@@ -156,7 +156,10 @@ func (s *Server) admitServedRequest(w http.ResponseWriter, r *http.Request, mess
 		if r != nil && r.URL != nil {
 			path = r.URL.Path
 		}
-		armLease, err := c.Admit(ctx, r, path, trace)
+		// Queue at a saturated arm instead of hard-refusing bursts (#14357): wait up to
+		// the configured budget for a slot; timeout still yields the same sentinel error
+		// and thus the same 429, now stating how long it waited.
+		armLease, err := c.AdmitWithWait(ctx, r, path, trace, s.armAdmitWaitDuration())
 		if err != nil {
 			if w != nil {
 				w.Header().Set("Retry-After", "1")

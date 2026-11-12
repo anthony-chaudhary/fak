@@ -151,6 +151,58 @@ func TestGatewayArmsThrottling(t *testing.T) {
 	}
 }
 
+// TestGatewayArmsThrottlingQueuesWhenWaitConfigured witnesses #14357: with an
+// arm admission wait configured, a request that arrives at a saturated arm
+// queues for a freed slot instead of taking the immediate 429 — and succeeds
+// once the slot frees.
+func TestGatewayArmsThrottlingQueuesWhenWaitConfigured(t *testing.T) {
+	srv := newArmsTestServer(t)
+	coord := researcharm.NewCoordinator(1) // Limit = 1 request per arm
+	srv.SetResearchArmCoordinator(coord)
+	srv.SetArmAdmitWait(5 * time.Second)
+
+	mux := srv.Handler()
+
+	reqManual := httptest.NewRequest("POST", "/manual", nil)
+	reqManual.Header.Set("X-Fak-Project-Arm", "arm-queue")
+	l1, err := coord.Admit(context.Background(), reqManual, "/manual", "trace-manual")
+	if err != nil {
+		t.Fatalf("manual admit failed: %v", err)
+	}
+
+	chatBody := map[string]any{
+		"model": "fak-mock",
+		"messages": []map[string]string{
+			{"role": "user", "content": "ping"},
+		},
+	}
+	bodyBytes, _ := json.Marshal(chatBody)
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Fak-Project-Arm", "arm-queue")
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		mux.ServeHTTP(rec, req)
+	}()
+
+	// Let the proxied request queue on the saturated arm, then free the slot.
+	time.Sleep(200 * time.Millisecond)
+	l1.Done(0, nil)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued request did not complete after the slot freed")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 after queued admission, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestGatewayArmsExclusiveLease(t *testing.T) {
 	srv := newArmsTestServer(t)
 	coord := researcharm.NewCoordinator(10)

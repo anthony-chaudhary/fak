@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/researcharm"
 )
@@ -44,6 +45,28 @@ func (s *Server) ResearchArmCoordinator() *researcharm.Coordinator {
 	s.researchArmsMu.RLock()
 	defer s.researchArmsMu.RUnlock()
 	return s.researchArms
+}
+
+// SetArmAdmitWait sets how long a proxied request may queue at a saturated
+// research-arm concurrency limit before the 429 refusal (0 = legacy immediate
+// refusal). Guarded by researchArmsMu alongside the coordinator itself.
+func (s *Server) SetArmAdmitWait(d time.Duration) {
+	if s == nil {
+		return
+	}
+	s.researchArmsMu.Lock()
+	s.armAdmitWait = d
+	s.researchArmsMu.Unlock()
+}
+
+// armAdmitWaitDuration returns the configured arm admission wait budget.
+func (s *Server) armAdmitWaitDuration() time.Duration {
+	if s == nil {
+		return 0
+	}
+	s.researchArmsMu.RLock()
+	defer s.researchArmsMu.RUnlock()
+	return s.armAdmitWait
 }
 
 // handleFakArms serves GET /v1/fak/arms, returning the snapshot of all research project arms,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -57,6 +58,14 @@ type armState struct {
 	errorCount     int64
 	recentPIDs     []int
 	lastSeen       time.Time
+	waiters        []*armWaiter // queued admissions blocked on the concurrency limit
+}
+
+// armWaiter is one queued admission blocked on an arm's concurrency limit. The
+// channel has capacity 1: a signal means "re-check admission", and a waiter that
+// already holds a pending signal is not double-signaled (non-blocking send).
+type armWaiter struct {
+	ch chan struct{}
 }
 
 // NewCoordinator creates a new research arm coordinator.
@@ -78,14 +87,79 @@ func (c *Coordinator) SetEnforceLeases(enforce bool) {
 }
 
 // Admit checks whether an incoming request from the given origin may proceed.
+// It refuses immediately when the arm is at its concurrency ceiling; callers
+// that want bounded queueing instead use AdmitWithWait.
 func (c *Coordinator) Admit(ctx context.Context, r *http.Request, endpoint string, traceID string) (*RequestLease, error) {
+	return c.AdmitWithWait(ctx, r, endpoint, traceID, 0)
+}
+
+// AdmitWithWait admits like Admit but, when the arm is at its concurrency
+// ceiling, queues behind it instead of refusing instantly. Waiters are woken
+// event-driven — a slot release, a limit/lease change, or coordinator close —
+// and re-check the FULL admission conditions on every wake, so a spurious or
+// stale signal simply loops back to the check. maxWait <= 0 preserves the
+// legacy immediate refusal. Timeout or context cancellation returns
+// ErrArmConcurrencyExceeded (errors.Is keeps working), stating the wait
+// duration, so callers' 429 handling is unchanged.
+func (c *Coordinator) AdmitWithWait(ctx context.Context, r *http.Request, endpoint string, traceID string, maxWait time.Duration) (*RequestLease, error) {
+	if maxWait <= 0 {
+		return c.admitNow(ctx, r, endpoint, traceID)
+	}
 	origin := ExtractOrigin(r, traceID)
-	reqID := randomHex(8)
-	now := time.Now()
+	timer := time.NewTimer(maxWait)
+	defer timer.Stop()
+
+	waiter := &armWaiter{ch: make(chan struct{}, 1)}
+	registered := false
+	for {
+		c.mu.Lock()
+		lease, err := c.tryAdmitLocked(origin, randomHex(8), time.Now(), endpoint, traceID)
+		if err == nil || !errors.Is(err, ErrArmConcurrencyExceeded) {
+			if registered {
+				c.removeWaiterLocked(origin.ArmID, waiter)
+			}
+			c.mu.Unlock()
+			return lease, err
+		}
+		if !registered {
+			if arm, ok := c.arms[origin.ArmID]; ok {
+				arm.waiters = append(arm.waiters, waiter)
+				registered = true
+			}
+		}
+		c.mu.Unlock()
+
+		select {
+		case <-waiter.ch:
+			// Woken: loop back and re-check everything under the lock.
+		case <-ctx.Done():
+			c.removeWaiter(origin.ArmID, waiter)
+			return nil, fmt.Errorf("%w: arm %q full while waiting (%s); context canceled",
+				ErrArmConcurrencyExceeded, origin.ArmID, maxWait)
+		case <-timer.C:
+			c.removeWaiter(origin.ArmID, waiter)
+			return nil, fmt.Errorf("%w: arm %q full after waiting %s",
+				ErrArmConcurrencyExceeded, origin.ArmID, maxWait)
+		}
+	}
+}
+
+// admitNow is the legacy immediate-refusal admission.
+func (c *Coordinator) admitNow(ctx context.Context, r *http.Request, endpoint string, traceID string) (*RequestLease, error) {
+	origin := ExtractOrigin(r, traceID)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	return c.tryAdmitLocked(origin, randomHex(8), time.Now(), endpoint, traceID)
+}
+
+// tryAdmitLocked runs the full admission check and records the admission when
+// it passes. Callers hold c.mu. Capacity exhaustion is reported as
+// ErrArmConcurrencyExceeded so AdmitWithWait can distinguish "queue me" from
+// "refuse me"; every other error is operator state (closed, lease rules, store
+// unavailable) that waiting cannot cure.
+func (c *Coordinator) tryAdmitLocked(origin Origin, reqID string, now time.Time, endpoint, traceID string) (*RequestLease, error) {
 	if err := c.availableLocked(); err != nil {
 		return nil, err
 	}
@@ -187,6 +261,45 @@ func (c *Coordinator) finishRequest(reqID, armID string, tokens int, err error) 
 			arm.errorCount++
 		}
 		arm.lastSeen = time.Now()
+		c.wakeArmWaiters(armID) // a slot just freed; queued admissions re-check
+	}
+}
+
+// wakeArmWaiters signals every queued admission on armID to re-check. Callers
+// hold c.mu; sends are non-blocking into cap-1 channels, so a waiter that
+// already holds a pending signal is not double-signaled. A wake is only ever a
+// hint — each waiter re-runs the full admission check under the lock.
+func (c *Coordinator) wakeArmWaiters(armID string) {
+	arm, ok := c.arms[armID]
+	if !ok {
+		return
+	}
+	for _, w := range arm.waiters {
+		select {
+		case w.ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// removeWaiter unregisters a queued admission. Safe to call when it was never
+// registered or was already removed.
+func (c *Coordinator) removeWaiter(armID string, w *armWaiter) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.removeWaiterLocked(armID, w)
+}
+
+func (c *Coordinator) removeWaiterLocked(armID string, w *armWaiter) {
+	arm, ok := c.arms[armID]
+	if !ok {
+		return
+	}
+	for i, cand := range arm.waiters {
+		if cand == w {
+			arm.waiters = append(arm.waiters[:i], arm.waiters[i+1:]...)
+			return
+		}
 	}
 }
 
@@ -277,6 +390,8 @@ func (c *Coordinator) AcquireLease(req LeaseRequest) (*LeaseInfo, error) {
 		}
 	}
 
+	c.wakeArmWaiters(req.ArmID) // a lease can raise (or lower) the effective ceiling
+
 	// Return a copy with token visible to the caller
 	res := *info
 	return &res, nil
@@ -312,7 +427,11 @@ func (c *Coordinator) ReleaseLease(leaseID, token string) error {
 
 	candidate := c.liveLeasesLocked(time.Now())
 	delete(candidate, leaseID)
-	return c.commitLeasesLocked(candidate, c.admissionReady)
+	if err := c.commitLeasesLocked(candidate, c.admissionReady); err != nil {
+		return err
+	}
+	c.wakeArmWaiters(l.ArmID) // dropping a low-concurrency lease can raise the ceiling
+	return nil
 }
 
 // SetLimit updates the max concurrency limit for an arm.
@@ -331,6 +450,7 @@ func (c *Coordinator) SetLimit(armID string, maxConcurrency int) error {
 		c.arms[armID] = arm
 	}
 	arm.maxConcurrency = maxConcurrency
+	c.wakeArmWaiters(armID) // the ceiling may have risen; queued admissions re-check
 	return nil
 }
 
@@ -343,16 +463,17 @@ func (c *Coordinator) Snapshot() Snapshot {
 	var arms []ArmInfo
 	for _, a := range c.arms {
 		info := ArmInfo{
-			ID:             a.id,
-			Group:          a.group,
-			DisplayName:    a.displayName,
-			MaxConcurrency: a.maxConcurrency,
-			ActiveRequests: a.activeRequests,
-			TotalRequests:  a.totalRequests,
-			TotalTokens:    a.totalTokens,
-			ErrorCount:     a.errorCount,
-			RecentPIDs:     append([]int(nil), a.recentPIDs...),
-			LastSeen:       a.lastSeen,
+			ID:              a.id,
+			Group:           a.group,
+			DisplayName:     a.displayName,
+			MaxConcurrency:  a.maxConcurrency,
+			ActiveRequests:  a.activeRequests,
+			WaitingRequests: len(a.waiters),
+			TotalRequests:   a.totalRequests,
+			TotalTokens:     a.totalTokens,
+			ErrorCount:      a.errorCount,
+			RecentPIDs:      append([]int(nil), a.recentPIDs...),
+			LastSeen:        a.lastSeen,
 		}
 		for _, l := range c.leases {
 			if l.ArmID == a.id && now.Before(l.ExpiresAt) {
@@ -457,6 +578,8 @@ func randomHex(bytesLen int) string {
 }
 
 // Close stops admission before releasing the process-lifetime store lock.
+// Queued admissions are woken so they observe the closed state and exit
+// instead of waiting out their timers.
 func (c *Coordinator) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -464,6 +587,9 @@ func (c *Coordinator) Close() error {
 		return nil
 	}
 	c.closed = true
+	for id := range c.arms {
+		c.wakeArmWaiters(id)
+	}
 	if c.store != nil {
 		return c.store.close()
 	}

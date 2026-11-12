@@ -219,7 +219,8 @@ func (s *Server) handleCausalEmbeddings(w http.ResponseWriter, r *http.Request, 
 	began := time.Now()
 	var modelErr error
 	if c := s.ResearchArmCoordinator(); c != nil {
-		arm, err := c.Admit(ctx, r, r.URL.Path, trace)
+		// Queue at a saturated arm instead of hard-refusing bursts (#14357).
+		arm, err := c.AdmitWithWait(ctx, r, r.URL.Path, trace, s.armAdmitWaitDuration())
 		if err != nil {
 			lease.SettleUsage(agent.Usage{})
 			writeErr(w, http.StatusTooManyRequests, err.Error())

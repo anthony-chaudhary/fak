@@ -204,3 +204,194 @@ func TestCoordinatorEnforceLeases(t *testing.T) {
 	}
 	l.Done(5, nil)
 }
+
+func TestAdmitWithWaitWaitsForFreedSlot(t *testing.T) {
+	coord := NewCoordinator(1)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.Header.Set("X-Fak-Project-Arm", "arm-wait")
+
+	holder, err := coord.Admit(context.Background(), req, "/v1/chat/completions", "trace-holder")
+	if err != nil {
+		t.Fatalf("holder admit failed: %v", err)
+	}
+
+	type result struct {
+		lease *RequestLease
+		err   error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		l, err := coord.AdmitWithWait(context.Background(), req, "/v1/chat/completions", "trace-waiter", 5*time.Second)
+		resCh <- result{l, err}
+	}()
+
+	// Give the waiter a moment to register on the arm's wait queue.
+	time.Sleep(50 * time.Millisecond)
+	snap := coord.Snapshot()
+	var waiting int
+	for _, arm := range snap.Arms {
+		if arm.ID == "arm-wait" {
+			waiting = arm.WaitingRequests
+		}
+	}
+	if waiting != 1 {
+		t.Fatalf("expected 1 waiting request in snapshot, got %d", waiting)
+	}
+
+	// Free the slot; the waiter must be woken and admitted without polling.
+	holder.Done(10, nil)
+
+	select {
+	case res := <-resCh:
+		if res.err != nil {
+			t.Fatalf("waiter should have been admitted after slot freed, got %v", res.err)
+		}
+		res.lease.Done(0, nil)
+	case <-time.After(3 * time.Second):
+		t.Fatal("waiter was not woken after the slot freed")
+	}
+}
+
+func TestAdmitWithWaitTimeout(t *testing.T) {
+	coord := NewCoordinator(1)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.Header.Set("X-Fak-Project-Arm", "arm-timeout")
+
+	holder, err := coord.Admit(context.Background(), req, "/v1/chat/completions", "trace-holder")
+	if err != nil {
+		t.Fatalf("holder admit failed: %v", err)
+	}
+	defer holder.Done(0, nil)
+
+	began := time.Now()
+	_, err = coord.AdmitWithWait(context.Background(), req, "/v1/chat/completions", "trace-waiter", 150*time.Millisecond)
+	elapsed := time.Since(began)
+	if !errors.Is(err, ErrArmConcurrencyExceeded) {
+		t.Fatalf("expected ErrArmConcurrencyExceeded after timeout, got %v", err)
+	}
+	if elapsed < 100*time.Millisecond || elapsed > 5*time.Second {
+		t.Errorf("timeout fired at %s; want roughly the configured 150ms", elapsed)
+	}
+}
+
+func TestAdmitWithWaitContextCancel(t *testing.T) {
+	coord := NewCoordinator(1)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.Header.Set("X-Fak-Project-Arm", "arm-cancel")
+
+	holder, err := coord.Admit(context.Background(), req, "/v1/chat/completions", "trace-holder")
+	if err != nil {
+		t.Fatalf("holder admit failed: %v", err)
+	}
+	defer holder.Done(0, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.Sleep(50 * time.Millisecond) // let the waiter register first
+	cancel()
+
+	_, err = coord.AdmitWithWait(ctx, req, "/v1/chat/completions", "trace-waiter", 10*time.Second)
+	if !errors.Is(err, ErrArmConcurrencyExceeded) {
+		t.Fatalf("expected ErrArmConcurrencyExceeded on context cancel, got %v", err)
+	}
+}
+
+func TestAdmitWithWaitZeroPreservesLegacyRefusal(t *testing.T) {
+	coord := NewCoordinator(1)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.Header.Set("X-Fak-Project-Arm", "arm-zero")
+
+	holder, err := coord.Admit(context.Background(), req, "/v1/chat/completions", "trace-holder")
+	if err != nil {
+		t.Fatalf("holder admit failed: %v", err)
+	}
+	defer holder.Done(0, nil)
+
+	began := time.Now()
+	_, err = coord.AdmitWithWait(context.Background(), req, "/v1/chat/completions", "trace-waiter", 0)
+	if !errors.Is(err, ErrArmConcurrencyExceeded) {
+		t.Fatalf("expected immediate ErrArmConcurrencyExceeded, got %v", err)
+	}
+	if elapsed := time.Since(began); elapsed > time.Second {
+		t.Errorf("zero-wait refusal took %s; must be immediate", elapsed)
+	}
+}
+
+func TestSetLimitWakesWaiters(t *testing.T) {
+	coord := NewCoordinator(1)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.Header.Set("X-Fak-Project-Arm", "arm-raise")
+
+	holder, err := coord.Admit(context.Background(), req, "/v1/chat/completions", "trace-holder")
+	if err != nil {
+		t.Fatalf("holder admit failed: %v", err)
+	}
+	defer holder.Done(0, nil)
+
+	type result struct {
+		lease *RequestLease
+		err   error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		l, err := coord.AdmitWithWait(context.Background(), req, "/v1/chat/completions", "trace-waiter", 5*time.Second)
+		resCh <- result{l, err}
+	}()
+
+	time.Sleep(50 * time.Millisecond) // let the waiter register
+
+	// Raise the ceiling; no slot needs to free up.
+	if err := coord.SetLimit("arm-raise", 4); err != nil {
+		t.Fatalf("SetLimit failed: %v", err)
+	}
+
+	select {
+	case res := <-resCh:
+		if res.err != nil {
+			t.Fatalf("waiter should have been admitted after limit raise, got %v", res.err)
+		}
+		res.lease.Done(0, nil)
+	case <-time.After(3 * time.Second):
+		t.Fatal("waiter was not woken by SetLimit")
+	}
+}
+
+func TestAdmitWithWaitClosedCoordinator(t *testing.T) {
+	coord := NewCoordinator(1)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.Header.Set("X-Fak-Project-Arm", "arm-close")
+
+	holder, err := coord.Admit(context.Background(), req, "/v1/chat/completions", "trace-holder")
+	if err != nil {
+		t.Fatalf("holder admit failed: %v", err)
+	}
+	defer holder.Done(0, nil)
+
+	type result struct {
+		err error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		_, err := coord.AdmitWithWait(context.Background(), req, "/v1/chat/completions", "trace-waiter", 10*time.Second)
+		resCh <- result{err}
+	}()
+
+	time.Sleep(50 * time.Millisecond) // let the waiter register
+	if err := coord.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	select {
+	case res := <-resCh:
+		if res.err == nil {
+			t.Fatal("waiter should have been refused after Close")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("waiter was not woken by Close")
+	}
+}

@@ -731,8 +731,13 @@ type Server struct {
 	ctxValueMu sync.Mutex
 	ctxValue   map[string]*sessionCtxValue
 
+	// researchArmsMu guards researchArms and armAdmitWait. armAdmitWait is how long a
+	// proxied request may queue at a saturated research-arm concurrency limit before
+	// the 429 (0 = legacy immediate refusal); cmd/fak serve sets it from
+	// FAK_ARM_ADMIT_WAIT. See AdmitWithWait in internal/researcharm.
 	researchArmsMu sync.RWMutex
 	researchArms   *researcharm.Coordinator
+	armAdmitWait   time.Duration
 
 	// ctxExpenseWarn / ctxExpenseBlock are the effective per-turn as-sent-volume lines the
 	// context-expense verdict (ctxexpense.go) grades on, in ESTIMATED tokens (0 = that tier
