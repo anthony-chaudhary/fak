@@ -151,6 +151,22 @@ type InKernelPlanner struct {
 	// planners alike; persistent ownership remains in tree/scopedTree.
 	prefixFlights radixkv.PrefixFlightGroup
 
+	// radixAttrMu guards the opt-in cold-prefill-tax attribution ledger
+	// (inkernel_radix_attribution.go). It is its own mutex, never shared with mu:
+	// the ledger is written at admission seams that already hold or release mu,
+	// and folding it into mu would couple observation to the hot lock. Disarmed
+	// (the default) every seam pays one bool read and nothing else.
+	radixAttrMu   sync.Mutex
+	radixDebug    bool
+	radixDebugLog bool
+	radixAttr     RadixAttribution
+	// radixOffLockAdmit selects the off-lock payload-clone admission fast path on
+	// the unscoped CPU seam (ticket prefill-radix-cold-prefill-tax-20261108): the
+	// O(prefix-bytes) session-cache clone runs outside mu, validated by a
+	// re-lookup before attach. DEFAULT ON; tests flip it to witness parity against
+	// the historical fully-locked section.
+	radixOffLockAdmit bool
+
 	// devMu serializes the WHOLE device forward pass (Prefill + the decode loop) when a
 	// backend or native Metal is wired. These accelerators have one shared command stream and
 	// model-level buffers. The CUDA backend's Go-side cudaMu makes
