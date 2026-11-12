@@ -23,8 +23,8 @@ const (
 	// overrides it per node, `fak arms limit --arm <id>` overrides it per arm at
 	// runtime, and a shared/exclusive lease may carry its own concurrency. The
 	// tracked plan to replace the hand constant with a measured policy (target
-	// the S(C) knee, not a number) is recorded in the private autotune ladder:
-	// docs/knowledge/ladder/autotune.md, id `autotune.concurrency.arm-admission`.
+	// the S(C) knee, not a ladder rung) is the autotune ladder row
+	// `autotune.concurrency.arm-admission`.
 	defaultArmMaxConcurrency = 128
 
 	// defaultArmAdmitWait is how long a proxied request may queue at a saturated
