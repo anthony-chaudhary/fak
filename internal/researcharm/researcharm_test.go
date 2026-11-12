@@ -360,6 +360,59 @@ func TestSetLimitWakesWaiters(t *testing.T) {
 	}
 }
 
+func TestLeaseExpiryWakesWaiters(t *testing.T) {
+	coord := NewCoordinator(4)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.Header.Set("X-Fak-Project-Arm", "arm-expire")
+
+	// A live lease lowers the effective ceiling from 4 to 1.
+	if _, err := coord.AcquireLease(LeaseRequest{
+		ArmID:       "arm-expire",
+		Mode:        LeaseModeShared,
+		Concurrency: 1,
+		TTL:         300 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AcquireLease failed: %v", err)
+	}
+
+	holder, err := coord.Admit(context.Background(), req, "/v1/chat/completions", "trace-holder")
+	if err != nil {
+		t.Fatalf("holder admit failed: %v", err)
+	}
+	defer holder.Done(0, nil)
+
+	type result struct {
+		lease *RequestLease
+		err   error
+	}
+	resCh := make(chan result, 1)
+	began := time.Now()
+	go func() {
+		l, err := coord.AdmitWithWait(context.Background(), req, "/v1/chat/completions", "trace-waiter", 5*time.Second)
+		resCh <- result{l, err}
+	}()
+
+	time.Sleep(50 * time.Millisecond) // let the waiter register
+
+	// No slot frees up and nobody acts: the ONLY thing that raises the ceiling
+	// is the lease expiring by TTL. The waiter must observe it well before its
+	// 5s budget.
+	select {
+	case res := <-resCh:
+		elapsed := time.Since(began)
+		if res.err != nil {
+			t.Fatalf("waiter should have been admitted after the lease expired, got %v", res.err)
+		}
+		res.lease.Done(0, nil)
+		if elapsed > 2*time.Second {
+			t.Errorf("waiter took %s; lease expiry (~300ms) should have woken it far sooner", elapsed)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("waiter was not woken when the lease expired by TTL")
+	}
+}
+
 func TestAdmitWithWaitClosedCoordinator(t *testing.T) {
 	coord := NewCoordinator(1)
 

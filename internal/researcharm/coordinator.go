@@ -95,18 +95,22 @@ func (c *Coordinator) Admit(ctx context.Context, r *http.Request, endpoint strin
 
 // AdmitWithWait admits like Admit but, when the arm is at its concurrency
 // ceiling, queues behind it instead of refusing instantly. Waiters are woken
-// event-driven — a slot release, a limit/lease change, or coordinator close —
-// and re-check the FULL admission conditions on every wake, so a spurious or
-// stale signal simply loops back to the check. maxWait <= 0 preserves the
-// legacy immediate refusal. Timeout or context cancellation returns
-// ErrArmConcurrencyExceeded (errors.Is keeps working), stating the wait
-// duration, so callers' 429 handling is unchanged.
+// event-driven — a slot release, a limit/lease change, a lease expiring by
+// TTL, or coordinator close — and re-check the FULL admission conditions on
+// every wake, so a spurious or stale signal simply loops back to the check.
+// While parked, each waiter's timer additionally fires at the sooner of its
+// remaining budget and the next lease expiry, so a ceiling that rises by
+// passive lease expiry is observed without polling. ctx must be non-nil.
+// maxWait <= 0 preserves the legacy immediate refusal. Timeout or context
+// cancellation returns ErrArmConcurrencyExceeded (errors.Is keeps working),
+// stating the wait duration, so callers' 429 handling is unchanged.
 func (c *Coordinator) AdmitWithWait(ctx context.Context, r *http.Request, endpoint string, traceID string, maxWait time.Duration) (*RequestLease, error) {
 	if maxWait <= 0 {
 		return c.admitNow(ctx, r, endpoint, traceID)
 	}
 	origin := ExtractOrigin(r, traceID)
-	timer := time.NewTimer(maxWait)
+	budgetEnd := time.Now().Add(maxWait)
+	timer := time.NewTimer(0)
 	defer timer.Stop()
 
 	waiter := &armWaiter{ch: make(chan struct{}, 1)}
@@ -127,7 +131,21 @@ func (c *Coordinator) AdmitWithWait(ctx context.Context, r *http.Request, endpoi
 				registered = true
 			}
 		}
+		// Park until the sooner of the budget end and the next lease expiry:
+		// an expiry can raise the effective ceiling even with no other event.
+		parkUntil := budgetEnd
+		for _, l := range c.leases {
+			if !l.ExpiresAt.IsZero() && l.ExpiresAt.Before(parkUntil) {
+				parkUntil = l.ExpiresAt
+			}
+		}
 		c.mu.Unlock()
+
+		if !timer.Reset(time.Until(parkUntil)) {
+			// The previous tick was already consumed by the select below; drain
+			// the stale value so it cannot fire spuriously on this iteration.
+			<-timer.C
+		}
 
 		select {
 		case <-waiter.ch:
@@ -137,6 +155,11 @@ func (c *Coordinator) AdmitWithWait(ctx context.Context, r *http.Request, endpoi
 			return nil, fmt.Errorf("%w: arm %q full while waiting (%s); context canceled",
 				ErrArmConcurrencyExceeded, origin.ArmID, maxWait)
 		case <-timer.C:
+			if time.Now().Before(budgetEnd) {
+				// A lease expired: re-check (the prune inside tryAdmitLocked
+				// applies it) and re-park with a fresh horizon.
+				continue
+			}
 			c.removeWaiter(origin.ArmID, waiter)
 			return nil, fmt.Errorf("%w: arm %q full after waiting %s",
 				ErrArmConcurrencyExceeded, origin.ArmID, maxWait)
@@ -550,10 +573,15 @@ func (c *Coordinator) ActiveInflight() []InflightRequest {
 }
 
 func (c *Coordinator) pruneExpiredLeasesLocked(now time.Time) {
+	var expiredArms []string
 	for id, l := range c.leases {
 		if !l.ExpiresAt.IsZero() && now.After(l.ExpiresAt) {
 			delete(c.leases, id)
+			expiredArms = append(expiredArms, l.ArmID)
 		}
+	}
+	for _, armID := range expiredArms {
+		c.wakeArmWaiters(armID) // an expiry can raise the effective ceiling
 	}
 }
 
