@@ -146,7 +146,7 @@ func (c *Chain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Policy stage: the commercial authority's verdict, then the chain's
+	// Policy stage: the billing authority's verdict, then the chain's
 	// own spend caps (folded synchronously at capture, so a breach here is
 	// deterministic).
 	if c.cfg.Policy != nil {

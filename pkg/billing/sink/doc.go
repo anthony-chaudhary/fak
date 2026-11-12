@@ -37,7 +37,7 @@
 // follow-on seam: implement Backend and pass it to NewRing.
 //
 // This package is pure MECHANISM. It contains NO pricing and NO policy,
-// and no default may encode a commercial choice: records move from
+// and no default may encode a billing choice: records move from
 // producer to destination unchanged; what a record means, and what it
 // costs, belong to the consuming authority.
 package sink

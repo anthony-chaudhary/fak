@@ -17,7 +17,7 @@
 //     UsageRecord v1, the neutral per-request usage record.
 //
 // This package is pure MECHANISM. It contains NO pricing and NO policy, and
-// no default may encode a commercial choice:
+// no default may encode a billing choice:
 //
 //   - No rates, markups, or amounts. A record points at the price book in
 //     force when it was produced (PriceBookVersion, a version stamp only)

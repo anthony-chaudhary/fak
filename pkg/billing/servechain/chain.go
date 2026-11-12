@@ -39,7 +39,7 @@ type Config struct {
 	Ledger   *billingledger.Ledger
 	Keys     *billingkeystore.Store
 
-	// Policy is the commercial authority consulted before reservation. A
+	// Policy is the billing authority consulted before reservation. A
 	// nil Policy admits; the chain then enforces only the manifest's own
 	// limits and balances.
 	Policy billing.Policy

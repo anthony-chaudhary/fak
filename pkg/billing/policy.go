@@ -16,7 +16,7 @@ package billing
 //   - The Policy interface and its closed vocabularies (Verdict,
 //     PricingMode) are MECHANISM: they fix the shape of the four decisions
 //     (admit / price / settle / reconcile) so any authority — this
-//     package's neutral default, a commercial Alpha, or an out-of-process
+//     package's neutral default, an external billing authority, or an out-of-process
 //     sink adapter — plugs into the same seam.
 //   - Every VALUE stays out of this file. Which principals are admitted,
 //     what anything costs, which ceilings exist, and how reconciliation
@@ -110,8 +110,8 @@ func (v Verdict) Valid() bool {
 
 // PricingMode is the closed set of ways a Price establishes its amount. It
 // keeps "zero by policy" distinct from "no price could be established":
-// the two must never be confused, because treating unpriced as free is how
-// unknown usage becomes silent revenue loss.
+// the two must never be confused, because collapsing unpriced into zero
+// makes unknown usage indistinguishable from settled usage downstream.
 type PricingMode string
 
 const (
@@ -125,7 +125,8 @@ const (
 
 	// PricingUnpriced means no price could be established (for example the
 	// model has no entry in the table in force). The amount is UNKNOWN,
-	// not zero: a consumer must not bill, waive, or average it away.
+	// not zero: a consumer must carry it forward as unknown rather than
+	// substitute a computed value.
 	PricingUnpriced PricingMode = "unpriced"
 )
 
@@ -443,7 +444,7 @@ type Reconciliation struct {
 // decision; every VALUE — which attempts are admitted, what they cost, how
 // settlements are recorded, what reconciliation joins — belongs to the
 // implementing authority. NeutralPolicy implements the interface as
-// no-charge plus local spend caps; commercial authorities implement the
+// no-charge plus local spend caps; external authorities implement the
 // same interface (in-process) or attach out-of-process against the record
 // schema.
 type Policy interface {
@@ -454,7 +455,7 @@ type Policy interface {
 	// Price establishes the cost of a recorded attempt. It returns a Price
 	// whose Mode is a member of the closed PricingMode vocabulary; an
 	// amount that cannot be established must come back unpriced, never as
-	// a zero that looks like a free ride.
+	// a zero.
 	Price(rec UsageRecord) Price
 
 	// Settle records the final outcome of an attempt: it folds the record
@@ -474,7 +475,7 @@ type Policy interface {
 // plus local spend caps. Every record is priced as zero-cost-BY-POLICY
 // (PricingNoCharge, explicitly typed — never an unknown coerced to zero),
 // and per-principal token ceilings configured by the operator are enforced
-// locally. It encodes no rate, threshold, or commercial choice: ceilings
+// locally. It encodes no rate, threshold, or billing choice: ceilings
 // arrive as CapConfig arguments, and an unset ceiling is unlimited.
 //
 // A nil *NeutralPolicy is not usable.

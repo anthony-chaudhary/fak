@@ -11,7 +11,7 @@
 // typed errors.
 //
 // This package is pure MECHANISM. It contains NO pricing and NO policy, and
-// no default may encode a commercial choice:
+// no default may encode a billing choice:
 //
 //   - Units are opaque integers. The package names no currency, holds no
 //     rates, and computes no amounts: a consumer decides what one unit is

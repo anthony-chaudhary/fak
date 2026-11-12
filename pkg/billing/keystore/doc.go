@@ -11,7 +11,7 @@
 // the durable tenant-key store that the operator key verbs ride.
 //
 // This package is pure MECHANISM. It contains NO pricing and NO policy, and
-// no default may encode a commercial choice:
+// no default may encode a billing choice:
 //
 //   - Keys only. The package mints, validates, revokes, and lists keys.
 //     BALANCES ARE NOT STORED HERE: a tenant's balance rides

@@ -12,7 +12,7 @@
 // price-book schema + operator-file loader + UNPRICED rule + version stamp.
 //
 // Like pkg/billing, this package is pure MECHANISM. It contains NO pricing
-// and NO policy, and no default may encode a commercial choice:
+// and NO policy, and no default may encode a billing choice:
 //
 //   - No rates, markups, or amounts in any default. Every rate in a book
 //     comes from the operator file; examples and tests use obviously fake

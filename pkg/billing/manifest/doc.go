@@ -22,7 +22,7 @@
 // it. Nothing here routes, prices, enforces, or persists.
 //
 // Like its siblings, this package is pure MECHANISM. It contains NO pricing
-// and NO policy, and no default may encode a commercial choice:
+// and NO policy, and no default may encode a billing choice:
 //
 //   - No rates or amounts anywhere: prices live in the price-book file that
 //     PricesPath references, loaded separately via pkg/billing/pricebook.
