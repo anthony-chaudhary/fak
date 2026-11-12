@@ -1,0 +1,74 @@
+{
+  "schema": "fak.serve-receipt.receipt/1",
+  "model": "tiny-test-1b",
+  "verdict": "OK",
+  "gpu": {
+    "key": "rtx-pro-6000-blackwell-96gb",
+    "vram_gb": 96,
+    "sm": "12.0",
+    "fp4_native": true,
+    "nvlink": false,
+    "pcie": "5.0 x16"
+  },
+  "config": {
+    "tp": 4,
+    "pp": 1,
+    "max_num_seqs": 32,
+    "gpu_mem_util": 0.9,
+    "activation_reserve_gb": 2
+  },
+  "facts": {
+    "schema": "fak.serve-receipt.facts/1",
+    "model": "tiny-test-1b",
+    "weights_bytes": 1000000000,
+    "observed_at": "2026-11-12",
+    "source_urls": [
+      "https://example.invalid/tiny-checkpoint"
+    ],
+    "notes": [
+      "synthetic fixture for exact-assertion tests; not a real checkpoint"
+    ],
+    "num_attention_heads": 32,
+    "kv": {
+      "full_attn_layers": 10,
+      "kv_lora_rank": 64,
+      "qk_rope_head_dim": 32,
+      "indexer_key_dim": 16,
+      "latent_dtype_bytes": 2,
+      "indexer_key_dtype_bytes": 2,
+      "indexer_scale_bytes": 4,
+      "tp_replicated": false
+    },
+    "state_per_seq_bytes": 8000000,
+    "state_tp_sharded": true
+  },
+  "arithmetic": {
+    "units": "VRAM per GPU read as GiB (2^30 B) — vendor \"GB\" listings treated as GiB (pkg/hwspecs convention); weights/state/KV bytes exact; activation reserve in decimal GB (10^9 B)",
+    "gpus_total": 4,
+    "weights_per_gpu_bytes": 250000000,
+    "kv_bytes_per_token_per_gpu": 570,
+    "kv_formula": "10 × ((64+32)×2 + 16×2 + 4) / tp 4",
+    "state_per_gpu_per_seq_bytes": 2000000,
+    "vram_bytes_per_gpu": 103079215104,
+    "util_budget_bytes": 92771293593,
+    "usable_per_gpu_bytes": 92521293593,
+    "reserved_state_bytes": 64000000,
+    "activation_reserve_bytes": 2000000000,
+    "max_cached_tokens": 158697006,
+    "requested_max_model_len": 0,
+    "headroom_tokens": 158697006
+  },
+  "warnings": [
+    "wide TP all-reduce over PCIe; PP-heavy layouts preferred (measured: TP4 6–7 tok/s vs TP2+PP2 46–49 on 397B MoE, flashinfer#2577)"
+  ],
+  "source_urls": [
+    "https://example.invalid/tiny-checkpoint"
+  ],
+  "observed_at": "2026-11-12",
+  "witness_checklist": [
+    "load witness: checkpoint loads to completion on this TP×PP layout without OOM",
+    "3-prompt accuracy spot-check on the served model",
+    "vllm bench serve sweep at the planned max-num-seqs",
+    "KV-headroom log cross-check against max_cached_tokens"
+  ]
+}

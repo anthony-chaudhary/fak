@@ -1,0 +1,39 @@
+# fak serve-receipt — tiny-test-1b
+
+**Verdict: OK**
+
+GPU: rtx-pro-6000-blackwell-96gb (vram 96 GB, sm 12.0, fp4_native true, nvlink false, pcie 5.0 x16) · config: tp 4 × pp 1 = 4 GPUs, max_num_seqs 32, gpu_mem_util 0.9, activation_reserve_gb 2, max_model_len (none)
+
+## Arithmetic
+
+units: VRAM per GPU read as GiB (2^30 B) — vendor "GB" listings treated as GiB (pkg/hwspecs convention); weights/state/KV bytes exact; activation reserve in decimal GB (10^9 B)
+
+- gpus = tp 4 × pp 1 = 4
+- weights_per_gpu = ceil(1,000,000,000 B / 4) = 250,000,000 B
+- kv_bytes_per_token_per_gpu = 10 × ((64+32)×2 + 16×2 + 4) / tp 4 = 570 B (kv.tp_replicated=false → divided by TP)
+- state_per_gpu_per_seq = 8,000,000 B / tp 4 = 2,000,000 B (state_tp_sharded=true)
+- vram_per_gpu = 96 GiB = 103,079,215,104 B × util 0.9 = 92,771,293,593 B
+- usable_per_gpu = 92,771,293,593 − 250,000,000 = 92,521,293,593 B
+- reserved_state = 2,000,000 B × max_num_seqs 32 = 64,000,000 B
+- activation_reserve = 2 GB = 2,000,000,000 B
+- max_cached_tokens = max(0, floor((92,521,293,593 − 64,000,000 − 2,000,000,000) / 570)) = 158,697,006
+- requested max-model-len: (none) → verdict OK
+
+## Warnings
+
+- wide TP all-reduce over PCIe; PP-heavy layouts preferred (measured: TP4 6–7 tok/s vs TP2+PP2 46–49 on 397B MoE, flashinfer#2577)
+
+## Provenance
+
+- observed_at: 2026-11-12
+- sources:
+  - https://example.invalid/tiny-checkpoint
+- notes:
+  - synthetic fixture for exact-assertion tests; not a real checkpoint
+
+## Witness checklist
+
+1. load witness: checkpoint loads to completion on this TP×PP layout without OOM
+2. 3-prompt accuracy spot-check on the served model
+3. vllm bench serve sweep at the planned max-num-seqs
+4. KV-headroom log cross-check against max_cached_tokens

@@ -1,0 +1,21 @@
+{
+  "schema": "fak.serve-receipt.facts/1",
+  "model": "tiny-test-1b",
+  "weights_bytes": 1000000000,
+  "observed_at": "2026-11-12",
+  "source_urls": ["https://example.invalid/tiny-checkpoint"],
+  "notes": ["synthetic fixture for exact-assertion tests; not a real checkpoint"],
+  "num_attention_heads": 32,
+  "kv": {
+    "full_attn_layers": 10,
+    "kv_lora_rank": 64,
+    "qk_rope_head_dim": 32,
+    "indexer_key_dim": 16,
+    "latent_dtype_bytes": 2,
+    "indexer_key_dtype_bytes": 2,
+    "indexer_scale_bytes": 4,
+    "tp_replicated": false
+  },
+  "state_per_seq_bytes": 8000000,
+  "state_tp_sharded": true
+}

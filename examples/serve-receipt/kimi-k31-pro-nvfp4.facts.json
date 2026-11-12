@@ -1,0 +1,27 @@
+{
+  "schema": "fak.serve-receipt.facts/1",
+  "model": "nvidia/Kimi-K3.1-Pro-NVFP4",
+  "weights_bytes": 1605125645632,
+  "observed_at": "2026-11-12",
+  "source_urls": [
+    "https://huggingface.co/nvidia/Kimi-K3.1-Pro-NVFP4",
+    "https://huggingface.co/api/models/nvidia/Kimi-K3.1-Pro-NVFP4?blobs=true"
+  ],
+  "notes": [
+    "exact shard sum: 96 safetensors shards at HF rev 3af0462 = 1605125645632 B (1605.13 GB / 1494.89 GiB)",
+    "DSA sparse indexer has 32 heads across 24 full-attn layers; TP must divide both 96 attention heads and 32 indexer heads"
+  ],
+  "num_attention_heads": 96,
+  "kv": {
+    "full_attn_layers": 24,
+    "kv_lora_rank": 512,
+    "qk_rope_head_dim": 64,
+    "indexer_key_dim": 128,
+    "latent_dtype_bytes": 1,
+    "indexer_key_dtype_bytes": 1,
+    "indexer_scale_bytes": 4,
+    "tp_replicated": true
+  },
+  "state_per_seq_bytes": 464601000,
+  "state_tp_sharded": true
+}

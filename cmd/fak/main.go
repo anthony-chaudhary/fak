@@ -470,6 +470,10 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdServe(args)
 	case "serve-wiring":
 		cmdServeWiring(args)
+	case "serve-receipt":
+		// Issue #14362: on-demand model→GPU serving-config receipts
+		// (plan / validate / profiles) over internal/servereceipt.
+		cmdServeReceipt(args)
 	case "l3-serve", "l3serve":
 		cmdL3Serve(args)
 	case "manage", "m":
