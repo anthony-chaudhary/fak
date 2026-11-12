@@ -31,10 +31,17 @@ func LoadModelOptNVFP4Dir(dir string, be compute.Backend) (*Model, error) {
 	if err := refuseDeepSeekV41Native(cfg); err != nil {
 		return nil, err
 	}
-	if _, ok, err := ReadModelOptNVFP4Config(dir); err != nil {
+	mopt, ok, err := ReadModelOptNVFP4Config(dir)
+	if err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, fmt.Errorf("%w: %s declares no ModelOpt NVFP4 quantization", ErrModelOptNVFP4Config, dir)
+	}
+	// A detected mixed NVFP4+MXFP8 declaration refuses before any tensor is
+	// quantized or resident: mixed-precision execution is not wired yet
+	// (fak#14364, fak#14365).
+	if mopt.Mixed != nil {
+		return nil, refuseModelOptMixed(mopt.Mixed)
 	}
 	if be == nil {
 		be = compute.Default()

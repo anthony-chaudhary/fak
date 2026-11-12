@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -324,5 +325,162 @@ func TestLoadModelOptNVFP4DirRefusesBackendWithoutW4A4(t *testing.T) {
 	writeTestFile(t, dir, "config.json", `{"model_type":"llama","hidden_size":32,"num_hidden_layers":1,"num_attention_heads":4,"vocab_size":2}`)
 	if _, err := LoadModelOptNVFP4Dir(dir, nil); !errors.Is(err, ErrModelOptNVFP4Config) {
 		t.Fatalf("undeclared quantization err = %v, want ErrModelOptNVFP4Config", err)
+	}
+}
+
+// modelOptMixedQuantConfig is the ModelOpt mixed-precision declaration under
+// test, shaped like nvidia/Kimi-K3.1-Pro-NVFP4: NVFP4 (4-bit group-16) routed
+// experts, MXFP8 (8-bit group-32) attention + shared experts, per-layer
+// quantized_layers, and an ignore glob list.
+const modelOptMixedQuantConfig = `{"quant_method":"modelopt_mixed","quant_algo":"MIXED_PRECISION","group_size":16,` +
+	`"config_groups":{` +
+	`"group_0":{"weights":{"num_bits":4,"group_size":16,"dynamic":false,"type":"float"},` +
+	`"input_activations":{"num_bits":4,"group_size":16,"dynamic":false,"type":"float"},` +
+	`"targets":["model.layers.*.mlp.experts.*.gate_up_proj","model.layers.*.mlp.experts.*.down_proj"]},` +
+	`"group_1":{"weights":{"num_bits":8,"group_size":32,"dynamic":false,"strategy":"group","type":"float"},` +
+	`"input_activations":{"num_bits":8,"group_size":32,"dynamic":true,"strategy":"group","type":"float"},` +
+	`"targets":["model.layers.*.self_attn.*_proj","model.layers.*.mlp.shared_expert.gate_up_proj"]}},` +
+	`"quantized_layers":{` +
+	`"model.layers.0.self_attn.q_proj":{"weights":{"num_bits":8,"group_size":32,"dynamic":false},"input_activations":{"num_bits":8,"group_size":32,"dynamic":true}},` +
+	`"model.layers.0.mlp.experts.0.gate_up_proj":{"weights":{"num_bits":4,"group_size":16,"dynamic":false},"input_activations":{"num_bits":4,"group_size":16,"dynamic":false}}},` +
+	`"ignore":["lm_head","re:.*rotary_emb.*"]}`
+
+const modelOptMixedHFQuantConfig = `{"producer":{"name":"modelopt","version":"0.49.0"},` +
+	`"quantization":{"quant_algo":"MIXED_PRECISION","group_size":16,"quantized_layers":{` +
+	`"model.layers.0.self_attn.q_proj":{"weights":{"num_bits":8,"group_size":32,"dynamic":false},"input_activations":{"num_bits":8,"group_size":32,"dynamic":true}}}}}`
+
+const modelOptMixedTinyLlamaConfig = `{"model_type":"llama","hidden_size":32,"num_hidden_layers":1,` +
+	`"num_attention_heads":4,"num_key_value_heads":4,"head_dim":8,"intermediate_size":64,` +
+	`"vocab_size":2,"rms_norm_eps":1e-5,"quantization_config":` + modelOptMixedQuantConfig + `}`
+
+// fak-test:runtime fast est=20ms lane=default
+func TestReadModelOptMixedConfigDetection(t *testing.T) {
+	const out, k = 4, 32
+	newMixedDir := func(t *testing.T, config, hfQuant string) string {
+		t.Helper()
+		dir := t.TempDir()
+		writeTestFile(t, dir, "config.json", config)
+		if hfQuant != "" {
+			writeTestFile(t, dir, "hf_quant_config.json", hfQuant)
+		}
+		return dir
+	}
+
+	t.Run("both surfaces", func(t *testing.T) {
+		dir := newMixedDir(t, modelOptMixedTinyLlamaConfig, modelOptMixedHFQuantConfig)
+		got, ok, err := ReadModelOptNVFP4Config(dir)
+		if err != nil || !ok {
+			t.Fatalf("ok=%v err=%v, want detected mixed config", ok, err)
+		}
+		if got.QuantAlgo != "MIXED_PRECISION" || got.GroupSize != 0 || got.Mixed == nil {
+			t.Fatalf("config = %+v, want MIXED_PRECISION with Mixed summary", got)
+		}
+		wantGroups := []ModelOptMixedGroupSpec{
+			{Name: "group_0", Kind: ModelOptMixedGroupNVFP4, Weights: ModelOptMixedQuantSpec{NumBits: 4, GroupSize: 16},
+				Inputs: &ModelOptMixedQuantSpec{NumBits: 4, GroupSize: 16}, Targets: 2},
+			{Name: "group_1", Kind: ModelOptMixedGroupMXFP8, Weights: ModelOptMixedQuantSpec{NumBits: 8, GroupSize: ModelOptMXFP8BlockSize, Dynamic: false},
+				Inputs: &ModelOptMixedQuantSpec{NumBits: 8, GroupSize: ModelOptMXFP8BlockSize, Dynamic: true}, Targets: 2},
+		}
+		if !reflect.DeepEqual(got.Mixed.Groups, wantGroups) {
+			t.Fatalf("Groups = %+v, want %+v", got.Mixed.Groups, wantGroups)
+		}
+		if got.Mixed.QuantizedLayers != 2 {
+			t.Fatalf("QuantizedLayers = %d, want 2", got.Mixed.QuantizedLayers)
+		}
+
+		// Admission at the index layer: the checkpoint indexer still indexes the
+		// NVFP4 expert triple out of the mixed fixture, and the MXFP8 pair (no
+		// _2 scale) is not an NVFP4 triple.
+		writeModelOptShards(t, dir, map[string]map[string]tinySTTensor{
+			"model.safetensors": mergeST(
+				nvfp4TestTriple("model.layers.0.mlp.experts.0.gate_up_proj", out, k, true, 0.5),
+				map[string]tinySTTensor{
+					"model.layers.0.self_attn.q_proj.weight":                 {dtype: "F8_E4M3", shape: []int{out, k}, data: make([]byte, out*k)},
+					"model.layers.0.self_attn.q_proj.weights_scaling_factor": {dtype: "F8_E8M0", shape: []int{out, k / 32}, data: make([]byte, out*(k/32))},
+				},
+			),
+		})
+		ck, err := OpenModelOptNVFP4Checkpoint(dir, Config{NumLayers: 1}, compute.Default())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ck.Close()
+		wantNames := []string{"model.layers.0.mlp.experts.0.gate_up_proj.weight"}
+		if got := ck.Names(); !reflect.DeepEqual(got, wantNames) {
+			t.Fatalf("Names = %v, want %v (MXFP8 pair must not index as an NVFP4 triple)", got, wantNames)
+		}
+	})
+
+	t.Run("config.json only", func(t *testing.T) {
+		got, ok, err := ReadModelOptNVFP4Config(newMixedDir(t, modelOptMixedTinyLlamaConfig, ""))
+		if err != nil || !ok || got.Mixed == nil || got.QuantAlgo != "MIXED_PRECISION" || len(got.Mixed.Groups) != 2 {
+			t.Fatalf("config = %+v ok=%v err=%v", got, ok, err)
+		}
+	})
+
+	t.Run("hf only", func(t *testing.T) {
+		// An hf-only mixed checkpoint (no config.json config_groups) still
+		// detects, with empty groups; the load path refuses it.
+		got, ok, err := ReadModelOptNVFP4Config(newMixedDir(t, `{"model_type":"llama"}`, modelOptMixedHFQuantConfig))
+		if err != nil || !ok || got.Mixed == nil || got.QuantAlgo != "MIXED_PRECISION" {
+			t.Fatalf("config = %+v ok=%v err=%v", got, ok, err)
+		}
+		if len(got.Mixed.Groups) != 0 || got.Mixed.QuantizedLayers != 1 {
+			t.Fatalf("Mixed = %+v, want empty groups over 1 quantized layer", got.Mixed)
+		}
+	})
+
+	t.Run("plain stays plain", func(t *testing.T) {
+		got, ok, err := ReadModelOptNVFP4Config(newMixedDir(t, modelOptTinyLlamaConfig, ""))
+		if err != nil || !ok || got.QuantAlgo != "NVFP4" || got.GroupSize != compute.NVFP4BlockSize || got.Mixed != nil {
+			t.Fatalf("config = %+v ok=%v err=%v, want unchanged plain NVFP4 with Mixed nil", got, ok, err)
+		}
+	})
+
+	t.Run("cross-surface disagreement refused", func(t *testing.T) {
+		_, _, err := ReadModelOptNVFP4Config(newMixedDir(t, modelOptMixedTinyLlamaConfig,
+			`{"producer":{"name":"modelopt"},"quantization":{"quant_algo":"NVFP4","group_size":16}}`))
+		if !errors.Is(err, ErrModelOptNVFP4Config) {
+			t.Fatalf("err = %v, want ErrModelOptNVFP4Config", err)
+		}
+	})
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestReadModelOptMixedConfigRefusesBadGroup(t *testing.T) {
+	cases := []struct {
+		name   string
+		groups string
+	}{
+		{"nvfp4 wrong group size", `"group_0":{"weights":{"num_bits":4,"group_size":32,"dynamic":false,"type":"float"},"targets":["a"]}`},
+		{"mxfp8 wrong group size", `"group_0":{"weights":{"num_bits":8,"group_size":16,"dynamic":false,"type":"float"},"targets":["a"]}`},
+		{"non-float type", `"group_0":{"weights":{"num_bits":4,"group_size":16,"dynamic":false,"type":"int"},"targets":["a"]}`},
+		{"inputs disagree with weights", `"group_0":{"weights":{"num_bits":4,"group_size":16,"dynamic":false,"type":"float"},"input_activations":{"num_bits":8,"group_size":32,"dynamic":false,"type":"float"},"targets":["a"]}`},
+		{"no weights spec", `"group_0":{"input_activations":{"num_bits":4,"group_size":16,"dynamic":false,"type":"float"},"targets":["a"]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTestFile(t, dir, "config.json", `{"model_type":"llama","quantization_config":{"quant_method":"modelopt_mixed","quant_algo":"MIXED_PRECISION","config_groups":{`+tc.groups+`}}}`)
+			if _, ok, err := ReadModelOptNVFP4Config(dir); !ok || !errors.Is(err, ErrModelOptNVFP4Config) {
+				t.Fatalf("ok=%v err=%v, want ErrModelOptNVFP4Config", ok, err)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestLoadModelOptNVFP4DirRefusesMixedCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "config.json", modelOptMixedTinyLlamaConfig)
+	// No shard files: reaching the checkpoint open would fail with
+	// ErrModelOptNVFP4Checkpoint, so the typed mixed error below proves the
+	// refusal fires before any tensor work.
+	_, err := LoadModelOptNVFP4Dir(dir, nil)
+	if !errors.Is(err, ErrModelOptMixedGroupUnsupported) {
+		t.Fatalf("err = %v, want ErrModelOptMixedGroupUnsupported", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "MXFP8") || !strings.Contains(msg, "not wired") {
+		t.Fatalf("refusal message %q must name MXFP8 and state execution is not wired", msg)
 	}
 }
