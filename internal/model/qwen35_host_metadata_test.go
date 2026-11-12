@@ -89,10 +89,7 @@ func BenchmarkQwen35HostMetadataBatchRequest(b *testing.B) {
 			sessions := qwen35HostMetadataSessions(b, lanes)
 			prepare := func() {
 				for i, s := range sessions {
-					req, release, ok := s.qwen35DecodeBatchLaneRequest(i + 3)
-					if !ok || release != nil {
-						b.Fatal("resident embedding request declined or staged a row")
-					}
+					req := s.qwen35SequencePrefillRequest([]int{i + 3}, true)
 					qwen35HostMetadataRequestSink = req
 				}
 			}
