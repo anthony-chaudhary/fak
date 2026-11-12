@@ -13221,6 +13221,11 @@
           "category": "incidental",
           "reason": "Appears only as the pinned upstream Mooncake fabric_context.cpp filename in the attribution comment of internal/l3kv/device_mem_registration.go. It identifies foreign donor source provenance, not a declared or invoked Fak Go API or transport context implementation. Actual RegistrationContextCaps is separately positioned.",
           "token": "fabric_context"
+        },
+        {
+          "category": "incidental",
+          "reason": "P/D q4k arm's context-budget parameter spelling (cmd/fak/serve_pd.go loadServePDQ4KModelPlaced); the context-token-budget concept is already positioned in the context-ctx family, no new concept",
+          "token": "ctxtokens"
         }
       ],
       "exclude": [
@@ -13343,6 +13348,7 @@
         "ctxSnapshot",
         "ctxThrashConsecutiveRefills",
         "ctxsleep",
+        "ctxtokens",
         "dflash2ContextKV",
         "engramLookAheadContext",
         "fabric_context",
@@ -18249,6 +18255,11 @@
           "category": "false-positive",
           "reason": "oldPlanes is the saved Kraw/K/V allocation pointer slice used for staged arena growth and copying, not an execution or scheduling plan.",
           "token": "oldPlanes"
+        },
+        {
+          "category": "incidental",
+          "reason": "P/D q4k arm's device memory-plan local (cmd/fak/serve_pd.go loadServePDQ4KModelPlaced); the serve device-plan concept is already positioned in the plan family, no new concept",
+          "token": "memplan"
         }
       ],
       "exclude": [
@@ -18454,6 +18465,7 @@
         "knownFaultPlane",
         "listPlan",
         "measuredPlanner",
+        "memplan",
         "mergePlanDigest",
         "motifDetectPlanFanoutReconcile",
         "nativecapacitycaptureplan",

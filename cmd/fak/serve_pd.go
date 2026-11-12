@@ -48,6 +48,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
@@ -204,13 +205,15 @@ func runServePDRole(stdout, stderr io.Writer, cfg servePDConfig) int {
 	var m *fakmodel.Model
 	var loadErr error
 	if cfg.Q4K {
-		// The resident Q4_K arm attaches the declared V4.1 Engram stage, whose row
-		// sources borrow the checkpoint's shard readers for the life of the model
-		// (every served forward re-reads packed table rows); the retained entry keeps
-		// those handles open, and the deferred CloseWeights below retires them at
-		// shutdown. The lifetime-closing LoadModelQ4K entry panics the front door on
-		// the first served request instead (ticket pd-q4k-engram-file-closed-20261108).
-		m, loadErr = ggufload.LoadModelQ4KRetained(cfg.GGUF)
+		// The P/D q4k arm takes the single-worker serve's device-placement policy:
+		// resolve the native context against the activated-expert ring when eligible,
+		// plan the full device plan, and take the ring placement when that plan is
+		// FitTooBig on an eligible backend instead of refusing the load outright
+		// (HITL rtp-h200-pd-3to1-20261106 blocker 2). Every selected arm transfers the
+		// checkpoint lifetime to the model, so the deferred CloseWeights below retires
+		// the shard handles at shutdown — the V4.1 Engram row sources borrow those
+		// readers for the life of the model (blocker 1).
+		m, loadErr = loadServePDQ4KModel(backend, cfg.GGUF)
 	} else {
 		m, loadErr = ggufload.LoadModelQuant(cfg.GGUF)
 	}
@@ -247,6 +250,85 @@ func runServePDRole(stdout, stderr io.Writer, cfg servePDConfig) int {
 		return runServePDPrefillRole(ctx, stdout, stderr, cfg, cluster)
 	}
 	return runServePDDecodeRole(ctx, stdout, stderr, cfg, cluster)
+}
+
+// loadServePDQ4KModel loads the P/D role's resident Q4_K model with the same
+// device-placement policy as the single-worker serve arm: it resolves the
+// native context the way that arm does (sizing against the activated-expert
+// ring when eligible), plans the full device plan, and takes the
+// activated-expert device-ring placement when the plan is FitTooBig on an
+// eligible backend instead of refusing the load outright. Every selected arm
+// transfers the checkpoint lifetime to the model, so the caller's deferred
+// CloseWeights retires the shard handles at shutdown — the V4.1 Engram row
+// sources borrow those readers for the life of the model.
+func loadServePDQ4KModel(backend compute.Backend, ggufPath string) (*fakmodel.Model, error) {
+	if backend == nil {
+		return ggufload.LoadModelQ4KRetained(ggufPath)
+	}
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return nil, err
+	}
+	defer ws.Close()
+	weights, fit, err := serveNativeContextSizingInputs(ws, backend, false, false, 1, 0, ggufPath)
+	if err != nil {
+		return nil, err
+	}
+	ringSize, err := resolveServeExpertRingSize("", os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	if ringWeights, ok := serveExpertRingContextWeights(ws, backend, serveExpertRingEligible(backend, false), ringSize, weights, fit); ok {
+		weights = ringWeights
+	}
+	resolution, _, err := resolveServeNativeContext(ws, backend, weights, fit, 0)
+	if err != nil {
+		return nil, err
+	}
+	return loadServePDQ4KModelPlaced(backend, ggufPath, resolution.ResolvedTokens, &fit)
+}
+
+// loadServePDQ4KModelPlaced is the P/D q4k arm's placement decision and load for a resolved
+// context budget: it plans the full device plan, takes the activated-expert device-ring
+// placement when that plan is FitTooBig on an eligible backend (bounded device ring,
+// stream-through routed band, bounded dense working set — the single-worker arm's own route),
+// and otherwise loads the retained resident arm, whose lifetime transfer keeps the checkpoint's
+// shard readers open for the V4.1 Engram row sources that borrow them for the life of the model.
+func loadServePDQ4KModelPlaced(backend compute.Backend, ggufPath string, ctxTokens int, fit *serveFitBudget) (*fakmodel.Model, error) {
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return nil, err
+	}
+	defer ws.Close()
+	artifactQuant := ggufload.ClassifyTensorQuant(ws.File.Tensors)
+	hostFit := serveStreamedHostFit(backend, fit)
+	q4kOpts := serveResidentQ4KLoadOptions(backend, ggufPath, true, artifactQuant)
+	memPlan, planErr := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, ctxTokens, fit)
+	ring, ringed, ringErr := serveActivatedExpertRingPathPlacement(ggufPath, backend, false, planErr, ctxTokens, fit, os.Getenv, q4kOpts)
+	if ringed {
+		memPlan = ring.Plan
+		q4kOpts = append(q4kOpts, serveActivatedExpertRingLoadOptions(ring)...)
+		q4kOpts = append(q4kOpts, serveActivatedExpertRingDenseOption(ggufPath, q4kOpts, hostFit, os.Getenv))
+		fmt.Fprintln(os.Stderr, "fak serve pd: activated-expert device ring:",
+			serveActivatedExpertRingPlanText(ring, ggufload.ApplyQ4KLoadOptions(q4kOpts),
+				serveArtifactMixedQuantHostFallback(backend, artifactQuant) && !serveArtifactNativeKQuant(backend, artifactQuant)))
+		mm, _, _, _, _, loadErr := loadResidentQ4KDeviceErr(ggufPath, time.Now(), memPlan, backend, nil, q4kOpts...)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if err := enableServeSharedExpertRing(mm, backend, ring.Sizing, os.Getenv); err != nil {
+			// The historical request-scoped ring still bounds residency; only reuse is lost.
+			fmt.Fprintln(os.Stderr, "fak serve pd: activated-expert device ring stays request-scoped:", err)
+		}
+		return mm, nil
+	}
+	if ringErr != nil {
+		return nil, ringErr
+	}
+	// The full device plan fits: the retained entry keeps the checkpoint's shard readers open
+	// for the V4.1 Engram row sources (the closing LoadModelQ4K entry panics the front door on
+	// the first served request instead).
+	return ggufload.LoadModelQ4KRetained(ggufPath)
 }
 
 // runServePDPrefillRole owns the HTTP front door: chat completions ride
