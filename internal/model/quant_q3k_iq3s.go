@@ -6,8 +6,8 @@ import (
 )
 
 // Shared scalar GGUF decoders keep load-time expansion and resident native math identical.
-// Layout oracle: ggml-org/llama.cpp@6fe74980162af0ed5e559870d5deccafaa034e7c,
-// ggml/src/ggml-quants.c dequantize_row_q3_K and dequantize_row_iq3_s (MIT).
+// Layout oracle: ggml-org/llama.cpp at 6fe74980162af0ed5e559870d5deccafaa034e7c,
+// Q3_K and IQ3_S row dequantizers (MIT).
 
 // DequantQ3K expands complete 256-weight/110-byte GGUF Q3_K blocks into out.
 // Callers validate payload geometry before dispatch, as for the other raw quant decoders.

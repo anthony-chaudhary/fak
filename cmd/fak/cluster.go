@@ -291,16 +291,13 @@ func planFromWidths(widths []int) (model.TPPlan, error) {
 // --- Cluster admission planning ---
 //
 // ADAPT (not a verbatim port) of the converged-round admission math from
-// TensorFold's zig/src/cluster/admission.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// (Apache-2.0; see THIRD_PARTY_NOTICES.md): fitsAt compares each rank's need —
+// TensorFold @9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0; see
+// THIRD_PARTY_NOTICES.md, "TensorFold"): fitsAt compares each rank's need —
 // resident weights plus per-stream/per-token caches plus margin — against that
 // rank's GPU limit; maxStreams/maxContext binary-search the largest admitted
 // load; chunkRows sizes prompt chunks in 16-row steps so a round stays within
-// (1+share) of its decode-only time. Re-expressed in idiomatic Go over fak's own
-// TPPlan tiling and a declared round-cost model; no upstream code blocks are
-// copied. Upstream honesty line retained: admission planning NEVER proves
-// physical serving — no process launches, no device is touched, no collective
-// runs.
+// (1+share) of its decode-only time. Admission planning NEVER proves physical
+// serving — no process launches, no device is touched, no collective runs.
 
 // admissionStreamCeiling bounds the stream bisection, mirroring the upstream search space.
 const admissionStreamCeiling = int64(1 << 16)

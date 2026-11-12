@@ -14,8 +14,7 @@ import (
 // fak-test:runtime fast est=5ms lane=default
 
 // TestDSv41KQuantCacheRoundTrip pins the V4.1 mxfp8 K-plane borrow from
-// vLLM deepseek_v41 cache_utils.py @ ae065918640a198a56f6f17eb45e251c3229fe41
-// (Apache-2.0):
+// vLLM at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0):
 //
 //	(a) quantize -> dequant-gather round trip stays within the mxfp8
 //	    quantization bound (16 * tileScale per dim) vs the f32 oracle on

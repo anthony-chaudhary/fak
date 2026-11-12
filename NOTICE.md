@@ -1,64 +1,26 @@
 # Third-party notice
 
-This notice supplements [existing third-party notices](THIRD_PARTY_NOTICES.md).
 See [LICENSE](LICENSE) for the project license.
 
 ## DeepInfer structured-output verification transactions
 
-`internal/agent/inkernel_structured_speculative.go` and the native planner
-integration adapt per-position grammar masking and accepted-progress rollback
-from DeepInfer revision `774ce244b87cc0eb8d4b94ab9f5de2ab22049f01` (Apache-2.0;
-sampler derived from vLLM and modified by DeepSeek). Changed for Fak: request-local
-current-position forks, ordinary CPU linear greedy verification and commitment
-of actually emitted tokens. No upstream Python or XGrammar implementation is
-copied. Full source anchors, changes and license are retained in
-[`third_party/deepinfer-grammar-transactions/NOTICE`](third_party/deepinfer-grammar-transactions/NOTICE)
-and [`LICENSE`](third_party/deepinfer-grammar-transactions/LICENSE).
+Portions of this product are adapted from deepseek-ai/DeepInfer: https://github.com/deepseek-ai/DeepInfer (pinned at revision 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01). Changes were made.
+
+Copyright DeepSeek-AI / DeepInfer authors.
+Sampler lineage: Derived from vLLM; modified by DeepSeek.
+Licensed under the Apache License, Version 2.0.
 
 ## DeepInfer causal multi-position verification schedule
 
-The native V4.1 speculative target panel in `internal/model/speculative.go`,
-`v41_suffix_ubatch.go`, and the step transaction/head helpers adapts the causal
-multi-position, layer-major schedule and explicit per-query publication view
-from deepseek-ai/DeepInfer at revision
-`774ce244b87cc0eb8d4b94ab9f5de2ab22049f01` (Apache-2.0). Reference files are
-`deepinfer/worker/model_runner.py`, `deepinfer/model_executor/models/deepseek.py`,
-`deepinfer/model_executor/input_metadata/input_metadata.py`,
-`deepinfer/model_executor/models/v4_modules/attn.py`,
-`deepinfer/model_executor/layers/sampler.py`, and
-`csrc/engine/input_metadata/prepare_tensor_input_v4.cpp`.
+Portions of this product are adapted from deepseek-ai/DeepInfer: https://github.com/deepseek-ai/DeepInfer (pinned at revision 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01). Changes were made.
 
-Changed for Fak: no upstream code is copied. The implementation reuses Fak's
-existing same-session suffix driver, native arithmetic, bounded ring/compressor
-journals and source publication stores. It returns every target-logit row and
-retains journal ownership through the caller's emitted-prefix decision. It does
-not import DeepInfer's stochastic sampler, DFlash drafter, CUDA runtime, cache
-encoding or block-size constants. The preserved target acceptance is Fak's
-existing temperature-zero tripwire. One logical target panel is not one GPU
-kernel; actual head projections/tiles are accounted separately. This attribution
-is not a hardware, full-checkpoint parity or throughput claim.
-
-Licensed under the Apache License, Version 2.0 (upstream `LICENSE`); the upstream
-repository has no NOTICE file. License text:
+Copyright DeepSeek-AI / DeepInfer authors.
+Licensed under the Apache License, Version 2.0 (upstream LICENSE). License text:
 https://www.apache.org/licenses/LICENSE-2.0
 
 ## ggml Q8 block reconstruction in packed KV attention
 
-`internal/model/quant_attn_q8_packed.go` adapts the blockwise reconstruction
-traversal of `dequantize_row_q8_0` from official ggml-org/llama.cpp revision
-`83078fec0db82d6b5a00d9599062c38c39145755`:
-https://github.com/ggml-org/llama.cpp/blob/83078fec0db82d6b5a00d9599062c38c39145755/ggml/src/ggml-quants.c
-
-Changed for Fak: signed code times block scale reconstructs one bounded F32
-head-row tile per worker, reused across sharing query heads and then values.
-There is no full-layer F32 K/V materialization; this is not zero F32 scratch.
-Fak's cache scales are already F32, unlike the donor's F16 scales. Queries
-remain F32; existing native dot/value kernels, worker scheduling, cache
-ownership, softmax and observer copies remain Fak-owned.
-This is a block-reconstruction adaptation, not a wholesale upstream attention
-kernel, SIMD port or Q8-query conversion. Different scalar/SIMD reduction orders
-require numerical qualification; this notice makes no bit-parity, model-quality
-or throughput claim.
+Portions of this product are adapted from ggml-org/llama.cpp: https://github.com/ggml-org/llama.cpp (pinned at revision 83078fec0db82d6b5a00d9599062c38c39145755). Changes were made.
 
 MIT License
 
@@ -84,17 +46,7 @@ SOFTWARE.
 
 ## llama.cpp bounded mapped expert prefetch
 
-The sorted range-union control flow in
-`internal/model/expert_checkpoint_readahead.go` is adapted from
-`llama_prefetch` in `src/llama-mmap.cpp`, ggml-org/llama.cpp revision
-`74bca3950054eed1795f525cb9cf06bfe796492d` (b11870):
-https://github.com/ggml-org/llama.cpp/blob/74bca3950054eed1795f525cb9cf06bfe796492d/src/llama-mmap.cpp
-
-FAK groups by checkpoint shard and unions exact selected payload ranges before
-the existing mapped reader performs platform page alignment. It does not copy
-the donor's page-rounded gap merging or change packed weight bytes. New formats
-and coalescing require `fak_expert_readahead_qualification`; backend qualification
-and ordinary demand-error/ownership contracts remain separate.
+Portions of this product are adapted from ggml-org/llama.cpp: https://github.com/ggml-org/llama.cpp (pinned at revision 74bca3950054eed1795f525cb9cf06bfe796492d). Changes were made.
 
 MIT License
 
@@ -120,54 +72,17 @@ SOFTWARE.
 
 ## SGLang immutable retained dense prefix pages
 
-`internal/model/dense_prefix_snapshot.go` and
-`internal/radixkv/shared_dense_prefix.go` adapt shared pool-index ownership,
-page-aligned duplicate-prefix release, protected ancestor lifetime and a
-request-private partial tail from `python/sglang/srt/mem_cache/radix_cache.py`
-in sgl-project/sglang at revision
-`181380682b50f4606d1a09df3cbbbfc21de931e3`:
-https://github.com/sgl-project/sglang/blob/181380682b50f4606d1a09df3cbbbfc21de931e3/python/sglang/srt/mem_cache/radix_cache.py
+Portions of this product are adapted from sgl-project/sglang: https://github.com/sgl-project/sglang (pinned at revision 181380682b50f4606d1a09df3cbbbfc21de931e3). Changes were made.
 
 Copyright 2023-2024 SGLang Team. SPDX-License-Identifier: Apache-2.0.
 The pinned repository has no root NOTICE file. Its Apache-2.0 license is:
 https://github.com/sgl-project/sglang/blob/181380682b50f4606d1a09df3cbbbfc21de931e3/LICENSE
 
-Changed for Fak: immutable dense-FP32 snapshots use the existing Go PagedKV
-Fork/COW/Free allocator, preserve exact K/V/Kraw bits, positions and lineage,
-and account unique retained numeric backing in the existing CPU-cache budget.
-The clone-owning ordinary host planner route is selected only by the explicit
-`fak_radix_dense_sharing_qualification` build tag. A request still materializes
-a private contiguous Session cache; this is not zero-copy decode or a GPU
-allocator. Legacy live-pointer insertion and unsupported cache layouts remain
-unchanged. No Python runtime or SGLang serving scheduler is included.
-
-The complete Apache License, Version 2.0 text reproduced in the
-[TensorFold section of THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md#tensorfold-benchmark-evidence)
-also applies to this adaptation.
-
-
 ## llama.cpp retained Q5_K/Q6_K MMQ prompt family
 
-The default-off typed Q5_K/Q6_K prompt family in
-`internal/compute/cuda/q56k_mmq.cuh` adapts
-`ggml/src/ggml-cuda/{mmq.cuh,mmq-load-tiles.cuh,mmq-vec-dot.cuh,mmq-config-ampere.cuh,mma.cuh,quantize.cu,vecdotq.cuh,common.cuh}`
-and `ggml/src/ggml-common.h` from
-[ggml-org/llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd](https://github.com/ggml-org/llama.cpp/tree/0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd).
-Copyright (c) 2023-2026 The ggml authors. License: MIT.
+Portions of this product are adapted from ggml-org/llama.cpp: https://github.com/ggml-org/llama.cpp (pinned at revision 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd). Changes were made.
 
-Modified for FAK: one retained block-256 Q5_K/Q6_K family for ordinary P>=128
-sequence/batched projections, using the Ampere integer-MMA layout rather than
-SM100 tcgen instructions. Q5 preserves DS4 half scale/original-sum metadata;
-Q6 preserves D4 float scales, signed six-bit values and signed 16-value
-subscales. Weights remain canonical packed bytes. F32 activations become an
-owned temporary Q8_1 panel; this deliberate numerical change is qualification
-only. Zero activation blocks are explicit. FAK reuses its retained Q4 Stream-K
-useful-work cap, bounds padded tiles and all operand extents, and composes
-first-error capture, shared/private failed-drain retention, typed native-build
-selection and the ordinary final sequence fence. No upstream runtime, managed
-spill, persistent global workspace, capture support or measured gain is claimed.
-Selection is explicit in ordinary Go projection dispatch; packed GDN's separate
-native path, both previous checked/void ABIs and short-panel/MMVQ math remain unchanged.
+Copyright (c) 2023-2026 The ggml authors. License: MIT.
 
 MIT License
 
@@ -193,63 +108,24 @@ SOFTWARE.
 
 ## Finite host-offload admission and ownership
 
-The host-swap admission in `internal/modelengine/nativesched_preempt.go`
-adapts the finite-capacity, capacity-before-allocation and completion-owned
-release contracts of `CPUOffloadingManager.prepare_store/complete_store` from
-vLLM at revision `bd5bbce6e45e09dbd07ac3e8c394626c059078f7`:
-https://github.com/vllm-project/vllm/blob/bd5bbce6e45e09dbd07ac3e8c394626c059078f7/vllm/v1/kv_offload/cpu/manager.py
+Portions of this product are adapted from vllm-project/vllm: https://github.com/vllm-project/vllm (pinned at revision bd5bbce6e45e09dbd07ac3e8c394626c059078f7). Changes were made.
 
 SPDX-License-Identifier: Apache-2.0
 SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-
-Changed for Fak: synchronous native scheduler mutex ownership instead of an
-asynchronous chunk cache; codec-derived exact serialized extents before staging;
-owned lane blobs with an explicit byte limit; existing request-error retirement
-on a refused store; no implicit recompute. Readmit, error and cancellation release
-the same backing owner. The limit excludes logits (separately reported), staging,
-resident KV, allocator/RSS overhead and GPU Direct descriptors. No upstream
-eviction/replacement algorithm, Python runtime, GPU transfer or routing policy is
-ported. Existing radix snapshot budgets remain separate.
-The full Apache License retained in [existing third-party notices](THIRD_PARTY_NOTICES.md)
-also applies to this adaptation. No upstream root NOTICE exists at this pinned revision. This is
-source-only until qualified; no hardware or measured performance improvement
-is implied.
+Licensed under the Apache License, Version 2.0.
 
 ## vLLM native request outbox
 
-`internal/modelengine/nativesched_output.go` adapts the request-local,
-nonblocking publication principle of `RequestOutputCollector` in
-`vllm/v1/engine/output_processor.py` at
-`975dca5bb5db302077674cfa9afe851ee700ad73`:
-https://github.com/vllm-project/vllm/blob/975dca5bb5db302077674cfa9afe851ee700ad73/vllm/v1/engine/output_processor.py
+Portions of this product are adapted from vllm-project/vllm: https://github.com/vllm-project/vllm (pinned at revision 975dca5bb5db302077674cfa9afe851ee700ad73). Changes were made.
 
 Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
-Changed for Fak: individual token IDs retained in the native request's existing
-finite generation budget, rather than Python output aggregation; the existing
-scheduler owns cancellation, terminal channel close and session/KV release.
-This is distinct from the gateway SSE boundary collector. The full Apache
-License retained in [existing third-party notices](THIRD_PARTY_NOTICES.md)
-also applies to this adaptation.
+Licensed under the Apache License, Version 2.0.
 
 ## vLLM fused QK normalization, RoPE and cache publication
 
-`internal/compute/cuda/qwen35_qknorm_rope_cache_vllm.cuh` directly adapts the
-subwarp RMS reduction and shared-memory rotary-pair traversal from
-`csrc/fused_qknorm_rope_cache_kernel.cu` in vLLM at revision
-`fa3b9d1377219247060d3c8b49eae199c9e7e154`:
-https://github.com/vllm-project/vllm/blob/fa3b9d1377219247060d3c8b49eae199c9e7e154/csrc/fused_qknorm_rope_cache_kernel.cu
+Portions of this product are adapted from vllm-project/vllm: https://github.com/vllm-project/vllm (pinned at revision fa3b9d1377219247060d3c8b49eae199c9e7e154). Changes were made.
 
 SPDX-License-Identifier: Apache-2.0
 SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-
-Changed for Fak: one ordinary decode token, separate F32 Q/K/V and effective
-norm gains, unscaled theta-derived NeoX angles, an owned contiguous device-zero
-cache and a normalized F32 Kraw shadow for eviction. FAK retains allocation,
-admission, failure and completion ownership. The adapter does not import
-PyTorch, packed half inputs, FP8 conversion, cached angles or paged slot maps.
-The donor's subwarp reduction changes F32 arithmetic relative to FAK's retained
-256-thread RMS tree; this default-off source adaptation makes no bit-parity,
-hardware-qualification or measured-throughput claim.
-
-The full Apache License, Version 2.0 in [LICENSE](LICENSE) also applies to this
-adaptation. The pinned upstream repository has no root NOTICE file.
+Licensed under the Apache License, Version 2.0.
+The pinned upstream repository has no root NOTICE file.

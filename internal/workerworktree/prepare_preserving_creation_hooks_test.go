@@ -17,11 +17,8 @@ import (
 // runner stops an unexpected add before Git can execute any fixture helper.
 // Only the explicitly named NativeSentinelControls execute native hook aliases.
 //
-// Git v2.45.0 source for the relevant creation order:
-// https://github.com/git/git/blob/v2.45.0/builtin/worktree.c#L477-L539
-// https://github.com/git/git/blob/v2.45.0/refs.c#L2180-L2316
-// https://github.com/git/git/blob/v2.45.0/read-cache.c#L2947-L2986
-// https://github.com/git/git/blob/v2.45.0/hook.c#L110-L150
+// Git v2.45.0 source for the relevant creation order: builtin/worktree.c,
+// refs.c, read-cache.c and hook.c at tag v2.45.0.
 func preservingCreationHookNames() []string {
 	return []string{"reference-transaction", "post-index-change", "post-checkout"}
 }

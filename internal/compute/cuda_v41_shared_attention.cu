@@ -4,7 +4,7 @@
 // a split-KV online-softmax partial kernel, then an N-way base-2 LSE combine
 // that folds the sink last. Numerics follow v41SparseMLADecodeReference
 // (internal/compute/v41_sparse_mla_decode.go), never the serial three-pass
-// contract. The combine stage is adapted from vLLM's merge_attn_states kernel
+// contract. The combine stage is adapted from vLLM's LSE merge kernel
 // (Apache-2.0, see third_party/vllm-merge-attn-states/NOTICE), generalized
 // from two states to N splits and rewritten to the reference's exp2 order.
 // Portable SIMT (sm80..sm120); no tensor-core or sm100-only instruction.
@@ -121,7 +121,7 @@ __global__ void k_v41_shared_attention_split(const float *__restrict__ q,
     part_lse[(size_t)(h0 + tid) * splits + split] = __fadd_rn(s_run[tid], log2f(s_sum[tid]));
 }
 
-// grid = heads. N-way generalization of vLLM merge_attn_states: the merged LSE
+// grid = heads. N-way generalization of the vLLM LSE merge: the merged LSE
 // is top + log2(sum exp2(lse_s - top)); each partial is weighted by
 // exp2(lse_s - lse), and the sink rescales by 1/(1+exp2(sink*log2e - lse)).
 __global__ void k_v41_shared_attention_combine(const float *__restrict__ part_out,

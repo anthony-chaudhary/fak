@@ -2,8 +2,8 @@ package gateway
 
 // inflight_admission.go — request-count INFLIGHT admission for the served path, ADAPTED
 // from TensorFold's opt-in model-request admission (Apache-2.0): ashhart/TensorFold
-// zig/src/server/request_admission.zig:100 acquireAt @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/request_admission.zig
+// at 9e8c368b0b4c2c7892a0c9f0f302d7c164016209. License and notices:
+// THIRD_PARTY_NOTICES.md ("TensorFold").
 //
 // BORROWED CONTRACT, re-expressed in idiomatic Go (no upstream code copied):
 //   - a request is admitted only within a global max_inflight AND a per-key cap; zero

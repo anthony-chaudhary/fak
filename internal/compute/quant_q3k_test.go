@@ -244,9 +244,9 @@ type q3kNoProbeBackend struct {
 }
 
 // q3kUpstreamDigest is the SHA-256 of the 1024 little-endian f32 values emitted by the
-// actual llama.cpp dequantize_row_q3_K C function at
-// ggml-org/llama.cpp@6fe74980162af0ed5e559870d5deccafaa034e7c (ggml/src/ggml-quants.c,
-// MIT), compiled with cc -O0 -ffp-contract=off. The fixture is the SAME one the model
+// actual llama.cpp Q3_K row dequantizer at
+// ggml-org/llama.cpp@6fe74980162af0ed5e559870d5deccafaa034e7c (MIT), compiled with
+// cc -O0 -ffp-contract=off. The fixture is the SAME one the model
 // package pins in TestQ3KIQ3SNativeReference: input bytes (i*37+11)%256 over four
 // 110-byte blocks, each fp16 scale replaced by 0x3c00. It is an EXTERNAL oracle -- the
 // compute decoder below never produced it -- so agreement is byte-identity with the C

@@ -13,8 +13,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kquantbits"
 )
 
-// cuda_iq_gemv_test.go — resident IQ2_XXS / IQ2_XS (llama.cpp vecdotq.cuh @f7c01c52) and
-// IQ1_M / IQ4_NL (llama.cpp convert.cu @571d0d54) CUDA GEMV (cuda/iq_gemv.cuh, MIT).
+// cuda_iq_gemv_test.go — resident IQ2_XXS / IQ2_XS (llama.cpp @f7c01c52) and
+// IQ1_M / IQ4_NL (llama.cpp @571d0d54) CUDA GEMV (cuda/iq_gemv.cuh, MIT).
 //
 // Runs in both builds. Pure Go: the C ABI/source contract plus a lane-for-lane simulation
 // of the kernel's decode (lane -> ib32=lane>>2, l=lane&3, the exact byte offsets the

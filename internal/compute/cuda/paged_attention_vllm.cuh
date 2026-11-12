@@ -1,33 +1,26 @@
 // ---- Paged decode attention over a block table (fak cuda-paged-kv) ------------------
-// Adapted from vLLM csrc/attention/attention_kernels.cuh, attention_generic.cuh,
-// attention_utils.cuh, dtype_float32.cuh and csrc/cuda_compat.h, plus the
-// reshape_and_cache_kernel of csrc/cache_kernels.cu, at tag v0.11.0
-// (b8b302cde434df8c9289a2b465406b47ebab1c2d), Apache-2.0.
+// Adapted from vLLM at tag v0.11.0 (b8b302cde434df8c9289a2b465406b47ebab1c2d), Apache-2.0.
 // Copyright (c) 2023, The vLLM team. Copyright (c) 2020-2023, NVIDIA CORPORATION.
-// The kernel itself is adapted from NVIDIA FasterTransformer
-// decoder_masked_multihead_attention_template.hpp (release/v5.3_tag), Apache-2.0.
-// License and notice: THIRD_PARTY_NOTICES.md ("vLLM paged attention v1/v2").
+// The kernel lineage is NVIDIA FasterTransformer (release/v5.3_tag), Apache-2.0.
+// License and notice: THIRD_PARTY_NOTICES.md ("vLLM"); the FasterTransformer lineage is
+// recorded under "NVIDIA/CUDALibrarySamples".
 //
-// The upstream bodies are kept; the deltas for Fak are:
-//   * Only the scalar_t = cache_t = float, KV_DTYPE = kAuto, IS_BLOCK_SPARSE = false
-//     instantiation is kept, so every `if constexpr` arm on those parameters is resolved
-//     (this translation unit compiles as C++14) and the fp8/bf16/fp16 dtype headers,
-//     ALiBi slopes and block-sparse parameters are dropped.
-//   * torch launchers are replaced by the extern "C" adapters at the bottom, which keep
-//     upstream's v1/v2 selection rule and PARTITION_SIZE = 512.
-//   * reshape_and_cache takes one contiguous run (block, offset, tokens) instead of a
-//     slot_mapping tensor: Fak appends rows in logical order, a run never crosses a page.
-//   * The namespace is fak_vllm_pa (the TU is shared with other adapted kernels).
-// The Fak-native glue below the upstream code (row gather out of the paged layout and the
-// tiny device scalar store) has no upstream counterpart: vLLM never reads its cache back
-// into row-major form.
+// Only the scalar_t = cache_t = float, KV_DTYPE = kAuto, IS_BLOCK_SPARSE = false
+// instantiation is kept, so every `if constexpr` arm on those parameters is resolved
+// (this translation unit compiles as C++14); the fp8/bf16/fp16 dtype headers, ALiBi
+// slopes and block-sparse parameters are dropped. The extern "C" adapters at the bottom
+// keep the v1/v2 selection rule and PARTITION_SIZE = 512. reshape_and_cache takes one
+// contiguous run (block, offset, tokens): Fak appends rows in logical order, a run never
+// crosses a page. The namespace is fak_vllm_pa (the TU is shared with other adapted
+// kernels). The row gather out of the paged layout and the tiny device scalar store are
+// Fak-native glue with no upstream counterpart.
 //
-// Cache layout (upstream): K [num_blocks, nKV, hd/x, block, x] with x = 16/sizeof(float),
+// Cache layout: K [num_blocks, nKV, hd/x, block, x] with x = 16/sizeof(float),
 // V [num_blocks, nKV, hd, block]. One physical block id addresses the same block in every
 // layer's arena, so a block table is per-session, not per-layer.
 
-// Multi-page append uses current vLLM e5196e2959a42908313510f55fa21f213a48802e
-// per-token slot addressing, adapted to a bounded by-value map; see its header.
+// Multi-page append follows vLLM e5196e2959a42908313510f55fa21f213a48802e per-token
+// slot addressing via the bounded by-value map; see paged_kv_write_map.h.
 #include <stdint.h>
 #include "paged_kv_write_map.h"
 
@@ -835,8 +828,8 @@ extern "C" int fcuda_paged_store_int(int* dst, int value) {
 #undef FAK_PA_NUM_THREADS
 #undef FAK_PA_BLOCK_SIZE
 
-// Qualified one-page COW adaptation of vLLM copy_blocks_kernel in
-// csrc/cache_kernels.cu at b8b302cde434df8c9289a2b465406b47ebab1c2d.
+// Qualified one-page COW adaptation of the vLLM block-copy kernel at
+// b8b302cde434df8c9289a2b465406b47ebab1c2d.
 // Copyright (c) 2023, The vLLM team. Apache-2.0; existing family notice above.
 // Modified: bounded by-value arena map, one distinct page pair, all three F32
 // planes per layer; no torch, device metadata allocation or new driver API.

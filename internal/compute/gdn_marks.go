@@ -5,11 +5,10 @@ import (
 	"math"
 )
 
-// This file adapts the segment-mark recurrent-state discipline of ashhart/TensorFold's
-// DeltaNet kernels — markList/slotKernel at zig/src/core/deltanet_kernels.zig:9 and the
-// GDN recurrence at zig/src/core/gdn.zig:117, both at revision
+// This file adapts the segment-mark recurrent-state discipline of
+// ashhart/TensorFold's DeltaNet kernels at revision
 // 9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0; see THIRD_PARTY_NOTICES.md,
-// "TensorFold GDN segment-mark recurrent state").
+// "TensorFold").
 //
 // Adapted contract:
 //   - Recurrent state stores at segment marks: the GDN recurrent state matrix is

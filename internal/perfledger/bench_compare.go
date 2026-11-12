@@ -1,6 +1,5 @@
-// Adapted from TensorFold tools/bench_evidence.py token_equal at 7cf02bdb401a79e7b13eb27b451c29a781583bbc.
-// Copyright 2026 TensorFold contributors. Apache-2.0; see THIRD_PARTY_NOTICES.md.
-// Changed: typed outcomes, bounded request lookup, HTTP success and legacy digest consistency checks.
+// Adapted from TensorFold at 7cf02bdb401a79e7b13eb27b451c29a781583bbc.
+// Copyright 2026 TensorFold contributors. Apache-2.0; see THIRD_PARTY_NOTICES.md ("TensorFold").
 package perfledger
 
 import "strings"

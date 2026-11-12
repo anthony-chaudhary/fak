@@ -5,11 +5,12 @@ import (
 	"net/http"
 )
 
-// Adapted from SGLang SamplingParams.normalize at
-// https://github.com/sgl-project/sglang/blob/ab9b2a173c18dc32614325319f631b016f543aad/python/sglang/srt/sampling/sampling_params.py
-// Copyright 2023-2024 SGLang Team. Licensed under the Apache License, Version 2.0
-// (https://www.apache.org/licenses/LICENSE-2.0). The Go cardinality adaptation
-// does not port stop-regex limits; the separate literal byte policy below is local.
+// Adapted from SGLang's sampling-parameter normalization at
+// ab9b2a173c18dc32614325319f631b016f543aad. Copyright 2023-2024 SGLang Team.
+// Licensed under the Apache License, Version 2.0
+// (https://www.apache.org/licenses/LICENSE-2.0). License and notices:
+// THIRD_PARTY_NOTICES.md ("SGLang"). The Go cardinality adaptation does not
+// port stop-regex limits; the separate literal byte policy below is local.
 const maxStopSequences = 32
 
 // maxStopSequenceBytes is Fak's explicit local policy from #12406. SGLang's

@@ -40,11 +40,11 @@ __global__ void k_f32_to_f16(const float *src, __half *dst, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) dst[i] = __float2half(src[i]);
 }
-// Contiguous vec4 loads/stores adapted from llama.cpp ggml/src/ggml-cuda/convert.cu,
-// change f4e276a2066a40cd200db17c1131826d6c0c7a94, retained at
+// Contiguous vec4 loads/stores adapted from llama.cpp, change
+// f4e276a2066a40cd200db17c1131826d6c0c7a94, retained at
 // 0ec4027a2a0183de87c007069adddc06e665f7de (MIT).
 // Copyright (c) 2023-2026 The ggml authors. The complete MIT permission notice is
-// reproduced in THIRD_PARTY_NOTICES.md under "llama.cpp Q4_K MMQ prompt-panel GEMM".
+// reproduced in THIRD_PARTY_NOTICES.md ("llama.cpp").
 // Fak specializes the conversion to F32 -> F16 and keeps the existing intrinsic,
 // stream and profiler label. The transpose and compensated hi/lo paths are separate.
 #include <stdint.h>
@@ -142,11 +142,10 @@ __device__ signed char q8round_dev(float x) {
   return (signed char)t;
 }
 
-// The block-32 maximum follows warp_reduce_max<32> in llama.cpp
-// ggml/src/ggml-cuda/common.cuh, used by quantize_q8_1 in quantize.cu, at
+// The block-32 maximum follows the llama.cpp block-32 max reduction at
 // f3586e66bc916d672773d4a6505513ba91a3595c (MIT).
 // Copyright (c) 2023-2026 The ggml authors. The full permission notice is
-// retained in THIRD_PARTY_NOTICES.md ("llama.cpp Q4_K MMQ prompt-panel GEMM").
+// retained in THIRD_PARTY_NOTICES.md ("llama.cpp").
 // Only the max reduction is borrowed: Fak's float scales and q8round_dev stay.
 static __device__ __forceinline__ float q8_activation_warp_max(float x) {
 #pragma unroll

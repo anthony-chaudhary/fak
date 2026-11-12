@@ -220,6 +220,27 @@ Contributions are accepted **inbound = outbound**: your change is licensed to th
 under the same license that governs that part of the tree (today, Apache-2.0 for the
 kernel), in addition to the CLA grant to Netra.
 
+## Third-party attribution granularity
+
+Public license notices (`NOTICE.md`, `THIRD_PARTY_NOTICES.md`,
+`third_party/*/NOTICE`) carry **only** the license-required minimum: donor
+project identity + repository URL + pinned revision(s), verbatim copyright
+notices, full license texts, and a "Changes were made" statement. Never add
+fak-side detail to a notice: no `internal/` paths, no symbol or type names,
+no `FAK_*` environment variables, no build tags, no test names, no "Changed
+for Fak" adaptation narratives, no donor-side file/line anchors or
+"Source units" lists, no feature-mapping section titles, no wiring or
+architecture descriptions, no links to internal port dossiers. One
+`## <Donor project>` section per donor project; list all of that donor's
+pinned revisions inside that single section. In source-file headers keep only
+the donor name + pinned revision + license id + verbatim copyright + a
+pointer to `THIRD_PARTY_NOTICES.md`; no donor-file mapping or adaptation
+narration in comments. Rationale: over-specific attribution reveals the
+internal build recipe (which internal files implement which donor, how ports
+are fused) - competitive alpha that must not ship in the public repo.
+Enforced by `go test ./internal/noticeguard`, a regression guard that
+refuses over-specific notices.
+
 ## Go sub-modules, applications, and tooling preference (no new scripts)
 
 New repository tooling and automation is Go, not Python, PowerShell, or shell scripts. Prefer

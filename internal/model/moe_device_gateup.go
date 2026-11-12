@@ -190,7 +190,8 @@ func (s *Session) q4kExpertDownDeviceWeight(downName string) (compute.Tensor, fu
 
 // clampSwiGLUProjections applies the expert's asymmetric projection clamp before
 // activation: the gate has only an upper bound; the up branch has both bounds.
-// ADAPT (MIT, DeepSeek subdirectory license): https://github.com/jundot/omlx/blob/3f2d07e8dff257119329e0a2e9821df81182f05d/omlx/patches/deepseek_v41/language.py#L551-L555
+// ADAPT (MIT, DeepSeek subdirectory license) of jundot/omlx at
+// 3f2d07e8dff257119329e0a2e9821df81182f05d.
 func clampSwiGLUProjections(gate, up []float32, limit float32) {
 	if limit > 0 {
 		for i := range gate {

@@ -51,11 +51,11 @@ func (m *mmapReaderAt) ReadAt(p []byte, off int64) (int, error) {
 // The checkpoint file must remain immutable while mapped. ReadAt keeps its
 // separate copy-and-own contract, including for TensorBytes callers.
 //
-// Prior-art: adapts llama_model_loader::load_data_range's mapped-address arm from
-// ggml-org/llama.cpp src/llama-model-loader.cpp:1471-1491 at
+// Prior-art: adapts the mapped-address range load from llama.cpp at
 // f2cc7282ce0042641df55e0e563b75e824e2b647 (MIT, Copyright (c) 2023-2026
-// The ggml authors; license reproduced in THIRD_PARTY_NOTICES.md). Go uses
-// subtraction-based bounds checks and a three-index slice instead of a pointer.
+// The ggml authors; license reproduced in THIRD_PARTY_NOTICES.md, "llama.cpp").
+// Go uses subtraction-based bounds checks and a three-index slice
+// instead of a pointer.
 func (m *mmapReaderAt) ReadOnlyRange(off, size int64) ([]byte, error) {
 	if m == nil || off < 0 || size < 0 || off > int64(len(m.data)) || size > int64(len(m.data))-off {
 		return nil, fmt.Errorf("gguf: mmap range offset %d size %d outside mapping", off, size)
@@ -92,8 +92,8 @@ func ggufMmapEnabled() bool {
 // by the page cache), mlock (keep weights pinned in RAM — syscalls not yet implemented
 // in this build), direct-io (bypass the page cache — syscalls not yet implemented in
 // this build), or auto (pick mmap when the platform supports it, else none). The
-// numeric values mirror llama.cpp's enum llama_load_mode (include/llama.h:206-211 at
-// 83078fec0db82d6b5a00d9599062c38c39145755, MIT) so config spellings stay portable
+// numeric values mirror llama.cpp's load-mode enum at
+// 83078fec0db82d6b5a00d9599062c38c39145755 (MIT) so config spellings stay portable
 // across the two codebases; upstream value 3 (mmap+mlock) is intentionally absent.
 type LoadMode int32
 
@@ -129,9 +129,9 @@ func (m LoadMode) String() string {
 // human-readable reason when the resolution DEGRADED from the request ("" when
 // the request was honored, or when AUTO made its policy pick). It never fails:
 // an unsupported explicit request degrades to the plain-file-load path instead
-// of erroring, mirroring llama_model_loader's constructor (src/llama-model-loader.cpp:559
-// at 83078fec0db82d6b5a00d9599062c38c39145755, MIT), which derives use_mmap /
-// use_direct_io from the requested mode and then downgrades use_mmap with a
+// of erroring, mirroring llama.cpp's model-loader constructor at
+// 83078fec0db82d6b5a00d9599062c38c39145755 (MIT), which derives the mmap / direct-io
+// flags from the requested mode and then downgrades mmap with a
 // warning when mmap is unavailable on the platform.
 //
 // Rules (pinned by TestResolveLoadModeDegradesWithReason):

@@ -1,21 +1,13 @@
 // Package policy carries pure, dependency-free policy primitives shared by
 // every fak build.
 //
-// perm.go ADAPTS opencode's ordered wildcard tool-permission ruleset
-// evaluation: packages/core/src/permission.ts evaluate() at line 76, revision
-// 4eb29a64f0054672950acf789f2b09487ebfbb20 (MIT, Copyright (c) 2025 opencode):
-// https://github.com/anomalyco/opencode/blob/4eb29a64f0054672950acf789f2b09487ebfbb20/packages/core/src/permission.ts#L76
-// Upstream evaluates an ordered list of {action, resource, effect} rules with
-// Wildcard.match on both dimensions and lets the LAST matching rule decide
-// (findLast), falling back to a synthesized "ask" rule when none matches.
-// Changed for Fak: the two rule dimensions are flattened into one
-// "tool:target" pattern per rule, matching uses path.Match-style glob syntax
-// over opaque strings (a '*' spans every byte, including '/') instead of
-// upstream Wildcard.match, the effect is a free-form action string instead of
-// the closed allow/deny/ask set, and a non-matching lookup returns
-// matched=false instead of inventing a default. This is a pure evaluator: it
-// is not wired into adjudication and persists no rules. See
-// THIRD_PARTY_NOTICES.md.
+// perm.go adapts opencode's ordered wildcard tool-permission ruleset
+// evaluation at revision 4eb29a64f0054672950acf789f2b09487ebfbb20 (MIT,
+// Copyright (c) 2025 opencode). License and notice: THIRD_PARTY_NOTICES.md
+// ("opencode").
+//
+// This is a pure evaluator: it is not wired into adjudication and persists no
+// rules.
 package policy
 
 import (

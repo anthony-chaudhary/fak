@@ -10,10 +10,9 @@ import (
 )
 
 // attention_splitkv_test.go — [SW-VERIFIED] CPU/in-memory witness for the
-// split-KV chunked-prefill panel borrowed from vLLM merge_attn_states
-// (vllm-project/vllm csrc/attention/merge_attn_states.cu:18 at
-// ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0; ADAPT, notice at
-// third_party/vllm-merge-attn-states/NOTICE). The device kernels live in
+// split-KV chunked-prefill panel borrowed from vLLM
+// (vllm-project/vllm at ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0;
+// ADAPT, notice at third_party/vllm-merge-attn-states/NOTICE). The device kernels live in
 // cuda/attention.cuh beside k_qwen38_causal_attention_panel_hd256:
 // k_qwen38_causal_attention_panel_hd256_splitkv_partial (one CTA per
 // (row, head, partition) writing the unnormalized (m, l, O) partial) and

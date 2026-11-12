@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-// Modified for Fak: Go transport budgets/error closure and ordered native SSE
-// barriers. The non-merging boundary rule adapts StreamingInputOutputCollector
-// in vllm/v1/engine/output_processor.py at e5196e2959a42908313510f55fa21f213a48802e.
-// See THIRD_PARTY_NOTICES.md, "vLLM native stream boundary collector".
+// Adapted from vLLM at e5196e2959a42908313510f55fa21f213a48802e (Apache-2.0).
+// License and notice: THIRD_PARTY_NOTICES.md ("vLLM").
 package gateway
 
 import (

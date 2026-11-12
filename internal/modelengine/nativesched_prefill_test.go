@@ -1371,8 +1371,7 @@ func TestPrefixHitApplyClampsToSnapshottedDepth(t *testing.T) {
 // truncation adapted into lookupPrefixPageAligned: a raw token-exact hit is
 // floored to a multiple of the block size in tokens, a sub-page hit is a miss
 // that releases its boundary lease, and page 1 leaves the raw match unchanged.
-// Source: SGLang python/sglang/srt/mem_cache/radix_cache.py:440-443,467@00a9a81
-// (key.page_aligned(page_size), Apache-2.0).
+// Source: SGLang at 00a9a81b67774e8374172646c092e14999472703 (Apache-2.0).
 // fak-test:runtime fast est=50ms lane=default
 func TestLookupPrefixTruncatesToPageMultiple(t *testing.T) {
 	prompt := nativeSchedulerQwenPrompt(40)
@@ -1557,8 +1556,8 @@ func TestSchedLaneTransitionCachedPrefillCancellation(t *testing.T) {
 }
 
 // TestQwenPrefillChunkBoundariesAlignInDeterministicMode pins the adapted
-// SGLang deterministic truncation_align_size rule (scheduler.py:1690-1722@
-// 00a9a81b, Apache-2.0): in deterministic mode a configured alignment A > 0
+// SGLang deterministic chunk-alignment rule at 00a9a81b (Apache-2.0): in
+// deterministic mode a configured alignment A > 0
 // rounds each non-final prefill chunk end down to a multiple of A measured
 // from position 0 (never below A), while A = 0 and non-deterministic mode keep
 // the historical arbitrary-token boundaries. The budget itself is unchanged.

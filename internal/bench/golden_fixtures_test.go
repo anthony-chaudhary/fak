@@ -17,10 +17,8 @@ import (
 // pass, because those two witnesses cannot see a permutation that is consistently wrong
 // in both directions.
 //
-// PROVENANCE. The pattern source is llama.cpp @571d0d540df04f25298d0e159e520d9fc62ed121,
-// ggml/src/ggml-cpu/repack.cpp (sha256 b3a1d6953fc61f2a4088337384166fb5102db617afe37a4b92f7cf07992a9f8a),
-// fetched 2026-11-03: repack_q4_K_to_q4_K_8_bl (:3231), make_block_q4_Kx8 (:2836), picker
-// ggml_repack_get_optimal_repack_type (~:4520). What this fixture pins is fak's documented
+// PROVENANCE. The pattern source is llama.cpp @571d0d540df04f25298d0e159e520d9fc62ed121
+// (MIT; fetched 2026-11-03). What this fixture pins is fak's documented
 // column-interleaved BYTE-PERMUTATION contract (the LAYOUT block in q4krepack.go): rows
 // grouped `width` at a time, per super-block [d x w][dmin x w][scales x w][qs byte j x w],
 // tail group truncated to the remaining rows. That is NOT byte-identical to llama.cpp's

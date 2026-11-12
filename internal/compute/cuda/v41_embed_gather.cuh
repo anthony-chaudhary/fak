@@ -4,12 +4,12 @@
 #include "v41_embed_gather_math.h"
 #include "v41_embed_gather_geometry.h"
 static __global__ void v41_eg_f32(const uint32_t *src,uint32_t *dst,int hidden) {
-  // getrows.cu k_get_rows_float indexing, specialized to a selected row.
+  // Float-row gather specialized to a single selected row.
   // Integer copies preserve every bit (NaN payloads and signed zeros included).
   for(uint64_t i=(uint64_t)blockIdx.x*blockDim.x+threadIdx.x;i<(uint64_t)hidden;i+=(uint64_t)gridDim.x*blockDim.x)dst[i]=src[i];
 }
 static __global__ void v41_eg_q2(const uint8_t *src,float *dst,int blocks) {
-  // getrows.cu k_get_rows_kq: 64 lanes decode four values per lane.
+  // Q2_K row gather: 64 lanes decode four values per lane.
   for(int64_t ib=blockIdx.x;ib<blocks;ib+=gridDim.x)
     v41_eg_q2_thread(src+ib*84,dst+ib*256,threadIdx.x);
 }
@@ -56,8 +56,8 @@ extern "C" int fak_v41_embed_gather(const void *table,float *out,const intptr_t 
 
 // Optional IQ4_NL spine, not a Go/model capability. Both native feature defines
 // are required; ordinary embedding builds and ABI2's accepted modes are intact.
-// getrows.cu:44-70,395-398 at llama.cpp e0f142d5ddc1461ce721644d92af33db23545105
-// supplies the 32-lane selected-row mapping. The MIT notice is retained in
+// The 32-lane selected-row mapping is adapted from llama.cpp at
+// e0f142d5ddc1461ce721644d92af33db23545105 (MIT); the MIT notice is retained in
 // v41_embed_iq4nl.h. No upstream context, stream, cache or scheduler is imported.
 #ifdef FAK_CUDA_V41_EMBED_IQ4NL
 #include "v41_embed_iq4nl.h"
@@ -181,18 +181,11 @@ extern "C" int fak_v41_embed_iq4nl_row_poison(float *target,const uint32_t *stat
   return v41_checked_stream_finish();
 }
 
-// Row-parallel mapping adapted from Niko1221/Strata (MIT),
-// src/dsv41/ds4_kernels.cu:1521-1540,1938-1959 at
-// c62d5e3a15b40ea51c96aae9e8d36928965f53ab, source SHA256
-// c96ba2b906ed54d3e9c7ac22b4a5d970783fe2246e4cfd01af4e8bf748aedf5a.
+// Row-parallel mapping adapted from Niko1221/Strata at
+// c62d5e3a15b40ea51c96aae9e8d36928965f53ab (MIT).
 // Copyright (c) 2026 Peasant Smith (mw00), Project Maya contributors,
 // including needmorevram, and Niko1221 and the Strata contributors.
-// Full MIT license and Project Maya notice: THIRD_PARTY_NOTICES.md,
-// section "Strata / Project Maya Engram CLOCK replacement". Origin:
-// Project Maya v1.1.17, commit 8d9a9b5d; upstream port changes remain attributed.
-// Adaptations: FAK gathered-row layout, bounded grid stride, existing Q2/IQ4
-// math, exact packed BF16 bits, first-fault status and owned checked stream.
-// Q6_K and the donor's unrounded output/gate/error policy are NOT imported.
+// License and notices: THIRD_PARTY_NOTICES.md ("Strata", "Project Maya").
 #include "v41_engram_rows.h"
 static __global__ void v41_eg_rows(const uint8_t *src,float *dst,uint32_t *status,const int rows,const int dim,const int mode) {
   __shared__ float decoded[256];

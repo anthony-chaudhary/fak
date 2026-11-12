@@ -31,12 +31,11 @@ const (
 )
 
 // The transition rules mirror primary OSS practice without copying source:
-// Apache-2.0 vLLM scheduler.py@f49777ba62b4926d0f8c100ab06edb03c5c10098
-// keeps LATER victims queued and publishes RUNNING only after swap_in succeeds;
-// https://github.com/vllm-project/vllm/blob/f49777ba62b4926d0f8c100ab06edb03c5c10098/vllm/core/scheduler.py
-// Apache-2.0 SGLang hiradix_cache.py@5ab97c4f441462f3d2adb1ffa954cc92518beece
-// protects host state during load-back and publishes device state only after transfer.
-// https://github.com/sgl-project/sglang/blob/5ab97c4f441462f3d2adb1ffa954cc92518beece/python/sglang/srt/mem_cache/hiradix_cache.py
+// Apache-2.0 vLLM at f49777ba62b4926d0f8c100ab06edb03c5c10098 keeps LATER
+// victims queued and publishes RUNNING only after swap_in succeeds; Apache-2.0
+// SGLang at 5ab97c4f441462f3d2adb1ffa954cc92518beece protects host state during
+// load-back and publishes device state only after transfer. License and
+// notices: THIRD_PARTY_NOTICES.md ("vLLM", "SGLang").
 type qwen38PagedSwapReceipt struct {
 	Schema            string                   `json:"schema"`
 	BindingSHA256     string                   `json:"binding_sha256"`

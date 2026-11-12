@@ -156,8 +156,11 @@ func TestIQ4XSCUDASourceContract(t *testing.T) {
 			t.Errorf("cuda_backend.h lost %q", sym)
 		}
 	}
-	if !strings.Contains(read(filepath.Join("..", "..", "THIRD_PARTY_NOTICES.md")), "cuda/iq4xs_mmvq.cuh") {
-		t.Error("THIRD_PARTY_NOTICES.md does not attribute cuda/iq4xs_mmvq.cuh")
+	notices := read(filepath.Join("..", "..", "THIRD_PARTY_NOTICES.md"))
+	for _, attr := range []string{"## llama.cpp", "571d0d540df04f25298d0e159e520d9fc62ed121"} {
+		if !strings.Contains(notices, attr) {
+			t.Errorf("THIRD_PARTY_NOTICES.md missing llama.cpp attribution element %q", attr)
+		}
 	}
 }
 

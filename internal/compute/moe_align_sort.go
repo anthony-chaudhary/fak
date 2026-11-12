@@ -1,9 +1,8 @@
 package compute
 
 // On-device MoE token align-and-sort per expert + weighted-sum finalize: the CPU
-// reference of moe_align_sort.cu (ADAPT of vllm-project/vllm
-// csrc/moe/moe_align_sum_kernels.cu at pin ae065918640a198a56f6f17eb45e251c3229fe41,
-// Apache-2.0). This file is pure Go on purpose: it compiles and is tested in every
+// reference of moe_align_sort.cu (ADAPT of vllm-project/vllm at pin
+// ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0). This file is pure Go on purpose: it compiles and is tested in every
 // build, while the device kernels ship behind the cuda build tag once the follow-on
 // ticket wires moe_align_sort.cu into the single libfakcuda translation unit. The
 // cgo launch wrapper lands with that wiring; declaring the C ABI here would break

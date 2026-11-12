@@ -4,19 +4,15 @@
 // V4.1 mxfp8 K-plane record helpers shared by the quantize-and-insert and
 // dequantize-and-gather kernels in ../dsv41_k_quant.cu.
 //
-// ADAPTED from vllm-project/vllm,
-// vllm/models/deepseek_v41/common/ops/cache_utils.py:184,528
-// (_quantize_and_insert_k_mxfp8_kernel, _dequantize_and_gather_k_mxfp8_kernel)
-// at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0; attribution in
-// THIRD_PARTY_NOTICES.md). Re-expressed against fak conventions; no upstream
-// code copied. Ref oss-port-vllmtop-dsv41-k-quant-cache-20261103.
+// Adapted from vLLM at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0).
+// License and notice: THIRD_PARTY_NOTICES.md ("vLLM").
+// Ref oss-port-vllmtop-dsv41-k-quant-cache-20261103.
 //
 // Record (V4.1 mxfp8, 528 B/token, interleaved per token inside a page):
 //   [0,512)   e4m3 payload, one byte per dim (RoPE dims included)
 //   [512,528) 16 ue8m0 scale bytes, one per 32-dim tile
-// Delta from upstream: the paged page holds 16 tokens (the fak paged writer,
-// paged_kv_write_map.h, admits block_size == 16 only), not upstream's
-// 64/128-token pages. The slot decomposition below is the same
+// The paged page holds 16 tokens (the fak paged writer, paged_kv_write_map.h,
+// admits block_size == 16 only). The slot decomposition below is the same
 // pos -> (block, offset) pair that paged_kv_write_offsets uses for the f32
 // planes.
 

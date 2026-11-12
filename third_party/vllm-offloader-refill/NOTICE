@@ -1,36 +1,8 @@
-FAK expert-ring compatible-slot refill (model consumer and CUDA provider)
+vLLM expert-offloader prefetch (compatible-slot refill)
 
-Conceptual adaptation from vLLM:
-  Copyright contributors to the vLLM project
-  Licensed under the Apache License, Version 2.0 (see LICENSE).
-  Repository: https://github.com/vllm-project/vllm
-  Revision: fa3b9d1377219247060d3c8b49eae199c9e7e154
-  Source: vllm/model_executor/offloader/prefetch.py
-  https://github.com/vllm-project/vllm/blob/fa3b9d1377219247060d3c8b49eae199c9e7e154/vllm/model_executor/offloader/prefetch.py
+Copyright contributors to the vLLM project
+Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-That upstream source acknowledges adaptation from SGLang:
-  https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/utils/offloader.py
+Portions of this product are adapted from vllm-project/vllm: https://github.com/vllm-project/vllm (pinned at revision fa3b9d1377219247060d3c8b49eae199c9e7e154). Changes were made.
 
-FAK adapts the geometry-matched reusable-slot and completion-before-reuse
-patterns to its existing expert-ring admission policy. The model consumer
-selects one equal-size victim, settles prior transfers, retires the old
-logical identity before overwrite, and retains failed or uncertain ownership.
-It requires an explicitly enabled provider and a live execution domain.
-
-The CUDA provider connects that consumer to checked synchronous same-allocation
-refill, with bounded pinned-source staging and a fresh backend handle. It retires
-the old handle before overwrite and retains failed or uncertain native ownership.
-The supported arm is at most 64 MiB, byte-verbatim F32, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K,
-IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL or IQ4_XS, with profiling, graphs and capture
-excluded. Raw-IQ metadata follows FAK's existing constructors: NewRawIQ uses
-Bits=4, while the dedicated NewIQ2XXS also supports Bits=2 for the identical
-raw layout. For these three lower-bit IQ formats, explicitly opted-in,
-validated MemoryOffload uploads retain a private copy of that host descriptor
-instead of the shared allocator's nominal-bit descriptor. Immutable weights and
-opt-out uploads keep their prior behavior. Refill still requires equal source
-and destination metadata; no quantization or conversion is introduced.
-
-No upstream Python implementation, modulo layer scheduler, or graph/capture
-protocol is copied here. FAK_CUDA_EXPERT_RING_REFILL=1 is required; ordinary
-defaults are unchanged. Source/host controls are not CUDA build/link, physical
-completion, model quality or performance qualification.
+The adapted upstream source acknowledges adaptation from SGLang; the SGLang Apache-2.0 terms apply to that lineage as well.

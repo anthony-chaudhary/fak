@@ -19,10 +19,10 @@ func isDeepSeek3PreTokenizer(pre string) bool {
 }
 
 // preTokenizeDeepSeek3 ports llama.cpp's DEEPSEEK3_LLM/JOYAI_LLM pre-tokenizer
-// (vcruz305/llama.cpp@5210c7c src/llama-vocab.cpp:318-327). Unlike the single-regex
-// families, it is THREE regexes applied in sequence by unicode_regex_split: each stage
-// re-splits every chunk the previous stage produced, and text a stage does not match is
-// kept as one chunk (not split per rune). The stages are:
+// (vcruz305/llama.cpp at 5210c7c). Unlike the single-regex families, it is THREE
+// regexes applied in sequence: each stage re-splits every chunk the previous
+// stage produced, and text a stage does not match is kept as one chunk (not
+// split per rune). The stages are:
 //
 //  1. \p{N}{1,3}
 //  2. [一-龥぀-ゟ゠-ヿ]+

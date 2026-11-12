@@ -4,41 +4,30 @@
 // the fused gate/up GEMV with the clamped SwiGLU in its epilogue, and the down
 // GEMV with the checked BF16 publication and the routed sum in its epilogue.
 //
-// Ported from llama.cpp ggml/src/ggml-cuda at 571d0d540df04f25298d0e159e520d9fc62ed121
+// Ported from llama.cpp at 571d0d540df04f25298d0e159e520d9fc62ed121
 // (MIT, Copyright (c) 2023-2026 The ggml authors; see THIRD_PARTY_NOTICES.md,
-// "llama.cpp MUL_MAT_ID MMVQ routed-expert GEMV"):
-//   * mmvq.cu:480 mul_mat_vec_q with ids (channel_x = ids[channel_dst], grid Y is
-//     the selected expert) and its fused gate + GLU epilogue (fusion.gate,
-//     tmp_gate, tmp_shared_gate), at the NVIDIA GENERIC table, ncols_dst = 1
-//     (4 warps, one row per CUDA block, so the clamp of the shared rows path is
-//     not needed);
-//   * vecdotq.cuh:364 vec_dot_q2_K_q8_1_impl_mmvq and :819 vec_dot_q2_K_q8_1,
-//     ggml-common.h block_q2_K. Q3_K reuses fak_q3k_mmvq::vec_dot_q3_K_q8_1 and
-//     the q8_1 block, quantize_q8_1 and warp_reduce_sum of cuda/q4k_mmvq.cuh
-//     (ported from the same upstream), not a second copy.
-// The clamped SwiGLU is antirez/ds4 ds4_cuda.cu:6188 swiglu_kernel at
-// 80ebbc396aee40eedc1d829222f3362d10fa4c6c (MIT, The ds4.c authors): g = min(g, c),
-// u = clamp(u, +-c), silu(g) * u * weight. Its lane is routed_swiglu_lane in
-// cuda_v41_routed_swiglu.cu (shared, so both CUDA routed paths publish the same
-// bits), which adds the V4.1 BF16 publication and fault stages.
+// "llama.cpp"). The clamped SwiGLU follows antirez/ds4 at
+// 80ebbc396aee40eedc1d829222f3362d10fa4c6c (MIT, The ds4.c authors; see
+// THIRD_PARTY_NOTICES.md, "antirez/ds4 (DwarfStar)"): g = min(g, c),
+// u = clamp(u, +-c), silu(g) * u * weight.
 //
-// Changed for Fak:
+// The shared lane is routed_swiglu_lane in cuda_v41_routed_swiglu.cu, so both
+// CUDA routed paths publish the same bits; it adds the V4.1 BF16 publication
+// and fault stages. Local behavior:
 //   * ids is the V41RoutedIDWords image: [0,P) slot in the bound slot table,
 //     [P,2P) route weight bits, [2P,3P) routed-sum order. The slot table is up
-//     to eight separate ring-page pointers passed by value, as llama_moe_cache
-//     remaps ids through its per-layer slot map (llama.cpp PR #29887), instead
-//     of one 3-D expert bank with stride_channel_x.
-//   * The GLU epilogue is the V4.1 checked clamp-SwiGLU (routed_swiglu_lane),
-//     not ggml_cuda_op_silu_single; faults go to the pick's own 16-byte record
-//     (magic, count, lowest activation lane, lowest down-operand lane).
+//     to eight separate ring-page pointers passed by value.
+//   * The GLU epilogue is the V4.1 checked clamp-SwiGLU (routed_swiglu_lane);
+//     faults go to the pick's own 16-byte record (magic, count, lowest
+//     activation lane, lowest down-operand lane).
 //   * The down kernel loops the picks in ids sum order inside one CUDA block
 //     per row and folds the checked BF16 publication (record: magic, site,
 //     lowest lane, count) and the ordered F32 sum into the epilogue, as
 //     v41_routed_down_sum.comp does on Vulkan.
 //   * Activations are quantized to q8_1 into a transient scratch per call;
-//     no bias, NVFP4 scale, sample broadcast or ggml_cuda_pdl_*. The outputs are
-//     therefore within the q8_1 activation residual of the per-pick F32 GEMV,
-//     not bitwise it (cudaQ2KCosineMin / cudaQ3KCosineMin bound it).
+//     no bias, NVFP4 scale or sample broadcast. The outputs are therefore
+//     within the q8_1 activation residual of the per-pick F32 GEMV, not
+//     bitwise it (cudaQ2KCosineMin / cudaQ3KCosineMin bound it).
 //   * The ids tensor is device data the host cannot re-check, and CUDA has no
 //     robust buffer access, so every slot word and order word is bounds-checked
 //     in the kernel. A slot outside the bound table publishes NaN and, where the
@@ -73,7 +62,7 @@ struct slot_table {
     unsigned n; // bound slots; w[n..) are null
 };
 
-// ggml-common.h block_q2_K.
+// The GGUF Q2_K super-block.
 struct block_q2_K {
     uint8_t scales[QK_K / 16]; // scales and mins, quantized with 4 bits
     uint8_t qs[QK_K / 4];      // quants
@@ -81,7 +70,7 @@ struct block_q2_K {
 };
 static_assert(sizeof(block_q2_K) == 2 * sizeof(half) + QK_K / 16 + QK_K / 4, "wrong q2_K block size/padding");
 
-// vecdotq.cuh vec_dot_q2_K_q8_1_impl_mmvq (contiguous v/x values).
+// Q2_K x Q8_1 MMVQ dot (contiguous v/x values).
 static __device__ __forceinline__ float vec_dot_q2_K_q8_1_impl_mmvq(
     const int &v, const int *__restrict__ u, const uint8_t *__restrict__ scales,
     const half2 &dm2, const float *__restrict__ d8) {

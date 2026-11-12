@@ -24,9 +24,9 @@ const (
 // renormalises the route weights over those N. Unset keeps the published 6.
 // Valid values are 1..V41RouterTopK or "auto". Routed expert bytes per token scale with
 // N, so N=5 cuts them by 1/6. The rule is adapted (no code copied) from Strata
-// src/dsv41/ds4_experts_rule.hpp:30-44 @46c152a1 (MIT), which reports +4% to
-// +13% decode at a KL cost of ~0.0015 for 5 vs 6 (upstream-reported, not a
-// fak witness). The default stays 6 until a fak quality gate passes.
+// at 46c152a1 (MIT), which reports +4% to +13% decode at a KL cost of ~0.0015
+// for 5 vs 6 (upstream-reported, not a fak witness). The default stays 6 until
+// a fak quality gate passes.
 const V41RoutedTopKEnv = "FAK_V41_ROUTED_TOPK"
 
 // ErrV41RoutedTopK classifies a refused routed top-k override.

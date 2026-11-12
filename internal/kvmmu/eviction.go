@@ -1,14 +1,9 @@
 // eviction.go — bump-topology KV eviction with allocation-free recency tracking.
 //
 // ADAPT port of incoai/splash's bump-topology KV-eviction policy (Apache-2.0),
-// pinned at 6c6002d42aabdddb9e31b96c9bba9041e2fba29f:
+// pinned at 6c6002d42aabdddb9e31b96c9bba9041e2fba29f.
 //
-//	runtime/engine/KvCache.hpp:143    resident-leaf eligibility + candidate scan
-//	runtime/engine/KvCache.cpp        reindex / inherit / retain-release / drop-adopt
-//	runtime/engine/RecencyOrder.hpp:13 intrusive last-used order
-//	runtime/engine/CacheRecency.hpp:6  shared monotonic access clock
-//
-// License record: THIRD_PARTY_NOTICES.md ("Splash bump-topology KV eviction").
+// License record: THIRD_PARTY_NOTICES.md ("Splash").
 package kvmmu
 
 import (

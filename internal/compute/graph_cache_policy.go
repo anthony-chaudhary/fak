@@ -6,12 +6,10 @@ import (
 )
 
 // GraphCachePolicy is a host-side keyed CUDA graph cache policy adapted from
-// TensorFold's zig/src/cuda/graph_cache.zig Cache.run at pin
-// 9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0; see
-// THIRD_PARTY_NOTICES.md, "TensorFold CUDA graph-cache policy"). It
-// re-expresses the upstream closed contract in idiomatic Go against an
-// injected engine so the whole policy is testable on host CPU with a fake
-// engine, beside cudaBackend.GraphBegin/GraphEndLaunch in cuda.go:
+// TensorFold at pin 9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0; see
+// THIRD_PARTY_NOTICES.md, "TensorFold"). It runs against an injected engine so
+// the whole policy is testable on host CPU with a fake engine, beside
+// cudaBackend.GraphBegin/GraphEndLaunch in cuda.go:
 //
 //   - capture-once per key, replay on hit;
 //   - a changed address fingerprint drops every cached executable at once

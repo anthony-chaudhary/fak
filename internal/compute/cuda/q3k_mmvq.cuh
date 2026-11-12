@@ -1,19 +1,14 @@
 // ---- Q3_K q8_1 DP4A matrix-vector product for decode + Q3_K dequant ----------------------
-// Adapted from llama.cpp ggml/src/ggml-cuda/vecdotq.cuh (get_int_b2, get_int_b4,
-// VDR_Q3_K_Q8_1_MMVQ, vec_dot_q3_K_q8_1_impl_mmvq, vec_dot_q3_K_q8_1), mmvq.cu
-// (mul_mat_vec_q, Q3_K table entries), convert.cu (dequantize_block_q3_K and its 64-thread
-// launcher) and ggml-common.h (block_q3_K) at
-// 571d0d540df04f25298d0e159e520d9fc62ed121 (MIT).
+// Adapted from llama.cpp at 571d0d540df04f25298d0e159e520d9fc62ed121 (MIT).
 // Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
-// THIRD_PARTY_NOTICES.md ("llama.cpp Q3_K MMVQ decode GEMV").
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
 // Only the Q3_K instantiation on the NVIDIA GENERIC parameter table is kept (Ampere and newer,
 // so sm_80/sm_86/sm_89/sm_90/sm_100/sm_120 all take it): 4 warps for 1..4 activation columns,
-// one output row per CUDA block at one column and two rows otherwise, vdr 1. Other changes for
-// Fak:
+// one output row per CUDA block at one column and two rows otherwise, vdr 1. Local behavior:
 //   * The q8_1 activation block, quantize_q8_1, warp_reduce_sum and the GENERIC nwarps /
-//     rows-per-block helpers are the ones already ported in cuda/q4k_mmvq.cuh (same upstream
-//     code); this file reuses them instead of porting a second copy.
+//     rows-per-block helpers are the ones already ported in cuda/q4k_mmvq.cuh; this file
+//     reuses them instead of porting a second copy.
 //   * No fusion (gate, bias), MoE ids, channel or sample broadcast: one resident Q3_K weight
 //     [out, in] times one f32 activation [P, in], dst [P, out]. MMVQ serves P in 1..3 when the
 //     k-quant mmvq decode arm is selected (FAK_CUDA_Q4K_DECODE=mmvq, shared with Q4_K); otherwise
@@ -21,12 +16,11 @@
 //     direct hi/lo half planes (dequantize_block_q3_K) for Fak's compensated fp16 GEMM,
 //     preserving the F32 dequantization rounding before each half conversion.
 //   * With two rows per CUDA block the second row's weight read is clamped to the last row, so
-//     an odd out never reads past the resident weight (upstream relies on row padding); its
-//     result is still not written.
+//     an odd out never reads past the resident weight; its result is still not written.
 //   * The activation row is not padded to MATRIX_ROW_PADDING: Fak's Q3_K rows are a whole
 //     number of 256-value super-blocks, so every q8_1 block the dot reads exists.
 //   * The q8_1 scratch is a persistent grown-once buffer, like the Q4_K mmvq scratch, because
-//     decode is captured into a CUDA graph; ggml_cuda_pdl_* is dropped.
+//     decode is captured into a CUDA graph.
 
 namespace fak_q3k_mmvq {
 
@@ -44,7 +38,7 @@ constexpr int QI8_1 = QK8_1 / 4;
 constexpr int VDR_Q3_K_Q8_1_MMVQ = 1;
 constexpr int max_cols = 3;
 
-// ggml-common.h block_q3_K.
+// The GGUF Q3_K super-block.
 struct block_q3_K {
     uint8_t hmask[QK_K / 8]; // quants - high bit
     uint8_t qs[QK_K / 4];    // quants - low 2 bits
@@ -53,7 +47,7 @@ struct block_q3_K {
 };
 static_assert(sizeof(block_q3_K) == sizeof(half) + QK_K / 4 + QK_K / 8 + 12, "wrong q3_K block size/padding");
 
-// vecdotq.cuh get_int_b2 / get_int_b4.
+// Two-bit / four-bit integer gathers.
 static __device__ __forceinline__ int get_int_b2(const void *x, const int &i32) {
     const uint16_t *x16 = (const uint16_t *)x; // assume at least 2 byte alignment
     int x32 = x16[2 * i32 + 0] << 0;
@@ -65,7 +59,7 @@ static __device__ __forceinline__ int get_int_b4(const void *x, const int &i32) 
     return ((const int *)x)[i32]; // assume at least 4 byte alignment
 }
 
-// vecdotq.cuh vec_dot_q3_K_q8_1_impl_mmvq (contiguous v/x values).
+// Q3_K x Q8_1 MMVQ dot (contiguous v/x values).
 static __device__ __forceinline__ float vec_dot_q3_K_q8_1_impl_mmvq(
     const int &vl, const int &vh, const int *__restrict__ u, const uint8_t *__restrict__ scales,
     const int &scale_offset, const float &d3, const float *__restrict__ d8) {
@@ -98,7 +92,7 @@ static __device__ __forceinline__ float vec_dot_q3_K_q8_1_impl_mmvq(
     return d3 * sumf;
 }
 
-// vecdotq.cuh vec_dot_q3_K_q8_1.
+// Q3_K x Q8_1 dot product.
 static __device__ __forceinline__ float vec_dot_q3_K_q8_1(
     const void *__restrict__ vbq, const block_q8_1 *__restrict__ bq8_1, const int &kbx, const int &iqs) {
 
@@ -182,7 +176,7 @@ static __global__ void mul_mat_vec_q(const void *__restrict__ vx, const block_q8
     }
 }
 
-// convert.cu dequantize_block_q3_K mapping, one CUDA block of 64 threads per
+// dequantize_block_q3_K mapping, one CUDA block of 64 threads per
 // 256-value super-block. Emit the existing compensated hi/lo representation directly,
 // preserving the two F32 product roundings and the separate residual subtraction.
 // Half overflow and non-finite inputs retain the former split behavior.

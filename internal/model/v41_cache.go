@@ -123,11 +123,11 @@ func (c *V41ExpertCache) Put(layer, expert int, payload []byte) error {
 	return nil
 }
 
-// putClockRow adapts EgRowCache from Niko1221/Strata at
-// c62d5e3a15b40ea51c96aae9e8d36928965f53ab, src/dsv41/ds4_engram_io.hpp:38-90.
+// putClockRow adapts the Engram row cache from Niko1221/Strata at
+// c62d5e3a15b40ea51c96aae9e8d36928965f53ab.
 // Copyright (c) 2026 Peasant Smith and the Project Maya contributors.
 // Copyright (c) 2026 Niko1221 and the Strata contributors.
-// MIT license and Maya lineage: THIRD_PARTY_NOTICES.md.
+// MIT license and Maya lineage: THIRD_PARTY_NOTICES.md ("Strata", "Project Maya").
 //
 // The caller holds the Engram mutex. Unlike upstream's mutable block slots,
 // payloads remain separate owned copies: an evicted row may still be borrowed

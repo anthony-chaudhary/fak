@@ -1,21 +1,18 @@
 // Included by cuda_kernels.cu, not a separate translation unit.
 //
 // DeepSeek-V4.1 MoE router top-k on CUDA, scored and token-hashed layers.
-// Adapted from antirez/ds4 ds4_cuda.cu router_select_warp_topk_kernel and
-// router_select_kernel at 80ebbc396aee40eedc1d829222f3362d10fa4c6c (MIT, The
-// ds4.c authors; see THIRD_PARTY_NOTICES.md): one warp per token row, four rows
-// per block, k rounds of a __shfl_xor_sync argmax with the lower expert first
-// on equal values, and a hash mode that takes the row's experts from a
-// token-to-expert table instead of selecting them.
+// Adapted from antirez/ds4 at 80ebbc396aee40eedc1d829222f3362d10fa4c6c (MIT, The
+// ds4.c authors; see THIRD_PARTY_NOTICES.md, "antirez/ds4 (DwarfStar)"): one warp
+// per token row, four rows per block, k rounds of a __shfl_xor_sync argmax with
+// the lower expert first on equal values, and a hash mode that takes the row's
+// experts from a token-to-expert table instead of selecting them.
 //
-// Changed for Fak: ds4 hard-codes 256 experts, k=6, scale 1.5, softplus via
-// log1pf(expf) and a fmaxf(sum, 2^-14) floor. Here experts, k (<=8) and scale
-// are parameters; each lane keeps its own insertion-ordered top-k over a
-// strided expert subset, so any expert count works and the k shuffle rounds
-// merge lane heads; the score is v41_router_topk.comp's sqrt(softplus) formula;
-// the in-order F32 sum (+1e-20 when full) and the four-word fault record follow
-// decodeV41RouterTopK. Every arithmetic step is a separately rounded __f*_rn
-// so nvcc never contracts it.
+// Local behavior: experts, k (<=8) and scale are parameters; each lane keeps its
+// own insertion-ordered top-k over a strided expert subset, so any expert count
+// works and the k shuffle rounds merge lane heads; the score is
+// v41_router_topk.comp's sqrt(softplus) formula; the in-order F32 sum (+1e-20
+// when full) and the four-word fault record follow decodeV41RouterTopK. Every
+// arithmetic step is a separately rounded __f*_rn so nvcc never contracts it.
 //
 // The fused sqrt(softplus) scoring folded into this pass for both the gate
 // and the token-hash layers is the vLLM topkGatingSoftplusSqrt and

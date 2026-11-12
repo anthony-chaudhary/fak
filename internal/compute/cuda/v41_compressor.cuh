@@ -1,20 +1,9 @@
 // Included by cuda_kernels.cu, not a separate translation unit.
 //
 // DeepSeek V4.1 compressor ring and gated pool on CUDA (opt-in
-// FAK_CUDA_V41_COMPRESSOR). The two device kernels are ported from antirez/ds4
-// ds4_cuda.cu at 80ebbc396aee40eedc1d829222f3362d10fa4c6c (MIT, see
-// THIRD_PARTY_NOTICES.md "antirez/ds4"):
-//   compressor_store_kernel        -> v41c_compressor_store_kernel
-//   compressor_update_pool_kernel  -> v41c_compressor_update_pool_kernel
-// Changes for Fak, none to the pooling arithmetic: one token per store into an
-// explicit caller slot (the ring is a plain [ratio,width] pair, so ds4's ratio-4
-// overlap row offset and the APE add stay with the caller, which already folds
-// APE into the score row); the ratio-4 two-half candidate split is the caller's
-// width layout, so only ds4's generic branch is kept; and the 128-entry local
-// candidate arrays are replaced by direct strided reads of the same values in
-// the same order, which lifts the 128-row cap to V41CompressorPoolMaxRatio
-// without changing any rounded operation. The per-dimension non-finite status
-// word (V41CompressorRingKVNonFinite / ...ScoreNonFinite) is a Fak post-pass.
+// FAK_CUDA_V41_COMPRESSOR). Ported from antirez/ds4 at
+// 80ebbc396aee40eedc1d829222f3362d10fa4c6c (MIT; see
+// THIRD_PARTY_NOTICES.md "antirez/ds4 (DwarfStar)").
 #ifdef FAK_CUDA_V41_COMPRESSOR
 
 #define V41C_THREADS 256

@@ -1,11 +1,12 @@
 #ifndef FAK_PAGED_KV_WRITE_MAP_H
 #define FAK_PAGED_KV_WRITE_MAP_H
 
-// Slot/block addressing adapted from vLLM csrc/cache_kernels.cu at
+// Slot/block addressing adapted from vLLM at
 // e5196e2959a42908313510f55fa21f213a48802e (Apache-2.0).
-// Copyright (c) 2023, The vLLM team. See THIRD_PARTY_NOTICES.md.
-// Fak uses contiguous logical rows and a bounded by-value physical page map,
-// rather than vLLM's device slot_mapping tensor; F32 K/V layouts are unchanged.
+// Copyright (c) 2023, The vLLM team. License and notice: THIRD_PARTY_NOTICES.md
+// ("vLLM").
+// Fak uses contiguous logical rows and a bounded by-value physical page map;
+// F32 K/V layouts are unchanged.
 #include <limits.h>
 #include <stdint.h>
 
@@ -64,8 +65,8 @@ FAK_PAGED_WRITE_INLINE void paged_kv_write_offsets(
 }
 
 // ---- MLA concat-and-cache addressing ------------------------------------------
-// Adapted from vLLM csrc/cache_kernels.cu at ae065918640a198a56f6f17eb45e251c3229fe41
-// (Apache-2.0): the concat_and_cache_mla_kernel entry geometry. The MLA cache holds
+// Adapted from vLLM at ae065918640a198a56f6f17eb45e251c3229fe41
+// (Apache-2.0): the MLA concat-and-cache entry geometry. The MLA cache holds
 // one concatenated [latent | rope] entry per position - entry width
 // kv_lora_rank + pe_dim floats - laid out [num_blocks, block_size, entry]. A physical
 // page id addresses the same block in every layer's arena, so one write map drives

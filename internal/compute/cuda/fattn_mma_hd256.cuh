@@ -1,25 +1,23 @@
 // ---- Qwen3.8 hd256 tensor-core prompt attention (P-05, fak#13984) ------------------
-// Adapted from llama.cpp ggml/src/ggml-cuda/fattn-mma-f16.cuh, mma.cuh and cp-async.cuh at
-// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
+// Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
 // Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
-// THIRD_PARTY_NOTICES.md ("llama.cpp fattn-mma-f16 hd256 prompt attention").
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
-// One upstream instantiation is kept: DKQ = DV = 256, ncols1 = 8, ncols2 = 8 (GQA-packed:
-// Qwen3.8 has 6 query heads per KV head, so 6 of the 8 packed columns do work), the Ampere
-// config row (256, 256, 64): 128 threads, occupancy 2, nbatch_fa 32, nbatch_K2/V2/combine 128,
-// two cp.async stages, Q kept in registers. The function bodies below are the upstream
-// NVIDIA (TURING_MMA_AVAILABLE) code paths with every C++17 constexpr-if resolved for that one
-// instantiation, because this translation unit compiles as C++14 (the deltas are recorded in
-// testdata/qwen38_kernel_provenance.json). Other changes for Fak:
-//   * The ggml mask tensor is replaced by the implicit causal bound key <= prefix + row, and
-//     KV tiles that no row of a query tile can see are skipped (upstream KV_max).
-//   * Fak keeps f32 K/V. The launcher stages them once per call into an f16 copy padded with
-//     zeros to a multiple of nbatch_fa, so upstream's padded-K, cp.async loader runs unchanged.
-//   * No ALiBi, logit softcap, sinks, V-is-K view, stream-k split or fixup buffer: one CUDA
-//     block owns one (query tile, KV head) pair.
-//   * Q and the output stay f32 in Fak's [tokens, heads*256] row-major layout, which matches
-//     ggml's Q/dst strides. As upstream, KQ and the softmax statistics accumulate in f32 and
-//     V*softmax(KQ) accumulates in f16 (mma .f16.f16.f16.f16).
+// One instantiation: DKQ = DV = 256, ncols1 = 8, ncols2 = 8 (GQA-packed: Qwen3.8 has
+// 6 query heads per KV head, so 6 of the 8 packed columns do work), the Ampere config
+// row (256, 256, 64): 128 threads, occupancy 2, nbatch_fa 32, nbatch_K2/V2/combine 128,
+// two cp.async stages, Q kept in registers. This translation unit compiles as C++14,
+// so the constexpr-if arms are resolved for that one instantiation; the deltas are
+// recorded in testdata/qwen38_kernel_provenance.json. Local behavior:
+//   * The mask tensor is replaced by the implicit causal bound key <= prefix + row, and
+//     KV tiles that no row of a query tile can see are skipped.
+//   * Fak keeps f32 K/V. The launcher stages them once per call into an f16 copy padded
+//     with zeros to a multiple of nbatch_fa.
+//   * No ALiBi, logit softcap, sinks, V-is-K view, stream-k split or fixup buffer: one
+//     CUDA block owns one (query tile, KV head) pair.
+//   * Q and the output stay f32 in Fak's [tokens, heads*256] row-major layout. KQ and
+//     the softmax statistics accumulate in f32; V*softmax(KQ) accumulates in f16
+//     (mma .f16.f16.f16.f16).
 
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #define FAK_FATTN_MMA_AVAILABLE 1
@@ -29,7 +27,7 @@ namespace fak_fattn_mma {
 
 constexpr int warp_size = 32;
 
-// fattn-common.cuh
+
 #define FAK_FATTN_SOFTMAX_FTZ_THRESHOLD -20.0f
 #define FAK_FATTN_KQ_MAX_OFFSET (3.0f*0.6931f)
 
@@ -46,7 +44,7 @@ constexpr int nbatch_combine = 128;
 constexpr int nstages = 2;
 constexpr bool Q_in_reg = true;
 
-// mma.cuh: the NVIDIA DATA_LAYOUT_I_MAJOR tiles this instantiation uses.
+// The NVIDIA DATA_LAYOUT_I_MAJOR tiles this instantiation uses.
 template <int I_, int J_, typename T>
 struct tile {};
 
@@ -222,7 +220,7 @@ static __device__ __forceinline__ void cp_async_wait_all() {
 #endif // FAK_FATTN_MMA_AVAILABLE
 }
 
-// common.cuh ggml_cuda_unroll
+// Compile-time unroll helper.
 template <int n>
 struct unroll {
     template <typename Func, typename... Args>

@@ -1,12 +1,11 @@
 // PRIVATE, UNQUALIFIED: Q3_K prompt-only MMQ; no default dispatch change.
-// Q3 loader/dot/D4 quantizer/config direct-adapted from ggml-org/llama.cpp
-// 571d0d540df04f25298d0e159e520d9fc62ed121, ggml/src/ggml-cuda/
-// mmq-load-tiles.cuh, mmq-vec-dot.cuh, quantize.cu, mmq.cuh,
-// mmq-config-ampere.cuh, mma.cuh, vecdotq.cuh; block ABI from ggml-common.h.
+// Q3 loader/dot/D4 quantizer/config direct-adapted from ggml-org/llama.cpp at
+// 571d0d540df04f25298d0e159e520d9fc62ed121 (MIT). License and notices:
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
 // Launch/writeback/stream-k scaffolding reused from Fak q4k_mmq.cuh, whose
 // upstream pin is 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd.
 // Stream-K iteration cap additionally follows llama.cpp change
-// 4c1004c49221b07c3b8108977e3d1991fc9f45cc (ggml/src/ggml-cuda/mmq.cuh).
+// 4c1004c49221b07c3b8108977e3d1991fc9f45cc.
 // Copyright (c) 2023-2026 The ggml authors. MIT text follows.
 /*
 MIT License
@@ -46,7 +45,7 @@ namespace fak_q3k_mmq {
 
 constexpr int warp_size = 32;
 
-// common.cuh / ggml-common.h
+
 constexpr int QK_K = 256;
 constexpr int QK8_1 = 32;
 constexpr int QR3_K = 4;
@@ -89,7 +88,7 @@ static __device__ __forceinline__ uint2 fast_div_modulo(uint32_t n, const uint3 
     return make_uint2(div_val, mod_val);
 }
 
-// vecdotq.cuh
+
 static __device__ __forceinline__ int get_int_b2(const void * x, const int & i32) {
     const uint16_t * x16 = (const uint16_t *) x; // assume at least 2 byte alignment
 
@@ -99,7 +98,7 @@ static __device__ __forceinline__ int get_int_b2(const void * x, const int & i32
     return x32;
 }
 
-// mmq.cuh
+
 constexpr int MMQ_ITER_K = 256;
 constexpr int QK8_1_MMQ = 4*QK8_1;
 
@@ -141,7 +140,7 @@ static constexpr __host__ __device__ int rows_per_warp_for(int J) {
     return J >= 48 && J % 16 == 0 ? 32 : 16;
 }
 
-// mma.cuh: the NVIDIA DATA_LAYOUT_I_MAJOR int tiles this instantiation uses.
+// The NVIDIA DATA_LAYOUT_I_MAJOR int tiles this instantiation uses.
 template <int I_, int J_>
 struct tile {
     static constexpr int I  = I_;
@@ -206,7 +205,7 @@ static __device__ __forceinline__ void mma(tile<16, 8> & D, const tile<16, 4> & 
 #endif
 }
 
-// mmq-load-tiles.cuh: NVIDIA MMA branch.
+// Load tiles: NVIDIA MMA branch.
 template <int J, bool fallback> static __device__ __forceinline__ void load_tiles_q3_K(
         const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
 
@@ -278,7 +277,7 @@ template <int J, bool fallback> static __device__ __forceinline__ void load_tile
 }
 
 
-// mmq-vec-dot.cuh: NVIDIA MMA branch.
+// Vector dot: NVIDIA MMA branch.
 template <int J, bool fallback> static __device__ __forceinline__ void vec_dot_q8_0_16_q8_1_mma(
         const int * __restrict__ x, const int * __restrict__ y, float * __restrict__ sum, const int k00) {
 
@@ -358,7 +357,7 @@ template <int J, bool fallback> static __device__ __forceinline__ void vec_dot_q
 }
 
 
-// mmq.cuh
+
 template <int J, bool fallback>
 static __device__ __forceinline__ void write_back_mma(
         const float * __restrict__ sum, float * __restrict__ dst, const int stride, const int i_max, const int j_max) {

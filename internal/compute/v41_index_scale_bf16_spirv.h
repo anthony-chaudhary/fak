@@ -1,7 +1,7 @@
 // Exact immutable module attestation. This is deliberately not a general SPIR-V parser.
 // Generated from shaders/v41_index_scale_bf16.comp using the qualified shaderc
 // Vulkan 1.2 performance compilation, independently validated by SPIRV-Tools.
-// Source SHA256: 24cb0eb5c32b545c4c3c495f1ac9529a9013500baad0f0d7dc3f473c28b7d0ec
+// SHA256 of shaders/v41_index_scale_bf16.comp: 24cb0eb5c32b545c4c3c495f1ac9529a9013500baad0f0d7dc3f473c28b7d0ec
 // Module SHA256: b67ed132187bde41131d355d9d493f56e5063ab87aa0a6a53ea66c8743136500
 // Compiler adapter SHA256: 29fb33e8967062fead96456ca91824d7ed81231335d2debe1cb94b7742a34527
 // libshaderc SHA256: 31400b359d2f4b4a43168978412a72913474725befb87966068cfac1922ac6c9

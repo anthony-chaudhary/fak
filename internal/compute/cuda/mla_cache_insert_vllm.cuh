@@ -1,29 +1,23 @@
 // ---- MLA concat-and-cache over a paged write map (fak cuda-mla-cache-insert) ----
-// Adapted from vLLM csrc/cache_kernels.cu, concat_and_cache_mla_kernel (:424),
-// concat_and_cache_mla_grouped_kernel (:472) and concat_and_cache_ds_mla_kernel
-// (:526), at commit ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0.
+// Adapted from vLLM at commit ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0.
 // Copyright (c) 2023, The vLLM team. License and notice: THIRD_PARTY_NOTICES.md
-// ("vLLM multi-page CUDA KV append addressing" family; this port cites its own pin).
+// ("vLLM").
 //
-// The upstream bodies are kept; the deltas for Fak are:
-//   * Only the scalar_t = cache_t = float lane is kept: the quantized-cache arms
-//     of the upstream kernels are dropped. Fak serves the MLA cache as the
-//     mlaKVLayout f32 row [latent | rope] (cacheStride = KVLatentDim + RopeDim,
-//     internal/model/kvlayout.go:104); no quantized MLA arm is adopted yet.
-//   * torch launchers and the device slot_mapping tensor are replaced by the
-//     extern "C" adapters below, driven by the bounded by-value PagedKVWriteMap
-//     (paged_kv_write_map.h) - same precedent as paged_attention_vllm.cuh.
-//   * The grouped variant reads one shared write map instead of per-layer slot
-//     rows: a physical block id addresses the same block in every layer's arena,
-//     so the block table is per-session, not per-layer (existing invariant).
-//   * The namespace is fak_vllm_mla; the shared entry-base/source scatter helpers
-//     live in paged_kv_write_map.h so the host regression executes the exact
-//     scatter the kernels run.
+// Only the scalar_t = cache_t = float lane is kept: the quantized-cache arms are
+// dropped. Fak serves the MLA cache as the mlaKVLayout f32 row [latent | rope]
+// (cacheStride = KVLatentDim + RopeDim, internal/model/kvlayout.go:104); no
+// quantized MLA arm is adopted yet. The extern "C" adapters are driven by the
+// bounded by-value PagedKVWriteMap (paged_kv_write_map.h). The grouped variant
+// reads one shared write map: a physical block id addresses the same block in
+// every layer's arena, so the block table is per-session, not per-layer
+// (existing invariant). The namespace is fak_vllm_mla; the shared
+// entry-base/source scatter helpers live in paged_kv_write_map.h so the host
+// regression executes the exact scatter the kernels run.
 //
-// Cache layout (upstream): kv_cache [num_blocks, block_size, (kv_lora_rank +
-// pe_dim)] - one concatenated [latent | rope] entry per position. The ds family
-// keeps upstream's fixed-row shape in the f32 lane: a reserved 64-wide rope tail
-// that is always physically present and zeroed when pe_dim is 0.
+// Cache layout: kv_cache [num_blocks, block_size, (kv_lora_rank + pe_dim)] -
+// one concatenated [latent | rope] entry per position. The ds family keeps a
+// fixed-row shape in the f32 lane: a reserved 64-wide rope tail that is always
+// physically present and zeroed when pe_dim is 0.
 
 #include <stdint.h>
 #include "paged_kv_write_map.h"

@@ -3,8 +3,8 @@ package ggufload
 import "testing"
 
 // The IQ4_NL / IQ4_XS expectations below are hand-derived from the llama.cpp GGML
-// reference (dequantize_row_iq4_nl / dequantize_row_iq4_xs + the kvalues_iq4nl
-// codebook), NOT read back from this package's own dequant — so the test is an
+// reference (the IQ4_NL / IQ4_XS row dequantizers + the kvalues_iq4nl codebook),
+// NOT read back from this package's own dequant — so the test is an
 // independent oracle, not a tautology. Every byte of the input block and every
 // float of the expected output is written as a literal so the correspondence is
 // auditable by eye.
@@ -15,8 +15,7 @@ import "testing"
 //	idx:  0    1    2    3    4    5    6    7   8   9  10  11  12  13  14   15
 //	val: -127 -104 -83  -65  -49  -35  -22  -10  1  13  25  38  53  69  89  113
 
-// Reference: llama.cpp 83078fec0db82d6b5a00d9599062c38c39145755,
-// ggml/src/ggml-quants.c, dequantize_row_iq4_nl.
+// Reference: llama.cpp at 83078fec0db82d6b5a00d9599062c38c39145755 (MIT).
 // fak-test:runtime fast est=1ms lane=default
 func TestDequantIQ4NLKnownAnswer(t *testing.T) {
 	// One 32-element block. d = 2.0 (f16 0x4000, little-endian 0x00 0x40). qs[j]

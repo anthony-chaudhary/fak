@@ -1,15 +1,11 @@
 // dsv41_k_quant.cu — DSv4.1 mxfp8 K-plane quantize-and-insert +
 // dequantize-and-gather.
 //
-// ADAPTED from vllm-project/vllm,
-// vllm/models/deepseek_v41/common/ops/cache_utils.py:184,528
-// (_quantize_and_insert_k_mxfp8_kernel, _dequantize_and_gather_k_mxfp8_kernel)
-// at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0; attribution in
-// THIRD_PARTY_NOTICES.md): the V4.1 all-dims MXFP8 record (512 e4m3 payload
-// bytes + 16 ue8m0 scales of 32 dims each), quantized at paged-cache insert
-// and dequantized during decode-attention gather. Re-expressed against fak
-// conventions (extern "C" fcuda_* entries, int status returns, explicit
-// stream argument); no upstream code copied.
+// Adapted from vLLM at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0).
+// License and notice: THIRD_PARTY_NOTICES.md ("vLLM").
+// The V4.1 all-dims MXFP8 record (512 e4m3 payload bytes + 16 ue8m0 scales of
+// 32 dims each) is quantized at paged-cache insert and dequantized during
+// decode-attention gather.
 // Ref oss-port-vllmtop-dsv41-k-quant-cache-20261103.
 //
 // Not yet #included into cuda_kernels.cu: that one-line build wiring is a
@@ -17,12 +13,11 @@
 // dsv41_k_quant.go pins the observable contract (record bytes, ue8m0 scale
 // encoding, paged slot addressing, one-pass/per-block gather parity).
 //
-// Deltas from upstream:
+// Local behavior:
 //   - Paged pages hold 16 tokens (the fak paged writer admits block_size ==
-//     16 only); upstream uses 64/128. Record layout is unchanged.
+//     16 only). Record layout is unchanged.
 //   - The gather grid width is workers = clamp(ceil(max_gather_len/8), 1,
-//     128) instead of upstream's adaptive [128, 8192]; no GPU or throughput
-//     claim attaches to this candidate.
+//     128); no GPU or throughput claim attaches to this candidate.
 //   - f32 K remains the default plane and the oracle; this candidate adds the
 //     quantized K-plane dtype option without touching the f32 write map.
 

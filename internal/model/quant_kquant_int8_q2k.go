@@ -8,15 +8,14 @@ import (
 // quant_kquant_int8_q2k.go — the int8 decode GEMV for resident Q2_K experts, the Q2_K sibling of
 // the Q5_K (quant_kquant_int8.go) and Q6_K (quant_kquant_int8_q6k.go) int8 paths.
 //
-// Prior-art: llama.cpp ggml_vec_dot_q2_K_q8_K and dequantize_row_q2_K at
-// ggml-org/llama.cpp commit 83078fec0db82d6b5a00d9599062c38c39145755 (MIT), source
-// ggml/src/ggml-cpu/arch/x86/quants.c (the AVX2 branch) with the byte layout from
-// ggml/src/ggml-quants.c dequantize_row_q2_K. Copyright (c) 2023-2026 The ggml authors.
+// Prior-art: llama.cpp's Q2_K x Q8_K int8 dot and Q2_K row dequantizer at
+// ggml-org/llama.cpp commit 83078fec0db82d6b5a00d9599062c38c39145755 (MIT).
+// Copyright (c) 2023-2026 The ggml authors. License and notices:
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
 // This is an ADAPT: the integer reduction is rewritten in portable Go over the SAME GGUF bytes —
 // no upstream code is copied verbatim — and the float combine is shared Go (q2kCombineRow).
 //
-// Integer Q2_K x Q8_K reduction adapted from llama.cpp ggml_vec_dot_q2_K_q8_K
-// (ggml/src/ggml-cpu/arch/x86/quants.c) and dequantize_row_q2_K (ggml/src/ggml-quants.c) at
+// Integer Q2_K x Q8_K reduction adapted from llama.cpp at
 // 83078fec0db82d6b5a00d9599062c38c39145755 (MIT).
 //
 // Q2_K is AFFINE, like Q4_K/Q5_K but with 16-wide sub-blocks (not 32):

@@ -1,8 +1,7 @@
 package model
 
 // Bonsai-2 activation transform, adapted from PrismML's llama.cpp fork
-// (src/llama-graph.cpp and src/models/qwen35.cpp, adfffbe41b2c) and its MLX
-// runtime (runtime/runtime.py, fcba37d). The stored projection weight has
+// (adfffbe41b2c) and its MLX runtime (fcba37d). The stored projection weight has
 // already been rotated on its input axis. At execution, multiply the incoming
 // activation by its explicit signs, then apply normalized H_block to each block.
 // The embedding is stored in that basis and uses the inverse order: H first,

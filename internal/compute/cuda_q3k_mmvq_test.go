@@ -11,8 +11,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kquantbits"
 )
 
-// cuda_q3k_mmvq_test.go — resident Q3_K CUDA MMVQ (cuda/q3k_mmvq.cuh, ported from llama.cpp
-// vecdotq.cuh / mmvq.cu / convert.cu @571d0d54, MIT). Pure Go, both builds: the C ABI and
+// cuda_q3k_mmvq_test.go — resident Q3_K CUDA MMVQ (cuda/q3k_mmvq.cuh, ported from
+// llama.cpp @571d0d54, MIT). Pure Go, both builds: the C ABI and
 // source contract, plus thread-for-thread replays of the ported vec_dot_q3_K_q8_1 and
 // dequantize_block_q3_K against the CPU Q3_K oracle (q3kRowDot / q3kDequantSuperBlock).
 // Device parity and the GB/s table live in cuda_q3k_device_test.go (-tags cuda).
@@ -179,8 +179,10 @@ func TestQ3KCUDASourceContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(notices), "llama.cpp Q3_K MMVQ decode GEMV") {
-		t.Error("THIRD_PARTY_NOTICES.md missing the llama.cpp Q3_K MMVQ decode GEMV entry")
+	for _, attr := range []string{"## llama.cpp", "571d0d540df04f25298d0e159e520d9fc62ed121"} {
+		if !strings.Contains(string(notices), attr) {
+			t.Errorf("THIRD_PARTY_NOTICES.md missing llama.cpp attribution element %q", attr)
+		}
 	}
 }
 

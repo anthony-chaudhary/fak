@@ -1,8 +1,8 @@
 package ggufload
 
 // Modified Go translation of the reference Q4_K/Q5_K/Q6_K encoders and their
-// coherent scale-search helpers in ggml-org/llama.cpp, ggml/src/ggml-quants.c at
-// 83078fec0db82d6b5a00d9599062c38c39145755 (blob 1ebc50a763f16db909de37090da38cc8c0fdde94).
+// coherent scale-search helpers in ggml-org/llama.cpp at
+// 83078fec0db82d6b5a00d9599062c38c39145755.
 // Local adaptation adds bounded finite arithmetic and explicit wire serialization.
 // The Q6 symmetric helper specializes the source's rmse_type=1, no-weight route.
 // Weighted/imatrix and other helper modes are intentionally not public capability.

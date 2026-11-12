@@ -31,13 +31,12 @@ import (
 )
 
 // Crash-safe checkpoint publish, adapted from unreallabsai/unreal-agent@1b9f778453f4
-// harness/sessionstore/localfile/store.go (publishFile, persistTemporary,
-// syncDirectory; MIT, copyright 2026 Unreal Labs). Adaptations: the temp file lives in
-// the target's own directory under a hidden name that never ends in ".json" (so
-// LoadSessionCheckpoint cannot resolve it), the write and rename go through test seams,
-// and the directory fsync is skipped on Windows, where a directory cannot be opened for
-// FlushFileBuffers and the file's own flush is the portable boundary (the
-// internal/serviceledger idiom).
+// (MIT, copyright 2026 Unreal Labs). The temp file lives in the target's own
+// directory under a hidden name that never ends in ".json" (so
+// LoadSessionCheckpoint cannot resolve it); the write and rename go through
+// test seams; and the directory fsync is skipped on Windows, where a directory
+// cannot be opened for FlushFileBuffers and the file's own flush is the
+// portable boundary (the internal/serviceledger idiom).
 
 // checkpointWriteTemp and checkpointRename are fault-injection seams for the
 // crash-safety witness (session_checkpoint_test.go). Production never reassigns them.

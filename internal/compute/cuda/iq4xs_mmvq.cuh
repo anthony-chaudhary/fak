@@ -1,24 +1,15 @@
 // ---- IQ4_XS resident GEMV (f32 and q8_1 DP4A MMVQ) + dequant-split prefill GEMM -----------
-// Adapted from llama.cpp at 571d0d540df04f25298d0e159e520d9fc62ed121 (MIT):
-//   * ggml/src/ggml-common.h block_iq4_xs and kvalues_iq4nl (fcuda_kvalues_iq4nl, iq_gemv.cuh);
-//   * ggml/src/ggml-cuda/convert.cu dequantize_block_iq4_xs (the per-thread (ib, il) split used
-//     by k_iq4xs_gemv and k_iq4xs_dequant_split below);
-//   * ggml/src/ggml-cuda/vecdotq.cuh get_int_from_table_16 (the portable char4 form, not the
-//     __byte_perm form), VDR_IQ4_XS_Q8_1_MMVQ and vec_dot_iq4_xs_q8_1;
-//   * ggml/src/ggml-cuda/mmvq.cu mul_mat_vec_q for GGML_TYPE_IQ4_XS on the NVIDIA GENERIC table.
+// Adapted from llama.cpp at 571d0d540df04f25298d0e159e520d9fc62ed121 (MIT).
 // Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
-// THIRD_PARTY_NOTICES.md ("llama.cpp IQ4_XS resident GEMV").
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
-// Changes for Fak (the same reductions as cuda/q3k_mmvq.cuh):
-//   * One resident IQ4_XS weight [out, in] (verbatim 136-byte 256-weight super-blocks, row-major)
-//     times one f32 activation [P, in], dst [P, out]. No fusion, MoE ids or broadcast.
-//   * The q8_1 block, quantize_q8_1, warp_reduce_sum and the GENERIC nwarps / rows-per-block
-//     helpers are the ones already ported in cuda/q4k_mmvq.cuh; the q8_1 scratch is a persistent
-//     grown-once buffer because decode is captured into a CUDA graph.
-//   * The second row of a two-row CUDA block is clamped to the last row, so an odd out never
-//     reads past the resident weight; its result is not written.
-//   * Prefill (P >= FCUDA_IQ4XS_DEQUANT_MIN_P) decodes straight into the fp16 hi/lo halves the
-//     compensated tensor-core GEMM consumes (no f32 weight image), like k_q8_dequant_split.
+// One resident IQ4_XS weight [out, in] (verbatim 136-byte 256-weight super-blocks, row-major)
+// times one f32 activation [P, in], dst [P, out]. No fusion, MoE ids or broadcast. The q8_1
+// scratch is a persistent grown-once buffer because decode is captured into a CUDA graph.
+// The second row of a two-row CUDA block is clamped to the last row, so an odd out never
+// reads past the resident weight; its result is not written. Prefill (P >=
+// FCUDA_IQ4XS_DEQUANT_MIN_P) decodes straight into the fp16 hi/lo halves the compensated
+// tensor-core GEMM consumes (no f32 weight image).
 
 namespace fak_iq4xs {
 
@@ -35,7 +26,7 @@ constexpr int QI4_XS = QK_K / (4 * QR4_XS);
 constexpr int VDR_IQ4_XS_Q8_1_MMVQ = 4;
 constexpr int max_cols = 3;
 
-// ggml-common.h block_iq4_xs.
+// The GGUF IQ4_XS super-block.
 struct block_iq4_xs {
     half     d;
     uint16_t scales_h;
@@ -48,7 +39,7 @@ static __device__ __forceinline__ int sub_scale(const block_iq4_xs *b, int ib) {
     return ((((b->scales_l[ib / 2] >> 4 * (ib % 2)) & 0xf) | (((b->scales_h >> 2 * ib) & 3) << 4)) - 32);
 }
 
-// vecdotq.cuh get_int_from_table_16, portable form.
+// Gather four values through a 16-entry table, portable form.
 static __device__ __forceinline__ int2 get_int_from_table_16(const int &q4, const signed char *table) {
     const int q0_32 = (q4 >> 0) & 0x0F0F0F0F;
     const int8_t *q0_8 = (const int8_t *)&q0_32;
@@ -61,7 +52,7 @@ static __device__ __forceinline__ int2 get_int_from_table_16(const int &q4, cons
     return make_int2(*((const int *)&val0_8), *((const int *)&val1_8));
 }
 
-// vecdotq.cuh vec_dot_iq4_xs_q8_1.
+// IQ4_XS x Q8_1 dot product.
 static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1(
     const void *__restrict__ vbq, const block_q8_1 *__restrict__ bq8_1, const int &kbx, const int &iqs) {
 

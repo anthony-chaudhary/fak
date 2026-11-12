@@ -2,19 +2,14 @@
 // iq_gemv.cuh — resident IQ2_XXS / IQ2_XS / IQ1_M / IQ4_NL dequant-fused GEMV.
 //
 // Ported from llama.cpp (MIT, Copyright (c) 2023-2026 The ggml authors) at
-// f7c01c5226cac1de1052c17920ff38cdefea0ae6: the i-quant decode of
-// ggml/src/ggml-cuda/vecdotq.cuh vec_dot_iq2_xxs_q8_1 / vec_dot_iq2_xs_q8_1 and the
-// iq2xxs_grid / iq2xs_grid / ksigns_iq2xs tables of ggml/src/ggml-common.h. The tables
-// below are emitted from the Go copies in quant_iq2_xxs_tables.go / quant_rawiq_tables.go,
-// so the CPU oracle (iq2xxsRowDot, iq2xsDequantSuperBlock) and this kernel share one source.
-// See THIRD_PARTY_NOTICES.md.
+// f7c01c5226cac1de1052c17920ff38cdefea0ae6. The tables below are emitted from
+// the Go copies in quant_iq2_xxs_tables.go / quant_rawiq_tables.go, so the CPU
+// oracle (iq2xxsRowDot, iq2xsDequantSuperBlock) and this kernel share one
+// source. License and notice: THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
-// IQ1_M / IQ4_NL are ported from llama.cpp (MIT) at 571d0d540df04f25298d0e159e520d9fc62ed121:
-// the per-thread decode of ggml/src/ggml-cuda/convert.cu dequantize_block_iq1_m /
-// dequantize_block_iq4_nl (the same 8-weights-per-thread split as the lane layout below,
-// decode-identical to vecdotq.cuh vec_dot_iq1_m_q8_1 / vec_dot_iq4_nl_q8_1) and the
-// iq1s_grid_gpu / kvalues_iq4nl tables of ggml/src/ggml-common.h. fcuda_iq1s_grid_gpu is
-// emitted from the Go iq1SGrid (quant_rawiq_tables.go) and equals upstream iq1s_grid_gpu.
+// IQ1_M / IQ4_NL are ported from llama.cpp (MIT) at
+// 571d0d540df04f25298d0e159e520d9fc62ed121. fcuda_iq1s_grid_gpu is emitted
+// from the Go iq1SGrid (quant_rawiq_tables.go).
 //
 // Activations stay f32 (the k_q2k_gemv contract), so GB/s is directly comparable with
 // k_q2k_gemv at the same shape; a q8_1 activation path is a follow-up.

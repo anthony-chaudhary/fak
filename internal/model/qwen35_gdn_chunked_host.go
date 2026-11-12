@@ -1,8 +1,8 @@
 package model
 
-// Chunkwise Gated-DeltaNet state/readout schedule adapted from vLLM
-// 5c8ae7c74aaa99d1f7fbeea942fd7282e3413810, csrc/cpu/sgl-kernels/fla.cpp
-// (itself adapted from SGLang). Copyright contributors to the vLLM project.
+// Chunkwise Gated-DeltaNet state/readout schedule adapted from vLLM at
+// 5c8ae7c74aaa99d1f7fbeea942fd7282e3413810 (itself adapted from SGLang).
+// Copyright contributors to the vLLM project.
 // SPDX-License-Identifier: Apache-2.0
 // See THIRD_PARTY_NOTICES.md and qwen35_gdn_chunked_host.README.md.
 //

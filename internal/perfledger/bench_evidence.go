@@ -1,6 +1,5 @@
-// Adapted from TensorFold tools/bench_evidence.py at 9e8c368b0b4c2c7892a0c9f0f302d7c164016209.
-// Copyright 2026 TensorFold contributors. Apache-2.0; see THIRD_PARTY_NOTICES.md.
-// Changed: Go receipt types and strict JSON count parsing.
+// Adapted from TensorFold at 9e8c368b0b4c2c7892a0c9f0f302d7c164016209.
+// Copyright 2026 TensorFold contributors. Apache-2.0; see THIRD_PARTY_NOTICES.md ("TensorFold").
 package perfledger
 
 import (

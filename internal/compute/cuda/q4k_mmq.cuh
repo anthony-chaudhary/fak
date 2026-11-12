@@ -1,30 +1,26 @@
 // ---- Q4_K int8 tensor-core MMQ for prompt panels (P-04, fak#13983) ---------------------
-// Adapted from llama.cpp ggml/src/ggml-cuda/mmq.cuh, mmq-load-tiles.cuh, mmq-vec-dot.cuh,
-// mmq-config-ampere.cuh, mma.cuh, quantize.cu and common.cuh at
-// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
+// Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
 // Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
-// THIRD_PARTY_NOTICES.md ("llama.cpp Q4_K MMQ prompt-panel GEMM").
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
-// Only the Q4_K instantiation is kept, on the NVIDIA MMA data layout (mmq.cuh binds Q4_K to
-// load_tiles_q4_K + vec_dot_q8_1_q8_1_mma + write_back_mma). The Ampere config rows for Q4_K
-// are copied as they are: 256 threads, occupancy 1, I = 128, K_vram = MMQ_ITER_K, stream-k on,
-// and the same J lists with and without the out-of-bounds row fallback. Blackwell uses the
-// Ampere rows for Q4_K upstream (mmq-config-blackwell.cuh), so sm_100/sm_103/sm_120 run the
-// same int8 mma.sync path. The activation is quantized by quantize_mmq_q8_1 in its DS4 layout.
-// The Stream-K useful-work grid cap additionally follows upstream change
-// 4c1004c49221b07c3b8108977e3d1991fc9f45cc, retained at current revision
-// 0ec4027a2a0183de87c007069adddc06e665f7de (2026-10-31).
-// Other changes for Fak:
-//   * The ggml type, MoE (ids_dst, expert_bounds), channel/sample broadcast and NVFP4 y_scale
-//     plumbing is removed: one weight [out, in] times one activation [P, in], so write-back
-//     indexes dst by column j directly and the shared-memory ids prefix is gone.
+// Only the Q4_K instantiation is kept, on the NVIDIA MMA data layout. The Ampere config
+// rows for Q4_K are used as they are: 256 threads, occupancy 1, I = 128, K_vram =
+// MMQ_ITER_K, stream-k on, and the same J lists with and without the out-of-bounds row
+// fallback. Blackwell uses the Ampere rows for Q4_K, so sm_100/sm_103/sm_120 run the same
+// int8 mma.sync path. The activation is quantized by quantize_mmq_q8_1 in its DS4 layout.
+// The Stream-K useful-work grid cap additionally follows change
+// 4c1004c49221b07c3b8108977e3d1991fc9f45cc, retained at revision
+// 0ec4027a2a0183de87c007069adddc06e665f7de (2026-10-31). Local behavior:
+//   * No MoE (ids_dst, expert_bounds), channel/sample broadcast or NVFP4 y_scale plumbing:
+//     one weight [out, in] times one activation [P, in], so write-back indexes dst by
+//     column j directly and the shared-memory ids prefix is gone.
 //   * Device code needs sm_80 (the m16n8k32 int8 mma); the Turing m8n8k16 emulation, Volta
 //     and AMD branches are dropped. The launcher refuses an older device or kernel image, and a
-//     panel whose P*out would overflow the kernel's int offsets (upstream's ubatch keeps P small).
-//   * The weight is Fak's resident Q4_K bytes (llama.cpp block_q4_K layout, in % 256 == 0).
+//     panel whose P*out would overflow the kernel's int offsets.
+//   * The weight is Fak's resident Q4_K bytes (block_q4_K layout, in % 256 == 0).
 //   * Scratch (the q8_1 activation and the stream-k fixup buffer) comes from Fak's pool and
-//     is freed after the call; ggml_cuda_pdl_sync is dropped. The dynamic shared-memory limit
-//     is raised only for the kernel variant being launched.
+//     is freed after the call. The dynamic shared-memory limit is raised only for the kernel
+//     variant being launched.
 
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #define FAK_Q4K_MMQ_AVAILABLE 1
@@ -34,7 +30,6 @@ namespace fak_q4k_mmq {
 
 constexpr int warp_size = 32;
 
-// common.cuh / ggml-common.h
 constexpr int QK_K = 256;
 constexpr int QK8_1 = 32;
 constexpr int QR4_K = 2;
@@ -74,12 +69,10 @@ static __device__ __forceinline__ uint2 fast_div_modulo(uint32_t n, const uint3 
     return make_uint2(div_val, mod_val);
 }
 
-// vecdotq.cuh
 static __device__ __forceinline__ int get_int_b4(const void * x, const int & i32) {
     return ((const int *) x)[i32]; // assume at least 4 byte alignment
 }
 
-// mmq.cuh
 constexpr int MMQ_ITER_K = 256;
 constexpr int QK8_1_MMQ = 4*QK8_1;
 
@@ -122,7 +115,7 @@ static constexpr __host__ __device__ int rows_per_warp_for(int J) {
     return J >= 48 && J % 16 == 0 ? 32 : 16;
 }
 
-// mma.cuh: the NVIDIA DATA_LAYOUT_I_MAJOR int tiles this instantiation uses.
+// The NVIDIA DATA_LAYOUT_I_MAJOR int tiles this instantiation uses.
 template <int I_, int J_>
 struct tile {
     static constexpr int I  = I_;
@@ -185,7 +178,6 @@ static __device__ __forceinline__ void mma(tile<16, 8> & D, const tile<16, 8> & 
 #endif // FAK_Q4K_MMQ_AVAILABLE
 }
 
-// mmq-load-tiles.cuh
 static __device__ __forceinline__ int unpack_scales_q45_K(const int * scales, const int ksc) {
     // scale arrangement after the following two lines:
     //   - ksc == 0: sc0, sc1, sc2, sc3
@@ -250,7 +242,6 @@ template <int J, bool fallback> static __device__ __forceinline__ void load_tile
     }
 }
 
-// mmq-vec-dot.cuh
 template <int J, bool fallback> static __device__ __forceinline__ void vec_dot_q8_1_q8_1_mma(
         const int * __restrict__ x, const int * __restrict__ y, float * __restrict__ sum, const int k00) {
     typedef tile<16,  8> tile_A;
@@ -325,7 +316,6 @@ template <int J, bool fallback> static __device__ __forceinline__ void vec_dot_q
     }
 }
 
-// mmq.cuh
 template <int J, bool fallback>
 static __device__ __forceinline__ void write_back_mma(
         const float * __restrict__ sum, float * __restrict__ dst, const int stride, const int i_max, const int j_max) {

@@ -36,8 +36,8 @@ func inKernelSnapshotCheckpoint(matched, promptTokens int) int {
 // a warmup leaf) must not displace the deepest grid checkpoint: on the first request
 // of an agent loop that shallow boundary is the only one known, and spending the
 // checkpoint there left the second turn restoring 5 of 1922 shared tokens (#12742).
-// Adapted from oMLX's off-grid prefill-tail snapshots (Apache-2.0):
-// https://github.com/jundot/omlx/blob/8288884d9b4f6db7b547633a94d36794c6b1d52d/omlx/scheduler.py
+// Adapted from oMLX's off-grid prefill-tail snapshots (Apache-2.0, jundot/omlx
+// at 8288884d9b4f6db7b547633a94d36794c6b1d52d).
 func inKernelAdaptiveSnapshotCheckpoint(matched, cacheable, promptTokens int) int {
 	grid := inKernelSnapshotCheckpoint(matched, promptTokens)
 	if cacheable > matched && cacheable < promptTokens &&

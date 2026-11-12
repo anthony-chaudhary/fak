@@ -1,6 +1,6 @@
 // Exact immutable module attestation; different compiler artifacts fail closed.
 // Qualified shaderc Vulkan 1.2 performance compilation, SPIRV-Tools validated.
-// Source SHA256: 68d6def81b6e0810b963696da3bdb9259c2fa08e9480f28a7db86d74e6bcc08d
+// SHA256 of shaders/v41_routed_swiglu_panel_chunk.comp: 68d6def81b6e0810b963696da3bdb9259c2fa08e9480f28a7db86d74e6bcc08d
 // Module SHA256: 6bb4c0d03199686cafb9efa5faa37e4ae14b567f6f2308f687ec5e3b926ed72c
 // Compiler adapter SHA256: 29fb33e8967062fead96456ca91824d7ed81231335d2debe1cb94b7742a34527
 // libshaderc SHA256: 31400b359d2f4b4a43168978412a72913474725befb87966068cfac1922ac6c9

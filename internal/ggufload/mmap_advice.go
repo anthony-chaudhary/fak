@@ -3,7 +3,7 @@ package ggufload
 // mmap_advice.go — the PURE choice core that picks the memory-map access hint for a
 // GGUF weight map from the host NUMA topology and the access pattern, WITHOUT touching a
 // syscall, a file, a clock, or a device (issue #5284; borrowed clean-room from a study of
-// llama.cpp @571d0d54, src/llama-mmap.cpp:445-476, verdict inspire — cite only, no bytes
+// llama.cpp @571d0d54, verdict inspire — cite only, no bytes
 // vendored). The body's rule: on a multi-node NUMA box, mark the weight map RANDOM so
 // pages fault local to the thread that first touches them (first-touch) instead of piling
 // onto one node and defeating the interleave story fak already invests in

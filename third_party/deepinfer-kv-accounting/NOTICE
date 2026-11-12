@@ -3,38 +3,4 @@ DeepInfer KV accounting contracts
 Copyright DeepSeek-AI / DeepInfer authors
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-Source: deepseek-ai/DeepInfer
-  csrc/engine/block_manager.hpp (Blocks::_push_back :39-52, Blocks::pin_block :88-93, Blocks::free :95-103)
-  csrc/engine/pybind_scheduler.cpp (BlockManager bindings :65-73)
-Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
-https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/csrc/engine/block_manager.hpp
-https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/csrc/engine/pybind_scheduler.cpp
-
-Adaptation (paged KV release misuse): inspired by, not copied from, the
-upstream block manager, which treats an out-of-range block id and a release
-of an already-free block as fatal invariant failures. Fak's PagedKVPool keeps
-its existing behavior, where such a release is a silent no-op that leaves the
-free list, reference counts and backing blocks unchanged, and only counts each
-one, readable through PagedKVPool.MisuseReleases. The native scheduler's swap
-preemption path adds each swap pool's count to NativePreemptionStats before the
-pool is dropped and exports the total as the
-fak_sched_preempt_paged_misuse_releases_total counter. A repeated release of a block
-that is still shared, or of a block id that was freed and reallocated, still
-looks legitimate and is not counted. Fak does not adopt the upstream FIFO free
-order, the reserved null block 0, or a count for pinning a free block.
-
-Also consulted (INSPIRE-ONLY): deepseek-ai/DeepInfer
-  deepinfer/worker/cache_engine.py (:141-198, :309-492)
-Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
-https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/worker/cache_engine.py
-
-Inspiration only, nothing copied: the upstream cache engine budgets its KV
-memory from the rows it actually keeps — owner-layer compressed rows plus
-indexer keys, with the per-layer device row mirror accounted per layer —
-instead of a uniform per-token product. Fak's DeepSeek-V4.1 context plan
-under FAK_HYBRID_KV (#13914) takes that kept-KV accounting shape: each
-decoder layer's bounded window mirror is charged per layer, the published
-compressed rows and index keys ride their source layers' entries, and the
-compressor's in-flight rows are charged once in session state. No upstream
-type, constant, or logic was ported; the arithmetic is fak's own
-(compute.CompressedKVLayer over the published retention schedule).
+Portions of this product are adapted from deepseek-ai/DeepInfer: https://github.com/deepseek-ai/DeepInfer (pinned at revision 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01). Changes were made.

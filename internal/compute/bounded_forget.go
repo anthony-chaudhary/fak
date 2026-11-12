@@ -12,7 +12,7 @@ const MaxBoundedDecay float32 = 1.0
 
 // BoundedAsymmetricForget computes the bounded asymmetric exponential forget gate
 // for recurrent attention kernels (borrowed from ds4 / wkljohn/ds4-strix-halo-tp-odinlink
-// rocm/ds4_rocm_glm5_kda.cuh:145-160).
+// at 48e10779d4723e40a8949d0ba59c262d35379a03, MIT).
 //
 // Formula:
 //

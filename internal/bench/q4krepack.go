@@ -3,9 +3,8 @@
 // CPU-feature detection, plus the A/B that says whether the layout alone pays.
 //
 // WHY THIS EXISTS. llama.cpp @571d0d54 re-serializes a row-major quant weight at
-// set_tensor time into `block_q4_Kx8`-style interleaved records (repack.cpp:143-205,
-// picker at :4528, feature branch at :4573-4599) so the CPU GEMM fills its SIMD lanes
-// with ONE contiguous load instead of N gathers. The repack is paid once at load; every
+// set_tensor time into `block_q4_Kx8`-style interleaved records so the CPU GEMM
+// fills its SIMD lanes with ONE contiguous load instead of N gathers. The repack is paid once at load; every
 // later token's matmul reads the streaming layout. fak has no CPU-side equivalent — it
 // holds the GGUF Q4_K bytes verbatim (internal/model/quant_q4k.go: "the resident bytes
 // ARE the GGUF bytes") and only repacks for the GPU at upload. #5285 asks for ONE quant
@@ -69,8 +68,8 @@ func Q4KInterleaveWidth() (width int, why string) {
 }
 
 // q4kWidthForKernel maps fak's resolved decode-kernel tier to an interleave width,
-// following llama.cpp's picker (repack.cpp:4573-4599): AVX2 -> 8 lanes, NEON+dotprod -> 4,
-// no vector unit -> 1 (identity, i.e. do not repack).
+// following llama.cpp's picker: AVX2 -> 8 lanes, NEON+dotprod -> 4, no vector unit
+// -> 1 (identity, i.e. do not repack).
 //
 // KNOWN NARROWING. llama.cpp splits arm64 further — NEON+i8mm takes the 4x8 record, plain
 // dotprod the 4x4 — but fak's arm64 tier ladder (quant_arm64.go) exposes only

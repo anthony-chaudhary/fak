@@ -16,8 +16,9 @@ import (
 
 // qwen35MTPMaterializationName maps the closed Qwen3.8 trailing-block vocabulary into
 // the existing native mtp.* namespace. It adapts the target/MTP split and four glue-role
-// remaps from llama.cpp's MIT-licensed Qwen converter:
-// https://github.com/ggml-org/llama.cpp/blob/9723942adc518b43c4b95dc4dce6906903eb5e09/conversion/qwen.py#L277-L354
+// remaps from llama.cpp's MIT-licensed Qwen converter at
+// 9723942adc518b43c4b95dc4dce6906903eb5e09 (license and notices: THIRD_PARTY_NOTICES.md
+// ("llama.cpp")).
 //
 // handled is true for every trailing-block, nextn, or vision-sidecar tensor in this family.
 // An empty canonical name means skip: default target-only loads, vision tensors, misplaced

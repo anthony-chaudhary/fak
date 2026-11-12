@@ -16,9 +16,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
-// The format is pinned independently by Strata's Engram decoder and its GGML:
-// https://github.com/Niko1221/Strata/blob/5e8a4cca7d690ac60ca37eb09e7d0e010099ad6d/src/dsv41/ds4_kernels.cu#L1506-L1517
-// https://github.com/ggml-org/llama.cpp/blob/3cf03257f219afbe7334045ff7c6a06ac68c627d/ggml/src/ggml-quants.c#L2725-L2740
+// The format is pinned independently by Strata's Engram decoder (Niko1221/Strata
+// at 5e8a4cca7d690ac60ca37eb09e7d0e010099ad6d, MIT) and its GGML (llama.cpp at
+// 3cf03257f219afbe7334045ff7c6a06ac68c627d, MIT). License and notices:
+// THIRD_PARTY_NOTICES.md ("Strata", "llama.cpp").
 // Low nibbles fill j, high nibbles j+16 in each 32-element block. Alternating
 // signed scales distinguish all eight blocks and adjacent rows without using
 // the production decoder or codebook to derive the oracle.

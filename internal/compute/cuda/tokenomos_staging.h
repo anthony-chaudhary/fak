@@ -4,13 +4,13 @@
 // Copyright 2026 Shih-Ying Yeh (aka KohakuBlueLeaf, KBlueLeaf).
 // Copyright 2026 Netra Systems, Inc.
 //
-// Modified C++ translation of Tokenomos src/tokenomos/core/staging.py at
-// eeb47ee09a3c5e66411e90313b017c211d6a3fbb:
-// https://github.com/KohakuBlueleaf/Tokenomos/blob/eeb47ee09a3c5e66411e90313b017c211d6a3fbb/src/tokenomos/core/staging.py
-// The complete Apache License 2.0 is retained in the repository root LICENSE.
-// Changes: fixed two-arena native owner, caller-supplied device destinations,
-// explicit same-stream seal before returning to Go, checked terminal retirement,
-// allocation-ledger accounting and fail-closed capture/device admission.
+// Modified C++ translation of KohakuBlueleaf/Tokenomos at
+// eeb47ee09a3c5e66411e90313b017c211d6a3fbb (Apache-2.0). The complete Apache
+// License 2.0 is retained in the repository root LICENSE.
+// Local behavior: fixed two-arena native owner, caller-supplied device
+// destinations, explicit same-stream seal before returning to Go, checked
+// terminal retirement, allocation-ledger accounting and fail-closed
+// capture/device admission.
 //
 // This is one process-owned pool, serialized by the existing cudaMu. Normal
 // lifetime matches g_stream (the CUDA backend has no session-owned shutdown).

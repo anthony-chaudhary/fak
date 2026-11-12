@@ -3,36 +3,4 @@ vLLM vocab-parallel embedding and parallel LM head
 Copyright contributors to the vLLM project
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-Source: vllm-project/vllm, vllm/model_executor/layers/vocab_parallel_embedding.py
-Revision: 4ba787ec9959e566d3b587a796dff07673324da5 (tag v0.33.0rc3)
-https://github.com/vllm-project/vllm/blob/4ba787ec9959e566d3b587a796dff07673324da5/vllm/model_executor/layers/vocab_parallel_embedding.py
-
-Adaptation: Go implementation of the vocab-parallel tensor-parallel decomposition
-for fak's native engine (internal/model/tensor_parallel_vocab.go). Ported
-mechanisms, in upstream terms:
-
-  - VocabParallelEmbedding.forward: per-rank masked input lookup over the rank's
-    contiguous vocabulary band (get_masked_input_and_mask), masked rows zeroed
-    (masked_fill_), and the per-rank contributions AllReduce-summed
-    (tensor_model_parallel_all_reduce). Each token id has exactly one owning
-    rank, so the reduce is exact.
-  - ParallelLMHead: the output-projection weight sharded along the vocabulary
-    dimension; each rank computes its logits band and the bands are
-    AllGather-concatenated in rank order (the sampler's
-    tensor_model_parallel_all_gather in vllm/model_executor/layers/logits_processor.py).
-  - get_sharded_to_full_mapping: the post-gather reindex of gathered logits.
-    Upstream needs it to undo vocabulary padding and LoRA-added rows; fak's
-    GGUF path has neither, so the mapping is the identity and the rank-order
-    concat IS token-id order.
-
-Divergences (fak adaptation, documented in the port file header):
-  - Upstream pads the vocabulary to a multiple of DEFAULT_VOCAB_PADDING_SIZE
-    (64) and requires exact divisibility (divide). fak reuses its validated
-    TPPlan tiling (near-even contiguous bands, no empty shard), so no padding
-    exists and the masked-input arithmetic degenerates to a single band test.
-  - Upstream supports LoRA-added embeddings via the added_vocab_* shard
-    indices; fak's serving path has no LoRA-added vocabulary rows, so those
-    indices are absent from the port.
-  - fak's head read is f32-resident only (the sharded matmul slices raw f32
-    output rows); quant-resident heads fail closed, matching the existing
-    tensor-parallel files' honesty contract.
+Portions of this product are adapted from vllm-project/vllm: https://github.com/vllm-project/vllm (pinned at revision 4ba787ec9959e566d3b587a796dff07673324da5 (= tag v0.33.0rc3)). Changes were made.

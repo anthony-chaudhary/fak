@@ -4,10 +4,8 @@ package compute
 //
 // PROVENANCE (DIRECT-PORT, ticket oss-port-sglang-block-sparse-indexer):
 //   Source:  sgl-project/sglang @ faaff1eca8876b8b77d8704f080c3ee2064b8b65
-//            ("dsv4.1: Top-k kernels and candidate selection", PR #39648)
-//     https://github.com/sgl-project/sglang/blob/faaff1eca8876b8b77d8704f080c3ee2064b8b65/python/sglang/kernels/jit/csrc/deepseek_v4/block_amax.cuh
-//     https://github.com/sgl-project/sglang/blob/faaff1eca8876b8b77d8704f080c3ee2064b8b65/python/sglang/kernels/jit/csrc/deepseek_v4/candidate_block_table.cuh
-//     https://github.com/sgl-project/sglang/blob/faaff1eca8876b8b77d8704f080c3ee2064b8b65/python/sglang/kernels/jit/csrc/deepseek_v4/topk_bf16_small.cuh
+//            ("dsv4.1: Top-k kernels and candidate selection", PR #39648);
+//            license and notices: THIRD_PARTY_NOTICES.md ("SGLang").
 //   License: Apache-2.0 (SGLang root LICENSE; no per-file copyright header on the
 //            pinned sources). Copyright SGLang authors.
 //   Reuse:   DIRECT-PORT of the decomposition contract — the level-one block-amax
@@ -19,16 +17,16 @@ package compute
 //            existing exact engine below instead of a parallel top-k.
 //
 // THE DECOMPOSITION (upstream pipeline, one row at a time):
-//  1. Level one (block_amax.cuh): amax[i] = max(scores[8i : 8i+8]) for
+//  1. Level one: amax[i] = max(scores[8i : 8i+8]) for
 //     i < ceil(seqLen/8); the newest (last) block is forced to +inf so it is always
 //     selected; rows with at most topk blocks are skipped entirely (every block is
 //     selected anyway — the identity fast path). kBlockTokens = 8.
-//  2. Level two (topk_bf16_small.cuh's role): the EXACT top-k over the block maxima,
+//  2. Level two: the EXACT top-k over the block maxima,
 //     emitting block ids. Upstream runs its bf16 radix-select kernel; here the seam
 //     is DeepSelectTopk (deepselect_topk.go) — the landed host ancestor of that same
 //     kernel — so the selected key SET is byte-for-byte the flat engine's set on the
 //     identically prepared keys, for every input.
-//  3. Finalise (candidate_block_table.cuh): the selected block ids (any order, -1
+//  3. Finalise: the selected block ids (any order, -1
 //     padded) become ascending with INT32_MAX past the count, plus each block mapped
 //     to its index-pool slot pageTable[id/bpp]*bpp + id%bpp (bpp = pageSize/8 blocks
 //     per pool page). Rows with at most topk blocks get the identity table without
@@ -62,7 +60,7 @@ import (
 const BlockSparseTokensPerBlock = 8
 
 // BlockSparsePadID is the candidate-block-table pad value past a row's count:
-// INT32_MAX, matching candidate_block_table.cuh's kPad.
+// INT32_MAX, matching the upstream pad value.
 const BlockSparsePadID = int32(math.MaxInt32)
 
 // ErrBlockSparsePageSize is returned when a pool page size is not a power of two of
@@ -146,7 +144,8 @@ func BlockAmax(scores []float64, seqLen int) []float64 {
 // first, ties by lower block id — the DeepSelect total order applied to the block
 // keys. It extends the existing seam rather than building a parallel top-k: the
 // engine is DeepSelectTopk itself, the landed host ancestor of upstream's
-// topk_bf16_small.cuh. k <= 0 or an empty key row yields nil; k >= len(amax) yields
+// level-two top-k kernel. k <= 0 or an empty key row yields nil; k >= len(amax)
+// yields
 // every block id.
 func HierarchicalBlockTopk(amax []float64, k int) []int {
 	n := len(amax)
@@ -194,7 +193,7 @@ func TwoLevelBlockKeys(scores []float64, seqLen, topk int) []int {
 }
 
 // CandidateBlockTable finalises a row's selected block ids into the two-level
-// indexer's block table, mirroring candidate_block_table.cuh:
+// indexer's block table, mirroring the upstream finaliser:
 //
 //   - ids: the valid selected ids ascending, BlockSparsePadID (INT32_MAX) past the
 //     count. Valid means 0 <= id < nblocks; -1 padding and out-of-range ids are

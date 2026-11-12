@@ -1,7 +1,8 @@
 package model
 
-// Known-address batch preparation is adapted from JigSawPT/llama.cpp
-// src/llama-graph.cpp:187-224@8ce0968539b1a6795f3413c2783dfa5646b4688a.
+// Known-address batch preparation is adapted from JigSawPT/llama.cpp at
+// 8ce0968539b1a6795f3413c2783dfa5646b4688a (MIT). License and notices:
+// THIRD_PARTY_NOTICES.md ("JigSawPT/llama.cpp").
 //
 // MIT License
 // Copyright (c) 2023-2026 The ggml authors
@@ -227,13 +228,13 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 	return out, panel, nil
 }
 
-// The bounded worker scheduling is adapted from Strata/Project Maya EgReader:
-// Niko1221/Strata src/dsv41/ds4_engram_io.hpp:129-203 at
-// c62d5e3a15b40ea51c96aae9e8d36928965f53ab (MIT; complete license and Maya
-// attribution in THIRD_PARTY_NOTICES.md). Unlike the donor's file-handle pool,
-// FAK reuses its explicit producer policy and source hold, exact coalesced spans,
-// immutable copied output and existing transaction/cache publication boundary.
-// One process-wide additional read group bounds total new workers to four.
+// The bounded worker scheduling is adapted from the Strata/Project Maya
+// EgReader (Niko1221/Strata) at c62d5e3a15b40ea51c96aae9e8d36928965f53ab
+// (MIT; complete license and Maya attribution in THIRD_PARTY_NOTICES.md,
+// "Strata" and "Project Maya"). The local producer policy and source hold are
+// reused with exact coalesced spans, immutable copied output and the existing
+// transaction/cache publication boundary. One process-wide additional read
+// group bounds total new workers to four.
 var v41EngramParallelReadBusy atomic.Bool
 
 const v41EngramParallelReadBudget int64 = 1 << 20

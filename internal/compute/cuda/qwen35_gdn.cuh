@@ -1381,7 +1381,7 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
 }
 
 // ---- Lane-panel decode: 2..8 independent one-token lanes ------------------------------------
-// The projections follow llama.cpp ggml-cuda mmvq.cu's ncols_dst multi-column GEMV (MIT): one
+// The projections follow llama.cpp's multi-column GEMV pattern (MIT): one
 // block streams one weight row once and dots it against every lane's activation row. Each
 // lane keeps exactly the per-thread stride, fmaf order, and warp/block reduction tree of the
 // single-lane kernels above, so lane l's projection is bitwise the decode kernel's. Conv,

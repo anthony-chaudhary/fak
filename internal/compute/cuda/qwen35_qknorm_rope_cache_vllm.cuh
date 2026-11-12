@@ -2,11 +2,8 @@
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 //
 // Adapted from vllm-project/vllm csrc/fused_qknorm_rope_cache_kernel.cu
-// at fa3b9d1377219247060d3c8b49eae199c9e7e154. See NOTICE.md.
-// Changed for Fak: one decode token, separate F32 inputs, effective norm gains,
-// unscaled theta-derived NeoX angles, contiguous owned cache and a normalized
-// F32 Kraw shadow. No torch, packed half inputs, FP8 conversion or slot mapping.
-// The donor's subwarp reduction changes F32 bits versus Fak's 256-thread tree.
+// at fa3b9d1377219247060d3c8b49eae199c9e7e154 (Apache-2.0). License and notice:
+// THIRD_PARTY_NOTICES.md ("vLLM").
 
 static unsigned long long g_qwen35_vllm_qk_launches = 0;
 

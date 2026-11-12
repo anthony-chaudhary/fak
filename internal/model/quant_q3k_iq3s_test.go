@@ -12,9 +12,9 @@ import (
 )
 
 // Goldens are SHA-256 of 1024 little-endian f32 values emitted by the actual
-// dequantize_row_q3_K / dequantize_row_iq3_s C functions and IQ3_S codebook from
-// ggml-org/llama.cpp@6fe74980162af0ed5e559870d5deccafaa034e7c, ggml/src/ggml-quants.c
-// and ggml-common.h. Compiled with cc -O0 -ffp-contract=off. Input bytes are
+// llama.cpp Q3_K / IQ3_S C row dequantizers and IQ3_S codebook from
+// ggml-org/llama.cpp@6fe74980162af0ed5e559870d5deccafaa034e7c. Compiled with
+// cc -O0 -ffp-contract=off. Input bytes are
 // (i*37+11)%256 for four 110-byte blocks, with each fp16 scale replaced by 0x3c00.
 // The oracle was run before extraction; it does not call these Go decoders.
 func TestQ3KIQ3SNativeReference(t *testing.T) {

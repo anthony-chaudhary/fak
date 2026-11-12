@@ -16,9 +16,8 @@ import (
 // zero-point lives at word[n/8] bits 4*(n%8) and is extracted on the fly with a
 // shift/mask.
 //
-// The layout mirrors the vLLM RDNA hybrid W4A16 path
-// (vllm .../rdna_hybrid_w4a16.py:80,105-112 and
-// csrc/rocm/skinny_gemms_int4.cu:110-117, zp_nibble), adapted into a fak-native,
+// The layout mirrors the vLLM RDNA hybrid W4A16 path (Apache-2.0; license and
+// notices: THIRD_PARTY_NOTICES.md ("vLLM")), adapted into a fak-native,
 // host-side reference kernel. It is a pure-Go arithmetic primitive: it holds no device
 // handles and makes no throughput claim. The existing per-group
 // QuantSpec.ZeroPoint []int32 mode is unchanged; this packed layout is additive and is

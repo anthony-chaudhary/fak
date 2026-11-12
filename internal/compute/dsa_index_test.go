@@ -282,8 +282,8 @@ func dsaRadixOracle(scores []float64, nValid, topK int) []int {
 }
 
 // TestCUDADSAIndexSelectRadixMatchesHostF64 pins the borrowed single-pass radix/bucket selection
-// pass (k_dsa_index_topk, ADAPTED from vLLM's persistent_topk_kernel / FilteredTopKUnifiedKernel,
-// csrc/persistent_topk.cuh:868/:1295 @ ae065918640a198a56f6f17eb45e251c3229fe41) that replaced the
+// pass (k_dsa_index_topk, ADAPTED from vLLM's persistent-topk radix select at
+// ae065918640a198a56f6f17eb45e251c3229fe41) that replaced the
 // repeated-max topK-times selection capped at DSA_TOPK_MAX_KEYS=4096. Two halves, both
 // software-verifiable (CPU/in-memory):
 //

@@ -1,8 +1,7 @@
 // IQ4_NL math adapted from ggml-org/llama.cpp at
-// e0f142d5ddc1461ce721644d92af33db23545105:
-// ggml/src/ggml-cuda/dequantize.cuh:408-421 (dequantize_iq4_nl),
-// ggml/src/ggml-common.h:447-452,1120-1122 (block layout/codebook).
-// Changes: raw byte loads, exact half widening and separate rounded F32
+// e0f142d5ddc1461ce721644d92af33db23545105 (MIT). License and notices:
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
+// Local behavior: raw byte loads, exact half widening and separate rounded F32
 // multiplication reuse Fak's shared helpers. The caller supplies the existing
 // fcuda_kvalues_iq4nl codebook; no duplicate device table/runtime is imported.
 //

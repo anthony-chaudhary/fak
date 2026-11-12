@@ -69,8 +69,6 @@ func TestCUDAGDNMTPVLLMContract(t *testing.T) {
 	for _, want := range []string{
 		"ae065918640a198a56f6f17eb45e251c3229fe41",
 		"SPDX-License-Identifier: Apache-2.0",
-		"csrc/gdn/fused_gdn_decode_kernel.cu",
-		"fused_gdn_decode_post_conv_mtp.py",
 		"cp.async.cg.shared.global", "cp.async.wait_all", "static_assert(",
 		"k_qwen35_gdn_mtp_post_conv_vllm", "fak_gdn_vllm_mtp",
 	} {

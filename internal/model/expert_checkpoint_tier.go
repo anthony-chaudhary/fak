@@ -762,12 +762,7 @@ func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 // that finishes first waits in ready for the next fault of that name. Ready entries from the
 // previous generation are dropped, so at most two layers' prefetches are held.
 //
-// PINNED-BUFFER IDENTITY + DEPENDENCY ORDERING (vLLM offloader port, see THIRD_PARTY_NOTICES.md).
-// vLLM's static buffer pool keys a staging buffer by the parameter's IDENTITY -- name, shape,
-// stride, dtype -- and reuses it across layers, while its prefetch custom ops declare the
-// prefetch/use edges as data dependencies so the compiler cannot reorder a wait ahead of the copy
-// it guards. This port takes the two parts that survive the move to a synchronous ReaderAt ring
-// fill:
+// PINNED-BUFFER IDENTITY + DEPENDENCY ORDERING (vLLM offloader port, see THIRD_PARTY_NOTICES.md, "vLLM"):
 //
 //  1. IDENTITY. A miss is identified by its name, so the same name arriving twice in one layer's
 //     pick list is one in-flight read, not two -- the existing t.loading guard already enforced

@@ -13,9 +13,7 @@ const (
 )
 
 // NVFP4 block-scale layout is adapted from NVIDIA TensorRT-LLM (Apache-2.0),
-// pinned at ecae3c97e2b646580415518a45a72bc5a5a67075:
-// https://github.com/NVIDIA/TensorRT-LLM/blob/ecae3c97e2b646580415518a45a72bc5a5a67075/cpp/tensorrt_llm/kernels/quantization.h
-// License: https://github.com/NVIDIA/TensorRT-LLM/blob/ecae3c97e2b646580415518a45a72bc5a5a67075/LICENSE
+// pinned at ecae3c97e2b646580415518a45a72bc5a5a67075. License: Apache-2.0.
 //
 // The byte permutation groups scaleCols (K/16) into 128-row by 4-column
 // tiles. It changes only the scale layout; it does not encode or decode FP4.

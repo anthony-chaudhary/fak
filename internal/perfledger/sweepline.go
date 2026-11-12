@@ -1,9 +1,7 @@
 // Adapted from ai-dynamo/aiperf, src/aiperf/analysis/sweepline.py
 // (+ sweepline_kv_cache.py) at ab610add4e8876fca223197596c728e17365f381.
 // Copyright 2025-2026 NVIDIA CORPORATION & AFFILIATES. Apache-2.0.
-// Changed for Fak: re-expressed over Go []float64 slices (epoch-nanosecond
-// timestamps) with a stdlib stable sort instead of numpy lexsort; the
-// MetricResult/SweepLineStats plumbing and the SSE ICL variants are omitted.
+// Changes were made.
 //
 // The sweep-line seam turns per-request wall-clock records into vectorized
 // step-function curves — concurrency, decode/prefill/total throughput,

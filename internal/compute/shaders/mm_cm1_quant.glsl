@@ -6,11 +6,7 @@
 // token (the matvec route re-streams the full matrix for every token).
 //
 // Adapted from ggml-vulkan (MIT, Copyright (c) 2023-2026 The ggml authors), pinned at
-// llama.cpp f74e2fa6a31cc33ab4ee4ae516641cfe62df3924:
-//   ggml/src/ggml-vulkan/vulkan-shaders/mul_mm.comp        (COOPMAT path: shared A/B tiles,
-//       coopMatLoad row-major A / column-major B, per-warp accumulator grid, staged edge store)
-//   ggml/src/ggml-vulkan/vulkan-shaders/mul_mm_funcs.glsl  (load_a_to_shmem: dequantize into the shared A tile)
-//   ggml/src/ggml-vulkan/vulkan-shaders/dequant_funcs.glsl (block field decode)
+// llama.cpp f74e2fa6a31cc33ab4ee4ae516641cfe62df3924.
 //
 // MIT License. Copyright (c) 2023-2026 The ggml authors.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this
@@ -26,12 +22,6 @@
 // FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
-//
-// Changed for Fak: fixed (not specialization-constant) tiles, scalar float16_t shared tiles,
-// fak's three-binding ABI (raw packed weight words, F32 X[tokens][in], F32 Y[tokens][out]) and
-// push constants {outDim, inDim, tokens}; one thread dequantizes one 16-weight half of a
-// 32-weight sub-block straight from the verbatim GGUF bytes. The host dispatch is exactly
-// (ceil(outDim / BM), ceil(tokens / BN), 1) with a required 32-lane subgroup.
 
 #extension GL_KHR_cooperative_matrix : require
 #extension GL_KHR_memory_scope_semantics : require

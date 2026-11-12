@@ -6,8 +6,8 @@ import (
 	"unsafe"
 )
 
-// Adapted from ggml-org/llama.cpp@74bca3950054eed1795f525cb9cf06bfe796492d,
-// ggml/src/ggml-cpu/ops.cpp: ggml_compute_forward_flash_attn_ext_tiled (MIT).
+// Adapted from ggml-org/llama.cpp at 74bca3950054eed1795f525cb9cf06bfe796492d (MIT).
+// License and notices: THIRD_PARTY_NOTICES.md ("llama.cpp").
 // The borrowed unit is the multi-query/KV tile, packed K/V reuse, and running
 // maximum/sum/output rescale. FAK keeps its existing fdot and saxpy primitives,
 // F32 activations, causal/window indexing and softcap expression. This is not

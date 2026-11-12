@@ -1,24 +1,19 @@
 // ---- Q4_K q8_1 DP4A matrix-vector product for decode (fak#8635) -------------------------
-// Adapted from llama.cpp ggml/src/ggml-cuda/mmvq.cu (mul_mat_vec_q, calc_nwarps,
-// calc_rows_per_block), vecdotq.cuh (vec_dot_q4_K_q8_1, vec_dot_q4_K_q8_1_impl_vmmq) and
-// quantize.cu (quantize_q8_1) at
-// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
+// Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
 // Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
-// THIRD_PARTY_NOTICES.md ("llama.cpp Q4_K MMVQ decode GEMV").
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
 // The default Q4_K instantiation uses the NVIDIA GENERIC parameter table (Ampere and newer,
 // so sm_80/sm_86/sm_89/sm_90/sm_100/sm_120 all take it): 4 warps for 1..4 activation columns,
-// one output row per CUDA block at one column and two rows otherwise, vdr 2. Other changes for
-// Fak:
+// one output row per CUDA block at one column and two rows otherwise, vdr 2. Local behavior:
 //   * No fusion (gate, bias, NVFP4 scale), MoE ids, channel or sample broadcast: one resident
 //     Q4_K weight [out, in] times one f32 activation [P, in], P in 1..3, dst [P, out].
 //   * With two rows per CUDA block the second row's weight read is clamped to the last row, so
-//     an odd out never reads past the resident weight (upstream relies on row padding); its
-//     result is still not written.
+//     an odd out never reads past the resident weight; its result is still not written.
 //   * The activation row is not padded to MATRIX_ROW_PADDING: Fak's Q4_K rows are a whole
 //     number of 256-value super-blocks, so every q8_1 block the dot reads exists.
 //   * The q8_1 scratch is a persistent grown-once buffer, like the Q8_0 GEMV scratch (#969),
-//     because decode is captured into a CUDA graph; ggml_cuda_pdl_* is dropped.
+//     because decode is captured into a CUDA graph.
 
 namespace fak_q4k_mmvq {
 
@@ -79,7 +74,7 @@ quantize_q8_1(const float *__restrict__ x, block_q8_1 *__restrict__ y, int ne0) 
     y[ib].ds = make_half2(d, sum);
 }
 
-// vecdotq.cuh vec_dot_q4_K_q8_1_impl_vmmq (contiguous v/x values).
+// Q4_K x Q8_1 VMVQ dot (contiguous v/x values).
 static __device__ __forceinline__ float vec_dot_q4_K_q8_1_impl_vmmq(
     const int *__restrict__ v, const int *__restrict__ u, const uint8_t *__restrict__ sc,
     const uint8_t *__restrict__ m, const half2 &dm4, const float *__restrict__ d8) {
@@ -98,7 +93,7 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1_impl_vmmq(
     return dm4f.x * sumf_d - dm4f.y * sumf_m;
 }
 
-// vecdotq.cuh vec_dot_q4_K_q8_1.
+// Q4_K x Q8_1 dot product.
 static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
     const void *__restrict__ vbq, const block_q8_1 *__restrict__ bq8_1, const int &kbx, const int &iqs) {
     const block_q4_K *bq4_K = (const block_q4_K *)vbq + kbx;
@@ -132,9 +127,9 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
 }
 
 
-// Additional Q5_K/Q6_K dots from vecdotq.cuh at the same immutable llama.cpp
-// pin above (MIT, Copyright (c) 2023-2026 The ggml authors; full license in
-// THIRD_PARTY_NOTICES.md). Modified only for local intrinsics/load names.
+// Additional Q5_K/Q6_K dots from the same immutable llama.cpp pin above
+// (MIT, Copyright (c) 2023-2026 The ggml authors; full license in
+// THIRD_PARTY_NOTICES.md, "llama.cpp"). Modified only for local intrinsics/load names.
 // Selection is qualification-only: q8_1 changes F32-activation precision.
 #ifdef FAK_CUDA_Q56K_MMVQ_QUALIFICATION
 constexpr int QR5_K = 2, QR6_K = 2, QI6_K = 32;

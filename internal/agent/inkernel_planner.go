@@ -2236,7 +2236,9 @@ func (p *InKernelPlanner) ValidateSamplingSeed(seed *int64) error {
 }
 
 // nextSeedlessSampleSeed gives one seedless sampled request its own RNG stream.
-// Adapted from DeepInfer SamplingParams._make_seed (Apache-2.0, deepseek-ai/DeepInfer deepinfer/sampling_params.py at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
+// Adapted from DeepInfer's seedless sampling-seed rule (Apache-2.0,
+// deepseek-ai/DeepInfer at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no
+// upstream source is copied.
 func (p *InKernelPlanner) nextSeedlessSampleSeed() int64 {
 	if !p.seedExplicit {
 		return int64(randv2.Uint64())

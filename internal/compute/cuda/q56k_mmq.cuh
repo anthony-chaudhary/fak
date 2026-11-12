@@ -1,9 +1,7 @@
 // ---- Retained Q5_K/Q6_K prompt-panel MMQ family (qualification only) ----
-// Adapted from llama.cpp ggml/src/ggml-cuda/{mmq.cuh,mmq-load-tiles.cuh,
-// mmq-vec-dot.cuh,mmq-config-ampere.cuh,mma.cuh,quantize.cu,vecdotq.cuh,common.cuh}
-// and ggml-common.h at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
+// Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
 // Copyright (c) 2023-2026 The ggml authors. Full permission notice is in
-// THIRD_PARTY_NOTICES.md ("llama.cpp retained Q5_K/Q6_K MMQ prompt family").
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
 // This is the Ampere integer-MMA path, also usable by later compiled devices.
 // Q5_K uses DS4 (half scale and sum); Q6_K uses D4 (float scale), signed
@@ -37,7 +35,6 @@ namespace fak_q56k_mmq {
 
 constexpr int warp_size = 32;
 
-// common.cuh / ggml-common.h
 constexpr int QK_K = 256;
 constexpr int QK8_1 = 32;
 constexpr int QR5_K = 2;
@@ -88,7 +85,7 @@ static __device__ __forceinline__ uint2 fast_div_modulo(uint32_t n, const uint3 
     return make_uint2(div_val, mod_val);
 }
 
-// vecdotq.cuh: Q6_K blocks are only two-byte aligned.
+// Q6_K blocks are only two-byte aligned.
 static __device__ __forceinline__ int get_int_b2(const void *x, const int &i32) {
     const uint16_t *x16 = (const uint16_t *)x;
     return (int)x16[2*i32] | ((int)x16[2*i32+1] << 16);
@@ -97,7 +94,6 @@ static __device__ __forceinline__ int get_int_b4(const void * x, const int & i32
     return ((const int *) x)[i32]; // assume at least 4 byte alignment
 }
 
-// mmq.cuh
 constexpr int MMQ_ITER_K = 256;
 constexpr int QK8_1_MMQ = 4*QK8_1;
 
@@ -141,7 +137,7 @@ static constexpr __host__ __device__ int rows_per_warp_for(int J) {
     return J >= 48 && J % 16 == 0 ? 32 : 16;
 }
 
-// mma.cuh: the NVIDIA DATA_LAYOUT_I_MAJOR int tiles this instantiation uses.
+// The NVIDIA DATA_LAYOUT_I_MAJOR int tiles this instantiation uses.
 template <int I_, int J_>
 struct tile {
     static constexpr int I  = I_;
@@ -204,7 +200,6 @@ static __device__ __forceinline__ void mma(tile<16, 8> & D, const tile<16, 8> & 
 #endif // FAK_Q56K_MMQ_AVAILABLE
 }
 
-// mmq-load-tiles.cuh
 static __device__ __forceinline__ int unpack_scales_q45_K(const int * scales, const int ksc) {
     // scale arrangement after the following two lines:
     //   - ksc == 0: sc0, sc1, sc2, sc3
@@ -365,7 +360,6 @@ template <int J, bool fallback> static __device__ __forceinline__ void load_tile
     }
 }
 
-// mmq-vec-dot.cuh
 template <int J, bool fallback> static __device__ __forceinline__ void vec_dot_q8_1_q8_1_mma(
         const int * __restrict__ x, const int * __restrict__ y, float * __restrict__ sum, const int k00) {
     typedef tile<16,  8> tile_A;
@@ -542,7 +536,6 @@ template <int J, bool fallback> static __device__ __forceinline__ void vec_dot_q
     }
 }
 
-// mmq.cuh
 template <int J, bool fallback>
 static __device__ __forceinline__ void write_back_mma(
         const float * __restrict__ sum, float * __restrict__ dst, const int stride, const int i_max, const int j_max) {

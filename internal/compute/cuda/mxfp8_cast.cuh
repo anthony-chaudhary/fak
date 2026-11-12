@@ -1,9 +1,8 @@
 // Original FAK SIMT implementation of the native V4.1 activation oracle.
-// Scale ABI follows DeepGEMM 1fc9c66975ee322d628b3288534ca0e9ce12a64d,
-// csrc/jit_kernels/impls/smxx_layout.hpp (MIT); no donor kernel copied.
-// DeepInfer 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01 linear.py requests
-// recipe32 / packed UE8M0 / TMA-aligned column-major scales. This is NOT its
-// tile_kernels casting implementation and is not a DeepGEMM GEMM port.
+// Scale ABI follows DeepGEMM at 1fc9c66975ee322d628b3288534ca0e9ce12a64d (MIT);
+// no donor kernel copied. DeepInfer at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+// requests recipe32 / packed UE8M0 / TMA-aligned column-major scales. This is
+// NOT its tile_kernels casting implementation and is not a DeepGEMM GEMM port.
 #include "../cuda_mxfp8_cast.h"
 #if CUDART_VERSION >= 12090
 #include <cuda_fp8.h>

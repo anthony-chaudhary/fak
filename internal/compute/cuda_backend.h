@@ -336,8 +336,8 @@ int fcuda_qwen35_gdn_mtp_post_conv_f32(
 /* Lane-panel twin of fcuda_qwen35_gdn_decode_f32 for 2..8 independent one-token decode
  * lanes. dX/dOut and every scratch are row-major [lanes, width] panels; lane l reads and
  * updates only convStates[l] / recurrentStates[l]. Each projection weight row is streamed
- * once for the whole lane panel (multi-column GEMV, after llama.cpp ggml-cuda mmvq.cu
- * ncols_dst, MIT). No stream synchronization: the caller fences the batch. */
+ * once for the whole lane panel (multi-column GEMV, after the llama.cpp
+ * multi-column pattern, MIT). No stream synchronization: the caller fences the batch. */
 int fcuda_qwen35_gdn_decode_lanes_f32(
     const float *dX, int lanes,
     const void *dInQKV, const float *dInQKVScale, int inQKVQ8,

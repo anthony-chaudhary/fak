@@ -328,9 +328,9 @@ __device__ __forceinline__ unsigned long long dsaRadixKey(double v) {
 }
 
 // k_dsa_index_topk: single-pass radix/bucket select over the f64 score array — the selection pass of
-// fcuda_dsa_index_select_f32. ADAPTED from vLLM's persistent-topk radix select (vllm-project/vllm
-// csrc/persistent_topk.cuh:868 persistent_topk_kernel / :1295 FilteredTopKUnifiedKernel @
-// ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0): histogram the monotone score keys into 256
+// fcuda_dsa_index_select_f32. ADAPTED from vLLM's persistent-topk radix select
+// (vllm-project/vllm at ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0):
+// histogram the monotone score keys into 256
 // buckets, suffix-scan for the bucket that carries the k-th key, emit every strictly-above item
 // directly, and refine the boundary bucket byte by byte — bounded shared state (256 counters +
 // scalars), NO O(nKeys) taken[] mask, so windows past any fixed key count stay on-device. Re-expressed

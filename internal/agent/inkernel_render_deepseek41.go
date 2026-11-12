@@ -30,9 +30,10 @@ const (
 
 // renderDeepSeekV41Chat ports the non-thinking branch of the GGUF's
 // tokenizer.chat_template (vcruz305/DeepSeek-V4.1-Flash-GGUF Q2_K shard 1), the
-// authority over the minimal layout in vcruz305/llama.cpp
-// src/llama-chat.cpp:548-561@5210c7c (MIT). BOS, then the system prompt: system
-// messages joined by a blank line, then the tool schemas and the response format.
+// authority over the minimal layout in vcruz305/llama.cpp at 5210c7c (MIT).
+// License and notices: THIRD_PARTY_NOTICES.md ("vcruz305/llama.cpp"). BOS, then
+// the system prompt: system messages joined by a blank line, then the tool
+// schemas and the response format.
 // Consecutive user, developer and tool turns share one <｜User｜> block (tool
 // results wrapped in <tool_result>); each assistant turn is <｜Assistant｜></think>,
 // its content, any DSML tool calls and EOS; the open generation turn closes it.

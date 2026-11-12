@@ -1,5 +1,5 @@
 // Exact immutable module attestation; alternate compiler output declines.
-// Source SHA256: e1a3fd8e3c1f8ce268e29e0f75a89ee2abcc4ecddce2d0b76f2854abd1b42442
+// SHA256 of shaders/v41_q2k_token_pair.comp: e1a3fd8e3c1f8ce268e29e0f75a89ee2abcc4ecddce2d0b76f2854abd1b42442
 // Module SHA256: 106f42d56d87f0d2ce44704a1e944efefc7a67320cf1a44cb492c4bacf07acbf
 // Compiler adapter SHA256: 29fb33e8967062fead96456ca91824d7ed81231335d2debe1cb94b7742a34527
 // libshaderc SHA256: 31400b359d2f4b4a43168978412a72913474725befb87966068cfac1922ac6c9

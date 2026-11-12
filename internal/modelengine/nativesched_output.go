@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-// Modified for Fak: a lossless fixed-budget token outbox instead of merging
-// RequestOutput values. See THIRD_PARTY_NOTICES.md, "vLLM native request outbox".
+// License and notice: THIRD_PARTY_NOTICES.md ("vLLM").
 package modelengine
 
 import "github.com/anthony-chaudhary/fak/internal/abi"
 
 // newNativeRequestOutbox isolates the selected native syscall producer from a
-// delayed Tokens consumer. vLLM's RequestOutputCollector at 975dca5bb5db302077674cfa9afe851ee700ad73
-// similarly keeps publication request-local rather than awaiting its reader.
+// delayed Tokens consumer. The upstream analogue (vLLM at
+// 975dca5bb5db302077674cfa9afe851ee700ad73) keeps publication request-local
+// rather than awaiting its reader.
 //
 // This is bounded by the actual native request budget, not a guessed queue
 // size: stageDeferredToken stops at EOS or genTokens, and retireDeferredToken

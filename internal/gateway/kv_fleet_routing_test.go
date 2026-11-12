@@ -3,10 +3,9 @@ package gateway
 import "testing"
 
 // TestStickyPrefixRoute pins the slack-tolerant sticky prefix routing borrowed
-// from microsoft/vidur's TolerantStickyLOPUncachedGlobalScheduler (ADAPT —
-// re-expressed in Go, no copied code; source:
-// vidur/scheduler/global_scheduler/tolerant_sticky_lop_uncached_global_scheduler.py
-// @abae7f63aa857300f5cdc6f5e0d27860cd24721b, MIT): a prefix's home instance keeps
+// from microsoft/vidur's tolerant-sticky global scheduler (ADAPT — re-expressed
+// in Go, no copied code) at abae7f63aa857300f5cdc6f5e0d27860cd24721b (MIT):
+// a prefix's home instance keeps
 // its traffic while its load stays within tolerance x the fleet's minimum load,
 // and sheds to the least-loaded instance past the bound, migrating the sticky
 // record with it. The closed contracts are exact (instance, hit) pairs and load

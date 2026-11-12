@@ -5,8 +5,7 @@ package radixkv
 // Ported from modular/modular rust_kv/kv-core/src/prefix_hit.rs at revision
 // 8d559749621418f39f31df7da998bcce884fa5b1 (Apache-2.0 WITH LLVM-exception;
 // vendored near-verbatim under third_party/modular/rust_kv with per-file byte
-// receipts in PINNED-SOURCE.json; see THIRD_PARTY_NOTICES.md "Modular
-// rust_kv/kv-core vendored tree and joint-prefix matcher port").
+// receipts in PINNED-SOURCE.json; see THIRD_PARTY_NOTICES.md). Changes were made.
 //
 // The rules here are about attention shape alone. They take residency as a
 // predicate, so the same code answers for any tier: the device pools, or a KV
@@ -26,10 +25,9 @@ package radixkv
 // a minimum: narrowing for one group can invalidate another's window, which
 // narrows it again.
 //
-// Changed for Fak: Go closure signatures replace Rust `impl Fn`/`impl FnMut`
+// Changes were made: Go closure signatures replace Rust `impl Fn`/`impl FnMut`
 // parameters; LeafShape becomes a fak-native Go type; debug_assert! becomes
-// a panic in LongestSlidingWindowHit (the zero-window case has no answer to
-// return, only a caller to fix). The fixed-point iteration, narrowing rules
+// a panic in LongestSlidingWindowHit. The fixed-point iteration, narrowing rules
 // and per-shape hit rules are ported verbatim.
 
 import "fmt"

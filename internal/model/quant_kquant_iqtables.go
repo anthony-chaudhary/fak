@@ -5,11 +5,10 @@ import (
 	"math"
 )
 
-// The IQ1/IQ2 scalar reference decoders below are direct Go ports of
-// dequantize_row_iq2_xxs, dequantize_row_iq2_xs, dequantize_row_iq2_s,
-// dequantize_row_iq1_s, and dequantize_row_iq1_m from llama.cpp revision
+// The IQ1/IQ2 scalar reference decoders below are direct Go ports of the
+// llama.cpp IQ1/IQ2 row dequantizers from revision
 // 6fe74980162af0ed5e559870d5deccafaa034e7c. The accompanying codebook tables
-// are copied from that revision's ggml/src/ggml-common.h.
+// are copied from that revision's GGML common constants.
 //
 // llama.cpp / ggml original notice:
 //

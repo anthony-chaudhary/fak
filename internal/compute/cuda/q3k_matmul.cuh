@@ -1,6 +1,6 @@
-// Q3_K decode arithmetic direct-ported from ggml-org/llama.cpp
-// commit 3c809f44383bcebc318b8cddd8c6d11aaa861e9b,
-// ggml/src/ggml-cuda/dequantize.cuh::dequantize_q3_K.
+// Q3_K decode arithmetic direct-ported from ggml-org/llama.cpp at
+// 3c809f44383bcebc318b8cddd8c6d11aaa861e9b (MIT). License and notices:
+// THIRD_PARTY_NOTICES.md ("llama.cpp").
 // FAK adaptation: byte-addressed GGUF blocks; fuse decode into F32 GEMV/token
 // panels rather than materializing dequantized weights. No SM100-only ISA.
 /*

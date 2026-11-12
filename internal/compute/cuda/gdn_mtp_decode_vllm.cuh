@@ -1,10 +1,8 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Adapted from vllm-project/vllm@ae065918640a198a56f6f17eb45e251c3229fe41,
- * csrc/gdn/fused_gdn_decode_kernel.cu (gdn_decode_post_conv_mtp_kernel), lineage
- * vllm/third_party/flash_linear_attention/ops/fused_gdn_decode_post_conv_mtp.py
- * (_gdn_mtp_update_kernel, _gdn_mtp_gated_rmsnorm_kernel). ADAPT verdict: the
+ * Adapted from vllm-project/vllm at ae065918640a198a56f6f17eb45e251c3229fe41
+ * (Apache-2.0). License and notices: THIRD_PARTY_NOTICES.md ("vLLM"). The
  * accepted-token replay idea is re-expressed below with no copied code blocks.
  * FAK keeps FP32 activations and one canonical [head,key,value] carried state
  * (upstream is BF16), the SiLU output gate, the cp.async pipeline on SM80+
