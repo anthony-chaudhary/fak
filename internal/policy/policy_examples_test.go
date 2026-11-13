@@ -15,9 +15,11 @@ import (
 // isPolicyManifest reports whether an examples/*.json file is a fak POLICY manifest
 // (this package's schema) rather than a different schema that merely shares the
 // examples/ dir — e.g. examples/model-routing.example.json is a `fak-route/v1` model
-// routing config, which a policy parser correctly rejects ("unknown field"). The
-// glob below must only validate POLICY files; a sibling schema dropped into examples/
-// would otherwise fail this test for being the wrong (but valid) kind of file. An
+// routing config, which a policy parser correctly rejects ("unknown field"), and the
+// retired-example tombstone stubs (a `tombstoned` / `reason` / `see` marker, see
+// examples/README.md "Tombstoned examples") are not policy at all. The glob below
+// must only validate POLICY files; a sibling schema dropped into examples/ would
+// otherwise fail this test for being the wrong (but valid) kind of file. An
 // untagged manifest defaults to the current policy version, so it still counts.
 func isPolicyManifest(b []byte) bool {
 	var probe struct {
@@ -27,6 +29,12 @@ func isPolicyManifest(b []byte) bool {
 		Candidate    string          `json:"candidate"`
 		Policies     json.RawMessage `json:"policies"`
 		Observations json.RawMessage `json:"observations"`
+		// Tombstoned marks a retired-example stub (examples/README.md "Tombstoned
+		// examples"): a file whose live content was retired by operator decision and
+		// replaced with a `tombstoned` / `reason` / `see` marker. It is NOT a policy
+		// manifest — the policy schema has no such field — so it must stay out of the
+		// parser, like any sibling schema that merely shares the examples/ dir.
+		Tombstoned string `json:"tombstoned"`
 	}
 	if err := json.Unmarshal(b, &probe); err != nil {
 		return true // not parseable as JSON-with-version: let ParseRuntime report it
@@ -34,6 +42,14 @@ func isPolicyManifest(b []byte) bool {
 	if probe.Schema != "" {
 		// A top-level "schema" key is a different family's self-tag (e.g.
 		// fak.resume-source-policy.v1) — policy manifests tag with "version".
+		return false
+	}
+	if probe.Tombstoned != "" {
+		// A top-level "tombstoned" key is the retired-example stub marker, not a
+		// policy manifest field. Keeping it out of the parser preserves the
+		// fail-loud guarantee for real manifests while letting the documented
+		// tombstone stubs (model-accounts.hosted-hive.json, routing-presets/
+		// ops-desk.json) sit in examples/ without being parsed as policy.
 		return false
 	}
 	// The modelops canary input predates an explicit schema tag. Its structural
