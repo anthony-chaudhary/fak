@@ -1,8 +1,7 @@
 fak rungstats — passive rung-decision distribution (7 probes, real fold, no gateway)
 
 RUNG                     KIND       REASON        COUNT  TOK_DELTA
-adjudicator.Adjudicator  ALLOW      -             3      +0
-adjudicator.Adjudicator  DENY       DEFAULT_DENY  1      +0
+adjudicator.Adjudicator  ALLOW      -             4      +0
 adjudicator.Adjudicator  DENY       POLICY_BLOCK  1      +0
 adjudicator.Adjudicator  DENY       SECRET_EXFIL  1      +0
 adjudicator.Adjudicator  TRANSFORM  -             1      +9

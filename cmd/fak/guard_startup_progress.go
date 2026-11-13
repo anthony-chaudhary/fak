@@ -24,6 +24,7 @@ type guardStartupProgress struct {
 	visible     bool
 	finished    bool
 	started     time.Time
+	delay       time.Duration
 	timer       *time.Timer
 }
 
@@ -35,8 +36,23 @@ func newGuardStartupProgress(w io.Writer, enabled, interactive bool, delay time.
 	if delay <= 0 {
 		delay = guardStartupProgressDelay
 	}
+	p.delay = delay
 	p.timer = time.AfterFunc(delay, p.reveal)
 	return p
+}
+
+// revealIfDue makes the current phase visible once startup has been observably
+// slow for the configured delay. It is the wall-clock twin of the timer's
+// reveal: the timer fires early when the runtime schedules it, but a starved
+// timer goroutine (heavy CI load) must not be able to leave a slow launch
+// silent, so Phase/Started also reveal synchronously here when the delay has
+// already elapsed.
+func (p *guardStartupProgress) revealIfDue() {
+	if p.visible || time.Since(p.started) < p.delay {
+		return
+	}
+	p.visible = true
+	p.renderLocked(false)
 }
 
 func (p *guardStartupProgress) Phase(phase string) {
@@ -51,6 +67,8 @@ func (p *guardStartupProgress) Phase(phase string) {
 	p.phase = phase
 	if p.visible {
 		p.renderLocked(false)
+	} else {
+		p.revealIfDue()
 	}
 }
 
@@ -80,7 +98,14 @@ func (p *guardStartupProgress) Started() {
 	if p.timer != nil {
 		p.timer.Stop()
 	}
-	if !p.enabled || !p.visible {
+	if !p.enabled {
+		return
+	}
+	// Reveal synchronously if the delay has already elapsed but the timer
+	// goroutine has not yet run (starved under load): a slow launch must not
+	// stay silent just because the timer was cancelled before it fired.
+	p.revealIfDue()
+	if !p.visible {
 		return
 	}
 	p.phase = "child registration/started"
@@ -121,6 +146,9 @@ func (p *guardStartupProgress) Abort() {
 	p.finished = true
 	if p.timer != nil {
 		p.timer.Stop()
+	}
+	if p.enabled {
+		p.revealIfDue()
 	}
 	if p.enabled && p.visible && p.interactive {
 		fmt.Fprintln(p.w)

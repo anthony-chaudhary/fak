@@ -93,13 +93,15 @@ func TestGuardResumeHarnessWarmSpliceSelectsNoReprefill(t *testing.T) {
 
 // An unrecognized wrapped binary gets NO continue flag — fak never guesses a foreign tool's
 // resume syntax (the same fence guardContinueFlagForAgent enforces on the restart path).
+// `codex` is a real CLI fak does not recognize for auto-continue (only claude/opencode are),
+// so it is the honest "unrecognized" fixture.
 func TestResumeHarnessUnknownAgentGetsNoContinueFlag(t *testing.T) {
-	desc := session.Descriptor{ID: "guard-x", Trace: "guard-x", Argv: []string{"opencode", "run"}}
+	desc := session.Descriptor{ID: "guard-x", Trace: "guard-x", Argv: []string{"codex", "run"}}
 	plan := planGuardResume("guard-x", desc, guardResumeInput{IdleSeconds: 60, TTL: resume.TTL5m})
 	if plan.ContinueFlag != "" {
 		t.Errorf("unrecognized agent must get no continue flag, got %q", plan.ContinueFlag)
 	}
-	if got := joinArgv(plan.RelaunchArgv); got != "fak guard -- opencode run" {
+	if got := joinArgv(plan.RelaunchArgv); got != "fak guard -- codex run" {
 		t.Errorf("relaunch argv = %q, want the recorded command with no injected resume flag", got)
 	}
 }

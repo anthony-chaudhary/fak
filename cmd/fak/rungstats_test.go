@@ -12,11 +12,13 @@ import (
 // TestCmdRungStatsTable is the golden assertion for `fak rungstats`: folding the
 // fixed probe set through the real adjudicator chain must print the exact
 // rung-decision distribution table in testdata/rungstats.golden. The probe verdicts
-// are stable under the built-in DefaultPolicy (three allows, then one tool per
-// distinct deny reason), every cheaper rung defers, and rungobs.Observer.Snapshot
-// sorts deterministically — so the table is byte-stable. We pin adjudicator.Default
-// to the default floor first so a sibling test that swapped in a custom policy
-// (attest_test.go / main_test.go) cannot make this order-dependent.
+// are stable under the built-in DefaultPolicy (four allows — the default_open
+// posture admits the unlisted probe tool that fail_closed once DEFAULT_DENY'd —
+// then one tool per distinct deny reason), every cheaper rung defers, and
+// rungobs.Observer.Snapshot sorts deterministically — so the table is byte-stable.
+// We pin adjudicator.Default to the default floor first so a sibling test that
+// swapped in a custom policy (attest_test.go / main_test.go) cannot make this
+// order-dependent.
 func TestCmdRungStatsTable(t *testing.T) {
 	adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy())
 	ifc.Default.Reset("")
