@@ -29,6 +29,7 @@ package defaultvaluescore
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -110,6 +111,10 @@ type reviewedDefaultDecision struct {
 // observable as the agentic default window moves. Dates are UTC YYYY-MM-DD.
 var offWithReason = map[string]reviewedDefaultDecision{
 	"gpudirect-overflow": {reason: "compatibility flag has no guard or serve overflow consumer; keep disabled until a wired implementation and hardware witness justify exposure", reviewBy: "2026-11-16"},
+	"chat-elide": {
+		reason:   "the serving router keeps the client's declared tools byte-identical by default (the 2026-11-10 hosting-simplification flip); the guard door keeps the elider armed, and --chat-elide / FAK_CHAT_ELIDE re-arm it on serve",
+		reviewBy: "2026-11-16",
+	},
 	"context-budget-tokens": {
 		reason:   "hard reset directives require an operator context policy; zero preserves the unbounded policy instead of guessing a model window",
 		reviewBy: "2026-11-16",
@@ -230,8 +235,10 @@ var reFlag = regexp.MustCompile(
 // literal. A default that references a named constant (e.g. gateway.DefaultCompact-
 // HistoryBudget) is treated as ON -- a named default-budget constant is the codebase's
 // idiom for "shipped enabled", and conflating it with 0 would false-positive the very
-// flags #1089 fixed to be default-on.
-func ParseFlags(text, source string) []valueFlag {
+// flags #1089 fixed to be default-on. root is the repo root, used to resolve a
+// constant-equality Bool default (a == b) against the gateway const values; it may be
+// empty for synthetic fixtures, in which case the named-constant rule applies.
+func ParseFlags(text, source, root string) []valueFlag {
 	var out []valueFlag
 	for _, m := range reFlag.FindAllStringSubmatch(text, -1) {
 		kind, name, def, help := m[1], m[2], strings.TrimSpace(m[3]), unescape(m[4])
@@ -242,7 +249,7 @@ func ParseFlags(text, source string) []valueFlag {
 			name:      name,
 			kind:      kind,
 			defLit:    def,
-			defaultOn: judgeDefaultOn(kind, def),
+			defaultOn: judgeDefaultOn(kind, def, root),
 			source:    source,
 			help:      help,
 		})
@@ -260,7 +267,7 @@ func isValueFlag(name, help string) bool {
 }
 
 // judgeDefaultOn applies the per-kind default-on rule documented on ParseFlags.
-func judgeDefaultOn(kind, def string) bool {
+func judgeDefaultOn(kind, def, root string) bool {
 	switch kind {
 	case "Bool":
 		// A Bool is ON unless its default is a literal false sentinel. A NAMED-CONSTANT
@@ -270,6 +277,16 @@ func judgeDefaultOn(kind, def string) bool {
 		// the bare literal `true`, so a Bool value-flag defaulted from a constant was
 		// false-positived as default-OFF (the --elide-stale-reads regression the live-tree
 		// floor caught). Only a bare `false` literal is the off sentinel.
+		//
+		// A constant-equality expression (gateway.DefaultServeChatToolResultElide ==
+		// gateway.ChatToolResultElideOn) is NOT a named-constant default: it is a
+		// comparison whose value is decided by the two constants it names. Judging it
+		// ON by the named-constant rule false-positives --chat-elide, which actually
+		// ships default-OFF (the serving-router posture). Evaluate the expression
+		// against the gateway const values read from the tree instead.
+		if on, ok := evalBoolConstEq(def, root); ok {
+			return on
+		}
 		return !isFalseLiteral(def)
 	case "String":
 		// A non-empty string literal default is ON. Anything that is not a bare ""
@@ -304,6 +321,119 @@ func isZeroLiteral(def string) bool {
 // enabled" idiom the numeric branch already applies via isZeroLiteral.
 func isFalseLiteral(def string) bool {
 	return strings.TrimSpace(def) == "false"
+}
+
+// reConstEq matches a Bool default that is a constant-equality expression:
+// <const> == <const> or <const> != <const>. Both operands must be named constants
+// (identifiers, optionally package-qualified like gateway.Foo); a literal side is not a
+// const-equality this resolver can evaluate from the tree.
+var reConstEq = regexp.MustCompile(`^\s*(\S+)\s*(==|!=)\s*(\S+)\s*$`)
+
+// reConstIdent matches a named-constant reference: an identifier, optionally
+// package-qualified (gateway.ChatToolResultElideOn).
+var reConstIdent = regexp.MustCompile(`^[A-Za-z_]\w*(\.[A-Za-z_]\w*)?$`)
+
+// reGatewayConst matches one exported gateway const assignment line: Name = value, where
+// value is a string literal or another exported const. Exported (uppercase) names only,
+// so package-level consts are captured and lowercase locals are ignored. This is the
+// tree-reading discipline the whole card runs on: a lightweight line scan, not a parser.
+var reGatewayConst = regexp.MustCompile(`(?m)^\s*([A-Z]\w*)\s*=\s*("[^"]*"|[A-Z]\w*)\s*(?://.*)?$`)
+
+// splitConstEq parses a constant-equality expression into its operator and two operands.
+// ok is false when the default is not a resolvable <const> ==/!= <const> expression.
+func splitConstEq(def string) (op, lhs, rhs string, ok bool) {
+	m := reConstEq.FindStringSubmatch(def)
+	if m == nil {
+		return "", "", "", false
+	}
+	lhs, op, rhs = m[1], m[2], m[3]
+	if !reConstIdent.MatchString(lhs) || !reConstIdent.MatchString(rhs) {
+		return "", "", "", false
+	}
+	return op, lhs, rhs, true
+}
+
+// constName strips a package qualifier from a const reference (gateway.Foo -> Foo).
+func constName(ref string) string {
+	if i := strings.LastIndex(ref, "."); i >= 0 {
+		return ref[i+1:]
+	}
+	return ref
+}
+
+// gatewayConsts reads the gateway package source and returns a map of exported const
+// name -> raw right-hand side (a quoted string or another const name). ok is false when
+// the gateway source cannot be read (a synthetic fixture with no tree, or an empty root),
+// in which case the caller falls back to the named-constant rule.
+func gatewayConsts(root string) (map[string]string, bool) {
+	if root == "" {
+		return nil, false
+	}
+	dir := filepath.Join(root, "internal", "gateway")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, false
+	}
+	consts := map[string]string{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		text := scorecard.SafeRead(filepath.Join(dir, e.Name()))
+		for _, m := range reGatewayConst.FindAllStringSubmatch(text, -1) {
+			consts[m[1]] = m[2]
+		}
+	}
+	if len(consts) == 0 {
+		return nil, false
+	}
+	return consts, true
+}
+
+// resolveGatewayConst resolves one gateway const to its string value, following const
+// references transitively (DefaultServeChatToolResultElide -> ChatToolResultElideOff ->
+// "off"). ok is false when the name is unknown or the chain does not terminate in a
+// string literal (a cycle or a non-string const).
+func resolveGatewayConst(name string, consts map[string]string, seen map[string]bool) (string, bool) {
+	if seen[name] {
+		return "", false
+	}
+	seen[name] = true
+	raw, ok := consts[name]
+	if !ok {
+		return "", false
+	}
+	if strings.HasPrefix(raw, `"`) && strings.HasSuffix(raw, `"`) && len(raw) >= 2 {
+		return raw[1 : len(raw)-1], true
+	}
+	return resolveGatewayConst(raw, consts, seen)
+}
+
+// evalBoolConstEq evaluates a Bool default that is a constant-equality expression
+// (gateway.DefaultServeChatToolResultElide == gateway.ChatToolResultElideOn) against the
+// gateway const values read from the tree. It returns (value, ok); ok is false when the
+// default is not a resolvable constant-equality expression, in which case the caller
+// falls back to the named-constant / literal rule. This is what keeps --chat-elide
+// judged default-OFF (the serving-router posture) instead of false-positived ON by the
+// named-constant rule.
+func evalBoolConstEq(def, root string) (bool, bool) {
+	op, lhs, rhs, ok := splitConstEq(def)
+	if !ok {
+		return false, false
+	}
+	consts, ok := gatewayConsts(root)
+	if !ok {
+		return false, false
+	}
+	lv, lok := resolveGatewayConst(constName(lhs), consts, map[string]bool{})
+	rv, rok := resolveGatewayConst(constName(rhs), consts, map[string]bool{})
+	if !lok || !rok {
+		return false, false
+	}
+	if op == "==" {
+		return lv == rv, true
+	}
+	return lv != rv, true
 }
 
 func unescape(s string) string {
@@ -569,7 +699,7 @@ func BuildAsOf(root string, asOf time.Time) scorecard.Payload {
 	var flags []valueFlag
 	for _, rel := range FlagSources {
 		text := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(rel)))
-		flags = append(flags, ParseFlags(text, rel)...)
+		flags = append(flags, ParseFlags(text, rel, root)...)
 	}
 	ampText := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(AmplificationSurface)))
 	scoreSurfaces := map[string]string{}
@@ -597,7 +727,7 @@ func BuildAsOf(root string, asOf time.Time) scorecard.Payload {
 	finding := "the agentic default window is balanced: every value lever has a current reviewed reason for its ON/OFF default, context defaults agree, and reports use observed evidence"
 	next := "hold -- re-run when a value flag lands or any default review date arrives"
 	if debt > 0 {
-		finding = scorecard.CountNoun(debt, "default-window defect") + ": unreviewed exposure, stale ON/OFF gating, context drift, or modeled evidence is outside the reviewed window"
+		finding = "the agentic default window is unbalanced: " + scorecard.CountNoun(debt, "default-window defect") + " -- unreviewed exposure, stale ON/OFF gating, context drift, or modeled evidence is outside the reviewed window"
 		next = "review worst-first (" + worstKPI(kpis) + "): choose ON/OFF from evidence, renew the witnessed gate, or exclude the lever"
 	}
 
