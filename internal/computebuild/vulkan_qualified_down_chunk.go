@@ -13,7 +13,7 @@ const (
 	vulkanQualifiedDownChunkStem      = "v41_routed_down_panel_chunk"
 	vulkanQualifiedDownChunkHeader    = "internal/compute/v41_routed_down_chunk_spirv.h"
 	vulkanQualifiedDownChunkSourceSHA = "df5e3ab83cce948aa7d246218a7c12eb843f72ffb28be41e00f97b4cb279d8e7"
-	vulkanQualifiedDownChunkHeaderSHA = "8ede430565aa4d9c9d1ca7a8c2cad35df89b3bbc09c16808e9b6087305ac9837"
+	vulkanQualifiedDownChunkHeaderSHA = "ccacba2aa706de2b6c4df3db6199d13f19a7238672048736c1b02ad5dfc0e98a"
 	vulkanQualifiedDownChunkModuleSHA = "a73eb3056a058e058556825254ce9de65e92eba7f3aec946718e272d978ec674"
 	vulkanQualifiedDownChunkBytes     = 2768
 )

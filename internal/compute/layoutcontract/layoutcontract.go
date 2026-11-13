@@ -203,7 +203,7 @@ func (r SourceRef) validate(where string) error {
 
 // pinSHA is the commit the SourceRefs below were cut at; re-pin an entry when
 // its cited line moves.
-const pinSHA = "9bd0f1516ae06f8e2848f07b8b9a63c78c920efd"
+const pinSHA = "faf9a253bf12b4d1d7f772a8c14108d48a40f30c"
 
 // registry holds the closed family set. Order is presentation order only;
 // Families sorts.
@@ -223,7 +223,7 @@ var registry = []Contract{
 		Source:          SourceRef{Path: "internal/model/quant_q4k.go", Line: 22, SHA: pinSHA},
 		Transform: Transform{
 			Name:   "bench.RepackQ4KInterleaved / bench.UnrepackQ4KInterleaved",
-			Source: SourceRef{Path: "internal/bench/q4krepack.go", Line: 163, SHA: pinSHA},
+			Source: SourceRef{Path: "internal/bench/q4krepack.go", Line: 162, SHA: pinSHA},
 			Forward: func(s Shape, b []byte) ([]byte, error) {
 				return bench.RepackQ4KInterleaved(b, s.Rows, s.Cols, s.Width)
 			},
@@ -257,10 +257,10 @@ var registry = []Contract{
 		ScaleLayout:     ScaleTiled128x4,
 		PaddingRule:     "in is a multiple of 16 (weight bytes are exact out*in/2); the 128x4-tiled scale image is zero-padded to complete the final 128-row and 4-column tiles",
 		PackingPath:     PackingRuntime,
-		Source:          SourceRef{Path: "internal/compute/nvfp4_scale_layout.go", Line: 26, SHA: pinSHA},
+		Source:          SourceRef{Path: "internal/compute/nvfp4_scale_layout.go", Line: 24, SHA: pinSHA},
 		Transform: Transform{
 			Name:   "compute.SwizzleNVFP4Scales / compute.UnswizzleNVFP4Scales",
-			Source: SourceRef{Path: "internal/compute/nvfp4_scale_layout.go", Line: 26, SHA: pinSHA},
+			Source: SourceRef{Path: "internal/compute/nvfp4_scale_layout.go", Line: 24, SHA: pinSHA},
 			Forward: func(s Shape, b []byte) ([]byte, error) {
 				return compute.SwizzleNVFP4Scales(s.Rows, s.Cols, b)
 			},

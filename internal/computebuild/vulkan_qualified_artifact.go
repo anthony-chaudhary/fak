@@ -15,7 +15,7 @@ const (
 	vulkanQualifiedIndexScaleStem      = "v41_index_scale_bf16"
 	vulkanQualifiedIndexScaleHeader    = "internal/compute/v41_index_scale_bf16_spirv.h"
 	vulkanQualifiedIndexScaleSourceSHA = "24cb0eb5c32b545c4c3c495f1ac9529a9013500baad0f0d7dc3f473c28b7d0ec"
-	vulkanQualifiedIndexScaleHeaderSHA = "92cdb499bd6909a14488334ff1baa741e092211ab880a26d3c687f2cb18c3fcf"
+	vulkanQualifiedIndexScaleHeaderSHA = "b5acc8db18d6281c281a415910124f16a2d58174b7ffcf0b4ffbd230c6c16efc"
 	vulkanQualifiedIndexScaleModuleSHA = "b67ed132187bde41131d355d9d493f56e5063ab87aa0a6a53ea66c8743136500"
 	vulkanQualifiedIndexScaleBytes     = 2836
 )

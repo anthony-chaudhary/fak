@@ -13,7 +13,7 @@ const (
 	vulkanQualifiedQ2TokenPairStem      = "v41_q2k_token_pair"
 	vulkanQualifiedQ2TokenPairHeader    = "internal/compute/v41_q2k_token_pair_spirv.h"
 	vulkanQualifiedQ2TokenPairSourceSHA = "e1a3fd8e3c1f8ce268e29e0f75a89ee2abcc4ecddce2d0b76f2854abd1b42442"
-	vulkanQualifiedQ2TokenPairHeaderSHA = "f9e11a9f4d35830356a070800fb8ac87c0c7b35a30e2d79cc40e4aef968d7e12"
+	vulkanQualifiedQ2TokenPairHeaderSHA = "7357a7cf34de2b6cb5f27dda673f25a5198ae12827f5cf34dd469759aa966b5c"
 	vulkanQualifiedQ2TokenPairModuleSHA = "106f42d56d87f0d2ce44704a1e944efefc7a67320cf1a44cb492c4bacf07acbf"
 	vulkanQualifiedQ2TokenPairBytes     = 11796
 )

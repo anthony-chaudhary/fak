@@ -13,7 +13,7 @@ const (
 	vulkanQualifiedActivationChunkStem      = "v41_routed_swiglu_panel_chunk"
 	vulkanQualifiedActivationChunkHeader    = "internal/compute/v41_routed_swiglu_chunk_spirv.h"
 	vulkanQualifiedActivationChunkSourceSHA = "68d6def81b6e0810b963696da3bdb9259c2fa08e9480f28a7db86d74e6bcc08d"
-	vulkanQualifiedActivationChunkHeaderSHA = "d386ddf385e6332cd8722880743eb988b8d57bf43a615d9babd8b6c437c7a1cf"
+	vulkanQualifiedActivationChunkHeaderSHA = "0d9b8d7aa81904dbf3f9be1d9f97e3b1da34a11cfdf15c05157647ec684d3aca"
 	vulkanQualifiedActivationChunkModuleSHA = "6bb4c0d03199686cafb9efa5faa37e4ae14b567f6f2308f687ec5e3b926ed72c"
 	vulkanQualifiedActivationChunkBytes     = 6052
 )
