@@ -1,6 +1,8 @@
 // Command loadgen is a pure-Go (stdlib-only) load generator for OpenAI-compatible
 // /v1/chat/completions endpoints. It runs a concurrency sweep against streaming
-// completions and writes a MATRIX.json with usage-based end-to-end output tok/s
+// completions with two-tier in-flight capping — a session slot per request plus a
+// prefill slot released at first content (TTFT) — and writes a MATRIX.json with
+// usage-based end-to-end output tok/s
 // (wall includes per-request prefill/TTFT), client first-content timing, chunk
 // cadence, and latency percentiles per concurrency point. Chunk cadence is not
 // token/decode throughput; token throughput is unavailable when usage is missing.
@@ -32,6 +34,7 @@ func main() {
 		prompt       = flag.String("prompt", "Write one sentence about why benchmarks matter.", "prompt text")
 		maxTokens    = flag.Int("max-tokens", 64, "max_tokens per request")
 		concurrency  = flag.String("concurrency", "1,4,16", "comma-separated concurrency levels")
+		prefillConc  = flag.Int("prefill-concurrency", 0, "max requests awaiting first content (TTFT) at once; 0 ties it to each concurrency level")
 		requestsPer  = flag.Int("requests-per", 32, "requests per concurrency level")
 		apiKeyEnv    = flag.String("api-key-env", "", "env var holding the API key (optional)")
 		maxErrorRate = flag.Float64("max-error-rate", 0.0, "fail if any point exceeds this error rate")
@@ -57,8 +60,9 @@ func main() {
 
 	cfg := &Config{
 		URL: *url, Model: *model, Stack: *stack, Prompt: *prompt,
-		MaxTokens: *maxTokens, Concurrencies: concs, RequestsPer: *requestsPer, APIKey: apiKey,
-		RatePerSec: *rate, MaxCatchUp: *maxCatchUp,
+		MaxTokens: *maxTokens, Concurrencies: concs, RequestsPer: *requestsPer,
+		PrefillConcurrency: *prefillConc, RatePerSec: *rate, MaxCatchUp: *maxCatchUp,
+		APIKey: apiKey,
 	}
 	if err := validateConfig(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
