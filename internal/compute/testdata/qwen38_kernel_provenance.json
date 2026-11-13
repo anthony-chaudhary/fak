@@ -119,7 +119,7 @@
       "source_path": "ggml/src/ggml-cpu/arch/x86/quants.c",
       "destination": "internal/model/quant_kquant_int8_q2k.go",
       "decision": "ADAPT",
-      "attribution": "Integer Q2_K x Q8_K reduction adapted from llama.cpp ggml_vec_dot_q2_K_q8_K\n// (ggml/src/ggml-cpu/arch/x86/quants.c) and dequantize_row_q2_K (ggml/src/ggml-quants.c) at\n// 83078fec0db82d6b5a00d9599062c38c39145755 (MIT).",
+      "attribution": "Integer Q2_K x Q8_K reduction adapted from llama.cpp at\n// 83078fec0db82d6b5a00d9599062c38c39145755 (MIT).",
       "parity_witness": "internal/model/quant_kquant_int8_q2k_test.go"
     },
     {
@@ -146,7 +146,7 @@
       "source_path": "ggml/src/ggml-cuda/fattn-mma-f16.cuh",
       "destination": "internal/compute/cuda/fattn_mma_hd256.cuh",
       "decision": "ADAPT",
-      "attribution": "Adapted from llama.cpp ggml/src/ggml-cuda/fattn-mma-f16.cuh, mma.cuh and cp-async.cuh at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
+      "attribution": "Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
       "parity_witness": "internal/compute/cuda_qwen38_prefill_attention_test.go"
     },
     {
@@ -155,7 +155,7 @@
       "source_path": "ggml/src/ggml-cuda/mmq.cuh",
       "destination": "internal/compute/cuda/q4k_mmq.cuh",
       "decision": "ADAPT",
-      "attribution": "Adapted from llama.cpp ggml/src/ggml-cuda/mmq.cuh, mmq-load-tiles.cuh, mmq-vec-dot.cuh,\n// mmq-config-ampere.cuh, mma.cuh, quantize.cu and common.cuh at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
+      "attribution": "Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
       "parity_witness": "internal/compute/cuda_q4k_prefill_arms_cuda_test.go"
     },
     {
@@ -164,7 +164,7 @@
       "source_path": "ggml/src/ggml-cuda/mmvq.cu",
       "destination": "internal/compute/cuda/q4k_mmvq.cuh",
       "decision": "ADAPT",
-      "attribution": "Adapted from llama.cpp ggml/src/ggml-cuda/mmvq.cu (mul_mat_vec_q, calc_nwarps,\n// calc_rows_per_block), vecdotq.cuh (vec_dot_q4_K_q8_1, vec_dot_q4_K_q8_1_impl_vmmq) and\n// quantize.cu (quantize_q8_1) at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
+      "attribution": "Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
       "parity_witness": "internal/compute/cuda_q4k_decode_arms_cuda_test.go"
     },
     {
