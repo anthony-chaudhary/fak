@@ -535,7 +535,17 @@ func (c *Config) client() *http.Client {
 	if c.HTTPClient != nil {
 		return c.HTTPClient
 	}
-	return &http.Client{Timeout: 120 * time.Second}
+	return &http.Client{Timeout: 120 * time.Second, Transport: socketDefaultsTransport()}
+}
+
+// socketDefaultsTransport returns an http.Transport whose dialer applies the
+// ported aiperf socket defaults (TCP_NODELAY, keepalive, per-OS buffer and TCP
+// options) to every connection. Other DefaultTransport knobs are kept so
+// connection reuse and proxy handling are unchanged.
+func socketDefaultsTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = socketDefaultsDialer().DialContext
+	return t
 }
 
 func (c *Config) now() time.Time {
