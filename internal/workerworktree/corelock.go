@@ -98,6 +98,12 @@ type landConfig struct {
 	// depends on. It is the ONLY input a bounded CAS retry may reuse a verdict on, and an
 	// empty closure means no disjointness was ever proven, so the verifier re-runs.
 	verifyClosure []string
+	// intendedIssue is the authoritative GitHub issue number this land is for,
+	// threaded from the private lander (cmd/fak-flow runLand) on the bot path, where
+	// no public Intent is ever written. When > 0, messageBindingLandGate binds the
+	// final commit message's closing reference to it instead of LoadIntent. 0 means
+	// "not supplied" — the gate falls back to the worktree's durable Intent.
+	intendedIssue int
 }
 
 // LandTrunkRefDefault is the trunk branch the stale-base ancestor check falls back
@@ -162,6 +168,18 @@ func WithCoreLockWitness(claim string) LandOption {
 // WithLandingQueue configures a custom LandingQueue coordinator for Land operations.
 func WithLandingQueue(q *LandingQueue) LandOption {
 	return func(c *landConfig) { c.queue = q }
+}
+
+// WithIntendedIssue threads the authoritative GitHub issue number this land is for
+// into the MESSAGE_RACE guard (#2196). On the bot path (fak-flow land -> fak worktree
+// worker land) no public Intent is ever written, so the guard's LoadIntent fallback
+// fails open and the final commit message's closing reference is never bound to the
+// leased ticket. The private lander knows the ticket's issue number and passes it
+// here; messageBindingLandGate then refuses a land whose final message cites a
+// DIFFERENT issue. A value of 0 (or negative) means "not supplied" and the gate
+// falls back to the worktree's durable Intent, preserving the public-native path.
+func WithIntendedIssue(n int) LandOption {
+	return func(c *landConfig) { c.intendedIssue = n }
 }
 
 func newLandConfig(opts []LandOption) landConfig {

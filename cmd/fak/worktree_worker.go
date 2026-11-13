@@ -1088,6 +1088,8 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	sourceHolder := fs.String("source-lease-holder", "", "immutable granted Source lease holder")
 	sourceGeneration := fs.Int64("source-lease-generation", 0, "immutable positive granted Source lease generation")
 	msgFile := fs.String("msg-file", "", "commit message file for `git commit -s -F` (default: derive from the worktree tip)")
+	intendedIssue := fs.Int("intended-issue", 0,
+		"authoritative GitHub issue number this land is for; the MESSAGE_RACE guard (#2196) refuses a land whose final commit message cites a different issue. 0 (default) falls back to the worktree's durable intent")
 	verifyDefault := "go-build"
 	if mode == "prepare-pending" || mode == "accept-pending" {
 		verifyDefault = "off"
@@ -1215,6 +1217,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	}
 	if strings.TrimSpace(*branch) != "" {
 		opts = append(opts, workerworktree.WithLandBranch(strings.TrimSpace(*branch)))
+	}
+	if *intendedIssue > 0 {
+		opts = append(opts, workerworktree.WithIntendedIssue(*intendedIssue))
 	}
 	if strings.TrimSpace(*recoveryRemote) != "" || *requireRemote {
 		remote := strings.TrimSpace(*recoveryRemote)

@@ -30,6 +30,12 @@ const (
 	// LandResultScopeEscape refuses a candidate whose tree delta reaches outside
 	// the explicitly declared land paths — a pre-CAS fence so trunk is untouched.
 	LandResultScopeEscape = "path-scope-escape"
+	// LandResultMessageBindingMismatch refuses a land whose commit message cites a
+	// DIFFERENT issue than the worktree's durable intent (the MESSAGE_RACE, #2196):
+	// a commit that auto-closes the wrong issue would close a ticket whose work this
+	// diff does not carry. The intent's issue number is the operator-supplied source
+	// of truth; a mismatched closing reference is a binding error, not a land.
+	LandResultMessageBindingMismatch = "message-binding-mismatch"
 )
 
 func isolatedLandReconciliation(wtPath, reason, detail string) (Result, bool) {
@@ -515,6 +521,18 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 	}
 	defer cleanup()
 
+	// MESSAGE_RACE guard (#2196). Before anything touches the trunk, bind the commit
+	// message's closing issue reference to the worktree's durable intent. A commit
+	// that auto-closes a DIFFERENT issue would close a ticket whose work this diff
+	// does not carry — the exact failure the six revert commits (764135500bf,
+	// 4ef69ac68f7, af06b6b399e, 9f1105b86c7, 557196ebefe, 768c2888d96) had to undo.
+	// Fail-open: only a positive issue-number mismatch refuses.
+	if refusal, fired := messageBindingLandGate(wtPath, msgFile, cfg.intendedIssue, git); fired {
+		phaseDone()
+		refusal.DroppedOutOfLane = droppedOutOfLane
+		return refusal
+	}
+
 	// HARD-SELF CORE LOCK (#5392). The last gate before anything touches the trunk:
 	// a diff carrying a core-locked kernel path (internal/adjudicator/**,
 	// internal/abi/**, internal/corelocks/**) lands only with a maintenance witness
@@ -655,6 +673,69 @@ func resolveMsgFile(wtPath, baseSHA, commitMsgFile string, git GitRunner) (strin
 	}
 	f.Close()
 	return f.Name(), func() { os.Remove(f.Name()) }, nil
+}
+
+// messageBindingLandGate is the MESSAGE_RACE guard (#2196). It refuses a land whose
+// commit message cites a DIFFERENT issue than the work is for. The intended issue is
+// the authoritative source of truth: when intendedIssue > 0 it is threaded from the
+// private lander (cmd/fak-flow runLand) on the bot path, where no public Intent is
+// ever written; otherwise the gate falls back to the worktree's durable Intent
+// (Intent.IssueNumber, derived at SaveIntent time from the intended subject). A
+// commit that auto-closes a different issue would close a ticket whose work this
+// diff does not carry.
+//
+// It is FAIL-OPEN in every direction except a positive mismatch: no intended issue
+// and no intent, an unreadable intent, a message with no issue reference, or an
+// unparseable reference all clear the gate (the land proceeds exactly as before).
+// Only a POSITIVE issue-number disagreement flips OK to false, so the guard can
+// never manufacture a refusal from uncertainty. This mirrors the landReadbackVerify
+// contract: a missing path is not a refusal; a proven mismatch is.
+func messageBindingLandGate(wtPath, msgFile string, intendedIssue int, git GitRunner) (Result, bool) {
+	// Resolve the authoritative intended issue: the threaded value wins when
+	// supplied (the bot path); otherwise fall back to the durable Intent
+	// (the public-native path). No authority in either -> fail open.
+	issue := intendedIssue
+	if issue <= 0 {
+		in, err := LoadIntent(wtPath)
+		if err != nil || in.IssueNumber <= 0 {
+			return Result{}, false // no durable intent / no issue authority: fail open
+		}
+		issue = in.IssueNumber
+	}
+	raw, err := os.ReadFile(msgFile)
+	if err != nil {
+		return Result{}, false // unreadable message: fail open
+	}
+	subject := strings.SplitN(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n", 2)[0]
+	tokens := intentIssueTokenRE.FindAllString(subject, -1)
+	if len(tokens) == 0 {
+		return Result{}, false // no closing reference: nothing to bind
+	}
+	if len(tokens) != 1 {
+		// A subject citing more than one issue is ambiguous; the intended single
+		// issue cannot be proven to be the one this commit closes. Fail open — the
+		// operator's intent already validated a single reference at SaveIntent time,
+		// so a multi-reference subject is a worker-authoring concern, not a binding
+		// error this gate owns.
+		return Result{}, false
+	}
+	cited, err := strconv.Atoi(strings.TrimPrefix(tokens[0], "#"))
+	if err != nil || cited <= 0 {
+		return Result{}, false // unparseable reference: fail open
+	}
+	if cited == issue {
+		return Result{}, false // bound to the leased ticket: clear
+	}
+	return Result{
+		OK:        false,
+		Code:      LandResultMessageBindingMismatch,
+		Applied:   false,
+		Committed: false,
+		Preserved: true,
+		Reason: fmt.Sprintf("commit message cites #%d but the work is for #%d (message-binding mismatch, MESSAGE_RACE #2196)",
+			cited, issue),
+		RecoveryAction: "Re-land with a commit message that cites the work's intended issue, or correct the intent. A commit that auto-closes a different issue would close a ticket this diff does not fix.",
+	}, true
 }
 
 // gitApply applies a captured diff to root's working tree via `git apply`, reading
