@@ -1506,3 +1506,86 @@ func TestRepositoryQualifiedDependencies(t *testing.T) {
 		t.Fatalf("json round-trip = %+v, want %+v", round, deps)
 	}
 }
+
+// TestDiscoverabilityAdmitsCompleteBody guards fak-private#2429: the
+// discoverability gate must admit a body whose done-condition lives as
+// unprefixed prose under the combined "## Done condition / witness" heading
+// (the fak-private#2427/#2428 false-refusal shape).
+func TestDiscoverabilityAdmitsCompleteBody(t *testing.T) {
+	reproBody := strings.Join([]string{
+		"Process cause: none",
+		"### Parent context",
+		"Parent: the shift-left-stuck-work spine.",
+		"### Current state",
+		"The filing gate demands a definition of done, yet refuses a body that",
+		"carries every required section under a combined heading.",
+		"### Why this is next",
+		"A valid issue cannot be filed without bypassing the gate.",
+		"### Working spine",
+		"stuck-work prevention -> born-routed issue contract -> this fix.",
+		"### Core through-line",
+		"Reconcile the scope probe with the section-presence probe so a body",
+		"carrying every required heading is admitted.",
+		"### Out of scope",
+		"Loosening the gate for bodies that genuinely omit a section.",
+		"## Value",
+		"Centrality: Stewardship (the born-routed gate must be trustworthy, not merely strict).",
+		"",
+		"- For: the ops-lane filing agent.",
+		"- Problem: a complete body is refused for sections it plainly contains.",
+		"- Today: filing needs a discoverability bypass even when every section is present.",
+		"- Better because: the gate admits complete bodies and still refuses incomplete ones.",
+		"- P1: advanced - a valid issue can be filed without bypassing the gate, so the gate keeps its meaning.",
+		"- P2: preserved - genuinely incomplete bodies are still refused.",
+		"- P3: N/A - no runtime or performance surface is touched.",
+		"- P4: N/A - no public SDK or frozen ABI is touched.",
+		"### Done condition / witness",
+		"Done when the combined-heading body shape is admitted without a bypass flag",
+		"and a body missing a section is still refused.",
+		"",
+		"- [ ] The combined-heading body shape is admitted by the gate.",
+		"### Witness",
+		"go test ./internal/issuepolicy -run TestDiscoverabilityAdmitsCompleteBody -count=1",
+		"### Acceptance gate",
+		"go test ./internal/issuepolicy -count=1",
+		"### Lane",
+		"ops",
+		"### Likely files",
+		"- `internal/issuepolicy/contract.go`",
+		"### Closure binding",
+		"Resolving commit cites this issue.",
+		"### Placement",
+		"gen/now; P1; milestone G0; ops lane",
+	}, "\n")
+	title := "fix(issuepolicy): admit the combined done-condition heading"
+
+	review := ReviewIssueDraft(IssueDraft{Title: title, Body: reproBody}, Options{})
+	if !review.OK || review.Dispatchability != Dispatchable {
+		t.Fatalf("review = %+v, want the complete combined-heading body dispatchable", review)
+	}
+	if has(review.MissingSections, "done_condition") || has(review.MissingFields, "done_condition") {
+		t.Fatalf("done_condition held despite the ## Done condition / witness body: sections=%v fields=%v", review.MissingSections, review.MissingFields)
+	}
+	candidate := CandidateFromIssueDraft(IssueDraft{Title: title, Body: reproBody})
+	if candidate.DoneCondition == "" {
+		t.Fatal("DoneCondition empty for the combined-heading body")
+	}
+	if candidate.Witness == "" {
+		t.Fatal("Witness empty; the combined-heading fallback must not swallow the witness section")
+	}
+
+	// Negative control: a body with no done-condition section is still refused.
+	start := strings.Index(reproBody, "### Done condition / witness")
+	end := strings.Index(reproBody, "### Witness")
+	if start < 0 || end < 0 || end < start {
+		t.Fatalf("fixture lost its anchors: start=%d end=%d", start, end)
+	}
+	missing := reproBody[:start] + reproBody[end:]
+	review = ReviewIssueDraft(IssueDraft{Title: title, Body: missing}, Options{})
+	if review.OK || !has(review.Reasons, ReasonScopeIncomplete) {
+		t.Fatalf("review = %+v, want a body without any done-condition section refused", review)
+	}
+	if !has(review.MissingSections, "done_condition") {
+		t.Fatalf("missing sections = %v, want done_condition", review.MissingSections)
+	}
+}
