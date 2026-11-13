@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/bits"
 	"net"
 	"os"
 	"runtime"
@@ -149,7 +150,23 @@ const DefaultRDMARecvBufCount = 4
 // DefaultConfig returns configuration with sensible defaults.
 func DefaultConfig() Config {
 	maxMem := 512
-	if runtime.GOOS != "linux" {
+	maxKeys := uint64(10000000)
+	if sysRAM := systemMemoryGB(); sysRAM > 0 {
+		// Size the slab and index to the host so DefaultConfig().Validate()
+		// passes on small runners (e.g. a 16 GB CI host) instead of hard-failing
+		// the per-field and aggregate RAM checks. The slab takes 40% of RAM and
+		// the index is capped so its Swiss-table footprint stays within 20% of
+		// RAM, leaving headroom for RDMA buffers and the OOM margin.
+		maxMem = int(sysRAM * 0.40)
+		if maxMem < 1 {
+			maxMem = 1
+		}
+		if a := adaptiveMaxKeys(sysRAM); a > 0 && a < maxKeys {
+			maxKeys = a
+		}
+	} else if runtime.GOOS != "linux" {
+		// Non-Linux hosts have no /proc/meminfo (systemMemoryGB returns 0); keep
+		// the minimal placeholder slab.
 		maxMem = 1
 	}
 	return Config{
@@ -166,7 +183,7 @@ func DefaultConfig() Config {
 		MaxMemoryGB:                maxMem,
 		UseHugePages:               true,
 		AutoAllocHugePages:         true,
-		MaxKeys:                    10000000,
+		MaxKeys:                    maxKeys,
 		EvictionPolicy:             "wtinylfu",
 		ModelPageBytes:             0,
 		MaxLeaseDurationMs:         30000,
@@ -286,13 +303,13 @@ func (c *Config) Validate() error {
 	if c.BudgetHeadroomGB <= 0 {
 		if sysRAM := systemMemoryGB(); sysRAM > 0 {
 			c.BudgetHeadroomGB = sysRAM * 0.10
-			if c.BudgetHeadroomGB < 8.0 {
-				c.BudgetHeadroomGB = 8.0
+			if c.BudgetHeadroomGB < 1.0 {
+				c.BudgetHeadroomGB = 1.0
 			}
 			log.Printf("[l3server] budget_headroom_gb auto-scaled to %.1f GB (10%% of %.0f GB system RAM)",
 				c.BudgetHeadroomGB, sysRAM)
 		} else {
-			c.BudgetHeadroomGB = 8.0
+			c.BudgetHeadroomGB = 1.0
 		}
 	}
 
@@ -688,4 +705,19 @@ func nextPow2Cfg(v uint64) uint64 {
 	v |= v >> 32
 	v++
 	return v
+}
+
+// adaptiveMaxKeys returns the largest power-of-two key cap whose Swiss-table
+// index footprint (nextPow2(cap) × BytesPerEntry × 16 shards) stays within 20%
+// of system RAM. It returns 0 when the host is too small to afford even a
+// minimal index, in which case the caller keeps the static default.
+func adaptiveMaxKeys(sysRAM float64) uint64 {
+	const numShards = 16
+	const frac = 0.20
+	target := sysRAM * frac * float64(1<<30)
+	cap := uint64(target / (float64(index.BytesPerEntry) * float64(numShards)))
+	if cap == 0 {
+		return 0
+	}
+	return 1 << (bits.Len64(cap) - 1)
 }

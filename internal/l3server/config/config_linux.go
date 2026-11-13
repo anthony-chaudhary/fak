@@ -20,8 +20,9 @@ func nofileLimit() int {
 }
 
 // systemMemoryGB reads total system RAM from /proc/meminfo and returns GB.
-// Returns 0 on error.
-func systemMemoryGB() float64 {
+// Returns 0 on error. It is a function variable so tests can substitute a
+// fixed value to exercise the RAM-adaptive defaults on any host.
+var systemMemoryGB = func() float64 {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
 		return 0
