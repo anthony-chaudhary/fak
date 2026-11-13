@@ -6,7 +6,7 @@ grounded in the in-tree seams as of trunk `b556cd799`. Parent serving spine: #14
 
 | # | Item | Spine (this map) | Hardware-gated follow-on |
 |---|---|---|---|
-| #14371 | FlashKDA CUTLASS prefill + FLA Triton decode | host chunk-reformulation prefill, bit-exact vs KDA oracle + sotamatrix row | CUTLASS `.cu` port + H200/B300 tok/s |
+| #14371 | FlashKDA CUTLASS prefill + FLA Triton decode | host chunk-reformulation prefill, tolerance-equivalent vs KDA oracle + sotamatrix row | CUTLASS `.cu` port + H200/B300 tok/s |
 | #14370 | FlashMLA SM90 FP8 sparse-DSA decode | filed breakdown (vendor + build admission + parity harness) | sm_90 TU build + H200 decode rung |
 | #14369 | DSpark spec-decode | `dspark` selector + rank-512 Markov geometry + confidence-scheduled block length (Qwen3.8 target) | K3.1 wiring (needs #14363 forward), H200 crossover |
 | #14372 | hot-expert CPU-RAM cache | advisor serve hookup + h=0.5/0.75/0.85 budget-fraction sweep + Qwen3.8 shape row | K3.1-Pro 680 GB profile + 4xH200 run |
@@ -20,18 +20,22 @@ grounded in the in-tree seams as of trunk `b556cd799`. Parent serving spine: #14
   float64 transcription in `kimik31_kda_naive_test.go`). State/params reuse:
   `GLM5NextKDALayerState`, `KimiK31KDAParams` (gate lower bound -5.0, use_full_rank_gate).
 - **Spine**: `ForwardKimiK31KDAChunkedPrefill` — the chunk-level reformulation of the
-  delta-rule scan (within-chunk cumulative decay + inter-chunk carry), host f32, bit-exact
-  vs the token scan on synthetic K3.1 shapes (96 heads x 128 dim, conv kernel 4). This is
-  the algorithm the CUTLASS kernel computes; the kernel port inherits the parity test.
+  delta-rule scan (within-chunk cumulative decay + inter-chunk carry), host f32, equivalent
+  to the token scan on synthetic K3.1 shapes (96 heads x 128 dim, conv kernel 4). Witness
+  precision: chunk=1 must equal the scan exactly (same op order); larger chunks are a
+  reordered arithmetic so the witness is a tight relative tolerance vs the scan AND vs the
+  independent float64 transcription, with the bound stated in the test. This is the
+  algorithm the CUTLASS kernel computes; the kernel port inherits the parity test.
 - **Prior art (sotamatrix)**: add the FlashKDA row (MoonshotAI/FlashKDA CUTLASS chunked
   prefill, SM90+; fla-org/flash-linear-attention#852 Triton decode + auto-dispatch) with
-  route=port + oracle=the in-tree KDA oracle. `fak sota` check runs before any kernel.
+  route=borrow + oracle=the in-tree KDA oracle. `fak sota` check runs before any kernel.
 - **Leaves**: CUTLASS `.cu` port beside `cuda_qwen35_gdn.go`/`cuda_flashmla_sparse_prefill.cu`
   arch-gated via `cuda_arch_coverage.go` SM90 entry; FLA Triton decode fallback seam;
   GLM5Next session dispatch behind a `VulkanGLMKDAStepper`-style interface
   (`glm5next_forward.go:597`); H200/B300 prefill tok/s (fleet nodes).
-- **Witness**: chunked==scan bit-exact on K3.1 shapes (CPU, in-session); device parity +
-  tok/s delta on H200/B300 (hardware-gated, fleet).
+- **Witness**: chunked==scan equivalence on K3.1 shapes (chunk=1 exact; larger chunks
+  tight-tolerance, CPU, in-session); device parity + tok/s delta on H200/B300
+  (hardware-gated, fleet).
 
 ## #14370 — FlashMLA SM90 FP8 sparse-DSA decode (spine: filed breakdown)
 
