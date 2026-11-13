@@ -15,7 +15,11 @@
     "pp": 1,
     "max_num_seqs": 32,
     "gpu_mem_util": 0.9,
-    "activation_reserve_gb": 2
+    "activation_reserve_gb": 2,
+    "host_pool_usability": 0.5,
+    "dcp": 1,
+    "kv_variant": "fp8",
+    "host_bandwidth_gbs": 50
   },
   "facts": {
     "schema": "fak.serve-receipt.facts/1",
@@ -56,7 +60,15 @@
     "activation_reserve_bytes": 2000000000,
     "max_cached_tokens": 158697006,
     "requested_max_model_len": 0,
-    "headroom_tokens": 158697006
+    "headroom_tokens": 158697006,
+    "kv_variant": "fp8",
+    "dcp": 1,
+    "kv_effective_per_token_per_gpu": 570,
+    "device_pool_bytes": 90457293593,
+    "host_pool_usability": 0.5,
+    "host_bandwidth_gbs": 50,
+    "physical_tokens": 158697006,
+    "physical_formula": "floor((device_pool 90457293593 B + usable_host 0 B) / (kv 570 B/token ÷ dcp 1))"
   },
   "warnings": [
     "wide TP all-reduce over PCIe; PP-heavy layouts preferred (measured: TP4 6–7 tok/s vs TP2+PP2 46–49 on 397B MoE, flashinfer#2577)"

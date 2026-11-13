@@ -66,14 +66,21 @@ fak serve-receipt profiles
 fak serve-receipt plan --facts examples/serve-receipt/<model>.facts.json \
   --gpu rtx-pro-6000-blackwell-96gb --tp 8 --pp 3 \
   --max-model-len 1048576 --max-num-seqs 32 --format md
+# KV-bound rig: attach a host pool instead of failing the rig
+fak serve-receipt plan --facts <facts.json> --gpu rtx-pro-6000-blackwell-96gb \
+  --tp 16 --max-model-len 1048576 --host-kv-gib 32 --dcp 16 --curve
 fak serve-receipt validate --receipt <receipt.json>   # re-derives every number; refuses mismatches
 ```
 
 - Author a facts file (`fak.serve-receipt.facts/1`, see `examples/serve-receipt/README.md`)
   from lane 1+4 outputs with `observed_at` + `source_urls`; exact bytes only.
-- Verdicts: `OK` / `TIGHT` / `INFEASIBLE` (exit 3). Warnings fire for no-native-FP4
-  hardware and wide-TP-over-PCIe. `validate` is the anti-narration gate — run it on the
-  final receipt before presenting it.
+- Verdicts: `OK` / `TIGHT` / `OFFLOAD_REQUIRED` (exit 0, marked — device KV headroom does
+  not kill a rig; attach a host pool and price the miss curve) / `INFEASIBLE` (exit 3 —
+  weights; the expert-offload rejection arithmetic prints with the verdict). Offload
+  flags: `--host-kv-gib`, `--host-pool-usability` (0.5 default, S8-anchor calibrated),
+  `--dcp`, `--kv-variant fp8|nvfp4|nvfp4_mxfp4keys`, `--host-bandwidth-gbs`, `--curve`.
+  Weight/expert offload is never a route — KV offload only. `validate` is the
+  anti-narration gate — run it on the final receipt before presenting it.
 
 ## Receipt artifact & witnesses
 
@@ -87,7 +94,8 @@ fak serve-receipt validate --receipt <receipt.json>   # re-derives every number;
 
 ## Worked example
 
-Kimi-K3.1-Pro-NVFP4 × RTX PRO 6000 Blackwell (2026-11-12, issue #14362):
-facts at `examples/serve-receipt/kimi-k31-pro-nvfp4.facts.json`; verdicts — 8× INFEASIBLE,
-16× INFEASIBLE upstream, 24× TP8×PP3 OK (~1.29M-token KV pool). First end-to-end run of
+Kimi-K3.1-Pro-NVFP4 × RTX PRO 6000 Blackwell (2026-11-12, issues #14362 + #14438):
+facts at `examples/serve-receipt/kimi-k31-pro-nvfp4.facts.json`; verdicts — 8× INFEASIBLE
+(expert-offload rejection printed), 16× OFFLOAD_REQUIRED (~1.01M tokens with a 32 GiB host
+pool, miss curve attached), 24× TP8×PP3 OK (~1.29M-token KV pool). First end-to-end run of
 this protocol; see that receipt for the lane-output shape.

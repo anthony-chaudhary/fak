@@ -23,5 +23,14 @@
     "tp_replicated": true
   },
   "state_per_seq_bytes": 464601000,
-  "state_tp_sharded": true
+  "state_tp_sharded": true,
+  "kv_variants": {
+    "fp8": { "latent_bytes": 576, "indexer_key_bytes": 128, "indexer_scale_bytes": 4 },
+    "nvfp4": { "latent_bytes": 352, "indexer_key_bytes": 132, "indexer_scale_bytes": 0 },
+    "nvfp4_mxfp4keys": { "latent_bytes": 352, "indexer_key_bytes": 68, "indexer_scale_bytes": 0 }
+  },
+  "routed_experts": 896,
+  "experts_per_token": 16,
+  "expert_bytes_packed": 1531000000000,
+  "expert_scale_bytes": 0
 }

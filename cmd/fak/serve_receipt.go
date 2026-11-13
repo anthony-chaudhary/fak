@@ -6,8 +6,8 @@ package main
 // arithmetic live in internal/servereceipt; this file is CLI grammar and
 // exit-code plumbing only (the hwspecs.go pattern).
 //
-// Exit codes: plan 0 OK/TIGHT, 2 input/usage error, 3 INFEASIBLE;
-// validate 0 reconciles, 1 field-by-field mismatch, 2 input error.
+// Exit codes: plan 0 OK/TIGHT/OFFLOAD_REQUIRED, 2 input/usage error,
+// 3 INFEASIBLE; validate 0 reconciles, 1 field-by-field mismatch, 2 input error.
 
 import (
 	"encoding/json"
@@ -19,11 +19,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/servereceipt"
 )
 
-const serveReceiptUsage = `fak serve-receipt — on-demand model→GPU serving-config receipts (issue #14362)
+const serveReceiptUsage = `fak serve-receipt — on-demand model→GPU serving-config receipts (issue #14362, offload-aware per #14438)
 
   fak serve-receipt plan --facts <json> --gpu <profile|@file.json> [--tp N] [--pp P]
                          [--max-model-len L] [--max-num-seqs S] [--gpu-mem-util F]
-                         [--activation-reserve-gb F] [--format md|json] [--out <path>]
+                         [--activation-reserve-gb F] [--host-kv-gib G] [--host-pool-usability F]
+                         [--dcp N] [--kv-variant fp8|nvfp4|nvfp4_mxfp4keys] [--host-bandwidth-gbs F]
+                         [--curve] [--format md|json] [--out <path>]
   fak serve-receipt validate --receipt <json> [--format md|json]
   fak serve-receipt profiles [--format md|json]`
 
@@ -57,6 +59,12 @@ func runServeReceiptPlan(stdout, stderr io.Writer, args []string) int {
 	maxNumSeqs := fs.Int("max-num-seqs", 32, "max concurrent sequences")
 	gpuMemUtil := fs.Float64("gpu-mem-util", 0.90, "fraction of VRAM usable for weights+state+cache")
 	activationReserveGB := fs.Float64("activation-reserve-gb", 2, "activation scratch reserve, decimal GB (10^9 B)")
+	hostKVGiB := fs.Float64("host-kv-gib", 0, "host KV pool, GiB (2^30 B); 0 = device-only (issue #14438)")
+	hostPoolUsability := fs.Float64("host-pool-usability", 0.5, "usable fraction of the host KV pool (S8-anchor calibrated default)")
+	dcp := fs.Int("dcp", 1, "decode-context parallelism: KV per-GPU ÷ N")
+	kvVariant := fs.String("kv-variant", "fp8", "KV cache variant: fp8 | nvfp4 | nvfp4_mxfp4keys (facts.kv_variants may override/add)")
+	hostBandwidthGBs := fs.Float64("host-bandwidth-gbs", 50, "host↔device bandwidth for the offload penalty math, GB/s (10^9 B/s)")
+	curve := fs.Bool("curve", false, "attach the host-sweep + miss-rate ESTIMATE block (anchored to the S8 calibration)")
 	format := fs.String("format", "md", "output format: md or json")
 	out := fs.String("out", "", "write the receipt to this path instead of stdout")
 	_ = fs.Parse(args)
@@ -78,6 +86,8 @@ func runServeReceiptPlan(stdout, stderr io.Writer, args []string) int {
 	cfg := servereceipt.Config{
 		TP: *tp, PP: *pp, MaxModelLen: *maxModelLen, MaxNumSeqs: *maxNumSeqs,
 		GPUMemUtil: *gpuMemUtil, ActivationReserveGB: *activationReserveGB,
+		HostKVGiB: *hostKVGiB, HostPoolUsability: *hostPoolUsability, DCP: *dcp,
+		KVVariant: *kvVariant, HostBandwidthGBs: *hostBandwidthGBs, Curve: *curve,
 	}
 	receipt, err := servereceipt.Plan(facts, gpu, cfg)
 	if err != nil {

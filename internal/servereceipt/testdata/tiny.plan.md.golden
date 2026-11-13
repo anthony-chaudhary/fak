@@ -2,7 +2,7 @@
 
 **Verdict: OK**
 
-GPU: rtx-pro-6000-blackwell-96gb (vram 96 GB, sm 12.0, fp4_native true, nvlink false, pcie 5.0 x16) · config: tp 4 × pp 1 = 4 GPUs, max_num_seqs 32, gpu_mem_util 0.9, activation_reserve_gb 2, max_model_len (none)
+GPU: rtx-pro-6000-blackwell-96gb (vram 96 GB, sm 12.0, fp4_native true, nvlink false, pcie 5.0 x16) · config: tp 4 × pp 1 = 4 GPUs, max_num_seqs 32, gpu_mem_util 0.9, activation_reserve_gb 2, max_model_len (none), kv_variant fp8
 
 ## Arithmetic
 
@@ -17,6 +17,8 @@ units: VRAM per GPU read as GiB (2^30 B) — vendor "GB" listings treated as GiB
 - reserved_state = 2,000,000 B × max_num_seqs 32 = 64,000,000 B
 - activation_reserve = 2 GB = 2,000,000,000 B
 - max_cached_tokens = max(0, floor((92,521,293,593 − 64,000,000 − 2,000,000,000) / 570)) = 158,697,006
+- device_pool = 92,521,293,593 − 64,000,000 − 2,000,000,000 = 90,457,293,593 B (clamped ≥ 0)
+- physical_tokens = floor((device_pool 90457293593 B + usable_host 0 B) / (kv 570 B/token ÷ dcp 1)) = 158,697,006
 - requested max-model-len: (none) → verdict OK
 
 ## Warnings

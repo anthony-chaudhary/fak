@@ -97,6 +97,19 @@ func TestPlanTinyExactArithmetic(t *testing.T) {
 		MaxCachedTokens:        158_697_006,     // floor(90,457,293,593 / 570)
 		RequestedMaxModelLen:   0,
 		HeadroomTokens:         158_697_006,
+		// Offload-aware defaults with every offload flag unset (issue #14438):
+		// fp8 variant, dcp 1, no host pool, 50 GB/s nominal bandwidth. The
+		// physical formula reduces exactly to max_cached_tokens.
+		KVVariant:              "fp8",
+		DCP:                    1,
+		KVEffectivePerTokenGPU: 570,
+		DevicePoolBytes:        90_457_293_593,
+		HostPoolBytes:          0,
+		HostPoolUsability:      0.5,
+		UsableHostBytes:        0,
+		HostBandwidthGBs:       50,
+		PhysicalTokens:         158_697_006, // = max_cached_tokens (host 0, dcp 1)
+		PhysicalFormula:        "floor((device_pool 90457293593 B + usable_host 0 B) / (kv 570 B/token ÷ dcp 1))",
 	}
 	if ar != want {
 		t.Fatalf("arithmetic mismatch:\n got %+v\nwant %+v", ar, want)

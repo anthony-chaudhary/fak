@@ -25,7 +25,18 @@
 //	    "tp_replicated": true                    // true: each TP rank holds the full per-token state (no TP divide)
 //	  },
 //	  "state_per_seq_bytes": 464601000,          // non-KV per-sequence reserved state
-//	  "state_tp_sharded": true                   // true: per-seq state divides by TP
+//	  "state_tp_sharded": true,                  // true: per-seq state divides by TP
+//	  "kv_variants": {                           // OPTIONAL (issue #14438): per-variant per-token component bytes
+//	                                             // for ONE full-attention layer, overriding the derived built-ins
+//	    "fp8":               {"latent_bytes": 576, "indexer_key_bytes": 128, "indexer_scale_bytes": 4},
+//	    "nvfp4":             {"latent_bytes": 352, "indexer_key_bytes": 132, "indexer_scale_bytes": 0},
+//	    "nvfp4_mxfp4keys":   {"latent_bytes": 352, "indexer_key_bytes": 68,  "indexer_scale_bytes": 0}
+//	  },
+//	  "routed_experts": 896,                     // OPTIONAL: routed-expert count (enables the exact expert
+//	                                             // offload-rejection arithmetic when a weights-INFEASIBLE verdict fires)
+//	  "experts_per_token": 16,                   // OPTIONAL: experts activated per token
+//	  "expert_bytes_packed": 1531000000000,      // OPTIONAL: routed-expert weight bytes (scales included when packed together)
+//	  "expert_scale_bytes": 0                    // OPTIONAL: separate scale-tensor bytes when stored apart
 //	}
 //
 // # Units (one convention, labeled everywhere)
@@ -35,6 +46,33 @@
 // sizes are exact bytes. The activation reserve flag is decimal GB (10^9
 // bytes). Every rendered receipt carries the UnitsNote string so a reader
 // never has to guess which reading produced a number.
+//
+// # Offload-aware capacity model (issue #14438)
+//
+// The v1 plan priced device-only KV. The extended plan adds a host KV pool
+// (--host-kv-gib), a KV cache variant (--kv-variant), decode-context
+// parallelism (--dcp), and the physical capacity they unlock:
+//
+//	physical_tokens = floor((device_pool_B + usable_host_B) / (kv_per_token_per_gpu / dcp))
+//
+// where device_pool_B is ONE GPU's device KV leftover (usable budget minus
+// reserved state minus activation reserve, clamped ≥ 0) and usable_host_B is
+// the per-DCP-rank share of the host pool: host_total × usability ÷ dcp. The
+// offloaded cache mirrors the device layout, so with DCP each rank stores 1/N
+// of each token on host too — keeping both sides of the ratio per-rank. With
+// the host pool at 0 and dcp 1 this reduces exactly to the v1
+// max_cached_tokens. The usability default (0.5) is calibrated to the S8
+// production-runtime anchor (16×RTX PRO 6000, 32 GiB configured → ~1.02M
+// physical FP8 KV tokens observed); the mechanism (per-block metadata,
+// alignment, allocator overhead in the native host backend) is not directly
+// measured. A device KV shortfall no longer kills the plan: when the host
+// pool covers the request the verdict is OFFLOAD_REQUIRED (exit 0, marked) —
+// decode reads miss to host at the miss-rate the --curve block prices.
+// Routed-expert WEIGHT offload is rejected with arithmetic, not assumed
+// viable: every forward activates a large union of experts across the batch,
+// so the per-forward host read (union_bytes ÷ host bandwidth) dwarfs a decode
+// step; the warning states the seconds-per-forward and keeps KV offload as
+// the only viable offload surface.
 //
 // # Receipt schema — fak.serve-receipt.receipt/1 (JSON output)
 //
