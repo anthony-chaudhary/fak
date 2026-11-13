@@ -308,12 +308,14 @@ type PointResult struct {
 
 // MatrixResult is the full sweep, shaped to be a drop-in MATRIX.json.
 type MatrixResult struct {
-	Endpoint     string        `json:"endpoint"`
-	Model        string        `json:"model"`
-	Stack        string        `json:"stack,omitempty"`
-	StartedAtUTC string        `json:"started_at_utc"`
-	Canceled     bool          `json:"canceled,omitempty"`
-	Points       []PointResult `json:"points"`
+	Endpoint     string `json:"endpoint"`
+	Model        string `json:"model"`
+	Stack        string `json:"stack,omitempty"`
+	StartedAtUTC string `json:"started_at_utc"`
+	Canceled     bool   `json:"canceled,omitempty"`
+	// Arrival echoes the shape applied across every point.
+	Arrival *ArrivalEcho  `json:"arrival,omitempty"`
+	Points  []PointResult `json:"points"`
 }
 
 // Config controls a sweep.
@@ -344,6 +346,30 @@ type Config struct {
 	// re-anchors to now; 0 selects defaultMaxCatchUp, negative is rejected by
 	// validateConfig.
 	MaxCatchUp time.Duration
+	// Arrival selects an inter-arrival distribution for issue pacing. The empty
+	// value preserves today's behavior: with RatePerSec > 0 the fixed-interval
+	// pacer runs, and with RatePerSec == 0 workers drain as fast as they consume.
+	Arrival ArrivalPattern
+	// ArrivalRate is the request rate (requests/sec) for the arrival pattern;
+	// 0 falls back to RatePerSec. Ignored (rate not applicable) for
+	// concurrency_burst.
+	ArrivalRate float64
+	// ArrivalSmoothness is the Gamma shape for the gamma pattern (1.0 =
+	// Poisson-equivalent; <1 burstier, >1 more regular); 0 defaults to 1.0.
+	// Ignored by the other patterns.
+	ArrivalSmoothness float64
+	// ArrivalSeed seeds the arrival generator so a shaped run is reproducible.
+	ArrivalSeed int64
+}
+
+// ArrivalEcho is the top-level MatrixResult block recording the arrival shape a
+// sweep used, so two runs with identical settings but different real-world
+// arrival shapes are distinguishable from the receipt alone.
+type ArrivalEcho struct {
+	Pattern    string  `json:"pattern"`
+	RatePerSec float64 `json:"rate_per_sec,omitempty"`
+	Smoothness float64 `json:"smoothness,omitempty"`
+	Seed       int64   `json:"seed"`
 }
 
 var (
@@ -384,6 +410,24 @@ func validateConfig(cfg *Config) error {
 	if cfg.PrefillConcurrency > maxConcurrency {
 		return fmt.Errorf("%w: prefill=%d maximum-concurrency=%d", errPrefillAboveConcurrency, cfg.PrefillConcurrency, maxConcurrency)
 	}
+	if _, err := parseArrivalPattern(string(cfg.Arrival)); err != nil {
+		return err
+	}
+	// A non-empty pattern needs an effective rate (ArrivalRate, else the legacy
+	// RatePerSec) except for concurrency_burst, whose throughput is governed by
+	// the concurrency semaphore rather than a rate.
+	if cfg.Arrival != "" && cfg.Arrival != arrivalBurst {
+		eff := cfg.ArrivalRate
+		if eff == 0 {
+			eff = cfg.RatePerSec
+		}
+		if !rateValid(eff) {
+			return fmt.Errorf("%w: arrival %q got %g", errNonPositiveRate, cfg.Arrival, eff)
+		}
+	}
+	if cfg.ArrivalSmoothness < 0 || math.IsNaN(cfg.ArrivalSmoothness) || math.IsInf(cfg.ArrivalSmoothness, 0) {
+		return fmt.Errorf("loadgen: arrival smoothness must be non-negative, got %g", cfg.ArrivalSmoothness)
+	}
 	return nil
 }
 
@@ -409,21 +453,30 @@ const defaultMaxCatchUp = 10 * time.Millisecond
 // The upstream asyncio high-resolution wait became a context-raced timer
 // (pacerSleep); issuance is reported through issue() so the caller owns the
 // worker channel.
+//
+// The fixed-interval case is a special case of a per-step gap source: newPacer
+// wraps a constant interval in gap, while an arrival-pattern generator supplies
+// a freshly drawn gap per step (see arrival.go). Behavior for a constant gap is
+// byte-for-byte the original schedule.
 type pacer struct {
-	interval   time.Duration
+	gap        func() time.Duration // delay drawn for the next step (per-step for variable patterns)
 	maxCatchUp time.Duration
 	now        func() time.Time
 	sleep      func(context.Context, time.Duration) bool
 }
 
 func newPacer(interval, maxCatchUp time.Duration, now func() time.Time, sleep func(context.Context, time.Duration) bool) *pacer {
+	return newPacerFromGap(func() time.Duration { return interval }, maxCatchUp, now, sleep)
+}
+
+func newPacerFromGap(gap func() time.Duration, maxCatchUp time.Duration, now func() time.Time, sleep func(context.Context, time.Duration) bool) *pacer {
 	if now == nil {
 		now = time.Now
 	}
 	if sleep == nil {
 		sleep = pacerSleep
 	}
-	return &pacer{interval: interval, maxCatchUp: maxCatchUp, now: now, sleep: sleep}
+	return &pacer{gap: gap, maxCatchUp: maxCatchUp, now: now, sleep: sleep}
 }
 
 // pacerSleep blocks until d elapses or ctx finishes; false means the context
@@ -440,17 +493,21 @@ func pacerSleep(ctx context.Context, d time.Duration) bool {
 }
 
 // run issues up to n calls through issue (each returning whether it was
-// accepted) on an absolute-deadline schedule: the first deadline is one
-// interval after start, each subsequent deadline advances by the interval from
-// the PREVIOUS deadline (never from wall-clock wake time, so oversleeps do not
-// compound). If the next deadline has fallen more than maxCatchUp in the past,
-// the schedule re-anchors to now — missed ticks are dropped, never burst-caught.
-// It stops early when ctx finishes or issue rejects, and returns how many
-// issues were actually accepted: a rejected feed is never counted, so callers
-// can slice their result arrays to the returned count safely. The deadline
-// advances BEFORE issuing so issue latency cannot shift subsequent deadlines.
+// accepted) on an absolute-deadline schedule: the first deadline is one gap
+// after start, each subsequent deadline advances by the NEXT gap drawn from the
+// gap source, measured from the PREVIOUS deadline (never from wall-clock wake
+// time, so oversleeps do not compound). A constant gap reproduces the original
+// fixed-rate schedule exactly; a variable gap (an arrival-pattern generator)
+// turns the schedule into a seeded point process. If the next deadline has
+// fallen more than maxCatchUp in the past, the schedule re-anchors to now —
+// missed ticks are dropped, never burst-caught. It stops early when ctx
+// finishes or issue rejects, and returns how many issues were actually
+// accepted: a rejected feed is never counted, so callers can slice their result
+// arrays to the returned count safely. A zero gap (ConcurrencyBurst) issues
+// every step with no sleep, so throughput is bounded by issue/consumer
+// back-pressure rather than by the schedule.
 func (p *pacer) run(ctx context.Context, n int, issue func() bool) int {
-	next := p.now().Add(p.interval)
+	next := p.now().Add(p.gap())
 	issued := 0
 	for i := 0; i < n; i++ {
 		if ctx.Err() != nil {
@@ -465,7 +522,7 @@ func (p *pacer) run(ctx context.Context, n int, issue func() bool) int {
 				break
 			}
 		}
-		next = next.Add(p.interval) // advance before issue: issue latency must not compound
+		next = next.Add(p.gap()) // advance before issue: issue latency must not compound
 		if !issue() {
 			break // rejected feed: not counted, nothing downstream consumed it
 		}
@@ -486,6 +543,24 @@ func (c *Config) now() time.Time {
 		return c.Now()
 	}
 	return time.Now()
+}
+
+// arrivalRate resolves the effective rate for the selected pattern: the explicit
+// ArrivalRate when set, else the legacy RatePerSec.
+func (c *Config) arrivalRate() float64 {
+	if c.ArrivalRate != 0 {
+		return c.ArrivalRate
+	}
+	return c.RatePerSec
+}
+
+// arrivalSmoothness resolves the Gamma shape, defaulting to 1.0 (Poisson-
+// equivalent) when unset, matching upstream's `arrival_smoothness or 1.0`.
+func (c *Config) arrivalSmoothness() float64 {
+	if c.ArrivalSmoothness != 0 {
+		return c.ArrivalSmoothness
+	}
+	return 1.0
 }
 
 // oneRequest issues a single chat completion as a stream (stream:true) and measures
@@ -737,7 +812,29 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 		}
 	}
 	var issued int
-	if cfg.RatePerSec > 0 {
+	switch {
+	case cfg.Arrival != "":
+		gen, err := newIntervalGenerator(cfg.Arrival, cfg.arrivalRate(), cfg.arrivalSmoothness(), cfg.ArrivalSeed)
+		if err != nil {
+			// validateConfig rejects this before any request; guard anyway so a
+			// direct runPoint caller cannot panic.
+			for i := 0; i < requests; i++ {
+				results[i] = reqResult{err: err}
+			}
+			issued = requests
+		} else {
+			catchUp := cfg.MaxCatchUp
+			if catchUp <= 0 {
+				catchUp = defaultMaxCatchUp
+			}
+			counter := 0
+			issued = newPacerFromGap(delaySource(gen), catchUp, cfg.now, nil).run(ctx, requests, func() bool {
+				i := counter
+				counter++
+				return feedJob(i)
+			})
+		}
+	case cfg.RatePerSec > 0:
 		interval := time.Duration(float64(time.Second) / cfg.RatePerSec)
 		catchUp := cfg.MaxCatchUp
 		if catchUp <= 0 {
@@ -749,7 +846,7 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 			counter++
 			return feedJob(i)
 		})
-	} else {
+	default:
 		for i := 0; i < requests; i++ {
 			if !feedJob(i) {
 				break
@@ -873,6 +970,16 @@ func Run(ctx context.Context, cfg *Config) MatrixResult {
 	mr := MatrixResult{
 		Endpoint: cfg.URL, Model: cfg.Model, Stack: cfg.Stack,
 		StartedAtUTC: cfg.now().UTC().Format(time.RFC3339),
+	}
+	if cfg.Arrival != "" {
+		echo := &ArrivalEcho{Pattern: string(cfg.Arrival), Seed: cfg.ArrivalSeed}
+		if cfg.Arrival != arrivalBurst {
+			echo.RatePerSec = cfg.arrivalRate()
+		}
+		if cfg.Arrival == arrivalGamma {
+			echo.Smoothness = cfg.arrivalSmoothness()
+		}
+		mr.Arrival = echo
 	}
 	for _, c := range cfg.Concurrencies {
 		if ctx.Err() != nil {
