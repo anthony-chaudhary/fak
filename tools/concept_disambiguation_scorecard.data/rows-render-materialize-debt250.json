@@ -353,6 +353,24 @@
       "gaps": []
     },
     {
+      "id": "cov-debt250-render-materialize-rendersearchhazardreason",
+      "canonical": "render-materialize implementation surface for rendersearchhazardreason",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderSearchHazardReason` is the render-materialize symbol declared or used at `internal/repoguard/guard.go:868` as `blocks = append(blocks, renderSearchHazardReason(searchHazards))`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderSearchHazardReason` for the operation evidenced at `internal/repoguard/guard.go:868`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "rendersearchhazardreason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
       "id": "cov-debt250-render-materialize-surrender",
       "canonical": "render-materialize implementation surface for surrender",
       "family": "render-materialize",

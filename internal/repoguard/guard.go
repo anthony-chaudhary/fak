@@ -746,7 +746,8 @@ func evaluateWithHints(toolName string, toolInput map[string]any, workspaceRoot 
 		violations = append(violations, classifyInteractive(command)...)
 		violations = append(violations, classifyWorkspaceCd(command, workspaceRoot)...)
 		violations = append(violations, foregroundSleeps(command, toolInput, hints)...)
-		return append(violations, classifyForegroundNetworkLoop(command)...)
+		violations = append(violations, classifyForegroundNetworkLoop(command)...)
+		return append(violations, classifySearchHazard(command, workspaceRoot)...)
 	case "PowerShell":
 		// PowerShell has its own syntax-aware inventory rung in addition to
 		// the cross-shell foreground-wait advisory.
@@ -818,7 +819,7 @@ func readPath(m map[string]any) string {
 }
 
 func renderReason(violations []Violation) string {
-	var outOfTree, buildCacheCleans, interactive, sleeps, liveMonitorReads, workspaceCd, networkLoops, undeclaredLeaves []Violation
+	var outOfTree, buildCacheCleans, interactive, sleeps, liveMonitorReads, workspaceCd, networkLoops, undeclaredLeaves, searchHazards []Violation
 	for _, v := range violations {
 		switch v.Reason {
 		case ReasonBuildCacheCleanRace:
@@ -835,6 +836,8 @@ func renderReason(violations []Violation) string {
 			workspaceCd = append(workspaceCd, v)
 		case ReasonForegroundNetworkLoop:
 			networkLoops = append(networkLoops, v)
+		case ReasonSearchHazard:
+			searchHazards = append(searchHazards, v)
 		default:
 			outOfTree = append(outOfTree, v)
 		}
@@ -860,6 +863,9 @@ func renderReason(violations []Violation) string {
 	}
 	if len(networkLoops) > 0 {
 		blocks = append(blocks, renderNetworkLoopReason(networkLoops))
+	}
+	if len(searchHazards) > 0 {
+		blocks = append(blocks, renderSearchHazardReason(searchHazards))
 	}
 	if len(undeclaredLeaves) > 0 {
 		blocks = append(blocks, renderUndeclaredLeafReason(undeclaredLeaves))
