@@ -57,6 +57,14 @@ func countPhase(receipt *LandCostReceipt, phase string) int {
 // receipt the worker's Result.Cost carries.
 func runProspectiveReuseLand(t *testing.T, g *fakeGit, closure []string, ran *int) (Result, *LandCostReceipt) {
 	t.Helper()
+	// These tests pin the transient verify path and the exact CAS re-seed
+	// sequence (rev-parse HEAD -> newhead). The kept-checkout pool (db9303d3733)
+	// adds side-effect `rev-parse --git-common-dir` calls that the fakeGit's
+	// verb-keyed replyOnce queue conflates with `rev-parse HEAD`, stealing the
+	// re-seed value and making the bases look equal. Run under the kill switch
+	// so the pool's side effects cannot pollute the fake, exactly as the pool
+	// commit did for the other transient-pinning tests.
+	t.Setenv(CandidatePoolEnv, "off")
 	stubCASSleep(t)
 	cfg := landConfig{
 		resources:     func() landResourceSample { return landResourceSample{} },
