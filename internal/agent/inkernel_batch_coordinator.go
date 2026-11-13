@@ -58,15 +58,16 @@ func (p *InKernelPlanner) BatchDecodeEnabled() bool {
 	return p != nil && p.batchDecode
 }
 
-// AdmitCoalescedDecodeForTest relaxes the DEVICE half of coalescesQwenDecode
+// AdmitCoalescedDecodeForTest relaxes the HOST half of coalescesQwenDecode
 // (metal/q4k) so a cross-package test can drive the REAL coalescer over a synthetic
 // hybrid model on the CPU dense forward, with no physical device. It enables the
 // batchDecode wiring and returns a restore func that puts every mutated gate back.
 //
 // It is deliberately a test seam: production turns coalescing on structurally via
-// InKernelPlannerConfig.BatchDecode (cmd/fak/up.go) and the device gates stay tied to
-// the real Metal/Q4_K load, so a synthetic model can never be mistaken for a device
-// forward in a served process.
+// InKernelPlannerConfig.BatchDecode (cmd/fak/up.go); the host gate stays tied to the
+// real Metal/Q4_K load and the device gate to the backend's exact independent-decode
+// batch capability, so a synthetic model can never be mistaken for a device forward
+// in a served process.
 func (p *InKernelPlanner) AdmitCoalescedDecodeForTest() func() {
 	if p == nil {
 		return func() {}
@@ -154,12 +155,26 @@ type inKernelCoalesceContextKey struct{}
 // a backend for cohort execution: unsupported backends retain the ordinary
 // whole-turn devMu route, including startup coherence probes (fak#14118).
 func (p *InKernelPlanner) coalescesQwenDecode() bool {
-	if p == nil || !p.batchDecode || !p.q4k || p.m == nil || !p.m.Cfg.IsQwen35Hybrid() {
+	if p == nil || !p.batchDecode || p.m == nil || !p.m.Cfg.IsQwen35Hybrid() {
 		return false
 	}
 	if p.backend == nil {
-		return p.metal
+		// Host route: only the packed resident-Q4_K session forward shares weight
+		// streams across lanes, so it stays gated on the q4k load.
+		return p.metal && p.q4k
 	}
+	// Device route: admission is the backend's own batch capability, not the
+	// planner's load-time quant label. The blanket q4k conjunct refused the
+	// matched-BF16 safetensors arm, which loads Q8_0-resident weights and reports
+	// inKernelQ4K=false; every request then serialized on the whole-turn devMu
+	// route, which the H200 like-for-like receipt measured as N=16 aggregate = N=1
+	// (0.037x vLLM; prefill-matched-bf16 gap 2, ticket
+	// prefill-qwen35-gdn-concurrent-batching-20261108). A checkpoint that loaded on
+	// this backend already passed the load-time quant-capability gate, and both
+	// device batch steps stream their projections through the same dtype-dispatched
+	// sequence matmul the serial path uses (CUDA: qwen35SequenceMatMulLocked +
+	// qwen35GDNQ8Args over F32/F16/Q8_0/Q4_K/Q2_K), so the cohort executes for any
+	// resident quantization the backend admitted at load.
 	batch, ok := p.backend.(compute.Qwen35IndependentDecodeBatchBackend)
 	if !ok || (reflect.ValueOf(batch).Kind() == reflect.Pointer && reflect.ValueOf(batch).IsNil()) {
 		return false
