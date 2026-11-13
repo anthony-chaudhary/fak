@@ -959,4 +959,20 @@ var admittedPostFreeze = []string{
 	"GIT_CONFIG_SYSTEM",
 	"GIT_GRAFT_FILE",
 	"GIT_REPLACE_REF_BASE",
+
+	// TENTH OCCURRENCE (v0.57.0 release-unblock): one executable-discovery read shipped
+	// while the ratchet was red and unwatched again. As in the earlier occurrences it is
+	// admitted by name, not absorbed into baseline.go, and it cannot relocate until the
+	// #2862 config surface exists. Admission resolves the current offense; it does not
+	// erase that liveness failure or pay the #2862 relocation debt.
+
+	// cmd/fak/resume_watchdog_runtime.go — FLEET_OPENCODE_EXE is the explicit OpenCode
+	// executable path the resume watchdog relaunches with (rwOpenCodeExe: the value wins
+	// when set, otherwise the PATH name "opencode"). A path to a binary, not a credential
+	// — it grants access to nothing and authenticates nothing. Exact sibling of the
+	// admitted FLEET_CODEX_EXE ("executable discovery overrides for recovery") and
+	// OPENCODE_BIN ("explicit OpenCode executable path"). Introduced by 34653cd6da
+	// (92 trunk advances at admission).
+	// Relocates to: a typed watchdog/ops-schedule executable-path config once #2862 lands.
+	"FLEET_OPENCODE_EXE",
 }
