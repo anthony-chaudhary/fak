@@ -713,9 +713,15 @@ func parallelVerifyKernelOwned(
 	targetArgmax := make([]int, len(draft)+1)
 	targetArgmax[0] = boundaryArgmax
 
-	// Simulate running count for speculative steps to properly penalize each draft step
+	// Simulate running count for speculative steps to properly penalize each draft step.
+	// The copy is taken unless a sanitizer is present but inactive: a nil sanitizer
+	// (plain verify) and an active one both need it, so the penalty path's only
+	// per-round cost over a plain verify stays the one reused scratch row
+	// (TestSpeculativePenaltyScratchReuseMatchesClone), while a present-but-inactive
+	// sanitizer still skips the vocabulary-sized clone
+	// (TestServeGreedyVerifySkipsInactiveCountClone).
 	var simCounts []int32
-	if sanitizer.penalizes(counts) {
+	if sanitizer == nil || sanitizer.penalizes(counts) {
 		simCounts = append([]int32(nil), counts...)
 	}
 	for i, row := range rows {
