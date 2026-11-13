@@ -245,7 +245,14 @@ func TestEvaluateServeFeaturesPrebootAndRuntime(t *testing.T) {
 	}
 }
 
-func TestEvaluateServeFeaturesReportsBufferedMockElisionInstalled(t *testing.T) {
+// TestEvaluateServeFeaturesReportsBufferedMockElisionOffByDefault pins the
+// 2026-11-10 hosting-simplification split posture on the SERVE door: the serve
+// router resolves its own raw context-plane default (gateway.DefaultServeElideResultBytes,
+// 0), so a plain buffered-mock serve does NOT install result elision by default. The
+// guard door keeps the armed library default (gateway.DefaultElideResultBytes); this test
+// locks the serve door to its own raw posture so a peer who silently re-arms elision on the
+// serving router reds here, not in production.
+func TestEvaluateServeFeaturesReportsBufferedMockElisionOffByDefault(t *testing.T) {
 	fs, sf := newServeFlagSet()
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
@@ -256,13 +263,19 @@ func TestEvaluateServeFeaturesReportsBufferedMockElisionInstalled(t *testing.T) 
 		t.Fatal(err)
 	}
 	got := featureStatusByID(t, catalog)[gateway.FeatureElideResults]
-	if got.State != gateway.FeatureConfiguredActive || got.Provenance != gateway.FeatureAutoDefault {
-		t.Fatalf("default buffered mock elide_results = %s/%s, want %s/%s; the decoded planner path installs result elision",
-			got.State, got.Provenance, gateway.FeatureConfiguredActive, gateway.FeatureAutoDefault)
+	if got.State != gateway.FeatureDisabled || got.Provenance != gateway.FeatureAutoDefault {
+		t.Fatalf("default serve-door elide_results = %s/%s, want %s/%s; the raw serving-router posture (gateway.DefaultServeElideResultBytes) leaves result elision off",
+			got.State, got.Provenance, gateway.FeatureDisabled, gateway.FeatureAutoDefault)
 	}
 }
 
-func TestEvaluateServeFeaturesReportsBufferedMockStaleReadElisionInstalled(t *testing.T) {
+// TestEvaluateServeFeaturesReportsBufferedMockStaleReadElisionOffByDefault pins the
+// 2026-11-10 hosting-simplification split posture on the SERVE door: the serve router
+// resolves its own raw context-plane default (gateway.DefaultServeElideStaleReads, false),
+// so a plain buffered-mock serve does NOT install stale-read elision by default. The guard
+// door keeps the armed library default (gateway.DefaultElideStaleReads, true); this test
+// locks the serve door to its own raw posture.
+func TestEvaluateServeFeaturesReportsBufferedMockStaleReadElisionOffByDefault(t *testing.T) {
 	fs, sf := newServeFlagSet()
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
@@ -273,9 +286,9 @@ func TestEvaluateServeFeaturesReportsBufferedMockStaleReadElisionInstalled(t *te
 		t.Fatal(err)
 	}
 	got := featureStatusByID(t, catalog)[gateway.FeatureElideStaleReads]
-	if got.State != gateway.FeatureConfiguredActive || got.Provenance != gateway.FeatureAutoDefault {
-		t.Fatalf("default buffered mock elide_stale_reads = %s/%s, want %s/%s; the decoded planner path installs stale-read elision",
-			got.State, got.Provenance, gateway.FeatureConfiguredActive, gateway.FeatureAutoDefault)
+	if got.State != gateway.FeatureDisabled || got.Provenance != gateway.FeatureAutoDefault {
+		t.Fatalf("default serve-door elide_stale_reads = %s/%s, want %s/%s; the raw serving-router posture (gateway.DefaultServeElideStaleReads) leaves stale-read elision off",
+			got.State, got.Provenance, gateway.FeatureDisabled, gateway.FeatureAutoDefault)
 	}
 }
 

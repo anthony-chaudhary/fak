@@ -211,11 +211,15 @@ func TestAdmitServeShrinkLeversOnRealFlagSurface(t *testing.T) {
 			wantAdmit: true,
 		},
 		{
-			name:      "the shipped default-on levers on a self-hosted openai wire serve, loudly named",
+			// 2026-11-10 hosting-simplification flip: the serve door resolves its own raw
+			// context-plane defaults (gateway.DefaultServe*), so no prompt-shrink lever is on
+			// by default on the serving router. A plain self-hosted openai wire therefore
+			// admits silently — there is no default-on lever to name as inert. (The guard
+			// door keeps the armed library defaults; the explicit-lever cases below still
+			// refuse by name.)
+			name:      "the raw serving-router defaults leave no lever on, so a self-hosted openai wire admits silently",
 			argv:      []string{"-provider", "openai", "-base-url", local},
 			wantAdmit: true,
-			wantAll:   []string{shrinkLeverInertToken, "NOTICE", "--compact-history-budget", "--elide-stale-reads", "--defer-cold-tools", "unwired lever"},
-			wantNone:  []string{"refusing to start"},
 		},
 		{
 			name:      "an in-kernel serve supports prompt-shrink levers and admits silently on default levers",
@@ -230,10 +234,14 @@ func TestAdmitServeShrinkLeversOnRealFlagSurface(t *testing.T) {
 			wantNone:  []string{shrinkLeverInertToken, "refusing to start", "NOTICE"},
 		},
 		{
+			// 2026-11-10 hosting-simplification flip: the serve door's raw context-plane
+			// defaults leave no prompt-shrink lever on, so a replica fleet (which routes
+			// through the replica router, not the single passthrough planner) admits
+			// silently with no inert-lever notice — there is no default-on lever to name.
+			// An EXPLICIT lever on the same wire still refuses by name (the next case).
 			name:      "a replica fleet is not a passthrough even on the anthropic wire",
 			argv:      []string{"-provider", "anthropic", "-base-url", "https://a.example", "-replica-base-url", "https://b.example"},
 			wantAdmit: true,
-			wantAll:   []string{shrinkLeverInertToken, "replica fleet"},
 		},
 		{
 			name:      "an explicit lever is refused on the replica fleet too",

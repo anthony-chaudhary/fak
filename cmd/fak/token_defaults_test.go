@@ -41,17 +41,21 @@ func readEntrypoint(t *testing.T, name string) string {
 	return string(b)
 }
 
-// TestTokenDefault_CompactHistoryDefaultsOn pins history compaction ON by default: the
-// gateway const is a non-zero (default-on) resident-token budget, and both front doors wire
-// the flag to it, so a sprawling conversation is compacted with no operator configuration.
+// TestTokenDefault_CompactHistoryDefaultsOn pins the 2026-11-10 hosting-simplification split
+// posture for history compaction: the GUARD door keeps the armed library default
+// (gateway.DefaultCompactHistoryBudget, a non-zero resident-token budget), while the SERVE door
+// resolves its own raw serving-router posture (gateway.DefaultServeCompactHistoryBudget, 0 — the
+// body is forwarded byte-for-byte). Each door must wire ITS OWN posture const; a door silently
+// inheriting the other's posture is the drift this lock exists for.
 func TestTokenDefault_CompactHistoryDefaultsOn(t *testing.T) {
 	if gateway.DefaultCompactHistoryBudget <= 0 {
-		t.Fatalf("DefaultCompactHistoryBudget must be default-on (>0), got %d", gateway.DefaultCompactHistoryBudget)
+		t.Fatalf("DefaultCompactHistoryBudget must be default-on (>0) for the guard door, got %d", gateway.DefaultCompactHistoryBudget)
 	}
-	for _, f := range []string{"serve.go", "guard.go"} {
-		if !strings.Contains(readEntrypoint(t, f), `fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`) {
-			t.Errorf("%s must wire --compact-history-budget to gateway.DefaultCompactHistoryBudget (default-on)", f)
-		}
+	if !strings.Contains(readEntrypoint(t, "guard.go"), `fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`) {
+		t.Errorf("guard.go must wire --compact-history-budget to gateway.DefaultCompactHistoryBudget (the armed harness posture)")
+	}
+	if !strings.Contains(readEntrypoint(t, "serve.go"), `fs.Int("compact-history-budget", gateway.DefaultServeCompactHistoryBudget`) {
+		t.Errorf("serve.go must wire --compact-history-budget to gateway.DefaultServeCompactHistoryBudget (the raw serving-router posture, 2026-11-10 hosting-simplification flip)")
 	}
 }
 
@@ -77,34 +81,39 @@ func TestTokenDefault_ToolFloorDefaultsOn(t *testing.T) {
 	}
 }
 
-// TestTokenDefault_ElideDefaultsOn pins oversized-result elision ON by default: the gateway
-// const is a non-zero (default-on) byte threshold, and both front doors wire the flag to it, so
-// an old oversized tool_result is shrunk to head+tail with no operator configuration. Wiring the
-// flag to the const keeps the on/off decision a single edit to DefaultElideResultBytes.
+// TestTokenDefault_ElideDefaultsOn pins the 2026-11-10 hosting-simplification split posture for
+// oversized-result elision: the GUARD door keeps the armed library default
+// (gateway.DefaultElideResultBytes, a non-zero byte threshold), while the SERVE door resolves its
+// own raw serving-router posture (gateway.DefaultServeElideResultBytes, 0 — elision off). Each
+// door must wire ITS OWN posture const; a door silently inheriting the other's posture is the
+// drift this lock exists for.
 func TestTokenDefault_ElideDefaultsOn(t *testing.T) {
 	if gateway.DefaultElideResultBytes <= 0 {
-		t.Fatalf("DefaultElideResultBytes must be default-on (>0), got %d", gateway.DefaultElideResultBytes)
+		t.Fatalf("DefaultElideResultBytes must be default-on (>0) for the guard door, got %d", gateway.DefaultElideResultBytes)
 	}
-	for _, f := range []string{"serve.go", "guard.go"} {
-		if !strings.Contains(readEntrypoint(t, f), `fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`) {
-			t.Errorf("%s must wire --elide-result-bytes to gateway.DefaultElideResultBytes (default-on threshold)", f)
-		}
+	if !strings.Contains(readEntrypoint(t, "guard.go"), `fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`) {
+		t.Errorf("guard.go must wire --elide-result-bytes to gateway.DefaultElideResultBytes (the armed harness posture)")
+	}
+	if !strings.Contains(readEntrypoint(t, "serve.go"), `fs.Int("elide-result-bytes", gateway.DefaultServeElideResultBytes`) {
+		t.Errorf("serve.go must wire --elide-result-bytes to gateway.DefaultServeElideResultBytes (the raw serving-router posture, 2026-11-10 hosting-simplification flip)")
 	}
 }
 
-// TestTokenDefault_CtxViewDefaultsOn pins the ctxplan O(1) view lever ON by default at the
-// conservative 8000-resident-token budget. It rewrites in-flight turn history, so the flip is
-// gated on a watched-live witness (selfcheck + the on-the-wire gateway test keeping the Anthropic
-// cache prefix byte-identical with exact recall) — docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md.
-// The planner is fail-open (only ever shortens; falls open to the full history on any doubt).
+// TestTokenDefault_CtxViewDefaultsOn pins the 2026-11-10 hosting-simplification split posture for
+// the ctxplan O(1) view lever: the GUARD door keeps the witnessed default-on budget
+// (agent.DefaultCtxViewBudget, 8000 — docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md), while
+// the SERVE door resolves its own raw serving-router posture (gateway.DefaultServeCtxViewBudget,
+// 0 — the forwarded history is byte-for-byte). The planner is fail-open (only ever shortens;
+// falls open to the full history on any doubt). Each door must wire ITS OWN posture const.
 func TestTokenDefault_CtxViewDefaultsOn(t *testing.T) {
 	if agent.DefaultCtxViewBudget <= 0 {
-		t.Fatalf("agent.DefaultCtxViewBudget must be default-on (>0), got %d", agent.DefaultCtxViewBudget)
+		t.Fatalf("agent.DefaultCtxViewBudget must be default-on (>0) for the guard door, got %d", agent.DefaultCtxViewBudget)
 	}
-	for _, f := range []string{"serve.go", "guard.go"} {
-		if !strings.Contains(readEntrypoint(t, f), `fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`) {
-			t.Errorf("%s must wire --ctx-view-budget to agent.DefaultCtxViewBudget (default-on; fail-open planner, witnessed)", f)
-		}
+	if !strings.Contains(readEntrypoint(t, "guard.go"), `fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`) {
+		t.Errorf("guard.go must wire --ctx-view-budget to agent.DefaultCtxViewBudget (the witnessed 8000-resident-token budget)")
+	}
+	if !strings.Contains(readEntrypoint(t, "serve.go"), `fs.Int("ctx-view-budget", gateway.DefaultServeCtxViewBudget`) {
+		t.Errorf("serve.go must wire --ctx-view-budget to gateway.DefaultServeCtxViewBudget (the raw serving-router posture, 2026-11-10 hosting-simplification flip)")
 	}
 }
 

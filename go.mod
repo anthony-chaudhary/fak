@@ -11,10 +11,11 @@ module github.com/anthony-chaudhary/fak
 
 go 1.26.0
 
-// Pin the patched toolchain: go1.26.10 fixes GO-2026-6809 in crypto/x509,
-// in addition to the earlier standard-library security fixes.
+// Pin the patched toolchain: go1.26.11 fixes GO-2026-6859 (net/http
+// MaxBytesReader header race) and, cumulatively, GO-2026-6809 in crypto/x509
+// plus the earlier standard-library security fixes.
 // GOTOOLCHAIN=auto selects this release when the default toolchain is older.
-toolchain go1.26.10
+toolchain go1.26.11
 
 require golang.org/x/term v0.47.0
 

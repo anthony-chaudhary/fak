@@ -18,18 +18,24 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
-// TestVCacheAnchorDefaultsOn pins the M2 star-anchor pre-flight gate ON by default: the gateway
-// const is true, and both front doors wire the flag to it, so the anchor is applied on the
-// Anthropic passthrough with no flags. Wiring the flag to the const keeps the on/off decision a
-// single edit to gateway.DefaultVCacheAnchor.
+// TestVCacheAnchorDefaultsOn pins the M2 star-anchor pre-flight gate's 2026-11-10
+// hosting-simplification split posture: the GUARD door keeps the armed library default
+// (gateway.DefaultVCacheAnchor, true — the #1493 fix), while the SERVE door resolves its own raw
+// serving-router posture (gateway.DefaultServeVCacheAnchor, false — the outbound body is never
+// re-anchored). Each door must wire ITS OWN posture const; a door silently inheriting the
+// other's posture is the drift this lock exists for.
 func TestVCacheAnchorDefaultsOn(t *testing.T) {
 	if !gateway.DefaultVCacheAnchor {
-		t.Fatalf("gateway.DefaultVCacheAnchor must be default-on (true) for the M2 star-anchor pre-flight gate (#1493)")
+		t.Fatalf("gateway.DefaultVCacheAnchor must be default-on (true) for the guard door's M2 star-anchor pre-flight gate (#1493)")
 	}
-	for _, f := range []string{"serve.go", "guard.go"} {
-		if !strings.Contains(readEntrypoint(t, f), `fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor`) {
-			t.Errorf("%s must wire --vcache-anchor to gateway.DefaultVCacheAnchor (default-on M2 star-anchor gate, #1493)", f)
-		}
+	if gateway.DefaultServeVCacheAnchor {
+		t.Fatalf("gateway.DefaultServeVCacheAnchor must be false (the raw serving-router posture, 2026-11-10 hosting-simplification flip)")
+	}
+	if !strings.Contains(readEntrypoint(t, "guard.go"), `fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor`) {
+		t.Errorf("guard.go must wire --vcache-anchor to gateway.DefaultVCacheAnchor (the armed M2 star-anchor gate, #1493)")
+	}
+	if !strings.Contains(readEntrypoint(t, "serve.go"), `fs.Bool("vcache-anchor", gateway.DefaultServeVCacheAnchor`) {
+		t.Errorf("serve.go must wire --vcache-anchor to gateway.DefaultServeVCacheAnchor (the raw serving-router posture, 2026-11-10 hosting-simplification flip)")
 	}
 }
 

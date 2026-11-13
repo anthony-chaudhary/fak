@@ -246,6 +246,9 @@ var maintainerDevCommands = []string{
 	"issues-recent",
 	"issues-solved",
 	"kernel-oracle",
+	// Billing key + unit-ledger operator surface (mint/topup/balance/revoke/list over
+	// keystore + ledger): fak's own billing machinery, not a portable adopter pattern.
+	"keys",
 	"knownbad",
 	"kvbm",
 	"l3-serve",
@@ -349,6 +352,9 @@ var maintainerDevCommands = []string{
 	"release-staleness",
 	"rename-concept",
 	"repo-hygiene-scorecard",
+	// Remote benchmark-host inspection over ssh (probe screen sessions, tail logs, save a
+	// reattach receipt): fak's own benchmark-host operation, not a portable adopter pattern.
+	"remote-launch",
 	"resume",
 	"rollup",
 	"route",
@@ -367,6 +373,9 @@ var maintainerDevCommands = []string{
 	"scorecard",
 	"scratch",
 	"scratch-janitor",
+	// On-demand model->GPU serving-config receipts (plan a TP x PP layout, validate a stored
+	// receipt, list profiles): fak's own serving-config machinery, not a portable adopter pattern.
+	"serve-receipt",
 	"serve-wiring",
 	"service",
 	"session-audit",
