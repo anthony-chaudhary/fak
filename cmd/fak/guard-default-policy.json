@@ -275,7 +275,12 @@
     "Artifact": "POLICY_BLOCK",
     "delete_file": "POLICY_BLOCK",
     "mcp__atlassian__confluence_delete_page": "POLICY_BLOCK",
-    "mcp__atlassian__confluence_delete_attachment": "POLICY_BLOCK"
+    "mcp__atlassian__confluence_delete_attachment": "POLICY_BLOCK",
+    "exfiltrate": "SECRET_EXFIL",
+    "exfiltrate_secrets": "SECRET_EXFIL",
+    "exfiltrate_to_prod": "SECRET_EXFIL",
+    "mcp__dos__dos_commit": "POLICY_BLOCK",
+    "dos_dos_commit": "POLICY_BLOCK"
   },
 
   "arg_rules": [

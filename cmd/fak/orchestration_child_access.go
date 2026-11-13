@@ -189,7 +189,11 @@ func compileObserveChildManifest(parent policy.Runtime, requested []string) (pol
 		return policy.Manifest{}, err
 	}
 	manifest := policy.FromPolicy(parent.Adjudicator)
-	manifest.Posture = ""
+	// A read-only child's allow list is its COMPLETE authority: unlisted tools must be
+	// denied, not admitted by posture. Pin the posture to fail_closed so the allow list
+	// is binding — under the shipped default_open posture an unlisted tool (e.g. Write)
+	// would be admitted by posture, defeating the read-only envelope.
+	manifest.Posture = policy.PostureFailClosed
 	manifest.Complain = nil
 	manifest.AdvisoryReasons = nil
 	manifest.AllowPrefix = nil

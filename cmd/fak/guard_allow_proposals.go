@@ -214,10 +214,22 @@ func beyondShippedFloor(names []string, asPrefix bool) (grants, already []string
 				}
 			}
 		} else {
-			// NeverAdmits is the floor's own args-independent "this name can never be
-			// Allowed" read, so exact allows AND prefix families are judged with the
-			// adjudicator's semantics instead of a second, drifting copy of them.
-			within = !floor.NeverAdmits(n)
+			// A name is "within the floor" when the floor's EXPLICIT allow list or
+			// allow-prefix families already cover it — the posture-independent read of
+			// "this name is already granted." Under the shipped default_open posture the
+			// floor admits unlisted tools by posture, but the proposal queue is about
+			// EXPLICIT grants: a name the floor's allow list does not cover is a true
+			// grant, even if posture would admit it. Judging by the explicit surface
+			// (Allow + AllowPrefix) keeps the queue meaningful under every posture.
+			within = floor.Allow[n]
+			if !within {
+				for _, pre := range floor.AllowPrefix {
+					if strings.HasPrefix(n, pre) {
+						within = true
+						break
+					}
+				}
+			}
 		}
 		if within {
 			already = append(already, n)

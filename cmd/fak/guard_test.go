@@ -158,7 +158,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"Codex unnamespaced DOS arbitrate allowed", "dos_arbitrate", `{"lane":"guard","tree":["cmd/fak"]}`, abi.VerdictAllow},
 		{"Codex subagent spawn allowed", "spawn_agent", `{"message":"review guard policy"}`, abi.VerdictAllow},
 		{"Codex subagent wait allowed", "wait_agent", `{"ids":["worker-1"]}`, abi.VerdictAllow},
-		{"Unknown substrate-shaped tool stays denied", "fak_not_a_real_tool", `{}`, abi.VerdictDeny},
+		{"Unknown substrate-shaped tool admitted by posture", "fak_not_a_real_tool", `{}`, abi.VerdictAllow},
 		{"Hosted web tool allowed (built-in read/search surface)", "web.run", `{"search_query":[{"q":"fak agent kernel"}]}`, abi.VerdictAllow},
 		{"Hosted image tool allowed (built-in generation surface)", "image_gen.imagegen", `{"prompt":"diagram"}`, abi.VerdictAllow},
 		{"Codex namespaced shell command benign allowed", "functions.shell_command", `{"command":"git status --short","workdir":"C:\\work\\fak"}`, abi.VerdictAllow},
@@ -230,8 +230,9 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"local sudo still denied", "Bash", `{"command":"sudo rm f"}`, abi.VerdictDeny},
 		{"local doas launder denied (structural sudo rule)", "Bash", `{"command":"doas id"}`, abi.VerdictDeny},
 
-		// Admitting orchestration does NOT widen the danger floor: a still-unlisted tool fails
-		// closed, and a destructive Bash arg is still refused even though Bash is allowed.
+		// Admitting orchestration does NOT widen the danger floor: a still-unlisted tool is
+		// admitted by posture under default_open, but a destructive Bash arg is still refused
+		// even though Bash is allowed.
 		{"unlisted tool still fails closed", "exfiltrate_to_prod", `{"target":"prod"}`, abi.VerdictDeny},
 		{"unlisted DOS-shaped mutation verb still fails closed", "mcp__dos__dos_commit", `{}`, abi.VerdictDeny},
 		{"opencode DOS-shaped mutation verb still fails closed", "dos_dos_commit", `{}`, abi.VerdictDeny},
@@ -335,10 +336,12 @@ func TestGuardDefaultPolicyKeepsArgGatedVerbsAdvertised(t *testing.T) {
 	if floor.NeverAdmits("fak_fak_memory_run") {
 		t.Errorf("the shipped floor marks fak_fak_memory_run as never-admitted, so the gateway prunes its tool DEFINITION — but apply=false is admitted")
 	}
-	// The control: a name the floor genuinely never admits is still droppable, so
-	// this test cannot pass by disabling pruning wholesale.
-	if !floor.NeverAdmits("mcp__fak__fak_definitely_not_a_real_tool") {
-		t.Errorf("an unknown name must stay never-admitted (droppable); NeverAdmits reported reachable, which would disable tool-def pruning entirely")
+	// The control: a name the floor structurally denies (the egress deny map) is still
+	// never-admitted under every posture, so this test cannot pass by disabling pruning
+	// wholesale. Under the shipped default_open posture an unlisted name is admitted by
+	// posture, so the droppable class is now the structural denies, not the unlisted.
+	if !floor.NeverAdmits("exfiltrate") {
+		t.Errorf("a structural egress deny must stay never-admitted (droppable); NeverAdmits reported reachable, which would disable tool-def pruning entirely")
 	}
 }
 

@@ -331,11 +331,34 @@ func checkHarnessFloorCoverage(manifestJSON []byte) ([]string, error) {
 		}
 		return adj.Adjudicate(ctx, &abi.ToolCall{Tool: tool, Args: ref}).Kind, nil
 	}
+	// explicitlyAdmitted is the posture-independent read of "the floor's allow surface
+	// covers this name": an exact Allow entry or an AllowPrefix family. Under the shipped
+	// default_open posture Adjudicate admits every unlisted tool by posture, so the
+	// RequiredTools coverage check must judge the EXPLICIT surface — otherwise dropping a
+	// required tool from the allow list would not surface a gap.
+	explicitlyAdmitted := func(tool string) bool {
+		for _, a := range m.Allow {
+			if a == tool {
+				return true
+			}
+		}
+		for _, pre := range m.AllowPrefix {
+			if strings.HasPrefix(tool, pre) {
+				return true
+			}
+		}
+		return false
+	}
 
 	var gaps []string
 	declared := map[string]bool{}
 	for _, p := range firstClassHarnessFloorProfiles() {
 		for _, probe := range p.RequiredTools {
+			if !explicitlyAdmitted(probe.Tool) {
+				gaps = append(gaps, fmt.Sprintf("%s: required tool %q is not in the floor's explicit allow surface — a guarded %s turn can DEFAULT_DENY-loop on it before any useful work",
+					p.Name, probe.Tool, p.Name))
+				continue
+			}
 			v, err := decide(probe.Tool, probe.Args)
 			if err != nil {
 				return nil, err

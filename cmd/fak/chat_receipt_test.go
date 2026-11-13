@@ -300,8 +300,8 @@ func TestNativeAgentEnforcementReceipt(t *testing.T) {
 			if got.Schema != "fak.agent.native.enforcement.v1" {
 				t.Errorf("enforcement schema = %q", got.Schema)
 			}
-			if got.GuardPosture != "fail_closed" {
-				t.Errorf("effective guard posture = %q, want fail_closed", got.GuardPosture)
+			if got.GuardPosture != "default_open" {
+				t.Errorf("effective guard posture = %q, want default_open", got.GuardPosture)
 			}
 			if want := guardPolicyDigest(policyBytes); got.PolicyDigest != want {
 				t.Errorf("policy digest = %q, want %q", got.PolicyDigest, want)
