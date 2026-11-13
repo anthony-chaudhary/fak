@@ -51,6 +51,31 @@ func TestClassifyHostFault(t *testing.T) {
 			want: HostAppTermFailure, ok: true,
 		},
 		{
+			name: "gpu xid fault with pci-qualified code",
+			rec: WinFaultRecord{
+				Provider: "nvlddmkm", ID: 14,
+				Message: "Xid (PCI:0000:01:00.0): 79, pid=1234, GPU has fallen off the bus",
+			},
+			want: HostGpuXID, ok: true,
+		},
+		{
+			name: "gpu xid fault from bare code token",
+			rec: WinFaultRecord{
+				Provider: "Windows Error Reporting", ID: 1001,
+				App:     "nvlddmkm.sys",
+				Message: "NVIDIA reported XID 48 on device 0",
+			},
+			want: HostGpuXID, ok: true,
+		},
+		{
+			name: "xid-shaped word without a standalone token dropped fail-closed",
+			rec: WinFaultRecord{
+				Provider: "Microsoft-Windows-Kernel-PnP", ID: 219,
+				Message: "Driver oxidation warning: rapid power state transition",
+			},
+			ok: false,
+		},
+		{
 			name: "unrelated app crash dropped fail-closed",
 			rec: WinFaultRecord{
 				Provider: "Windows Error Reporting", ID: 1001,
@@ -79,6 +104,70 @@ func TestClassifyHostFault(t *testing.T) {
 				t.Fatalf("class = %q, want %q", got, tc.want)
 			}
 		})
+	}
+
+	// Pinned XID vocabulary (DIRECT-PORT of the dcgm-exporter table at
+	// 4e663a526c46). These are the VALUE assertions: an operator receipt's fault
+	// text is the closed contract, so a reworded or re-sorted row must fail here
+	// rather than silently change what an operator reads.
+	pinnedXIDText := map[int]string{
+		0:   "No Error",
+		48:  "Double Bit ECC Error",
+		63:  "ECC page retirement or row remapping recording event",
+		64:  "ECC page retirement or row remapper recording failure",
+		74:  "NVLINK Error",
+		79:  "GPU has fallen off the bus",
+		119: "GSP RPC Timeout",
+		120: "GSP Error",
+		144: "NVLINK: Saw Error",
+		145: "NVLINK: RLW Error",
+		146: "NVLINK: TLW Error",
+		147: "NVLINK: TREX Error",
+		148: "NVLINK: NVLPW_CTRL Error",
+		149: "NVLINK: NETIR Error",
+		150: "NVLINK: MSE Error",
+		172: "Uncorrectable SRAM Error",
+	}
+	for code, want := range pinnedXIDText {
+		got, ok := XIDOperatorText(code)
+		if !ok {
+			t.Errorf("XIDOperatorText(%d) not ok, want %q", code, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("XIDOperatorText(%d) = %q, want %q", code, got, want)
+		}
+	}
+	// Fail-closed outside the pinned catalog: no text, and no ok.
+	for _, code := range []int{-1, -79, 173, 99999} {
+		if txt, ok := XIDOperatorText(code); ok {
+			t.Errorf("XIDOperatorText(%d) = (%q, true), want fail-closed", code, txt)
+		}
+	}
+	// Extraction: the code comes out of the same shapes the classifier accepts.
+	for _, tc := range []struct {
+		name string
+		rec  WinFaultRecord
+		want int
+		ok   bool
+	}{
+		{"pci-qualified", WinFaultRecord{Message: "Xid (PCI:0000:01:00.0): 79"}, 79, true},
+		{"bare token", WinFaultRecord{Message: "NVIDIA reported XID 48"}, 48, true},
+		{"app identity", WinFaultRecord{App: "Xid: 120"}, 120, true},
+		{"standalone word without code", WinFaultRecord{Message: "xid encountered"}, 0, false},
+		{"no xid at all", WinFaultRecord{Message: "LiveKernelEvent bucket 141"}, 0, false},
+	} {
+		got, ok := ExtractXID(tc.rec)
+		if ok != tc.ok || (ok && got != tc.want) {
+			t.Errorf("ExtractXID(%s) = (%d, %v), want (%d, %v)", tc.name, got, ok, tc.want, tc.ok)
+		}
+	}
+	// A code beyond the pinned catalog is still a witnessed XID fault: the event
+	// is classified, its operator text stays unknown.
+	if got, ok := ClassifyHostFault(WinFaultRecord{Provider: "nvlddmkm", Message: "Xid 99999"}); !ok || got != HostGpuXID {
+		t.Errorf("uncatalogued XID classified (%q, %v), want (GPU_XID, true)", got, ok)
+	} else if _, textOK := XIDOperatorText(99999); textOK {
+		t.Error("uncatalogued XID produced operator text; want fail-closed")
 	}
 }
 
