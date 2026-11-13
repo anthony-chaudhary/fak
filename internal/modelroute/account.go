@@ -554,6 +554,32 @@ func (r Roster) Resolve(modelID string) (Target, error) {
 	}, nil
 }
 
+// LoopbackBaseURLs returns, for each account whose EFFECTIVE base URL points at the
+// local box, that effective base URL. "Effective" is the same resolution Resolve uses
+// (account.go: the account's own base_url, else the kind's public default when the
+// account omits one), so a caller comparing a gateway's --base-url against its roster
+// sees exactly the loopback targets the request plan would actually hit. Remote
+// accounts (openai / anthropic / …) are excluded: a mixed roster that fronts one local
+// engine alongside vendor accounts is legitimate, and only the local binding is the
+// one a reused node-global roster can silently point at the wrong replica. The loopback
+// test is isLoopbackBaseURL, the same floor Validate enforces for a KindLocal account.
+func (r Roster) LoopbackBaseURLs() []string {
+	var out []string
+	for _, a := range r.Accounts {
+		baseURL := a.BaseURL
+		if baseURL == "" {
+			baseURL = KindBaseURL(a.Kind)
+		}
+		if baseURL == "" {
+			continue
+		}
+		if isLoopbackBaseURL(baseURL) {
+			out = append(out, baseURL)
+		}
+	}
+	return out
+}
+
 // ResolvePlan binds a whole Plan: the Scout (when set) and every Member, IN MEMBER
 // ORDER (the same determinism contract Combine relies on). The first id that cannot
 // resolve is a fail-loud error, so a misconfigured roster never silently drops an

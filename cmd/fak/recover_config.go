@@ -205,5 +205,16 @@ func configRecoveryPlans() map[string]recoveryPlan {
 				"this one is a warning, not a refusal: fak still serves, which is exactly why a silently mis-bound tree is worth checking before you trust what it reports",
 			},
 		},
+		bailReplicaBindingMismatch: {
+			Reason:     bailReplicaBindingMismatch,
+			Summary:    "the account roster's local-engine binding points at a different host:port than this gateway's --base-url",
+			Executable: false,
+			Notes: []string{
+				"the roster binding is authoritative for the request plan, so a reused node-global roster silently forwards every request to the OTHER replica — this replica's GPUs serve nothing while the facade stays healthy and every request returns 200 from the peer",
+				"write a PER-REPLICA roster (e.g. accounts-roster-replica2.json) that binds the local account to THIS replica's engine port, and pass it with --route-accounts",
+				"or drop --route-accounts entirely if this replica should not serve routed models — an empty roster leaves the plan-member string as the route, byte-for-byte the pre-roster behavior",
+				"the bail's `config:` block names both values: the --base-url this process was told to front, and the roster file whose loopback account disagrees — compare them to see which side is wrong",
+			},
+		},
 	}
 }

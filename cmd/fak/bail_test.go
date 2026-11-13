@@ -78,6 +78,7 @@ var bailConstNames = map[string]string{
 
 	bailUpstreamTrustUnverified: "bailUpstreamTrustUnverified",
 	bailUpstreamUnsupported:     "bailUpstreamUnsupported",
+	bailReplicaBindingMismatch:  "bailReplicaBindingMismatch",
 }
 
 // bailEmitterAliases lets a reason be cited through an equivalent constant. The

@@ -80,6 +80,16 @@ const (
 	// answered "unknown recovery reason". Adopting the existing constant here is
 	// the point: the vocabulary was already right, only the lookup was missing.
 	bailUnauthenticatedBind = serveBindRefusalToken
+
+	// bailReplicaBindingMismatch is the H200 half-node witness: a replica gateway
+	// launched with the CORRECT --base-url (this replica's engine port) but a REUSED
+	// node-global --route-accounts roster whose local-engine binding pointed at the
+	// OTHER replica's port. The roster, not the --base-url flag, is authoritative for
+	// the request plan, so every request returned 200 from the other replica while
+	// this replica's GPUs served nothing — and the facade stayed healthy, so the
+	// defect was invisible. The startup check refuses a loopback account binding that
+	// disagrees with this process's --base-url host:port, before the listener binds.
+	bailReplicaBindingMismatch = "REPLICA_BINDING_MISMATCH"
 )
 
 // bailReasons is every token a config bail may cite. The ratchet walks this list
@@ -99,6 +109,7 @@ var bailReasons = []string{
 	bailUpstreamTrustUnverified,
 	bailUpstreamUnsupported,
 	bailUnauthenticatedBind,
+	bailReplicaBindingMismatch,
 }
 
 // Knob origins — where a configured value came from. The origin matters as much
