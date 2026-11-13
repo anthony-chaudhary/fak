@@ -3,6 +3,12 @@
 // Copyright (c) 2023, The vLLM team. License and notice: THIRD_PARTY_NOTICES.md
 // ("vLLM").
 //
+// Port contract: the three upstream vLLM concat-and-cache kernels at the pinned
+// commit are kept as the f32 lane and renamed into the fak_vllm_mla namespace:
+//   concat_and_cache_mla_kernel         -> mla_concat_cache_pages_kernel
+//   concat_and_cache_mla_grouped_kernel -> mla_concat_cache_grouped_pages_kernel
+//   concat_and_cache_ds_mla_kernel      -> mla_concat_cache_ds_pages_kernel
+//
 // Only the scalar_t = cache_t = float lane is kept: the quantized-cache arms are
 // dropped. Fak serves the MLA cache as the mlaKVLayout f32 row [latent | rope]
 // (cacheStride = KVLatentDim + RopeDim, internal/model/kvlayout.go:104); no
