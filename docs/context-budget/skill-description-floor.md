@@ -36,9 +36,9 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 73 skill(s); resident floor = 33816 bytes (~8454 tokens);
-  description floor = 33816 B; name-only floor = 978 B; at-rest card floor = 17021 bytes
-  at-rest intent slice (#5560): 12490 B across 73 skill(s)
+skill footprint [interactive]: 74 skill(s); resident floor = 34257 bytes (~8564 tokens);
+  description floor = 34257 B; name-only floor = 991 B; at-rest card floor = 17402 bytes
+  at-rest intent slice (#5560): 12810 B across 74 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
@@ -54,23 +54,20 @@ Heaviest resident descriptions — the trim targets:
 | 7 | 617 | disambiguation-score |
 | 8 | 612 | dojo-rsi-score |
 
-The full 73-skill breakdown is what `fak skill footprint --top 0` prints; only the
+The full 74-skill breakdown is what `fak skill footprint --top 0` prints; only the
 head is pinned here so a drift is legible in review.
 
-`name-only floor = 978 B` is the size of the headroom: **32.8 kB of the 33.8 kB
+`name-only floor = 991 B` is the size of the headroom: **33.3 kB of the 34.3 kB
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 33769 → 33816 B (+47, 73 skills)** — description edits grew the
-measured floor +47 B past the pin, so the ceiling tracks the measurement in the same
+**Last re-pin: 33816 → 34257 B (+441, 74 skills)** — description edits grew the
+measured floor +441 B past the pin, so the ceiling tracks the measurement in the same
 commit, per the #5444 ratchet contract.
 
-**Prior re-pin: 34000 → 33769 B (−231, 73 skills)** — two new skills (ci-repair,
-opencode-wave) and description edits grew the floor to 34536 B (+536 over the pin);
-trimming the eight heaviest descriptions (field-borrow, refresh-readme,
-refresh-cachedoc-numbers, study-repo, milestone-score, modularize, issue-orchestrator,
-issue-queue — mostly redundant clauses and truncated fragments) recovered 767 B, and
-the 231 B below the old pin is banked rather than left as headroom.
+**Prior re-pin: 33769 → 33816 B (+47, 73 skills)** — description edits grew the
+measured floor +47 B past the pin, so the ceiling tracks the measurement in the same
+commit, per the #5444 ratchet contract.
 
 ## Provenance (Law A2 — every value carries its provenance)
 
@@ -100,7 +97,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **33816**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **34257**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |
