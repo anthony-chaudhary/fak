@@ -34,7 +34,7 @@ func registerFlags(fs *flag.FlagSet) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		flags := ParseFlags(sampleSource, "cmd/fak/guard.go")
+		flags := ParseFlags(sampleSource, "cmd/fak/guard.go", "")
 		if len(flags) == 0 {
 			b.Fatal("unexpected empty parsed flags")
 		}

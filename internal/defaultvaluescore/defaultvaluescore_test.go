@@ -17,7 +17,7 @@ import (
 
 func TestValueFlag_DefaultOnRequiresReviewedReason(t *testing.T) {
 	flags := ParseFlags(`package main
-func x() { fs.Bool("compact-new-path", true, "value saver") }`, "cmd/fak/guard.go")
+func x() { fs.Bool("compact-new-path", true, "value saver") }`, "cmd/fak/guard.go", "")
 	k := kpiValueFlagDefaultOn(flags, time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
 	if len(k.Defects) != 1 || !strings.Contains(k.Defects[0], "DEFAULT_ON_UNREVIEWED") {
 		t.Fatalf("default-ON without a reviewed reason must be debt, got %v", k.Defects)
@@ -35,7 +35,7 @@ func TestValueFlag_DefaultOnExpiredReviewIsDebt(t *testing.T) {
 		}
 	})
 	flags := ParseFlags(`package main
-func x() { fs.Bool("compact-expiring", true, "value saver") }`, "cmd/fak/guard.go")
+func x() { fs.Bool("compact-expiring", true, "value saver") }`, "cmd/fak/guard.go", "")
 	k := kpiValueFlagDefaultOn(flags, time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
 	if len(k.Defects) != 1 || !strings.Contains(k.Defects[0], "DEFAULT_ON_REVIEW_DUE") {
 		t.Fatalf("expired default-ON review must be typed debt, got %v", k.Defects)
@@ -45,7 +45,7 @@ func x() { fs.Bool("compact-expiring", true, "value saver") }`, "cmd/fak/guard.g
 func TestValueFlag_OffWithoutReasonIsDebt(t *testing.T) {
 	// A value-flag (name carries a value token) shipped default-OFF and NOT allow-listed.
 	src := `fs.Int("compact-mystery-budget", 0, "shed old turns to this budget")`
-	flags := ParseFlags(src, "cmd/fak/serve.go")
+	flags := ParseFlags(src, "cmd/fak/serve.go", "")
 	if len(flags) != 1 {
 		t.Fatalf("expected 1 value-flag parsed, got %d: %+v", len(flags), flags)
 	}
@@ -64,7 +64,7 @@ func TestValueFlag_OffWithoutReasonIsDebt(t *testing.T) {
 func TestValueFlag_DefaultOnIsClean(t *testing.T) {
 	// A value-flag shipped default-ON (a named-constant budget) is the shipped-enabled idiom.
 	src := `fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "shed old turns")`
-	flags := ParseFlags(src, "cmd/fak/guard.go")
+	flags := ParseFlags(src, "cmd/fak/guard.go", "")
 	if len(flags) != 1 || !flags[0].defaultOn {
 		t.Fatalf("named-constant default must judge default-ON, got %+v", flags)
 	}
@@ -84,7 +84,7 @@ func TestValueFlag_BoolNamedConstantDefaultIsOn(t *testing.T) {
 	// literal and false-positived it as VALUE_FLAG_OFF. This pins the named-constant rule
 	// for Bool the same way TestValueFlag_DefaultOnIsClean pins it for Int.
 	src := `fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "ON by default: replace a stale Read result")`
-	flags := ParseFlags(src, "cmd/fak/guard.go")
+	flags := ParseFlags(src, "cmd/fak/guard.go", "")
 	if len(flags) != 1 || !flags[0].defaultOn {
 		t.Fatalf("a Bool value-flag with a named-constant default must judge default-ON, got %+v", flags)
 	}
@@ -93,16 +93,54 @@ func TestValueFlag_BoolNamedConstantDefaultIsOn(t *testing.T) {
 		t.Errorf("a Bool named-constant default-on value-flag is clean, got %v", k.Defects)
 	}
 	// A bare `false` literal is still the off sentinel and remains debt when not allow-listed.
-	off := ParseFlags(`fs.Bool("elide-mystery", false, "shed something")`, "cmd/fak/serve.go")
+	off := ParseFlags(`fs.Bool("elide-mystery", false, "shed something")`, "cmd/fak/serve.go", "")
 	if len(off) != 1 || off[0].defaultOn {
 		t.Fatalf("a bare false Bool default must still judge default-OFF, got %+v", off)
+	}
+}
+
+func TestValueFlag_BoolConstEqualityDefaultIsEvaluated(t *testing.T) {
+	// A Bool value-flag whose default is a CONSTANT-EQUALITY expression
+	// (gateway.DefaultServeChatToolResultElide == gateway.ChatToolResultElideOn) is NOT a
+	// named-constant default: its value is decided by the two constants it names. The
+	// --chat-elide regression: that expression is "off" == "on" = false, so the flag ships
+	// default-OFF (the serving-router posture), but the named-constant rule false-positived
+	// it as default-ON (DEFAULT_ON_UNREVIEWED). With a real tree root the expression must be
+	// evaluated against the gateway const values and judged OFF; with an empty root (a
+	// synthetic fixture with no tree) it falls back to the named-constant rule and is ON.
+	src := `fs.Bool("chat-elide", gateway.DefaultServeChatToolResultElide == gateway.ChatToolResultElideOn, "arm tool-result elision")`
+
+	// Live tree: the const-equality resolves to false -> default-OFF.
+	live := ParseFlags(src, "cmd/fak/serve.go", "../..")
+	if len(live) != 1 || live[0].defaultOn {
+		t.Fatalf("a const-equality Bool default that resolves to false must judge default-OFF, got %+v", live)
+	}
+
+	// Synthetic fixture (no tree): the const-equality cannot be resolved, so the
+	// named-constant rule applies and the flag is judged ON.
+	synthetic := ParseFlags(src, "cmd/fak/serve.go", "")
+	if len(synthetic) != 1 || !synthetic[0].defaultOn {
+		t.Fatalf("an unresolvable const-equality Bool default must fall back to the named-constant rule (ON), got %+v", synthetic)
+	}
+
+	// The resolver itself: the live tree must evaluate the expression to false, and the
+	// negated form to true, proving the ==/!= operator is honored, not just the operands.
+	if on, ok := evalBoolConstEq("gateway.DefaultServeChatToolResultElide == gateway.ChatToolResultElideOn", "../.."); !ok || on {
+		t.Fatalf("evalBoolConstEq must resolve the live const-equality to (false,true), got (%v,%v)", on, ok)
+	}
+	if on, ok := evalBoolConstEq("gateway.DefaultServeChatToolResultElide != gateway.ChatToolResultElideOn", "../.."); !ok || !on {
+		t.Fatalf("evalBoolConstEq must resolve the negated live const-equality to (true,true), got (%v,%v)", on, ok)
+	}
+	// A non-const-equality default is not resolvable by the expression evaluator.
+	if _, ok := evalBoolConstEq("gateway.DefaultElideStaleReads", "../.."); ok {
+		t.Fatal("a bare named constant is not a const-equality expression and must not resolve")
 	}
 }
 
 func TestValueFlag_OffWithAllowlistReasonIsClean(t *testing.T) {
 	// An allow-listed OFF value-flag (a genuine gate with a documented reason) is honest.
 	src := `fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine")`
-	flags := ParseFlags(src, "cmd/fak/serve.go")
+	flags := ParseFlags(src, "cmd/fak/serve.go", "")
 	if len(flags) != 1 || flags[0].defaultOn {
 		t.Fatalf("empty-string default must judge default-OFF, got %+v", flags)
 	}
@@ -116,14 +154,14 @@ func TestValueFlag_TransportFlagIsOutOfScope(t *testing.T) {
 	// A pure transport/identity flag is NOT a value lever even if its help mentions cache;
 	// only the NAME is matched, so it must be ignored entirely.
 	src := `fs.String("session-id", "", "default trace/session id; affects the cache key")`
-	flags := ParseFlags(src, "cmd/fak/serve.go")
+	flags := ParseFlags(src, "cmd/fak/serve.go", "")
 	if len(flags) != 0 {
 		t.Errorf("a transport flag whose help mentions cache must be out of scope, got %+v", flags)
 	}
 }
 
 func TestOptInGateReviewDateBoundsOmissionHarm(t *testing.T) {
-	flags := ParseFlags(`fs.Bool("vdso-proxy-fill", false, "value cache speedup")`, FlagSources[0])
+	flags := ParseFlags(`fs.Bool("vdso-proxy-fill", false, "value cache speedup")`, FlagSources[0], "")
 	reviewBy, err := time.Parse("2006-01-02", offWithReason["vdso-proxy-fill"].reviewBy)
 	if err != nil {
 		t.Fatalf("vdso-proxy-fill review date: %v", err)
@@ -224,8 +262,8 @@ func TestContextParity_DriftIsDebt(t *testing.T) {
 	// default-OFF under serve: the win is silently disabled on the serve path. This is the
 	// class kpiValueFlagDefaultOn cannot see (it judges each surface alone -- both look fine).
 	flags := append(
-		ParseFlags(`fs.Bool("compact-anchor-head", true, "anchor the compaction head")`, "cmd/fak/guard.go"),
-		ParseFlags(`fs.Bool("compact-anchor-head", false, "anchor the compaction head")`, "cmd/fak/serve.go")...)
+		ParseFlags(`fs.Bool("compact-anchor-head", true, "anchor the compaction head")`, "cmd/fak/guard.go", ""),
+		ParseFlags(`fs.Bool("compact-anchor-head", false, "anchor the compaction head")`, "cmd/fak/serve.go", "")...)
 	if len(flags) != 2 {
 		t.Fatalf("expected the same value-flag parsed from 2 surfaces, got %d: %+v", len(flags), flags)
 	}
@@ -250,8 +288,8 @@ func TestContextParity_DriftIsDebt(t *testing.T) {
 func TestContextParity_AgreementIsClean(t *testing.T) {
 	// The shipped idiom: a saver default-ON on BOTH serving surfaces. Parity holds, no debt.
 	flags := append(
-		ParseFlags(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "shed old turns")`, "cmd/fak/guard.go"),
-		ParseFlags(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "shed old turns")`, "cmd/fak/serve.go")...)
+		ParseFlags(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "shed old turns")`, "cmd/fak/guard.go", ""),
+		ParseFlags(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "shed old turns")`, "cmd/fak/serve.go", "")...)
 	k := kpiValueFlagContextParity(flags)
 	if len(k.Defects) != 0 {
 		t.Errorf("a saver default-ON on both surfaces is parity-clean, got %v", k.Defects)
@@ -266,7 +304,7 @@ func TestContextParity_RoleSpecificSingleSurfaceIsClean(t *testing.T) {
 	// guard-only session lever) makes NO cross-context parity claim, so it is never a false
 	// positive -- even when its lone default is OFF. This is the guard against the naive
 	// "missing from the other surface = defect" over-reach.
-	flags := ParseFlags(`fs.Bool("engine-cache-require-exact-span", false, "serve-only inference-engine knob")`, "cmd/fak/serve.go")
+	flags := ParseFlags(`fs.Bool("engine-cache-require-exact-span", false, "serve-only inference-engine knob")`, "cmd/fak/serve.go", "")
 	if len(flags) != 1 {
 		t.Fatalf("expected 1 value-flag parsed, got %d: %+v", len(flags), flags)
 	}
