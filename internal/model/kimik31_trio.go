@@ -94,3 +94,59 @@ func SelectKimiK31TrioBackend(architecture string, sparseMLA, topKIndexer bool) 
 	}
 	return required, nil
 }
+
+// KimiK31TrioRawTopK is the raw-index output mode of the paged-indexer
+// contract: upstream topk_v2 with page_tables omitted (INDICES mode) writes
+// the selected logical indices themselves. It carries the same selection and
+// domain rules as KimiK31TrioPagedTopK without the page transform: only the
+// causal seqLen prefix participates, slots past min(topK, seqLen) are -1,
+// visible NaN scores are refused, and the deterministic tie rule of
+// SelectKimiK31DSATopK holds. It adapts SGLang topk.py / topk_v2.cuh at
+// 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e (Apache-2.0).
+func KimiK31TrioRawTopK(scores []float32, seqLen, topK int) ([]int, error) {
+	if seqLen < 0 || seqLen > len(scores) || topK <= 0 {
+		return nil, fmt.Errorf("%w: sequence or top-k", ErrKimiK31TrioGeometry)
+	}
+	for _, score := range scores[:seqLen] {
+		if math.IsNaN(float64(score)) {
+			return nil, fmt.Errorf("%w: NaN score", ErrKimiK31TrioGeometry)
+		}
+	}
+	selected := SelectKimiK31DSATopK(scores[:seqLen], topK)
+	out := make([]int, topK)
+	for i := range out {
+		out[i] = -1
+	}
+	for i, logical := range selected {
+		out[i] = logical
+	}
+	return out, nil
+}
+
+// KimiK31TrioPagedTopKRows is the batched form of the paged-indexer contract:
+// one call over a decode batch in which row b has its own causal length
+// seqLens[b] and its own page table. Every row delegates to
+// KimiK31TrioPagedTopK, so the per-row selection, page transform and refusal
+// rules are unchanged; the batch adds the shape rule that all three row
+// slices agree on the batch size. A zero-row batch returns an empty non-nil
+// result; any row's geometry refusal refuses the whole call with no partial
+// output. It adapts SGLang topk.py / topk_v2.cuh at
+// 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e (Apache-2.0).
+func KimiK31TrioPagedTopKRows(scores [][]float32, seqLens []int, pageTables [][]int, pageSize, topK int) ([][]int, error) {
+	batch := len(scores)
+	if batch != len(seqLens) || batch != len(pageTables) {
+		return nil, fmt.Errorf("%w: batch shape %d/%d/%d", ErrKimiK31TrioGeometry, batch, len(seqLens), len(pageTables))
+	}
+	if topK <= 0 || pageSize <= 0 {
+		return nil, fmt.Errorf("%w: top-k or page size", ErrKimiK31TrioGeometry)
+	}
+	out := make([][]int, batch)
+	for b := range scores {
+		row, err := KimiK31TrioPagedTopK(scores[b], seqLens[b], topK, pageSize, pageTables[b])
+		if err != nil {
+			return nil, fmt.Errorf("row %d: %w", b, err)
+		}
+		out[b] = row
+	}
+	return out, nil
+}
