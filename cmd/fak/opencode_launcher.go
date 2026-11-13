@@ -495,6 +495,7 @@ func runOpencodeResume(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	id := strings.TrimSpace(*sessionID)
 	if id == "" {
 		fmt.Fprintln(stderr, "fak opencode resume: --session is required")
