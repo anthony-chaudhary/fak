@@ -185,6 +185,7 @@ reds, and a row naming no live reason reds.
 | INTERACTIVE_HANG | warn | fail-open | hint returned, call proceeds |
 | LIVE_MONITOR_OUTPUT_READ | record | fail-open | journalled, call proceeds silently |
 | OUT_OF_TREE_WRITE | record | fail-open | journalled, call proceeds silently |
+| SEARCH_HAZARD | warn | fail-open | hint returned, call proceeds |
 | UNDECLARED_LEAF | warn | fail-open | hint returned, call proceeds |
 | WORKSPACE_PATH_UNMAPPED | warn | fail-open | hint returned, call proceeds |
 
