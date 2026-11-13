@@ -1309,6 +1309,14 @@ func TestLandSyncsIntermediatePeerCommitsSkipsConflictedLiveRepo(t *testing.T) {
 }
 
 func TestLandIsolatedCandidateVerificationRefusalRequiresReconciliation(t *testing.T) {
+	// This test pins the transient verify path: it asserts exactly ONE
+	// `worktree add --detach` (the transient candidate) and that verify runs on a
+	// `fak-cand-validate-` dir. The kept-checkout pool (db9303d3733) adds a pooled
+	// checkout plus side-effect `rev-parse --git-common-dir` calls that the
+	// fakeGit's verb-keyed replies conflate with `rev-parse HEAD`, so run under
+	// the kill switch — exactly as the pool commit did for the other
+	// transient-pinning tests.
+	t.Setenv(CandidatePoolEnv, "off")
 	g := newFakeGit().
 		reply("symbolic-ref", 0, "refs/heads/main\n").
 		reply("rev-parse", 0, "oldhead000\n").
