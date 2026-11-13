@@ -848,7 +848,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 	doneCondition := strmatch.FirstTrimmed(
 		section("Done condition", "Definition of done", "Acceptance criteria", "Done when", "DoD"),
 		prefixedSectionValue(doneWitness, "Done condition"),
-		doneWitness, // unprefixed prose under the combined heading satisfies done_condition (#2429)
+		doneWitness, // unprefixed prose under the combined heading satisfies done_condition (fak-private#2429)
 		extractBulletedField(section("Value", "Value frame", "Problem frame"), "done when"),
 		extractBulletedField(section("Value", "Value frame", "Problem frame"), "acceptance criteria"),
 		extractBulletedField(d.Body, "done when"),
