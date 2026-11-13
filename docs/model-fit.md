@@ -11,9 +11,26 @@ fak model fit compose --input unassigned.json
 fak model fit plan --input placement.json
 fak model fit check --input placement.json
 fak model fit compare --input alternatives.json
+fak model fit bands --input placement.json --manifest shards.json --manifest-sha256 SHA256
 ```
 
-All four verbs write JSON; `--json` is accepted. `--input -` reads stdin. Input is limited to 4 MiB;
+`bands` authenticates a GGUF shard manifest using the trusted SHA-256 of the canonical
+`json.Marshal` of its ordered `ShardIdentity` array (absolute path, size, and raw-file
+SHA-256 for each shard), then checks the loader's logical storage census against the
+existing composed declaration. Each accounting shard represents one layer; rank order and pool pins
+are preserved. Every band must fit its declared sharded charge, and first/last rank extra
+bytes must cover embedding/head. Replicated weight charges, zero-layer ranks, repeated
+pools, illegal hybrid cuts and unsupported census routes are refused. The result remains
+modeled and unverified; it does not validate KV, workspace, physical allocations, loader
+placement, or execution. Keep authenticated files immutable during the operation.
+The result includes the complete declaration and loader profile. Profile
+`q4k-dense-kquant-no-native-rows-no-mtp-no-packed-embedding/1` passes the explicit
+Q4K loader options: dense k-quant on; MTP, native linear rows, native SSM output,
+Q2/Q4 packed embedding and tied Q6 packed embedding off. Streaming and expert
+sharding are not selected. The estimate rejects the W3 selection; it does not
+establish that a future loader uses this profile.
+
+All five verbs write JSON; `--json` is accepted. `--input -` reads stdin. Input is limited to 4 MiB;
 unknown fields, extra JSON values, and omitted accounting fields are rejected. Specify every pool's
 `usable_bytes`, all three weight fields, and every rank's fields below. Use explicit zero for a cost
 that does not apply. Capacity zero means unknown. Usable capacity must already exclude headroom,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/fitplan"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
 const modelFitInputLimit = 4 << 20
@@ -25,7 +27,7 @@ type modelFitArtifact struct {
 
 func runModelFit(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 	usage := func() {
-		fmt.Fprintln(stderr, "usage: fak model fit compose|plan|check|compare --input FILE|- [--json]\nDeclared memory accounting only; no model loading or hardware qualification. See docs/model-fit.md.")
+		fmt.Fprintln(stderr, "usage: fak model fit compose|plan|check|compare|bands --input FILE|- [--json]\nDeclared memory accounting only; no model loading or hardware qualification. See docs/model-fit.md.")
 	}
 	if len(args) == 0 {
 		usage()
@@ -36,7 +38,7 @@ func runModelFit(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 		return 0
 	}
 	mode := args[0]
-	if mode != "compose" && mode != "plan" && mode != "check" && mode != "compare" {
+	if mode != "compose" && mode != "plan" && mode != "check" && mode != "compare" && mode != "bands" {
 		usage()
 		return 2
 	}
@@ -44,11 +46,13 @@ func runModelFit(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	fs.Usage = usage
 	input := fs.String("input", "", "JSON declaration file; - reads stdin")
+	manifest := fs.String("manifest", "", "authenticated GGUF shard manifest JSON (bands only)")
+	manifestSHA := fs.String("manifest-sha256", "", "trusted SHA-256 of canonical shard manifest (bands only)")
 	fs.Bool("json", true, "emit a versioned JSON artifact (always enabled)")
 	if rc, ok := parseFlagsOrHelp(fs, args[1:]); !ok {
 		return rc
 	}
-	if *input == "" || fs.NArg() != 0 {
+	if *input == "" || fs.NArg() != 0 || (mode != "bands" && (*manifest != "" || *manifestSHA != "")) {
 		usage()
 		return 2
 	}
@@ -68,6 +72,63 @@ func runModelFit(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	var reports []fitplan.PlacementReport
+	if mode == "bands" {
+		var in fitplan.DeploymentInput
+		if err := decodeModelFitInput(raw, &in); err != nil || *manifest == "" || *manifestSHA == "" {
+			fmt.Fprintln(stderr, "fak model fit bands: invalid declaration or missing authenticated manifest")
+			return 2
+		}
+		f, err := os.Open(*manifest)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak model fit bands: manifest unavailable")
+			return 2
+		}
+		data, err := io.ReadAll(io.LimitReader(f, modelFitInputLimit+1))
+		closeErr := f.Close()
+		if err != nil || closeErr != nil || len(data) > modelFitInputLimit {
+			fmt.Fprintln(stderr, "fak model fit bands: manifest unreadable")
+			return 2
+		}
+		var shards []ggufload.ShardIdentity
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&shards); err != nil {
+			fmt.Fprintln(stderr, "fak model fit bands: invalid manifest")
+			return 2
+		}
+		var extra any
+		if dec.Decode(&extra) != io.EOF {
+			fmt.Fprintln(stderr, "fak model fit bands: invalid manifest")
+			return 2
+		}
+		ws, err := ggufload.OpenWeightsAuthenticated(context.Background(), shards, *manifestSHA)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		bands, err := fitLayerBands(ws, in)
+		closeErr = ws.Close()
+		if err != nil || closeErr != nil {
+			fmt.Fprintln(stderr, errors.Join(err, closeErr))
+			return 1
+		}
+		artifact := struct {
+			Schema         string                  `json:"schema"`
+			ModeledOnly    bool                    `json:"modeled_only"`
+			Qualification  string                  `json:"qualification"`
+			ManifestSHA256 string                  `json:"manifest_sha256"`
+			Declaration    fitplan.DeploymentInput `json:"declaration"`
+			LoaderProfile  string                  `json:"loader_profile"`
+			Bands          []fitBand               `json:"bands"`
+		}{"fak-model-fit-bands/1", true, "unverified", *manifestSHA, in, "q4k-dense-kquant-no-native-rows-no-mtp-no-packed-embedding/1", bands}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(artifact); err != nil {
+			fmt.Fprintln(stderr, "fak model fit bands: output failed")
+			return 1
+		}
+		return 0
+	}
 	if mode == "compose" {
 		var in fitplan.DeploymentInput
 		if err = decodeModelFitInput(raw, &in); err == nil {
