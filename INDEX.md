@@ -301,6 +301,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Kimi-K3.1-Pro-NVFP4 on H200 — sizing verdict + serving recipes (2026-11-12)](docs/notes/2026-11-12-kimi-k31-pro-nvfp4-h200-sizing.md) -- auto-indexed dated note.
 - [Kimi K3.1 Pro NVFP4 — checkpoint contract, fak gap map, and support plan (2026-11-12)](docs/notes/2026-11-12-kimi-k31-pro-nvfp4-support.md) -- auto-indexed dated note.
 - [Agentic inference, kernel evaluation and observability source study (2026-11-07)](docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md) — 29 pinned repositories from two source lists, source-bound candidate decisions, license boundaries and an explicit continuation queue; no runtime or performance qualification.
 

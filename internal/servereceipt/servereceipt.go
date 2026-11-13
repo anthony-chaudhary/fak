@@ -260,6 +260,11 @@ var builtinProfiles = []GPUProfile{
 	{Key: "rtx-pro-6000-blackwell-96gb", VRAMGB: 96, SM: "12.0", FP4Native: true, NVLink: false, PCIe: "5.0 x16"},
 	{Key: "b200-180gb", VRAMGB: 180, SM: "10.0", FP4Native: true, NVLink: true},
 	{Key: "gb300-288gb", VRAMGB: 288, SM: "10.3", FP4Native: true, NVLink: true},
+	// h200-141gb: NVML reports 143,771 MiB = 140.40 GiB — the "141 GB" label is
+	// binary-ish, so capacity math sizes against 140.4, never 141. Hopper (SM 9.0)
+	// has no native FP4 tensor cores; NVFP4 checkpoints ride the Marlin W4A16
+	// dequant fallback there (vLLM modelopt docs; SGLang NVFP4-Marlin on SM80–90).
+	{Key: "h200-141gb", VRAMGB: 140.4, SM: "9.0", FP4Native: false, NVLink: true},
 	{Key: "rtx-6000-ada-48gb", VRAMGB: 48, SM: "8.9", FP4Native: false, NVLink: false},
 }
 

@@ -241,6 +241,8 @@ func TestPlanWarnings(t *testing.T) {
 			wantSub: []string{"NVFP4 checkpoints require Blackwell SM≥10.0", "wide TP all-reduce over PCIe"}},
 		{name: "blackwell at tp2 fires none", gpuKey: "rtx-pro-6000-blackwell-96gb", tp: 2, wantCount: 0},
 		{name: "b200 nvlink at tp8 fires none", gpuKey: "b200-180gb", tp: 8, wantCount: 0},
+		{name: "h200 at tp8 fires fp4 only", gpuKey: "h200-141gb", tp: 8, wantCount: 1,
+			wantSub: []string{"NVFP4 checkpoints require Blackwell SM≥10.0"}},
 		{name: "ada at tp2 fires fp4 only", gpuKey: "rtx-6000-ada-48gb", tp: 2, wantCount: 1,
 			wantSub: []string{"NVFP4 checkpoints require Blackwell SM≥10.0"}},
 	}
@@ -273,13 +275,14 @@ func TestPlanWarnings(t *testing.T) {
 // TestProfiles pins the built-in catalog shape and lookup behavior.
 func TestProfiles(t *testing.T) {
 	profiles := AllProfiles()
-	if len(profiles) != 4 {
-		t.Fatalf("AllProfiles = %d entries, want 4", len(profiles))
+	if len(profiles) != 5 {
+		t.Fatalf("AllProfiles = %d entries, want 5", len(profiles))
 	}
 	want := map[string]GPUProfile{
 		"rtx-pro-6000-blackwell-96gb": {Key: "rtx-pro-6000-blackwell-96gb", VRAMGB: 96, SM: "12.0", FP4Native: true, NVLink: false, PCIe: "5.0 x16"},
 		"b200-180gb":                  {Key: "b200-180gb", VRAMGB: 180, SM: "10.0", FP4Native: true, NVLink: true},
 		"gb300-288gb":                 {Key: "gb300-288gb", VRAMGB: 288, SM: "10.3", FP4Native: true, NVLink: true},
+		"h200-141gb":                  {Key: "h200-141gb", VRAMGB: 140.4, SM: "9.0", FP4Native: false, NVLink: true},
 		"rtx-6000-ada-48gb":           {Key: "rtx-6000-ada-48gb", VRAMGB: 48, SM: "8.9", FP4Native: false, NVLink: false},
 	}
 	for _, p := range profiles {
