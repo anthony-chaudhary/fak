@@ -160,7 +160,12 @@ func TestParent(t *testing.T) {
 		_, err := RunSandboxedTests(ctx, trial, oracle)
 		done <- err
 	}()
-	deadline := time.Now().Add(15 * time.Second)
+	// The sandboxed `go test` cold-compiles the fixture (runSandboxedTests uses a
+	// fresh GOCACHE) before TestParent can start its descendant and write the
+	// ready marker. Under CI load with -p=2/GOMAXPROCS=2 that compile can
+	// approach the sibling tests' 30s context budget, so allow 45s before
+	// declaring the descendant failed to start.
+	deadline := time.Now().Add(45 * time.Second)
 	for {
 		if _, err := os.Stat(ready); err == nil {
 			break
