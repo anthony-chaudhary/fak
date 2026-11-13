@@ -337,6 +337,7 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer, sleepThr
 	violations = append(violations, repoguard.ClassifySleepWaitThreshold(command, sleepThresholdS)...)
 	violations = append(violations, repoguard.ClassifyForegroundNetworkLoop(command)...)
 	violations = append(violations, repoguard.ClassifyForegroundPowerShellInventory(command)...)
+	violations = append(violations, repoguard.ClassifySearchHazard(command, ws)...)
 	if violations == nil {
 		violations = []repoguard.Violation{} // marshal as [] (matches the Python --json shape), never null
 	}
@@ -446,6 +447,11 @@ func runSelftest(stdout io.Writer) int {
 		{"Bash", cmd("git add -p")},
 		{"Bash", cmd("vim cmd/fak/main.go")},
 		{"Bash", cmd("gh auth login")},
+		// recursive search at a broad root (grep-spam root cause): classified.
+		{"Bash", cmd("grep -rn foo .")},
+		{"Bash", cmd("grep -r foo .")},
+		{"Bash", cmd("grep --recursive foo .")},
+		{"Bash", cmd("find . -name '*.go'")},
 	}
 	allow := []tc{
 		{"Bash", cmd("go build -o fak.exe ./cmd/fak")},
@@ -456,6 +462,12 @@ func runSelftest(stdout io.Writer) int {
 		{"Bash", cmd("cp a.txt /var/tmp/b.txt")},
 		{"Bash", cmd("cp a.txt ~/.cache/b.txt")},
 		{"Bash", cmd("grep -o ../foo internal/policy/x.go")},
+		// recursive search scoped to a subdirectory or backgrounded: not the hazard.
+		{"Bash", cmd("grep -r foo internal/")},
+		{"Bash", cmd("grep -rn foo cmd/fak")},
+		{"Bash", cmd("grep -r foo . &")},
+		{"Bash", cmd("find internal -name '*.go'")},
+		{"Bash", cmd("find . -maxdepth 2 -name '*.go'")},
 		{"Bash", cmd("cat ../README.md")},
 		{"Bash", cmd("mv internal/a internal/b")},
 		{"Write", fp("internal/policy/x.go")},

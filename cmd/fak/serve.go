@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1397,6 +1398,65 @@ func loadServeRouteFile[T any](flagName, path, want string, load func(string) (T
 	return &loaded
 }
 
+// hostPortOf extracts the host:port from a base URL, dropping any path suffix
+// (a --base-url carries a /v1 path that must not participate in the comparison).
+// An empty or unparseable URL yields "".
+func hostPortOf(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	host := u.Hostname()
+	if host == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" {
+		return host
+	}
+	return host + ":" + port
+}
+
+// checkReplicaBindingConsistency refuses a reused node-global roster whose loopback
+// account binding disagrees with this process's --base-url. The H200 half-node witness:
+// a replica gateway launched with the CORRECT --base-url (this replica's engine port)
+// but a REUSED --route-accounts roster whose local-engine binding pointed at the OTHER
+// replica's port. The roster, not the --base-url flag, is authoritative for the request
+// plan, so every request returned 200 from the other replica while this replica's GPUs
+// served nothing — and the facade stayed healthy, so the defect was invisible.
+//
+// SCOPING IS LOAD-BEARING: the check applies only to LOOPBACK accounts. A literal
+// "every account base_url equals --base-url" would refuse legitimate mixed rosters
+// (one local engine + remote openai/bedrock accounts); the witness defect is
+// specifically a loopback account pointing at the wrong local engine. The comparison
+// is host:port only, so a /v1 path suffix on either side does not false-positive.
+//
+// Returns nil when there is no proxy target (baseURL == "") or no roster (roster == nil)
+// — the pre-#2528 behavior, byte-identical.
+func checkReplicaBindingConsistency(baseURL string, roster *modelroute.Roster) error {
+	if baseURL == "" || roster == nil {
+		return nil
+	}
+	want := hostPortOf(baseURL)
+	if want == "" {
+		return nil
+	}
+	for _, acctURL := range roster.LoopbackBaseURLs() {
+		got := hostPortOf(acctURL)
+		if got == "" {
+			continue
+		}
+		if got != want {
+			return fmt.Errorf("%s: loopback account binding %s (host:port %s) disagrees with --base-url %s (host:port %s) — the roster, not the flag, is authoritative for the request plan, so every request would forward to the other replica while this one's GPUs serve nothing",
+				bailReplicaBindingMismatch, acctURL, got, baseURL, want)
+		}
+	}
+	return nil
+}
+
 // buildGateway loads the optional model-routing policy, constructs the gateway
 // server from the resolved planes, and arms the admission controller for a pure
 // in-kernel serve.
@@ -1442,6 +1502,27 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 	if *sf.routeAccounts != "" {
 		routeRoster = loadServeRouteFile("route-accounts", *sf.routeAccounts, "a fak-accounts/v1 roster carrying env var NAMES, never secrets", modelroute.LoadRoster)
 		startupMessages = append(startupMessages, gateway.StartupMessage{Source: "serve", Kind: "route-accounts", Level: "info", Text: "model-account roster loaded from " + *sf.routeAccounts})
+	}
+
+	// Refuse a reused node-global roster whose loopback account binding disagrees with
+	// this process's --base-url, BEFORE the gateway.Config is built (BaseURL / RouteAccounts
+	// below) so a mismatched replica never binds a listener. The H200 half-node witness:
+	// replica2 launched with the correct --base-url :8010 but replica1's roster binding
+	// coder-local -> :8000, so GPUs 4-7 served nothing while every request returned 200
+	// from replica1 and the facade stayed healthy. The check is scoped to loopback
+	// accounts and to host:port, so a mixed local+remote roster stays legal.
+	if err := checkReplicaBindingConsistency(*sf.baseURL, routeRoster); err != nil {
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailReplicaBindingMismatch,
+			Summary: "the account roster's local-engine binding points at a different host:port than this gateway's --base-url",
+			Knobs: []bailKnob{
+				bailFlag("base-url", *sf.baseURL),
+				bailFile(*sf.routeAccounts, "loopback account binding disagrees with --base-url"),
+			},
+			Bind: []string{"base_url=" + *sf.baseURL, "roster=" + *sf.routeAccounts},
+		})
+		os.Exit(1)
 	}
 
 	// Resolve the optional multi-tenant KEYSET (#5332). Off by default: no --key-principal
