@@ -67,6 +67,12 @@ type Config struct {
 	// the text-only forward must refuse (see v41_vision.go).
 	ImageTokenID int `json:"image_token_id"`
 
+	// HasVision reports the wrapper declares a vision_config (Kimi K3.1's
+	// multimodal "KimiK31ForConditionalGeneration"). PRESENCE MARKER ONLY: the
+	// tower's geometry is the vision-loader leaf's surface, not this one.
+	// json:"-" because it is derived at parse, never serialized.
+	HasVision bool `json:"-"`
+
 	// EOSTokenID is the legacy scalar EOS id. EOSTokenIDs is the Llama-3.x form, where
 	// config.json emits eos_token_id as a LIST (e.g. [128001,128008,128009]); the custom
 	// UnmarshalJSON below accepts scalar-or-list and populates both, so an int loader
@@ -123,6 +129,13 @@ type Config struct {
 
 	// ActGeluErf selects exact GELU (erf form) instead of SiLU. false (default) = SiLU.
 	ActGeluErf bool `json:"act_gelu_erf,omitempty"`
+
+	// ActivationSituBeta / ActivationSituLinearBeta parameterize Kimi K3.1's
+	// "situ" hidden activation (hidden_act "situ"; 4.0 / 25.0 on the published
+	// config). The activation form itself is wired by the K3.1 execution leaf;
+	// these fields carry the declared betas so the mapping is witnessed here.
+	ActivationSituBeta       float64 `json:"activation_situ_beta,omitempty"`
+	ActivationSituLinearBeta float64 `json:"activation_situ_linear_beta,omitempty"`
 
 	// AttnSoftcap / LogitSoftcap are Gemma2 tanh soft-caps. 0 (default) = off. A non-zero
 	// cap c maps z -> c*tanh(z/c) (applied to attention scores pre-softmax, and to final
@@ -201,10 +214,18 @@ type Config struct {
 	// MoE (Mixture-of-Experts) FFN axis. KV-orthogonal: these fields restructure
 	// only the FFN sub-layer (router -> top-k experts -> weighted sum), never the
 	// attention/KV path. Llama/dense default is NumExperts==0.
-	NumExperts          int     `json:"num_local_experts"`
-	NumExpertsPerTok    int     `json:"num_experts_per_tok"`
-	NormTopKProb        bool    `json:"norm_topk_prob"`
-	MoEIntermediateSize int     `json:"moe_intermediate_size,omitempty"`
+	NumExperts          int  `json:"num_local_experts"`
+	NumExpertsPerTok    int  `json:"num_experts_per_tok"`
+	NormTopKProb        bool `json:"norm_topk_prob"`
+	MoEIntermediateSize int  `json:"moe_intermediate_size,omitempty"`
+	// RoutedExpertHiddenSize is the routed-expert FFN width Kimi K3.1 declares
+	// as routed_expert_hidden_size (3584) — a DISTINCT axis from
+	// MoEIntermediateSize (3072), which the same checkpoint also carries. The
+	// ggufload deferred-axes note names the same axis expert_latent_length.
+	RoutedExpertHiddenSize int `json:"routed_expert_hidden_size,omitempty"`
+	// LatentMoEUseNorm selects the normed latent-MoE combine (Kimi K3.1
+	// latent_moe_use_norm: true). False keeps every other family's combine.
+	LatentMoEUseNorm    bool    `json:"latent_moe_use_norm,omitempty"`
 	NSharedExperts      int     `json:"n_shared_experts,omitempty"`
 	FirstKDenseReplace  int     `json:"first_k_dense_replace,omitempty"`
 	MoELayerFreq        int     `json:"moe_layer_freq,omitempty"`
@@ -263,15 +284,30 @@ type Config struct {
 	// and audited so a real DeepSeek artifact is not mistaken for standard q/k/v
 	// attention. The current runtime still requires explicit projection wiring before
 	// these become executable support.
-	QLoraRank     int      `json:"q_lora_rank,omitempty"`
-	KVLoraRank    int      `json:"kv_lora_rank,omitempty"`
-	QKNopeHeadDim int      `json:"qk_nope_head_dim,omitempty"`
-	QKRopeHeadDim int      `json:"qk_rope_head_dim,omitempty"`
-	VHeadDim      int      `json:"v_head_dim,omitempty"`
-	IndexNHeads   int      `json:"index_n_heads,omitempty"`
-	IndexHeadDim  int      `json:"index_head_dim,omitempty"`
-	IndexTopK     int      `json:"index_topk,omitempty"`
-	IndexerTypes  []string `json:"indexer_types,omitempty"`
+	QLoraRank     int `json:"q_lora_rank,omitempty"`
+	KVLoraRank    int `json:"kv_lora_rank,omitempty"`
+	QKNopeHeadDim int `json:"qk_nope_head_dim,omitempty"`
+	QKRopeHeadDim int `json:"qk_rope_head_dim,omitempty"`
+	VHeadDim      int `json:"v_head_dim,omitempty"`
+	// MLAUseNope / MLAUseOutputGate are Kimi K3.1's MLA variant flags
+	// (mla_use_nope / mla_use_output_gate, both true on the published config).
+	// Metadata only; the K3.1 execution leaf consumes them.
+	MLAUseNope       bool `json:"mla_use_nope,omitempty"`
+	MLAUseOutputGate bool `json:"mla_use_output_gate,omitempty"`
+	// AttnResBlockSize is Kimi K3.1's attention residual-block depth
+	// (attn_res_block_size: 12). Zero keeps every other family untouched.
+	AttnResBlockSize int      `json:"attn_res_block_size,omitempty"`
+	IndexNHeads      int      `json:"index_n_heads,omitempty"`
+	IndexHeadDim     int      `json:"index_head_dim,omitempty"`
+	IndexTopK        int      `json:"index_topk,omitempty"`
+	IndexerTypes     []string `json:"indexer_types,omitempty"`
+
+	// Kimi K3.1 DSA-indexer knobs (dsa_config.index_k_norm_type /
+	// index_skip_topk_offset / index_topk_freq). Folded from the nested
+	// dsa_config object at parse time; zero/empty keeps other families untouched.
+	IndexKNormType      string `json:"index_k_norm_type,omitempty"`
+	IndexSkipTopkOffset int    `json:"index_skip_topk_offset,omitempty"`
+	IndexTopkFreq       int    `json:"index_topk_freq,omitempty"`
 
 	// GLM-5.3-Flash (glm5_next) indexer k-pool compression. IndexKpool is the
 	// pooled-key width the DSA indexer scores over (pools of IndexKpool cached
@@ -286,6 +322,12 @@ type Config struct {
 	// zero means the HF unbounded softplus path. Folded from the nested
 	// linear_attn_config object at parse time.
 	LinearGateLowerBound float64 `json:"linear_gate_lower_bound,omitempty"`
+
+	// LinearUseFullRankGate selects Kimi K3.1's full-rank KDA output gate
+	// (linear_attn_config.use_full_rank_gate: true on the published config).
+	// Folded from the nested linear_attn_config object at parse time; false
+	// keeps GLM-5.3-Flash and the qwen35 hybrids untouched.
+	LinearUseFullRankGate bool `json:"linear_use_full_rank_gate,omitempty"`
 
 	// DeepSeek-V4-Flash-0731 forward metadata from revision
 	// 7872f01b1d1fe23eabc4c98b48bffcef5a386062. CompressRatios selects one
@@ -475,15 +517,28 @@ type configJSONHints struct {
 	// "shared_expert_intermediate_size" (not "shared_intermediate_size"). These alts
 	// fill the canonical fields only when the canonical key is absent, so num_local_experts
 	// families (Mixtral etc.) stay untouched.
-	NumExpertsAlt               *int   `json:"num_experts"`
-	NumRoutedExpertsAlt         *int   `json:"n_routed_experts"`
-	SharedExpertIntermediateAlt *int   `json:"shared_expert_intermediate_size"`
-	Alibi                       *bool  `json:"alibi"`
-	SlidingWindow               *int   `json:"sliding_window"`
-	UseSlidingWindow            *bool  `json:"use_sliding_window"`
-	Window                      []int  `json:"sliding_window_per_layer"`
-	HiddenAct                   string `json:"hidden_act"`
-	HiddenActivation            string `json:"hidden_activation"`
+	NumExpertsAlt               *int `json:"num_experts"`
+	NumRoutedExpertsAlt         *int `json:"n_routed_experts"`
+	SharedExpertIntermediateAlt *int `json:"shared_expert_intermediate_size"`
+	// Kimi K3.1 MoE spelling drift (text_config level): the expert count rides the
+	// existing NumExpertsAlt; the rest use K3.1's own key names. Each fills the
+	// canonical field only when the canonical key is absent, so DeepSeek/Mixtral
+	// families (num_experts_per_tok, n_shared_experts, ...) stay untouched.
+	NumExpertsPerTokAlt    *int   `json:"num_experts_per_token"`
+	NSharedExpertsAlt      *int   `json:"num_shared_experts"`
+	NGroupAlt              *int   `json:"num_expert_group"`
+	MoERenormalizeAlt      *bool  `json:"moe_renormalize"`
+	MoERouterActivationAlt string `json:"moe_router_activation_func"`
+	// MediaPlaceholderTokenIDAlt is the multimodal wrapper's image placeholder id
+	// (media_placeholder_token_id) — TOP-LEVEL on Kimi K3.1, so the wrapper overlay
+	// below propagates it; ImageTokenID's own tag does not match this spelling.
+	MediaPlaceholderTokenIDAlt *int   `json:"media_placeholder_token_id"`
+	Alibi                      *bool  `json:"alibi"`
+	SlidingWindow              *int   `json:"sliding_window"`
+	UseSlidingWindow           *bool  `json:"use_sliding_window"`
+	Window                     []int  `json:"sliding_window_per_layer"`
+	HiddenAct                  string `json:"hidden_act"`
+	HiddenActivation           string `json:"hidden_activation"`
 
 	// Nanbeige hints / alternative loop field names & variant flags.
 	LoopsAlt          *int  `json:"loops"`
@@ -504,6 +559,28 @@ type glm5LinearAttnConfigJSON struct {
 	HeadDim             int     `json:"head_dim"`
 	ShortConvKernelSize int     `json:"short_conv_kernel_size"`
 	GateLowerBound      float64 `json:"gate_lower_bound"`
+	// Kimi K3.1 rides the same nested object with three more keys: the 1-BASED
+	// kda_layers / full_attn_layers membership lists and the full-rank output
+	// gate. GLM-5.3-Flash declares none of them, so the folds no-op there.
+	KDALayers       []int `json:"kda_layers"`
+	FullAttnLayers  []int `json:"full_attn_layers"`
+	UseFullRankGate bool  `json:"use_full_rank_gate"`
+}
+
+// kimiK31DSAConfigJSON mirrors the nested dsa_config object Kimi K3.1 carries
+// inside text_config: the 1-BASED DSA-layer membership list plus the lightning
+// indexer geometry (index_num_heads 32, index_head_dim 128, index_topk 2048).
+// The canonical IndexNHeads/IndexHeadDim/IndexTopK fields do not decode nested
+// objects, so the fold below lifts them onto the flat axes.
+type kimiK31DSAConfigJSON struct {
+	DsaLayers           []int  `json:"dsa_layers"`
+	FullAttnLayers      []int  `json:"full_attn_layers"`
+	IndexNHeads         int    `json:"index_num_heads"`
+	IndexHeadDim        int    `json:"index_head_dim"`
+	IndexTopK           int    `json:"index_topk"`
+	IndexKNormType      string `json:"index_k_norm_type"`
+	IndexSkipTopkOffset int    `json:"index_skip_topk_offset"`
+	IndexTopkFreq       int    `json:"index_topk_freq"`
 }
 
 func (c *Config) UnmarshalJSON(b []byte) error {
@@ -521,9 +598,16 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 	// populate, then overlay the top level — which carries no LM dims, so JSON's
 	// absent-field semantics leave the nested values intact.
 	var probe struct {
-		TextConfig json.RawMessage `json:"text_config"`
+		TextConfig   json.RawMessage `json:"text_config"`
+		VisionConfig json.RawMessage `json:"vision_config"`
 	}
 	_ = json.Unmarshal(b, &probe)
+	// HasVision marks that the wrapper declares a vision_config (Kimi K3.1's
+	// multimodal "KimiK31ForConditionalGeneration"). PRESENCE ONLY — the tower's
+	// geometry is the vision-loader leaf's surface, not this one. Recomputed on
+	// every decode, so re-decoding a config without vision_config clears a
+	// stale true and a JSON null counts as absent.
+	c.HasVision = len(probe.VisionConfig) > 0 && string(probe.VisionConfig) != "null"
 	lm := b
 	if len(probe.TextConfig) > 0 && string(probe.TextConfig) != "null" {
 		if err := json.Unmarshal(probe.TextConfig, &aux); err != nil {
@@ -558,6 +642,12 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		if wrapperHints.RecurrentLoopsAlt != nil {
 			hints.RecurrentLoopsAlt = wrapperHints.RecurrentLoopsAlt
 		}
+		// Kimi K3.1 declares media_placeholder_token_id at the TOP level, while
+		// the hints decode from text_config — propagate it like the other
+		// wrapper-level hints so the alt hint can reach ImageTokenID.
+		if wrapperHints.MediaPlaceholderTokenIDAlt != nil {
+			hints.MediaPlaceholderTokenIDAlt = wrapperHints.MediaPlaceholderTokenIDAlt
+		}
 	}
 	c.EOSTokenIDs = aux.EOS.ids
 	// GLM-5.3-Flash nests its KDA (linear-attention) geometry under
@@ -586,7 +676,54 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		if c.LinearGateLowerBound == 0 {
 			c.LinearGateLowerBound = lc.GateLowerBound
 		}
+		if lc.UseFullRankGate {
+			c.LinearUseFullRankGate = true
+		}
 	}
+	// Kimi K3.1 nests its DSA membership list and lightning-indexer geometry
+	// under "dsa_config"; lift it onto the same flat Index* axes the MiniMax /
+	// DeepSeek indexer paths read. Canonical-first gates keep a config that
+	// states both forms untouched.
+	var dsaWrap struct {
+		DSAConfig *kimiK31DSAConfigJSON `json:"dsa_config"`
+	}
+	if err := json.Unmarshal(lm, &dsaWrap); err == nil && dsaWrap.DSAConfig != nil {
+		dc := dsaWrap.DSAConfig
+		if c.IndexNHeads == 0 {
+			c.IndexNHeads = dc.IndexNHeads
+		}
+		if c.IndexHeadDim == 0 {
+			c.IndexHeadDim = dc.IndexHeadDim
+		}
+		if c.IndexTopK == 0 {
+			c.IndexTopK = dc.IndexTopK
+		}
+		if c.IndexKNormType == "" {
+			c.IndexKNormType = dc.IndexKNormType
+		}
+		if c.IndexSkipTopkOffset == 0 {
+			c.IndexSkipTopkOffset = dc.IndexSkipTopkOffset
+		}
+		if c.IndexTopkFreq == 0 {
+			c.IndexTopkFreq = dc.IndexTopkFreq
+		}
+	}
+	// Rebuild LayerTypes from the 1-BASED membership lists when the checkpoint
+	// ships none flat (Kimi K3.1). GLM-5.3-Flash carries the same nested lists
+	// 0-BASED but always also ships flat layer_types, so the non-empty guard —
+	// plus the explicit GLM5Next skip — keeps its decode byte-identical.
+	var kdaList, dsaList, fullList []int
+	if lc := linearWrap.LinearAttnConfig; lc != nil {
+		kdaList = lc.KDALayers
+		fullList = lc.FullAttnLayers
+	}
+	if dc := dsaWrap.DSAConfig; dc != nil {
+		dsaList = dc.DsaLayers
+		if len(fullList) == 0 {
+			fullList = dc.FullAttnLayers
+		}
+	}
+	c.normalizeKimiK31LayerTypes(kdaList, dsaList, fullList)
 	// Default only an initially unset EOS. Later JSON overlays retain the scalar
 	// fallback while clearing the list, preserving the existing decode behavior.
 	if !aux.EOS.present && eosInitiallyUnset {
@@ -607,6 +744,48 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 	c.DeepSeekV41 = metadata
 	c.eosJSONDecoded = true
 	return nil
+}
+
+// normalizeKimiK31LayerTypes builds LayerTypes for Kimi K3.1's hybrid stack from
+// the 1-BASED membership lists the checkpoint carries in its nested
+// linear_attn_config (kda_layers, full_attn_layers) and dsa_config (dsa_layers).
+// It is a no-op whenever LayerTypes is already populated (GLM-5.3-Flash always
+// ships flat 0-based layer_types and a rebuild would corrupt it), the model has
+// no layers, every list is empty, or the config is GLM-5.3-Flash.
+//
+// Membership precedence: a layer named by dsa_layers is "dsa" even when another
+// list also names it (K3.1's full_attn_layers equals dsa_layers); a kda_layers
+// member is "kda"; a layer touched only by a full-attention list is
+// "full_attention"; a layer in no list keeps the empty token (dense default).
+// Indices arrive 1-based (K3.1 lists 93 for its 93-layer stack) and are stored
+// 0-based, matching every other LayerTypes consumer.
+func (c *Config) normalizeKimiK31LayerTypes(kda, dsa, fullAttn []int) {
+	if len(c.LayerTypes) != 0 || c.NumLayers <= 0 || c.GLM5Next {
+		return
+	}
+	if len(kda) == 0 && len(dsa) == 0 && len(fullAttn) == 0 {
+		return
+	}
+	member := func(list []int, l int) bool {
+		for _, v := range list {
+			if v == l {
+				return true
+			}
+		}
+		return false
+	}
+	tokens := make([]string, c.NumLayers)
+	for l := 1; l <= c.NumLayers; l++ {
+		switch {
+		case member(dsa, l):
+			tokens[l-1] = KimiK31LayerTypeDSA
+		case member(kda, l):
+			tokens[l-1] = KimiK31LayerTypeKDA
+		case member(fullAttn, l):
+			tokens[l-1] = "full_attention"
+		}
+	}
+	c.LayerTypes = tokens
 }
 
 // promoteLongRope lifts a CLASSIC-key rope_scaling block of the named kind onto the flat
@@ -644,8 +823,41 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	}
 	c.deriveGemmaAndQKNormAxes(h, family)
 	c.deriveMoEAxes(h, family)
+	c.deriveAltSpellingAxes(h)
 	c.deriveLayerNormFamilyAxes(h, family)
 	return nil
+}
+
+// deriveAltSpellingAxes folds alternative key spellings onto the canonical MoE
+// axes when the canonical key is absent. Kimi K3.1's text config names the MoE
+// knobs with its own spellings (num_experts_per_token, num_shared_experts,
+// num_expert_group, moe_renormalize, moe_router_activation_func) and puts the
+// image placeholder under media_placeholder_token_id; the expert count rides
+// the existing NumExpertsAlt hint in deriveMoEAxes. Every family that ships a
+// canonical key sets the canonical field directly, so the canonical-absent
+// gates keep DeepSeek / Mixtral / Qwen-MoE decodes byte-identical.
+func (c *Config) deriveAltSpellingAxes(h configJSONHints) {
+	if c.NumExpertsPerTok == 0 && h.NumExpertsPerTokAlt != nil {
+		c.NumExpertsPerTok = *h.NumExpertsPerTokAlt
+	}
+	if c.NSharedExperts == 0 && h.NSharedExpertsAlt != nil {
+		c.NSharedExperts = *h.NSharedExpertsAlt
+	}
+	if c.NGroup == 0 && h.NGroupAlt != nil {
+		c.NGroup = *h.NGroupAlt
+	}
+	// norm_topk_prob presence is tracked by the hint: an explicit canonical
+	// false must not be overwritten by the alt spelling, and an absent canonical
+	// key leaves the zero value free to take the alt.
+	if h.NormTopKProb == nil && h.MoERenormalizeAlt != nil {
+		c.NormTopKProb = *h.MoERenormalizeAlt
+	}
+	if c.ScoringFunc == "" && h.MoERouterActivationAlt != "" {
+		c.ScoringFunc = h.MoERouterActivationAlt
+	}
+	if c.ImageTokenID == 0 && h.MediaPlaceholderTokenIDAlt != nil {
+		c.ImageTokenID = *h.MediaPlaceholderTokenIDAlt
+	}
 }
 
 // deriveHeadAndLoopAxes resolves HeadDim and NumLoops, then refuses an
@@ -1408,6 +1620,16 @@ func (c Config) isMiniMaxSparseAttn() bool {
 // attention path is unchanged.
 func (c Config) isMSALayer(l int) bool {
 	return c.isMiniMax() && c.layerType(l) == "minimax_m3_sparse"
+}
+
+// IsKimiK31 reports a Kimi K3.1 architecture: model_type "kimi_k31" or the
+// multimodal wrapper entry "KimiK31ForConditionalGeneration" — both normalize
+// (lowercase, separators stripped) to a family key containing "kimik31". The
+// flat "kimi_linear" family (K3) normalizes to "kimilinear" and does NOT match.
+// Exported so the L8-dispatch and K3.1 execution/vision leaves (#14363-#14366)
+// can select on it across packages.
+func (c Config) IsKimiK31() bool {
+	return c.archFamilyHas("kimik31")
 }
 
 func parseBlockTopology(s string) (BlockTopology, bool) {
