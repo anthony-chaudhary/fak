@@ -1,6 +1,8 @@
 // Command loadgen is a pure-Go (stdlib-only) load generator for OpenAI-compatible
 // /v1/chat/completions endpoints. It runs a concurrency sweep against streaming
-// completions and writes a MATRIX.json with usage-based end-to-end output tok/s
+// completions with two-tier in-flight capping — a session slot per request plus a
+// prefill slot released at first content (TTFT) — and writes a MATRIX.json with
+// usage-based end-to-end output tok/s
 // (wall includes per-request prefill/TTFT), client first-content timing, chunk
 // cadence, and latency percentiles per concurrency point. Chunk cadence is not
 // token/decode throughput; token throughput is unavailable when usage is missing.
@@ -32,11 +34,16 @@ func main() {
 		prompt       = flag.String("prompt", "Write one sentence about why benchmarks matter.", "prompt text")
 		maxTokens    = flag.Int("max-tokens", 64, "max_tokens per request")
 		concurrency  = flag.String("concurrency", "1,4,16", "comma-separated concurrency levels")
+		prefillConc  = flag.Int("prefill-concurrency", 0, "max requests awaiting first content (TTFT) at once; 0 ties it to each concurrency level")
 		requestsPer  = flag.Int("requests-per", 32, "requests per concurrency level")
 		apiKeyEnv    = flag.String("api-key-env", "", "env var holding the API key (optional)")
 		maxErrorRate = flag.Float64("max-error-rate", 0.0, "fail if any point exceeds this error rate")
 		rate         = flag.Float64("rate", 0, "target request rate per second per concurrency point; 0 = off (issue as fast as workers consume)")
 		maxCatchUp   = flag.Duration("max-catch-up", 0, "bounded pacing catch-up window before re-anchoring to now; 0 = default 10ms")
+		arrival      = flag.String("arrival", "", "inter-arrival pattern: poisson, gamma, constant, or concurrency_burst (empty = fixed-rate pacer / unpaced)")
+		arrivalRate  = flag.Float64("arrival-rate", 0, "request rate (req/s) for -arrival; 0 falls back to -rate")
+		smoothness   = flag.Float64("arrival-smoothness", 0, "Gamma shape for -arrival=gamma (1.0 = Poisson-equivalent; <1 burstier, >1 more regular); 0 = 1.0")
+		arrivalSeed  = flag.Int64("arrival-seed", 0, "seed for the -arrival generator so a shaped run is reproducible")
 		timeout      = flag.Duration("timeout", 20*time.Minute, "overall timeout")
 		out          = flag.String("out", "", "write MATRIX.json here (default: stdout)")
 	)
@@ -57,9 +64,17 @@ func main() {
 
 	cfg := &Config{
 		URL: *url, Model: *model, Stack: *stack, Prompt: *prompt,
-		MaxTokens: *maxTokens, Concurrencies: concs, RequestsPer: *requestsPer, APIKey: apiKey,
-		RatePerSec: *rate, MaxCatchUp: *maxCatchUp,
+		MaxTokens: *maxTokens, Concurrencies: concs, RequestsPer: *requestsPer,
+		PrefillConcurrency: *prefillConc, RatePerSec: *rate, MaxCatchUp: *maxCatchUp,
+		ArrivalRate: *arrivalRate, ArrivalSmoothness: *smoothness, ArrivalSeed: *arrivalSeed,
+		APIKey: apiKey,
 	}
+	pattern, perr := parseArrivalPattern(*arrival)
+	if perr != nil {
+		fmt.Fprintln(os.Stderr, "loadgen:", perr)
+		os.Exit(2)
+	}
+	cfg.Arrival = pattern
 	if err := validateConfig(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

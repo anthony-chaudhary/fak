@@ -93,6 +93,9 @@ type sseMeasure struct {
 	sawData          bool
 	streamErr        error
 	done             bool
+	// onFirstContent fires exactly once, when the first content chunk lands —
+	// the TTFT point where a two-tier caller releases its prefill slot.
+	onFirstContent func()
 }
 
 // feedSSEMessage folds one complete SSE event body (possibly several physical
@@ -147,6 +150,9 @@ func (m *sseMeasure) feedSSELine(line string, now time.Time) {
 			if n := chunk.Usage.CompletionTokens; n != nil && *n >= 0 {
 				m.firstChunkTokens = n
 			}
+			if m.onFirstContent != nil {
+				m.onFirstContent()
+			}
 		} else {
 			m.chunkIntervals = append(m.chunkIntervals, now.Sub(m.lastContent))
 		}
@@ -156,12 +162,38 @@ func (m *sseMeasure) feedSSELine(line string, now time.Time) {
 	}
 }
 
-// clientInFlight tracks client-side HTTP operations. It does not claim that
+// clientInFlight tracks client-side HTTP operations in two tiers, adapting
+// aiperf's two-tier credit model (ai-dynamo/aiperf, src/aiperf/credit/issuer.py:311
+// @ ab610add4e8876fca223197596c728e17365f381, Apache-2.0):
+//
+//   - session tier: one slot per in-flight request, held from request start until
+//     the response body closes. Its cap is the sweep's concurrency level.
+//   - prefill tier: one slot per request still awaiting its first content chunk
+//     (TTFT). It is released at first content while the session slot stays held,
+//     so later chunks keep flowing under the session cap. Its cap is
+//     Config.PrefillConcurrency; when unset it equals the session cap, so the
+//     tier binds only when the operator dials it below the concurrency.
+//
+// The zero value disables the prefill tier (legacy single-tier behavior), which
+// keeps direct oneRequest callers on the old contract. It does not claim that
 // the server admitted the same number of requests into GPU execution.
 type clientInFlight struct {
-	mu      sync.Mutex
-	current int
-	peak    int
+	mu          sync.Mutex
+	current     int
+	peak        int
+	prefillHeld int
+	prefillPeak int
+	sem         chan struct{} // prefill permits; nil disables the prefill tier
+}
+
+// newClientInFlight builds a two-tier tracker for one sweep point. prefillCap is
+// clamped into (0, sessionCap]; values outside that range fall back to the
+// session cap so the prefill tier can never admit more than the session tier.
+func newClientInFlight(sessionCap, prefillCap int) *clientInFlight {
+	if prefillCap <= 0 || prefillCap > sessionCap {
+		prefillCap = sessionCap
+	}
+	return &clientInFlight{sem: make(chan struct{}, prefillCap)}
 }
 
 func (f *clientInFlight) begin() {
@@ -183,6 +215,46 @@ func (f *clientInFlight) peakValue() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.peak
+}
+
+// beginPrefill acquires a prefill-tier slot, blocking until one frees or ctx ends.
+// It reports whether a slot was acquired; with the tier disabled it acquires
+// nothing and reports true so callers keep one uniform release path.
+func (f *clientInFlight) beginPrefill(ctx context.Context) bool {
+	if f.sem == nil {
+		return true
+	}
+	select {
+	case f.sem <- struct{}{}:
+	case <-ctx.Done():
+		return false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prefillHeld++
+	if f.prefillHeld > f.prefillPeak {
+		f.prefillPeak = f.prefillHeld
+	}
+	return true
+}
+
+// endPrefill releases a prefill-tier slot held by beginPrefill. Callers must call
+// it exactly once per acquired slot, including every failure path, so a failed
+// request cannot strand the permit and starve later requests.
+func (f *clientInFlight) endPrefill() {
+	if f.sem == nil {
+		return
+	}
+	f.mu.Lock()
+	f.prefillHeld--
+	f.mu.Unlock()
+	<-f.sem
+}
+
+func (f *clientInFlight) prefillPeakValue() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.prefillPeak
 }
 
 // PointResult aggregates one concurrency level.
@@ -224,16 +296,26 @@ type PointResult struct {
 	// legacy fields remain zero/omitted; use the explicitly named chunk metrics.
 	TPOTMS                float64 `json:"tpot_ms,omitempty"`
 	DecodeTokensPerSecond float64 `json:"decode_tokens_per_second,omitempty"`
+	// PrefillConcurrency is this point's effective prefill-tier cap: the number of
+	// requests allowed to await first content at once. It equals Concurrency
+	// unless Config.PrefillConcurrency dials it lower.
+	PrefillConcurrency int `json:"prefill_concurrency,omitempty"`
+	// PeakPrefillInFlight is the observed number of client requests simultaneously
+	// awaiting their first content chunk. Client-side observation, not server
+	// GPU batching.
+	PeakPrefillInFlight int `json:"peak_prefill_in_flight,omitempty"`
 }
 
 // MatrixResult is the full sweep, shaped to be a drop-in MATRIX.json.
 type MatrixResult struct {
-	Endpoint     string        `json:"endpoint"`
-	Model        string        `json:"model"`
-	Stack        string        `json:"stack,omitempty"`
-	StartedAtUTC string        `json:"started_at_utc"`
-	Canceled     bool          `json:"canceled,omitempty"`
-	Points       []PointResult `json:"points"`
+	Endpoint     string `json:"endpoint"`
+	Model        string `json:"model"`
+	Stack        string `json:"stack,omitempty"`
+	StartedAtUTC string `json:"started_at_utc"`
+	Canceled     bool   `json:"canceled,omitempty"`
+	// Arrival echoes the shape applied across every point.
+	Arrival *ArrivalEcho  `json:"arrival,omitempty"`
+	Points  []PointResult `json:"points"`
 }
 
 // Config controls a sweep.
@@ -245,9 +327,14 @@ type Config struct {
 	MaxTokens     int
 	Concurrencies []int
 	RequestsPer   int // requests per concurrency level
-	APIKey        string
-	HTTPClient    *http.Client
-	Now           func() time.Time
+	// PrefillConcurrency caps requests awaiting their first content chunk (TTFT),
+	// independently of total in-flight. 0 (default) ties it to each point's
+	// concurrency; a smaller value throttles concurrent prompt processing while
+	// already-prefilled streams keep decoding under the session cap.
+	PrefillConcurrency int
+	APIKey             string
+	HTTPClient         *http.Client
+	Now                func() time.Time
 	// Dataset optionally replays stored payload bytes verbatim instead of the
 	// synthetic prompt: request i sends payloadSeq(Dataset)[i%n]. The client is
 	// owned by the caller; loadgen never closes it.
@@ -259,6 +346,30 @@ type Config struct {
 	// re-anchors to now; 0 selects defaultMaxCatchUp, negative is rejected by
 	// validateConfig.
 	MaxCatchUp time.Duration
+	// Arrival selects an inter-arrival distribution for issue pacing. The empty
+	// value preserves today's behavior: with RatePerSec > 0 the fixed-interval
+	// pacer runs, and with RatePerSec == 0 workers drain as fast as they consume.
+	Arrival ArrivalPattern
+	// ArrivalRate is the request rate (requests/sec) for the arrival pattern;
+	// 0 falls back to RatePerSec. Ignored (rate not applicable) for
+	// concurrency_burst.
+	ArrivalRate float64
+	// ArrivalSmoothness is the Gamma shape for the gamma pattern (1.0 =
+	// Poisson-equivalent; <1 burstier, >1 more regular); 0 defaults to 1.0.
+	// Ignored by the other patterns.
+	ArrivalSmoothness float64
+	// ArrivalSeed seeds the arrival generator so a shaped run is reproducible.
+	ArrivalSeed int64
+}
+
+// ArrivalEcho is the top-level MatrixResult block recording the arrival shape a
+// sweep used, so two runs with identical settings but different real-world
+// arrival shapes are distinguishable from the receipt alone.
+type ArrivalEcho struct {
+	Pattern    string  `json:"pattern"`
+	RatePerSec float64 `json:"rate_per_sec,omitempty"`
+	Smoothness float64 `json:"smoothness,omitempty"`
+	Seed       int64   `json:"seed"`
 }
 
 var (
@@ -267,6 +378,7 @@ var (
 	errNonFiniteRate            = errors.New("loadgen: rate-per-second must be finite")
 	errNegativeRate             = errors.New("loadgen: rate-per-second must be non-negative")
 	errNegativeMaxCatchUp       = errors.New("loadgen: max-catch-up must be non-negative")
+	errPrefillAboveConcurrency  = errors.New("loadgen: prefill-concurrency must not exceed maximum concurrency")
 )
 
 // validateConfig rejects sweep shapes that cannot actually put every requested
@@ -293,6 +405,29 @@ func validateConfig(cfg *Config) error {
 	if cfg.MaxCatchUp < 0 {
 		return fmt.Errorf("%w: got %s", errNegativeMaxCatchUp, cfg.MaxCatchUp)
 	}
+	// A prefill slot is always held together with a session slot, so a prefill
+	// cap above the largest session cap can never bind; reject it as a typo.
+	if cfg.PrefillConcurrency > maxConcurrency {
+		return fmt.Errorf("%w: prefill=%d maximum-concurrency=%d", errPrefillAboveConcurrency, cfg.PrefillConcurrency, maxConcurrency)
+	}
+	if _, err := parseArrivalPattern(string(cfg.Arrival)); err != nil {
+		return err
+	}
+	// A non-empty pattern needs an effective rate (ArrivalRate, else the legacy
+	// RatePerSec) except for concurrency_burst, whose throughput is governed by
+	// the concurrency semaphore rather than a rate.
+	if cfg.Arrival != "" && cfg.Arrival != arrivalBurst {
+		eff := cfg.ArrivalRate
+		if eff == 0 {
+			eff = cfg.RatePerSec
+		}
+		if !rateValid(eff) {
+			return fmt.Errorf("%w: arrival %q got %g", errNonPositiveRate, cfg.Arrival, eff)
+		}
+	}
+	if cfg.ArrivalSmoothness < 0 || math.IsNaN(cfg.ArrivalSmoothness) || math.IsInf(cfg.ArrivalSmoothness, 0) {
+		return fmt.Errorf("loadgen: arrival smoothness must be non-negative, got %g", cfg.ArrivalSmoothness)
+	}
 	return nil
 }
 
@@ -318,21 +453,30 @@ const defaultMaxCatchUp = 10 * time.Millisecond
 // The upstream asyncio high-resolution wait became a context-raced timer
 // (pacerSleep); issuance is reported through issue() so the caller owns the
 // worker channel.
+//
+// The fixed-interval case is a special case of a per-step gap source: newPacer
+// wraps a constant interval in gap, while an arrival-pattern generator supplies
+// a freshly drawn gap per step (see arrival.go). Behavior for a constant gap is
+// byte-for-byte the original schedule.
 type pacer struct {
-	interval   time.Duration
+	gap        func() time.Duration // delay drawn for the next step (per-step for variable patterns)
 	maxCatchUp time.Duration
 	now        func() time.Time
 	sleep      func(context.Context, time.Duration) bool
 }
 
 func newPacer(interval, maxCatchUp time.Duration, now func() time.Time, sleep func(context.Context, time.Duration) bool) *pacer {
+	return newPacerFromGap(func() time.Duration { return interval }, maxCatchUp, now, sleep)
+}
+
+func newPacerFromGap(gap func() time.Duration, maxCatchUp time.Duration, now func() time.Time, sleep func(context.Context, time.Duration) bool) *pacer {
 	if now == nil {
 		now = time.Now
 	}
 	if sleep == nil {
 		sleep = pacerSleep
 	}
-	return &pacer{interval: interval, maxCatchUp: maxCatchUp, now: now, sleep: sleep}
+	return &pacer{gap: gap, maxCatchUp: maxCatchUp, now: now, sleep: sleep}
 }
 
 // pacerSleep blocks until d elapses or ctx finishes; false means the context
@@ -349,17 +493,21 @@ func pacerSleep(ctx context.Context, d time.Duration) bool {
 }
 
 // run issues up to n calls through issue (each returning whether it was
-// accepted) on an absolute-deadline schedule: the first deadline is one
-// interval after start, each subsequent deadline advances by the interval from
-// the PREVIOUS deadline (never from wall-clock wake time, so oversleeps do not
-// compound). If the next deadline has fallen more than maxCatchUp in the past,
-// the schedule re-anchors to now — missed ticks are dropped, never burst-caught.
-// It stops early when ctx finishes or issue rejects, and returns how many
-// issues were actually accepted: a rejected feed is never counted, so callers
-// can slice their result arrays to the returned count safely. The deadline
-// advances BEFORE issuing so issue latency cannot shift subsequent deadlines.
+// accepted) on an absolute-deadline schedule: the first deadline is one gap
+// after start, each subsequent deadline advances by the NEXT gap drawn from the
+// gap source, measured from the PREVIOUS deadline (never from wall-clock wake
+// time, so oversleeps do not compound). A constant gap reproduces the original
+// fixed-rate schedule exactly; a variable gap (an arrival-pattern generator)
+// turns the schedule into a seeded point process. If the next deadline has
+// fallen more than maxCatchUp in the past, the schedule re-anchors to now —
+// missed ticks are dropped, never burst-caught. It stops early when ctx
+// finishes or issue rejects, and returns how many issues were actually
+// accepted: a rejected feed is never counted, so callers can slice their result
+// arrays to the returned count safely. A zero gap (ConcurrencyBurst) issues
+// every step with no sleep, so throughput is bounded by issue/consumer
+// back-pressure rather than by the schedule.
 func (p *pacer) run(ctx context.Context, n int, issue func() bool) int {
-	next := p.now().Add(p.interval)
+	next := p.now().Add(p.gap())
 	issued := 0
 	for i := 0; i < n; i++ {
 		if ctx.Err() != nil {
@@ -374,7 +522,7 @@ func (p *pacer) run(ctx context.Context, n int, issue func() bool) int {
 				break
 			}
 		}
-		next = next.Add(p.interval) // advance before issue: issue latency must not compound
+		next = next.Add(p.gap()) // advance before issue: issue latency must not compound
 		if !issue() {
 			break // rejected feed: not counted, nothing downstream consumed it
 		}
@@ -395,6 +543,24 @@ func (c *Config) now() time.Time {
 		return c.Now()
 	}
 	return time.Now()
+}
+
+// arrivalRate resolves the effective rate for the selected pattern: the explicit
+// ArrivalRate when set, else the legacy RatePerSec.
+func (c *Config) arrivalRate() float64 {
+	if c.ArrivalRate != 0 {
+		return c.ArrivalRate
+	}
+	return c.RatePerSec
+}
+
+// arrivalSmoothness resolves the Gamma shape, defaulting to 1.0 (Poisson-
+// equivalent) when unset, matching upstream's `arrival_smoothness or 1.0`.
+func (c *Config) arrivalSmoothness() float64 {
+	if c.ArrivalSmoothness != 0 {
+		return c.ArrivalSmoothness
+	}
+	return 1.0
 }
 
 // oneRequest issues a single chat completion as a stream (stream:true) and measures
@@ -426,8 +592,15 @@ func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight, body
 	}
 	start := cfg.now()
 	inFlight.begin()
+	if !inFlight.beginPrefill(ctx) {
+		// Canceled while waiting for a prefill slot: release the session slot to
+		// keep the tiers symmetric (aiperf releases slots on failure).
+		inFlight.end()
+		return reqResult{err: ctx.Err(), latency: cfg.now().Sub(start)}
+	}
 	resp, err := cfg.client().Do(req)
 	if err != nil {
+		inFlight.endPrefill()
 		inFlight.end()
 		return reqResult{err: err, latency: cfg.now().Sub(start)}
 	}
@@ -436,6 +609,7 @@ func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight, body
 		inFlight.end()
 	}()
 	if resp.StatusCode >= 300 {
+		inFlight.endPrefill() // no content will arrive: release the prefill slot now
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return reqResult{err: fmt.Errorf("status %d: %.120s", resp.StatusCode, string(data)), latency: cfg.now().Sub(start)}
 	}
@@ -447,26 +621,40 @@ func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight, body
 	// Classify by content type when declared; otherwise sniff the first line — an
 	// SSE stream opens with `data:` lines, a plain-JSON answer does not.
 	if isSSE || (!isJSON && strings.HasPrefix(strings.TrimLeft(firstLine, " \t\r"), "data:")) {
-		return measureStream(cfg, br, firstLine, firstErr, start)
+		// Arm the TTFT hook on this request's measurer: it releases the prefill
+		// slot exactly once, at the first content chunk, while the session slot
+		// stays held for the rest of the stream.
+		var m sseMeasure
+		m.onFirstContent = inFlight.endPrefill
+		rr := consumeSSE(&m, cfg, br, firstLine, firstErr, start)
+		if m.firstContent.IsZero() {
+			inFlight.endPrefill() // stream ended before any content chunk: still release
+		}
+		return rr
 	}
-	return jsonFallback(cfg, br, firstLine, firstErr, start)
+	// Plain-JSON delivery has no incremental TTFT: its first content arrives
+	// atomically with the parsed body, so the prefill slot is released once the
+	// whole response has been consumed.
+	rr := jsonFallback(cfg, br, firstLine, firstErr, start)
+	inFlight.endPrefill()
+	return rr
 }
 
 // emptyStreamBody is the closed sentinel for a 200 response whose stream carried no
 // data lines at all.
 var emptyStreamBody = errors.New("empty stream body")
 
-// measureStream consumes an SSE chat-completions body, sampling the arrival time of
-// each content chunk. The body is parsed incrementally as complete SSE events:
-// event delimiters that straddle two network chunks are recovered by re-scanning
-// the overlap region, and every event is stamped with the arrival time of the
-// chunk that completed it. A clean EOF (with or without [DONE]) completes the
-// request; malformed lines are skipped and never panic. Observed non-EOF read
-// errors fail the request, including errors accompanying partial data.
-// Completion tokens come only from usage.completion_tokens; chunk counts remain
-// a separate observation.
-func measureStream(cfg *Config, br *bufio.Reader, firstLine string, firstErr error, start time.Time) reqResult {
-	var m sseMeasure
+// consumeSSE folds an SSE chat-completions body into m, sampling the arrival
+// time of each content chunk. The body is parsed incrementally as complete SSE
+// events: event delimiters that straddle two network chunks are recovered by
+// re-scanning the overlap region, and every event is stamped with the arrival
+// time of the chunk that completed it. A clean EOF (with or without [DONE])
+// completes the request; malformed lines are skipped and never panic. Observed
+// non-EOF read errors fail the request, including errors accompanying partial
+// data. Completion tokens come only from usage.completion_tokens; chunk counts
+// remain a separate observation. The caller owns m so it can arm
+// m.onFirstContent before consuming.
+func consumeSSE(m *sseMeasure, cfg *Config, br *bufio.Reader, firstLine string, firstErr error, start time.Time) reqResult {
 	p := newSSEStreamParser()
 	if firstLine != "" {
 		for _, msg := range p.feed([]byte(firstLine), cfg.now()) {
@@ -507,6 +695,16 @@ func measureStream(cfg *Config, br *bufio.Reader, firstLine string, firstErr err
 	rr.chunkIntervals = m.chunkIntervals
 	rr.firstChunkTokens = m.firstChunkTokens
 	return rr
+}
+
+// measureStream consumes an SSE chat-completions body, sampling the arrival time of
+// each content chunk. A clean EOF (with or without [DONE]) completes the request;
+// malformed lines are skipped and never panic. Observed non-EOF read errors fail
+// the request, including errors accompanying partial data. Completion tokens come
+// only from usage.completion_tokens; chunk counts remain a separate observation.
+func measureStream(cfg *Config, br *bufio.Reader, firstLine string, firstErr error, start time.Time) reqResult {
+	var m sseMeasure
+	return consumeSSE(&m, cfg, br, firstLine, firstErr, start)
 }
 
 // jsonFallback parses a plain (non-SSE) chat-completions response — the shape returned
@@ -552,6 +750,16 @@ func payloadSeq(ds *DatasetClient) ([][]byte, error) {
 	return seq, nil
 }
 
+// prefillCapFor resolves one sweep point's effective prefill-tier cap:
+// Config.PrefillConcurrency when dialed below the point's concurrency, else the
+// concurrency itself (the tiers move together unless separated).
+func prefillCapFor(cfg *Config, concurrency int) int {
+	if cfg.PrefillConcurrency > 0 && cfg.PrefillConcurrency < concurrency {
+		return cfg.PrefillConcurrency
+	}
+	return concurrency
+}
+
 // runPoint issues up to `requests` requests at the given concurrency. When
 // cfg.Dataset is set, request i replays payloadSeq(cfg.Dataset)[i%n] verbatim;
 // otherwise the synthetic prompt from cfg is used. With RatePerSec > 0,
@@ -564,7 +772,8 @@ func payloadSeq(ds *DatasetClient) ([][]byte, error) {
 func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) PointResult {
 	results := make([]reqResult, requests)
 	jobs := make(chan int)
-	inFlight := &clientInFlight{}
+	prefillCap := prefillCapFor(cfg, concurrency)
+	inFlight := newClientInFlight(concurrency, prefillCap)
 	var wg sync.WaitGroup
 	wallStart := cfg.now()
 	var (
@@ -603,7 +812,29 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 		}
 	}
 	var issued int
-	if cfg.RatePerSec > 0 {
+	switch {
+	case cfg.Arrival != "":
+		gen, err := newIntervalGenerator(cfg.Arrival, cfg.arrivalRate(), cfg.arrivalSmoothness(), cfg.ArrivalSeed)
+		if err != nil {
+			// validateConfig rejects this before any request; guard anyway so a
+			// direct runPoint caller cannot panic.
+			for i := 0; i < requests; i++ {
+				results[i] = reqResult{err: err}
+			}
+			issued = requests
+		} else {
+			catchUp := cfg.MaxCatchUp
+			if catchUp <= 0 {
+				catchUp = defaultMaxCatchUp
+			}
+			counter := 0
+			issued = newPacerFromGap(delaySource(gen), catchUp, cfg.now, nil).run(ctx, requests, func() bool {
+				i := counter
+				counter++
+				return feedJob(i)
+			})
+		}
+	case cfg.RatePerSec > 0:
 		interval := time.Duration(float64(time.Second) / cfg.RatePerSec)
 		catchUp := cfg.MaxCatchUp
 		if catchUp <= 0 {
@@ -615,7 +846,7 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 			counter++
 			return feedJob(i)
 		})
-	} else {
+	default:
 		for i := 0; i < requests; i++ {
 			if !feedJob(i) {
 				break
@@ -628,6 +859,8 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 	wall := cfg.now().Sub(wallStart)
 	result := aggregate(concurrency, issued, wall, results[:issued])
 	result.PeakInFlight = inFlight.peakValue()
+	result.PrefillConcurrency = prefillCap
+	result.PeakPrefillInFlight = inFlight.prefillPeakValue()
 	return result
 }
 
@@ -737,6 +970,16 @@ func Run(ctx context.Context, cfg *Config) MatrixResult {
 	mr := MatrixResult{
 		Endpoint: cfg.URL, Model: cfg.Model, Stack: cfg.Stack,
 		StartedAtUTC: cfg.now().UTC().Format(time.RFC3339),
+	}
+	if cfg.Arrival != "" {
+		echo := &ArrivalEcho{Pattern: string(cfg.Arrival), Seed: cfg.ArrivalSeed}
+		if cfg.Arrival != arrivalBurst {
+			echo.RatePerSec = cfg.arrivalRate()
+		}
+		if cfg.Arrival == arrivalGamma {
+			echo.Smoothness = cfg.arrivalSmoothness()
+		}
+		mr.Arrival = echo
 	}
 	for _, c := range cfg.Concurrencies {
 		if ctx.Err() != nil {

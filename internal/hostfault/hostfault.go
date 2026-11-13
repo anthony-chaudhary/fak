@@ -13,6 +13,9 @@ package hostfault
 //     MoUpdateOrchestrator / MoUsoCoreWorker identity),
 //   - a GPU driver LIVE-KERNEL / TDR watchdog event (WER 1001 LiveKernelEvent,
 //     video-TDR bucket 141 / vendor watchdog dumps),
+//   - an NVIDIA GPU XID fault the driver named by code (Xid (PCI:...): 79,
+//     XID 48), rendered in operator text from the pinned dcgm-exporter XID
+//     vocabulary (xid.go) instead of a bare number,
 //   - an app-termination (hang) failure dump (WER 1001 AppTermFailureEvent).
 //
 // These live in the Windows event log across several providers; before this
@@ -68,6 +71,13 @@ const (
 	// watchdog dump under \LiveKernelReports). The dominant host-instability
 	// class on the audited host (AMD watchdog / VIDEO_TDR_ERROR).
 	HostGPULiveKernel HostFaultClass = "GPU_LIVEKERNEL"
+	// HostGpuXID: an NVIDIA GPU XID fault — the driver named a fault code
+	// ("Xid (PCI:0000:01:00.0): 79", "XID 48"). The class is the witnessed
+	// event; the operator text for the code comes from the pinned dcgm-exporter
+	// vocabulary (XIDOperatorText in xid.go). A code the pinned catalog does not
+	// index still names this class — the fault happened — while its text stays
+	// empty rather than invented.
+	HostGpuXID HostFaultClass = "GPU_XID"
 	// HostAppTermFailure: an application-termination (hang) failure dump — WER
 	// 1001 AppTermFailureEvent, an app killed for not responding.
 	HostAppTermFailure HostFaultClass = "APP_TERM_FAILURE"
@@ -76,7 +86,7 @@ const (
 // validHostFaultClass is the closed-set membership check.
 func validHostFaultClass(c HostFaultClass) bool {
 	switch c {
-	case HostWUInstallFailure, HostWUOrchestratorFault, HostGPULiveKernel, HostAppTermFailure:
+	case HostWUInstallFailure, HostWUOrchestratorFault, HostGPULiveKernel, HostGpuXID, HostAppTermFailure:
 		return true
 	}
 	return false
@@ -123,13 +133,13 @@ func hasGPULiveKernelSignal(msg, app string) bool {
 }
 
 // ClassifyHostFault maps one parsed event-log record onto the closed host-fault
-// class. Fail-closed: a record that is not one of the four witnessed host-fault
+// class. Fail-closed: a record that is not one of the witnessed host-fault
 // classes returns ok=false and is DROPPED by callers, never fabricated into a
 // row. Ordering is by specificity — the provider/id-pinned WU install failure
 // first, then the identity-pinned orchestrator fault (which is itself a WER 1001
 // and would otherwise be swallowed by the generic app-term/GPU message rungs),
-// then the GPU-signalled live-kernel event, then the generic app-termination
-// dump.
+// then the code-named NVIDIA XID fault, then the GPU-signalled live-kernel
+// event, then the generic app-termination dump.
 func ClassifyHostFault(r WinFaultRecord) (HostFaultClass, bool) {
 	prov := strings.ToLower(r.Provider)
 	msg := strings.ToLower(r.Message)
@@ -144,6 +154,12 @@ func ClassifyHostFault(r WinFaultRecord) (HostFaultClass, bool) {
 	if containsAny(app, "moupdateorchestrator", "mousocoreworker") ||
 		containsAny(msg, "moupdateorchestrator", "mousocoreworker") {
 		return HostWUOrchestratorFault, true
+	}
+	// NVIDIA GPU XID fault — the driver named a fault CODE, which is more
+	// specific than the GPU-ish tokens the live-kernel rung below accepts, so a
+	// record carrying both is attributed to the named code.
+	if _, ok := ExtractXID(r); ok {
+		return HostGpuXID, true
 	}
 	// GPU driver live-kernel / TDR — only when a GPU signal co-occurs.
 	if strings.Contains(msg, "livekernelevent") && hasGPULiveKernelSignal(msg, app) {
