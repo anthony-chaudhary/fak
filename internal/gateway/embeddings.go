@@ -1,9 +1,11 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -25,7 +27,14 @@ import (
 // nearest-neighbour smoke checks. A live encoder worker (embedding_worker.go)
 // takes precedence when installed; otherwise a configured EmbeddingPooling
 // selects the separately admitted causal model provider in
-// embeddings_causal.go. Unset configuration preserves this hashing backend.
+// embeddings_causal.go. In proxy mode (an upstream BaseURL is configured) the
+// handler instead forwards to that upstream's OpenAI-compatible /embeddings
+// endpoint and refuses with 501 embeddings_backend_unwired when the provider
+// cannot serve one - synthetic vectors never masquerade as the upstream model
+// (#14444); the --embeddings-backend=hash opt-in keeps this hashing backend
+// available there, self-labeled (model fak-hash-embed, X-Fak-Embedding-Mode:
+// hash). Offline deployments preserve this hashing backend as the deterministic
+// drop-in default.
 // ---------------------------------------------------------------------------
 
 const (
@@ -39,6 +48,13 @@ const (
 	// embedMaxItems bounds the number of inputs in one batched request, mirroring the
 	// real OpenAI per-request input cap so a single call cannot fan out unboundedly.
 	embedMaxItems = 2048
+	// embedHashModelLabel is the honest model name a hash-backend response reports
+	// when the operator opted in via --embeddings-backend=hash (#14444): the vectors
+	// are feature hashes, NOT the configured chat model, so the envelope says so.
+	embedHashModelLabel = "fak-hash-embed"
+	// embedHashModeValue marks a hash-backend response as synthetic on the
+	// X-Fak-Embedding-Mode header the encoder/causal paths already use.
+	embedHashModeValue = "hash"
 )
 
 // EmbeddingsRequest is the inbound POST /v1/embeddings body. Input is raw because
@@ -106,6 +122,10 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		s.handleCausalEmbeddings(w, r, req)
 		return
 	}
+	if s.embeddingsUpstream != nil {
+		s.handleUpstreamEmbeddings(w, r, req)
+		return
+	}
 	items, ok := normalizeTextInput(req.Input)
 	if !ok || len(items) == 0 {
 		writeErr(w, http.StatusBadRequest, "embeddings requires a non-empty `input` (string, array of strings, or token-id array)")
@@ -130,12 +150,88 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		data[i] = EmbeddingData{Object: "embedding", Index: i, Embedding: encodeEmbedding(vec, encodeBase64)}
 	}
 
+	model := s.model
+	if s.embeddingsHashOptIn {
+		// The operator acknowledged these are synthetic feature hashes: label the
+		// envelope so a client never mistakes them for the configured chat model
+		// (#14444). Offline deployments keep the unlabeled drop-in default.
+		model = embedHashModelLabel
+		w.Header().Set("X-Fak-Embedding-Mode", embedHashModeValue)
+	}
 	writeJSON(w, http.StatusOK, EmbeddingsResponse{
 		Object: "list",
 		Data:   data,
-		Model:  s.model,
+		Model:  model,
 		Usage:  EmbeddingUsage{PromptTokens: totalTokens, TotalTokens: totalTokens},
 	})
+}
+
+// embeddingsUpstream is the proxy-mode /v1/embeddings forward target (#14444),
+// built once in New from the primary upstream entry. The handler dials it per
+// request with the same credential posture the chat proxy uses.
+type embeddingsUpstream struct {
+	baseURL      string            // dial URL of the primary upstream (name= stripped)
+	apiKey       string            // static credential (may be empty)
+	apiKeyFunc   func() string     // fresh-credential resolver (may be nil)
+	extraHeaders map[string]string // trusted host headers (may be nil)
+	client       *http.Client      // bounded client for the forward hop
+}
+
+// handleUpstreamEmbeddings forwards POST /v1/embeddings to the configured
+// upstream's OpenAI-compatible /embeddings endpoint in proxy mode (#14444).
+// The body is the canonical form of the decoded inbound contract (the five
+// wire fields the DTO captures; Input round-trips byte-for-byte as RawMessage),
+// authenticated with the chat proxy's credential posture (static APIKey,
+// fresh-resolve APIKeyFunc, trusted ExtraHeaders). A 2xx answer passes the
+// upstream's own envelope through untouched - its model name, its vectors, its
+// usage. Any other outcome (transport failure, or a provider that cannot serve
+// embeddings) answers 501 with the typed code embeddings_backend_unwired: a
+// hosted deployment refuses honestly rather than falling back to synthetic
+// vectors masquerading as the upstream model. Upstream error bodies are never
+// folded into the refusal (the no-leak boundary the externally-exposed serve
+// path relies on).
+func (s *Server) handleUpstreamEmbeddings(w http.ResponseWriter, r *http.Request, req EmbeddingsRequest) {
+	up := s.embeddingsUpstream
+	body, err := json.Marshal(req)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "embeddings: encode forward body: "+err.Error())
+		return
+	}
+	url := strings.TrimRight(up.baseURL, "/") + "/embeddings"
+	hdr := http.Header{}
+	hdr.Set("Content-Type", "application/json")
+	key := up.apiKey
+	if up.apiKeyFunc != nil {
+		if k := up.apiKeyFunc(); k != "" {
+			key = k
+		}
+	}
+	if key != "" {
+		hdr.Set("Authorization", "Bearer "+key)
+	}
+	for k, v := range up.extraHeaders {
+		hdr.Set(k, v)
+	}
+	fwd, err := http.NewRequestWithContext(r.Context(), http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		writeErrCode(w, http.StatusNotImplemented, "embeddings_backend_unwired", "upstream /embeddings unavailable: "+err.Error())
+		return
+	}
+	fwd.Header = hdr
+	out, err := up.client.Do(fwd)
+	if err != nil {
+		writeErrCode(w, http.StatusNotImplemented, "embeddings_backend_unwired", "upstream /embeddings unavailable (transport failure); arm --embeddings-backend=hash for the deterministic local hashing backend")
+		return
+	}
+	defer out.Body.Close()
+	if out.StatusCode < 200 || out.StatusCode > 299 {
+		_, _ = io.Copy(io.Discard, out.Body)
+		writeErrCode(w, http.StatusNotImplemented, "embeddings_backend_unwired", "upstream /embeddings answered "+strconv.Itoa(out.StatusCode)+"; arm --embeddings-backend=hash for the deterministic local hashing backend")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, out.Body)
 }
 
 // embedDim clamps a client-requested dimensions to [1, embedMaxDim], defaulting to

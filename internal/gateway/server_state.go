@@ -384,6 +384,15 @@ type BudgetExhaustedFunc func(ctx context.Context, st SessionState, messages []a
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
 	causalEmbeddings *causalEmbeddingProvider
+	// embeddingsUpstream is the proxy-mode /v1/embeddings forward target (#14444):
+	// non-nil only when an upstream is configured AND the operator did not opt
+	// into the hash backend. nil = no forwarding (offline deployment, or the
+	// explicit hash opt-in below).
+	embeddingsUpstream *embeddingsUpstream
+	// embeddingsHashOptIn mirrors Config.EmbeddingsBackend=="hash": hash-backend
+	// responses self-label as synthetic (model fak-hash-embed plus
+	// X-Fak-Embedding-Mode: hash) instead of carrying the configured chat model.
+	embeddingsHashOptIn bool
 	// prefixReuse attributes in-kernel prefix reuse to same- vs cross-session origin
 	// (prefix_reuse_attribution.go). Zero value is ready.
 	prefixReuse                  prefixReuseAttribution

@@ -301,6 +301,17 @@ type Config struct {
 	// EmbeddingPooling explicitly selects bounded learned CPU causal mean/last embeddings.
 	// Empty preserves the legacy hash endpoint. Unsupported selections fail at startup.
 	EmbeddingPooling string
+	// EmbeddingsBackend selects the /v1/embeddings backend posture for proxy
+	// deployments (#14444). Empty (default) keeps the split honest: with an upstream
+	// configured (BaseURL or ReplicaBaseURLs), requests forward to that upstream's
+	// OpenAI-compatible /embeddings endpoint and a provider that cannot serve one
+	// (no such route, transport failure, or any non-2xx) answers 501 with the typed
+	// code embeddings_backend_unwired; offline deployments keep the deterministic
+	// hashing backend byte-for-byte. "hash" opts the deployment IN to the hashing
+	// backend even in front of an upstream: its responses then self-label as
+	// synthetic (model fak-hash-embed plus X-Fak-Embedding-Mode: hash) instead of
+	// masquerading under the configured chat model. Any other value fails New loud.
+	EmbeddingsBackend string
 	// Adjudicators optionally supplies a complete per-server kernel chain. A nil
 	// chain preserves the registered pipeline; callers must retain every floor.
 	Adjudicators []abi.Adjudicator

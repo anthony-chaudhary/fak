@@ -113,6 +113,7 @@ func configureServeToolEngines() {
 // locals through every call.
 type serveFlags struct {
 	embeddingPooling             *string
+	embeddingsBackend            *string
 	topologyShadowInput          *string
 	workspaceAdmission           *string
 	workspaceAdmissionPermissive *bool
@@ -373,6 +374,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.billingAddr = fs.String("billing-addr", "127.0.0.1:0", "listen address for the multi-tenant billing gateway chain; armed only when --billing is also set. Without --billing it is never bound, byte-for-byte today's behavior.")
 	sf.ggufPath = fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
 	sf.embeddingPooling = fs.String("embedding-pooling", "", "OPTIONAL learned causal dense-F32/Q8_0 CPU /v1/embeddings: mean or last, final norm + L2; empty keeps hash backend. Requires local compatible model/tokenizer; not trained embedding-quality qualification.")
+	sf.embeddingsBackend = fs.String("embeddings-backend", "", "select the /v1/embeddings backend posture (#14444): empty (default) keeps the split honest - in front of an upstream (--base-url/--replica-base-url) requests forward to that provider's /embeddings endpoint and answer 501 embeddings_backend_unwired when the provider cannot serve one; offline serves keep the deterministic hashing backend. 'hash' opts IN to the hashing backend even in front of an upstream and self-labels its responses (model fak-hash-embed, X-Fak-Embedding-Mode: hash) instead of presenting synthetic vectors under the configured chat model. Any other value fails startup.")
 	sf.tokPath = fs.String("tokenizer", "", "OPTIONAL override for the in-kernel CHAT planner's tokenizer. With --gguf and no --base-url, /v1/chat/completions AND /v1/messages already serve the in-kernel model (real ChatML chat) using the GGUF's EMBEDDED tokenizer; pass this only to override it (e.g. an SPM-only checkpoint with no embedded BPE tokenizer, or a custom vocab). Accepts a tokenizer.json or its directory. e.g. ~/.cache/fak-models/tokenizers/qwen3.6")
 	sf.ctxViewBudget = fs.Int("ctx-view-budget", gateway.DefaultServeCtxViewBudget, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-OFF on the serving router (gateway.DefaultServeCtxViewBudget, the 2026-11-10 hosting-simplification flip: the forwarded history is byte-for-byte); pass a budget (the guard door's legacy default is 8000, agent.DefaultCtxViewBudget) to re-arm. The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	sf.compactHistoryBudget = fs.Int("compact-history-budget", gateway.DefaultServeCompactHistoryBudget, "on the Anthropic PASSTHROUGH (an upstream --base-url anthropic), compact OLD conversation turns in the OUTBOUND request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream cache hit survives. This reaches the flagship passthrough the streaming ctxplan view cannot (#555). DEFAULT-OFF on the serving router (gateway.DefaultServeCompactHistoryBudget, the 2026-11-10 hosting-simplification flip: the body is forwarded byte-for-byte); pass a budget (the guard door's legacy default is 48000, gateway.DefaultCompactHistoryBudget) to re-arm. No effect on non-passthrough wires.")
@@ -1633,6 +1635,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		EngineCacheIdleTimeout:       *sf.engineCacheIdleTimeout,
 		EngineCacheRequireExactSpan:  *sf.engineCacheRequireExactSpan,
 		EmbeddingPooling:             *sf.embeddingPooling,
+		EmbeddingsBackend:            *sf.embeddingsBackend,
 		InKernelModel:                rt.inKernelModel,
 		Tokenizer:                    rt.inKernelTok,
 		InKernelQ4K:                  rt.inKernelQ4K,

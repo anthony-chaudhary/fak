@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -74,6 +75,15 @@ func New(cfg Config) (*Server, error) {
 	causalEmbeddings, embeddingErr := newCausalEmbeddingProvider(cfg)
 	if embeddingErr != nil {
 		return nil, embeddingErr
+	}
+	// The /v1/embeddings backend posture is the SAME class of honesty boundary:
+	// an explicit but unparsable selection fails loud at boot rather than
+	// silently picking a backend (#14444).
+	embeddingsBackend := strings.ToLower(strings.TrimSpace(cfg.EmbeddingsBackend))
+	switch embeddingsBackend {
+	case "", "hash":
+	default:
+		return nil, &ConfigError{Field: "EmbeddingsBackend", Reason: fmt.Sprintf("unknown backend %q (want \"\" or \"hash\")", cfg.EmbeddingsBackend)}
 	}
 	if err := validateDFlash2Config(cfg); err != nil {
 		return nil, err
@@ -194,6 +204,22 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
+	// Proxy-mode /v1/embeddings forward target (#14444): armed only when an
+	// upstream exists AND the operator did not opt into the hash backend. The
+	// primary entry (BaseURL, else the first replica) is the dial target; the
+	// name= identity prefix is stripped exactly as the chat planners do.
+	var embeddingsUp *embeddingsUpstream
+	if len(proxyURLs) > 0 && embeddingsBackend != "hash" {
+		_, dialURL := parseReplicaEntry(proxyURLs[0])
+		embeddingsUp = &embeddingsUpstream{
+			baseURL:      dialURL,
+			apiKey:       cfg.APIKey,
+			apiKeyFunc:   cfg.APIKeyFunc,
+			extraHeaders: cloneConfigHeaders(cfg.ExtraHeaders),
+			client:       &http.Client{Timeout: 2 * time.Minute},
+		}
+	}
+
 	planner, servedSide, upstreamSide, inKernelModelButChatIsMock, err := selectChatPlanner(cfg, model, proxyURLs, logf, startup)
 	if err != nil {
 		return nil, err
@@ -298,6 +324,8 @@ func New(cfg Config) (*Server, error) {
 
 	s := &Server{
 		causalEmbeddings:             causalEmbeddings,
+		embeddingsUpstream:           embeddingsUp,
+		embeddingsHashOptIn:          embeddingsBackend == "hash",
 		workspaceAdmissionPermissive: cfg.WorkspaceAdmissionPermissive,
 		workspaceAdmissionMode:       ResolveWorkspaceAdmissionMode(cfg),
 		toolGuardOff:                 toolGuardMode == ToolGuardOff,
