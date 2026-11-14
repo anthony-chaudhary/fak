@@ -29,6 +29,47 @@ an auditor, or a provider can rely on that single sentence. The CLA's sublicense
 ([`CLA.md`](CLA.md) §2) exists to enable the *serving-surface and product* options — **not**
 to ever close the kernel.
 
+## Layer → path map
+
+The layers above are mapped to concrete paths so that "which code sits in which layer"
+is checkable, not asserted. Every path listed exists on trunk; adding a package to a
+layer, or moving one between layers, is itself a governance change (see
+[`GOVERNANCE.md`](GOVERNANCE.md)) and lands as a `docs(licensing):` update to this map.
+
+| Layer | Paths (globs) |
+|---|---|
+| **Spec / ABI** | `internal/abi/**`, `pkg/abi/**`, the golden contract `internal/abi/testdata/abi_v0.1.golden`, the conformance suite `internal/conformance/**` |
+| **Importable kernel** | `pkg/abi/**` (the ABI driver surface), `internal/kernel/**` (the adjudication core), `internal/plancfi/**`, `internal/kv/**`, `internal/kvmmu/**`; the rest of `pkg/**` is the import surface and joins a layer only when named here |
+| **Serving surface** | `cmd/fak/**` (the `fak serve` entry point), `internal/gateway/**`, `internal/l3server/**`, `pkg/routerfront/**`, `pkg/gatewayauth/**` |
+| **Value-capture product** | No committed paths yet (TBD per product). Best-effort current set: `internal/fleet/**` (fleet orchestration), `internal/ops/**` (managed control plane); updated through the governance change process as products are carved out. |
+
+A new package does not silently join a layer: the change that lands it names its layer
+in this map, or a follow-up `docs(licensing):` change does.
+
+## Relicensing notice period (commitment)
+
+The reserved AGPL-3.0 + commercial dual-license option on the serving surface is held
+in reserve deliberately, and it may be exercised deliberately slowly. This is a
+commitment to downstream users, hosts, and providers who build on `fak serve`:
+
+- **Minimum 12-month written notice.** Before the first release carrying new license
+  terms on any serving-surface path, the steward publishes a dedicated announcement
+  (a labeled GitHub issue plus release notes) naming the affected paths from the
+  layer → path map above and the effective date, at least twelve months earlier.
+- **The last Apache-2.0 release stays available.** The final Apache-2.0 release of each
+  affected component remains downloadable and supported (security fixes included) for
+  at least twelve months after the announcement, so a host can remain on the last
+  permissive release while it decides.
+- **No retroactive reach.** Already-published Apache-2.0 releases stay Apache-2.0; the
+  notice period governs future fixes and new releases only.
+- **Scope is the serving surface.** The spec/ABI and kernel layers have no reserved
+  option; the kernel invariant above binds regardless of this commitment.
+
+Shortening the notice period requires a documented decision in
+[`GOVERNANCE.md`](GOVERNANCE.md) with the reason; the default direction is longer, not
+shorter. Exercising the option additionally follows the comment window in
+[`GOVERNANCE.md`](GOVERNANCE.md).
+
 ## Why layered, and why now
 
 - **Apache-2.0 on the kernel** maximizes adoption and makes the frozen ABI worth
@@ -60,8 +101,9 @@ The deliberate decision, recorded here per the project's positioning:
   Apache terms. Build, ship, embed, commercialize.
 - **Contributing** → Apache-2.0 inbound = outbound, **plus** the CLA grant to the Steward
   ([`CLA.md`](CLA.md)). The kernel you contribute to stays open, guaranteed by the invariant.
-- **Reselling a managed fak service** → permitted under Apache-2.0 today; be aware the
-  serving surface carries a reserved relicensing option for future versions.
+- **Reselling a managed fak service** → permitted under Apache-2.0 today; the serving
+  surface carries a reserved relicensing option for future versions, exercisable only
+  under the [relicensing notice period](#relicensing-notice-period-commitment) below.
 
 ---
 
