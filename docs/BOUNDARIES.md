@@ -125,7 +125,25 @@ Every guard refusal names a token from the closed `[reasons.*]` vocabulary in
 
 Full protocol: [AGENTS.md](../AGENTS.md), "If the kernel refuses you".
 
-## 10. Change protocol for this page
+## 10. The consumer tier — the 3-repo import DAG
+
+A third, private consumer repo (referred to here as `ConsumerPrivate`) is the
+first consumer of **both** `fak` (this repo) and `fak-private`. The import DAG is
+one-way and acyclic:
+
+- `ConsumerPrivate` → `fak/pkg/*` (allowed)
+- `ConsumerPrivate` → `fak-private/platform/*` (allowed)
+- `fak-private` → `fak/pkg/*` (allowed; never `fak/internal/*`)
+- `fak` → `fak-private` (forbidden)
+- `fak` / `fak-private` → `ConsumerPrivate` (forbidden)
+
+The last row is the invariant that keeps `ConsumerPrivate` a *consumer*, not a
+*dependency*: the upstream repos never know the consumer exists, so the DAG stays
+acyclic. This page documents topology only — the concrete consumer, its name, and
+its full import DAG are documented in the private repo (`fak-private`); no consumer
+code, IP, or secrets land here.
+
+## 11. Change protocol for this page
 
 New boundaries land here in the same commit as the boundary itself: when a doc takes
 ownership of a slice, a surface freezes, or a generated path appears, update the matching
