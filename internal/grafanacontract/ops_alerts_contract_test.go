@@ -348,6 +348,7 @@ func TestPrometheusLoadsNativePerformanceAlerts(t *testing.T) {
 // SKIPs rather than fails.
 var privateOpsExporterPaths = []string{
 	"platform/ops/dashboard/dashboard.go",
+	"platform/ops/dashboard/render_prometheus.go",
 	"cmd/fak-sync/ops_throughput_metrics.go",
 }
 
