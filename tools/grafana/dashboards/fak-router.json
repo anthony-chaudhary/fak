@@ -7,7 +7,7 @@
     "serving"
   ],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "timezone": "browser",
   "refresh": "30s",
@@ -71,7 +71,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Telemetry from the SCM-supervised router on `127.0.0.1:18101`, scraped under the `fak_router` job. **This board is built on the router's own `fak_router_*` families** - the counters that actually move when the router forwards to third-party upstreams (hive-ai, nebius, opencode-go, ...). The older `fak_gateway_*` proxy counters (requests, streaming requests, upstream token totals, net-win gauges) are **structurally zero in routing mode** and are deliberately not plotted here: reading them made a busy router look idle. **Unavailable means missing evidence**, not zero: an absent series means the router did not report it, not that traffic is idle.\n\nCommon stats: **RPS** (now), **RPM** (1-minute rate), per-backend request share, error rate, attempt latency p50/p95, time-to-first-byte p50/p95, terminal-outcome mix, and failover rate."
+        "content": "Telemetry from the SCM-supervised router on `127.0.0.1:18101`, scraped under the `fak_router` job. **This board is built on the router's own `fak_router_*` families** - the counters that actually move when the router forwards to third-party upstreams (hive-ai, nebius, opencode-go, ...). The older `fak_gateway_*` proxy counters (requests, streaming requests, upstream token totals, net-win gauges) are **structurally zero in routing mode** and are deliberately not plotted here: reading them made a busy router look idle. **Unavailable means missing evidence**, not zero: an absent series means the router did not report it, not that traffic is idle.\n\nCommon stats: **RPS** (now), **RPM** (1-minute rate), per-backend request share, error rate, attempt latency p50/p95, time-to-first-byte p50/p95, terminal-outcome mix, and failover rate. **Volume tiles and the per-backend / per-status attempt panels are windowed to the selected time range** - totals use `increase($__range)` and live rates use `rate($__rate_interval)` - so changing the range changes them instead of showing lifetime totals since process start. Two more sections: **caching** (prefix-cache hit rate, TTFB by cache hit/miss, cache-reported turns, prompt/cached token throughput) and **token throughput** (input / output / cached tokens per second from `fak_router_token_usage`)."
       }
     },
     {
@@ -355,7 +355,7 @@
       "id": 32,
       "type": "stat",
       "title": "Total requests",
-      "description": "Cumulative **routed** requests the router has completed across every terminal outcome, from `fak_router_requests_total`. This is the routing-mode request total (unlike the structurally-zero `fak_gateway_requests_total` proxy counter it replaces). In-flight requests are not yet counted here; see *In flight now*.",
+      "description": "Routed requests completed across every terminal outcome, **windowed to the selected time range** (`increase` over `$__range`), from `fak_router_requests_total`. This is the routing-mode request total (unlike the structurally-zero `fak_gateway_requests_total` proxy counter it replaces). Change the range to see the volume for that window, not a lifetime total. In-flight requests are not yet counted here; see *In flight now*.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -369,7 +369,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(fak_router_requests_total{job=\"fak_router\"})",
+          "expr": "sum(increase(fak_router_requests_total{job=\"fak_router\"}[$__range]))",
           "legendFormat": "requests",
           "datasource": {
             "type": "prometheus",
@@ -418,7 +418,7 @@
       "id": 33,
       "type": "stat",
       "title": "Routing attempts (all backends)",
-      "description": "Cumulative upstream attempts since process start, across every backend, status, and fallback hop. **This is the router's real demand signal in routing mode** - one logical request can fan into several attempts across a failover chain, so this is >= the request total. A rising value with *Total requests* flat is the routing path, not an outage.",
+      "description": "Upstream attempts **in the selected time range** (`increase` over `$__range`), across every backend, status, and fallback hop. **This is the router's real demand signal in routing mode** - one logical request can fan into several attempts across a failover chain, so this is >= the request total. A rising value with *Total requests* flat is the routing path, not an outage.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -432,7 +432,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(fak_router_attempts_total{job=\"fak_router\"})",
+          "expr": "sum(increase(fak_router_attempts_total{job=\"fak_router\"}[$__range]))",
           "legendFormat": "attempts",
           "datasource": {
             "type": "prometheus",
@@ -557,7 +557,7 @@
       "id": 36,
       "type": "table",
       "title": "Backends: live health",
-      "description": "One row per configured backend: live in-flight attempts, consecutive failures since last success, seconds since the backend last succeeded, total attempts, and how many of those were fallback hops. A backend with consecutive_failures > 0 and a growing seconds_since_success is failing over rather than serving. Series join on the `backend` label.",
+      "description": "One row per configured backend: live in-flight attempts, consecutive failures since last success, seconds since the backend last succeeded, attempts in the selected time range, and how many of those were fallback hops. A backend with consecutive_failures > 0 and a growing seconds_since_success is failing over rather than serving. Series join on the `backend` label. The two attempt columns are windowed (`increase` over `$__range`), not lifetime totals.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -604,7 +604,7 @@
         },
         {
           "refId": "D",
-          "expr": "sum without (fallback, status) (fak_router_attempts_total{job=\"fak_router\"})",
+          "expr": "sum without (fallback, status) (increase(fak_router_attempts_total{job=\"fak_router\"}[$__range]))",
           "legendFormat": "attempts_total",
           "datasource": {
             "type": "prometheus",
@@ -615,7 +615,7 @@
         },
         {
           "refId": "E",
-          "expr": "sum without (fallback, status) (fak_router_attempts_total{job=\"fak_router\",fallback=\"true\"})",
+          "expr": "sum without (fallback, status) (increase(fak_router_attempts_total{job=\"fak_router\",fallback=\"true\"}[$__range]))",
           "legendFormat": "fallback_attempts",
           "datasource": {
             "type": "prometheus",
@@ -1008,7 +1008,7 @@
       "id": 17,
       "type": "timeseries",
       "title": "Attempts by backend",
-      "description": "Cumulative routing attempts partitioned by upstream backend. A backend holding a flat share is not being selected for new work; a rising fallback-heavy backend is absorbing failovers.",
+      "description": "Routing attempts per second partitioned by upstream backend (`rate` over `$__rate_interval`). A backend holding a flat share is not being selected for new work; a rising fallback-heavy backend is absorbing failovers. Windowed, so it reflects the selected range rather than a cumulative total since process start.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1022,7 +1022,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (backend) (fak_router_attempts_total{job=\"fak_router\"})",
+          "expr": "sum by (backend) (rate(fak_router_attempts_total{job=\"fak_router\"}[$__rate_interval]))",
           "legendFormat": "{{backend}}",
           "datasource": {
             "type": "prometheus",
@@ -1055,7 +1055,7 @@
       "id": 18,
       "type": "timeseries",
       "title": "Attempts by status",
-      "description": "Cumulative routing attempts partitioned by the upstream result, re-read each scrape. The legend is the HTTP status the backend returned, except `0`, relabelled `0 (transport error)` because it is NOT a count of zero: a `0` status means the attempt never got an HTTP response at all (dial failure, timeout, reset). `402` is a credit wall, `429` rate limiting, `5xx` a backend fault. An absent series is unavailable evidence, never a healthy zero.",
+      "description": "Routing attempts per second partitioned by the upstream result (`rate` over `$__rate_interval`). The legend is the HTTP status the backend returned, except `0`, relabelled `0 (transport error)` because it is NOT a count of zero: a `0` status means the attempt never got an HTTP response at all (dial failure, timeout, reset). `402` is a credit wall, `429` rate limiting, `5xx` a backend fault. An absent series is unavailable evidence, never a healthy zero.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1069,7 +1069,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (status) (label_replace(fak_router_attempts_total{job=\"fak_router\"}, \"status\", \"0 (transport error)\", \"status\", \"0\"))",
+          "expr": "sum by (status) (label_replace(rate(fak_router_attempts_total{job=\"fak_router\"}[$__rate_interval]), \"status\", \"0 (transport error)\", \"status\", \"0\"))",
           "legendFormat": "{{status}}",
           "datasource": {
             "type": "prometheus",
@@ -1809,13 +1809,236 @@
       "options": {}
     },
     {
+      "id": 61,
+      "type": "row",
+      "title": "Caching and token throughput",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 92,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 62,
+      "type": "timeseries",
+      "title": "TTFB p95 by cache hit / miss",
+      "description": "95th-percentile time-to-first-byte split by whether the attempt was a prefix-cache hit or miss (`fak_router_attempt_ttfb_by_cache_seconds`, `cache` label). A large gap between the miss and hit lines is the cache paying for itself; a hit line that climbs toward the miss line means the prefix cache is not actually saving prefill. Windowed over `$__rate_interval`.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 93,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, cache) (rate(fak_router_attempt_ttfb_by_cache_seconds_bucket{job=\"fak_router\"}[$__rate_interval])))",
+          "legendFormat": "{{cache}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 63,
+      "type": "timeseries",
+      "title": "Cache-reported turns / s",
+      "description": "Rate of turns the upstream reports as cache-eligible, per backend (`fak_router_cache_reported_turns_total`). This is the turn view of the prefix-cache hit rate's denominator: a flat line with a rising hit rate means the cache is working on a stable workload; a falling line means fewer turns are being reported as cacheable. An absent series is missing evidence, not zero turns.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 93,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (backend) (rate(fak_router_cache_reported_turns_total{job=\"fak_router\"}[$__rate_interval]))",
+          "legendFormat": "{{backend}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 64,
+      "type": "timeseries",
+      "title": "Prompt / cached / reported token throughput",
+      "description": "Prompt-token throughput per backend, split into the prompt total, the cache-reported total, and the cached total (all `rate` over `$__rate_interval`). The cached line under the reported line is the prefix cache actually serving tokens; the gap between reported and prompt shows how much of the prompt the vendor did not report as cache-eligible. Read the cached line against *Prefix-cache hit rate* for the ratio view.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 101,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (backend) (rate(fak_router_prompt_tokens_total{job=\"fak_router\"}[$__rate_interval]))",
+          "legendFormat": "{{backend}} prompt",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (backend) (rate(fak_router_cache_reported_prompt_tokens_total{job=\"fak_router\"}[$__rate_interval]))",
+          "legendFormat": "{{backend}} reported",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "expr": "sum by (backend) (rate(fak_router_cached_prompt_tokens_total{job=\"fak_router\"}[$__rate_interval]))",
+          "legendFormat": "{{backend}} cached",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 65,
+      "type": "timeseries",
+      "title": "Token usage by type (tokens / s)",
+      "description": "Tokens per second by token type - input, output, and cached - from the GenAI-convention `fak_router_token_usage` histogram (`_sum` rate over `$__rate_interval`). This is the router's live token throughput: the output line is the generation rate, the input line the prefill load, and the cached line the prefix-cache savings. An absent series is missing evidence, not idle generation.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 101,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (token_type) (rate(fak_router_token_usage_sum{job=\"fak_router\"}[$__rate_interval]))",
+          "legendFormat": "{{token_type}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
       "id": 60,
       "type": "text",
       "title": "Router state verdict: read live, no metric yet (gap)",
       "description": "",
       "gridPos": {
         "x": 0,
-        "y": 92,
+        "y": 109,
         "w": 24,
         "h": 3
       },

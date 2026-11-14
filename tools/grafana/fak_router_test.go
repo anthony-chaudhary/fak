@@ -340,17 +340,24 @@ func TestFakRouterGapKPIPanels(t *testing.T) {
 		}
 	}
 
-	// (b) The cache-hit panel must use the REPORTED denominator: any panel that
-	// queries the cached numerator without the reported denominator divides by
-	// fak_router_prompt_tokens_total's meaning, which vendors can silently change
-	// by stopping usage reports.
+	// (b) The cache-hit panels must use the REPORTED denominator: any panel that
+	// plots the cached-prompt numerator must also plot the reported denominator
+	// in the SAME panel, otherwise the cached line has no reference to read
+	// against. Checked per panel (not per expr) so a multi-series throughput
+	// panel that shows prompt / reported / cached together still passes.
 	for title, exprs := range exprByTitle {
+		sawCached, sawReported := false, false
 		for _, expr := range exprs {
-			if strings.Contains(expr, "fak_router_cached_prompt_tokens_total") &&
-				!strings.Contains(expr, "fak_router_cache_reported_prompt_tokens_total") {
-				t.Errorf("panel %q uses the cached-prompt numerator without the reported denominator "+
-					"(fak_router_cache_reported_prompt_tokens_total); got: %s", title, expr)
+			if strings.Contains(expr, "fak_router_cached_prompt_tokens_total") {
+				sawCached = true
 			}
+			if strings.Contains(expr, "fak_router_cache_reported_prompt_tokens_total") {
+				sawReported = true
+			}
+		}
+		if sawCached && !sawReported {
+			t.Errorf("panel %q plots the cached-prompt numerator without the reported denominator "+
+				"(fak_router_cache_reported_prompt_tokens_total) in the same panel; got: %v", title, exprs)
 		}
 	}
 
@@ -411,5 +418,136 @@ func TestFakRouterGapKPIPanels(t *testing.T) {
 		if !strings.Contains(state, want) {
 			t.Errorf("state-verdict gap panel must name %s; got: %q", want, state)
 		}
+	}
+}
+
+// TestFakRouterVolumePanelsAreWindowed pins the operator complaint that the
+// lifetime-total panels did not respond to the selected time range: the volume
+// tiles and the per-backend / per-status attempt panels must be windowed, not
+// cumulative since process start. Totals use increase($__range) so they change
+// with the range; live rates use rate($__rate_interval) so they track the
+// window. A regression to a bare sum(counter) re-introduces the "lifetime
+// total" misread this test exists to catch.
+func TestFakRouterVolumePanelsAreWindowed(t *testing.T) {
+	d := loadFakRouter(t)
+
+	exprByTitle := map[string][]string{}
+	for _, p := range d.Panels {
+		for _, tgt := range p.Targets {
+			if strings.TrimSpace(tgt.Expr) != "" {
+				exprByTitle[p.Title] = append(exprByTitle[p.Title], tgt.Expr)
+			}
+		}
+	}
+
+	// (a) The two volume tiles must be range-windowed totals.
+	for _, title := range []string{"Total requests", "Routing attempts (all backends)"} {
+		exprs, ok := exprByTitle[title]
+		if !ok {
+			t.Fatalf("%s must expose a %q panel", fakRouterPath, title)
+		}
+		if len(exprs) == 0 || !strings.Contains(exprs[0], "increase(") || !strings.Contains(exprs[0], "$__range") {
+			t.Errorf("panel %q must be a range-windowed total (increase over $__range), not a lifetime sum; got: %v", title, exprs)
+		}
+	}
+
+	// (b) The per-backend / per-status attempt panels must be live rates.
+	for _, title := range []string{"Attempts by backend", "Attempts by status"} {
+		exprs, ok := exprByTitle[title]
+		if !ok {
+			t.Fatalf("%s must expose a %q panel", fakRouterPath, title)
+		}
+		if len(exprs) == 0 || !strings.Contains(exprs[0], "rate(") || !strings.Contains(exprs[0], "$__rate_interval") {
+			t.Errorf("panel %q must be a live rate (rate over $__rate_interval), not a cumulative total; got: %v", title, exprs)
+		}
+	}
+
+	// (c) The backend-health table's two attempt columns must be range-windowed.
+	table, ok := exprByTitle["Backends: live health"]
+	if !ok {
+		t.Fatalf("%s must expose a 'Backends: live health' panel", fakRouterPath)
+	}
+	windowedAttempts := 0
+	for _, expr := range table {
+		if strings.Contains(expr, "fak_router_attempts_total") &&
+			strings.Contains(expr, "increase(") && strings.Contains(expr, "$__range") {
+			windowedAttempts++
+		}
+	}
+	if windowedAttempts < 2 {
+		t.Errorf("'Backends: live health' must window both attempt columns (attempts_total and fallback_attempts) over $__range; found %d, got: %v", windowedAttempts, table)
+	}
+}
+
+// TestFakRouterCachingAndTokenPanels pins the caching and token-throughput
+// section added for the operator complaint that the board was missing caching
+// for the router's own surface and live token stats. Each new panel must be
+// backed by the real router family it claims to plot, on the router job.
+func TestFakRouterCachingAndTokenPanels(t *testing.T) {
+	d := loadFakRouter(t)
+
+	exprByTitle := map[string][]string{}
+	for _, p := range d.Panels {
+		for _, tgt := range p.Targets {
+			if strings.TrimSpace(tgt.Expr) != "" {
+				exprByTitle[p.Title] = append(exprByTitle[p.Title], tgt.Expr)
+			}
+		}
+	}
+
+	// (a) TTFB by cache hit/miss: the cache-split histogram, split on the cache label.
+	// Pin the split clause itself (sum by (le, cache)), not the bare "cache"
+	// substring: the metric name fak_router_attempt_ttfb_by_cache_seconds_bucket
+	// already contains "cache", so a bare-substring check would pass even if the
+	// panel dropped the hit/miss split and rendered a single unsplit line.
+	ttfb, ok := exprByTitle["TTFB p95 by cache hit / miss"]
+	if !ok {
+		t.Fatalf("%s must expose a 'TTFB p95 by cache hit / miss' panel", fakRouterPath)
+	}
+	if len(ttfb) == 0 || !strings.Contains(ttfb[0], "fak_router_attempt_ttfb_by_cache_seconds_bucket") ||
+		!strings.Contains(ttfb[0], "sum by (le, cache)") {
+		t.Errorf("panel 'TTFB p95 by cache hit / miss' must target the cache-split TTFB histogram split on the cache label (sum by (le, cache)); got: %v", ttfb)
+	}
+
+	// (b) Cache-reported turns: the turn view of the hit-rate denominator.
+	turns, ok := exprByTitle["Cache-reported turns / s"]
+	if !ok {
+		t.Fatalf("%s must expose a 'Cache-reported turns / s' panel", fakRouterPath)
+	}
+	if len(turns) == 0 || !strings.Contains(turns[0], "fak_router_cache_reported_turns_total") {
+		t.Errorf("panel 'Cache-reported turns / s' must target fak_router_cache_reported_turns_total; got: %v", turns)
+	}
+
+	// (c) Prompt / cached / reported token throughput: all three prompt-token
+	// families in one panel so the cached line has its reference lines.
+	throughput, ok := exprByTitle["Prompt / cached / reported token throughput"]
+	if !ok {
+		t.Fatalf("%s must expose a 'Prompt / cached / reported token throughput' panel", fakRouterPath)
+	}
+	for _, want := range []string{
+		"fak_router_prompt_tokens_total",
+		"fak_router_cache_reported_prompt_tokens_total",
+		"fak_router_cached_prompt_tokens_total",
+	} {
+		saw := false
+		for _, expr := range throughput {
+			if strings.Contains(expr, want) {
+				saw = true
+				break
+			}
+		}
+		if !saw {
+			t.Errorf("panel 'Prompt / cached / reported token throughput' must target %s; got: %v", want, throughput)
+		}
+	}
+
+	// (d) Token usage by type: the GenAI-convention token histogram, split on token_type.
+	token, ok := exprByTitle["Token usage by type (tokens / s)"]
+	if !ok {
+		t.Fatalf("%s must expose a 'Token usage by type (tokens / s)' panel", fakRouterPath)
+	}
+	if len(token) == 0 || !strings.Contains(token[0], "fak_router_token_usage_sum") ||
+		!strings.Contains(token[0], "token_type") {
+		t.Errorf("panel 'Token usage by type (tokens / s)' must target fak_router_token_usage_sum split on token_type; got: %v", token)
 	}
 }
