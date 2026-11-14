@@ -2731,3 +2731,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Modular
+
+Portions of this product are adapted from Modular: https://github.com/modular/modular (pinned at revision 8d559749621418f39f31df7da998bcce884fa5b1, vendored tree rust_kv/kv-core near-verbatim under third_party/modular/rust_kv with per-file byte receipts in PINNED-SOURCE.json; fak-native Go port in internal/radixkv/prefix_hit.go). Changes were made.
+
+SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception. Full license text ships at third_party/modular/rust_kv/LICENSE.

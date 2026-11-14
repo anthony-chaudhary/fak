@@ -71,6 +71,9 @@ FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
 LABEL io.modelcontextprotocol.server.name="io.github.anthony-chaudhary/fak"
 RUN groupadd -r fak && useradd -r -g fak -d /nonexistent -s /usr/sbin/nologin fak
 COPY --from=build /out/fak /usr/local/bin/fak
+# Notice files ship inside the image so redistributors can satisfy the
+# license notice terms (#14447).
+COPY LICENSE NOTICE.md THIRD_PARTY_NOTICES.md /usr/share/doc/fak/
 USER fak
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/fak"]
