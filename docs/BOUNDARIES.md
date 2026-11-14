@@ -43,6 +43,7 @@ path").
 | Dev-tooling CWD rule (companion dev harness) | [architecture/companion-dev-harness.md](architecture/companion-dev-harness.md) |
 | GPU/lab slice: what stays private | [gpu-server-private-boundary.md](gpu-server-private-boundary.md) |
 | Lab access: the public pointer into the private channel | [private-comms-channel.md](private-comms-channel.md) |
+| Consumer tier: the private downstream consumer + import DAG | `fak-private` `BOUNDARY.md` §1.3 (private; this page routes to it, §10) |
 
 Point, don't duplicate: each doc owns its slice; this page only routes.
 
@@ -125,22 +126,12 @@ Every guard refusal names a token from the closed `[reasons.*]` vocabulary in
 
 Full protocol: [AGENTS.md](../AGENTS.md), "If the kernel refuses you".
 
-## 10. The consumer tier — the 3-repo import DAG
+## 10. The consumer tier
 
-A third, private consumer repo (referred to here as `ConsumerPrivate`) is the
-first consumer of **both** `fak` (this repo) and `fak-private`. The import DAG is
-one-way and acyclic:
-
-- `ConsumerPrivate` → `fak/pkg/*` (allowed)
-- `ConsumerPrivate` → `fak-private/platform/*` (allowed)
-- `fak-private` → `fak/pkg/*` (allowed; never `fak/internal/*`)
-- `fak` → `fak-private` (forbidden)
-- `fak` / `fak-private` → `ConsumerPrivate` (forbidden)
-
-The last row is the invariant that keeps `ConsumerPrivate` a *consumer*, not a
-*dependency*: the upstream repos never know the consumer exists, so the DAG stays
-acyclic. This page documents topology only — the concrete consumer, its name, and
-its full import DAG are documented in the private repo (`fak-private`); no consumer
+A third, private consumer repo sits downstream of both `fak` (this repo) and
+`fak-private` in a one-way, acyclic import DAG. The concrete consumer, its name,
+and the full import-DAG table are documented in the private repo (`fak-private`),
+`BOUNDARY.md` §1.3; this page routes to it and does not duplicate it. No consumer
 code, IP, or secrets land here.
 
 ## 11. Change protocol for this page
