@@ -391,6 +391,10 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 				return abi.WitnessAbstain, "candidate selected symptom test timed out"
 			case result.runErr != nil:
 				return abi.WitnessAbstain, "candidate selected test execution failed"
+			case result.workspaceBroken:
+				// The committed go.work cannot load in this scratch topology (#13213): no
+				// test ran at all, so neither REFUTE nor CONFIRM is earned.
+				return abi.WitnessAbstain, "candidate selected symptom test could not load go.work"
 			case result.buildFailure:
 				r.symptomExcerpt = symptomFailureExcerpt(result.output)
 				return abi.WitnessRefuted, "candidate selected symptom test did not build"
@@ -410,9 +414,17 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 				return abi.WitnessRefuted, "candidate changed Python symptom test failed"
 			}
 		}
-	} else if !allTestsPass(ctx, exec, commitDir, pkgs, pyTests, tags) {
-		// The committed test does not even pass at the fix — not a usable witness; don't CONFIRM.
-		return abi.WitnessRefuted, "candidate changed-test package failed"
+	} else {
+		passed, workspaceBroken := allTestsPass(ctx, exec, commitDir, pkgs, pyTests, tags)
+		if workspaceBroken {
+			// The committed go.work cannot load in this scratch topology (#13213): no
+			// test ran at all, so neither REFUTE nor CONFIRM is earned.
+			return abi.WitnessAbstain, "candidate changed-test package could not load go.work"
+		}
+		if !passed {
+			// The committed test does not even pass at the fix — not a usable witness; don't CONFIRM.
+			return abi.WitnessRefuted, "candidate changed-test package failed"
+		}
 	}
 
 	// RED at the parent: the changed tests are already overlaid onto the parent
@@ -437,6 +449,10 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 				return abi.WitnessAbstain, "parent selected symptom test timed out"
 			case result.runErr != nil:
 				return abi.WitnessAbstain, "parent selected test execution failed"
+			case result.workspaceBroken:
+				// The committed go.work cannot load in this scratch topology (#13213): no
+				// test ran at all, so the parent red is unproven — never a CONFIRM.
+				return abi.WitnessAbstain, "parent selected symptom test could not load go.work"
 			case result.buildFailure:
 				return abi.WitnessAbstain, "parent selected symptom test did not build"
 			case !result.matched:
@@ -470,11 +486,16 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 		}
 		return abi.WitnessConfirmed, "selected symptom test failed at parent and passed at candidate"
 	}
-	passed, buildErr := runParentTests(ctx, exec, parentDir, pkgs, pyTests, tags)
+	passed, buildErr, workspaceBroken := runParentTests(ctx, exec, parentDir, pkgs, pyTests, tags)
 	if buildErr {
 		// Parent failed to compile/build (e.g. test references an API introduced by the fix) —
 		// this is unproven, never a false CONFIRM of behavioral reproduction (#12058).
 		return abi.WitnessAbstain, "parent changed-test package did not build"
+	}
+	if workspaceBroken {
+		// The committed go.work cannot load in this scratch topology (#13213): the parent
+		// "failure" is a workspace-load error, not a red test — unproven, never a false CONFIRM.
+		return abi.WitnessAbstain, "parent changed-test package could not load go.work"
 	}
 	if passed {
 		// The test passes against the OLD source too: it constrains nothing about the bug.
@@ -829,14 +850,23 @@ func pythonTestFiles(tests []string) []string {
 	return pyTests
 }
 
-func allTestsPass(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests, tags []string) bool {
-	if len(pkgs) > 0 && !goTestPasses(ctx, exec, dir, pkgs, tags) {
-		return false
+// allTestsPass reports whether every changed-test package passes in dir, and — when the Go
+// side fails — whether the failure is a committed go.work that cannot load in this scratch
+// topology (#13213): no test ran at all, so the caller must ABSTAIN instead of REFUTING.
+func allTestsPass(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests, tags []string) (passed bool, workspaceBroken bool) {
+	if len(pkgs) > 0 {
+		ok, out := goTestOutcome(ctx, exec, dir, pkgs, tags)
+		if !ok {
+			if isGoWorkspaceLoadFailure(out) {
+				return false, true
+			}
+			return false, false
+		}
 	}
 	if len(pyTests) > 0 && !pythonTestsPass(ctx, exec, dir, pyTests) {
-		return false
+		return false, false
 	}
-	return true
+	return true, false
 }
 
 type goTestJSONEvent struct {
@@ -849,6 +879,7 @@ type goTestJSONEvent struct {
 type selectedGoTestResult struct {
 	passed, matched, selectedFailed bool
 	buildFailure, timedOut          bool
+	workspaceBroken                 bool
 	runErr                          error
 	buildOutput                     string
 	output                          string
@@ -902,7 +933,8 @@ func runSelectedGoTests(ctx context.Context, run CommandRunner, dir string, pkgs
 		if !matched {
 			result := selectedGoTestResult{
 				passed: code == 0, buildFailure: code != 0 && isGoBuildFailure(out),
-				timedOut: strings.Contains(out, "panic: test timed out"),
+				workspaceBroken: code != 0 && isGoWorkspaceLoadFailure(out),
+				timedOut:        strings.Contains(out, "panic: test timed out"),
 			}
 			if result.buildFailure {
 				result.buildOutput = out
@@ -922,7 +954,8 @@ func runSelectedGoTests(ctx context.Context, run CommandRunner, dir string, pkgs
 	}
 	result := selectedGoTestResult{
 		passed: code == 0, matched: true, selectedFailed: selectedFailed,
-		timedOut: strings.Contains(out, "panic: test timed out"),
+		workspaceBroken: code != 0 && isGoWorkspaceLoadFailure(out),
+		timedOut:        strings.Contains(out, "panic: test timed out"),
 	}
 	if code != 0 {
 		result.output = out
@@ -1174,17 +1207,25 @@ func overlayTestsAtRef(ctx context.Context, git Runner, repoDir, commit, destDir
 	return true
 }
 
+// goTestOutcome runs `go test` for the given packages in dir and reports whether it exited 0,
+// along with the full output so callers can classify a non-zero exit: a real red test versus
+// a committed go.work that cannot load in this scratch topology (#13213).
+func goTestOutcome(ctx context.Context, run CommandRunner, dir string, pkgs, tags []string) (passed bool, out string) {
+	if run == nil {
+		run = commandRunner
+	}
+	out, code, err := run(ctx, dir, goTestArgv(pkgs, tags)...)
+	return err == nil && code == 0, out
+}
+
 // goTestPasses runs `go test` for the given packages in dir and reports whether it exited 0.
 // tags are the build constraints derived from the changed test files (#13243): a test gated
 // behind `//go:build vulkan` is excluded from a bare `go test`, so the execution rung would
 // see a trivially-passing package at BOTH refs and falsely REFUTE a genuine device witness.
 // A nil/empty tag set keeps the argv byte-identical to the pre-#13243 untagged form.
 func goTestPasses(ctx context.Context, run CommandRunner, dir string, pkgs []string, tags []string) bool {
-	if run == nil {
-		run = commandRunner
-	}
-	_, code, err := run(ctx, dir, goTestArgv(pkgs, tags)...)
-	return err == nil && code == 0
+	passed, _ := goTestOutcome(ctx, run, dir, pkgs, tags)
+	return passed
 }
 
 // goTestArgv composes the `go test` argv. The -tags flag is appended only when a tag set was
@@ -1335,13 +1376,16 @@ func pythonBin() string {
 	return "python3"
 }
 
-func runParentTests(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests, tags []string) (passed bool, buildErr bool) {
+func runParentTests(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests, tags []string) (passed bool, buildErr bool, workspaceBroken bool) {
 	goPassed := true
 	if len(pkgs) > 0 {
-		var err bool
-		goPassed, err = runGoTests(ctx, exec, dir, pkgs, tags)
+		var err, broken bool
+		goPassed, err, broken = runGoTests(ctx, exec, dir, pkgs, tags)
 		if err {
-			return false, true
+			return false, true, false
+		}
+		if broken {
+			return false, false, true
 		}
 	}
 	pyPassed := true
@@ -1349,30 +1393,33 @@ func runParentTests(ctx context.Context, exec CommandRunner, dir string, pkgs, p
 		var err bool
 		pyPassed, err = runPythonTests(ctx, exec, dir, pyTests)
 		if err {
-			return false, true
+			return false, true, false
 		}
 	}
 	if goPassed && pyPassed {
-		return true, false
+		return true, false, false
 	}
-	return false, false
+	return false, false, false
 }
 
-func runGoTests(ctx context.Context, run CommandRunner, dir string, pkgs, tags []string) (passed bool, buildErr bool) {
+func runGoTests(ctx context.Context, run CommandRunner, dir string, pkgs, tags []string) (passed bool, buildErr bool, workspaceBroken bool) {
 	if run == nil {
 		run = commandRunner
 	}
 	out, code, err := run(ctx, dir, goTestArgv(pkgs, tags)...)
 	if err != nil {
-		return false, true
+		return false, true, false
 	}
 	if code == 0 {
-		return true, false
+		return true, false, false
 	}
 	if isGoBuildFailure(out) {
-		return false, true
+		return false, true, false
 	}
-	return false, false
+	if isGoWorkspaceLoadFailure(out) {
+		return false, false, true
+	}
+	return false, false, false
 }
 
 func runPythonTests(ctx context.Context, run CommandRunner, dir string, tests []string) (passed bool, buildErr bool) {
@@ -1418,6 +1465,16 @@ func isGoBuildFailure(out string) bool {
 		}
 	}
 	return false
+}
+
+// isGoWorkspaceLoadFailure reports whether a non-zero `go test` exit is a go.work load
+// failure rather than a build or test failure: the committed workspace lists a module
+// that does not resolve in this scratch topology (#13213). It is kept separate from
+// isGoBuildFailure on purpose — folding it in would still refuse the candidate with
+// "did not build" for a package that never got to building, and the receipt would
+// describe a step that never happened.
+func isGoWorkspaceLoadFailure(out string) bool {
+	return strings.Contains(out, "listed in go.work file")
 }
 
 func isPythonBuildFailure(out string) bool {

@@ -23,21 +23,31 @@ func init() {
 	}
 }
 
-func nestedWorkspaceSymptomFixture(t *testing.T, foreignWorkspace bool) (abi.WitnessOutcome, string) {
+// nestedWorkspaceSymptomFixture builds a kernel repo whose committed go.work lists the
+// sibling module ../companion (a relative use that only resolves beside the checkout).
+// With createCompanion=false the sibling is never created, so every scratch materialization
+// of the committed tree fails to LOAD the workspace before any package loads (#13213).
+func nestedWorkspaceSymptomFixture(t *testing.T, foreignWorkspace, createCompanion bool) (abi.WitnessOutcome, string) {
 	requireGoAndGit(t)
 	base := t.TempDir()
 	companion := filepath.Join(base, "companion")
 	repository := filepath.Join(base, "kernel")
 	managed := filepath.Join(repository, ".worktrees", "candidate")
 	foreign := filepath.Join(base, "foreign")
-	for _, dir := range []string{companion, repository, foreign} {
+	dirs := []string{repository, foreign}
+	if createCompanion {
+		dirs = append(dirs, companion)
+	}
+	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	writeRepoFile(t, companion, "go.mod", "module example.invalid/companion\n\ngo 1.21\n")
-	writeRepoFile(t, companion, "value.go", "package companion\n\nfunc Value() int { return 7 }\n")
+	if createCompanion {
+		writeRepoFile(t, companion, "go.mod", "module example.invalid/companion\n\ngo 1.21\n")
+		writeRepoFile(t, companion, "value.go", "package companion\n\nfunc Value() int { return 7 }\n")
+	}
 	writeRepoFile(t, foreign, "go.mod", "module example.invalid/foreign\n\ngo 1.21\n")
 	writeRepoFile(t, foreign, "go.work", "go 1.21\n\nuse .\n")
 
@@ -81,7 +91,10 @@ func TestNegativeValue(t *testing.T) {
 	} else {
 		t.Setenv("GOWORK", "")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	// 120s, not 45s: the mandatory red-then-green witness runs this fixture on
+	// loaded shared-trunk hosts where each side cold-compiles the scratch test
+	// binary; 45s flaked the candidate side under fleet load (#13213 land).
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	var executionOutput string
 	execRun := func(ctx context.Context, dir string, argv ...string) (string, int, error) {
@@ -102,19 +115,41 @@ func TestNegativeValue(t *testing.T) {
 	return got, detail
 }
 
-// fak-test:runtime slow est=15s lane=default
+// fak-test:runtime slow est=30s lane=default
 func TestSymptomNestedWorktreePreservesCommittedSiblingWorkspace(t *testing.T) {
-	got, detail := nestedWorkspaceSymptomFixture(t, false)
+	got, detail := nestedWorkspaceSymptomFixture(t, false, true)
 	if got != abi.WitnessConfirmed {
 		t.Fatalf("nested-worktree symptom=%v (%s), want confirmed candidate-pass/parent-fail", got, detail)
 	}
 }
 
-// fak-test:runtime slow est=15s lane=default
+// fak-test:runtime slow est=30s lane=default
 func TestSymptomScratchIgnoresForeignAmbientWorkspace(t *testing.T) {
-	got, detail := nestedWorkspaceSymptomFixture(t, true)
+	got, detail := nestedWorkspaceSymptomFixture(t, true, true)
 	if got != abi.WitnessConfirmed {
 		t.Fatalf("foreign-workspace symptom=%v (%s), want confirmed candidate-pass/parent-fail", got, detail)
+	}
+}
+
+// #13213 regression: when the committed go.work lists a sibling module that does not
+// resolve in the scratch topology, NO test ran at all on either side. Before the fix the
+// candidate side misrefuted with "matched no executed test" / "did not build" and the
+// parent side could CONFIRM on a workspace-load error masquerading as a red test. The
+// rung must ABSTAIN and name the workspace, not a step that never happened.
+//
+// fak-test:runtime slow est=30s lane=default
+func TestSymptomAbstainsOnUnresolvableCommittedWorkspace(t *testing.T) {
+	got, detail := nestedWorkspaceSymptomFixture(t, false, false)
+	if got != abi.WitnessAbstain {
+		t.Fatalf("unresolvable-workspace symptom=%v (%s), want abstain on unresolvable go.work", got, detail)
+	}
+	if !strings.Contains(detail, "go.work") {
+		t.Fatalf("abstain receipt %q does not name the go.work load failure", detail)
+	}
+	for _, misreceipt := range []string{"did not build", "matched no executed test", "changed tests failed at parent"} {
+		if strings.Contains(detail, misreceipt) {
+			t.Fatalf("abstain receipt %q carries the pre-fix misreceipt %q", detail, misreceipt)
+		}
 	}
 }
 
