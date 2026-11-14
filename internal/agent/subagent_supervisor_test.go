@@ -166,8 +166,6 @@ func TestSubagentSupervisor_GetGoal(t *testing.T) {
 // Test TeardownParent abandons tracking without inventing successful execution.
 // fak-test:runtime fast est=1ms lane=default
 func TestSubagentSupervisor_TeardownParent(t *testing.T) {
-	// Literal expectations let this regression run against the pre-fix API too.
-	const abandonedError = "parent teardown abandoned subagent tracking; execution outcome unknown"
 	sup := NewSubagentSupervisor(8)
 
 	_, err := sup.Spawn("parent-1", "sub-1a", nil)
@@ -209,14 +207,20 @@ func TestSubagentSupervisor_TeardownParent(t *testing.T) {
 
 	// sub-2a should still be active
 	t2a, ok := sup.GetThread("sub-2a")
-	if !ok || t2a.State != SubagentStateRunning {
-		t.Fatalf("sub-2a should still be running, got %+v", t2a)
+	if !ok {
+		t.Fatal("sub-2a missing after teardown")
+	}
+	if t2a.State != SubagentStateRunning {
+		t.Fatalf("sub-2a state = %q; want %q", t2a.State, SubagentStateRunning)
 	}
 
 	for _, id := range []string{"sub-1a", "sub-1b"} {
 		thread, ok := sup.GetThread(id)
-		if !ok || thread.State != "abandoned" || thread.ExitErr == nil || thread.ExitErr.Error() != abandonedError {
-			t.Fatalf("%s must have unknown execution outcome after teardown, got %+v", id, thread)
+		if !ok {
+			t.Fatalf("thread %s missing after teardown", id)
+		}
+		if thread.State != SubagentStateAbandoned || !errors.Is(thread.ExitErr, ErrSubagentAbandoned) {
+			t.Fatalf("%s must have unknown execution outcome after teardown: state=%q exiterr=%v", id, thread.State, thread.ExitErr)
 		}
 		select {
 		case <-thread.done:
@@ -225,18 +229,18 @@ func TestSubagentSupervisor_TeardownParent(t *testing.T) {
 		}
 		got, err := sup.Wait(id, MinSubagentTimeoutMs)
 		if got != thread || err != thread.ExitErr {
-			t.Fatalf("Wait(%s) = (%+v, %v), want abandoned result", id, got, err)
+			t.Fatalf("Wait(%s) did not return the abandoned thread with its sentinel cause", id)
 		}
 		sup.Complete(id, nil)
-		if thread.State != "abandoned" || thread.ExitErr == nil || thread.ExitErr.Error() != abandonedError {
-			t.Fatalf("late completion overwrote abandoned tracking: %+v", thread)
+		if thread.State != SubagentStateAbandoned || !errors.Is(thread.ExitErr, ErrSubagentAbandoned) {
+			t.Fatalf("late completion overwrote abandoned tracking: state=%q exiterr=%v", thread.State, thread.ExitErr)
 		}
 	}
 	if finished.State != SubagentStateCompleted || finished.ExitErr != nil || !finished.CompletedAt.Equal(finishedAt) {
-		t.Fatalf("teardown changed a known completion: %+v", finished)
+		t.Fatalf("teardown changed a known completion: state=%q exiterr=%v", finished.State, finished.ExitErr)
 	}
 	if failed.State != SubagentStateFailed || failed.ExitErr != executionErr || !failed.CompletedAt.Equal(failedAt) {
-		t.Fatalf("teardown changed a known failure: %+v", failed)
+		t.Fatalf("teardown changed a known failure: state=%q exiterr=%v", failed.State, failed.ExitErr)
 	}
 	if sup.CompletedCount() != 4 {
 		t.Fatalf("retained terminal records = %d, want 4", sup.CompletedCount())

@@ -24,6 +24,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
 // warmContinueDeadFrames is the partial first segment: a message_start, an open text block,
@@ -548,6 +549,21 @@ func warmCancellationOwner(ctx context.Context, send func(string, any)) *anthrop
 	return p
 }
 
+// warmGuardedPlanner returns a non-nil planner whose upstream transport counts every
+// request it receives instead of dialing. A canceled entry must short-circuit BEFORE
+// reaching the planner; if a regression lets one through, the call-count assertion in
+// the test below fails that one test instead of a nil-deref panicking the whole package
+// witness.
+func warmGuardedPlanner(calls *int) *agent.HTTPPlanner {
+	hp := agent.NewHTTPPlanner("http://warm.invalid", "claude-test", "")
+	hp.Provider = agent.ProviderAnthropic
+	hp.Client = &http.Client{Transport: warmCancelRoundTripper(func(r *http.Request) (*http.Response, error) {
+		(*calls)++
+		return nil, errors.New("warm-guard: planner reached on a canceled entry")
+	})}
+	return hp
+}
+
 // fak-test:runtime fast est=1ms lane=default
 func TestWarmContinuationCanceledBeforeEntryOrCall(t *testing.T) {
 	canceled, cancel := context.WithCancel(context.Background())
@@ -556,18 +572,22 @@ func TestWarmContinuationCanceledBeforeEntryOrCall(t *testing.T) {
 	defer stop()
 	for _, ctx := range []context.Context{canceled, deadline} {
 		writes := 0
+		plannerCalls := 0
 		p := warmCancellationOwner(ctx, func(string, any) { writes++ })
-		// Nil planner is deliberate: canceled entry must not reach it.
-		if err := p.warmContinue(nil, "", ""); err != ctx.Err() {
+		if err := p.warmContinue(warmGuardedPlanner(&plannerCalls), "", ""); err != ctx.Err() {
 			t.Fatalf("entry cause=%v want%v", err, ctx.Err())
 		}
 		if writes != 0 || p.continuing || p.openClientBlock != 0 {
 			t.Fatal("canceled recovery changed state or wrote a frame")
 		}
+		if plannerCalls != 0 {
+			t.Fatalf("canceled entry reached the planner %d time(s)", plannerCalls)
+		}
 	}
 	ctx, cancelDuringClose := context.WithCancel(context.Background())
 	defer cancelDuringClose()
 	writes := 0
+	plannerCalls := 0
 	p := warmCancellationOwner(ctx, func(event string, _ any) {
 		writes++
 		if event != "content_block_stop" {
@@ -575,11 +595,14 @@ func TestWarmContinuationCanceledBeforeEntryOrCall(t *testing.T) {
 		}
 		cancelDuringClose()
 	})
-	if err := p.warmContinue(nil, "", ""); err != context.Canceled {
+	if err := p.warmContinue(warmGuardedPlanner(&plannerCalls), "", ""); err != context.Canceled {
 		t.Fatalf("post-close cause=%v", err)
 	}
 	if writes != 1 || p.openClientBlock != -1 {
 		t.Fatal("existing close not completed exactly once")
+	}
+	if plannerCalls != 0 {
+		t.Fatalf("cancel during close reached the planner %d time(s)", plannerCalls)
 	}
 }
 
@@ -658,13 +681,6 @@ func TestWarmContinuationPublicPassthroughStopsOnCallerCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(srv.Close)
-	var logMu sync.Mutex
-	var logs []string
-	srv.logf = func(format string, args ...any) {
-		logMu.Lock()
-		logs = append(logs, fmt.Sprintf(format, args...))
-		logMu.Unlock()
-	}
 	writer := &warmCancelOnTextWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(warmContinueInbound()))).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
@@ -696,11 +712,17 @@ func TestWarmContinuationPublicPassthroughStopsOnCallerCancel(t *testing.T) {
 	if !strings.Contains(body, "Hel") || strings.Contains(body, "content_block_stop") {
 		t.Fatalf("canceled turn entered recovery: %q", body)
 	}
-	logMu.Lock()
-	text := strings.Join(logs, "\n")
-	logMu.Unlock()
-	if !strings.Contains(text, "context canceled") || strings.Contains(text, "warm-continue") {
-		t.Fatalf("terminal cause was replaced or retried: %s", text)
+	// Closed contract: the turn's terminal cause is recorded as exactly one client-canceled
+	// failure row — not replaced by another class and not retried into a warm-continue.
+	recs, _, _ := srv.metrics.perfRecordsSnapshot()
+	canceledRows := 0
+	for _, rec := range recs {
+		if rec.Error == perfledger.ErrorClientCanceled {
+			canceledRows++
+		}
+	}
+	if canceledRows != 1 {
+		t.Fatalf("perf ledger holds %d client_canceled row(s), want exactly 1", canceledRows)
 	}
 }
 
