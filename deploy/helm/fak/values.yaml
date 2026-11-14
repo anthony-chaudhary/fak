@@ -91,6 +91,19 @@ timeouts:
   httpWriteSeconds: null
   plannerSeconds: null
 
+# Per-replica state plane (#14445). The audit journal (FAK_AUDIT_JOURNAL) and
+# the cold-resume session-state snapshot (--session-state) both land on this
+# volume, so a container restart inside the pod keeps them. The default emptyDir
+# dies with the pod: point pvc.claimName at an EXISTING PersistentVolumeClaim
+# (ReadWriteMany; one claim per replica - ReadWriteOnce cannot back two pods) to
+# keep them across reschedules too. Limits stay per-replica either way; see
+# docs/fak/deployment-guide.md, "Scale-out state model".
+state:
+  enabled: true
+  mountPath: /var/lib/fak
+  pvc:
+    claimName: ""
+
 # Resources. `resources` applies in proxy mode; `gpu.resources` in inkernel mode
 # (size memory to the model: >= the .gguf size plus headroom for the KV cache and
 # host staging).

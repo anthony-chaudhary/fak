@@ -291,6 +291,11 @@ func New(cfg Config) (*Server, error) {
 		})
 	}
 
+	traceIdentity := strings.TrimSpace(cfg.TraceIdentity)
+	if traceIdentity == "" {
+		traceIdentity = newTraceIdentity()
+	}
+
 	s := &Server{
 		causalEmbeddings:             causalEmbeddings,
 		workspaceAdmissionPermissive: cfg.WorkspaceAdmissionPermissive,
@@ -339,6 +344,7 @@ func New(cfg Config) (*Server, error) {
 		resetOnBudget:                cfg.ResetOnBudget,
 		budgetDrained:                cfg.OnBudgetExhausted,
 		defaultTraceID:               strings.TrimSpace(cfg.DefaultTraceID),
+		traceIdentity:                traceIdentity,
 		mcpSessionAuthEnabled:        mcpSessionBearer != "",
 		mcpSessionBearerDigest:       mcpSessionBearerDigest,
 		mcpAgentID:                   mcpAgentID,

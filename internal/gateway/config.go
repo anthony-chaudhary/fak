@@ -749,6 +749,12 @@ type Config struct {
 	// value lets wrapped CLIs that do not expose trace headers still share one
 	// operator-addressable session budget.
 	DefaultTraceID string
+	// TraceIdentity is the per-replica identity embedded in every gateway-minted gw-*
+	// trace id (#14445): with N replicas behind one service, two live replicas must
+	// never mint the same id, and a trace should be attributable to the pod that
+	// served it. Empty (the default) mints one at New from POD_NAME / the host name
+	// plus a random nonce; set it explicitly for deterministic tests.
+	TraceIdentity string
 	// MCPSessionBearer authenticates that POST /mcp came from the child configured by
 	// this guard launch. It deliberately grants no workspace lease ownership: the
 	// current DOS authority has no server-authenticated binding from a launch to a row.

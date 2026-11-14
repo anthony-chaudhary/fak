@@ -1005,9 +1005,12 @@ func adaptExecCommandArgs(raw string) (string, error) {
 	return string(encoded), nil
 }
 
-// traceFor returns the caller's TraceID, or mints a fresh, process-unique non-empty
+// traceFor returns the caller's TraceID, or mints a fresh, replica-unique non-empty
 // one so the result-side IFC ledger + plan-CFI never collapse distinct served
-// sessions onto the empty-string default trace.
+// sessions onto the empty-string default trace. Minted ids carry the replica's own
+// identity (gw-<identity>-N, #14445) so two live replicas behind one service never
+// mint the same id and a trace can be attributed to the pod that served it; a bare
+// zero-value Server that skipped New keeps the historical gw-N form.
 func (s *Server) traceFor(traceID string) string {
 	traceID = strings.TrimSpace(traceID)
 	if traceID != "" {
@@ -1019,7 +1022,21 @@ func (s *Server) traceFor(traceID string) string {
 	if defaultTraceID != "" && defaultTraceID != UnkeyedPerConnectionTraceID {
 		return defaultTraceID
 	}
-	return "gw-" + itoa(atomic.AddUint64(&s.traceSeq, 1))
+	seq := itoa(atomic.AddUint64(&s.traceSeq, 1))
+	if s.traceIdentity == "" {
+		return "gw-" + seq
+	}
+	return "gw-" + s.traceIdentity + "-" + seq
+}
+
+// TraceIdentity returns the per-replica identity embedded in gateway-minted gw-*
+// trace ids (#14445). It is fixed for the life of the process (set in New) and empty
+// only on a zero-value Server that skipped New.
+func (s *Server) TraceIdentity() string {
+	if s == nil {
+		return ""
+	}
+	return s.traceIdentity
 }
 
 // SetDefaultTraceID changes the trace used for callers that omit X-Trace-Id /

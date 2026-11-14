@@ -475,6 +475,7 @@ type Server struct {
 	metalMTPCoord           *model.MetalMTPCoordinator
 	servedFailure           servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
 	traceSeq                uint64        // mints a non-empty TraceID when the wire omits one (atomic)
+	traceIdentity           string        // per-replica identity inside minted gw-* ids (#14445); fixed in New, empty on a bare Server
 	reloadPolicy            PolicyReloadFunc
 	policyCanaryTurns       int
 	policyCanaryMu          sync.Mutex

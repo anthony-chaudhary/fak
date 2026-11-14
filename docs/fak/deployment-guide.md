@@ -116,6 +116,67 @@ surprises an existing deployment.
 
 ---
 
+## Scale-out state model (running N replicas)
+
+`fak serve` is a single process: every limit and ledger is **process-local**.
+Running N replicas behind one Service multiplies the effective fleet limits and
+fragments state across pods. This is the supported scale-out model — read it
+before scaling past one replica.
+
+### Limits multiply per replica
+
+Every cap below is enforced **per process**, not per tenant, per cluster, or per
+Service. With N replicas the effective fleet-wide allowance is N x the
+per-replica value:
+
+| Knob | What it bounds | Fleet effect at N replicas |
+|---|---|---|
+| `--spend-cap tenant:<t>=<N>` | spend per tenant scope | N x the per-replica cap can be spent fleet-wide before it trips |
+| `FAK_RATELIMIT_MAX_CALLS` / `FAK_RATELIMIT_MAX_COST` | calls/cost per rate-limit key | N x the per-replica budget |
+| `FAK_MAX_SESSIONS` | governed sessions per process | N x ceiling concurrent sessions |
+| `--arm-max-concurrency` (arm ceilings) | concurrent requests per research arm | N x per-replica arm slots |
+
+To hold a fleet-wide cap `C`, set each replica to `C / N` (integer division) and
+re-check whenever N changes — an HPA scaling up silently widens the fleet cap.
+A shared distributed limit/ledger backend is a separate design, not part of this
+model.
+
+### Journals and session state are per-pod
+
+`FAK_AUDIT_JOURNAL` and the cold-resume session-state snapshot (`--session-state`)
+write to local paths. The Helm chart mounts a per-replica `state` volume
+(`/var/lib/fak` by default) and points both there:
+
+- **Default `emptyDir`**: survives container restarts inside the pod, wiped when
+  the pod is deleted or rescheduled. Audit history and drive state do not follow
+  the pod.
+- **`state.pvc.claimName`**: mount an existing `ReadWriteMany` PVC (one claim
+  per replica — `ReadWriteOnce` cannot back two pods) to keep journal + snapshot
+  across reschedules.
+- Ship audit records to central storage through your log pipeline if the journal
+  must outlive the pod regardless of volume choice.
+
+With `readOnlyRootFilesystem: true` (the chart default), neither knob works at
+all without the state volume — writes to the root filesystem fail.
+
+### Trace ids carry pod identity
+
+Gateway-minted trace ids are `gw-<replica-identity>-<seq>`: the identity is the
+pod/host name plus a per-process random nonce, so two live replicas never mint
+the same trace id and a trace can be attributed to the pod that served it
+(#14445). Callers that send their own `X-Trace-Id` are unaffected.
+
+### Sticky routing (recommended)
+
+Sessions, budgets, and prefix warmth live in one process's memory. To keep a
+tenant's conversations on one replica, route by tenant consistently — client-side
+sticky routing on the tenant key, or `spec.sessionAffinity: ClientIP` on the
+Service for coarse stickiness. Without stickiness a tenant's requests bounce
+between replicas: each hop sees a cold session table, and each per-replica spend
+cap applies only to the slice of traffic that landed on it.
+
+---
+
 ## Production readiness checklist
 
 Clear every item before a network-facing deploy. Sources for each are in

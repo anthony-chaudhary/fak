@@ -96,12 +96,17 @@ spec:
             - --gguf={{ .Values.gguf | default "/weights/model.gguf" }}
             {{- end }}
             - --policy=/etc/fak/policy.json
+            {{- if .Values.state.enabled }}
+            # Per-replica state plane (#14445): the cold-resume session-state
+            # snapshot lands on the state volume, surviving container restarts.
+            - --session-state={{ .Values.state.mountPath }}/session-state.snap
+            {{- end }}
             {{- if .Values.requireKeyEnv }}
             - --require-key-env={{ .Values.requireKeyEnv }}
             {{- end }}
           ports:
             - containerPort: {{ $targetPort }}
-          {{- if or .Values.requireKeyEnv (and (eq $mode "proxy") .Values.apiKeyEnv) $emitWrite $emitPlanner }}
+          {{- if or .Values.requireKeyEnv (and (eq $mode "proxy") .Values.apiKeyEnv) $emitWrite $emitPlanner .Values.state.enabled }}
           env:
             {{- if .Values.requireKeyEnv }}
             - name: {{ .Values.requireKeyEnv }}
@@ -127,11 +132,20 @@ spec:
             - name: FAK_PLANNER_TIMEOUT_S
               value: "{{ $planner }}"
             {{- end }}
+            {{- if .Values.state.enabled }}
+            # Audit journal on the per-replica state volume (#14445).
+            - name: FAK_AUDIT_JOURNAL
+              value: "{{ .Values.state.mountPath }}/audit.jsonl"
+            {{- end }}
           {{- end }}
           volumeMounts:
             - name: policy
               mountPath: /etc/fak
               readOnly: true
+            {{- if .Values.state.enabled }}
+            - name: state
+              mountPath: {{ .Values.state.mountPath }}
+            {{- end }}
             {{- if eq $mode "inkernel" }}
             - name: weights
               mountPath: /weights
@@ -180,6 +194,15 @@ spec:
         - name: policy
           configMap:
             name: {{ include "fak.policyConfigMapName" . }}
+        {{- if .Values.state.enabled }}
+        - name: state
+          {{- if .Values.state.pvc.claimName }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.state.pvc.claimName }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
         {{- if eq $mode "inkernel" }}
         - name: weights
           persistentVolumeClaim:
