@@ -17,7 +17,7 @@ func runModelQuantize(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "local single-file GGUFv3 input; no aliases or downloads")
 	output := fs.String("output", "", "new local GGUF output; must not exist")
-	kind := fs.String("type", "", "reference q4_k, q5_k or q6_k; importance matrices not supported")
+	kind := fs.String("type", "", "reference q4_k, q5_k or q6_k; mxfp4 refuses until artifact assembly lands; importance matrices not supported")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak model quantize --input local.gguf --output new.gguf --type q4_k|q5_k|q6_k")
 		fs.PrintDefaults()
@@ -27,6 +27,13 @@ func runModelQuantize(stdout, stderr io.Writer, args []string) int {
 			return 0
 		}
 		return 2
+	}
+	if *kind == "mxfp4" {
+		// The lossless source-to-GGUF repack primitive ships in
+		// ggufload.RepackMXFP4; end-to-end safetensors artifact assembly
+		// through this verb is deferred, so refuse with a named reason.
+		fmt.Fprintf(stderr, "fak model quantize: %v\n", ggufload.ErrMXFP4ArtifactAssemblyDeferred)
+		return 1
 	}
 	target, ok := map[string]ggufload.TensorType{"q4_k": ggufload.TensorQ4_K, "q5_k": ggufload.TensorQ5_K, "q6_k": ggufload.TensorQ6_K}[*kind]
 	if !ok || *input == "" || *output == "" || fs.NArg() != 0 {
