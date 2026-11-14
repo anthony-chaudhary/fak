@@ -5,7 +5,8 @@ package radixkv
 // Ported from modular/modular rust_kv/kv-core/src/prefix_hit.rs at revision
 // 8d559749621418f39f31df7da998bcce884fa5b1 (Apache-2.0 WITH LLVM-exception;
 // vendored near-verbatim under third_party/modular/rust_kv with per-file byte
-// receipts in PINNED-SOURCE.json; see THIRD_PARTY_NOTICES.md). Changes were made.
+// receipts in PINNED-SOURCE.json; see the "Modular" section of
+// THIRD_PARTY_NOTICES.md). Changes were made.
 //
 // The rules here are about attention shape alone. They take residency as a
 // predicate, so the same code answers for any tier: the device pools, or a KV

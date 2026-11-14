@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/envchild"
 )
 
 type bashEngine struct{ t *Toolset }
@@ -103,7 +104,9 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	name, args := shellCommand(command)
 	cmd := exec.CommandContext(runCtx, name, args...)
 	cmd.Dir = cwd
-	cmd.Env = enforceGoTmpEnv(os.Environ(), gotmpDir)
+	// #14450: the child starts from the allowlisted minimal host environment, so
+	// gateway key variable names never reach it; GOTMPDIR is pinned afterwards.
+	cmd.Env = enforceGoTmpEnv(envchild.ChildEnv(os.Environ(), envchild.Options{Protected: t.protectedEnv}), gotmpDir)
 	var stdout, stderr boundedBuffer
 	stdout.max = t.limits.MaxOutputBytes
 	stderr.max = t.limits.MaxOutputBytes

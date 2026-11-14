@@ -39,6 +39,9 @@ FROM gcr.io/distroless/static-debian12:nonroot
 # already authenticated via GitHub. See docs/fak/mcp-registry.md.
 LABEL io.modelcontextprotocol.server.name="io.github.anthony-chaudhary/fak"
 COPY --from=build /out/fak /usr/local/bin/fak
+# Notice files ship inside the image so redistributors can satisfy the
+# license notice terms (#14447).
+COPY LICENSE NOTICE.md THIRD_PARTY_NOTICES.md /usr/share/doc/fak/
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/fak"]
 # Default to the gateway bound to all interfaces (containers need 0.0.0.0, not

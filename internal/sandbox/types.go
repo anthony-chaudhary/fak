@@ -183,19 +183,23 @@ func IsSandboxError(err error, token string) bool {
 
 // Spec specifies the complete configuration for sandbox instantiation.
 type Spec struct {
-	Tier             Tier             `json:"tier"`
-	Rootfs           string           `json:"rootfs,omitempty"`
-	WorkspaceDir     string           `json:"workspace_dir"`
-	LaneTree         []string         `json:"lane_tree,omitempty"`
-	ReadOnlyPaths    []string         `json:"read_only_paths,omitempty"`
-	WritablePaths    []string         `json:"writable_paths,omitempty"`
-	MemoryLimitBytes int64            `json:"memory_limit_bytes,omitempty"`
-	CPULimitPercent  int              `json:"cpu_limit_percent,omitempty"`
-	FuelLimit        int64            `json:"fuel_limit,omitempty"`
-	TimeoutMS        int64            `json:"timeout_ms,omitempty"`
-	Env              []string         `json:"env,omitempty"`
-	EgressPolicy     EgressPolicy     `json:"egress_policy"`
-	Capabilities     []abi.Capability `json:"capabilities,omitempty"`
+	Tier             Tier     `json:"tier"`
+	Rootfs           string   `json:"rootfs,omitempty"`
+	WorkspaceDir     string   `json:"workspace_dir"`
+	LaneTree         []string `json:"lane_tree,omitempty"`
+	ReadOnlyPaths    []string `json:"read_only_paths,omitempty"`
+	WritablePaths    []string `json:"writable_paths,omitempty"`
+	MemoryLimitBytes int64    `json:"memory_limit_bytes,omitempty"`
+	CPULimitPercent  int      `json:"cpu_limit_percent,omitempty"`
+	FuelLimit        int64    `json:"fuel_limit,omitempty"`
+	TimeoutMS        int64    `json:"timeout_ms,omitempty"`
+	Env              []string `json:"env,omitempty"`
+	// ProtectedEnv lists environment variable names that must never reach a
+	// sandboxed child, on top of the built-in gateway-key denylist applied by
+	// internal/envchild when the L1 engine builds the child environment (#14450).
+	ProtectedEnv []string         `json:"protected_env,omitempty"`
+	EgressPolicy EgressPolicy     `json:"egress_policy"`
+	Capabilities []abi.Capability `json:"capabilities,omitempty"`
 }
 
 // Validate checks whether the Spec conforms to structural integrity requirements.

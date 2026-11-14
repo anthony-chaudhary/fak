@@ -47,6 +47,26 @@ fak", "a driver for fak", "built on fak", "compatible with the fak ABI". You may
 name in unmodified redistributions. This is ordinary nominative fair use and the policy does
 not try to restrict it.
 
+## Hosted offerings (providers who host fak for customers)
+
+A provider that runs fak — typically the serving surface — and offers it as a hosted
+cloud service names the offering so customers can tell *who* operates it:
+
+- **Permitted forms:** "<Provider> fak" ("AcmeCloud fak"), "fak hosted by <Provider>",
+  "powered by fak", "built on fak". These are nominative uses: they truthfully refer to
+  the project and identify the provider as the operator.
+- **Required hygiene:** the offering states that it is operated by the provider, not by
+  the steward; any "fak-certified" claim follows the certification rules above (a green
+  conformance run at a named ABI tag).
+- **Not allowed:** naming the offering "fak" alone, or "fak <product>" with the mark
+  leading, where a reasonable customer would assume an official distribution or steward
+  endorsement (for example, "fak Cloud" as a standalone product name), or presenting the
+  provider's service as the official fak service.
+
+Hosting the serving surface creates no trademark rights or duties beyond these. For the
+licensing layer the offering runs on — including the relicensing notice period — see
+[`LICENSING.md`](LICENSING.md).
+
 ## Uses that need permission / are not allowed
 
 - Using "fak" or a confusingly similar name **as the name of your own product, service, or

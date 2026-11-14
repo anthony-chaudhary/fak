@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/envchild"
 )
 
 // osConfinement abstracts platform-specific OS isolation (Win32 JobObjects, Linux Landlock, Darwin Seatbelt).
@@ -160,15 +162,14 @@ func (inst *L1Instance) Execute(ctx context.Context, req ExecutionRequest) (Exec
 	cmd := prepareCommand(runCtx, req)
 	cmd.Dir = workingDir
 
-	// Setup environment
-	if len(req.Env) > 0 {
-		cmd.Env = req.Env
-	} else if len(inst.spec.Env) > 0 {
-		cmd.Env = inst.spec.Env
-	} else {
-		cmd.Env = os.Environ()
+	// Setup environment: every child starts from the allowlisted minimal host
+	// environment; req/spec Env are explicit per-spec additions, and gateway key
+	// variable names are denied even when a spec tries to add them (#14450).
+	extra := req.Env
+	if len(extra) == 0 {
+		extra = inst.spec.Env
 	}
-
+	cmd.Env = envchild.ChildEnv(os.Environ(), envchild.Options{Extra: extra, Protected: inst.spec.ProtectedEnv})
 	// Setup stdin
 	if len(req.Stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(req.Stdin)

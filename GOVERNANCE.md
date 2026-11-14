@@ -77,6 +77,22 @@ authority), in the open, on the trunk, with a `docs(governance):` / `docs(licens
 subject. Legal-text changes to `CLA.md` carry the "pending legal review" caveat until
 counsel signs off.
 
+### Comment window for licensing changes
+
+Licensing-affecting changes get a longer leash than ordinary docs:
+
+- **Any change to [`LICENSING.md`](LICENSING.md)** — layer definitions, the layer →
+  path map, a reserved option, or the notice-period commitment — opens a **minimum
+  14-day public comment window** on the announcing issue before merge. The window
+  starts when the issue is opened; objections are answered in-thread, and the merge
+  commit records the window's start date.
+- **Exercising a reserved option** (for example, relicensing the serving surface under
+  the reserved AGPL-3.0 + commercial dual-license) additionally requires the full
+  **relicensing notice period** committed in [`LICENSING.md`](LICENSING.md). The
+  14-day window approves the process; the notice period governs the act.
+- Changes to this file or [`TRADEMARK.md`](TRADEMARK.md) that do not alter a
+  commitment above follow the ordinary open-on-trunk process.
+
 ---
 
 _This document governs process, not code semantics. The binding artifacts are the
