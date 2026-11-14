@@ -122,6 +122,11 @@ type Config struct {
 	FocusedCommands      bool     // restrict Bash to the browser coding spine command set
 	ExactCommandsOnly    bool     // restrict Bash to byte-exact entries in ExactAllowedCommands
 	ExactAllowedCommands []string // explicit commands permitted under FocusedCommands
+	// ProtectedEnv lists environment variable names that must never reach a tool
+	// child, on top of the built-in gateway-key denylist applied by internal/envchild.
+	// Deployments register their --api-key-env / --require-key-env / --key-principal
+	// names here (#14450).
+	ProtectedEnv []string
 }
 
 // Toolset is a configured, confinement-bound instance of the coding engines plus the
@@ -135,6 +140,7 @@ type Toolset struct {
 	focusedCommands      bool
 	exactCommandsOnly    bool
 	exactAllowedCommands []string
+	protectedEnv         []string
 	mutationMu           sync.Mutex
 	mutationLocks        map[string]*mutationLock
 	grepFlight           flightGroup[*grepRecord]
@@ -177,16 +183,20 @@ func New(cfg Config) (*Toolset, error) {
 	if pol.Allow == nil {
 		pol = DefaultPolicy()
 	}
-	var exactAllowedCommands []string
+	var exactAllowedCommands, protectedEnv []string
 	if len(cfg.ExactAllowedCommands) > 0 {
 		exactAllowedCommands = make([]string, len(cfg.ExactAllowedCommands))
 		copy(exactAllowedCommands, cfg.ExactAllowedCommands)
 	}
+	if len(cfg.ProtectedEnv) > 0 {
+		protectedEnv = make([]string, len(cfg.ProtectedEnv))
+		copy(protectedEnv, cfg.ProtectedEnv)
+	}
 	return &Toolset{
 		root: abs, evalRoot: evalRoot, limits: cfg.Limits.normalize(), policy: pol,
 		focusedCommands: cfg.FocusedCommands, exactCommandsOnly: cfg.ExactCommandsOnly,
-		exactAllowedCommands: exactAllowedCommands,
-		mutationLocks:        map[string]*mutationLock{},
+		exactAllowedCommands: exactAllowedCommands, protectedEnv: protectedEnv,
+		mutationLocks: map[string]*mutationLock{},
 	}, nil
 }
 
