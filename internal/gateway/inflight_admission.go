@@ -27,9 +27,8 @@ package gateway
 // book (#5379). beginServedAdmission (admission_server.go) consults this gate FIRST —
 // the coarsest bound before the scheduler slot — and ties each hold's release to the
 // request's single lease-release path through the TokenReservation linked chain.
-// Inert by default: a Server with no installed gate (SetInflightGate(nil)) leaves the
-// request path byte-for-byte historical. The gate is PER-SERVER state (#14453), not
-// process-global: each gateway owns its own tenants' holds.
+// Inert by default: no live gate (SetInflightGate(nil)) leaves the request path
+// byte-for-byte historical.
 //
 // HONEST FENCE — what this is NOT. It counts REQUESTS, not tokens: it settles no
 // usage, charges no window, and claims no throughput or hardware property. The
@@ -75,26 +74,20 @@ func (e *inflightRefusal) Unwrap() []error {
 
 // InflightPolicy configures the request-count inflight gate. Every zero value disables
 // its dimension (zero limits count nothing): MaxInflight 0 = no global cap, a PerKey
-// entry absent or <= 0 = no cap for that key, PerPrincipal 0 = no uniform per-principal
-// cap, PrincipalSlots 0 = DefaultInflightPrincipalSlots. A policy with no positive
-// limit anywhere is fully inert: Acquire admits unbounded concurrent holds without any
-// refusal and tracks nothing.
+// entry absent or <= 0 = no cap for that key, PrincipalSlots 0 =
+// DefaultInflightPrincipalSlots. A policy with no positive limit anywhere is fully
+// inert: Acquire admits unbounded concurrent holds without any refusal and tracks
+// nothing.
 type InflightPolicy struct {
-	MaxInflight int
-	PerKey      map[string]int
-	// PerPrincipal caps ANY principal's concurrent holds uniformly — the per-tenant
-	// default for tenants that are not pre-listed in PerKey (#14453, fak serve
-	// --tenant-max-inflight). It composes WITH PerKey: both carriers are enforced and
-	// the tighter binds. 0 (the default) leaves every principal uncapped on this axis,
-	// byte-for-byte the historical behavior.
-	PerPrincipal   int
+	MaxInflight    int
+	PerKey         map[string]int
 	PrincipalSlots int
 }
 
 // enabled reports whether any dimension actually limits requests — the all-zero policy
 // counts nothing, reserves nothing and refuses nothing.
 func (p InflightPolicy) enabled() bool {
-	if p.MaxInflight > 0 || p.PerPrincipal > 0 {
+	if p.MaxInflight > 0 {
 		return true
 	}
 	for _, c := range p.PerKey {
@@ -126,10 +119,6 @@ type InflightGate struct {
 	rejectedGlobal   uint64
 	rejectedKey      uint64
 	rejectedCapacity uint64
-	// sheds counts refusals PER PRINCIPAL (#14453): the per-tenant shed counter the
-	// /metrics surface renders as fak_tenant_admission_shed_total{gate="inflight"}.
-	// All three closed classes count; a principal with no refusal holds no entry.
-	sheds map[string]uint64
 }
 
 // inflightPrincipalEntry is one distinct principal's seat in the bounded table. Its
@@ -157,7 +146,6 @@ func NewInflightGate(p InflightPolicy) *InflightGate {
 		global:     NewTokenRateGate(TokenRatePolicy{Caps: ratelimit.TokenCaps{MaxConcurrent: p.MaxInflight, TargetUtilization: 1}}),
 		perKey:     map[string]*TokenRateGate{},
 		principals: map[string]*inflightPrincipalEntry{},
-		sheds:      map[string]uint64{},
 	}
 }
 
@@ -216,7 +204,6 @@ func (g *InflightGate) Acquire(principal, key string) (*InflightLease, error) {
 	head, err := g.global.Admit(ratelimit.TokenUsage{})
 	if err != nil {
 		g.rejectedGlobal++
-		g.sheds[principal]++
 		return nil, &inflightRefusal{cause: ErrInflightGlobal}
 	}
 	lease.head = head
@@ -224,7 +211,6 @@ func (g *InflightGate) Acquire(principal, key string) (*InflightLease, error) {
 		kres, err := g.perKeyCarrierLocked(key, cap).Admit(ratelimit.TokenUsage{})
 		if err != nil {
 			g.rejectedKey++
-			g.sheds[principal]++
 			lease.Release() // free the global carrier this refused acquire took
 			return nil, &inflightRefusal{cause: ErrInflightKey}
 		}
@@ -232,18 +218,9 @@ func (g *InflightGate) Acquire(principal, key string) (*InflightLease, error) {
 	}
 	pres, err := g.principalHoldLocked(principal)
 	if err != nil {
-		// The refusal is typed by principalHoldLocked: the per-principal uniform cap
-		// fires as the key class (the served path keys by principal), the slot bound
-		// as capacity. Count the fired class, never a guess.
-		switch {
-		case errors.Is(err, ErrInflightKey):
-			g.rejectedKey++
-		default:
-			g.rejectedCapacity++
-		}
-		g.sheds[principal]++
+		g.rejectedCapacity++
 		lease.Release()
-		return nil, err
+		return nil, &inflightRefusal{cause: ErrInflightCapacity}
 	}
 	lease.principalRes = pres
 	// Served admission retains only head. Link all successful dimensions before
@@ -282,17 +259,10 @@ func (g *InflightGate) perKeyCarrierLocked(key string, cap int) *TokenRateGate {
 }
 
 // principalHoldLocked takes (creating if needed) the seat a distinct principal holds in
-// the bounded table, applying the idle sweep first. The entry's carrier carries the
-// policy's uniform PerPrincipal cap (#14453): when set, it is a real concurrency cap on
-// THAT principal's holds (refusing with the key class — the served path keys by
-// principal), and when unset it stays inert exactly as before. Caller holds g.mu.
+// the bounded table, applying the idle sweep first. Caller holds g.mu.
 func (g *InflightGate) principalHoldLocked(principal string) (*TokenReservation, error) {
 	if e := g.principals[principal]; e != nil {
-		res, err := e.gate.Admit(ratelimit.TokenUsage{})
-		if err != nil {
-			return nil, &inflightRefusal{cause: ErrInflightKey}
-		}
-		return res, nil
+		return e.gate.Admit(ratelimit.TokenUsage{})
 	}
 	if len(g.principals) >= g.slots {
 		g.sweepIdleLocked()
@@ -300,30 +270,18 @@ func (g *InflightGate) principalHoldLocked(principal string) (*TokenReservation,
 			return nil, &inflightRefusal{cause: ErrInflightCapacity}
 		}
 	}
-	caps := ratelimit.TokenCaps{}
-	if g.policy.PerPrincipal > 0 {
-		caps = ratelimit.TokenCaps{MaxConcurrent: g.policy.PerPrincipal, TargetUtilization: 1}
-	}
-	e := &inflightPrincipalEntry{gate: NewTokenRateGate(TokenRatePolicy{Caps: caps})}
+	e := &inflightPrincipalEntry{gate: NewTokenRateGate(TokenRatePolicy{})}
 	g.principals[principal] = e
-	res, err := e.gate.Admit(ratelimit.TokenUsage{})
-	if err != nil {
-		// A fresh carrier starts empty, so this cannot fire for a positive cap; keep
-		// the invariant total anyway and drop the seat that holds nothing.
-		delete(g.principals, principal)
-		return nil, &inflightRefusal{cause: ErrInflightKey}
-	}
-	return res, nil
+	return e.gate.Admit(ratelimit.TokenUsage{})
 }
 
 // sweepIdleLocked drops every principal entry whose carrier holds no live reservation.
 // Unlike the per-principal book's idle sweep (#5379), no window-elapsed clause is needed:
-// these carriers carry at most a CONCURRENCY cap (the uniform PerPrincipal dimension,
-// #14453) and no token caps, so their settled-window accounting constrains nothing — an
-// entry with zero live reservations is indistinguishable from a fresh one and dropping it
-// forgives no budget. Freeing the seat the moment the last hold releases mirrors the
-// upstream slot-reset-on-zero-count, keeping the table tight under caller-churned
-// principals. Caller holds g.mu.
+// these carriers are INERT — zero caps, no reader of their accounting — so an entry with
+// zero live reservations is indistinguishable from a fresh one and dropping it forgives
+// no budget. Freeing the seat the moment the last hold releases mirrors the upstream
+// slot-reset-on-zero-count, keeping the table tight under caller-churned principals.
+// Caller holds g.mu.
 func (g *InflightGate) sweepIdleLocked() {
 	for p, e := range g.principals {
 		if e.gate.Snapshot().InFlight != 0 {
@@ -333,35 +291,24 @@ func (g *InflightGate) sweepIdleLocked() {
 	}
 }
 
-// SetInflightGate installs this Server's inflight gate, consulted ahead of the
-// scheduler slot by beginServedAdmission; nil detaches it and the request path goes
-// byte-for-byte historical. Per-SERVER state (#14453): each gateway owns its own
-// tenants' holds, so two Servers on one process can run different inflight policies
-// without cross-talk. Settable after New, guarded by admissionMu alongside
-// SetPrincipalTokenRates. A nil receiver is a no-op.
-func (s *Server) SetInflightGate(g *InflightGate) {
-	if s == nil {
-		return
-	}
-	s.admissionMu.Lock()
-	s.inflightGate = g
-	s.admissionMu.Unlock()
+var (
+	inflightGateMu   sync.RWMutex
+	liveInflightGate *InflightGate
+)
+
+// SetInflightGate installs the live inflight gate consulted FIRST by
+// beginServedAdmission (the coarsest bound, before the scheduler slot); nil detaches it
+// and the request path goes byte-for-byte historical. Swaps under one guard alongside
+// LiveInflightGate.
+func SetInflightGate(g *InflightGate) {
+	inflightGateMu.Lock()
+	liveInflightGate = g
+	inflightGateMu.Unlock()
 }
 
-// ShedCounts returns the per-principal refusal totals (#14453) — the per-tenant shed
-// counter the /metrics surface renders as fak_tenant_admission_shed_total{gate="inflight"}.
-// The map is a copy; a nil gate reports an empty map.
-func (g *InflightGate) ShedCounts() map[string]uint64 {
-	if g == nil {
-		return map[string]uint64{}
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	out := make(map[string]uint64, len(g.sheds))
-	for p, n := range g.sheds {
-		if n > 0 {
-			out[p] = n
-		}
-	}
-	return out
+// LiveInflightGate returns the installed gate, or nil when none is attached.
+func LiveInflightGate() *InflightGate {
+	inflightGateMu.RLock()
+	defer inflightGateMu.RUnlock()
+	return liveInflightGate
 }

@@ -1,7 +1,7 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
   "commit": "f1cb7b8fb",
-  "total_debt": 612,
+  "total_debt": 610,
   "grade_debt": 50,
   "metrics": {
     "doc": 3,
@@ -16,7 +16,7 @@
     "sota": 0,
     "agent": 12,
     "brittleness": 0,
-    "product": 2,
+    "product": 0,
     "persona": 0,
     "popularization": 0,
     "stability": 0,

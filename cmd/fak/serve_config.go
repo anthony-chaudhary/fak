@@ -195,12 +195,6 @@ func effectiveServeConfig(sf *serveFlags, m deploymanifest.Manifest, hasManifest
 			"native_prefix_profile":                {Value: *sf.nativePrefixProfile, Source: source("native-prefix-profile", "", "")},
 			"vulkan_q4k_profile":                   {Value: *sf.vulkanQ4KProfile, Source: source("vulkan-q4k-profile", "", "")},
 			"vulkan_stage_q4k":                     {Value: *sf.vulkanStageQ4K, Source: source("vulkan-stage-q4k", "", "")},
-			// Per-tenant admission gates (#14453): 0 = off (the historical inert path).
-			"tenant_rate_rps":            {Value: *sf.tenantRateRPS, Source: source("tenant-rate-rps", "", "")},
-			"tenant_rate_burst":          {Value: *sf.tenantRateBurst, Source: source("tenant-rate-burst", "", "")},
-			"tenant_max_inflight":        {Value: *sf.tenantMaxInflight, Source: source("tenant-max-inflight", "", "")},
-			"tenant_token_window_tokens": {Value: *sf.tenantTokenWindowTokens, Source: source("tenant-token-window-tokens", "", "")},
-			"tenant_token_window":        {Value: sf.tenantTokenWindow.String(), Source: source("tenant-token-window", "", "")},
 		},
 		Opinions:        serveManifestOpinions(m),
 		ToolPlugins:     toolPluginProfiles(plugins),

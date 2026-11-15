@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -318,55 +317,6 @@ func (s *Server) writeAdmissionMetrics(b *strings.Builder) {
 	c.WriteMetrics(b)
 }
 
-// writeTenantAdmissionMetrics folds the wired per-tenant admission gates' shed counters
-// onto the gateway /metrics surface (#14453): one labeled counter row per tenant ever
-// shed, per gate family — rate (the request-rate bucket), inflight (the request-count
-// caps), token (the per-principal rolling-window allotment book). A Server with no
-// tenant gate attached emits nothing — no phantom zero series — the same host-injected,
-// inert-by-default posture as writeAdmissionMetrics. Rows are sorted by tenant then gate
-// so a scrape is deterministic.
-func (s *Server) writeTenantAdmissionMetrics(b *strings.Builder) {
-	if s == nil || b == nil {
-		return
-	}
-	s.admissionMu.RLock()
-	rg, ig, book := s.requestRateGate, s.inflightGate, s.principalTokenRates
-	s.admissionMu.RUnlock()
-	if rg == nil && ig == nil && book == nil {
-		return
-	}
-	type row struct {
-		tenant string
-		gate   string
-		n      uint64
-	}
-	var rows []row
-	for p, n := range rg.ShedCounts() {
-		rows = append(rows, row{p, "rate", n})
-	}
-	for p, n := range ig.ShedCounts() {
-		rows = append(rows, row{p, "inflight", n})
-	}
-	for p, n := range book.ShedCounts() {
-		rows = append(rows, row{p, "token", n})
-	}
-	if len(rows) == 0 {
-		return
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].tenant != rows[j].tenant {
-			return rows[i].tenant < rows[j].tenant
-		}
-		return rows[i].gate < rows[j].gate
-	})
-	writeHelpType(b, "fak_tenant_admission_shed_total",
-		"Cumulative per-tenant admission refusals by gate family: rate = per-tenant request-rate bucket, inflight = per-tenant request-count cap, token = per-tenant rolling-window token allotment.",
-		"counter")
-	for _, r := range rows {
-		fmt.Fprintf(b, "fak_tenant_admission_shed_total{tenant=%q,gate=%q} %d\n", promQuote(r.tenant), promQuote(r.gate), r.n)
-	}
-}
-
 // admitStreamedTurn is beginServedAdmission plus the refusal both streaming surfaces own
 // identically: a refused admission is logged with the surface's own `lane` word, answered on w as
 // an upstream error, and reported ok=false — the caller's cue to stop and return "response
@@ -383,14 +333,13 @@ func (s *Server) admitStreamedTurn(ctx context.Context, w http.ResponseWriter, l
 }
 
 // beginServedAdmission is the served request's admission boundary, coarsest bound
-// first: the per-principal request-rate bucket (the Server's requestRateGate, #14453 —
-// TensorFold borrow, integer ns-token credit on a monotonic clock, consulted ahead of
-// EVERYTHING so a request arriving faster than its principal's rate is shed before it
-// can queue, hold, or reserve; the one-token debit stands once admitted and a
-// later-stage refusal cancels it) — then the request-count inflight gate (the Server's
-// inflightGate, #14453 — TensorFold borrow, global/per-key/per-principal caps on
-// concurrent requests, consulted ahead of the rest so a request that cannot fit the
-// node's inflight caps never queues or reserves) — then the
+// first: the per-principal request-rate bucket (LiveRequestRateGate, TensorFold borrow —
+// integer ns-token credit on a monotonic clock, consulted ahead of EVERYTHING so a
+// request arriving faster than its principal's rate is shed before it can queue, hold,
+// or reserve; the one-token debit stands once admitted and a later-stage refusal
+// cancels it) — then the request-count inflight gate (LiveInflightGate, TensorFold
+// borrow — global/per-key caps on concurrent requests, consulted ahead of the rest so a
+// request that cannot fit the node's inflight caps never queues or reserves) — then the
 // scheduler slot (admissionCtl, #35); a queued request must not hold token budget while
 // it waits — then the caller's OWN per-principal allotment (principalTokenRates, #5379),
 // then the shared provider token window (tokenRateGate, #2019). A shed at any stage
@@ -410,23 +359,15 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	if len(queuedObserver) > 0 {
 		onQueued = queuedObserver[0]
 	}
-	s.admissionMu.RLock()
-	c := s.admissionCtl
-	g := s.tokenRateGate
-	b := s.principalTokenRates
-	cap, fraction := s.warmupCapacity, s.warmupReserveFraction
-	rg := s.requestRateGate
-	ig := s.inflightGate
-	s.admissionMu.RUnlock()
 	// The per-principal request-rate bucket (TensorFold borrow) is consulted FIRST —
 	// coarser than even the request-count inflight gate: a host-level arrival-rate bound
 	// sheds before any hold is taken, so a refusal here frees nothing. The one-token
 	// debit stands once admitted (the request consumed rate budget at admission); a
 	// later-stage refusal CANCELS it (the provider was never called), and the seat rides
-	// the request's single lease-release path like the inflight hold. A Server with no
-	// installed gate leaves the request path byte-for-byte historical.
+	// the request's single lease-release path like the inflight hold. A nil live gate
+	// leaves the request path byte-for-byte historical.
 	var rateHold *RateLease
-	if rg != nil {
+	if rg := LiveRequestRateGate(); rg != nil {
 		p := principalFromContext(ctx)
 		var err error
 		rateHold, err = rg.Take(p, 1)
@@ -434,6 +375,13 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 			return nil, &AdmissionError{Verdict: VerdictShed, Reason: rateShedReason(err)}
 		}
 	}
+	s.admissionMu.RLock()
+	c := s.admissionCtl
+	g := s.tokenRateGate
+	b := s.principalTokenRates
+	cap, fraction := s.warmupCapacity, s.warmupReserveFraction
+	ig := LiveInflightGate()
+	s.admissionMu.RUnlock()
 	// Zero disables the controller's token limit, so a refused fixed-state
 	// derive must stop here rather than install zero or retain a default budget.
 	// Validate the SAME captured controller used for Acquire: a concurrent

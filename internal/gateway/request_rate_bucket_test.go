@@ -245,7 +245,8 @@ func TestRequestRateBucketRefusals(t *testing.T) {
 		clk := &testRateClock{t: time.Unix(0, 0).UTC()}
 		rg := NewRequestRateGate(RateBucketPolicy{RequestsPerSecond: 1, RequestBurst: 1})
 		rg.SetClock(clk.now)
-		srv.SetRequestRateGate(rg)
+		SetRequestRateGate(rg)
+		defer SetRequestRateGate(nil)
 		lease, err := srv.beginServedAdmission(context.Background(), turn, nil, nil, 1)
 		if err != nil || lease == nil {
 			t.Fatalf("first beginServedAdmission = (%v, %v), want an admitted lease", lease, err)
@@ -280,7 +281,7 @@ func TestRequestRateBucketRefusals(t *testing.T) {
 		// — the provider was never called).
 		srv2 := newTestServer(t)
 		rg2 := NewRequestRateGate(RateBucketPolicy{RequestsPerSecond: 100, RequestBurst: 100})
-		srv2.SetRequestRateGate(rg2)
+		SetRequestRateGate(rg2)
 		shared := NewTokenRateGate(TokenRatePolicy{Caps: ratelimit.TokenCaps{MaxTotalTokens: 10}})
 		srv2.SetTokenRateGate(shared)
 		if _, err := shared.Admit(ratelimit.NewTokenUsage(8, 0, 0)); err != nil {
@@ -299,7 +300,7 @@ func TestRequestRateBucketRefusals(t *testing.T) {
 		// second principal must reach the scheduler, not the rate-capacity wall.
 		srv3 := newTestServer(t)
 		rg3 := NewRequestRateGate(RateBucketPolicy{RequestsPerSecond: 100, RequestBurst: 100, PrincipalSlots: 1})
-		srv3.SetRequestRateGate(rg3)
+		SetRequestRateGate(rg3)
 		policy := DefaultAdmissionPolicy()
 		policy.TokenBudget = 32
 		srv3.SetAdmissionController(NewAdmissionController(policy))
@@ -317,7 +318,8 @@ func TestRequestRateBucketRefusals(t *testing.T) {
 			t.Fatalf("org-b beginServedAdmission err = %v, want the scheduler's refusal — the cancelled org-a seat was swept, not a rate-capacity refusal", err)
 		}
 
-		// No installed gate: byte-for-byte historical.
+		// No live gate: byte-for-byte historical.
+		SetRequestRateGate(nil)
 		plain := newTestServer(t)
 		lease, err = plain.beginServedAdmission(context.Background(), turn, nil, nil, 1)
 		if err != nil || lease != nil {
