@@ -270,20 +270,11 @@ func (s *Server) handleFakEvents(w http.ResponseWriter, r *http.Request) {
 			traceID: q.Get("trace_id"), kind: q.Get("kind"),
 		}
 	}
-	// Tenant isolation (#14452): the authenticated caller's principal (stamped at
-	// the front door by withAuth for a keyset-bound key) bounds which rows this
-	// drain may hand over. An unnamed caller — the single-tenant loopback, the
-	// full-strength RequireKey bearer, the read-scoped metrics bearer — keeps the
-	// pre-#14452 whole-tail drain byte-for-byte; a named tenant sees ONLY the rows
-	// whose trace it owns, and the trace->tenant attribution map is withheld from
-	// it entirely so one customer cannot learn another customer's names or trace
-	// ids even in metadata form.
-	caller := strings.TrimSpace(principalFromContext(r.Context()))
 	rows := j.Recent(0)
 	out := make([]journal.Row, 0, len(rows))
 	cursor := since
 	for _, row := range rows {
-		if row.Seq > since && filter.match(row) && eventRowVisible(s, caller, row) {
+		if row.Seq > since && filter.match(row) {
 			out = append(out, row)
 		}
 		// Advance over EVERY walked row, not just the delivered ones: the cursor is the
@@ -294,51 +285,27 @@ func (s *Server) handleFakEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	resp := EventsResponse{Events: out, Cursor: cursor}
-	if caller == "" {
-		// Attribute each drained row to the tenant principal that owns its trace, so a
-		// reader joins the audit journal to the org/project that produced it by
-		// X-Trace-Id. Read-time only: the on-disk hash-chained row schema is untouched.
-		// Only NAMED owners are emitted (an unbound / single-tenant "" owner is
-		// skipped), so the map is absent on the single-key loopback and present
-		// exactly for keyset-attributed rows. A TENANT caller never receives the map
-		// at all (#14452): every row it sees is already its own, and emitting the
-		// attribution would cross the tenant boundary in metadata form.
-		principals := make(map[string]string, len(out))
-		for _, row := range out {
-			if row.TraceID == "" {
-				continue
-			}
-			if _, seen := principals[row.TraceID]; seen {
-				continue
-			}
-			if owner, ok := s.traceOwnerOf(row.TraceID); ok && owner != "" {
-				principals[row.TraceID] = owner
-			}
+	// Attribute each drained row to the tenant principal that owns its trace, so a
+	// reader joins the audit journal to the org/project that produced it by X-Trace-Id.
+	// Read-time only: the on-disk hash-chained row schema is untouched. Only NAMED
+	// owners are emitted (an unbound / single-tenant "" owner is skipped), so the map is
+	// absent on the single-key loopback and present exactly for keyset-attributed rows.
+	principals := make(map[string]string, len(out))
+	for _, row := range out {
+		if row.TraceID == "" {
+			continue
 		}
-		if len(principals) > 0 {
-			resp.Principals = principals
+		if _, seen := principals[row.TraceID]; seen {
+			continue
 		}
+		if owner, ok := s.traceOwnerOf(row.TraceID); ok && owner != "" {
+			principals[row.TraceID] = owner
+		}
+	}
+	if len(principals) > 0 {
+		resp.Principals = principals
 	}
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// eventRowVisible reports whether one drained audit-journal row may be delivered
-// to a caller authenticating as the given principal (#14452). An empty caller
-// (single-tenant / unattributed) sees every row, preserving the historical wire
-// shape. A named tenant sees a row ONLY when its trace is bound to that same
-// principal: an unbound trace fails closed for a named caller rather than
-// defaulting to the shared single-tenant bucket, because in a multi-tenant
-// process an unowned row is exactly the cross-tenant leak this floor exists to
-// refuse.
-func eventRowVisible(s *Server, caller string, row journal.Row) bool {
-	if caller == "" {
-		return true
-	}
-	if row.TraceID == "" {
-		return false
-	}
-	owner, ok := s.traceOwnerOf(row.TraceID)
-	return ok && owner == caller
 }
 
 // handleFakRevoke triggers a fleet-wide refutation of an external world-state witness.

@@ -171,7 +171,6 @@ type serveFlags struct {
 	vdso                         *bool
 	invalidation                 *string
 	requireKeyEnv                *string
-	metricsKeyEnv                *string
 	speculative                  *string
 	pdRole                       *string
 	allowLAN                     *bool
@@ -366,7 +365,6 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.vdso = fs.Bool("vdso", true, "enable the vDSO dedup fast path")
 	sf.invalidation = fs.String("invalidation", "global", "vDSO tier-2 invalidation granularity for the live fleet: global|namespace|resource")
 	sf.requireKeyEnv = fs.String("require-key-env", "", "env var holding a bearer token to REQUIRE on every request (default: no auth)")
-	sf.metricsKeyEnv = fs.String("metrics-key-env", "", "env var holding a READ-ONLY metrics bearer accepted ONLY on the operator observability routes (/metrics, /debug/vars, the observation family, /slots) so Prometheus can scrape a multi-tenant gateway without holding a full gateway key (#14452). Names the env var HOLDING the token, never the token itself — the same contract --require-key-env holds. It opens no mutating route and does not weaken tenant isolation: on a keyset-armed gateway tenant keys still get 403 on these routes.")
 	sf.allowLAN = fs.Bool("allow-lan", false, "allow unauthenticated requests from private/local networks (RFC 1918 IPv4, link-local, loopback); off-LAN / public callers still require authentication")
 	fs.Var(&sf.keyPrincipal, "key-principal", "bind an ADDITIONAL api key to an org/project PRINCIPAL as PRINCIPAL=ENV_VAR, so N corporate keys authenticate against one `fak serve` and every turn is attributed to the tenant that made it (#5332). The value names the env var HOLDING that tenant's key, never the key itself — the raw secret never lands in a unit file, a plist, or shell history, and gateway.New hashes it to a SHA-256 digest and drops the plaintext at construction. Repeat for N tenants (--key-principal acme=ACME_KEY --key-principal beta=BETA_KEY); binding one principal to several env vars is key ROTATION and is allowed. A matching inbound key (x-api-key or Authorization: Bearer) both AUTHENTICATES the caller and stamps its principal onto the access log and /v1/fak/events, joinable by X-Trace-Id. ADDITIVE to --require-key-env: that single bearer still authenticates the anonymous single-tenant caller and an empty keyset leaves that path byte-for-byte unchanged. Fails startup LOUD on a malformed spec, an unset/empty env var, or two tenants sharing a key — a keyset that silently forgot a binding looks armed and is not.")
 	sf.unsafeUnauthedBind = fs.Bool(serveUnsafeBindFlag, false, "proceed with a bind that is reachable from OFF THIS HOST even though no inbound token door is configured (#5373, a child of #3279). Default false: `fak serve --addr 0.0.0.0:8080` with neither --require-key-env nor --key-principal is REFUSED at startup with the "+serveBindRefusalToken+" reason, because every request such a listener serves is unauthenticated and the internet-wide scan #3279 cites found 175,108 local-model servers in exactly that shape. Loopback binds (the 127.0.0.1:8080 default, localhost, ::1) are never affected, nor is --stdio, nor is an off-host bind that DOES name a token door — so this flag is only ever needed for the deliberate case: an isolated lab segment, or a host firewall doing the work instead. Passing it prints a loud stderr warning every boot; it is named to be impossible to set by accident and is not a substitute for --require-key-env.")
@@ -1653,7 +1651,6 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		SpeculativeMode:              *sf.speculative,
 		ExpertParallelRanks:          *sf.expertParallel,
 		RequireKey:                   rt.requireKey,
-		ReadBearer:                   rt.metricsKey,
 		AllowLAN:                     *sf.allowLAN,
 		KeyPrincipals:                keyPrincipals,
 		ControlIngress:               controlHandler,

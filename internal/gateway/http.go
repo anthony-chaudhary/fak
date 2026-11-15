@@ -596,19 +596,6 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				}
 			}
 		}
-		// Tenant floor for operator-grade observability (#14452): whatever the
-		// source address, a request that authenticated AS a named tenant principal
-		// (keyset-bound, stamped above on either branch) is refused on the
-		// operator surfaces — a tenant key must not open /metrics, /debug/vars,
-		// the observation family or /slots even from loopback. Operators scrape
-		// with the full gateway key, the dedicated metrics bearer, or on-box
-		// without any tenant credential; both doors authenticate WITHOUT a
-		// principal, so this check never touches them.
-		if p := principalFromContext(r.Context()); p != "" && operatorObservationPath(r.URL.Path) {
-			s.logf("gateway: tenant %q refused operator-scoped route %s", p, r.URL.Path)
-			writeErr(w, http.StatusForbidden, "operator-scoped route: tenant keys cannot read "+r.URL.Path+"; use the operator or metrics bearer")
-			return
-		}
 		if s.startup.childStartupPending() && strings.HasPrefix(r.URL.Path, "/v1/") && !strings.HasPrefix(r.URL.Path, "/v1/fak/") {
 			s.MarkChildUsable(time.Now())
 		}
@@ -705,24 +692,6 @@ func readScopedPath(r *http.Request) bool {
 		// /metrics here so the read-scoped floor cannot drift — an engine that
 		// admits /metrics must admit the introspection that explains it.
 		"/props", "/slots":
-		return true
-	}
-	return false
-}
-
-// operatorObservationPath reports whether the path is an OPERATOR-GRADE
-// observability surface (#14452): the process-wide /metrics and /debug/vars,
-// the observation family, and the engine-introspection /slots. These carry
-// other tenants' tool names, verdicts, trace ids and customer names, so they
-// stay closed to keyset-bound TENANT principals: the doors are the on-box
-// loopback exemption, the full-strength RequireKey bearer, and the dedicated
-// read-only metrics bearer (Config.ReadBearer, armed on `fak serve` via
-// --metrics-key-env). The set is deliberately NARROWER than readScopedPath —
-// /props, /v1/fak/perf/* and /v1/fak/arms* expose process-level counts and
-// build labels, not per-tenant content, and keep their read-scoped access.
-func operatorObservationPath(path string) bool {
-	switch path {
-	case "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/observation/engine", "/slots":
 		return true
 	}
 	return false
