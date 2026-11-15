@@ -25,6 +25,14 @@ ExecStart=/usr/local/bin/fak serve --addr 0.0.0.0:8080 \
   --require-key-env FAK_GATEWAY_KEY
 Restart=on-failure
 RestartSec=2
+# Graceful drain budget (#14454): after SIGTERM the gateway drains in-flight
+# streams up to FAK_HTTP_DRAIN_TIMEOUT_S - by default the effective write timeout
+# plus 10s settle (100s at the bare 90s proxy default; 310s at the 300s write
+# timeout shipped in fak.env.example) - so cover the example-env case plus margin
+# before systemd escalates to SIGKILL. Raise this above the effective drain if
+# you raise the write timeout or set FAK_HTTP_DRAIN_TIMEOUT_S explicitly.
+TimeoutStopSec=360
+
 # Run unprivileged with a hardened sandbox.
 DynamicUser=yes
 # /var/lib/fak for the audit journal (FAK_AUDIT_JOURNAL in fak.env).

@@ -1,0 +1,13 @@
+# Voluntary-disruption guard (#14454): node drains / cordon-evict may remove at
+# most replicas-1 pods at once, so a rollout never empties the service.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "fak.fullname" . }}
+  labels:
+    {{- include "fak.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "fak.selectorLabels" . | nindent 6 }}

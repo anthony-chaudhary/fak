@@ -58,6 +58,12 @@ spec:
     spec:
       # fak never calls the Kubernetes API, so it needs no service-account token.
       automountServiceAccountToken: false
+      # Graceful shutdown budget (#14454): drain(100s) + 20s control-plane margin.
+      # /readyz reports stopping:true from SIGTERM, so orchestrators route new
+      # traffic away while in-flight streams finish; there is no preStop exec
+      # because the distroless proxy image carries no shell (probe split: #14210).
+      terminationGracePeriodSeconds: 120
+
       securityContext:
         runAsNonRoot: true
         seccompProfile: { type: RuntimeDefault }
@@ -82,6 +88,12 @@ spec:
               valueFrom: { secretKeyRef: { name: fak-secrets, key: gateway-key } }
             - name: OPENAI_API_KEY
               valueFrom: { secretKeyRef: { name: fak-secrets, key: openai-api-key } }
+            # Graceful drain (#14454): covers the 90s proxy write timeout plus
+            # settle, so an in-flight stream finishes across a rolling update.
+            # Must stay below terminationGracePeriodSeconds above.
+            - name: FAK_HTTP_DRAIN_TIMEOUT_S
+              value: "100"
+
           volumeMounts:
             - name: policy
               mountPath: /etc/fak
@@ -120,3 +132,14 @@ spec:
   ports:
     - port: 80
       targetPort: 8080
+---
+# Voluntary-disruption guard (#14454): node drains / cordon-evict may remove at
+# most replicas-1 pods at once, so a rollout never empties the service.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fak
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: fak }

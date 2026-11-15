@@ -24,6 +24,23 @@
 {{- end -}}
 {{- $emitWrite := or (not (kindIs "invalid" $writeRaw)) (gt ($write | int) 0) -}}
 {{- $emitPlanner := or (not (kindIs "invalid" $plannerRaw)) (gt ($planner | int) 0) -}}
+{{/* Graceful shutdown (#14454): the drain window must cover the effective write
+    timeout so an in-flight stream survives a rolling update; the grace period
+    must cover preStop + drain. Nulls resolve to the binary's own defaults. */}}
+{{- $drainRaw := .Values.shutdown.drainSeconds -}}
+{{- $graceRaw := .Values.shutdown.terminationGracePeriodSeconds -}}
+{{- $preStop := 5 -}}
+{{- if not (kindIs "invalid" .Values.shutdown.preStopSleepSeconds) -}}{{- $preStop = .Values.shutdown.preStopSleepSeconds -}}{{- end -}}
+{{- $effWrite := 0 -}}
+{{- if gt ($write | int) 0 -}}{{- $effWrite = $write -}}{{- else if ne $mode "inkernel" -}}{{- $effWrite = 90 -}}{{- end -}}
+{{- $drain := 0 -}}
+{{- if not (kindIs "invalid" $drainRaw) -}}{{- $drain = $drainRaw -}}{{- else if gt $effWrite 0 -}}{{- $drain = (add ($effWrite | int) 10) -}}{{- else -}}{{- $drain = 120 -}}{{- end -}}
+{{- $grace := 0 -}}
+{{- if not (kindIs "invalid" $graceRaw) -}}{{- $grace = $graceRaw -}}{{- else if eq $mode "inkernel" -}}{{- $grace = 640 -}}{{- else -}}{{- $grace = 120 -}}{{- end -}}
+{{- if lt ($grace | int) (add ($drain | int) ($preStop | int)) -}}
+{{-   fail (printf "fak: terminationGracePeriodSeconds must exceed FAK_HTTP_DRAIN_TIMEOUT_S + preStop delay (got grace=%s, drain=%s, preStop=%s); docs/fak/deployment-guide.md" ($grace | toString) ($drain | toString) ($preStop | toString)) -}}
+{{- end -}}
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -47,6 +64,9 @@ spec:
     spec:
       # fak never calls the Kubernetes API, so it needs no service-account token.
       automountServiceAccountToken: false
+      # Graceful shutdown budget (#14454): preStop + drain + control-plane margin.
+      terminationGracePeriodSeconds: {{ $grace }}
+
       {{- if eq $mode "inkernel" }}
       {{- if .Values.gpu.runtimeClassName }}
       # Neo clouds differ on how pods reach the driver: some GPU Operator installs
@@ -106,7 +126,6 @@ spec:
             {{- end }}
           ports:
             - containerPort: {{ $targetPort }}
-          {{- if or .Values.requireKeyEnv (and (eq $mode "proxy") .Values.apiKeyEnv) $emitWrite $emitPlanner .Values.state.enabled }}
           env:
             {{- if .Values.requireKeyEnv }}
             - name: {{ .Values.requireKeyEnv }}
@@ -137,7 +156,10 @@ spec:
             - name: FAK_AUDIT_JOURNAL
               value: "{{ .Values.state.mountPath }}/audit.jsonl"
             {{- end }}
-          {{- end }}
+            # Graceful drain (#14454): covers the effective write timeout so an
+            # in-flight stream finishes across a rolling update.
+            - name: FAK_HTTP_DRAIN_TIMEOUT_S
+              value: "{{ $drain }}"
           volumeMounts:
             - name: policy
               mountPath: /etc/fak
@@ -151,6 +173,15 @@ spec:
               mountPath: /weights
               readOnly: true
             {{- end }}
+          {{- if eq $mode "inkernel" }}
+          # Pre-SIGTERM pause (#14454): lets the endpoint drop propagate before
+          # the drain window opens. Inkernel only - the CUDA image carries
+          # /bin/sh; the distroless proxy image cannot run a preStop exec.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep {{ $preStop }}"]
+          {{- end }}
           # /healthz answers 200 {"ok":true,...} once the listener is bound and the
           # model is loaded — a valid liveness AND readiness signal (there is no
           # separate /readyz), and always unauthenticated so probes need no token.

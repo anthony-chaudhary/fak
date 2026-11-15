@@ -372,7 +372,12 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 // its own listener and calls Serve directly. It mirrors net/http.Server's
 // ListenAndServe/Serve split.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
-	drainTimeout := parseHTTPDrainTimeout(os.Getenv("FAK_HTTP_DRAIN_TIMEOUT_S"))
+	// The drain deadline derives from the SAME write timeout the handlers run
+	// under, so an in-flight stream that legitimately runs up to WriteTimeout
+	// finishes instead of being cut by a fixed 5s on every rolling update
+	// (#14454). FAK_HTTP_DRAIN_TIMEOUT_S still overrides either way.
+	writeTimeout := durEnv("FAK_HTTP_WRITE_TIMEOUT_S", serveWriteTimeoutDefault(plannerKind(s.planner)))
+	drainTimeout := parseHTTPDrainTimeout(os.Getenv("FAK_HTTP_DRAIN_TIMEOUT_S"), defaultHTTPDrainTimeout(writeTimeout))
 	// Record the address we actually bound so a served descriptor can name this
 	// process instead of a literal (#5642). This is the ONLY point where the chosen
 	// address is known — with an ephemeral ":0" bind the port does not exist until
@@ -399,7 +404,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       durEnv("FAK_HTTP_READ_TIMEOUT_S", 30*time.Second),
-		WriteTimeout:      durEnv("FAK_HTTP_WRITE_TIMEOUT_S", serveWriteTimeoutDefault(plannerKind(s.planner))),
+		WriteTimeout:      writeTimeout,
 		IdleTimeout:       durEnv("FAK_HTTP_IDLE_TIMEOUT_S", 120*time.Second),
 		// Route net/http's own diagnostics (per-request panic recovery, TLS/keepalive
 		// errors) through the SAME sink as every other gateway log. Left nil, net/http
@@ -470,14 +475,26 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	}
 }
 
-const defaultHTTPDrainTimeout = 5 * time.Second
+// defaultHTTPDrainTimeout derives the graceful-shutdown deadline from the handler
+// write timeout, so an in-flight stream that legitimately runs up to WriteTimeout
+// finishes instead of being cut by a fixed 5s on every rolling update (#14454).
+// The +10s settle covers the tail of chunked delivery after the last token. A zero
+// write timeout - a local in-kernel model whose turn can run for minutes - gets
+// the longer floor; operators with multi-minute decodes raise
+// FAK_HTTP_DRAIN_TIMEOUT_S explicitly.
+func defaultHTTPDrainTimeout(writeTimeout time.Duration) time.Duration {
+	if writeTimeout <= 0 {
+		return 120 * time.Second
+	}
+	return writeTimeout + 10*time.Second
+}
 
 // parseHTTPDrainTimeout accepts positive whole seconds that fit in a Duration.
-// Invalid values retain the default so shutdown always has a finite deadline.
-func parseHTTPDrainTimeout(raw string) time.Duration {
+// Unset or invalid values retain def so shutdown always has a finite deadline.
+func parseHTTPDrainTimeout(raw string, def time.Duration) time.Duration {
 	n, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 	if err != nil || n <= 0 || n > int64((1<<63-1)/time.Second) {
-		return defaultHTTPDrainTimeout
+		return def
 	}
 	return time.Duration(n) * time.Second
 }

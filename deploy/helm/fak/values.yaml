@@ -91,6 +91,17 @@ timeouts:
   httpWriteSeconds: null
   plannerSeconds: null
 
+# Graceful shutdown (#14454). drainSeconds maps to FAK_HTTP_DRAIN_TIMEOUT_S;
+# null = the binary's derived default (effective write timeout + 10s settle,
+# 120s floor when the write timeout is disabled). terminationGracePeriodSeconds
+# must stay above drain + preStop delay; the chart refuses to render otherwise.
+# preStopSleepSeconds is emitted only in inkernel mode: the CUDA image carries
+# /bin/sh, the distroless proxy image cannot run a preStop exec.
+shutdown:
+  drainSeconds: null
+  terminationGracePeriodSeconds: null   # null = mode default: proxy 120, inkernel 640
+  preStopSleepSeconds: 5
+
 # Per-replica state plane (#14445). The audit journal (FAK_AUDIT_JOURNAL) and
 # the cold-resume session-state snapshot (--session-state) both land on this
 # volume, so a container restart inside the pod keeps them. The default emptyDir

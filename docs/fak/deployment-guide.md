@@ -201,18 +201,26 @@ Clear every item before a network-facing deploy. Sources for each are in
 - [ ] **Audit journal enabled** (recommended). Set `FAK_AUDIT_JOURNAL=/path/to/audit.jsonl`
   to a durable, writable path for a tamper-evident record of every adjudicated
   syscall.
-- [ ] **Shutdown drain sized to the workload.** Set `FAK_HTTP_DRAIN_TIMEOUT_S=300`
-  for a five-minute HTTP drain, or leave it unset for the default five seconds.
-  The value is read when serving starts and accepts positive whole seconds up to
-  9223372036 (the largest whole-second Go duration). Surrounding whitespace is
-  ignored; empty, malformed, zero, negative, or larger values retain five seconds.
-  On terminating-signal cancellation, `/readyz` returns 503 with `stopping: true`
-  while the listener remains available; `/healthz` and startup timing retain their
-  existing semantics. Background loops join first within their separate five-second
-  bound, then the HTTP drain window starts and the listener closes to new requests.
-  Size the supervisor's termination grace period for both windows. The shutdown
-  log records `drain_timeout` and the `inflight_requests` snapshot taken before
-  loop joining. Requests exceeding the drain window are not guaranteed to finish.
+- [ ] **Shutdown drain sized to the workload.** The drain window defaults to the
+  effective `FAK_HTTP_WRITE_TIMEOUT_S` plus a 10s settle - 100s at the bare 90s
+  proxy default, and the 120s floor when the write timeout is disabled for a local
+  model - so an in-flight stream that legally runs up to the write timeout finishes
+  across a rolling update instead of being cut mid-body (#14454). Set
+  `FAK_HTTP_DRAIN_TIMEOUT_S=<seconds>` to override either way (e.g. `=300` for a
+  five-minute drain on multi-minute decodes). The value is read when serving starts
+  and accepts positive whole seconds up to 9223372036 (the largest whole-second Go
+  duration). Surrounding whitespace is ignored; empty, malformed, zero, negative,
+  or larger values retain the derived default. On terminating-signal cancellation,
+  `/readyz` returns 503 with `stopping: true` while the listener remains available;
+  `/healthz` and startup timing retain their existing semantics. Background loops
+  join first within their separate five-second bound, then the HTTP drain window
+  starts and the listener closes to new requests. Size the supervisor's termination
+  grace period above the drain window: the committed Kubernetes manifests ship
+  `terminationGracePeriodSeconds` = drain + margin (plus a `preStop` delay where the
+  image carries a shell) and a PodDisruptionBudget, and the systemd unit ships
+  `TimeoutStopSec` above its drain. The shutdown log records `drain_timeout` and the
+  `inflight_requests` snapshot taken before loop joining. Requests exceeding the
+  drain window are not guaranteed to finish.
 - [ ] **Rate limiting** (optional). `FAK_RATELIMIT_MAX_CALLS` / `FAK_RATELIMIT_MAX_COST`
   with `FAK_RATELIMIT_KEY` (`trace`|`tool`|`global`) cap per-key load.
 - [ ] **Health + metrics wired.** Probe `/healthz`; scrape `/metrics`
