@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -980,4 +981,149 @@ func (s *sessionSynthesizer) Reset() {
 	s.prevOutput = outputLen
 	s.turnIdx = 1
 	s.endReason = ""
+}
+
+// NOTICE / attribution (Apache-2.0 reuse):
+//
+// The tool-call delta merge below is an idiomatic Go re-expression (no code
+// copied) of the streaming tool-call delta assembly in:
+//
+//	ai-dynamo/aiperf @ ab610ad (ab610add4e8876fca223197596c728e17365f381),
+//	Apache-2.0 (NVIDIA CORPORATION & AFFILIATES, 2025-2026)
+//	  - src/aiperf/endpoints/openai_chat.py
+//	    (ChatEndpoint._merge_tool_call_delta and
+//	     ChatEndpoint._merge_legacy_function_call_delta: fold streaming
+//	     tool_calls / function_call deltas into an index-keyed accumulator)
+//
+// Upstream license header: SPDX-License-Identifier: Apache-2.0.
+
+// toolCallDelta mirrors one element of a streaming "tool_calls" array in an
+// OpenAI chat.completion.chunk delta. Index is a pointer so an omitted index
+// is distinguishable from an explicit one; the source falls back to the count
+// of existing slots when the server omits it.
+type toolCallDelta struct {
+	Index    *int                   `json:"index"`
+	ID       string                 `json:"id"`
+	Type     string                 `json:"type"`
+	Function *toolCallDeltaFunction `json:"function"`
+}
+
+// toolCallDeltaFunction mirrors the "function" object of a tool-call delta.
+// Arguments is a pointer so an absent "arguments" key is distinguishable from
+// a present one, matching the source's `"arguments" in fn_delta` check.
+type toolCallDeltaFunction struct {
+	Name      string  `json:"name"`
+	Arguments *string `json:"arguments"`
+}
+
+// toolCallSlot is one accumulated tool call, keyed by its stream index.
+type toolCallSlot struct {
+	id       string
+	typ      string
+	function *toolCallSlotFunction
+}
+
+// toolCallSlotFunction is the accumulated "function" object of a tool call.
+type toolCallSlotFunction struct {
+	name      string
+	arguments string
+}
+
+// toolCallDeltaAccumulator folds streaming tool_calls deltas into an
+// index-keyed accumulator, mirroring aiperf's _merge_tool_call_delta.
+type toolCallDeltaAccumulator struct {
+	slots map[int]*toolCallSlot
+}
+
+// newToolCallDeltaAccumulator returns an empty accumulator.
+func newToolCallDeltaAccumulator() *toolCallDeltaAccumulator {
+	return &toolCallDeltaAccumulator{slots: make(map[int]*toolCallSlot)}
+}
+
+// mergeToolCallDelta merges one streaming tool_calls delta into the
+// index-keyed accumulator, mirroring aiperf's _merge_tool_call_delta:
+//   - index defaults to the count of existing slots when omitted
+//   - "id" and "type" are set when present (non-empty)
+//   - function "name" is REPLACED when present (non-empty)
+//   - function "arguments" is APPENDED across chunks when the key is present
+func (a *toolCallDeltaAccumulator) mergeToolCallDelta(d toolCallDelta) {
+	idx := len(a.slots)
+	if d.Index != nil {
+		idx = *d.Index
+	}
+	slot := a.slots[idx]
+	if slot == nil {
+		slot = &toolCallSlot{}
+		a.slots[idx] = slot
+	}
+	if d.ID != "" {
+		slot.id = d.ID
+	}
+	if d.Type != "" {
+		slot.typ = d.Type
+	}
+	fn := d.Function
+	if fn == nil {
+		return
+	}
+	if fn.Name == "" && fn.Arguments == nil {
+		// Empty function object: nothing to accumulate, mirroring the
+		// source's `if not fn_delta: return`.
+		return
+	}
+	if slot.function == nil {
+		slot.function = &toolCallSlotFunction{}
+	}
+	if fn.Name != "" {
+		slot.function.name = fn.Name
+	}
+	if fn.Arguments != nil {
+		slot.function.arguments += *fn.Arguments
+	}
+}
+
+// mergeLegacyFunctionCallDelta merges a legacy streaming function_call delta
+// into a synthesised slot at index 0, mirroring aiperf's
+// _merge_legacy_function_call_delta. Legacy chunks carry no index, so
+// everything lands in slot 0; the function name is APPENDED (concatenated)
+// rather than replaced, matching the source.
+func (a *toolCallDeltaAccumulator) mergeLegacyFunctionCallDelta(fn *toolCallDeltaFunction) {
+	if fn == nil {
+		return
+	}
+	slot := a.slots[0]
+	if slot == nil {
+		slot = &toolCallSlot{typ: "function"}
+		a.slots[0] = slot
+	}
+	if slot.typ == "" {
+		slot.typ = "function"
+	}
+	if slot.function == nil {
+		slot.function = &toolCallSlotFunction{}
+	}
+	if fn.Name != "" {
+		slot.function.name += fn.Name
+	}
+	if fn.Arguments != nil {
+		slot.function.arguments += *fn.Arguments
+	}
+}
+
+// merged returns the accumulated tool calls in index order, mirroring the
+// source's `[tool_calls_by_index[k] for k in sorted(tool_calls_by_index)]`.
+func (a *toolCallDeltaAccumulator) merged() []toolCallSlot {
+	if len(a.slots) == 0 {
+		return nil
+	}
+	idxs := make([]int, 0, len(a.slots))
+	for i := range a.slots {
+		idxs = append(idxs, i)
+	}
+	sort.Ints(idxs)
+	out := make([]toolCallSlot, 0, len(idxs))
+	for _, i := range idxs {
+		out = append(out, *a.slots[i])
+	}
+	return out
 }
