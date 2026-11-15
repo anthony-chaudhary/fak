@@ -419,3 +419,144 @@ func incompleteBetaContinuedFraction(a, b, x float64) (float64, bool) {
 func positiveFinite(value float64) bool {
 	return value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
 }
+
+// NOTICE: The monotonic search planner below is an Apache-2.0 licensed reuse
+// ported from NVIDIA's aiperf project.
+//
+//	Source:    ai-dynamo/aiperf @ ab610ad (ab610add4e8876fca223197596c728e17365f381)
+//	File:      src/aiperf/orchestrator/search_planner/monotonic.py
+//	License:   Apache-2.0 (SPDX-License-Identifier: Apache-2.0)
+//	Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+//
+// The source implements a 1D "max-concurrency-under-SLA" search planner: an
+// exponential probe from the low end of a monotonically degrading sweep axis,
+// followed by bisection between the last passing point (lo') and the first
+// failing point (hi'). This port preserves the source's boundary semantics and
+// edge cases (all-true, all-false, single element) over a sorted candidate
+// list, and keeps the search monotonic: it never revisits a probed value.
+
+// MonotonicSearchReason mirrors the convergence reasons of the source planner.
+type MonotonicSearchReason string
+
+const (
+	// MonotonicPrecisionReached: bisection narrowed the bracket to two adjacent
+	// candidates (the discrete analogue of the source's 5% relative precision).
+	MonotonicPrecisionReached MonotonicSearchReason = "monotonic_precision_reached"
+	// MonotonicNoFailureInRange: every probed candidate passed; the boundary
+	// lies above the last candidate (the source's "SLA saturates above hi").
+	MonotonicNoFailureInRange MonotonicSearchReason = "monotonic_no_failure_in_range"
+	// MonotonicNoPassInRange: every probed candidate failed; the boundary lies
+	// below the first candidate (the source's "SLA saturates below lo").
+	MonotonicNoPassInRange MonotonicSearchReason = "monotonic_no_pass_in_range"
+)
+
+// MonotonicSearchResult is the boundary found by MonotonicSearch.
+type MonotonicSearchResult struct {
+	// SplitIndex is the index of the first failing candidate: every candidate
+	// before it passes the predicate, every candidate at or after it fails.
+	// SplitIndex == len(candidates) when all candidates pass; 0 when all fail.
+	SplitIndex int
+	// FeasibleMax is the highest passing candidate (the source's lo'), or -1
+	// when no candidate passes.
+	FeasibleMax int
+	// InfeasibleMin is the lowest failing candidate (the source's hi'), or -1
+	// when no candidate fails.
+	InfeasibleMin int
+	// Reason is the convergence reason.
+	Reason MonotonicSearchReason
+	// Probed is the sequence of candidate values probed, in order. No value is
+	// probed more than once: the search never revisits a value.
+	Probed []int
+}
+
+// MonotonicSearch finds the feasibility boundary over a sorted candidate list
+// using the source's monotonic (never-decreasing) parameter search: an
+// exponential probe from the low end, then bisection between the last passing
+// and first failing candidate.
+//
+// candidates must be sorted in ascending order. feasible reports whether a
+// candidate value satisfies the (monotonically degrading) constraint: it must
+// return true for low values and false for high values, and once it returns
+// false at some value it must return false at every higher value.
+//
+// The search never revisits a value: each candidate is probed at most once, and
+// the probe sequence never re-enters the already-established passing region
+// (at or below the last passing candidate) or failing region (at or above the
+// first failing candidate).
+func MonotonicSearch(candidates []int, feasible func(int) bool) MonotonicSearchResult {
+	n := len(candidates)
+	res := MonotonicSearchResult{FeasibleMax: -1, InfeasibleMin: -1}
+	if n == 0 {
+		res.Reason = MonotonicNoPassInRange
+		return res
+	}
+
+	probed := make([]int, 0, n)
+	probe := func(idx int) bool {
+		probed = append(probed, candidates[idx])
+		return feasible(candidates[idx])
+	}
+
+	// Phase 1: exponential probe from the low end (the source's "probe" phase).
+	// Probe index 0 first; on a pass, double the index (1, 2, 4, 8, ...) until
+	// a failure or the top of the list.
+	if !probe(0) {
+		// First candidate fails; monotonicity implies every candidate fails.
+		res.SplitIndex = 0
+		res.InfeasibleMin = candidates[0]
+		res.Reason = MonotonicNoPassInRange
+		res.Probed = probed
+		return res
+	}
+	lastPass := 0
+	firstFail := -1
+	idx := 1
+	for idx < n {
+		if probe(idx) {
+			lastPass = idx
+			if idx == n-1 {
+				// Reached the top and it passed: every candidate passes.
+				res.SplitIndex = n
+				res.FeasibleMax = candidates[n-1]
+				res.Reason = MonotonicNoFailureInRange
+				res.Probed = probed
+				return res
+			}
+			idx *= 2
+			if idx > n-1 {
+				idx = n - 1
+			}
+		} else {
+			// First failure during probing: bracket found.
+			firstFail = idx
+			break
+		}
+	}
+	if firstFail == -1 {
+		// No failure found (single-element list): every candidate passes.
+		res.SplitIndex = n
+		res.FeasibleMax = candidates[n-1]
+		res.Reason = MonotonicNoFailureInRange
+		res.Probed = probed
+		return res
+	}
+
+	// Phase 2: bisection between the last passing and first failing candidate
+	// (the source's "bisect" phase) until the bracket is two adjacent
+	// candidates.
+	lo, hi := lastPass, firstFail
+	for hi-lo > 1 {
+		mid := lo + (hi-lo)/2
+		if probe(mid) {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	res.SplitIndex = hi
+	res.FeasibleMax = candidates[lo]
+	res.InfeasibleMin = candidates[hi]
+	res.Reason = MonotonicPrecisionReached
+	res.Probed = probed
+	return res
+}
