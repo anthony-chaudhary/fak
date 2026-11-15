@@ -318,12 +318,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// changed prefix to fak rather than the harness.
 	s.observeHarnessCoherenceAndArm(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
 		false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens), int64(turn.Usage.InputTokens))
-	s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", false, agent.Usage{
+	s.logInferenceTurnAs(reqTrace, "anthropic_messages", false, agent.Usage{
 		PromptTokens:             turn.Usage.InputTokens,
 		CompletionTokens:         turn.Usage.OutputTokens,
 		CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 		CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
-	}, turn.Stop, time.Since(began), compacted, contextEvent)
+	}, turn.Stop, time.Since(began), compacted, contextEvent, principalFromContext(r.Context()))
 
 	writeJSON(w, http.StatusOK, anthropicMessageResponse{
 		ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
@@ -1169,12 +1169,12 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		}
 		s.observeHarnessCoherenceAndArm(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
 			false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens), int64(turn.Usage.InputTokens))
-		s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", true, agent.Usage{
+		s.logInferenceTurnAs(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             turn.Usage.InputTokens,
 			CompletionTokens:         turn.Usage.OutputTokens,
 			CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 			CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
-		}, turn.Stop, time.Since(began), compacted, contextEvent)
+		}, turn.Stop, time.Since(began), compacted, contextEvent, principalFromContext(r.Context()))
 		writeJSON(w, http.StatusOK, anthropicMessageResponse{
 			ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
 			Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
@@ -1233,12 +1233,12 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 			}
 			s.observeHarnessCoherenceAndArm(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
 				false /*fakWorldBreak*/, false /*sealed*/, int64(res.turn.Usage.CacheReadInputTokens), int64(res.turn.Usage.CacheCreationInputTokens), int64(res.turn.Usage.InputTokens))
-			s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", true, agent.Usage{
+			s.logInferenceTurnAs(reqTrace, "anthropic_messages", true, agent.Usage{
 				PromptTokens:             res.turn.Usage.InputTokens,
 				CompletionTokens:         res.turn.Usage.OutputTokens,
 				CacheReadInputTokens:     res.turn.Usage.CacheReadInputTokens,
 				CacheCreationInputTokens: res.turn.Usage.CacheCreationInputTokens,
-			}, res.turn.Stop, time.Since(began), compacted, contextEvent)
+			}, res.turn.Stop, time.Since(began), compacted, contextEvent, principalFromContext(r.Context()))
 			streamAnthropicBlocks(send, res.turn.Blocks, res.turn.Stop, res.turn.Usage)
 			return
 		case <-ticker.C:

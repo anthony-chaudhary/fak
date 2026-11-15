@@ -525,7 +525,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	if writeFailure != nil {
 		return true
 	}
-	s.logInferenceTurn(reqTrace, "openai_responses", true, comp.Usage, finish, time.Since(began), false)
+	s.logInferenceTurnAs(reqTrace, "openai_responses", true, comp.Usage, finish, time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(ctx))
 
 	resp := responsesResponse{
 		ID:        createdID,

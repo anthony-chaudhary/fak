@@ -383,6 +383,9 @@ type BudgetExhaustedFunc func(ctx context.Context, st SessionState, messages []a
 // Server is a configured, ready-to-serve gateway. Construct with New; serve with
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
+	// usageLedger is the billing-grade per-request usage ledger (#14451), keyed
+	// on the authenticated principal; nil = off (request path unchanged).
+	usageLedger      atomic.Pointer[UsageLedger]
 	causalEmbeddings *causalEmbeddingProvider
 	// embeddingsUpstream is the proxy-mode /v1/embeddings forward target (#14444):
 	// non-nil only when an upstream is configured AND the operator did not opt

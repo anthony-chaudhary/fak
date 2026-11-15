@@ -660,12 +660,12 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		// stream end). Same observation the buffered path makes; the family stays path-agnostic.
 		s.observeHarnessCoherenceAndArm(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
 			false /*fakWorldBreak*/, false /*sealed*/, int64(p.cacheRead), int64(p.cacheCreate), int64(p.promptTok))
-		s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", true, agent.Usage{
+		s.logInferenceTurnAs(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             p.promptTok,
 			CompletionTokens:         p.complTok,
 			CacheReadInputTokens:     p.cacheRead,
 			CacheCreationInputTokens: p.cacheCreate,
-		}, p.finishReason, dur, compacted, contextEvent)
+		}, p.finishReason, dur, compacted, contextEvent, principalFromContext(r.Context()))
 		s.debitServedSessionTurn(r.Context(), p.turn, agent.Usage{
 			PromptTokens:             p.promptTok,
 			CompletionTokens:         p.complTok,

@@ -216,7 +216,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		finish = "stop"
 	}
 	respModel := s.responseModel(comp.Model, reqModel, completionStreamModel(stream), "#5514")
-	s.logInferenceTurn(reqTrace, "openai_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
+	s.logInferenceTurnAs(reqTrace, "openai_completions", req.Stream, comp.Usage, finish, time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(r.Context()))
 
 	resp := CompletionResponse{
 		ID:      "cmpl-fak-" + itoa(uint64(time.Now().UnixNano())),

@@ -1444,6 +1444,17 @@ func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent
 	s.logInferenceTurnWithContextEvent(traceID, wire, stream, usage, finishReason, dur, compacted, compacted || s.consumeDecodedCtxViewEvent(traceID))
 }
 
+// logInferenceTurnAs is the principal-aware funnel entry (#14451): a route that
+// holds the request context passes the authenticated keyset principal stamped
+// by withAuth so the usage ledger keys the row on the presenting key, never on
+// a client-chosen trace or header.
+func (s *Server) logInferenceTurnAs(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted, contextEvent bool, principal string) {
+	if s == nil {
+		return
+	}
+	s.logInferenceTurnForModelAs(traceID, wire, s.model, stream, usage, finishReason, dur, compacted, contextEvent, principal)
+}
+
 func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted, contextEvent bool) {
 	if s == nil {
 		return
@@ -1454,6 +1465,12 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 // logInferenceTurnForModel records an explicitly selected upstream model while
 // the wire response can retain the client's public model alias.
 func (s *Server) logInferenceTurnForModel(traceID, wire, model string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted, contextEvent bool) {
+	s.logInferenceTurnForModelAs(traceID, wire, model, stream, usage, finishReason, dur, compacted, contextEvent, "")
+}
+
+// logInferenceTurnForModelAs is the shared per-turn chokepoint with the
+// authenticated principal threaded through for the usage ledger (#14451).
+func (s *Server) logInferenceTurnForModelAs(traceID, wire, model string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted, contextEvent bool, principal string) {
 	if s == nil {
 		return
 	}
@@ -1490,6 +1507,11 @@ func (s *Server) logInferenceTurnForModel(traceID, wire, model string, stream bo
 	// The stable per-request usage record (#10670): exactly one row per
 	// completed request, after the native plane above so its join receipts exist.
 	usageRec, usageRecOK := s.metrics.recordUsageTurn(traceID, wire, stream, usage, nowMillis)
+	// The billing-grade per-request usage ledger (#14451): one durable
+	// hash-chained row per request, keyed on the authenticated principal when
+	// the route carried one. Purely observational: a nil ledger or an append
+	// failure never touches the request path.
+	s.appendUsageLedgerRow(traceID, wire, model, usage, nowMillis, finishReason, principal)
 	// Roll the per-session managed-context record (ctxvalue.go) on the same always-on
 	// rung: every served turn, all wires, before any sink gating, so the long-session
 	// context report is answerable even with --log and --debug-stats off.

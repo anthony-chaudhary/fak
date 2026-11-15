@@ -556,7 +556,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if respModel == "" {
 		respModel = reqModel
 	}
-	s.logInferenceTurn(reqTrace, "openai_responses", false, comp.Usage, finish, time.Since(began), false)
+	s.logInferenceTurnAs(reqTrace, "openai_responses", false, comp.Usage, finish, time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(r.Context()))
 
 	resp := responsesResponse{
 		ID:         newResponsesID(),

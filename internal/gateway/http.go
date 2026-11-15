@@ -140,6 +140,10 @@ func (s *Server) routeTable() []gatewayRoute {
 		// against the native warm-state receipt. GET, read-only, counts and
 		// ratios only.
 		{"/v1/fak/usage/cache-alignment", s.handleFakUsageCacheAlignment},
+		// /v1/fak/usage/ledger is the billing-grade per-request usage export
+		// (#14451): last-N rows plus whole-file per-principal token sums and the
+		// chain verdict. GET, read-only, counts only.
+		{"/v1/fak/usage/ledger", s.handleFakUsageLedger},
 		{"/v1/fak/session-audit/actions", s.handleFakSessionAuditActions},
 		// /v1/fak/ctxvalue is the managed-context arm of the value API: the per-session
 		// multi-level (tokens / turns / session) long-session context report plus the
@@ -1029,7 +1033,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if chatBeamParams(req) != nil && comp.NativeBeamSearch == nil {
 		writeErr(w, http.StatusBadGateway, "native planner did not produce the requested beam-search result")
 		// A missing beam result still consumed the completed decode (#13562).
-		s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, toolCallLogFinishReason(comp.FinishReason), time.Since(began), false)
+		s.logInferenceTurnAs(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, toolCallLogFinishReason(comp.FinishReason), time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(ctx))
 		return
 	}
 	asst.Role = agent.RoleAssistant
@@ -1040,7 +1044,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// instead of vanishing behind the typed 502 / in-band SSE error. The
 		// refusal response itself is unchanged; the finish reason uses the same
 		// closed vocabulary as the sibling refusal log line.
-		s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, toolCallLogFinishReason(comp.FinishReason), time.Since(began), false)
+		s.logInferenceTurnAs(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, toolCallLogFinishReason(comp.FinishReason), time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(ctx))
 		return
 	}
 
@@ -1052,7 +1056,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// did not name a served model. Never just s.model — that is the silent-substitution
 	// this fix removes.
 	respModel := s.responseModel(comp.Model, reqModel, chatStreamModel(stream), "#5399")
-	s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
+	s.logInferenceTurnAs(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, finish, time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(ctx))
 	s.recordDeadlineWarmPrefix(deadlineCtx, comp.Usage)
 	stampTurnCost(sessionTurn.turnCost, reqTrace, respModel, turnCostBegan)
 	resp := s.buildChatResponse(comp, asst, finish, respModel, adjs, resultAdmissions, inputTriggerRoute, decodeTraceRequested, decodeTokenIDsRequested, sessionTurn.turnCost)

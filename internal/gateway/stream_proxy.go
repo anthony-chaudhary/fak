@@ -1074,7 +1074,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		// a finish_reason. Any of these is a normal stop to an OpenAI client.
 		finish = "stop"
 	}
-	s.logInferenceTurn(reqTrace, "openai_chat_completions", true, comp.Usage, finish, time.Since(began), false)
+	s.logInferenceTurnAs(reqTrace, "openai_chat_completions", true, comp.Usage, finish, time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(ctx))
 
 	// A final incomplete rune has no later fragment to complete it. Feed it through
 	// the existing JSON fallback before reconciling the buffered completion.

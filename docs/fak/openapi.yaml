@@ -1228,6 +1228,32 @@ paths:
               schema: { type: object }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+  /v1/fak/usage/ledger:
+    get:
+      tags: [fak-native]
+      summary: Export the billing-grade per-request usage ledger
+      description: |
+        Returns the `fak.gateway.usage-ledger.v1` export (#14451): the last N
+        hash-chained per-request rows (request id, authenticated principal,
+        wire, model, status, prompt/completion/cached token counts) plus
+        whole-file per-principal token sums and the chain verdict. The
+        principal is the keyset-authenticated presenting key, never a
+        client-supplied header or trace id. Counts only; no prompt or content
+        fields.
+      parameters:
+        - name: n
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1 }
+          description: How many of the most recent ledger rows to include (sums always cover the whole file).
+      responses:
+        '200':
+          description: The usage-ledger export report.
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /v1/fak/session-audit/actions:
     get:

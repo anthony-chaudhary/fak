@@ -127,9 +127,9 @@ func (s *Server) handleFakAgentSessions(w http.ResponseWriter, r *http.Request) 
 	for i := range calls {
 		emit(AgentSessionEvent{Event: "call", TraceID: reqTrace, Call: &calls[i]})
 	}
-	s.logInferenceTurn(reqTrace, "fak_agent_sessions", true, agent.Usage{
+	s.logInferenceTurnAs(reqTrace, "fak_agent_sessions", true, agent.Usage{
 		PromptTokens:     m.PromptTokens,
 		CompletionTokens: m.CompletionTokens,
-	}, nativeFinishReason(m), time.Since(began), false)
+	}, nativeFinishReason(m), time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(r.Context()))
 	emit(AgentSessionEvent{Event: "session.end", TraceID: reqTrace, Metrics: &m})
 }

@@ -139,13 +139,13 @@ func (s *Server) observeNativeChatRoute(ctx context.Context, traceID string, str
 			usage.UncachedPromptTokens(), usage.CompletionTokens, usage.CachedPromptTokens(),
 			usage.CacheCreationInputTokens, finishReason, dur, ttft, detail)
 		s.metrics.attributeServedTurn(binding.Locality, usage.UncachedPromptTokens(), usage.CompletionTokens)
-		s.logInferenceTurnForModel(traceID, "anthropic_messages_native", binding.Target.UpstreamModel, stream, usage, finishReason, dur, false, s.consumeDecodedCtxViewEvent(traceID))
+		s.logInferenceTurnForModelAs(traceID, "anthropic_messages_native", binding.Target.UpstreamModel, stream, usage, finishReason, dur, false, s.consumeDecodedCtxViewEvent(traceID), principalFromContext(ctx))
 		return
 	}
 	detail.model = s.model
 	s.metrics.recordPerf(s.chatServingLocality(ctx, s.model), usage.UncachedPromptTokens(),
 		usage.CompletionTokens, usage.CachedPromptTokens(), finishReason, dur, ttft, detail)
-	s.logInferenceTurn(traceID, "anthropic_messages_native", stream, usage, finishReason, dur, false)
+	s.logInferenceTurnAs(traceID, "anthropic_messages_native", stream, usage, finishReason, dur, false, s.consumeDecodedCtxViewEvent(traceID), principalFromContext(ctx))
 }
 
 // chatRouteOpts is applied last so client options cannot override the account's
