@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func probe(verb string, exists bool, adopted map[string]bool) Probe {
@@ -199,6 +201,42 @@ func TestGapActionItemsAreDispatchable(t *testing.T) {
 		rv := issuepolicy.ReviewCandidate(c, issuepolicy.Options{Live: true, DedupeChecked: true, DedupeCap: 10})
 		if !rv.OK {
 			t.Fatalf("gap %s -> non-dispatchable issue: verdict=%s reasons=%v missing=%v", g.Key(), rv.Verdict, rv.Reasons, rv.MissingFields)
+		}
+	}
+}
+
+// The live strict-scope gate (#1968) holds a row as triage_only when its Lane is empty, and the
+// dispatcher only syncs dispatchable rows -- so a gap whose ActionItem.Lane is blank would be
+// silently dropped on a --live run even though the dry-run (advisory, no strict scope) shows it
+// dispatchable. This is the regression that TestGapActionItemsAreDispatchable cannot catch: it
+// grades the candidate directly, bypassing dogfoodissues.ReviewActionItem, which is the path that
+// applies strictScopeHold. The lane must be populated on the ActionItem itself (the member's
+// internal package base), not left to inference.
+func TestGapActionItemLaneSurvivesLiveStrictScope(t *testing.T) {
+	gaps := []Gap{
+		{Member: Family[1], Convention: Conventions[0], Adopters: 3, Total: 8},
+		{Member: Family[4], Convention: Conventions[2], Adopters: 7, Total: 8},
+	}
+	for _, g := range gaps {
+		item := g.ToActionItem("fak propagation-scorecard --json")
+		wantLane := pathutil.Base(g.Member.PkgDir)
+		if wantLane == "" {
+			t.Fatalf("gap %s: member PkgDir %q has no base -- cannot derive a lane", g.Key(), g.Member.PkgDir)
+		}
+		if item.Lane != wantLane {
+			t.Fatalf("gap %s: ActionItem.Lane = %q, want %q (the live gate holds an empty lane as triage_only)", g.Key(), item.Lane, wantLane)
+		}
+		// The live path the dispatcher actually runs: ReviewActionItem applies strictScopeHold,
+		// which demands a non-empty Lane AND a path hint. Both must clear for the row to sync.
+		rv := dogfoodissues.ReviewActionItem(item, dogfoodissues.BuildOptions{
+			Live: true, DedupeChecked: true, DedupeCap: 10,
+			ParentIssue: 1414, ParentBaseline: 20, CompletionStandard: "development",
+		})
+		if !rv.OK {
+			t.Fatalf("gap %s -> live strict-scope hold: verdict=%s dispatchability=%s reasons=%v", g.Key(), rv.Verdict, rv.Dispatchability, rv.Reasons)
+		}
+		if rv.Dispatchability != issuepolicy.Dispatchable {
+			t.Fatalf("gap %s: dispatchability = %q, want %q", g.Key(), rv.Dispatchability, issuepolicy.Dispatchable)
 		}
 	}
 }

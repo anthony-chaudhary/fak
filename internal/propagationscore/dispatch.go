@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // Gap is one HARD un-propagated convention: a Member that has not adopted a Convention which the
@@ -138,7 +139,11 @@ func (g Gap) ToActionItem(evidencePath string) dogfoodissues.ActionItem {
 		DoneCondition:  "A re-run of `fak propagation-scorecard --json` no longer reports `fak " + g.Member.Verb + "` as missing " + g.Convention.Short + " (the `" + g.Key() + "` gap is gone).",
 		Witness:        g.witnessHint(),
 		AcceptanceGate: "go test ./internal/propagationscore ./" + g.Member.PkgDir + " && go build ./...",
-		Lane:           "",
+		// The live strict-scope gate (#1968) holds a row as triage_only when its Lane is empty,
+		// so the lane must be populated here -- not left to inference. It is the member's
+		// internal package base, the same value issuepolicy.inferLane derives from the
+		// internal/ path hint, so the worker lands in the lane that owns the card's code.
+		Lane:           pathutil.Base(g.Member.PkgDir),
 		Paths:          []string{g.Member.PkgDir + "/**", g.Member.CmdFile},
 		Labels:         []string{"propagation-debt", "scorecard"},
 		BoundaryNotes:  []string{"Public scorecard-family convention only; no private or lab-local evidence."},
