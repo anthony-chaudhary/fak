@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -659,4 +661,323 @@ func (a *prefixAllocator) ExtractSessionIDs(hashIDs []int) []int {
 // mirroring math.ceil(a/b) in the source.
 func ceilDiv(a, b int) int {
 	return (a + b - 1) / b
+}
+
+// NOTICE / attribution (Apache-2.0 reuse):
+//
+// The session synthesizer below is an idiomatic Go re-expression (no code
+// copied) of the session-synthesis reset semantics in:
+//
+//	ai-dynamo/aiperf @ ab610ad (ab610add4e8876fca223197596c728e17365f381),
+//	Apache-2.0 (NVIDIA CORPORATION & AFFILIATES, 2025-2026)
+//	  - src/aiperf/dataset/agentic_code_gen/session_synthesizer.py
+//	    (SessionSynthesizer per-session state machine; probabilistic reset)
+//	  - src/aiperf/dataset/agentic_code_gen/prefix_model.py
+//	    (PrefixAllocator.turn_hash_ids; "On session reset: new session gets
+//	     fresh L2+L3, L1 and L1.5 preserved.")
+//	  - src/aiperf/dataset/agentic_code_gen/models.py
+//	    (SynthesizedTurn / SynthesizedSession / ResetConfig)
+//
+// Upstream license header: SPDX-License-Identifier: Apache-2.0.
+
+// aiperf prefix-model block budget constants (prefix_model.py).
+const (
+	agentxMaxGroupBlocks   = 200
+	agentxMaxGroups        = 1000
+	agentxMaxSessionBlocks = 4000
+)
+
+// synthTurn mirrors aiperf's SynthesizedTurn (models.py): one synthesized turn
+// within a session.
+type synthTurn struct {
+	turnIndex    int
+	inputLength  int
+	outputLength int
+	newTokens    int
+	delayMS      float64
+	timestampMS  float64
+	hashIDs      []int
+}
+
+// sessionSynthConfig is the base configuration a sessionSynthesizer re-seeds
+// from on reset.
+type sessionSynthConfig struct {
+	MaxPromptTokens int
+	BlockSize       int
+	Layer1Tokens    int
+	Layer15Tokens   int
+	NumGroups       int
+	ZipfAlpha       float64
+	L2Mu, L2Sigma   float64
+	L2Min, L2Max    float64
+	GenMu, GenSigma float64
+	OutputMin       int
+	ResetBaseProbability float64
+	ResetContextScaling  float64
+	Seed            int64
+}
+
+// sessionSynthesizer mirrors the per-session state machine of aiperf's
+// SessionSynthesizer (session_synthesizer.py), focused on the session-reset
+// semantics: when a session is reset, the synthesized state (turns, hashes,
+// budget) is cleared and re-seeded from the base, with L1 and L1.5 preserved
+// and fresh L2+L3 allocated to the new session.
+type sessionSynthesizer struct {
+	// base config (the re-seed source)
+	maxPromptTokens int
+	blockSize       int
+	l1Blocks        int
+	l15Blocks       int
+	numGroups       int
+	zipfAlpha       float64
+	groupWeights    []float64
+	sessionRegionBase int
+	maxSessionBlocks  int
+	maxGroupBlocks    int
+	l2Mu, l2Sigma     float64
+	l2Min, l2Max      float64
+	genMu, genSigma   float64
+	outputMin         int
+	resetBaseProbability float64
+	resetContextScaling  float64
+
+	// per-session synthesized state (cleared + re-seeded on Reset)
+	sessionCounter int
+	sessionIndex   int
+	sessionID      string
+	groupID        int
+	turns          []synthTurn
+	hashes         []int
+	prevInput      int
+	prevOutput     int
+	turnIdx        int
+	timestampMS    float64
+	budget         int
+	endReason      string
+
+	rng *rand.Rand
+}
+
+// newSessionSynthesizer builds a sessionSynthesizer from cfg, pre-computing the
+// L1/L1.5 block counts and the Zipf group weights (source __init__).
+func newSessionSynthesizer(cfg sessionSynthConfig) *sessionSynthesizer {
+	l1Blocks := (cfg.Layer1Tokens + cfg.BlockSize - 1) / cfg.BlockSize
+	l15Blocks := (cfg.Layer15Tokens + cfg.BlockSize - 1) / cfg.BlockSize
+	weights := make([]float64, cfg.NumGroups)
+	sum := 0.0
+	for k := 1; k <= cfg.NumGroups; k++ {
+		w := 1.0 / math.Pow(float64(k), cfg.ZipfAlpha)
+		weights[k-1] = w
+		sum += w
+	}
+	for i := range weights {
+		weights[i] /= sum
+	}
+	return &sessionSynthesizer{
+		maxPromptTokens: cfg.MaxPromptTokens,
+		blockSize:       cfg.BlockSize,
+		l1Blocks:        l1Blocks,
+		l15Blocks:       l15Blocks,
+		numGroups:       cfg.NumGroups,
+		zipfAlpha:       cfg.ZipfAlpha,
+		groupWeights:    weights,
+		sessionRegionBase: l1Blocks + agentxMaxGroups * agentxMaxGroupBlocks,
+		maxSessionBlocks:  agentxMaxSessionBlocks,
+		maxGroupBlocks:    agentxMaxGroupBlocks,
+		l2Mu: cfg.L2Mu, l2Sigma: cfg.L2Sigma,
+		l2Min: cfg.L2Min, l2Max: cfg.L2Max,
+		genMu: cfg.GenMu, genSigma: cfg.GenSigma,
+		outputMin: cfg.OutputMin,
+		resetBaseProbability: cfg.ResetBaseProbability,
+		resetContextScaling:  cfg.ResetContextScaling,
+		rng: rand.New(rand.NewSource(cfg.Seed)),
+	}
+}
+
+// nextSessionIndex returns the current session counter and advances it,
+// mirroring aiperf's _next_session_index.
+func (s *sessionSynthesizer) nextSessionIndex() int {
+	idx := s.sessionCounter
+	s.sessionCounter++
+	return idx
+}
+
+// newSessionID mints a fresh session id, mirroring aiperf's "sess-<uuid
+// hex[:12]>" format derived from 16 random bytes.
+func (s *sessionSynthesizer) newSessionID() string {
+	var b [16]byte
+	for i := range b {
+		b[i] = byte(s.rng.Int())
+	}
+	return "sess-" + fmt.Sprintf("%x", b[:])[:12]
+}
+
+// sampleGroupID ports aiperf's _sample_group_id: a Zipf-weighted draw over the
+// L1.5 groups.
+func (s *sessionSynthesizer) sampleGroupID() int {
+	if s.numGroups <= 1 {
+		return 0
+	}
+	r := s.rng.Float64()
+	cum := 0.0
+	for i, w := range s.groupWeights {
+		cum += w
+		if r < cum {
+			return i
+		}
+	}
+	return s.numGroups - 1
+}
+
+// lognormal draws a lognormal sample, exp(N(mu, sigma)). With sigma == 0 it is
+// deterministic (exp(mu)), matching the source's numpy lognormal degenerate case.
+func (s *sessionSynthesizer) lognormal(mu, sigma float64) float64 {
+	if sigma == 0 {
+		return math.Exp(mu)
+	}
+	return math.Exp(mu + sigma*s.rng.NormFloat64())
+}
+
+// sampleInitialContext ports aiperf's _sample_initial_context: L1 + L1.5
+// (reserved as whole blocks) + sampled L2, clamped to max_prompt_tokens - 1.
+func (s *sessionSynthesizer) sampleInitialContext() int {
+	l2f := s.lognormal(s.l2Mu, s.l2Sigma)
+	if s.l2Min > 0 && l2f < s.l2Min {
+		l2f = s.l2Min
+	}
+	if s.l2Max > 0 && l2f > s.l2Max {
+		l2f = s.l2Max
+	}
+	l2 := int(l2f)
+	if l2 < 1 {
+		l2 = 1
+	}
+	fixedPrefix := (s.l1Blocks + s.l15Blocks) * s.blockSize
+	ctx := fixedPrefix + l2
+	if maxCtx := s.maxPromptTokens - 1; ctx > maxCtx {
+		ctx = maxCtx
+	}
+	return ctx
+}
+
+// sampleOutputLength ports aiperf's _sample_output_length: a lognormal draw
+// with a hard floor at outputMin.
+func (s *sessionSynthesizer) sampleOutputLength() int {
+	v := int(s.lognormal(s.genMu, s.genSigma))
+	if v < s.outputMin {
+		v = s.outputMin
+	}
+	return v
+}
+
+// shouldReset ports aiperf's _should_reset: the context-dependent
+// probabilistic reset check. P(reset) = base * (1 + (scaling-1) *
+// inputLength/maxPromptTokens). A non-positive base probability disables it.
+func (s *sessionSynthesizer) shouldReset(inputLength int) bool {
+	if s.resetBaseProbability <= 0 {
+		return false
+	}
+	ratio := float64(inputLength) / float64(s.maxPromptTokens)
+	p := s.resetBaseProbability * (1.0 + (s.resetContextScaling-1.0)*ratio)
+	return s.rng.Float64() < p
+}
+
+// turnHashIDs ports aiperf's PrefixAllocator.turn_hash_ids (prefix_model.py):
+// returns L1 ++ L1.5 ++ session blocks, len == ceil(inputLength/blockSize).
+// With prevSessionIDs nil (a fresh session / turn 0), the session blocks are
+// allocated from the session base; otherwise they extend the previous session
+// blocks.
+func (s *sessionSynthesizer) turnHashIDs(sessionIndex, groupID, inputLength int, prevSessionIDs []int) []int {
+	totalBlocks := 0
+	if inputLength > 0 {
+		totalBlocks = (inputLength + s.blockSize - 1) / s.blockSize
+	}
+	l1Used := s.l1Blocks
+	if l1Used > totalBlocks {
+		l1Used = totalBlocks
+	}
+	l1 := make([]int, l1Used)
+	for i := range l1 {
+		l1[i] = i
+	}
+	remaining := totalBlocks - l1Used
+	if remaining <= 0 {
+		return l1
+	}
+	l15Used := s.l15Blocks
+	if l15Used > remaining {
+		l15Used = remaining
+	}
+	l15 := make([]int, l15Used)
+	gb := s.l1Blocks + groupID*s.maxGroupBlocks
+	for i := range l15 {
+		l15[i] = gb + i
+	}
+	sessionNeeded := remaining - l15Used
+	if sessionNeeded < 0 {
+		sessionNeeded = 0
+	}
+	if sessionNeeded == 0 {
+		return append(l1, l15...)
+	}
+	sBase := s.sessionRegionBase + sessionIndex*s.maxSessionBlocks
+	var session []int
+	if prevSessionIDs == nil {
+		session = make([]int, sessionNeeded)
+		for i := range session {
+			session[i] = sBase + i
+		}
+	} else {
+		newBlocks := sessionNeeded - len(prevSessionIDs)
+		if newBlocks > 0 {
+			nextID := sBase
+			if len(prevSessionIDs) > 0 {
+				nextID = prevSessionIDs[len(prevSessionIDs)-1] + 1
+			}
+			session = make([]int, 0, sessionNeeded)
+			session = append(session, prevSessionIDs...)
+			for i := 0; i < newBlocks; i++ {
+				session = append(session, nextID+i)
+			}
+		} else {
+			session = make([]int, sessionNeeded)
+			copy(session, prevSessionIDs)
+		}
+	}
+	out := make([]int, 0, len(l1)+len(l15)+len(session))
+	out = append(out, l1...)
+	out = append(out, l15...)
+	out = append(out, session...)
+	return out
+}
+
+// Reset clears the synthesized state (turns, hashes, budget) and re-seeds from
+// the base, mirroring aiperf's session-reset semantics: "On session reset: new
+// session gets fresh L2+L3, L1 and L1.5 preserved." (prefix_model.py). The new
+// session gets a fresh session index, session id, group, and initial context
+// (L1 + L1.5 + sampled L2); its hash ids are regenerated from the session base
+// with no carried session blocks, and the context budget is re-seeded.
+func (s *sessionSynthesizer) Reset() {
+	s.sessionIndex = s.nextSessionIndex()
+	s.sessionID = s.newSessionID()
+	s.groupID = s.sampleGroupID()
+	initialCtx := s.sampleInitialContext()
+	outputLen := s.sampleOutputLength()
+	hashIDs := s.turnHashIDs(s.sessionIndex, s.groupID, initialCtx, nil)
+	s.turns = []synthTurn{{
+		turnIndex:    0,
+		inputLength:  initialCtx,
+		outputLength: outputLen,
+		newTokens:    initialCtx,
+		delayMS:      0.0,
+		timestampMS:  0.0,
+		hashIDs:      hashIDs,
+	}}
+	s.hashes = hashIDs
+	s.budget = s.maxPromptTokens - initialCtx
+	s.timestampMS = 0.0
+	s.prevInput = initialCtx
+	s.prevOutput = outputLen
+	s.turnIdx = 1
+	s.endReason = ""
 }
