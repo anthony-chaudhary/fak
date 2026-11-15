@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/benchruns"
@@ -227,4 +228,194 @@ usage:
   fak bench-runs table [--model M] [--precision P] [--format markdown|json]
   fak bench-runs summary [--group-by machine|model]
 `)
+}
+
+// ---------------------------------------------------------------------------
+// CI-width convergence (ported from ai-dynamo/aiperf)
+//
+// NOTICE: Ported from ai-dynamo/aiperf @ ab610ad
+// (src/aiperf/orchestrator/convergence/ci_width.py), Apache-2.0.
+// ---------------------------------------------------------------------------
+
+// CIWidthConvergence converges when the Student-t confidence-interval width
+// relative to the mean of the measured values falls below Threshold.
+type CIWidthConvergence struct {
+	Threshold       float64
+	ConfidenceLevel float64
+	MinRuns         int
+}
+
+// NewCIWidthConvergence builds a CIWidthConvergence, applying the source
+// defaults when the caller leaves a parameter unset: threshold 0 -> 0.10,
+// confidence level 0 -> 0.95, min runs <= 0 -> 3.
+func NewCIWidthConvergence(threshold, confidenceLevel float64, minRuns int) *CIWidthConvergence {
+	c := &CIWidthConvergence{Threshold: threshold, ConfidenceLevel: confidenceLevel, MinRuns: minRuns}
+	if c.Threshold == 0 {
+		c.Threshold = 0.10
+	}
+	if c.ConfidenceLevel == 0 {
+		c.ConfidenceLevel = 0.95
+	}
+	if c.MinRuns <= 0 {
+		c.MinRuns = 3
+	}
+	return c
+}
+
+// IsConverged reports whether the Student-t CI width relative to the mean of
+// values falls below Threshold, mirroring the source is_converged exactly.
+// It returns false when fewer than max(MinRuns, 2) values are present or when
+// the mean is zero.
+func (c *CIWidthConvergence) IsConverged(values []float64) bool {
+	if len(values) < max(c.MinRuns, 2) {
+		return false
+	}
+	mean := 0.0
+	for _, v := range values {
+		mean += v
+	}
+	mean /= float64(len(values))
+	if mean == 0 {
+		return false
+	}
+	n := len(values)
+	sumSquares := 0.0
+	for _, v := range values {
+		delta := v - mean
+		sumSquares += delta * delta
+	}
+	std := math.Sqrt(sumSquares / float64(n-1)) // sample standard deviation, ddof=1
+	se := std / math.Sqrt(float64(n))
+	tCrit := studentTQuantile((1+c.ConfidenceLevel)/2, float64(n-1))
+	ciHalf := tCrit * se
+	ciWidthRatio := (2 * ciHalf) / math.Abs(mean)
+	return ciWidthRatio < c.Threshold
+}
+
+// studentTQuantile returns the p-quantile of the Student-t distribution with
+// df degrees of freedom by bisecting the monotone Student-t CDF on [0, 100].
+// It returns 0 for non-finite or out-of-domain inputs.
+func studentTQuantile(p, df float64) float64 {
+	if math.IsNaN(p) || math.IsInf(p, 0) || math.IsNaN(df) || math.IsInf(df, 0) || df <= 0 || p <= 0 || p >= 1 {
+		return 0
+	}
+	lo, hi := 0.0, 100.0
+	for i := 0; i < 200; i++ {
+		mid := (lo + hi) / 2
+		cdf, ok := studentTCDF(mid, df)
+		if !ok {
+			return 0
+		}
+		if cdf < p {
+			lo = mid
+		} else {
+			hi = mid
+		}
+		if hi-lo < 1e-12 {
+			break
+		}
+	}
+	return (lo + hi) / 2
+}
+
+// studentTCDF returns the Student-t CDF at t >= 0 with df degrees of freedom:
+// 1 - 0.5*I_x(df/2, 0.5), where x = df/(df + t*t) and I_x is the regularized
+// incomplete beta function. ok is false when the inputs are non-finite or the
+// bounded continued fraction cannot produce finite evidence.
+func studentTCDF(t, df float64) (float64, bool) {
+	if t < 0 || df <= 0 || math.IsNaN(t) || math.IsInf(t, 0) || math.IsNaN(df) || math.IsInf(df, 0) {
+		return 0, false
+	}
+	x := df / (df + t*t)
+	ibeta, ok := regularizedIncompleteBeta(x, df/2, 0.5)
+	if !ok {
+		return 0, false
+	}
+	return 1 - 0.5*ibeta, true
+}
+
+// regularizedIncompleteBeta evaluates the regularized incomplete beta function
+// I_x(a, b) via the standard continued fraction (Lentz). Ported from
+// cmd/modelbench/profile_compare.go.
+func regularizedIncompleteBeta(x, a, b float64) (float64, bool) {
+	if x < 0 || x > 1 || !positiveFinite(a) || !positiveFinite(b) {
+		return 0, false
+	}
+	if x == 0 {
+		return 0, true
+	}
+	if x == 1 {
+		return 1, true
+	}
+	logGammaAB, _ := math.Lgamma(a + b)
+	logGammaA, _ := math.Lgamma(a)
+	logGammaB, _ := math.Lgamma(b)
+	factor := math.Exp(logGammaAB - logGammaA - logGammaB + a*math.Log(x) + b*math.Log1p(-x))
+	if math.IsNaN(factor) || math.IsInf(factor, 0) {
+		return 0, false
+	}
+	if x < (a+1)/(a+b+2) {
+		fraction, ok := incompleteBetaContinuedFraction(a, b, x)
+		return factor * fraction / a, ok
+	}
+	fraction, ok := incompleteBetaContinuedFraction(b, a, 1-x)
+	return 1 - factor*fraction/b, ok
+}
+
+// incompleteBetaContinuedFraction evaluates the continued fraction for the
+// incomplete beta function using the Lentz algorithm. Ported from
+// cmd/modelbench/profile_compare.go.
+func incompleteBetaContinuedFraction(a, b, x float64) (float64, bool) {
+	const (
+		maxIterations = 200
+		epsilon       = 3e-14
+		minimum       = 1e-300
+	)
+	qab := a + b
+	qap := a + 1
+	qam := a - 1
+	c := 1.0
+	d := 1 - qab*x/qap
+	if math.Abs(d) < minimum {
+		d = minimum
+	}
+	d = 1 / d
+	h := d
+	for iteration := 1; iteration <= maxIterations; iteration++ {
+		m := float64(iteration)
+		m2 := 2 * m
+		aa := m * (b - m) * x / ((qam + m2) * (a + m2))
+		d = 1 + aa*d
+		if math.Abs(d) < minimum {
+			d = minimum
+		}
+		c = 1 + aa/c
+		if math.Abs(c) < minimum {
+			c = minimum
+		}
+		d = 1 / d
+		h *= d * c
+
+		aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+		d = 1 + aa*d
+		if math.Abs(d) < minimum {
+			d = minimum
+		}
+		c = 1 + aa/c
+		if math.Abs(c) < minimum {
+			c = minimum
+		}
+		d = 1 / d
+		delta := d * c
+		h *= delta
+		if math.Abs(delta-1) < epsilon {
+			return h, !math.IsNaN(h) && !math.IsInf(h, 0)
+		}
+	}
+	return 0, false
+}
+
+// positiveFinite reports whether value is a finite positive number.
+func positiveFinite(value float64) bool {
+	return value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
 }
