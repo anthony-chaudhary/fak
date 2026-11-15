@@ -1,8 +1,8 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
   "commit": "f1cb7b8fb",
-  "total_debt": 610,
-  "grade_debt": 46,
+  "total_debt": 612,
+  "grade_debt": 50,
   "metrics": {
     "doc": 3,
     "readme": 0,
@@ -39,6 +39,7 @@
     "loopindex": 0,
     "heaviness": 0,
     "propagation": 14,
+    "checkpoint": 2,
     "claim_repro": 0,
     "release": 2,
     "observability": 0,
@@ -87,6 +88,7 @@
     "loopindex": 0,
     "heaviness": 4,
     "propagation": 0,
+    "checkpoint": 4,
     "claim_repro": 0,
     "release": 1,
     "observability": 0,

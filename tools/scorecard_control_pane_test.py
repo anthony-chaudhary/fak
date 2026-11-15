@@ -204,6 +204,27 @@ def test_propagation_pinned_in_committed_baseline() -> None:
         "propagation dropped from baseline grade_weights — the grade ratchet floor is gone"
 
 
+def test_checkpoint_scorecard_registered() -> None:
+    by_key = {c["key"]: c for c in scp.SCORECARDS}
+    card = by_key["checkpoint"]
+    assert card["debt"] == "checkpoint_debt"
+    assert card["cmd"] == "go run ./cmd/fak checkpoint-scorecard --json"
+    assert card["label"] == "checkpoint"
+
+
+def test_checkpoint_pinned_in_committed_baseline() -> None:
+    # #14459: registering the card in SCORECARDS is only half the ratchet — the
+    # re-pinned tools/scorecard_baseline.json must actually carry `checkpoint` in
+    # BOTH axes (raw metrics + grade_weights), or its debt has no floor and a
+    # regression can't red --check.
+    baseline = scp.load_baseline(scp.repo_root() / scp.BASELINE_REL)
+    assert baseline is not None, f"{scp.BASELINE_REL} missing or unreadable"
+    assert "checkpoint" in (baseline.get("metrics") or {}), \
+        "checkpoint dropped from baseline metrics — the raw-unit floor is gone"
+    assert "checkpoint" in (baseline.get("grade_weights") or {}), \
+        "checkpoint dropped from baseline grade_weights — the grade ratchet floor is gone"
+
+
 def test_commit_subject_scorecard_registered() -> None:
     # The fleet's own commit output folds into the portfolio via a pure `git log`
     # read (commit_subject_coverage.py), so it never drops out of the fold on a
