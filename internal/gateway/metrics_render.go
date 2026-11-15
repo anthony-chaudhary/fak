@@ -356,6 +356,7 @@ func (s *Server) renderMetrics() string {
 	s.observers.writeMetrics(&b)         // #2434: async result-observer lag + auto-disable (self-contained family)
 	s.writeFleetMembershipMetrics(&b)    // #42: live fleet membership/health/drain/failover transitions, per worker
 	s.writeAdmissionMetrics(&b)          // #35: native serving-scheduler admission family (fak_sched_*), when a controller is wired
+	s.writeTenantAdmissionMetrics(&b)    // #14453: per-tenant admission shed counters (fak_tenant_admission_shed_total), when a tenant gate is wired
 	s.writePreemptionMetrics(&b)         // #31: native KV preemption/swap/recompute family, when a preemptor is wired
 
 	// Fleet-value (hero-axis) KPIs, derived live from the kernel counters + the

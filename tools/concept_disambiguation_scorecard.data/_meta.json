@@ -4997,6 +4997,26 @@
           "category": "incidental",
           "reason": "Incidental comment vocabulary: surrogate describes Unicode encodings in gbnfUTF8Prefix, Unicode pairs in jsonUnescapeASCII, and a surrogate-key analogy for hierarchical cache invalidation. These three production-comment uses do not name a guard or gate concept. Classify only this exact normalized word; preserve plural and future compound discovery, UTF-8 rejection, cache invalidation, and admission checks.",
           "token": "surrogate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-server request-count inflight admission gate type installed by fak serve --tenant-max-inflight (#14453); implementation carrier of the positioned per-tenant admission seam, not a distinct guard/gate taxonomy concept.",
+          "token": "InflightGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-server per-principal request-rate bucket type installed by fak serve --tenant-rate-rps (#14453); implementation carrier of the positioned per-tenant admission seam, not a distinct guard/gate taxonomy concept.",
+          "token": "RequestRateGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Server method installing the per-server inflight gate (#14453); setter plumbing in the style of SetDirectorEngine, not a distinct guard/gate concept.",
+          "token": "SetInflightGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Server method installing the per-server request-rate gate (#14453); setter plumbing in the style of SetDirectorEngine, not a distinct guard/gate concept.",
+          "token": "SetRequestRateGate"
         }
       ],
       "exclude": [
@@ -5536,7 +5556,11 @@
         "wgate",
         "withGuardRegistrationEnv",
         "worker_guard",
-        "writeGuardCodexSessionBinding"
+        "writeGuardCodexSessionBinding",
+        "InflightGate",
+        "RequestRateGate",
+        "SetInflightGate",
+        "SetRequestRateGate"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -10612,7 +10636,11 @@
         "vulkankerneltiming",
         "vulkankerneltimingfrom",
         "webSearchEngine",
-        "writeEngine"
+        "writeEngine",
+        "InflightGate",
+        "RequestRateGate",
+        "SetInflightGate",
+        "SetRequestRateGate"
       ],
       "known_tokens": [],
       "min_files": 3,

@@ -1193,6 +1193,22 @@ type Server struct {
 	// SetPrincipalTokenRates.
 	principalTokenRates *PrincipalTokenRates
 
+	// requestRateGate is the optional PER-PRINCIPAL request-rate admission gate (#14453,
+	// request_rate_bucket.go): a monotonic ns-token credit bucket per tenant consulted
+	// FIRST at the served boundary, so an arrival faster than its tenant's rate is shed
+	// before it can queue or hold. nil (the default) leaves the request path
+	// byte-for-byte historical. Guarded by admissionMu alongside principalTokenRates;
+	// installed per Server via SetRequestRateGate (fak serve --tenant-rate-rps).
+	requestRateGate *RequestRateGate
+
+	// inflightGate is the optional request-count INFLIGHT admission gate (#14453,
+	// inflight_admission.go): global/per-key/per-principal caps on concurrent model
+	// requests consulted ahead of the scheduler slot. nil (the default) leaves the
+	// request path byte-for-byte historical. Guarded by admissionMu alongside
+	// principalTokenRates; installed per Server via SetInflightGate
+	// (fak serve --tenant-max-inflight).
+	inflightGate *InflightGate
+
 	// spendGovernor is the optional control-plane SPEND CAP (#3273, epic #3256):
 	// per-scope (tenant/team/agent/session) token/dollar budgets folded from the usage
 	// the gateway already accumulates and evaluated at the served boundary, so a scope

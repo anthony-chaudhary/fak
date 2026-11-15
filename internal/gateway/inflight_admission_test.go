@@ -212,8 +212,7 @@ func TestInflightAdmissionLeasesRefusals(t *testing.T) {
 		// hold riding the request's single lease-release path exactly once.
 		srv := newTestServer(t)
 		ig := NewInflightGate(InflightPolicy{MaxInflight: 1})
-		SetInflightGate(ig)
-		defer SetInflightGate(nil)
+		srv.SetInflightGate(ig)
 		lease, err := srv.beginServedAdmission(context.Background(), turn, nil, nil, 1)
 		if err != nil || lease == nil {
 			t.Fatalf("beginServedAdmission = (%v, %v), want an admitted lease", lease, err)
@@ -246,7 +245,7 @@ func TestInflightAdmissionLeasesRefusals(t *testing.T) {
 		// org-b is unaffected, and the shed names the key class.
 		srv2 := newTestServer(t)
 		ig2 := NewInflightGate(InflightPolicy{PerKey: map[string]int{"org-a": 1}})
-		SetInflightGate(ig2)
+		srv2.SetInflightGate(ig2)
 		ctxA := WithPrincipal(context.Background(), "org-a")
 		leaseA, err := srv2.beginServedAdmission(ctxA, turn, nil, nil, 1)
 		if err != nil || leaseA == nil {
@@ -271,7 +270,7 @@ func TestInflightAdmissionLeasesRefusals(t *testing.T) {
 		// window refuses after the inflight gate admitted, so the hold must come back.
 		srv3 := newTestServer(t)
 		ig3 := NewInflightGate(InflightPolicy{MaxInflight: 4})
-		SetInflightGate(ig3)
+		srv3.SetInflightGate(ig3)
 		shared := NewTokenRateGate(TokenRatePolicy{Caps: ratelimit.TokenCaps{MaxTotalTokens: 10}})
 		srv3.SetTokenRateGate(shared)
 		if _, err := shared.Admit(ratelimit.NewTokenUsage(8, 0, 0)); err != nil {
@@ -290,7 +289,7 @@ func TestInflightAdmissionLeasesRefusals(t *testing.T) {
 		// impossible envelope after the inflight gate admitted, so the hold must come back.
 		srv4 := newTestServer(t)
 		ig4 := NewInflightGate(InflightPolicy{MaxInflight: 4})
-		SetInflightGate(ig4)
+		srv4.SetInflightGate(ig4)
 		policy := DefaultAdmissionPolicy()
 		policy.TokenBudget = 32
 		srv4.SetAdmissionController(NewAdmissionController(policy))
@@ -302,8 +301,7 @@ func TestInflightAdmissionLeasesRefusals(t *testing.T) {
 			t.Fatalf("inflight after a scheduler refusal = %d, want 0 — the hold was freed charging nothing", got)
 		}
 
-		// No live gate: byte-for-byte historical.
-		SetInflightGate(nil)
+		// No installed gate: byte-for-byte historical.
 		plain := newTestServer(t)
 		lease, err = plain.beginServedAdmission(context.Background(), turn, nil, nil, 1)
 		if err != nil || lease != nil {

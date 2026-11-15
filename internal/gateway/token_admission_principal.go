@@ -118,6 +118,11 @@ type PrincipalTokenRates struct {
 	// named is the live count of allotmentNamed entries, maintained alongside book so the
 	// ceiling check never walks the map.
 	named int
+	// sheds counts refusals PER ALLOTMENT SUBJECT (#14453): the per-tenant shed counter
+	// the /metrics surface renders as fak_tenant_admission_shed_total{gate="token"}.
+	// Keyed by the RESOLVED allotment's subject (a named principal's id, or the shared
+	// unidentified/overflow class), so a refusal always names the budget that fired.
+	sheds map[string]uint64
 }
 
 // NewPrincipalTokenRates builds a book issuing every principal the same per-window budget.
@@ -135,14 +140,15 @@ func NewPrincipalTokenRates(perPrincipal TokenRatePolicy, ceiling int) *Principa
 		ceiling:      ceiling,
 		now:          time.Now,
 		book:         map[allotmentKey]*TokenRateGate{},
+		sheds:        map[string]uint64{},
 	}
 }
 
 // Admit checks one call's estimated footprint against THIS principal's allotment and, on
 // admission, reserves it there. A refusal is the same typed served-path *AdmissionError
 // (VerdictShed → HTTP 429) the provider gate returns, with the subject naming which
-// budget fired. An empty principal is the unidentified caller (see the file header). A nil
-// book admits freely.
+// budget fired, and counts into that budget's per-tenant shed counter (#14453). An empty
+// principal is the unidentified caller (see the file header). A nil book admits freely.
 func (b *PrincipalTokenRates) Admit(principal string, estimate ratelimit.TokenUsage) (*TokenReservation, error) {
 	if b == nil {
 		return nil, nil
@@ -151,7 +157,30 @@ func (b *PrincipalTokenRates) Admit(principal string, estimate ratelimit.TokenUs
 	// must not be detached after selection but before its reservation is visible.
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.allotmentForLocked(principal).Admit(estimate)
+	key, g := b.allotmentForLocked(principal)
+	res, err := g.Admit(estimate)
+	if err != nil {
+		b.sheds[key.subject()]++
+	}
+	return res, err
+}
+
+// ShedCounts returns the per-allotment-subject refusal totals (#14453) — the per-tenant
+// shed counter the /metrics surface renders as fak_tenant_admission_shed_total{gate="token"}.
+// The map is a copy; a nil book reports an empty map.
+func (b *PrincipalTokenRates) ShedCounts() map[string]uint64 {
+	if b == nil {
+		return map[string]uint64{}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make(map[string]uint64, len(b.sheds))
+	for s, n := range b.sheds {
+		if n > 0 {
+			out[s] = n
+		}
+	}
+	return out
 }
 
 // AllotmentCounts reports the book's live size: how many named principals hold their own
@@ -193,19 +222,21 @@ func keyForPrincipal(principal string) allotmentKey {
 }
 
 // allotmentForLocked resolves (creating if needed) the gate a principal is charged to,
-// applying the idle sweep and ceiling fallback. Never nil. Caller holds b.mu through
-// reservation, using the same book-before-gate lock order as sweepIdleLocked.
-func (b *PrincipalTokenRates) allotmentForLocked(principal string) *TokenRateGate {
+// applying the idle sweep and ceiling fallback, and returns the RESOLVED allotment key
+// alongside it so a refusal can be attributed to the budget that actually fired (#14453).
+// The gate is never nil. Caller holds b.mu through reservation, using the same
+// book-before-gate lock order as sweepIdleLocked.
+func (b *PrincipalTokenRates) allotmentForLocked(principal string) (allotmentKey, *TokenRateGate) {
 	key := keyForPrincipal(principal)
 	if g := b.book[key]; g != nil {
-		return g
+		return key, g
 	}
 	if key.class == allotmentNamed && b.named >= b.ceiling {
 		b.sweepIdleLocked()
 		if b.named >= b.ceiling {
 			key = allotmentKey{class: allotmentOverflow}
 			if g := b.book[key]; g != nil {
-				return g
+				return key, g
 			}
 		}
 	}
@@ -217,7 +248,7 @@ func (b *PrincipalTokenRates) allotmentForLocked(principal string) *TokenRateGat
 	if key.class == allotmentNamed {
 		b.named++
 	}
-	return g
+	return key, g
 }
 
 // sweepIdleLocked drops every named allotment that holds no in-flight reservation and
