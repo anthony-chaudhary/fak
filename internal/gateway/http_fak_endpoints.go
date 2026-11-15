@@ -459,6 +459,14 @@ func (s *Server) handleFakTraceReset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "trace_id is required")
 		return
 	}
+	// #14442: clearing a session's guard taint lowers its safety floor, so a
+	// cross-tenant reset is a policy widening against a FOREIGN session. The
+	// trace-owner floor applies: owner or operator scope only; anyone else
+	// draws 404 without learning the trace exists.
+	if s.foreignTraceRefused(r, traceID) {
+		writeErr(w, http.StatusNotFound, "trace not found")
+		return
+	}
 	if err := s.resetTrace(r.Context(), traceID); err != nil {
 		s.logf("gateway: trace reset failed: %v", err)
 		writeErr(w, http.StatusBadRequest, "trace reset failed: "+err.Error())
@@ -486,6 +494,12 @@ func (s *Server) handleFakTraceObserve(w http.ResponseWriter, r *http.Request) {
 	traceID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/fak/trace/"))
 	if traceID == "" {
 		writeErr(w, http.StatusBadRequest, "trace_id is required")
+		return
+	}
+	// #14442: observing another tenant's taint level is cross-tenant disclosure;
+	// the same trace-owner floor as the reset route applies.
+	if s.foreignTraceRefused(r, traceID) {
+		writeErr(w, http.StatusNotFound, "trace not found")
 		return
 	}
 	level, dangerous := s.observeTrace(r.Context(), traceID)

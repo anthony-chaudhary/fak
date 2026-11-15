@@ -50,7 +50,8 @@ func (s *Server) handleFakSessions(w http.ResponseWriter, r *http.Request) {
 				row.Activity = s.activity.actionCounts(row.TraceID)
 				sessions = append(sessions, row)
 			}
-			writeJSON(w, http.StatusOK, SessionListResponse{Sessions: sessions, Count: len(sessions)})
+			rows := s.sessionTenantView(r, sessions)
+			writeJSON(w, http.StatusOK, SessionListResponse{Sessions: rows, Count: len(rows)})
 			return
 		}
 		writeErr(w, http.StatusNotFound, "session list is not configured")
@@ -64,5 +65,27 @@ func (s *Server) handleFakSessions(w http.ResponseWriter, r *http.Request) {
 			sessions[i].Activity = s.activity.actionCounts(sessions[i].TraceID)
 		}
 	}
-	writeJSON(w, http.StatusOK, SessionListResponse{Sessions: sessions, Count: len(sessions)})
+	rows := s.sessionTenantView(r, sessions)
+	writeJSON(w, http.StatusOK, SessionListResponse{Sessions: rows, Count: len(rows)})
+}
+
+// sessionTenantView projects a session snapshot down to the rows the caller's
+// authenticated tenant may see (#14442): under an armed keyset a stamped tenant
+// keeps only the sessions it drove (its own trace-owner binding); everyone else
+// — the operator scope, or a single-tenant deployment — keeps the whole table,
+// exactly as before. Unbound rows are invisible to a stamped tenant: a session
+// no tenant claims is never another tenant's to read.
+func (s *Server) sessionTenantView(r *http.Request, sessions []SessionState) []SessionState {
+	caller, armed := s.tenantPrincipalOf(r)
+	if !armed {
+		return sessions
+	}
+	kept := sessions[:0]
+	for _, row := range sessions {
+		owner, _ := s.traceOwnerOf(row.TraceID)
+		if s.sessionOwnerAdmitted(caller, owner) {
+			kept = append(kept, row)
+		}
+	}
+	return kept
 }

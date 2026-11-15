@@ -190,6 +190,17 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #14442: the session-control plane enforces trace ownership before ANY verb
+	// dispatch (observe, control verbs, subscribe, teleport, checkpoint, client):
+	// under an armed keyset a stamped tenant may address only sessions IT drove.
+	// A cross-tenant address draws 404 — no existence leak, no 403 that confirms
+	// the target exists. The operator scope and single-tenant deployments pass
+	// through unchanged.
+	if s.foreignTraceRefused(r, traceID) {
+		writeErr(w, http.StatusNotFound, "session not found")
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		// subscribe (#2767) is the one GET verb on the subtree: the per-session

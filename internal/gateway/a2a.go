@@ -463,8 +463,14 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract tenant from headers
+	// #14442: under an armed keyset the tenant IS the authenticated principal —
+	// the X-Tenant-ID header is caller text and must not steer attribution (a
+	// forged header would file the task under a foreign tenant). Without a
+	// keyset the header keeps its advisory role, byte-for-byte as before.
 	tenantID := r.Header.Get("X-Tenant-ID")
+	if p, armed := s.tenantPrincipalOf(r); armed {
+		tenantID = p
+	}
 
 	// Validate message content
 	if msg.Content == nil {
@@ -603,6 +609,14 @@ func (s *Server) handleA2AListTasks(w http.ResponseWriter, r *http.Request) {
 	tenantID := query.Get("tenant_id")
 	contextID := query.Get("context_id")
 
+	// #14442: under an armed keyset the caller's authenticated principal scopes
+	// the listing — a forged tenant_id query parameter cannot widen (or narrow)
+	// what the caller sees. An un-stamped caller (the operator scope) keeps the
+	// full listing; single-tenant deployments are untouched.
+	if p, armed := s.tenantPrincipalOf(r); armed {
+		tenantID = p
+	}
+
 	store := getA2AStore()
 	store.mu.RLock()
 	defer store.mu.RUnlock()
@@ -717,6 +731,13 @@ func (s *Server) handleA2AGetTaskByID(w http.ResponseWriter, r *http.Request, ta
 		return
 	}
 
+	// #14442: a stamped tenant may read only tasks filed under its own
+	// authenticated principal; a foreign task reads as not found.
+	if p, armed := s.tenantPrincipalOf(r); armed && p != "" && task.TenantID != p {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+
 	// Return task snapshot. `state`/`result` are the task's own imperative record;
 	// `progress` is the RE-VERIFIABLE cursor a foreign peer can trust — the
 	// no-`claimed`-field VerifiedProgress shape projected across the edge. It fails
@@ -764,6 +785,15 @@ func (s *Server) handleA2ACancelTaskByID(w http.ResponseWriter, r *http.Request,
 	}
 	store.mu.Unlock()
 	if !exists {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	// #14442: a stamped tenant may cancel only tasks filed under its own
+	// authenticated principal — a cross-tenant cancel would drive a FOREIGN
+	// session's run to draining through the control seam, so it refuses here,
+	// before any state is touched.
+	if p, armed := s.tenantPrincipalOf(r); armed && p != "" && task.TenantID != p {
 		writeErr(w, http.StatusNotFound, "task not found")
 		return
 	}
