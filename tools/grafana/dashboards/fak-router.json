@@ -2046,6 +2046,268 @@
         "mode": "markdown",
         "content": "The whole-router **state verdict** (`ok` / `degraded` / `down`) and its reasons - including every `dead_ladder:<model>` chain whose declared fallback ladder has collapsed to one live rung - answer \"which model chains are unusable right now\". As of this board's contract there is **no Prometheus metric for it**: neither the router's own `:18101/metrics` fold nor the Fak Ops exporter (`fak_ops_*`) publishes a verdict series, so this panel documents the gap instead of plotting a proxy.\n\nRead it live:\n\n```\nGET /v1/router/state        # verdict + reasons[]\nfak-sync router state       # CLI view of the same document\n```\n\nDo not infer the verdict from `fak_router_backend_consecutive_failures`: that gauge is ONE input (the backend health streak). The verdict also folds zero-live backends, funding walls, config drift, and dead-ladder reachability; ladders past the cap collapse into a single `dead_ladder:+<count>` reason."
       }
+    },
+    {
+      "id": 66,
+      "type": "row",
+      "title": "H200 load: are both replicas serving?",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 112,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 67,
+      "type": "stat",
+      "title": "H200 replicas serving now",
+      "description": "How many of the two H200 vLLM replicas (rtp-h200-vllm blue, rtp-h200-vllm-replica2) served at least one router attempt in the last hour. 2 = both taking load, 1 = one is idle or failing over, 0 = neither is serving (all traffic went elsewhere). This is the direct answer to 'are both H200s even taking load?'.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 113,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(sum by (backend) (increase(fak_router_attempts_total{job=\"fak_router\",backend=~\"rtp-h200-vllm.*\"}[1h])) > 0)",
+          "legendFormat": "replicas serving",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 68,
+      "type": "stat",
+      "title": "H200 share of router traffic",
+      "description": "Share of all router attempts (across every backend) that went to the H200 replicas, windowed over the rate interval. A value near 0 means the H200s are not taking load even if they are healthy; a rising value means they are absorbing traffic. Read with 'H200 replicas serving now' to separate 'idle' from 'failing over'.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 113,
+        "w": 4,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(fak_router_attempts_total{job=\"fak_router\",backend=~\"rtp-h200-vllm.*\"}[$__rate_interval])) / clamp_min(sum(rate(fak_router_attempts_total{job=\"fak_router\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "H200 share",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "green",
+                "value": 0.2
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 69,
+      "type": "timeseries",
+      "title": "H200 attempts / s by replica",
+      "description": "Per-second rate of router attempts to each H200 replica, split by backend. A line that drops to 0 is a replica that stopped taking load (idle, or failing over after its tunnel dropped). Compare the two lines to see whether both replicas are serving or one has gone quiet.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 113,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (backend) (rate(fak_router_attempts_total{job=\"fak_router\",backend=~\"rtp-h200-vllm.*\"}[$__rate_interval]))",
+          "legendFormat": "{{backend}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 70,
+      "type": "table",
+      "title": "H200 backend health",
+      "description": "One row per H200 replica: live in-flight attempts, consecutive failures since last success, and seconds since the backend last succeeded. A replica with consecutive_failures > 0 and a growing seconds_since_success is failing over rather than serving - the error state behind 'so many errors'. Series join on the `backend` label.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 113,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_router_backend_inflight{job=\"fak_router\",backend=~\"rtp-h200-vllm.*\"}",
+          "legendFormat": "in_flight",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": false,
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "expr": "fak_router_backend_consecutive_failures{job=\"fak_router\",backend=~\"rtp-h200-vllm.*\"}",
+          "legendFormat": "consecutive_failures",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": false,
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "expr": "time() - fak_router_backend_last_success_timestamp_seconds{job=\"fak_router\",backend=~\"rtp-h200-vllm.*\"}",
+          "legendFormat": "seconds_since_success",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
     }
   ]
 }

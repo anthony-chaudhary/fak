@@ -551,3 +551,127 @@ func TestFakRouterCachingAndTokenPanels(t *testing.T) {
 		t.Errorf("panel 'Token usage by type (tokens / s)' must target fak_router_token_usage_sum split on token_type; got: %v", token)
 	}
 }
+
+// h200BackendRe is the closed backend vocabulary the H200-load panels group on:
+// the two vLLM TP4 replicas on the rtp-test H200 node. Pinning the regex keeps
+// the panels from silently drifting onto a different backend set (or onto all
+// backends, which would make "are both H200s serving?" read as "is the router
+// serving?").
+const h200BackendRe = `backend=~"rtp-h200-vllm.*"`
+
+// TestFakRouterH200LoadPanels pins the "H200 load" section added for the operator
+// question "are both H200s even taking load?". The board already had per-backend
+// health and error panels, but no H200-specific grouping and no share-of-traffic
+// stat, so the answer required a second query. This test pins the four panels and
+// the H200 backend regex so the section cannot be dropped or re-pointed at a
+// different backend set without a deliberate contract change.
+func TestFakRouterH200LoadPanels(t *testing.T) {
+	d := loadFakRouter(t)
+
+	exprByTitle := map[string][]string{}
+	for _, p := range d.Panels {
+		for _, tgt := range p.Targets {
+			if strings.TrimSpace(tgt.Expr) != "" {
+				exprByTitle[p.Title] = append(exprByTitle[p.Title], tgt.Expr)
+			}
+		}
+	}
+
+	// (a) The section row must exist so the H200 panels are grouped, not scattered.
+	sawRow := false
+	for _, p := range d.Panels {
+		if p.Type == "row" && p.Title == "H200 load: are both replicas serving?" {
+			sawRow = true
+		}
+	}
+	if !sawRow {
+		t.Errorf("%s must expose the 'H200 load: are both replicas serving?' row", fakRouterPath)
+	}
+
+	// (b) Every H200 panel must group on the H200 backend regex, so the section
+	// answers about the two replicas specifically, not the whole router.
+	h200Titles := []string{
+		"H200 replicas serving now",
+		"H200 share of router traffic",
+		"H200 attempts / s by replica",
+		"H200 backend health",
+	}
+	for _, title := range h200Titles {
+		exprs, ok := exprByTitle[title]
+		if !ok {
+			t.Fatalf("%s must expose a %q panel", fakRouterPath, title)
+		}
+		if len(exprs) == 0 {
+			t.Errorf("panel %q has no query target", title)
+			continue
+		}
+		sawRe := false
+		for _, expr := range exprs {
+			if strings.Contains(expr, h200BackendRe) {
+				sawRe = true
+			}
+		}
+		if !sawRe {
+			t.Errorf("panel %q must group on the H200 backend regex %s; got: %v", title, h200BackendRe, exprs)
+		}
+	}
+
+	// (c) "H200 replicas serving now" must be a windowed count of replicas with at
+	// least one attempt in the last hour - a lifetime sum would read as "always
+	// serving" and hide a replica that stopped taking load.
+	serving, ok := exprByTitle["H200 replicas serving now"]
+	if !ok {
+		t.Fatalf("%s must expose a 'H200 replicas serving now' panel", fakRouterPath)
+	}
+	if len(serving) == 0 || !strings.Contains(serving[0], "count(") ||
+		!strings.Contains(serving[0], "increase(") || !strings.Contains(serving[0], "[1h]") ||
+		!strings.Contains(serving[0], "> 0") {
+		t.Errorf("panel 'H200 replicas serving now' must count replicas with >0 attempts over a 1h window; got: %v", serving)
+	}
+
+	// (d) "H200 share of router traffic" must divide the H200 attempt rate by the
+	// total attempt rate (clamped), so a healthy-but-idle H200 reads as ~0 share
+	// rather than a blank panel.
+	share, ok := exprByTitle["H200 share of router traffic"]
+	if !ok {
+		t.Fatalf("%s must expose a 'H200 share of router traffic' panel", fakRouterPath)
+	}
+	if len(share) == 0 || !strings.Contains(share[0], "clamp_min") ||
+		strings.Count(share[0], "rate(fak_router_attempts_total") < 2 {
+		t.Errorf("panel 'H200 share of router traffic' must divide the H200 rate by the total rate (clamp_min); got: %v", share)
+	}
+
+	// (e) "H200 attempts / s by replica" must be a live rate split by backend, so
+	// the two replicas are separate lines and a dropped one reads as a flat 0.
+	byReplica, ok := exprByTitle["H200 attempts / s by replica"]
+	if !ok {
+		t.Fatalf("%s must expose a 'H200 attempts / s by replica' panel", fakRouterPath)
+	}
+	if len(byReplica) == 0 || !strings.Contains(byReplica[0], "sum by (backend)") ||
+		!strings.Contains(byReplica[0], "rate(") || !strings.Contains(byReplica[0], "$__rate_interval") {
+		t.Errorf("panel 'H200 attempts / s by replica' must be a live rate split by backend; got: %v", byReplica)
+	}
+
+	// (f) "H200 backend health" must target the three backend-health families so
+	// the error state (consecutive failures + seconds since success) is legible.
+	health, ok := exprByTitle["H200 backend health"]
+	if !ok {
+		t.Fatalf("%s must expose a 'H200 backend health' panel", fakRouterPath)
+	}
+	for _, want := range []string{
+		"fak_router_backend_inflight",
+		"fak_router_backend_consecutive_failures",
+		"fak_router_backend_last_success_timestamp_seconds",
+	} {
+		saw := false
+		for _, expr := range health {
+			if strings.Contains(expr, want) {
+				saw = true
+				break
+			}
+		}
+		if !saw {
+			t.Errorf("panel 'H200 backend health' must target %s; got: %v", want, health)
+		}
+	}
+}
