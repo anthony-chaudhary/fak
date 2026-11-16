@@ -88,6 +88,7 @@ type serveRuntime struct {
 	apiKey              string
 	engineCacheAdminKey string
 	requireKey          string
+	metricsKey          string
 	defaultTraceID      string
 
 	transObs  session.TransitionObserver
@@ -953,6 +954,9 @@ func (rt *serveRuntime) resolveSessionPlane(sf *serveFlags) {
 	requireKey := resolveServeRequiredKey(*sf.requireKeyEnv, "require-key-env",
 		"refusing to start a network-facing gateway with no authentication: the named bearer variable is empty",
 		"the bearer token callers must present, or omit the flag")
+	metricsKey := resolveServeRequiredKey(*sf.metricsKeyEnv, "metrics-key-env",
+		"refusing to start with a metrics door that holds no token: the named variable is empty",
+		"the read-only metrics bearer for /metrics, /debug/vars, observation and /slots, or omit the flag")
 	if *sf.contextBudgetTokens < 0 {
 		writeConfigBail(os.Stderr, configBail{
 			Verb:    "fak serve",
@@ -1007,7 +1011,7 @@ func (rt *serveRuntime) resolveSessionPlane(sf *serveFlags) {
 			os.Exit(1)
 		}
 	}
-	rt.apiKey, rt.engineCacheAdminKey, rt.requireKey, rt.defaultTraceID = apiKey, engineCacheAdminKey, requireKey, defaultTraceID
+	rt.apiKey, rt.engineCacheAdminKey, rt.requireKey, rt.metricsKey, rt.defaultTraceID = apiKey, engineCacheAdminKey, requireKey, metricsKey, defaultTraceID
 }
 
 // resolveObservers resolves the optional operator webhook (#743) and the tiered
