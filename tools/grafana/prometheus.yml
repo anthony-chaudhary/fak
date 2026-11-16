@@ -54,18 +54,6 @@ scrape_configs:
         labels:
           service: fak-gateway
 
-  - job_name: fak_router
-    # The SCM-supervised router listens on :18101 and is the process that emits
-    # fak_router_attempts_total{backend,fallback,status} (plus every
-    # fak_gateway_* family). This is DISTINCT from the generic fak_gateway job
-    # on :8080, which serves the fak_gateway_* families but does NOT emit
-    # fak_router_attempts_total. Scrape the real router here.
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["host.docker.internal:18101"]
-        labels:
-          service: fak-router
-
   - job_name: fak_cachevalue
     # `fak cachevalue metrics --serve` re-folds the docs/nightrun/*.jsonl ledgers +
     # experiments/ablate/*.json arms on each scrape and exposes the two-track cache-value

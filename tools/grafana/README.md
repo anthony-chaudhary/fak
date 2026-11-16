@@ -331,6 +331,28 @@ explicit `job=` can never silently sum both. Every rule names its job.
 > by `alertmanager.yml`. Update any local `fak_ops` file-SD target from `:9096` to `:9101` when
 > running both on one host.
 
+## Placement doctrine — public boards vs companion boards
+
+A Grafana board belongs to the repo that can *emit* the metrics it charts.
+
+- **Public (`fak`)** keeps **emitter-generic** boards whose families are produced by code
+  that ships here (`fak_gateway_*` from `fak serve`, `fak_fleet_*` from `fak fleet
+  metrics`, `fak_cachevalue_*` from `fak cachevalue metrics`, the `fleet_*` Python
+  scores). A public checkout provisions these with no companion present.
+- **Private companion (`fak-private`)** owns a board charting **private-only** metrics or
+  embedding **host/deployment facts**, and it moves there *whole*: the board JSON, its
+  Prometheus scrape job, and its alert group travel together, because a board with no
+  public emitter renders every panel blank (the worst observability failure — it looks
+  calm, not broken).
+
+The **router plane** was moved to the companion on **2026-11-16** under ticket
+`grafana-router-plane-placement-20261116`: the `fak_router_*` families have **no public
+emitter** — they are produced only by the companion's router process — so the
+`fak-router` board (uid `fak-router`), the `fak_router` scrape job (`:18101`), and the
+`fak_router` alert group (5 rules) all live in the companion now. Only this router plane
+moved: the public tree otherwise keeps the emitter-generic boards and the ops-plane alert
+rules exactly as they were.
+
 ## Run Operations: home → run drill-down
 
 The **FAK Run Operations** home (uid `fak-fleet-overview`) and **FAK Run Operations —
@@ -455,6 +477,7 @@ It currently writes:
 - `fak-startup-load.json`
 - `fak-guard-adjudication.json`
 - `fak-cache-value-rollup.json`
+- `fak-cache-health.json`
 - `fak-fleet-overview.json`
 - `fak-fleet-session.json`
 

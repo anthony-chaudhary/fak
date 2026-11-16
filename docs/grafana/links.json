@@ -73,14 +73,6 @@
       "lifetime": "stack-local",
       "description": "one session end to end — LIVE registry state (heartbeat liveness, cache posture, wall-clock budget) beside its HISTORICAL tokens, cache economics and kernel verdicts; reached by clicking a session on the fleet overview",
       "source": "tools/grafana/dashboards/fak-fleet-session.json"
-    },
-    {
-      "title": "FAK Router | Unified model routing",
-      "uid": "fak-router",
-      "category": "debug",
-      "lifetime": "stack-local",
-      "description": "unified router — request rate, streaming share, upstream prompt/decode tokens, per-backend and per-status routing attempts, failover rate",
-      "source": "tools/grafana/dashboards/fak-router.json"
     }
   ]
 }
