@@ -229,6 +229,10 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 // and renders the Gemini candidate/usage shape. It is the shared core of the
 // buffered and streaming paths.
 func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenerateContentRequest, opts []agent.SampleOpt, reqTrace, model string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission) (*geminiTurn, error) {
+	// The streaming arm calls this with r.Context(), which did NOT come from the
+	// handler's beginServedRequest, so install the text-lift observer here to
+	// cover both gemini arms.
+	ctx = s.withToolCallParseObserver(ctx)
 	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools, opts...)
 	if err != nil {
 		return nil, err
@@ -241,8 +245,11 @@ func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenera
 	// adjudication on a call the model intended to make — the exact silent no-op a
 	// non-OpenAI-shaped emitter causes. Fail closed (parity with the OpenAI path).
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
+		s.metrics.observeToolCallParse(toolCallParseOutcomeFailClosed, "", toolCallDropReasonName(comp))
 		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s finish_reason=%s completion_tokens=%d", model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 		return nil, errGeminiToolCallConformance
+	} else if len(asst.ToolCalls) > 0 {
+		s.metrics.observeToolCallParse(toolCallParseOutcomeStructured, "", "")
 	}
 
 	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)

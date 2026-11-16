@@ -331,6 +331,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// the terminal response.failed stays the fail-closed frame (parity with the
 	// buffered mid-stream arm, which also cannot carry a status).
 	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
+		s.metrics.observeToolCallParse(toolCallParseOutcomeFailClosed, "", toolCallDropReasonName(comp))
 		if started {
 			s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (responses stream); model=%s reason=%s finish_reason=%s completion_tokens=%d", s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 			emitResponseFailed()
@@ -343,6 +344,8 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 		}
 		writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
 		return true
+	} else if len(comp.Message.ToolCalls) > 0 {
+		s.metrics.observeToolCallParse(toolCallParseOutcomeStructured, "", "")
 	}
 
 	// A final incomplete rune has no later fragment to complete it. Flush it now so

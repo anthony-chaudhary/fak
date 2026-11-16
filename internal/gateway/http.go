@@ -922,6 +922,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !admitted {
 		return
 	}
+	// Count a text-form tool call promoted into structured calls as a parse
+	// outcome, not just a log line. Installed on the handler ctx so both the
+	// buffered path and the live chat stream (called with this same ctx) inherit it.
+	ctx = s.withToolCallParseObserver(ctx)
 	sessionTurn.turnCost = newTurnCostRecord(req.Stream)
 	defer func() {
 		sessionTurn.complete()
@@ -1224,6 +1228,7 @@ func hasElidedToolResult(messages []agent.Message) bool {
 
 func (s *Server) validateChatCompletionConformance(w http.ResponseWriter, stream *chatStreamWriter, comp *agent.Completion, asst agent.Message, receiptRequested, decodeTraceRequested, decodeTokenIDsRequested bool, inputTriggerRoute *InputTriggerRouteReceipt) bool {
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
+		s.metrics.observeToolCallParse(toolCallParseOutcomeFailClosed, "", toolCallDropReasonName(comp))
 		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s finish_reason=%s completion_tokens=%d", s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 		if msg, code, typed := toolCallDropRefusal(comp); typed {
 			if stream != nil {
@@ -1240,6 +1245,8 @@ func (s *Server) validateChatCompletionConformance(w http.ResponseWriter, stream
 		}
 		writeErr(w, http.StatusBadGateway, conformanceMsg)
 		return false
+	} else if len(asst.ToolCalls) > 0 {
+		s.metrics.observeToolCallParse(toolCallParseOutcomeStructured, "", "")
 	}
 	if receiptRequested && comp.NativeInference == nil {
 		writeErr(w, http.StatusBadGateway, "configured planner cannot produce a native inference receipt")

@@ -703,6 +703,20 @@ func withTextToolOffer(ctx context.Context, tools []agent.ToolDef) context.Conte
 	})
 }
 
+// withToolCallParseObserver installs the text-lift observer on the served-turn
+// context so a promoted text-form tool call is counted as a parse outcome
+// rather than only logged. The observer fires once per lift event with the
+// dialect name and the number of calls promoted.
+func (s *Server) withToolCallParseObserver(ctx context.Context) context.Context {
+	m := s.metrics
+	return agent.WithTextToolLiftObserver(ctx, func(dialect string, liftedCalls int) {
+		if liftedCalls <= 0 {
+			return
+		}
+		m.observeToolCallParse(toolCallParseOutcomeLifted, dialect, "")
+	})
+}
+
 type clientToolSchemasContextKey struct{}
 
 func withClientToolSchemas(ctx context.Context, tools []agent.ToolDef) context.Context {

@@ -694,6 +694,17 @@ type gatewayMetrics struct {
 	// above - a zero-or-one-increment-per-agent-refusal hot path.
 	scopeRefusalsMu sync.Mutex
 	scopeRefusals   map[scopeRefusalKey]uint64
+
+	// toolCallParseMu guards the tool-call parse-outcome family: what happened to
+	// the tool calls the upstream announced on a served turn — refused because
+	// none survived parsing + the text-lift fallback (fail_closed), promoted from
+	// a text-form dialect into structured calls (lifted), or carried into
+	// adjudication as structured calls (structured). Keyed by (outcome, dialect,
+	// reason) so an operator can tell a dialect that stopped lifting from a
+	// dialect that started emitting unparseable calls. Kept on its own lock off
+	// the families above — a zero-or-one-increment-per-served-turn path.
+	toolCallParseMu sync.Mutex
+	toolCallParse   map[toolCallParseKey]uint64
 }
 
 // scopeRefusalKey is the closed label set of fak_gateway_scope_refusals_total:
@@ -725,6 +736,61 @@ func (m *gatewayMetrics) scopeRefusalSnapshot() map[scopeRefusalKey]uint64 {
 	defer m.scopeRefusalsMu.Unlock()
 	snap := make(map[scopeRefusalKey]uint64, len(m.scopeRefusals))
 	for k, v := range m.scopeRefusals {
+		snap[k] = v
+	}
+	return snap
+}
+
+// toolCallParseKey is the closed label set of fak_gateway_toolcall_parse_total:
+// the parse outcome, the text-lift dialect that produced it (empty when the
+// outcome is not a lift), and the closed abi drop-reason name (empty unless the
+// outcome is fail_closed).
+type toolCallParseKey struct {
+	outcome string
+	dialect string
+	reason  string
+}
+
+// The closed outcome vocabulary of fak_gateway_toolcall_parse_total.
+const (
+	// toolCallParseOutcomeFailClosed: the upstream announced tool calls but none
+	// survived parsing + the text-lift fallback, so the turn was refused.
+	toolCallParseOutcomeFailClosed = "fail_closed"
+	// toolCallParseOutcomeLifted: a text-form tool-call dialect was promoted into
+	// structured calls.
+	toolCallParseOutcomeLifted = "lifted"
+	// toolCallParseOutcomeStructured: the turn reached adjudication carrying
+	// structured calls.
+	toolCallParseOutcomeStructured = "structured"
+)
+
+// observeToolCallParse records one tool-call parse outcome in place, before the
+// refusal is written, so a scrape taken mid-storm still sees the outcome exactly
+// once. A no-op for a nil metrics or an empty outcome — the conformance helpers
+// are called directly by tests that construct a Server with no metrics.
+func (m *gatewayMetrics) observeToolCallParse(outcome, dialect, reason string) {
+	if m == nil || outcome == "" {
+		return
+	}
+	m.toolCallParseMu.Lock()
+	defer m.toolCallParseMu.Unlock()
+	if m.toolCallParse == nil {
+		m.toolCallParse = map[toolCallParseKey]uint64{}
+	}
+	m.toolCallParse[toolCallParseKey{outcome: outcome, dialect: dialect, reason: reason}]++
+}
+
+// toolCallParseSnapshot copies the live parse-outcome map under its lock so the
+// scrape renders in sorted (outcome, dialect, reason) order without holding a
+// hot-path lock for the duration of the write. A nil metrics renders empty.
+func (m *gatewayMetrics) toolCallParseSnapshot() map[toolCallParseKey]uint64 {
+	if m == nil {
+		return map[toolCallParseKey]uint64{}
+	}
+	m.toolCallParseMu.Lock()
+	defer m.toolCallParseMu.Unlock()
+	snap := make(map[toolCallParseKey]uint64, len(m.toolCallParse))
+	for k, v := range m.toolCallParse {
 		snap[k] = v
 	}
 	return snap

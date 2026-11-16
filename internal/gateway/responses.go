@@ -287,6 +287,10 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !admitted {
 		return
 	}
+	// Count a text-form tool call promoted into structured calls as a parse
+	// outcome, not just a log line. Installed on the handler ctx so both the
+	// buffered path and streamResponsesLive (called with this same ctx) inherit it.
+	ctx = s.withToolCallParseObserver(ctx)
 	ctx = context.WithValue(ctx, responsesRestoreContextKey{}, restoreContinuation)
 	// Retain historical assistant calls so a new tool result can recover its
 	// originating name/arguments, while excluding historical result messages that
@@ -444,6 +448,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// the drop names a closed reason (#2088), render the typed error code so a client
 	// can branch; ReasonNone keeps the historical opaque 502 fail-closed.
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
+		s.metrics.observeToolCallParse(toolCallParseOutcomeFailClosed, "", toolCallDropReasonName(comp))
 		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s finish_reason=%s completion_tokens=%d", s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 		if msg, code, typed := toolCallDropRefusal(comp); typed {
 			writeErrCode(w, http.StatusBadGateway, code, msg)
@@ -451,6 +456,8 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 		writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
 		return
+	} else if len(asst.ToolCalls) > 0 {
+		s.metrics.observeToolCallParse(toolCallParseOutcomeStructured, "", "")
 	}
 
 	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)

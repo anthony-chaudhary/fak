@@ -153,9 +153,24 @@ func (s *Server) surfaceUpstreamStatus(w http.ResponseWriter, err error, note st
 // caller's log parentheticals, kept per-surface so an operator grepping the log can still
 // tell which stream refused.
 func (s *Server) failClosedOnUnparsedToolCalls(w http.ResponseWriter, comp *agent.Completion, started bool, preTag, midTag string, terminal func()) bool {
-	if comp == nil || !comp.ToolCallsDropped || len(comp.Message.ToolCalls) > 0 {
+	if comp == nil {
 		return false
 	}
+	// A turn carrying structured calls reached adjudication: count it, then report
+	// conformant. This is the structured fall-through for the two streamed surfaces
+	// that share this rule (stream_proxy.go, messages_stream_planner.go) — both are
+	// out of lane, so the count lives here rather than at their call sites.
+	if len(comp.Message.ToolCalls) > 0 {
+		s.metrics.observeToolCallParse(toolCallParseOutcomeStructured, "", "")
+		return false
+	}
+	if !comp.ToolCallsDropped {
+		return false
+	}
+	// The upstream announced tool calls and none survived parsing + the text-lift
+	// fallback: the fail-closed case. Recorded once, before the started split, so
+	// both the pre-status and mid-stream arms count exactly one outcome.
+	s.metrics.observeToolCallParse(toolCallParseOutcomeFailClosed, "", toolCallDropReasonName(comp))
 	if !started {
 		s.logf("gateway: upstream announced tool_calls but none parsed (%s); model=%s reason=%s finish_reason=%s completion_tokens=%d", preTag, s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 		if msg, code, typed := toolCallDropRefusal(comp); typed {
