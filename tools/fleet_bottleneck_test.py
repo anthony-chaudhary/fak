@@ -372,9 +372,12 @@ def _gateway_metric_names(exprs):
 
 # Alert surfaces whose metric families are validated by their own dedicated
 # cross-surface lock instead of the gateway-plane check below: the fleet
-# exporter pair (this file) and the router/ops planes (internal/grafanacontract;
-# their emitters live in the companion private repo).
-_ALERT_OWNED_PREFIXES = ("fak_fleet_", "fak_router_", "fak_ops_")
+# exporter pair (this file) and the ops plane (internal/grafanacontract; its
+# emitter lives in the companion private repo). The router plane is deliberately
+# NOT exempt: it moved to the companion on 2026-11-16
+# (grafana-router-plane-placement-20261116), so a fak_router_* family in a
+# public alert is a phantom with no public emitter and must be caught here.
+_ALERT_OWNED_PREFIXES = ("fak_fleet_", "fak_ops_")
 
 
 def _alert_recorded_prefixes(text):
@@ -484,6 +487,20 @@ class CrossSurfaceContractTest(unittest.TestCase):
                                 "fak_vcache_hit_rate", "fak_future_family"})
         self.assertEqual(_missing_gateway(refs, self.gateway_fams),
                          {"fak_harness_tool_calls_total", "fak_future_family"})
+
+    def test_router_plane_is_not_exempt_from_phantom_check(self):
+        """The router plane moved to the companion on 2026-11-16
+        (grafana-router-plane-placement-20261116): no public process emits
+        fak_router_*, so the family must NOT be exempt from the phantom check.
+        Pinning this keeps a future alert that queries fake fak_router_*... from
+        passing as if a public emitter existed."""
+        self.assertNotIn("fak_router_", _ALERT_OWNED_PREFIXES)
+        refs = _gateway_metric_names(
+            ["sum(rate(fak_router_requests_total[5m])) > 0"])
+        exempt = {n for n in refs if n.startswith(_ALERT_OWNED_PREFIXES)}
+        self.assertEqual(exempt, set())
+        self.assertEqual(_missing_gateway(refs, self.gateway_fams),
+                         {"fak_router_requests_total"})
 
     def test_dashboard_queries_only_emitted_metrics(self):
         dash = json.loads(_read(FLEET_DASH))
