@@ -235,6 +235,25 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		return http.StatusInternalServerError, "local_forward_failed",
 			fmt.Sprintf("local forward engine failed during %s: %v", lfe.Op, lfe.Err)
 	}
+	// A fail-closed device-stage failure (a *model.BackendForwardOperationError, e.g. the
+	// V4.1 mHC pre-collapse readback at a specific layer) is a LOCAL in-kernel engine failure,
+	// not an upstream provider failure. It is in-kernel by construction (only the in-kernel
+	// planner produces it), so naming the operation and layer is safe and reachable only on a
+	// genuine device-stage fault — a real upstream error can never be this type. The affected
+	// session is already closed and there is NO host/CPU retry (the device seam fails closed),
+	// so this is non-retryable: 500 with a distinct code that names op + layer, instead of the
+	// opaque 502 "upstream model error" fallthrough that hides the real cause from the client
+	// and the perf ledger (#3518). The cause is deliberately NOT forwarded: it can carry
+	// backend error text, and only the status + classification cross the trust boundary.
+	var bfo *model.BackendForwardOperationError
+	if errors.As(err, &bfo) {
+		path := strings.TrimSpace(string(bfo.Path))
+		if path == "" {
+			path = "device stage"
+		}
+		return http.StatusInternalServerError, "in_kernel_device_stage_failed",
+			fmt.Sprintf("in-kernel device stage failed during %s at layer %d; the session was closed and no host retry is available", path, bfo.Layer)
+	}
 	return http.StatusBadGateway, "", "upstream model error"
 }
 

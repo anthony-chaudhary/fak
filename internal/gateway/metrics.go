@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
@@ -913,6 +914,16 @@ func upstreamErrorKind(err error) string {
 			return "status_4xx"
 		}
 		return "status_5xx"
+	}
+	// A fail-closed device-stage failure (a *model.BackendForwardOperationError, e.g. the V4.1
+	// mHC pre-collapse readback at a specific layer) is a LOCAL in-kernel engine fault, not an
+	// upstream provider failure. It is in-kernel by construction, so it gets its OWN kind —
+	// distinct from the coarse "other" bucket and from "oom" — so a /metrics scrape (and the
+	// FAILED debug line) can tell a device-stage fault storm apart from everything else. Stays
+	// in lockstep with upstreamErrorStatus's in_kernel_device_stage_failed arm (#3518).
+	var bfo *model.BackendForwardOperationError
+	if errors.As(err, &bfo) {
+		return "device_stage"
 	}
 	// A TRANSIENT transport failure (mid-flight reset, truncated read, I/O timeout) that
 	// exhausted the planner's in-handler retry and surfaced to the wrapped agent. Split from

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // upstream400Detail is what the gateway can learn from an upstream 400 body without
@@ -140,7 +141,21 @@ func (s *Server) upstreamErrorFields(err error, code string) map[string]any {
 	fields := map[string]any{}
 	var contextErr *agent.InKernelContextLengthError
 	var se *agent.UpstreamStatusError
+	var bfo *model.BackendForwardOperationError
 	switch {
+	case errors.As(err, &bfo):
+		// A fail-closed device-stage failure carries its op (the Path, e.g. "v41-mhc-pre-collapse")
+		// and layer as typed fields so a client or the perf ledger can branch on WHICH stage failed
+		// without parsing the message (#3518). The cause is never forwarded (it can carry backend
+		// error text); only the op + layer cross the boundary.
+		if code == "in_kernel_device_stage_failed" {
+			if op := strings.TrimSpace(string(bfo.Path)); op != "" {
+				fields["op"] = op
+			}
+			if bfo.Layer >= 0 {
+				fields["layer"] = bfo.Layer
+			}
+		}
 	case errors.As(err, &contextErr):
 		if code == "context_length_exceeded" {
 			putPositive(fields, "prompt_tokens", contextErr.PromptTokens)
