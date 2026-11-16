@@ -330,7 +330,7 @@ func QuarantineMalformedLockRefsInDir(refDir, quarantineDir string) ([]string, e
 			}
 			return err
 		}
-		if validObjectID(strings.TrimSpace(string(b))) {
+		if usableLooseRefContent(string(b)) {
 			return nil
 		}
 		rel, err := filepath.Rel(refDir, path)

@@ -79,11 +79,15 @@ func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
 // fresh same-base-SHA look-ahead lesson beside the reframed affordance (#5207). A nil stdin
 // (the runGuardSessionStart entry) skips the pickup, keeping that path byte-identical.
 func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
-	// Repair only torn ephemeral session refs before any resume/discovery path can
-	// invoke Git with --all. The authoritative session registry remains untouched.
-	// Fail-open here: SessionStart affordances must never wedge a fresh process.
-	if reaped, err := leaseref.NewInDir("").ReapMalformedSessionRefs(context.Background()); err == nil && len(reaped) > 0 {
-		fmt.Fprintf(stderr, "fak: repaired %d malformed session lease ref(s) before resume\n", len(reaped))
+	// Repair only unusable lease refs under refs/fak/locks/ before any resume or
+	// discovery path can invoke Git with --all, since a single torn value wedges
+	// `log --all` / `rev-list --all` with "fatal: bad object" and takes the
+	// landing, sync and resume paths down with it. Ordinary refs and the
+	// authoritative session registry remain untouched, and a valid lease ref is
+	// never dropped. Fail-open here: SessionStart affordances must never wedge a
+	// fresh process.
+	if reaped, err := leaseref.NewInDir("").ReapMalformedLooseRefs(context.Background()); err == nil && len(reaped) > 0 {
+		fmt.Fprintf(stderr, "fak: repaired %d malformed lease ref(s) before resume\n", len(reaped))
 	}
 	fs := flag.NewFlagSet("guard-sessionstart", flag.ContinueOnError)
 	fs.SetOutput(stderr)

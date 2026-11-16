@@ -593,7 +593,7 @@ func TestQuarantineMalformedLockRefsInDirBoundsAndPreservesValid(t *testing.T) {
 	refs := t.TempDir()
 	quarantine := filepath.Join(t.TempDir(), "q")
 	valid := strings.Repeat("a", 40) + "\n"
-	for name, body := range map[string]string{"valid": valid, "allzero": strings.Repeat("0", 40) + "\n", "badnul": string(make([]byte, 41)), "short": "deadbeef\n", "active.lock": "busy"} {
+	for name, body := range map[string]string{"valid": valid, "allzero": strings.Repeat("0", 40) + "\n", "badnul": string(make([]byte, 41)), "short": "deadbeef\n", "active.lock": "busy", "alias": "ref: refs/fak/locks/valid\n"} {
 		if err := os.WriteFile(filepath.Join(refs, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -605,7 +605,9 @@ func TestQuarantineMalformedLockRefsInDirBoundsAndPreservesValid(t *testing.T) {
 	if strings.Join(moved, ",") != "allzero,badnul,short" {
 		t.Fatalf("moved=%v", moved)
 	}
-	for _, name := range []string{"valid", "active.lock"} {
+	// A symref ("ref: <target>") resolves, so Git traverses it without a "bad
+	// object" wedge; it is a live lease and must be preserved, not quarantined.
+	for _, name := range []string{"valid", "active.lock", "alias"} {
 		if _, err := os.Stat(filepath.Join(refs, name)); err != nil {
 			t.Fatalf("%s not preserved: %v", name, err)
 		}
