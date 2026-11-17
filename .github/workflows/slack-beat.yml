@@ -48,6 +48,7 @@ jobs:
       # Tokens are secrets; channel ids are repo variables — the same keys the feeders read, so
       # the health fold inside the beat sees the same surfaces CI would post to.
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_SLACK_QUIET: ${{ vars.FAK_SLACK_QUIET }}
       FAK_SCOREBOARD_CHANNEL: ${{ vars.FAK_SCOREBOARD_CHANNEL }}
       FAK_DISPATCH_TOKEN: ${{ secrets.FAK_DISPATCH_TOKEN }}
       FAK_DISPATCH_CHANNEL: ${{ vars.FAK_DISPATCH_CHANNEL }}

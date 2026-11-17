@@ -26,6 +26,19 @@ type Wire interface {
 
 var _ Wire = (*slackwire.Client)(nil)
 
+// quietWire is the optional slice of Wire a transport exposes when it can report the
+// global write brake (FAK_SLACK_QUIET). *slackwire.Client implements it; a test fake
+// need not, and a fake that does not is simply never held.
+type quietWire interface{ Quiet() bool }
+
+// held reports whether the transport says outbound writes are braked. A transport that
+// cannot answer is never held — the brake is opt-in and its absence must not change
+// behavior.
+func held(w Wire) bool {
+	qw, ok := w.(quietWire)
+	return ok && qw.Quiet()
+}
+
 // DrainOpts configures one drain pass. Zero values take the documented defaults.
 type DrainOpts struct {
 	// Root locates the leak fence's optional private-needle sidecar (the repo root).
@@ -93,6 +106,7 @@ type DrainReport struct {
 	Failed     int `json:"failed"`    // transient failures recorded this pass (still pending)
 	Dead       int `json:"dead"`
 	Reaped     int `json:"reaped,omitempty"` // expired ephemeral messages deleted (or found already gone) this pass
+	Held       int `json:"held,omitempty"`   // rows NOT attempted because the global brake (FAK_SLACK_QUIET) is engaged
 	Remaining  int `json:"remaining"`        // rows still owed after this pass
 }
 
@@ -186,6 +200,14 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 	}
 
 	rep := &DrainReport{}
+	// Global brake (FAK_SLACK_QUIET): while the fleet is muted, every pending row is
+	// HELD — not attempted, not failed, not dead-lettered, and no `sending` intent marker
+	// written. Holding rather than draining is the whole point: a quiet window must not
+	// burn a row's attempt budget (five quiet drains would otherwise dead-letter the
+	// entire queue) and must not leave a `sending` marker that the next drain would treat
+	// as an ambiguous post and probe for. The rows survive intact and deliver on the first
+	// drain after the operator disengages the switch.
+	braked := held(w)
 	stopped := map[string]bool{} // channel -> stop sending this pass (transient failure at head)
 	sentInChannel := map[string]bool{}
 	// Deferred-threading resolution state: known is every nonce in the spool (a
@@ -199,6 +221,13 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 	deadThisPass := map[string]bool{} // parents that went terminal-non-posted THIS pass (snap predates it)
 	for _, item := range plan {
 		ch := item.Row.Channel
+		if braked {
+			// Held, not failed: no state transition at all, so Attempts is untouched and
+			// the row is byte-identical to how it was enqueued.
+			rep.Held++
+			rep.Remaining++
+			continue
+		}
 		if stopped[ch] {
 			rep.Remaining++
 			continue

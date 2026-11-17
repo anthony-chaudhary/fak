@@ -22,6 +22,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
+	"github.com/anthony-chaudhary/fak/internal/slackquiet"
 	"github.com/anthony-chaudhary/fak/internal/slackwire"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -1082,6 +1083,9 @@ func dispatchCardWire(tokenOverride string) (*slackwire.Client, error) {
 	if dispatchAPIBase != "" {
 		opts = append(opts, slackwire.WithAPIBase(dispatchAPIBase))
 	}
+	// The global brake (FAK_SLACK_QUIET): a muted fleet holds its run-card rows rather
+	// than posting them, and the drain below reports them as held.
+	opts = append(opts, slackwire.WithQuiet(slackquiet.Engaged))
 	return slackwire.New(tok, opts...), nil
 }
 

@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/slackquiet"
 	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
@@ -360,6 +361,10 @@ func (s *HTTPSlack) wire() *slackwire.Client {
 	if s.HTTP != nil {
 		opts = append(opts, slackwire.WithHTTPClient(s.HTTP))
 	}
+	// The global brake (FAK_SLACK_QUIET). chatrelay is the inbound bridge, so its READS
+	// (History/Replies) are deliberately unaffected — only its posts go silent, which is
+	// what keeps the bridge able to observe a muted workspace.
+	opts = append(opts, slackwire.WithQuiet(slackquiet.Engaged))
 	return slackwire.New(s.Token, opts...)
 }
 

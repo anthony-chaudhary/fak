@@ -714,6 +714,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+          FAK_SLACK_QUIET: ${{ vars.FAK_SLACK_QUIET }}
           FAK_SCOREBOARD_CHANNEL: ${{ secrets.FAK_SCOREBOARD_CHANNEL }}
           FAK_SCOREBOARD_SOURCE: ci:${{ github.run_id }}
         run: |
@@ -749,6 +750,7 @@ jobs:
           rendered=0
           posted=0
           skipped=0
+          quiet=0
           failed=0
           while IFS=$'\t' read -r key label debt_key cmd; do
             payload="scorecard-payloads/${key}.json"
@@ -777,12 +779,20 @@ jobs:
             echo "::endgroup::"
 
             if [ "$live_post" = "true" ]; then
-              ./fak scoreboard post \
+              # The verb is the ONE authority on FAK_SLACK_QUIET (it owns the
+              # vocabulary), so a braked post exits 0 having printed "quiet:".
+              # Counting that as posted would make this summary lie about the
+              # fleet being muted, so the output is inspected rather than assumed.
+              post_out=$(./fak scoreboard post \
                 --from "$payload" \
                 --debt-key "$debt_key" \
                 --title "$label" \
-                --source "$FAK_SCOREBOARD_SOURCE"
-              posted=$((posted + 1))
+                --source "$FAK_SCOREBOARD_SOURCE")
+              echo "$post_out"
+              case "$post_out" in
+                quiet:*) quiet=$((quiet + 1)) ;;
+                *)       posted=$((posted + 1)) ;;
+              esac
             else
               skipped=$((skipped + 1))
             fi
@@ -793,9 +803,11 @@ jobs:
             echo "- dry-run rendered: ${rendered}"
             echo "- live posted: ${posted}"
             echo "- live skipped: ${skipped}"
+            echo "- live muted by FAK_SLACK_QUIET: ${quiet}"
             echo "- payload failures skipped: ${failed}"
             echo
             echo "Live posting requires a push to main/master plus FAK_SCOREBOARD_TOKEN and FAK_SCOREBOARD_CHANNEL CI secrets."
+            echo "Set the FAK_SLACK_QUIET repo variable to mute every outbound Slack surface fleet-wide."
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$failed" -ne 0 ]; then

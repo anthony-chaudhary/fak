@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
+	"github.com/anthony-chaudhary/fak/internal/slackquiet"
+	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
 const scoreboardPoisonLedgerEnv = "FAK_SCOREBOARD_POISON_LEDGER"
@@ -66,6 +69,17 @@ func scoreboardPostFlow(stdout, stderr io.Writer, up scoreboard.Update, o scoreb
 		return 0
 	}
 
+	// Global brake (FAK_SLACK_QUIET): the operator has muted outbound Slack, so this
+	// post is a clean SKIP, not a failure. It is checked BEFORE the channel and token
+	// are resolved so a muted fleet needs neither — and, critically, so the post never
+	// reaches the enqueue-on-error path below: a braked post is not a delayed post, and
+	// spooling it would deliver a stale card the moment the operator unmutes. Exit 0
+	// keeps every feeder's fail-open contract intact.
+	if slackquiet.Engaged() {
+		fmt.Fprintf(stdout, "quiet: %s=%s — outbound Slack is muted; nothing posted\n", slackquiet.EnvVar, slackquiet.Value())
+		return 0
+	}
+
 	ch := o.channelFlag
 	if ch == "" {
 		ch = o.resolveChan()
@@ -106,6 +120,14 @@ func scoreboardPostFlow(stdout, stderr io.Writer, up scoreboard.Update, o scoreb
 		ts, err = client.Post(ctx(), ch, up.Text(), up.Blocks())
 	}
 	if err != nil {
+		// Backstop for the early brake check above: if the switch engaged between the
+		// check and the call (or a caller reached here another way), the transport
+		// refuses with ErrQuiet. That is a skip, not a delivery failure — enqueueing it
+		// would spool a card that the next drain delivers stale.
+		if errors.Is(err, slackwire.ErrQuiet) {
+			fmt.Fprintf(stdout, "quiet: %s — outbound Slack is muted; nothing posted\n", slackquiet.EnvVar)
+			return 0
+		}
 		nonce, qerr := enqueueOutboxRow(ch, up, o.prefix)
 		if qerr != nil {
 			fmt.Fprintf(stderr, "%s: %v (and enqueue failed: %v)\n", o.prefix, err, qerr)

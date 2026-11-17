@@ -64,6 +64,7 @@ jobs:
       # Same keys the other feeders read: token is a secret, the channel is a repo var
       # with a built-in #releases default. ALL cards below post to #releases.
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_SLACK_QUIET: ${{ vars.FAK_SLACK_QUIET }}
       FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
       FAK_SCOREBOARD_SOURCE: ci
       RUN_ID: ${{ github.event.workflow_run.id }}
@@ -278,6 +279,7 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_SLACK_QUIET: ${{ vars.FAK_SLACK_QUIET }}
       FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
       FAK_SCOREBOARD_SOURCE: ci
       RUN_ID: ${{ github.event.workflow_run.id }}

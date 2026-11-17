@@ -82,11 +82,12 @@ func (r ReapOpts) norm(o *Outbox) ReapOpts {
 
 // ReapReport is what one reap pass did (or, for a dry run, would do).
 type ReapReport struct {
-	Scanned  int  `json:"scanned"`  // distinct posted messages (channel+ts) examined
-	Eligible int  `json:"eligible"` // messages idle past their TTL (the reap set)
-	Deleted  int  `json:"deleted"`  // chat.delete calls that removed a message
-	Gone     int  `json:"gone"`     // messages already absent (message_not_found) — recorded reaped anyway
-	Failed   int  `json:"failed"`   // transient delete failures — left posted, retried next pass
+	Scanned  int  `json:"scanned"`        // distinct posted messages (channel+ts) examined
+	Eligible int  `json:"eligible"`       // messages idle past their TTL (the reap set)
+	Deleted  int  `json:"deleted"`        // chat.delete calls that removed a message
+	Gone     int  `json:"gone"`           // messages already absent (message_not_found) — recorded reaped anyway
+	Failed   int  `json:"failed"`         // transient delete failures — left posted, retried next pass
+	Held     int  `json:"held,omitempty"` // eligible messages NOT deleted because the global brake (FAK_SLACK_QUIET) is engaged
 	DryRun   bool `json:"dry_run,omitempty"`
 }
 
@@ -177,6 +178,13 @@ func (o *Outbox) reapSnap(ctx context.Context, w Wire, snap *Snapshot, opts Reap
 		if opts.DryRun {
 			continue
 		}
+		if held(w) {
+			// The global brake covers chat.delete too: a quiet fleet must not keep
+			// mutating channels by deleting its own history. The message stays posted and
+			// is reaped on the first pass after the switch is disengaged.
+			rep.Held++
+			continue
+		}
 		if rep.Deleted+rep.Gone >= opts.MaxDeletes {
 			break // bounded per pass; the backlog clears over the next drains
 		}
@@ -242,6 +250,10 @@ func ReapReportLine(rep *ReapReport) string {
 	if rep.DryRun {
 		verb = "would reap"
 	}
-	return fmt.Sprintf("%s: scanned %d  eligible %d  deleted %d  already-gone %d  failed %d",
+	line := fmt.Sprintf("%s: scanned %d  eligible %d  deleted %d  already-gone %d  failed %d",
 		verb, rep.Scanned, rep.Eligible, rep.Deleted, rep.Gone, rep.Failed)
+	if rep.Held > 0 {
+		line += fmt.Sprintf("  held %d (FAK_SLACK_QUIET)", rep.Held)
+	}
+	return line
 }

@@ -37,6 +37,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
+	"github.com/anthony-chaudhary/fak/internal/slackquiet"
 	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
@@ -121,6 +122,11 @@ func outboxWire(token, apiBase string) (*slackwire.Client, error) {
 	if apiBase != "" {
 		opts = append(opts, slackwire.WithAPIBase(apiBase))
 	}
+	// The global brake (FAK_SLACK_QUIET) rides every drain transport built here, so a
+	// muted fleet holds its queue instead of posting. This is the composition layer: the
+	// transport is a primitive and takes the brake injected, and slackquiet owns the
+	// switch's vocabulary and its env/.env.slack.local resolution.
+	opts = append(opts, slackwire.WithQuiet(slackquiet.Engaged))
 	return slackwire.New(token, opts...), nil
 }
 

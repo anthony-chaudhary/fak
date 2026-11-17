@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
+	"github.com/anthony-chaudhary/fak/internal/slackquiet"
 	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
@@ -96,6 +97,10 @@ func NewClient(token string, opts ...Option) (*Client, error) {
 	if c.http != nil {
 		wopts = append(wopts, slackwire.WithHTTPClient(c.http))
 	}
+	// The global brake (FAK_SLACK_QUIET): scoreboard is the publisher most feeders ride,
+	// so wiring it here mutes every one of them without touching a single feeder. The
+	// transport is a primitive and takes the brake injected; slackquiet owns the switch.
+	wopts = append(wopts, slackwire.WithQuiet(slackquiet.Engaged))
 	c.wire = slackwire.New(token, wopts...)
 	return c, nil
 }

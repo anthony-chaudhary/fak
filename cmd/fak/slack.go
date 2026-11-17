@@ -42,6 +42,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
+	"github.com/anthony-chaudhary/fak/internal/slackquiet"
 	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
@@ -387,6 +388,11 @@ func slackWireClient(token, apiBase string) *slackwire.Client {
 	if apiBase != "" {
 		opts = append(opts, slackwire.WithAPIBase(apiBase))
 	}
+	// The global brake (FAK_SLACK_QUIET) rides every client built here. It only refuses
+	// WRITES, so the read-only probes that share this constructor (channel access,
+	// auth.test, history) keep working while the fleet is muted — which is what lets
+	// `fak slack health` still report on a quiet workspace.
+	opts = append(opts, slackwire.WithQuiet(slackquiet.Engaged))
 	return slackwire.New(token, opts...)
 }
 

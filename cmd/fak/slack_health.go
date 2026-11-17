@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/chatrelay"
+	"github.com/anthony-chaudhary/fak/internal/slackquiet"
 )
 
 // healthVerdict is the closed per-surface health classification. The set is deliberately
@@ -49,6 +50,15 @@ const (
 	// backlog no drain is moving is exactly the delivery loss it exists to make loud.
 	verdictDeadRows      healthVerdict = "DEAD_ROWS" // rows exhausted their retry budget — operator must retry or re-author
 	verdictOutboxStalled healthVerdict = "STALLED"   // pending rows older than the stall budget (or spool unreadable)
+
+	// verdictQuiet is the global-brake rung (FAK_SLACK_QUIET): the operator has
+	// deliberately muted outbound Slack, so "no recent post" and "pending rows are
+	// aging" are the INTENDED state, not a fault. Without this rung the brake would
+	// redden every cadence surface (STALE) and the outbox (STALLED) within one budget
+	// window, and slack-watchdog.yml would file a GitHub issue and post an in-channel
+	// alarm about the very silence the operator asked for. Like DEFERRED it is
+	// expected and non-actionable, so it never trips the gate.
+	verdictQuiet healthVerdict = "QUIET"
 )
 
 // surfaceFreshnessBudget maps a surface to the staleness budget implied by the cadence of
@@ -120,6 +130,7 @@ func runSlackHealth(stdout, stderr io.Writer, argv []string) int {
 	runAuthChecks(reports, *apiBase)
 	health := foldSlackHealth(reports, *apiBase, time.Now())
 	health = append(health, outboxHealthRung(time.Now()))
+	health = applyQuietBrake(health, slackquiet.Engaged(), slackquiet.Source(), slackquiet.Value())
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -197,6 +208,37 @@ func foldSlackHealth(reports []*surfaceReport, apiBase string, now time.Time) []
 	return out
 }
 
+// applyQuietBrake folds the global brake (FAK_SLACK_QUIET) over an already-classified
+// report. When the operator has muted outbound Slack, every verdict that would otherwise
+// read as a FAULT is re-labelled QUIET with the original verdict preserved in Detail —
+// the diagnosis is not thrown away, it is re-graded as intended. Two verdicts are left
+// alone: AUTH_FAIL (a rotated token is a real problem whether or not we are posting, and
+// the operator needs to know before they unmute) and INCOMPLETE (a config drift that
+// would silently swallow the first post after unmuting). DEFERRED and OK are already
+// non-alarming and pass through untouched.
+//
+// This is what keeps the brake from manufacturing its own alarm: without it, one budget
+// window of silence reddens every cadence surface and the outbox, and slack-watchdog.yml
+// files a GitHub issue plus an in-channel beat about the silence the operator requested.
+func applyQuietBrake(health []healthReport, engaged bool, source, value string) []healthReport {
+	if !engaged {
+		return health
+	}
+	where := "environment"
+	if source == "file" {
+		where = ".env.slack.local"
+	}
+	for i := range health {
+		switch health[i].Verdict {
+		case verdictStale, verdictOutboxStalled, verdictDeadRows:
+			health[i].Detail = fmt.Sprintf("QUIET (%s=%s in the %s): outbound Slack is muted by the operator — was %s: %s",
+				slackquiet.EnvVar, value, where, health[i].Verdict, health[i].Detail)
+			health[i].Verdict = verdictQuiet
+		}
+	}
+	return health
+}
+
 // lastPostAge reads the channel's most recent message via conversations.history and returns
 // its age. It takes the newest ts across the small page (Slack returns newest-first, but we
 // fold to the max so order can never fool us). An empty channel is an error (nothing to
@@ -255,10 +297,10 @@ func parseSlackTS(ts string) float64 {
 // INCOMPLETE, which is expected, not a real alarm).
 func healthExit(health []healthReport) int {
 	for _, h := range health {
-		// DEFERRED is an expected, non-actionable state (an optional surface with no channel
-		// yet), so it never trips the gate — only a real problem (incomplete/auth-fail/stale)
-		// does.
-		if h.Verdict != verdictOK && h.Verdict != verdictDeferred {
+		// DEFERRED and QUIET are expected, non-actionable states (an optional surface with no
+		// channel yet; the operator's own global mute), so neither trips the gate — only a
+		// real problem (incomplete/auth-fail/stale/dead-rows) does.
+		if h.Verdict != verdictOK && h.Verdict != verdictDeferred && h.Verdict != verdictQuiet {
 			return 1
 		}
 	}
@@ -268,7 +310,7 @@ func healthExit(health []healthReport) int {
 // renderHealthReports prints the human table, worst-verdict-first within a stable order so
 // the surfaces that need attention sit at the top.
 func renderHealthReports(w io.Writer, health []healthReport) {
-	var ok, incomplete, authFail, stale, deferred, alarms int
+	var ok, incomplete, authFail, stale, deferred, quiet, alarms int
 	for _, h := range health {
 		switch h.Verdict {
 		case verdictOK:
@@ -281,12 +323,14 @@ func renderHealthReports(w io.Writer, health []healthReport) {
 			stale++
 		case verdictDeferred:
 			deferred++
+		case verdictQuiet:
+			quiet++
 		case verdictDeadRows, verdictOutboxStalled:
 			alarms++
 		}
 	}
-	fmt.Fprintf(w, "fak slack health — %d surfaces; OK=%d STALE=%d AUTH_FAIL=%d INCOMPLETE=%d DEFERRED=%d OUTBOX_ALARMS=%d\n\n",
-		len(health), ok, stale, authFail, incomplete, deferred, alarms)
+	fmt.Fprintf(w, "fak slack health — %d surfaces; OK=%d STALE=%d AUTH_FAIL=%d INCOMPLETE=%d DEFERRED=%d QUIET=%d OUTBOX_ALARMS=%d\n\n",
+		len(health), ok, stale, authFail, incomplete, deferred, quiet, alarms)
 
 	ordered := make([]healthReport, len(health))
 	copy(ordered, health)
@@ -317,7 +361,9 @@ func verdictRank(v healthVerdict) int {
 		return 3
 	case verdictOK:
 		return 4
+	case verdictQuiet:
+		return 5 // the operator's own mute — informational, below OK
 	default: // DEFERRED — expected, sorts last (below OK)
-		return 5
+		return 6
 	}
 }

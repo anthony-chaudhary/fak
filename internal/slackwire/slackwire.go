@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,6 +69,14 @@ type Client struct {
 	// sleep is the 429 wait, injectable so tests witness the waits instead of
 	// serving them. It must honor ctx cancellation.
 	sleep func(ctx context.Context, d time.Duration) error
+	// quiet, when non-nil and true, brakes every WRITE method (chat.postMessage,
+	// chat.update, chat.delete) with ErrQuiet before any HTTP is issued. Reads
+	// (conversations.history/replies, auth.test) stay live so a health probe can
+	// still observe the workspace while the fleet is muted. Injected rather than
+	// read here: this package is a primitive (tier 1, imports only abi), so the
+	// policy and its config resolution live in internal/slackquiet and the
+	// composition layer passes it in via WithQuiet.
+	quiet func() bool
 }
 
 // Option configures a Client.
@@ -90,6 +99,36 @@ func WithRetryBudget(n int) Option {
 		c.retries = n
 	}
 }
+
+// WithQuiet installs the global write brake: while quiet() reports true, every write
+// method returns ErrQuiet without issuing HTTP. Reads are unaffected, so a health
+// probe still observes the workspace. A nil quiet leaves the wire unbraked.
+//
+// The brake is injected rather than resolved here because this package is a primitive
+// (tier 1, imports only abi): the switch's vocabulary and its env/.env.slack.local
+// resolution live in internal/slackquiet, and the composition layer passes
+// slackquiet.Engaged in. That keeps the transport free of policy and keeps the
+// dependency direction legal.
+func WithQuiet(quiet func() bool) Option {
+	return func(c *Client) { c.quiet = quiet }
+}
+
+// ErrQuiet is returned by every write method while the global brake is engaged. It is
+// a sentinel so callers can distinguish "deliberately muted" from a transport failure:
+// the outbox HOLDS a row on ErrQuiet (it must survive the quiet window intact) instead
+// of counting an attempt toward its dead-letter budget.
+var ErrQuiet = errors.New("slackwire: outbound writes are quieted (FAK_SLACK_QUIET)")
+
+// braked reports whether a write must be refused. A nil quiet is never braked.
+func (c *Client) braked() bool { return c.quiet != nil && c.quiet() }
+
+// Quiet reports whether the global write brake is currently engaged. It is the
+// read-only view of the same state the write methods enforce, exported so a caller
+// that owns a QUEUE of writes can short-circuit the whole pass instead of discovering
+// the brake one refused call at a time — internal/slackoutbox uses it to HOLD its
+// pending rows (spending no attempt, writing no intent marker) rather than walking
+// every row into ErrQuiet. A Client built without WithQuiet always reports false.
+func (c *Client) Quiet() bool { return c.braked() }
 
 // New builds a Client for a bot token. An empty token is allowed — the transport
 // does not resolve or validate credentials (that is internal/slackenv's and the
@@ -329,6 +368,9 @@ func (e envelope) errCode() string { return e.Error }
 // callJSON POSTs a JSON body to method; callGet GETs method with query q. Both
 // decode into out (which must embed envelope) and apply the 429 retry.
 func (c *Client) callJSON(ctx context.Context, method string, body map[string]any, out okReporter) error {
+	if c.braked() {
+		return ErrQuiet
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
