@@ -463,12 +463,23 @@ type Summary struct {
 	PrefillTPSP50 float64 `json:"prefill_tps_p50,omitempty"`
 	// PrefillTPSWeighted is total uncached prompt tokens over total TTFT across the
 	// rows that carry a prefill rate, so long prompts weigh by their tokens.
-	PrefillTPSWeighted float64              `json:"prefill_tps_weighted,omitempty"`
-	DecodeTPSP50       float64              `json:"decode_tps_p50,omitempty"`
-	E2EP50MS           float64              `json:"e2e_p50_ms,omitempty"`
-	E2EP99MS           float64              `json:"e2e_p99_ms,omitempty"`
-	CacheHitShare      float64              `json:"cache_hit_share"`
-	NativeTiming       *NativeTimingSummary `json:"native_timing,omitempty"`
+	PrefillTPSWeighted float64 `json:"prefill_tps_weighted,omitempty"`
+	DecodeTPSP50       float64 `json:"decode_tps_p50,omitempty"`
+	// PrefillTPSTimeWeighted and DecodeTPSTimeWeighted are the duration-weighted
+	// means of the aggregate prefill/decode rate step functions over the window
+	// [first start, last end]: each segment's rate weighs by how long it held,
+	// so a long slow prefill dominates a short fast one (aiperf time-weighted
+	// stats). DecodeTPSActive repeats the decode mean restricted to segments
+	// where at least one turn is in its decode phase, so idle gaps do not
+	// dilute it. All three are absent when no served turn observed a
+	// first-token boundary.
+	PrefillTPSTimeWeighted float64              `json:"prefill_tps_time_weighted,omitempty"`
+	DecodeTPSTimeWeighted  float64              `json:"decode_tps_time_weighted,omitempty"`
+	DecodeTPSActive        float64              `json:"decode_tps_active,omitempty"`
+	E2EP50MS               float64              `json:"e2e_p50_ms,omitempty"`
+	E2EP99MS               float64              `json:"e2e_p99_ms,omitempty"`
+	CacheHitShare          float64              `json:"cache_hit_share"`
+	NativeTiming           *NativeTimingSummary `json:"native_timing,omitempty"`
 	// Errors counts failed turns (Record.Error set); ByError splits them by class.
 	Errors  int            `json:"errors"`
 	ByError map[string]int `json:"by_error,omitempty"`
@@ -736,7 +747,17 @@ func RenderCompact(rep Report) string {
 	} else {
 		b.WriteString(" ttft n/a")
 	}
-	fmt.Fprintf(&b, " | prefill p50=%s weighted=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.PrefillTPSWeighted), fmtTPS(s.DecodeTPSP50))
+	fmt.Fprintf(&b, " | prefill p50=%s weighted=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.PrefillTPSWeighted))
+	if s.PrefillTPSTimeWeighted > 0 {
+		fmt.Fprintf(&b, " tw=%s", fmtTPS(s.PrefillTPSTimeWeighted))
+	}
+	fmt.Fprintf(&b, " | decode p50=%s", fmtTPS(s.DecodeTPSP50))
+	if s.DecodeTPSTimeWeighted > 0 {
+		fmt.Fprintf(&b, " tw=%s", fmtTPS(s.DecodeTPSTimeWeighted))
+	}
+	if s.DecodeTPSActive > 0 {
+		fmt.Fprintf(&b, " active=%s", fmtTPS(s.DecodeTPSActive))
+	}
 	fmt.Fprintf(&b, " | e2e p50=%s p99=%s", fmtMS(s.E2EP50MS), fmtMS(s.E2EP99MS))
 	fmt.Fprintf(&b, " | cache=%.1f%%", s.CacheHitShare*100)
 	if s.GPUBusyMeasured > 0 {

@@ -197,6 +197,11 @@ func (f *summaryFold) finish(recs []Record) Summary {
 		s.PrefillTPSWeighted = roundTo(float64(f.prefillTok)/(f.prefillMS/1000), 100)
 	}
 	s.DecodeTPSP50 = quantile(f.decode, 0.50)
+	if p, d, da, ok := timeWeightedThroughput(recs); ok {
+		s.PrefillTPSTimeWeighted = p
+		s.DecodeTPSTimeWeighted = d
+		s.DecodeTPSActive = da
+	}
 	s.E2EP50MS = quantile(f.e2e, 0.50)
 	s.E2EP99MS = quantile(f.e2e, 0.99)
 	s.GPUBusyMeasured = len(f.gpuBusy)
@@ -245,4 +250,56 @@ func (f *summaryFold) finish(recs []Record) Summary {
 	}
 	s.ByPathStats = summarizeNativePaths(recs)
 	return *s
+}
+
+// timeWeightedThroughput folds the window's records into the aiperf
+// time-weighted throughput trio: the duration-weighted means of the aggregate
+// prefill and decode rate step functions over the window [first start, last
+// end], plus the decode mean restricted to the segments where at least one
+// turn is in its decode phase (the active-only variant). A record contributes
+// when it is a served turn with an observed first-token boundary (TTFTMS > 0)
+// and a commit clock (UnixMS > 0); the per-record rates are the uniform phase
+// rates the sweep lines use: prompt tokens over [start, first-token) and
+// completion-1 over [first-token, end). Rates are returned in tokens/sec; ok
+// is false when no record contributes, leaving every field absent.
+func timeWeightedThroughput(recs []Record) (prefill, decode, decodeActive float64, ok bool) {
+	var startNS, genNS, endNS, inTok, outTok []float64
+	for _, r := range recs {
+		if r.IsProbe() || r.E2EMS <= 0 || r.TTFTMS <= 0 || r.UnixMS <= 0 {
+			continue
+		}
+		end := float64(r.UnixMS) * 1e6
+		start := end - r.E2EMS*1e6
+		startNS = append(startNS, start)
+		genNS = append(genNS, start+r.TTFTMS*1e6)
+		endNS = append(endNS, end)
+		inTok = append(inTok, float64(r.PromptTokens))
+		outTok = append(outTok, float64(r.CompletionTokens))
+	}
+	if len(startNS) == 0 {
+		return 0, 0, 0, false
+	}
+	lo, hi := startNS[0], endNS[0]
+	for i := range startNS {
+		if startNS[i] < lo {
+			lo = startNS[i]
+		}
+		if endNS[i] > hi {
+			hi = endNS[i]
+		}
+	}
+	if hi <= lo {
+		return 0, 0, 0, false
+	}
+	const nsPerSec = 1e9
+	if ts, vals := PrefillThroughputSweepLine(startNS, genNS, inTok); len(ts) > 0 {
+		prefill = roundTo(ComputeTimeWeightedStats(ts, vals, lo, hi).Avg*nsPerSec, 100)
+	}
+	if ts, vals := ThroughputSweepLine(genNS, endNS, outTok); len(ts) > 0 {
+		decode = roundTo(ComputeTimeWeightedStats(ts, vals, lo, hi).Avg*nsPerSec, 100)
+		if maskTS, maskVals := ConcurrencySweepLine(genNS, endNS); len(maskTS) > 0 {
+			decodeActive = roundTo(ComputeActiveWeightedStats(ts, vals, maskTS, maskVals, lo, hi).Avg*nsPerSec, 100)
+		}
+	}
+	return prefill, decode, decodeActive, true
 }
