@@ -19,6 +19,13 @@ type Orientation struct {
 	TestTarget string             `json:"owning_test_target,omitempty"`
 	Stamp      string             `json:"stamp,omitempty"`
 	LiveLeases []OrientationLease `json:"live_leases,omitempty"`
+	// Plan is the bounded sub-section validation plan for this path (see
+	// PlanScope): the minimal build/vet/test commands for the package the path
+	// sits in, plus the does_not_prove list that names what a green run leaves
+	// unproven. It rides the existing orient payload so a human or agent can read
+	// the plan from the surface they already use, with no new verb and no new
+	// binary. Nil only when the path resolves to no package at all.
+	Plan *ScopePlan `json:"plan,omitempty"`
 }
 
 // OrientationLease is the live-lease projection devindex needs. The CLI fills it
@@ -77,6 +84,10 @@ func (c *Catalog) Orient(paths []string, leases []OrientationLease) []Orientatio
 			t := tier
 			o.Tier = &t
 			o.TierName = TierName(tier)
+		}
+		if plan := c.PlanScope(path); plan.Resolved() {
+			p := plan
+			o.Plan = &p
 		}
 		requestTree := []string{path}
 		for _, lease := range leases {

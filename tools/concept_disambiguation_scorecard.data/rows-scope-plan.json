@@ -1,0 +1,28 @@
+{
+  "rows": [
+    {
+      "id": "scope-plan-bounded-validation",
+      "canonical": "ScopePlan (bounded sub-section validation plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/devindex.ScopePlan is the read-only answer to 'what is the smallest thing I can run to validate this sub-section, and what does that NOT prove?'. (*Catalog).PlanScope resolves one scope token - a lane name, a repo-relative path, or a package directory - to the package directories the scope covers, the minimal go build/vet/test commands for exactly those packages, and a does_not_prove list naming what a green run leaves unproven. It is a pure projection over the already-loaded Catalog: no I/O, no clock, no subprocess, and it runs nothing.",
+      "distinction": "A VALIDATION SCOPE for a sub-section of the monorepo - NOT an execution plan (ctxplan's chosen resident view, memq's explain plan, or a dispatch/issue plan) and NOT a land-verify candidate checkout (verifyTopologyCandidate). It names the commands a human or agent would run and the boundary those commands do not cross; it never runs them. It refuses rather than widens: SCOPE_UNBOUNDED for a scope naming the whole module, and SCOPE_UNDECLARED_LANE for a lane with no declared [lanes.trees] leaf.",
+      "distinct_from": [
+        "ctxplan",
+        "candidate-planner",
+        "wwt-topology-candidate-verify"
+      ],
+      "aliases": [
+        "PlanScope",
+        "scope plan",
+        "bounded sub-section validation plan"
+      ],
+      "grounding": "ScopePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

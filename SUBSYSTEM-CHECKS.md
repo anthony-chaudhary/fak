@@ -85,6 +85,50 @@ Regression rules:
 <!-- GPU server / endpoint-load artifact-integrity check excluded from the public copy (operator-private lab infra); its private-side tool targets stay out of public evidence. -->
 | Release / process safety | `python -m pytest tools/release_lock_test.py tools/safe_ff_sync_test.py`; optional `python -m pytest tools/fleet_*_test.py` | release lock, safe fast-forward sync, fleet account/bottleneck/control tests | Operator workflows fail closed on unsafe release ownership, unsafe sync, malformed fleet health inputs, and bottleneck classification drift. | Product performance or model quality. |
 
+## Bounded Sub-Section Validation
+
+The table above is the catalog of what to run. This section is the contract for
+running *part* of it without committing to the whole module — the answer to "I
+have limited capacity; what is the smallest thing that validates my sub-section,
+and what does that leave unproven?"
+
+`fak-dev orient --paths <lane|path|glob> --json` carries a `plan` object
+(schema `fak.scope-plan.v1`) for every path that resolves to a package. The plan
+names the minimal `go build` / `go vet` / `go test` commands for exactly that
+package, and a `does_not_prove` list. It is a read-only projection over the
+`dos.toml` lane taxonomy: it runs nothing, and it derives its package set from
+the lane's declared tree globs rather than a filesystem walk, so a plan cannot
+silently widen past the boundary the arbiter honors.
+
+Two refusals are part of the contract, and both are closed-vocabulary codes
+rather than prose:
+
+- `SCOPE_UNBOUNDED` — the scope names the whole module (`./...`, `**`, `.`,
+  `all`). "Validate everything" is refused rather than expanded, so the
+  whole-module commitment stays visible instead of hiding inside a plan.
+- `SCOPE_UNDECLARED_LANE` — the scope resolves to a lane with no declared
+  `[lanes.trees]` leaf, or to a lane that owns no package directory. An
+  undeclared leaf is not cosmetic: `internal/laneadmit` falls back to the lane's
+  declared tree, and an empty tree conservatively overlaps *everything*, so a
+  plan built on an undeclared lane would claim a boundary the arbiter does not
+  honor.
+
+**What a green bounded run does not prove** (the same honesty rule the table
+above applies per row, applied to the scope as a whole):
+
+- That `go build ./...` succeeds. A bounded plan is deliberately not the
+  whole-module build.
+- That packages outside the planned set are unaffected. Their tests are not run.
+- That cross-lane integration holds. A peer lane's unlanded change to a shared
+  dependency is not exercised.
+- That hardware, accelerator, or serving paths work. No device, model, or
+  network is touched.
+- That architest import rules hold beyond the planned package's own edges.
+
+A bounded plan is a *lower bound* on validation, never a substitute for the
+release gate. Use it to decide whether your sub-section is alive; use the full
+repo gate when you need release confidence.
+
 ## How To Read These Checks
 
 - A subsystem check should have a clear boundary: import graph, policy load,
