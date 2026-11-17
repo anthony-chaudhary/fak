@@ -113,6 +113,15 @@ const (
 	// which dispatches per layer on layer_types (isLinearAttnLayer); it is reached
 	// only for a RECOGNIZED hybrid (IsQwen35Hybrid), never the #934 refusal state.
 	ForwardQwen35GDN ForwardPathKind = "qwen35-gdn"
+	// ForwardKimiK31 is the Kimi K3.1 hybrid text stack: 69 KDA linear-attention
+	// layers + 24 Gated-DSA sparse-MLA layers under one layer_types dispatch
+	// (kimik31_forward.go, the L8 composite over the landed L5/L6 host oracles).
+	// It is reached only for a RECOGNIZED K3.1 checkpoint (IsKimiK31) whose
+	// LayerTypes carry the L1 admission's "kda"/"dsa" tokens, never the generic
+	// attnSeq fall-through that would panic on the KDA/DSA weight set (issue
+	// #14363). Its per-layer dispatch switches on IsKimiK31KDALayer/DSALayer so
+	// the classification cannot drift from what the composite actually runs.
+	ForwardKimiK31 ForwardPathKind = "kimi-k31"
 )
 
 // ClassifyForwardPath resolves the in-kernel forward path a checkpoint (cfg +
@@ -145,6 +154,16 @@ func ClassifyForwardPath(cfg Config, man map[string]tensorMeta) (ForwardPathKind
 	}
 	if err := refuseUnsupportedHybridArch(cfg, man); err != nil {
 		return "", err
+	}
+	// Kimi K3.1 before the qwen35 check: K3.1 shares no layer_types token with
+	// qwen35, but it must never fall through to the generic attnSeq path (its
+	// KDA/DSA weight set has no self_attn.q_proj). IsKimiK31 is the arch identity;
+	// a checkpoint whose LayerTypes carry the L1 admission's "kda"/"dsa" tokens is
+	// the one the composite dispatches (kimik31_forward.go). A recognized K3.1
+	// family with no layer_types yet (config parsed, admission not applied) is
+	// still named ForwardKimiK31 so classification never guesses attnSeq.
+	if cfg.IsKimiK31() {
+		return ForwardKimiK31, nil
 	}
 	switch {
 	case cfg.isGemma4():
