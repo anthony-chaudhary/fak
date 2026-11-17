@@ -17,12 +17,11 @@ import (
 )
 
 // fak-test:runtime integration est=1s lane=default
-// Serial: newTestServer and the live inflight gate are global. Estimate is unmeasured.
+// Serial: newTestServer shares process state. The inflight gate is per-Server (#14453),
+// so each subtest installs its own on its own Server. Estimate is unmeasured.
 func TestServedInflightReleasesEveryDimension(t *testing.T) {
 	t.Setenv("FAK_PROVIDER_EXTRA_BODY_JSON", "")
 	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "1")
-	prior := LiveInflightGate()
-	t.Cleanup(func() { SetInflightGate(prior) })
 	for _, dimension := range []string{"key", "principal"} {
 		for _, tokenChain := range []bool{false, true} {
 			for _, providerError := range []bool{false, true} {
@@ -54,8 +53,7 @@ func TestServedInflightReleasesEveryDimension(t *testing.T) {
 						keys = []string{"fixture-key-a", "fixture-key-b", "fixture-key-a"}
 					}
 					gate := NewInflightGate(policy)
-					SetInflightGate(gate)
-					t.Cleanup(func() { SetInflightGate(prior) })
+					srv.SetInflightGate(gate)
 					if tokenChain {
 						budget := TokenRatePolicy{Caps: ratelimit.TokenCaps{MaxTotalTokens: 100000, MaxConcurrent: 4, TargetUtilization: 1}}
 						srv.SetTokenRateGate(NewTokenRateGate(budget))
@@ -101,8 +99,7 @@ func TestServedInflightReleasesEveryDimension(t *testing.T) {
 	t.Run("later_gate_refusal_rolls_back", func(t *testing.T) {
 		srv := newTestServer(t)
 		gate := NewInflightGate(InflightPolicy{MaxInflight: 1, PrincipalSlots: 1, PerKey: map[string]int{"org-a": 1}})
-		SetInflightGate(gate)
-		t.Cleanup(func() { SetInflightGate(prior) })
+		srv.SetInflightGate(gate)
 		srv.SetTokenRateGate(NewTokenRateGate(TokenRatePolicy{Caps: ratelimit.TokenCaps{MaxTotalTokens: 1}}))
 		turn := servedSessionTurn{traceID: "inflight-rollback", maxTokens: 8}
 		ctx := WithPrincipal(context.Background(), "org-a")

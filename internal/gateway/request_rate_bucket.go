@@ -33,8 +33,9 @@ package gateway
 // host-level bound — debits exactly one token on admission, CANCELS it when a later
 // stage refuses (the provider was never called), and ties the seat to the request's
 // single lease-release path through the TokenReservation linked chain. Inert by
-// default: no live gate (SetRequestRateGate(nil)) leaves the request path
-// byte-for-byte historical.
+// default: a Server with no installed gate (SetRequestRateGate(nil)) leaves the
+// request path byte-for-byte historical. The gate is PER-SERVER state (#14453),
+// not process-global: each gateway owns its own tenants' buckets.
 //
 // HONEST FENCE — what this is NOT. It meters ARRIVAL RATE, not concurrency or tokens:
 // the debit stands once admitted (the request consumed rate budget at admission time),
@@ -189,6 +190,10 @@ type RequestRateGate struct {
 	admitted         uint64
 	rejectedRate     uint64
 	rejectedCapacity uint64
+	// sheds counts refusals PER PRINCIPAL (#14453): the per-tenant shed counter the
+	// /metrics surface renders as fak_tenant_admission_shed_total{gate="rate"}. Both
+	// closed classes count; a principal with no refusal holds no entry.
+	sheds map[string]uint64
 }
 
 // NewRequestRateGate builds a gate under the given policy.
@@ -198,6 +203,7 @@ func NewRequestRateGate(p RateBucketPolicy) *RequestRateGate {
 		slots:   p.slots(),
 		now:     time.Now,
 		buckets: map[string]*rateBucket{},
+		sheds:   map[string]uint64{},
 	}
 }
 
@@ -297,6 +303,7 @@ func (g *RequestRateGate) Take(principal string, requests int64) (*RateLease, er
 			g.sweepIdleLocked(now)
 			if len(g.buckets) >= g.slots {
 				g.rejectedCapacity++
+				g.sheds[principal]++
 				return nil, &rateRefusal{cause: ErrRequestRateCapacity}
 			}
 		}
@@ -312,6 +319,7 @@ func (g *RequestRateGate) Take(principal string, requests int64) (*RateLease, er
 	need := requests * rateTokenNs
 	if b.credit < need {
 		g.rejectedRate++
+		g.sheds[principal]++
 		// Two ceilings, mirroring the upstream divCeil pair: whole ns until the deficit
 		// is earned, then whole seconds (>= 1) the client waits.
 		waitNs := ceilDivInt64(need-b.credit, rate)
@@ -406,24 +414,35 @@ func ceilDivInt64(a, b int64) int64 {
 	return q
 }
 
-var (
-	requestRateGateMu   sync.RWMutex
-	liveRequestRateGate *RequestRateGate
-)
-
-// SetRequestRateGate installs the live request-rate gate consulted FIRST by
+// SetRequestRateGate installs this Server's request-rate gate, consulted FIRST by
 // beginServedAdmission (ahead of the request-count inflight gate); nil detaches it and
-// the request path goes byte-for-byte historical. Swaps under one guard alongside
-// LiveRequestRateGate.
-func SetRequestRateGate(g *RequestRateGate) {
-	requestRateGateMu.Lock()
-	liveRequestRateGate = g
-	requestRateGateMu.Unlock()
+// the request path goes byte-for-byte historical. Per-SERVER state (#14453): each
+// gateway owns its own tenants' buckets, so two Servers on one process can run
+// different rate policies without cross-talk. Settable after New, guarded by
+// admissionMu alongside SetPrincipalTokenRates. A nil receiver is a no-op.
+func (s *Server) SetRequestRateGate(g *RequestRateGate) {
+	if s == nil {
+		return
+	}
+	s.admissionMu.Lock()
+	s.requestRateGate = g
+	s.admissionMu.Unlock()
 }
 
-// LiveRequestRateGate returns the installed gate, or nil when none is attached.
-func LiveRequestRateGate() *RequestRateGate {
-	requestRateGateMu.RLock()
-	defer requestRateGateMu.RUnlock()
-	return liveRequestRateGate
+// ShedCounts returns the per-principal refusal totals (#14453) — the per-tenant shed
+// counter the /metrics surface renders as fak_tenant_admission_shed_total{gate="rate"}.
+// The map is a copy; a nil gate reports an empty map.
+func (g *RequestRateGate) ShedCounts() map[string]uint64 {
+	if g == nil {
+		return map[string]uint64{}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make(map[string]uint64, len(g.sheds))
+	for p, n := range g.sheds {
+		if n > 0 {
+			out[p] = n
+		}
+	}
+	return out
 }

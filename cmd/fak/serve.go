@@ -33,6 +33,7 @@ import (
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/ratelimit"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 	"github.com/anthony-chaudhary/fak/pkg/deploykit/coherence"
@@ -106,6 +107,64 @@ func configureServeToolEngines() {
 	// Register only the confined read miss engine; agent.Configure would also install
 	// the demo tool policy and is intentionally not part of serve startup.
 	agent.RegisterReadEngine("")
+}
+
+// resolveTenantAdmission reads the --tenant-* flags into the three per-tenant gate
+// policies (#14453). All-zero input yields all-disabled policies — the historical inert
+// path. A negative value fails loud: a typo must not silently disable a fairness gate.
+func resolveTenantAdmission(sf *serveFlags) (rate gateway.RateBucketPolicy, inflight gateway.InflightPolicy, tokens gateway.TokenRatePolicy, err error) {
+	if *sf.tenantRateRPS < 0 || *sf.tenantRateBurst < 0 {
+		return rate, inflight, tokens, errors.New("--tenant-rate-rps and --tenant-rate-burst accept 0 (off) or positive values")
+	}
+	if *sf.tenantMaxInflight < 0 {
+		return rate, inflight, tokens, errors.New("--tenant-max-inflight accepts 0 (off) or a positive value")
+	}
+	if *sf.tenantTokenWindowTokens < 0 {
+		return rate, inflight, tokens, errors.New("--tenant-token-window-tokens accepts 0 (off) or a positive value")
+	}
+	if *sf.tenantTokenWindow <= 0 {
+		return rate, inflight, tokens, errors.New("--tenant-token-window must be a positive duration")
+	}
+	rate = gateway.RateBucketPolicy{
+		RequestsPerSecond: int64(*sf.tenantRateRPS),
+		RequestBurst:      int64(*sf.tenantRateBurst),
+	}
+	inflight = gateway.InflightPolicy{PerPrincipal: *sf.tenantMaxInflight}
+	tokens = gateway.TokenRatePolicy{
+		Caps:   ratelimit.TokenCaps{MaxTotalTokens: int64(*sf.tenantTokenWindowTokens)},
+		Window: *sf.tenantTokenWindow,
+	}
+	return rate, inflight, tokens, nil
+}
+
+// installTenantAdmissionGates wires the armed per-tenant admission gates onto the Server
+// (#14453): the request-rate bucket, the in-flight caps, and the token allotment book —
+// the same order beginServedAdmission consults them. All-off leaves every gate nil and
+// the served request path byte-for-byte historical; each armed gate gets one startup
+// message naming its budget.
+func installTenantAdmissionGates(sf *serveFlags, srv *gateway.Server) ([]gateway.StartupMessage, error) {
+	rate, inflight, tokens, err := resolveTenantAdmission(sf)
+	if err != nil {
+		return nil, err
+	}
+	var msgs []gateway.StartupMessage
+	if rate.RequestsPerSecond > 0 {
+		srv.SetRequestRateGate(gateway.NewRequestRateGate(rate))
+		burst := rate.RequestBurst
+		if burst <= 0 {
+			burst = rate.RequestsPerSecond
+		}
+		msgs = append(msgs, gateway.StartupMessage{Source: "serve", Kind: "tenant-admission", Level: "info", Text: fmt.Sprintf("tenant admission: request-rate gate armed (%d req/s per tenant, burst %d)", rate.RequestsPerSecond, burst)})
+	}
+	if inflight.PerPrincipal > 0 {
+		srv.SetInflightGate(gateway.NewInflightGate(inflight))
+		msgs = append(msgs, gateway.StartupMessage{Source: "serve", Kind: "tenant-admission", Level: "info", Text: fmt.Sprintf("tenant admission: in-flight gate armed (%d concurrent requests per tenant)", inflight.PerPrincipal)})
+	}
+	if tokens.Caps.MaxTotalTokens > 0 {
+		srv.SetPrincipalTokenRates(gateway.NewPrincipalTokenRates(tokens, 0))
+		msgs = append(msgs, gateway.StartupMessage{Source: "serve", Kind: "tenant-admission", Level: "info", Text: fmt.Sprintf("tenant admission: token window gate armed (%d tokens per tenant per %s)", tokens.Caps.MaxTotalTokens, tokens.Window)})
+	}
+	return msgs, nil
 }
 
 // serveFlags holds the parsed `fak serve` flag values, one field per flag in
@@ -274,6 +333,11 @@ type serveFlags struct {
 	maxTotalTokens               *int
 	maxBatchPrefillTokens        *int
 	readinessCoherence           *int
+	tenantRateRPS                *int
+	tenantRateBurst              *int
+	tenantMaxInflight            *int
+	tenantTokenWindowTokens      *int
+	tenantTokenWindow            *time.Duration
 	fs                           *flag.FlagSet
 	explicit                     map[string]bool
 }
@@ -289,6 +353,16 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.maxTotalTokens = fs.Int("max-total-tokens", 0, "upper bound on a request's total tokens (prompt + max_new_tokens). Must not exceed admission token budget.")
 	sf.maxBatchPrefillTokens = fs.Int("max-batch-prefill-tokens", 0, "upper bound on batch prefill tokens (alias / companion to max-total-tokens)")
 	sf.readinessCoherence = fs.Int("readiness-coherence", coherence.DefaultCount, "hold readiness until a temperature-0 'count 1..N' probe answers correctly (binary/shader skew); 0 disables")
+	// Per-tenant admission gates (#14453): each authenticated principal (keyset tenant)
+	// meters its OWN budget, so one noisy tenant can no longer starve the others. All
+	// three default OFF (0), leaving the served request path byte-for-byte historical;
+	// every unlisted tenant takes the configured default. A negative value fails startup
+	// loud — a typo must not silently disable a fairness gate.
+	sf.tenantRateRPS = fs.Int("tenant-rate-rps", 0, "per-tenant request-rate admission: sustained requests/sec each authenticated principal may send before a 429 rate_limit_error shed (0 = off). Each tenant meters its own bucket; an arrival faster than its rate is shed before it can queue or hold.")
+	sf.tenantRateBurst = fs.Int("tenant-rate-burst", 0, "per-tenant request-rate burst ceiling in requests (0 = derive from --tenant-rate-rps). Only meaningful with --tenant-rate-rps > 0.")
+	sf.tenantMaxInflight = fs.Int("tenant-max-inflight", 0, "per-tenant in-flight admission: concurrent model requests each authenticated principal may hold before a 429 shed (0 = off). Composes with any per-key caps; the tighter binds.")
+	sf.tenantTokenWindowTokens = fs.Int("tenant-token-window-tokens", 0, "per-tenant rolling-window token admission: tokens per window each authenticated principal may reserve before a 429 shed (0 = off). Checked BEFORE the shared provider window so an over-cap tenant sheds without touching its neighbours' budget.")
+	sf.tenantTokenWindow = fs.Duration("tenant-token-window", time.Minute, "rolling accounting window for --tenant-token-window-tokens (default 1m, the unit providers quote TPM in)")
 	sf.configPath = fs.String("config", "", "load reviewable deployment defaults from fak.toml (explicit flags override; no implicit ambient lookup)")
 	sf.applianceObservability = fs.Bool("appliance-observability", false, "activate appliance Grafana dashboard catalog profile (fak-strix-*) and default routing to fak-strix-index")
 	sf.launchEvidencePath = fs.String("launch-evidence", "", "write private process-bound startup evidence to a new absolute JSON path after model setup; existing files refuse startup")
@@ -1796,6 +1870,15 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		if err := srv.CheckMaxTotalTokens(maxTokens); err != nil {
 			return nil, err
 		}
+	}
+	// Per-tenant admission gates (#14453): --tenant-* arms the request-rate, in-flight,
+	// and token-window gates PER SERVER, so one noisy tenant can no longer starve the
+	// others on a shared serve. All-off leaves them nil — the served request path stays
+	// byte-for-byte historical; a malformed value fails startup loud.
+	if tenantMsgs, err := installTenantAdmissionGates(sf, srv); err != nil {
+		return nil, err
+	} else {
+		startupMessages = append(startupMessages, tenantMsgs...)
 	}
 	// Control-plane SPEND CAP (#4859, the CLI half of #3273): --spend-cap builds the
 	// governor, --spend-scope-trace the trace->ScopeKey resolver, and --budget-webhook is

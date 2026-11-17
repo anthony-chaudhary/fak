@@ -18,17 +18,14 @@ import (
 )
 
 // fak-test:runtime integration est=1s lane=default
-// Serial: newTestServer and both live admission gates are global. Estimate is unmeasured.
+// Serial: newTestServer shares process state. Both admission gates are per-Server
+// (#14453), so each subtest installs its own on its own Server. Estimate is unmeasured.
 func TestServedRateAdmissionPreservesLeaseLifecycle(t *testing.T) {
 	t.Setenv("FAK_PROVIDER_EXTRA_BODY_JSON", "")
 	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "1")
-	priorRate, priorInflight := LiveRequestRateGate(), LiveInflightGate()
-	restore := func() { SetRequestRateGate(priorRate); SetInflightGate(priorInflight) }
-	t.Cleanup(restore)
 	for _, tokenChain := range []bool{false, true} {
 		for _, providerError := range []bool{false, true} {
 			t.Run(fmt.Sprintf("served/token_chain=%v/provider_error=%v", tokenChain, providerError), func(t *testing.T) {
-				t.Cleanup(restore)
 				var hits atomic.Int32
 				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					hits.Add(1)
@@ -50,12 +47,12 @@ func TestServedRateAdmissionPreservesLeaseLifecycle(t *testing.T) {
 				srv.keyset = newKeyset(map[string]string{"fixture-key-a": "org-a"})
 				srv.planner = &agent.HTTPPlanner{Provider: agent.ProviderOpenAI, BaseURL: upstream.URL, ModelID: "rate-lifecycle-fixture", Client: upstream.Client(), MaxTokens: 8}
 				inflight := NewInflightGate(InflightPolicy{MaxInflight: 1, PrincipalSlots: 2})
-				SetInflightGate(inflight)
+				srv.SetInflightGate(inflight)
 				rate := NewRequestRateGate(RateBucketPolicy{RequestsPerSecond: 16, RequestBurst: 16, PrincipalSlots: 1})
 				var now atomic.Int64
 				now.Store(time.Unix(1, 0).UnixNano())
 				rate.SetClock(func() time.Time { return time.Unix(0, now.Load()).UTC() })
-				SetRequestRateGate(rate)
+				srv.SetRequestRateGate(rate)
 				if tokenChain {
 					budget := TokenRatePolicy{Caps: ratelimit.TokenCaps{MaxTotalTokens: 1000000, MaxConcurrent: 4, TargetUtilization: 1}}
 					srv.SetTokenRateGate(NewTokenRateGate(budget))
@@ -110,12 +107,10 @@ func TestServedRateAdmissionPreservesLeaseLifecycle(t *testing.T) {
 	}
 	for _, cancelled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("fixed_capacity_refusal/cancelled=%v", cancelled), func(t *testing.T) {
-			t.Cleanup(restore)
 			srv := newTestServer(t)
-			SetInflightGate(nil)
 			rate := NewRequestRateGate(RateBucketPolicy{RequestsPerSecond: 1, RequestBurst: 1, PrincipalSlots: 1})
 			rate.SetClock(func() time.Time { return time.Unix(1, 0).UTC() })
-			SetRequestRateGate(rate)
+			srv.SetRequestRateGate(rate)
 			policy := DefaultAdmissionPolicy()
 			policy.MaxNumSeqs = 1
 			srv.SetAdmissionController(NewAdmissionController(policy))
