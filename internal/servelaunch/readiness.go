@@ -3,12 +3,17 @@
 // package waits until the health URL answers, while staying honest about what
 // actually happened if it never does.
 //
-// The composite races three outcomes against each other:
-//   - Ready:    the health URL answers 2xx within the deadline budget.
+// The composite races four outcomes against each other:
+//   - Ready:    the health URL answers 2xx within the deadline budget and,
+//     when the caller supplies an engine-start-chain channel, that chain has
+//     completed — a bare listener bind alone is not Ready.
 //   - Timeout:  the deadline budget passes with no healthy answer.
 //   - Crashed:  the caller-supplied crash side-channel (process-exit signal
 //     plus last-log-lines fetcher) fires first, so a fast crash returns in
 //     seconds instead of riding the full timeout.
+//   - Stopping: the caller-supplied stop side-channel (SIGTERM/drain) has
+//     fired. This outcome is terminal: a probe that observed stop can never
+//     transition back to Ready.
 //
 // The deadline budget itself is chosen from a caller-supplied cache-state
 // probe: cold state (weights not resident, first load dominates startup) gets
@@ -21,6 +26,14 @@
 // timestamps the ticker delivers (exactly what time.NewTicker delivers in
 // production). Tests drive fake ticks by hand, and no code path here ever
 // sleeps. Elapsed figures are therefore reported at tick granularity.
+//
+// The terminal Stopping outcome and the engine-start-chain gate are a
+// clean-room ADAPT of the 3-state readiness atomic (0 starting / 1 ready /
+// 2 stopping, one-way stop) in basetenlabs/deepseek-ultrafast
+// crates/server/src/readiness.rs:15-38 @ 76766a97308bfd1658fb055e835d0f92de737dc3
+// (Elastic License 2.0, source-available; idea only). The contract is
+// re-expressed over this package's channel seams; no upstream source text is
+// copied. Borrow-port: oss-port-dsuf-servelaunch-terminal-stop-20261116.
 package servelaunch
 
 import (
@@ -43,6 +56,10 @@ const (
 	VerdictTimeout Verdict = "timeout"
 	// VerdictCrashed reports the launched process exiting before readiness.
 	VerdictCrashed Verdict = "crashed"
+	// VerdictStopping reports that a stop (SIGTERM/drain) was observed. The
+	// state is terminal: a probe that observed stop never transitions back to
+	// Ready.
+	VerdictStopping Verdict = "stopping"
 )
 
 // Verdict is the closed outcome vocabulary of a readiness wait.
@@ -55,6 +72,8 @@ var (
 	ErrTimeout = errors.New("servelaunch: readiness deadline exceeded")
 	// ErrCrashed is the sentinel for the Crashed verdict.
 	ErrCrashed = errors.New("servelaunch: server process exited during readiness wait")
+	// ErrStopping is the sentinel for the Stopping verdict.
+	ErrStopping = errors.New("servelaunch: stop observed during readiness wait")
 )
 
 // CacheState is the closed vocabulary the cache-state probe reports.
@@ -143,6 +162,17 @@ type Config struct {
 	CacheState CacheStateProbe
 	// Crash is the process-exit side-channel. Zero value disables it.
 	Crash CrashSideChannel
+	// Stop, if non-nil, is the stop side-channel: it fires when the caller
+	// observes the launched server stopping (SIGTERM, drain). The Stopping
+	// verdict is terminal — once the channel has fired, Wait never returns
+	// Ready, even if the health URL answers healthily. A nil channel disables
+	// stop detection.
+	Stop <-chan struct{}
+	// EngineReady, if non-nil, fires when the full engine-start chain has
+	// completed. When supplied, a healthy listener answer alone is not enough
+	// for Ready: the wait also requires this channel to have fired. A nil
+	// channel preserves the bare-listener behavior.
+	EngineReady <-chan struct{}
 	// OnHeartbeat, if non-nil, is invoked once per surviving tick with the
 	// elapsed time since the wait started.
 	OnHeartbeat func(elapsed time.Duration)
@@ -178,16 +208,22 @@ type Result struct {
 	CrashLines []string
 }
 
-// Wait polls HealthURL at Config.Interval until it answers 2xx, the selected
-// deadline budget passes, or the crash side-channel fires. It returns a
-// Result plus an error whose identity is exactly one of the three sentinels:
-// branch with errors.Is(err, ErrReady | ErrTimeout | ErrCrashed), never prose.
+// Wait polls HealthURL at Config.Interval until it answers 2xx and (when
+// Config.EngineReady is supplied) the engine-start chain has completed, the
+// selected deadline budget passes, or a side-channel fires. It returns a
+// Result plus an error whose identity is exactly one of the four sentinels:
+// branch with errors.Is(err, ErrReady | ErrTimeout | ErrCrashed | ErrStopping),
+// never prose.
 //
-// Ordering guarantees: the crash side-channel is checked before every poll and
-// again before every deadline evaluation, so a fired crash always beats both
-// the next poll and the deadline — a fast crash returns Crashed in seconds,
-// never Timeout. Context cancellation aborts the wait and wraps ctx.Err();
-// that error matches none of the three sentinels.
+// Ordering guarantees: the crash and stop side channels are checked before
+// every poll and again before every deadline evaluation, so a fired crash or
+// stop always beats both the next poll and the deadline — a fast crash
+// returns Crashed in seconds, never Timeout. The stop side channel is
+// terminal with respect to Ready: a stop observed before the Ready check wins
+// even over a healthy answer, so a stopping probe never re-readies. When both
+// crash and stop have fired, crash wins: the process's fate is the stronger
+// observation. Context cancellation aborts the wait and wraps ctx.Err(); that
+// error matches none of the four sentinels.
 func Wait(ctx context.Context, cfg Config) (*Result, error) {
 	if strings.TrimSpace(cfg.HealthURL) == "" {
 		return nil, errors.New("servelaunch: health URL is required")
@@ -211,12 +247,36 @@ func Wait(ctx context.Context, cfg Config) (*Result, error) {
 	// A nil channel blocks forever in a select, so the same loop body serves
 	// both "side-channel armed" and "side-channel disabled".
 	crashCh := cfg.Crash.Exit
+	stopCh := cfg.Stop
+	engineCh := cfg.EngineReady
 	crashFired := func() bool {
 		if crashCh == nil {
 			return false
 		}
 		select {
 		case <-crashCh:
+			return true
+		default:
+			return false
+		}
+	}
+	stopFired := func() bool {
+		if stopCh == nil {
+			return false
+		}
+		select {
+		case <-stopCh:
+			return true
+		default:
+			return false
+		}
+	}
+	engineUp := func() bool {
+		if engineCh == nil {
+			return true
+		}
+		select {
+		case <-engineCh:
 			return true
 		default:
 			return false
@@ -230,20 +290,41 @@ func Wait(ctx context.Context, cfg Config) (*Result, error) {
 		if crashFired() {
 			return crashResult(res, cfg, now.Sub(start))
 		}
+		if stopFired() {
+			return stoppingResult(res, now.Sub(start))
+		}
 		res.Attempts++
 		if err := probeHealth(ctx, cfg); err == nil {
-			res.Verdict = VerdictReady
-			res.Elapsed = now.Sub(start)
-			return res, fmt.Errorf("%w: %d attempt(s) in %s", ErrReady, res.Attempts, res.Elapsed.Round(time.Millisecond))
+			if engineUp() {
+				// One-way invariant: a stop observed before the Ready
+				// transition wins even over a healthy answer — a stopping
+				// probe never re-readies.
+				if stopFired() {
+					return stoppingResult(res, now.Sub(start))
+				}
+				res.Verdict = VerdictReady
+				res.Elapsed = now.Sub(start)
+				return res, fmt.Errorf("%w: %d attempt(s) in %s", ErrReady, res.Attempts, res.Elapsed.Round(time.Millisecond))
+			}
 		}
 		select {
 		case <-crashCh:
 			return crashResult(res, cfg, now.Sub(start))
-		case tv := <-ticker.Channel():
-			// Re-check before the deadline evaluation so a crash that lands on
-			// the same tick still wins the race.
+		case <-stopCh:
+			// Re-check crash so a crash that landed on the same tick still
+			// wins the race: the process's fate is the stronger observation.
 			if crashFired() {
 				return crashResult(res, cfg, now.Sub(start))
+			}
+			return stoppingResult(res, now.Sub(start))
+		case tv := <-ticker.Channel():
+			// Re-check before the deadline evaluation so a crash or stop that
+			// lands on the same tick still wins the race.
+			if crashFired() {
+				return crashResult(res, cfg, now.Sub(start))
+			}
+			if stopFired() {
+				return stoppingResult(res, now.Sub(start))
 			}
 			now = tv
 			if !now.Before(deadline) {
@@ -268,6 +349,13 @@ func crashResult(res *Result, cfg Config, elapsed time.Duration) (*Result, error
 		res.CrashLines = append([]string(nil), cfg.Crash.LogTail()...)
 	}
 	return res, fmt.Errorf("%w: %d attempt(s) in %s", ErrCrashed, res.Attempts, res.Elapsed.Round(time.Millisecond))
+}
+
+// stoppingResult fills the terminal Stopping outcome.
+func stoppingResult(res *Result, elapsed time.Duration) (*Result, error) {
+	res.Verdict = VerdictStopping
+	res.Elapsed = elapsed
+	return res, fmt.Errorf("%w: %d attempt(s) in %s", ErrStopping, res.Attempts, res.Elapsed.Round(time.Millisecond))
 }
 
 // probeHealth performs one bounded GET; 2xx is success, anything else (refused

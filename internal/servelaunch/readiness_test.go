@@ -366,9 +366,221 @@ func TestReadinessRefusesEmptyHealthURL(t *testing.T) {
 	if res != nil {
 		t.Errorf("Result = %+v, want nil on refusal", res)
 	}
-	for _, s := range []error{ErrReady, ErrTimeout, ErrCrashed} {
+	for _, s := range []error{ErrReady, ErrTimeout, ErrCrashed, ErrStopping} {
 		if errors.Is(err, s) {
 			t.Fatalf("config refusal must not match verdict sentinel %v", s)
 		}
 	}
+}
+
+// TestReadinessTerminalStop pins the one-way stop invariant: once the probe
+// observes stop (SIGTERM/drain), it can never transition back to Ready.
+// fak-test:runtime fast est=50ms lane=default
+func TestReadinessTerminalStop(t *testing.T) {
+	t.Run("stop observed before the first poll beats a healthy answer", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(srv.Close)
+
+		_, _, cfg := harness(t, srv.URL, time.Second, 10*time.Second, 10*time.Second, CacheWarm)
+		stopCh := make(chan struct{})
+		close(stopCh)
+		engineCh := make(chan struct{})
+		close(engineCh)
+		cfg.Stop = stopCh
+		cfg.EngineReady = engineCh
+
+		res, err := Wait(context.Background(), cfg)
+		if !errors.Is(err, ErrStopping) {
+			t.Fatalf("err = %v, want errors.Is(err, ErrStopping)", err)
+		}
+		if res.Verdict != VerdictStopping {
+			t.Errorf("Verdict = %q, want %q", res.Verdict, VerdictStopping)
+		}
+		if res.Attempts != 0 {
+			t.Errorf("Attempts = %d, want 0 (stop checked before the first poll)", res.Attempts)
+		}
+	})
+
+	t.Run("stop observed mid-wait after a failed poll", func(t *testing.T) {
+		firstHit := make(chan struct{})
+		var once sync.Once
+		stopCh := make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			once.Do(func() {
+				close(firstHit)
+				close(stopCh)
+			})
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		t.Cleanup(srv.Close)
+
+		_, _, cfg := harness(t, srv.URL, time.Second, 10*time.Second, 10*time.Second, CacheWarm)
+		cfg.Stop = stopCh
+
+		type outcome struct {
+			res *Result
+			err error
+		}
+		done := make(chan outcome, 1)
+		go func() {
+			res, err := Wait(context.Background(), cfg)
+			done <- outcome{res, err}
+		}()
+
+		select {
+		case <-firstHit:
+		case <-time.After(5 * time.Second): // deadlock guard only; the SUT advances on channels, not wall clock
+			t.Fatal("first health poll never reached the server")
+		}
+
+		select {
+		case out := <-done:
+			if !errors.Is(out.err, ErrStopping) {
+				t.Fatalf("err = %v, want errors.Is(err, ErrStopping)", out.err)
+			}
+			if out.res.Verdict != VerdictStopping {
+				t.Errorf("Verdict = %q, want %q", out.res.Verdict, VerdictStopping)
+			}
+			if out.res.Attempts != 1 {
+				t.Errorf("Attempts = %d, want 1 (stop observed after the first failed poll)", out.res.Attempts)
+			}
+			if out.res.Elapsed >= out.res.Budget {
+				t.Errorf("Elapsed = %s with Budget = %s, want the stop to beat the deadline", out.res.Elapsed, out.res.Budget)
+			}
+		case <-time.After(5 * time.Second): // deadlock guard only
+			t.Fatal("Wait did not return after the stop signal fired")
+		}
+	})
+
+	t.Run("stop at the Ready transition beats a healthy answer", func(t *testing.T) {
+		// The handler closes the stop channel before it answers 2xx, so the
+		// stop is observed before the Ready transition even though the
+		// listener answers healthily: a stopping probe never re-readies.
+		stopCh := make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			close(stopCh)
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(srv.Close)
+
+		_, _, cfg := harness(t, srv.URL, time.Second, 10*time.Second, 10*time.Second, CacheWarm)
+		cfg.Stop = stopCh
+		engineCh := make(chan struct{})
+		close(engineCh)
+		cfg.EngineReady = engineCh
+
+		res, err := Wait(context.Background(), cfg)
+		if !errors.Is(err, ErrStopping) {
+			t.Fatalf("err = %v, want errors.Is(err, ErrStopping)", err)
+		}
+		if res.Verdict != VerdictStopping {
+			t.Errorf("Verdict = %q, want %q", res.Verdict, VerdictStopping)
+		}
+		if res.Attempts != 1 {
+			t.Errorf("Attempts = %d, want 1", res.Attempts)
+		}
+	})
+
+	t.Run("stop beats the deadline tick", func(t *testing.T) {
+		srv := unhealthyServer(t)
+
+		clock, ticker, cfg := harness(t, srv.URL, time.Second, 4*time.Second, 4*time.Second, CacheCold)
+		ticker.prime(clock, 4, time.Second) // last tick lands exactly on the 4s deadline
+		stopCh := make(chan struct{})
+		close(stopCh)
+		cfg.Stop = stopCh
+
+		res, err := Wait(context.Background(), cfg)
+		if !errors.Is(err, ErrStopping) {
+			t.Fatalf("err = %v, want errors.Is(err, ErrStopping) even though the deadline tick was also due", err)
+		}
+		if res.Verdict != VerdictStopping {
+			t.Errorf("Verdict = %q, want %q", res.Verdict, VerdictStopping)
+		}
+		if res.Attempts != 0 {
+			t.Errorf("Attempts = %d, want 0 (stop checked before the first poll)", res.Attempts)
+		}
+	})
+}
+
+// TestReadinessEngineChainGatesReady pins the engine-start-chain gate: a
+// healthy listener answer alone is not Ready when the caller supplies an
+// engine-start-chain channel; Ready requires the chain to have completed.
+// fak-test:runtime fast est=50ms lane=default
+func TestReadinessEngineChainGatesReady(t *testing.T) {
+	t.Run("a healthy listener answer alone is not Ready", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(srv.Close)
+
+		clock, ticker, cfg := harness(t, srv.URL, time.Second, 4*time.Second, 4*time.Second, CacheWarm)
+		ticker.prime(clock, 8, time.Second)
+		engineCh := make(chan struct{}) // never fires: the engine-start chain never completes
+		cfg.EngineReady = engineCh
+
+		res, err := Wait(context.Background(), cfg)
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("err = %v, want errors.Is(err, ErrTimeout): a bare listener bind is not Ready", err)
+		}
+		if res.Verdict != VerdictTimeout {
+			t.Errorf("Verdict = %q, want %q", res.Verdict, VerdictTimeout)
+		}
+		if res.Attempts != 4 {
+			t.Errorf("Attempts = %d, want 4 (polls at t=0..3s, timeout at the 4s tick)", res.Attempts)
+		}
+	})
+
+	t.Run("Ready requires the engine-start chain", func(t *testing.T) {
+		var hits int
+		engineCh := make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			hits++
+			if hits == 2 {
+				close(engineCh)
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(srv.Close)
+
+		clock, ticker, cfg := harness(t, srv.URL, time.Second, 10*time.Second, 10*time.Second, CacheWarm)
+		ticker.prime(clock, 4, time.Second)
+		cfg.EngineReady = engineCh
+
+		res, err := Wait(context.Background(), cfg)
+		if !errors.Is(err, ErrReady) {
+			t.Fatalf("err = %v, want errors.Is(err, ErrReady)", err)
+		}
+		if res.Verdict != VerdictReady {
+			t.Errorf("Verdict = %q, want %q", res.Verdict, VerdictReady)
+		}
+		if res.Attempts != 2 {
+			t.Errorf("Attempts = %d, want 2 (the first healthy answer arrives before the chain completes)", res.Attempts)
+		}
+		if res.Elapsed != time.Second {
+			t.Errorf("Elapsed = %s, want 1s", res.Elapsed)
+		}
+	})
+
+	t.Run("nil engine channel preserves the bare-listener behavior", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(srv.Close)
+
+		_, _, cfg := harness(t, srv.URL, time.Second, 10*time.Second, 10*time.Second, CacheWarm)
+
+		res, err := Wait(context.Background(), cfg)
+		if !errors.Is(err, ErrReady) {
+			t.Fatalf("err = %v, want errors.Is(err, ErrReady)", err)
+		}
+		if res.Attempts != 1 {
+			t.Errorf("Attempts = %d, want 1 (healthy answer on the first poll)", res.Attempts)
+		}
+		if res.Elapsed != 0 {
+			t.Errorf("Elapsed = %s, want 0", res.Elapsed)
+		}
+	})
 }
