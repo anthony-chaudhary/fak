@@ -567,7 +567,36 @@ var sweepExecWitnessScratchBeforeCreate = func(parent string) {
 	sweepExecWitnessScratch(parent, now, true, execWitnessSweepLimit, legacyExecWitnessMaxAge, processalive.Check, processstart.Start)
 }
 
+// ExecutionMaterializer leases one independently pinned, clean full snapshot.
+type ExecutionMaterializer func(context.Context, string, string) (string, func(), error)
+type executionMaterializerKey struct{}
+
+// WithExecutionMaterializer scopes snapshot acquisition to this verification context.
+func WithExecutionMaterializer(ctx context.Context, acquire ExecutionMaterializer) context.Context {
+	return context.WithValue(ctx, executionMaterializerKey{}, acquire)
+}
+
 func (v *ExecutionVerifier) scratchWorktree(ctx context.Context, ref string) (string, func(), error) {
+	if acquire, ok := ctx.Value(executionMaterializerKey{}).(ExecutionMaterializer); ok && acquire != nil {
+		if err := ctx.Err(); err != nil {
+			return "", nil, err
+		}
+		dir, release, err := acquire(ctx, v.dir, ref)
+		if err != nil {
+			if release != nil {
+				release()
+			}
+			return "", nil, err
+		}
+		if dir == "" || release == nil {
+			if release != nil {
+				release()
+			}
+			return "", nil, fmt.Errorf("invalid execution snapshot lease")
+		}
+		return dir, release, nil
+	}
+
 	// A checked-in workspace that references a sibling module (the private repo's
 	// `use ../fak`) only resolves when the scratch checkout preserves that sibling
 	// relationship. Materializing it beside the repository root keeps `../fak`

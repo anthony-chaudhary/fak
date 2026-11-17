@@ -47,6 +47,28 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "execution-witness-snapshot-materializer",
+      "canonical": "WithExecutionMaterializer",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Context-scoped source snapshot provider used by native execution verification to lease an independently pinned, clean full repository snapshot and release it after selectors finish.",
+      "distinction": "Acquires source files for execution witnesses, distinct from RenderPlan prompt assembly, RenderItem context cells, and Rendered history spans. The provider does not change selector verdicts or source refs; provider errors remain verification errors.",
+      "distinct_from": [
+        "renderplan-context",
+        "renderitem-memq",
+        "rendered-ctxplan"
+      ],
+      "aliases": [
+        "ExecutionMaterializer"
+      ],
+      "grounding": "WithExecutionMaterializer",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

@@ -635,8 +635,20 @@ func verifyWorkerLandSymptomSelected(wtPath, ref string, extraTags, testSelector
 	resolver := witness.NewWithRunner(nil, wtPath).WithSymptomTags(extraTags).WithSymptomTests(testSelectors)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	var snapshots []workerworktree.WitnessSnapshotEvent
+	ctx = workerworktree.WithWitnessSnapshotObserver(ctx, func(event workerworktree.WitnessSnapshotEvent) {
+		if len(snapshots) < 8 {
+			snapshots = append(snapshots, event)
+		}
+	})
+	ctx = witness.WithExecutionMaterializer(ctx, workerworktree.AcquireWitnessSnapshot)
 	outcome, detail := resolver.ResolveSymptomWithDetail(ctx, ref, true)
 	res := workerLandSymptomVerdict(outcome, detail, timeout)
+	if len(snapshots) > 0 {
+		if evidence, err := json.Marshal(snapshots); err == nil {
+			res.Detail += " | witness_snapshots=" + string(evidence)
+		}
+	}
 	if excerpt := resolver.SymptomFailureExcerpt(); !res.OK && excerpt != "" {
 		res.Detail += " | " + excerpt
 	}

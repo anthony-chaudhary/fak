@@ -1,15 +1,221 @@
 package workerworktree
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
+
+const witnessSnapshotPoolPrefix = ".fak-witness-pool-"
+
+// WitnessSnapshotEvent records source preparation separately from test outcomes.
+type WitnessSnapshotEvent struct {
+	Phase    string        `json:"phase"`
+	Ref      string        `json:"ref"`
+	Dir      string        `json:"dir"`
+	Reused   bool          `json:"reused"`
+	Duration time.Duration `json:"duration_ns"`
+	Error    string        `json:"error,omitempty"`
+}
+type witnessSnapshotObserverKey struct{}
+
+// WithWitnessSnapshotObserver receives acquisition and release evidence.
+func WithWitnessSnapshotObserver(ctx context.Context, observe func(WitnessSnapshotEvent)) context.Context {
+	return context.WithValue(ctx, witnessSnapshotObserverKey{}, observe)
+}
+
+// AcquireWitnessSnapshot leases a full clean detached snapshot. Active leases
+// remain disjoint from each other and from the land candidate namespace.
+func AcquireWitnessSnapshot(ctx context.Context, root, exactSHA string) (string, func(), error) {
+	started := time.Now()
+	emit := func(phase, dir string, reused bool, start time.Time, err error) {
+		if observer, ok := ctx.Value(witnessSnapshotObserverKey{}).(func(WitnessSnapshotEvent)); ok && observer != nil {
+			event := WitnessSnapshotEvent{Phase: phase, Ref: exactSHA, Dir: dir, Reused: reused, Duration: time.Since(start)}
+			if err != nil {
+				event.Error = err.Error()
+			}
+			observer(event)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		emit("prepare", "", false, started, err)
+		return "", nil, err
+	}
+	if len(exactSHA) != 40 || strings.IndexFunc(exactSHA, func(r rune) bool { return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') }) >= 0 {
+		err := fmt.Errorf("witness snapshot requires exact commit SHA")
+		emit("prepare", "", false, started, err)
+		return "", nil, err
+	}
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		emit("prepare", "", false, started, err)
+		return "", nil, err
+	}
+	root = absoluteRoot
+	session := newTopologyCandidateSession(root, witnessSnapshotGitRunner(ctx))
+	session.poolPrefix = witnessSnapshotPoolPrefix
+	if ok, detail := session.create(exactSHA); !ok {
+		err := ctx.Err()
+		if err == nil {
+			err = fmt.Errorf("witness snapshot preparation: %s", detail)
+		}
+		dir := session.dir
+		err = errors.Join(err, session.discardWitnessSnapshot(), session.cleanupErr)
+		emit("prepare", dir, session.reused, started, err)
+		return "", nil, err
+	}
+	dir := session.dir
+	if rc, _ := run(session.git, dir, []string{"sparse-checkout", "disable"}); rc != 0 {
+		err := errors.Join(fmt.Errorf("witness snapshot full checkout failed"), ctx.Err(), session.discardWitnessSnapshot())
+		emit("prepare", dir, session.reused, started, err)
+		return "", nil, err
+	}
+	if err := session.validateWitnessSnapshot(exactSHA); err != nil {
+		err = errors.Join(err, ctx.Err(), session.discardWitnessSnapshot())
+		emit("prepare", dir, session.reused, started, err)
+		return "", nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		err = errors.Join(err, session.discardWitnessSnapshot())
+		emit("prepare", dir, session.reused, started, err)
+		return "", nil, err
+	}
+	if err := os.Remove(witnessSnapshotUnavailablePath(dir)); err != nil {
+		err = errors.Join(err, session.discardWitnessSnapshot())
+		emit("prepare", dir, session.reused, started, err)
+		return "", nil, err
+	}
+	emit("prepare", dir, session.reused, started, nil)
+	var once sync.Once
+	return dir, func() {
+		once.Do(func() {
+			start := time.Now()
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			session.git = witnessSnapshotGitRunner(cleanupCtx)
+			var cleanupErr error
+			if session.pooled && livePoolCountPrefix(root, filepath.Dir(dir), session.git, session.poolName()) <= TopologyCandidatePoolCap {
+				session.close()
+			} else {
+				cleanupErr = session.discardWitnessSnapshot()
+			}
+			emit("release", dir, session.reused, start, cleanupErr)
+		})
+	}, nil
+}
+
+func (s *topologyCandidateSession) validateWitnessSnapshot(ref string) error {
+	for _, probe := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"rev-parse", "HEAD"}, ref},
+		{[]string{"status", "--porcelain", "--untracked-files=all", "--ignored"}, ""},
+	} {
+		rc, out := run(s.git, s.dir, probe.args)
+		if rc != 0 || strings.TrimSpace(out) != probe.want {
+			return fmt.Errorf("witness snapshot source or cleanliness probe failed")
+		}
+	}
+	if rc, _ := run(s.git, s.dir, []string{"symbolic-ref", "-q", "HEAD"}); rc != 1 {
+		return fmt.Errorf("witness snapshot is not detached")
+	}
+	return nil
+}
+
+func witnessSnapshotUnavailablePath(dir string) string {
+	return candidatePoolSidecarPath(dir) + ".witness-unavailable"
+}
+
+// Persist exclusion outside the checkout before any source mutation. Failure
+// paths retain this marker even if removing or renaming the checkout fails.
+func beginWitnessSnapshotMutation(dir string) error {
+	path := witnessSnapshotUnavailablePath(dir)
+	if err := os.MkdirAll(filepath.Dir(path), poolStateDirPerm); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, poolLockFilePerm)
+	if err != nil {
+		return err
+	}
+	_, writeErr := f.WriteString("witness snapshot preparation incomplete\n")
+	syncErr := f.Sync()
+	return errors.Join(writeErr, syncErr, f.Close())
+}
+
+func (s *topologyCandidateSession) discardWitnessSnapshot() error {
+	if s.dir == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := os.Stat(witnessSnapshotUnavailablePath(s.dir)); os.IsNotExist(err) {
+		if err := beginWitnessSnapshotMutation(s.dir); err != nil {
+			// This checkout was validated before release. Do not mutate it when
+			// exclusion cannot be persisted; the next acquisition must reset it.
+			releaseCandidatePool(s.poolLock)
+			s.poolLock, s.dir = nil, ""
+			return err
+		}
+	}
+	var cleanupErr error
+	if rc, out := run(witnessSnapshotGitRunner(ctx), s.root, []string{"worktree", "remove", "--force", s.dir}); rc != 0 {
+		cleanupErr = fmt.Errorf("witness snapshot removal exited %d: %s", rc, tail(out, 200))
+		// Failed preparation must leave the reusable namespace before unlocking.
+		if err := os.Rename(s.dir, filepath.Join(filepath.Dir(s.dir), ".fak-witness-quarantine-"+filepath.Base(s.dir))); err != nil && !os.IsNotExist(err) {
+			cleanupErr = fmt.Errorf("%w; quarantine rename: %v", cleanupErr, err)
+		}
+	}
+	releaseCandidatePool(s.poolLock)
+	s.poolLock = nil
+	s.dir = ""
+	s.cleanupErr = cleanupErr
+	return cleanupErr
+}
+
+func witnessSnapshotGitRunner(ctx context.Context) GitRunner {
+	return func(root string, args []string) (int, string) {
+		if err := ctx.Err(); err != nil {
+			return ReapTimeoutExitCode, err.Error()
+		}
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = root
+		cmd.WaitDelay = 100 * time.Millisecond
+		windowgate.ConfigureBackgroundCommand(cmd)
+		procguard.ConfigureProcessTreeCancel(cmd)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		job, err := windowgate.StartInNewJob(cmd)
+		if err != nil {
+			return 127, err.Error()
+		}
+		err = cmd.Wait()
+		_ = job.Close()
+		if ctx.Err() != nil {
+			return ReapTimeoutExitCode, ctx.Err().Error()
+		}
+		if err != nil {
+			if exit, ok := err.(*exec.ExitError); ok {
+				return exit.ExitCode(), stdout.String() + stderr.String()
+			}
+			return 127, err.Error()
+		}
+		return 0, stdout.String()
+	}
+}
 
 // Pool constants. topologyCandidatePoolPrefix names the kept-checkout family;
 // it is deliberately OUTSIDE topologyCandidatePrefixes so the owner-aware sweep
@@ -173,9 +379,13 @@ func verifyTopologyCandidate(root, ref, prospectiveDiff string, verify VerifyHoo
 // not take it never marks the dir pooled-holding (it either skips the dir or
 // leaves it unlocked-kept for its holder to release).
 type topologyCandidateSession struct {
-	root string
-	git  GitRunner
-	dir  string
+	poolPrefix string
+	reused     bool
+	failed     string
+	cleanupErr error
+	root       string
+	git        GitRunner
+	dir        string
 	// pooled reports that dir is a kept pool checkout: close releases the
 	// advisory lock (when held) and leaves the checkout in place.
 	pooled bool
@@ -213,9 +423,67 @@ func (s *topologyCandidateSession) verify(ref, prospectiveDiff string, verify Ve
 	return verify(s.dir)
 }
 
+func (s *topologyCandidateSession) poolName() string {
+	if s.poolPrefix != "" {
+		return s.poolPrefix
+	}
+	return topologyCandidatePoolPrefix
+}
+func (s *topologyCandidateSession) poolMarkerStale(name string) bool {
+	return poolLockMarkerStale(strings.Replace(name, s.poolName(), topologyCandidatePoolPrefix, 1))
+}
+
+// A managed caller's generated workspace describes plumbing, not the pinned tree.
+func (s *topologyCandidateSession) witnessSnapshotParent(ref string) (string, error) {
+	rc, files := run(s.git, s.root, []string{"ls-tree", "--full-tree", "--name-only", ref, "--", "go.work"})
+	if rc != 0 {
+		return "", fmt.Errorf("inspect committed witness workspace")
+	}
+	if strings.TrimSpace(files) == "" {
+		return "", nil
+	}
+	rc, workspace := run(s.git, s.root, []string{"show", ref + ":go.work"})
+	if rc != 0 {
+		return "", fmt.Errorf("read committed witness workspace")
+	}
+	sibling := false
+	for _, field := range strings.Fields(workspace) {
+		field = strings.Trim(field, "()\"")
+		if field == ".." || strings.HasPrefix(field, "../") || strings.HasPrefix(field, "..\\") {
+			sibling = true
+			break
+		}
+	}
+	if !sibling {
+		return "", nil
+	}
+	common := rootCommonGitDir(s.root, s.git)
+	info, err := os.Stat(common)
+	if common == "" || filepath.Base(common) != ".git" || err != nil || !info.IsDir() {
+		return "", fmt.Errorf("resolve canonical witness repository root")
+	}
+	canonical := filepath.Dir(common)
+	parent := filepath.Dir(canonical)
+	if parent == canonical {
+		return "", fmt.Errorf("canonical witness repository has no parent")
+	}
+	return parent, nil
+}
+
 func (s *topologyCandidateSession) create(ref string) (bool, string) {
+	if s.poolPrefix == witnessSnapshotPoolPrefix {
+		if rc, out := run(s.git, s.root, []string{"rev-parse", ref + "^{commit}"}); rc != 0 || strings.TrimSpace(out) != ref {
+			return false, "witness source commit unavailable"
+		}
+	}
 	parent := ""
-	if workspaceNeedsSiblingTopology(s.root) {
+	if s.poolPrefix == witnessSnapshotPoolPrefix {
+		var err error
+		parent, err = s.witnessSnapshotParent(ref)
+		if err != nil {
+			return false, err.Error()
+		}
+	} else if workspaceNeedsSiblingTopology(s.root) {
 		rootAbs, err := filepath.Abs(s.root)
 		if err != nil {
 			return false, "failed to resolve selected root: " + err.Error()
@@ -224,12 +492,18 @@ func (s *topologyCandidateSession) create(ref string) (bool, string) {
 	}
 	// A killed land never runs close; its owner-named candidate is collected by
 	// a later land's sweep (candidate.go).
-	sweepTopologyCandidatesBeforeCreate(s.root, parent, s.git)
-	if candidatePoolEnabled() {
+	if s.poolPrefix != witnessSnapshotPoolPrefix {
+		sweepTopologyCandidatesBeforeCreate(s.root, parent, s.git)
+	}
+	if candidatePoolEnabled() || s.poolPrefix == witnessSnapshotPoolPrefix {
 		if s.adoptPooled(parent, ref) {
 			return true, ""
 		}
-		if livePoolCount(s.root, parent, s.git) < TopologyCandidatePoolCap {
+		if s.failed != "" {
+			return false, s.failed
+		}
+
+		if livePoolCountPrefix(s.root, parent, s.git, s.poolName()) < TopologyCandidatePoolCap {
 			ok, hard := s.createPooled(parent, ref)
 			if ok {
 				return true, ""
@@ -251,7 +525,7 @@ func (s *topologyCandidateSession) create(ref string) (bool, string) {
 // established (the caller falls back to a transient checkout), and
 // (false, hard) when the materialization itself failed.
 func (s *topologyCandidateSession) createPooled(parent, ref string) (bool, string) {
-	candDir, err := os.MkdirTemp(parent, topologyCandidatePoolPattern())
+	candDir, err := os.MkdirTemp(parent, OwnerNamedScratchPattern(s.poolName()))
 	if err != nil {
 		return false, ""
 	}
@@ -263,8 +537,20 @@ func (s *topologyCandidateSession) createPooled(parent, ref string) (bool, strin
 	if !ok {
 		return false, ""
 	}
+	if s.poolPrefix == witnessSnapshotPoolPrefix {
+		if err := beginWitnessSnapshotMutation(candDir); err != nil {
+			releaseCandidateSidecar(sidecar)
+			return false, "witness exclusion marker failed: " + err.Error()
+		}
+	}
 	rc, out := run(s.git, s.root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", candDir, ref})
 	if rc != 0 {
+		if s.poolPrefix == witnessSnapshotPoolPrefix {
+			s.dir = candDir
+			s.discardWitnessSnapshot()
+			releaseCandidateSidecar(sidecar)
+			return false, "git witness checkout failed: " + tail(out, 200)
+		}
 		releaseCandidateSidecar(sidecar)
 		cleanupTopologyCandidate(s.root, candDir, s.git)
 		return false, "git candidate checkout failed: " + tail(out, 200)
@@ -277,14 +563,20 @@ func (s *topologyCandidateSession) createPooled(parent, ref string) (bool, strin
 	s.dir = candDir
 	s.pooled = true
 	s.poolLock = lock
-	trimPoolExcess(s.root, parent, s.git)
+	if s.poolPrefix != witnessSnapshotPoolPrefix {
+		trimPoolExcessPrefix(s.root, parent, s.git, s.poolName())
+	}
 	return true, ""
 }
 
 // createTransient is the pre-pool behavior: a fresh owner-named checkout that
 // close removes and the owner-aware sweep collects if the land is killed.
 func (s *topologyCandidateSession) createTransient(parent, ref string) (bool, string) {
-	candDir, err := os.MkdirTemp(parent, topologyCandidatePattern())
+	pattern := topologyCandidatePattern()
+	if s.poolPrefix == witnessSnapshotPoolPrefix {
+		pattern = OwnerNamedScratchPattern(".fak-witness-once-")
+	}
+	candDir, err := os.MkdirTemp(parent, pattern)
 	if err != nil {
 		return false, "failed to create topology-preserving candidate temp dir: " + err.Error()
 	}
@@ -292,8 +584,18 @@ func (s *topologyCandidateSession) createTransient(parent, ref string) (bool, st
 	s.dir = candDir
 	s.pooled = false
 	s.poolLock = nil
+	if s.poolPrefix == witnessSnapshotPoolPrefix {
+		if err := beginWitnessSnapshotMutation(candDir); err != nil {
+			s.dir = ""
+			return false, "witness exclusion marker failed: " + err.Error()
+		}
+	}
 	if rc, out := run(s.git, s.root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", candDir, ref}); rc != 0 {
-		s.close()
+		if s.poolPrefix == witnessSnapshotPoolPrefix {
+			s.discardWitnessSnapshot()
+		} else {
+			s.close()
+		}
 		return false, "git candidate checkout failed: " + tail(out, 200)
 	}
 	return true, ""
@@ -324,7 +626,7 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 		return false
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() || !isTopologyCandidatePoolName(entry.Name()) {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), s.poolName()) {
 			continue
 		}
 		cand := filepath.Join(parent, entry.Name())
@@ -333,6 +635,12 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 			// Mid-creation (or its creator sits between MkdirTemp and the
 			// handoff): never touch it.
 			continue
+		}
+		if s.poolPrefix == witnessSnapshotPoolPrefix {
+			if _, err := os.Stat(witnessSnapshotUnavailablePath(cand)); !os.IsNotExist(err) {
+				releaseCandidateSidecar(sidecar)
+				continue
+			}
 		}
 		candCommon := candidateCommonGitDir(cand)
 		if candCommon == "" || !samePath(candCommon, common) {
@@ -346,6 +654,10 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 			continue
 		}
 		if !containsPath(registered, cand) || containsPath(prunable, cand) {
+			if s.poolPrefix == witnessSnapshotPoolPrefix {
+				releaseCandidateSidecar(sidecar)
+				continue
+			}
 			// Registered-but-gutted (or unregistered) scratch of this repo:
 			// remove the dir and let the prune collect the registration, the
 			// same verdict the owner-aware sweep reaches for the transient
@@ -361,13 +673,25 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 		if !lockOK {
 			continue
 		}
-		if candidateWorktreeLockPresent(cand) && !poolLockMarkerStale(entry.Name()) {
+		if candidateWorktreeLockPresent(cand) && !s.poolMarkerStale(entry.Name()) {
 			// A live creator's (or operator's) explicit marker: respect it.
 			releaseCandidatePool(lock)
 			continue
 		}
+		if s.poolPrefix == witnessSnapshotPoolPrefix {
+			if err := beginWitnessSnapshotMutation(cand); err != nil {
+				releaseCandidatePool(lock)
+				s.failed = "witness exclusion marker failed: " + err.Error()
+				return false
+			}
+		}
 		clearCandidateWorktreeLock(cand)
 		if !s.moveToFrom(cand, ref) {
+			if s.poolPrefix == witnessSnapshotPoolPrefix {
+				s.dir, s.poolLock, s.pooled = cand, lock, true
+				s.failed = "git witness reset failed"
+				return false
+			}
 			// The flock proves no pool-aware session is using the checkout, so
 			// removing it is safe; a git "initializing" marker left by a dead
 			// creator is cleared by removeCandidateWithRegistration.
@@ -376,19 +700,24 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 			staleRegistration = true
 			continue
 		}
+		s.reused = true
 		s.dir = cand
 		s.pooled = true
 		s.poolLock = lock
 		if staleRegistration {
 			run(s.git, s.root, []string{"worktree", "prune"})
 		}
-		s.pruneGoneRegistrations()
+		if s.poolPrefix != witnessSnapshotPoolPrefix {
+			s.pruneGoneRegistrations()
+		}
 		return true
 	}
 	if staleRegistration {
 		run(s.git, s.root, []string{"worktree", "prune"})
 	}
-	s.pruneGoneRegistrations()
+	if s.poolPrefix != witnessSnapshotPoolPrefix {
+		s.pruneGoneRegistrations()
+	}
 	return false
 }
 
@@ -398,6 +727,9 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 // extras it can fully exclude (sidecar plus admin flock), so the pool returns
 // to the cap without ever serializing cold creations behind each other.
 func trimPoolExcess(root, parent string, git GitRunner) {
+	trimPoolExcessPrefix(root, parent, git, topologyCandidatePoolPrefix)
+}
+func trimPoolExcessPrefix(root, parent string, git GitRunner, prefix string) {
 	if parent == "" {
 		parent = os.TempDir()
 	}
@@ -416,7 +748,7 @@ func trimPoolExcess(root, parent string, git GitRunner) {
 		return
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() || !isTopologyCandidatePoolName(entry.Name()) {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
 			continue
 		}
 		cand := filepath.Join(parent, entry.Name())
@@ -475,13 +807,13 @@ func (s *topologyCandidateSession) pruneGoneRegistrations() {
 			continue
 		}
 		wt := filepath.Dir(filepath.Clean(strings.TrimSpace(string(gitdir))))
-		if !isTopologyCandidatePoolName(filepath.Base(wt)) {
+		if !strings.HasPrefix(filepath.Base(wt), s.poolName()) {
 			continue
 		}
 		if _, err := os.Stat(wt); !os.IsNotExist(err) {
 			continue
 		}
-		if !poolLockMarkerStale(filepath.Base(wt)) {
+		if !s.poolMarkerStale(filepath.Base(wt)) {
 			continue
 		}
 		lockPath := filepath.Join(adminDir, candidatePoolLockName)
@@ -509,7 +841,14 @@ func (s *topologyCandidateSession) moveToFrom(dir, ref string) bool {
 	if rc, _ := run(s.git, dir, []string{"-c", "core.longpaths=true", "checkout", "--detach", "--force", ref}); rc != 0 {
 		return false
 	}
-	rc, _ := run(s.git, dir, []string{"clean", "-ffdx", "-e", "/.gocache"})
+	args := []string{"clean", "-ffdx", "-e", "/.gocache"}
+	if s.poolPrefix == witnessSnapshotPoolPrefix {
+		if rc, _ := run(s.git, dir, []string{"reset", "--hard", ref}); rc != 0 {
+			return false
+		}
+		args = []string{"clean", "-ffdx"}
+	}
+	rc, _ := run(s.git, dir, args)
 	return rc == 0
 }
 
@@ -571,6 +910,9 @@ func registeredWorktrees(root string, git GitRunner) (registered map[string]bool
 // parent — the pool's disk bound. Unregistered or other-repository dirs do not
 // consume the cap.
 func livePoolCount(root, parent string, git GitRunner) int {
+	return livePoolCountPrefix(root, parent, git, topologyCandidatePoolPrefix)
+}
+func livePoolCountPrefix(root, parent string, git GitRunner, prefix string) int {
 	if parent == "" {
 		parent = os.TempDir()
 	}
@@ -585,7 +927,7 @@ func livePoolCount(root, parent string, git GitRunner) int {
 		return 0
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() || !isTopologyCandidatePoolName(entry.Name()) {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
 			continue
 		}
 		cand := filepath.Clean(filepath.Join(parent, entry.Name()))
