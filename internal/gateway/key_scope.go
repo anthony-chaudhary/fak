@@ -184,6 +184,51 @@ func keyScopeOneOf(route string, names []string) bool {
 	return false
 }
 
+// operatorPlaneRoute reports whether path is a host-wide control surface that
+// only the OPERATOR credential may reach (#14448): the admin plane
+// (/v1/admin/*), the host-wide reload/revoke verbs, and the control-directive
+// surfaces (both the /v1/control and /v1/fak/control spellings). It is the
+// closed refusal set for a scoped tenant key lacking the admin scope:
+// everything OUTSIDE it stays reachable to the tenant, which keeps the tenant
+// self-service surface (#14442 sessions, traces, tasks, leases, observation
+// reads) and the inference wire intact while closing the P0 hole where any
+// tenant key could reload host-wide policy/routing or apply control directives
+// affecting every customer on the host. It is deliberately a DENYLIST, unlike
+// allows' exact grant matrix: the file arm (scopedKeyFile) ports TensorFold's
+// closed per-route grants, but the flag arm's contract is coarse by design —
+// "inference vs operator", with per-route RBAC beyond that split out of scope
+// for #14448.
+func operatorPlaneRoute(path string) bool {
+	route := keyScopeRoutePath(path)
+	if route == "/v1/admin" || strings.HasPrefix(route, "/v1/admin/") {
+		return true
+	}
+	switch route {
+	case "/v1/fak/policy/reload", "/v1/fak/route/reload", "/v1/fak/revoke":
+		return true
+	}
+	return strings.HasPrefix(route, "/v1/control/") || strings.HasPrefix(route, "/v1/fak/control/")
+}
+
+// token renders the closed scope set as the short name the 403 refusal body
+// carries (writeScopeForbidden): admin | inference | read | inference.read.
+// The zero value renders "none": an unscoped legacy entry that reaches
+// the operator plane is refused there under that name (#14448).
+func (s keyScopes) token() string {
+	if s&keyScopeAdmin != 0 {
+		return "admin"
+	}
+	switch s {
+	case keyScopeInference:
+		return "inference"
+	case keyScopeRead:
+		return "read"
+	case keyScopeInference | keyScopeRead:
+		return "inference.read"
+	}
+	return "none"
+}
+
 // keyHasWhitespace reports whether key holds any whitespace or control rune:
 // such text is not a key, and accepting it would let a padded duplicate of a
 // real key ride the file under a second scope set.

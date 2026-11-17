@@ -3205,6 +3205,19 @@ summary  = "`fak serve` was asked to bind an address reachable from off this hos
 fix      = "Arm a token door: `--require-key-env FAK_API_KEY` (single-tenant bearer) or `--key-principal <tenant>=<ENV_VAR>` (per-tenant keyset), with the named env var set. Or keep the listener local with `--addr 127.0.0.1:8080`. For the deliberate isolated-segment case where a host firewall does the work, pass --unsafe-allow-unauthenticated-bind, which binds anyway and prints a loud warning every boot."
 see_also = ["cmd/fak/serve_bind_safety.go", "cmd/fak/serve_bind_safety_test.go", "docs/air-gapped-deployment-kit.md", "fak serve"]
 
+# The --allow-lan × --key-principal boot refusal (#14448, the multi-tenant isolation
+# epic #3263). `fak serve` refuses to start with both flags set: --allow-lan exempts
+# every private/link-local peer from authentication on every route, and in a shared
+# segment (a cloud VPC) those exempt peers are other customers — a tenant keyset next
+# to a LAN exemption hands unauthenticated peers full control of a gateway whose keys
+# pretend to isolate tenants.
+[reasons.ALLOW_LAN_WITH_KEY_PRINCIPAL]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "`fak serve` was started with --allow-lan together with --key-principal: the LAN exemption would bypass authentication on every route, including admin, while the tenant keyset exists precisely to attribute and bound each tenant's reach. Refused at startup rather than started silently."
+fix      = "Drop --allow-lan (loopback and authenticated callers are unaffected) or drop --key-principal. Tenant keys authenticate through their own door regardless of where the peer sits; the blanket LAN exemption is what makes a shared segment unsafe."
+see_also = ["cmd/fak/serve_bind_safety.go", "cmd/fak/serve_bind_safety_hostname_test.go", "internal/gateway/keyset.go", "fak serve"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).

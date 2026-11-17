@@ -587,9 +587,20 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			authed := ok && s.requireKey != "" && subtle.ConstantTimeCompare(got[:], want[:]) == 1
 			principal := ""
 			if ok {
-				if p, matched := s.keyset.lookup(tok); matched {
+				if p, sc, matched := s.keyset.lookupScoped(tok); matched {
 					authed = true
 					principal = p
+					// Per-key scope enforcement (#14448): a tenant key without the
+					// admin scope may not reach the host-wide operator plane — policy
+					// / route reload, control directives, revoke, /v1/admin/* — which
+					// answers 403 scope_forbidden here, before any handler runs. Every
+					// other route stays tenant-reachable (the inference wire plus the
+					// tenant self-service surface, #14442), and the RequireKey operator
+					// door stays unscoped on every route.
+					if sc&keyScopeAdmin == 0 && operatorPlaneRoute(r.URL.Path) {
+						writeScopeForbidden(w, sc.token(), r.Method)
+						return
+					}
 				}
 			}
 			// The read-scoped bearer (Config.ReadBearer) is consulted only AFTER the
@@ -612,7 +623,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			}
 		} else if s.keyset != nil {
 			if tok, ok := gatewayCredential(r); ok {
-				if p, matched := s.keyset.lookup(tok); matched {
+				if p, _, matched := s.keyset.lookupScoped(tok); matched {
 					r = r.WithContext(WithPrincipal(r.Context(), p))
 				}
 			}

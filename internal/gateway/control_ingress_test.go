@@ -114,9 +114,13 @@ func TestControlIngressCredentialDoorsRequireConfiguredIngress(t *testing.T) {
 		requireKey    string
 		keyPrincipals map[string]string
 		validKey      string
+		wantStatus    int
 	}{
-		{name: "require_key", requireKey: "operator-secret", validKey: "operator-secret"},
-		{name: "keyset", keyPrincipals: map[string]string{"tenant-secret": "tenant-a"}, validKey: "tenant-secret"},
+		{name: "require_key", requireKey: "operator-secret", validKey: "operator-secret", wantStatus: http.StatusServiceUnavailable},
+		// The scoped tenant key never reaches the host-wide operator plane
+		// (#14448): withAuth answers 403 scope_forbidden before the ingress
+		// door is ever consulted.
+		{name: "keyset", keyPrincipals: map[string]string{"tenant-secret": "tenant-a"}, validKey: "tenant-secret", wantStatus: http.StatusForbidden},
 	}
 	for _, door := range doors {
 		for _, methodPath := range []struct {
@@ -129,7 +133,14 @@ func TestControlIngressCredentialDoorsRequireConfiguredIngress(t *testing.T) {
 			t.Run(door.name+"/"+methodPath.method, func(t *testing.T) {
 				srv := newControlIngressServer(t, nil, door.requireKey, door.keyPrincipals, false)
 				rec := serveControlIngress(srv.Handler(), methodPath.method, methodPath.path, "203.0.113.8:12345", door.validKey)
-				assertControlIngressUnavailable(t, rec)
+				if rec.Code != door.wantStatus {
+					t.Fatalf("status = %d, want %d (body %q)", rec.Code, door.wantStatus, rec.Body.String())
+				}
+				if door.wantStatus == http.StatusServiceUnavailable {
+					assertControlIngressUnavailable(t, rec)
+				} else if !strings.Contains(rec.Body.String(), "scope_forbidden") {
+					t.Fatalf("refusal body must carry scope_forbidden, got: %s", rec.Body.String())
+				}
 			})
 		}
 	}
@@ -141,9 +152,13 @@ func TestControlIngressCredentialDoorsAuthenticateBeforeDispatch(t *testing.T) {
 		requireKey    string
 		keyPrincipals map[string]string
 		validKey      string
+		wantValid     int // status the valid credential draws
+		wantDispatch  int // ingress calls after the valid-credential request
 	}{
-		{name: "require_key", requireKey: "operator-secret", validKey: "operator-secret"},
-		{name: "keyset", keyPrincipals: map[string]string{"tenant-secret": "tenant-a"}, validKey: "tenant-secret"},
+		{name: "require_key", requireKey: "operator-secret", validKey: "operator-secret", wantValid: http.StatusNoContent, wantDispatch: 1},
+		// The operator-plane gate (#14448) refuses the scoped tenant key in
+		// withAuth, before the ingress door: 403 scope_forbidden, no dispatch.
+		{name: "keyset", keyPrincipals: map[string]string{"tenant-secret": "tenant-a"}, validKey: "tenant-secret", wantValid: http.StatusForbidden, wantDispatch: 0},
 	}
 	methods := []struct {
 		method string
@@ -170,10 +185,16 @@ func TestControlIngressCredentialDoorsAuthenticateBeforeDispatch(t *testing.T) {
 				}
 
 				rec := serveControlIngress(h, methodPath.method, methodPath.path, "203.0.113.8:12345", door.validKey)
-				if rec.Code != http.StatusNoContent {
-					t.Fatalf("valid credential status = %d, want 204", rec.Code)
+				if rec.Code != door.wantValid {
+					t.Fatalf("valid credential status = %d, want %d (body %q)", rec.Code, door.wantValid, rec.Body.String())
 				}
-				if ingress.calls != 1 || ingress.method != methodPath.method || ingress.urlPath != methodPath.path {
+				if door.wantValid == http.StatusForbidden && !strings.Contains(rec.Body.String(), "scope_forbidden") {
+					t.Fatalf("refusal body must carry scope_forbidden, got: %s", rec.Body.String())
+				}
+				if ingress.calls != door.wantDispatch {
+					t.Fatalf("ingress calls = %d, want %d", ingress.calls, door.wantDispatch)
+				}
+				if door.wantDispatch > 0 && (ingress.method != methodPath.method || ingress.urlPath != methodPath.path) {
 					t.Fatalf("dispatch = (%d,%q,%q), want (1,%q,%q)", ingress.calls, ingress.method, ingress.urlPath, methodPath.method, methodPath.path)
 				}
 			})

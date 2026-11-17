@@ -80,6 +80,9 @@ func ParseKeyPrincipals(specs []string, lookupEnv func(string) string) (map[stri
 		if !hasSep || principal == "" || envName == "" {
 			return nil, fmt.Errorf("%q: want PRINCIPAL=ENV_VAR, naming the env var that HOLDS the tenant's api key (never the key itself)", spec)
 		}
+		if isReservedKeyPrincipal(principal) {
+			return nil, fmt.Errorf("%q: principal %q is a reserved kernel authority label (human / self-model / peer-agent / timer / network-tool / unknown) and cannot name a tenant key — pick an org/project name", spec, principal)
+		}
 		if prev, dup := byEnv[envName]; dup {
 			return nil, fmt.Errorf("%q: env var %s is already bound to principal %q — one api key cannot authenticate as two tenants", spec, envName, prev)
 		}
@@ -98,11 +101,40 @@ func ParseKeyPrincipals(specs []string, lookupEnv func(string) string) (map[stri
 	return out, nil
 }
 
+// reservedKeyPrincipals is the closed set of kernel AUTHORITY labels (principal.go)
+// that a --key-principal tenant must never name (#14448). The keyset principal is the
+// tenant ISOLATION identity, deliberately distinct from the authority class — but
+// surfaces compare the stamped principal against these labels by string (scopeReadSelf
+// treats caller == "human" as read-all; classifyPrincipal maps the relay classes), so
+// a tenant bound to a reserved name would inherit that label's semantics on every such
+// surface. Refusing the name at boot is the closed fix: a tenant key names an
+// org/project, never a kernel label.
+var reservedKeyPrincipals = map[string]struct{}{
+	string(PrincipalHuman):       {},
+	string(PrincipalSelfModel):   {},
+	string(PrincipalPeerAgent):   {},
+	string(PrincipalTimer):       {},
+	string(PrincipalNetworkTool): {},
+	string(PrincipalUnknown):     {},
+}
+
+// isReservedKeyPrincipal reports whether name collides with a kernel authority label,
+// case-insensitively: classifyPrincipal lowercases before matching, so a capitalised
+// spelling would classify identically and must be refused too.
+func isReservedKeyPrincipal(name string) bool {
+	_, ok := reservedKeyPrincipals[strings.ToLower(strings.TrimSpace(name))]
+	return ok
+}
+
 // keysetEntry binds one api-key DIGEST (never the raw key) to the org/project
 // principal that key authenticates as and the scopes that key may exercise.
-// Scopes are authorization only (key_scope.go): a zero value grants nothing,
-// so an entry built by the unscoped newKeyset path fails closed on any scoped
-// route check until the operator arms a scope set via newScopedKeyset.
+// Scopes are authorization only (key_scope.go): they bound which routes the
+// key may reach, never how it authenticates. A key WITHOUT the admin scope —
+// including a zero-scope entry from the unscoped newKeyset path — is refused
+// on the host-wide operator plane (operatorPlaneRoute) by withAuth (#14448).
+// Production tenant keys are always built scoped (newTenantKeyset stamps the
+// inference-class tenant default), so a keyset match is never treated as fully
+// authorized.
 type keysetEntry struct {
 	digest    [sha256.Size]byte
 	principal string
@@ -149,6 +181,35 @@ func newKeyset(keyPrincipals map[string]string) *keyset {
 		return bytes.Compare(ks.entries[i].digest[:], ks.entries[j].digest[:]) < 0
 	})
 	return ks
+}
+
+// tenantKeysetScopes is the default grant every --key-principal tenant key
+// carries (#14448): the inference class — the tenant plane, NOT the operator
+// plane. A tenant key reaches the inference wire and the tenant self-service
+// surface (its own sessions, traces, tasks, leases, observation reads), and
+// nothing on the host-wide operator plane (policy/route reload, control
+// directives, revoke, /v1/admin/*), which answers 403 scope_forbidden. The
+// operator credential (--require-key-env) stays full-strength on every route.
+// That operator/tenant split is what lets a hosted provider hand out keys at
+// all without handing out control of the shared process.
+const tenantKeysetScopes = keyScopeInference
+
+// newTenantKeyset builds the production keyset from Config.KeyPrincipals with
+// the tenant-default scopes attached to every entry, so withAuth enforces the
+// per-key grant matrix instead of treating every keyset match as fully
+// authorized (#14448). It refuses the whole load on a conflicting-scope error
+// (one key digest carrying two scope sets — the tenant-isolation break
+// ParseKeyPrincipals already refuses upstream; the guard stays total). Returns
+// nil, nil when no usable binding remains, exactly as newKeyset does.
+func newTenantKeyset(keyPrincipals map[string]string) (*keyset, error) {
+	if len(keyPrincipals) == 0 {
+		return nil, nil
+	}
+	bindings := make([]keysetBinding, 0, len(keyPrincipals))
+	for key, principal := range keyPrincipals {
+		bindings = append(bindings, keysetBinding{Key: key, Principal: principal, Scopes: tenantKeysetScopes})
+	}
+	return newScopedKeyset(bindings)
 }
 
 // lookup resolves the principal an inbound credential authenticates as, matched by

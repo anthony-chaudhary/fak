@@ -72,6 +72,14 @@ func (e *ConfigError) Error() string {
 // registered — i.e. internal/registrations was imported) and that EngineID names
 // a registered engine. It fails loud rather than degrade to a permissive default.
 func New(cfg Config) (*Server, error) {
+	// The two inbound-auth doors cannot be open together (#14448): AllowLAN
+	// exempts every private/link-local peer from authentication on EVERY route,
+	// so next to a tenant keyset the exempt peers reach the host-wide operator
+	// plane unauthenticated — in a shared segment (a cloud VPC) those peers are
+	// other customers. Refuse the construction; the CLI names the flags.
+	if cfg.AllowLAN && len(cfg.KeyPrincipals) > 0 {
+		return nil, &ConfigError{Field: "AllowLAN", Reason: "cannot be combined with KeyPrincipals: the LAN exemption would skip authentication on every route, including the host-wide operator plane, for every private-network peer"}
+	}
 	causalEmbeddings, embeddingErr := newCausalEmbeddingProvider(cfg)
 	if embeddingErr != nil {
 		return nil, embeddingErr
@@ -322,6 +330,15 @@ func New(cfg Config) (*Server, error) {
 		traceIdentity = newTraceIdentity()
 	}
 
+	// The production tenant keyset is always built SCOPED (#14448): every
+	// --key-principal key carries the inference-only default, so withAuth enforces
+	// its grant instead of treating the match as fully authorized. A conflicting
+	// load (one key digest, two scope sets) refuses the whole construction.
+	tenantKeyset, err := newTenantKeyset(cfg.KeyPrincipals)
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Server{
 		causalEmbeddings:             causalEmbeddings,
 		embeddingsUpstream:           embeddingsUp,
@@ -345,7 +362,7 @@ func New(cfg Config) (*Server, error) {
 		allowLAN:                     cfg.AllowLAN,
 		readBearer:                   cfg.ReadBearer,
 		policyRuntime:                cfg.PolicyRuntime,
-		keyset:                       newKeyset(cfg.KeyPrincipals),
+		keyset:                       tenantKeyset,
 		exposeUpstreamErrorDetail:    cfg.ExposeUpstreamErrorDetail || exposeUpstreamErrorDetailEnv(),
 		denialRecoveryOff:            cfg.DenialRecoveryOff,
 		upstreamBadRequestNotify:     cfg.UpstreamBadRequestNotify,
