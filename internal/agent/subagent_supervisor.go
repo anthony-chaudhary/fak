@@ -61,6 +61,16 @@ type SubagentThread struct {
 
 // SubagentSupervisor coordinates subagent threads, enforcing timeout floors,
 // thread limit caps, automatic thread reaping, and leak prevention.
+//
+// STATUS: deliberately tested-but-unwired (2026-11-17). NewSubagentSupervisor
+// and TeardownParent have no production caller: the production subagent task
+// path is TaskState (tasktools.go), whose run-owned closeAndWait owns executor
+// cancellation and join. This supervisor is an observer tracker —
+// ErrSubagentAbandoned reports observer teardown, not executor cancellation —
+// and wiring it into the task path would create a second source of truth for
+// subagent lifecycle. Decision record:
+// docs/notes/2026-11-17-subagent-supervisor-unwired-decision.md. Follow-up:
+// #12632.
 type SubagentSupervisor struct {
 	mu             sync.RWMutex
 	MaxThreadLimit int
