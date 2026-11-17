@@ -226,10 +226,11 @@ type runConfig struct {
 	// mid-flight consult is a no-op, so the loop is byte-for-byte the historical loop.
 	midflight *MidflightVerbs
 	// conversation / toolCatalog are the WIRE seam (#6657, loop_wire.go): a served
-	// request's ordered transcript and its request-scoped tool declarations. Both empty
-	// => the historical fixed seed (system prompt + task, ToolCatalog()).
+	// request's ordered transcript and its request-scoped tool declarations. An omitted
+	// catalog keeps the historical ToolCatalog(); an explicit empty catalog closes tools.
 	conversation   []Message
 	toolCatalog    []ToolDef
+	toolCatalogSet bool
 	todoTools      bool
 	taskTools      bool
 	childTasks     *childTaskRunConfig

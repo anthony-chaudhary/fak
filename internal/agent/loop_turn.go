@@ -420,9 +420,12 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	var streamedChunks []string
 	turnSink := r.sink
 	if r.stream || (r.cfg != nil && r.cfg.streamingSpeculation) {
-		r.streamingFSM = NewStreamingToolFSM()
-		if r.cfg != nil && r.cfg.streamingFSMHook != nil {
-			r.cfg.streamingFSMHook(r.streamingFSM)
+		r.streamingFSM = nil
+		if r.cfg == nil || !r.cfg.explicitEmptyCatalog() {
+			r.streamingFSM = NewStreamingToolFSM()
+			if r.cfg != nil && r.cfg.streamingFSMHook != nil {
+				r.cfg.streamingFSMHook(r.streamingFSM)
+			}
 		}
 		turnSink = func(chunk string) error {
 			if r.sink != nil {
@@ -440,7 +443,7 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 			}
 			if r.streamingFSM != nil {
 				_ = r.streamingFSM.Feed(chunk)
-				if r.cfg != nil && r.cfg.streamingSpeculation && r.streamingFSM.IsSpeculatable() && !r.streamingFSM.IsDispatched() {
+				if r.cfg != nil && r.cfg.streamingSpeculation && !r.cfg.explicitEmptyCatalog() && r.streamingFSM.IsSpeculatable() && !r.streamingFSM.IsDispatched() {
 					args := r.streamingFSM.RawArgs()
 					if args == "" {
 						args = r.streamingFSM.EarlyArgs()
@@ -714,6 +717,9 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			}
 		}
 		return false, nil
+	}
+	if r.cfg != nil && r.cfg.explicitEmptyCatalog() {
+		return true, ErrToolCatalogClosed
 	}
 	// Resolve a suspended speculation against the first authoritative call in this turn.
 	r.speculation.resolve(ctx, authoritativeCall(asst.ToolCalls[0]), r.metrics)

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
@@ -35,9 +36,23 @@ func WithConversation(msgs []Message) RunOption {
 // nothing from the fixture is blended in, because a blended catalog would let the model
 // call a tool the caller never declared.
 //
-// An empty (or nil) tools leaves ToolCatalog() standing — the existing no-tools run.
+// An explicit empty (or nil) catalog disables tools, including optional additions.
+// Omitting this option preserves the built-in catalog.
 func WithToolCatalog(tools []ToolDef) RunOption {
-	return func(c *runConfig) { c.toolCatalog = tools }
+	return func(c *runConfig) {
+		c.toolCatalog = tools
+		c.toolCatalogSet = true
+	}
+}
+
+// ErrToolCatalogClosed refuses model tool calls when the caller explicitly disabled tools.
+var ErrToolCatalogClosed = errors.New("agent: tool catalog is explicitly closed")
+
+// NoToolsAgentSystemPrompt is the standing instruction for an explicitly empty catalog.
+const NoToolsAgentSystemPrompt = "Answer the user's request directly using the supplied context. No tools are available. Do not call tools or claim to execute actions."
+
+func (c runConfig) explicitEmptyCatalog() bool {
+	return c.toolCatalogSet && len(c.toolCatalog) == 0
 }
 
 // CodeAgentSystemPrompt is the default standing instruction when repository coding tools are armed.
@@ -57,6 +72,9 @@ func WithMemoryDigest(digest string) RunOption {
 }
 
 func (c runConfig) hasCodingTools() bool {
+	if c.explicitEmptyCatalog() {
+		return false
+	}
 	if armedCodeTools.Load() != nil {
 		return true
 	}
@@ -73,6 +91,8 @@ func (c runConfig) seedSystemPrompt() string {
 	base := SystemPrompt
 	if c.systemPrompt != "" {
 		base = c.systemPrompt
+	} else if c.explicitEmptyCatalog() {
+		base = NoToolsAgentSystemPrompt
 	} else if c.hasCodingTools() {
 		base = CodeAgentSystemPrompt
 	}
@@ -138,6 +158,9 @@ func WithContextControl(opts ...ContextControlOption) RunOption {
 // seedTools resolves this run's tool catalog: the request-scoped one when wired,
 // otherwise the kernel-owned built-in catalog.
 func (c runConfig) seedTools() []ToolDef {
+	if c.explicitEmptyCatalog() {
+		return nil
+	}
 	base := c.toolCatalog
 	if len(base) == 0 {
 		base = ToolCatalog()
