@@ -743,22 +743,25 @@ func applyHunks(originalLines []string, hunks []diffHunk, fuzz int) ([]string, e
 
 		// Find match with offset drift up to fuzz lines.
 		// Check exact match first (d=0), then +/-1, +/-2, ..., up to +/-fuzz.
+		// The legacy matcher owns the whole bounded window: a Unicode-only
+		// candidate at a nearer offset must not steal a farther candidate the
+		// legacy matcher would accept.
+		candidates := hunkCandidatePositions(expectedIdx, fileIdx, len(originalLines), len(oldLines), fuzz)
 		matchIdx := -1
-		for d := 0; d <= fuzz; d++ {
-			candPos := expectedIdx + d
-			if candPos >= fileIdx && candPos+len(oldLines) <= len(originalLines) {
-				if linesMatch(originalLines[candPos:candPos+len(oldLines)], oldLines) {
+		for _, candPos := range candidates {
+			if linesMatch(originalLines[candPos:candPos+len(oldLines)], oldLines) {
+				matchIdx = candPos
+				break
+			}
+		}
+		// Final fallback: Unicode punctuation/odd-space normalisation, tried
+		// only when the legacy matcher found no match anywhere in the fuzz
+		// window, and in the same candidate order.
+		if matchIdx < 0 {
+			for _, candPos := range candidates {
+				if unicodeLinesMatch(originalLines[candPos:candPos+len(oldLines)], oldLines) {
 					matchIdx = candPos
 					break
-				}
-			}
-			if d > 0 {
-				candNeg := expectedIdx - d
-				if candNeg >= fileIdx && candNeg+len(oldLines) <= len(originalLines) {
-					if linesMatch(originalLines[candNeg:candNeg+len(oldLines)], oldLines) {
-						matchIdx = candNeg
-						break
-					}
 				}
 			}
 		}
@@ -807,6 +810,98 @@ func linesMatch(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// hunkCandidatePositions returns the candidate start offsets for a hunk's
+// old-line sequence in legacy match order: the expected position first, then
+// expected+1, expected-1, expected+2, expected-2, ... up to fuzz, keeping
+// only positions at or after the consumed-input forward bound (fileIdx) whose
+// full sequence fits in the file. No position outside the fuzz window or
+// before consumed input is ever returned.
+func hunkCandidatePositions(expectedIdx, fileIdx, fileLen, seqLen, fuzz int) []int {
+	var out []int
+	seen := make(map[int]bool, 2*fuzz+1)
+	add := func(pos int) {
+		if pos >= fileIdx && pos+seqLen <= fileLen && !seen[pos] {
+			seen[pos] = true
+			out = append(out, pos)
+		}
+	}
+	add(expectedIdx)
+	for d := 1; d <= fuzz; d++ {
+		add(expectedIdx + d)
+		add(expectedIdx - d)
+	}
+	return out
+}
+
+// unicodeLinesMatch reports whether a and b match after mapping typographic
+// Unicode punctuation to its ASCII equivalent. The leading ASCII space/tab
+// prefix of each line pair must be byte-identical (a leading space/tab
+// mismatch stays a mismatch, and an NBSP or other non-ASCII leading byte is
+// not an ASCII space/tab); Unicode normalisation applies only after that
+// prefix. Trailing ASCII whitespace tolerance is the same as linesMatch.
+// Normalisation is comparison-only; the original bytes are never rewritten.
+//
+// Adapted from OpenAI Codex, codex-rs/apply-patch/src/seek_sequence.rs
+// (normalise + final fallback pass), pinned at
+// https://github.com/openai/codex/commit/94d642d8b40e45e2e544770f0d1f28df9a717f06.
+// Copyright 2025 OpenAI. Licensed under the Apache License, Version 2.0.
+func unicodeLinesMatch(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		// Leading ASCII space/tab prefix must match exactly; an NBSP or other
+		// non-ASCII leading byte is not an ASCII space/tab, so e.g. an
+		// NBSP-prefixed original line must not match an ASCII-space-prefixed
+		// patch line (or vice versa) even after normalisation.
+		if leadingASCIISpace(a[i]) != leadingASCIISpace(b[i]) {
+			return false
+		}
+		na, nb := unicodeNormalise(a[i]), unicodeNormalise(b[i])
+		if na == nb {
+			continue
+		}
+		// Trailing whitespace tolerance
+		if strings.TrimRight(na, " \t\r") != strings.TrimRight(nb, " \t\r") {
+			return false
+		}
+	}
+	return true
+}
+
+// leadingASCIISpace returns the run of leading ASCII space/tab bytes of s.
+func leadingASCIISpace(s string) string {
+	i := 0
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	return s[:i]
+}
+
+// unicodeNormalise maps the upstream dash/minus, quote, and odd-space sets to
+// their ASCII equivalents and leaves every other rune untouched: no case
+// folding, no generic Unicode normalisation, no trimming (unrelated accents
+// and interior tabs remain mismatches).
+func unicodeNormalise(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, c := range s {
+		switch {
+		case (c >= '\u2010' && c <= '\u2015') || c == '\u2212':
+			b.WriteByte('-')
+		case c >= '\u2018' && c <= '\u201B':
+			b.WriteByte('\'')
+		case c >= '\u201C' && c <= '\u201F':
+			b.WriteByte('"')
+		case c == '\u00A0' || (c >= '\u2002' && c <= '\u200A') || c == '\u202F' || c == '\u205F' || c == '\u3000':
+			b.WriteByte(' ')
+		default:
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
 }
 
 func detectLineEnding(b []byte) string {

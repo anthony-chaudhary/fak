@@ -2737,3 +2737,21 @@ SOFTWARE.
 Portions of this product are adapted from Modular: https://github.com/modular/modular (pinned at revision 8d559749621418f39f31df7da998bcce884fa5b1, vendored tree rust_kv/kv-core near-verbatim under third_party/modular/rust_kv with per-file byte receipts in PINNED-SOURCE.json; fak-native Go port in internal/radixkv/prefix_hit.go). Changes were made.
 
 SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception. Full license text ships at third_party/modular/rust_kv/LICENSE.
+
+## OpenAI Codex
+
+Portions of this product are adapted from OpenAI Codex: https://github.com/openai/codex (pinned at revision 94d642d8b40e45e2e544770f0d1f28df9a717f06; the Unicode punctuation/odd-space comparison fallback from codex-rs/apply-patch/src/seek_sequence.rs, upstream one-based lines 78-108, ported into internal/codetools/patch.go as unicodeNormalise/unicodeLinesMatch). Changes were made.
+
+Copyright 2025 OpenAI
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
