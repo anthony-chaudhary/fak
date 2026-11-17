@@ -35,8 +35,16 @@ import (
 // Qwen3.5 / Qwen3.6 / Qwen3-Next, which all share HF model_type "qwen3_5_text" (any
 // linear_attention layer present). It gates the (1+w) RMSNorm, the rotary-dim rope
 // denominator, the tensor-name normalization, and the per-layer mixer dispatch.
+//
+// A checkpoint whose FAMILY is a different hybrid is excluded outright: GLM5Next
+// and Kimi K3.1 both serialize layer_types tokens this predicate would otherwise
+// claim, and neither shares the qwen35 GDN weights or its recurrent state
+// machinery. Kimi K3.1 in particular ships "kda"/"dsa" layer_types once its
+// nested membership lists are rebuilt, but a K3.1 config that carries the
+// wrapper's own FLAT list can still spell a layer "linear_attention" — so the
+// exclusion is by arch identity (issue #14363), not by geometry accident.
 func (c Config) IsQwen35Hybrid() bool {
-	if c.GLM5Next {
+	if c.GLM5Next || c.IsKimiK31() {
 		return false
 	}
 	for _, t := range c.LayerTypes {

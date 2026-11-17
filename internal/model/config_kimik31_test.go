@@ -221,6 +221,48 @@ func TestConfigKimiK31FamilyKeyBothSpellings(t *testing.T) {
 	}
 }
 
+// TestConfigKimiK31ExcludedFromQwen35Hybrid is the Wave 0.4 regression: a K3.1
+// config carrying a FLAT qwen35 "linear_attention" layer_types token must NOT be
+// reported as a qwen35 hybrid, or it would route into the GDN tensor/state
+// machinery the two hybrids do not share. A genuine qwen35 config with the same
+// token stays a hybrid (the guard is K3.1-specific).
+func TestConfigKimiK31ExcludedFromQwen35Hybrid(t *testing.T) {
+	var k31 Config
+	if err := json.Unmarshal([]byte(`{
+		"model_type": "kimi_k31",
+		"num_hidden_layers": 2,
+		"layer_types": ["linear_attention", "full_attention"],
+		"linear_attn_config": {"kda_layers": [1], "full_attn_layers": [2]}
+	}`), &k31); err != nil {
+		t.Fatalf("unmarshal kimi_k31: %v", err)
+	}
+	if !k31.IsKimiK31() {
+		t.Fatalf("precondition: family key %q is not K3.1", k31.archFamilyKey())
+	}
+	if len(k31.LayerTypes) == 0 || k31.LayerTypes[0] != "linear_attention" {
+		t.Fatalf("precondition: flat layer_types not carried: %v", k31.LayerTypes)
+	}
+	if k31.IsQwen35Hybrid() {
+		t.Fatal("IsQwen35Hybrid() = true on a K3.1 config: it would route K3.1 into the qwen35 GDN path")
+	}
+	if k31.IsHybrid() {
+		t.Fatal("IsHybrid() = true on a K3.1 config: IsHybrid must agree with IsQwen35Hybrid")
+	}
+
+	// A genuine qwen35 config with the same token stays a hybrid.
+	var qwen35 Config
+	if err := json.Unmarshal([]byte(`{
+		"model_type": "qwen35",
+		"num_hidden_layers": 2,
+		"layer_types": ["linear_attention", "full_attention"]
+	}`), &qwen35); err != nil {
+		t.Fatalf("unmarshal qwen35: %v", err)
+	}
+	if !qwen35.IsQwen35Hybrid() {
+		t.Fatal("IsQwen35Hybrid() = false on a genuine qwen35 hybrid: the K3.1 guard must not over-reach")
+	}
+}
+
 // TestConfigKimiK31NormalizeGuards pins the no-op contract of the LayerTypes
 // rebuild — the guard that keeps GLM-5.3-Flash (which ships the same nested
 // lists 0-BASED together with flat layer_types) byte-identical.
