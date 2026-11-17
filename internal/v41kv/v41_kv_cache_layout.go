@@ -555,6 +555,10 @@ const (
 	// v41KVE2M1Max is the largest finite e2m1 magnitude (6), the divisor the fp4
 	// `amax/6` scale uses.
 	v41KVE2M1Max = 6.0
+	// v41KVBF16MaxFiniteBits is the largest finite bf16 magnitude as an f32 bit
+	// pattern (0x7f7f0000): the overflow bound an e8m0 wire scale must keep its
+	// fp4 values under, so the restore path can never produce a non-finite bf16.
+	v41KVBF16MaxFiniteBits = 0x7f7f0000
 )
 
 // ErrV41KVCacheLayout is the typed fail-closed refusal for a paged KV record
@@ -565,3 +569,147 @@ var ErrV41KVCacheLayout = errors.New("model: V4.1 paged KV cache layout is inval
 
 // finite32 retains the original public refusal for every IEEE nonfinite input.
 func finite32(v float32) bool { return math.Float32bits(v)&0x7f800000 != 0x7f800000 }
+
+// V41KVWireEncoding is the closed set of KV wire encodings a paged KV segment
+// may cross the transfer boundary in: raw (unquantized) bytes, or an fp4
+// (e2m1, two values per byte) payload with one scale byte per group - e4m3
+// scales at group 16, or e8m0 scales at group 32. Anything outside the closed
+// set fails closed.
+//
+// The contract is a clean-room adaptation of the wire-encoding idea pinned in
+// basetenlabs/deepseek-ultrafast crates/kv-transfer/src/encoding.rs:6-81 at
+// 76766a97308bfd1658fb055e835d0f92de737dc3 (Elastic-2.0, idea only; no code
+// copied); the fp4 geometry it charges is the same one this package already
+// pins for the V4.1 record (FP4 288 B/token E4M3).
+type V41KVWireEncoding int
+
+const (
+	// V41KVWireRaw is the unquantized wire form: the segment stores exactly its
+	// decoded bytes, with no scale row and no payload validation.
+	V41KVWireRaw V41KVWireEncoding = iota
+	// V41KVWireFp4E4m3 is the fp4 wire form with e4m3 scale bytes, one per 16
+	// decoded values.
+	V41KVWireFp4E4m3
+	// V41KVWireFp4E8m0 is the fp4 wire form with e8m0 scale bytes, one per 32
+	// decoded values.
+	V41KVWireFp4E8m0
+)
+
+// Group returns the closed scale group for the encoding: the number of decoded
+// values each scale byte covers. Raw carries no scale row, so it has no group;
+// an encoding outside the closed set fails closed with ok=false.
+func (e V41KVWireEncoding) Group() (int, bool) {
+	switch e {
+	case V41KVWireFp4E4m3:
+		return 16, true
+	case V41KVWireFp4E8m0:
+		return 32, true
+	default:
+		return 0, false
+	}
+}
+
+// String renders the encoding for witnesses and error messages.
+func (e V41KVWireEncoding) String() string {
+	switch e {
+	case V41KVWireRaw:
+		return "kv-wire-raw"
+	case V41KVWireFp4E4m3:
+		return "kv-wire-fp4-e4m3"
+	case V41KVWireFp4E8m0:
+		return "kv-wire-fp4-e8m0"
+	default:
+		return fmt.Sprintf("kv-wire-encoding(%d)", int(e))
+	}
+}
+
+// V41KVWireSegment is one KV wire segment: the decoded byte count and the
+// encoding that will carry it. It is the closed contract a transfer endpoint
+// sizes and validates a segment with before it crosses the boundary.
+type V41KVWireSegment struct {
+	// DecodedBytes is the decoded byte count: two bytes per value, so a segment
+	// is aligned when it holds a whole number of scale groups.
+	DecodedBytes int
+	// Encoding is the closed wire encoding for the segment.
+	Encoding V41KVWireEncoding
+}
+
+// V41KVWireSegmentRaw builds a raw (unquantized) segment.
+func V41KVWireSegmentRaw(decodedBytes int) V41KVWireSegment {
+	return V41KVWireSegment{DecodedBytes: decodedBytes, Encoding: V41KVWireRaw}
+}
+
+// StoredBytes derives the on-wire byte count from the closed contract: raw
+// stores its decoded bytes as-is; an fp4 form stores decoded/4 payload bytes
+// (two e2m1 values per byte) plus decoded/(2*group) scale bytes (one scale
+// byte per group of values). A segment whose decoded count does not hold a
+// whole number of scale groups fails closed.
+func (s V41KVWireSegment) StoredBytes() (int, error) {
+	switch s.Encoding {
+	case V41KVWireRaw:
+		if s.DecodedBytes < 0 {
+			return 0, fmt.Errorf("%w: raw segment has %d decoded bytes", ErrV41KVWireEncoding, s.DecodedBytes)
+		}
+		return s.DecodedBytes, nil
+	case V41KVWireFp4E4m3, V41KVWireFp4E8m0:
+		group, _ := s.Encoding.Group()
+		if s.DecodedBytes < 0 || s.DecodedBytes%(2*group) != 0 {
+			return 0, fmt.Errorf("%w: %s segment of %d decoded bytes is unaligned to group %d", ErrV41KVWireEncoding, s.Encoding, s.DecodedBytes, group)
+		}
+		return s.DecodedBytes/4 + s.DecodedBytes/(2*group), nil
+	default:
+		return 0, fmt.Errorf("%w: encoding %s is outside the closed set", ErrV41KVWireEncoding, s.Encoding)
+	}
+}
+
+// ValidatePayload checks a wire payload against the closed contract: the length
+// must equal StoredBytes, and every scale byte must be a finite nonzero code of
+// its encoding - e4m3 in 1..=126 (0 is the zero scale, 127 is the NaN code)
+// and e8m0 in 1..=254 (255 is the NaN byte). For e8m0 scales at or above 252,
+// every fp4 value the scale can produce must stay within the finite bf16 range,
+// so a huge scale cannot smuggle an overflow into the restore path.
+func (s V41KVWireSegment) ValidatePayload(payload []byte) error {
+	want, err := s.StoredBytes()
+	if err != nil {
+		return err
+	}
+	if len(payload) != want {
+		return fmt.Errorf("%w: %s payload has %d bytes, want %d", ErrV41KVWireEncoding, s.Encoding, len(payload), want)
+	}
+	group, ok := s.Encoding.Group()
+	if !ok {
+		return nil // raw: the length is the whole contract
+	}
+	dataBytes := s.DecodedBytes / 4
+	for g, scale := range payload[dataBytes:] {
+		switch s.Encoding {
+		case V41KVWireFp4E4m3:
+			if scale < 1 || scale > 126 {
+				return fmt.Errorf("%w: %s scale byte %d is outside 1..=126", ErrV41KVWireEncoding, s.Encoding, scale)
+			}
+		case V41KVWireFp4E8m0:
+			if scale < 1 || scale > 254 {
+				return fmt.Errorf("%w: %s scale byte %d is outside 1..=254", ErrV41KVWireEncoding, s.Encoding, scale)
+			}
+			if scale >= 252 {
+				scaleValue := e8m0ScaleToF32(scale)
+				lo := g * (group / 2)
+				for _, pair := range payload[lo : lo+group/2] {
+					for _, code := range [2]int{int(pair & 0x07), int(pair >> 4 & 0x07)} {
+						if math.Float32bits(e2m1Value(code)*scaleValue) > v41KVBF16MaxFiniteBits {
+							return fmt.Errorf("%w: %s scale byte %d drives an fp4 value past finite bf16", ErrV41KVWireEncoding, s.Encoding, scale)
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ErrV41KVWireEncoding is the typed fail-closed refusal for a KV wire segment
+// whose encoding, alignment, length, or scale codes do not match the closed
+// wire contract. A wire segment is the transfer boundary's sizing and
+// validation contract, so an unrecognized or inconsistent segment is refused
+// rather than guessed.
+var ErrV41KVWireEncoding = errors.New("model: V4.1 KV wire encoding is invalid")
