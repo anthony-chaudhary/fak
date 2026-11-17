@@ -3,12 +3,54 @@ package qwen4exp
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// PLEDTypeMetadataKey is the checkpoint-metadata key that declares the PLE
+// (per-layer-embedding) tensor's own dtype. It is the fak analog of upstream
+// TensorRT-LLM's ple_embedding_dtype (tensorrt_llm/_torch/modules/qwen4_exp/
+// ple.py:69): a checkpoint may quantize the PLE table independently of the rest
+// of the model, so the table's dtype must be read from metadata rather than
+// assumed to be the model default.
+const PLEDTypeMetadataKey = "ple_embedding_dtype"
+
+// PLEDTypeMetadata is the PLE dtype a checkpoint declares in its own metadata.
+// Declared is false when the metadata omits the key, so a caller can tell a
+// declared dtype from an assumed one.
+type PLEDTypeMetadata struct {
+	DType    string
+	Declared bool
+}
+
+// PLEDTypeFromManifest reads the PLE tensor's declared dtype from raw checkpoint
+// manifest metadata. It returns Declared=false (and no error) when the metadata
+// omits the key, which is the only case where a caller may fall back to the
+// model default.
+func PLEDTypeFromManifest(raw []byte) (PLEDTypeMetadata, error) {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return PLEDTypeMetadata{}, fmt.Errorf("qwen4exp manifest: decode ple dtype: %w", err)
+	}
+	rawDType, ok := probe[PLEDTypeMetadataKey]
+	if !ok {
+		return PLEDTypeMetadata{}, nil
+	}
+	var dtype string
+	if err := json.Unmarshal(rawDType, &dtype); err != nil {
+		return PLEDTypeMetadata{}, fmt.Errorf("qwen4exp manifest: %s must be a string: %w", PLEDTypeMetadataKey, err)
+	}
+	dtype = strings.TrimSpace(dtype)
+	if dtype == "" {
+		return PLEDTypeMetadata{}, nil
+	}
+	return PLEDTypeMetadata{DType: dtype, Declared: true}, nil
+}
 
 type ArtifactReceipt struct {
 	Artifact string `json:"artifact"`
