@@ -356,7 +356,76 @@ func safetensorsIndexShards(idxPath string) (shards []string, weightMap map[stri
 	return shards, index.WeightMap, nil
 }
 
+// safetensorsShardSelection is the outcome of narrowing a safetensors index's weight map
+// to the shards a partial load actually needs.
+type safetensorsShardSelection struct {
+	// Shards is the sorted, minimal set of shard files that hold at least one wanted key.
+	Shards []string
+	// Missing lists the wanted keys/prefixes that matched no index entry, sorted. A
+	// non-empty Missing means the caller asked for weights the checkpoint does not carry;
+	// the loader reports it rather than silently loading a model with holes.
+	Missing []string
+}
+
+// selectSafetensorsShards narrows a safetensors index weight map (tensor name -> shard
+// file) to the minimal set of shard files that hold a wanted key. A wanted entry matches
+// an index key when it equals the key or is a prefix of it, so a draft's "mtp.0." prefix
+// selects every mtp.0.* tensor wherever it lives. This is the port of TensorRT-LLM's
+// HfWeightLoader._files_with_key_prefixes (weight_loader.py:623-657@d865b3c2): a
+// draft/MTP load opens only the shards holding draft keys instead of every shard of a
+// large index, while the full-load path is untouched.
+//
+// An empty or nil wanted set selects EVERY shard, so the full-load path is byte-for-byte
+// unchanged. Wanted entries that match no index key are returned in Missing rather than
+// silently dropped.
+func selectSafetensorsShards(weightMap map[string]string, wanted []string) safetensorsShardSelection {
+	if len(wanted) == 0 {
+		seen := make(map[string]bool, len(weightMap))
+		shards := make([]string, 0, len(weightMap))
+		for _, shard := range weightMap {
+			if !seen[shard] {
+				seen[shard] = true
+				shards = append(shards, shard)
+			}
+		}
+		sort.Strings(shards)
+		return safetensorsShardSelection{Shards: shards}
+	}
+	shardSet := map[string]bool{}
+	matched := make([]bool, len(wanted))
+	for name, shard := range weightMap {
+		for i, w := range wanted {
+			if name == w || strings.HasPrefix(name, w) {
+				shardSet[shard] = true
+				matched[i] = true
+			}
+		}
+	}
+	shards := make([]string, 0, len(shardSet))
+	for shard := range shardSet {
+		shards = append(shards, shard)
+	}
+	sort.Strings(shards)
+	var missing []string
+	for i, w := range wanted {
+		if !matched[i] {
+			missing = append(missing, w)
+		}
+	}
+	sort.Strings(missing)
+	return safetensorsShardSelection{Shards: shards, Missing: missing}
+}
+
 func loadSafetensorsDir(dir string, cfg Config, open safetensorsFileOpener) (*Model, error) {
+	return loadSafetensorsDirFiltered(dir, cfg, open, nil)
+}
+
+// loadSafetensorsDirFiltered is loadSafetensorsDir with a wanted-key filter. When wanted
+// is non-empty only the shards holding a wanted key are opened (the draft/MTP load path),
+// so a checkpoint whose draft keys concentrate in a few shards never opens the rest. A
+// nil/empty wanted set opens every shard, so the full-load path is unchanged. The
+// whole-model derivation still sees the full index; only the OPEN set is filtered.
+func loadSafetensorsDirFiltered(dir string, cfg Config, open safetensorsFileOpener, wanted []string) (*Model, error) {
 	if err := refuseDeepSeekV41Native(cfg); err != nil {
 		return nil, err
 	}
@@ -364,10 +433,15 @@ func loadSafetensorsDir(dir string, cfg Config, open safetensorsFileOpener) (*Mo
 	if _, err := os.Stat(idxPath); err != nil {
 		return loadSafetensorsFilePath(filepath.Join(dir, "model.safetensors"), cfg, open)
 	}
-	shards, _, err := safetensorsIndexShards(idxPath)
+	shards, weightMap, err := safetensorsIndexShards(idxPath)
 	if err != nil {
 		return nil, err
 	}
+	sel := selectSafetensorsShards(weightMap, wanted)
+	if len(sel.Missing) > 0 {
+		return nil, fmt.Errorf("safetensors: wanted keys absent from index: %s", strings.Join(sel.Missing, ", "))
+	}
+	shards = sel.Shards
 
 	man := map[string]tensorMeta{}
 	var raw []byte
