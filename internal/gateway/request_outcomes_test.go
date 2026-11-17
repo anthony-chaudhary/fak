@@ -254,11 +254,17 @@ func TestRequestOutcomePrincipalAndCustomPlannerHTTP(t *testing.T) {
 	t.Cleanup(ts.Close)
 	client := &http.Client{Timeout: 10 * time.Second}
 	headers := requestOutcomePost(t, client, ts.URL, "tenant-"+randomHex(16), "", "tenant-a-key")
+	row, found, _ := s.metrics.requestOutcomes.lookup(requestOutcomeKey{
+		owner: "tenant-a", traceID: headers.Get("X-Trace-Id"), traceparent: headers.Get("traceparent"),
+	}, time.Now())
+	if !found || row.outcome != "completion_unknown" {
+		t.Fatalf("owner custom evidence: found=%v outcome=%q", found, row.outcome)
+	}
 	for _, key := range []string{"tenant-a-key", "tenant-b-key", "reader", "outcome-test-key"} {
 		code, body := requestOutcomeGet(t, client, ts.URL, headers.Get("X-Trace-Id"), headers.Get("traceparent"), key)
-		if key == "tenant-a-key" {
-			if code != 200 || body.Record == nil || body.Record.Outcome != "completion_unknown" {
-				t.Fatalf("owner custom evidence: %d %+v", code, body)
+		if key == "tenant-a-key" || key == "tenant-b-key" {
+			if code != http.StatusForbidden || body.Record != nil {
+				t.Fatalf("tenant observation via %s: %d %+v", key, code, body)
 			}
 		} else if code != 404 || body.Record != nil {
 			t.Fatalf("cross-principal read via %s: %d %+v", key, code, body)

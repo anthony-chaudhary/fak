@@ -75,7 +75,10 @@ func principalTestServer(t *testing.T, planner agent.Planner, principal string) 
 	srv.planner = planner
 	h := srv.Handler()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principal)))
+		if r.Method == http.MethodPost {
+			r = r.WithContext(WithPrincipal(r.Context(), principal))
+		}
+		h.ServeHTTP(w, r)
 	}))
 	t.Cleanup(ts.Close)
 	return ts
@@ -157,6 +160,9 @@ func TestPrefixReuseAttributionSplitsSameAndCrossSession(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("operator metrics status=%d, want %d", resp.StatusCode, http.StatusOK)
+	}
 	lines := map[string]bool{}
 	for _, l := range strings.Split(string(body), "\n") {
 		lines[strings.TrimSpace(l)] = true

@@ -1033,9 +1033,14 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		}
 		ic.writeIncident("openai_chat_completions", phase, statusClass, boundPolicy, cause, ttft, elapsed, bytesEmitted, eventsEmitted, lastEventAge)
 
-		_ = writeSSEData(w, map[string]any{
+		errorPayload := map[string]any{
 			"error": map[string]any{"message": msg, "type": "server_error"},
-		})
+		}
+		if !started {
+			_ = writeSSEEvent(w, "error", errorPayload)
+		} else {
+			_ = writeSSEData(w, errorPayload)
+		}
 		writeSSEDone(w, flusher)
 		return true
 	}

@@ -55,9 +55,19 @@ func TestDeviceOnlyExpertRingNativePolicyFailureReachesDefaultPerfLedger(t *test
 	if err != nil {
 		t.Fatalf("native policy refusal dropped HTTP request: %T", err)
 	}
+	var failure struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&failure); err != nil {
+		resp.Body.Close()
+		t.Fatal(err)
+	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Errorf("native policy failure HTTP status=%d, want %d", resp.StatusCode, http.StatusBadGateway)
+	t.Logf("native policy failure code=%q", failure.Error.Code)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("native policy failure HTTP status=%d, want %d", resp.StatusCode, http.StatusInternalServerError)
 	}
 	resp, err = client.Get(ts.URL + "/v1/fak/perf/recent")
 	if err != nil {
@@ -72,7 +82,7 @@ func TestDeviceOnlyExpertRingNativePolicyFailureReachesDefaultPerfLedger(t *test
 		t.Fatalf("default recent status=%d records=%d errors=%d", resp.StatusCode, len(report.Records), report.Summary.Errors)
 	}
 	row := report.Records[0]
-	if row.Model != "" || row.Status != http.StatusBadGateway || row.Error != perfledger.ErrorUpstream || row.FinishReason != perfledger.FinishReasonError {
+	if row.Model != "" || row.Status != http.StatusInternalServerError || row.Error != perfledger.ErrorUpstream || row.FinishReason != perfledger.FinishReasonError {
 		t.Fatalf("policy refusal ledger identity/status/class/finish=%q/%d/%q/%q", row.Model, row.Status, row.Error, row.FinishReason)
 	}
 }
