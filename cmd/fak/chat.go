@@ -30,6 +30,7 @@ type chatFlags struct {
 	anthropicAuth         *string
 	offline               *bool
 	maxTurns              *int
+	maxOutputTokens       *int
 	policyPath            *string
 	posture               *string
 	task                  *string
@@ -66,6 +67,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.anthropicAuth = fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key")
 	cf.offline = fs.Bool("offline", false, "force the deterministic mock planner (no network)")
 	cf.maxTurns = fs.Int("max-turns", 10, "max model turns the loop may take to resolve ONE human turn")
+	cf.maxOutputTokens = fs.Int("max-output-tokens", 0, "per-response output token budget for HTTP planners; 0 preserves the planner default (1024), subject to provider caps")
 	cf.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in production capability floor)")
 	cf.posture = fs.String("posture", "", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open developer floor; fail_closed/strict is the strict lever; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
 	cf.task = fs.String("task", "", "run a single non-interactive task turn (headless mode) and exit")
@@ -105,10 +107,14 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 func cmdChat(argv []string) {
 	fs, cf := newChatFlagSet()
 	_ = fs.Parse(argv)
+	if *cf.maxOutputTokens < 0 {
+		must(fmt.Errorf("fak chat: --max-output-tokens must be nonnegative"))
+	}
 	apiKeyExplicit := false
 	modelExplicit := false
 	baseURLExplicit := false
 	providerExplicit := false
+	maxOutputTokensExplicit := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "api-key-env" {
 			apiKeyExplicit = true
@@ -121,6 +127,9 @@ func cmdChat(argv []string) {
 		}
 		if f.Name == "provider" {
 			providerExplicit = true
+		}
+		if f.Name == "max-output-tokens" {
+			maxOutputTokensExplicit = true
 		}
 	})
 	if *cf.codexHome != "" && !*cf.codexAuth {
@@ -148,6 +157,10 @@ func cmdChat(argv []string) {
 	}
 
 	if *cf.workflow != "" {
+		if maxOutputTokensExplicit {
+			fmt.Fprintln(os.Stderr, "fak chat: --max-output-tokens cannot be combined with --workflow")
+			os.Exit(2)
+		}
 		if err := runWorkflowCLI(*cf.workflow, *cf.workflowStep, *cf.workflowCheckpointDir); err != nil {
 			os.Exit(1)
 		}
@@ -324,6 +337,15 @@ func cmdChat(argv []string) {
 		*cf.codexAuth,
 		!autoRouterProofMissing,
 	)
+	if maxOutputTokensExplicit {
+		httpPlanner, ok := planner.(*agent.HTTPPlanner)
+		if !ok {
+			must(fmt.Errorf("fak chat: --max-output-tokens requires the HTTP planner"))
+		}
+		if *cf.maxOutputTokens > 0 {
+			httpPlanner.MaxTokens = *cf.maxOutputTokens
+		}
+	}
 	if *cf.codexAuth {
 		httpPlanner, ok := planner.(*agent.HTTPPlanner)
 		if !ok {
