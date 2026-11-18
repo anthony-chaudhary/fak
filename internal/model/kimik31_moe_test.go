@@ -12,6 +12,7 @@ package model
 // fak-test:runtime fast est=15ms lane=default
 
 import (
+	"encoding/json"
 	"math"
 	"math/rand"
 	"testing"
@@ -345,5 +346,137 @@ func TestKimiK31MoEValidateRefuses(t *testing.T) {
 				t.Fatalf("expected a refusal for %s", tc.name)
 			}
 		})
+	}
+}
+
+// TestKimiK31ForwardShapeFaithful93Layer is the strongest host-side "the K3.1
+// concept works" witness: the composite runs ALL 93 published layers (69 KDA +
+// 24 Gated-DSA in the published 1-based membership rule, pause the final layer)
+// with the full reference layer order (attention + FFN/MoE block) end to end on
+// synthetic weights, at the published per-layer KIND split the config classifier
+// names. It proves the composite's layer-count/kind dispatch is not just a
+// 3-layer toy: the same ForwardKimiK31Token walk covers the real stack, every
+// layer's state advances, and the output is finite. Per-layer WIDTHs stay tiny
+// (this is a dispatch/composition witness, not a numerics run) so the test is
+// cheap; the kernel/loader leaves own the real geometry.
+func TestKimiK31ForwardShapeFaithful93Layer(t *testing.T) {
+	var cfg Config
+	if err := json.Unmarshal([]byte(kimiK31ConfigFixture(93)), &cfg); err != nil {
+		t.Fatalf("unmarshal 93-layer K3.1 config: %v", err)
+	}
+	if !cfg.IsKimiK31() || cfg.NumLayers != 93 {
+		t.Fatalf("fixture precondition: IsKimiK31=%v layers=%d", cfg.IsKimiK31(), cfg.NumLayers)
+	}
+	// The published split: 24 full-attention (Gated-DSA) layers, 69 KDA.
+	kdaLayers, dsaLayers := 0, 0
+	for l := 0; l < cfg.NumLayers; l++ {
+		switch {
+		case cfg.IsKimiK31KDALayer(l):
+			kdaLayers++
+		case cfg.IsKimiK31DSALayer(l):
+			dsaLayers++
+		default:
+			t.Fatalf("layer %d carries no kda/dsa token", l)
+		}
+	}
+	if kdaLayers != 69 || dsaLayers != 24 {
+		t.Fatalf("layer kinds = %d KDA + %d DSA, want 69 + 24", kdaLayers, dsaLayers)
+	}
+
+	// A tiny-geometry stack over the SAME 93-layer kind layout, with the full
+	// reference order (post-norm + FFN block) on every layer.
+	const H = 4
+	cfg.HiddenSize = H
+	cfg.RMSNormEps = 1e-5
+	p := &KimiK31ForwardParams{Hidden: H, RMSEps: 1e-5}
+	p.AttnNorm = make([][]float32, cfg.NumLayers)
+	p.PostNorm = make([][]float32, cfg.NumLayers)
+	p.FinalNorm = []float32{1, 1, 1, 1}
+	p.KDA = make([]*KimiK31KDAParams, cfg.NumLayers)
+	p.DSA = make([]*KimiK31DSAParams, cfg.NumLayers)
+	p.Moe = make([]*KimiK31MoEParams, cfg.NumLayers)
+	for l := 0; l < cfg.NumLayers; l++ {
+		p.AttnNorm[l] = []float32{1, 1, 1, 1}
+		p.PostNorm[l] = []float32{1, 1, 1, 1}
+		p.Moe[l] = tinyMoEParams(int64(l) + 7)
+		if cfg.IsKimiK31KDALayer(l) {
+			p.KDA[l] = tinyKimiK31KDACompositeParams(H)
+		} else {
+			p.DSA[l] = tinyKimiK31DSACompositeParams(H)
+		}
+	}
+	st, err := NewKimiK31ForwardState(cfg, p, 4)
+	if err != nil {
+		t.Fatalf("93-layer state: %v", err)
+	}
+	if len(st.KDA) != kdaLayers || len(st.DSA) != dsaLayers {
+		t.Fatalf("state kinds = %d KDA + %d DSA, want %d + %d", len(st.KDA), len(st.DSA), kdaLayers, dsaLayers)
+	}
+
+	rng := rand.New(rand.NewSource(101))
+	x := make([]float32, H)
+	for i := range x {
+		x[i] = rng.Float32()*2 - 1
+	}
+	out := ForwardKimiK31Token(cfg, p, st, x)
+	if len(out) != H {
+		t.Fatalf("output width %d != hidden %d", len(out), H)
+	}
+	if !allFinite(out) {
+		t.Fatal("93-layer composite produced a non-finite hidden value")
+	}
+}
+
+// tinyKimiK31KDACompositeParams builds a minimal valid KDA layer at hidden h
+// (2 heads x 2 dims, conv 2) — the same tiny geometry the composite smoke uses
+// (the KDA oracle's own test fixture is pinned at hidden 3, which the 93-layer
+// stack's hidden 4 cannot share).
+func tinyKimiK31KDACompositeParams(h int) *KimiK31KDAParams {
+	rng := rand.New(rand.NewSource(int64(h) + 1000))
+	pick := func(n int) []float32 {
+		out := make([]float32, n)
+		for i := range out {
+			out[i] = rng.Float32()*2 - 1
+		}
+		return out
+	}
+	conv := func() *GLM5NextKDAConvFilter {
+		f := NewGLM5NextKDAConvFilter(4, 2)
+		for i := range f.Weight {
+			f.Weight[i] = rng.Float32()*2 - 1
+		}
+		return f
+	}
+	return &KimiK31KDAParams{
+		NumHeads: 2, HeadDim: 2, ConvKernel: 2, HiddenSize: h,
+		Wq: pick(4 * h), Wk: pick(4 * h), Wv: pick(4 * h),
+		ConvQ: conv(), ConvK: conv(), ConvV: conv(),
+		WFA: pick(2 * h), WFB: pick(4 * 2),
+		DTBias: pick(4), AFolded: []float32{-0.5, -0.25},
+		WBeta: pick(2 * h), GateLowerBound: -5.0,
+		WGate: pick(4 * h), ONorm: pick(2), WO: pick(h * 4),
+		RMSEps: 1e-5,
+	}
+}
+
+// tinyKimiK31DSACompositeParams builds a minimal valid Gated-DSA layer at
+// hidden h.
+func tinyKimiK31DSACompositeParams(h int) *KimiK31DSAParams {
+	rng := rand.New(rand.NewSource(int64(h) + 2000))
+	pick := func(n int) []float32 {
+		out := make([]float32, n)
+		for i := range out {
+			out[i] = rng.Float32()*2 - 1
+		}
+		return out
+	}
+	return &KimiK31DSAParams{
+		NumHeads: 2, QLoRA: 3, KVLoRA: 2, QkNope: 2, QkRope: 1, VDim: 2, Hidden: h,
+		IdxHeads: 2, IdxDim: 2, TopK: 2, RMSEps: 1e-5, IdxEps: 1e-5,
+		WQa: pick(3 * h), WQaNorm: pick(3), WQb: pick(2 * 3 * 3),
+		WKvA: pick(3 * h), WKvANorm: pick(2), WKb: pick(2 * 2 * 2), WVb: pick(2 * 2 * 2),
+		WO: pick(h * 2 * 2), WGate: pick(2 * 2 * h),
+		WIdxQ: pick(2 * 2 * 3), WIdxK: pick(2 * h), WIdxProj: pick(2 * h),
+		IdxKNormW: pick(2), IdxKNormB: pick(2),
 	}
 }
