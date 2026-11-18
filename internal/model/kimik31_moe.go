@@ -37,6 +37,10 @@ package model
 //   6. block output = routed_up_out + shared_out (the caller adds the residual
 //      prefix; the latent-MoE layer owns that add in the reference).
 //
+// The DENSE layer (K3.1 first_k_dense_replace layer 0) takes the Experts == 0
+// branch: no router, no routed experts, no latent front/tail — a single SiTU MLP
+// at hidden width, the same KimiK3MLP the shared experts use.
+//
 // WHAT THIS OWNS: the FFN/MoE block composition for one token and the fail-closed
 // param validation. WHAT THIS DOES NOT OWN: the expert GEMM kernels, the CUDA
 // KDA/DSA kernels, the loader that fills these params from checkpoint tensors,
@@ -65,9 +69,11 @@ type KimiK31MoEParams struct {
 	Hidden             int // model hidden width (down_proj input / up_proj output)
 	Latent             int // routed_expert_hidden_size (the experts' working width)
 	ExpertIntermediate int // moe_intermediate_size (one expert's FFN width, in latent)
-	// SharedIntermediate is the shared experts' combined FFN width
-	// (moe_intermediate_size * num_shared_experts in the reference). 0 = no
-	// shared expert (the block is routed-only).
+	// SharedIntermediate is the always-on MLP's FFN width. On a MoE layer it is
+	// the shared experts' combined width (moe_intermediate_size *
+	// num_shared_experts); on a DENSE layer (Experts == 0, K3.1's
+	// first_k_dense_replace layer 0) it is that layer's intermediate_size. The
+	// reference builds the SAME KimiK3MLP for both, so they share this path.
 	SharedIntermediate int
 	LatentUseNorm      bool
 	RMSNormEps         float32
@@ -115,7 +121,19 @@ func ValidateKimiK31MoEParams(p *KimiK31MoEParams) error {
 		return fmt.Errorf("%w: bad geometry hidden=%d latent=%d inter=%d",
 			ErrKimiK31MoEShape, p.Hidden, p.Latent, p.ExpertIntermediate)
 	}
-	if p.Experts <= 0 || p.TopK <= 0 || p.TopK > p.Experts {
+	if p.Experts == 0 {
+		// The DENSE layer (K3.1 first_k_dense_replace layer 0): no router, no
+		// routed experts, no latent front/tail — a single SiTU MLP at hidden
+		// width, the same KimiK3MLP the shared experts use.
+		if err := validateKimiK31DenseMLP(p); err != nil {
+			return err
+		}
+		if p.SituBeta <= 0 {
+			return fmt.Errorf("%w: situ beta %v must be > 0", ErrKimiK31MoEShape, p.SituBeta)
+		}
+		return nil
+	}
+	if p.TopK <= 0 || p.TopK > p.Experts {
 		return fmt.Errorf("%w: router geometry experts=%d topk=%d", ErrKimiK31MoEShape, p.Experts, p.TopK)
 	}
 	if p.GroupCount < 1 {
@@ -155,18 +173,33 @@ func ValidateKimiK31MoEParams(p *KimiK31MoEParams) error {
 		}
 	}
 	if p.SharedIntermediate > 0 {
-		if len(p.SharedWGate) != p.SharedIntermediate*p.Hidden {
-			return fmt.Errorf("%w: SharedWGate len %d != shared_inter*hidden %d", ErrKimiK31MoEShape, len(p.SharedWGate), p.SharedIntermediate*p.Hidden)
-		}
-		if len(p.SharedWUp) != p.SharedIntermediate*p.Hidden {
-			return fmt.Errorf("%w: SharedWUp len %d != shared_inter*hidden %d", ErrKimiK31MoEShape, len(p.SharedWUp), p.SharedIntermediate*p.Hidden)
-		}
-		if len(p.SharedWDown) != p.Hidden*p.SharedIntermediate {
-			return fmt.Errorf("%w: SharedWDown len %d != hidden*shared_inter %d", ErrKimiK31MoEShape, len(p.SharedWDown), p.Hidden*p.SharedIntermediate)
+		if err := validateKimiK31DenseMLP(p); err != nil {
+			return err
 		}
 	}
 	if p.SituBeta <= 0 {
 		return fmt.Errorf("%w: situ beta %v must be > 0", ErrKimiK31MoEShape, p.SituBeta)
+	}
+	return nil
+}
+
+// validateKimiK31DenseMLP shape-checks the shared/dense SiTU MLP at hidden width
+// (SharedWGate/Up are [SharedIntermediate x Hidden], SharedWDown is
+// [Hidden x SharedIntermediate]). It is shared by the MoE branch's always-on
+// shared experts and the Experts == 0 dense-layer branch, which the reference
+// builds as the same KimiK3MLP.
+func validateKimiK31DenseMLP(p *KimiK31MoEParams) error {
+	if p.SharedIntermediate <= 0 {
+		return fmt.Errorf("%w: SharedIntermediate %d must be > 0", ErrKimiK31MoEShape, p.SharedIntermediate)
+	}
+	if len(p.SharedWGate) != p.SharedIntermediate*p.Hidden {
+		return fmt.Errorf("%w: SharedWGate len %d != shared_inter*hidden %d", ErrKimiK31MoEShape, len(p.SharedWGate), p.SharedIntermediate*p.Hidden)
+	}
+	if len(p.SharedWUp) != p.SharedIntermediate*p.Hidden {
+		return fmt.Errorf("%w: SharedWUp len %d != shared_inter*hidden %d", ErrKimiK31MoEShape, len(p.SharedWUp), p.SharedIntermediate*p.Hidden)
+	}
+	if len(p.SharedWDown) != p.Hidden*p.SharedIntermediate {
+		return fmt.Errorf("%w: SharedWDown len %d != hidden*shared_inter %d", ErrKimiK31MoEShape, len(p.SharedWDown), p.Hidden*p.SharedIntermediate)
 	}
 	return nil
 }
@@ -183,6 +216,12 @@ func ForwardKimiK31MoEToken(p *KimiK31MoEParams, xn []float32) []float32 {
 	}
 	if len(xn) != p.Hidden {
 		panic(fmt.Sprintf("model: kimi-k31 moe: input length %d != Hidden %d", len(xn), p.Hidden))
+	}
+
+	// Dense layer (K3.1 first_k_dense_replace layer 0): no router and no routed
+	// experts — a single SiTU MLP at hidden width, the reference's KimiK3MLP.
+	if p.Experts == 0 {
+		return kimiK31SharedExpert(p, xn)
 	}
 
 	// 1. Router: fp32 logits -> noaux_tc selection (bias-ranked) with unbiased,

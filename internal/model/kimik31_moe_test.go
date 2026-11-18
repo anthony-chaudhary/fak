@@ -427,6 +427,54 @@ func TestKimiK31ForwardShapeFaithful93Layer(t *testing.T) {
 	}
 }
 
+// TestKimiK31MoEDenseLayerRunsTheMLP pins the Experts == 0 dense branch: K3.1's
+// first_k_dense_replace layer 0 has no router — it is a single SiTU MLP at hidden
+// width (the reference's KimiK3MLP). The block must produce the same answer as
+// that MLP, not refuse.
+func TestKimiK31MoEDenseLayerRunsTheMLP(t *testing.T) {
+	rng := rand.New(rand.NewSource(53))
+	pick := func(n int) []float32 {
+		out := make([]float32, n)
+		for i := range out {
+			out[i] = rng.Float32()*2 - 1
+		}
+		return out
+	}
+	const H, SI = 4, 3
+	p := &KimiK31MoEParams{
+		Hidden: H, Latent: 3, ExpertIntermediate: 2,
+		SharedIntermediate: SI,
+		SituBeta:           4.0, SituLinearBeta: 25.0,
+		SharedWGate: pick(SI * H), SharedWUp: pick(SI * H), SharedWDown: pick(H * SI),
+	}
+	if err := ValidateKimiK31MoEParams(p); err != nil {
+		t.Fatalf("dense-layer params must validate: %v", err)
+	}
+	xn := []float32{0.3, -0.8, 0.5, 0.1}
+	got := ForwardKimiK31MoEToken(p, xn)
+
+	// Independent float64 transcription of the dense SiTU MLP.
+	g := naiveMatVec(f64s(p.SharedWGate), f64s(xn), SI, H)
+	u := naiveMatVec(f64s(p.SharedWUp), f64s(xn), SI, H)
+	act := make([]float64, SI)
+	for i := 0; i < SI; i++ {
+		act[i] = refSitu(g[i], u[i], float64(p.SituBeta), float64(p.SituLinearBeta))
+	}
+	want := naiveMatVec(f64s(p.SharedWDown), act, H, SI)
+	for i := range got {
+		if math.Abs(float64(got[i])-want[i]) > 1e-4 {
+			t.Errorf("dense MLP[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+
+	// A dense layer with no MLP weights refuses rather than returning zeros.
+	bad := *p
+	bad.SharedWGate = nil
+	if err := ValidateKimiK31MoEParams(&bad); err == nil {
+		t.Fatal("expected a refusal for a dense layer with no MLP weights")
+	}
+}
+
 // tinyKimiK31KDACompositeParams builds a minimal valid KDA layer at hidden h
 // (2 heads x 2 dims, conv 2) — the same tiny geometry the composite smoke uses
 // (the KDA oracle's own test fixture is pinned at hidden 3, which the 93-layer
