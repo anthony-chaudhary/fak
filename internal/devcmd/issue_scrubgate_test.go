@@ -79,13 +79,120 @@ func TestIssueCreateScrubGateVerdicts(t *testing.T) {
 
 func TestIssueScrubGateMissingCompanion(t *testing.T) {
 	original := issueScrubGateModuleRoot
-	issueScrubGateModuleRoot = filepath.Join(t.TempDir(), "fak")
-	t.Cleanup(func() { issueScrubGateModuleRoot = original })
+	// A real directory, so the module-root sibling candidate is a real (named) path;
+	// its sibling does not exist, so the locate still finds no companion.
+	issueScrubGateModuleRoot = t.TempDir()
+	originalCwd := issueScrubGateCwd
+	// Disable the trimpath-safe cwd walk so this test isolates the module-root sibling
+	// probe: with no explicit root, no env, no cwd walk, and no sibling, the gate must
+	// fail closed and name the probed (real) path. Using "" (not t.TempDir()) keeps this
+	// robust to GOTMPDIR landing inside a workspace that itself holds a companion.
+	issueScrubGateCwd = ""
+	t.Cleanup(func() {
+		issueScrubGateModuleRoot = original
+		issueScrubGateCwd = originalCwd
+	})
 	t.Setenv("FAK_PRIVATE_DIR", "")
 	t.Setenv("FAK_PRIVATE_ROOT", "")
 	verdict := runIssueScrubGateSubprocess("", "title", "body")
 	if verdict.Ran || verdict.Clean || !strings.Contains(verdict.Err, "issue_scrub.py not found") || !strings.Contains(verdict.Err, "fak-private") {
 		t.Fatalf("missing companion did not fail closed with probed path: %+v", verdict)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+// TestIssueScrubGateTrimpathSafeRootResolution is the regression for
+// anthony-chaudhary/fak#14489: under a -trimpath build the legacy runtime.Caller
+// module root is a module-qualified path, so the sibling probe yields a bogus
+// <module>/fak-private candidate. The trimpath-safe cwd walk must still locate the
+// real companion, and the refusal must name only real candidate paths.
+func TestIssueScrubGateTrimpathSafeRootResolution(t *testing.T) {
+	// Simulate the -trimpath worst case: the module root is a module-qualified path,
+	// not a filesystem directory, so the legacy sibling probe is unresolvable.
+	originalRoot := issueScrubGateModuleRoot
+	issueScrubGateModuleRoot = "github.com/anthony-chaudhary/fak"
+	originalCwd := issueScrubGateCwd
+	t.Cleanup(func() {
+		issueScrubGateModuleRoot = originalRoot
+		issueScrubGateCwd = originalCwd
+	})
+	t.Setenv("FAK_PRIVATE_DIR", "")
+	t.Setenv("FAK_PRIVATE_ROOT", "")
+
+	// Isolated tree: <tmp>/fak (public, no scrubber) + <tmp>/fak-private/tools/issue_scrub.py.
+	tmp := t.TempDir()
+	privateRoot := filepath.Join(tmp, "fak-private")
+	if err := os.MkdirAll(filepath.Join(privateRoot, "tools"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(privateRoot, "tools", "issue_scrub.py"), []byte("print('{}')\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	publicPkg := filepath.Join(tmp, "fak", "internal", "devcmd")
+	if err := os.MkdirAll(publicPkg, 0700); err != nil {
+		t.Fatal(err)
+	}
+	issueScrubGateCwd = publicPkg
+
+	// The trimpath-safe cwd walk must find the real companion (a sibling of the public root).
+	if got := issueScrubGateLocate(""); got != privateRoot {
+		t.Fatalf("trimpath-safe locate did not find the real companion: got %q want %q", got, privateRoot)
+	}
+	// The probed paths must be real filesystem paths, never a module-qualified path.
+	for _, p := range issueScrubGateProbe("") {
+		if strings.HasPrefix(p, "github.com/") {
+			t.Fatalf("probe named a module-qualified path: %q", p)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+// TestIssueScrubGateTrimpathFilesDraft files a clean draft with no root override
+// under a simulated -trimpath module root and observes success, not a fail-closed
+// refusal naming a module path. The companion is a stub producer emitting the
+// value-free clean verdict, so no real needle tables are needed.
+func TestIssueScrubGateTrimpathFilesDraft(t *testing.T) {
+	originalRoot := issueScrubGateModuleRoot
+	issueScrubGateModuleRoot = "github.com/anthony-chaudhary/fak"
+	originalCwd := issueScrubGateCwd
+	originalHook := issueScrubGateHook
+	t.Cleanup(func() {
+		issueScrubGateModuleRoot = originalRoot
+		issueScrubGateCwd = originalCwd
+		issueScrubGateHook = originalHook
+	})
+	t.Setenv("FAK_PRIVATE_DIR", "")
+	t.Setenv("FAK_PRIVATE_ROOT", "")
+
+	tmp := t.TempDir()
+	privateRoot := filepath.Join(tmp, "fak-private")
+	if err := os.MkdirAll(filepath.Join(privateRoot, "tools"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// A static value-free producer fixture; it never contacts a service.
+	clean := `{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0}`
+	if err := os.WriteFile(filepath.Join(privateRoot, "tools", "issue_scrub.py"), []byte("print('"+clean+"')\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	publicPkg := filepath.Join(tmp, "fak", "internal", "devcmd")
+	if err := os.MkdirAll(publicPkg, 0700); err != nil {
+		t.Fatal(err)
+	}
+	issueScrubGateCwd = publicPkg
+	issueScrubGateHook = nil // use the real subprocess gate
+
+	var out, errOut bytes.Buffer
+	runner := func(args []string) (string, string, bool) {
+		return "https://example.test/issues/1", "", true
+	}
+	argv := []string{"--title", "synthetic-title", "--body", "clean synthetic body\n\nProcess cause: none", "--raw-body", "--json"}
+	code := runIssueCreateWith(&out, &errOut, argv, runner)
+	var result issueCreateResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("result did not decode: %v (stderr: %s)", err, errOut.String())
+	}
+	if code != 0 || !result.OK || !result.Scrub.Clean {
+		t.Fatalf("trimpath build did not file a clean draft: code=%d result=%+v stderr=%s", code, result, errOut.String())
 	}
 }
 

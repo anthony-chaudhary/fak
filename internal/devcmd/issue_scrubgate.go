@@ -18,8 +18,46 @@ import (
 )
 
 // issueScrubGateModuleRoot is the fak module root the sibling-locator starts from.
-// Package vars: a test can point it at its own tree instead of the developer's.
-var issueScrubGateModuleRoot = func() string {
+// Package var: a test can point it at its own tree instead of the developer's.
+// The default is resolved -trimpath-safely (see issueScrubGateDefaultFakModuleRoot):
+// it never relies on a compiled-in source path, which -trimpath rewrites to a
+// module-qualified string.
+var issueScrubGateModuleRoot = issueScrubGateDefaultFakModuleRoot()
+
+// issueScrubGateCwd is the working directory the trimpath-safe private-companion
+// walk starts from. Package var: a test can point it at an isolated tree.
+var issueScrubGateCwd = func() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return cwd
+}()
+
+// issueScrubGateDefaultFakModuleRoot resolves the fak module root without relying on
+// a compiled-in source path. -trimpath rewrites runtime.Caller paths to
+// module-qualified strings, so the primary source is the filesystem: walk up from
+// the process cwd to the directory whose go.mod declares the fak module. The legacy
+// runtime.Caller value is accepted only when it names a real on-disk directory.
+func issueScrubGateDefaultFakModuleRoot() string {
+	cwd, err := os.Getwd()
+	if err == nil {
+		if root, ok := issueScrubGateWalkUpForFakModuleRoot(cwd); ok {
+			return root
+		}
+	}
+	if root := issueScrubGateModuleRootFromCaller(); root != "" {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			return root
+		}
+	}
+	return ""
+}
+
+// issueScrubGateModuleRootFromCaller is the legacy runtime.Caller resolution. Under
+// -trimpath the recorded path is module-qualified, so the derived root is a module
+// path, not a directory; callers must verify it exists on disk before using it.
+func issueScrubGateModuleRootFromCaller() string {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		return ""
@@ -28,7 +66,40 @@ var issueScrubGateModuleRoot = func() string {
 	// directory's parent's parent: devcmd -> internal -> <fakRoot>.
 	dir := filepath.Dir(file)
 	return filepath.Dir(filepath.Dir(dir))
-}()
+}
+
+// issueScrubGateWalkUpForFakModuleRoot walks up from startDir to the nearest
+// directory whose go.mod declares the fak module path. Trimpath-safe: pure
+// filesystem, no compiled-in paths.
+func issueScrubGateWalkUpForFakModuleRoot(startDir string) (string, bool) {
+	dir := startDir
+	for {
+		if issueScrubGateIsFakModuleRoot(dir) {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+// issueScrubGateIsFakModuleRoot reports whether dir is the root of the fak module:
+// it holds a go.mod whose module line is the fak module path.
+func issueScrubGateIsFakModuleRoot(dir string) bool {
+	b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module ")) == "github.com/anthony-chaudhary/fak"
+		}
+	}
+	return false
+}
 
 // issueScrubGateScriptName is the scrubber the gate shells out to. Public fak
 // deliberately ships NO copy of it (redacted-placeholders policy: the REAL needle
@@ -64,9 +135,10 @@ type issueScrubGateVerdict struct {
 	Err string
 }
 
-// issueScrubGateLocate resolves the private companion root the same way
-// debtlane.scan.go:39 does (`resolvePrivateRoot`): explicit argument first, then
-// env overrides, then the fak-private sibling of the fak module root. Env order:
+// issueScrubGateLocate resolves the private companion root: explicit argument
+// first, then env overrides, then the trimpath-safe walk up from the process cwd
+// to the nearest private companion (the scrubber lives in the checkout the caller
+// is standing in), then the fak-private sibling of the fak module root. Env order:
 // FAK_PRIVATE_DIR (the issue-#931 spelling) wins over FAK_PRIVATE_ROOT (the
 // pre-existing debtlane/factory spelling).
 func issueScrubGateLocate(privateRoot string) string {
@@ -83,6 +155,14 @@ func issueScrubGateLocate(privateRoot string) string {
 			}
 		}
 	}
+	// Trimpath-safe: the scrubber lives in the checkout the caller is standing in.
+	// Walk up from the process cwd to the nearest private companion, independent of
+	// any compiled-in source path.
+	if cwd := issueScrubGateCwd; cwd != "" {
+		if root := issueScrubGateLocatePrivateFromCwd(cwd); root != "" {
+			return root
+		}
+	}
 	if issueScrubGateModuleRoot != "" {
 		candidate := filepath.Join(filepath.Dir(issueScrubGateModuleRoot), "fak-private")
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
@@ -92,9 +172,45 @@ func issueScrubGateLocate(privateRoot string) string {
 	return ""
 }
 
+// issueScrubGatePrivateCandidates walks up from startDir and returns the private-root
+// candidate script paths in check order: at each ancestor, <ancestor>/tools/issue_scrub.py
+// (the caller is standing in the private repo) then <ancestor>/fak-private/tools/issue_scrub.py
+// (the caller is standing in the public repo or a workspace parent holding both).
+// Trimpath-safe: pure filesystem, no compiled-in paths. Bounded to 16 ancestors so the
+// refusal list stays finite on deep paths.
+func issueScrubGatePrivateCandidates(startDir string) []string {
+	var candidates []string
+	dir := startDir
+	for i := 0; ; i++ {
+		candidates = append(candidates,
+			filepath.Join(dir, issueScrubGateScriptName),
+			filepath.Join(dir, "fak-private", issueScrubGateScriptName))
+		parent := filepath.Dir(dir)
+		if parent == dir || i >= 16 {
+			break
+		}
+		dir = parent
+	}
+	return candidates
+}
+
+// issueScrubGateLocatePrivateFromCwd returns the private companion root nearest to
+// startDir: the first candidate whose script exists on disk. The private root is the
+// directory that CONTAINS the tools/ dir (two levels above the script path).
+func issueScrubGateLocatePrivateFromCwd(startDir string) string {
+	for _, c := range issueScrubGatePrivateCandidates(startDir) {
+		if info, err := os.Stat(c); err == nil && !info.IsDir() {
+			return filepath.Dir(filepath.Dir(c))
+		}
+	}
+	return ""
+}
+
 // issueScrubGateProbe returns every path the gate looked for the scrubber at, in
 // precedence order — the fail-closed refusal message names each one so the operator
-// can install/point the gate at the right tree instead of guessing.
+// can install/point the gate at the right tree instead of guessing. Every named path
+// is a real filesystem path: the module-root sibling candidate is named only when the
+// module root is a real directory, never a -trimpath module-qualified path.
 func issueScrubGateProbe(privateRoot string) []string {
 	var probed []string
 	if root := strings.TrimSpace(privateRoot); root != "" {
@@ -105,9 +221,14 @@ func issueScrubGateProbe(privateRoot string) []string {
 			probed = append(probed, filepath.Join(dir, issueScrubGateScriptName))
 		}
 	}
+	if cwd := issueScrubGateCwd; cwd != "" {
+		probed = append(probed, issueScrubGatePrivateCandidates(cwd)...)
+	}
 	if issueScrubGateModuleRoot != "" {
-		probed = append(probed, filepath.Join(
-			filepath.Dir(issueScrubGateModuleRoot), "fak-private", issueScrubGateScriptName))
+		if info, err := os.Stat(issueScrubGateModuleRoot); err == nil && info.IsDir() {
+			probed = append(probed, filepath.Join(
+				filepath.Dir(issueScrubGateModuleRoot), "fak-private", issueScrubGateScriptName))
+		}
 	}
 	if len(probed) == 0 {
 		probed = append(probed, "<no private root located: pass -private-root or set FAK_PRIVATE_DIR/FAK_PRIVATE_ROOT>")
