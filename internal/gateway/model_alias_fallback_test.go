@@ -24,8 +24,8 @@ import (
 func TestResolveAliasVariantTable(t *testing.T) {
 	canonical := func(id string) string {
 		switch strings.ToLower(strings.TrimSpace(id)) {
-		case "boostrun.medium", "boostrun.medium-q4": // served id + a modelreg-equivalent spelling
-			return "boostrun.medium"
+		case "example-llm.medium", "example-llm.medium-q4": // served id + a modelreg-equivalent spelling
+			return "example-llm.medium"
 		case "roster.model":
 			return "roster.model"
 		}
@@ -38,14 +38,14 @@ func TestResolveAliasVariantTable(t *testing.T) {
 		wantFell   bool
 		wantOK     bool
 	}{
-		{"known exact id passes through as sent", "boostrun.medium", "boostrun.medium", false, true},
-		{"bracket variant of served base falls back", "boostrun.medium[1m]", "boostrun.medium", true, true},
-		{"dash variant of served base falls back", "boostrun.medium-1m", "boostrun.medium", true, true},
-		{"marker match is case-insensitive", "Boostrun.Medium[1M]", "boostrun.medium", true, true},
-		{"dash marker match is case-insensitive", "Boostrun.Medium-1M", "boostrun.medium", true, true},
-		{"surrounding whitespace is trimmed", "  boostrun.medium[1m]\t", "boostrun.medium", true, true},
-		{"stacked markers strip repeatedly", "boostrun.medium[1m]-1m", "boostrun.medium", true, true},
-		{"modelreg-equivalent base falls back to canonical", "boostrun.medium-q4[1m]", "boostrun.medium", true, true},
+		{"known exact id passes through as sent", "example-llm.medium", "example-llm.medium", false, true},
+		{"bracket variant of served base falls back", "example-llm.medium[1m]", "example-llm.medium", true, true},
+		{"dash variant of served base falls back", "example-llm.medium-1m", "example-llm.medium", true, true},
+		{"marker match is case-insensitive", "Example-llm.Medium[1M]", "example-llm.medium", true, true},
+		{"dash marker match is case-insensitive", "Example-llm.Medium-1M", "example-llm.medium", true, true},
+		{"surrounding whitespace is trimmed", "  example-llm.medium[1m]\t", "example-llm.medium", true, true},
+		{"stacked markers strip repeatedly", "example-llm.medium[1m]-1m", "example-llm.medium", true, true},
+		{"modelreg-equivalent base falls back to canonical", "example-llm.medium-q4[1m]", "example-llm.medium", true, true},
 		{"roster-bound base falls back to its exact id", "Roster.Model[1m]", "roster.model", true, true},
 		{"variant of unknown base fails closed", "zzz.unknown[1m]", "zzz.unknown[1m]", false, false},
 		{"dash variant of unknown base fails closed", "zzz.unknown-1m", "zzz.unknown-1m", false, false},
@@ -76,12 +76,12 @@ func TestStripAliasVariantMarkers(t *testing.T) {
 		want       string
 		wantShaped bool
 	}{
-		{"boostrun.medium[1m]", "boostrun.medium", true},
-		{"Boostrun.Medium[1M]", "Boostrun.Medium", true},
-		{"boostrun.medium-1m", "boostrun.medium", true},
-		{"boostrun.medium[1m]-1m", "boostrun.medium", true},
-		{"boostrun.medium", "boostrun.medium", false},
-		{"boostrun.medium[2m]", "boostrun.medium[2m]", false},
+		{"example-llm.medium[1m]", "example-llm.medium", true},
+		{"Example-llm.Medium[1M]", "Example-llm.Medium", true},
+		{"example-llm.medium-1m", "example-llm.medium", true},
+		{"example-llm.medium[1m]-1m", "example-llm.medium", true},
+		{"example-llm.medium", "example-llm.medium", false},
+		{"example-llm.medium[2m]", "example-llm.medium[2m]", false},
 		{"[1m]", "", true},
 		{"", "", false},
 	}

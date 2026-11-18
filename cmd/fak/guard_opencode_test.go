@@ -868,9 +868,9 @@ func TestGuardOpenCodeKeepsValidAdvertisedOutput(t *testing.T) {
 // unqualified or legacy-prefixed pin would let a child escape the kernel
 // adjudication the guard exists to enforce.
 func TestGuardOpenCodeConfigUsesRouterProviderNamespace(t *testing.T) {
-	command := []string{"opencode", "run", "--model", "fak-router/boostrun.medium", "--model=fak-router/other", "hi"}
+	command := []string{"opencode", "run", "--model", "fak-router/example-llm.medium", "--model=fak-router/other", "hi"}
 	gwURL := "http://127.0.0.1:54321"
-	const qualified = "fak-router/boostrun.medium"
+	const qualified = "fak-router/example-llm.medium"
 	getenv := func(string) string { return "" }
 
 	injected, install := installGuardOpenCodeConfig(command, gwURL, qualified, getenv)

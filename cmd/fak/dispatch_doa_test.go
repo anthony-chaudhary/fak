@@ -29,7 +29,7 @@ usage: fak guard [flags] -- <agent command...>
 // witness carried the SAME `reason: unknown` as every outage run; the guard's
 // `— kernel-adjudicated:` launch banner is what tells them apart.
 const doaHealthyLog = `# fak-spawn 20260807-055116 issue=1348 lane=gateway backend=claude argv0=fak.exe
-fak guard: fleetspine: self-discovery on (group 239.255.70.65:4765 as "desktop-bb3fmhp")
+fak guard: fleetspine: self-discovery on (group 239.255.70.65:4765 as "node-desktop-b")
 fak guard 0.43.0 — kernel-adjudicated: claude -p --permission-mode bypassPermissions --model claude-opus-5
   build      : b225bb1ca20f
   gateway    : http://127.0.0.1:56430   (in-process; torn down when the command exits)

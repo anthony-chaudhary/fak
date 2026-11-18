@@ -17,8 +17,8 @@ import (
 // reaches the upstream body on both the buffered and the streamed path, and an
 // omitted model still sends the configured --model; unarmed, every request keeps
 // the historical bytes and sends --model. This is the Claude Code front door
-// contract: a client choosing boostrun.medium must not be silently served
-// boostrun.large because the front door was launched with --model boostrun.large.
+// contract: a client choosing example-llm.medium must not be silently served
+// example-llm.large because the front door was launched with --model example-llm.large.
 //
 // fak-test:runtime fast est=1s
 func TestMessagesProxyModelPassthrough(t *testing.T) {

@@ -23,8 +23,8 @@ func bucketRegistry(t *testing.T) (home, regPath string) {
 	// Both seats' on-disk identity is july11@… → same UUID → same account bucket. july6-netra is
 	// the name-lie duplicate (named july6, identity july11) — exactly the seat the issue says a
 	// per-seat `remove july11-netra` leaves live.
-	july11 := mkHome(t, home, ".claude-july11-netra", "july11@netrasystems.ai", true)
-	july6 := mkHome(t, home, ".claude-july6-netra", "july11@netrasystems.ai", true)
+	july11 := mkHome(t, home, ".claude-july11-netra", "july11@example.com", true)
+	july6 := mkHome(t, home, ".claude-july6-netra", "july11@example.com", true)
 	anchor := mkHome(t, home, ".claude-anchor-seat", "anchor@netra.test", true)
 
 	reg := `{"version":"fak-config-homes/v1","homes":[` +
@@ -57,7 +57,7 @@ func TestRemoveByAccountTombstonesEverySeat(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	rc := runAccounts(&out, &errb, []string{
-		"remove", "--by-account", "july11@netrasystems.ai", "--rehome-to", "anchor-seat",
+		"remove", "--by-account", "july11@example.com", "--rehome-to", "anchor-seat",
 		"--registry", regPath, "--home", home,
 	})
 	if rc != 0 {
@@ -90,7 +90,7 @@ func TestRemoveByAccountTombstonesEverySeat(t *testing.T) {
 	}
 
 	// Reconcile-clean witness: no ACTIVE seat still resolves to the retired july11 bucket.
-	bucket := accounts.UUIDBucketKey("u-july11@netrasystems.ai")
+	bucket := accounts.UUIDBucketKey("u-july11@example.com")
 	for _, h := range live.Homes {
 		if h.Active() && h.Identity.AccountKey() == bucket {
 			t.Fatalf("account %s is still reachable via active seat %q after retirement", bucket, h.Name)
@@ -106,7 +106,7 @@ func TestRemoveByAccountRefusesRehomeIntoRetired(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	rc := runAccounts(&out, &errb, []string{
-		"remove", "--by-account", "july11@netrasystems.ai", "--rehome-to", "july6-netra",
+		"remove", "--by-account", "july11@example.com", "--rehome-to", "july6-netra",
 		"--registry", regPath, "--home", home,
 	})
 	if rc == 0 {
