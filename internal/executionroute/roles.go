@@ -108,6 +108,12 @@ type RolePlan struct {
 	EscalateTo Role `json:"escalate_to,omitempty"`
 	// Fold is how THIS role's own (possibly ensemble) outputs reduce into one.
 	Fold modelroute.Reduction `json:"fold,omitempty"`
+	// ContextProfile optionally overrides the role's predefined context-window
+	// TYPE (see rolecontext.go). Empty means "use the role's registered default",
+	// which is the normal case: the window is a property of the role, not of the
+	// call site. A non-empty value MUST name a registered profile, and RouteRoles
+	// refuses an unknown name rather than silently falling back to the default.
+	ContextProfile string `json:"context_profile,omitempty"`
 }
 
 // RolePlanSet is the declared multi-role plan: an ordered list of RolePlan values plus
@@ -150,7 +156,13 @@ type RoleDecision struct {
 	ExhaustedAxis string               `json:"exhausted_axis,omitempty"`
 	EscalatedTo   Role                 `json:"escalated_to,omitempty"`
 	Fold          modelroute.Reduction `json:"fold,omitempty"`
-	Reason        string               `json:"reason"`
+	// ContextProfile is the resolved predefined context-window TYPE this role runs
+	// under: the named Layout, resident token target, and precision posture. It is
+	// resolved from the role's registered default unless the plan overrode it, and
+	// it is carried into the decision so the window a role ran under is auditable
+	// rather than implicit in the call site.
+	ContextProfile RoleContextProfile `json:"context_profile"`
+	Reason         string             `json:"reason"`
 }
 
 // RoleEnvelope is the parent, inspectable record of every role decision for one
@@ -207,11 +219,17 @@ func (e RoleEnvelope) EffectiveFold() modelroute.Reduction {
 // RouteRoles resolves each declared RolePlan into an inspectable RoleDecision: it
 // routes the role's Subject through the shared modelroute oracle (so role policy
 // and model policy stay separate, and no model id is overloaded across duties),
+// resolves the role's predefined context-window TYPE (see rolecontext.go),
 // tallies the role's spend against its independent Budget, and — when a bounded
 // axis is exhausted — fires the declared escalation to a stronger role. The
 // returned RoleEnvelope is the parent record; declared role order is preserved.
 // spends is the consumed-so-far tally per role (a nil / missing entry is a fresh,
 // zero spend). It is pure and deterministic: no I/O, no goroutines.
+//
+// The context profile is resolved FAIL-CLOSED: a role with no registered profile,
+// or a plan naming a profile that is not registered, is an error. It is never
+// silently downgraded to a zero Layout, because a zero Layout plans against
+// ctxplan's defaults and would make an unprofiled role look profiled.
 func RouteRoles(set RolePlanSet, manifest modelroute.Manifest, spends map[Role]Spend) (RoleEnvelope, error) {
 	if len(set.Plans) == 0 {
 		return RoleEnvelope{}, fmt.Errorf("execution route: no role plans are declared")
@@ -231,17 +249,22 @@ func RouteRoles(set RolePlanSet, manifest modelroute.Manifest, spends map[Role]S
 		if p.EscalateTo != "" && !declared[p.EscalateTo] {
 			return RoleEnvelope{}, fmt.Errorf("execution route: role %q escalates to undeclared role %q", p.Role, p.EscalateTo)
 		}
+		profile, err := resolveContextProfile(p)
+		if err != nil {
+			return RoleEnvelope{}, err
+		}
 		plan := manifest.Route(p.Subject).Plan
 		spend := spends[p.Role]
 		axis, spent := p.Budget.Exhausted(spend)
 		dec := RoleDecision{
-			Role:   p.Role,
-			Plan:   plan,
-			Budget: p.Budget,
-			Spend:  spend,
-			Status: RoleActive,
-			Fold:   p.Fold,
-			Reason: fmt.Sprintf("role %s within budget", p.Role),
+			Role:           p.Role,
+			Plan:           plan,
+			Budget:         p.Budget,
+			Spend:          spend,
+			Status:         RoleActive,
+			Fold:           p.Fold,
+			ContextProfile: profile,
+			Reason:         fmt.Sprintf("role %s within budget", p.Role),
 		}
 		if spent {
 			dec.Status = RoleExhausted
