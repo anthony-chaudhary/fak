@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="fp-title fp-desc">
+<title id="fp-title">The forward pass for one token: text, Encode, token ids, embedBand, forwardHiddenRows, finalNorm, logitsFromHidden, logits, pick, next token, and the loop back to the input</title>
+<desc id="fp-desc">A left-to-right pipeline for one token. Prompt text enters Encode (internal/tokenizer/tokenizer.go:356), which returns token ids as a flat []int. embedBand (internal/model/partition.go:91) is a table read, not a matrix multiply: it copies one HiddenSize-wide row per id out of the embedding table, so the working array x is [][]float32 with one row per sequence position. forwardHiddenRows (internal/model/forward.go:508) is the layer loop: it calls layer(l, x, rope) NumLayers times, each pass reading a different set of weights and mutating x in place, so the shape never changes. The tail is finalNorm (internal/model/weights.go:767) then logitsFromHidden (internal/model/forward.go:559), the LM head, which is the one place the width changes: a HiddenSize-wide vector becomes a VocabSize-wide vector of logits, one raw score per vocabulary entry. Only the FINAL position's row is projected. pick is argmaxF32 (internal/model/kv.go:1652) for greedy or SampleLogits (internal/agent/inkernel_sampling.go:14) for sampling. The chosen next token id is appended to ids and the whole pipeline runs again: that is the generation loop in Generate (internal/model/kv.go:1601).</desc>
+
+<rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+
+<text x="490" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">The forward pass &#8212; one token, end to end</text>
+<text x="490" y="60" text-anchor="middle" font-size="12.5" fill="#57606a">Every box is one function in this repository. The shape of the hidden state never changes; only the numbers do.</text>
+
+<!-- top row -->
+<rect x="30" y="147" width="110" height="76" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="85" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">prompt text</text>
+<text x="85" y="200" text-anchor="middle" font-size="10" fill="#57606a">"the cat sat"</text>
+
+<line x1="140" y1="185" x2="180" y2="185" stroke="#24292f" stroke-width="2"/>
+<polygon points="180,185 166,178 166,192" fill="#24292f"/>
+
+<rect x="180" y="147" width="120" height="76" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<text x="240" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">Encode</text>
+<text x="240" y="200" text-anchor="middle" font-size="9.5" fill="#57606a">tokenizer.go:356</text>
+
+<line x1="300" y1="185" x2="340" y2="185" stroke="#24292f" stroke-width="2"/>
+<polygon points="340,185 326,178 326,192" fill="#24292f"/>
+
+<rect x="340" y="147" width="120" height="76" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="400" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">ids []int</text>
+<text x="400" y="200" text-anchor="middle" font-size="9.5" fill="#57606a">[1820, 4758, 3332]</text>
+
+<line x1="460" y1="185" x2="500" y2="185" stroke="#24292f" stroke-width="2"/>
+<polygon points="500,185 486,178 486,192" fill="#24292f"/>
+
+<rect x="500" y="147" width="130" height="76" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<text x="565" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">embedBand</text>
+<text x="565" y="200" text-anchor="middle" font-size="9.5" fill="#57606a">partition.go:91</text>
+
+<line x1="630" y1="185" x2="670" y2="185" stroke="#24292f" stroke-width="2"/>
+<polygon points="670,185 656,178 656,192" fill="#24292f"/>
+
+<!-- forwardHiddenRows: the layer loop, a stack of N identical blocks -->
+<rect x="670" y="90" width="280" height="200" rx="10" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.4"/>
+<text x="810" y="112" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">forwardHiddenRows</text>
+<text x="810" y="128" text-anchor="middle" font-size="10" fill="#57606a">the layer loop &#8212; forward.go:508</text>
+<rect x="690" y="140" width="240" height="30" rx="6" fill="#ffffff" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="810" y="159" text-anchor="middle" font-size="10.5" fill="#24292f">layer(l, x, rope)</text>
+<rect x="690" y="176" width="240" height="30" rx="6" fill="#ffffff" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="810" y="195" text-anchor="middle" font-size="10.5" fill="#24292f">layer(l, x, rope)</text>
+<text x="810" y="224" text-anchor="middle" font-size="13" fill="#57606a">&#8942;</text>
+<rect x="690" y="230" width="240" height="30" rx="6" fill="#ffffff" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="810" y="249" text-anchor="middle" font-size="10.5" fill="#24292f">layer(l, x, rope)</text>
+<text x="810" y="278" text-anchor="middle" font-size="10" fill="#57606a">&#215; NumLayers &#8212; same code, different weights</text>
+
+<!-- connector: layer loop down to the tail -->
+<line x1="810" y1="290" x2="810" y2="350" stroke="#24292f" stroke-width="2"/>
+<line x1="810" y1="350" x2="95" y2="350" stroke="#24292f" stroke-width="2"/>
+<line x1="95" y1="350" x2="95" y2="400" stroke="#24292f" stroke-width="2"/>
+<polygon points="95,400 88,386 102,386" fill="#24292f"/>
+
+<!-- bottom row: the tail -->
+<rect x="30" y="400" width="130" height="76" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<text x="95" y="433" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">finalNorm</text>
+<text x="95" y="453" text-anchor="middle" font-size="9.5" fill="#57606a">weights.go:767</text>
+
+<line x1="160" y1="438" x2="200" y2="438" stroke="#24292f" stroke-width="2"/>
+<polygon points="200,438 186,431 186,445" fill="#24292f"/>
+
+<rect x="200" y="400" width="170" height="76" rx="10" fill="#9a6700" fill-opacity="0.05" stroke="#9a6700" stroke-width="1.4"/>
+<text x="285" y="433" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">logitsFromHidden</text>
+<text x="285" y="453" text-anchor="middle" font-size="9.5" fill="#57606a">forward.go:559 &#8212; the LM head</text>
+
+<line x1="370" y1="438" x2="410" y2="438" stroke="#24292f" stroke-width="2"/>
+<polygon points="410,438 396,431 396,445" fill="#24292f"/>
+
+<rect x="410" y="400" width="130" height="76" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="475" y="433" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">logits []float32</text>
+<text x="475" y="453" text-anchor="middle" font-size="9.5" fill="#57606a">one score per vocab</text>
+
+<line x1="540" y1="438" x2="580" y2="438" stroke="#24292f" stroke-width="2"/>
+<polygon points="580,438 566,431 566,445" fill="#24292f"/>
+
+<rect x="580" y="400" width="120" height="76" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<text x="640" y="430" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">pick</text>
+<text x="640" y="450" text-anchor="middle" font-size="9.5" fill="#57606a">argmaxF32 /</text>
+<text x="640" y="464" text-anchor="middle" font-size="9.5" fill="#57606a">SampleLogits</text>
+
+<line x1="700" y1="438" x2="740" y2="438" stroke="#24292f" stroke-width="2"/>
+<polygon points="740,438 726,431 726,445" fill="#24292f"/>
+
+<rect x="740" y="400" width="180" height="76" rx="10" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.4"/>
+<text x="830" y="433" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">next token id</text>
+<text x="830" y="453" text-anchor="middle" font-size="9.5" fill="#57606a">append to ids</text>
+
+<!-- the generation loop -->
+<line x1="830" y1="476" x2="830" y2="545" stroke="#0969da" stroke-width="2"/>
+<line x1="830" y1="545" x2="85" y2="545" stroke="#0969da" stroke-width="2"/>
+<line x1="85" y1="545" x2="85" y2="223" stroke="#0969da" stroke-width="2"/>
+<polygon points="85,223 78,237 92,237" fill="#0969da"/>
+<text x="450" y="536" text-anchor="middle" font-size="10.5" fill="#0969da">the generation loop &#8212; append the pick and run the whole pipeline again</text>
+
+<!-- shape annotations -->
+<text x="110" y="252" font-size="10.5" fill="#57606a">x is [][]float32 &#8212; one HiddenSize-wide row per sequence position</text>
+<text x="110" y="268" font-size="10.5" fill="#57606a">the layer loop mutates it in place; the row count is fixed inside the stack</text>
+<text x="200" y="505" font-size="10.5" fill="#57606a">only the FINAL position's row is projected to logits</text>
+
+<!-- footer -->
+<text x="490" y="570" text-anchor="middle" font-size="11" fill="#57606a">Forward is two calls: m.forwardHiddenRows(m.embedBand(ids)). The tail is fillSeqLogits (forward.go:544), which runs logitsFromHidden once per position;</text>
+<text x="490" y="588" text-anchor="middle" font-size="11" fill="#57606a">the simple case keeps only act.Logits[seq-1]. Generate (internal/model/kv.go:1601) is the loop: prefill once, then Step once per token.</text>
+</svg>

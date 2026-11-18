@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="db-title db-desc">
+<title id="db-title">Inside one decoder block: the residual stream runs left to right as a horizontal line, with RMSNorm, the Q/K/V projection, RoPE, attention with the causal mask and softmax, and the output projection hanging off it, then a second RMSNorm and the SwiGLU MLP, each sublayer adding its result back into the stream</title>
+<desc id="db-desc">One decoder block, drawn as a residual stream. A horizontal line runs left to right: x, one HiddenSize-wide row per position, the block's only long-lived state. The block body is composeSeqBlock (internal/model/forward.go:826); the per-sublayer wiring is composeSeqSublayer (forward.go:847), which for the default PreNorm topology computes x += body(norm(x)). The first sublayer hangs off the stream: normSeq (forward.go:810) applies RMSNorm, SerialRMSNorm (internal/model/norm/scalar.go:23), then attnSeq (forward.go:621) does the Q/K/V projection as three matrix multiplies, newRopeForLayer (forward.go:442) and rope.apply (forward.go:452) rotate Q and K by position, the score is dot(q,k) times attnScale, the causal mask is a loop bound so position t never scores past t, softmaxInPlace (forward.go:924) normalizes the scores, the values are weighted and summed, and the output projection o_proj mixes the heads back down to HiddenSize. That delta is added back into the stream at a residual add. The second sublayer hangs off the updated stream: a second normSeq, then mlpSeq (forward.go:793), which calls denseSwiGLU (internal/model/moe.go:140) &#8212; gate_proj, up_proj, silu, elementwise multiply, down_proj &#8212; and its delta is added back at a second residual add. The two residual adds are what make the block a stream: each sublayer computes a change to add, never a replacement, so the shape never changes. The decode twin of this block is blockStep (internal/model/kv.go:917), the same wiring over one position.</desc>
+
+<rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+
+<text x="490" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">Inside one decoder block &#8212; the residual stream</text>
+<text x="490" y="60" text-anchor="middle" font-size="12.5" fill="#57606a">Two sublayers hang off one horizontal line. Each computes a delta and adds it back; nothing overwrites the stream. That is what makes it a stream.</text>
+
+<!-- the residual stream line -->
+<line x1="60" y1="300" x2="920" y2="300" stroke="#24292f" stroke-width="2.4"/>
+<text x="60" y="288" font-size="11.5" font-weight="700" fill="#24292f">x &#8212; the residual stream</text>
+<text x="60" y="322" font-size="10" fill="#57606a">one HiddenSize-wide row per position &#183; mutated in place &#183; shape never changes</text>
+
+<!-- block body label -->
+<text x="490" y="90" text-anchor="middle" font-size="11" fill="#57606a">block body: composeSeqBlock (forward.go:826) &#160;&#183;&#160; wiring: composeSeqSublayer (forward.go:847) &#160;&#183;&#160; default PreNorm: x += body(norm(x))</text>
+
+<!-- ===== SUBLAYER 1: ATTENTION ===== -->
+<rect x="60" y="110" width="420" height="150" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<text x="76" y="132" font-size="11.5" font-weight="700" fill="#0969da">sublayer 1 &#8212; attention (positions talk)</text>
+
+<rect x="76" y="144" width="90" height="34" rx="6" fill="#ffffff" stroke="#0969da" stroke-width="1.2"/>
+<text x="121" y="160" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">RMSNorm</text>
+<text x="121" y="173" text-anchor="middle" font-size="8.5" fill="#57606a">normSeq:810</text>
+
+<line x1="166" y1="161" x2="186" y2="161" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="186,161 176,156 176,166" fill="#24292f"/>
+
+<rect x="186" y="144" width="100" height="34" rx="6" fill="#ffffff" stroke="#0969da" stroke-width="1.2"/>
+<text x="236" y="160" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">Q/K/V proj</text>
+<text x="236" y="173" text-anchor="middle" font-size="8.5" fill="#57606a">attnSeq:621</text>
+
+<line x1="286" y1="161" x2="306" y2="161" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="306,161 296,156 296,166" fill="#24292f"/>
+
+<rect x="306" y="144" width="80" height="34" rx="6" fill="#ffffff" stroke="#0969da" stroke-width="1.2"/>
+<text x="346" y="160" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">RoPE</text>
+<text x="346" y="173" text-anchor="middle" font-size="8.5" fill="#57606a">rope.apply:452</text>
+
+<line x1="386" y1="161" x2="406" y2="161" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="406,161 396,156 396,166" fill="#24292f"/>
+
+<rect x="406" y="144" width="60" height="34" rx="6" fill="#ffffff" stroke="#0969da" stroke-width="1.2"/>
+<text x="436" y="160" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">attn</text>
+<text x="436" y="173" text-anchor="middle" font-size="8.5" fill="#57606a">softmax:924</text>
+
+<!-- attention detail -->
+<text x="76" y="200" font-size="10" fill="#57606a">score = dot(q,k) &#215; attnScale &#160;&#8594;&#160; causal mask (loop bound: t never scores past t) &#160;&#8594;&#160; softmax</text>
+<text x="76" y="216" font-size="10" fill="#57606a">&#8594; weights &#8594; &#931; w&#7522;&#183;V&#7522; &#8594; o_proj (concat heads, back to HiddenSize)</text>
+<text x="76" y="238" font-size="10" fill="#57606a">GQA: GroupSize = NumHeads / NumKVHeads queries share one KV head (config.go:1692)</text>
+
+<!-- sublayer 1 delta down to the stream -->
+<line x1="270" y1="260" x2="270" y2="300" stroke="#0969da" stroke-width="2"/>
+<polygon points="270,300 263,286 277,286" fill="#0969da"/>
+<text x="280" y="284" font-size="9.5" fill="#0969da">delta</text>
+
+<!-- residual add 1 -->
+<circle cx="270" cy="300" r="11" fill="#ffffff" stroke="#1a7f37" stroke-width="1.8"/>
+<text x="270" y="305" text-anchor="middle" font-size="13" font-weight="700" fill="#1a7f37">+</text>
+<text x="270" y="332" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1a7f37">residual add</text>
+
+<!-- ===== SUBLAYER 2: MLP ===== -->
+<rect x="500" y="110" width="420" height="150" rx="10" fill="#9a6700" fill-opacity="0.05" stroke="#9a6700" stroke-width="1.4"/>
+<text x="516" y="132" font-size="11.5" font-weight="700" fill="#9a6700">sublayer 2 &#8212; MLP (each position alone)</text>
+
+<rect x="516" y="144" width="90" height="34" rx="6" fill="#ffffff" stroke="#9a6700" stroke-width="1.2"/>
+<text x="561" y="160" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">RMSNorm</text>
+<text x="561" y="173" text-anchor="middle" font-size="8.5" fill="#57606a">normSeq:810</text>
+
+<line x1="606" y1="161" x2="626" y2="161" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="626,161 616,156 616,166" fill="#24292f"/>
+
+<rect x="626" y="144" width="120" height="34" rx="6" fill="#ffffff" stroke="#9a6700" stroke-width="1.2"/>
+<text x="686" y="160" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">SwiGLU MLP</text>
+<text x="686" y="173" text-anchor="middle" font-size="8.5" fill="#57606a">mlpSeq:793</text>
+
+<line x1="746" y1="161" x2="766" y2="161" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="766,161 756,156 756,166" fill="#24292f"/>
+
+<rect x="766" y="144" width="130" height="34" rx="6" fill="#ffffff" stroke="#9a6700" stroke-width="1.2"/>
+<text x="831" y="160" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">down_proj</text>
+<text x="831" y="173" text-anchor="middle" font-size="8.5" fill="#57606a">denseSwiGLU:140</text>
+
+<!-- MLP detail -->
+<text x="516" y="200" font-size="10" fill="#57606a">g = gate_proj(xn) &#8594; silu(g) &#160;&#183;&#160; u = up_proj(xn) &#160;&#183;&#160; activated = silu(g) * u</text>
+<text x="516" y="216" font-size="10" fill="#57606a">delta = down_proj(activated) &#160;&#183;&#160; shared impl: ffn.Gated (ffn/gated.go:17)</text>
+<text x="516" y="238" font-size="10" fill="#57606a">shape funnel: HiddenSize &#8594; IntermediateSize (2.5&#8211;4&#215;) &#8594; HiddenSize</text>
+
+<!-- sublayer 2 delta down to the stream -->
+<line x1="710" y1="260" x2="710" y2="300" stroke="#9a6700" stroke-width="2"/>
+<polygon points="710,300 703,286 717,286" fill="#9a6700"/>
+<text x="720" y="284" font-size="9.5" fill="#9a6700">delta</text>
+
+<!-- residual add 2 -->
+<circle cx="710" cy="300" r="11" fill="#ffffff" stroke="#1a7f37" stroke-width="1.8"/>
+<text x="710" y="305" text-anchor="middle" font-size="13" font-weight="700" fill="#1a7f37">+</text>
+<text x="710" y="332" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1a7f37">residual add</text>
+
+<!-- stream in / out -->
+<text x="60" y="304" font-size="10" fill="#57606a">in</text>
+<line x1="900" y1="300" x2="920" y2="300" stroke="#24292f" stroke-width="2.4"/>
+<polygon points="920,300 906,293 906,307" fill="#24292f"/>
+<text x="900" y="288" font-size="10.5" font-weight="700" fill="#24292f">x&#8242;</text>
+<text x="900" y="322" font-size="10" fill="#57606a">same shape, richer content</text>
+
+<!-- the stream callout -->
+<rect x="60" y="360" width="420" height="96" rx="10" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="76" y="384" font-size="11.5" font-weight="700" fill="#1a7f37">why it is a stream</text>
+<text x="76" y="404" font-size="10.5" fill="#24292f">Each sublayer computes a change and adds it back &#8212; x += body(norm(x)).</text>
+<text x="76" y="420" font-size="10.5" fill="#24292f">Nothing overwrites the stream, so the shape never changes and the</text>
+<text x="76" y="436" font-size="10.5" fill="#24292f">information accumulates. The two (+) circles are the residual adds.</text>
+
+<!-- topology callout -->
+<rect x="500" y="360" width="420" height="96" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.2"/>
+<text x="516" y="384" font-size="11.5" font-weight="700" fill="#0969da">one body, four wirings</text>
+<text x="516" y="404" font-size="10.5" fill="#24292f">PreNorm (Llama, default) &#183; PostNorm (OLMo2) &#183; SandwichNorm (Gemma2)</text>
+<text x="516" y="420" font-size="10.5" fill="#24292f">&#183; ParallelResidual (GPT-NeoX), where both sublayers read the original</text>
+<text x="516" y="436" font-size="10.5" fill="#24292f">stream and both deltas land in one add. Chosen by BlockTopology (arch.go:691).</text>
+
+<!-- footer -->
+<text x="490" y="490" text-anchor="middle" font-size="11" fill="#57606a">The same block exists twice: composeSeqBlock (forward.go:826) for whole-sequence prefill, and blockStep (kv.go:917) for one-token decode. The wiring is</text>
+<text x="490" y="508" text-anchor="middle" font-size="11" fill="#57606a">shared; only the data shape differs. The two must compute the same function &#8212; the RMSNorm arithmetic, the RoPE rotation, the GQA sharing, the softmax,</text>
+<text x="490" y="526" text-anchor="middle" font-size="11" fill="#57606a">the residual adds, and the SwiGLU &#8212; or a token generated during decode would not match the same token scored during prefill. The f32 path is pinned</text>
+<text x="490" y="544" text-anchor="middle" font-size="11" fill="#57606a">bit-exact against the prefill path, and the decode path's RoPE funnels through ropeRowQK (kv.go:1070) so a convention change lands in one place.</text>
+<text x="490" y="572" text-anchor="middle" font-size="11" fill="#57606a">Attention mixes across positions; the MLP transforms within a position; the residual stream carries everything forward. Every modern decoder is a stack of this block.</text>
+</svg>

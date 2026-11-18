@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="kvc-title kvc-desc">
+<title id="kvc-title">The KV cache as a growing table: rows are sequence positions, columns are the K and V vectors per layer, one row is appended per decode step, and the new query attends over every cached row</title>
+<desc id="kvc-desc">A growing table. Rows are sequence positions; the columns are the K and V vectors for each layer, stored as flat row-major slices of NumKVHeads times HeadDim per position. The cache is the first-class object KVCache (internal/model/kvcache.go:11). It holds K (post-RoPE), Kraw (the same entries pre-RoPE, so a span can be repositioned), and V, plus a shared pos list of absolute positions. After prefill the table has P rows; each decode step appends exactly one row per layer, and the shared pos list grows by one. The new query at the newest position attends over ALL cached rows &#8212; the causal mask lets it see every position up to and including itself. The memory cost is 2 times layers times NumKVHeads times HeadDim times positions times bytes_per_element; the leading 2 is K and V. A worked example for 32 layers, 8 KV heads, HeadDim 128, 32768 positions, 2 bytes per element gives 4.29 GB. fak's own accounting charges three f32 rows per position (post-RoPE K, pre-RoPE Kraw, and V), which is 12.9 GB for the same config.</desc>
+
+<rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+
+<text x="490" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">The KV cache &#8212; a table that grows one row per step</text>
+<text x="490" y="60" text-anchor="middle" font-size="12.5" fill="#57606a">Rows are sequence positions; columns are K and V per layer. Decode appends one row and reads every row back. That read is why decode is fast.</text>
+
+<!-- the growing table -->
+<rect x="40" y="90" width="470" height="300" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<text x="275" y="114" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">KVCache &#8212; kvcache.go:11</text>
+<text x="275" y="130" text-anchor="middle" font-size="10" fill="#57606a">one row per position, per layer &#8212; flat row-major, NumKVHeads&#215;HeadDim wide</text>
+
+<!-- header row -->
+<rect x="60" y="142" width="70" height="26" rx="4" fill="#24292f" fill-opacity="0.06" stroke="#d0d7de" stroke-width="1"/>
+<text x="95" y="159" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">pos</text>
+<rect x="134" y="142" width="150" height="26" rx="4" fill="#0969da" fill-opacity="0.08" stroke="#d0d7de" stroke-width="1"/>
+<text x="209" y="159" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">K row (post-RoPE)</text>
+<rect x="288" y="142" width="150" height="26" rx="4" fill="#9a6700" fill-opacity="0.08" stroke="#d0d7de" stroke-width="1"/>
+<text x="363" y="159" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">V row</text>
+
+<!-- rows 0..3 (from prefill) -->
+<rect x="60" y="172" width="70" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="95" y="188" text-anchor="middle" font-size="10" fill="#57606a">0</text>
+<rect x="134" y="172" width="150" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="209" y="188" text-anchor="middle" font-size="10" fill="#57606a">[ &#8230; ]</text>
+<rect x="288" y="172" width="150" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="363" y="188" text-anchor="middle" font-size="10" fill="#57606a">[ &#8230; ]</text>
+
+<rect x="60" y="200" width="70" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="95" y="216" text-anchor="middle" font-size="10" fill="#57606a">1</text>
+<rect x="134" y="200" width="150" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="209" y="216" text-anchor="middle" font-size="10" fill="#57606a">[ &#8230; ]</text>
+<rect x="288" y="200" width="150" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="363" y="216" text-anchor="middle" font-size="10" fill="#57606a">[ &#8230; ]</text>
+
+<rect x="60" y="228" width="70" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="95" y="244" text-anchor="middle" font-size="10" fill="#57606a">2</text>
+<rect x="134" y="228" width="150" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="209" y="244" text-anchor="middle" font-size="10" fill="#57606a">[ &#8230; ]</text>
+<rect x="288" y="228" width="150" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="363" y="244" text-anchor="middle" font-size="10" fill="#57606a">[ &#8230; ]</text>
+
+<rect x="60" y="256" width="70" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="95" y="272" text-anchor="middle" font-size="10" fill="#57606a">3</text>
+<rect x="134" y="256" width="150" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="209" y="272" text-anchor="middle" font-size="10" fill="#57606a">[ &#8230; ]</text>
+<rect x="288" y="256" width="150" height="24" rx="3" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="363" y="272" text-anchor="middle" font-size="10" fill="#57606a">[ &#8230; ]</text>
+
+<text x="60" y="296" font-size="10" fill="#57606a">after prefill: P = 4 rows &#160;&#183;&#160; pos[] = {0,1,2,3}</text>
+
+<!-- appended rows -->
+<rect x="60" y="306" width="70" height="24" rx="3" fill="#1a7f37" fill-opacity="0.08" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="95" y="322" text-anchor="middle" font-size="10" font-weight="700" fill="#1a7f37">4</text>
+<rect x="134" y="306" width="150" height="24" rx="3" fill="#1a7f37" fill-opacity="0.08" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="209" y="322" text-anchor="middle" font-size="10" fill="#1a7f37">[ &#8230; ] new</text>
+<rect x="288" y="306" width="150" height="24" rx="3" fill="#1a7f37" fill-opacity="0.08" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="363" y="322" text-anchor="middle" font-size="10" fill="#1a7f37">[ &#8230; ] new</text>
+
+<rect x="60" y="334" width="70" height="24" rx="3" fill="#1a7f37" fill-opacity="0.08" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="95" y="350" text-anchor="middle" font-size="10" font-weight="700" fill="#1a7f37">5</text>
+<rect x="134" y="334" width="150" height="24" rx="3" fill="#1a7f37" fill-opacity="0.08" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="209" y="350" text-anchor="middle" font-size="10" fill="#1a7f37">[ &#8230; ] new</text>
+<rect x="288" y="334" width="150" height="24" rx="3" fill="#1a7f37" fill-opacity="0.08" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="363" y="350" text-anchor="middle" font-size="10" fill="#1a7f37">[ &#8230; ] new</text>
+
+<text x="60" y="378" font-size="10" fill="#1a7f37">each decode step appends exactly one row per layer; pos[] grows by one</text>
+
+<!-- the attention read pattern -->
+<rect x="530" y="90" width="420" height="300" rx="10" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.4"/>
+<text x="740" y="114" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">the attention read pattern</text>
+<text x="740" y="130" text-anchor="middle" font-size="10" fill="#57606a">the new query attends over ALL cached rows</text>
+
+<!-- query -->
+<rect x="550" y="146" width="120" height="30" rx="6" fill="#0969da" fill-opacity="0.08" stroke="#0969da" stroke-width="1.2"/>
+<text x="610" y="165" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">q at pos 5</text>
+
+<!-- fan-out lines to cached rows -->
+<line x1="670" y1="161" x2="720" y2="161" stroke="#1a7f37" stroke-width="1.4"/>
+<line x1="720" y1="161" x2="720" y2="200" stroke="#1a7f37" stroke-width="1.4"/>
+<line x1="720" y1="200" x2="760" y2="200" stroke="#1a7f37" stroke-width="1.4"/>
+<polygon points="760,200 746,193 746,207" fill="#1a7f37"/>
+
+<line x1="720" y1="200" x2="720" y2="240" stroke="#1a7f37" stroke-width="1.4"/>
+<line x1="720" y1="240" x2="760" y2="240" stroke="#1a7f37" stroke-width="1.4"/>
+<polygon points="760,240 746,233 746,247" fill="#1a7f37"/>
+
+<line x1="720" y1="240" x2="720" y2="280" stroke="#1a7f37" stroke-width="1.4"/>
+<line x1="720" y1="280" x2="760" y2="280" stroke="#1a7f37" stroke-width="1.4"/>
+<polygon points="760,280 746,273 746,287" fill="#1a7f37"/>
+
+<line x1="720" y1="280" x2="720" y2="320" stroke="#1a7f37" stroke-width="1.4"/>
+<line x1="720" y1="320" x2="760" y2="320" stroke="#1a7f37" stroke-width="1.4"/>
+<polygon points="760,320 746,313 746,327" fill="#1a7f37"/>
+
+<text x="770" y="204" font-size="10.5" fill="#24292f">K/V row 0</text>
+<text x="770" y="244" font-size="10.5" fill="#24292f">K/V row 1</text>
+<text x="770" y="284" font-size="10.5" fill="#24292f">K/V row 2</text>
+<text x="770" y="324" font-size="10.5" fill="#24292f">K/V row 3</text>
+
+<text x="550" y="360" font-size="10.5" fill="#57606a">the causal mask lets the newest position see every</text>
+<text x="550" y="376" font-size="10.5" fill="#57606a">position up to and including itself &#8212; so it reads the whole table</text>
+
+<!-- Kraw distinction -->
+<rect x="40" y="404" width="470" height="86" rx="10" fill="#9a6700" fill-opacity="0.05" stroke="#9a6700" stroke-width="1.2"/>
+<text x="58" y="428" font-size="11.5" font-weight="700" fill="#9a6700">K vs Kraw &#8212; two copies of the key</text>
+<text x="58" y="448" font-size="10.5" fill="#24292f">K is post-RoPE (the position is baked in); Kraw is the same key pre-RoPE.</text>
+<text x="58" y="464" font-size="10.5" fill="#24292f">Repositioning re-rotates Kraw once at the new position &#8212; bit-exact to a</text>
+<text x="58" y="480" font-size="10.5" fill="#24292f">fresh prefill. V needs no twin: values are never rotated.</text>
+
+<!-- memory cost formula -->
+<rect x="530" y="404" width="420" height="86" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.2"/>
+<text x="548" y="428" font-size="11.5" font-weight="700" fill="#0969da">the memory cost</text>
+<text x="548" y="450" font-size="11" fill="#24292f">KV bytes = 2 &#215; layers &#215; NumKVHeads &#215; HeadDim</text>
+<text x="548" y="466" font-size="11" fill="#24292f">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#215; positions &#215; bytes_per_element</text>
+<text x="548" y="484" font-size="10" fill="#57606a">the leading 2 is K and V; kvStride = NumKVHeads &#215; HeadDim</text>
+
+<!-- footer -->
+<text x="490" y="516" text-anchor="middle" font-size="11" fill="#57606a">Worked example: 32 layers, 8 KV heads, HeadDim 128, 32768 positions, 2 bytes/element &#8594; 2 &#215; 32 &#215; 8 &#215; 128 &#215; 32768 &#215; 2 = 4.29 GB.</text>
+<text x="490" y="534" text-anchor="middle" font-size="11" fill="#57606a">fak charges three f32 rows per position &#8212; post-RoPE K, pre-RoPE Kraw, and V (cache_geometry.go:191) &#8212; so the same config is 12.9 GB.</text>
+<text x="490" y="556" text-anchor="middle" font-size="11" fill="#57606a">At 32k context the cache is larger than the 3.5 GB of 4-bit weights for a 7B model. That is why paged and evictable caches exist, and why the</text>
+<text x="490" y="574" text-anchor="middle" font-size="11" fill="#57606a">quantized tier (KVPrecisionQ8_0) packs the attended K and V rows while leaving Kraw in f32, so the exactness property survives compression.</text>
+</svg>

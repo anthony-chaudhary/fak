@@ -74,6 +74,8 @@ Two numbers fall out of that picture, and they are the two a serving engineer tu
 
 The rest of this page is why those two numbers have different shapes.
 
+![Prefill versus decode, side by side: prefill processes every prompt token at once as a wide matrix multiply and is compute-bound with high arithmetic intensity, producing the first token; decode processes one token at a time as a matrix-vector product and is memory-bound with low arithmetic intensity because it must read the whole KV cache each step](diagrams/prefill-vs-decode.svg)
+
 ## What are the two phases actually doing?
 
 **Question: what is different about the pass that produces the first token?**
@@ -137,6 +139,8 @@ DECODE — one pass per new token (1 position at a time)
   step 3:  [t2002]  -> [ weights ] -> token 2003
   ...      weights read AGAIN, every step, for ONE column of work
 ```
+
+![The KV cache as a growing table: rows are sequence positions and columns are the K and V vectors per layer; each decode step appends one row, and the new query attends over every cached row; the memory cost is two tensors times layers times heads times head dimension times positions times bytes per element](diagrams/kv-cache.svg)
 
 ## What is the KV cache, and why does it have to exist?
 

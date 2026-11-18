@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="pvd-title pvd-desc">
+<title id="pvd-title">Prefill versus decode, side by side: prefill is one wide compute-bound matrix multiply over the whole prompt, decode is many narrow memory-bound matrix-vector products, one token at a time</title>
+<desc id="pvd-desc">A two-panel comparison. LEFT PANEL, PREFILL: the whole prompt, P positions at once, enters one wide matrix multiply (Prefill, internal/model/kv.go:1093, which calls prefillOwned at kv.go:1129). The weights are read once and reused across all P positions, so the arithmetic intensity is high &#8212; about 8000 FLOP per byte for a 2000-token prompt on a 7B 4-bit model &#8212; and the phase is compute-bound: the arithmetic units are the limit. It produces the logits of the last prompt position, which is the first generated token. RIGHT PANEL, DECODE: one already-chosen token enters a matrix-vector product (Step, internal/model/kv.go:1508, which calls stepOwned at kv.go:1535). The weights are read again every step for one column of work, so the arithmetic intensity is low &#8212; about 4 FLOP per byte &#8212; and the phase is memory-bound: the memory bus is the limit, and each step must also read the whole KV cache. A small arithmetic-intensity sketch sits under each panel, and a note states that the two phases run the same math with opposite bottlenecks.</desc>
+
+<rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+
+<text x="490" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">Prefill vs decode &#8212; one model, two speeds</text>
+<text x="490" y="60" text-anchor="middle" font-size="12.5" fill="#57606a">The same math, run at two different shapes. Prefill is one wide pass; decode is many narrow passes. That asymmetry is the whole story.</text>
+
+<!-- ================= LEFT PANEL: PREFILL ================= -->
+<rect x="30" y="84" width="440" height="420" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<rect x="30" y="84" width="440" height="34" rx="10" fill="#0969da"/>
+<rect x="30" y="104" width="440" height="14" fill="#0969da"/>
+<text x="250" y="107" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">PREFILL &#8212; the whole prompt, one pass</text>
+
+<text x="50" y="140" font-size="11" fill="#57606a">entry point:</text>
+<text x="50" y="158" font-size="11.5" font-weight="700" fill="#24292f">Prefill(ids) &#8212; kv.go:1093 &#8594; prefillOwned (kv.go:1129)</text>
+
+<!-- prompt tokens -->
+<rect x="50" y="172" width="40" height="26" rx="4" fill="#ffffff" stroke="#0969da" stroke-width="1.2"/>
+<text x="70" y="189" text-anchor="middle" font-size="10" fill="#24292f">t0</text>
+<rect x="94" y="172" width="40" height="26" rx="4" fill="#ffffff" stroke="#0969da" stroke-width="1.2"/>
+<text x="114" y="189" text-anchor="middle" font-size="10" fill="#24292f">t1</text>
+<rect x="138" y="172" width="40" height="26" rx="4" fill="#ffffff" stroke="#0969da" stroke-width="1.2"/>
+<text x="158" y="189" text-anchor="middle" font-size="10" fill="#24292f">t2</text>
+<rect x="182" y="172" width="40" height="26" rx="4" fill="#ffffff" stroke="#0969da" stroke-width="1.2"/>
+<text x="202" y="189" text-anchor="middle" font-size="10" fill="#24292f">t3</text>
+<text x="234" y="189" font-size="12" fill="#57606a">&#8230;</text>
+<rect x="256" y="172" width="60" height="26" rx="4" fill="#ffffff" stroke="#0969da" stroke-width="1.2"/>
+<text x="286" y="189" text-anchor="middle" font-size="10" fill="#24292f">t1999</text>
+<text x="330" y="189" font-size="10.5" fill="#57606a">P positions at once</text>
+
+<line x1="250" y1="198" x2="250" y2="222" stroke="#0969da" stroke-width="2"/>
+<polygon points="250,222 243,208 257,208" fill="#0969da"/>
+
+<!-- wide matmul -->
+<rect x="50" y="222" width="400" height="70" rx="8" fill="#0969da" fill-opacity="0.06" stroke="#0969da" stroke-width="1.4"/>
+<text x="250" y="248" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">one wide matrix multiply (GEMM)</text>
+<text x="250" y="268" text-anchor="middle" font-size="10.5" fill="#57606a">weights read ONCE, reused across all P positions</text>
+<text x="250" y="284" text-anchor="middle" font-size="10.5" fill="#57606a">prefillBatched (prefill_batch.go:35) &#8212; P columns of work</text>
+
+<line x1="250" y1="292" x2="250" y2="316" stroke="#0969da" stroke-width="2"/>
+<polygon points="250,316 243,302 257,302" fill="#0969da"/>
+
+<rect x="50" y="316" width="400" height="44" rx="8" fill="#1a7f37" fill-opacity="0.06" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="250" y="336" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a7f37">logits of the LAST prompt position</text>
+<text x="250" y="352" text-anchor="middle" font-size="10.5" fill="#57606a">that is the first generated token &#8212; this is TTFT</text>
+
+<!-- arithmetic intensity sketch: prefill -->
+<rect x="50" y="376" width="400" height="112" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="66" y="398" font-size="11" font-weight="700" fill="#0969da">arithmetic intensity &#8212; FLOPs per byte</text>
+<text x="66" y="418" font-size="10.5" fill="#24292f">FLOPs = 2 &#215; weights &#215; P &#160;&#160;&#183;&#160;&#160; bytes = weights &#215; bytes_per_weight</text>
+<text x="66" y="436" font-size="10.5" fill="#24292f">7B model, 4-bit, P = 2000:&#160;&#160;2.8&#215;10^13 / 3.5&#215;10^9 =</text>
+<text x="66" y="456" font-size="13" font-weight="700" fill="#1a7f37">8000 FLOP/byte</text>
+<text x="66" y="476" font-size="10.5" fill="#57606a">balance point is ~100 FLOP/byte &#8212; far above it</text>
+
+<!-- ================= RIGHT PANEL: DECODE ================= -->
+<rect x="510" y="84" width="440" height="420" rx="10" fill="#9a6700" fill-opacity="0.05" stroke="#9a6700" stroke-width="1.4"/>
+<rect x="510" y="84" width="440" height="34" rx="10" fill="#9a6700"/>
+<rect x="510" y="104" width="440" height="14" fill="#9a6700"/>
+<text x="730" y="107" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">DECODE &#8212; one token, one pass, repeated</text>
+
+<text x="530" y="140" font-size="11" fill="#57606a">entry point:</text>
+<text x="530" y="158" font-size="11.5" font-weight="700" fill="#24292f">Step(id) &#8212; kv.go:1508 &#8594; stepOwned (kv.go:1535)</text>
+
+<!-- one token per step -->
+<rect x="530" y="172" width="60" height="26" rx="4" fill="#ffffff" stroke="#9a6700" stroke-width="1.2"/>
+<text x="560" y="189" text-anchor="middle" font-size="10" fill="#24292f">t2000</text>
+<text x="600" y="189" font-size="10.5" fill="#57606a">1 position at a time</text>
+
+<line x1="560" y1="198" x2="560" y2="222" stroke="#9a6700" stroke-width="2"/>
+<polygon points="560,222 553,208 567,208" fill="#9a6700"/>
+
+<!-- matvec -->
+<rect x="530" y="222" width="400" height="70" rx="8" fill="#9a6700" fill-opacity="0.06" stroke="#9a6700" stroke-width="1.4"/>
+<text x="730" y="248" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">a matrix-vector product (GEMV)</text>
+<text x="730" y="268" text-anchor="middle" font-size="10.5" fill="#57606a">weights read AGAIN every step, for ONE column of work</text>
+<text x="730" y="284" text-anchor="middle" font-size="10.5" fill="#57606a">and the whole KV cache is read each step</text>
+
+<line x1="730" y1="292" x2="730" y2="316" stroke="#9a6700" stroke-width="2"/>
+<polygon points="730,316 723,302 737,302" fill="#9a6700"/>
+
+<rect x="530" y="316" width="400" height="44" rx="8" fill="#1a7f37" fill-opacity="0.06" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="730" y="336" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1a7f37">next-token logits</text>
+<text x="730" y="352" text-anchor="middle" font-size="10.5" fill="#57606a">one per step &#8212; this is inter-token latency</text>
+
+<!-- arithmetic intensity sketch: decode -->
+<rect x="530" y="376" width="400" height="112" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<text x="546" y="398" font-size="11" font-weight="700" fill="#9a6700">arithmetic intensity &#8212; FLOPs per byte</text>
+<text x="546" y="418" font-size="10.5" fill="#24292f">FLOPs = 2 &#215; weights &#215; 1 &#160;&#160;&#183;&#160;&#160; bytes = weights &#215; bytes_per_weight</text>
+<text x="546" y="436" font-size="10.5" fill="#24292f">7B model, 4-bit, 1 token:&#160;&#160;1.4&#215;10^10 / 3.5&#215;10^9 =</text>
+<text x="546" y="456" font-size="13" font-weight="700" fill="#cf222e">4 FLOP/byte</text>
+<text x="546" y="476" font-size="10.5" fill="#57606a">~25&#215; below the balance point &#8212; the bus is the limit</text>
+
+<!-- the shared-math note -->
+<rect x="30" y="516" width="920" height="34" rx="8" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.2"/>
+<text x="490" y="538" text-anchor="middle" font-size="11.5" fill="#24292f">Same math, opposite bottlenecks: both read the same weights and run the same block &#8212; prefill multiplies them against P positions, decode against one.</text>
+
+<!-- footer -->
+<text x="490" y="570" text-anchor="middle" font-size="11" fill="#57606a">Generate (kv.go:1601) is prefill once, then Step once per token. Batching raises decode's intensity (32 requests &#8594; 128 FLOP/byte) but does not help prefill,</text>
+<text x="490" y="588" text-anchor="middle" font-size="11" fill="#57606a">which is already saturated. Quantization halves decode's bytes-per-weight and so roughly halves its floor; prefill barely moves.</text>
+</svg>

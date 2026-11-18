@@ -515,6 +515,8 @@ than five hand-copies.
 This is the seam Level 4 opens: *why* the two paths have different performance
 characteristics, and what the cache does to the arithmetic.
 
+![One decoder block: the residual stream runs left to right as a horizontal line, with RMSNorm, the Q/K/V projection, RoPE, attention (causal mask and softmax), and the output projection hanging off it, then a second RMSNorm and the SwiGLU MLP, each sublayer adding its result back into the stream](diagrams/decoder-block.svg)
+
 ## The block, operation by operation
 
 | # | Operation | What it computes | Where |

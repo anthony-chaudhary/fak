@@ -58,6 +58,8 @@ making that function *fast* and *cheap* without changing what it computes.
 | **[4 · Prefill vs decode: why one model has two speeds](level-4-prefill-vs-decode.md)** | A performance engineer. | "Why is the first token slow and the rest fast? Why is decode memory-bound?" |
 | **[5 · What changes at scale](level-5-at-scale.md)** | A researcher or systems lead. | "Batching, quantization, MoE, speculative decoding — what do they change, and what is still open?" |
 
+![The forward pass for one token: text is encoded to token ids, each id becomes a vector, the layer loop runs over the hidden state, the final position's row is projected to one score per vocabulary entry, and one is picked as the next token; the next token feeds back into the input, which is the generation loop](diagrams/forward-pass.svg)
+
 ## How to read it
 
 - **Curious, not technical?** Read **Level 1** and stop. It is the whole story in
