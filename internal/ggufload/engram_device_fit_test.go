@@ -3,7 +3,7 @@ package ggufload
 import "testing"
 
 // engram_device_fit_test.go — V41C-19 phase-1 witnesses for the pure Engram device-admission
-// model. The anchor vector is the measured H200 baseline, rtp-test-h200 run 20261106T023306Z
+// model. The anchor vector is the measured H200 baseline, h200-test-node run 20261106T023306Z
 // (vcruz Q2_K c4a0855..., pin e2a6b10642, --native-context-tokens 16384, explicit 32 GiB ring).
 //
 // Exact byte derivations from the reported figures:

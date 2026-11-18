@@ -42,6 +42,11 @@ def _lab(name: str) -> str:
     return name + "." + "lab"
 
 
+def _codename(suffix: str) -> str:
+    # assembled so this test file carries no contiguous codename literal.
+    return "rtp" + "-" + suffix
+
+
 def _shapes(text: str) -> list[tuple[str, str]]:
     return list(css._scan_text(text))
 
@@ -90,6 +95,30 @@ def test_lab_host_is_caught() -> None:
 def test_example_lab_placeholder_is_exempt() -> None:
     # the documented placeholder host must pass clean.
     assert _shapes(f"connect to {_lab('example')}") == []
+
+
+# --- site/cluster codenames ------------------------------------------------
+
+def test_codename_forms_are_caught() -> None:
+    for suffix in ("test-h200", "h200", "test"):
+        c = _codename(suffix)
+        assert ("site-codename", c) in _shapes(f"measured on {c} yesterday"), c
+
+
+def test_codename_is_caught_any_case() -> None:
+    assert any(s == "site-codename" for s, _ in _shapes(_codename("test-h200").upper()))
+
+
+def test_public_rtp_llm_repo_is_exempt() -> None:
+    # `alibaba/rtp-llm` is a PUBLIC third-party repo cited in docs/research; a bare
+    # `rtp-` prefix rule would cry wolf on it. The (?!llm\b) guard is load-bearing.
+    assert _shapes("see https://github.com/alibaba/rtp-llm/blob/main/x.patch") == []
+
+
+def test_bare_rtp_is_not_a_codename() -> None:
+    # ERCOT "RTP" and a scraped `--served-model-name rtp` are public; only the
+    # QUALIFIED lab forms are the leak.
+    assert _shapes("the RTP settlement interval and --served-model-name rtp") == []
 
 
 # --- clean / negative ------------------------------------------------------

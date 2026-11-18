@@ -22,7 +22,7 @@ import (
 // which feeds cmd/fak serve_fit_confirm) must CONSUME this model and emit a typed device-scoped
 // plan line for the admitted Engram bytes before any loader arm may allocate them.
 //
-// The modeled envelope is the measured H200 baseline, rtp-test-h200 run 20261106T023306Z
+// The modeled envelope is the measured H200 baseline, h200-test-node run 20261106T023306Z
 // (vcruz Q2_K c4a0855..., pin e2a6b10642, --native-context-tokens 16384, explicit 32 GiB ring):
 // device total 143,771 MiB; non-Engram dense core 3,230,237,376 B device-resident; 60.083 GiB
 // packed Engram tables host-gathered; 32 GiB activated-expert ring; KV pool 16384 x 240 KiB;

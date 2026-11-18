@@ -27,7 +27,7 @@ func assertFloor(t *testing.T, p *InKernelPlanner, want time.Duration) {
 // ratcheting-MIN per-token floor fed by BOTH serial steps and healthy batched
 // steps (wall/lanes each), a per-token violation budget of floor x margin,
 // degradation after two consecutive violations, the serial probe cadence, and
-// the margin env knob. Measured context: rtp-test-h200 q2kxl rank-1 collapse
+// the margin env knob. Measured context: h200-test-node q2kxl rank-1 collapse
 // (aggregate decode 25.3 -> 0.9 tok/s from C=1 to C=16) and the diag2 finding
 // that serial probes queue behind the shared stream's prefill backlog, so the
 // floor must co-feed from healthy low-lane batched steps.

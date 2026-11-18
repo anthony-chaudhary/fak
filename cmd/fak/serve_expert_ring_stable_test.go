@@ -8,7 +8,7 @@ import (
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
 
-// h200RingFit is the DS4.1 Q2_K census the rtp-test H200 ring plan line reported: band 183.25 GiB,
+// h200RingFit is the DS4.1 Q2_K census the h200-test-node H200 ring plan line reported: band 183.25 GiB,
 // floor 73.3 MiB, token 2.863 GiB, dense base 3.0 GiB, host-gathered Engram 60.08 GiB.
 func h200RingFit() ggufload.ActivatedExpertFit {
 	return ggufload.ActivatedExpertFit{

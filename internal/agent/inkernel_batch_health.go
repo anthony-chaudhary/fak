@@ -44,7 +44,7 @@ const batchStepSeedSamples = 8
 var batchHealthDiagEnabled = os.Getenv("FAK_BATCH_DIAG") == "1"
 
 // batchStepHealth guards the cohort decode loop against a batched forward that
-// underperforms the per-token decode-step floor. Measured on rtp-test-h200
+// underperforms the per-token decode-step floor. Measured on h200-test-node
 // (q2kxl rank-1): a fresh serve batches well at C<=4 (aggregate 35-41 tok/s)
 // while C=8 inflates the batched step ~5x and an aged pool collapses every
 // cell (aggregate decode 25.3 -> 0.9 tok/s from C=1 to C=16). The policy keeps

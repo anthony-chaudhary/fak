@@ -99,7 +99,7 @@ per layer. Route regression:
   `TestKimiK31CompositeParity` (greedy ids vs oracle-composed reference).
 - Precision contract: global contract applies; linear paths route through the
   existing Q4_K/Q6_K quant kernels (q4k_matmul / iq* matvec), no widening.
-- h2h claim-window condition (rtp-test-h200): NOT arm-ready — host-only stage;
+- h2h claim-window condition (h200-test-node): NOT arm-ready — host-only stage;
   the candidate arm needs the device path of stages 5-6. Baseline (SGLang) arm
   readiness is independent of this stage. No claim window may be acquired on
   the strength of this stage.
@@ -116,7 +116,7 @@ per layer. Route regression:
   the pinned SGLang formula on fixed tensors.
 - Precision contract: F16 in/out, F32 intermediate inside the clamp; no
   widening of stored weights; covered by the precision witness command.
-- h2h claim-window condition (rtp-test-h200): NOT arm-ready — activates the MoE
+- h2h claim-window condition (h200-test-node): NOT arm-ready — activates the MoE
   expert path only after stage 6 geometry; no claim window.
 
 ### Stage 3 — Cross-layer attention residual (attn-res, block size 12)
@@ -133,7 +133,7 @@ per layer. Route regression:
   oracle dumps).
 - Precision contract: F32 accumulator for the carried residual stream, F16
   storage of the written block value; forbid_precision_widening applies.
-- h2h claim-window condition (rtp-test-h200): NOT arm-ready — correctness
+- h2h claim-window condition (h200-test-node): NOT arm-ready — correctness
   prerequisite only; no claim window.
 
 ### Stage 4 — MLA output gate
@@ -147,7 +147,7 @@ per layer. Route regression:
   `TestKimiK31MlaOutputGateParity` (gated vs ungated divergence pinned).
 - Precision contract: F16 gate input/output, F32 sigmoid accumulation; no
   widening.
-- h2h claim-window condition (rtp-test-h200): NOT arm-ready — host-oracle
+- h2h claim-window condition (h200-test-node): NOT arm-ready — host-oracle
   slice; the device attend still comes from stage 5; no claim window.
 
 ### Stage 5 — KDA/DSA CUDA kernels
@@ -179,7 +179,7 @@ per layer. Route regression:
   state; KDA recurrent state stays fp32 in the paged pool; Q4_K/Q6_K weights,
   forbid_precision_widening; launch counts for this stage feed the 64-launches /
   4-syncs / 2-scratch budget measured at bring-up.
-- h2h claim-window condition (rtp-test-h200): NOT arm-ready until stage 6 —
+- h2h claim-window condition (h200-test-node): NOT arm-ready until stage 6 —
   the candidate arm serves end-to-end only when the MoE geometry lands; no
   claim window yet.
 
@@ -202,7 +202,7 @@ per layer. Route regression:
 - Precision contract: router scores in F32 (noaux_tc), expert GEMM Q4_K/Q6_K
   weights with F16 activations and F32 accumulators, forbid_precision_widening;
   steady decode must show zero repack bytes/token.
-- h2h claim-window condition (rtp-test-h200): CANDIDATE ARM READY CONDITION —
+- h2h claim-window condition (h200-test-node): CANDIDATE ARM READY CONDITION —
   stages 1-6 parity green AND the process-contract budget witnessed on the node
   (`fak serve --model kimi-k31 --profile on`: launches <= 64/token, syncs <=
   4/token, scratch allocs <= 2/token, repack bytes/token == 0; fuse to the cap
@@ -212,9 +212,9 @@ per layer. Route regression:
 
 ```text
 # baseline arm (SGLang reference)
-fak bench h2h run --arm sglang=http://127.0.0.1:8002/v1 --model k31 --host rtp-test-h200 --cold 512,2048,8192 --reps 3 --decode 256 --turns 6 --system 4096 --turn-tokens 256 --answer 16 --speculative 0 --gpu-busy off --ledger /data/bench/h2h-k31-sglang.jsonl --json
+fak bench h2h run --arm sglang=http://127.0.0.1:8002/v1 --model k31 --host h200-test-node --cold 512,2048,8192 --reps 3 --decode 256 --turns 6 --system 4096 --turn-tokens 256 --answer 16 --speculative 0 --gpu-busy off --ledger /data/bench/h2h-k31-sglang.jsonl --json
 # candidate arm (fak port)
-fak bench h2h run --arm fak=http://127.0.0.1:8003/v1 --model k31 --host rtp-test-h200 --cold 512,2048,8192 --reps 3 --decode 256 --turns 6 --system 4096 --turn-tokens 256 --answer 16 --speculative 0 --gpu-busy off --ledger /data/bench/h2h-k31-fak.jsonl --json
+fak bench h2h run --arm fak=http://127.0.0.1:8003/v1 --model k31 --host h200-test-node --cold 512,2048,8192 --reps 3 --decode 256 --turns 6 --system 4096 --turn-tokens 256 --answer 16 --speculative 0 --gpu-busy off --ledger /data/bench/h2h-k31-fak.jsonl --json
 ```
 
   Metrics: decode ms/token and decode tok/s (ABBA, profile-off). Acceptance:

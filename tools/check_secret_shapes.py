@@ -12,6 +12,12 @@ It is deliberately scoped to the high-confidence, low-false-positive classes:
   * operator home paths  — C:\\Users\\<name> / C:/Users/<name> / /Users/<name>
     (the placeholder segments USER/You/runner/... are exempt).
   * internal lab hosts   — `msl-*` and `*.lab` (the `example.lab` placeholder is exempt).
+  * site/cluster codenames — the qualified lab forms of the operator's test-cluster
+    codename (see CODENAME_HOST). A BARE codename prefix is deliberately NOT a
+    shape: it collides with a public third-party repo of the same prefix cited in
+    docs/research, with an unrelated public industry acronym, and with a scraped
+    corpus `--served-model-name` value. Hardware CLASSES (`h200`, `a100`) stay
+    public — only the site/cluster codename is a leak.
 Token/key shapes are left to the leak gate + its KEEP-listed fixtures.
 
 Modes: --audit-staged (added lines only) | --audit-tree (tracked text files).
@@ -36,6 +42,17 @@ OP_PATH = re.compile(r"[A-Za-z]:[\\/][Uu]sers[\\/]([A-Za-z][A-Za-z0-9._-]{1,})")
 MAC_PATH = re.compile(r"/Users/([A-Za-z][A-Za-z0-9._-]{1,})")
 MSL_HOST = re.compile(r"\bmsl-[a-z0-9][a-z0-9-]*", re.IGNORECASE)
 LAB_HOST = re.compile(r"\b[a-z0-9][a-z0-9.-]*\.lab\b", re.IGNORECASE)
+# Site/cluster CODENAME family (the operator's test cluster). The literal needle
+# list carries the exact forms; this SHAPE catches a novel variant of the same
+# class (a new `<codename>-<something>` lab label) the way MSL_HOST catches a new
+# `msl-<host>`. The prefix is assembled from fragments so this file does not itself
+# carry a contiguous codename literal (the same discipline the sibling test file
+# uses). The `(?!llm\b)` guard is load-bearing: a PUBLIC third-party repo of the
+# same prefix is cited in docs/research, so a bare prefix rule would cry wolf on it.
+# Hardware CLASSES (`h200`, `a100`) are NOT matched — only the site codename.
+_CODENAME_PREFIX = "rt" + "p"
+CODENAME_HOST = re.compile(
+    r"\b" + _CODENAME_PREFIX + r"-(?!llm\b)[a-z0-9][a-z0-9-]*", re.IGNORECASE)
 
 # Files that legitimately contain these shapes (they define/test/document the rule).
 SELF_REF = {
@@ -72,6 +89,8 @@ def _scan_text(text: str):
         host = m.group(0).lower()
         if not host.endswith("example.lab"):
             yield ("internal-host", m.group(0))
+    for m in CODENAME_HOST.finditer(text):
+        yield ("site-codename", m.group(0))
 
 
 def _staged_added_lines(root):

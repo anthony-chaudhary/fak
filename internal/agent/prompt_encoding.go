@@ -269,7 +269,7 @@ var ErrDeepSeekV41ChatProfile = errors.New("native DeepSeek V4.1 chat profile no
 // we do not have, so it stays refused. This admits the shape our own bench
 // client sends by default (cmd/fak/bench_h2h.go), closing the typed-502
 // deviation recorded on the H200 DS4.1 runs (fak-private
-// docs/benchmarks/oss-baselines/rtp-test-h200/RESULTS.md).
+// docs/benchmarks/oss-baselines/h200-test-node/RESULTS.md).
 func admitsNonThinkingKwargs(raw json.RawMessage) bool {
 	if len(raw) == 0 {
 		return false // absent kwarg: the caller treats it as "no contract"

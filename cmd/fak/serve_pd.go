@@ -209,7 +209,7 @@ func runServePDRole(stdout, stderr io.Writer, cfg servePDConfig) int {
 		// resolve the native context against the activated-expert ring when eligible,
 		// plan the full device plan, and take the ring placement when that plan is
 		// FitTooBig on an eligible backend instead of refusing the load outright
-		// (HITL rtp-h200-pd-3to1-20261106 blocker 2). Every selected arm transfers the
+		// (HITL h200-node-pd-3to1-20261106 blocker 2). Every selected arm transfers the
 		// checkpoint lifetime to the model, so the deferred CloseWeights below retires
 		// the shard handles at shutdown — the V4.1 Engram row sources borrow those
 		// readers for the life of the model (blocker 1).

@@ -36,7 +36,7 @@ import (
 // the qwen35-family hybrid of FULL ATTENTION layers (every FullAttentionInterval-th
 // block) and GATED DELTANET linear-attention layers, plus the shared SwiGLU FFN. The
 // constants are the authoritative tensor shapes of the pinned BF16 checkpoint
-// (docs/benchmarks/oss-baselines/rtp-test-h200/raw/20261107T130517Z-matched-bf16/
+// (docs/benchmarks/oss-baselines/h200-test-node/raw/20261107T130517Z-matched-bf16/
 // convert.log) cross-checked against the C ABI validator in
 // cuda/attention.cuh fak_qwen35_causal_attention_panel_f32 (nH==24, nKV==4, hd==256) and
 // model.Config.linearAttnDims (convDim = 2*nK*kHd + nV*vHd = 10240).
