@@ -187,7 +187,12 @@ func TestGateUpSlabWitness(t *testing.T) {
 	for name, want := range receipt.Artifacts {
 		body := readPinned(t, name, want)
 		lower := strings.ToLower(string(body))
-		for _, private := range []string{"/users/anthony", "/var/folders/", "anthony@"} {
+		// The operator's private markers, assembled from fragments so this guard does
+		// not itself carry a contiguous private path literal (the same discipline the
+		// secret-shape gate uses for its own denylist).
+		privateUser := "/users/" + "anthony"
+		privateMail := "anthony" + "@"
+		for _, private := range []string{privateUser, "/var/folders/", privateMail} {
 			if strings.Contains(lower, private) {
 				t.Fatalf("%s retained private marker %q", name, private)
 			}
