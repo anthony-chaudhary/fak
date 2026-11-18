@@ -1,6 +1,6 @@
 ---
-title: "The fak/DOS Glossary: 17 Terms in One Line Each"
-description: "Plain one-line definitions of the vocabulary a newcomer trips on — addressable KV cache, bit-exact eviction, prefix-cache discount, verdict, capability floor, quarantine, syscall boundary, fail-closed, witness, lease, refusal reason, recall re-verification, change data capture, gateway runtime, agent application runtime, client, embed — each linked to its full explainer."
+title: "The fak/DOS Glossary: 23 Terms in One Line Each"
+description: "Plain one-line definitions of the vocabulary a newcomer trips on — addressable KV cache, bit-exact eviction, prefix-cache discount, verdict, capability floor, quarantine, syscall boundary, fail-closed, witness, lease, refusal reason, recall re-verification, change data capture, gateway runtime, agent application runtime, client, embed, forward pass, layer loop, pipeline parallelism, tensor parallelism, expert parallelism, collective — each linked to its full explainer."
 slug: glossary
 keywords:
   - fak glossary
@@ -18,7 +18,7 @@ keywords:
 date: 2026-07-03
 ---
 
-# The fak/DOS glossary — 17 terms, one line each
+# The fak/DOS glossary — 23 terms, one line each
 
 The vocabulary a newcomer trips on, defined plainly. Each term links to the
 explainer that earns the definition. People can only repeat what they can
@@ -55,6 +55,15 @@ name — this page is the naming.
 ## The change feeds
 
 - **[Change Data Capture (CDC), fak's sense](change-data-capture-for-agents.md)** — fak's wire feeds (the coherence bus, the hash-chained journal, the drive-state stream) are CDC changelogs for the agent loop: bounded, cursor-ordered, tombstone-carrying logs a data engineer already knows how to consume.
+
+## The model's own execution
+
+- **[Forward pass](inference/level-1-what-is-inference.md)** — running the weights over your input to produce a next-token prediction: one token id in, one logit vector out, then the chosen token is appended and fed back in.
+- **[Layer loop](inference/level-2-the-layer-loop.md)** — the stack of identically shaped layers a hidden state walks through, each an attention sublayer plus an MLP sublayer wrapped in pre-norm and residual, all reading and writing one shared residual stream.
+- **[Pipeline (layer) parallelism](inference/level-3-pipeline-parallelism.md)** — splitting the layer *stack* across workers so a model that does not fit on one machine can be served across many; a hidden-state tensor crosses each stage boundary, and the split is bit-exact rather than approximate.
+- **[Tensor parallelism](inference/level-4-tensor-and-expert-parallelism.md)** — splitting a *single* layer's matmuls across ranks; a collective runs *inside* the layer, so the result is reassociated rather than bit-exact. The architecture reference is [multi-GPU tensor parallelism](multi-gpu-tensor-parallelism.md).
+- **[Expert parallelism](inference/level-4-tensor-and-expert-parallelism.md)** — the MoE counterpart: experts are partitioned across ranks, the router is replicated, and one `AllReduceSum` combines the per-rank partials.
+- **[Collective](inference/level-4-tensor-and-expert-parallelism.md)** — the four cross-rank primitives (`AllReduceSum`, `AllGather`, `ReduceScatter`, `AllToAll`) that a parallel forward is built from, with two pinned identities relating them.
 
 ## Related glossaries
 

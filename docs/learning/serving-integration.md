@@ -692,3 +692,96 @@ go test ./internal/gpulease/ -count=1 -timeout 120s -run 'TestNoWaitBusyThenFree
 **You'll be able to:**
 - State the two regime-D theorems: a wire verdict equals the in-process kernel verdict (no network bypass), and a call that fails adjudication is dropped fail-closed
 - Explain why the wire never carries an abi.Ref so a client cannot smuggle a pre-trusted CAS handle to skip the IFC / self-modify rungs
+
+### FAK 536 — What Inference Actually Is: The Token Loop
+
+**Prerequisites:** **FAK 521**
+
+**You'll be able to:**
+- Trace one token id from `embedBand` through the layer loop to a logit vector, naming the function at each hop
+- Explain why generation is a loop over single tokens rather than one big computation
+- State what a hidden state is and why its shape is the same at every layer boundary
+
+**Read:** [`docs/explainers/inference-parallelism/level-1-what-is-inference.md`](../explainers/inference-parallelism/level-1-what-is-inference.md)
+
+**Lab:**
+```bash
+go test ./internal/model/ -run 'TestForwardBandTwoWayMatchesMonolithic' -count=1 -v
+```
+
+**Checkpoint:** Name the three functions a token id passes through on its way to a logit vector, and explain why the hidden state's shape does not change across the layer stack.
+
+### FAK 537 — The Layer Loop and the Residual Stream
+
+**Prerequisites:** **FAK 536**, **FAK 526**
+
+**You'll be able to:**
+- Describe one transformer layer as an attention sublayer plus an MLP sublayer, each wrapped in pre-norm and residual
+- Explain the residual stream as a shared bus every layer reads and writes
+- Explain why the layer stack is the natural split point for parallelism: sequential, identically shaped, and only the hidden state crosses a boundary
+
+**Read:** [`docs/explainers/inference-parallelism/level-2-the-layer-loop.md`](../explainers/inference-parallelism/level-2-the-layer-loop.md)
+
+**Lab:**
+```bash
+go test ./internal/model/ -run 'TestForwardBandTwoWayMatchesMonolithic' -count=1 -v
+```
+
+**Checkpoint:** Explain why cutting the layer stack in half and running the halves separately produces the same answer as running the whole stack, and name the test that pins it.
+
+### FAK 538 — Pipeline (Layer) Parallelism: Splitting the Stack
+
+**Prerequisites:** **FAK 537**
+
+**You'll be able to:**
+- State the difference between pipeline parallelism (a hidden-state tensor crosses a stage boundary) and tensor parallelism (a collective runs inside a layer)
+- Explain `ForwardBand(x, lo, hi, isLast)` as the unit of execution and why `Forward` is exactly `embedBand` followed by `ForwardBand(x, 0, NumLayers, true)`
+- Describe the `StageTransport` seam, `LocalTransport` vs `TCPTransport`, and the 12-byte frame header that carries `[seq][hidden][nextLo]`
+- Explain why incremental decode needs a stateful per-stage decoder and why a cut landing on a shared layer is refused
+- Name the pipeline bubble honestly: pipeline parallelism buys fit, not free speed
+
+**Read:** [`docs/explainers/inference-parallelism/level-3-pipeline-parallelism.md`](../explainers/inference-parallelism/level-3-pipeline-parallelism.md), [`docs/explainers/multi-gpu-tensor-parallelism.md`](../explainers/multi-gpu-tensor-parallelism.md)
+
+**Lab:**
+```bash
+go test ./internal/model/ -run 'TestPipelineSeparatelyLoadedStagesMatchMonolithic|TestPipelineIncrementalLogitsBitExactPerStep|TestPipelineIncrementalRejectsSharedBoundary|TestTCPTransportMatchesLocal' -count=1 -timeout 240s -v
+```
+
+**Checkpoint:** Explain what the `nextLo` field in the frame header is for and why it is a fail-closed check rather than a convention, and state why a partition plan whose cut lands on a shared layer is refused.
+
+### FAK 539 — Tensor and Expert Parallelism: Splitting Inside a Layer
+
+**Prerequisites:** **FAK 538**, **FAK 530**
+
+**You'll be able to:**
+- Distinguish column-parallel (AllGather, bit-exact) from row-parallel (AllReduceSum, reassociated) matmul splitting
+- Name the four collectives and the two pinned identities that relate them
+- Explain expert parallelism: experts in contiguous ascending bands, the router replicated, one AllReduceSum of per-rank partials, and the shared expert added exactly once after the reduce
+- State the bit-exact algebra honestly: `ranks=1` bit-exact, `ranks=N` reassociated to the asserted tolerance with the summation order pinned to rank order
+
+**Read:** [`docs/explainers/inference-parallelism/level-4-tensor-and-expert-parallelism.md`](../explainers/inference-parallelism/level-4-tensor-and-expert-parallelism.md), [`docs/explainers/multi-gpu-tensor-parallelism.md`](../explainers/multi-gpu-tensor-parallelism.md)
+
+**Lab:**
+```bash
+go test ./internal/model/ -run 'TestForwardTPMatchesForward|TestForwardTPRankCountClamped|TestExpertParallelRanks1MatchesMonolith|TestExpertParallelGLMSharedExpert|TestForwardEPMatchesForward' -count=1 -timeout 240s -v
+```
+
+**Checkpoint:** Explain why column-parallel is bit-exact while row-parallel is not, and describe the defect that would appear if a replicated shared expert were added once per rank instead of once after the reduce.
+
+### FAK 540 — The Parallelism Frontier: What Is Witnessed and What Is Not
+
+**Prerequisites:** **FAK 539**
+
+**You'll be able to:**
+- Read a mechanism-to-witness table and say precisely what each test asserts (bit-exact vs reassociated-to-tolerance)
+- Separate what the repo witnesses from what it does not: no measured pipeline-parallelism speedup, no measured tensor-parallel speedup, `TCPTransport` witnessed for equality with local rather than for throughput
+- Name the open edges as questions: cut-point selection, mid-generation stage failure, filling the bubble, and the composition of the two orthogonal axes
+
+**Read:** [`docs/explainers/inference-parallelism/level-5-the-parallelism-frontier.md`](../explainers/inference-parallelism/level-5-the-parallelism-frontier.md)
+
+**Lab:**
+```bash
+go test ./internal/model/ -run 'TestForwardTPFailsClosed|TestExpertParallelFailsClosed|TestExpertParallelShardingInvariant|TestExpertParallelLoadImbalance' -count=1 -timeout 240s -v
+```
+
+**Checkpoint:** Given a claim that "pipeline parallelism makes inference faster", state what evidence the repo does and does not have for it, and name the mechanism that actually decides whether a model fits.

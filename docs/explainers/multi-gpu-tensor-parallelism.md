@@ -36,6 +36,13 @@ The two axes are orthogonal and compose:
 
 You can run either alone or both together; this doc covers the tensor axis end to end.
 
+> **Want the teaching version first?** This page is the architecture reference. If you
+> want the on-ramp — what a forward pass is, what a layer does, why the stack is the
+> natural cut, and how a stage boundary actually works — read
+> [the inference ladder](inference-parallelism/README.md), whose
+> [Level 3](inference-parallelism/level-3-pipeline-parallelism.md) covers the pipeline axis and
+> [Level 4](inference-parallelism/level-4-tensor-and-expert-parallelism.md) covers this one.
+
 ---
 
 ## 2. The decomposition (Megatron-style, made honest)

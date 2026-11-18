@@ -215,6 +215,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **What a micro agent is, and when to use one** | [Micro agents](concepts/micro-agents.md) — definition, lifecycle, limits, and a no-key example |
 | **How agent fleets coordinate workers safely** | [Fleet concepts](concepts/fleet.md) — workers, lanes, leases, seats, monitoring, and independent witnesses |
 | **Why a loader can pass every shape/dtype check and still be wrong** | [Semantic transform contracts](explainers/loader-semantic-transform-contracts.md) — the tensor-meaning defect class and the contract that catches it |
+| **How inference actually works, and how you split one across workers** | [The inference ladder](explainers/inference-parallelism/README.md) — five rungs from "what is a forward pass" to pipeline, tensor, and expert parallelism, every claim grounded in a real `file.go:line` or `Test*` name |
 | **Every benchmark number** | [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
 | **Every per-run benchmark sheet** (results · runbooks · pending/gated) | [docs/benchmarks index](benchmarks/README.md) |
 | **Everything fak supports** | [What fak supports](supported/README.md) — models · features · clouds · APIs/MCP · harnesses · engines |
