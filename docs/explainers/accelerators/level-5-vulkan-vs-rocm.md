@@ -138,7 +138,7 @@ ROCm's plan is to compile the **existing** `internal/compute/cuda_kernels.cu` th
 Now the asymmetry that makes this genuinely interesting. Compare the two backends' code surfaces:
 
 - **Vulkan** could not reuse the CUDA kernels at all — different language (GLSL → SPIR-V, not C++), different execution model (command buffers, not kernel launches). So it needed a hand-written shim (`internal/compute/vulkan_shim.cpp`, ~9,157 lines) **plus** 116 GLSL compute shaders, built from scratch.
-- **ROCm** is expected to reuse the CUDA kernels through hipify, so its hand-written surface is a thin cgo wrapper (`rocm.go`), a C ABI header (`rocm_backend.h`), and a build script (`build_rocm.sh`).
+- **ROCm** is expected to reuse the CUDA kernels through hipify, so its hand-written surface is a thin cgo wrapper (`rocm_backend.go`), a C ABI header (`rocm_backend.h`), and a build script (`build_rocm.sh`).
 
 **The portable path cost more code than the native path is expected to.** That is the asymmetry, and it is not the direction intuition points. The intuition is "portable = less work, because it runs everywhere." The reality is "portable = more work, because you build the portable machine yourself, then build your program on top of it." The native path leans on the vendor's existing stack — including the vendor's ability to compile the CUDA kernels you already wrote.
 
@@ -192,7 +192,7 @@ Everything that would move ROCm from scaffold to silicon is enumerated in `inter
 
 1. **An AMD-GPU-on-Linux node with ROCm installed** — the precondition for all the rest; the current dev host has no AMD GPU and no `hipcc`.
 2. **Confirm the toolchain.** `hipcc --version` and `rocminfo | grep gfx` to get the reported `gfxNNNN`, then feed it to `ROCmOffloadArch` — which accepts the `:sramecc+:xnack-` feature suffix `rocminfo` may print.
-3. **Write the cgo half.** `rocm.go` (`//go:build rocm`), `rocm_backend.h`, and `build_rocm.sh` — a near-clone of `cuda.go`'s wrapper, registering an `Approx` backend named `"rocm"` over a flat C ABI.
+3. **Write the cgo half.** `rocm_backend.go` (`//go:build rocm`), `rocm_backend.h`, and `build_rocm.sh` — a near-clone of `cuda.go`'s wrapper, registering an `Approx` backend named `"rocm"` over a flat C ABI.
 4. **Witness op-by-op parity, then the full forward.** Mirror `vulkan_test.go`'s 7-op suite, then the full forward pass; hold argmax to EXACT, the rest to cosine plus a small max\|Δ\|.
 5. **Benchmark against the Vulkan baseline on the same card**, graded with `WithinTarget(rocmSeconds, vulkanSeconds, 1.5)`.
 6. **Multi-GPU** via `CollectiveBackend` over RCCL; the single-rank identity is witnessable on one card before a second GPU is needed.

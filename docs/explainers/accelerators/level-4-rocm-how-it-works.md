@@ -82,14 +82,19 @@ same path llama.cpp's ROCm backend takes. One kernel source, two vendors.
 
 Three pieces make up the deferred backend (`internal/compute/ROCM-C002-NOTES.md:31`):
 
-1. **`internal/compute/rocm.go`** — `//go:build rocm`, a near-clone of `cuda.go`'s cgo wrapper
-   that registers an `Approx` backend named `"rocm"` over a flat C ABI (`rocm_backend.h`),
-   keeping `cpu-ref` the `Reference` default so nothing runs on the GPU unless explicitly
-   selected (`FAK_BACKEND=rocm` / `--backend rocm`). The host already reports an unbuilt backend
-   honestly: `cmd/fak/serve_model_load.go:346` says a device backend "needs both a matching build
-   tag (e.g. `-tags rocm`) and a reachable device at runtime".
+1. **`internal/compute/rocm_backend.go`** — `//go:build rocm`, a near-clone of `cuda.go`'s cgo
+   wrapper that registers an `Approx` backend named `"rocm"` over a flat C ABI
+   (`rocm_backend.h`), keeping `cpu-ref` the `Reference` default so nothing runs on the GPU
+   unless explicitly selected (`FAK_BACKEND=rocm` / `--backend rocm`). (The source note calls
+   this file `rocm.go` at `internal/compute/ROCM-C002-NOTES.md:31`; the shipped file is
+   `rocm_backend.go`, which is what the diagram above and this line name.) The host already
+   reports an unbuilt backend honestly: `cmd/fak/serve_model_load.go:346` says a device backend
+   "needs both a matching build tag (e.g. `-tags rocm`) and a reachable device at runtime".
 2. **`build_rocm.sh`** — the `build_cuda.sh` twin: `hipify`/`hipcc` over `cuda_kernels.cu` →
-   `librocfak.a`, with `--offload-arch` taken from `ROCmOffloadArch(<device gfx>)`.
+   `libfakrocm.a`, with `--offload-arch` taken from `ROCmOffloadArch(<device gfx>)`. (The
+   source note spells this `librocfak.a` at `internal/compute/ROCM-C002-NOTES.md:37`; the
+   tree's convention is `libfak<backend>.a` — `libfakcuda.a`, `libfakvulkan.a` — so the
+   diagram above and this line use `libfakrocm.a`.)
 3. **The witnesses** — op-level and full-forward tests (`-tags rocm`) mirroring `cuda_test.go`
    and `vulkan_test.go`.
 
