@@ -112,5 +112,66 @@
       "verdict": "defined",
       "gaps": ["TrustEpoch vs WorldVersion not yet written into the glossary"]
     }
+  ,
+    {
+      "id": "acquirewitnesssnapshot",
+      "canonical": "AcquireWitnessSnapshot",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The execution witness snapshot provider (feature #14487): leases a full clean detached git snapshot of an exact commit SHA for execution verification, keeping active leases disjoint from each other and from the land candidate namespace, and returning a release function that either closes the pooled lease or discards the snapshot.",
+      "distinction": "Witness-side acquisition seam that reuses the land candidate topology session; distinct from ExecutionMaterializer, the context-scoped materializer type that wraps this provider, and from the land-side candidate session it borrows.",
+      "distinct_from": [
+        "execution-witness-snapshot-materializer",
+        "witnesssnapshotevent",
+        "withwitnesssnapshotobserver"
+      ],
+      "aliases": [],
+      "grounding": "AcquireWitnessSnapshot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "witnesssnapshotevent",
+      "canonical": "WitnessSnapshotEvent",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The observation event of the execution witness snapshot provider: records source preparation (phase, ref, dir, reused, duration, error) separately from test outcomes, emitted on prepare and release.",
+      "distinction": "Captures snapshot acquisition/release evidence only; distinct from test outcome records and from the land candidate session's own events. Emitted by AcquireWitnessSnapshot to the observer installed by WithWitnessSnapshotObserver.",
+      "distinct_from": [
+        "acquirewitnesssnapshot",
+        "withwitnesssnapshotobserver"
+      ],
+      "aliases": [],
+      "grounding": "WitnessSnapshotEvent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "withwitnesssnapshotobserver",
+      "canonical": "WithWitnessSnapshotObserver",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The context option that installs a witness snapshot observer: receives acquisition and release evidence (WitnessSnapshotEvent) for the scoped context.",
+      "distinction": "Only observes snapshot acquisition/release; distinct from WithExecutionMaterializer, which scopes the snapshot acquisition itself, and from AcquireWitnessSnapshot, which performs the lease.",
+      "distinct_from": [
+        "witnesssnapshotevent",
+        "acquirewitnesssnapshot"
+      ],
+      "aliases": [],
+      "grounding": "WithWitnessSnapshotObserver",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

@@ -58,7 +58,8 @@
       "distinct_from": [
         "renderplan-context",
         "renderitem-memq",
-        "rendered-ctxplan"
+        "rendered-ctxplan",
+        "acquirewitnesssnapshot"
       ],
       "aliases": [
         "ExecutionMaterializer"

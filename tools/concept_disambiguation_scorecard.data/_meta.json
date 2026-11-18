@@ -9322,6 +9322,51 @@
           "category": "incidental",
           "reason": "Only the CUDAOpError.Op diagnostic label for stream/identity failures in cudaFlashMLAPhysicalState (Go lines 70/73); it introduces no witness artifact, acceptance verdict, proof type or execution authority. Actual physical fixture assertions and loaded-core observation remain explicit and are not waived.",
           "token": "FlashMLAWitness"
+        },
+        {
+          "token": "witnessSnapshotPoolPrefix",
+          "category": "incidental",
+          "reason": "Unexported pool-namespace constant of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+        },
+        {
+          "token": "witnessSnapshotObserverKey",
+          "category": "incidental",
+          "reason": "Unexported context key of the positioned WithWitnessSnapshotObserver option; local implementation detail, not a separate witness-proof concept."
+        },
+        {
+          "token": "witnessSnapshotGitRunner",
+          "category": "incidental",
+          "reason": "Unexported git-runner factory of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+        },
+        {
+          "token": "discardWitnessSnapshot",
+          "category": "incidental",
+          "reason": "Unexported release method of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+        },
+        {
+          "token": "validateWitnessSnapshot",
+          "category": "incidental",
+          "reason": "Unexported validation method of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+        },
+        {
+          "token": "witnessSnapshotUnavailablePath",
+          "category": "incidental",
+          "reason": "Unexported scratch-path helper of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+        },
+        {
+          "token": "beginWitnessSnapshotMutation",
+          "category": "incidental",
+          "reason": "Unexported mutation-guard helper of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+        },
+        {
+          "token": "witnessSnapshotParent",
+          "category": "incidental",
+          "reason": "Unexported parent-resolution method of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+        },
+        {
+          "token": "witness_snapshots",
+          "category": "incidental",
+          "reason": "Evidence label in the worker-land symptom detail string; a reporting token, not a separate witness-proof concept."
         }
       ],
       "id": "witness-proof",
@@ -9413,6 +9458,7 @@
         "addDebtWitnesses",
         "appendGuardCompactionWitnessTo",
         "armbenchWitnessDrift",
+        "beginWitnessSnapshotMutation",
         "benchFleetWitnessSeconds",
         "cacheWitnessReadback",
         "canonicalDogfoodCacheWitnessPath",
@@ -9433,6 +9479,7 @@
         "coreLockWitnessFromMessage",
         "coreLockWitnessFromMsgFile",
         "derivedProxyFillWitness",
+        "discardWitnessSnapshot",
         "dispatchWitnessArchiveStranded",
         "dispatchWitnessContestingLaneHolders",
         "dispatchWitnessDiedBeforeEpilogue",
@@ -9519,6 +9566,7 @@
         "trajctlWitnessedPhases",
         "tree_witness",
         "unsafeSkipSymptomWitness",
+        "validateWitnessSnapshot",
         "verifyCheckpointWitness",
         "want_witness",
         "withdefaultoriginwitnesses",
@@ -9529,10 +9577,16 @@
         "witnessRaw",
         "witnessScriptedFold",
         "witnessSet",
+        "witnessSnapshotGitRunner",
+        "witnessSnapshotObserverKey",
+        "witnessSnapshotParent",
+        "witnessSnapshotPoolPrefix",
+        "witnessSnapshotUnavailablePath",
         "witnessStrandedArchiveSuffix",
         "witness_command",
         "witness_missing",
         "witness_request",
+        "witness_snapshots",
         "witness_unverified",
         "witnessable",
         "witnessed",
@@ -16825,6 +16879,11 @@
           "category": "incidental",
           "reason": "Boolean constructor parameter selecting eager vs deferred Qwen3.5 zero-state materialization; a local signature detail of newBackendSessionChecked/newBackendSessionOwned, not a reusable concept.",
           "token": "materializeQwen35State"
+        },
+        {
+          "token": "executionMaterializerKey",
+          "category": "incidental",
+          "reason": "Unexported context key of the positioned WithExecutionMaterializer option; local implementation detail, not a separate render-materialize concept."
         }
       ],
       "id": "render-materialize",
@@ -16864,6 +16923,7 @@
         "RenderUserSplice",
         "deepSeekV41ChatRendererID",
         "deepSeekV41RenderToolCall",
+        "executionMaterializerKey",
         "inKernelRenderPrompt",
         "incumbentRenderInput",
         "incumbentRenderSchema",
@@ -19068,6 +19128,36 @@
           "category": "incidental",
           "reason": "Checked arithmetic helper for the logical token-pool admission limit; not a distinct pool abstraction.",
           "token": "checkedTokenCapacity"
+        },
+        {
+          "token": "witnessSnapshotPoolPrefix",
+          "category": "incidental",
+          "reason": "Unexported pool-namespace constant of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate pool concept."
+        },
+        {
+          "token": "poolPrefix",
+          "category": "incidental",
+          "reason": "Unexported pool-namespace field of the land candidate topology session; local implementation detail, not a separate pool concept."
+        },
+        {
+          "token": "livePoolCountPrefix",
+          "category": "incidental",
+          "reason": "Unexported pool-count helper of the land candidate topology session; local implementation detail, not a separate pool concept."
+        },
+        {
+          "token": "poolName",
+          "category": "incidental",
+          "reason": "Unexported pool-name accessor of the land candidate topology session; local implementation detail, not a separate pool concept."
+        },
+        {
+          "token": "poolMarkerStale",
+          "category": "incidental",
+          "reason": "Unexported pool-marker staleness check of the land candidate topology session; local implementation detail, not a separate pool concept."
+        },
+        {
+          "token": "trimPoolExcessPrefix",
+          "category": "incidental",
+          "reason": "Unexported pool-cap self-heal helper of the land candidate topology session; local implementation detail, not a separate pool concept."
         }
       ],
       "exclude": [
@@ -19116,6 +19206,7 @@
         "kvpoolbytes",
         "leasePooled",
         "leaseSpecificPooled",
+        "livePoolCountPrefix",
         "normalizepooled",
         "parseServeExpertRingPoolFraction",
         "poolCapText",
@@ -19128,6 +19219,7 @@
         "poolLockPoll",
         "poolLockWait",
         "poolMarker",
+        "poolMarkerStale",
         "poolMemberExt",
         "poolMemberMetadata",
         "poolMemberPath",
@@ -19135,6 +19227,8 @@
         "poolMemberSchema",
         "poolMembersLocked",
         "poolMetadataPerm",
+        "poolName",
+        "poolPrefix",
         "poolSeats",
         "poolStateDir",
         "poolStateDirPerm",
@@ -19160,6 +19254,7 @@
         "sharesHostPool",
         "spoolsv",
         "transientPoolGauge",
+        "trimPoolExcessPrefix",
         "unpoolable",
         "v41CandidatePoolCovers",
         "v41CandidatePoolRows",
@@ -19172,6 +19267,7 @@
         "validPoolState",
         "weightsInPool",
         "withPoolLaneLock",
+        "witnessSnapshotPoolPrefix",
         "writeDeviceTransientPoolMetrics",
         "writePoolMemberLocked"
       ],

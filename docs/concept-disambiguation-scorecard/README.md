@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **58** (clarity 9 + coverage 49) |
-| **Crystal-clear concepts (and climbing)** | **1687** crystal of 4163 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4231 / 4280** (98.9% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1690** crystal of 4166 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4234 / 4283** (98.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **3** of 318 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **97** of 5498 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **97** of 5501 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 94.3/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4163 concepts - score 94.3/100 (grade A) - disambiguation-debt 58
+concept-disambiguation chart - 4166 concepts - score 94.3/100 (grade A) - disambiguation-debt 58
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1687
+  * crystal       ###################......... 1690
   o defined       ############################ 2476
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -59,7 +59,7 @@ clarity mix by family (each cell = one concept):
   support-maturity ********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 68 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (217 concept(s); 88 crystal)
+  witness-proof    *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (220 concept(s); 91 crystal)
 
 coverage by family (positioned / discovered):
   plan             ############################ 655/666
@@ -75,7 +75,7 @@ coverage by family (positioned / discovered):
   guard-gate       ############################ 583/584
   score-debt       ############################ 141/142
   support-maturity ############################ 146/147
-  witness-proof    ############################ 204/205
+  witness-proof    ############################ 207/208
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   layout           ############################ 58/58
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 98.9%  (4231/4280 confusable tokens positioned)
+namespace coverage  [################################] 98.9%  (4234/4283 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 315
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      #........................... 3
   pairs separated   [################################] 315/318
 
-name index: 5498 lookup name(s) -> 4163 concept(s), 97 ambiguous
+name index: 5501 lookup name(s) -> 4166 concept(s), 97 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **315 / 318** (315 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **3** |
 | Entangled concepts (own twin undrawn) | 6 |
-| Boundaries drawn (mutual / total) | 3700 / 8002 |
+| Boundaries drawn (mutual / total) | 3708 / 8010 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5498 over 4163 concepts |
+| Lookup names indexed | 5501 over 4166 concepts |
 | Lookup names landing on several concepts | 97 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4163 |
+| Concepts carrying a contrast set | 4166 |
 
 ## The concepts (best verdict first)
 
@@ -1823,6 +1823,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | witness-proof | **WitnessResolver** - The component that corroborates claims against independent evidence sources (git history, filesystem, HTTP APIs) and returns Confirmed, Refuted, or Abstain. |
 | * | crystal | symbol | witness-proof | **Refutation** - The local decision that a witness is invalid (its cached state is stale or poisoned), triggering eviction of all entries admitted under it. |
 | * | crystal | symbol | witness-proof | **Revocation** - The broadcast event published to the coherence bus when a witness is refuted, enabling cross-agent causal invalidation of cache entries. |
+| * | crystal | symbol | witness-proof | **AcquireWitnessSnapshot** - The execution witness snapshot provider (feature #14487): leases a full clean detached git snapshot of an exact commit SHA for execution verification, keeping active leases disjoint from each other and from the land candidate namespace, and returning a release function that either closes the pooled lease or discards the snapshot. |
+| * | crystal | symbol | witness-proof | **WitnessSnapshotEvent** - The observation event of the execution witness snapshot provider: records source preparation (phase, ref, dir, reused, duration, error) separately from test outcomes, emitted on prepare and release. |
+| * | crystal | symbol | witness-proof | **WithWitnessSnapshotObserver** - The context option that installs a witness snapshot observer: receives acquisition and release evidence (WitnessSnapshotEvent) for the scoped context. |
 | o | defined | symbol | attention | **AttentionNeeded (taskgraph table)** - The taskgraph.Table.AttentionNeeded bool field: true when any Task in the folded shared-task table carries a refusal finding, the one-bit gate a supervisor loop or CI keys on without re-scanning every task row. |
 | o | defined | symbol | attention | **AttentionNeeded (toolproc table)** - The toolproc.Table.AttentionNeeded bool field: true when any finding across the kernel's tool-call process table advises more than plain observe, the one-bit gate a supervisor loop or CI keys on for tool-process health. |
 | o | defined | config | attention | **cudaDsaSparseAttnCosineMin (CUDA GLM-DSA accuracy gate)** - internal/compute's recorded device-vs-cpuref-f32 cosine floor (0.999) for the GLM-MoE-DSA sparse-attention kernel k_dsa_sparse_attend, whose host side already selected the exact keys so the only drift source is f32 reduction order; the value RECORDS the contract threshold an out-of-tree CUDA-node witness checks and does not itself assert a pass. |
@@ -4446,8 +4449,8 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 40 | 3 | 3 confusable pair(s) with no line drawn |
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 34 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4302/8002 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4163 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4302/8010 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4166 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -4456,7 +4459,7 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `alias_resolved` | 100 | 0 | every alias resolves in the tree (token or wire key) |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5498 lookup name(s) resolves - 97 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5501 lookup name(s) resolves - 97 land on several concepts, all separated |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
@@ -4475,7 +4478,7 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | guard-gate | 583 | 584 | 1 |
 | score-debt | 141 | 142 | 1 |
 | support-maturity | 146 | 147 | 1 |
-| witness-proof | 204 | 205 | 1 |
+| witness-proof | 207 | 208 | 1 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | layout | 58 | 58 | 0 |

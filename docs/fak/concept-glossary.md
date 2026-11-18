@@ -2672,3 +2672,24 @@ Prometheus histogram of positive completion-token counts per accounted gateway m
 The fixed end-to-end test plan attached to a HITL verification request, pinning the workload, precision contract, reference parity witness, and before/after measurement commands that a hardware target must satisfy.
 
 **Distinct from:** A hardware-qualification test plan carried by a HITL verification request - NOT a dispatch or fleet plan (FleetPlan, WavePlanOptions) and NOT a planner implementation surface; it declares evidence owed by a target node, never execution authority.
+
+
+### AcquireWitnessSnapshot
+
+The execution witness snapshot provider (feature #14487): leases a full clean detached git snapshot of an exact commit SHA for execution verification, keeping active leases disjoint from each other and from the land candidate namespace, and returning a release function that either closes the pooled lease or discards the snapshot.
+
+**Distinct from:** Witness-side acquisition seam that reuses the land candidate topology session; distinct from ExecutionMaterializer, the context-scoped materializer type that wraps this provider, and from the land-side candidate session it borrows.
+
+
+### WitnessSnapshotEvent
+
+The observation event of the execution witness snapshot provider: records source preparation (phase, ref, dir, reused, duration, error) separately from test outcomes, emitted on prepare and release.
+
+**Distinct from:** Captures snapshot acquisition/release evidence only; distinct from test outcome records and from the land candidate session's own events. Emitted by AcquireWitnessSnapshot to the observer installed by WithWitnessSnapshotObserver.
+
+
+### WithWitnessSnapshotObserver
+
+The context option that installs a witness snapshot observer: receives acquisition and release evidence (WitnessSnapshotEvent) for the scoped context.
+
+**Distinct from:** Only observes snapshot acquisition/release; distinct from WithExecutionMaterializer, which scopes the snapshot acquisition itself, and from AcquireWitnessSnapshot, which performs the lease.
