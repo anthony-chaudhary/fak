@@ -170,6 +170,18 @@ gives you the practice, question by question — rung 1 *what is kernel developm
 win*, rung 5 *the other kernel* (the adjudicator rung), rung 6 *the frontier*. Read it
 alongside **FAK 615**; each rung ends with a lab and a checkpoint you answer yourself.
 
+**Companion ladders for the ML-systems row.** That route ends at **FAK 530** (the Compute
+HAL seam) and **FAK 532**. Two five-rung teaching ladders cover the same ground from the
+other direction, question by question, with every claim pinned to a real file:
+
+- [`docs/explainers/inference/`](docs/explainers/inference/README.md) — *what the forward
+  pass is*: tokens, the forward pass, inside a block, prefill vs decode, and what changes at
+  scale. Read it before **FAK 522** if the loop itself is not yet concrete; it is the
+  plain-language companion to **FAK 522–526** and **FAK 529**.
+- [`docs/explainers/accelerators/`](docs/explainers/accelerators/README.md) — *where it
+  runs*: why not just the CPU, the HAL seam, Vulkan, ROCm, and the Vulkan-versus-ROCm
+  head-to-head. Read it alongside **FAK 530**; it is the practice to that course's theory.
+
 ## The level ladder
 
 Read the ladder performance-first: L400's cache reuse and the in-kernel model are the

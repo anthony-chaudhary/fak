@@ -89,6 +89,9 @@ verified by a link-and-citation check, not by trust.
 
 - [The caching ladder](../caching/README.md) — the same five-rung pattern applied
   to fak's caching stack. This ladder is its sibling.
+- [The accelerator ladder](../accelerators/README.md) — the sibling ladder: this
+  one explains what the forward pass *is*; that one asks *where it runs* (CPU,
+  Vulkan, ROCm) and why the answer changes the numbers.
 - [What is a CUDA kernel?](../what-is-a-cuda-kernel.md) — the word "kernel" means
   three different things here; read this before Level 3 if that trips you.
 - [The abstraction map](../the-abstraction-map.md) — where the model sits in the
