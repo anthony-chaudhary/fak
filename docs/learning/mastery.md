@@ -309,7 +309,7 @@ go run ./cmd/rsiloop -mode improve -repo . -baseline-ref main -candidates 6,8,8,
 - For a new quantization kernel, name the seam (internal/compute), the correctness class to declare, and the exact gate command that proves it earns its keep
 - Explain why a contributor cannot land a plausible-but-wrong (gate 2) or correct-but-slower (gate 3) kernel
 
-**Read:** [`EXTENDING.md`](../../EXTENDING.md), [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
+**Read:** [`EXTENDING.md`](../../EXTENDING.md), [`ARCHITECTURE.md`](../../ARCHITECTURE.md), and the teaching ladder [`docs/explainers/kernel-development/`](../explainers/kernel-development/README.md) (rungs 1–4 walk the three gates question by question; rung 5 covers the adjudicator rung)
 
 **Lab:**
 ```bash

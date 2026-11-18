@@ -35,6 +35,14 @@ is plausible-but-wrong (Gate 2 catches it) or correct-but-slower (Gate 3 catches
 gates are what make it *safe* to accept optimizations from anyone — including autonomous
 coding agents.
 
+**Want the teaching version first?** This page is the reference. If you would rather be
+taught the three gates — question by question, with diagrams and a lab you can run at each
+step — read the six-rung ladder in
+[`docs/explainers/kernel-development/`](docs/explainers/kernel-development/README.md):
+rung 1 asks *what is kernel development*, rung 2 *where does my code attach*, rung 3 *does
+it preserve behavior*, rung 4 *is it actually a win*, rung 5 *the other kernel* (the
+adjudicator), rung 6 *the frontier*. Each rung ends with a checkpoint you answer yourself.
+
 **Before you start, run the preflight** — one command tells you whether your environment
 and all three gate entry points are wired, and prints this golden path with the exact
 commands (add `--json` for a machine-readable answer an agent tool can parse):

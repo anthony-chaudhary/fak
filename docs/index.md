@@ -23,6 +23,7 @@ FAK coordinates the whole agent path, not isolated components. Start with the [c
 | Deploying or operating | [Deployment guide](fak/deployment-guide.md) | Choose an operating envelope, then configure and observe the service. |
 | Serving multiple tenants with billing | [Billing quickstart](billing/quickstart.md) | Arm the billing chain on `fak serve`, provision tenant keys and balances, and walk a billed request through to the exhausted-budget refusal. |
 | Contributing | [Contributor guide](../CONTRIBUTING.md) and [developer tooling](dev-tooling.md) | Find the owning document first, then build, test, change, and prove the repository under its current contracts. |
+| Extending the kernel (a new kernel, backend, or policy rung) | [Kernel development ladder](explainers/kernel-development/README.md) | Learn the three-gate leaf pattern question by question — where your code attaches, how correctness is witnessed, how a speed win is proven — then read the reference in [`EXTENDING.md`](../EXTENDING.md). |
 | Researching design or history | [Notes archive](notes/) | Find rationale and dated evidence, then check current code and tests before relying on it. |
 
 For a human role map, use [`START-HERE.md`](../START-HERE.md). Agents that need a compact authority map should use [`llms.txt`](../llms.txt). The exhaustive audience, task, and lifecycle catalog is [`INDEX.md`](../INDEX.md).
@@ -203,6 +204,8 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **How every new unit of work is scoped and shipped** (applied spine first, then exhaustive proof, measured optimization, and backlog fan-out) | [Spine-first + fan-out defaults](spine-first-defaults.md) |
 | **How agents discover fak features and memory tools** | [Self-feature query spine](notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
+| **How to add a kernel, backend, or policy rung without forking the core** | [Kernel development ladder](explainers/kernel-development/README.md) — six rungs from "what is kernel development" to the frontier, each with a lab and a checkpoint |
+| **The questions a newcomer asks about changing the kernel** (and the four the repo cannot answer yet) | [Kernel development — the questions](questions/kernel-development.md) — 13 questions labeled CONTRARIAN / AFRAID / UNASKED / STEELMAN, each routed to the rung that answers it |
 | **How named context is loaded, filtered, cached, and backed by call snapshots** | [Context as a variable](explainers/context-as-a-variable.md) |
 | **Why a cache-hit % isn't the whole story** | [Context signal-to-noise](explainers/context-signal-to-noise.md) |
 | **How fak runs the agent as nested loops** | [Engineering is building loops](explainers/engineering-is-building-loops.md) |

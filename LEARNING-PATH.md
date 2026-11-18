@@ -162,6 +162,14 @@ so you can join mid-catalog without hitting a wall. Anyone can also just start a
 > The **Route** is the *hard-dependency* path. You can read the context prerequisites
 > noted on each course later (or never) without breaking a lab.
 
+**Companion ladder for the last row.** If your destination is *landing an optimization
+into the kernel*, the courses above give you the prerequisites; the six-rung teaching
+ladder at [`docs/explainers/kernel-development/`](docs/explainers/kernel-development/README.md)
+gives you the practice, question by question — rung 1 *what is kernel development*, rung 2
+*where does my code attach*, rung 3 *does it preserve behavior*, rung 4 *is it actually a
+win*, rung 5 *the other kernel* (the adjudicator rung), rung 6 *the frontier*. Read it
+alongside **FAK 615**; each rung ends with a lab and a checkpoint you answer yourself.
+
 ## The level ladder
 
 Read the ladder performance-first: L400's cache reuse and the in-kernel model are the

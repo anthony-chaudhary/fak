@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="vf-title vf-desc">
+<title id="vf-title">The verdict fold: a tool call enters at the top, passes down the ranked rung chain in execution order, the first decisive rung wins, and the fold returns one verdict</title>
+<desc id="vf-desc">A top-to-bottom flow. A proposed tool call enters at the top. It passes down the rung chain in execution order, cheap first: rank 5 grammar.Rung, rank 8 ratelimit.Limiter, rank 10 preflight.Ladder, rank 12 engine.residencyGate, rank 25 plancfi.Adjudicator, rank 30 ifc.SinkGate, rank 35 gitgate.GitGate, rank 40 shipgate.ShipAdjudicator, rank 100 adjudicator.Adjudicator. Each rung returns a verdict; the fold keeps the most-restrictive conclusive verdict, so the first decisive rung wins. The output fans to the real verdict values: VerdictAllow (fold rank 0), VerdictDefer (10), VerdictIndeterminate (15), VerdictTransform (20), VerdictQuarantine (30), VerdictRequireWitness (40), VerdictDeny (100). A callout states that DEFER means this rung did not decide, NOT allow; a chain where every rung defers is a deny unless the posture is default_open.</desc>
+
+<rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+
+<text x="490" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">The verdict fold &#8212; the model proposes, the kernel disposes</text>
+<text x="490" y="57" text-anchor="middle" font-size="12.5" fill="#57606a">The chain runs in execution order (cheap first); the fold keeps the most-restrictive conclusive verdict. Order changes the work done, not the verdict.</text>
+
+<!-- tool call enters -->
+<rect x="60" y="80" width="200" height="52" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="160" y="103" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">tool call (proposed)</text>
+<text x="160" y="121" text-anchor="middle" font-size="10.5" fill="#57606a">Adjudicate(ctx, *abi.ToolCall)</text>
+
+<line x1="160" y1="132" x2="160" y2="160" stroke="#24292f" stroke-width="2"/>
+<polygon points="160,160 153,146 167,146" fill="#24292f"/>
+
+<!-- rung chain panel -->
+<rect x="40" y="160" width="240" height="330" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="160" y="184" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">the rung chain</text>
+<text x="160" y="200" text-anchor="middle" font-size="10" fill="#57606a">execution order &#8212; cheap first</text>
+<line x1="56" y1="210" x2="264" y2="210" stroke="#d0d7de" stroke-width="1"/>
+
+<text x="56" y="232" font-size="10.5" fill="#57606a">[5]</text>
+<text x="86" y="232" font-size="10.5" fill="#24292f">grammar.Rung</text>
+<text x="56" y="256" font-size="10.5" fill="#57606a">[8]</text>
+<text x="86" y="256" font-size="10.5" fill="#24292f">ratelimit.Limiter</text>
+<text x="56" y="280" font-size="10.5" fill="#57606a">[10]</text>
+<text x="86" y="280" font-size="10.5" fill="#24292f">preflight.Ladder</text>
+<text x="56" y="304" font-size="10.5" fill="#57606a">[12]</text>
+<text x="86" y="304" font-size="10.5" fill="#24292f">engine.residencyGate</text>
+<text x="56" y="328" font-size="10.5" fill="#57606a">[25]</text>
+<text x="86" y="328" font-size="10.5" fill="#24292f">plancfi.Adjudicator</text>
+<text x="56" y="352" font-size="10.5" fill="#57606a">[30]</text>
+<text x="86" y="352" font-size="10.5" fill="#24292f">ifc.SinkGate</text>
+<text x="56" y="376" font-size="10.5" fill="#57606a">[35]</text>
+<text x="86" y="376" font-size="10.5" fill="#24292f">gitgate.GitGate</text>
+<text x="56" y="400" font-size="10.5" fill="#57606a">[40]</text>
+<text x="86" y="400" font-size="10.5" fill="#24292f">shipgate.ShipAdjudicator</text>
+<text x="56" y="424" font-size="10.5" fill="#cf222e">[100]</text>
+<text x="86" y="424" font-size="10.5" font-weight="700" fill="#cf222e">adjudicator.Adjudicator</text>
+<text x="56" y="446" font-size="10" fill="#57606a">the monitor is itself a sub-chain</text>
+<text x="56" y="462" font-size="10" fill="#57606a">of named rungs (rungDenyName,</text>
+<text x="56" y="478" font-size="10" fill="#57606a">rungSelfModify, rungEgress, &#8230;)</text>
+
+<!-- fold arrow -->
+<line x1="280" y1="325" x2="330" y2="325" stroke="#24292f" stroke-width="2"/>
+<polygon points="330,318 344,325 330,332" fill="#24292f"/>
+<text x="305" y="316" text-anchor="middle" font-size="10" fill="#57606a">fold</text>
+
+<!-- fold box -->
+<rect x="344" y="270" width="150" height="110" rx="10" fill="#0969da" fill-opacity="0.05" stroke="#0969da" stroke-width="1.4"/>
+<text x="419" y="296" text-anchor="middle" font-size="12" font-weight="700" fill="#0969da">kernel.Fold</text>
+<text x="419" y="318" text-anchor="middle" font-size="10.5" fill="#24292f">most-restrictive</text>
+<text x="419" y="334" text-anchor="middle" font-size="10.5" fill="#24292f">conclusive verdict</text>
+<text x="419" y="352" text-anchor="middle" font-size="10.5" fill="#24292f">wins (fail-closed)</text>
+<text x="419" y="370" text-anchor="middle" font-size="10" fill="#57606a">Deny short-circuits</text>
+
+<!-- fan to verdicts -->
+<line x1="494" y1="325" x2="540" y2="325" stroke="#24292f" stroke-width="2"/>
+<polygon points="540,318 554,325 540,332" fill="#24292f"/>
+
+<!-- verdict pills -->
+<rect x="560" y="86" width="150" height="30" rx="5" fill="#1a7f37"/>
+<text x="635" y="106" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">VerdictAllow</text>
+<text x="722" y="106" font-size="10.5" fill="#57606a">fold rank 0 &#8212; affirmatively permits</text>
+
+<rect x="560" y="126" width="150" height="30" rx="5" fill="#57606a"/>
+<text x="635" y="146" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">VerdictDefer</text>
+<text x="722" y="146" font-size="10.5" fill="#57606a">fold rank 10 &#8212; did not decide</text>
+
+<rect x="560" y="166" width="150" height="30" rx="5" fill="#57606a"/>
+<text x="635" y="186" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">VerdictIndeterminate</text>
+<text x="722" y="186" font-size="10.5" fill="#57606a">fold rank 15 &#8212; could not decide</text>
+
+<rect x="560" y="206" width="150" height="30" rx="5" fill="#9a6700"/>
+<text x="635" y="226" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">VerdictTransform</text>
+<text x="722" y="226" font-size="10.5" fill="#57606a">fold rank 20 &#8212; rewrite, then run</text>
+
+<rect x="560" y="246" width="150" height="30" rx="5" fill="#9a6700"/>
+<text x="635" y="266" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">VerdictQuarantine</text>
+<text x="722" y="266" font-size="10.5" fill="#57606a">fold rank 30 &#8212; hold the result out</text>
+
+<rect x="560" y="286" width="150" height="30" rx="5" fill="#0969da"/>
+<text x="635" y="306" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">VerdictRequireWitness</text>
+<text x="722" y="306" font-size="10.5" fill="#57606a">fold rank 40 &#8212; hold for a witness</text>
+
+<rect x="560" y="326" width="150" height="30" rx="5" fill="#cf222e"/>
+<text x="635" y="346" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">VerdictDeny</text>
+<text x="722" y="346" font-size="10.5" fill="#57606a">fold rank 100 &#8212; refuse the call</text>
+
+<!-- DEFER callout -->
+<rect x="560" y="380" width="400" height="110" rx="10" fill="#cf222e" fill-opacity="0.05" stroke="#cf222e" stroke-width="1.4"/>
+<text x="578" y="406" font-size="12" font-weight="700" fill="#cf222e">DEFER is not allow</text>
+<text x="578" y="428" font-size="11" fill="#24292f">VerdictDefer means "this rung did not decide" &#8212;</text>
+<text x="578" y="444" font-size="11" fill="#24292f">pass it on. It does NOT mean the call is permitted.</text>
+<text x="578" y="464" font-size="11" fill="#24292f">A chain where every rung defers is a DENY, unless</text>
+<text x="578" y="480" font-size="11" fill="#24292f">the posture is default_open (internal/kernel, Fold).</text>
+
+<!-- footer -->
+<text x="490" y="536" text-anchor="middle" font-size="11" fill="#57606a">Two orderings live here and they are not the same number. Execution rank (5, 8, 10, &#8230; 100) decides the order rungs run &#8212; an optimization.</text>
+<text x="490" y="552" text-anchor="middle" font-size="11" fill="#57606a">Fold rank (abi.FoldRank) decides which verdict wins &#8212; the most-restrictive lattice position, default-deny. A rung-10 Deny beats a later Allow</text>
+<text x="490" y="568" text-anchor="middle" font-size="11" fill="#57606a">because Deny outranks Allow in the lattice, not because rung 10 ran first. A rung can only ever tighten the chain; it cannot loosen the floor.</text>
+</svg>

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="ldr-title ldr-desc">
+<title id="ldr-title">The kernel-development ladder: six rungs from L1 what is kernel development to L6 the frontier</title>
+<desc id="ldr-desc">Six stacked rungs, climbed bottom to top. L1 What is kernel development? &#8212; the three senses of kernel (OS-metaphor, compute, CUDA). L2 Where does my code attach? &#8212; the Register* seam and the internal/architest layering gate (Gate 1: plug in, don't fork). L3 Does it preserve behavior? &#8212; the correctness class plus a deterministic witness (Gate 2: prove correct). L4 Is it actually a win? &#8212; the non-forgeable keep-bit (Gate 3: prove faster). L5 The other kernel &#8212; the adjudicator rung and the verdict fold (the same three gates, security-shaped). L6 The frontier &#8212; what is frozen, what is open, what is unproven. An arrow climbs from L1 at the bottom to L6 at the top.</desc>
+
+<rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+
+<text x="490" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">The kernel-development ladder &#8212; six rungs, bottom to top</text>
+<text x="490" y="60" text-anchor="middle" font-size="12.5" fill="#57606a">Each rung asks one question and ends with a checkpoint you answer yourself. Rungs 1&#8211;4 add a compute kernel; rung 5 is the other kernel; rung 6 is the edge.</text>
+
+<!-- climb arrow -->
+<line x1="70" y1="520" x2="70" y2="120" stroke="#0969da" stroke-width="2"/>
+<polygon points="70,112 63,128 77,128" fill="#0969da"/>
+<text x="70" y="540" text-anchor="middle" font-size="10.5" fill="#0969da">climb</text>
+
+<!-- L6 -->
+<rect x="110" y="100" width="840" height="62" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<rect x="110" y="100" width="70" height="62" rx="10" fill="#24292f"/>
+<rect x="160" y="100" width="20" height="62" fill="#24292f"/>
+<text x="145" y="137" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">L6</text>
+<text x="200" y="126" font-size="13.5" font-weight="700" fill="#24292f">The frontier</text>
+<text x="200" y="147" font-size="11" fill="#57606a">what is frozen, what is open, what is unproven &#8212; read the ledger honestly</text>
+
+<!-- L5 -->
+<rect x="110" y="172" width="840" height="62" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<rect x="110" y="172" width="70" height="62" rx="10" fill="#0969da"/>
+<rect x="160" y="172" width="20" height="62" fill="#0969da"/>
+<text x="145" y="209" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">L5</text>
+<text x="200" y="198" font-size="13.5" font-weight="700" fill="#24292f">The other kernel</text>
+<text x="200" y="219" font-size="11" fill="#57606a">the adjudicator rung; the verdict fold &#8212; the same three gates, security-shaped</text>
+
+<!-- L4 -->
+<rect x="110" y="244" width="840" height="62" rx="10" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.4"/>
+<rect x="110" y="244" width="70" height="62" rx="10" fill="#1a7f37"/>
+<rect x="160" y="244" width="20" height="62" fill="#1a7f37"/>
+<text x="145" y="281" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">L4</text>
+<text x="200" y="270" font-size="13.5" font-weight="700" fill="#24292f">Is it actually a win?</text>
+<text x="200" y="291" font-size="11" fill="#57606a">the non-forgeable keep-bit &#8212; Gate 3: prove faster</text>
+
+<!-- L3 -->
+<rect x="110" y="316" width="840" height="62" rx="10" fill="#9a6700" fill-opacity="0.05" stroke="#9a6700" stroke-width="1.4"/>
+<rect x="110" y="316" width="70" height="62" rx="10" fill="#9a6700"/>
+<rect x="160" y="316" width="20" height="62" fill="#9a6700"/>
+<text x="145" y="353" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">L3</text>
+<text x="200" y="342" font-size="13.5" font-weight="700" fill="#24292f">Does it preserve behavior?</text>
+<text x="200" y="363" font-size="11" fill="#57606a">the correctness class + a deterministic witness &#8212; Gate 2: prove correct</text>
+
+<!-- L2 -->
+<rect x="110" y="388" width="840" height="62" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<rect x="110" y="388" width="70" height="62" rx="10" fill="#0969da"/>
+<rect x="160" y="388" width="20" height="62" fill="#0969da"/>
+<text x="145" y="425" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">L2</text>
+<text x="200" y="414" font-size="13.5" font-weight="700" fill="#24292f">Where does my code attach?</text>
+<text x="200" y="435" font-size="11" fill="#57606a">the Register* seam; the internal/architest layering gate &#8212; Gate 1: plug in, don't fork</text>
+
+<!-- L1 -->
+<rect x="110" y="460" width="840" height="62" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<rect x="110" y="460" width="70" height="62" rx="10" fill="#24292f"/>
+<rect x="160" y="460" width="20" height="62" fill="#24292f"/>
+<text x="145" y="497" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">L1</text>
+<text x="200" y="486" font-size="13.5" font-weight="700" fill="#24292f">What is kernel development?</text>
+<text x="200" y="507" font-size="11" fill="#57606a">the three senses of "kernel" &#8212; OS-metaphor / compute / CUDA</text>
+
+<!-- footer -->
+<text x="490" y="556" text-anchor="middle" font-size="11" fill="#57606a">Rungs 1&#8211;4 are the compute kernel: attach it, prove it correct, prove it faster. Rung 5 points the same three-gate discipline at the security kernel.</text>
+<text x="490" y="574" text-anchor="middle" font-size="11" fill="#57606a">Rung 6 is the honest edge: the seam is frozen, the backend behind it may not be. Start at docs/explainers/kernel-development/README.md.</text>
+</svg>

@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="ld-title ld-desc">
+<title id="ld-title">The layered DAG: internal/abi is the frozen spine every leaf imports, internal/registrations blank-imports the leaves, and cmd/fak sits on top</title>
+<desc id="ld-desc">A vertical dependency stack. TOP: internal/abi, the frozen ABI, labelled "frozen &#8212; everyone imports this". BELOW it, a row of six representative leaf packages: adjudicator, vdso, preflight, ctxmmu, model, gateway. Each leaf imports internal/abi, so six lines rise from the leaves into a bus that feeds one arrow up into the frozen spine. BELOW the leaves, internal/registrations blank-imports the built-in leaves. BELOW that, cmd/fak, the top-level integrator, imports internal/registrations. Arrows point in the direction of dependency (importer to imported). A callout states the one rule: the kernel walks the registries; it never imports your code.</desc>
+
+<rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+
+<text x="490" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">The layered DAG &#8212; a frozen spine, leaves that import it, one wiring line</text>
+<text x="490" y="60" text-anchor="middle" font-size="12.5" fill="#57606a">Arrows point the way a dependency points: the importer points at the imported. Every leaf imports the frozen ABI; nothing imports a leaf.</text>
+
+<!-- internal/abi : frozen spine -->
+<rect x="290" y="100" width="400" height="64" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="490" y="126" text-anchor="middle" font-size="15" font-weight="700" fill="#24292f">internal/abi</text>
+<text x="490" y="147" text-anchor="middle" font-size="11.5" fill="#57606a">FROZEN &#8212; everyone imports this</text>
+
+<!-- bus: every leaf imports abi -->
+<line x1="115" y1="200" x2="865" y2="200" stroke="#0969da" stroke-width="1.4"/>
+<line x1="115" y1="230" x2="115" y2="200" stroke="#0969da" stroke-width="1.4"/>
+<line x1="265" y1="230" x2="265" y2="200" stroke="#0969da" stroke-width="1.4"/>
+<line x1="415" y1="230" x2="415" y2="200" stroke="#0969da" stroke-width="1.4"/>
+<line x1="565" y1="230" x2="565" y2="200" stroke="#0969da" stroke-width="1.4"/>
+<line x1="715" y1="230" x2="715" y2="200" stroke="#0969da" stroke-width="1.4"/>
+<line x1="865" y1="230" x2="865" y2="200" stroke="#0969da" stroke-width="1.4"/>
+<line x1="490" y1="200" x2="490" y2="170" stroke="#0969da" stroke-width="1.6"/>
+<polygon points="490,164 483,178 497,178" fill="#0969da"/>
+<text x="500" y="196" font-size="10.5" fill="#0969da">imports</text>
+
+<!-- leaf row -->
+<rect x="50" y="230" width="130" height="56" rx="8" fill="#0969da" fill-opacity="0.05" stroke="#0969da" stroke-width="1.2"/>
+<text x="115" y="255" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">adjudicator</text>
+<text x="115" y="273" text-anchor="middle" font-size="10.5" fill="#57606a">leaf package</text>
+
+<rect x="200" y="230" width="130" height="56" rx="8" fill="#0969da" fill-opacity="0.05" stroke="#0969da" stroke-width="1.2"/>
+<text x="265" y="255" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">vdso</text>
+<text x="265" y="273" text-anchor="middle" font-size="10.5" fill="#57606a">leaf package</text>
+
+<rect x="350" y="230" width="130" height="56" rx="8" fill="#0969da" fill-opacity="0.05" stroke="#0969da" stroke-width="1.2"/>
+<text x="415" y="255" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">preflight</text>
+<text x="415" y="273" text-anchor="middle" font-size="10.5" fill="#57606a">leaf package</text>
+
+<rect x="500" y="230" width="130" height="56" rx="8" fill="#0969da" fill-opacity="0.05" stroke="#0969da" stroke-width="1.2"/>
+<text x="565" y="255" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">ctxmmu</text>
+<text x="565" y="273" text-anchor="middle" font-size="10.5" fill="#57606a">leaf package</text>
+
+<rect x="650" y="230" width="130" height="56" rx="8" fill="#0969da" fill-opacity="0.05" stroke="#0969da" stroke-width="1.2"/>
+<text x="715" y="255" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">model</text>
+<text x="715" y="273" text-anchor="middle" font-size="10.5" fill="#57606a">leaf package</text>
+
+<rect x="800" y="230" width="130" height="56" rx="8" fill="#0969da" fill-opacity="0.05" stroke="#0969da" stroke-width="1.2"/>
+<text x="865" y="255" text-anchor="middle" font-size="12.5" font-weight="700" fill="#24292f">gateway</text>
+<text x="865" y="273" text-anchor="middle" font-size="10.5" fill="#57606a">leaf package</text>
+
+<!-- registrations blank-imports the leaves -->
+<line x1="490" y1="350" x2="490" y2="296" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="490,290 483,304 497,304" fill="#24292f"/>
+<text x="500" y="326" font-size="10.5" fill="#57606a">blank-imports the leaves</text>
+
+<rect x="290" y="350" width="400" height="56" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="490" y="375" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">internal/registrations</text>
+<text x="490" y="393" text-anchor="middle" font-size="11" fill="#57606a">one blank-import line per enabled idea</text>
+
+<!-- cmd/fak imports registrations -->
+<line x1="490" y1="460" x2="490" y2="416" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="490,410 483,424 497,424" fill="#24292f"/>
+<text x="500" y="442" font-size="10.5" fill="#57606a">imports</text>
+
+<rect x="340" y="460" width="300" height="56" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="490" y="485" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">cmd/fak</text>
+<text x="490" y="503" text-anchor="middle" font-size="11" fill="#57606a">the top-level integrator</text>
+
+<!-- rule callout -->
+<rect x="50" y="430" width="250" height="100" rx="10" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="66" y="456" font-size="11.5" font-weight="700" fill="#1a7f37">the one rule</text>
+<text x="66" y="478" font-size="11" fill="#24292f">the kernel walks the</text>
+<text x="66" y="494" font-size="11" fill="#24292f">registries; it never</text>
+<text x="66" y="510" font-size="11" fill="#24292f">imports your code.</text>
+
+<!-- tier note -->
+<rect x="690" y="430" width="240" height="100" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.2"/>
+<text x="706" y="456" font-size="11.5" font-weight="700" fill="#0969da">five-tier layering</text>
+<text x="706" y="478" font-size="10.5" fill="#57606a">0 root &#183; 1 primitive</text>
+<text x="706" y="494" font-size="10.5" fill="#57606a">2 foundation-composite</text>
+<text x="706" y="510" font-size="10.5" fill="#57606a">3 mechanism &#183; 4 composer</text>
+<text x="706" y="526" font-size="10.5" fill="#57606a">5 integrator</text>
+
+<!-- footer -->
+<text x="490" y="566" text-anchor="middle" font-size="11" fill="#57606a">internal/architest fails the build on an upward or cross-tier import, so the layering cannot silently erode. Each leaf is its own directory,</text>
+<text x="490" y="582" text-anchor="middle" font-size="11" fill="#57606a">so two ideas added in parallel edit disjoint files. Enabling or disabling an idea is one import line in internal/registrations.</text>
+</svg>
