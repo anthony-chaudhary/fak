@@ -15,7 +15,7 @@ var (
 func working() Holder {
 	return Holder{
 		Lane:         "gateway",
-		HostID:       "NODE-DESKTOP-B",
+		HostID:       "WORKSTATION-A",
 		PID:          4242,
 		Alive:        true,
 		StartedAt:    spawn,
@@ -29,7 +29,7 @@ func heldByWorker() Lease {
 	return Lease{
 		Lane:       "gateway",
 		Holder:     "claude-2404",
-		HostID:     "NODE-DESKTOP-B",
+		HostID:     "WORKSTATION-A",
 		LoopTS:     "2026-08-07T11:41:00Z",
 		AcquiredAt: spawn.Add(1 * time.Minute),
 	}

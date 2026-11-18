@@ -45,7 +45,7 @@ common flags:
 // and the detector must key off the log's own recorded launch evidence.
 const healthyLogFixture = `# fak-spawn 20260807-055116 issue=1348 lane=gateway backend=claude argv0=fak.exe
 fak guard: account "aug5-netra" is cooling down — rotating to "aug5TWO-netra" (resets 2026-08-07T06:16:04Z) (headroom=room)
-fak guard: fleetspine: self-discovery on (group 239.255.70.65:4765 as "node-desktop-b")
+fak guard: fleetspine: self-discovery on (group 239.255.70.65:4765 as "workstation-a")
 fak guard 0.43.0 — kernel-adjudicated: claude -p --permission-mode bypassPermissions --model claude-opus-5 --effort xhigh
   build      : b225bb1ca20f
   gateway    : http://127.0.0.1:56430   (in-process; torn down when the command exits)
