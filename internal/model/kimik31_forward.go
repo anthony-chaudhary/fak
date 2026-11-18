@@ -13,15 +13,17 @@ package model
 // oracles, so a K3.1 checkpoint is no longer dead code behind the L8 gate. The
 // dispatch switches on the SAME predicates the classifier reads
 // (IsKimiK31KDALayer / IsKimiK31DSALayer), so the named path cannot drift from
-// what the composite actually runs.
+// what the composite actually runs. When a layer also carries a PostNorm and an
+// MoE/MLP block (kimik31_moe.go), the composite runs the reference's full layer
+// order — norm -> attn -> +residual -> post_norm -> ffn -> +residual — so the
+// routed/shared expert compute is no longer dropped.
 //
 // WHAT THIS DOES NOT OWN (later leaves, no surface invented here): checkpoint
 // tensor resolution (the safetensors/GGUF loader leaves build
 // KimiK31ForwardParams from real weights; this file takes resolved params so the
-// composite stays testable on synthetic tensors), the latent-MoE / SiTU /
-// attention-residual / MLA-output-gate leaves (Wave 1), and the full assembled
-// 93-layer forward with the Kimi chat template + generation loop (Wave 5).
-// Until those land the composition carries attention + residual only, with the
+// composite stays testable on synthetic tensors), and the full assembled
+// 93-layer forward with the Kimi chat template + generation loop (Wave 5). The
+// attention + FFN composition carries no lm_head/generation loop yet, with the
 // tiny-tensor smoke test pinning finite logits through this path on synthetic
 // weights.
 
@@ -43,6 +45,17 @@ type KimiK31ForwardParams struct {
 	FinalNorm []float32
 	KDA       []*KimiK31KDAParams
 	DSA       []*KimiK31DSAParams
+	// PostNorm[l] is layer l's post-attention RMSNorm weight ([Hidden]); Moe[l]
+	// is its FFN block (a KimiK3MoE for MoE layers, a dense SiTU MLP for the
+	// first_k_dense_replace dense layer). When BOTH are set for a layer, the
+	// composite runs the layer's full reference order
+	//   norm -> attn -> +residual -> post_norm -> ffn -> +residual
+	// via the landed ForwardKimiK31MoEToken; a layer with either nil keeps the
+	// attention + residual composition only (so a caller with attention-only
+	// params still runs, and a partially-loaded checkpoint refuses rather than
+	// silently skipping the block).
+	PostNorm [][]float32
+	Moe      []*KimiK31MoEParams
 }
 
 // KimiK31ForwardState holds the recurrent/cell state for every layer of the
@@ -124,6 +137,22 @@ func ForwardKimiK31Token(cfg Config, p *KimiK31ForwardParams, st *KimiK31Forward
 		}
 		for i := range cur {
 			cur[i] += attn[i]
+		}
+		// FFN block (the ffn_boundary half): when the layer carries a post-norm
+		// and an MoE/MLP block, run the reference's second half — post-attention
+		// RMSNorm, the routed+shared expert block, and the residual add. A layer
+		// with params for one half and not the other is an unrepresentable
+		// partial load and refuses rather than silently dropping compute.
+		hasPost, hasMoE := l < len(p.PostNorm) && p.PostNorm[l] != nil, l < len(p.Moe) && p.Moe[l] != nil
+		switch {
+		case hasPost && hasMoE:
+			rmsnormInto(xn, cur, p.PostNorm[l], p.RMSEps)
+			ffn := ForwardKimiK31MoEToken(p.Moe[l], xn)
+			for i := range cur {
+				cur[i] += ffn[i]
+			}
+		case hasPost || hasMoE:
+			panic(fmt.Sprintf("model: kimi-k31 forward: layer %d has post-norm=%v moe=%v; both or neither", l, hasPost, hasMoE))
 		}
 	}
 	if p.FinalNorm != nil {
