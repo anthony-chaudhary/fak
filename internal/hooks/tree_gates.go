@@ -71,7 +71,7 @@ func gateSecretShapeTree(t *TrackedTree) ([]Finding, error) {
 	var findings []Finding
 	for _, f := range t.Paths {
 		norm := strings.ReplaceAll(f, "\\", "/")
-		if selfRefShape[norm] {
+		if selfRefShape[norm] || isGeneratedCorpus(norm) {
 			continue
 		}
 		if !textExt[lowerExt(norm)] {

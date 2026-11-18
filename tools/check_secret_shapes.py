@@ -26,6 +26,7 @@ Escape (staged): ALLOW_SECRET_SHAPE=1  (e.g. a new redaction-policy example).
 """
 from __future__ import annotations
 import argparse
+import fnmatch
 import os
 import re
 import subprocess
@@ -33,26 +34,75 @@ from dispatch_worker import install_no_window_subprocess_defaults
 import sys
 install_no_window_subprocess_defaults(subprocess)
 
-# user segments that are placeholders / system profiles, not a real operator name
+# user segments that are placeholders / system profiles, not a real operator name.
+# The second group is the generic FIXTURE-name class: the names a test or a doc uses
+# when it needs *some* home path and does not mean anyone. They are the same kind of
+# non-identity as `user`/`runner` above, and without them the whole-tree audit reports
+# ~100 findings on a clean tree, which is what makes a hard tree gate unusable.
 PLACEHOLDER_USERS = {
     "user", "you", "runner", "public", "default", "all", "username",
     "administrator", "guest", "youruser", "name", "someone",
+    "dev", "devuser", "test", "example", "private", "operator", "alice",
+    "foo", "bench", "me",
 }
-OP_PATH = re.compile(r"[A-Za-z]:[\\/][Uu]sers[\\/]([A-Za-z][A-Za-z0-9._-]{1,})")
-MAC_PATH = re.compile(r"/Users/([A-Za-z][A-Za-z0-9._-]{1,})")
+# Both home-path forms share one group structure so the Python gate and its Go fast
+# path (internal/hooks/gate_secretshape.go) report the SAME text for the same hit:
+#   group(1) = the path (what gets reported), group(2) = the username (what is judged).
+# The leading boundary is a CAPTURE GROUP rather than a lookbehind because the Go port
+# is RE2, which has no lookbehind, and the two are parity-tested on the same grammar.
+# It requires the character before the path to not be a path/word character, so a URL
+# path (`example.com/Users/x`) or a relative path (`../Users/x`) is not a home path.
+# The macOS form is additionally case-insensitive on `Users`: a lowercase
+# `/users/<operator>` literal is the same home path, and one such literal inside a
+# _test.go fixture (which the whole-tree export sweep exempts) was published while
+# this gate reported the tree clean.
+OP_PATH = re.compile(
+    r"(?:^|[^A-Za-z0-9._-])([A-Za-z]:[\\/][Uu]sers[\\/]([A-Za-z][A-Za-z0-9._-]{1,}))")
+MAC_PATH = re.compile(
+    r"(?:^|[^A-Za-z0-9._-])(/[Uu][Ss][Ee][Rr][Ss]/([A-Za-z][A-Za-z0-9._-]{1,}))")
 MSL_HOST = re.compile(r"\bmsl-[a-z0-9][a-z0-9-]*", re.IGNORECASE)
-LAB_HOST = re.compile(r"\b[a-z0-9][a-z0-9.-]*\.lab\b", re.IGNORECASE)
+# The first label must be at least 3 characters. A 1-2 character DNS label is not a
+# hostname convention, and it is exactly the shape a Go field selector takes: the tree
+# carries `tt.lab` (a struct field in internal/devindex), which a 1+ label rule reports
+# as an internal host on every audit. Every real lab host in the tree has a 3+
+# character first label (`gpu`, `gpu1`, `gpu-server` are the generic machine
+# classes; the site-specific aliases are deliberately not spelled here).
+LAB_HOST = re.compile(r"\b[a-z0-9][a-z0-9.-]{2,}\.lab\b", re.IGNORECASE)
 # Site/cluster CODENAME family (the operator's test cluster). The literal needle
 # list carries the exact forms; this SHAPE catches a novel variant of the same
 # class (a new `<codename>-<something>` lab label) the way MSL_HOST catches a new
 # `msl-<host>`. The prefix is assembled from fragments so this file does not itself
 # carry a contiguous codename literal (the same discipline the sibling test file
-# uses). The `(?!llm\b)` guard is load-bearing: a PUBLIC third-party repo of the
-# same prefix is cited in docs/research, so a bare prefix rule would cry wolf on it.
-# Hardware CLASSES (`h200`, `a100`) are NOT matched — only the site codename.
+# uses). Hardware CLASSES (`h200`, `a100`) are NOT matched — only the site codename.
 _CODENAME_PREFIX = "rt" + "p"
 CODENAME_HOST = re.compile(
-    r"\b" + _CODENAME_PREFIX + r"-(?!llm\b)[a-z0-9][a-z0-9-]*", re.IGNORECASE)
+    r"\b" + _CODENAME_PREFIX + r"-[a-z0-9][a-z0-9-]*", re.IGNORECASE)
+# The public-repo carve-out is a POST-MATCH filter, not a `(?!llm\b)` lookahead. The
+# lookahead is what this rule wants, but the Go fast path is RE2, which has no
+# lookahead at all — `regexp.MustCompile` on `(?!` PANICS at package init (Go's parser
+# accepts only `i m s U - : )` after `(?`). Since the two implementations are
+# parity-tested on the same grammar, the guard lives in a shared post-match predicate
+# instead. A PUBLIC third-party repo of the same prefix is cited in docs/research, so
+# this guard is load-bearing — without it the rule cries wolf on it.
+#
+# The predicate is deliberately ASCII-only, where `\b` would be Unicode-aware in Python
+# and ASCII in RE2. A non-ASCII byte after `llm` therefore counts as a WORD character, so
+# the guard FAILS SAFE: an ambiguous `rtp-llm<non-ascii>` is flagged, not exempted.
+_WORD_CHARS = set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
+
+
+def _is_public_llm_repo(text: str, m) -> bool:
+    """True when this codename match is the PUBLIC `<prefix>-llm` third-party repo."""
+    rest = text[m.start() + len(_CODENAME_PREFIX) + 1:]
+    head = rest[:3]
+    # ASCII case-insensitive "llm", matching Go's strings.EqualFold on the same bytes.
+    if len(head) < 3 or head[0] not in "lL" or head[1] not in "lL" or head[2] not in "mM":
+        return False
+    if len(rest) == 3:
+        return True
+    c = rest[3]
+    return ord(c) < 0x80 and c not in _WORD_CHARS
+
 
 # Files that legitimately contain these shapes (they define/test/document the rule).
 SELF_REF = {
@@ -62,6 +112,22 @@ SELF_REF = {
     "tools/check_secret_shapes_test.py",
     "tools/operator_path_needle_test.py",
 }
+# Machine-generated third-party corpora (docs/research/inventory/README.md: "generated
+# from pinned local checkouts with `fak study-inventory`"). These are verbatim scrapes of
+# UPSTREAM projects, so a home path inside one is a THIRD-PARTY developer's, not the
+# operator's -- the shape this gate exists to catch. Enumerated as a glob list, not a
+# pattern, so widening it is a reviewed edit (the same bar as adding a needle). The
+# literal-needle leak gate still scans these files; only the SHAPE heuristic stands down.
+GENERATED_CORPUS = (
+    "docs/research/inventory/*.jsonl",
+)
+
+
+def _is_generated_corpus(rel: str) -> bool:
+    norm = rel.replace("\\", "/")
+    return any(fnmatch.fnmatch(norm, pat) for pat in GENERATED_CORPUS)
+
+
 TEXT_EXT = (".md", ".txt", ".go", ".py", ".json", ".jsonl", ".sh", ".ps1",
             ".yml", ".yaml", ".toml", ".cff", ".html")
 
@@ -78,11 +144,11 @@ def _git(args, root):
 def _scan_text(text: str):
     """Yield (shape, matched) for each leak-shape hit in text."""
     for m in OP_PATH.finditer(text):
-        if m.group(1).lower() not in PLACEHOLDER_USERS:
-            yield ("operator-path", m.group(0))
+        if m.group(2).lower() not in PLACEHOLDER_USERS:
+            yield ("operator-path", m.group(1))
     for m in MAC_PATH.finditer(text):
-        if m.group(1).lower() not in PLACEHOLDER_USERS:
-            yield ("operator-path", m.group(0))
+        if m.group(2).lower() not in PLACEHOLDER_USERS:
+            yield ("operator-path", m.group(1))
     for m in MSL_HOST.finditer(text):
         yield ("internal-host", m.group(0))
     for m in LAB_HOST.finditer(text):
@@ -90,7 +156,8 @@ def _scan_text(text: str):
         if not host.endswith("example.lab"):
             yield ("internal-host", m.group(0))
     for m in CODENAME_HOST.finditer(text):
-        yield ("site-codename", m.group(0))
+        if not _is_public_llm_repo(text, m):
+            yield ("site-codename", m.group(0))
 
 
 def _staged_added_lines(root):
@@ -144,7 +211,7 @@ def main() -> int:
 
     findings = []
     for f, text in blobs.items():
-        if f in SELF_REF:
+        if f in SELF_REF or _is_generated_corpus(f):
             continue
         for shape, hit in _scan_text(text):
             findings.append((f, shape, hit))

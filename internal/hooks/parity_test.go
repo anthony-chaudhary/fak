@@ -165,6 +165,8 @@ func parityGCPEmail() string {
 }
 func parityInternalHost() string    { return "ms" + "l-bui" + "ld-7" }
 func parityPrivateLabAlias() string { return "lab-dg" + "x2" }
+func parityCodename() string        { return "rt" + "p" + "-test-h200" }
+func parityMacHome() string         { return "/" + "users/" + "bob" }
 func parityPrivateRepo() string     { return "ca" + "ma" }
 func parityPrivateIdentity() string { return "sar" + "onic" }
 
@@ -186,6 +188,13 @@ func TestParity_SecretShape(t *testing.T) {
 		{"placeholder-ok", map[string]string{"a.md": "see C:/Users/runner/go path\n"}, false},
 		{"internal-host", map[string]string{"a.md": "connect to " + parityInternalHost() + " now\n"}, true},
 		{"example-lab-ok", map[string]string{"a.md": "host gpu.example.lab is fake\n"}, false},
+		// The two classes the Go fast path was missing or mis-cased: a site/cluster codename
+		// (the Go port had no codename rule at all) and a lowercase macOS home path (the Go
+		// port was case-sensitive on `Users`). Both must agree with the Python oracle.
+		{"site-codename", map[string]string{"a.md": "measured on " + parityCodename() + " yesterday\n"}, true},
+		{"mac-home-lowercase", map[string]string{"a.md": "cache at " + parityMacHome() + "/Library\n"}, true},
+		{"public-same-prefix-repo-ok", map[string]string{"a.md": "see https://github.com/alibaba/" + "rt" + "p" + "-llm/blob/main/x.patch\n"}, false},
+		{"url-path-not-home-ok", map[string]string{"a.md": "source: https://example.com/Users/bob/fak\n"}, false},
 	})
 }
 

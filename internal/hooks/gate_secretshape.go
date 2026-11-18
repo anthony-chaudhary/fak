@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"path"
 	"regexp"
 	"strings"
 )
@@ -12,18 +13,58 @@ import (
 var (
 	// check_secret_shapes.py L33-36, verbatim. Go's regexp is RE2; these are plain enough to
 	// translate directly. (?i) replaces re.IGNORECASE on the two host patterns.
-	opPathRE  = regexp.MustCompile(`[A-Za-z]:[\\/][Uu]sers[\\/]([A-Za-z][A-Za-z0-9._-]{1,})`)
-	macPathRE = regexp.MustCompile(`/Users/([A-Za-z][A-Za-z0-9._-]{1,})`)
+	opPathRE = regexp.MustCompile(`(?:^|[^A-Za-z0-9._-])([A-Za-z]:[\\/][Uu]sers[\\/]([A-Za-z][A-Za-z0-9._-]{1,}))`)
+	// macOS home path: case-insensitive on `Users` and anchored on a path-segment boundary,
+	// matching the Python MAC_PATH. The boundary is a capture group, not a lookbehind, because
+	// RE2 has none -- group 1 is the path, group 2 the username. See the Python comment for why
+	// both properties are load-bearing (a lowercase `/users/<operator>` literal in an exempt
+	// _test.go fixture was published while this gate reported the tree clean).
+	macPathRE = regexp.MustCompile(`(?:^|[^A-Za-z0-9._-])(/[Uu][Ss][Ee][Rr][Ss]/([A-Za-z][A-Za-z0-9._-]{1,}))`)
 	mslHostRE = regexp.MustCompile(`(?i)\bmsl-[a-z0-9][a-z0-9-]*`)
-	labHostRE = regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9.-]*\.lab\b`)
+	// The first label must be at least 3 characters, matching the Python LAB_HOST. A 1-2
+	// character DNS label is not a hostname convention, and it is exactly the shape a Go
+	// field selector takes: the tree carries `tt.lab` (a struct field in internal/devindex),
+	// which a 1+ label rule reports as an internal host on every audit.
+	labHostRE = regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9.-]{2,}\.lab\b`)
+	// Site/cluster CODENAME family, matching the Python CODENAME_HOST. The prefix is assembled
+	// from fragments so this file carries no contiguous codename literal. Hardware CLASSES
+	// (`h200`, `a100`) are NOT matched -- only the site codename.
+	codenamePrefix = "rt" + "p"
+	codenameRE     = regexp.MustCompile(`(?i)\b` + codenamePrefix + `-[a-z0-9][a-z0-9-]*`)
 )
 
+// isPublicLLMRepo reports whether a codename match is the PUBLIC `<prefix>-llm` third-party
+// repo cited in docs/research. The Python rule wants a `(?!llm\b)` lookahead here, but RE2 has
+// no lookahead at all -- `regexp.MustCompile` on `(?!` PANICS at package init (Go's parser
+// accepts only `i m s U - : )` after `(?`). Since the two implementations are parity-tested on
+// the same grammar, the guard lives in this shared post-match predicate instead.
+//
+// The predicate is deliberately ASCII-only, where `\b` would be Unicode-aware in Python and
+// ASCII in RE2. A non-ASCII byte after `llm` therefore counts as a WORD character, so the
+// guard FAILS SAFE: an ambiguous `rtp-llm<non-ascii>` is flagged, not exempted.
+func isPublicLLMRepo(line string, m []int) bool {
+	rest := line[m[0]+len(codenamePrefix)+1:]
+	if len(rest) < 3 || !strings.EqualFold(rest[:3], "llm") {
+		return false
+	}
+	if len(rest) == 3 {
+		return true
+	}
+	c := rest[3]
+	return c < 0x80 && !(c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
+}
+
 // placeholderUsers — a home-path username in this set is a documentation placeholder, not a
-// leak (check_secret_shapes.py L29-32), compared lower-cased.
+// leak (check_secret_shapes.py PLACEHOLDER_USERS), compared lower-cased. The second group is
+// the generic FIXTURE-name class: the names a test or a doc uses when it needs *some* home
+// path and does not mean anyone. Without them the whole-tree audit reports ~100 findings on a
+// clean tree, which is what makes a hard tree gate unusable. Keep in lockstep with the Python.
 var placeholderUsers = map[string]bool{
 	"user": true, "you": true, "runner": true, "public": true, "default": true,
 	"all": true, "username": true, "administrator": true, "guest": true,
 	"youruser": true, "name": true, "someone": true,
+	"dev": true, "devuser": true, "test": true, "example": true, "private": true,
+	"operator": true, "alice": true, "foo": true, "bench": true, "me": true,
 }
 
 // selfRefShape — files skipped entirely (check_secret_shapes.py L39-44), path forward-slashed.
@@ -36,6 +77,25 @@ var selfRefShape = map[string]bool{
 	"tools/operator_path_needle_test.py": true,
 	"internal/hooks/gate_secretshape.go": true,
 	"internal/hooks/gate_publicleak.go":  true,
+}
+
+// generatedCorpus — machine-generated third-party corpora (docs/research/inventory/README.md:
+// "generated from pinned local checkouts with `fak study-inventory`"). These are verbatim
+// scrapes of UPSTREAM projects, so a home path inside one is a THIRD-PARTY developer's, not
+// the operator's -- the shape this gate exists to catch. Enumerated as a glob list, not a
+// pattern, so widening it is a reviewed edit (the same bar as adding a needle). The
+// literal-needle leak gate still scans these files; only the SHAPE heuristic stands down.
+var generatedCorpus = []string{"docs/research/inventory/*.jsonl"}
+
+// isGeneratedCorpus reports whether a forward-slashed repo-relative path is a generated
+// third-party corpus. Mirrors check_secret_shapes.py _is_generated_corpus.
+func isGeneratedCorpus(norm string) bool {
+	for _, pat := range generatedCorpus {
+		if ok, err := path.Match(pat, norm); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }
 
 // textExt — only these extensions are scanned (check_secret_shapes.py L45-46).
@@ -53,7 +113,7 @@ func gateSecretShape(d *StagedDiff) ([]Finding, error) {
 	scanned := 0
 	for _, f := range d.sortedFiles() {
 		norm := strings.ReplaceAll(f, "\\", "/")
-		if selfRefShape[norm] {
+		if selfRefShape[norm] || isGeneratedCorpus(norm) {
 			continue
 		}
 		if !textExt[lowerExt(norm)] {
@@ -105,16 +165,23 @@ func scanShapes(line string) []shapeHit {
 			hits = append(hits, shapeHit{"internal-host", m})
 		}
 	}
+	for _, m := range codenameRE.FindAllStringIndex(line, -1) {
+		if !isPublicLLMRepo(line, m) {
+			hits = append(hits, shapeHit{"site-codename", line[m[0]:m[1]]})
+		}
+	}
 	return hits
 }
 
-// operatorPathHits runs a home-path regex (capture group 1 = username) and emits an
-// operator-path shapeHit for every match whose username is not a documentation placeholder.
+// operatorPathHits runs a home-path regex and emits an operator-path shapeHit for every match
+// whose username is not a documentation placeholder. Both home-path forms share one group
+// structure: group 1 is the path (reported), group 2 the username (judged). The leading
+// path-segment boundary is a capture group rather than a lookbehind because RE2 has none.
 func operatorPathHits(re *regexp.Regexp, line string) []shapeHit {
 	var hits []shapeHit
 	for _, m := range re.FindAllStringSubmatch(line, -1) {
-		if !placeholderUsers[strings.ToLower(m[1])] {
-			hits = append(hits, shapeHit{"operator-path", m[0]})
+		if !placeholderUsers[strings.ToLower(m[2])] {
+			hits = append(hits, shapeHit{"operator-path", m[1]})
 		}
 	}
 	return hits

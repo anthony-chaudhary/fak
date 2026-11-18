@@ -39,6 +39,7 @@ func privateLabAliasFixture() string { return "lab-" + "dgx2" }
 func privateGPUAliasFixture() string { return "dgx" + "2" }
 func privateRepoFixture() string     { return "ca" + "ma" }
 func privateIdentityFixture() string { return "sar" + "onic" }
+func codenameFixture() string        { return "rt" + "p" + "-test-h200" }
 func userPathFixture(suffix string) string {
 	return `C:\Users\` + operatorNameFixture() + suffix
 }
@@ -261,6 +262,116 @@ func TestSecretShape_operatorPathButNotPlaceholder(t *testing.T) {
 	}
 	if !hasFindingFor(f, "SECRET_SHAPE", labHostFixture()) {
 		t.Errorf("missed .lab host; got %+v", f)
+	}
+}
+
+func TestSecretShape_macPathAnyCaseAndBoundary(t *testing.T) {
+	// A lowercase `/users/<operator>` literal is the same home path as `/Users/...`;
+	// the motivating miss was one such literal inside a _test.go fixture, which the
+	// whole-tree export sweep exempts, so it was published while the tree read clean.
+	lower := "/" + "users/" + operatorNameFixture()
+	d := diffOf("/r", map[string][]string{"a.md": {"cache at " + lower + "/Library"}})
+	f, _ := gateSecretShape(d)
+	if !hasFindingFor(f, "SECRET_SHAPE", lower) {
+		t.Errorf("missed lowercase mac home path; got %+v", f)
+	}
+
+	// The path-segment boundary: a URL path and a relative path are NOT home paths.
+	// Without it, widening the case would newly flag third-party URLs and prose.
+	for _, line := range []string{
+		"source: https://example.com/Users/" + operatorNameFixture() + "/fak",
+		"source: ../Users/" + operatorNameFixture() + "/fak",
+		"source: docs/Users/" + operatorNameFixture() + "/fak",
+	} {
+		d := diffOf("/r", map[string][]string{"a.md": {line}})
+		f, _ := gateSecretShape(d)
+		if len(f) != 0 {
+			t.Errorf("non-home path flagged: %q -> %+v", line, f)
+		}
+	}
+}
+
+func TestSecretShape_siteCodename(t *testing.T) {
+	// The site/cluster codename family: a novel `<codename>-<suffix>` lab label the
+	// literal needle list misses, the way mslHostRE catches a new `msl-<host>`.
+	d := diffOf("/r", map[string][]string{"a.md": {"measured on " + codenameFixture() + " yesterday"}})
+	f, _ := gateSecretShape(d)
+	if !hasFindingFor(f, "SECRET_SHAPE", codenameFixture()) {
+		t.Errorf("missed site codename; got %+v", f)
+	}
+
+	// The public-repo guard is load-bearing: a PUBLIC third-party repo of the same
+	// prefix is cited in docs/research, so a bare prefix rule would cry wolf on it.
+	// It is a post-match predicate, not a lookahead (RE2 has none), so it must behave
+	// like `(?!llm\b)` at every edge: case, end-of-text, and a following word char.
+	for _, ok := range []string{"llm", "LLM", "llm-x"} {
+		d = diffOf("/r", map[string][]string{
+			"a.md": {"see https://github.com/alibaba/" + "rt" + "p" + "-" + ok + "/blob/main/x.patch"},
+		})
+		f, _ = gateSecretShape(d)
+		if len(f) != 0 {
+			t.Errorf("public same-prefix repo %q flagged; got %+v", ok, f)
+		}
+	}
+
+	// ...but `llm` followed by a word character is NOT the public repo -> still a leak.
+	// `_` and a non-ASCII byte both stop the regex body, so the MATCH is the bare
+	// `rtp-llm`; the guard then sees the following word char and flags it. A non-ASCII
+	// byte counts as a word character, so the guard FAILS SAFE rather than exempting.
+	for _, bad := range []string{"llmx", "llm_1", "llmé"} {
+		d = diffOf("/r", map[string][]string{"a.md": {"see " + "rt" + "p" + "-" + bad}})
+		f, _ = gateSecretShape(d)
+		if !hasFindingFor(f, "SECRET_SHAPE", "rt"+"p"+"-llm") {
+			t.Errorf("near-miss %q must still be flagged; got %+v", bad, f)
+		}
+	}
+}
+
+func TestSecretShape_shortFirstLabelIsNotALabHost(t *testing.T) {
+	// A 1-2 character DNS label is not a hostname convention, and it is exactly the shape a
+	// Go field selector takes: the tree carries `tt.lab` (a struct field in
+	// internal/devindex), which a 1+ label rule reports as an internal host on every audit.
+	d := diffOf("/r", map[string][]string{
+		"a.go": {"problems := validate(tt.portable, tt.maintainer, tt.lab)"},
+	})
+	f, _ := gateSecretShape(d)
+	if len(f) != 0 {
+		t.Errorf("short first label flagged as a lab host; got %+v", f)
+	}
+
+	// ...but every real lab host in the tree has a 3+ character first label. The names
+	// here are the GENERIC machine classes only; a site-specific alias would itself be
+	// the leak this gate exists to catch, so it must not be spelled in a fixture.
+	for _, name := range []string{"gpu", "gpu1", "gpu-server", "node7", "worker-12"} {
+		host := name + ".lab"
+		d := diffOf("/r", map[string][]string{"a.md": {"host " + host + " down"}})
+		f, _ := gateSecretShape(d)
+		if !hasFindingFor(f, "SECRET_SHAPE", host) {
+			t.Errorf("missed lab host %q; got %+v", host, f)
+		}
+	}
+}
+
+func TestSecretShape_generatedCorpusIsExempt(t *testing.T) {
+	// docs/research/inventory/*.jsonl are verbatim scrapes of UPSTREAM projects, so a home
+	// path inside one is a THIRD-PARTY developer's, not the operator's. The literal-needle
+	// leak gate still scans them; only the shape heuristic stands down.
+	line := `File "/` + "users/" + "asdwb/.local/lib/python3.10/site-packages/fla"
+	d := diffOf("/r", map[string][]string{
+		"docs/research/inventory/llm-d-llm-d-corpus.jsonl": {line},
+	})
+	f, _ := gateSecretShape(d)
+	if len(f) != 0 {
+		t.Errorf("generated corpus must be exempt; got %+v", f)
+	}
+
+	// a sibling directory must NOT match (the glob is spelled out, not a leading `*`).
+	d = diffOf("/r", map[string][]string{
+		"docs/research/inventory-notes/x.jsonl": {line},
+	})
+	f, _ = gateSecretShape(d)
+	if !hasFindingFor(f, "SECRET_SHAPE", "/"+"users/"+"asdwb") {
+		t.Errorf("sibling dir must still be scanned; got %+v", f)
 	}
 }
 

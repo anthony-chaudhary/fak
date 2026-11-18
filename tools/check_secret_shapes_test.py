@@ -54,19 +54,42 @@ def _shapes(text: str) -> list[tuple[str, str]]:
 # --- operator home paths ---------------------------------------------------
 
 def test_windows_backslash_operator_path_is_caught() -> None:
-    p = _win("alice")
+    p = _win("bob")
     assert ("operator-path", p) in _shapes(f"see {p}{_BS}work for the log")
 
 
 def test_windows_forwardslash_operator_path_is_caught() -> None:
     # forward-slash form must not slip past (the exact motivating miss).
-    p = _win("alice", "/")
+    p = _win("bob", "/")
     assert {s for s, _ in _shapes(f"path {p}/work")} == {"operator-path"}
 
 
 def test_mac_operator_path_is_caught() -> None:
     p = _mac("bob")
     assert ("operator-path", p) in _shapes(f"cache at {p}/Library")
+
+
+def test_mac_operator_path_is_caught_any_case() -> None:
+    # A lowercase `/users/<operator>` literal is the SAME home path. The motivating
+    # miss: one such literal inside a _test.go fixture (which the whole-tree export
+    # sweep exempts) was published while this gate reported the tree clean.
+    for form in (_mac("bob").lower(), _mac("bob").upper()):
+        assert ("operator-path", form) in _shapes(f"cache at {form}/Library"), form
+
+
+def test_mac_path_after_a_url_or_relative_prefix_is_not_a_home_path() -> None:
+    # The path-segment boundary: a URL path and a relative path are not home paths.
+    # Without it, widening the case would newly flag third-party URLs and prose.
+    assert _shapes("source: https://example.com/Users/alice/fak") == []
+    assert _shapes("source: ../Users/alice/fak") == []
+    assert _shapes("source: docs/Users/alice/fak") == []
+
+
+def test_mac_path_after_a_separator_is_still_a_home_path() -> None:
+    # ...but a real home path is preceded by whitespace, a quote, or a line start.
+    p = _mac("bob")
+    for prefix in ("", " ", '"', "(", "=", ":", "\t"):
+        assert ("operator-path", p) in _shapes(f"{prefix}{p}/Library"), prefix
 
 
 def test_placeholder_users_are_exempt() -> None:
@@ -97,6 +120,19 @@ def test_example_lab_placeholder_is_exempt() -> None:
     assert _shapes(f"connect to {_lab('example')}") == []
 
 
+def test_short_first_label_is_not_a_lab_host() -> None:
+    # A 1-2 character DNS label is not a hostname convention, and it is exactly the shape
+    # a Go field selector takes: the tree carries `tt.lab` (a struct field in
+    # internal/devindex), which a 1+ label rule reports as an internal host on every audit.
+    assert _shapes("problems := validate(tt.portable, tt.maintainer, tt.lab)") == []
+    assert _shapes(f"host {_lab('ab')} down") == []
+    # ...but every real lab host in the tree has a 3+ character first label. The names
+    # here are the GENERIC machine classes only; a site-specific alias would itself be
+    # the leak this gate exists to catch, so it must not be spelled in a fixture.
+    for name in ("gpu", "gpu1", "gpu-server", "node7", "worker-12"):
+        assert ("internal-host", _lab(name)) in _shapes(f"host {_lab(name)} down"), name
+
+
 # --- site/cluster codenames ------------------------------------------------
 
 def test_codename_forms_are_caught() -> None:
@@ -111,8 +147,20 @@ def test_codename_is_caught_any_case() -> None:
 
 def test_public_rtp_llm_repo_is_exempt() -> None:
     # `alibaba/rtp-llm` is a PUBLIC third-party repo cited in docs/research; a bare
-    # `rtp-` prefix rule would cry wolf on it. The (?!llm\b) guard is load-bearing.
+    # `rtp-` prefix rule would cry wolf on it. The guard is load-bearing.
     assert _shapes("see https://github.com/alibaba/rtp-llm/blob/main/x.patch") == []
+    # the guard is a post-match predicate, not a lookahead (RE2 has none), so it must
+    # behave like `(?!llm\b)` at every edge: case, end-of-text, and a following word char.
+    assert _shapes("see " + _codename("LLM") + " upstream") == []
+    assert _shapes("see " + _codename("llm")) == []
+    assert _shapes("see " + _codename("llm-x") + " upstream") == []
+    # ...but `llm` followed by a word character is NOT the public repo -> still a leak.
+    assert ("site-codename", _codename("llmx")) in _shapes("see " + _codename("llmx"))
+    # `_` and a non-ASCII byte both stop the regex body, so the MATCH is the bare
+    # `rtp-llm`; the guard then sees the following word char and flags it. A non-ASCII
+    # byte counts as a word character, so the guard FAILS SAFE rather than exempting.
+    assert ("site-codename", _codename("llm")) in _shapes("see " + _codename("llm_1"))
+    assert ("site-codename", _codename("llm")) in _shapes("see " + _codename("llmé"))
 
 
 def test_bare_rtp_is_not_a_codename() -> None:
@@ -140,6 +188,17 @@ def test_self_ref_includes_this_gate_and_policy() -> None:
     # would forever flag its own regexes.
     assert "tools/check_secret_shapes.py" in css.SELF_REF
     assert "PUBLIC-SCRUB-POLICY.md" in css.SELF_REF
+
+
+def test_generated_corpus_is_exempt_from_the_shape_heuristic() -> None:
+    # docs/research/inventory/*.jsonl are verbatim scrapes of UPSTREAM projects, so a home
+    # path inside one is a THIRD-PARTY developer's, not the operator's. The literal-needle
+    # leak gate still scans them; only the shape heuristic stands down.
+    assert css._is_generated_corpus("docs/research/inventory/llm-d-llm-d-corpus.jsonl")
+    assert css._is_generated_corpus("docs\\research\\inventory\\x.jsonl")
+    # a sibling directory must NOT match (the glob is spelled out, not a leading `*`).
+    assert not css._is_generated_corpus("docs/research/inventory-notes/x.jsonl")
+    assert not css._is_generated_corpus("docs/research/inventory/README.md")
 
 
 def _run_all() -> int:
