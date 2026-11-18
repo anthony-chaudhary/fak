@@ -239,9 +239,11 @@ slower than llama.cpp**, because of per-dispatch overhead — the cost of handin
 operation to the GPU one at a time. Correct, but not yet fast. Full measurements:
 `docs/benchmarks/VULKAN-AMD-RESULTS.md`.
 
-**ROCm is a scaffold.** The architecture taxonomy — the part that classifies AMD GPU
-families and picks the right compiler target — is shipped and unit-tested on any host. But
-the actual HIP kernels, and every acceptance bullet that requires running on silicon, are
+**ROCm is written but never run.** The architecture taxonomy — the part that classifies AMD
+GPU families and picks the right compiler target — is shipped and unit-tested on any host.
+The rest of the backend, including the HIP kernels, is also written and sitting in the
+repository, but it has **never been compiled**, because compiling it needs a toolchain this
+machine does not have. And every acceptance bullet that requires running on silicon is
 **deferred to an AMD-GPU-on-Linux node**. **No ROCm performance number exists** — not a slow
 one, not an estimate, not a placeholder. Details: `internal/compute/ROCM-C002-NOTES.md`. If
 you ever see a ROCm throughput number on this page or any other, treat it as a bug.
