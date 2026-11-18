@@ -41,12 +41,12 @@ func BenchmarkWorkspaceInspect(b *testing.B) {
 		FileToPackage: map[string]string{
 			"internal/preflight/preflight.go": "github.com/anthony-chaudhary/fak/internal/preflight",
 			"internal/preflight/workspace.go": "github.com/anthony-chaudhary/fak/internal/preflight",
-			"cmd/fak/main.go":                 "github.com/anthony-chaudhary/fak/cmd/fak",
-			"internal/engine/engine.go":       "github.com/anthony-chaudhary/fak/internal/engine",
+			"cmd/app/main.go":                 "example.com/benchfix/cmd/app",
+			"internal/engine/engine.go":       "example.com/benchfix/internal/engine",
 		},
 		Edges: map[string][]string{
-			"github.com/anthony-chaudhary/fak/cmd/fak":         {"github.com/anthony-chaudhary/fak/internal/preflight"},
-			"github.com/anthony-chaudhary/fak/internal/engine": {"github.com/anthony-chaudhary/fak/internal/preflight"},
+			"example.com/benchfix/cmd/app":         {"github.com/anthony-chaudhary/fak/internal/preflight"},
+			"example.com/benchfix/internal/engine": {"github.com/anthony-chaudhary/fak/internal/preflight"},
 		},
 	}
 	input := WorkspacePreflightInput{
