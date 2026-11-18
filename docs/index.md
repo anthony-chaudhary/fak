@@ -24,6 +24,7 @@ FAK coordinates the whole agent path, not isolated components. Start with the [c
 | Serving multiple tenants with billing | [Billing quickstart](billing/quickstart.md) | Arm the billing chain on `fak serve`, provision tenant keys and balances, and walk a billed request through to the exhausted-budget refusal. |
 | Contributing | [Contributor guide](../CONTRIBUTING.md) and [developer tooling](dev-tooling.md) | Find the owning document first, then build, test, change, and prove the repository under its current contracts. |
 | Extending the kernel (a new kernel, backend, or policy rung) | [Kernel development ladder](explainers/kernel-development/README.md) | Learn the three-gate leaf pattern question by question — where your code attaches, how correctness is witnessed, how a speed win is proven — then read the reference in [`EXTENDING.md`](../EXTENDING.md). |
+| Understanding how a GPU backend works (Vulkan, ROCm) | [Accelerator ladder](explainers/accelerators/README.md) | Climb from "why not just the CPU?" to the Vulkan-versus-ROCm head-to-head, question by question, with every claim tied to a real code path. |
 | Researching design or history | [Notes archive](notes/) | Find rationale and dated evidence, then check current code and tests before relying on it. |
 
 For a human role map, use [`START-HERE.md`](../START-HERE.md). Agents that need a compact authority map should use [`llms.txt`](../llms.txt). The exhaustive audience, task, and lifecycle catalog is [`INDEX.md`](../INDEX.md).
