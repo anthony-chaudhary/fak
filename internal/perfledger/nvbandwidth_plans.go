@@ -305,12 +305,12 @@ const (
 // ReceiptEntry is one plan's result inside a receipt: its status, the
 // moment-in-time it was recorded, and its matrix with the stability bound.
 type ReceiptEntry struct {
-	Plan      string        `json:"plan"`
-	Status    ReceiptStatus `json:"status"`
-	MomentMS  int64         `json:"moment_ms"`
-	Matrix    *TransportMatrix
-	Stats     MatrixStats `json:"stats"`
-	WorstCV   float64     `json:"worst_cv,omitempty"`
+	Plan     string        `json:"plan"`
+	Status   ReceiptStatus `json:"status"`
+	MomentMS int64         `json:"moment_ms"`
+	Matrix   *TransportMatrix
+	Stats    MatrixStats `json:"stats"`
+	WorstCV  float64     `json:"worst_cv,omitempty"`
 }
 
 // Receipt is the self-describing moment-in-time record for one benchmark

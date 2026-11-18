@@ -202,10 +202,10 @@ func (m MeasurementState) Advance() (MeasurementState, Phase, error) {
 
 // PointResult is the measured record for one sweep point.
 type PointResult struct {
-	PointID   string
-	WarmupMS  float64
-	StreamMS  float64
-	StreamN   int
+	PointID  string
+	WarmupMS float64
+	StreamMS float64
+	StreamN  int
 }
 
 // CSVColumns is the CSV output contract: the point-id column, then one column

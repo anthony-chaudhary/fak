@@ -26,17 +26,17 @@ import (
 
 // Pinned upstream revisions the recipe is studied against.
 const (
-	modeloptNVFP4Source = "NVIDIA/Model-Optimizer@91e31320a6853eceb16525bd09302fc404ca8e7d"
+	modeloptNVFP4Source   = "NVIDIA/Model-Optimizer@91e31320a6853eceb16525bd09302fc404ca8e7d"
 	flashinferW4A16Source = "flashinfer-ai/flashinfer@866c80d0c70a90624b4c2056d12d1543d709609e"
 )
 
 // Fail-closed refusal reasons for the recipe model.
 var (
-	ErrRecipeUnknown    = errors.New("quantmatrix: unknown quantization recipe")
-	ErrRecipeShape      = errors.New("quantmatrix: invalid quantization recipe shape")
-	ErrRecipeScale      = errors.New("quantmatrix: invalid quantization recipe scale")
-	ErrRecipeInput      = errors.New("quantmatrix: invalid quantization recipe input")
-	ErrRecipePlacement  = errors.New("quantmatrix: unsupported scale placement")
+	ErrRecipeUnknown   = errors.New("quantmatrix: unknown quantization recipe")
+	ErrRecipeShape     = errors.New("quantmatrix: invalid quantization recipe shape")
+	ErrRecipeScale     = errors.New("quantmatrix: invalid quantization recipe scale")
+	ErrRecipeInput     = errors.New("quantmatrix: invalid quantization recipe input")
+	ErrRecipePlacement = errors.New("quantmatrix: unsupported scale placement")
 )
 
 // e2m1Values is the OCP MX E2M1 finite value table indexed by one unpacked

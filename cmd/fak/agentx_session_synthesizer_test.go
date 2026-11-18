@@ -33,12 +33,12 @@ func TestSessionSynthesizerReset(t *testing.T) {
 		Layer15Tokens:   0,
 		NumGroups:       1,
 		ZipfAlpha:       0.6,
-		L2Mu:            math.Log(5000),  L2Sigma: 0,
-		GenMu:           math.Log(1024),  GenSigma: 0,
-		OutputMin:       30,
+		L2Mu:            math.Log(5000), L2Sigma: 0,
+		GenMu: math.Log(1024), GenSigma: 0,
+		OutputMin:            30,
 		ResetBaseProbability: 0.01,
 		ResetContextScaling:  1.5,
-		Seed:            42,
+		Seed:                 42,
 	}
 	s := newSessionSynthesizer(cfg)
 

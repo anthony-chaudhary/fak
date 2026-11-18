@@ -57,7 +57,7 @@ func TestModelOptRecipes(t *testing.T) {
 
 		// Packed layout: even K in the low nibble, one E4M3FN per 16 K.
 		for _, tc := range []struct {
-			rows, cols int
+			rows, cols              int
 			packed, scale, swizzled int
 		}{
 			{1, 16, 8, 1, 512},

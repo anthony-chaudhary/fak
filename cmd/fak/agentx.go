@@ -703,19 +703,19 @@ type synthTurn struct {
 // sessionSynthConfig is the base configuration a sessionSynthesizer re-seeds
 // from on reset.
 type sessionSynthConfig struct {
-	MaxPromptTokens int
-	BlockSize       int
-	Layer1Tokens    int
-	Layer15Tokens   int
-	NumGroups       int
-	ZipfAlpha       float64
-	L2Mu, L2Sigma   float64
-	L2Min, L2Max    float64
-	GenMu, GenSigma float64
-	OutputMin       int
+	MaxPromptTokens      int
+	BlockSize            int
+	Layer1Tokens         int
+	Layer15Tokens        int
+	NumGroups            int
+	ZipfAlpha            float64
+	L2Mu, L2Sigma        float64
+	L2Min, L2Max         float64
+	GenMu, GenSigma      float64
+	OutputMin            int
 	ResetBaseProbability float64
 	ResetContextScaling  float64
-	Seed            int64
+	Seed                 int64
 }
 
 // sessionSynthesizer mirrors the per-session state machine of aiperf's
@@ -725,20 +725,20 @@ type sessionSynthConfig struct {
 // and fresh L2+L3 allocated to the new session.
 type sessionSynthesizer struct {
 	// base config (the re-seed source)
-	maxPromptTokens int
-	blockSize       int
-	l1Blocks        int
-	l15Blocks       int
-	numGroups       int
-	zipfAlpha       float64
-	groupWeights    []float64
-	sessionRegionBase int
-	maxSessionBlocks  int
-	maxGroupBlocks    int
-	l2Mu, l2Sigma     float64
-	l2Min, l2Max      float64
-	genMu, genSigma   float64
-	outputMin         int
+	maxPromptTokens      int
+	blockSize            int
+	l1Blocks             int
+	l15Blocks            int
+	numGroups            int
+	zipfAlpha            float64
+	groupWeights         []float64
+	sessionRegionBase    int
+	maxSessionBlocks     int
+	maxGroupBlocks       int
+	l2Mu, l2Sigma        float64
+	l2Min, l2Max         float64
+	genMu, genSigma      float64
+	outputMin            int
 	resetBaseProbability float64
 	resetContextScaling  float64
 
@@ -775,23 +775,23 @@ func newSessionSynthesizer(cfg sessionSynthConfig) *sessionSynthesizer {
 		weights[i] /= sum
 	}
 	return &sessionSynthesizer{
-		maxPromptTokens: cfg.MaxPromptTokens,
-		blockSize:       cfg.BlockSize,
-		l1Blocks:        l1Blocks,
-		l15Blocks:       l15Blocks,
-		numGroups:       cfg.NumGroups,
-		zipfAlpha:       cfg.ZipfAlpha,
-		groupWeights:    weights,
-		sessionRegionBase: l1Blocks + agentxMaxGroups * agentxMaxGroupBlocks,
+		maxPromptTokens:   cfg.MaxPromptTokens,
+		blockSize:         cfg.BlockSize,
+		l1Blocks:          l1Blocks,
+		l15Blocks:         l15Blocks,
+		numGroups:         cfg.NumGroups,
+		zipfAlpha:         cfg.ZipfAlpha,
+		groupWeights:      weights,
+		sessionRegionBase: l1Blocks + agentxMaxGroups*agentxMaxGroupBlocks,
 		maxSessionBlocks:  agentxMaxSessionBlocks,
 		maxGroupBlocks:    agentxMaxGroupBlocks,
-		l2Mu: cfg.L2Mu, l2Sigma: cfg.L2Sigma,
+		l2Mu:              cfg.L2Mu, l2Sigma: cfg.L2Sigma,
 		l2Min: cfg.L2Min, l2Max: cfg.L2Max,
 		genMu: cfg.GenMu, genSigma: cfg.GenSigma,
-		outputMin: cfg.OutputMin,
+		outputMin:            cfg.OutputMin,
 		resetBaseProbability: cfg.ResetBaseProbability,
 		resetContextScaling:  cfg.ResetContextScaling,
-		rng: rand.New(rand.NewSource(cfg.Seed)),
+		rng:                  rand.New(rand.NewSource(cfg.Seed)),
 	}
 }
 

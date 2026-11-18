@@ -84,12 +84,12 @@ func TestNomosReview(t *testing.T) {
 
 	t.Run("verdict grammar rejects malformed strings", func(t *testing.T) {
 		bad := []string{
-			"ALLOW",            // missing separator
+			"ALLOW",              // missing separator
 			"ALLOW:BENIGN:EXTRA", // extra segment is tolerated by SplitN but reason "BENIGN:EXTRA" is unknown
-			"MAYBE:BENIGN",     // unknown verdict
-			"ALLOW:OVEREAGER",  // ALLOW cannot pair with OVEREAGER
-			"DENY:BENIGN",      // DENY cannot pair with BENIGN
-			"ALLOW:WHATEVER",   // unknown reason
+			"MAYBE:BENIGN",       // unknown verdict
+			"ALLOW:OVEREAGER",    // ALLOW cannot pair with OVEREAGER
+			"DENY:BENIGN",        // DENY cannot pair with BENIGN
+			"ALLOW:WHATEVER",     // unknown reason
 		}
 		for _, s := range bad {
 			if _, err := ParseVerdict(s); err == nil {

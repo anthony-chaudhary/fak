@@ -74,10 +74,10 @@ func APFArtifactDigest(doc APFDocument) (string, error) {
 // closed-vocabulary reason; an admitted decision carries the content digest and
 // the policy version the decision is bound to.
 type APFDecision struct {
-	Admitted         bool
-	Reason           abi.ReasonCode
-	ArtifactDigest   string
-	PolicyVersion    string
+	Admitted       bool
+	Reason         abi.ReasonCode
+	ArtifactDigest string
+	PolicyVersion  string
 }
 
 // APFWaiver is a gate waiver bound to a policy version: it overrides one
@@ -146,6 +146,7 @@ func (a *APFAdmission) AdmittedDigest() string {
 //  2. version binding — the document's version must equal the bound version
 //     (POLICY_BLOCK);
 //  3. content binding — the canonical digest is computed and recorded.
+//
 // A refused admission leaves the admitted state untouched.
 func (a *APFAdmission) Admit(art APFArtifact) APFDecision {
 	doc := art.Document

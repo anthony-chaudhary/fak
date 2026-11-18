@@ -61,6 +61,7 @@ type HarnessReceipt struct {
 	Duplicate []string   `json:"duplicate"`
 	Stale     []string   `json:"stale"`
 }
+
 // PluginReceipt is the parity verdict for one manifest-declared .opencode/plugins/** asset.
 type PluginReceipt struct {
 	Path   string `json:"path"`

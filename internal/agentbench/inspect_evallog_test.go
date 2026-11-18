@@ -14,19 +14,19 @@ func testRunResult() RunResult {
 		Suite: "default",
 		Tasks: []taskrunTaskReceipt{
 			{
-				ID:       "task-a",
-				Family:   "c2",
-				Passed:   true,
-				Accepted: true,
-				Model:    taskrunModelObservation{Requests: 4, UpstreamRequests: 4, SuccessfulRequests: 4, ModelIdentityStatus: "matched"},
+				ID:        "task-a",
+				Family:    "c2",
+				Passed:    true,
+				Accepted:  true,
+				Model:     taskrunModelObservation{Requests: 4, UpstreamRequests: 4, SuccessfulRequests: 4, ModelIdentityStatus: "matched"},
 				ToolCalls: taskrunToolCallMetrics{Measured: true, Total: 3, Invalid: 0, Validity: ptrFloat(1.0)},
 			},
 			{
-				ID:       "task-b",
-				Family:   "c2",
-				Passed:   false,
-				Accepted: true,
-				Model:    taskrunModelObservation{Requests: 2, UpstreamRequests: 2, SuccessfulRequests: 2, ModelIdentityStatus: "matched"},
+				ID:        "task-b",
+				Family:    "c2",
+				Passed:    false,
+				Accepted:  true,
+				Model:     taskrunModelObservation{Requests: 2, UpstreamRequests: 2, SuccessfulRequests: 2, ModelIdentityStatus: "matched"},
 				ToolCalls: taskrunToolCallMetrics{Measured: true, Total: 1, Invalid: 1, Validity: ptrFloat(0.0)},
 			},
 		},
@@ -204,11 +204,11 @@ func TestInspectEvalLog(t *testing.T) {
 
 	t.Run("fail closed on unknown shape", func(t *testing.T) {
 		cases := map[string]func(RunResult) RunResult{
-			"empty arm":        func(r RunResult) RunResult { r.Arm = ""; return r },
-			"empty model":      func(r RunResult) RunResult { r.Model = ""; return r },
-			"no tasks":         func(r RunResult) RunResult { r.Tasks = nil; return r },
-			"empty task id":    func(r RunResult) RunResult { r.Tasks[0].ID = ""; return r },
-			"no observation":   func(r RunResult) RunResult { r.Tasks[0].Model.Requests = 0; return r },
+			"empty arm":         func(r RunResult) RunResult { r.Arm = ""; return r },
+			"empty model":       func(r RunResult) RunResult { r.Model = ""; return r },
+			"no tasks":          func(r RunResult) RunResult { r.Tasks = nil; return r },
+			"empty task id":     func(r RunResult) RunResult { r.Tasks[0].ID = ""; return r },
+			"no observation":    func(r RunResult) RunResult { r.Tasks[0].Model.Requests = 0; return r },
 			"inconsistent reqs": func(r RunResult) RunResult { r.Tasks[0].Model.UpstreamRequests = 99; return r },
 			"unknown identity":  func(r RunResult) RunResult { r.Tasks[0].Model.ModelIdentityStatus = "weird"; return r },
 		}
@@ -230,8 +230,8 @@ func TestInspectEvalLog(t *testing.T) {
 
 	t.Run("comparison projection", func(t *testing.T) {
 		receipt := compareDirectoryReceipt{
-			Schema:   "fak.agentbench.comparison.v1",
-			Status:   "COMPARABLE",
+			Schema:    "fak.agentbench.comparison.v1",
+			Status:    "COMPARABLE",
 			Candidate: comparisonArmArtifact{ArmID: "candidate", ModelID: "fixture-model"},
 			Comparison: ComparisonResult{
 				Metrics: map[string]PairedMetric{

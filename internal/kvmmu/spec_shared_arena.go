@@ -352,6 +352,7 @@ func (a *SharedArena) takeSnapshot() snapshot {
 //     union is the whole page table (one allocation, no page lost or doubled);
 //   - no page is owned by two steps;
 //   - every kept page is within the page table.
+//
 // A non-nil result names the first violated invariant so a test can assert the
 // oracle actually saw the corruption, not just that it ran.
 func (a *SharedArena) Verify() []string {

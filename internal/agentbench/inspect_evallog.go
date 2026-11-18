@@ -109,22 +109,22 @@ type InspectEvalLog struct {
 // InspectEvalSpec mirrors the pinned Inspect EvalSpec shape (the subset
 // the projection fills).
 type InspectEvalSpec struct {
-	EvalID       string                 `json:"eval_id,omitempty"`
-	RunID        string                 `json:"run_id,omitempty"`
-	Created      string                 `json:"created"`
-	Task         string                 `json:"task"`
-	TaskID       string                 `json:"task_id,omitempty"`
-	TaskVersion  int                    `json:"task_version,omitempty"`
-	Dataset      InspectEvalDataset     `json:"dataset"`
-	Model        string                 `json:"model"`
-	Config       InspectEvalConfig      `json:"config"`
-	ModelArgs    map[string]any         `json:"model_args,omitempty"`
+	EvalID      string             `json:"eval_id,omitempty"`
+	RunID       string             `json:"run_id,omitempty"`
+	Created     string             `json:"created"`
+	Task        string             `json:"task"`
+	TaskID      string             `json:"task_id,omitempty"`
+	TaskVersion int                `json:"task_version,omitempty"`
+	Dataset     InspectEvalDataset `json:"dataset"`
+	Model       string             `json:"model"`
+	Config      InspectEvalConfig  `json:"config"`
+	ModelArgs   map[string]any     `json:"model_args,omitempty"`
 }
 
 // InspectEvalDataset mirrors the pinned Inspect EvalDataset shape.
 type InspectEvalDataset struct {
-	Name     string `json:"name,omitempty"`
-	Samples  int    `json:"samples,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Samples int    `json:"samples,omitempty"`
 }
 
 // InspectEvalConfig mirrors the pinned Inspect EvalConfig shape (the
@@ -146,45 +146,45 @@ type InspectEvalPlanStep struct {
 
 // InspectEvalResults mirrors the pinned Inspect EvalResults shape.
 type InspectEvalResults struct {
-	TotalSamples    int                `json:"total_samples"`
-	CompletedSamples int               `json:"completed_samples"`
-	Scores          []InspectEvalScore `json:"scores"`
+	TotalSamples     int                `json:"total_samples"`
+	CompletedSamples int                `json:"completed_samples"`
+	Scores           []InspectEvalScore `json:"scores"`
 }
 
 // InspectEvalScore mirrors the pinned Inspect EvalScore shape.
 type InspectEvalScore struct {
-	Name          string                    `json:"name"`
-	Scorer        string                    `json:"scorer"`
-	ScoredSamples int                       `json:"scored_samples"`
+	Name          string                       `json:"name"`
+	Scorer        string                       `json:"scorer"`
+	ScoredSamples int                          `json:"scored_samples"`
 	Metrics       map[string]InspectEvalMetric `json:"metrics"`
 }
 
 // InspectEvalMetric mirrors the pinned Inspect EvalMetric shape.
 type InspectEvalMetric struct {
-	Name  string `json:"name"`
+	Name  string  `json:"name"`
 	Value float64 `json:"value"`
 }
 
 // InspectEvalStats mirrors the pinned Inspect EvalStats shape.
 type InspectEvalStats struct {
-	StartedAt   string                    `json:"started_at"`
-	CompletedAt string                    `json:"completed_at"`
+	StartedAt   string                       `json:"started_at"`
+	CompletedAt string                       `json:"completed_at"`
 	ModelUsage  map[string]InspectModelUsage `json:"model_usage"`
 }
 
 // InspectEvalSample mirrors the pinned Inspect EvalSample shape (the
 // subset the projection fills).
 type InspectEvalSample struct {
-	ID          string                    `json:"id"`
-	Epoch       int                       `json:"epoch"`
-	Input       string                    `json:"input"`
-	Target      string                    `json:"target"`
-	Messages    []InspectChatMessage      `json:"messages"`
-	Output      InspectModelOutput        `json:"output"`
-	Scores      map[string]InspectScore   `json:"scores"`
-	Events      []any                     `json:"events"`
-	StartedAt   string                    `json:"started_at"`
-	CompletedAt string                    `json:"completed_at"`
+	ID          string                  `json:"id"`
+	Epoch       int                     `json:"epoch"`
+	Input       string                  `json:"input"`
+	Target      string                  `json:"target"`
+	Messages    []InspectChatMessage    `json:"messages"`
+	Output      InspectModelOutput      `json:"output"`
+	Scores      map[string]InspectScore `json:"scores"`
+	Events      []any                   `json:"events"`
+	StartedAt   string                  `json:"started_at"`
+	CompletedAt string                  `json:"completed_at"`
 }
 
 // InspectChatMessage mirrors the pinned Inspect ChatMessageAssistant
@@ -198,9 +198,9 @@ type InspectChatMessage struct {
 // InspectModelOutput mirrors the pinned Inspect ModelOutput shape (the
 // subset the projection fills).
 type InspectModelOutput struct {
-	Model   string                  `json:"model"`
-	Choices []InspectChoice         `json:"choices"`
-	Usage   *InspectModelUsage      `json:"usage,omitempty"`
+	Model   string             `json:"model"`
+	Choices []InspectChoice    `json:"choices"`
+	Usage   *InspectModelUsage `json:"usage,omitempty"`
 }
 
 // InspectChoice mirrors the pinned Inspect ChatCompletionChoice shape.
@@ -226,25 +226,25 @@ type InspectScore struct {
 // InspectModelEvent mirrors the pinned Inspect ModelEvent shape (the
 // subset the projection fills). The "event" discriminator is "model".
 type InspectModelEvent struct {
-	Event    string               `json:"event"`
-	UUID     string               `json:"uuid"`
-	Timestamp string              `json:"timestamp"`
-	Model    string               `json:"model"`
-	Input    []InspectChatMessage `json:"input"`
-	Tools    []any                `json:"tools"`
-	ToolChoice string              `json:"tool_choice"`
-	Output   InspectModelOutput   `json:"output"`
+	Event      string               `json:"event"`
+	UUID       string               `json:"uuid"`
+	Timestamp  string               `json:"timestamp"`
+	Model      string               `json:"model"`
+	Input      []InspectChatMessage `json:"input"`
+	Tools      []any                `json:"tools"`
+	ToolChoice string               `json:"tool_choice"`
+	Output     InspectModelOutput   `json:"output"`
 }
 
 // InspectScoreEvent mirrors the pinned Inspect ScoreEvent shape (the
 // subset the projection fills). The "event" discriminator is "score".
 type InspectScoreEvent struct {
-	Event     string        `json:"event"`
-	UUID      string        `json:"uuid"`
-	Timestamp string        `json:"timestamp"`
-	Score     InspectScore  `json:"score"`
-	Target    string        `json:"target"`
-	Scorer    string        `json:"scorer"`
+	Event     string       `json:"event"`
+	UUID      string       `json:"uuid"`
+	Timestamp string       `json:"timestamp"`
+	Score     InspectScore `json:"score"`
+	Target    string       `json:"target"`
+	Scorer    string       `json:"scorer"`
 }
 
 // errInspectEvalLogRefused is the fail-closed refusal for unknown
@@ -407,8 +407,8 @@ func ExportInspectEvalLog(r RunResult) (InspectEvalLog, error) {
 	}
 
 	log := InspectEvalLog{
-		Version:  inspectEvalLogVersion,
-		Status:   "success",
+		Version: inspectEvalLogVersion,
+		Status:  "success",
 		Eval: InspectEvalSpec{
 			Created: inspectEvalLogTimestamp,
 			Task:    inspectTaskName,
@@ -474,9 +474,9 @@ func InspectEvalLogFromComparison(receipt compareDirectoryReceipt) (InspectEvalL
 	for i, key := range metricKeys {
 		metric := receipt.Comparison.Metrics[key]
 		tasks = append(tasks, taskrunTaskReceipt{
-			ID:     fmt.Sprintf("metric-%d-%s", i+1, key),
-			Family: "paired-metric",
-			Passed: metric.BootstrapHighMillis >= 0 && metric.BootstrapLowMillis <= 0,
+			ID:       fmt.Sprintf("metric-%d-%s", i+1, key),
+			Family:   "paired-metric",
+			Passed:   metric.BootstrapHighMillis >= 0 && metric.BootstrapLowMillis <= 0,
 			Accepted: true,
 			Model: taskrunModelObservation{
 				Requests:            metric.Pairs,

@@ -156,9 +156,9 @@ type W4A16DecoderTemplate struct {
 // CutlassStudy is the assembled template-study model: the pinned upstream
 // commit plus every template shape a native CUDA port would adapt.
 type CutlassStudy struct {
-	Repo      string
-	Pin       string
-	License   string
+	Repo       string
+	Pin        string
+	License    string
 	Schedulers []TileSchedulerPin
 	Mainloops  []CollectiveMainloopPin
 	NVFP4      NVFP4TensorCoreTemplate

@@ -101,9 +101,9 @@ func TestNVBandwidthPlans(t *testing.T) {
 			t.Fatalf("Stats = %+v, want sum %v max 480.5 min 55.5 avg %v", stats, wantSum, wantSum/4)
 		}
 		for _, tc := range []struct {
-			name string
+			name     string
 			src, dst int
-			bw   float64
+			bw       float64
 		}{
 			{"src_out_of_range", 3, 0, 1},
 			{"dst_out_of_range", 0, 3, 1},

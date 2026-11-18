@@ -97,12 +97,12 @@ type MPKPartition struct {
 // one task: its identity, kind, operator, assigned SM, and the tensor
 // references it reads and writes.
 type MPKTaskDescriptor struct {
-	TaskID     string        `json:"task_id"`
-	Kind       MPKTaskKind   `json:"kind"`
-	Op         string        `json:"op"`
-	SM         int           `json:"sm"`
-	InTensors  []string      `json:"in_tensors"`
-	OutTensors []string      `json:"out_tensors"`
+	TaskID     string      `json:"task_id"`
+	Kind       MPKTaskKind `json:"kind"`
+	Op         string      `json:"op"`
+	SM         int         `json:"sm"`
+	InTensors  []string    `json:"in_tensors"`
+	OutTensors []string    `json:"out_tensors"`
 }
 
 // MPKOracleReceipt is the closed host-oracle verdict for a partitioned graph.

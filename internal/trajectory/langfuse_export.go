@@ -68,16 +68,16 @@ type LangfuseExportRecord struct {
 	SessionID       string `json:"sessionId,omitempty"`
 	ObservationType string // observation type only ("agent"/"tool"/"generation"); not serialized
 	Name            string `json:"name,omitempty"`
-	Timestamp        string `json:"timestamp,omitempty"`
-	Level            string `json:"level,omitempty"`
-	StatusMessage    string `json:"statusMessage,omitempty"`
-	Model            string `json:"model,omitempty"`
-	ModelParameters  any    `json:"modelParameters,omitempty"`
-	Usage            any    `json:"usage,omitempty"`
-	Input            any    `json:"input,omitempty"`
-	Output           any    `json:"output,omitempty"`
-	Metadata         any    `json:"metadata,omitempty"`
-	CompletionStart  string `json:"completionStartTime,omitempty"`
+	Timestamp       string `json:"timestamp,omitempty"`
+	Level           string `json:"level,omitempty"`
+	StatusMessage   string `json:"statusMessage,omitempty"`
+	Model           string `json:"model,omitempty"`
+	ModelParameters any    `json:"modelParameters,omitempty"`
+	Usage           any    `json:"usage,omitempty"`
+	Input           any    `json:"input,omitempty"`
+	Output          any    `json:"output,omitempty"`
+	Metadata        any    `json:"metadata,omitempty"`
+	CompletionStart string `json:"completionStartTime,omitempty"`
 
 	// Score payload. ScoreName is the score's display name; it serializes under
 	// the same "name" key as Name (scores have no other name), so MarshalJSON
@@ -297,7 +297,7 @@ func langfuseSessionRecords(row AuditTranscriptRow) []LangfuseExportRecord {
 		Timestamp:       langfuseExportTimestamp,
 		Level:           "DEFAULT",
 		Metadata: map[string]any{
-			"tool_calls": row.ToolCalls,
+			"tool_calls":  row.ToolCalls,
 			"tool_errors": row.ToolErrors,
 		},
 	})
@@ -406,15 +406,15 @@ func langfuseReceiptRecord(receipt LangfuseExportReceipt) LangfuseExportRecord {
 	return LangfuseExportRecord{
 		Type: "langfuse_export_receipt",
 		Metadata: map[string]any{
-			"schema":           receipt.Schema,
-			"kind":             receipt.Kind,
-			"input_records":    receipt.InputRecords,
-			"sessions":         receipt.Sessions,
-			"traces":           receipt.Traces,
-			"observations":     receipt.Observations,
-			"scores":           receipt.Scores,
-			"refused_records":  receipt.RefusedRecords,
-			"source_digest":    receipt.SourceDigest,
+			"schema":          receipt.Schema,
+			"kind":            receipt.Kind,
+			"input_records":   receipt.InputRecords,
+			"sessions":        receipt.Sessions,
+			"traces":          receipt.Traces,
+			"observations":    receipt.Observations,
+			"scores":          receipt.Scores,
+			"refused_records": receipt.RefusedRecords,
+			"source_digest":   receipt.SourceDigest,
 		},
 	}
 }

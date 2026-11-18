@@ -254,6 +254,7 @@ var healthBounds = map[FieldID]fieldBounds{
 	FieldMemoryTemp:                   {warn: 95, critical: 105},
 	FieldPowerDraw:                    {warn: 0, critical: 0}, // power has no health bound; never trips
 }
+
 // HealthVerdictOf folds a set of device records into one verdict: the worst
 // bound any read value tripped. An empty set is VerdictUnknown, so a caller
 // that read nothing (service absent) can never report healthy.
