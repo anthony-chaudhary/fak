@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" role="img" aria-labelledby="t2 d2">
+<title id="t2">The driver stack: from a Go function call to a voltage on the GPU</title>
+<desc id="d2">Eight stacked layers show the path from Go source through cgo, a flat C ABI, a static library built offline by nvcc, the CUDA runtime, the CUDA driver, and the kernel-mode driver, down to the GPU executing SASS. A bracket marks where the user-space to kernel-space boundary is crossed.</desc>
+<defs>
+<linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#121a32"/></linearGradient>
+</defs>
+<rect width="980" height="600" rx="24" fill="url(#bg2)"/>
+<g font-family="Inter,Segoe UI,sans-serif">
+<text x="48" y="56" fill="#67e8f9" font-size="13" font-weight="700" letter-spacing="3">SIX LAYERS BETWEEN YOUR CODE AND THE CHIP</text>
+<text x="48" y="98" fill="#f8fafc" font-size="30" font-weight="750">The driver stack</text>
+<text x="48" y="128" fill="#94a3b8" font-size="15">Each layer only knows the one below it. Only the last one reads an instruction.</text>
+
+<rect x="60" y="152" width="560" height="40" rx="10" fill="#0d1b30" stroke="#22d3ee" stroke-width="1.6"/>
+<text x="80" y="177" fill="#f8fafc" font-size="15" font-weight="650">your Go code</text>
+<text x="600" y="177" fill="#64748b" font-family="Consolas,monospace" font-size="12" text-anchor="end">internal/model/quant.go</text>
+
+<rect x="60" y="199" width="560" height="40" rx="10" fill="#0d1b30" stroke="#22d3ee" stroke-width="1.6"/>
+<text x="80" y="224" fill="#f8fafc" font-size="15" font-weight="650">cgo boundary</text>
+<text x="600" y="224" fill="#64748b" font-family="Consolas,monospace" font-size="12" text-anchor="end">internal/compute/cuda.go</text>
+
+<rect x="60" y="246" width="560" height="40" rx="10" fill="#0d1b30" stroke="#38bdf8" stroke-width="1.6"/>
+<text x="80" y="271" fill="#f8fafc" font-size="15" font-weight="650">flat C ABI</text>
+<text x="600" y="271" fill="#64748b" font-family="Consolas,monospace" font-size="12" text-anchor="end">cuda_backend.h</text>
+
+<rect x="60" y="293" width="560" height="40" rx="10" fill="#0d1b30" stroke="#38bdf8" stroke-width="1.6"/>
+<text x="80" y="318" fill="#f8fafc" font-size="15" font-weight="650">static library</text>
+<text x="600" y="318" fill="#64748b" font-family="Consolas,monospace" font-size="12" text-anchor="end">libfakcuda.a · built offline by nvcc</text>
+
+<rect x="60" y="340" width="560" height="40" rx="10" fill="#0d1b30" stroke="#5b9dff" stroke-width="1.6"/>
+<text x="80" y="365" fill="#f8fafc" font-size="15" font-weight="650">CUDA runtime</text>
+<text x="600" y="365" fill="#64748b" font-family="Consolas,monospace" font-size="12" text-anchor="end">libcudart</text>
+
+<rect x="60" y="387" width="560" height="40" rx="10" fill="#0d1b30" stroke="#5b9dff" stroke-width="1.6"/>
+<text x="80" y="412" fill="#f8fafc" font-size="15" font-weight="650">CUDA driver</text>
+<text x="600" y="412" fill="#64748b" font-family="Consolas,monospace" font-size="12" text-anchor="end">libcuda · JIT-compiles PTX</text>
+
+<rect x="60" y="434" width="560" height="40" rx="10" fill="#1a1030" stroke="#a78bfa" stroke-width="1.6"/>
+<text x="80" y="459" fill="#f8fafc" font-size="15" font-weight="650">kernel-mode driver</text>
+<text x="600" y="459" fill="#64748b" font-family="Consolas,monospace" font-size="12" text-anchor="end">nvidia.ko · writes the doorbell</text>
+
+<rect x="60" y="481" width="560" height="40" rx="10" fill="#1a1030" stroke="#a78bfa" stroke-width="1.6"/>
+<text x="80" y="506" fill="#f8fafc" font-size="15" font-weight="650">the GPU</text>
+<text x="600" y="506" fill="#64748b" font-family="Consolas,monospace" font-size="12" text-anchor="end">SASS executes</text>
+
+<path d="M340 192v7M340 239v7M340 286v7M340 333v7M340 380v7M340 427v7M340 474v7" stroke="#475569" stroke-width="2" stroke-linecap="round"/>
+<path d="M336 199l4 5 4-5M336 246l4 5 4-5M336 293l4 5 4-5M336 340l4 5 4-5M336 387l4 5 4-5M336 434l4 5 4-5M336 481l4 5 4-5" fill="none" stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+<path d="M648 152h14v275h-14" fill="none" stroke="#22d3ee" stroke-width="1.6"/>
+<text x="676" y="290" fill="#67e8f9" font-size="13" font-weight="650">user space</text>
+<path d="M648 434h14v87h-14" fill="none" stroke="#a78bfa" stroke-width="1.6"/>
+<text x="676" y="482" fill="#c4b5fd" font-size="13" font-weight="650">kernel space</text>
+
+<text x="48" y="566" fill="#64748b" font-size="13">The instruction set is the last thing in a long chain. Everything above it exists to deliver instructions.</text>
+<text x="932" y="566" fill="#475569" font-size="13" text-anchor="end">fak · hardware instruction-set ladder</text>
+</g>
+</svg>

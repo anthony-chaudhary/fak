@@ -197,6 +197,48 @@ opposed to `decode`, which emits one token at a time. It lives only in `internal
   context (allow / quarantine / transform). These are the project's "two gates": the
   capability floor (pre-call) and the result quarantine (post-result).
 
+## Instruction-set vocabulary (the layer below the kernel)
+
+The compute kernels above are written in a vocabulary the chip defines, not one Go
+defines. These are the terms that vocabulary uses, and the ladder that teaches them is
+[the hardware instruction-set ladder](explainers/hardware-isa/README.md).
+
+- **instruction** — the smallest operation a processor can perform, fixed at
+  manufacturing time. Not a function call and not a statement: the smallest unit of work
+  the wiring supports.
+- **instruction set / ISA** — the complete list of instructions one processor supports,
+  plus the rules for encoding each one. A *contract*, not a description: it says what the
+  chip does, never how fast. Two chips can implement the same ISA and be entirely
+  different silicon.
+- **assembly language** — instructions written as text, one per line (`VPMADDWD Y1, Y0,
+  Y0`). **machine code** is the same instructions as the bit patterns the decode circuit
+  reads (`01 D8`). An **assembler** converts one to the other.
+- **SIMD** — single instruction, multiple data. Packing many small numbers into one wide
+  register so one instruction operates on all of them. `xmm` is 128 bits, `ymm` 256, `zmm`
+  512; ARM's NEON registers are 128 bits. This is the single biggest lever in quantized
+  inference — see [Rung 2](explainers/hardware-isa/level-2-simd-one-instruction-many-numbers.md).
+- **AVX2 / AVX-512** — the x86-64 SIMD extensions fak's `internal/model/quant_amd64.s`
+  uses. AVX2 handles a 32-wide Q8_0 block in two 16-wide halves; AVX-512BW does it in one
+  `zmm`, halving the multiply-accumulate instruction count.
+- **NEON / `SDOT`** — the ARM64 SIMD extension, in `internal/model/quant_arm64.s`. `SDOT`
+  does a 16-element int8 dot product in one instruction, where x86 needs `VPMOVSXBW` plus
+  `VPMADDWD`. The Go arm64 assembler has no `SDOT` mnemonic, so fak emits the raw encoding
+  `WORD $0x4e829404` and pins it with a test.
+- **PTX / SASS** — a GPU's *two* instruction sets. PTX is virtual and forward-compatible;
+  SASS is real machine code for one exact chip (`sm_89`, `sm_120`). See
+  [Rung 3](explainers/hardware-isa/level-3-the-gpu-isa-ptx-sass-and-tensor-cores.md).
+- **tensor core / `mma.sync`** — a GPU unit that performs a whole small matrix multiply in
+  one instruction. `mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32` computes a 16×8
+  output tile from a 16×16 and a 16×8 input: 2,048 multiply-adds per instruction.
+- **SPIR-V** — the portable intermediate a Vulkan shader compiles to (`glslc -O
+  --target-env=vulkan1.2 -fshader-stage=comp`). The *driver on the user's machine* then
+  compiles it to the real instruction set at run time. See
+  [Rung 4](explainers/hardware-isa/level-4-how-the-isa-reaches-silicon.md).
+- **bit-identical** — fak's requirement that a SIMD kernel produce exactly the same bits
+  as its scalar reference, not merely a close result. It forces the kernel to match the
+  scalar's floating-point operation order, including whether the compiler fused a
+  multiply-add. `TestQdot8AsmMatchesScalar` and `TestQdot8NEONMatchesScalar` pin it.
+
 ## The vCache streaming economy: what `fak manage` prints per turn
 
 When you run `fak manage -- claude --debug-stats`, the gateway streams **one line per

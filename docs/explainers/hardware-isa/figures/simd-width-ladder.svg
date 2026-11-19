@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600" role="img" aria-labelledby="t1 d1">
+<title id="t1">The SIMD width ladder: how many numbers one instruction handles</title>
+<desc id="d1">Six rows compare how many multiply-adds a single instruction performs, from one for the scalar reference kernel up to 2048 for a tensor-core mma.sync instruction. Bar length is on a logarithmic scale.</desc>
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#121a32"/></linearGradient>
+<linearGradient id="bar" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#22d3ee"/><stop offset="0.55" stop-color="#38bdf8"/><stop offset="1" stop-color="#5b9dff"/></linearGradient>
+</defs>
+<rect width="980" height="600" rx="24" fill="url(#bg)"/>
+<g font-family="Inter,Segoe UI,sans-serif">
+<text x="48" y="56" fill="#67e8f9" font-size="13" font-weight="700" letter-spacing="3">ONE INSTRUCTION, HOW MANY NUMBERS</text>
+<text x="48" y="98" fill="#f8fafc" font-size="30" font-weight="750">The SIMD width ladder</text>
+<text x="48" y="128" fill="#94a3b8" font-size="15">Bar length is logarithmic. The chip does not get faster. It does more per step.</text>
+
+<text x="48" y="186" fill="#e2e8f0" font-size="15" font-weight="600">scalar reference</text>
+<text x="48" y="204" fill="#64748b" font-family="Consolas,monospace" font-size="12">qdot8scalar</text>
+<rect x="290" y="174" width="24" height="26" rx="6" fill="url(#bar)"/>
+<text x="940" y="193" fill="#67e8f9" font-size="15" font-weight="700" text-anchor="end">1</text>
+
+<text x="48" y="248" fill="#e2e8f0" font-size="15" font-weight="600">SSE · xmm 128-bit</text>
+<text x="48" y="266" fill="#64748b" font-family="Consolas,monospace" font-size="12">4 int32 lanes</text>
+<rect x="290" y="236" width="128" height="26" rx="6" fill="url(#bar)"/>
+<text x="940" y="255" fill="#67e8f9" font-size="15" font-weight="700" text-anchor="end">4</text>
+
+<text x="48" y="310" fill="#e2e8f0" font-size="15" font-weight="600">AVX2 · ymm 256-bit</text>
+<text x="48" y="328" fill="#64748b" font-family="Consolas,monospace" font-size="12">VPMADDWD · 8 int32 / 16 int8</text>
+<rect x="290" y="298" width="180" height="26" rx="6" fill="url(#bar)"/>
+<text x="940" y="317" fill="#67e8f9" font-size="15" font-weight="700" text-anchor="end">8</text>
+
+<text x="48" y="372" fill="#e2e8f0" font-size="15" font-weight="600">AVX-512 · zmm 512-bit</text>
+<text x="48" y="390" fill="#64748b" font-family="Consolas,monospace" font-size="12">VPMADDWD · 16 int32 / 32 int8</text>
+<rect x="290" y="360" width="232" height="26" rx="6" fill="url(#bar)"/>
+<text x="940" y="379" fill="#67e8f9" font-size="15" font-weight="700" text-anchor="end">16</text>
+
+<text x="48" y="434" fill="#e2e8f0" font-size="15" font-weight="600">NEON · SDOT</text>
+<text x="48" y="452" fill="#64748b" font-family="Consolas,monospace" font-size="12">4 int32 from 16 int8, one instruction</text>
+<rect x="290" y="422" width="128" height="26" rx="6" fill="url(#bar)"/>
+<text x="940" y="441" fill="#67e8f9" font-size="15" font-weight="700" text-anchor="end">4</text>
+
+<text x="48" y="496" fill="#f8fafc" font-size="15" font-weight="700">tensor core · mma.sync</text>
+<text x="48" y="514" fill="#64748b" font-family="Consolas,monospace" font-size="12">m16n8k16 · one warp, one instruction</text>
+<rect x="290" y="484" width="596" height="26" rx="6" fill="url(#bar)"/>
+<text x="940" y="503" fill="#f8fafc" font-size="15" font-weight="750" text-anchor="end">2048</text>
+
+<text x="48" y="566" fill="#64748b" font-size="13">The same arithmetic, four instruction sets, one order of magnitude apart at every rung.</text>
+<text x="932" y="566" fill="#475569" font-size="13" text-anchor="end">fak · hardware instruction-set ladder</text>
+</g>
+</svg>
