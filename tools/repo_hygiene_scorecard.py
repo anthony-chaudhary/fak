@@ -860,7 +860,7 @@ def _git_lines(args: list[str], root: Path) -> list[str]:
 def _safe_read(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return ""
 
 
