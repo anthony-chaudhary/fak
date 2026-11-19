@@ -335,5 +335,57 @@
       "Color: source kernel-blue, context-economics mem-violet (a memory/KV story), coverage/provenance cheap-slate (bookkeeping), the trend note-grey. Three subgraphs group the facts by theme.",
       "Renders cleanly under mermaid-cli 11.15.0; PNG visually inspected at 2x."
     ]
+  },
+  {
+    "id": "86-buffer-hierarchy-ladder",
+    "title": "The memory hierarchy, one ladder",
+    "caption": "The six tiers a byte can live in while a model runs, ordered by distance from the arithmetic: registers (bytes per thread, the multiply itself), SRAM / shared memory (tens of KB per block, declared by the kernel author), L1 / L2 cache (megabytes, hardware-managed), HBM / VRAM (tens of GB, the weights in use), host DRAM (hundreds of GB, offload and staging), and NVMe / disk (terabytes, the model at rest). Each step down is bigger and orders of magnitude slower, so the craft is not making the arithmetic faster but arranging for the bytes needed next to already be one step closer. Consumed by docs/explainers/memory-hierarchy/README.md and level-1-what-is-a-buffer.md.",
+    "altText": "A vertical ladder of six memory tiers from registers at the top to NVMe at the bottom, each labelled with its rough capacity and owner, with a dashed arrow down the side noting that each step down is bigger and orders of magnitude slower, and a note that the craft is arranging for the next bytes to be one step closer.",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Tier capacities are stated as orders of magnitude (bytes / tens of KB / megabytes / tens of GB / hundreds of GB / terabytes), not as measured values for any specific part; the figure teaches the ratio, not a spec sheet.",
+      "Color: the two on-die tiers (registers, SRAM) use the kernel-blue vocabulary, the four off-die tiers use the memory-violet vocabulary, and the closing note uses the world-tan vocabulary, matching docs/engine-visuals.md.",
+      "Renders cleanly under mermaid-cli 11.15.0 at 2x on a white background; PNG visually inspected."
+    ]
+  },
+  {
+    "id": "87-sram-tile-lifecycle",
+    "title": "One weight tile's life inside a thread block",
+    "caption": "How a kernel turns a large off-die weight tile into many cheap on-die re-reads. The tile, the activation chunk, and the per-group scales are cooperatively loaded from global memory (HBM / VRAM) into __shared__ arrays once per block, and the threads then re-read them from SRAM many times into their own register accumulators. The +1 word of padding on the shared row stride is load-bearing rather than decorative: it makes row-per-thread reads conflict-free so the SRAM can serve every lane at once. Consumed by docs/explainers/memory-hierarchy/level-3-sram-and-the-kernels-own-scratch.md.",
+    "altText": "A left-to-right flowchart with three groups: global memory holding the weight tile, one thread block holding three shared-memory arrays (weights, activation chunk, scales), and threads holding register accumulators. Cooperative-load arrows go from global memory into shared memory, and cheap re-read arrows go from shared memory into the accumulators, with a note explaining the conflict-free padding.",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "The figure names the shared arrays generically (sW / sX / sS) rather than pinning one kernel; the concrete declarations and their exact sizes are cited in the consuming page as internal/compute/routed_expert_gemv.cu:109-111.",
+      "Color: shared memory and global memory both use the memory-violet vocabulary (they are both storage), the accumulators use kernel-blue (they are the arithmetic), and the padding note uses world-tan.",
+      "Renders cleanly under mermaid-cli 11.15.0 at 2x on a white background; PNG visually inspected."
+    ]
+  },
+  {
+    "id": "88-roofline-ridge-point",
+    "title": "The roofline ridge point, and why decode is bandwidth-bound",
+    "caption": "The roofline decision in one picture. Arithmetic intensity I is useful operations divided by bytes moved, in op/byte; the ridge point is the compute roof divided by measured bandwidth, in the same units. An operation whose intensity sits above the ridge is compute-bound (more bandwidth would not help); one below it is bandwidth-bound (more FLOPs would not help). Prefill reuses each weight byte across many tokens at once, so its intensity is high and it lands on the compute side; decode uses each weight byte once per token, so its intensity is low and it lands on the bandwidth side. That leaves exactly two decode levers: move fewer bytes, or move them from closer. Consumed by docs/explainers/memory-hierarchy/level-4-hbm-vram-and-the-roofline.md.",
+    "altText": "A top-down flowchart defining arithmetic intensity and the ridge point, branching on whether intensity is above or below the ridge into a green compute-bound box and a red bandwidth-bound box, with prefill feeding the compute side and decode feeding the bandwidth side, and a closing note naming the two decode levers.",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "No numeric roof or bandwidth value is drawn: the figure is deliberately unit-free because the ridge point is hardware-specific and the consuming page insists on a MEASURED bandwidth rather than a marketing peak.",
+      "Color: the two definitions use the note-slate vocabulary, compute-bound uses pass-green, bandwidth-bound uses refuse-red, prefill/decode use kernel-blue, and the levers note uses world-tan.",
+      "Renders cleanly under mermaid-cli 11.15.0 at 2x on a white background; PNG visually inspected."
+    ]
+  },
+  {
+    "id": "89-offload-tier-ladder",
+    "title": "When the model does not fit: residency, not a capacity wall",
+    "caption": "The offload story in one picture. A model that does not fit on the device is a residency problem rather than a capacity wall: the question becomes which bytes must be resident right now and which can live somewhere colder. The tiers run from device-resident (the hot set: current layer weights and live KV), to host DRAM (the rest of the weights, paged in on demand), to a host-DRAM staging ring that coalesces dirty pages before write-back, to NVMe as the cold store bounded by SSD endurance rather than speed. Two annotations carry the load: the activated-expert insight (a frontier mixture-of-experts checkpoint activates a small fraction of its experts per token, so STORED bytes minus ACTIVATED bytes is the opportunity) and the warning that a memoizer is not a cache, because with no budget, no victim and no accounting, residency grows monotonically until the machine runs out. Consumed by docs/explainers/memory-hierarchy/level-5-host-dram-offload-and-the-frontier.md.",
+    "altText": "A top-down flowchart starting from the question of whether a model that does not fit is a dead end, answering that it is a residency problem, then descending through four tiers from device-resident to NVMe, with two side annotations: the activated-expert insight about stored versus activated bytes, and the warning that a memoizer is not a cache.",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "The tier ladder is drawn as a conceptual ordering, not as a claim about which tiers are shipped: the consuming page's 'What is still open' section names the default-off expert ring, the nil resident-span provider, and the operator-owned SSD sink explicitly.",
+      "Color: the opening question uses note-slate, the residency answer uses world-tan, the four tiers use memory-violet, and the two annotations use kernel-blue.",
+      "Renders cleanly under mermaid-cli 11.15.0 at 2x on a white background; PNG visually inspected."
+    ]
   }
 ]

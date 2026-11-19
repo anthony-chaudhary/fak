@@ -17,6 +17,7 @@ FAK coordinates the whole agent path, not isolated components. Start with the [c
 |---|---|---|
 | Evaluating fak | [Reproducibility packet](repro-packet.md) | Identify the product, run the offline proof, then inspect its evidence. |
 | Learning the whole system | [8-module flagship course](courses/end-to-end-inference-agent-harness-memory.md) | Follow one request across native inference, the agent harness, policy, context, memory, observability, and proof; use the [99-course learning path](../LEARNING-PATH.md) for prerequisite ordering and deeper study. |
+| Learning how inference uses memory, from the ground up | [The memory-hierarchy ladder](explainers/memory-hierarchy/README.md) | Start at Level 1 (what is a buffer?) with no math, then climb through SRAM, HBM/VRAM, and host DRAM to the offload frontier — each rung citing the real `internal/compute` and `internal/model` sources. |
 | Building or integrating an agent or client | [Agent runtime](explainers/agent-runtime.md) | Understand the category and ownership boundary, choose an interface, and follow the proposal-to-continuation flow. |
 | Handling denied tool calls in a harness | [Tool feedback continuation](explainers/tool-feedback-continuation.md) | Close the wire turn, carry the refusal into context, and resume at a bounded harness turn boundary. |
 | Improving or comparing local inference | [Fak-native inference doctrine](native-inference-goal.md) | Keep native product work inside fak, classify explicit llama.cpp uses, and apply the matched-envelope rule. |

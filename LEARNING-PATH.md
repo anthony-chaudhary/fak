@@ -215,6 +215,19 @@ checkpoints, you are qualified to start there.
 | **L500 — Serving, Integration, and the In-Kernel Model** | Running and hardening the gateway (`fak serve`, `fak l3-serve` / `fak l3serve`), the gateway drop guarantee, repointing existing agents at one base URL, the framework cookbook, the pure-Go in-kernel model + compute HAL with oracle parity (preferring Qwen3.8 for native performance per AGENTS.md), the GPU lease, and the inference-and-parallelism ladder (FAK 536–540: the token loop, the layer loop, pipeline parallelism, tensor and expert parallelism, and the honest frontier). | FAK 105, FAK 301, FAK 304, FAK 310 |
 | **L600 — Mastery** | Honest baselines and the benchmark authority, the fleet/web/parity results, the AgentDojo red-team, the claims ledger and status gates, the additive ABI + architest, the RSI ship-gate, the three-gate leaf pattern, and the dispatch loop. | FAK 207, FAK 208, FAK 209, FAK 210 |
 
+### Companion ladders (same subject, five audiences each)
+
+The courses above are the prerequisite-ordered *catalog*. Two explainer ladders are the
+same material written five times, once per reader, for when you want the idea before the
+course:
+
+- [The memory-hierarchy ladder](docs/explainers/memory-hierarchy/README.md) — where the
+  numbers live while the model runs, from registers through SRAM, HBM/VRAM, and host DRAM
+  to NVMe. The ground-up companion to **FAK 521–530** and the L500 in-kernel model: read
+  Level 1 cold, Level 3 before you open a `.cu` file, Level 4 before you tune serving.
+- [The caching ladder](docs/explainers/caching/README.md) — what to keep close, and why.
+  The companion to **FAK 201** and the L400 performance core.
+
 ---
 
 ## The catalog

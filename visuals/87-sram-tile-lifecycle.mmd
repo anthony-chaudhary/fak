@@ -1,0 +1,33 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  subgraph G["Global memory — HBM / VRAM"]
+    gw["the weight tile<br/>large, off-die, re-read every block"]
+  end
+
+  subgraph B["One thread block — on-die SRAM"]
+    sw["__shared__ sW[...]<br/>the tile, staged once"]
+    sx["__shared__ sX[...]<br/>the activation chunk"]
+    ss["__shared__ sS[...]<br/>the per-group scales"]
+  end
+
+  subgraph T["Threads — registers"]
+    acc["the accumulator<br/>one per thread"]
+  end
+
+  gw -->|"cooperative load:<br/>many threads, one contiguous read"| sw
+  gw -->|"cooperative load"| sx
+  gw -->|"cooperative load"| ss
+  sw -->|"re-read from SRAM<br/>many times, cheap"| acc
+  sx --> acc
+  ss --> acc
+
+  pad["The +1 word of padding on the shared row stride<br/>is not decoration: it makes row-per-thread reads<br/>conflict-free, so the SRAM serves all lanes at once."]
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef mem fill:#E4D6F5,stroke:#6B4FA0,stroke-width:2px,color:#3B2A5E;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class gw mem;
+  class sw,sx,ss mem;
+  class acc kernel;
+  class pad world;

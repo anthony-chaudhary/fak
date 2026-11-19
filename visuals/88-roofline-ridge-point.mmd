@@ -1,0 +1,31 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  def["arithmetic intensity I = useful operations / bytes moved   [op/byte]"]
+  ridge["ridge point = compute roof / measured bandwidth   [op/byte]"]
+
+  def --> cmp{"is I above or below<br/>the ridge point?"}
+  ridge --> cmp
+
+  cmp -->|"I &gt; ridge"| comp["COMPUTE-BOUND<br/>the arithmetic units are the constraint.<br/>More bandwidth would not help."]
+  cmp -->|"I &lt; ridge"| bw["BANDWIDTH-BOUND<br/>the memory system is the constraint.<br/>More FLOPs would not help."]
+
+  prefill["PREFILL<br/>many tokens at once<br/>each weight byte is reused across the batch<br/>I is high"]
+  decode["DECODE<br/>one token at a time<br/>each weight byte is used once per token<br/>I is low"]
+
+  prefill --> comp
+  decode --> bw
+
+  lever["So the decode levers are exactly two:<br/>move FEWER bytes (quantize, sparsify, cache)<br/>or move them from CLOSER (keep them resident)."]
+
+  bw --> lever
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef refuse fill:#FADBD8,stroke:#C0392B,stroke-width:2px,color:#7B241C;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class def,ridge note;
+  class comp pass;
+  class bw refuse;
+  class prefill,decode kernel;
+  class lever world;

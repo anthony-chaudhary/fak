@@ -1,0 +1,26 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  R["Registers<br/>bytes per thread<br/>the multiply itself"]
+  S["SRAM / shared memory<br/>tens of KB per block<br/>declared by the kernel author"]
+  C["L1 / L2 cache<br/>megabytes<br/>hardware-managed"]
+  V["HBM / VRAM<br/>tens of GB<br/>the weights in use"]
+  H["Host DRAM<br/>hundreds of GB<br/>offload + staging"]
+  D["NVMe / disk<br/>terabytes<br/>the model at rest"]
+
+  R --- S
+  S --- C
+  C --- V
+  V --- H
+  H --- D
+
+  R -.->|"each step down:<br/>bigger, and orders of magnitude slower"| D
+
+  note["The craft is not making the arithmetic faster.<br/>It is arranging for the bytes you need NEXT<br/>to already be one step closer than they were."]
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef mem fill:#E4D6F5,stroke:#6B4FA0,stroke-width:2px,color:#3B2A5E;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class R,S kernel;
+  class C,V,H,D mem;
+  class note world;

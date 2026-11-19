@@ -1,0 +1,28 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  q["The model does not fit on the device.<br/>Is that a dead end?"]
+  a["No. It is a RESIDENCY problem, not a capacity wall.<br/>The question becomes: which bytes must be resident<br/>RIGHT NOW, and which can be somewhere colder?"]
+
+  q --> a
+
+  a --> t1["Tier 0 — device-resident<br/>the hot set: current layer weights, live KV"]
+  t1 --> t2["Tier 1 — host DRAM<br/>the rest of the weights, paged in on demand"]
+  t2 --> t3["Tier 2 — host DRAM staging ring<br/>dirty pages coalesced before write-back"]
+  t3 --> t4["Tier 3 — NVMe<br/>the cold store, bounded by SSD endurance"]
+
+  moe["The activated-expert insight:<br/>a frontier mixture-of-experts checkpoint activates<br/>a small fraction of its experts per token.<br/>STORED bytes minus ACTIVATED bytes = the opportunity."]
+
+  a --> moe
+
+  memo["A memoizer is not a cache.<br/>No budget, no victim, no accounting —<br/>so residency grows monotonically<br/>until the machine runs out."]
+
+  t2 --> memo
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef mem fill:#E4D6F5,stroke:#6B4FA0,stroke-width:2px,color:#3B2A5E;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class q note;
+  class a world;
+  class t1,t2,t3,t4 mem;
+  class moe,memo kernel;
