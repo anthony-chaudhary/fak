@@ -146,6 +146,8 @@ Now the asymmetry that makes this genuinely interesting. Compare the two backend
 
 ## What is the honest scorecard?
 
+![Vulkan versus ROCm in three parts: the portability-versus-tuning trade drawn as an axis, with Vulkan on the portability end presenting the intersection of what every vendor can implement and ROCm on the tuning end presenting the silicon with nothing hidden; the two dispatch paths, which both pay a per-operation tax but in different places, Vulkan roughly 2 milliseconds per operation in the driver per command buffer and ROCm a launch cost in the runtime, with the 0.07 millisecond figure coming from the CUDA-on-WSL comparison rather than a ROCm measurement; and the evidence ladder, which runs from measured on silicon at the top, holding Vulkan's full forward pass on an RX 7600, down through host-witnessed and silicon-witnessed-once to declared but unmeasured at the bottom, holding the ROCm throughput bar that has never been attempted](diagrams/vulkan-vs-rocm.svg)
+
 This table is the page's most important artifact. The `Evidence class` column is the one that makes it trustworthy: every ROCm *performance* row reads `declared, unmeasured`, because that is what it is — while the correctness row reads `silicon-witnessed once`, because that is what *it* is.
 
 | Axis | Vulkan | ROCm | Evidence class |

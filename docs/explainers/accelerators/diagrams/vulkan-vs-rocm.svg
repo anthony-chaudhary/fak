@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="760" viewBox="0 0 1000 760" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="vs-title vs-desc">
+<title id="vs-title">Vulkan versus ROCm in fak: the portability-versus-tuning trade, the two paths that pay the per-op tax in different places, and the evidence ladder that separates what has been measured from what has only been declared</title>
+<desc id="vs-desc">The comparison has three parts. First, the one-sentence difference: Vulkan is a cross-vendor standard specified by Khronos and implemented by every vendor's driver, so it runs on AMD, NVIDIA and Intel; ROCm is AMD's own native stack, so it runs on AMD only. That single fact generates the trade, drawn as a horizontal axis from portability on the left to tuning on the right: a cross-vendor API must present the intersection of what every vendor can implement, so it cannot expose AMD's 64-lane versus 32-lane wavefront distinction, while a native stack can expose everything the silicon has. Second, the two dispatch paths, which differ in where the per-operation cost is paid rather than in whether one is paid. The Vulkan path goes from a Go backend operation through cgo into internal/compute/vulkan_shim.cpp, records a command buffer, submits it with vkQueueSubmit and waits on a fence, and pays roughly 2 milliseconds per operation; the ROCm path goes from a Go backend operation through cgo into internal/compute/rocm_backend.go under the rocm build tag, makes a HIP runtime call that launches a kernel, and pays a launch cost instead, which the CUDA-on-WSL comparison on the same class of problem measures at roughly 0.07 milliseconds per operation. Both are single-stream first cuts: vulkanMu at internal/compute/vulkan.go:69 and rocmMu at internal/compute/rocm_backend.go:22 each serialize their whole backend, and both register in the Approx correctness class, at internal/compute/vulkan.go:587 and internal/compute/rocm_backend.go:62 respectively, graded against the cpu-ref Reference path. Third, the evidence ladder, which is the part that makes the comparison trustworthy: measured on silicon at the top, holding Vulkan's full forward pass on an RX 7600 with argmax-exact results, prefill cosine 1.0, roughly 2.5 tokens per second decode and the roughly 60 times gap behind llama.cpp; then host-witnessed, holding the pure-Go ROCm taxonomy that needs no GPU, ROCmFamily at internal/compute/rocm_arch.go:30, the rocmArches table at internal/compute/rocm_arch.go:105 and Datacenter at internal/compute/rocm_arch.go:92; then silicon-witnessed once, holding the 2026-09-10 correctness run on a gfx1151 part recorded at docs/tickets/native-rocm-backend/TICKET-01.md:64; and at the bottom declared but unmeasured, holding the ROCm throughput bar of within 1.5 times Vulkan, which is graded by WithinTarget at internal/compute/prefill.go:281 and has never been attempted, so no ROCm speed number exists at all.</desc>
+
+<rect x="0" y="0" width="1000" height="760" fill="#ffffff"/>
+
+<text x="500" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">Vulkan vs ROCm &#8212; the trade, the two paths, and the evidence</text>
+<text x="500" y="58" text-anchor="middle" font-size="12.5" fill="#57606a">One sentence generates everything below it: Vulkan is a cross-vendor standard, ROCm is one vendor's native stack.</text>
+
+<!-- ============ PART 1: the trade axis ============ -->
+<text x="30" y="92" font-size="13" font-weight="700" fill="#24292f">1 &#183; the trade &#8212; portability and tuning pull in opposite directions</text>
+
+<line x1="60" y1="130" x2="940" y2="130" stroke="#57606a" stroke-width="1.6"/>
+<polygon points="60,130 74,124 74,136" fill="#57606a"/>
+<polygon points="940,130 926,124 926,136" fill="#57606a"/>
+<text x="60" y="120" font-size="11" font-weight="700" fill="#0969da">PORTABILITY</text>
+<text x="940" y="120" text-anchor="end" font-size="11" font-weight="700" fill="#8250df">TUNING</text>
+
+<rect x="60" y="142" width="400" height="112" rx="10" fill="#0969da" fill-opacity="0.05" stroke="#0969da" stroke-width="1.6"/>
+<text x="260" y="166" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">Vulkan &#8212; cross-vendor standard</text>
+<text x="260" y="188" text-anchor="middle" font-size="10.5" fill="#57606a">specified by Khronos &#183; implemented by every vendor's driver</text>
+<text x="260" y="208" text-anchor="middle" font-size="10.5" fill="#57606a">runs on AMD, NVIDIA and Intel &#8212; one shader binary, re-targeted</text>
+<text x="260" y="228" text-anchor="middle" font-size="10.5" fill="#57606a">the machine it presents is the INTERSECTION of what all have</text>
+<text x="260" y="246" text-anchor="middle" font-size="10" font-weight="700" fill="#bc4c00">so it cannot say "the wavefront is 64 lanes"</text>
+
+<rect x="540" y="142" width="400" height="112" rx="10" fill="#8250df" fill-opacity="0.05" stroke="#8250df" stroke-width="1.6"/>
+<text x="740" y="166" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">ROCm &#8212; AMD's native stack</text>
+<text x="740" y="188" text-anchor="middle" font-size="10.5" fill="#57606a">AMD's compiler (hipcc), runtime and libraries &#183; AMD only</text>
+<text x="740" y="208" text-anchor="middle" font-size="10.5" fill="#57606a">the machine it presents is the SILICON, with nothing hidden</text>
+<text x="740" y="228" text-anchor="middle" font-size="10.5" fill="#57606a">models 64-lane (GCN/CDNA) vs 32-lane (RDNA) wavefronts</text>
+<text x="740" y="246" text-anchor="middle" font-size="10" font-weight="700" fill="#1a7f37">rocm_arch.go:27 &#8212; the wrong family "silently mistunes occupancy and LDS"</text>
+
+<rect x="60" y="264" width="880" height="34" rx="8" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.2"/>
+<text x="500" y="286" text-anchor="middle" font-size="11.5" fill="#24292f"><tspan font-weight="700">The principle:</tspan> portability is achieved by hiding the machine, and hiding the machine costs you the ability to tune for it.</text>
+
+<!-- ============ PART 2: the two paths ============ -->
+<text x="30" y="330" font-size="13" font-weight="700" fill="#24292f">2 &#183; the two paths &#8212; both pay a per-op tax, in different places</text>
+
+<rect x="60" y="344" width="400" height="196" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.5"/>
+<text x="260" y="366" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">VULKAN PATH</text>
+<text x="260" y="388" text-anchor="middle" font-size="10.5" fill="#57606a">Go backend op &#8594; cgo &#8594; vulkan_shim.cpp</text>
+<text x="260" y="408" text-anchor="middle" font-size="10.5" fill="#57606a">record a CommandBuffer (bind pipeline,</text>
+<text x="260" y="424" text-anchor="middle" font-size="10.5" fill="#57606a">descriptors, push constants, dispatch)</text>
+<text x="260" y="444" text-anchor="middle" font-size="10.5" fill="#57606a">vkQueueSubmit + fence wait &#8594; driver &#8594; GPU</text>
+<rect x="80" y="456" width="360" height="30" rx="6" fill="#bc4c00" fill-opacity="0.10" stroke="#bc4c00" stroke-width="1.1"/>
+<text x="260" y="476" text-anchor="middle" font-size="11" font-weight="700" fill="#24292f">~2 ms/op &#8212; paid in the DRIVER, per command buffer</text>
+<text x="260" y="506" text-anchor="middle" font-size="10" fill="#57606a">vulkanMu (vulkan.go:69) &#183; Class() = Approx (vulkan.go:587)</text>
+<text x="260" y="524" text-anchor="middle" font-size="10" fill="#57606a">one serialized queue &#8212; no overlap of compute with transfer</text>
+
+<rect x="540" y="344" width="400" height="196" rx="10" fill="#8250df" fill-opacity="0.04" stroke="#8250df" stroke-width="1.5"/>
+<text x="740" y="366" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">ROCM PATH</text>
+<text x="740" y="388" text-anchor="middle" font-size="10.5" fill="#57606a">Go backend op &#8594; cgo &#8594; rocm_backend.go</text>
+<text x="740" y="408" text-anchor="middle" font-size="10.5" fill="#57606a">(//go:build linux &#38;&#38; rocm &#38;&#38; cgo)</text>
+<text x="740" y="428" text-anchor="middle" font-size="10.5" fill="#57606a">HIP runtime call &#8594; hipLaunchKernel</text>
+<text x="740" y="448" text-anchor="middle" font-size="10.5" fill="#57606a">kernel launch &#8594; GPU</text>
+<rect x="560" y="456" width="360" height="30" rx="6" fill="#1a7f37" fill-opacity="0.10" stroke="#1a7f37" stroke-width="1.1"/>
+<text x="740" y="476" text-anchor="middle" font-size="11" font-weight="700" fill="#24292f">~0.07 ms/op &#8212; paid in the RUNTIME, per launch</text>
+<text x="740" y="506" text-anchor="middle" font-size="10" fill="#57606a">rocmMu (rocm_backend.go:22) &#183; Class() = Approx (rocm_backend.go:62)</text>
+<text x="740" y="524" text-anchor="middle" font-size="10" fill="#57606a">the 0.07 ms is the CUDA-on-WSL comparison, not a ROCm measurement</text>
+
+<rect x="60" y="550" width="880" height="30" rx="8" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.2"/>
+<text x="500" y="570" text-anchor="middle" font-size="11" fill="#24292f">The paths differ in <tspan font-weight="700">where</tspan> the per-op cost is paid, not in <tspan font-weight="700">whether</tspan> one is paid. The bet is that a launch is far cheaper than a command-buffer round trip.</text>
+
+<!-- ============ PART 3: the evidence ladder ============ -->
+<text x="30" y="612" font-size="13" font-weight="700" fill="#24292f">3 &#183; the evidence ladder &#8212; the part that makes the comparison trustworthy</text>
+
+<rect x="60" y="624" width="880" height="30" rx="6" fill="#1a7f37" fill-opacity="0.10" stroke="#1a7f37" stroke-width="1.3"/>
+<text x="72" y="644" font-size="10.5" fill="#24292f"><tspan font-weight="700">MEASURED ON SILICON</tspan> &#8212; Vulkan: full forward on an RX 7600 (gfx1102), argmax-exact, prefill cosine 1.0, ~2.5 tok/s decode, ~60&#215; behind llama.cpp</text>
+
+<rect x="60" y="660" width="880" height="26" rx="6" fill="#0969da" fill-opacity="0.08" stroke="#0969da" stroke-width="1.2"/>
+<text x="72" y="678" font-size="10.5" fill="#24292f"><tspan font-weight="700">HOST-WITNESSED</tspan> &#8212; ROCm: the pure-Go taxonomy, ROCmFamily (rocm_arch.go:30) &#183; rocmArches (:105) &#183; Datacenter() (:92) &#8212; unit-tested on any host, no GPU</text>
+
+<rect x="60" y="692" width="880" height="26" rx="6" fill="#9a6700" fill-opacity="0.10" stroke="#9a6700" stroke-width="1.2"/>
+<text x="72" y="710" font-size="10.5" fill="#24292f"><tspan font-weight="700">SILICON-WITNESSED ONCE</tspan> &#8212; ROCm: correctness only, 2026-09-10, HIP 7.2, gfx1151, required-device tests passing with no skips (TICKET-01.md:64)</text>
+
+<rect x="60" y="724" width="880" height="26" rx="6" fill="#bc4c00" fill-opacity="0.10" stroke="#bc4c00" stroke-width="1.2"/>
+<text x="72" y="742" font-size="10.5" fill="#24292f"><tspan font-weight="700">DECLARED, UNMEASURED</tspan> &#8212; ROCm: "within 1.5&#215; Vulkan throughput", graded by WithinTarget (prefill.go:281) &#8212; <tspan font-weight="700">never attempted; no ROCm speed number exists</tspan></text>
+</svg>
