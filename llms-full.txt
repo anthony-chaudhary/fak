@@ -76,6 +76,15 @@ Per-harness stubs that auto-load in their own harness and defer to [`AGENTS.md`]
 - Agent runtime category, ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
 - Canonical identity and nearest-contrast lookup for overloaded terms: [`docs/generated/disambiguation/INDEX.md`](docs/generated/disambiguation/INDEX.md)
 - TensorRT-LLM vs SGLang and how fak fronts fleet or local inference: [`docs/explainers/tensorrt-llm-vs-sglang-and-fak.md`](docs/explainers/tensorrt-llm-vs-sglang-and-fak.md)
+- How inference actually works, taught in five rungs from "what is a forward pass" to "how do you split one across workers" — the layer loop, pipeline (layer) parallelism, tensor and expert parallelism, and the honest frontier, every claim grounded in a real `file.go:line` or `Test*` name: [`docs/explainers/inference-parallelism/README.md`](docs/explainers/inference-parallelism/README.md)
+- Pipeline (layer) parallelism end to end — the layer stack as the split axis, `ForwardBand` as the execution unit, the `StageTransport` seam, `LocalTransport` vs `TCPTransport`, and incremental decode: [`docs/explainers/inference-parallelism/level-3-pipeline-parallelism.md`](docs/explainers/inference-parallelism/level-3-pipeline-parallelism.md)
+- How a language model turns your prompt into the next token, taught in five rungs from "what is a token?" to what changes at scale — the forward pass end to end, the ~10 operations inside one decoder block, prefill vs decode, and why decode is memory-bound, every claim pinned to a real `path:line` in this repository: [`docs/explainers/inference/README.md`](docs/explainers/inference/README.md)
+- The questions a newcomer asks the first time they try to follow a token through the model, and the ones the repository cannot answer yet, labeled CONTRARIAN / AFRAID / UNASKED / STEELMAN and each routed to the rung that answers it: [`docs/questions/inference.md`](docs/questions/inference.md)
+- What a model's numbers are stored in, and what that storage costs in memory and in time, taught in five rungs from "what is a bit?" to the evidence boundary where measured claims end and modeled ones begin — the format zoo, quantization sensitivity, the precision contract, and the honest split between measured, modeled, and designed-but-not-wired: [`docs/explainers/mixed-precision/README.md`](docs/explainers/mixed-precision/README.md)
+- How your text becomes the numbers a model reads, taught in five rungs from "what is a tokenizer?" to the tokenizer frontier — the three stages (split, spell, merge), the merge loop written out twice as a naive oracle and the fast incremental twin that must match it bit for bit, why a long indented code block is the quadratic worst case, and how correctness is proven against HuggingFace and llama.cpp: [`docs/explainers/tokenization/README.md`](docs/explainers/tokenization/README.md)
+- Where the numbers live while a model runs, and what it costs to move them, taught in five rungs from "what is a buffer?" to the evidence boundary — the buffer hierarchy, the forward pass as a sequence of buffer moves, SRAM and the kernel's own scratch, HBM/VRAM and the roofline (arithmetic intensity, the ridge point, why decode is bandwidth-bound), and host DRAM, offload, and the frontier, every rung citing real `internal/compute` and `internal/model` lines and ending with a lab you run: [`docs/explainers/memory-hierarchy/README.md`](docs/explainers/memory-hierarchy/README.md)
+- How you change fak's kernel without forking it, taught in six rungs from "what is kernel development?" to the frontier — the three senses of "kernel", the `Register*()` registration seam and the `internal/architest` layering gate, the Reference/Approx correctness class and its deterministic witness, the non-forgeable keep-bit that decides KEEP vs REVERT, the adjudicator rung and the verdict fold, and the honest edge of what the repo has not yet proven, each rung with a lab and a checkpoint: [`docs/explainers/kernel-development/README.md`](docs/explainers/kernel-development/README.md)
+- The questions a newcomer asks the first time they try to change fak's kernel, and the four the repository cannot answer yet, labeled CONTRARIAN / AFRAID / UNASKED / STEELMAN and each routed to the rung that answers it: [`docs/questions/kernel-development.md`](docs/questions/kernel-development.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)
 - One-agent management with `fak guard`: [`README.md#manage-one-local-agent-fak-guard`](README.md#manage-one-local-agent-fak-guard)
 - Running that same `fak guard` seam **server-side** — a hosted harness (Claude Code / Codex / a CI runner) governed unattended in a container, with no TTY, a mounted hash-chained audit journal, a cost cap, and a supervised-restart lifecycle; the complement to the local-dev framing above and to [`docs/integrations/embed-in-your-product.md`](docs/integrations/embed-in-your-product.md) (which governs your own direct API call): [`docs/guard-server-side-client.md`](docs/guard-server-side-client.md)
@@ -125,6 +134,7 @@ Runtime behavior is authoritative in code and tests. Documentation describes the
 |---|---|---|
 | Explain or evaluate fak | [`README.md`](README.md) | [`docs/repro-packet.md`](docs/repro-packet.md) |
 | Modify code or docs | [`AGENTS.md`](AGENTS.md) | The owning package tests and [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Extend the kernel (a new kernel, backend, or policy rung) | [`docs/explainers/kernel-development/README.md`](docs/explainers/kernel-development/README.md) | [`EXTENDING.md`](EXTENDING.md) for the three gates in full, then the owning package tests |
 | Run local models on Mac (Apple Silicon) | [`docs/fak/mac-local-models.md`](docs/fak/mac-local-models.md) | Run `fak run qwen38` or `fak serve --metal` |
 | Integrate a client or managed runtime | [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md) | [`docs/integrations/`](docs/integrations/) and the selected mode's quickstart and API/config authority |
 | Build a bounded microagent-derived harness | [`docs/notes/microagents-to-harnesses-2026-08-18.md`](docs/notes/microagents-to-harnesses-2026-08-18.md) | Run `go run ./cmd/microharnessdemo -selfcheck`; descendants remain host-admitted and the root receives compact receipts, not child transcripts |
@@ -1826,12 +1836,33 @@ so you can join mid-catalog without hitting a wall. Anyone can also just start a
 | Platform / SRE who already runs vLLM or SGLang in production | **FAK 201** | FAK 201 → FAK 103 → FAK 207 → FAK 301 → FAK 303 → FAK 304 → FAK 310 → FAK 501 → FAK 502 → FAK 503 → FAK 504 → FAK 505 → FAK 507 → FAK 314 → FAK 510 → FAK 535 |
 | Security engineer who already knows prompt injection, default-deny, reference monitors | **FAK 105** | FAK 105 → FAK 207 → FAK 103 → FAK 301 → FAK 302 → FAK 303 → FAK 304 → FAK 305 → FAK 306 → FAK 307 → FAK 308 → FAK 309 → FAK 310 → FAK 311 → FAK 312 → FAK 313 → FAK 314 → FAK 315 → FAK 318 |
 | ML-systems / kernel hacker who wants the in-kernel model and compute HAL | **FAK 201** | FAK 201 → FAK 205 → FAK 207 → FAK 210 → FAK 401 → FAK 521 → FAK 522 → FAK 523 → FAK 524 → FAK 525 → FAK 526 → FAK 404 → FAK 405 → FAK 406 → FAK 527 → FAK 528 → FAK 529 → FAK 530 → FAK 532 |
+| Engineer who can run the model but cannot explain how a forward pass is split across workers | **FAK 521** | FAK 521 → FAK 536 → FAK 537 → FAK 538 → FAK 539 → FAK 540 |
 | Memory / RAG engineer focused on what fak persists, forgets, and reuses | **FAK 202** | FAK 202 → FAK 203 → FAK 201 → FAK 205 → FAK 207 → FAK 301 → FAK 303 → FAK 310 → FAK 316 → FAK 307 → FAK 407 → FAK 409 → FAK 402 → FAK 401 → FAK 412 → FAK 413 → FAK 414 |
 | Compliance / audit / governance engineer (journal, provenance, deletion, honesty discipline) | **FAK 105** | FAK 105 → FAK 207 → FAK 103 → FAK 301 → FAK 303 → FAK 310 → FAK 311 → FAK 312 → FAK 313 → FAK 314 → FAK 315 → FAK 317 → FAK 404 → FAK 405 → FAK 406 → FAK 411 → FAK 601 → FAK 602 → FAK 606 → FAK 614 → FAK 307 → FAK 616 |
 | Contributor / autonomous agent landing an optimization into the kernel | **FAK 207** | FAK 207 → FAK 208 → FAK 209 → FAK 210 → FAK 614 → FAK 615 → FAK 616 → FAK 617 |
 
 > The **Route** is the *hard-dependency* path. You can read the context prerequisites
 > noted on each course later (or never) without breaking a lab.
+
+**Companion ladder for the last row.** If your destination is *landing an optimization
+into the kernel*, the courses above give you the prerequisites; the six-rung teaching
+ladder at [`docs/explainers/kernel-development/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/README.md)
+gives you the practice, question by question — rung 1 *what is kernel development*, rung 2
+*where does my code attach*, rung 3 *does it preserve behavior*, rung 4 *is it actually a
+win*, rung 5 *the other kernel* (the adjudicator rung), rung 6 *the frontier*. Read it
+alongside **FAK 615**; each rung ends with a lab and a checkpoint you answer yourself.
+
+**Companion ladders for the ML-systems row.** That route ends at **FAK 530** (the Compute
+HAL seam) and **FAK 532**. Two five-rung teaching ladders cover the same ground from the
+other direction, question by question, with every claim pinned to a real file:
+
+- [`docs/explainers/inference/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) — *what the forward
+  pass is*: tokens, the forward pass, inside a block, prefill vs decode, and what changes at
+  scale. Read it before **FAK 522** if the loop itself is not yet concrete; it is the
+  plain-language companion to **FAK 522–526** and **FAK 529**.
+- [`docs/explainers/accelerators/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/README.md) — *where it
+  runs*: why not just the CPU, the HAL seam, Vulkan, ROCm, and the Vulkan-versus-ROCm
+  head-to-head. Read it alongside **FAK 530**; it is the practice to that course's theory.
 
 ## The level ladder
 
@@ -1862,8 +1893,21 @@ checkpoints, you are qualified to start there.
 | **L200 — Foundations** | The handful of mechanisms every later claim rests on: the KV cache, context-vs-memory durability, the four memory layers, content addressing, the frozen ABI, and the proofs method. | FAK 101, FAK 102, FAK 103, FAK 104, FAK 105 |
 | **L300 — The Security Core** | The reference monitor, the policy lifecycle, the rungs (preflight, plan-CFI, witness, stewards, rate-limit, escalation), the write-time result gate, canonicalization, IFC, provenance, durability, and code-linting at the same boundary. | FAK 105, FAK 207 |
 | **L400 — The Performance Core** | Why agents stress the cache, prefill-elimination economics, the addressable/bijective KV-MMU, RadixAttention reuse, the vDSO, durable session recall, and the first-order scaling law (incl. cache legality and residency). | FAK 201, FAK 205, FAK 310 |
-| **L500 — Serving, Integration, and the In-Kernel Model** | Running and hardening the gateway (`fak serve`, `fak l3-serve` / `fak l3serve`), the gateway drop guarantee, repointing existing agents at one base URL, the framework cookbook, the pure-Go in-kernel model + compute HAL with oracle parity (preferring Qwen3.8 for native performance per AGENTS.md), and the GPU lease. | FAK 105, FAK 301, FAK 304, FAK 310 |
+| **L500 — Serving, Integration, and the In-Kernel Model** | Running and hardening the gateway (`fak serve`, `fak l3-serve` / `fak l3serve`), the gateway drop guarantee, repointing existing agents at one base URL, the framework cookbook, the pure-Go in-kernel model + compute HAL with oracle parity (preferring Qwen3.8 for native performance per AGENTS.md), the GPU lease, and the inference-and-parallelism ladder (FAK 536–540: the token loop, the layer loop, pipeline parallelism, tensor and expert parallelism, and the honest frontier). | FAK 105, FAK 301, FAK 304, FAK 310 |
 | **L600 — Mastery** | Honest baselines and the benchmark authority, the fleet/web/parity results, the AgentDojo red-team, the claims ledger and status gates, the additive ABI + architest, the RSI ship-gate, the three-gate leaf pattern, and the dispatch loop. | FAK 207, FAK 208, FAK 209, FAK 210 |
+
+### Companion ladders (same subject, five audiences each)
+
+The courses above are the prerequisite-ordered *catalog*. Two explainer ladders are the
+same material written five times, once per reader, for when you want the idea before the
+course:
+
+- [The memory-hierarchy ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-hierarchy/README.md) — where the
+  numbers live while the model runs, from registers through SRAM, HBM/VRAM, and host DRAM
+  to NVMe. The ground-up companion to **FAK 521–530** and the L500 in-kernel model: read
+  Level 1 cold, Level 3 before you open a `.cu` file, Level 4 before you tune serving.
+- [The caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) — what to keep close, and why.
+  The companion to **FAK 201** and the L400 performance core.
 
 ---
 
@@ -3840,6 +3884,7 @@ path").
 | Dev-tooling CWD rule (companion dev harness) | [architecture/companion-dev-harness.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/architecture/companion-dev-harness.md) |
 | GPU/lab slice: what stays private | [gpu-server-private-boundary.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/gpu-server-private-boundary.md) |
 | Lab access: the public pointer into the private channel | [private-comms-channel.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/private-comms-channel.md) |
+| Consumer tier: the private downstream consumer + import DAG | `fak-private` `BOUNDARY.md` §1.3 (private; this page routes to it, §10) |
 
 Point, don't duplicate: each doc owns its slice; this page only routes.
 
@@ -3922,7 +3967,15 @@ Every guard refusal names a token from the closed `[reasons.*]` vocabulary in
 
 Full protocol: [AGENTS.md](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md), "If the kernel refuses you".
 
-## 10. Change protocol for this page
+## 10. The consumer tier
+
+A third, private consumer repo sits downstream of both `fak` (this repo) and
+`fak-private` in a one-way, acyclic import DAG. The concrete consumer, its name,
+and the full import-DAG table are documented in the private repo (`fak-private`),
+`BOUNDARY.md` §1.3; this page routes to it and does not duplicate it. No consumer
+code, IP, or secrets land here.
+
+## 11. Change protocol for this page
 
 New boundaries land here in the same commit as the boundary itself: when a doc takes
 ownership of a slice, a surface freezes, or a generated path appears, update the matching
@@ -5398,7 +5451,7 @@ Use these resources when deploying to production, running fleet infrastructure, 
 - Product status: [`STATUS.md`](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) tracks subsystem implementation maturity.
 
 ### Kernel internals and repository workflows
-- Extending the kernel: [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md) explains how to register new leaves without editing core files.
+- Extending the kernel: [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md) explains how to register new leaves without editing core files. New to it? The [kernel-development ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/README.md) teaches the same three gates question by question, with a lab and a checkpoint per rung.
 - Internal architecture: [`ARCHITECTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) details kernel subsystem contracts.
 - Automated coding agents: [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) contains operational rules for autonomous workers on the shared trunk.
 - Exhaustive documentation index: [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md) catalogs the full 1,200+ page corpus for name-based lookups and archival research notes.
@@ -5551,7 +5604,12 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Neo-silicon onboarding](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-silicon-onboarding.md) — vendor-facing path from a stable `compute.Backend` name through the compiling MatMul+Attention example and the planned backend conformance kit.
 - [Data residency & compliance](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/data-residency-and-compliance.md) — how the self-host-first, fail-closed, default-deny, audit-logged boundary maps to India's DPDP Act and China's PIPL/DSL/CSL: an enforcement control surface you run on infrastructure you control (not legal advice, not a certification). The residency lens on the same boundary; go-to-market context in the [emerging-market adoption note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-EMERGING-MARKET-ADOPTION-2026-06-30.md).
 - [The god-file growth gate: a ratchet, not a sweep](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/god-file-growth-gate.md) — a monolith is never written in one commit; it accretes one line at a time, faster than anyone pays it down, because nothing refuses the next line. Hermes' `gateway/run.py` reached **20,320 lines** that way while its own rubric asked for the refactor — a doctrine that only *describes* the good state defends nothing. fak already names the ceiling (`FILE_HARD_MAX=1500` / `FUNC_HARD_MAX=200`) and owns the paydown loop ([/modularize](https://github.com/anthony-chaudhary/fak/blob/main/.claude/skills/modularize/SKILL.md), `tools/godsplit_plan.py`); `GOD_FILE_GROWTH` (`internal/hooks/gate_godfile.go`) turns the doctrine preventive — a `fak hygiene` + `make ci` ratchet that grandfathers today's offenders at-size (`godfile_baseline.go`) and refuses only NEW growth (new file/function over the ceiling, or a grandfathered one grown past its frozen size), with the baseline tighten-only, so the god-code surface is monotonically non-increasing. The preventive half of the [steerability](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/code-linting-at-the-kernel.md) story: /modularize retires the debt, the gate stops the next unit forming. Closes #2868 (Track I of #2834).
-- **More explainers** — [the caching ladder (five rungs, five audiences)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) · [cache reuse: choose the layer](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/cache.md) · [context management](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context.md) · [context as a variable](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context-as-a-variable.md) · [model routing](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/routing.md) · [the agent virtual filesystem](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/agent-virtual-filesystem.md) · [shared workspace & the negation operator](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/shared-workspace-and-the-negation-operator.md) · [the vLLM lifecycle cache-loss bridge](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/vllm-lifecycle-cache-loss-bridge.md).
+- [The kernel development ladder (six rungs)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/README.md) — the teaching companion to [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md): how to add a kernel, a backend, or a policy rung to fak without forking the core, taught question by question. Rung 1 *what is kernel development* (the three senses of "kernel", the frozen spine, the layered DAG) · rung 2 *where does my code attach* (the `Register*` seam, `internal/architest`, lanes) · rung 3 *does it preserve behavior* (the Reference/Approx correctness class and the deterministic witness) · rung 4 *is it actually a win* (the non-forgeable keep-bit, honest baselines) · rung 5 *the other kernel* (the adjudicator rung and the verdict fold) · rung 6 *the frontier* (the honest open edges). Every rung has a lab you run and a checkpoint you answer yourself. The practice-side companion to [what is a CUDA kernel?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-a-cuda-kernel.md) (the word) and [the abstraction map](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/the-abstraction-map.md) (the floors).
+- [Kernel development — the questions a newcomer actually asks](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/kernel-development.md) — the question-first companion to the ladder above: 13 questions a newcomer asks the first time they try to change fak's kernel, each labeled with the question loop's own vocabulary (**CONTRARIAN** / **AFRAID** / **UNASKED** / **STEELMAN**), answered in two sentences, and routed to the rung that answers it in full. Includes the four questions the repo genuinely cannot answer yet (a rung-shaped keep-bit, the add-a-rung path's witness parity, the `[STUB]` KV-region transport, the unbuilt tuned adjudication head). The durable surface of the [question loop](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/README.md) for this axis.
+- [The inference ladder (five rungs)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) — the teaching companion to the model spine: how a language model turns your prompt into the next token, taught question by question and pitched five times for five readers. Rung 1 *what is a token* (text → ids → vectors, no math) · rung 2 *the forward pass* (the whole pipeline end to end, with a three-token worked example you can follow by hand) · rung 3 *inside one decoder block* (the ~10 operations, each pinned to a real file) · rung 4 *prefill vs decode* (why the first token is slow and the rest are memory-bound) · rung 5 *what changes at scale* (batching, paged KV, quantization, MoE, speculative decoding, and the honest open edges). Every rung cites `path:line` in this repository. The inference-side companion to [the kernel development ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/README.md) (the practice) and [the abstraction map](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/the-abstraction-map.md) (the floors).
+- [Inference — the questions a newcomer actually asks](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/inference.md) — the question-first companion to the ladder above: the questions a newcomer asks the first time they try to follow a token through the model, each labeled with the question loop's own vocabulary (**CONTRARIAN** / **AFRAID** / **UNASKED** / **STEELMAN**), answered in two sentences, and routed to the rung that answers it in full. Includes the questions the repo genuinely cannot answer yet. The durable surface of the [question loop](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/README.md) for the inference axis, and the sibling of [the kernel-development questions](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/kernel-development.md).
+- [The memory-hierarchy ladder (five rungs, five audiences)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-hierarchy/README.md) — where the numbers live while a model runs, taught five times for five readers: Level 1 *what is a buffer* (no math, the desk/filing-cabinet analogy) · Level 2 *the forward pass as a sequence of buffer moves* (one token through the real Go) · Level 3 *SRAM and the kernel's own scratch* (`__shared__` tiles, bank-conflict padding, `__launch_bounds__`, the Go scratch pool) · Level 4 *HBM, VRAM, and the roofline* (arithmetic intensity, the ridge point, why decode is bandwidth-bound) · Level 5 *host DRAM, offload, and the frontier* (the staging ring, expert offload, KV pressure relief, and the honest open edges). Every rung cites real `internal/compute` and `internal/model` lines and ends with a lab you run. The ground-up companion to the [kernel development ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/README.md) (how to *add* a kernel) and the [caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) (what to keep close).
+- **More explainers** — [the caching ladder (five rungs, five audiences)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) · [the memory-hierarchy ladder (five rungs, five audiences)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-hierarchy/README.md) · [cache reuse: choose the layer](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/cache.md) · [context management](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context.md) · [context as a variable](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context-as-a-variable.md) · [model routing](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/routing.md) · [the agent virtual filesystem](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/agent-virtual-filesystem.md) · [shared workspace & the negation operator](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/shared-workspace-and-the-negation-operator.md) · [the vLLM lifecycle cache-loss bridge](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/vllm-lifecycle-cache-loss-bridge.md).
 - [Interoperability stance](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/interoperability.md) — why fak adopts whatever agent/model/framework you run (the one opinion kept is the floor) + the honest per-wire grade for the flagship harnesses and every interop protocol.
 - [Agent-to-agent value](https://github.com/anthony-chaudhary/fak/blob/main/docs/a2a-value-opportunities.md) — where the cross-agent cache pays off.
 - [Multi-agent coordination protocol (RFC, D-007)](https://github.com/anthony-chaudhary/fak/blob/main/docs/multi-agent-coordination-protocol.md) — the normative spec binding message passing (a2achan), shared state (sharedtask), and coordination primitives (comm) under one default-deny floor.
@@ -5602,7 +5660,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 - [Run local models on Mac (Apple Silicon Metal) and interactive chat](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-local-models.md) — run Qwen3.8 natively on Apple Silicon with Metal acceleration, interactive chat REPL (`fak run qwen38`), or an OpenAI-compatible gateway (`fak serve --metal`).
 - [Claude Code on your Mac's local model](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/claude-mac.md) — point Claude Code at an open model on your own Mac, with the kernel adjudicating tool calls and caching shared prefixes (88.2% compute reduction, flat 180 ms TTFT at K=16).
-- [Deploy fak on a rented GPU cloud](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/neo-cloud-deploy.md) — the operator quickstart for **standing the gateway up on a GPU box you rent** (CoreWeave, Lambda, RunPod, Crusoe, Vast.ai, Nebius): the two host primitives every provider is a storefront over (raw GPU VM → `docker run --gpus all` / `install.sh`+systemd; GPU k8s pool → `kubectl apply -k deploy/k8s/overlays/gpu`), and the two shapes — **in-kernel** on the card from a mounted `.gguf` (needs a `Dockerfile.cuda` build — with `CUDA_ARCH` unset the default build covers *every* arch in `internal/compute/cuda_arch.txt` plus a `compute_120` PTX floor, so it is the one to ship when you do not know which card you will be handed; `--build-arg CUDA_ARCH=sm_90` only *narrows* it. The versioned `-cuda` tag is published (`0.55.0-cuda` live, plus the moving `cuda-latest` tag) or **proxy** in front of a co-located vLLM/SGLang (the lean static image is enough). Every per-provider row is marked `not yet` end-to-end witnessed — a dogfood path, not a verified claim. Disambiguates the three pages that all say "cloud": this one deploys the **gateway**, [clouds.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/clouds.md) fronts a hosted **API**, and the [neo-cloud reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md) is the **backend binding layer**. `gen/next` under epic #1678.
+- [Deploy fak on a rented GPU cloud](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/neo-cloud-deploy.md) — the operator quickstart for **standing the gateway up on a GPU box you rent** (CoreWeave, Lambda, RunPod, Crusoe, Vast.ai, Nebius): the two host primitives every provider is a storefront over (raw GPU VM → `docker run --gpus all` / `install.sh`+systemd; GPU k8s pool → `kubectl apply -k deploy/k8s/overlays/gpu`), and the two shapes — **in-kernel** on the card from a mounted `.gguf` (needs a `Dockerfile.cuda` build — with `CUDA_ARCH` unset the default build covers *every* arch in `internal/compute/cuda_arch.txt` plus a `compute_120` PTX floor, so it is the one to ship when you do not know which card you will be handed; `--build-arg CUDA_ARCH=sm_90` only *narrows* it. The versioned `-cuda` tag is published (`<version>-cuda`, cut from the release's own `VERSION`, plus the moving `cuda-latest` tag) or **proxy** in front of a co-located vLLM/SGLang (the lean static image is enough). Every per-provider row is marked `not yet` end-to-end witnessed — a dogfood path, not a verified claim. Disambiguates the three pages that all say "cloud": this one deploys the **gateway**, [clouds.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/clouds.md) fronts a hosted **API**, and the [neo-cloud reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md) is the **backend binding layer**. `gen/next` under epic #1678.
 - [The scope of a GitHub ticket](https://github.com/anthony-chaudhary/fak/blob/main/docs/ticket-scope.md) — the front door for the ticket-scope toolkit: what the scope of one issue *is* — the six axes that decide whether a ticket is a single dispatchable unit of agent work (structure / size on the S0–S4 ladder / atomicity / write-scope / cohort placement / work-class), each mapped to the verb that measures it (`fak-dev issue contract`, `fak dispatch issue-smallness-lint`, `fak-dev issue cohort`), the closed reason it fails with, and the fix. The executable pass over it is the [`/ticket-scope`](https://github.com/anthony-chaudhary/fak/blob/main/.claude/skills/ticket-scope/SKILL.md) skill.
 - [Spine-first + fan-out defaults](https://github.com/anthony-chaudhary/fak/blob/main/docs/spine-first-defaults.md) — the two defaults that fire for every new unit of work unless waived: ship the applied end-to-end **spine** first (or file the spine as its own issue), then expand proof, optimize against that working baseline, and **fan out** the follow-on QA / dogfood / productization backlog at creation time with `fak-dev issue fanout` (**3 is the floor**, not the target — `issuefanout.MinFanout`; the full taxonomy runs to ~15 candidates), wave-planned via `fak-dev issue cohort --from-plan`. The doctrine behind epic #2510; the planner spine is [`internal/issuefanout`](https://github.com/anthony-chaudhary/fak/blob/main/internal/issuefanout/issuefanout.go) (`fak-dev issue fanout`, shipped `5b8f0bd1`).
 - [`fleet` operator console](https://github.com/anthony-chaudhary/fak/blob/main/tools/FLEET.md) — one command to watch the agent fleet on a host: live session/account health, what stopped and why, which accounts are resumable, and what needs you. The session-health companion to `dos top`; install it onto PATH with `fleet install`.
@@ -5713,6 +5771,9 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [SubagentSupervisor: deliberately tested-but-unwired (decision record)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/2026-11-17-subagent-supervisor-unwired-decision.md) -- auto-indexed dated note.
+- [Kimi-K3.1-Pro-NVFP4 on H200 — sizing verdict + serving recipes (2026-11-12)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/2026-11-12-kimi-k31-pro-nvfp4-h200-sizing.md) -- auto-indexed dated note.
+- [Kimi K3.1 Pro NVFP4 — checkpoint contract, fak gap map, and support plan (2026-11-12)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/2026-11-12-kimi-k31-pro-nvfp4-support.md) -- auto-indexed dated note.
 - [Agentic inference, kernel evaluation and observability source study (2026-11-07)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md) — 29 pinned repositories from two source lists, source-bound candidate decisions, license boundaries and an explicit continuation queue; no runtime or performance qualification.
 
 - [Loader packing coverage matrix — baseline (2026-11-03)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/PACKING-COVERAGE-MATRIX-2026-11-03.md) -- auto-indexed dated note.
@@ -7832,6 +7893,27 @@ two things — one binding today, one staged:
 Contributions are accepted **inbound = outbound**: your change is licensed to the public
 under the same license that governs that part of the tree (today, Apache-2.0 for the
 kernel), in addition to the CLA grant to Netra.
+
+## Third-party attribution granularity
+
+Public license notices (`NOTICE.md`, `THIRD_PARTY_NOTICES.md`,
+`third_party/*/NOTICE`) carry **only** the license-required minimum: donor
+project identity + repository URL + pinned revision(s), verbatim copyright
+notices, full license texts, and a "Changes were made" statement. Never add
+fak-side detail to a notice: no `internal/` paths, no symbol or type names,
+no `FAK_*` environment variables, no build tags, no test names, no "Changed
+for Fak" adaptation narratives, no donor-side file/line anchors or
+"Source units" lists, no feature-mapping section titles, no wiring or
+architecture descriptions, no links to internal port dossiers. One
+`## <Donor project>` section per donor project; list all of that donor's
+pinned revisions inside that single section. In source-file headers keep only
+the donor name + pinned revision + license id + verbatim copyright + a
+pointer to `THIRD_PARTY_NOTICES.md`; no donor-file mapping or adaptation
+narration in comments. Rationale: over-specific attribution reveals the
+internal build recipe (which internal files implement which donor, how ports
+are fused) - competitive alpha that must not ship in the public repo.
+Enforced by `go test ./internal/noticeguard`, a regression guard that
+refuses over-specific notices.
 
 ## Go sub-modules, applications, and tooling preference (no new scripts)
 
@@ -10652,6 +10734,1993 @@ reviewed on **2026-08-11** against immutable source revisions:
 Re-check current upstream support matrices and release notes before deployment; fast-moving
 model and hardware support can make a dated comparison stale without changing the layer
 boundary explained here.
+
+---
+
+# `docs/explainers/inference-parallelism/README.md`
+
+> Source: `docs/explainers/inference-parallelism/README.md`
+
+---
+title: "The fak inference ladder: five guides, five audiences"
+description: "One subject — how a transformer actually produces a token, and how fak splits that work across many workers — explained five times, each rung pitched at a different reader. Start at Level 1 (what is inference?) and climb to Level 5 (the parallelism frontier)."
+slug: inference-parallelism-ladder
+keywords:
+  - fak inference guide
+  - how inference works
+  - transformer forward pass explained
+  - pipeline parallelism explained
+  - layer loop
+  - tensor parallelism
+  - expert parallelism
+  - inference for beginners
+  - inference for new grads
+date: 2026-11-18
+---
+
+# The fak inference ladder
+
+> **What this is.** The same subject — how a language model turns your text into the
+> next token, and how fak cuts that work into pieces that run on many workers at once —
+> written **five times**, once for each kind of reader. Each rung assumes exactly what
+> the rung below it taught. A newcomer who has only ever called an API is served at
+> Level 1; a reader who wants the open problems of parallel serving is served at
+> Level 5. Pick your rung, or climb the whole ladder.
+
+Inference is one of those subjects where the beginner's page and the expert's page
+share almost no sentences. "The model predicts the next word" is true and useless to
+someone debugging a pipeline stall; "the hidden state crosses the stage boundary as a
+12-byte header plus a row-major float32 band" is precise and useless to someone who has
+never seen a forward pass. This ladder splits the difference.
+
+## The spine
+
+Every rung is a different zoom level on **one** path through the code. It is worth
+seeing the whole path once, in order, before you pick a rung:
+
+```text
+  one token id
+      │
+      ▼
+  embedBand(ids)                     internal/model/partition.go:91
+      │   token id -> a row of numbers (the hidden state)
+      ▼
+  the layer loop                     internal/model/forward.go:508
+      │   for l := 0; l < cfg.NumLayers; l++ { ... }
+      ▼
+  ForwardBand(x, lo, hi, isLast)     internal/model/partition.go:122
+      │   the SPLITTABLE unit: a contiguous band of layers
+      ▼
+  PipelineStage + StageTransport     internal/model/pipeline.go:51, :225
+      │   one band per worker; the hidden state crosses the wire
+      ▼
+  ForwardTP / ForwardEP              internal/model/tensor_parallel_forward.go:548
+      │   inside a single layer: split the matmuls / the experts
+      ▼
+  logitsFromHidden                    internal/model/forward.go:559
+      │   the shared tail: final norm -> LM head -> logit scale
+      ▼
+  next-token logits
+```
+
+The last line of that diagram is the load-bearing one. `Forward` and every parallel
+twin of it — `ForwardBand`, `ForwardTP`, `ForwardEP` — are required to **end
+identically** at `logitsFromHidden` (`internal/model/forward.go:559`). That is what
+makes the whole ladder a story about *the same computation, cut differently*, rather
+than a story about several different computations that happen to look alike. Each rung
+below is one cut.
+
+## The five rungs
+
+| Level | Who it's for | What you'll get |
+|---|---|---|
+| **[1 · What is inference?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-1-what-is-inference.md)** | A reader with no ML background at all — a new grad, a student, a backend engineer who has only ever called an API. | A model is a pile of numbers; inference runs them over your input; a token is a chunk of text; the model does one token at a time and feeds it back in. One analogy, one worked example you can do by hand. |
+| **[2 · The layer loop](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-2-the-layer-loop.md)** | Someone who now knows what a forward pass is and wants to know what happens *between* the embedding and the logits. | The stack of N same-shaped layers; attention + MLP wrapped in pre-norm + residual; the residual stream as a shared bus; why the layer boundary is the natural place to cut. |
+| **[3 · Pipeline parallelism](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-3-pipeline-parallelism.md)** | A competent engineer who wants to run a model too big for one worker. | `ForwardBand` as the unit, `PipelineStage` and `StageTransport` across workers, what actually crosses the wire, and the bit-exactness proof that a cut stack gives the same answer. |
+| **[4 · Tensor and expert parallelism](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-4-tensor-and-expert-parallelism.md)** | A senior engineer who wants to split *inside* a layer, not just between layers. | `ForwardTP` (column/row sharding of the matmuls) and `ForwardEP` (routing experts to ranks), the collectives they need, and how both stay pinned to `Forward`. |
+| **[5 · The parallelism frontier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-5-the-parallelism-frontier.md)** | A researcher who wants the composition of the axes and the honest open edges. | Pipeline × tensor × expert as one grid, the shared tail that keeps them consistent, and what is witnessed versus what is still hardware-gated. |
+
+## How to read it
+
+- **Never seen a forward pass?** Read **Level 1**, then **Level 2**, and stop. You will
+  be able to explain inference to someone else.
+- **Need to serve a model that does not fit one worker?** **Level 3** is the pipeline
+  axis; **Level 4** is the tensor and expert axes.
+- **Designing the serving plan?** **Level 5** is where the axes compose and where the
+  open problems live.
+
+Each rung ends with a nav footer linking its neighbours and back here.
+
+## See also
+
+- [The inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) — the **sibling** ladder, and the right
+  place to start if you have not yet seen a forward pass. It is the broad survey: what a
+  token is, the forward pass end to end, the ~10 operations inside one decoder block,
+  prefill vs decode, and a short tour of what changes at scale. This ladder is the
+  **deep dive on one axis of that survey** — the layer stack and how you cut it across
+  workers. Read the sibling first for the whole picture; read this one when the question
+  is "how do I split a model that does not fit on one worker?"
+- [Multi-GPU tensor parallelism in fak](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/multi-gpu-tensor-parallelism.md) — the
+  architecture reference for the **tensor axis**. Level 4 introduces the idea; that page
+  is the full setup/API/collective-seam document. This ladder cross-links to it rather
+  than duplicating it.
+- [The fak caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) — the sibling ladder. Caching is about
+  *not recomputing* work you have already done; inference is about *doing* the work.
+  They meet at the KV cache, which Level 3 and Level 4 touch on.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the vocabulary.
+- [Context](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context.md) · [Addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache.md) — the
+  context and cache layers the serving path sits on top of.
+
+---
+
+# `docs/explainers/inference-parallelism/level-3-pipeline-parallelism.md`
+
+> Source: `docs/explainers/inference-parallelism/level-3-pipeline-parallelism.md`
+
+---
+title: "Pipeline parallelism: cutting the layer stack across workers"
+description: "Your model does not fit on one machine. The layer stack is the natural place to cut it: ForwardBand runs a contiguous band of layers, PipelineStage gives each worker one band, and StageTransport carries the hidden state across the boundary. The split is not an approximation — it is the same computation, and the repo proves it bit-exact. Level 3 of the fak inference ladder."
+slug: pipeline-parallelism
+keywords:
+  - pipeline parallelism explained
+  - layer parallelism
+  - ForwardBand
+  - StageTransport
+  - pipeline bubble
+  - model does not fit on one GPU
+  - bit-exact pipeline split
+  - incremental pipeline decode
+  - fak inference ladder
+date: 2026-11-18
+---
+
+# Pipeline parallelism
+
+*You are on **Level 3 of 5** of the [fak inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/README.md).*
+
+> **Audience.** You have read [Level 1](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-1-what-is-inference.md) (a forward pass
+> turns token ids into next-token scores) and [Level 2](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-2-the-layer-loop.md) (the
+> middle of that pass is a stack of N same-shaped layers, connected by one small vector).
+> Now the practical question: **the model does not fit on one machine — how do I split
+> it?** You do not need to know any attention math for this rung. You need to be
+> comfortable reading a Go function signature and a byte layout.
+
+> **Short answer.** Cut the **stack**. Give worker 0 layers `[0, 8)`, worker 1 layers
+> `[8, 16)`, and so on. Each worker loads only its own layers' weights, runs only its own
+> layers, and hands the hidden state — one small `[seq][hidden]` block — to the next
+> worker. The thing that crosses a boundary is the *activation*, not the weights. This is
+> called **pipeline parallelism** (PP), and in fak the split is not an approximation: a
+> cut stack produces **bit-for-bit identical** logits to the uncut model, and the repo
+> has tests that assert exactly that.
+
+## What are the two ways to split a model?
+
+There are two, and they are genuinely different operations. Get the distinction in one
+sentence each and the rest of this ladder falls into place:
+
+- **Pipeline parallelism** cuts the **stack**. The boundary between two stages is a
+  **hidden-state tensor** — the `[seq][hidden]` bus from Level 2. Nothing inside a layer
+  is touched. *This page is about this one.*
+- **Tensor parallelism** cuts **inside a layer**. The boundary is a **collective** — an
+  `AllGather` or an `AllReduceSum` — that has to run *in the middle of* the layer's
+  arithmetic, because the layer's own matmul has been split across workers.
+  [Level 4](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-4-tensor-and-expert-parallelism.md) is about that one.
+
+Here is the same model drawn both ways:
+
+```text
+  PIPELINE PARALLELISM (this page)          TENSOR PARALLELISM (Level 4)
+  cut BETWEEN layers                        cut INSIDE a layer
+
+  worker 0 ┌──────────────┐                 worker 0 ┌──────────────┐
+           │  layer 0     │                          │  layer 0     │
+           │  layer 1     │                          │  ┌────────┐  │
+           │  layer 2     │                          │  │ W left │  │
+           │  layer 3     │                          │  └────────┘  │
+           └──────┬───────┘                          └──────┬───────┘
+                  │ hidden state                            │ collective
+                  │ [seq][hidden]                           │ AllGather /
+                  │  ← ONE tensor, small                    │ AllReduceSum
+           ┌──────▼───────┐                          ┌──────▼───────┐
+  worker 1 │  layer 4     │                 worker 1 │  ┌────────┐  │
+           │  layer 5     │                          │  │ W right│  │
+           │  layer 6     │                          │  └────────┘  │
+           │  layer 7     │                          │  layer 0     │
+           └──────────────┘                          └──────────────┘
+
+  the seam is a TENSOR                        the seam is a COLLECTIVE
+  between two whole layers                    inside one layer's matmul
+```
+
+The practical difference: a pipeline boundary is a **send**, and a tensor boundary is a
+**synchronisation**. A send can be pipelined and overlapped; a synchronisation cannot,
+because the layer literally cannot finish its arithmetic until every rank has
+contributed. That is why PP is the easier axis to reason about, and why it is the one
+this rung teaches first.
+
+## Why is the layer stack the natural cut?
+
+Level 2 already gave you the three properties. Restated as the reason the cut is *cheap*:
+
+1. **The layers are sequential.** Layer 5 reads layer 4's output, so the work is already
+   ordered. A cut does not create a dependency; it just assigns an existing one to a
+   different machine.
+2. **The layers are identically shaped.** "Run layers `[0, 8)`" and "run layers `[8, 16)`"
+   are the *same function* on different data. One code path, N calls.
+3. **The tensor crossing the boundary is small.** Only the `[seq][hidden]` bus crosses.
+   The weights — the billions of numbers, the thing that did not fit — stay put on
+   whichever worker owns them.
+
+Point 3 is the one that pays. Compare the two seams by *what has to move*:
+
+```text
+  PIPELINE BOUNDARY                     TENSOR BOUNDARY
+  ─────────────────                     ───────────────
+  what crosses:  the activation         what crosses:  partial results of a matmul
+  size:          seq × hidden × 4 B     size:          depends on the shard
+  when:          after a whole layer    when:          MID-LAYER, twice per block
+  can overlap?   yes — send and keep    can overlap?   no — the layer cannot
+                 computing the next                    finish until the
+                 microbatch                            collective returns
+```
+
+A pipeline boundary is a clean seam you can put a network in front of. A tensor boundary
+is a hole cut in the middle of a computation. Both are real, both are in this repo, and
+they compose — but they are not the same kind of cut, and conflating them is the single
+most common confusion in this area.
+
+## What is the unit of execution?
+
+Here is the load-bearing claim of this entire rung, and it is a claim about *identity*,
+not about approximation.
+
+The unit is `ForwardBand` (`internal/model/partition.go:122`):
+
+```go
+func (m *Model) ForwardBand(x [][]float32, lo, hi int, isLast bool) ([][]float32, [][]float32, error)
+```
+
+Read the signature as a sentence: *"take this already-embedded hidden state `x`, run
+layers `lo` up to but not including `hi` over it, and if `isLast`, also run the final
+norm and the LM head and give me the logits."*
+
+Now the claim. The doc comment on `ForwardBand` states it directly:
+
+> `Forward` is exactly `embedBand(ids)` followed by `ForwardBand(x, 0, NumLayers, true)`.
+
+And that is literally what the code does. `Forward` (`internal/model/forward.go:483`)
+ends with:
+
+```go
+return m.forwardHiddenRows(m.embedBand(ids))
+```
+
+`embedBand` (`internal/model/partition.go:91`) is the token-embedding lookup — the head of
+the forward pass. `forwardHiddenRows` (`internal/model/forward.go:508`) is the layer loop,
+`for l := 0; l < cfg.NumLayers; l++`. So the monolithic forward pass **is** a single band
+covering every layer, with the embedding in front and the head at the end.
+
+Why does that matter so much? Because it means the split is not a re-derivation. It is the
+*same instruction stream* over the *same bytes*:
+
+- Every weight is read by per-layer **name** (`model.layers.N.*`), so a worker holding only
+  `[lo, hi)` reads exactly the weights the monolith would have read for those layers, and
+  no others.
+- RoPE is keyed on the **absolute** layer index, so layer 12 behaves like layer 12 whether
+  it is the fifth layer of a band or the thirteenth layer of the whole stack.
+- The payload is `float32`, which round-trips bit-exact as IEEE-754 little-endian.
+
+Put those together and a cut stack cannot produce a different answer. The repo does not
+ask you to take that on faith — `TestForwardBandTwoWayMatchesMonolithic`
+(`internal/model/forward_band_test.go:17`) runs the full `Forward`, then runs the same
+model as two bands, and asserts `max|delta| = 0` on the logits.
+
+`ForwardBand` also **fails closed** rather than producing garbage. It rejects a malformed
+range (`lo < 0 || hi <= lo || hi > cfg.NumLayers`, `internal/model/partition.go:124`), and
+for a GLM-MoE-DSA model it rejects a band that would *begin* in the middle of an
+IndexShare group (`internal/model/partition.go:127`) — a "shared" indexer layer reuses the
+previous "full" layer's index, and a band starting on the shared layer never computed it.
+That is a real architectural constraint, not a formality: it is why the plan validator
+below has an opinion about *where* you may cut.
+
+## How does a worker load only its own layers?
+
+Splitting the *computation* is only half the job. The other half is the reason you are
+here: the worker must not materialise weights it will never use, or you have not saved any
+memory.
+
+That is the loader-side band filter, three small pieces in `internal/model/partition.go`:
+
+- `layerWindow` (`:28`) — a half-open band `[lo, hi)` of layer indices. Its zero value
+  keeps everything, so a load with no option is byte-for-byte the old behaviour.
+- `keepsLayer` (`:40`) — "does this worker keep layer N?" Note the first branch: a
+  **layer-agnostic** tensor (index `< 0` by convention) is *always* kept. The embedding,
+  the final norm, and an untied LM head have no layer index, and a worker that owns the
+  head or the embedding needs them regardless of which band it holds.
+- `WithLayerWindow(lo, hi)` (`:61`) — the `LoadOption` (`:54`) a worker passes to keep only
+  its own band. `hi <= lo` would select nothing and is rejected at apply time as a
+  programming error rather than silently loading an empty model.
+
+The name-parsing rule lives in one place, `tensorLayerForWindow` (`:80`), so the loader
+does not duplicate it: it returns the layer index a tensor belongs to, or `-1` for a
+layer-agnostic tensor.
+
+```text
+  ONE CHECKPOINT ON DISK
+  ┌──────────────────────────────────────────────────────────────┐
+  │  model.embed_tokens.weight          (layer-agnostic)         │
+  │  model.layers.0.*                   (layer 0)                │
+  │  model.layers.1.*                   (layer 1)                │
+  │  ...                                                         │
+  │  model.layers.31.*                  (layer 31)               │
+  │  model.norm.weight                  (layer-agnostic)         │
+  │  lm_head.weight                     (layer-agnostic)         │
+  └──────────────────────────────────────────────────────────────┘
+        │                    │                    │
+        │ WithLayerWindow    │ WithLayerWindow    │ WithLayerWindow
+        │ (0, 8)             │ (8, 16)            │ (24, 32)
+        ▼                    ▼                    ▼
+  ┌───────────┐        ┌───────────┐        ┌───────────┐
+  │ embed     │        │ layers    │        │ layers    │
+  │ layers 0-7│        │ 8-15      │  ...   │ 24-31     │
+  │           │        │           │        │ norm      │
+  │           │        │           │        │ lm_head   │
+  └───────────┘        └───────────┘        └───────────┘
+   stage 0              stage 1              stage 3
+   (First)              (interior)           (Last)
+```
+
+`TestPipelineSeparatelyLoadedStagesMatchMonolithic` (`internal/model/pipeline_test.go:27`)
+is the test that makes this real rather than aspirational. It loads the *same* checkpoint
+three times with different windows, asserts that stage A holds **no** layer-2 weights and
+stage B holds **no** layer-0 or layer-1 weights, and then runs the pipeline and checks the
+logits against the monolith at `max|delta| = 0`. The stages are genuinely partitioned
+checkpoints, not one shared model wearing two hats.
+
+## How do stages talk to each other?
+
+The seam is one interface, `StageTransport` (`internal/model/pipeline.go:225`):
+
+```go
+type StageTransport interface {
+	Send(hidden [][]float32, nextLo, dstStage int) ([][]float32, int, error)
+}
+```
+
+That is the whole contract. `Send` takes a stage's output hidden state, the absolute layer
+index the receiver should resume at, and the receiving stage's index (for diagnostics
+only), and returns what the next stage receives.
+
+There are two implementations, and the pair is the point:
+
+- `LocalTransport` (`:234`) — the single-box default. It marshals the hidden state and
+  immediately unmarshals it. It is the *stand-in* for a wire send, and it is bit-exact by
+  construction because it is an IEEE-754 round-trip.
+- `TCPTransport` (`internal/model/pipeline_transport.go:31`) — a **real socket**. It
+  marshals, writes a length-prefixed frame to a peer, reads the reply frame, and
+  unmarshals it (`Send`, `:44`). On loopback this is a genuine cross-process send.
+
+The reason both exist is honesty. `LocalTransport` alone would leave "the wire is a swap
+underneath the contract" as an aspiration — a claim with no implementation behind it.
+`TCPTransport` is that implementation, and `TestTCPTransportMatchesLocal`
+(`internal/model/pipeline_test.go:534`) asserts the socket path produces the same bytes as
+the in-process path. So the pipeline is demonstrably transport-agnostic on hardware that
+exists, and a real fleet swaps in NCCL or gRPC the same way: a new `StageTransport`, not a
+change to the generation loops.
+
+## What is actually on the wire?
+
+The codec is `MarshalHidden` (`internal/model/pipeline.go:160`) and `UnmarshalHidden`
+(`:188`). The layout is a fixed **12-byte header** (`hiddenHeaderBytes = 12`, `:153`)
+followed by the float words:
+
+```text
+  byte offset   0        4        8        12
+                │        │        │        │
+                ▼        ▼        ▼        ▼
+              ┌────────┬────────┬────────┬──────────────────────────────────┐
+              │  seq   │ hidden │ nextLo │  seq × hidden × float32 words    │
+              │ int32  │ int32  │ int32  │  row-major, little-endian        │
+              └────────┴────────┴────────┴──────────────────────────────────┘
+              └──────── 12 bytes ───────┘
+                 hiddenHeaderBytes = 12
+
+  seq      = how many positions are in this frame
+  hidden   = the width of each position's vector
+  nextLo   = the ABSOLUTE layer index the receiver must resume at
+  payload  = seq*hidden float32 words, each via math.Float32bits
+```
+
+Two details are worth pausing on.
+
+**Why `math.Float32bits` and not a cast?** Because `Float32bits` is the *identity bit
+pattern*. It preserves signed zero and NaN payloads, so the round-trip cannot perturb a
+single bit. A codec that "helpfully" normalised `-0.0` to `0.0` would break the bit-exact
+gates, and the failure would be a one-in-a-million logits delta that nobody could find.
+
+**Why does the header carry `nextLo` at all?** This is the interesting one. The receiving
+stage does not trust that it was handed the right tensor. It **verifies** it:
+
+```go
+if gotLo != wantLo {
+    return nil, fmt.Errorf("model: handoff resume layer %d != stage %d band start %d", gotLo, dstStage, wantLo)
+}
+```
+
+That is `handoff` (`internal/model/pipeline.go:253`), and it is a **fail-closed check, not
+a convention**. If a frame is routed to the wrong worker — a misconfigured plan, a stale
+connection, a reordered send — the worker refuses rather than running its band against a
+hidden state that was never meant for it. The same check is repeated on the worker side in
+`ServeBand` (`internal/model/pipeline_transport.go:169`). A pipeline that silently computed
+the wrong answer would be far worse than one that stops.
+
+`UnmarshalHidden` fails closed too: a buffer shorter than the header, a negative `seq` or
+`hidden`, or a length that does not equal `12 + seq*hidden*4` is an error, not a
+best-effort decode (`:189`–`:201`).
+
+## How is the plan described?
+
+A plan is a validated tiling of the layer range into stages. Four types, all in
+`internal/model/pipeline.go`:
+
+- `StageSpec{Lo, Hi, First, Last}` (`:41`) — one worker's responsibility: the half-open
+  band `[Lo, Hi)` it owns, plus its role. `First` means it embeds the token ids (it is the
+  head of the pipeline); `Last` means it runs the final norm and LM head and returns logits
+  (it is the tail).
+- `PipelineStage` (`:51`) — a runnable worker: a standalone `Model` plus the `StageSpec` it
+  owns.
+- `PartitionPlan` (`:57`) — an ordered, validated list of `StageSpec`s.
+- `NewPartitionPlan(cfg, cuts)` (`:68`) — builds a plan from **interior cut points**.
+  `cuts = {8, 16, 24}` over 32 layers gives `[0,8)`, `[8,16)`, `[16,24)`, `[24,32)`.
+- `Validate` (`:101`) — re-checks a plan and fails closed on any malformed tiling.
+
+### A worked example: 32 layers, four stages
+
+```text
+  cfg.NumLayers = 32
+  cuts          = {8, 16, 24}
+
+  stage 0   [0, 8)    First=true   Last=false   embeds the ids, runs layers 0-7
+  stage 1   [8, 16)   First=false  Last=false   runs layers 8-15
+  stage 2   [16, 24)  First=false  Last=false   runs layers 16-23
+  stage 3   [24, 32)  First=false  Last=true    runs layers 24-31, then norm + head
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  the layer stack, cut into four bands                                    │
+  ├──────────────────┬──────────────────┬──────────────────┬─────────────────┤
+  │  layers 0 – 7    │  layers 8 – 15   │  layers 16 – 23  │  layers 24 – 31 │
+  │  + embedding     │                  │                  │  + norm + head  │
+  │  stage 0 (First) │  stage 1         │  stage 2         │  stage 3 (Last) │
+  └────────┬─────────┴────────┬─────────┴────────┬─────────┴────────┬────────┘
+           │                  │                  │                  │
+           │  hidden state    │  hidden state    │  hidden state    │
+           │  [seq][hidden]   │  [seq][hidden]   │  [seq][hidden]   │
+           │  nextLo = 8      │  nextLo = 16     │  nextLo = 24     │
+           ▼                  ▼                  ▼                  ▼
+        ── send ──►        ── send ──►        ── send ──►      logits [seq][vocab]
+        (StageTransport)   (StageTransport)   (StageTransport)  (terminal)
+
+  What crosses each boundary: ONE [seq][hidden] tensor. Not the weights.
+  What does NOT cross: the weights, the KV cache, the DSA top-k state.
+```
+
+`Validate` enforces the properties that make that picture well-formed (`:101`–`:148`):
+
+- the bands **tile** `[0, NumLayers)` contiguously — the first starts at 0, the last ends
+  at `NumLayers`, and each `Lo` equals the previous `Hi` (no gap, no overlap);
+- every band is non-empty and in range;
+- exactly one stage is marked `First` (and it is the first), exactly one is marked `Last`
+  (and it is the last);
+- for a GLM-MoE-DSA config, every interior boundary falls on a full- or dense-indexer
+  layer, so no IndexShare group is split across the wire.
+
+That last rule is the plan-time lift of the per-band check inside `ForwardBand`. It is
+enforced *before any worker loads weights*, which is the right time to find out that your
+cut is illegal.
+
+## How does a whole generation run?
+
+Two loops, and the difference between them is the most interesting engineering in this
+rung.
+
+### The simple loop: re-forward the whole sequence
+
+`RunPipeline(ids, stages)` (`internal/model/pipeline.go:281`) is the single-box end-to-end
+harness. It is `RunPipelineWith(ids, stages, LocalTransport{})` (`:289`), and the loop is
+short: stage 0 embeds and runs its band; at each boundary the hidden state goes through
+`handoff`; each subsequent stage runs its band; the last stage runs the head and returns
+logits.
+
+`PipelineGenerate(prompt, n, stages)` (`:346`) wraps that in a greedy decode loop. Its own
+doc comment is refreshingly blunt about the cost: it **re-forwards the growing sequence
+each step — O(n²)**. Step 1 forwards 1 token, step 2 forwards 2, step 3 forwards 3. It is
+the runnable proof that fak generates across genuinely partitioned stages. It is not a
+throughput path, and it does not pretend to be.
+
+### The real loop: incremental decode
+
+The interesting version keeps a **KV cache** — the per-layer memory of every position the
+model has already seen — resident inside the stage that owns the layers. That is
+`PipelineStageDecoder` (`:383`):
+
+```go
+type PipelineStageDecoder struct {
+	Spec    StageSpec
+	Session *Session
+}
+```
+
+Why a `Session` and not a bare cache? The doc comment answers it: the `Session` is the
+unit so that the **last stage's head is literally `Session.glmDsaHead`** — the exact oracle
+the monolithic `Session.Generate` uses. There is no second head path that could drift from
+the first. And out-of-band cache layer slices stay `nil`, so resident KV is bounded to the
+band. That is the whole point of pipeline parallelism: the memory a worker holds is
+proportional to the layers it owns.
+
+The pieces:
+
+- `NewPipelineStageDecoder(spec, m)` (`:391`) — builds a stateful decoder over a windowed
+  model and allocates the band's KV cache.
+- `decode(id, x, pos)` (`:400`) — advances this stage's band by **one position**.
+- `StepPipelineDecode(id, pos, stages)` (`:474`) — advances *every* stage by one position
+  for token `id` at absolute position `pos`, threading the single-position hidden across
+  the transport, and returns the last stage's logits.
+- `StepPipelineDecodeWith(...)` (`:480`) — the same, parameterised by the `StageTransport`.
+- `PipelineGenerateIncremental(prompt, n, stages)` (`:514`) — the full loop: reset, prefill
+  the prompt in lockstep at positions `0..len-1`, then decode from position `len`.
+- `ResetStageDecoders(stages)` (`:438`) — restores every stage to a fresh, position-zero
+  cache. This one is a footgun guard: a decoder carries state across calls, so reusing a
+  decoded-on set for a new sequence without resetting would silently **concatenate** the
+  two sequences.
+- `assertBandAtPos(st, pos)` (`:452`) — fails closed if a stage's band has not run exactly
+  `pos` times. It reads the stage's *own* band cache rather than a global length, because
+  interior stages never advance a global position counter. A stage that has drifted out of
+  lockstep is rejected before its next append would mis-assert a row.
+- `validateDecoderPlan(stages)` (`:409`) — re-checks a hand-built decoder set the same way
+  `RunPipeline` checks `PipelineStage`s: nil sessions rejected, every stage's `NumLayers`
+  must agree (a stage loaded against the wrong checkpoint is rejected, not silently mixed),
+  and the specs must form a valid `PartitionPlan`.
+
+### Why does decode need a stateful per-stage decoder?
+
+Because the KV cache lives *inside* the stage that owns the layers. This is the part that
+makes incremental PP harder than incremental single-worker decode, and it is worth a
+diagram:
+
+```text
+  RE-FORWARD (RunPipeline)                INCREMENTAL (StepPipelineDecode)
+  ────────────────────────                ────────────────────────────────
+  every step re-runs the whole            every step appends ONE position
+  sequence through every stage            to each stage's own band cache
+
+  step 3: forward [t0 t1 t2 t3]           step 3: append t3 to stage 0's cache
+          through all 32 layers                    append t3 to stage 1's cache
+          (t0, t1, t2 recomputed)                  append t3 to stage 2's cache
+                                                   append t3 to stage 3's cache
+  cost: O(n²) over the generation          cost: O(n) over the generation
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  stage 0 KV cache:  layers 0-7   only                                │
+  │  stage 1 KV cache:  layers 8-15  only                                │
+  │  stage 2 KV cache:  layers 16-23 only                                │
+  │  stage 3 KV cache:  layers 24-31 only                                │
+  └──────────────────────────────────────────────────────────────────────┘
+  Each stage's resident KV is bounded to its band. That is the memory win.
+```
+
+And `validateDecoderPlan` refusing a plan whose cut lands on a shared layer is the same
+rule as `Validate`'s, applied to the decode path: a stage that begins on a GLM shared
+indexer layer never computed the index it is supposed to reuse, so the plan is refused at
+plan time rather than producing a subtly wrong token at position 400.
+
+## What does the worker side look like?
+
+So far the stages have all been in one process. The worker side is what makes it a real
+pipeline.
+
+`ServeBand(conn, stage, downstream)` (`internal/model/pipeline_transport.go:150`) is the
+band-running worker serve loop. It reads a frame, decodes it to a hidden state, checks the
+resume layer against its own band start, runs `ForwardBand` over its resident band, and
+replies with its **own** output frame:
+
+- the **last** stage marshals the per-position logits it produced under a sentinel resume
+  layer (`replyResumeLayer = -1`, `:126`) — a value distinct from every valid band start,
+  so a logits reply can never be mistaken for a hidden state handed to a downstream band;
+- an **interior** stage forwards its output hidden state to the next worker over
+  `downstream` and relays that worker's reply back upstream unchanged.
+
+It serves frames until the connection closes, so one worker handles every token of a
+generation over a persistent connection. A nil `downstream` on an interior stage is a
+configuration error, surfaced rather than deadlocked.
+
+`EchoFrames(conn)` (`:106`) is the reference peer: it reads each frame and writes it
+straight back. It is the identity peer that proves the transport itself preserves the
+payload bit-for-bit. `ServeBand` is the real peer that replaces it.
+
+`RunPipelineAcrossWorkers(ids, first, downstream)` (`:221`) is the multi-node counterpart
+of `RunPipelineWith`. It runs **only the first stage** in this process and delegates every
+later stage to a remote `ServeBand` worker. Where `RunPipelineWith` uses the transport as a
+marshalling boundary with an echo peer, here the remote bands run *only* inside the worker
+serve loops — so a two-stage run is a genuine cross-process pipeline.
+
+### The engine bridge
+
+`internal/modelengine/pipeline.go` puts that substrate behind the same engine surface the
+in-process engine uses, so a host can register and select it through the normal driver path
+instead of a test-only harness. (A note on the word "kernel": this repo uses it in three
+unrelated senses — the OS-metaphor agent kernel, an HPC compute kernel, and a literal CUDA
+kernel. The `"inkernel-pipeline"` id below is the *in-process* sense: the engine that runs
+the model in the same process, as opposed to a remote worker. It is not a CUDA kernel.)
+
+- `PipelineEngineID = "inkernel-pipeline"` (`:26`) — the default id for a PP head engine.
+- `PipelineEngine` (`:32`) — drives the first stage in-process and reaches the rest through
+  `downstream`, typically a `TCPTransport` whose peer is `ServeBand`.
+- `NewPipelineEngine(first, downstream)` (`:46`) — builds it. `first` must be the `First`
+  stage; if it is not also `Last`, `downstream` must reach the next worker.
+- `SetWorkerCoupler` (`:51`) / `WorkerCoupler` (`:59`) — the coupler seam.
+- `Admit(ctx, call)` (`:101`) — starts a streamed generation. It is deliberately
+  conservative: one admitted request re-forwards the growing sequence through
+  `RunPipelineAcrossWorkers` once per generated token, then streams that token. That is
+  slower than an incremental PP scheduler, and the file says so — but it puts the real
+  `ServeBand` loop behind the same admit/stream/reclaim surface without forking the proven
+  worker code.
+
+Note the mutex in `PipelineEngine` (`:41`): `TCPTransport` is a request/reply stream over
+one connection, so concurrent admitted requests are serialised to stop their
+length-prefixed frames from interleaving.
+
+## What is the honest cost?
+
+Pipeline parallelism buys **fit**. It does not, by itself, buy **speed**. Say that plainly,
+because the opposite is the most common thing people believe about it.
+
+With **one request in flight**, all but one stage is idle at any instant. Stage 0 works
+while stages 1, 2, and 3 wait; then stage 1 works while 0, 2, and 3 wait. That idle time
+is called the **bubble**, and it is not a bug — it is what a sequential computation looks
+like when you spread it over parallel hardware.
+
+```text
+  ONE REQUEST IN FLIGHT — the bubble is most of the machine
+  time ──►
+  stage 0  [███][   ][   ][   ]
+  stage 1  [   ][███][   ][   ]
+  stage 2  [   ][   ][███][   ]
+  stage 3  [   ][   ][   ][███]
+           └───┴───┴───┴───┘
+           at any instant, exactly ONE stage is working.
+           the other three are idle. That is the bubble.
+
+  SEVERAL REQUESTS (or micro-batches) — the bubble fills
+  time ──►
+  stage 0  [A][B][C][D]
+  stage 1  [ ][A][B][C]
+  stage 2  [ ][ ][A][B]
+  stage 3  [ ][ ][ ][A]
+           └───┴───┴───┴───┘
+           once the pipe is full, every stage is busy.
+           A, B, C, D are four different requests (or four micro-batches
+           of one request) at different points in the same stack.
+```
+
+What fills the bubble is **more work in flight**: multiple concurrent requests, or
+micro-batches of one request split into chunks that pipeline through the stages. The repo
+has the incremental decode machinery that a scheduler would build on
+(`StepPipelineDecode`, `internal/model/pipeline.go:474`; `PipelineGenerateIncremental`,
+`:514`), but the *scheduling* that fills the bubble — how many micro-batches, in what order
+— is not a witnessed end-to-end path here. [Level 5](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-5-the-parallelism-frontier.md)
+names that as an open edge.
+
+**There is no measured pipeline-parallel speedup in this repo.** Not a small one, not a
+qualified one — none. The repo witnesses that a cut stack gives the *same answer*; it does
+not witness that the cut stack is *faster*. If you see a number on this page, it is a byte
+count or a layer count, never a measurement.
+
+There is also no `fak serve` flag for pipeline stages. The serve surface has
+`--tensor-parallel` and `--expert-parallel` (Level 4), but the PP path is reached through
+the library and the engine bridge, not a serve flag. That is an honest gap, not an
+oversight to paper over.
+
+## What is witnessed?
+
+Every row below is a real test in the repo. The third column says what "matches" *means*
+in that row, because "matches" is not one thing.
+
+| Mechanism | Test that pins it | What the test actually asserts |
+|---|---|---|
+| Band split | `TestForwardBandTwoWayMatchesMonolithic` (`internal/model/forward_band_test.go:17`) | a two-way band split equals the monolithic forward — **bit-exact** (`max\|delta\| = 0`) |
+| Separately-loaded stages | `TestPipelineSeparatelyLoadedStagesMatchMonolithic` (`internal/model/pipeline_test.go:27`) | stages loaded as *separate windowed models* equal the monolith — **bit-exact**, and each stage is asserted to hold no out-of-band layer weights |
+| Incremental decode | `TestPipelineIncrementalMatchesMonolithicSession` (`internal/model/pipeline_test.go:118`) | stepwise pipeline decode produces the same **token ids** as a monolithic `Session.Generate` |
+| Per-step logits | `TestPipelineIncrementalLogitsBitExactPerStep` (`internal/model/pipeline_test.go:159`) | the **full logits vector at every decode position** is bit-identical — stronger than the token-id gate, because a sub-argmax delta a near-tie hides would still trip it |
+| Shared boundary refused | `TestPipelineIncrementalRejectsSharedBoundary` (`internal/model/pipeline_test.go:223`) | a band that starts on a GLM shared-indexer layer is **refused**, not silently served |
+| Generate loop | `TestPipelineGenerateMatchesMonolithicSession` (`internal/model/pipeline_test.go:363`) | the full greedy generate loop equals a monolithic session |
+| Cross-process transport | `TestTCPTransportMatchesLocal` (`internal/model/pipeline_test.go:534`) | `TCPTransport` over a real loopback socket equals `LocalTransport` — **equality, not throughput** |
+| Stage worker | `TestPipelineEngineAdmitRunsServeBandWorker` (`internal/modelengine/pipeline_test.go:19`) | the engine admits a request and runs a real `ServeBand` worker over TCP, streaming the same tokens as the monolith |
+
+Read the table as a spectrum of *what is proven*, not a checklist:
+
+```text
+  PROVEN                                    NOT PROVEN HERE
+  ─────────────────────────────────────     ────────────────────────────────
+  a cut stack gives the SAME ANSWER         a cut stack is FASTER
+  the socket path equals the local path     the socket path is fast
+  a bad plan is REFUSED                     a good plan is OPTIMAL
+  a stage runs its own band                 a stage recovers from a crash
+  incremental decode matches the monolith   the bubble is filled by a scheduler
+```
+
+The right-hand column is not a list of failures. It is the boundary of what the tests
+claim, and knowing where that boundary is is the difference between using this machinery
+and misusing it.
+
+## Try it
+
+```bash
+# The band identity: a two-way split equals the monolithic forward, bit-exact.
+go test ./internal/model/ -run TestForwardBandTwoWayMatchesMonolithic -v
+
+# The real thing: stages loaded as SEPARATE windowed models, still bit-exact.
+go test ./internal/model/ -run TestPipelineSeparatelyLoadedStagesMatchMonolithic -v
+
+# Incremental decode: per-stage KV, one position per step, matches the monolith.
+go test ./internal/model/ -run TestPipelineIncrementalMatchesMonolithicSession -v
+
+# The wire: a real loopback socket equals the in-process transport.
+go test ./internal/model/ -run TestTCPTransportMatchesLocal -v
+
+# The worker: the engine admits a request and runs a ServeBand worker over TCP.
+go test ./internal/modelengine/ -run TestPipelineEngineAdmitRunsServeBandWorker -v
+
+# Declared memory accounting for a layer-band placement (no model loading).
+fak model fit bands --input placement.json --manifest shards.json --manifest-sha256 SHA256
+```
+
+The first four are the correctness story in four commands. The last one is the *planning*
+side: `fak model fit bands` checks a declared per-rank layer-band placement against an
+authenticated shard manifest and reports whether each band fits its declared charge. It
+performs no model loading and no hardware qualification — it is declared accounting, and
+it says so.
+
+## See also
+
+- [Level 2 — The layer loop](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-2-the-layer-loop.md): the residual stream and the
+  same-shaped layer stack this rung cuts.
+- [Level 4 — Tensor and expert parallelism](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-4-tensor-and-expert-parallelism.md): the
+  other axis — cutting *inside* a layer, where the seam is a collective rather than a
+  tensor.
+- [Level 5 — The parallelism frontier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-5-the-parallelism-frontier.md): how the axes
+  compose, and the honest fence around what is witnessed.
+- [Multi-GPU tensor parallelism in fak](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/multi-gpu-tensor-parallelism.md) — the
+  architecture reference for the tensor axis, including the exact NCCL/RCCL swap-in point.
+  This page cross-links to it rather than duplicating it.
+- [The fak caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) — the sibling ladder. Caching is about
+  *not recomputing* work you have already done; inference is about *doing* the work. They
+  meet at the KV cache, which the incremental decode path above keeps per stage.
+- [Addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache.md) · [Context](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/context.md) — the
+  cache and context layers the serving path sits on top of.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the vocabulary.
+
+---
+*[Full ladder (README)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/README.md) · next → [Level 4 — Tensor and expert parallelism](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/level-4-tensor-and-expert-parallelism.md)*
+
+---
+
+# `docs/explainers/inference/README.md`
+
+> Source: `docs/explainers/inference/README.md`
+
+---
+title: "How inference works: a five-rung ladder (fak as the worked example)"
+description: "The same subject — how a language model turns your prompt into the next token — explained five times, each rung pitched at a different reader. Start at Level 1 (what is a token?) and climb to Level 5 (what changes at scale). Every claim is pinned to a real file in this repository."
+slug: inference-ladder
+keywords:
+  - how inference works
+  - forward pass explained
+  - transformer forward pass
+  - prefill vs decode
+  - KV cache explained
+  - logits and sampling
+  - LLM inference for beginners
+  - inference internals
+date: 2026-11-18
+---
+
+# How inference works — the five-rung ladder
+
+> **In one breath:** A language model turns your text into numbers. It then
+> scores every word it could say next. It picks one and starts again. That loop
+> is inference.
+
+**One line:** The model is a function from a sequence of token ids to a score for
+every entry in its vocabulary; generation is that function applied repeatedly,
+and everything else in this ladder is about making the function fast without
+changing what it computes.
+
+> **Who this is for.** One subject — *what actually happens between your prompt and
+> the next token* — written **five times**, once for each kind of reader. A
+> newcomer with no math gets Level 1. A working engineer who wants the real code
+> paths gets Level 3. A performance engineer gets Level 4. A researcher gets
+> Level 5. Each rung assumes exactly what the rung below it taught, and nothing
+> more.
+
+Most explanations of inference fail in one of two ways. Either they stay at the
+level of "the model predicts the next word" and never show you the machine, or
+they open with matrix calculus and lose everyone who has not already seen it.
+This ladder splits the difference: **every rung answers a question you can
+actually ask**, shows a worked example you can check by hand, and cites the file
+in this repository where the real thing lives.
+
+## The one-sentence answer (all five rungs agree on this)
+
+A language model is a function. You give it a sequence of **tokens**; it gives
+you back a **probability for every token in its vocabulary** being the next one.
+You pick one, append it, and run the function again. That loop is inference.
+
+Everything else — attention, the KV cache, quantization, batching — is about
+making that function *fast* and *cheap* without changing what it computes.
+
+## The five rungs
+
+| Level | Who it's for | The question it answers |
+|---|---|---|
+| **[1 · What is a token, and what is a model?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-1-what-is-a-token.md)** | A total newcomer. No math, no code. | "I type a sentence. What does the machine actually receive, and what does it give back?" |
+| **[2 · The forward pass, one token at a time](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-2-the-forward-pass.md)** | A new grad who can read Go or Python. | "Show me the whole pipeline, end to end, with a tiny example I can follow by hand." |
+| **[3 · Inside one decoder block](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-3-inside-a-block.md)** | A working engineer who wants the real code. | "What are the ~10 operations in a block, and where is each one in this repo?" |
+| **[4 · Prefill vs decode: why one model has two speeds](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-4-prefill-vs-decode.md)** | A performance engineer. | "Why is the first token slow and the rest fast? Why is decode memory-bound?" |
+| **[5 · What changes at scale](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-5-at-scale.md)** | A researcher or systems lead. | "Batching, quantization, MoE, speculative decoding — what do they change, and what is still open?" |
+
+![The forward pass for one token: text is encoded to token ids, each id becomes a vector, the layer loop runs over the hidden state, the final position's row is projected to one score per vocabulary entry, and one is picked as the next token; the next token feeds back into the input, which is the generation loop](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/diagrams/forward-pass.svg)
+
+## How to read it
+
+- **Curious, not technical?** Read **Level 1** and stop. It is the whole story in
+  plain words.
+- **Learning to work on inference code?** Read **1 → 2 → 3**. Level 3 is where
+  the repository's real functions appear.
+- **Tuning or serving a model?** **Level 4** is the one that changes your
+  decisions.
+- **Doing research or setting direction?** **Level 5** names the frontier and,
+  honestly, the parts nobody has solved.
+
+Each rung ends with a nav footer linking its neighbours and back here.
+
+## How to check a claim on any rung
+
+Every rung cites files as `path:line`. Those paths are real and resolve in this
+repository. To check one yourself:
+
+```sh
+sed -n '483,500p' internal/model/forward.go   # the Forward entry point
+```
+
+Run that from the repository root.
+
+If a citation does not resolve, that is a bug in the page. The **links** between
+pages are machine-checked — `fak doc-freshness --check --corpus` walks every
+markdown file in the repository (`internal/docfreshrsi/corpus_audit.go:104`) and
+reports `dangling_links`; a broken relative link fails that gate. The **citations** are checked by hand, and the check is weaker
+than it looks: a gate can prove that `internal/model/forward.go:483` *exists*, but
+not that line 483 *says what the page claims it says*. A citation that resolves is
+not yet a citation that is true. When a page here is wrong, it is almost always
+that second failure — the line moved, or the claim drifted off it — so read the
+line, do not just confirm it is there.
+
+## See also
+
+- [The explainers index](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/README.md) — every ladder and single-page explainer, indexed by what you already know.
+- [The caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) — the same five-rung pattern applied
+  to fak's caching stack. This ladder is its sibling.
+- [The accelerator ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/README.md) — the sibling ladder: this
+  one explains what the forward pass *is*; that one asks *where it runs* (CPU,
+  Vulkan, ROCm) and why the answer changes the numbers.
+- [What is a CUDA kernel?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-a-cuda-kernel.md) — the word "kernel" means
+  three different things here; read this before Level 3 if that trips you.
+- [The abstraction map](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/the-abstraction-map.md) — where the model sits in the
+  full stack, from your terminal to the silicon.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the vocabulary.
+- [The mixed-precision ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/mixed-precision/README.md) — the deep dive this
+  ladder hands off to at Level 4: what a model's numbers are stored in, and what
+  that storage costs in memory and in time.
+- [The tokenization ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tokenization/README.md) — the step *before* this
+  ladder starts. Level 1 here says the tokenizer decides the chunks by counting;
+  that ladder is where the counting is written out, down to the merge loop.
+- [The learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) — the prerequisite-ordered catalog
+  this ladder plugs into (courses FAK 522–529 cover the same ground, rigor-first:
+  FAK 522 tokenizer, 523 normalization, 524 RoPE, 525 attention, 526 MLP and the
+  residual stream, 527 the in-kernel KV cache, 528 quantization, 529 forward-pass
+  parity against the HuggingFace oracle).
+
+---
+
+# `docs/questions/inference.md`
+
+> Source: `docs/questions/inference.md`
+
+---
+title: "Inference — the questions a newcomer actually asks"
+description: "The question ledger for the inference axis: the questions a newcomer asks when they first try to follow a token through a model, each with a short answer and a pointer to the rung of the inference ladder that answers it in full."
+slug: questions-inference
+keywords:
+  - inference questions
+  - next-token prediction
+  - why is the first token slow
+  - prefill vs decode
+  - KV cache explained
+  - why is decode memory bound
+  - quantization questions
+  - speculative decoding
+  - question loop
+  - inference ladder
+date: 2026-11-18
+---
+
+# Inference — the questions a newcomer actually asks
+
+> **What this is.** The question ledger for the **inference** axis. Not a tutorial — a
+> list of the questions a newcomer actually asks the first time they try to follow a
+> token through a model, each with a short answer and a pointer to the rung of the
+> [inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) that answers it in full. The
+> page *is* the questions; the answers are deliberately short, because the rung is
+> where the real answer lives.
+
+"Inference" here means one specific thing: **the loop that turns your prompt into the
+next token, and everything done to make that loop fast without changing what it
+computes.** A newcomer meets that sentence and immediately has questions — some
+contrarian ("isn't this just autocomplete?"), some afraid ("why does the same prompt
+give different answers?"), and some nobody has thought to ask ("why is decode
+memory-bound and not compute-bound?"). This page collects them, labels them honestly,
+and routes each one to the rung that closes it.
+
+## How this page works
+
+This page is the durable surface of the **question loop** — a super-loop-family member
+whose whole job is to *ask* hard questions and *not* answer them. Two loops, in two
+separate context windows, keep it honest:
+
+- **The ASK loop** (role: *questioner*) writes the questions. Each tick it appends a
+  handful of `open` rows to [`asked.jsonl`](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/asked.jsonl) and stops. It never proposes
+  fixes, files tickets, or answers itself.
+- **The NEXT-STEP loop** (role: *ticketer*) turns an unanswered question into work. Each
+  tick it takes **one** `open` question, decides its fate, and — only if the question
+  earns it — files **one** ticket.
+
+**Why the two loops are separated.** A questioner that also holds the ticketing pen
+slides into solution mode: it starts writing questions it already knows how to close, and
+quietly stops asking the uncomfortable ones. The load-bearing rule is that **the
+questioner must not be the one who decides the question is answered.** Reading the open
+backlog is fine and necessary; *triaging* it is what corrupts the ASK role. A fresh
+context per ASK tick keeps the provocations honest. The full schema, the four categories,
+and the machine-checked ledger rules live in the [question-loop README](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/README.md).
+
+The categories below are the ledger's own vocabulary — **CONTRARIAN**, **AFRAID**,
+**UNASKED**, and **STEELMAN** — not a new taxonomy invented for this page.
+
+## CONTRARIAN — questions that challenge what the repo claims is correct
+
+### Isn't this just autocomplete?
+
+Yes, in the literal sense, and the rung says so plainly. The model is a function from
+token ids to a score per vocabulary entry, run in a loop; there is no plan being
+consulted and no outline being followed. What makes it feel like more is that predicting
+the next chunk well, across everything people write, requires absorbing grammar, facts,
+and the shape of an argument as a side effect. The mechanism is small and completely
+understandable; the behaviour that falls out of it is large, and nobody has a tidy
+explanation for all of it.
+
+→ full answer: [Level 1 — What is a token, and what is a model?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-1-what-is-a-token.md)
+
+### If it's just matrix multiplies, why does it need a GPU?
+
+Because the arithmetic is not the hard part — the memory traffic is. A decode step reads
+every weight to produce one token, and the arithmetic intensity works out to about 4
+FLOP per byte for a 7B model at 4 bits, roughly 25 times below the ~100 FLOP/byte a
+modern accelerator needs to be compute-bound. The arithmetic units finish long before the
+memory bus does, and then they wait. A GPU is not there to do more multiplies; it is
+there to move bytes fast. Prefill, which multiplies the same weights against many
+positions, is compute-bound — so the same hardware is doing two different jobs.
+
+→ full answer: [Level 4 — Prefill vs decode: why one model has two speeds](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-4-prefill-vs-decode.md)
+
+### Isn't the KV cache just a memoization table?
+
+No, and the difference is the whole design. A memoization table caches a pure function's
+output; the KV cache caches a vector *at a position*, and RoPE bakes the position into
+the stored key, so you cannot un-rotate it cleanly. That is why the cache keeps two
+copies of K: `K` (post-RoPE) and `Kraw` (pre-RoPE), so a span can be repositioned by one
+clean rotation, which is bit-exact to a fresh prefill, where composing two rotations
+drifts ~1e-6 — enough to flip a greedy token. It is a first-class kernel-owned object
+(`internal/model/kvcache.go:11`) with an absolute-position list and an eviction path, not
+a lookup table.
+
+→ full answer: [Level 4 — Prefill vs decode: why one model has two speeds](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-4-prefill-vs-decode.md)
+
+### Isn't temperature just a hack?
+
+It is a knob, but a principled one. Greedy decoding always takes the top token and is
+completely predictable; sampling draws from the distribution in proportion to
+probability, and temperature controls how adventurous that draw is — low concentrates on
+the top scores, high spreads the probability out. The reason to want the dice is that
+always taking the top token makes a model that is correct and dull, and sometimes stuck:
+if the single best next token leads down a bad path, greedy has no way out. Temperature
+is the parameter that decides how much of that escape hatch you want.
+
+→ full answer: [Level 1 — What is a token, and what is a model?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-1-what-is-a-token.md)
+
+## AFRAID — the elephant in the room
+
+### Why does the same prompt give different answers?
+
+Because the default is not always greedy. Greedy decoding — take the highest score — is
+deterministic: the same prompt always produces the same answer. Sampling rolls dice
+weighted by the probabilities, so a token with a 40% chance comes up about 40% of the
+time, and the same question produces different answers on different days. That is usually
+what you want from something you are talking to, and usually not what you want from
+something you are testing. Both modes are real and both are in the repo: the greedy pick
+is `internal/model/kv.go:1652`, the dice are rolled in
+`internal/agent/inkernel_sampling.go:14`.
+
+→ full answer: [Level 1 — What is a token, and what is a model?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-1-what-is-a-token.md)
+
+### Why is the first token slow?
+
+Because the first token is the *last* token of a whole-prompt pass, and the tokens after
+it are each the *only* token of a one-token pass. Prefill ingests the whole prompt in one
+wide pass — every position computed, the weights read once — so its cost grows with
+prompt length; decode then makes one token at a time, and its cost is roughly flat per
+token. A 2,000-token prompt takes roughly 400 ms to its first token and then roughly 15
+ms per token after. Time to first token is dominated by prefill; inter-token latency is
+dominated by model size.
+
+→ full answer: [Level 4 — Prefill vs decode: why one model has two speeds](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-4-prefill-vs-decode.md)
+
+### Does batching change the answer?
+
+No. Batching changes *when* work is admitted, never *what* the work is — each token is
+still computed by the same forward pass. What batching changes is arithmetic intensity:
+serve 32 requests at once and the same weight read serves 32 tokens, so the ratio rises
+from 4 to 128 FLOP/byte and crosses the balance point. The output distribution is
+untouched. The cost is that per-request latency can rise, because a request admitted into
+a busy batch shares bandwidth.
+
+→ full answer: [Level 5 — What changes at scale](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-5-at-scale.md)
+
+## UNASKED — questions nobody has thought to ask
+
+### Why 128,000 vocabulary entries?
+
+Because the vocabulary is the full list of chunks the model is allowed to produce, and
+the tokenizer decides those chunks by counting: common words get their own token, rare or
+long words get chopped into pieces that are themselves common. A modern model's list is
+around 128,000 entries, so the output of one next-token decision is not one number — it
+is about 128,000 numbers, one per possible next token. The LM head is the one place the
+width changes, from `HiddenSize` to `VocabSize`. The model scores every one of those
+chunks on every step and then throws almost all of them away.
+
+→ full answer: [Level 1 — What is a token, and what is a model?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-1-what-is-a-token.md)
+
+### Why is decode memory-bound and not compute-bound?
+
+Because the arithmetic intensity of a decode step is a division that cancels the model
+size. Bytes read ≈ weights × bytes-per-weight; FLOPs ≈ 2 × weights × 1 token; divide and
+the token count cancels, leaving `2 / bytes_per_weight` — about 4 FLOP/byte at 4 bits,
+independent of how big the model is. A modern accelerator needs on the order of 100
+FLOP/byte to be compute-bound, so decode sits roughly 25 times below the balance point.
+The arithmetic units finish long before the memory bus does. Prefill is the opposite: the
+same weights multiplied against 2,000 positions is 8,000 FLOP/byte, compute-bound by a
+wide margin.
+
+→ full answer: [Level 4 — Prefill vs decode: why one model has two speeds](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-4-prefill-vs-decode.md)
+
+### Why does quantization not break it?
+
+It does break it a little, and the rung is honest about that. Quantization stores each
+weight in fewer bits, so a decode step reads fewer bytes and, if bandwidth-bound, runs
+roughly proportionally faster — but rounding a weight to 4 bits loses information, the
+outputs drift, and how far is an empirical question that is not uniform: some layers
+tolerate aggressive quantization, others do not. The second cost people forget is the
+dequantization step: the weights are stored packed, but the matmul needs real numbers, so
+you unpack on the fly. The repo's own KV cache shows the shape of the trade — it
+quantizes the hot path (attended K and V, read every token) and keeps full precision on
+the cold path (`Kraw`, read on eviction), because a small error there compounds.
+
+→ full answer: [Level 5 — What changes at scale](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-5-at-scale.md)
+
+## STEELMAN — the strongest version of the objection
+
+### Steelman: the model is thinking, not predicting — why reduce it to next-token prediction?
+
+The steelman is real: to guess the next chunk of text well, across everything people
+write, a model has to absorb an enormous amount about how language works — grammar,
+facts, the shape of an argument, the way a story usually goes. A model that is genuinely
+good at "what comes next" has, as a side effect, picked up a great deal of that, so when
+it answers a question it is not retrieving an answer from a drawer; it is producing the
+continuation a very well-read predictor would produce. The repo's counter is not that the
+behaviour is unimpressive — it is that the mechanism is small and completely
+understandable, and it is worth holding both halves at once. The machine is next-token
+prediction; the behaviour that falls out of it is large, and nobody has a tidy
+explanation for all of it.
+
+→ full answer: [Level 1 — What is a token, and what is a model?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-1-what-is-a-token.md)
+
+### Steelman: a huge context window is strictly better — why not make it enormous?
+
+The steelman is that more context means the model can see more, and there is no obvious
+downside. The counter is memory: the KV cache grows linearly with sequence length, and
+its size is `2 × layers × NumKVHeads × HeadDim × positions × bytes_per_element`. For a
+32-layer, 8-KV-head, 128-head-dim model at 32k positions in 16-bit, that is 4.29 GB —
+larger than the 3.5 GB of 4-bit weights for a 7B model. At 100k+ tokens it dominates
+memory, and eviction, compression, and summarization all reduce it while risking the one
+token the answer depended on. A huge window is not free; it is paid for in memory, and
+the honest open edge is keeping that memory bounded without losing recall.
+
+→ full answer: [Level 4 — Prefill vs decode: why one model has two speeds](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-4-prefill-vs-decode.md)
+
+### Steelman: speculative decoding must change the output — how can guessing not change the answer?
+
+The steelman is that a draft model proposing tokens is a second model in the loop, so the
+output should be the draft's, not the target's. The counter is the verification step: the
+draft proposes `k` tokens, the target runs one forward pass over the prompt plus all `k`
+drafts, and the longest prefix where the draft matches the target is accepted; the rest
+is rolled back. A correct speculative decoder produces *exactly* the same distribution as
+the target model alone — the verification guarantees it. It is a latency win, not a
+throughput win: it makes a single sequence finish faster, but under a full batch the
+target is already saturated and there is no idle bandwidth for the draft to exploit.
+
+→ full answer: [Level 5 — What changes at scale](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/level-5-at-scale.md)
+
+## Questions still open
+
+These are questions the repo genuinely cannot answer yet. They are marked **open** in the
+ledger, and each names what would close it.
+
+- **How do you keep KV memory bounded at very long context without losing recall?** The
+  cache grows linearly with sequence length; at 100k+ tokens it dominates memory.
+  Eviction, compression, and summarization all reduce it — and all risk dropping the one
+  token the answer depended on. *What would close it:* a task-success benchmark at long
+  context showing a bounded-memory policy matching full-cache quality on tasks that
+  require recalling a specific early detail.
+- **Do sparse and linear attention hybrids preserve quality at scale?** Attention is
+  quadratic in sequence length; sparse and linear variants make it cheaper by attending
+  to less. Whether they preserve quality at frontier scale — or only at the sizes where
+  they have been tested — is contested. *What would close it:* a controlled comparison at
+  matched parameter count and matched training compute, evaluated on long-context recall,
+  not just perplexity.
+- **How far can quantization go before quality breaks?** 8-bit is broadly safe; 4-bit is
+  usually fine. Below that, results diverge by model and by layer, and there is no
+  reliable predictor of which layer will break first. *What would close it:* a per-layer
+  sensitivity metric that predicts quality loss before you run the evaluation, validated
+  across architectures.
+- **How do you schedule a mixed prefill/decode workload optimally?** Prefill is
+  compute-bound; decode is bandwidth-bound. A real server runs both at once. The optimal
+  split of hardware between them, and the optimal admission order, is not solved — it
+  depends on the traffic mix, which changes. *What would close it:* a scheduler whose
+  policy is provably near-optimal across a range of measured traffic mixes, not tuned to
+  one.
+
+## See also
+
+- [The question-loop ledger](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/README.md) — the schema, the four categories, and the
+  machine-checked rules behind this page.
+- [The inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) — the five rungs every
+  "→ full answer" above points into.
+- [The caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) — the same five-rung pattern
+  applied to fak's caching stack. The inference ladder is its sibling.
+- [What is a CUDA kernel?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-a-cuda-kernel.md) — the word "kernel"
+  means three different things here; read this before the `mat.mul` calls confuse you.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the
+  vocabulary.
+
+---
+
+*[← back to the question-loop README](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/README.md) · [the inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md)*
+
+---
+
+# `docs/explainers/mixed-precision/README.md`
+
+> Source: `docs/explainers/mixed-precision/README.md`
+
+---
+title: "The fak mixed-precision ladder: five guides, five audiences"
+description: "One subject, how a model stores its numbers, explained five times. From what a bit is, to the evidence boundary where measured claims end and modeled ones begin."
+slug: mixed-precision-ladder
+keywords:
+  - mixed precision explained
+  - quantization guide
+  - what is fp8
+  - int8 vs fp16
+  - KV cache quantization
+  - asymmetric quantization
+  - precision for beginners
+  - advanced quantization
+  - fak mixed precision ladder
+date: 2026-11-18
+---
+
+# The fak mixed-precision ladder
+
+> **In one breath:** A model is made of numbers. Each number takes some bits.
+> Fewer bits means less memory and faster answers. This ladder explains that
+> trade five times.
+
+**One line:** Mixed precision is the practice of storing different parts of a model in different numeric formats, chosen so that the parts which tolerate rounding are compressed and the parts which do not are left alone; this ladder explains the same subject at five depths.
+
+The same subject, written **five times**, once for each kind of reader. Each rung
+is pitched at both a human audience *and* a model/agent capability tier: a
+newcomer is served at Level 1; a frontier-tier reader is served at Level 5.
+
+This is the deep dive that the [inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) hands
+off to at its Level 4. If you have not read that rung, read it first: it
+establishes why bytes are time.
+
+## Why does this subject deserve its own ladder?
+
+Because it is where the interesting engineering is, and because it is where
+overclaiming is easiest.
+
+Every inference stack quantizes something. Very few say clearly which of their
+quantization claims have been measured on hardware, which are arithmetic
+derivations, and which are designed but not yet connected. That distinction is
+the spine of this ladder, and Level 5 is entirely about it.
+
+## The five rungs
+
+| Level | Who it's for | What you'll get |
+|---|---|---|
+| **[1 · What is a bit, and why fewer?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/mixed-precision/level-1-what-is-a-bit-and-why-fewer.md)** | A complete beginner. No binary, no floating point. | What a number's width means, why it costs memory, and why it costs time. |
+| **[2 · Number formats, from fp32 to 4-bit](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/mixed-precision/level-2-number-formats.md)** | A student who knows what a float is. | The format zoo, what each one can and cannot represent, and how a 4-bit number is unpacked. |
+| **[3 · What to quantize, and what to leave alone](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/mixed-precision/level-3-what-to-quantize.md)** | A practitioner who has quantized something and lost quality. | Sensitivity, the margin argument, and why Keys and Values want different treatment. |
+| **[4 · The precision machinery in fak](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/mixed-precision/level-4-the-precision-machinery.md)** | A systems engineer wiring precision into a runtime. | The contract, the support tensor, the dynamic policy, the schedule, and the fences. |
+| **[5 · The evidence boundary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/mixed-precision/level-5-the-evidence-boundary.md)** | A researcher who wants to know what is actually proven. | Measured versus modeled versus designed-not-wired, applied to every claim above. |
+
+## The whole ladder in one picture
+
+```text
+   L1  What is a bit?              ── width costs memory, and bytes are time
+        │
+        ▼
+   L2  What formats exist?         ── fp32, fp16, bf16, fp8, int8, 4-bit
+        │
+        ▼
+   L3  What can I compress?        ── sensitivity is about margin, not size
+        │
+        ▼
+   L4  How does fak do it?         ── contract, support tensor, policy, schedule
+        │
+        ▼
+   L5  What is actually proven?    ── measured vs modeled vs not-yet-wired
+```
+
+## How to read it
+
+- **New to the idea?** Read 1, then 2. You will understand why anyone bothers.
+- **Quantized something and it got worse?** Start at 3. It explains which parts
+  are sensitive and why.
+- **Wiring precision into a runtime?** Start at 4. It is the machinery.
+- **Evaluating a claim?** Read 5 first. It grades everything above it.
+
+## The one idea, if you read nothing else
+
+Rounding a number is only dangerous when the model was **close to a decision**.
+
+A confident prediction survives aggressive rounding. A near-tie does not. So the
+right question is never "how many bits can I afford" but "which numbers are
+close to a decision, and which are not." Every scheme in this ladder is an
+answer to that question.
+
+## Where the code is
+
+| Concept | File |
+|---|---|
+| The neutral precision contract | `internal/mixedprecision/contract.go` |
+| The format list | `internal/compute/compute.go` |
+| 8-bit float decode | `internal/compute/fp8.go`, `internal/mathx/fp8.go` |
+| Adaptive precision policy | `internal/model/dynamic_precision.go` |
+| Precision scheduling | `internal/model/precision_schedule.go` |
+| Asymmetric KV design | `internal/model/asymmetric_kv.go` |
+| The KV wiring caveat | `internal/model/kvquant.go` |
+| 4-bit activation-aware format | `internal/model/awq.go` |
+
+## See also
+
+- [The fak inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) — the parent ladder; its Level 4 hands off here.
+- [AWQ quantization](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/awq-quantization.md) — one concrete 4-bit format, in full detail.
+- [SOTA optimizations](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/sota-optimizations.md) — where fak stands on the tuned-optimization list.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the vocabulary.
+
+---
+
+*[Full ladder (README)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/mixed-precision/README.md) · next → [Level 1 — What is a bit, and why fewer?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/mixed-precision/level-1-what-is-a-bit-and-why-fewer.md)*
+
+---
+
+# `docs/explainers/tokenization/README.md`
+
+> Source: `docs/explainers/tokenization/README.md`
+
+---
+title: "How tokenization works: a five-rung ladder (fak as the worked example)"
+description: "The same subject — how text becomes the numbers a model reads — explained five times, each rung pitched at a different reader. Start at Level 1 (what is a tokenizer?) and climb to Level 5 (the tokenizer frontier). Every claim is pinned to a real file in this repository."
+slug: tokenization-ladder
+keywords:
+  - tokenization explained
+  - what is a tokenizer
+  - byte pair encoding
+  - BPE explained
+  - byte level BPE
+  - how does tokenization work
+  - tokenizer for beginners
+  - tokenizer internals
+date: 2026-11-18
+---
+
+# How tokenization works — the five-rung ladder
+
+> **In one breath:** A tokenizer turns your text into whole numbers. It does that
+> by counting which chunks of text appear together often. The chunks it learns
+> become the model's vocabulary. Everything the model does starts here.
+
+**One line:** Tokenization is three stages in a fixed order — split the text into
+pieces, rewrite each piece as a printable spelling of its bytes, then merge
+adjacent symbols by a rank table learned in training — and the merge stage is the
+one with a real algorithm in it, a naive reference loop and an incremental
+frontier that must agree bit for bit.
+
+> **Who this is for.** One subject — *how a string of text becomes the list of
+> numbers a model reads* — written **five times**, once for each kind of reader. A
+> newcomer with no math gets Level 1. A new grad who can read Go gets Level 2. A
+> working engineer who wants the real algorithm gets Level 3. A performance
+> engineer gets Level 4. A researcher gets Level 5. Each rung assumes exactly what
+> the rung below it taught, and nothing more.
+
+The [inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) opens by telling you that a model
+never sees your text, only a list of token ids. It then moves on, because its
+subject is what happens *after* the ids exist. This ladder is the page that was
+missing: it stays on the step the inference ladder skips, and it is the only place
+in this repository where the merge algorithm is written out in full.
+
+That matters more than it sounds. Tokenization is the first thing that happens and
+the thing every later number depends on. A wrong token boundary shifts a span, and
+a shifted span evicts the wrong rows from the key/value cache. The tokenizer
+package says so itself, in its own package doc: a wrong text-to-id boundary "can
+shift a `Segment.Len` and evict the wrong K/V rows"
+(`internal/tokenizer/doc.go`). Nothing downstream can repair a mistake made here.
+
+## The one-sentence answer (all five rungs agree on this)
+
+A tokenizer is a **lossless, reversible map** between text and a list of whole
+numbers. It is lossless in both directions: `Encode` then `Decode` gives you back
+exactly the bytes you started with, including the ones that are not valid text.
+
+Everything else — the split rules, the byte spelling, the merge ranks, the heap —
+is about making that map *fast* and *stable* without changing what it maps.
+
+## The five rungs
+
+| Level | Who it's for | The question it answers |
+|---|---|---|
+| **[1 · What is a tokenizer?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tokenization/level-1-what-is-a-tokenizer.md)** | A total newcomer. No math, no code. | "I type a sentence. How does it become numbers, and why those numbers?" |
+| **[2 · The three stages](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tokenization/level-2-the-three-stages.md)** | A new grad who can read Go or Python. | "Show me the whole pipeline, end to end, with an example I can follow by hand." |
+| **[3 · The merge loop, by hand](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tokenization/level-3-the-merge-loop-by-hand.md)** | A working engineer who wants the real algorithm. | "What is the merge rule exactly, and how do I know two implementations agree?" |
+| **[4 · Why the merge loop is the hot path](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tokenization/level-4-why-the-merge-loop-is-the-hot-path.md)** | A performance engineer. | "Why is the naive version quadratic, and what does the fast one do instead?" |
+| **[5 · The tokenizer frontier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tokenization/level-5-the-tokenizer-frontier.md)** | A researcher or systems lead. | "How do you prove a tokenizer is right, and what is still open?" |
+
+## How to read it
+
+- **Curious, not technical?** Read **Level 1** and stop. It is the whole idea in
+  plain words.
+- **Learning to work on tokenizer code?** Read **1 → 2 → 3**. Level 3 is where the
+  repository's real algorithm appears.
+- **Chasing a tokenization cost or a slow encode?** **Level 4** is the one that
+  changes your decisions.
+- **Doing research or setting direction?** **Level 5** names the frontier and,
+  honestly, the parts nobody has solved.
+
+Each rung ends with a nav footer linking its neighbours and back here.
+
+## How to check a claim on any rung
+
+Every rung cites files as `path:line`. Those paths are real and resolve in this
+repository. To check one yourself:
+
+```sh
+sed -n '22,30p' internal/tokenizer/bpe_merge.go   # the merge entry point
+```
+
+Run that from the repository root.
+
+If a citation does not resolve, that is a bug in the page — the pages are
+verified by a link-and-citation check, not by trust.
+
+## See also
+
+- [The inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) — the parent ladder. Its Level 1
+  says the tokenizer decides the chunks by counting; this ladder is where that
+  sentence is cashed out.
+- [The caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) — the same five-rung pattern applied
+  to fak's caching stack.
+- [The mixed-precision ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/mixed-precision/README.md) — what the numbers
+  are stored in, once the ids exist.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the vocabulary.
+- [The learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) — the prerequisite-ordered
+  catalog this ladder plugs into. Course **FAK 522** covers the same ground
+  rigor-first.
+
+---
+
+# `docs/explainers/memory-hierarchy/README.md`
+
+> Source: `docs/explainers/memory-hierarchy/README.md`
+
+---
+title: "The fak memory-hierarchy ladder: five guides, five audiences"
+description: "One subject — how bytes move through the memory hierarchy while a language model runs — explained five times, each rung pitched at a different reader. Start at Level 1 (what is a buffer?) and climb to Level 5 (host DRAM, offload, and the frontier). Every claim is pinned to a real file in this repository."
+slug: memory-hierarchy-ladder
+keywords:
+  - memory hierarchy explained
+  - SRAM vs HBM vs DRAM
+  - shared memory CUDA
+  - roofline model
+  - arithmetic intensity
+  - memory bandwidth bound
+  - LLM inference memory
+  - buffer hierarchy
+date: 2026-11-18
+---
+
+# The fak memory-hierarchy ladder
+
+> **In one breath:** A model is a pile of numbers. Running it means *moving* those
+> numbers — and the machine has several places to keep them, each one faster and
+> smaller than the last. Almost everything that makes inference fast or slow is a
+> decision about which of those places a byte is in.
+
+**One line:** The compute unit can only do arithmetic on numbers that are already
+inside it, so every operation is preceded by a fetch, and the fetch is what costs
+you. This ladder follows one byte from the disk it was stored on to the register
+that multiplied it.
+
+> **Who this is for.** One subject — *where the numbers live while the model runs,
+> and what it costs to move them* — written **five times**, once for each kind of
+> reader. A newcomer with no math gets Level 1. A new grad who can read Go gets
+> Level 2. A working engineer who writes kernels gets Level 3. A performance
+> engineer who tunes serving gets Level 4. A researcher or systems lead gets
+> Level 5. Each rung assumes exactly what the rung below it taught, and nothing
+> more.
+
+Most explanations of "how inference works" describe the *math* — attention,
+matrix multiplies, softmax — and stop there. But the math is the cheap part. A
+modern accelerator can do an enormous number of multiplies per second and can
+only *feed* them a tiny fraction of that rate, so the real story is the plumbing.
+This ladder is about the plumbing.
+
+## The one-sentence answer (all five rungs agree on this)
+
+A compute unit can only multiply numbers that are already in its own registers.
+Everything else — the model weights, the activations, the KV cache — has to be
+**fetched** first, from a place that is bigger but slower. The hierarchy is the
+list of those places, ordered by how close they are to the arithmetic. Inference
+is fast when the bytes you need are already close, and slow when they are not.
+
+## The five rungs
+
+| Level | Who it's for | The question it answers |
+|---|---|---|
+| **[1 · What is a buffer?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-hierarchy/level-1-what-is-a-buffer.md)** | A total newcomer. No math, no code. | "Where do the numbers actually *live* while the model is thinking?" |
+| **[2 · The forward pass as a sequence of buffer moves](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-hierarchy/level-2-the-forward-pass-as-buffer-moves.md)** | A new grad who can read Go. | "Show me one token's journey through the code, and tell me which buffer each step touches." |
+| **[3 · SRAM and the kernel's own scratch](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-hierarchy/level-3-sram-and-the-kernels-own-scratch.md)** | A working engineer who writes or reads kernels. | "Why does a kernel declare a tiny array at the top, and why is that array the whole trick?" |
+| **[4 · HBM, VRAM, and the roofline](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-hierarchy/level-4-hbm-vram-and-the-roofline.md)** | A performance engineer. | "Which resource is the binding constraint — compute or bandwidth — and how do I tell?" |
+| **[5 · Host DRAM, offload, and the frontier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-hierarchy/level-5-host-dram-offload-and-the-frontier.md)** | A researcher or systems lead. | "What happens when the model does not fit, and what is still unsolved?" |
+
+## How to read it
+
+- **Curious, not technical?** Read **Level 1** and stop. It is the whole idea in
+  plain words, with a coat-check analogy and no arithmetic.
+- **Learning to work on inference code?** Read **1 → 2 → 3**. Level 2 walks the
+  real Go forward pass; Level 3 opens the kernels it calls.
+- **Tuning or serving a model?** **Level 4** is the one that changes your
+  decisions — it is where "why is this slow?" gets an answer you can act on.
+- **Doing research or setting direction?** **Level 5** names the frontier and,
+  honestly, the parts nobody has solved.
+
+Each rung ends with a nav footer linking its neighbours and back here.
+
+## The hierarchy, in one table
+
+Read this once now; every rung is a zoom-in on one row.
+
+| Tier | Roughly how big | Roughly how far | Who owns it | In this repo |
+|---|---|---|---|---|
+| **Registers** | bytes per thread | zero — it *is* the arithmetic | the instruction | the multiply itself |
+| **SRAM / shared memory** | tens of KB per block | on the same die | the kernel author, declared by hand | `__shared__` arrays in `internal/compute/*.cu` |
+| **L1 / L2 cache** | MBs | on the same die, hardware-managed | the hardware | read-only `__ldg` loads, L2 promotion hints |
+| **HBM / VRAM** | tens of GB | centimetres, off-die | the runtime, via the HAL | `internal/compute/capacity.go` |
+| **Host DRAM** | hundreds of GB | across a bus | the runtime, via offload | `internal/compute/dram_ring.go` |
+| **NVMe / disk** | TBs | milliseconds away | the operator | the staging ring's sink |
+
+The pattern to notice: **each step down is bigger and slower, by orders of
+magnitude.** That is not an accident of engineering; it is the physics of how
+close a storage cell is to the transistor that reads it. The whole craft of
+inference engineering is arranging for the bytes you need *next* to already be
+one step closer than they were.
+
+## How to check a claim on any rung
+
+Every rung cites files as `path:line`. Those paths are real and resolve in this
+repository. To check one yourself:
+
+```sh
+sed -n '483,500p' internal/model/forward.go   # the Forward entry point
+```
+
+Run that from the repository root. If a citation does not resolve, that is a bug
+in the page — the pages are verified by a link-and-citation check, not by trust.
+
+## See also
+
+- [The hierarchy as one figure](https://github.com/anthony-chaudhary/fak/blob/main/visuals/86-buffer-hierarchy-ladder.mmd) — the
+  six tiers, rendered standalone (`.svg` / `.png` beside it) for slides and handouts.
+- [The caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) — the same five-rung pattern applied
+  to fak's caching stack. This ladder is its sibling: caching is *what* to keep
+  close, this ladder is *where* close is.
+- [Hardware limits and capacity](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-limits-and-capacity.md) — the
+  capacity half of the story, and the "eighth assumption" this ladder's Level 4
+  and Level 5 both lean on.
+- [Hardware portability](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md) — the seven shape
+  assumptions the compute HAL lifts, which is why the same forward loop can run
+  on a CPU, a GPU, or an integrated-memory APU.
+- [The memory-bandwidth field guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/MEMORY-BANDWIDTH-FIELD-GUIDE.md)
+  — the measurement discipline behind Level 4's roofline, including how to tell a
+  measured ceiling from a marketing one.
+- [What is a CUDA kernel?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-a-cuda-kernel.md) — the word "kernel" means
+  three different things in this repository; read this before Level 3 if that
+  trips you.
+- [The abstraction map](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/the-abstraction-map.md) — where the model sits in the
+  full stack, from your terminal to the silicon.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the vocabulary.
+- [The learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) — the prerequisite-ordered
+  catalog this ladder plugs into.
+
+---
+
+# `docs/explainers/kernel-development/README.md`
+
+> Source: `docs/explainers/kernel-development/README.md`
+
+---
+title: "The fak kernel-development ladder: six guides, six audiences"
+description: "One subject — the practice of changing fak's kernel — explained six times, each rung pitched at a different reader. Start at Level 1 (what is kernel development?) and climb to Level 6 (the frontier)."
+slug: kernel-development-ladder
+keywords:
+  - kernel development guide
+  - how to add a kernel to fak
+  - fak extension seam
+  - Register function explained
+  - prove a kernel correct
+  - prove a kernel faster
+  - adjudicator rung
+  - compute backend tutorial
+  - beginner kernel development
+  - advanced kernel development
+date: 2026-11-18
+---
+
+# The fak kernel-development ladder
+
+> **What this is.** The same subject — how you change fak's kernel without forking it —
+> written **six times**, once for each kind of reader. Each rung is pitched at both a
+> human audience *and* a model/agent capability tier: a newcomer is served at Level 1; a
+> frontier-tier reader is served at Level 6. Pick your rung, or climb the whole ladder.
+
+"Kernel development" in this repo means one specific practice: **changing the code the
+kernel walks, without editing the spine.** fak is a frozen minimal spine
+(`internal/abi`) plus real extension seams, so a new idea is a new package plus one
+`Register*()` call — never an edit to the core. That single sentence is the whole
+subject; the six rungs are the six depths at which you can understand it.
+
+A single flat page either loses the beginner or bores the expert. This ladder splits the
+difference: each rung assumes exactly what the one below it taught.
+
+## The six rungs
+
+| Level | Who it's for | What you'll get |
+|---|---|---|
+| **[1 · What is kernel development?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-1-what-is-kernel-development.md)** | A newcomer who has hit the word "kernel" in three places and cannot reconcile them. No systems background assumed. | The three senses of "kernel", what the *practice* is, and the one idea: a frozen spine plus real seams. |
+| **[2 · The registration seam](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-2-the-registration-seam.md)** | A competent dev or mid-tier agent asking "where does my code attach?" | The `Register*()` seams by name, the `architest` layering gate, and the file-tree disjointness that lets two workers build at once. |
+| **[3 · Prove correct](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-3-prove-correct.md)** | An engineer who has attached a kernel and must show it preserves behavior. | The Reference/Approx correctness class and the deterministic witness that decides it. |
+| **[4 · Prove faster](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-4-prove-faster.md)** | An engineer whose kernel is correct and now must earn the right to land. | The non-forgeable keep-bit, the honest baseline, and KEEP vs REVERT. |
+| **[5 · The adjudicator rung](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-5-the-adjudicator-rung.md)** | A security-minded reader who wants the *other* kernel — the one that decides whether a tool call may run. | The verdict fold, the real rung chain, and how to add an admission check. |
+| **[6 · The frontier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-6-the-kernel-development-frontier.md)** | A frontier-tier reader / researcher who wants the honest edge. | Which seams are frozen, which gates block, and what the repo does *not* yet prove. |
+
+## The whole ladder in one picture
+
+```
+   L1  What is kernel development?      ── the three senses of "kernel"
+        │                                   (OS-metaphor / compute / CUDA)
+        ▼
+   L2  Where does my code attach?       ── the Register* seam; architest layering gate
+        │                                   (Gate 1: plug in, don't fork)
+        ▼
+   L3  Does it preserve behavior?       ── the correctness class + a deterministic witness
+        │                                   (Gate 2: prove correct)
+        ▼
+   L4  Is it actually a win?            ── the non-forgeable keep-bit
+        │                                   (Gate 3: prove faster)
+        ▼
+   L5  The other kernel                 ── the adjudicator rung; the verdict fold
+        │                                   (the same three gates, security-shaped)
+        ▼
+   L6  The frontier                     ── what is frozen, what is open, what is unproven
+                                            (read the ledger honestly)
+```
+
+![The kernel-development ladder: six stacked rungs climbed bottom to top, L1 what is kernel development through L6 the frontier, with the three gates marked on rungs 2, 3 and 4](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/diagrams/ladder.svg)
+
+Rungs 1–4 are one continuous path: understand the word, attach at a seam, prove correct,
+prove faster. Rung 5 is the same discipline pointed at the security kernel instead of the
+compute kernel. Rung 6 is not a new mechanism at all — it is the honest edge of what the
+repo has proven.
+
+## What each rung assumes
+
+Each rung assumes exactly what the one below it taught, so you can join at any rung whose
+assumptions you already meet.
+
+| Rung | Assumes you can already… |
+|---|---|
+| 1 | — (start cold) |
+| 2 | say what a kernel is and why the spine is frozen |
+| 3 | name the seam your idea attaches to |
+| 4 | show your kernel preserves behavior |
+| 5 | read a `Register*()` call and a registry walk |
+| 6 | name the three gates and the two kernels |
+
+## How to read it
+
+- **Just want to understand the word?** Read **Level 1** and stop. That is the whole
+  conceptual story.
+- **Want to add a compute kernel (a quantization path, a GPU backend)?** Read **Level 1**,
+  then **Level 2** (attach), **Level 3** (prove correct), **Level 4** (prove faster).
+  That is the three-gate golden path.
+- **Want to add a security check instead of a compute kernel?** Read **Level 1**, then
+  **Level 5**. It is the same three-gate discipline, pointed at a different question.
+- **Deciding whether to build at all?** Read **Level 6** first — it tells you which seams
+  are frozen and which are still moving.
+
+Each rung ends with a nav footer linking its neighbours and back here.
+
+## The three gates, in one table
+
+Every optimization lands the same way, and the middle four rungs are the gates. Each gate
+is mechanical — a tool or a test, not a review opinion.
+
+| Gate | Question | The mechanism | The rung that teaches it |
+|---|---|---|---|
+| **1. Plug in** | Where does my code attach? | a `Register*` seam + the `internal/architest` layering gate | [Level 2](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-2-the-registration-seam.md) |
+| **2. Prove correct** | Does it preserve behavior? | the Reference/Approx correctness class + a deterministic witness | [Level 3](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-3-prove-correct.md) |
+| **3. Prove faster** | Is it actually a win? | the non-forgeable keep-bit (`shipgate.Evaluate` via `cmd/rsicycle`) | [Level 4](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-4-prove-faster.md) |
+
+![The three gates: a candidate optimization enters at the left and must pass Gate 1 Plug in, Gate 2 Prove correct, and Gate 3 Prove faster before it lands; failing any gate reverts it](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/diagrams/three-gates.svg)
+
+You do not get to skip a gate. That is the point: a contributor cannot land a kernel that
+is plausible-but-wrong (Gate 2 catches it) or correct-but-slower (Gate 3 catches it). The
+gates are what make it *safe* to accept optimizations from anyone — including autonomous
+coding agents.
+
+## The vocabulary the ladder uses
+
+Six words recur on every rung. Learn them here and the rungs read faster.
+
+| Word | What it means |
+|---|---|
+| **spine** | `internal/abi` — the frozen shared vocabulary every leaf imports. Never edited after freeze. |
+| **leaf** | One package under `internal/`, in its own directory, with its own lane. A new idea is a new leaf. |
+| **seam** | A named `Register*()` call a leaf attaches through. The kernel walks the registry; it never imports the leaf. |
+| **rung** | One link in the security kernel's ranked adjudicator chain (Level 5's sense of the word). |
+| **gate** | A mechanical check a change must clear: plug in, prove correct, prove faster. |
+| **witness** | A deterministic, re-runnable artifact that decides a gate — not a claim the author makes. |
+
+## What this ladder is not
+
+- It is **not** a CUDA tutorial. If you want the literal `__global__` sense of "kernel",
+  read [What is a CUDA kernel?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-a-cuda-kernel.md) first; this ladder is about
+  the *practice* of changing fak's kernel, whichever sense you mean.
+- It is **not** a serving guide. fak does not chase vLLM on raw tokens/sec; the honest
+  serving boundary is [what fak is not](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-fak-is-not.md).
+- It is **not** a promise that every seam is finished. Level 6 is the rung that tells you
+  which seams are frozen and which are still moving.
+
+## Questions this ladder answers
+
+- Where does my code attach to the kernel?
+- What is a `Register*()` call, and who calls it?
+- Why can't I just edit the core and add my feature there?
+- How do I know my kernel is *correct*, not just plausible?
+- How do I know my kernel is *faster*, not just different?
+- Is the "agent kernel" the same thing as a CUDA kernel?
+- What is a **rung**, and what is a **verdict fold**?
+- What stops two workers from colliding on the same files?
+- What does the layering gate refuse, and what is the fix?
+- Which seams are frozen, and which are still moving?
+- What does the repo *not* yet prove about kernel development?
+- Where do I go to actually build something?
+
+## See also
+
+- [The inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) — the **sibling** ladder: what the
+  forward pass *is*, before this one asks how you change the code that runs it. Read it
+  first if "the loop that turns a prompt into the next token" is not yet concrete.
+- [The accelerator ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/README.md) — the sibling ladder for the
+  *where*: the HAL seam, Vulkan, and ROCm. Level 2's `Register*` seam is the same seam
+  that ladder climbs.
+- [The caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) — the structural precedent: another subject
+  written five times, once per reader.
+- [The memory-hierarchy ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/memory-hierarchy/README.md) — the ground-up companion:
+  where the numbers live while a model runs (registers → SRAM → HBM → host DRAM → NVMe).
+  Read it when Level 4's "is it actually a win?" needs the roofline underneath it.
+- [Kernel development — the questions](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/kernel-development.md) — the
+  question-first companion to this ladder: 13 questions a newcomer asks, each routed to
+  the rung that answers it.
+- [What is a CUDA kernel?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-a-cuda-kernel.md) — the three-senses
+  disambiguation Level 1 builds on.
+- [The abstraction map](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/the-abstraction-map.md) — how the layers are named, floor by
+  floor, from your terminal to the silicon.
+- [The tool call is a syscall](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/tool-call-is-a-syscall.md) — the keystone idea behind
+  the security kernel Level 5 covers.
+- [Policy in the kernel](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/policy-in-the-kernel.md) — where the admission rungs live.
+- [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md) — the task-first golden path: plug in → prove
+  correct → prove faster → ship.
+- [`ARCHITECTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) — the frozen ABI, the seam catalog, and
+  the scaling contract, in full.
+
+---
+
+# `docs/questions/kernel-development.md`
+
+> Source: `docs/questions/kernel-development.md`
+
+---
+title: "Kernel development — the questions a newcomer actually asks"
+description: "The question ledger for the kernel-development axis: the questions a newcomer asks when they first try to change fak's kernel, each with a short answer and a pointer to the rung of the kernel-development ladder that answers it in full."
+slug: questions-kernel-development
+keywords:
+  - kernel development questions
+  - frozen ABI
+  - registration seam
+  - correctness class
+  - non-forgeable keep-bit
+  - adjudicator rung
+  - question loop
+  - kernel development ladder
+  - agent kernel vs CUDA kernel
+date: 2026-11-18
+---
+
+# Kernel development — the questions a newcomer actually asks
+
+> **What this is.** The question ledger for the **kernel-development** axis. Not a
+> tutorial — a list of the questions a newcomer actually asks the first time they try to
+> change fak's kernel, each with a short answer and a pointer to the rung of the
+> [kernel-development ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/README.md) that answers it
+> in full. The page *is* the questions; the answers are deliberately short, because the
+> rung is where the real answer lives.
+
+"Kernel development" here means one specific practice: **changing the code the kernel
+walks, without forking the spine.** A newcomer meets that sentence and immediately has
+questions — some contrarian ("isn't a frozen ABI just bureaucracy?"), some afraid ("what
+if I break the spine for everyone?"), and some nobody has thought to ask ("who decides
+what *correct* means?"). This page collects them, labels them honestly, and routes each
+one to the rung that closes it.
+
+## How this page works
+
+This page is the durable surface of the **question loop** — a super-loop-family member
+whose whole job is to *ask* hard questions and *not* answer them. Two loops, in two
+separate context windows, keep it honest:
+
+- **The ASK loop** (role: *questioner*) writes the questions. Each tick it appends a
+  handful of `open` rows to [`asked.jsonl`](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/asked.jsonl) and stops. It never proposes
+  fixes, files tickets, or answers itself.
+- **The NEXT-STEP loop** (role: *ticketer*) turns an unanswered question into work. Each
+  tick it takes **one** `open` question, decides its fate, and — only if the question
+  earns it — files **one** ticket.
+
+**Why the two loops are separated.** A questioner that also holds the ticketing pen
+slides into solution mode: it starts writing questions it already knows how to close, and
+quietly stops asking the uncomfortable ones. The load-bearing rule is that **the
+questioner must not be the one who decides the question is answered.** Reading the open
+backlog is fine and necessary; *triaging* it is what corrupts the ASK role. A fresh
+context per ASK tick keeps the provocations honest. The full schema, the four categories,
+and the machine-checked ledger rules live in the [question-loop README](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/README.md).
+
+The categories below are the ledger's own vocabulary — **CONTRARIAN**, **AFRAID**,
+**UNASKED**, and **STEELMAN** — not a new taxonomy invented for this page.
+
+## CONTRARIAN — questions that challenge what the repo claims is correct
+
+### Isn't a frozen ABI just bureaucracy?
+
+A frozen ABI looks like red tape until you count the importers. `internal/abi` is the one
+tree *every* leaf and *every* command imports, so an edit to it collides every in-flight
+change and forces a fleet-wide recompile. The freeze is not a preference for stability —
+it is the property that lets a hundred workers build at once without stepping on each
+other. The bureaucracy is the point: it is what makes parallel work possible.
+
+→ full answer: [Level 2 — The registration seam](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-2-the-registration-seam.md)
+
+### Why can't I just add a field to the struct?
+
+Because the struct is the shared vocabulary, and a field added for your feature is a field
+every other worker now has to compile against. The repo's answer is the **additive
+envelope**: a new field rides a `Capability`-guarded extension slot, so old workers that
+never negotiate the capability are unaffected. You *can* extend the wire — you just cannot
+extend it in a way that breaks a peer who has not heard of your idea yet.
+
+→ full answer: [Level 2 — The registration seam](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-2-the-registration-seam.md)
+
+### Isn't the keep-bit just a benchmark I could game?
+
+The keep-bit is deliberately **non-forgeable**: it is unexported and set only from a
+measured witness, so you cannot write it from your own code. But the honest answer is
+narrower than "ungameable" — a passing keep-bit proves a *strict measured gain on one
+host, in one window, against one baseline*. It does not prove the win generalizes. The
+gate removes the author's opinion from the decision; it does not remove the author's
+choice of what to measure.
+
+→ full answer: [Level 4 — Prove faster](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-4-prove-faster.md)
+
+### Isn't the correctness class just a label I pick to pass the looser gate?
+
+It is a label — but a *typed* one, and the harness reads it mechanically. `Reference` and
+`Approx` are real Go values, and `compute.RequireReference` is called *before* any
+bit-identity assertion, so it is impossible to hold a device to a gate it cannot meet or
+to quietly promote a device to `Reference`. You declare your class honestly; the right
+gate then applies itself. Picking the looser class is not cheating — it is the correct
+declaration for any kernel that reorders floats or quantizes a weight.
+
+→ full answer: [Level 3 — Prove correct](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-3-prove-correct.md)
+
+## AFRAID — the elephant in the room
+
+### What if my kernel is correct but slower?
+
+That is the exact failure mode Gate 3 exists to catch, and it is the reason a
+correct-but-slower kernel cannot land. It passes every correctness witness, it *looks*
+like progress, and it quietly makes the system worse — so the keep-bit refuses it. The
+fear is well-founded and the answer is structural: you do not get to land a regression
+just because it is correct.
+
+→ full answer: [Level 4 — Prove faster](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-4-prove-faster.md)
+
+### What if I break the spine for everyone?
+
+You cannot, and that is by design. The spine is frozen and no worker may lease it; a new
+idea attaches as a new package plus one `Register*()` call, never an edit to the core. The
+`internal/architest` layering gate fails the build on an upward or cross-tier import, so a
+change that would reach into the spine is refused before it lands. The fear is the reason
+the freeze exists.
+
+→ full answer: [Level 2 — The registration seam](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-2-the-registration-seam.md)
+
+### What if my numbers don't reproduce on the reviewer's machine?
+
+Then your keep-bit was an observation, not a claim. A reproducible win needs a *named
+honest baseline* (tuned/warm, same host and session), an *identical measurement window*
+for both arms, the measured resource freed first, and a clean truth so the result
+re-derives from committed state. The naive/cold and tuned/warm baselines are never
+blended, because averaging two different questions yields a number true of nothing.
+
+→ full answer: [Level 4 — Prove faster](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-4-prove-faster.md)
+
+## UNASKED — the blind spot nobody has raised
+
+### Who decides what "correct" means?
+
+Not you, and not a reviewer — a *declared class* plus a deterministic witness. You write
+the kernel and the witness; the toolchain re-runs the witness on every change, and a
+kernel whose witness goes red cannot land. "Correct" is not an opinion anyone holds; it is
+the property a re-runnable command asserts. The authority is the witness, and the witness
+is authored by the harness, not the author.
+
+→ full answer: [Level 3 — Prove correct](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-3-prove-correct.md)
+
+### What happens to my kernel when the ABI version bumps?
+
+Nothing, if you attached through a seam. The seam is frozen; the backend behind it may
+move. A new verdict kind registers for `k > 1023` with no core edit, a new field rides a
+capability-guarded envelope slot, and a new backend is a new file plus one `init()`. The
+rule of thumb from the frontier rung: **the seam is frozen, the backend behind it may
+not be** — so build against the seam, not against today's implementation.
+
+→ full answer: [Level 6 — The frontier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-6-the-kernel-development-frontier.md)
+
+### Is the agent kernel the same thing as a CUDA kernel?
+
+No — the word "kernel" is doing three jobs in this repo. The **OS-metaphor kernel** is the
+reference monitor that adjudicates tool calls, in pure Go on the CPU. The **compute
+kernel** is the inner-loop math a matmul dispatches to. The **CUDA kernel** is a literal
+`__global__` function launched onto the GPU. The three never overlap: no GPU code
+participates in a tool-call verdict, and the reference monitor never touches the forward
+pass.
+
+→ full answer: [Level 1 — What is kernel development?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-1-what-is-kernel-development.md)
+
+## STEELMAN — the strongest form of the opposite side
+
+### Steelman: a monorepo with no frozen spine would let me ship faster — what does the freeze actually buy?
+
+The steelman is real: with no freeze you could add a `case` to a switch and ship in an
+afternoon, with no registration ceremony. What the freeze buys is *parallelism* — because
+each leaf is its own directory and the spine never moves, two workers can build two ideas
+at once and edit disjoint files. The freeze trades a little per-change speed for the
+ability to run a fleet of changes at once without collisions. If you are one person
+shipping one change, the steelman wins; if you are a fleet, the freeze does.
+
+→ full answer: [Level 2 — The registration seam](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-2-the-registration-seam.md)
+
+### Steelman: a human reviewer's judgment beats a mechanical keep-bit — why trust a gate over a person?
+
+The steelman is that a reviewer can weigh context a gate cannot: is this win worth its
+complexity, does it generalize, is the baseline honest? The repo's counter is that the
+author is the worst verifier of their own speedup, and a reviewer reading a diff is
+reading the author's framing. The gate does not replace judgment — it removes the
+author's *opinion* from the KEEP/REVERT decision, and leaves the judgment questions
+(worth, generality) explicitly outside what a passing keep-bit proves.
+
+→ full answer: [Level 4 — Prove faster](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-4-prove-faster.md)
+
+### Steelman: the admission check should be a separate process, not in-kernel — what does in-process actually buy?
+
+The steelman is isolation: a separate process cannot be bypassed by a bug in the caller,
+and a crash in the check cannot take down the agent. The repo's counter is that the
+reference monitor must be the code a user program *cannot* bypass — and an out-of-process
+check is a check the caller can route around. In-process is what makes the fold a
+chokepoint: the model proposes, the kernel disposes, and a `DENY` never reaches dispatch.
+The cost is that the check shares the agent's address space; the benefit is that it cannot
+be skipped.
+
+→ full answer: [Level 5 — The adjudicator rung](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/level-5-the-adjudicator-rung.md)
+
+## Questions still open
+
+These are questions the repo genuinely cannot answer yet. They are marked **open** in the
+ledger, and each names what would close it.
+
+- **Is the keep-bit a valid gate for an adjudicator rung, or only for a compute kernel?**
+  The keep-bit machinery (`shipgate.Evaluate`) is compute-shaped today: it measures a
+  throughput win, while a rung's cost is a per-call latency. *What would close it:* a
+  rung-shaped keep-bit with a measured per-call witness, and a worked example of a rung
+  clearing it.
+- **Does the "add a rung" path have the same mechanical witness per gate as the "add a
+  backend" path?** Rungs 1–4 have a mechanical witness per gate; rung 5's rungs are
+  witnessed too, but the *add-a-rung* path is younger than the *add-a-backend* path.
+  *What would close it:* an end-to-end, witnessed example of adding an adjudicator rung
+  from scratch.
+- **Can a real external engine's KV region actually be attached through the frozen
+  `RegisterRegionBackend` ABI?** The ABI is frozen; the transport behind it is a `[STUB]`.
+  *What would close it:* building the CUDA-IPC / shared-memory import behind the frozen
+  seam and witnessing it against a live engine.
+- **Is the fine-tuned adjudication model real, or a stock forward pass wearing the name?**
+  The fused model is a *stock* reference forward pass; a tuned head is unbuilt and tagged
+  `[STUB]`. *What would close it:* training or grafting a tuned head onto the fused model
+  and witnessing the verdict quality against the stock baseline.
+
+## See also
+
+- [The question-loop ledger](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/README.md) — the schema, the four categories, and the
+  machine-checked rules behind this page.
+- [The kernel-development ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/README.md) — the six
+  rungs every "→ full answer" above points into.
+- [The inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) — the sibling ladder: what the
+  forward pass *is*, before this page asks how you change the code that runs it. Read it
+  first if "the loop that turns a prompt into the next token" is not yet concrete.
+- [What is a CUDA kernel?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-a-cuda-kernel.md) — the three-senses
+  disambiguation the "is the agent kernel a CUDA kernel?" question rests on.
+- [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md) — the task-first golden path: plug in → prove
+  correct → prove faster → ship.
+
+---
+
+*[← back to the question-loop README](https://github.com/anthony-chaudhary/fak/blob/main/docs/questions/README.md) · [the kernel-development ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/README.md)*
 
 ---
 
@@ -15068,6 +17137,67 @@ surprises an existing deployment.
 > the governed-session count (`fak_sessions`) is the right saturation axis for your
 > workload — if a single session fans out to many concurrent upstream requests, size on
 > request concurrency (the native scheduler's `fak_sched_*` family) instead.
+
+---
+
+## Scale-out state model (running N replicas)
+
+`fak serve` is a single process: every limit and ledger is **process-local**.
+Running N replicas behind one Service multiplies the effective fleet limits and
+fragments state across pods. This is the supported scale-out model — read it
+before scaling past one replica.
+
+### Limits multiply per replica
+
+Every cap below is enforced **per process**, not per tenant, per cluster, or per
+Service. With N replicas the effective fleet-wide allowance is N x the
+per-replica value:
+
+| Knob | What it bounds | Fleet effect at N replicas |
+|---|---|---|
+| `--spend-cap tenant:<t>=<N>` | spend per tenant scope | N x the per-replica cap can be spent fleet-wide before it trips |
+| `FAK_RATELIMIT_MAX_CALLS` / `FAK_RATELIMIT_MAX_COST` | calls/cost per rate-limit key | N x the per-replica budget |
+| `FAK_MAX_SESSIONS` | governed sessions per process | N x ceiling concurrent sessions |
+| `--arm-max-concurrency` (arm ceilings) | concurrent requests per research arm | N x per-replica arm slots |
+
+To hold a fleet-wide cap `C`, set each replica to `C / N` (integer division) and
+re-check whenever N changes — an HPA scaling up silently widens the fleet cap.
+A shared distributed limit/ledger backend is a separate design, not part of this
+model.
+
+### Journals and session state are per-pod
+
+`FAK_AUDIT_JOURNAL` and the cold-resume session-state snapshot (`--session-state`)
+write to local paths. The Helm chart mounts a per-replica `state` volume
+(`/var/lib/fak` by default) and points both there:
+
+- **Default `emptyDir`**: survives container restarts inside the pod, wiped when
+  the pod is deleted or rescheduled. Audit history and drive state do not follow
+  the pod.
+- **`state.pvc.claimName`**: mount an existing `ReadWriteMany` PVC (one claim
+  per replica — `ReadWriteOnce` cannot back two pods) to keep journal + snapshot
+  across reschedules.
+- Ship audit records to central storage through your log pipeline if the journal
+  must outlive the pod regardless of volume choice.
+
+With `readOnlyRootFilesystem: true` (the chart default), neither knob works at
+all without the state volume — writes to the root filesystem fail.
+
+### Trace ids carry pod identity
+
+Gateway-minted trace ids are `gw-<replica-identity>-<seq>`: the identity is the
+pod/host name plus a per-process random nonce, so two live replicas never mint
+the same trace id and a trace can be attributed to the pod that served it
+(#14445). Callers that send their own `X-Trace-Id` are unaffected.
+
+### Sticky routing (recommended)
+
+Sessions, budgets, and prefix warmth live in one process's memory. To keep a
+tenant's conversations on one replica, route by tenant consistently — client-side
+sticky routing on the tenant key, or `spec.sessionAffinity: ClientIP` on the
+Service for coarse stickiness. Without stickiness a tenant's requests bounce
+between replicas: each hop sees a cold session table, and each per-replica spend
+cap applies only to the slice of traffic that landed on it.
 
 ---
 
@@ -20788,6 +22918,410 @@ fak issues-solved --hours 9 --source git
 `scripts/ci.ps1` (or `make ci`) runs build + vet + test + the CLAIMS lint as one gate.
 
 > It is *designed for extension*: other ideas bake in as a new package + one
+
+---
+
+# `EXTENDING.md`
+
+> Source: `EXTENDING.md`
+
+# Build your optimization on fak
+
+**For researchers and teams who want to make a fak subsystem faster or smarter — a new
+quantization kernel, a GPU / NPU (neural-processing-unit) backend, a cache-eviction
+policy, an admission rung, a KV (key/value attention cache) layout — and have it land as
+a peer of the built-ins without forking the core.**
+
+If you've ever shipped a clever kernel and then watched it rot because the upstream you
+patched moved underneath you, this document is the contract that stops that here. You
+attach through a **named registration seam**; the kernel *walks* the registry and never
+imports your code. So your optimization (1) survives core refactors, (2) **composes** with
+every other optimization at zero hot-path cost, and (3) is **provably correct and provably
+faster before it ships** — by a witness the harness checks, not a claim you make.
+
+This is the researcher-facing companion to [`ARCHITECTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) (the
+extension model in full), the layering gates documented inline below, and the
+repo-wide [`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) (how to land a change). Read this one
+first if your goal is "I want to optimize subsystem X."
+
+---
+
+## TL;DR — the three gates
+
+Every optimization lands the same way. Each gate is mechanical: a tool or a test, not a
+review opinion.
+
+| Gate | Question | The mechanism | Run it |
+|------|----------|---------------|--------|
+| **1. Plug in** | Where does my code attach? | a `Register*` seam + `internal/architest` layering gate | `fak new-leaf …` / add a backend file |
+| **2. Prove correct** | Does it preserve behavior? | the Reference/Approx correctness class + a deterministic witness test | `.\fak\test.ps1 ./internal/<pkg>/` |
+| **3. Prove faster** | Is it actually a win? | the non-forgeable keep-bit (`shipgate.Evaluate` via `cmd/rsicycle`) | `go run ./cmd/rsicycle …` |
+
+You do not get to skip a gate. That is the point: a contributor cannot land a kernel that
+is plausible-but-wrong (Gate 2 catches it) or correct-but-slower (Gate 3 catches it). The
+gates are what make it *safe* to accept optimizations from anyone — including autonomous
+coding agents.
+
+**Want the teaching version first?** This page is the reference. If you would rather be
+taught the three gates — question by question, with diagrams and a lab you can run at each
+step — read the six-rung ladder in
+[`docs/explainers/kernel-development/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kernel-development/README.md):
+rung 1 asks *what is kernel development*, rung 2 *where does my code attach*, rung 3 *does
+it preserve behavior*, rung 4 *is it actually a win*, rung 5 *the other kernel* (the
+adjudicator), rung 6 *the frontier*. Each rung ends with a checkpoint you answer yourself.
+
+**Before you start, run the preflight** — one command tells you whether your environment
+and all three gate entry points are wired, and prints this golden path with the exact
+commands (add `--json` for a machine-readable answer an agent tool can parse):
+
+```bash
+python tools/extend_preflight.py
+```
+
+---
+
+## Gate 1 — Plug in (don't fork)
+
+fak is a **frozen minimal spine** (`internal/abi`) plus **real extension seams**. The
+spine never changes after freeze; everything else attaches as *a new package + one
+`Register*()` call*, never an edit to the core. `internal/architest` fails the build on an
+upward/cross-tier import, so the layering can't silently erode.
+
+### Pick your seam
+
+There are two registries, by where your optimization lives.
+
+**A. Device compute / quantization kernels → `internal/compute`** (the hardware
+abstraction layer, HAL). This is the seam for the most common research optimization:
+*"make this subsystem's math faster on my hardware."* A backend is a new **file** in
+`internal/compute/` that self-registers in `init()`:
+
+```go
+//go:build mybackend            // build tag gates which backends COMPILE IN; the
+package compute                 // registry picks which one RUNS (FAK_BACKEND / Pick).
+
+func init() { Register(myBackend{}) }   // compute.Register — that's the whole wiring.
+
+type myBackend struct{}
+func (myBackend) Name() string             { return "my-q4" }
+func (myBackend) Class() compute.CorrectnessClass { return compute.Approx } // see Gate 2
+// …implement the small whole-op Backend interface (MatMul, Attention, RoPE, Argmax, …);
+//   the forward loop targets the interface and never sees your bytes.
+```
+
+The CPU reference (`cpuref.go`) and the real `cuda` / `metal` / `vulkan` backends already
+ride this seam — read them as your template. For the **CUDA** backend specifically, the full
+edit→build→prove loop — the no-GPU local gate `make cuda-check`, the on-device build, the
+cosine witnesses, and how to add a kernel — is written up in
+**[`docs/cuda-dev.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/cuda-dev.md)**. The forward loop in `internal/model` calls
+*whole ops* (`MatMul`, `Attention`, `Argmax`), so a device is free to express its own
+intra-kernel parallelism, async enqueue (`Caps.Async`), fused attention (`Caps.FusedAttn`),
+or a tiled layout — and an older loop that doesn't know your capability falls back to the
+synchronous core. **You never edit the forward loop.**
+
+**B. Cross-worker policy / engine / cache / verdict → `internal/abi` `Register*`.** If your
+optimization is a new admission rung, a serving engine, a zero-copy region backend, a
+page-out codec, or a fast-path answer, it's a new **leaf package** that registers against
+the frozen ABI from `init()`:
+
+| To optimize / add… | Call | What you get |
+|---|---|---|
+| a smarter policy / admission rung | `RegisterAdjudicator(rank, impl)` | a new link in the LSM-style decision chain |
+| a local fast-path (vDSO-style) answer | `RegisterFastPath(tier, impl)` | a cache hit that never enters the slow path |
+| a serving backend (local/remote/multi) | `RegisterEngine(id, impl)` | a new engine behind the selector |
+| zero-copy KV co-residence | `RegisterRegionBackend(impl)` | a Resolver swap (copy → shared arena) |
+| a swappable page-out / compaction codec | `RegisterPageOutBackend(id, impl)` | a new MMU headroom backend |
+| a new verdict kind | `RegisterVerdictKind(k>1023, …)` | an open-range kind with a declared fold position |
+
+Scaffold one with the golden-path tool — it stamps a green-by-construction skeleton,
+declares the tier in `architest`, and (with `--register`) wires the blank-import:
+
+```bash
+fak new-leaf myfastcache --tier mechanism --register --summary "prefix-aware fast cache"
+```
+
+See the full seam table and the "how a new idea bakes in" walkthrough in
+[`ARCHITECTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md).
+
+**C. Operator panes / TUI controls → `internal/tuiplugin` `Register`.** If your
+extension is an operator-facing console pane, do not add another case to
+`cmd/fak/tui.go`. Register a pane descriptor plus runner instead:
+
+```go
+func init() {
+    tuiplugin.Register(tuiplugin.Pane{
+        ID:      "my-pane",
+        Summary: "one-line operator summary",
+        Usage:   "fak console my-pane [--json]",
+        Schema:  "fak.tui.my-pane.v1",
+        BuiltIn: true,
+        Controls: []tuiplugin.Control{
+            {ID: "json", Label: "JSON", Kind: "toggle", Flag: "--json"},
+            {ID: "mode", Label: "Mode", Kind: "flag", Flag: "--mode", Options: []string{"brief", "full"}},
+        },
+        Run:      runTUIMyPane,
+        Overview: tuiOverviewAdapter(buildTUIOverviewMyPaneCard), // optional
+    })
+}
+```
+
+Keep the `Register` call next to the pane implementation when practical. For
+example, the issues/garden panes register from `cmd/fak/tui_issues_garden.go`,
+and the loops pane registers from `cmd/fak/tui_loop_render.go`; adding another
+pane should follow that shape before growing a central dispatcher table.
+
+`fak console panes` lists the registered panes and their user controls, and
+`fak console panes --json` emits the stable discovery model (`fak.tui.registry.v1`)
+for a higher-level interactive shell, including whether a pane contributes an
+overview card and any enumerated `options` a control supports. This is the same
+kind of plugin seam as the ABI registries:
+in-process, compiled into the one binary, duplicate IDs panic at startup, and the
+dispatcher and overview walk the registry instead of importing every pane by name.
+
+The persisted user controls live in `~/.fak/console.json` / `$FAK_CONSOLE_FILE`.
+The first control is overview composition: `fak console overview` walks registered
+pane IDs that have overview adapters, and operators can choose a subset/order
+either per-run:
+
+```bash
+fak console overview --pane guard --pane loops --guard-json guard.json --ledger .fak/loops.jsonl
+```
+
+or in config:
+
+```json
+{
+  "overview_panes": ["guard", "loops", "issues"]
+}
+```
+
+The CLI list wins over the config file; with neither, overview includes all
+registered panes that have an overview adapter and ranks them by attention.
+The same config file can set per-pane defaults by registered control ID:
+
+```json
+{
+  "pane_defaults": {
+    "issues": {"json": true, "top": 40},
+    "guard": {"color": "never", "rows": 20}
+  }
+}
+```
+
+Pane defaults are injected before the pane parser runs, and an explicit CLI flag
+always wins (`--json=false` beats `"json": true`). Unknown panes, unknown controls,
+dispatcher-only controls, invalid value types, and values outside a control's
+declared `options` fail loudly instead of being ignored.
+
+Operators do not have to hand-edit that JSON. The `config` pane is itself a
+registered pane and can save the same controls after validating them against the
+registry:
+
+```bash
+fak console config --set-overview guard,loops,issues
+fak console config --set-default issues.json=true --set-default issues.top=40
+fak console config --unset-default issues.json --clear-overview
+```
+
+Use `--path FILE` or the dispatcher-level `--console-config FILE` when editing a
+non-default config file. `fak console config --json` renders the stored controls
+as `fak.tui.config.v1`, so an interactive shell can round-trip user preferences
+without scraping text.
+
+### The layering gate
+
+Whichever seam you use, `internal/architest` enforces the five-tier layering
+(`root → foundation → mechanism → composer → integrator`): a leaf may import lower tiers,
+never higher. Confirm you're green before going further:
+
+```powershell
+.\fak\test.ps1 ./internal/architest/
+```
+
+A violation comes back as a structured DOS reason (`ARCH_LAYER_VIOLATION`) with the fix,
+not a wall of compiler output.
+
+---
+
+## Gate 2 — Prove it's correct (a witness, not a claim)
+
+fak's whole thesis is *verify, don't self-certify*. An optimization that "should be
+equivalent" isn't accepted on your word — it ships a **witness** the test harness
+re-checks. The correctness contract is typed, so it can't silently rot.
+
+### The Reference / Approx contract
+
+`compute.CorrectnessClass` makes the bit-identity scope mechanical:
+
+- **`Reference`** — held to the exact rungs: **`max|Δ| = 0`** against the reference
+  reduction order, plus the Hugging-Face argmax oracle. Use this only if your kernel
+  reproduces the reference arithmetic byte-for-byte.
+- **`Approx`** — every device backend and every quantized lane. Held to the *looser*
+  gate: **argmax-exact** (same token out) plus a **logit-cosine** threshold you declare
+  per backend. This is the honest class for a faster-but-not-bit-identical kernel.
+
+The harness calls `compute.RequireReference(b)` before any `max|Δ|=0` assertion, so it is
+*mechanically impossible* to hold a device to bit-identity it can't meet, or to promote a
+device to reference. Declare your class honestly in `Class()` and the right gate applies
+itself.
+
+### Write the witness
+
+The pattern is a deterministic, stdlib-only `proofs_witness_test.go` next to your code —
+`internal/compute/proofs_witness_test.go` is a live example, and there are ~30 more under
+`internal/*/proofs_witness_test.go`, each bound to a theorem in
+[`docs/proofs/`](https://github.com/anthony-chaudhary/fak/tree/main/docs/proofs) with a verdict (`PROVEN` / `REFUTED` / `OPEN` /
+`SCOPED-OUT`). The witness is **deterministic** (no wall-clock, no RNG in the gate), so it
+reproduces **bit-for-bit across architectures** — a Mac (arm64) and a Windows box (x86_64)
+agree, which is what licenses the determinism claim. Run the weight-free metrics with
+`-live=false` for an instant cross-platform check.
+
+```powershell
+.\fak\test.ps1 ./internal/compute/      # your package's witnesses + the model bit-identity rungs
+```
+
+Honesty rule (from [`docs/proofs/00-METHOD.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/proofs/00-METHOD.md)): **prove or
+refute, never launder.** A `REFUTED` witness that records a real gap (e.g. a token-3
+decode drift) is a first-class, mergeable result — it's the gap mapped, not hidden. Tag
+every claim in your docs with exactly one of `[SHIPPED]` / `[SIMULATED]` / `[STUB]`
+([`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)).
+
+---
+
+## Gate 3 — Prove it's faster (the keep-bit)
+
+A correct optimization still has to *earn its keep*. fak runs a real
+propose → measure → keep-or-revert cycle, and the keep decision is **non-forgeable**: the
+"improved" bit (`shipgate.Evaluate`, `internal/shipgate/shipgate.go`) is unexported and
+set *only* from a measured witness — you cannot assert your way to a KEEP.
+
+```bash
+# one-shot: measure baseline vs your change, decide KEEP / REVERT from the witness
+go run ./cmd/rsicycle …
+```
+
+The decision is **KEEP** only on *strict gain ∧ green suite ∧ clean tree*; it is **REVERT**
+on a no-op, a regression, or a dirty-truth (a result that can't be reproduced from
+committed state). So "no measurable win" lands as REVERT, automatically — your optimization
+competes against the honest baseline, not against a story about it.
+
+Trace your number to ground truth: every public benchmark figure is reconciled to a
+committed JSON artifact in [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). When you
+report "1.4× on this kernel," the artifact + commit are the witness, and the
+`bench`-family tools (`tools/bench_*.py`) write the run rows. Free the resource you're
+measuring first (e.g. VRAM before a GPU bench) — contention, not architecture, is the
+usual cause of a surprising regression.
+
+---
+
+## The scaling contract you must honor (and the reason to build here)
+
+The registries are written **once** at `init()` and read on **every syscall**, so the
+rule is: *writes may be expensive; reads must be O(1) and wait-free no matter how many
+optimizations are registered.* The 1000th idea must cost the 1st syscall nothing in
+framework overhead — reads load an immutable atomic snapshot (no lock, no alloc), event
+fan-out is indexed by kind, and the policy folds are per-tool.
+
+**This is the payoff, not just a constraint.** Because each optimization is its own
+package / file-tree and attaches through a snapshot-read seam, *your* kernel composes with
+everyone else's at zero marginal hot-path cost — and two teams optimizing two subsystems
+edit **disjoint files** and never collide (the DOS arbiter leases one file-tree per leaf,
+so parallel work is collision-free by construction). If your rung or observer only applies
+to specific tools or events, declare it (`CallScope{ Tools() }` / `EventSubscriber{
+Subscriptions() }`) and the 100th tool-specific policy costs an unrelated call nothing.
+
+---
+
+## The stable-core ritual — adding a model or a backend
+
+A new optimization is one kernel. A new **model family** or a new **backend** is a whole
+*column* of the support cross-product (`internal/covmatrix`), and the thread we keep losing
+is "which cells did this just change, and which are still undefined?" The matrix is
+**generated from the tree, not hand-written** — so it only stays honest if it is *run* as
+the tree moves. That is the discipline below: the RSI scorecard loop (`#1021`, the scorecard
+family) pointed at *kernel growth* instead of doc/code quality.
+
+A new model or backend ships **only once all three hold**:
+
+1. **Its column of the matrix is generated.** `fak coverage-matrix` derives every new
+   `(family, backend)` cell from the kernel's own structural facts (the `resolveSpecFor`
+   family switch, the topology each family lowers to, the `--backend` enum, the
+   `requirePreNorm` / `requireGLMDsaSession` fences). Regenerate it and commit the snapshot
+   diff — that diff *is* the answer to "what did this change touch?"
+
+   ```bash
+   go run ./cmd/fak coverage-matrix            # the full grid (human)
+   go run ./cmd/fak coverage-matrix --json     # the control-pane payload (corpus.growth_debt)
+   ```
+
+2. **Its `SUPPORTED` cells have a CI witness.** A cell the matrix calls `SUPPORTED` by
+   topology but that carries no CI-runnable numeric oracle is *honest-but-incomplete* — it
+   runs, but its correctness is asserted, not proven. List that residual and retire it with
+   a weight-free conformance row (`#1081`):
+
+   ```bash
+   go run ./cmd/fak coverage-matrix --stale    # cells that RUN but have no CI oracle
+   ```
+
+   A `PANICS`/`FENCED` cell is honest-and-complete (it refuses); an `UNDEFINED` cell is
+   `growth_debt` (a silently-reachable wrong-result path) — neither is on the `--stale`
+   list, but an `UNDEFINED` cell **must** be fenced or witnessed before you ship.
+
+3. **`growth_debt` did not rise.** The coverage matrix folds one `growth_debt` integer into
+   the unified scorecard control-pane, and the `--check` ratchet enforces it: debt may hold
+   or fall, **never silently rise**. The gardening bundle runs this on every tick, so a
+   model/backend PR that adds an unfenced, unwitnessed cell reds the gate.
+
+   ```bash
+   python tools/scorecard_control_pane.py --check   # the ratchet (folds growth_debt)
+   go run ./cmd/fak garden --check                  # the same gate inside the gardening bundle
+   ```
+
+In short: **generate the column, witness the `SUPPORTED` cells, hold the line on
+`growth_debt`.** The full epic decomposition is in
+[`docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md).
+
+---
+
+## Land it
+
+Once all three gates are green, ship it the same way every contributor does — the rules
+are enforced *below* the agent layer by git hooks + the DOS kernel, so a human, a Claude
+Code session, and a Codex/Cursor/Aider run all land work identically:
+
+1. **Stay on `master`** in the main worktree — never branch (the trunk guard refuses
+   `OFF_TRUNK`). Install the guards once: `python tools/install_trunk_guard.py`.
+2. **Commit small, by explicit path** (`git commit -- <paths>`, never `git add -A`).
+3. **Stamp the subject** with a `(fak <leaf>)` trailer so the DOS verify-referee can bind
+   your "done" to git evidence — e.g. `feat(compute): add q4_k Metal backend (fak compute)`.
+   Use `docs(scope): …` for doc-only diffs.
+4. **Tests run through WSL** on Windows hosts (`.\fak\test.ps1`); `go build` / `go vet`
+   work natively. Never commit a red tree.
+5. **DCO sign-off + CLA** on an external PR — see [`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md)
+   and its CLA section (the CLA itself is a draft pending legal review).
+
+That's it. Your optimization is now a first-class part of fak: the core can't break it,
+the harness proves it stays correct and fast, and it composes with every other team's
+work at O(1) on the hot path.
+
+---
+
+## Why build *on* fak instead of forking
+
+- **A stable spine you can bet on.** The ABI is frozen and additive-only; your seam won't
+  be yanked out from under you.
+- **You own your file-tree.** One package per optimization → disjoint leases → your work
+  never collides with another team's, even running concurrently.
+- **Correctness and speed are mechanically gated, not trusted.** Your kernel ships with a
+  witness the harness re-checks; it can't silently regress, and neither can the kernel
+  underneath it.
+- **It composes.** O(1) hot path means the 50th optimization is as cheap to the syscall as
+  the 1st. Forking gives you one win; building here lets every team's wins stack.
+
+Questions, or a seam you need that doesn't exist yet? Open an issue (the
+`agent-tool-boundary-fixture` template is a good model for a precise, replayable ask), or
+propose the new seam as an additive `Register*` in `internal/abi` — the answer to "the
+seam I need is missing" is a new named seam, never a core edit.
 
 ---
 

@@ -87,7 +87,7 @@ Use these resources when deploying to production, running fleet infrastructure, 
 - Product status: [`STATUS.md`](STATUS.md) tracks subsystem implementation maturity.
 
 ### Kernel internals and repository workflows
-- Extending the kernel: [`EXTENDING.md`](EXTENDING.md) explains how to register new leaves without editing core files.
+- Extending the kernel: [`EXTENDING.md`](EXTENDING.md) explains how to register new leaves without editing core files. New to it? The [kernel-development ladder](docs/explainers/kernel-development/README.md) teaches the same three gates question by question, with a lab and a checkpoint per rung.
 - Internal architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md) details kernel subsystem contracts.
 - Automated coding agents: [`AGENTS.md`](AGENTS.md) contains operational rules for autonomous workers on the shared trunk.
 - Exhaustive documentation index: [`INDEX.md`](INDEX.md) catalogs the full 1,200+ page corpus for name-based lookups and archival research notes.

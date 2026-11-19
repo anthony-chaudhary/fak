@@ -16,6 +16,18 @@ skill. This page is the schema, the labeling, and — most importantly — the
 **disambiguation**, because "loop" and "super loop" mean several precise things in
 this repo and a question loop is none of the obvious ones.
 
+## The axes — the per-subject question pages
+
+`asked.jsonl` is the machine ledger. The **human** surface is one page per subject
+axis: the questions a newcomer actually asks about that subject, each labeled with
+the four categories below, answered in two sentences, and routed to the page that
+answers it in full. A page is the durable, readable form of the rows it cites.
+
+| Axis | Page | Companion to |
+|---|---|---|
+| Kernel development | [`kernel-development.md`](kernel-development.md) | [the kernel-development ladder](../explainers/kernel-development/README.md) |
+| Inference | [`inference.md`](inference.md) | [the inference ladder](../explainers/inference/README.md) |
+
 ## What it is NOT (read this first)
 
 | Not this | That surface | This surface (`/question-loop`) |

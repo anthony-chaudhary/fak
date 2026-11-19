@@ -158,6 +158,20 @@ Six words recur on every rung. Learn them here and the rungs read faster.
 
 ## See also
 
+- [The inference ladder](../inference/README.md) — the **sibling** ladder: what the
+  forward pass *is*, before this one asks how you change the code that runs it. Read it
+  first if "the loop that turns a prompt into the next token" is not yet concrete.
+- [The accelerator ladder](../accelerators/README.md) — the sibling ladder for the
+  *where*: the HAL seam, Vulkan, and ROCm. Level 2's `Register*` seam is the same seam
+  that ladder climbs.
+- [The caching ladder](../caching/README.md) — the structural precedent: another subject
+  written five times, once per reader.
+- [The memory-hierarchy ladder](../memory-hierarchy/README.md) — the ground-up companion:
+  where the numbers live while a model runs (registers → SRAM → HBM → host DRAM → NVMe).
+  Read it when Level 4's "is it actually a win?" needs the roofline underneath it.
+- [Kernel development — the questions](../../questions/kernel-development.md) — the
+  question-first companion to this ladder: 13 questions a newcomer asks, each routed to
+  the rung that answers it.
 - [What is a CUDA kernel?](../what-is-a-cuda-kernel.md) — the three-senses
   disambiguation Level 1 builds on.
 - [The abstraction map](../the-abstraction-map.md) — how the layers are named, floor by

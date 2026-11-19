@@ -230,6 +230,9 @@ ledger, and each names what would close it.
   machine-checked rules behind this page.
 - [The kernel-development ladder](../explainers/kernel-development/README.md) — the six
   rungs every "→ full answer" above points into.
+- [The inference ladder](../explainers/inference/README.md) — the sibling ladder: what the
+  forward pass *is*, before this page asks how you change the code that runs it. Read it
+  first if "the loop that turns a prompt into the next token" is not yet concrete.
 - [What is a CUDA kernel?](../explainers/what-is-a-cuda-kernel.md) — the three-senses
   disambiguation the "is the agent kernel a CUDA kernel?" question rests on.
 - [`EXTENDING.md`](../../EXTENDING.md) — the task-first golden path: plug in → prove

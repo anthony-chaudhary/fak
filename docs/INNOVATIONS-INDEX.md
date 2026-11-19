@@ -59,6 +59,15 @@ Companion decompositions: [`EXPLAINER-what-is-an-agent`](notes/EXPLAINER-what-is
 (the *deployment* axis) · [`hardware-portability`](explainers/hardware-portability.md)
 (the *hardware-depth* axis).
 
+**Taught, rung by rung.** The two structural shapes above are the *subject* of the
+[kernel-development ladder](explainers/kernel-development/README.md): six rungs from
+"what is kernel development" to the honest frontier, covering the frozen spine and the
+`Register*` seam (shape 1's attach point), the Reference/Approx correctness class and its
+deterministic witness, the non-forgeable keep-bit, and the adjudicator rung and its
+verdict fold (shape 1 applied to the security kernel). Every rung has a lab you run and a
+checkpoint you answer. The catalog below is *what has been built*; the ladder is *how you
+add the next row*.
+
 ---
 
 ## Part 2 — Innovation catalog by subsystem family
