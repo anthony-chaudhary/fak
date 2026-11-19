@@ -94,6 +94,8 @@ can still plug in.
 
 ## The contract: the `Backend` interface
 
+![The compute HAL seam: three Approx device backends (cuda, vulkan, rocm) sit above a dashed seam that is the compute.Backend interface, and one Reference backend (cpu-ref) sits below it as the correctness oracle; backends cross the seam by calling Register from their own init, and the forward loop crosses it by calling Lookup or Pick, never by naming a machine](diagrams/hal-seam.svg)
+
 Everything a backend must satisfy is one interface, declared at
 `internal/compute/compute.go:450`:
 

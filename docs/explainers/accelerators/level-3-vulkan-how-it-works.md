@@ -148,6 +148,8 @@ what the argmax-exact witness is for.
 
 ## The dispatch path, end to end
 
+![The Vulkan compute path as five stacked layers: the Go forward loop, the vulkan.go backend serialized by one mutex, the 9157-line C++ shim behind a flat fvk_ C ABI, 116 SPIR-V compute shaders, and the Vulkan driver and GPU; the per-dispatch tax is marked at the cgo crossing and at the queue-submit-and-fence crossing, which is why the backend is correct but roughly 60 times slower than llama.cpp](diagrams/vulkan-path.svg)
+
 Here is one operation, `MatMul(w, x)`, traced from Go to silicon and back.
 
 ```

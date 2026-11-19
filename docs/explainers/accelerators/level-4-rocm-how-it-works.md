@@ -134,6 +134,8 @@ silent numerical drift, not a compile error.
 
 ## The device-architecture taxonomy — the part that is host-witnessed
 
+![The ROCm path split in two: on the left, the pure-Go rocm_arch.go taxonomy that runs on any host and classifies every supported AMD target; on the right, the cgo backend and hipified kernels that need an AMD GPU and hipcc; below, the wavefront split that is the taxonomy's central fact, with GCN5 and CDNA1-3 executing a 64-lane wavefront and RDNA1-3 executing a native 32-lane wavefront](diagrams/rocm-path.svg)
+
 This is the page's technical centrepiece, and it is real, tested code.
 `internal/compute/rocm_arch.go` is **pure Go with no build tag**, so it compiles and is
 unit-tested on any host. That is how a hardware-dependent backend still ships a host-witnessed

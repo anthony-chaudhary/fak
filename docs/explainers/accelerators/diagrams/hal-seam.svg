@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="620" viewBox="0 0 980 620" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="hs-title hs-desc">
+<title id="hs-title">The compute HAL seam: three Approx device backends (cuda, vulkan, rocm) above one Reference cpu-ref backend, joined by Register, Lookup and Pick</title>
+<desc id="hs-desc">A horizontal seam across the middle of the diagram. Above it sit the device backends, all of correctness class Approx: cuda, vulkan and rocm. Below it sits cpu-ref, the single Reference backend, which is the bit-exact correctness oracle. The seam itself is the compute.Backend interface (internal/compute/compute.go:450), a set of whole-operation methods such as MatMul, BatchedMatMul, Attention and Argmax. Backends cross the seam by calling Register (internal/compute/compute.go:639) from their own init function: cpu-ref at internal/compute/cpuref.go:34, Vulkan at internal/compute/vulkan.go:214 from its init at internal/compute/vulkan.go:171, and ROCm at internal/compute/rocm_backend.go:57 from its init at internal/compute/rocm_backend.go:47. The forward loop never names a backend; it asks Lookup (internal/compute/compute.go:661) or Pick (internal/compute/compute.go:673) and calls the interface. The correctness split is a type, not a convention: CorrectnessClass (internal/compute/compute.go:279) has exactly two values, and RequireReference (internal/compute/compute.go:700) lets a harness mechanically refuse to hold a device to bit-identity. Vulkan declares Approx at internal/compute/vulkan.go:587 and ROCm declares Approx at internal/compute/rocm_backend.go:62.</desc>
+
+<rect x="0" y="0" width="980" height="620" fill="#ffffff"/>
+
+<text x="490" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">The compute HAL seam</text>
+<text x="490" y="58" text-anchor="middle" font-size="12.5" fill="#57606a">Adding a GPU is a registration, never an edit to the forward loop. Above the seam: many machines. Below it: one answer key.</text>
+
+<!-- ============ ABOVE THE SEAM: device backends ============ -->
+<text x="30" y="100" font-size="12" font-weight="700" fill="#57606a">ABOVE THE SEAM &#8212; device backends (Approx: same token, not same bits)</text>
+
+<rect x="30" y="114" width="290" height="104" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.4"/>
+<text x="175" y="142" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">cuda</text>
+<text x="175" y="163" text-anchor="middle" font-size="10.5" fill="#57606a">NVIDIA, via the CUDA driver</text>
+<text x="175" y="181" text-anchor="middle" font-size="10" fill="#57606a">Class() = Approx</text>
+<text x="175" y="201" text-anchor="middle" font-size="10" fill="#57606a">registers from its own init()</text>
+
+<rect x="345" y="114" width="290" height="104" rx="10" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.4"/>
+<text x="490" y="142" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">vulkan</text>
+<text x="490" y="163" text-anchor="middle" font-size="10.5" fill="#57606a">cross-vendor: AMD, Intel, NVIDIA</text>
+<text x="490" y="181" text-anchor="middle" font-size="10" fill="#57606a">Class() = Approx &#8212; vulkan.go:587</text>
+<text x="490" y="201" text-anchor="middle" font-size="10" fill="#57606a">Register at vulkan.go:214</text>
+
+<rect x="660" y="114" width="290" height="104" rx="10" fill="#9a6700" fill-opacity="0.05" stroke="#9a6700" stroke-width="1.4"/>
+<text x="805" y="142" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">rocm</text>
+<text x="805" y="163" text-anchor="middle" font-size="10.5" fill="#57606a">AMD native HIP, Linux only</text>
+<text x="805" y="181" text-anchor="middle" font-size="10" fill="#57606a">Class() = Approx &#8212; rocm_backend.go:62</text>
+<text x="805" y="201" text-anchor="middle" font-size="10" fill="#57606a">Register at rocm_backend.go:57</text>
+
+<!-- arrows down into the seam -->
+<line x1="175" y1="218" x2="175" y2="262" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="175,262 169,250 181,250" fill="#24292f"/>
+<line x1="490" y1="218" x2="490" y2="262" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="490,262 484,250 496,250" fill="#24292f"/>
+<line x1="805" y1="218" x2="805" y2="262" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="805,262 799,250 811,250" fill="#24292f"/>
+
+<text x="175" y="240" text-anchor="middle" font-size="9.5" fill="#57606a">Register(b)</text>
+<text x="490" y="240" text-anchor="middle" font-size="9.5" fill="#57606a">Register(b)</text>
+<text x="805" y="240" text-anchor="middle" font-size="9.5" fill="#57606a">Register(b)</text>
+
+<!-- ============ THE SEAM ============ -->
+<rect x="30" y="262" width="920" height="86" rx="8" fill="#24292f" fill-opacity="0.05" stroke="#24292f" stroke-width="2.2" stroke-dasharray="9 5"/>
+<text x="490" y="288" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">the seam &#8212; compute.Backend (internal/compute/compute.go:450)</text>
+<text x="490" y="310" text-anchor="middle" font-size="11" fill="#57606a">whole operations, not primitives: MatMul &#183; BatchedMatMul &#183; Attention &#183; Argmax &#183; Class() &#183; Caps()</text>
+<text x="490" y="332" text-anchor="middle" font-size="11" fill="#57606a">the forward loop calls these and never learns which machine answered</text>
+
+<!-- the three verbs -->
+<rect x="30" y="366" width="290" height="60" rx="8" fill="#ffffff" stroke="#0969da" stroke-width="1.4"/>
+<text x="175" y="390" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">Register(b Backend)</text>
+<text x="175" y="410" text-anchor="middle" font-size="10" fill="#57606a">compute.go:639 &#8212; a backend joins</text>
+
+<rect x="345" y="366" width="290" height="60" rx="8" fill="#ffffff" stroke="#0969da" stroke-width="1.4"/>
+<text x="490" y="390" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">Lookup(name) (Backend, bool)</text>
+<text x="490" y="410" text-anchor="middle" font-size="10" fill="#57606a">compute.go:661 &#8212; ask for one by name</text>
+
+<rect x="660" y="366" width="290" height="60" rx="8" fill="#ffffff" stroke="#0969da" stroke-width="1.4"/>
+<text x="805" y="390" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">Pick(name) Backend</text>
+<text x="805" y="410" text-anchor="middle" font-size="10" fill="#57606a">compute.go:673 &#8212; or take the best available</text>
+
+<!-- ============ BELOW THE SEAM ============ -->
+<line x1="490" y1="426" x2="490" y2="470" stroke="#24292f" stroke-width="1.6"/>
+<polygon points="490,470 484,458 496,458" fill="#24292f"/>
+
+<text x="30" y="462" font-size="12" font-weight="700" fill="#57606a">BELOW THE SEAM &#8212; the reference (Reference: bit-exact, always available)</text>
+
+<rect x="30" y="474" width="920" height="76" rx="10" fill="#8250df" fill-opacity="0.05" stroke="#8250df" stroke-width="1.6"/>
+<text x="490" y="502" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">cpu-ref &#8212; the correctness oracle</text>
+<text x="490" y="523" text-anchor="middle" font-size="10.5" fill="#57606a">registers itself at internal/compute/cpuref.go:34 &#8212; func init() { Register(&#38;cpuBackend{}) }</text>
+<text x="490" y="541" text-anchor="middle" font-size="10.5" fill="#57606a">every device backend is graded against this one. Same input, same output, to the last decimal place.</text>
+
+<!-- ============ the enforcement note ============ -->
+<rect x="30" y="566" width="920" height="42" rx="8" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="490" y="584" text-anchor="middle" font-size="11" fill="#24292f">The split is a <tspan font-weight="700">type</tspan>, not a convention: CorrectnessClass (compute.go:279) has exactly two values, and RequireReference (compute.go:700)</text>
+<text x="490" y="600" text-anchor="middle" font-size="11" fill="#24292f">lets a harness mechanically refuse to hold a device to bit-identity. You cannot forget the rule, because the compiler carries it.</text>
+</svg>

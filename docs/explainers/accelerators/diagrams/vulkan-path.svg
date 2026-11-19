@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700" viewBox="0 0 1000 700" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="vk-title vk-desc">
+<title id="vk-title">The Vulkan compute path in fak: Go backend, cgo boundary, the libfakvulkan C shim, SPIR-V shaders, and the Vulkan driver, with the per-dispatch tax marked at each crossing</title>
+<desc id="vk-desc">A vertical stack of five layers. At the top, the Go forward loop calls whole operations on the compute.Backend interface. Below it, internal/compute/vulkan.go is the Go backend, built only under the tag vulkan and cgo (internal/compute/vulkan.go:1), which registers itself at internal/compute/vulkan.go:214 from its init at internal/compute/vulkan.go:171 and declares correctness class Approx at internal/compute/vulkan.go:587. A single mutex, vulkanMu at internal/compute/vulkan.go:69, serializes the whole backend, so only one operation is in flight at a time. The cgo boundary crosses into the C++ shim internal/compute/vulkan_shim.cpp, 9157 lines, which exposes a flat C ABI of fvk_ functions: fvk_init at internal/compute/vulkan_shim.cpp:3326, fvk_device_identity at internal/compute/vulkan_shim.cpp:3279, fvk_free at internal/compute/vulkan_shim.cpp:118. The shim is compiled offline into a static library named libfakvulkan.a. Below the shim, 116 SPIR-V compute shaders in internal/compute/shaders/ carry the actual arithmetic, for example matmul.comp, attention.comp and q4k_matmul.comp. At the bottom, the Vulkan driver and the GPU. The per-dispatch tax is marked at each crossing: every small operation pays a Go-to-C call, a command-buffer record, a queue submit and a fence wait, which is why the backend is numerically correct but roughly 60 times slower than llama.cpp.</desc>
+
+<rect x="0" y="0" width="1000" height="700" fill="#ffffff"/>
+
+<text x="500" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">The Vulkan compute path &#8212; five layers, and where the time goes</text>
+<text x="500" y="58" text-anchor="middle" font-size="12.5" fill="#57606a">Vulkan is a graphics API pressed into compute service. It works on every vendor, and it charges a toll at every crossing.</text>
+
+<!-- LAYER 1 -->
+<rect x="40" y="80" width="920" height="66" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="500" y="106" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">1 &#183; the forward loop &#8212; calls whole operations, never names a backend</text>
+<text x="500" y="128" text-anchor="middle" font-size="10.5" fill="#57606a">MatMul &#183; BatchedMatMul &#183; Attention &#183; Argmax &#8212; the compute.Backend interface, internal/compute/compute.go:450</text>
+
+<line x1="500" y1="146" x2="500" y2="176" stroke="#24292f" stroke-width="1.8"/>
+<polygon points="500,176 493,163 507,163" fill="#24292f"/>
+
+<!-- LAYER 2 -->
+<rect x="40" y="176" width="920" height="104" rx="10" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.6"/>
+<text x="500" y="202" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">2 &#183; internal/compute/vulkan.go &#8212; the Go backend</text>
+<text x="500" y="224" text-anchor="middle" font-size="10.5" fill="#57606a">//go:build vulkan &#38;&#38; (windows || linux) &#38;&#38; cgo &#8212; a default go build ./... skips this file entirely</text>
+<text x="500" y="246" text-anchor="middle" font-size="10.5" fill="#57606a">init() at vulkan.go:171 &#8594; Register(vulkanDev) at vulkan.go:214 &#183; Class() = Approx at vulkan.go:587</text>
+<rect x="70" y="256" width="860" height="18" rx="4" fill="#9a6700" fill-opacity="0.10" stroke="#9a6700" stroke-width="1"/>
+<text x="500" y="269" text-anchor="middle" font-size="10" fill="#24292f">vulkanMu (vulkan.go:69) &#8212; ONE mutex serializes the whole backend: one operation in flight, ever</text>
+
+<line x1="500" y1="280" x2="500" y2="310" stroke="#24292f" stroke-width="1.8"/>
+<polygon points="500,310 493,297 507,297" fill="#24292f"/>
+<text x="560" y="300" font-size="10" font-weight="700" fill="#bc4c00">&#9664; crossing 1: cgo call (Go &#8594; C)</text>
+
+<!-- LAYER 3 -->
+<rect x="40" y="310" width="920" height="104" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.6"/>
+<text x="500" y="336" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">3 &#183; internal/compute/vulkan_shim.cpp &#8212; the C++ shim (9,157 lines)</text>
+<text x="500" y="358" text-anchor="middle" font-size="10.5" fill="#57606a">a flat C ABI of fvk_ functions &#8212; fvk_init (vulkan_shim.cpp:3326) &#183; fvk_device_identity (:3279) &#183; fvk_free (:118)</text>
+<text x="500" y="380" text-anchor="middle" font-size="10.5" fill="#57606a">compiled OFFLINE into a static library: libfakvulkan.a &#8212; the same libfak&lt;backend&gt;.a convention as libfakcuda.a</text>
+<rect x="70" y="390" width="860" height="18" rx="4" fill="#9a6700" fill-opacity="0.10" stroke="#9a6700" stroke-width="1"/>
+<text x="500" y="403" text-anchor="middle" font-size="10" fill="#24292f">here the shim records a command buffer, submits it to a queue, and waits on a fence &#8212; per operation</text>
+
+<line x1="500" y1="414" x2="500" y2="444" stroke="#24292f" stroke-width="1.8"/>
+<polygon points="500,444 493,431 507,431" fill="#24292f"/>
+<text x="560" y="434" font-size="10" font-weight="700" fill="#bc4c00">&#9664; crossing 2: vkQueueSubmit + fence wait</text>
+
+<!-- LAYER 4 -->
+<rect x="40" y="444" width="920" height="104" rx="10" fill="#8250df" fill-opacity="0.05" stroke="#8250df" stroke-width="1.6"/>
+<text x="500" y="470" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">4 &#183; internal/compute/shaders/ &#8212; 116 SPIR-V compute shaders</text>
+<text x="500" y="492" text-anchor="middle" font-size="10.5" fill="#57606a">the actual arithmetic lives here, not in Go: matmul.comp &#183; attention.comp &#183; q4k_matmul.comp &#183; argmax.comp</text>
+<text x="500" y="514" text-anchor="middle" font-size="10.5" fill="#57606a">SPIR-V is Vulkan's portable bytecode &#8212; one binary the driver translates to whatever the card speaks</text>
+<rect x="70" y="524" width="860" height="18" rx="4" fill="#9a6700" fill-opacity="0.10" stroke="#9a6700" stroke-width="1"/>
+<text x="500" y="537" text-anchor="middle" font-size="10" fill="#24292f">descriptor sets bind the buffers; the driver validates and compiles the pipeline</text>
+
+<line x1="500" y1="548" x2="500" y2="578" stroke="#24292f" stroke-width="1.8"/>
+<polygon points="500,578 493,565 507,565" fill="#24292f"/>
+
+<!-- LAYER 5 -->
+<rect x="40" y="578" width="920" height="60" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="500" y="604" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">5 &#183; the Vulkan driver and the GPU</text>
+<text x="500" y="626" text-anchor="middle" font-size="10.5" fill="#57606a">witnessed on an AMD Radeon RX 7600 (RDNA3 / gfx1102, 8 GB) &#8212; argmax-exact, prefill-logit cosine = 1.0</text>
+
+<!-- the verdict -->
+<rect x="40" y="650" width="920" height="40" rx="8" fill="#bc4c00" fill-opacity="0.06" stroke="#bc4c00" stroke-width="1.3"/>
+<text x="500" y="668" text-anchor="middle" font-size="11" fill="#24292f"><tspan font-weight="700">The per-dispatch tax:</tspan> a transformer forward pass is thousands of SMALL operations. Each one pays crossings 1 and 2 in full.</text>
+<text x="500" y="684" text-anchor="middle" font-size="11" fill="#24292f">The GPU finishes the arithmetic long before the CPU finishes handing it over &#8212; hence correct, but ~60&#215; slower than llama.cpp.</text>
+</svg>

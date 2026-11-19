@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="720" viewBox="0 0 1000 720" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="rc-title rc-desc">
+<title id="rc-title">The ROCm path in fak: the pure-Go architecture taxonomy that ships on any host, the cgo backend and hipified kernels that need an AMD GPU, and the 64-lane versus 32-lane wavefront split between CDNA and RDNA</title>
+<desc id="rc-desc">The diagram splits into two halves. The left half is what runs on any host: internal/compute/rocm_arch.go, 961 lines of pure Go with no build tag, which classifies every supported AMD target. It defines ROCmFamily at internal/compute/rocm_arch.go:30, the ROCmArch struct at internal/compute/rocm_arch.go:96, the rocmArches table at internal/compute/rocm_arch.go:105, normalizeGFX at internal/compute/rocm_arch.go:132, LookupROCmArch at internal/compute/rocm_arch.go:154 and ROCmOffloadArch at internal/compute/rocm_arch.go:162. The right half is what needs an AMD GPU and hipcc: internal/compute/rocm_backend.go, 671 lines, built only under the tag linux and rocm and cgo, which links -lfakrocm -lamdhip64 at internal/compute/rocm_backend.go:7, serializes a single HIP stream behind rocmMu at internal/compute/rocm_backend.go:22, and registers itself at internal/compute/rocm_backend.go:57 from its init at internal/compute/rocm_backend.go:47. The wavefront split is the taxonomy's central fact: GCN5 and CDNA1 through CDNA3 execute a 64-lane wavefront, while RDNA1 through RDNA3 execute a native 32-lane wavefront, recorded per row in the rocmArches table. The status is three-way: written, compiled and run on AMD silicon once on 2026-09-10 on a gfx1151 part, and not reproducible on a CPU-only host.</desc>
+
+<rect x="0" y="0" width="1000" height="720" fill="#ffffff"/>
+
+<text x="500" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">The ROCm path &#8212; what ships everywhere, and what needs the card</text>
+<text x="500" y="58" text-anchor="middle" font-size="12.5" fill="#57606a">ROCm is AMD's native compute stack: HIP is CUDA's source-compatible twin. Half of this backend is portable Go; half needs silicon.</text>
+
+<!-- ============ LEFT: portable ============ -->
+<rect x="30" y="80" width="450" height="330" rx="12" fill="#1a7f37" fill-opacity="0.05" stroke="#1a7f37" stroke-width="1.8"/>
+<text x="255" y="108" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">RUNS ON ANY HOST</text>
+<text x="255" y="128" text-anchor="middle" font-size="10.5" fill="#57606a">pure Go &#183; no build tag &#183; unit-witnessed here</text>
+
+<rect x="50" y="142" width="410" height="52" rx="8" fill="#ffffff" stroke="#1a7f37" stroke-width="1.3"/>
+<text x="255" y="163" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">internal/compute/rocm_arch.go</text>
+<text x="255" y="182" text-anchor="middle" font-size="10" fill="#57606a">961 lines &#8212; the device-architecture taxonomy</text>
+
+<rect x="50" y="204" width="410" height="40" rx="6" fill="#ffffff" stroke="#1a7f37" stroke-width="1.1"/>
+<text x="255" y="222" text-anchor="middle" font-size="10.5" fill="#24292f">ROCmFamily (rocm_arch.go:30) &#183; ROCmArch struct (:96)</text>
+<text x="255" y="238" text-anchor="middle" font-size="10" fill="#57606a">rocmArches table (:105) &#8212; one row per supported gfx target</text>
+
+<rect x="50" y="252" width="410" height="40" rx="6" fill="#ffffff" stroke="#1a7f37" stroke-width="1.1"/>
+<text x="255" y="270" text-anchor="middle" font-size="10.5" fill="#24292f">normalizeGFX (:132) &#183; LookupROCmArch (:154)</text>
+<text x="255" y="286" text-anchor="middle" font-size="10" fill="#57606a">ROCmOffloadArch (:162) &#8212; returns the hipcc --offload-arch token</text>
+
+<rect x="50" y="300" width="410" height="40" rx="6" fill="#ffffff" stroke="#1a7f37" stroke-width="1.1"/>
+<text x="255" y="318" text-anchor="middle" font-size="10.5" fill="#24292f">Datacenter() (rocm_arch.go:92)</text>
+<text x="255" y="334" text-anchor="middle" font-size="10" fill="#57606a">is this part the MI Instinct line, or a Radeon?</text>
+
+<rect x="50" y="350" width="410" height="46" rx="6" fill="#1a7f37" fill-opacity="0.08" stroke="#1a7f37" stroke-width="1.1"/>
+<text x="255" y="369" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">the honest answer to "does fak support my card?"</text>
+<text x="255" y="386" text-anchor="middle" font-size="10" fill="#57606a">KnownROCmArches() enumerates the table in generation order</text>
+
+<!-- ============ RIGHT: needs silicon ============ -->
+<rect x="520" y="80" width="450" height="330" rx="12" fill="#9a6700" fill-opacity="0.05" stroke="#9a6700" stroke-width="1.8"/>
+<text x="745" y="108" text-anchor="middle" font-size="14" font-weight="700" fill="#24292f">NEEDS AN AMD GPU + hipcc</text>
+<text x="745" y="128" text-anchor="middle" font-size="10.5" fill="#57606a">//go:build linux &#38;&#38; rocm &#38;&#38; cgo &#8212; skipped by a default build</text>
+
+<rect x="540" y="142" width="410" height="52" rx="8" fill="#ffffff" stroke="#9a6700" stroke-width="1.3"/>
+<text x="745" y="163" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">internal/compute/rocm_backend.go</text>
+<text x="745" y="182" text-anchor="middle" font-size="10" fill="#57606a">671 lines &#8212; the cgo wrapper over the HIP runtime</text>
+
+<rect x="540" y="204" width="410" height="40" rx="6" fill="#ffffff" stroke="#9a6700" stroke-width="1.1"/>
+<text x="745" y="222" text-anchor="middle" font-size="10.5" fill="#24292f">LDFLAGS: -lfakrocm -lamdhip64 (rocm_backend.go:7)</text>
+<text x="745" y="238" text-anchor="middle" font-size="10" fill="#57606a">the libfak&lt;backend&gt;.a convention, as with libfakcuda.a</text>
+
+<rect x="540" y="252" width="410" height="40" rx="6" fill="#ffffff" stroke="#9a6700" stroke-width="1.1"/>
+<text x="745" y="270" text-anchor="middle" font-size="10.5" fill="#24292f">init() at rocm_backend.go:47 &#8594; Register(b) at :57</text>
+<text x="745" y="286" text-anchor="middle" font-size="10" fill="#57606a">Class() = Approx at rocm_backend.go:62</text>
+
+<rect x="540" y="300" width="410" height="40" rx="6" fill="#ffffff" stroke="#9a6700" stroke-width="1.1"/>
+<text x="745" y="318" text-anchor="middle" font-size="10.5" fill="#24292f">rocmMu (rocm_backend.go:22) &#8212; ONE HIP stream</text>
+<text x="745" y="334" text-anchor="middle" font-size="10" fill="#57606a">rocm_kernels.hip (641) &#183; rocm_backend.h (65) &#183; rocm_kv.go (350)</text>
+
+<rect x="540" y="350" width="410" height="46" rx="6" fill="#9a6700" fill-opacity="0.08" stroke="#9a6700" stroke-width="1.1"/>
+<text x="745" y="369" text-anchor="middle" font-size="10.5" font-weight="700" fill="#24292f">the build recipe is inline, not a missing script</text>
+<text x="745" y="386" text-anchor="middle" font-size="10" fill="#57606a">hipcc --offload-arch=&#8230; &#8594; ar rcs libfakrocm.a &#8212; internal/compute/ROCM.md:15</text>
+
+<!-- ============ the wavefront split ============ -->
+<text x="30" y="440" font-size="13" font-weight="700" fill="#24292f">The taxonomy's central fact: the wavefront width</text>
+<text x="30" y="460" font-size="11" fill="#57606a">A wavefront is the set of lanes that execute one instruction together. Get the width wrong and the kernel silently misbehaves.</text>
+
+<rect x="30" y="474" width="450" height="150" rx="10" fill="#8250df" fill-opacity="0.05" stroke="#8250df" stroke-width="1.6"/>
+<text x="255" y="500" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">64-lane wavefront &#8212; datacenter</text>
+<text x="255" y="522" text-anchor="middle" font-size="10.5" fill="#57606a">GCN5 &#183; CDNA1 &#183; CDNA2 &#183; CDNA3</text>
+<text x="255" y="544" text-anchor="middle" font-size="10.5" fill="#57606a">gfx906 &#183; gfx908 &#183; gfx90a &#183; gfx942</text>
+<text x="255" y="566" text-anchor="middle" font-size="10.5" fill="#57606a">Instinct MI50/MI60 &#183; MI100 &#183; MI210/MI250 &#183; MI300A/MI300X</text>
+<text x="255" y="592" text-anchor="middle" font-size="10.5" fill="#57606a">the MI Instinct line &#8212; Datacenter() returns true</text>
+<text x="255" y="612" text-anchor="middle" font-size="10" fill="#57606a">rocm_arch.go:106-109</text>
+
+<rect x="520" y="474" width="450" height="150" rx="10" fill="#0969da" fill-opacity="0.04" stroke="#0969da" stroke-width="1.6"/>
+<text x="745" y="500" text-anchor="middle" font-size="13" font-weight="700" fill="#24292f">32-lane wavefront &#8212; consumer</text>
+<text x="745" y="522" text-anchor="middle" font-size="10.5" fill="#57606a">RDNA1 &#183; RDNA2 &#183; RDNA3 &#183; RDNA3.5</text>
+<text x="745" y="544" text-anchor="middle" font-size="10.5" fill="#57606a">gfx1010 &#183; gfx1030/1032 &#183; gfx1100/1102 &#183; gfx1151</text>
+<text x="745" y="566" text-anchor="middle" font-size="10.5" fill="#57606a">RX 5700 &#183; RX 6800/6900 &#183; RX 7900 XTX / RX 7600 &#183; Strix Halo</text>
+<text x="745" y="592" text-anchor="middle" font-size="10.5" fill="#57606a">the Radeon line &#8212; gfx1102 is the Vulkan-witnessed card</text>
+<text x="745" y="612" text-anchor="middle" font-size="10" fill="#57606a">rocm_arch.go:110-114</text>
+
+<!-- ============ status ============ -->
+<rect x="30" y="640" width="940" height="66" rx="10" fill="#24292f" fill-opacity="0.04" stroke="#24292f" stroke-width="1.4"/>
+<text x="500" y="662" text-anchor="middle" font-size="12" font-weight="700" fill="#24292f">Status: three things are true, and the ladder keeps them apart</text>
+<text x="500" y="682" text-anchor="middle" font-size="10.5" fill="#57606a"><tspan font-weight="700">written</tspan> (all files tracked) &#183; <tspan font-weight="700">compiled and run on AMD silicon once</tspan> &#8212; 2026-09-10, HIP 7.2, gfx1151, device tests passing without skips</text>
+<text x="500" y="699" text-anchor="middle" font-size="10.5" fill="#57606a">(docs/tickets/native-rocm-backend/TICKET-01.md:64) &#183; <tspan font-weight="700">not reproducible on a CPU-only host</tspan> &#8212; no AMD GPU, no hipcc. No throughput number exists.</text>
+</svg>
