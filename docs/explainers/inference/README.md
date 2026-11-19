@@ -84,8 +84,15 @@ sed -n '483,500p' internal/model/forward.go   # the Forward entry point
 
 Run that from the repository root.
 
-If a citation does not resolve, that is a bug in the page — the pages are
-verified by a link-and-citation check, not by trust.
+If a citation does not resolve, that is a bug in the page. The **links** between
+pages are machine-checked — `fak doc-freshness --check --corpus` walks every
+markdown file in the repository (`internal/docfreshrsi/corpus_audit.go:104`) and
+reports `dangling_links`; a broken relative link fails that gate. The **citations** are checked by hand, and the check is weaker
+than it looks: a gate can prove that `internal/model/forward.go:483` *exists*, but
+not that line 483 *says what the page claims it says*. A citation that resolves is
+not yet a citation that is true. When a page here is wrong, it is almost always
+that second failure — the line moved, or the claim drifted off it — so read the
+line, do not just confirm it is there.
 
 ## See also
 
