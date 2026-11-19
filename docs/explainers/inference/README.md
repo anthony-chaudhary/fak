@@ -96,6 +96,7 @@ line, do not just confirm it is there.
 
 ## See also
 
+- [The explainers index](../README.md) — every ladder and single-page explainer, indexed by what you already know.
 - [The caching ladder](../caching/README.md) — the same five-rung pattern applied
   to fak's caching stack. This ladder is its sibling.
 - [The accelerator ladder](../accelerators/README.md) — the sibling ladder: this

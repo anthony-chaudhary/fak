@@ -106,6 +106,7 @@ ROCm at `internal/compute/rocm_backend.go:57` from its `init()` at
 
 ## See also
 
+- [The explainers index](../README.md) — every ladder and single-page explainer, indexed by what you already know.
 - [Hardware portability](../hardware-portability.md) — the HAL-seam explainer this ladder extends.
 - [The inference ladder](../inference/README.md) — the sibling ladder: what the forward pass *is*, before this one asks where it runs. Read it first if "the loop that turns a prompt into the next token" is not yet concrete.
 - [The caching ladder](../caching/README.md) — the structural precedent: another subject written five times, once per reader.
