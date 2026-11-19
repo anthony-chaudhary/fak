@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -14,7 +15,7 @@ import (
 
 func runComputeTrace(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak compute-trace capture|summary|from-llamacpp|from-sglang|from-vllm|profile|first-divergence|logprobs|logits [flags]")
+		fmt.Fprintln(stderr, "usage: fak compute-trace capture|summary|breakdown|from-llamacpp|from-sglang|from-vllm|profile|first-divergence|logprobs|logits [flags]")
 		return 2
 	}
 	switch args[0] {
@@ -92,6 +93,39 @@ func runComputeTrace(stdout, stderr io.Writer, args []string) int {
 			}
 		} else {
 			fmt.Fprintln(stdout, "capture_validation=legacy_numerical")
+		}
+		return 0
+	case "breakdown":
+		fs := flag.NewFlagSet("compute-trace breakdown", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		in := fs.String("in", "", "trace artifact path")
+		asJSON := fs.Bool("json", false, "emit the breakdown as a single JSON object")
+		if err := fs.Parse(args[1:]); err != nil || *in == "" {
+			return 2
+		}
+		f, err := os.Open(*in)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		defer f.Close()
+		a, err := computetrace.Read(f)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		b := computetrace.BreakdownOf(a)
+		if *asJSON {
+			enc := json.NewEncoder(stdout)
+			if err := enc.Encode(b); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			return 0
+		}
+		fmt.Fprintf(stdout, "span_ns=%d covered_ns=%d unexplained_ns=%d events=%d dropped=%d\n", b.SpanNS, b.CoveredNS, b.UnexplainedNS, b.Events, b.Dropped)
+		for _, c := range computetrace.BreakdownClasses {
+			fmt.Fprintf(stdout, "%s=%d\n", c, b.ClassNS[c])
 		}
 		return 0
 	case "from-llamacpp":
