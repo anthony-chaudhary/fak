@@ -28,7 +28,7 @@ fak runs the model itself, in-process. The same forward pass — the loop that t
 prompt into the next token — can run on four machines behind one interface: a **CPU
 reference** (`cpu-ref`, the correctness oracle, always available), **CUDA** for NVIDIA,
 **Vulkan** (cross-vendor: AMD, Intel, NVIDIA), and **ROCm** (AMD's native HIP path,
-written but never compiled — see below).
+silicon-witnessed once, not reproducible here — see below).
 
 Vulkan and ROCm are genuinely different machines. Vulkan is a *graphics* API pressed into
 compute service: portable, but it pays a per-dispatch tax. ROCm is AMD's *native* compute
@@ -63,25 +63,28 @@ prefill-logit cosine = 1.0. It is **not** fast — still roughly **60× slower t
 llama.cpp**, from per-dispatch CPU/driver overhead, a known and fixable architectural
 limit, not a numeric defect. The measured record is `docs/benchmarks/VULKAN-AMD-RESULTS.md`.
 
-**ROCm is written but never compiled, and never measured.** Two different things are true here,
-and the ladder keeps them apart. The device-architecture taxonomy in
+**ROCm is written, and it has run on AMD silicon — once, and not on this host.** Three different
+things are true here, and the ladder keeps them apart. The device-architecture taxonomy in
 `internal/compute/rocm_arch.go` is shipped **and unit-witnessed on any host** — it classifies
 every supported AMD target (`gfxNNNN`) as GCN5 / CDNA1-3 / RDNA1-3 and returns the canonical
 `hipcc --offload-arch` token. The rest of the backend — `rocm_backend.go`, `rocm_kv.go`,
-`rocm_kernels.hip`, and a 1,455-line test file — is **in the tree but has never been compiled**,
-because every one of those files carries `//go:build linux && rocm && cgo` and the build script
-that would set it up (`build_rocm.sh`) does not exist. So: **no ROCm throughput or correctness
-number exists**, and neither does a single executed ROCm test. The named blocker and the four
-unwitnessed acceptance bullets are recorded in `internal/compute/ROCM-C002-NOTES.md`. The ladder
-never invents a ROCm number: where a rung needs one, it says the figure is deferred, not that it
-is small or large.
+`rocm_kernels.hip`, and a 1,455-line test file — is **in the tree, and it has been compiled and
+run on real AMD hardware**: `docs/tickets/native-rocm-backend/TICKET-01.md:64` records the
+functional witness on 2026-09-10, HIP 7.2 on a `gfx1151` part, required-device tests passing
+without skips. What it has **not** done is run on *this* dev host, which has no AMD GPU and no
+`hipcc` — every one of those files carries `//go:build linux && rocm && cgo`, so a default
+`go build ./...` skips them and the run is not reproducible here. And **no ROCm throughput number
+exists**: correctness on one card is not a speed measurement, and the four acceptance bullets that
+need measurement remain open in `internal/compute/ROCM-C002-NOTES.md`. The ladder never invents a
+ROCm number: where a rung needs one, it says the figure is unmeasured, not that it is small or
+large.
 
 ## The shape of the stack
 
 ```
    ┌────────────────────────────────────────────────┐
    │  device backends  (Approx — argmax-exact)      │
-   │   cuda      vulkan      rocm (uncompiled)      │
+   │   cuda      vulkan      rocm (silicon-run)     │
    └───────────────────────┬────────────────────────┘
                            │  Register / Lookup / Pick
   ═════════════════════════╪═════════════════════════  ← the HAL seam

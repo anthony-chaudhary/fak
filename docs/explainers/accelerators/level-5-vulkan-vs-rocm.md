@@ -1,6 +1,6 @@
 ---
 title: "Level 5 — Vulkan vs ROCm, head to head"
-description: "The honest head-to-head between fak's cross-vendor Vulkan backend (measured on AMD silicon) and its AMD-native ROCm backend (written, never compiled, host-witnessed only in its arch taxonomy): the real axes of difference, the per-dispatch tax, and the open problems."
+description: "The honest head-to-head between fak's cross-vendor Vulkan backend (measured on AMD silicon) and its AMD-native ROCm backend (correctness-witnessed on AMD silicon once, never measured for speed, not reproducible on a CPU-only host): the real axes of difference, the per-dispatch tax, and the open problems."
 slug: accelerators-level-5
 keywords:
   - vulkan vs rocm
@@ -18,9 +18,9 @@ date: 2026-11-18
 
 > **Audience.** A senior engineer or researcher who has read [Level 3 — Vulkan](level-3-vulkan-how-it-works.md) and [Level 4 — ROCm](level-4-rocm-how-it-works.md). You know what a command buffer is and what a HIP kernel launch is. This page does not re-teach either; it puts them on the same axes and says what fak's evidence actually supports today.
 
-> **Short answer.** Vulkan is a **cross-vendor standard** reached through a driver; ROCm is **one vendor's native stack**. Everything else — abstraction level, kernel language, code you must write, hardware you can tune for — follows from that sentence. In fak today, Vulkan is **shipped and witnessed on real AMD silicon** and ROCm is **written but never compiled** — only its arch taxonomy is host-witnessed, and it has had no silicon run. So the honest comparison here is of *designs and evidence classes*, not of measured throughput.
+> **Short answer.** Vulkan is a **cross-vendor standard** reached through a driver; ROCm is **one vendor's native stack**. Everything else — abstraction level, kernel language, code you must write, hardware you can tune for — follows from that sentence. In fak today, Vulkan is **shipped and measured on real AMD silicon** and ROCm is **shipped and correctness-witnessed on real AMD silicon once** — but never measured for speed, and not reproducible on a CPU-only host. So the honest comparison here is of *designs and evidence classes*, not of measured throughput.
 
-> **Evidence warning.** Vulkan has been measured on a real AMD Radeon RX 7600 (RDNA3 / gfx1102, 8 GB): full SmolLM2-135M forward pass, argmax-exact greedy decode, prefill-logit cosine = 1.0, and a decode rate ~60× slower than llama.cpp. ROCm has **not** been run on any GPU. Its device-architecture taxonomy is unit-witnessed on any host; its HIP kernel compilation and **every acceptance bullet that runs on silicon are deferred** to an AMD-GPU-on-Linux node. **No ROCm throughput or correctness number was run, estimated, or fabricated.** There is therefore **no measured ROCm-vs-Vulkan throughput comparison on this page**, and every ROCm number below is labeled `declared, unmeasured`.
+> **Evidence warning.** Vulkan has been measured on a real AMD Radeon RX 7600 (RDNA3 / gfx1102, 8 GB): full SmolLM2-135M forward pass, argmax-exact greedy decode, prefill-logit cosine = 1.0, and a decode rate ~60× slower than llama.cpp. ROCm has been **run on a real AMD GPU once** — `docs/tickets/native-rocm-backend/TICKET-01.md:64` records 2026-09-10, HIP 7.2, `gfx1151`, required-device tests passing without skips — but that run established **correctness, not speed**, and it is not reproducible on this dev host (no AMD GPU, no `hipcc`). Its device-architecture taxonomy is unit-witnessed on any host. **No ROCm throughput number was run, estimated, or fabricated.** There is therefore **no measured ROCm-vs-Vulkan throughput comparison on this page**, and every ROCm *performance* number below is labeled `declared, unmeasured`.
 
 ---
 
@@ -43,11 +43,11 @@ Each row is an axis; the "why" column is the part that matters, because the *wha
 | **Portability** | AMD, NVIDIA, Intel | AMD only | A standard must be implementable by everyone, so it can only expose the intersection of what everyone has. |
 | **Abstraction level** | You build Instance → Device → Queue → CommandBuffer → Pipeline → Buffer yourself | Looks like CUDA: allocate, launch, synchronize | Vulkan is a *graphics-and-compute* API; its object model is the price of explicit control. HIP mirrors CUDA, so the mental model is a kernel launch, not a command recording. |
 | **Kernel language** | **SPIR-V** bytecode, compiled ahead of time from GLSL | C++ compiled by `hipcc` | Vulkan consumes a vendor-neutral IR so one shader binary can be re-targeted by each driver. HIP compiles C++ straight to the vendor's ISA because it only ever targets one vendor. |
-| **Code reuse** | Hand-written shim (`internal/compute/vulkan_shim.cpp`, ~9,157 lines) plus 116 GLSL compute shaders | Plan: **hipify** the existing CUDA kernels rather than write a second set | Vulkan could not reuse the CUDA kernels at all — different language, different execution model. HIP is source-compatible with CUDA by design, so `internal/compute/cuda_kernels.cu` is expected to compile through `hipify`/`hipcc`. |
+| **Code reuse** | Hand-written shim (`internal/compute/vulkan_shim.cpp`, ~9,157 lines) plus 116 GLSL compute shaders | **hipify** the existing CUDA kernels rather than write a second set | Vulkan could not reuse the CUDA kernels at all — different language, different execution model. HIP is source-compatible with CUDA by design, so `internal/compute/cuda_kernels.cu` compiles through `hipify`/`hipcc` into `rocm_kernels.hip`. |
 | **Dispatch model** | Synchronous, one command buffer per op, serialized by `vulkanMu` (`internal/compute/vulkan.go:69`) | A single serialized HIP stream behind `rocmMu` (`internal/compute/rocm_backend.go:22`) | Both are single-stream first cuts — command-buffer model vs kernel-launch model. Neither is multi-stream or multi-queue yet. |
 | **Vendor-specific hardware access** | None: the API cannot expose what not every vendor has | Can expose AMD-specific features | `internal/compute/rocm_arch.go` models **wavefront width** — 64 lanes on GCN/CDNA, 32 on RDNA — and warns that picking the wrong family "silently mistunes occupancy and LDS" (`internal/compute/rocm_arch.go:27`). A cross-vendor API has no such knob. |
 | **Correctness class** | `Approx` (`internal/compute/vulkan.go:587`) | `Approx` (`internal/compute/rocm_backend.go:62`) | Both are graded against the `cpu-ref` `Reference` path: argmax held to EXACT, everything else to cosine plus a small max\|Δ\|. Neither is bit-exact. |
-| **Evidence class today** | **Measured on silicon** | **Host-witnessed taxonomy only** | The honest row. Vulkan has a full forward pass on a real RX 7600; ROCm has a unit-tested arch table and nothing that has touched a GPU. |
+| **Evidence class today** | **Measured on silicon** | **Correctness-witnessed on silicon once; no speed number** | The honest row. Vulkan has a full forward pass on a real RX 7600, with throughput. ROCm has a unit-tested arch table *and* a 2026-09-10 correctness run on a `gfx1151` part — but nothing that measures how fast it is. |
 
 The last row decides how you should read the other seven. Seven of these axes are *design* claims, and design claims are cheap. One is an *evidence* claim, and evidence is expensive.
 
@@ -138,7 +138,7 @@ ROCm's plan is to compile the **existing** `internal/compute/cuda_kernels.cu` th
 Now the asymmetry that makes this genuinely interesting. Compare the two backends' code surfaces:
 
 - **Vulkan** could not reuse the CUDA kernels at all — different language (GLSL → SPIR-V, not C++), different execution model (command buffers, not kernel launches). So it needed a hand-written shim (`internal/compute/vulkan_shim.cpp`, ~9,157 lines) **plus** 116 GLSL compute shaders, built from scratch.
-- **ROCm** reuses the CUDA kernels through hipify, so its hand-written surface is a thin cgo wrapper (`rocm_backend.go`, 671 lines), a C ABI header (`rocm_backend.h`, 65 lines), the hipified kernels (`rocm_kernels.hip`, 641 lines), and a build script (`build_rocm.sh`) — **the first three are in the tree; the build script is the one piece still missing.**
+- **ROCm** reuses the CUDA kernels through hipify, so its hand-written surface is a thin cgo wrapper (`rocm_backend.go`, 671 lines), a C ABI header (`rocm_backend.h`, 65 lines), and the hipified kernels (`rocm_kernels.hip`, 641 lines) — **all three in the tree, and all three compiled and run on a `gfx1151` part on 2026-09-10.** The one piece that is *not* checked in is a `build_rocm.sh` script: the recipe lives as documented commands in `internal/compute/ROCM.md:15` instead.
 
 **The portable path cost more code than the native path is expected to.** That is the asymmetry, and it is not the direction intuition points. The intuition is "portable = less work, because it runs everywhere." The reality is "portable = more work, because you build the portable machine yourself, then build your program on top of it." The native path leans on the vendor's existing stack — including the vendor's ability to compile the CUDA kernels you already wrote.
 
@@ -146,20 +146,21 @@ Now the asymmetry that makes this genuinely interesting. Compare the two backend
 
 ## What is the honest scorecard?
 
-This table is the page's most important artifact. The `Evidence class` column is the one that makes it trustworthy: every ROCm performance row reads `declared, unmeasured`, because that is what it is.
+This table is the page's most important artifact. The `Evidence class` column is the one that makes it trustworthy: every ROCm *performance* row reads `declared, unmeasured`, because that is what it is — while the correctness row reads `silicon-witnessed once`, because that is what *it* is.
 
 | Axis | Vulkan | ROCm | Evidence class |
 |---|---|---|---|
-| Runs on AMD silicon | Yes — RX 7600 (gfx1102) | Not yet | Vulkan `measured on silicon`; ROCm `declared, unmeasured` |
-| Numerical parity vs cpu-ref | argmax-exact, prefill cosine 1.0 | Not yet | Vulkan `measured on silicon`; ROCm `declared, unmeasured` |
+| Runs on AMD silicon | Yes — RX 7600 (gfx1102) | Yes — `gfx1151`, 2026-09-10 | Vulkan `measured on silicon`; ROCm `silicon-witnessed once` |
+| Numerical parity vs cpu-ref | argmax-exact, prefill cosine 1.0 | Required-device tests passed, no skips | Vulkan `measured on silicon`; ROCm `silicon-witnessed once` |
+| Reproducible on a CPU-only host | No (needs the card) | No (needs the card **and** `hipcc`) | both `not reproducible here` |
 | Decode throughput | ~2.5 tok/s (SmolLM2-135M f32), ~60× behind llama.cpp | No number exists | Vulkan `measured on silicon`; ROCm `declared, unmeasured` |
 | Throughput vs the other backend | Baseline | Expected within 1.5× of Vulkan | Vulkan `measured on silicon`; ROCm `declared, unmeasured` |
 | Device-arch taxonomy | n/a (cross-vendor) | `ROCmFamily` + `rocmArches` + `Datacenter()` | ROCm `host-witnessed` |
 | Offload-target selection | n/a | `ROCmOffloadArch(gfx)` normalization | ROCm `host-witnessed` |
-| Backend registration seam | Registers as `Approx` `"vulkan"` | Registers as `Approx` `"rocm"` (written, never compiled) | Vulkan `measured on silicon`; ROCm `declared, unmeasured` |
+| Backend registration seam | Registers as `Approx` `"vulkan"` | Registers as `Approx` `"rocm"` | both `in the tree` |
 | Multi-GPU | Not implemented | Planned over RCCL via `CollectiveBackend` | ROCm `declared, unmeasured` |
 
-Read the table by column, not by row. The Vulkan column is almost entirely `measured on silicon`. The ROCm column is almost entirely `declared, unmeasured`, with two `host-witnessed` rows for the parts that are pure computation and need no GPU. That split is the whole story of the two backends' maturity.
+Read the table by column, not by row. The Vulkan column is almost entirely `measured on silicon`. The ROCm column splits three ways: two `host-witnessed` rows for the pure computation that needs no GPU, two `silicon-witnessed once` rows for the correctness run, and `declared, unmeasured` for everything that would require a *speed* measurement. That split is the whole story of the two backends' maturity — and the reason the ROCm column cannot be summarized as a single word.
 
 ```
    THE EVIDENCE LADDER
@@ -175,15 +176,15 @@ Read the table by column, not by row. The Vulkan column is almost entirely `meas
       |    - ROCm: ROCmFamily / rocmArches / Datacenter() taxonomy
       |    - ROCm: ROCmOffloadArch(gfx) offload-target normalization
       |
-      |  WRITTEN, NEVER COMPILED  (in the tree, behind a build tag nothing sets)
-      |    - ROCm: rocm_backend.go / rocm_kv.go / rocm_kernels.hip
-      |    - ROCm: rocm_backend_test.go (25 TestROCm* funcs, none ever run)
+      |  SILICON-WITNESSED ONCE  (correctness only, 2026-09-10, gfx1151)
+      |    - ROCm: rocm_backend.go / rocm_kv.go / rocm_kernels.hip compiled
+      |    - ROCm: required-device tests (3) + transformer test (1), no skips
+      |    - NOT reproducible on a CPU-only host (needs the card + hipcc)
       |
       |  DECLARED, UNMEASURED  (a plan with a number attached)
       |    - ROCm: "within 1.5x Vulkan throughput"
       |    - ROCm: "bit-exact results"
       |    - ROCm: "multi-GPU support"
-      |    - ROCm: "runs on AMD GPU on Linux"
       |
    weakest
 ```
@@ -192,23 +193,28 @@ Read the table by column, not by row. The Vulkan column is almost entirely `meas
 
 ## What would change the answer?
 
-Everything that would move ROCm from *written* to *measured* is enumerated in `internal/compute/ROCM-C002-NOTES.md`. In order:
+The correctness rung is already climbed: `docs/tickets/native-rocm-backend/TICKET-01.md:64` records the
+2026-09-10 silicon run. What remains is everything that needs a *measurement*, enumerated in
+`internal/compute/ROCM-C002-NOTES.md`. In order:
 
-1. **An AMD-GPU-on-Linux node with ROCm installed** — the precondition for all the rest; the current dev host has no AMD GPU and no `hipcc`.
+1. **An AMD-GPU-on-Linux node with ROCm installed** — the precondition for all the rest; the current dev host has no AMD GPU and no `hipcc`, which is why the 2026-09-10 run cannot be repeated here.
 2. **Confirm the toolchain.** `hipcc --version` and `rocminfo | grep gfx` to get the reported `gfxNNNN`, then feed it to `ROCmOffloadArch` — which accepts the `:sramecc+:xnack-` feature suffix `rocminfo` may print.
-3. **Write the build script.** The cgo half is already in the tree — `rocm_backend.go` (`//go:build rocm`), `rocm_backend.h`, `rocm_kv.go` and `rocm_kernels.hip` — registering an `Approx` backend named `"rocm"` over a flat C ABI. What is missing is `build_rocm.sh`, the `build_cuda.sh` twin that runs `hipify`/`hipcc` and produces `libfakrocm.a`. Until it exists there is nothing to link, so none of that code has ever been compiled.
-4. **Witness op-by-op parity, then the full forward.** Mirror `vulkan_test.go`'s 7-op suite, then the full forward pass; hold argmax to EXACT, the rest to cosine plus a small max\|Δ\|.
-5. **Benchmark against the Vulkan baseline on the same card**, graded with `WithinTarget(rocmSeconds, vulkanSeconds, 1.5)`.
+3. **Check in the build script.** The recipe exists and works — it is written out as commands in `internal/compute/ROCM.md:15` (`hipcc --offload-arch=gfx1151 -c rocm_kernels.hip`, `ar rcs libfakrocm.a`, `go build -tags rocm`) — but it is not a checked-in `build_rocm.sh` the way CUDA has `build_cuda.sh`. Turning prose into a script is what makes the run repeatable by someone else.
+4. **Witness op-by-op parity, then the full forward.** Mirror `vulkan_test.go`'s 7-op suite, then the full forward pass; hold argmax to EXACT, the rest to cosine plus a small max\|Δ\|. The 2026-09-10 run did the transformer half of this; the op-by-op suite is the part to widen.
+5. **Benchmark against the Vulkan baseline on the same card**, graded with `WithinTarget(rocmSeconds, vulkanSeconds, 1.5)`. **This is the step that has never been attempted** — no ROCm speed number exists at all.
 6. **Multi-GPU** via `CollectiveBackend` over RCCL; the single-rank identity is witnessable on one card before a second GPU is needed.
 
-The four acceptance bullets that are **unwitnessed** — quoted verbatim from the notes — are:
+The four acceptance bullets from the notes, with their current state:
 
-- [ ] Run on AMD GPU on Linux
-- [ ] Within 1.5× Vulkan throughput
-- [ ] Bit-exact results
-- [ ] Multi-GPU support
+- [x] Run on AMD GPU on Linux — **done 2026-09-10** (`docs/tickets/native-rocm-backend/TICKET-01.md:64`), on `gfx1151`
+- [ ] Within 1.5× Vulkan throughput — **never attempted**; no ROCm speed number exists
+- [ ] Bit-exact results — the run held argmax exact and cosine ≥ 0.999; the notes' stricter "bit-exact" bar is not claimed
+- [ ] Multi-GPU support — **not implemented**
 
-All four are measurements on AMD silicon under ROCm, and none can be witnessed on a host with no AMD GPU and no `hipcc`. Until they are, the ROCm column of the scorecard stays `declared, unmeasured`.
+So the ROCm column of the scorecard is `silicon-witnessed once` for correctness and stays
+`declared, unmeasured` for every performance row. The distinction matters: a reader who collapses
+the two would conclude either that ROCm is proven fast (it is not) or that it has never run (it
+has).
 
 ---
 

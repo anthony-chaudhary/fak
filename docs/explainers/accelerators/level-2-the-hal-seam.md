@@ -294,13 +294,16 @@ runs on an AMD Radeon RX 7600 (RDNA3 / gfx1102), argmax-exact, with prefill cosi
 still roughly 60× slower than llama.cpp, from per-dispatch CPU/driver overhead — a known,
 fixable architectural limit, not a numeric defect. See `docs/benchmarks/VULKAN-AMD-RESULTS.md`.
 
-**ROCm is written but never compiled.** The arch taxonomy is shipped and unit-witnessed on any
-host. The backend itself — the cgo wrapper, the KV half, the hipified kernels, and a 1,455-line
-test file — is also in the tree, but every one of those files sits behind
-`//go:build linux && rocm && cgo`, and the build script that would set that up does not exist, so
-none of it has ever been compiled or run. Every on-silicon acceptance bullet is deferred to an
-AMD-GPU-on-Linux node. **No ROCm performance number exists** — none was run, estimated, or
-fabricated. See `internal/compute/ROCM-C002-NOTES.md`.
+**ROCm is written, compiled, and run — once, on an AMD node.** The arch taxonomy is shipped and
+unit-witnessed on any host. The backend itself — the cgo wrapper, the KV half, the hipified
+kernels, and a 1,455-line test file — is also in the tree, and it has been built and executed on
+real AMD silicon: `docs/tickets/native-rocm-backend/TICKET-01.md:64` records the 2026-09-10 run
+on `gfx1151` under HIP 7.2, required-device tests passing without skips. Every one of those files
+still sits behind `//go:build linux && rocm && cgo`, so a default `go build ./...` skips them and
+**this host cannot reproduce the run** (no AMD GPU, no `hipcc`). **No ROCm performance number
+exists** — none was run, estimated, or fabricated; correctness is not throughput. See
+`internal/compute/ROCM.md` for the build recipe and `internal/compute/ROCM-C002-NOTES.md` for the
+still-open acceptance bullets.
 
 ## See also
 

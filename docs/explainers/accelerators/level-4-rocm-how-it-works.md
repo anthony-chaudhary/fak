@@ -25,19 +25,23 @@ date: 2026-11-18
 > **Short answer.** ROCm is AMD's own compute platform — a runtime, a compiler toolchain and
 > libraries for running compute on AMD GPUs. Its programming language, **HIP**, is deliberately
 > source-compatible with CUDA, so fak's plan is not to hand-write a second kernel set but to
-> compile the *existing* `cuda_kernels.cu` through `hipcc`/`hipify`. What is *tested* today is
-> the hardware-independent half: a device-architecture taxonomy that classifies every supported
-> AMD target and, crucially, records whether it runs a **64-lane** or **32-lane** wavefront. The
-> cgo half and the hipified kernels ship too, but they cannot compile without `hipcc` — so they
-> are shipped-unwitnessed. Everything that needs silicon is deferred and named.
+> compile the *existing* `cuda_kernels.cu` through `hipcc`/`hipify`. The whole backend is in the
+> tree, and it has been **compiled and run on real AMD silicon** — once, on 2026-09-10, on a
+> `gfx1151` part under HIP 7.2. What is *reproducible on this host* is only the
+> hardware-independent half: a device-architecture taxonomy that classifies every supported AMD
+> target and, crucially, records whether it runs a **64-lane** or **32-lane** wavefront. The cgo
+> half and the hipified kernels need `hipcc` and an AMD GPU, and this dev host has neither.
 
-> **Status: shipped-unwitnessed, not silicon.** fak's ROCm backend is **written and in the tree,
-> but never compiled or run**. The device-architecture taxonomy is shipped *and* unit-witnessed on
-> any host; the cgo wrapper and the hipified kernels are shipped but **unwitnessed**, because
-> compiling them needs `hipcc` and running them needs an AMD GPU — the dev host has neither. Every
-> acceptance bullet that runs on silicon is deferred to an AMD-GPU-on-Linux node. **No ROCm
-> throughput or correctness number was run, estimated, or fabricated.** The source of truth is
-> `internal/compute/ROCM-C002-NOTES.md`; read it in full.
+> **Status: witnessed on silicon once, not reproducible here.** fak's ROCm backend is **written,
+> compiled, and run** — `docs/tickets/native-rocm-backend/TICKET-01.md:64` records the functional
+> witness: HIP 7.2, `gfx1151`, required-device compute tests (3) and a transformer test (1)
+> passing without skips. That run happened on an AMD node, not on this dev host, which has no AMD
+> GPU and no `hipcc` — so the backend is **not reproducible here**, and a default `go build ./...`
+> skips every file behind `//go:build linux && rocm && cgo`. The device-architecture taxonomy is
+> the part that is unit-witnessed on *any* host. **No ROCm throughput number exists** — the
+> correctness witness is not a performance result, and the four acceptance bullets that need
+> measurement remain open. The build recipe is `internal/compute/ROCM.md`; the acceptance contract
+> is `internal/compute/ROCM-C002-NOTES.md`.
 
 ## What is ROCm, and how is it different from Vulkan?
 
@@ -84,25 +88,28 @@ same path llama.cpp's ROCm backend takes. One kernel source, two vendors.
 
 **What is in the tree, and what is not.** `internal/compute/ROCM-C002-NOTES.md:29` lists three
 pieces as "the deferred backend" — but that list is a *plan written before the code landed*, and
-the tree has since moved past it. Read the two columns separately, because conflating them is
+the tree has since moved past it. Read the three columns separately, because conflating them is
 the easiest way to be wrong about this backend:
 
-| Piece | In the tree? | Witnessed? |
-|---|---|---|
-| `internal/compute/rocm_backend.go` (671 lines) — the cgo wrapper | **yes** | **no** — needs `hipcc` to compile |
-| `internal/compute/rocm_backend.h` (65 lines) — the flat C ABI | **yes** | **no** — same |
-| `internal/compute/rocm_kernels.hip` (641 lines) — the hipified kernels | **yes** | **no** — same |
-| `internal/compute/rocm_kv.go` (350 lines) — the KV-cache half | **yes** | **no** — same |
-| `internal/compute/rocm_backend_test.go` (1,455 lines, 25 `TestROCm*` funcs) | **yes** | **no** — same |
-| `internal/compute/rocm_arch.go` + `rocm_arch_test.go` (961 + 713 lines) | **yes** | **yes** — pure Go, no build tag |
-| `build_rocm.sh` — the `build_cuda.sh` twin | **no** | — |
+| Piece | In the tree? | Compiled & run? | Reproducible on this host? |
+|---|---|---|---|
+| `internal/compute/rocm_backend.go` (671 lines) — the cgo wrapper | **yes** | **yes** — 2026-09-10, `gfx1151` | **no** — needs `hipcc` + an AMD GPU |
+| `internal/compute/rocm_backend.h` (65 lines) — the flat C ABI | **yes** | **yes** — same run | **no** — same |
+| `internal/compute/rocm_kernels.hip` (641 lines) — the hipified kernels | **yes** | **yes** — same run | **no** — same |
+| `internal/compute/rocm_kv.go` (350 lines) — the KV-cache half | **yes** | **yes** — same run | **no** — same |
+| `internal/compute/rocm_backend_test.go` (1,455 lines, 25 `TestROCm*` funcs) | **yes** | **yes** — 4 of them ran | **no** — same |
+| `internal/compute/rocm_arch.go` + `rocm_arch_test.go` (961 + 713 lines) | **yes** | **yes** | **yes** — pure Go, no build tag |
+| `build_rocm.sh` — the `build_cuda.sh` twin | **no** | — | — |
 
-So the accurate one-liner is: **the backend is written, and it has never been compiled.** Every
-file above carries `//go:build linux && rocm && cgo`, so a default `go build ./...` skips all of
-them; the only ROCm code that actually executes on this host is the arch taxonomy. The missing
-piece is the build script — `internal/compute/rocm_arch.go:161` still calls it "`build_rocm.sh`,
-deferred to an AMD node", and `git ls-files internal/compute` shows `build_cuda.sh` and
-`setup_cuda_wsl.sh` but no ROCm twin.
+So the accurate one-liner is: **the backend is written, and it has been compiled and run — on an
+AMD node, once, on 2026-09-10.** Every file above carries `//go:build linux && rocm && cgo`, so a
+default `go build ./...` skips all of them and the only ROCm code that executes on *this* host is
+the arch taxonomy. The build recipe is not a script but a documented sequence of commands in
+`internal/compute/ROCM.md:15` — `hipcc --offload-arch=gfx1151 -c rocm_kernels.hip`, then
+`ar rcs libfakrocm.a`, then `go build -tags rocm`. `internal/compute/rocm_arch.go:161` still
+refers to a "`build_rocm.sh`, deferred to an AMD node", and `git ls-files internal/compute` shows
+`build_cuda.sh` and `setup_cuda_wsl.sh` but no ROCm twin — the recipe was written down in prose
+instead of being checked in as a script.
 
 Two naming corrections worth carrying, because the source note predates the code:
 
@@ -295,7 +302,7 @@ multi-stream pipelining, one dispatch at a time. It is the right first cut becau
 correctness question answerable before the performance question: with one stream there is no
 interleaving to reason about, so a numerical mismatch is a kernel bug, not a synchronization bug.
 
-## The witness, and why it is not yet green
+## The witness, and what it did and did not establish
 
 The real command, from `internal/compute/ROCM.md:30`:
 
@@ -309,8 +316,16 @@ registration a test **failure**, so a green run cannot be a silently-skipped run
 host test, a successful compilation, or a skipped device test does not establish hardware
 correctness.
 
-**And this command has not been run on silicon.** The dev host has no AMD GPU and no `hipcc`.
-The four acceptance bullets that remain unwitnessed are, verbatim from
+**This command has been run on silicon — once, and not here.** `docs/tickets/native-rocm-backend/TICKET-01.md:64`
+records the result: on 2026-09-10, under HIP 7.2 on a `gfx1151` part, the required-device compute
+tests (3) and the transformer test (1) passed **without skips**. The transformer fixture required
+finite logits, cosine ≥ 0.999, and ten exact greedy tokens. That is a real correctness result on
+real AMD hardware, and it is the strongest evidence this backend has.
+
+What it is *not* is reproducible on this dev host, which has no AMD GPU and no `hipcc` — so the
+run cannot be repeated here, and a reader on a CPU-only box has to take the receipt on trust. It
+is also **not a performance result**: correctness on one part says nothing about throughput, and
+the four acceptance bullets that need measurement remain open, verbatim from
 `internal/compute/ROCM-C002-NOTES.md:44`:
 
 - [ ] Run on AMD GPU on Linux
@@ -361,19 +376,21 @@ So that a missing device registration is a test *failure* rather than a skip. A 
 cannot be a silently-skipped run.
 
 **6. Has any ROCm number been measured?**
-No. No ROCm throughput or correctness number was run, estimated, or fabricated. The four
-acceptance bullets that run on silicon are deferred to an AMD-GPU-on-Linux node.
+No throughput number, and no correctness number *on this host*. The one silicon run
+(`docs/tickets/native-rocm-backend/TICKET-01.md:64`) established correctness on a `gfx1151` part;
+it did not measure speed. The four acceptance bullets that need measurement remain open.
 
 **7. "The ROCm backend is written" and "the ROCm backend has never been compiled" — how can both
 be true?**
-Because *in the tree* and *witnessed* are different claims. `rocm_backend.go`, `rocm_kv.go`,
-`rocm_kernels.hip` and the 1,455-line test file all exist and are tracked, but every one carries
-`//go:build linux && rocm && cgo`, so a default `go build ./...` skips them and no CI on this host
-ever compiles them. The only ROCm code that executes here is `rocm_arch.go`, which has no build
-tag. The missing piece is `build_rocm.sh` — the script that would invoke `hipcc` and produce
-`libfakrocm.a`. Without it there is nothing to link against, so the cgo half cannot even be
-type-checked. **Written is not the same as witnessed**, and a page that blurs the two is exactly
-the kind of page this ladder exists to replace.
+They cannot, and the second one is false — it is the kind of claim this page exists to correct.
+The backend *has* been compiled and run: `docs/tickets/native-rocm-backend/TICKET-01.md:64`
+records a functional witness on 2026-09-10 under HIP 7.2 on `gfx1151`, with the required-device
+tests passing without skips. What is true is narrower and more useful: every ROCm file carries
+`//go:build linux && rocm && cgo`, so a default `go build ./...` skips them, and **this dev host
+cannot reproduce the run** because it has no AMD GPU and no `hipcc`. The only ROCm code that
+executes here is `rocm_arch.go`, which has no build tag. So the honest three-way split is
+**written / witnessed-once-on-silicon / not-reproducible-here** — and collapsing the middle term
+into either neighbour is the error to avoid.
 
 ## See also
 

@@ -239,14 +239,17 @@ slower than llama.cpp**, because of per-dispatch overhead — the cost of handin
 operation to the GPU one at a time. Correct, but not yet fast. Full measurements:
 `docs/benchmarks/VULKAN-AMD-RESULTS.md`.
 
-**ROCm is written but never run.** The architecture taxonomy — the part that classifies AMD
-GPU families and picks the right compiler target — is shipped and unit-tested on any host.
-The rest of the backend, including the HIP kernels, is also written and sitting in the
-repository, but it has **never been compiled**, because compiling it needs a toolchain this
-machine does not have. And every acceptance bullet that requires running on silicon is
-**deferred to an AMD-GPU-on-Linux node**. **No ROCm performance number exists** — not a slow
-one, not an estimate, not a placeholder. Details: `internal/compute/ROCM-C002-NOTES.md`. If
-you ever see a ROCm throughput number on this page or any other, treat it as a bug.
+**ROCm is written, and it has run on AMD silicon — just not here.** The architecture taxonomy —
+the part that classifies AMD GPU families and picks the right compiler target — is shipped and
+unit-tested on any host. The rest of the backend, including the HIP kernels, is also written and
+sitting in the repository, and it has been **compiled and run on a real AMD GPU**: on 2026-09-10,
+on a `gfx1151` part, the device tests passed without skips
+(`docs/tickets/native-rocm-backend/TICKET-01.md:64`). What it has *not* done is run on **this**
+machine, which has no AMD GPU and no `hipcc` — so you cannot reproduce that run here. And **no
+ROCm performance number exists** — not a slow one, not an estimate, not a placeholder. Correctness
+on one card is not a speed measurement. Details: `internal/compute/ROCM.md` (the build recipe) and
+`internal/compute/ROCM-C002-NOTES.md` (the acceptance contract). If you ever see a ROCm throughput
+number on this page or any other, treat it as a bug.
 
 ## Checkpoint: can you answer these?
 
