@@ -426,6 +426,13 @@ func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRe
 	if err != nil {
 		return CtxRestoreResult{}, err
 	}
+	// The success counter counts a restore only once its bytes are actually in hand —
+	// i.e. a restore that was (or will be) SERVED on a wire that carries the restore
+	// affordance. The served-turn caller (adjudicateProposedServed's restore branch)
+	// runs its wire-affordance gate (#2498) BEFORE calling restoreContext, so a restore
+	// declined for lack of a wire affordance never reaches this line and never counts;
+	// refusals and misses above return early for the same reason. The counter is
+	// therefore a served-restores metric, not a restore-attempts metric.
 	s.recordCompactionRestore(1)
 	return applyRestoreBounds(res, req), nil
 }

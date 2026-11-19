@@ -82,6 +82,12 @@ const ReasonLivelockFuse = "LIVELOCK_FUSE"
 // recursing, and the refusal never reaches the wire (Admitted:false => dropped).
 const ReasonSubagentDepthExceeded = "SUBAGENT_DEPTH_EXCEEDED"
 
+// ReasonRestoreAffordanceUnadvertised is the wire-affordance gate's (#2498) decline
+// reason: the active client wire declares tools but carries no restore tool def, so
+// the restore call cannot be executed on this wire. RETRYABLE per-tool feedback —
+// the model can re-address the affordance correctly (or drop the call) next turn.
+const ReasonRestoreAffordanceUnadvertised = "RESTORE_AFFORDANCE_UNADVERTISED"
+
 // adjudicateProposedServed is the served-turn vDSO fast path (issue: vDSO live in
 // the hot path). It is adjudicateProposed plus a vDSO Lookup probe FIRST for every
 // read-only-shaped proposed call: on a fresh cache hit the answer is served LOCALLY
@@ -184,6 +190,46 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		if isRestoreTool(tool) {
 			var req ContextRestoreRequest
 			if err := json.Unmarshal([]byte(tc.Function.Arguments), &req); err == nil && req.ID != "" {
+				// WIRE-AFFORDANCE GATE (#2498): a restore call may be served inline ONLY
+				// when the active client wire actually advertises the restore affordance —
+				// i.e. the request's declared tools (the withClientToolSchemas ctx value
+				// the chat wire rides req.Tools into) carry a restore tool def. On a wire
+				// that declares tools but no restore tool (the pi openai-completions
+				// shape: no MCP tools, shrink levers inert), serving the banner fabricated
+				// a success for an affordance the model could only reach by mis-spelling
+				// it as a shell command — the observed `fak-sync context restore <handle>`
+				// loop that repeated ~40 times. The gate declines BEFORE restoreContext
+				// runs, so the compaction-restore counter never counts a restore no wire
+				// could act on, and the model gets a correction naming the real affordance
+				// instead of a fabricated banner. The Responses-restore pass-through above
+				// is untouched: it consumes restores as structured model input and never
+				// reaches this branch.
+				//
+				// Fallback: when the ctx carries NO client-tool schemas at all (the
+				// direct-call shape the reproducer tests exercise, and every wire that
+				// does not ride req.Tools into ctx — the Anthropic guard passthrough among
+				// them), the gate stays silent and the historical serve behavior stands.
+				// An ABSENT tools list is not evidence of a missing affordance; only an
+				// EXPLICIT tools list lacking a restore def declines.
+				//
+				// The decline is NOT a served-inline hit: the correction rides the served
+				// slice as prose (applyAdjudicatedTurn folds any non-empty servedText into
+				// assistant content), but servedHits stays flat so the correction never
+				// inflates cache_attribution.fak_inline_served_calls, and the adjudication
+				// is a structured RETRYABLE DENY, not an ALLOW. restoreContext is never
+				// reached on this path, so CompactionRestoredTurns stays flat too.
+				if advertised, wired := wireAdvertisesRestoreTool(ctx); wired && !advertised {
+					served = append(served, restoreAffordanceCorrection)
+					adjs = append(adjs, ToolAdjudication{
+						ToolCallID: tc.ID,
+						Tool:       tool,
+						ArgsDigest: argsDigest,
+						Admitted:   false,
+						Verdict: WireVerdict{Kind: "DENY", Reason: ReasonRestoreAffordanceUnadvertised,
+							By: "restore-affordance-gate", Disposition: "RETRYABLE"},
+					})
+					continue
+				}
 				if req.TraceID == "" {
 					req.TraceID = reqTrace
 				}
@@ -411,6 +457,17 @@ func reusableCapabilityDiscovery(a ToolAdjudication) bool {
 // and, when an admitted call's envelope has armed the hard Fuse, converts that call
 // into a retryable DENY in place. It returns the set of tool-call IDs it fused so the
 // caller can drop them from the kept slice (they were admitted before the fuse ran).
+//
+// KNOWN BOUND (ticket #2498 DoD): the livelock/advisory path observes only calls the
+// guard adjudicated. A client-executed tool (e.g. pi's bash) fails CLIENT-side — the
+// failure surfaces in the client's next tool-result message, never as a guard
+// adjudication — so the fuse cannot fire on it. This is a documented bound,
+// deliberately not fixed here: teaching the fuse about every client-executed tool is
+// out of scope per the ticket's gold-plating boundary. The wire-affordance gate
+// (adjudicateProposedServed, RESTORE_AFFORDANCE_UNADVERTISED) is the fix for the
+// restore-shaped instance of that blindness: it declines the unexecutable restore
+// call at the guard, where the livelock detector CAN see the repeat, instead of
+// letting the model loop on a shell spelling the guard never observes fail.
 func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) map[string]struct{} {
 	if s == nil || trace == "" {
 		return nil
@@ -724,6 +781,43 @@ func withClientToolSchemas(ctx context.Context, tools []agent.ToolDef) context.C
 		return ctx
 	}
 	return context.WithValue(ctx, clientToolSchemasContextKey{}, tools)
+}
+
+// restoreAffordanceCorrection is the model-actionable line the wire-affordance
+// gate (#2498) serves INSTEAD of the restore banner when the active wire declares
+// tools but no restore tool. It corrects the mis-spelling the pi session looped on:
+// fak_context_restore is a tool call, not a shell command, and the CLI verb does
+// not exist (`unknown verb "context"` is the honest fak-sync behavior and stays).
+// It deliberately carries NO `[fak: restored context` banner prefix and NO handle —
+// a declined restore must never read as a success, and the only id in play is one
+// the model invented. It rides the same served slice as a genuine serve, so
+// applyAdjudicatedTurn folds it into assistant prose unchanged.
+const restoreAffordanceCorrection = "[fak] fak_context_restore is a tool call, not a shell command: " +
+	"this session's tool list does not include it, so the call cannot be executed here. " +
+	"The CLI spelling does not exist either — `fak-sync context restore` fails with unknown verb \"context\". " +
+	"Do not retry the shell form; if a compaction tombstone advertised a restorable id, " +
+	"the affordance is a tool call named fak_context_restore on a wire that offers it."
+
+// wireAdvertisesRestoreTool reports whether the request's declared client tools
+// (the withClientToolSchemas ctx value) contain a restore tool def, and whether
+// the ctx carries a tools list at all. The boolean pair is the gate's whole
+// contract: wired=false (no schemas in ctx — the direct-call/test shape, and every
+// wire that does not ride req.Tools into ctx) means the caller CANNOT know the
+// wire's affordance surface, so the historical serve behavior stands; only
+// wired=true && !advertised (an EXPLICIT tools list lacking a restore def) is
+// positive evidence the wire offers no restore affordance and the call must be
+// declined with a correction instead of served with a fabricated banner.
+func wireAdvertisesRestoreTool(ctx context.Context) (advertised, wired bool) {
+	tools, ok := ctx.Value(clientToolSchemasContextKey{}).([]agent.ToolDef)
+	if !ok || len(tools) == 0 {
+		return false, false
+	}
+	for _, t := range tools {
+		if isRestoreTool(t.Function.Name) {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 func clientToolArguments(ctx context.Context, tool, original, repaired string) string {

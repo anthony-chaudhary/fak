@@ -1444,7 +1444,10 @@ func (s *Server) applyAdjudicatedTurn(asst *agent.Message, adjs []ToolAdjudicati
 	// vDSO served-inline (vDSO live in the hot path): a re-proposed read-only call the
 	// vDSO already holds fresh is answered LOCALLY and folded into the assistant content
 	// (the OpenAI assistant message carries tool_calls, never results), the call dropped
-	// from kept so the client never re-runs it — the engine round-trip is saved.
+	// from kept so the client never re-runs it — the engine round-trip is saved. The fold
+	// keys on servedText, not servedHits: the wire-affordance gate's (#2498) declined
+	// restore rides the served slice as prose with servedHits flat, and its correction
+	// must still reach the model.
 	if servedText != "" {
 		if asst.Content != "" {
 			asst.Content += "\n" + servedText
@@ -1452,6 +1455,8 @@ func (s *Server) applyAdjudicatedTurn(asst *agent.Message, adjs []ToolAdjudicati
 			asst.Content = servedText
 		}
 	}
+	// Strictly the served-inline hit count: a declined restore's correction is prose,
+	// not a served tool result, and must not inflate cache_attribution.fak_inline_served_calls.
 	if servedHits > 0 {
 		s.metrics.recordServedInline(servedHits)
 	}
@@ -1464,10 +1469,14 @@ func (s *Server) applyAdjudicatedTurn(asst *agent.Message, adjs []ToolAdjudicati
 	finish := upstreamFinish
 	if len(kept) > 0 {
 		finish = "tool_calls"
-	} else if dropped > 0 || servedHits > 0 {
+	} else if dropped > 0 || servedHits > 0 || servedText != "" {
 		// Every proposed call was refused OR served inline. A pure-served turn has
 		// dropped==0, so broaden the guard: the turn ends (no surviving tool_calls
-		// array for the client to act on). On a deny, surface the reason in-band.
+		// array for the client to act on). servedText is in the guard for the same
+		// reason: a declined restore (#2498) is a zero-hit, zero-drop turn whose only
+		// content is the correction, and it must still collapse to stop rather than
+		// report the upstream's tool_calls finish over an empty tool_calls array.
+		// On a deny, surface the reason in-band.
 		finish = "stop"
 		if asst.Content == "" {
 			asst.Content = denySummary(adjs)
