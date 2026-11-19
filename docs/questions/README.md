@@ -27,6 +27,7 @@ answers it in full. A page is the durable, readable form of the rows it cites.
 |---|---|---|
 | Kernel development | [`kernel-development.md`](kernel-development.md) | [the kernel-development ladder](../explainers/kernel-development/README.md) |
 | Inference | [`inference.md`](inference.md) | [the inference ladder](../explainers/inference/README.md) |
+| Memory hierarchy | [`memory-hierarchy.md`](memory-hierarchy.md) | [the memory-hierarchy ladder](../explainers/memory-hierarchy/README.md) |
 
 ## What it is NOT (read this first)
 

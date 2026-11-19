@@ -106,6 +106,9 @@ in the page — the pages are verified by a link-and-citation check, not by trus
 
 - [The hierarchy as one figure](../../../visuals/86-buffer-hierarchy-ladder.mmd) — the
   six tiers, rendered standalone (`.svg` / `.png` beside it) for slides and handouts.
+- [The memory hierarchy — the questions](../../questions/memory-hierarchy.md) — the
+  question-first companion to this ladder: 13 questions a newcomer asks, each routed to
+  the rung that answers it.
 - [The caching ladder](../caching/README.md) — the same five-rung pattern applied
   to fak's caching stack. This ladder is its sibling: caching is *what* to keep
   close, this ladder is *where* close is.

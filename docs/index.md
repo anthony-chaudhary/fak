@@ -213,6 +213,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
 | **How to add a kernel, backend, or policy rung without forking the core** | [Kernel development ladder](explainers/kernel-development/README.md) — six rungs from "what is kernel development" to the frontier, each with a lab and a checkpoint |
 | **The questions a newcomer asks about changing the kernel** (and the four the repo cannot answer yet) | [Kernel development — the questions](questions/kernel-development.md) — 13 questions labeled CONTRARIAN / AFRAID / UNASKED / STEELMAN, each routed to the rung that answers it |
+| **The questions a newcomer asks about where a model's numbers live** (and the four the repo cannot answer yet) | [The memory hierarchy — the questions](questions/memory-hierarchy.md) — 13 questions labeled CONTRARIAN / AFRAID / UNASKED / STEELMAN, each routed to the rung that answers it |
 | **How named context is loaded, filtered, cached, and backed by call snapshots** | [Context as a variable](explainers/context-as-a-variable.md) |
 | **Why a cache-hit % isn't the whole story** | [Context signal-to-noise](explainers/context-signal-to-noise.md) |
 | **How fak runs the agent as nested loops** | [Engineering is building loops](explainers/engineering-is-building-loops.md) |
