@@ -112,7 +112,7 @@ two, and they answer different questions:
 
 `BENCHMARK-AUTHORITY.md` is the single source of truth for which number is which, and
 it draws the line explicitly: the public multi-agent reuse headline is **4.1× vs
-tuned**, while the *same run* is **60.3× vs naive stateless serving** — the authority
+tuned**, while the *same run* is 60.3× vs naive stateless serving — the authority
 names the tuned per-agent KV as "the decision-grade baseline; naive stateless is
 context, not the headline alternative." The [fleet benchmark
 suite](../fleet-benchmarks.md) states the framing law for the whole repo: compare
