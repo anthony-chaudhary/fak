@@ -110,6 +110,9 @@ line, do not just confirm it is there.
 - [The mixed-precision ladder](../mixed-precision/README.md) — the deep dive this
   ladder hands off to at Level 4: what a model's numbers are stored in, and what
   that storage costs in memory and in time.
+- [The tokenization ladder](../tokenization/README.md) — the step *before* this
+  ladder starts. Level 1 here says the tokenizer decides the chunks by counting;
+  that ladder is where the counting is written out, down to the merge loop.
 - [The learning path](../../../LEARNING-PATH.md) — the prerequisite-ordered catalog
   this ladder plugs into (courses FAK 522–529 cover the same ground, rigor-first:
   FAK 522 tokenizer, 523 normalization, 524 RoPE, 525 attention, 526 MLP and the

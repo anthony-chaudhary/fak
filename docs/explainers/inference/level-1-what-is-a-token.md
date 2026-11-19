@@ -325,6 +325,9 @@ actually computes the scores — is what the rest of this ladder is about.
   what happens *inside* the box, with a tiny example you can follow by hand.
 - [The caching ladder](../caching/README.md) — the same five-rung pattern applied
   to fak's caching stack. This ladder is its sibling.
+- [The tokenization ladder](../tokenization/README.md) — this page says the
+  tokenizer decides the chunks by counting. That ladder shows the counting: the
+  three stages, the merge loop, and the naive oracle the fast one must match.
 - [The fak/DOS glossary](../glossary.md) — one-line definitions of the words used
   here.
 

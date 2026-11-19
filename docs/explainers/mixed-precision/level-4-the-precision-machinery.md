@@ -1,6 +1,6 @@
 ---
 title: "The precision machinery in fak"
-description: "The three layers of precision machinery in fak: the metadata contract, the cross-support tensor, and the runtime policy and schedule that decide what runs."
+description: "The three layers of precision machinery in fak: the metadata contract, the cross-support tensor, and the runtime policy and schedule that decide what runs, with the wiring status of each stated plainly."
 slug: the-precision-machinery
 keywords:
   - precision contract
@@ -19,23 +19,25 @@ date: 2026-11-18
 
 *You are on **Level 4 of 5** of the [mixed-precision ladder](README.md).*
 
-> **In one breath:** fak keeps precision in three separate pieces of machinery.
+> **In one breath:** fak keeps precision in three layers of machinery.
 > One checks whether a combination is allowed at all. One records which
 > formats each backend implements. One decides what should run right now,
-> and every unknown is a typed refusal.
+> and every unknown is a visible refusal.
 
-**One line:** fak splits precision into a metadata contract that adjudicates whether a combination is allowed, a cross-support tensor that records which formats each backend implements, and a runtime policy plus schedule that decide what actually runs, and all three share one discipline: an unknown is a typed refusal, never a quiet default.
+**One line:** fak splits precision into a metadata contract that adjudicates whether a combination is allowed, a cross-support tensor that records which formats each backend implements, and a runtime policy plus schedule that decide what should run, and all three share one discipline: an unknown is a visible refusal, never a quiet default.
 
 > **Audience.** You are a systems engineer. You are wiring precision into a
 > runtime and you want to know what the pieces are, what each one decides, and
 > how they fit together. You are comfortable reading a Go interface.
 
-> **Short answer.** Three layers, three questions. The **contract** answers "is
+> **Short answer.** Three layers, four pieces. The **contract** answers "is
 > this combination allowed at all" and is pure metadata. The **cross-support
 > tensor** answers "does this backend implement this format" and turns every gap
-> into an honest fence. The **dynamic policy** and the **schedule** answer "what
-> should run right now" and are the only two that touch execution. The unifying
-> rule is fail-closed: an unknown is a typed refusal.
+> into an honest fence. The **dynamic policy** answers "should this token run
+> quantized" and is the one that touches execution today; the **schedule**
+> answers "which level for this tensor, layer, phase" and is designed but not
+> yet wired into a live path. The unifying rule is fail-closed: an unknown is a
+> visible refusal.
 
 ## Why are there three separate pieces of machinery?
 
@@ -66,12 +68,12 @@ failure modes, and different owners. fak keeps them apart.
   +---------------------------------------------------------------+
 ```
 
-| Layer | Question it answers | File | Touches execution? |
-|---|---|---|---|
-| The contract | Is this combination allowed at all? | `internal/mixedprecision/contract.go` | No. Metadata only. |
-| The cross-support tensor | Does this backend implement this format? | `internal/covmatrix/precision.go` | No. A table. |
-| The dynamic policy | Should this token run quantized? | `internal/model/dynamic_precision.go` | Yes. |
-| The schedule | Which level for this tensor, layer, phase? | `internal/model/precision_schedule.go` | Yes. |
+| Layer | Piece | Question it answers | File | Touches execution? |
+|---|---|---|---|---|
+| 1 | The contract | Is this combination allowed at all? | `internal/mixedprecision/contract.go` | No. Metadata only. |
+| 2 | The cross-support tensor | Does this backend implement this format? | `internal/covmatrix/precision.go` | No. A table. |
+| 3a | The dynamic policy | Should this token run quantized? | `internal/model/dynamic_precision.go` | Yes. Wired into `Prefill`/`Step`. |
+| 3b | The schedule | Which level for this tensor, layer, phase? | `internal/model/precision_schedule.go` | Not yet. Designed, exercised by its own tests. |
 
 The contract's own README is explicit about the boundary. `internal/mixedprecision/README.md`
 states that the contract does not choose a quantization method, does not execute
@@ -114,7 +116,7 @@ caller never has to parse a string to know why something was rejected.
 |---|---|---|
 | `refuse` | the whole evaluation refuses with `unmatched_module` | `refused` |
 | `handoff` | the decision is delegated to the runtime | `delegate` |
-| `assign` | the declared fallback precision is used and counted as fallback | `supported` |
+| `assign` | the declared fallback precision is used and counted as fallback | the declared combination outcome, with reason `accepted_fallback` |
 
 The `handoff` mode is the honest one for a runtime-specific compatibility
 matrix: rather than claim support it does not have, the contract says "this is
@@ -302,6 +304,14 @@ everything else from the fallback.
 One honest caveat from the file: the levels are dispatch **hints** for the
 existing kernels, not a claim that two levels are numerically identical.
 
+**The wiring status, stated plainly.** The schedule is designed and tested, but
+it is not yet on a live path. `Session.PrecisionSchedule` is assigned only in
+`internal/model/precision_schedule_test.go`, and `RunScheduledPass` is called
+only from that same test file. The dynamic policy, by contrast, is wired: a
+non-nil `Session.PrecisionPolicy` routes `Prefill` and `Step` through the
+dynamic path. So of the four layers in the table above, exactly one touches
+execution today. Level 5 grades this properly.
+
 ## How do the pieces connect?
 
 The bridge from the metadata contract to the runtime is
@@ -340,13 +350,16 @@ It does three things, and each one is a refusal waiting to happen:
 
 So the contract decides what is legal, the adapter turns that into a per-point
 plan, and the scheduled pass executes it and records every decision. The
-cross-support tensor sits alongside as the table the runtime consults to know
-which formats a backend can actually run.
+cross-support tensor sits alongside as the table the support and scorecard
+tooling folds to report which formats a backend implements. It is a reporting
+input, not a runtime lookup: no code in `internal/model` or `internal/compute`
+imports it.
 
-## The one rule that ties it together
+## What one rule ties the pieces together?
 
-Every layer refuses the same way: an unknown is a typed refusal, never a quiet
-default.
+Every layer refuses the same way: an unknown is a visible refusal, never a quiet
+default. The shape of the refusal differs by layer, and that is fine. What
+matters is that none of them guesses.
 
 - The contract returns a typed `ReasonCode` for every gate it fails, and its
   `doc.go` states the invariant: fail-closed and bounded.
@@ -359,14 +372,14 @@ default.
   refused, and never widens a refused point into a rerun.
 
 The reason is the same in all four places. In a numeric system, the dangerous
-failure is not the error you see. It is the error you did not notice. A typed
+failure is not the error you see. It is the error you did not notice. A visible
 refusal is a failure you can see, count, and audit. A quiet default is a failure
 that ships.
 
 ## Check yourself
 
 1. What three questions do the three layers of machinery answer, and which
-   layer touches execution?
+   layer touches execution today?
 2. What does the contract's `Evaluate` return when a module matches no rule,
    and what decides the answer?
 3. What is a fence, and why is it not a bug?
@@ -379,8 +392,10 @@ that ships.
 
 1. The contract answers "is this combination allowed at all" and is pure
    metadata. The cross-support tensor answers "does this backend implement this
-   format" and is a table. The dynamic policy and the schedule answer "what
-   should run right now" and are the only two that touch execution.
+   format" and is a table. The dynamic policy answers "should this token run
+   quantized" and is the one that touches execution today; the schedule answers
+   "which level for this tensor, layer, phase" and is designed but not yet
+   wired into a live path.
 2. It depends on `Fallback.Mode`. `refuse` returns `refused` with
    `unmatched_module`; `handoff` returns `delegate`; `assign` uses the declared
    fallback precision and counts it as fallback.

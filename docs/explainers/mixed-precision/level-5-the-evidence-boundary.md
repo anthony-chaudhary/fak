@@ -29,12 +29,14 @@ date: 2026-11-18
 > the four rungs below and you want the honest edge of what the stack proves.
 > You are suspicious of any number without a provenance.
 
-> **Short answer.** There are three evidence classes. **Measured** means code
-> ran on hardware and the envelope and sample count were recorded. **Modeled**
-> means the number was derived by arithmetic from known inputs. **Designed but
-> not wired** means the code, the reasoning and the accounting all exist and
-> the live path never calls them. The stack has a typed slot for a measurement,
-> and that slot is empty. Knowing which claim is which is the whole skill.
+> **Short answer.** There are three evidence classes, plus a fourth that is
+> subtler. **Measured** means code ran on hardware and the envelope and sample
+> count were recorded. **Modeled** means the number was derived by arithmetic
+> from known inputs. **Designed but not wired** means the code, the reasoning
+> and the accounting all exist and the live path never calls them. The fourth
+> is **wired but uncalibrated**: the mechanism runs, and its tuning is an open
+> per-model question. The stack has a typed slot for a measurement, and that
+> slot is empty. Knowing which claim is which is the whole skill.
 
 ## Why does this rung exist?
 
@@ -64,7 +66,8 @@ demonstrated is that the stack says which of its own claims are which.
 
 ## What are the three evidence classes?
 
-Three classes, and the stack has a name for each.
+Three classes, and the stack has a name for each. A fourth shows up later on
+this page, and it is the one that hides best.
 
 | Class | What produced the number | How you recognize it | Example in fak |
 |---|---|---|---|
@@ -75,7 +78,7 @@ Three classes, and the stack has a name for each.
 The first two are **disjoint by construction**, and that is enforced, not
 promised. In `internal/mixedprecision/contract.go`, the evidence kind is a typed
 value with exactly two members: `EvidenceModeled` and `EvidenceObserved`
-(`contract.go:57`). The validator `validateEvidence` (`contract.go:318-340`)
+(`contract.go:55-56`). The validator `validateEvidence` (`contract.go:318-340`)
 requires an `observed` record to carry all four hardware fields, accelerator,
 runtime, driver and operating system, plus a **non-zero** sample count. A
 `modeled` record must carry a model basis and must **not** carry a hardware
@@ -232,10 +235,10 @@ false of the default configuration. The mechanism is wired. The calibration is
 open. That is a distinct class from "designed but not wired," and it deserves
 its own line in any honest ledger.
 
-## Grading the ladder
+## How does the ladder grade out?
 
-Here is every claim from rungs 1 to 4, with its class. This table is the
-deliverable of the whole ladder.
+Here are the load-bearing claims from rungs 1 to 4, with their class. This
+table is the deliverable of the whole ladder.
 
 | Claim from rungs 1 to 4 | Class | Why |
 |---|---|---|
@@ -245,7 +248,9 @@ deliverable of the whole ladder.
 | "Keys need more precision than Values" | **Modeled** reasoning | The accounting is real; the wiring is absent. |
 | "The cache is compressed" | **Designed, not wired** | The codec exists; the live cache stores 32-bit rows. |
 | "fak supports 8-bit on Vulkan" | **Measured about code** | The dispatch table is read from source and cross-checked by a test. It is a statement about code, not about achieved speed. |
-| "The contract adjudicates precision maps" | **Wired**, witnessed | `contract_test.go` proves the typed outcomes. |
+| "The contract adjudicates precision maps" | **Designed, not wired** | `contract_test.go` proves the typed outcomes, and no production path calls `Evaluate`. The only non-test use of the package is the `Assignment` type, consumed by the schedule adapter. |
+| "The cross-support tensor tells the runtime what a backend can run" | **Designed, not wired** | It is a table that reporting and scorecard tooling folds. No code in `internal/model` or `internal/compute` imports it. |
+| "The schedule picks a level per tensor, layer, phase" | **Designed, not wired** | `RunScheduledPass` is an opt-in API. Its only callers are its own tests; the decode path never invokes it. |
 | "The dynamic policy adapts per token" | **Wired, uncalibrated** | The mechanism runs; the default thresholds accept everything. |
 
 Read the fifth row again. "The cache is compressed" is the claim a reader is
@@ -259,7 +264,7 @@ about a dispatch table in `internal/covmatrix/precision.go`, cross-checked by
 speed, and a reader who hears "supports" as "runs fast" has crossed the evidence
 boundary without noticing.
 
-## The habit this rung is teaching
+## What habit is this rung teaching?
 
 Three questions, asked of any precision claim, anywhere.
 
