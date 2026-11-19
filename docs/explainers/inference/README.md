@@ -106,5 +106,11 @@ line, do not just confirm it is there.
 - [The abstraction map](../the-abstraction-map.md) — where the model sits in the
   full stack, from your terminal to the silicon.
 - [The fak/DOS glossary](../glossary.md) — one-line definitions of the vocabulary.
+- [The mixed-precision ladder](../mixed-precision/README.md) — the deep dive this
+  ladder hands off to at Level 4: what a model's numbers are stored in, and what
+  that storage costs in memory and in time.
 - [The learning path](../../../LEARNING-PATH.md) — the prerequisite-ordered catalog
-  this ladder plugs into (courses FAK 521–530 cover the same ground, rigor-first).
+  this ladder plugs into (courses FAK 522–529 cover the same ground, rigor-first:
+  FAK 522 tokenizer, 523 normalization, 524 RoPE, 525 attention, 526 MLP and the
+  residual stream, 527 the in-kernel KV cache, 528 quantization, 529 forward-pass
+  parity against the HuggingFace oracle).

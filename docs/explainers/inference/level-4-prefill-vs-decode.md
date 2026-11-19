@@ -501,6 +501,9 @@ when the acceptance rate makes it worth it.
   splits into two performance profiles.
 - [Level 5 — What changes at scale](level-5-at-scale.md): batching, quantization, MoE,
   and speculative decoding, each as a trade against the memory-bound fact.
+- [The mixed-precision ladder](../mixed-precision/README.md): the deep dive this rung
+  hands off to. This rung establishes that bytes are time; that ladder asks which
+  bytes, in which format, and what each choice costs.
 - [The kernel-owned KV cache](../caching/level-4-kernel-kv-cache.md): the cache as a
   kernel object, with bit-exact span eviction.
 - [Addressable KV cache](../addressable-kv-cache.md) — the paged, evictable cache in
