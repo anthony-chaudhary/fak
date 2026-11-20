@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/engine/specutil"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
@@ -219,13 +220,34 @@ func shouldEnableMetalMTP(cfg Config) bool {
 	return cfg.MetalMTP || speculativeModeSelected(cfg, "mtp")
 }
 
+// specQualificationMatrix is the qualification matrix consulted on the hot
+// path for the default-on Vulkan MTP flip. It defaults to the built-in matrix
+// (specutil.DefaultMatrix); tests may override it to exercise the default-on
+// path with a HW-WITNESSED pair without polluting the shared built-in matrix.
+var specQualificationMatrix = specutil.DefaultMatrix()
+
 // shouldEnableVulkanMTP admits only the supported Qwen3.8 resident
 // draft/target envelope on Vulkan or CUDA. Either backend is admitted only when
 // it advertises every resident path checked below; the backend name alone admits
 // nothing. The request-bound constructor repeats these checks and produces a
 // typed ordinary-decode downgrade if live session state is unsuitable.
+//
+// Default-on: a (backend, model) pair that passed the bit-exact logprob parity
+// witness on live silicon (specutil.DefaultMatrix, HW-WITNESSED) is admitted by
+// construction, without an operator env/config selection. The env var /
+// structural selector remains the operator override for unqualified pairs, and
+// DisableVulkanMTP is the escape hatch that forces ordinary decode for any pair.
 func shouldEnableVulkanMTP(cfg Config) bool {
-	if cfg.InKernelModel == nil || cfg.Backend == nil || cfg.Metal || !cfg.InKernelQ4K || !vulkanMTPModeSelected(cfg) {
+	if cfg.DisableVulkanMTP {
+		return false
+	}
+	if cfg.InKernelModel == nil || cfg.Backend == nil || cfg.Metal || !cfg.InKernelQ4K {
+		return false
+	}
+	// Default-on: a qualified pair is admitted by construction; the env var /
+	// config remains the operator override for unqualified pairs.
+	qualified := specQualificationMatrix.IsQualified(cfg.Backend.Name(), cfg.InKernelModel.Cfg.Name)
+	if !vulkanMTPModeSelected(cfg) && !qualified {
 		return false
 	}
 	if !isModelHybrid(cfg.InKernelModel) || !residentMTPBackendName(cfg.Backend.Name()) {

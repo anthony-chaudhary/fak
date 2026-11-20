@@ -577,6 +577,9 @@ type Config struct {
 	// DisableMetalMTP explicitly disables Metal MTP speculative decoding even
 	// if FAK_SPECULATIVE=mtp is set in the environment.
 	DisableMetalMTP bool
+	// DisableVulkanMTP explicitly disables Vulkan/CUDA MTP speculative decoding
+	// even when the (backend, model) pair is qualified for default-on.
+	DisableVulkanMTP bool
 	// SpeculativeMode is the STRUCTURAL selector for the speculative-decode route
 	// ("mtp" or "ngram"). A default front door sets it so the fast decode route is
 	// selected by construction rather than by an ambient env var; FAK_SPECULATIVE /
