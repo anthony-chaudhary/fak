@@ -180,15 +180,15 @@ func (c *cpuBackend) RequireStrixDecodeGEMV() error {
 // Q8_0 reproduces qMatRows (quantize the activation, per-block int8 dot). One method,
 // two dtypes — the duplication the audit ranked hardest, expressed as dispatch.
 // SupportsDeviceWeightDtype reports the exact dtype set cpuBackend.MatMul has a case for,
-// matching that switch: F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS, Q2_0 and NVFP4. Every other
-// dtype falls to the switch's panic default, so it is reported false here.
+// matching that switch: F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS, Q2_0, NVFP4 and I3_GS.
+// Every other dtype falls to the switch's panic default, so it is reported false here.
 //
 // The CPU reference is a host backend (Caps().DeviceMemory is false), so the device seams
 // never admit it; declaring its true MatMul dtype set keeps the predicate honest for any
 // caller that probes it directly (including a recording wrapper that embeds this backend).
 func (c *cpuBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 	switch dt {
-	case F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS, Q2_0, NVFP4:
+	case F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS, Q2_0, NVFP4, I3_GS:
 		return true
 	default:
 		return isRawIQ(dt)
@@ -259,6 +259,14 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 		rowBytes := (in / q3kSuper) * q3kSuperBlock
 		for o := 0; o < out; o++ {
 			y[o] = q3kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
+		}
+	case I3_GS:
+		raw := i8View(w.buf.(HostBuffer).I8())
+		rowBytes := (in / i3gsGroup) * i3gsGroupBytes
+		ws := w.Quant.Scale
+		nGroups := in / i3gsGroup
+		for o := 0; o < out; o++ {
+			y[o] = i3gsRowDot(raw[o*rowBytes:(o+1)*rowBytes], ws[o*nGroups:o*nGroups+nGroups], xf)
 		}
 	case IQ2_XXS:
 		raw := i8View(w.buf.(HostBuffer).I8())
@@ -366,6 +374,18 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
 				Y[t*out+o] = q3kRowDot(row, Xf[t*in:t*in+in], buf)
+			}
+		}
+	case I3_GS:
+		raw := i8View(w.buf.(HostBuffer).I8())
+		rowBytes := (in / i3gsGroup) * i3gsGroupBytes
+		ws := w.Quant.Scale
+		nGroups := in / i3gsGroup
+		for o := 0; o < out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			sc := ws[o*nGroups : o*nGroups+nGroups]
+			for t := 0; t < P; t++ {
+				Y[t*out+o] = i3gsRowDot(row, sc, Xf[t*in:t*in+in])
 			}
 		}
 	case IQ2_XXS:
