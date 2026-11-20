@@ -64,6 +64,10 @@ const (
 	// ReasonSparsityPatternInvalid: a structured N:M pattern whose N and M
 	// cannot describe a real pattern.
 	ReasonSparsityPatternInvalid Reason = "sparsity-pattern-invalid"
+	// ReasonExactnessViolation: a concrete value would be altered by storage
+	// under its own declared format. The exact-quantization admission gate
+	// (#14494) refuses rather than substituting the nearest representable value.
+	ReasonExactnessViolation Reason = "exactness-violation"
 
 	// ClaimNone: the descriptor licenses no claim at all.
 	ClaimNone ClaimClass = ""
@@ -83,7 +87,8 @@ func (r Reason) Known() bool {
 	switch r {
 	case ReasonFullyDeclared, ReasonSchemaUnknown, ReasonFormatUnknown,
 		ReasonNothingDeclared, ReasonRuntimeOwned, ReasonGroupSizeMissing,
-		ReasonZeroPointConflict, ReasonSparsityPatternInvalid:
+		ReasonZeroPointConflict, ReasonSparsityPatternInvalid,
+		ReasonExactnessViolation:
 		return true
 	}
 	return false
