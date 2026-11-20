@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -134,6 +135,56 @@ func issueCreateClassifyBody(body, category, layer string, registry categorybase
 		return "", fmt.Errorf("body already contains Category/Layer metadata; pass it only through --category and --layer")
 	}
 	return strings.TrimRight(body, "\r\n") + "\n\n## Category\n\n" + category + "\n\n## Layer\n\n" + layer + "\n", nil
+}
+
+// issueCreateCompanionRoots returns the (public, private) companion roots
+// used to classify the paths a draft issue declares. The public root comes
+// from ResolveCompanionRoots; an explicit --private-root directory wins for
+// the private root.
+func issueCreateCompanionRoots(explicitPrivateRoot string) (string, string) {
+	pubRoot, privRoot := ResolveCompanionRoots()
+	if r := strings.TrimSpace(explicitPrivateRoot); r != "" {
+		privRoot = r
+	}
+	return pubRoot, privRoot
+}
+
+// issueCreateClassifyRoutingPath classifies one declared path against the
+// two companion roots. A path that exists under both roots, or under
+// neither, carries no repository signal.
+func issueCreateClassifyRoutingPath(p, pubRoot, privRoot string) issuepolicy.PathRepoClass {
+	under := func(root string) bool {
+		if root == "" {
+			return false
+		}
+		_, err := os.Stat(filepath.Join(root, p))
+		return err == nil
+	}
+	pub, priv := under(pubRoot), under(privRoot)
+	switch {
+	case pub && priv:
+		return issuepolicy.PathBoth
+	case pub:
+		return issuepolicy.PathPublicOnly
+	case priv:
+		return issuepolicy.PathPrivateOnly
+	default:
+		return issuepolicy.PathNeither
+	}
+}
+
+// issueCreateOwningRepo derives the companion repository that owns the
+// paths a draft issue declares. It is definitive only when at least one
+// path resolves and every resolvable path agrees. The paths come from the
+// same CandidateFromIssueDraft source the discoverability audit reads, so
+// the two never disagree about which paths the draft declares.
+func issueCreateOwningRepo(title, body, pubRoot, privRoot string) (issuepolicy.CompanionRepo, bool) {
+	c := issuepolicy.CandidateFromIssueDraft(issuepolicy.IssueDraft{Title: title, Body: body})
+	classes := make([]issuepolicy.PathRepoClass, 0, len(c.Paths))
+	for _, p := range c.Paths {
+		classes = append(classes, issueCreateClassifyRoutingPath(p, pubRoot, privRoot))
+	}
+	return issuepolicy.OwnCompanionRepo(classes)
 }
 
 // runIssueCreateWith is fak's smooth, structurally-ungated path for filing one GitHub
@@ -266,6 +317,17 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		return 2
 	}
 
+	// Derive the owning repository from the declared paths when the caller did
+	// not pass --repo. Definitive only when every resolvable path agrees; a
+	// split or unresolvable set behaves as today (gh infers from cwd).
+	if strings.TrimSpace(*repo) == "" {
+		pubRoot, privRoot := issueCreateCompanionRoots(*privateRoot)
+		if owning, ok := issueCreateOwningRepo(*title, resolvedBody, pubRoot, privRoot); ok {
+			*repo = owning.Name()
+			result.Repo = *repo
+		}
+	}
+
 	labelList := issueFanoutSplit(*labels)
 	if !*rawBody {
 		labelList = issueCreateShiftLeftLabels(*title, resolvedBody, labelList)
@@ -329,6 +391,26 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 				}
 			}
 			fmt.Fprintln(stderr, "  (bypass with --no-audit-discoverability or --allow-non-dispatchable)")
+			if *asJSON {
+				result.OK = false
+				result.Error = errMsg
+				encodeJSONOrFail(stdout, stderr, result, "fak-dev issue create")
+			}
+			return 3
+		}
+	}
+
+	// Refuse a cross-repository mismatch before the gh POST. The declared paths
+	// are definitive about the owning repository, and the caller's --repo
+	// (explicit or derived) names a different one. This is a boundary guard,
+	// not a discoverability audit: it runs regardless of
+	// --no-audit-discoverability / --raw-body.
+	if strings.TrimSpace(*repo) != "" {
+		pubRoot, privRoot := issueCreateCompanionRoots(*privateRoot)
+		if owning, ok := issueCreateOwningRepo(*title, resolvedBody, pubRoot, privRoot); ok &&
+			issueTargetRepoIsPrivate(*repo) != (owning == issuepolicy.RepoPrivate) {
+			errMsg := fmt.Sprintf("declared paths belong to %s but --repo targets %s; pass --repo %s", owning.Name(), *repo, owning.Name())
+			fmt.Fprintf(stderr, "fak-dev issue create: %s\n", errMsg)
 			if *asJSON {
 				result.OK = false
 				result.Error = errMsg
