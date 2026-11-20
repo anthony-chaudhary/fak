@@ -80,7 +80,7 @@
       "type": "local"
     }
   },
-  "model": "fak-router/deepseek-ai/DeepSeek-V4.1-Flash",
+  "model": "fak-router/qwen/qwen3.8-27b",
   "permission": {
     "dos*": "allow",
     "dos_*": "allow",
