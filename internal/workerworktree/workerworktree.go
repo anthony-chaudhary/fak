@@ -111,6 +111,12 @@ const (
 	ReapCodeTimeout                = "REAP_TIMEOUT"
 	ReapCodeRemoved                = "WORKTREE_REAPED"
 	ReapCodeReleased               = "WORKTREE_RELEASED"
+	// ReapCodeInterruptedResidueReaped is the closed receipt for the exact-path
+	// interrupted-reap recovery: a managed worker whose .git marker and Git
+	// registration are gone but whose owner and pool sidecars remain, with a dead
+	// owner and a released lease. The residue is archived-or-removed and its exact
+	// sidecars cleared; every other state is refused and preserved.
+	ReapCodeInterruptedResidueReaped = "INTERRUPTED_RESIDUE_REAPED"
 
 	PrepareCodeOrphanTargetRefused = "ORPHAN_TARGET_REFUSED"
 	RecoveryActionOrphanTarget     = "adjudicate ownership/liveness of orphan target before managed reap and retry"

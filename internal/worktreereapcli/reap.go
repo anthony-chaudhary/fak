@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
@@ -77,7 +79,21 @@ func RunSingle(stdout, stderr io.Writer, root, target, superseded string, maxWai
 	defer cancel()
 	git := workerworktree.BoundedGitRunner(ctx)
 	if err := registeredTarget(root, target, git); err != nil {
-		return refuse("REAP_PATH_REFUSED", "target is not a registered worker of the canonical repository", err.Error())
+		// The target is not a registered worker. Before refusing, check whether it
+		// is the exact-path interrupted-reap residue: a managed worker whose .git
+		// marker and Git registration are gone but whose owner and pool sidecars
+		// remain, with a dead owner and a released lease. The recovery branch
+		// re-verifies every condition independently and preserves every byte when
+		// any of them fails, so it is safe to attempt after a registration refusal.
+		res := workerworktree.ReapInterruptedResidue(root, target, git, processalive.Check, interruptedResidueLeaseOracle(root, ctx))
+		if res.OK {
+			return emit(res, 0)
+		}
+		// Not a registered worker and not a recoverable residue. Surface the
+		// classifier's specific refusal (it re-verified every condition and
+		// preserved every byte) rather than a bare registration refusal, so the
+		// safety-critical live-owner / live-lease reasons stay visible.
+		return emit(res, 1)
 	}
 	fmt.Fprintf(stderr, "REAP_PROGRESS code=REAP_STARTED max_wait=%s\n", maxWait)
 	beforeCtx, beforeCancel := context.WithTimeout(ctx, maxWait/2)
@@ -202,4 +218,68 @@ func registeredTarget(root, target string, git workerworktree.GitRunner) error {
 		return fmt.Errorf("registered worker Git pointer missing or unsafe")
 	}
 	return nil
+}
+
+// interruptedResidueLeaseOracle builds the lease-liveness gate for the exact-path
+// interrupted-reap recovery. It reads the SAME leaseref store the bulk cold sweep
+// keys on (leaseref.NewInDir(root).Live), so a lease is live when its exact record
+// or a protecting lane record exists. Read failures fail toward LIVE, so an
+// unreadable store never causes a false recovery.
+func interruptedResidueLeaseOracle(root string, ctx context.Context) workerworktree.LeaseIDLiveFn {
+	live, _, err := leaseref.NewInDir(root).Live(ctx, time.Now())
+	if err != nil {
+		return func(string) bool { return true }
+	}
+	ids := map[string]bool{}
+	lanes := map[string]bool{}
+	for _, rec := range live {
+		ids[strings.ToLower(strings.TrimSpace(rec.ID))] = true
+		for _, lane := range leaseLanes(rec.ID) {
+			lanes[strings.ToLower(lane)] = true
+		}
+	}
+	return func(leaseID string) bool {
+		leaseID = strings.ToLower(strings.TrimSpace(leaseID))
+		if leaseID == "" {
+			return true
+		}
+		if ids[leaseID] {
+			return true
+		}
+		for _, lane := range leaseLanes(leaseID) {
+			if lanes[strings.ToLower(lane)] {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// leaseLanes returns the candidate lane token(s) a lease id binds to. Lease ids are
+// "resolve-<lane>" (a lane lease) or "resolve-<lane>-<issue>" (an issue lease); both
+// the full tail and the issue-suffix-stripped tail are returned so a worktree lane
+// matches either form. A non-resolve id yields nothing. Mirrors cmd/fak's
+// dispatchLeaseLanes so the recovery and the bulk sweep key on the same lane rule.
+func leaseLanes(id string) []string {
+	rest := strings.TrimPrefix(id, "resolve-")
+	if rest == id || rest == "" {
+		return nil
+	}
+	out := []string{rest}
+	if i := strings.LastIndex(rest, "-"); i > 0 && isDigitsOnly(rest[i+1:]) {
+		out = append(out, rest[:i])
+	}
+	return out
+}
+
+func isDigitsOnly(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
