@@ -106,6 +106,45 @@ func BenchmarkDecideStep(b *testing.B) {
 	})
 }
 
+// BenchmarkDecideStepQueueScaling pins the per-step cost against queue length.
+//
+// The contract is one normalized copy of the queue per decision: cost must grow
+// linearly with queue items, so draining a Q-item stream is O(Q^2) overall.
+// Remediating a superlinear (or repeated-copy) step path shows up here as
+// bytes/op rising faster than the queue.
+func BenchmarkDecideStepQueueScaling(b *testing.B) {
+	for _, n := range []int{1, 10, 100, 1000, 10000} {
+		queue := make([]WorkItem, n)
+		for i := range queue {
+			queue[i] = WorkItem{
+				ID:     fmt.Sprintf("item-%d", i),
+				Lane:   fmt.Sprintf("lane-%d", i),
+				Status: ItemPending,
+			}
+		}
+		spec := StreamSpec{
+			ID:              "scale-stream",
+			Intent:          "queue-scaling",
+			MaxTurnsTotal:   1 << 20,
+			MaxTurnsPerItem: 8,
+			Queue:           queue,
+		}
+		state := StreamState{StreamID: spec.ID, Queue: queue}
+		tax := laneadmit.Taxonomy{Loaded: true}
+
+		b.Run(fmt.Sprintf("queue_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				dec := DecideStep(spec, state, "scale-holder", nil, tax)
+				if dec.Action != ActionAcquireLease {
+					b.Fatalf("unexpected action: %s", dec.Action)
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkApplyStep exercises state transitions for individual actions.
 func BenchmarkApplyStep(b *testing.B) {
 	spec := StreamSpec{

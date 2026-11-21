@@ -54,7 +54,7 @@ type StepResult struct {
 // It is pure and deterministic over spec, state, live leases, and taxonomy.
 func DecideStep(spec StreamSpec, state StreamState, holder string, liveLeases []laneadmit.Lease, tax laneadmit.Taxonomy) StepDecision {
 	norm := spec.NormalizedSpec()
-	safety := EvaluateContextSafety(norm, state)
+	safety := evaluateContextSafetyNormalized(norm, state)
 
 	if state.Closed {
 		return StepDecision{
@@ -87,7 +87,7 @@ func DecideStep(spec StreamSpec, state StreamState, holder string, liveLeases []
 				NextSafeStep: fmt.Sprintf("release lease %q before final completion", state.CurrentLease.LeaseID),
 			}
 		}
-		seed := BuildCarryoverSeed(norm, state)
+		seed := buildCarryoverSeedNormalized(norm, state)
 		return StepDecision{
 			Action:       ActionStreamComplete,
 			ItemIndex:    state.ActiveIndex,
@@ -153,7 +153,7 @@ func DecideStep(spec StreamSpec, state StreamState, holder string, liveLeases []
 
 	// Case 2: Active item is terminal and lease is released -> Advance queue or Reset Context.
 	if active.Status.Terminal() && state.CurrentLease == nil {
-		seed := BuildCarryoverSeed(norm, state)
+		seed := buildCarryoverSeedNormalized(norm, state)
 		return StepDecision{
 			Action:       ActionAdvanceQueue,
 			ItemIndex:    state.ActiveIndex,
@@ -223,7 +223,7 @@ func DecideStep(spec StreamSpec, state StreamState, holder string, liveLeases []
 	if active.Status == ItemExecuting {
 		// If context ceiling is hit mid-execution, demand context reset/checkpoint.
 		if safety.Status == StatusContextResetRequired {
-			seed := BuildCarryoverSeed(norm, state)
+			seed := buildCarryoverSeedNormalized(norm, state)
 			return StepDecision{
 				Action:       ActionResetContext,
 				ItemIndex:    state.ActiveIndex,
@@ -279,8 +279,7 @@ func DecideStep(spec StreamSpec, state StreamState, holder string, liveLeases []
 }
 
 // ApplyStep transitions the stream state forward given the decision taken and witnessed result.
-func ApplyStep(spec StreamSpec, state *StreamState, decision StepDecision, result StepResult, now time.Time) {
-	norm := spec.NormalizedSpec()
+func ApplyStep(_ StreamSpec, state *StreamState, decision StepDecision, result StepResult, now time.Time) {
 	active := state.ActiveItem()
 
 	switch decision.Action {
@@ -370,6 +369,4 @@ func ApplyStep(spec StreamSpec, state *StreamState, decision StepDecision, resul
 		state.CloseReason = decision.Reason
 	}
 
-	// Update safety check after mutations
-	_ = norm
 }

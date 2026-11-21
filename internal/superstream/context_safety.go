@@ -34,9 +34,19 @@ type ContextSafetyVerdict struct {
 }
 
 // EvaluateContextSafety inspects current stream usage against limits.
+//
+// The spec is normalized here so a raw (un-defaulted) spec answers the same
+// verdict as an already-normalized one. Callers that normalized the spec
+// themselves should use evaluateContextSafetyNormalized to avoid copying the
+// queue a second time.
 func EvaluateContextSafety(spec StreamSpec, state StreamState) ContextSafetyVerdict {
-	norm := spec.NormalizedSpec()
+	return evaluateContextSafetyNormalized(spec.NormalizedSpec(), state)
+}
 
+// evaluateContextSafetyNormalized is EvaluateContextSafety over an
+// already-normalized spec (defaults applied). It performs no queue copy, so a
+// decision step costs one normalization rather than one per helper.
+func evaluateContextSafetyNormalized(norm StreamSpec, state StreamState) ContextSafetyVerdict {
 	totalTurnsLeft := norm.MaxTurnsTotal - state.TotalTurnsSpent
 	totalTokensLeft := norm.MaxTokensTotal - state.TotalTokensSpent
 
@@ -183,8 +193,12 @@ func BuildStreamLayout(pinCount int) ctxplan.Layout {
 
 // BuildCarryoverSeed synthesizes a fresh StreamCarryoverSeed from spec and state.
 func BuildCarryoverSeed(spec StreamSpec, state StreamState) StreamCarryoverSeed {
-	norm := spec.NormalizedSpec()
+	return buildCarryoverSeedNormalized(spec.NormalizedSpec(), state)
+}
 
+// buildCarryoverSeedNormalized is BuildCarryoverSeed over an already-normalized
+// spec, so a decision step that already normalized does not copy the queue again.
+func buildCarryoverSeedNormalized(norm StreamSpec, state StreamState) StreamCarryoverSeed {
 	completed := make([]ItemSummary, 0, len(state.Queue))
 	for _, it := range state.Queue {
 		if it.Status == ItemCompleted {
