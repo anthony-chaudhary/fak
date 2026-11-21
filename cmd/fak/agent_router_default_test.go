@@ -357,7 +357,7 @@ func TestAgentEndpointResolverDiscoversModelWithProvenKey(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"qwen/qwen3.8-27b"},{"id":"boostrun.large"}]}`)
+			_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"qwen/qwen3.8-27b"},{"id":"other/not-served"}]}`)
 		default:
 			http.NotFound(w, r)
 		}

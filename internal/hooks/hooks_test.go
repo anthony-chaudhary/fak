@@ -699,9 +699,10 @@ func TestDocPlacementThirdPartyNoticesExact(t *testing.T) {
 // TestPlaceholderTiersStaySeparateForWholeTreeOnlyNames pins the one-map-two-gates defect:
 // commit cdcb160cf3 added "alice" to placeholderUsers so the SECRET_SHAPE whole-tree audit
 // would tolerate the fixture literal "/Users/alice" in a test source, but PUBLIC_LEAK
-// consulted that same map, so every "/home/alice/..." operator home path stopped being
-// reported. A name may be a whole-tree fixture (placeholderUsers) and must still never be an
-// exemption for the leak detector, so the two tiers are asserted disjoint here.
+// consulted that same map, so every operator home path under the alice fixture account
+// stopped being reported. A name may be a whole-tree fixture (placeholderUsers) and must
+// still never be an exemption for the leak detector, so the two tiers are asserted
+// disjoint here.
 func TestPlaceholderTiersStaySeparateForWholeTreeOnlyNames(t *testing.T) {
 	if len(secretShapeOnlyPlaceholders) == 0 {
 		t.Fatal("the whole-tree-only placeholder tier is empty; delete it rather than keep a dead carve-out")

@@ -66,8 +66,9 @@ var operatorHomePathRe = regexp.MustCompile(
 )
 
 // placeholderHomeUsers are documentation and default-account usernames, compared lower-cased;
-// a home path under one identifies no operator. It extends placeholderUsers (SECRET_SHAPE) so
-// the two gates never disagree about a placeholder.
+// a home path under one identifies no operator. It is a superset of the placeholderUsers
+// (SECRET_SHAPE) names EXCEPT the whole-tree-only carve-outs below, which the leak gate must
+// still report.
 var placeholderHomeUsers = map[string]bool{
 	"u": true, "x": true, "xx": true, "xxx": true, "xxxx": true, "...": true, "..": true,
 	"me": true, "foo": true, "test": true, "example": true, "dev": true, "devuser": true,
