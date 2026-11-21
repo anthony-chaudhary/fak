@@ -116,3 +116,56 @@ tiers only and supplies no host-offload implementation. Shards are uniform byte
 accounting units, rounded upward per rank; they do not prove tensor or layer boundaries can split.
 Peer access, links, synchronization, heterogeneous backend compatibility, compute support and speed
 are not simulated. Do not infer a usable multi-GPU configuration from memory arithmetic alone.
+
+## Split and offload pricing (`fitplan.PlanSplit`)
+
+The commands above check whether declared placements fit in memory; they do not price speed.
+`fitplan.PlanSplit(Input, Interconnect)` is the matching pure pricer. It takes the same header facts,
+calibration, tier rates and stream/active-set gates that `Plan` and `--fit auto` use (an
+unknown per-token stream or MoE active set is omitted, not priced), and ranks one decode step for every
+(split mode, offload mode) pair across `Interconnect.Devices` identical discrete devices.
+`Hardware.PoolUsableBytes` is per device.
+
+| Mode | Placement | Decode step |
+| --- | --- | --- |
+| `single` | dense core first on one device | device, then spilled tiers |
+| `layer` | 1/N of dense, KV and experts per device | sum of stages + N-1 activation hops |
+| `tensor` | 1/N of every layer; KV over `min(N, kv_heads)` ranks (a compressed KV is replicated) | slowest rank + two ring all-reduces per layer, each `2(N-1)` latency steps |
+| `expert` | dense core and KV on device 0, routed experts across all devices | dense + slowest expert rank + two all-to-alls per layer |
+
+Weights that spill below the devices are priced twice:
+
+- **`cpu`** computes them in place: host-RAM bandwidth, NVMe rate for paged weights, the stated
+  host FLOP rate when one is given. Host experts spread over every MoE layer, so each layer pays
+  two host↔device crossings (out and back); a contiguous dense spill pays two in total. Attention
+  never runs on the host, because the KV is device-resident.
+- **`stream`** copies them over the host link at `min(link, host RAM)`. The copy is serial with
+  compute, because experts are selected after the router. Each rank pulls its own share over its
+own link: the dense spill is sharded only under `tensor`, the routed spill under `tensor` and
+`expert`.
+
+A batch reads `max(active, routed·(1-(1-k/E)^b))` routed bytes, the same rule as
+`Model.StreamBytes`, so every batch agrees with `Plan`. Without expert counts, the declared
+per-token active share stands in for `k/E`. These bytes are split by where the experts live. With
+serial decode (`batched_decode` off), the per-sequence rate is the aggregate divided by the
+stream count, as in `Plan`.
+
+`Chosen` is the fastest unrefused row the engine can actually run (`Interconnect.Executable`). The
+default, `ServeExecutableSplits()`, is what `fak serve` runs in one process today: `single`, and
+`expert` (`--expert-parallel N` on a `-tags cuda,nccl` build). `layer` (multi-process transport
+only) and `tensor` (a collective gate with no sharded serve forward) are priced but never chosen.
+When one of them would be faster, it appears as `Best`, so the gap that engine work would close is
+visible. If some row fits but no mode in the list does, the status is `unknown` with
+`no_executable_split`, never `refused`. `refused` means no row fits at all. A rate the caller did not state (host link, peer latency, host sync) is filled with a
+labelled generic default. Only rates a row's phases actually use are listed in its `generic_rates`,
+and only a chosen (or best) row that used one demotes the report to the `empirical` tier.
+`Devices` above `MaxSplitDevices` (64) is not priced: the status is `unknown` with
+`split_devices_out_of_range`.
+
+Worked case, all MODELED: a DeepSeek-V4.1-Flash-class MoE on one 16 GB card with 32 GB of host RAM
+is NVMe-bound. A second card over PCIe (`expert`) holds about 15 GB more experts, a modest gain,
+because NVMe still binds. Host RAM that holds every expert removes the NVMe term, a gain several
+times larger (`TestSplitSecondGPUVersusRAM`). Tensor split over PCIe-class latency loses to one
+device on a model that already fits, and wins over an NVLink-class link
+(`TestSplitTensorLatencyCrossover`). `PlanSplit` is not yet wired into `--fit auto`, because serve
+probes only device 0.

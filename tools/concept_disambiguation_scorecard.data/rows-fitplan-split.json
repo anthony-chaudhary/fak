@@ -1,0 +1,79 @@
+{
+ "rows": [
+  {
+   "id": "fitplan-plan-split",
+   "canonical": "fitplan.PlanSplit (multi-device split x host-offload decode pricer)",
+   "family": "plan",
+   "kind": "symbol",
+   "definition": "The pure pricer that ranks one decode step for every (split mode: single/layer/tensor/expert) x (offload mode: cpu/stream) pair across N identical discrete devices, choosing only among modes the serving engine can execute.",
+   "distinction": "fitplan.Plan prices one device's capacity and throughput per KV candidate and fitplan.Search picks context x KV x slots; PlanSplit alone decides HOW the weights spread across several devices and WHAT runs the spilled weights. It prices speed, unlike EvaluatePlacement, which checks declared residency only.",
+   "distinct_from": [
+    "fitplan-planner"
+   ],
+   "aliases": [
+    "SplitReport"
+   ],
+   "grounding": "PlanSplit",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "docs/fak/concept-glossary.md",
+   "parent": "fitplan-planner",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "fitplan-placement-pool-host-ram",
+   "canonical": "fitplan.PlacementPoolHostRAM (host-RAM offload tier of a tiered placement)",
+   "family": "pool",
+   "kind": "symbol",
+   "definition": "The placement tier between the device pool and the NVMe mmap: weight segments that overflow the device live in host RAM and are read at the host bandwidth.",
+   "distinction": "HostPoolUsableBytes is the CAPACITY figure of the host pool; PlacementPoolHostRAM is the TIER NAME a placement row is assigned to, and fitplan-placement-pool-nvme is the slower unbounded tier below it.",
+   "distinct_from": [
+    "fitplan-host-pool-usable-bytes",
+    "fitplan-placement-pool-nvme"
+   ],
+   "aliases": [],
+   "grounding": "PlacementPoolHostRAM",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "docs/fak/concept-glossary.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "fitplan-placement-pool-nvme",
+   "canonical": "fitplan.PlacementPoolNVMe (NVMe mmap tier of a tiered placement)",
+   "family": "pool",
+   "kind": "symbol",
+   "definition": "The last, unbounded placement tier: weights that fit neither the device nor host RAM are read from an NVMe mmap of the model file at the NVMe rate.",
+   "distinction": "fitplan-placement-pool-host-ram is the bounded RAM tier above it; NVMe always has room (the file itself), so it is the only tier with no capacity figure.",
+   "distinct_from": [
+    "fitplan-placement-pool-host-ram"
+   ],
+   "aliases": [],
+   "grounding": "PlacementPoolNVMe",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "docs/fak/concept-glossary.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "fitplan-attn-width",
+   "canonical": "fitplan attnWidth (attention layers x heads x head dim)",
+   "family": "attention",
+   "kind": "symbol",
+   "definition": "The per-position attention width the planner prices attention FLOPs with: KV-bearing attention layers x heads x head dimension.",
+   "distinction": "fitplan-attn-layers is the LAYER COUNT input; attnWidth is the derived product that scales attention FLOPs with context length.",
+   "distinct_from": [
+    "fitplan-attn-layers"
+   ],
+   "aliases": [],
+   "grounding": "attnWidth",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "docs/fak/concept-glossary.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  }
+ ]
+}
