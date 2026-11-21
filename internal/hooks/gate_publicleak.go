@@ -77,6 +77,16 @@ var placeholderHomeUsers = map[string]bool{
 	"test.user": true, "fak": true,
 }
 
+// secretShapeOnlyPlaceholders names the placeholderUsers entries that exist for the SECRET_SHAPE
+// WHOLE-TREE audit only, and must never exempt this gate. Secret-shape's tree pass matches a home
+// path with no trailing segment, so it tolerates the fixture names spelled literally inside test
+// and doc sources (remote_snapshot_test.go writes "/Users/alice"); a staged diff carrying that
+// same path under a real operator account is exactly what public-leak exists to report, so
+// inheriting the whole tree tier silenced the detector for every one of those names.
+var secretShapeOnlyPlaceholders = map[string]bool{
+	"alice": true,
+}
+
 // operatorUserPrefix is the operator's own username family; no exemption ever covers it.
 func operatorUserPrefix() string { return "an" + "tho" }
 
@@ -139,7 +149,7 @@ func operatorHomePathLeaks(line, file string) bool {
 		if strings.HasPrefix(user, operatorUserPrefix()) {
 			return true
 		}
-		if corpus || placeholderUsers[user] || placeholderHomeUsers[user] {
+		if corpus || placeholderHomeUsers[user] || (placeholderUsers[user] && !secretShapeOnlyPlaceholders[user]) {
 			continue
 		}
 		return true

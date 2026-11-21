@@ -521,6 +521,7 @@ var labDevCommands = map[string]string{
 	"node-compare":       "fak compute-node comparison",
 	"nodeusage":          "fak compute-node telemetry",
 	"nightrun":           "fak lab/fleet scheduled operation",
+	"packing-matrix":     "hardware-lab loader packing coverage matrix (native-ratio / runtime-repack defect cells per kernel-family x device)",
 	"roofline":           "hardware-lab RDNA roofline and WMMA microprobe",
 	"strix":              "hardware-lab appliance operation (strix-bench/status trigger)",
 	"strix-probe":        "hardware-lab appliance probe command",

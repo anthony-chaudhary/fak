@@ -779,6 +779,15 @@ autopick = [
   "routerlaunch",
   "anthropicbridge",
   "routerfront",
+  # reconciled 2026-11-21: five real committed internal leaves landed with no declared
+  # lane, so TestLiveInternalGoPackagesResolveToExplicitLaneTrees reds (5/857 top-level
+  # internal packages unresolved). Each is declared here AND in [lanes.trees] so the
+  # referee binds its `<lane>` ship-stamp and the arbiter protects internal/<lane>/**.
+  "envchild",     # internal/envchild: the child-process environment allowlist a gateway hands a tool child (strips upstream provider credentials); any cmd/fak shim stays in the `cmd` lane.
+  "noticeguard",  # internal/noticeguard: the license-minimal notice guard (test-only package) keeping NOTICE.md / THIRD_PARTY_NOTICES.md at the license-required minimum.
+  "policygoal",   # internal/policygoal: the closed vocabulary of named inference policy goals plus the serve-config knob inventory (hot/cold + defect-hiding).
+  "servereceipt", # internal/servereceipt: the on-demand model -> GPU serving-config receipt renderer (`fak serve-receipt`).
+  "slackquiet",   # internal/slackquiet: the ONE global brake for fak's outbound Slack writes (FAK_SLACK_QUIET), beside internal/slackwire.
   # new-leaf:lane
 ]
 
@@ -798,6 +807,13 @@ layoutoracle = ["internal/layoutoracle/**"]
 benchsweep = ["internal/benchsweep/**"]
 servelaunch = ["internal/servelaunch/**"]
 opencoderesume = ["internal/opencoderesume/**"]
+# reconciled 2026-11-21: the five leaves the roster note above declares (they had no tree,
+# so the lane-space resolver could not map their packages).
+envchild = ["internal/envchild/**"]
+noticeguard = ["internal/noticeguard/**"]
+policygoal = ["internal/policygoal/**"]
+servereceipt = ["internal/servereceipt/**"]
+slackquiet = ["internal/slackquiet/**"]
 conceptdrift = ["internal/conceptdrift/**"]
 optimize = ["internal/optimize/**"]
 hwspecs = ["pkg/hwspecs/**"]
