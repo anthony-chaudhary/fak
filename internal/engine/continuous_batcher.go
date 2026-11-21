@@ -224,6 +224,30 @@ func (cb *ContinuousBatcher) EmptySlotCount() int {
 	return count
 }
 
+// FreeQueue returns the indices of empty slots (State == SlotStateEmpty) in
+// stable ascending order — the free-queue the scheduler admits from.
+//
+// This is the engine-side half of the M2 free-queue batching discipline. The
+// discipline has NO steady-state batch-band hold: the free-queue is always the
+// LIVE set of empty slots, derived on each call under cb.mu and never a
+// reserved or stale band. A freed slot is therefore immediately available for
+// the next waiting request, so p99 ISL is unchanged.
+func (cb *ContinuousBatcher) FreeQueue() []int {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	free := make([]int, 0, len(cb.slots))
+	for i, s := range cb.slots {
+		s.mu.Lock()
+		empty := s.State == SlotStateEmpty
+		s.mu.Unlock()
+		if empty {
+			free = append(free, i)
+		}
+	}
+	return free
+}
+
 // TotalTokensGenerated returns cumulative count of decode tokens produced.
 func (cb *ContinuousBatcher) TotalTokensGenerated() int64 {
 	cb.mu.Lock()
