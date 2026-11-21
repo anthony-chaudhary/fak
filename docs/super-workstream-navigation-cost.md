@@ -1,6 +1,6 @@
 ---
 title: "Super workstream cost model: many workstreams are cheap, navigation must stay linear"
-description: "The Big-O contract for super workstreams: O(1) context in transcript length, O(1) allocation per decision step, Theta(Q) scan only at a seed boundary, Theta(W*Q) to sweep W streams — with the measured cost and the regression gates that pin it."
+description: "The Big-O contract for super workstreams: O(1) context in transcript length, Theta(Q) for a one-shot decision but O(1) per step through a Stepper, Theta(Q) allocation for a whole drain, a MaxItems queue cap, and Theta(W*Q) to sweep W streams — with the measured cost and the gates that pin it."
 ---
 
 # Super workstream cost model
@@ -13,44 +13,45 @@ A workstream is meant to be cheap to *have* and proportional to *navigate*. Two
 different quantities are involved, and conflating them is how this surface drifts
 into accidental quadratic behavior.
 
-| Quantity | Bound | Why |
+| Quantity | Bound | Basis |
 |---|---|---|
-| Session context carried across items | **O(1) in turns/transcript**, Θ(completed) receipts | `StreamCarryoverSeed` replaces the transcript, not the queue |
-| Resident state per stream | **Θ(Q)** | the queue of `Q` work items |
-| One `DecideStep`, no seed boundary | **O(1) time and allocation** | defaults are applied to the limits only; no queue copy, no queue-sized prealloc |
-| One contended step (`FindNextDisjointItem`) | Θ(Q·live leases) | forward scan for a disjoint queue item |
-| One seed-emitting step (`ADVANCE_QUEUE`, `STREAM_COMPLETE`, `RESET_CONTEXT`) | Θ(Q) scan time, Θ(completed) space | the scan is inherent; the seed carries completed receipts only |
-| Draining a `Q`-item stream | Θ(Q²) scan time when every boundary emits a seed; Θ(Σcompleted) summaries | next lever: a last-K receipt cap or an incremental cursor |
-| Navigating `W` streams (status/plan sweep) | Θ(W·Q) time, O(max Q) peak memory when swept one at a time | W independent spec reads; nothing aggregates all queues |
+| Context carried across items | **O(1) in turns/transcript**; O(32) receipts | `StreamCarryoverSeed` replaces the transcript; `CompletedItems` is windowed to `DefaultCarryoverReceiptWindow` (32) plus `CompletedItemsTotal` |
+| Resident state per stream | **Θ(Q)** | the queue |
+| One `DecideStep` call | **Θ(Q)** time and bytes | one normalized queue copy — correct for a one-shot decision |
+| Any drain loop | use **`Stepper.Step`**, **O(1) in Q** | `NewStepper` normalizes once; the copy is amortized across the whole drain |
+| Draining a Q-item stream via `Stepper` | **Θ(Q) allocation total** | Q steps × O(1); measured flat at 656–662 B/op for Q=1..10,000 |
+| Queue length | **bounded by `MaxItems`** (default 1000) | over-cap specs fail validation and halt navigation: split the stream or raise `max_items` explicitly |
+| One contended step (`FindNextDisjointItem`) | Θ(Q·live leases) | forward scan for a disjoint item |
+| Navigating W streams (plan/status sweep) | Θ(W·Q) time; **O(max Q)** peak memory when swept one at a time | W independent spec reads; nothing aggregates all queues |
 
 Measured on `internal/superstream` (AMD Ryzen 9 9950X, go1.26.11 windows/amd64,
-`-benchtime=200x`, `BenchmarkDecideStepQueueScaling`): a decision step allocates
-**632–634 B/op and 21 allocs/op flat from Q=1 to Q=10,000** — the same bytes at
-every queue length, ~0.7–1.5 µs/op. Before 2026-11-21 the same probe read
-**369 B per queue item** (3.69 MB/op at Q=10,000) because `DecideStep` normalized
-the queue and then `EvaluateContextSafety` and `BuildCarryoverSeed` normalized it
-again, while `ApplyStep` normalized it for no result. A first fix collapsed that
-to one copy (184 B/item); the residual copy was then removed outright, because
-the decision helpers read only the limit fields and base pins — the queue they
-walk is the caller's `state.Queue`.
+`-benchtime=100x`):
 
-Two deterministic gates pin this (allocation bytes, no wall clock):
+| Probe | Q=1 | Q=100 | Q=10,000 |
+|---|---|---|---|
+| `BenchmarkDecideStepQueueScaling` (one-shot call) | 853 B/op | 19,093 B/op | **1,845,639 B/op** |
+| `BenchmarkStepperStepQueueScaling` (drain step) | 662 B/op | 661 B/op | **656 B/op** |
 
-- `TestDecideStepCostIsQueueIndependent` — Q=200 vs Q=2,000 must allocate within
-  8 KiB of each other. On the copy shape it fails at
-  `Q=200 41588 B/op, Q=2000 373767 B/op`.
-- `TestCarryoverSeedAllocatesCompletedOnly` — with one completed item, the seed
-  must not size itself to the queue. Before the fix it allocated
-  `len(state.Queue)` summaries and failed at `Q=200 62320 B/op, Q=2000 567395 B/op`.
+Before 2026-11-21 a `DecideStep` normalized the queue and then had
+`EvaluateContextSafety` and `BuildCarryoverSeed` normalize it two more times
+(3.69 MB/op at Q=10,000). Collapsing those passes halved it to one copy
+(1.85 MB/op); amortizing that copy across a drain through `Stepper` removed the
+per-step term entirely (0.66 KB/op, flat). The lesson is the contract: **`DecideStep`
+is a one-shot primitive; a loop must hold a `Stepper`.**
+
+Gates that pin it (allocation bytes, no wall clock):
+
+- `TestDecideStepCopiesQueueOnce` — a single call copies the queue at most once.
+- `TestStepperStepDoesNotCopyQueue` — `Step` allocation does not scale with Q.
+- `TestStepperDrainAllocationLinear` — a full drain allocates Θ(Q), not Θ(Q²);
+  fails on the per-call-copy shape.
+- `TestStreamSpecValidateCap` / `TestDecideStepRefusesOversizedQueue` — the
+  `MaxItems` cap refuses an unbounded queue instead of paying for it.
 
 Consequences worth designing against:
 
-- **`Q` is the remaining superlinear term.** No queue-length cap exists today
-  (`MaxTurns*` bound turns, not items) and every seed boundary rescans the queue.
-  Keep queues bounded, or make the completed-receipt sweep incremental.
-- **The seed is not O(1) in `Q`.** `StreamCarryoverSeed.CompletedItems` grows with
-  completed work; "O(1) context" means independent of transcript length, not of
-  queue length. For long streams, carry the last `K` receipts plus a count.
+- **Many bounded streams are the intended shape.** `MaxItems` is the line between
+  "many workstreams" (navigable, linear) and "one enormous queue" (a Θ(Q²) sweep).
 - **`W` streams have no index.** Each `fak superstream … --spec <path>` reads one
   file and computes one stream; there is no registry to enumerate or rank streams,
   so aggregate navigation costs one invocation per known spec. If an aggregate
@@ -63,6 +64,6 @@ Consequences worth designing against:
 Re-measure with:
 
 ```bash
-go test ./internal/superstream -run '^$' -bench 'BenchmarkDecideStepQueueScaling' -benchtime=200x -count=3
-go test ./internal/superstream -run 'TestDecideStepCostIsQueueIndependent|TestCarryoverSeedAllocatesCompletedOnly' -count=1
+go test ./internal/superstream -run '^$' -bench 'Benchmark(DecideStep|StepperStep)QueueScaling' -benchtime=100x -count=1
+go test ./internal/superstream -count=1
 ```
