@@ -819,6 +819,51 @@ func TestProbeGatewayOnce_MockFallsThroughToModels(t *testing.T) {
 	}
 }
 
+// TestProbeGatewayOnce_ReadyHealthContract pins the router health contract:
+// the private fak router's /healthz reports liveness as "ready" and carries no
+// "ok" field, so a ready-only payload must count as healthy, while an explicit
+// ok:false still refuses even when ready is true.
+func TestProbeGatewayOnce_ReadyHealthContract(t *testing.T) {
+	cases := []struct {
+		name   string
+		health map[string]any
+		want   bool
+	}{
+		{"ready only", map[string]any{"ready": true, "route_id": "local-engine"}, true},
+		{"ready false", map[string]any{"ready": false}, false},
+		{"neither field", map[string]any{"route_id": "local-engine"}, false},
+		{"explicit ok false wins", map[string]any{"ok": false, "ready": true}, false},
+		{"ok true ready false", map[string]any{"ok": true, "ready": false}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/healthz":
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(tc.health)
+				case "/v1/models":
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"data": []map[string]any{{"id": "router-model"}},
+					})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer ts.Close()
+
+			model, ok := probeGatewayOnce(&http.Client{}, ts.URL)
+			if ok != tc.want {
+				t.Fatalf("probeGatewayOnce ok = %v, want %v (health %v)", ok, tc.want, tc.health)
+			}
+			if ok && model != "router-model" {
+				t.Fatalf("probeGatewayOnce model = %q, want %q", model, "router-model")
+			}
+		})
+	}
+}
+
 func TestDetectServerModel_FromHealthz(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {

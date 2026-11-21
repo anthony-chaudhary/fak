@@ -797,11 +797,22 @@ func probeGatewayOnce(client *http.Client, origin string) (string, bool) {
 	if resp.StatusCode != http.StatusOK {
 		return "", false
 	}
+	// Gateways report liveness under "ok"; the private fak router reports it
+	// under "ready" and omits "ok". An explicit ok decides; ready is the
+	// fallback only when ok is absent.
 	var health struct {
-		OK    bool   `json:"ok"`
+		OK    *bool  `json:"ok"`
+		Ready *bool  `json:"ready"`
 		Model string `json:"model"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil || !health.OK {
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		return "", false
+	}
+	healthy := health.OK != nil && *health.OK
+	if health.OK == nil {
+		healthy = health.Ready != nil && *health.Ready
+	}
+	if !healthy {
 		return "", false
 	}
 	model := strings.TrimSpace(health.Model)
