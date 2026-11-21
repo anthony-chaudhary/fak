@@ -172,7 +172,7 @@ func TestInKernelNonDecodeDeviceWorkIsMarked(t *testing.T) {
 			t.Errorf("%s decode window events = %s, want the mark closed around exactly the window", name, got)
 		}
 	}
-	if spans != 3 {
-		t.Errorf("decode windows = %d, want 3", spans)
+	if spans != 4 {
+		t.Errorf("decode windows = %d, want 4", spans)
 	}
 }

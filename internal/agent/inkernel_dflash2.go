@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
 var (
@@ -488,10 +489,16 @@ func (p *InKernelPlanner) generateDFlash2(ctx context.Context, ids []int, maxNew
 
 func (p *InKernelPlanner) runDFlash2Request(ctx context.Context, ids []int, maxNew int, lease *dflash2Lease,
 	preview func([]int) (dflash2StopPreview, error), publish func(dflash2StopPreview) error) (res inKernelGenerateResult, err error) {
+	// Bootstrap is prefill-like device work; a concurrent decode window must not book it.
+	nonDecode := nativeperf.BeginNonDecodeWork()
+	defer nonDecode.End()
 	if err = lease.request.Bootstrap(ctx, ids); err != nil {
 		return res, err
 	}
 	res.promptTok = len(ids)
+	nonDecode.End()
+	hostSpan := nativeperf.StartDecodeSpan()
+	defer hostSpan.Abandon()
 	for res.gen < maxNew {
 		if err = p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
 			return res, err
@@ -551,12 +558,14 @@ func (p *InKernelPlanner) runDFlash2Request(ctx context.Context, ids []int, maxN
 			return res, err
 		}
 		if plan.stopped {
-			return res, nil
+			break
 		}
 		if len(committed) == 0 {
 			return res, fmt.Errorf("dflash2: no progress without a stop")
 		}
 	}
+	hostSpan.Finish(ctx, res.gen)
+	nonDecode = nativeperf.BeginNonDecodeWork()
 	return res, nil
 }
 
