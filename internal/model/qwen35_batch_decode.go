@@ -205,18 +205,24 @@ func qwen35CohortMutation(backend compute.Backend, sessions []*Session, lanes []
 	n := len(sessions)
 	locked := make([][]*qwen35HALLayerOwner, n)
 	states := make([][]compute.Qwen35SequenceState, n)
-	unlockAll := func() {
-		for i := n - 1; i >= 0; i-- {
-			for j := len(locked[i]) - 1; j >= 0; j-- {
-				locked[i][j].mu.Unlock()
-			}
-			sessions[i].qwen35HAL.mu.Unlock()
-		}
-	}
 	err := func() error {
+		acquired := 0
+		// Release exactly the q.mu locks that were acquired, on any exit
+		// (normal, early-return, or panic) so an abnormal forward exit cannot
+		// strand the HAL state locks and deadlock the scheduler's cleanup path,
+		// which re-enters q.mu via Session.Close.
+		defer func() {
+			for i := acquired - 1; i >= 0; i-- {
+				for j := len(locked[i]) - 1; j >= 0; j-- {
+					locked[i][j].mu.Unlock()
+				}
+				sessions[i].qwen35HAL.mu.Unlock()
+			}
+		}()
 		for i, s := range sessions {
 			q := s.qwen35HAL
 			q.mu.Lock()
+			acquired++
 			states[i] = make([]compute.Qwen35SequenceState, len(q.layers))
 			locked[i] = make([]*qwen35HALLayerOwner, 0, len(q.layers))
 			for layer := range q.layers {
@@ -254,7 +260,6 @@ func qwen35CohortMutation(backend compute.Backend, sessions []*Session, lanes []
 		graphComplete = mutationErr == nil
 		return mutationErr
 	}()
-	unlockAll()
 	complete = err == nil
 	return err
 }
