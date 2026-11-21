@@ -144,6 +144,12 @@ var testOnlyEnableAllowlist = map[string]string{
 	// live instance until TICKET-01 landed its writer (v41IndexerKeyAdmissionBytes wiring,
 	// 8e664ed4d); the entry is kept to name that history and to re-exempt it if the writer regresses.
 	"indexerKeyBudgetBytes": "Ref #12640/TICKET-01: production writer added by 8e664ed4d; kept to document the swept class and re-exempt on regression",
+	// DSpineCheckpointContract.TerminalEnabled is a fail-closed contract gate: the
+	// supported dspine bridge is terminal-disabled, so Validate() refuses any
+	// terminal-enabled checkpoint (ErrDSpineContractTerminalEnabled). Production
+	// therefore never sets it true; the guard-read is the refusal itself, not a knob
+	// awaiting a writer.
+	"TerminalEnabled": "DSpine checkpoint contract gate: the supported bridge is terminal-disabled, so Validate() refuses TerminalEnabled=true; production never enables it",
 }
 
 // TestOnlyEnableFieldsHaveProductionWriters fails when a guard-read budget/enable field has no
