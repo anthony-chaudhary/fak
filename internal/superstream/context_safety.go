@@ -148,20 +148,31 @@ type ItemSummary struct {
 // when transitioning across item boundaries or resetting context.
 // It carries only verified receipts, active task pins, and remaining queue items,
 // discarding the bloated linear transcript of past tool outputs.
+//
+// CompletedItems is bounded: it holds the most recent
+// DefaultCarryoverReceiptWindow receipts plus a total count
+// (CompletedItemsTotal), so a finished Q-item stream carries an O(K) seed
+// instead of a Theta(Q) one.
 type StreamCarryoverSeed struct {
-	Schema         string          `json:"schema"`
-	StreamID       string          `json:"stream_id"`
-	Intent         string          `json:"intent"`
-	ActiveIndex    int             `json:"active_index"`
-	TotalItems     int             `json:"total_items"`
-	CompletedItems []ItemSummary   `json:"completed_items"`
-	CurrentItem    *WorkItem       `json:"current_item,omitempty"`
-	NextItem       *WorkItem       `json:"next_item,omitempty"`
-	StreamPins     []string        `json:"stream_pins,omitempty"`
-	TurnsRemaining int             `json:"turns_remaining"`
-	TokensRemain   int             `json:"tokens_remaining"`
-	Layout         *ctxplan.Layout `json:"layout,omitempty"`
+	Schema              string          `json:"schema"`
+	StreamID            string          `json:"stream_id"`
+	Intent              string          `json:"intent"`
+	ActiveIndex         int             `json:"active_index"`
+	TotalItems          int             `json:"total_items"`
+	CompletedItems      []ItemSummary   `json:"completed_items"`
+	CompletedItemsTotal int             `json:"completed_items_total"`
+	CurrentItem         *WorkItem       `json:"current_item,omitempty"`
+	NextItem            *WorkItem       `json:"next_item,omitempty"`
+	StreamPins          []string        `json:"stream_pins,omitempty"`
+	TurnsRemaining      int             `json:"turns_remaining"`
+	TokensRemain        int             `json:"tokens_remaining"`
+	Layout              *ctxplan.Layout `json:"layout,omitempty"`
 }
+
+// DefaultCarryoverReceiptWindow bounds the number of completed-item receipts a
+// carryover seed retains (most recent first-come order preserved). Long streams
+// read the count, not the receipts, to know how much landed.
+const DefaultCarryoverReceiptWindow = 32
 
 // BuildStreamLayout returns a recommended ctxplan.Layout configured specifically
 // for the Super Workstream's O(1) resident view.
@@ -198,19 +209,47 @@ func BuildCarryoverSeed(spec StreamSpec, state StreamState) StreamCarryoverSeed 
 
 // buildCarryoverSeedNormalized is BuildCarryoverSeed over an already-normalized
 // spec, so a decision step that already normalized does not copy the queue again.
+//
+// The completed-receipt list is windowed to the most recent
+// DefaultCarryoverReceiptWindow entries: the scan over the queue is the
+// unavoidable Theta(Q) read, but the seed's resident size stays O(K), so a
+// Q-item drain emits bounded seeds instead of one growing with every
+// boundary.
 func buildCarryoverSeedNormalized(norm StreamSpec, state StreamState) StreamCarryoverSeed {
-	completed := make([]ItemSummary, 0, len(state.Queue))
+	window := DefaultCarryoverReceiptWindow
+	if window < 1 {
+		window = 1
+	}
+	receipts := make([]ItemSummary, 0, window)
+	total := 0
+	rotate := 0
 	for _, it := range state.Queue {
-		if it.Status == ItemCompleted {
-			completed = append(completed, ItemSummary{
-				ID:            it.ID,
-				Title:         it.Title,
-				Lane:          it.Lane,
-				Status:        string(it.Status),
-				CommitSHA:     it.CommitSHA,
-				WitnessResult: it.WitnessResult,
-			})
+		if it.Status != ItemCompleted {
+			continue
 		}
+		summary := ItemSummary{
+			ID:            it.ID,
+			Title:         it.Title,
+			Lane:          it.Lane,
+			Status:        string(it.Status),
+			CommitSHA:     it.CommitSHA,
+			WitnessResult: it.WitnessResult,
+		}
+		total++
+		if len(receipts) < window {
+			receipts = append(receipts, summary)
+		} else {
+			// Ring buffer: drop the oldest receipt in favor of this one.
+			receipts[rotate] = summary
+			rotate = (rotate + 1) % window
+		}
+	}
+	if rotate != 0 {
+		// Restore chronological order after ring-buffer overwrite.
+		rotated := make([]ItemSummary, 0, window)
+		rotated = append(rotated, receipts[rotate:]...)
+		rotated = append(rotated, receipts[:rotate]...)
+		receipts = rotated
 	}
 
 	var cur *WorkItem
@@ -229,17 +268,18 @@ func buildCarryoverSeedNormalized(norm StreamSpec, state StreamState) StreamCarr
 	layout := BuildStreamLayout(len(norm.BasePins))
 
 	return StreamCarryoverSeed{
-		Schema:         CarryoverSchema,
-		StreamID:       state.StreamID,
-		Intent:         state.Intent,
-		ActiveIndex:    state.ActiveIndex,
-		TotalItems:     len(state.Queue),
-		CompletedItems: completed,
-		CurrentItem:    cur,
-		NextItem:       next,
-		StreamPins:     append([]string(nil), norm.BasePins...),
-		TurnsRemaining: turnsLeft,
-		TokensRemain:   tokensLeft,
-		Layout:         &layout,
+		Schema:              CarryoverSchema,
+		StreamID:            state.StreamID,
+		Intent:              state.Intent,
+		ActiveIndex:         state.ActiveIndex,
+		TotalItems:          len(state.Queue),
+		CompletedItems:      receipts,
+		CompletedItemsTotal: total,
+		CurrentItem:         cur,
+		NextItem:            next,
+		StreamPins:          append([]string(nil), norm.BasePins...),
+		TurnsRemaining:      turnsLeft,
+		TokensRemain:        tokensLeft,
+		Layout:              &layout,
 	}
 }

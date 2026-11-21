@@ -52,8 +52,15 @@ type StepResult struct {
 
 // DecideStep computes the single next action to progress the workstream.
 // It is pure and deterministic over spec, state, live leases, and taxonomy.
+// It normalizes the spec once (one queue copy). An executor that drains a
+// long queue should hold a Stepper instead, which normalizes once per
+// drain and keeps every subsequent step copy-free.
 func DecideStep(spec StreamSpec, state StreamState, holder string, liveLeases []laneadmit.Lease, tax laneadmit.Taxonomy) StepDecision {
-	norm := spec.NormalizedSpec()
+	return decideStepNormalized(spec.NormalizedSpec(), state, holder, liveLeases, tax)
+}
+
+// decideStepNormalized is DecideStep over an already-normalized spec.
+func decideStepNormalized(norm StreamSpec, state StreamState, holder string, liveLeases []laneadmit.Lease, tax laneadmit.Taxonomy) StepDecision {
 	safety := evaluateContextSafetyNormalized(norm, state)
 
 	if state.Closed {
@@ -63,6 +70,19 @@ func DecideStep(spec StreamSpec, state StreamState, holder string, liveLeases []
 			Safety:       safety,
 			Reason:       fmt.Sprintf("stream is already closed: %s", state.CloseReason),
 			NextSafeStep: "no action; stream terminated",
+		}
+	}
+
+	// Queue-length cap: navigation cost is at least linear in queue items
+	// (and a whole-queue copy per un-stepped decision is exactly linear), so
+	// an oversized queue is refused here rather than navigated.
+	if len(state.Queue) > norm.MaxItems {
+		return StepDecision{
+			Action:       ActionStreamHalted,
+			ItemIndex:    state.ActiveIndex,
+			Safety:       safety,
+			Reason:       fmt.Sprintf("queue length %d exceeds MaxItems cap %d: split the stream into bounded workstreams or raise max_items", len(state.Queue), norm.MaxItems),
+			NextSafeStep: "split the spec into bounded streams or state a higher max_items",
 		}
 	}
 

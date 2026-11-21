@@ -101,6 +101,25 @@ A Super Workstream maintains context safety through two mechanisms:
 This seed can be passed across conversational turns or subagent invocations, ensuring that
 Turn 1 of Task 4 has the same pristine context quality as Turn 1 of Task 1.
 
+`CompletedItems` is windowed to the most recent `DefaultCarryoverReceiptWindow` (32)
+receipts plus a total count (`CompletedItemsTotal`), so the seed stays O(K) in the
+receipt window regardless of how many items a long stream has already finished.
+
+### 3. Cost model and complexity bounds
+
+| Quantity | Bound | Basis |
+|---|---|---|
+| Context carried across items | O(1) in turns/transcript; O(receipt window) in completed receipts | `StreamCarryoverSeed` replaces the transcript, not the queue |
+| Resident state per stream | O(Q) | the queue |
+| One `DecideStep` (pure, per step) | Θ(Q) time and bytes | exactly one normalized queue copy |
+| One `Stepper.Step` after construction | O(1) in Q | the normalized spec is captured once by `NewStepper` |
+| Draining a Q-item stream via a `Stepper` | Θ(Q) allocation total | Q steps × O(1); measured flat at ~634 B/op for Q=1..10,000 (2026-11-21, `BenchmarkStepperStepQueueScaling`) vs ~1.85 MB/op per `DecideStep` at Q=10,000 |
+| Queue length | bounded by `MaxItems` (default `DefaultMaxItems` = 1000) | a queue over the cap fails `Validate` and halts navigation: split it into bounded workstreams or raise `max_items` explicitly |
+
+An executor that will step more than once (any drain loop) must hold a `Stepper`
+(`NewStepper(spec, holder)` then `Step(state, leases, tax)`); bare `DecideStep` per step
+re-normalizes the queue every call and turns the drain back into Θ(Q²).
+
 ---
 
 ## The Stream State Machine (`superstream.DecideStep`)

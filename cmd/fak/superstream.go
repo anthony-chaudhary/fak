@@ -109,6 +109,9 @@ func loadStreamSpec(path string) (superstream.StreamSpec, error) {
 	if err := json.Unmarshal(b, &spec); err != nil {
 		return superstream.StreamSpec{}, fmt.Errorf("parse spec %s: %w", path, err)
 	}
+	if err := spec.Validate(); err != nil {
+		return superstream.StreamSpec{}, fmt.Errorf("spec %s: %w", path, err)
+	}
 	return spec, nil
 }
 

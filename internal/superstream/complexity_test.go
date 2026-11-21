@@ -36,7 +36,10 @@ func TestDecideStepCopiesQueueOnce(t *testing.T) {
 		Intent:          "one-normalized-copy",
 		MaxTurnsTotal:   1 << 20,
 		MaxTurnsPerItem: 8,
-		Queue:           queue,
+		// Complexity gate: deliberately beyond the default MaxItems cap so
+		// the per-step cost of a huge queue is still measurable.
+		MaxItems: 1 << 20,
+		Queue:    queue,
 	}
 	state := StreamState{StreamID: spec.ID, Queue: queue}
 	tax := laneadmit.Taxonomy{Loaded: true}

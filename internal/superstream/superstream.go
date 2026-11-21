@@ -35,6 +35,7 @@
 package superstream
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -90,6 +91,9 @@ type StreamSpec struct {
 	MaxTurnsTotal   int        `json:"max_turns_total,omitempty"`
 	MaxTokensTotal  int        `json:"max_tokens_total,omitempty"`
 	MaxTurnsPerItem int        `json:"max_turns_per_item,omitempty"`
+	// MaxItems caps the queue length. Zero means the default cap applies; a
+	// spec that needs a longer queue states the bound explicitly.
+	MaxItems int `json:"max_items,omitempty"`
 }
 
 // Default limits if unspecified.
@@ -97,6 +101,11 @@ const (
 	DefaultMaxTurnsPerItem = 8
 	DefaultMaxTurnsTotal   = 40
 	DefaultMaxTokensTotal  = 250000
+	// DefaultMaxItems bounds one stream's queue so a drain cannot be an
+	// unbounded Theta(Q^2) sweep with unbounded Q. Anything larger should be
+	// split into multiple streams (that is the navigation contract) or the
+	// spec must state a higher cap explicitly.
+	DefaultMaxItems = 1000
 )
 
 // NormalizedSpec returns a copy of spec with default values populated where zero.
@@ -111,6 +120,9 @@ func (s StreamSpec) NormalizedSpec() StreamSpec {
 	if out.MaxTokensTotal <= 0 {
 		out.MaxTokensTotal = DefaultMaxTokensTotal
 	}
+	if out.MaxItems <= 0 {
+		out.MaxItems = DefaultMaxItems
+	}
 	out.Queue = make([]WorkItem, len(s.Queue))
 	for i, item := range s.Queue {
 		it := item
@@ -123,6 +135,22 @@ func (s StreamSpec) NormalizedSpec() StreamSpec {
 		out.Queue[i] = it
 	}
 	return out
+}
+
+// Validate reports whether the spec is navigable as written. The queue-length
+// cap is the one hard structural bound: a queue longer than MaxItems must be
+// split into multiple streams (or the spec must raise the cap explicitly),
+// because every bounded-budget drain over an oversized queue spends its
+// allocation budget re-touching items it can never execute.
+func (s StreamSpec) Validate() error {
+	maxItems := s.MaxItems
+	if maxItems <= 0 {
+		maxItems = DefaultMaxItems
+	}
+	if len(s.Queue) > maxItems {
+		return fmt.Errorf("queue length %d exceeds MaxItems cap %d: split the stream into bounded workstreams or raise max_items", len(s.Queue), maxItems)
+	}
+	return nil
 }
 
 // HeldLease tracks an active lane lease currently held by the stream.

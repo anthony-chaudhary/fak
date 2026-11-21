@@ -127,7 +127,10 @@ func BenchmarkDecideStepQueueScaling(b *testing.B) {
 			Intent:          "queue-scaling",
 			MaxTurnsTotal:   1 << 20,
 			MaxTurnsPerItem: 8,
-			Queue:           queue,
+			// Complexity probe: deliberately beyond the default MaxItems
+			// cap so the per-step cost of a huge queue stays measurable.
+			MaxItems: 1 << 20,
+			Queue:    queue,
 		}
 		state := StreamState{StreamID: spec.ID, Queue: queue}
 		tax := laneadmit.Taxonomy{Loaded: true}
@@ -137,6 +140,46 @@ func BenchmarkDecideStepQueueScaling(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				dec := DecideStep(spec, state, "scale-holder", nil, tax)
+				if dec.Action != ActionAcquireLease {
+					b.Fatalf("unexpected action: %s", dec.Action)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkStepperStepQueueScaling shows the amortized alternative: one
+// normalization per drain means per-step bytes stay flat as Q grows, so a
+// full drain is O(Q) allocation total rather than O(Q^2).
+func BenchmarkStepperStepQueueScaling(b *testing.B) {
+	for _, n := range []int{1, 10, 100, 1000, 10000} {
+		queue := make([]WorkItem, n)
+		for i := range queue {
+			queue[i] = WorkItem{
+				ID:     fmt.Sprintf("item-%d", i),
+				Lane:   fmt.Sprintf("lane-%d", i),
+				Status: ItemPending,
+			}
+		}
+		spec := StreamSpec{
+			ID:              "scale-stream",
+			Intent:          "queue-scaling",
+			MaxTurnsTotal:   1 << 20,
+			MaxTurnsPerItem: 8,
+			// Complexity probe: deliberately beyond the default MaxItems
+			// cap so the per-step cost of a huge queue stays measurable.
+			MaxItems: 1 << 20,
+			Queue:    queue,
+		}
+		state := StreamState{StreamID: spec.ID, Queue: queue}
+		tax := laneadmit.Taxonomy{Loaded: true}
+		stepper := NewStepper(spec, "scale-holder")
+
+		b.Run(fmt.Sprintf("queue_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				dec := stepper.Step(state, nil, tax)
 				if dec.Action != ActionAcquireLease {
 					b.Fatalf("unexpected action: %s", dec.Action)
 				}
