@@ -110,3 +110,65 @@ func TestResidentBytesRatioCountsObservedRequants(t *testing.T) {
 		t.Fatalf("resident %d, want file %d + 1000", r.ResidentWeightBytes, r.FileWeightBytes)
 	}
 }
+
+// fak-test:runtime fast est=100ms
+func TestResidentBytesRatioTracksResidentInventory(t *testing.T) {
+	compute.ResetWeightRequantsForTest()
+	t.Cleanup(compute.ResetWeightRequantsForTest)
+
+	// A native load with NO requant ledger entries: the ledger-derived resident bytes are
+	// just the file bytes, so any ratio above 1.00 must come from the resident inventory
+	// (total_resident_bytes), not the ledger.
+	t.Run("ratio tracks inventory", func(t *testing.T) {
+		const out, in, nblk = 760, 256, 1
+		inventory := int64(out) * int64(nblk*q4kBlockBytes) // 109440 B resident
+		file := int64(100000)
+		m := &Model{q4kw: map[string]*q4kTensor{
+			"model.layers.0.mlp.down_proj.weight": {out: out, in: in, nblk: nblk, raw: make([]byte, out*nblk*q4kBlockBytes)},
+		}}
+		m.SetFileWeightBytes(file)
+
+		r := m.WeightResidency(residencyBackend{Backend: compute.Default(), native: true})
+
+		if got := m.ResidentReport().TotalResidentBytes; got != inventory {
+			t.Fatalf("inventory = %d, want %d", got, inventory)
+		}
+		if r.ResidentWeightBytes != inventory {
+			t.Fatalf("resident %d, want inventory %d (not the ledger's %d)", r.ResidentWeightBytes, inventory, file)
+		}
+		wantRatio := float64(inventory) / float64(file) // 1.0944
+		if diff := r.Ratio - wantRatio; diff < -0.001 || diff > 0.001 {
+			t.Fatalf("ratio %.6f, want %.6f (±0.001)", r.Ratio, wantRatio)
+		}
+		if r.Degraded {
+			t.Fatalf("1.094x load degraded: %+v", r)
+		}
+		if len(r.RequantizedTypes) != 0 {
+			t.Fatalf("requantized types = %v, want empty", r.RequantizedTypes)
+		}
+	})
+
+	// The alarm must fire from the inventory, not just the ledger: a ~1.6x resident
+	// inventory with an empty requant ledger is still degraded.
+	t.Run("alarm fires from inventory", func(t *testing.T) {
+		const out, in, nblk = 1600, 256, 1
+		inventory := int64(out) * int64(nblk*q4kBlockBytes) // 230400 B resident
+		file := int64(144000)
+		m := &Model{q4kw: map[string]*q4kTensor{
+			"model.layers.0.mlp.down_proj.weight": {out: out, in: in, nblk: nblk, raw: make([]byte, out*nblk*q4kBlockBytes)},
+		}}
+		m.SetFileWeightBytes(file)
+
+		r := m.WeightResidency(residencyBackend{Backend: compute.Default(), native: true})
+
+		if !r.Degraded || r.Ratio <= ResidentBytesRatioAlarm {
+			t.Fatalf("1.6x inventory load not degraded: %+v", r)
+		}
+		if r.ResidentWeightBytes != inventory {
+			t.Fatalf("resident %d, want inventory %d", r.ResidentWeightBytes, inventory)
+		}
+		if len(r.RequantizedTypes) != 0 {
+			t.Fatalf("requantized types = %v, want empty", r.RequantizedTypes)
+		}
+	})
+}

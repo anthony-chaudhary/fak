@@ -120,7 +120,21 @@ func (m *Model) WeightResidency(be compute.Backend) WeightResidencyReceipt {
 	if m == nil {
 		return NewWeightResidencyReceipt(0, nil)
 	}
-	return NewWeightResidencyReceipt(m.fileWeightBytes, mergeWeightRequants(m.PlannedWeightRequants(be), compute.WeightRequantSnapshot()))
+	r := NewWeightResidencyReceipt(m.fileWeightBytes, mergeWeightRequants(m.PlannedWeightRequants(be), compute.WeightRequantSnapshot()))
+	// Reconcile with the actual resident inventory: layout-forced Q8 expansions (e.g.
+	// ssm_out re-expanded to Q8_0) are resident but absent from the requant ledger, so the
+	// ledger-derived resident bytes under-counts them. The resident store report is the
+	// ground truth for what is actually resident, so the ratio must track
+	// total_resident_bytes. Use the max so synthetic models with no resident raw bytes
+	// (TotalResidentBytes == 0) keep the requant-derived value.
+	if total := m.residentStoreReport().TotalResidentBytes; total > r.ResidentWeightBytes {
+		r.ResidentWeightBytes = total
+		if r.FileWeightBytes > 0 {
+			r.Ratio = float64(r.ResidentWeightBytes) / float64(r.FileWeightBytes)
+		}
+		r.Degraded = r.Ratio > ResidentBytesRatioAlarm
+	}
+	return r
 }
 
 func mergeWeightRequants(planned, observed []compute.WeightRequant) []compute.WeightRequant {
