@@ -18,10 +18,11 @@ import (
 // the ~2 TB the kernel will hand out (evicting clean cache on demand). Using Freeram made the
 // GLM-5.2 expert offload (~417 GiB host) wrongly refuse on a 2 TB box whose Freeram had dropped
 // to ~100 GiB after staging the 434 GB shards. Fall back to Sysinfo (Freeram) only when
-// /proc/meminfo is unreadable.
+// /proc/meminfo is unreadable. Either figure is then clamped to the process's cgroup headroom
+// (memory.max - memory.current), since /proc/meminfo reports the whole box inside a container.
 func hostSystemMemory() (total, free int64, known bool) {
 	if t, a, ok := procMeminfoAvailable(); ok {
-		return t, a, true
+		return t, clampFreeToCgroup(a, os.DirFS("/")), true
 	}
 	var si syscall.Sysinfo_t
 	if err := syscall.Sysinfo(&si); err != nil {
@@ -32,7 +33,7 @@ func hostSystemMemory() (total, free int64, known bool) {
 		unit = 1
 	}
 	total = scaleHostMem(uint64(si.Totalram), unit)
-	free = scaleHostMem(uint64(si.Freeram), unit)
+	free = clampFreeToCgroup(scaleHostMem(uint64(si.Freeram), unit), os.DirFS("/"))
 	return total, free, total > 0
 }
 
