@@ -230,6 +230,10 @@ func cmdChat(argv []string) {
 			autoRouterKey = resolveRouterAPIKey("", false, true, effectiveBaseURL)
 			if !modelExplicit && routerModel != "" && routerModel != "mock" {
 				*cf.model = routerModel
+			} else if !modelExplicit {
+				if served := routerModelWithKey(effectiveBaseURL, autoRouterKey); served != "" && served != "mock" {
+					*cf.model = served
+				}
 			}
 			fmt.Fprintf(os.Stderr, "fak chat: connected to gateway at %s\n", origin)
 		} else {
@@ -859,8 +863,39 @@ func detectServerModel(baseURL string) string {
 	return probeServerModels(client, modelsURL)
 }
 
+// routerModelWithKey lists the auto-connected router's served models with the
+// router key that origin just proved it holds. The keyless health probe cannot
+// see a gateway whose /v1/models requires a bearer (the live fak router), which
+// left the hard-coded --model default in place: a model no router rung serves.
+// No key means no request. Redirects are refused so the key never leaves the
+// origin that answered the possession challenge.
+func routerModelWithKey(baseURL, key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	return probeServerModelsWithKey(client, strings.TrimRight(baseURL, "/")+"/models", key)
+}
+
 func probeServerModels(client *http.Client, modelsURL string) string {
-	resp, err := client.Get(modelsURL)
+	return probeServerModelsWithKey(client, modelsURL, "")
+}
+
+func probeServerModelsWithKey(client *http.Client, modelsURL, key string) string {
+	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return ""
+	}
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()

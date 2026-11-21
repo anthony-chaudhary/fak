@@ -249,6 +249,11 @@ func resolveAgentEndpoint(af *agentFlags, baseURLExplicit, providerExplicit, mod
 				*af.model = localModel
 			}
 			routerKey := resolveRouterAPIKey("", false, true, effective)
+			if !modelExplicit && (localModel == "" || localModel == "mock") {
+				if served := routerModelWithKey(effective, routerKey); served != "" && served != "mock" {
+					*af.model = served
+				}
+			}
 			fmt.Fprintf(stderr, "fak agent: auto-connected to the fak router at %s (model: %s)\n", effective, *af.model)
 			return agentEndpoint{baseURL: effective, routerKey: routerKey, routerProbed: true}
 		}

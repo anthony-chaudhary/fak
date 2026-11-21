@@ -326,6 +326,97 @@ func TestAgentEndpointResolverUsesPairedNode(t *testing.T) {
 	}
 }
 
+// The live fak router's /healthz names no model and its /v1/models requires a
+// bearer, so the keyless probe discovers nothing. Once the saved key is proven,
+// the agent must list models WITH that key and adopt the first served id;
+// otherwise it keeps the hard-coded default, which no router rung serves.
+func TestAgentEndpointResolverDiscoversModelWithProvenKey(t *testing.T) {
+	isolateAgentEndpointEnv(t)
+	const key = "paired-gateway-key"
+	var keylessModelsHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			if challenge := r.Header.Get(routerAuthChallengeHeader); challenge != "" {
+				nonce, err := base64.StdEncoding.DecodeString(challenge)
+				if err != nil || len(nonce) != 32 { //boundarylint:ignore CHANGE_DETECTOR_TEST router auth challenge nonce is a fixed 32-byte protocol width
+					http.Error(w, "invalid challenge", http.StatusBadRequest)
+					return
+				}
+				mac := hmac.New(sha256.New, []byte(key))
+				_, _ = mac.Write([]byte(routerAuthProofDomain))
+				_, _ = mac.Write(nonce)
+				w.Header().Set(routerAuthProofHeader, base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"ready":true,"route_id":"local-engine"}`)
+		case "/v1/models":
+			if r.Header.Get("Authorization") != "Bearer "+key {
+				keylessModelsHits++
+				http.Error(w, "invalid gateway key", http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"qwen/qwen3.8-27b"},{"id":"boostrun.large"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	if err := nodeWriteCfg(nodeCfg{URL: srv.URL, Key: key}); err != nil {
+		t.Fatalf("nodeWriteCfg: %v", err)
+	}
+
+	fs, af := newAgentFlagSet()
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	ep := agentEndpointResolver(af, false, false, false, io.Discard)
+	if ep.baseURL != srv.URL+"/v1" || ep.routerKey != key {
+		t.Fatalf("baseURL = %q, key verified = %t; want %s/v1, true", ep.baseURL, ep.routerKey == key, srv.URL)
+	}
+	if *af.model != "qwen/qwen3.8-27b" {
+		t.Fatalf("model = %q, want the first id the router serves to the proven key", *af.model)
+	}
+	if keylessModelsHits == 0 {
+		t.Fatal("fixture never saw the keyless probe; the test no longer reproduces the live router")
+	}
+
+	// An explicit --model is never overridden by authenticated discovery.
+	fs, af = newAgentFlagSet()
+	if err := fs.Parse([]string{"--model", "my-model"}); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	_ = agentEndpointResolver(af, false, false, true, io.Discard)
+	if *af.model != "my-model" {
+		t.Fatalf("model = %q, want the explicit flag preserved", *af.model)
+	}
+}
+
+func TestRouterModelsWithKeyRefusesRedirect(t *testing.T) {
+	var leaked bool
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leaked = true
+		}
+		_, _ = io.WriteString(w, `{"data":[{"id":"sink-model"}]}`)
+	}))
+	defer sink.Close()
+	redirecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, sink.URL+"/v1/models", http.StatusTemporaryRedirect)
+	}))
+	defer redirecting.Close()
+	if got := routerModelWithKey(redirecting.URL+"/v1", "secret"); got != "" {
+		t.Fatalf("routerModelWithKey followed a redirect and returned %q", got)
+	}
+	if leaked {
+		t.Fatal("the router key was forwarded through a redirect")
+	}
+	if got := routerModelWithKey(redirecting.URL+"/v1", ""); got != "" {
+		t.Fatalf("routerModelWithKey with no key = %q, want empty (no keyless retry)", got)
+	}
+}
+
 func TestAgentPairedNodePrecedenceAndDown(t *testing.T) {
 	isolateAgentEndpointEnv(t)
 	const paired = "http://127.0.0.1:0"
