@@ -186,10 +186,15 @@ func TestSplitKernelDeviceEngineMatchesHostCPU(t *testing.T) {
 	if be.uploads[compute.Q6_K] != 0 {
 		t.Fatalf("split device engine staged a Q6_K down projection (uploads=%d), want 0 (down stays host-resident)", be.uploads[compute.Q6_K])
 	}
-	// The routed expert's weights must be staged on the device under the Q4_K descriptor prefix.
+	// The routed expert's gate/up must be staged on the device as Q4_K — TRANSIENTLY: a ring-less
+	// offload session frees each stage after its call and never memoizes it in halW, so device
+	// residency cannot grow with layer count (ds41-streamed-arm-device-oom-layer33-20261121).
+	if be.uploads[compute.Q4_K] != 2 {
+		t.Errorf("device engine staged %d Q4_K gate/up projections, want 2", be.uploads[compute.Q4_K])
+	}
 	for _, proj := range []string{"gate_proj.weight", "up_proj.weight"} {
-		if _, ok := s.halW["q4k:"+expertName(0, 0, proj)]; !ok {
-			t.Errorf("device engine did not stage %s on the backend", proj)
+		if _, ok := s.halW["q4k:"+expertName(0, 0, proj)]; ok {
+			t.Errorf("ring-less offload session memoized %s in halW (unbounded routed-expert residency)", proj)
 		}
 	}
 	// The reachability counter lands on the same session, so an operator surface can attribute the
@@ -327,10 +332,14 @@ func TestSplitDeviceEngineDoesNotUploadOffloadedExperts(t *testing.T) {
 			t.Fatalf("offload path staged %q resident on the device — residency must stay host-routed", key)
 		}
 	}
-	// The gate/up weights ARE staged: the #13128 engine intentionally computes them device-side.
+	// The gate/up weights ARE staged: the #13128 engine intentionally computes them device-side,
+	// but transiently — never memoized in halW on a ring-less offload session (ds41 layer-33 OOM).
+	if be.uploads[compute.Q4_K] != 2 {
+		t.Errorf("split device engine staged %d Q4_K gate/up projections, want 2 (the compute did not move)", be.uploads[compute.Q4_K])
+	}
 	for _, proj := range []string{"gate_proj.weight", "up_proj.weight"} {
-		if _, ok := s.halW["q4k:"+expertName(0, 0, proj)]; !ok {
-			t.Errorf("split device engine did not stage %s (the compute did not move)", proj)
+		if _, ok := s.halW["q4k:"+expertName(0, 0, proj)]; ok {
+			t.Errorf("ring-less offload session memoized %s in halW (unbounded routed-expert residency)", proj)
 		}
 	}
 }

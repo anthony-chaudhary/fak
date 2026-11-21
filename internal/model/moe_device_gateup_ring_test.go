@@ -491,3 +491,116 @@ func TestExpertDownRingLifetime(t *testing.T) {
 		}
 	})
 }
+
+// expertSeamMultiLayerModel extends the tiny Q4_K expert fixture to `layers` layers of
+// `experts` routed experts each, so a regression of the per-layer growth is visible.
+func expertSeamMultiLayerModel(t *testing.T, hidden, layers, experts int) *Model {
+	t.Helper()
+	m := expertRingTestModel(t, hidden, experts)
+	for l := 1; l < layers; l++ {
+		for e := 0; e < experts; e++ {
+			for i, suffix := range []string{"gate_proj.weight", "up_proj.weight", "down_proj.weight"} {
+				m.q4kw[expertName(l, e, suffix)] = &q4kTensor{out: hidden, in: hidden, nblk: hidden / qkK, raw: buildRawQ4K(t, hidden, hidden, 1000+l*100+e*3+i)}
+			}
+		}
+	}
+	return m
+}
+
+func halRoutedExpertKeys(s *Session) int {
+	n := 0
+	for k := range s.halW {
+		if isRoutedExpertWeight(k) {
+			n++
+		}
+	}
+	return n
+}
+
+// fak-test:runtime medium est=2s lane=default
+// fak-test:justify Pins ds41-streamed-arm-device-oom-layer33: a ring-less cpu-offload session must not memoize routed experts on the device.
+//
+// TestExpertSeamCPUOffloadNoRingFreesPerCall is the GPU-free witness for the aegis
+// ds41 layer-33 OOM: on a --cpu-offload-experts session with no routed-expert ring
+// (ExpertRingBytes == 0), every gate/up/down stage the V4.1 device seam makes must be
+// freed when the call releases it, so live routed-expert device bytes stay bounded by
+// one in-flight expert regardless of how many (layer, expert) pairs have run. Pre-fix
+// the ring-less fallback memoized each projection in halW with a no-op release, so the
+// recorder's Free counts stayed 0 and halW grew by 3 entries per distinct expert.
+func TestExpertSeamCPUOffloadNoRingFreesPerCall(t *testing.T) {
+	if compute.Default().Name() != "cpu-ref" || compute.Default().Caps().DeviceMemory {
+		t.Fatal("requires the actual cpu-ref backend; recorder is software evidence only")
+	}
+	const H, L, E = 256, 3, 2
+	m := expertSeamMultiLayerModel(t, H, L, E)
+	x := expertRingTestInput(H)
+
+	run := func(t *testing.T, s *Session, layer, expert int) []float32 {
+		t.Helper()
+		gate, up, down := expertName(layer, expert, "gate_proj.weight"), expertName(layer, expert, "up_proj.weight"), expertName(layer, expert, "down_proj.weight")
+		fused, ok := q4kExpertInputHALWithLimitAndBF16(s, gate, up, x, H, H, 0, true, layer)
+		if !ok {
+			t.Fatalf("gate/up seam declined for layer %d expert %d", layer, expert)
+		}
+		out, ok := q4kExpertDownHALWithBF16(s, down, fused, H, H, true, layer)
+		if !ok {
+			t.Fatalf("down seam declined for layer %d expert %d", layer, expert)
+		}
+		return append([]float32(nil), out...)
+	}
+
+	// Historical control: a non-offload, ring-less session keeps the memoized path, so
+	// its outputs are the arithmetic reference and its halW holds every projection.
+	ref, refBackend := gateUpRingSession(m, 0)
+	want := map[[2]int][]float32{}
+	for l := 0; l < L; l++ {
+		for e := 0; e < E; e++ {
+			want[[2]int{l, e}] = run(t, ref, l, e)
+		}
+	}
+	if got := halRoutedExpertKeys(ref); got != 3*L*E {
+		t.Errorf("non-offload control memoized %d routed projections, want %d (historical behavior changed)", got, 3*L*E)
+	}
+	if refBackend.weightUploads != 3*L*E {
+		t.Errorf("non-offload control uploads=%d, want %d (memoized once each)", refBackend.weightUploads, 3*L*E)
+	}
+	ref.Close()
+	gateUpRingFreedOnce(t, refBackend)
+
+	s, b := gateUpRingSession(m, 0)
+	s.CPUOffloadExperts = true
+	t.Cleanup(s.Close)
+	calls := 0
+	// Two passes: the second revisits every (layer, expert) and must re-upload, not hit a memo.
+	for pass := 0; pass < 2; pass++ {
+		for l := 0; l < L; l++ {
+			for e := 0; e < E; e++ {
+				got := run(t, s, l, e)
+				calls++
+				for i, v := range want[[2]int{l, e}] {
+					if math.Float32bits(got[i]) != math.Float32bits(v) {
+						t.Fatalf("pass %d layer %d expert %d: transient staging changed arithmetic at %d", pass, l, e, i)
+					}
+				}
+				live := 0
+				for _, n := range b.weights {
+					if n != 1 {
+						live++
+					}
+				}
+				if live != 0 {
+					t.Fatalf("after call %d (layer %d expert %d): %d routed-expert device weights still live, want 0 (per-layer growth)", calls, l, e, live)
+				}
+				if n := halRoutedExpertKeys(s); n != 0 {
+					t.Fatalf("after call %d: halW memoized %d routed-expert projections on a ring-less cpu-offload session", calls, n)
+				}
+			}
+		}
+	}
+	if b.weightUploads != 3*calls {
+		t.Errorf("weight uploads=%d, want %d (one gate+up+down upload per call, not memoized)", b.weightUploads, 3*calls)
+	}
+	if b.freedDispatch != 0 || s.expertRing != nil {
+		t.Errorf("freedDispatch=%d ring=%v; want no freed-weight dispatch and no ring allocation", b.freedDispatch, s.expertRing != nil)
+	}
+}

@@ -107,6 +107,9 @@ func (s *Session) expertInputDeviceWeight(name string) (compute.Tensor, func(), 
 	// stage-and-hold discipline as expertSwiGLUHAL, including reentrant shared spans.
 	r := s.routedExpertRing(name)
 	if r == nil {
+		if s.cpuOffloadTransientExpert(name) {
+			return s.transientExpertDeviceWeight(name, w)
+		}
 		return stage(), func() {}, true
 	}
 	done := s.ringEnter(r)
@@ -174,6 +177,9 @@ func (s *Session) q4kExpertDownDeviceWeight(downName string) (compute.Tensor, fu
 	// and pinning in one shared span, just like gate/up acquisition above.
 	r := s.routedExpertRing(downName)
 	if r == nil {
+		if s.cpuOffloadTransientExpert(downName) {
+			return s.transientExpertDeviceWeight(downName, w)
+		}
 		return stage(), func() {}, true
 	}
 	done := s.ringEnter(r)
@@ -185,6 +191,70 @@ func (s *Session) q4kExpertDownDeviceWeight(downName string) (compute.Tensor, fu
 		done := s.ringEnter(r)
 		defer done()
 		r.release(key)
+	}, true
+}
+
+// cpuOffloadTransientExpert reports whether a ring-less routed-expert stage must be
+// TRANSIENT rather than memoized. A --cpu-offload-experts session has deliberately placed
+// the routed expert bytes on the host (hostOffloadWeight) and its load-time fit charges
+// them only as host rows; with no declared ring (ExpertRingBytes == 0) the memoizing
+// fallback in weightHALStagedBounded would keep every activated (layer, expert)
+// projection in halW until Close, so device residency grows with layer count until the
+// card OOMs (ds41-streamed-arm-device-oom-layer33-20261121: ~470 MB/layer, layer 33 on a
+// 16 GB RTX 5080). Non-offload sessions keep the historical memoized path unchanged.
+func (s *Session) cpuOffloadTransientExpert(name string) bool {
+	return s != nil && s.CPUOffloadExperts && s.Backend != nil && isRoutedExpertWeight(name)
+}
+
+// transientExpertDeviceWeight uploads one admitted routed-expert projection for a single
+// in-flight call and returns a release callback that Frees it. The handle is never stored
+// in halW, so live routed-expert device bytes are bounded by the in-flight picks (one
+// expert's gate+up+down per call), independent of layer count, at the cost of one H2D
+// copy per pick — which is what the offload plan already assumes. It builds the SAME host
+// tensor and device dtype the memoized tiers (weightHALQ4K, weightHALKQuant, checkpoint
+// staging) would, so the arithmetic is unchanged; it deliberately skips weightHALQ4K's
+// single-residency host-copy release, because the host copy is authoritative here.
+func (s *Session) transientExpertDeviceWeight(name string, w expertWeight) (compute.Tensor, func(), bool) {
+	var mk func() compute.Tensor
+	var dt compute.Dtype
+	switch {
+	case w.q4 != nil:
+		qt := w.q4
+		dt = compute.Q4_K
+		mk = func() compute.Tensor {
+			raw, err := qt.materializeRaw()
+			if err != nil {
+				panic("model: lazy Q4_K read " + name + ": " + err.Error())
+			}
+			return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, raw)
+		}
+	case w.kq != nil:
+		qt := w.kq
+		desc, ok := LookupQuantDescriptor(qt.kind)
+		if !ok {
+			return compute.Tensor{}, nil, false
+		}
+		dt = desc.Dtype()
+		mk = func() compute.Tensor {
+			raw, err := qt.materializeRaw()
+			if err != nil {
+				panic("model: lazy " + qt.kind.String() + " read " + name + ": " + err.Error())
+			}
+			return desc.NewHostTensor(qt.out, qt.in, raw)
+		}
+	default:
+		if w.ck == nil {
+			return compute.Tensor{}, nil, false
+		}
+		mk, dt = w.ck.mk, w.ck.dt
+	}
+	t := s.Backend.Upload(mk(), dt)
+	freed := false
+	return t, func() {
+		if !freed {
+			freed = true
+			s.Backend.Free(t)
+		}
 	}, true
 }
 
