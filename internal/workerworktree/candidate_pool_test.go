@@ -252,6 +252,90 @@ func TestCandidatePoolCapBoundsKeptCheckouts(t *testing.T) {
 	}
 }
 
+// fak-test:runtime medium est=95s lane=default
+func TestCandidatePoolReleaseDrainsBurstOverflow(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root, parent := newSiblingTopologyRepo(t)
+	hook := func(dir string) (bool, string) { return true, "" }
+
+	// The end state of a concurrent cold burst: every creator observed room
+	// before any of them registered a checkout, so the pool holds far more kept
+	// checkouts than the cap. Reproduce it directly — two held sessions at cap,
+	// plus the extras the burst parked.
+	first := newTopologyCandidateSession(root, defaultGit)
+	if ok, detail := first.verify("HEAD", "", hook); !ok {
+		t.Fatalf("first verify: %s", detail)
+	}
+	defer first.close()
+	second := newTopologyCandidateSession(root, defaultGit)
+	if ok, detail := second.verify("HEAD", "", hook); !ok {
+		t.Fatalf("second verify: %s", detail)
+	}
+	defer second.close()
+
+	pattern := topologyCandidatePoolPattern()
+	for i := 0; i < 3; i++ {
+		extra := filepath.Join(parent, strings.Replace(pattern, "*", "burst"+strconv.Itoa(i)+"-", 1))
+		mustGit(t, root, "-c", "core.longpaths=true", "worktree", "add", "--detach", extra, "HEAD")
+	}
+	if got := livePoolCount(root, parent, defaultGit); got != TopologyCandidatePoolCap+3 {
+		t.Fatalf("burst live pool count = %d, want %d", got, TopologyCandidatePoolCap+3)
+	}
+
+	// Releasing one holder drains what it can exclude but must never touch a
+	// checkout a peer still holds.
+	held := first.dir
+	second.close()
+	if _, err := os.Stat(held); err != nil {
+		t.Fatalf("a peer's held pooled checkout %q must survive another session's drain: %v", held, err)
+	}
+	if got := livePoolCount(root, parent, defaultGit); got >= TopologyCandidatePoolCap+3 {
+		t.Fatalf("releasing a holder drained nothing: live pool count = %d", got)
+	}
+
+	// Once every holder has released, the pool is back at its cap: retention
+	// above the burst's width is never permanent.
+	first.close()
+	if got := livePoolCount(root, parent, defaultGit); got != TopologyCandidatePoolCap {
+		t.Fatalf("live pool count after release = %d, want %d (burst extras retained)", got, TopologyCandidatePoolCap)
+	}
+}
+
+// fak-test:runtime medium est=60s lane=default
+func TestCreatePooledRefusesBeyondCap(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root, parent := newSiblingTopologyRepo(t)
+	hook := func(dir string) (bool, string) { return true, "" }
+	first := newTopologyCandidateSession(root, defaultGit)
+	defer first.close()
+	if ok, detail := first.verify("HEAD", "", hook); !ok {
+		t.Fatalf("first verify: %s", detail)
+	}
+	second := newTopologyCandidateSession(root, defaultGit)
+	defer second.close()
+	if ok, detail := second.verify("HEAD", "", hook); !ok {
+		t.Fatalf("second verify: %s", detail)
+	}
+	if got := livePoolCount(root, parent, defaultGit); got != TopologyCandidatePoolCap {
+		t.Fatalf("live pool count = %d, want %d", got, TopologyCandidatePoolCap)
+	}
+
+	// A caller that already passed the pre-materialization cap check (the burst
+	// race) must still be refused at the last moment, so it parks no extra kept
+	// checkout and falls back to a transient one.
+	late := newTopologyCandidateSession(root, defaultGit)
+	if ok, hard := late.createPooled(parent, "HEAD"); ok || hard != "" {
+		t.Fatalf("createPooled parked a kept checkout beyond the cap: ok=%v hard=%q", ok, hard)
+	}
+	if got := livePoolCount(root, parent, defaultGit); got != TopologyCandidatePoolCap {
+		t.Fatalf("live pool count after refused create = %d, want %d", got, TopologyCandidatePoolCap)
+	}
+}
+
 // fak-test:runtime medium est=35s lane=default
 func TestCandidatePoolDisabledByEnv(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {

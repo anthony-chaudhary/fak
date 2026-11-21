@@ -231,6 +231,12 @@ const (
 	// creation lock, so concurrent cold lands never queue on each other.
 	TopologyCandidatePoolCap = 2
 
+	// poolDrainPerRelease bounds how many excess kept checkouts one release
+	// sheds. A parked burst is drained over several releases instead of one
+	// land's close paying for every extra checkout at once; the pool still
+	// converges on the cap.
+	poolDrainPerRelease = 2
+
 	// CandidatePoolEnv disables the pool: values 0, false, off (case-insensitive)
 	// make every candidate transient again (created fresh, removed on close,
 	// collected by the owner-aware sweep). Anything else, including unset,
@@ -537,6 +543,16 @@ func (s *topologyCandidateSession) createPooled(parent, ref string) (bool, strin
 	if !ok {
 		return false, ""
 	}
+	// The caller read the cap before this session materialized anything, and a
+	// burst of concurrent lands all read it at the same moment. Re-read it here,
+	// where the remaining window is a lock acquisition instead of a whole
+	// checkout, so a burst parks a handful of extras at worst rather than one
+	// kept checkout per concurrent land (measured: 86 parked against this cap).
+	if s.poolPrefix != witnessSnapshotPoolPrefix &&
+		livePoolCountPrefix(s.root, parent, s.git, s.poolName()) >= TopologyCandidatePoolCap {
+		releaseCandidateSidecar(sidecar)
+		return false, ""
+	}
 	if s.poolPrefix == witnessSnapshotPoolPrefix {
 		if err := beginWitnessSnapshotMutation(candDir); err != nil {
 			releaseCandidateSidecar(sidecar)
@@ -730,6 +746,14 @@ func trimPoolExcess(root, parent string, git GitRunner) {
 	trimPoolExcessPrefix(root, parent, git, topologyCandidatePoolPrefix)
 }
 func trimPoolExcessPrefix(root, parent string, git GitRunner, prefix string) {
+	trimPoolExcessPrefixBounded(root, parent, git, prefix, -1)
+}
+
+// trimPoolExcessPrefixBounded is trimPoolExcessPrefix with a removal budget
+// (-1 = unbounded). The release path passes a budget so that shedding a parked
+// burst never turns one land's close into a multi-minute delete of every extra
+// checkout at once; repeated releases still converge on the cap.
+func trimPoolExcessPrefixBounded(root, parent string, git GitRunner, prefix string, budget int) {
 	if parent == "" {
 		parent = os.TempDir()
 	}
@@ -768,7 +792,11 @@ func trimPoolExcessPrefix(root, parent string, git GitRunner, prefix string) {
 		return
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].mod.Before(dirs[j].mod) })
+	removed := 0
 	for _, d := range dirs[:len(dirs)-TopologyCandidatePoolCap] {
+		if budget >= 0 && removed >= budget {
+			return
+		}
 		sidecar, ok := lockCandidateSidecar(d.path)
 		if !ok {
 			continue
@@ -780,6 +808,7 @@ func trimPoolExcessPrefix(root, parent string, git GitRunner, prefix string) {
 		}
 		releaseCandidatePool(lock)
 		removeCandidateWithRegistration(root, d.path, git)
+		removed++
 	}
 }
 
@@ -859,17 +888,29 @@ func (s *topologyCandidateSession) moveTo(ref string) bool {
 // close releases the session's checkout: a pooled one is kept (lock released)
 // for a later land to adopt, a transient one is removed. Safe to call more
 // than once.
+//
+// The release is also the pool's drain point. A burst of concurrent lands can
+// each observe room under TopologyCandidatePoolCap before any of them
+// registers a checkout, so the burst parks far more kept checkouts than the
+// cap; while they are in flight every creator's trim can only skip them (their
+// admin flocks are held). Releasing is the first moment an over-cap pool can
+// shed extras, so trimming here returns the pool to its cap instead of
+// plateauing at the burst's width for the rest of the host's life.
 func (s *topologyCandidateSession) close() {
 	if s == nil || s.dir == "" {
 		return
 	}
+	dir := s.dir
 	if s.pooled {
 		releaseCandidatePool(s.poolLock)
 		s.poolLock = nil
 		s.dir = ""
+		if s.poolPrefix != witnessSnapshotPoolPrefix {
+			trimPoolExcessPrefixBounded(s.root, filepath.Dir(dir), s.git, s.poolName(), poolDrainPerRelease)
+		}
 		return
 	}
-	cleanupTopologyCandidate(s.root, s.dir, s.git)
+	cleanupTopologyCandidate(s.root, dir, s.git)
 	s.dir = ""
 }
 
