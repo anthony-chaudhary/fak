@@ -151,6 +151,24 @@ func guardCommonWorkspace(wt string) string {
 	return filepath.Dir(common)
 }
 func sameHostPath(a, b string) bool { return strings.EqualFold(filepath.Clean(a), filepath.Clean(b)) }
+
+// hostPathIdentity canonicalizes a caller-supplied path for identity comparison.
+// A relative --root ("." or "..\fak-private") names the same repository as the
+// absolute worktree owner, so a guard comparing `--root` against an owner root
+// must compare absolute, symlink-resolved paths or it refuses a correct
+// invocation as a cross-repository one. Unresolvable paths fall back to the
+// absolute spelling; sameHostPath's own semantics stay unchanged for its callers.
+func hostPathIdentity(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+		abs = resolved
+	}
+	return filepath.Clean(abs)
+}
+
 func relativeWithin(root, path string) string {
 	if strings.TrimSpace(path) == "" {
 		return ""

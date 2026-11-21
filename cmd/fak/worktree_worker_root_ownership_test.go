@@ -108,6 +108,80 @@ func TestWorkerLandDerivesTrunkFromTheWorktreeNotTheCwd(t *testing.T) {
 	}
 }
 
+// fak-test:runtime medium est=45s lane=default
+func TestWorkerLandRelativeRootOfTheOwningRepositoryIsNotAMismatch(t *testing.T) {
+	repoB, laneB, headB := landRootFixture(t, "repo-b", true)
+
+	// fak-flow land passes --root "." from the owning repository's root. Witnessed
+	// 2026-11-21: "root=. worktree_owner=C:\work\fak-private" was refused as a
+	// cross-repository land although both name the same repository.
+	t.Chdir(repoB)
+	var out, errb bytes.Buffer
+	res, _ := runWorktreeWorkerLand(&out, &errb, []string{
+		"--root", ".",
+		"--worktree", laneB,
+		"--base-sha", headB,
+		"--verify", "off",
+		"--paths", "a.txt",
+	})
+	if res.Code == "LAND_ROOT_WORKTREE_MISMATCH" {
+		t.Fatalf("a relative --root naming the owning repository must not refuse: %+v", res)
+	}
+	if !res.OK || !res.Committed {
+		t.Fatalf("landing B's lane with --root . from B should advance B: %+v (stderr %s)", res, errb.String())
+	}
+	if got := gitHead(t, repoB); got == headB {
+		t.Fatalf("land reported a commit against B (%+v) but B's trunk is unchanged at %s", res, headB)
+	}
+}
+
+// fak-test:runtime medium est=45s lane=default
+func TestWorkerLandAbsoluteRootOfTheOwningRepositoryIsAdmitted(t *testing.T) {
+	repoB, laneB, headB := landRootFixture(t, "repo-b", true)
+
+	// An explicitly named ABSOLUTE root of the worktree's own repository is
+	// admitted; canonicalizing both sides must never turn a correct, explicit
+	// root into a cross-repository refusal.
+	t.Chdir(t.TempDir())
+	var out, errb bytes.Buffer
+	res, _ := runWorktreeWorkerLand(&out, &errb, []string{
+		"--root", repoB,
+		"--worktree", laneB,
+		"--base-sha", headB,
+		"--verify", "off",
+		"--paths", "a.txt",
+	})
+	if res.Code == "LAND_ROOT_WORKTREE_MISMATCH" {
+		t.Fatalf("an absolute --root naming the owning repository must not refuse: %+v", res)
+	}
+	if !res.OK || !res.Committed {
+		t.Fatalf("landing B's lane with --root %s should advance B: %+v (stderr %s)", repoB, res, errb.String())
+	}
+	if got := gitHead(t, repoB); got == headB {
+		t.Fatalf("land reported a commit against B (%+v) but B's trunk is unchanged at %s", res, headB)
+	}
+}
+
+// fak-test:runtime medium est=30s lane=default
+func TestWorkerLandRelativeRootOfAnotherRepositoryStillRefuses(t *testing.T) {
+	repoA, _, headA := landRootFixture(t, "repo-a", false)
+	_, laneB, _ := landRootFixture(t, "repo-b", true)
+
+	t.Chdir(filepath.Dir(repoA))
+	var out, errb bytes.Buffer
+	res, code := runWorktreeWorkerLand(&out, &errb, []string{
+		"--root", filepath.Base(repoA),
+		"--worktree", laneB,
+		"--paths", "a.txt",
+	})
+	if code == 0 || res.OK || res.Code != "LAND_ROOT_WORKTREE_MISMATCH" {
+		t.Fatalf("a relative --root naming another repository must still refuse, got res=%+v code=%d stderr=%s", res, code, errb.String())
+	}
+	if got := gitHead(t, repoA); got != headA {
+		t.Fatalf("repo A trunk moved to %s during a lane-B land (was %s)", got, headA)
+	}
+}
+
 func gitHead(t *testing.T, dir string) string {
 	t.Helper()
 	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD")

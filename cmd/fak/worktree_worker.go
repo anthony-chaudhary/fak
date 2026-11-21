@@ -1199,7 +1199,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	if ownRoot := guardCommonWorkspace(worktreeDir); ownRoot != "" {
 		if strings.TrimSpace(*root) == "" {
 			repoRoot = ownRoot
-		} else if !sameHostPath(repoRoot, ownRoot) {
+		} else if !sameHostPath(hostPathIdentity(repoRoot), hostPathIdentity(ownRoot)) {
 			return returnEarly(workerworktree.Result{OK: false, Code: "LAND_ROOT_WORKTREE_MISMATCH", Preserved: true,
 				Reason: "--root names a different repository than --worktree",
 				Detail: "root=" + repoRoot + " worktree_owner=" + ownRoot + " worktree=" + worktreeDir}, 2)
