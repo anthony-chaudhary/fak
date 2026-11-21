@@ -9,6 +9,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
+// hostFallbackV41HeadReadback is the V4.1 head-projection readback stage, counted
+// in fak_compute_host_fallback_total when a V4.1 decode step returns host logits
+// (one ~517 KB D2H per token). It is the V4.1 delta of the dense-path
+// hostFallbackGreedyArgmax counter: stepV41 always returns host logits, so every
+// V4.1 decode step reads the head back to the host.
+const hostFallbackV41HeadReadback = "v41_head_readback"
+
+func init() { compute.DeclareHostFallbackStage(hostFallbackV41HeadReadback) }
+
 const q4kMLPOutputSlabReceiptSchema = "fak-q4k-gateup-slab/v1"
 
 type q4kMLPOutputSlabStats struct {
@@ -1559,6 +1568,9 @@ func (s *Session) stepOwnedOutput(id int, greedy bool, output func(int, int) ([]
 			}
 			return s.stepV41(id)
 		}()
+		if logits != nil && s.Backend != nil && s.Backend.Caps().DeviceMemory {
+			compute.CountHostFallback(hostFallbackV41HeadReadback)
+		}
 		completed = true
 		return logits, 0
 	}
