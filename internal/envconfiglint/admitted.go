@@ -975,4 +975,18 @@ var admittedPostFreeze = []string{
 	// (92 trunk advances at admission).
 	// Relocates to: a typed watchdog/ops-schedule executable-path config once #2862 lands.
 	"FLEET_OPENCODE_EXE",
+
+	// ELEVENTH OCCURRENCE (v0.57.0 release-unblock): one pod-identity read shipped
+	// while the ratchet was red and unwatched again. As in the earlier occurrences it
+	// is admitted by name, not absorbed into baseline.go, and it cannot relocate until
+	// the #2862 config surface exists. Admission resolves the current offense; it does
+	// not erase that liveness failure or pay the #2862 relocation debt.
+
+	// internal/gateway/trace_identity.go — POD_NAME is the Kubernetes downward-API
+	// pod-identity label the gateway stamps onto trace spans so a request can be
+	// correlated to the pod that served it. A pod name, not a credential — it grants
+	// access to nothing and authenticates nothing. Introduced by the trace-identity
+	// port (50 trunk advances at admission).
+	// Relocates to: a typed gateway trace-identity config field once #2862 lands.
+	"POD_NAME",
 }
