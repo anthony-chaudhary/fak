@@ -436,6 +436,10 @@ type nativeStructuredConstraint struct {
 
 	budget         *nativeGrammarBudget
 	budgetSnapshot []float32
+
+	// forcedTool marks the planner's own mask over a forced tool envelope,
+	// which is lifted into a tool call and falls back rather than refuses.
+	forcedTool bool
 }
 
 func nativeStructuredConstraintFromContext(ctx context.Context) *nativeStructuredConstraint {

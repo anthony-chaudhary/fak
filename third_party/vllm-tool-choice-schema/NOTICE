@@ -1,0 +1,21 @@
+vLLM forced tool_choice structured-output schema
+
+Copyright contributors to the vLLM project
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: vllm-project/vllm, vllm/tool_parsers/utils.py
+Revision: 0765565f103d5579382ad61994a041654684778b
+https://github.com/vllm-project/vllm/blob/0765565f103d5579382ad61994a041654684778b/vllm/tool_parsers/utils.py#L377-L490
+Related: vllm/tool_parsers/abstract_tool_parser.py (ToolParser.adjust_request)
+https://github.com/vllm-project/vllm/blob/0765565f103d5579382ad61994a041654684778b/vllm/tool_parsers/abstract_tool_parser.py#L122-L160
+
+Adaptation: Go implementation of the named tool_choice contract for the native
+in-kernel planner. When tool_choice resolves to one forced function, its
+parameters schema constrains decoding through the native JSON-schema logit
+mask, so the call's arguments come from the model under the schema rather
+than from text heuristics. The mask covers the {name, arguments} envelope the
+native forced-tool prompt already asks for, instead of upstream's bare
+parameters schema, and the decoded envelope is lifted into the tool call.
+Schemas outside the native mask subset, the forced Write artifact mode and
+requests the mask cannot serve keep the prior unmasked path. Multi-tool
+"required" (upstream's anyOf array) is not adapted.

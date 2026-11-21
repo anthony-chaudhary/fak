@@ -2338,11 +2338,14 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 	if err != nil {
 		return nil, err
 	}
+	if structured == nil {
+		structured = p.newNativeForcedToolConstraint(sp, tools)
+	}
 	if structured != nil {
 		if sp.NativeInferenceReceipt {
 			return nil, fmt.Errorf("%w: %w", ErrNativeStructuredUnsupported, &model.NativeInferenceReceiptUnsupportedError{Reason: "structured output masks model logits"})
 		}
-		if len(tools) > 0 {
+		if len(tools) > 0 && !structured.forcedTool {
 			return nil, fmt.Errorf("%w: structured output with tools", ErrNativeStructuredUnsupported)
 		}
 		if p.dflash2 != nil {
@@ -2462,7 +2465,11 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 		startInSpan := strings.HasSuffix(chat, qwenThinkAssistantSeed)
 		if structured != nil && (effectiveBudget > 0 || startInSpan) {
 			if err := structured.armReasoning(p, startInSpan, stops); err != nil {
-				return nil, err
+				if !structured.forcedTool {
+					return nil, err
+				}
+				structured = nil
+				ctx = context.WithValue(ctx, nativeStructuredConstraintContextKey{}, structured)
 			}
 		}
 		var thinking *nativeThinkingConstraint
@@ -2862,7 +2869,7 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 			// the in-kernel forward becomes a first-class tool-calling planner. Without this the
 			// gateway adjudicates nothing (it reads Message.ToolCalls) and the Anthropic wire never
 			// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
-			if structured == nil {
+			if structured == nil || structured.forcedTool {
 				comp = normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages)
 			}
 			return comp, nil

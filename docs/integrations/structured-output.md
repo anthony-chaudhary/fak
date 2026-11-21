@@ -375,6 +375,23 @@ combinations return HTTP 400 with code
 `native_structured_output_unsupported`; inability to select a valid token returns
 HTTP 500 with code `native_structured_decode_failed`.
 
+A forced tool call uses the same mask without a `response_format`. When
+`tool_choice` names one function, or is `required` with exactly one tool, the
+native route masks decoding to the envelope its forced-tool instruction already
+asks for: `{"name": <const tool name>, "arguments": <the tool's parameters>}`.
+The decoded envelope becomes the tool call and enters adjudication, so its
+arguments satisfy the schema by construction instead of being recovered from
+the user's text. This adapts vLLM's named `tool_choice` structured-output
+contract (Apache-2.0, see `third_party/vllm-tool-choice-schema/NOTICE`). A
+top-level `$schema` in the parameters is ignored. A tool without a parameters
+object, a schema outside the native subset above, the forced `Write` artifact
+mode, DFlash2, an unmodified-logit inference receipt and reasoning delimiters
+that are not single tokens all keep the unmasked forced-tool path; none of them
+is refused. A masked decode that cannot select a valid token fails with
+`native_structured_decode_failed` like a schema response. `tool_choice` `auto`
+and `none` are unchanged. Multi-tool `required` (vLLM's `anyOf` array) and
+OpenAI's `finish_reason: "stop"` for a forced named tool are open follow-ups.
+
 ### OpenAI SDK — preserve `response_format`, `text.format`, `strict`, `logit_bias`
 
 ```python
