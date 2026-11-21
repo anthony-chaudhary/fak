@@ -358,6 +358,7 @@ var verbManifest = []Verb{
 	{Name: "opt", Synopsis: "the optimization-fuser / RSI opt-target loop", Lane: "cmd"},
 	{Name: "optimize", Synopsis: "drive the inference-optimization loop: plan the next lever, measure on a frozen trace, verify the verdict", Lane: "cmd"},
 	{Name: "pack", Synopsis: "hermetic OCI bundle packaging and verification for harness collections", Lane: "cmd"},
+	{Name: "packing-matrix", Synopsis: "the loader packing coverage matrix: native ratio, runtime-repack defect cells, known gaps per cell", Lane: "cmd"},
 	{Name: "pi", Synopsis: "launch and manage Pi agent sessions through the guarded fak gateway", Lane: "cmd"},
 	{Name: "plan-audit", Synopsis: "audit plan docs for drift over a glob (json/markdown, --check exits nonzero on drift)", Lane: "cmd"},
 	{Name: "policy", Synopsis: "the deployable capability floor: --dump | --check a policy manifest", Lane: "cmd"},

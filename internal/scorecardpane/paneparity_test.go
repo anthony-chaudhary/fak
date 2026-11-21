@@ -53,6 +53,7 @@ var knownPaneDivergence = map[string]string{
 	"popularization_debt": "python-only: popularization_readiness_scorecard.py folded in the Python pane only",
 	"guard_accuracy_debt": "python-only: `go run ./cmd/fak score guard-accuracy` folded in the Python pane only",
 	"commit_debt":         "python-only: commit_subject_coverage.py folded in the Python pane only",
+	"checkpoint_debt":     "python-only: checkpoint card folded in the Python pane only",
 	// Go-pane-only — port into tools/scorecard_control_pane.py SCORECARDS, or retire from Go:
 	"antipattern_debt":       "go-only: antipattern-scorecard folded in the Go pane only",
 	"negframe_debt":          "go-only: negframe folded in the Go pane only",

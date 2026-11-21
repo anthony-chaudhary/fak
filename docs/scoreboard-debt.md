@@ -37,7 +37,7 @@ The portfolio tracks 50 distinct debt categories across code quality, documentat
 | `sota-coverage` | `sota_debt` | Compute operations lacking SOTA prior-art reference | 0 | 0 (A) | `tools/sota_coverage_scorecard.py` | [docs/sota/](sota/README.md) |
 | `agent-readiness` | `friction_debt` | Friction preventing agents discovering/adopting fak | 12 | 0 (A) | `fak score agent-readiness` | [docs/AGENT-READINESS-SCORECARD.md](AGENT-READINESS-SCORECARD.md) |
 | `brittleness` | `brittleness_debt` | Flaky tests, timing hazards, unpinned dependencies | 0 | 0 (A) | `fak score brittleness` | `cmd/fak/brittleness.go` |
-| `product` | `product_debt` | Concepts lacking runnable end-to-end examples | 2 | 0 (A) | `tools/product_scorecard.py` | [docs/product-scorecard/](product-scorecard/README.md) |
+| `product` | `product_debt` | Concepts lacking runnable end-to-end examples | 0 | 0 (A) | `tools/product_scorecard.py` | [docs/product-scorecard/](product-scorecard/README.md) |
 | `persona` | `persona_debt` | Unmet affordances across top-10 persona segments | 0 | 0 (A) | `tools/persona_readiness_scorecard.py` | [docs/adoption/personas.md](adoption/personas.md) |
 | `popularization` | `popularization_debt` | Leaks across 5-stage conversion funnel | 0 | 0 (A) | `tools/popularization_readiness_scorecard.py` | [docs/popularization-scorecard/](popularization-scorecard/README.md) |
 | `stability` | `stability_debt` | Regressions, tail-wags, broken rollback/bisect paths | 0 | 0 (A) | `tools/stability_scorecard.py` | [docs/STABILITY-SCORECARD.md](STABILITY-SCORECARD.md) |
