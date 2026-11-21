@@ -1190,6 +1190,21 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 			return returnEarly(workerworktree.Result{OK: false, Reason: rootErr.Error()}, 2)
 		}
 	}
+	// The trunk a land advances must be the repository that OWNS the worktree.
+	// Resolving it from the caller's cwd, or honouring a --root that names a
+	// different repository, applies one repository's lane diff to another
+	// repository's trunk. Witnessed 2026-11-21: `fak worktree worker land
+	// --worktree <private lane>` invoked from the public checkout landed a
+	// private lane's file on public trunk, because the root defaulted to the cwd.
+	if ownRoot := guardCommonWorkspace(worktreeDir); ownRoot != "" {
+		if strings.TrimSpace(*root) == "" {
+			repoRoot = ownRoot
+		} else if !sameHostPath(repoRoot, ownRoot) {
+			return returnEarly(workerworktree.Result{OK: false, Code: "LAND_ROOT_WORKTREE_MISMATCH", Preserved: true,
+				Reason: "--root names a different repository than --worktree",
+				Detail: "root=" + repoRoot + " worktree_owner=" + ownRoot + " worktree=" + worktreeDir}, 2)
+		}
+	}
 
 	// Mandatory test witness receipt check (#11532)
 	if *requireTestWitness {
