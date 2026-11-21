@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -228,8 +229,7 @@ func TestNativeExactCommandGrantOwnedGateway(t *testing.T) {
 // fak-test:runtime fast est=3s
 func TestNativeBashCommandTimeoutOwnedGateway(t *testing.T) {
 	const bound = 20 * time.Millisecond
-	command := quoteNativeTimeoutCommand(os.Args[0]) + " -test.run=TestNativeBashCommandTimeoutChild"
-	t.Setenv("FAK_NATIVE_BASH_TIMEOUT_CHILD", "1")
+	command := quoteNativeTimeoutCommand(os.Args[0]) + " " + nativeTimeoutChildSelector
 
 	results, _ := runNativeExactCommands(t, Config{
 		NativeExactAllowedCommands: []string{command},
@@ -240,6 +240,15 @@ func TestNativeBashCommandTimeoutOwnedGateway(t *testing.T) {
 	}
 }
 
+// nativeTimeoutChildSelector is the argv marker that identifies THIS test binary as
+// the owned-Bash timeout child. The signal cannot travel in the environment: the
+// code-tool Bash engine starts every child from the allowlisted minimal host env
+// (internal/envchild, #14450), so a FAK_* variable the owner sets never reaches the
+// child. A child that silently skipped its sleep would exit in single-digit
+// milliseconds and the 20ms server ceiling would never fire on a fast host, which
+// reports "no timeout" for a server that is in fact honouring its ceiling.
+const nativeTimeoutChildSelector = "-test.run=TestNativeBashCommandTimeoutChild"
+
 func quoteNativeTimeoutCommand(path string) string {
 	if runtime.GOOS == "windows" {
 		return `"` + strings.ReplaceAll(path, `"`, `""`) + `"`
@@ -247,9 +256,13 @@ func quoteNativeTimeoutCommand(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", "'\"'\"'") + "'"
 }
 
-// fak-test:runtime fast est=1s
+// fak-test:runtime fast est=2s
 func TestNativeBashCommandTimeoutChild(t *testing.T) {
-	if os.Getenv("FAK_NATIVE_BASH_TIMEOUT_CHILD") == "1" {
-		time.Sleep(250 * time.Millisecond)
+	if !slices.Contains(os.Args, nativeTimeoutChildSelector) {
+		return // a plain package run: this is not the owned-Bash long-lived child.
 	}
+	// Stay alive well past the owner's ceiling so the kill is unambiguous even on a
+	// loaded CI runner; the owner terminates this process at ~20ms, so the full
+	// sleep only elapses if the ceiling failed to fire.
+	time.Sleep(1 * time.Second)
 }

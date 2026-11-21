@@ -95,8 +95,11 @@ func scan(messages []Message) state {
 // Complete plans the next turn deterministically from the observed state. The
 // SampleOpts are accepted to satisfy the Planner seam but ignored by design: the
 // mock is a deterministic CI subject, so its turn count must not vary with
-// sampling params.
-func (m *MockPlanner) Complete(_ context.Context, messages []Message, _ []ToolDef, _ ...SampleOpt) (*Completion, error) {
+// sampling params. The advertised tools ARE honoured: a model cannot call a tool
+// that was not offered, so an explicitly closed catalog (WithToolCatalog(nil),
+// e.g. `fak chat --tools=none`) gets a direct answer instead of an unadvertised
+// call the loop must refuse with ErrToolCatalogClosed.
+func (m *MockPlanner) Complete(_ context.Context, messages []Message, tools []ToolDef, _ ...SampleOpt) (*Completion, error) {
 	s := scan(messages)
 	id := func() string { return "call_" + itoa(s.assistantTurns) }
 
@@ -118,6 +121,10 @@ func (m *MockPlanner) Complete(_ context.Context, messages []Message, _ []ToolDe
 	}
 
 	switch {
+	case len(tools) == 0:
+		// Nothing was advertised, so there is nothing to propose: answer directly.
+		return final("No tools are available in this run, so no action was taken."), nil
+
 	case s.userCalls == 0:
 		// 1. look up the account.
 		return emit(toolGetUser, `{"user_id":"mia_li_3668"}`), nil

@@ -104,6 +104,12 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 // console): each line of input is one human turn, driven through the fak arm of
 // RunArm in-process. A provider env or a selected gateway supplies the live
 // default; an unconfigured chat falls back to the offline mock planner.
+// chatExit ends the process when a headless chat turn fails. It is a seam: a test
+// that drives cmdChat in-process must be able to witness the refusal (exit code plus
+// the rendered termination) instead of terminating the whole test binary, which
+// reports a bare package FAIL and hides which case failed.
+var chatExit = os.Exit
+
 func cmdChat(argv []string) {
 	fs, cf := newChatFlagSet()
 	_ = fs.Parse(argv)
@@ -376,7 +382,7 @@ func cmdChat(argv []string) {
 			}
 		}
 		if err := runChatHeadlessWithContext(os.Stdout, planner, *cf.task, *cf.maxTurns, *cf.asJSON, *cf.receiptOut, root, receiptContext, runOpts...); err != nil {
-			os.Exit(1)
+			chatExit(1)
 		}
 		return
 	}

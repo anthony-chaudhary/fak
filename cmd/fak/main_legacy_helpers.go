@@ -384,7 +384,13 @@ func printReport(rep *metrics.Report, path string) {
 	if rep.Baseline.P50Ns > 0 && rep.On.P50Ns > 0 {
 		fmt.Printf("fusion speedup (p50)        : %.0fx\n", float64(rep.Baseline.P50Ns)/float64(rep.On.P50Ns))
 	}
-	fmt.Printf("PRIMARY GATE                : %s  (%s)\n", rep.GatePrimary, rep.PrimaryDetail)
+	gateDetail := rep.PrimaryDetail
+	if rep.Baseline.Calls == 0 {
+		// The gate fails CLOSED on an unmeasured baseline; say so, so a `--no-baseline`
+		// artifact is not read from a CI log as a 27us adjudication regression.
+		gateDetail += "; no spawned-hook baseline was measured (--no-baseline skips it), so this gate is unwitnessed, not a regression"
+	}
+	fmt.Printf("PRIMARY GATE                : %s  (%s)\n", rep.GatePrimary, gateDetail)
 	prov := rep.TokenDeltaProvenance
 	if prov == "" {
 		prov = "SIMULATED"

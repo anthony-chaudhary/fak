@@ -123,33 +123,42 @@ func TestChatDefaultDeveloperPolicyFloor(t *testing.T) {
 		t.Setenv("FAK_AGENT_POSTURE", "")
 		t.Setenv("FAK_GUARD_POSTURE", "")
 
-		captureAgentStdio(t, func() {
-			cmdChat([]string{"--offline", "--task", "hello", "--tools=none"})
-		})
+		// cmdChat ends the process on a failed headless turn. Swap the exit seam so a
+		// regression fails THIS case with the rendered cause: calling os.Exit here would
+		// abort the whole package binary and report a nameless package FAIL.
+		origExit := chatExit
+		var exits []int
+		chatExit = func(code int) { exits = append(exits, code) }
+		t.Cleanup(func() { chatExit = origExit })
+		run := func(args ...string) string {
+			t.Helper()
+			exits = nil
+			_, stderr := captureAgentStdio(t, func() { cmdChat(args) })
+			if len(exits) != 0 {
+				t.Fatalf("cmdChat%v exited %v on a runnable offline turn; stderr=%s", args, exits, stderr)
+			}
+			return stderr
+		}
+
+		run("--offline", "--task", "hello", "--tools=none")
 		if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
 			t.Fatalf("cmdChat default posture: got %v, want PostureDefaultOpen", got)
 		}
 
-		captureAgentStdio(t, func() {
-			cmdChat([]string{"--offline", "--task", "hello", "--tools=none", "--posture", "default_open"})
-		})
+		run("--offline", "--task", "hello", "--tools=none", "--posture", "default_open")
 		if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
 			t.Fatalf("cmdChat --posture default_open: got %v, want PostureDefaultOpen", got)
 		}
 
 		t.Setenv("FAK_AGENT_POSTURE", "fail_closed")
-		captureAgentStdio(t, func() {
-			cmdChat([]string{"--offline", "--task", "hello", "--tools=none"})
-		})
+		run("--offline", "--task", "hello", "--tools=none")
 		if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
 			t.Fatalf("cmdChat FAK_AGENT_POSTURE=fail_closed: got %v, want PostureFailClosed", got)
 		}
 
 		t.Setenv("FAK_AGENT_POSTURE", "")
 		t.Setenv("FAK_GUARD_POSTURE", "default_open")
-		captureAgentStdio(t, func() {
-			cmdChat([]string{"--offline", "--task", "hello", "--tools=none"})
-		})
+		run("--offline", "--task", "hello", "--tools=none")
 		if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
 			t.Fatalf("cmdChat FAK_GUARD_POSTURE=default_open: got %v, want PostureDefaultOpen", got)
 		}
