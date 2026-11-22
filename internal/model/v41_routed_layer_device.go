@@ -221,7 +221,12 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 				}
 				s.readAheadV41RoutedPicks(r, names)
 			}
+			leaders := v41RoutedStageLeaders(names, s.v41RoutedWeightsHostResident(names))
 			for slot := range picks {
+				if first := leaders[slot]; first != slot {
+					weights[slot] = weights[first]
+					continue
+				}
 				var gateBias, upBias string
 				if routed := s.M.v41RoutedNames(layer, picks[slot].expert); routed != nil {
 					gateBias, upBias = routed.biases[0], routed.biases[1]
@@ -785,6 +790,56 @@ func v41RoutedFusedAdmits(be compute.V41RoutedFusedBackend, weights []v41RoutedL
 		}
 	}
 	return true
+}
+
+// The host-resident branch below adapts vllm-project/vllm,
+// vllm/model_executor/layers/fused_moe/fused_moe.py (_weights_host_resident and
+// the naive_block_assignment condition of _prepare_expert_assignment), pinned at
+// 3b364baef5cd731b5e1f14ff16387feb69d01f10. Apache-2.0.
+// Copyright contributors to the vLLM project.
+// Changed for Fak: the marker is the session's expert placement predicate, not
+// a tensor attribute, and grouping shares one staged triple per expert.
+
+// v41RoutedWeightsHostResident reports whether any pick's projection is placed
+// in host memory by the session's offload split. Staging such a weight crosses
+// the host-to-device link on every read, so its picks must be grouped by expert.
+func (s *Session) v41RoutedWeightsHostResident(names [][3]string) bool {
+	if s == nil || s.M == nil || s.Backend == nil || !s.CPUOffloadExperts {
+		return false
+	}
+	onHost := s.expertSpillOnHost()
+	for _, triple := range names {
+		for _, name := range triple {
+			if onHost(name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// v41RoutedStageLeaders maps each pick slot to the slot whose staged triple it
+// reads. Naive assignment stages once per pick. Grouped assignment stages each
+// expert once, at its first slot, and later picks of that expert share it. Only
+// staging is grouped: dispatch and sum order stay per slot, so both assignments
+// produce the same bits.
+func v41RoutedStageLeaders(names [][3]string, hostResident bool) []int {
+	leaders := make([]int, len(names))
+	for slot := range leaders {
+		leaders[slot] = slot
+	}
+	if !hostResident {
+		return leaders
+	}
+	first := make(map[[3]string]int, len(names))
+	for slot, triple := range names {
+		if lead, seen := first[triple]; seen {
+			leaders[slot] = lead
+			continue
+		}
+		first[triple] = slot
+	}
+	return leaders
 }
 
 func v41FirstOpened(slot int, opened int64) int64 {

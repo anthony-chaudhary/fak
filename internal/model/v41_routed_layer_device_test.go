@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -540,5 +541,131 @@ func TestV41RoutedLayerDeclinesWhenRingCannotPinLayer(t *testing.T) {
 			t.Fatalf("ring=%d: per-pick loop after the decline: %v", c.ring, serialErr)
 		}
 		s.Close()
+	}
+}
+
+// v41RoutedStageCountingBackend counts projection uploads: every routed-expert
+// weight is a matrix, and the layer's activation, accumulator and status
+// uploads are vectors.
+type v41RoutedStageCountingBackend struct {
+	*v41RoutedLayerTestBackend
+	weightUploads int
+}
+
+func (b *v41RoutedStageCountingBackend) Upload(t compute.Tensor, dt compute.Dtype) compute.Tensor {
+	if len(t.Shape) == 2 {
+		b.weightUploads++
+	}
+	return b.v41RoutedLayerTestBackend.Upload(t, dt)
+}
+
+// The grouped assignment is the upstream sorted path's read pattern: one read
+// per expert. The naive assignment is one read per pick. Expectations are
+// written out by hand from that rule.
+// fak-test:runtime fast est=1s lane=default
+func TestSortedMoEDispatchStageLeaders(t *testing.T) {
+	a, b, c := [3]string{"a1", "a3", "a2"}, [3]string{"b1", "b3", "b2"}, [3]string{"c1", "c3", "c2"}
+	names := [][3]string{a, b, a, c, b}
+	if got, want := v41RoutedStageLeaders(names, false), []int{0, 1, 2, 3, 4}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("naive leaders=%v want %v", got, want)
+	}
+	if got, want := v41RoutedStageLeaders(names, true), []int{0, 1, 0, 3, 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("grouped leaders=%v want %v", got, want)
+	}
+	if got, want := v41RoutedStageLeaders([][3]string{c, a, b}, true), []int{0, 1, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("grouped distinct leaders=%v want %v", got, want)
+	}
+}
+
+// Host-resident expert weights select the grouped assignment, which uploads
+// each routed expert's triple once per step; without the marker the layer
+// keeps one upload per pick. Both produce the same bits.
+// fak-test:justify why=contract when=changed:internal/model/**
+// fak-test:runtime medium est=5s lane=default
+func TestSortedMoEDispatchBranchSelection(t *testing.T) {
+	type arm struct {
+		name      string
+		configure func(s *Session, picks []routePick)
+		marker    bool
+		// uploads maps (picks, distinct experts) to the expected projection uploads.
+		uploads func(picks, distinct int) int
+	}
+	perExpert := func(_, distinct int) int { return 3 * distinct }
+	perPick := func(picks, _ int) int { return 3 * picks }
+	arms := []arm{
+		{"host_resident_grouped", func(s *Session, _ []routePick) { s.CPUOffloadExperts = true }, true, perExpert},
+		{"one_host_resident_expert_grouped", func(s *Session, picks []routePick) {
+			s.CPUOffloadExperts = true
+			host := ".ffn.experts." + itoa(picks[0].expert) + "."
+			s.spillOnHost = func(name string) bool { return strings.Contains(name, host) }
+		}, true, perExpert},
+		{"offload_device_kept_naive", func(s *Session, _ []routePick) {
+			s.CPUOffloadExperts = true
+			s.spillOnHost = func(string) bool { return false }
+		}, false, perPick},
+		// A device-resident session memoizes each staged projection, so its
+		// naive assignment re-reads nothing.
+		{"device_resident_naive", func(*Session, []routePick) {}, false, perExpert},
+	}
+	for _, repeated := range []bool{true, false} {
+		var reference []float32
+		for _, a := range arms {
+			name := a.name + "/distinct_picks"
+			if repeated {
+				name = a.name + "/repeated_experts"
+			}
+			t.Run(name, func(t *testing.T) {
+				m := v41IncrementalExpertFixture(t, true, false)
+				picks, x := v41RoutedLayerFaultPicks(m)
+				if len(picks) < 4 {
+					t.Fatalf("fixture routes %d picks, need 4", len(picks))
+				}
+				if repeated {
+					picks[2].expert, picks[3].expert = picks[0].expert, picks[1].expert
+				}
+				experts := map[int]bool{}
+				for _, pick := range picks {
+					experts[pick.expert] = true
+				}
+				b := &v41RoutedStageCountingBackend{v41RoutedLayerTestBackend: newV41RoutedLayerTestBackend()}
+				s, err := m.NewBackendSessionChecked(b)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer s.Close()
+				a.configure(s, picks)
+				names := make([][3]string, len(picks))
+				for slot, pick := range picks {
+					stem := "ffn.experts." + itoa(pick.expert)
+					names[slot] = [3]string{layerName(0, stem+".w1.weight"), layerName(0, stem+".w3.weight"), layerName(0, stem+".w2.weight")}
+				}
+				if got := s.v41RoutedWeightsHostResident(names); got != a.marker {
+					t.Fatalf("host-resident marker=%t want %t", got, a.marker)
+				}
+				before := b.weightUploads
+				sum, outcome, err := s.v41RoutedLayerFunc()(0, picks, x)
+				if err != nil || outcome != v41RoutedExpertHandled || len(sum) != m.Cfg.HiddenSize {
+					t.Fatalf("layer outcome=%v err=%v sum=%d", outcome, err, len(sum))
+				}
+				if got, want := b.weightUploads-before, a.uploads(len(picks), len(experts)); got != want {
+					t.Fatalf("projection uploads=%d want %d (%d picks, %d experts)", got, want, len(picks), len(experts))
+				}
+				if b.calls != len(picks) || b.publishes != len(picks) || b.deferredReads != 1 {
+					t.Fatalf("dispatches activations=%d publishes=%d reads=%d, want %d/%d/1", b.calls, b.publishes, b.deferredReads, len(picks), len(picks))
+				}
+				bits := func(v []float32) []uint32 {
+					out := make([]uint32, len(v))
+					for i := range v {
+						out[i] = math.Float32bits(v[i])
+					}
+					return out
+				}
+				if reference == nil {
+					reference = append([]float32(nil), sum...)
+				} else if !reflect.DeepEqual(bits(sum), bits(reference)) {
+					t.Fatal("routed sum differs between the grouped and naive assignments")
+				}
+			})
+		}
 	}
 }
