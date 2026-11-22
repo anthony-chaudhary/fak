@@ -1,0 +1,47 @@
+{
+  "rows": [
+    {
+      "id": "inkling2loop-model-family",
+      "canonical": "inkling2loop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The Thinking Machines Inkling-2 looped MoE family (model_type inkling2_loop): 24 stored layers in six-layer attention-residual blocks, where the middle blocks run several passes per token with gated cross-pass messages. Spine and typed refusal live in internal/model/inkling2loop_spine.go; the host reference forward in internal/model/inkling2loop_forward.go; the GGUF binding in internal/ggufload/inkling2loop.go.",
+      "distinction": "A MODEL ARCHITECTURE loop (re-running stored transformer layers within one token's forward), not an agent, scheduler or retry loop: nothing iterates over turns, requests or attempts, and the pass count is a checkpoint hyperparameter.",
+      "distinct_from": [
+        "loopconstraint",
+        "looppark",
+        "loopobserve"
+      ],
+      "aliases": [
+        "inkling2_loop"
+      ],
+      "grounding": "inkling2loop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2loop-gate-rank",
+      "canonical": "GateRank",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The rank (64 for Inkling-2-Mini) of the low-rank cross-pass controller in an inkling2_loop checkpoint: each controller projects the normalized (input, message) pair down to GateRank, then up to tanh gain and forget gates that mix the previous pass's message into a looped layer's input.",
+      "distinction": "A NEURAL GATE's projection width inside the model forward, not an admission, policy or CI gate: it decides nothing about whether work may proceed and is read from loop_config.gate_rank / inkling2_loop.loop.gate_rank.",
+      "distinct_from": [
+        "inkerneldevicegate"
+      ],
+      "aliases": [
+        "gaterank",
+        "gate_rank"
+      ],
+      "grounding": "GateRank",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
