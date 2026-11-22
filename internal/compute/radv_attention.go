@@ -823,6 +823,111 @@ func QuantizeF32ToQ4_0(src []float32) ([]byte, error) {
 	return out, nil
 }
 
+// QuantizeF32ToQ4_0Ref encodes float32 values into ggml-exact Q4_0 blocks.
+//
+// Ported from ggml-org/llama.cpp ggml/src/ggml-quants.c (quantize_row_q4_0_ref)
+// at commit 83078fec0db82d6b5a00d9599062c38c39145755. MIT License.
+// Copyright (c) 2023-2026 The ggml authors
+//
+// The scale is the signed max-magnitude value over -8, so that value lands on
+// code 0 and the opposite extreme clamps at 15. Bytes use the ggml nibble order
+// (low nibble = element j, high nibble = element j+16); DequantizeQ4_0 reads
+// adjacent pairs instead, so its output for these blocks is that permutation.
+// Like the reference, only whole 32-value blocks are accepted.
+func QuantizeF32ToQ4_0Ref(src []float32) ([]byte, error) {
+	if len(src) == 0 {
+		return nil, errors.New("compute: empty src for q4_0 quantization")
+	}
+	const blkSize = 32
+	const blkBytes = 18
+	if len(src)%blkSize != 0 {
+		return nil, fmt.Errorf("compute: q4_0 reference quantization needs a multiple of %d values (got %d)", blkSize, len(src))
+	}
+	numBlocks := len(src) / blkSize
+	out := make([]byte, numBlocks*blkBytes)
+
+	for b := 0; b < numBlocks; b++ {
+		blk := src[b*blkSize : (b+1)*blkSize]
+		outOff := b * blkBytes
+
+		var amax, signedMax float32
+		for _, v := range blk {
+			a := float32(math.Abs(float64(v)))
+			if amax < a {
+				amax = a
+				signedMax = v
+			}
+		}
+
+		d := signedMax / -8
+		var id float32
+		if d != 0 {
+			id = 1 / d
+		}
+		binary.LittleEndian.PutUint16(out[outOff:outOff+2], float32ToFloat16BitsNearestEven(d))
+
+		for j := 0; j < blkSize/2; j++ {
+			// The explicit conversions keep the product a rounded float32, as in C,
+			// on targets that would otherwise fuse it with the add.
+			x0 := float32(blk[j] * id)
+			x1 := float32(blk[blkSize/2+j] * id)
+			out[outOff+2+j] = q4_0RefCode(x0) | q4_0RefCode(x1)<<4
+		}
+	}
+	return out, nil
+}
+
+// q4_0RefCode is MIN(15, (int8_t)(x + 8.5f)) stored to a uint8_t.
+func q4_0RefCode(x float32) uint8 {
+	q := int8(int32(x + 8.5))
+	if q > 15 {
+		q = 15
+	}
+	return uint8(q)
+}
+
+// float32ToFloat16BitsNearestEven narrows with IEEE round-to-nearest-even, the
+// rounding GGML_FP32_TO_FP16 uses; Float32ToFloat16Bits truncates the mantissa.
+func float32ToFloat16BitsNearestEven(f float32) uint16 {
+	bits := math.Float32bits(f)
+	sign := uint16((bits >> 16) & 0x8000)
+	biased := int((bits >> 23) & 0xff)
+	mant := bits & 0x007fffff
+
+	if biased == 0xff {
+		if mant != 0 {
+			return sign | 0x7e00
+		}
+		return sign | 0x7c00
+	}
+	exp := biased - 127 + 15
+	if exp >= 31 {
+		return sign | 0x7c00
+	}
+	if biased == 0 {
+		return sign
+	}
+
+	mant |= 0x00800000
+	shift := uint(13)
+	var h uint32
+	if exp <= 0 {
+		shift = uint(14 - exp)
+		if shift > 25 {
+			return sign
+		}
+	} else {
+		h = uint32(exp-1) << 10
+	}
+	h += mant >> shift
+	rem := mant & (1<<shift - 1)
+	half := uint32(1) << (shift - 1)
+	if rem > half || (rem == half && h&1 == 1) {
+		h++
+	}
+	return sign | uint16(h)
+}
+
 // FlashAttnDequantScratchpad manages GPU UMA scratchpad allocation and single-pass dequantization
 // for quantized KV caches on AMD RDNA 3.5 (gfx1151).
 // Quantized KV blocks are dequantized once into local GPU scratchpad memory and reused across all
