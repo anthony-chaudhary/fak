@@ -19,8 +19,8 @@ question belongs to the engine; the wire question belongs here.
 ## Start here: confirm fak speaks your client's wire
 
 If you are integrating a client, your job is to pick the wire your agent already speaks
-and confirm fak serves it. fak exposes three client wires — OpenAI Chat Completions,
-Anthropic Messages, and Gemini `generateContent` — so you repoint your client's base URL
+and confirm fak serves it. fak exposes four client wires — OpenAI Chat Completions, the
+OpenAI Responses API, Anthropic Messages, and Gemini `generateContent` — so you repoint your client's base URL
 at the fak host instead of the provider, and select the upstream with `--provider`
 (witnessed in [`internal/agent/adapters.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/adapters.go)).
 
@@ -36,12 +36,11 @@ Everything below is the exact per-wire surface, `--provider` value, and status.
 
 ## 1. Model wires fak speaks
 
-`fak serve` exposes three client wires (the surfaces your agent points at) and selects
+`fak serve` exposes four client wires (the surfaces your agent points at) and selects
 an upstream provider wire with `--provider`. A client speaks OpenAI Chat Completions,
-Anthropic Messages, or Gemini `generateContent` to reach fak, and fak then proxies on
-to OpenAI, Anthropic, Gemini, or xAI. The OpenAI Responses wire is upstream-only (no
-matching client endpoint yet), and xAI is reached through fak's OpenAI surface because
-it speaks the same shape.
+the OpenAI Responses API, Anthropic Messages, or Gemini `generateContent` to reach fak,
+and fak then proxies on to OpenAI, Anthropic, Gemini, or xAI. xAI is reached through
+fak's OpenAI surface because it speaks the same shape.
 
 The provider names and their wire shapes are defined in
 [`internal/agent/adapters.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/adapters.go);
@@ -51,7 +50,7 @@ the client surfaces are in the gateway route table
 | Wire | fak surface | `--provider` | Status |
 |---|---|---|---|
 | OpenAI Chat Completions | `POST /v1/chat/completions` (client + upstream) | `openai` | Shipped. The adjudicating chat proxy; the same wire fronts any OpenAI-compatible engine (Ollama, vLLM, SGLang, llm-d, llama.cpp, LM Studio). |
-| OpenAI Responses API | upstream only (`POST /responses`) | `openai-responses` | Upstream provider wire. fak proxies *to* a Responses upstream but exposes Chat Completions and Messages to clients. A Responses-default client connects by selecting the chat-completions model. |
+| OpenAI Responses API | `POST /v1/responses` (client + upstream) | `openai-responses` | Shipped ([`internal/gateway/responses.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/responses.go)). A Responses-native client (the OpenAI Codex CLI, for example) repoints its base URL at fak and every proposed function call is adjudicated before the client sees it. It serves a faithful subset: string or item-array `input`, `instructions`, function `tools`, `text.format`, `store` and `previous_response_id`. A `stream:true` request gets a well-formed SSE sequence synthesized from the buffered, already-adjudicated turn. Hosted tools (web search, code interpreter, file search) are not executed by the gateway. |
 | Anthropic Messages | `POST /v1/messages` (client + upstream) | `anthropic` | Shipped. The Claude-Code-facing proxy; `fak manage -- claude` is the one-command front door. `stream:true` relays live text deltas when fronting the real Anthropic API and translates a streaming OpenAI-compatible planner into Anthropic `text_delta` events; tool-use inputs are still held until adjudication. Non-streaming planners fall back to synthesized SSE. |
 | Gemini `generateContent` | `POST /v1beta/models/<model>:generateContent` (and `:streamGenerateContent`) (client + upstream) | `gemini` | Shipped (#567, [`internal/gateway/gemini.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/gemini.go)). The Gemini-CLI / google-genai-facing proxy: repoint a Gemini-native client's base URL from `generativelanguage.googleapis.com` at the fak host, and every proposed `functionCall` is adjudicated before the client sees it. A `:streamGenerateContent` request synthesizes a well-formed Gemini SSE sequence from the buffered, already-adjudicated turn (the same posture as the Anthropic wire). |
 | xAI (Grok) | upstream only (OpenAI-compatible `/chat/completions`) | `xai` | Upstream provider wire. xAI uses the OpenAI-compatible chat shape, so the same adapter serves it; clients reach it through fak's OpenAI surface. |
@@ -153,7 +152,7 @@ transports with nothing live to adjudicate. The grades below mirror the
 | Protocol | Boundary it owns | Grade | fak's position |
 |---|---|---|---|
 | MCP | agent ↔ tools/resources | Native / drop-in | fak *is* the stdio server (`fak serve --stdio`) and fronts MCP over HTTP (`POST /mcp`), exposing the `fak_*` adjudication tools. A runtime boundary fak sits on directly. |
-| OpenAI Responses | agent ↔ model | Partial | A runtime boundary. fak proxies *to* a Responses upstream (`--provider openai-responses`) but exposes Chat Completions and Messages to clients; a Responses-default client connects by selecting chat-completions. |
+| OpenAI Responses | agent ↔ model | Partial | A runtime boundary fak sits on directly. fak serves `POST /v1/responses` to clients and proxies *to* a Responses upstream (`--provider openai-responses`). Partial because it is a subset of the API: function tools and stored continuations are served, hosted tools and background mode are not. |
 | A2A (Agent2Agent) | agent ↔ agent | Needs an adapter | A runtime boundary fak does not yet speak natively. It projects a policy-filtered Agent Card from its reviewed method registry; the live HTTP edge is planned, not shipped. |
 | AG-UI | agent ↔ frontend/UI | Different boundary | Standardizes the UI event stream, not the tool-call boundary fak gates. Orthogonal, not blocked. |
 | ACP (BeeAI) | agent ↔ agent | Needs an adapter | Pre-alpha with an unsettled transport. fak would front it through the same registry once it stabilizes. |
