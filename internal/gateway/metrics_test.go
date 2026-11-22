@@ -474,13 +474,16 @@ func TestChatCompletionsPopulatesInferenceMetrics(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("chat status = %d, want 200", code)
 	}
+	if len(resp.Choices) != 1 || resp.Choices[0].FinishReason == "" || resp.Usage.CompletionTokens <= 0 {
+		t.Fatalf("served turn must report one choice with a finish reason and completion tokens, got %+v", resp)
+	}
 
 	text := getMetrics(t, ts.URL+"/metrics", "")
 	for _, want := range []string{
 		"# TYPE fak_gateway_inference_requests_total counter",
-		// The mock's first turn proposes a tool call (completion=24 tokens).
-		`fak_gateway_inference_requests_total{finish_reason="tool_calls"} 1`,
-		"fak_gateway_inference_completion_tokens_total 24",
+		// The scrape must agree with what this turn's own response reported.
+		fmt.Sprintf(`fak_gateway_inference_requests_total{finish_reason=%q} 1`, resp.Choices[0].FinishReason),
+		fmt.Sprintf("fak_gateway_inference_completion_tokens_total %d", resp.Usage.CompletionTokens),
 		// The wall-clock counter is emitted on every scrape; the derived tok/s math is
 		// proven against explicit durations in TestInferenceMetricsAccumulateAcrossTurns
 		// (a mock turn can round to 0s on a coarse OS clock, so we don't assert it here).
