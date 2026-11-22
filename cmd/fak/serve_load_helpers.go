@@ -753,8 +753,13 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 	hostFit := serveStreamedHostFit(backend, fit)
 	streamedOffload := false
 	var streamedBound int64
+	// denseFit is the host budget the bounded dense working set is sized from: the gross hostFit on
+	// every non-streamed arm (byte-for-byte), and on the streamed-expert arm the SAME net-of-reserve
+	// fit the streamed plan folded its bounds from (G5), so the loader retains what was admitted.
+	// serveStreamedCPUOffloadPathNetFit is serveStreamedCPUOffloadPathDecision plus that net fit.
+	denseFit := hostFit
 	if cpuOffloadArm && expertShard == nil {
-		streamedOffload, streamedBound, err = serveStreamedCPUOffloadPathDecision(ggufPath, backend, residentRanks, contextBudgetTokens, hostFit, ggufload.BackendSharesHostRAM(backend))
+		streamedOffload, streamedBound, denseFit, err = serveStreamedCPUOffloadPathNetFit(ggufPath, backend, residentRanks, contextBudgetTokens, hostFit, ggufload.BackendSharesHostRAM(backend))
 		if err != nil {
 			return nil, false, nil, gateway.StartupPhase{}, nil, err
 		}
@@ -771,7 +776,7 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 	// eligibility of the artifact's dense side is applied inside the estimator and loader via the
 	// shared denseBoundedEligible predicate: an ineligible dense side produces no bounded row and
 	// keeps the full charge (fail-closed).
-	if opts := serveLoadStreamedDenseOptions(hostFit, residentQ4K || (cpuOffloadExperts && cpuOffloadArm), streamedOffload, streamedBound); len(opts) > 0 {
+	if opts := serveLoadStreamedDenseOptions(denseFit, residentQ4K || (cpuOffloadExperts && cpuOffloadArm), streamedOffload, streamedBound); len(opts) > 0 {
 		q4kOpts = append(q4kOpts, opts...)
 	} // #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed â€” the ~50-100x

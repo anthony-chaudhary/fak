@@ -111,7 +111,12 @@ func serveStreamedCPUOffloadCorePlan(ws *ggufload.WeightSource, be compute.Backe
 	if !serveStreamedExpertsCapable(ws) {
 		return plan, plan, false, nil
 	}
-	bound := serveCPUOffloadStreamedResidentBoundForAperture(fit, plan.DeviceTotal(), sharedPool, splitAperture)
+	// G5 (ds41-streamed-resident-margin-omits-transient): the working-set bounds are derived from
+	// the host budget NET of the other fixed host-resident rows (the V4.1 forward-transient scratch),
+	// never from the gross budget. The ARM SELECTION above stays on the gross fit; only the bounds
+	// move, so a non-V4.1 artifact (reserve 0) is byte-for-byte unchanged.
+	netFit := serveFitNetOfReserve(fit, serveStreamedHostReserve(ws))
+	bound := serveCPUOffloadStreamedResidentBoundForAperture(netFit, plan.DeviceTotal(), sharedPool, splitAperture)
 	// fak#13215: when the device --cpu-offload-experts arm declares a bounded streamed-dense working
 	// set (serveCPUOffloadBoundedDenseOptions, gated on the SAME FAK_STREAM_Q4K knob), the streamed
 	// plan must fold BOTH bounds -- otherwise the historical EstimateCPUOffloadExpertsStreamedMemoryPlan
@@ -120,13 +125,13 @@ func serveStreamedCPUOffloadCorePlan(ws *ggufload.WeightSource, be compute.Backe
 	// declared bounded dense option (the default, every non-streamed serve) this is byte-for-byte
 	// EstimateCPUOffloadExpertsStreamedMemoryPlan.
 	var s compute.MemoryPlan
-	if denseBound, ok := serveBoundedDenseWorkingSetBound(serveCPUOffloadBoundedDenseOptions(be, fit)); ok {
+	if denseBound, ok := serveBoundedDenseWorkingSetBound(serveCPUOffloadBoundedDenseOptions(be, netFit)); ok {
 		// fak#13249: the bounded dense working set must be sized from the budget REMAINING after the
 		// resident expert bound, not from the whole host budget. Deriving both independently at
 		// (1-margin)*avail admitted their SUM (up to ~1.8*avail) and the kernel OOM-killed the serve
 		// mid-staging -- the [HW-WITNESSED] strix3 run. Min keeps a declared bound from inflating past
 		// the remainder the expert fold left.
-		if combined := serveCombinedStreamedDenseResidentBound(fit, bound); combined < denseBound {
+		if combined := serveCombinedStreamedDenseResidentBound(netFit, bound); combined < denseBound {
 			denseBound = combined
 		}
 		s, err = ws.EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan(ranks, bound, denseBound)
@@ -137,6 +142,58 @@ func serveStreamedCPUOffloadCorePlan(ws *ggufload.WeightSource, be compute.Backe
 		return nil, nil, false, err
 	}
 	return plan, s, true, nil
+}
+
+// serveStreamedHostReserve is the host-resident demand the streamed fold must leave room for
+// BEFORE it derives its bounded working sets: the V4.1 native forward's transient scratch +
+// layer-cache high-water, the SAME cfg.V41TransientResidentBytes(serveV41TransientCacheBudget(ws))
+// value appendServeV41TransientCharge charges as the host-scoped v41-forward-transient-scratch row.
+//
+// G5 (fak-private ticket ds41-streamed-resident-margin-omits-transient-20261121): the expert bound
+// (0.9*avail) and the combined dense bound (0.9*(avail-expert) ~= 0.09*avail) were derived from the
+// gross host fit, so their sum is ~0.99*avail before the transient row is appended; any transient
+// above ~1% of avail can never fit. The witnessed aegis refusal (30.4 GiB host, avail 22.38 GiB):
+// expert 21,656,830,095 B + dense 2,165,683,009 B + transient 1,294,860,288 B = 23.39 GiB on all 6
+// fit-commit back-off rungs, because shrinking believed-free shrinks the slack while the transient
+// stays fixed. Subtracting the reserve first keeps the 0.10 margin as genuine slack on the NET
+// remainder, on every rung.
+//
+// The context-sized rows (KV, per-token scratch) are deliberately NOT part of the reserve: the
+// context auto-sizer sizes them AFTER the weights, against what the weights leave, so folding them
+// in here would make the derivation circular. A non-V4.1 artifact, an unreadable header, or an
+// artifact the checkpoint tier cannot stage reports the estimator's own value (0 for non-V4.1), so
+// those plans stay byte-for-byte. An unrepresentable estimate (math.MaxInt64) fails closed:
+// serveFitNetOfReserve floors the net budget at zero and the bounds stream through.
+func serveStreamedHostReserve(ws *ggufload.WeightSource) int64 {
+	if ws == nil || ws.File == nil {
+		return 0
+	}
+	cfg, err := ws.File.Config()
+	if err != nil {
+		return 0
+	}
+	if tb := cfg.V41TransientResidentBytes(serveV41TransientCacheBudget(ws)); tb > 0 {
+		return tb
+	}
+	return 0
+}
+
+// serveFitNetOfReserve is fit with reserve bytes of its headroom-adjusted budget already spoken for,
+// so a bound derived from it via fit.avail() leaves room for the reserved host rows. The result's
+// avail() is exactly fit.avail()-reserve (expressed as a headroom-free Base, so no second headroom
+// truncation can drift it), floored at zero -- a reserve at or above the budget yields a budget the
+// bound derivations read as unprobeable, i.e. a zero (stream-through) bound, never a negative one.
+// A zero reserve, or an unprobeable fit (Base<=0, the fail-open path), returns fit unchanged.
+func serveFitNetOfReserve(fit serveFitBudget, reserve int64) serveFitBudget {
+	if reserve <= 0 || fit.Base <= 0 {
+		return fit
+	}
+	avail := fit.avail()
+	net := avail - reserve
+	if avail <= 0 || net <= 0 {
+		net = 0
+	}
+	return serveFitBudget{Base: net, DenseGPULayers: fit.DenseGPULayers}
 }
 
 // serveCPUOffloadStreamedResidentBoundForPool is the ONE derivation of the bounded host-resident
@@ -246,8 +303,19 @@ func serveCombinedStreamedDenseResidentBound(fit serveFitBudget, expertBound int
 // sharedPool is threaded straight to serveStreamedCPUOffloadPlanForPool so the load arm selects
 // streaming on the GRAND total on an integrated/APU tier (fak#13171/#13172 follow-on).
 func serveStreamedCPUOffloadPathDecision(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (bool, int64, error) {
+	streamed, bound, _, err := serveStreamedCPUOffloadPathNetFit(ggufPath, be, ranks, contextBudgetTokens, fit, sharedPool)
+	return streamed, bound, err
+}
+
+// serveStreamedCPUOffloadPathNetFit is serveStreamedCPUOffloadPathDecision that also returns
+// the NET host fit (serveFitNetOfReserve over serveStreamedHostReserve) the bound was derived from,
+// so the load arm sizes its bounded dense working set (serveLoadStreamedDenseOptions) from the SAME
+// net budget the streamed plan folded -- the load option list and the admitted plan cannot disagree
+// (G5). When streaming is not selected the returned fit is `fit` unchanged.
+func serveStreamedCPUOffloadPathNetFit(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (bool, int64, serveFitBudget, error) {
 	streamed := false
 	bound := int64(0)
+	netFit := fit
 	splitAperture := serveSplitAperture(be)
 	_, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
 		// The decision discards the plan (it only reads its DeviceTotal for the bound), so the
@@ -260,14 +328,15 @@ func serveStreamedCPUOffloadPathDecision(ggufPath string, be compute.Backend, ra
 			// Derive the bound from the SAME resident plan the sizing path used, so the load arm's
 			// WithStreamedExperts working set and the sizing plan cannot disagree. On a shared pool the
 			// device dense transit has already consumed part of the pool, exactly as the plan charged it.
-			streamed, bound = true, serveCPUOffloadStreamedResidentBoundForAperture(fit, plan.DeviceTotal(), sharedPool, splitAperture)
+			netFit = serveFitNetOfReserve(fit, serveStreamedHostReserve(ws))
+			streamed, bound = true, serveCPUOffloadStreamedResidentBoundForAperture(netFit, plan.DeviceTotal(), sharedPool, splitAperture)
 		}
 		return nil, nil
 	})
 	if err != nil {
-		return false, 0, err
+		return false, 0, fit, err
 	}
-	return streamed, bound, nil
+	return streamed, bound, netFit, nil
 }
 
 // fitServeStreamedCPUOffloadPathOnHost is the device-less counterpart of

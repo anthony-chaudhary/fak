@@ -947,6 +947,14 @@ func serveCPUOffloadSizingStreamedPlan(ws *ggufload.WeightSource, be compute.Bac
 	if err != nil || !selected {
 		return nil, false
 	}
+	// G5: charge the V4.1 forward-transient row here too, so the plan-json sizing artifact and the
+	// context auto-sizer see the SAME host demand fit-commit judges (appendServeGGUFDevicePlan
+	// charges it on the load path; the charge is idempotent, so a later append cannot double it).
+	// It is a fixed, config-derived load-time row, not a context-sized one, so the weights-only
+	// contract above still holds: no KV and no per-token rows. Non-V4.1 artifacts add nothing.
+	if cfg, cerr := ws.File.Config(); cerr == nil {
+		streamed = appendServeV41TransientCharge(streamed, cfg, serveV41TransientCacheBudget(ws))
+	}
 	return streamed, true
 }
 
@@ -986,8 +994,10 @@ func serveCPUOffloadSizingDenseBound(ws *ggufload.WeightSource, be compute.Backe
 	if err != nil || !streamed {
 		return declared
 	}
-	expertBound := serveCPUOffloadStreamedResidentBoundForAperture(hostFit, plan.DeviceTotal(), sharedPool, splitAperture)
-	if combined := serveCombinedStreamedDenseResidentBound(hostFit, expertBound); combined < declared {
+	// G5: the SAME net-of-reserve host fit the streamed core plan derives its bounds from.
+	netFit := serveFitNetOfReserve(hostFit, serveStreamedHostReserve(ws))
+	expertBound := serveCPUOffloadStreamedResidentBoundForAperture(netFit, plan.DeviceTotal(), sharedPool, splitAperture)
+	if combined := serveCombinedStreamedDenseResidentBound(netFit, expertBound); combined < declared {
 		return combined
 	}
 	return declared
@@ -1393,14 +1403,25 @@ func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, ranks, contextBudgetToke
 	})
 }
 
+// serveV41TransientDetail names the host-scoped V4.1 forward-transient scratch row.
+const serveV41TransientDetail = "v41-forward-transient-scratch"
+
 // appendServeV41TransientCharge adds the V4.1 native forward's transient
 // high-water to plan as ONE host-scoped scratchpad row (fak#13300), or returns
 // plan unchanged when the config is not V4.1-shaped (estimate 0). cacheBudget is
 // the layer-scoped expert cache bound the runtime will allocate (0 = cache off),
 // so the plan and the loader charge the same bytes. The row is host-scoped
 // because the forward's f32 scratch is anonymous host RAM on the APU tier. It is
-// pure, so the plan-level charge is unit-testable without a loaded model.
+// pure, so the plan-level charge is unit-testable without a loaded model. It is
+// idempotent: a plan that already carries the row (the streamed sizing plan charges
+// it before the context is sized, G5) is returned unchanged, so the row is charged
+// exactly once whichever path appends it first.
 func appendServeV41TransientCharge(plan compute.MemoryPlan, cfg fakmodel.Config, cacheBudget int64) compute.MemoryPlan {
+	for _, d := range plan {
+		if d.Detail == serveV41TransientDetail {
+			return plan
+		}
+	}
 	tb := cfg.V41TransientResidentBytes(cacheBudget)
 	if tb <= 0 {
 		return plan
@@ -1408,7 +1429,7 @@ func appendServeV41TransientCharge(plan compute.MemoryPlan, cfg fakmodel.Config,
 	return append(plan, compute.MemoryDemand{
 		Class:  compute.MemoryScratchpad,
 		Bytes:  tb,
-		Detail: "v41-forward-transient-scratch",
+		Detail: serveV41TransientDetail,
 		Scope:  compute.MemoryScopeHost,
 		DType:  "f32",
 	})
