@@ -32,11 +32,15 @@ func (rt *serveRuntime) servesPureInKernelChat(sf *serveFlags) bool {
 // resolveServeFirstTokenWatchdog resolves the buffered first-token watchdog window for the
 // chat backend this serve resolved and records the effective window and its source as a
 // startup message, so an operator can see why a slow first token was (or was not) cut off.
-// A CPU-backend in-kernel chat defaults to agent.CPUBackendFirstTokenWatchdogTimeout; an
-// explicit FAK_STREAM_STALL_TIMEOUT_S still wins; every other deployment keeps the default.
+// A CPU-backend in-kernel chat, and a device-backend in-kernel chat under
+// --cpu-offload-experts (host-bound prefill), default to
+// agent.CPUBackendFirstTokenWatchdogTimeout; an explicit FAK_STREAM_STALL_TIMEOUT_S still
+// wins; every other deployment keeps the default.
 func (rt *serveRuntime) resolveServeFirstTokenWatchdog(sf *serveFlags) time.Duration {
-	cpu := serveChatDecodesOnCPU(rt.servesPureInKernelChat(sf), rt.chatBackend, rt.useMetal)
-	window, source := agent.ResolveFirstTokenWatchdog(cpu)
+	inKernel := rt.servesPureInKernelChat(sf)
+	cpu := serveChatDecodesOnCPU(inKernel, rt.chatBackend, rt.useMetal)
+	offload := inKernel && sf.cpuOffloadExperts != nil && *sf.cpuOffloadExperts
+	window, source := agent.ResolveFirstTokenWatchdogHostBound(cpu, offload)
 	rt.addStartupMessage(newServeStartupMessage("serve", "first-token-watchdog", "info",
 		fmt.Sprintf("buffered first-token watchdog window %s (source: %s)", window, source)))
 	return window

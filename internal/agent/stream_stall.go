@@ -143,6 +143,9 @@ const (
 	FirstTokenWatchdogSourceEnv FirstTokenWatchdogSource = "env"
 	// FirstTokenWatchdogSourceCPUBackend: no override; the chat decodes on the CPU backend.
 	FirstTokenWatchdogSourceCPUBackend FirstTokenWatchdogSource = "cpu-backend default"
+	// FirstTokenWatchdogSourceCPUOffloadExperts: no override; a device-backend chat whose routed
+	// experts are CPU-offloaded or streamed from the host, so prefill is host-bound.
+	FirstTokenWatchdogSourceCPUOffloadExperts FirstTokenWatchdogSource = "cpu-offload-experts default"
 	// FirstTokenWatchdogSourceDefault: no override; the backend-blind stream idle default.
 	FirstTokenWatchdogSourceDefault FirstTokenWatchdogSource = "default"
 )
@@ -163,11 +166,28 @@ func ResolveFirstTokenWatchdog(cpuBackend bool) (time.Duration, FirstTokenWatchd
 // resolveFirstTokenWatchdog is ResolveFirstTokenWatchdog with the environment value injected,
 // so the resolution rule is provable without mutating process state.
 func resolveFirstTokenWatchdog(envValue string, cpuBackend bool) (time.Duration, FirstTokenWatchdogSource) {
+	return resolveFirstTokenWatchdogHostBound(envValue, cpuBackend, false)
+}
+
+// ResolveFirstTokenWatchdogHostBound is ResolveFirstTokenWatchdog for a chat whose prefill may
+// be host-bound without decoding on the CPU backend: with cpuOffloadExperts the routed expert
+// GEMMs run on (or stream through) host RAM while the device carries only the dense path, so a
+// cold prompt's time to first token is set by the host exactly as on the CPU backend. Absent an
+// in-band FAK_STREAM_STALL_TIMEOUT_S such a chat gets CPUBackendFirstTokenWatchdogTimeout under
+// FirstTokenWatchdogSourceCPUOffloadExperts; a CPU-backend chat keeps its own source.
+func ResolveFirstTokenWatchdogHostBound(cpuBackend, cpuOffloadExperts bool) (time.Duration, FirstTokenWatchdogSource) {
+	return resolveFirstTokenWatchdogHostBound(os.Getenv("FAK_STREAM_STALL_TIMEOUT_S"), cpuBackend, cpuOffloadExperts)
+}
+
+func resolveFirstTokenWatchdogHostBound(envValue string, cpuBackend, cpuOffloadExperts bool) (time.Duration, FirstTokenWatchdogSource) {
 	if d, ok := parseBandedSeconds(envValue, streamStallMinS, streamStallMaxS); ok {
 		return d, FirstTokenWatchdogSourceEnv
 	}
 	if cpuBackend {
 		return CPUBackendFirstTokenWatchdogTimeout, FirstTokenWatchdogSourceCPUBackend
+	}
+	if cpuOffloadExperts {
+		return CPUBackendFirstTokenWatchdogTimeout, FirstTokenWatchdogSourceCPUOffloadExperts
 	}
 	return defaultStreamStallTimeout, FirstTokenWatchdogSourceDefault
 }
