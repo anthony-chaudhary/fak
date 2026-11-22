@@ -72,7 +72,8 @@ importing `internal/` from outside:
 |---|---|---|
 | In this repo (a leaf plus a pull request) | all of them | the rest of this section |
 | Your own module | the kernel-ABI seams re-exported by [`pkg/abi`](pkg/abi/abi.go) | import `pkg/abi`; worked driver in [`examples/extdriver`](examples/extdriver) |
-| Your own module | device compute, loop, lever, store, sandbox and pane seams | not yet — they are sealed under `internal/` |
+| Your own module | the improvement loop: your proposer, metric and search policy, judged by the same keep-bit as Gate 3 | import [`pkg/climb`](pkg/climb/climb.go); a complete outside hill-climb is [`pkg/climb/testdata/climbprobe`](pkg/climb/testdata/climbprobe/main.go) |
+| Your own module | device compute, lever, store, sandbox and pane seams | not yet — they are sealed under `internal/` |
 
 The current count is printed by a test. It also builds a probe under a foreign
 module path and fails if a kernel-ABI seam loses its export:
