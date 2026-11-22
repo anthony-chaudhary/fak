@@ -336,6 +336,13 @@ type schemaTag struct {
 // member per invocation with a single env knob and no per-caller edits.
 func TestSuperloopDriveEnvBatchRaisesDefaultThroughput(t *testing.T) {
 	t.Setenv(superloopBatchEnv, "2")
+	// The real gate reads the ambient repo's lease refs, so any live lease there would
+	// refuse the members and turn this path-selection witness into a fabric probe.
+	orig := superloopDriveAdmitGate
+	t.Cleanup(func() { superloopDriveAdmitGate = orig })
+	superloopDriveAdmitGate = func(root, lane string, tree []string, intent string) (superloopDriveAdmit, func()) {
+		return superloopDriveAdmit{Status: "ADMITTED", Admitted: true, Lease: "lease-" + intent, Tree: tree}, func() {}
+	}
 	root := t.TempDir()
 	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 	var out, errb bytes.Buffer

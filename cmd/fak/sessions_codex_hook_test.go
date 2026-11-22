@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -329,22 +330,47 @@ func TestCodexLoopHookLargeTranscriptUsesProviderProbeWithinBudget(t *testing.T)
 		t.Fatal(err)
 	}
 
+	// Constant time is witnessed as bytes the probe consumes, not wall clock: elapsed
+	// time on a loaded runner says nothing about whether the probe scanned the body.
+	// The budget is raised so a slow runner cannot reach the timeout block, which would
+	// otherwise pass the decision check without the probe having answered.
 	oldBudget := codexLoopHookBudget
-	codexLoopHookBudget = 100 * time.Millisecond
+	codexLoopHookBudget = time.Minute
 	t.Cleanup(func() { codexLoopHookBudget = oldBudget })
+	oldDiagnose := codexLoopHookDiagnose
+	var consumed atomic.Int64
+	codexLoopHookDiagnose = func(r io.Reader, path string) (codexLoopDiagnosis, error) {
+		return probeCodexLoopProvider(&codexProbeCountingReader{r: r, n: &consumed}, path)
+	}
+	t.Cleanup(func() { codexLoopHookDiagnose = oldDiagnose })
+
 	payload := `{"session_id":"` + sessionID + `"}`
-	started := time.Now()
 	var stdout, stderr bytes.Buffer
 	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("hook exit=%d stderr=%s", code, stderr.String())
-	}
-	if elapsed := time.Since(started); elapsed >= codexLoopHookBudget {
-		t.Fatalf("provider probe took %s, budget=%s", elapsed, codexLoopHookBudget)
 	}
 	var block codexLoopHookBlock
 	if err := json.Unmarshal(stdout.Bytes(), &block); err != nil || block.Decision != "block" {
 		t.Fatalf("large direct transcript failed open: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 	}
+	if strings.Contains(block.Reason, codexLoopHookTimeoutReason) || !strings.Contains(block.Reason, "model_provider=openai") {
+		t.Fatalf("block must come from the provider probe, not the budget timeout: %q", block.Reason)
+	}
+	const probeReadCeiling = 64 << 10
+	if got := consumed.Load(); got <= 0 || got > probeReadCeiling {
+		t.Fatalf("provider probe consumed %d bytes of a %d-byte transcript, want (0, %d]: it must stop at the leading session_meta", got, len(chunk), probeReadCeiling)
+	}
+}
+
+type codexProbeCountingReader struct {
+	r io.Reader
+	n *atomic.Int64
+}
+
+func (c *codexProbeCountingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n.Add(int64(n))
+	return n, err
 }
 
 func TestCodexLoopHookGuardedMarkerSkipsReparse(t *testing.T) {
