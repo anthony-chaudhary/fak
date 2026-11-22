@@ -42,6 +42,78 @@
       "parent": "inkling2loop-model-family",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "family": "loop",
+      "kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": [],
+      "aliases": [],
+      "grounding_kind": "symbol",
+      "id": "inkling2loop-matrix",
+      "canonical": "Inkling2LoopMatrix",
+      "definition": "The weight seam of the inkling2_loop forward: a row-major matrix that only exposes dst = W*x, so a host provider can dequantize GGUF rows on the fly and a device provider can run the GEMV on the GPU.",
+      "distinction": "An interface over one weight matrix of the Inkling-2 forward, not a general tensor type or compute.Backend tensor; it carries no dtype, layout or residency of its own.",
+      "distinct_from": [
+        "inkling2loop-model-family"
+      ],
+      "grounding": "Inkling2LoopMatrix"
+    },
+    {
+      "family": "loop",
+      "kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": [],
+      "aliases": [],
+      "grounding_kind": "symbol",
+      "id": "inkling2loop-experts",
+      "canonical": "Inkling2LoopExperts",
+      "definition": "The routed-expert seam of the inkling2_loop forward: a stack of same-shape expert matrices addressed by expert index (ExpertMatVec), backed host-side by GGUF slices or device-side by row views into one stacked upload.",
+      "distinction": "A per-layer expert stack accessor for the Inkling-2 MoE, not a router, scheduler or expert-placement plan; selection stays in the forward.",
+      "distinct_from": [
+        "inkling2loop-model-family"
+      ],
+      "grounding": "Inkling2LoopExperts"
+    },
+    {
+      "family": "loop",
+      "kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": [],
+      "aliases": [],
+      "grounding_kind": "symbol",
+      "id": "inkling2loop-model",
+      "canonical": "Inkling2LoopModel",
+      "definition": "An inkling2_loop GGUF bound to the forward: hyperparameters, weights (host or device providers) and the mapping/device buffers released by Close.",
+      "distinction": "A loaded checkpoint binding for one model family, not the generic model.Model or a serving engine; it has no scheduler, KV pool or sampler.",
+      "distinct_from": [
+        "inkling2loop-model-family"
+      ],
+      "grounding": "Inkling2LoopModel"
+    },
+    {
+      "family": "loop",
+      "kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": [],
+      "aliases": [],
+      "grounding_kind": "symbol",
+      "id": "inkling2loop-new-host",
+      "canonical": "NewInkling2LoopHost",
+      "definition": "Constructor of the inkling2_loop reference forward state (Inkling2LoopHost): validates the loop core against attention-residual blocks and allocates one KV and short-conv state per layer visit.",
+      "distinction": "Builds per-generation forward state for one sequence, not a host process, node or server host.",
+      "distinct_from": [
+        "inkling2loop-model-family"
+      ],
+      "grounding": "NewInkling2LoopHost"
     }
   ]
 }

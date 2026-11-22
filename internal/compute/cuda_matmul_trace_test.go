@@ -34,6 +34,7 @@ func TestCUDAMatMulTracePayloadContract(t *testing.T) {
 		{F32, 2048}, {F16, 1024}, {Q8_0, 576}, {Q2_0, 192},
 		{Q2_K, 168}, {Q3_K, 220}, {Q4_K, 288}, {Q5_K, 352}, {Q6_K, 420},
 		{IQ2_XXS, 132}, {IQ2_XS, 148}, {IQ1_M, 112}, {IQ4_NL, 288}, {NVFP4, 288},
+		{IQ2_S, 164}, {IQ3_XXS, 196}, {IQ3_S, 220},
 	}
 	var last computetrace.Event
 	for _, tc := range cases {
@@ -69,7 +70,7 @@ func TestCUDAMatMulTracePayloadContract(t *testing.T) {
 	}
 	computetrace.Record(batch)
 	for _, bad := range []Tensor{
-		{Dtype: IQ3_S, Shape: []int{2, 256}}, // Not a CUDA MatMul dtype.
+		{Dtype: IQ1_S, Shape: []int{2, 256}}, // Not a CUDA MatMul dtype.
 		{Dtype: IQ2_XXS, Shape: []int{2, 255}},
 		{Dtype: F32, Shape: []int{int(^uint(0) >> 1), 256}},
 	} {

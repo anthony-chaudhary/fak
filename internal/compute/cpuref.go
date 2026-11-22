@@ -40,6 +40,9 @@ type hostBuf struct {
 	f32   []float32
 	i8    []int8
 	nvfp4 bool
+	// nvfp4Scales, when set, holds the NVFP4 block scales apart from the packed
+	// codes in i8 (a row view cannot keep the two planes adjacent).
+	nvfp4Scales []int8
 }
 
 // Ready reports the host buffer materialized; the CPU reference is synchronous so it is always true.
@@ -99,6 +102,9 @@ func (c *cpuBackend) CloneTensor(t Tensor) (Tensor, error) {
 		return Tensor{}, errors.New("cpu-ref: CloneTensor requires host buffer")
 	}
 	out.buf = &hostBuf{f32: append([]float32(nil), h.f32...), i8: append([]int8(nil), h.i8...), nvfp4: h.nvfp4}
+	if h.nvfp4Scales != nil {
+		out.buf.(*hostBuf).nvfp4Scales = append([]int8(nil), h.nvfp4Scales...)
+	}
 	if t.Quant != nil {
 		out.Quant = cloneQuantSpec(t.Quant)
 	}

@@ -861,18 +861,17 @@ static __device__ __forceinline__ float nv4_e4m3fn(uint32_t b) {
   return __uint_as_float(sign | mag);
 }
 
-__global__ void k_nvfp4_w4a16_f32(const uint8_t *Payload, const float *X,
-                                  float *Y, int out, int in, int P,
-                                  float globalScale) {
+__global__ void k_nvfp4_w4a16_f32(const uint8_t *Packed, const uint8_t *Scales,
+                                  const float *X, float *Y, int out, int in,
+                                  int P, float globalScale) {
   const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t outputs = (size_t)P * (size_t)out;
   if (index >= outputs) return;
 
   const int o = (int)(index % (size_t)out);
   const int p = (int)(index / (size_t)out);
-  const size_t weightBytes = (size_t)out * (size_t)in / 2u;
-  const uint8_t *wrow = Payload + (size_t)o * (size_t)in / 2u;
-  const uint8_t *srow = Payload + weightBytes + (size_t)o * (size_t)(in / 16);
+  const uint8_t *wrow = Packed + (size_t)o * (size_t)in / 2u;
+  const uint8_t *srow = Scales + (size_t)o * (size_t)(in / 16);
   const float *xrow = X + (size_t)p * (size_t)in;
 
   float sum = 0.0f;
@@ -886,18 +885,26 @@ __global__ void k_nvfp4_w4a16_f32(const uint8_t *Payload, const float *X,
   Y[index] = __fmul_rn(sum, globalScale);
 }
 
-extern "C" int fcuda_nvfp4_w4a16_f32(const uint8_t *dPayload, const float *dX,
-                                      float *dY, int out, int in, int P,
-                                      float globalScale) {
-  if (!dPayload || !dX || !dY || out <= 0 || in <= 0 || P <= 0 || (in & 15) != 0 ||
+extern "C" int fcuda_nvfp4_w4a16_split_f32(const uint8_t *dPacked, const uint8_t *dScales,
+                                            const float *dX, float *dY, int out, int in,
+                                            int P, float globalScale) {
+  if (!dPacked || !dScales || !dX || !dY || out <= 0 || in <= 0 || P <= 0 || (in & 15) != 0 ||
       globalScale < 0.0f || !isfinite(globalScale))
     return (int)cudaErrorInvalidValue;
   const size_t outputs = (size_t)P * (size_t)out;
   const size_t blocks = (outputs + 255u) / 256u;
   if (blocks > (size_t)UINT_MAX) return (int)cudaErrorInvalidConfiguration;
   FCUDA_TS("k_nvfp4_w4a16_f32", (unsigned int)blocks, k_nvfp4_w4a16_f32<<<(unsigned int)blocks, 256, 0, g_stream>>>(
-      dPayload, dX, dY, out, in, P, globalScale));
+      dPacked, dScales, dX, dY, out, in, P, globalScale));
   return (int)cudaGetLastError();
+}
+
+extern "C" int fcuda_nvfp4_w4a16_f32(const uint8_t *dPayload, const float *dX,
+                                      float *dY, int out, int in, int P,
+                                      float globalScale) {
+  if (!dPayload || out <= 0 || in <= 0) return (int)cudaErrorInvalidValue;
+  return fcuda_nvfp4_w4a16_split_f32(dPayload, dPayload + (size_t)out * (size_t)in / 2u,
+                                     dX, dY, out, in, P, globalScale);
 }
 
 // Q5_K/Q6_K resident dequant-fused GEMV/panel. One warp computes one output row

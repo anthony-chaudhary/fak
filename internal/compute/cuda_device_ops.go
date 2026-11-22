@@ -10,7 +10,7 @@ import (
 // or separate scale storage and must retain their existing upload routes.
 func cudaRawUploadIsVerbatim(dt Dtype) bool {
 	switch dt {
-	case Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ4_XS:
+	case Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ2_S, IQ3_XXS, IQ3_S, IQ4_XS:
 		return true
 	default:
 		return false
@@ -40,6 +40,9 @@ var cudaDeviceOps = [...]CUDADeviceOp{
 	{"matmul", "iq2_xs", "sm_80"},
 	{"matmul", "iq1_m", "sm_80"},
 	{"matmul", "iq4_nl", "sm_80"},
+	{"matmul", "iq2_s", "sm_80"},
+	{"matmul", "iq3_xxs", "sm_80"},
+	{"matmul", "iq3_s", "sm_80"},
 	{"matmul", "iq4_xs", "sm_80"},
 	{"matmul", "nvfp4", "sm_80"},
 	{"routed-expert-gemv", "F8_E4M3+F8_E8M0", "sm_80"},

@@ -57,6 +57,9 @@ type cudaBuf struct {
 	// raw super-block bytes at ptr, so it leaves scales==nil. Freed alongside ptr in Free.
 	scales  unsafe.Pointer
 	scalesN int // bytes at scales (0 when there is no scale side-channel)
+	// view marks a non-owning RowView alias into another buffer: Free and
+	// CloneTensor never act on it. A NVFP4 view carries its scale plane in scales.
+	view bool
 }
 
 // residentBytes is the total VRAM the weight occupies — codes (ptr) plus any scale side-channel.

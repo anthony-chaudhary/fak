@@ -24,6 +24,9 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 		{"matmul", "iq2_xs"}:                          {},
 		{"matmul", "iq1_m"}:                           {},
 		{"matmul", "iq4_nl"}:                          {},
+		{"matmul", "iq2_s"}:                           {},
+		{"matmul", "iq3_xxs"}:                         {},
+		{"matmul", "iq3_s"}:                           {},
 		{"matmul", "q2_k"}:                            {},
 		{"matmul", "iq4_xs"}:                          {},
 		{"matmul", "nvfp4"}:                           {},
@@ -53,7 +56,7 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 		dt := Dtype(value)
 		want := false
 		switch dt {
-		case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, Q3_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ4_XS, NVFP4:
+		case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, Q3_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ2_S, IQ3_XXS, IQ3_S, IQ4_XS, NVFP4:
 			want = true
 		default:
 			// every other dtype, named or not, has no shared CUDA matmul declaration
@@ -131,7 +134,7 @@ func TestCUDAIQWeightCapability(t *testing.T) {
 	// The concrete CPU backend advertises its real packed kernels; hide optional
 	// interfaces to witness a backend that makes no dtype capability promise.
 	unadvertised := struct{ Backend }{Default()}
-	for _, dt := range []Dtype{IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL} {
+	for _, dt := range []Dtype{IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ2_S, IQ3_XXS, IQ3_S} {
 		if !BackendSupportsDeviceWeightDtype(be, dt) {
 			t.Errorf("existing CUDA dtype %s is hidden from the consumed weight probe", dt)
 		}
@@ -167,7 +170,7 @@ func TestCUDAIQWeightCapability(t *testing.T) {
 	if !strings.Contains(string(asyncData), "case cudaRawUploadIsVerbatim(t.Dtype) && as == t.Dtype:\n\t\trequireCUDAUploadLayout(\"cuda UploadAsync\", t, as, class, site)\n\t\tout, fence := c.uploadRawKQuantAsync(t, hb, class, site)") {
 		t.Error("CUDA async packed-upload eligibility lost its shared predicate or matching-dtype guard")
 	}
-	if strings.Count(source, "case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL:") != 2 {
+	if strings.Count(source, "case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ2_S, IQ3_XXS, IQ3_S:") != 2 {
 		t.Fatal("CUDA i-quant declaration requires both single and batched matmul dispatch")
 	}
 }

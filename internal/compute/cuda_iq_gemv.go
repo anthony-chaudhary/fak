@@ -13,7 +13,8 @@ import "strconv"
 // (blockIdx.y = token). Larger prefill batches need a token-tiled kernel, not yet ported.
 const cudaIQGEMVMaxTokens = 65535
 
-// cudaIQGEMV launches the resident IQ2_XXS / IQ2_XS / IQ1_M / IQ4_NL GEMV (cuda/iq_gemv.cuh) for P tokens.
+// cudaIQGEMV launches the resident IQ2_XXS / IQ2_XS / IQ1_M / IQ4_NL (cuda/iq_gemv.cuh) or
+// IQ2_S / IQ3_XXS / IQ3_S (cuda/iq23s_gemv.cuh) GEMV for P tokens.
 // Caller holds cudaMu and has validated out/in against the weight shape (in % 256 == 0 is a
 // NewRawIQ invariant).
 func cudaIQGEMV(dt Dtype, wb *cudaBuf, x, y *C.float, out, in, P int) {
@@ -35,6 +36,12 @@ func cudaIQGEMV(dt Dtype, wb *cudaBuf, x, y *C.float, out, in, P int) {
 		C.fcuda_iq1m_gemv(w, x, y, C.int(out), C.int(in), C.int(P))
 	case IQ4_NL:
 		C.fcuda_iq4nl_gemv(w, x, y, C.int(out), C.int(in), C.int(P))
+	case IQ2_S:
+		C.fcuda_iq2s_gemv(w, x, y, C.int(out), C.int(in), C.int(P))
+	case IQ3_XXS:
+		C.fcuda_iq3xxs_gemv(w, x, y, C.int(out), C.int(in), C.int(P))
+	case IQ3_S:
+		C.fcuda_iq3s_gemv(w, x, y, C.int(out), C.int(in), C.int(P))
 	default:
 		panic(&CUDAOpError{Op: "MatMul", Site: "iq2-gemv-dtype", Msg: "cudaIQGEMV: unsupported dtype " + dt.String(), Class: MemoryActivation})
 	}

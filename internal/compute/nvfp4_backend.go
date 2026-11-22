@@ -86,7 +86,12 @@ func checkedNVFP4WeightPayload(w Tensor) (packed, scales []byte, globalScale flo
 		return nil, nil, 0, err
 	}
 	storage, ok := w.buf.(*hostBuf)
-	if !ok || storage == nil || !storage.nvfp4 || storage.f32 != nil || len(storage.i8) != weightBytes+scaleBytes {
+	if !ok || storage == nil || !storage.nvfp4 || storage.f32 != nil {
+		return nil, nil, 0, fmt.Errorf("%w: invalid packed host payload", ErrNVFP4Shape)
+	}
+	split := storage.nvfp4Scales != nil
+	if split && (len(storage.i8) != weightBytes || len(storage.nvfp4Scales) != scaleBytes) ||
+		!split && len(storage.i8) != weightBytes+scaleBytes {
 		return nil, nil, 0, fmt.Errorf("%w: invalid packed host payload", ErrNVFP4Shape)
 	}
 	q := w.Quant
@@ -96,6 +101,9 @@ func checkedNVFP4WeightPayload(w Tensor) (packed, scales []byte, globalScale flo
 	}
 	payload := i8View(storage.i8)
 	packed, scales, globalScale = payload[:weightBytes], payload[weightBytes:], q.Scale[0]
+	if split {
+		scales = i8View(storage.nvfp4Scales)
+	}
 	if err := nvfp4ValidateScales(scales, globalScale); err != nil {
 		return nil, nil, 0, err
 	}

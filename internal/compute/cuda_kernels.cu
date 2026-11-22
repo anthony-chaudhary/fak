@@ -248,6 +248,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/q3k_mmvq.cuh"
 #include "cuda_v41_routed_mmid.cu"
 #include "cuda/iq_gemv.cuh"
+#include "cuda/iq23s_gemv.cuh"
 // Embedding IQ4_NL reuses iq_gemv's canonical device codebook definition.
 #include "cuda/v41_embed_gather.cuh"
 #include "cuda/iq4xs_mmvq.cuh"

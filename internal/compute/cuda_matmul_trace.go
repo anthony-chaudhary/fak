@@ -105,7 +105,7 @@ func (w Tensor) cudaMatMulTraceWeightBytes() (int64, bool) {
 	}
 	var blockBytes int64
 	switch w.Dtype {
-	case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL:
+	case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ2_S, IQ3_XXS, IQ3_S:
 		bytes, found := RawIQBlockBytes(w.Dtype)
 		if !found {
 			return 0, false

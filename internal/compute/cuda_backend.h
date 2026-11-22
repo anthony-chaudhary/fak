@@ -523,6 +523,11 @@ void fcuda_q2_0_matmul_f32(const uint8_t *dCodes, const float *dScales, const fl
  * launch validation. */
 int fcuda_nvfp4_w4a16_f32(const uint8_t *dPayload, const float *dX, float *dY,
                           int out, int in, int P, float globalScale);
+/* fcuda_nvfp4_w4a16_f32 with the [out,in/16] scale plane at its own pointer, so a
+ * row view of a stacked weight addresses codes and scales independently. */
+int fcuda_nvfp4_w4a16_split_f32(const uint8_t *dPacked, const uint8_t *dScales,
+                                const float *dX, float *dY, int out, int in, int P,
+                                float globalScale);
 enum {
   FCUDA_NVFP4_LT_OK = 0,
   FCUDA_NVFP4_LT_GEOMETRY = -1,
@@ -597,6 +602,11 @@ void fcuda_iq2xs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, in
  * and IQ4_NL (eight 18 B / 32 blocks = 144 B / 256) weights (cuda/iq_gemv.cuh, llama.cpp @571d0d54). */
 void fcuda_iq1m_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
 void fcuda_iq4nl_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+/* fcuda_iq2s_gemv / fcuda_iq3xxs_gemv / fcuda_iq3s_gemv: the same contract over resident verbatim
+ * IQ2_S (82 B / 256), IQ3_XXS (98 B / 256) and IQ3_S (110 B / 256) weights (cuda/iq23s_gemv.cuh). */
+void fcuda_iq2s_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+void fcuda_iq3xxs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+void fcuda_iq3s_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
 /* fcuda_iq4xs_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident verbatim llama.cpp
  * IQ4_XS (136 B / 256: f16 d, u16 scales_h, scales_l[4], qs[128]). P < 32 runs the f32 warp-per-row
  * GEMV, or for P <= 3 with the mmvq decode arm (fcuda_set_q4k_decode_arm(1)) llama.cpp's q8_1 DP4A

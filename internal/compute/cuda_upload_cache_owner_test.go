@@ -186,6 +186,9 @@ const (
 	IQ1_M
 	IQ4_NL
 	IQ4_XS
+	IQ2_S
+	IQ3_XXS
+	IQ3_S
 )
 
 func (d Dtype) Bytes() int {
@@ -249,6 +252,7 @@ type cudaBuf struct {
 	budgetedWeightBytes            int
 	codes                          []int8
 	scaleValues                    []float32
+	view                           bool
 }
 
 func (*cudaBuf) Ready() bool { return true }
