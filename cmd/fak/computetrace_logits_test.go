@@ -109,3 +109,16 @@ func TestComputeTraceLogitsDumpThreadsOffloadAndContext(t *testing.T) {
 		t.Fatalf("code=%d offload=%v context=%d stderr=%s", code, gotOffload, gotContext, stderr.String())
 	}
 }
+
+func TestConfigureLogitDumpSessionCarriesCPUOffloadExperts(t *testing.T) {
+	for _, offload := range []bool{false, true} {
+		s := &fakmodel.Session{}
+		configureLogitDumpSession(s, true, offload)
+		if !s.Quant || !s.Q4K {
+			t.Fatalf("offload=%v: Quant=%v Q4K=%v, want both true", offload, s.Quant, s.Q4K)
+		}
+		if s.CPUOffloadExperts != offload {
+			t.Fatalf("CPUOffloadExperts=%v, want %v: the dump must free ring-less offload stages per call as serve does", s.CPUOffloadExperts, offload)
+		}
+	}
+}

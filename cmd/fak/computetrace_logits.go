@@ -40,6 +40,15 @@ func runComputeTraceLogits(stdout, stderr io.Writer, args []string) int {
 	}
 }
 
+// configureLogitDumpSession applies the per-session modes the serve planner sets
+// (inkernel_decode.go), so a dump runs the same routed-expert lifetime as serve:
+// without CPUOffloadExperts the ring-less offload stages memoize on the device and
+// a checkpoint larger than the card OOMs mid-forward.
+func configureLogitDumpSession(s *fakmodel.Session, q4k, cpuOffloadExperts bool) {
+	s.Quant, s.Q4K = true, q4k
+	s.CPUOffloadExperts = cpuOffloadExperts
+}
+
 // runComputeTraceLogitsDump loads the model once through the serve loader and
 // records full logit vectors for raw-token prompts. The process environment
 // selects the configuration under test; it is captured in the manifest.
@@ -123,7 +132,7 @@ func runComputeTraceLogitsDump(stdout, stderr io.Writer, args []string) int {
 		if halo && backend != nil {
 			s.SetExecutionPolicy(fakmodel.ExecutionPolicyDeviceOnly)
 		}
-		s.Quant, s.Q4K = true, q4k
+		configureLogitDumpSession(s, q4k, *cpuOffloadExperts)
 		return s, s.Close, nil
 	}
 	identity := logitDumpIdentity(*gguf, backend, q4k, halo)
