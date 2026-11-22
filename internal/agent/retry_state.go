@@ -66,10 +66,19 @@ func RecordSerialReplicaError(ctx context.Context, err error) {
 	}
 }
 
-// WithSerialStreamBoundary observes the existing held-activity callback without
-// replacing it. Reasoning/tool fragments can commit the gateway's role frame
-// before any content reaches the sink, making replica replay irreversible too.
+// WithSerialStreamBoundary observes the existing held-activity callback and live
+// reasoning sink without replacing them. Reasoning/tool fragments can commit the
+// gateway's role frame before any content reaches the sink, making replica
+// replay irreversible too.
 func WithSerialStreamBoundary(ctx context.Context, emitted func()) context.Context {
+	if reasoning := streamReasoningSink(ctx); reasoning != nil {
+		ctx = WithStreamReasoningSink(ctx, func(delta string) error {
+			if delta != "" {
+				emitted()
+			}
+			return reasoning(delta)
+		})
+	}
 	held := streamHeldActivity(ctx)
 	if held == nil {
 		return ctx

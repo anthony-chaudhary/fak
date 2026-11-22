@@ -55,6 +55,34 @@ func streamHeldActivity(ctx context.Context) func() {
 	return f
 }
 
+type streamReasoningSinkKey struct{}
+
+// WithStreamReasoningSink attaches a live channel for the reasoning text a
+// streamed turn would otherwise hold until its Completion. It never carries
+// content or tool-call bytes. A planner that cannot split reasoning live leaves
+// it unused, so the caller still emits whatever StreamReasoningRemainder reports.
+func WithStreamReasoningSink(ctx context.Context, sink StreamSink) context.Context {
+	if sink == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, streamReasoningSinkKey{}, sink)
+}
+
+func streamReasoningSink(ctx context.Context) StreamSink {
+	sink, _ := ctx.Value(streamReasoningSinkKey{}).(StreamSink)
+	return sink
+}
+
+// StreamReasoningRemainder returns the suffix of final that a live reasoning sink
+// has not delivered, given everything it did deliver. A live prefix that diverged
+// from the final split cannot be retracted, so it returns "" rather than repeat it.
+func StreamReasoningRemainder(streamed, final string) string {
+	if !strings.HasPrefix(final, streamed) {
+		return ""
+	}
+	return final[len(streamed):]
+}
+
 // StreamingPlanner is the optional capability a Planner advertises when it can
 // stream the upstream completion token-by-token. It is a strict superset of Planner:
 // CompleteStream behaves exactly like Complete (same sampling, same quarantine, same
@@ -978,6 +1006,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// leaves the stream RUNNING — a slow-but-alive turn still gets every chance to finish.
 	sr.armSoftProgress(p.streamSoftProgressWindow(progressWindow), func() int { return call.attemptsUsed }, p.SoftStallNotify)
 	held := streamHeldActivity(ctx)
+	reasoningSink := streamReasoningSink(ctx)
 	completionProof := newStreamCompletionProof(call.body)
 	promptProgress := newStreamPromptProgress(call.body)
 	sc := bufio.NewScanner(sr)
@@ -1084,6 +1113,13 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			}
 			if held != nil && (ch.Delta.ReasoningContent != "" || len(ch.Delta.ToolCalls) > 0) {
 				held()
+			}
+			// After held(): the caller's irreversible-emission boundary must be set
+			// before reasoning bytes reach its wire.
+			if reasoningSink != nil && ch.Delta.ReasoningContent != "" {
+				if err := reasoningSink(ch.Delta.ReasoningContent); err != nil {
+					return nil, err
+				}
 			}
 			for _, tcd := range ch.Delta.ToolCalls {
 				acc := toolAcc[tcd.Index]

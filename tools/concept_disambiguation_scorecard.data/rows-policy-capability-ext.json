@@ -119,10 +119,11 @@
       "family": "policy-capability",
       "kind": "symbol",
       "definition": "gateway.ToolAdjudication is the per-tool-call record of the kernel's decision on one proposed call \u2014 its id, tool, admitted bit, WireVerdict, and any repaired arguments.",
-      "distinction": "It is the per-CALL decision record, not the aggregate \u2014 unlike AdjudicationSummary, the run-level counter roll-up folded into the exit summary.",
+      "distinction": "It is the per-CALL decision record, not the aggregate \u2014 unlike AdjudicationSummary, the run-level counter roll-up folded into the exit summary \u2014 and not toolAdjudicator, the fak up accessor that returns the gateway producing these records.",
       "distinct_from": [
         "verdict",
-        "adjudicateProposed (gateway)"
+        "adjudicateProposed (gateway)",
+        "policy-capability-turnkey-tool-adjudicator"
       ],
       "aliases": [],
       "grounding": "tooladjudication",

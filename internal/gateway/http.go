@@ -1111,8 +1111,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
-	finish := s.applyAdjudicatedTurn(&asst, adjs, kept, dropped, servedHits, servedText, bodyRefused, comp.FinishReason)
+	finish, adjs := s.AdjudicateAssistantTurn(ctx, &asst, nil, comp.FinishReason, reqTrace)
 
 	// Echo the model the UPSTREAM reported it served (#82); fall back to the client's
 	// requested model (or, if it omitted one, the configured model) when the upstream

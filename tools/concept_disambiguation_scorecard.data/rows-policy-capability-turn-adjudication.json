@@ -1,0 +1,100 @@
+{
+  "rows": [
+    {
+      "id": "policy-capability-adjudicate-assistant-turn",
+      "canonical": "AdjudicateAssistantTurn (gateway)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "gateway.Server.AdjudicateAssistantTurn runs every tool call a BUFFERED assistant turn proposes through the served chat floor and rewrites the message in place: only admitted calls survive, refusal or served-inline text is folded into Content, and it returns the OpenAI finish_reason plus one ToolAdjudication per proposed call.",
+      "distinction": "It is the per-TURN entry point over a whole buffered assistant message, not the adjudicator itself (the pre-call reference monitor that decides one call), and not its streamed twin AdjudicateStreamedToolCalls, which cannot blank prose already on the wire.",
+      "distinct_from": [
+        "adjudicator",
+        "policy-capability-adjudicate-streamed-tool-calls"
+      ],
+      "aliases": [],
+      "grounding": "adjudicateassistantturn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "policy-capability-adjudicate-streamed-tool-calls",
+      "canonical": "AdjudicateStreamedToolCalls (gateway)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "gateway.Server.AdjudicateStreamedToolCalls is the streamed twin of AdjudicateAssistantTurn: it adjudicates the tool calls of a turn whose prose has already been streamed, blanks nothing, and returns a StreamedToolAdjudication whose Trailer carries the refusal or served-inline text the stream appends.",
+      "distinction": "It adjudicates STREAMED calls after the prose is on the wire (append a trailer), unlike AdjudicateAssistantTurn, which rewrites a buffered message in place; neither is the adjudicator, which decides a single call.",
+      "distinct_from": [
+        "adjudicator",
+        "policy-capability-adjudicate-assistant-turn"
+      ],
+      "aliases": [],
+      "grounding": "adjudicatestreamedtoolcalls",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "policy-capability-apply-adjudicated-turn",
+      "canonical": "applyAdjudicatedTurn (gateway)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "gateway.Server.applyAdjudicatedTurn folds one already-adjudicated proposal set into the assistant message the OpenAI wire carries (refused-body blanking, vDSO served-inline text, the livelock advisory note) and returns the finish_reason: tool_calls while calls survive, stop when every proposal was refused or served inline, else the upstream finish.",
+      "distinction": "It APPLIES verdicts that were already reached to the wire message; it decides nothing. Deciding is the adjudicator's job, and AdjudicateAssistantTurn is the caller that both decides and then applies.",
+      "distinct_from": [
+        "adjudicator",
+        "policy-capability-adjudicate-assistant-turn"
+      ],
+      "aliases": [],
+      "grounding": "applyadjudicatedturn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "policy-capability-turnkey-tool-adjudicator",
+      "canonical": "toolAdjudicator (fak up turnkey server)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "turnkeyServer.toolAdjudicator (cmd/fak) returns the gateway.Server that adjudicates the fak up server's proposed tool calls; a server built outside startTurnkeyServer shares one lazily built process default, so no construction path returns a proposed call unadjudicated.",
+      "distinction": "It is a fak up ACCESSOR that hands back the gateway doing the adjudication (toolAdjudicatOR, a provider), not ToolAdjudicatION, the per-call decision record that gateway produces, and not the adjudicator itself (the reference monitor inside that gateway); it exists so fak up applies the same served chat floor as serve.",
+      "distinct_from": [
+        "adjudicator",
+        "x-policy-capability-tooladjudication",
+        "policy-capability-adjudicate-assistant-turn"
+      ],
+      "aliases": [],
+      "grounding": "tooladjudicator",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "policy-capability-turnkey-adjudication-unavailable",
+      "canonical": "writeTurnkeyAdjudicationUnavailable (fak up)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "writeTurnkeyAdjudicationUnavailable (cmd/fak) writes the HTTP 502 server_error JSON body fak up returns when its tool adjudicator cannot be built, so a turn with proposed tool calls fails closed rather than reaching the client unadjudicated.",
+      "distinction": "It reports that ADJUDICATION ITSELF IS UNAVAILABLE (an infrastructure failure, 502), not a refusal verdict: a denied call is an adjudicator decision folded into the turn by applyAdjudicatedTurn, while this path means no decision could be made.",
+      "distinct_from": [
+        "adjudicator",
+        "policy-capability-apply-adjudicated-turn"
+      ],
+      "aliases": [],
+      "grounding": "writeturnkeyadjudicationunavailable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -18,6 +18,8 @@ type DeltaChunk struct {
 	Tokens  int
 	held    bool
 	barrier bool // serialized protocol event: never merge through this boundary
+	// reasoning carries reasoning_content text; it never merges with content.
+	reasoning bool
 }
 
 // These are per-request transport buffers, not model/context budgets. Even a
@@ -75,6 +77,15 @@ func (s *CoalescingSender) Send(text string, tokens int) error {
 
 func (s *CoalescingSender) activity() error { return s.send(DeltaChunk{held: true}) }
 
+// reasoning queues live reasoning text in the same order as content, on its own
+// delta field: it never merges with a content fragment.
+func (s *CoalescingSender) reasoning(text string) error {
+	if text == "" {
+		return nil
+	}
+	return s.send(DeltaChunk{Text: text, reasoning: true})
+}
+
 // barrier queues an already-serialized protocol event in the same bounded order
 // as text. send clones its backing bytes; the caller retains no mutable loan.
 func (s *CoalescingSender) barrier(frame string) error {
@@ -109,7 +120,7 @@ func (s *CoalescingSender) send(chunk DeltaChunk) error {
 		s.mu.Unlock()
 		return nil
 	}
-	merge := !s.preserveChunks && !chunk.held && !chunk.barrier && last >= 0 && !s.pending[last].held && !s.pending[last].barrier
+	merge := !s.preserveChunks && !chunk.held && !chunk.barrier && last >= 0 && !s.pending[last].held && !s.pending[last].barrier && s.pending[last].reasoning == chunk.reasoning
 	if len(chunk.Text) > streamPendingBytes-s.bufferedBytes || (!merge && s.bufferedEvents >= streamPendingEvents) {
 		s.mu.Unlock()
 		s.fail(errStreamBackpressure)

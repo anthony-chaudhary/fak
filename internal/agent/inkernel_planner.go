@@ -578,6 +578,15 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 		}
 		return comp, err
 	}
+	reasoningSink := streamReasoningSink(ctx)
+	newProjector := func(rendered string) *inKernelStreamProjector {
+		startsInReasoning := strings.HasSuffix(rendered, qwenThinkAssistantSeed)
+		projector := newInKernelStreamProjector(sink, sp.Stop, startsInReasoning)
+		projector.spans.deferTools = true
+		projector.spans.reasoning = reasoningSink
+		projector.spans.reasoningAtClose = startsInReasoning && (sp.ThinkingBudget == nil || *sp.ThinkingBudget <= 0)
+		return projector
+	}
 	var projector *inKernelStreamProjector
 	if p.nativeChatTemplate != nil {
 		// Seed projection from the actual once-prepared/shrunk prompt, not a
@@ -592,8 +601,7 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 				return nil
 			}
 			preparedIdentity = identity
-			projector = newInKernelStreamProjector(sink, sp.Stop, strings.HasSuffix(rendered, qwenThinkAssistantSeed))
-			projector.spans.deferTools = true
+			projector = newProjector(rendered)
 			return nil
 		})
 	} else {
@@ -601,8 +609,7 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 		if raw, selected := p.spmRawStreamPrompt(messages, sp); selected {
 			rendered = raw
 		}
-		projector = newInKernelStreamProjector(sink, sp.Stop, strings.HasSuffix(rendered, qwenThinkAssistantSeed))
-		projector.spans.deferTools = true
+		projector = newProjector(rendered)
 	}
 	comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
 		if sinkErr != nil || tokenPiece == "" {
@@ -780,6 +787,19 @@ type toolSpanGuard struct {
 	trailingSpace       strings.Builder
 	closers             []string
 	cap                 int
+	// reasoning, when set, receives the first <think> span's body (vLLM's streaming
+	// reasoning_content), trimmed the way splitReasoning trims it, and only while the
+	// bytes seen so far already fix the final split; StreamReasoningRemainder covers
+	// the rest.
+	reasoning StreamSink
+	// reasoningAtClose holds a seeded span until its closer. Complete counts the seed's
+	// open tag only under a thinking budget, which the stream knows only when it is
+	// explicit, so without one an unclosed seeded span may still split as content.
+	reasoningAtClose bool
+	reasoningStarted bool
+	reasoningDone    bool
+	reasoningSpace   strings.Builder
+	proseSeen        bool
 }
 
 // toolSpanOpeners lists the explicit tool-call span openers the guard suppresses, each
@@ -870,6 +890,19 @@ func (g *toolSpanGuard) drainSpan() error {
 		if idx := strings.Index(buf, closer); idx >= 0 {
 			tail := buf[idx+len(closer):]
 			wasReasoning := g.spanReasoning
+			if g.liveReasoning() {
+				body := buf[:idx]
+				if g.reasoningAtClose && strings.Contains(body, thinkOpen) {
+					// Only Complete's budget decides whether the split skips to this
+					// inner open, so the remainder carries the whole span.
+					body = ""
+				}
+				if err := g.emitReasoning(body); err != nil {
+					return err
+				}
+				g.reasoningSpace.Reset()
+				g.reasoningDone = true
+			}
 			g.span.Reset()
 			g.inSpan = false
 			g.spanReasoning = false
@@ -884,11 +917,66 @@ func (g *toolSpanGuard) drainSpan() error {
 			return g.drainHeld()
 		}
 	}
+	if g.liveReasoning() && !g.reasoningAtClose {
+		// Forward the reasoning body as it decodes; only a possible split closer waits.
+		keep := partialCloserSuffix(buf, g.closers)
+		if err := g.emitReasoning(buf[:len(buf)-keep]); err != nil {
+			return err
+		}
+		g.span.Reset()
+		g.span.WriteString(buf[len(buf)-keep:])
+		return nil
+	}
 	if g.closers == nil || len(buf) > g.cap {
 		// No terminator will arrive: drop the rest of the turn.
+		if g.liveReasoning() {
+			g.reasoningDone = true
+		}
 		g.span.Reset()
 	}
 	return nil
+}
+
+// liveReasoning reports whether the open span is the first reasoning span and a
+// reasoning sink wants its bytes. Later spans keep the held behavior because
+// splitReasoning reports only the first block.
+func (g *toolSpanGuard) liveReasoning() bool {
+	return g.reasoning != nil && g.inSpan && g.spanReasoning && !g.reasoningDone
+}
+
+// emitReasoning applies splitReasoning's TrimSpace incrementally: leading
+// whitespace is dropped and trailing whitespace waits for later reasoning text.
+func (g *toolSpanGuard) emitReasoning(text string) error {
+	if !g.reasoningStarted {
+		text = strings.TrimLeftFunc(text, unicode.IsSpace)
+		if text == "" {
+			return nil
+		}
+		g.reasoningStarted = true
+	}
+	text = g.reasoningSpace.String() + text
+	g.reasoningSpace.Reset()
+	visible := strings.TrimRightFunc(text, unicode.IsSpace)
+	g.reasoningSpace.WriteString(text[len(visible):])
+	if visible == "" {
+		return nil
+	}
+	return g.reasoning(visible)
+}
+
+// partialCloserSuffix is the length of the longest suffix of s that is a proper
+// prefix of one of closers.
+func partialCloserSuffix(s string, closers []string) int {
+	best := 0
+	for _, closer := range closers {
+		for n := min(len(closer)-1, len(s)); n > best; n-- {
+			if strings.HasPrefix(closer, s[len(s)-n:]) {
+				best = n
+				break
+			}
+		}
+	}
+	return best
 }
 
 // drainHeld scans buffered prose for the earliest confirmed opener. Text before it is
@@ -927,6 +1015,10 @@ func (g *toolSpanGuard) drainHeld() error {
 		g.inSpan = true
 		g.spanReasoning = matchedReasoning
 		g.closers = matched
+		if matchedReasoning && g.proseSeen {
+			// Earlier prose may hold the </think> the final split reasons up to.
+			g.reasoningDone = true
+		}
 		return g.drainSpan()
 	}
 	if keep := partialOpenerSuffix(buf); keep > 0 {
@@ -945,6 +1037,9 @@ func (g *toolSpanGuard) drainHeld() error {
 func (g *toolSpanGuard) emitText(text string) error {
 	if text == "" {
 		return nil
+	}
+	if g.reasoning != nil && !g.proseSeen {
+		g.proseSeen = strings.TrimSpace(text) != ""
 	}
 	if g.deferTools {
 		if g.deferred {

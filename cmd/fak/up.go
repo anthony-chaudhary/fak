@@ -492,6 +492,8 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// The capability floor (and FAK_PROFILE) `fak serve` installs by default.
+	applyFloorWithProfile("", "")
 	server, err := startTurnkeyServer(ctx, plan, *addr, *mock)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak up: %v\n", err)
@@ -601,6 +603,9 @@ type turnkeyServer struct {
 	// agentWarmReleaseOnce makes the planner's startup-warm release fire exactly
 	// once across Close/Shutdown/idle-stop convergence.
 	agentWarmReleaseOnce sync.Once
+	// adjudicator runs every proposed tool call through the serve floor before
+	// the wire (toolAdjudicator). It is closed with the residency release.
+	adjudicator *gateway.Server
 	// idleExit stops the resident server after a bounded idle window so the GPU
 	// lease and model residency are released instead of pinned for the process
 	// lifetime (#13135). Nil preserves the historical lifetime holder.
@@ -765,6 +770,9 @@ func (s *turnkeyServer) releaseResidency() {
 			s.residencyRelease()
 		}
 		_ = s.native.Close()
+		if s.adjudicator != nil {
+			s.adjudicator.Close()
+		}
 	})
 }
 
@@ -981,25 +989,32 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 		// WarmPrefix runs after the KV prefix (FAK_SERVE_STARTUP_WARM=off disarms).
 		installServeAuxWarm(planner, serveAuxWarmFactsFor(native.Model, nativeModelPath, agentWarmWorkspace), os.Getenv, os.Stderr, "up")
 	}
+	engineID := "inkernel"
+	if mock {
+		engineID = "mock"
+	}
+	adjudicator, err := newTurnkeyToolAdjudicator(engineID)
+	if err != nil {
+		_ = native.Close()
+		return nil, fmt.Errorf("tool-call adjudicator: %w", err)
+	}
 	// Boot work (model load + planner construction) is complete here; the server
 	// flips to ready immediately before binding the listener. A configured agent
 	// warm holds readiness until a live receipt is observed (agent_warm_pending).
 	ready.markReady()
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
+		adjudicator.Close()
 		_ = native.Close()
 		return nil, fmt.Errorf("listen on %s: %w", addr, err)
 	}
 
-	engineID := "inkernel"
-	if mock {
-		engineID = "mock"
-	}
 	ts := &turnkeyServer{
 		plan:          plan,
 		mock:          mock,
 		engineID:      engineID,
 		planner:       planner,
+		adjudicator:   adjudicator,
 		metalDecision: capturedMetalDecision,
 		native:        native,
 		listener:      ln,
@@ -1160,6 +1175,7 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	answer := agent.Message{Role: agent.RoleAssistant}
 	var usage agent.Usage
 	var nativeReceipt *fakmodel.NativeInferenceReceipt
+	var adjudications []gateway.ToolAdjudication
 
 	if !s.mock && s.planner != nil {
 		sampleOpts := turnkeyChatSampleOpts(req, s.plan.ContextBudgetTokens)
@@ -1194,6 +1210,14 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		nativeReceipt = comp.NativeInference
 		if comp.FinishReason != "" {
 			finishReason = comp.FinishReason
+		}
+		if len(answer.ToolCalls) > 0 {
+			adjudicator, err := s.toolAdjudicator()
+			if err != nil {
+				writeTurnkeyAdjudicationUnavailable(w)
+				return
+			}
+			finishReason, adjudications = adjudicator.AdjudicateAssistantTurn(r.Context(), &answer, req.Tools, finishReason, turnkeyRequestTrace(r))
 		}
 		if len(answer.ToolCalls) > 0 {
 			finishReason = "tool_calls"
@@ -1264,6 +1288,9 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 			}
 			if finishReason != nil {
 				chunk["usage"] = usage
+				if len(adjudications) > 0 {
+					chunk["fak"] = gateway.FakExt{Adjudications: adjudications}
+				}
 			}
 			raw, _ := json.Marshal(chunk)
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
@@ -1273,6 +1300,9 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		}
 
 		sendChunk(map[string]any{"role": "assistant"}, nil)
+		if answer.ReasoningContent != "" {
+			sendChunk(map[string]any{"reasoning_content": answer.ReasoningContent}, nil)
+		}
 		if answer.Content != "" {
 			sendChunk(map[string]any{"content": answer.Content}, nil)
 		}
@@ -1308,8 +1338,14 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		},
 		Usage: usage,
 	}
+	if len(adjudications) > 0 {
+		resp.Fak = &gateway.FakExt{Adjudications: adjudications}
+	}
 	if req.Fak != nil && req.Fak.NativeInferenceReceipt {
-		resp.Fak = &gateway.FakExt{NativeInferenceReceipt: nativeReceipt}
+		if resp.Fak == nil {
+			resp.Fak = &gateway.FakExt{}
+		}
+		resp.Fak.NativeInferenceReceipt = nativeReceipt
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }

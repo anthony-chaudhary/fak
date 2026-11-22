@@ -842,6 +842,29 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		flusher.Flush()
 		return nil
 	}
+	// Reasoning streams on its own delta field, outside the lift-guard and the
+	// content reconciliation: it is never content and never executable. Its own
+	// UTF-8 buffer keeps a split rune from reaching the wire as a replacement char.
+	var streamedReasoning strings.Builder
+	emitReasoning := func(reasoningDelta string) error {
+		if reasoningDelta == "" {
+			return nil
+		}
+		if !started {
+			if err := heldActivity(); err != nil {
+				return err
+			}
+		}
+		hb.recordStreamEvent(len(reasoningDelta))
+		streamedReasoning.WriteString(reasoningDelta)
+		var werr error
+		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
+			werr = writeSSEData(w, chunk(ChatDelta{ReasoningContent: reasoningDelta}, nil, nil))
+		})
+		lastWrite = time.Now()
+		return werr
+	}
+	reasoningFragments := newUTF8FragmentBuffer(emitReasoning)
 	// The sink streams prose through the lift-guard so a text-form tool-call dialect a
 	// model buries in content never reaches the wire before adjudication. Whatever the
 	// guard withheld is reconciled against the buffered post-lift content below.
@@ -907,6 +930,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	began := time.Now()
 	sink := utf8Fragments.write
 	held := func() { _ = heldActivity() }
+	reasoningSink := reasoningFragments.write
 	var sender *CoalescingSender
 	senderJoined := false
 	if sw.control != nil {
@@ -916,6 +940,9 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		sender = newCoalescingSender(liveCtx, true, func(chunk DeltaChunk) error {
 			if chunk.held {
 				return heldActivity()
+			}
+			if chunk.reasoning {
+				return reasoningFragments.write(chunk.Text)
 			}
 			return utf8Fragments.write(chunk.Text)
 		}, cancelLive)
@@ -928,8 +955,9 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		}()
 		sink = func(text string) error { return sender.Send(text, 0) }
 		held = func() { _ = sender.activity() }
+		reasoningSink = sender.reasoning
 	}
-	heldCtx := agent.WithStreamHeldActivity(liveCtx, held)
+	heldCtx := agent.WithStreamReasoningSink(agent.WithStreamHeldActivity(liveCtx, held), reasoningSink)
 	turnCtx := plannerTurnContext(heldCtx, nil, req.Messages, s.contextEpoch)
 	var firstDelta firstDeltaClock
 	turnCtx = withTextToolOffer(turnCtx, req.Tools)
@@ -1065,20 +1093,8 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// Adjudicate any proposed tool call BEFORE the client sees it — the load-bearing
 	// invariant, applied whether or not tools were offered (a model can hallucinate a
 	// call even with none offered). Only survivors are emitted.
-	kept, adjs, dropped, servedText, servedHits := s.adjudicateProposedServed(ctx, comp.Message.ToolCalls, reqTrace)
-	if servedHits > 0 {
-		s.metrics.recordServedInline(servedHits)
-	}
-	finish := comp.FinishReason
-	switch {
-	case len(kept) > 0:
-		finish = "tool_calls"
-	case finish == "" || finish == "tool_calls":
-		// No surviving call — either none was proposed, or every hallucinated call
-		// was dropped, every read served inline from the vDSO, or the upstream omitted
-		// a finish_reason. Any of these is a normal stop to an OpenAI client.
-		finish = "stop"
-	}
+	adjudicated := s.AdjudicateStreamedToolCalls(ctx, comp.Message.ToolCalls, nil, comp.FinishReason, reqTrace)
+	kept, adjs, finish := adjudicated.Calls, adjudicated.Adjudications, adjudicated.Finish
 	s.logInferenceTurnAs(reqTrace, "openai_chat_completions", true, comp.Usage, finish, time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(ctx))
 
 	// A final incomplete rune has no later fragment to complete it. Feed it through
@@ -1092,9 +1108,14 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	if err := start(); err != nil {
 		return true
 	}
-	// Reasoning remains held until the finalized turn passes conformance and tool
-	// adjudication. It does not count as live content for TTFT or heartbeat metrics.
-	for _, seg := range segmentContent(comp.Message.ReasoningContent) {
+	// Reasoning the live sink did not deliver (all of it for a planner without a
+	// live reasoning split) is held until the finalized turn passes conformance and
+	// tool adjudication, so the concatenated reasoning deltas equal the completion's
+	// exactly once. The held remainder does not count for TTFT or heartbeat metrics.
+	if err := reasoningFragments.flush(); err != nil {
+		return true
+	}
+	for _, seg := range segmentContent(agent.StreamReasoningRemainder(streamedReasoning.String(), comp.Message.ReasoningContent)) {
 		if err := writeSSEData(w, chunk(ChatDelta{ReasoningContent: seg}, nil, nil)); err != nil {
 			return true
 		}
@@ -1106,35 +1127,11 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	if err := emitContent(remaining); err != nil {
 		return true
 	}
-	// vDSO served-inline (vDSO live in the hot path): a fresh cache hit is emitted as
-	// assistant content; the call was dropped from kept so the client never re-runs it.
-	if servedText != "" {
-		if err := emitContent("\n" + servedText); err != nil {
-			return true
-		}
-	}
-	emittedAdjudicationNote := false
-	if anyLivelock(adjs) {
-		if note := adjudicationNote(adjs); note != "" {
-			if err := emitContent(note); err != nil {
-				return true
-			}
-			emittedAdjudicationNote = true
-		}
-	}
-	// Parity with the buffered path: when every proposed call was refused, give
-	// even a fak-unaware client an actionable note. Preserve the historical
-	// summary for empty prose; with model prose, append the detailed note so
-	// the no-tool finish cannot be mistaken for task completion.
-	if !emittedAdjudicationNote && len(kept) == 0 && dropped > 0 {
-		// The empty-prose summary is the established OpenAI wire shape. With
-		// model prose, append the detailed refusal note after it so clients can
-		// distinguish an all-refused tool turn from a completed answer.
-		note := adjudicationNote(adjs)
-		if guard.streamed() == "" && remaining == "" {
-			note = denySummary(adjs)
-		}
-		if err := emitContent(note); err != nil {
+	// vDSO served-inline answers, then the livelock or all-refused note: even a
+	// fak-unaware client must not mistake an all-refused tool turn for a finished
+	// answer. The empty-prose summary is the established OpenAI wire shape.
+	for _, text := range adjudicated.Trailer(guard.streamed() == "" && remaining == "") {
+		if err := emitContent(text); err != nil {
 			return true
 		}
 	}

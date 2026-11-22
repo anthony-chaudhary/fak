@@ -26,6 +26,10 @@ type turnkeyChatStream struct {
 	model   string
 	started bool
 	content strings.Builder
+	// reasoning is every reasoning_content byte already sent; fak rides the
+	// finish chunk, as on the served stream.
+	reasoning strings.Builder
+	fak       *gateway.FakExt
 }
 
 func newTurnkeyChatStream(w http.ResponseWriter, model string) *turnkeyChatStream {
@@ -40,6 +44,9 @@ func (s *turnkeyChatStream) send(delta map[string]any, finish *string, usage *ag
 	}
 	if usage != nil {
 		chunk["usage"] = *usage
+	}
+	if finish != nil && s.fak != nil {
+		chunk["fak"] = s.fak
 	}
 	raw, err := json.Marshal(chunk)
 	if err != nil {
@@ -75,6 +82,21 @@ func (s *turnkeyChatStream) contentDelta(delta string) error {
 		return err
 	}
 	s.content.WriteString(delta)
+	return nil
+}
+
+// reasoningDelta sends reasoning on its own delta field; it never enters content.
+func (s *turnkeyChatStream) reasoningDelta(delta string) error {
+	if delta == "" {
+		return nil
+	}
+	if err := s.open(); err != nil {
+		return err
+	}
+	if err := s.send(map[string]any{"reasoning_content": delta}, nil, nil); err != nil {
+		return err
+	}
+	s.reasoning.WriteString(delta)
 	return nil
 }
 
@@ -250,7 +272,8 @@ func (s *turnkeyServer) handleChatCompletionsStream(w http.ResponseWriter, r *ht
 	// planner to forward each decoded prose piece live. toolSpanGuard inside
 	// CompleteStream holds explicit tool-call spans back for post-decode adjudication.
 	opts := append(turnkeyChatSampleOpts(req, s.plan.ContextBudgetTokens), agent.WithPerTokenStream(true))
-	comp, err := sp.CompleteStream(turnkeyRequestContext(r.Context()), stream.contentDelta, req.Messages, req.Tools, opts...)
+	ctx := agent.WithStreamReasoningSink(turnkeyRequestContext(r.Context()), stream.reasoningDelta)
+	comp, err := sp.CompleteStream(ctx, stream.contentDelta, req.Messages, req.Tools, opts...)
 	if err != nil {
 		if !stream.started {
 			s.writeInferenceError(w, err)
@@ -280,7 +303,27 @@ func (s *turnkeyServer) handleChatCompletionsStream(w http.ResponseWriter, r *ht
 		}
 		return
 	}
+	// Adjudicate every proposed call before any of them reaches the wire.
+	var adjudicated gateway.StreamedToolAdjudication
+	if len(comp.Message.ToolCalls) > 0 {
+		adjudicator, err := s.toolAdjudicator()
+		if err != nil {
+			if !stream.started {
+				writeTurnkeyAdjudicationUnavailable(w)
+			} else {
+				stream.fail(turnkeyAdjudicationUnavailable, turnkeyAdjudicationUnavailableCode)
+			}
+			return
+		}
+		adjudicated = adjudicator.AdjudicateStreamedToolCalls(r.Context(), comp.Message.ToolCalls, req.Tools, comp.FinishReason, turnkeyRequestTrace(r))
+		if len(adjudicated.Adjudications) > 0 {
+			stream.fak = &gateway.FakExt{Adjudications: adjudicated.Adjudications}
+		}
+	}
 	if err := stream.open(); err != nil {
+		return
+	}
+	if err := stream.reasoningDelta(agent.StreamReasoningRemainder(stream.reasoning.String(), comp.Message.ReasoningContent)); err != nil {
 		return
 	}
 	remaining, err := turnkeyStreamRemainder(stream.content.String(), comp.Message.Content)
@@ -293,9 +336,14 @@ func (s *turnkeyServer) handleChatCompletionsStream(w http.ResponseWriter, r *ht
 			return
 		}
 	}
-	if len(comp.Message.ToolCalls) > 0 {
-		calls := make([]gateway.ChatDeltaToolCall, 0, len(comp.Message.ToolCalls))
-		for i, call := range comp.Message.ToolCalls {
+	for _, text := range adjudicated.Trailer(stream.content.Len() == 0) {
+		if err := stream.contentDelta(text); err != nil {
+			return
+		}
+	}
+	if len(adjudicated.Calls) > 0 {
+		calls := make([]gateway.ChatDeltaToolCall, 0, len(adjudicated.Calls))
+		for i, call := range adjudicated.Calls {
 			calls = append(calls, gateway.ChatDeltaToolCall{Index: i, ID: call.ID, Type: call.Type, Function: call.Function})
 		}
 		if err := stream.send(map[string]any{"tool_calls": calls}, nil, nil); err != nil {
@@ -307,7 +355,7 @@ func (s *turnkeyServer) handleChatCompletionsStream(w http.ResponseWriter, r *ht
 	}
 	finish := comp.FinishReason
 	if len(comp.Message.ToolCalls) > 0 {
-		finish = "tool_calls"
+		finish = adjudicated.Finish
 	} else if finish == "" {
 		finish = "stop"
 	}
