@@ -11,35 +11,37 @@ import (
 // unknown-field refusal.
 func TestDCGMTelemetry(t *testing.T) {
 	t.Run("pinned_vocabulary", func(t *testing.T) {
+		// ID, name and deprecated alias verbatim from go-dcgm const_fields.go
+		// at the pin, ascending by ID.
+		want := []Field{
+			{ID: 140, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_MEMORY_TEMP_CELSIUS", LegacyName: "DCGM_FI_DEV_MEMORY_TEMP", Unit: "C"},
+			{ID: 150, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_GPU_TEMP_CELSIUS", LegacyName: "DCGM_FI_DEV_GPU_TEMP", Unit: "C"},
+			{ID: 155, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_BOARD_POWER_WATTS", LegacyName: "DCGM_FI_DEV_POWER_USAGE", Unit: "W"},
+			{ID: 230, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_XID_ERROR", LegacyName: "DCGM_FI_DEV_XID_ERRORS", Unit: "xid"},
+			{ID: 393, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ROW_REMAP_UNCORRECTABLE_TOTAL", LegacyName: "DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS", Unit: "rows"},
+			{ID: 394, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ROW_REMAP_CORRECTABLE_TOTAL", LegacyName: "DCGM_FI_DEV_CORRECTABLE_REMAPPED_ROWS", Unit: "rows"},
+			{ID: 395, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ROW_REMAP_FAILED", LegacyName: "DCGM_FI_DEV_ROW_REMAP_FAILURE", Unit: "bool"},
+			{ID: 429, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_NVLINK_REPLAY_ERROR_TOTAL", LegacyName: "DCGM_FI_DEV_NVLINK_REPLAY_ERROR_COUNT_TOTAL", Unit: "count"},
+			{ID: 439, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_NVLINK_RECOVERY_ERROR_TOTAL", LegacyName: "DCGM_FI_DEV_NVLINK_RECOVERY_ERROR_COUNT_TOTAL", Unit: "count"},
+		}
 		fields := HealthThermalFields()
-		if len(fields) != 8 {
-			t.Fatalf("expected 8 pinned fields, got %d", len(fields))
+		if len(fields) != len(want) {
+			t.Fatalf("expected %d pinned fields, got %d", len(want), len(fields))
 		}
-		// The pinned IDs are the authority; assert a few verbatim so a drifted
-		// row is caught.
-		want := map[FieldID]Field{
-			FieldXidErrors:                    {ID: FieldXidErrors, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_XID_ERRORS", Unit: "count"},
-			FieldGpuTemp:                      {ID: FieldGpuTemp, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_TEMPERATURE", Unit: "C"},
-			FieldMemoryTemp:                   {ID: FieldMemoryTemp, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_MEMORY_TEMP", Unit: "C"},
-			FieldPowerDraw:                    {ID: FieldPowerDraw, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_POWER_USAGE", Unit: "W"},
-			FieldEccCorrectableRemappedRows:   {ID: FieldEccCorrectableRemappedRows, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ECC_CORRECTABLE_REMAPPED_ROWS", Unit: "rows"},
-			FieldEccUncorrectableRemappedRows: {ID: FieldEccUncorrectableRemappedRows, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ECC_UNCORRECTABLE_REMAPPED_ROWS", Unit: "rows"},
-			FieldNvlinkReplayErrors:           {ID: FieldNvlinkReplayErrors, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_NVLINK_REPLAY_ERROR", Unit: "count"},
-			FieldNvlinkRecoveryRounds:         {ID: FieldNvlinkRecoveryRounds, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_NVLINK_RECOVERY_ROUNDS", Unit: "count"},
-		}
-		for _, f := range fields {
-			w, ok := want[f.ID]
-			if !ok {
-				t.Fatalf("unexpected field ID %d in pinned vocabulary", int(f.ID))
-			}
-			if f != w {
-				t.Fatalf("field %d = %+v, want %+v", int(f.ID), f, w)
+		for i := range want {
+			if fields[i] != want[i] {
+				t.Fatalf("field[%d] = %+v, want %+v", i, fields[i], want[i])
 			}
 		}
-		// Sorted by ID ascending.
-		for i := 1; i < len(fields); i++ {
-			if fields[i-1].ID >= fields[i].ID {
-				t.Fatalf("fields not sorted by ID: %d then %d", int(fields[i-1].ID), int(fields[i].ID))
+		consts := map[FieldID]FieldID{
+			FieldMemoryTemp: 140, FieldGpuTemp: 150, FieldPowerDraw: 155,
+			FieldXidErrors: 230, FieldUncorrectableRemappedRows: 393,
+			FieldCorrectableRemappedRows: 394, FieldRowRemapFailed: 395,
+			FieldNvlinkReplayErrors: 429, FieldNvlinkRecoveryErrors: 439,
+		}
+		for got, w := range consts {
+			if got != w {
+				t.Fatalf("field constant = %d, want %d", int(got), int(w))
 			}
 		}
 	})
@@ -49,15 +51,50 @@ func TestDCGMTelemetry(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FieldByID(%d) error: %v", int(FieldGpuTemp), err)
 		}
-		if f.Name != "DCGM_FI_DEV_TEMPERATURE" || f.Unit != "C" {
-			t.Fatalf("FieldByID(%d) = %+v, want DCGM_FI_DEV_TEMPERATURE C", int(FieldGpuTemp), f)
+		if f.Name != "DCGM_FI_DEV_GPU_TEMP_CELSIUS" || f.Unit != "C" {
+			t.Fatalf("FieldByID(%d) = %+v, want DCGM_FI_DEV_GPU_TEMP_CELSIUS C", int(FieldGpuTemp), f)
+		}
+		// The IDs the vocabulary pinned before it was checked against upstream
+		// are not DCGM health/thermal fields and must be refused.
+		for _, stale := range []FieldID{100, 151, 1004, 1005, 1010, 1011} {
+			if _, err := FieldByID(stale); !errors.Is(err, ErrDCGMFieldUnknown) {
+				t.Fatalf("FieldByID(%d): err = %v, want ErrDCGMFieldUnknown", int(stale), err)
+			}
+		}
+	})
+
+	t.Run("field_by_name", func(t *testing.T) {
+		// Both the current name and the deprecated alias resolve, matching the
+		// upstream name-to-ID map.
+		for name, id := range map[string]FieldID{
+			"DCGM_FI_DEV_GPU_TEMP":                          150,
+			"DCGM_FI_DEV_GPU_TEMP_CELSIUS":                  150,
+			"DCGM_FI_DEV_MEMORY_TEMP":                       140,
+			"DCGM_FI_DEV_POWER_USAGE":                       155,
+			"DCGM_FI_DEV_XID_ERRORS":                        230,
+			"DCGM_FI_DEV_XID_ERROR":                         230,
+			"DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS":       393,
+			"DCGM_FI_DEV_CORRECTABLE_REMAPPED_ROWS":         394,
+			"DCGM_FI_DEV_ROW_REMAP_FAILURE":                 395,
+			"DCGM_FI_DEV_NVLINK_REPLAY_ERROR_COUNT_TOTAL":   429,
+			"DCGM_FI_DEV_NVLINK_RECOVERY_ERROR_COUNT_TOTAL": 439,
+		} {
+			f, err := FieldByName(name)
+			if err != nil || f.ID != id {
+				t.Fatalf("FieldByName(%q) = %+v, %v; want ID %d", name, f, err, int(id))
+			}
+		}
+		for _, bad := range []string{"", "DCGM_FI_DEV_TEMPERATURE", "DCGM_FI_DEV_ECC_CORRECTABLE_REMAPPED_ROWS", "DCGM_FI_DEV_NVLINK_RECOVERY_ROUNDS"} {
+			if _, err := FieldByName(bad); !errors.Is(err, ErrDCGMFieldUnknown) {
+				t.Fatalf("FieldByName(%q): err = %v, want ErrDCGMFieldUnknown", bad, err)
+			}
 		}
 	})
 
 	t.Run("fields_in_group", func(t *testing.T) {
 		health := FieldsInGroup(FieldGroupHealth)
-		if len(health) != 5 {
-			t.Fatalf("expected 5 health fields, got %d", len(health))
+		if len(health) != 6 {
+			t.Fatalf("expected 6 health fields, got %d", len(health))
 		}
 		thermal := FieldsInGroup(FieldGroupThermal)
 		if len(thermal) != 3 {
@@ -72,6 +109,9 @@ func TestDCGMTelemetry(t *testing.T) {
 			if f.Group != FieldGroupThermal {
 				t.Fatalf("thermal group returned non-thermal field %d", int(f.ID))
 			}
+		}
+		if got := FieldsInGroup(FieldGroup(100)); len(got) != 0 {
+			t.Fatalf("FieldsInGroup(100) = %d fields, want 0", len(got))
 		}
 	})
 
@@ -106,7 +146,7 @@ func TestDCGMTelemetry(t *testing.T) {
 				Index: 0,
 				UUID:  "GPU-0",
 				Values: []FieldValue{
-					{Field: Field{ID: FieldGpuTemp, Name: "DCGM_FI_DEV_TEMPERATURE", Unit: "C"}, Value: 45},
+					{Field: Field{ID: FieldGpuTemp, Name: "DCGM_FI_DEV_GPU_TEMP_CELSIUS", Unit: "C"}, Value: 45},
 					{Field: Field{ID: FieldXidErrors, Name: "DCGM_FI_DEV_XID_ERRORS", Unit: "count"}, Value: 0},
 				},
 			},
@@ -114,7 +154,7 @@ func TestDCGMTelemetry(t *testing.T) {
 				Index: 1,
 				UUID:  "GPU-1",
 				Values: []FieldValue{
-					{Field: Field{ID: FieldGpuTemp, Name: "DCGM_FI_DEV_TEMPERATURE", Unit: "C"}, Value: 95},
+					{Field: Field{ID: FieldGpuTemp, Name: "DCGM_FI_DEV_GPU_TEMP_CELSIUS", Unit: "C"}, Value: 95},
 				},
 			},
 		}
@@ -193,7 +233,7 @@ func TestDCGMTelemetry(t *testing.T) {
 			{
 				Index: 0,
 				Values: []FieldValue{
-					{Field: Field{ID: FieldGpuTemp, Name: "DCGM_FI_DEV_TEMPERATURE", Unit: "C"}, Value: 45},
+					{Field: Field{ID: FieldGpuTemp, Name: "DCGM_FI_DEV_GPU_TEMP_CELSIUS", Unit: "C"}, Value: 45},
 					{Field: Field{ID: FieldXidErrors, Name: "DCGM_FI_DEV_XID_ERRORS", Unit: "count"}, Value: 0},
 				},
 			},
@@ -205,8 +245,8 @@ func TestDCGMTelemetry(t *testing.T) {
 		if !strings.Contains(out, "dev0") {
 			t.Fatalf("Render = %q, want 'dev0'", out)
 		}
-		if !strings.Contains(out, "DCGM_FI_DEV_TEMPERATURE=45.0C") {
-			t.Fatalf("Render = %q, want 'DCGM_FI_DEV_TEMPERATURE=45.0C'", out)
+		if !strings.Contains(out, "DCGM_FI_DEV_GPU_TEMP_CELSIUS=45.0C") {
+			t.Fatalf("Render = %q, want 'DCGM_FI_DEV_GPU_TEMP_CELSIUS=45.0C'", out)
 		}
 	})
 }

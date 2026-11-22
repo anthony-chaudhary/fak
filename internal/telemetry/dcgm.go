@@ -1,29 +1,18 @@
-// DIRECT-PORT of the DCGM health and thermal field model from
-// NVIDIA/go-dcgm (Apache-2.0), pinned at
+// DIRECT-PORT of NVIDIA/go-dcgm pkg/dcgm/const_fields.go at
+// bc5d307bece3d373de882978c8503a1c8613e232 (Apache-2.0), https://github.com/NVIDIA/go-dcgm.
+// Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+// Ported: the DCGM_FI_DEV_* field IDs and names for the health and thermal
+// fields, with each field's current upstream name and its deprecated alias.
+// Changes were made.
 //
-//	NVIDIA/go-dcgm@bc5d307bece3d373de882978c8503a1c8613e232
-//	https://github.com/NVIDIA/go-dcgm
-//
-// The field IDs, group IDs, units, and short names below are the closed
-// vocabulary the upstream bindings expose for the health and thermal field
-// groups (the dcgm_fields.h constants the generated Go bindings re-export),
-// cross-checked against the dcgm-exporter default counter set pinned at
-// 4e663a526c4624ad0e18ad816f09b7be2c5348a7. Borrow provenance:
-// docs/research/STUDY-NVIDIA-GO-DCGM-2026-11-06.md, candidate
-// oss-port-nv-godcgm-telemetry-20261106.
-//
-// What fak adds AROUND the ported data: the fail-closed seam. A DCGM reading
-// is only meaningful when the dcgm host-engine service is present, so every
-// read path here REFUSES with ErrDCGMServiceAbsent when the service is not
-// reachable rather than skipping or zero-filling: an absent service must be
-// visible in a receipt, never masquerade as a healthy device. The same
-// fail-closed rule applies to the field vocabulary: a field ID outside the
-// pinned set is refused by FieldByID, so a drifted or invented field can never
-// be rendered into a record.
-//
-// Scope is bindings and headers only: no exporter, no Prometheus sink, no
-// hot-path blocking. The records here extend the device-seam records the
-// NVML port feeds, for the perfledger and hostdiag consumers.
+// What fak adds: a fail-closed seam around that vocabulary. A DCGM reading only
+// means something when the dcgm host-engine service is present, so every read
+// path refuses with ErrDCGMServiceAbsent instead of skipping or zero-filling;
+// an absent service must show up in a receipt, never as a healthy device. A
+// field ID or name outside the pinned set is refused the same way, so a drifted
+// or invented field can never be rendered into a record. The field groups and
+// the health bounds are fak-local: upstream field groups are runtime handles
+// from FieldGroupCreate, not fixed IDs.
 
 package telemetry
 
@@ -39,18 +28,19 @@ import (
 // branch on the error rather than on an empty record.
 var ErrDCGMServiceAbsent = errors.New("telemetry: dcgm service absent")
 
-// ErrDCGMFieldUnknown is returned by FieldByID for a field ID outside the
-// pinned health/thermal vocabulary.
+// ErrDCGMFieldUnknown is returned by FieldByID and FieldByName for a field
+// outside the pinned health/thermal vocabulary.
 var ErrDCGMFieldUnknown = errors.New("telemetry: dcgm field unknown")
 
-// FieldGroup is a DCGM field-group ID (the upstream DcgmFieldGroup_t values).
+// FieldGroup is a fak-local classification of the pinned fields. It is not a
+// DCGM field-group handle: upstream groups are created at runtime.
 type FieldGroup int
 
 const (
-	// FieldGroupHealth is the DCGM health field group (DCGM_FI_HEALTH).
-	FieldGroupHealth FieldGroup = 100
-	// FieldGroupThermal is the DCGM thermal field group (DCGM_FI_THERMAL).
-	FieldGroupThermal FieldGroup = 101
+	// FieldGroupHealth classifies the error and row-remap fields.
+	FieldGroupHealth FieldGroup = iota + 1
+	// FieldGroupThermal classifies the temperature and power fields.
+	FieldGroupThermal
 )
 
 // String renders the group for operator text.
@@ -65,59 +55,58 @@ func (g FieldGroup) String() string {
 	}
 }
 
-// FieldID is a DCGM field ID (the upstream DcgmField_t values).
+// FieldID is a DCGM field ID (the upstream dcgm.Short values).
 type FieldID int
 
-// The pinned health/thermal field vocabulary. The IDs, units, and short names
-// are the upstream DCGM_FI_DEV_* constants the go-dcgm bindings re-export from
-// dcgm_fields.h; they are never reworded or re-sorted — a drifted row would
-// silently change what a receipt says about a device, so the pinned values are
-// asserted verbatim in TestDCGMTelemetry.
+// The pinned field IDs, verbatim from upstream. A drifted ID would silently
+// change what a receipt says about a device, so TestDCGMTelemetry asserts them.
 const (
-	// FieldXidErrors: XID error count (DCGM_FI_DEV_XID_ERRORS).
-	FieldXidErrors FieldID = 100
-	// FieldGpuTemp: GPU temperature in Celsius (DCGM_FI_DEV_TEMPERATURE).
+	// FieldMemoryTemp is DCGM_FI_DEV_MEMORY_TEMP_CELSIUS.
+	FieldMemoryTemp FieldID = 140
+	// FieldGpuTemp is DCGM_FI_DEV_GPU_TEMP_CELSIUS.
 	FieldGpuTemp FieldID = 150
-	// FieldMemoryTemp: memory temperature in Celsius (DCGM_FI_DEV_MEMORY_TEMP).
-	FieldMemoryTemp FieldID = 151
-	// FieldPowerDraw: power draw in watts (DCGM_FI_DEV_POWER_USAGE).
+	// FieldPowerDraw is DCGM_FI_DEV_BOARD_POWER_WATTS.
 	FieldPowerDraw FieldID = 155
-	// FieldEccCorrectableRemappedRows: ECC correctable remapped rows
-	// (DCGM_FI_DEV_ECC_CORRECTABLE_REMAPPED_ROWS).
-	FieldEccCorrectableRemappedRows FieldID = 1004
-	// FieldEccUncorrectableRemappedRows: ECC uncorrectable remapped rows
-	// (DCGM_FI_DEV_ECC_UNCORRECTABLE_REMAPPED_ROWS).
-	FieldEccUncorrectableRemappedRows FieldID = 1005
-	// FieldNvlinkReplayErrors: NVLink replay error count
-	// (DCGM_FI_DEV_NVLINK_REPLAY_ERROR).
-	FieldNvlinkReplayErrors FieldID = 1010
-	// FieldNvlinkRecoveryRounds: NVLink recovery round count
-	// (DCGM_FI_DEV_NVLINK_RECOVERY_ROUNDS).
-	FieldNvlinkRecoveryRounds FieldID = 1011
+	// FieldXidErrors is DCGM_FI_DEV_XID_ERROR; the value is the last XID code,
+	// not a count.
+	FieldXidErrors FieldID = 230
+	// FieldUncorrectableRemappedRows is DCGM_FI_DEV_ROW_REMAP_UNCORRECTABLE_TOTAL.
+	FieldUncorrectableRemappedRows FieldID = 393
+	// FieldCorrectableRemappedRows is DCGM_FI_DEV_ROW_REMAP_CORRECTABLE_TOTAL.
+	FieldCorrectableRemappedRows FieldID = 394
+	// FieldRowRemapFailed is DCGM_FI_DEV_ROW_REMAP_FAILED.
+	FieldRowRemapFailed FieldID = 395
+	// FieldNvlinkReplayErrors is DCGM_FI_DEV_NVLINK_REPLAY_ERROR_TOTAL.
+	FieldNvlinkReplayErrors FieldID = 429
+	// FieldNvlinkRecoveryErrors is DCGM_FI_DEV_NVLINK_RECOVERY_ERROR_TOTAL.
+	FieldNvlinkRecoveryErrors FieldID = 439
 )
 
 // Field is one row of the pinned DCGM field vocabulary.
 type Field struct {
 	// ID is the DCGM field ID.
 	ID FieldID
-	// Group is the field group the ID belongs to.
+	// Group is the fak-local group the field is classified under.
 	Group FieldGroup
-	// Name is the upstream short name (the DcgmField_t constant name).
+	// Name is the current upstream constant name.
 	Name string
+	// LegacyName is the deprecated upstream alias for the same ID, which
+	// dcgm-exporter counter files still use.
+	LegacyName string
 	// Unit is the unit the value is reported in.
 	Unit string
 }
 
-// healthThermalFields is the closed vocabulary the seam exposes.
 var healthThermalFields = []Field{
-	{ID: FieldXidErrors, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_XID_ERRORS", Unit: "count"},
-	{ID: FieldGpuTemp, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_TEMPERATURE", Unit: "C"},
-	{ID: FieldMemoryTemp, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_MEMORY_TEMP", Unit: "C"},
-	{ID: FieldPowerDraw, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_POWER_USAGE", Unit: "W"},
-	{ID: FieldEccCorrectableRemappedRows, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ECC_CORRECTABLE_REMAPPED_ROWS", Unit: "rows"},
-	{ID: FieldEccUncorrectableRemappedRows, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ECC_UNCORRECTABLE_REMAPPED_ROWS", Unit: "rows"},
-	{ID: FieldNvlinkReplayErrors, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_NVLINK_REPLAY_ERROR", Unit: "count"},
-	{ID: FieldNvlinkRecoveryRounds, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_NVLINK_RECOVERY_ROUNDS", Unit: "count"},
+	{ID: FieldMemoryTemp, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_MEMORY_TEMP_CELSIUS", LegacyName: "DCGM_FI_DEV_MEMORY_TEMP", Unit: "C"},
+	{ID: FieldGpuTemp, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_GPU_TEMP_CELSIUS", LegacyName: "DCGM_FI_DEV_GPU_TEMP", Unit: "C"},
+	{ID: FieldPowerDraw, Group: FieldGroupThermal, Name: "DCGM_FI_DEV_BOARD_POWER_WATTS", LegacyName: "DCGM_FI_DEV_POWER_USAGE", Unit: "W"},
+	{ID: FieldXidErrors, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_XID_ERROR", LegacyName: "DCGM_FI_DEV_XID_ERRORS", Unit: "xid"},
+	{ID: FieldUncorrectableRemappedRows, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ROW_REMAP_UNCORRECTABLE_TOTAL", LegacyName: "DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS", Unit: "rows"},
+	{ID: FieldCorrectableRemappedRows, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ROW_REMAP_CORRECTABLE_TOTAL", LegacyName: "DCGM_FI_DEV_CORRECTABLE_REMAPPED_ROWS", Unit: "rows"},
+	{ID: FieldRowRemapFailed, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_ROW_REMAP_FAILED", LegacyName: "DCGM_FI_DEV_ROW_REMAP_FAILURE", Unit: "bool"},
+	{ID: FieldNvlinkReplayErrors, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_NVLINK_REPLAY_ERROR_TOTAL", LegacyName: "DCGM_FI_DEV_NVLINK_REPLAY_ERROR_COUNT_TOTAL", Unit: "count"},
+	{ID: FieldNvlinkRecoveryErrors, Group: FieldGroupHealth, Name: "DCGM_FI_DEV_NVLINK_RECOVERY_ERROR_TOTAL", LegacyName: "DCGM_FI_DEV_NVLINK_RECOVERY_ERROR_COUNT_TOTAL", Unit: "count"},
 }
 
 // HealthThermalFields returns the pinned health/thermal field vocabulary,
@@ -132,7 +121,7 @@ func HealthThermalFields() []Field {
 
 // FieldByID looks up one pinned field by its DCGM field ID, fail-closed: an ID
 // outside the pinned vocabulary is refused with ErrDCGMFieldUnknown rather than
-// guessed, so an invented or drifted field can never be rendered into a record.
+// guessed.
 func FieldByID(id FieldID) (Field, error) {
 	for _, f := range healthThermalFields {
 		if f.ID == id {
@@ -140,6 +129,17 @@ func FieldByID(id FieldID) (Field, error) {
 		}
 	}
 	return Field{}, fmt.Errorf("%w: %d", ErrDCGMFieldUnknown, int(id))
+}
+
+// FieldByName looks up one pinned field by its current upstream name or its
+// deprecated alias, fail-closed like FieldByID.
+func FieldByName(name string) (Field, error) {
+	for _, f := range healthThermalFields {
+		if f.Name == name || f.LegacyName == name {
+			return f, nil
+		}
+	}
+	return Field{}, fmt.Errorf("%w: %q", ErrDCGMFieldUnknown, name)
 }
 
 // FieldsInGroup returns the pinned fields of one group, sorted by field ID.
@@ -164,10 +164,9 @@ type FieldValue struct {
 	Value float64 `json:"value"`
 }
 
-// DeviceRecord is one device's DCGM health/thermal reading. It extends the
-// device-seam records the NVML port feeds: the device identity plus the
-// pinned field values, so a perfledger or hostdiag consumer can fold a DCGM
-// reading into the same record without a second device model.
+// DeviceRecord is one device's DCGM health/thermal reading: the device
+// identity plus the pinned field values, so a perfledger or hostdiag consumer
+// can fold a DCGM reading into its own record without a second device model.
 type DeviceRecord struct {
 	// Index is the device index the service reported.
 	Index int `json:"index"`
@@ -185,7 +184,7 @@ type Service struct {
 	HostEngine string
 }
 
-// Probe reports whether the dcgm host-engine service is present. A nil host
+// Probe reports whether the dcgm host-engine service is present. An empty host
 // engine is absent.
 func Probe(hostEngine string) Service {
 	if hostEngine == "" {
@@ -236,7 +235,7 @@ func (v HealthVerdict) String() string {
 	}
 }
 
-// fieldBounds is the pinned per-field warn/critical bound the verdict folds
+// fieldBounds is the fak-local per-field warn/critical bound the verdict folds
 // against. A value at or above the critical bound is critical; at or above the
 // warn bound is warn; below the warn bound is healthy.
 type fieldBounds struct {
@@ -245,14 +244,15 @@ type fieldBounds struct {
 }
 
 var healthBounds = map[FieldID]fieldBounds{
-	FieldEccCorrectableRemappedRows:   {warn: 1, critical: 10},
-	FieldEccUncorrectableRemappedRows: {warn: 1, critical: 1},
-	FieldXidErrors:                    {warn: 1, critical: 1},
-	FieldNvlinkReplayErrors:           {warn: 1, critical: 10},
-	FieldNvlinkRecoveryRounds:         {warn: 1, critical: 10},
-	FieldGpuTemp:                      {warn: 83, critical: 93},
-	FieldMemoryTemp:                   {warn: 95, critical: 105},
-	FieldPowerDraw:                    {warn: 0, critical: 0}, // power has no health bound; never trips
+	FieldCorrectableRemappedRows:   {warn: 1, critical: 10},
+	FieldUncorrectableRemappedRows: {warn: 1, critical: 1},
+	FieldRowRemapFailed:            {warn: 1, critical: 1},
+	FieldXidErrors:                 {warn: 1, critical: 1},
+	FieldNvlinkReplayErrors:        {warn: 1, critical: 10},
+	FieldNvlinkRecoveryErrors:      {warn: 1, critical: 10},
+	FieldGpuTemp:                   {warn: 83, critical: 93},
+	FieldMemoryTemp:                {warn: 95, critical: 105},
+	FieldPowerDraw:                 {warn: 0, critical: 0}, // power has no health bound; never trips
 }
 
 // HealthVerdictOf folds a set of device records into one verdict: the worst
@@ -296,8 +296,7 @@ func (s Service) Render(records []DeviceRecord) string {
 	fmt.Fprintf(&b, "dcgm (%d devices, %s):", len(records), verdict)
 	for _, r := range records {
 		fmt.Fprintf(&b, " dev%d", r.Index)
-		// Worst value first: sort by value descending so a hot device is the
-		// first thing read.
+		// Highest value first so a hot device is the first thing read.
 		vals := make([]FieldValue, len(r.Values))
 		copy(vals, r.Values)
 		sort.Slice(vals, func(i, j int) bool { return vals[i].Value > vals[j].Value })

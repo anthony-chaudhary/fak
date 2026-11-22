@@ -2755,3 +2755,26 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+## NVIDIA/go-dcgm
+
+Portions of this product are adapted from NVIDIA/go-dcgm: https://github.com/NVIDIA/go-dcgm (pinned at revision bc5d307bece3d373de882978c8503a1c8613e232; the DCGM_FI_DEV_* health and thermal field IDs and names from pkg/dcgm/const_fields.go, ported as internal/telemetry/dcgm.go). Changes were made.
+
+Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+## NVIDIA/go-nvml
+
+Portions of this product are adapted from NVIDIA/go-nvml: https://github.com/NVIDIA/go-nvml (pinned at revision f83235b8e2ea45c52a11a6ba5c7b8049813a1e6b; the NVML return-code vocabulary and device memory/utilization record shapes from pkg/nvml/const.go, pkg/nvml/return.go and pkg/nvml/types_gen.go, and the device getter method names from pkg/nvml/zz_generated.api.go, ported without cgo as internal/telemetry/nvml.go). Changes were made.
+
+Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
+Copyright 2024 NVIDIA CORPORATION
+SPDX-License-Identifier: Apache-2.0
+
+## NVIDIA/go-nvlib
+
+Portions of this product are adapted from NVIDIA/go-nvlib: https://github.com/NVIDIA/go-nvlib (pinned at revision d3f4ca82a973a3ea4f6dd30e7fca3fd5444972be; sysfs PCI discovery from pkg/nvpci/nvpci.go and MIG profile parsing from pkg/nvlib/device/mig_profile.go, ported as internal/telemetry/nvlib.go). Changes were made.
+
+Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
+Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+SPDX-License-Identifier: Apache-2.0
