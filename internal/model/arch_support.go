@@ -74,6 +74,9 @@ func refuseUnsupportedHybridArch(cfg Config, man map[string]tensorMeta) error {
 	if err := refuseQwen4ExpNative(cfg); err != nil {
 		return err
 	}
+	if err := refuseInkling2LoopNative(cfg); err != nil {
+		return err
+	}
 	if cfg.IsQwen35Hybrid() {
 		return nil // layer_types marks the linear-attention layers — GDN forward is wired
 	}

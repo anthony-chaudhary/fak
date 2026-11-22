@@ -1,0 +1,27 @@
+{
+  "rows": [
+    {
+      "id": "loop-inkling2-loopconfig",
+      "canonical": "loopconfig",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Inkling2LoopConfig (internal/model/inkling2loop_spine.go): the pinned identity and geometry of a Thinking Machines inkling2_loop checkpoint, a looped MoE transformer whose stored layers 6..17 run three passes per token (48 layer visits from 24 stored layers). Its loop_config field (Inkling2LoopPasses) is the per-token layer-pass schedule: core_start, core_end, num_passes, gate_rank, is_varloop.",
+      "distinction": "A model-architecture layer-pass schedule inside one forward step, not a control loop: it has nothing to do with the agent loop, goal loop, super-loop, meta-loop or loop_count rows, which are process or orchestration loops. It is a load-time validated description that fak's native forward refuses to execute (UnsupportedInkling2LoopExecutionError).",
+      "distinct_from": [
+        "loop-ring",
+        "x-disambig-loopcount",
+        "loop-metaloop"
+      ],
+      "aliases": [
+        "Inkling2LoopConfig",
+        "loop_config"
+      ],
+      "grounding": "Inkling2LoopConfig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
