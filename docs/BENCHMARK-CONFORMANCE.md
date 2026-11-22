@@ -268,3 +268,24 @@ unless stated.
   compute a baseline.
 - The catalog module also re-exports `pareto-sweep` and
   `max-goodput-under-slo`; they are not treated in this section.
+
+## Streaming usage reporting (aiperf openai_chat)
+
+> **NOTICE / attribution:** Ported from `ai-dynamo/aiperf@ab610ad`
+> (Apache-2.0), file `src/aiperf/endpoints/openai_chat.py`
+> (`format_payload`, `_ensure_include_usage`).
+
+- A streaming chat request (`stream: true`) carries
+  `stream_options.include_usage: true`. OpenAI-compatible servers (vLLM,
+  SGLang) emit the trailing `usage` chunk only when asked, so without it a
+  streamed run reports completion tokens as unknown instead of measured.
+- Caller-supplied `stream_options` are never clobbered: an explicit
+  `include_usage: false` is honored.
+- A non-streaming request carries no `stream_options`; servers reject the
+  field when `stream` is false.
+- Stored payloads replayed from a dataset are sent byte-for-byte; the rule
+  applies to the synthetic request builder only.
+
+In fak, `cmd/loadgen` applies the rule in `syntheticChatRequest` /
+`withIncludeUsage`; witness `TestIncludeUsageConformance`
+(`go test ./cmd/loadgen -run ^TestIncludeUsageConformance$ -count=1`).

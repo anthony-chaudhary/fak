@@ -31,6 +31,8 @@ type chatRequest struct {
 	MaxTokens   int           `json:"max_tokens,omitempty"`
 	Temperature float64       `json:"temperature"`
 	Stream      bool          `json:"stream"`
+	// StreamOptions is nil (omitted) unless streaming; see withIncludeUsage.
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
 }
 
 type chatMessage struct {
@@ -584,13 +586,7 @@ func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight, body
 	if bodyOverride != nil {
 		body = bodyOverride
 	} else {
-		body, _ = json.Marshal(chatRequest{
-			Model:       cfg.Model,
-			Messages:    []chatMessage{{Role: "user", Content: cfg.Prompt}},
-			MaxTokens:   cfg.MaxTokens,
-			Temperature: 0,
-			Stream:      true,
-		})
+		body, _ = json.Marshal(syntheticChatRequest(cfg))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, bytes.NewReader(body))
 	if err != nil {
