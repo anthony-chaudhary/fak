@@ -151,3 +151,120 @@ scenario must hold.
   include **hard locks** that the override cannot downgrade, and the error
   instead names the required remedy (e.g. providing the required public
   dataset).
+
+## Recipe catalog (aiperf search_recipes/builtins)
+
+> **NOTICE / attribution:** The recipe catalog in this section is adapted
+> from `ai-dynamo/aiperf@ab610ad` (Apache-2.0), file
+> `src/aiperf/search_recipes/builtins.py` (classes
+> `MaxThroughputUnderTTFTSLA`, `MaxThroughputUnderITLSLA`,
+> `ConcurrencyRamp`, `PrefillTTFTCurve`, `DecodeITLCurve`;
+> `MaxConcurrencyUnderSLA` re-exported from
+> `src/aiperf/search_recipes/_max_concurrency_under_sla.py`). Source pin:
+> **ai-dynamo/aiperf@ab610ad** (full SHA
+> `ab610add4e8876fca223197596c728e17365f381`), license Apache-2.0.
+
+A search recipe is a **named preset that compiles at the CLI converter
+boundary into canonical sweep fields** — the recipe name never reaches the
+benchmark config itself. Each builtin below compiles to exactly one of an
+adaptive-search (Bayesian-optimization) sweep or a grid sweep, plus optional
+SLA filters and, for grid recipes, a post-process handler that emits a
+derived artifact under `sweep_aggregate/`. Concurrency bounds are `[1, 1000]`
+unless stated.
+
+### max-throughput-ttft-sla
+
+- Maximizes `output_token_throughput` at the highest concurrency where p95
+  TTFT stays under `--ttft-sla-ms`.
+- Bayesian-optimized over profiling concurrency in `[1, 1000]` with a
+  **log-uniform prior** (30 max iterations, 5 initial points); bounds are
+  overridable via `--concurrency-min` / `--concurrency-max`.
+- The SLA constraint lands as an SLA filter (`time_to_first_token`, stat
+  `p95`, op `lt`) that feeds the planner's lexicographic feasibility
+  scoring — feasibility ranks before the throughput objective.
+- **Streaming is required** (TTFT is a streaming-only metric); non-streaming
+  configs are rejected at expand time rather than failing mid-search.
+
+### max-throughput-itl-sla
+
+- The inter-token-latency twin: maximizes `output_token_throughput` at the
+  highest concurrency where p95 ITL stays under `--itl-sla-ms` (alias
+  `--tpot-sla-ms`; passing both with different values is an error).
+- Same BO wiring as the TTFT recipe: log-uniform over `[1, 1000]`, 30
+  iterations, 5 initial points; SLA filter on `inter_token_latency` p95.
+- Streaming required (ITL is streaming-only).
+
+### max-concurrency-under-sla
+
+- Finds the **highest concurrency where all SLA filters pass** — the
+  boundary itself, not a throughput-maximizing interior point.
+- Five search styles (`--search-style`):
+  - `smooth_isotonic` (**default**): PAVA + PCHIP denoised isotonic
+    regression — a 1-D SLA-saturation search that denoises before fitting
+    and supports replicate-based bootstrap CIs; drop-in replacement for
+    `monotonic`.
+  - `monotonic`: 1-D binary search over `[1, 1000]` (~10-20 iterations);
+    mirrors perf_analyzer's `--binary-search`.
+  - `bo`: penalty Bayesian optimization with the same SLA filters and
+    `output_token_throughput` as the maximize objective — lands at the
+    throughput-maximizing feasible point rather than the boundary. Uses a
+    **log-uniform prior**: concurrency spans three orders of magnitude, so
+    uniform sampling would place ~1.6% of initial points in the `[1, 16]`
+    knee region and the planner would latch onto an infeasible but
+    high-throughput surface.
+  - `optuna`: same penalty-BO formulation routed through the Optuna
+    planner (TPE / GP / BoTorch samplers via `--optuna-sampler`);
+    log-uniform prior for the same reason as `bo`.
+  - `grid`: log-spaced 8-step sweep plus an `sla_breach_knee` post-process
+    that emits `sla_breach.json` with the boundary report.
+- SLA filters compose from any of `--ttft-sla-ms` (p95 TTFT),
+  `--itl-sla-ms` / `--tpot-sla-ms` (p95 ITL), `--e2e-sla-ms` (p99
+  `request_latency`), and `--error-rate-sla` (avg error rate; the CLI takes
+  a fraction, the filter compares against the run-level percentage); at
+  least one is required.
+- **Streaming is required only when a selected filter references a
+  streaming-only metric** (TTFT or ITL/TPOT); `--e2e-sla-ms` and
+  `--error-rate-sla` work without streaming.
+
+### concurrency-ramp
+
+- Ramps concurrency on a **log scale** — default 8-step log-spaced grid over
+  `[1, 1000]` (overridable via `--concurrency-min` / `--concurrency-max` /
+  `--concurrency-steps`) — and detects the **latency degradation knee**.
+- The post-process handler reports the first concurrency where the chosen
+  metric/stat exceeds `baseline * (1 + threshold)`: default
+  `--degradation-threshold 0.20` (20%), default metric `request_latency`
+  stat `p99`; both flow through to the knee detector's params.
+- Streaming is **not** required by default (`request_latency` is end-to-end);
+  selecting a streaming-only metric (e.g. `time_to_first_token`) via
+  `--degradation-metric-tag` does require streaming.
+
+### prefill-ttft-curve
+
+- Sweeps ISL log-spaced over `[256, 32768]` with **concurrency fixed at 1**,
+  isolating prefill cost from queueing effects (the single-element sweep
+  list collapses the cartesian product, so concurrency stays 1 on every
+  row).
+- The post-process handler fits `TTFT = a * ISL + b` and falls back to a
+  **quadratic fit when r^2 < 0.85**; emits `prefill_curve.json`.
+- Streaming required (TTFT is streaming-only).
+
+### decode-itl-curve
+
+- Sweeps a **concurrency x OSL grid**: concurrency 6 log-spaced points in
+  `[1, 200]` against OSL 4 log-spaced points in `[64, 1024]` (all
+  overridable).
+- The post-process handler fits an ITL surface and emits
+  `decode_itl_surface.json` with the raw measured points and a bilinear-grid
+  surface.
+- Streaming required.
+
+### Grid helper and remaining exports
+
+- `_logspace_int_steps` builds the log-spaced integer grids: endpoints are
+  forced into the result (the lowest/highest swept value is exactly `lo` /
+  `hi`), rounding collisions are deduped, order is ascending, and a
+  single-point ramp is rejected (`steps >= 2`) because post-process can't
+  compute a baseline.
+- The catalog module also re-exports `pareto-sweep` and
+  `max-goodput-under-slo`; they are not treated in this section.
