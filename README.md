@@ -61,6 +61,7 @@ fallback ([native inference goal](docs/native-inference-goal.md)).
 
 **Pick your path:** run a local agent → [Try fak](#try-fak) · guard an agent you
 already use → [`fak guard`](#governance-for-external-agents-fak-guard) ·
+sell tokens from your own GPUs → [token-factory operator route](docs/operator/token-factory.md) ·
 understand why → [the market framing](docs/explainers/why-fak-the-market-moment.md) ·
 check the evidence → [benchmarks](docs/benchmarks/README.md) and [claims](CLAIMS.md).
 
