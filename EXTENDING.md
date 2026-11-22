@@ -64,6 +64,23 @@ upward/cross-tier import, so the layering can't silently erode.
 
 There are two registries, by where your optimization lives.
 
+**In tree or out of tree?** Every seam below accepts a leaf *inside* this
+repository. Only some can be reached from your own module, because Go forbids
+importing `internal/` from outside:
+
+| Where your code lives | Seams you can reach | How |
+|---|---|---|
+| In this repo (a leaf plus a pull request) | all of them | the rest of this section |
+| Your own module | the kernel-ABI seams re-exported by [`pkg/abi`](pkg/abi/abi.go) | import `pkg/abi`; worked driver in [`examples/extdriver`](examples/extdriver) |
+| Your own module | device compute, loop, lever, store, sandbox and pane seams | not yet — they are sealed under `internal/` |
+
+The current count is printed by a test. It also builds a probe under a foreign
+module path and fails if a kernel-ABI seam loses its export:
+
+```bash
+go test ./pkg/abi -run TestSeam -v   # seam reachability: N/M ...
+```
+
 **A. Device compute / quantization kernels → `internal/compute`** (the hardware
 abstraction layer, HAL). This is the seam for the most common research optimization:
 *"make this subsystem's math faster on my hardware."* A backend is a new **file** in
