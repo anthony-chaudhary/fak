@@ -41,6 +41,7 @@ func runAgentX(stdout, stderr io.Writer, argv []string) int {
 	validateFile := fs.String("validate", "", "admit an existing receipt JSON file as evidence (refuses mock and legacy receipts)")
 	jsonOutput := fs.Bool("json", false, "output JSON receipt to stdout")
 	prefillSlots := fs.Int("prefill-slots", 0, "bound on concurrent in-flight requests during prefill; each request holds one slot until its first content token arrives (live runs only); 0 disables the gate")
+	parentPID := fs.Int("parent-pid", agentxDefaultParentPID(), "direct-parent supervisor PID captured at launch, not a wrapper shell's parent (env "+agentxParentPIDEnv+"); when set, exit if it is no longer the parent and, on Linux, die with it via PR_SET_PDEATHSIG; 0 disables")
 
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -49,6 +50,13 @@ func runAgentX(stdout, stderr io.Writer, argv []string) int {
 	if *prefillSlots < 0 {
 		fmt.Fprintf(stderr, "fak agentx: --prefill-slots must be >= 0\n")
 		return 2
+	}
+	if *parentPID < 0 {
+		fmt.Fprintf(stderr, "fak agentx: --parent-pid must be >= 0\n")
+		return 2
+	}
+	if !installAgentXParentDeathGuard(stderr, *parentPID) {
+		return 1
 	}
 
 	if *validateFile != "" {
