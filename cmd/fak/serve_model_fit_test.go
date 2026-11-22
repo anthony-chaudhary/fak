@@ -299,6 +299,16 @@ func TestServeRefusalNamesViableOffloadArms(t *testing.T) {
 		t.Fatalf("device refusal with host headroom SuggestedArms = %v, want [%s]", arms, serveFitSuggestedArmHostPoolHeadroom)
 	}
 
+	// D2) Spare host capacity smaller than the device shortfall names no arm: the aegis2 RTX 5080
+	// shape (26.71 GiB device plan vs 13.19 GiB window, ~4 GiB host spare beside a co-resident
+	// serve) cannot move 13.5 GiB to host.
+	smallHostBe := serveCapBackend{Backend: compute.Default(), total: 16 * gib, free: 16 * gib, known: true, hostTotal: 30 * gib, hostFree: 4 * gib, hostKnown: true}
+	shortPlan := compute.MemoryPlan{{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: 26 * gib, Detail: "gguf-native-q4k-logical-weights"}}
+	shortFe := &compute.FitError{Verdict: compute.FitTooBig, Want: 26 * gib, Avail: 13 * gib, Demands: shortPlan, Scope: compute.MemoryScopeDevice}
+	if arms := serveSuggestedFitArms(shortFe, shortPlan, smallHostBe); len(arms) != 0 {
+		t.Fatalf("device refusal whose host spare cannot cover the shortfall SuggestedArms = %v, want empty", arms)
+	}
+
 	// E) The reserved token is part of the closed vocabulary but NEVER emitted: no input shapes
 	// the streamed-dense route into a suggestion (fak#13175 open - a refusal must not claim it
 	// works). Assert the guard on every branch above by scanning the outputs.

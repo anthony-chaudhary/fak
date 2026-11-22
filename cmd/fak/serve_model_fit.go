@@ -1322,7 +1322,10 @@ func serveSuggestedFitArms(fe *compute.FitError, plan compute.MemoryPlan, be com
 		if base <= 0 {
 			return nil
 		}
-		if compute.BudgetAfterHeadroom(base, serveGGUFHostHeadroom) > plan.HostTotal() {
+		// The spare host window must absorb the device shortfall, not merely be non-empty: a
+		// 13.5 GiB device miss beside a 4 GiB spare host pool has no host arm that admits it.
+		spare := compute.BudgetAfterHeadroom(base, serveGGUFHostHeadroom) - plan.HostTotal()
+		if spare > 0 && spare >= fe.Want-fe.Avail {
 			return []string{serveFitSuggestedArmHostPoolHeadroom}
 		}
 		return nil
