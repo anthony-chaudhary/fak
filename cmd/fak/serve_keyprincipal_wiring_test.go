@@ -186,12 +186,12 @@ func TestServeSourceWiresKeyPrincipalsIntoGatewayNew(t *testing.T) {
 }
 
 // keyPrincipalProbe drives one authenticated request through the server's real Handler and
-// returns its status. /metrics is the cheapest non-exempt route: httptest.NewRequest gives
-// the request a documentation-range RemoteAddr rather than a loopback one, so authExempt's
-// read-only loopback exemption does not apply and withAuth's credential check really runs.
+// returns its status. /v1/models is a cheap tenant-reachable route that is never auth-exempt,
+// so withAuth's credential check really runs. /metrics is unsuitable: it is operator-scoped
+// and refuses tenant principals with 403 even when their key authenticated.
 func keyPrincipalProbe(t *testing.T, srv *gateway.Server, key string) int {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	if key != "" {
 		req.Header.Set("X-Api-Key", key)
 	}
