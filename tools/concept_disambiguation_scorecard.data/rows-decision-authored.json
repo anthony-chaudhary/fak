@@ -39,5 +39,25 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "x-decision-stepdecision",
+      "canonical": "StepDecision (superstream)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "StepDecision (superstream.StepDecision) is the pure verdict DecideStep produces for one super-workstream invocation: the exact next queue action (ACQUIRE_LEASE, EXECUTE_ITEM, WITNESS_AND_COMMIT, RELEASE_LEASE, ADVANCE_QUEUE, RESET_CONTEXT, YIELD_CONTENDED, STREAM_COMPLETE/HALTED), the active item index, the optional lease request, the context-safety verdict, the optional carryover seed, and the reason / next-safe-step text.",
+      "distinction": "It is the per-invocation decision record of the superstream queue state machine, NOT DriveDecision (superloop's read-first worst-loop member selection), NOT SteerDecision (trajctl's per-session steering verdict), and NOT laneadmit's lease-admission verdict (which only answers whether one lease request may be admitted); DecideStep computes it, ApplyStep mutates StreamState from it.",
+      "distinct_from": [
+        "x-decision-drivedecision",
+        "x-decision-steerdecision"
+      ],
+      "aliases": [],
+      "grounding": "StepDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

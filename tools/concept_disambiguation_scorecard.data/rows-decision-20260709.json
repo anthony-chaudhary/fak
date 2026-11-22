@@ -31,7 +31,8 @@
       "distinction": "It is the super loop's PER-INVOCATION worst-first selection over member work, not the dispatcher's per-issue routing tier pick (TierDecision) nor an account-pool rotation pick (NextRotationDecision).",
       "distinct_from": [
         "x-decision-tierdecision",
-        "x-decision-nextrotationdecision"
+        "x-decision-nextrotationdecision",
+        "x-decision-stepdecision"
       ],
       "aliases": [
         "DriveDecision",

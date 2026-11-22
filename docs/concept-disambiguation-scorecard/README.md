@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **58** (clarity 9 + coverage 49) |
-| **Crystal-clear concepts (and climbing)** | **1690** crystal of 4166 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4234 / 4283** (98.9% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **3** of 318 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **97** of 5501 indexed names |
+| **Disambiguation-debt (drive to 0)** | **59** (clarity 9 + coverage 50) |
+| **Crystal-clear concepts (and climbing)** | **1700** crystal of 4176 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4243 / 4293** (98.8% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **3** of 320 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **97** of 5516 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 94.3/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 94.2/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4166 concepts - score 94.3/100 (grade A) - disambiguation-debt 58
+concept-disambiguation chart - 4176 concepts - score 94.2/100 (grade A) - disambiguation-debt 59
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1690
+  * crystal       ###################......... 1700
   o defined       ############################ 2476
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -39,20 +39,20 @@ clarity ladder (count of concepts, best -> fog):
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        *****************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (248 concept(s); 101 crystal)
+  attention        ******************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 102 crystal)
   cache            *****************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (419 concept(s); 173 crystal)
   context-ctx      *********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (309 concept(s); 105 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
-  decision         ***************************************ooooooooooooooooooooooooo (64 concept(s); 39 crystal)
+  decision         ****************************************ooooooooooooooooooooooooo (65 concept(s); 40 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            **************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (89 concept(s); 26 crystal)
   gateway-engine   **************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (278 concept(s); 98 crystal)
   guard-gate       ***************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (519 concept(s); 231 crystal)
   layout           *************************************oooooooooooooooooooooooo (61 concept(s); 37 crystal)
   loop             *****************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 53 crystal)
-  plan             *****************************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (587 concept(s); 245 crystal)
-  policy-capability **********************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (261 concept(s); 130 crystal)
-  pool             **************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (109 concept(s); 38 crystal)
+  plan             ******************************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (588 concept(s); 246 crystal)
+  policy-capability ***************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (266 concept(s); 135 crystal)
+  pool             ****************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (111 concept(s); 40 crystal)
   render-materialize ***************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (238 concept(s); 51 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 35 crystal)
   session-runtime  ********************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (368 concept(s); 140 crystal)
@@ -62,17 +62,18 @@ clarity mix by family (each cell = one concept):
   witness-proof    *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (220 concept(s); 91 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ############################ 655/666
+  plan             ############################ 656/667
   session-runtime  ###########################. 389/397
-  context-ctx      ###########################. 335/342
+  context-ctx      ###########################. 334/341
   cache            ############################ 467/472
-  pool             ###########################. 115/120
+  pool             ###########################. 117/122
   gateway-engine   ############################ 327/331
   render-materialize ############################ 256/259
-  attention        ############################ 243/244
-  decision         ############################ 68/69
+  attention        ############################ 244/245
+  decision         ############################ 69/70
   evict            ############################ 97/98
   guard-gate       ############################ 583/584
+  policy-capability ############################ 293/294
   score-debt       ############################ 141/142
   support-maturity ############################ 146/147
   witness-proof    ############################ 207/208
@@ -80,19 +81,18 @@ coverage by family (positioned / discovered):
   dev-tier         ............................ 0/0
   layout           ############################ 58/58
   loop             ############################ 121/121
-  policy-capability ############################ 288/288
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 98.9%  (4234/4283 confusable tokens positioned)
+namespace coverage  [################################] 98.8%  (4243/4293 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 315
+  mutual       ############################ 317
   one-sided    ............................ 0
   undrawn      #........................... 3
-  pairs separated   [################################] 315/318
+  pairs separated   [################################] 317/320
 
-name index: 5501 lookup name(s) -> 4166 concept(s), 97 ambiguous
+name index: 5516 lookup name(s) -> 4176 concept(s), 97 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 318 |
-| **Separated from each other (drive to all)** | **315 / 318** (315 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 320 |
+| **Separated from each other (drive to all)** | **317 / 320** (317 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **3** |
 | Entangled concepts (own twin undrawn) | 6 |
-| Boundaries drawn (mutual / total) | 3708 / 8010 |
+| Boundaries drawn (mutual / total) | 3718 / 8031 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5501 over 4166 concepts |
+| Lookup names indexed | 5516 over 4176 concepts |
 | Lookup names landing on several concepts | 97 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4166 |
+| Concepts carrying a contrast set | 4176 |
 
 ## The concepts (best verdict first)
 
@@ -174,6 +174,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | attention | **attn_q_norm** - The per-head query-normalization weight tensor (blk.N.attn_q_norm.weight, canonicalized to self_attn.q_norm.weight) that applies QK-norm to the attention query projection in Qwen3.5-class GGUFs. |
 | * | crystal | config | attention | **full_attention_interval** - The Qwen3.5 hybrid-attention layer period (cfg.FullAttentionInterval, GGUF full_attention_interval): every Nth layer runs full (global) attention while the rest run the local/linear path. |
 | * | crystal | symbol | attention | **DSpark GGUF attention tensor roles** - Serialized attention projection and normalization tensor names in the DSpark support GGUF header, validated against the pinned original model geometry. |
+| * | crystal | symbol | attention | **fitplan attnWidth (attention layers x heads x head dim)** - The per-position attention width the planner prices attention FLOPs with: KV-bearing attention layers x heads x head dimension. |
 | * | crystal | symbol | attention | **AttnLayers** - fitplan.Model field: the number of KV-bearing attention layers (ContextSizeConfig.KV.NumLayers): every decoder layer that keeps token-indexed KV, sliding-window layers included, Qwen3.5-hybrid linear-attention layers excluded when their recurrent geometry is known. Its per-position width (layers x heads x head dim) prices decode KV FLOPs and the quadratic prefill attention term, an upper bound for windowed models. |
 | * | crystal | symbol | attention | **qwen35FullAttentionHAL (resident Qwen3.5 full-attention step)** - The internal/model Session method that executes one ordinary Qwen3.5 full-attention layer through the compute HAL over a device-resident residual and the session KV store; the retained MTP draft reuses it for its decoder layer. |
 | * | crystal | symbol | attention | **attnDecodeQ8Packed** - Experimental default-off host B=1 Q8-KV attention consumer. It reconstructs one bounded F32 head-row tile per worker from packed codes and block scales, shares that tile across grouped query heads, and uses existing native dot, softmax and value kernels without expanding full-layer K/V panels. The separately guarded tokenHiddenQ branch selects it only for admitted contiguous host Q8 cache geometry. |
@@ -538,6 +539,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | decision | **WalkDecision (gardenbundle)** - One budgeted item's triage outcome from a garden walk (internal/gardenbundle/walk.go): a Disposition (act/review/defer), the ready Action command to run, a Reason, and a Perform flag, emitted worst-first for each issue the walk inspected so the dispatch garden can split human-needed from fleet-drivable work. |
 | * | crystal | symbol | decision | **RoleDecision** - One role's resolved routing for a single execution: the modelroute Plan chosen, the budget it runs under, spend against it, whether exhausted and on which axis, and any role it escalated to. |
 | * | crystal | symbol | decision | **cudaStaticKQuantDecision (model preflight)** - The static dense k-quant residency decision fak model preflight derives from the declared CUDA device-op table and target arch - which dense quant types stay resident on-device instead of re-quantizing to Q8_0 - feeding the same options function serve uses. |
+| * | crystal | symbol | decision | **StepDecision (superstream)** - StepDecision (superstream.StepDecision) is the pure verdict DecideStep produces for one super-workstream invocation: the exact next queue action (ACQUIRE_LEASE, EXECUTE_ITEM, WITNESS_AND_COMMIT, RELEASE_LEASE, ADVANCE_QUEUE, RESET_CONTEXT, YIELD_CONTENDED, STREAM_COMPLETE/HALTED), the active item index, the optional lease request, the context-safety verdict, the optional carryover seed, and the reason / next-safe-step text. |
 | * | crystal | symbol | decision | **decision implementation surface for decisional** - `decisional` is the decision symbol declared or used at `internal/gitbroker/client.go:93` as `// broker never guesses: an absent or unrecognized class is decisional. See the`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | decision | **decision implementation surface for needsdecision** - `NeedsDecision` is the decision symbol declared or used at `cmd/fak/harness_classify.go:72` as `if result.NeedsDecision {`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | decision | **decision implementation surface for dosdecision** - `dosdecision` is the decision symbol declared or used at `cmd/fak-dos/main.go:15` as `"github.com/anthony-chaudhary/fak/internal/dosdecision"`. This row positions that concrete implementation surface, not merely the family label. |
@@ -1095,6 +1097,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **newPlanner** - The unexported constructor that binds a fitplan Input (hardware, weights, demand, calibration) to the internal planner struct shared by Plan's single-arm pricing and the T04 joint context x KV-dtype x slots search. |
 | * | crystal | symbol | plan | **serveFitPlanArch** - The cmd/fak glue that extracts the GGUF architecture string into the fitplan report so the --plan-json sizing artifact records which architecture the sizing ran under. |
 | * | crystal | symbol | plan | **serveFitPlanHardware** - The cmd/fak glue that snapshots the host hardware facts (backend, sizing-fit and host-fit budgets) into the fitplan Hardware block of the serve sizing artifact. |
+| * | crystal | symbol | plan | **fitplan.PlanSplit (multi-device split x host-offload decode pricer)** - The pure pricer that ranks one decode step for every (split mode: single/layer/tensor/expert) x (offload mode: cpu/stream) pair across N identical discrete devices, choosing only among modes the serving engine can execute. |
 | * | crystal | symbol | plan | **fitplan** - Package internal/fitplan: the header-derived model-fit planner. Plan prices one selected serve arm's weights MemoryPlan against a pool budget over a KV-tier x context candidate table and returns a Report: fit status, one-stream max context, per-candidate max concurrency, nominal decode/prefill tok/s and TTFT with the binding bound and evidence tier, typed omissions for unknown inputs, and a typed refusal (weights_exceed_pool, context_exceeds_pool, concurrency_exceeds_pool, pin_unmatched). |
 | * | crystal | symbol | plan | **FitPlanModel** - ggufload.WeightSource method that derives fitplan.Model from GGUF tensor headers for the selected arm's embedding storage: loaded payload bytes, decode-swept bytes per token (row-gathered untied input embedding excluded, routed experts at the RoutedExpertActiveSet top-k share), active and LM-head parameters, expert counts and attention geometry. |
 | * | crystal | symbol | plan | **BuildCandidates** - fitplan function that expands KV storage tiers over ContextLadder (resolved context, pinned extras, 4K/32K/128K served windows, model max) into the Candidate table Plan prices; the first tier at the resolved context is marked Current, and a tier whose KV charge equals an earlier tier's is skipped. |
@@ -1360,6 +1363,11 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for multimodalpolicy** - `MultimodalPolicy` is the policy-capability symbol declared or used at `internal/model/multimodal.go:59` as `// MultimodalPolicy is the opt-in governance envelope for image-bearing prompts.`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for postureargs** - `postureArgs` is the policy-capability symbol declared or used at `cmd/fak/dispatch_tick_worker.go:120` as `postureArgs, postureErr := fleetGuardCachePostureArgs()`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for tunefirepolicy** - `TuneFirePolicy` is the policy-capability symbol declared or used at `internal/agent/anthropic_compact.go:263` as `// rsiloop.TuneFirePolicy over a corpus of scored per-fire receipts (rsiloop.CompactionFireObs →`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | policy-capability | **AdjudicateAssistantTurn (gateway)** - gateway.Server.AdjudicateAssistantTurn runs every tool call a BUFFERED assistant turn proposes through the served chat floor and rewrites the message in place: only admitted calls survive, refusal or served-inline text is folded into Content, and it returns the OpenAI finish_reason plus one ToolAdjudication per proposed call. |
+| * | crystal | symbol | policy-capability | **AdjudicateStreamedToolCalls (gateway)** - gateway.Server.AdjudicateStreamedToolCalls is the streamed twin of AdjudicateAssistantTurn: it adjudicates the tool calls of a turn whose prose has already been streamed, blanks nothing, and returns a StreamedToolAdjudication whose Trailer carries the refusal or served-inline text the stream appends. |
+| * | crystal | symbol | policy-capability | **applyAdjudicatedTurn (gateway)** - gateway.Server.applyAdjudicatedTurn folds one already-adjudicated proposal set into the assistant message the OpenAI wire carries (refused-body blanking, vDSO served-inline text, the livelock advisory note) and returns the finish_reason: tool_calls while calls survive, stop when every proposal was refused or served inline, else the upstream finish. |
+| * | crystal | symbol | policy-capability | **toolAdjudicator (fak up turnkey server)** - turnkeyServer.toolAdjudicator (cmd/fak) returns the gateway.Server that adjudicates the fak up server's proposed tool calls; a server built outside startTurnkeyServer shares one lazily built process default, so no construction path returns a proposed call unadjudicated. |
+| * | crystal | symbol | policy-capability | **writeTurnkeyAdjudicationUnavailable (fak up)** - writeTurnkeyAdjudicationUnavailable (cmd/fak) writes the HTTP 502 server_error JSON body fak up returns when its tool adjudicator cannot be built, so a turn with proposed tool calls fails closed rather than reaching the client unadjudicated. |
 | * | crystal | concept | policy-capability | **capability floor** - The deployable, declarative authorization layer that defines exactly which tools an agent may call by name, loaded as a JSON manifest at runtime. |
 | * | crystal | config | policy-capability | **policy manifest** - The versioned JSON structure an operator edits to configure the capability floor, mapping 1:1 to adjudicator.Policy with deny reasons validated against the closed vocabulary. |
 | * | crystal | subsystem | policy-capability | **adjudicator** - The in-process DOS reference monitor: the rung that folds a decision chain to prove a tool call allowed, denied, or deferred under the loaded policy. |
@@ -1401,6 +1409,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | pool | **OmitPoolCapacityUnknown** - The typed omission fitplan reports (value pool_capacity_unknown) when the usable pool budget for the selected arm cannot be determined, so candidate rows are priced with an unknown pool term. |
 | * | crystal | symbol | pool | **ReasonWeightsExceedPool** - The typed refusal reason fitplan returns (value weights_exceed_pool) when the selected arm's weights alone exceed the usable pool before any KV or slot term is added, so no candidate row can fit. |
 | * | crystal | symbol | pool | **HostPool** - The Refusal.HostPool bool flag (JSON host_pool) marking that a weights_exceed_pool refusal is short on a discrete topology's host DRAM pool rather than the device pool. |
+| * | crystal | symbol | pool | **fitplan.PlacementPoolHostRAM (host-RAM offload tier of a tiered placement)** - The placement tier between the device pool and the NVMe mmap: weight segments that overflow the device live in host RAM and are read at the host bandwidth. |
+| * | crystal | symbol | pool | **fitplan.PlacementPoolNVMe (NVMe mmap tier of a tiered placement)** - The last, unbounded placement tier: weights that fit neither the device nor host RAM are read from an NVMe mmap of the model file at the NVMe rate. |
 | * | crystal | symbol | pool | **PoolUsableBytes** - fitplan Hardware and Evidence field: the headroom-adjusted bytes of the pool the plan's KV store and pool-charged weights draw on: device memory on a discrete GPU, the one shared pool on a unified-memory APU (host-scoped rows charged once), host RAM on a host-only serve; <=0 means unknown and the plan fails open. |
 | * | crystal | symbol | pool | **HostPoolUsableBytes** - fitplan Hardware and Evidence field set only for a discrete topology: the headroom-adjusted host RAM that host-scoped weight rows (CPU-offloaded experts, streamed working sets) draw on; overflow refuses weights_exceed_pool with host_pool=true. |
 | * | crystal | symbol | pool | **PoolSignals** - Observed aggregate serving measurements for one role pool: queue depth, KV utilization, goodput and TTFT/TPOT; the supplied-observation shadow adapter uses the validated queue/KV subset. |
@@ -4308,7 +4318,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 Most readers cannot hold every concept at once. The optional `parent` forest lets the catalog roll concepts up to the abstraction that HEADS them - and the roll-up is **weakest-link**: an abstraction reads as crystal only when *every* concept beneath it is. A single `defined` leaf keeps the whole head from rolling up to crystal, so the collapsed view can never hide fog it contains. `!` marks a head whose declared verdict reads clearer than its subtree supports.
 
 ```text
-concept-disambiguation roll-up: 49 top-level abstraction(s), 60 head(s) total, max depth 3 (195 concepts in the forest)
+concept-disambiguation roll-up: 50 top-level abstraction(s), 61 head(s) total, max depth 3 (197 concepts in the forest)
 
 Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest
 descendant. '!' = the head verdict reads clearer than the subtree supports.
@@ -4358,6 +4368,7 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         4    0  ****                 cache / Prompt cache
    * crystal     crystal         3    0  ***                  policy-capability / abi.Verdict
    * crystal     crystal         2    0  **                   context-ctx / compaction
+   * crystal     crystal         2    0  **                   plan / fitplan
    * crystal     crystal         2    0  **                   guard-gate / gitgate (adjudicator)
    * crystal     crystal         2    0  **                   cache / Hardware-aware cache
    * crystal     crystal         2    0  **                   context-ctx / ProofContext (pending-admission execution identity)
@@ -4435,6 +4446,7 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-control = crystal |
 | * | **abi.Verdict** (`verdict`) | crystal | crystal | 3 | 0 | policy-capability-reason-policy-malformed = crystal |
 | * | **compaction** (`compaction`) | crystal | crystal | 2 | 0 | compaction = crystal |
+| * | **fitplan** (`fitplan-planner`) | crystal | crystal | 2 | 0 | fitplan-plan-split = crystal |
 | * | **gitgate (adjudicator)** (`gitgate`) | crystal | crystal | 2 | 0 | gitgate = crystal |
 | * | **Hardware-aware cache** (`hardware-aware-cache`) | crystal | crystal | 2 | 0 | hardware-aware-cache = crystal |
 | * | **ProofContext (pending-admission execution identity)** (`pendingadmission-proofcontext`) | crystal | crystal | 2 | 0 | pendingadmission-contextdigest = crystal |
@@ -4449,8 +4461,8 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 40 | 3 | 3 confusable pair(s) with no line drawn |
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 34 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4302/8010 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4166 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4313/8031 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4176 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -4459,23 +4471,24 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `alias_resolved` | 100 | 0 | every alias resolves in the tree (token or wire key) |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5501 lookup name(s) resolves - 97 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5516 lookup name(s) resolves - 97 land on several concepts, all separated |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 655 | 666 | 11 |
+| plan | 656 | 667 | 11 |
 | session-runtime | 389 | 397 | 8 |
-| context-ctx | 335 | 342 | 7 |
+| context-ctx | 334 | 341 | 7 |
 | cache | 467 | 472 | 5 |
-| pool | 115 | 120 | 5 |
+| pool | 117 | 122 | 5 |
 | gateway-engine | 327 | 331 | 4 |
 | render-materialize | 256 | 259 | 3 |
-| attention | 243 | 244 | 1 |
-| decision | 68 | 69 | 1 |
+| attention | 244 | 245 | 1 |
+| decision | 69 | 70 | 1 |
 | evict | 97 | 98 | 1 |
 | guard-gate | 583 | 584 | 1 |
+| policy-capability | 293 | 294 | 1 |
 | score-debt | 141 | 142 | 1 |
 | support-maturity | 146 | 147 | 1 |
 | witness-proof | 207 | 208 | 1 |
@@ -4483,7 +4496,6 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | dev-tier | 0 | 0 | 0 |
 | layout | 58 | 58 | 0 |
 | loop | 121 | 121 | 0 |
-| policy-capability | 288 | 288 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
 

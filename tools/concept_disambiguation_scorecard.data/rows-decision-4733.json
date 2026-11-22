@@ -29,7 +29,8 @@
       "distinct_from": [
         "decision-kernel",
         "decision-witness",
-        "x-decision-tierdecision"
+        "x-decision-tierdecision",
+        "x-decision-stepdecision"
       ],
       "aliases": [],
       "grounding": "steerdecision",

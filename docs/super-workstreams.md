@@ -115,6 +115,8 @@ receipt window regardless of how many items a long stream has already finished.
 | One `Stepper.Step` after construction | O(1) in Q | the normalized spec is captured once by `NewStepper` |
 | Draining a Q-item stream via a `Stepper` | Θ(Q) allocation total | Q steps × O(1); measured flat at ~634 B/op for Q=1..10,000 (2026-11-21, `BenchmarkStepperStepQueueScaling`) vs ~1.85 MB/op per `DecideStep` at Q=10,000 |
 | Queue length | bounded by `MaxItems` (default `DefaultMaxItems` = 1000) | a queue over the cap fails `Validate` and halts navigation: split it into bounded workstreams or raise `max_items` explicitly |
+| Per-stream state across invocations | durable, O(1) load | `<spec>.state.json` written atomically by `fak superstream step --apply`; reconciled against the edited spec on load (spec owns queue shape, state file owns execution fields) |
+| Served navigation over W streams | O(1) served read; O(W) refresh | `.fak/superstream/registry.json` holds one summary per stream; `fak superstream status --all` reads one file and never concatenates queues |
 
 An executor that will step more than once (any drain loop) must hold a `Stepper`
 (`NewStepper(spec, holder)` then `Step(state, leases, tax)`); bare `DecideStep` per step
@@ -150,9 +152,11 @@ Displays queue ordering, target lanes, per-item turn allocations, and acceptance
 
 ### 2. Step the Stream
 ```bash
-fak superstream step [--spec <path>] [--holder <id>] [--json]
+fak superstream step [--spec <path>] [--holder <id>] [--apply] [--result <result.json>] [--json]
 ```
 Evaluates the next deterministic transition (e.g. acquire lease, execute, commit, release).
+With `--apply` it applies the witnessed `--result`, persists the state next to the spec
+(`<spec>.state.json`) and upserts the `.fak/superstream/registry.json` row.
 
 ### 3. Generate Carryover Seed
 ```bash
@@ -162,9 +166,10 @@ Outputs the compact O(1) `StreamCarryoverSeed` for boundary resets.
 
 ### 4. Query Status
 ```bash
-fak superstream status [--spec <path>] [--json]
+fak superstream status [--spec <path>] [--all] [--json]
 ```
 Reports total progress, held leases, turn/token spend, and context safety status.
+With `--all` it serves the registry snapshot (one row per stream) without reading any spec file.
 
 ---
 

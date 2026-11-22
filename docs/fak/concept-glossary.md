@@ -2693,3 +2693,10 @@ The observation event of the execution witness snapshot provider: records source
 The context option that installs a witness snapshot observer: receives acquisition and release evidence (WitnessSnapshotEvent) for the scoped context.
 
 **Distinct from:** Only observes snapshot acquisition/release; distinct from WithExecutionMaterializer, which scopes the snapshot acquisition itself, and from AcquireWitnessSnapshot, which performs the lease.
+
+
+### StepDecision (superstream)
+
+StepDecision (superstream.StepDecision) is the pure verdict DecideStep produces for one super-workstream invocation: the exact next queue action (ACQUIRE_LEASE, EXECUTE_ITEM, WITNESS_AND_COMMIT, RELEASE_LEASE, ADVANCE_QUEUE, RESET_CONTEXT, YIELD_CONTENDED, STREAM_COMPLETE/HALTED), the active item index, the optional lease request, the context-safety verdict, the optional carryover seed, and the reason / next-safe-step text.
+
+**Distinct from:** It is the per-invocation decision record of the superstream queue state machine, NOT DriveDecision (superloop's read-first worst-loop member selection), NOT SteerDecision (trajctl's per-session steering verdict), and NOT laneadmit's lease-admission verdict (which only answers whether one lease request may be admitted); DecideStep computes it, ApplyStep mutates StreamState from it.
