@@ -16,12 +16,15 @@ import "strings"
 // line number and no File (there is no file). An empty result means the payload may leave.
 func ScanOutboundText(payload, root string) []Finding {
 	needles := needlesWithSidecar(root)
-	var findings []Finding
+	fence := alphaFenceAtRoot(root)
+	findings := fence.defectFindings()
+	unit := fence.unit("")
 	for i, line := range strings.Split(payload, "\n") {
 		findings = append(findings, publicLeakLineFindings(line, i+1, "", needles)...)
+		unit.observe(i+1, line)
 		for _, hit := range scanShapes(line) {
 			findings = append(findings, Finding{Gate: "SECRET_SHAPE", Line: i + 1, Detail: "[" + hit.shape + "] " + hit.text})
 		}
 	}
-	return findings
+	return append(findings, unit.findings()...)
 }

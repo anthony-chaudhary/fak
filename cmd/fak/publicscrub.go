@@ -26,6 +26,8 @@ func runPublicScrub(stdout, stderr io.Writer, argv []string) int {
 		return runPublicScrubTree(stdout, stderr, argv[1:])
 	case "audit-message":
 		return runPublicScrubMessage(stdout, stderr, argv[1:])
+	case "fence":
+		return runPublicScrubFence(stdout, stderr, argv[1:])
 	case "help", "-h", "--help":
 		publicScrubUsage(stdout)
 		return 0
@@ -161,5 +163,6 @@ func publicScrubUsage(w io.Writer) {
   fak public-scrub audit-range BASE..HEAD [--root DIR] [--json]
   fak public-scrub audit-tree [--root DIR] [--json]
   fak public-scrub audit-message MSGFILE [--root DIR] [--json]
+  fak public-scrub fence [--root DIR] [--label-paths] [--min-hits N] PATH...
 `)
 }

@@ -176,7 +176,8 @@ const privateNeedlesRel = "tools/_registry/scrub_needles.private.json"
 
 func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 	needles := effectiveAuditNeedles(d)
-	var findings []Finding
+	fence := alphaFenceAtRoot(d.Root)
+	findings := fence.defectFindings()
 	// scanned is this gate's candidate denominator (#5602): the staged files it actually read,
 	// counted here rather than re-derived, so the number can never disagree with the set judged.
 	scanned := 0
@@ -188,7 +189,10 @@ func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 		scanned++
 		findings = append(findings, publicLeakLineFindings(norm, 0, norm, needles)...)
 		pinned := isPinnedUpstreamArtifact(d, norm)
+		findings = append(findings, alphaFencePublished(norm)...)
+		unit := fence.unit(f)
 		for _, al := range d.AddedByFile[f] {
+			unit.observe(al.New, al.Text)
 			if pinned && egresslist.IsUpstreamRuleLine(al.Text) {
 				continue
 			}
@@ -210,6 +214,7 @@ func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 				}
 			}
 		}
+		findings = append(findings, unit.findings()...)
 	}
 	d.NoteCandidates("PUBLIC_LEAK", scanned, "staged file(s) scanned")
 	return findings, nil
@@ -335,7 +340,9 @@ func needlesWithSidecar(root string) []string {
 // skips git's scissors block, comment lines, and identity trailers (see messageTrailerRe).
 func ScanMessageNeedles(msg string, root string) []Finding {
 	needles := needlesWithSidecar(root)
-	var findings []Finding
+	fence := alphaFenceAtRoot(root)
+	findings := fence.defectFindings()
+	unit := fence.unit("")
 	// Mirror scrub_public_copy.py's message scanner so the Go gate and the Python checker
 	// cannot drift: eachCommitMessageLine already stops at git's scissors line and skips
 	// comment lines; skip identity trailers (DCO sign-off / co-author) here too — a needle
@@ -346,8 +353,9 @@ func ScanMessageNeedles(msg string, root string) []Finding {
 			return
 		}
 		findings = append(findings, publicLeakLineFindings(line, i, "", needles)...)
+		unit.observe(i, line)
 	})
-	return findings
+	return append(findings, unit.findings()...)
 }
 
 func readFileRel(root, rel string) ([]byte, error) {

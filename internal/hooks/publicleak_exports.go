@@ -101,6 +101,7 @@ func PublicLeakFindingLines(findings []Finding, where string) []string {
 func oneShotPublicLeakTreeReader(t *TrackedTree) func(string) ([]byte, bool) {
 	remaining := make(map[string]int, len(t.Paths)+1)
 	remaining[privateNeedlesRel]++
+	remaining[alphaFenceRel]++
 	for _, path := range t.Paths {
 		remaining[path]++
 	}
@@ -127,7 +128,8 @@ func scanPublicLeakTreeFiles(paths []string, fileBytes func(string) ([]byte, boo
 			mode = "full"
 		}
 	}
-	var findings []Finding
+	fence := parseAlphaFence(fileBytes(alphaFenceRel))
+	findings := fence.defectFindings()
 	for _, f := range paths {
 		norm := strings.ReplaceAll(f, "\\", "/")
 		if selfReferentialLeak[norm] {
@@ -141,11 +143,15 @@ func scanPublicLeakTreeFiles(paths []string, fileBytes func(string) ([]byte, boo
 		if bytes.IndexByte(body, 0) >= 0 {
 			continue
 		}
+		findings = append(findings, alphaFencePublished(norm)...)
+		unit := fence.unit(f)
 		lineNo := 1
 		for line := range strings.SplitSeq(string(body), "\n") {
 			findings = append(findings, publicLeakLineFindings(line, lineNo, f, needles)...)
+			unit.observe(lineNo, line)
 			lineNo++
 		}
+		findings = append(findings, unit.findings()...)
 	}
 	return findings, mode
 }
