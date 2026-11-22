@@ -31,6 +31,8 @@ func runBenchRuns(stdout, stderr io.Writer, argv []string) int {
 		return benchRunsTable(stdout, stderr, rest)
 	case "summary":
 		return benchRunsSummary(stdout, stderr, rest)
+	case "pareto":
+		return benchRunsParetoCmd(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		benchRunsUsage(stdout)
 		return 0
@@ -227,6 +229,7 @@ usage:
   fak bench-runs best [--model M] [--metric peak_tok_per_sec|speedup]
   fak bench-runs table [--model M] [--precision P] [--format markdown|json]
   fak bench-runs summary [--group-by machine|model]
+  fak bench-runs pareto [--model M] [--throughput F] [--latency F] [--format table|json]
 `)
 }
 
