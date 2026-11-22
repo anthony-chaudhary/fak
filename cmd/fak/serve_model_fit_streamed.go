@@ -134,7 +134,15 @@ func serveStreamedCPUOffloadCorePlan(ws *ggufload.WeightSource, be compute.Backe
 		if combined := serveCombinedStreamedDenseResidentBound(netFit, bound); combined < denseBound {
 			denseBound = combined
 		}
-		s, err = ws.EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan(ranks, bound, denseBound)
+		// A discrete device keeps the uploaded dense copy in VRAM after the host transit frees, so
+		// its plan charges the eligible dense side on the device too. A shared pool keeps the plain
+		// fold because both scopes are judged against the one physical pool above, and a device-less
+		// arm has no VRAM to charge.
+		if sharedPool || be == nil {
+			s, err = ws.EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan(ranks, bound, denseBound)
+		} else {
+			s, err = ws.EstimateCPUOffloadExpertsStreamedBoundedDenseDiscreteMemoryPlan(ranks, bound, denseBound)
+		}
 	} else {
 		s, err = ws.EstimateCPUOffloadExpertsStreamedMemoryPlan(bound)
 	}

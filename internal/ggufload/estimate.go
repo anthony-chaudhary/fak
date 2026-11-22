@@ -1016,7 +1016,25 @@ func (s *WeightSource) EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan(r
 	if denseResident < 0 {
 		return nil, fmt.Errorf("gguf: streamed-dense host working set %d is negative", denseResident)
 	}
-	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, streamResident, denseResident)
+	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, streamResident, denseResident, false)
+}
+
+// EstimateCPUOffloadExpertsStreamedBoundedDenseDiscreteMemoryPlan is
+// EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan for a DISCRETE device: the eligible dense
+// side still transits host RAM inside the bounded "gguf-host-dense-streamed" row, but the uploaded
+// copy stays resident in VRAM for the model's lifetime, so it is ALSO charged as one device
+// "gguf-device-dense-resident" row at its packed bytes. Without it the device plan priced only the
+// non-eligible remainder and the context and expert-ring sizing judged a VRAM pool that already held
+// the whole dense side. A shared-pool tier must keep the plain variant: there the host transit and the
+// device copy are judged against the one physical pool by the caller.
+func (s *WeightSource) EstimateCPUOffloadExpertsStreamedBoundedDenseDiscreteMemoryPlan(ranks int, streamResident, denseResident int64) (compute.MemoryPlan, error) {
+	if streamResident < 0 {
+		return nil, fmt.Errorf("gguf: streamed expert resident budget %d is negative", streamResident)
+	}
+	if denseResident < 0 {
+		return nil, fmt.Errorf("gguf: streamed-dense host working set %d is negative", denseResident)
+	}
+	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, streamResident, denseResident, true)
 }
 
 // EstimateCPUOffloadExpertsBoundedDenseMemoryPlan is EstimateCPUOffloadExpertsMemoryPlan under the
@@ -1042,7 +1060,7 @@ func (s *WeightSource) EstimateCPUOffloadExpertsBoundedDenseMemoryPlan(ranks int
 	if bound < 0 {
 		return nil, fmt.Errorf("gguf: streamed-dense host working set %d is negative", bound)
 	}
-	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, -1, bound)
+	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, -1, bound, false)
 }
 
 func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlan(ranks int) (compute.MemoryPlan, error) {
@@ -1053,7 +1071,7 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlan(ranks int) (compute.M
 // kernel: it delegates to the shared arm kernel with denseResident = -1, the historical full device
 // dense charge, so every pre-existing caller stays byte-identical.
 func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanFor(ranks int, streamResident int64) (compute.MemoryPlan, error) {
-	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, streamResident, -1)
+	return s.estimateCPUOffloadExpertsMemoryPlanForArm(ranks, streamResident, -1, false)
 }
 
 // estimateCPUOffloadExpertsMemoryPlanForArm is the ONE accounting kernel every --cpu-offload-experts
@@ -1072,7 +1090,10 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanFor(ranks int, streamR
 // CanonicalTensorNameArch -> model.QuantSourceTensorName chain the Q4_K loader dispatches on, so
 // this estimator and the loader cannot disagree about which tensors the bounded dense policy
 // covers: a non-eligible dense tensor stays on the raw device charge (fail-closed).
-func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanForArm(ranks int, streamResident, denseResident int64) (compute.MemoryPlan, error) {
+//
+// denseDeviceResident additionally charges the eligible dense side to the device at its packed
+// bytes, for a discrete device that keeps the uploaded copy after the host transit is freed.
+func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanForArm(ranks int, streamResident, denseResident int64, denseDeviceResident bool) (compute.MemoryPlan, error) {
 	arch, _ := s.File.String("general.architecture")
 	modelType := canonicalGGUFArch(arch)
 	// densePolicy turns on the bounded dense fold and the lazy Config() read it needs; the
@@ -1265,6 +1286,18 @@ func (s *WeightSource) estimateCPUOffloadExpertsMemoryPlanForArm(ranks int, stre
 				Detail: "gguf-host-dense-streamed",
 				Scope:  compute.MemoryScopeHost,
 				DType:  "streamed-resident",
+			})
+		}
+		if denseDeviceResident && denseEligible > 0 {
+			if denseEligible > math.MaxInt64 {
+				return nil, fmt.Errorf("gguf: device-resident dense bytes overflow int64")
+			}
+			plan = append(plan, compute.MemoryDemand{
+				Class:  compute.MemoryWeights,
+				Bytes:  int64(denseEligible),
+				Detail: "gguf-device-dense-resident",
+				Scope:  compute.MemoryScopeDevice,
+				DType:  "mixed",
 			})
 		}
 	}

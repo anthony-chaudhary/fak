@@ -135,6 +135,25 @@
       "gaps": []
     },
     {
+      "id": "planp2-estimatecpuoffloadexpertsstreamedboundeddensediscretememoryplan",
+      "canonical": "EstimateCPUOffloadExpertsStreamedBoundedDenseDiscreteMemoryPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The combined streamed-expert plus bounded-dense ggufload estimator for a DISCRETE device: the same fold as the combined arm, plus one device gguf-device-dense-resident row charging the eligible dense side at its packed bytes because the uploaded copy stays in VRAM after the host transit frees.",
+      "distinction": "Adds only the device-resident dense row; the combined arm charges the eligible dense side as host transit alone, which is correct for a shared pool and device-less arms but under-charges VRAM on a discrete device.",
+      "distinct_from": [
+        "planp2-estimatecpuoffloadexpertsstreamedboundeddensememoryplan",
+        "planp2-estimatecpuoffloadexpertsboundeddensememoryplan"
+      ],
+      "aliases": [],
+      "grounding": "EstimateCPUOffloadExpertsStreamedBoundedDenseDiscreteMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
       "id": "planp2-estimatecpuoffloadexpertsstreamedmemoryplan",
       "canonical": "EstimateCPUOffloadExpertsStreamedMemoryPlan",
       "family": "plan",
