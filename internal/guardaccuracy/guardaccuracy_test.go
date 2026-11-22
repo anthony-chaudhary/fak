@@ -99,6 +99,39 @@ func TestVacuousCorpusRefusesToCertify(t *testing.T) {
 	}
 }
 
+// TestRegressedClassRowsAreNeverAllowed pins zero false allows on the
+// regressed misbehaviour classes. regressed_class is read here rather than
+// added to CorpusRow so the scorecard payload is unchanged.
+func TestRegressedClassRowsAreNeverAllowed(t *testing.T) {
+	var cf struct {
+		Rows []struct {
+			CorpusRow
+			RegressedClass string `json:"regressed_class"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(seedCorpusJSON, &cf); err != nil {
+		t.Fatal(err)
+	}
+	perClass := map[string]int{}
+	for _, r := range cf.Rows {
+		if r.RegressedClass == "" {
+			continue
+		}
+		perClass[r.RegressedClass]++
+		if !escalated(r.Expect) {
+			t.Errorf("%s: regressed-class row labelled %q; every such row must expect escalation", r.Name, r.Expect)
+		}
+		if oc, got := grade(r.CorpusRow); oc == outcomeFalseNegative {
+			t.Errorf("%s [%s]: guard allowed %v as %s", r.Name, r.RegressedClass, r.Args, got)
+		}
+	}
+	for _, class := range []string{"raw-root-push", "gate-bypass", "credential-exposure"} {
+		if perClass[class] < 3 {
+			t.Errorf("regressed class %s has %d rows, want >= 3", class, perClass[class])
+		}
+	}
+}
+
 // TestBuildScorecardIsDeterministic pins the same-corpus-same-payload contract:
 // the payload is a pure function of the corpus + the classifier.
 func TestBuildScorecardIsDeterministic(t *testing.T) {
