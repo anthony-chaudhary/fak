@@ -5,7 +5,10 @@ package ggufload
 // 83078fec0db82d6b5a00d9599062c38c39145755.
 // Local adaptation adds bounded finite arithmetic and explicit wire serialization.
 // The Q6 symmetric helper specializes the source's rmse_type=1, no-weight route.
-// Weighted/imatrix and other helper modes are intentionally not public capability.
+// QuantizeQ4KWeighted is the importance-weighted Q4_K route: the quant_weights
+// branch of quantize_q4_K / quantize_row_q4_K_impl with make_qkx3_quants and
+// make_qp_quants (ggml/src/ggml-quants.c at the same pin). Only Q4_K has a
+// weighted route here, and importance-matrix file parsing is not provided.
 //
 // MIT License
 //
@@ -133,11 +136,8 @@ func quantizeKRow(row []float32, typ TensorType) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported K-quant target %s", typ)
 	}
-	for _, v := range row {
-		a := kQuantAbs(v)
-		if math.Float32bits(v)&0x7f800000 == 0x7f800000 || a > 65504 || (a != 0 && a < 1e-30) {
-			return nil, fmt.Errorf("K-quant input outside finite envelope: zero or 1e-30 <= abs(x) <= 65504")
-		}
+	if err := kQuantCheckEnvelope(row); err != nil {
+		return nil, err
 	}
 	out := make([]byte, len(row)/256*size)
 	m := &kQuantMath{}
@@ -149,6 +149,48 @@ func quantizeKRow(row []float32, typ TensorType) ([]byte, error) {
 		} else {
 			m.q45(x, dst, typ == TensorQ5_K)
 		}
+		if m.err != nil {
+			return nil, m.err
+		}
+	}
+	return out, nil
+}
+
+func kQuantCheckEnvelope(row []float32) error {
+	for _, v := range row {
+		a := kQuantAbs(v)
+		if math.Float32bits(v)&0x7f800000 == 0x7f800000 || a > 65504 || (a != 0 && a < 1e-30) {
+			return fmt.Errorf("K-quant input outside finite envelope: zero or 1e-30 <= abs(x) <= 65504")
+		}
+	}
+	return nil
+}
+
+// QuantizeQ4KWeighted encodes one row as Q4_K super-blocks, weighting the
+// scale search by imatrix (one importance value per row element). A nil
+// imatrix selects the unweighted reference encoder.
+func QuantizeQ4KWeighted(row, imatrix []float32) ([]byte, error) {
+	if imatrix == nil {
+		return quantizeKRow(row, TensorQ4_K)
+	}
+	if len(row) == 0 || len(row)%256 != 0 {
+		return nil, fmt.Errorf("K-quant row must contain complete 256-value blocks")
+	}
+	if len(imatrix) != len(row) {
+		return nil, fmt.Errorf("K-quant importance matrix has %d values for a %d-value row", len(imatrix), len(row))
+	}
+	if err := kQuantCheckEnvelope(row); err != nil {
+		return nil, err
+	}
+	for _, w := range imatrix {
+		if math.Float32bits(w)&0x7f800000 == 0x7f800000 || w < 0 {
+			return nil, fmt.Errorf("K-quant importance values must be finite and non-negative")
+		}
+	}
+	out := make([]byte, len(row)/256*144)
+	m := &kQuantMath{}
+	for b := 0; b < len(row)/256; b++ {
+		m.q4Weighted(row[b*256:(b+1)*256], imatrix[b*256:(b+1)*256], out[b*144:(b+1)*144])
 		if m.err != nil {
 			return nil, m.err
 		}
@@ -276,6 +318,202 @@ func (m *kQuantMath) qkx2(x, weights []float32, codes []uint8, nmax int, rmin fl
 	return scale, -lo
 }
 
+// qkx3 is the source make_qkx3_quants with caller-supplied weights and
+// use_mad=false. It differs from qkx2 in the degenerate-range test and in
+// taking the step width as a parameter.
+func (m *kQuantMath) qkx3(x, weights []float32, codes []uint8, nmax int, rmin, rdelta float32, nstep int) (float32, float32) {
+	lo, hi := x[0], x[0]
+	sumW := weights[0]
+	sumX := m.mul(sumW, x[0])
+	for i := 1; i < len(x); i++ {
+		if x[i] < lo {
+			lo = x[i]
+		}
+		if x[i] > hi {
+			hi = x[i]
+		}
+		sumW = m.add(sumW, weights[i])
+		sumX = m.add(sumX, m.mul(weights[i], x[i]))
+	}
+	if lo > 0 {
+		lo = 0
+	}
+	if hi <= lo {
+		clear(codes)
+		return 0, -lo
+	}
+	iscale := m.div(float32(nmax), m.sub(hi, lo))
+	scale := m.div(1, iscale)
+	var bestError float32
+	for i, v := range x {
+		l := max(0, min(nmax, m.nearest(m.mul(iscale, m.sub(v, lo)))))
+		codes[i] = uint8(l)
+		diff := m.sub(m.add(m.mul(scale, float32(l)), lo), v)
+		bestError = m.add(bestError, m.mul(weights[i], m.mul(diff, diff)))
+	}
+	if nstep < 1 {
+		return scale, -lo
+	}
+	var aux [32]uint8
+	for is := 0; is <= nstep; is++ {
+		iscale = m.div(m.add(m.add(rmin, m.mul(rdelta, float32(is))), float32(nmax)), m.sub(hi, lo))
+		var sumL, sumL2, sumXL float32
+		for i, v := range x {
+			l := max(0, min(nmax, m.nearest(m.mul(iscale, m.sub(v, lo)))))
+			aux[i] = uint8(l)
+			w := weights[i]
+			sumL = m.add(sumL, m.mul(w, float32(l)))
+			sumL2 = m.add(sumL2, m.mul(m.mul(w, float32(l)), float32(l)))
+			sumXL = m.add(sumXL, m.mul(m.mul(w, float32(l)), v))
+		}
+		determinant := m.sub(m.mul(sumW, sumL2), m.mul(sumL, sumL))
+		if determinant > 0 {
+			thisScale := m.div(m.sub(m.mul(sumW, sumXL), m.mul(sumX, sumL)), determinant)
+			thisMin := m.div(m.sub(m.mul(sumL2, sumX), m.mul(sumL, sumXL)), determinant)
+			if thisMin > 0 {
+				thisMin = 0
+				thisScale = m.div(sumXL, sumL2)
+			}
+			var currentError float32
+			for i, v := range x {
+				diff := m.sub(m.add(m.mul(thisScale, float32(aux[i])), thisMin), v)
+				currentError = m.add(currentError, m.mul(weights[i], m.mul(diff, diff)))
+			}
+			if currentError < bestError {
+				copy(codes, aux[:len(x)])
+				bestError = currentError
+				scale = thisScale
+				lo = thisMin
+			}
+		}
+	}
+	return scale, -lo
+}
+
+// qp is the source make_qp_quants: a weighted fit of non-negative values to
+// nmax levels. Codes are stored through uint8 exactly as the source does, so
+// an out-of-range level wraps instead of being clamped.
+func (m *kQuantMath) qp(x []float32, codes []uint8, weights []float32, nmax int) float32 {
+	var hi float32
+	for _, v := range x {
+		if !(hi > v) {
+			hi = v
+		}
+	}
+	if hi < kQuantGroupEpsilon {
+		clear(codes)
+		return 0
+	}
+	iscale := m.div(float32(nmax), hi)
+	for i, v := range x {
+		codes[i] = uint8(m.nearest(m.mul(iscale, v)))
+	}
+	scale := m.div(1, iscale)
+	var bestError float32
+	for i, v := range x {
+		diff := m.sub(v, m.mul(scale, float32(codes[i])))
+		bestError = m.add(bestError, m.mul(m.mul(weights[i], diff), diff))
+	}
+	for is := -4; is <= 4; is++ {
+		if is == 0 {
+			continue
+		}
+		tryIscale := m.div(m.add(m.mul(0.1, float32(is)), float32(nmax)), hi)
+		tryScale := m.div(1, tryIscale)
+		var currentError float32
+		for i, v := range x {
+			l := min(nmax, m.nearest(m.mul(tryIscale, v)))
+			diff := m.sub(v, m.mul(tryScale, float32(l)))
+			currentError = m.add(currentError, m.mul(m.mul(weights[i], diff), diff))
+		}
+		if currentError < bestError {
+			bestError = currentError
+			iscale = tryIscale
+		}
+	}
+	var sumLX, sumL2 float32
+	for i, v := range x {
+		l := min(nmax, m.nearest(m.mul(iscale, v)))
+		codes[i] = uint8(l)
+		w := weights[i]
+		sumLX = m.add(sumLX, m.mul(m.mul(w, v), float32(l)))
+		sumL2 = m.add(sumL2, m.mul(m.mul(w, float32(l)), float32(l)))
+	}
+	for try := 0; try < 5; try++ {
+		changed := 0
+		for i, v := range x {
+			w := weights[i]
+			old := float32(codes[i])
+			slx := m.sub(sumLX, m.mul(m.mul(w, v), old))
+			sl2 := m.sub(sumL2, m.mul(m.mul(w, old), old))
+			if slx > 0 && sl2 > 0 {
+				l := min(nmax, m.nearest(m.div(m.mul(v, sl2), slx)))
+				if l != int(codes[i]) {
+					slx = m.add(slx, m.mul(m.mul(w, v), float32(l)))
+					sl2 = m.add(sl2, m.mul(m.mul(w, float32(l)), float32(l)))
+					if m.mul(m.mul(slx, slx), sumL2) > m.mul(m.mul(sumLX, sumLX), sl2) {
+						codes[i] = uint8(l)
+						sumLX = slx
+						sumL2 = sl2
+						changed++
+					}
+				}
+			}
+		}
+		if changed == 0 {
+			break
+		}
+	}
+	if sumL2 > 0 {
+		return m.div(sumLX, sumL2)
+	}
+	return 0
+}
+
+// q4Weighted is the source quantize_row_q4_K_impl body for one super-block
+// when quant_weights is non-NULL.
+func (m *kQuantMath) q4Weighted(x, imatrix []float32, out []byte) {
+	var codes [256]uint8
+	var scales, mins, sumWeights [8]float32
+	var weights [32]float32
+	var scaleCodes, minCodes [8]uint8
+	var sumX2 float32
+	for _, v := range x {
+		sumX2 = m.add(sumX2, m.mul(v, v))
+	}
+	sigma2 := m.div(m.mul(2, sumX2), 256)
+	for j := 0; j < 8; j++ {
+		var sumW float32
+		for l := range weights {
+			v := x[j*32+l]
+			root := m.checked(float32(math.Sqrt(float64(m.add(sigma2, m.mul(v, v))))))
+			weights[l] = m.mul(imatrix[j*32+l], root)
+		}
+		for _, w := range weights {
+			sumW = m.add(sumW, w)
+		}
+		sumWeights[j] = sumW
+		scales[j], mins[j] = m.qkx3(x[j*32:(j+1)*32], weights[:], codes[j*32:(j+1)*32], 15, -0.9, 0.05, 36)
+	}
+	blockScale := m.qp(scales[:], scaleCodes[:], sumWeights[:], 63)
+	blockMin := m.qp(mins[:], minCodes[:], sumWeights[:], 63)
+	packed := out[4:16]
+	for j := 0; j < 8; j++ {
+		ls, lm := scaleCodes[j], minCodes[j]
+		if j < 4 {
+			packed[j] = ls
+			packed[j+4] = lm
+		} else {
+			packed[j+4] = (ls & 15) | ((lm & 15) << 4)
+			packed[j-4] |= (ls >> 4) << 6
+			packed[j] |= (lm >> 4) << 6
+		}
+	}
+	binary.LittleEndian.PutUint16(out, m.half(blockScale))
+	binary.LittleEndian.PutUint16(out[2:], m.half(blockMin))
+	m.pack45(x, out, &codes, 15, false)
+}
+
 func (m *kQuantMath) q45(x []float32, out []byte, q5 bool) {
 	var codes [256]uint8
 	var scales, mins [8]float32
@@ -327,6 +565,12 @@ func (m *kQuantMath) q45(x []float32, out []byte, q5 bool) {
 	}
 	binary.LittleEndian.PutUint16(out, m.half(m.div(maxScale, 63)))
 	binary.LittleEndian.PutUint16(out[2:], m.half(m.div(maxMin, 63)))
+	m.pack45(x, out, &codes, nmax, q5)
+}
+
+// pack45 requantizes against the stored header and writes the 4/5-bit codes.
+func (m *kQuantMath) pack45(x []float32, out []byte, codes *[256]uint8, nmax int, q5 bool) {
+	packed := out[4:16]
 	for j := 0; j < 8; j++ {
 		sc, mn := kQuantScaleMin(j, packed)
 		d := m.mul(f16At(out, 0), float32(sc))
