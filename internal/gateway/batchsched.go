@@ -228,10 +228,3 @@ func StatsFor(lengths []int, batches [][]int) BatchPlanStats {
 	}
 	return st
 }
-
-// PlanBatches is the one-call entry point: compose padding-bounded batches for the pending
-// prompt lengths and return both the index groups and their summary stats.
-func (p BatchPolicy) PlanBatches(lengths []int) ([][]int, BatchPlanStats) {
-	batches := p.ComposeBatches(lengths)
-	return batches, StatsFor(lengths, batches)
-}

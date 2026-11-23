@@ -63,7 +63,8 @@ func TestBatchPaddingOverheadInvariant(t *testing.T) {
 	}
 	p := DefaultBatchPolicy()
 
-	batches, stats := p.PlanBatches(lengths)
+	batches := p.ComposeBatches(lengths)
+	stats := StatsFor(lengths, batches)
 	if len(batches) == 0 {
 		t.Fatal("expected at least one batch")
 	}

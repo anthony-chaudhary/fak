@@ -12,9 +12,11 @@ import (
 // slots (stable-UID order), generates one token for each simultaneously, retires
 // finished slots, and pulls queued requests into freed slots. It is exactly
 // stepWithBudget(ctx, 0). The pre-existing Step observable behavior is preserved
-// except for two intentional refinements: the decode batch is ordered by stable
-// submission sequence, and it is filtered through slotDecodableLocked so a slot
-// already at its target is not advanced again.
+// except for three intentional refinements: the decode batch is ordered by stable
+// submission sequence, it is filtered through slotDecodableLocked so a slot
+// already at its target is not advanced again, and a slot admission deferred
+// because its prompt exceeds the prefill budget is drained unbudgeted this step
+// rather than left with no arm that could advance it.
 func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error) {
 	return cb.stepWithBudget(ctx, 0)
 }
@@ -107,7 +109,8 @@ type stepSnapshot struct {
 // plus the prefilling and resident decodable rosters. Caller MUST hold cb.mu.
 func (cb *ContinuousBatcher) gatherStepSnapshotLocked() *stepSnapshot {
 	// 1. Pull queued requests into any empty slots before gathering batches.
-	// initSlot applies the budgeted-prefill rule for ChunkedPrefill requests.
+	// initSlot applies the budgeted-prefill rule to any request whose remainder
+	// exceeds one prefill budget, flagged or not.
 	promotedIDs := cb.tryPromoteWaitingLocked()
 
 	// Capture and reset once-only admission accounting now that this step's
@@ -144,8 +147,9 @@ func (cb *ContinuousBatcher) gatherStepSnapshotLocked() *stepSnapshot {
 	return snap
 }
 
-// stepWithBudget is the shared scheduler step. budget > 0 enables the PREFILL arm
-// for SlotStatePrefilling slots; budget == 0 is the decode-only legacy path.
+// stepWithBudget is the shared scheduler step. budget > 0 bounds the PREFILL arm
+// to that many prompt tokens; budget == 0 is the decode-only path, which still
+// drains any SlotStatePrefilling slot in one unbounded prefill pass.
 func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*BatchStepResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -162,9 +166,14 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 
 	// 3. PREFILL arm, consuming up to budget prompt tokens FIFO. The refill gate
 	// adapts TGI backends/v3/src/backend.rs:186-195@b4adbf2 (Apache-2.0).
-	refillDue := len(snap.resident) == 0 || cb.decodeSinceRefill >= cb.cfg.MaxWaitingDecodeSteps ||
+	// A decode-only step (budget 0) still runs this arm for slots left prefilling:
+	// admission defers by prompt length rather than by the caller's flag, so
+	// skipping the arm here would strand a deferred slot with no arm able to
+	// advance it. With no budget the arm emits the whole remainder at once, which
+	// is the work an eager admission used to do inside the admission lock.
+	refillDue := budget <= 0 || len(snap.resident) == 0 || cb.decodeSinceRefill >= cb.cfg.MaxWaitingDecodeSteps ||
 		len(snap.prefilling) >= int(cb.cfg.WaitingServedRatio*float64(len(snap.resident)))
-	if budget > 0 && len(snap.prefilling) > 0 && refillDue {
+	if len(snap.prefilling) > 0 && refillDue {
 		return cb.runPrefillArmLocked(snap, budget)
 	}
 	return cb.runDecodeArmLocked(snap)
@@ -172,11 +181,17 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 
 // runPrefillArmLocked runs the PREFILL arm: consume up to budget prompt tokens
 // across the prefilling slots FIFO, finishing slots whose pending prompt is fully
-// consumed, and return the step result. Caller MUST hold cb.mu.
+// consumed, and return the step result. A non-positive budget means unbounded:
+// the arm drains every prefilling slot's remainder this step, which is what a
+// decode-only driver needs to make progress on a slot admission deferred.
+// Caller MUST hold cb.mu.
 func (cb *ContinuousBatcher) runPrefillArmLocked(snap *stepSnapshot, budget int) (*BatchStepResult, error) {
 	cb.decodeSinceRefill = 0
 	sortSlotsByStableUID(snap.prefilling)
 	remaining := budget
+	if remaining <= 0 {
+		remaining = int(^uint(0) >> 1)
+	}
 	total := 0
 	for _, slot := range snap.prefilling {
 		if remaining <= 0 {

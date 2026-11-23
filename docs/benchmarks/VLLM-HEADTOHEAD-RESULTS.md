@@ -119,6 +119,62 @@ this bar is a target fak currently misses on every axis, prefix reuse being the 
 single gap. That receipt lives in the private factory, so it is cited as prior evidence, not
 as a committed public artifact.
 
+### 2b. The concurrency ladder (C=1 · 8 · 32) and why C=8 used to collapse
+
+A serving node is judged on aggregate throughput as concurrency rises, so the ladder is the
+axis that separates a batch server from a fast single stream. fak's own measurement of the
+ladder is **not yet** taken — the cells below are open, and the blocker is recorded rather
+than filled:
+
+| Concurrency | fak aggregate tok/s | vLLM aggregate tok/s | fak / vLLM |
+|---|---|---|---|
+| C=1 | not yet | not yet | not yet |
+| C=8 | not yet | not yet | not yet |
+| C=32 | not yet | not yet | not yet |
+
+What *is* settled is the mechanism behind the C=8 collapse, and it was a defect in the
+batcher rather than a property of the kernels. Admission (`ContinuousBatcher.submit` →
+`initSlot`) holds the one global batcher lock for the whole call, and the budgeted-prefill
+branch was reachable only through the wire-only `chunked_prefill` request field, which no
+production caller sets. Every real admission therefore took the eager branch and ran the
+entire remaining prompt through `Session.Prefill` **synchronously under that lock**, so C
+concurrent arrivals serialised into C full prompt forwards before any of them could emit a
+token. Queue promotion (the same `initSlot` under the same lock) compounded it: draining a
+backlog cost the sum of every queued prompt length.
+
+Admission now decides by length instead of by an opt-in flag: a request whose post-prefix-reuse
+remainder exceeds one `PrefillBudget` is admitted deferred (`SlotStatePrefilling`) and consumed
+in budget-sized chunks by the budgeted step, whichever way the caller set `chunked_prefill`.
+Short prompts and `PrefillBudget == 0` keep the single-step eager admit, so the change is
+confined to requests that had to be chunked anyway. What it bounds is the *forward*: no
+admission runs more than one budget of prompt through the model under the batcher lock, so an
+arrival burst serialises into budget-sized forward chunks instead of whole prompts. Admission
+is still O(prompt) in bookkeeping (the request's prompt is copied, and a recurrent prefix hit
+restores its snapshot), so the claim here is about the forward, not about the whole call.
+
+Two costs of the change are worth naming rather than leaving to be discovered. A deferred slot
+is progressed by the prefill arm, and that arm is prefill-first under the shipped defaults
+(`WaitingServedRatio` and `MaxWaitingDecodeSteps` are both zero), so a prompt longer than the
+budget holds its chunk sequence for `ceil(remainder/budget)` steps during which resident decode
+slots do not emit. And a decode-only driver (`Step`, budget 0) has no budget to slice with, so
+it drains a deferred slot's remainder in one unbudgeted pass — the same forward work the eager
+path used to do inside admission, moved out of the admission lock and into the step.
+
+```bash
+go test ./internal/engine -run 'Admission|Chunk|Budget|Prefill|StepDrains' -count=1   # GPU-free: deferral, budget-bounded steps, decode-only drain, eager parity, token equivalence
+```
+
+**Honest fence on the remaining gap.** Bounding admission's serialisation is not the same as
+explaining the whole C=8 gap, and this page will not claim otherwise. A deadline profile of a
+C=8 burst on this engine once ranked recurrent-state `mutateSequence` nesting and lane-request
+preparation as the dominant host cost; that ranking was later shown to be an artifact of a
+serving-heap memory limit that forced back-to-back GC on every allocation, and retiring that
+limit moved C=8 aggregate throughput by an order of magnitude without touching those frames.
+So the admission defect above is a real serialisation term that is now bounded, and the size
+of whatever remains is **unmeasured on the current engine** rather than "mostly outside the
+batcher". The ladder is a measurement to take on a free node, not an improvement this page
+may claim.
+
 ## 3. Gateway adjudication tax (fak-fronts-vLLM vs raw-vLLM)
 
 `tools/vllm_tax_witness.py` runs the same deterministic chat payload N times against (a) raw
@@ -282,6 +338,10 @@ similarly and is **to be measured, not assumed**.
   page: the only admitted node was VRAM-saturated and no `bench-h2h` ledger exists here. The
   cited prior H200 run is the evidence the bar is currently *missed* on all three axes, so
   the bar must not be quoted as achieved until `fak bench h2h` writes a receipt on a free node.
+- **The §2b concurrency ladder is empty for the same reason.** Admission no longer forwards a
+  whole prompt under the batcher lock, which bounds one serialisation term, but no C=1/8/32
+  cell has been read on a free node and the residual cost of a concurrent burst is unmeasured
+  on this engine. The ladder is a measurement to take, not an improvement this page may claim.
 
 ## 6. Reproduce (run on a serving node)
 

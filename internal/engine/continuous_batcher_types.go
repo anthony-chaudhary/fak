@@ -88,7 +88,9 @@ type SubagentRequest struct {
 	SubmissionSeq uint64
 	// ChunkedPrefill asks the batcher to admit this request into SlotStatePrefilling
 	// (budgeted, resumable prompt chunks) rather than eagerly prefill+activate it.
-	// Only honored when ContinuousBatcherConfig.PrefillBudget > 0.
+	// Only honored when ContinuousBatcherConfig.PrefillBudget > 0. A prompt whose
+	// post-reuse remainder exceeds the budget is admitted chunked regardless of this
+	// flag, because such a prompt cannot be prefilled in one budgeted step anyway.
 	ChunkedPrefill bool
 }
 
@@ -314,8 +316,11 @@ type ContinuousBatcherConfig struct {
 	KVBytesPerToken int64
 
 	// PrefillBudget is the per-step prompt-token budget for budgeted chunked prefill.
-	// 0 (default) preserves the legacy eager-prefill, decode-only stepping behavior;
-	// > 0 enables a PREFILL arm for slots admitted with ChunkedPrefill.
+	// 0 (default) preserves the legacy eager-prefill, decode-only stepping behavior
+	// (a slot admission deferred under a later nonzero budget is still drained
+	// unbudgeted by Step, so it can terminate); > 0 enables a budgeted PREFILL arm
+	// and admits every prompt whose remainder exceeds the budget into it, so no
+	// admission forwards more than one budget under the lock.
 	PrefillBudget int
 
 	// DisableRecurrentPrefixReuse turns off GDN recurrent prefix reuse. By default

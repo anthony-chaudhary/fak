@@ -75,7 +75,7 @@ Build the shipping defaults with `gateway.DefaultBatchPolicy()`.
   length and greedily packs each rectangular batch only while its padding overhead stays
   ≤ `MaxPadOverhead`. Similar-length requests batch together; a length jump that would blow
   the ceiling starts a new batch instead.
-- **One-call entry** — `PlanBatches(lengths)` returns the batch index-groups plus
+- **Reporting** — `StatsFor(lengths, batches)` summarizes an already-composed plan as
   `BatchPlanStats` (`AggregatePadOverhead`, `WorstPadOverhead`, `BatchedFraction`).
 
 ### The guarantee (witnessed, not measured)

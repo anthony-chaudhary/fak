@@ -174,7 +174,14 @@ func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 		}
 	}
 
-	if cb.cfg.PrefillBudget > 0 && req.ChunkedPrefill {
+	// A prompt remainder that does not fit one prefill budget takes the chunked path even
+	// when the caller did not ask for it: the eager branch below runs the whole remaining
+	// prompt through Prefill while cb.mu is held, so concurrent arrivals queue behind each
+	// other's prompt forward instead of interleaving. Gating on the remainder keeps short
+	// prompts on the single-step eager admit, where deferring would only add a step.
+	remainder := len(req.PromptTokens) - reused
+	willChunk := cb.cfg.PrefillBudget > 0 && remainder > cb.cfg.PrefillBudget
+	if willChunk || (cb.cfg.PrefillBudget > 0 && req.ChunkedPrefill) {
 		// Budgeted chunked prefill: defer activation. The slot consumes its prompt
 		// copy in budget-sized chunks across PREFILL steps, then transitions to
 		// SlotStateActiveDecode. Upstream mini-sglang prefill.py:65-151 treats an
