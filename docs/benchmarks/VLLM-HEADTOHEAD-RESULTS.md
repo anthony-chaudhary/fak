@@ -1,6 +1,6 @@
 ---
 title: "fak vs vLLM head-to-head: the adjudication tax + the engine bench (gated scaffold)"
-description: "How fak measures itself against vLLM as a first-class peer: a gateway adjudication-tax witness (fak-fronts-vLLM vs raw-vLLM) and a vLLM engine in the GPU throughput bench. Status: pending-measurement — every vLLM cell is a placeholder until a serving-node run lands a committed artifact; the only real numbers here are the measured SGLang sibling's."
+description: "How fak measures itself against vLLM as a first-class peer: a gateway adjudication-tax witness (fak-fronts-vLLM vs raw-vLLM) and a vLLM engine in the GPU throughput bench, plus the fail-closed single-GPU single-stream parity bar (decode, cold prefill, warm TTFT) fak holds itself to against llama.cpp. Status: pending-measurement — every vLLM cell is a placeholder until a serving-node run lands a committed artifact; the only real numbers here are the measured SGLang sibling's and the cited prior llama.cpp parity run."
 ---
 
 # VLLM-HEADTOHEAD-RESULTS — fak vs vLLM, measured the same way SGLang is
@@ -82,6 +82,42 @@ regime, and the table must be read with that disclosure.
 
 Artifacts (pending): a run dir under `experiments/benchmark/runs/by-machine/<machine>/`
 with `result.json` carrying a `vllm` engine row.
+
+### 2a. The single-GPU single-stream parity bar (decode · cold prefill · warm TTFT)
+
+The vLLM cells above are gated on a serving node. The bar fak holds **itself** to on a single
+admitted NVIDIA node is narrower and is now machine-checkable in code rather than prose:
+three axes against **llama.cpp on the same GPU and the same GGUF**, all at concurrency 1.
+
+| Axis | Reading | Bar (fak / llama.cpp) | Direction | Why this bar |
+|---|---|---|---|---|
+| decode | steady-state single-stream tok/s | **≥ 0.80×** | higher is better | the arm a single-stream agent spends most wall-clock in |
+| cold prefill | tok/s at prompt length **P=2048** | **≥ 0.50×** | higher is better | long agent prompts dominate cold turns; llama.cpp's prefill is its strongest axis |
+| warm multi-turn TTFT | ms to first token after a resident prefix | **≤ 2.00×** | lower is better | multi-turn agent loops pay this every turn; a 2× ceiling is the usability floor |
+
+The bar is a typed contract in `internal/engine/servingparity.go` (`ParityRequirements`,
+`GradeParity`, `ServingParityReport`), not a table in this doc: it is fail-closed by
+construction, so a missing, unit-mismatched, non-finite or non-positive reading grades
+`unmeasured` and can never be read as parity. `AllMet()` and `Complete()` are deliberately
+separate — a complete report may still miss, and only a complete one is trustworthy.
+
+```bash
+go test ./internal/engine -run TestServingParity -v   # GPU-free: vocabulary, bars, polarity, fail-closed
+```
+
+**Re-measure status: BLOCKED on hardware, not skipped and not faked.** No ratio on this page
+was produced by a run of this bar. On 2026-11-22 the only admitted NVIDIA node
+(aegis-fak, RTX 5080 16 GB) was fully occupied — 15118 MiB of 16303 MiB held by a resident
+`llama-server` under `fak-llama-qwen27b.service` — and `fak bench h2h report --json` has no
+ledger on this host (`.fak/nightrun/bench-h2h.jsonl` absent), so the acceptance command
+cannot emit a row here. Per the honesty contract, that is recorded as a blocker: **the three
+ratios stay unmeasured until a node with free VRAM runs `fak bench h2h`** (the §6 reproduce
+path). A prior same-GPU, same-GGUF H200 measurement exists and is the reason the bar is not
+assumed reachable — it put fak at **0.40× decode, 0.10× 8k prefill and ~75× warm TTFT** on
+one Qwen 27B GGUF (fak 32.6 tok/s decode / 225 tok/s prefill vs llama.cpp 81.7 / 2318), i.e.
+this bar is a target fak currently misses on every axis, prefix reuse being the largest
+single gap. That receipt lives in the private factory, so it is cited as prior evidence, not
+as a committed public artifact.
 
 ## 3. Gateway adjudication tax (fak-fronts-vLLM vs raw-vLLM)
 
@@ -242,6 +278,10 @@ similarly and is **to be measured, not assumed**.
   `tool_calls`. This is a config item to verify on the run, not a settled value.
 - **No fabricated numbers.** Until a serving-node run lands a committed artifact, every vLLM
   cell stays `not yet`. The SGLang numbers in §4 are the SGLang stack's, fenced and labelled.
+- **The §2a parity bar is a target, not a result.** Its three ratios are `unmeasured` on this
+  page: the only admitted node was VRAM-saturated and no `bench-h2h` ledger exists here. The
+  cited prior H200 run is the evidence the bar is currently *missed* on all three axes, so
+  the bar must not be quoted as achieved until `fak bench h2h` writes a receipt on a free node.
 
 ## 6. Reproduce (run on a serving node)
 
@@ -255,7 +295,11 @@ python tools/gcp_bench.py --tier g2-l4 --engine llama,vllm,fak-cuda
 # 2. Stand a raw vLLM endpoint up (the ENGINE=vllm branch of the serve script):
 ENGINE=vllm bash tools/glm52_sglang_vllm_serve.sh    # or a Qwen vLLM serve variant
 
-# 3. Measure the fak gateway adjudication tax over that raw vLLM endpoint:
+# 3. The single-GPU single-stream parity bar (§2a) — a free node, same GPU + same GGUF:
+fak bench h2h run --model <gguf> --arm fak=<fak-serve-argv> --arm llama=<llama-server-argv>
+fak bench h2h report --json        # decode / cold-prefill-2048 / warm-TTFT ratios vs llama.cpp
+
+# 4. Measure the fak gateway adjudication tax over that raw vLLM endpoint:
 python tools/vllm_tax_witness.py \
     --base-url http://127.0.0.1:8000/v1 --model <served-model> --count 8 --record
 ```
