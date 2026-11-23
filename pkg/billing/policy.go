@@ -247,13 +247,21 @@ func (a CapAction) Valid() bool {
 }
 
 // CapConfig declares the ceilings a SpendCaps enforces. A zero ceiling on
-// an axis means that axis is unlimited; a config with both ceilings zero
+// an axis means that axis is unlimited; a config with every ceiling zero
 // never breaches. Ceilings are OPERATOR CHOICES supplied at construction:
 // this package ships none.
 type CapConfig struct {
 	// DailyTokenCap is the cumulative token ceiling per tenant per UTC
 	// calendar day. 0 = unlimited.
 	DailyTokenCap int64
+
+	// WeeklyTokenCap is the cumulative token ceiling per tenant per UTC ISO
+	// week (Monday start). 0 = unlimited.
+	WeeklyTokenCap int64
+
+	// MonthlyTokenCap is the cumulative token ceiling per tenant per UTC
+	// calendar month. 0 = unlimited.
+	MonthlyTokenCap int64
 
 	// SessionTokenCap is the cumulative token ceiling per (tenant,
 	// session), for the life of the session identifier. 0 = unlimited.
@@ -278,11 +286,12 @@ func (c CapConfig) action() CapAction {
 // no rates, no policy beyond the ceilings it is constructed with — and it
 // is the enforcement arm of the neutral default policy.
 //
-// Two windows are tracked, each only when its ceiling is configured:
+// Windows are tracked only when their ceiling is configured:
 //
-//   - daily: total tokens per tenant, reset on each UTC calendar-day
-//     change. Spend is attributed by the timestamp the caller supplies, so
-//     replaying history lands in the day it happened, not in wall clock.
+//   - daily, weekly, monthly: total tokens per tenant, reset when the UTC
+//     calendar day, ISO week, or calendar month changes. Spend is attributed
+//     by the timestamp the caller supplies, so replaying history lands in the
+//     window it happened in, not in wall clock.
 //   - session: total tokens per (tenant, session), cumulative for the life
 //     of the identifier.
 //
@@ -290,22 +299,50 @@ func (c CapConfig) action() CapAction {
 type SpendCaps struct {
 	mu      sync.Mutex
 	cfg     CapConfig
-	daily   map[string]*capDayCounter
+	daily   map[string]*capWindowCounter
+	weekly  map[string]*capWindowCounter
+	monthly map[string]*capWindowCounter
 	session map[string]int64
 }
 
-// capDayCounter is one tenant's daily accumulator stamped with the UTC day
-// it belongs to.
-type capDayCounter struct {
-	day    string
+// capWindowCounter is one tenant's accumulator for a calendar window,
+// stamped with the key of the window it belongs to.
+type capWindowCounter struct {
+	window string
 	tokens int64
+}
+
+// addWindow folds tokens into the tenant's counter for window, starting a
+// fresh counter when the stored one belongs to an earlier window.
+func addWindow(m map[string]*capWindowCounter, tenant, window string, tokens int64) {
+	w := m[tenant]
+	if w == nil || w.window != window {
+		w = &capWindowCounter{window: window}
+		m[tenant] = w
+	}
+	w.tokens += tokens
+}
+
+// windowTokens reads the tenant's total for window, ignoring a stale
+// counter from an earlier window.
+func windowTokens(m map[string]*capWindowCounter, tenant, window string) int64 {
+	if tenant == "" {
+		return 0
+	}
+	w := m[tenant]
+	if w == nil || w.window != window {
+		return 0
+	}
+	return w.tokens
 }
 
 // NewSpendCaps builds cap state enforcing the given ceilings.
 func NewSpendCaps(cfg CapConfig) *SpendCaps {
 	return &SpendCaps{
 		cfg:     cfg,
-		daily:   make(map[string]*capDayCounter),
+		daily:   make(map[string]*capWindowCounter),
+		weekly:  make(map[string]*capWindowCounter),
+		monthly: make(map[string]*capWindowCounter),
 		session: make(map[string]int64),
 	}
 }
@@ -319,14 +356,16 @@ func (c *SpendCaps) Add(p Principal, tokens int64, at time.Time) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if p.TenantID != "" && c.cfg.DailyTokenCap > 0 {
-		day := utcDay(at)
-		d := c.daily[p.TenantID]
-		if d == nil || d.day != day {
-			d = &capDayCounter{day: day}
-			c.daily[p.TenantID] = d
+	if p.TenantID != "" {
+		if c.cfg.DailyTokenCap > 0 {
+			addWindow(c.daily, p.TenantID, utcDay(at), tokens)
 		}
-		d.tokens += tokens
+		if c.cfg.WeeklyTokenCap > 0 {
+			addWindow(c.weekly, p.TenantID, utcISOWeek(at), tokens)
+		}
+		if c.cfg.MonthlyTokenCap > 0 {
+			addWindow(c.monthly, p.TenantID, utcMonth(at), tokens)
+		}
 	}
 	if p.TenantID != "" && p.SessionID != "" && c.cfg.SessionTokenCap > 0 {
 		c.session[sessionKey(p)] += tokens
@@ -344,6 +383,12 @@ func (c *SpendCaps) Breached(p Principal, at time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cfg.DailyTokenCap > 0 && c.dailyTokensLocked(p, at) >= c.cfg.DailyTokenCap {
+		return true
+	}
+	if c.cfg.WeeklyTokenCap > 0 && windowTokens(c.weekly, p.TenantID, utcISOWeek(at)) >= c.cfg.WeeklyTokenCap {
+		return true
+	}
+	if c.cfg.MonthlyTokenCap > 0 && windowTokens(c.monthly, p.TenantID, utcMonth(at)) >= c.cfg.MonthlyTokenCap {
 		return true
 	}
 	if c.cfg.SessionTokenCap > 0 && p.TenantID != "" && p.SessionID != "" &&
@@ -368,6 +413,24 @@ func (c *SpendCaps) Spent(p Principal, at time.Time) (daily, session int64) {
 	return daily, session
 }
 
+// SpentWindows returns the principal's current daily, weekly, monthly, and
+// session token totals as of the given time. An axis whose ceiling is not
+// configured is not tracked and reads zero. A nil receiver yields zeros.
+func (c *SpendCaps) SpentWindows(p Principal, at time.Time) (daily, weekly, monthly, session int64) {
+	if c == nil {
+		return 0, 0, 0, 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	daily = c.dailyTokensLocked(p, at)
+	weekly = windowTokens(c.weekly, p.TenantID, utcISOWeek(at))
+	monthly = windowTokens(c.monthly, p.TenantID, utcMonth(at))
+	if p.TenantID != "" && p.SessionID != "" {
+		session = c.session[sessionKey(p)]
+	}
+	return daily, weekly, monthly, session
+}
+
 // Action reports the resolved breach action: the configured action, or
 // CapActionPause when none was set.
 func (c *SpendCaps) Action() CapAction {
@@ -382,14 +445,7 @@ func (c *SpendCaps) Action() CapAction {
 // dailyTokensLocked reads the principal's daily total for the day of at,
 // ignoring stale counters from earlier days. Callers hold c.mu.
 func (c *SpendCaps) dailyTokensLocked(p Principal, at time.Time) int64 {
-	if p.TenantID == "" {
-		return 0
-	}
-	d := c.daily[p.TenantID]
-	if d == nil || d.day != utcDay(at) {
-		return 0
-	}
-	return d.tokens
+	return windowTokens(c.daily, p.TenantID, utcDay(at))
 }
 
 // sessionKey renders the (tenant, session) pair as one map key. The NUL
@@ -404,6 +460,19 @@ func sessionKey(p Principal) string {
 // simply contributes to no daily window.
 func utcDay(t time.Time) string {
 	return t.UTC().Format("2006-01-02")
+}
+
+// utcISOWeek renders the UTC ISO week of t as "2026-W53". The ISO year can
+// differ from the calendar year around January 1, so this is not derivable
+// from a date layout.
+func utcISOWeek(t time.Time) string {
+	y, w := t.UTC().ISOWeek()
+	return fmt.Sprintf("%04d-W%02d", y, w)
+}
+
+// utcMonth renders the UTC calendar month of t as "2006-01".
+func utcMonth(t time.Time) string {
+	return t.UTC().Format("2006-01")
 }
 
 // Settlement is the durable outcome of settling one usage record: the
