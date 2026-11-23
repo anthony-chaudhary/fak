@@ -1,8 +1,8 @@
 package ggufload
 
 // quant_descriptor_adapter_test.go is the witness suite for the W4AFP8
-// foreign-descriptor adapter (issue oss-port-vllm-quant-descriptor-adapter-
-// 20261106, ported from vllm/model_executor/layers/quantization/w4afp8.py:1@
+// foreign-descriptor adapter (ported from vllm-project/vllm,
+// vllm/model_executor/layers/quantization/w4afp8.py@
 // 05737d01eb8d74b52c8478c6885dfb603808f335, Apache-2.0). It pins the
 // load-time translation of a fixed foreign descriptor onto the canonical W4A8
 // FP8 MoE scheme, the routed-expert tensor-name remap, the int4->uint4b8 byte
@@ -100,6 +100,27 @@ func TestQuantDescriptorAdapter(t *testing.T) {
 		}
 	})
 
+	t.Run("refuse any single drifted field", func(t *testing.T) {
+		drifts := map[string]func(*ForeignQuantDescriptor){
+			"weight type":  func(d *ForeignQuantDescriptor) { d.WeightType = "float" },
+			"strategy":     func(d *ForeignQuantDescriptor) { d.Strategy = "channel" },
+			"act bits":     func(d *ForeignQuantDescriptor) { d.ActBits = 16 },
+			"act type":     func(d *ForeignQuantDescriptor) { d.ActType = "int" },
+			"act strategy": func(d *ForeignQuantDescriptor) { d.ActStrategy = "tensor" },
+		}
+		for name, drift := range drifts {
+			d := knownForeignW4AFP8()
+			drift(&d)
+			got, err := TranslateQuantDescriptor(d)
+			if !errors.Is(err, ErrUnknownQuantSpelling) {
+				t.Fatalf("TranslateQuantDescriptor(drifted %s) = %v, want ErrUnknownQuantSpelling", name, err)
+			}
+			if got != (CanonicalQuantDescriptor{}) {
+				t.Fatalf("TranslateQuantDescriptor(drifted %s) returned %+v on refusal, want zero", name, got)
+			}
+		}
+	})
+
 	t.Run("refuse wrong weight bits", func(t *testing.T) {
 		d := knownForeignW4AFP8()
 		d.WeightBits = 8
@@ -122,6 +143,18 @@ func TestQuantDescriptorAdapterTensorNameRemap(t *testing.T) {
 		{name: "blk.0.experts.3.w1.weight", want: "blk.0.experts.3.w1.weight_packed", wantOK: true},
 		{name: "blk.0.experts.3.w1.weight_scale_inv", want: "blk.0.experts.3.w1.weight_scale", wantOK: true},
 		{name: "blk.0.experts.3.w1.input_scale", want: "", wantOK: false},
+		{name: "model.layers.2.mlp.experts.17.down_proj.weight", want: "model.layers.2.mlp.experts.17.down_proj.weight_packed", wantOK: true},
+		{name: "model.layers.2.mlp.experts.17.gate_proj.input_scale", want: "", wantOK: false},
+		// Dense tensors keep the native FP8 serialization: never renamed, and
+		// their input scale is never dropped.
+		{name: "model.layers.0.self_attn.q_proj.weight", wantErr: true},
+		{name: "model.layers.0.self_attn.q_proj.weight_scale_inv", wantErr: true},
+		{name: "model.layers.0.self_attn.q_proj.input_scale", wantErr: true},
+		// The expert projection list is closed.
+		{name: "blk.0.experts.3.gate.weight", wantErr: true},
+		{name: "blk.0.sharedexperts.3.w1.weight", wantErr: true},
+		{name: "blk.0.experts.x.w1.weight", wantErr: true},
+		{name: "blk.0.experts.3.w1.weight.extra", wantErr: true},
 		{name: "blk.0.experts.3.w1.bias", wantErr: true},
 		{name: "blk.0.experts.3.w1", wantErr: true},
 		{name: "", wantErr: true},
@@ -142,6 +175,11 @@ func TestQuantDescriptorAdapterTensorNameRemap(t *testing.T) {
 		}
 		if got != tc.want || ok != tc.wantOK {
 			t.Fatalf("MapQuantTensorName(%q) = (%q,%v), want (%q,%v)", tc.name, got, ok, tc.want, tc.wantOK)
+		}
+	}
+	for _, tc := range cases {
+		if got := IsRoutedExpertQuantTensor(tc.name); got == tc.wantErr {
+			t.Fatalf("IsRoutedExpertQuantTensor(%q) = %v, want %v", tc.name, got, !tc.wantErr)
 		}
 	}
 }

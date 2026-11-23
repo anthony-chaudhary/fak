@@ -27,7 +27,7 @@ package ggufload
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"regexp"
 )
 
 // ErrUnknownQuantSpelling is the fail-closed sentinel returned when a foreign
@@ -162,30 +162,45 @@ func TranslateQuantDescriptor(d ForeignQuantDescriptor) (CanonicalQuantDescripto
 //   - "<expert>.input_scale"      -> dropped (ok=false): the W4A8 kernel
 //     quantizes activations per token, so the static input scale is not bound.
 //
-// The caller applies this only to routed-expert tensors; dense layers already
-// use the native FP8 serialization and are not remapped. A name that is not
-// one of the three remapped forms is refused with ErrUnknownQuantSpelling.
+// Only routed-expert tensors are remapped: dense layers already use the native
+// FP8 serialization and keep both their names and their input scales, so a
+// caller filters with IsRoutedExpertQuantTensor first. Any other name, dense
+// ones included, is refused with ErrUnknownQuantSpelling.
 //
 // The returned ok is true when the name maps to a canonical tensor, false when
 // the name is dropped (the input scale). On refusal the returned name is
 // empty and ok is false.
 func MapQuantTensorName(name string) (string, bool, error) {
-	// The static input scale is dropped, not remapped.
-	if strings.HasSuffix(name, ".input_scale") {
+	m := routedExpertQuantTensor.FindStringSubmatchIndex(name)
+	if m == nil {
+		return "", false, fmt.Errorf("%w: tensor %q", ErrUnknownQuantSpelling, name)
+	}
+	expert, field := name[:m[2]], name[m[2]:m[3]]
+	switch field {
+	case "weight":
+		return expert + "weight_packed", true, nil
+	case "weight_scale_inv":
+		return expert + "weight_scale", true, nil
+	default:
 		return "", false, nil
 	}
-	if rest, found := strings.CutSuffix(name, ".weight_scale_inv"); found {
-		return rest + ".weight_scale", true, nil
-	}
-	if rest, found := strings.CutSuffix(name, ".weight"); found {
-		return rest + ".weight_packed", true, nil
-	}
-	return "", false, fmt.Errorf("%w: tensor %q", ErrUnknownQuantSpelling, name)
+}
+
+// routedExpertQuantTensor matches the three foreign tensor fields of one routed
+// expert projection. The projection list is closed: an expert-shaped name with
+// any other projection is not a W4AFP8 expert tensor.
+var routedExpertQuantTensor = regexp.MustCompile(
+	`\.experts\.\d+\.(?:gate_proj|up_proj|down_proj|w1|w2|w3)\.(weight|weight_scale_inv|input_scale)$`)
+
+// IsRoutedExpertQuantTensor reports whether name is a routed-expert tensor the
+// adapter remaps or drops. Dense tensors report false and bind unchanged.
+func IsRoutedExpertQuantTensor(name string) bool {
+	return routedExpertQuantTensor.MatchString(name)
 }
 
 // RepackSignedInt4ToUint4B8 applies the W4AFP8 load-time byte transform to a
-// routed-expert weight payload: each int8 byte (one signed INT4 per byte) is
-// XORed with 0x88. This mirrors the upstream
+// routed-expert weight payload: each int8 byte packs two signed INT4 nibbles,
+// and XOR with 0x88 adds 8 (mod 16) to both. This mirrors the upstream
 // `tensor.view(torch.uint8).bitwise_xor(0x88).view(torch.int32)` repack, whose
 // net byte effect is the per-byte XOR; the int32 view only reinterprets the
 // result, so the byte count is unchanged.
