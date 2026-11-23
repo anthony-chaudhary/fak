@@ -11,11 +11,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
-// TensorNVFP4 is ggml's NVFP4: 64-value blocks of four UE4M3 sub-block scales
-// then 32 bytes of packed E2M1 values. Inkling-2-Mini GGUFs keep the released
-// NVFP4 experts in it, with a per-expert F32 ".scale" tensor beside.
-const TensorNVFP4 TensorType = 40
-
 const (
 	qkNVFP4         = 64
 	qkNVFP4Sub      = 16

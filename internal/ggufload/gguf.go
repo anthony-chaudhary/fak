@@ -129,7 +129,11 @@ const (
 	TensorIQ1_M   TensorType = 29
 	TensorBF16    TensorType = 30
 	TensorMXFP4   TensorType = 39
-	TensorQ2_0    TensorType = 42
+	// TensorNVFP4 is ggml's NVFP4: 64-value blocks of four UE4M3 sub-block scales
+	// then 32 bytes of packed E2M1 values. Inkling-2-Mini GGUFs keep the released
+	// NVFP4 experts in it, with a per-expert F32 ".scale" tensor beside.
+	TensorNVFP4 TensorType = 40
+	TensorQ2_0  TensorType = 42
 	// PQ2_0 is Prism's Bonsai-2 ternary group-128 format (GGUF type 142).
 	// It shares Q2_0's decode, but is a separate on-disk format identifier.
 	TensorPQ2_0 TensorType = 142

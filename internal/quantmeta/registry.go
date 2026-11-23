@@ -65,7 +65,7 @@ var dtypeRegistry = []DtypeDescriptor{
 var ggufEnum = map[string]uint32{
 	"TensorF32": 0, "TensorF16": 1, "TensorQ4_0": 2, "TensorQ4_1": 3, "TensorQ5_0": 6, "TensorQ5_1": 7, "TensorQ8_0": 8,
 	"TensorQ2_K": 10, "TensorQ3_K": 11, "TensorQ4_K": 12, "TensorQ5_K": 13, "TensorQ6_K": 14,
-	"TensorIQ2_XXS": 16, "TensorIQ2_XS": 17, "TensorIQ3_XXS": 18, "TensorIQ1_S": 19, "TensorIQ4_NL": 20, "TensorIQ3_S": 21, "TensorIQ2_S": 22, "TensorIQ4_XS": 23, "v41EngramRawI8Type": 24, "TensorIQ1_M": 29, "TensorBF16": 30, "TensorMXFP4": 39, "TensorQ2_0": 42, "TensorPQ2_0": 142, "TensorQ1_0": 43, "TensorHQQ4": 44,
+	"TensorIQ2_XXS": 16, "TensorIQ2_XS": 17, "TensorIQ3_XXS": 18, "TensorIQ1_S": 19, "TensorIQ4_NL": 20, "TensorIQ3_S": 21, "TensorIQ2_S": 22, "TensorIQ4_XS": 23, "v41EngramRawI8Type": 24, "TensorIQ1_M": 29, "TensorBF16": 30, "TensorMXFP4": 39, "TensorNVFP4": 40, "TensorQ2_0": 42, "TensorPQ2_0": 142, "TensorQ1_0": 43, "TensorHQQ4": 44,
 }
 var dtypeEnum = map[string]uint8{
 	"F32": 0, "F16": 1, "BF16": 2, "Q8_0": 3, "I8": 4, "I4": 5, "FP8": 6, "Q4_K": 7, "Q5_K": 8, "Q6_K": 9, "Q2_0": 10, "Q2_K": 11, "Q3_K": 12, "IQ3_XXS": 13, "IQ3_S": 14, "IQ2_XXS": 15, "FP4": 16, "IQ4_XS": 17, "IQ2_S": 18, "IQ2_XS": 19, "IQ1_S": 20, "NVFP4": 21, "IQ1_M": 22, "IQ4_NL": 23,
@@ -74,6 +74,7 @@ var unsupportedGGUF = map[uint32]string{
 	24: "private packed V4.1 Engram row encoding (264 bytes), not an ordinary GGUF tensor block",
 	19: "IQ1 offset/grid semantics are not represented by this descriptor",
 	29: "IQ1 offset/grid semantics are not represented by this descriptor",
+	40: "NVFP4 UE4M3 sub-block scales plus a separate per-tensor scale need a richer descriptor; not MXFP4",
 	43: "Q1_0 numeric tag is provisional pending a real file header",
 	44: "HQQ4 numeric tag is provisional pending a real file header",
 }
