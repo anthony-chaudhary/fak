@@ -1307,6 +1307,14 @@ func cmdManageCommand(commandName string, argv []string) {
 	if err != nil {
 		abortChildWiring(cancel, "provider SessionStart hook setup", err, 1)
 	}
+	routingSettings := sessionStartSettings
+	if strings.TrimSpace(sessionStartInstall.SettingsPath) != "" {
+		routingSettings = sessionStartInstall.SettingsPath
+	}
+	command, _, err = installGuardClaudeRoutingEnv(command, injected, routingSettings)
+	if err != nil {
+		abortChildWiring(cancel, "Claude routing env setup", err, 1)
+	}
 	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.

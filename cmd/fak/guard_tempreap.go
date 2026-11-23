@@ -70,6 +70,7 @@ var guardTempDirHooks = map[string]bool{
 	"pi":           true,
 	"precompact":   true,
 	"replay":       true,
+	"routingenv":   true,
 	"seedprompt":   true,
 	"sessionstart": true,
 	"stophook":     true,
