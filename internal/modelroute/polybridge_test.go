@@ -43,7 +43,7 @@ func coResidentPool(t *testing.T) *polymodel.Pool {
 // hands straight to polymodel.Schedule / AcceptGreedy.
 func TestBridgeCoResidentDrafterVerifier(t *testing.T) {
 	pool := coResidentPool(t)
-	b, err := specPlan("draft-7b", "verify-70b").BridgeToPolymodel(pool)
+	b, err := BridgeToPolymodel(specPlan("draft-7b", "verify-70b"), pool)
 	if err != nil {
 		t.Fatalf("co-resident spec ensemble should bridge: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestBridgeDifferentFamilyNotBridgeable(t *testing.T) {
 	mustAdmitBridge(t, p, polymodel.Model{ID: "draft-a", Family: "glm", PrefixDigest: "sha256:x", WeightBytes: 7000})
 	mustAdmitBridge(t, p, polymodel.Model{ID: "verify-b", Family: "qwen", PrefixDigest: "sha256:y", WeightBytes: 70000})
 
-	_, err := specPlan("draft-a", "verify-b").BridgeToPolymodel(p)
+	_, err := BridgeToPolymodel(specPlan("draft-a", "verify-b"), p)
 	if err == nil {
 		t.Fatal("different-family members must not be bridgeable")
 	}
@@ -74,13 +74,13 @@ func TestBridgeDifferentFamilyNotBridgeable(t *testing.T) {
 // resident is not bridgeable — a nil pool and a half-resident pool both refuse.
 func TestBridgeNotResidentNotBridgeable(t *testing.T) {
 	// nil pool: nothing resident.
-	if _, err := specPlan("d", "v").BridgeToPolymodel(nil); !errors.Is(err, ErrNotBridgeable) {
+	if _, err := BridgeToPolymodel(specPlan("d", "v"), nil); !errors.Is(err, ErrNotBridgeable) {
 		t.Fatalf("nil pool should be not-bridgeable, got %v", err)
 	}
 	// Only the drafter resident; the verifier is absent.
 	p := polymodel.NewPool(1 << 20)
 	mustAdmitBridge(t, p, polymodel.Model{ID: "draft-7b", Family: "glm", PrefixDigest: "sha256:band", WeightBytes: 7000})
-	if _, err := specPlan("draft-7b", "verify-70b").BridgeToPolymodel(p); !errors.Is(err, ErrNotBridgeable) {
+	if _, err := BridgeToPolymodel(specPlan("draft-7b", "verify-70b"), p); !errors.Is(err, ErrNotBridgeable) {
 		t.Fatalf("absent verifier should be not-bridgeable, got %v", err)
 	}
 }
@@ -92,7 +92,7 @@ func TestBridgeSameFamilyNoSharedDigestNotBridgeable(t *testing.T) {
 	p := polymodel.NewPool(1 << 20)
 	mustAdmitBridge(t, p, polymodel.Model{ID: "draft-7b", Family: "glm", PrefixDigest: "sha256:a", WeightBytes: 7000})
 	mustAdmitBridge(t, p, polymodel.Model{ID: "verify-70b", Family: "glm", PrefixDigest: "sha256:b", WeightBytes: 70000})
-	if _, err := specPlan("draft-7b", "verify-70b").BridgeToPolymodel(p); !errors.Is(err, ErrNotBridgeable) {
+	if _, err := BridgeToPolymodel(specPlan("draft-7b", "verify-70b"), p); !errors.Is(err, ErrNotBridgeable) {
 		t.Fatalf("same family but mismatched digest should be not-bridgeable, got %v", err)
 	}
 }
@@ -103,7 +103,7 @@ func TestBridgeSameFamilyNoSharedDigestNotBridgeable(t *testing.T) {
 func TestBridgeNonSpecEnsembleNotBridgeable(t *testing.T) {
 	pool := coResidentPool(t)
 	vote := Plan{Members: []Member{{Model: "draft-7b"}, {Model: "verify-70b"}}, Reduce: ReduceVote}
-	if _, err := vote.BridgeToPolymodel(pool); err == nil {
+	if _, err := BridgeToPolymodel(vote, pool); err == nil {
 		t.Fatal("a role-less vote ensemble must not bridge to spec-decode")
 	}
 }
@@ -116,12 +116,12 @@ func TestBridgeDeterministicAndOrderPreserving(t *testing.T) {
 	pool := coResidentPool(t)
 	plan := specPlan("draft-7b", "verify-70b")
 
-	first, err := plan.BridgeToPolymodel(pool)
+	first, err := BridgeToPolymodel(plan, pool)
 	if err != nil {
 		t.Fatalf("bridge: %v", err)
 	}
 	for i := 0; i < 50; i++ {
-		got, err := plan.BridgeToPolymodel(pool)
+		got, err := BridgeToPolymodel(plan, pool)
 		if err != nil {
 			t.Fatalf("bridge at %d: %v", i, err)
 		}
@@ -135,7 +135,7 @@ func TestBridgeDeterministicAndOrderPreserving(t *testing.T) {
 		{Model: "verify-70b", Role: "verifier"},
 		{Model: "draft-7b", Role: "drafter"},
 	}}
-	rb, err := reversed.BridgeToPolymodel(pool)
+	rb, err := BridgeToPolymodel(reversed, pool)
 	if err != nil {
 		t.Fatalf("reversed-order bridge: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestBridgeEnabledGate(t *testing.T) {
 
 	// Default (flag unset / off): refused even though the members ARE co-resident.
 	t.Setenv(polymodel.FlagEnv, "")
-	if _, err := plan.BridgeToPolymodelEnabled(pool); !errors.Is(err, ErrNotBridgeable) {
+	if _, err := BridgeToPolymodelEnabled(plan, pool); !errors.Is(err, ErrNotBridgeable) {
 		t.Fatalf("disabled lane should refuse, got %v", err)
 	}
 	// Enabled: identical to the pure bridge.
@@ -161,7 +161,7 @@ func TestBridgeEnabledGate(t *testing.T) {
 	if !polymodel.Enabled() {
 		t.Fatal("FAK_POLYMODEL=on should enable the lane")
 	}
-	b, err := plan.BridgeToPolymodelEnabled(pool)
+	b, err := BridgeToPolymodelEnabled(plan, pool)
 	if err != nil {
 		t.Fatalf("enabled co-resident bridge should succeed: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestBridgeEnabledGate(t *testing.T) {
 // co-resident — and surfaces a divergence when a cheaper warm member exists.
 func TestPickPolyDrafterAgreesWithRole(t *testing.T) {
 	pool := coResidentPool(t) // draft-7b (7000) is the only other glm member of verify-70b
-	b, preferred, agree, err := specPlan("draft-7b", "verify-70b").PickPolyDrafter(pool)
+	b, preferred, agree, err := PickPolyDrafter(specPlan("draft-7b", "verify-70b"), pool)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestPickPolyDrafterAgreesWithRole(t *testing.T) {
 	// Admit a CHEAPER co-resident family member: PickDrafter now prefers it, so the
 	// declared drafter (draft-7b) no longer agrees — the divergence is surfaced.
 	mustAdmitBridge(t, pool, polymodel.Model{ID: "draft-1b", Family: "glm", PrefixDigest: "sha256:band", WeightBytes: 1000})
-	_, preferred2, agree2, err := specPlan("draft-7b", "verify-70b").PickPolyDrafter(pool)
+	_, preferred2, agree2, err := PickPolyDrafter(specPlan("draft-7b", "verify-70b"), pool)
 	if err != nil {
 		t.Fatalf("pick after cheaper admit: %v", err)
 	}

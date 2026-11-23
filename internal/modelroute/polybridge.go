@@ -71,7 +71,7 @@ var ErrNotBridgeable = fmt.Errorf("modelroute: ensemble is not a co-resident dra
 // This is the pure residency MAPPING; it does not consult Enabled(). A caller
 // putting the resulting pairing on a LIVE request path MUST gate that on
 // polymodel.Enabled() (FAK_POLYMODEL) — see BridgeToPolymodelEnabled.
-func (p Plan) BridgeToPolymodel(pool *polymodel.Pool) (PolyBridge, error) {
+func BridgeToPolymodel(p Plan, pool *polymodel.Pool) (PolyBridge, error) {
 	roles, err := p.SpecRoles()
 	if err != nil {
 		// Not a 1-drafter/1-verifier ensemble at all — surface the role error.
@@ -111,11 +111,11 @@ func (p Plan) BridgeToPolymodel(pool *polymodel.Pool) (PolyBridge, error) {
 // answer-level reduce. When ON, it is exactly BridgeToPolymodel. The pure mapping
 // (BridgeToPolymodel) stays testable without the env gate; only this live form
 // consults Enabled().
-func (p Plan) BridgeToPolymodelEnabled(pool *polymodel.Pool) (PolyBridge, error) {
+func BridgeToPolymodelEnabled(p Plan, pool *polymodel.Pool) (PolyBridge, error) {
 	if !polymodel.Enabled() {
 		return PolyBridge{}, fmt.Errorf("%w: poly-model lane disabled (set %s=on)", ErrNotBridgeable, polymodel.FlagEnv)
 	}
-	return p.BridgeToPolymodel(pool)
+	return BridgeToPolymodel(p, pool)
 }
 
 // PickPolyDrafter resolves the drafter polymodel would itself select for the Plan's
@@ -126,8 +126,8 @@ func (p Plan) BridgeToPolymodelEnabled(pool *polymodel.Pool) (PolyBridge, error)
 // PickDrafter would prefer it — this surfaces that divergence instead of hiding it.
 // Returns the bridged pairing (declared roles) plus the residency-preferred drafter
 // id; agree reports whether they match. Not-bridgeable Plans propagate the error.
-func (p Plan) PickPolyDrafter(pool *polymodel.Pool) (bridge PolyBridge, preferred polymodel.ModelID, agree bool, err error) {
-	b, err := p.BridgeToPolymodel(pool)
+func PickPolyDrafter(p Plan, pool *polymodel.Pool) (bridge PolyBridge, preferred polymodel.ModelID, agree bool, err error) {
+	b, err := BridgeToPolymodel(p, pool)
 	if err != nil {
 		return PolyBridge{}, "", false, err
 	}

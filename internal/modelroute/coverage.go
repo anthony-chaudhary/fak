@@ -1,7 +1,5 @@
 package modelroute
 
-import "sort"
-
 // coverage.go — the MANIFEST <-> ROSTER cross-check: does a user's OWN account
 // roster actually bind every model id their routing manifest can emit? modelroute.go
 // picks abstract model ids; account.go binds ONE id to one account. Nothing tied the
@@ -14,33 +12,7 @@ import "sort"
 // to any model" answerable against "which of MY accounts serves it" for the whole
 // policy at once, not one decision at a time.
 
-// ModelIDs returns every distinct model id the Manifest can route to — every member
-// and every scout across all rules AND the default plan — sorted. It is exactly the
-// set an account roster must bind (or serve via its default) to cover the policy.
-func (m Manifest) ModelIDs() []string {
-	seen := map[string]bool{}
-	add := func(id string) {
-		if id != "" {
-			seen[id] = true
-		}
-	}
-	collect := func(p Plan) {
-		for _, id := range p.Models() {
-			add(id)
-		}
-		add(p.Scout)
-	}
-	for _, r := range m.Rules {
-		collect(r.Plan)
-	}
-	collect(m.Default)
-	out := make([]string, 0, len(seen))
-	for id := range seen {
-		out = append(out, id)
-	}
-	sort.Strings(out)
-	return out
-}
+// Manifest.ModelIDs, the set a roster must cover, lives in pkg/routepolicy.
 
 // CoverageStatus is how a roster serves one routed model id.
 type CoverageStatus string

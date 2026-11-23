@@ -1006,7 +1006,7 @@ hfhub = ["internal/hfhub/**"]
 memq = ["internal/memq/**"]
 polymodel = ["internal/polymodel/**"]
 storedrv = ["internal/storedrv/**"]
-modelroute = ["internal/modelroute/**"]
+modelroute = ["internal/modelroute/**", "pkg/routepolicy/**"]
 capabilitymatrix = ["internal/capabilitymatrix/**"]
 # reconciled 2026-06-28 (dos lint --strict LANE_WITHOUT_TREE): #1029 added the modelreg lane to
 # [lanes].concurrent/autopick but never declared its tree here, so the lane could NOT be arbitrated
