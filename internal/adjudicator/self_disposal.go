@@ -90,6 +90,13 @@ func plainSingleRMTarget(command string) (string, bool) {
 // path never launches git; unsupported/corrupt index forms return an error and
 // preserve REQUIRE_WITNESS. Staged files therefore remain protected.
 func gitIndexTracks(root, target string) (bool, error) {
+	return gitIndexLists(root, target, filepath.Separator == '\\')
+}
+
+// gitIndexLists is gitIndexTracks with the letter-case rule chosen by the
+// caller: foldCase treats names differing only by case as the same entry, the
+// fail-closed reading wherever the filesystem's case sensitivity is unknown.
+func gitIndexLists(root, target string, foldCase bool) (bool, error) {
 	indexPath, err := repositoryIndexPath(root)
 	if err != nil {
 		return false, err
@@ -139,7 +146,7 @@ func gitIndexTracks(root, target string) (bool, error) {
 			return false, errors.New("unterminated git index path")
 		}
 		name := string(payload[off:end])
-		if name == want || filepath.Separator == '\\' && strings.EqualFold(name, want) {
+		if name == want || foldCase && strings.EqualFold(name, want) {
 			tracked = true
 		}
 		off = entryStart + ((end-entryStart+1+7)/8)*8

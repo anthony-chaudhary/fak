@@ -83,13 +83,15 @@ type policyState struct {
 // Adjudicator is the reference monitor. Construct with New; the default instance
 // registers itself in init().
 type Adjudicator struct {
-	state           atomic.Pointer[policyState]
-	authored        sync.Map
-	devEdit         atomic.Pointer[devEditAttestationState]
-	missionContract atomic.Pointer[MissionContract]
-	receiptRoot     string
-	recovery        *RecoveryAuditLedger
-	circuitBreaker  atomic.Pointer[circuitBreakerTracker]
+	state             atomic.Pointer[policyState]
+	authored          sync.Map
+	testAuthored      sync.Map
+	testAuthoredCount atomic.Int64
+	devEdit           atomic.Pointer[devEditAttestationState]
+	missionContract   atomic.Pointer[MissionContract]
+	receiptRoot       string
+	recovery          *RecoveryAuditLedger
+	circuitBreaker    atomic.Pointer[circuitBreakerTracker]
 }
 
 // New builds an adjudicator with the given policy.
@@ -137,6 +139,7 @@ func (a *Adjudicator) ResetRun() {
 		a.authored.Delete(k)
 		return true
 	})
+	a.resetTestAuthorship()
 }
 
 // DeniedTools returns the names of tools the policy provably refuses BY NAME (the

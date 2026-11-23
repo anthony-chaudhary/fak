@@ -256,26 +256,7 @@ func newTestFileAuthorshipExempt(lowerTool string, args map[string]any, target s
 	} else if !os.IsNotExist(err) {
 		return false
 	}
-	// Whitespace-normalized vacuous-pass screen: `func TestMain (` (space before
-	// the paren) is valid Go and compiles clean, and a TestMain that skips
-	// m.Run() makes the whole package report ok without running a single test.
-	// Stripping every whitespace rune closes the spelling variants; os.Exit and
-	// flag.Set in a NEW test file are the init-based skip-all vectors
-	// (init{os.Exit(0)} / init{flag.Set("test.run","zzz")} both report ok
-	// vacuously). Anything exotic fails closed into the designated-test-lane
-	// route; plain authorship (testing, t.Run, errors.Is) sails through.
-	normalized := strings.Map(func(r rune) rune {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-			return -1
-		}
-		return r
-	}, content)
-	if strings.Contains(normalized, "funcTestMain(") ||
-		strings.Contains(normalized, "os.Exit(") ||
-		strings.Contains(normalized, "flag.Set(") {
-		return false
-	}
-	return true
+	return !carriesVacuousPassVector(content)
 }
 
 // workspaceResolvedPath resolves a tool-call target for the authorship check.
@@ -447,6 +428,12 @@ func (a *Adjudicator) testImmunityVerdict(ctx context.Context, p Policy, c *abi.
 			if newTestFileAuthorshipExempt(lowerTool, args, target) {
 				// Pure authorship of a NEW Go test file cannot weaken an existing
 				// gating suite; admit it even under an implementation lane.
+				a.noteTestAuthorship(c, args, target)
+				continue
+			}
+			if a.sessionAuthoredTestEditExempt(c, lowerTool, args, target) {
+				// A test file this adjudicator admitted as new earlier in the trace,
+				// still holding the admitted content, is in-progress authorship.
 				continue
 			}
 			if a.devEditAttested(ctx, c, target) {
