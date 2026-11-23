@@ -25,6 +25,7 @@ var (
 	ErrTeacherMismatch = errors.New("logitoracle: teacher prompt differs from requested prompt")
 	ErrInvalidHistory  = errors.New("logitoracle: invalid fed-token history")
 	ErrLogitsChecksum  = errors.New("logitoracle: logits checksum missing, invalid or mismatched")
+	ErrBadNoiseFloor   = errors.New("logitoracle: KL noise floor and multiple must be finite and positive")
 )
 
 // Thresholds is the declared gate. A divergent greedy token counts as a tie only
@@ -35,6 +36,28 @@ type Thresholds struct {
 	RelL2Max   float64 `json:"relative_l2_max"`
 	TieEpsilon float64 `json:"tie_epsilon"`
 	TopK       int     `json:"top_k"`
+	// KLNoise is the optional noise-floor gate; nil leaves it off.
+	KLNoise *KLNoiseFloor `json:"kl_noise,omitempty"`
+}
+
+// KLNoiseFloor gates the candidate's mean KL against run-to-run noise the
+// caller measured on the reference itself. Floor is the mean KL between two
+// reference runs that should agree (for example the same build at two batch
+// sizes); the candidate passes while its mean KL stays within Multiple times
+// that floor. Both are caller inputs: the package holds no default for either,
+// because the noise of one artifact on one backend says nothing about another.
+type KLNoiseFloor struct {
+	Floor    float64 `json:"floor"`
+	Multiple float64 `json:"multiple"`
+}
+
+// A zero floor means the baseline pair was bit-identical, so there is no noise
+// to scale by and the ratio is undefined; that case belongs to the strict gate.
+func (f KLNoiseFloor) validate() error {
+	if !(f.Floor > 0) || math.IsInf(f.Floor, 0) || !(f.Multiple > 0) || math.IsInf(f.Multiple, 0) {
+		return fmt.Errorf("%w: floor=%v multiple=%v", ErrBadNoiseFloor, f.Floor, f.Multiple)
+	}
+	return nil
 }
 
 // StrictThresholds is the fak#12735 whole-model logit gate.
@@ -48,6 +71,11 @@ func (t Thresholds) validate() error {
 	if t.TopK < 1 || t.CosineMin < -1 || t.CosineMin > 1 || t.RelL2Max < 0 || t.TieEpsilon < 0 ||
 		math.IsNaN(t.CosineMin) || math.IsNaN(t.RelL2Max) || math.IsNaN(t.TieEpsilon) {
 		return ErrBadThresholds
+	}
+	if t.KLNoise != nil {
+		if err := t.KLNoise.validate(); err != nil {
+			return fmt.Errorf("%w: %w", ErrBadThresholds, err)
+		}
 	}
 	return nil
 }
@@ -295,6 +323,73 @@ func (a *Accumulator) Fold(positions, excluded int, th Thresholds) PromptReport 
 	return r
 }
 
+// KL noise-floor verdicts. NoFloor is not a pass: it says the axis was never
+// gated. Refused means the gate was requested but could not be evaluated.
+const (
+	KLNoiseNoFloor  = "NO_FLOOR"
+	KLNoiseWithin   = "WITHIN_FLOOR"
+	KLNoiseExceeded = "EXCEEDED"
+	KLNoiseRefused  = "REFUSED"
+)
+
+// KLNoiseReport is the noise-floor gate's receipt. KLMean is weighted by
+// compared positions across prompts; Limit is Floor*Multiple and Ratio is
+// KLMean/Floor. Numeric fields stay zero unless the gate was evaluated.
+type KLNoiseReport struct {
+	Verdict  string  `json:"verdict"`
+	KLMean   float64 `json:"kl_mean"`
+	Floor    float64 `json:"floor"`
+	Multiple float64 `json:"multiple"`
+	Limit    float64 `json:"limit"`
+	Ratio    float64 `json:"ratio_to_floor"`
+	Reason   string  `json:"reason,omitempty"`
+}
+
+// EvaluateKLNoise judges the position-weighted mean KL of prompts against the
+// caller's measured noise floor. It never divides by an unusable floor and
+// never reports a non-finite number, so the receipt always encodes as JSON.
+func EvaluateKLNoise(prompts []PromptReport, gate *KLNoiseFloor) KLNoiseReport {
+	if gate == nil {
+		return KLNoiseReport{Verdict: KLNoiseNoFloor}
+	}
+	if err := gate.validate(); err != nil {
+		return KLNoiseReport{Verdict: KLNoiseRefused, Reason: "noise floor and multiple must be finite and positive"}
+	}
+	limit := gate.Floor * gate.Multiple
+	if math.IsInf(limit, 0) {
+		return KLNoiseReport{Verdict: KLNoiseRefused, Reason: "floor times multiple overflows"}
+	}
+	var sum float64
+	compared := 0
+	for _, p := range prompts {
+		if p.Compared <= 0 {
+			continue
+		}
+		// Checked per prompt so an impossible negative cannot cancel a real excess.
+		if math.IsNaN(p.KLMean) || math.IsInf(p.KLMean, 0) || p.KLMean < 0 {
+			return KLNoiseReport{Verdict: KLNoiseRefused, Reason: "candidate mean KL is not a finite non-negative number"}
+		}
+		sum += p.KLMean * float64(p.Compared)
+		compared += p.Compared
+	}
+	if compared == 0 {
+		return KLNoiseReport{Verdict: KLNoiseRefused, Reason: "no compared positions"}
+	}
+	mean := sum / float64(compared)
+	if math.IsInf(mean, 0) {
+		return KLNoiseReport{Verdict: KLNoiseRefused, Reason: "candidate mean KL overflows"}
+	}
+	r := KLNoiseReport{Verdict: KLNoiseWithin, KLMean: mean, Floor: gate.Floor, Multiple: gate.Multiple,
+		Limit: limit, Ratio: mean / gate.Floor}
+	if mean > limit {
+		r.Verdict = KLNoiseExceeded
+	}
+	if math.IsInf(r.Ratio, 0) {
+		r.Ratio = math.MaxFloat64
+	}
+	return r
+}
+
 // Report is the whole comparison receipt.
 type Report struct {
 	Schema        string         `json:"schema"`
@@ -306,6 +401,7 @@ type Report struct {
 	Greedy        string         `json:"greedy"`
 	Verdict       string         `json:"verdict"`
 	StrictVerdict string         `json:"strict_verdict"`
+	KLNoise       KLNoiseReport  `json:"kl_noise"`
 }
 
 // ReportSchema names the comparison receipt format.
@@ -313,10 +409,17 @@ const ReportSchema = "fak.logit-oracle.compare/v1"
 
 // FoldReport combines prompt reports. Excluded positions (a free-running
 // candidate whose fed tokens diverged) make an otherwise passing gate
-// INCOMPLETE, because those positions were never compared.
+// INCOMPLETE, because those positions were never compared. A supplied KL noise
+// floor that is exceeded or refused fails the declared verdict; the strict
+// verdict keeps its fixed thresholds and ignores it.
 func FoldReport(prompts []PromptReport, th Thresholds) Report {
 	r := Report{Schema: ReportSchema, Thresholds: th, Strict: StrictThresholds, Prompts: prompts,
 		Greedy: GreedyIdentical, Verdict: VerdictPass, StrictVerdict: VerdictPass}
+	r.KLNoise = EvaluateKLNoise(prompts, th.KLNoise)
+	if g := th.KLNoise; g != nil && (math.IsNaN(g.Floor+g.Multiple) || math.IsInf(g.Floor+g.Multiple, 0)) {
+		// A JSON receipt cannot carry NaN or Inf; the refusal reason stands in.
+		r.Thresholds.KLNoise = nil
+	}
 	if len(prompts) == 0 {
 		r.Greedy, r.Verdict, r.StrictVerdict = GreedyNotEquivalent, VerdictFail, VerdictFail
 		return r
@@ -338,6 +441,9 @@ func FoldReport(prompts []PromptReport, th Thresholds) Report {
 			r.StrictVerdict = VerdictFail
 		}
 		incomplete = incomplete || p.Excluded > 0
+	}
+	if r.KLNoise.Verdict == KLNoiseExceeded || r.KLNoise.Verdict == KLNoiseRefused {
+		r.Verdict = VerdictFail
 	}
 	if incomplete && r.Verdict == VerdictPass {
 		r.Verdict = VerdictIncomplete

@@ -1,6 +1,7 @@
 package logitoracle
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"testing"
@@ -152,5 +153,123 @@ func TestFoldReportVerdicts(t *testing.T) {
 	}
 	if r := FoldReport(nil, FlipThresholds); r.Verdict != VerdictFail {
 		t.Fatalf("%+v", r)
+	}
+
+	// Without a floor the KL axis is reported as ungated and changes no verdict.
+	noisy := PromptReport{GatePass: true, StrictPass: true, Greedy: GreedyIdentical, Compared: 4, KLMean: 5}
+	if r := FoldReport([]PromptReport{noisy}, FlipThresholds); r.KLNoise != (KLNoiseReport{Verdict: KLNoiseNoFloor}) ||
+		r.Verdict != VerdictPass || r.StrictVerdict != VerdictPass || r.Thresholds.KLNoise != nil {
+		t.Fatalf("no floor: %+v", r)
+	}
+
+	withFloor := func(floor, multiple float64) Thresholds {
+		th := FlipThresholds
+		th.KLNoise = &KLNoiseFloor{Floor: floor, Multiple: multiple}
+		return th
+	}
+	// Mean is weighted by compared positions: (1*0.004 + 3*0.012) / 4 = 0.010.
+	a := PromptReport{GatePass: true, StrictPass: true, Greedy: GreedyIdentical, Compared: 1, KLMean: 0.004}
+	b := PromptReport{GatePass: true, StrictPass: true, Greedy: GreedyIdentical, Compared: 3, KLMean: 0.012}
+	under := FoldReport([]PromptReport{a, b}, withFloor(0.008, 1.5))
+	if under.KLNoise.Verdict != KLNoiseWithin || under.Verdict != VerdictPass || under.StrictVerdict != VerdictPass ||
+		!near(under.KLNoise.KLMean, 0.010, 1e-15) || !near(under.KLNoise.Limit, 0.012, 1e-15) || !near(under.KLNoise.Ratio, 1.25, 1e-12) {
+		t.Fatalf("under floor: %+v", under.KLNoise)
+	}
+	over := FoldReport([]PromptReport{a, b}, withFloor(0.008, 1.2))
+	if over.KLNoise.Verdict != KLNoiseExceeded || over.Verdict != VerdictFail || over.StrictVerdict != VerdictPass {
+		t.Fatalf("over floor: %+v verdict=%s strict=%s", over.KLNoise, over.Verdict, over.StrictVerdict)
+	}
+	// The limit itself is inside the gate.
+	if r := FoldReport([]PromptReport{{GatePass: true, Greedy: GreedyIdentical, Compared: 2, KLMean: 0.5}}, withFloor(0.25, 2)); r.KLNoise.Verdict != KLNoiseWithin {
+		t.Fatalf("at limit: %+v", r.KLNoise)
+	}
+	// A passing KL axis never rescues a failed gate or hides excluded positions.
+	if r := FoldReport([]PromptReport{a, fail}, withFloor(0.008, 1.5)); r.KLNoise.Verdict != KLNoiseWithin || r.Verdict != VerdictFail {
+		t.Fatalf("within floor must not rescue: %+v", r)
+	}
+	partialA := a
+	partialA.Excluded = 2
+	if r := FoldReport([]PromptReport{partialA}, withFloor(0.008, 1.5)); r.Verdict != VerdictIncomplete {
+		t.Fatalf("within floor with exclusions: %+v", r)
+	}
+	if r := FoldReport([]PromptReport{partialA, b}, withFloor(0.008, 1.2)); r.Verdict != VerdictFail {
+		t.Fatalf("exceeded outranks incomplete: %+v", r)
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestFoldReportVerdictsRefuseUnusableKLNoise(t *testing.T) {
+	nan, inf := math.NaN(), math.Inf(1)
+	ok := PromptReport{GatePass: true, StrictPass: true, Greedy: GreedyIdentical, Compared: 2, KLMean: 0.001}
+	gates := map[string]KLNoiseFloor{
+		"zero floor":        {Floor: 0, Multiple: 2},
+		"negative floor":    {Floor: -0.01, Multiple: 2},
+		"nan floor":         {Floor: nan, Multiple: 2},
+		"inf floor":         {Floor: inf, Multiple: 2},
+		"zero multiple":     {Floor: 0.01, Multiple: 0},
+		"negative multiple": {Floor: 0.01, Multiple: -1},
+		"nan multiple":      {Floor: 0.01, Multiple: nan},
+		"inf multiple":      {Floor: 0.01, Multiple: inf},
+		"overflowing limit": {Floor: math.MaxFloat64, Multiple: 2},
+	}
+	for name, gate := range gates {
+		th := FlipThresholds
+		th.KLNoise = &gate
+		r := FoldReport([]PromptReport{ok}, th)
+		if r.KLNoise.Verdict != KLNoiseRefused || r.KLNoise.Reason == "" || r.Verdict != VerdictFail || r.StrictVerdict != VerdictPass {
+			t.Fatalf("%s: %+v verdict=%s strict=%s", name, r.KLNoise, r.Verdict, r.StrictVerdict)
+		}
+		if r.KLNoise.KLMean != 0 || r.KLNoise.Ratio != 0 || r.KLNoise.Limit != 0 {
+			t.Fatalf("%s: refused gate must report no numbers: %+v", name, r.KLNoise)
+		}
+		if _, err := json.Marshal(r); err != nil {
+			t.Fatalf("%s: receipt must encode: %v", name, err)
+		}
+		if name == "overflowing limit" {
+			continue
+		}
+		if err := th.validate(); !errors.Is(err, ErrBadNoiseFloor) || !errors.Is(err, ErrBadThresholds) {
+			t.Fatalf("%s: validate=%v", name, err)
+		}
+	}
+
+	th := FlipThresholds
+	th.KLNoise = &KLNoiseFloor{Floor: 0.01, Multiple: 2}
+	if err := th.validate(); err != nil {
+		t.Fatalf("usable floor rejected: %v", err)
+	}
+	candidates := map[string][]PromptReport{
+		"nan candidate":      {{GatePass: true, Greedy: GreedyIdentical, Compared: 2, KLMean: nan}},
+		"inf candidate":      {{GatePass: true, Greedy: GreedyIdentical, Compared: 2, KLMean: inf}},
+		"negative candidate": {{GatePass: true, Greedy: GreedyIdentical, Compared: 2, KLMean: -0.5}},
+		"nothing compared":   {{GatePass: true, Greedy: GreedyIdentical}},
+		"cancelling negative": {{GatePass: true, Greedy: GreedyIdentical, Compared: 1, KLMean: -1},
+			{GatePass: true, Greedy: GreedyIdentical, Compared: 1, KLMean: 1.01}},
+		"overflowing sum": {{GatePass: true, Greedy: GreedyIdentical, Compared: 10, KLMean: 1e308}},
+		"no prompts":      nil,
+	}
+	for name, prompts := range candidates {
+		r := FoldReport(prompts, th)
+		if r.KLNoise.Verdict != KLNoiseRefused || r.KLNoise.Reason == "" || r.Verdict != VerdictFail {
+			t.Fatalf("%s: %+v verdict=%s", name, r.KLNoise, r.Verdict)
+		}
+	}
+	// A subnormal floor is usable; its ratio saturates instead of becoming Inf.
+	th.KLNoise = &KLNoiseFloor{Floor: math.SmallestNonzeroFloat64, Multiple: 2}
+	r := FoldReport([]PromptReport{{GatePass: true, Greedy: GreedyIdentical, Compared: 1, KLMean: 1e300}}, th)
+	if r.KLNoise.Verdict != KLNoiseExceeded || math.IsInf(r.KLNoise.Ratio, 0) {
+		t.Fatalf("subnormal floor: %+v", r.KLNoise)
+	}
+	if _, err := json.Marshal(r); err != nil {
+		t.Fatalf("receipt must encode: %v", err)
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestCompareManifestsRefusesUnusableKLNoise(t *testing.T) {
+	th := FlipThresholds
+	th.KLNoise = &KLNoiseFloor{Floor: 0, Multiple: 2}
+	if _, err := CompareManifests(&Manifest{}, &Manifest{}, th); !errors.Is(err, ErrBadNoiseFloor) {
+		t.Fatalf("zero floor must be refused before any comparison: %v", err)
 	}
 }
