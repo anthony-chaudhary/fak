@@ -53,6 +53,7 @@ New dated notes go under [`docs/notes/`](docs/notes/) and get a line in **Notes 
 - [Tier 2: run the fused in-kernel model](docs/fak/in-kernel-model.md) — the kernel-developer continuation of Getting started, split out of it so the newcomer route reads end to end: the deterministic synthetic checkpoint over `/v1/fak/syscall`, the one-command SmolLM2-135M HuggingFace export, the Qwen3.6-27B GGUF smoke through `cmd/fakchat`, in-kernel chat through `fak serve --gguf` on both the OpenAI and Anthropic wires, and the honest caveat on why this is a correctness/reference path rather than a production chat server.
 - [AGENTS](AGENTS.md) — orientation for coding agents (build, test, the hard rules). Written for automated contributors inside the maintainers' shared checkout; humans want [CONTRIBUTING](CONTRIBUTING.md).
 - [Security policy](SECURITY.md) — evaluate the current capability floor, its policy configuration, scoped evidence, and private reporting route.
+- [Alpha fence](docs/alpha-fence.md) — keep private skills, prompts and workflows out of a public repository: fence them as salted hashes and the leak gates refuse any content reproducing them.
 - [Benchmark authority](BENCHMARK-AUTHORITY.md) — select a scoped result, compare its tuned baseline, and follow the committed artifact and reproduce route.
 - [llms.txt](llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
 - [Docs home](docs/index.md) — choose a current public, builder, operator, contributor, or research route.
