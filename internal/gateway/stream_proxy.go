@@ -904,6 +904,9 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		// without requiring the process-wide compatibility environment flag.
 		agent.WithPerTokenStream(true),
 	}
+	if serviceTier, err := parseClientServiceTier(req.ServiceTier); err == nil {
+		opts = serviceTier.appendSampleOpt(opts)
+	}
 	stopQueued := func() {}
 	lease, admissionErr := s.beginServedAdmission(liveCtx, sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts), func() {
 		stopQueued = startPrefillKeepalive(liveCtx, w, flusher, durEnv("FAK_STREAM_PREFILL_KEEPALIVE_S", prefillKeepaliveEvery), commitHeaders)

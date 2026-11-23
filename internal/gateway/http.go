@@ -113,6 +113,9 @@ func (s *Server) routeTable() []gatewayRoute {
 		// traffic through the kernel's tool-call adjudication, the same as the chat
 		// wire. Buffered only; stream:true is refused (#925).
 		{"/v1/responses", s.handleResponses},
+		// GET / DELETE /v1/responses/{id} over the same owner-scoped store
+		// previous_response_id reads.
+		{"/v1/responses/", s.handleResponsesRetrieve},
 		{"/v1/embeddings", s.handleEmbeddings},
 		{"/v1/moderations", s.handleModerations},
 		// /v1/decisions is the single-choice decision-probability surface: one
@@ -1026,7 +1029,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// identical to the pre-seam behavior — while one asking for a long completion is
 	// no longer hard-capped at the planner's 1024-token floor (#62).
 	began := time.Now()
-	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools,
+	serviceTier, _ := parseClientServiceTier(req.ServiceTier)
+	chatOpts := []agent.SampleOpt{
 		agent.WithModel(req.Model), // no-op when the client omitted model
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithClientTemperature(req.Temperature),
@@ -1056,7 +1060,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
 		agent.WithMultimodalMode(req.DeclaredMultimodalMode()),
-	)
+	}
+	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools, serviceTier.appendSampleOpt(chatOpts)...)
 	if err != nil {
 		if comp != nil {
 			applyVulkanMTPExecutionHeaders(w, comp.VulkanMTP)
@@ -1122,6 +1127,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	s.recordDeadlineWarmPrefix(deadlineCtx, comp.Usage)
 	stampTurnCost(sessionTurn.turnCost, reqTrace, respModel, turnCostBegan)
 	resp := s.buildChatResponse(comp, asst, finish, respModel, adjs, resultAdmissions, inputTriggerRoute, decodeTraceRequested, decodeTokenIDsRequested, sessionTurn.turnCost)
+	resp.ServiceTier = serviceTier.echo(comp.ServiceTier)
 	if stream != nil {
 		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {
 			writeChatCompletionStream(stream, resp)
@@ -1156,6 +1162,9 @@ func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
 		return false
 	}
 	if rejectInvalidResponseFormatCarrier(w, req.ResponseFormat) {
+		return false
+	}
+	if rejectInvalidServiceTier(w, req.ServiceTier) {
 		return false
 	}
 	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt

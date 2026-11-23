@@ -251,7 +251,7 @@ func TestResponsesLiveUsesBoundPlannerGateAndOptions(t *testing.T) {
 			persisted := 0
 			handled := srv.streamResponsesLive(ctx, w, "public-model", "route-test", servedSessionTurn{}, nil, responsesLiveTurn{
 				messages: []agent.Message{{Role: agent.RoleUser, Content: "hi"}}, sampleOpts: opts,
-			}, newResponsesRestoreContinuation(nil), func(string, agent.Message) { persisted++ })
+			}, newResponsesRestoreContinuation(nil), func(responsesResponse, agent.Message) { persisted++ })
 			if handled != tc.wantHandled {
 				t.Fatalf("handled=%v, want %v", handled, tc.wantHandled)
 			}

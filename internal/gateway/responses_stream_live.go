@@ -76,6 +76,8 @@ type responsesLiveTurn struct {
 	messages   []agent.Message
 	tools      []agent.ToolDef
 	sampleOpts []agent.SampleOpt
+	// serviceTier only shapes the echo; sampleOpts already carries the forward.
+	serviceTier clientServiceTier
 }
 
 // streamResponsesLive streams POST /v1/responses LIVE over the planner's
@@ -84,8 +86,9 @@ type responsesLiveTurn struct {
 // been written — the caller falls through to the buffered path, which synthesizes
 // the same events. Once it admits the turn or writes anything, it owns the request
 // and returns true. persistResponse is the buffered path's continuation-store
-// closure, called with the SAME id response.created advertised.
-func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission, turn responsesLiveTurn, restoreContinuation *responsesRestoreContinuation, persistResponse func(id string, asst agent.Message)) bool {
+// closure, called with the final response, whose id is the one response.created
+// advertised.
+func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission, turn responsesLiveTurn, restoreContinuation *responsesRestoreContinuation, persistResponse func(resp responsesResponse, asst agent.Message)) bool {
 	planner := s.chatPlanner(ctx)
 	sp, ok := planner.(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
@@ -531,13 +534,14 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	s.logInferenceTurnAs(reqTrace, "openai_responses", true, comp.Usage, finish, time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(ctx))
 
 	resp := responsesResponse{
-		ID:        createdID,
-		Object:    "response",
-		CreatedAt: createdAt,
-		Model:     respModel,
-		Status:    responsesStatusFor(comp.FinishReason),
-		Output:    []responsesOutputItem{},
-		Usage:     responsesUsageFrom(comp.Usage),
+		ID:          createdID,
+		Object:      "response",
+		CreatedAt:   createdAt,
+		Model:       respModel,
+		Status:      responsesStatusFor(comp.FinishReason),
+		Output:      []responsesOutputItem{},
+		Usage:       responsesUsageFrom(comp.Usage),
+		ServiceTier: turn.serviceTier.echo(comp.ServiceTier),
 	}
 	if comp.FinishReason == "length" {
 		resp.IncompleteDetails = &responsesIncomplete{Reason: "max_output_tokens"}
@@ -573,7 +577,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	}
 	// Publish the finalized continuation state before response.completed reveals the
 	// ID (the buffered path persists before writeResponsesStream for the same reason).
-	persistResponse(createdID, agent.Message{Role: agent.RoleAssistant, Content: fullText, ToolCalls: kept})
+	persistResponse(resp, agent.Message{Role: agent.RoleAssistant, Content: fullText, ToolCalls: kept})
 	terminalEvent := "response.completed"
 	if resp.Status == "incomplete" {
 		terminalEvent = "response.incomplete"

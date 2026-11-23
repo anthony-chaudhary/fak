@@ -213,6 +213,8 @@ var epFanoutExemptRoutes = map[string]string{
 	"/a2a/v1/tasks":      epExemptNoDecode,
 	"/a2a/v1/agent-card": epExemptNoDecode,
 	"/a2a/v1/tasks/":     epExemptNoDecode,
+	// GET / DELETE of a stored Responses snapshot reads the continuation store only.
+	"/v1/responses/": epExemptNoDecode,
 
 	// The default embedText backend is hash-derived; selected causal embeddings
 	// refuse ExpertParallelRanks > 1 at construction (TestCausalEmbeddingEPRefusal).

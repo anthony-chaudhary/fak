@@ -24,6 +24,9 @@ type responsesContinuationEntry struct {
 	id       string
 	owner    string
 	messages []agent.Message
+	// response is the rendered response body GET /v1/responses/{id} returns; nil
+	// when the entry was stored without one.
+	response []byte
 	bytes    int64
 	storedAt time.Time
 }
@@ -108,6 +111,12 @@ func (s *responsesContinuationStore) Get(id, owner string, now time.Time) ([]age
 }
 
 func (s *responsesContinuationStore) Put(id, owner string, messages []agent.Message, now time.Time) bool {
+	return s.PutResponse(id, owner, messages, nil, now)
+}
+
+// PutResponse stores the continuation messages together with the rendered
+// response snapshot; both count against the store's byte cap.
+func (s *responsesContinuationStore) PutResponse(id, owner string, messages []agent.Message, response []byte, now time.Time) bool {
 	if s == nil || id == "" {
 		return false
 	}
@@ -116,18 +125,64 @@ func (s *responsesContinuationStore) Put(id, owner string, messages []agent.Mess
 	if bytes <= 0 || bytes > s.cfg.MaxBytes {
 		return false
 	}
+	// An oversized snapshot is dropped rather than the entry, so a response that
+	// was continuable before snapshots existed stays continuable.
+	var snapshot []byte
+	if bytes+int64(len(response)) <= s.cfg.MaxBytes {
+		snapshot = append([]byte(nil), response...)
+		bytes += int64(len(snapshot))
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expireLocked(now)
 	if _, exists := s.entries[id]; exists {
 		return false
 	}
-	e := responsesContinuationEntry{id: id, owner: owner, messages: cloned, bytes: bytes, storedAt: now}
+	e := responsesContinuationEntry{id: id, owner: owner, messages: cloned, response: snapshot, bytes: bytes, storedAt: now}
 	s.entries[id] = e
 	s.order = append(s.order, id)
 	s.bytes += bytes
 	for len(s.entries) > s.cfg.MaxEntries || s.bytes > s.cfg.MaxBytes {
 		s.evictOldestLocked()
+	}
+	return true
+}
+
+// Snapshot returns a copy of the stored response body. An entry stored without
+// one is reported as absent, the same as an unknown, expired or foreign id.
+func (s *responsesContinuationStore) Snapshot(id, owner string, now time.Time) ([]byte, bool) {
+	if s == nil || id == "" {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireLocked(now)
+	e, ok := s.entries[id]
+	if !ok || e.owner != owner || now.Sub(e.storedAt) >= s.cfg.TTL || len(e.response) == 0 {
+		return nil, false
+	}
+	return append([]byte(nil), e.response...), true
+}
+
+// Delete removes an owned, unexpired entry and reports whether it did.
+func (s *responsesContinuationStore) Delete(id, owner string, now time.Time) bool {
+	if s == nil || id == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireLocked(now)
+	e, ok := s.entries[id]
+	if !ok || e.owner != owner || now.Sub(e.storedAt) >= s.cfg.TTL {
+		return false
+	}
+	delete(s.entries, id)
+	s.bytes -= e.bytes
+	for i, queued := range s.order {
+		if queued == id {
+			s.order = append(s.order[:i], s.order[i+1:]...)
+			break
+		}
 	}
 	return true
 }

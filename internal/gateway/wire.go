@@ -457,6 +457,8 @@ type ChatRequest struct {
 	Fak *FakRequestExt `json:"fak,omitempty"`
 	// AffinityKey carries an optional affinity key for multi-turn prompt cache affinity.
 	AffinityKey string `json:"session_id,omitempty"`
+	// ServiceTier is the optional OpenAI service tier; see parseClientServiceTier.
+	ServiceTier string `json:"service_tier,omitempty"`
 }
 
 // FakRequestExt is the opt-in request half of fak's response extension.
@@ -568,7 +570,9 @@ type ChatResponse struct {
 	// Timings is llama.cpp's per-request prefill/decode split, present only for a
 	// natively served turn.
 	Timings *agent.Timings `json:"timings,omitempty"`
-	Fak     *FakExt        `json:"fak,omitempty"`
+	// ServiceTier echoes the realized tier only when the request sent one.
+	ServiceTier string  `json:"service_tier,omitempty"`
+	Fak         *FakExt `json:"fak,omitempty"`
 }
 
 // ChatStreamResponse is the OpenAI-compatible SSE chunk shape emitted when the

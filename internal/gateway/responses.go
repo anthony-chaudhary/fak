@@ -69,6 +69,10 @@ type ResponsesRequest struct {
 	// explicit false leaves no continuation state behind.
 	Store              *bool  `json:"store,omitempty"`
 	PreviousResponseID string `json:"previous_response_id,omitempty"`
+	// ToolChoice is read only to refuse a forced hosted tool the upstream cannot run.
+	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
+	// ServiceTier is the optional OpenAI service tier; see parseClientServiceTier.
+	ServiceTier string `json:"service_tier,omitempty"`
 }
 
 // responsesTool is the inbound Responses function-tool declaration. Unlike the chat
@@ -127,7 +131,9 @@ type responsesResponse struct {
 	Output            []responsesOutputItem `json:"output"`
 	OutputText        string                `json:"output_text,omitempty"`
 	Usage             responsesUsage        `json:"usage"`
-	Fak               *FakExt               `json:"fak,omitempty"`
+	// ServiceTier echoes the realized tier only when the request sent one.
+	ServiceTier string  `json:"service_tier,omitempty"`
+	Fak         *FakExt `json:"fak,omitempty"`
 }
 
 type responsesIncomplete struct {
@@ -218,16 +224,21 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	storeResponse := req.Store == nil || *req.Store
 	var continuationBase []agent.Message
-	persistResponse := func(id string, asst agent.Message) {
+	persistResponse := func(resp responsesResponse, asst agent.Message) {
 		if !storeResponse || r.Context().Err() != nil {
 			return
 		}
+		snapshot, _ := json.Marshal(resp)
 		stored := append(continuationBase, asst)
-		_ = s.responsesContinuationState().Put(id, owner, stored, time.Now())
+		_ = s.responsesContinuationState().PutResponse(resp.ID, owner, stored, snapshot, time.Now())
 	}
 	if rejectInvalidSampling(w, validateResponsesSampling(req)) {
 		return
 	}
+	if rejectInvalidServiceTier(w, req.ServiceTier) {
+		return
+	}
+	serviceTier, _ := parseClientServiceTier(req.ServiceTier)
 	responseFormat, ok := responsesTextResponseFormat(req.Text)
 	if !ok {
 		writeErrCode(w, http.StatusBadRequest, "invalid_text_format", "text.format must be an object with a non-empty string type")
@@ -270,6 +281,9 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.refuseNativeModelMismatch(w, r, reqModel, "") {
+		return
+	}
+	if s.refuseForcedHostedTool(w, r, req.ToolChoice) {
 		return
 	}
 	if !releaseEPFanout(r) {
@@ -318,17 +332,18 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if note := lowInfoReceiptFuseNote(resultAdmissions); note != "" {
 		asst := agent.Message{Role: agent.RoleAssistant, Content: note}
 		resp := responsesResponse{
-			ID:         newResponsesID(),
-			Object:     "response",
-			CreatedAt:  time.Now().Unix(),
-			Model:      reqModel,
-			Status:     "completed",
-			Output:     responsesOutputFromAssistant(asst),
-			OutputText: note,
-			Usage:      responsesUsage{},
-			Fak:        fakExtFrom(nil, resultAdmissions),
+			ID:          newResponsesID(),
+			Object:      "response",
+			CreatedAt:   time.Now().Unix(),
+			Model:       reqModel,
+			Status:      "completed",
+			Output:      responsesOutputFromAssistant(asst),
+			OutputText:  note,
+			Usage:       responsesUsage{},
+			ServiceTier: serviceTier.echo(""),
+			Fak:         fakExtFrom(nil, resultAdmissions),
 		}
-		persistResponse(resp.ID, asst)
+		persistResponse(resp, asst)
 		if req.Stream {
 			s.writeResponsesStream(w, resp)
 		} else {
@@ -385,7 +400,8 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(SubturnYieldHeader, "true")
 		resp := makeSubturnYieldResponse(reqModel, resultAdmissions)
 		resp.ID = newResponsesID()
-		persistResponse(resp.ID, responsesAssistantMessage(resp))
+		resp.ServiceTier = serviceTier.echo("")
+		persistResponse(resp, responsesAssistantMessage(resp))
 		if req.Stream {
 			s.writeResponsesStream(w, resp)
 		} else {
@@ -411,6 +427,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		agent.WithTopP(req.TopP),
 		agent.WithResponseFormat(responseFormat),
 	}
+	sampleOpts = serviceTier.appendSampleOpt(sampleOpts)
 
 	began := time.Now()
 	// LIVE passthrough (#12765): a stream:true client whose planner can stream the
@@ -421,9 +438,10 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// completeServed call below receives, so admission sees the same turn.
 	if req.Stream {
 		if s.streamResponsesLive(ctx, w, reqModel, reqTrace, sessionTurn, resultAdmissions, responsesLiveTurn{
-			messages:   messages,
-			tools:      tools,
-			sampleOpts: sampleOpts,
+			messages:    messages,
+			tools:       tools,
+			sampleOpts:  sampleOpts,
+			serviceTier: serviceTier,
 		}, restoreContinuation, persistResponse) {
 			return
 		}
@@ -566,14 +584,15 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	s.logInferenceTurnAs(reqTrace, "openai_responses", false, comp.Usage, finish, time.Since(began), false, s.consumeDecodedCtxViewEvent(reqTrace), principalFromContext(r.Context()))
 
 	resp := responsesResponse{
-		ID:         newResponsesID(),
-		Object:     "response",
-		CreatedAt:  time.Now().Unix(),
-		Model:      respModel,
-		Status:     responsesStatusFor(comp.FinishReason),
-		Output:     responsesOutputFromAssistant(asst),
-		OutputText: asst.Content,
-		Usage:      responsesUsageFrom(comp.Usage),
+		ID:          newResponsesID(),
+		Object:      "response",
+		CreatedAt:   time.Now().Unix(),
+		Model:       respModel,
+		Status:      responsesStatusFor(comp.FinishReason),
+		Output:      responsesOutputFromAssistant(asst),
+		OutputText:  asst.Content,
+		Usage:       responsesUsageFrom(comp.Usage),
+		ServiceTier: serviceTier.echo(comp.ServiceTier),
 	}
 	if comp.FinishReason == "length" {
 		resp.IncompleteDetails = &responsesIncomplete{Reason: "max_output_tokens"}
@@ -601,7 +620,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// client may issue its continuation as soon as it receives response.completed;
 	// retaining first prevents an intermittent unknown-parent race. A delivery that
 	// later disconnects may conservatively remain addressable until the bounded TTL.
-	persistResponse(resp.ID, asst)
+	persistResponse(resp, asst)
 	if req.Stream {
 		s.writeResponsesStream(w, resp)
 	} else {
@@ -990,14 +1009,6 @@ func determineResponsesRestoreTool(tools []responsesTool) (restoreToolName strin
 	return "mcp__fak__fak_context_restore", false
 }
 
-// responsesToolsToToolDefs maps the flat Responses function-tool shape onto the
-// gateway's agent.ToolDef (the nested chat shape the planner consumes). A
-// non-function tool type (web_search, file_search, computer_use, ...) is skipped
-// rather than 400'd: fak adjudicates the FUNCTION tool calls; a built-in tool the
-// upstream resolves itself is not a kernel-mediated call and carries no args to gate.
-//
-// When incoming tools contain duplicate definitions for the same base tool across legacy
-// and canonical namespaces, collapse them into the canonical tool definition.
 // normalizeServingToolDefs folds one dialect's decoded tool declarations into the
 // gateway's single serving-input contract, so every mounted HTTP dialect hands the
 // served core the same folded catalog instead of each route keeping its own ad-hoc
@@ -1051,10 +1062,12 @@ func normalizeServingToolDefs(defs []agent.ToolDef) []agent.ToolDef {
 }
 
 // responsesToolsToToolDefs maps the Responses wire tool shape onto agent.ToolDef
-// (the nested chat shape) so the planner sees one canonical catalog. The mapping is
-// pure wire-shape translation; the serving-input fold (empty-name drop, dedupe, MCP
-// legacy/canonical collapse) runs once in normalizeServingToolDefs, shared with the
-// other mounted dialects.
+// (the nested chat shape) so the planner sees one canonical catalog. A non-function
+// tool (web_search, file_search, custom, ...) is carried as an opaque ResponsesWire
+// entry rather than 400'd: fak adjudicates FUNCTION tool calls, and only a Responses
+// upstream can execute the rest. The mapping is pure wire-shape translation; the
+// serving-input fold (empty-name drop, dedupe, MCP legacy/canonical collapse) runs
+// once in normalizeServingToolDefs, shared with the other mounted dialects.
 func responsesToolsToToolDefs(tools []responsesTool) []agent.ToolDef {
 	if len(tools) == 0 {
 		return nil
@@ -1502,4 +1515,36 @@ func (s *Server) emitResponsesTerminalReceipt(r *http.Request, reqTrace string, 
 		}
 	}
 	s.upstreamFailureObserver(rec)
+}
+
+// refuseForcedHostedTool writes a 400 when tool_choice forces a provider-hosted tool
+// and the selected upstream is not the Responses wire, which is the only wire that
+// can execute it. An optional hosted tool is left alone: the model may simply not
+// call it.
+func (s *Server) refuseForcedHostedTool(w http.ResponseWriter, r *http.Request, toolChoice json.RawMessage) bool {
+	typ := forcedHostedToolType(toolChoice)
+	if typ == "" {
+		return false
+	}
+	if provider, ok := plannerWireProvider(s.chatPlanner(r.Context())); ok && provider == agent.ProviderOpenAIResponses {
+		return false
+	}
+	writeErrCode(w, http.StatusBadRequest, "hosted_tool_unsupported",
+		"tool_choice forces hosted tool type \""+typ+"\", which the selected upstream cannot execute")
+	return true
+}
+
+// forcedHostedToolType returns the hosted tool type a tool_choice object forces, or
+// "" when tool_choice is absent, a mode string, or names a function tool.
+func forcedHostedToolType(toolChoice json.RawMessage) string {
+	var choice struct {
+		Type string `json:"type"`
+	}
+	if len(toolChoice) == 0 || json.Unmarshal(toolChoice, &choice) != nil {
+		return ""
+	}
+	if !agent.IsHostedToolType(choice.Type) {
+		return ""
+	}
+	return choice.Type
 }

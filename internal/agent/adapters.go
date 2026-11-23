@@ -283,8 +283,9 @@ type openAIResponse struct {
 // /logit_bias), opting into a usage-bearing SSE stream when r.Stream is set, and
 // merging any provider ExtraBody.
 func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
+	tools := openAICompatibleTools(r.Tools)
 	var toolChoice any
-	if len(r.Tools) > 0 {
+	if len(tools) > 0 {
 		toolChoice = "auto"
 	}
 	if len(r.ToolChoice) > 0 {
@@ -303,7 +304,7 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		ServiceTier:        serviceTierWire(a.Provider(), r.ServiceTier),
 		Model:              r.Model,
 		Messages:           openAIWireMessages(messages),
-		Tools:              openAICompatibleTools(r.Tools),
+		Tools:              tools,
 		ToolChoice:         toolChoice,
 		Temperature:        temp,
 		Seed:               r.Seed,
@@ -562,14 +563,19 @@ func openAIToolMessagesAsText(messages []Message) []Message {
 	return out
 }
 
+// openAICompatibleTools keeps only named function tools: a chat-completions
+// upstream has no shape for hosted or opaque Responses tools.
 func openAICompatibleTools(tools []ToolDef) []ToolDef {
 	if len(tools) == 0 {
 		return tools
 	}
-	out := make([]ToolDef, len(tools))
-	copy(out, tools)
-	for i := range out {
-		out[i].Function.Parameters = openAICompatibleSchema(out[i].Function.Parameters, true)
+	var out []ToolDef
+	for _, td := range tools {
+		if len(td.ResponsesWire) > 0 || (td.Type != "" && td.Type != "function") || td.Function.Name == "" {
+			continue
+		}
+		td.Function.Parameters = openAICompatibleSchema(td.Function.Parameters, true)
+		out = append(out, td)
 	}
 	return out
 }
