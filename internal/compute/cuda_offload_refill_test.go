@@ -308,7 +308,7 @@ type MemoryClass string
 const MemoryOffload MemoryClass="offload"
 const MemoryWeights MemoryClass="weights"
 type Dtype int
-const(F32 Dtype=iota;Q2_K;Q3_K;Q4_K;Q5_K;Q6_K;IQ2_XXS;IQ2_XS;IQ1_M;IQ4_NL;IQ4_XS;Q8_0)
+const(F32 Dtype=iota;Q2_K;Q3_K;Q4_K;Q5_K;Q6_K;IQ2_XXS;IQ2_XS;IQ1_M;IQ4_NL;IQ2_S;IQ3_XXS;IQ3_S;IQ4_XS;Q8_0)
 type Layout int
 const RowMajor Layout=0
 type health bool

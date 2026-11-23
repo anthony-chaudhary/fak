@@ -9,7 +9,9 @@ func TestCUDARawUploadIsVerbatim(t *testing.T) {
 		dt := Dtype(value)
 		want := false
 		switch dt {
-		case Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ4_XS:
+		// IQ2_S/IQ3_XXS/IQ3_S carry inline scales that the CUDA IQ GEMVs read
+		// straight from the ggml super-block, so no conversion is needed.
+		case Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ2_S, IQ3_XXS, IQ3_S, IQ4_XS:
 			want = true
 		}
 		if got := cudaRawUploadIsVerbatim(dt); got != want {
