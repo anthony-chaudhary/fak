@@ -80,6 +80,64 @@ func TestEvaluateIsTheSameKeepBit(t *testing.T) {
 	}
 }
 
+// The rule is fixed but its inputs are the harness's: this pins the boundary the
+// package doc states, so the doc cannot drift into promising more.
+func TestKeepIsOnlyAsHonestAsTheHarness(t *testing.T) {
+	h := climb.Harness{
+		MetricName:     "latency_ms",
+		LowerBetter:    true,
+		BaselineMetric: func() (float64, string, error) { return 100, "base", nil },
+		Candidates:     func() []climb.Candidate { return []climb.Candidate{{Label: "regression"}} },
+		Measure: func(climb.Candidate) (climb.Measurement, error) {
+			return climb.Measurement{Metric: 500, SuiteGreen: false, TruthClean: true}, nil
+		},
+	}
+	res, err := climb.Run(h, quietJournal(t), 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Kept != 0 {
+		t.Fatalf("under ClassFull a regression with a red suite must revert; kept %d", res.Kept)
+	}
+
+	h.Classify = func(climb.Candidate) climb.EvidenceClass { return climb.ClassDocsOnly }
+	res, err = climb.Run(h, quietJournal(t), 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Kept != 1 {
+		t.Fatalf("a harness that classifies the same candidate docs-only gets it kept; kept %d", res.Kept)
+	}
+}
+
+// A label naming one of fak's self-modifying surfaces needs a receipt that
+// verifies; without one the candidate is reverted however good its metric.
+func TestGatedLabelNeedsAReceipt(t *testing.T) {
+	run := func(label string) climb.Result {
+		h := climb.Harness{
+			MetricName:     "latency_ms",
+			LowerBetter:    true,
+			BaselineMetric: func() (float64, string, error) { return 100, "base", nil },
+			Candidates:     func() []climb.Candidate { return []climb.Candidate{{Label: label}} },
+			Measure: func(climb.Candidate) (climb.Measurement, error) {
+				return climb.Measurement{Metric: 50, SuiteGreen: true, TruthClean: true}, nil
+			},
+		}
+		res, err := climb.Run(h, quietJournal(t), 10, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if got := run("tighter step size").Kept; got != 1 {
+		t.Errorf("an ordinary label must be kept on its measurement; kept %d", got)
+	}
+	if got := run("new routing policy").Kept; got != 0 {
+		t.Errorf("a gated label without a receipt must revert; kept %d", got)
+	}
+	var _ *climb.GymReceipt = climb.Measurement{}.GymReceipt
+}
+
 // TestLoopFromForeignModule builds and runs a hill-climb under a module path
 // outside the fak prefix, where Go's internal/ rule applies as it does to a
 // third party.
@@ -114,12 +172,17 @@ func TestLoopFromForeignModule(t *testing.T) {
 
 	cmd := exec.Command(goBin, "run", ".")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
+	scratch := t.TempDir()
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod",
+		"TMP="+scratch, "TEMP="+scratch, "TMPDIR="+scratch)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("foreign-module loop failed: %v\n%s", err, out)
 	}
 	if !strings.Contains(string(out), "climbprobe: kept 3 of 5 candidates") {
 		t.Fatalf("unexpected probe output:\n%s", out)
+	}
+	if left, _ := filepath.Glob(filepath.Join(scratch, "climbprobe-*")); len(left) != 0 {
+		t.Errorf("probe left files behind: %v", left)
 	}
 }

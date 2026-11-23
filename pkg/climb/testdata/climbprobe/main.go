@@ -23,11 +23,20 @@ type proposal struct {
 func cost(x float64) float64 { return (x - 7) * (x - 7) }
 
 func main() {
-	journal, err := climb.NewJournal(filepath.Join(os.TempDir(), fmt.Sprintf("climbprobe-%d.jsonl", os.Getpid())))
+	dir, err := os.MkdirTemp("", "climbprobe-")
 	if err != nil {
 		fail(err)
 	}
-	defer journal.Close()
+	journal, err := climb.NewJournal(filepath.Join(dir, "journal.jsonl"))
+	if err != nil {
+		os.RemoveAll(dir)
+		fail(err)
+	}
+	cleanup = func() {
+		journal.Close()
+		os.RemoveAll(dir)
+	}
+	defer cleanup()
 
 	h := climb.Harness{
 		MetricName:      "squared_error",
@@ -60,7 +69,11 @@ func main() {
 	fmt.Printf("climbprobe: kept %d of %d candidates, baseline %v -> %v\n", res.Kept, res.Cycles, cost(0), res.FinalBaseline)
 }
 
+// cleanup removes the journal; fail calls it because os.Exit skips defers.
+var cleanup = func() {}
+
 func fail(err error) {
+	cleanup()
 	fmt.Fprintln(os.Stderr, "climbprobe:", err)
 	os.Exit(1)
 }
