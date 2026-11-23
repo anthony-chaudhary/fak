@@ -733,7 +733,9 @@ __global__ void k_ink2_expert_nvfp4(const uint8_t *Packed, const uint8_t *Scales
 static inline int ink2_last_error(void) { return (int)cudaGetLastError(); }
 
 extern "C" int fcuda_ink2_zero(void *p, size_t bytes) {
-  return (int)cudaMemsetAsync(p, 0, bytes, g_stream);
+  cudaError_t e = cudaSuccess;
+  FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(p, 0, bytes, g_stream));
+  return (int)e;
 }
 
 extern "C" int fcuda_ink2_rms_rows(const float *x, const float *w, float *y, int rows, int n, float eps) {
@@ -844,7 +846,8 @@ extern "C" int fcuda_ink2_add(const float *a, const float *b, float *out, int n)
 // outIdx[0] receives the index; outIdx[2..3] (8-byte aligned) hold the reduction key.
 extern "C" int fcuda_ink2_softcap_argmax(float *logits, int n, float cap, int *outIdx) {
   unsigned long long *key = (unsigned long long *)(outIdx + 2);
-  const cudaError_t e = cudaMemsetAsync(key, 0, sizeof(*key), g_stream);
+  cudaError_t e = cudaSuccess;
+  FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(key, 0, sizeof(*key), g_stream));
   if (e != cudaSuccess) return (int)e;
   FCUDA_TS("k_ink2_softcap_argmax", 128, k_ink2_softcap_argmax<<<128, 256, 0, g_stream>>>(logits, n, cap, key));
   FCUDA_TS("k_ink2_argkey_index", 1, k_ink2_argkey_index<<<1, 1, 0, g_stream>>>(key, outIdx));
@@ -867,22 +870,22 @@ extern "C" int fcuda_ink2_expert_gemv(int fmt, const uint8_t *W, const uint8_t *
     }
     break;
   case INK2_IQ2XS:
-    FCUDA_TS("k_ink2_expert_iq2xs", iqgrid, k_ink2_expert_iq<INK2_IQ2XS><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
+    FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ2XS><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_IQ2S:
-    FCUDA_TS("k_ink2_expert_iq2s", iqgrid, k_ink2_expert_iq<INK2_IQ2S><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
+    FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ2S><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_IQ3XXS:
-    FCUDA_TS("k_ink2_expert_iq3xxs", iqgrid, k_ink2_expert_iq<INK2_IQ3XXS><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
+    FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ3XXS><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_IQ3S:
-    FCUDA_TS("k_ink2_expert_iq3s", iqgrid, k_ink2_expert_iq<INK2_IQ3S><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
+    FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ3S><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_Q3K:
-    FCUDA_TS("k_ink2_expert_q3k", iqgrid, k_ink2_expert_iq<INK2_Q3K><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
+    FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_Q3K><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_IQ4NL:
-    FCUDA_TS("k_ink2_expert_iq4nl", iqgrid, k_ink2_expert_iq<INK2_IQ4NL><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
+    FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ4NL><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   default:
     return (int)cudaErrorInvalidValue;
