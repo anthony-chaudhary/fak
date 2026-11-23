@@ -1022,7 +1022,7 @@ SOFTWARE.
 
 ## SGLang
 
-Portions of this product are adapted from SGLang: https://github.com/sgl-project/sglang (pinned at revision 45418d7dc648d0d71501b8b905a2499a40e9b971, 3f5b1bec8e00115bc8439b5b9a9da902822d2f82, ebeed893722150a29303d9eb9bd975abec4072a5, 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e, 8a0edcf799d06bdee8832356d382495e7fb50f22, 58484246d26523eaf1a7f16ab524deee288d2120). Changes were made.
+Portions of this product are adapted from SGLang: https://github.com/sgl-project/sglang (pinned at revision 45418d7dc648d0d71501b8b905a2499a40e9b971, 3f5b1bec8e00115bc8439b5b9a9da902822d2f82, ebeed893722150a29303d9eb9bd975abec4072a5, 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e, 8a0edcf799d06bdee8832356d382495e7fb50f22, 58484246d26523eaf1a7f16ab524deee288d2120, 32b7b66572d76bb5b7042e5792fee31d9de60286). Changes were made.
 
 ```text
                                  Apache License
