@@ -1022,7 +1022,7 @@ SOFTWARE.
 
 ## SGLang
 
-Portions of this product are adapted from SGLang: https://github.com/sgl-project/sglang (pinned at revision 45418d7dc648d0d71501b8b905a2499a40e9b971, 3f5b1bec8e00115bc8439b5b9a9da902822d2f82, ebeed893722150a29303d9eb9bd975abec4072a5, 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e, 8a0edcf799d06bdee8832356d382495e7fb50f22, 58484246d26523eaf1a7f16ab524deee288d2120, 32b7b66572d76bb5b7042e5792fee31d9de60286, 2fd45ed82fe07ec64ef7f4d2dbd9071b0eb01763, 0afb736d0aab96e3ab80b4c54a376213a1db67a6). Changes were made.
+Portions of this product are adapted from SGLang: https://github.com/sgl-project/sglang (pinned at revision 45418d7dc648d0d71501b8b905a2499a40e9b971, 3f5b1bec8e00115bc8439b5b9a9da902822d2f82, ebeed893722150a29303d9eb9bd975abec4072a5, 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e, 8a0edcf799d06bdee8832356d382495e7fb50f22, 58484246d26523eaf1a7f16ab524deee288d2120, 32b7b66572d76bb5b7042e5792fee31d9de60286, 2fd45ed82fe07ec64ef7f4d2dbd9071b0eb01763, 0afb736d0aab96e3ab80b4c54a376213a1db67a6, 5481134403e01b46891e091ec63db42a36e6626f). Changes were made.
 
 ```text
                                  Apache License
@@ -1764,7 +1764,7 @@ Licensed under the Apache License, Version 2.0 (upstream LICENSE); the upstream 
 
 ## FlashInfer
 
-Portions of this product are adapted from FlashInfer: https://github.com/flashinfer-ai/flashinfer (pinned at revision 866c80d0c70a90624b4c2056d12d1543d709609e). Changes were made.
+Portions of this product are adapted from FlashInfer: https://github.com/flashinfer-ai/flashinfer (pinned at revision 866c80d0c70a90624b4c2056d12d1543d709609e, 61bc8b6dd7049a44d614b2a0cd4a036cb3c46ad0). Changes were made.
 
 Copyright (c) 2026 FlashInfer contributors, SPDX-License-Identifier: Apache-2.0.
 
@@ -2781,7 +2781,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## magnitude
 
-Portions of this product are adapted from magnitude: https://github.com/magnitudedev/magnitude (pinned at revision 8d7dbcc1baf4eb3ae7f1c3449dd463f3b375f576). Changes were made.
+Portions of this product are adapted from magnitude: https://github.com/magnitudedev/magnitude (pinned at revision 8d7dbcc1baf4eb3ae7f1c3449dd463f3b375f576, 814f72abf533c96dbc21bc8b5c3b6ba38c156f64). Changes were made.
 
 Copyright 2026 Magnitude AI Inc.
 SPDX-License-Identifier: Apache-2.0
@@ -2825,4 +2825,11 @@ SOFTWARE.
 
 Portions of this product are adapted from OpenSandbox: https://github.com/opensandbox-group/OpenSandbox (pinned at revision f72baeae3a7feb11a49cc42f48dba3e93a94600d; the sandbox lifecycle state enum, its documented transitions and the create/list/get/pause/resume/snapshot/renew-expiration/delete contract from specs/sandbox-lifecycle.yml, reimplemented as a native Go lifecycle state machine in internal/sandbox/lifecycle.go). Changes were made.
 
+SPDX-License-Identifier: Apache-2.0
+
+## NVIDIA/TensorRT-LLM
+
+Portions of this product are adapted from NVIDIA/TensorRT-LLM: https://github.com/NVIDIA/TensorRT-LLM (pinned at revision 2f528b21d8b28ec56f4d4d8eace953dce8399138). Changes were made.
+
+Copyright (c) 2011-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
