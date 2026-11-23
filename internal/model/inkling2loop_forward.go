@@ -23,6 +23,29 @@ type Inkling2LoopExperts interface {
 	ExpertMatVec(expert int, dst, x []float32)
 }
 
+// Inkling2LoopMatVecJob is one Dst = W·X of a batch: Matrix, or expert Expert
+// of Experts when Matrix is nil.
+type Inkling2LoopMatVecJob struct {
+	Matrix  Inkling2LoopMatrix
+	Experts Inkling2LoopExperts
+	Expert  int
+	Dst, X  []float32
+}
+
+// Inkling2LoopBatcher runs independent MatVecs together, so a device provider
+// pays one host round trip per batch instead of one per job.
+type Inkling2LoopBatcher interface {
+	MatVecBatch(jobs []Inkling2LoopMatVecJob)
+}
+
+// Inkling2LoopExpertMLP is an optional Batcher extension that runs a whole
+// routed MLP: sum_i weights[i] * (Down_e · situ(GateUp_e · x)) over e = top[i],
+// with the per-expert scales applied exactly as the host forward does. ok is
+// false when the provider cannot take these experts.
+type Inkling2LoopExpertMLP interface {
+	ExpertMLP(lw *Inkling2LoopLayerWeights, hp *Inkling2LoopHParams, top []int, weights, x []float32) (out []float32, ok bool)
+}
+
 // Inkling2LoopEmbedding returns one dequantized embedding row.
 type Inkling2LoopEmbedding interface {
 	Row(token int, dst []float32)
@@ -78,6 +101,9 @@ type Inkling2LoopWeights struct {
 	OutputResQuery []float32
 	Layers         []Inkling2LoopLayerWeights
 	Controllers    []Inkling2LoopControllerWeights // CoreEnd-CoreStart entries
+	// Batcher, when set, runs each group of independent MatVecs; nil runs them
+	// one by one (experts in parallel goroutines).
+	Batcher Inkling2LoopBatcher
 }
 
 const (
@@ -246,16 +272,22 @@ func (h *Inkling2LoopHost) layer(slot, ip int, cur []float32, blocks *[][]float3
 		inputs[2] = inkling2RMS(inputs[2], lw.VInpNorm, hp.NormEps)
 	}
 
-	q := inkling2MatVec(lw.Wq, inputs[0])
+	jobs := []Inkling2LoopMatVecJob{
+		inkling2Job(lw.Wq, inputs[0]), inkling2Job(lw.Wk, inputs[1]), inkling2Job(lw.Wv, inputs[2]),
+		inkling2Job(lw.Rel, inputs[0]), inkling2Job(lw.SinkProj, inputs[0]), inkling2Job(lw.Gate, inputs[0]),
+	}
+	if !local {
+		jobs = append(jobs, inkling2Job(lw.KConvProj, inputs[1]), inkling2Job(lw.VConvProj, inputs[2]))
+	}
+	h.run(jobs)
 	var kDyn, vDyn []float32
 	if !local {
-		kDyn = inkling2MatVec(lw.KConvProj, inputs[1])
-		vDyn = inkling2MatVec(lw.VConvProj, inputs[2])
+		kDyn, vDyn = jobs[6].Dst, jobs[7].Dst
 	}
-	k := h.convolve(slot, inkling2MatVec(lw.Wk, inputs[1]), lw.KConv, kDyn, hp.KVHeads, 0)
-	v := h.convolve(slot, inkling2MatVec(lw.Wv, inputs[2]), lw.VConv, vDyn, hp.KVHeads, kvDim)
-	r := inkling2MatVec(lw.Rel, inputs[0])
-	sinks := inkling2MatVec(lw.SinkProj, inputs[0])
+	q := jobs[0].Dst
+	k := h.convolve(slot, jobs[1].Dst, lw.KConv, kDyn, hp.KVHeads, 0)
+	v := h.convolve(slot, jobs[2].Dst, lw.VConv, vDyn, hp.KVHeads, kvDim)
+	r, sinks, gate := jobs[3].Dst, jobs[4].Dst, jobs[5].Dst
 
 	for hd := 0; hd < hp.Heads; hd++ {
 		inkling2Clip(q[hd*hp.HeadDim:(hd+1)*hp.HeadDim], lw.QClip[hd*hp.HeadDim:(hd+1)*hp.HeadDim], hp.QKClip)
@@ -286,7 +318,6 @@ func (h *Inkling2LoopHost) layer(slot, ip int, cur []float32, blocks *[][]float3
 	}
 	attn := h.attend(slot, q, r, sinks, lw.RelBias, extent, local)
 
-	gate := inkling2MatVec(lw.Gate, inputs[0])
 	for i := range attn {
 		attn[i] *= sigmoid32(gate[i])
 	}
@@ -435,48 +466,96 @@ func (h *Inkling2LoopHost) moe(lw *Inkling2LoopLayerWeights, x []float32) []floa
 			weights[i] *= hp.ExpertWeightsScale
 		}
 	}
-	width := hp.ExpertWidth
-	outs := make([][]float32, len(top))
-	var wg sync.WaitGroup
-	for i, e := range top {
-		wg.Add(1)
-		go func(i, e int) {
-			defer wg.Done()
-			gu := make([]float32, 2*width)
-			lw.GateUp.ExpertMatVec(e, gu, x)
-			if lw.GateUpScale != nil {
-				for j := range gu {
-					gu[j] *= lw.GateUpScale[e]
-				}
-			}
-			act := make([]float32, width)
-			beta, lb := float64(hp.SituBeta), float64(hp.SituLinearBeta)
-			for j := 0; j < width; j++ {
-				g, u := float64(gu[j]), float64(gu[width+j])
-				a := beta * math.Tanh(g/beta) * (1 / (1 + math.Exp(-g)))
-				if lb > 0 {
-					u = lb * math.Tanh(u/lb)
-				}
-				act[j] = float32(a * u)
-			}
-			d := make([]float32, hp.Hidden)
-			lw.Down.ExpertMatVec(e, d, act)
-			if lw.DownScale != nil {
-				for j := range d {
-					d[j] *= lw.DownScale[e]
-				}
-			}
-			outs[i] = d
-		}(i, e)
+	if mlp, ok := h.W.Batcher.(Inkling2LoopExpertMLP); ok {
+		if out, ok := mlp.ExpertMLP(lw, &h.HP, top, weights, x); ok {
+			return out
+		}
 	}
-	wg.Wait()
+	outs := make([][]float32, len(top))
+	if h.W.Batcher != nil {
+		jobs := make([]Inkling2LoopMatVecJob, len(top))
+		for i, e := range top {
+			jobs[i] = Inkling2LoopMatVecJob{Experts: lw.GateUp, Expert: e, Dst: make([]float32, 2*hp.ExpertWidth), X: x}
+		}
+		h.run(jobs)
+		for i, e := range top {
+			jobs[i] = Inkling2LoopMatVecJob{Experts: lw.Down, Expert: e, Dst: make([]float32, hp.Hidden),
+				X: h.situ(lw, e, jobs[i].Dst)}
+		}
+		h.run(jobs)
+		for i, e := range top {
+			outs[i] = inkling2ScaleExpert(jobs[i].Dst, lw.DownScale, e)
+		}
+	} else {
+		var wg sync.WaitGroup
+		for i, e := range top {
+			wg.Add(1)
+			go func(i, e int) {
+				defer wg.Done()
+				gu := make([]float32, 2*hp.ExpertWidth)
+				lw.GateUp.ExpertMatVec(e, gu, x)
+				d := make([]float32, hp.Hidden)
+				lw.Down.ExpertMatVec(e, d, h.situ(lw, e, gu))
+				outs[i] = inkling2ScaleExpert(d, lw.DownScale, e)
+			}(i, e)
+		}
+		wg.Wait()
+	}
 	out := make([]float32, hp.Hidden)
 	for i, d := range outs {
 		for j := range out {
-			out[j] += weights[i] * d[j]
+			// float32() rounds the product, so no GOARCH fuses this into an FMA
+			out[j] += float32(weights[i] * d[j])
 		}
 	}
 	return out
+}
+
+// situ scales expert e's gate-up output and applies the situ activation
+// beta*tanh(g/beta)*sigmoid(g) * lb*tanh(u/lb).
+func (h *Inkling2LoopHost) situ(lw *Inkling2LoopLayerWeights, e int, gu []float32) []float32 {
+	hp := h.HP
+	width := hp.ExpertWidth
+	gu = inkling2ScaleExpert(gu, lw.GateUpScale, e)
+	act := make([]float32, width)
+	beta, lb := float64(hp.SituBeta), float64(hp.SituLinearBeta)
+	for j := 0; j < width; j++ {
+		g, u := float64(gu[j]), float64(gu[width+j])
+		a := beta * math.Tanh(g/beta) * (1 / (1 + math.Exp(-g)))
+		if lb > 0 {
+			u = lb * math.Tanh(u/lb)
+		}
+		act[j] = float32(a * u)
+	}
+	return act
+}
+
+func inkling2ScaleExpert(v, scale []float32, e int) []float32 {
+	if scale != nil {
+		for j := range v {
+			v[j] *= scale[e]
+		}
+	}
+	return v
+}
+
+func inkling2Job(m Inkling2LoopMatrix, x []float32) Inkling2LoopMatVecJob {
+	return Inkling2LoopMatVecJob{Matrix: m, Dst: make([]float32, m.Rows()), X: x}
+}
+
+// run executes independent MatVecs through the Batcher when one is set.
+func (h *Inkling2LoopHost) run(jobs []Inkling2LoopMatVecJob) {
+	if h.W.Batcher != nil {
+		h.W.Batcher.MatVecBatch(jobs)
+		return
+	}
+	for _, j := range jobs {
+		if j.Matrix != nil {
+			j.Matrix.MatVec(j.Dst, j.X)
+		} else {
+			j.Experts.ExpertMatVec(j.Expert, j.Dst, j.X)
+		}
+	}
 }
 
 // inkling2Mix is depth attention: RMS-normalize each earlier block output and

@@ -52,22 +52,152 @@ type inkling2ClassedUploader interface {
 }
 
 func inkling2DeviceMatVec(be compute.Backend, w compute.Tensor, cols, padK int, dst, x []float32) {
+	xt := inkling2UploadActivation(be, x, cols, padK)
+	y := be.MatMul(w, xt)
+	copy(dst, be.Read(y))
+	be.Free(y)
+	be.Free(xt)
+}
+
+// inkling2DeviceBatcher runs a batch as: upload each distinct input once,
+// launch every device GEMV back to back, run host-resident jobs while the
+// device works, then read the outputs. Each blocking copy used to drain the
+// stream once per GEMV; now only the first read waits on device work.
+type inkling2DeviceBatcher struct{ be compute.Backend }
+
+func (b *inkling2DeviceBatcher) MatVecBatch(jobs []model.Inkling2LoopMatVecJob) {
+	type devJob struct {
+		w          compute.Tensor
+		cols, padK int
+		dst, x     []float32
+	}
+	devs := make([]devJob, 0, len(jobs))
+	host := make([]model.Inkling2LoopMatVecJob, 0, len(jobs))
+	for _, j := range jobs {
+		switch m := j.Matrix.(type) {
+		case *inkling2DeviceMatrix:
+			devs = append(devs, devJob{m.w, m.cols, m.padK, j.Dst, j.X})
+		case nil:
+			if e, ok := j.Experts.(*inkling2DeviceExperts); ok {
+				devs = append(devs, devJob{e.w[j.Expert], e.cols, e.padK, j.Dst, j.X})
+			} else {
+				host = append(host, j)
+			}
+		default:
+			host = append(host, j)
+		}
+	}
+	type inputKey struct {
+		p    *float32
+		n, k int
+	}
+	if pk, ok := b.be.(compute.PackedMatVecer); ok && len(devs) > 0 {
+		for _, j := range host {
+			inkling2HostMatVec(j)
+		}
+		align := func(n int) int {
+			return (n + compute.PackedMatVecAlign - 1) / compute.PackedMatVecAlign * compute.PackedMatVecAlign
+		}
+		ws := make([]compute.Tensor, len(devs))
+		xOff, yOff := make([]int, len(devs)), make([]int, len(devs))
+		at := make(map[inputKey]int, 3)
+		var xs []float32
+		yLen := 0
+		for i, d := range devs {
+			key := inputKey{&d.x[0], d.cols, d.padK}
+			off, seen := at[key]
+			if !seen {
+				off = len(xs)
+				at[key] = off
+				xs = append(xs, make([]float32, align(d.padK))...)
+				copy(xs[off:off+d.cols], d.x[:d.cols])
+			}
+			ws[i], xOff[i], yOff[i] = d.w, off, yLen
+			yLen += align(len(d.dst))
+		}
+		y, err := pk.MatVecPacked(ws, xs, xOff, yOff, yLen)
+		if err != nil {
+			panic(fmt.Errorf("inkling2_loop: packed matvec: %w", err))
+		}
+		for i, d := range devs {
+			copy(d.dst, y[yOff[i]:yOff[i]+len(d.dst)])
+		}
+		return
+	}
+	inputs := make(map[inputKey]compute.Tensor, 3)
+	xs := make([]compute.Tensor, len(devs))
+	for i, d := range devs {
+		key := inputKey{&d.x[0], d.cols, d.padK}
+		xt, ok := inputs[key]
+		if !ok {
+			xt = inkling2UploadActivation(b.be, d.x, d.cols, d.padK)
+			inputs[key] = xt
+		}
+		xs[i] = xt
+	}
+	ys := make([]compute.Tensor, len(devs))
+	for i, d := range devs {
+		ys[i] = b.be.MatMul(d.w, xs[i])
+	}
+	for _, j := range host {
+		inkling2HostMatVec(j)
+	}
+	for i, d := range devs {
+		copy(d.dst, b.be.Read(ys[i]))
+		b.be.Free(ys[i])
+	}
+	for _, xt := range inputs {
+		b.be.Free(xt)
+	}
+}
+
+// ExpertMLP runs the routed MLP in one device round trip when the backend has
+// the fused situ MoE and both expert stacks are device-resident.
+func (b *inkling2DeviceBatcher) ExpertMLP(lw *model.Inkling2LoopLayerWeights, hp *model.Inkling2LoopHParams, top []int, weights, x []float32) ([]float32, bool) {
+	sm, ok := b.be.(compute.SituMoE)
+	gu, okG := lw.GateUp.(*inkling2DeviceExperts)
+	dn, okD := lw.Down.(*inkling2DeviceExperts)
+	if !ok || !okG || !okD {
+		return nil, false
+	}
+	scale := func(s []float32, e int) float32 {
+		if s == nil {
+			return 1
+		}
+		return s[e]
+	}
+	g, d := make([]compute.Tensor, len(top)), make([]compute.Tensor, len(top))
+	gs, ds := make([]float32, len(top)), make([]float32, len(top))
+	for i, e := range top {
+		g[i], d[i] = gu.w[e], dn.w[e]
+		gs[i], ds[i] = scale(lw.GateUpScale, e), scale(lw.DownScale, e)
+	}
+	out, err := sm.SituMoE(g, d, x[:gu.cols], weights, gs, ds, hp.SituBeta, hp.SituLinearBeta)
+	if err != nil {
+		panic(fmt.Errorf("inkling2_loop: situ moe: %w", err))
+	}
+	return out, true
+}
+
+func inkling2HostMatVec(j model.Inkling2LoopMatVecJob) {
+	if j.Matrix != nil {
+		j.Matrix.MatVec(j.Dst, j.X)
+	} else {
+		j.Experts.ExpertMatVec(j.Expert, j.Dst, j.X)
+	}
+}
+
+func inkling2UploadActivation(be compute.Backend, x []float32, cols, padK int) compute.Tensor {
 	in := x[:cols]
 	if padK > cols {
 		in = make([]float32, padK)
 		copy(in, x[:cols])
 	}
 	host := compute.NewF32(be, []int{len(in)}, in)
-	var xt compute.Tensor
 	if cu, ok := be.(inkling2ClassedUploader); ok {
-		xt = cu.UploadClass(host, compute.F32, compute.MemoryActivation, "inkling2-activation")
-	} else {
-		xt = be.Upload(host, compute.F32)
+		return cu.UploadClass(host, compute.F32, compute.MemoryActivation, "inkling2-activation")
 	}
-	y := be.MatMul(w, xt)
-	copy(dst, be.Read(y))
-	be.Free(y)
-	be.Free(xt)
+	return be.Upload(host, compute.F32)
 }
 
 // inkling2DeviceWeight uploads one [rows, cols] GGUF matrix to be in the
@@ -270,6 +400,7 @@ func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
 	}
 	s.next = m.closer
 	m.closer = s
+	w.Batcher = &inkling2DeviceBatcher{be: be}
 	return nil
 }
 

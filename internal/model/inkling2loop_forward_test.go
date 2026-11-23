@@ -233,3 +233,49 @@ func TestInkling2LoopHostRejectsMisalignedCore(t *testing.T) {
 		t.Fatal("misaligned loop core accepted")
 	}
 }
+
+// inkling2ReverseBatcher runs each batch back to front, so a forward that
+// leaned on job order or on MatVecs running before the batch returns would
+// diverge from the unbatched path.
+type inkling2ReverseBatcher struct{ batches, jobs int }
+
+func (b *inkling2ReverseBatcher) MatVecBatch(jobs []Inkling2LoopMatVecJob) {
+	b.batches++
+	b.jobs += len(jobs)
+	for i := len(jobs) - 1; i >= 0; i-- {
+		if j := jobs[i]; j.Matrix != nil {
+			j.Matrix.MatVec(j.Dst, j.X)
+		} else {
+			j.Experts.ExpertMatVec(j.Expert, j.Dst, j.X)
+		}
+	}
+}
+
+func TestInkling2LoopHostBatcherMatchesUnbatchedForward(t *testing.T) {
+	run := func(b Inkling2LoopBatcher) [][]float32 {
+		hp, w := inkling2TinyModel()
+		w.Batcher = b
+		h, err := NewInkling2LoopHost(hp, w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out [][]float32
+		for _, tok := range []int{1, 5, 2, 7} {
+			out = append(out, append([]float32(nil), h.Step(tok)...))
+		}
+		return out
+	}
+	want := run(nil)
+	b := &inkling2ReverseBatcher{}
+	got := run(b)
+	if b.batches == 0 || b.jobs <= b.batches {
+		t.Fatalf("batcher saw %d batches / %d jobs; the forward did not batch", b.batches, b.jobs)
+	}
+	for s := range want {
+		for i := range want[s] {
+			if got[s][i] != want[s][i] {
+				t.Fatalf("step %d logit %d: batched %v, unbatched %v", s, i, got[s][i], want[s][i])
+			}
+		}
+	}
+}

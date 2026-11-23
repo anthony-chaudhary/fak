@@ -607,6 +607,16 @@ void fcuda_iq4nl_gemv(const uint8_t *dW, const float *dX, float *dY, int out, in
 void fcuda_iq2s_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
 void fcuda_iq3xxs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
 void fcuda_iq3s_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+/* fcuda_situ_act_f32 / fcuda_situ_combine_f32: elementwise halves of a routed situ-activation
+ * expert MLP (cuda/situ_moe.cuh), rounding in the host forward's order (no FMA contraction). */
+void fcuda_situ_act_f32(const float *dGU, int guStride, const float *dGUScale, float *dAct,
+                        int actStride, int width, int picks, double beta, double linBeta);
+void fcuda_situ_combine_f32(const float *dD, int dStride, const float *dDnScale,
+                            const float *dWeight, float *dOut, int hidden, int picks);
+/* fcuda_nvfp4_w4a16_warp_f32: fcuda_nvfp4_w4a16_split_f32's math with a warp-per-row, lane-split
+ * K reduction (cuda/nvfp4_warp_gemv.cuh); not bit-equal to the serial reference order. */
+int fcuda_nvfp4_w4a16_warp_f32(const uint8_t *dPacked, const uint8_t *dScales, const float *dX,
+                               float *dY, int out, int in, int P, float globalScale);
 /* fcuda_iq4xs_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident verbatim llama.cpp
  * IQ4_XS (136 B / 256: f16 d, u16 scales_h, scales_l[4], qs[128]). P < 32 runs the f32 warp-per-row
  * GEMV, or for P <= 3 with the mmvq decode arm (fcuda_set_q4k_decode_arm(1)) llama.cpp's q8_1 DP4A
