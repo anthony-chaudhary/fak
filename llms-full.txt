@@ -40,7 +40,7 @@ Per-harness stubs that auto-load in their own harness and defer to [`AGENTS.md`]
 
 - **Name:** `fak`; the technical name and architecture are the **Fused Agent Kernel** / *agent kernel*. Repository: `fak`. Language: **Go 1.26+**. License: **Apache-2.0**. Version: **0.45.0** ([`VERSION`](VERSION) is authoritative).
 - **Public category:** **agent runtime**. In fak, that means the operator-controlled boundary for cache and context, model routing, tool authority, memory, observability, and native inference. These capabilities are available by operating mode and claim status; the category does not promote roadmap work to shipped behavior.
-- **Disambiguated search terms:** `fak agent runtime` (the public category), `fak agent kernel` and `fused agent kernel` (the technical architecture and name), `fak serve` (the gateway verb), `fak guard`, `treat the tool call like a syscall`, `default-deny tool-call gate`, `prompt-injection result quarantine`, `addressable KV cache`, `long-session prompt cache`, `cost-aware model routing for agents`, `managed agent runtime`, `MCP tool poisoning defense`, `AI agent least-privilege tool access`, `tamper-evident agent tool-call audit`. The bare word `fak` is dominated by homophone and F.A.K.-acronym noise, so always pair it with one of these. The full 76-term roster, including localized variants, is the generated feed [`llms-terms.txt`](llms-terms.txt) (source of record: `docs/marketing/disambiguation-terms.json`, written by `fak marketing aeo`).
+- **Disambiguated search terms:** `fak agent runtime` (the public category), `fak agent kernel` and `fused agent kernel` (the technical architecture and name), `fak serve` (the gateway verb), `fak guard`, `treat the tool call like a syscall`, `default-deny tool-call gate`, `prompt-injection result quarantine`, `addressable KV cache`, `long-session prompt cache`, `cost-aware model routing for agents`, `managed agent runtime`, `MCP tool poisoning defense`, `AI agent least-privilege tool access`, `tamper-evident agent tool-call audit`; and for fak as an inference engine, `fak-native inference engine`, `LLM inference engine written in Go`, `fak vs llama.cpp`, `fak vs vLLM and SGLang`. The bare word `fak` is dominated by homophone and F.A.K.-acronym noise, so always pair it with one of these. The full 85-term roster, including localized variants, is the generated feed [`llms-terms.txt`](llms-terms.txt) (source of record: `AEODisambiguationTerms` in `internal/marketing/aeo.go`, written by `fak marketing aeo`).
 - **Three adoption rungs:** (1) `fak guard` wraps the agent you already run with one command; (2) `fak serve` fronts any OpenAI-compatible server (Ollama, vLLM, cloud) with routing, policy, quarantine, and audit; (3) the fused kernel runs a local model inside the kernel's address space so the KV cache is a kernel object.
 - **Serving boundary:** Proxy/gateway mode may front an explicitly selected tuned engine or hosted provider. That is external inference, not fak-native, and its engine identity stays attached to every result.
 - **Native inference invariant:** [`fak-native`](docs/native-inference-goal.md) is the product and performance path for local inference and is intended to beat llama.cpp in matched, quality-constrained envelopes. llama.cpp is permitted only when explicitly selected for benchmarks, parity/reference diagnosis, migration/interoperability, or ego-free borrowing; it is never a silent fallback. A current win still requires the exact scoped row in [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md).
@@ -84,6 +84,9 @@ Per-harness stubs that auto-load in their own harness and defer to [`AGENTS.md`]
 - How your text becomes the numbers a model reads, taught in five rungs from "what is a tokenizer?" to the tokenizer frontier — the three stages (split, spell, merge), the merge loop written out twice as a naive oracle and the fast incremental twin that must match it bit for bit, why a long indented code block is the quadratic worst case, and how correctness is proven against HuggingFace and llama.cpp: [`docs/explainers/tokenization/README.md`](docs/explainers/tokenization/README.md)
 - Where the numbers live while a model runs, and what it costs to move them, taught in five rungs from "what is a buffer?" to the evidence boundary — the buffer hierarchy, the forward pass as a sequence of buffer moves, SRAM and the kernel's own scratch, HBM/VRAM and the roofline (arithmetic intensity, the ridge point, why decode is bandwidth-bound), and host DRAM, offload, and the frontier, every rung citing real `internal/compute` and `internal/model` lines and ending with a lab you run: [`docs/explainers/memory-hierarchy/README.md`](docs/explainers/memory-hierarchy/README.md)
 - How you change fak's kernel without forking it, taught in six rungs from "what is kernel development?" to the frontier — the three senses of "kernel", the `Register*()` registration seam and the `internal/architest` layering gate, the Reference/Approx correctness class and its deterministic witness, the non-forgeable keep-bit that decides KEEP vs REVERT, the adjudicator rung and the verdict fold, and the honest edge of what the repo has not yet proven, each rung with a lab and a checkpoint: [`docs/explainers/kernel-development/README.md`](docs/explainers/kernel-development/README.md)
+- How fak's in-kernel forward pass runs on a GPU instead of a CPU, taught in five rungs from "why not just the CPU?" to a head-to-head of Vulkan and ROCm — the HAL seam where a backend registers, the Vulkan compute path, and AMD's ROCm/HIP stack: [`docs/explainers/accelerators/README.md`](docs/explainers/accelerators/README.md)
+- What a prompt cache and a KV cache are and what they cost, taught in five rungs from "what is caching?" to the caching frontier — managed-cache defaults, cache economics on the wire, and the kernel-owned KV cache: [`docs/explainers/caching/README.md`](docs/explainers/caching/README.md)
+- The instruction sets a machine actually executes, taught in five rungs from "what is an instruction set?" to the limits of ISA knowledge — SIMD, the GPU's PTX and SASS, and the driver stack down to silicon: [`docs/explainers/hardware-isa/README.md`](docs/explainers/hardware-isa/README.md)
 - The questions a newcomer asks the first time they try to change fak's kernel, and the four the repository cannot answer yet, labeled CONTRARIAN / AFRAID / UNASKED / STEELMAN and each routed to the rung that answers it: [`docs/questions/kernel-development.md`](docs/questions/kernel-development.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)
 - One-agent management with `fak guard`: [`README.md#manage-one-local-agent-fak-guard`](README.md#manage-one-local-agent-fak-guard)
@@ -1243,6 +1246,8 @@ description: "A bounded course following one fak request through native inferenc
 ---
 
 # End-to-End Inference, Agent Harness, and Memory
+
+This course is a bounded, end-to-end walk through one fak request: native inference, agent tools, policy, context admission, memory recall, and verification.
 
 > **Flagship bounded course.** Follow one fak request end to end. Trace runtime admission, fak-native model execution, and agent tool use. Inspect policy checks and local fast paths. Then examine context admission, memory recall, and durable verification. This page is a syllabus and lab guide; the linked canonical documents remain authoritative.
 
@@ -5235,6 +5240,7 @@ fallback ([native inference goal](https://github.com/anthony-chaudhary/fak/blob/
 
 **Pick your path:** run a local agent → [Try fak](#try-fak) · guard an agent you
 already use → [`fak guard`](#governance-for-external-agents-fak-guard) ·
+sell tokens from your own GPUs → [token-factory operator route](https://github.com/anthony-chaudhary/fak/blob/main/docs/operator/token-factory.md) ·
 understand why → [the market framing](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/why-fak-the-market-moment.md) ·
 check the evidence → [benchmarks](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md) and [claims](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
@@ -5518,6 +5524,7 @@ New dated notes go under [`docs/notes/`](https://github.com/anthony-chaudhary/fa
 - [Tier 2: run the fused in-kernel model](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/in-kernel-model.md) — the kernel-developer continuation of Getting started, split out of it so the newcomer route reads end to end: the deterministic synthetic checkpoint over `/v1/fak/syscall`, the one-command SmolLM2-135M HuggingFace export, the Qwen3.6-27B GGUF smoke through `cmd/fakchat`, in-kernel chat through `fak serve --gguf` on both the OpenAI and Anthropic wires, and the honest caveat on why this is a correctness/reference path rather than a production chat server.
 - [AGENTS](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) — orientation for coding agents (build, test, the hard rules). Written for automated contributors inside the maintainers' shared checkout; humans want [CONTRIBUTING](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md).
 - [Security policy](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) — evaluate the current capability floor, its policy configuration, scoped evidence, and private reporting route.
+- [Alpha fence](https://github.com/anthony-chaudhary/fak/blob/main/docs/alpha-fence.md) — keep private skills, prompts and workflows out of a public repository: fence them as salted hashes and the leak gates refuse any content reproducing them.
 - [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — select a scoped result, compare its tuned baseline, and follow the committed artifact and reproduce route.
 - [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
 - [Docs home](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md) — choose a current public, builder, operator, contributor, or research route.
@@ -10323,7 +10330,7 @@ Every request gets a `TraceID` (or generates one). This threads through:
 
 ---
 title: "Agent runtime: category, ownership, interfaces, and proof"
-description: "fak is the operator-controlled agent-runtime boundary for cache and context, model routing, tool authority, memory, observability, and native inference; this map separates that category from its Fused Agent Kernel architecture and shows current interfaces."
+description: "fak is the operator-controlled agent-runtime boundary for cache, context, routing, tool authority, memory, and native inference. A map of its interfaces."
 slug: agent-runtime
 keywords:
   - fak agent runtime
@@ -10535,11 +10542,13 @@ description: "Browse every scoped fak identity with its meaning, owner-backed sc
 
 ---
 title: "TensorRT-LLM vs SGLang: where fak fits"
-description: "An answer-first comparison of TensorRT-LLM and SGLang, plus deployment patterns for placing fak in front of either server or using fak's local in-process runtime."
+description: "An answer-first comparison of TensorRT-LLM and SGLang, plus deployment patterns for placing fak in front of either server or using fak's own runtime."
 last_reviewed: 2026-08-11
 ---
 
 # TensorRT-LLM vs SGLang: where fak fits
+
+TensorRT-LLM and SGLang are inference serving systems; fak is an agent runtime and policy gateway that can sit in front of either one. This page compares the two and shows where fak fits.
 
 **Audience:** inference engineers choosing where the fak boundary sits. **Prerequisite:** the native-inference goal and one serving-engine deployment.
 
@@ -10744,7 +10753,7 @@ boundary explained here.
 
 ---
 title: "The fak inference ladder: five guides, five audiences"
-description: "One subject — how a transformer actually produces a token, and how fak splits that work across many workers — explained five times, each rung pitched at a different reader. Start at Level 1 (what is inference?) and climb to Level 5 (the parallelism frontier)."
+description: "How a transformer produces a token, and how fak splits that inference work across many workers, explained five times from first question to frontier."
 slug: inference-parallelism-ladder
 keywords:
   - fak inference guide
@@ -10860,7 +10869,7 @@ Each rung ends with a nav footer linking its neighbours and back here.
 
 ---
 title: "Pipeline parallelism: cutting the layer stack across workers"
-description: "Your model does not fit on one machine. The layer stack is the natural place to cut it: ForwardBand runs a contiguous band of layers, PipelineStage gives each worker one band, and StageTransport carries the hidden state across the boundary. The split is not an approximation — it is the same computation, and the repo proves it bit-exact. Level 3 of the fak inference ladder."
+description: "Pipeline parallelism cuts the layer stack across workers: ForwardBand runs a band of layers, StageTransport carries the hidden state, proven bit-exact."
 slug: pipeline-parallelism
 keywords:
   - pipeline parallelism explained
@@ -10876,6 +10885,8 @@ date: 2026-11-18
 ---
 
 # Pipeline parallelism
+
+Pipeline parallelism is splitting a model across workers by cutting its layer stack: `ForwardBand` runs a contiguous band of layers, `PipelineStage` gives each worker one band, and `StageTransport` carries the hidden state across the boundary. The split is the same computation, and the repository proves it bit-exact.
 
 *You are on **Level 3 of 5** of the [fak inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference-parallelism/README.md).*
 
@@ -11511,7 +11522,7 @@ it says so.
 
 ---
 title: "How inference works: a five-rung ladder (fak as the worked example)"
-description: "The same subject — how a language model turns your prompt into the next token — explained five times, each rung pitched at a different reader. Start at Level 1 (what is a token?) and climb to Level 5 (what changes at scale). Every claim is pinned to a real file in this repository."
+description: "How inference works: a language model turning your prompt into the next token, explained five times, from 'what is a token?' to what changes at scale."
 slug: inference-ladder
 keywords:
   - how inference works
@@ -11922,7 +11933,7 @@ ledger, and each names what would close it.
 
 ---
 title: "The fak mixed-precision ladder: five guides, five audiences"
-description: "One subject, how a model stores its numbers, explained five times. From what a bit is, to the evidence boundary where measured claims end and modeled ones begin."
+description: "The mixed-precision ladder: how a model stores its numbers, explained five times, from what a bit is to where measured claims end and modeled begin."
 slug: mixed-precision-ladder
 keywords:
   - mixed precision explained
@@ -12040,7 +12051,7 @@ answer to that question.
 
 ---
 title: "How tokenization works: a five-rung ladder (fak as the worked example)"
-description: "The same subject — how text becomes the numbers a model reads — explained five times, each rung pitched at a different reader. Start at Level 1 (what is a tokenizer?) and climb to Level 5 (the tokenizer frontier). Every claim is pinned to a real file in this repository."
+description: "How tokenization works: text becoming the numbers a model reads, explained five times, from 'what is a tokenizer?' to the tokenizer frontier."
 slug: tokenization-ladder
 keywords:
   - tokenization explained
@@ -12154,7 +12165,7 @@ verified by a link-and-citation check, not by trust.
 
 ---
 title: "The fak memory-hierarchy ladder: five guides, five audiences"
-description: "One subject — how bytes move through the memory hierarchy while a language model runs — explained five times, each rung pitched at a different reader. Start at Level 1 (what is a buffer?) and climb to Level 5 (host DRAM, offload, and the frontier). Every claim is pinned to a real file in this repository."
+description: "How bytes move through the memory hierarchy while a language model runs, explained five times: from 'what is a buffer?' to host DRAM and offload."
 slug: memory-hierarchy-ladder
 keywords:
   - memory hierarchy explained
@@ -12292,7 +12303,7 @@ in the page — the pages are verified by a link-and-citation check, not by trus
 
 ---
 title: "The fak kernel-development ladder: six guides, six audiences"
-description: "One subject — the practice of changing fak's kernel — explained six times, each rung pitched at a different reader. Start at Level 1 (what is kernel development?) and climb to Level 6 (the frontier)."
+description: "The practice of changing fak's kernel, explained six times, each rung for a different reader: from 'what is kernel development?' up to the frontier."
 slug: kernel-development-ladder
 keywords:
   - kernel development guide
@@ -12475,6 +12486,296 @@ Six words recur on every rung. Learn them here and the rungs read faster.
   correct → prove faster → ship.
 - [`ARCHITECTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) — the frozen ABI, the seam catalog, and
   the scaling contract, in full.
+
+---
+
+# `docs/explainers/accelerators/README.md`
+
+> Source: `docs/explainers/accelerators/README.md`
+
+---
+title: "The fak accelerator ladder: five rungs from the CPU to Vulkan and ROCm"
+description: "How fak runs its in-kernel forward pass on a GPU, explained five times: from a first CPU-vs-GPU question up to a head-to-head of Vulkan and ROCm on AMD."
+slug: accelerators-ladder
+keywords:
+  - fak accelerator ladder
+  - vulkan compute explained
+  - rocm hip explained
+  - gpu backend for llm inference
+  - compute HAL seam
+  - vulkan vs rocm
+  - beginner gpu inference guide
+  - advanced gpu inference guide
+date: 2026-11-18
+---
+
+# The fak accelerator ladder
+
+The fak accelerator ladder is one subject, how fak runs its in-kernel forward pass on a GPU instead of a CPU, explained five times for five kinds of reader.
+
+> **What this is.** The same subject — how fak's in-kernel forward pass runs on a GPU
+> instead of a CPU — written **five times**, once for each kind of reader. Each rung
+> assumes exactly what the one below it taught, so you can start at the bottom and climb,
+> or drop in at the rung that matches what you already know. **Vulkan** and **ROCm** get
+> the most attention: they are the paths most readers can run on hardware they own.
+
+## Why does this subject need a ladder?
+
+fak runs the model itself, in-process. The same forward pass — the loop that turns a
+prompt into the next token — can run on four machines behind one interface: a **CPU
+reference** (`cpu-ref`, the correctness oracle, always available), **CUDA** for NVIDIA,
+**Vulkan** (cross-vendor: AMD, Intel, NVIDIA), and **ROCm** (AMD's native HIP path,
+silicon-witnessed once, not reproducible here — see below).
+
+Vulkan and ROCm are genuinely different machines. Vulkan is a *graphics* API pressed into
+compute service: portable, but it pays a per-dispatch tax. ROCm is AMD's *native* compute
+stack: potentially faster, but only on AMD silicon under Linux. One flat page either
+drowns a newcomer or bores a senior engineer who wants the tradeoff table.
+
+## The five rungs
+
+| Level | Who it's for | What you'll get |
+|---|---|---|
+| **[1 · Why not just the CPU?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/level-1-why-not-just-cpu.md)** | A complete newcomer. | Why a CPU is the wrong shape for a transformer forward pass, what a GPU actually is, and the one idea — many slow lanes beating few fast ones — that makes the rest make sense. |
+| **[2 · The HAL seam](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/level-2-the-hal-seam.md)** | A competent Go developer. | How a backend plugs in: the `Backend` interface, `Register`/`Lookup`/`Pick`, the `Reference` vs `Approx` classes, and why adding a GPU is a registration, never a forward-loop edit. |
+| **[3 · Vulkan: how it actually works](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/level-3-vulkan-how-it-works.md)** | A systems or graphics dev. | The Vulkan compute pipeline end to end — instance, device, queues, SPIR-V shaders, descriptor sets, command buffers — and where the per-dispatch overhead comes from. |
+| **[4 · ROCm: how it actually works](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/level-4-rocm-how-it-works.md)** | A systems engineer, AMD-curious. | HIP as CUDA's source-compatible twin, the `hipcc`/`hipify` build, the CDNA-vs-RDNA wavefront split, and the arch taxonomy that ships before any kernel runs. |
+| **[5 · Vulkan vs ROCm, head to head](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/level-5-vulkan-vs-rocm.md)** | A senior engineer or researcher. | The tradeoff table: portability vs native speed, the per-dispatch tax, what each path can and cannot do today, and how to choose for a card and workload. |
+
+Each rung ends with a nav footer linking its neighbours and back here.
+
+## How to read it
+
+- **Just want it to work?** Read **Level 1**, then **Level 2** — what a backend is and how to select one.
+- **Writing a backend?** **Level 2** is the contract; **Level 3** and **Level 4** are two worked implementations of it, one portable and one native.
+- **Choosing AMD hardware?** **Level 5** is the decision page — read it after **Level 3** and **Level 4** so the tradeoffs have something concrete to attach to.
+- **Doing research?** **Level 5** names the open edges; the "What is proven" section below says exactly which numbers exist and which do not.
+
+## What is proven, and what is not
+
+**Vulkan is shipped and witnessed on real AMD silicon.** The full SmolLM2-135M forward
+pass runs on an **AMD Radeon RX 7600** (RDNA3 / gfx1102, 8 GB) through the native Vulkan
+loader, reaching **numerical parity** with the CPU reference: argmax-exact greedy decode,
+prefill-logit cosine = 1.0. It is **not** fast — still roughly **60× slower than
+llama.cpp**, from per-dispatch CPU/driver overhead, a known and fixable architectural
+limit, not a numeric defect. The measured record is `docs/benchmarks/VULKAN-AMD-RESULTS.md`.
+
+**ROCm is written, and it has run on AMD silicon — once, and not on this host.** Three different
+things are true here, and the ladder keeps them apart. The device-architecture taxonomy in
+`internal/compute/rocm_arch.go` is shipped **and unit-witnessed on any host** — it classifies
+every supported AMD target (`gfxNNNN`) as GCN5 / CDNA1-3 / RDNA1-3 and returns the canonical
+`hipcc --offload-arch` token. The rest of the backend — `rocm_backend.go`, `rocm_kv.go`,
+`rocm_kernels.hip`, and a 1,455-line test file — is **in the tree, and it has been compiled and
+run on real AMD hardware**: `docs/tickets/native-rocm-backend/TICKET-01.md:64` records the
+functional witness on 2026-09-10, HIP 7.2 on a `gfx1151` part, required-device tests passing
+without skips. What it has **not** done is run on *this* dev host, which has no AMD GPU and no
+`hipcc` — every one of those files carries `//go:build linux && rocm && cgo`, so a default
+`go build ./...` skips them and the run is not reproducible here. And **no ROCm throughput number
+exists**: correctness on one card is not a speed measurement, and the four acceptance bullets that
+need measurement remain open in `internal/compute/ROCM-C002-NOTES.md`. The ladder never invents a
+ROCm number: where a rung needs one, it says the figure is unmeasured, not that it is small or
+large.
+
+## The shape of the stack
+
+```
+   ┌────────────────────────────────────────────────┐
+   │  device backends  (Approx — argmax-exact)      │
+   │   cuda      vulkan      rocm (silicon-run)     │
+   └───────────────────────┬────────────────────────┘
+                           │  Register / Lookup / Pick
+  ═════════════════════════╪═════════════════════════  ← the HAL seam
+                           │  compute.Backend (whole-op methods)
+   ┌───────────────────────┴────────────────────────┐
+   │  cpu-ref  (Reference — the correctness oracle) │
+   └────────────────────────────────────────────────┘
+```
+
+The seam is the whole design. Above it, a backend implements whole operations — `MatMul`,
+`BatchedMatMul`, `Attention`, `Argmax` — and registers itself; below it, the forward loop
+calls those operations and never knows which machine answered. The interface is
+`internal/compute/compute.go:450`, the correctness classes `internal/compute/compute.go:279`,
+the registration verbs `internal/compute/compute.go:639`,
+`internal/compute/compute.go:661`, `internal/compute/compute.go:673`. Vulkan registers at
+`internal/compute/vulkan.go:214` from its `init()` at `internal/compute/vulkan.go:171`;
+ROCm at `internal/compute/rocm_backend.go:57` from its `init()` at
+`internal/compute/rocm_backend.go:47`.
+
+## See also
+
+- [The explainers index](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/README.md) — every ladder and single-page explainer, indexed by what you already know.
+- [Hardware portability](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md) — the HAL-seam explainer this ladder extends.
+- [The inference ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/inference/README.md) — the sibling ladder: what the forward pass *is*, before this one asks where it runs. Read it first if "the loop that turns a prompt into the next token" is not yet concrete.
+- [The caching ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/README.md) — the structural precedent: another subject written five times, once per reader.
+- [Multi-GPU tensor parallelism](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/multi-gpu-tensor-parallelism.md) — when one device is not enough and the seam must span ranks.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the vocabulary.
+- [Vulkan AMD results](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/VULKAN-AMD-RESULTS.md) — the measured RX 7600 record cited above.
+- [Vulkan on Linux](https://github.com/anthony-chaudhary/fak/blob/main/docs/compute/vulkan-linux.md) — building and running the Vulkan backend on a Linux host.
+- [The Vulkan host backend](https://github.com/anthony-chaudhary/fak/blob/main/docs/architecture/vulkan-host-backend.md) — the architecture note behind the Vulkan path.
+
+*[Full ladder (README)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/README.md) · next → [Level 1 — Why not just the CPU?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/accelerators/level-1-why-not-just-cpu.md)*
+
+---
+
+# `docs/explainers/caching/README.md`
+
+> Source: `docs/explainers/caching/README.md`
+
+---
+title: "The fak caching ladder: five guides, five audiences"
+description: "fak's caching stack explained five times, each rung for a different reader: from Level 1 (what is a cache?) up to Level 5 (the caching frontier)."
+slug: caching-ladder
+keywords:
+  - fak caching guide
+  - prompt cache explained
+  - managed cache
+  - KV cache
+  - cache economics
+  - caching for AI agents
+  - beginner caching guide
+  - advanced caching guide
+date: 2026-07-10
+---
+
+# The fak caching ladder
+
+> **What this is.** The same subject — how fak caches so a long, stop-start agent
+> session stays cheap — written **five times**, once for each kind of reader. Each rung
+> is pitched at both a human audience *and* a model/agent capability tier: a newcomer or
+> a small 8B agent is served at Level 1; a frontier / `fable`-tier reader is served at
+> Level 5. Pick your rung, or climb the whole ladder.
+
+Caching in fak spans two very different layers — the **provider's prompt cache** that
+fak *steers* on the API wire, and the **kernel-owned KV cache** fak *owns* when it runs
+the model itself. A single flat page either loses the beginner or bores the expert. This
+ladder splits the difference: each rung assumes exactly what the one below it taught.
+
+## The five rungs
+
+| Level | Who it's for | What you'll get |
+|---|---|---|
+| **[1 · What is caching?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/level-1-what-is-caching.md)** | A newcomer, or a small/8B agent that needs the one-screen version. No jargon. | What a prompt cache is, why it matters, what to type, how to tell it helped. |
+| **[2 · Managed cache in practice](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/level-2-managed-cache-in-practice.md)** | A competent dev or mid-tier agent running `fak manage -- claude`. | `--managed-cache on\|off\|auto`, the defaults, Pro/Max headroom, how to verify. |
+| **[3 · Cache economics & the wire](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/level-3-cache-economics-and-the-wire.md)** | A senior engineer / capable agent who wants the mechanism and the money. | Sliding window vs 1h tier, the read/write multipliers, byte-exact prefix, provider matrix. |
+| **[4 · The kernel-owned KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/level-4-kernel-kv-cache.md)** | A platform engineer / strong agent running the model in-kernel. | Addressable KV cache, bit-exact span eviction, prefix cloning, WITNESSED vs OBSERVED accounting. |
+| **[5 · The caching frontier](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/caching/level-5-the-caching-frontier.md)** | A `fable`-tier reader / researcher who wants the SOTA and the open problems. | vCache enablement, SOTA optimizations, cross-provider futures, the honest open edges. |
+
+## How to read it
+
+- **Just want it to work?** Read **Level 1**, then **Level 2**, and stop. That's the
+  whole user-facing story.
+- **Operating a fleet / paying the bill?** **Level 3** is where the economics live.
+- **Running the model yourself?** **Level 4** is the kernel layer; **Level 5** is where
+  it's going.
+
+Each rung ends with a nav footer linking its neighbours and back here.
+
+## See also
+
+- [What is fak's managed cache?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-managed-cache.md) — the original plain-English
+  managed-cache page; Level 2 is its canonical successor.
+- [Addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache.md) · [KV cache for agentic context](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/kv-cache-agentic-context.md) — the kernel-owned layer Level 4 builds on.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the vocabulary.
+
+---
+
+# `docs/explainers/hardware-isa/README.md`
+
+> Source: `docs/explainers/hardware-isa/README.md`
+
+---
+title: "The hardware instruction-set ladder: five rungs down to silicon"
+description: "The instruction sets a machine executes, and the software layers that carry your code down to them, explained five times with fak as the worked example."
+slug: hardware-isa-ladder
+keywords:
+  - what is an instruction set
+  - instruction set architecture explained
+  - SIMD explained
+  - AVX-512 vs NEON
+  - PTX and SASS explained
+  - tensor core mma.sync
+  - how a GPU driver works
+  - SPIR-V explained
+  - beginner computer architecture guide
+  - advanced instruction set guide
+date: 2026-11-18
+---
+
+# The hardware instruction-set ladder
+
+> **In one breath:** A processor only understands a fixed list of tiny commands. That
+> list is its instruction set. Your Go code is not on that list, so something must
+> translate it. This ladder follows that translation all the way down.
+
+**One line:** the instruction set is the contract between software and silicon — the
+complete, frozen vocabulary a given chip will execute — and every layer between your
+source file and that chip exists to turn your intent into words the chip already knows.
+
+> **Audience.** Five readers, one per rung. Rung 1 assumes nothing beyond "I have written
+> a program." Rung 5 assumes you are comfortable with roofline reasoning and want the
+> honest edges. Each rung assumes exactly what the one below it taught, so you can start
+> at the bottom and climb, or drop in at the rung that matches what you already know.
+
+## Why does this subject need a ladder?
+
+fak runs a language model's forward pass itself, in-process. That forward pass is, at the
+bottom, an enormous number of multiply-and-add operations over quantized integers. The
+same arithmetic can execute on a laptop CPU, an Apple laptop's ARM cores, an NVIDIA GPU,
+an AMD integrated GPU, or a phone. Each of those is a different machine with a different
+instruction set, and fak reaches all of them through one interface.
+
+That is exactly the situation where a single flat page fails. A newcomer who does not yet
+know what an instruction *is* drowns in `VPMADDWD` before they learn why anyone cares. A
+senior engineer who already knows what a tensor core is gets bored by the analogy. The
+ladder splits the difference: five rungs, five audiences, one subject.
+
+## The five rungs
+
+| Level | Who it's for | What you'll get |
+|---|---|---|
+| **[1 · What is an instruction set?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-isa/level-1-what-is-an-instruction-set.md)** | A student or new grad. You have written code; you have never thought about what the chip does with it. | What an instruction is, why a chip has a fixed list of them, and the four-layer journey from your source file to a voltage. |
+| **[2 · One instruction, many numbers](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-isa/level-2-simd-one-instruction-many-numbers.md)** | A competent developer. You know what a loop is and you have heard the word "SIMD". | How one instruction operates on 16 or 32 numbers at once, why quantized inference is a dot-product problem, and how fak's AVX-512 and NEON kernels stay bit-identical to the scalar reference. |
+| **[3 · The GPU instruction set](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-isa/level-3-the-gpu-isa-ptx-sass-and-tensor-cores.md)** | A platform or systems engineer. You have written or read CUDA. | Why a GPU has *two* instruction sets, what `mma.sync` and `cp.async` actually ask the hardware to do, and why the same source compiles to different machine code per chip. |
+| **[4 · How the ISA reaches silicon](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-isa/level-4-how-the-isa-reaches-silicon.md)** | A senior engineer. You want the whole stack, not the arithmetic. | The full driver path: Go to cgo to a static library to a vendor runtime to a kernel driver to the chip, plus the shader path where the driver compiles your code at runtime. |
+| **[5 · Why the ISA is not the whole story](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-isa/level-5-why-the-isa-is-not-the-whole-story.md)** | A researcher or a `fable`-tier reader. You want the limits and the open edges. | Why knowing the instruction set does not predict speed, what the roofline says instead, and which claims fak has actually witnessed. |
+
+## How to read it
+
+- **Never thought about hardware?** Read **Rung 1**, then **Rung 2**, and stop. You will
+  know what an instruction set is and why it decides how fast a model runs.
+- **Writing or reading kernels?** **Rung 3** is the GPU instruction set; **Rung 4** is
+  how it gets there.
+- **Deciding what to believe?** **Rung 5** is the honest accounting.
+
+Each rung ends with a nav footer linking its neighbours and back here. Every rung carries
+a checkpoint you answer yourself before moving on.
+
+## The one loop that makes this stick
+
+Do not memorize mnemonics. Use the same five-step loop on every rung:
+
+1. **Predict** one observable result in plain language.
+2. **Run** the command or read the code the rung points at.
+3. **Locate** the line that produced what you saw.
+4. **Adjust** exactly one input.
+5. **Rerun** and explain the difference.
+
+That loop is the same one [`LEARNING-PATH.md`](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) teaches for the
+whole of fak. This ladder is one subject run through it five times.
+
+## See also
+
+- [What is a CUDA kernel?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/what-is-a-cuda-kernel.md) — the depth ladder from Go to
+  silicon, and the three senses of the word "kernel". Rung 3 and Rung 4 build on it.
+- [Hardware portability](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md) — the HAL seam that lets one
+  forward pass run on four different machines. Rung 4 is the layer beneath it.
+- [The hardware matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md) — every platform fak has measured,
+  with the instruction sets and backends each one uses.
+- [The fak/DOS glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/glossary.md) — one-line definitions of the vocabulary.
+
+---
+
+*[Full ladder (README)](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-isa/README.md) · next → [Rung 1 — What is an instruction set?](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-isa/level-1-what-is-an-instruction-set.md)*
 
 ---
 
@@ -20725,7 +21026,7 @@ No benchmark result from Terminal-Bench 4 may be cited publicly in `README.md`, 
 
 | Boundary | Current guarantee | Configuration | Evidence |
 |---|---|---|---|
-| **Capability floor** | A tool absent from the active policy's allow-list is denied before execution. | Select and review a policy manifest; [`examples/customer-support-readonly-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/customer-support-readonly-policy.json) is the read-only evaluation example. | The deterministic `fak preflight` check below exercises one denied and one allowed tool without a model. |
+| **Capability floor** | Under the shipped `default_open` posture, structural denies (deny list, self-modify globs, argument rules) and danger rules refuse a call before execution, and an unlisted tool is permitted. Under `fail_closed` (`fak guard --posture fail_closed`, or `"posture": "fail_closed"` in the manifest), only allow-listed tools run; any other tool is denied before execution. | Select and review a policy manifest; [`examples/customer-support-readonly-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/customer-support-readonly-policy.json) is the read-only evaluation example. | The deterministic `fak preflight` check below exercises one denied and one allowed tool without a model. |
 | **Containment / quarantine** | In `fak agent`, a result classified as secret-shaped, prompt injection, or poison is held out of model context and replaced by a stub pointer; page-in requires an explicit witness clear. | This shipped gate is automatic on the managed-agent path; its current trigger and page-in contract are itemized in [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). | Run the offline managed-agent proof in the [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md); do not generalize it to unmanaged clients or every backend. |
 | **Gateway / adjudication** | Tool calls routed through `fak agent` or the documented `fak` gateway cross the in-process gate; crash, timeout, and malformed-input failures deny rather than execute. | Start from [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md), select its production row, and keep the client on the documented path for that backend with the intended policy. An integration that bypasses `fak` is outside this guarantee. | The [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md) and repository tests are the public proof routes; a call that bypasses an advertised managed path is in scope below. |
 
@@ -22994,6 +23295,24 @@ upward/cross-tier import, so the layering can't silently erode.
 ### Pick your seam
 
 There are two registries, by where your optimization lives.
+
+**In tree or out of tree?** Every seam below accepts a leaf *inside* this
+repository. Only some can be reached from your own module, because Go forbids
+importing `internal/` from outside:
+
+| Where your code lives | Seams you can reach | How |
+|---|---|---|
+| In this repo (a leaf plus a pull request) | all of them | the rest of this section |
+| Your own module | the kernel-ABI seams re-exported by [`pkg/abi`](https://github.com/anthony-chaudhary/fak/blob/main/pkg/abi/abi.go) | import `pkg/abi`; worked driver in [`examples/extdriver`](https://github.com/anthony-chaudhary/fak/tree/main/examples/extdriver) |
+| Your own module | the improvement loop: your proposer, metric and search policy, judged by the same keep-bit as Gate 3 | import [`pkg/climb`](https://github.com/anthony-chaudhary/fak/blob/main/pkg/climb/climb.go); a complete outside hill-climb is [`pkg/climb/testdata/climbprobe`](https://github.com/anthony-chaudhary/fak/blob/main/pkg/climb/testdata/climbprobe/main.go) |
+| Your own module | device compute, lever, store, sandbox and pane seams | not yet — they are sealed under `internal/` |
+
+The current count is printed by a test. It also builds a probe under a foreign
+module path and fails if a kernel-ABI seam loses its export:
+
+```bash
+go test ./pkg/abi -run TestSeam -v   # seam reachability: N/M ...
+```
 
 **A. Device compute / quantization kernels → `internal/compute`** (the hardware
 abstraction layer, HAL). This is the seam for the most common research optimization:

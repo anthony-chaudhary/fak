@@ -1,6 +1,6 @@
 ---
 title: "What is a tokenizer, and why does it count?"
-description: "A total newcomer's guide to the program that turns your sentence into the numbers a model reads, and to the surprising fact that it learns its chunks by counting. No math, no code background. Level 1 of the fak tokenization ladder."
+description: "A newcomer's guide to the tokenizer: the program that turns your sentence into the numbers a model reads, and learns its chunks by counting."
 slug: what-is-a-tokenizer
 keywords:
   - what is a tokenizer

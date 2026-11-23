@@ -1,6 +1,6 @@
 ---
 title: "Level 1 — What is a buffer?"
-description: "The memory hierarchy with no math and no code: why a computer that can think fast still has to wait for its own numbers, and what a buffer is. The coat-check analogy, the desk analogy, and the one table that explains every slow program you will ever meet."
+description: "The memory hierarchy with no math and no code: why a fast computer still waits for its own numbers, and what a buffer is. Two everyday analogies."
 slug: memory-hierarchy-level-1
 keywords:
   - what is a buffer
@@ -15,6 +15,8 @@ date: 2026-11-18
 ---
 
 # Level 1 — What is a buffer?
+
+A buffer is a place where numbers wait between the step that produced them and the step that needs them. This page explains the memory hierarchy with no math and no code: why a computer that can think fast still has to wait for its own numbers.
 
 *You are on **Level 1 of 5** of the [fak memory-hierarchy ladder](README.md).*
 

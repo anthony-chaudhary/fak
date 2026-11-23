@@ -1,6 +1,6 @@
 ---
 title: "What to quantize, and what to leave alone"
-description: "Why some numbers survive aggressive rounding and others break the model, why the answer is about decision margins rather than magnitude, and why Keys and Values differ."
+description: "What to quantize: why some numbers survive aggressive rounding and others break the model, and why the answer is decision margins, not magnitude."
 slug: what-to-quantize
 keywords:
   - quantization sensitivity
@@ -16,6 +16,8 @@ date: 2026-11-18
 ---
 
 # What to quantize, and what to leave alone
+
+Quantization is storing a model's numbers in fewer bits, and not every number tolerates it equally. This page explains why some survive aggressive rounding and others break the model, why the answer is about decision margins rather than magnitude, and why Keys and Values differ.
 
 *You are on **Level 3 of 5** of the [mixed-precision ladder](README.md).*
 

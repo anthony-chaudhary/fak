@@ -1,6 +1,6 @@
 ---
 title: "How inference works: a five-rung ladder (fak as the worked example)"
-description: "The same subject — how a language model turns your prompt into the next token — explained five times, each rung pitched at a different reader. Start at Level 1 (what is a token?) and climb to Level 5 (what changes at scale). Every claim is pinned to a real file in this repository."
+description: "How inference works: a language model turning your prompt into the next token, explained five times, from 'what is a token?' to what changes at scale."
 slug: inference-ladder
 keywords:
   - how inference works

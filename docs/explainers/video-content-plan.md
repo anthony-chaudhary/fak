@@ -1,6 +1,6 @@
 ---
 title: "Video explainer plan — getting the initial fak/fleet points across"
-description: "How to turn the existing fak explainers into short video content using the video tooling across the sibling repos (openclaw video_generate, hermes-agent ascii-video for brand/narration/captions, deer-flow structured prompts, sglang self-hosted backend, ffmpeg), without letting generated b-roll overstate measured results."
+description: "A plan to turn the fak explainers into short video content with existing video tooling, without letting generated b-roll overstate measured results."
 slug: video-content-plan
 date: 2026-06-19
 status: plan

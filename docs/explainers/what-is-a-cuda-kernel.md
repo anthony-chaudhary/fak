@@ -1,6 +1,6 @@
 ---
-title: "What is a CUDA kernel? (And why \"kernel\" means three things in an agent-kernel repo)"
-description: "A from-scratch disambiguation of the word every reader trips on: the OS-metaphor agent kernel (fak's reference monitor), the HPC compute kernel (which arithmetic a matmul runs through), and the literal CUDA kernel (__global__ code executing on the GPU) — what a .cu file actually looks like, the depth ladder from header file to silicon, and the four-part test for when going deeper is worth it."
+title: "What is a CUDA kernel? The three meanings of kernel in fak"
+description: "A CUDA kernel is __global__ code running on the GPU. Kernel also means fak's agent kernel and the HPC compute kernel; this page separates all three."
 slug: what-is-a-cuda-kernel
 keywords:
   - what is a CUDA kernel

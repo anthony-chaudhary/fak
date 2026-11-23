@@ -1,6 +1,6 @@
 ---
-title: "What a saved token is worth: one multiplier, two axes, and its six names"
-description: "Turning a token fak avoided paying for into an honest dollar comes down to one number — the 0.1x cache-read price. This is the plain-English account of that number: the two ways it saves you money, the identity that keeps the dollar figure honest, and why the same 0.1 shows up in the code under six different names."
+title: "What a saved token is worth: one multiplier, two axes, six names"
+description: "What a saved token is worth comes down to one number, the 0.1x cache-read price: the two ways it saves money and the identity that keeps it honest."
 slug: what-a-saved-token-is-worth
 keywords:
   - saved token value

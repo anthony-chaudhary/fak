@@ -1,6 +1,6 @@
 ---
 title: "Agent runtime: category, ownership, interfaces, and proof"
-description: "fak is the operator-controlled agent-runtime boundary for cache and context, model routing, tool authority, memory, observability, and native inference; this map separates that category from its Fused Agent Kernel architecture and shows current interfaces."
+description: "fak is the operator-controlled agent-runtime boundary for cache, context, routing, tool authority, memory, and native inference. A map of its interfaces."
 slug: agent-runtime
 keywords:
   - fak agent runtime

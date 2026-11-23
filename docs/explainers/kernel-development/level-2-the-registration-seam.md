@@ -1,6 +1,6 @@
 ---
 title: "Level 2 — The registration seam: where does my code attach?"
-description: "Rung 2 of the kernel-development ladder: the plug-in gate. A new idea is a new package plus one Register*() call — never an edit to the frozen spine — and the file-tree disjointness that lets two workers build in parallel without colliding."
+description: "The registration seam of kernel development: a new idea is a new package plus one Register*() call, never an edit to the frozen spine."
 slug: kernel-development-level-2
 keywords:
   - registration seam
@@ -16,6 +16,8 @@ date: 2026-11-18
 ---
 
 # Level 2 — The registration seam: where does my code attach?
+
+The registration seam is where new code attaches to fak's kernel: a new idea is a new package plus one `Register*()` call, never an edit to the frozen spine. File-tree disjointness is what lets two workers build in parallel without colliding.
 
 *You are on **Level 2 of 6** of the [kernel-development ladder](README.md).*
 

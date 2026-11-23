@@ -1,6 +1,6 @@
 ---
 title: "Level 3 — Prove correct: the correctness gate"
-description: "Rung 3 of the kernel-development ladder: how a new kernel earns the right to ship by declaring a correctness class (Reference or Approx) and passing a deterministic witness the harness re-runs — model proposes, test disposes."
+description: "How a new kernel earns the right to ship: declare a correctness class (Reference or Approx) and pass a deterministic witness the harness re-runs."
 slug: kernel-development-level-3
 keywords:
   - kernel correctness gate
@@ -16,6 +16,8 @@ date: 2026-11-18
 ---
 
 # Level 3 — Prove correct: the correctness gate
+
+The correctness gate is how a new kernel earns the right to ship: it declares a correctness class, Reference or Approx, and passes a deterministic witness the harness re-runs. The model proposes; the test disposes.
 
 *You are on **Level 3 of 6** of the [kernel-development ladder](README.md).*
 

@@ -5,6 +5,8 @@ description: "The L400 performance stage explains cache reuse, addressable evict
 
 # L400 — The Performance Core: cache reuse, addressable eviction, and the scaling laws
 
+L400 is the performance stage of the fak learning path: cache reuse, addressable eviction, scaling laws, and the labs that verify them.
+
 **Stage 4 of the path** · prev: [L300 — The Security Core](security-core.md) · next: [L500 — Serving, Integration, and the In-Kernel Model](serving-integration.md) · back to the [overview and L100–L200](../../LEARNING-PATH.md)
 
 **Read:** [`docs/explainers/code-linting-at-the-kernel.md`](../explainers/code-linting-at-the-kernel.md)

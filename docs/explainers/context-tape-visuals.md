@@ -1,6 +1,6 @@
 ---
 title: "The context tape: one visual, any trajectory, anywhere"
-description: "fak's clearest one-glance picture — a row per agent (or per turn, or per RSI cycle), each a bar whose coloured segments are drawn to scale — extracted from the live demo into a portable, source-agnostic renderer. Point it at a real Claude Code session and watch that session's context assemble; emit it from an RSI loop as a keep/revert ladder; drop the standalone SVG into a README, a docs page, or a course. One renderer, many sources."
+description: "The context tape is fak's one-glance picture of a trajectory: a row per agent or turn, coloured segments drawn to scale, rendered from any session source."
 slug: context-tape-visuals
 keywords:
   - agentic context

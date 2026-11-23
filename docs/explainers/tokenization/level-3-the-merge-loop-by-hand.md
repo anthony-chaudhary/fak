@@ -1,6 +1,6 @@
 ---
 title: "The merge loop, by hand: a naive oracle and a fast twin"
-description: "The BPE merge algorithm written out in full, twice: the obvious O(n squared) version kept as a test oracle, and the incremental linked-list-plus-heap version that actually runs. Level 3 of the fak tokenization ladder."
+description: "The BPE merge loop written out twice: the obvious O(n squared) version kept as a naive oracle, and the fast incremental twin that actually runs."
 slug: the-merge-loop-by-hand
 keywords:
   - BPE algorithm explained

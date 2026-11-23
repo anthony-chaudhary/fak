@@ -1,6 +1,6 @@
 ---
 title: "Tool refusal is feedback, not task completion"
-description: "General continuation contract learned from Pi and fak guard: preserve the denied effect, make refusal legible, and resume the model at the harness turn boundary with a bound."
+description: "Tool refusal is feedback: preserve the denied effect, make the refusal legible, and resume the model at the harness turn boundary with a bound."
 ---
 
 # Tool refusal is feedback, not task completion

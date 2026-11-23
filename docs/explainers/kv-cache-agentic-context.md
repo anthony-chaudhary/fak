@@ -1,6 +1,6 @@
 ---
 title: "How the KV Cache Changes as Agentic Context Grows"
-description: "Appending tool output does not break the KV cache — that is the easy case. Hit rate erodes from latency-eviction and head-mutation, and it matters far more for agents than chat because of the input:output ratio."
+description: "Appending tool output does not break the KV cache. Hit rate erodes from latency-eviction and head-mutation, which matters far more for agents than chat."
 slug: kv-cache-agentic-context
 keywords:
   - KV cache
@@ -15,6 +15,8 @@ date: 2026-06-17
 ---
 
 # How the KV Cache Changes as Agentic Context Grows
+
+The KV cache is the saved attention state that lets a model skip re-reading a prompt it has already seen. Appending tool output does not break it; hit rate erodes from latency-eviction and head-mutation, and that matters far more for agents than for chat.
 
 **Short answer:** Appending a tool result to the conversation does *not*, by itself, break the KV cache — prefix caching is built for append-only growth and handles it well. What actually erodes the hit rate in agent loops is (1) **eviction during tool latency** (your cached prefix is thrown out while a tool runs for seconds to minutes) and (2) **head-mutation** — any change ahead of the stable part of the context (summarization, an injected timestamp, a changing tool list, reordering, unstable serialization). A changed tool *result* does not silently serve a stale answer either: the new result tokens are literally different, so the prefix matches only up to that point and the suffix is recomputed. The reason it matters so much more for agents than for chat is the **input:output ratio** — agents re-send a huge transcript to read against a few generated tokens, so the same cache discounts most of the bill.
 

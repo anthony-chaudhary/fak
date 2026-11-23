@@ -17,6 +17,8 @@ date: 2026-11-18
 
 # The evidence boundary
 
+The evidence boundary is the line between a measured number, a modeled one, and code that exists but is never called. This page applies it to every precision claim in the stack.
+
 *You are on **Level 5 of 5** of the [mixed-precision ladder](README.md).*
 
 > **In one breath:** A stack can measure a number, model it, or design it

@@ -1,6 +1,6 @@
 ---
 title: "SRAM and the kernel's own scratch: the fastest tier"
-description: "Level 3 of the fak memory-hierarchy ladder: the on-chip scratchpad a compute unit owns — registers, CUDA __shared__ and extern __shared__ shared memory, __launch_bounds__ occupancy, the __ldg read-only path, L2 promotion hints, and the Go-side pooled scratch in the CPU reference backend."
+description: "SRAM is the on-chip scratch a compute unit owns: registers, CUDA shared memory, launch-bounds occupancy, the read-only path, and fak's pooled scratch."
 slug: level-3-sram-and-the-kernels-own-scratch
 keywords:
   - cuda shared memory
@@ -15,6 +15,8 @@ date: 2026-11-18
 ---
 
 # SRAM and the kernel's own scratch
+
+SRAM is the fastest memory tier: the on-chip scratchpad a compute unit owns. This page covers registers, CUDA `__shared__` memory, `__launch_bounds__` occupancy, the `__ldg` read-only path, L2 promotion hints, and the Go-side pooled scratch in the CPU reference backend.
 
 *You are on **Level 3 of 5** of the [fak memory-hierarchy ladder](README.md).*
 

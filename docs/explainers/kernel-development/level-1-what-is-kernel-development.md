@@ -1,6 +1,6 @@
 ---
 title: "Level 1 — What is kernel development?"
-description: "Rung 1 of the kernel-development ladder: the newcomer's rung. The word \"kernel\" means three different machines in this repo; this page pins each one, then says precisely what kernel development is as a practice — changing the code the kernel walks, without forking the spine."
+description: "The word kernel means three different machines in this repo. This page pins each one, then says what kernel development is as a practice."
 slug: kernel-development-level-1
 keywords:
   - what is kernel development
@@ -16,6 +16,8 @@ date: 2026-11-18
 ---
 
 # Level 1 — What is kernel development?
+
+Kernel development is the practice of changing the code fak's kernel walks without forking its spine. The word "kernel" means three different machines in this repository, and this page pins each one first.
 
 *You are on **Level 1 of 6** of the [kernel-development ladder](README.md).*
 

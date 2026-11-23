@@ -1,6 +1,6 @@
 ---
 title: "What fak Is Not — the Honest Boundary"
-description: "fak fronts vLLM, SGLang, or llama.cpp to make the agent loop cheaper and longer-running — governing the tool call on the same seam. It does not replace them for raw tokens/sec; the limits, volunteered plainly, are the point."
+description: "fak fronts vLLM, SGLang, or llama.cpp to make the agent loop cheaper and longer-running. It is not a replacement for their raw tokens/sec."
 slug: what-fak-is-not
 keywords:
   - fak is not a serving engine

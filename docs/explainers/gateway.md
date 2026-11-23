@@ -1,6 +1,6 @@
 ---
 title: "The Gateway: the kernel-adjudicated wire in front of your agent"
-description: "fak serve is the gateway runtime — one long-lived server that fronts the single in-process fak kernel over MCP and OpenAI- and Anthropic-compatible HTTP, so an agent in any language routes its tool calls through the syscall boundary. Every wire request gets the same verdict the kernel renders in-process (the network seam is not a bypass), and a call that fails adjudication is dropped fail-closed. Names the wires, the responsibilities, and the defaults."
+description: "fak serve is the gateway runtime: one server fronting the in-process fak kernel over MCP and OpenAI- and Anthropic-compatible HTTP, adjudicating each call."
 slug: gateway
 keywords:
   - agent gateway

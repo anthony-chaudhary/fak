@@ -1,6 +1,6 @@
 ---
 title: "Two Runtimes, One Binary: Gateway vs Agent Runtime vs Client"
-description: "\"Put fak in front of your agent\" hides three roles the one binary plays: the gateway runtime that governs model traffic (fak serve), the agent application runtime that hosts and runs the loop (fak serve --native), and the client that a harness becomes when you wrap it (fak manage). serve and guard are not alternatives or layers — they are a runtime and a client. This is the naming that unblocks the first decision: what do I even run?"
+description: "One fak binary plays three roles: the gateway runtime (fak serve), the agent application runtime (fak serve --native), and the client (fak manage)."
 slug: runtime-vs-client
 keywords:
   - agent runtime

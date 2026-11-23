@@ -1,6 +1,6 @@
 ---
 title: "Level 3 — Vulkan: how it actually works"
-description: "The Vulkan compute path in fak end to end: instance, device, queue, SPIR-V shaders, command buffers, the byte-level admission check, and where the per-dispatch tax comes from."
+description: "The Vulkan compute path in fak end to end: instance, device, queue, SPIR-V shaders, command buffers, byte-level admission, and the per-dispatch tax."
 slug: accelerators-level-3
 keywords:
   - vulkan compute explained
@@ -14,6 +14,8 @@ date: 2026-11-18
 ---
 
 # Level 3 — Vulkan: how it actually works
+
+Vulkan is a cross-vendor GPU API, and fak uses its compute path end to end: instance, device, queue, SPIR-V shaders, command buffers, a byte-level admission check, and a per-dispatch tax this page accounts for.
 
 *You are on **Level 3 of 5** of the [fak accelerator ladder](README.md).*
 

@@ -1,6 +1,6 @@
 ---
 title: "The Tool Call Is a Syscall"
-description: "The one-page mental model behind fak: an OS kernel never trusts a user program's word that a write is safe — the syscall crosses a boundary the program does not control. fak does the same to the LLM. The model proposes a tool call; the kernel adjudicates it before anything happens. Model proposes, kernel disposes."
+description: "The mental model behind fak: a tool call is a syscall. The model proposes it and the kernel adjudicates it before anything happens."
 slug: tool-call-is-a-syscall
 keywords:
   - tool call
@@ -16,6 +16,8 @@ date: 2026-07-02
 ---
 
 # The Tool Call Is a Syscall
+
+A tool call is a syscall: the model proposes it, and the fak kernel adjudicates it before anything happens. An OS kernel never trusts a user program's word that a write is safe, and fak applies the same boundary to the LLM.
 
 > **TL;DR:** an operating system never asks a program to promise it will behave —
 > every dangerous action must cross into the kernel, where the program has no vote.

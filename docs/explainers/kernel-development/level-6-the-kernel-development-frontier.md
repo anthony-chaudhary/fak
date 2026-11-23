@@ -1,6 +1,6 @@
 ---
 title: "Level 6 — The kernel-development frontier: what is still open"
-description: "Rung 6 of the kernel-development ladder: the honest edge. Which seams are frozen and which are not, which gates are blocking and which are advisory, and what the repo does NOT yet prove about kernel development — read against the SHIPPED / SIMULATED / STUB honesty ledger."
+description: "The kernel-development frontier: which seams are frozen, which gates are blocking or advisory, and what the repo does not yet prove."
 slug: kernel-development-level-6
 keywords:
   - kernel development frontier
@@ -15,6 +15,8 @@ date: 2026-11-18
 ---
 
 # Level 6 — The kernel-development frontier: what is still open
+
+The kernel-development frontier is the honest edge of the practice: which seams are frozen and which are not, which gates are blocking and which are advisory, and what the repository does not yet prove.
 
 *You are on **Level 6 of 6** of the [kernel-development ladder](README.md).*
 

@@ -17,6 +17,8 @@ date: 2026-11-18
 
 # Number formats, from fp32 to 4-bit: the format zoo
 
+A number format is a rule for packing a value into a fixed count of bits. This page explains what fp32, fp16, bf16, fp8, int8, and 4-bit actually are, what each can represent, and how a 4-bit number is packed and unpacked.
+
 *You are on **Level 2 of 5** of the [fak mixed-precision ladder](README.md).*
 
 > **In one breath:** Numbers come in different widths. Some split their bits

@@ -1,6 +1,6 @@
 ---
-title: "Why the instruction set is not the whole story: the honest limits of ISA knowledge"
-description: "Knowing the instruction set does not predict speed. This rung explains the memory wall, the roofline, and the five things besides the ISA that decide how fast a kernel runs, with fak's own measured 0.95x as the worked example."
+title: "Why the instruction set is not the whole story: the limits of ISA"
+description: "Knowing the instruction set does not predict speed: the memory wall, the roofline, and five other things that decide how fast a kernel runs."
 slug: level-5-why-the-isa-is-not-the-whole-story
 keywords:
   - instruction set limits

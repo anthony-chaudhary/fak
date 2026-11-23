@@ -1,6 +1,6 @@
 ---
 title: "The Agent Virtual Filesystem"
-description: "The filesystem tier of fak's OS analogy, named. An agent says 'file' and 'memory' for six different things — the host block device, the file tree it is allowed to see, the read/query surface, its scratchpad, its durable memory, and the KV cache. This page separates them, draws the line each is confused with, and places fak: the layer that manages an agent's context as addressable, cache-backed storage — cheap to reuse across long sessions — and, on the same seam, the reference monitor that mediates it, not the box that provides it."
+description: "An agent says 'file' and 'memory' for six different things. This page separates them and places fak: context managed as addressable, cache-backed storage."
 slug: agent-virtual-filesystem
 keywords:
   - agent virtual filesystem

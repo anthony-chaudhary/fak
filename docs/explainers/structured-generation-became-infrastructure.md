@@ -1,6 +1,6 @@
 ---
 title: "Structured generation didn't die — it became infrastructure"
-description: "Structured generation looks like a quiet topic, but it didn't disappear: it was absorbed into structured outputs, tool calling, MCP, provider-native schema modes, and engine guided decoding. Where the mechanism went, why it feels quieter, and why fak's job is not producing valid JSON but adjudicating whether a valid candidate is allowed to act."
+description: "Structured generation became infrastructure: structured outputs, tool calling, MCP, guided decoding. fak adjudicates whether valid output may act."
 slug: structured-generation-became-infrastructure
 keywords:
   - structured generation

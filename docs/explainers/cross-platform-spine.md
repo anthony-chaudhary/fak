@@ -1,6 +1,6 @@
 ---
 title: "The cross-platform spine: one agent kernel from IoT to hyperscaler"
-description: "Why the same fak kernel is the invariant spine across the whole deployment spectrum — IoT, edge, laptop, hyperscaler — the way Linux is one kernel under an Android phone and a datacenter. The hardware changes; the workload shape and the invariants do not."
+description: "Why the same fak kernel is the cross-platform spine from IoT and edge to laptop and hyperscaler: hardware changes; workload shape and invariants do not."
 slug: cross-platform-spine
 keywords:
   - cross-platform agent kernel

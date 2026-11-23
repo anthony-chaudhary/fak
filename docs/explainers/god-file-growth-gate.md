@@ -1,6 +1,6 @@
 ---
 title: "The god-file growth gate: a ratchet, not a sweep"
-description: "A monolith is never written in one commit — it accretes one line at a time, faster than anyone pays it down, because nothing refuses the next line. Hermes' gateway/run.py reached 20,320 lines that way. fak's scorecard names the debt line (1500/file, 200/function); GOD_FILE_GROWTH turns the doctrine preventive — a CI ratchet that grandfathers today's offenders at-size and refuses new growth. Files stay firm at 1500 (aligned with the file-only sibling gate); functions block loose at 400, and a bounded slack band lets a grandfathered offender absorb an ordinary edit — so the surface stays bounded without false-blocking a plausible change to already-large code."
+description: "A monolith accretes a line at a time because nothing refuses the next line. The god-file growth gate is a CI ratchet that grandfathers and refuses growth."
 slug: god-file-growth-gate
 keywords:
   - god file

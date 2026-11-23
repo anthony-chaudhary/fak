@@ -1,6 +1,6 @@
 ---
 title: "Level 2 — The forward pass as a sequence of buffer moves"
-description: "Follow one token through fak's real Go forward pass and name the buffer each step touches: the embedding gather, the per-layer hidden state, the final norm, the logits head. The forward pass is not a formula, it is a schedule of moves."
+description: "Follow one token through fak's Go forward pass and name the buffer each step touches: embedding gather, per-layer hidden state, final norm, logits."
 slug: memory-hierarchy-level-2
 keywords:
   - forward pass explained
@@ -15,6 +15,8 @@ date: 2026-11-18
 ---
 
 # Level 2 — The forward pass as a sequence of buffer moves
+
+The forward pass is a schedule of buffer moves, not a formula. This page follows one token through fak's real Go forward pass and names the buffer each step touches: the embedding gather, the per-layer hidden state, the final norm, and the logits head.
 
 *You are on **Level 2 of 5** of the [fak memory-hierarchy ladder](README.md).*
 

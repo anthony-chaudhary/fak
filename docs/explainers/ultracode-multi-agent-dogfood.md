@@ -1,6 +1,6 @@
 ---
-title: "Ultracode: a concurrent agent fleet as an operational mode on fak's multi-agent substrate"
-description: "Defines the operational discipline and honest concurrency metric behind Ultracode, then locates the newer fak ultracode command as a front door over the canonical orchestration plan and limited launcher rather than a new kernel primitive."
+title: "Ultracode: a concurrent agent fleet as an operational mode on fak"
+description: "Ultracode is an operational discipline and honest concurrency metric for an agent fleet, with fak ultracode as a front door over orchestration."
 ---
 
 # Ultracode: a concurrent agent fleet as an operational mode

@@ -1,6 +1,6 @@
 ---
 title: "Linting Agent Code at the Kernel"
-description: "When an agent writes code, who checks it before it lands? fak already adjudicates every tool call, so a write that produces broken code is checkable at the same boundary. codelint adds language-server packs to the kernel: route each file to the pack that owns its extension, report the parse/compile errors, and feed them back to the model so it self-corrects."
+description: "fak adjudicates every tool call, so broken code is checkable at the same boundary: codelint routes each file to a language pack and feeds errors back."
 slug: code-linting-at-the-kernel
 keywords:
   - language server

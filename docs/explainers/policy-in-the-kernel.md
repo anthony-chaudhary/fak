@@ -1,6 +1,6 @@
 ---
 title: "The Policy Runs Inside the Kernel"
-description: "Most agent safety bolts a recognizer onto the outside of the loop — a hook, a sidecar, an LLM judge — that the model can talk past and that fails open when it breaks. fak puts the permission check on the same code path as the tool call, in one address space, with no process to talk past. The floor ships default-open, but its provable-refusal rungs hold regardless of posture. This is what 'the tool call is a syscall' actually means."
+description: "Most agent safety bolts a recognizer outside the loop. fak runs the policy check inside the kernel, on the same code path as the tool call."
 slug: policy-in-the-kernel
 keywords:
   - reference monitor

@@ -1,6 +1,6 @@
 ---
 title: "Pipeline parallelism: cutting the layer stack across workers"
-description: "Your model does not fit on one machine. The layer stack is the natural place to cut it: ForwardBand runs a contiguous band of layers, PipelineStage gives each worker one band, and StageTransport carries the hidden state across the boundary. The split is not an approximation — it is the same computation, and the repo proves it bit-exact. Level 3 of the fak inference ladder."
+description: "Pipeline parallelism cuts the layer stack across workers: ForwardBand runs a band of layers, StageTransport carries the hidden state, proven bit-exact."
 slug: pipeline-parallelism
 keywords:
   - pipeline parallelism explained
@@ -16,6 +16,8 @@ date: 2026-11-18
 ---
 
 # Pipeline parallelism
+
+Pipeline parallelism is splitting a model across workers by cutting its layer stack: `ForwardBand` runs a contiguous band of layers, `PipelineStage` gives each worker one band, and `StageTransport` carries the hidden state across the boundary. The split is the same computation, and the repository proves it bit-exact.
 
 *You are on **Level 3 of 5** of the [fak inference ladder](README.md).*
 

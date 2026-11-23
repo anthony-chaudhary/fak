@@ -1,6 +1,6 @@
 ---
 title: "Change Data Capture for Agents — fak's Change Feeds in CDC Terms"
-description: "fak already implements the Change Data Capture pattern family — a hash-chained change log, cursor-drained change feeds, a transactional outbox, and fold-to-read-model projections — over agent, cache, and session state. It is a change SOURCE for agent work, not a database-replication tool."
+description: "fak implements the Change Data Capture pattern family (hash-chained change log, cursor-drained feeds, outbox, projections) over agent and cache state."
 slug: change-data-capture-for-agents
 keywords:
   - change data capture

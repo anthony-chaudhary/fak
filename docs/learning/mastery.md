@@ -5,6 +5,8 @@ description: "The L600 mastery stage covers benchmark honesty, proof discipline,
 
 # L600 — Mastery: benchmarks, honesty discipline, and extending the kernel
 
+L600 is the mastery stage of the fak learning path: benchmark honesty, proof discipline, kernel extension, and the final hands-on checkpoint.
+
 **Stage 6 of the path** · prev: [L500 — Serving, Integration, and the In-Kernel Model](serving-integration.md) · next: [The shipped-surface appendix](appendix-shipped-surface.md) · back to the [overview and L100–L200](../../LEARNING-PATH.md)
 
 **Read:** [`docs/proofs/gateway.md`](../proofs/gateway.md)

@@ -1,6 +1,6 @@
 ---
 title: "The tokenizer frontier: how you prove a tokenizer is right"
-description: "Three independent oracles, the circularity trap they close, streaming decode, and the parts of tokenization nobody has solved. Level 5 of the fak tokenization ladder."
+description: "The tokenizer frontier: three independent oracles, the circularity trap they close, streaming decode, and the unsolved parts of tokenization."
 slug: the-tokenizer-frontier
 keywords:
   - tokenizer correctness

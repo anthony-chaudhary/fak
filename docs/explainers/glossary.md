@@ -1,6 +1,6 @@
 ---
 title: "The fak/DOS Glossary: 23 Terms in One Line Each"
-description: "Plain one-line definitions of the vocabulary a newcomer trips on — addressable KV cache, bit-exact eviction, prefix-cache discount, verdict, capability floor, quarantine, syscall boundary, fail-closed, witness, lease, refusal reason, recall re-verification, change data capture, gateway runtime, agent application runtime, client, embed, forward pass, layer loop, pipeline parallelism, tensor parallelism, expert parallelism, collective — each linked to its full explainer."
+description: "Plain one-line definitions of the fak and DOS glossary terms a newcomer trips on, from addressable KV cache to expert parallelism, each linked onward."
 slug: glossary
 keywords:
   - fak glossary
@@ -58,12 +58,12 @@ name — this page is the naming.
 
 ## The model's own execution
 
-- **[Forward pass](inference/level-1-what-is-inference.md)** — running the weights over your input to produce a next-token prediction: one token id in, one logit vector out, then the chosen token is appended and fed back in.
-- **[Layer loop](inference/level-2-the-layer-loop.md)** — the stack of identically shaped layers a hidden state walks through, each an attention sublayer plus an MLP sublayer wrapped in pre-norm and residual, all reading and writing one shared residual stream.
-- **[Pipeline (layer) parallelism](inference/level-3-pipeline-parallelism.md)** — splitting the layer *stack* across workers so a model that does not fit on one machine can be served across many; a hidden-state tensor crosses each stage boundary, and the split is bit-exact rather than approximate.
-- **[Tensor parallelism](inference/level-4-tensor-and-expert-parallelism.md)** — splitting a *single* layer's matmuls across ranks; a collective runs *inside* the layer, so the result is reassociated rather than bit-exact. The architecture reference is [multi-GPU tensor parallelism](multi-gpu-tensor-parallelism.md).
-- **[Expert parallelism](inference/level-4-tensor-and-expert-parallelism.md)** — the MoE counterpart: experts are partitioned across ranks, the router is replicated, and one `AllReduceSum` combines the per-rank partials.
-- **[Collective](inference/level-4-tensor-and-expert-parallelism.md)** — the four cross-rank primitives (`AllReduceSum`, `AllGather`, `ReduceScatter`, `AllToAll`) that a parallel forward is built from, with two pinned identities relating them.
+- **[Forward pass](inference-parallelism/level-1-what-is-inference.md)** — running the weights over your input to produce a next-token prediction: one token id in, one logit vector out, then the chosen token is appended and fed back in.
+- **[Layer loop](inference-parallelism/level-2-the-layer-loop.md)** — the stack of identically shaped layers a hidden state walks through, each an attention sublayer plus an MLP sublayer wrapped in pre-norm and residual, all reading and writing one shared residual stream.
+- **[Pipeline (layer) parallelism](inference-parallelism/level-3-pipeline-parallelism.md)** — splitting the layer *stack* across workers so a model that does not fit on one machine can be served across many; a hidden-state tensor crosses each stage boundary, and the split is bit-exact rather than approximate.
+- **[Tensor parallelism](inference-parallelism/level-4-tensor-and-expert-parallelism.md)** — splitting a *single* layer's matmuls across ranks; a collective runs *inside* the layer, so the result is reassociated rather than bit-exact. The architecture reference is [multi-GPU tensor parallelism](multi-gpu-tensor-parallelism.md).
+- **[Expert parallelism](inference-parallelism/level-4-tensor-and-expert-parallelism.md)** — the MoE counterpart: experts are partitioned across ranks, the router is replicated, and one `AllReduceSum` combines the per-rank partials.
+- **[Collective](inference-parallelism/level-4-tensor-and-expert-parallelism.md)** — the four cross-rank primitives (`AllReduceSum`, `AllGather`, `ReduceScatter`, `AllToAll`) that a parallel forward is built from, with two pinned identities relating them.
 
 ## Related glossaries
 

@@ -1,6 +1,6 @@
 ---
 title: "What Tuned SOTA Serving Optimizations Mean in fak Benchmarks"
-description: "What tuned SOTA means in fak benchmarks: KV cache, batching, quantization, paged attention — and which mechanisms fak owns natively versus uses as explicit external references."
+description: "What tuned SOTA means in fak benchmarks: KV cache, batching, quantization, paged attention, and which optimizations fak owns natively vs references."
 ---
 
 # SOTA Serving Optimizations — What "Tuned" Actually Means

@@ -1,6 +1,6 @@
 ---
 title: "The fak caching ladder: five guides, five audiences"
-description: "One subject — fak's caching stack — explained five times, each rung pitched at a different reader and model/agent capability tier. Start at Level 1 (what is a cache?) and climb to Level 5 (the caching frontier)."
+description: "fak's caching stack explained five times, each rung for a different reader: from Level 1 (what is a cache?) up to Level 5 (the caching frontier)."
 slug: caching-ladder
 keywords:
   - fak caching guide

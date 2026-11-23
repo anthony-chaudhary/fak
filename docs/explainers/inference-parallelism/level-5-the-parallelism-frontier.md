@@ -1,6 +1,6 @@
 ---
-title: "The parallelism frontier: what is witnessed, what is not, and where the edges are"
-description: "Levels 1-4 taught the mechanisms. This rung is the honest fence: a table of what each test actually pins, a plain statement of what is NOT witnessed (no measured speedup, no device collective), and the open edges named as questions. Level 5 of the fak inference ladder."
+title: "The parallelism frontier: what is witnessed and what is not"
+description: "The honest fence on inference parallelism: what each test pins, what is not witnessed (no measured speedup, no device collective), and the open edges."
 slug: the-parallelism-frontier
 keywords:
   - parallelism frontier
@@ -14,6 +14,8 @@ date: 2026-11-18
 ---
 
 # The parallelism frontier
+
+The parallelism frontier is the boundary between what fak's inference parallelism tests actually prove and what they do not. This page tabulates what each test pins, states plainly what is not witnessed (no measured speedup, no device collective), and names the open edges as questions.
 
 *You are on **Level 5 of 5** of the [fak inference ladder](README.md).*
 

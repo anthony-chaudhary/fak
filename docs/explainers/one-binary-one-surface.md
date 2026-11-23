@@ -1,6 +1,6 @@
 ---
 title: "One binary is the whole agent-serving surface"
-description: "fak collapses the multi-process agent-serving stack — API surface, audit, and auth, plus the capability gate and result containment that ride the same seam — into one static Go binary, laptop to fleet."
+description: "fak collapses the multi-process agent-serving stack (API surface, audit, auth, capability gate, result containment) into one static Go binary."
 ---
 
 # One binary is the whole surface — laptop to fleet

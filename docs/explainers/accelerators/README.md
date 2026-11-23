@@ -1,6 +1,6 @@
 ---
 title: "The fak accelerator ladder: five rungs from the CPU to Vulkan and ROCm"
-description: "One subject — how fak runs its in-kernel forward pass on a GPU — explained five times, from a first CPU-vs-GPU question up to a head-to-head of Vulkan and ROCm for AMD hardware."
+description: "How fak runs its in-kernel forward pass on a GPU, explained five times: from a first CPU-vs-GPU question up to a head-to-head of Vulkan and ROCm on AMD."
 slug: accelerators-ladder
 keywords:
   - fak accelerator ladder
@@ -15,6 +15,8 @@ date: 2026-11-18
 ---
 
 # The fak accelerator ladder
+
+The fak accelerator ladder is one subject, how fak runs its in-kernel forward pass on a GPU instead of a CPU, explained five times for five kinds of reader.
 
 > **What this is.** The same subject — how fak's in-kernel forward pass runs on a GPU
 > instead of a CPU — written **five times**, once for each kind of reader. Each rung

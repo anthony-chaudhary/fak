@@ -1,6 +1,6 @@
 ---
 title: "Why fak, now: the market moved from writing code to checking it"
-description: "Agent iteration collapsed from days to minutes, so the bottleneck migrated downstream: review throughput, verification, and trust now cap what agent fleets ship. The market offers two binaries - gate every step by hand, or just trust the model - and both fail at fleet scale. fak is the third option: a runtime where you define what you trust and the kernel proves the rest."
+description: "Why fak, now: agent iteration collapsed to minutes, so review and verification cap what fleets ship. The market moved from writing code to checking it."
 slug: why-fak-the-market-moment
 keywords:
   - agentic development

@@ -1,6 +1,6 @@
 ---
 title: "Level 1 — Why not just the CPU?"
-description: "A CPU is built to do one hard thing at a time; a language model is millions of identical easy things. Here is the arithmetic, the memory wall, and why fak still keeps a CPU path."
+description: "A CPU does one hard thing at a time; a language model is millions of identical easy things. The arithmetic, the memory wall, and why fak keeps a CPU path."
 slug: accelerators-level-1
 keywords:
   - why use a gpu for llm inference
@@ -13,6 +13,8 @@ date: 2026-11-18
 ---
 
 # Level 1 — Why not just the CPU?
+
+A CPU is built to do one hard thing at a time, while a language model is millions of identical easy things, which is why inference runs on accelerators. This page gives the arithmetic, the memory wall, and why fak still keeps a CPU path.
 
 *You are on **Level 1 of 5** of the [fak accelerator ladder](README.md).*
 

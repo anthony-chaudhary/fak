@@ -1,6 +1,6 @@
 ---
 title: "Level 2 — The HAL seam: how a backend plugs in"
-description: "Where a new GPU backend attaches in fak, the compute.Backend contract it must satisfy, and why adding one is a registration rather than an edit to the forward loop."
+description: "Where a new GPU backend attaches in fak, the compute.Backend contract it must satisfy, and why adding one is a registration, not a forward-loop edit."
 slug: accelerators-level-2
 keywords:
   - compute HAL seam
@@ -13,6 +13,8 @@ date: 2026-11-18
 ---
 
 # Level 2 — The HAL seam: how a backend plugs in
+
+The HAL seam is the one place a new GPU backend attaches in fak: a backend satisfies the `compute.Backend` contract and registers itself, so adding one is a registration rather than an edit to the forward loop.
 
 *You are on **Level 2 of 5** of the [fak accelerator ladder](README.md).*
 

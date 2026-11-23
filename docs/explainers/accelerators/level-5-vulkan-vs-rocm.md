@@ -1,6 +1,6 @@
 ---
 title: "Level 5 — Vulkan vs ROCm, head to head"
-description: "The honest head-to-head between fak's cross-vendor Vulkan backend (measured on AMD silicon) and its AMD-native ROCm backend (correctness-witnessed on AMD silicon once, never measured for speed, not reproducible on a CPU-only host): the real axes of difference, the per-dispatch tax, and the open problems."
+description: "An honest head-to-head of fak's cross-vendor Vulkan backend and its AMD-native ROCm backend: the real axes of difference, the dispatch tax, open problems."
 slug: accelerators-level-5
 keywords:
   - vulkan vs rocm
@@ -13,6 +13,8 @@ date: 2026-11-18
 ---
 
 # Level 5 — Vulkan vs ROCm, head to head
+
+Vulkan is fak's cross-vendor GPU backend, measured on AMD silicon; ROCm is its AMD-native backend, correctness-witnessed once and never measured for speed. This page compares them on the real axes of difference and names the open problems.
 
 *You are on **Level 5 of 5** of the [fak accelerator ladder](README.md).*
 

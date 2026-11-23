@@ -1,6 +1,6 @@
 ---
-title: "The compounding benefits of a saved call: why one avoided tool call pays back four times, then again on the horizon"
-description: "fak's headline accounting prices one quantity — turns saved — four ways (tokens, dollars, latency). That undercounts. A single avoided or cheapened tool call discharges across four ORTHOGONAL budgets at once (local CPU, GPU/prefill, context window, wall-clock), and then a fifth effect compounds on top: the budget it returns extends how many EFFECTIVE calls the session can still make. This note formalizes both — the multi-axis discharge and the horizon multiplier — grounds every term in a real seam, and fences measured from modeled."
+title: "The compounding benefits of a saved tool call"
+description: "One avoided tool call discharges across four budgets at once (CPU, GPU prefill, context window, wall-clock), then extends the session's call horizon."
 slug: compounding-benefits-of-a-saved-call
 keywords:
   - avoided tool call

@@ -1,5 +1,5 @@
 ---
-title: "Model routing"
+title: "Model routing in fak: policy, support, and execution"
 description: "The current operator route for choosing fak model-routing policy, validating its support surface, and separating advisory decisions from execution."
 slug: routing
 keywords:

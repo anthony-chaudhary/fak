@@ -1,6 +1,6 @@
 ---
-title: "The frozen-trajectory cache cliff: why the prompt-cache hit rate is high, and the scaling laws that take it to 0%"
-description: "The high prompt-cache hit rate everyone quotes is purchased with a frozen, append-only trajectory. It is a prefix match, so it stays high only while the harness refuses to touch history. The moment the trajectory becomes flexible — or the workload gains per-turn tool density or cross-agent fan-out — the default cache decays toward 0%. With a runnable demonstrator and the measured ceiling from this machine."
+title: "The frozen-trajectory cache cliff: why hit rates fall to 0%"
+description: "A high prompt-cache hit rate is bought with a frozen, append-only trajectory. Flexible history, tool density, or fan-out decay the cache toward 0%."
 slug: frozen-trajectory-cache-cliff
 keywords:
   - prompt caching

@@ -1,6 +1,6 @@
 ---
 title: "The three stages: split, spell, merge"
-description: "The whole tokenization pipeline, end to end, with a worked example you can follow by hand: pre-tokenize the text, rewrite each piece as printable bytes, then merge by rank. Level 2 of the fak tokenization ladder."
+description: "The three stages of tokenization with a worked example to follow by hand: split the text, spell each piece as printable bytes, then merge by rank."
 slug: the-three-stages
 keywords:
   - tokenization pipeline

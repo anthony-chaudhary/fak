@@ -1,6 +1,6 @@
 ---
 title: "What is fak's managed cache? A plain-English guide"
-description: "fak managed cache is a family of caching levers — provider 5m prompt cache, star-anchor breakpoint placement, compaction shed, tool-prune, and the 1h-TTL upgrade — that lets an idle session re-enter cheap instead of re-paying. On Pro/Max the payoff is usage-limit headroom, delivered by the family's passive-side levers (the 1h tier is API-key-only in practice)."
+description: "fak's managed cache is a family of caching levers (provider prompt cache, breakpoint placement, compaction shed, tool-prune) that keep sessions cheap."
 slug: what-is-managed-cache
 keywords:
   - fak managed cache

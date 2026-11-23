@@ -1,6 +1,6 @@
 ---
 title: "Level 4 — ROCm: how it actually works"
-description: "AMD's native compute stack explained: HIP's CUDA-compatible reuse path, the shipped GCN/CDNA/RDNA device taxonomy, and why 64-lane vs 32-lane wavefronts decide your tuning."
+description: "AMD's native compute stack explained: HIP's CUDA-compatible reuse path, the GCN/CDNA/RDNA device taxonomy, and why wavefront width decides your tuning."
 slug: accelerators-level-4
 keywords:
   - rocm explained
@@ -14,6 +14,8 @@ date: 2026-11-18
 ---
 
 # Level 4 — ROCm: how it actually works
+
+ROCm is AMD's native compute stack. This page explains HIP's CUDA-compatible reuse path, the shipped GCN/CDNA/RDNA device taxonomy, and why 64-lane versus 32-lane wavefronts decide your tuning.
 
 *You are on **Level 4 of 5** of the [fak accelerator ladder](README.md).*
 

@@ -1,6 +1,6 @@
 ---
 title: "The fak inference ladder: five guides, five audiences"
-description: "One subject — how a transformer actually produces a token, and how fak splits that work across many workers — explained five times, each rung pitched at a different reader. Start at Level 1 (what is inference?) and climb to Level 5 (the parallelism frontier)."
+description: "How a transformer produces a token, and how fak splits that inference work across many workers, explained five times from first question to frontier."
 slug: inference-parallelism-ladder
 keywords:
   - fak inference guide

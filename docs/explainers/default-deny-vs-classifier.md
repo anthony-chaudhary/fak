@@ -1,6 +1,6 @@
 ---
 title: "Why a Capability Floor Beats a Classifier for Prompt Injection"
-description: "A classifier has to catch an attack to stop it, and it fails open when it's fooled or falls over. A capability floor stops the same attack without noticing it, because the provable dangers are refused by structure — the dangerous lever was never wired up. One injected prompt, two stacks, two outcomes."
+description: "A classifier must catch an attack to stop it and fails open when fooled. A capability floor refuses the provable dangers by structure, unnoticed."
 slug: default-deny-vs-classifier
 keywords:
   - prompt injection

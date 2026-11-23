@@ -1,6 +1,6 @@
 ---
 title: "Tensor and expert parallelism: splitting inside a layer"
-description: "Pipeline parallelism cuts the stack between layers. When one layer is still too big — or you want the layer itself to go faster — you cut inside it. Tensor parallelism shards a matmul (column-parallel, bit-exact; row-parallel, reassociated) and expert parallelism routes experts to ranks. Level 4 of the fak inference ladder."
+description: "When one layer is still too big, cut inside it: tensor parallelism shards a matmul across workers, and expert parallelism routes MoE experts to ranks."
 slug: tensor-and-expert-parallelism
 keywords:
   - tensor parallelism explained
@@ -14,6 +14,8 @@ date: 2026-11-18
 ---
 
 # Tensor and expert parallelism
+
+Tensor parallelism is splitting one matrix multiply across workers, and expert parallelism is routing a mixture-of-experts model's experts to different ranks. Both cut inside a layer, where pipeline parallelism cuts between layers.
 
 *You are on **Level 4 of 5** of the [fak inference ladder](README.md).*
 

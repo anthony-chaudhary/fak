@@ -1,6 +1,6 @@
 ---
 title: "The fak mixed-precision ladder: five guides, five audiences"
-description: "One subject, how a model stores its numbers, explained five times. From what a bit is, to the evidence boundary where measured claims end and modeled ones begin."
+description: "The mixed-precision ladder: how a model stores its numbers, explained five times, from what a bit is to where measured claims end and modeled begin."
 slug: mixed-precision-ladder
 keywords:
   - mixed precision explained

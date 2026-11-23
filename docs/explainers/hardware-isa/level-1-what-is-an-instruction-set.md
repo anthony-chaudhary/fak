@@ -1,6 +1,6 @@
 ---
-title: "What is an instruction set? A first look at the language your chip actually speaks"
-description: "A beginner's guide to the instruction set: what an instruction is, why a processor has a fixed list of them, and the four-layer journey from your source file to a voltage. Written for students and new grads, grounded in fak's real code."
+title: "What is an instruction set? The language your chip speaks"
+description: "A beginner's guide to the instruction set: what an instruction is, why a processor has a fixed list, and the four-layer journey from source to voltage."
 slug: level-1-what-is-an-instruction-set
 keywords:
   - what is an instruction set

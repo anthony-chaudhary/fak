@@ -1,6 +1,6 @@
 ---
 title: "The Status a Peer Can Trust: Verified Progress for In-Flight Agents"
-description: "Every A2A protocol standardizes how one agent reports its status to another — and every one of them ships that status as a self-report the reader is asked to believe. fak ships the opposite: a peer-readable run digest with no `claimed` field by construction, so an in-flight agent hands a successor only progress it can re-verify against git and the intent ledger."
+description: "Every A2A protocol ships status as a self-report. fak ships a status a peer can trust: a run digest with no claimed field, re-verifiable against git."
 slug: status-a-peer-can-trust
 keywords:
   - agent-to-agent

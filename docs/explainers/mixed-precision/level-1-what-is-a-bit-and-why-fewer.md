@@ -16,6 +16,8 @@ date: 2026-11-18
 
 # What is a bit, and why would you use fewer?
 
+A bit is the smallest unit of storage, and a model's numbers each take a fixed number of them. That width costs memory and time, which is why using fewer bits is the most-used lever in inference.
+
 *You are on **Level 1 of 5** of the [fak mixed-precision ladder](README.md).*
 
 > **In one breath:** A model is a huge pile of numbers. Each number takes some

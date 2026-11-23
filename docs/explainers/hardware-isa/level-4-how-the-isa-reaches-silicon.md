@@ -1,6 +1,6 @@
 ---
-title: "How the instruction set reaches silicon: the driver stack, layer by layer"
-description: "The full path from a Go function call to a voltage on a chip: cgo, a flat C ABI, a static library built offline by nvcc, a vendor runtime, a kernel-mode driver, and the silicon. Plus the shader path, where the driver compiles your code at run time."
+title: "How the instruction set reaches silicon: the driver stack"
+description: "The path from a Go function call to a voltage on a chip: cgo, a flat C ABI, a static library built by nvcc, a vendor runtime, a kernel driver, the silicon."
 slug: level-4-how-the-isa-reaches-silicon
 keywords:
   - how a GPU driver works

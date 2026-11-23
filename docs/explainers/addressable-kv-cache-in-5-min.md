@@ -1,6 +1,6 @@
 ---
 title: "The Addressable KV Cache in 5 Minutes"
-description: "A gentle on-ramp to fak's addressable KV cache: most caches only let you add to the end, fak lets you reach into the middle and remove one span — and prove the cache is bit-for-bit identical to one that never saw it."
+description: "A gentle on-ramp to fak's addressable KV cache: remove one span from the middle and prove the cache is bit-identical to one that never saw it."
 slug: addressable-kv-cache-in-5-min
 keywords:
   - KV cache

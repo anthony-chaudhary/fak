@@ -1,6 +1,6 @@
 ---
 title: "Why shape and dtype parity cannot establish loader correctness"
-description: "A GGUF tensor and fak's canonical tensor can agree on every dimension, every byte and the dtype while carrying different mathematical meanings. That is what broke Qwen3-Next decoding in #4273: blk.*.ssm_a stores -exp(A_log), fak's canonical tensor is A_log, and the forward applied exp twice. Shape checks, dtype checks and byte-count checks all passed. This page explains the defect class, why the obvious checks are structurally blind to it, and the semantic transform contract fak now declares for every non-identity external-to-canonical mapping."
+description: "A GGUF tensor can match fak's canonical tensor on shape, bytes, and dtype yet mean something else: why parity checks miss it, and the loader contract."
 slug: loader-semantic-transform-contracts
 keywords:
   - GGUF loader

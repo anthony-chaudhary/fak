@@ -1,6 +1,6 @@
 ---
 title: "Context control surfaces — the middle, the pins, and the audit gap"
-description: "A map of every lever an operator or the model has over fak's planned context view (the four-area 'middle'), what pins actually guarantee, and the one long-term-correct gap: pin outcomes are only reconciled at materialize time, so the dry-run preview can lie about the pinned region. Names real signatures across internal/ctxplan and cmd/fak."
+description: "A map of every lever over fak's planned context view, what pins actually guarantee, and the gap: pin outcomes are only reconciled at materialize time."
 ---
 
 # Context control surfaces — the middle, the pins, and the audit gap

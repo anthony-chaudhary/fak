@@ -1,6 +1,6 @@
 ---
 title: "The caching frontier: where prompt & KV caching is going"
-description: "Field guide to fak's cache frontier: SOTA serving optimizations, cross-engine cache capabilities, and the default-enablement backlog — honest about shipped vs planned."
+description: "Field guide to fak's cache frontier: SOTA serving optimizations, cross-engine cache capabilities, and the default-enablement backlog, shipped vs planned."
 slug: level-5-the-caching-frontier
 keywords:
   - cache frontier
@@ -15,6 +15,8 @@ date: 2026-07-10
 ---
 
 # The caching frontier
+
+The caching frontier is where prompt and KV caching are still moving: SOTA serving optimizations, cross-engine cache capabilities, and fak's default-enablement backlog, with shipped and planned kept apart.
 
 *You are on **Level 5 of 5** of the [fak caching ladder](README.md).*
 

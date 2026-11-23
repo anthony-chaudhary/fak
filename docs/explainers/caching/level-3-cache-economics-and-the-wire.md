@@ -1,6 +1,6 @@
 ---
-title: "Cache economics and the wire: read/write multipliers, break-even, and the 1h tier"
-description: "The money-and-bytes rung of the fak caching ladder: what a cache write vs read really costs, how many reuses pay a write back, the sliding TTL that resets on use, and how fak measures the realized saving."
+title: "Cache economics and the wire: multipliers, break-even, the 1h tier"
+description: "What a cache write vs read really costs, how many reuses pay a write back, the sliding TTL that resets on use, and how fak measures the realized saving."
 slug: level-3-cache-economics-and-the-wire
 keywords:
   - prompt cache economics
@@ -15,6 +15,8 @@ date: 2026-07-10
 ---
 
 # Cache economics and the wire
+
+Cache economics is the arithmetic of a prompt cache: a write costs more than a normal input token and a read costs far less, so the saving depends on how many reuses follow each write. This page covers the multipliers, the break-even, the sliding TTL, and how fak measures the realized saving.
 
 *You are on **Level 3 of 5** of the [fak caching ladder](README.md).*
 

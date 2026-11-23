@@ -1,6 +1,6 @@
 ---
 title: "fak explainer: how fak interfaces with hardware capacity limits"
-description: "fak's HAL lifts seven hardware-SHAPE assumptions; finite device CAPACITY is the eighth. The capacity-aware policy lives in the cachemeta plane; the physical allocators panic blind. This explains the two planes and the bridge between them."
+description: "fak's HAL lifts seven hardware-shape assumptions; finite device capacity is the eighth. The capacity policy plane, the allocators, and the bridge between."
 ---
 
 # How fak interfaces with hardware limits — capacity is the eighth assumption

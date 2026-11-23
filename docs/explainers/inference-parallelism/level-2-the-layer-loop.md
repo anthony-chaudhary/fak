@@ -1,6 +1,6 @@
 ---
-title: "The layer loop: what the model does between the embedding and the logits"
-description: "A transformer is a stack of N same-shaped layers. Each layer is an attention sublayer plus an MLP sublayer, each wrapped in a pre-norm and a residual. The residual stream is a shared bus every layer reads and writes. Level 2 of the fak inference ladder."
+title: "The layer loop: what a model does between embedding and logits"
+description: "A transformer is a stack of N same-shaped layers: the layer loop runs attention plus an MLP in each, wrapped in a pre-norm and a residual."
 slug: the-layer-loop
 keywords:
   - transformer layer explained
@@ -14,6 +14,8 @@ date: 2026-11-18
 ---
 
 # The layer loop
+
+The layer loop is the part of a transformer between the embedding and the logits: a stack of N same-shaped layers, each an attention sublayer plus an MLP sublayer wrapped in a pre-norm and a residual. The residual stream is a shared bus every layer reads and writes.
 
 *You are on **Level 2 of 5** of the [fak inference ladder](README.md).*
 

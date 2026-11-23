@@ -1,10 +1,12 @@
 ---
 title: "TensorRT-LLM vs SGLang: where fak fits"
-description: "An answer-first comparison of TensorRT-LLM and SGLang, plus deployment patterns for placing fak in front of either server or using fak's local in-process runtime."
+description: "An answer-first comparison of TensorRT-LLM and SGLang, plus deployment patterns for placing fak in front of either server or using fak's own runtime."
 last_reviewed: 2026-08-11
 ---
 
 # TensorRT-LLM vs SGLang: where fak fits
+
+TensorRT-LLM and SGLang are inference serving systems; fak is an agent runtime and policy gateway that can sit in front of either one. This page compares the two and shows where fak fits.
 
 **Audience:** inference engineers choosing where the fak boundary sits. **Prerequisite:** the native-inference goal and one serving-engine deployment.
 

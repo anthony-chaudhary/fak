@@ -1,6 +1,6 @@
 ---
 title: "The fak Fleet Benchmark Suite — Run the Five Headline Demos Yourself"
-description: "Five model-agnostic fleet benchmarks you can reproduce in minutes with `go run` — no GPU, no model weights, no API key: fan-out to 1024 sub-agents, a 50×50 turn-tax sweep, the turn-tax A/B + safety floor, RadixAttention cache hit rate, and context-changing token accounting. Every number traces to BENCHMARK-AUTHORITY."
+description: "Five model-agnostic fleet benchmarks you can reproduce in minutes with go run: no GPU, weights, or API key. Every number traces to BENCHMARK-AUTHORITY."
 ---
 
 # The fak Fleet Benchmark Suite — explore it yourself

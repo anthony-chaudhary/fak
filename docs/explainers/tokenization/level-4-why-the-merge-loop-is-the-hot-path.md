@@ -1,6 +1,6 @@
 ---
 title: "Why the merge loop is the hot path"
-description: "The quadratic cliff in naive BPE, why a long indented code block is the worst case, and how the incremental frontier turns it near-linear. With the repository's own benchmarks and the caching layer above them. Level 4 of the fak tokenization ladder."
+description: "Why the merge loop is the hot path: the quadratic cliff in naive BPE, the worst-case indented code block, and the near-linear incremental frontier."
 slug: why-the-merge-loop-is-the-hot-path
 keywords:
   - BPE performance

@@ -1,6 +1,6 @@
 ---
 title: "Context shedding: how fak trims a long session from the middle out"
-description: "Every turn, an agent re-sends its whole transcript. fak sheds the stale middle turns while keeping the cached head and your recent work, so the trimmed history stops costing you every turn. What it saves, what it doesn't, and how to read the number honestly."
+description: "An agent re-sends its whole transcript every turn. Context shedding trims stale middle turns while keeping the cached head and your recent work."
 slug: context-shedding
 keywords:
   - context shedding

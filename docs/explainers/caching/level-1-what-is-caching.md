@@ -1,6 +1,6 @@
 ---
 title: "What is caching? The one-screen version"
-description: "A prompt cache lets the AI provider remember the part of your conversation it has already seen, so each new turn is faster and cheaper. Level 1 of the fak caching ladder: no jargon, one analogy, one command."
+description: "A prompt cache lets the AI provider remember the part of your conversation it has already seen, so each new turn is faster and cheaper. No jargon."
 slug: what-is-caching
 keywords:
   - what is caching
@@ -13,6 +13,8 @@ date: 2026-07-10
 ---
 
 # What is caching?
+
+Caching is remembering work you have already done so you do not pay for it twice. A prompt cache lets the AI provider remember the part of your conversation it has already seen, so each new turn is faster and cheaper.
 
 *You are on **Level 1 of 5** of the [fak caching ladder](README.md).*
 

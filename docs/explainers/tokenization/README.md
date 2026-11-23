@@ -1,6 +1,6 @@
 ---
 title: "How tokenization works: a five-rung ladder (fak as the worked example)"
-description: "The same subject — how text becomes the numbers a model reads — explained five times, each rung pitched at a different reader. Start at Level 1 (what is a tokenizer?) and climb to Level 5 (the tokenizer frontier). Every claim is pinned to a real file in this repository."
+description: "How tokenization works: text becoming the numbers a model reads, explained five times, from 'what is a tokenizer?' to the tokenizer frontier."
 slug: tokenization-ladder
 keywords:
   - tokenization explained

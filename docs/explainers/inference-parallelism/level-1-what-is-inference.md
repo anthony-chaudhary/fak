@@ -1,6 +1,6 @@
 ---
 title: "What is inference? The one-screen version"
-description: "A language model is a big pile of numbers. Inference is running those numbers over your input to predict the next token, one token at a time, feeding each new token back in. Level 1 of the fak inference ladder: no ML background assumed, one analogy, one worked example you can do by hand."
+description: "A language model is a big pile of numbers. Inference is running those numbers over your input to predict the next token, one token at a time."
 slug: what-is-inference
 keywords:
   - what is inference
@@ -14,6 +14,8 @@ date: 2026-11-18
 ---
 
 # What is inference?
+
+Inference is running a language model's numbers over your input to predict the next token, one token at a time, feeding each new token back in. This page assumes no ML background and uses one analogy and one worked example you can do by hand.
 
 *You are on **Level 1 of 5** of the [fak inference ladder](README.md).*
 

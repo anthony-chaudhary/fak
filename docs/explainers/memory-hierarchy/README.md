@@ -1,6 +1,6 @@
 ---
 title: "The fak memory-hierarchy ladder: five guides, five audiences"
-description: "One subject — how bytes move through the memory hierarchy while a language model runs — explained five times, each rung pitched at a different reader. Start at Level 1 (what is a buffer?) and climb to Level 5 (host DRAM, offload, and the frontier). Every claim is pinned to a real file in this repository."
+description: "How bytes move through the memory hierarchy while a language model runs, explained five times: from 'what is a buffer?' to host DRAM and offload."
 slug: memory-hierarchy-ladder
 keywords:
   - memory hierarchy explained

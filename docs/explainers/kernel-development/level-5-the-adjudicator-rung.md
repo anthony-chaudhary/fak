@@ -1,6 +1,6 @@
 ---
 title: "Level 5 — The adjudicator rung: the other kernel"
-description: "Rung 5 of the kernel-development ladder: the same three-gate discipline applied to the security kernel. A new admission check is a rung in the verdict fold — the model proposes, the kernel disposes. Learn the real rung chain, the fold, and how to add a check that refuses a tool after N failures."
+description: "The three-gate kernel-development discipline applied to the security kernel: a new admission check is one adjudicator rung in the verdict fold."
 slug: kernel-development-level-5
 keywords:
   - adjudicator rung
@@ -16,6 +16,8 @@ date: 2026-11-18
 ---
 
 # Level 5 — The adjudicator rung: the other kernel
+
+An adjudicator rung is one admission check in the security kernel's verdict fold. This page applies the same three-gate discipline to that other kernel: the real rung chain, the fold, and how to add a check that refuses a tool after N failures.
 
 *You are on **Level 5 of 6** of the [kernel-development ladder](README.md).*
 

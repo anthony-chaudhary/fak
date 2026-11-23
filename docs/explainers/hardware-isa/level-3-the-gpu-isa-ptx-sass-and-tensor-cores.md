@@ -1,6 +1,6 @@
 ---
-title: "The GPU instruction set: PTX, SASS, and what a tensor core actually does"
-description: "Why a graphics processor has two instruction sets instead of one, how to read an mma.sync mnemonic piece by piece, what cp.async and ldmatrix ask the hardware to do, and why the same source compiles to different machine code for every chip."
+title: "The GPU instruction set: PTX, SASS, and what a tensor core does"
+description: "Why a GPU has two instruction sets, how to read an mma.sync mnemonic, what cp.async and ldmatrix ask of the hardware, and why machine code differs per chip."
 slug: level-3-the-gpu-isa-ptx-sass-and-tensor-cores
 keywords:
   - PTX vs SASS

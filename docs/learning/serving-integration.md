@@ -5,6 +5,8 @@ description: "The L500 serving stage connects gateway operation, agent integrati
 
 # L500 — Serving, Integration, and the In-Kernel Model
 
+L500 is the serving stage of the fak learning path: gateway operation, agent integrations, and the fak-native in-kernel model, taught through practical labs.
+
 **Stage 5 of the path** · prev: [L400 — The Performance Core](performance-core.md) · next: [L600 — Mastery](mastery.md) · back to the [overview and L100–L200](../../LEARNING-PATH.md)
 
 **Read:** [`docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](../notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md)

@@ -1,6 +1,6 @@
 ---
-title: "Context signal-to-noise: what provider-observed cache-hit % can't give you"
-description: "Provider-observed cache-hit % is a denominator artifact — it climbs toward 1.0 with session length alone, whether or not the resident context is any good (measured: 0.88 short → 0.99 long across 247 sessions, with 10× density spread at the same observed 99%). The number actually worth maximizing is whether the resident window equals the desired window. fak's ctxplan records the ground truth per turn (which resident spans the turn referenced vs left idle), and ComputeSignalNoise folds it into a token-weighted signal-to-noise ratio that is invariant to caching and to length — so a session can read OBSERVED provider cache-hit 0.99 and WITNESSED ctxplan S/N 0.30 at once, finally making the bloat legible."
+title: "Context signal-to-noise: what cache-hit % can't tell you"
+description: "Provider cache-hit % climbs with session length whether or not the context is any good. fak's ctxplan computes a token-weighted signal-to-noise instead."
 slug: context-signal-to-noise
 keywords:
   - context signal-to-noise

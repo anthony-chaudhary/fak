@@ -1,6 +1,6 @@
 ---
-title: "One instruction, many numbers: how SIMD works, and why it is most of the speed"
-description: "How a single instruction operates on 16, 32, or 64 numbers at once. Why quantized inference is a dot-product problem, how fak's AVX2, AVX-512 and NEON kernels work line by line, and why they are held bit-identical to a scalar reference."
+title: "SIMD: how one instruction operates on many numbers at once"
+description: "How one SIMD instruction operates on 16, 32, or 64 numbers at once, why quantized inference is a dot-product problem, and how fak's AVX and NEON kernels work."
 slug: level-2-simd-one-instruction-many-numbers
 keywords:
   - SIMD explained

@@ -1,6 +1,6 @@
 ---
 title: "The abstraction map — from your terminal to the silicon"
-description: "The end-to-end tour of fak's layers for a human operator: your starting points and work items at the top, the two front doors, the kernel, context and memory, serving and the in-kernel model, then the compute HAL and every hardware floor below it — with the one seam you touch at each level and the doc that teaches it."
+description: "The abstraction map is an end-to-end tour of fak's layers: front doors, the kernel, context and memory, serving, the compute HAL, and hardware below."
 slug: the-abstraction-map
 keywords:
   - abstraction map

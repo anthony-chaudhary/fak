@@ -5,6 +5,8 @@ description: "Builder route for fak cache reuse: preserve a provider prompt pref
 
 # Cache reuse: choose the layer and verify the effect
 
+Cache reuse in fak is a choice between two layers: preserving a provider's prompt-cache prefix, or using the kernel-owned KV cache. This page routes a builder to the right one and to the proof that it worked.
+
 **Audience:** the builder choosing how a fak-backed agent reuses shared setup across turns.
 
 fak keeps repeated setup reusable at the checkpoint between an agent and its model calls. The

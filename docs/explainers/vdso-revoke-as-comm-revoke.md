@@ -1,6 +1,6 @@
 ---
 title: "vdso.Revoke is the MPI_Comm_revoke analogue (invalidate-on-refutation)"
-description: "fak's shipped vdso.Revoke path is the integrity-direction eraser: a refuted witness evicts every entry admitted under it, bumps a monotone trust clock, refuses re-admission, and publishes to registered subscribers. It is the structural analogue of ULFM's MPI_Comm_revoke — with one load-bearing difference: the revoked unit is a cache witness, not a live communicator, so revocation can only ever turn a would-be hit into a miss. It can never strand live computation."
+description: "vdso.Revoke evicts every cache entry admitted under a refuted witness and refuses re-admission: the analogue of MPI_Comm_revoke for a cache witness."
 slug: vdso-revoke-as-comm-revoke
 keywords:
   - MPI_Comm_revoke

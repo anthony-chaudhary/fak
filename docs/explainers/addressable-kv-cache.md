@@ -1,6 +1,6 @@
 ---
-title: "Addressable KV Cache: What Production Actually Offers, and What It Doesn't"
-description: "Every production prefix cache — vLLM, SGLang, OpenAI, Anthropic — is append-only and prefix-addressed: reuse is a run from token 0, and a change at position N costs you everything after N. fak owns its KV cache as a kernel object, which lets it do one thing no shipped engine does: remove a tool result from the MIDDLE of a kept sequence, bit-identically to never having seen it. That is the underdiscussed half of 'addressable'."
+title: "Addressable KV cache: what production offers, and what it doesn't"
+description: "Production prefix caches are append-only and prefix-addressed. fak owns its KV cache as a kernel object and can evict a mid-sequence tool result bit-exactly."
 slug: addressable-kv-cache
 keywords:
   - KV cache

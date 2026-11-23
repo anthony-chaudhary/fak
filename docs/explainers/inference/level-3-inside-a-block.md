@@ -1,6 +1,6 @@
 ---
 title: "Inside one decoder block: the ~10 operations, and where each one lives"
-description: "Level 3 of the inference ladder. Level 2 showed the pipeline and said a block is 'normalize, attention, add, normalize, MLP, add'. This rung opens the block: the residual stream, RMSNorm, Q/K/V projection, GQA, RoPE, the causal mask and softmax, the output projection, the SwiGLU MLP, and the decode-path twin — each pinned to the real function in this repository, with a hand-computable attention step."
+description: "Inside one decoder block: the residual stream, RMSNorm, Q/K/V projection, GQA, RoPE, the causal mask and softmax, and the SwiGLU MLP, pinned to real code."
 slug: inside-a-decoder-block
 keywords:
   - transformer decoder block explained

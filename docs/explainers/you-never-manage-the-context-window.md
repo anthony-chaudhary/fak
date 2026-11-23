@@ -1,6 +1,6 @@
 ---
 title: "You Never Manage the Context Window"
-description: "The context window is the agent era's physical RAM, and in 2026 everyone is still writing overlay code by hand: humans decide when to /compact, agents are told not to read big files, sessions die of length. fak's doctrine is that context placement is a kernel job, not a user job — residency (which tokens are in the window) and warmth (which bytes are cached) are two projections of one placement decision the kernel owns. This page states the property, shows what is live on the default path today, and is honest about where fak is still only a referee."
+description: "You never manage the context window: placement is a kernel job. Residency and cache warmth are two projections of one decision fak's kernel owns."
 slug: you-never-manage-the-context-window
 keywords:
   - automatic context management

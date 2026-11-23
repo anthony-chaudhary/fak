@@ -1,6 +1,6 @@
 ---
-title: "Data residency & compliance — keep inference and data in-country behind one binary"
-description: "How fak's self-host-first, fail-closed, default-deny, audit-logged boundary maps to India's DPDP Act, China's PIPL/DSL/CSL, and Europe's GDPR + EU AI Act — an enforcement boundary you run on infrastructure you control. Not legal advice."
+title: "Data residency and compliance: keep inference and data in-country"
+description: "How fak's self-hosted, fail-closed, default-deny, audit-logged boundary maps to India's DPDP Act, China's PIPL, and Europe's GDPR. Not legal advice."
 ---
 
 # Data residency & compliance — inference and data stay where you put them

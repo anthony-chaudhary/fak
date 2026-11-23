@@ -1,6 +1,6 @@
 ---
 title: "Managed cache in practice: the flag, the default, the proof"
-description: "The operator's view of fak's managed cache: what --managed-cache on|off|auto does, why it defaults on through fleet launchers, and the three ways to see it working. Level 2 of the fak caching ladder."
+description: "The operator's view of fak's managed cache: what --managed-cache on|off|auto does, why it defaults on through fleet launchers, and how to see it working."
 slug: level-2-managed-cache-in-practice
 keywords:
   - fak managed cache
@@ -15,6 +15,8 @@ date: 2026-07-10
 ---
 
 # Managed cache in practice
+
+fak's managed cache is the set of defaults that keep a provider's prompt cache warm for you. This page is the operator's view: what `--managed-cache on|off|auto` does, why it defaults on through fleet launchers, and three ways to see it working.
 
 *You are on **Level 2 of 5** of the [fak caching ladder](README.md).*
 

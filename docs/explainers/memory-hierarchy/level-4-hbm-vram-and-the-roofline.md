@@ -1,6 +1,6 @@
 ---
 title: "Level 4 — HBM, VRAM, and the roofline"
-description: "Level 4 of the fak memory-hierarchy ladder, for the performance engineer: why decode is bandwidth-bound and prefill is compute-bound, what arithmetic intensity and the ridge point mean, why capacity and bandwidth are different questions, why quantization helps twice but not proportionally, the H2D/D2H/D2D transfer accounting fak keeps, and the unified-memory case where the copy disappears."
+description: "HBM, VRAM, and the roofline: why decode is bandwidth-bound and prefill is compute-bound, arithmetic intensity, the ridge point, and transfer accounting."
 slug: memory-hierarchy-level-4
 keywords:
   - hbm vs vram
@@ -15,6 +15,8 @@ date: 2026-11-18
 ---
 
 # Level 4 — HBM, VRAM, and the roofline
+
+The roofline is a model that says whether a kernel is limited by compute or by memory bandwidth. This page uses it to explain why decode is bandwidth-bound and prefill is compute-bound, why HBM/VRAM capacity and bandwidth are different questions, and what transfer accounting fak keeps.
 
 *You are on **Level 4 of 5** of the [fak memory-hierarchy ladder](README.md).*
 

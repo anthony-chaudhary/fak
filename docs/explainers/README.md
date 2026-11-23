@@ -1,6 +1,6 @@
 ---
 title: "The fak explainers: where to start, whatever you already know"
-description: "The entry point to fak's human educational docs. Eight question-driven ladders, each written five or six times for five or six different readers, plus the single-page explainers — indexed by what you already know rather than by topic."
+description: "The entry point to fak's educational docs: question-driven ladders written for five or six kinds of reader, plus single-page explainers."
 slug: explainers-index
 keywords:
   - fak explainers
@@ -15,6 +15,8 @@ date: 2026-11-18
 ---
 
 # The fak explainers
+
+The fak explainers are the project's educational docs: question-driven ladders, each written five or six times for different readers, plus single-page explainers, indexed by what you already know rather than by topic.
 
 > **What this is.** The entry point to the human educational docs in this repository.
 > Everything here teaches the same system — fak, an in-kernel inference and agent

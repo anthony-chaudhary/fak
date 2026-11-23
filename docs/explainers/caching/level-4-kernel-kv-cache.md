@@ -16,6 +16,8 @@ date: 2026-07-10
 
 # The kernel-owned KV cache
 
+The KV cache is the transformer's own memory of the tokens it has already processed, one level under the provider's prompt cache. This page covers prefix reuse, bit-exact span eviction, and how a vLLM sleep silently drops it.
+
 *You are on **Level 4 of 5** of the [fak caching ladder](README.md).*
 
 > **Audience.** Engineers who know the provider-level view from Levels 1–3 and want the

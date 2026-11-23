@@ -1,6 +1,6 @@
 ---
-title: "The hardware instruction-set ladder: five rungs from 'what is an instruction?' to silicon"
-description: "One subject — the instruction sets a machine actually executes, and the software layers that carry your code down to them — explained five times, from a first question about what an instruction even is up to the honest limits of what an instruction set can tell you. fak is the worked example throughout."
+title: "The hardware instruction-set ladder: five rungs down to silicon"
+description: "The instruction sets a machine executes, and the software layers that carry your code down to them, explained five times with fak as the worked example."
 slug: hardware-isa-ladder
 keywords:
   - what is an instruction set

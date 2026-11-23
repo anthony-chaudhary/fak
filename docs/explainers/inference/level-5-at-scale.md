@@ -1,6 +1,6 @@
 ---
-title: "What changes at scale: batching, quantization, MoE, and speculative decoding"
-description: "Level 5 of the inference ladder. Continuous batching, paged KV, quantization, mixture-of-experts, speculative decoding, sampling at scale, and tensor vs pipeline parallelism — each as what it changes, what it costs, and what it does not change. Ends with the honest open edges."
+title: "What changes at scale: batching, quantization, MoE, speculation"
+description: "What changes in inference at scale: continuous batching, paged KV, quantization, mixture-of-experts, and speculative decoding, with the cost of each."
 slug: inference-at-scale
 keywords:
   - LLM inference at scale

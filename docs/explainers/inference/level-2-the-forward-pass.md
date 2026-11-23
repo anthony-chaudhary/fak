@@ -1,6 +1,6 @@
 ---
 title: "The forward pass, one token at a time"
-description: "The whole inference pipeline, end to end, with a tiny example you can follow by hand: text to ids, ids to vectors, the layer loop, the LM head, and the pick. Level 2 of the fak inference ladder."
+description: "The forward pass end to end, with a tiny example to follow by hand: text to ids, ids to vectors, the layer loop, the LM head, and the pick."
 slug: the-forward-pass
 keywords:
   - forward pass explained

@@ -1,6 +1,6 @@
 ---
 title: "What is a token, and what is a model?"
-description: "A total newcomer's guide to what a language model actually receives when you type a sentence, and what it gives back. No math, no code background. Level 1 of the fak inference ladder."
+description: "A newcomer's guide to what a token is, what a language model receives when you type a sentence, and what it gives back. No math, no code."
 slug: what-is-a-token
 keywords:
   - what is a token

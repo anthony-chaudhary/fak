@@ -1,6 +1,6 @@
 ---
 title: "Level 4 — Prove faster: the keep-bit"
-description: "Rung 4 of the kernel-development ladder: how a correct kernel earns the right to land by clearing a non-forgeable keep-bit. A mechanical gate — not a reviewer's opinion — decides KEEP or REVERT from a measured witness, so a contributor cannot land a correct-but-slower kernel."
+description: "How a correct kernel earns the right to land: a mechanical, non-forgeable keep-bit decides KEEP or REVERT from a measured witness, not a reviewer."
 slug: kernel-development-level-4
 keywords:
   - non-forgeable keep-bit
@@ -17,6 +17,8 @@ date: 2026-11-18
 ---
 
 # Level 4 — Prove faster: the keep-bit
+
+The keep-bit is a mechanical, non-forgeable gate that decides KEEP or REVERT for a kernel from a measured witness. It is not a reviewer's opinion, so a contributor cannot land a correct-but-slower kernel.
 
 *You are on **Level 4 of 6** of the [kernel-development ladder](README.md).*
 

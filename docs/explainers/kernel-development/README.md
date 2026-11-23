@@ -1,6 +1,6 @@
 ---
 title: "The fak kernel-development ladder: six guides, six audiences"
-description: "One subject — the practice of changing fak's kernel — explained six times, each rung pitched at a different reader. Start at Level 1 (what is kernel development?) and climb to Level 6 (the frontier)."
+description: "The practice of changing fak's kernel, explained six times, each rung for a different reader: from 'what is kernel development?' up to the frontier."
 slug: kernel-development-ladder
 keywords:
   - kernel development guide

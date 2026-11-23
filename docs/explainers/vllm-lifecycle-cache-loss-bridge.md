@@ -5,6 +5,8 @@ description: "How fak bridges session dormancy to an upstream vLLM worker's slee
 
 # The vLLM lifecycle cache-loss bridge
 
+The vLLM lifecycle cache-loss bridge is how fak maps session dormancy onto an upstream vLLM worker's sleep, pause, and wake controls, with explicit evidence of what happened to the KV cache.
+
 *Bridging fak session dormancy to an upstream vLLM worker's sleep/pause/wake
 controls, with explicit evidence of what happened to the KV cache. Issue
 [#1730](https://github.com/anthony-chaudhary/fak/issues/1730); parents #1178,

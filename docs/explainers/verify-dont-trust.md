@@ -1,6 +1,6 @@
 ---
 title: "Verify, Don't Trust: What DOS Actually Checks"
-description: "A DOS primer for newcomers: a done-claim is checked against git, a refusal carries a reason from a closed vocabulary, a recalled memory is re-verified at read time — the three things the kernel re-checks instead of believing."
+description: "Verify, don't trust: DOS checks a done-claim against git, gives a refusal a closed-vocabulary reason, and re-verifies a recalled memory at read time."
 slug: verify-dont-trust
 keywords:
   - verify don't trust

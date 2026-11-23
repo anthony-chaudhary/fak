@@ -1,6 +1,6 @@
 ---
 title: "Long sessions: shed history, keep the cache hit"
-description: "Why a long Claude Code session gets expensive, why the obvious fix makes it worse, and how fak sheds old turns while keeping the provider's prompt-cache prefix byte-identical so the discount survives."
+description: "Why long sessions get expensive, why the obvious fix makes it worse, and how fak sheds old turns while keeping the prompt-cache prefix and its hit."
 ---
 
 # Long sessions: shed history, keep the cache hit
