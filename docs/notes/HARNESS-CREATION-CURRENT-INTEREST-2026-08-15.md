@@ -54,7 +54,7 @@ Several local gaps closed after the original collection window:
 
 - The loopback browser now runs a bounded real coding task through fak-native
   Read/Edit/focused-test/diff tools, persists its timeline across restart, and has a
-  captured [`gpt-5.6-sol` receipt](../_witnesses/harness-web-demo/LIVE-CODING-GPT-5.6-SOL-2026-08-15.md).
+  captured [`gpt-5.6-sol` receipt](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/harness-web-demo/LIVE-CODING-GPT-5.6-SOL-2026-08-15.md).
 - Four executable starters now cover read-only support, coding workspace, cited research,
   and incident operations; full composable extension remains #6796.
 - Released-asset clean-room automation now verifies checksum, extraction, user-owned

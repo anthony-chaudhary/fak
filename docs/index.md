@@ -241,7 +241,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 - **Session control and trajectory:** [Child-agent registration and lineage](session-child-registration.md), [Session lifecycle reconciliation](session-lifecycle-reconciliation.md), [Trajectory assurance receipt](trajectory-assurance.md), and [Workflow concepts: the operator's middle layer](workflow-concepts.md).
 - **Local application runtime:** [Local-app compute layer](local-app-compute-layer.md) explains the browser-to-daemon boundary, loopback security, offline behavior, and accelerator ownership; [job-apply migration runbook](local-app-job-apply-runbook.md) gives the shortest supported signed-desktop-app integration path.
 - **Tool-result and work accounting:** [Operate tool-result budgets safely](tool-result-budget-operations.md), [Work-accounting coverage](work-accounting-coverage.md), [Work delivery: recording is not readiness](work-delivery.md), [Work-done baselines](work-done-baselines.md), [Work-done history](work-done-history.md), [Work-done query contract](work-done-query.md), and [Work-done source provenance](work-done-sources.md).
-- **Captured read-backs and witnesses:** [Current task queue read-back](witnesses/task-queue-current.md) and [Issue 9020 — owned Metal session profile](_witnesses/issue-9020-metal-profile.md).
+- **Captured read-backs and witnesses:** [Current task queue read-back](witnesses/task-queue-current.md) and [Issue 9020 — owned Metal session profile](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-9020-metal-profile.md).
 
 ---
 
@@ -273,23 +273,23 @@ These links expose captured evidence and maintained scorecard/research clusters 
 
 These links expose captured evidence and maintained scorecard/research clusters to the documentation crawler without changing their content or scorecard coverage.
 
-- [armbench-caveman-native](_witnesses/armbench-caveman-native/README.md)
-- [armbench-caveman-passthrough](_witnesses/armbench-caveman-passthrough/README.md)
-- [caveman-pairwise-judge-v2](_witnesses/caveman-pairwise-judge-v2/README.md)
-- [issue-8308-qwen38-bf16](_witnesses/issue-8308-qwen38-bf16/README.md)
-- [issue-8311-qwen38-q5km](_witnesses/issue-8311-qwen38-q5km/README.md)
-- [issue-8360-qwen38-mac-metal](_witnesses/issue-8360-qwen38-mac-metal/README.md)
-- [issue-8504-temp-artifacts](_witnesses/issue-8504-temp-artifacts/README.md)
-- [issue-8544-open-witnessed-closure](_witnesses/issue-8544-open-witnessed-closure/README.md)
-- [issue-8621-qwen35-0.8b](_witnesses/issue-8621-qwen35-0.8b/README.md)
-- [issue-8622-qwen35-27b](_witnesses/issue-8622-qwen35-27b/README.md)
-- [issue-8629-qwen35-0.8b-valid-smoke](_witnesses/issue-8629-qwen35-0.8b-valid-smoke/README.md)
-- [issue-8630-qwen35-9b](_witnesses/issue-8630-qwen35-9b/README.md)
-- [issue-8819-qwen38-a100-roofline](_witnesses/issue-8819-qwen38-a100-roofline/README.md)
-- [issue-8968-qwen38-metal-control](_witnesses/issue-8968-qwen38-metal-control/README.md)
-- [issue-9044-q8-metal-residency](_witnesses/issue-9044-q8-metal-residency/README.md)
-- [issue-CHILD-qwen38-startup-bisect](_witnesses/issue-CHILD-qwen38-startup-bisect/README.md)
-- [qwen38-27b-2026-08-19](_witnesses/qwen38-27b-2026-08-19/README.md)
+- [armbench-caveman-native](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-caveman-native/README.md)
+- [armbench-caveman-passthrough](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-caveman-passthrough/README.md)
+- [caveman-pairwise-judge-v2](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/caveman-pairwise-judge-v2/README.md)
+- [issue-8308-qwen38-bf16](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8308-qwen38-bf16/README.md)
+- [issue-8311-qwen38-q5km](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8311-qwen38-q5km/README.md)
+- [issue-8360-qwen38-mac-metal](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8360-qwen38-mac-metal/README.md)
+- [issue-8504-temp-artifacts](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8504-temp-artifacts/README.md)
+- [issue-8544-open-witnessed-closure](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8544-open-witnessed-closure/README.md)
+- [issue-8621-qwen35-0.8b](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8621-qwen35-0.8b/README.md)
+- [issue-8622-qwen35-27b](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8622-qwen35-27b/README.md)
+- [issue-8629-qwen35-0.8b-valid-smoke](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8629-qwen35-0.8b-valid-smoke/README.md)
+- [issue-8630-qwen35-9b](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8630-qwen35-9b/README.md)
+- [issue-8819-qwen38-a100-roofline](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8819-qwen38-a100-roofline/README.md)
+- [issue-8968-qwen38-metal-control](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8968-qwen38-metal-control/README.md)
+- [issue-9044-q8-metal-residency](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-9044-q8-metal-residency/README.md)
+- [issue-CHILD-qwen38-startup-bisect](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-CHILD-qwen38-startup-bisect/README.md)
+- [qwen38-27b-2026-08-19](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/qwen38-27b-2026-08-19/README.md)
 - [lightgap-scorecard](lightgap-scorecard/README.md)
 - [ceilings](lightgap-scorecard/ceilings.md)
 - [dents](lightgap-scorecard/dents.md)

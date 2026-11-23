@@ -1,3 +1,8 @@
+---
+title: "Benchmark Infrastructure Session Summary"
+description: "Historical session summary for fak's early sweep-demo benchmark infrastructure. Its demorace speedup figures are unverified projections, not measurements."
+---
+
 # Benchmark Infrastructure Session Summary
 
 **Date:** 2025-06-19

@@ -1,3 +1,8 @@
+---
+title: "Sandbox tiering ladder and gym lifecycle spec"
+description: "Specification for sandboxing agent tool execution in fak: an L0-L2 isolation ladder, OCI/WASI/MCP contracts and the gym lifecycle invariants."
+---
+
 # Sandbox Tiering Ladder, Low-Ego OCI/WASI/MCP Contracts, and Gym Lifecycle Specification
 
 > **Status:** Approved Architectural Specification  

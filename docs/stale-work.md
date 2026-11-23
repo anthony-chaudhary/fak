@@ -116,4 +116,4 @@ Issue creation and launch remain independent gates so an operator can inspect th
 contracts before any worker starts.
 
 The working-spine proof is captured in
-[`docs/_witnesses/stale-work-live-2026-08-13.json`](_witnesses/stale-work-live-2026-08-13.json).
+[`docs/_witnesses/stale-work-live-2026-08-13.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/stale-work-live-2026-08-13.json).

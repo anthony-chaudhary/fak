@@ -1,3 +1,8 @@
+---
+title: "Benchmarking Documentation Index"
+description: "Index of fak's benchmark documentation: results, methodology, infrastructure and governance. Authoritative numbers live in BENCHMARK-AUTHORITY.md."
+---
+
 # Benchmarking Documentation Index
 
 > **Quick link:** The single source of truth for all benchmark numbers is

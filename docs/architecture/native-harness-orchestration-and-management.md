@@ -1,3 +1,8 @@
+---
+title: "Native Harness Orchestration & Management Architecture"
+description: "How fak orchestrates and governs external agent harnesses (OpenCode, Codex, Claude Code) as native subprocesses instead of through the fak guard wire proxy."
+---
+
 # Native Harness Orchestration & Management Architecture
 
 > **Authoritative Platform Architecture Specification**  

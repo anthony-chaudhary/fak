@@ -5,7 +5,7 @@
 > hooks (routing, fallback, prompt-cache cost) and agent-security demand hooks such
 > as MCP tool poisoning, the lethal trifecta, and least-privilege tool access.
 >
-> Updated: 2026-07-14T20:28:49Z
+> Updated: 2026-11-23T05:00:31Z
 
 ## core
 
@@ -26,6 +26,18 @@
 - `automatic agent context management` (en) — The performance-lens pillar behind long sessions that pick themselves back up: on fak's own wire the default-on pipeline plans the resident view, sheds the stale middle while keeping the cached head byte-identical, quarantines oversized results, and pages cold spans back on resume — so nobody hand-manages the window. Honest bound: on a borrowed harness wire fak measures the harness's own compaction but does not yet suppress it. Keywords: automatic context management, zero-knob context, agent context window, managed context.
 - `cache-preserving history compaction` (en) — How fak trims a long transcript without breaking the discount: it sheds the stale middle turns while keeping the provider's cached prefix byte-identical, unlike summarize-and-discard which rewrites the middle and busts the cache. The witnessed figure is per-fire — about a third of a turn's context trimmed each time compaction fires on the longest measured session — never a re-counted session sum. Keywords: context shedding, history compaction, prompt cache preservation, middle-out compaction.
 - `KV reuse across an agent fleet` (en) — The cross-agent performance lead, stated with a witness: sharing the model's KV work across a multi-agent fleet does measured less work than re-running each agent — about 4.1x less work than a tuned per-agent baseline on a 50-turn by 5-agent run, and up to 6.95x prefill reuse up the model ladder, each number tracing to a committed benchmark artifact rather than a vibe. Keywords: KV cache reuse, multi-agent fleet, agentic cache benchmark, cross-agent prefix reuse.
+
+## inference-engine
+
+- `fak-native inference engine` (en) — fak is also a local inference engine: the fused kernel runs the model inside the kernel's own address space, so the KV cache is a kernel object the agent runtime can address. fak-native is the product and performance path for local inference; llama.cpp is used only when explicitly selected as a reference, never as a silent fallback. Fronting an external engine is gateway mode, not fak-native. Keywords: fak inference engine, in-process LLM inference, local inference engine for AI agents, agent runtime with native inference.
+- `LLM inference engine written in Go` (en) — fak's in-kernel reference engine is a pure-Go forward pass, built into the same binary as the agent gateway by default; accelerated device backends, such as CUDA under its build tag, register behind one compute seam. The diagrams trace a token through the kernel and show the backend registry. Keywords: Go LLM inference engine, pure Go transformer forward pass, golang inference engine, single binary inference engine.
+- `fak vs llama.cpp` (en) — llama.cpp is the reference fak-native is measured against. The stated target is to beat it in matched, quality-constrained envelopes; whether a given model, quantization and device is a current win is answered only by the exact scoped row in the benchmark authority, and an unmeasured axis is never reported as parity. Keywords: llama.cpp alternative, fak vs llama.cpp benchmark, llama.cpp comparison, matched-envelope inference benchmark.
+- `fak vs vLLM and SGLang` (en) — vLLM and SGLang are tuned serving engines; within one serving instance their prefix caching is roughly at parity with fak. fak adds cross-worker and cross-session prefix reuse and addressable mid-run eviction, and can either front one of those engines or run its own in-process engine. The contrast is operational surface, not a blanket throughput claim. Keywords: vLLM alternative, SGLang alternative, vLLM vs SGLang vs fak, prefix caching comparison.
+- `TensorRT-LLM vs SGLang` (en) — An answer-first comparison of two serving stacks and where fak sits relative to them: in front of either server as the agent runtime and policy gateway, or as its own local in-process runtime. Keywords: TensorRT-LLM vs SGLang, which LLM serving engine, agent gateway in front of an inference server.
+- `how LLM inference works` (en) — A five-rung explainer of how a language model turns a prompt into the next token, from what a token is to what changes at scale: the forward pass, the operations inside one decoder block, prefill versus decode, and why decode is memory-bound. Every claim is pinned to a real file in the engine. Keywords: how inference works, transformer forward pass explained, prefill vs decode, KV cache explained.
+- `pipeline, tensor and expert parallelism for inference` (en) — How one forward pass is split across workers, taught in five rungs: the layer loop, pipeline (layer) parallelism, tensor and expert parallelism, and the frontier of what is witnessed versus still hardware-gated. Keywords: pipeline parallelism explained, tensor parallelism, expert parallelism, distributed LLM inference.
+- `add a new model architecture to an inference engine` (en) — The maintainer procedure for making fak's in-kernel engine recognize and run a new model: a pinned release intake, then either a one-line architecture alias with a recognition test or a scaffolded forward pass checked against an oracle. Fronting a model through the gateway needs none of this. Keywords: add a model to an inference engine, new model architecture support, forward pass oracle test.
+- `CUDA backend for a Go inference engine` (en) — The development loop for fak's CUDA compute backend: edit a kernel, build it, prove it correct with local no-GPU checks, then pass remote GPU acceptance gates before it ships. Keywords: CUDA inference backend, CUDA kernel development loop, GPU acceptance gate.
 
 ## managed-agent
 
@@ -66,6 +78,12 @@
 - `lethal trifecta data exfiltration` (en) — Private data, untrusted content, and an external channel are the three legs of agent exfiltration; fak breaks the third by default-denying the egress effect at the tool-call seam and quarantining untrusted results. Keywords: lethal trifecta, agent data exfiltration, prompt injection egress.
 - `AI agent least-privilege tool access` (en) — Treat an agent like a privileged identity: fak is the capability floor that scopes which tool effects an agent may cause, fail-closed, instead of trusting the model to stay in bounds. Keywords: agent least privilege, privileged agent identity, agent capability scoping.
 - `tamper-evident agent tool-call audit` (en) — Every kernel decision can write a hash-chained, tamper-evident audit row; an auditor re-verifies the chain to prove no tool-call decision was dropped or altered — evidence, not a self-report. Keywords: agent audit log, hash-chained audit, tool-call audit trail.
+
+## global-workspace
+
+- `bounded shared workspace for AI agents` (en) — fak treats the model context as a bounded shared workspace: preserve the originating task and useful state, reuse stable setup, and shed superseded turns before they dominate the horizon. Keywords: AI agent global workspace, bounded model context, context shedding.
+- `positive-state context construction` (en) — Instead of repeatedly broadcasting what an agent must not do, positive-state construction keeps the task, allowed affordance, and next valid state explicit in the shared context. Keywords: positive state prompting, affordance-first agent context, query not chat.
+- `negation operator for agent context` (en) — fak's negframe operator rewrites kernel-authored refusal and recovery prose toward the allowed substitute while preserving required policy tokens; it does not rewrite untrusted user content or weaken the capability floor. Keywords: negation operator, negframe, positive refusal recovery.
 
 ## localized
 

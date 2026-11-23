@@ -59,8 +59,8 @@ Run:
 go run ./cmd/instructiondemo -selfcheck
 ```
 
-The demo resolves two turns with different operator focus. It passes only when the complete prompt digest changes while the audited kernel-prefix digest remains byte-identical. Captured output: [`docs/_witnesses/native-harness-dynamic-instructions-2026-08-18.json`](../_witnesses/native-harness-dynamic-instructions-2026-08-18.json).
+The demo resolves two turns with different operator focus. It passes only when the complete prompt digest changes while the audited kernel-prefix digest remains byte-identical. Captured output: [`docs/_witnesses/native-harness-dynamic-instructions-2026-08-18.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/native-harness-dynamic-instructions-2026-08-18.json).
 
-The same selfcheck also drives one real stable-prefix refusal and exposes the resulting outcome tally. Captured counter readout: [`docs/_witnesses/native-harness-instruction-outcomes-2026-08-22.json`](../_witnesses/native-harness-instruction-outcomes-2026-08-22.json).
+The same selfcheck also drives one real stable-prefix refusal and exposes the resulting outcome tally. Captured counter readout: [`docs/_witnesses/native-harness-instruction-outcomes-2026-08-22.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/native-harness-instruction-outcomes-2026-08-22.json).
 
 The witness proves deterministic composition and cache-prefix preservation. It does not claim that one prompt improves model quality or reduces net tokens; those require a workload experiment.

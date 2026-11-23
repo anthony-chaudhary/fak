@@ -1,3 +1,8 @@
+---
+title: "Declared multi-device model fit"
+description: "fak model fit evaluates a fixed model's declared memory placement. It loads no model, probes no device and qualifies no hardware; results are modeled and unverified."
+---
+
 # Declared multi-device model fit
 
 `fak model fit` evaluates a fixed model's declared memory placement. It performs no model loading,

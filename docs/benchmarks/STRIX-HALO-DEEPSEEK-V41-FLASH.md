@@ -1,3 +1,8 @@
+---
+title: "DeepSeek V4.1 Flash on one Strix Halo"
+description: "4.61 decode tok/s for DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI Max+ 395, Vulkan/RADV): the measured result and how it was reached."
+---
+
 # DeepSeek V4.1 Flash on one Strix Halo
 
 **Final result: 4.61 decode tok/s** for `DeepSeek-V4.1-Flash-Q2_K` on one 128 GB AMD Strix

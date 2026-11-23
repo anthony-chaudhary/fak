@@ -6,7 +6,7 @@ description: "Supported Qwen3.8-27B aliases, native Metal and CUDA execution bou
 
 Tracking epic: [#8011](https://github.com/anthony-chaudhary/fak/issues/8011)
 
-Captured product proof: [Qwen3.8-27B acceptance evidence](../_witnesses/issue-8623-qwen38-27b/README.md) records the admitted model identity, native engine path, benchmark envelope, and remaining limitations.
+Captured product proof: [Qwen3.8-27B acceptance evidence](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8623-qwen38-27b/README.md) records the admitted model identity, native engine path, benchmark envelope, and remaining limitations.
 
 Qwen3.8-27B has exact built-in aliases. An alias is a launch identity, not a
 claim that every target machine has passed acceptance:
@@ -82,7 +82,7 @@ The Q4_K_M file is large; check free disk and memory before pulling it.
 
 | Route | Hardware | Verdict | Evidence |
 |---|---|---|---|
-| Native fak Metal GGUF | M3 Pro, 18 GPU cores, 36 GiB unified memory | **PASS_NATIVE_METAL_OPT_IN** | The streamed Q4_K path reaches readiness, identifies `metal/qwen35-hybrid-session-v1`, and passes exact `Q38`, strict JSON, an admitted tool call, warmup/request serialization, and rollback. The functional run used 18,920,570,880 B maximum RSS with zero swaps; request p95 was 37.208 s. Evidence: [`qwen38-27b-2026-08-20`](../_witnesses/qwen38-27b-2026-08-20/README.md). |
+| Native fak Metal GGUF | M3 Pro, 18 GPU cores, 36 GiB unified memory | **PASS_NATIVE_METAL_OPT_IN** | The streamed Q4_K path reaches readiness, identifies `metal/qwen35-hybrid-session-v1`, and passes exact `Q38`, strict JSON, an admitted tool call, warmup/request serialization, and rollback. The functional run used 18,920,570,880 B maximum RSS with zero swaps; request p95 was 37.208 s. Evidence: [`qwen38-27b-2026-08-20`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/qwen38-27b-2026-08-20/README.md). |
 | llama.cpp Metal behind fak | same MacBook | **PASS_DELEGATED_METAL** | llama.cpp 9828 (`ebd048fc5`) loads in about 8.15 s at roughly 17 GiB RSS; exact model ID, `Q38`, schema JSON, and an admitted correlated tool call pass through fak. This is a compatibility control, not native-fak Metal acceptance. |
 | Native fak CUDA GGUF | 40 GB A100 | **PASS_NATIVE_CUDA_GGUF** | Exact model identity, `Q38`, schema JSON, and an admitted correlated tool call pass through the native `cuda/qwen35-gdn-ssm-decode-v1` forward with no CPU/model/backend fallback. Startup is 52.431 s. Evidence: [#8070](https://github.com/anthony-chaudhary/fak/issues/8070#issuecomment-5337879917). |
 | vLLM FP8 behind fak | 2× 40 GB A100, tensor parallel | **PASS_FP8_TP2_THROUGH_FAK** | Exact official FP8 revision boots with vLLM 0.27.1 at about 38,069 MiB per GPU; model identity, `Q38`, strict JSON, correlated tool use, and fak admission pass. One 40GB A100 remains **HOLD_FP8_BOOT**. Evidence: [#8075](https://github.com/anthony-chaudhary/fak/issues/8075#issuecomment-5338921901). |

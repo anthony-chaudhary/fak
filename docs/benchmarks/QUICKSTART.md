@@ -1,3 +1,8 @@
+---
+title: "Cross-Machine Benchmark Quick Start"
+description: "How to start with fak's cross-machine benchmark infrastructure: run a benchmark on one machine and record a result other machines can be compared against."
+---
+
 # Cross-Machine Benchmark Quick Start
 
 **Last Updated:** 2025-01-06 | **Status:** v1.0

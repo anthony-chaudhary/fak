@@ -1,3 +1,8 @@
+---
+title: "Follow Q4_K bytes through a computation"
+description: "go run ./cmd/quanttrace --out receipt.json executes a deterministic two-row demo and explains each stage. Add --json for the machine-readable receipt."
+---
+
 # Follow Q4_K bytes through a computation
 
 `go run ./cmd/quanttrace --out receipt.json` executes a deterministic two-row

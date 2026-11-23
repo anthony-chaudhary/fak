@@ -1,3 +1,8 @@
+---
+title: "Build the native Vulkan backend on Linux"
+description: "The vulkan build includes the existing fak compute kernels on Linux and Windows."
+---
+
 # Build the native Vulkan backend on Linux
 
 The `vulkan` build includes the existing fak compute kernels on Linux and Windows.

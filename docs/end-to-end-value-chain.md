@@ -59,7 +59,7 @@ one-slot scheduler, then reads the effects back. PASS requires:
 
 It requires no key, external model, network, or GPU. That makes it a reliable architecture
 witness, **not** a model-quality or cost-savings claim. The dated real-process witness remains
-[`_witnesses/microagent-real-kernel-2026-08-12.md`](./_witnesses/microagent-real-kernel-2026-08-12.md),
+[`_witnesses/microagent-real-kernel-2026-08-12.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/microagent-real-kernel-2026-08-12.md),
 and paired tuned-baseline quality/cost evidence remains issue #6520.
 
 ## Build path — one receipt, successively less simulated

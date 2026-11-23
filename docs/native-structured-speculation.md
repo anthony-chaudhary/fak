@@ -1,3 +1,8 @@
+---
+title: "Structured output in native linear speculation"
+description: "How native linear speculation applies JSON-schema, regex and choice masks during greedy CPU decoding; software correctness, not a throughput claim."
+---
+
 # Structured output in native linear speculation
 
 The ordinary `InKernelPlanner.Complete` and `CompleteStream` routes compose an

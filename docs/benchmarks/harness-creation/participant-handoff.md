@@ -1,3 +1,8 @@
+---
+title: "Independent harness-creation participant handoff"
+description: "Use this card for #6911 only after the study baseline reports baseline_ready=true."
+---
+
 # Independent harness-creation participant handoff
 
 Use this card for #6911 only after the study baseline reports `baseline_ready=true`.

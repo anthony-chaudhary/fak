@@ -12,7 +12,7 @@ The implementation deliberately does not change `scripts/build.sh`, the debuggab
 
 ## Alternating fresh-root witness
 
-The complete machine-readable receipt is [`docs/_witnesses/build10x/path-cache-cross-root-2026-08-27.json`](../_witnesses/build10x/path-cache-cross-root-2026-08-27.json). Each sample extracted the same committed `git archive HEAD` into a never-before-used root. Control and treatment used separate, initially empty cache directories; each cache was shared only with the second same-arm root. `go build -x` supplied the executed compile/link counts.
+The complete machine-readable receipt is [`docs/_witnesses/build10x/path-cache-cross-root-2026-08-27.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/build10x/path-cache-cross-root-2026-08-27.json). Each sample extracted the same committed `git archive HEAD` into a never-before-used root. Control and treatment used separate, initially empty cache directories; each cache was shared only with the second same-arm root. `go build -x` supplied the executed compile/link counts.
 
 | Order | Arm | Cache state | Real | Compile | Link |
 |---:|---|---|---:|---:|---:|
@@ -34,7 +34,7 @@ The behavior outputs were byte-identical. Binary hashes were intentionally diffe
 
 ## Cgo follow-up: the last compile action
 
-The machine-readable #9671 receipt is [`docs/_witnesses/build10x/cgo-path-cache-cross-root-2026-08-28.json`](../_witnesses/build10x/cgo-path-cache-cross-root-2026-08-28.json). It compares committed `0f36db306` with the same tree plus one production-line deletion: the redundant `#cgo CFLAGS: -I${SRCDIR}` in `internal/compute/metal.go`. Go's cgo documentation guarantees that the source directory is already on the compiler include path. The explicit directive changed no header lookup, but `${SRCDIR}` expanded to each checkout's absolute path and entered the build-action hash.
+The machine-readable #9671 receipt is [`docs/_witnesses/build10x/cgo-path-cache-cross-root-2026-08-28.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/build10x/cgo-path-cache-cross-root-2026-08-28.json). It compares committed `0f36db306` with the same tree plus one production-line deletion: the redundant `#cgo CFLAGS: -I${SRCDIR}` in `internal/compute/metal.go`. Go's cgo documentation guarantees that the source directory is already on the compiler include path. The explicit directive changed no header lookup, but `${SRCDIR}` expanded to each checkout's absolute path and entered the build-action hash.
 
 The action-key trace made the cause direct:
 
@@ -60,7 +60,7 @@ The receipt remains labeled **experimental evidence** because it was captured fr
 
 ## Make follow-up: named artifacts versus 147 command links
 
-The machine-readable #9672 receipt is [`docs/_witnesses/build10x/make-build-link-census-2026-08-28.json`](../_witnesses/build10x/make-build-link-census-2026-08-28.json). It compares the former `make build` graph with the same pinned source after moving only `go build ./...` to an explicit `build-all` target. Both arms emitted the same four real outputs: debuggable `fak`, native `repoguard`, Windows `repoguard.exe`, and native `dispatchworker`. Each arm had a separate initially empty `GOCACHE`; its warm sample retained the exact named output paths so Go could validate their embedded build IDs.
+The machine-readable #9672 receipt is [`docs/_witnesses/build10x/make-build-link-census-2026-08-28.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/build10x/make-build-link-census-2026-08-28.json). It compares the former `make build` graph with the same pinned source after moving only `go build ./...` to an explicit `build-all` target. Both arms emitted the same four real outputs: debuggable `fak`, native `repoguard`, Windows `repoguard.exe`, and native `dispatchworker`. Each arm had a separate initially empty `GOCACHE`; its warm sample retained the exact named output paths so Go could validate their embedded build IDs.
 
 | Sample | Cache / output state | Real | Compile | Cgo | Link |
 |---|---|---:|---:|---:|---:|

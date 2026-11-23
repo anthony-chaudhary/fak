@@ -58,7 +58,7 @@ no longer fails the selfcheck when a satisfying toolchain is cached.
 
 The same command is supported natively on Windows and through WSL. The checked-in machine
 readout, including both platform witnesses, is
-[`issue-8227-harness-cross-dogfood.json`](_witnesses/issue-8227-harness-cross-dogfood.json).
+[`issue-8227-harness-cross-dogfood.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8227-harness-cross-dogfood.json).
 
 Ownership is explicit in `harness.lock.json`: `product/config.go` and `README.md` are user-owned and never overwritten. Generated Go/module files carry generator provenance or are listed in the lock. Re-running the command updates only recognized generated files and leaves user-owned files byte-for-byte intact.
 

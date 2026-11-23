@@ -6,7 +6,7 @@ description: "Verdict: NOT-YET for provider-cache value. The live provider retur
 
 **Verdict: NOT-YET for provider-cache value.** The live provider returned zero cache-read and cache-write tokens in every arm. Therefore this run makes no cache-hit or cost-saving claim. It does establish the six tuned controls, semantic parity, and the clean passthrough path.
 
-Pinned input: `JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4`, inherited from #6681 with hash checks. Live endpoint/model: the configured real OpenAI-compatible endpoint, `gpt-5.6-sol`. Raw request bodies, complete provider responses, provider usage, outputs, and timing are in [`docs/_witnesses/armbench-caveman-passthrough/live-gpt-5.6-sol/manifest.json`](_witnesses/armbench-caveman-passthrough/live-gpt-5.6-sol/manifest.json).
+Pinned input: `JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4`, inherited from #6681 with hash checks. Live endpoint/model: the configured real OpenAI-compatible endpoint, `gpt-5.6-sol`. Raw request bodies, complete provider responses, provider usage, outputs, and timing are in [`docs/_witnesses/armbench-caveman-passthrough/live-gpt-5.6-sol/manifest.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-caveman-passthrough/live-gpt-5.6-sol/manifest.json).
 
 ## Isolation
 

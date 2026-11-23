@@ -62,7 +62,7 @@ llama.cpp is MIT at the pinned root. The shipped FAK implementation was written 
 ## Companions
 
 - Native acceptance and launch contract: [`docs/supported/qwen38-27b.md`](../supported/qwen38-27b.md)
-- Captured exact-model fold: [`docs/_witnesses/qwen38-27b-2026-08-20/README.md`](../_witnesses/qwen38-27b-2026-08-20/README.md)
+- Captured exact-model fold: [`docs/_witnesses/qwen38-27b-2026-08-20/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/qwen38-27b-2026-08-20/README.md)
 - Parent model-support epic: [#8011](https://github.com/anthony-chaudhary/fak/issues/8011)
 - Capacity-preflight recalibration: [#8101](https://github.com/anthony-chaudhary/fak/issues/8101)
 - Borrowing workflow: `field-borrow` + `study-repo` + `sota-check`

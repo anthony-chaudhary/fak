@@ -1,3 +1,8 @@
+---
+title: "Native context windows in fak serve"
+description: "How fak serve sizes one native context window for model loading, request admission and model discovery, counting the rendered prompt plus reserved output tokens."
+---
+
 # Native context windows
 
 > This page describes budget **A** (the model window) and budget **B** (the native

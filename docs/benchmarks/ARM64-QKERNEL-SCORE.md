@@ -1,3 +1,8 @@
+---
+title: "ARM64 q-kernel score matrix"
+description: "This page is the operator contract for the score-only Mac benchmark artifacts under experiments/benchmark/runs/by-machine/node-macos-a/*/score.json."
+---
+
 # ARM64 q-kernel score matrix
 
 This page is the operator contract for the score-only Mac benchmark artifacts under

@@ -7,7 +7,7 @@ now has an open repair issue.
 ## Receipts
 
 The durable machine artifacts are in
-[`docs/_witnesses/issue-8238-closure-honesty/`](../_witnesses/issue-8238-closure-honesty/README.md).
+[`docs/_witnesses/issue-8238-closure-honesty/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8238-closure-honesty/README.md).
 The live default run captured the failure first: 1,000 of 1,000 fetched issues and 2,000 of
 12,321 commits produced `COVERAGE_INCOMPLETE`. The complete run then scanned all 8,505 issues
 and all 12,328 commits reachable from snapshot

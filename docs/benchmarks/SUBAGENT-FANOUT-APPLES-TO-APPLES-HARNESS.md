@@ -1,3 +1,8 @@
+---
+title: "Subagent Fanout Benchmark Harness: Apples-to-Apples vs SGLang & vLLM"
+description: "Benchmark harness comparing no-reuse, SGLang RadixAttention, vLLM APC and fak prefix reuse on identical weights for subagent fan-out workloads."
+---
+
 # Subagent Fanout Benchmark Harness: Apples-to-Apples vs SGLang & vLLM
 
 Status: **COMPLETE**. Issues: #6036, #12325.

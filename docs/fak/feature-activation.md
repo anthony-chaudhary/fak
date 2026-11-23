@@ -1,3 +1,8 @@
+---
+title: "fak request feature activation headers and trailer"
+description: "The three response fields fak uses to report which request features were enabled, used before the first header commit, and used by the end of the request."
+---
+
 # Request feature activation
 
 Chat completions, Messages, and fak syscall responses expose request-local

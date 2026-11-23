@@ -194,7 +194,7 @@ The launcher must serve the **exact witnessed artifact** (`Qwen3.8-27B-Q4_K_M.gg
 17,106,775,008 bytes). Other `qwen38` quantizations (for example the UD-Q2_K_XL alias)
 do not carry the separate process-RSS availability witness and reserve the 36 GiB
 startup peak, which no 36 GiB host can admit. See
-[`docs/_witnesses/issue-8971-streamed-q4k-capacity/`](../_witnesses/issue-8971-streamed-q4k-capacity/README.md)
+[`docs/_witnesses/issue-8971-streamed-q4k-capacity/`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8971-streamed-q4k-capacity/README.md)
 for the canonical capacity bound.
 
 ### 5. Capture the four dashboard renders
@@ -312,7 +312,7 @@ capture remains honestly pending. The blockers are evidenced, not assumed:
    `q38-q4km-native-metal-m3pro-capacity` envelope as `ConstraintCapacityBound` with a
    **44 GiB minimum**: the canonical no-`FAK_Q4K_FREE_CPU` control reached readiness but
    grew peak swap by 7,681,930,690 bytes
-   ([canonical witness](../_witnesses/issue-8971-streamed-q4k-capacity/canonical-no-free-cpu.json)).
+   ([canonical witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8971-streamed-q4k-capacity/canonical-no-free-cpu.json)).
    The reservation plane (`internal/localadmission/reservation.go`) compares the exact
    artifact's 20 GiB startup-peak bound against *currently allocatable* memory, so a
    36 GiB host under ambient load refuses before model load even though the streamed

@@ -93,7 +93,7 @@ go test ./cmd/fak -run 'TestGuardSessionStart(ClearCreatesFakSessionBoundary|Cod
 ```
 
 The captured Codex 0.148 TUI run, exact hook-trust proof, and fail-before result
-are in [`issue-8218-codex-session-boundary.json`](../_witnesses/issue-8218-codex-session-boundary.json).
+are in [`issue-8218-codex-session-boundary.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8218-codex-session-boundary.json).
 
 Live cross-provider dogfood and outcome counts are tracked in [#8220](https://github.com/anthony-chaudhary/fak/issues/8220).
 

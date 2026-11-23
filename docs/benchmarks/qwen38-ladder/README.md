@@ -1,3 +1,8 @@
+---
+title: "Qwen3.8 concept hill-climb"
+description: "Verdict: prove each candidate change cheaply on Qwen3.5, but require a paired baseline-versus-candidate win on Qwen3.8-27B for the final claim."
+---
+
 # Qwen3.8 concept hill-climb
 
 **Verdict:** prove each candidate change cheaply on Qwen3.5, but require a paired baseline-versus-candidate win on Qwen3.8-27B for the final claim. Qwen3.8 has no official sub-27B checkpoint as of 2026-08-22. The useful smaller family is Qwen3.5: its 0.8B, 2B, 4B, 9B, and 27B checkpoints use the same `qwen3_5` runtime architecture as Qwen3.8-27B. Qwen3.5-27B also has the same 64 layers, hidden size 5120, intermediate size 17408, 24 attention heads, four KV heads, head dimension 256, vocabulary 248320, and 3:1 GDN/full-attention cadence.

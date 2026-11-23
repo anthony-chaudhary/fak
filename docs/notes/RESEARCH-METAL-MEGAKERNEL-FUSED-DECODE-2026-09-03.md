@@ -189,7 +189,7 @@ In a persistent megakernel, all of the following heterogeneous operators must be
 
 A critical correctness invariant in fak's engine is exact numerical parity against the CPU and llama.cpp references.
 
-As documented in [`docs/releases/v0.28.0.md`](../releases/v0.28.0.md) and [`docs/proofs/model-forward-parity.md`](../proofs/model-forward-parity.md) (N7 Theorem 3), **greedy decode of Qwen3.6-27B diverges at token 3** due to accumulated floating-point drift in the GDN recurrent scan and attention accumulation order (flipping the near-tie argmax between ID `8160` "Here" and oracle ID `90700` "Thinking").
+As documented in [`docs/releases/v0.28.0.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/releases/v0.28.0.md) and [`docs/proofs/model-forward-parity.md`](../proofs/model-forward-parity.md) (N7 Theorem 3), **greedy decode of Qwen3.6-27B diverges at token 3** due to accumulated floating-point drift in the GDN recurrent scan and attention accumulation order (flipping the near-tie argmax between ID `8160` "Here" and oracle ID `90700` "Thinking").
 
 When computing in a megakernel:
 - Reductions across threadgroups use different summation trees than individual dispatched GEMVs.

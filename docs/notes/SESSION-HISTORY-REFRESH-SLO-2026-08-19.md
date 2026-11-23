@@ -6,7 +6,7 @@ Command:
 fak vcache session-history benchmark --sizes 1000,10000,100000 --repetitions 3
 ```
 
-Privacy-safe real-corpus summary: [`../_witnesses/session-history-real-corpus-summary-2026-08-19.json`](../_witnesses/session-history-real-corpus-summary-2026-08-19.json) (404 sessions / 406 files; aggregate counts only).`r`n`r`nMachine-readable synthetic benchmark witness: [`../_witnesses/session-history-refresh-benchmark-2026-08-19.json`](../_witnesses/session-history-refresh-benchmark-2026-08-19.json).
+Privacy-safe real-corpus summary: [`../_witnesses/session-history-real-corpus-summary-2026-08-19.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/session-history-real-corpus-summary-2026-08-19.json) (404 sessions / 406 files; aggregate counts only).`r`n`r`nMachine-readable synthetic benchmark witness: [`../_witnesses/session-history-refresh-benchmark-2026-08-19.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/session-history-refresh-benchmark-2026-08-19.json).
 
 The benchmark generates privacy-safe normalized synthetic sessions and runs the production `MineIndexed` refresh path in three modes: cold index, unchanged index, and one changed source. Ordinary unit tests run only a 20-session structural sentinel and do not time-gate CI.
 

@@ -1,3 +1,8 @@
+---
+title: "fak benchmark infrastructure documentation index"
+description: "Index of fak's benchmark infrastructure docs: the cross-machine quick start, design and schema reference, with performance claims routed to the benchmark authority."
+---
+
 # Benchmark Documentation
 
 This directory contains comprehensive documentation for the fleet benchmark infrastructure.

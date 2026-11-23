@@ -1,3 +1,8 @@
+---
+title: "Released harness clean-room witness"
+description: "After a release is published, download one target archive and its .sha256 sidecar from the GitHub release page."
+---
+
 # Released harness clean-room witness
 
 Issue: #6957; release acceptance: #6935.

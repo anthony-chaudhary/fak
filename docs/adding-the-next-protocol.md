@@ -1,3 +1,8 @@
+---
+title: "Adding the next protocol to fak's skill loader"
+description: "A new protocol joins fak's queried skill loader by implementing one interface, capindex.Resolver. This page covers the one file a new protocol implements."
+---
+
 # Adding the next protocol
 
 **The one file a new protocol implements.** A protocol joins the queried skill loader by

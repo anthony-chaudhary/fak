@@ -1,3 +1,8 @@
+---
+title: "Alpha fence: keep your private workflows private"
+description: "Keep private skills, prompts, runbooks and strategy notes next to a public repository with fak, without relying on anyone remembering what must stay private."
+---
+
 # Alpha fence: keep your private workflows private
 
 Your skills, prompts, runbooks and strategy notes are your edge. fak lets you use them next

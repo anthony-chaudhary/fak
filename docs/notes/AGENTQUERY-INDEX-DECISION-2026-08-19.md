@@ -16,8 +16,8 @@ fak agents --benchmark --benchmark-sizes 1000,10000,100000 --benchmark-repetitio
 
 Machine witnesses:
 
-- [`agentquery-benchmark-windows-2026-08-19.json`](../_witnesses/agentquery-benchmark-windows-2026-08-19.json)
-- [`agentquery-benchmark-linux-2026-08-19.json`](../_witnesses/agentquery-benchmark-linux-2026-08-19.json)
+- [`agentquery-benchmark-windows-2026-08-19.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/agentquery-benchmark-windows-2026-08-19.json)
+- [`agentquery-benchmark-linux-2026-08-19.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/agentquery-benchmark-linux-2026-08-19.json)
 
 Each size is a deterministic, content-free journal with equal open/close rows. Every path must produce the same SHA-256 result digest or the command fails.
 

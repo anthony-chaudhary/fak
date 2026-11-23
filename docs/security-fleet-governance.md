@@ -1,3 +1,8 @@
+---
+title: "Security fleet governance with fak"
+description: "Security teams can deploy one capability floor across agent entry points while leaving engineers room to choose a narrower operating profile."
+---
+
 # Security fleet governance with fak
 
 Security teams can deploy one **capability floor** across agent entry points while leaving engineers room to choose a narrower operating profile. The useful boundary is precise: fak can enforce and attest the policy supplied to each local `fak manage`/`fak guard` process; an enterprise must supply the fleet distribution, inventory, update, and admission systems around those processes.

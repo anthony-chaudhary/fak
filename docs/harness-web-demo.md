@@ -27,7 +27,7 @@ The Theme control proves that branding/layout tokens can change without rebuildi
 
 This is a practical local product-development surface, not yet a complete coding-harness replacement: a live model/tool adapter, durable sessions across process restart, authenticated non-loopback deployment, full screen-reader/browser automation, and the independent second implementation remain follow-ons under #6790.
 
-Captured normal, approval, and failure renders are indexed in [the operating-envelope witness](_witnesses/harness-web-demo/README.md).
+Captured normal, approval, and failure renders are indexed in [the operating-envelope witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/harness-web-demo/README.md).
 ## Native coding workspace capability
 
 Launch the gateway with its existing bounded coding catalog, then point the browser at it:
@@ -56,4 +56,4 @@ the deterministic offline product, or stop the workspace-armed `fak serve` proce
 `fak harness gallery show --id coding-workspace` for the corresponding user-needs pack.
 
 
-The real edit/test/diff browser receipt and restart capture are archived in [the live coding witness](_witnesses/harness-web-demo/LIVE-CODING-GPT-5.6-SOL-2026-08-15.md). The shipped-binary extraction, temp-built launch, and rollback evidence are archived in [the shipped fak launch witness](_witnesses/harness-web-demo/SHIPPED-FAK-LAUNCH-2026-08-15.md).
+The real edit/test/diff browser receipt and restart capture are archived in [the live coding witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/harness-web-demo/LIVE-CODING-GPT-5.6-SOL-2026-08-15.md). The shipped-binary extraction, temp-built launch, and rollback evidence are archived in [the shipped fak launch witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/harness-web-demo/SHIPPED-FAK-LAUNCH-2026-08-15.md).

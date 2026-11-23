@@ -1,3 +1,8 @@
+---
+title: "Runtime concepts: pools, sessions, and cache"
+description: "These distinctions describe existing source behavior; they do not assert that a particular entrypoint invokes it."
+---
+
 # Runtime concepts: pools, sessions, and cache
 
 These distinctions describe existing source behavior; they do not assert that a particular entrypoint invokes it.

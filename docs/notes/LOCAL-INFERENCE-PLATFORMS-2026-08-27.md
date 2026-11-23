@@ -12,9 +12,9 @@ option the issue asked to resolve first. The inventory does not rank products or
 throughput.
 
 Machine-readable authority:
-[`inventory.json`](../_witnesses/issue-9573-local-inference-platforms/inventory.json).
+[`inventory.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-9573-local-inference-platforms/inventory.json).
 Method and validation:
-[`README.md`](../_witnesses/issue-9573-local-inference-platforms/README.md).
+[`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-9573-local-inference-platforms/README.md).
 
 ## Comparison
 

@@ -486,6 +486,24 @@ func TestPublishedExcludesReleasesAndNonMD(t *testing.T) {
 	}
 }
 
+func TestPublishedSkipsJekyllHiddenSegments(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{
+		"docs/_witnesses/issue-1/README.md",
+		"docs/_plans/x.md",
+		"docs/notes/_draft.md",
+		"docs/.cache/x.md",
+		"docs/~backup/x.md",
+	} {
+		if published(root, rel) {
+			t.Fatalf("%s is skipped by Jekyll and should not publish", rel)
+		}
+	}
+	if !published(root, "docs/notes/a_b.md") {
+		t.Fatalf("an inner underscore should not hide a page")
+	}
+}
+
 // --- site-level checks -----------------------------------------------------
 
 func TestSiteFlagsMissingJSONLDAndLLMSFull(t *testing.T) {

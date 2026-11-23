@@ -6,7 +6,7 @@ description: "Verdict: SHIPPED with bounded evidence. The harness crosses normal
 
 **Verdict: SHIPPED with bounded evidence.** The harness crosses normal and pinned Caveman style with passthrough, tool-result compression only, context shedding only, both, and the tuned bundle over native one-shot and growing multi-turn tool-result workloads at pressure 1/4/12. Routing, policy, and semantic response reuse are explicitly disabled in every manifest.
 
-Comparator: `JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4`; the command verifies the imported comparator hashes before running. Live endpoint/model: `http://127.0.0.1:64355/v1`, `gpt-5.6-sol`. Evidence: [deterministic manifest](_witnesses/armbench-caveman-factorial/deterministic/manifest.json) and [live manifest](_witnesses/armbench-caveman-factorial/live-gpt-5.6-sol/manifest.json).
+Comparator: `JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4`; the command verifies the imported comparator hashes before running. Live endpoint/model: `http://127.0.0.1:64355/v1`, `gpt-5.6-sol`. Evidence: [deterministic manifest](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-caveman-factorial/deterministic/manifest.json) and [live manifest](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-caveman-factorial/live-gpt-5.6-sol/manifest.json).
 
 ## Evidence boundary
 

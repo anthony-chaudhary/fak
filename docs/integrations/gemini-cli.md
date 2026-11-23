@@ -82,7 +82,7 @@ go test ./cmd/fak -run 'TestGuardGemini|TestInstallManagedNativeHooksUsesSupport
 ```
 
 The captured Gemini CLI run and its old/new trace transitions are recorded in
-[`issue-8219-gemini-clear-session.json`](../_witnesses/issue-8219-gemini-clear-session.json).
+[`issue-8219-gemini-clear-session.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8219-gemini-clear-session.json).
 
 ## Cross-references
 

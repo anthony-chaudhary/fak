@@ -1,3 +1,8 @@
+---
+title: "fak benchmark conformance invariants"
+description: "Conformance notes for fak's benchmark tooling: which invariants a conforming benchmark scenario must hold, and where each invariant comes from."
+---
+
 # Benchmark Conformance
 
 Conformance notes for fak's benchmark tooling: which invariants a conforming

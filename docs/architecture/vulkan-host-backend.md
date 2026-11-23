@@ -1,3 +1,8 @@
+---
+title: "Vulkan host backend boundaries"
+description: "Where fak's Vulkan backend ends and its native bridge begins: the vulkan-tagged cgo adapter links libfakvulkan and calls the flat fvk ABI."
+---
+
 # Vulkan host backend boundaries
 
 The Vulkan backend currently needs its native bridge. The `vulkan`-tagged,

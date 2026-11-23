@@ -1,3 +1,8 @@
+---
+title: "Prompt-Vault harness and Qwen3.8 fleet comparison"
+description: "The frozen Prompt-Vault Color Palette task has a deterministic 12-check browser fixture. The comparison is unranked until the fak native and Ultracode arms have artifacts and telemetry."
+---
+
 # Prompt-Vault harness and Qwen3.8 fleet comparison
 
 **Verdict:** The frozen Prompt-Vault Color Palette task now has a deterministic 12-check browser fixture. The unchanged fixture accepts both captured strong-model artifacts at 12/12 and rejects empty (2/12) and static-but-wrong (6/12) pages. The two accepted arms remain unranked because fak native and Ultracode still lack artifacts and complete telemetry.
@@ -47,8 +52,8 @@ Do not rank the arms until all four have `terminal_verdict`, the same acceptance
 ## Existing proof points this joins
 
 - [`docs/supported/qwen38-27b.md`](../supported/qwen38-27b.md) pins the Qwen3.8 artifacts and launch identities.
-- [`docs/_witnesses/qwen38-27b-2026-08-19/`](../_witnesses/qwen38-27b-2026-08-19/) proves Qwen3.8-27B FP8 TP2 and CUDA GGUF text/JSON/tool acceptance.
-- [`docs/_witnesses/qwen38-27b-2026-08-20/`](../_witnesses/qwen38-27b-2026-08-20/) records the exact native-Metal baseline settings represented in `matrix.json`: text/JSON/tool acceptance passed on `internal/model@r448+g8145dc0bea` and `internal/agent@r320+g6bb3c3dd55`.
+- [`docs/_witnesses/qwen38-27b-2026-08-19/`](https://github.com/anthony-chaudhary/fak/tree/main/docs/_witnesses/qwen38-27b-2026-08-19) proves Qwen3.8-27B FP8 TP2 and CUDA GGUF text/JSON/tool acceptance.
+- [`docs/_witnesses/qwen38-27b-2026-08-20/`](https://github.com/anthony-chaudhary/fak/tree/main/docs/_witnesses/qwen38-27b-2026-08-20) records the exact native-Metal baseline settings represented in `matrix.json`: text/JSON/tool acceptance passed on `internal/model@r448+g8145dc0bea` and `internal/agent@r320+g6bb3c3dd55`.
 - [`docs/notes/ULTRACODE-NATIVE-RUNTIME-AUDIT-2026-08-20.md`](../notes/ULTRACODE-NATIVE-RUNTIME-AUDIT-2026-08-20.md) proves Ultracode's current boundary: deterministic plans and real worker launch, but no accepted workflow outcome.
 
 The comparison therefore separates two questions that are often conflated:

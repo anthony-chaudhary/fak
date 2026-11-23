@@ -1,3 +1,8 @@
+---
+title: "Native-performance regression gate"
+description: "fak native-performance --gate request.json converts the hill climb into an envelope-scoped regression gate."
+---
+
 # Native-performance regression gate
 
 `fak native-performance --gate request.json` converts the hill climb into an

@@ -1,3 +1,8 @@
+---
+title: "Lightgap bench-gated experiment contracts"
+description: "These contracts make the five remaining comparisons runnable without converting them into claims."
+---
+
 # Lightgap bench-gated experiment contracts
 
 These contracts make the five remaining comparisons runnable without converting them into claims. Every result stays `NEEDS_KEY`/UNCOVERED until the committed artifact is produced by the named live arms. A modeled estimate is invalid.

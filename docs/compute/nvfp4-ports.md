@@ -1,3 +1,8 @@
+---
+title: "Composable NVFP4 primitives"
+description: "The compute package supplies independent NVFP4 quantization, scale-layout, packed CUDA W4A16, and explicit prequantized W4A4 operations."
+---
+
 # Composable NVFP4 primitives
 
 The compute package supplies independent NVFP4 quantization, scale-layout,

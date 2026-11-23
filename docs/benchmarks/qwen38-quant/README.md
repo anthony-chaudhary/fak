@@ -1,3 +1,8 @@
+---
+title: "Qwen3.8-27B quantization campaign contract"
+description: "This directory freezes the comparable evidence contract for issues #8307–#8321. It does not claim that an arm is production-ready merely because it loads."
+---
+
 # Qwen3.8-27B quantization campaign contract
 
 This directory freezes the comparable evidence contract for issues #8307–#8321.

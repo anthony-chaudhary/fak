@@ -1,3 +1,8 @@
+---
+title: "Backend composability: source-pinned semantic inventory"
+description: "The reviewed engineering map of AMD, Vulkan and Halo seams in fak's compute backends, pinned to source, kept as four scopes so backend-specific code is not misread as a bug."
+---
+
 # Backend composability: source-pinned semantic inventory
 
 This is the reviewed engineering map behind [the index](README.md) and [canonical ticket inputs](ticket-plan.json). It preserves four complementary scopes rather than treating every AMD/Vulkan/Halo identifier as a bug. The common baseline is public commit `93b295a81683f81868d1b9cc4c340496700cc0da`; later hosted BF16 and CPU-only NVFP4 deltas are explicitly separate. The inventories ran no compiler, numerical test, hardware job, or performance experiment.

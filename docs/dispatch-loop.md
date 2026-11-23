@@ -356,24 +356,18 @@ The scorecards may report ACTION/debt and still pass this dogfood packet when th
 machine payload is valid. The pass condition is repeatable use of the feature and
 valid evidence, not pretending existing repo debt is already gone.
 
-### As a CI gate (`.github/workflows/dogfood.yml`)
+### As a repeatable gate
 
-The same packet runs on a clean checkout in CI (issue #798), so the recently-shipped
-CLI surfaces are proven to work on every push — not just locally. The
-[`dogfood`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/dogfood.yml) workflow builds a real `fak` into
-`tools/.bin/`, runs the packet into a fixed evidence dir, fails the build when a
-**required** probe fails, and uploads `report.json` + the vCache score artifact as build
-artifacts (with the human report written to the run's step summary). It runs on push to
-`main`/`master`, on pull requests, on a daily `schedule:`, and on demand via
-`workflow_dispatch`. The gate preserves the local semantics: a scorecard reporting
-ACTION/debt does **not** fail the packet — only an invalid machine payload does.
+The same packet runs against the current workspace, so the recently-shipped CLI surfaces are proven
+to work rather than assumed. The hosted `dogfood` workflow that once ran it on every push
+was removed; the gate is now run locally. It writes `report.json` and the vCache score
+artifact into a fixed evidence dir and exits non-zero when a **required** probe fails. The
+local semantics hold: a scorecard reporting ACTION/debt does **not** fail the packet — only
+an invalid machine payload does.
 
 ```bash
-# the exact gate command CI runs (writes evidence under .fak/recent-feature-dogfood/ci):
-python tools/recent_feature_dogfood.py --out-dir .fak/recent-feature-dogfood/ci --json
-
-# trigger the workflow manually from a branch:
-gh workflow run dogfood.yml
+# the gate command (writes evidence under .fak/recent-feature-dogfood/gate):
+python tools/recent_feature_dogfood.py --out-dir .fak/recent-feature-dogfood/gate --json
 ```
 
 ## A note on opaque workers

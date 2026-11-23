@@ -1,3 +1,8 @@
+---
+title: "Three context budgets, not one"
+description: "fak has three independent context budgets. They are routinely conflated — including in-review, including by agents. This page is the disambiguator."
+---
+
 # Three context budgets, not one
 
 `fak` has **three independent context budgets**. They are routinely conflated —

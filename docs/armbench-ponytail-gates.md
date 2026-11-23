@@ -51,8 +51,8 @@ Ponytail failures are explicit in the raw witness: hardware calibration (pinned 
 
 ## Evidence
 
-- Dry fail-closed witness: [`_witnesses/armbench-ponytail-gates-dryrun-2026-08-14.json`](_witnesses/armbench-ponytail-gates-dryrun-2026-08-14.json)
-- Complete provider witness: [`_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json`](_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json)
+- Dry fail-closed witness: [`_witnesses/armbench-ponytail-gates-dryrun-2026-08-14.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-ponytail-gates-dryrun-2026-08-14.json)
+- Complete provider witness: [`_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json)
 
 Intermediate provider/re-score files are intentionally not authoritative; the final witness contains the complete output set and assumptions.
 

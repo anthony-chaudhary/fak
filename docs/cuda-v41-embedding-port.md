@@ -1,3 +1,8 @@
+---
+title: "CUDA selected-row primitives: source and qualification boundary"
+description: "The optional native embedding fragments directly reuse the MIT-licensed ggml-org/llama.cpp implementation at e0f142d5ddc1461ce721644d92af33db23545105."
+---
+
 # CUDA selected-row primitives: source and qualification boundary
 
 The optional native embedding fragments directly reuse the MIT-licensed

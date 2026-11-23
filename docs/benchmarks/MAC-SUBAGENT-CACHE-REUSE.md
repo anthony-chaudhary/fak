@@ -1,3 +1,8 @@
+---
+title: "Mac subagent prefix-cache reuse: fak vs llama.cpp llama-server"
+description: "Methodology and repro protocol for a Mac head-to-head on subagent prefix-cache reuse. Pilot receipt: the llama-server arm is measured; the fak arm is blocked and pending."
+---
+
 # Mac Subagent Prefix-Cache Reuse: Head-to-Head vs llama.cpp `llama-server`
 
 Status: **PILOT RECEIPT (fak arm blocked)**, issue fak#13023. The OSS reference arm has a live pilot receipt (§5.1); the fak arm and the full-geometry run are pending.

@@ -1,3 +1,8 @@
+---
+title: "Useful local agents, accelerated automatically"
+description: "Fak's first breakthrough milestone is to make useful local agents practical on local machines: responsive, economical, and simple to run."
+---
+
 # Useful local agents, accelerated automatically
 
 **Direction set: 2026-09-09. Status: product milestone to qualify.**

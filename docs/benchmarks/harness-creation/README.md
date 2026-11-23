@@ -1,3 +1,8 @@
+---
+title: "Harness-creation promotion study"
+description: "The frozen, machine-readable study ledger for the phrases “create a harness in 10 minutes” and “create your own harness this weekend.”"
+---
+
 # Harness-creation promotion study
 
 Issues: #6911, #6809, executable evidence fold #6937.

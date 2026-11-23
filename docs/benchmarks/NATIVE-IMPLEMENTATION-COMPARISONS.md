@@ -1,3 +1,8 @@
+---
+title: "Native implementation benchmark contracts"
+description: "The contract that every fak-native implementation is compared with the strongest practical alternative on a shared workload. Status incomplete: a missing measurement is never a claim."
+---
+
 # Native implementation benchmark contracts
 
 Status: **INCOMPLETE**. This is the machine-readable starting spine for requiring every fak-native implementation to be compared with the strongest practical alternatives. It deliberately does not turn missing measurements into claims.

@@ -338,5 +338,5 @@ On Windows, Microsoft Defender real-time protection may flag transient test exec
 - [`docs/native-inference-goal.md`](../native-inference-goal.md) — The native inference invariant and matched-envelope doctrine.
 - [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) — Single source of truth for benchmark claims and rules.
 - [`examples/local-hardware-benchmark/README.md`](../../examples/local-hardware-benchmark/README.md) — Walkthrough of the local receipt tool.
-- [`docs/_witnesses/issue-10458-home-llm-consumer-hardware/README.md`](../_witnesses/issue-10458-home-llm-consumer-hardware/README.md) — Witnessed consumer hardware residency and composed-cache benchmark.
+- [`docs/_witnesses/issue-10458-home-llm-consumer-hardware/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-10458-home-llm-consumer-hardware/README.md) — Witnessed consumer hardware residency and composed-cache benchmark.
 - Issues: #10421 (v1 receipt foundation), #10444 (CLI promotion), #10445 (moderated scoreboard), #10446 (attestation envelope), #10458 (consumer residency benchmark), #10470 (hardware setup guide).

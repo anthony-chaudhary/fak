@@ -22,7 +22,7 @@ planner. It proves all three effects in one path:
 3. the report captures the canonical selection and fragment digest.
 
 The explicit `standard` path remains an off switch. The machine-readable witness is
-[`_witnesses/ponytail-default-medium-dogfood-2026-08-14.json`](_witnesses/ponytail-default-medium-dogfood-2026-08-14.json).
+[`_witnesses/ponytail-default-medium-dogfood-2026-08-14.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/ponytail-default-medium-dogfood-2026-08-14.json).
 
 ## Exact-default gate arm
 
@@ -36,7 +36,7 @@ profile or its pinned fragment digest drifts:
 - fragment witness: `sha256:fb03503c5d7d3e75155796ddf34c426ba5126f86c10d2b929c1f1796328fb7ed`
 
 The no-spend receipt is
-[`_witnesses/ponytail-default-medium-gates-dryrun-2026-08-24.json`](_witnesses/ponytail-default-medium-gates-dryrun-2026-08-24.json).
+[`_witnesses/ponytail-default-medium-gates-dryrun-2026-08-24.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/ponytail-default-medium-gates-dryrun-2026-08-24.json).
 It records all four arm identities, passes the unchanged pinned `node:test` regression fixture
 (4/4), and marks every provider-backed category for every arm `not_run`; consequently
 `overall_pass` is honestly `false`. This receipt proves inventory, canonical rendering provenance,
@@ -45,7 +45,7 @@ digest pinning, and fail-closed dry-run accounting. It does **not** prove model 
 ## Effectiveness audit
 
 The latest live provider witness remains
-[`_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json`](_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json):
+[`_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json):
 
 | arm | behavior | correctness | robustness |
 |---|---:|---:|---:|

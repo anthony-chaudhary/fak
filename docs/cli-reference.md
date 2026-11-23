@@ -422,7 +422,7 @@ The default file is `~/.fak/console.json`; `FAK_CONSOLE_FILE` changes it, and
 `--path FILE` selects one file for a settings command. Mutations validate the full
 configuration before atomically replacing that file with user-only permissions.
 `fak console config` remains a compatibility alias, but help and pane discovery
-advertise only `settings`. The [captured 72×24 render](./_witnesses/tui-settings/settings-render.txt)
+advertise only `settings`. The [captured 72×24 render](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/tui-settings/settings-render.txt)
 shows a loaded file, built-in values, allowed options, copyable actions, and one
 saved value without a key, model, network call, or GPU.
 

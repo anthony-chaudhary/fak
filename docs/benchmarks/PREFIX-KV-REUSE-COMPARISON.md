@@ -1,3 +1,8 @@
+---
+title: "Prefix KV reuse comparison contract"
+description: "Contract (incomplete) for judging fak's radixkv prefix reuse against no-reuse, SGLang RadixAttention and fak+llm-d on the same model and trace; no winner is claimable yet."
+---
+
 # Prefix KV reuse comparison contract
 
 Status: **INCOMPLETE**. Issue: #6036.

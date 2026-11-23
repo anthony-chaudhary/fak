@@ -234,7 +234,7 @@ The importer returns exit `3` with a closed reason token for:
 
 Tests use only an in-process local fixture server; CI never fetches GitHub. The
 captured live command report at
-[`docs/_witnesses/armbench-import-2026-08-14.json`](_witnesses/armbench-import-2026-08-14.json)
+[`docs/_witnesses/armbench-import-2026-08-14.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-import-2026-08-14.json)
 materialized both exact revisions. The importer tests then load its emitted
 manifest/corpus through the normal armbench decoder and execute them with the
 network-free fake provider.
@@ -254,7 +254,7 @@ and one `ctxmmu-paging` arm. It captures the complete raw ledger and report,
 proves model/prompt/judge/corpus/capability mutations move the identity, exercises
 resume and paired ordering, and witnesses the raw-evidence and capability
 refusals. Its byte-for-byte deterministic committed capture is
-[`docs/_witnesses/armbench-selfcheck-2026-08-13.json`](_witnesses/armbench-selfcheck-2026-08-13.json).
+[`docs/_witnesses/armbench-selfcheck-2026-08-13.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-selfcheck-2026-08-13.json).
 
 Exit codes: `0` success, `2` usage, `3` a typed fail-closed refusal, and `1` an
 I/O or internal runtime error.
@@ -323,12 +323,12 @@ shared-helper safety criterion on `trace-transfer` (they guarded `transfer` but 
 able to overdraw); Ponytail fixed the shared `_debit` seam. All task success checks still passed.
 
 Raw evidence is committed under
-[`docs/_witnesses/armbench-ponytail-live-2026-08-14/`](_witnesses/armbench-ponytail-live-2026-08-14/):
+[`docs/_witnesses/armbench-ponytail-live-2026-08-14/`](https://github.com/anthony-chaudhary/fak/tree/main/docs/_witnesses/armbench-ponytail-live-2026-08-14):
 every upstream `results.json`/`summary.json`, all 36 workspaces, generated source, `_claude.json`
 provider receipts, and Claude stderr. The indexed receipt
-[`armbench-ponytail-live-2026-08-14.json`](_witnesses/armbench-ponytail-live-2026-08-14.json)
+[`armbench-ponytail-live-2026-08-14.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-ponytail-live-2026-08-14.json)
 contains SHA-256 and byte size for every raw file. The no-provider packet is
-[`armbench-ponytail-dryrun-2026-08-14.json`](_witnesses/armbench-ponytail-dryrun-2026-08-14.json).
+[`armbench-ponytail-dryrun-2026-08-14.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-ponytail-dryrun-2026-08-14.json).
 
 ### Judge calibration and published-result comparison
 
@@ -359,7 +359,7 @@ The pinned Ponytail passthrough and managed-context ablation is specified in [ar
 
 ## Paired net-true report
 
-`fak armbench paired-report --receipts RECEIPTS.json` consumes trial-level receipts paired by task, model, temperature, and pair ID. The committed minimal spine is [`armbench-paired-receipts-2026-08-14.json`](_witnesses/armbench-paired-receipts-2026-08-14.json) with its deterministic [`armbench-paired-report-2026-08-14.json`](_witnesses/armbench-paired-report-2026-08-14.json). It reuses the committed fake-provider benchmark witness, so it incurs no provider spend.
+`fak armbench paired-report --receipts RECEIPTS.json` consumes trial-level receipts paired by task, model, temperature, and pair ID. The committed minimal spine is [`armbench-paired-receipts-2026-08-14.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-paired-receipts-2026-08-14.json) with its deterministic [`armbench-paired-report-2026-08-14.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/armbench-paired-report-2026-08-14.json). It reuses the committed fake-provider benchmark witness, so it incurs no provider spend.
 
 The report is deliberately claim-conservative:
 

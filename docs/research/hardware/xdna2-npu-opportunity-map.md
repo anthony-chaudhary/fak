@@ -9,7 +9,7 @@ description: "Architectural analysis of AMD XDNA 2 NPU (32 AIE-ML cores, 50 TOPS
 **Status:** Canonical NPU Research & Deferral Authority  
 **As of:** 2026-09-03  
 **Authoritative Seam:** [`docs/native-inference-goal.md`](../../native-inference-goal.md)  
-**Related Witness:** [`issue-10685-xdna2-gpu-coresidency`](../../_witnesses/issue-10685-xdna2-gpu-coresidency/README.md)
+**Related Witness:** [`issue-10685-xdna2-gpu-coresidency`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-10685-xdna2-gpu-coresidency/README.md)
 
 ---
 
@@ -170,7 +170,7 @@ The core economic justification for the NPU in an agent host is **heterogeneous 
 | **GPU Clock Throttling** | 0% (pinned 2.80 GHz) | **-23.2%** (drops to 2.15 GHz) | **0%** (pinned 2.80 GHz) |
 | **Kernel Mutex / Queue Wait** | 0.0 ms | **21.8 ms / turn** | **0.0 ms** |
 
-*Witnessed evidence recorded in [`docs/_witnesses/issue-10685-xdna2-gpu-coresidency/receipt.json`](../../_witnesses/issue-10685-xdna2-gpu-coresidency/receipt.json).*
+*Witnessed evidence recorded in [`docs/_witnesses/issue-10685-xdna2-gpu-coresidency/receipt.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-10685-xdna2-gpu-coresidency/receipt.json).*
 
 ---
 

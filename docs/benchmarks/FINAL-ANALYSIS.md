@@ -1,3 +1,8 @@
+---
+title: "Benchmark Infrastructure: Final Analysis"
+description: "Historical analysis of fak's benchmark infrastructure from June 2026. Its demorace figures are projections, not committed measurements; read the correction before quoting a number."
+---
+
 # Benchmark Infrastructure: Final Analysis
 
 **Date:** 2026-06-19

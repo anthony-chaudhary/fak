@@ -1,3 +1,8 @@
+---
+title: "Durable research-arm leases"
+description: "fak serve --arm-lease-store /absolute/private-directory/leases.json retains acknowledged research-arm leases across serving restarts."
+---
+
 # Durable research-arm leases
 
 `fak serve --arm-lease-store /absolute/private-directory/leases.json` retains acknowledged research-arm leases across serving restarts. Native and proxy serving can use the same path. Without the flag, leases remain in memory as before. Durable stores support Linux and Darwin; other platforms refuse startup when the flag is configured.

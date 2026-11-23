@@ -1,3 +1,8 @@
+---
+title: "Architecture quality per active byte"
+description: "A benchmark method for ranking model-architecture memory-efficiency ideas on one conservative denominator; a method witness, not evidence that any architecture is better."
+---
+
 # Architecture quality per active byte
 
 ## Decision record

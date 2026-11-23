@@ -42,7 +42,7 @@ Use `ActivateCompatible` when the builder/host boundary is not already pinned by
 
 `DiffContracts` explicitly compares contract semantics; it does not reflect over Go struct layout. Added capabilities and experimental-to-stable promotion are additive, changed behavior or forward revisions are behavioral, and removals, revision rollback, stable-to-experimental demotion, or contract-line changes are breaking. Deprecated offers carry a replacement and removal horizon, and negotiation refuses the deprecation until the replacement is present and valid.
 
-`PlanUpgrade` only computes a versioned `UpgradePlan`. It never edits builder-owned source, configuration, or lock files. The plan blocks breaking changes and required incompatibilities, while surfacing behavioral review, optional gaps, and deprecation migrations as explicit steps. The clean-module capture at [`_witnesses/issue-6805-harnesskit-upgrade.json`](_witnesses/issue-6805-harnesskit-upgrade.json) proves an N-1 revision range accepts a supported host upgrade and produces actionable JSON for a deliberately too-new refusal.
+`PlanUpgrade` only computes a versioned `UpgradePlan`. It never edits builder-owned source, configuration, or lock files. The plan blocks breaking changes and required incompatibilities, while surfacing behavioral review, optional gaps, and deprecation migrations as explicit steps. The clean-module capture at [`_witnesses/issue-6805-harnesskit-upgrade.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-6805-harnesskit-upgrade.json) proves an N-1 revision range accepts a supported host upgrade and produces actionable JSON for a deliberately too-new refusal.
 
 ## Operating semantics
 

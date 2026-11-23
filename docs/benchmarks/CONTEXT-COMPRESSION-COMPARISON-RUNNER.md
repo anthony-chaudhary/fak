@@ -1,3 +1,8 @@
+---
+title: "Context-compression comparison runner"
+description: "fak headroom compare runs every requested Compressor plugin over the same frozen corpus. It measures local byte savings and transform time only, not the end-to-end product benchmark."
+---
+
 # Context-compression comparison runner
 
 `fak headroom compare` is the shared-corpus local spine for #6064:

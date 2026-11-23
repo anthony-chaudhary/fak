@@ -1,3 +1,8 @@
+---
+title: "Serve launch evidence"
+description: "fak serve --launch-evidence /absolute/new/launch.json writes an opt-in private startup snapshot after model and gateway setup, before listener execution."
+---
+
 # Serve launch evidence
 
 `fak serve --launch-evidence /absolute/new/launch.json` writes an opt-in private

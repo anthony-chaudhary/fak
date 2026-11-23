@@ -982,11 +982,17 @@ func published(rootAbs, rel string) bool {
 	seg := parts[1:]
 	cfgDirs, cfgFiles := configExcludes(rootAbs)
 	for _, s := range seg {
-		if nonpublishedDirs[s] || cfgDirs[s] {
+		if nonpublishedDirs[s] || cfgDirs[s] || jekyllHidden(s) {
 			return false
 		}
 	}
 	return !cfgFiles[strings.Join(seg, "/")]
+}
+
+// jekyllHidden reports a path segment Jekyll skips without any exclude entry:
+// it never reads a file or directory whose name starts with '_', '.', '#' or '~'.
+func jekyllHidden(seg string) bool {
+	return seg != "" && strings.ContainsRune("_.#~", rune(seg[0]))
 }
 
 func discovery(rootAbs, rel string) bool {

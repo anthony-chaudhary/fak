@@ -1,3 +1,8 @@
+---
+title: "Cross-Machine Benchmark Infrastructure Design"
+description: "Design of fak's cross-machine benchmark infrastructure: scalable, queryable and visualizable benchmark results across heterogeneous machines."
+---
+
 # Cross-Machine Benchmark Infrastructure Design
 
 **Status:** Design v1.0 | **Last Updated:** 2025-01-06

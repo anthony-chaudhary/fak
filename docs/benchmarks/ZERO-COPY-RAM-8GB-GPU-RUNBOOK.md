@@ -1,3 +1,8 @@
+---
+title: "Zero-Copy RAM to 8 GB GPU Verification Playbook"
+description: "End-to-end verification ladder for direct-memory, zero-copy execution on hosts that pair large physical host memory with an 8 GB GPU."
+---
+
 # Zero-Copy RAM to 8 GB GPU Verification Playbook
 
 ## Context & Hardware Topology

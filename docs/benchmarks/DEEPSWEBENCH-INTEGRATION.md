@@ -1,3 +1,8 @@
+---
+title: "DeepSWE-bench Integration Design"
+description: "Design for running DeepSWE-bench in fak's benchmark infrastructure: establish a DeepSWE-Preview baseline on SWE-bench Verified, then measure lift with repeatable evaluation."
+---
+
 # DeepSWE-bench Integration Design
 
 ## Overview

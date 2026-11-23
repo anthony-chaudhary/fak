@@ -5,7 +5,7 @@
 - Issue: [#8046](https://github.com/anthony-chaudhary/fak/issues/8046)
 - Shipped spine: `95404b4fe0d9998fee7bd8a6714d43990d034cd2`
 - Live committed base: `56c32a0364e49a78af0436b122957825ff19bddc`
-- Machine-readable receipt: [`native-harness-dynamic-instructions-dogfood-2026-08-22.json`](../_witnesses/native-harness-dynamic-instructions-dogfood-2026-08-22.json)
+- Machine-readable receipt: [`native-harness-dynamic-instructions-dogfood-2026-08-22.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/native-harness-dynamic-instructions-dogfood-2026-08-22.json)
 - Defect marker-key prefix: `fanout-harnesskit-dogfood-self-run`
 
 ## User outcome

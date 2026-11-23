@@ -17,7 +17,7 @@ The JSON schema is `fak-wip-inventory/1`. Every count that can fail includes `kn
 
 The command does not mutate the index, refs, worktrees, or files. The fixture test exercises tracked and untracked source work, ignored files, detached-worktree work, stale residue, and a checkpoint in one observation and compares filesystem state before and after collection.
 
-Live witness: [`docs/_witnesses/wip-inventory-live-2026-08-17.json`](../_witnesses/wip-inventory-live-2026-08-17.json). That observation covers more than 600,000 ignored paths and records each source/recovery population independently; it is evidence for this observation, not a historical reconstruction.
+Live witness: [`docs/_witnesses/wip-inventory-live-2026-08-17.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/wip-inventory-live-2026-08-17.json). That observation covers more than 600,000 ignored paths and records each source/recovery population independently; it is evidence for this observation, not a historical reconstruction.
 
 ## Integration path
 

@@ -1,3 +1,8 @@
+---
+title: "Qwen3.8 native MTP operating envelope and downgrade semantics"
+description: "Operating envelope for fak-native multi-token-prediction speculative decoding on Qwen3.8: the certified envelopes, fail-closed downgrade and kill-switch semantics, and receipt schemas."
+---
+
 # Qwen3.8 Native Multi-Token Prediction (MTP) Operating Envelope & Downgrade Semantics
 
 **Date of Record:** September 7, 2026  

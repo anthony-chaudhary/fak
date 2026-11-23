@@ -1,3 +1,8 @@
+---
+title: "Verified default plus control versus scratch construction"
+description: "Paired study protocol testing whether operators prefer adopting a verified harness and changing it through visible control seams over building the equivalent harness from scratch."
+---
+
 # Verified default plus control versus scratch construction
 
 This paired study tests one narrow product theory:

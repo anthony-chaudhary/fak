@@ -1,3 +1,8 @@
+---
+title: "AMD, Vulkan and Halo to multi-backend composability"
+description: "Index of the source review that turns fak's AMD, Vulkan and Halo backend inventories into bounded work for NVIDIA and other backends without dropping AMD qualification."
+---
+
 # AMD, Vulkan and Halo to multi-backend composability
 
 Source-review snapshot: 2026-10-23. Repository: [anthony-chaudhary/fak](https://github.com/anthony-chaudhary/fak).

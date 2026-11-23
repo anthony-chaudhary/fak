@@ -1,3 +1,8 @@
+---
+title: "Contributor Git access and publication recovery"
+description: "For contributors diagnosing authentication or transport failures while publishing an already-authorized change: the diagnostic checks and the recovery for each failure."
+---
+
 # Contributor Git access and publication recovery
 
 **Audience:** contributors diagnosing authentication or transport failures while

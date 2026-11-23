@@ -19,7 +19,7 @@ For the current cross-hardware view, use the canonical [Qwen performance index](
 with llama.cpp. Its **2026-08-27** review window passed without a comparable renewal,
 so it is now historical and is reaped from the active front-door presentation.
 
-Source of truth: [`metal-native-run-summary.json`](../_witnesses/qwen38-27b-2026-08-20/metal-native-run-summary.json),
+Source of truth: [`metal-native-run-summary.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/qwen38-27b-2026-08-20/metal-native-run-summary.json),
 observed **2026-08-20** and reviewed through **2026-08-27**. No newer comparable,
 accepted Metal full-run receipt supersedes it. The exact model is the 17,106,775,008-byte
 `unsloth/Qwen3.8-27B-GGUF` Q4_K_M artifact at revision
@@ -69,10 +69,10 @@ The main delta is implementation maturity, not a demonstrated architectural wind
   Q4_K residency, memory/lifetime fixes, warmup serialization, and newer Metal GEMM
   work. The accepted witness therefore measures a more mature fak path.
 - The newest landed Q4_K 4–8-vector specialization is a **kernel microbenchmark**, not
-  a new end-to-end model number: [`issue-8326-metal-q4k-multivector.json`](../_witnesses/issue-8326-metal-q4k-multivector.json)
+  a new end-to-end model number: [`issue-8326-metal-q4k-multivector.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/issue-8326-metal-q4k-multivector.json)
   reports **1.57–1.71×** over repeated GEMV for the measured shapes, with parity checks. Qwen3.8 must be
   remeasured end to end before attributing that gain to tokens/sec.
-- The September 3, 2026 Metal benchmark witness ([`qwen38-m3pro-metal-benchmarks-2026-09-03.json`](../_witnesses/qwen38-m3pro-metal-benchmarks-2026-09-03.json))
+- The September 3, 2026 Metal benchmark witness ([`qwen38-m3pro-metal-benchmarks-2026-09-03.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/qwen38-m3pro-metal-benchmarks-2026-09-03.json))
   captures M2 sequence prefill at **7.80× speedup** (19.73 ms vs 153.91 ms, 87.2% latency reduction),
   fused MLP at **1.62×** (1.962 ms vs 3.175 ms, 76.6 GB/s), and Qwen3.5-0.8B Metal decode at
   **11.42 tok/s** with zero swap growth. These are focused sequence/kernel microbenchmarks;

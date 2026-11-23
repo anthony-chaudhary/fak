@@ -1,3 +1,8 @@
+---
+title: "Request timing burndown with fak model-observe"
+description: "Use fak's observation proxy and offline reducer to rank request time by backend, model and declared cache state."
+---
+
 # Request timing burndown
 
 Use the observation proxy and the offline reducer to rank time by backend, model,

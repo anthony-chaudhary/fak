@@ -1,3 +1,8 @@
+---
+title: "Runbook — single-stream CPU Q8 parity: fak vs llama.cpp (Apple M3 Pro)"
+description: "Reproduces experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json — the canonical SOTA-parity baseline cited by BENCHMARK-AUTHORITY.md."
+---
+
 # Runbook — single-stream CPU Q8 parity: fak vs llama.cpp (Apple M3 Pro)
 
 Reproduces [`experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json) —

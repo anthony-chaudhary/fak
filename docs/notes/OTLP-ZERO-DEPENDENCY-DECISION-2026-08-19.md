@@ -14,4 +14,4 @@ Exported attributes are fixed to service name, route template, HTTP method, stat
 
 ## Waterfall witness
 
-[`docs/_witnesses/otlp-trace-join-2026-08-19.txt`](../_witnesses/otlp-trace-join-2026-08-19.txt) captures a collector-backed server span. Provider-child linkage is pinned by `TestProviderSpanContextCreatesChild`: the child retains the 128-bit trace ID, names the server span ID as `parentSpanId`, and receives a fresh span ID. This separates total gateway duration from provider-attempt duration without recording payload content.
+[`docs/_witnesses/otlp-trace-join-2026-08-19.txt`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/otlp-trace-join-2026-08-19.txt) captures a collector-backed server span. Provider-child linkage is pinned by `TestProviderSpanContextCreatesChild`: the child retains the 128-bit trace ID, names the server span ID as `parentSpanId`, and receives a fresh span ID. This separates total gateway duration from provider-attempt duration without recording payload content.

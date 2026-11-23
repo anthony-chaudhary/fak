@@ -75,7 +75,7 @@ witness/effect readback, required reconciliation, and an `ultra` SOL route. This
 strong resolver/schema witness and deliberately says `launched=0`.
 
 The committed live witness
-[`orchestration-status-live-2026-08-18.json`](../_witnesses/orchestration-status-live-2026-08-18.json)
+[`orchestration-status-live-2026-08-18.json`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/orchestration-status-live-2026-08-18.json)
 shows a real three-worker launch: two logs had a completed turn and one worker was live
 with an active turn. It proves spawn plus observation. It contains no effect, witness,
 reconciliation, or accepted-outcome record, so it cannot prove useful-work completion.

@@ -1,3 +1,8 @@
+---
+title: "Terminal-Bench 4 Reproduction Manual & Parity Envelope Specification"
+description: "Reproduction manual and parity rules for Terminal-Bench 4, comparing the fak harness with its in-kernel engine against opencode with a llama-server baseline on identical weights."
+---
+
 # Terminal-Bench 4 Reproduction Manual & Parity Envelope Specification
 
 > **Audience:** Researchers, benchmark operators, and engineers replicating or auditing the Terminal-Bench 4 (TB4) evaluation comparing `fak harness` (in-kernel model engine) against `opencode` (`llama-server` baseline reference).

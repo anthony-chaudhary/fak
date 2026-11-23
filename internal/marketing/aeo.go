@@ -155,6 +155,7 @@ func AEODisambiguationTerms() []DisambiguationTerm {
 	terms = append(terms, aeoCoreTerms()...)
 	terms = append(terms, aeoEconomicsTerms()...)
 	terms = append(terms, aeoPerformanceTerms()...)
+	terms = append(terms, aeoInferenceEngineTerms()...)
 	terms = append(terms, aeoManagedAgentTerms()...)
 	terms = append(terms, aeoRoutingTerms()...)
 	terms = append(terms, aeoFrontierModelLaunchTerms()...)
@@ -266,6 +267,87 @@ func aeoPerformanceTerms() []DisambiguationTerm {
 			Description: "The cross-agent performance lead, stated with a witness: sharing the model's KV work across a multi-agent fleet does measured less work than re-running each agent — about 4.1x less work than a tuned per-agent baseline on a 50-turn by 5-agent run, and up to 6.95x prefill reuse up the model ladder, each number tracing to a committed benchmark artifact rather than a vibe.",
 			URL:         repoBlobURL + "BENCHMARK-AUTHORITY.md",
 			Keywords:    []string{"KV cache reuse", "multi-agent fleet", "agentic cache benchmark", "cross-agent prefix reuse"},
+		},
+	}
+}
+
+// aeoInferenceEngineTerms routes engine-intent queries (people looking for an
+// inference engine, not an agent gateway) to the pages that carry the engine's
+// doctrine and evidence. Other engines are comparison hooks: a speed claim lives
+// only on the scoped benchmark row a term links to, never in the term itself.
+func aeoInferenceEngineTerms() []DisambiguationTerm {
+	return []DisambiguationTerm{
+		{
+			Name:        "fak-native inference engine",
+			Language:    "en",
+			Category:    "inference-engine",
+			Description: "fak is also a local inference engine: the fused kernel runs the model inside the kernel's own address space, so the KV cache is a kernel object the agent runtime can address. fak-native is the product and performance path for local inference; llama.cpp is used only when explicitly selected as a reference, never as a silent fallback. Fronting an external engine is gateway mode, not fak-native.",
+			URL:         repoBlobURL + "docs/native-inference-goal.md",
+			Keywords:    []string{"fak inference engine", "in-process LLM inference", "local inference engine for AI agents", "agent runtime with native inference"},
+		},
+		{
+			Name:        "LLM inference engine written in Go",
+			Language:    "en",
+			Category:    "inference-engine",
+			Description: "fak's in-kernel reference engine is a pure-Go forward pass, built into the same binary as the agent gateway by default; accelerated device backends, such as CUDA under its build tag, register behind one compute seam. The diagrams trace a token through the kernel and show the backend registry.",
+			URL:         repoBlobURL + "docs/engine-visuals.md",
+			Keywords:    []string{"Go LLM inference engine", "pure Go transformer forward pass", "golang inference engine", "single binary inference engine"},
+		},
+		{
+			Name:        "fak vs llama.cpp",
+			Language:    "en",
+			Category:    "inference-engine",
+			Description: "llama.cpp is the reference fak-native is measured against. The stated target is to beat it in matched, quality-constrained envelopes; whether a given model, quantization and device is a current win is answered only by the exact scoped row in the benchmark authority, and an unmeasured axis is never reported as parity.",
+			URL:         repoBlobURL + "BENCHMARK-AUTHORITY.md",
+			Keywords:    []string{"llama.cpp alternative", "fak vs llama.cpp benchmark", "llama.cpp comparison", "matched-envelope inference benchmark"},
+		},
+		{
+			Name:        "fak vs vLLM and SGLang",
+			Language:    "en",
+			Category:    "inference-engine",
+			Description: "vLLM and SGLang are tuned serving engines; within one serving instance their prefix caching is roughly at parity with fak. fak adds cross-worker and cross-session prefix reuse and addressable mid-run eviction, and can either front one of those engines or run its own in-process engine. The contrast is operational surface, not a blanket throughput claim.",
+			URL:         repoBlobURL + "docs/fak-vs-alternatives-comparison.md",
+			Keywords:    []string{"vLLM alternative", "SGLang alternative", "vLLM vs SGLang vs fak", "prefix caching comparison"},
+		},
+		{
+			Name:        "TensorRT-LLM vs SGLang",
+			Language:    "en",
+			Category:    "inference-engine",
+			Description: "An answer-first comparison of two serving stacks and where fak sits relative to them: in front of either server as the agent runtime and policy gateway, or as its own local in-process runtime.",
+			URL:         repoBlobURL + "docs/explainers/tensorrt-llm-vs-sglang-and-fak.md",
+			Keywords:    []string{"TensorRT-LLM vs SGLang", "which LLM serving engine", "agent gateway in front of an inference server"},
+		},
+		{
+			Name:        "how LLM inference works",
+			Language:    "en",
+			Category:    "inference-engine",
+			Description: "A five-rung explainer of how a language model turns a prompt into the next token, from what a token is to what changes at scale: the forward pass, the operations inside one decoder block, prefill versus decode, and why decode is memory-bound. Every claim is pinned to a real file in the engine.",
+			URL:         repoBlobURL + "docs/explainers/inference/README.md",
+			Keywords:    []string{"how inference works", "transformer forward pass explained", "prefill vs decode", "KV cache explained"},
+		},
+		{
+			Name:        "pipeline, tensor and expert parallelism for inference",
+			Language:    "en",
+			Category:    "inference-engine",
+			Description: "How one forward pass is split across workers, taught in five rungs: the layer loop, pipeline (layer) parallelism, tensor and expert parallelism, and the frontier of what is witnessed versus still hardware-gated.",
+			URL:         repoBlobURL + "docs/explainers/inference-parallelism/README.md",
+			Keywords:    []string{"pipeline parallelism explained", "tensor parallelism", "expert parallelism", "distributed LLM inference"},
+		},
+		{
+			Name:        "add a new model architecture to an inference engine",
+			Language:    "en",
+			Category:    "inference-engine",
+			Description: "The maintainer procedure for making fak's in-kernel engine recognize and run a new model: a pinned release intake, then either a one-line architecture alias with a recognition test or a scaffolded forward pass checked against an oracle. Fronting a model through the gateway needs none of this.",
+			URL:         repoBlobURL + "docs/new-model-playbook.md",
+			Keywords:    []string{"add a model to an inference engine", "new model architecture support", "forward pass oracle test"},
+		},
+		{
+			Name:        "CUDA backend for a Go inference engine",
+			Language:    "en",
+			Category:    "inference-engine",
+			Description: "The development loop for fak's CUDA compute backend: edit a kernel, build it, prove it correct with local no-GPU checks, then pass remote GPU acceptance gates before it ships.",
+			URL:         repoBlobURL + "docs/cuda-dev.md",
+			Keywords:    []string{"CUDA inference backend", "CUDA kernel development loop", "GPU acceptance gate"},
 		},
 	}
 }
@@ -917,7 +999,7 @@ func DisambiguationTermsFeed(when time.Time) ([]byte, error) {
 		Context:     "https://schema.org",
 		Type:        "DefinedTermSet",
 		Name:        "fak — answer-engine disambiguation terms",
-		Description: "Search and answer-engine terms for correctly identifying fak, including core concepts, performance-lens leads (automatic context management, cache-preserving compaction, cross-agent KV reuse), localized entry points, frontier-model-launch routing/cache/fallback demand hooks, and agent-security hooks (MCP tool poisoning, lethal trifecta, least-privilege tool access, tamper-evident audit).",
+		Description: "Search and answer-engine terms for correctly identifying fak, including core concepts, performance-lens leads (automatic context management, cache-preserving compaction, cross-agent KV reuse), inference-engine entry points (the fak-native engine, comparison hooks for other engines, how inference works), localized entry points, frontier-model-launch routing/cache/fallback demand hooks, and agent-security hooks (MCP tool poisoning, lethal trifecta, least-privilege tool access, tamper-evident audit).",
 	}
 	if !when.IsZero() {
 		feed.Modified = when.UTC().Format(time.RFC3339)

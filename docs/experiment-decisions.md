@@ -1,3 +1,8 @@
+---
+title: "Evaluate and replay native performance decisions"
+description: "Use fak's transaction gate to evaluate a native-performance change against matched baseline and candidate receipts, record the keep or reject decision, and replay it later."
+---
+
 # Evaluate and replay native performance decisions
 
 Use the existing transaction gate to evaluate a supplied profile, selected

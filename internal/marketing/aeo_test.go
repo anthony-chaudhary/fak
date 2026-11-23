@@ -479,3 +479,54 @@ func TestConfigAnswersMarkdownKeepsVisibleAnswersWithJSONLD(t *testing.T) {
 		}
 	}
 }
+
+func TestInferenceEngineTermsRouteToEnginePagesAndKeepTheFence(t *testing.T) {
+	var engine []DisambiguationTerm
+	for _, term := range AEODisambiguationTerms() {
+		if term.Category == "inference-engine" {
+			engine = append(engine, term)
+		}
+	}
+	if len(engine) < 8 {
+		t.Fatalf("inference-engine terms = %d, want at least 8", len(engine))
+	}
+
+	txt := LlmsTermsText(time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC))
+	for _, want := range []string{
+		"## inference-engine",
+		"fak-native inference engine",
+		"LLM inference engine written in Go",
+		"fak vs llama.cpp",
+		"fak vs vLLM and SGLang",
+		"how LLM inference works",
+	} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("llms terms missing engine hook %q", want)
+		}
+	}
+
+	routed := map[string]bool{}
+	for _, term := range engine {
+		if !strings.HasPrefix(term.URL, repoBlobURL) {
+			t.Errorf("%q routes off-repo: %s", term.Name, term.URL)
+		}
+		routed[strings.TrimPrefix(term.URL, repoBlobURL)] = true
+		// Another engine's name is a comparison hook. A speed verdict belongs to a
+		// scoped benchmark row, so a term may state a target but never a result.
+		lower := strings.ToLower(term.Description)
+		for _, banned := range []string{"faster than", "outperforms", "x faster", "beats llama.cpp", "beats vllm"} {
+			if strings.Contains(lower, banned) {
+				t.Errorf("%q states an unscoped speed result (%q)", term.Name, banned)
+			}
+		}
+	}
+	for _, want := range []string{
+		"docs/native-inference-goal.md",
+		"BENCHMARK-AUTHORITY.md",
+		"docs/explainers/inference/README.md",
+	} {
+		if !routed[want] {
+			t.Errorf("no inference-engine term routes to %s", want)
+		}
+	}
+}

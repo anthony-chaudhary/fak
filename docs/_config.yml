@@ -72,6 +72,11 @@ exclude:
   # would surface strategic positioning. The work they distribute lives in the
   # real docs above; the drafts stay out of the index.
   - launch/
+  # Work tickets: per-change acceptance records written for the people and agents
+  # doing the work. They carry no reader-facing answer, and several hundred thin
+  # pages dilute the site an answer engine samples. The outcome each one tracked is
+  # described in the real docs; the ticket stays in the repository.
+  - tickets/
   # Frozen historical snapshots (e.g. the pre-rewrite README). They are kept for
   # provenance, not reading: their links point at a tree that has since moved, so
   # publishing them creates stale duplicate content that competes with the live

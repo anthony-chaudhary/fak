@@ -1,3 +1,8 @@
+---
+title: "CUDA capture-once: required-device witness"
+description: "How to run the required-device witness for fak's CUDA capture-once dense-F32 single-session path on an authorized GPU node. It makes no performance or serving-parity claim."
+---
+
 # Required-device capture-once witness
 
 Scope: the landed capture-once dense-F32 single-session path plus this witness.

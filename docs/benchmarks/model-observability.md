@@ -1,3 +1,8 @@
+---
+title: "Model inference observability spine"
+description: "modelperfobs turns any OpenAI-compatible model server into request-level, queryable evidence without requiring a patched backend."
+---
+
 # Model inference observability spine
 
 `modelperfobs` turns any OpenAI-compatible model server into request-level,

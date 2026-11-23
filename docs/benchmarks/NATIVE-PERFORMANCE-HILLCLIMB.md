@@ -272,6 +272,6 @@ why a run is limited; only end-to-end experiment receipts may claim a throughput
 | Real sanctioned CUDA bundle | **OPEN** | No real CUDA profiler capture is claimed or committed by this change. |
 
 The scrubbed status record is
-[`docs/_witnesses/native-performance-profile/README.md`](../_witnesses/native-performance-profile/README.md).
+[`docs/_witnesses/native-performance-profile/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/_witnesses/native-performance-profile/README.md).
 Synthetic fixtures are not hardware measurements, profiler artifacts, throughput evidence, or
 substitutes for the still-open sanctioned captures.
