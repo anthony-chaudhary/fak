@@ -258,6 +258,123 @@ func TestGatherNoSemverTag(t *testing.T) {
 	}
 }
 
+func TestComputePrereleaseNewerThanLatestReadsLatestLag(t *testing.T) {
+	th := DefaultThresholds()
+	// Newest tag v0.57.0 is a pre-release 194 commits / 8d behind; GitHub Latest is v0.56.0,
+	// 3409 commits / 41d behind. The newest-tag axis alone is very stale on commits, so use a
+	// tag lag inside the thresholds to prove Latest is what promotes the verdict.
+	f := Facts{
+		Reachable: true, LatestTag: "v0.57.0", CommitsBehind: 10, DaysBehind: 2, AgeDays: 2,
+		LatestRelease: "v0.56.0", ReleaseReachable: true,
+		ReleaseCommitsBehind: 3409, ReleaseDaysBehind: 41, ReleaseAgeDays: 41,
+	}
+	if got := tagLevel(f, th); got != Fresh {
+		t.Fatalf("newest-tag axis should read fresh on its own, got %v", got)
+	}
+	p := Compute(f, th, "/ws")
+	if p.Verdict != VeryStale.String() || p.OK {
+		t.Fatalf("Latest 3409 commits behind must be very_stale and gate, got verdict=%q ok=%v", p.Verdict, p.OK)
+	}
+	if p.LatestReleaseCheck != ReleaseMismatch {
+		t.Fatalf("LatestReleaseCheck = %q, want %q", p.LatestReleaseCheck, ReleaseMismatch)
+	}
+	if p.ReleaseCommitsBehind != 3409 || p.ReleaseAgeDays != 41 {
+		t.Fatalf("release lag not surfaced: commits=%d age=%v", p.ReleaseCommitsBehind, p.ReleaseAgeDays)
+	}
+	if !strings.Contains(p.Reason, "v0.56.0") || !strings.Contains(p.NextAction, "promote v0.57.0") {
+		t.Fatalf("reason/next action must name Latest and the promotion, got %q / %q", p.Reason, p.NextAction)
+	}
+	if !strings.Contains(Render(p), "GitHub Latest: v0.56.0 (mismatch)") {
+		t.Fatalf("Render should show the Latest mismatch, got %q", Render(p))
+	}
+
+	// A fresh Latest that is merely older than a just-cut pre-release is a mismatch, not a gate.
+	small := f
+	small.ReleaseCommitsBehind, small.ReleaseDaysBehind, small.ReleaseAgeDays = 12, 3, 3
+	ps := Compute(small, th, "/ws")
+	if ps.Verdict != Fresh.String() || !ps.OK || ps.LatestReleaseCheck != ReleaseMismatch {
+		t.Fatalf("small Latest lag: verdict=%q ok=%v check=%q", ps.Verdict, ps.OK, ps.LatestReleaseCheck)
+	}
+	if !strings.Contains(ps.NextAction, "promote v0.57.0") {
+		t.Fatalf("fresh mismatch should still point at promotion, got %q", ps.NextAction)
+	}
+}
+
+func TestComputeLatestEqualsNewestTag(t *testing.T) {
+	th := DefaultThresholds()
+	f := Facts{
+		Reachable: true, LatestTag: "v1.2.3", CommitsBehind: 5, DaysBehind: 1, AgeDays: 1,
+		LatestRelease: "v1.2.3", ReleaseReachable: true,
+		ReleaseCommitsBehind: 5, ReleaseDaysBehind: 1, ReleaseAgeDays: 1,
+	}
+	p := Compute(f, th, "/ws")
+	if p.Verdict != Fresh.String() || !p.OK || p.LatestReleaseCheck != ReleaseMatch {
+		t.Fatalf("equal anchors: verdict=%q ok=%v check=%q", p.Verdict, p.OK, p.LatestReleaseCheck)
+	}
+	if strings.Contains(p.NextAction, "promote") {
+		t.Fatalf("matching Latest must not ask for a promotion, got %q", p.NextAction)
+	}
+}
+
+func TestComputeLatestUncheckedOrUnresolvedNeverPromotes(t *testing.T) {
+	th := DefaultThresholds()
+	base := Facts{Reachable: true, LatestTag: "v1.2.3", CommitsBehind: 5, DaysBehind: 1}
+	if p := Compute(base, th, "/ws"); p.LatestReleaseCheck != ReleaseUnchecked || p.Verdict != Fresh.String() {
+		t.Fatalf("no Latest supplied: check=%q verdict=%q", p.LatestReleaseCheck, p.Verdict)
+	}
+	unresolved := base
+	unresolved.LatestRelease = "v0.1.0"
+	unresolved.ReleaseCommitsBehind = 9999 // must be ignored when not resolved
+	if p := Compute(unresolved, th, "/ws"); p.LatestReleaseCheck != ReleaseUnresolved || p.Verdict != Fresh.String() {
+		t.Fatalf("unresolved Latest: check=%q verdict=%q", p.LatestReleaseCheck, p.Verdict)
+	}
+}
+
+func TestGatherWithReleaseMeasuresLatestLag(t *testing.T) {
+	const day = 86400
+	const relEpoch = 1000000
+	const tagEpoch = relEpoch + 33*day
+	run := fakeRunner(t, map[string]string{
+		"git --no-optional-locks rev-parse HEAD":                      "headsha",
+		"git --no-optional-locks tag --sort=-v:refname --merged HEAD": "v0.57.0\nv0.56.0",
+		"git --no-optional-locks rev-list -n1 v0.57.0":                "tagsha",
+		"git --no-optional-locks rev-list --count v0.57.0..HEAD":      "194",
+		"git --no-optional-locks rev-list --count v0.56.0..HEAD":      "3409",
+		"git --no-optional-locks log -1 --format=%ct v0.57.0":         itoa64(tagEpoch),
+		"git --no-optional-locks log -1 --format=%ct v0.56.0":         itoa64(relEpoch),
+		"git --no-optional-locks log -1 --format=%ct HEAD":            itoa64(relEpoch + 40*day),
+	})
+	f := GatherWithRelease(context.Background(), run, fixedClock(relEpoch+41*day), "/repo", "", " v0.56.0 ")
+	if f.LatestRelease != "v0.56.0" || !f.ReleaseReachable {
+		t.Fatalf("Latest not resolved: %+v", f)
+	}
+	if f.ReleaseCommitsBehind != 3409 || f.ReleaseDaysBehind != 40 || f.ReleaseAgeDays != 41 {
+		t.Fatalf("release lag = %d / %v / %v, want 3409 / 40 / 41", f.ReleaseCommitsBehind, f.ReleaseDaysBehind, f.ReleaseAgeDays)
+	}
+	if f.CommitsBehind != 194 || f.AgeDays != 8 {
+		t.Fatalf("newest-tag lag = %d / age %v, want 194 / 8", f.CommitsBehind, f.AgeDays)
+	}
+
+	// A Latest tag absent from the clone stays unresolved.
+	g := GatherWithRelease(context.Background(), run, fixedClock(relEpoch+41*day), "/repo", "", "v9.9.9")
+	if g.ReleaseReachable || g.LatestRelease != "v9.9.9" {
+		t.Fatalf("unknown Latest should be unresolved, got %+v", g)
+	}
+}
+
+func TestGatherReadsLatestFromEnv(t *testing.T) {
+	t.Setenv(LatestReleaseEnv, "v1.0.0")
+	run := fakeRunner(t, map[string]string{
+		"git --no-optional-locks rev-parse HEAD":                      "headsha",
+		"git --no-optional-locks tag --sort=-v:refname --merged HEAD": "v1.1.0\nv1.0.0",
+		"git --no-optional-locks rev-list --count v1.0.0..HEAD":       "7",
+	})
+	f := Gather(context.Background(), run, fixedClock(5000), "/repo", "")
+	if f.LatestRelease != "v1.0.0" || f.ReleaseCommitsBehind != 7 {
+		t.Fatalf("Gather must read %s, got %+v", LatestReleaseEnv, f)
+	}
+}
+
 func itoa64(n int64) string {
 	// local helper to avoid importing strconv in the test for one call
 	neg := n < 0

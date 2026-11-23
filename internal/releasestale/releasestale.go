@@ -28,6 +28,7 @@ package releasestale
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -119,6 +120,15 @@ type Facts struct {
 	DaysBehind    float64 // HEAD commit time minus tag commit time, in days (0 if unknown) — the TRUNK delta, frozen on a quiet trunk
 	AgeDays       float64 // wall-clock age of the tag: now minus tag commit time, in days (0 if unknown) — the real @latest publish age, which keeps advancing on a quiet trunk
 	VersionFile   string  // the VERSION marker at the working tree (e.g. "0.34.0"; "" if absent)
+
+	// The GitHub "Latest" release is a second anchor: install.sh resolves
+	// /releases/latest, so a newer tag published only as a pre-release leaves new users
+	// on the older Latest binary while the newest-tag axis above reads fresh.
+	LatestRelease        string  // tag GitHub marks Latest ("" when not supplied)
+	ReleaseReachable     bool    // the Latest tag resolved in git and its lag was measured
+	ReleaseCommitsBehind int     // rev-list --count LatestRelease..HEAD
+	ReleaseDaysBehind    float64 // HEAD commit time minus Latest commit time, in days
+	ReleaseAgeDays       float64 // now minus Latest commit time, in days
 }
 
 // Payload is the control-pane record: the schema/ok/verdict/finding/reason/next_action
@@ -141,7 +151,21 @@ type Payload struct {
 	VersionFile       string     `json:"version_file"`
 	VersionAheadOfTag bool       `json:"version_ahead_of_tag"`
 	Thresholds        Thresholds `json:"thresholds"`
+
+	LatestRelease        string  `json:"latest_release"`
+	LatestReleaseCheck   string  `json:"latest_release_check"`
+	ReleaseCommitsBehind int     `json:"release_commits_behind"`
+	ReleaseDaysBehind    float64 `json:"release_days_behind"`
+	ReleaseAgeDays       float64 `json:"release_age_days"`
 }
+
+// Outcomes for Payload.LatestReleaseCheck.
+const (
+	ReleaseUnchecked  = "unchecked"  // no Latest tag supplied
+	ReleaseUnresolved = "unresolved" // supplied but not resolvable in this clone
+	ReleaseMatch      = "match"      // Latest is the newest tag
+	ReleaseMismatch   = "mismatch"   // Latest is not the newest tag (e.g. a newer pre-release)
+)
 
 // Compute is the pure core: it turns Facts + Thresholds into the full Payload (verdict,
 // gate bit, and the operator next-action). No git, no clock, no I/O.
@@ -157,10 +181,17 @@ func Compute(f Facts, t Thresholds, workspace string) Payload {
 		AgeDays:       f.AgeDays,
 		VersionFile:   f.VersionFile,
 		Thresholds:    t,
+
+		LatestRelease:        f.LatestRelease,
+		LatestReleaseCheck:   releaseCheck(f),
+		ReleaseCommitsBehind: f.ReleaseCommitsBehind,
+		ReleaseDaysBehind:    f.ReleaseDaysBehind,
+		ReleaseAgeDays:       f.ReleaseAgeDays,
 	}
 	p.VersionAheadOfTag = versionAheadOfTag(f.VersionFile, f.LatestTag)
 
 	v := classify(f, t)
+	releaseBinds := releaseLevel(f, t) > tagLevel(f, t)
 	p.Verdict = v.String()
 	// OK is the gate bit: only a proven lag (Stale/VeryStale) fails. Unknown is advisory
 	// — a gate must not red on the absence of evidence (e.g. no tag yet, git unreadable).
@@ -180,6 +211,10 @@ func Compute(f Facts, t Thresholds, workspace string) Payload {
 		p.Finding = "publish_fresh"
 		p.Reason = freshReason(f)
 		p.NextAction = "hold; `@latest` tracks HEAD within the staleness thresholds"
+		if p.LatestReleaseCheck == ReleaseMismatch {
+			p.Reason += "; GitHub Latest is " + f.LatestRelease + ", not the newest tag " + f.LatestTag
+			p.NextAction = "promote " + f.LatestTag + " to the GitHub Latest release so /releases/latest stops serving " + f.LatestRelease
+		}
 	case Stale, VeryStale:
 		p.Finding = "publish_stale"
 		if v == VeryStale {
@@ -187,8 +222,37 @@ func Compute(f Facts, t Thresholds, workspace string) Payload {
 		}
 		p.Reason = lagReason(f, v)
 		p.NextAction = nextAction(p)
+		if releaseBinds {
+			p.Reason = releaseLagReason(f, v)
+			p.NextAction = "promote " + f.LatestTag + " (or a newer cut) to the GitHub Latest release so /releases/latest tracks HEAD"
+		}
 	}
 	return p
+}
+
+// releaseCheck compares the GitHub Latest release with the newest tag.
+func releaseCheck(f Facts) string {
+	switch {
+	case f.LatestRelease == "":
+		return ReleaseUnchecked
+	case !f.ReleaseReachable:
+		return ReleaseUnresolved
+	case f.LatestRelease == f.LatestTag:
+		return ReleaseMatch
+	default:
+		return ReleaseMismatch
+	}
+}
+
+func releaseLagReason(f Facts, v Verdict) string {
+	level := "stale"
+	if v == VeryStale {
+		level = "very stale"
+	}
+	return "the GitHub Latest release is " + level + ": " + f.LatestRelease + " lags HEAD by " +
+		strconv.Itoa(f.ReleaseCommitsBehind) + " commit(s) / " + days(f.ReleaseDaysBehind) + "d (published " +
+		days(f.ReleaseAgeDays) + "d ago) while the newest tag is " + f.LatestTag +
+		" — install.sh resolves /releases/latest, so new users get " + f.LatestRelease
 }
 
 // classify is the pure verdict rule. Order matters: very-stale dominates stale dominates
@@ -196,19 +260,41 @@ func Compute(f Facts, t Thresholds, workspace string) Payload {
 // trunk delta (DaysBehind), or the wall-clock publish age (AgeDays). AgeDays is the input
 // that keeps escalating on a quiet-but-unpublished trunk, where CommitsBehind and DaysBehind
 // both freeze — a tag whose HEAD stopped advancing still ages in calendar terms.
+//
+// When the GitHub Latest release resolved, the verdict is the worse of the two anchors:
+// a pre-release newer than Latest must not make the install path read fresh.
 func classify(f Facts, t Thresholds) Verdict {
 	if !f.Reachable || f.LatestTag == "" {
 		return Unknown
 	}
-	if f.CommitsBehind <= 0 {
-		// Nothing newer than the tag to publish — `@latest` already serves HEAD, so the
-		// wall-clock age of the tag is immaterial (you cannot cut a release with no new work).
+	return max(tagLevel(f, t), releaseLevel(f, t))
+}
+
+func tagLevel(f Facts, t Thresholds) Verdict {
+	if !f.Reachable || f.LatestTag == "" {
+		return Unknown
+	}
+	return lagLevel(f.CommitsBehind, f.DaysBehind, f.AgeDays, t)
+}
+
+// releaseLevel is Unknown (the lowest level) unless the Latest tag resolved, so an
+// unreadable Latest never promotes the verdict.
+func releaseLevel(f Facts, t Thresholds) Verdict {
+	if !f.Reachable || !f.ReleaseReachable {
+		return Unknown
+	}
+	return lagLevel(f.ReleaseCommitsBehind, f.ReleaseDaysBehind, f.ReleaseAgeDays, t)
+}
+
+func lagLevel(commits int, daysBehind, age float64, t Thresholds) Verdict {
+	if commits <= 0 {
+		// Nothing newer than the anchor to publish, so its wall-clock age is immaterial.
 		return Fresh
 	}
-	if atLeast(f.CommitsBehind, t.VeryStaleCommits) || atLeastF(f.DaysBehind, t.VeryStaleDays) || atLeastF(f.AgeDays, t.VeryStaleDays) {
+	if atLeast(commits, t.VeryStaleCommits) || atLeastF(daysBehind, t.VeryStaleDays) || atLeastF(age, t.VeryStaleDays) {
 		return VeryStale
 	}
-	if atLeast(f.CommitsBehind, t.StaleCommits) || atLeastF(f.DaysBehind, t.StaleDays) || atLeastF(f.AgeDays, t.StaleDays) {
+	if atLeast(commits, t.StaleCommits) || atLeastF(daysBehind, t.StaleDays) || atLeastF(age, t.StaleDays) {
 		return Stale
 	}
 	return Fresh
@@ -316,6 +402,13 @@ func Render(p Payload) string {
 		"  behind: " + strconv.Itoa(p.CommitsBehind) + " commit(s) / " + days(p.DaysBehind) + " day(s)",
 		"  published: " + days(p.AgeDays) + " day(s) ago (wall-clock @latest age)",
 	}
+	switch p.LatestReleaseCheck {
+	case ReleaseMatch, ReleaseMismatch:
+		lines = append(lines, "  GitHub Latest: "+p.LatestRelease+" ("+p.LatestReleaseCheck+") — "+
+			strconv.Itoa(p.ReleaseCommitsBehind)+" commit(s) behind, published "+days(p.ReleaseAgeDays)+" day(s) ago")
+	case ReleaseUnresolved:
+		lines = append(lines, "  GitHub Latest: "+p.LatestRelease+" (not resolvable in this clone)")
+	}
 	if p.VersionAheadOfTag {
 		lines = append(lines, "  note: VERSION ("+p.VersionFile+") is ahead of the tag — a cut landed untagged")
 	}
@@ -372,7 +465,19 @@ func RealClock() int64 { return time.Now().Unix() }
 // VERSION marker passed in by the caller, which already knows how to resolve it). It is
 // deliberately tolerant: any unreadable rung leaves its field zero/empty and Reachable
 // reflects whether the HEAD read itself worked.
+//
+// The GitHub Latest release tag comes from LatestReleaseEnv because git alone cannot see
+// the Latest flag; the cadence workflow sets it from the releases API.
 func Gather(ctx context.Context, run Runner, now Clock, root, versionFile string) Facts {
+	return GatherWithRelease(ctx, run, now, root, versionFile, os.Getenv(LatestReleaseEnv))
+}
+
+// LatestReleaseEnv names the env var carrying the tag GitHub marks as the Latest release.
+const LatestReleaseEnv = "FAK_RELEASE_LATEST_TAG"
+
+// GatherWithRelease is Gather with the Latest release tag supplied explicitly; "" skips
+// the second anchor.
+func GatherWithRelease(ctx context.Context, run Runner, now Clock, root, versionFile, latestRelease string) Facts {
 	if now == nil {
 		now = RealClock
 	}
@@ -398,9 +503,29 @@ func Gather(ctx context.Context, run Runner, now Clock, root, versionFile string
 			f.CommitsBehind = n
 		}
 	}
+	headEpoch := commitEpoch(ctx, run, root, "HEAD")
+	nowEpoch := now()
 	tagEpoch := commitEpoch(ctx, run, root, f.LatestTag)
-	f.DaysBehind = daysBetween(tagEpoch, commitEpoch(ctx, run, root, "HEAD"))
-	f.AgeDays = ageDays(tagEpoch, now())
+	f.DaysBehind = daysBetween(tagEpoch, headEpoch)
+	f.AgeDays = ageDays(tagEpoch, nowEpoch)
+
+	f.LatestRelease = strings.TrimSpace(latestRelease)
+	if f.LatestRelease == "" {
+		return f
+	}
+	cnt, ok := run(ctx, root, "git", "--no-optional-locks", "rev-list", "--count", f.LatestRelease+"..HEAD")
+	if !ok {
+		return f
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(cnt))
+	if err != nil {
+		return f
+	}
+	f.ReleaseReachable = true
+	f.ReleaseCommitsBehind = n
+	relEpoch := commitEpoch(ctx, run, root, f.LatestRelease)
+	f.ReleaseDaysBehind = daysBetween(relEpoch, headEpoch)
+	f.ReleaseAgeDays = ageDays(relEpoch, nowEpoch)
 	return f
 }
 

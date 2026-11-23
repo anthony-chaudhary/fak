@@ -83,18 +83,21 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Publish staleness (informational)
+      - name: Publish staleness
         # #1367: make the @latest-vs-HEAD publish lag a loud, MONITORED number on a
-        # live loop. `fak release-staleness` already computes it (commits + days behind
-        # the newest tag) and `make release-staleness{,-check}` / the cadencereport
-        # scoreboard card already surface it off the hot path — this wires the verb into
-        # the 2-hourly cadence tick so a VERY_STALE verdict is emitted by *someone* on a
-        # schedule. `--check` is run for its gate verdict but kept NON-GATING here:
-        # publish staleness is informational (the auto-cut steps below are what actually
-        # close the lag), matching the `WithPublishStaleness` contract. VERY_STALE is
-        # raised as a ::warning:: so it is visible without failing the tick.
+        # live loop. `fak release-staleness` computes commits + days behind the newest
+        # tag AND behind the GitHub Latest release (install.sh resolves /releases/latest,
+        # so a newer pre-release must not make the install path read fresh). This step
+        # only measures, so the auto-cut steps below still run; the final
+        # "Fail on very stale publish" step turns VERY_STALE into a red tick.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # An unreadable Latest leaves the second anchor unchecked, never a false red.
+          FAK_RELEASE_LATEST_TAG="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+          export FAK_RELEASE_LATEST_TAG
+          echo "GitHub Latest release: ${FAK_RELEASE_LATEST_TAG:-(unreadable)}"
           set +e
           go run ./cmd/fak release-staleness --json --check > staleness.json
           code=$?
@@ -105,10 +108,13 @@ jobs:
           days="$(python -c 'import json; print(json.load(open("staleness.json"))["days_behind"])')"
           latest="$(python -c 'import json; print(json.load(open("staleness.json")).get("latest_tag") or "(none)")')"
           nextact="$(python -c 'import json; print(json.load(open("staleness.json")).get("next_action") or "")')"
+          relcheck="$(python -c 'import json; d=json.load(open("staleness.json")); print("%s %s, %s commit(s) / %sd old" % (d.get("latest_release") or "(none)", d.get("latest_release_check") or "unchecked", d.get("release_commits_behind", 0), d.get("release_age_days", 0)))')"
           {
             echo "## Publish staleness: $verdict"
             echo ""
-            echo "\`@latest\` = $latest — $commits commit(s) / ${days}d behind HEAD (gate exit=$code, informational)."
+            echo "\`@latest\` = $latest — $commits commit(s) / ${days}d behind HEAD (gate exit=$code)."
+            echo ""
+            echo "GitHub Latest release: $relcheck."
             [ -n "$nextact" ] && echo "" && echo "$nextact"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$verdict" = "very_stale" ]; then
@@ -426,3 +432,17 @@ jobs:
           name: release-lease-receipt-${{ github.run_id }}-${{ github.run_attempt }}
           path: release-lease-receipt.json
           if-no-files-found: error
+
+      - name: Fail on very stale publish
+        # Runs last so the auto-cut above gets its chance to close the lag first; a tick
+        # that published a release measured a pre-cut snapshot and is not failed on it.
+        if: steps.cut.outputs.sha == ''
+        run: |
+          set -euo pipefail
+          verdict="$(python -c 'import json; print(json.load(open("staleness.json"))["verdict"])')"
+          if [ "$verdict" = "very_stale" ]; then
+            reason="$(python -c 'import json; print(json.load(open("staleness.json")).get("reason") or "")')"
+            echo "::error::publish staleness VERY_STALE — $reason"
+            exit 1
+          fi
+          echo "publish staleness: $verdict"
