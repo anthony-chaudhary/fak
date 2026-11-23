@@ -141,6 +141,9 @@ func TestSingleReapLifecycleAndRefusals(t *testing.T) {
 				if kind == "swapped sibling pointer" && result.Code != "REAP_PATH_REFUSED" {
 					t.Fatalf("swapped identity reached content proof: %+v", result)
 				}
+				if kind == "locked registration" && !strings.Contains(result.Detail, "locked") {
+					t.Fatalf("a locked registration must be named in the refusal: %+v", result)
+				}
 				if kind == "unknown before" && result.Code != "REAP_PRESTATE_UNKNOWN" {
 					t.Fatalf("unknown inventory bypassed: %+v %s", result, &stderr)
 				}

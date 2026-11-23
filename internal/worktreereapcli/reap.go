@@ -92,7 +92,10 @@ func RunSingle(stdout, stderr io.Writer, root, target, superseded string, maxWai
 		// Not a registered worker and not a recoverable residue. Surface the
 		// classifier's specific refusal (it re-verified every condition and
 		// preserved every byte) rather than a bare registration refusal, so the
-		// safety-critical live-owner / live-lease reasons stay visible.
+		// safety-critical live-owner / live-lease reasons stay visible. The
+		// registration refusal rides along: a locked or aliased registration is
+		// otherwise reported only as the residue classifier's unrelated reason.
+		res.Detail = strings.TrimPrefix(res.Detail+"; registration: "+err.Error(), "; ")
 		return emit(res, 1)
 	}
 	fmt.Fprintf(stderr, "REAP_PROGRESS code=REAP_STARTED max_wait=%s\n", maxWait)
