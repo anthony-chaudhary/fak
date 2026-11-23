@@ -29,6 +29,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/interspersedflags"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -1059,6 +1060,10 @@ func extractCommittedTipWithin(ctx context.Context, repo, tip string) (string, e
 	}()
 	select {
 	case got := <-done:
+		var budgetErr *committedtree.BudgetError
+		if errors.As(got.err, &budgetErr) {
+			return "", got.err
+		}
 		if got.err != nil && strings.Contains(strings.ToLower(got.err.Error()), "timed out") {
 			return "", context.DeadlineExceeded
 		}
@@ -1350,13 +1355,24 @@ func runValidateTestCommand(ctx context.Context, repo, dir, tip string, args []s
 }
 
 func finishValidateTimeout(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase string, asJSON bool) int {
+	detail := fmt.Sprintf("validation timeout after %s", time.Duration(res.TimeoutMS)*time.Millisecond)
+	return finishValidateTimeoutDetail(stdout, res, recorder, phase, detail, asJSON)
+}
+
+// extractBudgetTimeoutDetail explains a tip extraction stopped by the
+// committed-tree budget while the validation deadline was still live: raising
+// the validation timeout cannot cure it, so the detail names the binding knob.
+func extractBudgetTimeoutDetail(budget, validateTimeout time.Duration) string {
+	return fmt.Sprintf("committed tree extraction timed out after its own %s budget, inside the %s validation timeout; raise %s (e.g. %s=10m), a longer validation timeout cannot cure this",
+		budget, validateTimeout, committedtree.ExtractionBudgetEnv, committedtree.ExtractionBudgetEnv)
+}
+
+func finishValidateTimeoutDetail(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase, detail string, asJSON bool) int {
 	res.OK = false
 	res.Partial = true
 	res.TimedOut = true
 	res.Reason = "TIMEOUT"
-	res.Failures = append(res.Failures, ciPreflightFailure{
-		Step: phase, Detail: fmt.Sprintf("validation timeout after %s", time.Duration(res.TimeoutMS)*time.Millisecond),
-	})
+	res.Failures = append(res.Failures, ciPreflightFailure{Step: phase, Detail: detail})
 	res.Overlays.Skipped = subtractValidatePaths(res.Mine, res.Overlays.Checked)
 	completed := make(map[string]bool, len(res.Phases))
 	for _, timing := range res.Phases {

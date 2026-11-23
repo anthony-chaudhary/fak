@@ -39,6 +39,10 @@ const (
 // extraction still fails closed fast as a typed timeout, never a stall.
 const extractionBudgetEnv = "FAK_COMMITTEDTREE_EXTRACT_BUDGET"
 
+// ExtractionBudgetEnv is the knob callers name when this budget, not their own
+// deadline, stopped an extraction.
+const ExtractionBudgetEnv = extractionBudgetEnv
+
 // extractionBudget resolves the per-invocation extraction budget: the env
 // override when it parses to a positive duration, defaultTimeout otherwise.
 func extractionBudget() time.Duration {
@@ -49,6 +53,20 @@ func extractionBudget() time.Duration {
 	}
 	return defaultTimeout
 }
+
+// BudgetError reports that extraction ran out of its own budget. That budget
+// is independent of any caller deadline, so the message names the one knob that
+// extends it; it unwraps to context.DeadlineExceeded.
+type BudgetError struct {
+	Budget time.Duration
+}
+
+func (e *BudgetError) Error() string {
+	return fmt.Sprintf("committed tree extraction timed out after %s (raise %s to extend this budget): %v",
+		e.Budget, extractionBudgetEnv, context.DeadlineExceeded)
+}
+
+func (e *BudgetError) Unwrap() error { return context.DeadlineExceeded }
 
 // budgetKey carries the resolved extraction budget on the extraction context so
 // timeout diagnostics report the budget that actually bounded the run.
@@ -575,7 +593,7 @@ func extractionStopError(ctx context.Context) error {
 		if v, ok := ctx.Value(budgetKey{}).(time.Duration); ok {
 			budget = v
 		}
-		return fmt.Errorf("committed tree extraction timed out after %s: %w", budget, ctx.Err())
+		return &BudgetError{Budget: budget}
 	}
 	return fmt.Errorf("committed tree extraction canceled: %w", ctx.Err())
 }

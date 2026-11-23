@@ -53,9 +53,7 @@ func resolveRootWithin(ctx context.Context, explicit string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func extractCommittedTip(repo, object string) (string, error) {
-	return committedtree.Extract(repo, object)
-}
+var extractCommittedTip = committedtree.Extract
 
 type goPkg struct {
 	ImportPath string

@@ -8,6 +8,9 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 )
 
 type validateWorkspaceRequest struct {
@@ -67,6 +70,12 @@ func prepareValidateWorkspace(req validateWorkspaceRequest) (preparedValidateWor
 		detail := context.DeadlineExceeded.Error()
 		if err != nil {
 			detail = err.Error()
+		}
+		var budgetErr *committedtree.BudgetError
+		if req.ctx.Err() == nil && errors.As(err, &budgetErr) {
+			detail = extractBudgetTimeoutDetail(budgetErr.Budget, time.Duration(req.result.TimeoutMS)*time.Millisecond)
+			phase.finishAs("timeout", detail)
+			return preparedValidateWorkspace{}, finishValidateTimeoutDetail(req.stdout, req.result, req.recorder, "extract_tip", detail, req.asJSON), true
 		}
 		phase.finishAs("timeout", detail)
 		return preparedValidateWorkspace{}, finishValidateTimeout(req.stdout, req.result, req.recorder, "extract_tip", req.asJSON), true
