@@ -3,6 +3,11 @@
 // immutable manifest lookup and falls back when no exact compatible entry exists.
 package computetune
 
+// The paired sign test in this file is adapted from magnitudedev/magnitude,
+// inference/seismic/measure/src/statistics.rs at commit
+// 8d7dbcc1baf4eb3ae7f1c3449dd463f3b375f576 (Apache-2.0). Changes were made: it
+// is re-expressed in Go and bound to Tune's challenger-versus-fallback admission.
+
 import (
 	"context"
 	"crypto/sha256"
@@ -83,6 +88,24 @@ type Policy struct {
 	TimerDomain       string        `json:"timer_domain"`
 	FallbackCandidate string        `json:"fallback_candidate"`
 	SelectionOverhead time.Duration `json:"selection_overhead"`
+	// SignTestAlpha, when positive, makes a challenger earn its place over the
+	// fallback through a paired sign test instead of a lower median alone. It is
+	// the error rate of the whole selection for one profile: it is split evenly
+	// over the challengers compared. Zero keeps median-only selection.
+	SignTestAlpha float64 `json:"sign_test_alpha,omitempty"`
+}
+
+// SignTestResult is the receipt of one paired comparison against the fallback.
+// Ratios holds each round's challenger cost over the fallback cost measured in
+// that same round; a round is ahead when its ratio is below one. Alpha is the
+// share of the policy's error rate this one comparison was run at.
+type SignTestResult struct {
+	Alpha  float64   `json:"alpha"`
+	Rounds int       `json:"rounds"`
+	Ahead  int       `json:"ahead"`
+	Ratios []float64 `json:"ratios,omitempty"`
+	Wealth float64   `json:"wealth"`
+	Leads  bool      `json:"leads"`
 }
 
 // CandidateResult preserves failures instead of silently removing them.
@@ -92,6 +115,7 @@ type CandidateResult struct {
 	RefusalReason string          `json:"refusal_reason,omitempty"`
 	Samples       []time.Duration `json:"samples,omitempty"`
 	Statistic     time.Duration   `json:"statistic,omitempty"`
+	SignTest      *SignTestResult `json:"sign_test,omitempty"`
 }
 
 // ProfileResult is the inspectable tuning receipt for one profile.
@@ -186,20 +210,25 @@ func (m Manifest) Digest() (string, error) {
 // Candidate validation precedes benchmark timing, and lookup fails closed.
 // Tune deterministically enumerates candidates, validates output before any
 // timing, then selects the lowest median. Failed candidates remain in the report.
+// With Policy.SignTestAlpha set, a lower median only nominates a challenger: it
+// replaces the fallback when it also leads a paired sign test against it.
 func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, reference Candidate, correct Correct, measure Measure, policy Policy) (Manifest, Report, error) {
 	if len(profiles) == 0 || len(candidates) == 0 || reference == nil || correct == nil || measure == nil {
 		return Manifest{}, Report{}, errors.New("computetune: incomplete tuning inputs")
 	}
-	if policy.Warmup < 0 || policy.Repeats <= 0 || policy.Statistic != "median" || policy.TimerDomain == "" || policy.FallbackCandidate == "" || policy.SelectionOverhead < 0 {
+	if policy.Warmup < 0 || policy.Repeats <= 0 || policy.Statistic != "median" || policy.TimerDomain == "" || policy.FallbackCandidate == "" || policy.SelectionOverhead < 0 || !(policy.SignTestAlpha >= 0 && policy.SignTestAlpha < 1) {
 		return Manifest{}, Report{}, errors.New("computetune: invalid policy")
 	}
 	ids := make(map[string]bool, len(candidates))
+	byID := make(map[string]Candidate, len(candidates))
 	for _, c := range candidates {
 		if c == nil || c.ID() == "" || ids[c.ID()] {
 			return Manifest{}, Report{}, errors.New("computetune: invalid candidate set")
 		}
 		ids[c.ID()] = true
+		byID[c.ID()] = c
 	}
+	order := newRoundOrder()
 	if !ids[policy.FallbackCandidate] {
 		return Manifest{}, Report{}, errors.New("computetune: fallback is not a candidate")
 	}
@@ -270,6 +299,12 @@ func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 		if winner == nil {
 			winner = fallback
 		}
+		if policy.SignTestAlpha > 0 && winner != fallback {
+			winner, err = admitBySignTest(ctx, measure, byID, pr.Candidates, fallback, profile, policy.SignTestAlpha, &order)
+			if err != nil {
+				return Manifest{}, Report{}, err
+			}
+		}
 		pr.SelectedID = winner.CandidateID
 		if winner.Statistic < fallback.Statistic {
 			pr.BreakEvenReuse = uint64(math.Ceil(float64(policy.SelectionOverhead) / float64(fallback.Statistic-winner.Statistic)))
@@ -283,6 +318,132 @@ func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 	}
 	report.ManifestDigest, err = manifest.Digest()
 	return manifest, report, err
+}
+
+// signTestWealth is M_n(s), the uniform mixture over p in (1/2, 1) of the
+// likelihood ratio of "a round is ahead with probability p" against one half:
+// the sum over j <= s of C(n+1, j), divided by (n+1)*C(n, s). While the median
+// ratio is not below one, a round is ahead with probability at most one half
+// whatever the timing distribution, so M_n is a nonnegative supermartingale
+// starting at one and by Ville's inequality ever reaches 1/alpha with
+// probability at most alpha. That bound covers every look together, so the
+// comparison may be read after each round. Each term is derived from the one
+// above it, so no binomial coefficient is formed along the way.
+func signTestWealth(rounds, favourable int) float64 {
+	n, s := float64(rounds), float64(favourable)
+	term := (n + 1) / (n + 1 - s)
+	sum := 0.0
+	for j := favourable; j >= 0; j-- {
+		sum += term
+		term *= float64(j) / (n + 2 - float64(j))
+	}
+	return sum / (n + 1)
+}
+
+// roundOrder picks which side of a paired round is timed first (xorshift64*).
+// A device whose speed is still drifting gives the later slot of a round a
+// different clock; a fixed order would favour one side every round, while a
+// random one favours each side equally often.
+type roundOrder uint64
+
+func newRoundOrder() roundOrder { return 0x9e3779b97f4a7c15 }
+
+func (o *roundOrder) challengerFirst() bool {
+	x := uint64(*o)
+	x ^= x >> 12
+	x ^= x << 25
+	x ^= x >> 27
+	*o = roundOrder(x)
+	return (x*0x2545f4914f6cdd1d)>>33&1 == 0
+}
+
+func measurePositive(ctx context.Context, measure Measure, c Candidate, p Profile) (time.Duration, error) {
+	d, err := measure(ctx, c, p)
+	if err != nil {
+		return 0, err
+	}
+	if d <= 0 {
+		return 0, errors.New("non-positive duration")
+	}
+	return d, nil
+}
+
+// pairedSignTest runs rounds that each time the challenger and the incumbent
+// together, and reads the test after every round. It ends when the challenger
+// leads at error rate alpha or at the first round it is not ahead: a lead in the
+// fewest rounds needs every round ahead, so a miss is taken as no lead rather
+// than paid for with more rounds. Timing errors are returned per side.
+func pairedSignTest(ctx context.Context, measure Measure, challenger, incumbent Candidate, p Profile, alpha float64, order *roundOrder) (res SignTestResult, challengerErr, incumbentErr error) {
+	res = SignTestResult{Alpha: alpha, Wealth: 1}
+	for {
+		var c, i time.Duration
+		if order.challengerFirst() {
+			if c, challengerErr = measurePositive(ctx, measure, challenger, p); challengerErr == nil {
+				i, incumbentErr = measurePositive(ctx, measure, incumbent, p)
+			}
+		} else {
+			if i, incumbentErr = measurePositive(ctx, measure, incumbent, p); incumbentErr == nil {
+				c, challengerErr = measurePositive(ctx, measure, challenger, p)
+			}
+		}
+		if challengerErr != nil || incumbentErr != nil {
+			return res, challengerErr, incumbentErr
+		}
+		ratio := float64(c) / float64(i)
+		res.Rounds++
+		if ratio < 1 {
+			res.Ahead++
+		}
+		res.Ratios = append(res.Ratios, ratio)
+		res.Wealth = signTestWealth(res.Rounds, res.Ahead)
+		if res.Wealth*alpha >= 1 {
+			res.Leads = true
+			return res, nil, nil
+		}
+		if ratio >= 1 {
+			return res, nil, nil
+		}
+	}
+}
+
+// admitBySignTest tries the challengers whose median beats the fallback, fastest
+// first, and returns the first that leads its paired sign test, or the fallback
+// when none does. Each comparison runs at alpha over the number of challengers,
+// so the chance that any of them wrongly replaces the fallback stays within
+// alpha. A challenger whose paired timing fails is refused in place; a fallback
+// that cannot be timed fails the tuning, as it does everywhere else.
+func admitBySignTest(ctx context.Context, measure Measure, byID map[string]Candidate, results []CandidateResult, fallback *CandidateResult, p Profile, alpha float64, order *roundOrder) (*CandidateResult, error) {
+	var challengers []*CandidateResult
+	for i := range results {
+		r := &results[i]
+		if r != fallback && r.Correct && r.Statistic > 0 && r.Statistic < fallback.Statistic {
+			challengers = append(challengers, r)
+		}
+	}
+	sort.Slice(challengers, func(a, b int) bool {
+		if challengers[a].Statistic != challengers[b].Statistic {
+			return challengers[a].Statistic < challengers[b].Statistic
+		}
+		return challengers[a].CandidateID < challengers[b].CandidateID
+	})
+	share := alpha / float64(len(challengers))
+	for _, r := range challengers {
+		res, challengerErr, fallbackErr := pairedSignTest(ctx, measure, byID[r.CandidateID], byID[fallback.CandidateID], p, share, order)
+		if fallbackErr != nil {
+			return nil, fmt.Errorf("computetune: fallback %q failed a paired round for %s: %w", fallback.CandidateID, p.key(), fallbackErr)
+		}
+		r.SignTest = &res
+		if challengerErr != nil {
+			r.RefusalReason = "sign test timing: " + challengerErr.Error()
+			r.Correct = false
+			r.Statistic = 0
+			continue
+		}
+		if res.Leads {
+			return r, nil
+		}
+	}
+	return fallback, nil
 }
 
 func resultByID(results []CandidateResult, id string) *CandidateResult {

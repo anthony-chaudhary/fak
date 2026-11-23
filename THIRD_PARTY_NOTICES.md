@@ -2778,3 +2778,10 @@ Portions of this product are adapted from NVIDIA/go-nvlib: https://github.com/NV
 Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
 SPDX-License-Identifier: Apache-2.0
+
+## magnitude
+
+Portions of this product are adapted from magnitude: https://github.com/magnitudedev/magnitude (pinned at revision 8d7dbcc1baf4eb3ae7f1c3449dd463f3b375f576). Changes were made.
+
+Copyright 2026 Magnitude AI Inc.
+SPDX-License-Identifier: Apache-2.0
