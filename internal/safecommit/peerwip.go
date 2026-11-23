@@ -40,6 +40,9 @@ const (
 	// OwnershipConflictingHunk indicates a genuine overlapping or conflicting peer hunk exists
 	// that must be rejected.
 	OwnershipConflictingHunk HunkOwnershipClassification = "CONFLICTING_HUNK"
+	// OwnershipIncidentalCapture indicates a peer checkpoint holds the path only because a
+	// capture is tree-wide: its stamp declares a scope, and the path is outside it.
+	OwnershipIncidentalCapture HunkOwnershipClassification = "INCIDENTAL_CAPTURE"
 )
 
 // WitnessedPathDelta carries exact independently witnessed path and hunk delta evidence
@@ -68,6 +71,16 @@ type ReconciledPathOwnership struct {
 type NarrowOwnershipReconciliation struct {
 	ManagedWorker   bool                 `json:"managed_worker"`
 	WitnessedDeltas []WitnessedPathDelta `json:"witnessed_deltas,omitempty"`
+}
+
+// witnessedConflict reports an independently witnessed conflicting hunk on path.
+func witnessedConflict(deltas []WitnessedPathDelta, path string) bool {
+	for _, wd := range deltas {
+		if wd.Path == path && wd.Status == OwnershipConflictingHunk {
+			return true
+		}
+	}
+	return false
 }
 
 // peerWIPGuardMode reads FAK_PEER_WIP_GUARD (block|warn|off, default block).
@@ -250,9 +263,23 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 		// 3. Git peer checkpoints
 		if !isPeer && len(opts.PeerWIP) == 0 && opts.PeerWIPChecker == nil && run != nil {
 			if info, ok := gitOwnerDetails[cp]; ok && info.Peer != "" {
-				peerOwner = info.Peer
-				peerOID = info.OID
-				isPeer = true
+				if info.Incidental && !isDirSweep && !witnessedConflict(opts.WitnessedDeltas, cp) {
+					// The committer names this exact path and the peer's own stamp
+					// declares a scope that excludes it: two explicit statements agree.
+					// An incidental capture is not authorship evidence either way, so
+					// the path is judged as if no checkpoint held it.
+					reconciledPaths = append(reconciledPaths, ReconciledPathOwnership{
+						Path:           cp,
+						Classification: OwnershipIncidentalCapture,
+						PeerSession:    info.Peer,
+						CheckpointOID:  info.OID,
+						Detail:         fmt.Sprintf("checkpoint %s captured %s outside its declared scope", info.OID, cp),
+					})
+				} else {
+					peerOwner = info.Peer
+					peerOID = info.OID
+					isPeer = true
+				}
 			}
 		}
 
@@ -416,11 +443,18 @@ const peerWIPRefFormat = "--format=%(refname)%00%(objectname)%00%(objecttype)%00
 // resolveGitPeerOwners snapshots ordered refs and their messages in one process.
 // Messages are byte-length framed; embedded newlines/NULs cannot forge records.
 // Deltas are fetched by immutable object ID in bounded, deduplicated chunks.
-// Evaluate refs in snapshot order, so an earlier delta still beats a later scope.
+// Refs are evaluated in snapshot order: the first real claim (in declared scope,
+// or the delta of a checkpoint without a canonical declared scope) wins. An
+// incidental capture only holds the slot until a real claim appears. An undeclared
+// or non-canonical scope keeps claiming its whole delta by choice: it fails closed.
 type gitPeerOwnerInfo struct {
 	Peer  string
 	OID   string
 	Scope []string
+	// Incidental marks a path the checkpoint captured outside the scope its own
+	// canonical stamp declares. A capture is tree-wide on a shared working tree, so
+	// that containment names the capturer, not the author.
+	Incidental bool
 }
 
 type peerWIPCheckpoint struct {
@@ -641,16 +675,30 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		if checkpoint.represented || checkpoint.selfPark {
 			continue
 		}
+		declaresScope, scopeProbed := false, false
 		for _, path := range targetPaths {
 			if err := ctx.Err(); err != nil {
 				return nil, nil, err
 			}
-			if _, exists := ownerDetails[path]; !exists && (gitgate.CoveredByAnyTree(path, checkpoint.scope) || deltas[checkpoint.oid][path]) {
-				ownerDetails[path] = gitPeerOwnerInfo{
-					Peer:  checkpoint.peer,
-					OID:   checkpoint.oid,
-					Scope: checkpoint.scope,
-				}
+			inScope := gitgate.CoveredByAnyTree(path, checkpoint.scope)
+			if !inScope && !deltas[checkpoint.oid][path] {
+				continue
+			}
+			if !inScope && !scopeProbed {
+				scopeProbed = true
+				declaresScope = peerWIPStampEligible(checkpoint) && peerWIPScopeCaptured(ctx, run, dir, checkpoint)
+			}
+			incidental := !inScope && declaresScope
+			// The first real claim wins; an incidental capture only holds the slot
+			// until a checkpoint with a real claim on the path is seen.
+			if prev, exists := ownerDetails[path]; exists && (!prev.Incidental || incidental) {
+				continue
+			}
+			ownerDetails[path] = gitPeerOwnerInfo{
+				Peer:       checkpoint.peer,
+				OID:        checkpoint.oid,
+				Scope:      checkpoint.scope,
+				Incidental: incidental,
 			}
 		}
 	}
@@ -658,6 +706,22 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		return nil, nil, err
 	}
 	return ownerDetails, malformed, nil
+}
+
+// peerWIPScopeCaptured proves the declared scope names at least one path the
+// checkpoint itself changed. A scope that matches nothing it captured (a typo, a
+// case mismatch, a stale declaration) carries no authorship signal, so that
+// checkpoint keeps claiming its whole delta. Any lookup failure returns false.
+func peerWIPScopeCaptured(ctx context.Context, run Runner, dir string, checkpoint peerWIPCheckpoint) bool {
+	if run == nil || ctx.Err() != nil || len(checkpoint.stamp.Scope) == 0 {
+		return false
+	}
+	args := []string{"diff-tree", "--quiet", "--no-renames", "--no-ext-diff", "-r", checkpoint.oid, "--"}
+	for _, path := range checkpoint.stamp.Scope {
+		args = append(args, ":(top,literal)"+path)
+	}
+	_, code, err := run(ctx, dir, args...)
+	return err == nil && ctx.Err() == nil && code == 1
 }
 
 const (
