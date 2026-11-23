@@ -136,6 +136,7 @@ func gateScopes() []gateScopeRow {
 var gateScopeFilesWithoutGates = map[string]string{
 	"gate_tuning.go":     "shared operator knobs (gateEnvInt) for the SIZE gates — declares no gate of its own",
 	"gate_affordance.go": "affordance validator (GateAffordanceCompleteness) — validates refusals carry next actions",
+	"gate_alphafence.go": "alpha-fence scanner feeding PUBLIC_LEAK findings — declares no gate; it inherits PUBLIC_LEAK's WORKTREE class because the fence is untracked local policy",
 }
 
 // gateClass returns the classification for a gate name, or "" when the name is not in the table.
