@@ -6,8 +6,15 @@
 
 static unsigned long long g_qwen35_residual_norm_launches = 0;
 
+// Device 0 launch limits are fixed for the process: resolved once, so admission
+// stays off the driver. 0 unresolved, -1 unsupported, else the row grid limit.
+// Unsynchronized: every caller holds the backend lock.
+static int g_qwen35_residual_norm_max_rows = 0;
+
+// Admission refuses an open capture: every caller allocates Y from the pool and
+// fences the stream, and neither is capture-stable.
 extern "C" int fak_qwen35_residual_norm_capability(int rows, int n) {
-  if (rows <= 1 || n <= 0 || rows > INT_MAX / n || g_capture_open) return 0;
+  if (rows <= 0 || n <= 0 || rows > INT_MAX / n || g_capture_open) return 0;
   int device = -1;
   cudaError_t e = cudaGetDevice(&device);
   if (e != cudaSuccess) return -(int)e;
@@ -16,11 +23,30 @@ extern "C" int fak_qwen35_residual_norm_capability(int rows, int n) {
   e = cudaStreamIsCapturing(g_stream, &capture);
   if (e != cudaSuccess) return -(int)e;
   if (capture != cudaStreamCaptureStatusNone) return 0;
-  cudaDeviceProp prop;
-  e = cudaGetDeviceProperties(&prop, device);
-  if (e != cudaSuccess) return -(int)e;
-  return prop.maxThreadsPerBlock >= 256 && prop.maxThreadsDim[0] >= 256 &&
-      prop.sharedMemPerBlock >= 256 * sizeof(float) && rows <= prop.maxGridSize[0];
+  if (g_qwen35_residual_norm_max_rows == 0) {
+    cudaDeviceProp prop;
+    e = cudaGetDeviceProperties(&prop, 0);
+    if (e != cudaSuccess) return -(int)e;
+    const bool fits = prop.maxThreadsPerBlock >= 256 && prop.maxThreadsDim[0] >= 256 &&
+        prop.sharedMemPerBlock >= 256 * sizeof(float) && prop.maxGridSize[0] > 0;
+    g_qwen35_residual_norm_max_rows = fits ? prop.maxGridSize[0] : -1;
+  }
+  return rows <= g_qwen35_residual_norm_max_rows;
+}
+
+// X is intentionally the existing kernel's ResidualOut. Its addend and norm
+// weights must remain independent; fresh Y may alias none of the inputs.
+static bool qwen35_residual_norm_aliased(uintptr_t x, uintptr_t delta, uintptr_t w, uintptr_t y,
+                                         size_t panelBytes, size_t weightBytes) {
+  const uintptr_t ptrs[4] = {x, delta, w, y};
+  const size_t bytes[4] = {panelBytes, panelBytes, weightBytes, panelBytes};
+  for (int a = 0; a < 4; ++a) {
+    for (int b = a + 1; b < 4; ++b) {
+      if (a == 1 && b == 2) continue; // Delta and W are both read-only.
+      if (ptrs[a] < ptrs[b] + bytes[b] && ptrs[b] < ptrs[a] + bytes[a]) return true;
+    }
+  }
+  return false;
 }
 
 static bool qwen35_residual_norm_extent(const void *p, size_t bytes) {
@@ -34,7 +60,7 @@ static bool qwen35_residual_norm_extent(const void *p, size_t bytes) {
 extern "C" int fak_qwen35_residual_norm_f32(
     float *X, const float *Delta, const float *W, float *Y,
     int rows, int n, float eps) {
-  if (rows <= 1 || n <= 0 || rows > INT_MAX / n || !(eps > 0.f) || !isfinite(eps)) return -1;
+  if (rows <= 0 || n <= 0 || rows > INT_MAX / n || !(eps > 0.f) || !isfinite(eps)) return -1;
   const int supported = fak_qwen35_residual_norm_capability(rows, n);
   if (supported != 1) return supported < 0 ? 88000 - supported : -2;
   const size_t panelBytes = (size_t)rows * n * sizeof(float);
@@ -47,15 +73,8 @@ extern "C" int fak_qwen35_residual_norm_f32(
     if (e != cudaSuccess) return 89000 + (int)e;
     if (attrs.type != cudaMemoryTypeDevice || attrs.device != 0) return -5;
   }
-  // X is intentionally the existing kernel's ResidualOut. Its addend and norm
-  // weights must remain independent; fresh Y may alias none of the inputs.
-  for (int a = 0; a < 4; ++a) {
-    for (int b = a + 1; b < 4; ++b) {
-      if (a == 1 && b == 2) continue; // Delta and W are both read-only.
-      const uintptr_t pa = (uintptr_t)ptrs[a], pb = (uintptr_t)ptrs[b];
-      if (pa < pb + bytes[b] && pb < pa + bytes[a]) return -4;
-    }
-  }
+  if (qwen35_residual_norm_aliased((uintptr_t)X, (uintptr_t)Delta, (uintptr_t)W, (uintptr_t)Y,
+                                   panelBytes, bytes[2])) return -4;
   cudaError_t e = cudaGetLastError();
   if (e != cudaSuccess) return 90000 + (int)e;
   // Existing kernel materializes float val=x+delta in X, accumulates that same

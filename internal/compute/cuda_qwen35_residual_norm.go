@@ -22,7 +22,7 @@ var cudaQwen35ResidualNormEnabled = os.Getenv("FAK_CUDA_QWEN35_RESIDUAL_NORM") =
 // mutation. Once selected, error is fatal: X might already contain its residual
 // update, so the caller must not retry Add then RMSNorm. No public API is added.
 func (c *cudaBackend) qwen35SequenceResidualNormLocked(x, delta, weight Tensor, rows int, eps float32) (Tensor, *cudaBuf, bool, error) {
-	if !cudaQwen35ResidualNormEnabled || c.capturing || rows <= 1 {
+	if !cudaQwen35ResidualNormEnabled || c.capturing || rows <= 0 {
 		return Tensor{}, nil, false, nil
 	}
 	fail := func(reason string) (Tensor, *cudaBuf, bool, error) {
@@ -74,4 +74,8 @@ func (c *cudaBackend) qwen35SequenceResidualNormLocked(x, delta, weight Tensor, 
 
 func cudaQwen35ResidualNormLaunchesLocked() uint64 {
 	return uint64(C.fak_qwen35_residual_norm_launch_count())
+}
+
+func cudaQwen35ResidualNormCapabilityLocked(rows, width int) int {
+	return int(C.fak_qwen35_residual_norm_capability(C.int(rows), C.int(width)))
 }

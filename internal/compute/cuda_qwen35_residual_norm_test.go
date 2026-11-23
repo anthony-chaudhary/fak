@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +22,7 @@ func TestCUDAQwen35ResidualNormMatchesComposition(t *testing.T) {
 		t.Skip("experimental CUDA residual norm disabled")
 	}
 	t.Cleanup(be.Recycle)
-	for _, shape := range [][2]int{{2, 1}, {7, 255}, {3, 257}, {128, 5120}} {
+	for _, shape := range [][2]int{{1, 1}, {1, 255}, {1, 257}, {1, 5120}, {2, 1}, {7, 255}, {3, 257}, {128, 5120}} {
 		t.Run(fmt.Sprintf("P%d-n%d", shape[0], shape[1]), func(t *testing.T) {
 			rows, width := shape[0], shape[1]
 			xh, dh, wh := make([]float32, rows*width), make([]float32, rows*width), make([]float32, width)
@@ -65,8 +66,17 @@ func TestCUDAQwen35ResidualNormMatchesComposition(t *testing.T) {
 				before := cudaQwen35ResidualNormLaunchesLocked()
 				// Intentional X==ResidualOut is supported, X==delta is not.
 				_, _, selected, aliasErr := be.qwen35SequenceResidualNormLocked(x, x, weight, rows, eps)
-				if !selected || aliasErr == nil || cudaQwen35ResidualNormLaunchesLocked() != before {
+				if !selected || aliasErr == nil || !strings.Contains(aliasErr.Error(), "CUDA status -4") || cudaQwen35ResidualNormLaunchesLocked() != before {
 					return fmt.Errorf("alias did not refuse before enqueue: %v", aliasErr)
+				}
+				if rows == 1 {
+					// One row makes W panel-sized: it may not be the residual it normalizes.
+					selfNorm := x
+					selfNorm.Shape = []int{width}
+					_, _, selected, aliasErr = be.qwen35SequenceResidualNormLocked(x, delta, selfNorm, rows, eps)
+					if !selected || aliasErr == nil || !strings.Contains(aliasErr.Error(), "CUDA status -4") || cudaQwen35ResidualNormLaunchesLocked() != before {
+						return fmt.Errorf("norm weight aliasing the residual did not refuse before enqueue: %v", aliasErr)
+					}
 				}
 				var used bool
 				got, _, used, err = be.qwen35SequenceResidualNormLocked(x, delta, weight, rows, eps)
@@ -99,6 +109,152 @@ func TestCUDAQwen35ResidualNormMatchesComposition(t *testing.T) {
 			check("normalized output", be.Read(got), be.Read(want))
 			check("read-only delta", be.Read(delta), dh)
 			check("read-only norm", be.Read(weight), wh)
+			if rows != 1 {
+				return
+			}
+			// The one permitted overlap: a read-only branch that is also the norm weight.
+			x2, wantX2 := upload([]int{rows, width}, xh), upload([]int{rows, width}, xh)
+			shared := delta
+			shared.Shape = []int{width}
+			be.AddInPlace(wantX2, delta)
+			err = func() error {
+				cudaMu.Lock()
+				defer cudaMu.Unlock()
+				var err error
+				want, _, err = be.qwen35SequenceRMSNormLocked(wantX2, shared, rows, eps, "residual-norm-oracle")
+				if err != nil {
+					return err
+				}
+				before := cudaQwen35ResidualNormLaunchesLocked()
+				var used bool
+				got, _, used, err = be.qwen35SequenceResidualNormLocked(x2, delta, shared, rows, eps)
+				if err != nil {
+					return err
+				}
+				if !used || cudaQwen35ResidualNormLaunchesLocked()-before != 1 {
+					return fmt.Errorf("shared read-only operand must enqueue exactly once")
+				}
+				return be.qwen35SequenceSyncLocked()
+			}()
+			if err != nil {
+				t.Fatal(err)
+			}
+			check("shared-operand residual", be.Read(x2), be.Read(wantX2))
+			check("shared-operand output", be.Read(got), be.Read(want))
+			check("shared read-only operand", be.Read(delta), dh)
 		})
+	}
+}
+
+// Host enqueue cost of the fused launch against the two launches it replaces;
+// "drain" includes the stream fence so GPU execution is counted too.
+func BenchmarkCUDAQwen35ResidualNormEnqueue(b *testing.B) {
+	registered, ok := Lookup("cuda")
+	be, isCUDA := registered.(*cudaBackend)
+	if !ok || !isCUDA {
+		b.Skip("exact cuda backend not registered")
+	}
+	if !cudaQwen35ResidualNormEnabled {
+		b.Skip("experimental CUDA residual norm disabled")
+	}
+	const eps = float32(1e-6)
+	for _, shape := range [][2]int{{1, 5120}, {2, 5120}, {8, 5120}, {1, 2048}} {
+		rows, width := shape[0], shape[1]
+		upload := func(dims []int, fill float32) Tensor {
+			values := make([]float32, dims[0]*dims[len(dims)-1])
+			if len(dims) == 1 {
+				values = values[:dims[0]]
+			}
+			for i := range values {
+				values[i] = fill
+			}
+			x := be.UploadClass(NewF32(Default(), dims, values), F32, MemoryScratchpad, "cuda-residual-norm-bench")
+			b.Cleanup(func() { be.Free(x) })
+			return x
+		}
+		// A zero branch keeps the in-place residual stable across iterations.
+		x, delta, weight := upload([]int{rows, width}, 0.5), upload([]int{rows, width}, 0), upload([]int{width}, 1)
+		fence := func(b testing.TB) {
+			cudaMu.Lock()
+			err := be.qwen35SequenceSyncLocked()
+			cudaMu.Unlock()
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+		arms := []struct {
+			name string
+			step func(b testing.TB) bool
+		}{
+			{"capability", func(b testing.TB) bool {
+				cudaMu.Lock()
+				defer cudaMu.Unlock()
+				return cudaQwen35ResidualNormCapabilityLocked(rows, width) == 1
+			}},
+			{"fused", func(b testing.TB) bool {
+				cudaMu.Lock()
+				defer cudaMu.Unlock()
+				_, buf, used, err := be.qwen35SequenceResidualNormLocked(x, delta, weight, rows, eps)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if used {
+					be.releaseTransientBuffers([]*cudaBuf{buf})
+				}
+				return used
+			}},
+			{"norm-only", func(b testing.TB) bool {
+				cudaMu.Lock()
+				defer cudaMu.Unlock()
+				_, buf, err := be.qwen35SequenceRMSNormLocked(x, weight, rows, eps, "residual-norm-bench")
+				if err != nil {
+					b.Fatal(err)
+				}
+				be.releaseTransientBuffers([]*cudaBuf{buf})
+				return true
+			}},
+			{"unfused", func(b testing.TB) bool {
+				be.AddInPlace(x, delta)
+				cudaMu.Lock()
+				defer cudaMu.Unlock()
+				_, buf, err := be.qwen35SequenceRMSNormLocked(x, weight, rows, eps, "residual-norm-bench")
+				if err != nil {
+					b.Fatal(err)
+				}
+				be.releaseTransientBuffers([]*cudaBuf{buf})
+				return true
+			}},
+		}
+		for _, arm := range arms {
+			for _, mode := range []string{"enqueue", "drain"} {
+				if arm.name == "capability" && mode == "drain" {
+					continue
+				}
+				b.Run(fmt.Sprintf("P%d-n%d/%s/%s", rows, width, arm.name, mode), func(b *testing.B) {
+					if !arm.step(b) {
+						b.Skip("arm declined for this shape")
+					}
+					fence(b)
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						arm.step(b)
+						if i%256 == 255 {
+							if mode == "enqueue" {
+								b.StopTimer()
+							}
+							fence(b)
+							if mode == "enqueue" {
+								b.StartTimer()
+							}
+						}
+					}
+					if mode == "drain" {
+						fence(b)
+					}
+					b.StopTimer()
+					fence(b)
+				})
+			}
+		}
 	}
 }
