@@ -5,9 +5,135 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestStopConditions(t *testing.T) {
+	limit := func(n int) *int { return &n }
+	deadline := func(d time.Duration) *time.Duration { return &d }
+
+	t.Run("closed ordered set", func(t *testing.T) {
+		want := []string{"lifecycle", "dag_lifecycle", "request_count", "session_count", "duration"}
+		var got []string
+		for _, cond := range benchStopConditions {
+			got = append(got, cond.Name)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("stop conditions = %v, want %v", got, want)
+		}
+		all := newBenchStopChecker(benchStopLimits{
+			MaxRequests: limit(1), MaxSessions: limit(1), Duration: deadline(time.Second),
+		})
+		if !slices.Equal(all.Active(), want) {
+			t.Fatalf("active with every limit = %v, want %v", all.Active(), want)
+		}
+	})
+
+	t.Run("unset limits are not checked", func(t *testing.T) {
+		bare := newBenchStopChecker(benchStopLimits{})
+		if got, want := bare.Active(), []string{"lifecycle", "dag_lifecycle"}; !slices.Equal(got, want) {
+			t.Fatalf("active with no limits = %v, want %v", got, want)
+		}
+		huge := benchStopState{RequestsSent: 1 << 30, SessionsSent: 1 << 30, Elapsed: 1000 * time.Hour}
+		if !bare.CanSendAnyTurn(huge) || !bare.CanStartNewSession(huge) || !bare.CanSendDAGChildTurn(huge) {
+			t.Fatal("a checker with no limits refused a turn")
+		}
+		onlyDuration := newBenchStopChecker(benchStopLimits{Duration: deadline(time.Minute)})
+		if got, want := onlyDuration.Active(), []string{"lifecycle", "dag_lifecycle", "duration"}; !slices.Equal(got, want) {
+			t.Fatalf("active with a duration = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("first refusing condition wins", func(t *testing.T) {
+		c := newBenchStopChecker(benchStopLimits{
+			MaxRequests: limit(5), MaxSessions: limit(1), Duration: deadline(time.Second),
+		})
+		everything := benchStopState{
+			Cancelled: true, RequestsSent: 5, SessionsSent: 1, Elapsed: time.Minute,
+		}
+		if got := c.FirstStop(everything, false); got != "lifecycle" {
+			t.Fatalf("loop first stop = %q, want lifecycle", got)
+		}
+		if got := c.FirstStop(everything, true); got != "dag_lifecycle" {
+			t.Fatalf("child first stop = %q, want dag_lifecycle", got)
+		}
+		everything.Cancelled = false
+		if got := c.FirstStop(everything, false); got != "request_count" {
+			t.Fatalf("loop first stop without cancel = %q, want request_count", got)
+		}
+		if got := c.FirstStop(benchStopState{}, false); got != "" {
+			t.Fatalf("fresh loop first stop = %q, want none", got)
+		}
+	})
+
+	// The DAG-child policy matrix: one stopping fact per row, and whether it
+	// stops the send loop and child dispatch.
+	t.Run("dag child policy", func(t *testing.T) {
+		c := newBenchStopChecker(benchStopLimits{
+			MaxRequests: limit(10), MaxSessions: limit(2), Duration: deadline(time.Minute),
+		})
+		for _, row := range []struct {
+			name      string
+			state     benchStopState
+			loopSends bool
+			childSend bool
+		}{
+			{"nothing reached", benchStopState{}, true, true},
+			{"cancelled", benchStopState{Cancelled: true}, false, false},
+			{"sending complete", benchStopState{SendingComplete: true}, false, true},
+			{"request count reached", benchStopState{RequestsSent: 10}, false, false},
+			{"duration elapsed", benchStopState{Elapsed: time.Minute}, false, false},
+			{"session count reached", benchStopState{SessionsSent: 2, RootRequestsSent: 6, TotalSessionTurns: 6}, false, true},
+		} {
+			if got := c.CanSendAnyTurn(row.state); got != row.loopSends {
+				t.Errorf("%s: CanSendAnyTurn = %v, want %v", row.name, got, row.loopSends)
+			}
+			if got := c.CanSendDAGChildTurn(row.state); got != row.childSend {
+				t.Errorf("%s: CanSendDAGChildTurn = %v, want %v", row.name, got, row.childSend)
+			}
+		}
+	})
+
+	t.Run("session target stops new sessions not open ones", func(t *testing.T) {
+		c := newBenchStopChecker(benchStopLimits{MaxSessions: limit(2)})
+		open := benchStopState{SessionsSent: 2, RootRequestsSent: 3, TotalSessionTurns: 6}
+		if !c.CanSendAnyTurn(open) {
+			t.Fatal("continuation turns of open sessions were refused")
+		}
+		if c.CanStartNewSession(open) {
+			t.Fatal("a new session started past the session target")
+		}
+		// Child wires inflate RequestsSent; only root wires finish a session.
+		open.RequestsSent = 40
+		if !c.CanSendAnyTurn(open) {
+			t.Fatal("child requests were counted against the root session plan")
+		}
+		below := benchStopState{SessionsSent: 1, RootRequestsSent: 3, TotalSessionTurns: 3}
+		if !c.CanStartNewSession(below) {
+			t.Fatal("a new session was refused below the session target")
+		}
+	})
+
+	t.Run("new session implies any turn", func(t *testing.T) {
+		c := newBenchStopChecker(benchStopLimits{MaxRequests: limit(1), MaxSessions: limit(5)})
+		if c.CanStartNewSession(benchStopState{RequestsSent: 1}) {
+			t.Fatal("a new session started with the request cap reached")
+		}
+		if c.CanStartNewSession(benchStopState{Cancelled: true}) {
+			t.Fatal("a new session started after cancellation")
+		}
+	})
+
+	t.Run("zero limits stop immediately", func(t *testing.T) {
+		c := newBenchStopChecker(benchStopLimits{MaxRequests: limit(0)})
+		if c.CanSendAnyTurn(benchStopState{}) || c.CanSendDAGChildTurn(benchStopState{}) {
+			t.Fatal("a zero request cap allowed a turn")
+		}
+	})
+}
 
 func TestBenchLoopStatusAndNext(t *testing.T) {
 	root := t.TempDir()

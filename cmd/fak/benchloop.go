@@ -223,3 +223,187 @@ benchmark machine plan and queues one idempotent request per node; fleet dispatc
 tick always on via the Windows Task Scheduler (use cron elsewhere).
 `)
 }
+
+// Stop conditions for a benchmark send loop.
+//
+// ADAPT of the stop-condition checker from ai-dynamo/aiperf
+// (StopCondition and its five subclasses, _STOP_CONDITION_CLASSES,
+// StopConditionChecker), pinned at
+// https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/timing/phase/stop_conditions.py
+// (commit ab610add4e8876fca223197596c728e17365f381, Apache-2.0). Re-expressed
+// in idiomatic Go as a closed table over value snapshots; no upstream code is
+// copied. Study note: fak-private docs/research/STUDY-aiperf-2026-11-09.md,
+// candidate aiperf-lifecycle-9.
+//
+// Why the set is closed and ordered: a loop that checks "may I send?" before
+// every request needs one answer that cannot drift between call sites. The
+// table below is the only place a condition is declared, its position is the
+// order it is evaluated in, and a condition whose limit is unset is dropped
+// when the checker is built rather than re-tested per request.
+//
+// Why DAG children get their own gate: a child request is fanned out when its
+// parent returns, not by the send loop, and belongs to its parent's session.
+// A wire-request cap, a deadline and cancellation are promises about every
+// request on the wire, so they bind children. A session target counts planned
+// conversations, and "sending complete" only says the loop stopped issuing
+// roots; honoring either for children would cut a conversation tree in half.
+
+// benchStopLimits holds the configured limits. A nil limit is unset: its
+// condition is left out of the checker.
+type benchStopLimits struct {
+	MaxRequests *int
+	MaxSessions *int
+	Duration    *time.Duration
+}
+
+// benchStopState is a read-only snapshot of the send loop. Conditions never
+// mutate it.
+type benchStopState struct {
+	Cancelled       bool
+	SendingComplete bool
+	// RequestsSent counts every request on the wire, children included.
+	RequestsSent int
+	// RootRequestsSent counts only requests the send loop issued. The
+	// session condition compares it to TotalSessionTurns, which is also
+	// root-only; child requests arriving in parallel would otherwise make a
+	// session look finished early.
+	RootRequestsSent  int
+	SessionsSent      int
+	TotalSessionTurns int
+	Elapsed           time.Duration
+}
+
+type benchStopCondition struct {
+	Name string
+	// AppliesToDAGChildren reports whether the condition gates child
+	// dispatch as well as the send loop.
+	AppliesToDAGChildren bool
+	ShouldUse            func(benchStopLimits) bool
+	CanSendAnyTurn       func(benchStopLimits, benchStopState) bool
+	// CanStartNewSession, when set, is an extra restriction on first turns
+	// only; a nil func adds none.
+	CanStartNewSession func(benchStopLimits, benchStopState) bool
+}
+
+const (
+	benchStopLifecycle    = "lifecycle"
+	benchStopDAGLifecycle = "dag_lifecycle"
+	benchStopRequestCount = "request_count"
+	benchStopSessionCount = "session_count"
+	benchStopDuration     = "duration"
+)
+
+func benchStopAlways(benchStopLimits) bool { return true }
+
+// benchStopConditions is the closed set, in evaluation order.
+var benchStopConditions = [...]benchStopCondition{
+	{
+		Name:      benchStopLifecycle,
+		ShouldUse: benchStopAlways,
+		CanSendAnyTurn: func(_ benchStopLimits, s benchStopState) bool {
+			return !s.Cancelled && !s.SendingComplete
+		},
+	},
+	{
+		// The send loop's lifecycle gate skips children because of
+		// SendingComplete; this entry restores cancellation for them.
+		Name:                 benchStopDAGLifecycle,
+		AppliesToDAGChildren: true,
+		ShouldUse:            benchStopAlways,
+		CanSendAnyTurn: func(_ benchStopLimits, s benchStopState) bool {
+			return !s.Cancelled
+		},
+	},
+	{
+		Name:                 benchStopRequestCount,
+		AppliesToDAGChildren: true,
+		ShouldUse:            func(l benchStopLimits) bool { return l.MaxRequests != nil },
+		CanSendAnyTurn: func(l benchStopLimits, s benchStopState) bool {
+			return s.RequestsSent < *l.MaxRequests
+		},
+	},
+	{
+		Name:      benchStopSessionCount,
+		ShouldUse: func(l benchStopLimits) bool { return l.MaxSessions != nil },
+		CanSendAnyTurn: func(l benchStopLimits, s benchStopState) bool {
+			return s.SessionsSent < *l.MaxSessions || s.RootRequestsSent < s.TotalSessionTurns
+		},
+		CanStartNewSession: func(l benchStopLimits, s benchStopState) bool {
+			return s.SessionsSent < *l.MaxSessions
+		},
+	},
+	{
+		Name:                 benchStopDuration,
+		AppliesToDAGChildren: true,
+		ShouldUse:            func(l benchStopLimits) bool { return l.Duration != nil },
+		CanSendAnyTurn: func(l benchStopLimits, s benchStopState) bool {
+			return s.Elapsed < *l.Duration
+		},
+	},
+}
+
+// benchStopChecker answers the send loop's three questions from the
+// conditions that apply to one set of limits.
+type benchStopChecker struct {
+	limits benchStopLimits
+	active []benchStopCondition
+}
+
+func newBenchStopChecker(limits benchStopLimits) benchStopChecker {
+	c := benchStopChecker{limits: limits}
+	for _, cond := range benchStopConditions {
+		if cond.ShouldUse(limits) {
+			c.active = append(c.active, cond)
+		}
+	}
+	return c
+}
+
+// Active lists the conditions in force, in evaluation order.
+func (c benchStopChecker) Active() []string {
+	names := make([]string, len(c.active))
+	for i, cond := range c.active {
+		names[i] = cond.Name
+	}
+	return names
+}
+
+// FirstStop names the earliest condition refusing a turn, or "" when the
+// loop may send. forDAGChild restricts the walk to the child gate.
+func (c benchStopChecker) FirstStop(s benchStopState, forDAGChild bool) string {
+	for _, cond := range c.active {
+		if forDAGChild && !cond.AppliesToDAGChildren {
+			continue
+		}
+		if !cond.CanSendAnyTurn(c.limits, s) {
+			return cond.Name
+		}
+	}
+	return ""
+}
+
+// CanSendAnyTurn reports whether the send loop may issue any turn, first or
+// continuation.
+func (c benchStopChecker) CanSendAnyTurn(s benchStopState) bool {
+	return c.FirstStop(s, false) == ""
+}
+
+// CanSendDAGChildTurn reports whether a child turn may still be dispatched.
+func (c benchStopChecker) CanSendDAGChildTurn(s benchStopState) bool {
+	return c.FirstStop(s, true) == ""
+}
+
+// CanStartNewSession reports whether a first turn may be issued. It implies
+// CanSendAnyTurn and adds the per-condition session restrictions, so a
+// reached session target stops new sessions while open ones keep sending.
+func (c benchStopChecker) CanStartNewSession(s benchStopState) bool {
+	if !c.CanSendAnyTurn(s) {
+		return false
+	}
+	for _, cond := range c.active {
+		if cond.CanStartNewSession != nil && !cond.CanStartNewSession(c.limits, s) {
+			return false
+		}
+	}
+	return true
+}
