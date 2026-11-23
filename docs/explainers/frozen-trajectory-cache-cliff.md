@@ -1,6 +1,6 @@
 ---
 title: "The frozen-trajectory cache cliff: why hit rates fall to 0%"
-description: "A high prompt-cache hit rate is bought with a frozen, append-only trajectory. Flexible history, tool density, or fan-out decay the cache toward 0%."
+description: "A high prompt-cache hit rate is bought with a frozen trajectory. Flexible history and tool density push it toward 0%; fan-out forfeits shared reuse."
 slug: frozen-trajectory-cache-cliff
 keywords:
   - prompt caching

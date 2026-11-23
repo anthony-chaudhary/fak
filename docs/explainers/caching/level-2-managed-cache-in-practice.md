@@ -16,7 +16,7 @@ date: 2026-07-10
 
 # Managed cache in practice
 
-fak's managed cache is the set of defaults that keep a provider's prompt cache warm for you. This page is the operator's view: what `--managed-cache on|off|auto` does, why it defaults on through fleet launchers, and three ways to see it working.
+fak's managed cache is a family of caching levers that work a provider's prompt cache so idle pauses hurt less. This page is the operator's view: what `--managed-cache on|off|auto` does, why it defaults on through fleet launchers, and three ways to see it working.
 
 *You are on **Level 2 of 5** of the [fak caching ladder](README.md).*
 

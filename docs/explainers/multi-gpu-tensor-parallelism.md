@@ -1,6 +1,6 @@
 ---
 title: "Multi-GPU tensor parallelism in fak: architecture, API, and setup"
-description: "How fak's native multi-GPU tensor parallelism is built: Megatron-style column/row sharding, the four-collective HAL seam, and the NCCL/RCCL swap-in point."
+description: "How fak's tensor parallelism is built: Megatron-style sharding and a four-collective seam, bit-exact on CPU; the NCCL/RCCL GPU backend is not shipped."
 ---
 
 # Multi-GPU tensor parallelism in fak

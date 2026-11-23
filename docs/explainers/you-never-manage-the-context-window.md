@@ -1,6 +1,6 @@
 ---
 title: "You Never Manage the Context Window"
-description: "You never manage the context window: placement is a kernel job. Residency and cache warmth are two projections of one decision fak's kernel owns."
+description: "Context placement is a kernel job: residency and cache warmth are one placement decision. What fak owns today, and where it is still only a referee."
 slug: you-never-manage-the-context-window
 keywords:
   - automatic context management

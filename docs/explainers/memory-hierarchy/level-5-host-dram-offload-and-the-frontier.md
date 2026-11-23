@@ -16,7 +16,7 @@ date: 2026-11-18
 
 # Host DRAM, offload, and the frontier
 
-Host DRAM is the memory tier below the accelerator, where a model goes when it does not fit in VRAM. This page covers the write-back staging ring, expert offload, KV pressure relief, and the unified-memory case where the hierarchy partly collapses.
+Host DRAM is the tier below the accelerator where the bytes a model is not using right now can wait until they are paged back in. This page covers the write-back staging ring, expert offload, KV pressure relief, and the unified-memory case where the hierarchy partly collapses.
 
 *You are on **Level 5 of 5** of the [fak memory-hierarchy ladder](README.md).*
 

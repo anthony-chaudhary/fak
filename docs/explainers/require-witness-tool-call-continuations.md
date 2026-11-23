@@ -5,7 +5,7 @@ description: "Design for suspending a proposed tool call until a bound attestati
 
 # REQUIRE_WITNESS as a durable tool-call continuation
 
-REQUIRE_WITNESS is a kernel verdict that suspends a proposed tool call until a bound attestation arrives, then rechecks policy and resumes with exactly-once execution. This page is the design for making that suspension durable.
+REQUIRE_WITNESS is a kernel verdict that stops a proposed tool call and routes it outward for a witness. This page is the design for turning that stop into a durable continuation that rechecks policy and resumes with exactly-once execution.
 
 **Status:** design note; current ABI has the verdict, but the durable held-call queue described here is not yet implemented end to end.
 

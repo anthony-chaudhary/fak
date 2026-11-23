@@ -1,6 +1,6 @@
 ---
 title: "The precision machinery in fak"
-description: "The three layers of precision machinery in fak: the metadata contract, the cross-support tensor, and the runtime policy and schedule that decide."
+description: "fak's three precision layers: the metadata contract, the cross-support tensor, and the runtime policy (wired) and schedule (not yet wired)."
 slug: the-precision-machinery
 keywords:
   - precision contract
@@ -17,7 +17,7 @@ date: 2026-11-18
 
 # The precision machinery in fak
 
-The precision machinery in fak is three layers: the metadata contract, the cross-support tensor, and the runtime policy and schedule that decide what runs. The wiring status of each is stated plainly.
+The precision machinery in fak is three layers: the metadata contract, the cross-support tensor, and a runtime layer where the dynamic policy is wired today and the schedule is designed but not yet wired.
 
 *You are on **Level 4 of 5** of the [mixed-precision ladder](README.md).*
 

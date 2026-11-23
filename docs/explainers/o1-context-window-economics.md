@@ -1,6 +1,6 @@
 ---
 title: "The O(1) Context Window: When Sending Less Beats Caching More"
-description: "An append-only transcript leans on the prefix cache. The O(1) context window rebuilds a bounded context each turn: replayable, observable, and cheaper."
+description: "The O(1) context window rebuilds a bounded context each turn: replayable, observable, and cheaper than a warm cache below about 12% of the context."
 slug: o1-context-window-economics
 keywords:
   - O(1) context window
@@ -17,7 +17,7 @@ date: 2026-06-23
 
 # The O(1) Context Window: When Sending Less Beats Caching More
 
-An O(1) context window is a bounded context rebuilt each turn from a lossless history store, instead of an append-only transcript that leans on the provider's prefix cache. Every step is replayable and observable, and replaying real billed usage shows the design is also the cheaper one.
+An O(1) context window is a bounded context rebuilt each turn from a lossless history store, instead of an append-only transcript that leans on the provider's prefix cache. Every step is replayable and observable, and on replayed billed usage it is cheaper whenever the window stays under about 12% of the full context.
 
 *Who this is for: engineers building long agent loops who are deciding between append-only-plus-prefix-cache and reconstructing a bounded context each turn. Prerequisite: a working grasp of prefix caching (see the companion [KV Cache](kv-cache-agentic-context.md) explainer). You'll come away able to say when the O(1) window is cheaper than a warm cache (it wins below the cache's own discount fraction, ~12%) and why it buys observability and deterministic replay — and how to check both against real billed usage with `tools/ctxcost.py`.*
 

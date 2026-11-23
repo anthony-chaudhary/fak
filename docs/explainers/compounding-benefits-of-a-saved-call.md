@@ -1,6 +1,6 @@
 ---
 title: "The compounding benefits of a saved tool call"
-description: "One avoided tool call discharges across four budgets at once (CPU, GPU prefill, context window, wall-clock), then extends the session's call horizon."
+description: "One avoided tool call frees four budgets (CPU, GPU prefill, context, wall-clock); a modeled horizon multiplier compounds on top."
 slug: compounding-benefits-of-a-saved-call
 keywords:
   - avoided tool call

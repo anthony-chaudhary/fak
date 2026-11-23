@@ -16,7 +16,7 @@ date: 2026-11-18
 
 # Level 1 — What is a buffer?
 
-A buffer is a place where numbers wait between the step that produced them and the step that needs them. This page explains the memory hierarchy with no math and no code: why a computer that can think fast still has to wait for its own numbers.
+A buffer is a named block of memory that holds numbers for one purpose, such as weights, activations, or the KV cache. This page explains the memory hierarchy with no math and no code: why a computer that can think fast still has to wait for its own numbers.
 
 *You are on **Level 1 of 5** of the [fak memory-hierarchy ladder](README.md).*
 
