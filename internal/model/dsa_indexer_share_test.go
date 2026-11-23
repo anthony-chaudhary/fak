@@ -256,3 +256,71 @@ func TestDsaIndexerShareConcurrentAliasingLayersComputeOnce(t *testing.T) {
 		t.Fatalf("concurrent computes = %d, want 1 (compute-once must hold under contention)", got)
 	}
 }
+
+func TestDsaIndexerShareGroupFromArchDescriptor(t *testing.T) {
+	scores, qPos, kPos, topK := dsaShareFixture()
+	const step = 3
+
+	// Layers 1 and 2 alias layer 0's indexer; layer 3 runs its own, layer 4
+	// aliases that one.
+	cfg := Config{NumLayers: 5, IndexerTypes: []string{"full", "shared", "shared", "full", "shared"}}
+	wantGroups := []string{"indexer-layer-0", "indexer-layer-0", "indexer-layer-0", "indexer-layer-3", "indexer-layer-3"}
+	for layer, want := range wantGroups {
+		if got, ok := dsaIndexerGroupForLayer(cfg, layer); !ok || got != want {
+			t.Fatalf("layer %d group = %q, %v; want %q", layer, got, ok, want)
+		}
+	}
+	cache := newDSAIndexerGroupCache()
+	otherScores := [][]float64{{90, 40, 5, 10, 20, 30}}
+	for layer := range wantGroups {
+		layerScores, want := scores, [][]int{{3, 1, 5}}
+		if layer >= 3 {
+			layerScores, want = otherScores, [][]int{{0, 1, 5}}
+		}
+		got, ok := cache.SelectForLayer(cfg, layer, step, layerScores, qPos, kPos, topK)
+		if !ok || !reflect.DeepEqual(got, want) {
+			t.Fatalf("layer %d selection = %v, %v; want %v", layer, got, ok, want)
+		}
+	}
+	// Five layers, two indexer groups: the aliasing layers consumed the group
+	// selection and only the two full layers computed.
+	if got := cache.Computes(); got != 2 {
+		t.Fatalf("computes = %d, want 2", got)
+	}
+
+	// Every layout the descriptor cannot satisfy refuses and caches nothing.
+	for name, tc := range map[string]struct {
+		cfg   Config
+		layer int
+	}{
+		"leading shared layer has no full source":  {Config{NumLayers: 3, IndexerTypes: []string{"shared", "full", "shared"}}, 0},
+		"dense layer publishes no selection":       {Config{NumLayers: 3, IndexerTypes: []string{"dense", "full", "shared"}}, 0},
+		"dense layer clears the share source":      {Config{NumLayers: 3, IndexerTypes: []string{"full", "dense", "shared"}}, 2},
+		"unknown indexer kind":                     {Config{NumLayers: 2, IndexerTypes: []string{"full", "sparse-ish"}}, 1},
+		"unknown kind behind a shared layer":       {Config{NumLayers: 2, IndexerTypes: []string{"sparse-ish", "shared"}}, 1},
+		"legal layer of a plan that starts shared": {Config{NumLayers: 3, IndexerTypes: []string{"shared", "full", "shared"}}, 2},
+		"legal layer before an unknown kind":       {Config{NumLayers: 3, IndexerTypes: []string{"full", "shared", "sparse-ish"}}, 1},
+		"no layer count":                           {Config{IndexerTypes: []string{"full", "shared"}}, 1},
+		"negative layer":                           {cfg, -1},
+		"layer past the model":                     {cfg, 5},
+	} {
+		refused := newDSAIndexerGroupCache()
+		if group, ok := dsaIndexerGroupForLayer(tc.cfg, tc.layer); ok {
+			t.Fatalf("%s: resolved group %q", name, group)
+		}
+		if sel, ok := refused.SelectForLayer(tc.cfg, tc.layer, step, scores, qPos, kPos, topK); ok || sel != nil {
+			t.Fatalf("%s: SelectForLayer = %v, %v; want refusal", name, sel, ok)
+		}
+		if refused.Computes() != 0 {
+			t.Fatalf("%s: a refused layer computed a selection", name)
+		}
+	}
+	// A dense head is a legal plan: the layers after it still resolve, and a
+	// layer the plan does not list defaults to its own full indexer.
+	densePlan := Config{NumLayers: 4, IndexerTypes: []string{"dense", "full", "shared"}}
+	for layer, want := range map[int]string{1: "indexer-layer-1", 2: "indexer-layer-1", 3: "indexer-layer-3"} {
+		if got, ok := dsaIndexerGroupForLayer(densePlan, layer); !ok || got != want {
+			t.Fatalf("dense-head plan layer %d = %q, %v; want %q", layer, got, ok, want)
+		}
+	}
+}

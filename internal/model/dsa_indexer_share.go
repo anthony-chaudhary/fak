@@ -1,6 +1,9 @@
 package model
 
-import "sync"
+import (
+	"strconv"
+	"sync"
+)
 
 // dsa_indexer_share.go — layer-group-scoped DSA light-indexer selection sharing.
 //
@@ -123,4 +126,54 @@ func (c *dsaIndexerGroupCache) Invalidate(group string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.groups, group)
+}
+
+// dsaIndexerGroupForLayer derives a layer's indexer group from the arch
+// descriptor's indexer plan: a "full" layer heads its own group and each
+// "shared" layer joins the nearest preceding full layer's group. Kinds are read
+// through the descriptor's own normalization.
+//
+// The whole plan is judged, not just the asked layer: one shared layer with no
+// full source (a dense layer in between clears the source) or one unknown kind
+// refuses every layer of the model, since a plan that is wrong somewhere gives
+// no reason to trust the rest of it. A "dense" layer publishes no sparse
+// selection and is refused on its own. Without a layer count there is no model
+// to be inside of, so that refuses too.
+func dsaIndexerGroupForLayer(cfg Config, layer int) (string, bool) {
+	if layer < 0 || layer >= cfg.NumLayers {
+		return "", false
+	}
+	source, group := -1, -1
+	for l := 0; l < cfg.NumLayers; l++ {
+		switch glmDsaIndexerKind(cfg, l) {
+		case "full":
+			source = l
+		case "dense":
+			source = -1
+		case "shared":
+			if source < 0 {
+				return "", false
+			}
+		default:
+			return "", false
+		}
+		if l == layer {
+			group = source
+		}
+	}
+	if group < 0 {
+		return "", false
+	}
+	return "indexer-layer-" + strconv.Itoa(group), true
+}
+
+// SelectForLayer is Select with the group taken from the arch descriptor
+// instead of from the caller, so the descriptor's refusals reach the cache: a
+// layer with no legal indexer source gets no selection and caches nothing.
+func (c *dsaIndexerGroupCache) SelectForLayer(cfg Config, layer, step int, scores [][]float64, queryPositions, keyPositions []int, topK int) ([][]int, bool) {
+	group, ok := dsaIndexerGroupForLayer(cfg, layer)
+	if !ok {
+		return nil, false
+	}
+	return c.Select(group, step, scores, queryPositions, keyPositions, topK)
 }

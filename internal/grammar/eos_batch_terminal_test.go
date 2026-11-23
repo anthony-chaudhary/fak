@@ -40,6 +40,11 @@ func TestEOSBatchTerminal(t *testing.T) {
 		if f0 || f2 {
 			t.Fatalf("live rows marked finished: row0=%v row2=%v", f0, f2)
 		}
+		for k, want := range []bool{true, false, true} {
+			if live, err := batch.Live(k); err != nil || live != want {
+				t.Fatalf("Live(%d) = %v, %v; want %v", k, live, err, want)
+			}
+		}
 		// Row 0 and 2 kept their advanced live sets; row 1 is masked to {eos}.
 		if m, _ := batch.Mask(0); !reflect.DeepEqual(m, []int{eos, 7}) {
 			t.Fatalf("row 0 mask disturbed: %v", m)
@@ -109,6 +114,24 @@ func TestEOSBatchTerminal(t *testing.T) {
 		before := snapshot(batch)
 		if err := batch.Step(0, 99, []int{11}); !errors.Is(err, ErrEOSBatchTerminal) {
 			t.Fatalf("token outside live set admitted: %v", err)
+		}
+		if got := snapshot(batch); !reflect.DeepEqual(got, before) {
+			t.Fatalf("refusal changed batch state")
+		}
+	})
+
+	t.Run("EOS outside the live set is not a terminal transition", func(t *testing.T) {
+		// The grammar decides when a row may end: once row 0's live set drops
+		// EOS, an EOS token is an ordinary disallowed token for that row.
+		if err := batch.Step(0, 10, []int{12, 13}); err != nil {
+			t.Fatal(err)
+		}
+		before := snapshot(batch)
+		if err := batch.Step(0, eos, nil); !errors.Is(err, ErrEOSBatchTerminal) {
+			t.Fatalf("EOS outside the live set admitted: %v", err)
+		}
+		if f, _ := batch.Finished(0); f {
+			t.Fatal("row 0 finished on an EOS its grammar did not allow")
 		}
 		if got := snapshot(batch); !reflect.DeepEqual(got, before) {
 			t.Fatalf("refusal changed batch state")
