@@ -34,7 +34,7 @@ func TestDsaIndexerShareAliasingLayersGetIdenticalSelection(t *testing.T) {
 	// Four layers alias the same light indexer in group "layers-0-3" at step 7.
 	const group = "layers-0-3"
 	const step = 7
-	var first [][]int
+	var first, broadcast [][]int
 	for layer := 0; layer < 4; layer++ {
 		sel, ok := cache.Select(group, step, scores, qPos, kPos, topK)
 		if !ok {
@@ -50,6 +50,7 @@ func TestDsaIndexerShareAliasingLayersGetIdenticalSelection(t *testing.T) {
 		if !reflect.DeepEqual(sel, first) {
 			t.Fatalf("aliasing layer %d got %v, want identical to layer 0 %v", layer, sel, first)
 		}
+		broadcast = sel
 	}
 
 	// The broadcast must be a clone: mutating one layer's view cannot corrupt a
@@ -61,6 +62,17 @@ func TestDsaIndexerShareAliasingLayersGetIdenticalSelection(t *testing.T) {
 	}
 	if again[0][0] == 999 {
 		t.Fatalf("cached selection aliases a caller's mutable slice: %v", again)
+	}
+
+	// The compute path and the broadcast path clone separately, so a view an
+	// aliasing layer received from the cache needs its own mutation check.
+	broadcast[0][0] = 999
+	after, ok := cache.Select(group, step, scores, qPos, kPos, topK)
+	if !ok {
+		t.Fatal("re-select after mutating a broadcast view failed")
+	}
+	if want := [][]int{{3, 1, 5}}; !reflect.DeepEqual(after, want) {
+		t.Fatalf("mutating a broadcast view corrupted the group selection: got %v, want %v", after, want)
 	}
 }
 
@@ -145,7 +157,10 @@ func TestDsaIndexerShareLayerOutsideGroupDoesNotShare(t *testing.T) {
 	// A layer outside the group presents a different group id. It must NOT be
 	// served group A's cached selection: it computes its own (a second compute),
 	// and its digest is its own entry, not group A's.
-	outside, ok := cache.Select("layers-8-11", step, scores, qPos, kPos, topK)
+	// Its indexer scores differ, so being handed group A's selection is visible
+	// in the result and not only in the compute counter.
+	outsideScores := [][]float64{{90, 40, 5, 10, 20, 30}}
+	outside, ok := cache.Select("layers-8-11", step, outsideScores, qPos, kPos, topK)
 	if !ok {
 		t.Fatal("outside-group selection failed")
 	}
@@ -155,12 +170,19 @@ func TestDsaIndexerShareLayerOutsideGroupDoesNotShare(t *testing.T) {
 	if cache.Digest("layers-8-11", step) == "" {
 		t.Fatal("outside group has no cached digest of its own")
 	}
-	if cache.Digest("layers-0-3", step) == cache.Digest("layers-8-11", step) && cache.Digest("layers-0-3", step) == "" {
-		t.Fatal("group digests unexpectedly both empty")
+	if cache.Digest("layers-0-3", step) == cache.Digest("layers-8-11", step) {
+		t.Fatal("outside group shares group A's digest; it must hold its own selection")
 	}
-	// The outside layer's selection is still a valid, identical-shape selection.
-	if want := [][]int{{3, 1, 5}}; !reflect.DeepEqual(outside, want) {
-		t.Fatalf("outside-group selection = %v, want %v", outside, want)
+	if want := [][]int{{0, 1, 5}}; !reflect.DeepEqual(outside, want) {
+		t.Fatalf("outside-group selection = %v, want its own %v", outside, want)
+	}
+	// Group A's entry is untouched by the outside layer's compute.
+	groupA, ok := cache.Select("layers-0-3", step, scores, qPos, kPos, topK)
+	if !ok || !reflect.DeepEqual(groupA, [][]int{{3, 1, 5}}) {
+		t.Fatalf("group A selection after outside compute = %v (ok=%v), want [[3 1 5]]", groupA, ok)
+	}
+	if got := cache.Computes(); got != 2 {
+		t.Fatalf("computes after re-reading group A = %d, want 2", got)
 	}
 }
 

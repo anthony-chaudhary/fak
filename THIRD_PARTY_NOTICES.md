@@ -1470,7 +1470,7 @@ Copyright and attribution retained from the FreeToken/freetoken-mlx contributors
 
 ## MLX-LM
 
-Portions of this product are adapted from MLX-LM: https://github.com/ml-explore/mlx-lm (pinned at revision 8d47a50482e27ad972e545f94f7ecb9e73a44635). Changes were made.
+Portions of this product are adapted from MLX-LM: https://github.com/ml-explore/mlx-lm (pinned at revision 8d47a50482e27ad972e545f94f7ecb9e73a44635, 4e9a1de64e2d874f0742b10ded506e30e67270e0). Changes were made.
 
 ```text
 MIT License
