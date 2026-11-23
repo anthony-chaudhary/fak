@@ -943,6 +943,40 @@ int fcuda_sampling_candidates(const uint32_t *row, int vocab, int k,
     void *workspace, uint32_t *retained, uint32_t *host_words);
 int fcuda_sampling_candidates_release(void *owned);
 
+/* inkling2_loop resident decode ops (cuda/inkling2_loop.cuh). All launch on g_stream and
+ * return 0 or a cudaError_t; meta[0] carries the token position as int bits. */
+int fcuda_ink2_zero(void *p, size_t bytes);
+int fcuda_ink2_rms_rows(const float *x, const float *w, float *y, int rows, int n, float eps);
+int fcuda_ink2_ctrl_pair(const float *cur, const float *msg, float *pair, int n);
+int fcuda_ink2_mix(const float *const *states, int ns, const float *queries, int nq, float *out, int n);
+int fcuda_ink2_gemv_f32(const float *W, const float *x, float *y, int rows, int cols);
+int fcuda_ink2_ctrl_down(const float *cur, const float *msg, const float *W, float *g, int n, int rank);
+int fcuda_ink2_ctrl_apply(const float *cur, const float *msg, const float *g, const float *gainW,
+    const float *forgetW, float *out, int n, int rank);
+int fcuda_ink2_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
+    const float *resid, int n, int heads, int kn, float norm);
+int fcuda_ink2_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
+    const float *rclip, float *kcache, float *vcache, const float *meta, int heads, int kvHeads,
+    int headDim, int relLen, float qkClip, float relClip, float eps, int global, float alpha,
+    float floorTok, int cap);
+int fcuda_ink2_attend(const float *q, const float *r, const float *sinks, const float *relBias,
+    const float *kcache, const float *vcache, double *scores, float *out, const float *meta,
+    int heads, int kvHeads, int headDim, int relLen, int extent, int window, int cap, float scale);
+int fcuda_ink2_sigmoid_mul(float *x, const float *gate, int n);
+int fcuda_ink2_route(const float *logits, const float *bias, int *ids, float *wts, int nexp, int k, float wscale);
+int fcuda_ink2_expert_scale(float *y, const int *ids, const float *scale, int k, int rows);
+int fcuda_ink2_situ(const float *gu, float *act, int k, int width, int actStride, double beta, double lb);
+int fcuda_ink2_moe_combine(const float *down, const float *wts, float *out, int k, int n);
+int fcuda_ink2_add(const float *a, const float *b, float *out, int n);
+int fcuda_ink2_softcap_argmax(float *logits, int n, float cap, int *outIdx);
+int fcuda_ink2_expert_gemv(int fmt, const uint8_t *W, const uint8_t *scales, const int *ids,
+    const float *X, int xStride, float *Y, int k, int rows, int in, const float *escale, int situW,
+    double beta, double lb);
+int fcuda_ink2_graph_begin(void);
+int fcuda_ink2_graph_end(void);
+int fcuda_ink2_graph_launch(void);
+void fcuda_ink2_graph_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

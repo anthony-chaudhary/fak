@@ -26,7 +26,7 @@ func openInkling2CUDAForTest(t *testing.T, env string) (*Inkling2LoopModel, comp
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("cuda load %s on %s", time.Since(start), be.Tier())
+	t.Logf("cuda load %s on %s (resident forward %v)", time.Since(start), be.Tier(), inkling2ResidentEligible(m, be))
 	return m, be
 }
 

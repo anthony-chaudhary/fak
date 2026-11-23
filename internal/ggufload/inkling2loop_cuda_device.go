@@ -3,6 +3,7 @@ package ggufload
 import (
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ func (m *inkling2DeviceMatrix) MatVec(dst, x []float32) {
 // device tensor owned by the inkling2DeviceSet.
 type inkling2DeviceExperts struct {
 	be               compute.Backend
+	stack            compute.Tensor
 	w                []compute.Tensor
 	rows, cols, padK int
 }
@@ -215,7 +217,7 @@ func (s *inkling2DeviceSet) experts(e model.Inkling2LoopExperts) (model.Inkling2
 		return nil, err
 	}
 	s.keep(stack)
-	out := &inkling2DeviceExperts{be: s.be, w: make([]compute.Tensor, q.experts), rows: q.rows, cols: q.cols, padK: padK}
+	out := &inkling2DeviceExperts{be: s.be, stack: stack, w: make([]compute.Tensor, q.experts), rows: q.rows, cols: q.cols, padK: padK}
 	for x := range out.w {
 		if out.w[x], err = compute.RowView(s.be, stack, x*q.rows, q.rows); err != nil {
 			return nil, fmt.Errorf("inkling2_loop: expert %d of %s stack: %w", x, q.typ, err)
@@ -307,6 +309,9 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 	if len(prompt) == 0 {
 		return nil, st, fmt.Errorf("inkling2_loop: empty prompt")
 	}
+	if inkling2ResidentEligible(m, be) {
+		return inkling2ResidentGreedy(m, be, prompt, n)
+	}
 	h, err := model.NewInkling2LoopHost(m.HP, m.Weights)
 	if err != nil {
 		return nil, st, err
@@ -341,4 +346,18 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 	}
 	st.Decode = time.Since(start)
 	return out, st, nil
+}
+
+// inkling2ResidentEligible routes a device-bound model on a backend with the
+// inkling2 device ops through the resident forward; FAK_INKLING2_RESIDENT=0 keeps
+// the host-driven per-matrix path.
+func inkling2ResidentEligible(m *Inkling2LoopModel, be compute.Backend) bool {
+	if os.Getenv("FAK_INKLING2_RESIDENT") == "0" || len(m.Weights.Layers) == 0 {
+		return false
+	}
+	if _, ok := be.(compute.Inkling2Device); !ok {
+		return false
+	}
+	_, ok := m.Weights.Layers[0].GateUp.(*inkling2DeviceExperts)
+	return ok
 }

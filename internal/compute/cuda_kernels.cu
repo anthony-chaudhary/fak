@@ -284,3 +284,6 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 // SM90 pull-style FP4 MegaMoE task-shape contract and K128 stage-ordering
 // invariants (structure and constexpr oracle only; no kernels, no ABI).
 #include "cuda/mega_moe_fp4.cuh"
+
+// inkling2_loop resident decode ops; uses the IQ grids and NVFP4 decoders above.
+#include "cuda/inkling2_loop.cuh"
