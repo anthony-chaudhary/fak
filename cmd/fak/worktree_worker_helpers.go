@@ -520,13 +520,32 @@ func worktreeWorkerRetainedTrees(rows []worktreeWorkerLifecycleRow) []workerwork
 	return trees
 }
 
+// worktreeWorkerCapacityAdvisoryBudget bounds the pool inspection behind the
+// contraction recommendations. The advisory must never wedge the operation it
+// annotates: past the setpoint the inspection is one git status per retained
+// worktree, which on a loaded host outlasts the prepare it follows.
+var worktreeWorkerCapacityAdvisoryBudget = 20 * time.Second
+
 func worktreeWorkerCapacityAdvisory(repoRoot string, census workerworktree.CapacityCensus, prospectiveCount int, reason string, rows []worktreeWorkerLifecycleRow) workerworktree.CapacityAdvisory {
+	return worktreeWorkerCapacityAdvisoryWith(repoRoot, census, prospectiveCount, reason, rows, worktreeWorkerLifecycleProbes{})
+}
+
+func worktreeWorkerCapacityAdvisoryWith(repoRoot string, census workerworktree.CapacityCensus, prospectiveCount int, reason string, rows []worktreeWorkerLifecycleRow, probes worktreeWorkerLifecycleProbes) workerworktree.CapacityAdvisory {
+	truncated := false
 	if census.Known && prospectiveCount > workerworktree.AdvisoryCapacitySetpoint && rows == nil {
-		rows = worktreeWorkerLifecycleInventory(repoRoot, census.Paths, worktreeWorkerLifecycleProbes{})
+		ctx, cancel := context.WithTimeout(context.Background(), worktreeWorkerCapacityAdvisoryBudget)
+		rows, truncated = worktreeWorkerLifecycleInventoryContext(ctx, repoRoot, census.Paths, probes)
+		cancel()
 	}
-	return workerworktree.AssessCapacity(
+	advisory := workerworktree.AssessCapacity(
 		len(census.Paths), prospectiveCount, census.Known, reason, worktreeWorkerRetainedTrees(rows),
 	)
+	if truncated {
+		// Fewer recommendations, never a refusal; say so, or an unfinished
+		// inspection reads as a pool with nothing to reclaim.
+		advisory.Message += fmt.Sprintf("; pool inspection stopped at its %s budget, contraction recommendations are incomplete", worktreeWorkerCapacityAdvisoryBudget)
+	}
+	return advisory
 }
 
 func worktreeWorkerWriteCapacityHuman(w io.Writer, advisory workerworktree.CapacityAdvisory) {
