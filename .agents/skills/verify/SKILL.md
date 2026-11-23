@@ -121,6 +121,19 @@ alone, and `diff-witnessed` + `CLAIM_TEST_RED` is a REFUTATION.
   (no changed test-bearing package, runner off/faulted). UNRUN is honest, not a
   pass.
 
+### Step 4b - Ratify the whole claim end to end (`fak done`)
+
+The test binding is one rung; the repo's composed pre-claim self-check ratifies
+the full done-claim in one verdict — selected paths clean, the test target,
+claims-lint, and a loopgate/DOS witness criterion, folded to one GREEN/RED:
+
+```bash
+fak done --paths <changed-files> --test ./<changed-pkg>/... --witness "commit-audit HEAD"
+```
+
+Run it before folding any done-claim as true; on RED it names the missing
+witness and the next checkable step. Exit 0 is GREEN, 1 is RED, 2 is usage.
+
 ## Anti-Patterns
 
 - Reporting a diff-shape `diff-witnessed` as if it proved the tests pass.

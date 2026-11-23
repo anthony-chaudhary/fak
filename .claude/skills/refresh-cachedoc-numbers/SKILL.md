@@ -74,5 +74,5 @@ making the text match it.
   after `--refresh`, you likely ran it outside the repo's `fak` data context —
   re-run from the repo root before trusting it.
 - This skill only touches guarded docs. Committed benchmark claims belong to
-  `docs/benchmarks/BENCHMARK-AUTHORITY.md`; the README's numbers to
+  `BENCHMARK-AUTHORITY.md` (repo root); the README's numbers to
   `tools/readme_freshness_audit.py`. Don't cross those streams.

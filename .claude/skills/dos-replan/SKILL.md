@@ -96,7 +96,7 @@ row (the queue's write path, `home.append_decision`, is currently reached only b
 `dos arbitrate --force`'s override capture). So the generic baseline **surfaces**
 the 0-2 items in its operator summary (Step 6) and reads the existing queue here;
 *emitting a new decision row into the queue is a host/driver capability* (the
-named open seam — see `docs/74-friction-log.md`). Do not imply `dos decisions`
+named open seam — see `docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md`). Do not imply `dos decisions`
 writes; it lists and drills in.
 
 ## Step 5b — Concrete findings go to the issue tracker, not the inbox

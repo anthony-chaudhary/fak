@@ -1,6 +1,6 @@
 ---
 name: ci-repair
-description: Diagnose, isolate, and repair broken CI/CD workflows and red trunk gates across GitHub Actions, spine-invariance, ci-fast, architest DAG rules, structural policies, scorecard freshness, and build breakages. Uses parallel subagents for failure triage, isolated leaf implementation, on-device witness verification, and atomic commit landing. Call when CI turns red, when `fak sync push` or `fak commit --push` is blocked by `COMMITTED_RED`/`CI_BASE_RED`, or when dual-repo synchronization is wedged.
+description: Diagnose, isolate, and repair broken CI/CD workflows and red trunk gates across GitHub Actions, spine-invariance, ci-fast, architest DAG rules, structural policies, scorecard freshness, and build breakages. Uses parallel subagents for failure triage, isolated leaf implementation, on-device witness verification, and atomic commit landing. Use when CI turns red, when `fak sync push` or `fak commit --push` is blocked by `COMMITTED_RED`/`CI_BASE_RED`, or when dual-repo synchronization is wedged.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob, Task

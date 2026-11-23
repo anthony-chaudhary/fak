@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable scratch state (_scratch/goals/GOAL-<slug>.md, whose markdown checklist is the step tracker on pi), a deterministic witness exit-gate, and executes atomic steps until verified.
+description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable scratch state (_scratch/goals/GOAL-<slug>.md, whose markdown checklist is the step tracker on pi), a deterministic witness exit-gate, and executes atomic steps until verified. Use when an operator pins a durable objective that must persist across turns (the active-goal question boundary), when work should continue unattended until a witness proves the goal, or when a session needs the goal-park claim protocol.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Edit, Write, Grep, Glob, Bash

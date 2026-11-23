@@ -198,7 +198,8 @@ Before the split both nothing-landed classes returned 3, so a lander that (corre
 3. **Lint:** `fak commit --preview -m "<subject>" --path <p> …` — fix any subject/stamp/lane issue it flags before anything lands.
 4. **Commit:** `fak commit --path <p> [--path <q>] -m "<type>(<scope>): <what> (fak <leaf>)" [--push]`.
 5. **Witness:** on success, `fak commit` auto-executes `dos commit-audit` (verifying diff-witnessed shape) and `dos verify` (confirming leaf registration), printing both inline. Check `git show --stat <committed_sha>` and run `dos review origin/main..HEAD` to confirm zero residual (`has_residual: false`).
-6. **On a `reason` refusal,** act per the vocabulary table above — never convert a race or refusal into a force-push or an amend.
+6. **Ratify end to end before claiming done:** run `fak done --paths <p> ... --test ./<pkg>/... --witness "commit-audit HEAD"` — the composed pre-claim self-check that folds paths-clean, the test run, claims-lint, and the DOS witness criterion into one GREEN/RED verdict. A commit that landed is not a claim that is ratified; report the `fak done` verdict (and its named missing witness on RED) as the final line of the turn.
+7. **On a `reason` refusal,** act per the vocabulary table above — never convert a race or refusal into a force-push or an amend.
 
 ## Never
 

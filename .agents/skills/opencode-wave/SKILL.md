@@ -1,6 +1,6 @@
 ---
 name: opencode-wave
-description: Spawn and coordinate deterministic, collision-safe OpenCode leaf worker waves with high reasoning effort (--variant high), automated approvals (--auto), mandatory detached worktree isolation (--worktree), pre-flight lane lease arbitration, and automated closed-loop harvest.
+description: Spawn and coordinate deterministic, collision-safe OpenCode leaf worker waves with high reasoning effort (--variant high), automated approvals (--auto), mandatory detached worktree isolation (--worktree), pre-flight lane lease arbitration, and automated closed-loop harvest. Use when an operator asks for a wave of OpenCode leaf workers, or when a batch of issue-sized units should fan out to isolated high-effort OpenCode sessions and be harvested closed-loop.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Edit, Write, Grep, Glob, Bash, Task

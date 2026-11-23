@@ -144,9 +144,11 @@ dos review origin/main..HEAD
 ```
 
 Confirm `has_residual: false`.
+Ratify the claim end to end before emitting the receipt — `fak done --paths <changed-files> --test ./<pkg>/... --witness "commit-audit HEAD"` folds paths-clean, the test run, claims-lint, and the DOS witness into one GREEN/RED verdict; a RED names the missing witness.
 Emit the final non-forgeable receipt:
 - Commit SHA: `<sha>`
 - Diff Witness: `diff-witnessed`
 - Test Status: `CLAIM_TEST_GREEN`
+- E2E Ratification: `fak done` GREEN
 - Cross-Validation: `CONFIRMED_VALID`
 - Discovered Issues: `#<issue_numbers>`
