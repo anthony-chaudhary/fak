@@ -44,6 +44,11 @@ var PathFlags = map[string]bool{
 	"dir":       true,
 }
 
+// NotPathMarker exempts one declaration whose flag name collides with PathFlags but
+// whose value is never a filesystem path (e.g. a Hub repo id). It must sit on the
+// declaration line or the line directly above, so the exemption stays next to the flag.
+const NotPathMarker = "pathlint:not-path"
+
 // Offense is one unexpanded path flag at one declaration site.
 type Offense struct {
 	Cmd  string // command dir name, e.g. "diagtok"
@@ -101,24 +106,25 @@ func scanCmd(dir, name string) ([]Offense, error) {
 		if f.IsDir() || !strings.HasSuffix(f.Name(), ".go") || strings.HasSuffix(f.Name(), "_test.go") {
 			continue
 		}
-		af, perr := parser.ParseFile(fset, filepath.Join(dir, f.Name()), nil, 0)
+		af, perr := parser.ParseFile(fset, filepath.Join(dir, f.Name()), nil, parser.ParseComments)
 		if perr != nil {
 			continue // not parseable as standalone Go (e.g. a //go:build cuda cgo file); skip
 		}
 		parsed = append(parsed, af)
 	}
-	return analyzeFiles(name, parsed), nil
+	return analyzeFiles(name, fset, parsed), nil
 }
 
 // analyzeFiles is the AST core, split out so it can be unit-tested on synthetic source.
 // Each function is analyzed independently (its declared path flags must be expanded
 // within it); package-level flag vars are checked against file-wide expansion.
-func analyzeFiles(cmd string, files []*ast.File) []Offense {
+func analyzeFiles(cmd string, fset *token.FileSet, files []*ast.File) []Offense {
 	var offenses []Offense
 	for _, f := range files {
+		notPath := notPathLines(fset, f)
 		// Package-level flag vars (e.g. `var gguf = flag.String(...)`): scope is the file.
 		fileExpanded := collectExpanded(f)
-		for v, name := range packageFlagVars(f) {
+		for v, name := range packageFlagVars(fset, f, notPath) {
 			if !fileExpanded[v] {
 				offenses = append(offenses, Offense{Cmd: cmd, Func: "<package>", Flag: name})
 			}
@@ -130,7 +136,7 @@ func analyzeFiles(cmd string, files []*ast.File) []Offense {
 				continue
 			}
 			localExpanded := collectExpanded(fn.Body)
-			for v, name := range localFlagVars(fn.Body) {
+			for v, name := range localFlagVars(fset, fn.Body, notPath) {
 				if !localExpanded[v] {
 					offenses = append(offenses, Offense{Cmd: cmd, Func: fn.Name.Name, Flag: name})
 				}
@@ -157,7 +163,7 @@ func collectExpanded(root ast.Node) map[string]bool {
 
 // localFlagVars maps each `<var> := <recv>.String("<pathflag>", ...)` in body to its
 // flag name.
-func localFlagVars(body *ast.BlockStmt) map[string]string {
+func localFlagVars(fset *token.FileSet, body *ast.BlockStmt, notPath map[int]bool) map[string]string {
 	out := map[string]string{}
 	ast.Inspect(body, func(n ast.Node) bool {
 		as, ok := n.(*ast.AssignStmt)
@@ -168,7 +174,7 @@ func localFlagVars(body *ast.BlockStmt) map[string]string {
 		if !ok {
 			return true
 		}
-		if name, ok := stringFlagName(as.Rhs[0]); ok && PathFlags[name] {
+		if name, ok := stringFlagName(as.Rhs[0]); ok && PathFlags[name] && !markedNotPath(fset, as.Pos(), notPath) {
 			out[lhs.Name] = name
 		}
 		return true
@@ -178,7 +184,7 @@ func localFlagVars(body *ast.BlockStmt) map[string]string {
 
 // packageFlagVars maps each package-level `var <name> = <recv>.String("<pathflag>", ...)`
 // to its flag name.
-func packageFlagVars(f *ast.File) map[string]string {
+func packageFlagVars(fset *token.FileSet, f *ast.File, notPath map[int]bool) map[string]string {
 	out := map[string]string{}
 	for _, d := range f.Decls {
 		gd, ok := d.(*ast.GenDecl)
@@ -194,13 +200,32 @@ func packageFlagVars(f *ast.File) map[string]string {
 				if i >= len(vs.Names) {
 					break
 				}
-				if name, ok := stringFlagName(val); ok && PathFlags[name] {
+				if name, ok := stringFlagName(val); ok && PathFlags[name] && !markedNotPath(fset, vs.Pos(), notPath) {
 					out[vs.Names[i].Name] = name
 				}
 			}
 		}
 	}
 	return out
+}
+
+// notPathLines returns the lines of f carrying a NotPathMarker comment.
+func notPathLines(fset *token.FileSet, f *ast.File) map[int]bool {
+	out := map[int]bool{}
+	for _, cg := range f.Comments {
+		for _, c := range cg.List {
+			if strings.Contains(c.Text, NotPathMarker) {
+				out[fset.Position(c.Pos()).Line] = true
+			}
+		}
+	}
+	return out
+}
+
+// markedNotPath reports whether a NotPathMarker sits on pos's line or the line above.
+func markedNotPath(fset *token.FileSet, pos token.Pos, notPath map[int]bool) bool {
+	line := fset.Position(pos).Line
+	return notPath[line] || notPath[line-1]
 }
 
 // stringFlagName returns the flag name if expr is a `<x>.String("name", ...)` call.

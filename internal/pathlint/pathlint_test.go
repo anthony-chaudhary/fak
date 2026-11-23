@@ -10,13 +10,14 @@ import (
 )
 
 // parseSrc is a tiny helper to AST-parse a synthetic source string.
-func parseSrc(t *testing.T, src string) *ast.File {
+func parseSrc(t *testing.T, src string) (*token.FileSet, *ast.File) {
 	t.Helper()
-	f, err := parser.ParseFile(token.NewFileSet(), "synthetic.go", src, 0)
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "synthetic.go", src, parser.ParseComments)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	return f
+	return fset, f
 }
 
 // TestAnalyzeFiles verifies the witness itself (verify the verifier): a path flag that
@@ -87,10 +88,25 @@ func main() {
 }`,
 			want: []string{"dir"},
 		},
+		{
+			name: "not-path marker exempts only its own declaration",
+			src: `package main
+func main() {
+	repo := fs.String("hf", "", "") //pathlint:not-path Hub repo id
+	// pathlint:not-path
+	id := fs.String("dir", "", "")
+	gguf := fs.String("gguf", "", "")
+
+	tok := fs.String("tok", "", "")
+	_, _, _, _ = repo, id, gguf, tok
+}`,
+			want: []string{"gguf", "tok"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := analyzeFiles("synthetic", []*ast.File{parseSrc(t, tc.src)})
+			fset, f := parseSrc(t, tc.src)
+			got := analyzeFiles("synthetic", fset, []*ast.File{f})
 			gotFlags := map[string]bool{}
 			for _, o := range got {
 				gotFlags[o.Flag] = true

@@ -25,7 +25,7 @@ func runNewModel(stdout, stderr io.Writer, argv []string) int {
 	fromManifest := fs.String("from-manifest", "", "compile a pinned release manifest into an onboarding packet")
 	gguf := fs.String("gguf", "", "with --from-manifest: also run the header preflight (fak model preflight) on this GGUF")
 	hfConfig := fs.String("hf-config", "", "with --gguf: the HF config.json the GGUF keys must agree with")
-	hfRepo := fs.String("hf", "", "emit a family spine from <owner>/<repo>@<40-hex commit> headers (needs --family)")
+	hfRepo := fs.String("hf", "", "emit a family spine from <owner>/<repo>@<40-hex commit> headers (needs --family)") //pathlint:not-path a Hub repo pin, never opened on disk
 	hfEndpoint := fs.String("hf-endpoint", hfhub.DefaultBaseURL, "with --hf: Hub origin or mirror")
 	outDir := fs.String("out", ".", "with --hf: directory the spine tree is written under")
 	if err := fs.Parse(argv); err != nil {

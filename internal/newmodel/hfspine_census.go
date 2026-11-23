@@ -68,7 +68,7 @@ func (s HubRangeSource) do(ctx context.Context, url, rangeHeader string) (*http.
 	}
 	hc := s.Client.HTTP
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = hfhub.NewClient().HTTP
 	}
 	return hc.Do(req)
 }
