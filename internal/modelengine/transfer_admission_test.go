@@ -7,8 +7,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 )
 
-// These tests pin the two-budget admission contract adapted from vLLM PR
-// #65319 (vllm/config/scheduler.py and
+// These tests pin the two-budget admission contract adapted from vLLM
+// (vllm/config/scheduler.py and
 // vllm/distributed/kv_transfer/kv_connector/v1/base.py at
 // 56e993a68990cd3bb0719d5d91dab549ce0d5a79, Apache-2.0): execution slots and
 // in-flight KV-transfer slots are INDEPENDENT ceilings. A full compute batch
@@ -67,7 +67,9 @@ func TestTransferAdmission(t *testing.T) {
 		if d := a.Admit(TransferRequest{ID: "t1", NeedsTransfer: true}); d.Verdict != cachemeta.AdmissionDefer {
 			t.Fatalf("second transfer verdict=%q, want defer despite exec cap 100", d.Verdict)
 		}
-		if st := a.Stats(); st.TransferUsed != 1 || st.ExecutionUsed != 1 {
+		// A transfer start holds a transfer slot only: it must not draw down the
+		// execution budget it is not yet using.
+		if st := a.Stats(); st.TransferUsed != 1 || st.ExecutionUsed != 0 {
 			t.Fatalf("conflated caps: %+v", st)
 		}
 
@@ -86,13 +88,49 @@ func TestTransferAdmission(t *testing.T) {
 		if d.Verdict != cachemeta.AdmissionAllow || !d.TransferSlot {
 			t.Fatalf("transfer over full batch verdict=%q slot=%v, want allow+transfer", d.Verdict, d.TransferSlot)
 		}
-		// It did NOT take an execution slot (none free), proving the budgets
-		// are not the same counter.
+		// It did NOT take an execution slot, proving the budgets are not the
+		// same counter.
 		if d.ExecutionSlot {
 			t.Fatalf("transfer request took an execution slot from a full batch: %+v", d)
 		}
 		if st := b.Stats(); st.ExecutionUsed != 1 || st.TransferUsed != 1 {
 			t.Fatalf("stats = %+v, want exec 1/1 transfer 1/4", st)
+		}
+	})
+
+	t.Run("transfer starts cannot starve a runnable request of the batch", func(t *testing.T) {
+		a, err := NewTransferAdmission(2, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 4; i++ {
+			d := a.Admit(TransferRequest{ID: "loading", NeedsTransfer: true})
+			if d.Verdict != cachemeta.AdmissionAllow || !d.TransferSlot || d.ExecutionSlot {
+				t.Fatalf("transfer start %d = %+v, want a transfer slot and no execution slot", i, d)
+			}
+		}
+		// Four loads are in flight against an execution cap of two; the batch
+		// must still be empty for requests whose KV is already resident.
+		for _, id := range []string{"ready-0", "ready-1"} {
+			d := a.Admit(TransferRequest{ID: id})
+			if d.Verdict != cachemeta.AdmissionAllow || !d.ExecutionSlot || d.TransferSlot || d.ID != id {
+				t.Fatalf("runnable %s = %+v, want an execution slot behind four in-flight loads", id, d)
+			}
+		}
+		if st := a.Stats(); st.ExecutionUsed != 2 || st.TransferUsed != 4 {
+			t.Fatalf("stats = %+v, want exec 2/2 transfer 4/4", st)
+		}
+		// A finished load hands back its transfer slot and queues for the batch
+		// like any runnable request.
+		if _, ok := a.ReleaseTransfer(); ok {
+			t.Fatal("ReleaseTransfer promoted a waiter with an empty queue")
+		}
+		if d := a.Admit(TransferRequest{ID: "loaded"}); d.Verdict != cachemeta.AdmissionDefer {
+			t.Fatalf("loaded request over a full batch = %+v, want defer", d)
+		}
+		d, ok := a.ReleaseExecution()
+		if !ok || d.ID != "loaded" || !d.ExecutionSlot || d.TransferSlot {
+			t.Fatalf("ReleaseExecution promoted %+v ok=%v, want the loaded request into the batch", d, ok)
 		}
 	})
 
@@ -107,18 +145,24 @@ func TestTransferAdmission(t *testing.T) {
 		if d := a.Admit(TransferRequest{ID: "t1", NeedsTransfer: true}); d.Verdict != cachemeta.AdmissionDefer {
 			t.Fatalf("second verdict=%q, want defer", d.Verdict)
 		}
-		if st := a.Stats(); st.Waiters != 1 {
-			t.Fatalf("waiters=%d, want 1", st.Waiters)
+		if d := a.Admit(TransferRequest{ID: "t2", NeedsTransfer: true}); d.Verdict != cachemeta.AdmissionDefer || d.ID != "t2" {
+			t.Fatalf("third decision=%+v, want t2 deferred", d)
+		}
+		if st := a.Stats(); st.Waiters != 2 {
+			t.Fatalf("waiters=%d, want 2", st.Waiters)
 		}
 		d, ok := a.ReleaseTransfer()
 		if !ok {
 			t.Fatal("ReleaseTransfer promoted no waiter")
 		}
-		if d.Verdict != cachemeta.AdmissionAllow || !d.TransferSlot {
-			t.Fatalf("promoted verdict=%q slot=%v, want allow+transfer", d.Verdict, d.TransferSlot)
+		if d.Verdict != cachemeta.AdmissionAllow || !d.TransferSlot || d.ID != "t1" {
+			t.Fatalf("promoted %+v, want the first waiter t1 with a transfer slot", d)
 		}
-		if st := a.Stats(); st.Waiters != 0 || st.TransferUsed != 1 || st.Admitted != 2 {
+		if st := a.Stats(); st.Waiters != 1 || st.TransferUsed != 1 || st.Admitted != 2 {
 			t.Fatalf("stats after promote = %+v", st)
+		}
+		if d, ok := a.ReleaseTransfer(); !ok || d.ID != "t2" {
+			t.Fatalf("second release promoted %+v ok=%v, want t2", d, ok)
 		}
 		// Nothing left to promote.
 		if _, ok := a.ReleaseTransfer(); ok {
@@ -148,8 +192,8 @@ func TestTransferAdmission(t *testing.T) {
 			t.Fatalf("transfer waiter verdict=%q, want defer", d.Verdict)
 		}
 		d, ok := a.ReleaseTransfer()
-		if !ok || d.Verdict != cachemeta.AdmissionAllow || !d.TransferSlot {
-			t.Fatalf("ReleaseTransfer promoted %+v ok=%v, want the transfer waiter", d, ok)
+		if !ok || d.Verdict != cachemeta.AdmissionAllow || !d.TransferSlot || d.ID != "t1" {
+			t.Fatalf("ReleaseTransfer promoted %+v ok=%v, want the transfer waiter t1", d, ok)
 		}
 		if st := a.Stats(); st.Waiters != 1 || st.TransferUsed != 1 || st.ExecutionUsed != 1 {
 			t.Fatalf("stats = %+v, want the exec waiter still queued", st)

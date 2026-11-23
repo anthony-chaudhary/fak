@@ -8,8 +8,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 )
 
-// Adapted from vLLM PR #65319 "[Core] Cap the number of in-flight async KV
-// loads" (vllm-project/vllm, pinned at revision
+// Adapted from the vLLM cap on in-flight async KV loads (vllm-project/vllm,
+// pinned at revision
 // 56e993a68990cd3bb0719d5d91dab549ce0d5a79; the pinned sources are
 // vllm/config/scheduler.py and
 // vllm/distributed/kv_transfer/kv_connector/v1/base.py, Apache-2.0).
@@ -39,8 +39,12 @@ type TransferRequest struct {
 	NeedsTransfer bool
 }
 
-// TransferAdmissionDecision is the outcome of one Admit call.
+// TransferAdmissionDecision is the outcome of one Admit call, or of a release
+// that promoted a waiter.
 type TransferAdmissionDecision struct {
+	// ID names the request the decision is about, so a release that promotes a
+	// waiter says which one now holds the slot.
+	ID string
 	// Verdict is Allow when the request may proceed (it holds every slot it
 	// needs) and Defer when it must wait for a slot to free.
 	Verdict cachemeta.AdmissionVerdict
@@ -72,8 +76,14 @@ type transferWaiter struct {
 // once). A request that needs a transfer must hold a transfer slot; when the
 // transfer budget is exhausted admission defers rather than over-admitting.
 // The two caps are independent: a large execution-slot count never raises the
-// transfer cap, and a full compute batch never defers a transfer start (the
-// request prefetches its KV while the GPU stays saturated).
+// transfer cap, a full compute batch never defers a transfer start (the
+// request prefetches its KV while the GPU stays saturated), and a transfer
+// start never takes an execution slot, so loading requests cannot crowd a
+// runnable one out of the batch.
+//
+// A request whose transfer finished calls ReleaseTransfer and is admitted again
+// without NeedsTransfer to take its execution slot. Callers release only the
+// slots their decision reported holding.
 //
 // All methods are safe for concurrent use.
 type TransferAdmission struct {
@@ -114,7 +124,7 @@ func (a *TransferAdmission) admitLocked(req TransferRequest) TransferAdmissionDe
 	if !a.canGrantLocked(req) {
 		a.deferred++
 		a.waiters = append(a.waiters, &transferWaiter{req: req})
-		return TransferAdmissionDecision{Verdict: cachemeta.AdmissionDefer}
+		return TransferAdmissionDecision{ID: req.ID, Verdict: cachemeta.AdmissionDefer}
 	}
 	return a.grantLocked(req)
 }
@@ -132,16 +142,17 @@ func (a *TransferAdmission) canGrantLocked(req TransferRequest) bool {
 	return true
 }
 
-// grantLocked consumes the slots req needs. A transfer-needing request always
-// takes a transfer slot; it takes an execution slot only when one is free, so a
-// full compute batch still admits a bounded transfer start. Caller holds a.mu.
+// grantLocked consumes the one slot req needs: a transfer slot for a request
+// still loading its KV, an execution slot for a runnable one. Keeping a loading
+// request out of the execution budget is what lets a full batch admit a
+// transfer start and stops transfer starts from deferring runnable requests.
+// Caller holds a.mu and has checked canGrantLocked.
 func (a *TransferAdmission) grantLocked(req TransferRequest) TransferAdmissionDecision {
-	d := TransferAdmissionDecision{Verdict: cachemeta.AdmissionAllow}
+	d := TransferAdmissionDecision{ID: req.ID, Verdict: cachemeta.AdmissionAllow}
 	if req.NeedsTransfer {
 		a.transferUsed++
 		d.TransferSlot = true
-	}
-	if a.execUsed < a.execCap {
+	} else {
 		a.execUsed++
 		d.ExecutionSlot = true
 	}
