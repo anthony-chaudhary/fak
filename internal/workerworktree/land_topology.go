@@ -711,8 +711,15 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 			// The flock proves no pool-aware session is using the checkout, so
 			// removing it is safe; a git "initializing" marker left by a dead
 			// creator is cleared by removeCandidateWithRegistration.
+			// Retake the sidecar before giving up the flock so no other adopter
+			// can take the checkout while it is being deleted.
+			removal, held := lockCandidateSidecar(cand)
 			releaseCandidatePool(lock)
+			if !held {
+				continue
+			}
 			removeCandidateWithRegistration(s.root, cand, s.git)
+			releaseCandidateSidecar(removal)
 			staleRegistration = true
 			continue
 		}
@@ -802,12 +809,15 @@ func trimPoolExcessPrefixBounded(root, parent string, git GitRunner, prefix stri
 			continue
 		}
 		lock, lockOK := lockCandidatePoolDir(d.path)
-		releaseCandidateSidecar(sidecar)
 		if !lockOK {
+			releaseCandidateSidecar(sidecar)
 			continue
 		}
+		// The sidecar stays held across the removal: an adopter takes it first,
+		// so none can adopt a checkout that is being deleted.
 		releaseCandidatePool(lock)
 		removeCandidateWithRegistration(root, d.path, git)
+		releaseCandidateSidecar(sidecar)
 		removed++
 	}
 }
@@ -927,7 +937,13 @@ func rootCommonGitDir(root string, git GitRunner) string {
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(root, dir)
 	}
-	return filepath.Clean(dir)
+	// A relative root yields a relative common dir, which never compares equal
+	// to the absolute one a checkout's .git file names.
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	return filepath.Clean(abs)
 }
 
 // registeredWorktrees parses one `git worktree list --porcelain` into
@@ -1112,6 +1128,11 @@ func removeCandidateWithRegistration(root, cand string, git GitRunner) {
 // containsPath reports whether the key set contains path, compared with the
 // codebase's case-insensitive, symlink-resolving path equality.
 func containsPath(set map[string]bool, path string) bool {
+	// The usual hit is byte-equal, and resolving every key costs a filesystem
+	// walk per comparison, which is minutes across a large registration list.
+	if set[filepath.Clean(path)] {
+		return true
+	}
 	for key := range set {
 		if samePath(key, path) {
 			return true
