@@ -98,6 +98,11 @@ type Inkling2LoopHost struct {
 	keys, values [][][]float32
 	positions    [][]int
 	conv         [][]float32
+	// FeatureVisits are layer visits (loop passes counted) whose input partial
+	// Step copies into Features; visit Visits() is the final-norm output. They
+	// are the target features a DSpark draft reads.
+	FeatureVisits []int
+	Features      [][]float32
 }
 
 func NewInkling2LoopHost(hp Inkling2LoopHParams, w *Inkling2LoopWeights) (*Inkling2LoopHost, error) {
@@ -124,15 +129,32 @@ func NewInkling2LoopHost(hp Inkling2LoopHParams, w *Inkling2LoopWeights) (*Inkli
 // Slots is the number of layer visits per token (cache slots).
 func (h *Inkling2LoopHost) Slots() int { return len(h.conv) }
 
+// Visits is the number of layer visits per token in execution order.
+func (h *Inkling2LoopHost) Visits() int {
+	return h.HP.Layers + (h.HP.Passes-1)*(h.HP.CoreEnd-h.HP.CoreStart)
+}
+
+func (h *Inkling2LoopHost) tap(visit int, x []float32) {
+	for i, v := range h.FeatureVisits {
+		if v == visit {
+			h.Features[i] = append([]float32(nil), x...)
+		}
+	}
+}
+
 // Step consumes one token at the next position and returns its unpadded logits.
 func (h *Inkling2LoopHost) Step(token int) []float32 {
 	hp := h.HP
 	cur := make([]float32, hp.Hidden)
 	h.W.TokEmbd.Row(token, cur)
 	cur = inkling2RMS(cur, h.W.TokNorm, hp.NormEps)
+	h.Features = make([][]float32, len(h.FeatureVisits))
+	visit := 0
 
 	var blocks [][]float32
 	for il := 0; il < hp.CoreStart; il++ {
+		h.tap(visit, cur)
+		visit++
 		cur = h.layer(il, il, cur, &blocks, nil)
 	}
 	prelude := cur
@@ -148,6 +170,8 @@ func (h *Inkling2LoopHost) Step(token int) []float32 {
 			blocks = append([][]float32(nil), preludeBlocks...)
 		}
 		for ip := hp.CoreStart; ip < hp.CoreEnd; ip++ {
+			h.tap(visit, cur)
+			visit++
 			if pass == 0 {
 				cur = h.layer(ip, ip, cur, &blocks, nil)
 				continue
@@ -162,11 +186,14 @@ func (h *Inkling2LoopHost) Step(token int) []float32 {
 		}
 	}
 	for il := hp.CoreEnd; il < hp.Layers; il++ {
+		h.tap(visit, cur)
+		visit++
 		cur = h.layer(il, il, cur, &blocks, nil)
 	}
 
 	cur = inkling2Mix(blocks, cur, h.W.OutputResQuery)
 	cur = inkling2RMS(cur, h.W.OutputNorm, hp.NormEps)
+	h.tap(visit, cur)
 	logits := make([]float32, h.W.Output.Rows())
 	h.W.Output.MatVec(logits, cur)
 	if c := hp.FinalLogitSoftcap; c != 0 {
