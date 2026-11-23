@@ -156,6 +156,20 @@ func TestHashIDBlockCache(t *testing.T) {
 		}
 	})
 
+	t.Run("layout names", func(t *testing.T) {
+		for layout, want := range map[HashIDLayout]string{
+			HashIDLayoutUnhashed:         "unhashed",
+			HashIDLayoutExactTile:        "exact_tile",
+			HashIDLayoutPartialLastBlock: "partial_last_block",
+			HashIDLayoutPrefixOnly:       "prefix_only",
+			HashIDLayout(99):             "HashIDLayout(99)",
+		} {
+			if got := layout.String(); got != want {
+				t.Errorf("HashIDLayout(%d).String() = %q, want %q", int(layout), got, want)
+			}
+		}
+	})
+
 	t.Run("default entry cap", func(t *testing.T) {
 		c := newHashIDTestCache(t, HashIDBlockCacheConfig{})
 		if c.Cap() != DefaultHashIDBlockCacheEntries {
