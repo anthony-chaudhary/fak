@@ -3,8 +3,8 @@ package compute
 import "sync"
 
 // GraphEvictGuard is a host-side pending-use guard for the CUDA graph cache,
-// adapted from llama.cpp's CUDA graph-pool eviction fix (PR #30662,
-// ggml/src/ggml-cuda/common.cuh @00f113eceb2758158582d56f98bf476b2fe3ed32,
+// adapted from llama.cpp's CUDA graph-pool eviction fix
+// (ggml/src/ggml-cuda/common.cuh @00f113eceb2758158582d56f98bf476b2fe3ed32,
 // MIT; see THIRD_PARTY_NOTICES.md, "llama.cpp"). Upstream, a captured graph that
 // had been queued for imminent replay could still be evicted when graph-pool
 // memory pressure triggered a cleanup pass, forcing a costly re-capture stall
@@ -12,10 +12,11 @@ import "sync"
 // an outstanding replay is not a valid eviction victim.
 //
 // This guard tracks in-flight replays per graph key and answers the eviction
-// predicate the cache policy consults. It is keyed by the same string keys as
-// GraphCachePolicy (graph_cache_policy.go), and EvictableVictim selects a victim
-// from that policy's LRU order, so it extends the existing cache rather than
-// standing up a parallel registry. It is host-buildable (no CUDA build tag) and
+// predicate for them. It is keyed by the same string keys as GraphCachePolicy,
+// and EvictableVictim selects a victim from that policy's LRU order rather than
+// standing up a parallel registry. The policy's own room-miss eviction does not
+// consult the guard: an eviction pass that must spare queued graphs picks its
+// victim through EvictableVictim. It is host-buildable (no CUDA build tag) and
 // safe for concurrent use.
 type GraphEvictGuard struct {
 	mu       sync.Mutex
@@ -112,13 +113,15 @@ func (g *GraphEvictGuard) Pending() int {
 // pass under pressure skips the queued entries instead of freeing a graph that
 // is still in flight.
 //
-// The caller must hold the policy quiescent (no concurrent Run), exactly as the
-// policy's own eviction pass runs under its lock; this reads the policy's LRU
-// order directly because the guard and the policy share the compute package.
+// It reads the LRU order under the policy's lock, so it is safe beside a
+// concurrent Run; the guard's own lock is only ever taken inside the policy's,
+// never the other way round.
 func (g *GraphEvictGuard) EvictableVictim(p *GraphCachePolicy) (string, bool) {
 	if p == nil {
 		return "", false
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for _, key := range p.order {
 		if g.Evictable(key) {
 			return key, true

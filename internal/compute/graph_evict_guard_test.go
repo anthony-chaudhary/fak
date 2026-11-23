@@ -6,7 +6,7 @@ import (
 )
 
 // TestGraphEvictGuard pins the llama.cpp CUDA graph-pool pending-use guard
-// adapted in graph_evict_guard.go (PR #30662, ggml/src/ggml-cuda/common.cuh
+// adapted in graph_evict_guard.go (ggml/src/ggml-cuda/common.cuh
 // @00f113eceb2758158582d56f98bf476b2fe3ed32, MIT): a captured graph queued for
 // replay is non-evictable until its replay completes, so an eviction pass under
 // memory pressure cannot free a graph that is still in flight.
@@ -124,6 +124,31 @@ func TestGraphEvictGuard(t *testing.T) {
 		if victim, ok := g.EvictableVictim(p); !ok || victim != "a" {
 			t.Fatalf("victim = (%q, %v), want (a, true) after a's replay completes", victim, ok)
 		}
+	})
+
+	t.Run("victim selection is safe beside a running policy", func(t *testing.T) {
+		eng := newFakeGraphCacheEngine()
+		p, err := NewGraphCachePolicy(eng, GraphCachePolicyOptions{On: true, Cap: 4, MinKeep: 1})
+		if err != nil {
+			t.Fatalf("NewGraphCachePolicy: %v", err)
+		}
+		g := NewGraphEvictGuard()
+		g.QueueReplay("a")
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 200; i++ {
+				_, _ = p.Run([]string{"a", "b", "c"}[i%3], 1, func() error { return nil })
+			}
+		}()
+		for i := 0; i < 200; i++ {
+			if victim, ok := g.EvictableVictim(p); ok && victim == "a" {
+				t.Error("a queued graph was offered as a victim while the policy ran")
+				break
+			}
+		}
+		wg.Wait()
 	})
 
 	t.Run("concurrent queue and complete are race-free", func(t *testing.T) {
