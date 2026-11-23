@@ -13,12 +13,14 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/privacy"
+	"github.com/anthony-chaudhary/fak/pkg/stepspan"
 )
 
 type otlpSpan struct {
 	TraceID, SpanID, ParentSpanID, Name, Route, Method string
 	Status                                             int
 	Start, End                                         time.Time
+	GenAI                                              *stepspan.GenAISpan `json:",omitempty"`
 }
 type otlpExporter struct {
 	privacy                                     privacy.Policy
@@ -95,7 +97,18 @@ func (e *otlpExporter) run() {
 	}
 }
 func (e *otlpExporter) export(s otlpSpan) error {
-	payload := map[string]any{"resourceSpans": []any{map[string]any{"resource": map[string]any{"attributes": []any{map[string]any{"key": "service.name", "value": map[string]any{"stringValue": "fak-gateway"}}}}, "scopeSpans": []any{map[string]any{"scope": map[string]any{"name": "github.com/anthony-chaudhary/fak/internal/gateway"}, "spans": []any{map[string]any{"traceId": s.TraceID, "spanId": s.SpanID, "parentSpanId": s.ParentSpanID, "name": s.Name, "kind": 2, "startTimeUnixNano": fmt.Sprint(s.Start.UnixNano()), "endTimeUnixNano": fmt.Sprint(s.End.UnixNano()), "attributes": []any{otlpAttr("http.request.method", s.Method), otlpAttr("http.route", s.Route), otlpIntAttr("http.response.status_code", s.Status)}, "status": map[string]any{"code": map[bool]int{true: 2, false: 1}[s.Status >= 500]}}}}}}}}
+	name, attrs := s.Name, []any{otlpAttr("http.request.method", s.Method), otlpAttr("http.route", s.Route), otlpIntAttr("http.response.status_code", s.Status)}
+	if s.GenAI != nil {
+		if s.GenAI.Name != "" {
+			name = s.GenAI.Name
+		}
+		for _, a := range s.GenAI.Attrs {
+			if !stepspan.IsGenAIContentKey(a.Key) {
+				attrs = append(attrs, otlpAttr(a.Key, a.Value))
+			}
+		}
+	}
+	payload := map[string]any{"resourceSpans": []any{map[string]any{"resource": map[string]any{"attributes": []any{map[string]any{"key": "service.name", "value": map[string]any{"stringValue": "fak-gateway"}}}}, "scopeSpans": []any{map[string]any{"scope": map[string]any{"name": "github.com/anthony-chaudhary/fak/internal/gateway"}, "spans": []any{map[string]any{"traceId": s.TraceID, "spanId": s.SpanID, "parentSpanId": s.ParentSpanID, "name": name, "kind": 2, "startTimeUnixNano": fmt.Sprint(s.Start.UnixNano()), "endTimeUnixNano": fmt.Sprint(s.End.UnixNano()), "attributes": attrs, "status": map[string]any{"code": map[bool]int{true: 2, false: 1}[s.Status >= 500]}}}}}}}}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, e.endpoint, bytes.NewReader(body))
 	if err != nil {

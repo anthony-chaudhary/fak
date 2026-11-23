@@ -1022,7 +1022,7 @@ SOFTWARE.
 
 ## SGLang
 
-Portions of this product are adapted from SGLang: https://github.com/sgl-project/sglang (pinned at revision 45418d7dc648d0d71501b8b905a2499a40e9b971, 3f5b1bec8e00115bc8439b5b9a9da902822d2f82, ebeed893722150a29303d9eb9bd975abec4072a5, 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e, 8a0edcf799d06bdee8832356d382495e7fb50f22, 58484246d26523eaf1a7f16ab524deee288d2120, 32b7b66572d76bb5b7042e5792fee31d9de60286, 2fd45ed82fe07ec64ef7f4d2dbd9071b0eb01763). Changes were made.
+Portions of this product are adapted from SGLang: https://github.com/sgl-project/sglang (pinned at revision 45418d7dc648d0d71501b8b905a2499a40e9b971, 3f5b1bec8e00115bc8439b5b9a9da902822d2f82, ebeed893722150a29303d9eb9bd975abec4072a5, 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e, 8a0edcf799d06bdee8832356d382495e7fb50f22, 58484246d26523eaf1a7f16ab524deee288d2120, 32b7b66572d76bb5b7042e5792fee31d9de60286, 2fd45ed82fe07ec64ef7f4d2dbd9071b0eb01763, 0afb736d0aab96e3ab80b4c54a376213a1db67a6). Changes were made.
 
 ```text
                                  Apache License
@@ -2791,4 +2791,38 @@ SPDX-License-Identifier: Apache-2.0
 Portions of this product are adapted from kubernetes-sigs/agent-sandbox: https://github.com/kubernetes-sigs/agent-sandbox (pinned at revision 890de53a4dd18e35313173e6dc34d9559b1a9733; the SandboxWarmPool reconcile semantics from extensions/controllers/sandboxwarmpool_controller.go, namely template-hash staleness with recreate, the per-pool refill token bucket and batch-capped newest-first surplus deletion, reimplemented as a native Go warm pool in internal/sandbox/warmpool.go). Changes were made.
 
 Copyright 2025 The Kubernetes Authors.
+SPDX-License-Identifier: Apache-2.0
+
+## DBOS Transact Golang
+
+Portions of this product are adapted from DBOS Transact Golang: https://github.com/dbos-inc/dbos-transact-golang (pinned at revision d516e2191d78673e2e5623a51164b0fec11e7cc9; the step-memoization and durable-cancel semantics from dbos/workflow.go, reimplemented as a file-backed step journal in internal/agentqueue/step_journal.go). Changes were made.
+
+```text
+MIT License
+
+Copyright (c) 2024 DBOS, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## OpenSandbox
+
+Portions of this product are adapted from OpenSandbox: https://github.com/opensandbox-group/OpenSandbox (pinned at revision f72baeae3a7feb11a49cc42f48dba3e93a94600d; the sandbox lifecycle state enum, its documented transitions and the create/list/get/pause/resume/snapshot/renew-expiration/delete contract from specs/sandbox-lifecycle.yml, reimplemented as a native Go lifecycle state machine in internal/sandbox/lifecycle.go). Changes were made.
+
 SPDX-License-Identifier: Apache-2.0

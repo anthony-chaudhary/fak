@@ -3,12 +3,16 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/stepspan"
 )
 
 func TestOTLPExporterCollectorPayloadAndDrain(t *testing.T) {
@@ -123,5 +127,131 @@ func TestOTLPExporterConcurrentEnqueueAndCloseRaceSafe(t *testing.T) {
 		wg.Wait()
 		// Late enqueue after close should drop cleanly, never panic on closed channel
 		e.enqueue(otlpSpan{TraceID: "late-trace"})
+	}
+}
+
+func exportGenAIOnce(t *testing.T, span otlpSpan) map[string]any {
+	t.Helper()
+	var mu sync.Mutex
+	var bodies [][]byte
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var buf strings.Builder
+		if _, err := io.Copy(&buf, r.Body); err != nil {
+			t.Error(err)
+		}
+		mu.Lock()
+		bodies = append(bodies, []byte(buf.String()))
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer collector.Close()
+	e, err := newOTLPExporter(collector.URL, 4, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.enqueue(span)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := e.close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 1 {
+		t.Fatalf("posted %d bodies, stats=%+v", len(bodies), e.stats())
+	}
+	var p struct {
+		ResourceSpans []struct {
+			ScopeSpans []struct {
+				Spans []map[string]any `json:"spans"`
+			} `json:"scopeSpans"`
+		} `json:"resourceSpans"`
+	}
+	if err := json.Unmarshal(bodies[0], &p); err != nil {
+		t.Fatal(err)
+	}
+	return p.ResourceSpans[0].ScopeSpans[0].Spans[0]
+}
+
+func otlpGenAIStringAttrs(t *testing.T, span map[string]any) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, raw := range span["attributes"].([]any) {
+		a := raw.(map[string]any)
+		v := a["value"].(map[string]any)
+		if sv, ok := v["stringValue"].(string); ok {
+			out[a["key"].(string)] = sv
+		} else {
+			out[a["key"].(string)] = "int:" + v["intValue"].(string)
+		}
+	}
+	return out
+}
+
+func genAIBaseSpan() otlpSpan {
+	return otlpSpan{TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", SpanID: "00f067aa0ba902b7", Name: "POST /v1/chat/completions", Route: "/v1/chat/completions", Method: "POST", Status: 200, Start: time.Unix(1, 0), End: time.Unix(1, 100)}
+}
+
+func TestOTLPExportGenAIAttributesArriveInPostedJSON(t *testing.T) {
+	g, ok := stepspan.GenAI(stepspan.Span{Plane: stepspan.Agent, Kind: stepspan.ToolCall, Status: stepspan.OK, Attrs: stepspan.Attrs{Tool: "Flights"}, IDs: stepspan.IDs{CallID: "call_9", SessionID: "conv_1"}}, stepspan.GenAIOptions{})
+	if !ok {
+		t.Fatal("tool call span not mapped")
+	}
+	span := genAIBaseSpan()
+	span.GenAI = &g
+	got := exportGenAIOnce(t, span)
+	if got["name"] != "execute_tool Flights" {
+		t.Fatalf("name=%v", got["name"])
+	}
+	want := map[string]string{
+		"http.request.method":       "POST",
+		"http.route":                "/v1/chat/completions",
+		"http.response.status_code": "int:200",
+		"gen_ai.operation.name":     "execute_tool",
+		"gen_ai.tool.name":          "Flights",
+		"gen_ai.tool.call.id":       "call_9",
+		"gen_ai.conversation.id":    "conv_1",
+	}
+	if attrs := otlpGenAIStringAttrs(t, got); !reflect.DeepEqual(attrs, want) {
+		t.Fatalf("attrs=%v want %v", attrs, want)
+	}
+}
+
+func TestOTLPExportGenAIAbsentLeavesSpanUnchanged(t *testing.T) {
+	got := exportGenAIOnce(t, genAIBaseSpan())
+	if got["name"] != "POST /v1/chat/completions" {
+		t.Fatalf("name=%v", got["name"])
+	}
+	want := map[string]string{"http.request.method": "POST", "http.route": "/v1/chat/completions", "http.response.status_code": "int:200"}
+	if attrs := otlpGenAIStringAttrs(t, got); !reflect.DeepEqual(attrs, want) {
+		t.Fatalf("attrs=%v", attrs)
+	}
+	plain, err := json.Marshal(genAIBaseSpan())
+	if err != nil || strings.Contains(string(plain), "GenAI") {
+		t.Fatalf("privacy payload changed without GenAI: %s err=%v", plain, err)
+	}
+}
+
+func TestOTLPExportGenAINeverPostsContentAttributes(t *testing.T) {
+	span := genAIBaseSpan()
+	span.GenAI = &stepspan.GenAISpan{Name: "generate_content m", Attrs: []stepspan.GenAIAttr{
+		{Key: stepspan.GenAIOperationName, Value: stepspan.GenAIOpGenerateContent},
+		{Key: "gen_ai.input.messages", Value: "hello"},
+		{Key: "gen_ai.output.messages", Value: "world"},
+		{Key: "gen_ai.system_instructions", Value: "be brief"},
+		{Key: "gen_ai.tool.call.arguments", Value: "{}"},
+		{Key: "gen_ai.tool.call.result", Value: "{}"},
+	}}
+	attrs := otlpGenAIStringAttrs(t, exportGenAIOnce(t, span))
+	if attrs["gen_ai.operation.name"] != "generate_content" {
+		t.Fatalf("attrs=%v", attrs)
+	}
+	for k := range attrs {
+		if stepspan.IsGenAIContentKey(k) {
+			t.Fatalf("content attribute %q posted: %v", k, attrs)
+		}
+	}
+	if len(attrs) != 4 {
+		t.Fatalf("attrs=%v", attrs)
 	}
 }
