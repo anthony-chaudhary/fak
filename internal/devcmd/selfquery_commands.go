@@ -21,7 +21,9 @@ func RunFeature(stdout, stderr io.Writer, argv []string) int {
 	}
 	switch argv[0] {
 	case "query":
-		return runFeatureQuery(stdout, stderr, argv[1:])
+		return runFeatureQuery(stdout, stderr, argv[1:], loadSelfQueryCatalog)
+	case "batch":
+		return runFeatureBatch(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		writeFeatureUsage(stdout)
 		return 0
@@ -32,7 +34,7 @@ func RunFeature(stdout, stderr io.Writer, argv []string) int {
 	}
 }
 
-func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
+func runFeatureQuery(stdout, stderr io.Writer, argv []string, load selfQueryCatalogLoader) int {
 	fs := flag.NewFlagSet("feature query", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: search upward for dos.toml)")
@@ -65,12 +67,7 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 	if strings.TrimSpace(rootDir) == "" {
 		rootDir = devindexRoot()
 	}
-	dev, err := loadSelfQueryDevCatalog(rootDir)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak-dev feature query: %v\n", err)
-		return 1
-	}
-	cat, err := selfquery.Load(rootDir, selfquery.Options{Dev: dev, DevLoader: loadSelfQueryDevCatalog, Tools: selfquery.ToolDescriptorsFromMaps(gateway.ToolDescriptorsForResolver())})
+	cat, err := load(rootDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak-dev feature query: %v\n", err)
 		return 1
@@ -103,6 +100,10 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 }
 
 func RunCapabilities(stdout, stderr io.Writer, argv []string) int {
+	return runCapabilities(stdout, stderr, argv, loadSelfQueryCatalog)
+}
+
+func runCapabilities(stdout, stderr io.Writer, argv []string, load selfQueryCatalogLoader) int {
 	fs := flag.NewFlagSet("capabilities", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root")
@@ -118,12 +119,7 @@ func RunCapabilities(stdout, stderr io.Writer, argv []string) int {
 	if strings.TrimSpace(rootDir) == "" {
 		rootDir = devindexRoot()
 	}
-	dev, err := loadSelfQueryDevCatalog(rootDir)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak-dev capabilities: %v\n", err)
-		return 1
-	}
-	cat, err := selfquery.Load(rootDir, selfquery.Options{Dev: dev, DevLoader: loadSelfQueryDevCatalog, Tools: selfquery.ToolDescriptorsFromMaps(gateway.ToolDescriptorsForResolver())})
+	cat, err := load(rootDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak-dev capabilities: %v\n", err)
 		return 1
@@ -150,6 +146,19 @@ func RunCapabilities(stdout, stderr io.Writer, argv []string) int {
 
 func devindexRoot() string { return devindex.FindRoot(".") }
 
+// selfQueryCatalogLoader builds the query catalog for one repo root. The single-shot
+// commands load it fresh; a batch shares one load per root across its queries.
+type selfQueryCatalogLoader func(root string) (*selfquery.Catalog, error)
+
+func loadSelfQueryCatalog(root string) (*selfquery.Catalog, error) {
+	dev, err := loadSelfQueryDevCatalog(root)
+	if err != nil {
+		return nil, err
+	}
+	return selfquery.Load(root, selfquery.Options{Dev: dev, DevLoader: loadSelfQueryDevCatalog, Tools: selfquery.ToolDescriptorsFromMaps(gateway.ToolDescriptorsForResolver())})
+}
+
 func writeFeatureUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak-dev feature query <intent> [--json] [--plane dev|live|all] [--root DIR]")
+	fmt.Fprintln(w, "       fak-dev feature batch [--json] query|capabilities <args> [--next query|capabilities <args>]...")
 }

@@ -15,9 +15,10 @@ package devcmd
 //	fak blast estimate <path> --leases FILE      read leases from a JSONL fixture instead of the live ledger
 //	fak blast estimate <path> --issues FILE      join queued-issue declared paths from a JSONL file
 //
-// Impure shell over internal/blastradius: it gathers the import graph (`go list`, keyed
-// by repo-relative package DIR so a package node and a lease tree compare in the same
-// namespace), the live lease set (leaseref), and the queued-issue paths, then folds
+// Impure shell over internal/blastradius: it gathers the import graph (a cached scan of
+// the tree, with `go list` as the fallback; keyed by repo-relative package DIR so a
+// package node and a lease tree compare in the same namespace), the live lease set
+// (leaseref), and the queued-issue paths, then folds
 // them through the pure blastradius.Estimate. The `--leases` fixture path is what makes
 // an estimate capturable offline (the witness) and what the cmd tests drive.
 
@@ -39,9 +40,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-// Seams the tests inject to avoid a real `go list` / git lease read.
+// Seams the tests inject to avoid a real tree scan / git lease read.
 var (
-	blastDirGraph    = goListDirGraph
+	blastDirGraph    = defaultBlastDirGraph
 	blastLeaseSource = blastlease.Live
 	blastNow         = time.Now
 )
@@ -90,6 +91,20 @@ func runBlastEstimate(stdout, stderr io.Writer, argv []string) int {
 
 	root := repoRoot()
 
+	// The live lease read shells out to git and does not depend on the graph, so it
+	// runs alongside the graph build instead of after it.
+	type leaseRead struct {
+		leases []blastradius.Lease
+		err    error
+	}
+	liveLeases := make(chan leaseRead, 1)
+	if *leasesFile == "" {
+		go func() {
+			leases, err := blastLeaseSource(root, blastNow())
+			liveLeases <- leaseRead{leases: leases, err: err}
+		}()
+	}
+
 	edges, modPath, _, err := blastDirGraph(root)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak blast estimate: building import graph: %v\n", err)
@@ -109,7 +124,8 @@ func runBlastEstimate(stdout, stderr io.Writer, argv []string) int {
 	if *leasesFile != "" {
 		leases, err = blastlease.Read(*leasesFile)
 	} else {
-		leases, err = blastLeaseSource(root, blastNow())
+		read := <-liveLeases
+		leases, err = read.leases, read.err
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "fak blast estimate: reading leases: %v\n", err)
