@@ -2785,3 +2785,10 @@ Portions of this product are adapted from magnitude: https://github.com/magnitud
 
 Copyright 2026 Magnitude AI Inc.
 SPDX-License-Identifier: Apache-2.0
+
+## kubernetes-sigs/agent-sandbox
+
+Portions of this product are adapted from kubernetes-sigs/agent-sandbox: https://github.com/kubernetes-sigs/agent-sandbox (pinned at revision 890de53a4dd18e35313173e6dc34d9559b1a9733; the SandboxWarmPool reconcile semantics from extensions/controllers/sandboxwarmpool_controller.go, namely template-hash staleness with recreate, the per-pool refill token bucket and batch-capped newest-first surplus deletion, reimplemented as a native Go warm pool in internal/sandbox/warmpool.go). Changes were made.
+
+Copyright 2025 The Kubernetes Authors.
+SPDX-License-Identifier: Apache-2.0
