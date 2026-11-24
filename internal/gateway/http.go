@@ -857,6 +857,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !validateChatRequestIngress(w, req) {
 		return
 	}
+	loopDepth, ok := resolveChatLoopDepth(w, req)
+	if !ok {
+		return
+	}
 	s.bindUnkeyedChatConversation(w, r, req.Model, req.Tools, req.Messages)
 	// Bind the client deadline before routing or preparation. Cache credit is
 	// selected only after the execution route is fixed below.
@@ -1127,6 +1131,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	s.recordDeadlineWarmPrefix(deadlineCtx, comp.Usage)
 	stampTurnCost(sessionTurn.turnCost, reqTrace, respModel, turnCostBegan)
 	resp := s.buildChatResponse(comp, asst, finish, respModel, adjs, resultAdmissions, inputTriggerRoute, decodeTraceRequested, decodeTokenIDsRequested, sessionTurn.turnCost)
+	stampLoopDepthReceipt(&resp, loopDepth)
 	resp.ServiceTier = serviceTier.echo(comp.ServiceTier)
 	if stream != nil {
 		timePhase(sessionTurn.turnCost, turncost.PhaseStream, func() {

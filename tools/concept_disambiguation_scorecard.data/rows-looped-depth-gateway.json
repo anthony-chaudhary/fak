@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "gateway-loop-depth-receipt",
+      "canonical": "LoopDepthReceipt",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The gateway's per-request loop depth for a looped model: the loop count selected for a chat request, the model's max loops, and whether the count came from the request (top-level loops or vllm_xargs.loops) or the model default. Emitted as fak.loop_depth on the chat response.",
+      "distinction": "Request-time recurrent depth chosen at the OpenAI-compatible gateway ingress, not the model's static loop pass count in its hyperparameters (Inkling2LoopHParams) and not an agent loop or retry loop.",
+      "distinct_from": [
+        "inkling2loop-hparams"
+      ],
+      "aliases": [
+        "LoopDepth"
+      ],
+      "grounding": "LoopDepthReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

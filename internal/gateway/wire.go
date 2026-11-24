@@ -429,6 +429,10 @@ type ChatRequest struct {
 	SpeculativeNMax *int            `json:"speculative.n_max,omitempty"`
 	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
 	ThinkingConfig  json.RawMessage `json:"thinking_config,omitempty"`
+	// Loops / VLLMXArgs carry the per-request recurrent depth for looped models in
+	// vLLM's wire shape (top-level "loops" or vllm_xargs.loops); see resolveLoopDepth.
+	Loops     *int            `json:"loops,omitempty"`
+	VLLMXArgs json.RawMessage `json:"vllm_xargs,omitempty"`
 	// Guided* are provider-native guided-decode controls accepted by common
 	// OpenAI-compatible ride engines. They are not part of the core OpenAI request,
 	// so the gateway collects only these known keys and threads them through the
@@ -790,6 +794,8 @@ type FakExt struct {
 	// enabled and a record was collected. Omitted otherwise, so response bytes are
 	// unchanged when disabled.
 	TurnCost *turncost.TurnCostRecord `json:"turn_cost,omitempty"`
+	// LoopDepth is emitted only when the request set a loop count or the model is looped.
+	LoopDepth *LoopDepthReceipt `json:"loop_depth,omitempty"`
 }
 
 // CompactionContract is what a compaction boundary PROMISES the turn that continues past
