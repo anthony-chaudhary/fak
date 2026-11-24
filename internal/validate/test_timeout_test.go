@@ -5,12 +5,15 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 )
 
 // TestValidateGoTestTimeoutFollowsDeadline pins #13558: the isolated go test must
 // inherit the validate budget instead of Go's 10m default, and its alarm must fire
 // inside that budget so a hung test is named by Go's goroutine dump.
 func TestValidateGoTestTimeoutFollowsDeadline(t *testing.T) {
+	t.Setenv(goenv.NoTrimpathEnv, "")
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name      string
@@ -34,33 +37,44 @@ func TestValidateGoTestTimeoutFollowsDeadline(t *testing.T) {
 				t.Fatalf("timeout %s does not fire before the %s validate deadline", got, tc.remaining)
 			}
 			args := validateTestArgs("TestX", got, []string{"./cmd/fak"})
-			want := []string{"test", "-count=1", "-timeout", tc.want.String(), "-run", "TestX", "./cmd/fak"}
+			want := []string{"test", "-count=1", "-trimpath", "-timeout", tc.want.String(), "-run", "TestX", "./cmd/fak"}
 			if !reflect.DeepEqual(args, want) {
 				t.Fatalf("validateTestArgs = %q, want %q", args, want)
 			}
-			parsed, err := time.ParseDuration(args[3])
+			parsed, err := time.ParseDuration(args[4])
 			if err != nil || parsed != tc.want {
-				t.Fatalf("go test cannot read -timeout %q back as %s: %v", args[3], tc.want, err)
+				t.Fatalf("go test cannot read -timeout %q back as %s: %v", args[4], tc.want, err)
 			}
 		})
 	}
 }
 
 func TestValidateTestArgsWithoutDeadlineKeepsGoDefault(t *testing.T) {
+	t.Setenv(goenv.NoTrimpathEnv, "")
 	if got := validateGoTestTimeout(context.Background(), time.Now()); got != 0 {
 		t.Fatalf("validateGoTestTimeout(no deadline) = %s, want 0 (omit -timeout)", got)
 	}
 	args := validateTestArgs("", 0, []string{"./internal/validate"})
-	if want := []string{"test", "-count=1", "./internal/validate"}; !reflect.DeepEqual(args, want) {
+	if want := []string{"test", "-count=1", "-trimpath", "./internal/validate"}; !reflect.DeepEqual(args, want) {
 		t.Fatalf("validateTestArgs(no timeout) = %q, want %q", args, want)
 	}
 }
 
 // TestValidateJSONTestArgsKeepsTimeout covers the test_audit_full argv shape.
 func TestValidateJSONTestArgsKeepsTimeout(t *testing.T) {
+	t.Setenv(goenv.NoTrimpathEnv, "")
 	args := validateJSONTestArgs(validateTestArgs("", 85*time.Minute, []string{"./cmd/fak"}))
-	want := []string{"test", "-json", "-count=1", "-timeout", "1h25m0s", "./cmd/fak"}
+	want := []string{"test", "-json", "-count=1", "-trimpath", "-timeout", "1h25m0s", "./cmd/fak"}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("validateJSONTestArgs(validateTestArgs) = %q, want %q", args, want)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestValidateTestArgsHonorTrimpathOptOut(t *testing.T) {
+	t.Setenv(goenv.NoTrimpathEnv, "1")
+	args := validateTestArgs("", 0, []string{"./internal/validate"})
+	if want := []string{"test", "-count=1", "./internal/validate"}; !reflect.DeepEqual(args, want) {
+		t.Fatalf("validateTestArgs(%s=1) = %q, want %q", goenv.NoTrimpathEnv, args, want)
 	}
 }

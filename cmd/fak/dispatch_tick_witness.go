@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"io"
 	"os"
@@ -708,6 +709,7 @@ func dispatchWitnessTestRunGo(root, sha string) (ran, passed bool) {
 	defer cancel()
 	cmd := windowgate.CommandContext(ctx, name, cmdArgs...)
 	cmd.Dir = root
+	cmd.Env = goenv.Environ(nil)
 	configureDispatchHelperCommand(cmd)
 	err := cmd.Run()
 	return true, err == nil

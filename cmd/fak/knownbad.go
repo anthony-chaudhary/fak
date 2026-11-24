@@ -71,6 +71,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 
 	"github.com/anthony-chaudhary/fak/internal/blastlease"
@@ -795,6 +796,7 @@ func runKnownBadTestsWitness(root string, treeGlobs []string) knownBadWitnessRes
 	args := append([]string{"test"}, pkgs...)
 	cmd := windowgate.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
+	cmd.Env = goenv.Environ(nil)
 	configureDispatchHelperCommand(cmd)
 	// `go test` forks the toolchain + the compiled test binary — a descendant tree.
 	// The dispatch helper only hides the window; it is not a tree kill. So on the

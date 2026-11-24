@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 )
 
 // fak-test:runtime fast est=10ms lane=default
@@ -79,15 +81,18 @@ func TestValidateCompileVetRetainsTestDiagnostics(t *testing.T) {
 }
 
 // fak-test:runtime medium est=15s lane=default
-func TestValidateCompileVetPreservesInitializationPaths(t *testing.T) {
+func TestValidateCompileVetRunsTestsTrimmedFromPackageDir(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real Go initialization integration")
 	}
+	t.Setenv(goenv.NoTrimpathEnv, "")
+	// Under -trimpath the caller file is module-relative, so repo files must be
+	// found from the package working directory instead.
 	root := compileVetFixture(t, `package app
-import("os";"runtime";"testing")
+import("os";"path/filepath";"runtime";"testing")
 var initialized bool
-func init(){_,p,_,ok:=runtime.Caller(0);if !ok{os.Exit(21)};if _,e:=os.Stat(p);e!=nil{os.Exit(22)};initialized=true}
-func TestMain(m *testing.M){if !initialized{os.Exit(23)};_,p,_,_:=runtime.Caller(0);if _,e:=os.Stat(p);e!=nil{os.Exit(24)};os.Exit(m.Run())}
+func init(){_,p,_,ok:=runtime.Caller(0);if !ok{os.Exit(21)};if filepath.IsAbs(p){os.Exit(22)};if _,e:=os.Stat("app_test.go");e!=nil{os.Exit(23)};initialized=true}
+func TestMain(m *testing.M){if !initialized{os.Exit(24)};os.Exit(m.Run())}
 func TestUnselected(t *testing.T){t.Fatal("must not run")}
 `)
 	var out, stderr bytes.Buffer

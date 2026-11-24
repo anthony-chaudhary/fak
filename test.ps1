@@ -82,6 +82,10 @@ if ($env:FAK_ORACLE_DIRS) {
     # `.cache/...` paths, and the Go helper accepts Windows-style ';' lists.
     Add-WSLEnvVar 'FAK_ORACLE_DIRS/u'
 }
+if ($env:FAK_NO_TRIMPATH) {
+    # test.sh adds -trimpath inside WSL unless this opt-out crosses over.
+    Add-WSLEnvVar 'FAK_NO_TRIMPATH/u'
+}
 if ($env:FAK_ORACLE_REQUIRED_FAMILIES) {
     Add-WSLEnvVar 'FAK_ORACLE_REQUIRED_FAMILIES/u'
 }

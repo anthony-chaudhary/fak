@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 )
 
 func eventFixtureEnvironment(t *testing.T) {
@@ -244,6 +246,7 @@ func TestValidateEventCapturePreservesRawStreamsFailureAndTimeout(t *testing.T) 
 	}
 }
 func TestValidateEventFlagRefusesAuditOrNonJSON(t *testing.T) {
+	t.Setenv(goenv.NoTrimpathEnv, "")
 	for _, extra := range [][]string{{}, {"--json", "--audit-selection"}, {"--json", "--wsl-tests=true"}} {
 		var stdout, stderr bytes.Buffer
 		args := append([]string{"--mine", "source.go", "--test-events"}, extra...)
@@ -252,7 +255,7 @@ func TestValidateEventFlagRefusesAuditOrNonJSON(t *testing.T) {
 		}
 	}
 	args := validateJSONTestArgs(validateTestArgs("^TestOwned$", time.Minute, []string{"./owned"}))
-	if strings.Join(args, " ") != "test -json -count=1 -timeout 1m0s -run ^TestOwned$ ./owned" {
+	if strings.Join(args, " ") != "test -json -count=1 -trimpath -timeout 1m0s -run ^TestOwned$ ./owned" {
 		t.Fatalf("unexpected selected argv %v", args)
 	}
 }

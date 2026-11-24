@@ -43,6 +43,36 @@ func GoFlags(base string, lookup func(string) (string, bool)) string {
 	return TrimpathFlags(base)
 }
 
+// TrimpathArgs is the argv form of GoFlags for callers whose go child must not
+// inherit GOFLAGS: ["-trimpath"], or nil when lookup reports NoTrimpathEnv=1.
+func TrimpathArgs(lookup func(string) (string, bool)) []string {
+	if v, _ := lookup(NoTrimpathEnv); strings.TrimSpace(v) == "1" {
+		return nil
+	}
+	return []string{"-trimpath"}
+}
+
+// Environ returns env with GOFLAGS rewritten by GoFlags; nil env means the
+// process environment. The appended entry wins because os/exec keeps the last
+// duplicate key.
+func Environ(env []string) []string {
+	if env == nil {
+		env = os.Environ()
+	}
+	lookup := EnvironLookup(env)
+	inherited, _ := lookup("GOFLAGS")
+	flags := GoFlags(inherited, lookup)
+	if flags == inherited {
+		return env
+	}
+	return append(append([]string(nil), env...), "GOFLAGS="+flags)
+}
+
+// TrimsSubcommand reports whether a go subcommand should run trimmed. vet is
+// excluded: its cgocall analyzer reparses the raw cgo source path recorded in
+// cached export data, which a trimmed action ID can reuse from a removed checkout.
+func TrimsSubcommand(sub string) bool { return sub != "vet" }
+
 // SharedCache returns the absolute directory lookup reports for
 // SharedCacheEnv, or false when it is unset, relative, or malformed.
 func SharedCache(lookup func(string) (string, bool)) (string, bool) {

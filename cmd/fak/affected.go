@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/worktreeprune"
@@ -415,6 +416,7 @@ func runAffectedBaselineRed(root, ref string, flags, pkgs []string) (red, seen m
 	cmd := exec.Command("go", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = wt
+	cmd.Env = goenv.Environ(nil)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -502,6 +504,7 @@ func runAffectedRerunFailed(root string, flags, pkgs []string, attempts int) (ma
 		cmd := exec.Command(name, cmdArgs...)
 		windowgate.ConfigureBackgroundCommand(cmd)
 		cmd.Dir = root
+		cmd.Env = goenv.Environ(nil)
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		cmd.Stderr = &out
@@ -539,6 +542,7 @@ func runAffectedGoTest(root string, args []string, stdout, stderr io.Writer) (in
 	cmd := exec.Command(name, cmdArgs...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
+	cmd.Env = goenv.Environ(nil)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {

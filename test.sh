@@ -79,6 +79,15 @@ fi
 # first run downloads it (~once); later runs reuse the cached toolchain.
 export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
 
+# -trimpath keeps the checkout path out of action IDs so every lane reuses one
+# cache; Windows GOFLAGS does not cross into WSL. FAK_NO_TRIMPATH=1 opts out.
+if [ "${FAK_NO_TRIMPATH:-}" != "1" ]; then
+  case " ${GOFLAGS:-} " in
+    *" -trimpath"*|*" --trimpath"*) ;;
+    *) export GOFLAGS="${GOFLAGS:+$GOFLAGS }-trimpath" ;;
+  esac
+fi
+
 # GOCACHE / GOTMPDIR are deliberately left at their WSL defaults
 # (~/.cache/go-build and $TMPDIR|/tmp) — both already on ext4, which is the
 # whole point. Override them in the environment if you need to.

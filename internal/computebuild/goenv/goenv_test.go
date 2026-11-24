@@ -2,6 +2,7 @@ package goenv
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -68,6 +69,41 @@ func TestEnvironLookupLastWins(t *testing.T) {
 	}
 	if _, ok := lookup("GOCACHE"); ok {
 		t.Fatal("missing key reported present")
+	}
+}
+
+func TestTrimpathArgsHonorsOptOut(t *testing.T) {
+	if got := TrimpathArgs(mapLookup(nil)); !slices.Equal(got, []string{"-trimpath"}) {
+		t.Fatalf("TrimpathArgs default = %q", got)
+	}
+	if got := TrimpathArgs(mapLookup(map[string]string{NoTrimpathEnv: "1"})); got != nil {
+		t.Fatalf("TrimpathArgs with %s=1 = %q, want nil", NoTrimpathEnv, got)
+	}
+}
+
+func TestEnvironAppendsTrimpathOnce(t *testing.T) {
+	env := []string{"PATH=/bin", "GOFLAGS=-race"}
+	got := Environ(env)
+	if v, _ := EnvironLookup(got)("GOFLAGS"); v != "-race -trimpath" {
+		t.Fatalf("Environ GOFLAGS = %q (env %q)", v, got)
+	}
+	if len(env) != 2 || env[1] != "GOFLAGS=-race" {
+		t.Fatalf("Environ mutated its input: %q", env)
+	}
+	if again := Environ(got); len(again) != len(got) {
+		t.Fatalf("Environ re-appended an existing -trimpath: %q", again)
+	}
+	optOut := []string{NoTrimpathEnv + "=1", "GOFLAGS=-race"}
+	if got := Environ(optOut); len(got) != len(optOut) {
+		t.Fatalf("Environ ignored %s=1: %q", NoTrimpathEnv, got)
+	}
+}
+
+func TestTrimsSubcommandExcludesVet(t *testing.T) {
+	for sub, want := range map[string]bool{"test": true, "build": true, "list": true, "vet": false} {
+		if got := TrimsSubcommand(sub); got != want {
+			t.Errorf("TrimsSubcommand(%q) = %v, want %v", sub, got, want)
+		}
 	}
 }
 

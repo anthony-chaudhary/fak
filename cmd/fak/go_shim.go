@@ -38,6 +38,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -56,6 +57,9 @@ func runGoShimCommand(root string, args []string, stdout, stderr io.Writer) (int
 	cmd := windowgate.Command("go", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
+	if len(args) > 0 && goShimOverlaySubcommands[args[0]] && goenv.TrimsSubcommand(args[0]) {
+		cmd.Env = goenv.Environ(nil)
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {

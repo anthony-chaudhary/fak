@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 )
 
 func validateSkipWalkDir(name string) bool {
@@ -134,9 +135,10 @@ func (v *validateVetCoverage) coversCompileTests(testRun, dir, goos string, wslT
 
 // validateTestArgs builds the isolated go test argv; timeout 0 omits -timeout.
 func validateTestArgs(testRun string, timeout time.Duration, targets []string) []string {
-	// Tests require filesystem-valid source paths from runtime.Caller(0) (e.g. for
-	// package introspection and dos.toml validation); do not pass -trimpath here (#9788).
-	args := []string{"test", "-count=1"}
+	// -trimpath keeps the per-run materialized root out of test action IDs so the
+	// shared cache is reused; tests locate repo files via repotest, not runtime.Caller.
+	// It rides argv because the test-events launcher refuses ambient GOFLAGS.
+	args := append([]string{"test", "-count=1"}, goenv.TrimpathArgs(goenv.ProcessLookup)...)
 	if timeout > 0 {
 		args = append(args, "-timeout", timeout.String())
 	}

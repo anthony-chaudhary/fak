@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -46,12 +45,25 @@ func main() {
 	fmt.Println("PASS security-fleet-governance: floor, attestation, canonical references, narrowing, read-back, and rollback")
 }
 
+// repoRoot walks up from the working directory to the checkout holding this
+// demo; under -trimpath the caller's source path is module-relative, not on disk.
 func repoRoot() (string, error) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("locate demo source")
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..")), nil
+	for {
+		_, modErr := os.Stat(filepath.Join(dir, "go.mod"))
+		_, demoErr := os.Stat(filepath.Join(dir, "examples", "security-fleet-governance", "central-floor.json"))
+		if modErr == nil && demoErr == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no fak checkout above the working directory; run from inside the repo")
+		}
+		dir = parent
+	}
 }
 
 func run(dir, name string, args ...string) string {

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -68,6 +69,9 @@ func execTestCommand(argv []string, stdin io.Reader, stdout, stderr io.Writer) t
 		return testCommandResult{ExitCode: 1, SpawnError: msg}
 	}
 	cmd := windowgate.Command(argv[0], argv[1:]...)
+	if len(argv) < 2 || goenv.TrimsSubcommand(argv[1]) {
+		cmd.Env = goenv.Environ(nil)
+	}
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = stdout, stderr, stdin
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
