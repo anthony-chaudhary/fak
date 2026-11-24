@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -182,9 +183,12 @@ func (m *Inkling2LoopModel) Close() error {
 
 // OpenInkling2Loop maps an inkling2_loop GGUF (mainline llama.cpp layout).
 func OpenInkling2Loop(path string) (*Inkling2LoopModel, error) {
-	data, closer, _, err := model.MmapOpen(path)
+	data, closer, ok, err := model.MmapOpen(path)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("inkling2_loop: cannot map %q", path)
 	}
 	m, err := bindInkling2Loop(data)
 	if err != nil {
@@ -195,7 +199,15 @@ func OpenInkling2Loop(path string) (*Inkling2LoopModel, error) {
 	return m, nil
 }
 
+type inkling2PackedWeight interface {
+	model.Inkling2LoopMatrix
+	model.Inkling2LoopExperts
+}
+
+type inkling2Pack func(t TensorInfo) (inkling2PackedWeight, error)
+
 type inkling2Binder struct {
+	pack    inkling2Pack
 	f       *File
 	data    []byte
 	tensors map[string]TensorInfo
@@ -203,6 +215,10 @@ type inkling2Binder struct {
 }
 
 func bindInkling2Loop(data []byte) (*Inkling2LoopModel, error) {
+	return bindInkling2LoopWith(data, nil)
+}
+
+func bindInkling2LoopWith(data []byte, pack inkling2Pack) (*Inkling2LoopModel, error) {
 	f, err := ReadSize(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, err
@@ -210,7 +226,7 @@ func bindInkling2Loop(data []byte) (*Inkling2LoopModel, error) {
 	if a, _ := f.String("general.architecture"); a != "inkling2_loop" {
 		return nil, fmt.Errorf("inkling2_loop: general.architecture %q", a)
 	}
-	b := &inkling2Binder{f: f, data: data, tensors: map[string]TensorInfo{}}
+	b := &inkling2Binder{f: f, data: data, pack: pack, tensors: map[string]TensorInfo{}}
 	for _, t := range f.Tensors {
 		b.tensors[t.Name] = t
 	}
@@ -224,7 +240,7 @@ func bindInkling2Loop(data []byte) (*Inkling2LoopModel, error) {
 		OutputResQuery: b.vec("output_res_query.weight"),
 		Output:         b.mat("output.weight"),
 	}
-	if emb := b.mat("token_embd.weight"); emb != nil {
+	if emb := b.matrix("token_embd.weight", false); emb != nil {
 		w.TokEmbd = inkling2QuantEmbedding{emb.(*inkling2QuantMatrix)}
 	}
 	for il := 0; il < hp.Layers; il++ {
@@ -423,6 +439,22 @@ func (b *inkling2Binder) rowsOf(name string, width int) [][]float32 {
 }
 
 func (b *inkling2Binder) mat(name string) model.Inkling2LoopMatrix {
+	return b.matrix(name, true)
+}
+
+func (b *inkling2Binder) packed(t TensorInfo) inkling2PackedWeight {
+	if b.err != nil {
+		return nil
+	}
+	w, err := b.pack(t)
+	if err != nil {
+		b.err = fmt.Errorf("inkling2_loop: bind %s: %w", t.Name, err)
+		return nil
+	}
+	return w
+}
+
+func (b *inkling2Binder) matrix(name string, usePacked bool) model.Inkling2LoopMatrix {
 	t, raw, ok := b.info(name)
 	if !ok {
 		return nil
@@ -432,6 +464,9 @@ func (b *inkling2Binder) mat(name string) model.Inkling2LoopMatrix {
 			b.err = fmt.Errorf("inkling2_loop: %s has %d dims, want a matrix", name, len(t.Dims))
 		}
 		return nil
+	}
+	if usePacked && b.pack != nil {
+		return b.packed(t)
 	}
 	cols, rows := int(t.Dims[0]), int(t.Dims[1])
 	rb, _ := inkling2RowBytes(t.Type, cols)
@@ -449,9 +484,41 @@ func (b *inkling2Binder) experts(name string) model.Inkling2LoopExperts {
 		}
 		return nil
 	}
+	if b.pack != nil {
+		return b.packed(t)
+	}
 	cols := int(t.Dims[0])
 	rb, _ := inkling2RowBytes(t.Type, cols)
 	return &inkling2QuantExperts{typ: t.Type, raw: raw, experts: int(t.Dims[2]), rows: int(t.Dims[1]), cols: cols, rowLen: rb}
+}
+
+// The matrix interface predates fallible device submissions. Unwind just that
+// failure at the token boundary so the caller can discard the partial session.
+type inkling2DispatchError struct{ cause error }
+
+func inkling2RecoverDispatch(err *error) {
+	if r := recover(); r != nil {
+		if failure, ok := r.(inkling2DispatchError); ok {
+			*err = failure.cause
+		} else {
+			panic(r)
+		}
+	}
+}
+
+func Inkling2LoopStep(h *model.Inkling2LoopHost, token int) (logits []float32, err error) {
+	defer inkling2RecoverDispatch(&err)
+	return h.Step(token), nil
+}
+
+func Inkling2LoopPrefillToken(h *model.Inkling2LoopHost, token int, final bool) (logits []float32, err error) {
+	defer inkling2RecoverDispatch(&err)
+	return h.PrefillToken(token, final), nil
+}
+
+func Inkling2LoopPrefill(ctx context.Context, h *model.Inkling2LoopHost, tokens []int) (logits []float32, err error) {
+	defer inkling2RecoverDispatch(&err)
+	return h.Prefill(ctx, tokens)
 }
 
 // Inkling2LoopGreedy runs the host reference over prompt token IDs and returns
@@ -464,9 +531,9 @@ func Inkling2LoopGreedy(m *Inkling2LoopModel, prompt []int, n int) ([]int, error
 	if err != nil {
 		return nil, err
 	}
-	var logits []float32
-	for _, t := range prompt {
-		logits = h.Step(t)
+	logits, err := Inkling2LoopPrefill(context.Background(), h, prompt)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]int, 0, n)
 	for len(out) < n {
@@ -480,7 +547,10 @@ func Inkling2LoopGreedy(m *Inkling2LoopModel, prompt []int, n int) ([]int, error
 		if len(out) == n {
 			break
 		}
-		logits = h.Step(best)
+		logits, err = Inkling2LoopStep(h, best)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }

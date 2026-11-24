@@ -2,6 +2,8 @@ package model
 
 import (
 	"math"
+	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -277,5 +279,31 @@ func TestInkling2LoopHostBatcherMatchesUnbatchedForward(t *testing.T) {
 				t.Fatalf("step %d logit %d: batched %v, unbatched %v", s, i, got[s][i], want[s][i])
 			}
 		}
+	}
+}
+
+func TestInkling2LoopPrefillKeepsSlotsAndFeatureTaps(t *testing.T) {
+	hp, w := inkling2TinyModel()
+	a, err := NewInkling2LoopHost(hp, w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewInkling2LoopHost(hp, w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.FeatureVisits = []int{1, 3, a.Visits()}
+	b.FeatureVisits = a.FeatureVisits
+	for _, id := range []int{1, 4, 2} {
+		a.Step(id)
+		if got := b.PrefillToken(id, false); got != nil {
+			t.Fatal("non-final prompt row produced logits")
+		}
+		if !reflect.DeepEqual(a.Features, b.Features) {
+			t.Fatal("feature taps differ after token", id)
+		}
+	}
+	if !slices.Equal(a.Step(3), b.Step(3)) {
+		t.Fatal("decode logits changed after prompt-only rows")
 	}
 }

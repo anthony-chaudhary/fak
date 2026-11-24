@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -485,9 +486,19 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 	}
 	start := time.Now()
 	var logits []float32
-	for _, t := range prompt {
-		logits = h.Step(t)
-		recycle()
+	if _, metal := m.Weights.Batcher.(*inkling2MetalBatch); metal {
+		logits, err = Inkling2LoopPrefill(context.Background(), h, prompt)
+		if err != nil {
+			return nil, st, err
+		}
+	} else {
+		for i, t := range prompt {
+			logits, err = Inkling2LoopPrefillToken(h, t, i == len(prompt)-1)
+			if err != nil {
+				return nil, st, err
+			}
+			recycle()
+		}
 	}
 	st.Prefill = time.Since(start)
 	out := make([]int, 0, n)
@@ -503,7 +514,10 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 		if len(out) == n {
 			break
 		}
-		logits = h.Step(best)
+		logits, err = Inkling2LoopStep(h, best)
+		if err != nil {
+			return nil, st, err
+		}
 		recycle()
 		st.DecodeSteps++
 	}

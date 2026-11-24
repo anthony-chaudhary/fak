@@ -170,6 +170,12 @@ func (h *Inkling2LoopHost) tap(visit int, x []float32) {
 
 // Step consumes one token at the next position and returns its unpadded logits.
 func (h *Inkling2LoopHost) Step(token int) []float32 {
+	return h.PrefillToken(token, true)
+}
+
+// PrefillToken advances every recurrent slot and feature tap. Only the final
+// prompt row needs the output projection that predicts the first decode token.
+func (h *Inkling2LoopHost) PrefillToken(token int, final bool) []float32 {
 	hp := h.HP
 	cur := make([]float32, hp.Hidden)
 	h.W.TokEmbd.Row(token, cur)
@@ -220,6 +226,10 @@ func (h *Inkling2LoopHost) Step(token int) []float32 {
 	cur = inkling2Mix(blocks, cur, h.W.OutputResQuery)
 	cur = inkling2RMS(cur, h.W.OutputNorm, hp.NormEps)
 	h.tap(visit, cur)
+	h.pos++
+	if !final {
+		return nil
+	}
 	logits := make([]float32, h.W.Output.Rows())
 	h.W.Output.MatVec(logits, cur)
 	if c := hp.FinalLogitSoftcap; c != 0 {
@@ -227,7 +237,6 @@ func (h *Inkling2LoopHost) Step(token int) []float32 {
 			logits[i] = c * float32(math.Tanh(float64(v/c)))
 		}
 	}
-	h.pos++
 	return logits[:hp.VocabUnpadded]
 }
 
@@ -245,18 +254,16 @@ func (h *Inkling2LoopHost) layer(slot, ip int, cur []float32, blocks *[][]float3
 
 	inputs := [3][]float32{cur, cur, cur}
 	if len(lw.AttnResQuery) > 0 {
-		for j := 0; j < 3; j++ {
-			q := lw.AttnResQuery[0]
-			if !local {
-				q = lw.AttnResQuery[j]
-			}
-			inputs[j] = inkling2Mix(*blocks, cur, q)
+		inputs[0] = inkling2Mix(*blocks, cur, lw.AttnResQuery[0])
+		if local {
+			inputs[1], inputs[2] = inputs[0], inputs[0]
+		} else {
+			inputs[1] = inkling2Mix(*blocks, cur, lw.AttnResQuery[1])
+			inputs[2] = inkling2Mix(*blocks, cur, lw.AttnResQuery[2])
 		}
 	}
 	if m != nil {
-		for j := 0; j < 3; j++ {
-			inputs[j] = inkling2Control(inputs[j], m.msgs[j], m.ctrl, j)
-		}
+		h.controls(inputs[:], m, 0)
 	}
 	switch {
 	case local && m != nil:
@@ -321,7 +328,7 @@ func (h *Inkling2LoopHost) layer(slot, ip int, cur []float32, blocks *[][]float3
 	for i := range attn {
 		attn[i] *= sigmoid32(gate[i])
 	}
-	out := h.convolve(slot, inkling2MatVec(lw.Wo, attn), lw.AttnPostConv, nil, 0, 2*kvDim)
+	out := h.convolve(slot, h.project(lw.Wo, attn), lw.AttnPostConv, nil, 0, 2*kvDim)
 
 	if ip%hp.AttnResBlock == 0 {
 		*blocks = append(*blocks, inpSA)
@@ -333,7 +340,9 @@ func (h *Inkling2LoopHost) layer(slot, ip int, cur []float32, blocks *[][]float3
 
 	x := inkling2Mix(*blocks, cur, lw.FFNResQuery)
 	if m != nil {
-		x = inkling2Control(x, m.msgs[inkling2CtrlFFN], m.ctrl, inkling2CtrlFFN)
+		ffn := [1][]float32{x}
+		h.controls(ffn[:], m, inkling2CtrlFFN)
+		x = ffn[0]
 	}
 	x = inkling2RMS(x, lw.FFNNorm, hp.NormEps)
 	x = h.moe(lw, x)
@@ -443,7 +452,14 @@ func (h *Inkling2LoopHost) convolve(slot int, cur, weight, dynamic []float32, he
 
 func (h *Inkling2LoopHost) moe(lw *Inkling2LoopLayerWeights, x []float32) []float32 {
 	hp := h.HP
-	logits := inkling2MatVec(lw.Router, x)
+	if ffn, ok := h.W.Batcher.(interface {
+		RoutedFFN(*Inkling2LoopLayerWeights, *Inkling2LoopHParams, []float32) ([]float32, bool)
+	}); ok {
+		if out, ran := ffn.RoutedFFN(lw, &hp, x); ran {
+			return out
+		}
+	}
+	logits := h.project(lw.Router, x)
 	probs := make([]float32, len(logits))
 	sel := make([]float32, len(logits))
 	for i, l := range logits {
@@ -588,20 +604,32 @@ func inkling2Mix(blocks [][]float32, cur, query []float32) []float32 {
 	return out
 }
 
-// inkling2Control mixes a cross-pass message: (1-forget)*cur + gain*message,
-// both gates read from the normalized pair.
-func inkling2Control(cur, msg []float32, ctrl *Inkling2LoopControllerWeights, c int) []float32 {
-	pair := append(inkling2RMS(cur, nil, 1e-6), inkling2RMS(msg, nil, 1e-6)...)
-	g := inkling2MatVec(ctrl.Down[c], pair)
-	gain := inkling2MatVec(ctrl.Gain[c], g)
-	forget := inkling2MatVec(ctrl.Forget[c], g)
-	out := make([]float32, len(cur))
-	for i := range out {
-		f := float32(math.Tanh(float64(forget[i])))
-		gn := float32(math.Tanh(float64(gain[i])))
-		out[i] = cur[i] - f*cur[i] + gn*msg[i]
+// controls batches the independent cross-pass projections at each dependency
+// boundary. inputs may share storage before the per-channel controls apply.
+func (h *Inkling2LoopHost) controls(inputs [][]float32, m *inkling2Messages, first int) {
+	down := make([]Inkling2LoopMatVecJob, len(inputs))
+	for i, cur := range inputs {
+		c := first + i
+		pair := append(inkling2RMS(cur, nil, 1e-6), inkling2RMS(m.msgs[c], nil, 1e-6)...)
+		down[i] = inkling2Job(m.ctrl.Down[c], pair)
 	}
-	return out
+	h.run(down)
+	gates := make([]Inkling2LoopMatVecJob, 2*len(inputs))
+	for i, d := range down {
+		c := first + i
+		gates[2*i] = inkling2Job(m.ctrl.Gain[c], d.Dst)
+		gates[2*i+1] = inkling2Job(m.ctrl.Forget[c], d.Dst)
+	}
+	h.run(gates)
+	for i, cur := range inputs {
+		gain, forget, msg := gates[2*i].Dst, gates[2*i+1].Dst, m.msgs[first+i]
+		for j, x := range cur {
+			f := float32(math.Tanh(float64(forget[j])))
+			g := float32(math.Tanh(float64(gain[j])))
+			gain[j] = x - f*x + g*msg[j]
+		}
+		inputs[i] = gain
+	}
 }
 
 // inkling2Clip scales x (after an optional per-channel scale) down to an L2

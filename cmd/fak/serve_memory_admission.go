@@ -262,6 +262,10 @@ func estimateMetalModelMemoryBoundsWithEnvelope(ggufPath string) (localadmission
 	if err != nil {
 		return localadmission.MemoryPlan{}, nil, err
 	}
+	return metalWeightPlanWithEnvelope(weights)
+}
+
+func metalWeightPlanWithEnvelope(weights localadmission.MemoryPlan) (localadmission.MemoryPlan, *localadmission.SessionResidencyPlan, error) {
 	if !stateEnvelopeEnabled() {
 		return weights, nil, nil
 	}
@@ -465,6 +469,9 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 // metalAdmissionSpec is one native Metal load whose reservation lifecycle the
 // admission seam owns end to end (#9587).
 type metalAdmissionSpec struct {
+	// Weights overrides the generic dense/Q4K estimate for an architecture whose
+	// native loader has a different, header-derived storage plan.
+	Weights *localadmission.MemoryPlan
 	// Load performs the model load and reports whether a model is now resident.
 	// false is a load failure: the reservation is released without ever being
 	// marked steady and the GPU lease is dropped, exactly once, before
@@ -550,7 +557,13 @@ func admitLocalMetalModel(useMetal bool, ggufPath string, opts gpulease.Options,
 	}
 
 	store := localadmission.NewReservationStore(defaultLocalReservationDir())
-	plan, stateEnvelope, err := estimateMetalModelMemoryBoundsWithEnvelope(ggufPath)
+	var plan localadmission.MemoryPlan
+	var stateEnvelope *localadmission.SessionResidencyPlan
+	if spec.Weights != nil {
+		plan, stateEnvelope, err = metalWeightPlanWithEnvelope(*spec.Weights)
+	} else {
+		plan, stateEnvelope, err = estimateMetalModelMemoryBoundsWithEnvelope(ggufPath)
+	}
 	if err != nil {
 		lease.Release()
 		return func() {}, fmt.Errorf("fak local launcher: Metal memory estimate refused before model load: %w", err)

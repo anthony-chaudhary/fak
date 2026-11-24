@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -43,6 +44,8 @@ type runFlags struct {
 	effort           *string
 	thinkingBudget   *int
 	quiet            *bool
+	raw              *bool
+	timings          *bool
 	nativeFlags      nativeControlFlags
 
 	// Trace controls
@@ -67,6 +70,8 @@ type chatModelConfig struct {
 	effort           string
 	thinkingBudget   int
 	quiet            bool
+	raw              bool
+	timings          bool
 	nativeFlags      nativeControlFlags
 }
 
@@ -91,6 +96,8 @@ func newRunFlagSet(name string, errorHandling flag.ErrorHandling) (*flag.FlagSet
 	flags.backendName = fs.String("backend", "", "compute backend for decode: --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects CUDA on Linux/Windows when this build's cubins/PTX cover the detected device arch, else usable Vulkan, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
 	flags.metal = fs.Bool("metal", false, "run the in-kernel chat through the Apple-Silicon Metal GPU forward (auto-selected on darwin/arm64 with a usable Metal device; mutually exclusive with --backend)")
 	flags.nativeFlags = registerRunNativeControlFlags(fs)
+	flags.raw = fs.Bool("raw", false, "complete a single literal prompt without the chat template")
+	flags.timings = fs.Bool("timings", false, "print native prompt and decode timing counters as JSON to stderr")
 	flags.system = fs.String("system", "", "optional system prompt prepended to the conversation")
 	flags.maxTokens = fs.Int("max-tokens", 512, "maximum number of tokens to generate per turn")
 	flags.temp = fs.Float64("temp", 0, "sampling temperature (0 = greedy/deterministic)")
@@ -137,7 +144,7 @@ func parseRunArgs(fs *flag.FlagSet, flags *runFlags, argv []string) (parsedRunCo
 				errMessage: "fak run: --trace cannot be combined with a model argument",
 			}, nil
 		}
-		prompt = strings.TrimSpace(strings.Join(fs.Args(), " "))
+		prompt = strings.Join(fs.Args(), " ")
 	} else {
 		// Flag specified as first argument: fak run [flags] [model] [prompt]
 		if err := fs.Parse(argv); err != nil {
@@ -163,9 +170,14 @@ func parseRunArgs(fs *flag.FlagSet, flags *runFlags, argv []string) (parsedRunCo
 			}, nil
 		}
 		modelRef = args[0]
-		prompt = strings.TrimSpace(strings.Join(args[1:], " "))
+		prompt = strings.Join(args[1:], " ")
 	}
 
+	if !*flags.raw {
+		prompt = strings.TrimSpace(prompt)
+	} else if prompt == "" || *flags.system != "" {
+		return parsedRunCommand{action: runActionUsage, errMessage: "fak run: --raw requires one prompt and cannot take a system message"}, nil
+	}
 	return parsedRunCommand{
 		action:   runActionChat,
 		modelRef: modelRef,
@@ -185,6 +197,8 @@ func parseRunArgs(fs *flag.FlagSet, flags *runFlags, argv []string) (parsedRunCo
 			effort:           *flags.effort,
 			thinkingBudget:   *flags.thinkingBudget,
 			quiet:            *flags.quiet,
+			raw:              *flags.raw,
+			timings:          *flags.timings,
 			nativeFlags:      flags.nativeFlags,
 		},
 	}, nil
@@ -215,11 +229,14 @@ func runUnifiedRun(argv []string) {
 	case runActionTrace:
 		executeTraceReplay(cmd.tracePath, cmd.engineID, cmd.vdso, cmd.policyPath)
 	case runActionChat:
-		executeChatModel(cmd.chatConfig)
+		if err := executeChatModel(cmd.chatConfig); err != nil {
+			fmt.Fprintln(os.Stderr, "fak run:", err)
+			os.Exit(1)
+		}
 	}
 }
 
-func executeChatModel(cfg chatModelConfig) {
+func executeChatModel(cfg chatModelConfig) error {
 	if cfg.nativeFlags.prefillChunk != nil {
 		if err := validateNativeQwenQ4KPrefillChunk(*cfg.nativeFlags.prefillChunk); err != nil {
 			fmt.Fprintln(os.Stderr, "fak run:", err)
@@ -235,6 +252,9 @@ func executeChatModel(cfg chatModelConfig) {
 	}
 
 	var extraOpts []agent.SampleOpt
+	if cfg.raw {
+		extraOpts = append(extraOpts, agent.WithRawPrompt())
+	}
 	if cfg.effort != "" {
 		extraOpts = append(extraOpts, agent.WithReasoningEffort(cfg.effort))
 	}
@@ -242,12 +262,16 @@ func executeChatModel(cfg chatModelConfig) {
 		extraOpts = append(extraOpts, agent.WithThinkingBudget(cfg.thinkingBudget))
 	}
 	opts := runSampleOpts(cfg.maxTokens, cfg.temp, cfg.topP, cfg.topK, cfg.frequencyPenalty, cfg.presencePenalty, extraOpts...)
+	var err error
 	if cfg.prompt != "" {
 		// One-shot: answer and exit.
-		runChatTurn(ctx, planner, cfg.system, nil, cfg.prompt, opts, !cfg.quiet)
+		_, err = runChatTurn(ctx, planner, cfg.system, nil, cfg.prompt, opts, !cfg.quiet, cfg.timings, cfg.raw)
 	} else {
 		// REPL: interactive session.
-		runChatREPL(ctx, planner, cfg.system, opts, !cfg.quiet)
+		err = runChatREPL(ctx, planner, cfg.system, opts, !cfg.quiet, cfg.timings)
+	}
+	if err != nil {
+		return err
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075).
 	stats := cacheobs.Default.Snapshot()
@@ -262,6 +286,7 @@ func executeChatModel(cfg chatModelConfig) {
 	// zero-value summary would write zero rows forever (cachevaluereport.NewSavingsRows
 	// is a no-op unless CacheReadTokens/CacheCreationTokens/CompactionShedTokens is
 	// nonzero), so it is deliberately omitted rather than wired as dead code.
+	return nil
 }
 
 // cacheValueLine renders one WITNESSED cache-value line from the per-turn delta of the
@@ -323,7 +348,7 @@ func resolveRunMetal(flag, env bool, backendName string) (bool, error) {
 	return use, nil
 }
 
-func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalFlag bool, nativeConfig nativeControlConfig) (*agent.InKernelPlanner, func()) {
+func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalFlag bool, nativeConfig nativeControlConfig) (agent.Planner, func()) {
 	ref, expanded := modelreg.Resolve(modelRef)
 	if expanded {
 		fmt.Fprintf(os.Stderr, "fak run: %s → %s\n", modelRef, ref)
@@ -342,6 +367,12 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalFla
 		os.Exit(2)
 	}
 
+	if planner, release, err := openInkling2Run(ref, modelRef, backendName, metalFlag, nativeConfig); err != nil {
+		fmt.Fprintln(os.Stderr, "fak run:", err)
+		os.Exit(1)
+	} else if planner != nil {
+		return planner, release
+	}
 	backend, err := resolveServeChatBackend(backendName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak run: %v\n", err)
@@ -436,7 +467,7 @@ func runSampleOpts(maxTokens int, temp, topP float64, topK int, frequencyPenalty
 // the REPL can thread context across turns. When showCache is set, it brackets the
 // turn with a cacheobs snapshot and prints the WITNESSED KV-prefix reuse line to
 // stderr (the #333 value-add the run surface advertises) — stdout stays pipe-clean.
-func runChatTurn(ctx context.Context, planner *agent.InKernelPlanner, system string, history []agent.Message, prompt string, opts []agent.SampleOpt, showCache bool) []agent.Message {
+func runChatTurn(ctx context.Context, planner agent.Planner, system string, history []agent.Message, prompt string, opts []agent.SampleOpt, showCache, showTimings, raw bool) ([]agent.Message, error) {
 	msgs := history
 	if len(msgs) == 0 && strings.TrimSpace(system) != "" {
 		msgs = append(msgs, agent.Message{Role: "system", Content: system})
@@ -450,23 +481,29 @@ func runChatTurn(ctx context.Context, planner *agent.InKernelPlanner, system str
 	before := cacheobs.Default.Snapshot()
 	comp, err := planner.Complete(ctx, msgs, nil, opts...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak run: %v\n", err)
-		os.Exit(1)
+		return nil, err
+	}
+	if showTimings && comp.Timings != nil {
+		_ = json.NewEncoder(os.Stderr).Encode(comp.Timings)
 	}
 	out := comp.Message.Content
-	fmt.Println(strings.TrimSpace(out))
+	if raw {
+		fmt.Print(out)
+	} else {
+		fmt.Println(strings.TrimSpace(out))
+	}
 	// The cache-value summary goes to STDERR (never stdout) so a `fak run ... | …` pipe
 	// stays clean; --quiet (showCache=false) silences it for scripting. An idle/empty
 	// turn (no prompt delta) renders "" and prints nothing.
 	if line := cacheTurnLine(before, cacheobs.Default.Snapshot(), showCache); line != "" {
 		fmt.Fprintln(os.Stderr, line)
 	}
-	return append(msgs, comp.Message)
+	return append(msgs, comp.Message), nil
 }
 
 // runChatREPL is the interactive mode: read a line, answer, repeat. EOF (Ctrl-D) or
 // an interrupt ends it. Conversation context is threaded across turns.
-func runChatREPL(ctx context.Context, planner *agent.InKernelPlanner, system string, opts []agent.SampleOpt, showCache bool) {
+func runChatREPL(ctx context.Context, planner agent.Planner, system string, opts []agent.SampleOpt, showCache, showTimings bool) error {
 	fmt.Fprintf(os.Stderr, "fak run: interactive chat on %q — Ctrl-D to exit\n", planner.Model())
 	var history []agent.Message
 	sc := bufio.NewScanner(os.Stdin)
@@ -475,12 +512,16 @@ func runChatREPL(ctx context.Context, planner *agent.InKernelPlanner, system str
 		fmt.Fprint(os.Stderr, ">>> ")
 		if !sc.Scan() {
 			fmt.Fprintln(os.Stderr)
-			return
+			return sc.Err()
 		}
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
 			continue
 		}
-		history = runChatTurn(ctx, planner, system, history, line, opts, showCache)
+		var err error
+		history, err = runChatTurn(ctx, planner, system, history, line, opts, showCache, showTimings, false)
+		if err != nil {
+			return err
+		}
 	}
 }

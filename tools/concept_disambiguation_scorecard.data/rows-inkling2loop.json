@@ -114,6 +114,96 @@
         "inkling2loop-model-family"
       ],
       "grounding": "NewInkling2LoopHost"
+    },
+    {
+      "id": "inkling2loop-matvec-job",
+      "canonical": "Inkling2LoopMatVecJob",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "One input vector, output slice and weight matrix for a projection scheduled by the native Inkling 2 forward.",
+      "distinction": "The matrix interface owns the weights. This job identifies one application of that matrix to specific activation buffers.",
+      "distinct_from": [
+        "inkling2loop-matrix"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopMatVecJob",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2loop-prefill",
+      "canonical": "Inkling2LoopPrefill",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Consume prompt token IDs in causal order, update the host attention and convolution state, and return logits at the final prompt position.",
+      "distinction": "The prompt operation can batch independent projections across several token positions. A decode step consumes one sampled token.",
+      "distinct_from": [
+        "inkling2loop-step"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopPrefill",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2loop-step",
+      "canonical": "Inkling2LoopStep",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Advance one Inkling 2 token through the host forward and return next-token logits or a packed-backend execution error.",
+      "distinction": "The one-token call produces logits immediately. The prompt call evaluates a sequence and returns only its final logits.",
+      "distinct_from": [
+        "inkling2loop-prefill"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopStep",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2loop-open",
+      "canonical": "OpenInkling2Loop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Open a GGUF file, validate the Inkling 2 model geometry and bind host-accessible weights for a native forward pass.",
+      "distinction": "The model handle owns mapped weights. The opener creates that handle and reports format and tensor validation failures.",
+      "distinct_from": [
+        "inkling2loop-model"
+      ],
+      "aliases": [],
+      "grounding": "OpenInkling2Loop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2loop-run-planner",
+      "canonical": "NewInkling2RunPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Construct the agent Planner that tokenizes an Inkling 2 request, runs the loaded model, and decodes its text or reasoning response.",
+      "distinction": "The opener binds model weights. The planner adapts an already loaded model and its tokenizer to the generation request interface.",
+      "distinct_from": [
+        "inkling2loop-open"
+      ],
+      "aliases": [],
+      "grounding": "NewInkling2RunPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
