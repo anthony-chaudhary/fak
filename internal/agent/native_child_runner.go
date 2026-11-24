@@ -19,9 +19,15 @@ var ErrNativeChildTruncated = errors.New("native child task: final answer trunca
 type nativeChildCompletionFilter struct {
 	Planner
 	allowed map[string]struct{}
+	// declared replaces the child's narrowed catalog on the wire with the parent's
+	// schemas so the tool block stays prefix-identical; allowed still gates calls.
+	declared []ToolDef
 }
 
 func (p nativeChildCompletionFilter) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	if p.declared != nil && len(tools) > 0 {
+		tools = p.declared
+	}
 	completion, err := p.Planner.Complete(ctx, messages, tools, opts...)
 	if err != nil || completion == nil {
 		return completion, err
@@ -57,6 +63,13 @@ func NewNativeChildTaskRunner(planner Planner, maxTurns int, baseOpts []RunOptio
 			withIsolatedPolicy(policy),
 			WithToolCatalog(catalog),
 		)
+		if pre := req.Preamble; pre != nil && pre.System != "" && len(catalog) > 0 {
+			childPlanner.declared = pre.Tools
+			opts = append(opts, WithConversation([]Message{
+				{Role: RoleSystem, Content: pre.System},
+				{Role: RoleUser, Content: nativeChildBrief(req, catalog)},
+			}))
+		}
 		metrics, err := RunArm(ctx, childPlanner, req.Prompt, true, maxTurns, nil, opts...)
 		if err != nil {
 			return nil, err

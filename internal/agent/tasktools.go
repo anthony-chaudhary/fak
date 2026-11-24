@@ -93,6 +93,8 @@ type ChildTaskRunRequest struct {
 	Description  string
 	SubagentType string
 	ReadOnly     bool
+	// Preamble is the parent's stable request head, nil when none was captured.
+	Preamble *ChildPreamble
 }
 
 // ChildTaskRunner executes one admitted child. Implementations must stop when ctx
@@ -168,6 +170,7 @@ type TaskState struct {
 	cancels     map[string]context.CancelFunc
 	executions  sync.WaitGroup
 	closed      bool
+	preamble    *ChildPreamble
 }
 
 // NewTaskState returns an empty initialized TaskState.
@@ -344,6 +347,7 @@ func (s *TaskState) startTask(taskID string) {
 		Description:  item.Description,
 		SubagentType: item.SubagentType,
 		ReadOnly:     item.ReadOnly,
+		Preamble:     s.preamble,
 	}
 	s.executions.Add(1)
 	s.mu.Unlock()

@@ -650,6 +650,7 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	// request-scoped catalog through them (#6657, loop_wire.go).
 	messages := cfg.seedMessages(task)
 	tools := cfg.seedTools()
+	cfg.taskState.setChildPreamble(messages, tools)
 
 	var terminated func() bool
 	ctx, terminated, cleanupTerminate := watchArmTermination(ctx, cfg.terminateSignal())
