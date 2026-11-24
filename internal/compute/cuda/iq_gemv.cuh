@@ -228,14 +228,18 @@ __device__ const unsigned long long fcuda_iq2xs_grid[512] = {
 };
 
 // fcuda_iq_dot8 dots the 8 signed grid magnitudes of one 8-weight group with xs[0..7].
+// Each magnitude byte converts through 32 bits: (float) of the 64-bit grid word compiles
+// to I2F.U64, which bound every IQ GEMV; the magic-number form is exact for 0..255.
 __device__ __forceinline__ float fcuda_iq_dot8(unsigned long long grid, unsigned char signs, const float *xs) {
   const float4 a = *(const float4 *)xs;
   const float4 b = *(const float4 *)(xs + 4);
   const float xv[8] = {a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w};
+  const unsigned int lo = (unsigned int)grid, hi = (unsigned int)(grid >> 32);
   float part = 0.f;
 #pragma unroll
   for (int j = 0; j < 8; ++j) {
-    float v = (float)((grid >> (8 * j)) & 0xff);
+    const unsigned int byte = ((j < 4 ? lo : hi) >> (8 * (j & 3))) & 0xffu;
+    float v = __uint_as_float(0x4b000000u | byte) - 8388608.0f;
     v = (signs & (1u << j)) ? -v : v;
     part = fmaf(v, xv[j], part);
   }
