@@ -12,7 +12,8 @@ import (
 // a serve that never becomes ready. The gate records the failure as a distinct
 // readiness state with a closed reason token (branch on it, never on prose) and a
 // bounded, scrubbed message. Readiness stays held — a failed backend is not warm —
-// and a later successful RunWarmup still completes the gate and clears it.
+// and a later successful RunWarmup still completes the gate and clears it. fak serve
+// exits on the failure (see servewarmup.Fatal) unless FAK_SERVE_WARMUP_FAILURE=hold.
 const (
 	// WarmupFailurePanic: a boot-probe planner call panicked (ErrWarmupPanic).
 	WarmupFailurePanic = "warmup_panic"
@@ -127,6 +128,15 @@ func (g *warmupGate) markFailed(reason, message string) {
 		return
 	}
 	g.failed, g.failReason, g.failMessage, g.failSite = true, reason, message, nil
+}
+
+// WarmupFailure reports the held terminal warmup failure's closed reason token and
+// scrubbed message, so the serve host can exit with a typed cause.
+func (s *Server) WarmupFailure() (reason, message string, failed bool) {
+	if s == nil {
+		return "", "", false
+	}
+	return s.warmup.failure()
 }
 
 // failure reports the recorded terminal failure while the gate is still held.

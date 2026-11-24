@@ -560,6 +560,14 @@ func (s *Session) validatePackedQ2KEmbeddingGuards() {
 			return
 		}
 	}
+	// A device backend never stages the packed Q4_K table: tokenHALOutput gathers the row on
+	// the host and uploads it as layer 0's input, and a dense layer split reads the residual
+	// back before the host tail, so every split point decodes exactly like the f32 table.
+	if s.M.Q2KEmbedding.Format() == "Q4_K" && s.M.Cfg.IsQwen35Hybrid() && !s.M.Cfg.IsMoE() &&
+		s.Backend != nil && s.Q4K && !s.Metal && !s.MetalQ4K &&
+		!s.Q4 && !s.F16 && !s.GPTQ && s.PrecisionPolicy == nil {
+		return
+	}
 	if s.Metal || s.MetalQ4K || s.Q4 || s.F16 || s.GPTQ || s.PrecisionPolicy != nil || s.DenseGPULayers != 0 || s.GPULayers != 0 {
 		panic("model: resident Q2_K embedding does not support Metal/MetalQ4K/Q4/F16/GPTQ/PrecisionPolicy or GPU layer offload")
 	}

@@ -150,6 +150,13 @@ func (bs *BatchSession) qwen35HybridQ4KBatchOK(batch int) bool {
 		!bs.M.Cfg.IsQwen35Hybrid() || bs.M.Cfg.BlockTopology != PreNorm || bs.M.Cfg.IsMoE() {
 		return false
 	}
+	// The batched request spans every layer on the device; a dense layer split must take each
+	// lane's split-aware Step instead.
+	for _, s := range bs.Seqs {
+		if s != nil && s.denseGPULayers() > 0 && s.denseGPULayers() < bs.M.Cfg.NumLayers {
+			return false
+		}
+	}
 	if qwen35HybridQ4KBatchStep != nil {
 		return true
 	}

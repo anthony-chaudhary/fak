@@ -40,6 +40,20 @@ func WithTiedQ6KEmbeddingResident(enabled bool) Q4KLoadOption {
 	}
 }
 
+// ResolvesTiedQ6KEmbedding reports whether a load with opts would keep the tied Q6_K token table
+// packed for this checkpoint: the loader's own decision, for callers that must not place the
+// model in a way that table refuses.
+func (s *WeightSource) ResolvesTiedQ6KEmbedding(cfg model.Config, opts ...Q4KLoadOption) bool {
+	if s == nil || s.File == nil {
+		return false
+	}
+	o, err := resolveQ4KLoadOptions(cfg, opts)
+	if err != nil {
+		return false
+	}
+	return s.resolveTiedQ6KEmbedding(cfg, &o) == nil && o.residentTiedQ6KEmbedding
+}
+
 // resolveTiedQ6KEmbedding sets o.residentTiedQ6KEmbedding for this checkpoint. It runs after
 // the other packed-embedding options are known so the modes stay mutually exclusive, and it is
 // shared by the loader and EstimateQ4KLoadMemoryPlan so admission prices the same layout.

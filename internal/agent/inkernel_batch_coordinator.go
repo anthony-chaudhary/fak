@@ -158,6 +158,10 @@ func (p *InKernelPlanner) coalescesQwenDecode() bool {
 	if p == nil || !p.batchDecode || p.m == nil || !p.m.Cfg.IsQwen35Hybrid() {
 		return false
 	}
+	// A dense layer split runs a host tail per lane; the device cohort covers every layer.
+	if p.denseGPULayers > 0 && p.denseGPULayers < p.m.Cfg.NumLayers {
+		return false
+	}
 	if p.backend == nil {
 		// Host route: only the packed resident-Q4_K session forward shares weight
 		// streams across lanes, so it stays gated on the q4k load.

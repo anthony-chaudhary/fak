@@ -67,6 +67,10 @@ func estimateServeNativeHostLoadPeak(ggufPath string, _ bool, opts []ggufload.Q4
 		return ggufload.HostLoadPeak{}, err
 	}
 	defer ws.Close()
+	return estimateServeNativeHostLoadPeakFromWeights(ws, opts)
+}
+
+func estimateServeNativeHostLoadPeakFromWeights(ws *ggufload.WeightSource, opts []ggufload.Q4KLoadOption) (ggufload.HostLoadPeak, error) {
 	effects := ggufload.ApplyQ4KLoadOptions(opts)
 	if effects.StreamedExperts {
 		// Estimate the actual option list, never a hypothetical bounded route.

@@ -850,6 +850,13 @@ func cmdServe(argv []string) {
 	// t0 anchors the boot timeline exposed as fak_gateway_time_to_ready_seconds; it
 	// must be the FIRST statement so flag parse + policy + weight load are accounted.
 	t0 := time.Now()
+	// Registered first so it runs last: a nonzero exit waits for every deferred cleanup below.
+	exitCode := 0
+	defer func() {
+		if exitCode != 0 {
+			serveExit(exitCode)
+		}
+	}()
 	fs, sf := newServeFlagSet()
 	if serveHelpRequested(fs, argv) {
 		os.Exit(0)
@@ -1361,8 +1368,11 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	rt.addStartupMessage(serveDurabilityStartupMessage(durability))
-	rt.run(sf)
+	exitCode = rt.run(sf)
 }
+
+// serveExit is os.Exit, injectable so tests can observe a nonzero serve exit.
+var serveExit = os.Exit
 
 // resolveServeEngine selects the appropriate engine ID. If --engine was not explicitly
 // passed by the operator, and in-kernel weights are configured or loaded (e.g. --gguf is set

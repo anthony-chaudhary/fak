@@ -1370,17 +1370,24 @@ func withGGUFWeights(ggufPath string, plan func(*ggufload.WeightSource) (compute
 
 func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
 	plan, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		arm := resolveDeviceServeLoadArm(ws, be, f32Resident, false)
-		// ONE fit snapshot: the same device budget judges the plan and derives the
-		// streamed-dense working set (fak#13205).
-		fit := serveDeviceFitBudgetFromReported(be, override)
-		plan, err := serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, be, arm, fit)...)
-		return applyDenseGPULayerSplit(plan, ws, fit.DenseGPULayers), err
+		return serveGGUFDeviceDemands(ws, ggufPath, be, f32Resident, contextBudgetTokens, override)
 	})
-	if err == nil {
-		plan = applyDeviceWeightBudget(plan, be)
-	}
 	return refuseIfTooBigOnDevice(plan, err, be, override)
+}
+
+// serveGGUFDeviceDemands is the device arm's unrefused plan on an open header: the exact plan
+// fitAndPlanServeGGUFPathOnDevice admits, shared with the --gpu-layers auto search so the split
+// it picks is judged by the same arithmetic the load commits.
+func serveGGUFDeviceDemands(ws *ggufload.WeightSource, ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int, override *serveFitBudget) (compute.MemoryPlan, error) {
+	arm := resolveDeviceServeLoadArm(ws, be, f32Resident, false)
+	// ONE fit snapshot: the same device budget judges the plan and derives the
+	// streamed-dense working set (fak#13205).
+	fit := serveDeviceFitBudgetFromReported(be, override)
+	plan, err := serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, be, arm, fit)...)
+	if err != nil {
+		return nil, err
+	}
+	return applyDeviceWeightBudget(applyDenseGPULayerSplit(plan, ws, fit.DenseGPULayers), be), nil
 }
 
 // fitAndPlanServeGGUFCPUOffloadPathOnDevice keeps serveDeviceFitBudget's generic device headroom

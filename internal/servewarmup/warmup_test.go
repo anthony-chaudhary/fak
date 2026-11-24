@@ -53,3 +53,44 @@ func TestRunNilWriterDoesNotPanic(t *testing.T) {
 		return time.Second, errors.New("boom")
 	}, nil)
 }
+
+// A failed warmup is terminal (nothing re-runs it), so it must end the serve instead of
+// leaving /readyz at 503 forever; shutdown-in-progress and the hold opt-out are not fatal.
+func TestFatalPolicy(t *testing.T) {
+	boom := errors.New("boom")
+	live := context.Background()
+	gone, cancel := context.WithCancel(live)
+	cancel()
+	env := func(v string) func(string) string {
+		return func(k string) string {
+			if k == FailureModeEnv {
+				return v
+			}
+			return ""
+		}
+	}
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+		mode string
+		want bool
+	}{
+		{"failure is fatal", live, boom, "", true},
+		{"nil getenv is fatal", live, boom, "-", true},
+		{"success", live, nil, "", false},
+		{"shutdown in progress", gone, boom, "", false},
+		{"hold opt-out", live, boom, " HOLD ", false},
+	} {
+		getenv := env(c.mode)
+		if c.mode == "-" {
+			getenv = nil
+		}
+		if got := Fatal(c.ctx, c.err, getenv); got != c.want {
+			t.Fatalf("%s: Fatal = %v, want %v", c.name, got, c.want)
+		}
+	}
+	if err := Run(live, func(context.Context) (time.Duration, error) { return 0, boom }, nil); !errors.Is(err, boom) {
+		t.Fatalf("Run returned %v, want the warmup error", err)
+	}
+}

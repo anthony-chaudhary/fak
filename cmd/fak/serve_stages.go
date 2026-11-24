@@ -650,6 +650,9 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 				return openErr
 			}
 			defer ws.Close()
+			if err := rt.resolveAutoGPULayers(sf, ws, ranks, requested, path); err != nil {
+				return err
+			}
 			weights, fit, inputErr := serveNativeContextSizingInputs(ws, rt.chatBackend, *sf.cpuOffloadExperts, rt.useMetal, ranks, *sf.nativeGPULayers, path)
 			if inputErr != nil {
 				return inputErr
@@ -1124,7 +1127,9 @@ func (rt *serveRuntime) wireGateway(sf *serveFlags) {
 // run serves until a terminating signal: it arms the route-manifest hot-reload
 // watcher, the optional periodic usage snapshot, then blocks in stdio or HTTP
 // mode and writes the shared shutdown tail (ledgers + session drive-state dump).
-func (rt *serveRuntime) run(sf *serveFlags) {
+// run serves until shutdown and returns the process exit code: 0 for a drained
+// shutdown, nonzero when a fatal warmup failure ended the serve.
+func (rt *serveRuntime) run(sf *serveFlags) int {
 	// Graceful drain on ANY terminating signal, not just Ctrl-C (#1359): SIGHUP is "the
 	// terminal was closed" and SIGTERM is "an orchestrator asked us to stop" — both must
 	// route through the same ctx-cancel → ListenAndServe-returns → dumpServeSessions flush
@@ -1134,6 +1139,8 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	// journal's job (#1363), not this signal handler's.
 	ctx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
 	defer stop()
+	ctx, failServe := context.WithCancelCause(ctx)
+	defer failServe(nil)
 
 	// Operator approvals are expiring overlays, not launch-time configuration. Keep
 	// the installed serve floor synchronized for the process lifetime so an MCP client
@@ -1230,7 +1237,7 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 			must(err)
 		}
 		persistServeExitObservations("stdio")
-		return
+		return 0
 	}
 	if *sf.addr == "" {
 		writeConfigBail(os.Stderr, configBail{
@@ -1283,7 +1290,9 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 			rt.srv.ArmCoherenceProbe(*sf.readinessCoherence)
 		}
 		go func() {
-			runServeBackendWarmup(ctx, rt.srv.RunWarmup, os.Stderr)
+			if runServeBackendWarmup(ctx, rt.srv.RunWarmup, rt.srv.WarmupFailure, os.Getenv, os.Stderr, failServe) {
+				return
+			}
 			if agentWarmArmed {
 				runServeAgentWarmup(ctx, rt.srv)
 			}
@@ -1293,10 +1302,53 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		must(err)
 	}
 	persistServeExitObservations("http")
+	return serveExitCode(ctx, os.Stderr)
 }
 
-func runServeBackendWarmup(ctx context.Context, run func(context.Context) (time.Duration, error), stderr io.Writer) {
-	servewarmup.Run(ctx, run, stderr)
+// serveWarmupFailedToken prefixes the exit line of a serve ended by a fatal warmup failure.
+const serveWarmupFailedToken = "WARMUP_FAILED"
+
+// serveWarmupFatalError is the serve context's cancel cause after a fatal warmup failure;
+// Reason is the gateway's closed warmup-failure token.
+type serveWarmupFatalError struct {
+	Reason string
+	Err    error
+}
+
+func (e *serveWarmupFatalError) Error() string {
+	return serveWarmupFailedToken + ": " + e.Reason + ": " + e.Err.Error()
+}
+
+func (e *serveWarmupFatalError) Unwrap() error { return e.Err }
+
+// runServeBackendWarmup runs the backend warmup and, when its failure is fatal, cancels the
+// serve with a typed cause so ListenAndServe drains and run returns nonzero. It reports
+// whether it did.
+func runServeBackendWarmup(ctx context.Context, run func(context.Context) (time.Duration, error),
+	failure func() (string, string, bool), getenv func(string) string, stderr io.Writer,
+	failServe context.CancelCauseFunc) bool {
+	err := servewarmup.Run(ctx, run, stderr)
+	if !servewarmup.Fatal(ctx, err, getenv) {
+		return false
+	}
+	reason := gateway.WarmupFailureBackendError
+	if failure != nil {
+		if r, _, ok := failure(); ok && r != "" {
+			reason = r
+		}
+	}
+	failServe(&serveWarmupFatalError{Reason: reason, Err: err})
+	return true
+}
+
+// serveExitCode maps the serve context's cancel cause to the process exit code.
+func serveExitCode(ctx context.Context, stderr io.Writer) int {
+	var fatal *serveWarmupFatalError
+	if errors.As(context.Cause(ctx), &fatal) {
+		fmt.Fprintf(stderr, "fak serve: %v (set %s=hold to keep serving with readiness held)\n", fatal, servewarmup.FailureModeEnv)
+		return 1
+	}
+	return 0
 }
 
 func resolveServeRequiredKey(envName, flagName, summary, want string) string {
