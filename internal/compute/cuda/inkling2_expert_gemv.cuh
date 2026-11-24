@@ -172,3 +172,186 @@ static bool ink2_expert_nvfp4_v2(const uint8_t *W, const uint8_t *scales, const 
   return true;
 }
 
+// IQ2_XS / IQ2_S / IQ3_XXS / IQ3_S: k_ink2_expert_iq's per-lane term (lane l covers
+// values 8l..8l+7 of each 256-value super-block, sum = fmaf(db, dot8, sum) in block
+// order, same shuffle tree), so outputs are bit-identical. The reference is bound by
+// converting every grid byte from a 64-bit integer (I2F.U64); here each byte converts
+// exactly through 32 bits, the grid and sign tables live in shared memory, R rows
+// advance together per super-block and the grid is about 6 blocks per SM.
+// FAK_INKLING2_IQ_GEMV=0 keeps the reference kernel.
+#ifndef INK2_IQ3_ROWS
+#define INK2_IQ3_ROWS 2
+#endif
+#ifndef INK2_IQ3_BLOCKS_PER_SM
+#define INK2_IQ3_BLOCKS_PER_SM 6
+#endif
+
+template <int FMT> struct Ink2IQShape {
+  static constexpr int SB = FMT == INK2_IQ2XS ? 74 : FMT == INK2_IQ2S ? 82 : FMT == INK2_IQ3XXS ? 98 : 110;
+  static constexpr int GRID_BYTES = FMT == INK2_IQ2XS ? 512 * 8 : FMT == INK2_IQ2S ? 1024 * 8 : FMT == INK2_IQ3XXS ? 256 * 4 : 512 * 4;
+};
+
+template <int FMT>
+static __device__ __forceinline__ const void *ink2_iq_grid_src(void) {
+  if (FMT == INK2_IQ2XS) return fcuda_iq2xs_grid;
+  if (FMT == INK2_IQ2S) return fcuda_iq2s_grid;
+  if (FMT == INK2_IQ3XXS) return fcuda_iq3xxs_grid;
+  return fcuda_iq3s_grid;
+}
+
+// fcuda_iq_dot8 with the grid byte converted through 32 bits: (float) of a 64-bit
+// integer compiles to I2F.U64, the binding cost of the reference IQ kernels. Each
+// byte is 0..255, so the magic-number conversion is exact and every fmaf operand,
+// hence the result, is unchanged.
+static __device__ __forceinline__ float ink2_iq_dot8(unsigned int lo, unsigned int hi, unsigned char signs,
+                                                     const float *xs) {
+  const float4 a = *(const float4 *)xs;
+  const float4 b = *(const float4 *)(xs + 4);
+  const float xv[8] = {a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w};
+  float part = 0.f;
+#pragma unroll
+  for (int j = 0; j < 8; ++j) {
+    const unsigned int byte = ((j < 4 ? lo : hi) >> (8 * (j & 3))) & 0xffu;
+    float v = __uint_as_float(0x4b000000u | byte) - 8388608.0f;
+    v = (signs & (1u << j)) ? -v : v;
+    part = fmaf(v, xv[j], part);
+  }
+  return part;
+}
+
+template <int FMT>
+static __device__ __forceinline__ void ink2_iq_term_tab(const unsigned char *blk, int lane, const float *xs,
+                                                        const void *gridTab, const unsigned char *ksigns, float &db,
+                                                        float &dot) {
+  const int ib32 = lane >> 2, l = lane & 3;
+  const float d = __half2float(*(const __half *)blk);
+  if (FMT == INK2_IQ2XS) {
+    const unsigned short qv = ((const unsigned short *)(blk + 2))[4 * ib32 + l];
+    const unsigned char sc = blk[66 + ib32];
+    db = d * (0.5f + (float)(l < 2 ? (sc & 0x0f) : (sc >> 4))) * 0.25f;
+    const uint2 g = ((const uint2 *)gridTab)[qv & 511];
+    dot = ink2_iq_dot8(g.x, g.y, ksigns[qv >> 9], xs);
+  } else if (FMT == INK2_IQ2S) {
+    const unsigned int idx = blk[2 + 4 * ib32 + l] | (((unsigned int)blk[66 + ib32] << (8 - 2 * l)) & 0x300);
+    const unsigned char sign = blk[34 + 4 * ib32 + l];
+    const unsigned char sc = blk[74 + ib32];
+    db = d * (0.5f + (float)(l < 2 ? (sc & 0x0f) : (sc >> 4))) * 0.25f;
+    const uint2 g = ((const uint2 *)gridTab)[idx];
+    dot = ink2_iq_dot8(g.x, g.y, sign, xs);
+  } else if (FMT == INK2_IQ3XXS) {
+    const unsigned int aux32 = fcuda_iq_u32_at(blk + 66 + 4 * ib32);
+    db = d * (0.5f + (float)(aux32 >> 28)) * 0.5f;
+    const unsigned char signs = ksigns[(aux32 >> (7 * l)) & 127];
+    const unsigned int *g = (const unsigned int *)gridTab;
+    dot = ink2_iq_dot8(g[blk[2 + 8 * ib32 + 2 * l]], g[blk[2 + 8 * ib32 + 2 * l + 1]], signs, xs);
+  } else {
+    const unsigned int high = blk[66 + ib32];
+    const unsigned int idx1 = blk[2 + 8 * ib32 + 2 * l] | ((high << (8 - 2 * l)) & 0x100);
+    const unsigned int idx2 = blk[2 + 8 * ib32 + 2 * l + 1] | ((high << (7 - 2 * l)) & 0x100);
+    const unsigned char sign = blk[74 + 4 * ib32 + l];
+    const unsigned int nibble = (blk[106 + ib32 / 2] >> (4 * (ib32 & 1))) & 0x0f;
+    db = d * (float)(1 + 2 * (int)nibble);
+    const unsigned int *g = (const unsigned int *)gridTab;
+    dot = ink2_iq_dot8(g[idx1], g[idx2], sign, xs);
+  }
+}
+
+template <int FMT, int R>
+__global__ void __launch_bounds__(256)
+    k_ink2_expert_iq_v3(const unsigned char *__restrict__ W, const int *ids, const float *X, int xStride, float *Y,
+                        int rows, int in, const float *escale, int situW, double beta, double lb) {
+  extern __shared__ __align__(16) unsigned char ink2_iq3_sm[];
+  constexpr int SB = Ink2IQShape<FMT>::SB, GBYTES = Ink2IQShape<FMT>::GRID_BYTES;
+  float *xsh = (float *)ink2_iq3_sm;
+  unsigned int *gsh = (unsigned int *)(ink2_iq3_sm + (size_t)in * 4);
+  unsigned char *ssh = (unsigned char *)gsh + GBYTES;
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+  const int slot = blockIdx.y;
+  const float *xg = X + (size_t)slot * xStride;
+  for (int i = threadIdx.x; i < in; i += blockDim.x) xsh[i] = ink2_stage(xg, i, situW, beta, lb);
+  const unsigned int *gsrc = (const unsigned int *)ink2_iq_grid_src<FMT>();
+  for (int i = threadIdx.x; i < GBYTES / 4; i += blockDim.x) gsh[i] = gsrc[i];
+  if (threadIdx.x < 128) ssh[threadIdx.x] = fcuda_ksigns_iq2xs[threadIdx.x];
+  __syncthreads();
+  const int nsb = in / 256;
+  const size_t rowBytes = (size_t)nsb * SB;
+  const size_t ebase = (size_t)ids[slot] * rows;
+  const float es = escale ? escale[ids[slot]] : 0.f;
+  const float *xl = xsh + lane * 8;
+  for (int o0 = (blockIdx.x * (blockDim.x >> 5) + warp) * R; o0 < rows; o0 += gridDim.x * (blockDim.x >> 5) * R) {
+    const unsigned char *wrow[R];
+#pragma unroll
+    for (int r = 0; r < R; ++r) wrow[r] = W + (ebase + (size_t)min(o0 + r, rows - 1)) * rowBytes;
+    float sum[R];
+#pragma unroll
+    for (int r = 0; r < R; ++r) sum[r] = 0.f;
+    for (int sb = 0; sb < nsb; ++sb) {
+      float db[R], dot[R];
+#pragma unroll
+      for (int r = 0; r < R; ++r) {
+        ink2_iq_term_tab<FMT>(wrow[r] + (size_t)sb * SB, lane, xl + (size_t)sb * 256, gsh, ssh, db[r], dot[r]);
+      }
+#pragma unroll
+      for (int r = 0; r < R; ++r) sum[r] = fmaf(db[r], dot[r], sum[r]);
+    }
+#pragma unroll
+    for (int r = 0; r < R; ++r) {
+      float v = sum[r];
+#pragma unroll
+      for (int delta = 16; delta > 0; delta >>= 1) v += __shfl_down_sync(0xffffffff, v, delta);
+      const int o = o0 + r;
+      if (lane == 0 && o < rows) Y[(size_t)slot * rows + o] = escale ? __fmul_rn(v, es) : v;
+    }
+  }
+}
+
+static int g_ink2_iq3_mode = -1;
+
+static bool ink2_iq3_enabled(void) {
+  if (g_ink2_iq3_mode < 0) {
+    const char *v = getenv("FAK_INKLING2_IQ_GEMV");
+    g_ink2_iq3_mode = (v && v[0] == '0' && v[1] == 0) ? 0 : 1;
+  }
+  return g_ink2_iq3_mode == 1;
+}
+
+// Test hook: 1 selects the v3 IQ kernels, 0 the reference; returns the previous mode.
+extern "C" int fcuda_ink2_iq_gemv_select(int mode) {
+  const int prev = ink2_iq3_enabled() ? 1 : 0;
+  g_ink2_iq3_mode = mode ? 1 : 0;
+  return prev;
+}
+
+// Launches the v3 IQ kernel for fmt; returns false (nothing launched) for a format,
+// shape or mode that keeps the reference kernel.
+static bool ink2_expert_iq_v3(int fmt, const uint8_t *W, const int *ids, const float *X, int xStride, float *Y, int k,
+                              int rows, int in, const float *escale, int situW, double beta, double lb) {
+  if (!ink2_iq3_enabled() || (in & 255) != 0 || in <= 0) return false;
+  static int sms = 0;
+  if (sms == 0) {
+    int dev = 0;
+    if (cudaGetDevice(&dev) != cudaSuccess || cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev) != cudaSuccess || sms <= 0) sms = 84;
+  }
+  const int needed = ((rows + INK2_IQ3_ROWS - 1) / INK2_IQ3_ROWS + 7) / 8;
+  int g = (sms * INK2_IQ3_BLOCKS_PER_SM + k - 1) / k;
+  if (g > needed) g = needed;
+  const dim3 grid(g < 1 ? 1 : g, k);
+#define INK2_IQ3_CASE(F)                                                                                          \
+  case F: {                                                                                                       \
+    const size_t smem = (size_t)in * 4 + Ink2IQShape<F>::GRID_BYTES + 128;                                        \
+    if (smem > 48 * 1024) return false;                                                                           \
+    FCUDA_TS("k_ink2_expert_iq_v3", grid,                                                                         \
+             k_ink2_expert_iq_v3<F, INK2_IQ3_ROWS><<<grid, 256, smem, g_stream>>>(                                \
+                 W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));                                      \
+    return true;                                                                                                  \
+  }
+  switch (fmt) {
+    INK2_IQ3_CASE(INK2_IQ2XS)
+    INK2_IQ3_CASE(INK2_IQ2S)
+    INK2_IQ3_CASE(INK2_IQ3XXS)
+    INK2_IQ3_CASE(INK2_IQ3S)
+  }
+#undef INK2_IQ3_CASE
+  return false;
+}
+

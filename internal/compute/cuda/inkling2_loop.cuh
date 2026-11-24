@@ -1238,15 +1238,19 @@ extern "C" int fcuda_ink2_expert_gemv(int fmt, const uint8_t *W, const uint8_t *
     }
     break;
   case INK2_IQ2XS:
+    if (ink2_expert_iq_v3(fmt, W, ids, X, xStride, Y, k, rows, in, escale, situW, beta, lb)) break;
     FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ2XS><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_IQ2S:
+    if (ink2_expert_iq_v3(fmt, W, ids, X, xStride, Y, k, rows, in, escale, situW, beta, lb)) break;
     FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ2S><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_IQ3XXS:
+    if (ink2_expert_iq_v3(fmt, W, ids, X, xStride, Y, k, rows, in, escale, situW, beta, lb)) break;
     FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ3XXS><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_IQ3S:
+    if (ink2_expert_iq_v3(fmt, W, ids, X, xStride, Y, k, rows, in, escale, situW, beta, lb)) break;
     FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ3S><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_Q3K:

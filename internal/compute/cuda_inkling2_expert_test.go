@@ -129,3 +129,92 @@ func TestCUDAInk2ExpertNVFP4FastMatchesReference(t *testing.T) {
 		}
 	}
 }
+
+// The IQ expert kernels keep k_ink2_expert_iq's per-lane term and block order, so the
+// two must agree bit for bit; both are also checked against a float64 host dot over
+// DequantRawIQ of the same super-blocks.
+// fak-test:runtime integration est=3s lane=optin
+func TestCUDAInk2ExpertIQFastMatchesReference(t *testing.T) {
+	cb := cudaNVFP4OrSkip(t)
+	defer ink2SelectIQGEMV(ink2SelectIQGEMV(true))
+	r := rand.New(rand.NewSource(31))
+	const experts = 10
+	for _, dt := range []Dtype{IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S} {
+		bb, ok := RawIQBlockBytes(dt)
+		if !ok {
+			t.Fatalf("%s is not a raw i-quant", dt)
+		}
+		for _, c := range []struct{ rows, in, k, xs int }{{2304, 2304, 8, 0}, {2304, 1280, 8, 1280}, {37, 512, 3, 512}} {
+			raw := iqGEMVTestRaw(experts*c.rows, c.in, bb, uint64(c.rows*131+c.in)^uint64(dt))
+			stack := cb.Upload(NewRawIQ(cb, dt, []int{experts * c.rows, c.in}, raw), dt)
+			xn := c.in
+			if c.xs > 0 {
+				xn = c.k * c.xs
+			}
+			x := make([]float32, xn)
+			for i := range x {
+				x[i] = float32(r.NormFloat64())
+			}
+			idv := r.Perm(experts)[:c.k]
+			ids := make([]float32, c.k)
+			for i, id := range idv {
+				ids[i] = math.Float32frombits(uint32(id))
+			}
+			esc := make([]float32, experts)
+			for i := range esc {
+				esc[i] = 0.5 + r.Float32()
+			}
+			alloc := func(n int) Tensor {
+				tt, err := cb.Ink2Alloc(n)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return tt
+			}
+			dx, dids, des := alloc(xn), alloc(c.k), alloc(experts)
+			for _, w := range []struct {
+				dst Tensor
+				src []float32
+			}{{dx, x}, {dids, ids}, {des, esc}} {
+				if err := cb.Ink2Write(Ink2At(w.dst, 0), w.src); err != nil {
+					t.Fatal(err)
+				}
+			}
+			run := func(fast bool) []float32 {
+				ink2SelectIQGEMV(fast)
+				y := alloc(c.k * c.rows)
+				ok, err := cb.Ink2ExpertMatVec(stack, c.rows, Ink2At(dids, 0), Ink2At(dx, 0), c.xs, Ink2At(y, 0), c.k, Ink2At(des, 0), nil)
+				if err != nil || !ok {
+					t.Fatalf("%s: ok=%v err=%v", dt, ok, err)
+				}
+				out, err := cb.Ink2Read(Ink2At(y, 0), c.k*c.rows)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			}
+			want, got := run(false), run(true)
+			for i := range want {
+				if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+					t.Fatalf("%s %dx%d: y[%d] fast %v, reference %v", dt, c.rows, c.in, i, got[i], want[i])
+				}
+			}
+			w := DequantRawIQ(dt, experts*c.rows, c.in, raw)
+			for s, id := range idv {
+				for o := 0; o < c.rows; o++ {
+					var dot, mag float64
+					for i, wv := range w[(id*c.rows+o)*c.in : (id*c.rows+o+1)*c.in] {
+						p := float64(wv) * float64(x[s*c.xs+i])
+						dot += p
+						mag += math.Abs(p)
+					}
+					dot *= float64(esc[id])
+					mag *= float64(esc[id])
+					if g := float64(got[s*c.rows+o]); math.Abs(g-dot) > 1e-5*mag+1e-6 {
+						t.Fatalf("%s %dx%d slot %d row %d: device %v, host %v (|w||x| %v)", dt, c.rows, c.in, s, o, g, dot, mag)
+					}
+				}
+			}
+		}
+	}
+}

@@ -155,6 +155,17 @@ func ink2SelectNVFP4GEMV(fast bool) bool {
 	return C.fcuda_ink2_nvfp4_gemv_select(mode) != 0
 }
 
+// ink2SelectIQGEMV is ink2SelectNVFP4GEMV for the IQ2_XS/IQ2_S/IQ3_XXS/IQ3_S kernels.
+func ink2SelectIQGEMV(fast bool) bool {
+	mode := C.int(0)
+	if fast {
+		mode = 1
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return C.fcuda_ink2_iq_gemv_select(mode) != 0
+}
+
 func (c *cudaBackend) Ink2RMS(x, w, y Ink2Ref, rows, n int, eps float32) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
