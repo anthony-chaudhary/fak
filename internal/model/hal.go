@@ -1469,7 +1469,11 @@ func (s *Session) prefillHALContext(ctx context.Context, ids []int, wantLogits b
 		s.retireRequestResources()
 		return logits
 	}
-	if panel, ok := s.promptPanelFor(ids); ok {
+	panel, reason := s.promptPanelSelect(ids)
+	if len(ids) > 1 {
+		s.observeQ4KPrefillGEMM(promptPanelRouteLabel(reason))
+	}
+	if reason == promptPanelSelected {
 		return s.prefillHALPanel(panel, ids, wantLogits)
 	}
 	// Sequence/panel operations above keep their own atomic boundary. An EP

@@ -94,6 +94,25 @@ const (
 	promptPanelWitnessReasons
 )
 
+// promptPanelReasonNames labels each outcome on the per-request prefill route observation.
+var promptPanelReasonNames = [promptPanelWitnessReasons]string{
+	promptPanelSelected:                      "selected",
+	promptPanelRefusalShortPrompt:            "short_prompt",
+	promptPanelRefusalNoBackend:              "no_backend",
+	promptPanelRefusalNoHALKV:                "no_hal_kv",
+	promptPanelRefusalBackendLacksSeam:       "backend_lacks_seam",
+	promptPanelRefusalArchQ8TokenLoop:        "arch_q8_sequential",
+	promptPanelRefusalArchDeepSeekV4NonPanel: "arch_deepseek_v4_non_panel",
+	promptPanelRefusalArchQKNorm:             "arch_qk_norm",
+	promptPanelRefusalArchMLAMoELayout:       "arch_mla_moe",
+	promptPanelRefusalArchMiniMaxSparseAttn:  "arch_minimax_sparse",
+	promptPanelRefusalArchGemma4:             "arch_gemma4",
+	promptPanelRefusalCaptureTarget:          "capture_target",
+	promptPanelRefusalQ2KEmbedding:           "q2k_embedding",
+	promptPanelRefusalSplitGPULayers:         "split_gpu_layers",
+	promptPanelRefusalDtypeNotRowExact:       "dtype_not_row_exact",
+}
+
 // promptPanelWitness counts every promptPanelFor outcome at the selection seam. Downstream
 // fallback counters count declines-after-selection only, so they are structurally blind to
 // exclusions-at-selection: without this witness a landed fast path can go uninvoked on the
@@ -106,8 +125,9 @@ var promptPanelWitness [promptPanelWitnessReasons]atomic.Int64
 // outside Total.
 var promptPanelSelectedBatched atomic.Int64
 
-func notePromptPanelSelection(r promptPanelWitnessReason) {
+func notePromptPanelSelection(r promptPanelWitnessReason) promptPanelWitnessReason {
 	promptPanelWitness[r].Add(1)
+	return r
 }
 
 // PromptPanelSelectionCounts is a point-in-time copy of the prompt-panel selection witness:
@@ -173,21 +193,24 @@ func PromptPanelSelectionWitness() PromptPanelSelectionCounts {
 // selection witness (notePromptPanelSelection): a refusal is attributed to the first matching
 // axis in the order below, mirroring the original left-to-right OR.
 func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
+	panel, reason := s.promptPanelSelect(ids)
+	return panel, reason == promptPanelSelected
+}
+
+// promptPanelSelect is promptPanelFor with the typed outcome, so the prefill caller can
+// name the refusal on the per-request route observation instead of only in the counters.
+func (s *Session) promptPanelSelect(ids []int) (promptPanelBackend, promptPanelWitnessReason) {
 	switch {
 	case len(ids) < 2:
-		notePromptPanelSelection(promptPanelRefusalShortPrompt)
-		return nil, false
+		return nil, notePromptPanelSelection(promptPanelRefusalShortPrompt)
 	case s.Backend == nil:
-		notePromptPanelSelection(promptPanelRefusalNoBackend)
-		return nil, false
+		return nil, notePromptPanelSelection(promptPanelRefusalNoBackend)
 	case s.halKV == nil:
-		notePromptPanelSelection(promptPanelRefusalNoHALKV)
-		return nil, false
+		return nil, notePromptPanelSelection(promptPanelRefusalNoHALKV)
 	}
 	panel, ok := s.Backend.(promptPanelBackend)
 	if !ok {
-		notePromptPanelSelection(promptPanelRefusalBackendLacksSeam)
-		return nil, false
+		return nil, notePromptPanelSelection(promptPanelRefusalBackendLacksSeam)
 	}
 	cfg := s.M.Cfg
 	// MoE prefill takes the panel for exactly the arch whose routed FFN is a per-row
@@ -199,36 +222,27 @@ func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
 	if !panelMoE {
 		switch {
 		case q8PrefillNeedsTokenLoop(cfg):
-			notePromptPanelSelection(promptPanelRefusalArchQ8TokenLoop)
-			return nil, false
+			return nil, notePromptPanelSelection(promptPanelRefusalArchQ8TokenLoop)
 		case cfg.IsDeepSeekV4():
-			notePromptPanelSelection(promptPanelRefusalArchDeepSeekV4NonPanel)
-			return nil, false
+			return nil, notePromptPanelSelection(promptPanelRefusalArchDeepSeekV4NonPanel)
 		case cfg.QKNorm:
-			notePromptPanelSelection(promptPanelRefusalArchQKNorm)
-			return nil, false
+			return nil, notePromptPanelSelection(promptPanelRefusalArchQKNorm)
 		case cfg.usesMLAMoELayout():
-			notePromptPanelSelection(promptPanelRefusalArchMLAMoELayout)
-			return nil, false
+			return nil, notePromptPanelSelection(promptPanelRefusalArchMLAMoELayout)
 		case cfg.isMiniMaxSparseAttn():
-			notePromptPanelSelection(promptPanelRefusalArchMiniMaxSparseAttn)
-			return nil, false
+			return nil, notePromptPanelSelection(promptPanelRefusalArchMiniMaxSparseAttn)
 		case cfg.isGemma4():
-			notePromptPanelSelection(promptPanelRefusalArchGemma4)
-			return nil, false
+			return nil, notePromptPanelSelection(promptPanelRefusalArchGemma4)
 		}
 	}
 	if s.captureTargetHidden || s.qwen35TargetFeatureTxn != nil || s.qwen35TargetLayerCapture != nil {
-		notePromptPanelSelection(promptPanelRefusalCaptureTarget)
-		return nil, false
+		return nil, notePromptPanelSelection(promptPanelRefusalCaptureTarget)
 	}
 	if s.M.Q2KEmbedding != nil {
-		notePromptPanelSelection(promptPanelRefusalQ2KEmbedding)
-		return nil, false
+		return nil, notePromptPanelSelection(promptPanelRefusalQ2KEmbedding)
 	}
 	if _, split := s.validateDenseGPULayers(); split {
-		notePromptPanelSelection(promptPanelRefusalSplitGPULayers)
-		return nil, false
+		return nil, notePromptPanelSelection(promptPanelRefusalSplitGPULayers)
 	}
 	// The panel GEMMs are the attention projections; a dense layer adds the MLP triple.
 	// deepseek_v4's router and expert weights run per row through the token loop's own
@@ -246,16 +260,14 @@ func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
 			case batchedBE != nil && batchedBE.PromptPanelBatched(dt):
 				batched = true
 			default:
-				notePromptPanelSelection(promptPanelRefusalDtypeNotRowExact)
-				return nil, false
+				return nil, notePromptPanelSelection(promptPanelRefusalDtypeNotRowExact)
 			}
 		}
 	}
-	notePromptPanelSelection(promptPanelSelected)
 	if batched {
 		promptPanelSelectedBatched.Add(1)
 	}
-	return panel, true
+	return panel, notePromptPanelSelection(promptPanelSelected)
 }
 
 // promptPanelChunkTokens sizes a chunk so its peak scratch fits the per-token transient demand

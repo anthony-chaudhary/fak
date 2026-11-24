@@ -81,3 +81,16 @@ func (s *Session) Q4KPrefillGEMMObservation() string {
 	}
 	return strings.Join(s.q4kPrefillGEMMLabels, "+")
 }
+
+// Q4KPrefillGEMMHALPanel labels a HAL prefill that took the prompt panel.
+const Q4KPrefillGEMMHALPanel = "hal_panel"
+
+// promptPanelRouteLabel is the gemm= route label for one HAL prefill outcome. A refused
+// multi-token prompt runs one full forward per token, so the label carries the refusal axis:
+// a long prompt reading token_loop(<axis>) is the per-request sign of a dormant panel.
+func promptPanelRouteLabel(r promptPanelWitnessReason) string {
+	if r == promptPanelSelected {
+		return Q4KPrefillGEMMHALPanel
+	}
+	return Q4KPrefillGEMMTokenLoop + "(" + promptPanelReasonNames[r] + ")"
+}

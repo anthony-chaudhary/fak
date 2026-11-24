@@ -848,3 +848,39 @@ func TestPromptPanelBatchedAdmission(t *testing.T) {
 		})
 	}
 }
+
+// fak-test:runtime fast est=20ms lane=default
+// TestPrefillHALObservesPanelRoute pins the per-request half of the selection witness: a
+// multi-token HAL prefill names its route on the gemm= observation, and a refused prompt
+// names the refusal axis, so a long prompt served one token at a time is visible on the
+// default inkernel_chat line instead of reading gemm=none. [SW-VERIFIED]
+func TestPrefillHALObservesPanelRoute(t *testing.T) {
+	cases := []struct {
+		name     string
+		rowExact bool
+		ids      []int
+		want     string
+	}{
+		{"panel", true, []int{3, 7}, Q4KPrefillGEMMHALPanel},
+		{"dtype-refused", false, []int{3, 7}, Q4KPrefillGEMMTokenLoop + "(dtype_not_row_exact)"},
+		{"single-token", true, []int{3}, Q4KPrefillGEMMNone},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			be := newPromptPanelRecordingBackend()
+			be.rowExact = tc.rowExact
+			s := promptPanelBiasModel().NewBackendSession(be)
+			defer s.Close()
+			s.ResetQ4KPrefillGEMMObservation()
+			s.prefillHAL(tc.ids, true)
+			if got := s.Q4KPrefillGEMMObservation(); got != tc.want {
+				t.Fatalf("observation = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	for r := promptPanelWitnessReason(0); r < promptPanelWitnessReasons; r++ {
+		if promptPanelReasonNames[r] == "" {
+			t.Fatalf("witness reason %d has no route label name", r)
+		}
+	}
+}
