@@ -32,6 +32,17 @@ func installSessionRecoverIdentityFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("FLEET_REG_DIR", regDir)
+	isolateSessionRecoverEndpoint(t)
+}
+
+// isolateSessionRecoverEndpoint clears the ambient upstream endpoint: recover
+// probes OPENAI_BASE_URL / FAK_CODEX_BASE_URL when --endpoint is unset, so a
+// shell that exports a dead local port refuses every launch as
+// endpoint_unavailable.
+func isolateSessionRecoverEndpoint(t *testing.T) {
+	t.Helper()
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("FAK_CODEX_BASE_URL", "")
 }
 
 type captureLaunchHandle struct {
@@ -1095,6 +1106,7 @@ func TestSessionRecoverDefaultFullSafeCohortAndBoundedLimit(t *testing.T) {
 	// file's tests alone refused with "identity authority unreadable". Own a valid, empty one.
 	regDir := t.TempDir()
 	t.Setenv("FLEET_REG_DIR", regDir)
+	isolateSessionRecoverEndpoint(t)
 	if err := os.WriteFile(resume.IdentityLedgerPath(regDir), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}

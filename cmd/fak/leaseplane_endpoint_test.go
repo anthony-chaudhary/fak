@@ -37,7 +37,9 @@ func TestFakAdjudicateUsesRealDOSWorkspaceLease(t *testing.T) {
 	}
 	t.Setenv("FAK_LEASEPLANE_DIR", root)
 	t.Setenv("FAK_SESSION_ID", "spoofed-process-session")
-	gw, err := gateway.New(gateway.Config{})
+	// The shipped default admission is open (admit-and-log); strict is the mode
+	// in which the real lease must refuse the write.
+	gw, err := gateway.New(gateway.Config{WorkspaceAdmission: string(gateway.WorkspaceAdmissionStrict)})
 	if err != nil {
 		t.Fatal(err)
 	}
