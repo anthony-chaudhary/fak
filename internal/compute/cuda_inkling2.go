@@ -155,6 +155,18 @@ func ink2SelectNVFP4GEMV(fast bool) bool {
 	return C.fcuda_ink2_nvfp4_gemv_select(mode) != 0
 }
 
+// ink2SelectQ8GEMV picks the dense Q8_0 GEMV of Ink2MatVecQ8 (true: the
+// bandwidth-shaped one, false: k_q8_gemm) and returns the previous choice.
+func ink2SelectQ8GEMV(fast bool) bool {
+	mode := C.int(0)
+	if fast {
+		mode = 1
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return C.fcuda_ink2_q8_gemv_select(mode) != 0
+}
+
 // ink2SelectIQGEMV is ink2SelectNVFP4GEMV for the IQ2_XS/IQ2_S/IQ3_XXS/IQ3_S kernels.
 func ink2SelectIQGEMV(fast bool) bool {
 	mode := C.int(0)

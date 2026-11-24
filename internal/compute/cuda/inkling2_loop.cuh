@@ -1066,6 +1066,67 @@ __global__ void k_ink2_q8_quant_gated(const float *x, const float *gate, signed 
   qX[i] = d > 0.f ? q8round_dev(v * inv) : (signed char)0;
 }
 
+// Bandwidth-shaped k_q8_gemm for one activation row: a warp per output row, lane L
+// takes blocks L, L+32, ... exactly as k_q8_gemm does, but issues every weight and
+// activation load of its (at most MAXB) blocks as 16-byte loads before the first
+// DP4A, and streams the weight past L1. The per-block term, its accumulation order
+// and the shuffle tree are k_q8_gemm's, so y is bitwise the same.
+#define INK2_Q8_WARPS 8
+template <int MAXB>
+__global__ void __launch_bounds__(INK2_Q8_WARPS * 32)
+    k_ink2_q8_gemv(const signed char *__restrict__ W, const float *__restrict__ Wscale,
+                   const signed char *__restrict__ qX, const float *__restrict__ xScale, float *__restrict__ Y, int out,
+                   int in) {
+  const int lane = threadIdx.x & 31;
+  const int o = blockIdx.x * INK2_Q8_WARPS + (threadIdx.x >> 5);
+  if (o >= out) return;
+  const int nblk = in >> 5;
+  const int4 *wrow = (const int4 *)(W + (size_t)o * in);
+  const int4 *xrow = (const int4 *)qX;
+  const float *wsc = Wscale + (size_t)o * nblk;
+  int4 w0[MAXB], w1[MAXB], x0[MAXB], x1[MAXB];
+  float ws[MAXB], xs[MAXB];
+#pragma unroll
+  for (int j = 0; j < MAXB; ++j) {
+    const int b = lane + 32 * j;
+    if (b < nblk) {
+      w0[j] = __ldcs(wrow + 2 * b);
+      w1[j] = __ldcs(wrow + 2 * b + 1);
+      x0[j] = __ldg(xrow + 2 * b);
+      x1[j] = __ldg(xrow + 2 * b + 1);
+      ws[j] = __ldcs(wsc + b);
+      xs[j] = __ldg(xScale + b);
+    }
+  }
+  float sum = 0.f;
+#pragma unroll
+  for (int j = 0; j < MAXB; ++j) {
+    if (lane + 32 * j < nblk) {
+      int acc = __dp4a(w0[j].x, x0[j].x, 0);
+      acc = __dp4a(w0[j].y, x0[j].y, acc);
+      acc = __dp4a(w0[j].z, x0[j].z, acc);
+      acc = __dp4a(w0[j].w, x0[j].w, acc);
+      acc = __dp4a(w1[j].x, x1[j].x, acc);
+      acc = __dp4a(w1[j].y, x1[j].y, acc);
+      acc = __dp4a(w1[j].z, x1[j].z, acc);
+      acc = __dp4a(w1[j].w, x1[j].w, acc);
+      sum += (float)acc * ws[j] * xs[j];
+    }
+  }
+#pragma unroll
+  for (int delta = 16; delta > 0; delta >>= 1) sum += __shfl_down_sync(0xffffffff, sum, delta);
+  if (lane == 0) Y[o] = sum;
+}
+
+// 1 runs k_ink2_q8_gemv where its contract holds, 0 always k_q8_gemm.
+static int g_ink2_q8_fast = 1;
+
+extern "C" int fcuda_ink2_q8_gemv_select(int mode) {
+  const int prev = g_ink2_q8_fast;
+  g_ink2_q8_fast = mode;
+  return prev;
+}
+
 // fcuda_ink2_q8_matvec is y = W.x for a resident Q8_0 weight, the per-row k_q8_gemm of
 // fcuda_q8_matmul_f32 at P = 1. q holds x's Q8_0 codes (in bytes) then its block scales;
 // quantize = 0 reuses the codes an earlier call on the same x wrote, so several weights
@@ -1083,6 +1144,17 @@ extern "C" int fcuda_ink2_q8_matvec(const int8_t *W, const float *Wscale, const 
   } else if (quantize) {
     const int qt = block == 32 ? 32 : 64;
     FCUDA_TS("k_q8_quant_act", dim3(nblk, 1), k_q8_quant_act<<<dim3(nblk, 1), qt, 0, g_stream>>>(x, codes, scales, 1, in, block));
+  }
+  const bool aligned = (((uintptr_t)W | (uintptr_t)codes) & 15) == 0 && (in & 15) == 0;
+  if (g_ink2_q8_fast && block == 32 && aligned && nblk <= 128) {
+    const int grid = (out + INK2_Q8_WARPS - 1) / INK2_Q8_WARPS;
+    const signed char *w8 = (const signed char *)W;
+    if (nblk <= 96) {
+      FCUDA_TS("k_ink2_q8_gemv", grid, k_ink2_q8_gemv<3><<<grid, INK2_Q8_WARPS * 32, 0, g_stream>>>(w8, Wscale, codes, scales, y, out, in));
+    } else {
+      FCUDA_TS("k_ink2_q8_gemv", grid, k_ink2_q8_gemv<4><<<grid, INK2_Q8_WARPS * 32, 0, g_stream>>>(w8, Wscale, codes, scales, y, out, in));
+    }
+    return ink2_last_error();
   }
   FCUDA_TS("k_q8_gemm", dim3((out + 7) / 8, 1), k_q8_gemm<<<dim3((out + 7) / 8, 1), 256, 0, g_stream>>>(
       (const signed char *)W, Wscale, codes, scales, y, out, in, 1, block));

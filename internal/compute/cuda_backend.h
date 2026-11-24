@@ -967,6 +967,8 @@ int fcuda_ink2_mix(const float *const *states, int ns, const float *queries, int
     const float *const *norms, float eps, float *out, int n);
 int fcuda_ink2_q8_matvec(const int8_t *W, const float *Wscale, const float *x, const float *gate, void *q,
     int quantize, float *y, int out, int in, int block);
+/* 1: bandwidth-shaped Q8_0 GEMV where it applies, 0: k_q8_gemm; returns the previous mode. */
+int fcuda_ink2_q8_gemv_select(int mode);
 int fcuda_ink2_gemv_f32(const float *W, const float *x, float *y, int rows, int cols);
 /* ptrs: cur[4], msg[4], down[4], gain[4], forget[4] (first nj of each used). */
 int fcuda_ink2_control(const float *const *ptrs, int nj, float *g, float *out, int n, int rank,
