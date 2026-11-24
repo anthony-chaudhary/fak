@@ -450,6 +450,8 @@ func OpenInkling2LoopDevice(path string, be compute.Backend) (*Inkling2LoopModel
 type Inkling2LoopGreedyStats struct {
 	Prefill, Decode time.Duration
 	DecodeSteps     int
+	// Passes is the loop depth the run executed; set by Inkling2LoopGenerate.
+	Passes int
 }
 
 func (s Inkling2LoopGreedyStats) DecodeTokensPerSecond() float64 {
@@ -504,6 +506,28 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 	}
 	st.Decode = time.Since(start)
 	return out, st, nil
+}
+
+// Inkling2LoopRequest is one native inkling2_loop generation. Loops selects the
+// core pass count for this request only; 0 runs the checkpoint's loop.count.
+type Inkling2LoopRequest struct {
+	Prompt    []int
+	MaxTokens int
+	Loops     int
+}
+
+// Inkling2LoopGenerate greedily decodes one request at its own loop depth. The
+// loaded weights are shared; only the per-request cache is sized for the
+// selected pass count, so a shallower request also holds fewer KV slots.
+func Inkling2LoopGenerate(m *Inkling2LoopModel, be compute.Backend, req Inkling2LoopRequest) ([]int, Inkling2LoopGreedyStats, error) {
+	hp, err := m.HP.WithPasses(req.Loops)
+	if err != nil {
+		return nil, Inkling2LoopGreedyStats{}, err
+	}
+	run := &Inkling2LoopModel{HP: hp, Weights: m.Weights}
+	out, st, err := Inkling2LoopGreedyTimed(run, be, req.Prompt, req.MaxTokens)
+	st.Passes = hp.Passes
+	return out, st, err
 }
 
 // inkling2BackendSM is the compute capability of a CUDA backend from its
