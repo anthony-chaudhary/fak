@@ -76,6 +76,8 @@ type inkling2Resident struct {
 	pos               int
 	err               error
 
+	q8 map[int]ink2Ref // arena offset of an activation -> its Q8_0 codes this token
+
 	graph       bool
 	graphReady  bool
 	hostRouting bool // an expert dtype has no indexed kernel: ids are read back per layer
@@ -168,7 +170,7 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 		return nil, fmt.Errorf("inkling2 resident: backend %s has no inkling2 device ops", be.Name())
 	}
 	hp, w := m.HP, m.Weights
-	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev}
+	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}}
 	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
 	s.output = s.mat(w.Output)
 	s.layers = make([]ink2Layer, hp.Layers)
@@ -290,10 +292,41 @@ func at(r ink2Ref, off int) ink2Ref { return compute.Ink2At(r.T, r.Off+off) }
 
 func (s *inkling2Resident) mv(m ink2Mat, x ink2Ref) ink2Ref {
 	y := s.tmp(m.rows)
-	if s.err == nil {
-		s.fail(s.dev.Ink2MatVec(m.t, x, y))
+	if s.err != nil {
+		return y
 	}
+	if m.t.Dtype == compute.Q8_0 && x.T.Buf() == s.arena.T.Buf() {
+		// arena slots are never reused within a token, so the offset names the value
+		q, seen := s.q8[x.Off]
+		if !seen {
+			q = s.tmp(m.cols/4 + m.cols/32)
+			s.q8[x.Off] = q
+		}
+		ok, err := s.dev.Ink2MatVecQ8(m.t, x, ink2Ref{}, q, !seen, y)
+		if err != nil || ok {
+			s.fail(err)
+			return y
+		}
+	}
+	s.fail(s.dev.Ink2MatVec(m.t, x, y))
 	return y
+}
+
+// mvGated is mv(m, x * sigmoid(gate)); on a Q8_0 weight the gate is applied while x
+// is quantized, so x itself is left unscaled.
+func (s *inkling2Resident) mvGated(m ink2Mat, x, gate ink2Ref, n int) ink2Ref {
+	if s.err == nil && m.t.Dtype == compute.Q8_0 {
+		y := s.tmp(m.rows)
+		ok, err := s.dev.Ink2MatVecQ8(m.t, x, gate, s.tmp(m.cols/4+m.cols/32), true, y)
+		if err != nil || ok {
+			s.fail(err)
+			return y
+		}
+	}
+	if s.err == nil {
+		s.fail(s.dev.Ink2SigmoidMul(x, gate, n))
+	}
+	return s.mv(m, x)
 }
 
 func (s *inkling2Resident) rms(x, w ink2Ref, n int, eps float32) ink2Ref {
@@ -318,30 +351,41 @@ func (s *inkling2Resident) mixNorm(states []ink2Ref, queries ink2Ref, nq int, no
 	return out
 }
 
-func (s *inkling2Resident) control(cur, msg ink2Ref, c *ink2Ctrl, j int) ink2Ref {
+// control runs controllers js of c on (curs[i], msgs[i]) in one batch and returns the
+// outputs as consecutive rows, each RMS-normalized by norms[i].
+func (s *inkling2Resident) control(curs, msgs []ink2Ref, c *ink2Ctrl, js []int, norms []ink2Ref) ink2Ref {
 	h := s.hp.Hidden
-	g := s.tmp(c.rank)
-	if s.err == nil {
-		s.fail(s.dev.Ink2CtrlDown(cur, msg, c.down[j], g, h, c.rank))
+	ctl := compute.Ink2Controls{Cur: curs, Msg: msgs}
+	for _, j := range js {
+		ctl.Down = append(ctl.Down, c.down[j])
+		ctl.Gain = append(ctl.Gain, c.gain[j])
+		ctl.Forget = append(ctl.Forget, c.forget[j])
 	}
-	out := s.tmp(h)
+	g := s.tmp(len(js) * c.rank)
+	out := s.tmp(len(js) * h)
 	if s.err == nil {
-		s.fail(s.dev.Ink2CtrlApply(cur, msg, g, c.gain[j], c.forget[j], out, h, c.rank))
+		s.fail(s.dev.Ink2Control(ctl, g, out, h, c.rank, norms, s.hp.NormEps))
 	}
 	return out
 }
 
 func (s *inkling2Resident) conv(slot int, x, weight, dyn, resid ink2Ref, n, heads, offset int) ink2Ref {
 	kn := s.hp.ConvKernel
-	norm := float32(1 / math.Sqrt(float64(kn+1)))
-	if dyn.T.Buf() != nil {
-		norm = float32(1 / math.Sqrt(float64(2*kn+1)))
-	}
+	norm := inkling2ConvNorm(kn, dyn)
 	out := s.tmp(n)
 	if s.err == nil {
 		s.fail(s.dev.Ink2Conv(x, weight, dyn, at(s.hist[slot], offset*(kn-1)), out, resid, n, max(heads, 1), kn, norm))
 	}
 	return out
+}
+
+// inkling2ConvNorm is the output scale of a short conv of width kn, with or without
+// dynamic taps.
+func inkling2ConvNorm(kn int, dyn ink2Ref) float32 {
+	if dyn.T.Buf() != nil {
+		return float32(1 / math.Sqrt(float64(2*kn+1)))
+	}
+	return float32(1 / math.Sqrt(float64(kn+1)))
 }
 
 func with(blocks []ink2Ref, cur ink2Ref) []ink2Ref {
@@ -377,16 +421,16 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 		}
 	}
 	if msgs != nil {
-		for j := 0; j < 3; j++ {
-			in[j] = s.control(in[j], msgs[j], c, j)
+		norms := []ink2Ref{l.qNorm, l.kNorm, l.vNorm}
+		if local {
+			norms = []ink2Ref{l.attnNorm, l.attnNorm, l.attnNorm}
 		}
+		o := s.control(in[:], msgs[:3], c, []int{0, 1, 2}, norms)
+		in = [3]ink2Ref{o, at(o, h), at(o, 2*h)}
+		normed = true
 	}
 	switch {
 	case normed:
-	case local && msgs != nil:
-		for j := 0; j < 3; j++ {
-			in[j] = s.rms(in[j], l.attnNorm, h, hp.NormEps)
-		}
 	case local:
 		n0 := s.rms(in[0], l.attnNorm, h, hp.NormEps)
 		in = [3]ink2Ref{n0, n0, n0}
@@ -402,8 +446,13 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 		kDyn = s.mv(l.kconv, in[1])
 		vDyn = s.mv(l.vconv, in[2])
 	}
-	k := s.conv(slot, s.mv(l.wk, in[1]), l.kconvW, kDyn, ink2Ref{}, kvDim, hp.KVHeads, 0)
-	v := s.conv(slot, s.mv(l.wv, in[2]), l.vconvW, vDyn, ink2Ref{}, kvDim, hp.KVHeads, kvDim)
+	k, v := s.mv(l.wk, in[1]), s.mv(l.wv, in[2])
+	kn := hp.ConvKernel
+	cv := &compute.Ink2KVConv{
+		KW: l.kconvW, VW: l.vconvW, KDyn: kDyn, VDyn: vDyn, Kn: kn,
+		KHist: s.hist[slot], VHist: at(s.hist[slot], kvDim*(kn-1)),
+		KNorm: inkling2ConvNorm(kn, kDyn), VNorm: inkling2ConvNorm(kn, vDyn),
+	}
 	r := s.mv(l.rel, in[0])
 	sinks := s.mv(l.sink, in[0])
 
@@ -415,7 +464,7 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	meta := at(s.in, h)
 	cap := s.caps[slot]
 	if s.err == nil {
-		s.fail(s.dev.Ink2QKVPost(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], meta, p, cap))
+		s.fail(s.dev.Ink2QKVPost(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], meta, p, cap, cv))
 	}
 	extent, window := hp.RelExtent, 0
 	if local {
@@ -426,10 +475,7 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 		s.fail(s.dev.Ink2Attend(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.scores, attn, meta, p, extent, window, cap))
 	}
 	gate := s.mv(l.gate, in[0])
-	if s.err == nil {
-		s.fail(s.dev.Ink2SigmoidMul(attn, gate, hp.Heads*hp.HeadDim))
-	}
-	o := s.mv(l.wo, attn)
+	o := s.mvGated(l.wo, attn, gate, hp.Heads*hp.HeadDim)
 	if ip%hp.AttnResBlock == 0 {
 		*blocks = append(*blocks, inpSA)
 		cur = s.conv(slot, o, l.attnPostConv, ink2Ref{}, ink2Ref{}, h, 0, 2*kvDim)
@@ -441,13 +487,11 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	var x ink2Ref
 	if msgs != nil {
 		x = s.mix(with(*blocks, cur), l.ffnResQ, 1)
-		x = s.control(x, msgs[3], c, 3)
-		x = s.rms(x, l.ffnNorm, h, hp.NormEps)
+		x = s.control([]ink2Ref{x}, msgs[3:4], c, []int{3}, []ink2Ref{l.ffnNorm})
 	} else {
 		x = s.mixNorm(with(*blocks, cur), l.ffnResQ, 1, []ink2Ref{l.ffnNorm})
 	}
-	x = s.moe(l, x)
-	return s.conv(slot, x, l.ffnPostConv, ink2Ref{}, ffnInp, h, 0, 2*kvDim+h)
+	return s.moeConv(l, x, slot, ffnInp, 2*kvDim+h)
 }
 
 // expertMatVec runs k routed slots through e into y (rows per slot), with the
@@ -482,7 +526,7 @@ func (s *inkling2Resident) expertMatVec(e *ink2Experts, ids, x ink2Ref, xStride 
 	}
 }
 
-func (s *inkling2Resident) moe(l *ink2Layer, x ink2Ref) ink2Ref {
+func (s *inkling2Resident) moe(l *ink2Layer, x ink2Ref) ink2MoE {
 	hp := s.hp
 	k, width := hp.ExpertsUsed, hp.ExpertWidth
 	logits := s.mv(l.router, x)
@@ -501,9 +545,21 @@ func (s *inkling2Resident) moe(l *ink2Layer, x ink2Ref) ink2Ref {
 	}
 	down := s.tmp(k * hp.Hidden)
 	s.expertMatVec(&l.down, ids, act, padK, down, hp.Hidden, nil)
+	return ink2MoE{down: down, wts: wts}
+}
+
+// ink2MoE is a MoE output before its combine: the routed slots' down rows and weights.
+type ink2MoE struct{ down, wts ink2Ref }
+
+// moeConv runs the FFN's MoE and its post conv with the combine folded into the conv.
+func (s *inkling2Resident) moeConv(l *ink2Layer, x ink2Ref, slot int, resid ink2Ref, offset int) ink2Ref {
+	hp := s.hp
+	e := s.moe(l, x)
+	kn := hp.ConvKernel
 	out := s.tmp(hp.Hidden)
 	if s.err == nil {
-		s.fail(s.dev.Ink2Combine(down, wts, out, k, hp.Hidden))
+		s.fail(s.dev.Ink2CombineConv(e.down, e.wts, hp.ExpertsUsed, l.ffnPostConv, at(s.hist[slot], offset*(kn-1)), out, resid,
+			hp.Hidden, kn, float32(1/math.Sqrt(float64(kn+1)))))
 	}
 	return out
 }
@@ -513,6 +569,7 @@ func (s *inkling2Resident) moe(l *ink2Layer, x ink2Ref) ink2Ref {
 func (s *inkling2Resident) forward() {
 	hp := s.hp
 	s.off = 0
+	clear(s.q8)
 	cur := s.rms(s.in, s.tokNorm, hp.Hidden, hp.NormEps)
 	var blocks []ink2Ref
 	for il := 0; il < hp.CoreStart; il++ {

@@ -960,16 +960,20 @@ int fcuda_ink2_rms_rows(const float *x, const float *w, float *y, int rows, int 
 int fcuda_ink2_ctrl_pair(const float *cur, const float *msg, float *pair, int n);
 int fcuda_ink2_mix(const float *const *states, int ns, const float *queries, int nq,
     const float *const *norms, float eps, float *out, int n);
+int fcuda_ink2_q8_matvec(const int8_t *W, const float *Wscale, const float *x, const float *gate, void *q,
+    int quantize, float *y, int out, int in, int block);
 int fcuda_ink2_gemv_f32(const float *W, const float *x, float *y, int rows, int cols);
-int fcuda_ink2_ctrl_down(const float *cur, const float *msg, const float *W, float *g, int n, int rank);
-int fcuda_ink2_ctrl_apply(const float *cur, const float *msg, const float *g, const float *gainW,
-    const float *forgetW, float *out, int n, int rank);
+/* ptrs: cur[4], msg[4], down[4], gain[4], forget[4] (first nj of each used). */
+int fcuda_ink2_control(const float *const *ptrs, int nj, float *g, float *out, int n, int rank,
+    const float *const *norms, float eps);
 int fcuda_ink2_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
     const float *resid, int n, int heads, int kn, float norm);
+int fcuda_ink2_combine_conv(const float *down, const float *wts, int k, const float *w, float *hist,
+    float *out, const float *resid, int n, int kn, float norm);
 int fcuda_ink2_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
     const float *rclip, float *kcache, float *vcache, const float *meta, int heads, int kvHeads,
     int headDim, int relLen, float qkClip, float relClip, float eps, int global, float alpha,
-    float floorTok, int cap);
+    float floorTok, int cap, const float *const *conv, float kNorm, float vNorm, int kn);
 int fcuda_ink2_attend(const float *q, const float *r, const float *sinks, const float *relBias,
     const float *kcache, const float *vcache, double *scores, float *out, const float *meta,
     int heads, int kvHeads, int headDim, int relLen, int extent, int window, int cap, float scale);

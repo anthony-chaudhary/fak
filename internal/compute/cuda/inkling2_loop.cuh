@@ -41,11 +41,9 @@ static __device__ __forceinline__ double ink2_block_sum_d(double v, double *sh) 
 
 // inkling2RMS over `rows` rows of width n: y = x * s (* w); float partials per thread,
 // float64 across warps.
-__global__ void __launch_bounds__(1024) k_ink2_rms_rows(const float *x, const float *w, float *y, int n, float eps) {
+static __device__ void k_ink2_rms_row_body(const float *xr, const float *w, float *yr, int n, float eps) {
   __shared__ float part[32];
   __shared__ float sfac;
-  const float *xr = x + (size_t)blockIdx.x * n;
-  float *yr = y + (size_t)blockIdx.x * n;
   float ss = 0.f;
   for (int i = threadIdx.x; i < n; i += blockDim.x) ss = fmaf(xr[i], xr[i], ss);
   for (int d = 16; d > 0; d >>= 1) ss += __shfl_down_sync(0xffffffff, ss, d);
@@ -63,6 +61,10 @@ __global__ void __launch_bounds__(1024) k_ink2_rms_rows(const float *x, const fl
     if (w) v = __fmul_rn(v, w[i]);
     yr[i] = v;
   }
+}
+
+__global__ void __launch_bounds__(1024) k_ink2_rms_rows(const float *x, const float *w, float *y, int n, float eps) {
+  k_ink2_rms_row_body(x + (size_t)blockIdx.x * n, w, y + (size_t)blockIdx.x * n, n, eps);
 }
 
 // Two-input RMS (eps 1e-6, no weight) into the halves of a controller pair row.
@@ -340,19 +342,29 @@ __global__ void k_ink2_gemv_f32(const float *W, const float *x, float *y, int ro
   }
 }
 
-// inkling2Control head: g[r] = Down[r,:] . [rms(cur), rms(msg)] with both RMS scales
-// (eps 1e-6) folded out of the dot; one block per rank row.
-__global__ void k_ink2_ctrl_down(const float *cur, const float *msg, const float *W, float *g, int n) {
-  __shared__ float part[4][32];
-  const int r = blockIdx.x;
-  const float *wc = W + (size_t)r * 2 * n, *wm = wc + n;
+// Up to INK2_MAX_CTRL loop controllers of one layer visit, launched together: blockIdx.y
+// selects the controller. Adapted from CTRL_DOWN/CTRL_OUT of realugbun/llama.cpp
+// ggml/src/ggml-cuda/inkling2.cu:1443-1679@2eb2530ec4 (MIT).
+#define INK2_MAX_CTRL 4
+struct Ink2CtrlSet {
+  const float *cur[INK2_MAX_CTRL], *msg[INK2_MAX_CTRL], *down[INK2_MAX_CTRL];
+  const float *gain[INK2_MAX_CTRL], *forget[INK2_MAX_CTRL];
+};
+
+// g[j][r] = Down_j[r,:] . [rms(cur_j), rms(msg_j)], both RMS scales (eps 1e-6) folded out
+// of the dot; one block per (rank row, controller), float4 loads.
+__global__ void __launch_bounds__(256) k_ink2_ctrl_down4(Ink2CtrlSet cs, float *g, int n, int rank) {
+  __shared__ float part[4][8];
+  const int r = blockIdx.x, j = blockIdx.y;
+  const float4 *c4 = (const float4 *)cs.cur[j], *m4 = (const float4 *)cs.msg[j];
+  const float4 *wc = (const float4 *)(cs.down[j] + (size_t)r * 2 * n), *wm = (const float4 *)(cs.down[j] + (size_t)r * 2 * n + n);
   float ssc = 0.f, ssm = 0.f, dc = 0.f, dm = 0.f;
-  for (int i = threadIdx.x; i < n; i += blockDim.x) {
-    const float c = cur[i], m = msg[i];
-    ssc = fmaf(c, c, ssc);
-    ssm = fmaf(m, m, ssm);
-    dc = fmaf(wc[i], c, dc);
-    dm = fmaf(wm[i], m, dm);
+  for (int i = threadIdx.x; i < n / 4; i += blockDim.x) {
+    const float4 c = c4[i], m = m4[i], a = wc[i], b = wm[i];
+    ssc = fmaf(c.x, c.x, fmaf(c.y, c.y, fmaf(c.z, c.z, fmaf(c.w, c.w, ssc))));
+    ssm = fmaf(m.x, m.x, fmaf(m.y, m.y, fmaf(m.z, m.z, fmaf(m.w, m.w, ssm))));
+    dc = fmaf(a.x, c.x, fmaf(a.y, c.y, fmaf(a.z, c.z, fmaf(a.w, c.w, dc))));
+    dm = fmaf(b.x, m.x, fmaf(b.y, m.y, fmaf(b.z, m.z, fmaf(b.w, m.w, dm))));
   }
   for (int d = 16; d > 0; d >>= 1) {
     ssc += __shfl_down_sync(0xffffffff, ssc, d);
@@ -374,45 +386,58 @@ __global__ void k_ink2_ctrl_down(const float *cur, const float *msg, const float
       for (int v = 0; v < 4; ++v) t[v] += (double)part[v][w];
     const float sc = (float)(1.0 / sqrt(t[0] / (double)n + 1e-6));
     const float sm = (float)(1.0 / sqrt(t[1] / (double)n + 1e-6));
-    g[r] = (float)((double)sc * t[2] + (double)sm * t[3]);
+    g[(size_t)j * rank + r] = (float)((double)sc * t[2] + (double)sm * t[3]);
   }
 }
 
-// inkling2Control tail: gain/forget rank-`rank` GEMVs (warp per output), then
-// out = cur - tanh(f)*cur + tanh(g)*msg.
-__global__ void k_ink2_ctrl_apply(const float *cur, const float *msg, const float *g, const float *gainW,
-                                  const float *forgetW, float *out, int n, int rank) {
-  const int lane = threadIdx.x & 31;
-  const int i = blockIdx.x * (blockDim.x >> 5) + (threadIdx.x >> 5);
+// out[j][i] = cur - tanh(F_j[i,:].g_j)*cur + tanh(G_j[i,:].g_j)*msg for rank 64: a half
+// warp owns one output row per step (one float4 per lane per matrix), and after 16 steps
+// every lane holds one output, so the float64 tanh runs on all 32 lanes at once.
+#define INK2_CTRL_APPLY_WARPS 4
+__global__ void __launch_bounds__(INK2_CTRL_APPLY_WARPS * 32) k_ink2_ctrl_apply64(Ink2CtrlSet cs, const float *g, float *out, int n) {
+  const int j = blockIdx.y;
+  const int lane = threadIdx.x & 31, half = lane >> 4, hl = lane & 15;
+  const int base = (blockIdx.x * INK2_CTRL_APPLY_WARPS + (threadIdx.x >> 5)) * 32;
+  const float4 gv = ((const float4 *)(g + (size_t)j * 64))[hl];
+  float myG = 0.f, myF = 0.f;
+#pragma unroll 4
+  for (int s = 0; s < 16; ++s) {
+    const int o = base + 2 * s + half;
+    float gn = 0.f, fg = 0.f;
+    if (o < n) {
+      const float4 a = ((const float4 *)(cs.gain[j] + (size_t)o * 64))[hl];
+      const float4 b = ((const float4 *)(cs.forget[j] + (size_t)o * 64))[hl];
+      gn = fmaf(a.x, gv.x, fmaf(a.y, gv.y, fmaf(a.z, gv.z, a.w * gv.w)));
+      fg = fmaf(b.x, gv.x, fmaf(b.y, gv.y, fmaf(b.z, gv.z, b.w * gv.w)));
+    }
+    for (int d = 8; d > 0; d >>= 1) {
+      gn += __shfl_xor_sync(0xffffffff, gn, d);
+      fg += __shfl_xor_sync(0xffffffff, fg, d);
+    }
+    if (hl == s) {
+      myG = gn;
+      myF = fg;
+    }
+  }
+  const int i = base + 2 * hl + half;
   if (i >= n) return;
-  const float *gw = gainW + (size_t)i * rank, *fw = forgetW + (size_t)i * rank;
-  float gn = 0.f, fg = 0.f;
-  for (int r = lane; r < rank; r += 32) {
-    const float gv = g[r];
-    gn = fmaf(gw[r], gv, gn);
-    fg = fmaf(fw[r], gv, fg);
-  }
-  for (int d = 16; d > 0; d >>= 1) {
-    gn += __shfl_down_sync(0xffffffff, gn, d);
-    fg += __shfl_down_sync(0xffffffff, fg, d);
-  }
-  if (lane == 0) {
-    const float f = (float)tanh((double)fg), t = (float)tanh((double)gn);
-    out[i] = __fadd_rn(__fsub_rn(cur[i], __fmul_rn(f, cur[i])), __fmul_rn(t, msg[i]));
-  }
+  const float cur = cs.cur[j][i], msg = cs.msg[j][i];
+  const float f = (float)tanh((double)myF), t = (float)tanh((double)myG);
+  out[(size_t)j * n + i] = __fadd_rn(__fsub_rn(cur, __fmul_rn(f, cur)), __fmul_rn(t, msg));
 }
 
-// convolve: causal short conv with residual over one channel range of a slot's history.
-// dyn (nullable) adds per-head input-dependent taps laid out [head][tap]; resid
-// (nullable) is added to the result.
-__global__ void k_ink2_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
-                            const float *resid, int n, int heads, int kn, float norm) {
-  const int c = blockIdx.x * blockDim.x + threadIdx.x;
-  if (c >= n) return;
+// RMS of `rows` contiguous rows, row q weighted by w.w[q] (null for none).
+__global__ void __launch_bounds__(1024) k_ink2_rms_multi(const float *x, Ink2Norms w, float *y, int n, float eps) {
+  k_ink2_rms_row_body(x + (size_t)blockIdx.x * n, w.w[blockIdx.x], y + (size_t)blockIdx.x * n, n, eps);
+}
+
+// One channel of the causal short conv: returns (x + taps) * norm and shifts x into the
+// channel's history.
+static __device__ __forceinline__ float ink2_conv_chan(float xc, int c, const float *w, const float *dyn, float *hist,
+                                                       int n, int heads, int kn, float norm) {
   const int past = kn - 1;
   float *hc = hist + (size_t)c * past;
   const float *wc = w + (size_t)c * kn;
-  const float xc = x[c];
   float acc = 0.f;
   for (int t = 0; t < past; ++t) acc = __fadd_rn(acc, __fmul_rn(hc[t], wc[t]));
   acc = __fadd_rn(acc, __fmul_rn(xc, wc[past]));
@@ -423,12 +448,34 @@ __global__ void k_ink2_conv(const float *x, const float *w, const float *dyn, fl
       acc = __fadd_rn(acc, __fmul_rn(dyn[hd * kn + lag], xv));
     }
   }
-  float o = __fmul_rn(__fadd_rn(xc, acc), norm);
+  const float o = __fmul_rn(__fadd_rn(xc, acc), norm);
   for (int t = 0; t + 1 < past; ++t) hc[t] = hc[t + 1];
   hc[past - 1] = xc;
+  return o;
+}
+
+// convolve: causal short conv with residual over one channel range of a slot's history.
+// moeDown (nullable) makes the input the MoE combine of k routed slots, summed in routing
+// order like k_ink2_moe_combine, so the combine needs no launch of its own.
+// dyn (nullable) adds per-head input-dependent taps laid out [head][tap]; resid
+// (nullable) is added to the result.
+__global__ void k_ink2_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
+                            const float *resid, int n, int heads, int kn, float norm, const float *moeDown,
+                            const float *moeWts, int moeK) {
+  const int c = blockIdx.x * blockDim.x + threadIdx.x;
+  if (c >= n) return;
+  float xc;
+  if (moeDown) {
+    xc = 0.f;
+    for (int t = 0; t < moeK; ++t) xc = __fadd_rn(xc, __fmul_rn(moeWts[t], moeDown[(size_t)t * n + c]));
+  } else {
+    xc = x[c];
+  }
+  float o = ink2_conv_chan(xc, c, w, dyn, hist, n, heads, kn, norm);
   if (resid) o = __fadd_rn(resid[c], o);
   out[c] = o;
 }
+
 
 static __device__ __forceinline__ float ink2_warp_sum(float v) {
   for (int d = 16; d > 0; d >>= 1) v += __shfl_xor_sync(0xffffffff, v, d);
@@ -454,6 +501,14 @@ static __device__ void ink2_clip_warp(float *x, const float *scale, float thr, i
   for (int i = lane; i < n; i += 32) x[i] = __fmul_rn(x[i], f);
 }
 
+// The k and v short convs folded into k_ink2_qkv_post: on = 0 leaves k and v as given.
+struct Ink2KVConv {
+  const float *w[2], *dyn[2];
+  float *hist[2];
+  float norm[2];
+  int kn, on;
+};
+
 // Post-projection attention prep for one layer visit: per-head q/r clips, k clip, v RMS,
 // the global log-scale tau on q and r, and the append of k/v into the slot cache at the
 // current position (ring index for local slots). Blocks: [0,heads) q+r heads, then
@@ -461,7 +516,7 @@ static __device__ void ink2_clip_warp(float *x, const float *scale, float thr, i
 __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
                                 const float *rclip, float *kcache, float *vcache, const float *meta,
                                 int heads, int kvHeads, int headDim, int relLen, float qkClip, float relClip,
-                                float eps, int global, float alpha, float floorTok, int cap) {
+                                float eps, int global, float alpha, float floorTok, int cap, Ink2KVConv cv) {
   const int lane = threadIdx.x & 31;
   const int b = blockIdx.x;
   const int pos = ink2_pos(meta);
@@ -483,18 +538,30 @@ __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float 
   if (b < heads + kvHeads) {
     const int h = b - heads;
     float *dst = kcache + (size_t)idx * kvDim + (size_t)h * headDim;
-    for (int i = lane; i < headDim; i += 32) dst[i] = k[h * headDim + i];
+    for (int i = lane; i < headDim; i += 32) {
+      const int c = h * headDim + i;
+      dst[i] = cv.on ? ink2_conv_chan(k[c], c, cv.w[0], cv.dyn[0], cv.hist[0], kvDim, kvHeads, cv.kn, cv.norm[0]) : k[c];
+    }
     __syncwarp();
     ink2_clip_warp(dst, nullptr, qkClip, headDim);
     return;
   }
   const int h = b - heads - kvHeads;
   const float *vh = v + (size_t)h * headDim;
+  float *dst = vcache + (size_t)idx * kvDim + (size_t)h * headDim;
+  if (cv.on) {
+    // the conv output is staged in the cache row, then normalized in place
+    for (int i = lane; i < headDim; i += 32) {
+      const int c = h * headDim + i;
+      dst[i] = ink2_conv_chan(v[c], c, cv.w[1], cv.dyn[1], cv.hist[1], kvDim, kvHeads, cv.kn, cv.norm[1]);
+    }
+    __syncwarp();
+    vh = dst;
+  }
   double ss = 0;
   for (int i = lane; i < headDim; i += 32) ss += (double)vh[i] * (double)vh[i];
   for (int d = 16; d > 0; d >>= 1) ss += __shfl_xor_sync(0xffffffff, ss, d);
   const float s = (float)(1.0 / sqrt(ss / (double)headDim + (double)eps));
-  float *dst = vcache + (size_t)idx * kvDim + (size_t)h * headDim;
   for (int i = lane; i < headDim; i += 32) dst[i] = __fmul_rn(vh[i], s);
 }
 
@@ -987,39 +1054,112 @@ static int fcuda_ink2_mix_plain(const Ink2States &st, const float *queries, int 
   return ink2_last_error();
 }
 
+// Q8_0 block-32 quantization of x * sigmoid(gate), one warp per block: the value is
+// k_ink2_sigmoid_mul's and the codes k_q8_quant_act's.
+__global__ void k_ink2_q8_quant_gated(const float *x, const float *gate, signed char *qX, float *xScale) {
+  const int i = blockIdx.x * 32 + threadIdx.x;
+  const float v = __fmul_rn(x[i], ink2_sigmoid(gate[i]));
+  const float a = q8_activation_warp_max(fmaxf(0.f, fabsf(v)));
+  const float d = a / 127.f;
+  if (threadIdx.x == 0) xScale[blockIdx.x] = d;
+  const float inv = d > 0.f ? 1.f / d : 0.f;
+  qX[i] = d > 0.f ? q8round_dev(v * inv) : (signed char)0;
+}
+
+// fcuda_ink2_q8_matvec is y = W.x for a resident Q8_0 weight, the per-row k_q8_gemm of
+// fcuda_q8_matmul_f32 at P = 1. q holds x's Q8_0 codes (in bytes) then its block scales;
+// quantize = 0 reuses the codes an earlier call on the same x wrote, so several weights
+// that read one activation quantize it once. gate (nullable, block 32) quantizes
+// x * sigmoid(gate) instead: the attention output gate folded into the quantization.
+extern "C" int fcuda_ink2_q8_matvec(const int8_t *W, const float *Wscale, const float *x, const float *gate, void *q,
+                                    int quantize, float *y, int out, int in, int block) {
+  if (block <= 0 || in % block != 0 || (in & 3) != 0) return (int)cudaErrorInvalidValue;
+  signed char *codes = (signed char *)q;
+  float *scales = (float *)(codes + in);
+  const int nblk = in / block;
+  if (gate) {
+    if (block != 32 || !quantize) return (int)cudaErrorInvalidValue;
+    FCUDA_TS("k_ink2_q8_quant_gated", nblk, k_ink2_q8_quant_gated<<<nblk, 32, 0, g_stream>>>(x, gate, codes, scales));
+  } else if (quantize) {
+    const int qt = block == 32 ? 32 : 64;
+    FCUDA_TS("k_q8_quant_act", dim3(nblk, 1), k_q8_quant_act<<<dim3(nblk, 1), qt, 0, g_stream>>>(x, codes, scales, 1, in, block));
+  }
+  FCUDA_TS("k_q8_gemm", dim3((out + 7) / 8, 1), k_q8_gemm<<<dim3((out + 7) / 8, 1), 256, 0, g_stream>>>(
+      (const signed char *)W, Wscale, codes, scales, y, out, in, 1, block));
+  return ink2_last_error();
+}
+
 extern "C" int fcuda_ink2_gemv_f32(const float *W, const float *x, float *y, int rows, int cols) {
   FCUDA_TS("k_ink2_gemv_f32", rows, k_ink2_gemv_f32<<<rows, 256, 0, g_stream>>>(W, x, y, rows, cols));
   return ink2_last_error();
 }
 
-extern "C" int fcuda_ink2_ctrl_down(const float *cur, const float *msg, const float *W, float *g, int n, int rank) {
-  FCUDA_TS("k_ink2_ctrl_down", rank, k_ink2_ctrl_down<<<rank, 256, 0, g_stream>>>(cur, msg, W, g, n));
-  return ink2_last_error();
-}
-
-extern "C" int fcuda_ink2_ctrl_apply(const float *cur, const float *msg, const float *g, const float *gainW,
-                                     const float *forgetW, float *out, int n, int rank) {
-  FCUDA_TS("k_ink2_ctrl_apply", (n + 7) / 8, k_ink2_ctrl_apply<<<(n + 7) / 8, 256, 0, g_stream>>>(
-      cur, msg, g, gainW, forgetW, out, n, rank));
+// fcuda_ink2_control runs nj (<= INK2_MAX_CTRL) rank-64 loop controllers of one layer
+// visit: g is [nj][rank] scratch, out is [nj][n]; then (norms != null) RMS-normalizes
+// each output row with its weight in place.
+extern "C" int fcuda_ink2_control(const float *const *ptrs, int nj, float *g, float *out, int n, int rank,
+                                  const float *const *norms, float eps) {
+  if (nj < 1 || nj > INK2_MAX_CTRL || rank != 64 || (n & 3) != 0) return (int)cudaErrorInvalidValue;
+  Ink2CtrlSet cs;
+  for (int j = 0; j < INK2_MAX_CTRL; ++j) {
+    const bool on = j < nj;
+    cs.cur[j] = on ? ptrs[j] : nullptr;
+    cs.msg[j] = on ? ptrs[INK2_MAX_CTRL + j] : nullptr;
+    cs.down[j] = on ? ptrs[2 * INK2_MAX_CTRL + j] : nullptr;
+    cs.gain[j] = on ? ptrs[3 * INK2_MAX_CTRL + j] : nullptr;
+    cs.forget[j] = on ? ptrs[4 * INK2_MAX_CTRL + j] : nullptr;
+  }
+  FCUDA_TS("k_ink2_ctrl_down4", dim3(rank, nj), k_ink2_ctrl_down4<<<dim3(rank, nj), 256, 0, g_stream>>>(cs, g, n, rank));
+  const dim3 ag((n + INK2_CTRL_APPLY_WARPS * 32 - 1) / (INK2_CTRL_APPLY_WARPS * 32), nj);
+  FCUDA_TS("k_ink2_ctrl_apply64", ag, k_ink2_ctrl_apply64<<<ag, INK2_CTRL_APPLY_WARPS * 32, 0, g_stream>>>(cs, g, out, n));
+  if (norms) {
+    Ink2Norms nw;
+    for (int q = 0; q < INK2_MAX_QUERIES; ++q) nw.w[q] = q < nj ? norms[q] : nullptr;
+    FCUDA_TS("k_ink2_rms_multi", nj, k_ink2_rms_multi<<<nj, 1024, 0, g_stream>>>(out, nw, out, n, eps));
+  }
   return ink2_last_error();
 }
 
 extern "C" int fcuda_ink2_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
                                const float *resid, int n, int heads, int kn, float norm) {
   FCUDA_TS("k_ink2_conv", (n + 255) / 256, k_ink2_conv<<<(n + 255) / 256, 256, 0, g_stream>>>(
-      x, w, dyn, hist, out, resid, n, heads, kn, norm));
+      x, w, dyn, hist, out, resid, n, heads, kn, norm, nullptr, nullptr, 0));
+  return ink2_last_error();
+}
+
+// fcuda_ink2_combine_conv is fcuda_ink2_conv (no dynamic taps) whose input is the MoE
+// combine of down ([k][n]) weighted by wts.
+extern "C" int fcuda_ink2_combine_conv(const float *down, const float *wts, int k, const float *w, float *hist,
+                                       float *out, const float *resid, int n, int kn, float norm) {
+  FCUDA_TS("k_ink2_conv", (n + 255) / 256, k_ink2_conv<<<(n + 255) / 256, 256, 0, g_stream>>>(
+      nullptr, w, nullptr, hist, out, resid, n, 1, kn, norm, down, wts, k));
   return ink2_last_error();
 }
 
 extern "C" int fcuda_ink2_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
                                    const float *rclip, float *kcache, float *vcache, const float *meta, int heads,
                                    int kvHeads, int headDim, int relLen, float qkClip, float relClip, float eps,
-                                   int global, float alpha, float floorTok, int cap) {
+                                   int global, float alpha, float floorTok, int cap, const float *const *conv,
+                                   float kNorm, float vNorm, int kn) {
   if (headDim > 256) return (int)cudaErrorInvalidValue;
+  Ink2KVConv cv = {};
+  if (conv) {
+    // conv: k weight, v weight, k dyn, v dyn, k hist, v hist
+    cv.w[0] = conv[0];
+    cv.w[1] = conv[1];
+    cv.dyn[0] = conv[2];
+    cv.dyn[1] = conv[3];
+    cv.hist[0] = (float *)conv[4];
+    cv.hist[1] = (float *)conv[5];
+    cv.norm[0] = kNorm;
+    cv.norm[1] = vNorm;
+    cv.kn = kn;
+    cv.on = 1;
+  }
   const int blocks = heads + 2 * kvHeads;
   FCUDA_TS("k_ink2_qkv_post", blocks, k_ink2_qkv_post<<<blocks, 32, 0, g_stream>>>(
       q, r, k, v, qclip, rclip, kcache, vcache, meta, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global,
-      alpha, floorTok, cap));
+      alpha, floorTok, cap, cv));
   return ink2_last_error();
 }
 
@@ -1054,7 +1194,8 @@ extern "C" int fcuda_ink2_expert_scale(float *y, const int *ids, const float *sc
 }
 
 extern "C" int fcuda_ink2_situ(const float *gu, float *act, int k, int width, int actStride, double beta, double lb) {
-  FCUDA_TS("k_ink2_situ", dim3((width + 255) / 256, k), k_ink2_situ<<<dim3((width + 255) / 256, k), 256, 0, g_stream>>>(
+  // small blocks spread the float64 activation over every SM
+  FCUDA_TS("k_ink2_situ", dim3((width + 63) / 64, k), k_ink2_situ<<<dim3((width + 63) / 64, k), 64, 0, g_stream>>>(
       gu, act, width, actStride, beta, lb));
   return ink2_last_error();
 }

@@ -105,6 +105,17 @@ func (c *cudaBackend) Ink2MatVec(w Tensor, x, y Ink2Ref) error {
 	return fmt.Errorf("cuda inkling2 matvec: unsupported weight dtype %s", w.Dtype)
 }
 
+func (c *cudaBackend) Ink2MatVecQ8(w Tensor, x, gate, q Ink2Ref, quantize bool, y Ink2Ref) (bool, error) {
+	if w.Dtype != Q8_0 || len(w.Shape) != 2 || w.Quant.Block != 32 {
+		return false, nil
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	wb := c.cudaBufForSubmit(w)
+	return true, ink2Status("matvec q8_0 shared", C.fcuda_ink2_q8_matvec((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.ink2F(x), c.ink2F(gate),
+		c.ink2Ptr(q), ink2Bool(quantize), c.ink2F(y), C.int(w.Shape[0]), C.int(w.Shape[1]), C.int(w.Quant.Block)))
+}
+
 var ink2ExpertFormat = map[Dtype]C.int{NVFP4: 0, IQ2_XS: 1, IQ2_S: 2, IQ3_XXS: 3, IQ3_S: 4, IQ4_NL: 5, Q3_K: 6}
 
 func (c *cudaBackend) Ink2ExpertMatVec(stack Tensor, expertRows int, ids, x Ink2Ref, xStride int, y Ink2Ref, k int, scale Ink2Ref, situ *Ink2Situ) (bool, error) {
@@ -178,17 +189,28 @@ func (c *cudaBackend) Ink2Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms [
 		np, C.float(eps), c.ink2F(out), C.int(n)))
 }
 
-func (c *cudaBackend) Ink2CtrlDown(cur, msg, w, g Ink2Ref, n, rank int) error {
+func (c *cudaBackend) Ink2Control(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norms []Ink2Ref, eps float32) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	return ink2Status("ctrl down", C.fcuda_ink2_ctrl_down(c.ink2F(cur), c.ink2F(msg), c.ink2F(w), c.ink2F(g), C.int(n), C.int(rank)))
-}
-
-func (c *cudaBackend) Ink2CtrlApply(cur, msg, g, gainW, forgetW, out Ink2Ref, n, rank int) error {
-	cudaMu.Lock()
-	defer cudaMu.Unlock()
-	return ink2Status("ctrl apply", C.fcuda_ink2_ctrl_apply(c.ink2F(cur), c.ink2F(msg), c.ink2F(g), c.ink2F(gainW), c.ink2F(forgetW),
-		c.ink2F(out), C.int(n), C.int(rank)))
+	nj := len(ctl.Cur)
+	if nj < 1 || nj > 4 || len(ctl.Msg) != nj || len(ctl.Down) != nj || len(ctl.Gain) != nj || len(ctl.Forget) != nj || len(norms) > nj {
+		return fmt.Errorf("cuda inkling2 control: %d controllers", nj)
+	}
+	ptrs := (*[24]*C.float)(C.malloc(C.size_t(24 * unsafe.Sizeof(uintptr(0)))))
+	defer C.free(unsafe.Pointer(ptrs))
+	for j := 0; j < nj; j++ {
+		ptrs[j], ptrs[4+j], ptrs[8+j] = c.ink2F(ctl.Cur[j]), c.ink2F(ctl.Msg[j]), c.ink2F(ctl.Down[j])
+		ptrs[12+j], ptrs[16+j] = c.ink2F(ctl.Gain[j]), c.ink2F(ctl.Forget[j])
+	}
+	var np **C.float
+	if norms != nil {
+		for j, w := range norms {
+			ptrs[20+j] = c.ink2F(w)
+		}
+		np = (**C.float)(unsafe.Pointer(&ptrs[20]))
+	}
+	return ink2Status("control", C.fcuda_ink2_control((**C.float)(unsafe.Pointer(ptrs)), C.int(nj), c.ink2F(g), c.ink2F(out),
+		C.int(n), C.int(rank), np, C.float(eps)))
 }
 
 func (c *cudaBackend) Ink2Conv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn int, norm float32) error {
@@ -198,6 +220,13 @@ func (c *cudaBackend) Ink2Conv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn
 		C.int(n), C.int(heads), C.int(kn), C.float(norm)))
 }
 
+func (c *cudaBackend) Ink2CombineConv(down, wts Ink2Ref, k int, w, hist, out, resid Ink2Ref, n, kn int, norm float32) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("combine conv", C.fcuda_ink2_combine_conv(c.ink2F(down), c.ink2F(wts), C.int(k), c.ink2F(w), c.ink2F(hist),
+		c.ink2F(out), c.ink2F(resid), C.int(n), C.int(kn), C.float(norm)))
+}
+
 func ink2Bool(b bool) C.int {
 	if b {
 		return 1
@@ -205,12 +234,24 @@ func ink2Bool(b bool) C.int {
 	return 0
 }
 
-func (c *cudaBackend) Ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int) error {
+func (c *cudaBackend) Ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	var conv **C.float
+	var kNorm, vNorm C.float
+	var kn C.int
+	if cv != nil {
+		ptrs := (*[6]*C.float)(C.malloc(C.size_t(6 * unsafe.Sizeof(uintptr(0)))))
+		defer C.free(unsafe.Pointer(ptrs))
+		ptrs[0], ptrs[1], ptrs[2] = c.ink2F(cv.KW), c.ink2F(cv.VW), c.ink2F(cv.KDyn)
+		ptrs[3], ptrs[4], ptrs[5] = c.ink2F(cv.VDyn), c.ink2F(cv.KHist), c.ink2F(cv.VHist)
+		conv = (**C.float)(unsafe.Pointer(ptrs))
+		kNorm, vNorm, kn = C.float(cv.KNorm), C.float(cv.VNorm), C.int(cv.Kn)
+	}
 	return ink2Status("qkv post", C.fcuda_ink2_qkv_post(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v), c.ink2F(qclip), c.ink2F(rclip),
 		c.ink2F(kcache), c.ink2F(vcache), c.ink2F(meta), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen),
-		C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps), ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor), C.int(cap)))
+		C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps), ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor), C.int(cap),
+		conv, kNorm, vNorm, kn))
 }
 
 func (c *cudaBackend) Ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
