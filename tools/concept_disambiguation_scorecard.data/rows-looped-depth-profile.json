@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "agent-resolve-loop-depth",
+      "canonical": "ResolveLoopDepth",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The agent harness's mapping from a reasoning effort profile (low/med/high/ultra) and the current turn assessment to a recurrent loop count for a looped model, clamped to [1, maxLoops]; an error turn raises depth one step and a non-looped model always gets 1.",
+      "distinction": "Harness-side choice of recurrent depth for the next request, not the gateway's per-request receipt of the depth actually selected (LoopDepthReceipt) and not an agent turn loop or retry loop.",
+      "distinct_from": [
+        "gateway-loop-depth-receipt"
+      ],
+      "aliases": [],
+      "grounding": "ResolveLoopDepth",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

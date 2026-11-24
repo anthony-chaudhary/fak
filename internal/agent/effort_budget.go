@@ -196,6 +196,42 @@ func ResolveReasoningProfileBudget(profile string, explicitBudget *int, turnCont
 	return effort, defaultBudget
 }
 
+// loopDepthSteps is the number of effort steps above none; ultra uses the full loop ceiling.
+const loopDepthSteps = 4
+
+// ResolveLoopDepth maps a reasoning profile and turn assessments to a recurrence
+// depth for a looped model that supports at most maxLoops loops. Effort tiers
+// low/medium/high/ultra take an increasing share of maxLoops, an error-recovery
+// turn raises the tier by one step, and the result is clamped to [1, maxLoops].
+// A non-looped model (maxLoops <= 1) always yields 1.
+func ResolveLoopDepth(profile string, maxLoops int, turnContext ...TurnAssessment) int {
+	if maxLoops <= 1 {
+		return 1
+	}
+	effort, _ := ResolveReasoningProfile(profile)
+	step := 2
+	switch effort {
+	case EffortTierNone:
+		step = 0
+	case EffortTierLow:
+		step = 1
+	case EffortTierHigh:
+		step = 3
+	case EffortTierUltra:
+		step = 4
+	}
+	for _, ta := range turnContext {
+		if ta.IsError() {
+			step++
+			break
+		}
+	}
+	step = min(step, loopDepthSteps)
+	// Round up so every non-none tier gets at least one loop and tiers stay monotone.
+	loops := (maxLoops*step + loopDepthSteps - 1) / loopDepthSteps
+	return max(1, min(loops, maxLoops))
+}
+
 // IsRoutineToolName reports whether a tool name represents a routine inspection tool.
 func IsRoutineToolName(name string) bool {
 	return isRoutineToolName(name)
