@@ -146,7 +146,7 @@ compliance review, and needs one control surface for the portfolio.
   select, spawn, witness, close.
 - [`../super-loops.md`](../super-loops.md) explains the read-first super loop that
   chooses which member loop to enter.
-- [`../loops-user-value.md`](../loops-user-value.md) explains the end-user value:
+- [`../archive/loops-user-value.md`](../archive/loops-user-value.md) explains the end-user value:
   token/cost controls, fleet efficiency, harness reliability, and super-loop steering.
 - [`../managed-context-continuous-usage.md`](../managed-context-continuous-usage.md)
   explains how long runs preserve objectives, recoverable history, and budget

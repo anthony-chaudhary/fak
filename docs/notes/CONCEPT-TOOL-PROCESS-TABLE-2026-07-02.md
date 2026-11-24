@@ -152,7 +152,7 @@ supervisor tick, a CI gate, and a forensic replay all read the same truth.
 
 The tool process table is the lifetime engine, not the authority boundary for a
 fleet of nested agents. The public contract for that boundary is
-[`docs/agent-run-leak-prevention.md`](../agent-run-leak-prevention.md): an
+[`docs/archive/agent-run-leak-prevention.md`](../archive/agent-run-leak-prevention.md): an
 `AgentRun` owns one running agent loop, a `SpawnAttempt` is the only pre-exec
 path to a child run, `PolicyDigest` pins the effective policy snapshot, and the
 launch `ToolCallID` remains the join key for `toolprocgate.Supervisor.Spawn`,

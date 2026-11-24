@@ -3,6 +3,8 @@ title: "Cross-Generation Dependency Edges"
 description: "The metadata and reporting shape for a dependency that crosses a generation boundary — a gen/now leaf that waits on a gen/second-next seam, or a second-next bet whose prerequisites are already shipping in gen/next. Defines how to record the edge (issue-body + commit sidecar), which direction it points, and how it surfaces in the milestone report's generation debt so a stalled cross-horizon bet is visible without rereading the epic."
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: [docs/generation.md](../generation.md) · scope: gen/future design memo; the described tooling was never built
+
 # Cross-Generation Dependency Edges
 
 **Issue:** #1655.
@@ -19,13 +21,13 @@ horizon routinely depends on work at another — a `gen/now` leaf that cannot sh
 until a `gen/second-next` seam lands, or a `gen/second-next` bet whose promotion
 trigger is "these prerequisites are all shipped" (the *dependency edge resolving*
 promotion trigger named in
-[`docs/generation-second-next-option-contracts.md`](generation-second-next-option-contracts.md)
+[`docs/archive/generation-second-next-option-contracts.md`](generation-second-next-option-contracts.md)
 §4). The generation contract names that trigger but never says **how the edge is
 recorded** or **how a stalled cross-horizon dependency becomes visible**. This
 memo defines both, without forking the trunk or inventing a new label taxonomy.
 
 The canonical stream taxonomy, promotion verbs, and the flat debt metric live in
-[`docs/generation.md`](generation.md); this memo is the *edge* refinement of the
+[`docs/generation.md`](../generation.md); this memo is the *edge* refinement of the
 debt metric's `unpromoted_bets` and `missing_witnesses` inputs.
 
 ## What a cross-generation edge is
@@ -77,7 +79,7 @@ Gen-dep: blocked-by #1664 (gen/second-next)
 
 A commit that resolves a dependency records the fact in the body, alongside the
 existing `Generation:` sidecar (never in the subject — subjects stay optimized
-for the witness path, per [`docs/generation.md`](generation.md) §Commits And
+for the witness path, per [`docs/generation.md`](../generation.md) §Commits And
 Releases):
 
 ```text
@@ -95,7 +97,7 @@ the same failure posture the `Generation:` sidecar already uses.
 ## Reporting: how an edge surfaces
 
 The reporting home is the milestone report's generation section, computed in
-[`internal/milestonereport`](../internal/milestonereport/milestonereport.go).
+[`internal/milestonereport`](../../internal/milestonereport/milestonereport.go).
 Today `GenerationRow.DebtScore` folds four cheap inputs:
 
 ```text
@@ -150,7 +152,7 @@ An individual edge *resolves* (promoting the dependent) when:
 - Every `to` endpoint of a **prerequisite pull** is shipped and witnessed, firing
   the far item's promotion trigger; the recheck note records the resolving
   commits. This is the `dependency edge` promotion trigger from
-  [`docs/generation-second-next-option-contracts.md`](generation-second-next-option-contracts.md)
+  [`docs/archive/generation-second-next-option-contracts.md`](generation-second-next-option-contracts.md)
   §4, now with a metadata record instead of prose.
 - A **forward bet** resolves when the far dependency promotes to a nearer horizon
   *on its own contract's evidence* (a passing simulation or an additive
@@ -167,7 +169,7 @@ prerequisite pull does not.
 
 The edge mechanism (or an individual edge) demotes or retires under the closed
 sunset-trigger vocabulary in
-[`docs/generation-future-sunset-criteria.md`](generation-future-sunset-criteria.md),
+[`docs/generation-future-sunset-criteria.md`](../generation-future-sunset-criteria.md),
 cited by exactly one token with the four-piece retirement evidence:
 
 - `ASSUMPTION_FIRED` — the invalidating assumption below fails: cross-generation

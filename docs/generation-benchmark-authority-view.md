@@ -24,7 +24,7 @@ interchangeable in a sentence.
 
 The canonical stream taxonomy lives in [`docs/generation.md`](generation.md). The
 per-generation minimum-evidence rungs live in
-[`docs/generation-witness-ladders.md`](generation-witness-ladders.md) — this memo
+[`docs/archive/generation-witness-ladders.md`](archive/generation-witness-ladders.md) — this memo
 consumes that ladder's **benchmark column** rather than restating it. The process
 that mints and verifies a row is [`BENCHMARK-GOVERNANCE.md`](../BENCHMARK-GOVERNANCE.md).
 
@@ -57,7 +57,7 @@ declared by its prose. Two distinct quantities:
 
 - **Entitled horizon** — the strongest generation the row's evidence supports,
   read straight off the benchmark column of the witness ladder
-  ([`docs/generation-witness-ladders.md`](generation-witness-ladders.md)).
+  ([`docs/archive/generation-witness-ladders.md`](archive/generation-witness-ladders.md)).
 - **Claimed horizon** — the horizon the row's prose (and anything citing it)
   actually asserts.
 
@@ -67,7 +67,7 @@ The single invariant this view enforces:
 > over-claim.
 
 `claimed > entitled` is **horizon laundering** — the failure mode
-[`docs/generation-public-narrative.md`](generation-public-narrative.md) bans in
+[`docs/archive/generation-public-narrative.md`](archive/generation-public-narrative.md) bans in
 public copy, here given a mechanically checkable form on the authority rows
 themselves. Because `entitled` is a function of the witness rung, the check is
 derivable rather than editorial: it needs no new metadata beyond what the
@@ -342,7 +342,7 @@ A future agent picking this up should, in order:
    this transcription.
 
 The hub ([`docs/generation.md`](generation.md)) stays the front door. The witness
-rungs ([`docs/generation-witness-ladders.md`](generation-witness-ladders.md)) stay
+rungs ([`docs/archive/generation-witness-ladders.md`](archive/generation-witness-ladders.md)) stay
 the source of `entitled`; this memo is the *authority-surface projection* of that
 ladder's benchmark column — the answer to "which of these numbers proves the
 product works today, and which one proves it could."

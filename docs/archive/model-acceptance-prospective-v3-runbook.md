@@ -3,11 +3,13 @@ title: "Prospective exact-model v3 campaign runbook"
 description: "After v2 produced 18 of 18 provider rejections, a fresh campaign needs a new committed declaration and may not replace the standing attempts. This is that plan."
 ---
 
+> **Archived 2026-11-23** · reason: completed · replacement: [docs/model-production-readiness-inventory.md](../model-production-readiness-inventory.md) · scope: v3 prospective acceptance campaign runbook; campaign closed 2026-08-05
+
 # Prospective exact-model v3: post-reset campaign runbook
 
 Issue: [#4845](https://github.com/anthony-chaudhary/fak/issues/4845)
 Production-readiness parent: [#4633](https://github.com/anthony-chaudhary/fak/issues/4633)
-Supersedes-context: v2 HOLD readout `docs/model-acceptance-prospective-v2-readout.md`
+Supersedes-context: v2 HOLD readout `docs/archive/model-acceptance-prospective-v2-readout.md`
 
 ## Why this exists
 
@@ -64,7 +66,7 @@ Exit codes: `0` PASS (all eligible runs satisfied the declared contract), `4` HO
 
 - Raw provider JSONL under `--raw-dir` contains provider/session metadata — it stays
   in operator scratch and is **not** committed (same as v2).
-- Publish a scrubbed readout mirroring `docs/model-acceptance-prospective-v2-readout.md`:
+- Publish a scrubbed readout mirroring `docs/archive/model-acceptance-prospective-v2-readout.md`:
   declaration SHA-256, canonical raw-manifest SHA-256, completed-report SHA-256, the
   per-model eligible/provider-failure table, and the runner exit code.
 - Link results to #4845 and #4633 without treating the retrospective refold or the v2

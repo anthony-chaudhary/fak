@@ -3,6 +3,8 @@ title: "Generation Concurrent-Trunk Playbook"
 description: "How now, next, second-next, and future work streams share one trunk without feature branches, stale evidence, or runtime exposure confusion."
 ---
 
+> **Archived 2026-11-23** · reason: superseded · replacement: [docs/generation.md](../generation.md) · scope: epic #1625 concurrent-trunk memo; fak-flow lanes now own this workflow
+
 # Generation Concurrent-Trunk Playbook
 
 **Issue:** #1651.
@@ -115,10 +117,10 @@ affected stream if needed, and keep the public evidence with the work item.
 A future agent continuing generation concurrency work should read, in order:
 
 1. This playbook.
-2. [`docs/generation.md`](generation.md) for stream definitions and sidecars.
-3. [`docs/dispatch-loop.md`](dispatch-loop.md) for worker routing and prompt
+2. [`docs/generation.md`](../generation.md) for stream definitions and sidecars.
+3. [`docs/dispatch-loop.md`](../dispatch-loop.md) for worker routing and prompt
    behavior.
-4. [`docs/agentic-issue-dispatch.md`](agentic-issue-dispatch.md) for manual
+4. [`docs/agentic-issue-dispatch.md`](../agentic-issue-dispatch.md) for manual
    wave launch and witnessed rollup.
 
 Then inspect the target issue, run the relevant route/arbitration command, and

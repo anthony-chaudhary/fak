@@ -3,6 +3,8 @@ title: "Prospective exact-model v2: infrastructure HOLD"
 description: "Every preregistered attempt reached the authenticated provider boundary and hit the same weekly-limit rejection, so v2 is infrastructure evidence only."
 ---
 
+> **Archived 2026-11-23** · reason: superseded · replacement: [docs/model-production-readiness-inventory.md](../model-production-readiness-inventory.md) · scope: v2 prospective acceptance HOLD readout
+
 # Prospective exact-model v2: infrastructure HOLD
 
 Issue: [#4851](https://github.com/anthony-chaudhary/fak/issues/4851)  

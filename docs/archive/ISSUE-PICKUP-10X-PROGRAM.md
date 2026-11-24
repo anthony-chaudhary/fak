@@ -3,6 +3,8 @@ title: "fak issue-pickup 10x program — from ungated creation to born-pickup-re
 description: "The trajectory ledger for making fak's default GitHub issue surface 10x easier to pick up and 10x less wasteful: the baseline, the target, and the ordered ladder of changes that shift the issue-hygiene scorecard's checks left into the creation path — with proof."
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: none · scope: 2026-07 issue-pickup program ledger; never executed
+
 # The issue-pickup 10x program — make every issue born pickup-ready
 
 fak files GitHub issues from a fan of independent producers — `fak issue create`,
@@ -31,7 +33,7 @@ obvious, ready choice*, with the evidence that proves it.
 > The living per-run snapshot is `fak score issue-hygiene` (against the live
 > backlog); this file is the hand-kept **trajectory** — baseline, target, and the
 > ordered ladder, with the witness each rung must show. Sibling of
-> [`CODE-2X-PROGRAM.md`](CODE-2X-PROGRAM.md), one surface up: it grades the
+> [`CODE-2X-PROGRAM.md`](../CODE-2X-PROGRAM.md), one surface up: it grades the
 > *backlog we create*, not the *code we ship*.
 
 ## The measure — `fak score issue-hygiene`

@@ -173,6 +173,6 @@ The next code slice should be small and witnessed. Reasonable options:
 - Add a fixture test proving a wave admits disjoint `gen/now` plus `gen/next`
   work and defers an overlapping `gen/future` item with `collision_deferred`.
 
-Use [`docs/generation-concurrent-trunk-playbook.md`](generation-concurrent-trunk-playbook.md)
+Use [`docs/archive/generation-concurrent-trunk-playbook.md`](archive/generation-concurrent-trunk-playbook.md)
 for the branchless team rules and [`docs/dispatch-loop.md`](dispatch-loop.md)
 for the live issue-dispatch pipeline.

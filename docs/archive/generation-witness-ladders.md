@@ -3,6 +3,8 @@ title: "Generation-Specific Witness Ladders"
 description: "The minimum-evidence ladders that let each generation stream (now / next / second-next / future) carry a different proof bar for the same four claim types — planning, code, benchmark, and operator — while every claim still names a witness. A now bug fix and a second-next architecture bet ride different rungs, not different truth standards."
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: [docs/generation.md](../generation.md) · scope: gen/future design memo; the described tooling was never built
+
 # Generation-Specific Witness Ladders
 
 **Issue:** #1659.
@@ -19,7 +21,7 @@ generation epic. It answers one question that #1625 raised but did not resolve:
 future research and now bug fixes need *different proof bars*, but both need
 witnesses — so what is the **minimum evidence** that promotes a claim within
 each generation, per claim type? The canonical stream taxonomy and the flat
-promotion/demotion evidence list live in [`docs/generation.md`](generation.md);
+promotion/demotion evidence list live in [`docs/generation.md`](../generation.md);
 this memo is the *ladder* refinement of that list: it turns "code work needs a
 focused test" into a per-generation rung with an explicit floor.
 
@@ -83,14 +85,14 @@ simulation).
 
 | Generation | Minimum witness (the floor) |
 |---|---|
-| `gen/future` | A *modeled* estimate with its inputs stated and labeled **MODELED / projected** — never "measured." The simulator (`docs/generation-future-proof-of-value-simulator.md`) output counts here. |
+| `gen/future` | A *modeled* estimate with its inputs stated and labeled **MODELED / projected** — never "measured." The simulator (`docs/archive/generation-future-proof-of-value-simulator.md`) output counts here. |
 | `gen/second-next` | A simulation or micro-measurement on a fixture, with the counterfactual named and the extrapolation-to-real-workload assumption stated. Still labeled projected. |
 | `gen/next` | A captured measurement on a real (if small) workload, reproducible from a named command, labeled **MEASURED**, with the baseline it beats named. |
 | `gen/now` | A captured, reproducible measurement with baseline, N, and command, provenance-labeled `WITNESSED` (fak authored) vs `OBSERVED` (relayed), passing the provenance guard. Regression-gated if it claims a default. |
 
 The benchmark ladder is why this issue routed to the `bench` lane: it is the
 column where the "measured vs modeled" provenance discipline
-([`tools/check_provenance_labels.py`](../tools/check_provenance_labels.py)) does
+([`tools/check_provenance_labels.py`](../../tools/check_provenance_labels.py)) does
 the enforcing, and where `internal/bench` fan-run output is the `gen/now`-rung
 artifact. A benchmark claim that labels a MODELED number "measured" is not a
 low rung — it is a **broken** witness and fails CI at every generation.
@@ -158,7 +160,7 @@ it:
   hiding over-carry rather than pacing it. That pushes the ladder back to
   `gen/future` for a recut of the second-next rung.
 - **Retire** the memo if the flat evidence list in
-  [`docs/generation.md`](generation.md) plus a single wired gate fully subsume
+  [`docs/generation.md`](../generation.md) plus a single wired gate fully subsume
   the ladders; then this doc collapses into a pointer from the hub with no
   standalone taxonomy left to carry.
 - **Retire** if generations stop carrying different proof costs (all work
@@ -197,5 +199,5 @@ generation stream and tag which rung its witness currently clears — that is th
 provenance guard already exists and only needs the generation-label + claim-type
 read bolted on; (c) if a claim type is found that fits no column, cut a new
 column rather than overloading the benchmark one. The hub
-([`docs/generation.md`](generation.md)) stays the front door; this memo is the
+([`docs/generation.md`](../generation.md)) stays the front door; this memo is the
 minimum-evidence refinement of its Evidence section.

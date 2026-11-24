@@ -1,11 +1,11 @@
 ---
 title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"
-description: "fak's demo-quality scorecard grades 80 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
+description: "fak's demo-quality scorecard grades 113 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
 ---
 
 # Demo-quality scorecard
 
-<!-- demo-quality-scorecard: 2026-07-28 · process: tools/demo_quality_scorecard.py -->
+<!-- demo-quality-scorecard: 2026-11-23 · process: tools/demo_quality_scorecard.py -->
 
 > Regenerate: `python tools/demo_quality_scorecard.py --markdown --stamp DATE > docs/DEMO-QUALITY-SCORECARD.md`
 > Verify snapshot freshness: `python tools/demo_quality_scorecard.py --check-doc`
@@ -16,11 +16,11 @@ description: "fak's demo-quality scorecard grades 80 demos on five deterministic
 
 | Metric | Value |
 |---|---|
-| Demos scored | 80 |
-| **Demo-debt (total defects)** | **0** |
-| Mean score | 98.5/100 |
-| Median / min / max | 100.0 / 89.0 / 100.0 |
-| Grade distribution | A:79 B:1 C:0 D:0 F:0 |
+| Demos scored | 113 |
+| **Demo-debt (total defects)** | **6** |
+| Mean score | 98.3/100 |
+| Median / min / max | 100.0 / 61.4 / 100.0 |
+| Grade distribution | A:110 B:1 C:0 D:2 F:0 |
 
 ## Per-demo scores
 
@@ -28,6 +28,8 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 | Score | Grade | Debt | run | repro | scope | self | docs | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
+| 61.4 | D | 3 | 45 | 48 | 48 | 100 | 78 | `examples/serve-receipt` |
+| 67.4 | D | 3 | 86 | 62 | 48 | 88 | 48 | `cmd/piidemo` |
 | 89.0 | B | 0 | 86 | 100 | 90 | 88 | 78 | `cmd/qwen36codedemo` |
 | 91.0 | A | 0 | 86 | 100 | 100 | 88 | 78 | `examples/mobile-ffi` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/playground` |
@@ -45,6 +47,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 96.4 | A | 0 | 100 | 100 | 90 | 100 | 90 | `examples/normgate-evasion` |
 | 96.6 | A | 0 | 86 | 100 | 100 | 100 | 100 | `examples/deny-as-value` |
 | 96.6 | A | 0 | 86 | 100 | 100 | 100 | 100 | `examples/grammar-repair` |
+| 97.8 | A | 0 | 100 | 100 | 100 | 88 | 100 | `examples/local-hardware-benchmark` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/addressable-evict` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/admit-and-log` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/agent-ab` |
@@ -57,6 +60,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/policy-loader-properties` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/radixattention` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/remote-vm-guard` |
+| 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/security-fleet-governance` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/self-modify-floor` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/session-reload` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/vdso-cache-hit` |
@@ -64,15 +68,21 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/vm-fs-guard` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `cmd/marketdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/adjudication-demo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/affectedtests-comparison` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/agentdojo-redteam` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/auth-hardening` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/commit-audit-in-60s` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/component-contracts` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/compose-ollama` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/corporate-tls` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/custom-harness` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/deny-in-60s` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/escalation-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/extdriver` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/federated-changes` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/ifc-taint-flow` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/independent-server` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/macos-guard-child-memory-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/mcp` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/mcp-client` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/observability` |
@@ -81,8 +91,11 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/preflight-ladder` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/presets` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/quarantine-demo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/receipt-trigger-rsi` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/release-steward` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/shared-task-record` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/shared-task-record-verdicts` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/skill-program` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/steward-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/trace-reset` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/wire-proof` |
@@ -90,30 +103,71 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/witness-gate` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/a2ademo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/agentbenchdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/archreportdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/cachedemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/ctxdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/ctxplandemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/cxlpooldemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/dashboarddemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/disambiguationdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/fabricmapdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/fanoutdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/generationcontroldemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/guarddemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/harnesswebdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/hwcachedemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/instructiondemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/memqdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/microcachedemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/microcontextdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/microfleetdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/microharnessdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/perfrsidemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/poisonedmcpdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/quantdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/resultbudgetdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/sessionintentdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/simpledemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/stackpreflightdemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/stackresolvedemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/supportgraphdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/timewolfdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/tokendemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/toolcallcontroldemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/trychatdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/turntaxdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/unseedemo` |
+| 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/workloadfitdemo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/causalbench` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/deletioncert` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `cmd/demorace` |
 
 ## Demo-debt work-list
 
-No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
+### `examples/serve-receipt` — 3 defect(s), score 61.4 (D)
+- runnable: no runnable entry: no run script / `go run` / `python x.py` / make command, and no `__main__` script — there is no one-command way to run it
+- reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run — a reader cannot tell what a correct run looks like
+- honest_scope: no scope / 'what this does not claim' statement — a demo that only shows the win overclaims; state the boundary honestly
+
+### `cmd/piidemo` — 3 defect(s), score 67.4 (D)
+- reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run — a reader cannot tell what a correct run looks like
+- honest_scope: no scope / 'what this does not claim' statement — a demo that only shows the win overclaims; state the boundary honestly
+- documented: no H1 title (a '# Title' line) in the README
 
 ## Soft signals (score only, not debt)
+
+### `examples/serve-receipt`
+- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
+- honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
+- documented: no run/usage section and no visible run command — hard to find how to start
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `cmd/piidemo`
+- runnable: a runnable script exists but the README shows no paste-able command to launch it
+- honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
+- self_contained: no stated prerequisites — a cold runner can't tell what to install first
+- documented: no run/usage section and no visible run command — hard to find how to start
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `cmd/qwen36codedemo`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
@@ -190,6 +244,9 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 ### `examples/grammar-repair`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
 
+### `examples/local-hardware-benchmark`
+- self_contained: no stated prerequisites — a cold runner can't tell what to install first
+
 ### `examples/addressable-evict`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
@@ -224,6 +281,9 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/remote-vm-guard`
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `examples/security-fleet-governance`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/self-modify-floor`

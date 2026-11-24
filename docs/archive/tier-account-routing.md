@@ -3,6 +3,8 @@ title: "Tier to account routing (dispatch marathons)"
 description: "How fak fleet dispatch maps a work tier to the account and model that serves it, and how that routing holds up across long dispatch marathons."
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: none · scope: 2026-07 seat routing with hard-coded seat names; internal/issuecontract removed
+
 # Tier ↔ account routing (dispatch marathons)
 
 How fleet dispatch maps work *tier* to the account/model that serves it, how an

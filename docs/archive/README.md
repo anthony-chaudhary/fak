@@ -19,7 +19,7 @@ Archived files preserve prior designs, retired instructions, and snapshots that 
 | A rejected or retired proposal | The option and its evidence were considered, then removed from active guidance. | Follow its decision record or current architecture route for the selected path. |
 | No replacement link | The file is still historical evidence, not current instruction. | Start from the [documentation index](../index.md) or report the missing replacement through [CONTRIBUTING.md](../../CONTRIBUTING.md#reporting-issues). |
 
-The current file in this directory, [`README-2026-06-25-before-fresh-start.md`](../notes/README-2026-06-25-before-fresh-start.md), is a snapshot of the repository front door before its 2026-06-25 refresh. Its maintained replacement is the root [`README.md`](../../README.md).
+Each archived file opens with a one-line banner naming its archive date, reason, replacement and scope; `python tools/doc_reap.py check` fails when one is missing.
 
 ## Lifecycle and replacement contract
 
@@ -39,3 +39,17 @@ If no maintained replacement exists because the behavior was removed, link the r
 An archived command can target a different platform, release, backend, or runtime mode from the one you use today. Treat its mode statement as historical scope, then select current instructions for your environment. The [dated-notes landing page](../notes/) covers evidence that remains under research or historical investigation without necessarily being retired into this archive.
 
 For machine-oriented discovery, use [`llms.txt`](../../llms.txt). For current release guidance, use the [release index](../releases/).
+
+## Reaping and refreshing docs
+
+Docs rot in two ways, and each has its own fix:
+
+- **Generated snapshots** (`*-SCORECARD.md` and other docs stamped `process: tools/...`) drift whenever nobody reruns the generator. Refresh them with the command in their `Regenerate:` line; never hand-edit them and never archive them while the generator works.
+- **Hand-written docs** go stale when the code they describe changes or never ships: plans and programs nobody executed, dated campaign readouts, audits of removed code. These move here.
+
+The loop, from the repository root:
+
+1. `python tools/doc_reap.py rank --top 40` lists candidates worst-first. The score combines days since the last commit, inbound references (index files excluded, so orphans show up), the `doc_appeal_scorecard.py` prose score and snapshot age. Its `action` column says `regenerate` for stamped snapshots, `archive` for orphans and `repoint+archive` when code or config names the path.
+2. Read each top row and decide: keep (still describes live code), merge (a short stub that belongs in a named live doc), regenerate, or archive. A rank is a queue, not a verdict; short docs tied to live code are usually keepers.
+3. `python tools/doc_reap.py archive docs/X.md --reason <superseded|retired|completed|rejected|orphaned|stale-snapshot> --successor <path|none> --scope "<what it records>"` moves the doc here with `git mv`, writes the banner, rebases the doc's own relative links and repoints every inbound link, including code comments and tests that name `docs/X.md`. Evidence records (`docs/_witnesses/`, `*.jsonl`) keep their original paths. Add `--dry-run` to preview.
+4. Regenerate `llms-full.txt` (`python tools/gen_llms_full.py`) and run `python tools/doc_reap.py check` plus the link gates before landing.

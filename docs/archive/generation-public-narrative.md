@@ -3,11 +3,13 @@ title: "Generation Public Narrative — talking about fak horizons"
 description: "Market-facing rules for describing fak generations — shipped, next, and research — honestly and without hype, the external half of the Generation Contract."
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: [docs/generation.md](../generation.md) · scope: gen/future design memo; the described tooling was never built
+
 # Generation Public Narrative
 
 Market-facing rules for talking about fak generations — **shipped**, **next**,
 and **research** — honestly and without hype. This is the external half of the
-[Generation Contract](generation.md): that doc governs how the fleet labels and
+[Generation Contract](../generation.md): that doc governs how the fleet labels and
 promotes work internally; this doc governs how we describe those horizons to the
 market, so a public statement never overclaims what a stream actually is.
 
@@ -76,7 +78,7 @@ The public narrative does not relax any of the three orthogonality guarantees:
 **Promotion evidence** (a public word may move closer to Shipped when):
 
 - The internal stream promoted with its own witness (see
-  [Generation Contract → Evidence](generation.md#evidence)), *and*
+  [Generation Contract → Evidence](../generation.md#evidence)), *and*
 - A user-reproducible proof now exists: a command that runs with no key/GPU, a
   captured output, or a default-exposure witness. Only then may `[NEXT]` become
   `[SHIPPED]` in public copy.
@@ -118,7 +120,7 @@ The public narrative does not relax any of the three orthogonality guarantees:
 
 ## See also
 
-- [Generation Contract](generation.md) — the internal now/next/second-next/future
+- [Generation Contract](../generation.md) — the internal now/next/second-next/future
   taxonomy, promotion verbs, and intake rules this narrative maps to.
 - [`docs/launch/positioning-brief.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/launch/positioning-brief.md) — the honest-fence
   discipline applied to specific launch claims.

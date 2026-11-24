@@ -38,7 +38,7 @@ import (
 //     schema never rewrites a shipped /N. See docs/generation-abi-compatibility-policy.md.
 //   - RELEASE NOTE PLACEMENT — the note lands in the section its horizon folds
 //     onto (see PublicSection). Filing a non-shipped horizon under "shipped" is
-//     horizon laundering. See docs/generation-public-narrative.md.
+//     horizon laundering. See docs/archive/generation-public-narrative.md.
 //
 // Generation stays orthogonal to three things, and this gate is built to keep
 // them separate:

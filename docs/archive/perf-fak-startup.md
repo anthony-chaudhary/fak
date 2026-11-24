@@ -3,6 +3,8 @@ title: "Where fak's 172 ms startup actually goes"
 description: "A measured attribution of fak.exe's per-spawn cost: not binary size, not package init, but an O(journal) rescan of the usage log on every invocation — and the fix that removes it."
 ---
 
+> **Archived 2026-11-23** · reason: stale-snapshot · replacement: none · scope: 2026-08 startup profile; the measured cost was since removed
+
 # Profile: `fak.exe` per-spawn cost (#5626)
 
 **Status:** attributed and the named cost removed (2026-08-06) · **Host:** Windows 11 Pro

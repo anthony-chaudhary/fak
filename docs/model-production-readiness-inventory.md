@@ -58,7 +58,7 @@ fak model readiness-inventory --input examples/model-acceptance-prospective-v3-r
 
 The source artifact is [`examples/model-acceptance-prospective-v3-report.json`](../examples/model-acceptance-prospective-v3-report.json) at `examples/model-acceptance-prospective-v3-report.json@r1+gf722bd39cd`, evaluated by `internal/modelaccept@r6+gf722bd39cd`. Corpus `top3-prospective-sentinel-v3` was declared and published before observation; the 18 fixed attempts ran from `2026-08-05T15:26:54-07:00` through `2026-08-05T15:29:37-07:00`. Each exact ID has six eligible samples and passes only its declared tier: Opus T0, Sonnet T1, and Haiku T2. The inventory fails closed for missing/mismatched/stale provenance and cannot borrow a PASS across model IDs.
 
-These PASS rows cover only the two declared production-shaped task classes; they do not change the independent HOLD/PARTIAL gates below. Runtime dispatch consumes this exact-ID artifact and refuses above-tier, absent, stale, malformed, alias, or HOLD evidence before provider invocation. The scrubbed comparison and raw-stream digest are in [`docs/model-acceptance-prospective-v3-readout.md`](model-acceptance-prospective-v3-readout.md).
+These PASS rows cover only the two declared production-shaped task classes; they do not change the independent HOLD/PARTIAL gates below. Runtime dispatch consumes this exact-ID artifact and refuses above-tier, absent, stale, malformed, alias, or HOLD evidence before provider invocation. The scrubbed comparison and raw-stream digest are in [`docs/archive/model-acceptance-prospective-v3-readout.md`](archive/model-acceptance-prospective-v3-readout.md).
 
 ## Evidence and remaining work by model
 

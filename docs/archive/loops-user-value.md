@@ -3,6 +3,8 @@ title: "Why loops matter to end users"
 description: "Product-facing explanation of normal loops, harness loops, fleet loops, and super loops: how they reduce repeated token spend, raise fleet efficiency, and make autonomous work measurable instead of self-reported."
 ---
 
+> **Archived 2026-11-23** · reason: superseded · replacement: [docs/integrations/harness-loop-playbook.md](../integrations/harness-loop-playbook.md) · scope: 2026-07 product-value prose for loops
+
 # Why loops matter to end users
 
 A loop is a way to spend agent budget only where the next step is still worth it.
@@ -148,15 +150,15 @@ Each rung adds evidence. None requires trusting a worker's final message as proo
 
 ## Where to Look in This Repo
 
-- [`docs/dispatch-loop.md`](dispatch-loop.md) shows the GitHub-issue fleet loop:
+- [`docs/dispatch-loop.md`](../dispatch-loop.md) shows the GitHub-issue fleet loop:
   spawn, ship a commit, witness, close, and refresh status.
-- [`docs/super-loops.md`](super-loops.md) defines the read-first super loop and its
+- [`docs/super-loops.md`](../super-loops.md) defines the read-first super loop and its
   five properties.
-- [`docs/fak/dojo.md`](fak/dojo.md) shows the token-saving prediction, run,
+- [`docs/fak/dojo.md`](../fak/dojo.md) shows the token-saving prediction, run,
   measure, score, and recalibrate loop.
-- [`docs/cache-value-rollup.md`](cache-value-rollup.md) keeps witnessed kernel reuse
+- [`docs/cache-value-rollup.md`](../cache-value-rollup.md) keeps witnessed kernel reuse
   and observed provider savings in separate accounts.
-- [`docs/standards/net-true-value.md`](standards/net-true-value.md) is the standard
+- [`docs/standards/net-true-value.md`](../standards/net-true-value.md) is the standard
   for any efficiency claim this page would let a user make.
 
 Useful readouts:

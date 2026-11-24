@@ -45,7 +45,7 @@ Generation is independent of shared trunk. All streams still land through
 any other fak work. A stream label never authorizes a feature branch, a side
 worktree escape, or stale trunk hygiene.
 The branchless team workflow is spelled out in
-[`docs/generation-concurrent-trunk-playbook.md`](generation-concurrent-trunk-playbook.md):
+[`docs/archive/generation-concurrent-trunk-playbook.md`](archive/generation-concurrent-trunk-playbook.md):
 stream labels partition evidence and horizon, while `dos arbitrate`, path scope,
 and runtime gates decide whether concurrent work can safely run.
 Loop scheduling for concurrent generation workers is pinned in
@@ -184,12 +184,12 @@ after one focused gate lands.
 policy that later code can enforce. The option-contract shape such a bet must
 carry — assumption set, reversible seam, cost to keep alive, promotion trigger,
 and kill trigger — is pinned in
-[`docs/generation-second-next-option-contracts.md`](generation-second-next-option-contracts.md),
+[`docs/archive/generation-second-next-option-contracts.md`](archive/generation-second-next-option-contracts.md),
 the `gen/second-next` companion to the `gen/future` real-options model. The
 metadata and reporting for a dependency that crosses a generation boundary — how
 the edge is recorded and how a stalled forward bet surfaces in the debt metric —
 is pinned in
-[`docs/generation-cross-generation-dependency-edges.md`](generation-cross-generation-dependency-edges.md).
+[`docs/archive/generation-cross-generation-dependency-edges.md`](archive/generation-cross-generation-dependency-edges.md).
 
 `gen/future`: research a standards analogue or market-facing narrative, with a
 memo that names the decision it could influence.

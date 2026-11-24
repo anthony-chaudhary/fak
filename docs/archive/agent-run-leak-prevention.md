@@ -3,6 +3,8 @@ title: "AgentRun leak-prevention boundary"
 description: "Normative public spec for AgentRun identity, parent-child propagation, PolicyDigest pinning, ToolCallID linkage, inherited capability envelopes, unmanaged-spawn default deny, and the witness suite for agent-run leak prevention."
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: none · scope: normative spec for an AgentRun broker that was never built
+
 # AgentRun leak-prevention boundary
 
 Status: public contract spec for issue #2355. This page defines the vocabulary

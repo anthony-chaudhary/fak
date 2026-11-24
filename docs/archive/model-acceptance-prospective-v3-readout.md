@@ -3,6 +3,8 @@ title: "Prospective exact-model v3: capability PASS"
 description: "The preregistered post-reset campaign completed all 18 fixed attempts and witnessed the exact production IDs at their declared tiers."
 ---
 
+> **Archived 2026-11-23** · reason: completed · replacement: [docs/model-production-readiness-inventory.md](../model-production-readiness-inventory.md) · scope: v3 prospective acceptance result as of 2026-08-05
+
 # Prospective exact-model v3: capability PASS
 
 Issue: [#4633](https://github.com/anthony-chaudhary/fak/issues/4633)  
@@ -43,7 +45,7 @@ not evidence for unrelated protocol/cache, pricing, canary, or rollback gates.
 | `claude-haiku-4-5-20251001` | T2 | 6 | 100% | 0% | 0% | 6,260 ms | 22.0 | $0.013846 | PASS |
 
 The completed machine-readable artifact is
-[`examples/model-acceptance-prospective-v3-report.json`](../examples/model-acceptance-prospective-v3-report.json).
+[`examples/model-acceptance-prospective-v3-report.json`](../../examples/model-acceptance-prospective-v3-report.json).
 It retains every successful or failed scheduled attempt; this run had no failures to
 classify. Runtime enforcement remains the fail-closed dispatch seam shipped by #4799:
 above-tier, absent, stale, malformed, alias, or HOLD evidence is refused before the

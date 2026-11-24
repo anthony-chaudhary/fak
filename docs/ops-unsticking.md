@@ -140,7 +140,7 @@ and is the one with the nicer name.
 
 At a 4% launch rate, every improvement to lane selection, dedup, arbitration,
 capacity planning, and conservation is an improvement to a queue that mostly never
-drains. `docs/ISSUE-PICKUP-10X-PROGRAM.md` makes the same argument from the
+drains. `docs/archive/ISSUE-PICKUP-10X-PROGRAM.md` makes the same argument from the
 product side — a perfect backlog cannot be picked up if nothing picks it up.
 
 The repo's own tail-wag audit reached the identical conclusion on the job side:
@@ -308,6 +308,6 @@ nothing landed, 0 still live — this is an outage, not an idle fleet` instead o
   clarification behind lesson 2.
 - `docs/OPERATOR-HEAVINESS.md` — the scorecard behind lesson 5, regenerated
   2026-09-28 after 39 days of staleness.
-- `docs/ISSUE-PICKUP-10X-PROGRAM.md` — the product-side argument for lesson 3.
+- `docs/archive/ISSUE-PICKUP-10X-PROGRAM.md` — the product-side argument for lesson 3.
 - `docs/STEERABILITY-SCORECARD.md` — the sibling growth-invariant index; graded A
   where operator-heaviness grades D, which is itself worth noticing.

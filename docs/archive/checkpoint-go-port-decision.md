@@ -3,6 +3,8 @@ title: "Decision: do NOT port the session checkpoint to Go (gate #634 chose peri
 description: "tools/session_checkpoint.py stays Python. A Go port was only justified if #634 moved checkpointing onto the PostToolUse hot path; #634 closed on the periodic-only arm, so the precondition is unmet. Revisit only if a future PostToolUse checkpoint arm lands."
 ---
 
+> **Archived 2026-11-23** · reason: completed · replacement: none · scope: closed 2026-06 decision to keep tools/session_checkpoint.py in Python
+
 # Decision: keep the session checkpoint in Python — do not port to Go (`#635`)
 
 **Verdict: DO NOT PORT.** `tools/session_checkpoint.py` (commit `23f1261`) stays a

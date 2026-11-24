@@ -3,6 +3,8 @@ title: "fak testing and linting infrastructure scorecard"
 description: "A current-state score and top-20 improvement spine for fak's testing, linting, CI, and agentic developer-experience infrastructure."
 ---
 
+> **Archived 2026-11-23** · reason: stale-snapshot · replacement: [docs/dev-tooling.md](../dev-tooling.md) · scope: 2026-06-30 hand-entered snapshot; cmd/fak/codelint no longer exists
+
 # Testing and linting infrastructure scorecard
 
 <!-- testing-linting-infra-scorecard: 2026-06-30 - process: evidence-backed manual snapshot -->

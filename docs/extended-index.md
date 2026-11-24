@@ -32,7 +32,7 @@ These reader-facing references complement the curated paths above. They are grou
 - [latest model eval policy](latest-model-eval-policy.md)
 - [manage](manage.md)
 - [on demand releases](on-demand-releases.md)
-- [perf fak startup](perf-fak-startup.md)
+- [perf fak startup](archive/perf-fak-startup.md)
 - [ponytail default medium audit](ponytail-default-medium-audit.md)
 - [portability adapter sdk](portability-adapter-sdk.md)
 - [portability continuity](portability-continuity.md)

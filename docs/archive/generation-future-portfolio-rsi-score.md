@@ -3,6 +3,8 @@ title: "Generation Portfolio RSI Score"
 description: "A decision-model spec for a portfolio-level RSI score that tracks whether the whole generation portfolio is improving over time — generation balance, promotion velocity, retired assumptions, and avoided contention — as a frontier and trend, never a bounded completion percentage."
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: [docs/generation.md](../generation.md) · scope: gen/future design memo; the described tooling was never built
+
 # Generation Portfolio RSI Score
 
 **Issue:** #1677.
@@ -21,7 +23,7 @@ alone; reading the whole generation epic
 
 The problem this issue names: *the whole portfolio should improve over time, not only
 individual issues.* fak already values a **single** `gen/future` bet
-([real-options model](generation-future-real-options-model.md), #1666) and compares
+([real-options model](../generation-future-real-options-model.md), #1666) and compares
 option value **across** streams at one instant
 ([proof-of-value simulator](generation-future-proof-of-value-simulator.md), #1672).
 Neither answers the recursive question: *between last week and this week, did the
@@ -30,11 +32,11 @@ it is what an RSI score is for.
 
 This composes with, and does not duplicate, the existing surfaces:
 
-- The [real-options model](generation-future-real-options-model.md) (#1666) values one
+- The [real-options model](../generation-future-real-options-model.md) (#1666) values one
   issue and emits a disposition verb (exercise / hold / retire / hedge).
 - The [proof-of-value simulator](generation-future-proof-of-value-simulator.md) (#1672)
   compares option cost and payoff bands **across** streams at one moment.
-- The `debt_score` in [`generation.md`](generation.md) §Debt Metric is a cheap
+- The `debt_score` in [`generation.md`](../generation.md) §Debt Metric is a cheap
   lane-aggregate *pressure* signal (higher = worse) read once.
 - **This RSI score is the portfolio-over-time fold that sits above all of them.** It
   reads the same cheap inputs those surfaces use, but reports a **direction between two
@@ -46,14 +48,14 @@ This composes with, and does not duplicate, the existing surfaces:
 The generation program is an **ongoing optimization program**, not a discrete
 deliverable — there is always a better balance and a faster honest promotion cadence,
 and it is never "done." The project already forbids putting such a program on a
-completion bar (see [`AGENTS.md`](../AGENTS.md) §Planning: two kinds of work, and
-[`generation.md`](generation.md) §"Generation is independent of completion
+completion bar (see [`AGENTS.md`](../../AGENTS.md) §Planning: two kinds of work, and
+[`generation.md`](../generation.md) §"Generation is independent of completion
 percentage"). So the RSI score is reported the way a program is: **a frontier value
 plus a trend**, never a bounded 0–100 grade. A single absolute RSI number is not a
 verdict; it is only meaningful as a **Δ against its own prior fold**.
 
 The score is also a **scorecard side-channel, not a gate**. It mirrors
-`rsiloop.Measurement.Score` (see [`rsi-loop.md`](rsi-loop.md) §"Structured scores for
+`rsiloop.Measurement.Score` (see [`rsi-loop.md`](../rsi-loop.md) §"Structured scores for
 multi-axis controls"): "A scorecard can explain a metric; it cannot make a REVERT into
 a KEEP." The portfolio RSI **explains** whether the portfolio is improving so an
 operator can act on intake and rebalancing. It never blocks a commit, never reorders
@@ -70,7 +72,7 @@ dollar figure is invented anywhere.
 ### 1. Generation balance (`B`) — is capacity spread deliberately?
 
 Is live evidence spread across the four streams inside each stream's capacity
-envelope ([capacity model](generation-agent-capacity-model.md))?
+envelope ([capacity model](../generation-agent-capacity-model.md))?
 
 - **Inputs:** count of live-evidence issues per stream (open + witnessed-in-flight),
   against that stream's capacity envelope.
@@ -93,13 +95,13 @@ The net rate of evidence-backed movement toward `now` per recheck window.
   time" signal the issue's `## Why` names.
 - **Guard:** only *witnessed* promotions count. A bare label flip with no evidence is
   not a promotion, or the axis just rewards label-churn (the [Hidden demotion /
-  Branch-by-label anti-patterns](generation.md) apply here unchanged).
+  Branch-by-label anti-patterns](../generation.md) apply here unchanged).
 
 ### 3. Retired assumptions (`R`) — is the portfolio self-correcting?
 
 The rate of invalidating assumptions that **fired** and produced a named
 `retire`/`demote` with a closed sunset-trigger token
-([sunset criteria](generation-future-sunset-criteria.md): `CARRY_EXHAUSTED`,
+([sunset criteria](../generation-future-sunset-criteria.md): `CARRY_EXHAUSTED`,
 `ASSUMPTION_FIRED`, `STRIKE_UNREACHABLE`, `SUPERSEDED`, `ORPHANED`, `STALE_RECHECK`,
 `HORIZON_LAUNDERED`).
 
@@ -200,11 +202,11 @@ commit — the RSI score never promotes a bet, it only reports that promotions h
 
 **Demotion / retirement evidence** for the score itself is equally concrete, and is
 named with a closed trigger token, a witness, and a disposition — never a silent label
-change — exactly as the [sunset criteria](generation-future-sunset-criteria.md) require:
+change — exactly as the [sunset criteria](../generation-future-sunset-criteria.md) require:
 
 - The RSI trend never changes an intake or rebalance decision across two recheck cycles
   — it is decoration, and decoration retires (`CARRY_EXHAUSTED`).
-- The `debt_score` in [`generation.md`](generation.md) already captures portfolio
+- The `debt_score` in [`generation.md`](../generation.md) already captures portfolio
   health well enough that the four-axis trend adds nothing over reading it twice — fall
   back to the coarser signal and retire this one (`SUPERSEDED`).
 - The four axes prove un-witnessable cheaply, so the fold is fabricated precision
@@ -240,28 +242,28 @@ trend as an operator-facing fact once its inputs have stopped being honest.
 
 Each a separate issue, so this spec is not silently deferred into code (and so the
 generation program keeps its "spine first, then fan out" default — see
-[`spine-first-defaults.md`](spine-first-defaults.md)):
+[`spine-first-defaults.md`](../spine-first-defaults.md)):
 
 - A `fak generation rsi` verb (pure fold in `internal/<name>/`, thin shell in
   `cmd/fak/`) that reads the four axes off open generation issues + the commit-sidecar
   and arbitration journals, and emits the vector, the scalar frontier, and the Δ vs the
   last recorded fold as JSON — appending one row to a versioned JSONL ledger so the
   trend is durable (the additive-only ledger discipline in
-  [`generation-abi-compatibility-policy.md`](generation-abi-compatibility-policy.md)).
+  [`generation-abi-compatibility-policy.md`](../generation-abi-compatibility-policy.md)).
 - A carry/trend field in the milestone report's generation section, fed by the RSI Δ,
   reported next to the existing `debt_score` so the operator sees pressure *and*
   direction side by side.
 - A fixture that walks the worked example above (the rising fold and the falling fold)
   and asserts the Δ direction on each axis matches the rule — the deterministic,
-  wall-clock-free witness an RSI score requires (see [`rsi-loop.md`](rsi-loop.md) §"The
+  wall-clock-free witness an RSI score requires (see [`rsi-loop.md`](../rsi-loop.md) §"The
   metric is a legal witness").
-- A discoverability entry in [`llms.txt`](../llms.txt) §"Start here" for this page,
+- A discoverability entry in [`llms.txt`](../../llms.txt) §"Start here" for this page,
   landed with a clean `llms-full.txt` regeneration on a quiet tree (the generator inlines
   each linked doc's working-tree body, so regenerating on a dirty shared tree would
   sweep peers' in-flight doc edits into the aggregate — do it from a pristine snapshot).
 
-Use [`generation.md`](generation.md) for the contract,
-[`generation-future-real-options-model.md`](generation-future-real-options-model.md) for
+Use [`generation.md`](../generation.md) for the contract,
+[`generation-future-real-options-model.md`](../generation-future-real-options-model.md) for
 the per-bet valuation, and
 [`generation-future-proof-of-value-simulator.md`](generation-future-proof-of-value-simulator.md)
 for the cross-stream option-band fold this portfolio trend sits above.

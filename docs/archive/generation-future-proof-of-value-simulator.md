@@ -3,6 +3,8 @@ title: "Generation Future Proof-of-Value Simulator"
 description: "A decision-model spec for a cross-stream simulator that compares option cost, projected payoff, and uncertainty across generation streams, so a long-horizon bet can be valued as an option band instead of a pretend-shipped point estimate."
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: [docs/generation.md](../generation.md) · scope: gen/future design memo; the described tooling was never built
+
 # Generation Future Proof-of-Value Simulator
 
 **Issue:** #1672.
@@ -29,14 +31,14 @@ compare it across streams, never to emit one fabricated point estimate.
 
 This composes with, and does not duplicate, the per-issue valuation:
 
-- The [real-options model](generation-future-real-options-model.md) (#1666) values
+- The [real-options model](../generation-future-real-options-model.md) (#1666) values
   **one** `gen/future` issue via six variables (`V`, `X`, `C`, `σ`, `T`, `S`) and
   folds them to a disposition verb (exercise / hold / retire / hedge).
 - **This simulator lifts that per-option valuation to a portfolio across streams.**
   It runs many bets through a scenario sweep and reports, per stream, the aggregate
   option cost, the projected-payoff band, and the aggregate uncertainty — the
   cross-stream comparison the per-issue model cannot give on its own.
-- The [sunset and kill criteria](generation-future-sunset-criteria.md) (#1670)
+- The [sunset and kill criteria](../generation-future-sunset-criteria.md) (#1670)
   consume the simulator's `retire` signals through their closed trigger vocabulary
   (`CARRY_EXHAUSTED`, `STRIKE_UNREACHABLE`, …).
 
@@ -51,7 +53,7 @@ Two fields are added for the cross-stream fold:
 |---|---|---|
 | `stream` | `now` / `next` / `second-next` / `future` | the issue's generation label |
 | `V` | underlying value if exercised with current evidence | the issue's `## Why` |
-| `X` | exercise cost to promote and build | leaf tier + [capacity model](generation-agent-capacity-model.md) |
+| `X` | exercise cost to promote and build | leaf tier + [capacity model](../generation-agent-capacity-model.md) |
 | `C` | carry cost per recheck cycle | named on the issue (the real-options model requires it) |
 | `σ` | uncertainty — how far `V` could move before `T` | count of open / invalidating assumptions |
 | `T` | time to decision (recheck cadence or market window) | the issue's cadence |
@@ -97,7 +99,7 @@ For each generation stream, and for the portfolio as a whole:
 - **Positive-net count** — how many bets in the stream clear a positive base-case net.
 - **Retire candidates** — bets whose `C_accumulated ≥` their optimistic payoff, or
   whose `p_S` is `low` with a horizon nearly spent. These feed the
-  [sunset trigger](generation-future-sunset-criteria.md) vocabulary directly.
+  [sunset trigger](../generation-future-sunset-criteria.md) vocabulary directly.
 
 The decision readout is a **comparison, not a ranking-by-priority**: "stream *future*
 is carrying more option cost than its base-case band returns" is an allocation
@@ -153,14 +155,14 @@ through `main` with a witnessed commit.
 
 - The bands it emits never change a real allocation decision across two recheck
   cycles — it is decoration, and decoration retires (`CARRY_EXHAUSTED`).
-- The lane-aggregate `debt_score` in [`generation.md`](generation.md) already
+- The lane-aggregate `debt_score` in [`generation.md`](../generation.md) already
   captures the over-carry signal well enough that the per-stream band adds nothing —
   fall back to the coarser measure and retire this one (`SUPERSEDED`).
 - The ordinal inputs prove un-rankable in practice, so the fold is fabricated
   precision (`ASSUMPTION_FIRED`; see below).
 
 Retirement is named with a trigger token, a witness, and a disposition — never by a
-silent label change — exactly as the [sunset criteria](generation-future-sunset-criteria.md)
+silent label change — exactly as the [sunset criteria](../generation-future-sunset-criteria.md)
 require.
 
 ## Invalidating Assumptions
@@ -195,8 +197,8 @@ Each a separate issue, so this spec is not silently deferred into code:
 - A carry-budget field in the milestone report's `gen/future` lane, fed by the
   simulator's per-stream option-cost total, reported next to the existing `debt_score`.
 
-Use [`generation.md`](generation.md) for the contract,
-[`generation-future-real-options-model.md`](generation-future-real-options-model.md)
+Use [`generation.md`](../generation.md) for the contract,
+[`generation-future-real-options-model.md`](../generation-future-real-options-model.md)
 for the per-bet valuation this simulator aggregates, and
-[`generation-future-sunset-criteria.md`](generation-future-sunset-criteria.md) for the
+[`generation-future-sunset-criteria.md`](../generation-future-sunset-criteria.md) for the
 retirement machinery its `retire` signals feed.

@@ -185,7 +185,7 @@ performs a different, task-specific discovery: changed packages and their import
 | Support | Build, test, debug, profile, and ship-loop selection are covered. Product use starts at [`README.md`](../README.md), deployment recovery at [`docs/operator/`](operator/), and research hypotheses at the [research-agent playbook](playbooks/research-agent.md). |
 
 For the ranked improvement program behind these tools, see the
-[testing/linting infrastructure scorecard](TESTING-LINTING-INFRA-SCORECARD.md).
+[testing/linting infrastructure scorecard](archive/TESTING-LINTING-INFRA-SCORECARD.md).
 
 ## Build and run
 

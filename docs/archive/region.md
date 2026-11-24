@@ -12,6 +12,8 @@ keywords:
 date: 2026-06-25
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: none · scope: MPI-RMA analogy essay for an internal/region package that was never built
+
 # Region: one-sided shared-result pool as an RMA analogue
 
 > TL;DR: fak's shipped `abi.Resolver` surface is a one-sided, addressable payload

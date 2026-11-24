@@ -3,6 +3,8 @@ title: "Generation Second-Next Architectural Option Contracts"
 description: "The option-contract shape a gen/second-next architectural bet must carry before it can be evaluated — assumption set, reversible seam, cost to keep alive, promotion trigger, and kill trigger — so architecture options get enough shape to compare without prematurely committing the trunk."
 ---
 
+> **Archived 2026-11-23** · reason: retired · replacement: [docs/generation.md](../generation.md) · scope: gen/future design memo; the described tooling was never built
+
 # Generation Second-Next Architectural Option Contracts
 
 **Issue:** #1664.
@@ -16,7 +18,7 @@ be a real `gen/second-next` bet rather than an undated aspiration — without
 rereading the generation epic
 ([#1625](https://github.com/anthony-chaudhary/fak/issues/1625)). It is the
 `gen/second-next` companion to the `gen/future`
-[real-options model](generation-future-real-options-model.md): that model
+[real-options model](../generation-future-real-options-model.md): that model
 *values* a research option; this contract *shapes* an architecture option so a
 later stream can evaluate it against the trunk it will eventually touch.
 
@@ -31,7 +33,7 @@ option is the thing this contract refuses.
 
 Second-next is the horizon that "needs simulation, compatibility policy, or
 cross-generation dependency management before it can become active product
-work" ([`docs/generation.md`](generation.md) §Streams). The contract below is
+work" ([`docs/generation.md`](../generation.md) §Streams). The contract below is
 what makes those three prerequisites checkable rather than aspirational: each
 field names the evidence a later agent can read to decide *promote*, *hold*,
 *demote*, or *retire*.
@@ -41,7 +43,7 @@ field names the evidence a later agent can read to decide *promote*, *hold*,
 Every `gen/second-next` architectural option states these five fields. The issue
 that seeds the option (or the memo that carries it) is incomplete until all five
 are named. They map onto the promotion verbs in
-[`docs/generation.md`](generation.md) §Promotion Verbs — the contract adds the
+[`docs/generation.md`](../generation.md) §Promotion Verbs — the contract adds the
 *shape* that justifies the verb, it does not invent a new verb set.
 
 ### 1. Assumption set
@@ -61,7 +63,7 @@ touch current code — and the proof that touching it is *reversible* without a
 trunk-wide edit. The seam is what lets second-next influence current APIs
 without a per-generation branch: it must be expressible under the additive-only
 promise in
-[`docs/generation-abi-compatibility-policy.md`](generation-abi-compatibility-policy.md)
+[`docs/generation-abi-compatibility-policy.md`](../generation-abi-compatibility-policy.md)
 (a new enum value, a new versioned schema, a default-off gate, a new interface
 method with a fail-closed default), never a renumber, a removed field, or a
 breaking signature change. If the smallest honest seam requires a breaking
@@ -74,7 +76,7 @@ second-next bet.
 
 The carry cost of holding the option open per recheck cycle, denominated in the
 scarce resources the
-[capacity model](generation-agent-capacity-model.md) already names — attention,
+[capacity model](../generation-agent-capacity-model.md) already names — attention,
 recheck overhead, the simulation/compat fixture the bet must keep green, and the
 context tax on every backlog scan. Unlike a `gen/future` research option, a
 second-next option's carry usually includes **keeping a simulation or
@@ -90,19 +92,19 @@ strike condition for architecture rather than research. For second-next this is
 almost always one of: a passing **simulation** that shows the architecture beats
 the incumbent on a named metric; a **compatibility fixture** proving the seam is
 additive across a `/1`↔`/2` boundary (the promotion witness named in
-[`docs/generation-abi-compatibility-policy.md`](generation-abi-compatibility-policy.md));
+[`docs/generation-abi-compatibility-policy.md`](../generation-abi-compatibility-policy.md));
 or a **dependency edge** resolving so the seam's prerequisites are all shipped.
 The trigger names the artifact (test, fixture, benchmark, or shipped
 prerequisite) — not a date and not a vibe. When it fires, promotion follows the
 witness-ladder rung for the next horizon
-([`docs/generation-witness-ladders.md`](generation-witness-ladders.md)); it does
+([`docs/archive/generation-witness-ladders.md`](generation-witness-ladders.md)); it does
 not skip straight to `now`.
 
 ### 5. Kill trigger
 
 The named condition that retires the option immediately rather than at the next
 recheck. It reuses the closed sunset-trigger vocabulary in
-[`docs/generation-future-sunset-criteria.md`](generation-future-sunset-criteria.md)
+[`docs/generation-future-sunset-criteria.md`](../generation-future-sunset-criteria.md)
 (`CARRY_EXHAUSTED`, `STRIKE_UNREACHABLE`, `ASSUMPTION_FIRED`, `SUPERSEDED`,
 `ORPHANED`, `STALE_RECHECK`, `HORIZON_LAUNDERED`) so second-next and future
 retirements speak one language. The load-bearing second-next kill triggers are
@@ -216,7 +218,7 @@ This contract composes with, and does not duplicate, the existing generation
 surfaces:
 
 - **Real-options model
-  ([`docs/generation-future-real-options-model.md`](generation-future-real-options-model.md))**
+  ([`docs/generation-future-real-options-model.md`](../generation-future-real-options-model.md))**
   values a `gen/future` *research* option (`V`/`X`/`C`/`σ`/`T`/`S`). This
   contract shapes a `gen/second-next` *architecture* option. Carry cost here is
   the same `C`; the promotion trigger is the same `S` specialized to
@@ -224,22 +226,22 @@ surfaces:
   disposition. The difference is the reversible-seam field, which a research
   option does not yet need and an architecture option cannot omit.
 - **ABI/schema compatibility policy
-  ([`docs/generation-abi-compatibility-policy.md`](generation-abi-compatibility-policy.md))**
+  ([`docs/generation-abi-compatibility-policy.md`](../generation-abi-compatibility-policy.md))**
   is what makes the reversible-seam field *enforceable*: the additive-only wire
   ABI and versioned schemas are the promise that a seam stays reversible. That
   memo's `future → second-next → next → now` promotion ladder is the same ladder
   a bet under this contract climbs.
 - **Sunset and kill criteria
-  ([`docs/generation-future-sunset-criteria.md`](generation-future-sunset-criteria.md))**
+  ([`docs/generation-future-sunset-criteria.md`](../generation-future-sunset-criteria.md))**
   supplies the closed trigger vocabulary and four-piece retirement-evidence
   contract the kill-trigger field reuses, so second-next and future retirements
   are audited identically.
 - **Witness ladders
-  ([`docs/generation-witness-ladders.md`](generation-witness-ladders.md))**
+  ([`docs/archive/generation-witness-ladders.md`](generation-witness-ladders.md))**
   set the minimum evidence rung a promotion trigger must clear for the target
   horizon; this contract names *which* witness, the ladder sets *how strong* it
   must be.
-- **Debt metric ([`docs/generation.md`](generation.md) §Debt Metric)** is the
+- **Debt metric ([`docs/generation.md`](../generation.md) §Debt Metric)** is the
   lane-aggregate signal; an option missing contract fields shows up there as an
   `unpromoted_bet` or a `missing_witness`. The per-option contract explains
   *which* field is missing.
