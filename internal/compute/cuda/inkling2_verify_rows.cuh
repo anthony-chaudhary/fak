@@ -11,40 +11,56 @@
 // every row. Every row keeps k_q5k_gemm<1>'s expression, K order and shuffle-down
 // reduction, so a row's result equals the single-row GEMV's bit for bit.
 template <int R>
-__global__ void k_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in) {
+__global__ void k_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int blockRows) {
   extern __shared__ float xs[];
   for (int i = threadIdx.x; i < R * in; i += blockDim.x) xs[i] = X[i];
   __syncthreads();
   const int lane = threadIdx.x & 31;
   const int nsb = in / 256;
-  for (int o = blockIdx.x * INK2V_BLOCK_ROWS + (threadIdx.x >> 5); o < min(out, (blockIdx.x + 1) * INK2V_BLOCK_ROWS);
-       o += blockDim.x >> 5) {
-  float sums[R] = {};
-  const unsigned char *wr = W + (size_t)o * nsb * 176;
-  for (int sb = 0; sb < nsb; ++sb) {
-    const unsigned char *b = wr + (size_t)sb * 176;
-    const float d = __half2float(*(const __half *)b);
-    const float dm = __half2float(*(const __half *)(b + 2));
-    const unsigned char *sc = b + 4, *qh = b + 16, *ql = b + 48;
+  const int end = min(out, (blockIdx.x + 1) * blockRows);
+  // each warp takes two output rows at a time, so one staged-X read feeds both
+  for (int o = blockIdx.x * blockRows + 2 * (threadIdx.x >> 5); o < end; o += 2 * (blockDim.x >> 5)) {
+    const bool two = o + 1 < end;
+    float s0[R] = {}, s1[R] = {};
+    const unsigned char *w0 = W + (size_t)o * nsb * 176;
+    const unsigned char *w1 = two ? w0 + (size_t)nsb * 176 : w0;
+    for (int sb = 0; sb < nsb; ++sb) {
+      const unsigned char *b0 = w0 + (size_t)sb * 176, *b1 = w1 + (size_t)sb * 176;
+      const float d0 = __half2float(*(const __half *)b0), dm0 = __half2float(*(const __half *)(b0 + 2));
+      const float d1 = __half2float(*(const __half *)b1), dm1 = __half2float(*(const __half *)(b1 + 2));
 #pragma unroll
-    for (int g = 0; g < 8; ++g) {
-      unsigned char scale, mn;
-      getScaleMinK4_dev(g, sc, &scale, &mn);
-      const int pair = g >> 1;
-      int q = (g & 1) ? (ql[pair * 32 + lane] >> 4) : (ql[pair * 32 + lane] & 15);
-      if (qh[lane] & (1u << g)) q += 16;
-      const float wv = d * (float)scale * (float)q - dm * (float)mn;
-      const int k = sb * 256 + g * 32 + lane;
+      for (int g = 0; g < 8; ++g) {
+        unsigned char sc0, mn0, sc1, mn1;
+        getScaleMinK4_dev(g, b0 + 4, &sc0, &mn0);
+        getScaleMinK4_dev(g, b1 + 4, &sc1, &mn1);
+        const int pair = g >> 1;
+        int q0 = (g & 1) ? (b0[48 + pair * 32 + lane] >> 4) : (b0[48 + pair * 32 + lane] & 15);
+        int q1 = (g & 1) ? (b1[48 + pair * 32 + lane] >> 4) : (b1[48 + pair * 32 + lane] & 15);
+        if (b0[16 + lane] & (1u << g)) q0 += 16;
+        if (b1[16 + lane] & (1u << g)) q1 += 16;
+        const float wv0 = d0 * (float)sc0 * (float)q0 - dm0 * (float)mn0;
+        const float wv1 = d1 * (float)sc1 * (float)q1 - dm1 * (float)mn1;
+        const int k = sb * 256 + g * 32 + lane;
 #pragma unroll
-      for (int t = 0; t < R; ++t) sums[t] += wv * xs[t * in + k];
+        for (int t = 0; t < R; ++t) {
+          const float x = xs[t * in + k];
+          s0[t] += wv0 * x;
+          s1[t] += wv1 * x;
+        }
+      }
     }
-  }
 #pragma unroll
-  for (int t = 0; t < R; ++t) {
+    for (int t = 0; t < R; ++t) {
 #pragma unroll
-    for (int z = 16; z; z >>= 1) sums[t] += __shfl_down_sync(0xffffffff, sums[t], z);
-    if (lane == 0) Y[(size_t)t * out + o] = sums[t];
-  }
+      for (int z = 16; z; z >>= 1) {
+        s0[t] += __shfl_down_sync(0xffffffff, s0[t], z);
+        s1[t] += __shfl_down_sync(0xffffffff, s1[t], z);
+      }
+      if (lane == 0) {
+        Y[(size_t)t * out + o] = s0[t];
+        if (two) Y[(size_t)t * out + o + 1] = s1[t];
+      }
+    }
   }
 }
 
@@ -53,8 +69,12 @@ static int ink2v_q5k_rows_launch(const unsigned char *W, const float *X, float *
   const size_t smem = (size_t)R * in * sizeof(float);
   const int oe = ink2p_smem_optin((const void *)k_ink2v_q5k_rows<R>, smem);
   if (oe) return oe;
-  const int blocks = (out + INK2V_BLOCK_ROWS - 1) / INK2V_BLOCK_ROWS;
-  FCUDA_TS("k_ink2v_q5k_rows", blocks, k_ink2v_q5k_rows<R><<<blocks, 256, smem, g_stream>>>(W, X, Y, out, in));
+  // enough blocks to fill the SMs on a small matrix, else INK2V_BLOCK_ROWS rows per
+  // block so the staged X is re-read from L2 as few times as possible
+  int blockRows = INK2V_BLOCK_ROWS;
+  if (out < INK2V_BLOCK_ROWS * 256) blockRows = max(8, ((out / 256) + 7) & ~7);
+  const int blocks = (out + blockRows - 1) / blockRows;
+  FCUDA_TS("k_ink2v_q5k_rows", blocks, k_ink2v_q5k_rows<R><<<blocks, 256, smem, g_stream>>>(W, X, Y, out, in, blockRows));
   return ink2_last_error();
 }
 
@@ -245,4 +265,75 @@ extern "C" int fcuda_ink2v_mix(const float *const *states, int ns, const float *
   default: FCUDA_TS("k_ink2v_mixc", grid, e = ink2v_mixc_launch<4>(st, ns, queries, nw, norm, eps, out, n, T, threads)); break;
   }
   return (int)e;
+}
+
+// k_ink2v_q5k_rows for a Q6_K W: every row keeps k_q6k_gemm<1>'s expression and order.
+template <int R>
+__global__ void k_ink2v_q6k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int blockRows) {
+  extern __shared__ float xs[];
+  for (int i = threadIdx.x; i < R * in; i += blockDim.x) xs[i] = X[i];
+  __syncthreads();
+  const int lane = threadIdx.x & 31;
+  const int nsb = in / 256;
+  for (int o = blockIdx.x * blockRows + (threadIdx.x >> 5); o < min(out, (blockIdx.x + 1) * blockRows);
+       o += blockDim.x >> 5) {
+    float sums[R] = {};
+    const unsigned char *wr = W + (size_t)o * nsb * 210;
+    for (int sb = 0; sb < nsb; ++sb) {
+      const unsigned char *b = wr + (size_t)sb * 210;
+      const unsigned char *ql = b, *qh = b + 128;
+      const signed char *sc = (const signed char *)(b + 192);
+      const float d = __half2float(*(const __half *)(b + 208));
+#pragma unroll
+      for (int h = 0; h < 2; ++h) {
+        const int qo = h * 64, ho = h * 32, so = h * 8, base = h * 128, is = lane >> 4;
+        const int q1 = (ql[qo + lane] & 15) | (((qh[ho + lane] >> 0) & 3) << 4);
+        const int q2 = (ql[qo + lane + 32] & 15) | (((qh[ho + lane] >> 2) & 3) << 4);
+        const int q3 = (ql[qo + lane] >> 4) | (((qh[ho + lane] >> 4) & 3) << 4);
+        const int q4 = (ql[qo + lane + 32] >> 4) | (((qh[ho + lane] >> 6) & 3) << 4);
+#pragma unroll
+        for (int t = 0; t < R; ++t) {
+          const float *xb = xs + (size_t)t * in + (size_t)sb * 256;
+          sums[t] += d * (float)sc[so + is] * (q1 - 32) * xb[base + lane];
+          sums[t] += d * (float)sc[so + is + 2] * (q2 - 32) * xb[base + lane + 32];
+          sums[t] += d * (float)sc[so + is + 4] * (q3 - 32) * xb[base + lane + 64];
+          sums[t] += d * (float)sc[so + is + 6] * (q4 - 32) * xb[base + lane + 96];
+        }
+      }
+    }
+#pragma unroll
+    for (int t = 0; t < R; ++t) {
+#pragma unroll
+      for (int z = 16; z; z >>= 1) sums[t] += __shfl_down_sync(0xffffffff, sums[t], z);
+      if (lane == 0) Y[(size_t)t * out + o] = sums[t];
+    }
+  }
+}
+
+template <int R>
+static int ink2v_q6k_rows_launch(const unsigned char *W, const float *X, float *Y, int out, int in) {
+  const size_t smem = (size_t)R * in * sizeof(float);
+  const int oe = ink2p_smem_optin((const void *)k_ink2v_q6k_rows<R>, smem);
+  if (oe) return oe;
+  int blockRows = INK2V_BLOCK_ROWS;
+  if (out < INK2V_BLOCK_ROWS * 256) blockRows = max(8, ((out / 256) + 7) & ~7);
+  const int blocks = (out + blockRows - 1) / blockRows;
+  FCUDA_TS("k_ink2v_q6k_rows", blocks, k_ink2v_q6k_rows<R><<<blocks, 256, smem, g_stream>>>(W, X, Y, out, in, blockRows));
+  return ink2_last_error();
+}
+
+extern "C" int fcuda_ink2v_q6k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows) {
+  if (in % 256 != 0) return (int)cudaErrorInvalidValue;
+  switch (rows) {
+  case 1: return ink2v_q6k_rows_launch<1>(W, X, Y, out, in);
+  case 2: return ink2v_q6k_rows_launch<2>(W, X, Y, out, in);
+  case 3: return ink2v_q6k_rows_launch<3>(W, X, Y, out, in);
+  case 4: return ink2v_q6k_rows_launch<4>(W, X, Y, out, in);
+  case 5: return ink2v_q6k_rows_launch<5>(W, X, Y, out, in);
+  case 6: return ink2v_q6k_rows_launch<6>(W, X, Y, out, in);
+  case 7: return ink2v_q6k_rows_launch<7>(W, X, Y, out, in);
+  case 8: return ink2v_q6k_rows_launch<8>(W, X, Y, out, in);
+  case 9: return ink2v_q6k_rows_launch<9>(W, X, Y, out, in);
+  }
+  return (int)cudaErrorInvalidValue;
 }

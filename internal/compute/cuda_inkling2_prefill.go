@@ -342,10 +342,14 @@ func (c *cudaBackend) Ink2DMarkovPick(head Tensor, base, cand Ink2Ref, M int, z,
 func (c *cudaBackend) Ink2VRows(w Tensor, x, y Ink2Ref, rows int) (bool, error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if w.Dtype != Q5_K || len(w.Shape) != 2 || rows < 1 || rows > 9 {
+	if (w.Dtype != Q5_K && w.Dtype != Q6_K) || len(w.Shape) != 2 || rows < 1 || rows > 9 {
 		return false, nil
 	}
 	wb := c.cudaBufForSubmit(w)
+	if w.Dtype == Q6_K {
+		return true, ink2Status("verify q6k rows", C.fcuda_ink2v_q6k_rows((*C.uchar)(wb.ptr), c.ink2F(x), c.ink2F(y), C.int(w.Shape[0]),
+			C.int(w.Shape[1]), C.int(rows)))
+	}
 	return true, ink2Status("verify q5k rows", C.fcuda_ink2v_q5k_rows((*C.uchar)(wb.ptr), c.ink2F(x), c.ink2F(y), C.int(w.Shape[0]),
 		C.int(w.Shape[1]), C.int(rows)))
 }
@@ -418,4 +422,24 @@ func (c *cudaBackend) Ink2PControlMulti(cur, msg, down, gain, forget, g, out []I
 	p := func(i int) **C.float { return (**C.float)(unsafe.Pointer(&tab[i])) }
 	return ink2Status("prefill control multi", C.fcuda_ink2p_ctrl_multi(p(0), p(4), p(8), p(12), p(16), p(20), p(24),
 		C.int(J), C.int(n), C.int(rank), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PConvPairLog(x, w, dyn, hist, log, out []Ink2Ref, norm []float32, n, heads, kn, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if len(x) != 2 || len(w) != 2 || len(dyn) != 2 || len(hist) != 2 || len(log) != 2 || len(out) != 2 || len(norm) != 2 {
+		return fmt.Errorf("cuda inkling2 conv pair: want two convs")
+	}
+	tab := (*[12]*C.float)(C.malloc(C.size_t(12 * unsafe.Sizeof(uintptr(0)))))
+	defer C.free(unsafe.Pointer(tab))
+	nm := (*[2]C.float)(C.malloc(C.size_t(2 * unsafe.Sizeof(C.float(0)))))
+	defer C.free(unsafe.Pointer(nm))
+	for j := 0; j < 2; j++ {
+		tab[j], tab[2+j], tab[4+j] = c.ink2F(x[j]), c.ink2F(w[j]), c.ink2F(dyn[j])
+		tab[6+j], tab[8+j], tab[10+j] = c.ink2F(hist[j]), c.ink2F(log[j]), c.ink2F(out[j])
+		nm[j] = C.float(norm[j])
+	}
+	p := func(i int) **C.float { return (**C.float)(unsafe.Pointer(&tab[i])) }
+	return ink2Status("verify conv pair", C.fcuda_ink2p_conv_pair_log(p(0), p(2), p(4), p(6), p(8), p(10),
+		(*C.float)(unsafe.Pointer(nm)), C.int(n), C.int(heads), C.int(kn), C.int(T)))
 }

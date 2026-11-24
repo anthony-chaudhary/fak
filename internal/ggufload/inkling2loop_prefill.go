@@ -174,10 +174,19 @@ func inkling2RowsMatMul(vd compute.Inkling2VerifyDevice, m ink2Mat, x, y ink2Ref
 	case compute.Q8_0:
 		q, fresh := codes(x, m.cols)
 		return vd.Ink2VQ8Rows(m.t, x, q, y, rows, fresh)
-	case compute.Q5_K:
+	case compute.Q5_K, compute.Q6_K:
 		return vd.Ink2VRows(m.t, x, y, rows)
 	}
 	return false, nil
+}
+
+// rmsRows RMS-normalizes rows contiguous rows of x by w in one launch.
+func (p *ink2Prefill) rmsRows(x, w ink2Ref, rows, n int, eps float32) ink2Ref {
+	y := p.tmp(rows * n)
+	if p.s.err == nil {
+		p.fail(p.s.dev.Ink2RMS(x, w, y, rows, n, eps))
+	}
+	return y
 }
 
 func (p *ink2Prefill) rms(x, w ink2Ref, n int, eps float32) ink2Ref {
@@ -238,8 +247,10 @@ func (p *ink2Prefill) controls(cur, msg []ink2Ref, c *ink2Ctrl) []ink2Ref {
 	h := p.s.hp.Hidden
 	J := len(cur)
 	g, out := make([]ink2Ref, J), make([]ink2Ref, J)
+	// the outputs are contiguous, so one rms can normalize them all
+	gs, outs := p.tmp(J*p.T*c.rank), p.tmp(J*p.T*h)
 	for j := range g {
-		g[j], out[j] = p.tmp(p.T*c.rank), p.tmp(p.T*h)
+		g[j], out[j] = at(gs, j*p.T*c.rank), at(outs, j*p.T*h)
 	}
 	if p.s.err == nil {
 		p.fail(p.vd.Ink2PControlMulti(cur, msg, c.down[:J], c.gain[:J], c.forget[:J], g, out, h, c.rank, p.T))
@@ -283,6 +294,26 @@ func (p *ink2Prefill) conv(slot int, x, weight, dyn, resid ink2Ref, n, heads, of
 	return out
 }
 
+// convKV runs a verify chunk's logged k and v short convs in one launch; each equals
+// the conv call it replaces.
+func (p *ink2Prefill) convKV(slot int, kx, vx ink2Ref, l *ink2Layer, kDyn, vDyn ink2Ref) (ink2Ref, ink2Ref) {
+	s := p.s
+	hp := s.hp
+	kn := hp.ConvKernel
+	kvDim := hp.KVHeads * hp.HeadDim
+	L := kn - 1 + p.T
+	k, v := p.tmp(p.T*kvDim), p.tmp(p.T*kvDim)
+	if s.err == nil {
+		p.fail(p.vd.Ink2PConvPairLog(
+			[]ink2Ref{kx, vx}, []ink2Ref{l.kconvW, l.vconvW}, []ink2Ref{kDyn, vDyn},
+			[]ink2Ref{s.hist[slot], at(s.hist[slot], kvDim*(kn-1))},
+			[]ink2Ref{s.convLog[slot], at(s.convLog[slot], kvDim*L)},
+			[]ink2Ref{k, v}, []float32{inkling2ConvNorm(kn, kDyn), inkling2ConvNorm(kn, vDyn)},
+			kvDim, hp.KVHeads, kn, p.T))
+	}
+	return k, v
+}
+
 func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs []ink2Ref, c *ink2Ctrl) ink2Ref {
 	s := p.s
 	hp := s.hp
@@ -324,6 +355,9 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	}
 	switch {
 	case normed:
+	case local && msgs != nil && p.verify:
+		o := p.rmsRows(in[0], l.attnNorm, 3*p.T, h, hp.NormEps)
+		in = [3]ink2Ref{o, at(o, p.T*h), at(o, 2*p.T*h)}
 	case local && msgs != nil:
 		for j := 0; j < 3; j++ {
 			in[j] = p.rms(in[j], l.attnNorm, h, hp.NormEps)
@@ -343,8 +377,13 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		kDyn = p.mm(l.kconv, in[1])
 		vDyn = p.mm(l.vconv, in[2])
 	}
-	k := p.conv(slot, p.mm(l.wk, in[1]), l.kconvW, kDyn, ink2Ref{}, kvDim, hp.KVHeads, 0, false)
-	v := p.conv(slot, p.mm(l.wv, in[2]), l.vconvW, vDyn, ink2Ref{}, kvDim, hp.KVHeads, kvDim, false)
+	var k, v ink2Ref
+	if p.verify {
+		k, v = p.convKV(slot, p.mm(l.wk, in[1]), p.mm(l.wv, in[2]), l, kDyn, vDyn)
+	} else {
+		k = p.conv(slot, p.mm(l.wk, in[1]), l.kconvW, kDyn, ink2Ref{}, kvDim, hp.KVHeads, 0, false)
+		v = p.conv(slot, p.mm(l.wv, in[2]), l.vconvW, vDyn, ink2Ref{}, kvDim, hp.KVHeads, kvDim, false)
+	}
 	r := p.mm(l.rel, in[0])
 	sinks := p.mm(l.sink, in[0])
 

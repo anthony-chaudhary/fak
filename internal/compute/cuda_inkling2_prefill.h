@@ -40,6 +40,9 @@ int fcuda_ink2p_ctrl_multi(const float *const *cur, const float *const *msg, con
     int rank, int T);
 int fcuda_ink2v_mix(const float *const *states, int ns, const float *queries, int nq, const float *const *norms,
     float eps, float *out, int n, int T);
+int fcuda_ink2v_q6k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows);
+int fcuda_ink2p_conv_pair_log(const float *const *x, const float *const *w, const float *const *dyn,
+    float *const *hist, float *const *log, float *const *out, const float *norm, int n, int heads, int kn, int T);
 int fcuda_ink2v_repeat_rows(const float *x, float *out, int n, int rows, int k);
 int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, void *q, int quantize, float *Y, int out, int in,
     int rows, int block);

@@ -196,8 +196,9 @@ __global__ void __launch_bounds__(256) k_ink2p_ctrl_apply(Ink2PCtrl cs, int n, i
 // Causal short conv walked along the token axis: one thread per channel carries the
 // history in registers and writes the final history once.
 #define INK2P_MAX_KN 8
-__global__ void k_ink2p_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
-                             const float *resid, int n, int heads, int kn, float norm, int T, float *log) {
+__device__ __forceinline__ void ink2p_conv_body(const float *x, const float *w, const float *dyn, float *hist,
+                                                float *out, const float *resid, int n, int heads, int kn, float norm,
+                                                int T, float *log) {
   const int c = blockIdx.x * blockDim.x + threadIdx.x;
   if (c >= n) return;
   const int past = kn - 1;
@@ -233,6 +234,43 @@ __global__ void k_ink2p_conv(const float *x, const float *w, const float *dyn, f
     out[(size_t)tok * n + c] = o;
   }
   for (int t = 0; t < past; ++t) hc[t] = h[t];
+}
+
+__global__ void k_ink2p_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
+                             const float *resid, int n, int heads, int kn, float norm, int T, float *log) {
+  ink2p_conv_body(x, w, dyn, hist, out, resid, n, heads, kn, norm, T, log);
+}
+
+// Two logged convs of one verify visit (the k and v short convs) in one launch:
+// blockIdx.y selects the conv; each runs k_ink2p_conv's arithmetic.
+struct Ink2PConvPair {
+  const float *x[2], *w[2], *dyn[2];
+  float *hist[2], *out[2], *log[2];
+  float norm[2];
+};
+
+__global__ void k_ink2p_conv_pair(Ink2PConvPair cp, int n, int heads, int kn, int T) {
+  const int j = blockIdx.y;
+  ink2p_conv_body(cp.x[j], cp.w[j], cp.dyn[j], cp.hist[j], cp.out[j], nullptr, n, heads, kn, cp.norm[j], T, cp.log[j]);
+}
+
+extern "C" int fcuda_ink2p_conv_pair_log(const float *const *x, const float *const *w, const float *const *dyn,
+                                         float *const *hist, float *const *log, float *const *out, const float *norm,
+                                         int n, int heads, int kn, int T) {
+  if (kn < 1 || kn > INK2P_MAX_KN) return (int)cudaErrorInvalidValue;
+  Ink2PConvPair cp = {};
+  for (int j = 0; j < 2; ++j) {
+    cp.x[j] = x[j];
+    cp.w[j] = w[j];
+    cp.dyn[j] = dyn[j];
+    cp.hist[j] = hist[j];
+    cp.out[j] = out[j];
+    cp.log[j] = log[j];
+    cp.norm[j] = norm[j];
+  }
+  const dim3 grid((n + 31) / 32, 2);
+  FCUDA_TS("k_ink2p_conv", grid, k_ink2p_conv_pair<<<grid, 32, 0, g_stream>>>(cp, n, heads, kn, T));
+  return ink2_last_error();
 }
 
 // k_ink2_qkv_post over a chunk: blockIdx.y is the token, at position pos0 + t.

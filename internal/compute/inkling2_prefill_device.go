@@ -49,8 +49,9 @@ type Inkling2VerifyDevice interface {
 	// Ink2PConvCommit sets hist[c][j] = log[c][keep+j] for channels*(past) entries,
 	// where every log row is L floats.
 	Ink2PConvCommit(hist, log Ink2Ref, channels, past, L, keep int) error
-	// Ink2VRows is Y[t] = W.X[t] for up to 9 rows in one weight pass, each row equal to
-	// the single-row GEMV; ok is false (nothing launched) for a dtype without one.
+	// Ink2VRows is Y[t] = W.X[t] for a Q5_K or Q6_K W and up to 9 rows in one weight
+	// pass, each row equal to the single-row GEMV; ok is false (nothing launched) for
+	// a dtype without one.
 	Ink2VRows(w Tensor, x, y Ink2Ref, rows int) (ok bool, err error)
 	// Ink2VQ8Rows is Y[t] = W.X[t] for a Q8_0 W and up to 9 rows, each row equal to the
 	// decode GEMV; q holds rows*(in/4 + in/32) floats of codes and scales, which
@@ -64,6 +65,9 @@ type Inkling2VerifyDevice interface {
 	// Ink2PControlMulti runs J <= 4 controllers of one visit over T rows (Ink2PCtrlDown
 	// then Ink2PCtrlApply for each) in one launch per stage; slices index by controller.
 	Ink2PControlMulti(cur, msg, down, gain, forget, g, out []Ink2Ref, n, rank, T int) error
+	// Ink2PConvPairLog runs two Ink2PConvLog calls of the same geometry (no residual)
+	// in one launch; every slice holds the two convs' arguments.
+	Ink2PConvPairLog(x, w, dyn, hist, log, out []Ink2Ref, norm []float32, n, heads, kn, T int) error
 	// Ink2VRepeatRows writes out[t*k+j] = x[t] for rows x of n floats.
 	Ink2VRepeatRows(x, out Ink2Ref, n, rows, k int) error
 	// Ink2PConvCommitDev is Ink2PConvCommit with keep read from the int at keepDev.
