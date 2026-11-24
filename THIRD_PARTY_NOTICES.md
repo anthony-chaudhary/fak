@@ -1,4 +1,4 @@
-  [ggml-org/llama.cpp] adding 3 revs   [sgl-project/sglang] adding 5 revs   [vllm-project/vllm] adding 9 revs # Third-party notices
+# Third-party notices
 
 Each entry identifies an upstream project adapted into this product; changes were made.
 
@@ -2788,14 +2788,14 @@ SPDX-License-Identifier: Apache-2.0
 
 ## kubernetes-sigs/agent-sandbox
 
-Portions of this product are adapted from kubernetes-sigs/agent-sandbox: https://github.com/kubernetes-sigs/agent-sandbox (pinned at revision 890de53a4dd18e35313173e6dc34d9559b1a9733; the SandboxWarmPool reconcile semantics from extensions/controllers/sandboxwarmpool_controller.go, namely template-hash staleness with recreate, the per-pool refill token bucket and batch-capped newest-first surplus deletion, reimplemented as a native Go warm pool in internal/sandbox/warmpool.go). Changes were made.
+Portions of this product are adapted from kubernetes-sigs/agent-sandbox: https://github.com/kubernetes-sigs/agent-sandbox (pinned at revision 890de53a4dd18e35313173e6dc34d9559b1a9733). Changes were made.
 
 Copyright 2025 The Kubernetes Authors.
 SPDX-License-Identifier: Apache-2.0
 
 ## DBOS Transact Golang
 
-Portions of this product are adapted from DBOS Transact Golang: https://github.com/dbos-inc/dbos-transact-golang (pinned at revision d516e2191d78673e2e5623a51164b0fec11e7cc9; the step-memoization and durable-cancel semantics from dbos/workflow.go, reimplemented as a file-backed step journal in internal/agentqueue/step_journal.go). Changes were made.
+Portions of this product are adapted from DBOS Transact Golang: https://github.com/dbos-inc/dbos-transact-golang (pinned at revision d516e2191d78673e2e5623a51164b0fec11e7cc9). Changes were made.
 
 ```text
 MIT License
@@ -2823,7 +2823,7 @@ SOFTWARE.
 
 ## OpenSandbox
 
-Portions of this product are adapted from OpenSandbox: https://github.com/opensandbox-group/OpenSandbox (pinned at revision f72baeae3a7feb11a49cc42f48dba3e93a94600d; the sandbox lifecycle state enum, its documented transitions and the create/list/get/pause/resume/snapshot/renew-expiration/delete contract from specs/sandbox-lifecycle.yml, reimplemented as a native Go lifecycle state machine in internal/sandbox/lifecycle.go). Changes were made.
+Portions of this product are adapted from OpenSandbox: https://github.com/opensandbox-group/OpenSandbox (pinned at revision f72baeae3a7feb11a49cc42f48dba3e93a94600d). Changes were made.
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -2832,4 +2832,32 @@ SPDX-License-Identifier: Apache-2.0
 Portions of this product are adapted from NVIDIA/TensorRT-LLM: https://github.com/NVIDIA/TensorRT-LLM (pinned at revision 2f528b21d8b28ec56f4d4d8eace953dce8399138). Changes were made.
 
 Copyright (c) 2011-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+## AIPerf
+
+Portions of this product are adapted from AIPerf: https://github.com/ai-dynamo/aiperf (pinned at revision ab610add4e8876fca223197596c728e17365f381). Changes were made.
+
+Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+## InferenceX
+
+Portions of this product are adapted from InferenceX: https://github.com/SemiAnalysisAI/InferenceX (pinned at revision ea9e4f6f2e3073d55fe6f1dcd33557b7fe67f608). Changes were made.
+
+Copyright 2025 SemiAnalysis LLC, Advanced Micro Devices, NVIDIA CORPORATION
+SPDX-License-Identifier: Apache-2.0
+
+## DeepEval
+
+Portions of this product are adapted from DeepEval: https://github.com/confident-ai/deepeval (pinned at revision 696248fd7f8b4db1aa0d4f05cee22c3d2cc5857b). Changes were made.
+
+Copyright [2024] [Confident AI Inc.]
+SPDX-License-Identifier: Apache-2.0
+
+## OpenTelemetry GenAI semantic conventions
+
+Portions of this product are adapted from the OpenTelemetry GenAI semantic conventions: https://github.com/open-telemetry/semantic-conventions-genai (pinned at revision e6658f14c9d9ea0760825f029cb82e7673f48fab). Changes were made.
+
+Copyright The OpenTelemetry Authors
 SPDX-License-Identifier: Apache-2.0
