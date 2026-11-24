@@ -14,7 +14,7 @@ func TestArchDefaultsUserEnvWinsAndCiteEvidence(t *testing.T) {
 	none := lookupFrom(nil)
 	for _, env := range []string{"FAK_INKLING2_RESIDENT", "FAK_INKLING2_GRAPH"} {
 		r := ResolveArchDefault(120, env, none)
-		if r.Source != ArchDefaultFromTable || r.Value != "1" || r.Evidence != sm120InklingResidentReceipt || r.Equivalence != ArchDefaultGreedyIdentical {
+		if r.Source != ArchDefaultFromTable || r.Value != "1" || r.Evidence != sm120InklingKLReceipt || r.Equivalence != ArchDefaultKLChecked {
 			t.Fatalf("sm_120 %s: %+v", env, r)
 		}
 		if r := ResolveArchDefault(120, env, lookupFrom(map[string]string{env: "0"})); r.Source != ArchDefaultFromUser || r.Value != "0" {

@@ -38,7 +38,7 @@ type ArchDefaultTable struct {
 	Defaults   []ArchDefault `json:"defaults"`
 }
 
-const sm120InklingResidentReceipt = "docs/benchmarks/aegis-inkling2-resident-cuda-20261123/perf-receipt-v2.json"
+const sm120InklingKLReceipt = "docs/benchmarks/aegis2-inkling2-row-measurement-debt-20261124/perf-receipt-v2.json"
 
 // archDefaultTables is the evidence-gated per-arch table. An arch with no row
 // gets no defaults: a measurement on one card says nothing about another.
@@ -47,11 +47,12 @@ var archDefaultTables = []ArchDefaultTable{
 		SM:         120,
 		KillSwitch: "FAK_SM120_DEFAULTS",
 		Defaults: []ArchDefault{
-			// RTX 5080, Inkling-2-Mini UD-Q3_K_XL: 6.31 -> 82.55 decode tok/s ABBA,
-			// 64/64 greedy tokens identical to the llama.cpp CPU oracle.
-			{Env: "FAK_INKLING2_RESIDENT", Value: "1", Evidence: sm120InklingResidentReceipt, Equivalence: ArchDefaultGreedyIdentical},
-			// Same receipt: graph replay of the resident forward, climb step 3 onward.
-			{Env: "FAK_INKLING2_GRAPH", Value: "1", Evidence: sm120InklingResidentReceipt, Equivalence: ArchDefaultGreedyIdentical},
+			// RTX 5080, Inkling-2-Mini UD-Q3_K_XL: 17.88 -> 120.14 decode tok/s ABBA against
+			// the host-driven path; teacher-forced mean KL 1.09e-3 nats sits within the
+			// 1.47e-3 floor of two host-path implementations.
+			{Env: "FAK_INKLING2_RESIDENT", Value: "1", Evidence: sm120InklingKLReceipt, Equivalence: ArchDefaultKLChecked},
+			// Same receipt: graph replay is +2.5% over eager with bitwise logits.
+			{Env: "FAK_INKLING2_GRAPH", Value: "1", Evidence: sm120InklingKLReceipt, Equivalence: ArchDefaultKLChecked},
 		},
 	},
 }
