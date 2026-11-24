@@ -37,7 +37,7 @@ func TestResolveServeFirstTokenWatchdogCPUOffloadExperts(t *testing.T) {
 		{name: "cuda without offload", rt: newRuntime(device()), baseURL: &empty, offload: &off, wantWindow: 60 * time.Second, wantSource: agent.FirstTokenWatchdogSourceDefault},
 		{name: "cuda offload flag unset pointer", rt: newRuntime(device()), baseURL: &empty, wantWindow: 60 * time.Second, wantSource: agent.FirstTokenWatchdogSourceDefault},
 		{name: "cpu backend with offload keeps cpu source", rt: newRuntime(nil), baseURL: &empty, offload: &on, wantWindow: agent.CPUBackendFirstTokenWatchdogTimeout, wantSource: agent.FirstTokenWatchdogSourceCPUBackend},
-		{name: "proxy upstream with offload", rt: newRuntime(device()), baseURL: &upstream, offload: &on, wantWindow: 60 * time.Second, wantSource: agent.FirstTokenWatchdogSourceDefault},
+		{name: "proxy upstream with offload", rt: newRuntime(device()), baseURL: &upstream, offload: &on, wantWindow: agent.CPUBackendFirstTokenWatchdogTimeout, wantSource: agent.FirstTokenWatchdogSourceProxyUpstream},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

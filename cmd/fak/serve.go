@@ -1549,6 +1549,7 @@ func checkReplicaBindingConsistency(baseURL string, roster *modelroute.Roster) e
 // server from the resolved planes, and arms the admission controller for a pure
 // in-kernel serve.
 func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableControlIngress, buildErr error) {
+	ensureServeProxyTimeoutFloors(sf)
 	resolveServeEngine(sf, rt.explicitFlags, rt.inKernelModel != nil)
 	native, _ := abi.Engine(*sf.engineID).(*modelengine.Engine)
 	if err := configureServeHostSwapBudget(sf, native); err != nil {

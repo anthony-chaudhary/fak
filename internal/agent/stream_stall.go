@@ -146,6 +146,10 @@ const (
 	// FirstTokenWatchdogSourceCPUOffloadExperts: no override; a device-backend chat whose routed
 	// experts are CPU-offloaded or streamed from the host, so prefill is host-bound.
 	FirstTokenWatchdogSourceCPUOffloadExperts FirstTokenWatchdogSource = "cpu-offload-experts default"
+	// FirstTokenWatchdogSourceProxyUpstream: no override; the chat proxies an upstream engine. A
+	// buffered proxied turn has no first token before the whole upstream completion, so the
+	// window bounds the entire agent turn, which a local engine can take minutes to produce.
+	FirstTokenWatchdogSourceProxyUpstream FirstTokenWatchdogSource = "proxy-upstream default"
 	// FirstTokenWatchdogSourceDefault: no override; the backend-blind stream idle default.
 	FirstTokenWatchdogSourceDefault FirstTokenWatchdogSource = "default"
 )

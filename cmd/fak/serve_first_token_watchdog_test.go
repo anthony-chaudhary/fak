@@ -38,7 +38,8 @@ func TestServeChatDecodesOnCPU(t *testing.T) {
 
 // TestResolveServeFirstTokenWatchdogPassesCPUBackend drives the serve seam buildGateway calls:
 // a pure in-kernel chat on the CPU floor must resolve the CPU-backend default and record it as
-// a startup message, while a device backend or a proxy upstream keeps the 60s default.
+// a startup message, a proxy upstream must resolve the proxy-upstream window, and a device
+// backend keeps the 60s default.
 func TestResolveServeFirstTokenWatchdogPassesCPUBackend(t *testing.T) {
 	t.Setenv("FAK_STREAM_STALL_TIMEOUT_S", "")
 	empty := ""
@@ -55,7 +56,7 @@ func TestResolveServeFirstTokenWatchdogPassesCPUBackend(t *testing.T) {
 	}{
 		{name: "cpu backend in-kernel", rt: newRuntime(nil), baseURL: &empty, wantWindow: agent.CPUBackendFirstTokenWatchdogTimeout, wantSource: agent.FirstTokenWatchdogSourceCPUBackend},
 		{name: "device backend in-kernel", rt: newRuntime(&serveBackendAutoSentinel{name: "vulkan"}), baseURL: &empty, wantWindow: 60 * time.Second, wantSource: agent.FirstTokenWatchdogSourceDefault},
-		{name: "proxy upstream", rt: newRuntime(nil), baseURL: &upstream, wantWindow: 60 * time.Second, wantSource: agent.FirstTokenWatchdogSourceDefault},
+		{name: "proxy upstream", rt: newRuntime(nil), baseURL: &upstream, wantWindow: agent.CPUBackendFirstTokenWatchdogTimeout, wantSource: agent.FirstTokenWatchdogSourceProxyUpstream},
 		{name: "no model loaded", rt: &serveRuntime{}, baseURL: &empty, wantWindow: 60 * time.Second, wantSource: agent.FirstTokenWatchdogSourceDefault},
 	}
 	for _, tt := range tests {
