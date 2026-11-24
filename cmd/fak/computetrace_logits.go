@@ -19,7 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
-const computeTraceLogitsUsage = "usage: fak compute-trace logits dump --gguf <model.gguf> --prompts <prompts.json> --out <dir> [--teacher <ref-dump>] | compare --ref <dump> --cand <dump> [--json]"
+const computeTraceLogitsUsage = "usage: fak compute-trace logits dump --gguf <model.gguf> --prompts <prompts.json> --out <dir> [--teacher <ref-dump>] | compare --ref <dump> --cand <dump> [--kl-baseline <pair-report.json> [--kl-multiple N]] [--json]"
 
 // logitDumpLoadModel is the serve loader the dump uses; tests replace it.
 var logitDumpLoadModel = loadServeInKernelModel
@@ -291,6 +291,8 @@ func runComputeTraceLogitsCompare(stdout, stderr io.Writer, args []string) int {
 	fs.Float64Var(&th.RelL2Max, "rel-l2-max", th.RelL2Max, "maximum relative L2 at every compared position")
 	fs.Float64Var(&th.TieEpsilon, "tie-epsilon", th.TieEpsilon, "logit gap below which a greedy mismatch is a tie in both distributions")
 	fs.IntVar(&th.TopK, "topk", th.TopK, "k for top-k overlap")
+	klBaseline := fs.String("kl-baseline", "", "compare report of two reference runs that should agree; gates the candidate's mean KL against that pair's noise floor")
+	klMultiple := fs.Float64("kl-multiple", 2, "with --kl-baseline, the candidate passes while its mean KL stays within this multiple of the floor")
 	jsonOut := fs.Bool("json", false, "print the fak.logit-oracle.compare/v1 report as JSON")
 	reportOut := fs.String("out", "", "also write the JSON report to this path")
 	if err := fs.Parse(args); err != nil {
@@ -299,6 +301,14 @@ func runComputeTraceLogitsCompare(stdout, stderr io.Writer, args []string) int {
 	if *ref == "" || *cand == "" {
 		fmt.Fprintln(stderr, computeTraceLogitsUsage)
 		return 2
+	}
+	if *klBaseline != "" {
+		gate, err := readLogitKLBaseline(*klBaseline, *klMultiple)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		th.KLNoise = &gate
 	}
 	rm, err := logitoracle.ReadManifest(*ref)
 	if err != nil {
@@ -337,6 +347,27 @@ func runComputeTraceLogitsCompare(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
+// readLogitKLBaseline derives the KL noise-floor gate from a saved compare
+// report of a baseline pair.
+func readLogitKLBaseline(path string, multiple float64) (logitoracle.KLNoiseFloor, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return logitoracle.KLNoiseFloor{}, err
+	}
+	var pair logitoracle.Report
+	if err := json.Unmarshal(data, &pair); err != nil {
+		return logitoracle.KLNoiseFloor{}, fmt.Errorf("kl baseline %s: %w", path, err)
+	}
+	if pair.Schema != logitoracle.ReportSchema {
+		return logitoracle.KLNoiseFloor{}, fmt.Errorf("kl baseline %s: schema %q, want %q", path, pair.Schema, logitoracle.ReportSchema)
+	}
+	gate, err := logitoracle.KLNoiseFloorFromPair(pair, multiple)
+	if err != nil {
+		return logitoracle.KLNoiseFloor{}, fmt.Errorf("kl baseline %s: %w", path, err)
+	}
+	return gate, nil
+}
+
 func writeLogitCompareText(w io.Writer, rep logitoracle.Report, rm, cm *logitoracle.Manifest) {
 	for _, p := range rep.Prompts {
 		fmt.Fprintf(w, "prompt=%s compared=%d excluded=%d cos_min=%.8f rel_l2_max=%.3g rel_l2_med=%.3g kl_max=%.3g top1=%d/%d top%d_overlap_mean=%.3f greedy=%s gate=%t strict=%t\n",
@@ -352,6 +383,9 @@ func writeLogitCompareText(w io.Writer, rep logitoracle.Report, rm, cm *logitora
 	}
 	fmt.Fprintf(w, "verdict=%s strict_verdict=%s greedy=%s cosine_min=%g rel_l2_max=%g tie_epsilon=%g\n",
 		rep.Verdict, rep.StrictVerdict, rep.Greedy, rep.Thresholds.CosineMin, rep.Thresholds.RelL2Max, rep.Thresholds.TieEpsilon)
+	if k := rep.KLNoise; k.Verdict != logitoracle.KLNoiseNoFloor {
+		fmt.Fprintf(w, "kl_noise=%s kl_mean=%.4g floor=%.4g multiple=%g ratio=%.3f %s\n", k.Verdict, k.KLMean, k.Floor, k.Multiple, k.Ratio, k.Reason)
+	}
 }
 
 func logitPiece(m *logitoracle.Manifest, prompt string, position, id int) string {

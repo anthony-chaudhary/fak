@@ -85,6 +85,53 @@ func TestComputeTraceLogitsCompareExitCodes(t *testing.T) {
 	}
 }
 
+// fak-test:justify why=regression when=changed:cmd/fak/computetrace*.go
+// fak-test:runtime fast est=20ms lane=default
+func TestComputeTraceLogitsCompareKLBaselineGate(t *testing.T) {
+	root := t.TempDir()
+	ref, twin, near, far := filepath.Join(root, "ref"), filepath.Join(root, "twin"), filepath.Join(root, "near"), filepath.Join(root, "far")
+	writeLogitFixture(t, ref, 0)
+	writeLogitFixture(t, twin, 0.002)
+	writeLogitFixture(t, near, 0.002)
+	writeLogitFixture(t, far, 0.01)
+	var out, errOut bytes.Buffer
+	pair := filepath.Join(root, "pair.json")
+	if code := runComputeTrace(&out, &errOut, []string{"logits", "compare", "--ref", ref, "--cand", twin, "--json", "--out", pair}); code != 0 {
+		t.Fatalf("baseline pair exit=%d stderr=%s", code, errOut.String())
+	}
+	run := func(cand string, extra ...string) (int, logitoracle.Report) {
+		out.Reset()
+		code := runComputeTrace(&out, &errOut, append([]string{"logits", "compare", "--ref", ref, "--cand", cand, "--json", "--kl-baseline", pair}, extra...))
+		var rep logitoracle.Report
+		if code != 2 && out.Len() > 0 {
+			if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return code, rep
+	}
+	// A candidate as noisy as the baseline pair passes; one well past the floor fails on KL alone.
+	if code, rep := run(near); code != 0 || rep.KLNoise.Verdict != logitoracle.KLNoiseWithin || rep.Thresholds.KLNoise == nil || rep.KLNoise.Multiple != 2 {
+		t.Fatalf("near: exit=%d kl=%+v stderr=%s", code, rep.KLNoise, errOut.String())
+	}
+	code, rep := run(far, "--kl-multiple", "1.5")
+	if code != 1 || rep.KLNoise.Verdict != logitoracle.KLNoiseExceeded || rep.Verdict != logitoracle.VerdictFail || rep.KLNoise.Multiple != 1.5 {
+		t.Fatalf("far: exit=%d verdict=%s kl=%+v", code, rep.Verdict, rep.KLNoise)
+	}
+	// A bit-identical pair has no noise to scale by; a missing report is refused before comparing.
+	same := filepath.Join(root, "same.json")
+	if code := runComputeTrace(&out, &errOut, []string{"logits", "compare", "--ref", ref, "--cand", ref, "--json", "--out", same}); code != 0 {
+		t.Fatalf("identical pair exit=%d", code)
+	}
+	for _, bad := range []string{same, filepath.Join(root, "missing.json"), filepath.Join(ref, "manifest.json")} {
+		errOut.Reset()
+		out.Reset()
+		if code := runComputeTrace(&out, &errOut, []string{"logits", "compare", "--ref", ref, "--cand", near, "--kl-baseline", bad}); code != 1 || out.Len() != 0 || errOut.Len() == 0 {
+			t.Fatalf("baseline %s: exit=%d out=%q", bad, code, out.String())
+		}
+	}
+}
+
 // A host reference of a checkpoint larger than RAM (DeepSeek-V4.1 Flash Q2_K on
 // CPU) needs the serve --cpu-offload-experts arm and a bounded KV budget; the
 // dump must thread both to the serve loader instead of hard-coding false/0.
