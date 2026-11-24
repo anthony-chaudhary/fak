@@ -107,6 +107,37 @@ A host is at baseline when the four paths and four processes above appear in the
 output. That is the whole acceptance test: a new host reaches baseline from a
 single elevated paste, and this command proves it.
 
+## Machine-learning false positives on the fak toolchain
+
+Path exclusions remove the scan tax but do not stop Defender's cloud
+machine-learning models from convicting fak's own development loop. Three
+signatures have been witnessed against fak tooling on a fleet host:
+
+| Threat ID | Name | What it scored |
+| --- | --- | --- |
+| 2147735815 | `Behavior:Win32/Execution.A!ml` | `fak-run.exe` writing freshly built, unsigned binaries into `%LOCALAPPDATA%\fak-toolrun` and executing them at hook rate |
+| 2147852719 | `Trojan:Win32/Commando.B!ml` | `git.exe ls-tree` / `status` and `gofmt -l` command lines naming many `cmd/fak-spawn/spawn_*.go` files |
+| 2147981340 | `Trojan:Win32/Commando.C!ml` | the same `gofmt -l` shape over a larger file list |
+
+The behavior verdict quarantines the launcher and terminates its whole process
+tree, so every agent spawned through it dies mid-turn. Each rebuild yields a new
+hash with no cloud reputation, so the verdict recurs on every launch.
+
+`fak-dev windows-setup --apply` therefore installs, alongside the path
+exclusions (now including `%USERPROFILE%\bin`, `%LOCALAPPDATA%\fak-toolrun`,
+`%USERPROFILE%\.local\share\fak` and a sibling `fak-private` checkout), a
+per-signature allow for exactly those IDs and reads each one back:
+
+```powershell
+Add-MpPreference -ThreatIDDefaultAction_Ids 2147735815,2147852719,2147981340 `
+  -ThreatIDDefaultAction_Actions Allow,Allow,Allow
+```
+
+Trade-off: an allow is per signature and machine-wide, so a genuine payload
+convicted by the same ML signature would also be allowed. The list is limited
+to signatures witnessed on fak tooling; add an ID only from a
+`Get-MpThreatDetection` record whose resource is a fak path or command line.
+
 ## The honest trade-off
 
 Every exclusion is a **security-surface-for-throughput trade**, and this doc will

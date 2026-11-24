@@ -26,15 +26,32 @@ const (
 var windowsSetupTempDir = os.TempDir
 
 type SetupSpec struct {
-	Paths           []string `json:"paths"`
-	Processes       []string `json:"processes"`
-	Group           string   `json:"fleet_group"`
-	Port            int      `json:"fleet_port"`
-	TunePower       bool     `json:"tune_power"`
-	LongPaths       bool     `json:"long_paths"`
-	ProcThrottleMin int      `json:"proc_throttle_min"`
-	Warnings        []string `json:"warnings,omitempty"`
-	StaleTempDirs   []string `json:"stale_temp_dirs,omitempty"`
+	Paths           []string      `json:"paths"`
+	Processes       []string      `json:"processes"`
+	Group           string        `json:"fleet_group"`
+	Port            int           `json:"fleet_port"`
+	TunePower       bool          `json:"tune_power"`
+	LongPaths       bool          `json:"long_paths"`
+	ProcThrottleMin int           `json:"proc_throttle_min"`
+	ThreatAllows    []ThreatAllow `json:"threat_allows,omitempty"`
+	Warnings        []string      `json:"warnings,omitempty"`
+	StaleTempDirs   []string      `json:"stale_temp_dirs,omitempty"`
+}
+
+// ThreatAllow is a Defender machine-learning signature that fires on fak's own
+// development loop. A path exclusion cannot cover these: the behavior model
+// scores the launcher that writes then executes freshly built unsigned binaries,
+// and the command-line model scores git/gofmt invocations naming many source files.
+type ThreatAllow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// DefaultThreatAllows lists only signatures witnessed against fak tooling.
+var DefaultThreatAllows = []ThreatAllow{
+	{ID: 2147735815, Name: "Behavior:Win32/Execution.A!ml"},
+	{ID: 2147852719, Name: "Trojan:Win32/Commando.B!ml"},
+	{ID: 2147981340, Name: "Trojan:Win32/Commando.C!ml"},
 }
 
 type Item struct {
@@ -50,10 +67,11 @@ type Result struct {
 	Profiles  []Item `json:"profiles"`
 	Power     []Item `json:"power,omitempty"`
 	Settings  []Item `json:"settings,omitempty"`
+	Threats   []Item `json:"threats,omitempty"`
 }
 
 func (r Result) Complete() bool {
-	for _, set := range [][]Item{r.Paths, r.Processes, r.Firewall, r.Profiles, r.Power, r.Settings} {
+	for _, set := range [][]Item{r.Paths, r.Processes, r.Firewall, r.Profiles, r.Power, r.Settings, r.Threats} {
 		for _, item := range set {
 			if !item.Present {
 				return false
@@ -98,6 +116,14 @@ func buildWindowsSetupSpec(repo string) (SetupSpec, error) {
 		filepath.Join(home, ".cargo"), filepath.Join(home, ".rustup"),
 		filepath.Join(home, ".cache"), filepath.Join(local, "pip", "cache"),
 		filepath.Join(home, ".codex"), filepath.Join(home, ".claude"),
+		// Launcher install dir, its cached build slots and scheduled-ops binaries.
+		filepath.Join(home, "bin"), filepath.Join(local, "fak-toolrun"),
+		filepath.Join(home, ".local", "share", "fak"),
+	}
+	if private := filepath.Join(filepath.Dir(abs), "fak-private"); private != abs {
+		if st, err := os.Stat(private); err == nil && st.IsDir() {
+			paths = append(paths, private)
+		}
 	}
 	paths = uniqueClean(paths)
 	group, port := fleetSpineEndpointFromEnv()
@@ -125,6 +151,7 @@ func buildWindowsSetupSpec(repo string) (SetupSpec, error) {
 		TunePower:       true,
 		LongPaths:       true,
 		ProcThrottleMin: DefaultProcThrottleMin,
+		ThreatAllows:    append([]ThreatAllow(nil), DefaultThreatAllows...),
 		Warnings:        warnings,
 		StaleTempDirs:   staleDirs,
 	}, nil
@@ -310,6 +337,10 @@ func PowerShell(p SetupSpec, resultPath string, apply bool) string {
 	if p.LongPaths {
 		longPaths = "$true"
 	}
+	threatIDs := make([]string, len(p.ThreatAllows))
+	for i, t := range p.ThreatAllows {
+		threatIDs[i] = strconv.FormatInt(t.ID, 10)
+	}
 	throttleMin := p.ProcThrottleMin
 	if throttleMin <= 0 {
 		throttleMin = DefaultProcThrottleMin
@@ -320,6 +351,7 @@ $tunePower=%s
 $longPaths=%s
 $paths=%s
 $processes=%s
+$threatIds=@(%s)
 if($apply){
  foreach($x in $paths){
   if(-not (Test-Path -LiteralPath $x)){
@@ -328,6 +360,7 @@ if($apply){
   Add-MpPreference -ExclusionPath $x -ErrorAction SilentlyContinue
  }
  foreach($x in $processes){Add-MpPreference -ExclusionProcess $x -ErrorAction SilentlyContinue}
+ foreach($x in $threatIds){Add-MpPreference -ThreatIDDefaultAction_Ids $x -ThreatIDDefaultAction_Actions Allow -ErrorAction SilentlyContinue}
  Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Block -DefaultOutboundAction Allow -NotifyOnListen False -AllowInboundRules True -AllowLocalFirewallRules True
  foreach($d in @('Inbound','Outbound')){
   $n='fak-fleet-spine-'+$d.ToLowerInvariant()
@@ -383,9 +416,11 @@ if($apply){
  }
 }
 $p=Get-MpPreference
-$r=[ordered]@{applied_at=(Get-Date).ToString('o');paths=@();processes=@();firewall=@();profiles=@();power=@();settings=@()}
+$r=[ordered]@{applied_at=(Get-Date).ToString('o');paths=@();processes=@();firewall=@();profiles=@();power=@();settings=@();threats=@()}
 foreach($x in $paths){$r.paths += [ordered]@{value=$x;present=(@($p.ExclusionPath)-contains $x)}}
 foreach($x in $processes){$r.processes += [ordered]@{value=$x;present=(@($p.ExclusionProcess)-contains $x)}}
+$tids=@($p.ThreatIDDefaultAction_Ids);$tacts=@($p.ThreatIDDefaultAction_Actions)
+foreach($x in $threatIds){$i=[Array]::IndexOf($tids,[long]$x);$r.threats += [ordered]@{value=[string]$x;present=($i -ge 0 -and [int]$tacts[$i] -eq 6)}}
 foreach($d in @('inbound','outbound')){$n='fak-fleet-spine-'+$d;$f=Get-NetFirewallRule -Name $n -ErrorAction SilentlyContinue;$a=$f|Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue;$pt=$f|Get-NetFirewallPortFilter -ErrorAction SilentlyContinue;$ok=[bool]($f -and $f.Enabled -eq 'True' -and $f.Action -eq 'Allow' -and @($a.RemoteAddress)-contains %s -and @($pt.LocalPort)-contains '%d');$r.firewall += [ordered]@{value=$n;present=$ok}}
 foreach($name in @('Domain','Private','Public')){$fp=Get-NetFirewallProfile -Name $name;$ok=[bool]($fp.DefaultInboundAction -eq 'Block' -and $fp.DefaultOutboundAction -eq 'Allow' -and $fp.NotifyOnListen -eq $false -and $fp.AllowInboundRules -eq 'True' -and $fp.AllowLocalFirewallRules -eq 'True');$r.profiles += [ordered]@{value=$name;present=$ok}}
 if($tunePower){
@@ -403,5 +438,5 @@ if($longPaths){
  $r.settings += [ordered]@{value='filesystem_long_paths_enabled';present=($lp -eq 1)}
 }
 $r|ConvertTo-Json -Depth 5|Set-Content -LiteralPath %s -Encoding utf8
-`, mode, tunePower, longPaths, arr(p.Paths), arr(p.Processes), q(p.Group), p.Port, p.Port, throttleMin, q(p.Group), p.Port, q(resultPath))
+`, mode, tunePower, longPaths, arr(p.Paths), arr(p.Processes), strings.Join(threatIDs, ","), q(p.Group), p.Port, p.Port, throttleMin, q(p.Group), p.Port, q(resultPath))
 }

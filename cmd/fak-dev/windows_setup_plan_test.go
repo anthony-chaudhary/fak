@@ -428,3 +428,59 @@ func TestInspectAndReapStaleTempDirs(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultPlanAllowsWitnessedToolchainFalsePositives(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", filepath.Join(t.TempDir(), "Local"))
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := buildWindowsSetupSpec(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{filepath.Join(home, "bin"), filepath.Join(os.Getenv("LOCALAPPDATA"), "fak-toolrun")} {
+		found := false
+		for _, got := range p.Paths {
+			found = found || strings.EqualFold(filepath.Clean(got), filepath.Clean(want))
+		}
+		if !found {
+			t.Errorf("paths omit launcher location %q", want)
+		}
+	}
+	ids := map[int64]bool{}
+	for _, a := range p.ThreatAllows {
+		ids[a.ID] = true
+	}
+	for _, want := range []int64{2147735815, 2147852719, 2147981340} {
+		if !ids[want] {
+			t.Errorf("threat allows omit %d", want)
+		}
+	}
+	script := PowerShell(p, `C:\tmp\result.json`, true)
+	for _, want := range []string{"$threatIds=@(2147735815,2147852719,2147981340)", "-ThreatIDDefaultAction_Actions Allow", "ThreatIDDefaultAction_Ids", "$r.threats"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script omits %q", want)
+		}
+	}
+}
+
+func TestResultCompleteRequiresThreatAllowsWhenPresent(t *testing.T) {
+	r := Result{
+		Paths: []Item{{Present: true}}, Processes: []Item{{Present: true}},
+		Firewall: []Item{{Present: true}, {Present: true}},
+		Profiles: []Item{{Present: true}, {Present: true}, {Present: true}},
+		Threats:  []Item{{Value: "2147735815", Present: false}},
+	}
+	if r.Complete() {
+		t.Fatal("missing threat allow accepted")
+	}
+	r.Threats[0].Present = true
+	if !r.Complete() {
+		t.Fatal("complete threat allow rejected")
+	}
+}
