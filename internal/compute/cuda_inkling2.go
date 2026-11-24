@@ -178,6 +178,18 @@ func ink2SelectIQGEMV(fast bool) bool {
 	return C.fcuda_ink2_iq_gemv_select(mode) != 0
 }
 
+// ink2SelectAttendSplit picks the attend kernel (true: the split launches, false: the
+// reference) and returns the previous choice.
+func ink2SelectAttendSplit(split bool) bool {
+	mode := C.int(0)
+	if split {
+		mode = 1
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return C.fcuda_ink2_attend_split_select(mode) != 0
+}
+
 func (c *cudaBackend) Ink2RMS(x, w, y Ink2Ref, rows, n int, eps float32) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()

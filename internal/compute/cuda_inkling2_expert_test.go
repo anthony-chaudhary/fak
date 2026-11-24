@@ -224,3 +224,72 @@ func TestCUDAInk2ExpertIQFastMatchesReference(t *testing.T) {
 		}
 	}
 }
+
+// The split attend keeps the reference's per-key score, exp and serial denominator
+// order and its 4-group value sums, so the two must agree bit for bit at every depth,
+// for local (window) and global (full-cache, wrapped ring) slots.
+// fak-test:runtime integration est=2s lane=optin
+func TestCUDAInk2AttendSplitMatchesReference(t *testing.T) {
+	cb := cudaNVFP4OrSkip(t)
+	defer ink2SelectAttendSplit(ink2SelectAttendSplit(true))
+	r := rand.New(rand.NewSource(37))
+	p := Ink2AttnParams{Heads: 24, KVHeads: 8, HeadDim: 128, RelLen: 16, Scale: float32(1 / math.Sqrt(128))}
+	kvDim := p.KVHeads * p.HeadDim
+	alloc := func(n int) Tensor {
+		tt, err := cb.Ink2Alloc(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tt
+	}
+	fill := func(tt Tensor, n int, sd float64) []float32 {
+		v := make([]float32, n)
+		for i := range v {
+			v[i] = float32(sd * r.NormFloat64())
+		}
+		if err := cb.Ink2Write(Ink2At(tt, 0), v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	for _, c := range []struct{ cap, window, extent, pos int }{
+		{1024, 1024, 1024, 0}, {1024, 1024, 1024, 82}, {1024, 1024, 1024, 2000},
+		{4096, 0, 1024, 82}, {4096, 0, 1024, 2000}, {4096, 0, 1024, 5000},
+	} {
+		q, rr, sinks, rel := alloc(p.Heads*p.HeadDim), alloc(p.Heads*p.RelLen), alloc(p.Heads), alloc(c.extent*p.RelLen)
+		kc, vc, meta := alloc(c.cap*kvDim), alloc(c.cap*kvDim), alloc(1)
+		scores := alloc(2 * p.Heads * c.cap)
+		fill(q, p.Heads*p.HeadDim, 1)
+		rv := fill(rr, p.Heads*p.RelLen, 1)
+		fill(sinks, p.Heads, 1)
+		fill(rel, c.extent*p.RelLen, 0.1)
+		fill(kc, c.cap*kvDim, 0.3)
+		fill(vc, c.cap*kvDim, 1)
+		if err := cb.Ink2Write(Ink2At(meta, 0), []float32{math.Float32frombits(uint32(c.pos))}); err != nil {
+			t.Fatal(err)
+		}
+		run := func(split bool) []float32 {
+			// the split launches park the head max in the rel-query row
+			if err := cb.Ink2Write(Ink2At(rr, 0), rv); err != nil {
+				t.Fatal(err)
+			}
+			ink2SelectAttendSplit(split)
+			out := alloc(p.Heads * p.HeadDim)
+			if err := cb.Ink2Attend(Ink2At(q, 0), Ink2At(rr, 0), Ink2At(sinks, 0), Ink2At(rel, 0), Ink2At(kc, 0), Ink2At(vc, 0),
+				Ink2At(scores, 0), Ink2At(out, 0), Ink2At(meta, 0), p, c.extent, c.window, c.cap); err != nil {
+				t.Fatal(err)
+			}
+			got, err := cb.Ink2Read(Ink2At(out, 0), p.Heads*p.HeadDim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+		want, got := run(false), run(true)
+		for i := range want {
+			if math.IsNaN(float64(want[i])) || math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("cap %d window %d pos %d: out[%d] split %v, reference %v", c.cap, c.window, c.pos, i, got[i], want[i])
+			}
+		}
+	}
+}

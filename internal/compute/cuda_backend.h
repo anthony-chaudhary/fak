@@ -996,6 +996,7 @@ int fcuda_ink2_expert_gemv(int fmt, const uint8_t *W, const uint8_t *scales, con
     double beta, double lb);
 int fcuda_ink2_nvfp4_gemv_select(int mode);
 int fcuda_ink2_iq_gemv_select(int mode);
+int fcuda_ink2_attend_split_select(int mode);
 int fcuda_ink2_graph_begin(void);
 int fcuda_ink2_graph_end(void);
 int fcuda_ink2_graph_launch(void);

@@ -656,6 +656,8 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
   }
 }
 
+#include "inkling2_attend_split.cuh"
+
 __global__ void k_ink2_sigmoid_mul(float *x, const float *gate, int n) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) x[i] = __fmul_rn(x[i], ink2_sigmoid(gate[i]));
@@ -1241,6 +1243,9 @@ extern "C" int fcuda_ink2_attend(const float *q, const float *r, const float *si
                                  const float *meta, int heads, int kvHeads, int headDim, int relLen, int extent,
                                  int window, int cap, float scale) {
   if (headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS) return (int)cudaErrorInvalidValue;
+  if (ink2_attend_split(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen, extent,
+                        window, cap, scale))
+    return ink2_last_error();
   FCUDA_TS("k_ink2_attend", heads, k_ink2_attend<<<heads, INK2_ATT_THREADS, (size_t)cap * sizeof(float), g_stream>>>(
       q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen, extent, window, cap,
       scale));
