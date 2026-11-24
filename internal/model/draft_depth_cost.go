@@ -208,3 +208,71 @@ func (r *DraftDepthRule) Done(tokens, rows, levels int) {
 	r.tokens += r.weight * (float64(tokens) - r.tokens)
 	r.ms += r.weight * (r.costs.Verify[rows] + float64(levels)*r.costs.Level - r.ms)
 }
+
+// Speculation back-off bounds, after Niko1221/Strata
+// engine/src/hy4flash/run/hy4_spec.hip.h:100-116,188-207 @ c6f6427d9de9 (MIT),
+// re-expressed without copied code.
+const (
+	SpeculationBackoffMinPlain = 8
+	SpeculationBackoffMaxPlain = 256
+	// SpeculationBackoffResetWin is the speedup over plain decode a speculative
+	// step must reach before the plain interval drops back to its minimum, so a
+	// marginal win does not undo the back-off earned by repeated losses.
+	SpeculationBackoffResetWin = 1.10
+)
+
+// SpeculationBackoff turns speculation off after it loses to plain decode.
+// Each loss runs plain decode for P steps and then probes again, with P
+// doubling from SpeculationBackoffMinPlain to SpeculationBackoffMaxPlain; a
+// win of SpeculationBackoffResetWin or more resets P. A fixed probe interval
+// keeps paying for failed probes at the same rate however long drafting keeps
+// losing; doubling makes that cost shrink geometrically.
+//
+// The zero value is ready to use. It is not safe for concurrent use.
+type SpeculationBackoff struct {
+	next  int // plain steps the next loss buys; 0 reads as the minimum
+	left  int // plain steps still owed before the next probe
+	loses int
+}
+
+// Speculate reports whether this step should draft. While a back-off is
+// owed it consumes one plain step and reports false.
+func (b *SpeculationBackoff) Speculate() bool {
+	if b.left > 0 {
+		b.left--
+		return false
+	}
+	return true
+}
+
+// Observe folds a speculative step's speedup over plain decode (tokens per ms
+// speculating divided by tokens per ms plain). A loss, including a
+// non-finite or non-positive speedup, starts a back-off and doubles the next
+// one; a win at the reset threshold restores the minimum interval.
+func (b *SpeculationBackoff) Observe(speedup float64) {
+	if b.next == 0 {
+		b.next = SpeculationBackoffMinPlain
+	}
+	switch {
+	case math.IsNaN(speedup) || math.IsInf(speedup, 0) || speedup < 1:
+		b.left = b.next
+		b.next = min(2*b.next, SpeculationBackoffMaxPlain)
+		b.loses++
+	case speedup >= SpeculationBackoffResetWin:
+		b.next = SpeculationBackoffMinPlain
+	}
+}
+
+// PlainLeft reports the plain steps still owed before the next probe.
+func (b *SpeculationBackoff) PlainLeft() int { return b.left }
+
+// NextPlain reports the plain interval the next loss will buy.
+func (b *SpeculationBackoff) NextPlain() int {
+	if b.next == 0 {
+		return SpeculationBackoffMinPlain
+	}
+	return b.next
+}
+
+// Losses reports how many speculative steps lost to plain decode.
+func (b *SpeculationBackoff) Losses() int { return b.loses }

@@ -538,3 +538,47 @@ func TestQwen38MTP_Adaptive_FailClosedBoundaries(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestSpeculationBackoffDoublesPlainIntervalAndResetsOnWin(t *testing.T) {
+	var b SpeculationBackoff
+	if !b.Speculate() || b.NextPlain() != SpeculationBackoffMinPlain {
+		t.Fatalf("zero value must speculate with the minimum interval: next=%d", b.NextPlain())
+	}
+	plainRun := func() int {
+		n := 0
+		for !b.Speculate() {
+			n++
+		}
+		return n
+	}
+	// Repeated losses: 8, 16, 32, 64, 128, 256, then capped at 256.
+	for i, want := range []int{8, 16, 32, 64, 128, 256, 256, 256} {
+		b.Observe(0.9)
+		if got := plainRun(); got != want {
+			t.Fatalf("loss %d: ran plain %d steps, want %d", i+1, got, want)
+		}
+	}
+	if b.Losses() != 8 || b.PlainLeft() != 0 {
+		t.Fatalf("losses=%d left=%d", b.Losses(), b.PlainLeft())
+	}
+	// A marginal win keeps speculating but does not undo the earned back-off.
+	b.Observe(1.05)
+	if !b.Speculate() || b.NextPlain() != SpeculationBackoffMaxPlain {
+		t.Fatalf("marginal win: next=%d", b.NextPlain())
+	}
+	// A clear win resets the interval; the next loss buys the minimum again.
+	b.Observe(SpeculationBackoffResetWin)
+	b.Observe(0.5)
+	if got := plainRun(); got != SpeculationBackoffMinPlain {
+		t.Fatalf("after reset ran plain %d steps", got)
+	}
+	// Speedups that cannot be priced count as losses.
+	for _, s := range []float64{math.NaN(), math.Inf(1), 0, -1} {
+		var c SpeculationBackoff
+		c.Observe(s)
+		if c.Speculate() || c.PlainLeft() != SpeculationBackoffMinPlain-1 {
+			t.Fatalf("speedup %v must back off: left=%d", s, c.PlainLeft())
+		}
+	}
+}
