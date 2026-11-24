@@ -77,7 +77,13 @@ func readGoldenTSV(t *testing.T, name string) []goldenLine {
 // full 129k vocab does, whichever pre-tokenizer runs.
 func loadDeepSeekV41Subset(t *testing.T) *Tokenizer {
 	t.Helper()
-	f, err := os.Open(filepath.Join("testdata", "deepseek_v41_vocab_subset.tsv"))
+	return loadGGMLSubset(t, "deepseek_v41_vocab_subset.tsv")
+}
+
+// loadGGMLSubset rebuilds a FromGGML tokenizer from a committed testdata vocab slice.
+func loadGGMLSubset(t *testing.T, name string) *Tokenizer {
+	t.Helper()
+	f, err := os.Open(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatalf("open vocab subset: %v", err)
 	}

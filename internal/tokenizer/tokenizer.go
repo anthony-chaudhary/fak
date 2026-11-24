@@ -92,7 +92,7 @@ type tokenizerJSON struct {
 	Model struct {
 		Type         string         `json:"type"`
 		Vocab        map[string]int `json:"vocab"`
-		Merges       []string       `json:"merges"`
+		Merges       jsonMerges     `json:"merges"`
 		IgnoreMerges bool           `json:"ignore_merges"`
 	} `json:"model"`
 	Decoder struct {
@@ -100,6 +100,42 @@ type tokenizerJSON struct {
 	} `json:"decoder"`
 	PreTokenizer preTokConfig     `json:"pre_tokenizer"`
 	AddedTokens  []addedTokenJSON `json:"added_tokens"`
+}
+
+// jsonMerges reads tokenizer.json BPE merges in either serialization: the legacy
+// "left right" strings or the newer ["left", "right"] pairs, which can carry a
+// piece containing a space.
+type jsonMerges []tokenPair
+
+func (m *jsonMerges) UnmarshalJSON(b []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	out := make(jsonMerges, 0, len(raw))
+	for _, r := range raw {
+		var pair tokenPair
+		var s string
+		var parts []string
+		switch {
+		case json.Unmarshal(r, &s) == nil:
+			fields := strings.Split(s, " ")
+			if len(fields) != 2 {
+				return fmt.Errorf("tokenizer: unsupported merge %q", s)
+			}
+			pair = tokenPair{left: fields[0], right: fields[1]}
+		case json.Unmarshal(r, &parts) == nil && len(parts) == 2:
+			pair = tokenPair{left: parts[0], right: parts[1]}
+		default:
+			return fmt.Errorf("tokenizer: unsupported merge %s", r)
+		}
+		if pair.left == "" || pair.right == "" {
+			return fmt.Errorf("tokenizer: unsupported merge %s", r)
+		}
+		out = append(out, pair)
+	}
+	*m = out
+	return nil
 }
 
 // preTokConfig captures only the pre_tokenizer shape we dispatch on.
@@ -238,14 +274,9 @@ func ParseJSON(b []byte) (*Tokenizer, error) {
 	})
 
 	mergeRank := make(map[tokenPair]int, len(doc.Model.Merges))
-	for rank, merge := range doc.Model.Merges {
-		fields := strings.Split(merge, " ")
-		if len(fields) != 2 || fields[0] == "" || fields[1] == "" {
-			return nil, fmt.Errorf("tokenizer: unsupported merge %q", merge)
-		}
-		pair := tokenPair{left: fields[0], right: fields[1]}
+	for rank, pair := range doc.Model.Merges {
 		if _, exists := mergeRank[pair]; exists {
-			return nil, fmt.Errorf("tokenizer: duplicate merge %q", merge)
+			return nil, fmt.Errorf("tokenizer: duplicate merge %q", pair.left+" "+pair.right)
 		}
 		mergeRank[pair] = rank
 	}

@@ -25,6 +25,9 @@ const (
 	// preTokDeepSeek3 is llama.cpp's DeepSeek-V3/JoyAI three-regex sequence
 	// (DeepSeek-V4.1-Flash GGUFs carry tokenizer.ggml.pre=joyai-llm).
 	preTokDeepSeek3
+	// preTokO200k is the o200k Split regex (Inkling 2): case-aware letter words,
+	// combining marks kept with their letters, digits in runs of 1-3.
+	preTokO200k
 )
 
 // resolvePreTokenizer maps a closed pre-tokenizer kind to the split function and the
@@ -39,6 +42,8 @@ func resolvePreTokenizer(kind preTokKind) (split func(string) []string, metaspac
 		return preTokenizeGLM4, false
 	case preTokDeepSeek3:
 		return preTokenizeDeepSeek3, false
+	case preTokO200k:
+		return preTokenizeO200k, false
 	case preTokMetaspace:
 		// Gemma BPEs the ▁-marked literal chunk directly; Encode keys off metaspace and
 		// does not regex-split, so the ByteLevel splitter is the inert placeholder here
@@ -57,6 +62,10 @@ func resolvePreTokenizer(kind preTokKind) (split func(string) []string, metaspac
 func jsonPreTokKind(c preTokConfig) preTokKind {
 	if !c.hasSplit() {
 		return preTokByteLevel
+	}
+	// o200k also groups digits as \p{N}{1,3}, so it must be recognized before GLM-4.
+	if c.hasO200kLetterClasses() {
+		return preTokO200k
 	}
 	if c.hasGLM4DigitGrouping() {
 		return preTokGLM4
@@ -80,6 +89,8 @@ func ggmlPreTokKind(pre string) preTokKind {
 		return preTokMetaspace
 	case isDeepSeek3PreTokenizer(pre):
 		return preTokDeepSeek3
+	case isO200kPreTokenizer(pre):
+		return preTokO200k
 	default:
 		return preTokByteLevel
 	}
@@ -101,4 +112,24 @@ func (c preTokConfig) hasGLM4DigitGrouping() bool {
 		}
 	}
 	return false
+}
+
+// hasO200kLetterClasses reports whether any Split stage uses o200k's case-split
+// letter classes, the feature that separates it from the Qwen and GLM-4 regexes.
+func (c preTokConfig) hasO200kLetterClasses() bool {
+	if c.Type == "Split" && strings.Contains(c.Pattern.Regex, `[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]`) {
+		return true
+	}
+	for _, p := range c.Pretokenizers {
+		if p.hasO200kLetterClasses() {
+			return true
+		}
+	}
+	return false
+}
+
+// isO200kPreTokenizer matches the GGUF hints that carry the o200k split. Only
+// inkling2 is mapped: it is the hint with a reference corpus in testdata.
+func isO200kPreTokenizer(pre string) bool {
+	return strings.EqualFold(pre, "inkling2")
 }

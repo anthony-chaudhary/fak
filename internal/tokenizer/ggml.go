@@ -87,10 +87,11 @@ func FromGGML(tokens, merges []string, tokenTypes []int32, pre string) (*Tokeniz
 	// the metaspace flag together. Adding a family is one kind + one resolver case, picked
 	// up here and by the JSON path alike, so the two loaders can never silently diverge.
 	preKind := ggmlPreTokKind(pre)
-	// GLM-4/5 GGUFs prefer a complete vocabulary piece before consulting merges.
-	// chatglm-bpe shares the splitter but retains ordinary merge behavior.
+	// GLM-4/5 and Inkling 2 GGUFs prefer a complete vocabulary piece before consulting
+	// merges (HF ignore_merges): some Inkling pieces cannot be built from merges at all.
+	// chatglm-bpe shares the GLM splitter but retains ordinary merge behavior.
 	p := strings.ToLower(pre)
-	ignoreMerges := p == "glm4" || p == "glm5"
+	ignoreMerges := p == "glm4" || p == "glm5" || p == "inkling2"
 	split, metaspace := resolvePreTokenizer(preKind)
 
 	return &Tokenizer{
