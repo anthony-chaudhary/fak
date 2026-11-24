@@ -1,3 +1,8 @@
+---
+title: "Campaign record: MOE-CM-HW-20261031-1856Z — hardware witness of the published col-major MoE GEMM tile-mapping defect on aegis-fak"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-moe-colmajor (2026-10-31): MOE-CM-HW-20261031-1856Z — hardware witness of the published col-major MoE GEMM tile-mapping defect on aegis-fak."
+---
+
 # MOE-CM-HW-20261031-1856Z — hardware witness of the published col-major MoE GEMM tile-mapping defect on aegis-fak (2026-10-31)
 
 Ticket `moe-colmajor-hw-witness-20261031` (lane `nvidia-test-leasing`). Node: **aegis-fak**,

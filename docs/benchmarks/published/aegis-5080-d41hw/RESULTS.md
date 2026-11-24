@@ -1,3 +1,8 @@
+---
+title: "Campaign record: D41-HW-20261028-0310 — four named SM120 component witnesses on aegis-fak"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-5080-d41hw (2026-10-31): D41-HW-20261028-0310 — four named SM120 component witnesses on aegis-fak."
+---
+
 # D41-HW-20261028-0310 — four named SM120 component witnesses on aegis-fak (2026-10-31)
 
 Request: `D41-HW-20261028-0310` ([#12640](https://github.com/anthony-chaudhary/fak/issues/12640),

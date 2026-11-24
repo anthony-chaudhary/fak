@@ -1,0 +1,46 @@
+{
+  "schema": "fak.gpu-baseline-manifest.v1",
+  "client_date": "2026-10-25",
+  "created_utc": "2026-10-26T02:58:10.3203613Z",
+  "evidence_class": "HISTORICAL_DATA_READBACK_AND_CURRENT_ACCESS_PREFLIGHT",
+  "new_physical_timing_samples": 0,
+  "inventory_sha256": "dd52a08ea6eb9390deec1e4a3792f482598000a03bf4d5a0e1ed84dfac974e0c",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 6467,
+      "sha256": "85795240436f705fead6b0a1fb6a17d3ae161a923c04c845871a07356d6a2a1d"
+    },
+    {
+      "path": "campaign.json",
+      "bytes": 11870,
+      "sha256": "e643b62feb0a85310ff89c30fbad91c96265b49af239c1ea1304387d0d2a9f2a"
+    },
+    {
+      "path": "preflight.json",
+      "bytes": 2345,
+      "sha256": "fa0b33f5615fdf329d278f2a1ff492c2323f7c3af0c9b67d72b075fab48a1f96"
+    },
+    {
+      "path": "raw/reachability.txt",
+      "bytes": 1309,
+      "sha256": "3b6780ef51e8119729254fa63c0969130fc40cc23109856ec2ee5f85bef0bb1e"
+    },
+    {
+      "path": "historical-inventory.json",
+      "bytes": 280670,
+      "sha256": "dd52a08ea6eb9390deec1e4a3792f482598000a03bf4d5a0e1ed84dfac974e0c"
+    },
+    {
+      "path": "INVENTORY.md",
+      "bytes": 4808,
+      "sha256": "2ffe962024c8c08b0f57209dfd0097556edbe6a1a8b1d375ff782487f358c8f7"
+    },
+    {
+      "path": "verification.json",
+      "bytes": 1908,
+      "sha256": "e857de5ebe3b0e23866625499a337c6c9acd16b52d3950bead6d9bc702e28fac"
+    }
+  ],
+  "acceptance_scope": "Byte identity and independent historical data readback only; live GPU collection remains pending"
+}

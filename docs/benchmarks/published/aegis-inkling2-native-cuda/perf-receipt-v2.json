@@ -1,0 +1,57 @@
+{
+ "schema": "fak.perf-receipt/2",
+ "kind": "candidate",
+ "ticket": "inkling2-loop-cuda-sm120-20261122",
+ "step": "First fak-native CUDA decode of Inkling-2-Mini (inkling2_loop), token-identical to llama.cpp ad50351f5",
+ "date": "2026-11-22",
+ "evidence_class": "HW-WITNESSED",
+ "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, aegis-fak, driver 615.78.08, CUDA 13.4]",
+ "node": "aegis-fak, measure leases hwl-21a815ec860c796e (window 1, OOM) and hwl-6eb995ebd7704248 (window 2), both released; fak-llama-qwen27b.service restored active, /health ok",
+ "models": {
+  "gguf_mainline": "unsloth/Inkling-2-Mini-GGUF Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file sha256 e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639"
+ },
+ "engines": {
+  "fak": "public fak d09931ed93 (CUDA leaf) on 88dde7a2e8 (host reference); libfakcuda sm_120 SASS",
+  "oracle": "llama.cpp ad50351f5 llama-server CPU backend -ngl 0 -fa off, greedy top_k 1"
+ },
+ "workload": "C1 greedy; parity: prompts capitals (19 tok) and fibonacci (20 tok) x 32 tokens; bench: capitals prompt then 128 tokens, decode = 127 steps after the first, prefill excluded",
+ "argv": [
+  "FAK_INKLING2_GGUF=/var/lib/fak/models/inkling2/gguf-mainline/Inkling-2-Mini-UD-Q3_K_XL.gguf ggufload.test -test.run TestInkling2CUDAOracleGreedyMatchesLlamaCpp",
+  "FAK_INKLING2_GGUF=... FAK_INKLING2_BENCH=128 ggufload.test -test.run TestInkling2CUDADecodeBench (x2)"
+ ],
+ "env": [
+  "CUDA_HOME=/opt/cuda",
+  "FAK_CUDA_ARCH=sm_120"
+ ],
+ "token_time": {
+  "metric": "decode tok/s C1 greedy",
+  "baseline": {
+   "engine": "llama.cpp ad50351f5 all-on-GPU",
+   "decode_tok_s": 80.4,
+   "source": "docs/benchmarks/aegis-inkling2-mini-oss-baseline-20261122/perf-receipt-v2.json"
+  },
+  "candidate": {
+   "engine": "fak-native CUDA d09931ed93",
+   "decode_tok_s": [
+    6.32,
+    6.32
+   ],
+   "ms_per_token": 158.3,
+   "load_s": 15.0,
+   "prefill_tok_s": 6.56
+  },
+  "ratio_vs_baseline": 0.079,
+  "profiling": "off"
+ },
+ "parity": {
+  "oracle": "llama.cpp ad50351f5 CPU",
+  "host_reference": "64/64 tokens identical",
+  "cuda": "64/64 tokens identical"
+ },
+ "selected_kernels": "not profiled (profile-ON run owed); routes by construction: NVFP4 W4A16 split-scale GEMV, IQ2_S/IQ3_XXS/IQ3_S/IQ2_XS/IQ4_NL raw-IQ GEMV, Q3_K/Q4_K/Q5_K/Q6_K GEMV, Q8_0 GEMV; small ops host-side",
+ "residency": {
+  "weights_gib": 12.35,
+  "allocations": 298
+ },
+ "next": "device-resident small ops + per-token CUDA graph to remove ~1000 host syncs/token"
+}

@@ -1,0 +1,317 @@
+{
+  "schema": "fak.private-oss-smoke-plan/1",
+  "date": "2026-10-23",
+  "purpose": "Initial single-card smoke setup; not performance qualification",
+  "targets": [
+    {
+      "id": "rtx5070-desktop",
+      "name": "NVIDIA GeForce RTX 5070",
+      "vram_gb": 12,
+      "status": "external_required",
+      "throughput_tok_s": null
+    },
+    {
+      "id": "rtx5090-desktop",
+      "name": "NVIDIA GeForce RTX 5090",
+      "vram_gb": 32,
+      "status": "external_required",
+      "throughput_tok_s": null
+    }
+  ],
+  "exclude_substitutions": [
+    "5070 Ti",
+    "5070 Laptop",
+    "5090 Laptop",
+    "SM100 datacenter Blackwell"
+  ],
+  "budget": {
+    "paid_provisioning": false,
+    "max_arm_seconds": 120,
+    "warmup": 1,
+    "repetitions": 3,
+    "concurrency": [
+      1
+    ],
+    "later_concurrency": [
+      1,
+      2,
+      4
+    ],
+    "context_tokens": 2048
+  },
+  "artifacts": {
+    "sentinel": {
+      "repository": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+      "revision": "9217f5db79a29953eb74d5343926648285ec7e67",
+      "filename": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+      "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+      "bytes": 491400032,
+      "role": "Tiny wire/CLI sentinel, not representative 7B throughput"
+    },
+    "shared_hf": {
+      "model": "Qwen2.5-3B-Instruct",
+      "revision": null,
+      "sha256": null,
+      "status": "bind local snapshot and all tensor/tokenizer digests before comparison",
+      "precision": "BF16; GGUF/EXL3 derivatives are separate deployment arms"
+    },
+    "specialist_5090": {
+      "model": "Qwen3.8-27B",
+      "artifact_sha256": null,
+      "status": "acquire companion-qualified .ninfer weights; 5070 excluded by weight footprint"
+    }
+  },
+  "sources": [
+    {
+      "repository": "ggml-org/llama.cpp",
+      "revision": "5c8854fd88319125125dc4b836c98b1b215b0f23",
+      "license": "MIT",
+      "study": "targeted",
+      "kernel_inventory": "partial",
+      "hardware_qualified": false
+    },
+    {
+      "repository": "Neroued/ninfer",
+      "revision": "64d10fbf9f8e6bfc79ab0570b94674c5b9997929",
+      "license": "Apache-2.0",
+      "study": "targeted",
+      "kernel_inventory": "partial",
+      "hardware_qualified": false
+    },
+    {
+      "repository": "Wallawalla47/Infernix",
+      "revision": "be0d06e693b5d6cd474611ea345ed484bc947cfc",
+      "license": "Apache-2.0",
+      "study": "targeted",
+      "kernel_inventory": "partial",
+      "hardware_qualified": false
+    },
+    {
+      "repository": "turboderp-org/exllamav3",
+      "revision": "da68d57de61781e5b74ad68698ac4caf36408d7a",
+      "license": "MIT; bundled licenses separately",
+      "study": "targeted",
+      "kernel_inventory": "partial",
+      "hardware_qualified": false
+    },
+    {
+      "repository": "sgl-project/sglang",
+      "revision": "46beacf13dbcd9d3aea456301f2d39ea3888540e",
+      "license": "Apache-2.0",
+      "study": "targeted",
+      "kernel_inventory": "partial",
+      "hardware_qualified": false
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "7173c64e2ec8763c6d8ddd5c3ff9cb6fc92e2da8",
+      "license": "Apache-2.0",
+      "study": "targeted",
+      "kernel_inventory": "partial",
+      "hardware_qualified": false
+    }
+  ],
+  "arms": [
+    {
+      "id": "llama-phase",
+      "executable": "llama-bench",
+      "argv": [
+        "-m",
+        "${GGUF}",
+        "-ngl",
+        "99",
+        "-p",
+        "512",
+        "-n",
+        "128",
+        "-r",
+        "3",
+        "-o",
+        "json"
+      ],
+      "measurement": "separate synthetic PP512 and TG128; TG does not retain the 512 prompt"
+    },
+    {
+      "id": "llama-context",
+      "executable": "llama-bench",
+      "argv": [
+        "-m",
+        "${GGUF}",
+        "-ngl",
+        "99",
+        "-p",
+        "0",
+        "-n",
+        "0",
+        "-pg",
+        "512,128",
+        "-r",
+        "3",
+        "-o",
+        "json"
+      ],
+      "measurement": "combined synthetic context; retain raw timings without relabeling as pure decode"
+    },
+    {
+      "id": "ninfer-5090",
+      "executable": "ninfer_bench",
+      "argv": [
+        "--weights",
+        "${NINFER_WEIGHTS}",
+        "-p",
+        "512",
+        "-n",
+        "128",
+        "-pg",
+        "2048,128",
+        "--max-ctx",
+        "4096",
+        "--kv-dtype",
+        "fp8",
+        "--warmup",
+        "1",
+        "-r",
+        "3",
+        "-o",
+        "json",
+        "--output-file",
+        "${OUTPUT}"
+      ],
+      "gate": "Linux/Windows build contract per note; SM120a; plain first; approximation disabled; no speculation without companion weights"
+    },
+    {
+      "id": "infernix-5090",
+      "executable": "infernix_bench",
+      "argv": [
+        "--weights",
+        "${NINFER_WEIGHTS}",
+        "-p",
+        "512",
+        "-n",
+        "128",
+        "-pg",
+        "2048,128",
+        "--max-ctx",
+        "4096",
+        "--kv-dtype",
+        "fp8",
+        "--warmup",
+        "1",
+        "-r",
+        "3",
+        "-o",
+        "json",
+        "--output-file",
+        "${OUTPUT}"
+      ],
+      "gate": "Linux/Windows build contract per note; SM120a; plain first; approximation disabled; no speculation without companion weights"
+    },
+    {
+      "id": "exl3-correctness",
+      "executable": "pytest",
+      "argv": [
+        "tests/kernels/gemm/test_exl3_gemv.py",
+        "tests/kernels/gemm/test_exl3_gemm_shapes.py",
+        "tests/modules/linear/test_linear_exl3_paths.py",
+        "--devices",
+        "0",
+        "-q"
+      ],
+      "gate": "Use source environment; count passes AND skips; requires CUDA runtime matching actual SM120",
+      "measurement": "correctness only; endpoint needed for token-time"
+    },
+    {
+      "id": "vllm-latency",
+      "executable": "vllm",
+      "argv": [
+        "bench",
+        "latency",
+        "--model",
+        "${HF_MODEL}",
+        "--dtype",
+        "bfloat16",
+        "--max-model-len",
+        "2048",
+        "--gpu-memory-utilization",
+        "0.75",
+        "--batch-size",
+        "1",
+        "--input-len",
+        "512",
+        "--output-len",
+        "128",
+        "--num-iters-warmup",
+        "1",
+        "--num-iters",
+        "3",
+        "--output-json",
+        "${OUTPUT}"
+      ],
+      "measurement": "whole-batch synthetic latency; not TTFT or standalone decode"
+    },
+    {
+      "id": "sglang-latency",
+      "executable": "python",
+      "argv": [
+        "-m",
+        "sglang.benchmark.one_batch",
+        "--model-path",
+        "${HF_MODEL}",
+        "--dtype",
+        "bfloat16",
+        "--batch-size",
+        "1",
+        "--input-len",
+        "512",
+        "--output-len",
+        "128",
+        "--result-filename",
+        "${OUTPUT}"
+      ],
+      "measurement": "native synthetic phases; invoke 3 independent arms after documented warmup"
+    }
+  ],
+  "preflight": [
+    "verify exact GPU model, VRAM, driver, idle utilization, power/temperature and lease ownership",
+    "verify source revision, binary plus loaded DLL/package/runtime digests; do not equate source study pin with installed executable",
+    "verify model/tokenizer/artifact digests, precision, chat template, headroom and actual allocation",
+    "semantic fixed prompts before timing; preserve raw output and finish reason",
+    "capture effective attention/GEMM backends and offload; initial tail-skip=0 and speculation off",
+    "disable prefix reuse for cold-cache comparison using engine controls; empty client prefix does not disable it"
+  ],
+  "required_receipt_fields": [
+    "argv",
+    "environment",
+    "source_revision",
+    "binary_sha256",
+    "model_sha256",
+    "gpu_name",
+    "driver",
+    "dtype",
+    "kv_dtype",
+    "speculation",
+    "approximation",
+    "warmup_count",
+    "repetitions",
+    "prompt_tokens_actual",
+    "output_tokens_actual",
+    "finish_reason",
+    "correctness",
+    "ttft_ms",
+    "decode_tok_s",
+    "prefill_tok_s",
+    "wall_ms",
+    "peak_vram_mib",
+    "raw_stdout",
+    "raw_stderr",
+    "status"
+  ],
+  "rules": [
+    "unknown counters remain null; no SSE-event rate labeled token throughput",
+    "no cross-format speedup without quality/envelope labels",
+    "HTTP runner supports SGLang/vLLM labels only; never mislabel another engine",
+    "no native bench alone establishes semantic correctness",
+    "microbenchmarks are distinct from request latency and agentic replay",
+    "no percent delta without measured comparable nonzero baseline"
+  ]
+}

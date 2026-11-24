@@ -1,0 +1,23 @@
+{
+  "physical_attachment": "both external enclosures intentionally disconnected",
+  "files": [
+    {
+      "path": "disconnected-control.json",
+      "bytes": 17570,
+      "sha256": "db3bd878458a8e98c746c352fcb11ac292b4ef40f53b7bc7fb860131dab4e1cb"
+    },
+    {
+      "path": "incident-previous.json",
+      "bytes": 123055,
+      "sha256": "d0cd689396c44e1372ff8afa180bd22ece69952e978296d47c10bb0b426b673c"
+    },
+    {
+      "path": "incident-cuda-loss.json",
+      "bytes": 95124,
+      "sha256": "7dad76b31b87564423bfb5310162b9175a4a127eecae9d3eec3ba60ed29ee458"
+    }
+  ],
+  "target": "Arch Linux Raider",
+  "schema": "fak.egpu-incident-evidence.v1",
+  "hardware_qualified": false
+}

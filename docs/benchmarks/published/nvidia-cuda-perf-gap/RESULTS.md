@@ -1,3 +1,8 @@
+---
+title: "Campaign record: Wave-2 step 1+2: H2H re-measure at public trunk HEAD c7caeb22d + prefill kernel profile"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak nvidia-cuda-perf-gap (2026-10-31): Wave-2 step 1+2: H2H re-measure at public trunk HEAD c7caeb22d + prefill kernel profile."
+---
+
 # Wave-2 step 1+2: H2H re-measure at public trunk HEAD `c7caeb22d` + prefill kernel profile
 
 **[HW-WITNESSED]** 2026-10-31T02:05Z-02:52Z. Host `raider-fak`, internal RTX 5090 Laptop

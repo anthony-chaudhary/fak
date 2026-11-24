@@ -1,19 +1,43 @@
+---
+title: "Campaign record: maya + Strata on owned NVIDIA HW"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak maya-strat-hw (2026-10-30): maya + Strata on owned NVIDIA HW."
+---
+
 # RESULTS — maya + Strata on owned NVIDIA HW (2026-10-30/31)
 
-Goal `GOAL-maya-strat-hw-config-sweep`. All perf numbers below are **[HW-WITNESSED]**
+Goal `GOAL-maya-strat-hw-config-sweep`. Measured cells below are **[HW-WITNESSED]**
 on named nodes with argv + binary-sha + model-oid pins (full cell objects:
 [raider-fak/RECEIPT.json](raider-fak/RECEIPT.json),
 [aegis-fak/RECEIPT.json](aegis-fak/RECEIPT.json)); pins and node envelopes:
 [README.md](README.md). Oracle prompt every cell:
 `What color is the sky on a clear day? Answer in one sentence.` (greedy, temp 0, top_p 1).
 
-## a) TL;DR — winners
+## Correction — 2026-11-01
+
+Withdraw the historical 1160.104 tok/s rate, its 0.025x ratio and the
+claimed 99.93% collapse. The [original campaign correction](../raider-5090/ds41-gsq-iq2xxs-20261028/README.md)
+already identifies a x1000 seconds/milliseconds error; producer repair
+`2b012243fd347c7a222214c11ac4057d24374ae2` removes it. Arithmetic-only ARM-2
+is 1.160 tok/s, still optimistic because it includes the first token. The
+[fixed-producer rerun](../raider-5090/ds41-gsq-iq2xxs-20261028/RECEIPT-20261030.json)
+measures 1.05 server / 0.867 client post-TTFT tok/s. No fast historical regime,
+regime collapse or memory-state explanation follows from the invalid rate.
+
+Retain the measured cells and I/O observations. All DS cells use the same
+**19-token actual prompt at C1**; ctx512/ctx2048 names allocated capacity.
+Outputs stop after 10–11 tokens in the Strata cells. These are short-output,
+short-prompt observations, with no measured multi-stream scaling, actual 2K
+prompt result, or profiling-on CUDA timing. Cross-engine rates and same-day
+ratios below are descriptive `UNMATCHED(timer/cache/entrypoint)` comparisons.
+See [the LAN evidence inventory](../LAN-INFERENCE-EVIDENCE.md) for owed coverage.
+
+## a) Recorded short-request results
 
 | engine | model | node | best config (argv-delta) | decode tok/s | ratio vs same-day llama.cpp baseline | label |
 | --- | --- | --- | --- | --- | --- | --- |
-| **strata-dsv41 0.1.53** (@46c152a1) | DS4.1-Flash GSQ-RCO IQ2_XXS | raider-fak | BASE defaults (`--pack <ds41 pack> --max-context 512 --tp 1 --threads on --vision off`, warm cache) | **28.91 @ctx512** (10.46 @ctx2048) | **≈36x** vs 0.803 (same-day pinned T0); 0.025x vs historical 1160.104 | [HW-WITNESSED] GREEN-BASELINE-STRATA |
+| **strata-dsv41 0.1.53** (@46c152a1) | DS4.1-Flash GSQ-RCO IQ2_XXS | raider-fak | BASE defaults (`--pack <ds41 pack> --max-context 512 --tp 1 --threads on --vision off`, warm cache) | **28.91 @ctx512** (10.46 @ctx2048) | **≈36x** vs 0.803 (same-day pinned T0) | [HW-WITNESSED] GREEN-BASELINE-STRATA |
 | **maya-ds4 1.1.39** (@376b4b87) | DS4.1-Flash GSQ-RCO IQ2_XXS | raider-fak | BASE defaults, warm page cache (M5 control; first request pays ~18 GB pre-read) | **12.7 @ctx512** (3.6 @ctx2048) | ≈15.8x vs 0.803 | [HW-WITNESSED] GREEN-BASELINE-MAYA-WARM-CONTROL |
-| llama.cpp b11870 (baseline) | DS4.1-Flash GSQ-RCO IQ2_XXS | raider-fak | pinned T0 (`-ngl 40 --n-cpu-moe 36`) | 0.803 @ctx512 / 0.56 @ctx2048 | 1.0x (baseline; collapse attributed DISK-BOUND-STRUCTURAL, §d) | [HW-WITNESSED] COLLAPSE-REPRODUCED-ATTRIBUTED |
+| llama.cpp b11870 (baseline) | DS4.1-Flash GSQ-RCO IQ2_XXS | raider-fak | pinned T0 (`-ngl 40 --n-cpu-moe 36`) | 0.803 @ctx512 / 0.56 @ctx2048 | 1.0x (same-day baseline; historical-collapse claim withdrawn, §d) | [HW-WITNESSED] measured cell; interpretation corrected |
 | **strata 0.1.53** (@46c152a1) | Qwen3.8-Flash-Next GSQ-RCO Q2_0 | aegis-fak | `--expert-cache auto --mmap-experts --prefill auto --kv int8 --greedy`, warm page cache (S2) | **30.55 @ctx2048** (12.37 @ctx512 cold) | **≈3.6x** vs same-day llama.cpp b11870 `--cpu-moe` (8.556 @ctx2048) | [HW-WITNESSED] GREEN-BASELINE-STRATA |
 | llama.cpp b11870 (baseline) | Qwen3.8-Flash-Next GSQ-RCO Q2_0 | aegis-fak | `-ngl 9999 --cpu-moe --lazy-mode auto --flash-attn auto -np 1 --batch-size 2` (pinned full-offload OOMs at load — 35.6 GB > 16 GB card; minimal deviation `--cpu-moe`, typed OOM_LOAD_LLAMA_PINNED_ARGV) | 8.812 @ctx512 warm / 8.556 @ctx2048 cold | 1.0x (baseline) | [HW-WITNESSED] OK-DEVIATION-DOCUMENTED |
 | maya v1.1.39 (@376b4b87) | CYBER-FROST-3.8-PS (its documented Qwen path) | aegis-fak | — | — | — | ABSENT-IN-WINDOW: CYBER-FROST download 9.8% at window close, resumed detached (PID 31936); binary staged + sha-verified, unused (§g) |
@@ -37,15 +61,15 @@ ctx2048 (argmax divergence between engines, coherent, not an error).
 
 | cell | engine | argv-delta | ctx/maxtok | decode tps | TTFT ms | VRAM MiB | verdict |
 | --- | --- | --- | --- | ---: | ---: | --- | --- |
-| L1 | llama.cpp b11870 | T0: `-ngl 40 --n-cpu-moe 36`; ctx512 | 512/16 | 0.803 | 34048.0 | peak 19380 / steady 19360 | ok — COLLAPSE-REPRODUCED |
-| L2 | llama.cpp b11870 | T0; ctx2048 | 2048/64 | 0.56 | 42120.9 | peak 19376 / steady 19368 | ok — COLLAPSE-REPRODUCED |
+| L1 | llama.cpp b11870 | T0: `-ngl 40 --n-cpu-moe 36`; ctx512 | 512/16 | 0.803 | 34048.0 | peak 19380 / steady 19360 | ok — measured cell; historical collapse withdrawn |
+| L2 | llama.cpp b11870 | T0; ctx2048 | 2048/64 | 0.56 | 42120.9 | peak 19376 / steady 19368 | ok — measured cell; historical collapse withdrawn |
 | M1 | maya-ds4 1.1.39 | BASE: `--pack <ds41>/maya-ds4 --max-context 512 --tp 1 --threads on --vision off`; serve stack port 18091; reasoning off; greedy; **cold** cache | 512/16 | 2.8 | 6908.6 | steady 23676 | ok — GREEN-BASELINE-MAYA |
 | M2 | maya-ds4 1.1.39 | BASE; `--max-context 2048` (rest = M1); warm | 2048/64 | 3.6 | 925.2 | — | ok — GREEN-BASELINE-MAYA |
 | M3 | maya-ds4 1.1.39 | ABLATION: env `MAYA_DS4_STREAM=0` (PCIe stream-fetch off); ctx512; warm | 512/16 | 8.6 | 486.6 | — | ok — GREEN-ABLATION-STREAM-OFF |
 | M4 | maya-ds4 1.1.39 | ABLATION: `--mmap-experts on` (in-place, no pinned-RAM tier); stream default ON; ctx512; warm | 512/16 | 5.8 | 2977.1 | — | ok — GREEN-ABLATION-INPLACE |
 | M5 | maya-ds4 1.1.39 | BASE (no ablations); warm-cache control for M3/M4 | 512/16 | 12.7 | 772.1 | — | ok — GREEN-BASELINE-MAYA-WARM-CONTROL |
-| L1′ (L1p) | llama.cpp b11870 | T0; ctx512; B-bracket with `/proc/pid/io` attribution; warm | 512/16 | 1.074 | 26492.1 | steady 19380 | ok — COLLAPSE-REPRODUCED-ATTRIBUTED |
-| L2′ (L2p) | llama.cpp b11870 | T0; ctx2048; B-bracket with `/proc/pid/io` attribution; warm | 2048/64 | 0.737 | 49136.0 | — | ok — COLLAPSE-REPRODUCED-ATTRIBUTED |
+| L1′ (L1p) | llama.cpp b11870 | T0; ctx512; B-bracket with `/proc/pid/io` attribution; warm | 512/16 | 1.074 | 26492.1 | steady 19380 | ok — measured cell; historical collapse withdrawn |
+| L2′ (L2p) | llama.cpp b11870 | T0; ctx2048; B-bracket with `/proc/pid/io` attribution; warm | 2048/64 | 0.737 | 49136.0 | — | ok — measured cell; historical collapse withdrawn |
 | S1 | strata-dsv41 0.1.53 | BASE: `--pack <same ds41 pack> --max-context 512 --tp 1 --threads on --vision off --ids <19 ids> --n 16`; generate mode; warm | 512/16 | 28.91 | — (prefill 63.95 tok/s engine line) | — | ok — GREEN-BASELINE-STRATA |
 | S2 | strata-dsv41 0.1.53 | BASE; `--max-context 2048` (rest = S1); warm | 2048/64 | 10.46 | — | — | ok — GREEN-BASELINE-STRATA |
 
@@ -54,33 +78,29 @@ S cells `engine_timing_line`. Per-cell NVMe reads: L2 ~105 GiB device-level;
 L1′ 68.1 GB / L2′ 73.2 GB process-level; M1 21.35 GB, M2 7.1 GB, M3 2.76 GB,
 M4 8.73 GB, M5 2.31 GB; S1 19.5 GB (27.3 MB/token), S2 23.4 GB (132.8 MB/token).
 
-## d) Baseline anomaly — historical regime non-reproducible, attributed DISK-BOUND-STRUCTURAL
+## d) Historical arithmetic error; later I/O observations retained
 
-Historical llama.cpp b11870 arms on this node/model (same boot id, same binary sha,
-same model oids): `docs/benchmarks/raider-5090/ds41-gsq-iq2xxs-20261028/RECEIPT.json`
-@ 2026-10-29T04:42Z — ARM-1 (T1) 712.715, **ARM-2 (T0, ctx512) 1160.104**, ARM-3
-(T2) 1055.597, ARM-4 (best-T0, ctx2048) 1014.489 tok/s. A same-arm rerun the same
-night (`RECEIPT-20261030.json`, 2026-10-29T20:25Z) already showed 1.05 tok/s.
-Same-day 2026-10-30 re-measurement under the identical pinned argv: L1 0.803,
-L2 0.56, L1′ 1.074, L2′ 0.737 tok/s.
+The original [DS41 campaign](../raider-5090/ds41-gsq-iq2xxs-20261028/README.md)
+records raw ARM-1/2/3/4 rates 712.715/1160.104/1055.597/1014.489 tok/s.
+Its existing correction divides each by 1000: 0.713/1.160/1.056/1.014 tok/s.
+These are arithmetic corrections, not new physical measurements; the old
+numerator still counts the first token inside the post-TTFT denominator.
+The raw receipt lacks the complete original durations needed to reconstruct
+all arithmetic independently. The fixed-producer ARM-2 rerun reports 1.05
+server tok/s, 0.867 client post-TTFT tok/s and 32,692.8 ms TTFT.
 
-Attribution (L1′/L2′ bracket, `/proc/pid/io`): the llama-server process itself pulled
-**68.1 GB (L1′) / 73.2 GB (L2′) from NVMe per 11-token generation** —
-`rchar=0`, `syscr=0` → zero `read()` syscalls, pure mmap demand paging of mapped
-expert weights at **~1.2–1.9 GB/s** sustained; `majflt_delta=0`, `minflt_delta`
-19,624/22,082; GPU idle at **1% util / 19 W** throughout. A warm page cache moved
-the result only ~30% (0.803 → 1.074): the touched working set (~68–73 GB per
-generation incl. prefill) exceeds the ~28 GB RAM page-cache budget, so re-reads
-persist. Root cause: the ~123 GB expert pool cannot be resident in 24 GB VRAM +
-30 GB RAM, so decode streams experts from NVMe through CPU mmap every token.
+Later same-day cells remain L1 0.803, L2 0.56, L1p 1.074, L2p 0.737 tok/s.
+They do not reproduce a thousand-fold collapse. The former labels
+`COLLAPSE-REPRODUCED` and `REGIME-NONREPRODUCIBLE` in historical raw notes are
+withdrawn interpretations; [receipt correction metadata](raider-fak/RECEIPT.json)
+retains their original text with this explicit supersession.
 
-Labels: the historical 1160.104 tok/s regime is
-**REGIME-NONREPRODUCIBLE-under-pinned-argv-on-this-node**. This is NOT claimed to be
-a hardware fault: Xid count unchanged at 12 across the whole window, greedy text
-byte-identical to yesterday, VRAM steady 19,360–19,380 MiB (same as yesterday),
-clean kills to 2 MiB. It is a memory-budget regime shift: whatever host-memory
-state made the 10-29 morning run fast (resident expert working set) is absent now,
-and the pinned argv does not change it back.
+L1p/L2p process I/O observations remain 68.1/73.2 GB read across each complete
+request, with GPU samples around 1% utilization / 19 W and Xid count unchanged.
+These support storage pressure during those windows. They do not independently
+attribute bytes to decode versus prefill or prove what caused a cross-day
+performance change. Request I/O divided by completed tokens is not measured
+per-token decode traffic. No new hardware measurements are added here.
 
 ## e) Config-space ablations (raider, maya-ds4 × DS4.1)
 
@@ -165,7 +185,7 @@ Typed deviations (verbatim errors in the receipt):
 
 Reading: strata wins steady-state single-stream decode on aegis —
 **30.55 tok/s @ctx2048 warm = 3.6x the same-day llama.cpp baseline** (8.556),
-and even cold S1 (12.37) beats warm L1 (8.812). The mmap-experts +
+with different prompt rendering and cache states; C1 only is measured. The mmap-experts +
 expert-cache-auto regime parks ~9.1 GiB of the hottest experts in VRAM and
 streams the rest from NVMe; the cold/warm spread (12.37 → 30.55) is strata's
 documented mmap A/B behavior. Recommended winning config for strata ×
@@ -184,37 +204,30 @@ reboot); a watchdog covered all subsequent runs (zero events). Treat aegis as
 OOM-sensitive at 30 GB RAM + 1 GB swap: no pinned arenas ≥ host RAM without
 `--mmap-experts` or equivalent.
 
-## h) Cross-engine verdict + implication
+## h) Cross-engine interpretation and next qualification
 
-For DS4.1-Flash on raider-fak, **strata-dsv41 is preferred over llama.cpp**:
-28.91 tok/s @ctx512 = **36x the same-day pinned-argv baseline** (0.803) and
-**2.3x maya warm BASE** (12.7). The differentiator is strata's profile-driven
-RAM-store prefetch of the hottest experts (91.0% store hit at ctx512; 27.3 MB/token
-disk traffic vs ~6.2 GB/token for llama.cpp and ~1.9 GB/token for maya BASE).
-llama.cpp b11870 under its pinned T0 argv is structurally disk-bound on this
-node/memory budget (§d) and is not a usable reference for future climbs here.
-For Flash-Next Q2_0 on aegis-fak, **strata 0.1.53 is likewise preferred over
-llama.cpp**: 30.55 tok/s @ctx2048 warm = 3.6x the same-day `--cpu-moe`
-baseline (§g) — there the llama.cpp baseline is healthy, so the win is a clean
-engine delta, not a baseline pathology. Strata therefore wins both witnessed
-(model, node) pairs of the campaign — DS4.1-Flash × raider (36x, disk-bound
-baseline) and Flash-Next Q2_0 × aegis (3.6x, healthy baseline) — with maya
-trailing on raider (12.7 warm BASE) and unrun on aegis (CYBER-FROST artifact
-absent in window; download resumed for a follow-on).
+Strata records the highest short-request rates in these retained cells:
+DS4.1 Flash on Raider, 28.91 tok/s versus same-day llama.cpp 0.803 and Maya
+warm BASE 12.7; Flash-Next Q2_0 on Aegis, 30.55 versus llama.cpp 8.556 tok/s.
+These are descriptive ratios (about 36x, 2.3x and 3.6x). They use different
+entrypoints, timing sources and cache conditions; prompt rendering also differs
+on Aegis. Label them `UNMATCHED(timer/cache/entrypoint)` and do not promote them
+into matched performance qualification, actual long-context results or scaling.
 
-Mechanism half of the goal: multi-candidate default-engine selection
-(commit `1ada7a1ab1` "feat(strix): select default engine across native/reference/OSS
-candidates", lane `ticket-maya-strat-default-engine-preference-20261030`, lands in
-this campaign as step 5d). The data-driven flip it drives will key off receipts
-like this one — a witnessed-winning OSS engine becomes preferred over llama.cpp
-only when a same-day, same-node, argv/sha-pinned receipt shows it.
+Retain Strata as a candidate for the next matched measurement. Its reported
+RAM-store hits and request I/O are supporting observations; attribution requires
+phase-scoped measurements. Withdraw the false historical collapse (§d).
+The existing multi-candidate engine-selection implementation is separate from
+measurement acceptance; these cells alone do not justify a production default
+change. Collect the [owed actual-context/concurrency and profile matrix](../LAN-INFERENCE-EVIDENCE.md)
+through each engine's supported entrypoint before that decision.
 
 ### Label discipline
 
 - [HW-WITNESSED]: every verdict-ok cell above (argv + binary sha256 + model oid pins
   in [raider-fak/RECEIPT.json](raider-fak/RECEIPT.json) and
-  [aegis-fak/RECEIPT.json](aegis-fak/RECEIPT.json)); historical arms cited in §d
-  carry their own committed receipts.
+  [aegis-fak/RECEIPT.json](aegis-fak/RECEIPT.json)); historical TTFT/load observations carry their own committed receipts, while
+  arithmetic-corrected decode rates are explicitly not new hardware measurements.
 - ESTIMATE: none outstanding — the aegis tiering figures that were planning
   estimates in the probe are now witnessed (§g: mmap-experts path green, default-
   arena OOM witnessed); probe planning numbers are superseded.

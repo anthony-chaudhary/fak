@@ -1,3 +1,8 @@
+---
+title: "Campaign record: NVIDIA CUDA Perf-Gap Attribution — fak vs llama.cpp b11870"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak nvidia-cuda-perf-gap (2026-10-31): NVIDIA CUDA Perf-Gap Attribution — fak vs llama.cpp b11870."
+---
+
 # NVIDIA CUDA Perf-Gap Attribution — fak vs llama.cpp b11870
 
 Campaign: `GOAL-nvidia-cuda-perf-gap` (2026-10-31). Method: six read-only wave-1 cohorts

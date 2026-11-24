@@ -1,3 +1,8 @@
+---
+title: "Campaign record: maya + Strata on owned NVIDIA HW — campaign index"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak maya-strat-hw (2026-10-30): maya + Strata on owned NVIDIA HW — campaign index."
+---
+
 # maya + Strata on owned NVIDIA HW — campaign index (2026-10-30)
 
 Goal: `GOAL-maya-strat-hw-config-sweep` (operator direction 2026-10-30: run

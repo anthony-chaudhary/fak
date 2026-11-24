@@ -1,0 +1,204 @@
+{
+ "schema": "fak.perf-receipt/2",
+ "kind": "delta",
+ "ticket": "inkling2-gpu-decode-climb-20261122",
+ "step": "Inkling-2-Mini host-driven CUDA decode: batched/packed GEMV round trips, fused situ MoE, warp-per-row NVFP4 W4A16 decode GEMV",
+ "date": "2026-11-23",
+ "evidence_class": "HW-WITNESSED",
+ "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, aegis-fak, driver 615.78.08, CUDA 13.4]",
+ "node": "aegis-fak, measure leases hwl-db29d1047e61108b (W1), hwl-eb1bb6daf71c82e5 (W2 profile-on), hwl-ad92c0782de91cfd (W3), all released; fak-llama-qwen27b.service stopped and restored active each window; W4 rebase window hwl-aa0381a78a5dbbcc released",
+ "models": {
+  "gguf_mainline": "unsloth/Inkling-2-Mini-GGUF Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file sha256 e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639"
+ },
+ "engines": {
+  "base": "public fak a8030e394b (resident forward landed) with FAK_INKLING2_RESIDENT=0, the host-driven per-GEMV device path",
+  "candidate": "public fak 03a73bb075 (lane ticket-inkling2-gpu-decode-climb-20261122 rebased on a8030e394b), FAK_INKLING2_RESIDENT=0",
+  "oracle": "llama.cpp ad50351f5 llama-server CPU backend -ngl 0 -fa off, greedy top_k 1"
+ },
+ "base_commit": "a8030e394b",
+ "order": "ABBA",
+ "single_flight": true,
+ "workload": "C1 greedy; bench: capitals prompt (19 tok) then 128 tokens, decode = 127 steps after the first, prefill excluded; parity: capitals + fibonacci x 32 tokens",
+ "argv": [
+  "FAK_INKLING2_GGUF=/var/lib/fak/models/inkling2/gguf-mainline/Inkling-2-Mini-UD-Q3_K_XL.gguf FAK_INKLING2_BENCH=128 FAK_INKLING2_RESIDENT=0 ggufload.{r-base,r-cand}.test -test.run TestInkling2CUDADecodeBench -test.v -test.count=1 (order A B B A)",
+  "FAK_INKLING2_GGUF=... [FAK_INKLING2_RESIDENT=0] ggufload.r-cand.test -test.run TestInkling2CUDAOracleGreedyMatchesLlamaCpp"
+ ],
+ "env": [
+  "CUDA_HOME=/opt/cuda",
+  "FAK_CUDA_ARCH=sm_120",
+  "FAK_INKLING2_RESIDENT=0"
+ ],
+ "steps": {
+  "p3_abba": {
+   "base": [
+    6.31,
+    6.33
+   ],
+   "candidate": [
+    7.09,
+    7.1
+   ],
+   "window": "W1"
+  },
+  "p2_single": 6.74,
+  "p1_single": 6.55
+ },
+ "parity": {
+  "oracle": "llama.cpp ad50351f5 CPU",
+  "cand_fallback_w4": "capitals, fibonacci, chat-template PASS; passphrase-recall-1946 diverges at decode token 9 (llama.cpp 0.21-nat near-tie; base fallback reported diverging at token 11, resident at token 10)",
+  "cand_resident_w4": "capitals, fibonacci, chat-template PASS; passphrase-recall-1946 diverges at token 10 (unchanged resident path)",
+  "original_64_of_64": "PASS (p2, p3, p4 W1/W3; rebased W4)",
+  "nvfp4_generic_matmul": "TestCUDANVFP4W4A16Parity PASS"
+ },
+ "next": "fallback path is host-bound (57 ms wall vs 15.6 GPU ms); the resident forward (a8030e394b, 82.5 tok/s) is the default device path and does not use k_nvfp4_w4a16_f32",
+ "model": "Inkling-2-Mini-UD-Q3_K_XL.gguf (inkling2_loop) sha256 e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639",
+ "engine": "fak host-driven CUDA decode (ggufload Inkling2LoopGreedyTimed via device batcher)",
+ "fak_commit": "03a73bb0757cafa35189d985a7d1cb74ca8df809",
+ "token_time": {
+  "metric": "decode_tok_s",
+  "units": "tok/s",
+  "scope": "end_to_end",
+  "before": 6.295,
+  "after": 17.48,
+  "interleaved": true,
+  "order": "ABBA",
+  "n_before": 2,
+  "n_after": 2,
+  "source": "receipts/window-w4.log (runs 6-9)"
+ },
+ "token_time_detail": {
+  "rebase_abba_w4": {
+   "base_fallback": [
+    6.28,
+    6.31
+   ],
+   "cand_fallback": [
+    17.5,
+    17.46
+   ]
+  },
+  "pre_rebase_abba_w3": {
+   "base": [
+    6.29,
+    6.32
+   ],
+   "cand": [
+    17.57,
+    17.52
+   ],
+   "base_commit": "185fc7d56b"
+  },
+  "resident_default_no_regression_w4": {
+   "base": 81.52,
+   "cand": 82.94
+  },
+  "reference_llamacpp_gpu": 80.4,
+  "profiling": "off"
+ },
+ "kernel_profile_source": "ts-stage-stderr",
+ "selected_kernels": [
+  {
+   "kernel": "k_nvfp4_w4a16_warp_f32",
+   "role": "changed",
+   "calls_per_token": 624.0,
+   "gpu_ms_per_token": 5.785,
+   "share": 0.3707,
+   "us_per_call": 9.27,
+   "gpu_ms_per_token_before": 87.678
+  },
+  {
+   "kernel": "d2d_copy",
+   "role": "top",
+   "calls_per_token": 1008.0,
+   "gpu_ms_per_token": 2.81,
+   "share": 0.1801,
+   "us_per_call": 2.79
+  },
+  {
+   "kernel": "k_q8_gemm",
+   "role": "top",
+   "calls_per_token": 241.0,
+   "gpu_ms_per_token": 2.36,
+   "share": 0.1512,
+   "us_per_call": 9.79
+  },
+  {
+   "kernel": "k_iq3xxs_gemv",
+   "role": "top",
+   "calls_per_token": 56.0,
+   "gpu_ms_per_token": 1.012,
+   "share": 0.0648,
+   "us_per_call": 18.07
+  },
+  {
+   "kernel": "k_q8_quant_act",
+   "role": "top",
+   "calls_per_token": 241.0,
+   "gpu_ms_per_token": 0.888,
+   "share": 0.0569,
+   "us_per_call": 3.68
+  },
+  {
+   "kernel": "k_q5k_gemm",
+   "role": "top",
+   "calls_per_token": 11.0,
+   "gpu_ms_per_token": 0.553,
+   "share": 0.0354,
+   "us_per_call": 50.27
+  },
+  {
+   "kernel": "k_q6k_gemm",
+   "role": "top",
+   "calls_per_token": 34.0,
+   "gpu_ms_per_token": 0.47,
+   "share": 0.0301,
+   "us_per_call": 13.82
+  },
+  {
+   "kernel": "k_iq2s_gemv",
+   "role": "top",
+   "calls_per_token": 24.0,
+   "gpu_ms_per_token": 0.432,
+   "share": 0.0277,
+   "us_per_call": 18.0
+  },
+  {
+   "kernel": "k_situ_act",
+   "role": "top",
+   "calls_per_token": 48.0,
+   "gpu_ms_per_token": 0.358,
+   "share": 0.0229,
+   "us_per_call": 7.46
+  },
+  {
+   "kernel": "k_iq3s_gemv",
+   "role": "top",
+   "calls_per_token": 16.0,
+   "gpu_ms_per_token": 0.296,
+   "share": 0.019,
+   "us_per_call": 18.5
+  },
+  {
+   "kernel": "k_iq4nl_gemv",
+   "role": "top",
+   "calls_per_token": 32.0,
+   "gpu_ms_per_token": 0.186,
+   "share": 0.0119,
+   "us_per_call": 5.81
+  },
+  {
+   "kernel": "other",
+   "role": "other",
+   "gpu_ms_per_token": 0.456,
+   "share": 0.0292
+  }
+ ],
+ "kernel_gpu_ms_per_token_total": {
+  "after": 15.606
+ },
+ "kernel_profile_note": {
+  "source": "separate profile-on runs (FAK_CUDA_TIMESTAMP_PROFILE=1), receipts/window-w2.log and receipts/window-w3.log (run 10)",
+  "before": "k_nvfp4_w4a16_f32 grid 9x1, 624 calls/token, 140.5 us/call, 87.7 of 97.6 GPU ms/token (89.9%)",
+  "after": "k_nvfp4_w4a16_warp_f32 grid 288x1, 624 calls/token, 9.27 us/call, 5.8 of 15.6 GPU ms/token (37.1%); d2d_copy 18.0%"
+ }
+}

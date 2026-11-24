@@ -1,0 +1,52 @@
+{
+ "schema": "fak.perf-receipt/2",
+ "kind": "candidate",
+ "ticket": "inkling2-expert-gemv-20261124",
+ "step": "Bit-identical rescheduled NVFP4 expert GEMV (k_ink2_expert_nvfp4_v2) for the resident Inkling-2 CUDA decode",
+ "date": "2026-11-24",
+ "evidence_class": "HW-WITNESSED",
+ "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, aegis2-fak, driver 620.73.04, CUDA 13.5 runtime]",
+ "node": "aegis2-fak, measure lease hwl-67270ec41ba02d50 (released); builds on aegis CPU under share lease hwl-6e7d2003d0a9d855 (released)",
+ "models": {
+  "gguf_mainline": "/var/lib/fak/models/inkling2/gguf-mainline/Inkling-2-Mini-UD-Q3_K_XL.gguf (13631779296 bytes)"
+ },
+ "engines": {
+  "baseline_fak": "public fak a4e0af4066 (git archive), ~/ink2gemv-A/_bin/ggufload.test",
+  "candidate_fak": "public fak lane ticket-inkling2-expert-gemv-20261124 commit d27b9cc5de on a4e0af4066 (landed public 6eba862214), ~/ink2gemv-B/_bin/ggufload.test; libfakcuda sm_120 SASS",
+  "oracle": "llama.cpp CPU greedy token lists embedded in internal/ggufload/inkling2loop_test.go"
+ },
+ "workload": "C1 greedy batch-1 decode; bench capitals prompt (19 tok) then 128 tokens, decode = 127 steps; microbench gate_up 2304x2304 and down 2304x1152, k=8 of 64 experts",
+ "argv": [
+  "receipts/run_e2e.sh <out>",
+  "FAK_INKLING2_GGUF=<gguf> FAK_INKLING2_BENCH=128 ggufload.test -test.run TestInkling2CUDADecodeBench -test.v  (A B B A)",
+  "FAK_INKLING2_GGUF=<gguf> ggufload.test -test.run TestInkling2CUDAOracleGreedyMatchesLlamaCpp -test.v  (A and B)",
+  "compute.test -test.run 'TestCUDAInk2Expert|TestCUDANVFP4W4A16Parity' -test.v",
+  "FAK_INKLING2_GRAPH=0 FAK_CUDA_TIMESTAMP_PROFILE=1 FAK_CUDA_TIMESTAMP_PROFILE_EVERY=140 FAK_INKLING2_BENCH=128 ggufload.test -test.run TestInkling2CUDADecodeBench (profile-ON, separate run per arm)",
+  "mb_<variant> 2000 ; mb_<variant> 300 iq  (receipts/mb.cu, nvcc 12.9 -O3 sm_120, variants receipts/mb-variants.txt)"
+ ],
+ "env": [
+  "LD_LIBRARY_PATH=/opt/cuda/lib64",
+  "FAK_REQUIRE_CUDA_NVFP4=1",
+  "FAK_INKLING2_RESIDENT unset (resident on)",
+  "FAK_INKLING2_GRAPH unset (graph replay on) for ABBA; 0 for profile",
+  "FAK_INKLING2_NVFP4_GEMV unset (v2 on in B; kernel absent in A)"
+ ],
+ "results": {
+  "abba_decode_tok_s": {"A": [85.22, 85.24], "B": [89.28, 89.28]},
+  "decode_ms_per_token": {"A": 11.733, "B": 11.201},
+  "delta_pct": 4.75,
+  "profile_on": {
+   "gpu_ms_per_token": {"A": 15.336, "B": 14.781},
+   "nvfp4_expert_us_per_call": {"A": 31.77, "B": 24.73},
+   "nvfp4_expert_ms_per_token": {"A": 2.478, "B": 1.929}
+  },
+  "microbench_gb_s": {
+   "gate_up_2304x2304_k8": {"reference": 626, "v2": 914},
+   "down_2304x1152_k8": {"reference": 558, "v2": 803}
+  },
+  "parity": "bit-identical: 0/1179648 outputs differ per shape per variant; TestCUDAInk2ExpertNVFP4FastMatchesReference PASS",
+  "oracle": "capitals 32/32, fibonacci 32/32, chat-template 32/32 identical on A and B; passphrase-recall-1946 diverges at token 10 on both A and B with identical streams (pre-existing)",
+  "iq_expert_v2": "measured_no_gain: rows-together + one-wave IQ kernels bit-exact but 7-20% slower; not shipped (receipts/mb-iq-sweep.txt)"
+ },
+ "verdict": "measured_gain"
+}

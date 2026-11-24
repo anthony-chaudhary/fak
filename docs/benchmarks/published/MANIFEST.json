@@ -1,7 +1,222 @@
 {
   "schema": "fak.benchpub.manifest.v1",
-  "generated_at": "2026-11-01T17:08:04Z",
+  "generated_at": "2026-11-24T15:48:48Z",
   "entries": [
+    {
+      "campaign": "aegis-gpu-direct-weight-paths",
+      "date": "2026-11-24",
+      "source_dir": "docs/benchmarks/aegis-gpu-direct-weight-paths",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "c7e3c867991628673efd5fb40886b76f36082ce7f82c1152b425343298d9eeb5",
+          "bytes": 7725,
+          "source_sha256": "c8a044a07616c1323d246051899a370d52ea9ecab9fdf7ce265b88c6344fa7a6"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-inkling2-crossbox-hitl",
+      "date": "2026-11-24",
+      "source_dir": "docs/benchmarks/aegis-inkling2-crossbox-hitl",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "1d64c25bda0ae49c10fe530b20fbf7810fe7c04580e22d67cc14d9361444edcf",
+          "bytes": 3967,
+          "source_sha256": "b65e3247dbe92b99e214f8661e22b5f583d725d55e2b3a6dafff4e94a9dcfb38"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-inkling2-fork-parity",
+      "date": "2026-11-24",
+      "source_dir": "docs/benchmarks/aegis-inkling2-fork-parity",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "3c42208896c5a2da8d69c677518176e21169bc1c8529241680d5933eec7104f9",
+          "bytes": 4446,
+          "source_sha256": "c021bd20497a281ca564547b6676dff1be9c1844f5f788c5eec4756cc0c0d418"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis2-inkling2-batched-prefill",
+      "date": "2026-11-24",
+      "source_dir": "docs/benchmarks/aegis2-inkling2-batched-prefill",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "57a78f79645955ae46644753996409b72b489e398c22a460bbe62312b368155c",
+          "bytes": 4573,
+          "source_sha256": "5e16adbcba444650581162c852202a02f4729b973de00e1b37e1bc7d0f361aa8"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis2-inkling2-expert-gemv-climb",
+      "date": "2026-11-24",
+      "source_dir": "docs/benchmarks/aegis2-inkling2-expert-gemv-climb",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "ba94aa59c1495545e01119acf04d6ccd44cc147c82d0af2a876cfce3eb8a9ceb",
+          "bytes": 14443,
+          "source_sha256": "0aea8cb7d1a3d5074cbd6b7f344ad43498799eedb531c9b259f6df4478962ba8"
+        },
+        {
+          "name": "perf-receipt-v2.json",
+          "sha256": "e1fc88942b6c18a61ea93cc5b11ee58d8ddd71ddac79564a560470edf32ec66f",
+          "bytes": 3158
+        }
+      ]
+    },
+    {
+      "campaign": "aegis2-inkling2-fused-climb",
+      "date": "2026-11-24",
+      "source_dir": "docs/benchmarks/aegis2-inkling2-fused-climb",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "f744ccb007390fe67d381f0aff24b87d24be3e7cde3449cdd6cd9fd5b2d8fc9e",
+          "bytes": 7898,
+          "source_sha256": "7ee8ce0b369dda4dbda24bd6095ea0614b71c94c2265cc371e2d95c4cc0c6137"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-inkling2-gpu-decode-climb",
+      "date": "2026-11-23",
+      "source_dir": "docs/benchmarks/aegis-inkling2-gpu-decode-climb",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "c1dd6932a380e08ead3e594a8b84b99ed35adcf299e8e83e46dcd66bf83d84f3",
+          "bytes": 5701,
+          "source_sha256": "63b63de402505de266f21d78d3b683579097aad724b97c73ded1a8abaafd08f3"
+        },
+        {
+          "name": "perf-receipt-v2.json",
+          "sha256": "096e2f13f77239eebd5b50005b288b3c0abbeaba29e836bdd043392ffd2619cf",
+          "bytes": 6183
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-inkling2-resident-cuda",
+      "date": "2026-11-23",
+      "source_dir": "docs/benchmarks/aegis-inkling2-resident-cuda",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "f734fae1f963c6468ab13d094e43f6662c7607ed0b0202cbc6f4ff60bac1a7c1",
+          "bytes": 3637,
+          "source_sha256": "03617e2fdde0357246de01367e65dbcc8829b56a70de5c817c3024d94244a2e4"
+        },
+        {
+          "name": "perf-receipt-v2.json",
+          "sha256": "81862ec0a18e96d8f973db4836d81e8cc6e9ce5efd26d064a7b9115ab7047867",
+          "bytes": 6272
+        }
+      ]
+    },
+    {
+      "campaign": "deveval-multigold",
+      "date": "2026-11-23",
+      "source_dir": "docs/benchmarks/deveval-multigold",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "a89037122dd21f8c4414aec68d85eb4af02d20e9827294bf5587ab8b21cdefee",
+          "bytes": 4585,
+          "source_sha256": "c022c7daaf3079fecae71e73763bcd7b975f2a602fe5340cfc484a42e27709d4"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-inkling2-mini-oss-baseline",
+      "date": "2026-11-22",
+      "source_dir": "docs/benchmarks/aegis-inkling2-mini-oss-baseline",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "51852c82d86120f3352aa22379c218c791f5a4943ab744fca4e8fe164da57a28",
+          "bytes": 28116,
+          "source_sha256": "96cde4d36bcdcba9a8a399d6af3b077e9bad79720c22757af60139c52896fba2"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-inkling2-native-cuda",
+      "date": "2026-11-22",
+      "source_dir": "docs/benchmarks/aegis-inkling2-native-cuda",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "957dbf45b7216b3b95cc115eb164ef2516e520e2152e9b039019fa0bf3b5b506",
+          "bytes": 4240,
+          "source_sha256": "6f5e99489c7c73f8abe1e988addd11724547a56454b513404f1eb34b2245d79f"
+        },
+        {
+          "name": "perf-receipt-v2.json",
+          "sha256": "d9a26c2e2b0b22353370e0fbe471aa7cf65b5aa8eda4d2a62ba47c178a00718a",
+          "bytes": 2540
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-inkling2-realugbun-fork-ab",
+      "date": "2026-11-22",
+      "source_dir": "docs/benchmarks/aegis-inkling2-realugbun-fork-ab",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "9a303aedf7a89a68dfcd58a3bc45ec95d15ec82f10ea8196eb4107b26d3394b0",
+          "bytes": 6447,
+          "source_sha256": "00a2f15a560f24a78960c1714090f262031c78f2cf2ccbc7a620625edb89bbeb"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-inkling2-realugbun-fusion-ablation",
+      "date": "2026-11-22",
+      "source_dir": "docs/benchmarks/aegis-inkling2-realugbun-fusion-ablation",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "c8489438f56be925d356c1c997018c322912c2743c574ca096d0c0abe1b8e9ad",
+          "bytes": 16223,
+          "source_sha256": "5e806501a3478126f11404e85c24780b72fbae10c5064c7fe5f049436965cbd3"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-qwen38-mtp-hillclimb",
+      "date": "2026-11-20",
+      "source_dir": "docs/benchmarks/aegis-qwen38-mtp-hillclimb",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "e14cd8a07cecfd72b8c84081c8cf6b5d5c3682ffcb618c95a40dec3d8388ae5c",
+          "bytes": 4505,
+          "source_sha256": "67ae306405de4626fca9a593e586882727ba18df8c6d6a9076e1f9151420f501"
+        }
+      ]
+    },
+    {
+      "campaign": "development-loop-alternatives",
+      "date": "2026-11-02",
+      "source_dir": "docs/benchmarks/development-loop-alternatives",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "fb354428cf406460ba243846cfc8549d554eddd4eb4d51f1f8e93ea4faef9c2e",
+          "bytes": 9499,
+          "source_sha256": "bcd72ee9eb5ce705e7fba5e7d1bdce1be33ea2a64842242a42d78b749270d4de"
+        }
+      ]
+    },
     {
       "campaign": "aegis-5080-d41hw",
       "date": "2026-10-31",
@@ -9,30 +224,15 @@
       "files": [
         {
           "name": "RESULTS-v2.md",
-          "sha256": "6a7fdcdf77f052aa59863c824ad783e63337f88cae7b7ddec71ea549c97a316a",
-          "bytes": 1474
+          "sha256": "3227b5be6bfbacece5f526a668675128ede27a2de763708338799598b1532402",
+          "bytes": 1837,
+          "source_sha256": "6a7fdcdf77f052aa59863c824ad783e63337f88cae7b7ddec71ea549c97a316a"
         },
         {
           "name": "RESULTS.md",
-          "sha256": "f079c52c8e6ea6575c489e03ef1f2814e28c67f8fb2d5f6fd70cf6834616dcaa",
-          "bytes": 5892
-        }
-      ]
-    },
-    {
-      "campaign": "nvidia-cuda-perf-gap",
-      "date": "2026-10-31",
-      "source_dir": "docs/benchmarks/nvidia-cuda-perf-gap",
-      "files": [
-        {
-          "name": "ATTRIBUTION.md",
-          "sha256": "41adffa0566cd99af219eaf85dba0d8cc679c480d13dc7b8c865c7fbce4e4d54",
-          "bytes": 22064
-        },
-        {
-          "name": "RESULTS.md",
-          "sha256": "b79ae015c2d1f67dcb2192f8e75a8bd3561913b1b7b260d696611816a31dddfb",
-          "bytes": 7043
+          "sha256": "cf17960b45e258691a1821deecdf702958f0ec75f90893b7819863bbe523b774",
+          "bytes": 6221,
+          "source_sha256": "f079c52c8e6ea6575c489e03ef1f2814e28c67f8fb2d5f6fd70cf6834616dcaa"
         }
       ]
     },
@@ -43,8 +243,9 @@
       "files": [
         {
           "name": "RESULTS.md",
-          "sha256": "6503ee6a0d6a69542a0e6271abe035883ee8480164067e273334a645bf094344",
-          "bytes": 8051
+          "sha256": "1142caee50e703694200f5ed9bf6b3f1282ec99c1a044d1a1f9b95da256e664b",
+          "bytes": 8462,
+          "source_sha256": "6503ee6a0d6a69542a0e6271abe035883ee8480164067e273334a645bf094344"
         },
         {
           "name": "manifest.json",
@@ -54,19 +255,21 @@
       ]
     },
     {
-      "campaign": "maya-strat-hw",
-      "date": "2026-10-30",
-      "source_dir": "docs/benchmarks/maya-strat-hw",
+      "campaign": "nvidia-cuda-perf-gap",
+      "date": "2026-10-31",
+      "source_dir": "docs/benchmarks/nvidia-cuda-perf-gap",
       "files": [
         {
-          "name": "README.md",
-          "sha256": "a0e8b49205064dd51d7b713b68e42d63e0c45e927f70649d2a448f2fa2b3444c",
-          "bytes": 6575
+          "name": "ATTRIBUTION.md",
+          "sha256": "bcf1e20351bba57469754e4771ee7b5111333376f26109165038efd10738e3ae",
+          "bytes": 22369,
+          "source_sha256": "41adffa0566cd99af219eaf85dba0d8cc679c480d13dc7b8c865c7fbce4e4d54"
         },
         {
           "name": "RESULTS.md",
-          "sha256": "1300f4045d000990b30e04acd69f30e80f2bc6271087adf8d160ae94fe86d744",
-          "bytes": 17051
+          "sha256": "ced553a88187f174de7884597d2ecc5a5cf67fdff0d6c1bf48b905e6665febe3",
+          "bytes": 7402,
+          "source_sha256": "b79ae015c2d1f67dcb2192f8e75a8bd3561913b1b7b260d696611816a31dddfb"
         }
       ]
     },
@@ -79,6 +282,151 @@
           "name": "baseline.json",
           "sha256": "8980ee84e72b9b743804261ea88747be415b854292cd0f673e4acd64ac0066ff",
           "bytes": 1109
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-5080",
+      "date": "2026-10-30",
+      "source_dir": "docs/benchmarks/aegis-5080",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "e622540adb663045578eb9d519517f152a1b3af3a7decf2caadc93ba9b1b8736",
+          "bytes": 10698,
+          "source_sha256": "7633a157c1ac3e7a061c9d6d3a876b644ca40e63b1519f12ef6f8e0a180b3b63"
+        }
+      ]
+    },
+    {
+      "campaign": "maya-strat-hw",
+      "date": "2026-10-30",
+      "source_dir": "docs/benchmarks/maya-strat-hw",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "a0244bc5cca49a67e3c549541a0809dc39c607e15511a0c247154cbe4d78b40e",
+          "bytes": 6855,
+          "source_sha256": "a0e8b49205064dd51d7b713b68e42d63e0c45e927f70649d2a448f2fa2b3444c"
+        },
+        {
+          "name": "RESULTS.md",
+          "sha256": "dd3c86db6460b66459c31dbcecb569b7ec7fd79e7201b280c376c96240fb6621",
+          "bytes": 17814,
+          "source_sha256": "6887b3d2bad4eb82b6f9d1d9740d15f2669bee8f600fb53464acbd49e8ee3771"
+        }
+      ]
+    },
+    {
+      "campaign": "hwbench",
+      "date": "2026-10-28",
+      "source_dir": "docs/benchmarks/hwbench",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "83b326c221b6e7fc565909bf65304ecce22a61ca5b72a26a7ed0e587dedf620d",
+          "bytes": 3538,
+          "source_sha256": "f164af25283a50b48b793da377d0fc0fb43212e7eea16a27f1446bf67d42f1b5"
+        }
+      ]
+    },
+    {
+      "campaign": "raider-qwen38-batch",
+      "date": "2026-10-27",
+      "source_dir": "docs/benchmarks/raider-qwen38-batch",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "f249f0ca0171ed32d377dc0bfa583119f5ed9bb208cb664b0a8def817b950fd7",
+          "bytes": 10501,
+          "source_sha256": "842ff9f2e448a29d37364ca5ffb70ec30763fe84a33aef558c29f5b08e2da71f"
+        }
+      ]
+    },
+    {
+      "campaign": "anthony-27b-multigpu-fit",
+      "date": "2026-10-26",
+      "source_dir": "docs/benchmarks/anthony-27b-multigpu-fit",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "fdda5ccae1331651c9091395dcb84680473fd055de99759ab20a15193ca2b49e",
+          "bytes": 4977,
+          "source_sha256": "57c35094b7fd0a950853f6da9fa2ec2cdab16c4c67d08c822ff4447f62a73995"
+        }
+      ]
+    },
+    {
+      "campaign": "egpu-recovery",
+      "date": "2026-10-26",
+      "source_dir": "docs/benchmarks/egpu-recovery",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "5c6771b3c66fbbc45f76698ccfea48530e99de0f3d50c1f5b8ae985e66024626",
+          "bytes": 5840,
+          "source_sha256": "d04833ce2aebd253fe34ab90c03ec67781f34e0bcd6814cd365707420467d398"
+        },
+        {
+          "name": "manifest.json",
+          "sha256": "968ad99844b5e27c0e0dc9d2cdbd72c8adeaeecff4d8a7c567b0c079373deabf",
+          "bytes": 711
+        }
+      ]
+    },
+    {
+      "campaign": "anthony-current",
+      "date": "2026-10-25",
+      "source_dir": "docs/benchmarks/anthony-current",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "82744a264808eff85e96830031619f7388e678466a144a5aeed1215ebf5d3f86",
+          "bytes": 8908,
+          "source_sha256": "4dd273d5de5a1b9d2a6d931b068400ce573b16f00dee92b7f896456fdbec9820"
+        }
+      ]
+    },
+    {
+      "campaign": "disagg-anthony",
+      "date": "2026-10-25",
+      "source_dir": "docs/benchmarks/disagg-anthony",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "94216bccb184ee2ce91f3b357130ff97c2afd008d7face130c3d8f08610cbb1f",
+          "bytes": 5989,
+          "source_sha256": "eebe6134d01cfee0377c8397e2d1b7b5ac35efc1a7f9041092a7737872e586e0"
+        }
+      ]
+    },
+    {
+      "campaign": "gpu-baseline",
+      "date": "2026-10-25",
+      "source_dir": "docs/benchmarks/gpu-baseline",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "93e7b2af1591794d33a1c1a50635523751182d47168b2e0c568c74f01065487b",
+          "bytes": 6747,
+          "source_sha256": "85795240436f705fead6b0a1fb6a17d3ae161a923c04c845871a07356d6a2a1d"
+        },
+        {
+          "name": "manifest.json",
+          "sha256": "c94b55f19192c218d1ccf07c3edba2e70abbabad95d0d0e24979d62ad79e396a",
+          "bytes": 1573
+        }
+      ]
+    },
+    {
+      "campaign": "rtx-oss-smoke",
+      "date": "2026-10-23",
+      "source_dir": "docs/benchmarks/rtx-oss-smoke",
+      "files": [
+        {
+          "name": "manifest.json",
+          "sha256": "ac81f413473289db613b8c03995a81939fd8913431b6433003cfe0a806c7343a",
+          "bytes": 8486
         }
       ]
     }
