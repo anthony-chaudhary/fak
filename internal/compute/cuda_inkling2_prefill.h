@@ -35,8 +35,10 @@ int fcuda_ink2d_attend(const float *q, const float *kb, const float *vb, const f
     int rows, int heads, int kvHeads, int dim, const int *posDev, int window, int cap);
 int fcuda_ink2d_silu_mul(const float *g, const float *u, float *out, int n);
 int fcuda_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows);
+int fcuda_ink2v_mix(const float *const *states, int ns, const float *queries, int nq, const float *const *norms,
+    float eps, float *out, int n, int T);
 int fcuda_ink2v_repeat_rows(const float *x, float *out, int n, int rows, int k);
-int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, void *q, float *Y, int out, int in,
+int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, void *q, int quantize, float *Y, int out, int in,
     int rows, int block);
 int fcuda_ink2d_topm(const float *logits, int rows, int rowStride, int vocab, int M, float *candV, int *candI,
     int *out);

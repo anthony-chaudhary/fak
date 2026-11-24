@@ -158,18 +158,20 @@ static void ink2v_q8_rows_launch(const signed char *W, const float *Wscale, cons
 }
 
 // Y[t] = W.X[t] for a resident Q8_0 (block 32) W and rows <= 9 rows of X; q holds the
-// rows' codes ([rows][in] bytes) then their block scales. Returns cudaErrorNotSupported
-// (nothing launched) outside the kernel's contract.
-extern "C" int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, void *q, float *Y, int out,
-                                   int in, int rows, int block) {
+// rows' codes ([rows][in] bytes) then their block scales; quantize = 0 reuses the codes an
+// earlier call on the same X left in q. Returns -1 (nothing launched) outside the kernel's
+// contract.
+extern "C" int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, void *q, int quantize,
+                                   float *Y, int out, int in, int rows, int block) {
   const int nblk = in / 32;
   const bool aligned = (((uintptr_t)W | (uintptr_t)q) & 15) == 0 && (in & 15) == 0;
   if (block != 32 || in % 32 != 0 || !aligned || nblk > 288 || rows < 1 || rows > INK2V_MAX_ROWS)
     return -1;
   signed char *codes = (signed char *)q;
   float *scales = (float *)(codes + (size_t)rows * in);
-  FCUDA_TS("k_q8_quant_act", dim3(nblk, rows),
-           k_q8_quant_act<<<dim3(nblk, rows), 32, 0, g_stream>>>(X, codes, scales, rows, in, 32));
+  if (quantize)
+    FCUDA_TS("k_q8_quant_act", dim3(nblk, rows),
+             k_q8_quant_act<<<dim3(nblk, rows), 32, 0, g_stream>>>(X, codes, scales, rows, in, 32));
   const signed char *w8 = (const signed char *)W;
   if (nblk <= 96)
     ink2v_q8_rows_launch<3>(w8, Wscale, codes, scales, Y, out, in, rows);
@@ -178,4 +180,69 @@ extern "C" int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const f
   else
     ink2v_q8_rows_launch<9>(w8, Wscale, codes, scales, Y, out, in, rows);
   return ink2_last_error();
+}
+
+// The cluster depth mix (k_ink2_mixc) for each row of a verify chunk: cluster y mixes
+// token y, whose states sit at row y of each [T][n] state, and writes query q of it at
+// out[q][y] ([nq][T][n], the batched mix layout), with the optional RMS norm folded in.
+template <int NQ>
+__global__ void __launch_bounds__(1024)
+    k_ink2v_mixc(Ink2States st, int ns, const float *queries, Ink2Norms nw, int norm, float eps, float *out, int n,
+                 int T) {
+  __shared__ Ink2MixShared sm;
+  const size_t toff = (size_t)blockIdx.y * n;
+  Ink2States sr;
+  for (int s = 0; s < INK2_MAX_STATES; ++s) sr.p[s] = st.p[s] ? st.p[s] + toff : nullptr;
+  float *o = out + toff;
+  const size_t qs = (size_t)T * n;
+  switch (ns) {
+  case 1: ink2_mixc_body<1, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
+  case 2: ink2_mixc_body<2, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
+  case 3: ink2_mixc_body<3, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
+  case 4: ink2_mixc_body<4, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
+  case 5: ink2_mixc_body<5, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
+  case 6: ink2_mixc_body<6, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
+  case 7: ink2_mixc_body<7, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
+  default: ink2_mixc_body<8, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
+  }
+}
+
+template <int NQ>
+static cudaError_t ink2v_mixc_launch(const Ink2States &st, int ns, const float *queries, const Ink2Norms &nw, int norm,
+                                     float eps, float *out, int n, int T, int threads) {
+  cudaLaunchConfig_t cfg = {};
+  cfg.gridDim = dim3(INK2_MIX_CTAS, T);
+  cfg.blockDim = dim3(threads);
+  cfg.stream = g_stream;
+  cudaLaunchAttribute attr[1];
+  attr[0].id = cudaLaunchAttributeClusterDimension;
+  attr[0].val.clusterDim.x = INK2_MIX_CTAS;
+  attr[0].val.clusterDim.y = 1;
+  attr[0].val.clusterDim.z = 1;
+  cfg.attrs = attr;
+  cfg.numAttrs = 1;
+  return cudaLaunchKernelEx(&cfg, k_ink2v_mixc<NQ>, st, ns, queries, nw, norm, eps, out, n, T);
+}
+
+// Row-batched fcuda_ink2_mix: out is [nq][T][n]; norms (nullable) folds an RMS per query.
+// Returns -1 (nothing launched) without cluster launch, so the caller keeps its own path.
+extern "C" int fcuda_ink2v_mix(const float *const *states, int ns, const float *queries, int nq,
+                               const float *const *norms, float eps, float *out, int n, int T) {
+  if (ns < 1 || ns > INK2_MAX_STATES || nq < 1 || nq > INK2_MAX_QUERIES || T < 1) return (int)cudaErrorInvalidValue;
+  const int threads = ((n + INK2_MIX_CTAS - 1) / INK2_MIX_CTAS + 31) & ~31;
+  if (threads > 1024 || !ink2_cluster_ok()) return -1;
+  Ink2States st;
+  for (int i = 0; i < INK2_MAX_STATES; ++i) st.p[i] = i < ns ? states[i] : nullptr;
+  Ink2Norms nw;
+  for (int q = 0; q < INK2_MAX_QUERIES; ++q) nw.w[q] = norms && q < nq ? norms[q] : nullptr;
+  const int norm = norms ? 1 : 0;
+  cudaError_t e = cudaSuccess;
+  const dim3 grid(INK2_MIX_CTAS, T);
+  switch (nq) {
+  case 1: FCUDA_TS("k_ink2v_mixc", grid, e = ink2v_mixc_launch<1>(st, ns, queries, nw, norm, eps, out, n, T, threads)); break;
+  case 2: FCUDA_TS("k_ink2v_mixc", grid, e = ink2v_mixc_launch<2>(st, ns, queries, nw, norm, eps, out, n, T, threads)); break;
+  case 3: FCUDA_TS("k_ink2v_mixc", grid, e = ink2v_mixc_launch<3>(st, ns, queries, nw, norm, eps, out, n, T, threads)); break;
+  default: FCUDA_TS("k_ink2v_mixc", grid, e = ink2v_mixc_launch<4>(st, ns, queries, nw, norm, eps, out, n, T, threads)); break;
+  }
+  return (int)e;
 }

@@ -356,17 +356,48 @@ func (c *cudaBackend) Ink2VRepeatRows(x, out Ink2Ref, n, rows, k int) error {
 	return ink2Status("verify repeat rows", C.fcuda_ink2v_repeat_rows(c.ink2F(x), c.ink2F(out), C.int(n), C.int(rows), C.int(k)))
 }
 
-func (c *cudaBackend) Ink2VQ8Rows(w Tensor, x, q, y Ink2Ref, rows int) (bool, error) {
+func (c *cudaBackend) Ink2VQ8Rows(w Tensor, x, q, y Ink2Ref, rows int, quantize bool) (bool, error) {
 	if w.Dtype != Q8_0 || len(w.Shape) != 2 || w.Quant.Block != 32 {
 		return false, nil
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	wb := c.cudaBufForSubmit(w)
-	rc := C.fcuda_ink2v_q8_rows((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.ink2F(x), c.ink2Ptr(q), c.ink2F(y),
+	rc := C.fcuda_ink2v_q8_rows((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.ink2F(x), c.ink2Ptr(q), ink2Bool(quantize), c.ink2F(y),
 		C.int(w.Shape[0]), C.int(w.Shape[1]), C.int(rows), C.int(w.Quant.Block))
 	if rc == -1 {
 		return false, nil
 	}
 	return true, ink2Status("verify q8 rows", rc)
+}
+
+func (c *cudaBackend) Ink2VMix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2Ref, eps float32, out Ink2Ref, n, T int) (bool, error) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	ptrs := (*[8]*C.float)(C.malloc(C.size_t(8 * unsafe.Sizeof(uintptr(0)))))
+	defer C.free(unsafe.Pointer(ptrs))
+	if len(states) > len(ptrs) {
+		return false, fmt.Errorf("cuda inkling2 verify mix: %d states", len(states))
+	}
+	for i, s := range states {
+		ptrs[i] = c.ink2F(s)
+	}
+	var np **C.float
+	if norms != nil {
+		nps := (*[4]*C.float)(C.malloc(C.size_t(4 * unsafe.Sizeof(uintptr(0)))))
+		defer C.free(unsafe.Pointer(nps))
+		for i := range nps {
+			nps[i] = nil
+			if i < len(norms) && norms[i].T.Buf() != nil {
+				nps[i] = c.ink2F(norms[i])
+			}
+		}
+		np = (**C.float)(unsafe.Pointer(nps))
+	}
+	rc := C.fcuda_ink2v_mix((**C.float)(unsafe.Pointer(ptrs)), C.int(len(states)), c.ink2F(queries), C.int(nq), np, C.float(eps),
+		c.ink2F(out), C.int(n), C.int(T))
+	if rc == -1 {
+		return false, nil
+	}
+	return true, ink2Status("verify mix", rc)
 }

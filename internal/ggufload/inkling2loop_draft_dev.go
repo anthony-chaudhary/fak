@@ -237,7 +237,8 @@ func (d *ink2DeviceDraft) forward() {
 	mm := func(m ink2Mat, x ink2Ref, rows int) ink2Ref {
 		y := d.tmp(rows * m.rows)
 		if s.err == nil {
-			if ok, err := inkling2RowsMatMul(vdev, m, x, y, rows, d.tmp); err != nil || ok {
+			codes := func(x ink2Ref, n int) (ink2Ref, bool) { return d.tmp(rows * (n/4 + n/32)), true }
+			if ok, err := inkling2RowsMatMul(vdev, m, x, y, rows, codes); err != nil || ok {
 				run(err)
 				return y
 			}

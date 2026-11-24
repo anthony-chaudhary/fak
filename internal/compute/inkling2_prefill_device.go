@@ -53,9 +53,14 @@ type Inkling2VerifyDevice interface {
 	// the single-row GEMV; ok is false (nothing launched) for a dtype without one.
 	Ink2VRows(w Tensor, x, y Ink2Ref, rows int) (ok bool, err error)
 	// Ink2VQ8Rows is Y[t] = W.X[t] for a Q8_0 W and up to 9 rows, each row equal to the
-	// decode GEMV; q holds rows*(in/4 + in/32) floats of codes and scales. ok is false
-	// (nothing launched) outside the kernel's contract.
-	Ink2VQ8Rows(w Tensor, x, q, y Ink2Ref, rows int) (ok bool, err error)
+	// decode GEMV; q holds rows*(in/4 + in/32) floats of codes and scales, which
+	// quantize=false reuses from an earlier call on the same x. ok is false (nothing
+	// launched) outside the kernel's contract.
+	Ink2VQ8Rows(w Tensor, x, q, y Ink2Ref, rows int, quantize bool) (ok bool, err error)
+	// Ink2VMix is Ink2PMix ([nq][T][n] out) on the cluster mix kernel, with each query
+	// RMS-normalized by norms[q] when norms is set; ok is false (nothing launched)
+	// without cluster launch.
+	Ink2VMix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2Ref, eps float32, out Ink2Ref, n, T int) (ok bool, err error)
 	// Ink2VRepeatRows writes out[t*k+j] = x[t] for rows x of n floats.
 	Ink2VRepeatRows(x, out Ink2Ref, n, rows, k int) error
 	// Ink2PConvCommitDev is Ink2PConvCommit with keep read from the int at keepDev.

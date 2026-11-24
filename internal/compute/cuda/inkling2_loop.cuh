@@ -191,7 +191,7 @@ struct Ink2MixShared {
 
 template <int NS, int NQ>
 __device__ void ink2_mixc_body(Ink2MixShared &sm, const Ink2States &st, const float *queries, const Ink2Norms &nw,
-                               int norm, float eps, float *out, int n) {
+                               int norm, float eps, float *out, int n, size_t qstride) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
   namespace cg = cooperative_groups;
   cg::cluster_group cluster = cg::this_cluster();
@@ -302,7 +302,7 @@ __device__ void ink2_mixc_body(Ink2MixShared &sm, const Ink2States &st, const fl
   }
   if (live)
 #pragma unroll
-    for (int q = 0; q < NQ; ++q) out[(size_t)q * n + i] = o[q];
+    for (int q = 0; q < NQ; ++q) out[(size_t)q * qstride + i] = o[q];
   // a block's shared memory must outlive every remote read of it
   cluster.sync();
 #endif
@@ -313,14 +313,14 @@ __global__ void __launch_bounds__(1024)
     k_ink2_mixc(Ink2States st, int ns, const float *queries, Ink2Norms nw, int norm, float eps, float *out, int n) {
   __shared__ Ink2MixShared sm;
   switch (ns) {
-  case 1: ink2_mixc_body<1, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
-  case 2: ink2_mixc_body<2, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
-  case 3: ink2_mixc_body<3, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
-  case 4: ink2_mixc_body<4, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
-  case 5: ink2_mixc_body<5, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
-  case 6: ink2_mixc_body<6, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
-  case 7: ink2_mixc_body<7, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
-  default: ink2_mixc_body<8, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
+  case 1: ink2_mixc_body<1, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
+  case 2: ink2_mixc_body<2, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
+  case 3: ink2_mixc_body<3, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
+  case 4: ink2_mixc_body<4, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
+  case 5: ink2_mixc_body<5, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
+  case 6: ink2_mixc_body<6, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
+  case 7: ink2_mixc_body<7, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
+  default: ink2_mixc_body<8, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
   }
 }
 

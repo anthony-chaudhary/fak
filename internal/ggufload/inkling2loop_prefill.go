@@ -40,6 +40,8 @@ type ink2Prefill struct {
 	// commit and the head runs on every row.
 	verify bool
 	vd     compute.Inkling2VerifyDevice
+	// q8 maps a scratch activation offset to its Q8_0 codes for this visit
+	q8 map[int]ink2Ref
 }
 
 func (p *ink2Prefill) fail(err error) { p.s.fail(err) }
@@ -135,7 +137,7 @@ func (p *ink2Prefill) mm(m ink2Mat, x ink2Ref) ink2Ref {
 	// a verify chunk reads each weight once for all its rows, each row equal to the
 	// decode GEMV
 	if p.verify && p.T <= 9 {
-		ok, err := inkling2RowsMatMul(p.vd, m, x, y, p.T, p.tmp)
+		ok, err := inkling2RowsMatMul(p.vd, m, x, y, p.T, p.q8Codes)
 		if err != nil || ok {
 			p.fail(err)
 			return y
@@ -145,12 +147,33 @@ func (p *ink2Prefill) mm(m ink2Mat, x ink2Ref) ink2Ref {
 	return y
 }
 
+// q8Codes returns the Q8_0 code buffer for activation x of rows*n floats and whether
+// it still has to be filled. Scratch activations are never rewritten before the next
+// visit resets the scratch, so their codes are shared by every weight that reads them.
+func (p *ink2Prefill) q8Codes(x ink2Ref, n int) (ink2Ref, bool) {
+	size := p.T * (n/4 + n/32)
+	if x.T.Buf() != p.scr.T.Buf() {
+		return p.tmp(size), true
+	}
+	if q, ok := p.q8[x.Off]; ok {
+		return q, false
+	}
+	if p.q8 == nil {
+		p.q8 = map[int]ink2Ref{}
+	}
+	q := p.tmp(size)
+	p.q8[x.Off] = q
+	return q, true
+}
+
 // inkling2RowsMatMul runs y = m.x[t] for rows <= 9 through the few-row kernels; ok is
-// false (nothing launched) for a dtype without one.
-func inkling2RowsMatMul(vd compute.Inkling2VerifyDevice, m ink2Mat, x, y ink2Ref, rows int, tmp func(int) ink2Ref) (bool, error) {
+// false (nothing launched) for a dtype without one. codes returns x's Q8_0 code
+// buffer and whether it must be (re)quantized.
+func inkling2RowsMatMul(vd compute.Inkling2VerifyDevice, m ink2Mat, x, y ink2Ref, rows int, codes func(ink2Ref, int) (ink2Ref, bool)) (bool, error) {
 	switch m.t.Dtype {
 	case compute.Q8_0:
-		return vd.Ink2VQ8Rows(m.t, x, tmp(rows*(m.cols/4+m.cols/32)), y, rows)
+		q, fresh := codes(x, m.cols)
+		return vd.Ink2VQ8Rows(m.t, x, q, y, rows, fresh)
 	case compute.Q5_K:
 		return vd.Ink2VRows(m.t, x, y, rows)
 	}
@@ -165,8 +188,38 @@ func (p *ink2Prefill) rms(x, w ink2Ref, n int, eps float32) ink2Ref {
 	return y
 }
 
+// mixNorm is mix with query q RMS-normalized by norms[q] (norms nil: no norm). A
+// verify chunk runs both in one cluster launch per token row.
+func (p *ink2Prefill) mixNorm(states []ink2Ref, queries ink2Ref, nq int, norms []ink2Ref) []ink2Ref {
+	s := p.s
+	h := s.hp.Hidden
+	if p.verify && s.err == nil {
+		out := p.tmp(nq * p.T * h)
+		ok, err := p.vd.Ink2VMix(states, queries, nq, norms, s.hp.NormEps, out, h, p.T)
+		if err != nil || ok {
+			p.fail(err)
+			refs := make([]ink2Ref, nq)
+			for q := range refs {
+				refs[q] = at(out, q*p.T*h)
+			}
+			return refs
+		}
+	}
+	refs := p.mixPlain(states, queries, nq)
+	for q := range refs {
+		if q < len(norms) {
+			refs[q] = p.rms(refs[q], norms[q], h, s.hp.NormEps)
+		}
+	}
+	return refs
+}
+
 // mix returns the nq query outputs, each a [T][hidden] matrix.
 func (p *ink2Prefill) mix(states []ink2Ref, queries ink2Ref, nq int) []ink2Ref {
+	return p.mixNorm(states, queries, nq, nil)
+}
+
+func (p *ink2Prefill) mixPlain(states []ink2Ref, queries ink2Ref, nq int) []ink2Ref {
 	h := p.s.hp.Hidden
 	out := p.tmp(nq * p.T * h)
 	if p.s.err == nil {
@@ -225,12 +278,22 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	inpSA := cur
 
 	in := [3]ink2Ref{cur, cur, cur}
+	// without a controller between them the input norms fold into the mix
+	normed := false
 	if l.resQRows > 0 {
+		var norms []ink2Ref
+		if msgs == nil {
+			normed = true
+			norms = []ink2Ref{l.qNorm, l.kNorm, l.vNorm}
+			if local {
+				norms = []ink2Ref{l.attnNorm}
+			}
+		}
 		if local {
-			m := p.mix(with(*blocks, cur), l.resQ, 1)
+			m := p.mixNorm(with(*blocks, cur), l.resQ, 1, norms)
 			in = [3]ink2Ref{m[0], m[0], m[0]}
 		} else {
-			m := p.mix(with(*blocks, cur), l.resQ, 3)
+			m := p.mixNorm(with(*blocks, cur), l.resQ, 3, norms)
 			in = [3]ink2Ref{m[0], m[1], m[2]}
 		}
 	}
@@ -240,6 +303,7 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		}
 	}
 	switch {
+	case normed:
 	case local && msgs != nil:
 		for j := 0; j < 3; j++ {
 			in[j] = p.rms(in[j], l.attnNorm, h, hp.NormEps)
@@ -298,11 +362,14 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	}
 	ffnInp := cur
 
-	x := p.mix(with(*blocks, cur), l.ffnResQ, 1)[0]
+	var x ink2Ref
 	if msgs != nil {
+		x = p.mix(with(*blocks, cur), l.ffnResQ, 1)[0]
 		x = p.control(x, msgs[3], c, 3)
+		x = p.rms(x, l.ffnNorm, h, hp.NormEps)
+	} else {
+		x = p.mixNorm(with(*blocks, cur), l.ffnResQ, 1, []ink2Ref{l.ffnNorm})[0]
 	}
-	x = p.rms(x, l.ffnNorm, h, hp.NormEps)
 	x = p.moe(l, x)
 	return p.conv(slot, x, l.ffnPostConv, ink2Ref{}, ffnInp, h, 0, 2*kvDim+h, true)
 }
@@ -417,6 +484,7 @@ func (p *ink2Prefill) forward(last bool) {
 	nv := 0
 	visit := func() {
 		p.scrOff = 0
+		clear(p.q8)
 		if s.draft != nil {
 			for _, v := range s.draft.visits {
 				if v == nv {
@@ -468,8 +536,8 @@ func (p *ink2Prefill) forward(last bool) {
 		return
 	}
 	if s.draft != nil {
-		x := p.mix(with(blocks, cur), s.outResQ, 1)[0]
-		s.draft.commitContext(p, append(taps, p.rms(x, s.outNorm, h, hp.NormEps)))
+		x := p.mixNorm(with(blocks, cur), s.outResQ, 1, []ink2Ref{s.outNorm})[0]
+		s.draft.commitContext(p, append(taps, x))
 	}
 	if !last {
 		return
@@ -517,9 +585,7 @@ func (s *inkling2Resident) ensurePrefillArenas(T int) {
 func (p *ink2Prefill) headRows(blocks []ink2Ref, cur ink2Ref) ink2Ref {
 	s := p.s
 	hp := s.hp
-	h := hp.Hidden
-	x := p.mix(with(blocks, cur), s.outResQ, 1)[0]
-	xn := p.rms(x, s.outNorm, h, hp.NormEps)
+	xn := p.mixNorm(with(blocks, cur), s.outResQ, 1, []ink2Ref{s.outNorm})[0]
 	rows := s.output.rows
 	if s.err == nil {
 		ok, err := p.vd.Ink2VRows(s.output.t, xn, s.verifyLogits, p.T)
