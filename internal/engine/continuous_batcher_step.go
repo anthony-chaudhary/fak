@@ -346,7 +346,11 @@ func (cb *ContinuousBatcher) runDecodeArmLocked(snap *stepSnapshot) (*BatchStepR
 		slot.LastToken = tok
 		slot.GeneratedTokens = append(slot.GeneratedTokens, tok)
 		slot.CurrentDepth++
-		slot.RecurrentPasses++
+		passes := slot.ExecutionDepth
+		if passes < 1 {
+			passes = 1
+		}
+		slot.RecurrentPasses += passes
 		cb.totalTokens++
 		generatedTokens[slot.SessionID] = tok
 		slotDepths[slot.SessionID] = slot.CurrentDepth

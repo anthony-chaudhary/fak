@@ -119,7 +119,7 @@ type Slot struct {
 	TargetTokens      int
 	ExecutionDepth    int // Configured recurrent depth limit (default 1)
 	CurrentDepth      int // Current recurrent depth reached (0..ExecutionDepth)
-	RecurrentPasses   int // Recurrent execution passes completed
+	RecurrentPasses   int // Looped-block passes completed: ExecutionDepth per decoded token
 	YieldCount        int
 	ResumeCount       int
 	LastToken         int
@@ -314,6 +314,11 @@ type ContinuousBatcherConfig struct {
 
 	// KVBytesPerToken is the default KV cache footprint in bytes per token (default if <= 0 is 1024).
 	KVBytesPerToken int64
+
+	// LoopedBlock declares the model's prelude/loop/coda layer split. When
+	// declared, recurrent KV is sized from layer visits instead of depth x the
+	// full stack; KVBytesPerToken is then the cost of one unrolled pass.
+	LoopedBlock LoopedBlockShape
 
 	// PrefillBudget is the per-step prompt-token budget for budgeted chunked prefill.
 	// 0 (default) preserves the legacy eager-prefill, decode-only stepping behavior

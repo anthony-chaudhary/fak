@@ -314,7 +314,8 @@ func TestRecurrentBatchIsolationIntegration(t *testing.T) {
 		if completedA.CurrentDepth != 2 || completedB.CurrentDepth != 3 {
 			t.Fatalf("current depths corrupted: got A=%d, B=%d", completedA.CurrentDepth, completedB.CurrentDepth)
 		}
-		if completedA.RecurrentPasses != 2 || completedB.RecurrentPasses != 3 {
+		// Each decoded token runs the looped block ExecutionDepth times.
+		if completedA.RecurrentPasses != 4 || completedB.RecurrentPasses != 9 {
 			t.Fatalf("recurrent passes corrupted: got A=%d, B=%d", completedA.RecurrentPasses, completedB.RecurrentPasses)
 		}
 

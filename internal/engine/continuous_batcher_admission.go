@@ -266,9 +266,10 @@ func (cb *ContinuousBatcher) WaitingQueueLength() int {
 	return len(cb.waitingQueue)
 }
 
-// RequiredKVCacheBytes calculates the required KV cache footprint for a request based on
-// token dimensions, KV bytes per token, and recurrent execution depth:
-// KV capacity required = (len(PromptTokens) + TargetTokens) * KVBytesPerToken * ExecutionDepth.
+// RequiredKVCacheBytes calculates the required KV cache footprint for a request:
+// (len(PromptTokens) + TargetTokens) * KVBytesPerToken * ExecutionDepth, or, when
+// the model declares a LoopedBlock, KVBytesPerToken scaled by
+// LayerVisits(depth)/PhysicalLayers so only the looped block pays per pass.
 func (cb *ContinuousBatcher) RequiredKVCacheBytes(req *SubagentRequest) int64 {
 	if req == nil {
 		return 0
@@ -286,6 +287,10 @@ func (cb *ContinuousBatcher) RequiredKVCacheBytes(req *SubagentRequest) int64 {
 		targetTokens = req.effectiveDepth()
 	}
 	tokens := int64(len(req.PromptTokens) + targetTokens)
+	if shape := cb.cfg.LoopedBlock; shape.Declared() {
+		visits := int64(shape.LayerVisits(int(depth)))
+		return tokens * bpt * visits / int64(shape.PhysicalLayers())
+	}
 	return tokens * bpt * depth
 }
 
