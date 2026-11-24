@@ -273,3 +273,38 @@ func TestInkling2ExpertResidencyOrderCoreFirst(t *testing.T) {
 		}
 	}
 }
+
+type inkling2TierBackend struct {
+	compute.Backend
+	name, tier string
+}
+
+func (b inkling2TierBackend) Name() string { return b.name }
+func (b inkling2TierBackend) Tier() string { return b.tier }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestInkling2DefaultOnKeepsBuiltInThroughArchTable(t *testing.T) {
+	sm120 := inkling2TierBackend{name: "cuda", tier: "sm_120"}
+	sm89 := inkling2TierBackend{name: "cuda", tier: "sm_89"}
+	vk := inkling2TierBackend{name: "vulkan", tier: "sm_120"}
+	if inkling2BackendSM(sm120) != 120 || inkling2BackendSM(sm89) != 89 || inkling2BackendSM(vk) != 0 ||
+		inkling2BackendSM(inkling2TierBackend{name: "cuda", tier: "scalar"}) != 0 || inkling2BackendSM(nil) != 0 {
+		t.Fatal("backend compute capability misread")
+	}
+	lookup := func(env map[string]string) func(string) (string, bool) {
+		return func(k string) (string, bool) { v, ok := env[k]; return v, ok }
+	}
+	for _, env := range []string{"FAK_INKLING2_RESIDENT", "FAK_INKLING2_GRAPH"} {
+		for _, be := range []compute.Backend{sm120, sm89, vk, nil} {
+			// Unset, the sm_120 table row, or a killed table all stay on, as before.
+			for _, e := range []map[string]string{nil, {"FAK_SM120_DEFAULTS": "0"}, {env: "1"}, {env: ""}} {
+				if !inkling2DefaultOn(be, env, lookup(e)) {
+					t.Fatalf("%s on %v with %v: want on", env, be, e)
+				}
+			}
+			if inkling2DefaultOn(be, env, lookup(map[string]string{env: "0"})) {
+				t.Fatalf("%s=0 on %v: want off", env, be)
+			}
+		}
+	}
+}

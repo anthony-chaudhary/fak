@@ -231,7 +231,7 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 			}
 		}
 	}
-	s.graph = os.Getenv("FAK_INKLING2_GRAPH") != "0" && !s.hostRouting
+	s.graph = inkling2DefaultOn(be, "FAK_INKLING2_GRAPH", os.LookupEnv) && !s.hostRouting
 	if s.err != nil {
 		s.close()
 		return nil, s.err

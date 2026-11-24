@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -504,11 +506,32 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 	return out, st, nil
 }
 
+// inkling2BackendSM is the compute capability of a CUDA backend from its
+// "sm_120" tier, 0 for any other backend or an unparseable tier.
+func inkling2BackendSM(be compute.Backend) int {
+	if be == nil || be.Name() != "cuda" {
+		return 0
+	}
+	sm, err := strconv.Atoi(strings.TrimPrefix(be.Tier(), "sm_"))
+	if err != nil || sm <= 0 {
+		return 0
+	}
+	return sm
+}
+
+// inkling2DefaultOn resolves an Inkling-2 on/off switch through the per-arch
+// default table, so a value the user set wins and each arch default cites its
+// run. Only an explicit "0" turns the switch off: an arch with no row, or one
+// whose kill switch is set, keeps the built-in on.
+func inkling2DefaultOn(be compute.Backend, env string, lookup func(string) (string, bool)) bool {
+	return compute.ResolveArchDefault(inkling2BackendSM(be), env, lookup).Value != "0"
+}
+
 // inkling2ResidentEligible routes a device-bound model on a backend with the
 // inkling2 device ops through the resident forward; FAK_INKLING2_RESIDENT=0 keeps
 // the host-driven per-matrix path.
 func inkling2ResidentEligible(m *Inkling2LoopModel, be compute.Backend) bool {
-	if os.Getenv("FAK_INKLING2_RESIDENT") == "0" || len(m.Weights.Layers) == 0 {
+	if !inkling2DefaultOn(be, "FAK_INKLING2_RESIDENT", os.LookupEnv) || len(m.Weights.Layers) == 0 {
 		return false
 	}
 	if _, ok := be.(compute.Inkling2Device); !ok {
