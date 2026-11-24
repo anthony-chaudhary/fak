@@ -111,6 +111,7 @@ type prefixReuseAttribution struct {
 	sameTokens, crossTokens          uint64
 	coldTurns, sameTurns, crossTurns uint64
 	unknownTurns                     uint64
+	reportedPromptTokens             uint64
 }
 
 var prefixReuseSeed = maphash.MakeSeed()
@@ -171,6 +172,9 @@ func (a *prefixReuseAttribution) observeTurn(session string, conv uint64, prompt
 	cross := uint64(matchedTokens) - own
 	a.sameTokens += own
 	a.crossTokens += cross
+	if reported {
+		a.reportedPromptTokens += uint64(promptTokens)
+	}
 	origin := prefixReuseCold
 	switch {
 	case !reported:
@@ -222,6 +226,7 @@ type prefixReuseSnapshot struct {
 	sameTokens, crossTokens          uint64
 	coldTurns, sameTurns, crossTurns uint64
 	unknownTurns                     uint64
+	reportedPromptTokens             uint64
 	rollup                           crossAgentRollup
 	coordinators                     int
 }
@@ -231,7 +236,7 @@ func (a *prefixReuseAttribution) snapshot() prefixReuseSnapshot {
 	snap := prefixReuseSnapshot{
 		sameTokens: a.sameTokens, crossTokens: a.crossTokens,
 		coldTurns: a.coldTurns, sameTurns: a.sameTurns, crossTurns: a.crossTurns,
-		unknownTurns: a.unknownTurns,
+		unknownTurns: a.unknownTurns, reportedPromptTokens: a.reportedPromptTokens,
 	}
 	ledger := a.ledger
 	a.mu.Unlock()
@@ -298,4 +303,5 @@ func (s *Server) writePrefixReuseAttributionMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_kv_prefix_cross_agent_shared_tokens",
 		"Subagent prompt tokens served from a prefix another conversation prefilled, retained in the cross-agent reuse ledger.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_cross_agent_shared_tokens %d\n", snap.rollup.CrossAgentSharedTokens)
+	writeFusionCacheMetrics(b, snap)
 }
