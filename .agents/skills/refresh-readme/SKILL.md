@@ -216,11 +216,31 @@ end to end: **daily audit → ACTION verdict → this skill → commit the READM
 The section below is what you do when the loop hands you an ACTION (or when one of
 the triggers fires early).
 
+## Where a change goes
+
+Three surfaces move; everything else is stable framing.
+
+- **A newer hardware result** replaces its platform row (Mac, AMD or NVIDIA) only
+  when a public receipt backs it: write `docs/benchmarks/receipts/<slug>/RESULTS.md`
+  first, then change the row in `docs/benchmarks/hardware-latest.json` and the README
+  table to the same bytes, and move the heading date with the manifest `as_of`.
+  Receipts carry no lab hostnames, IP addresses, private paths or lease ids.
+- **Shipped behavior** goes in `What changed since <date>`. The list is a rolling
+  window: restart it from the previous stamp date, build it from
+  `git log --since=<date>`, and drop older items (one line at most for anything
+  still current). A claim whose evidence is not public waits.
+- **A newly witnessed model** adds a row to the pins table with its Hugging Face
+  source and the hardware it ran on.
+
+Results first published in maintainer notes elsewhere follow the same path: a
+public receipt, then the row. A front-page line never links outside this repository.
+
 ## When to run this
 
 - After a `/release` or any `VERSION` bump (the stamp + any pin go stale at once).
 - When a headline number changes in `BENCHMARK-AUTHORITY`.
 - When a doc the README links to moves or is renamed.
+- When a new public receipt or a notable public change lands (see Where a change goes).
 - When the daily `readme-freshness` loop (above) returns `ACTION`, or on a manual
   `/loop` cadence to garden the front page ahead of the daily tick.
 

@@ -1,6 +1,6 @@
 {
   "schema": "fak-hardware-latest/1",
-  "as_of": "2026-11-10",
+  "as_of": "2026-11-24",
   "platforms": {
     "Mac": {
       "observed": "2026-09-03",
@@ -13,9 +13,9 @@
       "row": "| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |"
     },
     "NVIDIA": {
-      "observed": "2026-11-07",
-      "detail": "docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md",
-      "row": "| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): the Q4_K large-batch prefill arm now defaults to the mmq route on sm_80+, a same-card ABBA re-measure of 1.30–1.49× cold prefill (fak/llama.cpp b11870 0.17×→0.26× at P=128) with byte-identical greedy output; decode is unchanged within noise; observed 2026-11-07. | HW-witnessed ABBA on sm_120; the ≥0.5× prefill maturity bar is not yet met (0.13–0.26× llama), and the Q5/Q6 MMQ arm failed the byte-parity gate and was not landed. [RTX 5090 mmq prefill receipt](docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md) |"
+      "observed": "2026-11-24",
+      "detail": "docs/benchmarks/receipts/inkling2-cuda-resident-rtx5080-20261124/RESULTS.md",
+      "row": "| NVIDIA | Inkling-2-Mini UD-Q3_K_XL on an RTX 5080 16 GB (sm_120): fak-native resident CUDA decode with graph replay reached 104.6 tok/s single-stream, up from 82.5 a day earlier and 6.3 on the host-driven path; upstream llama.cpp tg128 does 81.0 on the same card and GGUF, and the fastest llama.cpp fork measured does 119.3; greedy output matches the llama.cpp oracle on 3 of 4 cases; observed 2026-11-24. | HW-witnessed ABBA, in-process decode bench, not a served-endpoint rate; the fourth case diverges at a known near-tie on both builds, and prefill is still per-token by default. [RTX 5080 Inkling-2 receipt](docs/benchmarks/receipts/inkling2-cuda-resident-rtx5080-20261124/RESULTS.md) |"
     }
   }
 }

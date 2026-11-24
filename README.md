@@ -65,7 +65,7 @@ sell tokens from your own GPUs → [token-factory operator route](docs/operator/
 understand why → [the market framing](docs/explainers/why-fak-the-market-moment.md) ·
 check the evidence → [benchmarks](docs/benchmarks/README.md) and [claims](CLAIMS.md).
 
-## Latest hardware results — 2026-11-10
+## Latest hardware results — 2026-11-24
 
 One row per hardware family: the newest committed performance receipt for that platform,
 with its claim boundary and receipt link. A row stays historical until a newer quality-complete
@@ -75,7 +75,7 @@ measurement exists.
 |---|---|---|
 | Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
 | AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |
-| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): the Q4_K large-batch prefill arm now defaults to the mmq route on sm_80+, a same-card ABBA re-measure of 1.30–1.49× cold prefill (fak/llama.cpp b11870 0.17×→0.26× at P=128) with byte-identical greedy output; decode is unchanged within noise; observed 2026-11-07. | HW-witnessed ABBA on sm_120; the ≥0.5× prefill maturity bar is not yet met (0.13–0.26× llama), and the Q5/Q6 MMQ arm failed the byte-parity gate and was not landed. [RTX 5090 mmq prefill receipt](docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md) |
+| NVIDIA | Inkling-2-Mini UD-Q3_K_XL on an RTX 5080 16 GB (sm_120): fak-native resident CUDA decode with graph replay reached 104.6 tok/s single-stream, up from 82.5 a day earlier and 6.3 on the host-driven path; upstream llama.cpp tg128 does 81.0 on the same card and GGUF, and the fastest llama.cpp fork measured does 119.3; greedy output matches the llama.cpp oracle on 3 of 4 cases; observed 2026-11-24. | HW-witnessed ABBA, in-process decode bench, not a served-endpoint rate; the fourth case diverges at a known near-tie on both builds, and prefill is still per-token by default. [RTX 5080 Inkling-2 receipt](docs/benchmarks/receipts/inkling2-cuda-resident-rtx5080-20261124/RESULTS.md) |
 
 Read the status column before comparing rates. History: [benchmark index](docs/benchmarks/README.md);
 claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
@@ -142,40 +142,28 @@ fak agent --offline   # -> task completed
 - **Credit upstream.** Parts of fak are adapted from ggml / llama.cpp;
   attributions and pinned revisions are in [NOTICE.md](NOTICE.md).
 
-## What changed since 2026-10-12
+## What changed since 2026-11-10
 
-- Fit planning: `fak serve --fit` jointly picks context, KV dtype and slots against a
-  stated workload and SLO. It refuses live boots with typed reasons instead of guessing size.
-- CUDA serving deepens: concurrent Qwen lanes share one device decode step, and sampled
-  MTP runs inside ordinary request serving. An opt-in paged KV store
-  (`FAK_CUDA_PAGED_KV=1`) lets requests sharing a prefix share device pages. The Q4_K
-  large-batch prefill arm now defaults to the mmq route on sm_80+. The same-card ABBA
-  receipt measured 1.30–1.49× cold prefill with byte-identical greedy output. An
-  explicit `FAK_CUDA_Q4K_PREFILL` remains the opt-out.
-- `fak claude` targets a local `fak serve` gateway (`127.0.0.1:8080`) by default. If an
-  optional fak router (a separately distributed component) answers on `FAK_ROUTER_URL`,
-  else `127.0.0.1:18101`, it fronts that instead; with no router it keeps the `fak serve`
-  default, and `--no-router` skips the probe. OpenCode and Pi use a router only when one is
-  configured (`fak node use`, `fak pi config --from-router`). One paused provider no longer stops every routed worker.
-- Multi-session serving: `fak up` admits several agent sessions against capacity, with
-  backpressure instead of timeouts. `fak node install` rolls back to the prior
-  registration when a start fails.
-- Serving engine: continuous batching is wired into decode, so concurrent cold requests
-  share one bounded packed prefill (code-verified; no accepted throughput receipt yet).
-  Packed prefill can also share work with live decode behind a qualification-only,
-  default-off build tag (#12328). It is a bounded software step with no throughput claim.
-- Guard policy: context changes, memory apply, and plugin writes are refused unless an
-  act-bound lease fences them. An attending operator can approve one exact refused call
-  with `fak guard allow --approve`; the agent cannot approve itself. The gateway's
-  workspace admission now defaults to the open posture
-  (`--workspace-admission open|permissive|strict` on `fak serve` and `fak guard`),
-  fixing a shipped floor that silently denied mutating tool calls after a kernel allow.
-- Native inference primitives: bounded CPU beam search, an explicit score-based SPM
-  tokenizer, a bounded Jinja chat-template runtime, and causal-model embeddings land
-  natively. MoE expert-residency and hot-set advisors ship with a `hotsetcheck` replay
-  CLI that measures routed-expert hit rate.
-- For builders: a stdlib-only utility tier (atomic file writes, bounded JSONL rotation,
-  pid liveness, and more) moved into the public Go API under `pkg/`.
+- A second model family runs fak-native on NVIDIA: Inkling-2-Mini decodes resident on
+  CUDA with one replayed graph per token (receipt in the table above). Its tokenizer
+  now matches Hugging Face on 46/46 corpus lines. A batched prompt prefill is opt-in
+  behind `FAK_INKLING2_BATCHED_PREFILL=1`; per-token prefill stays the default.
+- CUDA prefill defaults: dense K-quant prompt panels batch through the mmq kernel,
+  and Q6_K batched matmul uses mmq at 8+ prompt tokens on sm_80 and newer. The Q4_K
+  mmq default from 2026-11-07 stands.
+- `fak serve` on CUDA falls back to fit-with-offload when a dense model does not fit
+  in VRAM, and exits on a fatal warmup failure instead of serving a broken engine.
+- Cache reuse: native child tasks share the parent's stable system and tools
+  preamble, and the gateway exports `fak_gateway_fusion_cache_*` metrics that price
+  the prefill saved against no-reuse and same-session-only baselines.
+- Gateway: `GET` and `DELETE /v1/responses/{id}`, `service_tier` accepted, and a
+  forced hosted tool refused with a typed 400.
+- Guard policy: a `loop_depth` rule caps a looped model's recurrent depth per tool
+  scope. Still current from the previous window: an attending operator approves one
+  exact refused call with `fak guard allow --approve` (the agent cannot approve
+  itself), and workspace admission defaults to the open posture.
+- Docs: the router is optional (agents talk to `fak up` / `fak serve` directly), and
+  GPU owners get a [token-factory operator route](docs/operator/token-factory.md).
 
 ## Models fak has actually run — exact Hugging Face pins
 
@@ -189,6 +177,7 @@ is linked instead of an unrecorded mirror.
 | Qwen3.8-27B Q4_K_M (`qwen38`, default) | [unsloth/Qwen3.8-27B-GGUF@f1bfb127](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/tree/f1bfb127c64f7072bdd2cad55f258b9c8b2910fe) · [official Qwen/Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B) | Apple M3 Pro, Metal |
 | Qwen3.6-27B Q4_K_M | [lmstudio-community/Qwen3.6-27B-GGUF](https://huggingface.co/lmstudio-community/Qwen3.6-27B-GGUF) | AMD RX 7600, Vulkan |
 | Qwen2.5-3B-Instruct Q8_0 | [Qwen/Qwen2.5-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct) (receipt records the Q8_0 GGUF filename only) | NVIDIA H100, CUDA |
+| Inkling-2-Mini UD-Q3_K_XL | [unsloth/Inkling-2-Mini-GGUF](https://huggingface.co/unsloth/Inkling-2-Mini-GGUF) (file under `Mainline_Support/`; receipt records its sha256) | NVIDIA RTX 5080, CUDA |
 | DeepSeek-V4.1-Flash Q2_K (7 shards, 264,515,279,456 B) | [vcruz305/DeepSeek-V4.1-Flash-GGUF@c4a08554](https://huggingface.co/vcruz305/DeepSeek-V4.1-Flash-GGUF/tree/c4a085541cb53f67ee5e57b63d255e80cef286e7) · [official deepseek-ai/DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) | Strix Halo, Vulkan |
 | Qwen3.5-0.8B Q4_K_M | [Qwen/Qwen3.5-0.8B](https://huggingface.co/Qwen/Qwen3.5-0.8B) | Apple M3 Pro, Metal keepalive |
 | Prism Bonsai-2-27B PQ2_0 | [prism-ml/Ternary-Bonsai-2-27B-gguf@b072e1d3](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/b072e1d3b35a0a630cece372c2127528e0994386) | Apple M3 Pro, CPU |
