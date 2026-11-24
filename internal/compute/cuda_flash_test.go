@@ -65,6 +65,8 @@ func TestCUDAFlashAttentionMatchesRef(t *testing.T) {
 		{"gqa", 8, 2, 16, 64},   // grouped-query: 4 query heads share each KV head
 		{"mqa", 8, 1, 32, 50},   // multi-query: all query heads share one KV head
 		{"hd64", 16, 4, 64, 96}, // a wider head dim spanning >1 reduction stride
+
+		{"gqa7-hd128-splitkv", 28, 4, 128, 1000}, // Qwen2.5-7B geometry; the long window takes the split-KV merge
 	}
 	for _, c := range cases {
 		var seed lcg = 486

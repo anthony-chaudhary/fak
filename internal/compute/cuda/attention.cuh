@@ -169,6 +169,7 @@ __global__ void k_flash_attention(const float *Q, const float *K, const float *V
 extern "C" void fcuda_flash_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
                                           int nPos, int maxPos, int nH, int nKV, int hd, float scale) {
   (void)maxPos;
+  if (attn_generic_launch(dQ, dK, dV, dOut, 1, nPos - 1, nH, nKV, hd, scale, 0) != -2) return;
   size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
   FCUDA_TS("k_flash_attention", nH, k_flash_attention<false><<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dK, dV, dOut, nPos, nH, nKV, hd, scale));
 }
@@ -685,6 +686,10 @@ extern "C" int fcuda_causal_attention_panel_f32(
       qwen38_prefill_attention_wants_mma()) {
     int mma = fak_qwen38_fattn_mma_hd256_launch(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
     if (mma != -2) return mma;
+  }
+  if (attn_generic_launch(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale, 1) != -2) {
+    cudaError_t generic = cudaGetLastError();
+    return generic == cudaSuccess ? 0 : 71000 + (int)generic;
   }
   size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
   FCUDA_TS("k_prompt_causal_attention_panel", tokens * nH, k_prompt_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(

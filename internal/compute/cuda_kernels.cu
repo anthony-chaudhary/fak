@@ -260,6 +260,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/qwen35_qknorm_rope_cache_vllm.cuh"
 #include "cuda/qwen35_residual_norm.cuh"
 #include "cuda/fattn_mma_hd256.cuh"
+#include "cuda/attention_generic.cuh"
 #include "cuda/attention.cuh"
 #include "cuda/paged_attention_vllm.cuh"
 #include "cuda/kv_precision.cuh"

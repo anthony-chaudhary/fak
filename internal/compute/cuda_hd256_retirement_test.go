@@ -123,6 +123,8 @@ static int fcuda_alloc_status(int status) { if(status==cudaErrorMemoryAllocation
 static bool fak_alloc_untrack(void *p) { assert(p==old_storage && old_tracked); old_tracked=false; ++untracks; return !miss_untrack; }
 static void fak_alloc_track(void *p, int, int, const char *, size_t) { assert(p==new_storage); ++tracks; if(throw_track) throw std::bad_alloc(); }
 static bool qwen38_prefill_attention_wants_mma() { return true; }
+// The generic tiled kernel never admits in this harness, so its legacy SIMT tail stays the witness.
+static int attn_generic_launch(const float *, const float *, const float *, float *, int, int, int, int, int, float, int) { return -2; }
 static void launch(const char *name) {
  if (!strcmp(name,"k_qwen38_fattn_stage_kv_f16")) { ++stages;last_error=stage_status;if(profile_status)g_cuda_cleanup_status=profile_status; }
  else if (!strcmp(name,"k_qwen38_fattn_mma_hd256")) { ++mma;last_error=mma_status; }

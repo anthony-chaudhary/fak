@@ -25,6 +25,7 @@ int fak_qwen35_causal_attention_panel_f32(
     int tokens, int prefix, int nH, int nKV, int hd, float scale);
 int fak_qwen35_sequence_sync(void);
 unsigned long long fak_qwen38_fattn_mma_launch_count(void);
+unsigned long long fak_attn_generic_launch_count(int which);
 */
 import "C"
 
@@ -433,6 +434,14 @@ func (c *cudaBackend) qwen38PrefillAttentionMMALaunchesForTest() uint64 {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	return uint64(C.fak_qwen38_fattn_mma_launch_count())
+}
+
+// attnGenericLaunchesForTest reports how many decode (which=0) or prompt-panel (which=1)
+// attention calls ran the generic tiled kernel, so parity tests can refuse a silent legacy run.
+func (c *cudaBackend) attnGenericLaunchesForTest(which int) uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fak_attn_generic_launch_count(C.int(which)))
 }
 
 // qwen35CausalAttentionPanelIntoForTest exposes the supplied-output ABI used by the

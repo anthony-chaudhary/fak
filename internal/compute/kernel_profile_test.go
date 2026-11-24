@@ -1268,6 +1268,7 @@ func TestKernelOpClassCUDANames(t *testing.T) {
 		"k_qwen38_causal_attention_panel_hd256_splitkv_partial": KernelOpAttention, "k_qwen38_splitkv_lse_merge_hd256": KernelOpAttention,
 		"k_dsa_sparse_attend": KernelOpAttention, "k_dsa_index_topk": KernelOpAttention, "k_spec_verify_combine": KernelOpAttention,
 		"k_tree_verify_attention": KernelOpAttention, "k_qwen35_gdn_fused_in_proj": KernelOpMatvec,
+		"k_attention_generic_tiled": KernelOpAttention, "k_attention_generic_merge": KernelOpAttention,
 		"k_qwen35_gdn_recurrent_panel_cols": KernelOpGDN, "d2d_copy": KernelOpCopy, "fill": KernelOpCopy,
 	} {
 		if !names[name] {

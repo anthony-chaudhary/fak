@@ -14,9 +14,11 @@ func TestCUDAFiniteReductionSentinelContract(t *testing.T) {
 		t.Fatal("cuda_kernels.cu retains a finite -1e30f reduction sentinel")
 	}
 	for want, count := range map[string]int{
-		"float lm = -INFINITY;":             1,
-		"float m = -INFINITY, l = 0.f;":     3, // k_flash_attention, k_prompt_causal_attention_panel, k_dsa_sparse_attend
-		"float bv = -INFINITY; int bi = 0;": 1,
+		"float lm = -INFINITY;":                     1,
+		"float m = -INFINITY, l = 0.f;":             3, // k_flash_attention, k_prompt_causal_attention_panel, k_dsa_sparse_attend
+		"float bv = -INFINITY; int bi = 0;":         1,
+		"mRun[s] = mTot[s] = -INFINITY;":            1, // k_attention_generic_tiled
+		"float mT = -INFINITY, lT = 0.f, xT = 0.f;": 1, // k_attention_generic_merge
 	} {
 		if got := strings.Count(text, want); got != count {
 			t.Errorf("cuda_kernels.cu true-bound contract %q count = %d, want %d", want, got, count)
