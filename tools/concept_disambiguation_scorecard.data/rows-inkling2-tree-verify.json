@@ -1,0 +1,81 @@
+{
+  "rows": [
+    {
+      "id": "inkling2loop-host",
+      "canonical": "Inkling2LoopHost",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The Inkling-2 loop host reference forward in internal/model: one token per Step with f32 activations, every layer visit (loop passes counted) owning its own KV cache and short-conv history slot. VerifyTree runs a speculative token tree over it and Commit keeps one accepted path.",
+      "distinction": "The host reference that defines Inkling-2 decode semantics, not the CUDA resident driver (internal/ggufload inkling2Resident) and not the GGUF-bound model (Inkling2LoopModel) that constructs it; NewInkling2LoopHost is only its constructor.",
+      "distinct_from": [
+        "inkling2loop-new-host",
+        "inkling2loop-model",
+        "inkling2loop-model-family"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopHost",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2loop-hparams",
+      "canonical": "Inkling2LoopHParams",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The Inkling-2 loop forward's shape and numeric hyperparameters: hidden width, layer count, loop core range and pass count, heads, conv kernel, sliding window, relative-bias extent, expert routing widths, clip thresholds and the final logit softcap.",
+      "distinction": "Resolved numeric shape the forward reads, not the parsed HF config envelope (Inkling2LoopConfig) it is derived from and not the weight tensors (Inkling2LoopWeights).",
+      "distinct_from": [
+        "loop-inkling2-loopconfig",
+        "inkling2loop-weights"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopHParams",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2loop-weights",
+      "canonical": "Inkling2LoopWeights",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The whole-model weight set of the Inkling-2 loop forward: token embedding and norms, output head, per-layer weights and the loop controllers, plus an optional MatVec batcher.",
+      "distinction": "Whole-model container; one layer's tensors are Inkling2LoopLayerWeights, and the shapes they must match are Inkling2LoopHParams.",
+      "distinct_from": [
+        "inkling2loop-layer-weights",
+        "inkling2loop-hparams"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopWeights",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2loop-layer-weights",
+      "canonical": "Inkling2LoopLayerWeights",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "One Inkling-2 layer's tensors: Q/K/V/O, relative-bias and sink projections, gate, conv taps, depth-mix queries, norms, router and routed expert matrices. A looped core layer reuses the same entry on every pass.",
+      "distinction": "Per-layer and shared across loop passes, not per visit: the per-visit state is the host's cache slot, and the whole-model set is Inkling2LoopWeights.",
+      "distinct_from": [
+        "inkling2loop-weights",
+        "inkling2loop-host"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopLayerWeights",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
