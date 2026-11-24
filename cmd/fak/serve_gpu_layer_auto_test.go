@@ -234,3 +234,41 @@ func TestServeAutoGPULayersLeavesPreferredContext(t *testing.T) {
 		t.Fatalf("--gpu-layers %d also leaves the window; %d is not the largest band", n+1, n)
 	}
 }
+
+// An explicit window no split can hold clamps like full placement does (#13036): the boot serves
+// split with the largest window the lightest split holds, instead of refusing AUTO_GPU_LAYERS_NO_FIT.
+func TestServeAutoGPULayersClampsExplicitContext(t *testing.T) {
+	ws := serveSynthLongContextWeightSource(t)
+	cfg, err := ws.File.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	csc := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
+	roomy := serveCUDACapBackend{serveCapBackend{Backend: compute.Default(), total: 1 << 40, free: compute.FreeUnknown, known: true, uploadDtype: true}}
+	one, _, err := serveNativeContextSizingInputs(ws, roomy, false, false, 1, 1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Size the device so one layer holds a mid window but not the declared one.
+	want := one.DeviceTotal() + (csc.KVBytes(1024)+csc.KVBytes(csc.MaxContext))/2
+	total := want * 2
+	for i := 0; i < 8; i++ {
+		probe := serveCUDACapBackend{serveCapBackend{Backend: compute.Default(), total: total, free: compute.FreeUnknown, known: true, uploadDtype: true}}
+		total = total * want / serveDeviceFitBudget(probe).avail()
+	}
+	be := serveCUDACapBackend{serveCapBackend{Backend: compute.Default(), total: total, free: compute.FreeUnknown, known: true, uploadDtype: true}}
+
+	in := serveAutoGPULayersTestInputs()
+	in.RequestedContext = csc.MaxContext
+	if serveLargestFittingSplit(ws, be, cfg, "", in.RequestedContext) != 0 {
+		t.Fatal("precondition: some split holds the explicit window; the clamp is not exercised")
+	}
+	n, err := serveAutoGPULayers(ws, be, in)
+	if err != nil || n < 1 {
+		t.Fatalf("serveAutoGPULayers = (%d, %v), want a split serving a clamped window", n, err)
+	}
+	window := serveSplitLargestContext(ws, be, cfg, "", n)
+	if window < 1024 || window >= in.RequestedContext {
+		t.Fatalf("--gpu-layers %d leaves %d tokens, want a clamp in [1024, %d)", n, window, in.RequestedContext)
+	}
+}

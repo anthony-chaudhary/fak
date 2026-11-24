@@ -95,6 +95,18 @@ func serveSplitFitsContext(ws *ggufload.WeightSource, be compute.Backend, cfg fa
 	return err
 }
 
+// serveSplitLargestContext is the largest KV window layers [0, n) on device leave, or 0.
+func serveSplitLargestContext(ws *ggufload.WeightSource, be compute.Backend, cfg fakmodel.Config, path string, n int) int {
+	weights, fit, err := serveNativeContextSizingInputs(ws, be, false, false, 1, n, path)
+	if err != nil {
+		return 0
+	}
+	csc := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
+	// An explicit full window is clamped to the largest that fits (#13036).
+	tokens, _ := compute.AutoSizeContextPlan(csc, weights, fit.avail(), csc.MaxContext)
+	return tokens
+}
+
 // serveLargestFittingSplit is the largest n in [1, NumLayers) whose split fits contextTokens, or 0.
 func serveLargestFittingSplit(ws *ggufload.WeightSource, be compute.Backend, cfg fakmodel.Config, path string, contextTokens int) int {
 	firstMiss := 1 + sort.Search(cfg.NumLayers-1, func(i int) bool {
@@ -131,9 +143,16 @@ func serveAutoGPULayers(ws *ggufload.WeightSource, be compute.Backend, in serveA
 		return 0, fmt.Errorf("%w (full device plan: %v)", err, fullErr)
 	}
 	n := serveLargestFittingSplit(ws, be, cfg, in.Path, ctx)
-	if n < 1 && in.RequestedContext <= 0 && ctx > compute.MinAutoContextTokens {
-		// No split leaves the preferred window; serve the sizer's floor rather than refuse.
-		n = serveLargestFittingSplit(ws, be, cfg, in.Path, compute.MinAutoContextTokens)
+	if n < 1 && ctx > compute.MinAutoContextTokens {
+		// No split holds the window. Unpinned, serve the sizer's floor with the most layers. An
+		// explicit window clamps like full placement does (#13036): keep the largest window the
+		// lightest split holds, then the most layers at it; the context sizer logs the clamp.
+		window := compute.MinAutoContextTokens
+		if in.RequestedContext > 0 {
+			window = max(serveSplitLargestContext(ws, be, cfg, in.Path, 1), compute.MinAutoContextTokens)
+			window = min(window, ctx)
+		}
+		n = serveLargestFittingSplit(ws, be, cfg, in.Path, window)
 	}
 	if n < 1 {
 		return 0, fmt.Errorf("%w at %d context tokens: %w", errServeAutoGPULayersNoFit, ctx, fullErr)
