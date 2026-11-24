@@ -51,12 +51,13 @@ func TestResolveChatLoopDepthContract(t *testing.T) {
 		{"looped, xargs not object", `{"model":"looped-stub","vllm_xargs":"loops=2"}`, http.StatusBadRequest, nil},
 		{"looped, xargs loops not int", `{"model":"looped-stub","vllm_xargs":{"loops":"2"}}`, http.StatusBadRequest, nil},
 		{"looped, null xargs is absent", `{"model":"looped-stub","vllm_xargs":null}`, 0, &LoopDepthReceipt{Loops: 4, MaxLoops: 4, Source: LoopDepthSourceDefault}},
-		{"looped, no loops: full depth", `{"model":"looped-stub","reasoning_effort":"low"}`, 0, &LoopDepthReceipt{Loops: 4, MaxLoops: 4, Source: LoopDepthSourceDefault}},
+		{"looped, no loops: full depth", `{"model":"looped-stub"}`, 0, &LoopDepthReceipt{Loops: 4, MaxLoops: 4, Source: LoopDepthSourceDefault}},
+		{"looped, effort low derives depth", `{"model":"looped-stub","reasoning_effort":"low"}`, 0, &LoopDepthReceipt{Loops: 1, MaxLoops: 4, Source: LoopDepthSourceEffort}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			got, ok := resolveChatLoopDepth(rec, decodeLoopDepthChatRequest(t, tc.body))
+			got, ok := resolveChatLoopDepth(rec, decodeLoopDepthChatRequest(t, tc.body), nil)
 			if tc.wantStatus != 0 {
 				if ok || rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), codeLoopsOutOfRange) {
 					t.Fatalf("ok=%v status=%d body=%s, want refusal %d with %s", ok, rec.Code, rec.Body.String(), tc.wantStatus, codeLoopsOutOfRange)

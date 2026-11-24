@@ -687,6 +687,9 @@ type SampleParams struct {
 	// SpeculativeNMax is the llama-server per-request speculative draft-length cap
 	// (0 disables drafting; nil => unset on the OpenAI chat wire).
 	SpeculativeNMax *int
+	// Loops is the recurrent depth for a looped model, forwarded as
+	// vllm_xargs.loops; 0 leaves the upstream body untouched.
+	Loops int
 	// NativeInferenceReceipt requests the strict native measurement envelope. It is
 	// false by default, preserving both planner work and response bytes.
 	NativeInferenceReceipt bool

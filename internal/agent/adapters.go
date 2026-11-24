@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -81,6 +82,7 @@ type adapterRequest struct {
 	MinP                 *float64 // nil => omit; OpenAI-compatible chat wire only
 	ChatTemplateKwargs   json.RawMessage
 	SpeculativeNMax      *int     // nil => omit; ProviderOpenAI chat wire only (llama-server)
+	Loops                int      // 0 => omit; OpenAI-compatible chat wire only, as vllm_xargs.loops
 	Stop                 []string // empty => omit from the wire
 	// ResponseFormat / LogitBias are the OpenAI structured/guided-decode carriers
 	// (#560). They ride on the wire ONLY where the provider has a native field
@@ -252,6 +254,7 @@ type openAIRequest struct {
 	MinP                *float64             `json:"min_p,omitempty"`
 	ChatTemplateKwargs  json.RawMessage      `json:"chat_template_kwargs,omitempty"` // llama.cpp/vLLM, verbatim
 	SpeculativeNMax     *int                 `json:"speculative.n_max,omitempty"`    // llama-server draft-length cap
+	VLLMXArgs           json.RawMessage      `json:"vllm_xargs,omitempty"`
 	Stop                []string             `json:"stop,omitempty"`
 	ResponseFormat      json.RawMessage      `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
 	LogitBias           map[int]float64      `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
@@ -346,7 +349,40 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		req.SpeculativeNMax = r.SpeculativeNMax
 		extra = withoutExtraKey(extra, speculativeNMaxKey)
 	}
+	if r.Loops > 0 {
+		xargs, rest, err := mergeVLLMXArgsLoops(extra, r.Loops)
+		if err != nil {
+			return nil, err
+		}
+		req.VLLMXArgs, extra = xargs, rest
+	}
 	return marshalWithExtraBody(req, extra)
+}
+
+const vllmXArgsKey = "vllm_xargs"
+
+// mergeVLLMXArgsLoops folds the per-request loop count into any operator
+// vllm_xargs object from ExtraBody, so operator xargs survive and the duplicate
+// key does not make marshalWithExtraBody refuse the turn.
+func mergeVLLMXArgsLoops(extra json.RawMessage, loops int) (json.RawMessage, json.RawMessage, error) {
+	xargs := map[string]json.RawMessage{}
+	if len(extra) > 0 {
+		var keys map[string]json.RawMessage
+		if json.Unmarshal(extra, &keys) == nil {
+			if raw, ok := keys[vllmXArgsKey]; ok {
+				if err := json.Unmarshal(raw, &xargs); err != nil || xargs == nil {
+					return nil, nil, fmt.Errorf("provider extra body %s must be a JSON object", vllmXArgsKey)
+				}
+				extra = withoutExtraKey(extra, vllmXArgsKey)
+			}
+		}
+	}
+	xargs["loops"] = json.RawMessage(strconv.Itoa(loops))
+	out, err := json.Marshal(xargs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, extra, nil
 }
 
 const speculativeNMaxKey = "speculative.n_max"

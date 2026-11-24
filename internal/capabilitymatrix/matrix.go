@@ -20,6 +20,9 @@ type Capabilities struct {
 	AnthropicTTL      bool `json:"anthropic_ttl,omitempty"`
 	ContextWindow     int  `json:"context_window,omitempty"`
 	MaxOutputTokens   int  `json:"max_output_tokens,omitempty"`
+	// MaxLoops is the trained recurrent depth of a looped model; 0 or 1 means
+	// the model is not looped and requests must stay byte-identical.
+	MaxLoops int `json:"max_loops,omitempty"`
 }
 
 // MarshalJSON preserves backward and forward wire compatibility for both direct nouns
@@ -45,6 +48,9 @@ func (c Capabilities) MarshalJSON() ([]byte, error) {
 	}
 	if c.MaxOutputTokens > 0 {
 		m["max_output_tokens"] = c.MaxOutputTokens
+	}
+	if c.MaxLoops > 0 {
+		m["max_loops"] = c.MaxLoops
 	}
 	return json.Marshal(m)
 }
@@ -86,6 +92,7 @@ func (c *Capabilities) UnmarshalJSON(data []byte) error {
 	c.AnthropicTTL = getBool("anthropic_ttl", sup+"ports_anthropic_ttl")
 	c.ContextWindow = getInt("context_window")
 	c.MaxOutputTokens = getInt("max_output_tokens")
+	c.MaxLoops = getInt("max_loops")
 	return nil
 }
 
@@ -710,6 +717,10 @@ func applyEnvOverrides(model string, caps *Capabilities) {
 		case "maxoutputtokens":
 			if num, ok := val.(float64); ok {
 				caps.MaxOutputTokens = int(num)
+			}
+		case "maxloops":
+			if num, ok := val.(float64); ok {
+				caps.MaxLoops = int(num)
 			}
 		}
 	}

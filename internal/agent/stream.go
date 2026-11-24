@@ -643,6 +643,7 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 			MinP:                     sp.MinP,
 			ChatTemplateKwargs:       sp.ChatTemplateKwargs,
 			SpeculativeNMax:          sp.SpeculativeNMax,
+			Loops:                    sp.Loops,
 			Stop:                     sp.Stop,
 			ResponseFormat:           sp.ResponseFormat,
 			LogitBias:                sp.LogitBias,

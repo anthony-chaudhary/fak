@@ -445,6 +445,8 @@ type Server struct {
 	// never on a mutating route.
 	readBearer    string
 	policyRuntime *policy.Runtime
+	// loopDepthRule caps looped-model depth per request; nil caps nothing.
+	loopDepthRule *policy.LoopDepthRule
 	// keyset binds additional api keys to org/project isolation principals
 	// (Config.KeyPrincipals, #5332), matched in withAuth by a constant-time digest
 	// compare. nil => RequireKey-only auth, unchanged. Holds only key DIGESTS — the raw

@@ -208,6 +208,15 @@ func WithSpeculativeNMax(n *int) SampleOpt {
 	}
 }
 
+// WithLoops sets the looped-model recurrent depth; n < 1 is a no-op.
+func WithLoops(n int) SampleOpt {
+	return func(sp *SampleParams) {
+		if n >= 1 {
+			sp.Loops = n
+		}
+	}
+}
+
 // WithStop sets the per-request stop sequences. An empty/nil slice is a no-op.
 func WithStop(s []string) SampleOpt {
 	return func(sp *SampleParams) {

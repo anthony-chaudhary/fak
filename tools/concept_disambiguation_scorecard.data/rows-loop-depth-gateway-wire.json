@@ -1,0 +1,42 @@
+{
+  "rows": [
+    {
+      "id": "policy-loop-depth-rule",
+      "canonical": "LoopDepthRule",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "policy.LoopDepthRule: the compiled policy cap on a looped model's per-request recurrent depth (max_loop_depth plus per-scope overrides); the gateway clamps the resolved loop count under its default cap and stamps Source policy_clamp when it lowered the depth.",
+      "distinction": "A POLICY CAP on depth, not the model capability (MaxLoops) and not the per-request receipt (LoopDepthReceipt); a nil rule caps nothing.",
+      "distinct_from": [
+        "gateway-loop-depth-receipt",
+        "capability-max-loops"
+      ],
+      "aliases": [],
+      "grounding": "LoopDepthRule",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "capability-max-loops",
+      "canonical": "MaxLoops",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "capabilitymatrix.Capabilities.MaxLoops (wire max_loops): a model's trained recurrent depth, read by the gateway as the per-model loop capability; 0 or 1 means not looped, so requests forward byte-identical bodies with no vllm_xargs.loops.",
+      "distinction": "The MODEL CAPABILITY ceiling, distinct from the policy cap (LoopDepthRule) that may lower it and the resolved per-request depth on LoopDepthReceipt.Loops.",
+      "distinct_from": [
+        "gateway-loop-depth-receipt",
+        "policy-loop-depth-rule"
+      ],
+      "aliases": [],
+      "grounding": "MaxLoops",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

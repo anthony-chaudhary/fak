@@ -857,10 +857,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !validateChatRequestIngress(w, req) {
 		return
 	}
-	loopDepth, ok := resolveChatLoopDepth(w, req)
+	loopDepth, ok := resolveChatLoopDepth(w, req, s.loopDepthRule)
 	if !ok {
 		return
 	}
+	req.AffinityKey = depthAffinityKey(req.AffinityKey, loopDepth)
 	s.bindUnkeyedChatConversation(w, r, req.Model, req.Tools, req.Messages)
 	// Bind the client deadline before routing or preparation. Cache credit is
 	// selected only after the execution route is fixed below.
@@ -1064,6 +1065,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
 		agent.WithMultimodalMode(req.DeclaredMultimodalMode()),
+		loopDepthSampleOpt(loopDepth),
 	}
 	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools, serviceTier.appendSampleOpt(chatOpts)...)
 	if err != nil {
