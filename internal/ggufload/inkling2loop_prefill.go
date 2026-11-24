@@ -1,0 +1,411 @@
+package ggufload
+
+import (
+	"fmt"
+	"math"
+	"os"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+)
+
+// inkling2PrefillChunk is the token count of one batched prefill forward. Local
+// slots keep a window+chunk ring so a chunk's appended keys never evict a key an
+// earlier query of the same chunk still attends to.
+const inkling2PrefillChunk = 512
+
+// inkling2BatchedPrefill reports whether the resident path prefills a prompt in
+// token-axis batches (FAK_INKLING2_BATCHED_PREFILL=1); unset or any other value keeps
+// the per-token decode step.
+func inkling2BatchedPrefill() bool { return os.Getenv("FAK_INKLING2_BATCHED_PREFILL") == "1" }
+
+// inkling2GroupedExperts reports whether NVFP4 expert stacks run the expert-grouped
+// GEMM in prefill; FAK_INKLING2_PREFILL_GROUPED=0 runs every (token, slot) pair
+// through the decode expert GEMV instead.
+func inkling2GroupedExperts() bool { return os.Getenv("FAK_INKLING2_PREFILL_GROUPED") != "0" }
+
+// ink2Prefill is one batched prefill of a resident session. Values that outlive a
+// layer visit (layer outputs, residual blocks) take keep slots; everything else is
+// layer scratch, reset at the start of every visit.
+type ink2Prefill struct {
+	s          *inkling2Resident
+	pd         compute.Inkling2PrefillDevice
+	T, pos0    int
+	keep, scr  ink2Ref
+	keepOff    int
+	scrOff     int
+	keepFloats int
+	scrFloats  int
+	grouped    bool
+}
+
+func (p *ink2Prefill) fail(err error) { p.s.fail(err) }
+
+func (p *ink2Prefill) take(base ink2Ref, off *int, limit, n int, what string) ink2Ref {
+	n = (n + 63) &^ 63
+	if *off+n > limit {
+		p.fail(fmt.Errorf("inkling2 prefill: %s arena exhausted at %d floats", what, *off+n))
+		return base
+	}
+	r := compute.Ink2At(base.T, base.Off+*off)
+	*off += n
+	return r
+}
+
+func (p *ink2Prefill) tmp(n int) ink2Ref  { return p.take(p.scr, &p.scrOff, p.scrFloats, n, "scratch") }
+func (p *ink2Prefill) hold(n int) ink2Ref { return p.take(p.keep, &p.keepOff, p.keepFloats, n, "keep") }
+
+// prefillArenas sizes the two prefill arenas for chunks of T tokens.
+func (s *inkling2Resident) prefillArenas(T int) (keep, scr int) {
+	hp := s.hp
+	visits := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
+	keep = (visits + 2) * (T*hp.Hidden + 64)
+	kvDim := hp.KVHeads * hp.HeadDim
+	k := hp.ExpertsUsed
+	padK := 0
+	for i := range s.layers {
+		padK = max(padK, s.layers[i].down.padK, s.layers[i].gateUp.padK)
+	}
+	perTok := 4*4*hp.Hidden + // msgs
+		3*hp.Hidden*3 + // mix, control, rms inputs
+		hp.Heads*hp.HeadDim*3 + hp.Heads*hp.RelLength + hp.Heads + 4*kvDim + 2*hp.KVHeads*hp.ConvKernel +
+		6*hp.Hidden + 256 + 2*k +
+		k*(hp.Hidden+padK+2*hp.ExpertWidth+padK+hp.Hidden) +
+		k*(1+max(hp.Hidden, padK)+max(2*hp.ExpertWidth, hp.Hidden)) // sorted-pair staging
+	scr = T*perTok + 64*64 + compute.Ink2PGroupScratch(T*k, 256) + 64
+	return keep, scr
+}
+
+// prefill runs prompt through the batched forward in chunks, leaving every cache
+// slot and conv history where the per-token path would, and returns the greedy
+// token after the last prompt position.
+func (s *inkling2Resident) prefill(prompt []int) (int, error) {
+	pd, ok := s.be.(compute.Inkling2PrefillDevice)
+	if !ok {
+		return 0, fmt.Errorf("inkling2 prefill: backend %s has no batched prefill ops", s.be.Name())
+	}
+	hp := s.hp
+	if s.pos+len(prompt) > inkling2ResidentCtx {
+		return 0, fmt.Errorf("inkling2 prefill: %d tokens exceed the %d-token global cache", s.pos+len(prompt), inkling2ResidentCtx)
+	}
+	T := min(inkling2PrefillChunk, len(prompt))
+	p := &ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts()}
+	p.keepFloats, p.scrFloats = s.prefillArenas(T)
+	if s.prefillKeep.T.Buf() == nil {
+		s.prefillKeep, s.prefillScr = s.alloc(p.keepFloats), s.alloc(p.scrFloats)
+		s.prefillIn = s.alloc(T * hp.Hidden)
+	}
+	p.keep, p.scr = s.prefillKeep, s.prefillScr
+	if s.err != nil {
+		return 0, s.err
+	}
+	rows := make([]float32, T*hp.Hidden)
+	for start := 0; start < len(prompt); start += T {
+		n := min(T, len(prompt)-start)
+		for i, tok := range prompt[start : start+n] {
+			s.w.TokEmbd.Row(tok, rows[i*hp.Hidden:(i+1)*hp.Hidden])
+		}
+		s.fail(s.dev.Ink2Write(s.prefillIn, rows[:n*hp.Hidden]))
+		p.T, p.pos0 = n, s.pos
+		p.keepOff, p.scrOff = 0, 0
+		p.forward(start+n == len(prompt))
+		if s.err != nil {
+			return 0, s.err
+		}
+		s.pos += n
+	}
+	got, err := s.dev.Ink2ReadInts(s.argIdx, 1)
+	if err != nil {
+		return 0, err
+	}
+	if r, ok := s.be.(interface{ Recycle() }); ok {
+		r.Recycle()
+	}
+	return int(got[0]), nil
+}
+
+func (p *ink2Prefill) mm(m ink2Mat, x ink2Ref) ink2Ref {
+	y := p.tmp(p.T * m.rows)
+	if p.s.err == nil {
+		p.fail(p.pd.Ink2PMatMul(m.t, x, y, p.T))
+	}
+	return y
+}
+
+func (p *ink2Prefill) rms(x, w ink2Ref, n int, eps float32) ink2Ref {
+	y := p.tmp(p.T * n)
+	if p.s.err == nil {
+		p.fail(p.s.dev.Ink2RMS(x, w, y, p.T, n, eps))
+	}
+	return y
+}
+
+// mix returns the nq query outputs, each a [T][hidden] matrix.
+func (p *ink2Prefill) mix(states []ink2Ref, queries ink2Ref, nq int) []ink2Ref {
+	h := p.s.hp.Hidden
+	out := p.tmp(nq * p.T * h)
+	if p.s.err == nil {
+		p.fail(p.pd.Ink2PMix(states, queries, nq, out, h, p.T))
+	}
+	refs := make([]ink2Ref, nq)
+	for q := range refs {
+		refs[q] = at(out, q*p.T*h)
+	}
+	return refs
+}
+
+func (p *ink2Prefill) control(cur, msg ink2Ref, c *ink2Ctrl, j int) ink2Ref {
+	h := p.s.hp.Hidden
+	g := p.tmp(p.T * c.rank)
+	if p.s.err == nil {
+		p.fail(p.pd.Ink2PCtrlDown(cur, msg, c.down[j], g, h, c.rank, p.T))
+	}
+	out := p.tmp(p.T * h)
+	if p.s.err == nil {
+		p.fail(p.pd.Ink2PCtrlApply(cur, msg, g, c.gain[j], c.forget[j], out, h, c.rank, p.T))
+	}
+	return out
+}
+
+func (p *ink2Prefill) conv(slot int, x, weight, dyn, resid ink2Ref, n, heads, offset int, keep bool) ink2Ref {
+	s := p.s
+	kn := s.hp.ConvKernel
+	norm := float32(1 / math.Sqrt(float64(kn+1)))
+	if dyn.T.Buf() != nil {
+		norm = float32(1 / math.Sqrt(float64(2*kn+1)))
+	}
+	var out ink2Ref
+	if keep {
+		out = p.hold(p.T * n)
+	} else {
+		out = p.tmp(p.T * n)
+	}
+	if s.err == nil {
+		p.fail(p.pd.Ink2PConv(x, weight, dyn, at(s.hist[slot], offset*(kn-1)), out, resid, n, max(heads, 1), kn, norm, p.T))
+	}
+	return out
+}
+
+func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs []ink2Ref, c *ink2Ctrl) ink2Ref {
+	s := p.s
+	hp := s.hp
+	l := &s.layers[ip]
+	local := hp.LocalLayer[ip]
+	h := hp.Hidden
+	kvDim := hp.KVHeads * hp.HeadDim
+	inpSA := cur
+
+	in := [3]ink2Ref{cur, cur, cur}
+	if l.resQRows > 0 {
+		if local {
+			m := p.mix(with(*blocks, cur), l.resQ, 1)
+			in = [3]ink2Ref{m[0], m[0], m[0]}
+		} else {
+			m := p.mix(with(*blocks, cur), l.resQ, 3)
+			in = [3]ink2Ref{m[0], m[1], m[2]}
+		}
+	}
+	if msgs != nil {
+		for j := 0; j < 3; j++ {
+			in[j] = p.control(in[j], msgs[j], c, j)
+		}
+	}
+	switch {
+	case local && msgs != nil:
+		for j := 0; j < 3; j++ {
+			in[j] = p.rms(in[j], l.attnNorm, h, hp.NormEps)
+		}
+	case local:
+		n0 := p.rms(in[0], l.attnNorm, h, hp.NormEps)
+		in = [3]ink2Ref{n0, n0, n0}
+	default:
+		in[0] = p.rms(in[0], l.qNorm, h, hp.NormEps)
+		in[1] = p.rms(in[1], l.kNorm, h, hp.NormEps)
+		in[2] = p.rms(in[2], l.vNorm, h, hp.NormEps)
+	}
+
+	q := p.mm(l.wq, in[0])
+	var kDyn, vDyn ink2Ref
+	if !local {
+		kDyn = p.mm(l.kconv, in[1])
+		vDyn = p.mm(l.vconv, in[2])
+	}
+	k := p.conv(slot, p.mm(l.wk, in[1]), l.kconvW, kDyn, ink2Ref{}, kvDim, hp.KVHeads, 0, false)
+	v := p.conv(slot, p.mm(l.wv, in[2]), l.vconvW, vDyn, ink2Ref{}, kvDim, hp.KVHeads, kvDim, false)
+	r := p.mm(l.rel, in[0])
+	sinks := p.mm(l.sink, in[0])
+
+	ap := compute.Ink2AttnParams{
+		Heads: hp.Heads, KVHeads: hp.KVHeads, HeadDim: hp.HeadDim, RelLen: hp.RelLength,
+		QKClip: hp.QKClip, RelClip: hp.RelClip, Eps: hp.NormEps, Global: !local,
+		Alpha: hp.LogScaleAlpha, Floor: hp.LogScaleFloor, Scale: float32(1 / math.Sqrt(float64(hp.HeadDim))),
+	}
+	cap := s.caps[slot]
+	if s.err == nil {
+		p.fail(p.pd.Ink2PQKVPost(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], ap, cap, p.pos0, p.T))
+	}
+	extent, window := hp.RelExtent, 0
+	if local {
+		extent, window = hp.SlidingWindow, hp.SlidingWindow
+	}
+	attn := p.tmp(p.T * hp.Heads * hp.HeadDim)
+	if s.err == nil {
+		p.fail(p.pd.Ink2PAttend(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, ap, extent, window, cap, p.pos0, p.T))
+	}
+	gate := p.mm(l.gate, in[0])
+	if s.err == nil {
+		p.fail(s.dev.Ink2SigmoidMul(attn, gate, p.T*hp.Heads*hp.HeadDim))
+	}
+	o := p.mm(l.wo, attn)
+	if ip%hp.AttnResBlock == 0 {
+		*blocks = append(*blocks, inpSA)
+		cur = p.conv(slot, o, l.attnPostConv, ink2Ref{}, ink2Ref{}, h, 0, 2*kvDim, false)
+	} else {
+		cur = p.conv(slot, o, l.attnPostConv, ink2Ref{}, inpSA, h, 0, 2*kvDim, false)
+	}
+	ffnInp := cur
+
+	x := p.mix(with(*blocks, cur), l.ffnResQ, 1)[0]
+	if msgs != nil {
+		x = p.control(x, msgs[3], c, 3)
+	}
+	x = p.rms(x, l.ffnNorm, h, hp.NormEps)
+	x = p.moe(l, x)
+	return p.conv(slot, x, l.ffnPostConv, ink2Ref{}, ffnInp, h, 0, 2*kvDim+h, true)
+}
+
+// ink2Bucket is the device bucketing of one layer's routed ids, shared by its
+// gate/up and down expert GEMMs.
+type ink2Bucket struct {
+	nexp    int
+	scratch ink2Ref
+	filled  bool
+}
+
+// experts runs npairs routed pairs through e: the grouped GEMM when the dtype has
+// one, else the decode expert GEMV over every pair in expert order.
+func (p *ink2Prefill) experts(e *ink2Experts, ids, x ink2Ref, xDiv, xStride int, y ink2Ref, rows int, b *ink2Bucket) {
+	s := p.s
+	if s.err != nil {
+		return
+	}
+	npairs := p.T * s.hp.ExpertsUsed
+	nexp := e.stack.Shape[0] / rows
+	if b.nexp != nexp {
+		*b = ink2Bucket{nexp: nexp, scratch: p.tmp(compute.Ink2PGroupScratch(npairs, nexp))}
+	}
+	scratch := b.scratch
+	if p.grouped {
+		ok, err := p.pd.Ink2PExpertGrouped(e.stack, rows, nexp, ids, x, xDiv, xStride, y, npairs, e.scale, scratch, b.filled)
+		if err != nil || ok {
+			b.filled = err == nil
+			p.fail(err)
+			return
+		}
+	}
+	b.filled = false
+	ok, err := p.pd.Ink2PExpertSorted(e.stack, rows, nexp, ids, x, xDiv, xStride, y, npairs, e.scale, scratch,
+		p.tmp(npairs), p.tmp(npairs*xStride), p.tmp(npairs*rows))
+	if err == nil && !ok {
+		err = fmt.Errorf("inkling2 prefill: expert dtype %s has no indexed kernel", e.stack.Dtype)
+	}
+	p.fail(err)
+}
+
+func (p *ink2Prefill) moe(l *ink2Layer, x ink2Ref) ink2Ref {
+	s := p.s
+	hp := s.hp
+	k, width := hp.ExpertsUsed, hp.ExpertWidth
+	logits := p.mm(l.router, x)
+	ids, wts := p.tmp(p.T*k), p.tmp(p.T*k)
+	if s.err == nil {
+		p.fail(p.pd.Ink2PRoute(logits, l.probsBias, ids, wts, l.router.rows, k, hp.ExpertWeightsScale, p.T))
+	}
+	npairs := p.T * k
+	gu := p.tmp(npairs * 2 * width)
+	var bucket ink2Bucket
+	p.experts(&l.gateUp, ids, x, k, hp.Hidden, gu, 2*width, &bucket)
+	padK := l.down.padK
+	act := p.tmp(npairs * padK)
+	if s.err == nil {
+		p.fail(s.dev.Ink2Situ(gu, act, npairs, width, padK, float64(hp.SituBeta), float64(hp.SituLinearBeta)))
+	}
+	down := p.tmp(npairs * hp.Hidden)
+	p.experts(&l.down, ids, act, 1, padK, down, hp.Hidden, &bucket)
+	out := p.tmp(p.T * hp.Hidden)
+	if s.err == nil {
+		p.fail(p.pd.Ink2PCombine(down, wts, out, k, hp.Hidden, p.T))
+	}
+	return out
+}
+
+// forward runs one chunk through every layer visit; on the last chunk it also
+// enqueues the last token's head and argmax into s.argIdx.
+func (p *ink2Prefill) forward(last bool) {
+	s := p.s
+	hp := s.hp
+	h := hp.Hidden
+	cur := p.hold(p.T * h)
+	if s.err == nil {
+		p.fail(s.dev.Ink2RMS(s.prefillIn, s.tokNorm, cur, p.T, h, hp.NormEps))
+	}
+	visit := func() { p.scrOff = 0 }
+	var blocks []ink2Ref
+	for il := 0; il < hp.CoreStart; il++ {
+		visit()
+		cur = p.layer(il, il, cur, &blocks, nil, nil)
+	}
+	prelude := cur
+	preludeBlocks := append([]ink2Ref(nil), blocks...)
+	core := hp.CoreEnd - hp.CoreStart
+	for pass := 0; pass < hp.Passes; pass++ {
+		var bank []ink2Ref
+		var bankOut ink2Ref
+		if pass > 0 {
+			bank = append(bank, blocks[len(preludeBlocks)+1:]...)
+			bankOut = cur
+			cur = prelude
+			blocks = append([]ink2Ref(nil), preludeBlocks...)
+		}
+		for ip := hp.CoreStart; ip < hp.CoreEnd; ip++ {
+			visit()
+			if pass == 0 {
+				cur = p.layer(ip, ip, cur, &blocks, nil, nil)
+				continue
+			}
+			slot := hp.Layers + (pass-1)*core + (ip - hp.CoreStart)
+			c := &s.ctrls[ip-hp.CoreStart]
+			msgs := p.mix(with(bank, bankOut), c.msgQ, 4)
+			cur = p.layer(slot, ip, cur, &blocks, msgs, c)
+		}
+	}
+	for il := hp.CoreEnd; il < hp.Layers; il++ {
+		visit()
+		cur = p.layer(il, il, cur, &blocks, nil, nil)
+	}
+	if !last {
+		return
+	}
+	visit()
+	// the head runs on the last token only: every state viewed at its last row
+	lastRow := func(r ink2Ref) ink2Ref { return at(r, (p.T-1)*h) }
+	states := make([]ink2Ref, 0, len(blocks)+1)
+	for _, b := range blocks {
+		states = append(states, lastRow(b))
+	}
+	states = append(states, lastRow(cur))
+	x := p.tmp(h)
+	if s.err == nil {
+		p.fail(s.dev.Ink2Mix(states, s.outResQ, 1, nil, 0, x, h))
+	}
+	xn := p.tmp(h)
+	if s.err == nil {
+		p.fail(s.dev.Ink2RMS(x, s.outNorm, xn, 1, h, hp.NormEps))
+	}
+	logits := p.tmp(s.output.rows)
+	if s.err == nil {
+		p.fail(s.dev.Ink2MatVec(s.output.t, xn, logits))
+	}
+	if s.err == nil {
+		p.fail(s.dev.Ink2SoftcapArgmax(logits, hp.VocabUnpadded, hp.FinalLogitSoftcap, s.argIdx))
+	}
+}

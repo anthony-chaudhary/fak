@@ -81,6 +81,10 @@ type inkling2Resident struct {
 	graph       bool
 	graphReady  bool
 	hostRouting bool // an expert dtype has no indexed kernel: ids are read back per layer
+
+	warm                               bool // one eager token has run since the last batched prefill
+	batched                            bool
+	prefillKeep, prefillScr, prefillIn ink2Ref
 }
 
 func (s *inkling2Resident) fail(err error) {
@@ -171,6 +175,8 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 	}
 	hp, w := m.HP, m.Weights
 	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}}
+	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
+	s.batched = hasPrefill && inkling2BatchedPrefill()
 	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
 	s.output = s.mat(w.Output)
 	s.layers = make([]ink2Layer, hp.Layers)
@@ -214,6 +220,9 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 		cap := inkling2ResidentCtx
 		if hp.LocalLayer[inkling2SlotLayer(hp, slot)] {
 			cap = hp.SlidingWindow
+			if s.batched {
+				cap += inkling2PrefillChunk
+			}
 		}
 		maxCap = max(maxCap, cap)
 		s.caps[slot] = cap
@@ -232,6 +241,7 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 		}
 	}
 	s.graph = inkling2DefaultOn(be, "FAK_INKLING2_GRAPH", os.LookupEnv) && !s.hostRouting
+	s.batched = s.batched && !s.hostRouting
 	if s.err != nil {
 		s.close()
 		return nil, s.err
@@ -622,7 +632,7 @@ func (s *inkling2Resident) step(token int) (int, error) {
 	switch {
 	case s.graphReady:
 		s.fail(s.dev.Ink2GraphLaunch())
-	case s.graph && s.pos > 0:
+	case s.graph && s.pos > 0 && s.warm:
 		// capture after one eager token has grown every lazily sized GEMV scratch
 		if err := s.dev.Ink2GraphBegin(); err != nil {
 			s.graph = false
@@ -639,6 +649,7 @@ func (s *inkling2Resident) step(token int) (int, error) {
 		s.fail(s.dev.Ink2GraphLaunch())
 	default:
 		s.forward()
+		s.warm = true
 	}
 	if s.err != nil {
 		return 0, s.err
@@ -668,9 +679,15 @@ func inkling2ResidentGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []i
 	defer runtime.UnlockOSThread()
 	start := time.Now()
 	next := 0
-	for _, t := range prompt {
-		if next, err = s.step(t); err != nil {
+	if s.batched && len(prompt) > 0 {
+		if next, err = s.prefill(prompt); err != nil {
 			return nil, st, err
+		}
+	} else {
+		for _, t := range prompt {
+			if next, err = s.step(t); err != nil {
+				return nil, st, err
+			}
 		}
 	}
 	st.Prefill = time.Since(start)
