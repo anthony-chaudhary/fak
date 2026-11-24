@@ -96,6 +96,7 @@ const (
 	prefixReuseCold prefixReuseOrigin = iota
 	prefixReuseSameSession
 	prefixReuseCrossSession
+	prefixReuseUnknown
 )
 
 // prefixReuseAttribution is the zero-value-usable per-Server attribution state.
@@ -109,6 +110,7 @@ type prefixReuseAttribution struct {
 
 	sameTokens, crossTokens          uint64
 	coldTurns, sameTurns, crossTurns uint64
+	unknownTurns                     uint64
 }
 
 var prefixReuseSeed = maphash.MakeSeed()
@@ -135,8 +137,18 @@ func conversationKey(principal string, messages []agent.Message) uint64 {
 
 // observe classifies one turn and folds it into the counters and the cross-agent ledger.
 func (a *prefixReuseAttribution) observe(session string, conv uint64, promptTokens, matchedTokens, completionTokens int) prefixReuseOrigin {
+	return a.observeTurn(session, conv, promptTokens, matchedTokens, completionTokens, true)
+}
+
+// observeTurn with reported=false counts an upstream that stated no cached count at all:
+// the turn is unknown, never a cold miss, but its footprint still bounds later same-session
+// attribution because the prefill happened.
+func (a *prefixReuseAttribution) observeTurn(session string, conv uint64, promptTokens, matchedTokens, completionTokens int, reported bool) prefixReuseOrigin {
 	if promptTokens <= 0 {
 		return prefixReuseCold
+	}
+	if !reported {
+		matchedTokens = 0
 	}
 	if matchedTokens < 0 {
 		matchedTokens = 0
@@ -161,6 +173,9 @@ func (a *prefixReuseAttribution) observe(session string, conv uint64, promptToke
 	a.crossTokens += cross
 	origin := prefixReuseCold
 	switch {
+	case !reported:
+		origin = prefixReuseUnknown
+		a.unknownTurns++
 	case cross > 0:
 		origin = prefixReuseCrossSession
 		a.crossTurns++
@@ -189,7 +204,9 @@ func (a *prefixReuseAttribution) observe(session string, conv uint64, promptToke
 		if conv == rootConv {
 			child = session // the coordinator's own turn: the ledger excludes it
 		}
-		a.ledger.ObserveCrossAgentTurn(session, child, "", promptTokens, int(cross))
+		if reported {
+			a.ledger.ObserveCrossAgentTurn(session, child, "", promptTokens, int(cross))
+		}
 	}
 	return origin
 }
@@ -204,6 +221,7 @@ func evictOne[K comparable, V any](m map[K]V) {
 type prefixReuseSnapshot struct {
 	sameTokens, crossTokens          uint64
 	coldTurns, sameTurns, crossTurns uint64
+	unknownTurns                     uint64
 	rollup                           crossAgentRollup
 	coordinators                     int
 }
@@ -213,6 +231,7 @@ func (a *prefixReuseAttribution) snapshot() prefixReuseSnapshot {
 	snap := prefixReuseSnapshot{
 		sameTokens: a.sameTokens, crossTokens: a.crossTokens,
 		coldTurns: a.coldTurns, sameTurns: a.sameTurns, crossTurns: a.crossTurns,
+		unknownTurns: a.unknownTurns,
 	}
 	ledger := a.ledger
 	a.mu.Unlock()
@@ -222,18 +241,35 @@ func (a *prefixReuseAttribution) snapshot() prefixReuseSnapshot {
 }
 
 // observePrefixReuseTurn is the served-path hook every planner call site runs after a
-// successful turn. Non-in-kernel completions (provider passthrough) carry no local prefix
-// reuse and are skipped.
+// successful turn. In-kernel turns and self-hosted proxy turns (llama-server) are observed;
+// vendor passthrough carries no local prefix reuse and is skipped.
 func (s *Server) observePrefixReuseTurn(ctx context.Context, messages []agent.Message, comp *agent.Completion) {
-	if s == nil || comp == nil || comp.ProviderCache == nil || comp.ProviderCache.Derivation.Producer != inKernelProducer {
+	if s == nil || comp == nil {
 		return
 	}
-	matched := 0
-	if comp.Usage.PromptTokensDetails != nil {
-		matched = comp.Usage.PromptTokensDetails.CachedTokens
+	matched, reported, ok := s.prefixReuseMatched(ctx, comp)
+	if !ok {
+		return
 	}
 	conv := conversationKey(principalFromContext(ctx), messages)
-	s.prefixReuse.observe(prefixReuseSessionFromContext(ctx), conv, comp.Usage.PromptTokens, matched, comp.Usage.CompletionTokens)
+	s.prefixReuse.observeTurn(prefixReuseSessionFromContext(ctx), conv, comp.Usage.PromptTokens, matched, comp.Usage.CompletionTokens, reported)
+}
+
+// prefixReuseMatched resolves one turn's reused prompt tokens. A proxied llama-server turn
+// reports through usage cached_tokens or, on builds that omit it, timings.cache_n; when
+// neither is present the count is unknown rather than zero.
+func (s *Server) prefixReuseMatched(ctx context.Context, comp *agent.Completion) (matched int, reported, observed bool) {
+	inKernel := comp.ProviderCache != nil && comp.ProviderCache.Derivation.Producer == inKernelProducer
+	if !inKernel && comp.Timings == nil && s.chatServingLocality(ctx, comp.Model) != localitySelfHosted {
+		return 0, false, false
+	}
+	if d := comp.Usage.PromptTokensDetails; d != nil {
+		matched, reported = d.CachedTokens, true
+	}
+	if t := comp.Timings; t != nil && !inKernel {
+		matched, reported = max(matched, t.CacheN), true
+	}
+	return matched, reported || inKernel, true
 }
 
 // writePrefixReuseAttributionMetrics renders the same-session vs cross-session split of
@@ -241,14 +277,15 @@ func (s *Server) observePrefixReuseTurn(ctx context.Context, messages []agent.Me
 func (s *Server) writePrefixReuseAttributionMetrics(b *strings.Builder) {
 	snap := s.prefixReuse.snapshot()
 	writeHelpType(b, "fak_gateway_kv_prefix_reused_tokens_by_origin_total",
-		"In-kernel KV-prefix reused tokens split by origin. same_session: within what this agent conversation itself prefilled earlier; cross_session: beyond it, so a sibling subagent or another session paid for the prefix.", "counter")
+		"In-kernel and self-hosted proxy (llama-server) KV-prefix reused tokens split by origin. same_session: within what this agent conversation itself prefilled earlier; cross_session: beyond it, so a sibling subagent or another session paid for the prefix.", "counter")
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_reused_tokens_by_origin_total{origin=\"same_session\"} %d\n", snap.sameTokens)
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_reused_tokens_by_origin_total{origin=\"cross_session\"} %d\n", snap.crossTokens)
 	writeHelpType(b, "fak_gateway_kv_prefix_turns_by_origin_total",
-		"In-kernel turns classified by prefix-reuse origin: cross_session if any reused token exceeds the conversation's own footprint, same_session if all reuse is its own, cold if nothing was reused.", "counter")
+		"In-kernel and self-hosted proxy turns classified by prefix-reuse origin: cross_session if any reused token exceeds the conversation's own footprint, same_session if all reuse is its own, cold if nothing was reused, unknown if the upstream reported no cached count (neither usage cached_tokens nor timings.cache_n).", "counter")
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_turns_by_origin_total{origin=\"same_session\"} %d\n", snap.sameTurns)
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_turns_by_origin_total{origin=\"cross_session\"} %d\n", snap.crossTurns)
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_turns_by_origin_total{origin=\"cold\"} %d\n", snap.coldTurns)
+	fmt.Fprintf(b, "fak_gateway_kv_prefix_turns_by_origin_total{origin=\"unknown\"} %d\n", snap.unknownTurns)
 	writeHelpType(b, "fak_gateway_kv_prefix_cross_agent_coordinators",
 		"Harness launch sessions (X-Fak-Session-Id / X-Trace-Id) with at least one subagent turn in the bounded cross-agent reuse ledger.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_cross_agent_coordinators %d\n", snap.coordinators)
