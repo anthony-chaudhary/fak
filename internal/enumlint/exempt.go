@@ -41,7 +41,7 @@ const ExemptDirective = "enumlint:exempt"
 // — and every entry here has to earn it at its own site. Filling this table from
 // a baseline sweep would convert a measurement into a hundred unread assertions.
 var exemptions = map[string]string{
-	"switch|internal/compute|cudaBackend.PromptPanelMatMul":                                     "PromptPanelRowExact rejects every dtype except Q8_0 and explicitly enabled Q4_K/Q6_K before allocation; this kernel dispatch covers that admitted subset.",
+	"switch|internal/compute|cudaBackend.PromptPanelMatMul":                                     "PromptPanelMatMul rejects every dtype outside the row-exact set (Q8_0, rowexact-mode Q4_K/Q6_K) and the batched set (batched-mode Q4_K/Q6_K) before allocation; this kernel dispatch covers that admitted subset.",
 	"switch|internal/compute|TestCUDARawUploadIsVerbatim":                                       "The fixture starts every one of 256 dtype values ineligible and marks only verbatim raw formats eligible; omitted formats are explicitly checked against false, not omitted from coverage.",
 	"switch|internal/inferencetopology|SearchRuntimeTopology":                                   "Eligible rows compete for selection and unknown-evidence rows prevent an infeasible verdict; known memory, pin, concurrency, and SLO failures deliberately remain infeasible without changing either category.",
 	"switch|internal/compute|Tensor.cudaMatMulTraceWeightBytes":                                 "The first dispatch handles dense, scaled low-bit, and NVFP4 layouts; remaining dtypes are classified by the following block-quant switch and its fail-closed geometry lookup.",

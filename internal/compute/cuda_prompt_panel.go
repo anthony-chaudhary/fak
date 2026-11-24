@@ -9,18 +9,13 @@ package compute
 import "C"
 
 import (
-	"os"
 	"unsafe"
 )
 
-// CUDAKQuantPromptPanelEnv opts into row-exact K-quant panels pending device qualification.
-const CUDAKQuantPromptPanelEnv = "FAK_CUDA_KQUANT_PROMPT_PANEL"
-
-var cudaKQuantPromptPanelEnabled = os.Getenv(CUDAKQuantPromptPanelEnv) == "1"
-
 // cuda_prompt_panel.go is the CUDA half of the dense HAL prompt panel (model.promptPanelBackend).
-// Every panel op is the per-row form of the op a decode step issues, so a row's bits never
-// depend on the panel's row count or on how the prompt was chunked: the Q8_0 GEMM quantizes and
+// Every panel op except a batched K-quant GEMM (PromptPanelBatched) is the per-row form of the
+// op a decode step issues, so a row's bits never depend on the panel's row count or on how the
+// prompt was chunked: the Q8_0 GEMM quantizes and
 // dots each row exactly as the P=1 GEMV does (fcuda_q8_matmul_rows_f32, never the P>=128
 // dequant + cuBLAS path), RoPE keeps k_rope's arithmetic, and attention keeps
 // k_flash_attention's recurrence. Panel scratch lives in its own free list, released at
@@ -122,7 +117,14 @@ func (c *cudaBackend) dallocPromptPanel(nbytes int, class MemoryClass, site stri
 // PromptPanelRowExact reports the weight dtypes whose panel GEMM is bitwise the decode GEMV
 // per row. K-quants retain the selected P=1 arithmetic instead of the generic prefill arm.
 func (c *cudaBackend) PromptPanelRowExact(dt Dtype) bool {
-	return dt == Q8_0 || cudaKQuantPromptPanelEnabled && (dt == Q4_K || dt == Q6_K)
+	return promptPanelRowExactFor(CurrentPromptPanelKQuantMode(), dt)
+}
+
+// PromptPanelBatched reports the weight dtypes whose panel GEMM reads the weight once for all
+// panel rows through the prefill arms. Those rows match the decode GEMV within the arms'
+// activation-quantization tolerance, not bitwise.
+func (c *cudaBackend) PromptPanelBatched(dt Dtype) bool {
+	return promptPanelBatchedFor(CurrentPromptPanelKQuantMode(), dt)
 }
 
 // PromptPanelBegin routes scratch and activation allocations to the panel free list.
@@ -170,18 +172,12 @@ func (c *cudaBackend) PromptPanelEnd() {
 	c.compactTransientLocked()
 }
 
-// CUDAPromptPanelCounters are the panel engagement witness: scopes opened, per-row panel GEMMs
-// issued, and panel buffers still held when the last scope closed.
-type CUDAPromptPanelCounters struct {
-	Begins, MatMuls uint64
-	LastReleaseLive int64
-}
-
 // CUDADebugPromptPanelCounters reads CUDAPromptPanelCounters under the allocator lock.
 func (c *cudaBackend) CUDADebugPromptPanelCounters() CUDAPromptPanelCounters {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	return CUDAPromptPanelCounters{Begins: c.promptPanelBegins, MatMuls: c.promptPanelMatMuls, LastReleaseLive: c.promptPanelLastLive}
+	return CUDAPromptPanelCounters{Begins: c.promptPanelBegins, MatMuls: c.promptPanelMatMuls,
+		BatchedMatMuls: c.promptPanelBatchedMatMuls, LastReleaseLive: c.promptPanelLastLive}
 }
 
 // CUDADebugSetGraphEnabled flips the process-wide CUDA graph gate (FAK_CUDA_GRAPH) and returns
@@ -203,10 +199,14 @@ func cudaArmScratchAllocFaultForTest(nth int) {
 	C.fcuda_scratch_alloc_test_fault(C.int(nth))
 }
 
-// PromptPanelMatMul keeps every row on the selected decode arithmetic, independent of tokens.
+// PromptPanelMatMul keeps every row on the selected decode arithmetic, independent of tokens,
+// unless the weight dtype is batched-eligible (PromptPanelBatched).
 func (c *cudaBackend) PromptPanelMatMul(w, x Tensor, tokens int) Tensor {
-	if !c.PromptPanelRowExact(w.Dtype) || len(w.Shape) != 2 || tokens <= 0 || w.Shape[0] <= 0 || w.Shape[1] <= 0 {
-		cudaPromptPanelFail("prompt-panel-matmul-geometry", "panel GEMM needs a row-exact [out,in] weight and a positive token count", 0)
+	mode := CurrentPromptPanelKQuantMode()
+	rowExact := promptPanelRowExactFor(mode, w.Dtype)
+	batched := !rowExact && promptPanelBatchedFor(mode, w.Dtype)
+	if !rowExact && !batched || len(w.Shape) != 2 || tokens <= 0 || w.Shape[0] <= 0 || w.Shape[1] <= 0 {
+		cudaPromptPanelFail("prompt-panel-matmul-geometry", "panel GEMM needs a row-exact or batched [out,in] weight and a positive token count", 0)
 	}
 	out, in := w.Shape[0], w.Shape[1]
 	for _, dimensions := range [][2]int{{tokens, in}, {tokens, out}, {out, in}} {
@@ -222,6 +222,12 @@ func (c *cudaBackend) PromptPanelMatMul(w, x Tensor, tokens int) Tensor {
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if batched {
+		y := c.promptPanelBatchedMatMulLocked(w, x, tokens, out, in)
+		c.promptPanelMatMuls++
+		c.promptPanelBatchedMatMuls++
+		return y
+	}
 	if w.Dtype == Q6_K {
 		first := x
 		first.Shape = []int{in}
@@ -248,6 +254,30 @@ func (c *cudaBackend) PromptPanelMatMul(w, x Tensor, tokens int) Tensor {
 		}
 	}
 	c.promptPanelMatMuls++
+	return y
+}
+
+// promptPanelBatchedMatMulLocked is the batched K-quant panel GEMM: Q6_K goes through the
+// ordinary prefill dispatch (tile panel, or MMQ in a qualification build), Q4_K through the
+// Q4_K prefill GEMM in sub-batches of promptPanelBatchRows so a non-mmq arm never allocates a
+// weight-sized image the chunk planner did not price. Caller holds cudaMu.
+func (c *cudaBackend) promptPanelBatchedMatMulLocked(w, x Tensor, tokens, out, in int) Tensor {
+	if w.Dtype == Q6_K {
+		xv := x
+		xv.Shape = []int{tokens, in}
+		return c.batchedMatMulLocked(w, xv, tokens)
+	}
+	arm, err := CUDAQ4KPrefillArmInUse()
+	rows := promptPanelBatchRows(w.Dtype, tokens, err == nil && arm == CUDAQ4KPrefillMMQ)
+	wb := c.cudaBufForSubmit(w)
+	xp := c.cudaBufForSubmit(x).ptr
+	y, ybuf := c.devTr([]int{tokens, out}, F32)
+	for off := 0; off < tokens; off += rows {
+		n := min(rows, tokens-off)
+		xs := (*C.float)(unsafe.Add(xp, off*in*F32.Bytes()))
+		ys := (*C.float)(unsafe.Add(ybuf.ptr, off*out*F32.Bytes()))
+		cudaGEMMStatus("PromptPanelMatMul", int(C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), xs, ys, C.int(out), C.int(in), C.int(n))), cudaQ4KScratch(out, in, n))
+	}
 	return y
 }
 

@@ -4,7 +4,7 @@ package model
 
 import (
 	"encoding/binary"
-	"os"
+	"math"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -112,8 +112,8 @@ func TestCUDAPromptPanelBackendAdmitsQ8(t *testing.T) {
 		t.Fatal("Q8_0 row-exact capability lost")
 	}
 	for _, dt := range []compute.Dtype{compute.Q4_K, compute.Q6_K} {
-		if got, want := panel.PromptPanelRowExact(dt), os.Getenv(compute.CUDAKQuantPromptPanelEnv) == "1"; got != want {
-			t.Fatalf("%s row-exact capability=%v want opt-in=%v", dt, got, want)
+		if got, want := panel.PromptPanelRowExact(dt), compute.CurrentPromptPanelKQuantMode() == compute.PromptPanelKQuantRowExact; got != want {
+			t.Fatalf("%s row-exact capability=%v want rowexact mode=%v", dt, got, want)
 		}
 	}
 	for _, dt := range []compute.Dtype{compute.F32, compute.F16, compute.Q5_K, compute.Q2_K} {
@@ -125,12 +125,36 @@ func TestCUDAPromptPanelBackendAdmitsQ8(t *testing.T) {
 
 // fak-test:runtime integration est=20s
 func TestCUDAPromptPanelMixedKQuantCallerExact(t *testing.T) {
-	if os.Getenv(compute.CUDAKQuantPromptPanelEnv) != "1" {
-		t.Skip("select K-quant prompt-panel qualification")
+	if compute.CurrentPromptPanelKQuantMode() != compute.PromptPanelKQuantRowExact {
+		t.Skip("select K-quant prompt-panel qualification (FAK_CUDA_PROMPT_PANEL_KQUANT=rowexact)")
 	}
 	be := promptPanelCUDA(t)
 	cfg := Config{HiddenSize: 256, NumLayers: 2, NumHeads: 4, NumKVHeads: 2, HeadDim: 64, IntermediateSize: 512, VocabSize: 96, RMSNormEps: 1e-5, RopeTheta: 10000, TieWordEmbeddings: true, EOSTokenID: -1}
-	m := NewSynthetic(cfg)
+	m := promptPanelMixedKQuantModel(NewSynthetic(cfg))
+	setPromptPanelChunk(t, 37)
+	newSession := func() *Session { s := m.NewBackendSession(be); s.Q4K = true; return s }
+	ids := promptPanelIDs(129, cfg.VocabSize)
+	ref, panel := newSession(), newSession()
+	defer ref.Close()
+	defer panel.Close()
+	assertPromptPanelMixedKQuantDtypes(t, m, panel)
+	var want, got []float32
+	expectPromptPanel(t, be, "mixed K-quant token loop", 0, 0, func() { want = promptPanelTokenLoop(ref, ids) })
+	expectPromptPanel(t, be, "mixed K-quant ordinary prefill", 1, promptPanelGEMMs(m, len(ids), 37), func() { got = append([]float32(nil), panel.Prefill(ids)...) })
+	assertSameBits(t, "mixed K-quant caller logits", got, want)
+	assertSameHALKV(t, "mixed K-quant caller", panel, ref)
+	for step := 0; step < 3; step++ {
+		token := promptPanelArgmax(want)
+		got = append([]float32(nil), panel.Step(token)...)
+		want = append([]float32(nil), ref.Step(token)...)
+		assertSameBits(t, "mixed K-quant greedy continuation", got, want)
+	}
+}
+
+// promptPanelMixedKQuantModel replaces m's projections with synthetic K-quant weights: every
+// third projection (q, o, down) Q6_K, the rest Q4_K, the Q4_K_M mix.
+func promptPanelMixedKQuantModel(m *Model) *Model {
+	cfg := m.Cfg
 	m.q4kw, m.kqw = map[string]*q4kTensor{}, map[string]*kQuantTensor{}
 	for layer := 0; layer < cfg.NumLayers; layer++ {
 		for projection, suffix := range promptPanelProjections {
@@ -160,39 +184,147 @@ func TestCUDAPromptPanelMixedKQuantCallerExact(t *testing.T) {
 			}
 		}
 	}
-	setPromptPanelChunk(t, 37)
-	newSession := func() *Session { s := m.NewBackendSession(be); s.Q4K = true; return s }
-	ids := promptPanelIDs(129, cfg.VocabSize)
-	ref, panel := newSession(), newSession()
-	defer ref.Close()
-	defer panel.Close()
-	for layer := 0; layer < cfg.NumLayers; layer++ {
+	return m
+}
+
+func assertPromptPanelMixedKQuantDtypes(t *testing.T, m *Model, s *Session) {
+	t.Helper()
+	for layer := 0; layer < m.Cfg.NumLayers; layer++ {
 		for projection, suffix := range promptPanelProjections {
 			want := compute.Q4_K
 			if projection%3 == 0 {
 				want = compute.Q6_K
 			}
-			if got := panel.matWeightHAL(layerName(layer, suffix)).Dtype; got != want {
+			if got := s.matWeightHAL(layerName(layer, suffix)).Dtype; got != want {
 				t.Fatalf("projection changed dtype: got%s want%s", got, want)
 			}
 		}
 	}
-	var want, got []float32
-	expectPromptPanel(t, be, "mixed K-quant token loop", 0, 0, func() { want = promptPanelTokenLoop(ref, ids) })
-	expectPromptPanel(t, be, "mixed K-quant ordinary prefill", 1, promptPanelGEMMs(m, len(ids), 37), func() { got = append([]float32(nil), panel.Prefill(ids)...) })
-	assertSameBits(t, "mixed K-quant caller logits", got, want)
-	assertSameHALKV(t, "mixed K-quant caller", panel, ref)
-	for step := 0; step < 3; step++ {
-		token := 0
-		for i := range want {
-			if want[i] > want[token] {
-				token = i
-			}
+}
+
+func promptPanelArgmax(v []float32) int {
+	best := 0
+	for i := range v {
+		if v[i] > v[best] {
+			best = i
 		}
-		got = append([]float32(nil), panel.Step(token)...)
-		want = append([]float32(nil), ref.Step(token)...)
-		assertSameBits(t, "mixed K-quant greedy continuation", got, want)
 	}
+	return best
+}
+
+// assertPromptPanelClose requires max|got-want| <= tol*max(1, max|want|) and returns the
+// observed relative error for the log.
+func assertPromptPanelClose(t *testing.T, label string, got, want []float32, tol float64) float64 {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s: len %d, want %d", label, len(got), len(want))
+	}
+	scale, worst := 1.0, 0.0
+	for _, w := range want {
+		scale = math.Max(scale, math.Abs(float64(w)))
+	}
+	for i := range got {
+		g := float64(got[i])
+		if math.IsNaN(g) || math.IsInf(g, 0) {
+			t.Fatalf("%s[%d] non-finite %v", label, i, g)
+		}
+		worst = math.Max(worst, math.Abs(g-float64(want[i]))/scale)
+	}
+	if worst > tol {
+		t.Fatalf("%s: max rel err %.4g > %.4g (scale %.4g)", label, worst, tol, scale)
+	}
+	return worst
+}
+
+// assertPromptPanelArgmax requires got's argmax to be want's argmax up to a tie within tol of
+// want's maximum, so an approximate panel may not change the greedy token.
+func assertPromptPanelArgmax(t *testing.T, label string, got, want []float32, tol float64) {
+	t.Helper()
+	g, w := promptPanelArgmax(got), promptPanelArgmax(want)
+	if g != w && float64(want[w]-want[g]) > tol*math.Max(1, math.Abs(float64(want[w]))) {
+		t.Fatalf("%s: argmax %d (ref logit %v) want %d (ref logit %v)", label, g, want[g], w, want[w])
+	}
+}
+
+// TestCUDAPromptPanelKQuantBatchedVsTokenLoop is the device witness for the batched K-quant
+// panel on a dense Qwen2-shaped model (q/k/v biases, GQA 4q/2kv, RoPE, Q4_K/Q6_K mix): the
+// panel reads each weight once per chunk, its logits, KV and greedy continuation stay within
+// tolerance of the per-token loop, the selection witness names the batched route, and the off
+// switch restores the token loop bitwise.
+//
+// fak-test:runtime integration est=60s
+func TestCUDAPromptPanelKQuantBatchedVsTokenLoop(t *testing.T) {
+	be := promptPanelCUDA(t)
+	defer compute.SetPromptPanelKQuantMode(compute.SetPromptPanelKQuantMode(compute.PromptPanelKQuantBatched))
+	cfg := Config{HiddenSize: 256, NumLayers: 2, NumHeads: 4, NumKVHeads: 2, HeadDim: 64, IntermediateSize: 512,
+		VocabSize: 96, RMSNormEps: 1e-5, RopeTheta: 10000, TieWordEmbeddings: true, EOSTokenID: -1, AttentionBias: true}
+	extra := map[string][]int{}
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := layerPrefix(l)
+		extra[p+"self_attn.q_proj.bias"] = []int{cfg.NumHeads * cfg.HeadDim}
+		extra[p+"self_attn.k_proj.bias"] = []int{cfg.NumKVHeads * cfg.HeadDim}
+		extra[p+"self_attn.v_proj.bias"] = []int{cfg.NumKVHeads * cfg.HeadDim}
+	}
+	m := promptPanelMixedKQuantModel(newSyntheticExtra(cfg, extra))
+	newSession := func() *Session { s := m.NewBackendSession(be); s.Q4K = true; return s }
+	const logitTol, kvTol = 5e-2, 5e-2
+	// 5 rows: tile panel; 129 in chunks of 37: mmq launches plus an 18-row tail; 600 at the
+	// derived chunk: a 512-row launch plus an 88-row tail.
+	for _, tc := range []struct{ P, chunk int }{{5, 0}, {129, 37}, {600, 0}} {
+		setPromptPanelChunk(t, tc.chunk)
+		ids := promptPanelIDs(tc.P, cfg.VocabSize)
+		ref, s := newSession(), newSession()
+		assertPromptPanelMixedKQuantDtypes(t, m, s)
+		var want, got []float32
+		expectPromptPanel(t, be, "token loop", 0, 0, func() { want = promptPanelTokenLoop(ref, ids) })
+		rows := s.promptPanelChunkTokens()
+		before := PromptPanelSelectionWitness()
+		expectPromptPanel(t, be, "batched panel", 1, promptPanelGEMMs(m, tc.P, rows), func() { got = append([]float32(nil), s.Prefill(ids)...) })
+		if d := PromptPanelSelectionWitness().SelectedBatched - before.SelectedBatched; d != 1 {
+			t.Fatalf("P=%d: SelectedBatched delta=%d want 1", tc.P, d)
+		}
+		e := assertPromptPanelClose(t, "batched panel logits", got, want, logitTol)
+		assertPromptPanelArgmax(t, "batched panel logits", got, want, logitTol)
+		gs, err := s.halKV.(compute.KVHostSnapshotter).SnapshotToHost()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ws, err := ref.halKV.(compute.KVHostSnapshotter).SnapshotToHost()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(gs.Pos) != len(ws.Pos) {
+			t.Fatalf("P=%d: %d cached positions want %d", tc.P, len(gs.Pos), len(ws.Pos))
+		}
+		for l := range ws.K {
+			assertPromptPanelClose(t, "batched panel K", gs.K[l], ws.K[l], kvTol)
+			assertPromptPanelClose(t, "batched panel Kraw", gs.KRaw[l], ws.KRaw[l], kvTol)
+			assertPromptPanelClose(t, "batched panel V", gs.V[l], ws.V[l], kvTol)
+		}
+		for step := 0; step < 3; step++ {
+			token := promptPanelArgmax(want)
+			got = append([]float32(nil), s.Step(token)...)
+			want = append([]float32(nil), ref.Step(token)...)
+			assertPromptPanelClose(t, "decode after batched panel", got, want, logitTol)
+			assertPromptPanelArgmax(t, "decode after batched panel", got, want, logitTol)
+		}
+		t.Logf("P=%d chunk=%d logits max rel err %.3g", tc.P, rows, e)
+		s.Close()
+		ref.Close()
+	}
+
+	// Off switch: a K-quant model keeps the token loop exactly.
+	compute.SetPromptPanelKQuantMode(compute.PromptPanelKQuantOff)
+	setPromptPanelChunk(t, 0)
+	ids := promptPanelIDs(129, cfg.VocabSize)
+	ref, s := newSession(), newSession()
+	defer ref.Close()
+	defer s.Close()
+	var want, got []float32
+	expectPromptPanel(t, be, "token loop", 0, 0, func() { want = promptPanelTokenLoop(ref, ids) })
+	expectPromptPanel(t, be, "off switch", 0, 0, func() { got = append([]float32(nil), s.Prefill(ids)...) })
+	assertSameBits(t, "off switch logits", got, want)
+	assertSameHALKV(t, "off switch", s, ref)
 }
 
 // TestCUDAPromptPanelBitExactVsTokenLoop: P=1 is token-loop only (no panel scope); every

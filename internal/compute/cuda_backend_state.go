@@ -186,11 +186,11 @@ type cudaBackend struct {
 	// promptPanelRows is the row count of the panel chunk now running; a chunk with a
 	// different count first releases the free list so two chunk sizes never coexist.
 	promptPanelRows int
-	// promptPanelBegins/MatMuls count panel scopes and per-row panel GEMMs, and
-	// promptPanelLastLive is how many panel buffers callers still held at the last
-	// PromptPanelEnd (CUDADebugPromptPanelCounters). Guarded by cudaMu.
-	promptPanelBegins, promptPanelMatMuls uint64
-	promptPanelLastLive                   int64
+	// promptPanelBegins/MatMuls/BatchedMatMuls count panel scopes, panel GEMMs and the
+	// batched subset of them, and promptPanelLastLive is how many panel buffers callers
+	// still held at the last PromptPanelEnd (CUDADebugPromptPanelCounters). Guarded by cudaMu.
+	promptPanelBegins, promptPanelMatMuls, promptPanelBatchedMatMuls uint64
+	promptPanelLastLive                                              int64
 	// receipt is the typed device receipt built ONCE at init from the captured driver facts
 	// (name, VRAM, driver version, arch tier, coverage verdict, per-arm admissions). It is
 	// immutable after init, so CUDADeviceReceipt reads it without holding cudaMu.

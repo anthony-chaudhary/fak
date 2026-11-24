@@ -11,7 +11,8 @@ import (
 // as [rows, width] panels: per layer one GEMM per projection over the rows instead of one GEMV
 // per token. Every op must be the per-row form of the op tokenHALOutput issues for one token,
 // so a panel row is bitwise the token loop's row whatever the row count or chunking (the BitExact
-// default). Row t of a panel sits at absolute position start+t. A backend that implements it
+// default); only a GEMM admitted through promptPanelBatchedBackend trades that for one weight
+// read per chunk. Row t of a panel sits at absolute position start+t. A backend that implements it
 // must also run RMSNorm, AddBias, SwiGLU and AddInPlace row-wise over [rows, width] panels.
 // For deepseek_v4 the routed FFN stays a per-row primitive (applyV4ExpertHAL): the panel
 // extracts each residual row, runs the token loop's exact FFN on it, and writes the updated
@@ -19,7 +20,7 @@ import (
 type promptPanelBackend interface {
 	// PromptPanelRowExact reports whether PromptPanelMatMul over a weight of dt computes each
 	// row bitwise as MatMul computes that row alone. A prompt with any other weight dtype keeps
-	// the token loop.
+	// the token loop unless the backend also implements promptPanelBatchedBackend for it.
 	PromptPanelRowExact(dt compute.Dtype) bool
 	// PromptPanelBegin opens a panel scratch scope; PromptPanelEnd frees every panel-sized
 	// buffer the scope pooled, so no panel size survives into the decode allocator.
@@ -46,8 +47,18 @@ type promptPanelBackend interface {
 	PromptPanelSetRow(x compute.Tensor, row, width int, src compute.Tensor)
 }
 
+// promptPanelBatchedBackend is the optional approximate half of the panel seam: a backend
+// whose PromptPanelMatMul over a weight of dt reads the weight once for all rows through its
+// prefill GEMM. Those rows match MatMul within the backend's GEMM tolerance, not bitwise, so a
+// prompt that needs one is counted as a batched selection (SelectedBatched).
+type promptPanelBatchedBackend interface {
+	PromptPanelBatched(dt compute.Dtype) bool
+}
+
 // promptPanelMaxTokens caps one panel chunk. A longer prompt runs as consecutive chunks that
-// advance the KV start; the per-row ops make the split invisible in the bits.
+// advance the KV start; the per-row ops make the split invisible in the bits. The batched
+// K-quant GEMM does not need a larger chunk: mmq already reads each weight once per 512 rows,
+// and the panel attention cost is per row, so raising the cap only grows unpriced scratch.
 const promptPanelMaxTokens = 512
 
 // promptPanelChunkOverride, when positive, replaces the derived chunk size. Tests use it to
@@ -90,6 +101,11 @@ const (
 // no locks on the hot path.
 var promptPanelWitness [promptPanelWitnessReasons]atomic.Int64
 
+// promptPanelSelectedBatched counts the selected prompts that admitted at least one weight
+// only through promptPanelBatchedBackend. It is a subset of promptPanelSelected, so it stays
+// outside Total.
+var promptPanelSelectedBatched atomic.Int64
+
 func notePromptPanelSelection(r promptPanelWitnessReason) {
 	promptPanelWitness[r].Add(1)
 }
@@ -112,6 +128,9 @@ type PromptPanelSelectionCounts struct {
 	Q2KEmbedding           int64
 	SplitGPULayers         int64
 	DtypeNotRowExact       int64
+	// SelectedBatched is the subset of Selected whose panel reads some weight once for all
+	// rows instead of row-exactly; not an outcome of its own, so Total excludes it.
+	SelectedBatched int64
 }
 
 // Total is every counted promptPanelFor outcome, selected or refused.
@@ -142,12 +161,14 @@ func PromptPanelSelectionWitness() PromptPanelSelectionCounts {
 		Q2KEmbedding:           promptPanelWitness[promptPanelRefusalQ2KEmbedding].Load(),
 		SplitGPULayers:         promptPanelWitness[promptPanelRefusalSplitGPULayers].Load(),
 		DtypeNotRowExact:       promptPanelWitness[promptPanelRefusalDtypeNotRowExact].Load(),
+		SelectedBatched:        promptPanelSelectedBatched.Load(),
 	}
 }
 
 // promptPanelFor returns the backend's panel seam when this prompt can take it. The panel
 // mirrors tokenHALOutput's plain dense branch plus deepseek_v4's per-row live-expert FFN, and
-// only weight dtypes with a per-row exact GEMM, so every arch, capture, placement and dtype
+// only weight dtypes with a per-row exact or backend-declared batched GEMM, so every arch,
+// capture, placement and dtype
 // that does not qualify keeps the token loop. Every outcome notes its typed reason in the
 // selection witness (notePromptPanelSelection): a refusal is attributed to the first matching
 // axis in the order below, mirroring the original left-to-right OR.
@@ -216,15 +237,24 @@ func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
 	if !cfg.IsDeepSeekV4() {
 		projections = promptPanelProjections[:]
 	}
+	batchedBE, _ := panel.(promptPanelBatchedBackend)
+	batched := false
 	for l := 0; l < cfg.NumLayers; l++ {
 		for _, name := range projections {
-			if !panel.PromptPanelRowExact(s.matWeightHAL(layerName(l, name)).Dtype) {
+			switch dt := s.matWeightHAL(layerName(l, name)).Dtype; {
+			case panel.PromptPanelRowExact(dt):
+			case batchedBE != nil && batchedBE.PromptPanelBatched(dt):
+				batched = true
+			default:
 				notePromptPanelSelection(promptPanelRefusalDtypeNotRowExact)
 				return nil, false
 			}
 		}
 	}
 	notePromptPanelSelection(promptPanelSelected)
+	if batched {
+		promptPanelSelectedBatched.Add(1)
+	}
 	return panel, true
 }
 

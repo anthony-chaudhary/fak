@@ -791,3 +791,60 @@ func TestHALPromptPrefillMoEFallbackKeepsTokenLoop(t *testing.T) {
 		t.Fatal("deepseek_v4 with QKNorm took the panel, want the token loop")
 	}
 }
+
+// promptPanelBatchedRecordingBackend adds the approximate seam: F32 weights are admitted as
+// batched when batched is set, independent of the row-exact answer.
+type promptPanelBatchedRecordingBackend struct {
+	*promptPanelRecordingBackend
+	batched bool
+}
+
+func (b *promptPanelBatchedRecordingBackend) PromptPanelBatched(dt compute.Dtype) bool {
+	return b.batched && dt == compute.F32
+}
+
+// fak-test:runtime fast est=20ms lane=default
+// TestPromptPanelBatchedAdmission is the admission table for the approximate seam: a weight
+// admitted row-exactly never counts as batched, a weight admitted only through
+// PromptPanelBatched selects the panel and counts SelectedBatched, and a weight neither seam
+// admits keeps the token loop under the dtype refusal. [SW-VERIFIED]: cpu-ref witness.
+func TestPromptPanelBatchedAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		rowExact, batched      bool
+		wantPanel, wantBatched bool
+		reason                 promptPanelWitnessReason
+	}{
+		{"row-exact-only", true, false, true, false, promptPanelSelected},
+		{"row-exact-wins-over-batched", true, true, true, false, promptPanelSelected},
+		{"batched-only", false, true, true, true, promptPanelSelected},
+		{"neither", false, false, false, false, promptPanelRefusalDtypeNotRowExact},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := newPromptPanelRecordingBackend()
+			rec.rowExact = tc.rowExact
+			be := &promptPanelBatchedRecordingBackend{promptPanelRecordingBackend: rec, batched: tc.batched}
+			s := promptPanelBiasModel().NewBackendSession(be)
+			defer s.Close()
+			before := PromptPanelSelectionWitness()
+			_, ok := s.promptPanelFor([]int{3, 7})
+			after := PromptPanelSelectionWitness()
+			if ok != tc.wantPanel {
+				t.Fatalf("panel = %t, want %t", ok, tc.wantPanel)
+			}
+			if got := promptPanelWitnessCount(after, tc.reason) - promptPanelWitnessCount(before, tc.reason); got != 1 {
+				t.Fatalf("reason %v: witness delta = %d, want 1", tc.reason, got)
+			}
+			if got := after.Total() - before.Total(); got != 1 {
+				t.Fatalf("total witness delta = %d, want 1", got)
+			}
+			want := int64(0)
+			if tc.wantBatched {
+				want = 1
+			}
+			if got := after.SelectedBatched - before.SelectedBatched; got != want {
+				t.Fatalf("SelectedBatched delta = %d, want %d", got, want)
+			}
+		})
+	}
+}
