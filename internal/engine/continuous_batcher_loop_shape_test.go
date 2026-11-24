@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func TestRecurrentLoopedBlockLayerVisits(t *testing.T) {
@@ -74,5 +76,30 @@ func TestRecurrentPassCountIsLoopsPerToken(t *testing.T) {
 	}
 	if got := slot.RecurrentPasses; got != 9 {
 		t.Fatalf("RecurrentPasses = %d, want 9 (3 tokens x 3 loops)", got)
+	}
+}
+
+func TestLoopedBlockFromInkling2LoopHParams(t *testing.T) {
+	cases := []struct {
+		name string
+		hp   model.Inkling2LoopHParams
+		want LoopedBlockShape
+	}{
+		{"looped core", model.Inkling2LoopHParams{Layers: 24, CoreStart: 6, CoreEnd: 18, Passes: 3}, LoopedBlockShape{PreludeLayers: 6, LoopLayers: 12, CodaLayers: 6}},
+		{"single pass is not looped", model.Inkling2LoopHParams{Layers: 24, CoreStart: 6, CoreEnd: 18, Passes: 1}, LoopedBlockShape{}},
+		{"empty core", model.Inkling2LoopHParams{Layers: 24, CoreStart: 6, CoreEnd: 6, Passes: 3}, LoopedBlockShape{}},
+		{"core past stack", model.Inkling2LoopHParams{Layers: 24, CoreStart: 6, CoreEnd: 30, Passes: 3}, LoopedBlockShape{}},
+		{"negative start", model.Inkling2LoopHParams{Layers: 24, CoreStart: -1, CoreEnd: 18, Passes: 3}, LoopedBlockShape{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := LoopedBlockFromInkling2Loop(tc.hp)
+			if got != tc.want {
+				t.Fatalf("LoopedBlockFromInkling2Loop(%+v) = %+v, want %+v", tc.hp, got, tc.want)
+			}
+			if got.Declared() && got.LayerVisits(tc.hp.Passes) != tc.hp.Layers+(tc.hp.Passes-1)*(tc.hp.CoreEnd-tc.hp.CoreStart) {
+				t.Fatalf("LayerVisits(%d) = %d disagrees with the loader's slot count", tc.hp.Passes, got.LayerVisits(tc.hp.Passes))
+			}
+		})
 	}
 }

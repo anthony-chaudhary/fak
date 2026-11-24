@@ -1,5 +1,7 @@
 package engine
 
+import "github.com/anthony-chaudhary/fak/internal/model"
+
 // LoopedBlockShape describes a middle-block looped model: Prelude and Coda
 // layers run once per token, Loop layers run once per recurrent pass. Only the
 // looped block carries per-pass KV, so a request at depth L stores
@@ -18,6 +20,16 @@ func LoopedBlockFromCoreRange(layers, coreStart, coreEnd int) LoopedBlockShape {
 		LoopLayers:    coreEnd - coreStart,
 		CodaLayers:    layers - coreEnd,
 	}
+}
+
+// LoopedBlockFromInkling2Loop maps a loaded inkling2_loop checkpoint onto a
+// shape. A checkpoint that never repeats its core (Passes <= 1) or declares a
+// core outside [0, Layers) yields the zero shape, keeping full-stack accounting.
+func LoopedBlockFromInkling2Loop(hp model.Inkling2LoopHParams) LoopedBlockShape {
+	if hp.Passes <= 1 || hp.CoreStart < 0 || hp.CoreStart >= hp.CoreEnd || hp.CoreEnd > hp.Layers {
+		return LoopedBlockShape{}
+	}
+	return LoopedBlockFromCoreRange(hp.Layers, hp.CoreStart, hp.CoreEnd)
 }
 
 // Declared reports whether the shape describes a real looped block; the zero
