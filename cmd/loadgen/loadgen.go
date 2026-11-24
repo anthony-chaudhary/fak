@@ -306,6 +306,15 @@ type PointResult struct {
 	// awaiting their first content chunk. Client-side observation, not server
 	// GPU batching.
 	PeakPrefillInFlight int `json:"peak_prefill_in_flight,omitempty"`
+	// Schedule adherence, set only for paced points (a rate or arrival
+	// pattern). Lags are measured against the ideal schedule, before any
+	// re-anchoring. ScheduleKept false means the point offered less load than
+	// its rate label, so its latencies describe a lighter load than claimed.
+	PlannedRequests   int     `json:"planned_requests,omitempty"`
+	ScheduleReanchors int     `json:"schedule_reanchors,omitempty"`
+	ScheduleLagP99MS  float64 `json:"schedule_lag_p99_ms,omitempty"`
+	ScheduleLagMaxMS  float64 `json:"schedule_lag_max_ms,omitempty"`
+	ScheduleKept      *bool   `json:"schedule_kept,omitempty"`
 }
 
 // MatrixResult is the full sweep, shaped to be a drop-in MATRIX.json.
@@ -465,6 +474,47 @@ type pacer struct {
 	maxCatchUp time.Duration
 	now        func() time.Time
 	sleep      func(context.Context, time.Duration) bool
+	adherence  scheduleAdherence // filled by run
+}
+
+// Schedule-adherence bounds, adapted from google-deepmind/gbench
+// (gbench/runners/stress.py:1330 @ d3e4283162d6c34353fa933284135d2a7ef3b9fe,
+// Apache-2.0): a paced point keeps its schedule only when at least 99% of the
+// planned requests were issued and the P99 issue lag behind the ideal schedule
+// stays within 150 ms. Re-anchoring keeps the rate going after a stall, but the
+// requests it delays still mean the server saw less load than the label says.
+const (
+	scheduleMinIssuedFrac = 0.99
+	scheduleMaxLagP99     = 150 * time.Millisecond
+)
+
+// scheduleAdherence records how far issuance fell behind the ideal schedule:
+// the deadlines run would have used had it never re-anchored.
+type scheduleAdherence struct {
+	planned   int
+	issued    int
+	reanchors int
+	lags      []time.Duration // per issued request, never negative
+}
+
+// apply copies the adherence reading into a point result and decides whether
+// the point kept its schedule.
+func (a scheduleAdherence) apply(pr *PointResult) {
+	pr.PlannedRequests = a.planned
+	pr.ScheduleReanchors = a.reanchors
+	ms := make([]float64, len(a.lags))
+	for i, d := range a.lags {
+		ms[i] = float64(d.Nanoseconds()) / 1e6
+	}
+	sort.Float64s(ms)
+	pr.ScheduleLagP99MS = percentile(ms, 99)
+	if len(ms) > 0 {
+		pr.ScheduleLagMaxMS = ms[len(ms)-1]
+	}
+	kept := a.planned > 0 &&
+		float64(a.issued) >= scheduleMinIssuedFrac*float64(a.planned) &&
+		pr.ScheduleLagP99MS <= float64(scheduleMaxLagP99.Nanoseconds())/1e6
+	pr.ScheduleKept = &kept
 }
 
 func newPacer(interval, maxCatchUp time.Duration, now func() time.Time, sleep func(context.Context, time.Duration) bool) *pacer {
@@ -507,9 +557,12 @@ func pacerSleep(ctx context.Context, d time.Duration) bool {
 // accepted: a rejected feed is never counted, so callers can slice their result
 // arrays to the returned count safely. A zero gap (ConcurrencyBurst) issues
 // every step with no sleep, so throughput is bounded by issue/consumer
-// back-pressure rather than by the schedule.
+// back-pressure rather than by the schedule. Each issue's lag behind the ideal
+// (never re-anchored) deadline is recorded in p.adherence.
 func (p *pacer) run(ctx context.Context, n int, issue func() bool) int {
 	next := p.now().Add(p.gap())
+	ideal := next
+	p.adherence = scheduleAdherence{planned: n, lags: make([]time.Duration, 0, n)}
 	issued := 0
 	for i := 0; i < n; i++ {
 		if ctx.Err() != nil {
@@ -518,18 +571,26 @@ func (p *pacer) run(ctx context.Context, n int, issue func() bool) int {
 		now := p.now()
 		if next.Add(p.maxCatchUp).Before(now) {
 			next = now // past the catch-up window: drop the backlog, keep the rate
+			p.adherence.reanchors++
 		}
 		if next.After(now) {
 			if !p.sleep(ctx, next.Sub(now)) {
 				break
 			}
 		}
-		next = next.Add(p.gap()) // advance before issue: issue latency must not compound
+		due := ideal
+		g := p.gap()
+		next = next.Add(g) // advance before issue: issue latency must not compound
+		ideal = ideal.Add(g)
 		if !issue() {
 			break // rejected feed: not counted, nothing downstream consumed it
 		}
 		issued++
+		// Lag is taken at acceptance: a feed that blocks on busy workers delays
+		// the request as surely as a late wake-up does.
+		p.adherence.lags = append(p.adherence.lags, max(p.now().Sub(due), 0))
 	}
+	p.adherence.issued = issued
 	return issued
 }
 
@@ -818,6 +879,7 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 		}
 	}
 	var issued int
+	var paced *pacer
 	switch {
 	case cfg.Arrival != "":
 		gen, err := newIntervalGenerator(cfg.Arrival, cfg.arrivalRate(), cfg.arrivalSmoothness(), cfg.ArrivalSeed)
@@ -834,7 +896,11 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 				catchUp = defaultMaxCatchUp
 			}
 			counter := 0
-			issued = newPacerFromGap(delaySource(gen), catchUp, cfg.now, nil).run(ctx, requests, func() bool {
+			pc := newPacerFromGap(delaySource(gen), catchUp, cfg.now, nil)
+			if gen.rate() > 0 {
+				paced = pc // a zero-gap burst has no schedule to keep
+			}
+			issued = pc.run(ctx, requests, func() bool {
 				i := counter
 				counter++
 				return feedJob(i)
@@ -847,7 +913,8 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 			catchUp = defaultMaxCatchUp
 		}
 		counter := 0
-		issued = newPacer(interval, catchUp, cfg.now, nil).run(ctx, requests, func() bool {
+		paced = newPacer(interval, catchUp, cfg.now, nil)
+		issued = paced.run(ctx, requests, func() bool {
 			i := counter
 			counter++
 			return feedJob(i)
@@ -866,6 +933,9 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 	result := aggregate(concurrency, issued, wall, results[:issued])
 	result.PeakInFlight = inFlight.peakValue()
 	result.PrefillConcurrency = prefillCap
+	if paced != nil {
+		paced.adherence.apply(&result)
+	}
 	result.PeakPrefillInFlight = inFlight.prefillPeakValue()
 	return result
 }
