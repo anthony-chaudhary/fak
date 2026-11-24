@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/agentopt"
 )
@@ -117,7 +118,7 @@ func TestBuildPromptDeclaresEveryOptionAndTruncates(t *testing.T) {
 }
 
 func TestOpenAIReader(t *testing.T) {
-	var gotReq chatReq
+	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer k" {
 			http.Error(w, "bad", http.StatusBadRequest)
@@ -135,7 +136,7 @@ func TestOpenAIReader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !gotReq.Logprobs || gotReq.MaxTokens != 1 || gotReq.Model != "m" {
+	if gotReq["logprobs"] != true || gotReq["max_tokens"] != float64(1) || gotReq["model"] != "m" {
 		t.Fatalf("request %+v", gotReq)
 	}
 	want := math.Log(math.Exp(-0.2) + math.Exp(-2.0))
@@ -174,5 +175,119 @@ func TestFromEnv(t *testing.T) {
 	}
 	if _, err := FromEnv(env(map[string]string{EnvDecider: "on", EnvURL: "http://x", EnvModel: "m", EnvMinConfidence: "2"})); err == nil {
 		t.Fatal("want error on confidence > 1")
+	}
+}
+
+func TestLowDeclaredMassFallsBack(t *testing.T) {
+	// "<think>" holds nearly all mass; stray letters would renormalize to p(A)~0.85.
+	d := mustNew(t, Config{Reader: fixed(map[string]float64{"A": -11.2, "D": -12.9})})
+	got := d.Decide(context.Background(), routineTurn())
+	if got.Source != SourceHeuristic || !strings.HasPrefix(got.FallbackReason, "low_declared_mass") || got.DeclaredMass > 1e-4 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestReaderIgnoringContextIsBounded(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	stuck := ReaderFunc(func(context.Context, string, []string) (map[string]float64, error) {
+		<-block
+		return nil, nil
+	})
+	start := time.Now()
+	got := mustNew(t, Config{Reader: stuck, Timeout: 20 * time.Millisecond}).Decide(context.Background(), routineTurn())
+	if got.FallbackReason != "timeout" || time.Since(start) > time.Second {
+		t.Fatalf("got %+v after %s", got, time.Since(start))
+	}
+}
+
+func TestParentCancelIsNotTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	slow := ReaderFunc(func(ctx context.Context, _ string, _ []string) (map[string]float64, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if got := mustNew(t, Config{Reader: slow}).Decide(ctx, routineTurn()); got.FallbackReason != "canceled" {
+		t.Fatalf("got %q", got.FallbackReason)
+	}
+}
+
+func TestTruncationKeepsUTF8Valid(t *testing.T) {
+	p := BuildPrompt(agentopt.TurnContext{ToolOutput: "x" + strings.Repeat("界", 1000)})
+	if !utf8.ValidString(p) {
+		t.Fatal("prompt is not valid UTF-8")
+	}
+}
+
+func TestNormalizeLabel(t *testing.T) {
+	for in, want := range map[string]string{"A": "A", " B": "B", "C)": "C", "**D": "D", "a.": "A", "<think>": "<THINK>", "The": "THE"} {
+		if got := normalizeLabel(in); got != want {
+			t.Errorf("normalizeLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestOpenAIReaderBaseURLAndKnobs(t *testing.T) {
+	var body map[string]any
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{"choices":[{"logprobs":{"content":[{"top_logprobs":[{"token":"A)","logprob":-0.1},{"token":"b","logprob":-2.5}]}]}}]}`))
+	}))
+	defer srv.Close()
+	r := &OpenAIReader{BaseURL: srv.URL + "/v1/", Model: "m", MaxTokensField: "max_completion_tokens", DisableThinking: true}
+	scores, err := r.ReadOptions(context.Background(), "q", Labels())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/v1/chat/completions" {
+		t.Fatalf("path %q", path)
+	}
+	if _, ok := body["max_tokens"]; ok || body["max_completion_tokens"] != float64(1) {
+		t.Fatalf("cap field: %v", body)
+	}
+	if kw, _ := body["chat_template_kwargs"].(map[string]any); kw["enable_thinking"] != false {
+		t.Fatalf("thinking kwargs: %v", body)
+	}
+	if scores["A"] != -0.1 || scores["B"] != -2.5 {
+		t.Fatalf("scores %v", scores)
+	}
+}
+
+func TestOpenAIReaderErrorCarriesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":"Unsupported parameter: 'max_tokens'"}`, http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	_, err := (&OpenAIReader{BaseURL: srv.URL, Model: "m"}).ReadOptions(context.Background(), "q", Labels())
+	if err == nil || !strings.Contains(err.Error(), "max_tokens") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestFromEnvNewKnobs(t *testing.T) {
+	env := func(kv map[string]string) func(string) string { return func(k string) string { return kv[k] } }
+	base := map[string]string{EnvDecider: "on", EnvURL: "http://x/v1", EnvModel: "m"}
+	with := func(k, v string) map[string]string {
+		m := map[string]string{}
+		for a, b := range base {
+			m[a] = b
+		}
+		m[k] = v
+		return m
+	}
+	d, err := FromEnv(env(with(EnvNoThinking, "true")))
+	if err != nil || !d.cfg.Reader.(*OpenAIReader).DisableThinking {
+		t.Fatalf("disable thinking: %v", err)
+	}
+	for k, v := range map[string]string{EnvMaxTokens: "max_output", EnvMinMass: "0", EnvNoThinking: "maybe", EnvURL: "localhost:8000"} {
+		if _, err := FromEnv(env(with(k, v))); err == nil {
+			t.Errorf("%s=%s: want error", k, v)
+		}
+	}
+	if d, err := FromEnv(env(with(EnvMinMass, "0.3"))); err != nil || d.cfg.MinDeclaredMass != 0.3 {
+		t.Fatalf("min mass: %v", err)
 	}
 }

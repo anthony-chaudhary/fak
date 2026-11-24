@@ -16,12 +16,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/agentopt"
 )
 
-// Reader scores declared answer labels for a prompt. Scores are logits or
-// log-probabilities; labels the model did not score are omitted.
+// Reader scores declared answer labels for a prompt. Scores are
+// log-probabilities normalized over the model's full vocabulary, so their
+// exp-sum is the mass the model put on any declared answer; labels the model
+// did not score are omitted.
 type Reader interface {
 	ReadOptions(ctx context.Context, prompt string, labels []string) (map[string]float64, error)
 }
@@ -61,9 +64,10 @@ const (
 	// SourceHeuristic marks an effort taken from the heuristic router.
 	SourceHeuristic = "heuristic"
 
-	defaultMinConfidence = 0.5
-	defaultTimeout       = 750 * time.Millisecond
-	maxFieldChars        = 1500
+	defaultMinConfidence   = 0.5
+	defaultMinDeclaredMass = 0.5
+	defaultTimeout         = 750 * time.Millisecond
+	maxFieldBytes          = 1500
 )
 
 // Config configures a Decider. Reader is required.
@@ -75,6 +79,11 @@ type Config struct {
 	// MinConfidence is the top-option probability below which the heuristic
 	// wins. Zero means 0.5.
 	MinConfidence float64
+	// MinDeclaredMass is the total probability the model must put on the
+	// declared labels before its choice counts. Without it, stray letters in
+	// the tail of a distribution dominated by "<think>" or "**" renormalize
+	// into a confident-looking answer. Zero means 0.5.
+	MinDeclaredMass float64
 	// Timeout bounds one read. Zero means 750ms; the read sits on the turn's
 	// critical path, so a slow decider must cost less than the thinking it saves.
 	Timeout time.Duration
@@ -100,6 +109,9 @@ func New(cfg Config) (*Decider, error) {
 	if cfg.MinConfidence <= 0 {
 		cfg.MinConfidence = defaultMinConfidence
 	}
+	if cfg.MinDeclaredMass <= 0 {
+		cfg.MinDeclaredMass = defaultMinDeclaredMass
+	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = defaultTimeout
 	}
@@ -111,6 +123,7 @@ type Decision struct {
 	agentopt.TurnClassification
 	Source         string                          `json:"source"`
 	Confidence     float64                         `json:"confidence,omitempty"`
+	DeclaredMass   float64                         `json:"declared_mass,omitempty"`
 	Probabilities  map[agentopt.EffortTier]float64 `json:"probabilities,omitempty"`
 	HeuristicTier  agentopt.EffortTier             `json:"heuristic_tier"`
 	FallbackReason string                          `json:"fallback_reason,omitempty"`
@@ -123,18 +136,24 @@ func (d *Decider) Decide(ctx context.Context, turn agentopt.TurnContext) Decisio
 		return Decision{TurnClassification: heur, Source: SourceHeuristic, HeuristicTier: heur.Effort, FallbackReason: reason}
 	}
 
-	rctx, cancel := context.WithTimeout(ctx, d.cfg.Timeout)
-	defer cancel()
-	scores, err := d.cfg.Reader.ReadOptions(rctx, BuildPrompt(turn), Labels())
+	scores, err := d.read(ctx, BuildPrompt(turn))
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || rctx.Err() != nil {
+		switch {
+		case ctx.Err() != nil:
+			return fallback("canceled")
+		case errors.Is(err, context.DeadlineExceeded):
 			return fallback("timeout")
 		}
 		return fallback("read_error: " + err.Error())
 	}
-	probs, err := declaredSoftmax(scores)
+	probs, mass, err := declaredSoftmax(scores)
 	if err != nil {
 		return fallback(err.Error())
+	}
+	if mass < d.cfg.MinDeclaredMass {
+		dec := fallback(fmt.Sprintf("low_declared_mass %.2g < %.2g", mass, d.cfg.MinDeclaredMass))
+		dec.Probabilities, dec.DeclaredMass = probs, mass
+		return dec
 	}
 
 	best, conf := agentopt.EffortTier(""), -1.0
@@ -145,7 +164,7 @@ func (d *Decider) Decide(ctx context.Context, turn agentopt.TurnContext) Decisio
 	}
 	if conf < d.cfg.MinConfidence {
 		dec := fallback(fmt.Sprintf("low_confidence %.2f < %.2f", conf, d.cfg.MinConfidence))
-		dec.Probabilities, dec.Confidence = probs, conf
+		dec.Probabilities, dec.Confidence, dec.DeclaredMass = probs, conf, mass
 		return dec
 	}
 
@@ -165,8 +184,31 @@ func (d *Decider) Decide(ctx context.Context, turn agentopt.TurnContext) Decisio
 		},
 		Source:        SourceModel,
 		Confidence:    conf,
+		DeclaredMass:  mass,
 		Probabilities: probs,
 		HeuristicTier: heur.Effort,
+	}
+}
+
+// read bounds the Reader by Timeout even when it ignores ctx; such a reader's
+// goroutine outlives the turn, but the turn does not wait for it.
+func (d *Decider) read(ctx context.Context, prompt string) (map[string]float64, error) {
+	rctx, cancel := context.WithTimeout(ctx, d.cfg.Timeout)
+	defer cancel()
+	type result struct {
+		scores map[string]float64
+		err    error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		s, err := d.cfg.Reader.ReadOptions(rctx, prompt, Labels())
+		ch <- result{s, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.scores, r.err
+	case <-rctx.Done():
+		return nil, rctx.Err()
 	}
 }
 
@@ -179,9 +221,10 @@ func rank(t agentopt.EffortTier) int {
 	return -1
 }
 
-// declaredSoftmax normalizes over declared labels only. Fewer than two finite
-// scores cannot express a preference, so it fails closed.
-func declaredSoftmax(scores map[string]float64) (map[agentopt.EffortTier]float64, error) {
+// declaredSoftmax normalizes over declared labels only and also returns their
+// raw probability mass. Fewer than two finite scores cannot express a
+// preference, so it fails closed.
+func declaredSoftmax(scores map[string]float64) (map[agentopt.EffortTier]float64, float64, error) {
 	type kv struct {
 		tier agentopt.EffortTier
 		s    float64
@@ -193,21 +236,22 @@ func declaredSoftmax(scores map[string]float64) (map[agentopt.EffortTier]float64
 		}
 	}
 	if len(vals) < 2 {
-		return nil, fmt.Errorf("insufficient_options: %d finite of %d declared", len(vals), len(options))
+		return nil, 0, fmt.Errorf("insufficient_options: %d finite of %d declared", len(vals), len(options))
 	}
 	maxS := math.Inf(-1)
 	for _, v := range vals {
 		maxS = math.Max(maxS, v.s)
 	}
-	var sum float64
+	var sum, mass float64
 	for _, v := range vals {
 		sum += math.Exp(v.s - maxS)
+		mass += math.Exp(v.s)
 	}
 	out := make(map[agentopt.EffortTier]float64, len(vals))
 	for _, v := range vals {
 		out[v.tier] = math.Exp(v.s-maxS) / sum
 	}
-	return out, nil
+	return out, mass, nil
 }
 
 // BuildPrompt renders the declared-option question for one turn. Fields are
@@ -225,8 +269,12 @@ func BuildPrompt(turn agentopt.TurnContext) string {
 		if v == "" {
 			return
 		}
-		if len(v) > maxFieldChars {
-			v = v[:maxFieldChars] + " ...[truncated]"
+		if len(v) > maxFieldBytes {
+			cut := maxFieldBytes
+			for cut > 0 && !utf8.RuneStart(v[cut]) {
+				cut--
+			}
+			v = v[:cut] + " ...[truncated]"
 		}
 		fmt.Fprintf(&b, "- %s: %s\n", name, v)
 	}

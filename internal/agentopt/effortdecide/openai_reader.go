@@ -17,20 +17,21 @@ import (
 // /v1/chat/completions endpoint (vLLM, SGLang, llama.cpp server, hosted
 // providers) using first-token top_logprobs. It generates one token, but the
 // decision is the distribution, not the sampled token.
+//
+// The decision model must return logprobs and answer on its first token.
+// Hosted reasoning models that refuse logprobs cannot serve here; a local
+// thinking model needs DisableThinking so its first token is not "<think>".
 type OpenAIReader struct {
-	BaseURL string // e.g. http://127.0.0.1:8000; "/v1/chat/completions" is appended
+	BaseURL string // http://host:8000 or http://host:8000/v1
 	Model   string
 	APIKey  string
-	Client  *http.Client
-}
-
-type chatReq struct {
-	Model       string    `json:"model"`
-	Messages    []chatMsg `json:"messages"`
-	MaxTokens   int       `json:"max_tokens"`
-	Temperature float64   `json:"temperature"`
-	Logprobs    bool      `json:"logprobs"`
-	TopLogprobs int       `json:"top_logprobs"`
+	// MaxTokensField names the output-cap field; "" means "max_tokens".
+	// Some providers accept only "max_completion_tokens".
+	MaxTokensField string
+	// DisableThinking sends chat_template_kwargs.enable_thinking=false, which
+	// vLLM and SGLang honor for Qwen3/DeepSeek-style templates.
+	DisableThinking bool
+	Client          *http.Client
 }
 
 type chatMsg struct {
@@ -53,21 +54,33 @@ type chatResp struct {
 
 // ReadOptions implements Reader.
 func (r *OpenAIReader) ReadOptions(ctx context.Context, prompt string, labels []string) (map[string]float64, error) {
-	body, err := json.Marshal(chatReq{
-		Model: r.Model,
-		Messages: []chatMsg{
+	maxField := r.MaxTokensField
+	if maxField == "" {
+		maxField = "max_tokens"
+	}
+	payload := map[string]any{
+		"model": r.Model,
+		"messages": []chatMsg{
 			{Role: "system", Content: "Reply with exactly one capital letter."},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens:   1,
-		Temperature: 0,
-		Logprobs:    true,
-		TopLogprobs: 20,
-	})
+		maxField:       1,
+		"temperature":  0,
+		"logprobs":     true,
+		"top_logprobs": 20,
+	}
+	if r.DisableThinking {
+		payload["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	url := strings.TrimRight(r.BaseURL, "/") + "/v1/chat/completions"
+	url := strings.TrimRight(r.BaseURL, "/")
+	if !strings.HasSuffix(url, "/v1") {
+		url += "/v1"
+	}
+	url += "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -90,7 +103,11 @@ func (r *OpenAIReader) ReadOptions(ctx context.Context, prompt string, labels []
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("decision endpoint status %d", resp.StatusCode)
+		snippet := strings.TrimSpace(string(raw))
+		if len(snippet) > 300 {
+			snippet = snippet[:300]
+		}
+		return nil, fmt.Errorf("decision endpoint status %d: %s", resp.StatusCode, snippet)
 	}
 	var cr chatResp
 	if err := json.Unmarshal(raw, &cr); err != nil {
@@ -105,7 +122,7 @@ func (r *OpenAIReader) ReadOptions(ctx context.Context, prompt string, labels []
 	}
 	out := map[string]float64{}
 	for _, tl := range cr.Choices[0].Logprobs.Content[0].TopLogprobs {
-		label := strings.TrimSpace(tl.Token)
+		label := normalizeLabel(tl.Token)
 		if !want[label] {
 			continue
 		}
@@ -120,6 +137,12 @@ func (r *OpenAIReader) ReadOptions(ctx context.Context, prompt string, labels []
 	return out, nil
 }
 
+// normalizeLabel maps first-token variants of an answer ("A", " A", "A)",
+// "**A", "a.") to the bare label.
+func normalizeLabel(tok string) string {
+	return strings.ToUpper(strings.Trim(tok, " \t\n*().:[]_`'\""))
+}
+
 // Environment knobs for FromEnv.
 const (
 	EnvDecider       = "FAK_EFFORT_DECIDER" // "decision-model" enables; empty/"off" disables
@@ -128,6 +151,9 @@ const (
 	EnvAPIKey        = "FAK_EFFORT_DECIDER_API_KEY"
 	EnvMinConfidence = "FAK_EFFORT_DECIDER_MIN_CONFIDENCE"
 	EnvTimeout       = "FAK_EFFORT_DECIDER_TIMEOUT" // Go duration, e.g. 500ms
+	EnvMinMass       = "FAK_EFFORT_DECIDER_MIN_DECLARED_MASS"
+	EnvMaxTokens     = "FAK_EFFORT_DECIDER_MAX_TOKENS_FIELD" // max_tokens | max_completion_tokens
+	EnvNoThinking    = "FAK_EFFORT_DECIDER_DISABLE_THINKING" // 1/true
 )
 
 // FromEnv builds a Decider from environment knobs. It returns (nil, nil) when
@@ -145,13 +171,41 @@ func FromEnv(getenv func(string) string) (*Decider, error) {
 	if url == "" || model == "" {
 		return nil, fmt.Errorf("%s needs %s and %s", EnvDecider, EnvURL, EnvModel)
 	}
-	cfg := Config{Reader: &OpenAIReader{BaseURL: url, Model: model, APIKey: getenv(EnvAPIKey)}}
-	if v := strings.TrimSpace(getenv(EnvMinConfidence)); v != "" {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return nil, fmt.Errorf("%s=%q: want an http(s) URL", EnvURL, url)
+	}
+	reader := &OpenAIReader{BaseURL: url, Model: model, APIKey: getenv(EnvAPIKey)}
+	switch f := strings.TrimSpace(getenv(EnvMaxTokens)); f {
+	case "", "max_tokens", "max_completion_tokens":
+		reader.MaxTokensField = f
+	default:
+		return nil, fmt.Errorf("%s=%q: want max_tokens or max_completion_tokens", EnvMaxTokens, f)
+	}
+	if v := strings.TrimSpace(getenv(EnvNoThinking)); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("%s=%q: want a boolean", EnvNoThinking, v)
+		}
+		reader.DisableThinking = b
+	}
+	cfg := Config{Reader: reader}
+	prob := func(key string, dst *float64) error {
+		v := strings.TrimSpace(getenv(key))
+		if v == "" {
+			return nil
+		}
 		f, err := strconv.ParseFloat(v, 64)
 		if err != nil || f <= 0 || f > 1 {
-			return nil, fmt.Errorf("%s=%q: want a probability in (0,1]", EnvMinConfidence, v)
+			return fmt.Errorf("%s=%q: want a probability in (0,1]", key, v)
 		}
-		cfg.MinConfidence = f
+		*dst = f
+		return nil
+	}
+	if err := prob(EnvMinConfidence, &cfg.MinConfidence); err != nil {
+		return nil, err
+	}
+	if err := prob(EnvMinMass, &cfg.MinDeclaredMass); err != nil {
+		return nil, err
 	}
 	if v := strings.TrimSpace(getenv(EnvTimeout)); v != "" {
 		d, err := time.ParseDuration(v)
