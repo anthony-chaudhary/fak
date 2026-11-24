@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // binPath is the freshly compiled customlintfixture binary shared by every test.
@@ -17,12 +19,11 @@ import (
 var binPath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "customlintfixture-bin-")
+	dir, err := testgit.ProcessTempDir("customlintfixture-bin-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "mkdtemp:", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(dir)
 	binPath = filepath.Join(dir, "customlintfixture")
 	if os.PathSeparator == '\\' {
 		binPath += ".exe"
@@ -31,9 +32,9 @@ func TestMain(m *testing.M) {
 	build.Stdout, build.Stderr = os.Stdout, os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "go build:", err)
-		os.Exit(1)
+		testgit.ExitProcessTemp(1)
 	}
-	os.Exit(m.Run())
+	testgit.ExitProcessTemp(m.Run())
 }
 
 // runBin drives the compiled binary as a subprocess and returns its exit code,

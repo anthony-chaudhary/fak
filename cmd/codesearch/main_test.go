@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // binPath is the compiled cmd/codesearch binary, built once in TestMain. The tests
@@ -17,7 +19,7 @@ import (
 var binPath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "codesearch-bin-")
+	dir, err := testgit.ProcessTempDir("codesearch-bin-")
 	if err != nil {
 		panic("mkdtemp: " + err.Error())
 	}
@@ -29,12 +31,10 @@ func TestMain(m *testing.M) {
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
-		os.RemoveAll(dir)
+		testgit.RemoveProcessTempDirs()
 		panic("build cmd/codesearch: " + err.Error())
 	}
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
+	testgit.ExitProcessTemp(m.Run())
 }
 
 // runBin executes the built binary and returns (exitCode, stdout, stderr).

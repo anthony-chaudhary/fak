@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // binPath is the freshly built cmd/devfresh binary under test. It is compiled
@@ -18,11 +20,7 @@ import (
 var binPath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "devfresh-bin-")
-	if err != nil {
-		panic(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := testgit.MustProcessTempDir("devfresh-bin-")
 	binPath = filepath.Join(dir, "devfresh")
 	if isWindows() {
 		binPath += ".exe"
@@ -32,7 +30,7 @@ func TestMain(m *testing.M) {
 	if err := build.Run(); err != nil {
 		panic("go build cmd/devfresh: " + err.Error())
 	}
-	os.Exit(m.Run())
+	testgit.ExitProcessTemp(m.Run())
 }
 
 func isWindows() bool {

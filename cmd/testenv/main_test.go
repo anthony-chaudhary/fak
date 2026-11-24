@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // binPath is the real cmd/testenv binary built once in TestMain so every case
@@ -18,11 +20,7 @@ import (
 var binPath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "testenv-bin-")
-	if err != nil {
-		panic(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := testgit.MustProcessTempDir("testenv-bin-")
 
 	name := "testenv"
 	if runtime.GOOS == "windows" {
@@ -36,7 +34,7 @@ func TestMain(m *testing.M) {
 	if err := build.Run(); err != nil {
 		panic("building cmd/testenv: " + err.Error())
 	}
-	os.Exit(m.Run())
+	testgit.ExitProcessTemp(m.Run())
 }
 
 // runBin drives the built binary as a subprocess and returns exit code, stdout

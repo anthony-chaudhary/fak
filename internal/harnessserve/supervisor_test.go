@@ -18,15 +18,13 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/processalive"
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 var fakeRuntimePath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "fak-harnessserve-runtime-")
-	if err != nil {
-		panic(err)
-	}
+	dir := testgit.MustProcessTempDir("fak-harnessserve-runtime-")
 	name := "fakeruntime"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -36,9 +34,7 @@ func TestMain(m *testing.M) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		panic("build fake runtime: " + err.Error() + ": " + string(output))
 	}
-	code := m.Run()
-	_ = os.RemoveAll(dir)
-	os.Exit(code)
+	testgit.ExitProcessTemp(m.Run())
 }
 
 func TestSupervisorLaunchReadinessOneTokenProbeAndGracefulStop(t *testing.T) {

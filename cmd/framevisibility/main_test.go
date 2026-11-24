@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // binPath is the real compiled cmd/framevisibility binary, built once in
@@ -17,19 +19,14 @@ import (
 var binPath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "framevisibility-bin")
-	if err != nil {
-		panic(err)
-	}
+	dir := testgit.MustProcessTempDir("framevisibility-bin-")
 	binPath = filepath.Join(dir, "framevisibility.exe")
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		panic("build failed: " + err.Error())
 	}
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
+	testgit.ExitProcessTemp(m.Run())
 }
 
 func runBin(t *testing.T, args ...string) (int, string, string) {

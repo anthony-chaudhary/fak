@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -30,7 +31,9 @@ const (
 // CreateProcess refuses (limit 32,767) before WSL starts, and the failure
 // surfaced with an empty message.
 func overlayMinePathsWSLWithin(ctx context.Context, srcRoot, wslRoot string, paths []string, checked func(string)) error {
-	stage, err := os.MkdirTemp("", "fak-validate-overlay-*")
+	// A killed validate leaks its stage; the owner-named dir lets the next
+	// overlay reap it.
+	stage, err := processalive.OwnedTempDir("fak-validate-overlay-")
 	if err != nil {
 		return err
 	}

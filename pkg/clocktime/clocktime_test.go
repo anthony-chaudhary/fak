@@ -8,17 +8,18 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // TestMain installs a synthetic IANA-style zone ("Syn/Dst": EST -5h until
 // 2026-03-08 07:00 UTC, then EDT -4h) via $ZONEINFO so DST tests never depend
 // on host tzdata availability.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "clocktime-zoneinfo-*")
+	dir, err := testgit.ProcessTempDir("clocktime-zoneinfo-")
 	if err != nil {
 		os.Exit(1)
 	}
-	defer os.RemoveAll(dir)
 	syn := filepath.Join(dir, "Syn")
 	if err := os.MkdirAll(syn, 0o755); err != nil {
 		panic(err)
@@ -31,7 +32,7 @@ func TestMain(m *testing.M) {
 	os.Setenv("ZONEINFO", dir)
 	code := m.Run()
 	os.Unsetenv("ZONEINFO")
-	os.Exit(code)
+	testgit.ExitProcessTemp(code)
 }
 
 // dstTzfile builds a minimal TZif v0 byte stream: EST (-5h) until

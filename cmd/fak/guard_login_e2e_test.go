@@ -61,19 +61,11 @@ func TestMain(m *testing.M) {
 	// and pointed models.json at a dead test port — which made a bare `pi` launch stop
 	// resolving to the live fak router. A package-level throwaway dir makes that class
 	// impossible for every test in this package, not just the ones that remember to guard.
-	piAgentDir, piErr := os.MkdirTemp("", "fak-test-pi-agent-")
-	if piErr != nil {
-		panic(piErr)
-	}
-	defer os.RemoveAll(piAgentDir)
+	piAgentDir := testgit.MustProcessTempDir("fak-test-pi-agent-")
 	_ = os.Setenv("PI_CODING_AGENT_DIR", piAgentDir)
 	// Keep registered agent launches off the machine-global journal. Linux CI cannot write
 	// /var/lib/fak, and package tests must never publish real session registrations.
-	registryDir, err := os.MkdirTemp("", "fak-test-session-registry-")
-	if err != nil {
-		panic(err)
-	}
-	defer os.RemoveAll(registryDir)
+	registryDir := testgit.MustProcessTempDir("fak-test-session-registry-")
 	_ = os.Setenv("FAK_SESSION_REGISTRY", filepath.Join(registryDir, "sessions.jsonl"))
 	// The developer shell may itself be guarded. Package tests start a fresh registry, so
 	// inherited lineage would point at a parent absent from that registry.
@@ -90,7 +82,7 @@ func TestMain(m *testing.M) {
 	divorceRefreshSpawn = func(context.Context, string) error { return nil }
 	// Hermetic git: fixture `git config user.*` writes and commits can never reach the real
 	// checkout or the operator's global config, even under a git hook's exported GIT_DIR.
-	os.Exit(testgit.RunGitIsolated(m))
+	testgit.ExitProcessTemp(testgit.RunGitIsolated(m))
 }
 
 // runGuardE2E execs this test binary in helper mode as `fak guard <args>` under env, with a

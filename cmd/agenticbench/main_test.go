@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // binPath is the freshly compiled cmd/agenticbench binary. Building it once in
@@ -16,9 +18,9 @@ import (
 var binPath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "agenticbench-bin")
+	dir, err := testgit.ProcessTempDir("agenticbench-bin-")
 	if err != nil {
-		os.Stderr.WriteString("mkdirtemp: " + err.Error() + "\n")
+		os.Stderr.WriteString("process temp dir: " + err.Error() + "\n")
 		os.Exit(1)
 	}
 	binPath = filepath.Join(dir, "agenticbench.exe")
@@ -26,11 +28,9 @@ func TestMain(m *testing.M) {
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		os.Stderr.WriteString("go build: " + err.Error() + "\n")
-		os.Exit(1)
+		testgit.ExitProcessTemp(1)
 	}
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
+	testgit.ExitProcessTemp(m.Run())
 }
 
 // runBin executes the compiled binary and returns exit code, stdout, stderr.

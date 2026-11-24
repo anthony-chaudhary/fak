@@ -6,19 +6,15 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/memorycotravel"
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // TestMain points the memory co-travel ledger at a temp file: every real re-home in this
 // package appends a default-shadow row, which must never reach the operator's ~/.claude.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "fak-rehome-cotravel-")
-	if err != nil {
-		panic(err)
-	}
+	dir := testgit.MustProcessTempDir("fak-rehome-cotravel-")
 	os.Setenv("FAK_MEMORY_COTRAVEL_LEDGER", filepath.Join(dir, "ledger.jsonl"))
-	code := m.Run()
-	_ = os.RemoveAll(dir)
-	os.Exit(code)
+	testgit.ExitProcessTemp(m.Run())
 }
 
 func mkTranscript(t *testing.T, cfg, project, sid, content string) {

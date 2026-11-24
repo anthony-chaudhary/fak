@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // binPath is the real crossauditcalibrate binary compiled once in TestMain. The
@@ -20,10 +21,7 @@ import (
 var binPath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "crossauditcalibrate-bin-*")
-	if err != nil {
-		panic(err)
-	}
+	dir := testgit.MustProcessTempDir("crossauditcalibrate-bin-")
 	exe := "crossauditcalibrate"
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
@@ -32,12 +30,10 @@ func TestMain(m *testing.M) {
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
-		_ = os.RemoveAll(dir)
+		testgit.RemoveProcessTempDirs()
 		panic("build crossauditcalibrate: " + err.Error())
 	}
-	code := m.Run()
-	_ = os.RemoveAll(dir)
-	os.Exit(code)
+	testgit.ExitProcessTemp(m.Run())
 }
 
 // runBin executes the compiled binary and returns (exitCode, stdout, stderr).

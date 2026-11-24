@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 var binPath string
@@ -24,10 +26,7 @@ var binPath string
 // against that real binary. A build failure fails the suite rather than silently
 // skipping the runtime proof.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "cfgprobe-bin-*")
-	if err != nil {
-		panic("cfgprobe test: MkdirTemp: " + err.Error())
-	}
+	dir := testgit.MustProcessTempDir("cfgprobe-bin-")
 	name := "cfgprobe"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -36,12 +35,10 @@ func TestMain(m *testing.M) {
 
 	out, err := exec.Command("go", "build", "-o", binPath, ".").CombinedOutput()
 	if err != nil {
-		os.RemoveAll(dir)
+		testgit.RemoveProcessTempDirs()
 		panic("cfgprobe test: go build failed: " + err.Error() + "\n" + string(out))
 	}
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
+	testgit.ExitProcessTemp(m.Run())
 }
 
 // runBin drives the compiled binary with args and returns its exit code plus the

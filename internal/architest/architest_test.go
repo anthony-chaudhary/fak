@@ -785,7 +785,7 @@ var tier = map[string]int{
 	"validate":       2, // isolated prospective validation pipeline over affectedtests(1), committedtree(2) and windowgate(2).
 	"radixpager":     4, // ctxmmu pager adapter over radixkv(4) and model; imported only by pkg/ctxmmu.
 	"naivecontrol":   2,
-	"testgit":        1,
+	"testgit":        2, // hermetic test-process helpers; a foundation-composite because ProcessTempDir composes processalive(1) to reap dead owners' temp dirs.
 	"fakroot":        1,
 	"stepobs":        2,
 	"h2hbench":       1, // off-path engine head-to-head benchmark; stdlib-only, imports nothing internal.

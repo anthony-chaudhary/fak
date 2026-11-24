@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // binPath is the real cmd/fak-selfupdate binary compiled once in TestMain and then
@@ -18,10 +20,7 @@ import (
 var binPath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "fak-selfupdate-bin-")
-	if err != nil {
-		panic(err)
-	}
+	dir := testgit.MustProcessTempDir("fak-selfupdate-bin-")
 	suffix := ""
 	if runtime.GOOS == "windows" {
 		suffix = ".exe"
@@ -31,12 +30,10 @@ func TestMain(m *testing.M) {
 	build.Stdout = os.Stderr
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
-		os.RemoveAll(dir)
+		testgit.RemoveProcessTempDirs()
 		panic("build cmd/fak-selfupdate: " + err.Error())
 	}
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
+	testgit.ExitProcessTemp(m.Run())
 }
 
 // runBin executes the compiled binary with args and returns (exitCode, stdout, stderr).

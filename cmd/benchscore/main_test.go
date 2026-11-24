@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
 // binPath is the freshly compiled cmd/benchscore binary driven as a subprocess
@@ -16,19 +18,14 @@ import (
 var binPath string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "benchscore-bin-")
-	if err != nil {
-		panic(err)
-	}
+	dir := testgit.MustProcessTempDir("benchscore-bin-")
 	binPath = filepath.Join(dir, "benchscore.exe")
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	if out, err := build.CombinedOutput(); err != nil {
-		os.RemoveAll(dir)
+		testgit.RemoveProcessTempDirs()
 		panic("go build ./cmd/benchscore failed: " + err.Error() + "\n" + string(out))
 	}
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
+	testgit.ExitProcessTemp(m.Run())
 }
 
 // runBin executes the compiled binary with args in dir, returning exit code,
