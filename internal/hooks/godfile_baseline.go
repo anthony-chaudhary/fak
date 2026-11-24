@@ -19,7 +19,6 @@ var godfileGrandfathered = map[string]int{
 	"internal/gateway/gateway.go":             3070,
 	"internal/gateway/http.go":                1680,
 	"internal/gateway/messages.go":            1710,
-	"internal/gateway/metrics.go":             3354,
 	"internal/operatorbrief/operatorbrief.go": 1576,
 	"internal/sessionaudit/sessionaudit.go":   1737,
 }
