@@ -198,6 +198,46 @@ func TestFoldReportVerdicts(t *testing.T) {
 }
 
 // fak-test:runtime fast est=5ms lane=default
+func TestFoldReportVerdictsGateOnBaselinePairFloor(t *testing.T) {
+	// Baseline pair: the reference build at two batch sizes, mean KL (2*0.002+2*0.004)/4 = 0.003.
+	pair := FoldReport([]PromptReport{
+		{Name: "a", GatePass: true, Greedy: GreedyIdentical, Compared: 2, KLMean: 0.002},
+		{Name: "b", GatePass: true, Greedy: GreedyIdentical, Compared: 2, KLMean: 0.004},
+	}, FlipThresholds)
+	gate, err := KLNoiseFloorFromPair(pair, 2)
+	if err != nil || !near(gate.Floor, 0.003, 1e-15) || gate.Multiple != 2 {
+		t.Fatalf("floor from pair: %+v %v", gate, err)
+	}
+	th := FlipThresholds
+	th.KLNoise = &gate
+	// Cosine and relative L2 pass in both candidates; only the KL axis separates them.
+	quiet := PromptReport{Name: "a", GatePass: true, Greedy: GreedyIdentical, Compared: 4, KLMean: 0.005}
+	loud := PromptReport{Name: "a", GatePass: true, Greedy: GreedyIdentical, Compared: 4, KLMean: 0.007}
+	if r := FoldReport([]PromptReport{quiet}, th); r.Verdict != VerdictPass || r.KLNoise.Verdict != KLNoiseWithin {
+		t.Fatalf("inside 2x the baseline floor: %+v", r.KLNoise)
+	}
+	if r := FoldReport([]PromptReport{loud}, th); r.Verdict != VerdictFail || r.KLNoise.Verdict != KLNoiseExceeded {
+		t.Fatalf("beyond 2x the baseline floor: %+v verdict=%s", r.KLNoise, r.Verdict)
+	}
+
+	refused := map[string]Report{
+		"bit-identical pair": FoldReport([]PromptReport{{GatePass: true, Greedy: GreedyIdentical, Compared: 3}}, FlipThresholds),
+		"excluded positions": FoldReport([]PromptReport{{Name: "x", GatePass: true, Greedy: GreedyIdentical, Compared: 3, Excluded: 1, KLMean: 0.01}}, FlipThresholds),
+		"nothing compared":   FoldReport([]PromptReport{{GatePass: true, Greedy: GreedyIdentical}}, FlipThresholds),
+		"nan pair":           {Prompts: []PromptReport{{Compared: 1, KLMean: math.NaN()}}},
+		"negative pair":      {Prompts: []PromptReport{{Compared: 1, KLMean: -0.1}}},
+	}
+	for name, pair := range refused {
+		if g, err := KLNoiseFloorFromPair(pair, 2); !errors.Is(err, ErrBadNoiseFloor) {
+			t.Fatalf("%s: %+v %v", name, g, err)
+		}
+	}
+	if _, err := KLNoiseFloorFromPair(pair, 0); !errors.Is(err, ErrBadNoiseFloor) {
+		t.Fatalf("zero multiple: %v", err)
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
 func TestFoldReportVerdictsRefuseUnusableKLNoise(t *testing.T) {
 	nan, inf := math.NaN(), math.Inf(1)
 	ok := PromptReport{GatePass: true, StrictPass: true, Greedy: GreedyIdentical, Compared: 2, KLMean: 0.001}

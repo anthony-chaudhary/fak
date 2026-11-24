@@ -390,6 +390,38 @@ func EvaluateKLNoise(prompts []PromptReport, gate *KLNoiseFloor) KLNoiseReport {
 	return r
 }
 
+// KLNoiseFloorFromPair derives the noise-floor gate from a baseline pair: a
+// Report comparing two reference runs that should agree (same build at two
+// batch sizes, or two repeats). The floor is the pair's position-weighted mean
+// KL. A pair with excluded positions understates its own noise, and a
+// bit-identical pair has no noise to scale by; both are refused so the caller
+// falls back to the strict gate instead of a silently tight or undefined one.
+func KLNoiseFloorFromPair(pair Report, multiple float64) (KLNoiseFloor, error) {
+	var sum float64
+	compared := 0
+	for _, p := range pair.Prompts {
+		if p.Excluded > 0 {
+			return KLNoiseFloor{}, fmt.Errorf("%w: baseline prompt %q excluded %d positions", ErrBadNoiseFloor, p.Name, p.Excluded)
+		}
+		if p.Compared <= 0 {
+			continue
+		}
+		if math.IsNaN(p.KLMean) || math.IsInf(p.KLMean, 0) || p.KLMean < 0 {
+			return KLNoiseFloor{}, fmt.Errorf("%w: baseline prompt %q mean KL %v", ErrBadNoiseFloor, p.Name, p.KLMean)
+		}
+		sum += p.KLMean * float64(p.Compared)
+		compared += p.Compared
+	}
+	if compared == 0 {
+		return KLNoiseFloor{}, fmt.Errorf("%w: baseline pair compared no positions", ErrBadNoiseFloor)
+	}
+	g := KLNoiseFloor{Floor: sum / float64(compared), Multiple: multiple}
+	if err := g.validate(); err != nil {
+		return KLNoiseFloor{}, err
+	}
+	return g, nil
+}
+
 // Report is the whole comparison receipt.
 type Report struct {
 	Schema        string         `json:"schema"`
