@@ -318,3 +318,36 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o fak-linux-arm64 ./cmd/fak
 `fak` onto your `$(go env GOBIN)` (`$GOPATH/bin`). The Go module is the repository root, so
 the `...@latest` pseudo-path resolves directly — no clone needed. You can equally use the
 prebuilt-binary download (sections 1 and 2 above) or the build-from-source fallback.
+
+---
+
+## Uninstall
+
+Run these steps in order; skip any that do not apply to your install.
+
+1. Remove the `claude`/`codex` launch shims, if you created them with `fak launch install`:
+   ```bash
+   fak launch uninstall --provider all   # or --provider claude | codex
+   ```
+2. Remove the gateway service, if you installed one with `fak node install`
+   (launchd agent, systemd `--user` unit, or Windows Scheduled Task):
+   ```bash
+   fak node install --uninstall
+   ```
+3. Remove the binary, matching how you installed it:
+   - One-line installer: `rm "$(command -v fak)"`. It installs to `$FAK_INSTALL_DIR`, else
+     `/usr/local/bin`, `/opt/homebrew/bin` (macOS), or `~/.local/bin`. A Vulkan install also
+     placed a `spirv/` directory beside the binary; remove it first with
+     `rm -r "$(dirname "$(command -v fak)")/spirv"`, then remove the binary.
+   - Homebrew: `brew uninstall fak`.
+   - `go install`: delete `fak` (`fak.exe` on Windows) from `$(go env GOBIN)`, or from
+     `$(go env GOPATH)/bin` if GOBIN is unset.
+   - Windows zip: delete `fak.exe` from wherever you moved it.
+4. Delete downloaded models: remove the whole `$FAK_MODELS_DIR` directory, or by default
+   `fak-models` inside your user cache directory (`~/.cache` on Linux, `~/Library/Caches`
+   on macOS, `%LocalAppData%` on Windows). It holds plain files (`hub/`, `gguf/`) plus the
+   model alias registry.
+5. Delete fak's settings and local state: the `~/.fak/` directory, and the `fak` directory
+   inside your user config directory (`~/.config` on Linux, `~/Library/Application Support`
+   on macOS, `%AppData%` on Windows). If you ran `fak codex config --write`, also remove the
+   `fak` provider block it added to that workspace's `.codex/config.toml`.

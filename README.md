@@ -82,7 +82,7 @@ claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
 ## Try fak
 
-Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`). More install options are in the [install-options matrix](INSTALL.md#install-options-at-a-glance).
+Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`). More install options are in the [install-options matrix](INSTALL.md#install-options-at-a-glance); removal steps are in [Uninstall](INSTALL.md#uninstall).
 
 1. Start local inference on a supported Apple Silicon Mac. `fak up` sizes the model
    and context to your memory and serves an OpenAI-compatible endpoint on `:8080`.
@@ -95,16 +95,16 @@ Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak
 2. In another terminal, point an agent at it. Use `fak opencode`, `fak codex`,
    `fak claude`, or [Pi](docs/integrations/pi.md). Give it real work, e.g.
    *"Using parallel subagents, audit the packages under internal/ and report their status."*
-   `fak up` serves the OpenAI chat-completions API only. `fak claude` needs the
-   Anthropic Messages API, so start `fak serve --gguf qwen38:27b-q4` for it instead.
+   `fak up` serves only OpenAI chat completions (enough for OpenCode and Pi). `fak claude` and
+   `fak codex` need Messages and Responses: run `fak serve --gguf qwen38:27b-q4` for them.
    No separate router is needed: agents talk to the local endpoint directly.
 
 ### Governance for external agents (`fak guard`)
 
-Already running Claude Code or Codex? Wrap the agent you already run with one command
-to add a capability floor: the kernel adjudicates every tool call before it runs —
-structural denies and danger rules block by structure, and the strict `fail_closed`
-posture makes only allow-listed tools run. fak forwards your Codex subscription credentials (no API key required):
+Already running Claude Code or Codex? One command adds a capability floor around it.
+The kernel checks every tool call before it runs. Structural denies and danger
+rules block by structure; the strict `fail_closed` posture runs only allow-listed tools.
+fak forwards your Codex subscription credentials (no API key required):
 
 ```bash
 fak guard -- codex
@@ -117,6 +117,30 @@ no key, no model, and no setup, run the offline agent or take the
 ```bash
 fak agent --offline   # -> task completed
 ```
+
+### Works with the agent you already use
+
+| Agent | Command | Needs |
+|---|---|---|
+| Claude Code | `fak claude` | `fak serve` (Anthropic Messages, `/v1/messages`) |
+| Codex | `fak codex`, or `fak guard -- codex` | `fak serve` (OpenAI Responses, `/v1/responses`) |
+| OpenCode | `fak opencode` | `fak up` or `fak serve` (OpenAI chat completions) |
+| Pi | `fak pi` · [Pi guide](docs/integrations/pi.md) | `fak up` or `fak serve` (OpenAI chat completions) |
+
+## Your machine, your files
+
+- **Local by default.** `fak serve` listens on `127.0.0.1:8080`. It refuses to start on an
+  address reachable from off this host unless you name an inbound token
+  (for example `--require-key-env`) or pass the deliberately named
+  `--unsafe-allow-unauthenticated-bind`.
+- **No opaque model store.** Downloaded models are plain files at
+  `<cache>/fak-models/hub/<owner>/<repo>/<revision>/<file>` (your user cache directory,
+  or `$FAK_MODELS_DIR/hub`). Copy, inspect, or delete them with ordinary tools.
+- **No phone-home.** No analytics SDK is linked, and fak runs no update check on its own:
+  `fak self-update` and `fak release-staleness` act only when you invoke them.
+- **Clean exit.** [Uninstall](INSTALL.md#uninstall) covers the binary, services and shims, plus models and settings.
+- **Credit upstream.** Parts of fak are adapted from ggml / llama.cpp;
+  attributions and pinned revisions are in [NOTICE.md](NOTICE.md).
 
 ## What changed since 2026-10-12
 
@@ -186,4 +210,4 @@ is linked instead of an unrecorded mirror.
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-11-10 vs VERSION 0.57.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-11-10 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
+<!-- readme-verified: 2026-11-24 vs VERSION 0.57.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-11-24 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
