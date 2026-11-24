@@ -1,18 +1,13 @@
 package issueownerprompt
 
 import (
-	"path/filepath"
-	"runtime"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func BenchmarkIssueOwnerPrompt(b *testing.B) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		b.Fatal("runtime.Caller failed")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	dir := filepath.Join(root, ".claude", "goal-prompts")
+	dir := repotest.Path(b, ".claude/goal-prompts")
 
 	if err := ValidateDir(dir); err != nil {
 		b.Fatalf("ValidateDir failed: %v", err)

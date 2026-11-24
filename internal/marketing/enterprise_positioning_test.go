@@ -2,11 +2,11 @@ package marketing
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // enterprise_positioning_test.go — the witness that binds the shipped enterprise
@@ -29,17 +29,11 @@ import (
 // ("| 1 | ... |"), the one-to-one mapping the acceptance counts.
 var numberedGapRowRE = regexp.MustCompile(`(?m)^\|\s*\d+\s*\|.*\|`)
 
-// readEnterprisePositioningPage returns the page text, locating it from this test
-// file's own path (the safecommit/reasons_doc_test.go repo-root idiom) so the test
-// is runnable from the package dir with no CWD assumption.
+// readEnterprisePositioningPage returns the page text, resolved from the
+// repository root so the test does not depend on the source path layout.
 func readEnterprisePositioningPage(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed; cannot locate the repo root")
-	}
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	pagePath := filepath.Join(repoRoot, "docs", "enterprise-positioning.md")
+	pagePath := repotest.Path(t, "docs/enterprise-positioning.md")
 	b, err := os.ReadFile(pagePath)
 	if err != nil {
 		t.Fatalf("read enterprise positioning page at %s: %v\n"+

@@ -5,10 +5,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // TestWiringAuditContract keeps WIRING-AUDIT.md honest against the tree. It
@@ -23,11 +24,7 @@ func TestWiringAuditContract(t *testing.T) {
 
 	const importPath = "github.com/anthony-chaudhary/fak/internal/landingvoucher"
 
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed; cannot derive the repository root")
-	}
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	repoRoot := repotest.Root(t)
 
 	// cmd and internal are required (production entry points and the internal
 	// hop space the debt-lanes census reads); the rest are scanned when present

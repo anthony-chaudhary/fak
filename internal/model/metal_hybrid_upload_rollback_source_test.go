@@ -10,10 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // fak-test:runtime host est=10s lane=standard
@@ -26,11 +27,7 @@ func TestMetalHybridUploadRollbackActualSource(t *testing.T) {
 	if err != nil {
 		t.Fatal("Go compiler required for actual-source ownership regression:", err)
 	}
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate actual source")
-	}
-	root := filepath.Dir(here)
+	root := repotest.PackageDir(t)
 	method := metalRollbackSourceDecl(t, filepath.Join(root, "metal_prefill_hybrid.go"), "metalWeightsQwen35Hybrid")
 	helper := metalRollbackSourceDecl(t, filepath.Join(root, "cleanup_siblings.go"), "suppressBackendCleanupPanic")
 	dir := t.TempDir()

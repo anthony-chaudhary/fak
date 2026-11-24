@@ -2,11 +2,11 @@ package skillfootprint
 
 import (
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/capindex"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // skillCard builds one at-rest skill card with a chosen name and resident
@@ -19,15 +19,10 @@ func skillCard(name, desc string) capindex.CapCard {
 	}
 }
 
-// repoRootForTest locates the module root from THIS test's own source path, so the
-// real-tree probes below are independent of the working directory a runner picks.
+// repoRootForTest locates the module root for the real-tree probes below.
 func repoRootForTest(tb testing.TB) string {
 	tb.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		tb.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	return repotest.Root(tb)
 }
 
 // TestFoldPartitionsEveryFloorExactly pins the property the gate depends on: each

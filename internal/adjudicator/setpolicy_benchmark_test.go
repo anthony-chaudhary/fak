@@ -8,12 +8,12 @@ import (
 	"go/token"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // BenchmarkSetPolicyScaling measures the complete policy-swap path. Its ns/op
@@ -77,11 +77,7 @@ func TestSetPolicyBuildsLargeIndexBeforeAtomicSwap(t *testing.T) {
 	// flakes on loaded CI runners without detecting lock contention. The
 	// performance invariant is exact: SetPolicy must finish the O(predicate-count)
 	// index build before its single atomic state publication.
-	_, source, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate test source")
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(filepath.Dir(source), "decide.go"), nil, 0)
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repotest.PackageDir(t), "decide.go"), nil, 0)
 	if err != nil {
 		t.Fatalf("parse decide.go: %v", err)
 	}

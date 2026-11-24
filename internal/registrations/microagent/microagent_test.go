@@ -5,13 +5,13 @@ import (
 	"go/token"
 	"io/fs"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 
 	// The microagent-minimal set UNDER TEST. This external test package blank-imports
 	// ONLY this package, so the abi registries the runtime tests below walk reflect the
@@ -62,17 +62,11 @@ func leafImports(t *testing.T, dir string) map[string]bool {
 	return leaves
 }
 
-// pkgDirs locates the microagent-minimal dir and the full-defconfig dir from this test
-// file's own compiled path (runtime.Caller), so the test is independent of the working
-// directory the runner (WSL / CI) launches it from.
+// pkgDirs locates the microagent-minimal dir and the full-defconfig dir.
 func pkgDirs(t *testing.T) (minimal, full string) {
 	t.Helper()
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed — cannot locate the microagent package dir")
-	}
-	minimal = filepath.Dir(self) // internal/registrations/microagent
-	full = filepath.Dir(minimal) // internal/registrations
+	minimal = repotest.PackageDir(t) // internal/registrations/microagent
+	full = filepath.Dir(minimal)     // internal/registrations
 	return minimal, full
 }
 

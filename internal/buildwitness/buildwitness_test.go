@@ -2,21 +2,16 @@ package buildwitness
 
 import (
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
-// repoRoot walks up from this test file to the module root (the dir holding go.mod).
+// repoRoot returns the module root (the dir holding go.mod).
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Skip("cannot resolve caller path")
-	}
-	// self = <root>/internal/buildwitness/buildwitness_test.go → up three.
-	return filepath.Dir(filepath.Dir(filepath.Dir(self)))
+	return repotest.Root(t)
 }
 
 // TestCmdFakBuildsWithDefaultTags fails when `go build ./cmd/fak` is red under default tags,

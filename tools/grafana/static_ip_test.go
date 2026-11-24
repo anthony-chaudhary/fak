@@ -4,9 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // TestComposeServicesPinStaticIPs keeps every published service on a fixed
@@ -60,11 +61,7 @@ func TestComposeUnauthenticatedAPIsBindLoopback(t *testing.T) {
 
 func readCompose(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "docker-compose.yml"))
+	raw, err := os.ReadFile(filepath.Join(repotest.PackageDir(t), "docker-compose.yml"))
 	if err != nil {
 		t.Fatalf("read docker-compose.yml: %v", err)
 	}

@@ -1,9 +1,9 @@
 package orgdebt
 
 import (
-	"path/filepath"
-	"runtime"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func TestEvaluateClean(t *testing.T) {
@@ -265,11 +265,7 @@ func TestEvaluateUnindexedLeaves(t *testing.T) {
 }
 
 func TestScanWorkspace(t *testing.T) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot determine test location")
-	}
-	root := filepath.Dir(filepath.Dir(filepath.Dir(filename)))
+	root := repotest.Root(t)
 	in, err := ScanWorkspace(root)
 	if err != nil {
 		t.Fatalf("ScanWorkspace error: %v", err)

@@ -4,20 +4,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
-// repoRoot resolves the repository root from this test's source path:
-// internal/covmatrix/precision_test.go -> two dirs up from internal/.
+// repoRoot resolves the repository root.
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Skip("cannot locate test source path")
-	}
-	return filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+	return repotest.Root(t)
 }
 
 func readSource(t *testing.T, rel ...string) string {

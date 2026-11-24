@@ -5,11 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // fakEngineBatchingPath is the hand-authored continuous-batching board (uid
@@ -36,11 +36,7 @@ type fakEngineBatchingDashboard struct {
 
 func loadFakEngineBatching(t *testing.T) fakEngineBatchingDashboard {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	path := filepath.Join(filepath.Dir(file), filepath.FromSlash(fakEngineBatchingPath))
+	path := filepath.Join(repotest.PackageDir(t), filepath.FromSlash(fakEngineBatchingPath))
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

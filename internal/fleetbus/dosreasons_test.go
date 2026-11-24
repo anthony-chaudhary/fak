@@ -2,10 +2,10 @@ package fleetbus
 
 import (
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // TestReasonsRegisteredInDosToml binds the Go closed vocabulary to the workspace
@@ -99,16 +99,10 @@ func reasonFieldValue(block, field string) string {
 	return ""
 }
 
-// readRepoDosToml reads the repo-root dos.toml relative to this test's own source
-// path, so the lookup does not depend on the working directory the suite runs from.
+// readRepoDosToml reads the repo-root dos.toml.
 func readRepoDosToml(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
-	}
-	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	b, err := os.ReadFile(filepath.Join(root, "dos.toml"))
+	b, err := os.ReadFile(repotest.Path(t, "dos.toml"))
 	if err != nil {
 		t.Fatalf("read repo dos.toml: %v", err)
 	}

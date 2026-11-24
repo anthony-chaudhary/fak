@@ -3,40 +3,20 @@ package agentsindex
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
-// guidanceRoot resolves the repository root that holds AGENTS.md. runtime.Caller
-// paths are module-relative under -trimpath (the isolated buildcheck/validate
-// compile), so the caller-derived root is only a first candidate; walking up from
-// the test's working directory (go test runs in the package dir) finds the real
-// checkout in both compile modes.
+// guidanceRoot resolves the repository root that holds AGENTS.md.
 func guidanceRoot(t *testing.T) string {
 	t.Helper()
-	if _, file, _, ok := runtime.Caller(0); ok {
-		root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-		if fileExists(filepath.Join(root, "AGENTS.md")) {
-			return root
-		}
+	root := repotest.Root(t)
+	if !fileExists(filepath.Join(root, "AGENTS.md")) {
+		t.Fatalf("AGENTS.md not found at repository root %s", root)
 	}
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("resolve working directory: %v", err)
-	}
-	for i := 0; i < 8; i++ {
-		if fileExists(filepath.Join(dir, "AGENTS.md")) {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	t.Fatal("locate AGENTS.md above the package directory")
-	return ""
+	return root
 }
 
 func fileExists(path string) bool {

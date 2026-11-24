@@ -2,12 +2,11 @@ package adjudicator
 
 import (
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // reversibilityEmittedReasonToken is the wire spelling of abi.VerdictRequireWitness —
@@ -106,17 +105,10 @@ func reasonFieldTrue(block, field string) bool {
 	return false
 }
 
-// readRepoDosToml reads the repo-root dos.toml located relative to this test's own
-// source path (internal/adjudicator), so the lookup is independent of the test's
-// working directory.
+// readRepoDosToml reads the repo-root dos.toml.
 func readRepoDosToml(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
-	}
-	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	b, err := os.ReadFile(filepath.Join(root, "dos.toml"))
+	b, err := os.ReadFile(repotest.Path(t, "dos.toml"))
 	if err != nil {
 		t.Fatalf("read repo dos.toml: %v", err)
 	}

@@ -7,9 +7,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // q2kWitnessSameFloatBits requires two float32 values to be bit-identical.
@@ -241,13 +242,10 @@ func TestQ2KReduceProductionCallerReachability(t *testing.T) {
 }
 
 // TestQ2KReducePinnedSourceProvenance is a non-vacuous source guard. It reads
-// THIS file (via runtime.Caller) and the pinned amd64 seam source, requiring the
+// THIS file (from the package directory) and the pinned amd64 seam source, requiring the
 // expected test symbols and upstream provenance strings to be literally present.
 func TestQ2KReducePinnedSourceProvenance(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatalf("runtime.Caller(0) failed")
-	}
+	thisFile := filepath.Join(repotest.PackageDir(t), "quant_kquant_int8_q2k_amd64_test.go")
 	self, err := os.ReadFile(thisFile)
 	if err != nil {
 		t.Fatalf("read self %q: %v", thisFile, err)
@@ -265,7 +263,7 @@ func TestQ2KReducePinnedSourceProvenance(t *testing.T) {
 		}
 	}
 
-	impl := filepath.Join(filepath.Dir(thisFile), "quant_kquant_int8_q2k_amd64.go")
+	impl := filepath.Join(repotest.PackageDir(t), "quant_kquant_int8_q2k_amd64.go")
 	implBytes, err := os.ReadFile(impl)
 	if err != nil {
 		t.Fatalf("read impl %q: %v", impl, err)

@@ -3,9 +3,10 @@ package grafana
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // TestFleetNodeFileSDMountContract keeps the supervisor-generated fleet-node
@@ -14,11 +15,7 @@ import (
 // plus the matching in-container file-SD path—not tracking generated node
 // identities.
 func TestFleetNodeFileSDMountContract(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	dir := filepath.Dir(file)
+	dir := repotest.PackageDir(t)
 	read := func(name string) string {
 		t.Helper()
 		raw, err := os.ReadFile(filepath.Join(dir, name))

@@ -4,20 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
-// workflowDir locates .github/workflows from the test's own source location, so the
-// guard works from any working directory (the package is run from .github/workflows).
+// workflowDir returns .github/workflows, the package directory go test runs in.
 func workflowDir(t *testing.T) string {
 	t.Helper()
-	if _, file, _, ok := runtime.Caller(0); ok {
-		dir := filepath.Dir(file)
-		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
-			return dir
-		}
+	dir := repotest.PackageDir(t)
+	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+		return dir
 	}
 	t.Fatalf("could not locate the workflows directory")
 	return ""

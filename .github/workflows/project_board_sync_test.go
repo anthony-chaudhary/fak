@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // GitHubContext represents the subset of GitHub Actions event context
@@ -47,26 +48,9 @@ func locateWorkflowFile(t *testing.T) string {
 			return cand
 		}
 	}
-	if _, file, _, ok := runtime.Caller(0); ok {
-		cand := filepath.Join(filepath.Dir(file), "project-board-sync.yml")
-		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
-			return cand
-		}
-	}
-	wd, err := os.Getwd()
-	if err == nil {
-		cur := wd
-		for i := 0; i < 6; i++ {
-			cand := filepath.Join(cur, ".github", "workflows", "project-board-sync.yml")
-			if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
-				return cand
-			}
-			parent := filepath.Dir(cur)
-			if parent == cur {
-				break
-			}
-			cur = parent
-		}
+	cand := filepath.Join(repotest.PackageDir(t), "project-board-sync.yml")
+	if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+		return cand
 	}
 	t.Fatalf("could not locate project-board-sync.yml")
 	return ""

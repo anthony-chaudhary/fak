@@ -17,15 +17,13 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func sourceDir(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	return filepath.Dir(file)
+	return repotest.PackageDir(t)
 }
 
 func writeFile(t *testing.T, path, body string, mode os.FileMode) {

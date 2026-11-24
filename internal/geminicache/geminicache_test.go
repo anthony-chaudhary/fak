@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/boundarylint"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func TestCachedContentLifecycleCopiesPinnedProviderContract(t *testing.T) {
@@ -199,11 +198,7 @@ func TestCachedContentProvenancePinsGeneratedSDK(t *testing.T) {
 }
 
 func TestClientDefaultHTTPClientHasTimeout(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate package source")
-	}
-	findings, err := boundarylint.Scan([]string{filepath.Dir(file)}, boundarylint.DefaultRules())
+	findings, err := boundarylint.Scan([]string{repotest.PackageDir(t)}, boundarylint.DefaultRules())
 	if err != nil {
 		t.Fatal(err)
 	}

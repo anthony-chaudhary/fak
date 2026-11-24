@@ -3,18 +3,14 @@ package issueownerprompt
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func TestTrackedResolversComposeCanonicalLifecycle(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	if err := ValidateDir(filepath.Join(root, ".claude", "goal-prompts")); err != nil {
+	if err := ValidateDir(repotest.Path(t, ".claude/goal-prompts")); err != nil {
 		t.Fatal(err)
 	}
 }

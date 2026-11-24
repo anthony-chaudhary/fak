@@ -3,13 +3,12 @@ package superloop
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/relay"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // verifiedSteps builds a ledger-verified progress read with n re-verifiable steps —
@@ -279,15 +278,10 @@ func spinningDosBlock(content, header string) string {
 	return content[i:]
 }
 
-// readRepoDosTomlForSpinning reads the repo-root dos.toml relative to this test's
-// own source path, independent of the test working directory.
+// readRepoDosTomlForSpinning reads the repo-root dos.toml.
 func readRepoDosTomlForSpinning(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
-	}
-	b, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", "dos.toml"))
+	b, err := os.ReadFile(repotest.Path(t, "dos.toml"))
 	if err != nil {
 		t.Fatalf("read repo dos.toml: %v", err)
 	}

@@ -8,20 +8,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessresolve"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 const controlTaskDigest = "b82b6d9e17853a40fa37ffa4b8d78da53bc42bab3f6d6ffbe21ba876cf2d7fa3"
 
 func TestPairedStudyMaterialsAreSelfContainedAndVerified(t *testing.T) {
-	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	study := filepath.Join(root, "docs", "benchmarks", "harness-control-study")
+	study := repotest.Path(t, "docs/benchmarks/harness-control-study")
 
 	readme := mustRead(t, filepath.Join(study, "README.md"))
 	for _, b := range readme {

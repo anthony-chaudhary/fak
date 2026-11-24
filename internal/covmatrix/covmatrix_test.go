@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func TestFamiliesMatchResolver(t *testing.T) {
@@ -28,12 +29,7 @@ func TestFamiliesMatchResolver(t *testing.T) {
 // are the identity Llama default or families detected by a config predicate rather than a
 // resolver substring; those are covered by the model-package conformance contract, #1081.)
 func TestResolverTokensExistInSource(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Skip("cannot locate test source path")
-	}
-	// internal/covmatrix/covmatrix_test.go -> repo root is two dirs up from internal/.
-	root := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+	root := repotest.Root(t)
 	resolver := filepath.Join(root, "internal", "model", "tensor_resolver.go")
 	b, err := os.ReadFile(resolver)
 	if err != nil {
@@ -302,17 +298,12 @@ func TestCountBy(t *testing.T) {
 	}
 }
 
-// modelSource reads one file out of internal/model relative to this test's own path, or
+// modelSource reads one file out of internal/model under the repo root, or
 // skips. It is the file-loading half of TestResolverTokensExistInSource, shared by the two
 // cross-checks below so each one asserts rather than re-derives the repo layout.
 func modelSource(t *testing.T, name string) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Skip("cannot locate test source path")
-	}
-	// internal/covmatrix/covmatrix_test.go -> repo root is two dirs up from internal/.
-	root := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+	root := repotest.Root(t)
 	b, err := os.ReadFile(filepath.Join(root, "internal", "model", name))
 	if err != nil {
 		t.Skipf("internal/model/%s not readable (%v); cross-check skipped", name, err)

@@ -6,10 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 type supportWatchFixture struct {
@@ -22,12 +23,8 @@ type supportWatchFixture struct {
 }
 
 func TestQwen4ExpSupportWatchDocument(t *testing.T) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve support watch test path")
-	}
-	packageDir := filepath.Dir(filename)
-	docPath := filepath.Join(packageDir, "..", "..", "docs", "notes", "QWEN4EXP-SUPPORT-ROLLBACK-WATCH-2026-08-26.md")
+	packageDir := repotest.PackageDir(t)
+	docPath := repotest.Path(t, "docs/notes/QWEN4EXP-SUPPORT-ROLLBACK-WATCH-2026-08-26.md")
 	docBefore, err := os.ReadFile(docPath)
 	if err != nil {
 		t.Fatal(err)

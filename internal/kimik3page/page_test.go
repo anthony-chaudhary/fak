@@ -3,18 +3,15 @@ package kimik3page
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func pageRoot(t *testing.T) string {
 	t.Helper()
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test path")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(here), "..", "..", "docs", "kimi-k3"))
+	return repotest.Path(t, "docs/kimi-k3")
 }
 
 func TestMarketingPageContract(t *testing.T) {
@@ -57,8 +54,7 @@ func TestMarketingPageContract(t *testing.T) {
 }
 
 func TestMarketingPageRepositoryLinksResolve(t *testing.T) {
-	_, here, _, _ := runtime.Caller(0)
-	repo := filepath.Clean(filepath.Join(filepath.Dir(here), "..", ".."))
+	repo := repotest.Root(t)
 	for _, rel := range []string{
 		"DOGFOOD-CLAUDE.md",
 		filepath.Join("scripts", "claude-kimi-k3.sh"),

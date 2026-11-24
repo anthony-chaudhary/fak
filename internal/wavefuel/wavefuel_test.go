@@ -3,17 +3,14 @@ package wavefuel
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func TestFleetWaveUsesNativeDispatchAndKeepsReceiptOutOfChildPrompt(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := repotest.Root(t)
 	raw, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "fleet-wave", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -44,8 +41,7 @@ func TestFleetWaveUsesNativeDispatchAndKeepsReceiptOutOfChildPrompt(t *testing.T
 }
 
 func TestFleetWaveReceiptIsNotConstrainedByLegacyGoalCap(t *testing.T) {
-	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := repotest.Root(t)
 	raw, err := os.ReadFile(filepath.Join(root, ".claude", "skills", "fleet-wave", "fuel-wave.md"))
 	if err != nil {
 		t.Fatal(err)

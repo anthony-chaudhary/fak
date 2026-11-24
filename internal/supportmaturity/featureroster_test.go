@@ -4,33 +4,20 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // readClaims loads the repo's real CLAIMS.md document set — the compact index plus every
-// claims page it links. It walks up from this test file (located via runtime.Caller) to the
-// module root (the directory holding go.mod), then follows the index's authoritative links.
+// claims page it links. It resolves the module root (the directory holding go.mod), then
+// follows the index's authoritative links.
 // The witness is the LIVE ledger, not a fixture: that is what makes a rostered feature's
 // rung a binding against the honesty ledger rather than a self-report.
 func readClaims(t *testing.T) string {
 	t.Helper()
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed; cannot locate the test source to find the repo root")
-	}
-	dir := filepath.Dir(here)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			break
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("walked to the filesystem root without finding go.mod")
-		}
-		dir = parent
-	}
+	dir := repotest.Root(t)
 	b, err := os.ReadFile(filepath.Join(dir, "CLAIMS.md"))
 	if err != nil {
 		t.Fatalf("read CLAIMS.md at repo root %s: %v", dir, err)

@@ -3,9 +3,10 @@ package unwiredscore
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // writeGo writes a Go source file under root at repo-relative rel, creating parents.
@@ -208,11 +209,7 @@ func TestGapsAndActionItems(t *testing.T) {
 // flaps. It also proves the end-to-end wiring signal: this very package is imported by
 // cmd/fak/unwiredscore.go, so it must classify as WIRED (never flag itself).
 func TestLiveTreeDeterministicAndConsistent(t *testing.T) {
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Skip("cannot locate self")
-	}
-	root := filepath.Dir(filepath.Dir(filepath.Dir(self))) // internal/unwiredscore -> internal -> repo root
+	root := repotest.Root(t)
 
 	a := Scan(root)
 	b := Scan(root)

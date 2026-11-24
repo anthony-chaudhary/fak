@@ -5,9 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // writeChecker writes content at the repo-relative slash path rel under root, creating parent
@@ -261,16 +262,10 @@ func dosReasonFieldTrue(block, field string) bool {
 	return false
 }
 
-// readRepoDosTomlForChecker reads the repo-root dos.toml relative to this test's own source path
-// (internal/safecommit → ../..), so the lookup is independent of the working directory.
+// readRepoDosTomlForChecker reads the repo-root dos.toml.
 func readRepoDosTomlForChecker(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
-	}
-	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	b, err := os.ReadFile(filepath.Join(root, "dos.toml"))
+	b, err := os.ReadFile(repotest.Path(t, "dos.toml"))
 	if err != nil {
 		t.Fatalf("read repo dos.toml: %v", err)
 	}

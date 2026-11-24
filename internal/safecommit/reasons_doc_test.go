@@ -2,12 +2,12 @@ package safecommit
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // TestCommitCleanSkillDocumentsEveryRefusalReason binds the commit-clean SKILL.md
@@ -17,12 +17,7 @@ import (
 // drift as new reasons are added. It guards the historical gap where SYMLINK_ESCAPE
 // and MERGE_IN_PROGRESS were emitted by the executor but missing from the skill.
 func TestCommitCleanSkillDocumentsEveryRefusalReason(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed; cannot locate the repo root")
-	}
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	skillPath := filepath.Join(repoRoot, ".claude", "skills", "commit-clean", "SKILL.md")
+	skillPath := repotest.Path(t, ".claude/skills/commit-clean/SKILL.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		t.Fatalf("read commit-clean SKILL.md at %s: %v", skillPath, err)
@@ -61,12 +56,7 @@ func TestRefusalExitCodeClassifiesEveryReason(t *testing.T) {
 // retry" while listing OFF_TRUNK and CORE_SELF_MODIFY under it, which is precisely how a
 // lander came to burn a retry budget on a refusal that could never clear.
 func TestCommitCleanSkillDocumentsTheExitCodeClass(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed; cannot locate the repo root")
-	}
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	skillPath := filepath.Join(repoRoot, ".claude", "skills", "commit-clean", "SKILL.md")
+	skillPath := repotest.Path(t, ".claude/skills/commit-clean/SKILL.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		t.Fatalf("read commit-clean SKILL.md at %s: %v", skillPath, err)

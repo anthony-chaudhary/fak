@@ -4,9 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // TestFleetJobScrapeTimeoutContract pins an explicit scrape_timeout on every
@@ -24,11 +25,7 @@ import (
 // cover the observed fold. The check is deliberately a floor, not equality, so
 // raising the timeout further stays legal.
 func TestFleetJobScrapeTimeoutContract(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "prometheus.yml"))
+	raw, err := os.ReadFile(filepath.Join(repotest.PackageDir(t), "prometheus.yml"))
 	if err != nil {
 		t.Fatalf("read prometheus.yml: %v", err)
 	}
@@ -103,11 +100,7 @@ func scrapeTimeoutSeconds(block string) int {
 // with job name "fak_fleet"`), so it is pinned here rather than rediscovered at
 // reload time.
 func TestScrapeTimeoutWithinInterval(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "prometheus.yml"))
+	raw, err := os.ReadFile(filepath.Join(repotest.PackageDir(t), "prometheus.yml"))
 	if err != nil {
 		t.Fatalf("read prometheus.yml: %v", err)
 	}

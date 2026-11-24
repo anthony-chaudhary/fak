@@ -3,9 +3,10 @@ package orchestration
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // TestUltracodeBudgetReasonsRegisteredInDosToml binds the closed budget vocabulary
@@ -109,11 +110,7 @@ func reasonFieldValue(block, field string) string {
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
-	}
-	return filepath.Join(filepath.Dir(thisFile), "..", "..")
+	return repotest.Root(t)
 }
 
 func readRepoDosToml(t *testing.T) string {

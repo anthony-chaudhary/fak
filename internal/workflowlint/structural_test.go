@@ -3,9 +3,10 @@ package workflowlint
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func TestCommentAndBlockScalarAreNotStructure(t *testing.T) {
@@ -46,8 +47,7 @@ func TestStructuralAndDAGFailures(t *testing.T) {
 }
 
 func TestWalkDiscoversEveryCurrentWorkflow(t *testing.T) {
-	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := repotest.Root(t)
 	entries, err := os.ReadDir(filepath.Join(root, ".github", "workflows"))
 	if err != nil {
 		t.Fatal(err)
@@ -87,8 +87,7 @@ func TestActionlintMissingIsCleanSkip(t *testing.T) {
 }
 
 func TestCurrentWorkflowsRatchet(t *testing.T) {
-	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := repotest.Root(t)
 	got, err := CheckTree(root)
 	if err != nil {
 		t.Fatal(err)

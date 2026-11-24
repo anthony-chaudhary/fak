@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // fakCLITelemetryPath is the hand-authored CLI/dev-tool invocation-telemetry
@@ -36,11 +37,7 @@ type fakCLIDashboard struct {
 
 func loadFakCLITelemetry(t *testing.T) fakCLIDashboard {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	path := filepath.Join(filepath.Dir(file), filepath.FromSlash(fakCLITelemetryPath))
+	path := filepath.Join(repotest.PackageDir(t), filepath.FromSlash(fakCLITelemetryPath))
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("dashboard artifact missing at %s: %v", path, err)
 	}

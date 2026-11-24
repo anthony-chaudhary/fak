@@ -5,9 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // snNow anchors the undated time-only reset forms deterministically.
@@ -212,36 +213,9 @@ func TestWeekdayResetFixtureMatchesPythonParser(t *testing.T) {
 	}
 
 	python, prefix := fleetaccountsPython(t)
-	// runtime.Caller paths are module-relative under -trimpath (the isolated
-	// buildcheck/validate compile), so the caller-derived root is only a first
-	// candidate; walking up from the test's working directory (go test runs in
-	// the package dir) finds the real checkout in both compile modes.
-	repoRoot := ""
-	if _, sourceFile, _, ok := runtime.Caller(0); ok {
-		candidate := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
-		if _, err := os.Stat(filepath.Join(candidate, "tools", "issue_resolve_dispatch.py")); err == nil {
-			repoRoot = candidate
-		}
-	}
-	if repoRoot == "" {
-		dir, err := os.Getwd()
-		if err != nil {
-			t.Fatalf("resolve working directory: %v", err)
-		}
-		for i := 0; i < 8 && repoRoot == ""; i++ {
-			if _, err := os.Stat(filepath.Join(dir, "tools", "issue_resolve_dispatch.py")); err == nil {
-				repoRoot = dir
-				break
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	}
-	if repoRoot == "" {
-		t.Fatal("locate tools/issue_resolve_dispatch.py above the package directory")
+	repoRoot := repotest.Root(t)
+	if _, err := os.Stat(filepath.Join(repoRoot, "tools", "issue_resolve_dispatch.py")); err != nil {
+		t.Fatalf("locate tools/issue_resolve_dispatch.py under the repo root: %v", err)
 	}
 	script := `
 import datetime as dt, json, pathlib, sys

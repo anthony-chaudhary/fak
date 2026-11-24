@@ -14,24 +14,18 @@ package wiprecon
 
 import (
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
-// wipUsageSource returns cmd/fak/wip.go's bytes, walking up from this test file to the
-// module root. A missing file is a hard failure: this witness silently passing because it
-// could not find what it guards is the failure mode it exists to prevent.
+// wipUsageSource returns cmd/fak/wip.go's bytes from the module root. A missing file is a
+// hard failure: this witness silently passing because it could not find what it guards is
+// the failure mode it exists to prevent.
 func wipUsageSource(t *testing.T) string {
 	t.Helper()
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Skip("cannot resolve caller path")
-	}
-	// self = <root>/internal/wiprecon/reclaim_help_test.go → up three to the root.
-	root := filepath.Dir(filepath.Dir(filepath.Dir(self)))
-	b, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "wip.go"))
+	b, err := os.ReadFile(repotest.Path(t, "cmd/fak/wip.go"))
 	if err != nil {
 		t.Fatalf("read cmd/fak/wip.go: %v", err)
 	}

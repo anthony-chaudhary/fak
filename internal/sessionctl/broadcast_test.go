@@ -9,12 +9,11 @@ package sessionctl
 
 import (
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // seedSession materializes trace in tbl (Running) and tags it for broadcast
@@ -230,12 +229,7 @@ func TestTagRegistryLifecycle(t *testing.T) {
 // resolves it instead of classifying it UNCLASSIFIED drift — the same gate shape
 // as internal/assumecheck/dosreasons_test.go.
 func TestBroadcastMalformedRegisteredInDosToml(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
-	}
-	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	b, err := os.ReadFile(filepath.Join(root, "dos.toml"))
+	b, err := os.ReadFile(repotest.Path(t, "dos.toml"))
 	if err != nil {
 		t.Fatalf("read repo dos.toml: %v", err)
 	}
