@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/inklingmetal"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
@@ -14,6 +16,7 @@ import (
 type inkling2RunPlanner struct {
 	name  string
 	model *ggufload.Inkling2LoopModel
+	metal *inklingmetal.Model
 	tok   *tokenizer.Tokenizer
 	eos   int
 }
@@ -21,6 +24,10 @@ type inkling2RunPlanner struct {
 // NewInkling2RunPlanner binds the interactive text runner to its checkpoint.
 func NewInkling2RunPlanner(name string, m *ggufload.Inkling2LoopModel, tok *tokenizer.Tokenizer, eos int) Planner {
 	return &inkling2RunPlanner{name: name, model: m, tok: tok, eos: eos}
+}
+
+func NewInkling2MetalRunPlanner(name string, m *inklingmetal.Model, tok *tokenizer.Tokenizer, eos int) Planner {
+	return &inkling2RunPlanner{name: name, metal: m, tok: tok, eos: eos}
 }
 
 func (p *inkling2RunPlanner) Model() string { return p.name }
@@ -134,30 +141,86 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("Inkling 2: prompt is empty")
 	}
-	h, err := model.NewInkling2LoopHost(p.model.HP, p.model.Weights)
-	if err != nil {
+	maxTokens := inkling2Param(sp.MaxTokens, 512)
+	if maxTokens < 1 || maxTokens > math.MaxInt-len(ids) {
+		return nil, fmt.Errorf("Inkling 2: invalid token limit %d", maxTokens)
+	}
+	temp, topP, topK := inkling2Param(sp.Temperature, 0), inkling2Param(sp.TopP, 0), inkling2Param(sp.TopK, 0)
+	freq, pres := inkling2Param(sp.FrequencyPenalty, 0), inkling2Param(sp.PresencePenalty, 0)
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	for _, id := range ids {
-		if id < 0 || id >= p.model.HP.VocabUnpadded {
-			return nil, fmt.Errorf("Inkling 2: prompt token %d exceeds the checkpoint vocabulary", id)
+	var prefillPrompt func() ([]float32, error)
+	var step func(int) ([]float32, error)
+	if p.metal != nil {
+		sess, err := p.metal.NewSession(len(ids) + maxTokens)
+		if err != nil {
+			return nil, err
 		}
+		defer sess.Close()
+		if temp == 0 && freq == 0 && pres == 0 {
+			rows := inklingmetal.MaxBlock
+			if sp.SpeculativeNMax != nil {
+				rows = 1 + min(rows-1, max(0, *sp.SpeculativeNMax))
+			}
+			generated, st, err := ggufload.Inkling2MetalGreedy(ctx, sess, sess, ggufload.Inkling2MetalGreedyRequest{
+				Prompt: ids, MaxTokens: maxTokens, Vocab: inklingmetal.Vocabulary, EOS: p.eos, VerifyRows: rows, DraftDepth: min(rows-1, 15), TreeWidth: 4,
+			})
+			if err != nil {
+				return nil, err
+			}
+			sampled := len(generated)
+			reason := "length"
+			if sampled < maxTokens {
+				sampled++
+				reason = "stop"
+			}
+			return p.result(sp, generated, len(ids), sampled, st.DecodeSteps, reason, st.Prefill, st.Decode)
+		}
+		input := make([]int32, len(ids))
+		for i, id := range ids {
+			if id < 0 || id >= inklingmetal.Vocabulary {
+				return nil, fmt.Errorf("Inkling 2: prompt token %d outside vocabulary", id)
+			}
+			input[i] = int32(id)
+		}
+		prefillPrompt = func() ([]float32, error) { return sess.Prefill(input) }
+		step = func(id int) ([]float32, error) {
+			rows, err := sess.BeginBlock([]int32{int32(id)})
+			if err != nil {
+				return nil, err
+			}
+			return rows[0], sess.Commit(1)
+		}
+	} else {
+		h, err := model.NewInkling2LoopHost(p.model.HP, p.model.Weights)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			if id < 0 || id >= p.model.HP.VocabUnpadded {
+				return nil, fmt.Errorf("Inkling 2: prompt token %d outside vocabulary", id)
+			}
+		}
+		prefillPrompt = func() ([]float32, error) { return ggufload.Inkling2LoopPrefill(ctx, h, ids) }
+		step = func(id int) ([]float32, error) { return ggufload.Inkling2LoopStep(h, id) }
 	}
 	start := time.Now()
-	logits, err := ggufload.Inkling2LoopPrefill(ctx, h, ids)
+	logits, err := prefillPrompt()
 	if err != nil {
 		return nil, err
 	}
 	prefill := time.Since(start)
 	start = time.Now()
-	maxTokens := inkling2Param(sp.MaxTokens, 512)
-	temp, topP, topK := inkling2Param(sp.Temperature, 0), inkling2Param(sp.TopP, 0), inkling2Param(sp.TopK, 0)
-	freq, pres := inkling2Param(sp.FrequencyPenalty, 0), inkling2Param(sp.PresencePenalty, 0)
 	var counts []int32
 	if freq != 0 || pres != 0 {
 		counts = make([]int32, len(logits))
 	}
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	seed := time.Now().UnixNano()
+	if sp.Seed != nil {
+		seed = *sp.Seed
+	}
+	rng := rand.New(rand.NewSource(seed))
 	var ws samplerWorkspace
 	var generated []int
 	steps, sampled := 0, 0
@@ -182,16 +245,19 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 		if counts != nil {
 			counts[id]++
 		}
-		logits, err = ggufload.Inkling2LoopStep(h, id)
+		logits, err = step(id)
 		if err != nil {
 			return nil, err
 		}
 		steps++
 	}
-	decode := time.Since(start)
+	return p.result(sp, generated, len(ids), sampled, steps, reason, prefill, time.Since(start))
+}
+
+func (p *inkling2RunPlanner) result(sp SampleParams, generated []int, prompt, sampled, steps int, reason string, prefill, decode time.Duration) (*Completion, error) {
 	msg, err := inkling2RunReply(p.tok, generated, sp.RawPrompt)
 	if err != nil {
 		return nil, err
 	}
-	return &Completion{Model: p.name, Message: msg, FinishReason: reason, Usage: Usage{PromptTokens: len(ids), CompletionTokens: sampled, TotalTokens: len(ids) + sampled}, Timings: NewTimings(len(ids), 0, steps, prefill.Seconds(), decode.Seconds())}, nil
+	return &Completion{Model: p.name, Message: msg, FinishReason: reason, Usage: Usage{PromptTokens: prompt, CompletionTokens: sampled, TotalTokens: prompt + sampled}, Timings: NewTimings(prompt, 0, steps, prefill.Seconds(), decode.Seconds())}, nil
 }

@@ -1,0 +1,103 @@
+#pragma once
+
+#include "metal/abi/KernelABI.h"
+#include "metal/abi/MoE.h"
+#include "metal/abi/QuantFormat.h"
+#include "metal/kernels/common/moe_expert_chunk.h"
+
+// A grouped expert tile of at most tile_rows rows (kernels/shared/moe.metal)
+// holds `rows` live rows from its first grouped row on (MoeTileDescriptor).
+// An expert pass runs the matmul of the smallest of 8, 16, 32 and tile_rows
+// rows that holds the live rows and stores the live rows alone: the rows it
+// reads past them, the next tile's or rows of no tile, which the scratch holds
+// up to tile_rows - 1 past the routes' (ops::MoeScratch), give results it
+// discards. The staged passes' column tiles (moe_column_tile) read their live
+// rows alone.
+inline uint moe_matmul_rows(uint rows, uint tile_rows) {
+  return min(tile_rows, rows <= 8 ? 8u : rows <= 16 ? 16u : rows <= 32 ? 32u : tile_rows);
+}
+// The staged expert passes run an expert's only tile of at most
+// GGUF_COLUMN_ROWS live rows on the column tile (moe_column_tile in
+// abi/MoE.h). The two tiles sum a row's products in different orders, so a
+// route's output depends on how many rows the step routes to its expert, up to
+// GGUF_COLUMN_ROWS on the column tile and more on the staged tile: decode
+// results of GGUF MoE models on the staged tile are not batch-invariant, since
+// a row's experts see the other rows of its step (its lane's draft rows and the
+// other lanes'). The grouping's atomics order an expert's routes over its
+// tiles, so the tiles of an expert run one tile kind, or a route's output would
+// also depend on that order (an expert of nine routes in an 8-row tile and a
+// 1-row tile).
+
+// Runs the pass `run` on the matmul rows of a Max-row tile:
+// run(integral_constant<ushort, R>{}) for R = moe_matmul_rows(rows, Max).
+template <ushort Max, typename Run>
+inline void moe_live_rows(uint rows, Run run) {
+  const uint matmul = moe_matmul_rows(rows, Max);
+  if constexpr (8 < Max) {
+    if (matmul == 8)
+      return run(integral_constant<ushort, 8>{});
+  }
+  if constexpr (16 < Max) {
+    if (matmul == 16)
+      return run(integral_constant<ushort, 16>{});
+  }
+  if constexpr (32 < Max) {
+    if (matmul == 32)
+      return run(integral_constant<ushort, 32>{});
+  }
+  run(integral_constant<ushort, Max>{});
+}
+
+// The shared slice that `id` names when the shared expert's slices take the
+// ids from `first` on: a route slot of a row, whose top_k routed routes the
+// slices follow (first = top_k), or an expert, the slices following the
+// routed experts (first = experts). An id below `first` names a routed one
+// and wraps past every slice.
+inline uint moe_shared_slice(uint id, uint first) { return id - first; }
+
+// A GGUF expert pass's weights for one tile (ops/MoE.cpp, metal/abi/MoE.h):
+// routed expert e's planes start at row local * output_size of projection
+// z's regions in the chunk that holds slot slots[e] (moe_expert_chunk),
+// slots being the block's slot table and local the slot's place in its
+// chunk; the Shared slices of the shared expert (ids `experts` on) have a
+// segment of their own, possibly in another format, slice s's planes from
+// tile s * output_size / QUANT_TILE_ROWS (metal/abi/QuantFormat.h) on, and
+// never read the slot table. w1 is the meta plane for formats without a
+// second plane, as the host binds and addresses it.
+struct MoeGgufSegment {
+  device uchar *w0;
+  device uchar *w1;
+  device uchar *meta;
+  uint format;
+};
+
+// The planes of a segment in format f (id `format`) from row `row` on, of
+// `groups` groups of 32 inputs a row.
+inline MoeGgufSegment moe_gguf_planes(constant QuantFormat &f, uint format, device uchar *w0, device uchar *w1,
+                                      device uchar *meta, ulong row, ulong groups) {
+  return {w0 + row * groups * f.plane0_bytes, w1 + row * groups * f.plane1_bytes,
+          meta + row * (groups / f.meta_groups) * f.meta_bytes, format};
+}
+template <uint Shared>
+inline MoeGgufSegment moe_gguf_segment(uint expert, uint experts, uint input_size, uint output_size,
+                                       uint routed_format, uint shared_format, device const uint *slots,
+                                       constant ulong *chunks, uint floor_slots, uint chunk_slots, uint projection,
+                                       device uchar *shared_w0, device uchar *shared_w1,
+                                       device uchar *shared_meta) {
+  const uint slice = moe_shared_slice(expert, experts);
+  if (slice < Shared) {
+    constant QuantFormat &f = kQuantFormats[shared_format];
+    return moe_gguf_planes(f, shared_format, shared_w0, shared_w1, shared_meta, ulong(slice) * output_size,
+                           input_size / 32);
+  }
+  constant QuantFormat &f = kQuantFormats[routed_format];
+  const MoeExpertChunk c = moe_expert_chunk(chunks, floor_slots, chunk_slots, slots[expert], projection);
+  return moe_gguf_planes(f, routed_format, c.w0, c.w1, c.meta, ulong(c.local) * output_size, input_size / 32);
+}
+
+// The scale an expert pass multiplies the fp32 sums of projection `projection` (0 gate, 1 up, 2 down) by, before it
+// rounds them: routed expert e's, at e of the projection's row of `scales` (ops::BlockMoeWeights::expertScales, F32
+// [3][experts]); 1 for a shared slice (ids `experts` on).
+inline float moe_expert_scale(device const float *scales, uint expert, uint experts, uint projection) {
+  return expert < experts ? scales[projection * experts + expert] : 1.0f;
+}

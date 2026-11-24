@@ -8,8 +8,10 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
+	"github.com/anthony-chaudhary/fak/internal/inklingmetal"
 	"github.com/anthony-chaudhary/fak/internal/localadmission"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -45,22 +47,48 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 		}
 	}
 	var m *ggufload.Inkling2LoopModel
+	var target *inklingmetal.Model
 	var release func()
 	backendName := "cpu"
 	if metal {
 		backendName = "metal"
-		weights, planErr := inkling2RunMetalMemory(path, f)
-		if planErr != nil {
-			return nil, nil, planErr
+		useTarget := inklingmetal.Available()
+		var weights localadmission.MemoryPlan
+		if useTarget {
+			// Match the launcher's default single-session context budget, including
+			// the direct target's packed images, verification scratch and KV extents.
+			planned, e := inklingmetal.Estimate(path, gateway.DefaultAdmissionPolicy().TokenBudget)
+			if e != nil {
+				return nil, nil, e
+			}
+			if planned.Bytes() > math.MaxInt64 {
+				return nil, nil, fmt.Errorf("Inkling 2: Metal plan exceeds address space")
+			}
+			weights.SteadyBytes = int64(planned.Bytes())
+			weights.StartupPeakBytes, _ = metalServeStartupPeakBytes(serveLoadArmResidentQ4K, weights.SteadyBytes, 0, false)
+		} else {
+			weights, err = inkling2RunMetalMemory(path, f)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 		var loadErr error
 		release, err = admitLocalMetalModel(true, path, gpulease.Options{}, metalAdmissionSpec{
 			Weights: &weights,
 			Load: func() bool {
-				m, loadErr = ggufload.OpenInkling2LoopMetal(path)
+				if useTarget {
+					target, loadErr = inklingmetal.Open(path)
+				} else {
+					m, loadErr = ggufload.OpenInkling2LoopMetal(path)
+				}
 				return loadErr == nil
 			},
-			Teardown: func() error { return m.Close() },
+			Teardown: func() error {
+				if target != nil {
+					return target.Close()
+				}
+				return m.Close()
+			},
 		})
 		if err == nil {
 			err = loadErr
@@ -71,6 +99,10 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 	}
 	if err != nil {
 		return nil, nil, err
+	}
+	if target != nil {
+		fmt.Fprintln(os.Stderr, "fak run: inkling2_loop backend=metal native target layers=24 passes=3")
+		return agent.NewInkling2MetalRunPlanner(name, target, tok, table.EOS), release, nil
 	}
 	fmt.Fprintf(os.Stderr, "fak run: inkling2_loop backend=%s layers=%d passes=%d\n", backendName, m.HP.Layers, m.HP.Passes)
 	return agent.NewInkling2RunPlanner(name, m, tok, table.EOS), release, nil
