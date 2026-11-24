@@ -3,17 +3,14 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func TestDogfoodClaudeHeadFallbackStampsCommittedRevision(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := repotest.Root(t)
 	body, err := os.ReadFile(filepath.Join(root, "scripts", "dogfood-claude.ps1"))
 	if err != nil {
 		t.Fatal(err)
@@ -34,11 +31,7 @@ func TestDogfoodClaudeHeadFallbackStampsCommittedRevision(t *testing.T) {
 // freshly built binary and the staged .new copy and refuse to install unless each
 // reports a build: revision equal to the repo HEAD's 12-char prefix.
 func TestDogfoodClaudeProvenanceReadBackBeforeSwap(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := repotest.Root(t)
 	body, err := os.ReadFile(filepath.Join(root, "scripts", "dogfood-claude.ps1"))
 	if err != nil {
 		t.Fatal(err)

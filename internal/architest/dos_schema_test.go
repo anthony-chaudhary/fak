@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // dosClosedCategories defines the five closed DOS categories for reason tokens.
@@ -306,35 +307,11 @@ func validateDOSTomlContent(content string) (int, int, []string) {
 // findRepoRoot locates the root of the repo containing dos.toml.
 func findRepoRoot(t *testing.T) string {
 	t.Helper()
-	if _, self, _, ok := runtime.Caller(0); ok {
-		dir := filepath.Dir(self)
-		for i := 0; i < 10; i++ {
-			if _, err := os.Stat(filepath.Join(dir, "dos.toml")); err == nil {
-				return dir
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
+	root := repotest.Root(t)
+	if _, err := os.Stat(filepath.Join(root, "dos.toml")); err != nil {
+		t.Fatalf("could not locate repository root with dos.toml: %v", err)
 	}
-	wd, err := os.Getwd()
-	if err == nil {
-		dir := wd
-		for i := 0; i < 10; i++ {
-			if _, err := os.Stat(filepath.Join(dir, "dos.toml")); err == nil {
-				return dir
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	}
-	t.Fatal("could not locate repository root with dos.toml")
-	return ""
+	return root
 }
 
 // TestDOSTomlSchemaStrict validates that dos.toml satisfies strict schema and closed-category requirements.

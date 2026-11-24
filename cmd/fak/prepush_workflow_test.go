@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 	"github.com/anthony-chaudhary/fak/internal/workflowlint"
 )
 
@@ -130,11 +131,7 @@ func TestWorkflowCheckWarnsAboutGitHubWorkflowScopeEarly(t *testing.T) {
 }
 
 func TestPrepushHookWorkflowRungIsIndependentOfBuildGuard(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test path")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := repotest.Root(t)
 	b, err := os.ReadFile(filepath.Join(root, "tools", "githooks", "pre-push"))
 	if err != nil {
 		t.Fatal(err)
@@ -273,8 +270,7 @@ func makeHookWorkflowRepo(t *testing.T, workflow string, unrelated bool, dirty s
 
 func runWorkflowHook(t *testing.T, shell, repo, tip, old string) (string, int) {
 	t.Helper()
-	_, file, _, _ := runtime.Caller(0)
-	sourceRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	sourceRoot := repotest.Root(t)
 	hook := filepath.Join(sourceRoot, "tools", "githooks", "pre-push")
 	bin := t.TempDir()
 	testBinary, err := os.Executable()
@@ -308,11 +304,7 @@ func runWorkflowHook(t *testing.T, shell, repo, tip, old string) (string, int) {
 }
 
 func TestWorkflowStructureCurrentTreeZeroFindingsWitness(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test path")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := repotest.Root(t)
 	tipCmd := exec.Command("git", "rev-parse", "HEAD")
 	tipCmd.Dir = root
 	tipOut, err := tipCmd.Output()

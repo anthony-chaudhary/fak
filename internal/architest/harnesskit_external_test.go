@@ -5,9 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 const harnesskitModule = "github.com/anthony-chaudhary/fak"
@@ -92,15 +93,7 @@ func main() {}`
 
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	root, err := filepath.Abs(filepath.Join(filepath.Dir(file), "..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
+	return repotest.Root(t)
 }
 
 func writeExternalModule(t *testing.T, root, main string) string {

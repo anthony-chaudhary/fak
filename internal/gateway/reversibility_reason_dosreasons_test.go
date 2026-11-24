@@ -2,12 +2,11 @@ package gateway
 
 import (
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // TestReversibilityGateReasonIsDeclaredNotUnclassified is the closed-vocabulary
@@ -110,17 +109,11 @@ func reversibilityDosReasonFieldTrue(block, field string) bool {
 	return false
 }
 
-// readRepoDosTomlForReversibility reads the repo-root dos.toml located relative to
-// this test's own source path (internal/gateway), so the lookup is independent of
-// the test's working directory.
+// readRepoDosTomlForReversibility reads the repo-root dos.toml located by walking
+// up from the package directory to go.mod.
 func readRepoDosTomlForReversibility(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
-	}
-	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	b, err := os.ReadFile(filepath.Join(root, "dos.toml"))
+	b, err := os.ReadFile(repotest.Path(t, "dos.toml"))
 	if err != nil {
 		t.Fatalf("read repo dos.toml: %v", err)
 	}

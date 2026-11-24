@@ -10,13 +10,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/archreport"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // modPrefix is the import-path prefix for every internal leaf.
@@ -595,6 +595,15 @@ var tier = map[string]int{
 	"learningmesh":          2, // #9839: deterministic cross-envelope transfer candidates; orchestration and execution remain outside this leaf.
 	"streamrules":           0, // #5920 (epic #5917): pure stdlib-only streaming rule matcher; per-call buffers, scopes, regex/glob matching, diagnostics, and turn reset. No decision-path wiring and imports no sibling leaf.
 	"testenv":               2, // credential-free test process boundary (#5914); imports envconfiglint(1), off the hot path.
+	"benchsweep":            1, // engine-agnostic benchmark sweep mechanics; stdlib-only, imports nothing internal.
+	"conceptdrift":          1, // concept-coverage drift watcher; stdlib plus pkg/sysproc, imports nothing internal.
+	"envchild":              1, // environment a tool child process may inherit; stdlib-only, imported by codetools(2) and sandbox(2).
+	"layoutoracle":          1, // independent tensor geometry/stride oracle; stdlib-only, imports nothing internal.
+	"opencoderesume":        1, // verifies OpenCode session identities before resume; stdlib-only, imported by sessionrecovery(2).
+	"optimize":              5, // leaf logic behind `fak optimize`; composes ablate, bench and nativeperf (all tier 5).
+	"policygoal":            1, // closed vocabulary of named inference policy goals; stdlib-only, imports nothing internal.
+	"servelaunch":           1, // readiness-probe composite for benchmark-wave serving; stdlib-only, imports nothing internal.
+	"servereceipt":          1, // on-demand model-to-GPU serving-config receipts; stdlib-only, imports nothing internal.
 	"docreach":              2, // Pure document-reachability census; repository I/O stays in cmd/fak.
 	"testquality":           3, // #5936: pure stdlib Go test AST quality findings plus counted baseline ratchet; repository I/O and CLI wiring stay in cmd/fak.
 	"dependencyquarantine":  0, // #5947: stdlib-only repository dependency-budget and nested-module quarantine checker; imports no sibling leaf.
@@ -822,43 +831,14 @@ var tierName = []string{"root", "primitive", "foundation-composite", "mechanism"
 // (bench, shipgate, tests) â€” only these packages are checked.
 var hotPath = []string{"adjudicator", "kernel", "vdso", "grammar", "preflight", "ctxmmu", "ratelimit"}
 
-// internalDir returns the absolute path of fak/internal. This test file lives in
-// internal/architest, so internal is its parent.
+// internalDir returns the absolute path of fak/internal.
 func internalDir(t *testing.T) string {
 	t.Helper()
-	if _, self, _, ok := runtime.Caller(0); ok {
-		cand := filepath.Dir(filepath.Dir(self))
-		if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
-			return cand
-		}
+	dir := repotest.Path(t, "internal")
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("cannot locate the internal/ tree at %s", dir)
 	}
-	if fi, err := os.Stat(".."); err == nil && fi.IsDir() {
-		if _, err := os.Stat(filepath.Join("..", "adjudicator")); err == nil {
-			abs, _ := filepath.Abs("..")
-			return abs
-		}
-	}
-	if fi, err := os.Stat("internal"); err == nil && fi.IsDir() {
-		abs, _ := filepath.Abs("internal")
-		return abs
-	}
-	wd, _ := os.Getwd()
-	cur := wd
-	for i := 0; i < 6; i++ {
-		if _, err := os.Stat(filepath.Join(cur, "go.mod")); err == nil {
-			cand := filepath.Join(cur, "internal")
-			if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
-				return cand
-			}
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			break
-		}
-		cur = parent
-	}
-	t.Fatal("cannot locate the internal/ tree")
-	return ""
+	return dir
 }
 
 // goPackageDirs returns the short names of every directory under internal/ that contains

@@ -595,6 +595,8 @@ concurrent = [
   # an unrelated lane (AUTOPICK_LANE_UNDECLARED) and a worker stamped the wrong lane on
   # internal/<leaf>/** edits. Declared here with their trees.
   "envchild", "noticeguard", "policygoal", "servereceipt", "slackquiet",
+  # Committed internal leaves that had a [lanes.trees] entry but no concurrent seat.
+  "benchsweep", "conceptdrift", "opencoderesume", "servelaunch",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -824,6 +826,25 @@ optimize = ["internal/optimize/**"]
 hwspecs = ["pkg/hwspecs/**"]
 gpubinding = ["pkg/gpubinding/**"]
 mcpinstall = ["pkg/mcpinstall/**"]
+# The pkg stdlib-only utility tier seated above; without trees their packages had no owner.
+boundedlog = ["pkg/boundedlog/**"]
+childenv = ["pkg/childenv/**"]
+clocktime = ["pkg/clocktime/**"]
+fsatomic = ["pkg/fsatomic/**"]
+gitgraph = ["pkg/gitgraph/**"]
+gitidentity = ["pkg/gitidentity/**"]
+gitindex = ["pkg/gitindex/**"]
+hostload = ["pkg/hostload/**"]
+machineid = ["pkg/machineid/**"]
+phasetime = ["pkg/phasetime/**"]
+powershell = ["pkg/powershell/**"]
+procalive = ["pkg/procalive/**"]
+pyexec = ["pkg/pyexec/**"]
+scratchdir = ["pkg/scratchdir/**"]
+security = ["pkg/security/**"]
+selfcheck = ["pkg/selfcheck/**"]
+semdiff = ["pkg/semdiff/**"]
+verbhint = ["pkg/verbhint/**"]
 hostapproval = ["internal/hostapproval/**"]
 reasoneval = ["internal/reasoneval/**"]
 remotemaintresult = ["internal/remotemaintresult/**"]

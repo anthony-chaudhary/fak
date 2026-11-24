@@ -4,12 +4,12 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/engine"
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // fakeCapProducer is a wire-neutral stand-in for an engine-specific adapter: it
@@ -110,11 +110,7 @@ func TestReportEngineCacheCapabilityColdPathGate(t *testing.T) {
 // the engine-specific adapter packages (internal/enginecache's SGLang/vLLM client, or
 // the #1551–#1553 adapters). Fails before enginecapability.go exists; passes after.
 func TestReportEngineCacheCapabilityIsWireNeutral(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed; cannot locate the read-path source")
-	}
-	readPath := filepath.Join(filepath.Dir(thisFile), "enginecapability.go")
+	readPath := filepath.Join(repotest.PackageDir(t), "enginecapability.go")
 
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, readPath, nil, parser.ImportsOnly)

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 func TestTestShFastMirrorRetriesRsyncExit23AndForwardsVerbose(t *testing.T) {
@@ -381,11 +383,7 @@ func splitNonEmptyLines(s string) []string {
 
 func repoRootForWrapperTest(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	return repotest.Root(t)
 }
 
 func writeExecutable(t *testing.T, path, body string) {

@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
 // TestPluginManifestVersionMatchesVERSION guards against EVERY plugin-manifest version field
@@ -71,23 +72,8 @@ func assertVersion(t *testing.T, label, got, want string) {
 	}
 }
 
-// repoRootForTest walks up from this test file's own location to the repo root (the dir
-// holding go.mod), so the test does not depend on the working directory the runner chose.
+// repoRootForTest returns the repo root (the dir holding go.mod) above the package dir.
 func repoRootForTest(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	dir := filepath.Dir(file)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("could not find repo root (go.mod) above test file")
-		}
-		dir = parent
-	}
+	return repotest.Root(t)
 }
