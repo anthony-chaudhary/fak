@@ -95,6 +95,9 @@ Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak
 2. In another terminal, point an agent at it. Use `fak opencode`, `fak codex`,
    `fak claude`, or [Pi](docs/integrations/pi.md). Give it real work, e.g.
    *"Using parallel subagents, audit the packages under internal/ and report their status."*
+   `fak up` serves the OpenAI chat-completions API only. `fak claude` needs the
+   Anthropic Messages API, so start `fak serve --gguf qwen38:27b-q4` for it instead.
+   No separate router is needed: agents talk to the local endpoint directly.
 
 ### Governance for external agents (`fak guard`)
 
@@ -125,9 +128,11 @@ fak agent --offline   # -> task completed
   large-batch prefill arm now defaults to the mmq route on sm_80+. The same-card ABBA
   receipt measured 1.30–1.49× cold prefill with byte-identical greedy output. An
   explicit `FAK_CUDA_Q4K_PREFILL` remains the opt-out.
-- `fak claude` routes through the live fak router by default (`FAK_ROUTER_URL`,
-  else `127.0.0.1:18101`); `--no-router` keeps the direct Mac setup. OpenCode and Pi
-  default workers route through it too. One paused provider no longer stops every worker.
+- `fak claude` targets a local `fak serve` gateway (`127.0.0.1:8080`) by default. If an
+  optional fak router (a separately distributed component) answers on `FAK_ROUTER_URL`,
+  else `127.0.0.1:18101`, it fronts that instead; with no router it keeps the `fak serve`
+  default, and `--no-router` skips the probe. OpenCode and Pi use a router only when one is
+  configured (`fak node use`, `fak pi config --from-router`). One paused provider no longer stops every routed worker.
 - Multi-session serving: `fak up` admits several agent sessions against capacity, with
   backpressure instead of timeouts. `fak node install` rolls back to the prior
   registration when a start fails.

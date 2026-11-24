@@ -147,14 +147,16 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "usage: fak claude [launcher flags] [-- <claude args...>]")
 		fmt.Fprintln(stderr, "       fak claude config [--write] [--addr ADDR] [--model MODEL]")
 		fmt.Fprintln(stderr, "")
-		fmt.Fprintln(stderr, "First-class support for Claude Code as harness. When no backend is named")
-		fmt.Fprintln(stderr, "explicitly and a fak router is live (FAK_ROUTER_URL, else")
-		fmt.Fprintln(stderr, "http://127.0.0.1:18101), the launcher starts a private loopback front door")
-		fmt.Fprintln(stderr, "to that router and serves its current model; otherwise it uses the local")
-		fmt.Fprintln(stderr, "fak serve backend (Mac Metal) as before. Pass --no-router to opt out.")
+		fmt.Fprintln(stderr, "First-class support for Claude Code as harness. By default the launcher")
+		fmt.Fprintln(stderr, "points Claude Code at a local fak serve gateway (--gateway-url, default")
+		fmt.Fprintln(stderr, "http://127.0.0.1:8080); start one first with `fak serve`. A fak router is an")
+		fmt.Fprintln(stderr, "optional, separately distributed component: when no backend is named and one")
+		fmt.Fprintln(stderr, "answers on FAK_ROUTER_URL (else http://127.0.0.1:18101), the launcher fronts")
+		fmt.Fprintln(stderr, "it instead. With no router it silently keeps the fak serve default.")
+		fmt.Fprintln(stderr, "Pass --no-router to skip the router probe.")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "examples:")
-		fmt.Fprintln(stderr, "  fak claude                                    # live router, else local fak serve")
+		fmt.Fprintln(stderr, "  fak claude                                    # local fak serve (or a live router)")
 		fmt.Fprintln(stderr, "  fak claude --no-router                        # direct local backend only")
 		fmt.Fprintln(stderr, "  fak claude --dry-run                          # preview environment and command")
 		fmt.Fprintln(stderr, "  fak claude --print-env                        # print shell export lines")
@@ -344,14 +346,7 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 	// In live mode, verify that the backend is reachable
 	if !launch.noProbe && probeErr != nil {
 		fmt.Fprintf(stderr, "fak claude: fak serve backend is unreachable at %s: %v\n", launch.serverURL, probeErr)
-		if runtime.GOOS == "darwin" && (strings.Contains(launch.serverURL, "127.0.0.1") || strings.Contains(launch.serverURL, "localhost")) {
-			fmt.Fprintln(stderr, "")
-			fmt.Fprintln(stderr, "To start the local Mac Metal GPU backend:")
-			fmt.Fprintln(stderr, "    fak serve --gguf qwen38:27b-q4")
-			fmt.Fprintln(stderr, "")
-			fmt.Fprintln(stderr, "Or point to an existing remote gateway:")
-			fmt.Fprintln(stderr, "    fak claude --gateway-url http://<host>:8080")
-		}
+		printClaudeUnreachableNextStep(stderr, launch.serverURL, runtime.GOOS)
 		return 1
 	}
 
@@ -576,4 +571,23 @@ func runClaudeConfig(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintln(stdout, string(out))
 	return 0
+}
+
+// printClaudeUnreachableNextStep names the public way to bring up a backend for
+// a loopback gateway that did not answer. `fak up` is not offered because its
+// turnkey server has no Anthropic /v1/messages route; `fak serve` does.
+func printClaudeUnreachableNextStep(w io.Writer, serverURL, goos string) {
+	if !strings.Contains(serverURL, "127.0.0.1") && !strings.Contains(serverURL, "localhost") {
+		return
+	}
+	addr := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(serverURL, "http://"), "https://"), "/")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Start a local fak serve gateway, then rerun fak claude:")
+	if goos == "darwin" {
+		fmt.Fprintf(w, "    fak serve --addr %s --gguf qwen38:27b-q4            # Mac Metal GPU backend\n", addr)
+	}
+	fmt.Fprintf(w, "    fak serve --addr %s --base-url <upstream>/v1 --model <id>\n", addr)
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Or point to an existing gateway:")
+	fmt.Fprintln(w, "    fak claude --gateway-url http://<host>:8080")
 }
