@@ -21,6 +21,7 @@ type cudaQ56KMMQWitness interface {
 	cudaQ56KMMVQWitness
 	cudaQ56KMMQForTest() (bool, uint64, uint64, uint64)
 	cudaQ56KMMQNullInputForTest(Tensor, Tensor, int) int
+	cudaQ6KPrefillMMQArmForTest() bool
 }
 
 // The small matrix set covers the selector boundary, padded prompt/output tails,
@@ -72,7 +73,8 @@ func TestCUDAQ56KMMQ(t *testing.T) {
 				defer be.Free(y)
 				got := be.Read(y) // real completion, not the submission counter
 				_, a5, a6, _ := be.cudaQ56KMMQForTest()
-				selected := enabled && p >= 128
+				selected := enabled && p >= 128 ||
+					kind == Q6_K && cudaQ6KPrefillMMQEligible(cudaQ6KPrefillArmForWitness(be), kind, p, enabled && p >= 128)
 				want5, want6 := uint64(0), uint64(0)
 				if selected && kind == Q5_K {
 					want5 = 1
@@ -233,4 +235,11 @@ func cudaQ56MMQRefusals(t *testing.T, be cudaQ56KMMQWitness, w, x Tensor, p int)
 	if !be.IsCapturing() {
 		t.Fatal("refusal ended caller-owned capture")
 	}
+}
+
+func cudaQ6KPrefillArmForWitness(be cudaQ56KMMQWitness) CUDAQ6KPrefillArm {
+	if be.cudaQ6KPrefillMMQArmForTest() {
+		return CUDAQ6KPrefillMMQ
+	}
+	return CUDAQ6KPrefillDequant
 }

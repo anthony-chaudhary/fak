@@ -134,6 +134,7 @@ func init() {
 	RegisterDeviceWorkReader("cuda", readCUDADeviceWork)
 	initCUDAQ4KPrefillArm(int(sm))
 	initCUDAQ4KDecodeArm()
+	initCUDAQ6KPrefillArm(int(sm))
 	if C.fcuda_ts_enabled() != 0 {
 		installCUDAKernelProfile()
 	}
@@ -1542,7 +1543,13 @@ func (c *cudaBackend) batchedMatMulLocked(w, X Tensor, P int) Tensor {
 	case Q6_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, X, y, P), in, P); err != nil {
+		if rc, ran := c.q6KPrefillMMQStatus(w, wb, X, y, P); ran && rc == cudaQ6KPrefillMMQScratchMiss {
+			panic(cudaGEMMError("BatchedMatMul", rc, cudaGEMMScratch{main: cudaQ6KPrefillMMQScratchBytes(in, P)}))
+		} else if ran {
+			if err := c.q56KMMQFailure(y, rc); err != nil {
+				panic(err)
+			}
+		} else if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, X, y, P), in, P); err != nil {
 			panic(err)
 		}
 	case Q3_K:

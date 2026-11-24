@@ -25,7 +25,7 @@ func TestCUDAQ56KMMQSourceContract(t *testing.T) {
 		"#ifdef FAK_CUDA_Q56K_MMQ_QUALIFICATION",
 		"sizeof(block_q5_K) == 176", "sizeof(block_q6_K) == 210",
 		"info.cc < 80 || info.compiled_arch < 80",
-		"p < 128 || in % QK_K",
+		"p < FAK_Q56K_MMQ_MIN_COLS || in % QK_K", "if (p < 128) return 0;",
 		"cudaPointerGetAttributes", "attr.type == cudaMemoryTypeDevice",
 		"g_capture_open || g_q4k_qkv_async_pending != 0",
 		"cudaMemsetAsync(activation, 0, plan.activation_bytes, g_stream)",

@@ -565,6 +565,11 @@ unsigned long long fcuda_q56k_mmq_launch_count(int kind);
 int fcuda_q56k_mmq_preflight(const uint8_t *w, const float *x, int out, int in, int p, int kind);
 int fcuda_q56k_mmq_matmul_checked_f32(const uint8_t *w, const float *x, float *y, int out, int in, int p, int kind);
 void fcuda_q56k_mmq_retirement_failed(int first);
+/* Default Q6_K P>=8 prompt arm over the same MMQ family: 1 = mmq, 0 = legacy k_q6k_gemm.
+ * fcuda_q6k_prefill_mmq_f32 returns 80011 (declined) before any enqueue when the caller must
+ * run fcuda_q6k_matmul_checked_f32 instead. */
+void fcuda_set_q6k_prefill_arm(int arm);
+int fcuda_q6k_prefill_mmq_f32(const uint8_t *w, const float *x, float *y, int out, int in, int p);
 int fcuda_q56k_mmvq_enabled(void);
 int fcuda_q56k_mmvq_terminal(void);
 unsigned long long fcuda_q56k_mmvq_launch_count(int kind);

@@ -1,4 +1,4 @@
-// ---- Retained Q5_K/Q6_K prompt-panel MMQ family (qualification only) ----
+// ---- Retained Q5_K/Q6_K prompt-panel MMQ family (Q6_K default prefill arm) ----
 // Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
 // Copyright (c) 2023-2026 The ggml authors. Full permission notice is in
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
@@ -8,7 +8,8 @@
 // six-bit quants and separate signed 16-value subscales. Neither widens weights.
 // It deliberately quantizes F32 activations to temporary Q8_1; parity and
 // end-to-end cost must be qualified, not inferred from source or launch count.
-// The old void ABI, P<128 panel math and independent P1..3 MMVQ remain unchanged.
+// The old void ABI and independent P1..3 MMVQ remain unchanged; the default
+// Q6_K arm (fcuda_q6k_prefill_mmq_f32) takes P>=8 and declines to them.
 // One explicit owner holds activation and optional Stream-K fixup buffers.
 // Successful calls enqueue on g_stream; first-error status is captured inside
 // each profiling scope. Failed drains latch shared AND private-loan ownership.
@@ -26,7 +27,9 @@ extern "C" unsigned long long fcuda_q56k_mmq_launch_count(int kind) {
     return kind == 5 || kind == 6 ? g_q56k_mmq_launches[kind-5] : 0;
 }
 
-#ifdef FAK_CUDA_Q56K_MMQ_QUALIFICATION
+// The family is always compiled so the default Q6_K prefill arm can use it;
+// the qualification define only widens selection (Q5_K, the P>=128 strict
+// whole-operation admission) and instantiates the Q5_K kernels.
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #define FAK_Q56K_MMQ_AVAILABLE 1
 #endif
@@ -884,8 +887,11 @@ struct launch_plan {
     size_t activation_bytes, fixup_bytes;
 };
 
+// The narrowest J tile; the P>=128 qualification floor is the Go selector's.
+#define FAK_Q56K_MMQ_MIN_COLS 8
+
 static int plan_geometry(int out, int in, int p, device_info &info, launch_plan &plan) {
-    if (out <= 0 || in <= 0 || p < 128 || in % QK_K ||
+    if (out <= 0 || in <= 0 || p < FAK_Q56K_MMQ_MIN_COLS || in % QK_K ||
         (int64_t)out*in >= INT_MAX || (int64_t)p*in >= INT_MAX ||
         (int64_t)p*out >= INT_MAX || info.nsm <= 0) return -75701;
     const int64_t padded = FAK_Q56K_MMQ_PAD((int64_t)in, MATRIX_ROW_PADDING);
@@ -1003,10 +1009,16 @@ static int allocation_failure() {
     const int status = (int)cudaPeekAtLastError();
     return status ? status : FCUDA_SCRATCH_ALLOC_FAILED;
 }
+// A plain scratch miss before the first enqueue declines to the scratch-free
+// legacy kernel instead of surfacing as an execution fault; a miss caused by a
+// sticky native terminal or a CUDA error keeps its status.
+static int declinable_miss(int declined, int status) {
+    return declined && status == FCUDA_SCRATCH_ALLOC_FAILED && !g_cuda_cleanup_status;
+}
 
 template <int kind, int J, bool fallback>
 static int run_variant(const uint8_t *w, const float *x, float *y, int out, int in, int p,
-                       device_info &info, const launch_plan &plan) {
+                       device_info &info, const launch_plan &plan, int declined) {
     static_assert(kind == 5 || kind == 6, "packed family only");
     const int shared_bytes = (int)nbytes_shared(J);
     if (!info.smem_raised[fallback][J]) {
@@ -1018,12 +1030,22 @@ static int run_variant(const uint8_t *w, const float *x, float *y, int out, int 
     // Both owned allocations precede the first enqueue. Neither uses managed memory.
     void *activation = fcuda_malloc_tagged(plan.activation_bytes, FAK_ALLOC_PREFILL_SCRATCH,
                                            FAK_ALLOC_SITE("q56k-mmq-q8_1"));
-    if (!activation) return allocation_failure();
+    if (!activation) {
+        const int st = allocation_failure();
+        return declinable_miss(declined, st) ? declined : st;
+    }
     float *fixup = nullptr;
     if (plan.fixup) {
         fixup = (float *)fcuda_malloc_tagged(plan.fixup_bytes, FAK_ALLOC_PREFILL_SCRATCH,
                                             FAK_ALLOC_SITE("q56k-mmq-stream-k"));
-        if (!fixup) return retire(activation, nullptr, allocation_failure());
+        if (!fixup) {
+            const int st = allocation_failure();
+            if (declinable_miss(declined, st)) {
+                const int freed = retire(activation, nullptr, 0);
+                return freed ? freed : declined;
+            }
+            return retire(activation, nullptr, st);
+        }
     }
     // The final shared Y tile may over-read into the J_max tail. Initialize it
     // before quantization; no pool bytes or prior request metadata are consumed.
@@ -1063,8 +1085,8 @@ static int run_variant(const uint8_t *w, const float *x, float *y, int out, int 
 
 template <int kind, bool fallback>
 static int dispatch(const uint8_t *w, const float *x, float *y, int out, int in, int p,
-                    device_info &info, const launch_plan &plan) {
-#define FAK_Q56K_MMQ_CASE(J) case J: return run_variant<kind,J,fallback>(w,x,y,out,in,p,info,plan)
+                    device_info &info, const launch_plan &plan, int declined) {
+#define FAK_Q56K_MMQ_CASE(J) case J: return run_variant<kind,J,fallback>(w,x,y,out,in,p,info,plan,declined)
     switch (plan.J) {
         FAK_Q56K_MMQ_CASE(8); FAK_Q56K_MMQ_CASE(16); FAK_Q56K_MMQ_CASE(24);
         FAK_Q56K_MMQ_CASE(32); FAK_Q56K_MMQ_CASE(40); FAK_Q56K_MMQ_CASE(48);
@@ -1074,23 +1096,26 @@ static int dispatch(const uint8_t *w, const float *x, float *y, int out, int in,
     }
 #undef FAK_Q56K_MMQ_CASE
 }
+// declined != 0 replaces every pre-enqueue refusal status, including a plain
+// scratch miss, so a default-arm caller can run its legacy kernel instead;
+// nothing was submitted and any scratch already taken was returned.
 template <int kind>
-static int run(const uint8_t *w, const float *x, float *y, int out, int in, int p) {
-    if (!x) return -75703;
+static int run(const uint8_t *w, const float *x, float *y, int out, int in, int p,
+               int declined = 0) {
+    if (!x) return declined ? declined : -75703;
     device_info *info = nullptr;
     launch_plan plan{};
     int rc = preflight<kind>(w,x,out,in,p,info,plan);
-    if (rc) return rc;
+    if (rc) return declined ? declined : rc;
     const size_t yb = (size_t)p*out*sizeof(float), xb = (size_t)p*in*sizeof(float);
     const size_t wb = (size_t)out*(in/QK_K)*(kind == 5 ? 176 : 210);
     rc = extent(y,yb,alignof(float));
-    if (rc) return rc;
-    if (overlap(y,yb,x,xb) || overlap(y,yb,w,wb)) return -75703;
-    return plan.fallback ? dispatch<kind,true>(w,x,y,out,in,p,*info,plan)
-                         : dispatch<kind,false>(w,x,y,out,in,p,*info,plan);
+    if (rc) return declined ? declined : rc;
+    if (overlap(y,yb,x,xb) || overlap(y,yb,w,wb)) return declined ? declined : -75703;
+    return plan.fallback ? dispatch<kind,true>(w,x,y,out,in,p,*info,plan,declined)
+                         : dispatch<kind,false>(w,x,y,out,in,p,*info,plan,declined);
 }
 } // namespace fak_q56k_mmq
-#endif // FAK_CUDA_Q56K_MMQ_QUALIFICATION
 
 extern "C" int fcuda_q56k_mmq_preflight(const uint8_t *w, const float *x,
                                         int out, int in, int p, int kind) {
@@ -1119,6 +1144,23 @@ extern "C" int fcuda_q56k_mmq_matmul_checked_f32(const uint8_t *w, const float *
     (void)w; (void)x; (void)y; (void)out; (void)in; (void)p; (void)kind;
     return -75705;
 #endif
+}
+
+// Default Q6_K prompt-panel arm: 1 = mmq, 0 = the legacy k_q6k_gemm panel.
+// The Go side resolves FAK_CUDA_Q6K_PREFILL into this once at init.
+#define FCUDA_Q6K_PREFILL_MMQ_DECLINED 80011
+#define FCUDA_Q6K_PREFILL_MMQ_MIN_COLS 8
+static int g_q6k_prefill_arm = 0;
+extern "C" void fcuda_set_q6k_prefill_arm(int arm) { g_q6k_prefill_arm = arm; }
+
+// Returns FCUDA_Q6K_PREFILL_MMQ_DECLINED before any allocation or enqueue when
+// the arm is off, the panel is narrow, or the family refuses the device, the
+// capture state or the operands; the caller then runs the legacy Q6_K panel.
+extern "C" int fcuda_q6k_prefill_mmq_f32(const uint8_t *w, const float *x, float *y,
+                                         int out, int in, int p) {
+    if (g_q6k_prefill_arm != 1 || p < FCUDA_Q6K_PREFILL_MMQ_MIN_COLS)
+        return FCUDA_Q6K_PREFILL_MMQ_DECLINED;
+    return fak_q56k_mmq::run<6>(w,x,y,out,in,p,FCUDA_Q6K_PREFILL_MMQ_DECLINED);
 }
 
 // A failed ordinary Read is already a completion observation. Preserve that
