@@ -958,7 +958,8 @@ int fcuda_sampling_candidates_release(void *owned);
 int fcuda_ink2_zero(void *p, size_t bytes);
 int fcuda_ink2_rms_rows(const float *x, const float *w, float *y, int rows, int n, float eps);
 int fcuda_ink2_ctrl_pair(const float *cur, const float *msg, float *pair, int n);
-int fcuda_ink2_mix(const float *const *states, int ns, const float *queries, int nq, float *out, int n);
+int fcuda_ink2_mix(const float *const *states, int ns, const float *queries, int nq,
+    const float *const *norms, float eps, float *out, int n);
 int fcuda_ink2_gemv_f32(const float *W, const float *x, float *y, int rows, int cols);
 int fcuda_ink2_ctrl_down(const float *cur, const float *msg, const float *W, float *g, int n, int rank);
 int fcuda_ink2_ctrl_apply(const float *cur, const float *msg, const float *g, const float *gainW,

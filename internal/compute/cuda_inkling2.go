@@ -144,19 +144,26 @@ func (c *cudaBackend) Ink2CtrlPair(cur, msg, pair Ink2Ref, n int) error {
 	return ink2Status("ctrl pair", C.fcuda_ink2_ctrl_pair(c.ink2F(cur), c.ink2F(msg), c.ink2F(pair), C.int(n)))
 }
 
-func (c *cudaBackend) Ink2Mix(states []Ink2Ref, queries Ink2Ref, nq int, out Ink2Ref, n int) error {
+func (c *cudaBackend) Ink2Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2Ref, eps float32, out Ink2Ref, n int) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	ptrs := (*[8]*C.float)(C.malloc(C.size_t(8 * unsafe.Sizeof(uintptr(0)))))
-	defer C.free(unsafe.Pointer(ptrs))
-	if len(states) > len(ptrs) {
-		return fmt.Errorf("cuda inkling2 mix: %d states", len(states))
+	if len(states) > 8 || len(norms) > 4 {
+		return fmt.Errorf("cuda inkling2 mix: %d states, %d norms", len(states), len(norms))
 	}
+	ptrs := (*[12]*C.float)(C.malloc(C.size_t(12 * unsafe.Sizeof(uintptr(0)))))
+	defer C.free(unsafe.Pointer(ptrs))
 	for i, s := range states {
 		ptrs[i] = c.ink2F(s)
 	}
+	var np **C.float
+	if norms != nil {
+		for i, w := range norms {
+			ptrs[8+i] = c.ink2F(w)
+		}
+		np = (**C.float)(unsafe.Pointer(&ptrs[8]))
+	}
 	return ink2Status("mix", C.fcuda_ink2_mix((**C.float)(unsafe.Pointer(ptrs)), C.int(len(states)), c.ink2F(queries), C.int(nq),
-		c.ink2F(out), C.int(n)))
+		np, C.float(eps), c.ink2F(out), C.int(n)))
 }
 
 func (c *cudaBackend) Ink2CtrlDown(cur, msg, w, g Ink2Ref, n, rank int) error {

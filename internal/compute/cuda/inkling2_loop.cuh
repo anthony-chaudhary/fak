@@ -8,6 +8,8 @@
 // tokens. Included last by cuda_kernels.cu: uses the IQ grids, fcuda_iq_dot8 and the
 // NVFP4 decoders defined by earlier headers of the same translation unit.
 
+#include <cooperative_groups.h>
+
 #define INK2_MAX_STATES 8
 #define INK2_MAX_QUERIES 4
 #define INK2_MAX_TOPK 16
@@ -159,6 +161,164 @@ __global__ void __launch_bounds__(INK2_MIX_THREADS) k_ink2_mix(Ink2States st, in
   case 6: ink2_mix_body<6, NQ>(st, queries, out, n); break;
   case 7: ink2_mix_body<7, NQ>(st, queries, out, n); break;
   default: ink2_mix_body<8, NQ>(st, queries, out, n); break;
+  }
+}
+
+// Cluster form of the depth mix: INK2_MIX_CTAS blocks each own one slice of the hidden
+// dimension (one element per thread) and meet over distributed shared memory, so the
+// reductions use eight SMs where k_ink2_mix uses one. Scores and weights are computed
+// one (query, state) pair per lane, which keeps the float64 softmax off a single lane.
+// With norms set, each query row is RMS-normalized (weight norms[q]) before it is
+// written, which removes the RMS launch that follows a mix with no controller between.
+// Adapted from the single-pass MIX of realugbun/llama.cpp ggml/src/ggml-cuda/inkling2.cu:931-1073@2eb2530ec4 (MIT).
+#define INK2_MIX_CTAS 8
+struct Ink2Norms {
+  const float *w[INK2_MAX_QUERIES];
+};
+
+struct Ink2MixShared {
+  float part[32][INK2_MAX_STATES * (1 + INK2_MAX_QUERIES)];
+  double blk[INK2_MAX_STATES * (1 + INK2_MAX_QUERIES)];
+  double tot[INK2_MAX_STATES * (1 + INK2_MAX_QUERIES)];
+  float scale[INK2_MAX_STATES];
+  double esc[INK2_MAX_QUERIES][INK2_MAX_STATES];
+  float wts[INK2_MAX_QUERIES][INK2_MAX_STATES];
+  double nblk[INK2_MAX_QUERIES];
+  float nfac[INK2_MAX_QUERIES];
+};
+
+template <int NS, int NQ>
+__device__ void ink2_mixc_body(Ink2MixShared &sm, const Ink2States &st, const float *queries, const Ink2Norms &nw,
+                               int norm, float eps, float *out, int n) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+  namespace cg = cooperative_groups;
+  cg::cluster_group cluster = cg::this_cluster();
+  constexpr int NV = NS * (1 + NQ);
+  auto &part = sm.part;
+  auto &blk = sm.blk;
+  auto &tot = sm.tot;
+  auto &scale = sm.scale;
+  auto &esc = sm.esc;
+  auto &wts = sm.wts;
+  auto &nblk = sm.nblk;
+  auto &nfac = sm.nfac;
+  const unsigned rank = cluster.block_rank();
+  const int i = (int)rank * blockDim.x + threadIdx.x;
+  const bool live = i < n;
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5, nwarp = (blockDim.x + 31) >> 5;
+  float xs[NS], acc[NV];
+#pragma unroll
+  for (int s = 0; s < NS; ++s) xs[s] = live ? st.p[s][i] : 0.f;
+  {
+    float qv[NQ];
+#pragma unroll
+    for (int q = 0; q < NQ; ++q) qv[q] = live ? queries[(size_t)q * n + i] : 0.f;
+#pragma unroll
+    for (int s = 0; s < NS; ++s) {
+      acc[s] = xs[s] * xs[s];
+#pragma unroll
+      for (int q = 0; q < NQ; ++q) acc[NS + s * NQ + q] = xs[s] * qv[q];
+    }
+  }
+#pragma unroll
+  for (int v = 0; v < NV; ++v) {
+    float x = acc[v];
+    for (int d = 16; d > 0; d >>= 1) x += __shfl_down_sync(0xffffffff, x, d);
+    if (lane == 0) part[warp][v] = x;
+  }
+  __syncthreads();
+  if (threadIdx.x < NV) {
+    double t = 0;
+    for (int w = 0; w < nwarp; ++w) t += (double)part[w][threadIdx.x];
+    blk[threadIdx.x] = t;
+  }
+  cluster.sync();
+  if (threadIdx.x < NV) {
+    double t = 0;
+    for (unsigned r = 0; r < cluster.num_blocks(); ++r) t += cluster.map_shared_rank(blk, r)[threadIdx.x];
+    tot[threadIdx.x] = t;
+  }
+  __syncthreads();
+  if (threadIdx.x < NS) scale[threadIdx.x] = (float)(1.0 / sqrt(tot[threadIdx.x] / (double)n + 1e-6));
+  __syncthreads();
+  if (threadIdx.x < 32) {
+    const int q = threadIdx.x / NS, s = threadIdx.x % NS;
+    const bool on = threadIdx.x < NS * NQ;
+    const double inv = 1.0 / sqrt((double)n);
+    const double sc = on ? (double)(float)((double)scale[s] * tot[NS + s * NQ + q]) * inv : 0.0;
+    if (on) esc[q][s] = sc;
+    __syncwarp();
+    double mx = -INFINITY;
+    if (on)
+      for (int t = 0; t < NS; ++t) mx = fmax(mx, esc[q][t]);
+    __syncwarp();
+    if (on) esc[q][s] = exp(sc - mx);
+    __syncwarp();
+    if (on) {
+      double sum = 0;
+      for (int t = 0; t < NS; ++t) sum += esc[q][t];
+      wts[q][s] = (float)(esc[q][s] / sum);
+    }
+  }
+  __syncthreads();
+  float o[NQ];
+#pragma unroll
+  for (int s = 0; s < NS; ++s) xs[s] = __fmul_rn(xs[s], scale[s]);
+#pragma unroll
+  for (int q = 0; q < NQ; ++q) {
+    float a = 0.f;
+#pragma unroll
+    for (int s = 0; s < NS; ++s) a = __fadd_rn(a, __fmul_rn(wts[q][s], xs[s]));
+    o[q] = a;
+  }
+  if (norm) {
+#pragma unroll
+    for (int q = 0; q < NQ; ++q) {
+      float x = o[q] * o[q];
+      for (int d = 16; d > 0; d >>= 1) x += __shfl_down_sync(0xffffffff, x, d);
+      if (lane == 0) part[warp][q] = x;
+    }
+    __syncthreads();
+    if (threadIdx.x < NQ) {
+      double t = 0;
+      for (int w = 0; w < nwarp; ++w) t += (double)part[w][threadIdx.x];
+      nblk[threadIdx.x] = t;
+    }
+    cluster.sync();
+    if (threadIdx.x < NQ) {
+      double t = 0;
+      for (unsigned r = 0; r < cluster.num_blocks(); ++r) t += cluster.map_shared_rank(nblk, r)[threadIdx.x];
+      nfac[threadIdx.x] = (float)(1.0 / sqrt(t / (double)n + (double)eps));
+    }
+    __syncthreads();
+#pragma unroll
+    for (int q = 0; q < NQ; ++q) {
+      float v = __fmul_rn(o[q], nfac[q]);
+      if (nw.w[q] && live) v = __fmul_rn(v, nw.w[q][i]);
+      o[q] = v;
+    }
+  }
+  if (live)
+#pragma unroll
+    for (int q = 0; q < NQ; ++q) out[(size_t)q * n + i] = o[q];
+  // a block's shared memory must outlive every remote read of it
+  cluster.sync();
+#endif
+}
+
+template <int NQ>
+__global__ void __launch_bounds__(1024)
+    k_ink2_mixc(Ink2States st, int ns, const float *queries, Ink2Norms nw, int norm, float eps, float *out, int n) {
+  __shared__ Ink2MixShared sm;
+  switch (ns) {
+  case 1: ink2_mixc_body<1, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
+  case 2: ink2_mixc_body<2, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
+  case 3: ink2_mixc_body<3, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
+  case 4: ink2_mixc_body<4, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
+  case 5: ink2_mixc_body<5, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
+  case 6: ink2_mixc_body<6, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
+  case 7: ink2_mixc_body<7, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
+  default: ink2_mixc_body<8, NQ>(sm, st, queries, nw, norm, eps, out, n); break;
   }
 }
 
@@ -748,10 +908,74 @@ extern "C" int fcuda_ink2_ctrl_pair(const float *cur, const float *msg, float *p
   return ink2_last_error();
 }
 
-extern "C" int fcuda_ink2_mix(const float *const *states, int ns, const float *queries, int nq, float *out, int n) {
+static int fcuda_ink2_mix_plain(const Ink2States &st, const float *queries, int nq, float *out, int n);
+
+// -1 unknown, 0 no cluster launch on this device, 1 cluster launch available.
+static int g_ink2_cluster = -1;
+
+static bool ink2_cluster_ok(void) {
+  if (g_ink2_cluster < 0) {
+    int dev = 0, attr = 0;
+    g_ink2_cluster = cudaGetDevice(&dev) == cudaSuccess &&
+                             cudaDeviceGetAttribute(&attr, cudaDevAttrClusterLaunch, dev) == cudaSuccess && attr
+                         ? 1
+                         : 0;
+    cudaGetLastError();
+  }
+  return g_ink2_cluster == 1;
+}
+
+template <int NQ>
+static cudaError_t ink2_mixc_launch(const Ink2States &st, int ns, const float *queries, const Ink2Norms &nw, int norm,
+                                    float eps, float *out, int n, int threads) {
+  cudaLaunchConfig_t cfg = {};
+  cfg.gridDim = dim3(INK2_MIX_CTAS);
+  cfg.blockDim = dim3(threads);
+  cfg.stream = g_stream;
+  cudaLaunchAttribute attr[1];
+  attr[0].id = cudaLaunchAttributeClusterDimension;
+  attr[0].val.clusterDim.x = INK2_MIX_CTAS;
+  attr[0].val.clusterDim.y = 1;
+  attr[0].val.clusterDim.z = 1;
+  cfg.attrs = attr;
+  cfg.numAttrs = 1;
+  return cudaLaunchKernelEx(&cfg, k_ink2_mixc<NQ>, st, ns, queries, nw, norm, eps, out, n);
+}
+
+// fcuda_ink2_mix: out[q] = mix of the states for query q, then (norms != null) RMS with
+// weight norms[q] (nullable entries skip the weight). Devices without cluster launch run
+// the single-block mix and one k_ink2_rms_rows per query.
+extern "C" int fcuda_ink2_mix(const float *const *states, int ns, const float *queries, int nq,
+                              const float *const *norms, float eps, float *out, int n) {
   if (ns < 1 || ns > INK2_MAX_STATES || nq < 1 || nq > INK2_MAX_QUERIES) return (int)cudaErrorInvalidValue;
   Ink2States st;
   for (int i = 0; i < INK2_MAX_STATES; ++i) st.p[i] = i < ns ? states[i] : nullptr;
+  Ink2Norms nw;
+  for (int q = 0; q < INK2_MAX_QUERIES; ++q) nw.w[q] = norms && q < nq ? norms[q] : nullptr;
+  const int threads = ((n + INK2_MIX_CTAS - 1) / INK2_MIX_CTAS + 31) & ~31;
+  if (threads <= 1024 && ink2_cluster_ok()) {
+    cudaError_t e = cudaSuccess;
+    const int norm = norms ? 1 : 0;
+    switch (nq) {
+    case 1: FCUDA_TS("k_ink2_mixc", INK2_MIX_CTAS, e = ink2_mixc_launch<1>(st, ns, queries, nw, norm, eps, out, n, threads)); break;
+    case 2: FCUDA_TS("k_ink2_mixc", INK2_MIX_CTAS, e = ink2_mixc_launch<2>(st, ns, queries, nw, norm, eps, out, n, threads)); break;
+    case 3: FCUDA_TS("k_ink2_mixc", INK2_MIX_CTAS, e = ink2_mixc_launch<3>(st, ns, queries, nw, norm, eps, out, n, threads)); break;
+    default: FCUDA_TS("k_ink2_mixc", INK2_MIX_CTAS, e = ink2_mixc_launch<4>(st, ns, queries, nw, norm, eps, out, n, threads)); break;
+    }
+    return (int)e;
+  }
+  const int rc = fcuda_ink2_mix_plain(st, queries, nq, out, n);
+  if (rc != 0 || !norms) return rc;
+  for (int q = 0; q < nq; ++q) {
+    float *row = out + (size_t)q * n;
+    FCUDA_TS("k_ink2_rms_rows", 1, k_ink2_rms_rows<<<1, 1024, 0, g_stream>>>(row, norms[q], row, n, eps));
+  }
+  return ink2_last_error();
+}
+
+static int fcuda_ink2_mix_plain(const Ink2States &st, const float *queries, int nq, float *out, int n) {
+  int ns = 0;
+  while (ns < INK2_MAX_STATES && st.p[ns]) ++ns;
   switch (nq) {
   case 1: FCUDA_TS("k_ink2_mix", 1, k_ink2_mix<1><<<1, INK2_MIX_THREADS, 0, g_stream>>>(st, ns, queries, out, n)); break;
   case 2: FCUDA_TS("k_ink2_mix", 1, k_ink2_mix<2><<<1, INK2_MIX_THREADS, 0, g_stream>>>(st, ns, queries, out, n)); break;

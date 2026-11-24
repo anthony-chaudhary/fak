@@ -45,7 +45,9 @@ type Inkling2Device interface {
 
 	Ink2RMS(x, w, y Ink2Ref, rows, n int, eps float32) error
 	Ink2CtrlPair(cur, msg, pair Ink2Ref, n int) error
-	Ink2Mix(states []Ink2Ref, queries Ink2Ref, nq int, out Ink2Ref, n int) error
+	// Ink2Mix writes nq depth mixes of states; with norms (one weight per query, a
+	// zero Ref for none) each mix row is RMS-normalized (eps) before it is written.
+	Ink2Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2Ref, eps float32, out Ink2Ref, n int) error
 	// Ink2CtrlDown is g = Down*[rms(cur), rms(msg)] for an F32 [rank, 2n] Down.
 	Ink2CtrlDown(cur, msg, w, g Ink2Ref, n, rank int) error
 	Ink2CtrlApply(cur, msg, g, gainW, forgetW, out Ink2Ref, n, rank int) error

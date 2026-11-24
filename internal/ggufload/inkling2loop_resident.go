@@ -305,9 +305,15 @@ func (s *inkling2Resident) rms(x, w ink2Ref, n int, eps float32) ink2Ref {
 }
 
 func (s *inkling2Resident) mix(states []ink2Ref, queries ink2Ref, nq int) ink2Ref {
+	return s.mixNorm(states, queries, nq, nil)
+}
+
+// mixNorm is mix with each query row RMS-normalized by its weight in norms, in the
+// same launch.
+func (s *inkling2Resident) mixNorm(states []ink2Ref, queries ink2Ref, nq int, norms []ink2Ref) ink2Ref {
 	out := s.tmp(nq * s.hp.Hidden)
 	if s.err == nil {
-		s.fail(s.dev.Ink2Mix(states, queries, nq, out, s.hp.Hidden))
+		s.fail(s.dev.Ink2Mix(states, queries, nq, norms, s.hp.NormEps, out, s.hp.Hidden))
 	}
 	return out
 }
@@ -351,7 +357,17 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	inpSA := cur
 
 	in := [3]ink2Ref{cur, cur, cur}
-	if l.resQRows > 0 {
+	normed := false
+	if l.resQRows > 0 && msgs == nil {
+		normed = true
+		if local {
+			m := s.mixNorm(with(*blocks, cur), l.resQ, 1, []ink2Ref{l.attnNorm})
+			in = [3]ink2Ref{m, m, m}
+		} else {
+			m := s.mixNorm(with(*blocks, cur), l.resQ, 3, []ink2Ref{l.qNorm, l.kNorm, l.vNorm})
+			in = [3]ink2Ref{m, at(m, h), at(m, 2*h)}
+		}
+	} else if l.resQRows > 0 {
 		if local {
 			m := s.mix(with(*blocks, cur), l.resQ, 1)
 			in = [3]ink2Ref{m, m, m}
@@ -366,6 +382,7 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 		}
 	}
 	switch {
+	case normed:
 	case local && msgs != nil:
 		for j := 0; j < 3; j++ {
 			in[j] = s.rms(in[j], l.attnNorm, h, hp.NormEps)
@@ -421,11 +438,14 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	}
 	ffnInp := cur
 
-	x := s.mix(with(*blocks, cur), l.ffnResQ, 1)
+	var x ink2Ref
 	if msgs != nil {
+		x = s.mix(with(*blocks, cur), l.ffnResQ, 1)
 		x = s.control(x, msgs[3], c, 3)
+		x = s.rms(x, l.ffnNorm, h, hp.NormEps)
+	} else {
+		x = s.mixNorm(with(*blocks, cur), l.ffnResQ, 1, []ink2Ref{l.ffnNorm})
 	}
-	x = s.rms(x, l.ffnNorm, h, hp.NormEps)
 	x = s.moe(l, x)
 	return s.conv(slot, x, l.ffnPostConv, ink2Ref{}, ffnInp, h, 0, 2*kvDim+h)
 }
@@ -525,8 +545,7 @@ func (s *inkling2Resident) forward() {
 	for il := hp.CoreEnd; il < hp.Layers; il++ {
 		cur = s.layer(il, il, cur, &blocks, nil, nil)
 	}
-	x := s.mix(with(blocks, cur), s.outResQ, 1)
-	x = s.rms(x, s.outNorm, hp.Hidden, hp.NormEps)
+	x := s.mixNorm(with(blocks, cur), s.outResQ, 1, []ink2Ref{s.outNorm})
 	logits := s.mv(s.output, x)
 	if s.err == nil {
 		s.fail(s.dev.Ink2SoftcapArgmax(logits, hp.VocabUnpadded, hp.FinalLogitSoftcap, s.argIdx))
