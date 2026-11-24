@@ -37,14 +37,71 @@ __global__ void k_rmsnorm_warp_per_row(const float *X, const float *W, float *Y,
   for (int i = lane; i < n; i += 32) y[i] = x[i] * inv * W[i];
 }
 
-extern "C" void fcuda_rmsnorm_dispatched_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps) {
-  if (n <= 1024) {
+// ---- RMSNorm: G-lane segment per row (widths <= 16) -----------------------------
+// A warp-per-row launch of a 16-wide row leaves half the warp idle; packing 32/G rows
+// per warp gives each element exactly one thread and reduces within the segment.
+template <int G>
+__global__ void k_rmsnorm_subwarp_per_row(const float *X, const float *W, float *Y, int rows, int n, float eps) {
+  const int lane = threadIdx.x & 31;
+  const long long warp = ((long long)blockIdx.x * blockDim.x + threadIdx.x) >> 5;
+  const long long row = warp * (32 / G) + lane / G;
+  const int col = lane % G;
+  const bool live = row < rows && col < n;
+  const float v = live ? X[row * n + col] : 0.f;
+  float local = v * v;
+  // Every lane of the warp must reach the shuffles, so dead lanes contribute zero.
+  for (int offset = G / 2; offset > 0; offset >>= 1) local += __shfl_xor_sync(0xffffffffu, local, offset, G);
+  if (live) Y[row * n + col] = v * rsqrtf(local / (float)n + eps) * W[col];
+}
+
+// Width classes: 0 = G-lane segment per row, 1 = warp per row, 2 = block per row.
+#define FAK_RMSNORM_WIDTH_SUBWARP 0
+#define FAK_RMSNORM_WIDTH_WARP 1
+#define FAK_RMSNORM_WIDTH_BLOCK 2
+extern "C" int fak_rmsnorm_width_class(int n) {
+  if (n <= 0) return -1;
+  if (n <= 16) return FAK_RMSNORM_WIDTH_SUBWARP;
+  return n <= 1024 ? FAK_RMSNORM_WIDTH_WARP : FAK_RMSNORM_WIDTH_BLOCK;
+}
+
+static void fak_rmsnorm_launch_class(int cls, const float *dX, const float *dW, float *dY, int rows, int n, float eps) {
+  if (cls == FAK_RMSNORM_WIDTH_SUBWARP) {
+    const int g = n <= 1 ? 1 : n <= 2 ? 2 : n <= 4 ? 4 : n <= 8 ? 8 : 16;
+    const long long rowsPerBlock = 8LL * (32 / g); // 8 warps per 256-thread block
+    const unsigned blocks = (unsigned)(((long long)rows + rowsPerBlock - 1) / rowsPerBlock);
+    switch (g) {
+      case 1: FCUDA_TS("k_rmsnorm_subwarp_per_row", blocks, k_rmsnorm_subwarp_per_row<1><<<blocks, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps)); break;
+      case 2: FCUDA_TS("k_rmsnorm_subwarp_per_row", blocks, k_rmsnorm_subwarp_per_row<2><<<blocks, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps)); break;
+      case 4: FCUDA_TS("k_rmsnorm_subwarp_per_row", blocks, k_rmsnorm_subwarp_per_row<4><<<blocks, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps)); break;
+      case 8: FCUDA_TS("k_rmsnorm_subwarp_per_row", blocks, k_rmsnorm_subwarp_per_row<8><<<blocks, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps)); break;
+      default: FCUDA_TS("k_rmsnorm_subwarp_per_row", blocks, k_rmsnorm_subwarp_per_row<16><<<blocks, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps)); break;
+    }
+  } else if (cls == FAK_RMSNORM_WIDTH_WARP) {
     int warps = 8;
     int blocks = (rows + warps - 1) / warps;
     FCUDA_TS("k_rmsnorm_warp_per_row", blocks, k_rmsnorm_warp_per_row<<<blocks, warps * 32, 0, g_stream>>>(dX, dW, dY, rows, n, eps));
   } else {
     FCUDA_TS("k_rmsnorm", rows, k_rmsnorm<<<rows, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps));
   }
+}
+
+extern "C" void fcuda_rmsnorm_dispatched_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps) {
+  fak_rmsnorm_launch_class(fak_rmsnorm_width_class(n), dX, dW, dY, rows, n, eps);
+}
+
+// Checked form: cls < 0 selects by width; an explicit class must be legal for n
+// (the segment kernel holds one element per lane, so it refuses n > 16).
+// Returns the launched class, -1 on bad arguments, or 92000 + cudaError.
+extern "C" int fak_rmsnorm_width_dispatched_f32(int cls, const float *dX, const float *dW, float *dY,
+                                                int rows, int n, float eps) {
+  if (!dX || !dW || !dY || rows <= 0 || n <= 0 || rows > INT_MAX / n || !(eps > 0.f)) return -1;
+  if (cls < 0) cls = fak_rmsnorm_width_class(n);
+  if (cls > FAK_RMSNORM_WIDTH_BLOCK || (cls == FAK_RMSNORM_WIDTH_SUBWARP && n > 16)) return -1;
+  cudaError_t prior = cudaGetLastError();
+  if (prior != cudaSuccess) return 92000 + (int)prior;
+  fak_rmsnorm_launch_class(cls, dX, dW, dY, rows, n, eps);
+  cudaError_t launch = cudaGetLastError();
+  return launch == cudaSuccess ? cls : 92000 + (int)launch;
 }
 
 // ---- Fused RMSNorm + Residual Add ----------------------------------------------

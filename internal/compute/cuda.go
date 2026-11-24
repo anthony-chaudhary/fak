@@ -1607,6 +1607,9 @@ func (c *cudaBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
 	n := weight.Numel()
 	rows := x.Numel() / n
 	y, _ := c.devTr(append([]int(nil), x.Shape...), F32)
+	if cudaRMSNormWidthDispatchEnabled && c.rmsNormWidthDispatchLocked(cudaRMSNormWidthAuto, x, weight, y, rows, n, eps) >= 0 {
+		return y
+	}
 	C.fcuda_rmsnorm_f32(c.cf(x), c.cf(weight), c.cf(y), C.int(rows), C.int(n), C.float(eps))
 	return y
 }
