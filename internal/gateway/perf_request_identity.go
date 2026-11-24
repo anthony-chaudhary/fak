@@ -197,7 +197,10 @@ func nativeKernels(totals nativeperf.DecodeHostWorkTotals) *perfledger.NativeKer
 	for _, r := range k.Rows {
 		samples = append(samples, perfledger.KernelSample{Kernel: r.Kernel, Op: compute.KernelOpClass(r.Kernel), GX: r.GX, GY: r.GY, Calls: r.Calls, NS: r.NS})
 	}
+	clock, _ := compute.SMClockFor(k.Backend)
 	return perfledger.NewNativeKernels(perfledger.KernelWindow{
+		SMClockMHz:      clock.MHz,
+		ClockSource:     clock.Source,
 		Backend:         k.Backend,
 		Steps:           totals.Steps,
 		GPUNS:           k.GPUNS,

@@ -87,6 +87,7 @@ are about. They assume more than a ladder's rung 1 and less than its top rung.
 ### Inference, hardware, and the accelerator path
 
 - [What is a CUDA kernel?](what-is-a-cuda-kernel.md) — and why "kernel" means three things here.
+- [GPU clock cycles](gpu-cycles.md) — what a kernel costs in the unit the chip counts.
 - [Hardware portability via the compute HAL seam](hardware-portability.md) — the seam the accelerator ladder climbs.
 - [Hardware capacity limits](hardware-limits-and-capacity.md) — the eighth assumption the HAL does not lift.
 - [Multi-GPU tensor parallelism](multi-gpu-tensor-parallelism.md) — when one device is not enough.

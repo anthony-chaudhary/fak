@@ -42,6 +42,10 @@ type KernelWindow struct {
 	UntimedTransfer uint64
 	BarriersElided  uint64
 	Samples         []KernelSample
+	// SMClockMHz converts GPU time into cycles; zero or a missing ClockSource
+	// leaves every cycle field unset.
+	SMClockMHz  float64
+	ClockSource string
 }
 
 // SelectedKernel is one selected kernel shape's per-token device time. Share
@@ -54,6 +58,10 @@ type SelectedKernel struct {
 	GPUMSPerToken float64 `json:"gpu_ms_per_token"`
 	USPerCall     float64 `json:"us_per_call"`
 	Share         float64 `json:"share"`
+	// CyclesPerCall and MCyclesPerToken are the same device time in SM clock
+	// cycles; omitted when the window had no known clock.
+	CyclesPerCall   float64 `json:"cycles_per_call,omitempty"`
+	MCyclesPerToken float64 `json:"mcycles_per_token,omitempty"`
 }
 
 // NativeKernels is the per-token GPU time of the kernels a native decode
@@ -79,6 +87,16 @@ type NativeKernels struct {
 	Complete         bool             `json:"complete"`
 	Pipelining       string           `json:"pipelining"`
 	SelectedKernels  []SelectedKernel `json:"selected_kernels"`
+	// SMClockMHz and ClockSource (compute.SMClockObserved or SMClockDeclared)
+	// are the clock every cycle field was derived from.
+	SMClockMHz         float64 `json:"sm_clock_mhz,omitempty"`
+	ClockSource        string  `json:"clock_source,omitempty"`
+	GPUMCyclesPerToken float64 `json:"gpu_mcycles_per_token,omitempty"`
+}
+
+// CyclesFromNS converts device nanoseconds at a clock in MHz into cycles.
+func CyclesFromNS(ns, mhz float64) float64 {
+	return ns * mhz / 1e3
 }
 
 func finitePositive(v float64) bool {
@@ -135,8 +153,14 @@ func NewNativeKernels(w KernelWindow) *NativeKernels {
 		Complete:        w.Truncated == 0 && w.UntimedCompute == 0 && w.BarriersElided == 0,
 		Pipelining:      KernelPipeliningDisabledByProfile,
 	}
+	clocked := finitePositive(w.SMClockMHz) && w.ClockSource != ""
+	if clocked {
+		n.SMClockMHz = w.SMClockMHz
+		n.ClockSource = w.ClockSource
+		n.GPUMCyclesPerToken = roundTo(CyclesFromNS(w.GPUNS, w.SMClockMHz)/steps/1e6, 1e6)
+	}
 	row := func(kernel, op, groups string, calls uint64, ns float64) SelectedKernel {
-		return SelectedKernel{
+		r := SelectedKernel{
 			Kernel:        kernel,
 			Op:            op,
 			Groups:        groups,
@@ -145,6 +169,12 @@ func NewNativeKernels(w KernelWindow) *NativeKernels {
 			USPerCall:     roundTo(ns/float64(calls)/1e3, 1e6),
 			Share:         roundTo(ns/total, 1e9),
 		}
+		if clocked {
+			cycles := CyclesFromNS(ns, w.SMClockMHz)
+			r.CyclesPerCall = roundTo(cycles/float64(calls), 10)
+			r.MCyclesPerToken = roundTo(cycles/steps/1e6, 1e6)
+		}
+		return r
 	}
 	var selectedNS float64
 	i := 0
