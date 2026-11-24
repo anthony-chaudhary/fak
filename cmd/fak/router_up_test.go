@@ -123,6 +123,24 @@ func TestRouterUpAlreadyHealthyExitsZero(t *testing.T) {
 	}
 }
 
+func TestRouterUpMissingBinaryPointsAtFakServe(t *testing.T) {
+	f := &routerUpFake{}
+	d := f.deps(t.TempDir())
+	d.lookPath = func(string) (string, error) { return "", errors.New("not found") }
+	var stderr bytes.Buffer
+	if code := runRouterUp(io.Discard, &stderr, nil, d); code != exitRouterConfig {
+		t.Fatalf("exit %d, want %d", code, exitRouterConfig)
+	}
+	if len(f.ran) != 0 {
+		t.Fatal("ran a binary that was not found")
+	}
+	for _, want := range []string{"fak-server not found at", "fak serve"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q: %q", want, stderr.String())
+		}
+	}
+}
+
 func TestRouterUpPropagatesConfigExit(t *testing.T) {
 	f := &routerUpFake{code: exitRouterConfig}
 	if code := runRouterUp(io.Discard, io.Discard, nil, f.deps(t.TempDir())); code != exitRouterConfig {

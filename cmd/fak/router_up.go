@@ -1,14 +1,13 @@
 package main
 
-// fak router up (fak-private#3348): one verb that starts the always-on routing
-// gateway from the ~/.fak/router layout (%LOCALAPPDATA%\fak\router on
-// Windows). It derives the `fak-server route` launch line, creates a missing
-// gateway.key (0600), asks fak-server to write a default routing.json only when
-// none exists, exits 0 when a healthy router already answers on the address,
-// and otherwise runs fak-server in the foreground with signals forwarded, so a
-// service manager (fak-private#3347) can supervise it directly. The manual
-// local-engine server (`fak serve`, `fak-server serve --local-engine`) is a
-// separate path and is not touched.
+// fak router up starts the always-on routing gateway from the ~/.fak/router
+// layout (%LOCALAPPDATA%\fak\router on Windows). It derives the
+// `fak-server route` launch line, creates a missing gateway.key (0600), asks
+// fak-server to write a default routing.json only when none exists, exits 0
+// when a healthy router already answers on the address, and otherwise runs
+// fak-server in the foreground with signals forwarded so a service manager can
+// supervise it directly. fak-server is distributed separately; the standalone
+// gateway in this repo is `fak serve`, which this verb does not touch.
 
 import (
 	"crypto/rand"
@@ -179,6 +178,8 @@ func runRouterUp(stdout, stderr io.Writer, argv []string, d routerUpDeps) int {
 	if err != nil {
 		if !*dryRun {
 			fmt.Fprintf(stderr, "fak router up: config error: %v\n", err)
+			fmt.Fprintln(stderr, "fak router up: hint: this verb supervises the separately distributed fak-server routing gateway.")
+			fmt.Fprintln(stderr, "fak router up: hint: for the standalone OpenAI/Anthropic-compatible gateway, run: fak serve --addr <addr> --base-url <upstream>/v1 --model <model> (or --gguf <model> for the built-in engine)")
 			return exitRouterConfig
 		}
 		bin = "fak-server"
