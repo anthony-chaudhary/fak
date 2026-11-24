@@ -186,7 +186,7 @@ __global__ void __launch_bounds__(256) k_ink2p_ctrl_apply(const float *cur, cons
 // history in registers and writes the final history once.
 #define INK2P_MAX_KN 8
 __global__ void k_ink2p_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
-                             const float *resid, int n, int heads, int kn, float norm, int T) {
+                             const float *resid, int n, int heads, int kn, float norm, int T, float *log) {
   const int c = blockIdx.x * blockDim.x + threadIdx.x;
   if (c >= n) return;
   const int past = kn - 1;
@@ -195,10 +195,16 @@ __global__ void k_ink2p_conv(const float *x, const float *w, const float *dyn, f
   float h[INK2P_MAX_KN], wv[INK2P_MAX_KN];
   for (int t = 0; t < past; ++t) h[t] = hc[t];
   for (int t = 0; t < kn; ++t) wv[t] = wc[t];
+  // a verify chunk logs the entry history and every input so a later commit can keep
+  // only the accepted prefix
+  float *lc = log ? log + (size_t)c * (past + T) : nullptr;
+  if (lc)
+    for (int t = 0; t < past; ++t) lc[t] = h[t];
   const int hd = dyn ? c / (n / heads) : 0;
   const int dstride = heads * kn;
   for (int tok = 0; tok < T; ++tok) {
     const float xc = x[(size_t)tok * n + c];
+    if (lc) lc[past + tok] = xc;
     float acc = 0.f;
     for (int t = 0; t < past; ++t) acc = __fadd_rn(acc, __fmul_rn(h[t], wv[t]));
     acc = __fadd_rn(acc, __fmul_rn(xc, wv[past]));
@@ -222,10 +228,10 @@ __global__ void k_ink2p_conv(const float *x, const float *w, const float *dyn, f
 __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
                                  const float *rclip, float *kcache, float *vcache, int heads, int kvHeads,
                                  int headDim, int relLen, float qkClip, float relClip, float eps, int global,
-                                 float alpha, float floorTok, int cap, int pos0) {
+                                 float alpha, float floorTok, int cap, int pos0, const int *posDev) {
   const int lane = threadIdx.x & 31;
   const int b = blockIdx.x, tok = blockIdx.y;
-  const int pos = pos0 + tok;
+  const int pos = (posDev ? *posDev : pos0) + tok;
   const int idx = pos % cap;
   const int kvDim = kvHeads * headDim;
   if (b < heads) {
@@ -267,12 +273,13 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2p_attend(const float *
                                                                   const float *relBias, const float *kcache,
                                                                   const float *vcache, float *out, int heads,
                                                                   int kvHeads, int headDim, int relLen, int extent,
-                                                                  int window, int cap, float scale, int pos0) {
+                                                                  int window, int cap, float scale, int pos0,
+                                                                  const int *posDev) {
   extern __shared__ float sc[];
   const int h = blockIdx.x, tok = blockIdx.y;
   const int kvh = h / (heads / kvHeads);
   const int kvDim = kvHeads * headDim;
-  const int pos = pos0 + tok;
+  const int pos = (posDev ? *posDev : pos0) + tok;
   int n = pos + 1;
   if (window > 0 && n > window) n = window;
   if (n > cap) n = cap;
@@ -785,7 +792,44 @@ extern "C" int fcuda_ink2p_conv(const float *x, const float *w, const float *dyn
   if (kn < 1 || kn > INK2P_MAX_KN) return (int)cudaErrorInvalidValue;
   // one thread walks a channel along the whole chunk, so small blocks spread it over every SM
   FCUDA_TS("k_ink2p_conv", (n + 31) / 32, k_ink2p_conv<<<(n + 31) / 32, 32, 0, g_stream>>>(
-      x, w, dyn, hist, out, resid, n, heads, kn, norm, T));
+      x, w, dyn, hist, out, resid, n, heads, kn, norm, T, nullptr));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_conv over a verify chunk: log is [n][kn-1+T] for this conv's channels.
+extern "C" int fcuda_ink2p_conv_log(const float *x, const float *w, const float *dyn, float *hist, float *log,
+                                    float *out, const float *resid, int n, int heads, int kn, float norm, int T) {
+  if (kn < 1 || kn > INK2P_MAX_KN) return (int)cudaErrorInvalidValue;
+  FCUDA_TS("k_ink2p_conv", (n + 31) / 32, k_ink2p_conv<<<(n + 31) / 32, 32, 0, g_stream>>>(
+      x, w, dyn, hist, out, resid, n, heads, kn, norm, T, log));
+  return ink2_last_error();
+}
+
+// The history after the first keep tokens of a logged chunk: log[c][keep .. keep+past).
+__global__ void k_ink2p_conv_commit(float *hist, const float *log, int channels, int past, int L, int keep,
+                                    const int *keepDev) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= channels * past) return;
+  if (keepDev) keep = *keepDev;
+  const int c = i / past, j = i % past;
+  hist[i] = log[(size_t)c * L + keep + j];
+}
+
+extern "C" int fcuda_ink2p_conv_commit(float *hist, const float *log, int channels, int past, int L, int keep) {
+  if (past < 1 || keep < 0 || keep + past > L) return (int)cudaErrorInvalidValue;
+  const int n = channels * past;
+  FCUDA_TS("k_ink2p_conv_commit", (n + 255) / 256,
+           k_ink2p_conv_commit<<<(n + 255) / 256, 256, 0, g_stream>>>(hist, log, channels, past, L, keep, nullptr));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_conv_commit with keep read from device memory (0 <= keep <= L-past).
+extern "C" int fcuda_ink2p_conv_commit_dev(float *hist, const float *log, int channels, int past, int L,
+                                           const int *keepDev) {
+  if (past < 1) return (int)cudaErrorInvalidValue;
+  const int n = channels * past;
+  FCUDA_TS("k_ink2p_conv_commit", (n + 255) / 256,
+           k_ink2p_conv_commit<<<(n + 255) / 256, 256, 0, g_stream>>>(hist, log, channels, past, L, 0, keepDev));
   return ink2_last_error();
 }
 
@@ -797,7 +841,21 @@ extern "C" int fcuda_ink2p_qkv_post(float *q, float *r, const float *k, const fl
   const dim3 grid(heads + 2 * kvHeads, T);
   FCUDA_TS("k_ink2p_qkv_post", grid, k_ink2p_qkv_post<<<grid, 32, 0, g_stream>>>(
       q, r, k, v, qclip, rclip, kcache, vcache, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global, alpha,
-      floorTok, cap, pos0));
+      floorTok, cap, pos0, nullptr));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_qkv_post with the chunk position read from device memory, so a captured
+// verify graph replays at any position.
+extern "C" int fcuda_ink2p_qkv_post_dev(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                        const float *rclip, float *kcache, float *vcache, int heads, int kvHeads,
+                                        int headDim, int relLen, float qkClip, float relClip, float eps, int global,
+                                        float alpha, float floorTok, int cap, const int *posDev, int T) {
+  if (headDim > 256) return (int)cudaErrorInvalidValue;
+  const dim3 grid(heads + 2 * kvHeads, T);
+  FCUDA_TS("k_ink2p_qkv_post", grid, k_ink2p_qkv_post<<<grid, 32, 0, g_stream>>>(
+      q, r, k, v, qclip, rclip, kcache, vcache, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global, alpha,
+      floorTok, cap, 0, posDev));
   return ink2_last_error();
 }
 
@@ -814,7 +872,27 @@ extern "C" int fcuda_ink2p_attend(const float *q, const float *r, const float *s
   if (oe) return oe;
   const dim3 grid(heads, T);
   FCUDA_TS("k_ink2p_attend", grid, k_ink2p_attend<<<grid, INK2_ATT_THREADS, smem, g_stream>>>(
-      q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, headDim, relLen, extent, window, cap, scale, pos0));
+      q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, headDim, relLen, extent, window, cap, scale, pos0,
+      nullptr));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_attend with the chunk position read from device memory; scores are
+// sized for the longest span any position can see.
+extern "C" int fcuda_ink2p_attend_dev(const float *q, const float *r, const float *sinks, const float *relBias,
+                                      const float *kcache, const float *vcache, float *out, int heads, int kvHeads,
+                                      int headDim, int relLen, int extent, int window, int cap, float scale,
+                                      const int *posDev, int T) {
+  if (headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS) return (int)cudaErrorInvalidValue;
+  int span = cap;
+  if (window > 0 && span > window) span = window;
+  const size_t smem = (size_t)span * sizeof(float);
+  const int oe = ink2p_smem_optin((const void *)k_ink2p_attend, smem);
+  if (oe) return oe;
+  const dim3 grid(heads, T);
+  FCUDA_TS("k_ink2p_attend", grid, k_ink2p_attend<<<grid, INK2_ATT_THREADS, smem, g_stream>>>(
+      q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, headDim, relLen, extent, window, cap, scale, 0,
+      posDev));
   return ink2_last_error();
 }
 

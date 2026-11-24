@@ -67,4 +67,10 @@ func TestInkling2CUDADecodeBench(t *testing.T) {
 	t.Logf("inkling2 cuda bench: prompt %d prefill %s (%.2f tok/s); decode %d steps %s = %.2f tok/s; first tokens %v",
 		len(prompt), st.Prefill, float64(len(prompt))/st.Prefill.Seconds(), st.DecodeSteps, st.Decode,
 		st.DecodeTokensPerSecond(), got[:min(8, len(got))])
+	if d := inkling2SpecDepth(); d > 0 {
+		sp := inkling2LastSpec
+		t.Logf("inkling2 cuda bench spec: depth %d, %d verifies, accepted %d/%d (%.2f tok/verify), draft %.3f ms/call, verify %.3f ms/call",
+			d, sp.Verifies, sp.Accepted, sp.Drafted, float64(sp.Accepted+sp.Verifies)/float64(max(1, sp.Verifies)),
+			ms(sp.Draft)/float64(max(1, sp.Verifies)), ms(sp.Verify)/float64(max(1, sp.Verifies)))
+	}
 }

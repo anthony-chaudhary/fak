@@ -36,6 +36,10 @@ type ink2Prefill struct {
 	keepFloats int
 	scrFloats  int
 	grouped    bool
+	// verify is a speculative verify chunk: convs log their inputs for a later
+	// commit and the head runs on every row.
+	verify bool
+	vd     compute.Inkling2VerifyDevice
 }
 
 func (p *ink2Prefill) fail(err error) { p.s.fail(err) }
@@ -89,11 +93,8 @@ func (s *inkling2Resident) prefill(prompt []int) (int, error) {
 	}
 	T := min(inkling2PrefillChunk, len(prompt))
 	p := &ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts()}
-	p.keepFloats, p.scrFloats = s.prefillArenas(T)
-	if s.prefillKeep.T.Buf() == nil {
-		s.prefillKeep, s.prefillScr = s.alloc(p.keepFloats), s.alloc(p.scrFloats)
-		s.prefillIn = s.alloc(T * hp.Hidden)
-	}
+	s.ensurePrefillArenas(T)
+	p.keepFloats, p.scrFloats = s.prefillArenas(s.prefillCap)
 	p.keep, p.scr = s.prefillKeep, s.prefillScr
 	if s.err != nil {
 		return 0, s.err
@@ -107,6 +108,9 @@ func (s *inkling2Resident) prefill(prompt []int) (int, error) {
 		s.fail(s.dev.Ink2Write(s.prefillIn, rows[:n*hp.Hidden]))
 		p.T, p.pos0 = n, s.pos
 		p.keepOff, p.scrOff = 0, 0
+		if s.draft != nil {
+			s.fail(s.dev.Ink2Write(s.verifyPos, []float32{intBits(s.pos)}))
+		}
 		p.forward(start+n == len(prompt))
 		if s.err != nil {
 			return 0, s.err
@@ -125,10 +129,32 @@ func (s *inkling2Resident) prefill(prompt []int) (int, error) {
 
 func (p *ink2Prefill) mm(m ink2Mat, x ink2Ref) ink2Ref {
 	y := p.tmp(p.T * m.rows)
-	if p.s.err == nil {
-		p.fail(p.pd.Ink2PMatMul(m.t, x, y, p.T))
+	if p.s.err != nil {
+		return y
 	}
+	// a verify chunk reads each weight once for all its rows, each row equal to the
+	// decode GEMV
+	if p.verify && p.T <= 9 {
+		ok, err := inkling2RowsMatMul(p.vd, m, x, y, p.T, p.tmp)
+		if err != nil || ok {
+			p.fail(err)
+			return y
+		}
+	}
+	p.fail(p.pd.Ink2PMatMul(m.t, x, y, p.T))
 	return y
+}
+
+// inkling2RowsMatMul runs y = m.x[t] for rows <= 9 through the few-row kernels; ok is
+// false (nothing launched) for a dtype without one.
+func inkling2RowsMatMul(vd compute.Inkling2VerifyDevice, m ink2Mat, x, y ink2Ref, rows int, tmp func(int) ink2Ref) (bool, error) {
+	switch m.t.Dtype {
+	case compute.Q8_0:
+		return vd.Ink2VQ8Rows(m.t, x, tmp(rows*(m.cols/4+m.cols/32)), y, rows)
+	case compute.Q5_K:
+		return vd.Ink2VRows(m.t, x, y, rows)
+	}
+	return false, nil
 }
 
 func (p *ink2Prefill) rms(x, w ink2Ref, n int, eps float32) ink2Ref {
@@ -179,7 +205,11 @@ func (p *ink2Prefill) conv(slot int, x, weight, dyn, resid ink2Ref, n, heads, of
 	} else {
 		out = p.tmp(p.T * n)
 	}
-	if s.err == nil {
+	if s.err == nil && p.verify {
+		L := kn - 1 + p.T
+		p.fail(p.vd.Ink2PConvLog(x, weight, dyn, at(s.hist[slot], offset*(kn-1)), at(s.convLog[slot], offset*L), out, resid,
+			n, max(heads, 1), kn, norm, p.T))
+	} else if s.err == nil {
 		p.fail(p.pd.Ink2PConv(x, weight, dyn, at(s.hist[slot], offset*(kn-1)), out, resid, n, max(heads, 1), kn, norm, p.T))
 	}
 	return out
@@ -240,7 +270,9 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		Alpha: hp.LogScaleAlpha, Floor: hp.LogScaleFloor, Scale: float32(1 / math.Sqrt(float64(hp.HeadDim))),
 	}
 	cap := s.caps[slot]
-	if s.err == nil {
+	if s.err == nil && p.verify {
+		p.fail(p.vd.Ink2PQKVPostDev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.verifyPos, ap, cap, p.T))
+	} else if s.err == nil {
 		p.fail(p.pd.Ink2PQKVPost(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], ap, cap, p.pos0, p.T))
 	}
 	extent, window := hp.RelExtent, 0
@@ -248,7 +280,9 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		extent, window = hp.SlidingWindow, hp.SlidingWindow
 	}
 	attn := p.tmp(p.T * hp.Heads * hp.HeadDim)
-	if s.err == nil {
+	if s.err == nil && p.verify {
+		p.fail(p.vd.Ink2PAttendDev(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, s.verifyPos, ap, extent, window, cap, p.T))
+	} else if s.err == nil {
 		p.fail(p.pd.Ink2PAttend(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, ap, extent, window, cap, p.pos0, p.T))
 	}
 	gate := p.mm(l.gate, in[0])
@@ -323,19 +357,48 @@ func (p *ink2Prefill) moe(l *ink2Layer, x ink2Ref) ink2Ref {
 	npairs := p.T * k
 	gu := p.tmp(npairs * 2 * width)
 	var bucket ink2Bucket
-	p.experts(&l.gateUp, ids, x, k, hp.Hidden, gu, 2*width, &bucket)
+	// a verify chunk runs the decode expert GEMV straight over its T*k pairs: at a
+	// few rows, bucketing pairs by expert costs more than it saves
+	pairwise := p.verify && !p.grouped
+	if pairwise {
+		xr := p.tmp(npairs * hp.Hidden)
+		if s.err == nil {
+			p.fail(p.vd.Ink2VRepeatRows(x, xr, hp.Hidden, p.T, k))
+		}
+		p.pairExperts(&l.gateUp, ids, xr, hp.Hidden, gu, 2*width, npairs)
+	} else {
+		p.experts(&l.gateUp, ids, x, k, hp.Hidden, gu, 2*width, &bucket)
+	}
 	padK := l.down.padK
 	act := p.tmp(npairs * padK)
 	if s.err == nil {
 		p.fail(s.dev.Ink2Situ(gu, act, npairs, width, padK, float64(hp.SituBeta), float64(hp.SituLinearBeta)))
 	}
 	down := p.tmp(npairs * hp.Hidden)
-	p.experts(&l.down, ids, act, 1, padK, down, hp.Hidden, &bucket)
+	if pairwise {
+		p.pairExperts(&l.down, ids, act, padK, down, hp.Hidden, npairs)
+	} else {
+		p.experts(&l.down, ids, act, 1, padK, down, hp.Hidden, &bucket)
+	}
 	out := p.tmp(p.T * hp.Hidden)
 	if s.err == nil {
 		p.fail(p.pd.Ink2PCombine(down, wts, out, k, hp.Hidden, p.T))
 	}
 	return out
+}
+
+// pairExperts runs npairs (token, slot) pairs through e with the decode expert GEMV,
+// pair i reading x row i (stride xStride) and writing y row i.
+func (p *ink2Prefill) pairExperts(e *ink2Experts, ids, x ink2Ref, xStride int, y ink2Ref, rows, npairs int) {
+	s := p.s
+	if s.err != nil {
+		return
+	}
+	ok, err := s.dev.Ink2ExpertMatVec(e.stack, rows, ids, x, xStride, y, npairs, e.scale, nil)
+	if err == nil && !ok {
+		err = fmt.Errorf("inkling2 verify: expert dtype %s has no indexed kernel", e.stack.Dtype)
+	}
+	p.fail(err)
 }
 
 // forward runs one chunk through every layer visit; on the last chunk it also
@@ -348,7 +411,21 @@ func (p *ink2Prefill) forward(last bool) {
 	if s.err == nil {
 		p.fail(s.dev.Ink2RMS(s.prefillIn, s.tokNorm, cur, p.T, h, hp.NormEps))
 	}
-	visit := func() { p.scrOff = 0 }
+	// visit resets the layer scratch and, with a draft attached, keeps the visit's
+	// input when it is a draft tap
+	var taps []ink2Ref
+	nv := 0
+	visit := func() {
+		p.scrOff = 0
+		if s.draft != nil {
+			for _, v := range s.draft.visits {
+				if v == nv {
+					taps = append(taps, cur)
+				}
+			}
+		}
+		nv++
+	}
 	var blocks []ink2Ref
 	for il := 0; il < hp.CoreStart; il++ {
 		visit()
@@ -382,10 +459,22 @@ func (p *ink2Prefill) forward(last bool) {
 		visit()
 		cur = p.layer(il, il, cur, &blocks, nil, nil)
 	}
+	p.scrOff = 0
+	if p.verify {
+		final := p.headRows(blocks, cur)
+		if s.draft != nil {
+			s.draft.commitContext(p, append(taps, final))
+		}
+		return
+	}
+	if s.draft != nil {
+		x := p.mix(with(blocks, cur), s.outResQ, 1)[0]
+		s.draft.commitContext(p, append(taps, p.rms(x, s.outNorm, h, hp.NormEps)))
+	}
 	if !last {
 		return
 	}
-	visit()
+	p.scrOff = 0
 	// the head runs on the last token only: every state viewed at its last row
 	lastRow := func(r ink2Ref) ink2Ref { return at(r, (p.T-1)*h) }
 	states := make([]ink2Ref, 0, len(blocks)+1)
@@ -408,4 +497,39 @@ func (p *ink2Prefill) forward(last bool) {
 	if s.err == nil {
 		p.fail(s.dev.Ink2SoftcapArgmax(logits, hp.VocabUnpadded, hp.FinalLogitSoftcap, s.argIdx))
 	}
+}
+
+// ensurePrefillArenas sizes the batched-forward arenas for chunks of up to T tokens,
+// regrowing them when a longer chunk arrives.
+func (s *inkling2Resident) ensurePrefillArenas(T int) {
+	if s.prefillKeep.T.Buf() != nil && T <= s.prefillCap {
+		return
+	}
+	T = max(T, s.prefillCap)
+	keep, scr := s.prefillArenas(T)
+	s.prefillKeep, s.prefillScr = s.alloc(keep), s.alloc(scr)
+	s.prefillIn = s.alloc(T * s.hp.Hidden)
+	s.prefillCap = T
+}
+
+// headRows runs the output head on every row of the chunk and leaves row t's greedy
+// token at s.verifyIdx[4t].
+func (p *ink2Prefill) headRows(blocks []ink2Ref, cur ink2Ref) ink2Ref {
+	s := p.s
+	hp := s.hp
+	h := hp.Hidden
+	x := p.mix(with(blocks, cur), s.outResQ, 1)[0]
+	xn := p.rms(x, s.outNorm, h, hp.NormEps)
+	rows := s.output.rows
+	if s.err == nil {
+		ok, err := p.vd.Ink2VRows(s.output.t, xn, s.verifyLogits, p.T)
+		if err == nil && !ok {
+			err = p.pd.Ink2PMatMul(s.output.t, xn, s.verifyLogits, p.T)
+		}
+		p.fail(err)
+	}
+	for t := 0; t < p.T && s.err == nil; t++ {
+		p.fail(s.dev.Ink2SoftcapArgmax(at(s.verifyLogits, t*rows), hp.VocabUnpadded, hp.FinalLogitSoftcap, at(s.verifyIdx, 4*t)))
+	}
+	return xn
 }

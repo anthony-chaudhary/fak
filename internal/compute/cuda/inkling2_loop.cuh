@@ -1376,9 +1376,43 @@ extern "C" int fcuda_ink2_graph_launch(void) {
   return (int)cudaGraphLaunch(g_ink2_exec, g_stream);
 }
 
+// Extra capture slots beside the decode graph (slot 0): a speculative session keeps
+// its verify and commit graphs here.
+#define INK2_GRAPH_SLOTS 4
+static cudaGraphExec_t g_ink2_slot_exec[INK2_GRAPH_SLOTS] = {};
+
+extern "C" int fcuda_ink2_graph_end_slot(int slot) {
+  if (slot < 1 || slot >= INK2_GRAPH_SLOTS) return (int)cudaErrorInvalidValue;
+  cudaGraph_t graph = nullptr;
+  const cudaError_t e = cudaStreamEndCapture(g_stream, &graph);
+  g_capture_open = false;
+  if (e != cudaSuccess) {
+    if (graph) cudaGraphDestroy(graph);
+    return (int)e;
+  }
+  if (g_ink2_slot_exec[slot]) {
+    cudaGraphExecDestroy(g_ink2_slot_exec[slot]);
+    g_ink2_slot_exec[slot] = nullptr;
+  }
+  const cudaError_t ie = cudaGraphInstantiate(&g_ink2_slot_exec[slot], graph, 0);
+  cudaGraphDestroy(graph);
+  return (int)ie;
+}
+
+extern "C" int fcuda_ink2_graph_launch_slot(int slot) {
+  if (slot < 1 || slot >= INK2_GRAPH_SLOTS || !g_ink2_slot_exec[slot]) return (int)cudaErrorInvalidValue;
+  return (int)cudaGraphLaunch(g_ink2_slot_exec[slot], g_stream);
+}
+
 extern "C" void fcuda_ink2_graph_reset(void) {
   if (g_ink2_exec) {
     cudaGraphExecDestroy(g_ink2_exec);
     g_ink2_exec = nullptr;
+  }
+  for (int i = 1; i < INK2_GRAPH_SLOTS; ++i) {
+    if (g_ink2_slot_exec[i]) {
+      cudaGraphExecDestroy(g_ink2_slot_exec[i]);
+      g_ink2_slot_exec[i] = nullptr;
+    }
   }
 }

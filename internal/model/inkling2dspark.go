@@ -60,6 +60,11 @@ type Inkling2DSparkDraft struct {
 	keys, values [][][]float32 // [layer][context][KVHeads*HeadDim]
 	positions    []int
 	fRNN         [][]float32 // per committed token, so Rewind restores it
+	// Shortlist, when positive, restricts each drafted token to the Shortlist best
+	// base logits lm_head(h) before the Markov bias is added; negative drops the
+	// Markov head and drafts the base argmax. A device draft computes the base logits
+	// of every row in one batched head pass and the bias only on the shortlist.
+	Shortlist int
 }
 
 func NewInkling2DSparkDraft(hp Inkling2DSparkHParams, w *Inkling2DSparkWeights) (*Inkling2DSparkDraft, error) {
@@ -164,12 +169,12 @@ func (d *Inkling2DSparkDraft) draft(anchor, pos int) ([]int, [][]float32, error)
 		for j := range y {
 			y[j] += h[j] + d.W.HiddenOutBias[j]
 		}
-		d.W.Output.MatVec(logits, y)
-		best := 0
-		for t := 1; t < hp.VocabUnpadded; t++ {
-			if logits[t] > logits[best] {
-				best = t
-			}
+		var best int
+		if d.Shortlist != 0 {
+			best = d.shortlistArgmax(h, y, logits)
+		} else {
+			d.W.Output.MatVec(logits, y)
+			best = inkling2Argmax(logits[:hp.VocabUnpadded])
 		}
 		out = append(out, best)
 		prev = best
@@ -309,4 +314,48 @@ func inkling2Softmax(x []float32) []float32 {
 		out[i] = float32(math.Exp(float64(v)-maxV) / sum)
 	}
 	return out
+}
+
+func inkling2Argmax(v []float32) int {
+	best := 0
+	for t := 1; t < len(v); t++ {
+		if v[t] > v[best] {
+			best = t
+		}
+	}
+	return best
+}
+
+// shortlistArgmax is the draft token under d.Shortlist: the argmax of lm_head(y) over
+// the Shortlist largest lm_head(h), or the argmax of lm_head(h) when negative.
+func (d *Inkling2DSparkDraft) shortlistArgmax(h, y, logits []float32) int {
+	vocab := d.HP.VocabUnpadded
+	d.W.Output.MatVec(logits, h)
+	if d.Shortlist < 0 {
+		return inkling2Argmax(logits[:vocab])
+	}
+	top := make([]int, 0, d.Shortlist+1)
+	for t := 0; t < vocab; t++ {
+		i := len(top)
+		for i > 0 && logits[top[i-1]] < logits[t] {
+			i--
+		}
+		if i < d.Shortlist {
+			top = append(top, 0)
+			copy(top[i+1:], top[i:])
+			top[i] = t
+			if len(top) > d.Shortlist {
+				top = top[:d.Shortlist]
+			}
+		}
+	}
+	full := make([]float32, len(logits))
+	d.W.Output.MatVec(full, y)
+	best := top[0]
+	for _, t := range top[1:] {
+		if full[t] > full[best] {
+			best = t
+		}
+	}
+	return best
 }

@@ -38,3 +38,63 @@ func Ink2PGroupScratch(npairs, nexp int) int {
 	tiles := npairs/8 + nexp
 	return nexp + (nexp + 1) + npairs + 2*tiles + 1
 }
+
+// Inkling2VerifyDevice adds what a speculative verify chunk needs beyond prefill:
+// a conv that also logs its entry history and every chunk input, and the commit that
+// rewinds a history to the state after the first keep tokens of that chunk.
+type Inkling2VerifyDevice interface {
+	// Ink2PConvLog is Ink2PConv that also writes log as [n][kn-1+T]: the entry
+	// history followed by the T inputs of each channel.
+	Ink2PConvLog(x, w, dyn, hist, log, out, resid Ink2Ref, n, heads, kn int, norm float32, T int) error
+	// Ink2PConvCommit sets hist[c][j] = log[c][keep+j] for channels*(past) entries,
+	// where every log row is L floats.
+	Ink2PConvCommit(hist, log Ink2Ref, channels, past, L, keep int) error
+	// Ink2VRows is Y[t] = W.X[t] for up to 9 rows in one weight pass, each row equal to
+	// the single-row GEMV; ok is false (nothing launched) for a dtype without one.
+	Ink2VRows(w Tensor, x, y Ink2Ref, rows int) (ok bool, err error)
+	// Ink2VQ8Rows is Y[t] = W.X[t] for a Q8_0 W and up to 9 rows, each row equal to the
+	// decode GEMV; q holds rows*(in/4 + in/32) floats of codes and scales. ok is false
+	// (nothing launched) outside the kernel's contract.
+	Ink2VQ8Rows(w Tensor, x, q, y Ink2Ref, rows int) (ok bool, err error)
+	// Ink2VRepeatRows writes out[t*k+j] = x[t] for rows x of n floats.
+	Ink2VRepeatRows(x, out Ink2Ref, n, rows, k int) error
+	// Ink2PConvCommitDev is Ink2PConvCommit with keep read from the int at keepDev.
+	Ink2PConvCommitDev(hist, log, keepDev Ink2Ref, channels, past, L int) error
+	// Ink2PQKVPostDev and Ink2PAttendDev read the chunk's first position from the int
+	// at posDev, so a captured verify replays at any position.
+	Ink2PQKVPostDev(q, r, k, v, qclip, rclip, kcache, vcache, posDev Ink2Ref, p Ink2AttnParams, cap, T int) error
+	Ink2PAttendDev(q, r, sinks, relBias, kcache, vcache, out, posDev Ink2Ref, p Ink2AttnParams, extent, window, cap, T int) error
+	// Ink2GraphEndSlot ends a capture opened by Ink2GraphBegin into slot (1..3), beside
+	// the decode graph; Ink2GraphLaunchSlot replays it.
+	Ink2GraphEndSlot(slot int) error
+	Ink2GraphLaunchSlot(slot int) error
+}
+
+// Inkling2DraftDevice runs the DSpark draft's dense block forward. Positions are
+// read from device ints so the draft and its context commit replay in graphs.
+type Inkling2DraftDevice interface {
+	// Ink2DFuse writes rows of RMS(sum_t alpha[t]*taps[t]) times w.
+	Ink2DFuse(taps []Ink2Ref, alpha []float32, w, out Ink2Ref, rows, n int, eps float32) error
+	// Ink2DQK RMS-normalizes each head of x by w and rotates it (neox RoPE, theta) at
+	// position *posDev+row into dst: row order, or the pos%cap slot of a ring.
+	Ink2DQK(x, w, dst, posDev Ink2Ref, rows, heads, dim, cap int, ring bool, eps float32, theta float64) error
+	// Ink2DRingStore copies src row r into ring slot (*posDev+r)%cap.
+	Ink2DRingStore(src, ring, posDev Ink2Ref, rows, width, cap int) error
+	// Ink2DAttend attends each block query row to the context ring before *posDev
+	// (the last window positions when window > 0) and to every block key.
+	Ink2DAttend(q, kb, vb, kc, vc, out, posDev Ink2Ref, rows, heads, kvHeads, dim, window, cap int) error
+	// Ink2DSiluMul is out = silu(g) * u.
+	Ink2DSiluMul(g, u, out Ink2Ref, n int) error
+	// Ink2DTopM writes the M largest of the first vocab logits of each row into
+	// out[row][M]; candV/candI are 64*M scratch per row.
+	Ink2DTopM(logits Ink2Ref, rows, rowStride, vocab, M int, candV, candI, out Ink2Ref) error
+	// Ink2DMarkovIn assembles step's Markov input [state | w1[prev] | h | fRNN], w1 a
+	// BF16 [vocab][rank] table, prev the anchor at step 0 else idx[4*(step-1)], fRNN
+	// the ring row of position *posDev-1.
+	Ink2DMarkovIn(state, w1, anchor, idx Ink2Ref, step int, h, frnnRing, posDev Ink2Ref, cap, rank, hidden int, in Ink2Ref) error
+	// Ink2DMarkovGate updates state and writes latent from raw+bias.
+	Ink2DMarkovGate(raw, bias, state, latent Ink2Ref, rank, step int) error
+	// Ink2DMarkovPick writes idx[4*step] = argmax over the M shortlisted tokens cand
+	// of base[c] + head[c].(z+zb), head the resident Q5_K LM head.
+	Ink2DMarkovPick(head Tensor, base, cand Ink2Ref, M int, z, zb, idx Ink2Ref, step int) error
+}

@@ -85,6 +85,15 @@ type inkling2Resident struct {
 	warm                               bool // one eager token has run since the last batched prefill
 	batched                            bool
 	prefillKeep, prefillScr, prefillIn ink2Ref
+	prefillCap                         int
+
+	// speculative verify state, allocated by enableSpec
+	specMax                            int
+	convLog                            []ink2Ref
+	verifyLogits, verifyIdx            ink2Ref
+	verifyPos, verifyKeep              ink2Ref
+	verifyWarm, verifyReady, keepReady bool
+	draft                              *ink2DeviceDraft
 }
 
 func (s *inkling2Resident) fail(err error) {
@@ -176,7 +185,7 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 	hp, w := m.HP, m.Weights
 	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}}
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
-	s.batched = hasPrefill && inkling2BatchedPrefill()
+	s.batched = hasPrefill && (inkling2BatchedPrefill() || inkling2SpecDepth() > 0)
 	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
 	s.output = s.mat(w.Output)
 	s.layers = make([]ink2Layer, hp.Layers)

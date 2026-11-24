@@ -14,6 +14,38 @@ int fcuda_ink2p_ctrl_apply(const float *cur, const float *msg, const float *g, c
     const float *forgetW, float *out, int n, int rank, int T);
 int fcuda_ink2p_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
     const float *resid, int n, int heads, int kn, float norm, int T);
+int fcuda_ink2p_conv_log(const float *x, const float *w, const float *dyn, float *hist, float *log,
+    float *out, const float *resid, int n, int heads, int kn, float norm, int T);
+int fcuda_ink2p_conv_commit(float *hist, const float *log, int channels, int past, int L, int keep);
+int fcuda_ink2p_conv_commit_dev(float *hist, const float *log, int channels, int past, int L, const int *keepDev);
+int fcuda_ink2p_qkv_post_dev(float *q, float *r, const float *k, const float *v, const float *qclip,
+    const float *rclip, float *kcache, float *vcache, int heads, int kvHeads, int headDim, int relLen,
+    float qkClip, float relClip, float eps, int global, float alpha, float floorTok, int cap, const int *posDev, int T);
+int fcuda_ink2p_attend_dev(const float *q, const float *r, const float *sinks, const float *relBias,
+    const float *kcache, const float *vcache, float *out, int heads, int kvHeads, int headDim, int relLen,
+    int extent, int window, int cap, float scale, const int *posDev, int T);
+int fcuda_ink2_graph_end_slot(int slot);
+/* DSpark draft ops (cuda/inkling2_dspark.cuh). */
+int fcuda_ink2d_fuse(const float *const *f, const float *a, int taps, const float *w, float *out, int rows, int n,
+    float eps);
+int fcuda_ink2d_qk(const float *x, const float *w, float *dst, int rows, int heads, int dim, const int *posDev,
+    int cap, int ring, float eps, double theta);
+int fcuda_ink2d_ring_store(const float *src, float *ring, int rows, int width, const int *posDev, int cap);
+int fcuda_ink2d_attend(const float *q, const float *kb, const float *vb, const float *kc, const float *vc, float *out,
+    int rows, int heads, int kvHeads, int dim, const int *posDev, int window, int cap);
+int fcuda_ink2d_silu_mul(const float *g, const float *u, float *out, int n);
+int fcuda_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows);
+int fcuda_ink2v_repeat_rows(const float *x, float *out, int n, int rows, int k);
+int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, void *q, float *Y, int out, int in,
+    int rows, int block);
+int fcuda_ink2d_topm(const float *logits, int rows, int rowStride, int vocab, int M, float *candV, int *candI,
+    int *out);
+int fcuda_ink2d_markov_in(const float *state, const unsigned short *w1, const int *anchor, const int *idx, int step,
+    const float *h, const float *frnnRing, const int *posDev, int cap, int rank, int hidden, float *in);
+int fcuda_ink2d_markov_gate(const float *raw, const float *bias, float *state, float *latent, int rank, int step);
+int fcuda_ink2d_markov_pick_q5k(const unsigned char *W, int in, const float *base, const int *cand, int M,
+    const float *z, const float *zb, int *idx, int step);
+int fcuda_ink2_graph_launch_slot(int slot);
 int fcuda_ink2p_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
     const float *rclip, float *kcache, float *vcache, int heads, int kvHeads, int headDim, int relLen,
     float qkClip, float relClip, float eps, int global, float alpha, float floorTok, int cap, int pos0, int T);

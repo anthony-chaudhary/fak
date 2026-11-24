@@ -207,3 +207,166 @@ func (c *cudaBackend) Ink2PExpertSorted(stack Tensor, expertRows, nexp int, ids,
 	}
 	return true, ink2Status("prefill scatter pairs", C.fcuda_ink2p_scatter_pairs(c.ink2I(order), c.ink2F(sortY), c.ink2F(y), C.int(expertRows), C.int(npairs)))
 }
+
+var _ Inkling2VerifyDevice = (*cudaBackend)(nil)
+
+func (c *cudaBackend) Ink2PConvLog(x, w, dyn, hist, log, out, resid Ink2Ref, n, heads, kn int, norm float32, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify conv", C.fcuda_ink2p_conv_log(c.ink2F(x), c.ink2F(w), c.ink2F(dyn), c.ink2F(hist), c.ink2F(log),
+		c.ink2F(out), c.ink2F(resid), C.int(n), C.int(heads), C.int(kn), C.float(norm), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PConvCommit(hist, log Ink2Ref, channels, past, L, keep int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify conv commit", C.fcuda_ink2p_conv_commit(c.ink2F(hist), c.ink2F(log), C.int(channels), C.int(past),
+		C.int(L), C.int(keep)))
+}
+
+func (c *cudaBackend) Ink2PConvCommitDev(hist, log, keepDev Ink2Ref, channels, past, L int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify conv commit", C.fcuda_ink2p_conv_commit_dev(c.ink2F(hist), c.ink2F(log), C.int(channels), C.int(past),
+		C.int(L), c.ink2I(keepDev)))
+}
+
+func (c *cudaBackend) Ink2PQKVPostDev(q, r, k, v, qclip, rclip, kcache, vcache, posDev Ink2Ref, p Ink2AttnParams, cap, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify qkv post", C.fcuda_ink2p_qkv_post_dev(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v), c.ink2F(qclip), c.ink2F(rclip),
+		c.ink2F(kcache), c.ink2F(vcache), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen),
+		C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps), ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor),
+		C.int(cap), c.ink2I(posDev), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PAttendDev(q, r, sinks, relBias, kcache, vcache, out, posDev Ink2Ref, p Ink2AttnParams, extent, window, cap, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify attend", C.fcuda_ink2p_attend_dev(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias), c.ink2F(kcache),
+		c.ink2F(vcache), c.ink2F(out), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent),
+		C.int(window), C.int(cap), C.float(p.Scale), c.ink2I(posDev), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2GraphEndSlot(slot int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("graph end slot", C.fcuda_ink2_graph_end_slot(C.int(slot)))
+}
+
+func (c *cudaBackend) Ink2GraphLaunchSlot(slot int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("graph launch slot", C.fcuda_ink2_graph_launch_slot(C.int(slot)))
+}
+
+var _ Inkling2DraftDevice = (*cudaBackend)(nil)
+
+func (c *cudaBackend) Ink2DFuse(taps []Ink2Ref, alpha []float32, w, out Ink2Ref, rows, n int, eps float32) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if len(taps) != len(alpha) || len(taps) < 1 || len(taps) > 4 {
+		return fmt.Errorf("cuda inkling2 draft fuse: %d taps, %d weights", len(taps), len(alpha))
+	}
+	ptrs := (*[4]*C.float)(C.malloc(C.size_t(4 * unsafe.Sizeof(uintptr(0)))))
+	defer C.free(unsafe.Pointer(ptrs))
+	a := (*[4]C.float)(C.malloc(C.size_t(4 * unsafe.Sizeof(C.float(0)))))
+	defer C.free(unsafe.Pointer(a))
+	for i, t := range taps {
+		ptrs[i] = c.ink2F(t)
+		a[i] = C.float(alpha[i])
+	}
+	return ink2Status("draft fuse", C.fcuda_ink2d_fuse((**C.float)(unsafe.Pointer(ptrs)), (*C.float)(unsafe.Pointer(a)), C.int(len(taps)),
+		c.ink2F(w), c.ink2F(out), C.int(rows), C.int(n), C.float(eps)))
+}
+
+func (c *cudaBackend) Ink2DQK(x, w, dst, posDev Ink2Ref, rows, heads, dim, cap int, ring bool, eps float32, theta float64) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft qk", C.fcuda_ink2d_qk(c.ink2F(x), c.ink2F(w), c.ink2F(dst), C.int(rows), C.int(heads), C.int(dim),
+		c.ink2I(posDev), C.int(cap), ink2Bool(ring), C.float(eps), C.double(theta)))
+}
+
+func (c *cudaBackend) Ink2DRingStore(src, ring, posDev Ink2Ref, rows, width, cap int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft ring store", C.fcuda_ink2d_ring_store(c.ink2F(src), c.ink2F(ring), C.int(rows), C.int(width),
+		c.ink2I(posDev), C.int(cap)))
+}
+
+func (c *cudaBackend) Ink2DAttend(q, kb, vb, kc, vc, out, posDev Ink2Ref, rows, heads, kvHeads, dim, window, cap int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft attend", C.fcuda_ink2d_attend(c.ink2F(q), c.ink2F(kb), c.ink2F(vb), c.ink2F(kc), c.ink2F(vc),
+		c.ink2F(out), C.int(rows), C.int(heads), C.int(kvHeads), C.int(dim), c.ink2I(posDev), C.int(window), C.int(cap)))
+}
+
+func (c *cudaBackend) Ink2DSiluMul(g, u, out Ink2Ref, n int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft silu mul", C.fcuda_ink2d_silu_mul(c.ink2F(g), c.ink2F(u), c.ink2F(out), C.int(n)))
+}
+
+func (c *cudaBackend) Ink2DTopM(logits Ink2Ref, rows, rowStride, vocab, M int, candV, candI, out Ink2Ref) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft topm", C.fcuda_ink2d_topm(c.ink2F(logits), C.int(rows), C.int(rowStride), C.int(vocab), C.int(M),
+		c.ink2F(candV), c.ink2I(candI), c.ink2I(out)))
+}
+
+func (c *cudaBackend) Ink2DMarkovIn(state, w1, anchor, idx Ink2Ref, step int, h, frnnRing, posDev Ink2Ref, cap, rank, hidden int, in Ink2Ref) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft markov in", C.fcuda_ink2d_markov_in(c.ink2F(state), (*C.ushort)(c.ink2Ptr(w1)), c.ink2I(anchor), c.ink2I(idx),
+		C.int(step), c.ink2F(h), c.ink2F(frnnRing), c.ink2I(posDev), C.int(cap), C.int(rank), C.int(hidden), c.ink2F(in)))
+}
+
+func (c *cudaBackend) Ink2DMarkovGate(raw, bias, state, latent Ink2Ref, rank, step int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft markov gate", C.fcuda_ink2d_markov_gate(c.ink2F(raw), c.ink2F(bias), c.ink2F(state), c.ink2F(latent),
+		C.int(rank), C.int(step)))
+}
+
+func (c *cudaBackend) Ink2DMarkovPick(head Tensor, base, cand Ink2Ref, M int, z, zb, idx Ink2Ref, step int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if head.Dtype != Q5_K || len(head.Shape) != 2 {
+		return fmt.Errorf("cuda inkling2 draft markov pick: head %s %v, want Q5_K", head.Dtype, head.Shape)
+	}
+	wb := c.cudaBufForSubmit(head)
+	return ink2Status("draft markov pick", C.fcuda_ink2d_markov_pick_q5k((*C.uchar)(wb.ptr), C.int(head.Shape[1]), c.ink2F(base),
+		c.ink2I(cand), C.int(M), c.ink2F(z), c.ink2F(zb), c.ink2I(idx), C.int(step)))
+}
+
+func (c *cudaBackend) Ink2VRows(w Tensor, x, y Ink2Ref, rows int) (bool, error) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if w.Dtype != Q5_K || len(w.Shape) != 2 || rows < 1 || rows > 9 {
+		return false, nil
+	}
+	wb := c.cudaBufForSubmit(w)
+	return true, ink2Status("verify q5k rows", C.fcuda_ink2v_q5k_rows((*C.uchar)(wb.ptr), c.ink2F(x), c.ink2F(y), C.int(w.Shape[0]),
+		C.int(w.Shape[1]), C.int(rows)))
+}
+
+func (c *cudaBackend) Ink2VRepeatRows(x, out Ink2Ref, n, rows, k int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify repeat rows", C.fcuda_ink2v_repeat_rows(c.ink2F(x), c.ink2F(out), C.int(n), C.int(rows), C.int(k)))
+}
+
+func (c *cudaBackend) Ink2VQ8Rows(w Tensor, x, q, y Ink2Ref, rows int) (bool, error) {
+	if w.Dtype != Q8_0 || len(w.Shape) != 2 || w.Quant.Block != 32 {
+		return false, nil
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	wb := c.cudaBufForSubmit(w)
+	rc := C.fcuda_ink2v_q8_rows((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.ink2F(x), c.ink2Ptr(q), c.ink2F(y),
+		C.int(w.Shape[0]), C.int(w.Shape[1]), C.int(rows), C.int(w.Quant.Block))
+	if rc == -1 {
+		return false, nil
+	}
+	return true, ink2Status("verify q8 rows", rc)
+}

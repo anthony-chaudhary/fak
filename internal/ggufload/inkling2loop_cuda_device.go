@@ -470,6 +470,9 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 		return nil, st, fmt.Errorf("inkling2_loop: empty prompt")
 	}
 	if inkling2ResidentEligible(m, be) {
+		if depth := inkling2SpecDepth(); depth > 0 {
+			return inkling2SpecGreedy(m, be, prompt, n, depth)
+		}
 		return inkling2ResidentGreedy(m, be, prompt, n)
 	}
 	h, err := model.NewInkling2LoopHost(m.HP, m.Weights)

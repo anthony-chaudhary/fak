@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -306,6 +307,7 @@ func Inkling2DSparkTeacherForced(target *Inkling2LoopModel, draft *Inkling2DSpar
 	if err != nil {
 		return nil, err
 	}
+	d.Shortlist = inkling2DSparkShortlist()
 	gamma := draft.HP.Block - 1
 	var accepted []int
 	for p, tok := range tokens {
@@ -326,4 +328,11 @@ func Inkling2DSparkTeacherForced(target *Inkling2LoopModel, draft *Inkling2DSpar
 		}
 	}
 	return accepted, nil
+}
+
+// inkling2DSparkShortlist reads FAK_INKLING2_DSPARK_SHORTLIST: unset or 0 keeps the
+// full Markov head, a positive count shortlists the base logits, negative drops it.
+func inkling2DSparkShortlist() int {
+	n, _ := strconv.Atoi(os.Getenv("FAK_INKLING2_DSPARK_SHORTLIST"))
+	return n
 }
