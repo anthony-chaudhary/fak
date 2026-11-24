@@ -252,6 +252,36 @@ func TestWorktreeEnvIsolatesBuildIntoWorktree(t *testing.T) {
 	}
 }
 
+func TestWorktreeEnvAppendsTrimpath(t *testing.T) {
+	wt := filepath.FromSlash("/tmp/wt/fak-worker-wt-trim-abc")
+	for _, tc := range []struct {
+		name       string
+		ambient    string
+		base       map[string]string
+		noTrimpath string
+		want       string
+		wantSet    bool
+	}{
+		{name: "unset", want: "-trimpath", wantSet: true},
+		{name: "ambient-appended", ambient: "-mod=mod", want: "-mod=mod -trimpath", wantSet: true},
+		{name: "base-wins-over-ambient", ambient: "-mod=mod", base: map[string]string{"GOFLAGS": "-race"}, want: "-race -trimpath", wantSet: true},
+		{name: "explicit-false-kept", base: map[string]string{"GOFLAGS": "-trimpath=false"}, want: "-trimpath=false", wantSet: true},
+		{name: "ambient-already-trimmed", ambient: "-trimpath"},
+		{name: "opt-out", ambient: "-mod=mod", noTrimpath: "1"},
+		{name: "base-opt-out", base: map[string]string{"FAK_NO_TRIMPATH": "1", "GOFLAGS": "-race"}, want: "-race", wantSet: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GOFLAGS", tc.ambient)
+			t.Setenv("FAK_NO_TRIMPATH", tc.noTrimpath)
+			env := WorktreeEnv(tc.base, wt)
+			got, set := env["GOFLAGS"]
+			if set != tc.wantSet || got != tc.want {
+				t.Fatalf("GOFLAGS = %q (set=%v), want %q (set=%v)", got, set, tc.want, tc.wantSet)
+			}
+		})
+	}
+}
+
 func TestWorktreeEnvDoesNotMutateBase(t *testing.T) {
 	base := map[string]string{"PATH": "/usr/bin"}
 	WorktreeEnv(base, filepath.FromSlash("/tmp/wt/fak-worker-wt-x-y"))

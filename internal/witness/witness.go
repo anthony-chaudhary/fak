@@ -73,6 +73,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/computebuild"
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 	"github.com/anthony-chaudhary/fak/internal/corelockgate"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -153,8 +154,33 @@ func commandRunner(ctx context.Context, dir string, argv ...string) (string, int
 }
 
 func execWitnessScratchGoCommand(dir, executable string) bool {
+	return isGoExecutable(executable) && activeExecWitnessScratch(dir)
+}
+
+func isGoExecutable(executable string) bool {
 	base := strings.ToLower(filepath.Base(executable))
-	return (base == "go" || base == "go.exe") && activeExecWitnessScratch(dir)
+	return base == "go" || base == "go.exe"
+}
+
+// witnessGoBuildEnv keeps witness go commands on reusable cache entries. Every
+// witness runs in a fresh snapshot directory, and without -trimpath cmd/go
+// folds that directory into each action ID, so each land cold-compiled the
+// whole graph into new cache entries. An operator-selected shared cache wins
+// over the inherited GOCACHE.
+func witnessGoBuildEnv(env []string) []string {
+	lookup := goenv.EnvironLookup(env)
+	set := map[string]string{}
+	inherited, _ := lookup("GOFLAGS")
+	if flags := goenv.GoFlags(inherited, lookup); flags != inherited {
+		set["GOFLAGS"] = flags
+	}
+	if dir, ok := goenv.SharedCache(lookup); ok {
+		set["GOCACHE"] = dir
+	}
+	if len(set) == 0 {
+		return env
+	}
+	return computebuild.MergeEnviron(env, set)
 }
 
 func commandRunnerEnv(overlay map[string]string) CommandRunner {
@@ -189,6 +215,12 @@ func commandRunnerEnv(overlay map[string]string) CommandRunner {
 				cmd.Env = isolatedGitEnv()
 			}
 			cmd.Env = computebuild.MergeEnviron(cmd.Env, map[string]string{"GOWORK": ""})
+		}
+		if isGoExecutable(argv[0]) {
+			if cmd.Env == nil {
+				cmd.Env = isolatedGitEnv()
+			}
+			cmd.Env = witnessGoBuildEnv(cmd.Env)
 		}
 		var out strings.Builder
 		cmd.Stdout = &out

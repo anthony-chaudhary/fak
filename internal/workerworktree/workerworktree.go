@@ -45,6 +45,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/computebuild/goenv"
 	"github.com/anthony-chaudhary/fak/internal/gitbroker"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -397,6 +398,18 @@ func WorktreeEnv(base map[string]string, wtDir string) map[string]string {
 		env["GOCACHE"] = sharedCache
 	}
 	env["GOTMPDIR"] = filepath.Join(wtDir, ".gotmp")
+	// Each worker worktree is a fresh directory, so without -trimpath its
+	// compiles land under action IDs no other worktree can reuse.
+	lookup := func(key string) (string, bool) {
+		if v, ok := base[key]; ok {
+			return v, true
+		}
+		return os.LookupEnv(key)
+	}
+	inherited, _ := lookup("GOFLAGS")
+	if flags := goenv.GoFlags(inherited, lookup); flags != inherited {
+		env["GOFLAGS"] = flags
+	}
 	return env
 }
 
