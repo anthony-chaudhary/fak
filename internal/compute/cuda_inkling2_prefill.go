@@ -401,3 +401,21 @@ func (c *cudaBackend) Ink2VMix(states []Ink2Ref, queries Ink2Ref, nq int, norms 
 	}
 	return true, ink2Status("verify mix", rc)
 }
+
+func (c *cudaBackend) Ink2PControlMulti(cur, msg, down, gain, forget, g, out []Ink2Ref, n, rank, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	J := len(cur)
+	if J < 1 || J > 4 || len(msg) != J || len(down) != J || len(gain) != J || len(forget) != J || len(g) != J || len(out) != J {
+		return fmt.Errorf("cuda inkling2 control multi: %d controllers", J)
+	}
+	tab := (*[28]*C.float)(C.malloc(C.size_t(28 * unsafe.Sizeof(uintptr(0)))))
+	defer C.free(unsafe.Pointer(tab))
+	for j := 0; j < J; j++ {
+		tab[j], tab[4+j], tab[8+j] = c.ink2F(cur[j]), c.ink2F(msg[j]), c.ink2F(down[j])
+		tab[12+j], tab[16+j], tab[20+j], tab[24+j] = c.ink2F(gain[j]), c.ink2F(forget[j]), c.ink2F(g[j]), c.ink2F(out[j])
+	}
+	p := func(i int) **C.float { return (**C.float)(unsafe.Pointer(&tab[i])) }
+	return ink2Status("prefill control multi", C.fcuda_ink2p_ctrl_multi(p(0), p(4), p(8), p(12), p(16), p(20), p(24),
+		C.int(J), C.int(n), C.int(rank), C.int(T)))
+}

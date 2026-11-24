@@ -35,6 +35,9 @@ int fcuda_ink2d_attend(const float *q, const float *kb, const float *vb, const f
     int rows, int heads, int kvHeads, int dim, const int *posDev, int window, int cap);
 int fcuda_ink2d_silu_mul(const float *g, const float *u, float *out, int n);
 int fcuda_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows);
+int fcuda_ink2p_ctrl_multi(const float *const *cur, const float *const *msg, const float *const *W,
+    const float *const *gainW, const float *const *forgetW, float *const *g, float *const *out, int J, int n,
+    int rank, int T);
 int fcuda_ink2v_mix(const float *const *states, int ns, const float *queries, int nq, const float *const *norms,
     float eps, float *out, int n, int T);
 int fcuda_ink2v_repeat_rows(const float *x, float *out, int n, int rows, int k);

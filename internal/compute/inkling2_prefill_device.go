@@ -61,6 +61,9 @@ type Inkling2VerifyDevice interface {
 	// RMS-normalized by norms[q] when norms is set; ok is false (nothing launched)
 	// without cluster launch.
 	Ink2VMix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2Ref, eps float32, out Ink2Ref, n, T int) (ok bool, err error)
+	// Ink2PControlMulti runs J <= 4 controllers of one visit over T rows (Ink2PCtrlDown
+	// then Ink2PCtrlApply for each) in one launch per stage; slices index by controller.
+	Ink2PControlMulti(cur, msg, down, gain, forget, g, out []Ink2Ref, n, rank, T int) error
 	// Ink2VRepeatRows writes out[t*k+j] = x[t] for rows x of n floats.
 	Ink2VRepeatRows(x, out Ink2Ref, n, rows, k int) error
 	// Ink2PConvCommitDev is Ink2PConvCommit with keep read from the int at keepDev.

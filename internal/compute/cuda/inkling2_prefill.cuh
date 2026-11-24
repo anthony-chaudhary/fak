@@ -106,8 +106,18 @@ __global__ void k_ink2p_gemm_f32(const float *W, const float *X, float *Y, int r
   if (lane == 0) Y[(size_t)t * rows + r] = s;
 }
 
-__global__ void k_ink2p_ctrl_down(const float *cur, const float *msg, const float *W, float *g, int n, int rank) {
+// Up to four controllers of one layer visit; blockIdx.z selects the controller, so one
+// launch serves them all with each controller's arithmetic unchanged.
+struct Ink2PCtrl {
+  const float *cur[4], *msg[4], *W[4], *gain[4], *forget[4];
+  float *g[4], *out[4];
+};
+
+__global__ void k_ink2p_ctrl_down(Ink2PCtrl cs, int n, int rank) {
   __shared__ float part[4][32];
+  const int j = blockIdx.z;
+  const float *cur = cs.cur[j], *msg = cs.msg[j], *W = cs.W[j];
+  float *g = cs.g[j];
   const int r = blockIdx.x;
   const size_t toff = (size_t)blockIdx.y * n;
   cur += toff;
@@ -149,9 +159,10 @@ __global__ void k_ink2p_ctrl_down(const float *cur, const float *msg, const floa
 // rows of the tile are staged once (transposed, so a warp reads 32 banks) instead of
 // re-read per token.
 #define INK2P_CTRL_TOK 8
-__global__ void __launch_bounds__(256) k_ink2p_ctrl_apply(const float *cur, const float *msg, const float *g,
-                                                         const float *gainW, const float *forgetW, float *out, int n,
-                                                         int rank, int T) {
+__global__ void __launch_bounds__(256) k_ink2p_ctrl_apply(Ink2PCtrl cs, int n, int rank, int T) {
+  const int j = blockIdx.z;
+  const float *cur = cs.cur[j], *msg = cs.msg[j], *g = cs.g[j], *gainW = cs.gain[j], *forgetW = cs.forget[j];
+  float *out = cs.out[j];
   extern __shared__ float csh[];
   float *gws = csh, *fws = csh + (size_t)rank * 33, *gs = csh + (size_t)rank * 66;
   const int i0 = blockIdx.x * 32, t0 = blockIdx.y * INK2P_CTRL_TOK;
@@ -773,7 +784,12 @@ extern "C" int fcuda_ink2p_gemm_f32(const float *W, const float *X, float *Y, in
 
 extern "C" int fcuda_ink2p_ctrl_down(const float *cur, const float *msg, const float *W, float *g, int n, int rank,
                                      int T) {
-  FCUDA_TS("k_ink2p_ctrl_down", dim3(rank, T), k_ink2p_ctrl_down<<<dim3(rank, T), 256, 0, g_stream>>>(cur, msg, W, g, n, rank));
+  Ink2PCtrl cs = {};
+  cs.cur[0] = cur;
+  cs.msg[0] = msg;
+  cs.W[0] = W;
+  cs.g[0] = g;
+  FCUDA_TS("k_ink2p_ctrl_down", dim3(rank, T), k_ink2p_ctrl_down<<<dim3(rank, T), 256, 0, g_stream>>>(cs, n, rank));
   return ink2_last_error();
 }
 
@@ -783,7 +799,39 @@ extern "C" int fcuda_ink2p_ctrl_apply(const float *cur, const float *msg, const 
   const size_t smem = ((size_t)rank * 66 + (size_t)INK2P_CTRL_TOK * rank) * sizeof(float);
   const int oe = ink2p_smem_optin((const void *)k_ink2p_ctrl_apply, smem);
   if (oe) return oe;
-  FCUDA_TS("k_ink2p_ctrl_apply", grid, k_ink2p_ctrl_apply<<<grid, 256, smem, g_stream>>>(cur, msg, g, gainW, forgetW, out, n, rank, T));
+  Ink2PCtrl cs = {};
+  cs.cur[0] = cur;
+  cs.msg[0] = msg;
+  cs.g[0] = (float *)g;
+  cs.gain[0] = gainW;
+  cs.forget[0] = forgetW;
+  cs.out[0] = out;
+  FCUDA_TS("k_ink2p_ctrl_apply", grid, k_ink2p_ctrl_apply<<<grid, 256, smem, g_stream>>>(cs, n, rank, T));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_ctrl_down then fcuda_ink2p_ctrl_apply for J <= 4 controllers in one launch
+// each; arrays are indexed by controller.
+extern "C" int fcuda_ink2p_ctrl_multi(const float *const *cur, const float *const *msg, const float *const *W,
+                                      const float *const *gainW, const float *const *forgetW, float *const *g,
+                                      float *const *out, int J, int n, int rank, int T) {
+  if (J < 1 || J > 4) return (int)cudaErrorInvalidValue;
+  Ink2PCtrl cs = {};
+  for (int j = 0; j < J; ++j) {
+    cs.cur[j] = cur[j];
+    cs.msg[j] = msg[j];
+    cs.W[j] = W[j];
+    cs.gain[j] = gainW[j];
+    cs.forget[j] = forgetW[j];
+    cs.g[j] = g[j];
+    cs.out[j] = out[j];
+  }
+  FCUDA_TS("k_ink2p_ctrl_down", dim3(rank, T, J), k_ink2p_ctrl_down<<<dim3(rank, T, J), 256, 0, g_stream>>>(cs, n, rank));
+  const dim3 grid((n + 31) / 32, (T + INK2P_CTRL_TOK - 1) / INK2P_CTRL_TOK, J);
+  const size_t smem = ((size_t)rank * 66 + (size_t)INK2P_CTRL_TOK * rank) * sizeof(float);
+  const int oe = ink2p_smem_optin((const void *)k_ink2p_ctrl_apply, smem);
+  if (oe) return oe;
+  FCUDA_TS("k_ink2p_ctrl_apply", grid, k_ink2p_ctrl_apply<<<grid, 256, smem, g_stream>>>(cs, n, rank, T));
   return ink2_last_error();
 }
 

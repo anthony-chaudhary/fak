@@ -232,6 +232,21 @@ func (p *ink2Prefill) mixPlain(states []ink2Ref, queries ink2Ref, nq int) []ink2
 	return refs
 }
 
+// controls runs controllers 0..len(cur)-1 of c on (cur[j], msg[j]) in one launch per
+// stage, the result of each equal to control's.
+func (p *ink2Prefill) controls(cur, msg []ink2Ref, c *ink2Ctrl) []ink2Ref {
+	h := p.s.hp.Hidden
+	J := len(cur)
+	g, out := make([]ink2Ref, J), make([]ink2Ref, J)
+	for j := range g {
+		g[j], out[j] = p.tmp(p.T*c.rank), p.tmp(p.T*h)
+	}
+	if p.s.err == nil {
+		p.fail(p.vd.Ink2PControlMulti(cur, msg, c.down[:J], c.gain[:J], c.forget[:J], g, out, h, c.rank, p.T))
+	}
+	return out
+}
+
 func (p *ink2Prefill) control(cur, msg ink2Ref, c *ink2Ctrl, j int) ink2Ref {
 	h := p.s.hp.Hidden
 	g := p.tmp(p.T * c.rank)
@@ -298,8 +313,13 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		}
 	}
 	if msgs != nil {
-		for j := 0; j < 3; j++ {
-			in[j] = p.control(in[j], msgs[j], c, j)
+		if p.verify {
+			o := p.controls(in[:], msgs[:3], c)
+			in = [3]ink2Ref{o[0], o[1], o[2]}
+		} else {
+			for j := 0; j < 3; j++ {
+				in[j] = p.control(in[j], msgs[j], c, j)
+			}
 		}
 	}
 	switch {
