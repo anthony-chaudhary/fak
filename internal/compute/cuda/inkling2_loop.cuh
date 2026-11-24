@@ -1257,6 +1257,7 @@ extern "C" int fcuda_ink2_expert_gemv(int fmt, const uint8_t *W, const uint8_t *
     FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_Q3K><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   case INK2_IQ4NL:
+    if (ink2_expert_iq4nl_v3(W, ids, X, xStride, Y, k, rows, in, escale, situW, beta, lb)) break;
     FCUDA_TS("k_ink2_expert_iq", iqgrid, k_ink2_expert_iq<INK2_IQ4NL><<<iqgrid, 256, in * sizeof(float), g_stream>>>(W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
     break;
   default:

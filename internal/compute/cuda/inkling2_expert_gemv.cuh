@@ -355,3 +355,82 @@ static bool ink2_expert_iq_v3(int fmt, const uint8_t *W, const int *ids, const f
   return false;
 }
 
+// IQ4_NL: k_ink2_expert_iq's per-lane term and block order (bit-identical), with the
+// codebook staged once as floats instead of an int->float conversion per weight, the
+// 4 code bytes read as two 16-bit words, R rows advancing together per super-block
+// and the IQ grid sizing above. Shares FAK_INKLING2_IQ_GEMV with the IQ2/IQ3 kernels.
+template <int R>
+__global__ void __launch_bounds__(256)
+    k_ink2_expert_iq4nl_v3(const unsigned char *__restrict__ W, const int *ids, const float *X, int xStride,
+                           float *Y, int rows, int in, const float *escale, int situW, double beta, double lb) {
+  extern __shared__ __align__(16) float ink2_kq_sm[];
+  __shared__ float kv[16];
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+  const int slot = blockIdx.y;
+  const float *xg = X + (size_t)slot * xStride;
+  for (int i = threadIdx.x; i < in; i += blockDim.x) ink2_kq_sm[i] = ink2_stage(xg, i, situW, beta, lb);
+  if (threadIdx.x < 16) kv[threadIdx.x] = (float)fcuda_kvalues_iq4nl[threadIdx.x];
+  __syncthreads();
+  const int nsb = in / 256;
+  const size_t rowBytes = (size_t)nsb * 144;
+  const size_t ebase = (size_t)ids[slot] * rows;
+  const float es = escale ? escale[ids[slot]] : 0.f;
+  const int ib = lane >> 2, il = lane & 3;
+  for (int o0 = (blockIdx.x * (blockDim.x >> 5) + warp) * R; o0 < rows; o0 += gridDim.x * (blockDim.x >> 5) * R) {
+    const unsigned char *wrow[R];
+    float sum[R];
+#pragma unroll
+    for (int r = 0; r < R; ++r) {
+      wrow[r] = W + (ebase + (size_t)min(o0 + r, rows - 1)) * rowBytes;
+      sum[r] = 0.f;
+    }
+    for (int sb = 0; sb < nsb; ++sb) {
+      const float *xs = ink2_kq_sm + (size_t)sb * 256 + 32 * ib + 4 * il;
+      const float4 lo = *(const float4 *)xs;
+      const float4 hi = *(const float4 *)(xs + 16);
+      const float xl[4] = {lo.x, lo.y, lo.z, lo.w};
+      const float xh[4] = {hi.x, hi.y, hi.z, hi.w};
+      float d[R], part[R];
+#pragma unroll
+      for (int r = 0; r < R; ++r) {
+        const unsigned char *b = wrow[r] + (size_t)sb * 144 + 18 * ib;
+        const unsigned short *q2 = (const unsigned short *)(b + 2 + 4 * il);
+        const unsigned int q = (unsigned int)q2[0] | ((unsigned int)q2[1] << 16);
+        d[r] = __half2float(*(const __half *)b);
+        part[r] = 0.f;
+#pragma unroll
+        for (int j = 0; j < 4; ++j) {
+          const unsigned int byte = (q >> (8 * j)) & 0xffu;
+          part[r] = fmaf(kv[byte & 0xf], xl[j], part[r]);
+          part[r] = fmaf(kv[byte >> 4], xh[j], part[r]);
+        }
+      }
+#pragma unroll
+      for (int r = 0; r < R; ++r) sum[r] = fmaf(d[r], part[r], sum[r]);
+    }
+#pragma unroll
+    for (int r = 0; r < R; ++r) {
+      float v = sum[r];
+#pragma unroll
+      for (int delta = 16; delta > 0; delta >>= 1) v += __shfl_down_sync(0xffffffff, v, delta);
+      const int o = o0 + r;
+      if (lane == 0 && o < rows) Y[(size_t)slot * rows + o] = escale ? __fmul_rn(v, es) : v;
+    }
+  }
+}
+
+// Launches the IQ4_NL v3 kernel; returns false (nothing launched) for a shape or mode
+// that keeps the reference kernel.
+static bool ink2_expert_iq4nl_v3(const uint8_t *W, const int *ids, const float *X, int xStride, float *Y, int k,
+                                 int rows, int in, const float *escale, int situW, double beta, double lb) {
+  if (!ink2_iq3_enabled() || (in & 255) != 0 || in <= 0 || (size_t)in * 4 > 48 * 1024) return false;
+  int sms = 0, dev = 0;
+  if (cudaGetDevice(&dev) != cudaSuccess || cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev) != cudaSuccess || sms <= 0) sms = 84;
+  const int needed = ((rows + INK2_IQ3_ROWS - 1) / INK2_IQ3_ROWS + 7) / 8;
+  int g = (sms * INK2_IQ3_BLOCKS_PER_SM + k - 1) / k;
+  if (g > needed) g = needed;
+  const dim3 grid(g < 1 ? 1 : g, k);
+  FCUDA_TS("k_ink2_expert_iq4nl_v3", grid, k_ink2_expert_iq4nl_v3<INK2_IQ3_ROWS><<<grid, 256, (size_t)in * 4, g_stream>>>(
+                                               W, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));
+  return true;
+}

@@ -139,13 +139,19 @@ func TestCUDAInk2ExpertIQFastMatchesReference(t *testing.T) {
 	defer ink2SelectIQGEMV(ink2SelectIQGEMV(true))
 	r := rand.New(rand.NewSource(31))
 	const experts = 10
-	for _, dt := range []Dtype{IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S} {
-		bb, ok := RawIQBlockBytes(dt)
-		if !ok {
-			t.Fatalf("%s is not a raw i-quant", dt)
-		}
+	for _, dt := range []Dtype{IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ4_NL} {
 		for _, c := range []struct{ rows, in, k, xs int }{{2304, 2304, 8, 0}, {2304, 1280, 8, 1280}, {37, 512, 3, 512}} {
-			raw := iqGEMVTestRaw(experts*c.rows, c.in, bb, uint64(c.rows*131+c.in)^uint64(dt))
+			seed := uint64(c.rows*131+c.in) ^ uint64(dt)
+			var raw []byte
+			if dt == IQ4_NL {
+				raw = iqGEMVTestRawFor(dt, experts*c.rows, c.in, seed)
+			} else {
+				bb, ok := RawIQBlockBytes(dt)
+				if !ok {
+					t.Fatalf("%s is not a raw i-quant", dt)
+				}
+				raw = iqGEMVTestRaw(experts*c.rows, c.in, bb, seed)
+			}
 			stack := cb.Upload(NewRawIQ(cb, dt, []int{experts * c.rows, c.in}, raw), dt)
 			xn := c.in
 			if c.xs > 0 {
