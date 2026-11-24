@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand"
+	"slices"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -234,6 +235,41 @@ func TestInkling2DeviceExpertsShareOneStack(t *testing.T) {
 		}
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestInkling2ExpertResidencyOrderCoreFirst(t *testing.T) {
+	// The released schedule: core [6,18) x3 passes over 24 layers.
+	hp := model.Inkling2LoopHParams{Layers: 24, CoreStart: 6, CoreEnd: 18, Passes: 3}
+	got := inkling2ExpertResidencyOrder(hp, 24)
+	want := []int{6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 0, 1, 2, 3, 4, 5, 18, 19, 20, 21, 22, 23}
+	if !slices.Equal(got, want) {
+		t.Fatalf("order %v, want %v", got, want)
+	}
+	// Visits per token never rise along the order, so every prefix that fits a
+	// VRAM budget holds the most-read expert bytes.
+	visits := func(l int) int {
+		if l >= hp.CoreStart && l < hp.CoreEnd {
+			return hp.Passes
+		}
+		return 1
+	}
+	for i := 1; i < len(got); i++ {
+		if visits(got[i]) > visits(got[i-1]) {
+			t.Fatalf("layer %d (%d visits) follows layer %d (%d visits)", got[i], visits(got[i]), got[i-1], visits(got[i-1]))
+		}
+	}
+	plain := []int{0, 1, 2, 3}
+	for name, hp := range map[string]model.Inkling2LoopHParams{
+		"single pass":     {Layers: 4, CoreStart: 1, CoreEnd: 3, Passes: 1},
+		"empty core":      {Layers: 4, CoreStart: 2, CoreEnd: 2, Passes: 3},
+		"core past model": {Layers: 4, CoreStart: 2, CoreEnd: 9, Passes: 3},
+		"negative start":  {Layers: 4, CoreStart: -1, CoreEnd: 2, Passes: 3},
+	} {
+		if got := inkling2ExpertResidencyOrder(hp, 4); !slices.Equal(got, plain) {
+			t.Fatalf("%s: order %v, want layer order", name, got)
 		}
 	}
 }

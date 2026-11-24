@@ -356,6 +356,29 @@ func (s *inkling2DeviceSet) experts(e model.Inkling2LoopExperts) (model.Inkling2
 	return out, nil
 }
 
+// inkling2ExpertResidencyOrder lists layer indices in the order their expert
+// stacks claim device memory: layers in the loop core [CoreStart, CoreEnd) run
+// Passes times per token, so a byte of their experts saves Passes reads where
+// any other layer's saves one. Ties keep layer order. A schedule that does not
+// fit inside layers degrades to plain layer order rather than guessing.
+// Adapted from Niko1221/Strata engine/src/inkling2/ink_manifest.h:495-509 @
+// c6f6427d9de9 (MIT), re-expressed without copied code.
+func inkling2ExpertResidencyOrder(hp model.Inkling2LoopHParams, layers int) []int {
+	order := make([]int, 0, layers)
+	core := hp.Passes > 1 && hp.CoreStart >= 0 && hp.CoreStart < hp.CoreEnd && hp.CoreEnd <= layers
+	if core {
+		for i := hp.CoreStart; i < hp.CoreEnd; i++ {
+			order = append(order, i)
+		}
+	}
+	for i := 0; i < layers; i++ {
+		if !core || i < hp.CoreStart || i >= hp.CoreEnd {
+			order = append(order, i)
+		}
+	}
+	return order
+}
+
 // bindInkling2Device swaps every packed matrix and expert stack of a host-bound
 // model for be-resident equivalents. The token embedding and small dense
 // matrices stay host-side; Close frees the device tensors before the mapping.
@@ -384,8 +407,10 @@ func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
 			&lw.SinkProj, &lw.Router, &lw.KConvProj, &lw.VConvProj} {
 			mat(p)
 		}
-		exps(&lw.GateUp)
-		exps(&lw.Down)
+	}
+	for _, i := range inkling2ExpertResidencyOrder(m.HP, len(w.Layers)) {
+		exps(&w.Layers[i].GateUp)
+		exps(&w.Layers[i].Down)
 	}
 	for i := range w.Controllers {
 		cw := &w.Controllers[i]
