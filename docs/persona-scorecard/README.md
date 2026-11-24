@@ -5,6 +5,8 @@ description: "Inward persona scorecard: each of fak's top-10 personas (free-tier
 
 # Persona-readiness scorecard — is each top persona served?
 
+<!-- persona-readiness-scorecard: 2026-11-24 · process: tools/persona_readiness_scorecard.py · data: tools/persona_readiness_scorecard.data/ -->
+
 The sibling scorecards grade fak through one lens each: [`agent-readiness`](../AGENT-READINESS-SCORECARD.md) asks whether an AI *agent* can adopt fak, [`product`](../product-scorecard/README.md) whether a person can use each *concept*. This one asks the **go-to-market** question: of the kinds of human (and one machine) who actually land on fak — from the free-tier dev who will download a binary and not read a word, through the infra engineer who has to operate it, to the researcher who wants to reproduce it — **is each one served?** Does the first affordance that persona reaches for exist in the tree? Every number below is re-derived from `tools/persona_readiness_scorecard.data/` by `tools/persona_readiness_scorecard.py` and cross-checked against the real tree, so no verdict is hand-typed: to lift a persona you ADD the real affordance.
 
 > Regenerate: `python tools/persona_readiness_scorecard.py --markdown-dir docs/persona-scorecard`.
@@ -14,10 +16,10 @@ The sibling scorecards grade fak through one lens each: [`agent-readiness`](../A
 | Metric | Value |
 |---|---|
 | **Coverage** | **100.0%** (10/10 top personas positioned) |
-| **Persona-debt** | **0** (affordance/honesty 0 + coverage 0) |
-| Composite score | 100.0/100 (grade A) |
+| **Persona-debt** | **2** (affordance/honesty 2 + coverage 0) |
+| Composite score | 94.4/100 (grade A) |
 | Personas served | 10 of 10 |
-| Hard affordances present | 62 / 62 |
+| Hard affordances present | 61 / 62 |
 | As of | 2026-09-01 (fak v0.45.0) |
 
 > **Read this right.** The score grades how *complete and honest the persona map is* — every required persona positioned, every readiness verdict matching the affordances actually on disk. A missing affordance is a real gap you ADD; an *overclaimed* verdict is the defect this catches.
@@ -27,7 +29,7 @@ The sibling scorecards grade fak through one lens each: [`agent-readiness`](../A
 > Regenerate this chart in the terminal with `python tools/persona_readiness_scorecard.py --chart`.
 
 ```text
-persona-readiness chart — 10 personas · score 100.0/100 (grade A) · persona-debt 0
+persona-readiness chart — 10 personas · score 94.4/100 (grade A) · persona-debt 2
 
 verdict ladder (count of personas, best -> worst):
   ★ served            ████████████████████████████ 10
@@ -49,7 +51,7 @@ affordance fill per persona (hard affordances present):
   ★ backend-integrator     ████████████████████ 6/6
   ★ ml-researcher          ████████████████████ 6/6
   ★ benchmark-engineer     ████████████████████ 6/6
-  ★ decision-maker         ████████████████████ 6/6
+  ★ decision-maker         █████████████████··· 5/6
   ★ infra-engineer         ████████████████████ 7/7
   ★ security-engineer      ████████████████████ 7/7
 
@@ -78,7 +80,7 @@ legend: ★ served   ● mostly-served   ◐ partially-served   ○ unserved
 | ★ | served | consume | moderate | 6/6 | **Backend integrator** — Install fak into a service, front my model server, and depend on a frozen interface I can build a leaf onto. |
 | ★ | served | evaluate | deep | 6/6 | **ML researcher** — Reproduce the determinism witness and the benchmarks offline, read the research notes, and cite the work. |
 | ★ | served | evaluate | moderate | 6/6 | **Benchmark / eval engineer** — Run a benchmark command, read the measured numbers, and see fak's honest position vs the field. |
-| ★ | served | evaluate | minimal | 6/6 | **Evaluator / decision-maker** — See what fak is, what's proven, how it compares, and its license — fast, with no overclaim. |
+| ★ | served | evaluate | minimal | 5/6 | **Evaluator / decision-maker** — See what fak is, what's proven, how it compares, and its license — fast, with no overclaim. |
 | ★ | served | operate | moderate | 7/7 | **Infra / platform engineer (SRE)** — Deploy fak serve with /metrics, /healthz, rate limits, and a container image — and a guide for Docker, Compose, and k8s. |
 | ★ | served | operate | deep | 7/7 | **Security engineer** — Audit what fak denies/contains, confirm the refusals are a closed vocabulary, the audit trail is tamper-evident, and the CI scans for CVEs. |
 
@@ -86,7 +88,11 @@ legend: ★ served   ● mostly-served   ◐ partially-served   ○ unserved
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
+| honesty | `verdict_honest` | 75 | 1 | 1 verdict overclaim(s) |
+| reality | `affordances_present` | 98 | 1 | 61/62 hard affordances present (98%) |
 | well-formed | `rows_well_formed` | 100 | 0 | all 10 persona rows well-formed |
-| reality | `affordances_present` | 100 | 0 | 62/62 hard affordances present (100%) |
-| honesty | `verdict_honest` | 100 | 0 | every verdict matches its affordance evidence |
+
+## Worst-served personas (serve worst-first)
+
+- **decision-maker** (served, 2 debt) — missing: identity
 
