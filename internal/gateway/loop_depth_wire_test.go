@@ -69,11 +69,11 @@ func TestSetLoopDepthRuleRejectsInvalidCap(t *testing.T) {
 	if err := s.SetLoopDepthRule(&policy.LoopDepthRule{}); err == nil {
 		t.Fatal("empty rule accepted, want compile error")
 	}
-	if err := s.SetLoopDepthRule(&policy.LoopDepthRule{MaxLoopDepth: 3}); err != nil || s.loopDepthRule == nil {
-		t.Fatalf("valid rule: err=%v rule=%v", err, s.loopDepthRule)
+	if err := s.SetLoopDepthRule(&policy.LoopDepthRule{MaxLoopDepth: 3}); err != nil || s.loopDepthRule.Load() == nil {
+		t.Fatalf("valid rule: err=%v rule=%v", err, s.loopDepthRule.Load())
 	}
-	if err := s.SetLoopDepthRule(nil); err != nil || s.loopDepthRule != nil {
-		t.Fatalf("nil rule must clear: err=%v rule=%v", err, s.loopDepthRule)
+	if err := s.SetLoopDepthRule(nil); err != nil || s.loopDepthRule.Load() != nil {
+		t.Fatalf("nil rule must clear: err=%v rule=%v", err, s.loopDepthRule.Load())
 	}
 }
 

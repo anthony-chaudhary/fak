@@ -690,7 +690,7 @@ func liveChatCompletionError(parent context.Context, plannerErr, writeErr error)
 // window, carrying only counts and durations (elapsed, phase, bytes/events emitted,
 // last-event age). Heartbeats are SILENT before the first token (the response is not
 // committed yet) and contain NO prompt or output content.
-func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req ChatRequest, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission, inputTriggerRoute *InputTriggerRouteReceipt) bool {
+func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req ChatRequest, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission, inputTriggerRoute *InputTriggerRouteReceipt, loopDepth *LoopDepthReceipt) bool {
 	sp, ok := s.chatPlanner(ctx).(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		return false
@@ -877,33 +877,10 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		}
 		return guard.write(s)
 	})
-	opts := []agent.SampleOpt{
-		agent.WithModel(req.Model),
-		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
-		agent.WithClientTemperature(req.Temperature),
-		agent.WithTopP(req.TopP),
-		agent.WithSeed(req.Seed),
-		agent.WithStop(normalizeStop(req.Stop)),
-		// Structured-output passthrough (#907): the streamed wire forwards the same
-		// response_format / logit_bias constraints as the buffered path, so a streamed
-		// tool-bearing turn is generated under the ride engine's constraint and still
-		// adjudicated whole. No-op when absent (bit-exact drop-in).
-		agent.WithResponseFormat(req.ResponseFormat),
-		agent.WithToolChoice(req.ToolChoice),
-		agent.WithLogitBias(req.LogitBias),
-		agent.WithGuidedDecode(req.GuidedDecodeFields()),
-		agent.WithFrequencyPenalty(req.FrequencyPenalty),
-		agent.WithPresencePenalty(req.PresencePenalty),
-		agent.WithChatWireTopK(req.TopK),
-		agent.WithMinP(req.MinP),
-		agent.WithChatTemplateKwargs(req.ChatTemplateKwargs),
-		agent.WithSpeculativeNMax(req.SpeculativeNMax),
-		agent.WithMultimodalMode(req.DeclaredMultimodalMode()),
-		// A streamed OpenAI request is an explicit request for incremental output.
-		// Select the native per-token seam per call so ordinary `fak serve` works
-		// without requiring the process-wide compatibility environment flag.
-		agent.WithPerTokenStream(true),
-	}
+	// A streamed OpenAI request is an explicit request for incremental output.
+	// Select the native per-token seam per call so ordinary `fak serve` works
+	// without requiring the process-wide compatibility environment flag.
+	opts := append(chatWireSampleOpts(req, sessionTurn, loopDepth), agent.WithPerTokenStream(true))
 	if serviceTier, err := parseClientServiceTier(req.ServiceTier); err == nil {
 		opts = serviceTier.appendSampleOpt(opts)
 	}

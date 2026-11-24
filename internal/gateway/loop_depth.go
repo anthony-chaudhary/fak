@@ -101,12 +101,13 @@ func selectLoopDepth(req ChatRequest, maxLoops int) (*LoopDepthReceipt, string) 
 }
 
 // SetLoopDepthRule installs the policy cap on looped-model depth; nil removes it.
+// Safe to call while the server is handling requests.
 func (s *Server) SetLoopDepthRule(rule *policy.LoopDepthRule) error {
 	compiled, err := policy.CompileLoopDepth(rule)
 	if err != nil {
 		return err
 	}
-	s.loopDepthRule = compiled
+	s.loopDepthRule.Store(compiled)
 	return nil
 }
 
