@@ -102,6 +102,9 @@ type DisambiguationWitness struct {
 	CacheIdentity  string                    `json:"cache_identity,omitempty"`
 	CacheState     string                    `json:"cache_state,omitempty"`
 	CacheReason    string                    `json:"cache_reason,omitempty"`
+	// ScratchCleanup reports a scratch tree that could not be removed; it does
+	// not affect the verdict and is never cached.
+	ScratchCleanup string `json:"scratch_cleanup,omitempty"`
 }
 type DisambiguationWitnesses struct {
 	Timeout   DisambiguationTimeoutReceipt `json:"timeout"`
@@ -790,7 +793,7 @@ func readCachedDisambiguation(path, key string) (DisambiguationWitness, string, 
 }
 
 func writeCachedDisambiguation(path, key string, witness DisambiguationWitness) error {
-	witness.Tree, witness.CacheIdentity, witness.CacheState, witness.CacheReason = "", "", "", ""
+	witness.Tree, witness.CacheIdentity, witness.CacheState, witness.CacheReason, witness.ScratchCleanup = "", "", "", "", ""
 	data, err := json.Marshal(disambiguationCacheEntry{Schema: disambiguationCacheSchema, Key: key, Witness: witness})
 	if err != nil {
 		return err
@@ -831,14 +834,18 @@ var disambiguationSkipDir = map[string]bool{
 
 const disambiguationMaxCorpusBytes = 512 * 1024
 
-func computeDisambiguationWitness(ctx context.Context, repo, treeID string, w DisambiguationWitness, setSubphase func(string)) (DisambiguationWitness, bool) {
+func computeDisambiguationWitness(ctx context.Context, repo, treeID string, w DisambiguationWitness, setSubphase func(string)) (result DisambiguationWitness, complete bool) {
 	setSubphase("scratch-tree")
-	tmp, err := os.MkdirTemp("", "fak-disambiguation-tree-*")
+	tmp, release, err := createDisambiguationScratch()
 	if err != nil {
 		w.Detail = err.Error()
 		return w, false
 	}
-	defer os.RemoveAll(tmp)
+	defer func() {
+		if err := release(); err != nil {
+			result.ScratchCleanup = err.Error()
+		}
+	}()
 	out := filepath.Join(tmp, "tree")
 	// Keep the stable subphase name used by timeout diagnostics. The old
 	// implementation extracted every tracked blob from a whole-tree archive;
