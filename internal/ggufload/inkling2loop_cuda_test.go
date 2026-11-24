@@ -35,17 +35,14 @@ func TestInkling2CUDAOracleGreedyMatchesLlamaCpp(t *testing.T) {
 	defer m.Close()
 	for _, c := range inkling2OracleCases {
 		t.Run(c.name, func(t *testing.T) {
-			got, st, err := Inkling2LoopGreedyTimed(m, be, c.prompt, len(c.greedy))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("cuda: %d prompt tokens prefill %s; %d decode steps %s = %.2f tok/s",
-				len(c.prompt), st.Prefill, st.DecodeSteps, st.Decode, st.DecodeTokensPerSecond())
-			for i := range got {
-				if got[i] != c.greedy[i] {
-					t.Fatalf("greedy token %d = %d, llama.cpp = %d (got %v)", i, got[i], c.greedy[i], got)
+			runInkling2Oracle(t, c, func(prompt []int, n int) ([]int, error) {
+				got, st, err := Inkling2LoopGreedyTimed(m, be, prompt, n)
+				if err == nil {
+					t.Logf("cuda: %d prompt tokens prefill %s; %d decode steps %s = %.2f tok/s",
+						len(prompt), st.Prefill, st.DecodeSteps, st.Decode, st.DecodeTokensPerSecond())
 				}
-			}
+				return got, err
+			})
 		})
 	}
 }

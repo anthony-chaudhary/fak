@@ -45,32 +45,51 @@ func TestInkling2UnsupportedTypeRefuses(t *testing.T) {
 }
 
 // The oracle is llama.cpp ad50351f5 llama-server greedy (temperature 0, top_k 1,
-// CPU backend, -fa off) on Inkling-2-Mini-UD-Q3_K_XL.gguf (mainline layout,
-// sha256 e2d03e8c...), each prompt tokenized without BOS and with special tokens
-// parsed.
-var inkling2OracleCases = []struct {
-	name           string
-	prompt, greedy []int
-}{
+// CPU backend -dev none, -fa off, -np 1) on Inkling-2-Mini-UD-Q3_K_XL.gguf
+// (mainline layout, sha256 e2d03e8c...), each prompt tokenized without BOS and
+// with special tokens parsed. runnerUp and margin come from the same requests'
+// pre-sampling n_probs logprobs. -np 1 matters: the slot count sizes the
+// sliding-window KV ring, which changes attention summation order.
+var inkling2OracleCases = []inkling2OracleCase{
 	{
 		// "The capital of France is Paris. The capital of Germany is Berlin. The capital of Japan is"
 		name:   "capitals",
 		prompt: []int{371, 151451, 149879, 151194, 149884, 152717, 13, 149917, 151451, 149879, 153067, 149884, 154328, 13, 149917, 151451, 149879, 153630, 149884},
 		greedy: []int{182416, 13, 149917, 151451, 149879, 149876, 151465, 151480, 149884, 156229, 11, 149950, 13, 34, 13, 149917, 151451, 149879, 149876, 151465, 157422, 149884, 153629, 13, 149917, 151451, 149879, 165985, 149884, 169305, 13, 149917},
+		runnerUp: []int{
+			220, 11, 68014, 151100, 82, 165985, 198345, 157422, 149879, 220, 13, 198396, 149929, 149929,
+			145039, 68014, 151465, 82, 152817, 198386, 151480, 196976, 220, 11, 68014, 220, 82, 152817, 11,
+			160040, 11, 68014,
+		},
+		margin: []float64{
+			4.2747, 4.9793, 1.4328, 6.0440, 4.7663, 0.7292, 0.0587, 1.0284, 2.1909, 4.8539, 0.7503, 1.5191,
+			5.7374, 2.5081, 3.6895, 0.7334, 5.5785, 4.6307, 0.7526, 2.2278, 4.3718, 4.5645, 6.1715, 5.2560,
+			1.5002, 6.3854, 5.2455, 0.7174, 7.4019, 4.9952, 5.6180, 2.8119,
+		},
 	},
 	{
 		// a Python def line followed by a one-line docstring and a newline
 		name:   "fibonacci",
 		prompt: []int{1719, 220, 46389, 7, 77, 8, 25, 198, 149862, 172706, 72358, 149876, 149934, 12, 258, 181713, 150107, 13, 70646, 198},
 		greedy: []int{149862, 150003, 149934, 197012, 220, 16, 25, 198, 149860, 149862, 150583, 149934, 198, 149862, 149878, 11, 149963, 196977, 220, 15, 11, 220, 16, 198, 149862, 149887, 197001, 149881, 150354, 7, 17, 11},
+		runnerUp: []int{
+			149871, 149878, 149935, 196982, 15, 15, 196985, 220, 149864, 220, 196994, 220, 220, 149871,
+			150506, 196977, 65, 11, 196976, 16, 196988, 16, 17, 220, 149859, 150419, 149900, 220, 220,
+			196976, 77, 196988,
+		},
+		margin: []float64{
+			4.6565, 1.8664, 6.1612, 1.6099, 7.3107, 0.4570, 8.7180, 4.2618, 7.7296, 7.5745, 6.9613, 3.9027,
+			3.5899, 3.4755, 0.5158, 5.5235, 5.3113, 5.2196, 9.3988, 7.1219, 10.0617, 8.1561, 11.5597, 5.7493,
+			7.1920, 5.3934, 2.7570, 8.0437, 7.7983, 9.3551, 1.8873, 11.7876,
+		},
 	},
 	{
 		// a 1946-token inventory log whose first line holds a passphrase and whose
 		// last line asks for it: the recall spans past both the relative-bias
 		// extent and the sliding window (1024 each), so distances beyond the
 		// extent take the zero bias row and local layers mask old keys. Greedy
-		// is from -b 8 -ub 8: at token 9 llama.cpp's own top two sit 0.21 nats
-		// apart and -ub 512 flips them, so the oracle pins the ubatch
+		// is from -b 8 -ub 8. Steps 9 and 10 are near ties (0.21 and 0.24 nats)
+		// that llama.cpp's own -ub 512 run resolves the other way at step 10.
 		name: "passphrase-recall-1946",
 		prompt: []int{
 			137864, 150573, 149887, 149876, 177903, 169358, 151556, 13, 149917, 153536, 150099, 49778, 4507,
@@ -210,6 +229,16 @@ var inkling2OracleCases = []struct {
 			149876, 153536, 150099, 49778, 4507, 149887, 149876, 220, 36940, 13, 149917, 150816, 167742,
 			152672, 25, 196980, 371, 153536,
 		},
+		runnerUp: []int{
+			198, 146051, 198, 46, 46, 13, 69663, 198, 68014, 54756, 153536, 171960, 153221, 149991, 149878,
+			150099, 220, 694, 4438, 13, 149878, 196980, 46025, 11, 150078, 150311, 152068, 152068, 149921,
+			196984, 268, 220,
+		},
+		margin: []float64{
+			2.9082, 7.9335, 8.2430, 8.3586, 8.0962, 7.2845, 7.9105, 3.1735, 0.7162, 0.2107, 0.2367, 0.5481,
+			3.8425, 0.8652, 2.3189, 3.3231, 6.9718, 15.0706, 15.4349, 0.0402, 8.9666, 10.7538, 11.3417,
+			1.8107, 1.7825, 0.8841, 1.0772, 2.8145, 2.6320, 5.1607, 6.5816, 10.6726,
+		},
 	},
 	{
 		// the GGUF chat template (system + user turn, default thinking effort)
@@ -224,6 +253,16 @@ var inkling2OracleCases = []struct {
 			200001, 200008, 371, 150409, 171960, 25, 196980, 1353, 150396, 152354, 160200, 11, 167291,
 			149910, 149976, 32010, 13, 1, 170289, 150893, 149911, 4123, 13, 170289, 151608, 152354, 160200,
 			13, 149954, 150561, 14, 49718,
+		},
+		runnerUp: []int{
+			9850, 200049, 1003, 150377, 159306, 149887, 152186, 152186, 14777, 151108, 99108, 1, 101417, 220,
+			150519, 1918, 1, 170289, 150078, 150400, 149899, 2407, 11, 150197, 150476, 150161, 150519, 25,
+			220, 150990, 196976, 30734,
+		},
+		margin: []float64{
+			20.5338, 20.1061, 6.0022, 11.6667, 3.1025, 0.9428, 0.2466, 16.3822, 15.4032, 16.2548, 21.3875,
+			15.5264, 12.7710, 19.6769, 15.1326, 10.9771, 15.2633, 9.7542, 2.2613, 5.8603, 4.8079, 16.2043,
+			5.0616, 2.7584, 0.5985, 0.1299, 8.6501, 1.5247, 1.3100, 2.0070, 0.8563, 1.5652,
 		},
 	},
 }
@@ -240,17 +279,12 @@ func TestInkling2OracleGreedyMatchesLlamaCpp(t *testing.T) {
 	defer m.Close()
 	for _, c := range inkling2OracleCases {
 		t.Run(c.name, func(t *testing.T) {
-			start := time.Now()
-			got, err := Inkling2LoopGreedy(m, c.prompt, len(c.greedy))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("host reference: %d prompt + %d greedy tokens in %s", len(c.prompt), len(got), time.Since(start))
-			for i := range got {
-				if got[i] != c.greedy[i] {
-					t.Fatalf("greedy token %d = %d, llama.cpp = %d (got %v)", i, got[i], c.greedy[i], got)
-				}
-			}
+			runInkling2Oracle(t, c, func(prompt []int, n int) ([]int, error) {
+				start := time.Now()
+				got, err := Inkling2LoopGreedy(m, prompt, n)
+				t.Logf("host reference: %d prompt + %d greedy tokens in %s", len(prompt), len(got), time.Since(start))
+				return got, err
+			})
 		})
 	}
 }
