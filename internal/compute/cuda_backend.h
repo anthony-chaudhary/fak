@@ -983,6 +983,7 @@ int fcuda_ink2_softcap_argmax(float *logits, int n, float cap, int *outIdx);
 int fcuda_ink2_expert_gemv(int fmt, const uint8_t *W, const uint8_t *scales, const int *ids,
     const float *X, int xStride, float *Y, int k, int rows, int in, const float *escale, int situW,
     double beta, double lb);
+int fcuda_ink2_nvfp4_gemv_select(int mode);
 int fcuda_ink2_graph_begin(void);
 int fcuda_ink2_graph_end(void);
 int fcuda_ink2_graph_launch(void);

@@ -890,6 +890,8 @@ __global__ void k_ink2_expert_nvfp4(const uint8_t *Packed, const uint8_t *Scales
   }
 }
 
+#include "inkling2_expert_gemv.cuh"
+
 static inline int ink2_last_error(void) { return (int)cudaGetLastError(); }
 
 extern "C" int fcuda_ink2_zero(void *p, size_t bytes) {
@@ -1087,6 +1089,7 @@ extern "C" int fcuda_ink2_expert_gemv(int fmt, const uint8_t *W, const uint8_t *
   switch (fmt) {
   case INK2_NVFP4:
     if (!scales || (in & 15) != 0) return (int)cudaErrorInvalidValue;
+    if (ink2_expert_nvfp4_v2(W, scales, ids, X, xStride, Y, k, rows, in, escale, situW, beta, lb)) break;
     {
       const dim3 nvgrid((rows + 31) / 32, k);
       FCUDA_TS("k_ink2_expert_nvfp4", nvgrid, k_ink2_expert_nvfp4<<<nvgrid, 256, in * sizeof(float), g_stream>>>(

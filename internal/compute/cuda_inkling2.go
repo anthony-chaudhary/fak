@@ -132,6 +132,18 @@ func (c *cudaBackend) Ink2ExpertMatVec(stack Tensor, expertRows int, ids, x Ink2
 		c.ink2F(scale), C.int(sw), C.double(beta), C.double(lb)))
 }
 
+// ink2SelectNVFP4GEMV picks the NVFP4 expert kernel (true: the bandwidth-shaped
+// one, false: the reference) and returns the previous choice.
+func ink2SelectNVFP4GEMV(fast bool) bool {
+	mode := C.int(0)
+	if fast {
+		mode = 1
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return C.fcuda_ink2_nvfp4_gemv_select(mode) != 0
+}
+
 func (c *cudaBackend) Ink2RMS(x, w, y Ink2Ref, rows, n int, eps float32) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
