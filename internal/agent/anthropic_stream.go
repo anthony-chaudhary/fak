@@ -89,6 +89,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	// call.apiKey in place, so a rehome persists across attempts here exactly as it does there.
 	call := &upstreamCall{
 		adapter:         adapter,
+		body:            body,
 		apiKey:          key,
 		upstreamBeta:    beta,
 		extraHeaders:    p.effectiveExtraHeaders(),
@@ -155,6 +156,9 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			// gets the same backoff as a retryable status.
 			if uerr := classifyDoError(derr, &rs); uerr != nil {
 				return uerr
+			}
+			if ierr := rs.noteIdenticalFailure(ctx, p, body, 0, derr); ierr != nil {
+				return ierr
 			}
 			continue
 		}

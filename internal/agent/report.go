@@ -110,3 +110,17 @@ func oneLine(s string, n int) string {
 	}
 	return s
 }
+
+// TraceLog collects the per-call trace of a RunArm/RunArmStream run so callers
+// outside the package can render it as the plaintext --log artifact.
+type TraceLog []traceEvent
+
+// Events returns the sink to pass as the log argument of RunArm/RunArmStream.
+func (l *TraceLog) Events() *[]traceEvent {
+	return (*[]traceEvent)(l)
+}
+
+// Render renders the collected trace as text.
+func (l TraceLog) Render() []byte {
+	return RenderTrace([]traceEvent(l))
+}

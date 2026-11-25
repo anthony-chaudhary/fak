@@ -30,6 +30,18 @@ import (
 const SystemPrompt = "You are an agent assistant. Use the provided tools to complete the user's request. " +
 	"Call tools to look up real data; do not invent values. When you have finished, reply with a short final answer to the user."
 
+// ArmMetrics.EndedBy tokens.
+const (
+	// EndedByIdenticalRetry: the planner refused to resend a request that kept failing
+	// to generate (HTTPPlanner.IdenticalRetryLimit).
+	EndedByIdenticalRetry = "identical_retry"
+	// EndedByContextOverflow: the upstream said the prompt does not fit the context window.
+	EndedByContextOverflow = "context_overflow"
+	// EndedByToolCallTruncated: a tool call was cut off at the output limit again after
+	// one corrective turn.
+	EndedByToolCallTruncated = "tool_call_truncated"
+)
+
 // ArmMetrics is one arm's witnessed outcome. The counts are kernel-measured on the
 // fak arm (k.Counters()) and harness-measured on the baseline arm.
 type ArmMetrics struct {
@@ -72,7 +84,12 @@ type ArmMetrics struct {
 	// InfraReprompts counts how many times the outer loop re-prompted the model after a
 	// RECOVERABLE infrastructure failure (infra_reprompt.go) instead of hard-stopping the
 	// arm. Zero on the historical loop and whenever the arm is disabled.
-	InfraReprompts        int    `json:"infra_reprompts,omitempty"`
+	InfraReprompts int `json:"infra_reprompts,omitempty"`
+	// EndedBy is a closed token naming a harness stop that is not a final answer: one of
+	// the EndedBy* constants. Empty when the arm ended any other way.
+	EndedBy string `json:"ended_by,omitempty"`
+	// ToolCallTruncations counts turns whose tool call was cut off at the output limit.
+	ToolCallTruncations   int    `json:"tool_call_truncations,omitempty"`
 	CircuitBreakerTripped bool   `json:"circuit_breaker_tripped,omitempty"`
 	CircuitBreakerReason  string `json:"circuit_breaker_reason,omitempty"`
 

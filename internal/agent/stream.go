@@ -864,6 +864,9 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 			if uerr := classifyDoError(err, &rs); uerr != nil {
 				return nil, nil, uerr
 			}
+			if ierr := rs.noteIdenticalFailure(ctx, p, call.body, 0, err); ierr != nil {
+				return nil, nil, ierr
+			}
 			continue
 		}
 		if r.StatusCode == http.StatusOK {
@@ -877,6 +880,9 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 					// rather than an older retryable status from another attempt.
 					rs.noteTransportGlitch(fmt.Errorf("planner: %s: read body: %w", call.adapter.Provider(), readErr))
 					rs.lastStatusErr = nil
+					if ierr := rs.noteIdenticalFailure(ctx, p, call.body, 0, rs.lastErr); ierr != nil {
+						return nil, nil, ierr
+					}
 					continue
 				}
 				fbState.noteRecovered(p, attempt)

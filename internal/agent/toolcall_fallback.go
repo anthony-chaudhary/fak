@@ -843,9 +843,14 @@ type truncatedBlock struct {
 // closers that bound its payload. The bounds mirror the lift-path regexes: a
 // payload ends at its earliest closer when one is present, otherwise at
 // end-of-content — which is exactly where a truncated block stops.
+//
+// specialToken marks an opener that is a reserved tokenizer token rather than text:
+// prose cannot produce it, so any payload after it is a tool-call start even when
+// the cut fell before "name".
 type truncationDialect struct {
-	open    string
-	closers []string
+	open         string
+	closers      []string
+	specialToken bool
 }
 
 // The Hermes open marker is assembled from parts so the literal stays
@@ -858,6 +863,7 @@ var truncationDialects = []truncationDialect{
 	{open: "<|python_tag|>", closers: []string{"<|eom_id|>", "<|eot_id|>"}},
 	{open: deepSeekDSMLCallsOpen, closers: []string{deepSeekDSMLCallsClose}},
 	{open: "[TOOL_CALLS]", closers: nil},
+	{open: inkling2InvokeToolJSON, closers: []string{inkling2EndMessage}, specialToken: true},
 }
 
 // findTruncatedToolCallBlock locates the LAST tool-call opening in content and
@@ -879,8 +885,12 @@ func findTruncatedToolCallBlock(content string) (truncatedBlock, bool) {
 				payload = payload[:ci]
 			}
 		}
-		if looksLikeToolCallStart(payload) && !payloadCloses(payload) {
-			return truncatedBlock{name: nameFromPayload(payload), payload: payload}, true
+		if (d.specialToken || looksLikeToolCallStart(payload)) && !payloadCloses(payload) {
+			name := nameFromPayload(payload)
+			if name == "" && d.open == inkling2InvokeToolJSON {
+				_, name = inkling2CallHeader(content[:idx])
+			}
+			return truncatedBlock{name: name, payload: payload}, true
 		}
 	}
 	// Qwen antl-style: <function=NAME> opens without a JSON body; a truncated

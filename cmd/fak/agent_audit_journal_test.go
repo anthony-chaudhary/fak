@@ -216,15 +216,21 @@ func TestAgentAuditJournalLegacyRejection(t *testing.T) {
 		}
 	})
 
-	t.Run("native arm rejects plaintext log", func(t *testing.T) {
+	t.Run("native arm writes plaintext log", func(t *testing.T) {
+		dir := t.TempDir()
 		cmd := exec.Command(os.Args[0], "-test.run=TestAgentAuditJournalLegacyRejection", "--", "--native", "--offline", "--log", "trace.txt", "--out", "out.json", "--code-tools=false", "--sys-tools=false")
+		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "TEST_AGENT_AUDIT_HELPER=1")
 		out, err := cmd.CombinedOutput()
-		if err == nil {
-			t.Fatal("expected error, got nil")
+		if err != nil {
+			t.Fatalf("native --log run failed: %v\n%s", err, out)
 		}
-		if !strings.Contains(string(out), "--native does not support --log") {
-			t.Fatalf("expected rejection message, got: %s", string(out))
+		data, err := os.ReadFile(filepath.Join(dir, "trace.txt"))
+		if err != nil {
+			t.Fatalf("ReadFile trace.txt: %v\n%s", err, out)
+		}
+		if len(data) == 0 {
+			t.Fatal("expected plaintext trace to be non-empty")
 		}
 	})
 }

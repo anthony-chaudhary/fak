@@ -964,6 +964,16 @@ type HTTPPlanner struct {
 	// it MUST NOT mark the current account permanently walled.
 	TransientTargetFunc func(status int) (newCred string, ok bool)
 
+	// IdenticalRetryLimit bounds re-sends of a byte-identical request body after a
+	// generation-class failure: a retryable 500/502/504 or a transport/read error,
+	// including the client timeout. 0 keeps the legacy behaviour (unbounded within the
+	// retry budget); N > 0 allows at most N re-sends, then the call returns
+	// *IdenticalRetryError. A local model that failed to decode a request will fail
+	// the same way again, so resending it only multiplies the wasted decode time.
+	// Backpressure statuses (408/429/503/529), credential rewinds and transient-target
+	// failover keep their existing behaviour.
+	IdenticalRetryLimit int
+
 	// AccountFailoverNotify, when non-nil, is called when the account-failover arm resolves —
 	// separately from the other three notify hooks so an org/region/billing failover is never
 	// conflated with a 429/5xx backoff, a 401 token rotation, or a transient-403 flap (four
@@ -1315,6 +1325,9 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			if uerr := classifyDoError(err, &rs); uerr != nil {
 				return nil, uerr
 			}
+			if ierr := rs.noteIdenticalFailure(ctx, p, call.body, 0, err); ierr != nil {
+				return nil, ierr
+			}
 			continue
 		}
 		raw, readErr := io.ReadAll(resp.Body)
@@ -1326,6 +1339,9 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// status: if every remaining read fails, surface this final wrapped cause.
 			rs.noteTransportGlitch(fmt.Errorf("planner: %s: read body: %w", call.adapter.Provider(), readErr))
 			rs.lastStatusErr = nil
+			if ierr := rs.noteIdenticalFailure(ctx, p, call.body, 0, rs.lastErr); ierr != nil {
+				return nil, ierr
+			}
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {

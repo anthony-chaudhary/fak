@@ -272,6 +272,20 @@ func chatTemplateRejected(body []byte) bool {
 	)
 }
 
+// IsContextOverflow reports whether an upstream error body says the request does not fit
+// the model's context window. The prompt is deterministic input, so resending it can never
+// succeed; callers must shrink it instead. Only engine-specific signatures match: generic
+// phrases such as "context window" also appear in transient overload bodies.
+func IsContextOverflow(body []byte) bool {
+	return bodyContainsAny(body,
+		"context_length_exceeded",
+		"exceed_context_size_error",
+		"exceeds the available context size",
+		"maximum context length",
+		"prompt is too long",
+	)
+}
+
 // IsChatTemplateRejected is the exported witness for a server-side chat-template render
 // failure, so the gateway can give it a typed client code (upstream_template_render) from the
 // same signature the retry classifier uses — one taxonomy, not two (#13784).

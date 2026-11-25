@@ -17,6 +17,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // infraClass is the closed verdict of classifying one completion error: whether the
@@ -44,6 +45,14 @@ func classifyCompleteError(err error) (infraClass, string) {
 	if err == nil {
 		return infraTerminal, ""
 	}
+	// Both are checked before RetryCeilingError and the status probe: re-prompting would
+	// resend the same unservable request, which is exactly what these stops exist to end.
+	if errors.Is(err, ErrIdenticalRetry) {
+		return infraTerminal, infraReasonIdenticalRetry
+	}
+	if isContextOverflowErr(err) {
+		return infraTerminal, infraReasonContextOverflow
+	}
 	if deterministicTransportError(err) {
 		return infraTerminal, "UPSTREAM_UNREACHABLE"
 	}
@@ -68,6 +77,33 @@ func classifyCompleteError(err error) (infraClass, string) {
 		return infraTerminal, "CONTEXT_DONE"
 	}
 	return infraReprompt, "TRANSPORT_EXHAUSTED"
+}
+
+// Closed terminal reasons that also name why the arm ended (ArmMetrics.EndedBy).
+const (
+	infraReasonIdenticalRetry  = "IDENTICAL_RETRY"
+	infraReasonContextOverflow = "CONTEXT_OVERFLOW"
+)
+
+// isContextOverflowErr reports a context overflow whether it arrived typed, as an HTTP
+// status body, or in-band on an already-open stream.
+func isContextOverflowErr(err error) bool {
+	if errors.Is(err, ErrContextOverflow) {
+		return true
+	}
+	var se *UpstreamStatusError
+	if errors.As(err, &se) && !backpressureStatus(se.Status) && IsContextOverflow([]byte(se.Body)) {
+		return true
+	}
+	var stream *UpstreamStreamError
+	if errors.As(err, &stream) {
+		kind := strings.ToLower(stream.Type + " " + stream.Code)
+		if strings.Contains(kind, "rate_limit") || strings.Contains(kind, "overloaded") {
+			return false
+		}
+		return IsContextOverflow([]byte(stream.Type + " " + stream.Code + " " + stream.Message))
+	}
+	return false
 }
 
 // infraContinuationText renders the bounded continuation spliced as a user turn after a

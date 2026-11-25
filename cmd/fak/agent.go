@@ -561,6 +561,9 @@ func runAgent(argv []string) {
 
 	endpoint := agentEndpointResolver(af, baseURLExplicit, providerExplicit, modelExplicit, os.Stderr)
 	effectiveBaseURL := endpoint.baseURL
+	if !*af.offline {
+		ensureAgentLocalEndpointDefaults(effectiveBaseURL, os.Stderr)
+	}
 	if *af.provider != "" {
 		runOpts = append(runOpts, agent.WithProvider(*af.provider))
 	}
@@ -593,6 +596,10 @@ func runAgent(argv []string) {
 		}
 		p, err := agent.NewProviderHTTPPlanner(*af.provider, effectiveBaseURL, *af.model, key)
 		must(err)
+		if agent.IsLocalEndpoint(effectiveBaseURL) {
+			// Greedy local decode answers an identical re-send identically, and each costs minutes.
+			p.IdenticalRetryLimit = 1
+		}
 		scheme, ok := agent.ParseAnthropicAuthScheme(*af.anthropicAuth)
 		if !ok {
 			must(fmt.Errorf("--anthropic-auth %q: want auto, bearer, or x-api-key", *af.anthropicAuth))
@@ -686,13 +693,11 @@ func runAgent(argv []string) {
 	}
 
 	if isNative {
-		if *af.logOut != "" && auditJournal == nil {
-			must(errors.New("fak agent: --native does not support --log; use --out for its receipt"))
-		}
 		streamMode, err := resolveStreamMode(*af.stream)
 		must(err)
 		activeWakeReleaser, _ := acquireAgentRunKeepAwake(*af.keepAwake)
 		var metrics agent.ArmMetrics
+		var traceLog agent.TraceLog
 		if streamMode == streamOn || (streamMode == streamAuto && plannerSupportsStreaming(planner)) {
 			// Drive the native arm through RunArmStream so a stream-only upstream (one that
 			// rejects a buffered request) completes instead of retrying its refusal. Content
@@ -700,24 +705,31 @@ func runAgent(argv []string) {
 			// that cannot stream falls back to the buffered arm for BOTH auto and on (RunArmStream
 			// would otherwise fail immediately with ErrStreamingUnsupported).
 			if plannerSupportsStreaming(planner) {
-				metrics, err = agent.RunArmStream(ctx(), planner, *af.task, true, *af.maxTurns, streamToStderr, nil, runOpts...)
+				metrics, err = agent.RunArmStream(ctx(), planner, *af.task, true, *af.maxTurns, streamToStderr, traceLog.Events(), runOpts...)
 			} else {
 				if streamMode == streamOn {
 					must(errors.New("fak agent: --stream=on requires a streaming-capable planner (this provider/wire cannot stream)"))
 				}
-				metrics, err = agent.RunArm(ctx(), planner, *af.task, true, *af.maxTurns, nil, runOpts...)
+				metrics, err = agent.RunArm(ctx(), planner, *af.task, true, *af.maxTurns, traceLog.Events(), runOpts...)
 			}
 		} else {
-			metrics, err = agent.RunArm(ctx(), planner, *af.task, true, *af.maxTurns, nil, runOpts...)
+			metrics, err = agent.RunArm(ctx(), planner, *af.task, true, *af.maxTurns, traceLog.Events(), runOpts...)
 		}
 		if activeWakeReleaser != nil {
 			_ = activeWakeReleaser.Release()
 		}
-		mustAgentRun(err)
 		if auditJournal != nil {
 			_ = auditJournal.Flush()
 		}
-		receipt := newNativeAgentReceipt(*af.task, planner.Model(), metrics)
+		if *af.logOut != "" && auditJournal == nil {
+			_ = os.WriteFile(*af.logOut, traceLog.Render(), 0o644)
+		}
+		receipt := newNativeAgentReceiptWithError(*af.task, planner.Model(), metrics, err)
+		if err != nil {
+			// A typed stop still leaves its receipt behind before the process exits.
+			_ = os.WriteFile(*af.out, jsonIndent(receipt), 0o644)
+			mustAgentRun(err)
+		}
 		must(os.WriteFile(*af.out, jsonIndent(receipt), 0o644))
 		fmt.Fprintln(os.Stdout, metrics.FinalAnswer)
 		announceAgentReport(os.Stderr, *af.out)

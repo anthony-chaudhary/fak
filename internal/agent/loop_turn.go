@@ -117,6 +117,10 @@ type armRunner struct {
 	// context is preserved on the exhausted path exactly as it was on the historical
 	// hard-stop path.
 	lastInfraWrapped error
+	// truncationRetries counts corrective turns spent on the current run of cut-off tool
+	// calls (reset by a parsed one); truncatedCapBoost is the output cap for the next turn.
+	truncationRetries int
+	truncatedCapBoost int
 }
 
 func (r *armRunner) emitEnvelope(eventType harnesskit.EventType, payload any) {
@@ -181,6 +185,12 @@ func (r *armRunner) hardStop(err error, terminalWrap func(error) error) (armTurn
 	r.lastInfraClass = infraTerminal
 	r.lastInfraReason = ""
 	r.lastInfraWrapped = nil
+	switch reason {
+	case infraReasonIdenticalRetry:
+		r.metrics.EndedBy = EndedByIdenticalRetry
+	case infraReasonContextOverflow:
+		r.metrics.EndedBy = EndedByContextOverflow
+	}
 	return armTurnStop, wrapped
 }
 
@@ -370,6 +380,10 @@ func (r *armRunner) beginTurn(ctx context.Context, turn int) (int, bool, error) 
 // response. It returns a closed action so runTurn preserves the original continue,
 // final-answer, and tool-dispatch ordering.
 func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Message, armTurnAction, error) {
+	if r.truncatedCapBoost > 0 && perTurnCap <= 0 {
+		perTurnCap = r.truncatedCapBoost
+	}
+	r.truncatedCapBoost = 0
 	// Boundary directives are spliced in the established steer/redirect/constraint order.
 	beforeDirectives := len(r.messages)
 	r.messages = spliceTurnDirectives(*r.cfg, r.messages)
@@ -533,8 +547,12 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 		action, herr := r.hardStop(err, func(cause error) error { return cause })
 		return Message{}, action, herr
 	}
+	if sig, terr := TruncatedToolCall(comp); terr != nil {
+		return r.truncatedToolCall(turn, perTurnCap, asst, sig, terr)
+	}
 	r.messages = append(r.messages, asst)
 	if len(asst.ToolCalls) != 0 {
+		r.truncationRetries = 0
 		return asst, armTurnDispatchTools, nil
 	}
 	consecDeny := 0
@@ -613,6 +631,29 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 	r.finalizeFak()
 	return Message{}, armTurnStop, nil
+}
+
+// truncatedToolCall handles a turn whose tool call ran out of output budget. The first
+// time it feeds the cut-off back with a larger output cap, which changes the request;
+// a second cut-off stops the arm rather than accepting the fragment as a final answer.
+func (r *armRunner) truncatedToolCall(turn, perTurnCap int, asst Message, sig TruncatedToolCallSignal, cause error) (Message, armTurnAction, error) {
+	r.metrics.ToolCallTruncations++
+	if r.truncationRetries >= 1 {
+		r.metrics.EndedBy = EndedByToolCallTruncated
+		r.lastInfraClass = infraTerminal
+		r.lastInfraReason = ""
+		r.lastInfraWrapped = nil
+		return Message{}, armTurnStop, fmt.Errorf("%s arm turn %d: %w", r.metrics.Arm, turn+1, cause)
+	}
+	r.truncationRetries++
+	// A positive perTurnCap is the budget gate's grant, which must not be exceeded; only a
+	// turn that ran under the provider's own default cap gets a larger one.
+	if perTurnCap <= 0 && sig.OutputTokens > 0 {
+		r.truncatedCapBoost = sig.OutputTokens * 2
+	}
+	r.messages = append(r.messages, asst, sig.Feedback())
+	r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1, Tool: sig.ToolName, Reason: "TOOL_CALL_TRUNCATED"})
+	return Message{}, armTurnContinue, nil
 }
 
 // reasoningOnlyFinal refuses only an otherwise-final reasoning-only turn. Callers

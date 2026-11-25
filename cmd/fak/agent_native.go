@@ -64,10 +64,23 @@ type nativeAgentReceipt struct {
 }
 
 func newNativeAgentReceipt(task, model string, metrics agent.ArmMetrics) nativeAgentReceipt {
+	return newNativeAgentReceiptWithError(task, model, metrics, nil)
+}
+
+// newNativeAgentReceiptWithError leaves Status empty for a clean run, as the
+// native receipt always has, and names the outcome only for a stopped run.
+func newNativeAgentReceiptWithError(task, model string, metrics agent.ArmMetrics, runErr error) nativeAgentReceipt {
+	var status string
+	if metrics.EndedBy != "" {
+		status = metrics.EndedBy
+	} else if runErr != nil {
+		status = "failed"
+	}
 	return nativeAgentReceipt{
 		Schema:  nativeAgentReceiptSchema,
 		Task:    task,
 		Model:   model,
+		Status:  status,
 		Metrics: metrics,
 	}
 }
@@ -220,7 +233,9 @@ func newHeadlessAgentReceipt(task, model string, metrics agent.ArmMetrics, calls
 
 func newHeadlessAgentReceiptWithContext(task, model string, metrics agent.ArmMetrics, calls []agent.CallTrace, workspace string, runErr error, receiptContext nativeAgentReceiptContext) nativeAgentReceipt {
 	var status string
-	if runErr != nil {
+	if metrics.EndedBy != "" {
+		status = metrics.EndedBy
+	} else if runErr != nil {
 		status = "failed"
 	} else if metrics.CircuitBreakerTripped {
 		status = "stopped_circuit_breaker"

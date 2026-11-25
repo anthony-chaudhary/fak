@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {
+      "id": "agent-context-overflow",
+      "canonical": "ContextOverflowError",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextOverflowError (internal/agent) is the client planner's terminal error for an upstream refusal saying the prompt does not fit the model's context: a 413, or a non-backpressure body matching IsContextOverflow's strict engine signatures (context_length_exceeded, exceed_context_size_error, maximum context length, prompt is too long). errors.Is matches ErrContextOverflow; the native loop records ended_by context_overflow.",
+      "distinction": "The CLIENT-side verdict on an outbound request, never retried or re-prompted because the same prompt can never fit. It is NOT InKernelContextLengthError (fak's own in-kernel admission refusal), NOT the upstream's per-slot n_ctx window, and NOT the context window concept itself.",
+      "distinct_from": ["native-context-refusal", "upstream-slot-window", "context-window"],
+      "aliases": ["contextoverflow", "iscontextoverflow", "errcontextoverflow", "exceedcontextsizeerror"],
+      "grounding": "contextoverflowerror",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "internal/agent/identical_retry.go",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -176,6 +177,10 @@ type retryState struct {
 	lastRetryAfter    string               // the triggering response's Retry-After header, honored as the next wait
 	lastCapWait       string               // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
 	serialInitialized bool                 // prior replica truth is seeded once, never after a newer response clears it
+
+	identicalSends     int // generation-class failures of this call's unchanged body
+	identicalDigest    [sha256.Size]byte
+	identicalDigestSet bool
 }
 
 // waitBeforeAttempt applies the common between-attempt wait. Under serial
@@ -270,6 +275,9 @@ func (c *upstreamCall) handleRejectedResponse(ctx context.Context, p *HTTPPlanne
 	if chatTemplateRejected(raw) {
 		return false, false, newUpstreamStatusError(status, raw, resp.Header, 400)
 	}
+	if status == http.StatusRequestEntityTooLarge || (!backpressureStatus(status) && IsContextOverflow(raw)) {
+		return false, false, &ContextOverflowError{Status: status, Cause: newUpstreamStatusError(status, raw, resp.Header, 400)}
+	}
 	if p != nil && p.TransientTargetFunc != nil && transientTargetStatus(status) && ctl.triedTransientRetry != nil && ctl.triedTransientTarget != nil {
 		if !*ctl.triedTransientRetry {
 			*ctl.triedTransientRetry = true
@@ -294,6 +302,11 @@ func (c *upstreamCall) handleRejectedResponse(ctx context.Context, p *HTTPPlanne
 		// with its real cause instead of draining the retry budget on an unfixable status.
 		if classifyUpstream(status, raw, resp.Header) == RemedyStreamRequired {
 			return false, false, newUpstreamStatusError(status, raw, resp.Header, 400)
+		}
+		if generationClassStatus(status) {
+			if err := s.noteIdenticalFailure(ctx, p, c.body, status, newUpstreamStatusError(status, raw, resp.Header, ctl.bodyCap)); err != nil {
+				return false, false, err
+			}
 		}
 		action := c.noteRetryableCapMaybeRehome(p, s, status, raw, resp.Header, ctl.bodyCap, false, ctl.triedRehome, ctl.rehomePending, attempt)
 		return true, action == capRehomeResend, nil
