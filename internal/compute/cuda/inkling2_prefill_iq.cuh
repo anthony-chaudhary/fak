@@ -379,7 +379,7 @@ extern "C" int fcuda_ink2p_expert_iq_v2(int fmt, const uint8_t *W, const int *of
     if (buf) cudaFree(buf);
     buf = nullptr;
     cap = 0;
-    const cudaError_t err = cudaMalloc(&buf, need);
+    const cudaError_t err = fcuda_alloc_status(cudaMalloc(&buf, need));
     if (err != cudaSuccess) return (int)err;
     cap = need;
   }

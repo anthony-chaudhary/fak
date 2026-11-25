@@ -334,7 +334,7 @@ template <int MAXB>
 static void ink2v_q8_segs_launch(const Ink2VQ8Segs &segs, int nseg, int grid, int in, int rows) {
 #define INK2V_Q8_SEG_CASE(R)                                                                                          \
   case R:                                                                                                             \
-    FCUDA_TS("k_ink2v_q8_rows", grid,                                                                                 \
+    FCUDA_TS("k_ink2v_q8_segs", grid,                                                                                 \
              k_ink2v_q8_segs<MAXB, R><<<grid, INK2_Q8_WARPS * 32, 0, g_stream>>>(segs, nseg, in));                    \
     break;
   switch (rows) {

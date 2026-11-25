@@ -527,6 +527,7 @@ func cudaLaunchTimingName(path, launch, kernel string) string {
 		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<3>":                                                            "k_iq4xs_mmvq_gemv",
 		"cuda/paged_attention_vllm.cuh:kern":                                                                         "fak_paged_attention_v1",
 		"cuda/inkling2_prefill.cuh:k_ink2p_conv_pair":                                                                "k_ink2p_conv",
+		"cuda/inkling2_prefill.cuh:k_ink2p_attend<true>":                                                             "k_ink2p_attend_global",
 		"cuda/paged_attention_vllm.cuh:kern2":                                                                        "fak_paged_attention_v2",
 		"cuda/paged_attention_vllm.cuh:paged_attention_v2_reduce_kernel<float,HEAD_SIZE,NUM_THREADS,PARTITION_SIZE>": "fak_paged_attention_v2_reduce",
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_run_kernel":                                    "fak_paged_kv_write",
@@ -1228,16 +1229,20 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"v41_eg_q5": true, "v41_eg_q2": true, "v41_eg_f32": true, "v41_eg_rows": true,
 	"v41_eg_iq4nl": true, "v41_eg_iq4nl_row": true, "v41_eg_iq4nl_poison": true,
 	// Inkling-2 causal short convolution and its history commit: no conv class.
-	"k_ink2_conv": true, "k_ink2p_conv": true, "k_ink2p_conv_commit": true,
+	"k_ink2_conv": true, "k_ink2p_conv": true, "k_ink2p_conv_commit": true, "k_ink2m_conv": true,
 	// Inkling-2 softmax state mix, MoE routing, SITU activation and weighted combine.
 	"k_ink2_mix": true, "k_ink2_mixc": true, "k_ink2v_mixc": true, "k_ink2p_mix": true,
 	"k_ink2_route": true, "k_ink2p_route": true, "k_ink2_situ": true, "k_situ_act": true,
 	"k_ink2_moe_combine": true, "k_ink2p_combine": true, "k_situ_combine": true,
+	"k_ink2m_mix": true, "k_ink2m_situ4": true, "k_ink2m_situ1": true,
 	// Inkling-2 attention prep: clips, tau, RoPE and cache append fused in one row.
 	"k_ink2_qkv_post": true, "k_ink2p_qkv_post": true, "k_ink2d_qk": true,
 	// Inkling-2 elementwise glue, activation quantization and key-to-index publication.
 	"k_ink2_add": true, "k_ink2_sigmoid_mul": true, "k_ink2d_silu_mul": true, "k_ink2_expert_scale": true,
 	"k_ink2_q8_quant_gated": true, "k_ink2_argkey_index": true,
+	"k_ink2p_dense_quant": true, "k_ink2q_quant": true, "k_ink2p_nv2_quant": true, "k_ink2p_nvf4_quant": true,
+	// Inkling-2 NVFP4 image capability probe: one thread publishes a flag.
+	"k_ink2p_nvf4_probe": true,
 	// Inkling-2 pair bucketing, row gathers/scatters and ring stores.
 	"k_ink2p_bucket_count": true, "k_ink2p_bucket_scan": true, "k_ink2p_bucket_fill": true,
 	"k_ink2p_gather_pairs": true, "k_ink2p_scatter_pairs": true, "k_ink2v_repeat_rows": true,

@@ -235,7 +235,7 @@ static int ink2p_nv2_launch(const uint8_t *W, const uint8_t *scales, const int *
     if (g_ink2p_nv2_q) cudaFree(g_ink2p_nv2_q);
     g_ink2p_nv2_q = nullptr;
     g_ink2p_nv2_q_cap = 0;
-    const cudaError_t e = cudaMalloc(&g_ink2p_nv2_q, need);
+    const cudaError_t e = fcuda_alloc_status(cudaMalloc(&g_ink2p_nv2_q, need));
     if (e != cudaSuccess) return (int)e;
     g_ink2p_nv2_q_cap = need;
   }
@@ -443,7 +443,7 @@ static int ink2p_nv3_launch(const uint8_t *W, const uint8_t *scales, const int *
     if (g_ink2p_nv2_q) cudaFree(g_ink2p_nv2_q);
     g_ink2p_nv2_q = nullptr;
     g_ink2p_nv2_q_cap = 0;
-    const cudaError_t e = cudaMalloc(&g_ink2p_nv2_q, need);
+    const cudaError_t e = fcuda_alloc_status(cudaMalloc(&g_ink2p_nv2_q, need));
     if (e != cudaSuccess) return (int)e;
     g_ink2p_nv2_q_cap = need;
   }
@@ -728,7 +728,7 @@ static int ink2p_nvf4_available() {
   if (cudaStreamIsCapturing(g_stream, &capture) != cudaSuccess || capture != cudaStreamCaptureStatusNone) return 0;
   if (cudaPeekAtLastError() != cudaSuccess) return 0;
   int flag = 0;
-  k_ink2p_nvf4_probe<<<1, 1, 0, g_stream>>>();
+  FCUDA_TS("k_ink2p_nvf4_probe", 1, k_ink2p_nvf4_probe<<<1, 1, 0, g_stream>>>());
   cudaError_t e = cudaGetLastError();
   if (e == cudaSuccess)
     e = cudaMemcpyFromSymbolAsync(&flag, g_ink2p_nvf4_flag, sizeof(flag), 0, cudaMemcpyDeviceToHost, g_stream);
@@ -775,7 +775,7 @@ static int ink2p_nvf4_launch(const uint8_t *W, const uint8_t *scales, const int 
     if (g_ink2p_nvf4_q) cudaFree(g_ink2p_nvf4_q);
     g_ink2p_nvf4_q = nullptr;
     g_ink2p_nvf4_q_cap = 0;
-    const cudaError_t e = cudaMalloc(&g_ink2p_nvf4_q, need);
+    const cudaError_t e = fcuda_alloc_status(cudaMalloc(&g_ink2p_nvf4_q, need));
     if (e != cudaSuccess) return (int)e;
     g_ink2p_nvf4_q_cap = need;
   }
@@ -811,9 +811,15 @@ extern "C" int fcuda_ink2p_nvfp4_w4a4_read_quant(int nrows, int in, uint8_t *q, 
     return (int)cudaErrorInvalidValue;
   const uint8_t *dq = g_ink2p_nvf4_q, *dqs = dq + g_ink2p_nvf4_q_bytes;
   const uint8_t *drs = dqs + g_ink2p_nvf4_s_bytes;
-  cudaError_t e = cudaMemcpyAsync(q, dq, (size_t)nrows * (in / 2), cudaMemcpyDeviceToHost, g_stream);
-  if (e == cudaSuccess) e = cudaMemcpyAsync(qs, dqs, (size_t)nrows * (in / 16), cudaMemcpyDeviceToHost, g_stream);
-  if (e == cudaSuccess) e = cudaMemcpyAsync(rs, drs, (size_t)nrows * sizeof(float), cudaMemcpyDeviceToHost, g_stream);
+  cudaError_t e = cudaSuccess;
+  FCUDA_TS("readback", dim3(0, 0),
+           e = cudaMemcpyAsync(q, dq, (size_t)nrows * (in / 2), cudaMemcpyDeviceToHost, g_stream));
+  if (e == cudaSuccess)
+    FCUDA_TS("readback", dim3(0, 0),
+             e = cudaMemcpyAsync(qs, dqs, (size_t)nrows * (in / 16), cudaMemcpyDeviceToHost, g_stream));
+  if (e == cudaSuccess)
+    FCUDA_TS("readback", dim3(0, 0),
+             e = cudaMemcpyAsync(rs, drs, (size_t)nrows * sizeof(float), cudaMemcpyDeviceToHost, g_stream));
   if (e == cudaSuccess) e = cudaStreamSynchronize(g_stream);
   return (int)e;
 }

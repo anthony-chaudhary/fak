@@ -261,7 +261,9 @@ func KernelOpClass(name string) string {
 		return KernelOpMatvec
 	case strings.Contains(name, "matmul"), strings.Contains(name, "token_panel"), strings.Contains(name, "token_pair"),
 		strings.Contains(name, "gemm"), strings.Contains(name, "mul_mat"), strings.Contains(name, "q3k_panel"),
-		strings.Contains(name, "w4a16"), strings.Contains(name, "ink2v_q"):
+		strings.Contains(name, "w4a16"), strings.Contains(name, "ink2v_q"),
+		// The Inkling-2 dense prefill projections: int8 tensor-core and fp32 GEMMs.
+		name == "k_ink2d_mmq", name == "k_ink2d_f32":
 		return KernelOpMatmul
 	case strings.Contains(name, "swiglu"):
 		return KernelOpSwiGLU

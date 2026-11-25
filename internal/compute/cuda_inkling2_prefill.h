@@ -1,5 +1,6 @@
 #ifndef FAK_CUDA_INKLING2_PREFILL_H
 #define FAK_CUDA_INKLING2_PREFILL_H
+#include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
@@ -109,6 +110,15 @@ int fcuda_ink2p_expert_iq_v2(int fmt, const uint8_t *W, const int *offsets, cons
 int fcuda_ink2p_expert_iq(int fmt, const uint8_t *W, const int *offsets, const int *order, const int *tiles,
     const int *ntiles, int maxTiles, const float *X, int xDiv, int xStride, float *Y, int rows, int in,
     const float *escale);
+/* fcuda_ink2p_expert_iq_v2 with caller-owned device scratch of at least
+ * fcuda_ink2p_expert_iq_v2_scratch_bytes(maxTiles, in) bytes, so it never allocates. */
+size_t fcuda_ink2p_expert_iq_v2_scratch_bytes(int maxTiles, int in);
+int fcuda_ink2p_expert_iq_v2_ws(int fmt, const uint8_t *W, const int *offsets, const int *order, const int *tiles,
+    const int *ntiles, int maxTiles, const float *X, int xDiv, int xStride, float *Y, int rows, int in,
+    const float *escale, void *scratch);
+/* Test hook (cuda/inkling2_pdl.cuh): selects the programmatic-dependent-launch rewrite for
+ * graphs captured from now on and returns the previous mode. */
+int fcuda_ink2_pdl_select(int mode);
 
 #ifdef __cplusplus
 }

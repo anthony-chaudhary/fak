@@ -30,7 +30,7 @@ static int workspace(size_t qbytes, size_t sbytes) {
       g_ws_q = nullptr;
       g_ws_qcap = 0;
     }
-    cudaError_t e = cudaMalloc(&g_ws_q, qbytes);
+    cudaError_t e = fcuda_alloc_status(cudaMalloc(&g_ws_q, qbytes));
     if (e != cudaSuccess) return (int)e;
     g_ws_qcap = qbytes;
   }
@@ -41,7 +41,7 @@ static int workspace(size_t qbytes, size_t sbytes) {
       g_ws_s = nullptr;
       g_ws_scap = 0;
     }
-    cudaError_t e = cudaMalloc(&g_ws_s, sbytes);
+    cudaError_t e = fcuda_alloc_status(cudaMalloc(&g_ws_s, sbytes));
     if (e != cudaSuccess) return (int)e;
     g_ws_scap = sbytes;
   }
@@ -49,8 +49,8 @@ static int workspace(size_t qbytes, size_t sbytes) {
 }
 
 // One thread per 4 elements, 8 threads per 32-block; rows t >= T write zeros.
-__global__ void k_quant_q8(const float *__restrict__ X, int8_t *__restrict__ qx, float2 *__restrict__ xs, int in,
-                           int T) {
+__global__ void k_ink2p_dense_quant(const float *__restrict__ X, int8_t *__restrict__ qx, float2 *__restrict__ xs,
+                                    int in, int T) {
   const int t = blockIdx.y;
   const int i4 = blockIdx.x * blockDim.x + threadIdx.x;  // float4 index within the row
   if (i4 * 4 >= in) return;
@@ -504,7 +504,7 @@ static int matmul(const uint8_t *W, const float *S, const float *X, float *Y, in
   int rc = workspace((size_t)Tpad * in, (size_t)Tpad * (in / 32) * sizeof(float2));
   if (rc) return rc;
   const dim3 qg((in / 4 + 255) / 256, Tpad);
-  FCUDA_TS("k_ink2d_quant", qg, k_quant_q8<<<qg, 256, 0, g_stream>>>(X, g_ws_q, g_ws_s, in, T));
+  FCUDA_TS("k_ink2p_dense_quant", qg, k_ink2p_dense_quant<<<qg, 256, 0, g_stream>>>(X, g_ws_q, g_ws_s, in, T));
   rc = (int)cudaGetLastError();
   if (rc) return rc;
   if (bm == 0) {

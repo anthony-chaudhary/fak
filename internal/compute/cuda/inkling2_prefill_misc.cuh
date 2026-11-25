@@ -96,10 +96,10 @@ extern "C" int fcuda_ink2p_situ_v2(const float *gu, float *act, int k, int width
   const float fb = (float)beta, fl = (float)lb;
   if ((width & 3) == 0 && (actStride & 3) == 0 && ((uintptr_t)gu & 15) == 0 && ((uintptr_t)act & 15) == 0) {
     const dim3 grid((width / 4 + 127) / 128, k);
-    FCUDA_TS("k_ink2m_situ", grid, k_ink2m_situ4<<<grid, 128, 0, g_stream>>>(gu, act, width, actStride, fb, fl));
+    FCUDA_TS("k_ink2m_situ4", grid, k_ink2m_situ4<<<grid, 128, 0, g_stream>>>(gu, act, width, actStride, fb, fl));
   } else {
     const dim3 grid((width + 255) / 256, k);
-    FCUDA_TS("k_ink2m_situ", grid, k_ink2m_situ1<<<grid, 256, 0, g_stream>>>(gu, act, width, actStride, fb, fl));
+    FCUDA_TS("k_ink2m_situ1", grid, k_ink2m_situ1<<<grid, 256, 0, g_stream>>>(gu, act, width, actStride, fb, fl));
   }
   return ink2_last_error();
 }

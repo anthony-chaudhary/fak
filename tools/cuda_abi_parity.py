@@ -295,7 +295,7 @@ BINDINGS += ("internal/compute/cuda_offload_refill.go", "internal/compute/cuda_q
 BINDINGS_LABEL = ", ".join(BINDINGS)
 # Inkling-2 declares its C seam in a dedicated header that its own CGo bindings
 # include; enroll the header and both bindings rather than exempting the exports.
-HEADERS += ("internal/compute/cuda_inkling2_prefill.h",)
+HEADERS += ("internal/compute/cuda_inkling2_prefill.h", "internal/compute/cuda_inkling2_prefill_dense.h")
 HEADERS_LABEL = ", ".join(HEADERS)
 BINDINGS += ("internal/compute/cuda_inkling2.go", "internal/compute/cuda_inkling2_prefill.go",
              "internal/compute/cuda_inkling2_batch.go")
