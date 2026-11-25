@@ -102,3 +102,9 @@ internal/compute/v41_q2k_token_pair_spirv.h text eol=lf
 # dropping them keeps `go install .../cmd/fak@vX` under the cap.
 docs/research/inventory/** export-ignore
 visuals/** export-ignore
+
+# Launch charts and the headline index are compared byte for byte against their render, so
+# pin LF: a CRLF checkout would make every chart drift.
+docs/launch/assets/*.svg text eol=lf
+docs/launch/assets/*.json text eol=lf
+docs/benchmarks/published/HEADLINES.json text eol=lf
