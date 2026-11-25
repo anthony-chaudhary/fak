@@ -407,8 +407,9 @@ This list of shipped behavior moved off the front page on 2026-11-24.
   picks Metal automatically and verifies DFlash2 draft tokens on the GPU when an
   `Inkling-2-Mini-DFlash2/` directory sits next to the GGUF (receipt in the
   [hardware results](benchmarks/README.md)).
-  It landed after v0.57.0, so install from `main` (`go install github.com/anthony-chaudhary/fak/cmd/fak@main`)
-  until the next release; `fak version` shows the commit on its `build:` line.
+  It landed after v0.57.0, so build from source until the next release:
+  `git clone --depth 1 https://github.com/anthony-chaudhary/fak.git; cd fak; go build -o fak ./cmd/fak`;
+  `fak version` shows the commit on its `build:` line.
 - A second model family runs fak-native on NVIDIA: Inkling-2-Mini decodes resident on
   CUDA with one replayed graph per token, 119.9 tok/s on an RTX 5080 (receipt in the
   [hardware results](benchmarks/README.md)). Speculative decode is opt-in (`FAK_INKLING2_SPEC=2` plus
