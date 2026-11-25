@@ -9,6 +9,9 @@ import (
 // ErrEngineUnconfigured is the typed failure when real mode has no engine configured.
 var ErrEngineUnconfigured = errors.New("allinone: engine unconfigured: set cfg.Engine, cfg.EngineDriver, or explicit mock")
 
+// ErrPolicyDenied is the typed failure when a tool call is refused by the configured security policy.
+var ErrPolicyDenied = errors.New("allinone: tool call denied by policy")
+
 // Config defines the execution parameters for the all-in-one bootstrap orchestrator.
 type Config struct {
 	LockPath        string           `json:"lock_path"`
@@ -44,6 +47,7 @@ type TopologySpec struct {
 	MemoryStore  string                 `json:"memory_store"`
 	Engine       string                 `json:"engine"`
 	Addr         string                 `json:"addr"`
+	PolicyPath   string                 `json:"policy_path,omitempty"`
 	Dispositions []ComponentDisposition `json:"dispositions,omitempty"`
 }
 

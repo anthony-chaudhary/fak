@@ -21,10 +21,12 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/fakpack"
 	"github.com/anthony-chaudhary/fak/internal/mcpbroker"
 	"github.com/anthony-chaudhary/fak/internal/ociartifact"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit/lockv2"
 )
@@ -149,16 +151,17 @@ func (j *MemoryJournal) Entries() []MemoryEntry {
 // Supervisor coordinates lock verification, MCP broker, memory journal, model engine,
 // and gateway HTTP services into a unified deployable runtime.
 type Supervisor struct {
-	cfg        Config
-	health     *HealthAggregator
-	lock       *lockv2.Lock
-	broker     *mcpbroker.Broker
-	engine     abi.EngineDriver
-	memory     *MemoryJournal
-	httpServer *http.Server
-	listener   net.Listener
-	boundAddr  string
-	unpackDir  string
+	cfg         Config
+	health      *HealthAggregator
+	lock        *lockv2.Lock
+	adjudicator *adjudicator.Adjudicator
+	broker      *mcpbroker.Broker
+	engine      abi.EngineDriver
+	memory      *MemoryJournal
+	httpServer  *http.Server
+	listener    net.Listener
+	boundAddr   string
+	unpackDir   string
 
 	activeSessions sync.WaitGroup
 	mu             sync.RWMutex
@@ -187,6 +190,13 @@ func (s *Supervisor) Health() *HealthAggregator {
 // Broker returns the active MCP broker.
 func (s *Supervisor) Broker() *mcpbroker.Broker {
 	return s.broker
+}
+
+// Adjudicator returns the policy adjudicator when PolicyPath is configured, or nil otherwise.
+func (s *Supervisor) Adjudicator() *adjudicator.Adjudicator {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.adjudicator
 }
 
 // Engine returns the active model engine driver.
@@ -482,12 +492,94 @@ func (s *Supervisor) validateLockOrBundle() (*lockv2.Lock, string, error) {
 	return nil, "", errors.New("allinone: either lock_path or bundle_path must be specified")
 }
 
+func (s *Supervisor) loadPolicy() (*adjudicator.Adjudicator, error) {
+	path := strings.TrimSpace(s.cfg.PolicyPath)
+	if path == "" {
+		return nil, nil
+	}
+	p, err := policy.Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("allinone: load policy %q: %w", path, err)
+	}
+	return adjudicator.New(p), nil
+}
+
+// adjudicateToolCall evaluates a tool call against the configured policy adjudicator.
+// For namespaced MCP tools (mcp__<server>__<tool>), both the full namespaced name and
+// the bare tool name are checked: an explicit deny on either always wins, while an
+// allow rule matching either permits the call under fail-closed posture.
+func (s *Supervisor) adjudicateToolCall(ctx context.Context, sessionID, toolName string, args json.RawMessage) (allowed bool, reason string) {
+	s.mu.RLock()
+	adj := s.adjudicator
+	s.mu.RUnlock()
+	if adj == nil {
+		return true, ""
+	}
+
+	makeCall := func(name string) *abi.ToolCall {
+		c := &abi.ToolCall{
+			Tool: name,
+			Args: abi.Ref{
+				Kind:   abi.RefInline,
+				Inline: args,
+				Len:    int64(len(args)),
+			},
+		}
+		if sessionID != "" {
+			c.Meta = map[string]string{"session_id": sessionID}
+		}
+		return c
+	}
+
+	formatReason := func(v abi.Verdict) string {
+		if name := abi.ReasonName(v.Reason); name != "" {
+			return name
+		}
+		return "POLICY_BLOCK"
+	}
+
+	isAdmitted := func(v abi.Verdict) bool {
+		return v.Kind == abi.VerdictAllow || v.Kind == abi.VerdictTransform
+	}
+
+	vFull := adj.Adjudicate(ctx, makeCall(toolName))
+	if _, rawTool, ok := mcpbroker.ParseNamespacedTool(toolName); ok && rawTool != "" && rawTool != toolName {
+		vRaw := adj.Adjudicate(ctx, makeCall(rawTool))
+		// Explicit (non-default) deny on either namespaced or bare tool name always wins.
+		if vFull.Kind == abi.VerdictDeny && vFull.Reason != abi.ReasonDefaultDeny {
+			return false, formatReason(vFull)
+		}
+		if vRaw.Kind == abi.VerdictDeny && vRaw.Reason != abi.ReasonDefaultDeny {
+			return false, formatReason(vRaw)
+		}
+		if isAdmitted(vFull) || isAdmitted(vRaw) {
+			return true, ""
+		}
+		if vFull.Kind == abi.VerdictDeny {
+			return false, formatReason(vFull)
+		}
+		return false, formatReason(vRaw)
+	}
+
+	if isAdmitted(vFull) {
+		return true, ""
+	}
+	return false, formatReason(vFull)
+}
+
+func (s *Supervisor) policyFilter(ctx context.Context, req mcpbroker.CallRequest, _ mcpbroker.ToolRegistration) (bool, string) {
+	return s.adjudicateToolCall(ctx, req.SessionID, req.Tool, req.Arguments)
+}
+
 // DryRunTopology inspects and validates the target deployment topology without binding network or launching processes.
 func (s *Supervisor) DryRunTopology() (*TopologySpec, error) {
 	// DryRunTopology reports the topology truthfully (including ResolvedEngine
 	// "unconfigured"); Start enforces the Validate contract.
 	lock, lockID, err := s.validateLockOrBundle()
 	if err != nil {
+		return nil, err
+	}
+	if _, err := s.loadPolicy(); err != nil {
 		return nil, err
 	}
 
@@ -531,6 +623,7 @@ func (s *Supervisor) DryRunTopology() (*TopologySpec, error) {
 		MemoryStore:  memStore,
 		Engine:       eng,
 		Addr:         addr,
+		PolicyPath:   strings.TrimSpace(s.cfg.PolicyPath),
 		Dispositions: dispositions,
 	}, nil
 }
@@ -564,6 +657,20 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		s.health.SetStatus(SubsystemHTTP, false, err.Error())
 		return err
 	}
+
+	// Load and validate security policy before launching child processes or
+	// binding any listener; fail closed if PolicyPath cannot be read or parsed.
+	adj, err := s.loadPolicy()
+	if err != nil {
+		s.health.SetStatus(SubsystemHTTP, false, err.Error())
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
+	s.mu.Lock()
+	s.adjudicator = adj
+	s.mu.Unlock()
 	if _, err := componentActivationDispositions(lock, s.cfg); err != nil {
 		s.health.SetStatus(SubsystemHTTP, false, err.Error())
 		s.mu.Lock()
@@ -634,7 +741,11 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	}
 
 	// 3. Initialize MCP Broker and register declared tools
-	broker := mcpbroker.NewBroker()
+	var brokerOpts []mcpbroker.BrokerOption
+	if adj != nil {
+		brokerOpts = append(brokerOpts, mcpbroker.WithGlobalSecurityFilter(s.policyFilter))
+	}
+	broker := mcpbroker.NewBroker(brokerOpts...)
 	s.broker = broker
 
 	// Fail-fast component capability contract: a declared MCP component that
@@ -873,17 +984,55 @@ func (s *Supervisor) handleAgentWire(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	denied := false
+	emitDenied := func(tool, reason string) {
+		denied = true
+		emit(map[string]any{
+			"event":  "deny",
+			"tool":   tool,
+			"reason": reason,
+			"error":  fmt.Sprintf("%s: %s", ErrPolicyDenied.Error(), reason),
+		})
+		if s.memory != nil {
+			data, _ := json.Marshal(map[string]any{
+				"tool":   tool,
+				"reason": reason,
+			})
+			_ = s.memory.Append(MemoryEntry{
+				Timestamp: time.Now(),
+				Type:      "call.denied",
+				SessionID: sessionID,
+				Tool:      tool,
+				Data:      data,
+			})
+		}
+	}
+
 	// Broker tool calls through MCP broker
 	if req.Tool != "" {
 		callResp, err := s.broker.RouteCall(r.Context(), mcpbroker.CallRequest{
+			SessionID: sessionID,
 			Tool:      req.Tool,
 			Arguments: req.Args,
 		})
 		if err != nil {
-			emit(map[string]any{
-				"event": "error",
-				"error": err.Error(),
-			})
+			if errors.Is(err, mcpbroker.ErrToolNotFound) {
+				if allowed, reason := s.adjudicateToolCall(r.Context(), sessionID, req.Tool, req.Args); !allowed {
+					emitDenied(req.Tool, reason)
+				} else {
+					emit(map[string]any{
+						"event": "error",
+						"error": err.Error(),
+					})
+				}
+			} else {
+				emit(map[string]any{
+					"event": "error",
+					"error": err.Error(),
+				})
+			}
+		} else if callResp.Filtered {
+			emitDenied(req.Tool, callResp.FilterReason)
 		} else {
 			emit(map[string]any{
 				"event":    "call",
@@ -930,45 +1079,50 @@ func (s *Supervisor) handleAgentWire(w http.ResponseWriter, r *http.Request) {
 		if len(tools) > 0 {
 			t := tools[0]
 			callResp, err := s.broker.RouteCall(r.Context(), mcpbroker.CallRequest{
+				SessionID: sessionID,
 				Tool:      t.Name,
 				Arguments: json.RawMessage(fmt.Sprintf(`{"goal":%q}`, req.Goal)),
 			})
 			if err == nil && callResp != nil {
-				emit(map[string]any{
-					"event":  "call",
-					"tool":   t.Name,
-					"result": callResp.Content,
-				})
-				if s.memory != nil {
-					_ = s.memory.Append(MemoryEntry{
-						Timestamp: time.Now(),
-						Type:      "call",
-						SessionID: sessionID,
-						Tool:      t.Name,
-						Data:      callResp.Content,
+				if callResp.Filtered {
+					emitDenied(t.Name, callResp.FilterReason)
+				} else {
+					emit(map[string]any{
+						"event":  "call",
+						"tool":   t.Name,
+						"result": callResp.Content,
 					})
-				}
-				if s.engine != nil {
-					engineRes, engineErr := s.engine.Complete(r.Context(), &abi.ToolCall{
-						Tool: t.Name,
-						Args: abi.Ref{Kind: abi.RefInline, Inline: callResp.Content, Len: int64(len(callResp.Content))},
-					})
-					if engineErr != nil {
-						emit(map[string]any{
-							"event": "error",
-							"error": engineErr.Error(),
+					if s.memory != nil {
+						_ = s.memory.Append(MemoryEntry{
+							Timestamp: time.Now(),
+							Type:      "call",
+							SessionID: sessionID,
+							Tool:      t.Name,
+							Data:      callResp.Content,
 						})
-					} else if engineRes != nil {
-						pBytes := refutil.Bytes(r.Context(), engineRes.Payload)
-						if len(pBytes) > 0 {
-							var payloadAny any = string(pBytes)
-							if json.Valid(pBytes) {
-								payloadAny = json.RawMessage(pBytes)
-							}
+					}
+					if s.engine != nil {
+						engineRes, engineErr := s.engine.Complete(r.Context(), &abi.ToolCall{
+							Tool: t.Name,
+							Args: abi.Ref{Kind: abi.RefInline, Inline: callResp.Content, Len: int64(len(callResp.Content))},
+						})
+						if engineErr != nil {
 							emit(map[string]any{
-								"event":   "step",
-								"payload": payloadAny,
+								"event": "error",
+								"error": engineErr.Error(),
 							})
+						} else if engineRes != nil {
+							pBytes := refutil.Bytes(r.Context(), engineRes.Payload)
+							if len(pBytes) > 0 {
+								var payloadAny any = string(pBytes)
+								if json.Valid(pBytes) {
+									payloadAny = json.RawMessage(pBytes)
+								}
+								emit(map[string]any{
+									"event":   "step",
+									"payload": payloadAny,
+								})
+							}
 						}
 					}
 				}
@@ -976,10 +1130,14 @@ func (s *Supervisor) handleAgentWire(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	endStatus := "ok"
+	if denied {
+		endStatus = "denied"
+	}
 	emit(map[string]any{
 		"event":      "session.end",
 		"session_id": sessionID,
-		"status":     "ok",
+		"status":     endStatus,
 	})
 	if s.memory != nil {
 		_ = s.memory.Append(MemoryEntry{
@@ -1184,6 +1342,7 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 
 	s.mu.Lock()
 	s.running = false
+	s.adjudicator = nil
 	s.mu.Unlock()
 
 	s.health.SetStatus(SubsystemHTTP, false, "stopped")
