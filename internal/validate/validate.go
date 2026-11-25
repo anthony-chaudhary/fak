@@ -1050,8 +1050,11 @@ func extractCommittedTipWithin(ctx context.Context, repo, tip string) (string, e
 		err error
 	}
 	done := make(chan result, 1)
+	// Captured before the goroutine: on deadline the goroutine is abandoned
+	// still running, so it must not read the swappable package variable.
+	extract := extractCommittedTip
 	go func() {
-		dir, err := extractCommittedTip(repo, tip)
+		dir, err := extract(repo, tip)
 		if ctx.Err() != nil && dir != "" {
 			_ = os.RemoveAll(dir)
 			dir = ""
