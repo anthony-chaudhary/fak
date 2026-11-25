@@ -92,6 +92,8 @@ type inkling2Resident struct {
 
 	in, arena, scores ink2Ref
 	argIdx            ink2Ref
+	logits            ink2Ref // the last step's or prefill's softcapped logits
+	stepLogits        ink2Ref // forward's logits: one arena offset, so graph replays rewrite it
 	kc, vc, hist      []ink2Ref
 	caps              []int
 	off, arenaFloats  int
@@ -659,6 +661,7 @@ func (s *inkling2Resident) forward() {
 	}
 	x := s.mixNorm(with(blocks, cur), s.outResQ, 1, []ink2Ref{s.outNorm})
 	logits := s.mv(s.output, x)
+	s.stepLogits = logits
 	if s.err == nil {
 		s.fail(s.dev.Ink2SoftcapArgmax(logits, hp.VocabUnpadded, hp.FinalLogitSoftcap, s.argIdx))
 	}
@@ -696,6 +699,7 @@ func (s *inkling2Resident) step(token int) (int, error) {
 		s.forward()
 		s.warm = true
 	}
+	s.logits = s.stepLogits
 	if s.err != nil {
 		return 0, s.err
 	}
@@ -709,6 +713,11 @@ func (s *inkling2Resident) step(token int) (int, error) {
 		r.Recycle()
 	}
 	return int(got[0]), nil
+}
+
+// lastLogits reads back the softcapped logits of the last step or prefill.
+func (s *inkling2Resident) lastLogits() ([]float32, error) {
+	return s.dev.Ink2Read(s.logits, s.hp.VocabUnpadded)
 }
 
 // inkling2ResidentGreedy is Inkling2LoopGreedyTimed on the resident device forward.

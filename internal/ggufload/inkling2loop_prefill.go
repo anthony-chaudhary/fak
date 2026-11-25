@@ -755,6 +755,7 @@ func (p *ink2Prefill) forward(last bool) {
 		p.fail(s.dev.Ink2RMS(x, s.outNorm, xn, 1, h, hp.NormEps))
 	}
 	logits := p.tmp(s.output.rows)
+	s.logits = logits
 	if s.err == nil {
 		p.fail(s.dev.Ink2MatVec(s.output.t, xn, logits))
 	}

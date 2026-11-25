@@ -51,6 +51,8 @@ func TestInkling2CUDAOracleGreedyMatchesLlamaCpp(t *testing.T) {
 
 // FAK_INKLING2_BENCH=N decodes N (default 128) greedy tokens after the
 // capitals prompt and logs decode tok/s, prefill excluded.
+// FAK_INKLING2_BENCH_DEPTH=D (at most 1946) prefills the first D tokens of the
+// passphrase-recall prompt instead, so decode runs at context depth D.
 func TestInkling2CUDADecodeBench(t *testing.T) {
 	m, be := openInkling2CUDAForTest(t, "FAK_INKLING2_BENCH")
 	defer m.Close()
@@ -59,6 +61,10 @@ func TestInkling2CUDADecodeBench(t *testing.T) {
 		n = v
 	}
 	prompt := inkling2OracleCases[0].prompt
+	if d, err := strconv.Atoi(os.Getenv("FAK_INKLING2_BENCH_DEPTH")); err == nil && d > 0 {
+		long := inkling2OracleCases[2].prompt
+		prompt = long[:min(d, len(long))]
+	}
 	got, st, err := Inkling2LoopGreedyTimed(m, be, prompt, n)
 	if err != nil {
 		t.Fatal(err)

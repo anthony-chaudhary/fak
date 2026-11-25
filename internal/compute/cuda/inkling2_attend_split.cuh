@@ -1,20 +1,29 @@
-// inkling2_attend_split.cuh: k_ink2_attend spread over more blocks, bit for bit.
+// inkling2_attend_split.cuh: k_ink2_attend spread over more blocks.
 // The reference runs one 512-thread block per head (24 blocks on an 84-SM card), so
 // its key scores, double exps and value sums all sit on a quarter of the SMs. Here
-// the same arithmetic runs in three launches:
+// the same scores and exps run in three launches:
 //   scores  (head, chunk) blocks, one warp per key with the reference dot and shuffle
 //           order; each block leaves its chunk max in the head's output row, which is
 //           free until the last launch writes it;
 //   exp     (head, chunk) blocks take the head max from those chunk maxes (fmax is
 //           exact in any order), exponentiate their chunk in place and park the max
 //           in the head's rel-query row, which only the scores launch reads;
-//   output  (head, 32-dim slice) blocks redo the serial key-order denominator, then
-//           the reference's 4 key groups per dim, combined in group order.
+//   output  (head, 32-dim slice) blocks sum the denominator, then the value groups
+//           per dim, combined in group order (exact mode: the reference's serial
+//           key-order denominator and 4 key groups, bit for bit).
 // FAK_INKLING2_ATTEND_SPLIT=0 keeps the reference kernel.
+//
+// The serial denominator costs about 40 ns per key of dependent DADD latency, which
+// dominates decode at depth. FAK_INKLING2_ATTEND_TREE=1 sums it as a fixed-shape tree
+// instead and runs 16 key groups per dim: deterministic, but not bit-identical to the
+// reference (the order of the double adds and of the float value sums changes), so it
+// stays opt-in until a logit-KL receipt clears it against the batch-size noise floor.
+// The default keeps the bit-identical serial output launch.
 
 #ifndef INK2_ATS_CHUNKS
-#define INK2_ATS_CHUNKS 8
+#define INK2_ATS_CHUNKS 32
 #endif
+#define INK2_ATS_TREE_GROUPS 16
 #define INK2_ATS_WARPS 8
 #ifndef INK2_ATS_UNROLL
 #define INK2_ATS_UNROLL 8
@@ -175,6 +184,91 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
 #undef INK2_ATS_W
 }
 
+// The tree output launch: block of 32 dims x INK2_ATS_TREE_GROUPS key groups. Each
+// thread sums a key-strided slice of the exps, warps reduce by a fixed xor pattern and
+// thread 0 adds the sink term and the warp partials in warp order. STAGED keeps the
+// weights in shared memory; unstaged recomputes them from global, giving the same bits.
+template <bool STAGED, class T>
+__global__ void __launch_bounds__(INK2_ATS_TREE_GROUPS * 32)
+    k_ink2_attend_out_tree(const double *scores, const T *vcache, const float *r, float *out, const float *meta,
+                           int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq) {
+  ink2_pdl_enter();
+  const int h = blockIdx.x, seq = blockIdx.z;
+  scores = ink2_row(scores, sq.scores, seq);
+  vcache = ink2_row(vcache, sq.vc, seq);
+  r = ink2_row(r, sq.r, seq);
+  out = ink2_row(out, sq.out, seq);
+  meta = ink2_row(meta, sq.meta, seq);
+  const int kvh = h / (heads / kvHeads);
+  const int kvDim = kvHeads * headDim;
+  int first;
+  const int n = ink2_ats_keys(meta, window, cap, &first);
+  const double *sc = scores + (size_t)h * cap;
+  extern __shared__ float wsh[];
+  __shared__ double wpart[INK2_ATS_TREE_GROUPS];
+  __shared__ double sdenom;
+  const int lane = threadIdx.x & 31, g = threadIdx.x >> 5;
+  double part = 0;
+  for (int j = threadIdx.x; j < n; j += blockDim.x) part += sc[j];
+  for (int o = 16; o > 0; o >>= 1) part += __shfl_xor_sync(0xffffffff, part, o);
+  if (lane == 0) wpart[g] = part;
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    double denom = exp(-*(const double *)(r + (size_t)h * relLen));
+    for (int w = 0; w < INK2_ATS_TREE_GROUPS; ++w) denom += wpart[w];
+    sdenom = denom;
+  }
+  __syncthreads();
+  const double denom = sdenom;
+  if (STAGED) {
+    for (int j = threadIdx.x; j < n; j += blockDim.x) wsh[j] = (float)(sc[j] / denom);
+    __syncthreads();
+  }
+#define INK2_ATS_TW(j) (STAGED ? wsh[(j)] : (float)(sc[(j)] / denom))
+  const int dd = blockIdx.y * 32 + lane;
+  __shared__ float gacc[INK2_ATS_TREE_GROUPS][32];
+  float acc = 0.f;
+  if (dd < headDim) {
+    const T *vbase = vcache + (size_t)kvh * headDim + dd;
+    const int groups = INK2_ATS_TREE_GROUPS;
+    int j = g;
+    for (; j + (INK2_ATS_UNROLL - 1) * groups < n; j += INK2_ATS_UNROLL * groups) {
+      float vv[INK2_ATS_UNROLL];
+#pragma unroll
+      for (int u = 0; u < INK2_ATS_UNROLL; ++u) vv[u] = ink2_kv_f(vbase[(size_t)((first + j + u * groups) % cap) * kvDim]);
+#pragma unroll
+      for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(INK2_ATS_TW(j + u * groups), vv[u], acc);
+    }
+    for (; j < n; j += groups) acc = fmaf(INK2_ATS_TW(j), ink2_kv_f(vbase[(size_t)((first + j) % cap) * kvDim]), acc);
+  }
+#undef INK2_ATS_TW
+  gacc[g][lane] = acc;
+  __syncthreads();
+  if (threadIdx.x < 32 && dd < headDim) {
+    float a = 0.f;
+    for (int gg = 0; gg < INK2_ATS_TREE_GROUPS; ++gg) a += gacc[gg][threadIdx.x];
+    out[(size_t)h * headDim + dd] = a;
+  }
+}
+
+static int g_ink2_ats_exact = -1;
+
+static bool ink2_ats_exact(void) {
+  if (g_ink2_ats_exact < 0) {
+    const char *v = getenv("FAK_INKLING2_ATTEND_TREE");
+    g_ink2_ats_exact = (v && v[0] == '1' && v[1] == 0) ? 0 : 1;
+  }
+  return g_ink2_ats_exact == 1;
+}
+
+// Test hook: 1 selects the bit-identical serial output launch, 0 the tree; returns the
+// previous mode.
+extern "C" int fcuda_ink2_attend_exact_select(int mode) {
+  const int prev = ink2_ats_exact() ? 1 : 0;
+  g_ink2_ats_exact = mode ? 1 : 0;
+  return prev;
+}
+
 static int g_ink2_ats_mode = -1;
 
 static bool ink2_ats_enabled(void) {
@@ -206,20 +300,25 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
   if (!ink2_ats_enabled() || headDim / 2 < INK2_ATS_CHUNKS || (headDim & 31) != 0 || relLen < 2 || (relLen & 1) != 0 ||
       ((uintptr_t)r & 7) != 0 || ((uintptr_t)out & 7) != 0 || (sq.r & 1) != 0 || (sq.out & 1) != 0)
     return false;
-  size_t osmem = (size_t)cap * (sizeof(double) + sizeof(float));
-  static size_t optin = 0;
-  static size_t refused = 0;
+  // the opt-in is per kernel and per staging footprint: exact stages exps and weights,
+  // the tree only weights
+  const bool exact = ink2_ats_exact();
+  size_t osmem = (size_t)cap * (exact ? sizeof(double) + sizeof(float) : sizeof(float));
+  static size_t optin[2] = {0, 0}, refused[2] = {0, 0};
+  const int k = exact ? 0 : 1;
   bool staged = true;
-  if (osmem > optin) {
-    if (refused != 0 && osmem >= refused) {
-      staged = false;
-    } else if (cudaFuncSetAttribute(k_ink2_attend_out<true, T>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)osmem) !=
-               cudaSuccess) {
+  if (osmem > optin[k]) {
+    const cudaError_t e =
+        refused[k] != 0 && osmem >= refused[k] ? cudaErrorInvalidValue
+        : exact ? cudaFuncSetAttribute(k_ink2_attend_out<true, T>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)osmem)
+                : cudaFuncSetAttribute(k_ink2_attend_out_tree<true, T>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                       (int)osmem);
+    if (e != cudaSuccess) {
       cudaGetLastError();
-      refused = osmem;
+      if (refused[k] == 0 || osmem < refused[k]) refused[k] = osmem;
       staged = false;
     } else {
-      optin = osmem;
+      optin[k] = osmem;
     }
   }
   if (!staged) osmem = 0;
@@ -229,14 +328,21 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
                                            relLen, extent, window, cap, scale, sq));
   FCUDA_TS("k_ink2_attend_exp", g1, k_ink2_attend_exp<<<g1, 256, 0, g_stream>>>(scores, out, (float *)r, meta, headDim,
                                                                                   relLen, window, cap, INK2_ATS_CHUNKS, sq));
-  if (staged) {
-    FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<true, T><<<g3, (INK2_ATT_THREADS / headDim) * 32, osmem, g_stream>>>(
-                                          scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
-                                          cap, sq));
+  const int othreads = (INK2_ATT_THREADS / headDim) * 32;
+  if (!exact) {
+    if (staged) {
+      FCUDA_TS("k_ink2_attend_out_tree", g3, k_ink2_attend_out_tree<true, T><<<g3, INK2_ATS_TREE_GROUPS * 32, osmem, g_stream>>>(
+                                                 scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq));
+    } else {
+      FCUDA_TS("k_ink2_attend_out_tree", g3, k_ink2_attend_out_tree<false, T><<<g3, INK2_ATS_TREE_GROUPS * 32, 0, g_stream>>>(
+                                                 scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq));
+    }
+  } else if (staged) {
+    FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<true, T><<<g3, othreads, osmem, g_stream>>>(
+                                          scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq));
   } else {
-    FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<false, T><<<g3, (INK2_ATT_THREADS / headDim) * 32, 0, g_stream>>>(
-                                          scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
-                                          cap, sq));
+    FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<false, T><<<g3, othreads, 0, g_stream>>>(
+                                          scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq));
   }
   return true;
 }

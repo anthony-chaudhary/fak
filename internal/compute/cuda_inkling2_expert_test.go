@@ -230,8 +230,19 @@ func TestCUDAInk2ExpertIQFastMatchesReference(t *testing.T) {
 // for local (window) and global (full-cache, wrapped ring) slots.
 // fak-test:runtime integration est=2s lane=optin
 func TestCUDAInk2AttendSplitMatchesReference(t *testing.T) {
+	ink2AttendSplitVsReference(t, true)
+}
+
+// The tree denominator and 16 key groups reorder double and float sums, so the
+// output is held to a tolerance instead of bit identity.
+func TestCUDAInk2AttendTreeNearReference(t *testing.T) {
+	ink2AttendSplitVsReference(t, false)
+}
+
+func ink2AttendSplitVsReference(t *testing.T, exact bool) {
 	cb := cudaNVFP4OrSkip(t)
 	defer ink2SelectAttendSplit(ink2SelectAttendSplit(true))
+	defer ink2SelectAttendExact(ink2SelectAttendExact(exact))
 	r := rand.New(rand.NewSource(37))
 	p := Ink2AttnParams{Heads: 24, KVHeads: 8, HeadDim: 128, RelLen: 16, Scale: float32(1 / math.Sqrt(128))}
 	kvDim := p.KVHeads * p.HeadDim
@@ -287,7 +298,15 @@ func TestCUDAInk2AttendSplitMatchesReference(t *testing.T) {
 		}
 		want, got := run(false), run(true)
 		for i := range want {
-			if math.IsNaN(float64(want[i])) || math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+			if math.IsNaN(float64(want[i])) {
+				t.Fatalf("cap %d window %d pos %d: reference out[%d] is NaN", c.cap, c.window, c.pos, i)
+			}
+			same := math.Float32bits(got[i]) == math.Float32bits(want[i])
+			if !exact {
+				diff := math.Abs(float64(got[i]) - float64(want[i]))
+				same = diff <= 1e-6+1e-5*math.Abs(float64(want[i]))
+			}
+			if !same {
 				t.Fatalf("cap %d window %d pos %d: out[%d] split %v, reference %v", c.cap, c.window, c.pos, i, got[i], want[i])
 			}
 		}

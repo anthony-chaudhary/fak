@@ -1013,6 +1013,7 @@ int fcuda_ink2_attend_seq(const float *q, const float *r, const float *sinks, co
 int fcuda_ink2_conv_seq(const float *x, const float *w, float *hist, float *out, const float *resid,
     int n, int kn, float norm, const long long *st, int C);
 int fcuda_ink2_softcap_argmax_seq(float *logits, int n, long long ld, float cap, int *outIdx, int C);
+int fcuda_ink2_attend_exact_select(int mode);
 int fcuda_ink2_graph_begin(void);
 int fcuda_ink2_graph_end(void);
 int fcuda_ink2_graph_launch(void);
