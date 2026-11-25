@@ -211,6 +211,7 @@ func TestTestHandlePollIsNonConsuming(t *testing.T) {
 
 func TestTestHandleReadyAndDeniedAreLocallyComplete(t *testing.T) {
 	setup()
+	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictAllow}})
 	abi.RegisterFastPath(1, fakeFP{hit: true})
 	k := New("e")
 	h, v := k.Submit(context.Background(), call("read_cached", "{}"))
@@ -427,22 +428,36 @@ func TestTransformMutatesArgs(t *testing.T) {
 	}
 }
 
-// ---- unit 30: vDSO consulted first -------------------------------------------
+// ---- #14514: adjudicator runs before vDSO fast path --------------------------
 
-func TestVDSOConsultedBeforeAdjudicator(t *testing.T) {
+func TestSubmitAdjudicatorBeforeFastPath(t *testing.T) {
 	setup()
 	abi.RegisterFastPath(1, fakeFP{hit: true})
-	// a DENY adjudicator that must NOT run because the fast path short-circuits
-	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictDeny}})
 	eng := &countEngine{}
 	abi.RegisterEngine("e", eng)
-	k := New("e")
-	r, v := k.Syscall(context.Background(), call("read_x", "{}"))
-	if v.By != "vdso" || r.Meta["served_by"] != "fp" {
-		t.Fatalf("vDSO must be consulted first and short-circuit, got verdict.by=%q", v.By)
+
+	// 1. A DENY adjudicator must block the call even when a global vDSO FastPath matches.
+	kDeny := New("e", WithAdjudicators([]abi.Adjudicator{
+		fakeAdj{abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, By: "monitor"}},
+	}))
+	rDeny, vDeny := kDeny.Syscall(context.Background(), call("read_x", "{}"))
+	if vDeny.Kind != abi.VerdictDeny || vDeny.Reason != abi.ReasonPolicyBlock {
+		t.Fatalf("denied kernel must not bypass adjudicator via vDSO: got %+v", vDeny)
 	}
-	if atomic.LoadInt64(&eng.n) != 0 || k.Counters().VDSOHits != 1 {
-		t.Fatalf("a vDSO hit must skip the engine (n=%d hits=%d)", eng.n, k.Counters().VDSOHits)
+	if rDeny.Status != abi.StatusError || kDeny.Counters().VDSOHits != 0 || kDeny.Counters().Denies != 1 {
+		t.Fatalf("denied kernel must record deny and 0 vDSO hits: status=%v ctrs=%+v", rDeny.Status, kDeny.Counters())
+	}
+
+	// 2. An ALLOW adjudicator in the same process still hits vDSO and skips the engine.
+	kAllow := New("e", WithAdjudicators([]abi.Adjudicator{
+		fakeAdj{abi.Verdict{Kind: abi.VerdictAllow, By: "monitor"}},
+	}))
+	rAllow, vAllow := kAllow.Syscall(context.Background(), call("read_x", "{}"))
+	if vAllow.Kind != abi.VerdictAllow || vAllow.By != "vdso" || rAllow.Meta["served_by"] != "fp" {
+		t.Fatalf("allowed kernel must still hit vDSO fast path: verdict=%+v meta=%+v", vAllow, rAllow.Meta)
+	}
+	if atomic.LoadInt64(&eng.n) != 0 || kAllow.Counters().VDSOHits != 1 {
+		t.Fatalf("vDSO hit must skip the engine (n=%d hits=%d)", eng.n, kAllow.Counters().VDSOHits)
 	}
 }
 

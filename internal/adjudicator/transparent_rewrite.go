@@ -2,6 +2,7 @@ package adjudicator
 
 import (
 	"context"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -92,7 +93,7 @@ func (rw transparentRewrite) admit(ctx context.Context, p Policy, v abi.Verdict)
 	if rw.rule == nil || v.Kind != abi.VerdictAllow {
 		return v
 	}
-	if _, denied := p.Deny[rw.rule.newTool]; denied {
+	if _, denied := p.Deny[strings.ToLower(rw.rule.newTool)]; denied {
 		return v
 	}
 	args := rw.rule.normalize(rw.args)

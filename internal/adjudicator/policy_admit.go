@@ -52,6 +52,47 @@ func (a *Adjudicator) NeverAdmits(tool string) bool {
 	return p.NeverAdmits(tool)
 }
 
+// normalizeDenyMap returns a copy of deny with every tool-name key folded to
+// lowercase so explicit Deny lookups are consistently case-insensitive (#14512).
+// If both a mixed-case and an already-lowercase entry exist for the same tool,
+// the exact lowercase entry wins deterministically.
+func normalizeDenyMap(deny map[string]abi.ReasonCode) map[string]abi.ReasonCode {
+	if len(deny) == 0 {
+		return deny
+	}
+	out := make(map[string]abi.ReasonCode, len(deny))
+	for k, r := range deny {
+		lk := strings.ToLower(k)
+		if _, exists := out[lk]; !exists || k == lk {
+			out[lk] = r
+		}
+	}
+	return out
+}
+
+// lookupDeny looks up tool in deny case-insensitively. Fast-path O(1) when deny
+// has been normalized by New/SetPolicy; falls back to a case-folding scan for
+// raw Policy values (e.g. Policy.NeverAdmits called without Adjudicator.New).
+func lookupDeny(deny map[string]abi.ReasonCode, tool, lowerTool string) (abi.ReasonCode, bool) {
+	if len(deny) == 0 {
+		return 0, false
+	}
+	if r, ok := deny[lowerTool]; ok {
+		return r, true
+	}
+	if tool != lowerTool {
+		if r, ok := deny[tool]; ok {
+			return r, true
+		}
+	}
+	for k, r := range deny {
+		if strings.EqualFold(k, tool) {
+			return r, true
+		}
+	}
+	return 0, false
+}
+
 // NeverAdmits reports whether the floor can NEVER produce an Allow for this tool
 // NAME, for ANY argument value — the pure, args-independent question the inbound
 // tool-def compactor (promptmmu) asks before it may safely drop a tool DEFINITION.
@@ -67,7 +108,7 @@ func (a *Adjudicator) NeverAdmits(tool string) bool {
 // never admitted, so they report true too; the inbound compactor only ever needs the
 // "model can't reach it" guarantee, which both classes satisfy.
 func (p Policy) NeverAdmits(tool string) bool {
-	if r, denied := p.Deny[tool]; denied {
+	if r, denied := lookupDeny(p.Deny, tool, strings.ToLower(tool)); denied {
 		// A name-deny whose cited reason is advisory can still be admitted (the
 		// soften downgrade), so its tool-def must not be pruned.
 		return !p.AdvisoryReasons[r]

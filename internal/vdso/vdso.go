@@ -606,8 +606,8 @@ func servedTaint(c *abi.ToolCall) abi.TaintLabel {
 	return abi.TaintTrusted
 }
 
-// Lookup is the FastPath entry (unit 30: consulted before the adjudicator). It
-// tries tier 1, then tier 3, then tier 2; a miss returns ok=false.
+// Lookup is the FastPath entry (consulted after adjudication admits the call,
+// #14514). It tries tier 1, then tier 3, then tier 2; a miss returns ok=false.
 func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (result *abi.Result, hit bool) {
 	var historicalEngineNS int64
 	if receipt := lookupReceiptFromContext(ctx); receipt != nil {

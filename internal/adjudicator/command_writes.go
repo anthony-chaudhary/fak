@@ -24,6 +24,16 @@ var shellWriteVerbs = []string{
 	// above, so `perl -i -pe 's/x/y/' internal/abi/kernel.go` would otherwise
 	// launder a self-edit past the floor that `sed -i` is caught on.
 	"perl -i", "ruby -i",
+	// PowerShell write cmdlets (#14513).
+	"set-content ", "out-file ", "add-content ", "copy-item ", "move-item ",
+	"remove-item ", "new-item ", "clear-content ", "rename-item ", "tee-object ",
+}
+
+// psWriteAliases are short PowerShell write aliases matched ONLY in command
+// position (via hasCommandLeadingToken) so they never false-positive as
+// substrings inside ordinary words (e.g. "desc ", "misc ").
+var psWriteAliases = []string{
+	"sc", "ac", "clc", "ni", "ri", "cpi", "mi", "rni", "del", "erase", "rd", "copy", "move", "ren",
 }
 
 // commandArg returns the shell command string carried by a tool-call's args,
@@ -91,6 +101,11 @@ func commandWrites(cmd string) bool {
 	lc := strings.ToLower(cmd)
 	for _, v := range shellWriteVerbs {
 		if strings.Contains(lc, v) {
+			return true
+		}
+	}
+	for _, alias := range psWriteAliases {
+		if hasCommandLeadingToken(lc, alias) {
 			return true
 		}
 	}
@@ -457,6 +472,16 @@ func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []stri
 		}
 	case "wget":
 		for _, target := range flagValues(args, "-O", "--output-document", "-P", "--directory-prefix") {
+			add(target)
+		}
+	case "set-content", "sc", "out-file", "add-content", "ac",
+		"clear-content", "clc", "new-item", "ni",
+		"remove-item", "ri", "del", "erase", "rd",
+		"copy-item", "cpi", "copy",
+		"move-item", "mi", "move",
+		"rename-item", "rni", "ren",
+		"tee-object":
+		for _, target := range psWriteTargets(head, segment) {
 			add(target)
 		}
 	}
@@ -871,6 +896,190 @@ func flagValues(args []shellWord, names ...string) []string {
 		}
 	}
 	return values
+}
+
+// psWords tokenizes a PowerShell command segment while preserving literal
+// backslashes ('\' is a Windows path separator in PowerShell, not an escape
+// character; PowerShell escapes with backtick '`').
+func psWords(cmd string) []shellWord {
+	var out []shellWord
+	var b strings.Builder
+	var quote byte
+	quoted := false
+	escaped := false
+	flush := func() {
+		if b.Len() == 0 && !quoted {
+			return
+		}
+		out = append(out, shellWord{text: b.String(), quoted: quoted})
+		b.Reset()
+		quoted = false
+	}
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if c == '`' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+				quoted = true
+				continue
+			}
+			b.WriteByte(c)
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+			quoted = true
+		case ' ', '\t', '\n', '\r':
+			flush()
+		default:
+			b.WriteByte(c)
+		}
+	}
+	flush()
+	return out
+}
+
+// psFlagValues extracts PowerShell parameter values case-insensitively, handling
+// both space-separated (-Path .env) and colon-separated (-Path:.env) forms.
+func psFlagValues(args []shellWord, names ...string) []string {
+	var values []string
+	for i := 0; i < len(args); i++ {
+		tok := args[i].text
+		lt := strings.ToLower(tok)
+		for _, name := range names {
+			if lt == name && i+1 < len(args) {
+				values = append(values, args[i+1].text)
+				i++
+				break
+			}
+			if strings.HasPrefix(lt, name+":") {
+				values = append(values, tok[len(name)+1:])
+				break
+			}
+		}
+	}
+	return values
+}
+
+// psPositionalOperands returns positional (non-flag) operands from a PowerShell
+// cmdlet invocation, skipping the argument values of common non-path parameters.
+func psPositionalOperands(args []shellWord, valueFlags ...string) []string {
+	var out []string
+	skipNext := false
+	for _, w := range args {
+		tok := cleanShellOperand(w.text)
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if tok == "" || tok == "--" {
+			continue
+		}
+		if strings.HasPrefix(tok, "-") {
+			lt := strings.ToLower(tok)
+			if !strings.Contains(lt, ":") {
+				for _, vf := range valueFlags {
+					if lt == vf {
+						skipNext = true
+						break
+					}
+				}
+			}
+			continue
+		}
+		out = append(out, tok)
+	}
+	return out
+}
+
+// psWriteTargets extracts the write target paths from a PowerShell write cmdlet
+// or alias segment (#14513).
+func psWriteTargets(head, segment string) []string {
+	words := psWords(segment)
+	start := commandWordStart(words)
+	if start >= len(words) {
+		return nil
+	}
+	args := words[start+1:]
+	var targets []string
+	addAll := func(xs []string) {
+		for _, x := range xs {
+			if x != "" {
+				targets = append(targets, x)
+			}
+		}
+	}
+
+	switch head {
+	case "copy-item", "cpi", "copy":
+		if dests := psFlagValues(args, "-destination"); len(dests) > 0 {
+			addAll(dests)
+			return targets
+		}
+		ops := psPositionalOperands(args, "-path", "-literalpath", "-filter", "-include", "-exclude", "-credential")
+		if len(ops) > 0 {
+			targets = append(targets, ops[len(ops)-1])
+		}
+		return targets
+
+	case "move-item", "mi", "move":
+		addAll(psFlagValues(args, "-path", "-literalpath", "-destination"))
+		addAll(psPositionalOperands(args, "-path", "-literalpath", "-destination", "-filter", "-include", "-exclude", "-credential"))
+		return targets
+
+	case "rename-item", "rni", "ren":
+		addAll(psFlagValues(args, "-path", "-literalpath", "-newname"))
+		addAll(psPositionalOperands(args, "-path", "-literalpath", "-newname", "-credential"))
+		return targets
+
+	case "new-item", "ni":
+		paths := psFlagValues(args, "-path", "-literalpath")
+		names := psFlagValues(args, "-name")
+		addAll(paths)
+		addAll(names)
+		for _, p := range paths {
+			for _, n := range names {
+				targets = append(targets, strings.TrimRight(p, `/\`)+"/"+n)
+			}
+		}
+		if len(targets) == 0 {
+			addAll(psPositionalOperands(args, "-itemtype", "-type", "-value", "-credential"))
+		}
+		return targets
+
+	default:
+		// set-content/sc, add-content/ac, out-file, clear-content/clc,
+		// remove-item/ri/del/erase/rd, tee-object
+		if explicit := psFlagValues(args, "-path", "-literalpath", "-filepath"); len(explicit) > 0 {
+			addAll(explicit)
+			return targets
+		}
+		ops := psPositionalOperands(args,
+			"-value", "-encoding", "-inputobject", "-filter", "-include",
+			"-exclude", "-stream", "-width", "-delimiter", "-variable", "-credential",
+		)
+		if len(ops) > 0 {
+			switch head {
+			case "set-content", "sc", "add-content", "ac", "out-file", "tee-object":
+				// First positional operand is -Path / -FilePath; subsequent positional
+				// operand for Set-Content/Add-Content is -Value.
+				targets = append(targets, ops[0])
+			default:
+				addAll(ops)
+			}
+		}
+		return targets
+	}
 }
 
 func cleanShellOperand(s string) string {

@@ -6,8 +6,8 @@
 //
 // The dispatch chain, in order:
 //
-//	Submit:  vDSO FastPath lookup  ->  (miss) fold Adjudicator chain  ->  route verdict
-//	Reap:    engine.Complete       ->  fold ResultAdmitter chain (context-MMU)
+//	Submit:  fold Adjudicator chain  ->  (allow) vDSO FastPath lookup  ->  route verdict
+//	Reap:    engine.Complete         ->  fold ResultAdmitter chain (context-MMU)
 //
 // Adjudication happens entirely at Submit and touches neither the engine nor the
 // network, so Submit's latency IS the tool-call adjudication latency the A/B
@@ -337,9 +337,11 @@ func (k *Kernel) denyResultAdmission(c *abi.ToolCall, r *abi.Result, v abi.Verdi
 	return v
 }
 
-// Submit adjudicates and admits the call. The vDSO is consulted FIRST (unit 30);
-// a hit returns immediately with no adjudication and no engine call. On a miss
-// the Adjudicator chain is folded; a denied call is never enqueued.
+// Submit adjudicates and admits the call. The Adjudicator chain is ALWAYS folded
+// FIRST so process-global vDSO fast paths can never bypass explicit Deny rules,
+// policy reloads, or per-kernel WithAdjudicators isolation (#14514). Only after
+// adjudication admits the call is the vDSO fast path consulted to skip the engine
+// round-trip; a denied call is never enqueued or fast-pathed.
 func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHandle, abi.Verdict) {
 	atomic.AddInt64(&k.ctr.Submits, 1)
 	k.mu.Lock()
@@ -353,24 +355,7 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 
 	emit(abi.Event{Kind: abi.EvSubmit, Call: c})
 
-	// vDSO fast path first (skipped entirely in the --vdso=off ablation arm).
-	for _, fp := range abi.FastPaths() {
-		if k.vdsoOff {
-			break
-		}
-		if r, ok := fp.Lookup(ctx, c); ok {
-			atomic.AddInt64(&k.ctr.VDSOHits, 1)
-			v := abi.Verdict{Kind: abi.VerdictAllow, By: "vdso"}
-			k.store(seq, &pendingCall{call: c, verdict: v, ready: r})
-			// A vDSO hit ran no adjudication (0 ns of tax) and SAVED the engine
-			// round-trip: the token-delta is negative, the local result's tokens the
-			// kernel did not have to generate (#1149).
-			emit(abi.Event{Kind: abi.EvVDSOHit, Call: c, Verdict: &v, Result: r, Fields: costFields(0, -refLen(r.Payload))})
-			return h, v
-		}
-	}
-
-	// Adjudicate. Time the fold so the EvSubmit->EvDecide adjudication tax (#1149)
+	// Adjudicate first. Time the fold so the EvSubmit->EvDecide adjudication tax (#1149)
 	// rides every decision event rungobs folds; the transform token-delta is read
 	// off the ORIGINAL args, before the Transform arm rewrites c.Args below.
 	t0 := time.Now()
@@ -385,6 +370,9 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 		// abstains, so this preserves v0.1's deny-on-require-witness behavior.
 		v = k.resolveWitness(ctx, c, v)
 		if v.Kind == abi.VerdictAllow {
+			if vdsoV, ok := k.tryFastPath(ctx, seq, c); ok {
+				return h, vdsoV
+			}
 			k.store(seq, &pendingCall{call: c, verdict: v})
 			emit(abi.Event{Kind: abi.EvDecide, Call: c, Verdict: &v, Fields: costFields(adjNs, 0)})
 			return h, v
@@ -407,7 +395,11 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 		return h, v
 	case abi.VerdictAllow, abi.VerdictDefer:
 		// The only dispatching outcomes: an affirmative allow (or a defer that the
-		// fold left unrefused). Everything else is held.
+		// fold left unrefused). Consult the vDSO fast path only after adjudication
+		// admits the call so policy reloads and per-kernel chains stay authoritative.
+		if vdsoV, ok := k.tryFastPath(ctx, seq, c); ok {
+			return h, vdsoV
+		}
 		k.store(seq, &pendingCall{call: c, verdict: v})
 		return h, v
 	default:
@@ -422,6 +414,26 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 		emit(abi.Event{Kind: abi.EvDeny, Call: c, Verdict: &v, Fields: costFields(adjNs, 0)})
 		return h, v
 	}
+}
+
+// tryFastPath consults registered vDSO FastPaths for an already-admitted call.
+// Skipped entirely when --vdso=off is set.
+func (k *Kernel) tryFastPath(ctx context.Context, seq uint64, c *abi.ToolCall) (abi.Verdict, bool) {
+	if k.vdsoOff {
+		return abi.Verdict{}, false
+	}
+	for _, fp := range abi.FastPaths() {
+		if r, ok := fp.Lookup(ctx, c); ok {
+			atomic.AddInt64(&k.ctr.VDSOHits, 1)
+			v := abi.Verdict{Kind: abi.VerdictAllow, By: "vdso"}
+			k.store(seq, &pendingCall{call: c, verdict: v, ready: r})
+			// A vDSO hit SAVED the engine round-trip: the token-delta is negative,
+			// the local result's tokens the kernel did not have to generate (#1149).
+			emit(abi.Event{Kind: abi.EvVDSOHit, Call: c, Verdict: &v, Result: r, Fields: costFields(0, -refLen(r.Payload))})
+			return v, true
+		}
+	}
+	return abi.Verdict{}, false
 }
 
 func (k *Kernel) store(seq uint64, p *pendingCall) {

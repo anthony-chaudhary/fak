@@ -96,6 +96,7 @@ type Adjudicator struct {
 
 // New builds an adjudicator with the given policy.
 func New(p Policy) *Adjudicator {
+	p.Deny = normalizeDenyMap(p.Deny)                              // case-insensitive explicit Deny (#14512)
 	p.Profile = sanitizeProfile(p.Profile)                         // a profile may only narrow the floor
 	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // only heuristic reasons may soften
 	a := &Adjudicator{
@@ -118,6 +119,7 @@ func (a *Adjudicator) RecoveryLedger() *RecoveryAuditLedger {
 
 // SetPolicy swaps the policy (used by tests + the bench harness).
 func (a *Adjudicator) SetPolicy(p Policy) {
+	p.Deny = normalizeDenyMap(p.Deny)                              // case-insensitive explicit Deny (#14512)
 	p.Profile = sanitizeProfile(p.Profile)                         // a profile may only narrow the floor
 	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // only heuristic reasons may soften
 	// Build the immutable predicate index before excluding readers. The lock then
@@ -195,7 +197,12 @@ func writeShapedLower(lowerTool string) bool {
 	if lowerTool == "fak_remote_maintenance" {
 		return true
 	}
-	for _, p := range []string{"write", "edit", "delete", "patch", "put", "exec", "run", "modify", "create"} {
+	for _, p := range []string{
+		"write", "edit", "delete", "patch", "put", "exec", "run", "modify", "create",
+		"save", "replace", "remove", "append", "rename", "unlink", "truncate",
+		"mkdir", "rmdir", "chmod", "chown", "touch",
+		"move_file", "copy_file", "rm_file", "apply_diff", "insert_",
+	} {
 		if strings.Contains(lowerTool, p) {
 			return true
 		}
@@ -284,7 +291,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 	// decoded only on that path so the no-deny fast path is unchanged.
 	var args map[string]any
 	var approval *operatorApprovalState
-	if r, ok := p.Deny[c.Tool]; ok {
+	if r, ok := p.Deny[lowerTool]; ok {
 		v := p.soften(abi.Verdict{Kind: abi.VerdictDeny, Reason: r, By: "monitor"}, nil)
 		if v.Kind != abi.VerdictDeny {
 			return v

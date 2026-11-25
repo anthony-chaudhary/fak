@@ -101,6 +101,7 @@ func BenchmarkStepExecution_SubmitReap(b *testing.B) {
 
 func BenchmarkStepExecution_VDSOHit(b *testing.B) {
 	setup()
+	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictAllow}})
 	abi.RegisterFastPath(1, fakeFP{hit: true})
 	k := New("")
 	ctx := context.Background()

@@ -18,32 +18,76 @@ import (
 // of the rung stay inline in Adjudicate, where the architest wiring gates pin
 // their calls. Returns the resolved verdict and whether it decided this call.
 func (a *Adjudicator) selfModifyPathVerdict(ctx context.Context, p Policy, c *abi.ToolCall, lowerTool string, args map[string]any, cl class, pr *RungProfile) (abi.Verdict, bool) {
-	if !pr.runs(cl, rungSelfModify) || !writeShapedLower(lowerTool) {
+	if !pr.runs(cl, rungSelfModify) {
 		return abi.Verdict{}, false
 	}
-	target := targetPath(args)
-	if g := matchGlob(target, p.BlockedPathGlobs); g != "" {
-		return credentialBlockVerdict(g), true
+	if !writeShapedLower(lowerTool) && !hasWriteContentArgs(args) {
+		return abi.Verdict{}, false
 	}
-	if g := matchGlob(target, p.SelfModifyGlobs); g != "" {
-		if directDevEditTool(c.Tool) && a.devEditAttested(ctx, c, target) {
-			return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/dev-lease", Meta: map[string]string{"dev_attested": "true"}}, true
+	for _, target := range targetPaths(args) {
+		if g := matchGlob(target, p.BlockedPathGlobs); g != "" {
+			return credentialBlockVerdict(g), true
 		}
-		return p.soften(abi.Verdict{
-			Kind:    abi.VerdictDeny,
-			Reason:  abi.ReasonSelfModify,
-			By:      "monitor",
-			Payload: abi.WitnessPayload{Claim: g},
-			// Three different rungs cite SELF_MODIFY and disclose only the
-			// glob, so on the wire they are one undifferentiated bucket. The rule
-			// id separates them (#5863) — and it is what decides whether a
-			// SELF_MODIFY on a `cd fak && …` compound came in through a path ARG or
-			// through the shell command line, the hypothesis the journal could not
-			// confirm.
-			Meta: denyRule(abi.DenyRuleSelfModifyPath),
-		}, nil), true
+		if g := matchGlob(target, p.SelfModifyGlobs); g != "" {
+			if directDevEditTool(c.Tool) && a.devEditAttested(ctx, c, target) {
+				return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/dev-lease", Meta: map[string]string{"dev_attested": "true"}}, true
+			}
+			return p.soften(abi.Verdict{
+				Kind:    abi.VerdictDeny,
+				Reason:  abi.ReasonSelfModify,
+				By:      "monitor",
+				Payload: abi.WitnessPayload{Claim: g},
+				// Three different rungs cite SELF_MODIFY and disclose only the
+				// glob, so on the wire they are one undifferentiated bucket. The rule
+				// id separates them (#5863) — and it is what decides whether a
+				// SELF_MODIFY on a `cd fak && …` compound came in through a path ARG or
+				// through the shell command line, the hypothesis the journal could not
+				// confirm.
+				Meta: denyRule(abi.DenyRuleSelfModifyPath),
+			}, nil), true
+		}
 	}
 	return abi.Verdict{}, false
+}
+
+// hasWriteContentArgs reports whether args carry a file-mutation payload (content,
+// replacement text, patch/diff, or destination path) so non-keyword write tools
+// targeting a blocked or self-modify glob cannot bypass selfModifyPathVerdict (#14513).
+func hasWriteContentArgs(args map[string]any) bool {
+	if len(args) == 0 {
+		return false
+	}
+	for _, k := range []string{
+		"content", "contents", "new_str", "new_string", "new_text",
+		"replacement", "patch", "diff", "edits", "data", "body",
+		"destination", "dest", "new_path", "newPath", "to_path", "toPath",
+	} {
+		if v, ok := args[k]; ok && v != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// targetPaths extracts all path-like target arguments from args, including
+// destination/rename keys so copy/move/rename tools cannot hide a guarded target
+// behind a non-primary argument name (#14513).
+func targetPaths(args map[string]any) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	var out []string
+	for _, k := range []string{
+		"path", "file_path", "filePath", "filepath", "file", "target", "filename", "dir",
+		"destination", "dest", "new_path", "newPath", "to_path", "toPath",
+	} {
+		if v, ok := args[k]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
 }
 
 // egressRungVerdict is the EGRESS rung: a tool call that reaches a blocked
