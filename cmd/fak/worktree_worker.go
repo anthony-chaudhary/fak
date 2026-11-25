@@ -660,6 +660,7 @@ func verifyWorkerLandSymptomSelected(wtPath, ref string, extraTags, testSelector
 // names fix-introduced API), so it lands with a SYMPTOM_ABSTAIN_* advisory.
 const (
 	symptomVerdictConfirmed          = "SYMPTOM_CONFIRMED"
+	symptomVerdictConfirmedTolerant  = "SYMPTOM_CONFIRMED_TOLERANT"
 	symptomVerdictAbstainTimeout     = "SYMPTOM_ABSTAIN_TIMEOUT"
 	symptomVerdictAbstainParentBuild = "SYMPTOM_ABSTAIN_PARENT_BUILD"
 	symptomVerdictAbstainSelection   = "SYMPTOM_ABSTAIN_SELECTION"
@@ -669,7 +670,13 @@ const (
 func workerLandSymptomVerdict(outcome abi.WitnessOutcome, detail string, timeout time.Duration) workerworktree.Result {
 	switch outcome {
 	case abi.WitnessConfirmed:
-		return workerworktree.Result{OK: true, SymptomVerdict: symptomVerdictConfirmed}
+		res := workerworktree.Result{OK: true, SymptomVerdict: symptomVerdictConfirmed}
+		// The verdict stays SYMPTOM_CONFIRMED; the tolerance is an advisory so the
+		// closed verdict set and its consumers do not change.
+		if strings.Contains(detail, "tolerated at candidate") {
+			res.SymptomAdvisory = symptomVerdictConfirmedTolerant + ": symptom witness confirmed with tolerated candidate reds (not cached): " + detail
+		}
+		return res
 	case abi.WitnessRefuted:
 		res := workerLandSymptomUnwitnessed(symptomRefusalDetail("refuted", detail))
 		res.SymptomVerdict = symptomSubtype(detail)
@@ -720,6 +727,9 @@ func symptomSubtype(detail string) string {
 		return "SYMPTOM_NO_MATCH"
 	case strings.Contains(detail, "parent") && (strings.Contains(detail, "did not build") || strings.Contains(detail, "did not parse")):
 		return "SYMPTOM_PARENT_BUILD"
+	// Must precede "passed at parent": a regression detail names that phrase too.
+	case strings.Contains(detail, "symptom test regressed"):
+		return "SYMPTOM_CANDIDATE_REGRESSION"
 	case strings.Contains(detail, "passed at parent"):
 		return "SYMPTOM_PARENT_PASSED"
 	case strings.Contains(detail, "candidate") && strings.Contains(detail, "failed"):
