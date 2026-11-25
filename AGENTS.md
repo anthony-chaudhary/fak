@@ -297,14 +297,8 @@ The rule of thumb: reproduce the defect as a captured artifact *first*, then mak
 clean. If you cannot capture it, you cannot prove you fixed it — say `not yet` with the missing
 witness instead of claiming a fix.
 
-**Evidence is not part of the product.** Everything tracked in the root Go module ships to
-every `go install` user, and cmd/go refuses a module over 500 MiB (v0.57.0 was, and could not
-be installed). Keep one proof artifact small: a receipt or summary, not raw logs, traces or
-dumps; over 5 MiB, commit a pointer (path, sha256, size) and store the bytes outside the repo.
-Do not add a new top-level data or vendored tree without deciding how it stays out of the
-module zip. `TestRootModuleZipBudget` in `internal/architest` is the meter: it fails the
-commit that pushes the zip past its total, non-Go or per-file budget, and its log line shows
-the current size.
+**Evidence is not part of the product.** cmd/go refuses a root module over 500 MiB: keep proof
+artifacts small (a pointer over 5 MiB). `TestRootModuleZipBudget` meters it.
 
 ## Track work in GitHub before implementation
 
