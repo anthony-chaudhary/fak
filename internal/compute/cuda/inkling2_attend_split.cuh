@@ -95,6 +95,9 @@ __global__ void __launch_bounds__(256)
 }
 
 // Block: 32 dims x INK2_ATT_THREADS / headDim key groups (the reference's grouping).
+// STAGED keeps the exps and weights in shared memory; past the opt-in limit the
+// unstaged form reads them from global and divides in place, giving the same bits.
+template <bool STAGED>
 __global__ void __launch_bounds__(INK2_ATT_THREADS)
     k_ink2_attend_out(const double *scores, const float *vcache, const float *r, float *out, const float *meta,
                       int heads, int kvHeads, int headDim, int relLen, int window, int cap) {
@@ -108,18 +111,23 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
   extern __shared__ double esh[];
   float *wsh = (float *)(esh + cap);
   __shared__ double sdenom;
-  for (int j = threadIdx.x; j < n; j += blockDim.x) esh[j] = sc[j];
-  __syncthreads();
+  if (STAGED) {
+    for (int j = threadIdx.x; j < n; j += blockDim.x) esh[j] = sc[j];
+    __syncthreads();
+  }
   if (threadIdx.x == 0) {
     const double m = *(const double *)(r + (size_t)h * relLen);
     double denom = exp(-m);
-    for (int j = 0; j < n; ++j) denom += esh[j];
+    for (int j = 0; j < n; ++j) denom += STAGED ? esh[j] : sc[j];
     sdenom = denom;
   }
   __syncthreads();
   const double denom = sdenom;
-  for (int j = threadIdx.x; j < n; j += blockDim.x) wsh[j] = (float)(esh[j] / denom);
-  __syncthreads();
+  if (STAGED) {
+    for (int j = threadIdx.x; j < n; j += blockDim.x) wsh[j] = (float)(esh[j] / denom);
+    __syncthreads();
+  }
+#define INK2_ATS_W(j) (STAGED ? wsh[(j)] : (float)(sc[(j)] / denom))
   const int groups = INK2_ATT_THREADS / headDim;
   const int dd = blockIdx.y * 32 + (threadIdx.x & 31), g = threadIdx.x >> 5;
   __shared__ float gacc[INK2_ATT_GROUPS][32];
@@ -133,9 +141,9 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
 #pragma unroll
       for (int u = 0; u < INK2_ATS_UNROLL; ++u) vv[u] = vbase[(size_t)((first + j + u * groups) % cap) * kvDim];
 #pragma unroll
-      for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(wsh[j + u * groups], vv[u], acc);
+      for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(INK2_ATS_W(j + u * groups), vv[u], acc);
     }
-    for (; j < n; j += groups) acc = fmaf(wsh[j], vbase[(size_t)((first + j) % cap) * kvDim], acc);
+    for (; j < n; j += groups) acc = fmaf(INK2_ATS_W(j), vbase[(size_t)((first + j) % cap) * kvDim], acc);
     gacc[g][threadIdx.x & 31] = acc;
   }
   __syncthreads();
@@ -144,6 +152,7 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
     for (int gg = 0; gg < groups; ++gg) acc += gacc[gg][threadIdx.x];
     out[(size_t)h * headDim + dd] = acc;
   }
+#undef INK2_ATS_W
 }
 
 static int g_ink2_ats_mode = -1;
@@ -173,23 +182,37 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
   if (!ink2_ats_enabled() || headDim / 2 < INK2_ATS_CHUNKS || (headDim & 31) != 0 || relLen < 2 || (relLen & 1) != 0 ||
       ((uintptr_t)r & 7) != 0 || ((uintptr_t)out & 7) != 0)
     return false;
-  const size_t osmem = (size_t)cap * (sizeof(double) + sizeof(float));
+  size_t osmem = (size_t)cap * (sizeof(double) + sizeof(float));
   static size_t optin = 0;
+  static size_t refused = 0;
+  bool staged = true;
   if (osmem > optin) {
-    if (cudaFuncSetAttribute(k_ink2_attend_out, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)osmem) != cudaSuccess) {
+    if (refused != 0 && osmem >= refused) {
+      staged = false;
+    } else if (cudaFuncSetAttribute(k_ink2_attend_out<true>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)osmem) !=
+               cudaSuccess) {
       cudaGetLastError();
-      return false;
+      refused = osmem;
+      staged = false;
+    } else {
+      optin = osmem;
     }
-    optin = osmem;
   }
+  if (!staged) osmem = 0;
   const dim3 g1(heads, INK2_ATS_CHUNKS), g3(heads, headDim / 32);
   FCUDA_TS("k_ink2_attend_scores", g1, k_ink2_attend_scores<<<g1, INK2_ATS_WARPS * 32, 0, g_stream>>>(
                                            q, r, sinks, relBias, kcache, scores, out, meta, heads, kvHeads, headDim,
                                            relLen, extent, window, cap, scale));
   FCUDA_TS("k_ink2_attend_exp", g1, k_ink2_attend_exp<<<g1, 256, 0, g_stream>>>(scores, out, (float *)r, meta, headDim,
                                                                                   relLen, window, cap, INK2_ATS_CHUNKS));
-  FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<<<g3, (INK2_ATT_THREADS / headDim) * 32, osmem, g_stream>>>(
-                                        scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
-                                        cap));
+  if (staged) {
+    FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<true><<<g3, (INK2_ATT_THREADS / headDim) * 32, osmem, g_stream>>>(
+                                          scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
+                                          cap));
+  } else {
+    FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<false><<<g3, (INK2_ATT_THREADS / headDim) * 32, 0, g_stream>>>(
+                                          scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
+                                          cap));
+  }
   return true;
 }

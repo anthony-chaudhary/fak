@@ -691,6 +691,13 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		return m, false, profile, gateway.StartupPhase{Name: "model-load", Dur: loadDur}, nil, nil
 	}
 	ggufPath := modelPath
+	// The looped family is served by its own forward (serve_inkling2.go); every
+	// *Model loader below would mis-read its header keys.
+	if serveIsInkling2LoopGGUF(ggufPath) {
+		err := serveRefuseInkling2LoopGeneric(backend)
+		fmt.Fprintln(os.Stderr, "fak serve:", err)
+		return nil, false, nil, gateway.StartupPhase{}, nil, err
+	}
 	artifactSource, err := ggufload.OpenWeights(ggufPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve: GGUF quant inventory:", err)

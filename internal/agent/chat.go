@@ -1016,6 +1016,10 @@ func NewProviderHTTPPlanner(provider, baseURL, model, apiKey string) (*HTTPPlann
 		p.OpenAIToolMessagesAsText = envTruthy("FAK_OPENAI_TOOL_MESSAGES_AS_TEXT")
 	}
 	p.MaxTokensCap = envPositiveInt("FAK_PROVIDER_MAX_TOKENS")
+	// A local endpoint's tool call can carry a whole file, past the hosted-API default.
+	if n := envPositiveInt("FAK_PROVIDER_DEFAULT_MAX_TOKENS"); n > 0 {
+		p.MaxTokens = n
+	}
 	return p, nil
 }
 

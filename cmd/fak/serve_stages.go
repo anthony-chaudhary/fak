@@ -84,6 +84,9 @@ type serveRuntime struct {
 	epCoord               *fakmodel.EPDecodeCoordinator
 	inKernelTok           *tokenizer.Tokenizer
 	warmDiskModelIdentity string
+	// inkling2Planner serves an inkling2_loop GGUF, which has no *fakmodel.Model.
+	inkling2Planner agent.Planner
+	inkling2Model   *ggufload.Inkling2LoopModel
 
 	apiKey              string
 	engineCacheAdminKey string
@@ -756,6 +759,9 @@ func resolveServeNativeContextDirectory(dir string, requested int) (serveNativeC
 // group and wires the rank-local forward; the dialed group lands on rt.epGroup and
 // is closed by cmdServe's deferred closeEPGroup.
 func (rt *serveRuntime) loadModel(sf *serveFlags) {
+	if rt.loadInkling2LoopModel(sf) {
+		return
+	}
 	startupResidency := serveStartupResidency(*sf.ggufPath)
 	artifactStamp := stampModelArtifact(*sf.ggufPath)
 	// This header-only forward gate precedes expert-shard derivation and
@@ -923,6 +929,9 @@ func (rt *serveRuntime) closeEPGroup() {
 	}
 	if rt.inKernelModel != nil {
 		_ = rt.inKernelModel.CloseWeights()
+	}
+	if rt.inkling2Model != nil {
+		_ = rt.inkling2Model.Close()
 	}
 	rt.releaseStrixKVBuffers()
 }

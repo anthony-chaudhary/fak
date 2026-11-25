@@ -2871,6 +2871,8 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 			var reasoning, content string
 			if structured != nil {
 				reasoning, content = structured.splitOutput(sb.String(), structuredContentStart)
+			} else if p.m.Cfg.IsInkling2Loop() {
+				reasoning, content = SplitInkling2Output(sb.String())
 			} else {
 				reasoning, content = splitNativeBudgetReasoning(sb.String(), thinking != nil && startInSpan)
 				for strings.Contains(content, thinkClose) {

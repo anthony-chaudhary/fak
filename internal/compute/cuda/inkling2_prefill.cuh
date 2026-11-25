@@ -796,7 +796,7 @@ __global__ void __launch_bounds__(INK2P_IQ_THREADS) k_ink2p_expert_iq(const unsi
 }
 
 static int ink2p_smem_optin(const void *fn, size_t bytes) {
-  if (bytes <= 48 * 1024) return 0;
+  if (bytes + INK2_SMEM_STATIC_ALLOWANCE <= 48 * 1024) return 0;
   return (int)cudaFuncSetAttribute(fn, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)bytes);
 }
 

@@ -1,7 +1,6 @@
 package ggufload
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -476,49 +475,33 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 		}
 		return inkling2ResidentGreedy(m, be, prompt, n)
 	}
-	h, err := model.NewInkling2LoopHost(m.HP, m.Weights)
+	s, err := newInkling2HostSession(m, be)
 	if err != nil {
 		return nil, st, err
 	}
-	recycle := func() {}
-	if r, ok := be.(interface{ Recycle() }); ok {
-		recycle = r.Recycle
-	}
+	return inkling2SessionGreedy(s, prompt, n)
+}
+
+// inkling2SessionGreedy decodes n greedy tokens from a fresh session; the first
+// comes from prefill.
+func inkling2SessionGreedy(s Inkling2LoopSession, prompt []int, n int) ([]int, Inkling2LoopGreedyStats, error) {
+	var st Inkling2LoopGreedyStats
 	start := time.Now()
-	var logits []float32
-	if _, metal := m.Weights.Batcher.(*inkling2MetalBatch); metal {
-		logits, err = Inkling2LoopPrefill(context.Background(), h, prompt)
-		if err != nil {
-			return nil, st, err
-		}
-	} else {
-		for i, t := range prompt {
-			logits, err = Inkling2LoopPrefillToken(h, t, i == len(prompt)-1)
-			if err != nil {
-				return nil, st, err
-			}
-			recycle()
-		}
+	next, err := s.Prefill(prompt)
+	if err != nil {
+		return nil, st, err
 	}
 	st.Prefill = time.Since(start)
 	out := make([]int, 0, n)
 	start = time.Now()
 	for len(out) < n {
-		best := 0
-		for i, v := range logits {
-			if v > logits[best] {
-				best = i
-			}
-		}
-		out = append(out, best)
+		out = append(out, next)
 		if len(out) == n {
 			break
 		}
-		logits, err = Inkling2LoopStep(h, best)
-		if err != nil {
+		if next, err = s.Step(next); err != nil {
 			return nil, st, err
 		}
-		recycle()
 		st.DecodeSteps++
 	}
 	st.Decode = time.Since(start)

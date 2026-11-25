@@ -1724,6 +1724,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		EmbeddingPooling:             *sf.embeddingPooling,
 		EmbeddingsBackend:            *sf.embeddingsBackend,
 		InKernelModel:                rt.inKernelModel,
+		NativeChatPlanner:            rt.inkling2Planner,
 		Tokenizer:                    rt.inKernelTok,
 		InKernelQ4K:                  rt.inKernelQ4K,
 		InKernelPlanner:              nativePlannerConfig,

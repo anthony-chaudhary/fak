@@ -89,6 +89,7 @@ type dialectExtractor struct {
 // like bare JSON) is lifted exactly once, by the more specific dialect.
 var toolCallDialects = []dialectExtractor{
 	{name: "deepseek_dsml", extract: extractDeepSeekDSMLBlocks},
+	{name: "inkling2_invoke_tool_json", extract: extractInkling2ToolBlocks},
 	{name: "hermes", extract: extractDelimited(hermesToolCallRe)},
 	{name: "function_call_tag", extract: extractDelimited(functionCallTagRe)},
 	{name: "llama_python_tag", extract: extractDelimited(llamaPythonTagRe)},

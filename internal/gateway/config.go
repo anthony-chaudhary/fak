@@ -539,6 +539,10 @@ type Config struct {
 	// `fak serve --gguf …` (no --base-url); Tokenizer is the explicit --tokenizer or the
 	// GGUF's embedded tokenizer. Proxy mode (BaseURL set) wins.
 	InKernelModel *model.Model
+	// NativeChatPlanner serves chat for a local model that has no *model.Model
+	// (the dedicated inkling2_loop forward). It wins over InKernelModel and is
+	// ignored when a proxy upstream is configured.
+	NativeChatPlanner agent.Planner
 	// Tokenizer is the BPE tokenizer the in-kernel chat planner encodes ChatML with.
 	Tokenizer *tokenizer.Tokenizer
 	// InKernelQ4K flags the preloaded model as resident-Q4_K so the chat decode runs

@@ -634,6 +634,9 @@ func selectChatPlanner(cfg Config, model string, proxyURLs []string, logf func(s
 	// quietly read a new planner as unclassified and shrink coverage without saying so.
 	side := localityUnknown
 	switch {
+	case len(proxyURLs) == 0 && cfg.NativeChatPlanner != nil:
+		planner = cfg.NativeChatPlanner
+		side = localitySelfHosted
 	case len(proxyURLs) != 0 && cfg.InKernelModel != nil && cfg.Tokenizer != nil:
 		// DUAL (small local model ALONGSIDE the API upstream, dual_planner.go): a live
 		// proxy AND a loaded in-kernel model in ONE gateway. Requests addressed to the

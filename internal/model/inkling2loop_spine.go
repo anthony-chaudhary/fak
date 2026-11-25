@@ -306,11 +306,18 @@ type UnsupportedInkling2LoopExecutionError struct {
 	Engine       string
 	ModelType    string
 	Architecture string
+	// Backend is the compute backend that was asked to run it; empty means the
+	// generic native forward, which has no looped path on any backend.
+	Backend string
 }
 
 func (e *UnsupportedInkling2LoopExecutionError) Error() string {
-	return fmt.Sprintf("%s: unsupported execution for %s/%s: the native looped forward (attention residuals, cross-pass gated messages, relative-bias attention, short convolutions, NVFP4/MXFP8 experts) is not implemented; serve it on %s",
-		e.Engine, e.ModelType, e.Architecture, strings.Join(Inkling2LoopOSSRoutes, ", "))
+	where := "the generic native forward"
+	if e.Backend != "" {
+		where = "the " + e.Backend + " backend"
+	}
+	return fmt.Sprintf("%s: unsupported execution for %s/%s on %s: fak's looped forward runs only on the %s backend from an inkling2_loop GGUF (fak serve --engine inkernel --backend %s --gguf <file>); otherwise serve it on %s",
+		e.Engine, e.ModelType, e.Architecture, where, Inkling2LoopBackend, Inkling2LoopBackend, strings.Join(Inkling2LoopOSSRoutes, ", "))
 }
 
 // NativeExecution validates the config and returns the typed refusal.

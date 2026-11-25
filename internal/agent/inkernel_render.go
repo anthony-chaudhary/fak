@@ -781,9 +781,14 @@ func qwenToolCallArgs(args string) string {
 // honoured and the other did not would end the SAME turn at two different places.
 func StopIDs(tok *tokenizer.Tokenizer, cfg model.Config) map[int]bool {
 	stops := map[int]bool{}
+	inkling2 := cfg.IsInkling2Loop()
+	blockEnd := -1
 	for id, content := range tok.SpecialTokens() {
-		if content == "<|im_end|>" || content == "<|endoftext|>" {
+		if content == "<|im_end|>" || content == "<|endoftext|>" || (inkling2 && content == Inkling2EndOfTurnMarker) {
 			stops[id] = true
+		}
+		if inkling2 && content == inkling2EndMessage {
+			blockEnd = id
 		}
 	}
 	if cfg.EOSTokenID > 0 {
@@ -794,5 +799,8 @@ func StopIDs(tok *tokenizer.Tokenizer, cfg model.Config) map[int]bool {
 			stops[e] = true
 		}
 	}
+	// An Inkling-2 EOS that names the block terminator would end the turn after
+	// its thinking block or first tool call.
+	delete(stops, blockEnd)
 	return stops
 }

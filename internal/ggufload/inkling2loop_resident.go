@@ -5,15 +5,37 @@ import (
 	"math"
 	"os"
 	"runtime"
-	"time"
+	"strconv"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // inkling2ResidentCtx is the global-slot KV capacity of a resident session; local
-// slots keep a sliding-window ring.
-const inkling2ResidentCtx = 4096
+// slots keep a sliding-window ring. FAK_INKLING2_CTX raises it for agentic serving,
+// paying device memory on every global slot, so the bench default stays small.
+var inkling2ResidentCtx = inkling2ResidentCtxFrom(os.LookupEnv)
+
+// inkling2ResidentCtxMax keeps the batched-prefill score row (4 B per key plus ~5.5 KiB
+// static) inside sm_120's 99 KiB per-block shared-memory opt-in.
+const (
+	inkling2ResidentCtxDefault = 4096
+	inkling2ResidentCtxMin     = 512
+	inkling2ResidentCtxMax     = 23552
+)
+
+func inkling2ResidentCtxFrom(lookup func(string) (string, bool)) int {
+	v, ok := lookup("FAK_INKLING2_CTX")
+	if !ok {
+		return inkling2ResidentCtxDefault
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < inkling2ResidentCtxMin {
+		return inkling2ResidentCtxDefault
+	}
+	return min(n, inkling2ResidentCtxMax)
+}
 
 // inkling2ArenaFloats bounds the per-token scratch arena. Every intermediate of a
 // token takes the next arena slot, so a token's device addresses repeat exactly
@@ -677,41 +699,13 @@ func (s *inkling2Resident) step(token int) (int, error) {
 
 // inkling2ResidentGreedy is Inkling2LoopGreedyTimed on the resident device forward.
 func inkling2ResidentGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, n int) ([]int, Inkling2LoopGreedyStats, error) {
-	var st Inkling2LoopGreedyStats
 	s, err := newInkling2Resident(m, be)
 	if err != nil {
-		return nil, st, err
+		return nil, Inkling2LoopGreedyStats{}, err
 	}
 	defer s.close()
 	// a CUDA stream capture is bound to the OS thread that opened it
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	start := time.Now()
-	next := 0
-	if s.batched && len(prompt) > 0 {
-		if next, err = s.prefill(prompt); err != nil {
-			return nil, st, err
-		}
-	} else {
-		for _, t := range prompt {
-			if next, err = s.step(t); err != nil {
-				return nil, st, err
-			}
-		}
-	}
-	st.Prefill = time.Since(start)
-	out := make([]int, 0, n)
-	start = time.Now()
-	for len(out) < n {
-		out = append(out, next)
-		if len(out) == n {
-			break
-		}
-		if next, err = s.step(next); err != nil {
-			return nil, st, err
-		}
-		st.DecodeSteps++
-	}
-	st.Decode = time.Since(start)
-	return out, st, nil
+	return inkling2SessionGreedy(&inkling2ResidentSession{s: s}, prompt, n)
 }

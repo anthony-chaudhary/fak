@@ -208,7 +208,8 @@ func deepSeekV41ToolArguments(raw string) []deepSeekV41ToolArgument {
 }
 
 // inKernelRenderPrompt is the text a native planner encodes for one request: the
-// raw V4.1 completion text, the V4.1 chat template, or ChatML for every other family.
+// raw V4.1 completion text, the V4.1 or Inkling-2 chat template, or ChatML for
+// every other family.
 func inKernelRenderPrompt(messages []Message, tools []ToolDef, cfg model.Config, sp SampleParams) string {
 	var toolChoice string
 	if json.Unmarshal(sp.ToolChoice, &toolChoice) == nil && toolChoice == "none" {
@@ -224,6 +225,8 @@ func inKernelRenderPrompt(messages []Message, tools []ToolDef, cfg model.Config,
 	case cfg.IsDeepSeekV41():
 		messages, tools = deepSeekV41ChatRequest(messages, tools, sp.ToolChoice)
 		return renderDeepSeekV41Chat(messages, tools, sp.ResponseFormat)
+	case cfg.IsInkling2Loop():
+		return renderInkling2Chat(messages, tools, sp)
 	default:
 		return renderInKernelChatMLRequest(messages, tools, cfg, sp.ResponseFormat, sp.ToolChoice, sp)
 	}

@@ -1,0 +1,120 @@
+{
+  "rows": [
+    {
+      "id": "inkling2-serve-loop-planner",
+      "canonical": "Inkling2LoopPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The agent.StreamingPlanner that serves chat turns on the dedicated inkling2_loop forward: it renders the request with the Inkling-2 chat template, tokenizes it, caps prompt plus completion at the context budget, drives an Inkling2LoopGenerator and lifts tool calls from the output. NewInkling2LoopPlanner builds it; fak serve holds it as inkling2Planner.",
+      "distinction": "A CHAT-TURN planner in the agent sense (request in, assistant message out), not a memory, fit or run plan: it allocates nothing and prices nothing. It exists because inkling2_loop has no *model.Model and so cannot ride InKernelPlanner.",
+      "distinct_from": [
+        "x-gateway-engine-inkernelplanner",
+        "inkling2loop-run-planner"
+      ],
+      "aliases": [
+        "NewInkling2LoopPlanner",
+        "inkling2Planner"
+      ],
+      "grounding": "Inkling2LoopPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-serve-native-chat-planner",
+      "canonical": "NativeChatPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The gateway.Config field carrying a ready agent.Planner for a local model that has no *model.Model (today the inkling2_loop forward). When set and no proxy upstream is configured, the gateway uses it as the chat planner ahead of InKernelModel.",
+      "distinction": "A CONFIG SLOT selecting which planner serves chat, not a planner implementation: it holds whatever planner fak serve built, and is ignored in proxy mode.",
+      "distinct_from": [
+        "inkling2-serve-loop-planner",
+        "x-gateway-engine-inkernelplanner"
+      ],
+      "aliases": [],
+      "grounding": "NativeChatPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-serve-loop-session",
+      "canonical": "Inkling2LoopSession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "One request's greedy decode state over a fresh inkling2_loop KV cache: Prefill consumes the prompt and returns the next token, Step consumes one token and returns the next, Close frees it. NewInkling2LoopSession opens the resident CUDA-graph session when the backend qualifies, else the host-driven one.",
+      "distinction": "A PER-REQUEST decode state, not an agent, chat or user session: it carries no conversation identity and dies with the request. A resident session is bound to the OS thread that first steps it.",
+      "distinct_from": [
+        "inkling2loop-step",
+        "inkling2loop-prefill"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-serve-is-loop",
+      "canonical": "IsInkling2Loop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "model.Config predicate: true when a generically decoded config's model_type is the inkling2_loop envelope or text type, so serve, the planner and the renderer can route the family to its dedicated forward.",
+      "distinction": "A FAMILY IDENTITY check on config, not a loop control: it iterates nothing and reports no pass count.",
+      "distinct_from": [
+        "inkling2loop-model-family",
+        "loop-inkling2-loopconfig"
+      ],
+      "aliases": [],
+      "grounding": "IsInkling2Loop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-serve-open-device",
+      "canonical": "OpenInkling2LoopDevice",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Maps an inkling2_loop GGUF exactly like OpenInkling2Loop, then moves its packed weights onto a compute.Backend and installs the device batcher so the forward runs on the GPU.",
+      "distinction": "A DEVICE-RESIDENT open of the model weights, not a session open: it opens no KV cache and decodes nothing; sessions come from NewInkling2LoopSession on the returned model.",
+      "distinct_from": [
+        "inkling2loop-open",
+        "inkling2-serve-loop-session"
+      ],
+      "aliases": [],
+      "grounding": "OpenInkling2LoopDevice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-serve-render-chat",
+      "canonical": "renderInkling2Chat",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Port of the Inkling-2 GGUF tokenizer.chat_template: renders messages and tool definitions into the prompt string, ending on the last closed block because the model writes its own message header.",
+      "distinction": "A PROMPT TEXT renderer for one model family, not a UI, markdown or materialized-view render: its output is tokenized, never displayed.",
+      "distinct_from": [
+        "inkling2-serve-loop-planner"
+      ],
+      "aliases": [],
+      "grounding": "renderInkling2Chat",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

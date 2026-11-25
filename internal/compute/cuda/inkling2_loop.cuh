@@ -1237,6 +1237,10 @@ extern "C" int fcuda_ink2_qkv_post(float *q, float *r, const float *k, const flo
   return ink2_last_error();
 }
 
+// The 48 KiB default bounds static plus dynamic shared memory, so the opt-in starts
+// below 48 KiB of dynamic bytes by the static allowance (the attend kernels carry ~5.5 KiB).
+#define INK2_SMEM_STATIC_ALLOWANCE (8 * 1024)
+
 // headDim <= 256 and INK2_ATT_THREADS / headDim <= INK2_ATT_GROUPS (the per-group partials).
 extern "C" int fcuda_ink2_attend(const float *q, const float *r, const float *sinks, const float *relBias,
                                  const float *kcache, const float *vcache, double *scores, float *out,
@@ -1246,7 +1250,15 @@ extern "C" int fcuda_ink2_attend(const float *q, const float *r, const float *si
   if (ink2_attend_split(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen, extent,
                         window, cap, scale))
     return ink2_last_error();
-  FCUDA_TS("k_ink2_attend", heads, k_ink2_attend<<<heads, INK2_ATT_THREADS, (size_t)cap * sizeof(float), g_stream>>>(
+  const size_t smem = (size_t)cap * sizeof(float);
+  if (smem + INK2_SMEM_STATIC_ALLOWANCE > 48 * 1024) {
+    const cudaError_t oe = cudaFuncSetAttribute(k_ink2_attend, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
+    if (oe != cudaSuccess) {
+      cudaGetLastError();
+      return (int)oe;
+    }
+  }
+  FCUDA_TS("k_ink2_attend", heads, k_ink2_attend<<<heads, INK2_ATT_THREADS, smem, g_stream>>>(
       q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen, extent, window, cap,
       scale));
   return ink2_last_error();

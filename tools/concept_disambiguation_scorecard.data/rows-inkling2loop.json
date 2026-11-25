@@ -10,7 +10,8 @@
       "distinct_from": [
         "loopconstraint",
         "looppark",
-        "loopobserve"
+        "loopobserve",
+        "inkling2-serve-is-loop"
       ],
       "aliases": [
         "inkling2_loop"

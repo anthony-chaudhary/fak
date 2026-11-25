@@ -88,6 +88,23 @@ func refuseUnsupportedHybridArch(cfg Config, man map[string]tensorMeta) error {
 	return nil
 }
 
+// Inkling2LoopBackend is the only compute backend with fak's dedicated
+// inkling2_loop looped forward. The generic loader still refuses the family on
+// every backend because that forward is not a *Model.
+const Inkling2LoopBackend = "cuda"
+
+// RefuseInkling2LoopBackend is nil when backend runs the looped forward and the
+// typed refusal naming backend otherwise; "" is the host CPU forward.
+func RefuseInkling2LoopBackend(backend string) error {
+	if backend == Inkling2LoopBackend {
+		return nil
+	}
+	if backend == "" {
+		backend = "cpu"
+	}
+	return &UnsupportedInkling2LoopExecutionError{Engine: "fak-native", ModelType: inkling2LoopEnvelopeType, Architecture: inkling2LoopArchitecture, Backend: backend}
+}
+
 // ForwardPathKind names the in-kernel token-mixer forward a loaded checkpoint
 // dispatches to. It is the load-time, device-independent classification issue #3814
 // asks for — "confirm it maps to a supported forward path (attnSeq GQA for
