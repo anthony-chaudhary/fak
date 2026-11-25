@@ -35,10 +35,21 @@ func diffPolicyWidening(old, next adjudicator.Policy) policyWideningDelta {
 			d.AddedAllowPrefix = append(d.AddedAllowPrefix, prefix)
 		}
 	}
+	// The installed floor folds Deny keys to lowercase while a freshly parsed
+	// manifest keeps its authored case, so a case-only difference is not a removal.
+	nextDeny := make(map[string]struct{}, len(next.Deny))
+	for key := range next.Deny {
+		nextDeny[strings.ToLower(key)] = struct{}{}
+	}
+	removedDeny := make(map[string]struct{})
 	for key := range old.Deny {
-		if _, ok := next.Deny[key]; !ok {
-			d.RemovedDeny = append(d.RemovedDeny, key)
+		folded := strings.ToLower(key)
+		if _, ok := nextDeny[folded]; !ok {
+			removedDeny[folded] = struct{}{}
 		}
+	}
+	for key := range removedDeny {
+		d.RemovedDeny = append(d.RemovedDeny, key)
 	}
 	nextGlobs := stringSet(next.SelfModifyGlobs)
 	for _, glob := range old.SelfModifyGlobs {

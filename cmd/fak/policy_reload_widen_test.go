@@ -54,6 +54,17 @@ func TestDiffPolicyWideningAllowsNarrowingAndRelabel(t *testing.T) {
 	}
 }
 
+func TestDiffPolicyWideningFoldsDenyCase(t *testing.T) {
+	installed := adjudicator.Policy{Deny: map[string]abi.ReasonCode{"artifact": abi.ReasonPolicyBlock, "gone": abi.ReasonPolicyBlock}}
+	parsed := adjudicator.Policy{Deny: map[string]abi.ReasonCode{"Artifact": abi.ReasonPolicyBlock}}
+	if got := strings.Join(diffPolicyWidening(installed, parsed).RemovedDeny, ","); got != "gone" {
+		t.Fatalf("RemovedDeny = %q, want only the genuinely removed key %q", got, "gone")
+	}
+	if delta := diffPolicyWidening(parsed, installed); !delta.Empty() {
+		t.Fatalf("case-only Deny difference reported as widening: %s", delta.String())
+	}
+}
+
 func TestPolicyWideningConfirmationEnv(t *testing.T) {
 	for _, value := range []string{"1", "true", "YES"} {
 		t.Run(value, func(t *testing.T) {
