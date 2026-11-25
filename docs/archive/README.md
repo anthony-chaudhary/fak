@@ -19,7 +19,7 @@ Archived files preserve prior designs, retired instructions, and snapshots that 
 | A rejected or retired proposal | The option and its evidence were considered, then removed from active guidance. | Follow its decision record or current architecture route for the selected path. |
 | No replacement link | The file is still historical evidence, not current instruction. | Start from the [documentation index](../index.md) or report the missing replacement through [CONTRIBUTING.md](../../CONTRIBUTING.md#reporting-issues). |
 
-Each archived file opens with a one-line banner naming its archive date, reason, replacement and scope; `python tools/doc_reap.py check` fails when one is missing.
+Each archived file opens with a one-line banner naming its archive date, reason, replacement and scope; `go run ./cmd/docreap check` fails when one is missing.
 
 ## Lifecycle and replacement contract
 
@@ -49,7 +49,7 @@ Docs rot in two ways, and each has its own fix:
 
 The loop, from the repository root:
 
-1. `python tools/doc_reap.py rank --top 40` lists candidates worst-first. The score combines days since the last commit, inbound references (index files excluded, so orphans show up), the `doc_appeal_scorecard.py` prose score and snapshot age. Its `action` column says `regenerate` for stamped snapshots, `archive` for orphans and `repoint+archive` when code or config names the path.
+1. `go run ./cmd/docreap rank --top 40` lists candidates worst-first. The score combines days since the last commit, inbound references (index files excluded, so orphans show up) and snapshot age; add `--appeal` to fold in the `doc_appeal_scorecard.py` prose score, which runs Python once per doc. Its `action` column says `regenerate` for stamped snapshots, `archive` for orphans and `repoint+archive` when code or config names the path.
 2. Read each top row and decide: keep (still describes live code), merge (a short stub that belongs in a named live doc), regenerate, or archive. A rank is a queue, not a verdict; short docs tied to live code are usually keepers.
-3. `python tools/doc_reap.py archive docs/X.md --reason <superseded|retired|completed|rejected|orphaned|stale-snapshot> --successor <path|none> --scope "<what it records>"` moves the doc here with `git mv`, writes the banner, rebases the doc's own relative links and repoints every inbound link, including code comments and tests that name `docs/X.md`. Evidence records (`docs/_witnesses/`, `*.jsonl`) keep their original paths. Add `--dry-run` to preview.
-4. Regenerate `llms-full.txt` (`python tools/gen_llms_full.py`) and run `python tools/doc_reap.py check` plus the link gates before landing.
+3. `go run ./cmd/docreap archive docs/X.md --reason <superseded|retired|completed|rejected|orphaned|stale-snapshot> --successor <path|none> --scope "<what it records>"` moves the doc here with `git mv`, writes the banner, rebases the doc's own relative links and repoints every inbound link, including code comments and tests that name `docs/X.md`. Evidence records (`docs/_witnesses/`, `*.jsonl`) keep their original paths. Add `--dry-run` to preview.
+4. Regenerate `llms-full.txt` (`python tools/gen_llms_full.py`) and run `go run ./cmd/docreap check` plus the link gates before landing.

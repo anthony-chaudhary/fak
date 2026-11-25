@@ -989,4 +989,38 @@ var admittedPostFreeze = []string{
 	// port (50 trunk advances at admission).
 	// Relocates to: a typed gateway trace-identity config field once #2862 lands.
 	"POD_NAME",
+
+	// TWELFTH OCCURRENCE (release-unblock): seven opt-in experimental kernel and decode
+	// toggles shipped while the ratchet was red and unwatched again. As in the earlier
+	// occurrences they are admitted by name, not absorbed into baseline.go, and none can
+	// relocate until the typed config surface exists. Each is read at its literal call
+	// site, so the scan keeps corroborating it. Admission resolves the current offenses;
+	// it does not erase that liveness failure or pay the relocation debt.
+
+	// internal/compute/cuda_row_width_dispatch.go — FAK_CUDA_RMSNORM_WIDTH_DISPATCH=1
+	// selects the width-classed RMSNorm kernels. Off by default because the narrow
+	// classes reduce in a different order than the block kernel, so outputs are not
+	// bit-identical. A numeric-path toggle, not a credential.
+	// Relocates to: a typed CUDA kernel-selection config.
+	"FAK_CUDA_RMSNORM_WIDTH_DISPATCH",
+
+	// internal/ggufload/inkling2loop_prefill.go — FAK_INKLING2_BATCHED_PREFILL=1 prefills
+	// a prompt in token-axis batches instead of per-token decode steps, and
+	// FAK_INKLING2_PREFILL_GROUPED=0 swaps the expert-grouped GEMM in that prefill for
+	// the decode expert GEMV. Prefill-path toggles, not credentials.
+	// Relocates to: a typed Inkling-2 prefill config.
+	"FAK_INKLING2_BATCHED_PREFILL",
+	"FAK_INKLING2_PREFILL_GROUPED",
+
+	// internal/ggufload/inkling2loop_spec.go + inkling2dspark.go — the opt-in DSpark
+	// speculative decode: FAK_INKLING2_SPEC is the draft depth (unset or 0 keeps plain
+	// decode), FAK_INKLING2_MTP_DIR is the snapshot directory holding the draft head
+	// weights, FAK_INKLING2_VERIFY_GROUPED=1 selects the grouped expert GEMM for verify
+	// chunks, and FAK_INKLING2_DSPARK_SHORTLIST sizes the draft head's logit shortlist.
+	// A depth, a local path and two kernel toggles, not credentials.
+	// Relocates to: a typed Inkling-2 speculative-decode config.
+	"FAK_INKLING2_SPEC",
+	"FAK_INKLING2_MTP_DIR",
+	"FAK_INKLING2_VERIFY_GROUPED",
+	"FAK_INKLING2_DSPARK_SHORTLIST",
 }

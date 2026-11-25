@@ -371,6 +371,7 @@ var tier = map[string]int{
 	"goalpark":            2, // durable long Retry-After goal parking and exactly-once supervisor claim (#4805)
 	"goalsync":            2, // goal artifact sync between workspace and private backup repo; off the hot path.
 	"codexmcphealth":      3, // Codex MCP transport health diagnostic (#1445): fresh stdio smoke + stale-child inventory/reap fold over subprocess evidence. Tool-shaped mechanism leaf, off the hot path, imports only stdlib.
+	"docreap":             2, // stale-doc reaper: ranks tracked docs by age and inbound references and archives them with link repointing; shells to git through windowgate, off the hot path.
 	"pythongate":          3, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
 	"ctxknobs":            2, // MANUAL-OVERLAY COUNTER ratchet (#2199): walks cmd/fak flags/env + .claude/skills for context knobs, classifies operator-debug vs user-required, refuses a NEW user-required overlay against a frozen baseline (NEW_USER_REQUIRED_KNOB). Pure filesystem walk + fold, stdlib-only, imports nothing internal, off the hot path.
 	"knobcensus":          3, // knob census (#2210): classifies every cmd/fak flag/env + skill knob as INTENT vs HOUSEKEEPING over a tree walk. Tool-shaped mechanism leaf; imports ctxknobs(1)+stdlib, off the hot path.
