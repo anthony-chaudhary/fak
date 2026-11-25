@@ -13,6 +13,9 @@ import (
 const Vocabulary = 200058
 const MaxBlock = 32
 
+// MaxLanes bounds the sessions one batched decode step advances.
+const MaxLanes = 8
+
 var ErrUnavailable = errors.New("Inkling Metal requires an Apple GPU and macOS 26.4 or later")
 
 // Open uses the adjacent DFlash2 checkpoint when the model directory includes it.

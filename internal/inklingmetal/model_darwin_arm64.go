@@ -10,9 +10,11 @@ package inklingmetal
 */
 import "C"
 import (
+	"cmp"
 	"errors"
 	_ "github.com/anthony-chaudhary/fak/third_party/inklingmetal"
 	"math"
+	"slices"
 	"sync"
 	"unsafe"
 )
@@ -24,6 +26,7 @@ type Model struct {
 	ptr          *C.FakInkModel
 	idle         *C.FakInkSession
 	idleCapacity int
+	hasDraft     bool
 }
 type Session struct {
 	mu       sync.Mutex
@@ -44,7 +47,7 @@ func openModel(path, draft string) (*Model, error) {
 	cp, cd := C.CString(path), C.CString(draft)
 	defer C.free(unsafe.Pointer(cp))
 	defer C.free(unsafe.Pointer(cd))
-	m := new(Model)
+	m := &Model{hasDraft: draft != ""}
 	if err := nativeError(C.fak_ink_model(cp, cd, &m.ptr)); err != nil {
 		return nil, err
 	}
@@ -184,6 +187,91 @@ func (s *Session) Commit(keep int) error {
 	}
 	s.failure = nativeError(C.fak_ink_commit(s.ptr, C.uint32_t(keep)))
 	return s.failure
+}
+
+// StepBatch commits one token to each session and returns each session's
+// greedy next token, all in one GPU submission. Every session's result is the
+// one its own single steps give. The sessions need a model opened without a
+// draft and no uncommitted block. One session takes the single-session calls.
+func (m *Model) StepBatch(sessions []*Session, ids []int32) ([]int32, error) {
+	if len(sessions) == 1 && len(ids) == 1 && sessions[0] != nil && sessions[0].model == m {
+		out, err := sessions[0].BeginBlockIDs(ids)
+		if err != nil {
+			return nil, err
+		}
+		if err := sessions[0].Commit(1); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+	return m.stepBatch(sessions, ids, false, nil)
+}
+
+// StepBatchWide is StepBatch with every session in one target pass. From three
+// sessions on the kernels round a row together with the rows beside it, so a
+// session's scores vary with what it is batched with and a near tie may pick
+// another token than the session alone would.
+func (m *Model) StepBatchWide(sessions []*Session, ids []int32) ([]int32, error) {
+	return m.stepBatch(sessions, ids, true, nil)
+}
+
+// A non-nil scores receives each session's vocabulary row, in session order.
+func (m *Model) stepBatch(sessions []*Session, ids []int32, wide bool, scores []float32) ([]int32, error) {
+	if len(sessions) == 0 || len(sessions) > MaxLanes || len(ids) != len(sessions) ||
+		(scores != nil && len(scores) != len(sessions)*Vocabulary) {
+		return nil, errors.New("invalid Inkling batch width")
+	}
+	if m.hasDraft {
+		return nil, errors.New("batched Inkling decode requires a model opened without a draft")
+	}
+	order := slices.Clone(sessions)
+	if slices.Contains(order, nil) {
+		return nil, errors.New("nil Inkling batch session")
+	}
+	// Overlapping batches lock their sessions in one order.
+	slices.SortFunc(order, func(a, b *Session) int {
+		return cmp.Compare(uintptr(unsafe.Pointer(a)), uintptr(unsafe.Pointer(b)))
+	})
+	if len(slices.Compact(slices.Clone(order))) != len(order) {
+		return nil, errors.New("repeated Inkling batch session")
+	}
+	for _, s := range order {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
+	ptrs := make([]*C.FakInkSession, len(sessions))
+	for i, s := range sessions {
+		if s.model != m {
+			return nil, errors.New("Inkling batch session of another model")
+		}
+		if err := s.ready(); err != nil {
+			return nil, err
+		}
+		ptrs[i] = s.ptr
+	}
+	var onePass C.int
+	if wide {
+		onePass = 1
+	}
+	out := make([]int32, len(sessions))
+	err := nativeError(C.fak_ink_step_batch(&ptrs[0], (*C.int32_t)(unsafe.Pointer(&ids[0])), C.uint32_t(len(ids)), onePass, (*C.float)(unsafe.Pointer(unsafe.SliceData(scores))), (*C.int32_t)(unsafe.Pointer(&out[0]))))
+	if err != nil {
+		for _, s := range sessions {
+			s.failure = err
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
+// batchBytes is the scratch the model holds for batched steps so far.
+func (m *Model) batchBytes() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ptr == nil {
+		return 0
+	}
+	return uint64(C.fak_ink_batch_bytes(m.ptr))
 }
 func (s *Session) Draft(anchor int32, depth int) ([]int32, error) {
 	s.mu.Lock()

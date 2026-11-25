@@ -29,3 +29,11 @@ func (*Session) ProposeVerifyCommit(int32, int, int, int, int32) ([][3]int32, []
 
 func (*Session) PrefillID([]int32) (int32, error)            { return 0, ErrUnavailable }
 func estimateMemory(string, string, int) (MemoryPlan, error) { return MemoryPlan{}, ErrUnavailable }
+
+func (*Model) StepBatch([]*Session, []int32) ([]int32, error) {
+	return nil, ErrUnavailable
+}
+
+func (*Model) StepBatchWide([]*Session, []int32) ([]int32, error) {
+	return nil, ErrUnavailable
+}

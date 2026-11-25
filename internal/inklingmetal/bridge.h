@@ -20,6 +20,9 @@ char *fak_ink_reset(FakInkSession *, uint32_t);
 void fak_ink_free_session(FakInkSession *session);
 char *fak_ink_step(FakInkSession *s, const int32_t *tokens, uint32_t n,
                    int prefill, float *scores, int32_t *argmax);
+char *fak_ink_step_batch(FakInkSession *const *sessions, const int32_t *tokens,
+                         uint32_t n, int wide, float *scores, int32_t *argmax);
+uint64_t fak_ink_batch_bytes(FakInkModel *model);
 char *fak_ink_tree(FakInkSession *, const int32_t *rows, uint32_t count,
                    int32_t *argmax);
 char *fak_ink_propose_verify(FakInkSession *, int32_t, uint32_t, uint32_t,

@@ -7,11 +7,14 @@
 #if FAK_INKLING_METAL_SDK
 #include "bridge.h"
 #include "fak_tree_verify.hpp"
+#include "metal/abi/Gguf.h"
 #include "model/DraftCheckpoint.hpp"
 #include "model/GgufTarget.hpp"
 #include "model/Inkling2LoopTarget.hpp"
 #include "ops/PageStorage.hpp"
 #include "ops/PagedAttention.hpp"
+#include "ops/RoPE.hpp"
+#include "ops/Sampling.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -59,6 +62,29 @@ QwenTargetPrefillBuffers prefillBuffers(const PrefillArena &arena,
   return buffers;
 }
 
+// A decode arena and target wide enough for several sessions' lanes. A pass
+// borrows each session's page table and convolution state and closes inside
+// one command, so nothing here outlives a call.
+struct BatchLanes {
+  RuntimeGeometry geometry;
+  std::unique_ptr<QwenTarget> target;
+  DecodeArena decode;
+
+  BatchLanes(MetalBackend &backend, const ops::ExecutionPlans &operators,
+             const LoadedModel &weights, RuntimeGeometry base, uint32_t lanes)
+      : geometry(widen(std::move(base), weights, lanes)),
+        target(makeQwenTarget(std::get<Inkling2LoopWeights>(weights.target),
+                              geometry.target, backend, operators, 1)),
+        decode(backend, geometry, operators) {}
+  static RuntimeGeometry widen(RuntimeGeometry g, const LoadedModel &weights,
+                               uint32_t lanes) {
+    g.target.lanes = lanes;
+    g.targetScratch = qwenTargetScratchBytes(
+        std::get<Inkling2LoopWeights>(weights.target).layout, g.target, 1, 0);
+    return g;
+  }
+};
+
 struct Weights {
   MetalBackend backend;
   ops::ExecutionPlans operators;
@@ -66,6 +92,7 @@ struct Weights {
   RuntimeGeometry geometry;
   std::mutex device;
   const bool hasDraft;
+  std::vector<std::unique_ptr<BatchLanes>> exactPasses, widePass;
 
   Weights(const char *file, const char *draft, bool planOnly = false)
       : backend(""),
@@ -425,6 +452,185 @@ extern "C" char *fak_ink_step(FakInkSession *s, const int32_t *ids, uint32_t n,
     }
   });
 }
+namespace {
+// Lanes share a pass only through the tables they bind: a page entry carries
+// its extent's address, so each session keeps its own KV store.
+void encodePass(CommandGraph &graph, BatchLanes &batch,
+                std::span<FakInkSession *const> sessions, const int32_t *ids) {
+  const uint32_t n = sessions.size();
+  const auto &g = batch.geometry.target;
+  const auto d = [&](DecodeTensor t) { return batch.decode.batchSlice(t, n); };
+  const ops::StepRows step{n, n, ops::verifyLaneCap(n, n)};
+  const auto tokenBuffer = d(DecodeTensor::InputTokens);
+  const auto rowBuffer = d(DecodeTensor::TreeRows);
+  const auto layout = d(DecodeTensor::LaneLayout);
+  const auto retained = d(DecodeTensor::RetainedRows);
+  std::array<uint32_t, kLaneCount> positions{};
+  std::array<QwenTargetPrefillSequence, kLaneCount> lanes{};
+  QwenTargetCommitBuffers state;
+  state.retainedRows = retained;
+  state.laneRows = layout;
+  for (uint32_t i = 0; i < n; ++i) {
+    FakInkSession &s = *sessions[i];
+    s.ensurePages(s.position + 1);
+    static_cast<uint32_t *>(tokenBuffer.contents())[i] = ids[i];
+    static_cast<SplashTreeRow *>(rowBuffer.contents())[i] = {
+        1, SPLASH_TREE_ROOT, 0};
+    static_cast<SplashLaneRows *>(layout.contents())[i] = {i, 1};
+    static_cast<uint32_t *>(retained.contents())[i] = 1;
+    positions[i] = s.position;
+    // The attention split spans the lane cap. Bound it to allocated slots.
+    const uint64_t end = uint64_t{s.allocated} * kv::kPageTokens;
+    const uint32_t chunkRows =
+        std::min<uint64_t>(step.laneCap, end - s.position);
+    lanes[i].lane = i;
+    lanes[i].chunk = ops::PagedAttention::chunkParams(
+        s.position, chunkRows,
+        (chunkRows + kTileRows - 1) / kTileRows * kTileRows, s.allocated);
+    lanes[i].pageTable = s.table;
+    lanes[i].auxiliaryIn = s.current;
+    state.auxiliaryIn[i] = s.current;
+    state.auxiliaryOut[i] = s.next;
+  }
+  auto b = fak::inkling::targetBuffers(batch.decode.target(), 0);
+  b.linearScratch = batch.decode.linearScratch();
+  b.denseGateScratch = batch.decode.gateScratch();
+  b.ropeInverseFrequencies =
+      sessions[0]->arena.get(PrefillTensor::TargetInverseFrequencies);
+  b.laneRows = layout;
+  batch.target->addVerifyInput(graph, {tokenBuffer, rowBuffer, layout, step});
+  if (g.rotaryPairs)
+    ops::RoPE::addTreeTables(graph, layout, rowBuffer,
+                             std::span(positions).first(n),
+                             b.ropeInverseFrequencies, b.ropeCos, b.ropeSin,
+                             step, g.ropeScaling.attentionFactor(),
+                             g.rotaryPairs);
+  batch.target->addEmbedding(graph, tokenBuffer, b.hidden[0], n);
+  QwenTargetDecodeBuffers verify;
+  verify.step = step;
+  verify.tree = rowBuffer;
+  verify.capturedTargetHidden =
+      batch.decode.all(DecodeTensor::CapturedTargetHidden);
+  verify.finalHidden = batch.decode.all(DecodeTensor::FinalHidden);
+  verify.logits = batch.decode.all(DecodeTensor::Logits);
+  QwenTargetPrefillChunk chunk{b, std::span(lanes).first(n), n, &verify};
+  SpilledKvReads reads;
+  // Every session's store places its layers alike. Only that placement is read.
+  (void)batch.target->addPrefill(graph, std::span(&chunk, 1),
+                                 sessions[0]->kvStore, reads, {0, g.layers},
+                                 nullptr);
+  ops::SamplingBuffers sampling{d(DecodeTensor::Logits),
+                                d(DecodeTensor::TargetPartialMasses),
+                                d(DecodeTensor::TargetVocabularyRows),
+                                d(DecodeTensor::SamplingUniforms),
+                                d(DecodeTensor::ConstraintMasks),
+                                d(DecodeTensor::OutputTokens),
+                                d(DecodeTensor::ArgmaxValues),
+                                d(DecodeTensor::ArgmaxIndices),
+                                tokenBuffer,
+                                rowBuffer,
+                                d(DecodeTensor::TargetVocabularyRanges),
+                                d(DecodeTensor::TargetVocabularyArrivals),
+                                layout,
+                                d(DecodeTensor::VerifySources),
+                                d(DecodeTensor::Candidates),
+                                d(DecodeTensor::DraftTreeDraws),
+                                d(DecodeTensor::DraftTreeNext)};
+  std::array<ops::SamplingPolicy, kLaneCount> greedy{};
+  ops::Sampling(g.vocabularySize)
+      .addVerify(graph, std::span(greedy).first(n), sampling, step,
+                 g.stopTokens, {});
+  // A lane's one row is its own prefix, stored where the verify wrote it.
+  batch.target->addStateCommit(graph, std::move(state), step);
+}
+
+// From three rows on the projection tiles round a row with its pass's other
+// rows. Passes of at most GGUF_COLUMN_ROWS lanes keep each session's logits
+// those of its own steps; a wide step runs every lane in one pass.
+void stepBatch(std::span<FakInkSession *const> sessions, const int32_t *ids,
+               bool wide, float *scores, int32_t *argmax) {
+  const uint32_t n = sessions.size();
+  Weights &owner = *sessions[0]->owner;
+  const auto &g = owner.geometry.target;
+  for (uint32_t i = 0; i < n; ++i) {
+    FakInkSession &s = *sessions[i];
+    if (s.owner.get() != &owner ||
+        std::find(sessions.begin(), sessions.begin() + i, &s) !=
+            sessions.begin() + i)
+      throw std::invalid_argument("Inkling batch lanes must be distinct "
+                                  "sessions of one model");
+    // The draft's rings take committed rows from a session's own arenas.
+    if (s.draft)
+      throw std::invalid_argument(
+          "batched Inkling decode requires sessions opened without a draft");
+    if (s.position != s.tokens.size() || !s.stagedTree.empty() ||
+        s.position >= s.limit)
+      throw std::invalid_argument("invalid Inkling batch lane context");
+    if (ids[i] < 0 || uint32_t(ids[i]) >= g.vocabularyTokens)
+      throw std::invalid_argument("Inkling token outside vocabulary");
+  }
+  const uint32_t passLanes = wide ? n : std::min(n, GGUF_COLUMN_ROWS);
+  const uint32_t passes = (n + passLanes - 1) / passLanes;
+  auto &arenas = wide ? owner.widePass : owner.exactPasses;
+  if (arenas.size() < passes)
+    arenas.resize(passes);
+  const auto pass = [&](uint32_t k) {
+    return sessions.subspan(k * passLanes,
+                            std::min(passLanes, n - k * passLanes));
+  };
+  CommandGraph graph;
+  for (uint32_t k = 0; k < passes; ++k) {
+    const uint32_t width = wide ? std::bit_ceil(n) : GGUF_COLUMN_ROWS;
+    if (!arenas[k] || arenas[k]->geometry.target.lanes < width)
+      arenas[k] = std::make_unique<BatchLanes>(owner.backend, owner.operators,
+                                               owner.weights, owner.geometry,
+                                               width);
+    encodePass(graph, *arenas[k], pass(k), ids + k * passLanes);
+  }
+  (void)owner.backend.submitCommandAsync(graph.dispatches()).wait();
+  for (uint32_t k = 0, i = 0; k < passes; ++k) {
+    const uint32_t lanes = pass(k).size();
+    const auto &decode = arenas[k]->decode;
+    const auto *selected = static_cast<const int32_t *>(
+        decode.batchSlice(DecodeTensor::OutputTokens, lanes).contents());
+    const auto *head = static_cast<const float *>(
+        decode.batchSlice(DecodeTensor::Logits, lanes).contents());
+    for (uint32_t lane = 0; lane < lanes; ++lane, ++i) {
+      FakInkSession &s = *sessions[i];
+      std::swap(s.current, s.next);
+      s.tokens.push_back(ids[i]);
+      s.position = s.tokens.size();
+      argmax[i] = selected[lane];
+      if (scores)
+        std::copy_n(head + uint64_t(lane) * g.vocabularySize,
+                    g.vocabularyTokens,
+                    scores + uint64_t(i) * g.vocabularyTokens);
+    }
+  }
+}
+} // namespace
+
+extern "C" char *fak_ink_step_batch(FakInkSession *const *sessions,
+                                    const int32_t *ids, uint32_t n, int wide,
+                                    float *scores, int32_t *argmax) {
+  return guard([&] {
+    if (!n || n > kLaneCount)
+      throw std::invalid_argument("invalid Inkling batch width");
+    std::lock_guard lock(sessions[0]->owner->device);
+    stepBatch(std::span(sessions, n), ids, wide, scores, argmax);
+  });
+}
+extern "C" uint64_t fak_ink_batch_bytes(FakInkModel *m) {
+  std::lock_guard lock(m->owner->device);
+  uint64_t bytes = 0;
+  for (const auto *arenas : {&m->owner->exactPasses, &m->owner->widePass})
+    for (const auto &batch : *arenas)
+      if (batch) {
+        const auto scratch = batch->target->allocatedScratchBytes();
+        bytes += batch->decode.bytes() + scratch.prefill + scratch.decode;
+      }
+  return bytes;
+}
 extern "C" char *fak_ink_commit(FakInkSession *s, uint32_t keep) {
   return guard([&] {
     std::lock_guard lock(s->owner->device);
@@ -594,4 +800,13 @@ extern "C" char *fak_ink_propose(FakInkSession *s, int32_t anchor,
   });
 }
 
+#else
+#include "bridge.h"
+#include <cstring>
+char *fak_ink_step_batch(FakInkSession *const *, const int32_t *, uint32_t,
+                         int, float *, int32_t *) {
+  return strdup(
+      "Inkling Metal requires macOS 26.4 SDK and Metal 4 shader support");
+}
+uint64_t fak_ink_batch_bytes(FakInkModel *) { return 0; }
 #endif
