@@ -24,9 +24,13 @@ The MacBook has 18 GPU cores and runs macOS 27.0.1 on arm64. All engines read th
 The release installer (`install.sh`) and Homebrew install the latest tag, so until the first tag after v0.57.0 ships, build from `main`:
 
 ```sh
-go install github.com/anthony-chaudhary/fak/cmd/fak@main
-fak version   # expect "0.57.0" plus "build: 1f31533f2ccb" or a later main commit
+git clone --depth 1 https://github.com/anthony-chaudhary/fak.git
+cd fak
+go build -o fak ./cmd/fak    # needs Go 1.26+ and cgo (Xcode command line tools)
+./fak version   # expect "0.57.0" plus a "build:" line naming a main commit at or after 1f31533f2ccb
 ```
+
+The commands below call the binary `fak`; from the clone, run `./fak` or put it on your `PATH`. `go install ...@main` is not a substitute: the Go module proxy timed out fetching `main` when this page was checked, and `...@latest` resolves to v0.56.0.
 
 Then run the model by alias. On Apple Silicon this downloads the pinned target GGUF and the DFlash2 draft on first use and places the draft next to the GGUF. The alias, and its use as the default for a bare `fak run` on Macs with 24 GB or more, landed on `main` at 6f56c684d, after the qualified revision above, so use a current `main` build:
 
@@ -40,7 +44,7 @@ The measurements on this page used an explicit path to a local copy of the same 
 fak run "$HOME/models/inkling2/Inkling-2-Mini-UD-Q3_K_XL.gguf" --effort none --timings --temp 0 --max-tokens 256 --quiet "What is 2 + 2? Reply with the number only."
 ```
 
-Models: the target is `Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf` from [unsloth/Inkling-2-Mini-GGUF](https://huggingface.co/unsloth/Inkling-2-Mini-GGUF). The DFlash2 draft is [incoai/Inkling-2-Mini-DFlash2@4f9088ea](https://huggingface.co/incoai/Inkling-2-Mini-DFlash2/tree/4f9088ea66c21f2b99ed657d1941c306b03e84d2). Put the draft in an `Inkling-2-Mini-DFlash2/` directory next to the GGUF; Fak picks it up automatically. Check both files against the SHA-256 values above. This run used a 36 GB M3 Pro. The process peaked at about 16 GB.
+Models: the target is published as `Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file` in [unsloth/Inkling-2-Mini-GGUF](https://huggingface.co/unsloth/Inkling-2-Mini-GGUF). The DFlash2 draft is [incoai/Inkling-2-Mini-DFlash2@4f9088ea](https://huggingface.co/incoai/Inkling-2-Mini-DFlash2/tree/4f9088ea66c21f2b99ed657d1941c306b03e84d2). Put the draft in an `Inkling-2-Mini-DFlash2/` directory next to the GGUF; Fak picks it up automatically. Check both files against the SHA-256 values above. This run used a 36 GB M3 Pro. The process peaked at about 16 GB.
 
 Only this page and [perf-receipt-v2.json](perf-receipt-v2.json) are published in the public repository. The `receipts/` files, reproduction scripts and schedules linked below are kept in the maintainer archive, because they record local paths.
 

@@ -14801,7 +14801,7 @@ fak run inkling2-mini --max-tokens 256 "What is 2 + 2? Reply with the number onl
 [unsloth/Inkling-2-Mini-GGUF](https://huggingface.co/unsloth/Inkling-2-Mini-GGUF)
 (13,631,779,296 bytes). On Apple Silicon, `fak` also fetches the DFlash2 draft
 from [incoai/Inkling-2-Mini-DFlash2](https://huggingface.co/incoai/Inkling-2-Mini-DFlash2)
-(about 1 GB) into an `Inkling-2-Mini-DFlash2/` directory next to the GGUF. If
+(989,975,616 bytes, about 990 MB) into an `Inkling-2-Mini-DFlash2/` directory next to the GGUF. If
 the draft download fails, `fak` warns and runs the target model alone, which
 decodes more slowly. `fak run` and `fak up` reuse a copy of the GGUF you already
 downloaded when it sits in a model search directory under its published name
@@ -14810,7 +14810,8 @@ downloads into the hub cache, so pass the file path to serve a local copy.
 
 **Token budget.** Inkling-2-Mini reasons before it answers. A small
 `--max-tokens` value such as 16 can end before any visible text; use 256 or
-more, or pass `--effort none` to `fak run`.
+more, or pass `--effort none` to `fak run`. `fak run` accepts `--effort` for
+this model but refuses `--thinking-budget`.
 
 **Bare `fak run`.** With no model, or when the first argument is prompt text
 containing spaces, `fak run` prints
@@ -14827,7 +14828,8 @@ are refused with a named reason before any weights load.
 
 **`fak up`.** On a Mac that meets the requirements above, `fak up` selects
 Inkling-2-Mini instead of a Qwen tier. That session is text-only and serves one
-request at a time. `fak up --model 27B` (or another tier) returns to the Qwen
+request at a time: a request that carries tool definitions or a thinking budget
+is refused, so use a Qwen tier for tool-calling agents. `fak up --model 27B` (or another tier) returns to the Qwen
 ladder, which is also what `fak up` uses on smaller Macs, on a build without the
 native Metal target, and on every other platform.
 
@@ -14953,7 +14955,7 @@ that a model will run without swap.
 
 | Model Alias | Quantization | Approximate Model Weights | What This Estimate Covers |
 |---|---|---:|---|
-| `inkling2-mini` | UD-Q3_K_XL | 13.6 GB, plus about 1 GB for the DFlash2 draft | File sizes only; the planner budgets about 15.5 GB resident before session memory |
+| `inkling2-mini` | UD-Q3_K_XL | 13.6 GB, plus about 990 MB for the DFlash2 draft | File sizes only; the planner budgets about 15.5 GB resident before session memory |
 | `qwen2.5-coder:3b` or `qwen2.5-coder:7b` | Q4_K_M | 1.8 GB - 4.5 GB | Model weights only |
 | `qwen38` (`qwen38:27b-q2k`) | UD-Q2_K_XL | 9.4 GB | Model weights only |
 | `qwen38:27b-q4` | Q4_K_M | ~17.1 GB (15.93 GiB) | Pinned artifact weights only; context length and concurrency add runtime memory |
