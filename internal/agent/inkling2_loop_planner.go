@@ -109,6 +109,10 @@ type inkling2StopScanner struct {
 	text    []byte
 	err     error
 	stopped bool
+	// release, when set, receives each run of output no later stop can cut, in
+	// order, and returns false to end generation.
+	release  func(raw []byte) bool
+	released int
 }
 
 func newInkling2StopScanner(decode func(ids []int) (string, error), stops []string) *inkling2StopScanner {
@@ -131,17 +135,40 @@ func (s *inkling2StopScanner) push(id int) bool {
 	}
 	before := len(s.text)
 	s.text = append(s.text, piece...)
-	if s.longest == 0 {
-		return true
-	}
-	window := s.text[max(0, before-s.longest+1):]
-	for _, stop := range s.stops {
-		if stop != "" && bytes.Contains(window, []byte(stop)) {
-			s.stopped = true
-			return false
+	if s.longest > 0 {
+		window := s.text[max(0, before-s.longest+1):]
+		for _, stop := range s.stops {
+			if stop != "" && bytes.Contains(window, []byte(stop)) {
+				s.stopped = true
+				return false
+			}
 		}
 	}
-	return true
+	return s.releaseSafe()
+}
+
+// releaseSafe hands on the output before the longest suffix that could still
+// grow into a stop. A stop not yet matched must end in a later piece, so it
+// starts inside that suffix and finish never cuts released bytes.
+func (s *inkling2StopScanner) releaseSafe() bool {
+	if s.release == nil {
+		return true
+	}
+	end := len(s.text)
+	for _, stop := range s.stops {
+		for n := min(len(stop)-1, len(s.text)); n > 0 && len(s.text)-n < end; n-- {
+			if bytes.HasSuffix(s.text, []byte(stop[:n])) {
+				end = len(s.text) - n
+				break
+			}
+		}
+	}
+	if end <= s.released {
+		return true
+	}
+	raw := s.text[s.released:end]
+	s.released = end
+	return s.release(raw)
 }
 
 // finish returns the generated text, cut at each stop in order when a stop ended generation.
@@ -164,15 +191,49 @@ func (p *Inkling2LoopPlanner) Model() string { return p.modelID }
 
 func (p *Inkling2LoopPlanner) StreamingSupported() bool { return true }
 
-// CompleteStream delivers the content once the turn is decoded, like the default
-// in-kernel stream: tool-call text must not reach the client before adjudication.
+// CompleteStream streams content while the turn decodes: each delta is text that
+// the finished turn's content provably starts with, so tool-call text never reaches
+// the client before adjudication. The returned Completion is the one Complete
+// builds, and the deltas concatenate to its content. A forced tool choice may
+// rewrite content, so that turn is delivered once decoded. Text streamed before
+// a decode error stays delivered; the error follows it.
 func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
-	comp, err := p.Complete(ctx, messages, tools, opts...)
-	if err != nil || sink == nil || comp == nil || comp.Message.Content == "" {
-		return comp, err
+	sp := applySampleOpts(opts...)
+	if sink == nil {
+		return p.complete(ctx, messages, tools, sp, nil)
 	}
-	if err := sink(comp.Message.Content); err != nil {
+	if inKernelEffectiveToolName(sp.ToolChoice, tools) != "" {
+		comp, err := p.complete(ctx, messages, tools, sp, nil)
+		if err != nil || comp == nil || comp.Message.Content == "" {
+			return comp, err
+		}
+		if err := sink(comp.Message.Content); err != nil {
+			return nil, err
+		}
+		return comp, nil
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	projector := newInkling2ContentStream(len(offeredToolsFor(ctx, tools).names) > 0)
+	pump := startInkling2StreamPump(sink, cancel)
+	defer pump.stop()
+	comp, err := p.complete(streamCtx, messages, tools, sp, func(raw []byte) bool {
+		return pump.put(projector.feed(raw))
+	})
+	if sinkErr := pump.stop(); sinkErr != nil {
+		return nil, sinkErr
+	}
+	if err != nil {
 		return nil, err
+	}
+	streamed := projector.emitted.String()
+	if !strings.HasPrefix(comp.Message.Content, streamed) {
+		return nil, fmt.Errorf("inkling2_loop planner: streamed content is not a prefix of the final content")
+	}
+	if rest := comp.Message.Content[len(streamed):]; rest != "" {
+		if err := sink(rest); err != nil {
+			return nil, err
+		}
 	}
 	return comp, nil
 }
@@ -180,7 +241,11 @@ func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSin
 // Complete decodes greedily; the device forward selects the argmax on device, so
 // temperature, top_p and top_k do not apply.
 func (p *Inkling2LoopPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
-	sp := applySampleOpts(opts...)
+	return p.complete(ctx, messages, tools, applySampleOpts(opts...), nil)
+}
+
+// complete is Complete with release receiving each run of raw output no stop can cut.
+func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams, release func(raw []byte) bool) (*Completion, error) {
 	offered := offeredToolsFor(ctx, tools)
 	ids, err := p.tok.Encode(inKernelRenderPrompt(messages, tools, p.cfg, sp))
 	if err != nil {
@@ -201,6 +266,7 @@ func (p *Inkling2LoopPlanner) Complete(ctx context.Context, messages []Message, 
 	}
 
 	scan := newInkling2StopScanner(p.tok.Decode, sp.Stop)
+	scan.release = release
 	res, err := p.generate(ctx, ids, maxNew, p.stops, scan.push)
 	if err != nil {
 		return nil, err
