@@ -190,7 +190,10 @@ jobs:
           IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
         run: |
           set -euo pipefail
-          got="$(docker run --rm "$IMAGE" version 2>/dev/null | head -1 || true)"
+          # No stderr suppression and no `|| true`: a failed container start must fail this
+          # step with the loader's own message, not an empty version string.
+          out="$(docker run --rm "$IMAGE" version)"
+          got="$(printf '%s\n' "$out" | head -1)"
           echo "container fak version -> ${got}"
           case "$got" in
             *"$VERSION"*) echo "ok: CUDA image reports $VERSION" ;;
@@ -215,13 +218,13 @@ jobs:
           IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
         run: |
           set -euo pipefail
-          caps="$(docker run --rm --entrypoint fak "$IMAGE" runtime-capabilities 2>/dev/null || true)"
+          caps="$(docker run --rm --entrypoint fak "$IMAGE" runtime-capabilities)"
           echo "container fak runtime-capabilities -> ${caps}"
-          if ! echo "$caps" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if "cuda" in (d.get("build_tags") or []) else 1)' 2>/dev/null; then
+          if ! echo "$caps" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if "cuda" in (d.get("build_tags") or []) else 1)'; then
             echo "::error::CUDA image binary lacks the 'cuda' build tag: '$caps'"; exit 1
           fi
           echo "ok: CUDA image binary was compiled with the cuda build tag"
-          if ! docker run --rm --entrypoint sh "$IMAGE" -c 'ldd /usr/local/bin/fak 2>/dev/null | grep -q libcudart'; then
+          if ! docker run --rm --entrypoint sh "$IMAGE" -c 'ldd /usr/local/bin/fak | grep -q libcudart'; then
             echo "::error::CUDA image fak is not linked against libcudart — the cuda runtime linkage is missing"; exit 1
           fi
           echo "ok: CUDA image fak is dynamically linked against libcudart"

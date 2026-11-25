@@ -406,7 +406,8 @@ jobs:
           fi
           cuda_caps="$(docker run --rm --entrypoint fak "$cuda_digest" runtime-capabilities)"
           echo "$cuda_caps" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if "cuda" in (d.get("build_tags") or []) else 1)'
-          cuda_version="$(docker run --rm --entrypoint fak "$cuda_digest" version 2>/dev/null | head -1)"
+          cuda_version_out="$(docker run --rm --entrypoint fak "$cuda_digest" version)"
+          cuda_version="$(printf '%s\n' "$cuda_version_out" | head -1)"
           if [ "$cuda_version" != "$VERSION" ]; then
             echo "::error::CUDA image version mismatch: got '$cuda_version', want '$VERSION'"
             exit 1
