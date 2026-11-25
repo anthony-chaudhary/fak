@@ -32,8 +32,15 @@ static __device__ __forceinline__ int ink2_ats_keys(const float *meta, int windo
 __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
     k_ink2_attend_scores(const float *q, const float *r, const float *sinks, const float *relBias,
                          const float *kcache, double *scores, float *out, const float *meta, int heads, int kvHeads,
-                         int headDim, int relLen, int extent, int window, int cap, float scale) {
-  const int h = blockIdx.x, c = blockIdx.y;
+                         int headDim, int relLen, int extent, int window, int cap, float scale, Ink2Seq sq) {
+  const int h = blockIdx.x, c = blockIdx.y, seq = blockIdx.z;
+  q = ink2_row(q, sq.q, seq);
+  r = ink2_row(r, sq.r, seq);
+  sinks = ink2_row(sinks, sq.sinks, seq);
+  kcache = ink2_row(kcache, sq.kc, seq);
+  scores = ink2_row(scores, sq.scores, seq);
+  out = ink2_row(out, sq.out, seq);
+  meta = ink2_row(meta, sq.meta, seq);
   const int kvh = h / (heads / kvHeads);
   const int kvDim = kvHeads * headDim;
   int first;
@@ -79,8 +86,12 @@ __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
 
 __global__ void __launch_bounds__(256)
     k_ink2_attend_exp(double *scores, const float *out, float *r, const float *meta, int headDim, int relLen,
-                      int window, int cap, int chunks) {
-  const int h = blockIdx.x, c = blockIdx.y;
+                      int window, int cap, int chunks, Ink2Seq sq) {
+  const int h = blockIdx.x, c = blockIdx.y, seq = blockIdx.z;
+  scores = ink2_row(scores, sq.scores, seq);
+  out = ink2_row(out, sq.out, seq);
+  r = ink2_row(r, sq.r, seq);
+  meta = ink2_row(meta, sq.meta, seq);
   int first;
   const int n = ink2_ats_keys(meta, window, cap, &first);
   const double *cm = (const double *)(out + (size_t)h * headDim);
@@ -100,8 +111,13 @@ __global__ void __launch_bounds__(256)
 template <bool STAGED>
 __global__ void __launch_bounds__(INK2_ATT_THREADS)
     k_ink2_attend_out(const double *scores, const float *vcache, const float *r, float *out, const float *meta,
-                      int heads, int kvHeads, int headDim, int relLen, int window, int cap) {
-  const int h = blockIdx.x;
+                      int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq) {
+  const int h = blockIdx.x, seq = blockIdx.z;
+  scores = ink2_row(scores, sq.scores, seq);
+  vcache = ink2_row(vcache, sq.vc, seq);
+  r = ink2_row(r, sq.r, seq);
+  out = ink2_row(out, sq.out, seq);
+  meta = ink2_row(meta, sq.meta, seq);
   const int kvh = h / (heads / kvHeads);
   const int kvDim = kvHeads * headDim;
   int first;
@@ -174,13 +190,14 @@ extern "C" int fcuda_ink2_attend_split_select(int mode) {
 
 // Launches the split attend; false (nothing launched) when the shape keeps the
 // reference: the chunk maxes need headDim / 2 >= INK2_ATS_CHUNKS doubles of out and
-// the parked max needs an even relLen >= 2 (8-byte aligned rows).
+// the parked max needs an even relLen >= 2 (8-byte aligned rows). blockIdx.z is the
+// sequence of sq; every sequence's r and out rows must keep that alignment.
 static bool ink2_attend_split(const float *q, const float *r, const float *sinks, const float *relBias,
                               const float *kcache, const float *vcache, double *scores, float *out, const float *meta,
                               int heads, int kvHeads, int headDim, int relLen, int extent, int window, int cap,
-                              float scale) {
+                              float scale, const Ink2Seq &sq, int C) {
   if (!ink2_ats_enabled() || headDim / 2 < INK2_ATS_CHUNKS || (headDim & 31) != 0 || relLen < 2 || (relLen & 1) != 0 ||
-      ((uintptr_t)r & 7) != 0 || ((uintptr_t)out & 7) != 0)
+      ((uintptr_t)r & 7) != 0 || ((uintptr_t)out & 7) != 0 || (sq.r & 1) != 0 || (sq.out & 1) != 0)
     return false;
   size_t osmem = (size_t)cap * (sizeof(double) + sizeof(float));
   static size_t optin = 0;
@@ -199,20 +216,20 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
     }
   }
   if (!staged) osmem = 0;
-  const dim3 g1(heads, INK2_ATS_CHUNKS), g3(heads, headDim / 32);
+  const dim3 g1(heads, INK2_ATS_CHUNKS, C), g3(heads, headDim / 32, C);
   FCUDA_TS("k_ink2_attend_scores", g1, k_ink2_attend_scores<<<g1, INK2_ATS_WARPS * 32, 0, g_stream>>>(
                                            q, r, sinks, relBias, kcache, scores, out, meta, heads, kvHeads, headDim,
-                                           relLen, extent, window, cap, scale));
+                                           relLen, extent, window, cap, scale, sq));
   FCUDA_TS("k_ink2_attend_exp", g1, k_ink2_attend_exp<<<g1, 256, 0, g_stream>>>(scores, out, (float *)r, meta, headDim,
-                                                                                  relLen, window, cap, INK2_ATS_CHUNKS));
+                                                                                  relLen, window, cap, INK2_ATS_CHUNKS, sq));
   if (staged) {
     FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<true><<<g3, (INK2_ATT_THREADS / headDim) * 32, osmem, g_stream>>>(
                                           scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
-                                          cap));
+                                          cap, sq));
   } else {
     FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<false><<<g3, (INK2_ATT_THREADS / headDim) * 32, 0, g_stream>>>(
                                           scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
-                                          cap));
+                                          cap, sq));
   }
   return true;
 }

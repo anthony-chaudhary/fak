@@ -94,7 +94,7 @@ type inkling2Resident struct {
 	argIdx            ink2Ref
 	kc, vc, hist      []ink2Ref
 	caps              []int
-	off               int
+	off, arenaFloats  int
 	pos               int
 	err               error
 
@@ -200,12 +200,19 @@ func concatRows(rows [][]float32) []float32 {
 }
 
 func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Resident, error) {
+	return newInkling2ResidentSized(m, be, inkling2ResidentCtx, inkling2ArenaFloats)
+}
+
+// newInkling2ResidentSized is newInkling2Resident with ctx global-slot cache positions
+// and an arenaFloats per-token arena. ctx 0 allocates no slot caches, histories or
+// scores (caps still hold the local ring sizes) for a caller that owns its own state.
+func newInkling2ResidentSized(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats int) (*inkling2Resident, error) {
 	dev, ok := be.(compute.Inkling2Device)
 	if !ok {
 		return nil, fmt.Errorf("inkling2 resident: backend %s has no inkling2 device ops", be.Name())
 	}
 	hp, w := m.HP, m.Weights
-	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}}
+	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats}
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
 	s.batched = hasPrefill && (inkling2BatchedPrefill() || inkling2SpecDepth() > 0)
 	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
@@ -248,7 +255,7 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 	s.kc, s.vc, s.hist, s.caps = make([]ink2Ref, slots), make([]ink2Ref, slots), make([]ink2Ref, slots), make([]int, slots)
 	maxCap := hp.SlidingWindow
 	for slot := 0; slot < slots; slot++ {
-		cap := inkling2ResidentCtx
+		cap := ctx
 		if hp.LocalLayer[inkling2SlotLayer(hp, slot)] {
 			cap = hp.SlidingWindow
 			if s.batched {
@@ -257,12 +264,16 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 		}
 		maxCap = max(maxCap, cap)
 		s.caps[slot] = cap
-		s.kc[slot], s.vc[slot] = s.alloc(cap*kvDim), s.alloc(cap*kvDim)
-		s.hist[slot] = s.alloc(channels * (hp.ConvKernel - 1))
+		if ctx > 0 {
+			s.kc[slot], s.vc[slot] = s.alloc(cap*kvDim), s.alloc(cap*kvDim)
+			s.hist[slot] = s.alloc(channels * (hp.ConvKernel - 1))
+		}
 	}
-	s.scores = s.alloc(2 * hp.Heads * maxCap)
+	if ctx > 0 {
+		s.scores = s.alloc(2 * hp.Heads * maxCap)
+	}
 	s.in = s.alloc(hp.Hidden + 4)
-	s.arena = s.alloc(inkling2ArenaFloats)
+	s.arena = s.alloc(arenaFloats)
 	s.argIdx = s.alloc(4)
 	for i := range s.layers {
 		for _, e := range []ink2Experts{s.layers[i].gateUp, s.layers[i].down} {
@@ -320,7 +331,7 @@ func (s *inkling2Resident) close() {
 
 func (s *inkling2Resident) tmp(n int) ink2Ref {
 	n = (n + 63) &^ 63
-	if s.off+n > inkling2ArenaFloats {
+	if s.off+n > s.arenaFloats {
 		s.fail(fmt.Errorf("inkling2 resident: arena exhausted at %d floats", s.off+n))
 		return s.arena
 	}

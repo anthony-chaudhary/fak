@@ -43,6 +43,20 @@ struct Ink2States {
 
 static __device__ __forceinline__ int ink2_pos(const float *meta) { return __float_as_int(meta[0]); }
 
+// Element strides between the sequences of a sequence-batched launch, whose last grid
+// axis is the sequence (llama.cpp fattn-vec / vLLM paged-attention v1 layout). A
+// single-sequence launch passes all zeros, so one kernel body serves both and a row of
+// the batch runs exactly the arithmetic of its own launch. scores is in doubles.
+struct Ink2Seq {
+  long long q, r, k, v, kdyn, vdyn, sinks, kc, vc, hist, scores, out, meta, x, resid;
+};
+#define INK2_SEQ_FIELDS 15
+
+// p advanced to sequence s; a null operand stays null.
+template <class T> static __device__ __forceinline__ T *ink2_row(T *p, long long stride, int s) {
+  return p ? p + stride * (long long)s : p;
+}
+
 static __device__ __forceinline__ float ink2_sigmoid(float x) {
   return (float)(1.0 / (1.0 + exp((double)(-x))));
 }
@@ -485,11 +499,17 @@ static __device__ __forceinline__ float ink2_conv_chan(float xc, int c, const fl
 // order like k_ink2_moe_combine, so the combine needs no launch of its own.
 // dyn (nullable) adds per-head input-dependent taps laid out [head][tap]; resid
 // (nullable) is added to the result.
+// blockIdx.y is the sequence of a batched launch (sq.x, sq.hist, sq.out, sq.resid).
 __global__ void k_ink2_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
                             const float *resid, int n, int heads, int kn, float norm, const float *moeDown,
-                            const float *moeWts, int moeK) {
+                            const float *moeWts, int moeK, Ink2Seq sq) {
   const int c = blockIdx.x * blockDim.x + threadIdx.x;
   if (c >= n) return;
+  const int seq = blockIdx.y;
+  x = ink2_row(x, sq.x, seq);
+  hist = ink2_row(hist, sq.hist, seq);
+  out = ink2_row(out, sq.out, seq);
+  resid = ink2_row(resid, sq.resid, seq);
   float xc;
   if (moeDown) {
     xc = 0.f;
@@ -538,13 +558,27 @@ struct Ink2KVConv {
 // Post-projection attention prep for one layer visit: per-head q/r clips, k clip, v RMS,
 // the global log-scale tau on q and r, and the append of k/v into the slot cache at the
 // current position (ring index for local slots). Blocks: [0,heads) q+r heads, then
-// kvHeads k heads, then kvHeads v heads; one warp per head.
+// kvHeads k heads, then kvHeads v heads; one warp per head. blockIdx.y is the sequence.
 __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
                                 const float *rclip, float *kcache, float *vcache, const float *meta,
                                 int heads, int kvHeads, int headDim, int relLen, float qkClip, float relClip,
-                                float eps, int global, float alpha, float floorTok, int cap, Ink2KVConv cv) {
+                                float eps, int global, float alpha, float floorTok, int cap, Ink2KVConv cv0,
+                                Ink2Seq sq) {
   const int lane = threadIdx.x & 31;
   const int b = blockIdx.x;
+  const int seq = blockIdx.y;
+  q = ink2_row(q, sq.q, seq);
+  r = ink2_row(r, sq.r, seq);
+  k = ink2_row(k, sq.k, seq);
+  v = ink2_row(v, sq.v, seq);
+  kcache = ink2_row(kcache, sq.kc, seq);
+  vcache = ink2_row(vcache, sq.vc, seq);
+  meta = ink2_row(meta, sq.meta, seq);
+  Ink2KVConv cv = cv0;
+  cv.dyn[0] = ink2_row(cv.dyn[0], sq.kdyn, seq);
+  cv.dyn[1] = ink2_row(cv.dyn[1], sq.vdyn, seq);
+  cv.hist[0] = ink2_row(cv.hist[0], sq.hist, seq);
+  cv.hist[1] = ink2_row(cv.hist[1], sq.hist, seq);
   const int pos = ink2_pos(meta);
   const int idx = pos % cap;
   if (b < heads) {
@@ -600,8 +634,18 @@ __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float 
 __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q, const float *r, const float *sinks, const float *relBias,
                               const float *kcache, const float *vcache, double *scores, float *out,
                               const float *meta, int heads, int kvHeads, int headDim, int relLen,
-                              int extent, int window, int cap, float scale) {
+                              int extent, int window, int cap, float scale, Ink2Seq sq) {
   const int h = blockIdx.x;
+  // blockIdx.y is the sequence, each with its own scores rows
+  const int seq = blockIdx.y;
+  q = ink2_row(q, sq.q, seq);
+  r = ink2_row(r, sq.r, seq);
+  sinks = ink2_row(sinks, sq.sinks, seq);
+  kcache = ink2_row(kcache, sq.kc, seq);
+  vcache = ink2_row(vcache, sq.vc, seq);
+  scores = ink2_row(scores, sq.scores, seq);
+  out = ink2_row(out, sq.out, seq);
+  meta = ink2_row(meta, sq.meta, seq);
   const int kvh = h / (heads / kvHeads);
   const int kvDim = kvHeads * headDim;
   const int pos = ink2_pos(meta);
@@ -775,7 +819,11 @@ static __device__ __forceinline__ unsigned long long ink2_argkey(float v, int i)
   return ((unsigned long long)ord << 32) | (unsigned long long)(0xffffffffu - (unsigned int)i);
 }
 
-__global__ void k_ink2_softcap_argmax(float *logits, int n, float cap, unsigned long long *key) {
+// blockIdx.y is the row of a batched launch: logits advance by ld, keys by 2 (a [rows][4]
+// int layout whose ints 2..3 are the row's key).
+__global__ void k_ink2_softcap_argmax(float *logits, int n, float cap, unsigned long long *key, long long ld) {
+  logits += ld * (long long)blockIdx.y;
+  key += 2 * blockIdx.y;
   __shared__ unsigned long long best[32];
   unsigned long long mine = 0;
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x) {
@@ -800,8 +848,10 @@ __global__ void k_ink2_softcap_argmax(float *logits, int n, float cap, unsigned 
   }
 }
 
+// Thread i decodes row i of the [rows][4] layout (key at ints 2..3).
 __global__ void k_ink2_argkey_index(const unsigned long long *key, int *outIdx) {
-  *outIdx = (int)(0xffffffffu - (unsigned int)(*key & 0xffffffffull));
+  const int i = threadIdx.x;
+  outIdx[4 * i] = (int)(0xffffffffu - (unsigned int)(key[2 * i] & 0xffffffffull));
 }
 
 // Expert-indexed GEMVs: blockIdx.y is the routed slot, ids[slot] selects the expert's
@@ -1221,10 +1271,31 @@ extern "C" int fcuda_ink2_control(const float *const *ptrs, int nj, float *g, fl
   return ink2_last_error();
 }
 
+// st: INK2_SEQ_FIELDS host strides in Ink2Seq field order (scores in floats), or null.
+static Ink2Seq ink2_seq_strides(const long long *st) {
+  Ink2Seq sq = {};
+  if (st) {
+    long long *f = (long long *)&sq;
+    for (int i = 0; i < INK2_SEQ_FIELDS; ++i) f[i] = st[i];
+    sq.scores /= 2;
+  }
+  return sq;
+}
+
 extern "C" int fcuda_ink2_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
                                const float *resid, int n, int heads, int kn, float norm) {
   FCUDA_TS("k_ink2_conv", (n + 255) / 256, k_ink2_conv<<<(n + 255) / 256, 256, 0, g_stream>>>(
-      x, w, dyn, hist, out, resid, n, heads, kn, norm, nullptr, nullptr, 0));
+      x, w, dyn, hist, out, resid, n, heads, kn, norm, nullptr, nullptr, 0, Ink2Seq{}));
+  return ink2_last_error();
+}
+
+// fcuda_ink2_conv_seq is fcuda_ink2_conv (no dynamic taps) over C sequences in one launch.
+extern "C" int fcuda_ink2_conv_seq(const float *x, const float *w, float *hist, float *out, const float *resid,
+                                   int n, int kn, float norm, const long long *st, int C) {
+  if (C < 1 || C > 65535) return (int)cudaErrorInvalidValue;
+  const dim3 g((n + 255) / 256, C);
+  FCUDA_TS("k_ink2_conv", g, k_ink2_conv<<<g, 256, 0, g_stream>>>(x, w, nullptr, hist, out, resid, n, 1, kn, norm,
+                                                                   nullptr, nullptr, 0, ink2_seq_strides(st)));
   return ink2_last_error();
 }
 
@@ -1233,7 +1304,7 @@ extern "C" int fcuda_ink2_conv(const float *x, const float *w, const float *dyn,
 extern "C" int fcuda_ink2_combine_conv(const float *down, const float *wts, int k, const float *w, float *hist,
                                        float *out, const float *resid, int n, int kn, float norm) {
   FCUDA_TS("k_ink2_conv", (n + 255) / 256, k_ink2_conv<<<(n + 255) / 256, 256, 0, g_stream>>>(
-      nullptr, w, nullptr, hist, out, resid, n, 1, kn, norm, down, wts, k));
+      nullptr, w, nullptr, hist, out, resid, n, 1, kn, norm, down, wts, k, Ink2Seq{}));
   return ink2_last_error();
 }
 
@@ -1242,7 +1313,19 @@ extern "C" int fcuda_ink2_qkv_post(float *q, float *r, const float *k, const flo
                                    int kvHeads, int headDim, int relLen, float qkClip, float relClip, float eps,
                                    int global, float alpha, float floorTok, int cap, const float *const *conv,
                                    float kNorm, float vNorm, int kn) {
-  if (headDim > 256) return (int)cudaErrorInvalidValue;
+  return fcuda_ink2_qkv_post_seq(q, r, k, v, qclip, rclip, kcache, vcache, meta, heads, kvHeads, headDim, relLen,
+                                 qkClip, relClip, eps, global, alpha, floorTok, cap, conv, kNorm, vNorm, kn, nullptr, 1);
+}
+
+// fcuda_ink2_qkv_post_seq is fcuda_ink2_qkv_post over C sequences in one launch: every
+// operand but the weights and clip scales advances by its stride in st.
+extern "C" int fcuda_ink2_qkv_post_seq(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                       const float *rclip, float *kcache, float *vcache, const float *meta,
+                                       int heads, int kvHeads, int headDim, int relLen, float qkClip, float relClip,
+                                       float eps, int global, float alpha, float floorTok, int cap,
+                                       const float *const *conv, float kNorm, float vNorm, int kn,
+                                       const long long *st, int C) {
+  if (headDim > 256 || C < 1 || C > 65535) return (int)cudaErrorInvalidValue;
   Ink2KVConv cv = {};
   if (conv) {
     // conv: k weight, v weight, k dyn, v dyn, k hist, v hist
@@ -1257,10 +1340,10 @@ extern "C" int fcuda_ink2_qkv_post(float *q, float *r, const float *k, const flo
     cv.kn = kn;
     cv.on = 1;
   }
-  const int blocks = heads + 2 * kvHeads;
+  const dim3 blocks(heads + 2 * kvHeads, C);
   FCUDA_TS("k_ink2_qkv_post", blocks, k_ink2_qkv_post<<<blocks, 32, 0, g_stream>>>(
       q, r, k, v, qclip, rclip, kcache, vcache, meta, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global,
-      alpha, floorTok, cap, cv));
+      alpha, floorTok, cap, cv, ink2_seq_strides(st)));
   return ink2_last_error();
 }
 
@@ -1273,9 +1356,24 @@ extern "C" int fcuda_ink2_attend(const float *q, const float *r, const float *si
                                  const float *kcache, const float *vcache, double *scores, float *out,
                                  const float *meta, int heads, int kvHeads, int headDim, int relLen, int extent,
                                  int window, int cap, float scale) {
-  if (headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS) return (int)cudaErrorInvalidValue;
+  return fcuda_ink2_attend_seq(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen,
+                               extent, window, cap, scale, nullptr, 1);
+}
+
+// fcuda_ink2_attend_seq is fcuda_ink2_attend over C sequences in one launch per kernel;
+// scores holds st's scores stride (floats) per sequence, so sequences never share it.
+// The split/reference choice is made once for every row by the same rule a single
+// sequence applies, and the two are bit-identical anyway.
+extern "C" int fcuda_ink2_attend_seq(const float *q, const float *r, const float *sinks, const float *relBias,
+                                     const float *kcache, const float *vcache, double *scores, float *out,
+                                     const float *meta, int heads, int kvHeads, int headDim, int relLen, int extent,
+                                     int window, int cap, float scale, const long long *st, int C) {
+  if (headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS || C < 1 || C > 65535)
+    return (int)cudaErrorInvalidValue;
+  if (st && (st[10] & 1) != 0) return (int)cudaErrorInvalidValue;
+  const Ink2Seq sq = ink2_seq_strides(st);
   if (ink2_attend_split(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen, extent,
-                        window, cap, scale))
+                        window, cap, scale, sq, C))
     return ink2_last_error();
   const size_t smem = (size_t)cap * sizeof(float);
   if (smem + INK2_SMEM_STATIC_ALLOWANCE > 48 * 1024) {
@@ -1285,9 +1383,10 @@ extern "C" int fcuda_ink2_attend(const float *q, const float *r, const float *si
       return (int)oe;
     }
   }
-  FCUDA_TS("k_ink2_attend", heads, k_ink2_attend<<<heads, INK2_ATT_THREADS, smem, g_stream>>>(
+  const dim3 g(heads, C);
+  FCUDA_TS("k_ink2_attend", g, k_ink2_attend<<<g, INK2_ATT_THREADS, smem, g_stream>>>(
       q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen, extent, window, cap,
-      scale));
+      scale, sq));
   return ink2_last_error();
 }
 
@@ -1332,8 +1431,22 @@ extern "C" int fcuda_ink2_softcap_argmax(float *logits, int n, float cap, int *o
   cudaError_t e = cudaSuccess;
   FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(key, 0, sizeof(*key), g_stream));
   if (e != cudaSuccess) return (int)e;
-  FCUDA_TS("k_ink2_softcap_argmax", 128, k_ink2_softcap_argmax<<<128, 256, 0, g_stream>>>(logits, n, cap, key));
+  FCUDA_TS("k_ink2_softcap_argmax", 128, k_ink2_softcap_argmax<<<128, 256, 0, g_stream>>>(logits, n, cap, key, 0));
   FCUDA_TS("k_ink2_argkey_index", 1, k_ink2_argkey_index<<<1, 1, 0, g_stream>>>(key, outIdx));
+  return ink2_last_error();
+}
+
+// fcuda_ink2_softcap_argmax_seq is fcuda_ink2_softcap_argmax over C rows of logits ld
+// floats apart, into outIdx[C][4] (index at int 0, key at ints 2..3 of each row).
+extern "C" int fcuda_ink2_softcap_argmax_seq(float *logits, int n, long long ld, float cap, int *outIdx, int C) {
+  if (C < 1 || C > 1024) return (int)cudaErrorInvalidValue;
+  unsigned long long *key = (unsigned long long *)(outIdx + 2);
+  cudaError_t e = cudaSuccess;
+  FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(outIdx, 0, (size_t)C * 4 * sizeof(int), g_stream));
+  if (e != cudaSuccess) return (int)e;
+  const dim3 g(128, C);
+  FCUDA_TS("k_ink2_softcap_argmax", g, k_ink2_softcap_argmax<<<g, 256, 0, g_stream>>>(logits, n, cap, key, ld));
+  FCUDA_TS("k_ink2_argkey_index", 1, k_ink2_argkey_index<<<1, C, 0, g_stream>>>(key, outIdx));
   return ink2_last_error();
 }
 

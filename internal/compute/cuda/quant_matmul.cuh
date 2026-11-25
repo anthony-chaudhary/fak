@@ -421,7 +421,14 @@ extern "C" int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, c
     if (status != FCUDA_Q8_MMQ_REFUSED) return status;
   }
 #endif
-  if (P < 128) return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
+  // FAK_CUDA_Q8_SMALLP=rowtile sends small batched-decode panels to the bit-identical
+  // rowtile GEMM, which loads each weight block once per tile of rows instead of per row.
+  static const int smallp_rowtile = [] {
+    const char *v = getenv("FAK_CUDA_Q8_SMALLP");
+    return v && strcmp(v, "rowtile") == 0;
+  }();
+  if (P < 128 && !(smallp_rowtile && P >= 2)) return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
+  if (P < 128) return fcuda_q8_matmul_rows_f32(dCodes, dScales, dX, dY, out, in, P, block);
   // oss-port-cuda-perf-gdn-q8-dequant-retire: the P>=128 dequant -> fp16 split + 3x cuBLAS arm
   // no longer serves prefill panels. Every panel row now runs the per-row BitExact lane: the
   // rowtile panel GEMM when its contract holds (block 32, 16-byte aligned codes, bounded output

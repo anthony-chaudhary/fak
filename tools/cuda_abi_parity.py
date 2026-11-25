@@ -297,7 +297,8 @@ BINDINGS_LABEL = ", ".join(BINDINGS)
 # include; enroll the header and both bindings rather than exempting the exports.
 HEADERS += ("internal/compute/cuda_inkling2_prefill.h",)
 HEADERS_LABEL = ", ".join(HEADERS)
-BINDINGS += ("internal/compute/cuda_inkling2.go", "internal/compute/cuda_inkling2_prefill.go")
+BINDINGS += ("internal/compute/cuda_inkling2.go", "internal/compute/cuda_inkling2_prefill.go",
+             "internal/compute/cuda_inkling2_batch.go")
 BINDINGS_LABEL = ", ".join(BINDINGS)
 
 
