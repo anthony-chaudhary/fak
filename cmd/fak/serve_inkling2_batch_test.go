@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -550,5 +551,179 @@ func TestInkling2BatchCollectDropsCancelled(t *testing.T) {
 	}
 	if g := adm.collect(dead, make(chan *inkling2QueuedRequest)); g != nil {
 		t.Fatalf("cancelled first row formed cohort %d rows, want none", len(g))
+	}
+}
+
+// admittingEngine is a serve engine whose cohorts run through run, at cohort width two.
+// The scalar path and the plain batch are forbidden: every row must come through admission.
+func admittingEngine(t *testing.T, run inkling2BatchAdmitting) *inkling2LoopBatchEngine {
+	t.Helper()
+	adm := inkling2Admission{gap: inkling2BatchDurationMax, maxWait: inkling2BatchDurationMax, max: 2, clock: inkling2RealClock{}}
+	e := newInkling2LoopBatchEngineWith(func(context.Context, []int, int, map[int]bool, func(int) bool) (agent.Inkling2LoopGeneration, error) {
+		t.Error("admitting cohort rows must not run scalar")
+		return agent.Inkling2LoopGeneration{}, nil
+	}, func([]ggufload.Inkling2LoopBatchRequest) ([]ggufload.Inkling2LoopBatchResult, error) {
+		t.Error("admitting engine ran the plain batch")
+		return nil, nil
+	}, adm, 4096)
+	e.batchAdmitting = run
+	go e.run()
+	t.Cleanup(func() { close(e.queue) })
+	return e
+}
+
+// waitQueued blocks until n requests wait in the queue, so a test admits only after
+// the caller it means to admit has arrived.
+func waitQueued(t *testing.T, e *inkling2LoopBatchEngine, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for len(e.queue) < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("queue holds %d requests, want %d", len(e.queue), n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// generateAsync runs one Generate in the background and reports its outcome.
+func generateAsync(e *inkling2LoopBatchEngine, prompt []int, maxNew int, emitted *[]int) <-chan error {
+	out := make(chan error, 1)
+	go func() {
+		_, err := e.Generate(context.Background(), prompt, maxNew, nil, func(id int) bool {
+			*emitted = append(*emitted, id)
+			return true
+		})
+		out <- err
+	}()
+	return out
+}
+
+// A request queued while a cohort runs joins the slot of a row that ended, and its
+// caller is answered with the cohort's width.
+func TestInkling2BatchAdmittedRequestJoinsFinishedSlot(t *testing.T) {
+	const maxPositions = 64
+	var e *inkling2LoopBatchEngine
+	var emitA, emitB, emitC []int
+	var errC <-chan error
+	e = admittingEngine(t, func(reqs []ggufload.Inkling2LoopBatchRequest, admit func(int) (ggufload.Inkling2LoopBatchRequest, bool)) ([]ggufload.Inkling2LoopBatchResult, error) {
+		if len(reqs) != 2 {
+			t.Errorf("cohort width %d, want 2", len(reqs))
+		}
+		reqs[0].Emit(reqs[0].Prompt[0] * 10)
+		reqs[0].Done(ggufload.Inkling2LoopBatchResult{Generated: 1})
+		errC = generateAsync(e, []int{3}, 1, &emitC)
+		waitQueued(t, e, 1)
+		c, ok := admit(maxPositions)
+		if !ok {
+			t.Error("queued request not admitted into the finished slot")
+			return nil, nil
+		}
+		c.Emit(c.Prompt[0] * 10)
+		c.Done(ggufload.Inkling2LoopBatchResult{Generated: 1})
+		reqs[1].Emit(reqs[1].Prompt[0] * 10)
+		reqs[1].Done(ggufload.Inkling2LoopBatchResult{Generated: 1})
+		return nil, nil
+	})
+	errA := generateAsync(e, []int{1}, 1, &emitA)
+	errB := generateAsync(e, []int{2}, 1, &emitB)
+	// errC is set by the cohort before it answers B, so it is safe to read after B
+	for name, ch := range map[string]<-chan error{"A": errA, "B": errB} {
+		if err := <-ch; err != nil {
+			t.Errorf("row %s: %v", name, err)
+		}
+	}
+	if err := <-errC; err != nil {
+		t.Errorf("row C: %v", err)
+	}
+	if !reflect.DeepEqual(emitA, []int{10}) || !reflect.DeepEqual(emitB, []int{20}) || !reflect.DeepEqual(emitC, []int{30}) {
+		t.Fatalf("emitted A=%v B=%v C=%v", emitA, emitB, emitC)
+	}
+	if e.admittedRows.Load() != 1 {
+		t.Fatalf("admitted rows %d, want 1", e.admittedRows.Load())
+	}
+}
+
+// A request that does not fit the cohort's capacity is held as the next cohort's first
+// row: admission refuses everything behind it, and the next cohort starts with it.
+func TestInkling2BatchNonFittingRequestHeldAsNextCohortFirst(t *testing.T) {
+	const maxPositions = 4
+	var mu sync.Mutex
+	var cohorts [][]int
+	var e *inkling2LoopBatchEngine
+	var errX, errY <-chan error
+	cohort := 0
+	e = admittingEngine(t, func(reqs []ggufload.Inkling2LoopBatchRequest, admit func(int) (ggufload.Inkling2LoopBatchRequest, bool)) ([]ggufload.Inkling2LoopBatchResult, error) {
+		firsts := make([]int, len(reqs))
+		for i, r := range reqs {
+			firsts[i] = r.Prompt[0]
+		}
+		mu.Lock()
+		cohorts = append(cohorts, firsts)
+		mu.Unlock()
+		cohort++
+		if cohort > 1 {
+			return make([]ggufload.Inkling2LoopBatchResult, len(reqs)), nil
+		}
+		// X needs 6 positions against 4; Y would fit but queues behind X
+		// X is queued before Y, so it is the request admission sees first
+		errX = generateAsync(e, []int{1, 2, 3}, 3, new([]int))
+		waitQueued(t, e, 1)
+		errY = generateAsync(e, []int{4}, 1, new([]int))
+		waitQueued(t, e, 2)
+		if _, ok := admit(maxPositions); ok {
+			t.Error("admitted a request that does not fit")
+		}
+		if _, ok := admit(maxPositions); ok {
+			t.Error("admitted a request behind a held one")
+		}
+		if n := len(e.queue); n != 1 {
+			t.Errorf("queue holds %d requests after the refusal, want Y alone", n)
+		}
+		return make([]ggufload.Inkling2LoopBatchResult, len(reqs)), nil
+	})
+	errA := generateAsync(e, []int{5}, 1, new([]int))
+	errB := generateAsync(e, []int{6}, 1, new([]int))
+	// the cohort sets errX and errY before it answers A and B, so they are read after
+	for name, ch := range map[string]<-chan error{"A": errA, "B": errB} {
+		if err := <-ch; err != nil {
+			t.Errorf("row %s: %v", name, err)
+		}
+	}
+	for name, ch := range map[string]<-chan error{"X": errX, "Y": errY} {
+		if err := <-ch; err != nil {
+			t.Errorf("row %s: %v", name, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// the cohort's row order follows arrival, so the first cohort is checked as a set
+	if len(cohorts) != 2 || len(cohorts[0]) != 2 || cohorts[0][0]+cohorts[0][1] != 11 || !reflect.DeepEqual(cohorts[1], []int{1, 4}) {
+		t.Fatalf("cohorts %v, want {5 6} then [1 4]: X first, Y after it", cohorts)
+	}
+}
+
+// A panic while a cohort runs answers the rows it admitted as well as the rows it
+// started with, so no caller waits on a worker that is gone.
+func TestInkling2BatchPanicAnswersAdmittedRows(t *testing.T) {
+	var e *inkling2LoopBatchEngine
+	var errC <-chan error
+	e = admittingEngine(t, func(reqs []ggufload.Inkling2LoopBatchRequest, admit func(int) (ggufload.Inkling2LoopBatchRequest, bool)) ([]ggufload.Inkling2LoopBatchResult, error) {
+		errC = generateAsync(e, []int{3}, 1, new([]int))
+		waitQueued(t, e, 1)
+		if _, ok := admit(64); !ok {
+			t.Error("queued request not admitted")
+		}
+		panic("device fault")
+	})
+	errA := generateAsync(e, []int{1}, 1, new([]int))
+	errB := generateAsync(e, []int{2}, 1, new([]int))
+	// the panic is recovered after errC is set, so it is safe to read once A and B answer
+	for name, ch := range map[string]<-chan error{"A": errA, "B": errB} {
+		if err := <-ch; err == nil {
+			t.Errorf("row %s answered without an error after the cohort panicked", name)
+		}
+	}
+	if err := <-errC; err == nil {
+		t.Error("row C answered without an error after the cohort panicked")
 	}
 }

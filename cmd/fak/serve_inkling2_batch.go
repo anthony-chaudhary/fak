@@ -172,6 +172,11 @@ type inkling2QueuedResult struct {
 type inkling2ScalarGenerate func(context.Context, []int, int, map[int]bool, func(int) bool) (agent.Inkling2LoopGeneration, error)
 type inkling2BatchGenerate func([]ggufload.Inkling2LoopBatchRequest) ([]ggufload.Inkling2LoopBatchResult, error)
 
+// inkling2BatchAdmitting runs a cohort that takes queued requests into the slots of
+// rows that finish: admit is polled at each boundary and returns the next request that
+// fits the cohort, if one is waiting.
+type inkling2BatchAdmitting func([]ggufload.Inkling2LoopBatchRequest, func(int) (ggufload.Inkling2LoopBatchRequest, bool)) ([]ggufload.Inkling2LoopBatchResult, error)
+
 // inkling2LoopBatchEngine owns the only GPU executor: a lone admission runs the
 // scalar engine, a wider cohort shares one row-batched greedy forward.
 type inkling2LoopBatchEngine struct {
@@ -183,6 +188,13 @@ type inkling2LoopBatchEngine struct {
 	batchGroups    atomic.Uint64
 	scalarGenerate inkling2ScalarGenerate
 	batchGenerate  inkling2BatchGenerate
+	// batchAdmitting, when set, runs cohorts with admission instead of batchGenerate.
+	batchAdmitting inkling2BatchAdmitting
+	// pending is the first queued request a running cohort could not fit: it is the
+	// next cohort's first row. Only the run worker touches it.
+	pending *inkling2QueuedRequest
+	// admittedRows counts requests that joined a running cohort.
+	admittedRows atomic.Uint64
 	// releaseArenas frees the cached cohort arenas, keeping the weight binding, so
 	// a lone request's scalar session does not have to fit beside the widest
 	// cohort's KV. arenasCached is touched only by the run worker.
@@ -199,6 +211,7 @@ func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.I
 	cohorts := ggufload.NewInkling2LoopCohorts(model, backend)
 	e := newInkling2LoopBatchEngineWith(scalar, cohorts.Generate, adm, ggufload.Inkling2LoopResidentContext)
 	e.releaseArenas = cohorts.ReleaseArenas
+	e.batchAdmitting = cohorts.GenerateAdmitting
 	if v, _ := lookup("FAK_INKLING2_TRACE"); v == "1" {
 		e.trace = true
 	}
@@ -248,8 +261,19 @@ func (e *inkling2LoopBatchEngine) Generate(ctx context.Context, prompt []int, ma
 	}
 }
 
+// run serves cohorts in arrival order. A request a running cohort could not fit is
+// the next cohort's first row, ahead of anything still queued.
 func (e *inkling2LoopBatchEngine) run() {
-	for first := range e.queue {
+	for {
+		first := e.pending
+		e.pending = nil
+		if first == nil {
+			r, ok := <-e.queue
+			if !ok {
+				return
+			}
+			first = r
+		}
 		if group := e.admission.collect(first, e.queue); len(group) > 0 {
 			e.execute(group)
 		}
@@ -260,10 +284,12 @@ func (e *inkling2LoopBatchEngine) execute(group []*inkling2QueuedRequest) {
 	// The worker goroutine sits outside net/http's per-handler recovery, so a
 	// panic here would kill the server; fail the cohort instead. done has a
 	// one-slot buffer, so the non-blocking send skips rows already answered.
+	// owned grows as a running cohort admits rows, so a panic answers those too.
+	owned := group
 	defer func() {
 		if p := recover(); p != nil {
 			err := fmt.Errorf("inkling2 batch worker panic: %v", p)
-			for _, r := range group {
+			for _, r := range owned {
 				select {
 				case r.done <- inkling2QueuedResult{err: err}:
 				default:
@@ -294,7 +320,7 @@ func (e *inkling2LoopBatchEngine) execute(group []*inkling2QueuedRequest) {
 	}
 	e.batchGroups.Add(1)
 	e.arenasCached = true
-	e.runBatch(group)
+	e.runBatch(group, &owned)
 }
 
 func (e *inkling2LoopBatchEngine) observePeak(width int) {
@@ -309,35 +335,93 @@ func inkling2BatchRowResult(br ggufload.Inkling2LoopBatchResult, width int) inkl
 	}}
 }
 
+// inkling2Cohort is the set of rows one batch run owns. owned lists every row the
+// worker must answer if the run panics, and answered marks the rows already completed.
+type inkling2Cohort struct {
+	width    int
+	owned    *[]*inkling2QueuedRequest
+	answered []bool
+}
+
+// request wraps row i of the cohort for the batch: its Done answers the caller the
+// moment the row ends, while the cohort may still be stepping.
+func (c *inkling2Cohort) request(i int, r *inkling2QueuedRequest) ggufload.Inkling2LoopBatchRequest {
+	return ggufload.Inkling2LoopBatchRequest{
+		Context: r.ctx, Prompt: r.prompt, MaxTokens: r.maxNew,
+		Stop: func(token int) bool { return r.stops[token] },
+		Emit: r.sink.send,
+		Done: func(br ggufload.Inkling2LoopBatchResult) {
+			c.answered[i] = true
+			r.done <- inkling2BatchRowResult(br, c.width)
+		},
+	}
+}
+
+// admit records r as a cohort row and wraps it.
+func (c *inkling2Cohort) admit(r *inkling2QueuedRequest) ggufload.Inkling2LoopBatchRequest {
+	*c.owned = append(*c.owned, r)
+	c.answered = append(c.answered, false)
+	return c.request(len(c.answered)-1, r)
+}
+
+// admitQueued is the admission callback of a running cohort. It takes the next live
+// queued request if it fits maxPositions. One that does not fit is held as pending and
+// nothing behind it is admitted, so a large request is not starved by small ones.
+func (e *inkling2LoopBatchEngine) admitQueued(c *inkling2Cohort, maxPositions int) (ggufload.Inkling2LoopBatchRequest, bool) {
+	for e.pending == nil {
+		var r *inkling2QueuedRequest
+		var ok bool
+		select {
+		case r, ok = <-e.queue:
+		default:
+			return ggufload.Inkling2LoopBatchRequest{}, false
+		}
+		if !ok {
+			return ggufload.Inkling2LoopBatchRequest{}, false
+		}
+		if !inkling2RowLive(r) {
+			continue
+		}
+		if len(r.prompt)+r.maxNew > maxPositions {
+			e.pending = r
+			return ggufload.Inkling2LoopBatchRequest{}, false
+		}
+		e.admittedRows.Add(1)
+		return c.admit(r), true
+	}
+	return ggufload.Inkling2LoopBatchRequest{}, false
+}
+
 // runBatch answers each row the moment it ends, so a row that stops or is cancelled
-// early does not wait for the cohort's longest row.
-func (e *inkling2LoopBatchEngine) runBatch(group []*inkling2QueuedRequest) {
-	answered := make([]bool, len(group))
+// early does not wait for the cohort's longest row. Rows admitted while the cohort runs
+// are answered the same way; any row the batch leaves unanswered gets the batch's error.
+func (e *inkling2LoopBatchEngine) runBatch(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) {
+	c := &inkling2Cohort{width: len(group), owned: owned, answered: make([]bool, len(group))}
 	reqs := make([]ggufload.Inkling2LoopBatchRequest, len(group))
 	for i, r := range group {
-		i, r := i, r
-		reqs[i] = ggufload.Inkling2LoopBatchRequest{
-			Context: r.ctx, Prompt: r.prompt, MaxTokens: r.maxNew,
-			Stop: func(token int) bool { return r.stops[token] },
-			Emit: r.sink.send,
-			Done: func(br ggufload.Inkling2LoopBatchResult) {
-				answered[i] = true
-				r.done <- inkling2BatchRowResult(br, len(group))
-			},
-		}
+		reqs[i] = c.request(i, r)
 	}
-	results, fatal := e.batchGenerate(reqs)
-	for i, r := range group {
-		if answered[i] {
+	var results []ggufload.Inkling2LoopBatchResult
+	var fatal error
+	if e.batchAdmitting != nil {
+		results, fatal = e.batchAdmitting(reqs, func(maxPositions int) (ggufload.Inkling2LoopBatchRequest, bool) {
+			return e.admitQueued(c, maxPositions)
+		})
+	} else {
+		results, fatal = e.batchGenerate(reqs)
+	}
+	for i, r := range *owned {
+		if c.answered[i] {
 			continue
 		}
-		if fatal != nil || i >= len(results) {
-			if fatal == nil {
-				fatal = fmt.Errorf("inkling2 batch: %d results for %d rows", len(results), len(group))
-			}
-			r.done <- inkling2QueuedResult{err: fatal}
+		if fatal == nil && i < len(results) {
+			r.done <- inkling2BatchRowResult(results[i], c.width)
 			continue
 		}
-		r.done <- inkling2BatchRowResult(results[i], len(group))
+		err := fatal
+		if err == nil {
+			err = fmt.Errorf("inkling2 batch: %d results for %d rows", len(results), len(group))
+		}
+		r.done <- inkling2QueuedResult{err: err}
 	}
 }

@@ -919,3 +919,195 @@ func TestInkling2CohortMixedPrefillDropsRowCancelledMidMixed(t *testing.T) {
 		t.Fatalf("%d prefill chunks %v ran, want 2: the cancelled row prompt was packed", len(chunks), chunks)
 	}
 }
+
+// fakeInk2AdmitRows builds the two-row cohort of the admission tests: row 0 ends after
+// two tokens and row 1 runs budget tokens, both on short prompts in the mixed driver.
+// events records each emit (tok >= 0) and each Done (tok -1) in callback order.
+func fakeInk2AdmitRows(budget int, events *[]ink2Event, got [][]int) []Inkling2LoopBatchRequest {
+	row := func(i int) func(int) bool {
+		return func(tok int) bool {
+			got[i] = append(got[i], tok)
+			*events = append(*events, ink2Event{i, tok})
+			return true
+		}
+	}
+	done := func(i int) func(Inkling2LoopBatchResult) {
+		return func(Inkling2LoopBatchResult) { *events = append(*events, ink2Event{i, -1}) }
+	}
+	return []Inkling2LoopBatchRequest{
+		{Prompt: fakeInk2CohortPrompt(5, 0), MaxTokens: 2, Emit: row(0), Done: done(0)},
+		{Prompt: fakeInk2CohortPrompt(5, 1), MaxTokens: budget, Emit: row(1), Done: done(1)},
+	}
+}
+
+// A request queued while the cohort runs joins the slot of the row that finished first,
+// decodes exactly what the scalar decode emits, and finishes before the cohort's long row:
+// it does not wait for the cohort to drain.
+func TestInkling2CohortAdmitsQueuedRowIntoFinishedSlot(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "64")
+	const budgetB, budgetC = 40, 5
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	var events []ink2Event
+	got := make([][]int, 3)
+	reqs := fakeInk2AdmitRows(budgetB, &events, got)
+	queued := []Inkling2LoopBatchRequest{{Prompt: fakeInk2CohortPrompt(7, 2), MaxTokens: budgetC,
+		Emit: func(tok int) bool {
+			got[2] = append(got[2], tok)
+			events = append(events, ink2Event{2, tok})
+			return true
+		},
+		Done: func(Inkling2LoopBatchResult) { events = append(events, ink2Event{2, -1}) }}}
+	admit := func(int) (Inkling2LoopBatchRequest, bool) {
+		if len(queued) == 0 {
+			return Inkling2LoopBatchRequest{}, false
+		}
+		r := queued[0]
+		queued = queued[1:]
+		return r, true
+	}
+	results, err := bt.GenerateAdmitting(reqs, admit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(7, 2), budgetC); !reflect.DeepEqual(got[2], want) {
+		t.Fatalf("admitted row emitted %v, scalar %v", got[2], want)
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(5, 1), budgetB); !reflect.DeepEqual(got[1], want) {
+		t.Fatalf("long row emitted %v, scalar %v", got[1], want)
+	}
+	if results[0].Generated != 2 || results[1].Generated != budgetB || results[0].Err != nil || results[1].Err != nil {
+		t.Fatalf("results %+v", results)
+	}
+	doneAt := map[int]int{}
+	for k, e := range events {
+		if e.tok < 0 {
+			if _, dup := doneAt[e.row]; dup {
+				t.Fatalf("Done fired twice for row %d: %v", e.row, events)
+			}
+			doneAt[e.row] = k
+		}
+	}
+	if len(doneAt) != 3 {
+		t.Fatalf("Done fired for rows %v, want all three", doneAt)
+	}
+	if doneAt[2] > doneAt[1] {
+		t.Fatalf("admitted row finished at event %d, after the long row at %d: it waited for the cohort", doneAt[2], doneAt[1])
+	}
+}
+
+// A request whose prompt and budget exceed the cohort's KV capacity is never admitted,
+// even when admit hands it back: its Done gets an error, it emits nothing, and the
+// cohort's other rows are unchanged.
+func TestInkling2CohortNeverAdmitsRequestPastCohortContext(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "64")
+	const budgetB = 40
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	var events []ink2Event
+	got := make([][]int, 3)
+	reqs := fakeInk2AdmitRows(budgetB, &events, got)
+	var bounds []int
+	var tooLong *Inkling2LoopBatchResult
+	emitted := false
+	queued := []Inkling2LoopBatchRequest{{Prompt: fakeInk2CohortPrompt(60, 2), MaxTokens: 10,
+		Emit: func(int) bool { emitted = true; return true },
+		Done: func(r Inkling2LoopBatchResult) { tooLong = &r }}}
+	admit := func(maxPositions int) (Inkling2LoopBatchRequest, bool) {
+		bounds = append(bounds, maxPositions)
+		if len(queued) == 0 {
+			return Inkling2LoopBatchRequest{}, false
+		}
+		r := queued[0]
+		queued = queued[1:]
+		return r, true
+	}
+	results, err := bt.GenerateAdmitting(reqs, admit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tooLong == nil || tooLong.Err == nil || tooLong.Generated != 0 {
+		t.Fatalf("too-long request result %+v, want an error and no tokens", tooLong)
+	}
+	if emitted {
+		t.Fatal("too-long request emitted a token")
+	}
+	for _, b := range bounds {
+		if b != bt.b.ctx {
+			t.Fatalf("admit saw %d positions, want the cohort capacity %d", b, bt.b.ctx)
+		}
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(5, 1), budgetB); !reflect.DeepEqual(got[1], want) {
+		t.Fatalf("long row emitted %v, scalar %v", got[1], want)
+	}
+	if results[1].Generated != budgetB || results[1].Err != nil {
+		t.Fatalf("long row result %+v", results[1])
+	}
+}
+
+// With the cap unset the cohort never calls admit, and the rows run as they did before.
+func TestInkling2CohortKnobOffNeverCallsAdmit(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "")
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	var events []ink2Event
+	got := make([][]int, 2)
+	calls := 0
+	admit := func(int) (Inkling2LoopBatchRequest, bool) {
+		calls++
+		return Inkling2LoopBatchRequest{Prompt: []int{1}, MaxTokens: 1, Emit: func(int) bool { return true }}, true
+	}
+	results, err := bt.GenerateAdmitting(fakeInk2AdmitRows(40, &events, got), admit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Fatalf("admit called %d times with the cap unset", calls)
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(5, 1), 40); !reflect.DeepEqual(got[1], want) || results[1].Generated != 40 {
+		t.Fatalf("long row emitted %v (generated %d), scalar %v", got[1], results[1].Generated, want)
+	}
+}
+
+// A joined row starts from empty conv history: resetRow zeroes that row's history in
+// every slot and leaves the other rows and the row's own position bookkeeping alone.
+// The host fake model has no conv slots, so this drives the batch state directly.
+func TestInkling2BatchResetRowClearsOnlyThatRowsHistory(t *testing.T) {
+	d := newFakeInk2Cohort()
+	const C, stride, slots = 3, 10, 2
+	b := &inkling2Batch{s: &inkling2Resident{dev: d}, C: C, histStride: stride, pos: []int{4, 5, 6}}
+	for slot := 0; slot < slots; slot++ {
+		tensor, err := d.Ink2Alloc(C * stride)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.hist = append(b.hist, compute.Ink2At(tensor, 0))
+		for j := range d.rows(b.hist[slot])[:C*stride] {
+			d.rows(b.hist[slot])[j] = 7
+		}
+	}
+	if err := b.resetRow(1); err != nil {
+		t.Fatal(err)
+	}
+	if b.pos[1] != 0 || b.pos[0] != 4 || b.pos[2] != 6 {
+		t.Fatalf("positions %v after resetting row 1, want [4 0 6]", b.pos)
+	}
+	for slot := range b.hist {
+		row := d.rows(b.hist[slot])
+		for j := 0; j < C*stride; j++ {
+			want := float32(7)
+			if j >= stride && j < 2*stride {
+				want = 0
+			}
+			if row[j] != want {
+				t.Fatalf("slot %d element %d = %v, want %v", slot, j, row[j], want)
+			}
+		}
+	}
+}

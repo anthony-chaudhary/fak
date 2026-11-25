@@ -244,6 +244,20 @@ func (b *inkling2Batch) begin(C, ctx int) error {
 	return nil
 }
 
+// resetRow readies finished row i for a new sequence at position 0. Its KV needs no
+// clearing: the row writes every position below its own before attention reads it.
+// Its conv history is read before the first write, so it is cleared in every slot.
+func (b *inkling2Batch) resetRow(row int) error {
+	b.pos[row] = 0
+	zero := make([]float32, b.histStride)
+	for _, h := range b.hist {
+		if err := b.s.dev.Ink2Write(at(h, row*b.histStride), zero); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // release frees the batch arenas and keeps the weight binding; the freed blocks go
 // back to the driver so the next state's admission probe sees them free.
 func (b *inkling2Batch) release() {

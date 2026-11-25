@@ -130,6 +130,8 @@ type inkling2BatchLane struct {
 	sinkTime    time.Duration
 	// skip is the prompt positions prefilled before the first step
 	skip int
+	// origin is the request index a cohort lane answers, or -1 for an admitted one
+	origin int
 }
 
 func newInkling2BatchLane(req Inkling2LoopBatchRequest, started time.Time) inkling2BatchLane {
@@ -256,7 +258,19 @@ func Inkling2LoopBatchGenerate(m *Inkling2LoopModel, be compute.Backend, reqs []
 // and token budget, and its context is checked before every step; a finished row
 // feeds an ignored token until the cohort drains and its callbacks and accounting
 // never advance again.
-func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) (_ []Inkling2LoopBatchResult, fatal error) {
+func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) ([]Inkling2LoopBatchResult, error) {
+	return bt.GenerateAdmitting(reqs, nil)
+}
+
+// GenerateAdmitting is Generate with continuous admission: when a row finishes, its
+// slot takes the next request admit returns, at the next chunk or step boundary.
+// Admission rides the mixed driver, so admit is called only when cohort prefill and the
+// long-prefill cap are both on. The cohort width and the per-row KV capacity b.ctx are
+// fixed at begin, so a request joins only when len(prompt)+MaxTokens <= b.ctx; that bound
+// is checked here as well, and a request past it is answered through its Done with an
+// error rather than admitted. A joined row restarts at position 0 on a cleared history,
+// and attention reads no position its row has not written.
+func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest, admit func(maxPositions int) (Inkling2LoopBatchRequest, bool)) (_ []Inkling2LoopBatchResult, fatal error) {
 	if len(reqs) < 2 || len(reqs) > Inkling2LoopMaxBatch {
 		return nil, fmt.Errorf("inkling2 batch stream: cohort size %d outside 2..%d", len(reqs), Inkling2LoopMaxBatch)
 	}
@@ -287,19 +301,25 @@ func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) (_ []In
 
 	started := time.Now()
 	lanes := make([]inkling2BatchLane, len(reqs))
+	results := make([]Inkling2LoopBatchResult, len(reqs))
 	for i, req := range reqs {
 		lanes[i] = newInkling2BatchLane(req, started)
+		lanes[i].origin = i
 	}
-	if b.prefillT > 0 {
-		if longCap := inkling2CohortLongPrefillCap(os.LookupEnv); longCap > 0 {
-			fatal = prefillLanesMixed(b, lanes, longCap)
-		} else {
-			fatal = prefillLanes(b, lanes)
-		}
+	longCap := inkling2CohortLongPrefillCap(os.LookupEnv)
+	mixed := b.prefillT > 0 && longCap > 0
+	if b.prefillT > 0 && !mixed {
+		fatal = prefillLanes(b, lanes)
 	}
+	keep, first := prefillHooks(lanes)
 	tokens := make([]int, len(lanes))
-	for step := 0; fatal == nil; step++ {
-		active := 0
+	for step := 0; fatal == nil; {
+		if mixed && admit != nil {
+			if fatal = admitLanes(b, lanes, results, admit); fatal != nil {
+				break
+			}
+		}
+		active, prefilling := 0, false
 		for i := range lanes {
 			lane := &lanes[i]
 			if !lane.done {
@@ -307,11 +327,25 @@ func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) (_ []In
 					lane.finish(time.Now(), err)
 				} else {
 					active++
+					prefilling = prefilling || (mixed && b.pos[i] < len(lane.req.Prompt))
 				}
 			}
-			if lane.done && lane.skip > 0 {
+			// a slot joined above is live here, so it is never parked
+			if lane.done {
 				b.park(i)
 			}
+		}
+		if active == 0 {
+			break
+		}
+		if prefilling {
+			if fatal = prefillMixedStep(b, lanes, longCap, keep, first); fatal != nil {
+				break
+			}
+			continue
+		}
+		for i := range lanes {
+			lane := &lanes[i]
 			switch fed := step + lane.skip; {
 			case fed < len(lane.req.Prompt):
 				tokens[i] = lane.req.Prompt[fed]
@@ -321,18 +355,9 @@ func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) (_ []In
 				tokens[i] = lane.req.Prompt[len(lane.req.Prompt)-1]
 			}
 		}
-		if active == 0 {
-			break
-		}
 		next, err := b.step(tokens)
 		if err != nil {
 			fatal = err
-			now := time.Now()
-			for i := range lanes {
-				if !lanes[i].done {
-					lanes[i].finish(now, err)
-				}
-			}
 			break
 		}
 		now := time.Now()
@@ -343,10 +368,15 @@ func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) (_ []In
 			}
 			lane.accept(next[i], now)
 		}
+		step++
 	}
-	results := make([]Inkling2LoopBatchResult, len(lanes))
+	if fatal != nil {
+		finishLive(lanes, fatal)
+	}
 	for i := range lanes {
-		results[i] = lanes[i].result
+		if lanes[i].origin >= 0 {
+			results[lanes[i].origin] = lanes[i].result
+		}
 	}
 	clean = fatal == nil
 	return results, fatal
@@ -415,66 +445,110 @@ func finishPrefilledLanes(lanes []inkling2BatchLane, err error) {
 	}
 }
 
-// prefillLanesMixed prefills like prefillLanes, but a lane that has its first token
-// decodes one token in each chunk that still prefills other prompts. Each chunk is
-// planned per row (inkling2MixedPrefillPlan): a prefilling row takes at most longCap
-// tokens in the first pass in row order, so a prompt of at most longCap tokens ends in
-// the first chunk while that chunk has room for it. While any lane decodes, a chunk
-// carries at most longCap prompt tokens in total. A chunk never exceeds prefillT tokens.
-func prefillLanesMixed(b *inkling2Batch, lanes []inkling2BatchLane, longCap int) error {
-	keep, first := prefillHooks(lanes)
-	cursor, err := prefillMixedChunks(b, lanes, longCap, keep, first)
-	if err == nil {
-		b.endPrefill(cursor)
+// prefillMixedStep runs one mixed chunk over the live rows: a prefilling row takes its
+// planned share of prompt tokens and a decoding row feeds its last token. Each row's
+// position is its cursor, so the chunk and the lockstep step agree on where a row writes.
+// It runs nothing when no live row is left to prefill once keep has dropped cancelled ones.
+func prefillMixedStep(b *inkling2Batch, lanes []inkling2BatchLane, longCap int,
+	keep func(int) bool, first func(int, int)) error {
+	cursor := append([]int(nil), b.pos...)
+	lens := make([]int, len(lanes))
+	var decoding []int
+	more := false
+	for i := range lanes {
+		lane := &lanes[i]
+		keep(i)
+		lens[i] = len(lane.req.Prompt)
+		switch {
+		case lane.done:
+			lens[i] = cursor[i]
+		case cursor[i] < lens[i]:
+			more = true
+		default:
+			decoding = append(decoding, i)
+		}
 	}
-	finishPrefilledLanes(lanes, err)
-	return err
+	if !more {
+		return nil
+	}
+	if b.prefillT-len(decoding) < 1 {
+		return errors.New("inkling2 batch: no room in a prefill chunk for a prompt token")
+	}
+	// a mixed chunk runs prefill kernels between captured steps, which may grow scratch
+	// a captured step still addresses, so the graph is captured again after it
+	if b.graphReady {
+		b.s.dev.Ink2GraphReset()
+		b.graphReady = false
+	}
+	segs := inkling2MixedPrefillPlan(lens, cursor, decoding, b.prefillT, longCap)
+	toks := make([][]int, len(segs))
+	for k, sg := range segs {
+		prompt := lanes[sg.row].req.Prompt
+		if sg.pos0 < len(prompt) {
+			toks[k] = prompt[sg.pos0 : sg.pos0+sg.n]
+		} else {
+			toks[k] = []int{lanes[sg.row].last}
+		}
+	}
+	if err := b.prefillChunk(segs, toks, first); err != nil {
+		return err
+	}
+	for _, sg := range segs {
+		cursor[sg.row] += sg.n
+	}
+	b.endPrefill(cursor)
+	return nil
 }
 
-// prefillMixedChunks runs the mixed chunks until no live lane has prompt left and
-// returns each row's cursor: the positions written, which the lockstep decode resumes at.
-func prefillMixedChunks(b *inkling2Batch, lanes []inkling2BatchLane, longCap int,
-	keep func(int) bool, first func(int, int)) ([]int, error) {
-	cursor := make([]int, len(lanes))
-	lens := make([]int, len(lanes))
-	for {
-		more := false
-		for i := range lanes {
-			lane := &lanes[i]
-			keep(i)
-			lens[i] = len(lane.req.Prompt)
-			if lane.done {
-				lens[i] = cursor[i]
-			}
-			more = more || (!lane.done && cursor[i] < len(lane.req.Prompt))
-		}
-		if !more {
-			return cursor, nil
-		}
-		var decoding []int
-		for i := range lanes {
-			if !lanes[i].done && cursor[i] >= len(lanes[i].req.Prompt) {
-				decoding = append(decoding, i)
-			}
-		}
-		if b.prefillT-len(decoding) < 1 {
-			return cursor, errors.New("inkling2 batch: no room in a prefill chunk for a prompt token")
-		}
-		segs := inkling2MixedPrefillPlan(lens, cursor, decoding, b.prefillT, longCap)
-		toks := make([][]int, len(segs))
-		for k, sg := range segs {
-			prompt := lanes[sg.row].req.Prompt
-			if sg.pos0 < len(prompt) {
-				toks[k] = prompt[sg.pos0 : sg.pos0+sg.n]
-			} else {
-				toks[k] = []int{lanes[sg.row].last}
-			}
-		}
-		if err := b.prefillChunk(segs, toks, first); err != nil {
-			return cursor, err
-		}
-		for _, sg := range segs {
-			cursor[sg.row] += sg.n
+// finishLive ends every row still unfinished with err.
+func finishLive(lanes []inkling2BatchLane, err error) {
+	now := time.Now()
+	for i := range lanes {
+		if !lanes[i].done {
+			lanes[i].finish(now, err)
 		}
 	}
+}
+
+// admitLanes offers every finished slot to admit in slot order and stops at the first
+// refusal. A request that does not fit is answered with its error and never joins. A
+// request with no Done is dropped, since nothing could hear its result.
+func admitLanes(b *inkling2Batch, lanes []inkling2BatchLane, results []Inkling2LoopBatchResult,
+	admit func(int) (Inkling2LoopBatchRequest, bool)) error {
+	for i := range lanes {
+		if !lanes[i].done {
+			continue
+		}
+		req, ok := admit(b.ctx)
+		if !ok {
+			return nil
+		}
+		if req.Done == nil {
+			continue
+		}
+		if err := inkling2AdmitCheck(req, b.ctx); err != nil {
+			req.Done(Inkling2LoopBatchResult{Err: err})
+			continue
+		}
+		if old := &lanes[i]; old.origin >= 0 {
+			results[old.origin] = old.result
+		}
+		lanes[i] = newInkling2BatchLane(req, time.Now())
+		lanes[i].origin = -1
+		if err := b.resetRow(i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// inkling2AdmitCheck validates an admitted request as Generate validates its cohort.
+func inkling2AdmitCheck(req Inkling2LoopBatchRequest, maxPositions int) error {
+	switch {
+	case len(req.Prompt) == 0 || req.MaxTokens <= 0 || req.Emit == nil:
+		return errors.New("inkling2 batch stream: invalid admitted request")
+	case len(req.Prompt)+req.MaxTokens > maxPositions:
+		return fmt.Errorf("inkling2 batch stream: admitted request needs %d positions, past the %d-token cohort", len(req.Prompt)+req.MaxTokens, maxPositions)
+	}
+	return nil
 }
