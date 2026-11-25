@@ -2,15 +2,16 @@ package ggufload
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
 
 // inkling2CohortDivergence compares one cohort row's tokens got with the scalar
 // reference want, step by step. It returns the first divergent step (-1 when
-// none) and whether that step is an admissible near tie: the scalar top-1 leads
-// its runner-up by less than inkling2OracleNearTieNats and the cohort picked that
-// runner-up. The rows legitimately diverge after a tie, so callers stop there.
+// none) and whether that step is an admissible near tie by inkling2NearTie on the
+// scalar side alone, since the cohort's logits are not read back. The rows
+// legitimately diverge after a tie, so callers stop there.
 func inkling2CohortDivergence(want, runnerUp []int, margin []float64, got []int) (at int, nearTie bool, why string) {
 	if len(got) != len(want) || len(runnerUp) != len(want) || len(margin) != len(want) {
 		return min(len(got), len(want)), false, fmt.Sprintf("cohort decoded %d tokens, scalar %d, runner-up %d, margin %d",
@@ -22,7 +23,7 @@ func inkling2CohortDivergence(want, runnerUp []int, margin []float64, got []int)
 		}
 		why = fmt.Sprintf("token %d = %d, scalar = %d (runner-up %d, margin %.4f nats, near-tie bound %.2f)",
 			i, got[i], want[i], runnerUp[i], margin[i], inkling2OracleNearTieNats)
-		return i, margin[i] < inkling2OracleNearTieNats && got[i] == runnerUp[i], why
+		return i, inkling2NearTie(margin[i], got[i] == runnerUp[i], math.Inf(1)), why
 	}
 	return -1, false, ""
 }

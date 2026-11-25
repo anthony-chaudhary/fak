@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -44,8 +45,31 @@ func TestInkling2CUDAOracleGreedyMatchesLlamaCpp(t *testing.T) {
 						len(prompt), st.Prefill, st.DecodeSteps, st.Decode, st.DecodeTokensPerSecond())
 				}
 				return got, err
-			})
+			}, inkling2CUDAOracleGap(t, m, be))
 		})
+	}
+}
+
+// inkling2CUDAOracleGap reads fak's side of an oracle divergence on the same
+// resident session and prefill arm Inkling2LoopGreedyTimed decodes on, so the
+// near-tie rule sees the logits the greedy pick came from. It is nil where that
+// decode takes another route (host session, speculative decode).
+func inkling2CUDAOracleGap(t *testing.T, m *Inkling2LoopModel, be compute.Backend) inkling2OracleGap {
+	if !inkling2ResidentEligible(m, be) || inkling2SpecDepth() > 0 {
+		return nil
+	}
+	return func(prompt, forced []int, tok int) (int, float64, error) {
+		s, err := newInkling2Resident(m, be)
+		if err != nil {
+			return 0, 0, err
+		}
+		defer s.close()
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		rows := inkling2TeacherForcedLogProbs(t, m, s, prompt, forced)
+		lp := rows[len(rows)-1]
+		top, _ := inkling2Top2(lp)
+		return top, lp[top] - lp[tok], nil
 	}
 }
 

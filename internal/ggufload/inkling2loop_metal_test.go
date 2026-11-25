@@ -31,7 +31,7 @@ func TestInkling2MetalOracleGreedyMatchesLlamaCpp(t *testing.T) {
 						stats.Passes, len(prompt), stats.Prefill, stats.DecodeSteps, stats.Decode, stats.DecodeTokensPerSecond(), out)
 				}
 				return out, err
-			})
+			}, nil)
 		})
 	}
 }

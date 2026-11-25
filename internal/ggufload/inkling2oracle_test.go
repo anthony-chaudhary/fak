@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -36,32 +37,63 @@ const (
 	inkling2OracleMismatch inkling2OracleVerdict = "FAIL"
 )
 
+// inkling2NearTie judges a greedy flip from both engines' side: the reference
+// led the candidate's token, its runner-up, by under the bound, or the
+// reference's token sits under the bound below the candidate's own top-1.
+// Reduction-order noise only needs one of the two distributions to be near
+// tied to flip the pick, while a real numeric bug moves both by nats. candGap
+// is +Inf when the candidate's logits are not available.
+func inkling2NearTie(refMargin float64, gotIsRefRunnerUp bool, candGap float64) bool {
+	return (gotIsRefRunnerUp && refMargin < inkling2OracleNearTieNats) || candGap < inkling2OracleNearTieNats
+}
+
+// inkling2OracleGap teacher-forces forced after prompt the way the decode under
+// test reached that position, and returns fak's top-1 token there and how far
+// tok's logprob sits below it, in nats. The fak-side clause counts only when
+// that top-1 is the token the decode picked.
+type inkling2OracleGap func(prompt, forced []int, tok int) (top int, gap float64, err error)
+
 // inkling2OracleDivergence compares got, decoded after prompt+greedy[:from],
 // with greedy[from:]. It returns the first divergent greedy index (-1 when
-// none) and whether that divergence is an admissible near tie: the oracle's
-// margin there is under inkling2OracleNearTieNats and fak picked the oracle's
-// runner-up.
-func inkling2OracleDivergence(c inkling2OracleCase, from int, got []int) (at int, nearTie bool, why string) {
+// none) and whether that divergence is an admissible near tie by
+// inkling2NearTie. A nil gap judges by the oracle's margin alone.
+func inkling2OracleDivergence(c inkling2OracleCase, from int, got []int, gap inkling2OracleGap) (at int, nearTie bool, why string, err error) {
 	want := c.greedy[from:]
 	if len(got) != len(want) {
-		return from + min(len(got), len(want)), false, fmt.Sprintf("decoded %d tokens, oracle has %d", len(got), len(want))
+		return from + min(len(got), len(want)), false, fmt.Sprintf("decoded %d tokens, oracle has %d", len(got), len(want)), nil
 	}
 	for k := range got {
 		if got[k] == want[k] {
 			continue
 		}
 		i := from + k
-		why = fmt.Sprintf("greedy token %d = %d, llama.cpp = %d (runner-up %d, margin %.4f nats, near-tie bound %.2f)",
-			i, got[k], want[k], c.runnerUp[i], c.margin[i], inkling2OracleNearTieNats)
-		return i, c.margin[i] < inkling2OracleNearTieNats && got[k] == c.runnerUp[i], why
+		fakGap, fakSide := math.Inf(1), "fak gap n/a"
+		if gap != nil {
+			prompt := append(append([]int(nil), c.prompt...), c.greedy[:from]...)
+			top, g, err := gap(prompt, c.greedy[from:i], want[k])
+			if err != nil {
+				return i, false, "", err
+			}
+			fakSide = fmt.Sprintf("fak top %d, llama.cpp's token %.4f nats below it", top, g)
+			// The gap only describes the pick when the teacher-forced top-1 is the
+			// token fak decoded; otherwise fak's own distribution says nothing about it.
+			if top == got[k] {
+				fakGap = g
+			} else {
+				fakSide += fmt.Sprintf(", but fak decoded %d", got[k])
+			}
+		}
+		why = fmt.Sprintf("greedy token %d = %d, llama.cpp = %d (runner-up %d, margin %.4f nats; %s; near-tie bound %.2f)",
+			i, got[k], want[k], c.runnerUp[i], c.margin[i], fakSide, inkling2OracleNearTieNats)
+		return i, inkling2NearTie(c.margin[i], got[k] == c.runnerUp[i], fakGap), why, nil
 	}
-	return -1, false, ""
+	return -1, false, "", nil
 }
 
 // inkling2OracleCompare runs decode from the prompt and, at each admissible
 // near tie, re-anchors on the oracle's token by decoding again from
 // prompt+greedy[:at+1], so the steps after a tie are still compared.
-func inkling2OracleCompare(c inkling2OracleCase, decode func(prompt []int, n int) ([]int, error)) (inkling2OracleVerdict, []string, error) {
+func inkling2OracleCompare(c inkling2OracleCase, decode func(prompt []int, n int) ([]int, error), gap inkling2OracleGap) (inkling2OracleVerdict, []string, error) {
 	if len(c.runnerUp) != len(c.greedy) || len(c.margin) != len(c.greedy) {
 		return inkling2OracleMismatch, nil, fmt.Errorf("%s: oracle has %d greedy, %d runner-up, %d margin entries", c.name, len(c.greedy), len(c.runnerUp), len(c.margin))
 	}
@@ -72,7 +104,10 @@ func inkling2OracleCompare(c inkling2OracleCase, decode func(prompt []int, n int
 		if err != nil {
 			return inkling2OracleMismatch, ties, err
 		}
-		at, nearTie, why := inkling2OracleDivergence(c, from, got)
+		at, nearTie, why, err := inkling2OracleDivergence(c, from, got, gap)
+		if err != nil {
+			return inkling2OracleMismatch, ties, err
+		}
 		switch {
 		case at < 0:
 			from = len(c.greedy)
@@ -93,9 +128,9 @@ func inkling2OracleCompare(c inkling2OracleCase, decode func(prompt []int, n int
 
 // runInkling2Oracle reports one ORACLE_VERDICT line per case; a NEAR_TIE is
 // green but never logged as PASS.
-func runInkling2Oracle(t *testing.T, c inkling2OracleCase, decode func(prompt []int, n int) ([]int, error)) {
+func runInkling2Oracle(t *testing.T, c inkling2OracleCase, decode func(prompt []int, n int) ([]int, error), gap inkling2OracleGap) {
 	t.Helper()
-	v, ties, err := inkling2OracleCompare(c, decode)
+	v, ties, err := inkling2OracleCompare(c, decode, gap)
 	if err != nil {
 		t.Fatalf("ORACLE_VERDICT %s %s: %v (near ties so far: %v)", c.name, v, err, ties)
 	}
@@ -130,7 +165,7 @@ func syntheticInkling2OracleCase() inkling2OracleCase {
 
 func TestInkling2OracleExactMatchIsPass(t *testing.T) {
 	c := syntheticInkling2OracleCase()
-	v, ties, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{0: {10, 11, 12, 13}}))
+	v, ties, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{0: {10, 11, 12, 13}}), nil)
 	if err != nil || v != inkling2OraclePass || len(ties) != 0 {
 		t.Fatalf("verdict %s ties %v err %v, want PASS", v, ties, err)
 	}
@@ -143,7 +178,7 @@ func TestInkling2OracleRunnerUpUnderBoundIsNearTieAndReanchors(t *testing.T) {
 	v, ties, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{
 		0: {10, 21, 99, 99},
 		2: {12, 13},
-	}))
+	}), nil)
 	if err != nil || v != inkling2OracleNearTie || len(ties) != 1 {
 		t.Fatalf("verdict %s ties %v err %v, want one NEAR_TIE", v, ties, err)
 	}
@@ -154,7 +189,7 @@ func TestInkling2OracleDivergenceAfterReanchorStillFails(t *testing.T) {
 	v, _, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{
 		0: {10, 21, 99, 99},
 		2: {12, 23},
-	}))
+	}), nil)
 	if err == nil || v != inkling2OracleMismatch {
 		t.Fatalf("verdict %s err %v, want FAIL at the 2.5-nat step after re-anchor", v, err)
 	}
@@ -163,13 +198,13 @@ func TestInkling2OracleDivergenceAfterReanchorStillFails(t *testing.T) {
 func TestInkling2OracleLargeMarginDivergenceFails(t *testing.T) {
 	c := syntheticInkling2OracleCase()
 	// fak picks the runner-up where llama.cpp led by 3 nats: a real bug.
-	v, _, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{0: {20, 11, 12, 13}}))
+	v, _, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{0: {20, 11, 12, 13}}), nil)
 	if err == nil || v != inkling2OracleMismatch {
 		t.Fatalf("verdict %s err %v, want FAIL", v, err)
 	}
 	// Just over the bound is still a failure.
 	c.margin[0] = inkling2OracleNearTieNats + 1e-6
-	if v, _, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{0: {20, 11, 12, 13}})); err == nil || v != inkling2OracleMismatch {
+	if v, _, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{0: {20, 11, 12, 13}}), nil); err == nil || v != inkling2OracleMismatch {
 		t.Fatalf("margin just over the bound: verdict %s err %v, want FAIL", v, err)
 	}
 }
@@ -177,7 +212,7 @@ func TestInkling2OracleLargeMarginDivergenceFails(t *testing.T) {
 func TestInkling2OracleSmallMarginNonRunnerUpFails(t *testing.T) {
 	c := syntheticInkling2OracleCase()
 	// Under the bound, but fak picked neither of the oracle's top two.
-	v, _, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{0: {10, 77, 12, 13}}))
+	v, _, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{0: {10, 77, 12, 13}}), nil)
 	if err == nil || v != inkling2OracleMismatch {
 		t.Fatalf("verdict %s err %v, want FAIL", v, err)
 	}
@@ -195,9 +230,121 @@ func TestInkling2OracleNearTieBudgetIsBounded(t *testing.T) {
 		0: {20, 0, 0, 0},
 		1: {21, 0, 0},
 		2: {22, 0},
-	}))
+	}), nil)
 	if err == nil || v != inkling2OracleMismatch || len(ties) != inkling2OracleMaxNearTies {
 		t.Fatalf("verdict %s ties %v err %v, want FAIL after %d near ties", v, ties, err, inkling2OracleMaxNearTies)
+	}
+}
+
+// passphraseInkling2OracleCase is a flip llama.cpp's margin alone refuses: it
+// leads fak's pick, its runner-up, by 0.548 nats, just over the bound, while
+// fak's own top-1 leads llama.cpp's token by only 0.351.
+func passphraseInkling2OracleCase() inkling2OracleCase {
+	return inkling2OracleCase{
+		name:     "passphrase-shape",
+		prompt:   []int{1, 2},
+		greedy:   []int{10, 150008, 12},
+		runnerUp: []int{20, 149884, 22},
+		margin:   []float64{3, 0.548, 4},
+	}
+}
+
+// fixedGap answers every gap query with one fak-side gap and records the
+// teacher-forced position it was asked about.
+func fixedGap(top int, g float64, asked *[][]int) inkling2OracleGap {
+	return func(prompt, forced []int, tok int) (int, float64, error) {
+		*asked = append(*asked, append(append(append([]int(nil), prompt...), forced...), tok))
+		return top, g, nil
+	}
+}
+
+func TestInkling2OracleFakSideGapUnderBoundIsNearTie(t *testing.T) {
+	c := passphraseInkling2OracleCase()
+	decode := replayDecode(c, map[int][]int{0: {10, 149884, 99}, 2: {12}})
+	var asked [][]int
+	v, ties, err := inkling2OracleCompare(c, decode, fixedGap(149884, 0.351, &asked))
+	if err != nil || v != inkling2OracleNearTie || len(ties) != 1 {
+		t.Fatalf("verdict %s ties %v err %v, want one NEAR_TIE from fak's 0.351-nat gap", v, ties, err)
+	}
+	if want := []int{1, 2, 10, 150008}; len(asked) != 1 || fmt.Sprint(asked[0]) != fmt.Sprint(want) {
+		t.Fatalf("gap asked %v, want one query at prompt+greedy[:1] for llama.cpp's token %v", asked, want)
+	}
+	if !strings.Contains(ties[0], "0.3510 nats below") || !strings.Contains(ties[0], "margin 0.5480") {
+		t.Fatalf("tie %q does not report both sides' gaps", ties[0])
+	}
+	// The llama.cpp margin alone still refuses it, as before.
+	if v, _, err := inkling2OracleCompare(c, decode, nil); err == nil || v != inkling2OracleMismatch {
+		t.Fatalf("without fak's gap: verdict %s err %v, want FAIL on the 0.548-nat margin", v, err)
+	}
+}
+
+func TestInkling2OracleWideGapOnBothSidesFails(t *testing.T) {
+	c := passphraseInkling2OracleCase()
+	c.margin[1] = 0.9
+	decode := replayDecode(c, map[int][]int{0: {10, 149884, 99}})
+	for _, g := range []float64{0.8, inkling2OracleNearTieNats + 1e-6} {
+		var asked [][]int
+		v, _, err := inkling2OracleCompare(c, decode, fixedGap(149884, g, &asked))
+		if err == nil || v != inkling2OracleMismatch {
+			t.Fatalf("llama margin 0.9, fak gap %v: verdict %s err %v, want FAIL", g, v, err)
+		}
+	}
+}
+
+func TestInkling2OracleFakSideGapRescuesOracleTopTwoMiss(t *testing.T) {
+	c := passphraseInkling2OracleCase()
+	// fak picked a token outside llama.cpp's top two, but llama.cpp's token is
+	// within the bound of fak's top-1: fak itself is near tied there.
+	decode := replayDecode(c, map[int][]int{0: {10, 77, 99}, 2: {12}})
+	var asked [][]int
+	if v, _, err := inkling2OracleCompare(c, decode, fixedGap(77, 0.1, &asked)); err != nil || v != inkling2OracleNearTie {
+		t.Fatalf("verdict %s err %v, want NEAR_TIE", v, err)
+	}
+	asked = nil
+	if v, _, err := inkling2OracleCompare(c, decode, fixedGap(77, 2, &asked)); err == nil || v != inkling2OracleMismatch {
+		t.Fatalf("fak gap 2: verdict %s err %v, want FAIL", v, err)
+	}
+}
+
+func TestInkling2OracleFakSideGapNeedsFakTopToBeItsPick(t *testing.T) {
+	c := passphraseInkling2OracleCase()
+	// Teacher-forced, fak's top-1 is llama.cpp's own token (gap 0), yet the
+	// decode picked 77: the gap says nothing about that pick.
+	decode := replayDecode(c, map[int][]int{0: {10, 77, 99}, 2: {12}})
+	var asked [][]int
+	v, _, err := inkling2OracleCompare(c, decode, fixedGap(150008, 0, &asked))
+	if err == nil || v != inkling2OracleMismatch || !strings.Contains(err.Error(), "but fak decoded 77") {
+		t.Fatalf("verdict %s err %v, want FAIL naming the decoded token", v, err)
+	}
+}
+
+func TestInkling2OracleGapErrorFails(t *testing.T) {
+	c := passphraseInkling2OracleCase()
+	boom := func([]int, []int, int) (int, float64, error) { return 0, 0, fmt.Errorf("logits unavailable") }
+	v, _, err := inkling2OracleCompare(c, replayDecode(c, map[int][]int{0: {10, 149884, 99}}), boom)
+	if err == nil || v != inkling2OracleMismatch || !strings.Contains(err.Error(), "logits unavailable") {
+		t.Fatalf("verdict %s err %v, want the gap error as FAIL", v, err)
+	}
+}
+
+func TestInkling2NearTieAcceptsEitherSide(t *testing.T) {
+	const b = inkling2OracleNearTieNats
+	for _, tc := range []struct {
+		margin   float64
+		runnerUp bool
+		gap      float64
+		want     bool
+	}{
+		{0.548, true, 0.351, true},
+		{0.351, true, 0.548, true},
+		{0.6, true, 0.6, false},
+		{0.1, false, math.Inf(1), false},
+		{0.1, true, math.Inf(1), true},
+		{b, true, b, false},
+	} {
+		if got := inkling2NearTie(tc.margin, tc.runnerUp, tc.gap); got != tc.want {
+			t.Errorf("inkling2NearTie(%v, %v, %v) = %v, want %v", tc.margin, tc.runnerUp, tc.gap, got, tc.want)
+		}
 	}
 }
 

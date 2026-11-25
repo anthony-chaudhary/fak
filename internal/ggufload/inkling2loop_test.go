@@ -284,7 +284,7 @@ func TestInkling2OracleGreedyMatchesLlamaCpp(t *testing.T) {
 				got, err := Inkling2LoopGreedy(m, prompt, n)
 				t.Logf("host reference: %d prompt + %d greedy tokens in %s", len(prompt), len(got), time.Since(start))
 				return got, err
-			})
+			}, nil)
 		})
 	}
 }
