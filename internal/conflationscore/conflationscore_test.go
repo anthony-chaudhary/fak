@@ -1,6 +1,9 @@
 package conflationscore
 
 import (
+	"encoding/json"
+	"os"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -180,6 +183,46 @@ func TestBuildEnvelopeShape(t *testing.T) {
 	}
 	if p.Verdict == "" || p.Finding == "" || p.NextAction == "" {
 		t.Error("envelope prose fields must be populated")
+	}
+}
+
+func TestScorecardTaxonomySourceCarriesCacheHeadlineProvenance(t *testing.T) {
+	// The scorecard pages are regenerated from this source, so a SOTA bar that is only
+	// labelled in the rendered page loses its owner/plane/provenance on the next regeneration.
+	const src = "../../tools/industry_scorecard.data/_taxonomy.json"
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read scorecard taxonomy source: %v", err)
+	}
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse scorecard taxonomy source: %v", err)
+	}
+	var bars []string
+	var walk func(v any)
+	walk = func(v any) {
+		switch n := v.(type) {
+		case map[string]any:
+			for key, child := range n {
+				if bar, ok := child.(string); ok && key == "sota_bar" {
+					bars = append(bars, bar)
+				}
+				walk(child)
+			}
+		case []any:
+			for _, child := range n {
+				walk(child)
+			}
+		}
+	}
+	walk(doc)
+	if len(bars) == 0 {
+		t.Fatal("no sota_bar entries found; the rendered field moved and this guard reads nothing")
+	}
+	sort.Strings(bars)
+	k := kpiCacheHeadlineProvenance(map[string][]cacheHeadlineLine{src: extractCacheHeadlineLines(strings.Join(bars, "\n"))})
+	if len(k.Defects) != 0 {
+		t.Errorf("generator source carries unlabelled cache headlines: %v", k.Defects)
 	}
 }
 

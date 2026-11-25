@@ -145,7 +145,7 @@ description: "The memory dimensions that matter in LLM serving, the current SOTA
 
 *Why it matters:* Agent and fleet workloads repeat large identical prefixes (system prompts, tool schemas, few-shot exemplars). Reusing their KV across requests is the single largest lever on prefill cost and TTFT, and is now table-stakes; buyers compare hit-rate and the throughput gain it delivers.
 
-- **SOTA bar:** RadixAttention's automatic cross-request KV reuse via an LRU radix tree gives up to 6.4x throughput on shared-prefix workloads with 50%-99% cache hit rates; this remains the canonical cross-request prefix-reuse bar in 2026.
+- **SOTA bar:** OBSERVED external-engine KV-cache plane: RadixAttention's automatic cross-request KV reuse via an LRU radix tree gives up to 6.4x throughput on shared-prefix workloads with 50%-99% cache hit rates; this remains the canonical cross-request prefix-reuse bar in 2026.
 - **Leading systems:** SGLang RadixAttention, vLLM Automatic Prefix Caching, Mooncake KV pool
 - **Source:** [https://www.lmsys.org/blog/2024-01-17-sglang/](https://www.lmsys.org/blog/2024-01-17-sglang/) (2024-01)
 - **fak:** parity — 86.7 % (shipped)

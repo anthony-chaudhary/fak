@@ -1258,7 +1258,7 @@
       "dimension": "Automatic cross-request prefix / KV-cache reuse (shared system prompts, agent scaffolds, few-shot)",
       "metric_unit": "x throughput improvement from cross-request prefix KV reuse",
       "best_value": 6.4,
-      "sota_bar": "RadixAttention's automatic cross-request KV reuse via an LRU radix tree gives up to 6.4x throughput on shared-prefix workloads with 50%-99% cache hit rates; this remains the canonical cross-request prefix-reuse bar in 2026.",
+      "sota_bar": "OBSERVED external-engine KV-cache plane: RadixAttention's automatic cross-request KV reuse via an LRU radix tree gives up to 6.4x throughput on shared-prefix workloads with 50%-99% cache hit rates; this remains the canonical cross-request prefix-reuse bar in 2026.",
       "sota_systems": [
         "SGLang RadixAttention",
         "vLLM Automatic Prefix Caching",
