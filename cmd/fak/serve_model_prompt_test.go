@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -149,6 +151,25 @@ func TestParseServeArgsModelGGUF(t *testing.T) {
 	}
 	if *sf.ggufPath != "qwen38:27b-q4" {
 		t.Fatalf("ggufPath = %q, want %q", *sf.ggufPath, "qwen38:27b-q4")
+	}
+}
+
+func TestParseServeArgsGGUFPathKeepsExplicitModel(t *testing.T) {
+	gguf := filepath.Join(t.TempDir(), "Inkling-2-Mini-UD-Q3_K_XL.gguf")
+	if err := os.WriteFile(gguf, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, sf := newServeFlagSet()
+	if err := parseServeArgs(fs, sf, []string{"--gguf", gguf, "--model", "inkling2-mini"}); err != nil {
+		t.Fatalf("parseServeArgs failed: %v", err)
+	}
+	rt := &serveRuntime{}
+	rt.resolveServeModelSources(sf)
+	if *sf.model != "inkling2-mini" {
+		t.Fatalf("model = %q, want inkling2-mini (the /v1/models id)", *sf.model)
+	}
+	if *sf.ggufPath != gguf {
+		t.Fatalf("ggufPath = %q, want the local path %q", *sf.ggufPath, gguf)
 	}
 }
 
