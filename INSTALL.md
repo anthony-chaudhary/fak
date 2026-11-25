@@ -48,7 +48,7 @@ The Metal archive is available on v0.54.0, backfilled from the exact tagged
 source; this adds an asset to the existing release, not a new version. This
 backfill is SHA-256-verified and ad-hoc-signed; it has no SLSA attestation or
 Apple notarization. Its checksum verifies download integrity, not source provenance.
-The [v0.56.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.56.0) includes the Linux amd64 Vulkan archive.
+The [v0.58.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.58.0) includes the Linux amd64 Vulkan archive.
 A packaged backend still needs qualification on the actual model and GPU.
 
 ---
@@ -106,7 +106,7 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 Then confirm:
 
 ```sh
-fak version          # prints the installed version, e.g. 0.57.0
+fak version          # prints the installed version, e.g. 0.58.0
 ```
 
 What you'll see: a single version line on stdout (the release you just installed). If
@@ -245,7 +245,7 @@ Containers must bind `0.0.0.0`, not loopback — the default `CMD` already does
 (`serve --addr 0.0.0.0:8080`). Stamp a specific version into the binary at build time:
 
 ```sh
-docker build --build-arg APP_VERSION=0.57.0 -t fak:0.57.0 .
+docker build --build-arg APP_VERSION=0.58.0 -t fak:0.58.0 .
 ```
 
 Override the entrypoint command to run `fak agent`, `fak policy`, etc. instead of the
