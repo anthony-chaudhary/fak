@@ -155,6 +155,9 @@ var Catalog = map[string]string{
 	// files are the pre-mainline tensor layout the loader does not bind.
 	"inkling2-small": "hf://unsloth/Inkling-2-Small-GGUF@42593c63926d23380ea03d643ab2cde742427608/UD-Q2_K_XL/Inkling-2-Small-UD-Q2_K_XL-00001-of-00006.gguf",
 	"inkling2-mini":  "hf://unsloth/Inkling-2-Mini-GGUF@8078d149286eec7193795413b9e0643da6d11fa1/Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file",
+	// Short names chain to inkling2-mini so the pin lives in one place.
+	"inkling":        "inkling2-mini",
+	"inkling-2-mini": "inkling2-mini",
 }
 
 // codingAliases is the set of Catalog aliases that are CODING-tuned and emit the
