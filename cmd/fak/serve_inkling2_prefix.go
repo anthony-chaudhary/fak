@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -154,3 +155,24 @@ func (e *inkling2LoopEngine) prefixHeldBytes() int64 {
 }
 
 func (e *inkling2LoopEngine) prefixSlotCount() int { return len(e.cache) }
+
+// inkling2PrefixSlotsNote names a slot count above the default for the startup message.
+func inkling2PrefixSlotsNote(e *inkling2LoopEngine) string {
+	if e.noReuse || e.slots <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("; prefix slots=%d cap=%dMiB", e.slots, e.capBytes>>20)
+}
+
+// inkling2ScalarBehindCohorts runs every lone request the cohort engine routes to
+// scalar on a fresh session and names the slots that ignores. Kept slots would be
+// unsafe there: a cohort captures into and resets the same process-wide graph exec
+// without taking the resident graph owner, so a kept session could replay a
+// cohort's exec, and nothing frees the slots before a cohort sizes its arenas.
+func inkling2ScalarBehindCohorts(scalar *inkling2LoopEngine) string {
+	scalar.noReuse = true
+	if scalar.slots <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("; FAK_INKLING2_PREFIX_SLOTS=%d ignored: lone requests run on a fresh session beside cohorts", scalar.slots)
+}

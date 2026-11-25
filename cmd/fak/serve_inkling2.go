@@ -79,8 +79,11 @@ type inkling2Rewinder interface {
 
 // inkling2PrefixReuseEnabled reads FAK_INKLING2_PREFIX_REUSE; reuse is on unless
 // it is 0, false or off.
-func inkling2PrefixReuseEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKLING2_PREFIX_REUSE"))) {
+func inkling2PrefixReuseEnabled() bool { return inkling2PrefixReuseFrom(os.LookupEnv) }
+
+func inkling2PrefixReuseFrom(lookup func(string) (string, bool)) bool {
+	v, _ := lookup("FAK_INKLING2_PREFIX_REUSE")
+	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "0", "false", "off":
 		return false
 	}
@@ -404,20 +407,21 @@ func inkling2HasPrefix(s, prefix []int) bool {
 // the choice for the startup message.
 func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (agent.Inkling2LoopGenerator, string, error) {
 	scalar := newInkling2LoopEngine(m, be)
+	scalar.noReuse = !inkling2PrefixReuseFrom(lookup)
+	scalar.slots, scalar.capBytes = inkling2PrefixCacheFromEnv(lookup)
 	if !inkling2ServeBatchEnabled(lookup) {
-		return scalar, "greedy decode", nil
+		return scalar, "greedy decode" + inkling2PrefixSlotsNote(scalar), nil
 	}
 	adm, err := inkling2AdmissionFromEnv(lookup)
 	if err != nil {
 		return nil, "", err
 	}
 	if !ggufload.Inkling2LoopBatchEligible(m, be) {
-		return scalar, "greedy decode; FAK_INKLING2_SERVE_BATCH ignored: load is not batch eligible", nil
+		return scalar, "greedy decode; FAK_INKLING2_SERVE_BATCH ignored: load is not batch eligible" + inkling2PrefixSlotsNote(scalar), nil
 	}
-	// a lone request's session must not stay resident beside the cohorts
-	scalar.noReuse = true
+	ignored := inkling2ScalarBehindCohorts(scalar)
 	return newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, lookup),
-		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s", ggufload.Inkling2LoopMaxBatch, adm.gap, adm.maxWait), nil
+		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s", ggufload.Inkling2LoopMaxBatch, adm.gap, adm.maxWait, ignored), nil
 }
 
 // newServeInkling2LoopPlanner binds an engine to the chat surface with a config

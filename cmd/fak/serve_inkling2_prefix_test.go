@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -304,5 +305,65 @@ func TestInkling2AdapterPrefixCacheEmitPanicDropsOnlyItsSlot(t *testing.T) {
 	}
 	if res, _ := inkling2Gen(t, eng, inkling2Extend(b1, 'r'), 1); res.CachedPromptTokens != len(b1)-1 {
 		t.Fatalf("B after A's panic cached %d, want %d", res.CachedPromptTokens, len(b1)-1)
+	}
+}
+
+// The serialized engine takes its slot knobs from the generator's lookup, like
+// every other serve knob, and names them in the startup message.
+func TestInkling2ServeGeneratorReadsPrefixSlotsFromLookup(t *testing.T) {
+	t.Setenv("FAK_INKLING2_PREFIX_SLOTS", "7")
+	t.Setenv("FAK_INKLING2_PREFIX_REUSE", "0")
+	lookup := func(k string) (string, bool) {
+		switch k {
+		case "FAK_INKLING2_PREFIX_SLOTS":
+			return "3", true
+		case "FAK_INKLING2_PREFIX_CACHE_MIB":
+			return "6144", true
+		}
+		return "", false
+	}
+	gen, msg, err := newServeInkling2Generator(nil, nil, lookup)
+	eng, ok := gen.(*inkling2LoopEngine)
+	if err != nil || !ok {
+		t.Fatalf("gen=%T err=%v, want the serialized engine", gen, err)
+	}
+	if eng.noReuse || eng.slots != 3 || eng.capBytes != 6144<<20 {
+		t.Fatalf("slots=%d cap=%d, want the lookup's 3 slots and 6144 MiB, not the process env", eng.slots, eng.capBytes)
+	}
+	if !strings.Contains(msg, "prefix slots=3") {
+		t.Fatalf("startup message %q does not name the prefix slots", msg)
+	}
+	if _, msg, _ := newServeInkling2Generator(nil, nil, func(string) (string, bool) { return "", false }); strings.Contains(msg, "prefix slots") {
+		t.Fatalf("default startup message %q names slots the default does not add", msg)
+	}
+}
+
+// Behind the cohort engine every lone request runs on a fresh session whatever
+// FAK_INKLING2_PREFIX_SLOTS says, and the startup message says it is ignored.
+func TestInkling2PrefixSlotsOffBehindCohorts(t *testing.T) {
+	eng, opened := inkling2SlotEngine([]int{'a', 'b'}, 4, 1<<40, 0)
+	defer eng.Close()
+	note := inkling2ScalarBehindCohorts(eng)
+	if !strings.Contains(note, "FAK_INKLING2_PREFIX_SLOTS=4 ignored") {
+		t.Fatalf("note %q does not name the ignored slots", note)
+	}
+	a1, b1 := []int{'A', 'p'}, []int{'B', 'p'}
+	inkling2Gen(t, eng, a1, 1)
+	inkling2Gen(t, eng, b1, 1)
+	if res, _ := inkling2Gen(t, eng, inkling2Extend(a1, 'q'), 1); res.CachedPromptTokens != 0 {
+		t.Fatalf("lone request behind cohorts cached %d, want a fresh session", res.CachedPromptTokens)
+	}
+	for i, s := range *opened {
+		if !s.closed {
+			t.Fatalf("session %d stayed resident beside the cohorts", i)
+		}
+	}
+	if eng.prefixSlotCount() != 0 {
+		t.Fatalf("%d slots resident behind cohorts", eng.prefixSlotCount())
+	}
+	one, _ := inkling2SlotEngine([]int{'a'}, 1, 1<<40, 0)
+	defer one.Close()
+	if note := inkling2ScalarBehindCohorts(one); note != "" {
+		t.Fatalf("default one slot note %q, want none", note)
 	}
 }
