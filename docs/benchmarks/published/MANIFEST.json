@@ -1,7 +1,33 @@
 {
   "schema": "fak.benchpub.manifest.v1",
-  "generated_at": "2026-11-24T15:48:48Z",
+  "generated_at": "2026-11-24T21:47:29Z",
   "entries": [
+    {
+      "campaign": "aegis-inkling2-spec-decode",
+      "date": "2026-11-24",
+      "source_dir": "docs/benchmarks/aegis-inkling2-spec-decode",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "f38b257094002f25c082912e7948f5bac5ef1392ddd1876d5ed8e0f0034c4d07",
+          "bytes": 6337,
+          "source_sha256": "5526b74706685f77ad15997837b868eb258173dfb8e749221bb75f71114ae3ae"
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-inkling2-fork-parity",
+      "date": "2026-11-24",
+      "source_dir": "docs/benchmarks/aegis-inkling2-fork-parity",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "3c42208896c5a2da8d69c677518176e21169bc1c8529241680d5933eec7104f9",
+          "bytes": 4446,
+          "source_sha256": "c021bd20497a281ca564547b6676dff1be9c1844f5f788c5eec4756cc0c0d418"
+        }
+      ]
+    },
     {
       "campaign": "aegis-gpu-direct-weight-paths",
       "date": "2026-11-24",
@@ -25,19 +51,6 @@
           "sha256": "1d64c25bda0ae49c10fe530b20fbf7810fe7c04580e22d67cc14d9361444edcf",
           "bytes": 3967,
           "source_sha256": "b65e3247dbe92b99e214f8661e22b5f583d725d55e2b3a6dafff4e94a9dcfb38"
-        }
-      ]
-    },
-    {
-      "campaign": "aegis-inkling2-fork-parity",
-      "date": "2026-11-24",
-      "source_dir": "docs/benchmarks/aegis-inkling2-fork-parity",
-      "files": [
-        {
-          "name": "RESULTS.md",
-          "sha256": "3c42208896c5a2da8d69c677518176e21169bc1c8529241680d5933eec7104f9",
-          "bytes": 4446,
-          "source_sha256": "c021bd20497a281ca564547b6676dff1be9c1844f5f788c5eec4756cc0c0d418"
         }
       ]
     },

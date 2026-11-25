@@ -16,6 +16,7 @@ some pages report a run that was blocked or not made.
 | `aegis-gpu-direct-weight-paths` | 2026-11-24 | docs/benchmarks/aegis-gpu-direct-weight-paths | RESULTS.md (1) |
 | `aegis-inkling2-crossbox-hitl` | 2026-11-24 | docs/benchmarks/aegis-inkling2-crossbox-hitl | RESULTS.md (1) |
 | `aegis-inkling2-fork-parity` | 2026-11-24 | docs/benchmarks/aegis-inkling2-fork-parity | RESULTS.md (1) |
+| `aegis-inkling2-spec-decode` | 2026-11-24 | docs/benchmarks/aegis-inkling2-spec-decode | RESULTS.md (1) |
 | `aegis2-inkling2-batched-prefill` | 2026-11-24 | docs/benchmarks/aegis2-inkling2-batched-prefill | RESULTS.md (1) |
 | `aegis2-inkling2-expert-gemv-climb` | 2026-11-24 | docs/benchmarks/aegis2-inkling2-expert-gemv-climb | RESULTS.md, perf-receipt-v2.json (2) |
 | `aegis2-inkling2-fused-climb` | 2026-11-24 | docs/benchmarks/aegis2-inkling2-fused-climb | RESULTS.md (1) |

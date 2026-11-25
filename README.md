@@ -75,7 +75,7 @@ measurement exists.
 |---|---|---|
 | Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
 | AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |
-| NVIDIA | Inkling-2-Mini UD-Q3_K_XL on an RTX 5080 16 GB (sm_120): fak-native resident CUDA decode with graph replay reached 104.6 tok/s single-stream, up from 82.5 a day earlier and 6.3 on the host-driven path; upstream llama.cpp tg128 does 81.0 on the same card and GGUF, and the fastest llama.cpp fork measured does 119.3; greedy output matches the llama.cpp oracle on 3 of 4 cases; observed 2026-11-24. | HW-witnessed ABBA, in-process decode bench, not a served-endpoint rate; the fourth case diverges at a known near-tie on both builds, and prefill is still per-token by default. [RTX 5080 Inkling-2 receipt](docs/benchmarks/receipts/inkling2-cuda-resident-rtx5080-20261124/RESULTS.md) |
+| NVIDIA | Inkling-2-Mini UD-Q3_K_XL on an RTX 5080 16 GB (sm_120): fak-native resident CUDA decode reached 119.9 tok/s single-stream on the default path, about 1.48x upstream llama.cpp tg128 (81.0 on the same card and GGUF) and level with the fastest llama.cpp fork measured (119.5 in the same window); opt-in speculative decode (`FAK_INKLING2_SPEC=2`) reached 151.7 tok/s, +26.6% over plain decode in the same window; greedy output matches the llama.cpp oracle on 3 of 4 cases; observed 2026-11-24. | HW-witnessed ABBA, in-process decode bench, not a served-endpoint rate. Speculative decode is off by default because its batched verify is not bit-exact to the per-token step. The fourth oracle case diverges at a known near-tie, and at 1,946 tokens of context plain decode still trails the fork (89.0 vs 113.8 tok/s). [Plain decode receipt](docs/benchmarks/published/aegis-inkling2-fork-parity/RESULTS.md), [spec decode receipt](docs/benchmarks/published/aegis-inkling2-spec-decode/RESULTS.md) |
 
 Read the status column before comparing rates. History: [benchmark index](docs/benchmarks/README.md);
 claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
@@ -145,7 +145,11 @@ fak agent --offline   # -> task completed
 ## What changed since 2026-11-10
 
 - A second model family runs fak-native on NVIDIA: Inkling-2-Mini decodes resident on
-  CUDA with one replayed graph per token (receipt in the table above). Its tokenizer
+  CUDA with one replayed graph per token, 119.9 tok/s on an RTX 5080 (receipt in the
+  table above). Speculative decode is opt-in (`FAK_INKLING2_SPEC=2` plus
+  `FAK_INKLING2_MTP_DIR`): the checkpoint's own draft head proposes two tokens and one
+  batched forward checks them, 151.7 tok/s on the same card. It stays off by default
+  because the batched check is not bit-exact to one-token-at-a-time decode. Its tokenizer
   now matches Hugging Face on 46/46 corpus lines. A batched prompt prefill is opt-in
   behind `FAK_INKLING2_BATCHED_PREFILL=1`; per-token prefill stays the default.
 - CUDA prefill defaults: dense K-quant prompt panels batch through the mmq kernel,
