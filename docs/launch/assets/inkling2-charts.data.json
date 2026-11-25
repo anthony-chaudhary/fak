@@ -1,0 +1,221 @@
+{
+  "schema": "fak.launchvisual.charts.v1",
+  "docs": ["docs/launch/inkling2-launch-2026-11-24.md"],
+  "superseded_tokens": ["151.7"],
+  "allowed_numbers": [
+    {"token": "2.0", "reason": "license name Apache-2.0 in the model description; not a measurement"},
+    {"token": "1.26", "reason": "Go toolchain version the build needs; not a measurement"},
+    {"token": "89.5", "reason": "35-task model-quality suite score; a model-quality receipt, not a fak engine row"},
+    {"token": "87.6", "reason": "35-task model-quality suite score; a model-quality receipt, not a fak engine row"},
+    {"token": "1", "reason": "receipt-row count (one build, one run); not a measurement"},
+    {"token": "2", "reason": "receipt-row count or speculative depth label; not a measurement"},
+    {"token": "3", "reason": "receipt-row count (repeats, reps) or prompt label; not a measurement"},
+    {"token": "4", "reason": "receipt-row count (runs per arm, rounds) or depth label; not a measurement"},
+    {"token": "8", "reason": "stream-count label (C8); not a measurement"},
+    {"token": "11", "reason": "calendar month in a receipt date; not a measurement"},
+    {"token": "16", "reason": "hardware label (16 GB) or stream-count label (C16); not a measurement"},
+    {"token": "19", "reason": "prompt size label (19-token prompt); not a measurement"},
+    {"token": "23", "reason": "calendar day in a campaign date; not a measurement"},
+    {"token": "24", "reason": "stream-count label (24 streams); not a measurement"},
+    {"token": "25", "reason": "calendar day in a receipt date; not a measurement"},
+    {"token": "31", "reason": "step count of an oracle run; not a measurement"},
+    {"token": "32", "reason": "token-count label (32 tokens); not a measurement"},
+    {"token": "36", "reason": "hardware label (36 GB); not a measurement"},
+    {"token": "127", "reason": "decode step count of a run; not a measurement"},
+    {"token": "128", "reason": "output-token count of a run; not a measurement"},
+    {"token": "1946", "reason": "context depth label (1946 tokens of depth); not a measurement"},
+    {"token": "2026", "reason": "calendar year in a receipt date; not a measurement"},
+    {"token": "5080", "reason": "GPU model number (RTX 5080); not a measurement"},
+    {"token": "8192", "reason": "prompt size label (8192-token prompt); not a measurement"}
+  ],
+  "charts": [
+    {
+      "id": "decode-comparison",
+      "file": "inkling2-decode-comparison.svg",
+      "kicker": "INKLING-2-MINI DECODE AND PREFILL",
+      "title": "Decode and prefill on one RTX 5080 16 GB",
+      "subtitle": "Higher is better. Decode panels share one tok/s axis; prefill has its own axis.",
+      "columns": 4,
+      "panels": [
+        {
+          "title": "Same card, same window",
+          "subtitle": "ABBA x2, one GGUF",
+          "style": "bars",
+          "axis": "decode",
+          "series": [
+            {"row": "samewindow.fak.decode_tok_s", "label": "fak", "tone": "fak"},
+            {"row": "samewindow.stock.decode_tok_s", "label": "stock", "tone": "base"}
+          ]
+        },
+        {
+          "title": "Fork parity",
+          "subtitle": "separate window",
+          "style": "bars",
+          "axis": "decode",
+          "series": [
+            {"row": "fork.fak.decode_tok_s", "label": "fak", "tone": "fak", "build": true},
+            {"row": "fork.realugbun.decode_tok_s", "label": "fork", "tone": "base"}
+          ]
+        },
+        {
+          "title": "Opt-in speculative",
+          "subtitle": "vs plain, same receipt",
+          "style": "bars",
+          "axis": "decode",
+          "series": [
+            {"row": "spec.plain.tok_s", "label": "plain", "tone": "base"},
+            {"row": "spec.d2.tok_s", "label": "depth 2", "tone": "optin"},
+            {"row": "spec.d4.tok_s", "label": "depth 4", "tone": "optin"}
+          ]
+        },
+        {
+          "title": "Depth 1946 (a loss)",
+          "subtitle": "fak vs fork at 1946 tokens",
+          "style": "bars",
+          "axis": "decode",
+          "series": [
+            {"row": "fork.depth1946.fak_tok_s", "label": "fak", "tone": "fak"},
+            {"row": "fork.depth1946.fork_tok_s", "label": "fork", "tone": "base"}
+          ]
+        },
+        {
+          "title": "Prefill (a loss)",
+          "subtitle": "pp512; the fak bar is the second box",
+          "style": "bars",
+          "axis": "prefill",
+          "span": 2,
+          "series": [
+            {"row": "prefill.batched.pp512_tok_s", "label": "fak batched", "tone": "box2"},
+            {"row": "prefill.llamacpp.pp512_tok_s", "label": "llama.cpp", "tone": "base"},
+            {"row": "prefill.fork.pp512_tok_s", "label": "fork ref.", "tone": "unmatched", "sub": "unmatched reference"}
+          ]
+        },
+        {
+          "title": "PDL flag (a loss)",
+          "subtitle": "opt-in, off by default; plain, then speculative depth 2",
+          "style": "bars",
+          "axis": "decode",
+          "span": 2,
+          "series": [
+            {"row": "pdl.plain.off_tok_s", "label": "plain off", "tone": "base"},
+            {"row": "pdl.plain.on_tok_s", "label": "plain on", "tone": "base"},
+            {"row": "pdl.spec.off_tok_s", "label": "spec off", "tone": "base"},
+            {"row": "pdl.spec.on_tok_s", "label": "spec on", "tone": "base"}
+          ]
+        }
+      ],
+      "footers": [
+        "Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB.",
+        "Decode is an in-process decode bench, not served-endpoint rates; decode parity with the fork holds at depth 0 only."
+      ]
+    },
+    {
+      "id": "decode-climb",
+      "file": "inkling2-decode-climb.svg",
+      "kicker": "INKLING-2-MINI DECODE CLIMB",
+      "title": "Decode climb on one RTX 5080 16 GB, tok/s",
+      "subtitle": "Plain steps climb to fork level; opt-in speculative bars are outlined; the hatched step is the second box.",
+      "columns": 1,
+      "panels": [
+        {
+          "title": "fak decode, plain and opt-in",
+          "subtitle": "tok/s on one axis; each step is compared within its own box",
+          "style": "staircase",
+          "axis": "decode",
+          "series": [
+            {"row": "climb.first_native.tok_s", "label": "first native", "tone": "base", "sub": "per-GEMV device path"},
+            {"row": "climb.resident.tok_s", "label": "resident", "tone": "base", "sub": "resident, graph replay"},
+            {"row": "climb.fused_box2.tok_s", "label": "fused, box 2", "tone": "box2"},
+            {"row": "fork.fak.decode_tok_s", "label": "fork level", "tone": "fak", "build": true},
+            {"row": "spec.d2.tok_s", "label": "opt-in depth 2", "tone": "optin", "sub": "speculative"},
+            {"row": "spec.d4.tok_s", "label": "opt-in depth 4", "tone": "optin", "sub": "speculative"}
+          ],
+          "references": [
+            {"row": "fork.realugbun.decode_tok_s", "label": "fork"},
+            {"row": "samewindow.stock.decode_tok_s", "label": "stock"}
+          ]
+        }
+      ],
+      "footers": [
+        "Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB.",
+        "Reference lines come from separate harnesses; the row captions below apply.",
+        "The opt-in speculative bars are not bit-exact on every prompt and are off by default."
+      ]
+    },
+    {
+      "id": "batched-serving",
+      "file": "inkling2-batched-serving.svg",
+      "kicker": "INKLING-2-MINI BATCHED SERVING",
+      "title": "Batched serving on one RTX 5080 16 GB",
+      "subtitle": "Aggregate tok/s across streams, and the cohort prefill end to end; a single stream is the per-stream reference.",
+      "columns": 4,
+      "panels": [
+        {
+          "title": "Aggregate decode",
+          "subtitle": "summed across streams; single stream is per stream",
+          "style": "bars",
+          "axis": "decode",
+          "span": 4,
+          "series": [
+            {"row": "batched.single_stream.tok_s", "label": "single stream", "tone": "base"},
+            {"row": "batched.c1.decode_tok_s", "label": "C1 batch", "tone": "base"},
+            {"row": "batched.c8.rows_off_tok_s", "label": "C8 rows off", "tone": "base"},
+            {"row": "batched.c8.rows_on_tok_s", "label": "C8 rows on", "tone": "fak"},
+            {"row": "batched.c24_f16.agg_tok_s", "label": "C24 f16", "tone": "fak"}
+          ]
+        },
+        {
+          "title": "Cohort prefill, end to end",
+          "subtitle": "C16 HTTP cohort, aggregate tok/s",
+          "style": "bars",
+          "axis": "e2e",
+          "span": 2,
+          "series": [
+            {"row": "c16.cohort_prefill.lockstep_e2e_tok_s", "label": "lockstep", "tone": "base"},
+            {"row": "c16.cohort_prefill.ragged_e2e_tok_s", "label": "ragged", "tone": "fak"},
+            {"row": "oss.c16.e2e_tok_s", "label": "OSS e2e", "tone": "base"}
+          ]
+        }
+      ],
+      "footers": [
+        "Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB.",
+        "Aggregate rows are summed across streams and are not per-stream rates; the cohort rows use chat prompts, the OSS row uses raw prompts.",
+        "The C1 batch row is the batch path at one stream: a loss by design, since the batch path only wins at width."
+      ]
+    },
+    {
+      "id": "context-depth",
+      "file": "inkling2-context-depth.svg",
+      "kicker": "INKLING-2-MINI CONTEXT DEPTH",
+      "title": "Decode cost per token at depth, one RTX 5080 16 GB",
+      "subtitle": "ms/token, lower is better; each pair is before and after the tiled large-cap attend change.",
+      "columns": 2,
+      "panels": [
+        {
+          "title": "Deep context, 8192 tokens",
+          "subtitle": "ms/token; before, then after",
+          "style": "bars",
+          "axis": "ms",
+          "series": [
+            {"row": "ctx.p8192_d16416.before_ms_tok", "label": "before", "tone": "base"},
+            {"row": "ctx.p8192_d16416.after_ms_tok", "label": "after", "tone": "fak"}
+          ]
+        },
+        {
+          "title": "Short context, 19 tokens",
+          "subtitle": "within noise of the before arm",
+          "style": "bars",
+          "axis": "ms",
+          "series": [
+            {"row": "ctx.p19_d16416.before_ms_tok", "label": "before", "tone": "base"},
+            {"row": "ctx.p19_d16416.after_ms_tok", "label": "after", "tone": "base", "sub": "within noise"}
+          ]
+        }
+      ],
+      "footers": [
+        "Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB.",
+        "Lower is better: the ratio is before over after, drawn only where the index row carries one."
+      ]
+    }
+  ]
+}

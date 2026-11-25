@@ -451,6 +451,7 @@ index-sync:
 		exit $$rc; \
 	fi
 	@tools/.bin/fak llms-full --check
+	@tools/.bin/fak launch-visual --check
 	@echo "index-sync OK"
 
 # gofmt-check: every committed .go file is gofmt-formatted — the local mirror of ci.yml's

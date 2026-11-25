@@ -1,37 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" width="760" height="420" font-family="Helvetica, Arial, sans-serif">
-  <title>Inkling-2-Mini fak decode climb: 6.32 to 119.9 tok/s</title>
-  <rect width="760" height="420" fill="#ffffff"/>
-  <text x="380" y="34" font-size="16" font-weight="bold" text-anchor="middle" fill="#111">fak decode on Inkling-2-Mini, tok/s, step by step</text>
-
-  <!-- scale 0-130 tok/s over 260 px (2 px per tok/s), baseline y=330 -->
-  <line x1="70" y1="330" x2="690" y2="330" stroke="#333"/>
-
-  <!-- reference lines -->
-  <line x1="70" y1="91" x2="690" y2="91" stroke="#8b949e" stroke-dasharray="6 4"/>
-  <text x="690" y="84" font-size="11" text-anchor="end" fill="#444">llama.cpp fork (realugbun) 119.5</text>
-  <line x1="70" y1="168" x2="690" y2="168" stroke="#c9d1d9" stroke-width="2" stroke-dasharray="6 4"/>
-  <text x="690" y="161" font-size="11" text-anchor="end" fill="#444">stock llama.cpp 81.0</text>
-
-  <!-- steps, drawn as a staircase -->
-  <polyline fill="none" stroke="#1f6feb" stroke-width="2" points="100,317.4 210,317.4 210,165 350,165 350,126.8 490,126.8 490,90.2 630,90.2"/>
-  <circle cx="155" cy="317.4" r="4" fill="#1f6feb"/>
-  <circle cx="280" cy="165" r="4" fill="#1f6feb"/>
-  <circle cx="420" cy="126.8" r="4" fill="#9a6700"/>
-  <circle cx="560" cy="90.2" r="4" fill="#1f6feb"/>
-  <text x="155" y="306" font-size="14" text-anchor="middle" fill="#111">6.32</text>
-  <text x="280" y="186" font-size="14" text-anchor="middle" fill="#111">82.5</text>
-  <text x="420" y="148" font-size="14" text-anchor="middle" fill="#111">101.6</text>
-  <text x="560" y="112" font-size="14" text-anchor="middle" fill="#111">119.9</text>
-
-  <text x="155" y="350" font-size="12" text-anchor="middle" fill="#111">first native run</text>
-  <text x="155" y="365" font-size="11" text-anchor="middle" fill="#444">per-call uploads</text>
-  <text x="280" y="350" font-size="12" text-anchor="middle" fill="#111">resident weights</text>
-  <text x="280" y="365" font-size="11" text-anchor="middle" fill="#444">default device path</text>
-  <text x="420" y="350" font-size="12" text-anchor="middle" fill="#9a6700">fused small ops</text>
-  <text x="420" y="365" font-size="11" text-anchor="middle" fill="#9a6700">second box</text>
-  <text x="560" y="350" font-size="12" text-anchor="middle" fill="#111">current main</text>
-  <text x="560" y="365" font-size="11" text-anchor="middle" fill="#444">build b64405de76</text>
-
-  <text x="380" y="398" font-size="11" text-anchor="middle" fill="#444">in-process decode bench, Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB</text>
-  <text x="380" y="413" font-size="11" text-anchor="middle" fill="#444">the 101.6 step was measured on a second box with the same card model; compare it within that box only</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="423" viewBox="0 0 900 423" role="img" aria-labelledby="lv-title lv-desc" font-family="Helvetica, Arial, sans-serif">
+  <title id="lv-title">Decode climb on one RTX 5080 16 GB, tok/s</title>
+  <desc id="lv-desc">Plain steps climb to fork level; opt-in speculative bars are outlined; the hatched step is the second box.</desc>
+  <defs><pattern id="lv-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fbf3dc"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9a6700" stroke-width="2"/></pattern></defs>
+  <rect width="900" height="423" fill="#ffffff"/>
+  <text x="40.00" y="22.00" font-size="11.00" font-weight="bold" fill="#1f6feb" text-anchor="start">INKLING-2-MINI DECODE CLIMB</text>
+  <text x="40.00" y="44.00" font-size="18.00" font-weight="bold" fill="#111111" text-anchor="start">Decode climb on one RTX 5080 16 GB, tok/s</text>
+  <text x="40.00" y="62.00" font-size="12.00" fill="#444444" text-anchor="start">Plain steps climb to fork level; opt-in speculative bars are outlined; the hatched step is the second box.</text>
+  <text x="40.00" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">fak decode, plain and opt-in</text>
+  <text x="40.00" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">tok/s on one axis; each step is compared within its own box</text>
+  <text x="71.00" y="269.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
+  <line x1="76.00" y1="205.00" x2="854.00" y2="205.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="208.50" font-size="10.00" fill="#444444" text-anchor="end">100</text>
+  <line x1="76.00" y1="144.00" x2="854.00" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="147.50" font-size="10.00" fill="#444444" text-anchor="end">200</text>
+  <text x="71.00" y="114.00" font-size="10.00" fill="#444444" text-anchor="end">tok/s</text>
+  <line x1="76.00" y1="266.00" x2="854.00" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <line x1="76.00" y1="193.12" x2="854.00" y2="193.12" stroke="#8b949e" stroke-width="1.50" stroke-dasharray="6 4"/>
+  <line x1="76.00" y1="216.60" x2="854.00" y2="216.60" stroke="#8b949e" stroke-width="1.50" stroke-dasharray="6 4"/>
+  <rect class="lv-bar" x="104.83" y="262.14" width="72.00" height="3.86" fill="#6e7781"/>
+  <text x="140.83" y="256.14" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">6.32</text>
+  <text x="140.83" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">first native</text>
+  <text x="140.83" y="294.00" font-size="10.00" fill="#444444" text-anchor="middle">per-GEMV device path</text>
+  <rect class="lv-bar" x="234.50" y="215.65" width="72.00" height="50.35" fill="#6e7781"/>
+  <text x="270.50" y="209.65" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">82.5</text>
+  <text x="270.50" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">resident</text>
+  <text x="270.50" y="294.00" font-size="10.00" fill="#444444" text-anchor="middle">resident, graph replay</text>
+  <rect class="lv-bar" x="364.17" y="204.05" width="72.00" height="61.95" fill="url(#lv-hatch)" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="400.17" y="198.05" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">101.6</text>
+  <text x="400.17" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fused, box 2</text>
+  <rect class="lv-bar" x="493.83" y="192.87" width="72.00" height="73.13" fill="#1f6feb"/>
+  <text x="529.83" y="186.87" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">119.9</text>
+  <text x="529.83" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fork level</text>
+  <text x="529.83" y="294.00" font-size="10.00" fill="#444444" text-anchor="middle">build b64405de76</text>
+  <rect class="lv-bar" x="623.50" y="161.36" width="72.00" height="104.64" fill="#ddf4ff" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="659.50" y="155.36" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">171.5</text>
+  <text x="659.50" y="142.36" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">1.43x</text>
+  <text x="659.50" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">opt-in depth 2</text>
+  <text x="659.50" y="294.00" font-size="10.00" fill="#444444" text-anchor="middle">speculative</text>
+  <rect class="lv-bar" x="753.17" y="155.64" width="72.00" height="110.36" fill="#ddf4ff" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="789.17" y="149.64" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">180.9</text>
+  <text x="789.17" y="136.64" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">1.51x</text>
+  <text x="789.17" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">opt-in depth 4</text>
+  <text x="789.17" y="294.00" font-size="10.00" fill="#444444" text-anchor="middle">speculative</text>
+  <polyline points="140.83,262.14 270.50,215.65 400.17,204.05 529.83,192.87 659.50,161.36 789.17,155.64" fill="none" stroke="#333333" stroke-width="1.5"/>
+  <line x1="40.00" y1="328.00" x2="62.00" y2="328.00" stroke="#8b949e" stroke-width="1.50" stroke-dasharray="6 4"/>
+  <text x="62.00" y="332.00" font-size="11.00" fill="#444444" text-anchor="start">fork 119.5</text>
+  <line x1="146.00" y1="328.00" x2="168.00" y2="328.00" stroke="#8b949e" stroke-width="1.50" stroke-dasharray="6 4"/>
+  <text x="168.00" y="332.00" font-size="11.00" fill="#444444" text-anchor="start">stock 81.0</text>
+  <rect x="252.00" y="323.00" width="12.00" height="10.00" fill="url(#lv-hatch)" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="274.00" y="332.00" font-size="11.00" fill="#444444" text-anchor="start">second box, compared within it</text>
+  <rect x="474.00" y="323.00" width="12.00" height="10.00" fill="#ddf4ff" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="496.00" y="332.00" font-size="11.00" fill="#444444" text-anchor="start">opt-in, off by default</text>
+  <text x="40.00" y="354.00" font-size="10.00" fill="#444444" text-anchor="start">Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB. Reference lines come from separate harnesses; the row captions below apply.</text>
+  <text x="40.00" y="365.00" font-size="10.00" fill="#444444" text-anchor="start">The opt-in speculative bars are not bit-exact on every prompt and are off by default.</text>
+  <text x="40.00" y="376.00" font-size="10.00" fill="#444444" text-anchor="start">cross-engine: realugbun llama.cpp 2eb2530e vs fak in-process; parity, no ratio</text>
+  <text x="40.00" y="387.00" font-size="10.00" fill="#444444" text-anchor="start">same window, ABBA x2; fak in-process decode bench vs llama-bench. second box: compare within that box only; not a cross-box ratio</text>
+  <text x="40.00" y="398.00" font-size="10.00" fill="#444444" text-anchor="start">cross-engine: fak in-process vs realugbun llama.cpp 2eb2530e; parity, no ratio</text>
+  <text x="40.00" y="409.00" font-size="10.00" fill="#444444" text-anchor="start">opt-in; not bit-exact on every prompt; capitals prompt</text>
 </svg>

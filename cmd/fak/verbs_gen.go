@@ -198,6 +198,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "l3-serve", Synopsis: "layer 3 distributed serving gateway and request routing coordinator", Aliases: []string{"l3serve"}, Tier: "dev"},
 	{Name: "lab", Synopsis: "the GPU-lab status surface: per-state / per-class node counts + readiness", Tier: "dev"},
 	{Name: "launch", Synopsis: "the reversible provider launch shim: route claude/codex through fak (install/uninstall/default/enable/status)", Tier: "dev"},
+	{Name: "launch-visual", Synopsis: "write or check the launch SVG charts and launch-doc numbers against the headline index", Tier: "dev"},
 	{Name: "launchguard", Synopsis: "repeated-crash quarantine guard: per-identity attempt budget with status/reset", Tier: "dev"},
 	{Name: "learning-debt-dispatch", Synopsis: "learning-scorecard -> backlog: file capped triage issues for HARD learning-debt defects", Tier: "dev"},
 	{Name: "learning-mesh", Synopsis: "compile learning records into deterministic cross-envelope transfer candidates", Tier: "dev"},

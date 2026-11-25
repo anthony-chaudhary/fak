@@ -1,5 +1,3 @@
-//go:build wip_mcp_search
-
 package gateway
 
 import (

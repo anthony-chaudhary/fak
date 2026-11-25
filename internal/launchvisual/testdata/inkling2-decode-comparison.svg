@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="379" viewBox="0 0 900 379" role="img" aria-labelledby="lv-title lv-desc" font-family="Helvetica, Arial, sans-serif">
+  <title id="lv-title">Decode fixture, tok/s</title>
+  <desc id="lv-desc">Golden render of the decode panels from the provisional index.</desc>
+  <defs><pattern id="lv-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fbf3dc"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9a6700" stroke-width="2"/></pattern></defs>
+  <rect width="900" height="379" fill="#ffffff"/>
+  <text x="40.00" y="22.00" font-size="11.00" font-weight="bold" fill="#1f6feb" text-anchor="start">FIXTURE</text>
+  <text x="40.00" y="44.00" font-size="18.00" font-weight="bold" fill="#111111" text-anchor="start">Decode fixture, tok/s</text>
+  <text x="40.00" y="62.00" font-size="12.00" fill="#444444" text-anchor="start">Golden render of the decode panels from the provisional index.</text>
+  <text x="40.00" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Same card and GGUF</text>
+  <text x="40.00" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">in-process fak vs llama-bench</text>
+  <text x="71.00" y="269.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
+  <line x1="76.00" y1="205.00" x2="296.67" y2="205.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="208.50" font-size="10.00" fill="#444444" text-anchor="end">100</text>
+  <line x1="76.00" y1="144.00" x2="296.67" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="147.50" font-size="10.00" fill="#444444" text-anchor="end">200</text>
+  <text x="71.00" y="114.00" font-size="10.00" fill="#444444" text-anchor="end">tok/s</text>
+  <line x1="76.00" y1="266.00" x2="296.67" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="100.27" y="193.94" width="61.79" height="72.06" fill="#1f6feb"/>
+  <text x="131.17" y="187.94" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">118.1</text>
+  <text x="131.17" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fak</text>
+  <rect class="lv-bar" x="210.61" y="216.60" width="61.79" height="49.40" fill="#6e7781"/>
+  <text x="241.50" y="210.60" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">81.0</text>
+  <text x="241.50" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">stock</text>
+  <text x="318.67" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Fork parity</text>
+  <text x="318.67" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">fak vs realugbun, separate window</text>
+  <line x1="324.67" y1="205.00" x2="575.33" y2="205.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="324.67" y1="144.00" x2="575.33" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="324.67" y1="266.00" x2="575.33" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="352.24" y="192.86" width="70.19" height="73.14" fill="#1f6feb"/>
+  <text x="387.33" y="186.86" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">119.9</text>
+  <text x="387.33" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fak</text>
+  <rect class="lv-bar" x="477.57" y="193.10" width="70.19" height="72.90" fill="#6e7781"/>
+  <text x="512.67" y="187.10" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">119.5</text>
+  <text x="512.67" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fork</text>
+  <text x="597.33" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Opt-in speculative decode</text>
+  <text x="597.33" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">same receipt, same card</text>
+  <line x1="603.33" y1="205.00" x2="854.00" y2="205.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="603.33" y1="144.00" x2="854.00" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="603.33" y1="266.00" x2="854.00" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="621.72" y="192.99" width="46.79" height="73.01" fill="#6e7781"/>
+  <text x="645.11" y="186.99" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">119.7</text>
+  <text x="645.11" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">plain</text>
+  <rect class="lv-bar" x="705.27" y="161.36" width="46.79" height="104.64" fill="#ddf4ff" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="728.67" y="155.36" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">171.5</text>
+  <text x="728.67" y="142.36" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">1.43x</text>
+  <text x="728.67" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">depth 2</text>
+  <rect class="lv-bar" x="788.83" y="155.64" width="46.79" height="110.36" fill="#ddf4ff" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="812.22" y="149.64" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">180.9</text>
+  <text x="812.22" y="136.64" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">1.51x</text>
+  <text x="812.22" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">depth 4</text>
+  <rect x="40.00" y="323.00" width="12.00" height="10.00" fill="#ddf4ff" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="62.00" y="332.00" font-size="11.00" fill="#444444" text-anchor="start">opt-in, off by default</text>
+  <text x="40.00" y="354.00" font-size="10.00" fill="#444444" text-anchor="start">cross-harness: llama-bench vs fak in-process go test; absolute values, no ratio. separate window; parity, not a speedup</text>
+  <text x="40.00" y="365.00" font-size="10.00" fill="#444444" text-anchor="start">opt-in; not bit-exact (oracle diverges at token 104 or 111). opt-in; not bit-exact on every prompt</text>
+</svg>

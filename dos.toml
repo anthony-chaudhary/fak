@@ -1504,6 +1504,7 @@ codexresume = ["internal/codexresume/**"]
 mixedprecision = ["internal/mixedprecision/**"] # #6407: see the [lanes].concurrent note.
 depthadmit = ["internal/depthadmit/**"]
 managedocs = ["internal/managedocs/**"]
+launchvisual = ["internal/launchvisual/**"]
 toolcatalog = ["internal/toolcatalog/**"]
 toolcallcontrol = ["internal/toolcallcontrol/**"]
 harnesskit = ["pkg/harnesskit/**", "docs/harness-kit-contract.md", "docs/_witnesses/harness-kit-contract*"]

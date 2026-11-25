@@ -1,0 +1,74 @@
+{
+  "schema": "fak.launchvisual.charts.v1",
+  "docs": ["internal/launchvisual/testdata/doc.md"],
+  "allowed_numbers": [
+    {"token": "12.5", "reason": "fixture build seconds, not an index fact"},
+    {"token": "2", "reason": "fixture speculative depth and batch labels, not measurements"},
+    {"token": "4", "reason": "fixture speculative depth label, not a measurement"}
+  ],
+  "charts": [
+    {
+      "id": "fixture-comparison",
+      "file": "inkling2-decode-comparison.svg",
+      "kicker": "FIXTURE",
+      "title": "Decode fixture, tok/s",
+      "subtitle": "Golden render of the decode panels from the provisional index.",
+      "columns": 3,
+      "panels": [
+        {
+          "title": "Same card and GGUF",
+          "subtitle": "in-process fak vs llama-bench",
+          "style": "bars", "axis": "decode",
+          "series": [
+            {"row": "samewindow.fak.decode_tok_s", "label": "fak", "tone": "fak"},
+            {"row": "samewindow.stock.decode_tok_s", "label": "stock", "tone": "base"}
+          ]
+        },
+        {
+          "title": "Fork parity",
+          "subtitle": "fak vs realugbun, separate window",
+          "style": "bars", "axis": "decode",
+          "series": [
+            {"row": "fork.parity.fak_tok_s", "label": "fak", "tone": "fak"},
+            {"row": "fork.parity.fork_tok_s", "label": "fork", "tone": "base"}
+          ]
+        },
+        {
+          "title": "Opt-in speculative decode",
+          "subtitle": "same receipt, same card",
+          "style": "bars", "axis": "decode",
+          "series": [
+            {"row": "spec.plain.tok_s", "label": "plain", "tone": "base"},
+            {"row": "spec.d2.tok_s", "label": "depth 2", "tone": "optin"},
+            {"row": "spec.d4.tok_s", "label": "depth 4", "tone": "optin"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixture-climb",
+      "file": "inkling2-decode-climb.svg",
+      "kicker": "FIXTURE CLIMB",
+      "title": "Decode climb fixture",
+      "subtitle": "Staircase with a loss row and reference lines.",
+      "columns": 1,
+      "panels": [
+        {
+          "title": "Climb and loss",
+          "subtitle": "tok/s at each step",
+          "style": "staircase", "axis": "decode",
+          "series": [
+            {"row": "climb.first_native.tok_s", "label": "first native", "tone": "base"},
+            {"row": "climb.resident.tok_s", "label": "resident KV", "tone": "base"},
+            {"row": "climb.fused_box2.tok_s", "label": "fused box2", "tone": "box2"},
+            {"row": "c16.true_batch.decode_tok_s", "label": "true batch", "tone": "base"}
+          ],
+          "references": [
+            {"row": "oss.c16.decode_tok_s", "label": "OSS"}
+          ]
+        }
+      ],
+      "footers": ["Fixture footer line."]
+    }
+  ]
+}

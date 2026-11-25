@@ -147,6 +147,7 @@ cross-checked against the live registry in code.
 | UNTIERED_LEAF | warn | fail-open | advisory by design (#3614); staged twin of TIER_DECLARED |
 | CART_BEFORE_HORSE | warn | fail-open | advisory by design (#2521); new leaves establish an applied spine before downstream proof/performance breadth |
 | GOFMT | block | fail-open | blocking commit-boundary twin of make ci gofmt-check |
+| LAUNCH_NUMBERS_FRESHNESS | block | fail-open | launch SVGs and launch docs must match the staged headline index |
 | DUPLICATION | warn | fail-open | advisory; in-process twin of fak dup guard --staged |
 | COMMENT_QUALITY | warn | fail-open | advisory; changed-lines-only comments should explain durable why |
 | CLEAR_INVENTORY_ADMISSION | warn | fail-open | advisory by design; defaults to clear inventory gating over mock substitutions |

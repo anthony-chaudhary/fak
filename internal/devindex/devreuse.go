@@ -251,6 +251,7 @@ var maintainerDevCommands = []string{
 	"l3serve",
 	"launch",
 	"launch-census",
+	"launch-visual",
 	// Read-only tensor-layout contract registry CLI over internal/compute/layoutcontract:
 	// port workers and CI verify a kernel's expected packed/tile layout before a port
 	// silently pays a runtime repack; fak-maintainer machinery, not a portable adopter pattern.

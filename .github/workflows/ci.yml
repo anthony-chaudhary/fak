@@ -577,6 +577,7 @@ jobs:
           # source-of-truth data.json -> one renderer -> one SVG, drift-gated.
           python tools/hero_matrix_gen.py --check
           go run ./cmd/fak turntax visual --check
+          go run ./cmd/fak launch-visual --check
           python tools/hero_sweep_gen.py --check
 
       # Docs scorecard: the whole-corpus analogue of the README freshness audit.

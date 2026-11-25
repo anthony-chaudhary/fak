@@ -346,6 +346,7 @@ var verbTiers = map[string]VerbTier{
 	"l3serve":                       TierDev,
 	"lab":                           TierDev,
 	"launch":                        TierDev,
+	"launch-visual":                 TierDev,
 	"launchguard":                   TierDev,
 	"layoutcontract":                TierDev,
 	"learning-debt-dispatch":        TierDev,

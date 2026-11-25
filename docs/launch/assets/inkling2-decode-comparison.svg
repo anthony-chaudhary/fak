@@ -1,38 +1,129 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" width="760" height="420" font-family="Helvetica, Arial, sans-serif">
-  <title>Inkling-2-Mini decode and prefill: fak, realugbun llama.cpp fork, stock llama.cpp</title>
-  <rect width="760" height="420" fill="#ffffff"/>
-
-  <!-- Panel 1: decode, scale 0-130 tok/s over 240 px (1.846 px per tok/s), baseline y=320 -->
-  <text x="190" y="36" font-size="16" font-weight="bold" text-anchor="middle" fill="#111">Decode, tok/s (higher is better)</text>
-  <text x="190" y="56" font-size="12" text-anchor="middle" fill="#444">same card and GGUF; fak and stock in one window</text>
-  <line x1="40" y1="320" x2="350" y2="320" stroke="#333"/>
-  <rect x="60" y="102.0" width="70" height="218.0" fill="#1f6feb"/>
-  <text x="95" y="95" font-size="14" text-anchor="middle" fill="#111">118.1</text>
-  <text x="95" y="340" font-size="12" text-anchor="middle" fill="#111">fak</text>
-  <text x="95" y="355" font-size="11" text-anchor="middle" fill="#444">(ABBA x2)</text>
-  <rect x="155" y="99.4" width="70" height="220.6" fill="#8b949e"/>
-  <text x="190" y="92" font-size="14" text-anchor="middle" fill="#111">119.5</text>
-  <text x="190" y="340" font-size="12" text-anchor="middle" fill="#111">llama.cpp fork</text>
-  <text x="190" y="355" font-size="11" text-anchor="middle" fill="#444">(realugbun,</text>
-  <text x="190" y="369" font-size="11" text-anchor="middle" fill="#444">separate window)</text>
-  <rect x="250" y="170.5" width="70" height="149.5" fill="#c9d1d9"/>
-  <text x="285" y="164" font-size="14" text-anchor="middle" fill="#111">81.0</text>
-  <text x="285" y="340" font-size="12" text-anchor="middle" fill="#111">stock llama.cpp</text>
-  <text x="285" y="355" font-size="11" text-anchor="middle" fill="#444">(ABBA x2, 1.46x)</text>
-
-  <!-- Panel 2: prefill pp512, scale 0-2500 tok/s over 240 px (0.096 px per tok/s), baseline y=320 -->
-  <line x1="380" y1="60" x2="380" y2="360" stroke="#ddd"/>
-  <text x="570" y="36" font-size="16" font-weight="bold" text-anchor="middle" fill="#111">Prefill pp512, tok/s: fak loses</text>
-  <text x="570" y="56" font-size="12" text-anchor="middle" fill="#b42318">different boxes, not a matched ratio</text>
-  <line x1="420" y1="320" x2="720" y2="320" stroke="#333"/>
-  <rect x="470" y="237.2" width="80" height="82.8" fill="#1f6feb"/>
-  <text x="510" y="230" font-size="14" text-anchor="middle" fill="#111">862.7</text>
-  <text x="510" y="340" font-size="12" text-anchor="middle" fill="#111">fak</text>
-  <text x="510" y="355" font-size="11" text-anchor="middle" fill="#444">(opt-in batched)</text>
-  <rect x="590" y="93.2" width="80" height="226.8" fill="#c9d1d9"/>
-  <text x="630" y="86" font-size="14" text-anchor="middle" fill="#111">2362</text>
-  <text x="630" y="340" font-size="12" text-anchor="middle" fill="#111">llama.cpp</text>
-
-  <text x="380" y="398" font-size="11" text-anchor="middle" fill="#444">in-process decode bench, Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB</text>
-  <text x="380" y="413" font-size="11" text-anchor="middle" fill="#444">not served-endpoint rates; decode parity holds at depth 0 only</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="750" viewBox="0 0 900 750" role="img" aria-labelledby="lv-title lv-desc" font-family="Helvetica, Arial, sans-serif">
+  <title id="lv-title">Decode and prefill on one RTX 5080 16 GB</title>
+  <desc id="lv-desc">Higher is better. Decode panels share one tok/s axis; prefill has its own axis.</desc>
+  <defs><pattern id="lv-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fbf3dc"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9a6700" stroke-width="2"/></pattern></defs>
+  <rect width="900" height="750" fill="#ffffff"/>
+  <text x="40.00" y="22.00" font-size="11.00" font-weight="bold" fill="#1f6feb" text-anchor="start">INKLING-2-MINI DECODE AND PREFILL</text>
+  <text x="40.00" y="44.00" font-size="18.00" font-weight="bold" fill="#111111" text-anchor="start">Decode and prefill on one RTX 5080 16 GB</text>
+  <text x="40.00" y="62.00" font-size="12.00" fill="#444444" text-anchor="start">Higher is better. Decode panels share one tok/s axis; prefill has its own axis.</text>
+  <text x="40.00" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Same card, same window</text>
+  <text x="40.00" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">ABBA x2, one GGUF</text>
+  <text x="71.00" y="269.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
+  <line x1="76.00" y1="205.00" x2="227.00" y2="205.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="208.50" font-size="10.00" fill="#444444" text-anchor="end">100</text>
+  <line x1="76.00" y1="144.00" x2="227.00" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="147.50" font-size="10.00" fill="#444444" text-anchor="end">200</text>
+  <text x="71.00" y="114.00" font-size="10.00" fill="#444444" text-anchor="end">tok/s</text>
+  <line x1="76.00" y1="266.00" x2="227.00" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="92.61" y="193.94" width="42.28" height="72.06" fill="#1f6feb"/>
+  <text x="113.75" y="187.94" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">118.1</text>
+  <text x="113.75" y="174.94" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">1.46x</text>
+  <text x="113.75" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fak</text>
+  <rect class="lv-bar" x="168.11" y="216.60" width="42.28" height="49.40" fill="#6e7781"/>
+  <text x="189.25" y="210.60" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">81.0</text>
+  <text x="189.25" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">stock</text>
+  <text x="249.00" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Fork parity</text>
+  <text x="249.00" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">separate window</text>
+  <line x1="255.00" y1="205.00" x2="436.00" y2="205.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="255.00" y1="144.00" x2="436.00" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="255.00" y1="266.00" x2="436.00" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="274.91" y="192.87" width="50.68" height="73.13" fill="#1f6feb"/>
+  <text x="300.25" y="186.87" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">119.9</text>
+  <text x="300.25" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fak</text>
+  <text x="300.25" y="294.00" font-size="10.00" fill="#444444" text-anchor="middle">build b64405de76</text>
+  <rect class="lv-bar" x="365.41" y="193.12" width="50.68" height="72.88" fill="#6e7781"/>
+  <text x="390.75" y="187.12" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">119.5</text>
+  <text x="390.75" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fork</text>
+  <text x="458.00" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Opt-in speculative</text>
+  <text x="458.00" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">vs plain, same receipt</text>
+  <line x1="464.00" y1="205.00" x2="645.00" y2="205.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="464.00" y1="144.00" x2="645.00" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="464.00" y1="266.00" x2="645.00" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="477.27" y="192.97" width="33.79" height="73.03" fill="#6e7781"/>
+  <text x="494.17" y="186.97" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">119.7</text>
+  <text x="494.17" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">plain</text>
+  <rect class="lv-bar" x="537.61" y="161.36" width="33.79" height="104.64" fill="#ddf4ff" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="554.50" y="155.36" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">171.5</text>
+  <text x="554.50" y="142.36" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">1.43x</text>
+  <text x="554.50" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">depth 2</text>
+  <rect class="lv-bar" x="597.94" y="155.64" width="33.79" height="110.36" fill="#ddf4ff" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="614.83" y="149.64" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">180.9</text>
+  <text x="614.83" y="136.64" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">1.51x</text>
+  <text x="614.83" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">depth 4</text>
+  <text x="667.00" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Depth 1946 (a loss)</text>
+  <text x="667.00" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">fak vs fork at 1946 tokens</text>
+  <line x1="673.00" y1="205.00" x2="854.00" y2="205.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="673.00" y1="144.00" x2="854.00" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <line x1="673.00" y1="266.00" x2="854.00" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="692.91" y="211.73" width="50.68" height="54.27" fill="#b42318"/>
+  <text x="718.25" y="205.73" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">89.0</text>
+  <text x="718.25" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fak</text>
+  <rect class="lv-bar" x="783.41" y="196.58" width="50.68" height="69.42" fill="#6e7781"/>
+  <text x="808.75" y="190.58" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">113.8</text>
+  <text x="808.75" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fork</text>
+  <text x="40.00" y="338.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Prefill (a loss)</text>
+  <text x="40.00" y="352.00" font-size="10.50" fill="#444444" text-anchor="start">pp512; the fak bar is the second box</text>
+  <text x="71.00" y="519.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
+  <line x1="76.00" y1="475.33" x2="436.00" y2="475.33" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="478.83" font-size="10.00" fill="#444444" text-anchor="end">2000</text>
+  <line x1="76.00" y1="434.67" x2="436.00" y2="434.67" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="438.17" font-size="10.00" fill="#444444" text-anchor="end">4000</text>
+  <line x1="76.00" y1="394.00" x2="436.00" y2="394.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="397.50" font-size="10.00" fill="#444444" text-anchor="end">6000</text>
+  <text x="71.00" y="364.00" font-size="10.00" fill="#444444" text-anchor="end">tok/s</text>
+  <line x1="76.00" y1="516.00" x2="436.00" y2="516.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="102.40" y="498.46" width="67.20" height="17.54" fill="#b42318"/>
+  <text x="136.00" y="492.46" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">862.4</text>
+  <text x="136.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">fak batched</text>
+  <rect class="lv-bar" x="222.40" y="467.97" width="67.20" height="48.03" fill="#6e7781"/>
+  <text x="256.00" y="461.97" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">2362</text>
+  <text x="256.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">llama.cpp</text>
+  <rect class="lv-bar" x="342.40" y="412.18" width="67.20" height="103.82" fill="#ffffff" stroke="#6e7781" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <text x="376.00" y="406.18" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">5106</text>
+  <text x="376.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">fork ref.</text>
+  <text x="376.00" y="544.00" font-size="10.00" fill="#444444" text-anchor="middle">unmatched reference</text>
+  <text x="458.00" y="338.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">PDL flag (a loss)</text>
+  <text x="458.00" y="352.00" font-size="10.50" fill="#444444" text-anchor="start">opt-in, off by default; plain, then speculative depth 2</text>
+  <text x="489.00" y="519.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
+  <line x1="494.00" y1="455.00" x2="854.00" y2="455.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="489.00" y="458.50" font-size="10.00" fill="#444444" text-anchor="end">100</text>
+  <line x1="494.00" y1="394.00" x2="854.00" y2="394.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="489.00" y="397.50" font-size="10.00" fill="#444444" text-anchor="end">200</text>
+  <text x="489.00" y="364.00" font-size="10.00" fill="#444444" text-anchor="end">tok/s</text>
+  <line x1="494.00" y1="516.00" x2="854.00" y2="516.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="513.80" y="444.53" width="50.40" height="71.47" fill="#6e7781"/>
+  <text x="539.00" y="438.53" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">117.2</text>
+  <text x="539.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">plain off</text>
+  <rect class="lv-bar" x="603.80" y="448.49" width="50.40" height="67.51" fill="#b42318"/>
+  <text x="629.00" y="442.49" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">110.7</text>
+  <text x="629.00" y="429.49" font-size="10.50" font-weight="bold" fill="#b42318" text-anchor="middle">0.94x</text>
+  <text x="629.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">plain on</text>
+  <rect class="lv-bar" x="693.80" y="426.37" width="50.40" height="89.63" fill="#6e7781"/>
+  <text x="719.00" y="420.37" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">146.9</text>
+  <text x="719.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">spec off</text>
+  <rect class="lv-bar" x="783.80" y="432.37" width="50.40" height="83.63" fill="#b42318"/>
+  <text x="809.00" y="426.37" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">137.1</text>
+  <text x="809.00" y="413.37" font-size="10.50" font-weight="bold" fill="#b42318" text-anchor="middle">0.93x</text>
+  <text x="809.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">spec on</text>
+  <rect x="40.00" y="573.00" width="12.00" height="10.00" fill="#ddf4ff" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="62.00" y="582.00" font-size="11.00" fill="#444444" text-anchor="start">opt-in, off by default</text>
+  <rect x="215.60" y="573.00" width="12.00" height="10.00" fill="#b42318"/>
+  <text x="237.60" y="582.00" font-size="11.00" fill="#444444" text-anchor="start">loss</text>
+  <rect x="286.80" y="573.00" width="12.00" height="10.00" fill="url(#lv-hatch)" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="308.80" y="582.00" font-size="11.00" fill="#444444" text-anchor="start">second box, compared within it</text>
+  <rect x="508.80" y="573.00" width="12.00" height="10.00" fill="#ffffff" stroke="#6e7781" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <text x="530.80" y="582.00" font-size="11.00" fill="#444444" text-anchor="start">unmatched reference, not measured on the same box</text>
+  <text x="40.00" y="604.00" font-size="10.00" fill="#444444" text-anchor="start">Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB.</text>
+  <text x="40.00" y="615.00" font-size="10.00" fill="#444444" text-anchor="start">Decode is an in-process decode bench, not served-endpoint rates; decode parity with the fork holds at depth 0 only.</text>
+  <text x="40.00" y="626.00" font-size="10.00" fill="#444444" text-anchor="start">same window, ABBA x2; fak in-process decode bench vs llama-bench</text>
+  <text x="40.00" y="637.00" font-size="10.00" fill="#444444" text-anchor="start">cross-engine: fak in-process vs realugbun llama.cpp 2eb2530e; parity, no ratio</text>
+  <text x="40.00" y="648.00" font-size="10.00" fill="#444444" text-anchor="start">cross-engine: realugbun llama.cpp 2eb2530e vs fak in-process; parity, no ratio</text>
+  <text x="40.00" y="659.00" font-size="10.00" fill="#444444" text-anchor="start">opt-in; not bit-exact on every prompt; capitals prompt</text>
+  <text x="40.00" y="670.00" font-size="10.00" fill="#444444" text-anchor="start">single 31-step run at 1946 tokens of depth; trails the realugbun fork on a different harness; cross-engine, no ratio</text>
+  <text x="40.00" y="681.00" font-size="10.00" fill="#444444" text-anchor="start">external comparator: realugbun llama.cpp 2eb2530e; cross-engine, different harness (llama-bench tg32 at depth), no ratio</text>
+  <text x="40.00" y="692.00" font-size="10.00" fill="#444444" text-anchor="start">opt-in; mean of two ABBA samples (862.74, 862.05); cross-box vs llama.cpp, no ratio</text>
+  <text x="40.00" y="703.00" font-size="10.00" fill="#444444" text-anchor="start">external comparator; measured on a different box from the batched prefill row; no ratio</text>
+  <text x="40.00" y="714.00" font-size="10.00" fill="#444444" text-anchor="start">unmatched reference: eligibility UNMATCHED and not measured on the batched prefill box; no ratio</text>
+  <text x="40.00" y="725.00" font-size="10.00" fill="#444444" text-anchor="start">PDL measured slower on sm_120; opt-in FAK_INKLING2_PDL=1, default off; output bit-identical</text>
+  <text x="40.00" y="736.00" font-size="10.00" fill="#444444" text-anchor="start">PDL measured slower with spec depth 2 as well; opt-in FAK_INKLING2_PDL=1, default off</text>
 </svg>

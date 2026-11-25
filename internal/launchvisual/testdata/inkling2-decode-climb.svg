@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="368" viewBox="0 0 900 368" role="img" aria-labelledby="lv-title lv-desc" font-family="Helvetica, Arial, sans-serif">
+  <title id="lv-title">Decode climb fixture</title>
+  <desc id="lv-desc">Staircase with a loss row and reference lines.</desc>
+  <defs><pattern id="lv-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fbf3dc"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9a6700" stroke-width="2"/></pattern></defs>
+  <rect width="900" height="368" fill="#ffffff"/>
+  <text x="40.00" y="22.00" font-size="11.00" font-weight="bold" fill="#1f6feb" text-anchor="start">FIXTURE CLIMB</text>
+  <text x="40.00" y="44.00" font-size="18.00" font-weight="bold" fill="#111111" text-anchor="start">Decode climb fixture</text>
+  <text x="40.00" y="62.00" font-size="12.00" fill="#444444" text-anchor="start">Staircase with a loss row and reference lines.</text>
+  <text x="40.00" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Climb and loss</text>
+  <text x="40.00" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">tok/s at each step</text>
+  <text x="71.00" y="269.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
+  <line x1="76.00" y1="241.60" x2="854.00" y2="241.60" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="245.10" font-size="10.00" fill="#444444" text-anchor="end">100</text>
+  <line x1="76.00" y1="217.20" x2="854.00" y2="217.20" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="220.70" font-size="10.00" fill="#444444" text-anchor="end">200</text>
+  <line x1="76.00" y1="192.80" x2="854.00" y2="192.80" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="196.30" font-size="10.00" fill="#444444" text-anchor="end">300</text>
+  <line x1="76.00" y1="168.40" x2="854.00" y2="168.40" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="171.90" font-size="10.00" fill="#444444" text-anchor="end">400</text>
+  <line x1="76.00" y1="144.00" x2="854.00" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="147.50" font-size="10.00" fill="#444444" text-anchor="end">500</text>
+  <text x="71.00" y="114.00" font-size="10.00" fill="#444444" text-anchor="end">tok/s</text>
+  <line x1="76.00" y1="266.00" x2="854.00" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <line x1="76.00" y1="167.73" x2="854.00" y2="167.73" stroke="#8b949e" stroke-width="1.50" stroke-dasharray="6 4"/>
+  <rect class="lv-bar" x="137.25" y="264.46" width="72.00" height="1.54" fill="#6e7781"/>
+  <text x="173.25" y="258.46" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">6.32</text>
+  <text x="173.25" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">first native</text>
+  <rect class="lv-bar" x="331.75" y="245.87" width="72.00" height="20.13" fill="#6e7781"/>
+  <text x="367.75" y="239.87" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">82.5</text>
+  <text x="367.75" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">resident KV</text>
+  <rect class="lv-bar" x="526.25" y="241.21" width="72.00" height="24.79" fill="url(#lv-hatch)" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="562.25" y="235.21" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">101.6</text>
+  <text x="562.25" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fused box2</text>
+  <rect class="lv-bar" x="720.75" y="215.82" width="72.00" height="50.18" fill="#b42318"/>
+  <text x="756.75" y="209.82" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">205.67</text>
+  <text x="756.75" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">true batch</text>
+  <polyline points="173.25,264.46 367.75,245.87 562.25,241.21 756.75,215.82" fill="none" stroke="#333333" stroke-width="1.5"/>
+  <line x1="40.00" y1="328.00" x2="62.00" y2="328.00" stroke="#8b949e" stroke-width="1.50" stroke-dasharray="6 4"/>
+  <text x="62.00" y="332.00" font-size="11.00" fill="#444444" text-anchor="start">OSS 402.76</text>
+  <rect x="146.00" y="323.00" width="12.00" height="10.00" fill="url(#lv-hatch)" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="168.00" y="332.00" font-size="11.00" fill="#444444" text-anchor="start">second box, compared within it</text>
+  <rect x="368.00" y="323.00" width="12.00" height="10.00" fill="#b42318"/>
+  <text x="390.00" y="332.00" font-size="11.00" fill="#444444" text-anchor="start">loss</text>
+  <text x="40.00" y="354.00" font-size="10.00" fill="#444444" text-anchor="start">Fixture footer line. below OSS llama-server on the same card</text>
+</svg>

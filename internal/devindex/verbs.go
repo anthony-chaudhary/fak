@@ -298,6 +298,7 @@ var verbManifest = []Verb{
 	{Name: "l3-serve", Synopsis: "layer 3 distributed serving gateway and request routing coordinator", Aliases: []string{"l3serve"}, Lane: "cmd"},
 	{Name: "lab", Synopsis: "the GPU-lab status surface: per-state / per-class node counts + readiness", Lane: "cmd"},
 	{Name: "launch", Synopsis: "the reversible provider launch shim: route claude/codex through fak (install/uninstall/default/enable/status)", Lane: "cmd"},
+	{Name: "launch-visual", Synopsis: "write or check the launch SVG charts and launch-doc numbers against the headline index", Lane: "cmd"},
 	{Name: "launchguard", Synopsis: "repeated-crash quarantine guard: per-identity attempt budget with status/reset", Lane: "cmd"},
 	{Name: "layoutcontract", Synopsis: "query the tensor-layout contract registry: families, show, check, orphans (read-only)", Lane: "cmd"},
 	{Name: "leaseref", Synopsis: "cross-machine lease visibility: read the refs/fak/locks/* lease ref namespace", Lane: "cmd"},

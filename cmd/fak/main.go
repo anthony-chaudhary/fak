@@ -1034,6 +1034,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		} else {
 			cmdTurnTax(args)
 		}
+	case "launch-visual":
+		cmdLaunchVisual(args)
 	case "hooklat":
 		cmdHookLat(args)
 	case "dispatchlat":

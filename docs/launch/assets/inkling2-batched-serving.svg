@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="728" viewBox="0 0 900 728" role="img" aria-labelledby="lv-title lv-desc" font-family="Helvetica, Arial, sans-serif">
+  <title id="lv-title">Batched serving on one RTX 5080 16 GB</title>
+  <desc id="lv-desc">Aggregate tok/s across streams, and the cohort prefill end to end; a single stream is the per-stream reference.</desc>
+  <defs><pattern id="lv-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fbf3dc"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9a6700" stroke-width="2"/></pattern></defs>
+  <rect width="900" height="728" fill="#ffffff"/>
+  <text x="40.00" y="22.00" font-size="11.00" font-weight="bold" fill="#1f6feb" text-anchor="start">INKLING-2-MINI BATCHED SERVING</text>
+  <text x="40.00" y="44.00" font-size="18.00" font-weight="bold" fill="#111111" text-anchor="start">Batched serving on one RTX 5080 16 GB</text>
+  <text x="40.00" y="62.00" font-size="12.00" fill="#444444" text-anchor="start">Aggregate tok/s across streams, and the cohort prefill end to end; a single stream is the per-stream reference.</text>
+  <text x="40.00" y="88.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Aggregate decode</text>
+  <text x="40.00" y="102.00" font-size="10.50" fill="#444444" text-anchor="start">summed across streams; single stream is per stream</text>
+  <text x="71.00" y="269.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
+  <line x1="76.00" y1="235.50" x2="854.00" y2="235.50" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="239.00" font-size="10.00" fill="#444444" text-anchor="end">200</text>
+  <line x1="76.00" y1="205.00" x2="854.00" y2="205.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="208.50" font-size="10.00" fill="#444444" text-anchor="end">400</text>
+  <line x1="76.00" y1="174.50" x2="854.00" y2="174.50" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="178.00" font-size="10.00" fill="#444444" text-anchor="end">600</text>
+  <line x1="76.00" y1="144.00" x2="854.00" y2="144.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="147.50" font-size="10.00" fill="#444444" text-anchor="end">800</text>
+  <text x="71.00" y="114.00" font-size="10.00" fill="#444444" text-anchor="end">tok/s</text>
+  <line x1="76.00" y1="266.00" x2="854.00" y2="266.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="117.80" y="247.72" width="72.00" height="18.28" fill="#6e7781"/>
+  <text x="153.80" y="241.72" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">119.9</text>
+  <text x="153.80" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">single stream</text>
+  <rect class="lv-bar" x="273.40" y="256.04" width="72.00" height="9.96" fill="#b42318"/>
+  <text x="309.40" y="250.04" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">65.3</text>
+  <text x="309.40" y="237.04" font-size="10.50" font-weight="bold" fill="#b42318" text-anchor="middle">0.54x</text>
+  <text x="309.40" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">C1 batch</text>
+  <rect class="lv-bar" x="429.00" y="218.32" width="72.00" height="47.68" fill="#6e7781"/>
+  <text x="465.00" y="212.32" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">312.7</text>
+  <text x="465.00" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">C8 rows off</text>
+  <rect class="lv-bar" x="584.60" y="215.12" width="72.00" height="50.88" fill="#1f6feb"/>
+  <text x="620.60" y="209.12" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">333.7</text>
+  <text x="620.60" y="196.12" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">1.07x</text>
+  <text x="620.60" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">C8 rows on</text>
+  <rect class="lv-bar" x="740.20" y="146.49" width="72.00" height="119.51" fill="#1f6feb"/>
+  <text x="776.20" y="140.49" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">783.7</text>
+  <text x="776.20" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">C24 f16</text>
+  <text x="40.00" y="338.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Cohort prefill, end to end</text>
+  <text x="40.00" y="352.00" font-size="10.50" fill="#444444" text-anchor="start">C16 HTTP cohort, aggregate tok/s</text>
+  <text x="71.00" y="519.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
+  <line x1="76.00" y1="485.50" x2="436.00" y2="485.50" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="489.00" font-size="10.00" fill="#444444" text-anchor="end">100</text>
+  <line x1="76.00" y1="455.00" x2="436.00" y2="455.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="458.50" font-size="10.00" fill="#444444" text-anchor="end">200</text>
+  <line x1="76.00" y1="424.50" x2="436.00" y2="424.50" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="428.00" font-size="10.00" fill="#444444" text-anchor="end">300</text>
+  <line x1="76.00" y1="394.00" x2="436.00" y2="394.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="397.50" font-size="10.00" fill="#444444" text-anchor="end">400</text>
+  <text x="71.00" y="364.00" font-size="10.00" fill="#444444" text-anchor="end">tok/s</text>
+  <line x1="76.00" y1="516.00" x2="436.00" y2="516.00" stroke="#333333" stroke-width="1.00"/>
+  <rect class="lv-bar" x="102.40" y="474.00" width="67.20" height="42.00" fill="#6e7781"/>
+  <text x="136.00" y="468.00" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">137.7</text>
+  <text x="136.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">lockstep</text>
+  <rect class="lv-bar" x="222.40" y="402.52" width="67.20" height="113.48" fill="#1f6feb"/>
+  <text x="256.00" y="396.52" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">372.1</text>
+  <text x="256.00" y="383.52" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">2.70x</text>
+  <text x="256.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">ragged</text>
+  <rect class="lv-bar" x="342.40" y="408.53" width="67.20" height="107.47" fill="#6e7781"/>
+  <text x="376.00" y="402.53" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">352.36</text>
+  <text x="376.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">OSS e2e</text>
+  <rect x="40.00" y="573.00" width="12.00" height="10.00" fill="#b42318"/>
+  <text x="62.00" y="582.00" font-size="11.00" fill="#444444" text-anchor="start">loss</text>
+  <text x="40.00" y="604.00" font-size="10.00" fill="#444444" text-anchor="start">Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB.</text>
+  <text x="40.00" y="615.00" font-size="10.00" fill="#444444" text-anchor="start">Aggregate rows are summed across streams and are not per-stream rates; the cohort rows use chat prompts, the OSS row uses raw</text>
+  <text x="40.00" y="626.00" font-size="10.00" fill="#444444" text-anchor="start">prompts.</text>
+  <text x="40.00" y="637.00" font-size="10.00" fill="#444444" text-anchor="start">The C1 batch row is the batch path at one stream: a loss by design, since the batch path only wins at width.</text>
+  <text x="40.00" y="648.00" font-size="10.00" fill="#444444" text-anchor="start">reference for the batch rows; the resident single-stream reader, not the batch path</text>
+  <text x="40.00" y="659.00" font-size="10.00" fill="#444444" text-anchor="start">loss: the batch path at one stream runs at about half the resident single-stream rate; the batch path only wins at width</text>
+  <text x="40.00" y="670.00" font-size="10.00" fill="#444444" text-anchor="start">aggregate across 8 streams, not per-stream. aggregate across 24 streams, not a per-stream rate; opt-in f16 KV; single run</text>
+  <text x="40.00" y="681.00" font-size="10.00" fill="#444444" text-anchor="start">aggregate across 16 streams, not per-stream; 82-88-token chat prompts, not the 19-token OSS prompts</text>
+  <text x="40.00" y="692.00" font-size="10.00" fill="#444444" text-anchor="start">aggregate across 16 streams, not per-stream; 82-88-token chat prompts; B adds the cohort prefill to the same serve path as A</text>
+  <text x="40.00" y="703.00" font-size="10.00" fill="#444444" text-anchor="start">aggregate across 16 streams, not per-stream; 19-token raw prompts, so the prompt shape differs from the fak C16 rows; absolute</text>
+  <text x="40.00" y="714.00" font-size="10.00" fill="#444444" text-anchor="start">value, no ratio</text>
+</svg>

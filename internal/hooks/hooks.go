@@ -9,7 +9,7 @@
 // staged diff ONCE and runs every gate over it — the whole measured cost was spawn overhead,
 // so a single static-binary start recovers essentially all of it.
 //
-// The registry has grown well past that Python-era set: PreCommitGates() registers all 27 gates
+// The registry has grown well past that Python-era set: PreCommitGates() registers all 28 gates
 // today. That number is BOUND, not typed — exhaustiveness_claim_test.go re-derives it from the
 // registry and fails when the two disagree, so this sentence cannot quietly decay the way the
 // count it replaces did (#5605, epic #5601). Adding a gate is expected to update it.
@@ -105,6 +105,7 @@ func PreCommitGates() []Gate {
 		{Name: "INDEX_SYNC", ModeEnv: "FLEET_INDEX_GUARD", EscapeEnv: "ALLOW_INDEX_DRIFT", Check: gateIndexSync},
 		{Name: "CONCEPT_ADMISSION", ModeEnv: "FLEET_CONCEPT_GUARD", EscapeEnv: "ALLOW_CONCEPT_GAP", Check: gateConceptAdmission},
 		{Name: "CONCEPT_FRESHNESS", ModeEnv: "FLEET_CONCEPT_FRESHNESS_GUARD", EscapeEnv: "ALLOW_STALE_CONCEPT_DOCS", Check: checkConceptFreshness},
+		{Name: "LAUNCH_NUMBERS_FRESHNESS", ModeEnv: "FLEET_LAUNCH_NUMBERS_GUARD", EscapeEnv: "ALLOW_STALE_LAUNCH_NUMBERS", Check: checkLaunchNumbers},
 		{Name: "PROVENANCE_LABEL", ModeEnv: "FLEET_PROVENANCE_GUARD", EscapeEnv: "ALLOW_PROVENANCE_DRIFT", Check: gateProvenanceLabel},
 		{Name: "HARDWARE_TELL", ModeEnv: "FLEET_HW_GUARD", EscapeEnv: "FLEET_ALLOW_HW", Check: gateHardwareTell},
 		{Name: "NATIVE_FIRST", ModeEnv: "NATIVEFIRST_HOOK_MODE", EscapeEnv: "ALLOW_NATIVE_SUBSTITUTION", Check: checkNativeFirst},
