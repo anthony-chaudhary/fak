@@ -18,14 +18,26 @@ The MacBook has 18 GPU cores and runs macOS 27.0.1 on arm64. All engines read th
 | --- | --- |
 | Qualified source | public `main` at [1f31533f2](https://github.com/anthony-chaudhary/fak/commit/1f31533f2ccba844c2f03d176bfbb98772913754), committed 2026-11-24 |
 | Latest tagged release | [v0.57.0](https://github.com/anthony-chaudhary/fak/releases/tag/v0.57.0), tagged 2026-11-13 from ad2f918a4. It **does not** contain the native Inkling-2 Metal runner. |
-| First release with it | the next tag after v0.57.0 |
+| First release with it | the first tag after v0.57.0 |
 | Version string | A build from `main` between those tags still prints `0.57.0`. Check the `build:` line instead. |
 
-The release installer (`install.sh`) and Homebrew install the latest tag, so until the next release ships, build from `main`:
+The release installer (`install.sh`) and Homebrew install the latest tag, so until the first tag after v0.57.0 ships, build from `main`:
 
 ```sh
 go install github.com/anthony-chaudhary/fak/cmd/fak@main
 fak version   # expect "0.57.0" plus "build: 1f31533f2ccb" or a later main commit
+```
+
+Then run the model by alias. On Apple Silicon this downloads the pinned target GGUF and the DFlash2 draft on first use and places the draft next to the GGUF. The alias, and its use as the default for a bare `fak run` on Macs with 24 GB or more, landed on `main` at 6f56c684d, after the qualified revision above, so use a current `main` build:
+
+```sh
+fak run inkling2-mini --effort none --timings --temp 0 --max-tokens 256 --quiet "What is 2 + 2? Reply with the number only."
+```
+
+The measurements on this page used an explicit path to a local copy of the same file, which still works:
+
+```sh
+fak run "$HOME/models/inkling2/Inkling-2-Mini-UD-Q3_K_XL.gguf" --effort none --timings --temp 0 --max-tokens 256 --quiet "What is 2 + 2? Reply with the number only."
 ```
 
 Models: the target is `Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf` from [unsloth/Inkling-2-Mini-GGUF](https://huggingface.co/unsloth/Inkling-2-Mini-GGUF). The DFlash2 draft is [incoai/Inkling-2-Mini-DFlash2@4f9088ea](https://huggingface.co/incoai/Inkling-2-Mini-DFlash2/tree/4f9088ea66c21f2b99ed657d1941c306b03e84d2). Put the draft in an `Inkling-2-Mini-DFlash2/` directory next to the GGUF; Fak picks it up automatically. Check both files against the SHA-256 values above. This run used a 36 GB M3 Pro. The process peaked at about 16 GB.

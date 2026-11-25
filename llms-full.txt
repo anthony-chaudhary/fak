@@ -5186,6 +5186,19 @@ The first run downloads a small coding model (about 1.9 GB). At `you>`, paste
 Write a test that catches it.” Look for a test that passes an empty list and
 checks for `IndexError`. Type `/quit` to exit.
 
+On an M3 or later Mac with 24 GB of memory or more and macOS 26.4 or later, a
+build from `main` can also run Inkling-2-Mini on the GPU by name:
+
+```sh
+fak run inkling2-mini
+```
+
+The first run downloads about 14.6 GB. On an Apple Silicon Mac with 24 GB or
+more, `fak run` with no model picks Inkling-2-Mini as well. This is not in
+v0.57.0; it ships in the first tag after v0.57.0. Smaller Macs and other
+platforms keep the Qwen coding models. The [Mac guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-local-models.md#inkling-2-mini-the-first-run-default)
+has the requirements and the server commands.
+
 For build requirements, platform verification and other model sizes, see the
 [local model setup guide](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#local-model-setup).
 
@@ -14715,12 +14728,12 @@ python tools/grafana/gen_dashboard.py     # regenerate the dashboard JSON after 
 
 ---
 title: "Run local models on Mac (Apple Silicon Metal) and interactive chat"
-description: "How to run local models (Qwen3.8-27B and peers) natively on Apple Silicon with Metal GPU acceleration and chat via interactive REPL or OpenAI-compatible gateway."
+description: "How to run local models (Inkling-2-Mini, Qwen3.8-27B and peers) natively on Apple Silicon with Metal GPU acceleration and chat via interactive REPL or OpenAI-compatible gateway."
 ---
 
 # Run local models on Mac (Apple Silicon Metal) and interactive chat
 
-**fak** runs open models directly on Apple Silicon unified memory using native Metal compute kernels. No Python, no PyTorch, and no separate runtime daemon required — one native binary runs the model, accelerates KV-cache prefix reuse, and secures tool execution behind a default-deny capability floor.
+**fak** runs open models directly on Apple Silicon unified memory using native Metal compute kernels. No Python, no PyTorch, and no separate runtime daemon required — one native binary runs the model, accelerates KV-cache prefix reuse, and secures tool execution behind a default-deny capability floor. On an M3 or later Mac with 24 GB or more, start with [`fak run inkling2-mini`](#inkling-2-mini-the-first-run-default), which needs a current `main` build and is not in v0.57.0.
 
 > **TL;DR — Two ways to chat with Qwen3.8 on macOS:**
 >
@@ -14736,6 +14749,82 @@ description: "How to run local models (Qwen3.8-27B and peers) natively on Apple 
 >    # Terminal 2: chat through the gateway (auto-connects to :8080 and detects model)
 >    fak chat
 >    ```
+
+---
+
+## Inkling-2-Mini: the first-run default
+
+On an Apple Silicon Mac whose unified memory fits it, Inkling-2-Mini
+(UD-Q3_K_XL) is the model `fak` starts when you do not name one. It runs on the
+Apple GPU through fak's native Metal target.
+
+```bash
+# By alias: downloads the pinned GGUF and its DFlash2 draft on first use
+fak run inkling2-mini
+
+# No model named: the same model on a Mac that fits it
+fak run
+
+# One-shot
+fak run inkling2-mini --max-tokens 256 "What is 2 + 2? Reply with the number only."
+```
+
+**Requirements.**
+
+- A `darwin/arm64` build with CGo from a current `main`. The native runner
+  needs `main` at or after 1f31533f2, the alias and the default need 6f56c684d,
+  and serving needs c6c5f0ed6. The v0.57.0 release contains none of them; the
+  first tag after v0.57.0 does. Until that tag ships, `install.sh` and Homebrew
+  still install a version without them, so build with
+  `go install github.com/anthony-chaudhary/fak/cmd/fak@main`.
+- An M3 or later chip and macOS 26.4 or later for the fast path that uses the
+  DFlash2 draft. On an older chip or an older macOS, `fak run inkling2-mini`
+  falls back to fak's own Metal forward without the draft, and `fak serve` refuses
+  the model with a named reason. The automatic default does not check the chip
+  or the macOS version, so on those Macs name a Qwen model instead
+  (`fak run qwen38`, `fak up --model 27B`).
+- 24 GB of unified memory or more for the automatic default. The planner
+  budgets about 15.5 GB resident for the model and draft plus one 8,192-token
+  session inside a 20% reserve. On 16 GB and 18 GB Macs, bare `fak run` picks a
+  Qwen tier for the host's memory instead.
+
+**What the alias fetches.** `inkling2-mini` is pinned to
+`Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file` in
+[unsloth/Inkling-2-Mini-GGUF](https://huggingface.co/unsloth/Inkling-2-Mini-GGUF)
+(13,631,779,296 bytes). On Apple Silicon, `fak` also fetches the DFlash2 draft
+from [incoai/Inkling-2-Mini-DFlash2](https://huggingface.co/incoai/Inkling-2-Mini-DFlash2)
+(about 1 GB) into an `Inkling-2-Mini-DFlash2/` directory next to the GGUF. If
+the draft download fails, `fak` warns and runs the target model alone, which
+decodes more slowly. `fak run` and `fak up` reuse a copy of the GGUF you already
+downloaded when it sits in a model search directory under its published name
+and has the exact pinned size. `fak serve --gguf inkling2-mini` does not: it
+downloads into the hub cache, so pass the file path to serve a local copy.
+
+**Token budget.** Inkling-2-Mini reasons before it answers. A small
+`--max-tokens` value such as 16 can end before any visible text; use 256 or
+more, or pass `--effort none` to `fak run`.
+
+**Bare `fak run`.** With no model, or when the first argument is prompt text
+containing spaces, `fak run` prints
+`fak run: no model named; using inkling2-mini (override: fak run <model> [prompt])`
+and continues. A single-word first argument is still read as a model name. On
+other platforms a bare `fak run` remains a usage error.
+
+**Serving.** `fak serve --gguf inkling2-mini` serves the same checkpoint on
+Metal through the OpenAI-compatible endpoints. Today it keeps one resident
+model, decodes greedily, and handles one request at a time. It does not use the
+DFlash2 draft, so it decodes more slowly than `fak run`. A split GGUF, the
+larger Inkling-2-Small checkpoint, and a build without the native Metal target
+are refused with a named reason before any weights load.
+
+**`fak up`.** On a Mac that meets the requirements above, `fak up` selects
+Inkling-2-Mini instead of a Qwen tier. That session is text-only and serves one
+request at a time. `fak up --model 27B` (or another tier) returns to the Qwen
+ladder, which is also what `fak up` uses on smaller Macs, on a build without the
+native Metal target, and on every other platform.
+
+Measured throughput on a 36 GB M3 Pro is in the
+[M3 Pro Inkling-2-Mini record](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/published/m3pro-inkling2-mini-metal/RESULTS.md).
 
 ---
 
@@ -14856,6 +14945,7 @@ that a model will run without swap.
 
 | Model Alias | Quantization | Approximate Model Weights | What This Estimate Covers |
 |---|---|---:|---|
+| `inkling2-mini` | UD-Q3_K_XL | 13.6 GB, plus about 1 GB for the DFlash2 draft | File sizes only; the planner budgets about 15.5 GB resident before session memory |
 | `qwen2.5-coder:3b` or `qwen2.5-coder:7b` | Q4_K_M | 1.8 GB - 4.5 GB | Model weights only |
 | `qwen38` (`qwen38:27b-q2k`) | UD-Q2_K_XL | 9.4 GB | Model weights only |
 | `qwen38:27b-q4` | Q4_K_M | ~17.1 GB (15.93 GiB) | Pinned artifact weights only; context length and concurrency add runtime memory |
@@ -14898,7 +14988,9 @@ Downloads are stored in `~/.cache/fak-models/hub/` or `~/Library/Caches/fak-mode
 
 ## 3. Option A: Instant interactive REPL (`fak run`)
 
-`fak run <model>` provides an Ollama-style chat REPL without launching a background server or network listener:
+`fak run <model>` provides an Ollama-style chat REPL without launching a background server or network listener. On a Mac with 24 GB or more, start with [`fak run inkling2-mini`](#inkling-2-mini-the-first-run-default).
+
+The Qwen3.8 aliases work on any Apple Silicon Mac that fits them:
 
 ```bash
 # Interactive multi-turn chat (Ctrl-D or Ctrl-C to exit)
@@ -14990,6 +15082,9 @@ concurrency before relying on the estimated headroom:
 ```bash
 fak up
 ```
+
+On a Mac with 24 GB or more and a native Metal build, the default tier is
+[Inkling-2-Mini](#inkling-2-mini-the-first-run-default). Otherwise it is a Qwen tier.
 
 Flags:
 - `fak up --dry-run`: profile unified memory and print the allocation plan without loading weights.

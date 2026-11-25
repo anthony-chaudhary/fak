@@ -23,6 +23,19 @@ The first run downloads a small coding model (about 1.9 GB). At `you>`, paste
 Write a test that catches it.” Look for a test that passes an empty list and
 checks for `IndexError`. Type `/quit` to exit.
 
+On an M3 or later Mac with 24 GB of memory or more and macOS 26.4 or later, a
+build from `main` can also run Inkling-2-Mini on the GPU by name:
+
+```sh
+fak run inkling2-mini
+```
+
+The first run downloads about 14.6 GB. On an Apple Silicon Mac with 24 GB or
+more, `fak run` with no model picks Inkling-2-Mini as well. This is not in
+v0.57.0; it ships in the first tag after v0.57.0. Smaller Macs and other
+platforms keep the Qwen coding models. The [Mac guide](docs/fak/mac-local-models.md#inkling-2-mini-the-first-run-default)
+has the requirements and the server commands.
+
 For build requirements, platform verification and other model sizes, see the
 [local model setup guide](GETTING-STARTED.md#local-model-setup).
 
