@@ -3,12 +3,16 @@
 package ggufload
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // The batched decode gives every sequence the greedy continuation the llama.cpp
@@ -112,10 +116,80 @@ func inkling2MiB(free, total int64) string {
 	return fmt.Sprintf("%.1f of %.1f MiB free", float64(free)/(1<<20), float64(total)/(1<<20))
 }
 
+// inkling2ResidentGreedyMargins is inkling2ResidentGreedy that also returns, per
+// greedy step, the scalar runner-up and the top-1 minus top-2 logit gap. The argmax
+// kernel softcaps the logits in place before reading them back, so the gap is
+// already in logprob nats.
+func inkling2ResidentGreedyMargins(m *Inkling2LoopModel, be compute.Backend, prompt []int, n int) (toks, runnerUp []int, margin []float64, err error) {
+	if len(prompt) == 0 {
+		return nil, nil, nil, fmt.Errorf("inkling2 resident margins: empty prompt")
+	}
+	s, err := newInkling2Resident(m, be)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer s.close()
+	// a CUDA stream capture is bound to the OS thread that opened it
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	var next int
+	if s.batched {
+		next, err = s.prefill(context.Background(), prompt)
+	} else {
+		for _, tok := range prompt {
+			if next, err = s.step(tok); err != nil {
+				break
+			}
+		}
+	}
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for i := 0; i < n; i++ {
+		logits, err := s.lastLogits()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		top, second := inkling2TopTwo(logits[:s.hp.VocabUnpadded])
+		if top != next {
+			return nil, nil, nil, fmt.Errorf("step %d: greedy token %d, but the logits' top-1 is %d", i, next, top)
+		}
+		toks = append(toks, next)
+		runnerUp = append(runnerUp, second)
+		margin = append(margin, float64(logits[top]-logits[second]))
+		if i+1 < n {
+			if next, err = s.step(next); err != nil {
+				return nil, nil, nil, err
+			}
+		}
+	}
+	return toks, runnerUp, margin, nil
+}
+
+// inkling2TopTwo returns the indices of the largest and second-largest entries of v,
+// with ties to the lower index as the argmax kernel breaks them.
+func inkling2TopTwo(v []float32) (top, second int) {
+	top, second = 0, 1
+	if v[1] > v[0] {
+		top, second = 1, 0
+	}
+	for i := 2; i < len(v); i++ {
+		switch {
+		case v[i] > v[top]:
+			top, second = i, top
+		case v[i] > v[second]:
+			second = i
+		}
+	}
+	return top, second
+}
+
 // A cohort prefilled as one ragged token stream gives every row the greedy tokens the
 // single-sequence resident session gives its prompt alone with the batched prefill.
-// The lockstep prompt path runs the prompt through the decode kernels, whose rounding
-// can flip a near-tied greedy token, so its divergence is logged, not asserted.
+// The scalar reference is compared up to the first divergence, which must be an
+// admissible near tie: the rows legitimately diverge after it. The lockstep prompt path
+// runs the prompt through the decode kernels, whose rounding can flip a near-tied greedy
+// token, so its divergence is logged, not asserted.
 func TestInkling2CUDACohortPrefillMatchesScalar(t *testing.T) {
 	m, be := openInkling2CUDAForTest(t, "")
 	defer m.Close()
@@ -149,16 +223,21 @@ func TestInkling2CUDACohortPrefillMatchesScalar(t *testing.T) {
 		return got
 	}
 	pre, lock := cohort("1"), cohort("0")
+	ties := 0
 	for i, prompt := range prompts {
-		want, _, err := inkling2ResidentGreedy(m, be, prompt, n)
+		want, runnerUp, margin, err := inkling2ResidentGreedyMargins(m, be, prompt, n)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for j := range want {
-			if pre[i][j] != want[j] {
-				t.Errorf("row %d (%d prompt tokens): token %d prefilled %d, scalar %d", i, len(prompt), j, pre[i][j], want[j])
-				break
-			}
+		at, nearTie, why := inkling2CohortDivergence(want, runnerUp, margin, pre[i])
+		switch {
+		case at < 0:
+			t.Logf("COHORT_VERDICT row %d PASS (%d prompt tokens)", i, len(prompt))
+		case nearTie:
+			ties++
+			t.Logf("COHORT_VERDICT row %d NEAR_TIE (%d prompt tokens) %s", i, len(prompt), why)
+		default:
+			t.Errorf("COHORT_VERDICT row %d FAIL (%d prompt tokens): %s", i, len(prompt), why)
 		}
 		for j := range want {
 			if lock[i][j] != want[j] {
@@ -166,5 +245,8 @@ func TestInkling2CUDACohortPrefillMatchesScalar(t *testing.T) {
 				break
 			}
 		}
+	}
+	if ties > inkling2OracleMaxNearTies {
+		t.Errorf("%d of %d rows are near ties, more than %d: the cohort drifts from scalar, not ties", ties, len(prompts), inkling2OracleMaxNearTies)
 	}
 }
