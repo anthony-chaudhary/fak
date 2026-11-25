@@ -35,6 +35,8 @@ type inkling2Batch struct {
 	mem    compute.Inkling2BatchMemory
 	need   int64
 	kvHalf bool
+	// half is the cohort prefill's f16-cache append and attend, set when prefill runs on f16 caches
+	half compute.Inkling2PrefillHalfKV
 
 	kc, vc, hist []ink2Ref
 	caps         []int
@@ -139,7 +141,7 @@ func newInkling2BatchChunk(s *inkling2Resident, C, ctx, chunk int) (*inkling2Bat
 	hp := s.hp
 	kvHalf, keep, scr, caps, rowsT := sh.kvHalf, sh.keep, sh.scr, sh.caps, sh.rowsT
 	b := &inkling2Batch{s: s, capC: C, capCtx: ctx, seq: sh.seq, kvHalf: kvHalf, mem: inkling2BatchMem(be),
-		prefillT: sh.prefillT, need: sh.need, capT: chunk, capPrefillT: sh.prefillT}
+		prefillT: sh.prefillT, need: sh.need, capT: chunk, capPrefillT: sh.prefillT, half: sh.half}
 	b.p = ink2Prefill{s: s, pd: pd, T: C}
 	if b.mem != nil && inkling2BatchQ8RowTile(os.LookupEnv) {
 		b.p.rows = b.mem
@@ -212,6 +214,7 @@ func (b *inkling2Batch) alloc(n int) ink2Ref {
 type inkling2BatchShape struct {
 	seq             compute.Inkling2BatchDevice
 	kvHalf          bool
+	half            compute.Inkling2PrefillHalfKV
 	prefillT, rowsT int
 	keep, scr       int
 	caps            []int
@@ -244,8 +247,12 @@ func (s *inkling2Resident) batchShapeChunk(C, ctx, chunk int) (inkling2BatchShap
 	}
 	sh.kvHalf = kvHalf
 	hp := s.hp
-	if inkling2CohortPrefill(os.LookupEnv) && !kvHalf {
-		// the prefill kernels append fp32 keys and values
+	on, half, err := inkling2CohortPrefillKV(be, kvHalf, os.LookupEnv)
+	if err != nil {
+		return inkling2BatchShape{}, err
+	}
+	if on {
+		sh.half = half
 		sh.prefillT = min(chunk, C*ctx)
 	}
 	// the prefill chunks and the decode steps run one after the other on one arena pair

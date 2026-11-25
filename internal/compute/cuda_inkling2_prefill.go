@@ -16,7 +16,10 @@ import (
 	"unsafe"
 )
 
-var _ Inkling2PrefillDevice = (*cudaBackend)(nil)
+var (
+	_ Inkling2PrefillDevice = (*cudaBackend)(nil)
+	_ Inkling2PrefillHalfKV = (*cudaBackend)(nil)
+)
 
 func (c *cudaBackend) Ink2PMatMul(w Tensor, x, y Ink2Ref, T int) error {
 	cudaMu.Lock()
@@ -165,6 +168,35 @@ func (c *cudaBackend) Ink2PAttend(q, r, sinks, relBias, kcache, vcache, out Ink2
 	}
 	return ink2Status("prefill attend", C.fcuda_ink2p_attend(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias), c.ink2F(kcache),
 		c.ink2F(vcache), c.ink2F(out), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent),
+		C.int(window), C.int(cap), C.float(p.Scale), C.int(pos0), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PQKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("prefill qkv post f16", C.fcuda_ink2p_qkv_post_h(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v), c.ink2F(qclip), c.ink2F(rclip),
+		unsafe.Pointer(c.ink2F(kcache)), unsafe.Pointer(c.ink2F(vcache)), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen),
+		C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps), ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor),
+		C.int(cap), C.int(pos0), C.int(T)))
+}
+
+// Ink2PHalfKVReady refuses FAK_INKLING2_PREFILL_OLD=attn: the f16 caches have only the
+// tensor-core attend, and the float kernel it selects cannot read them.
+func (c *cudaBackend) Ink2PHalfKVReady() error {
+	if !ink2PrefillFast("attn") {
+		return fmt.Errorf("cuda inkling2 prefill attend: f16 caches need the tensor-core attend, but FAK_INKLING2_PREFILL_OLD selects the float kernel")
+	}
+	return nil
+}
+
+func (c *cudaBackend) Ink2PAttendHalf(q, r, sinks, relBias, kcache, vcache, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error {
+	if err := c.Ink2PHalfKVReady(); err != nil {
+		return err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("prefill attend f16", C.fcuda_ink2p_attend_v2_h(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias), unsafe.Pointer(c.ink2F(kcache)),
+		unsafe.Pointer(c.ink2F(vcache)), c.ink2F(out), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent),
 		C.int(window), C.int(cap), C.float(p.Scale), C.int(pos0), C.int(T)))
 }
 

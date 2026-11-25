@@ -78,6 +78,14 @@ int fcuda_ink2p_attend_v2(const float *q, const float *r, const float *sinks, co
 int fcuda_ink2p_attend(const float *q, const float *r, const float *sinks, const float *relBias,
     const float *kcache, const float *vcache, float *out, int heads, int kvHeads, int headDim, int relLen,
     int extent, int window, int cap, float scale, int pos0, int T);
+/* The append and tensor-core attend over f16 caches (cap * kvDim halves per row); the
+ * attend refuses shapes off its tile instead of falling back to the float kernel. */
+int fcuda_ink2p_qkv_post_h(float *q, float *r, const float *k, const float *v, const float *qclip,
+    const float *rclip, void *kcache, void *vcache, int heads, int kvHeads, int headDim, int relLen,
+    float qkClip, float relClip, float eps, int global, float alpha, float floorTok, int cap, int pos0, int T);
+int fcuda_ink2p_attend_v2_h(const float *q, const float *r, const float *sinks, const float *relBias,
+    const void *kcache, const void *vcache, float *out, int heads, int kvHeads, int headDim, int relLen,
+    int extent, int window, int cap, float scale, int pos0, int T);
 /* Attend score-row placement test hooks: select 1 forces the global-memory path;
  * budget sets the global path's per-tile scratch bytes (0 keeps it). Both return
  * the previous value. FAK_INKLING2_PREFILL_ATTEND_GLOBAL=1 sets the default. */

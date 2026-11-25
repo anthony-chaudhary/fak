@@ -21,6 +21,15 @@ func ink2PrefillFast(name string) bool {
 	return true
 }
 
+// Inkling2PrefillHalfKV is Ink2PQKVPost and Ink2PAttend over f16 caches. A half cache's
+// Ref offset is in floats, two elements per float, as in Inkling2BatchDevice.
+type Inkling2PrefillHalfKV interface {
+	// Ink2PHalfKVReady reports why the f16 prefill ops cannot run in this process, before any is called.
+	Ink2PHalfKVReady() error
+	Ink2PQKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error
+	Ink2PAttendHalf(q, r, sinks, relBias, kcache, vcache, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error
+}
+
 // Inkling2PrefillDevice batches the Inkling2Device decode ops along the token axis
 // for a prompt chunk: token t of a T-token chunk sits at position pos0+t and every
 // activation is [T][width] rows. Ops that are already row-batched (Ink2RMS rows,

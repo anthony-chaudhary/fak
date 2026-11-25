@@ -88,8 +88,7 @@ func (b *inkling2Batch) copyRowState(src, dst int) error {
 	hp := b.s.hp
 	kvDim := hp.KVHeads * hp.HeadDim
 	for slot, cap := range b.caps {
-		// cohort prefill runs only on fp32 caches, so a row is cap*kvDim floats
-		n := cap * kvDim
+		n := inkling2CohortKVRow(1, cap, kvDim, b.kvHalf)
 		for _, arena := range []ink2Ref{b.kc[slot], b.vc[slot]} {
 			if err := b.copyFloats(at(arena, src*n), at(arena, dst*n), n); err != nil {
 				return err

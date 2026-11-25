@@ -16,6 +16,45 @@ func inkling2CohortPrefill(lookup func(string) (string, bool)) bool {
 	return !ok || v != "0"
 }
 
+// inkling2CohortPrefillKV decides whether a cohort with kvHalf caches runs cohort
+// prefill, and with which f16 append and attend. fp32 caches follow
+// FAK_INKLING2_COHORT_PREFILL alone. f16 caches feed prompts lockstep unless
+// FAK_INKLING2_COHORT_PREFILL_KV=f16 opts in, which needs a backend with the f16
+// prefill ops; an opt-in that cannot be honoured is an error, not a silent lockstep.
+func inkling2CohortPrefillKV(be any, kvHalf bool, lookup func(string) (string, bool)) (bool, compute.Inkling2PrefillHalfKV, error) {
+	if !inkling2CohortPrefill(lookup) {
+		return false, nil, nil
+	}
+	if !kvHalf {
+		return true, nil, nil
+	}
+	v, _ := lookup("FAK_INKLING2_COHORT_PREFILL_KV")
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "off", "0":
+		return false, nil, nil
+	case "f16", "fp16":
+	default:
+		return false, nil, fmt.Errorf("inkling2 batch: FAK_INKLING2_COHORT_PREFILL_KV=%q is not f16 or off", v)
+	}
+	half, ok := be.(compute.Inkling2PrefillHalfKV)
+	if !ok {
+		return false, nil, fmt.Errorf("inkling2 batch: FAK_INKLING2_COHORT_PREFILL_KV=f16 needs a backend with the f16 prefill append and attend")
+	}
+	if err := half.Ink2PHalfKVReady(); err != nil {
+		return false, nil, fmt.Errorf("inkling2 batch: FAK_INKLING2_COHORT_PREFILL_KV=f16: %w", err)
+	}
+	return true, half, nil
+}
+
+// inkling2CohortKVRow is the Ref offset, in floats, of row's cache in a slot of cap
+// positions: two f16 elements per float, kvDim being even for every supported head.
+func inkling2CohortKVRow(row, cap, kvDim int, half bool) int {
+	if half {
+		return row * cap * kvDim / 2
+	}
+	return row * cap * kvDim
+}
+
 // ink2PrefillSeg is the run of one sequence's prompt inside a cohort prefill chunk:
 // tokens off..off+n of the chunk are that row's positions pos0..pos0+n.
 type ink2PrefillSeg struct {
@@ -131,11 +170,16 @@ func (r *ink2PrefillRows) attend(p *ink2Prefill, slot int, l *ink2Layer, q, rel,
 		if p.s.err != nil {
 			return
 		}
-		kc, vc := at(b.kc[slot], sg.row*cap*kvDim), at(b.vc[slot], sg.row*cap*kvDim)
+		row := inkling2CohortKVRow(sg.row, cap, kvDim, b.half != nil)
+		post, attend := p.pd.Ink2PQKVPost, p.pd.Ink2PAttend
+		if b.half != nil {
+			post, attend = b.half.Ink2PQKVPostHalf, b.half.Ink2PAttendHalf
+		}
+		kc, vc := at(b.kc[slot], row), at(b.vc[slot], row)
 		qs, rs := at(q, sg.off*l.wq.rows), at(rel, sg.off*l.rel.rows)
-		p.fail(p.pd.Ink2PQKVPost(qs, rs, at(k, sg.off*kvDim), at(v, sg.off*kvDim), l.qclip, l.relClip, kc, vc, ap, cap, sg.pos0, sg.n))
+		p.fail(post(qs, rs, at(k, sg.off*kvDim), at(v, sg.off*kvDim), l.qclip, l.relClip, kc, vc, ap, cap, sg.pos0, sg.n))
 		if p.s.err == nil {
-			p.fail(p.pd.Ink2PAttend(qs, rs, at(sinks, sg.off*l.sink.rows), l.relBias, kc, vc, at(attn, sg.off*qd), ap, extent, window,
+			p.fail(attend(qs, rs, at(sinks, sg.off*l.sink.rows), l.relBias, kc, vc, at(attn, sg.off*qd), ap, extent, window,
 				cap, sg.pos0, sg.n))
 		}
 	}
