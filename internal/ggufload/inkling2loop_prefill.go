@@ -24,6 +24,10 @@ func inkling2BatchedPrefill() bool { return os.Getenv("FAK_INKLING2_BATCHED_PREF
 // through the decode expert GEMV instead.
 func inkling2GroupedExperts() bool { return os.Getenv("FAK_INKLING2_PREFILL_GROUPED") != "0" }
 
+// inkling2PrefillControlBatch reports whether a prefill visit runs its Q/K/V
+// controllers as one grid per stage; FAK_INKLING2_PREFILL_CTRL_BATCH=1 opts in.
+func inkling2PrefillControlBatch() bool { return os.Getenv("FAK_INKLING2_PREFILL_CTRL_BATCH") == "1" }
+
 // ink2Prefill is one batched prefill of a resident session. Values that outlive a
 // layer visit (layer outputs, residual blocks) take keep slots; everything else is
 // layer scratch, reset at the start of every visit.
@@ -378,6 +382,27 @@ func (p *ink2Prefill) controlsAt(cur, msg []ink2Ref, c *ink2Ctrl, j0 int) []ink2
 	return out
 }
 
+// controlBatch runs controllers 0..len(cur)-1 of c on the prefill controller
+// kernels in one grid per stage, each output equal to control's; ok is false when
+// the device or the toggle does not offer it.
+func (p *ink2Prefill) controlBatch(cur, msg []ink2Ref, c *ink2Ctrl) ([]ink2Ref, bool) {
+	bd, ok := p.pd.(compute.Inkling2PrefillControlBatchDevice)
+	if !ok || !inkling2PrefillControlBatch() {
+		return nil, false
+	}
+	h := p.s.hp.Hidden
+	J := len(cur)
+	g, outs := p.tmp(J*p.T*c.rank), p.tmp(J*p.T*h)
+	if p.s.err == nil {
+		p.fail(bd.Ink2PCtrlBatch(cur, msg, c.down[:J], c.gain[:J], c.forget[:J], g, outs, h, c.rank, p.T))
+	}
+	out := make([]ink2Ref, J)
+	for j := range out {
+		out[j] = at(outs, j*p.T*h)
+	}
+	return out, true
+}
+
 func (p *ink2Prefill) control(cur, msg ink2Ref, c *ink2Ctrl, j int) ink2Ref {
 	h := p.s.hp.Hidden
 	g := p.tmp(p.T * c.rank)
@@ -468,6 +493,8 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	if msgs != nil {
 		if p.verify {
 			o := p.controls(in[:], msgs[:3], c)
+			in = [3]ink2Ref{o[0], o[1], o[2]}
+		} else if o, ok := p.controlBatch(in[:], msgs[:3], c); ok {
 			in = [3]ink2Ref{o[0], o[1], o[2]}
 		} else {
 			for j := 0; j < 3; j++ {

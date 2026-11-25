@@ -115,12 +115,21 @@ extern "C" int fcuda_ink2p_situ_v2(const float *gu, float *act, int k, int width
 #define INK2M_CD_XP 20
 #define INK2M_CD_WP 36
 
-__global__ void __launch_bounds__(256) k_ink2m_ctrl_down(const float *cur, const float *msg, const float *W, float *g,
-                                                         int n, int rank, int T) {
+#define INK2M_CTRL_MAX 3
+struct Ink2PCtrlSet {
+  const float *cur[INK2M_CTRL_MAX], *msg[INK2M_CTRL_MAX], *down[INK2M_CTRL_MAX];
+  const float *gain[INK2M_CTRL_MAX], *forget[INK2M_CTRL_MAX];
+  float *g, *out;
+};
+
+__global__ void __launch_bounds__(256) k_ink2m_ctrl_down(Ink2PCtrlSet cs, int n, int rank, int T) {
   __shared__ __align__(16) float xs[INK2M_CD_KC * INK2M_CD_XP];
   __shared__ __align__(16) float ws[INK2M_CD_KC * INK2M_CD_WP];
   __shared__ float red[8 * INK2M_CD_TOK * INK2M_CD_RK];
   __shared__ float ssh[2][8][INK2M_CD_TOK];
+  const int j = blockIdx.z;
+  const float *cur = cs.cur[j], *msg = cs.msg[j], *W = cs.down[j];
+  float *g = cs.g + (size_t)j * T * rank;
   const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5;
   const int t0 = blockIdx.x * INK2M_CD_TOK, r0 = blockIdx.y * INK2M_CD_RK;
   // staging roles: X float4 (token xt, k quad xq); W float4 x2 (rank wr, k quads wq, wq+8)
@@ -239,8 +248,10 @@ extern "C" int fcuda_ink2p_ctrl_down_v2(const float *cur, const float *msg, cons
   if (n % INK2M_CD_KC != 0 || rank % INK2M_CD_RK != 0 || ((uintptr_t)cur & 15) || ((uintptr_t)msg & 15) ||
       ((uintptr_t)W & 15))
     return fcuda_ink2p_ctrl_down(cur, msg, W, g, n, rank, T);
-  const dim3 grid((T + INK2M_CD_TOK - 1) / INK2M_CD_TOK, rank / INK2M_CD_RK);
-  FCUDA_TS("k_ink2m_ctrl_down", grid, k_ink2m_ctrl_down<<<grid, 256, 0, g_stream>>>(cur, msg, W, g, n, rank, T));
+  Ink2PCtrlSet cs = {};
+  cs.cur[0] = cur; cs.msg[0] = msg; cs.down[0] = W; cs.g = g;
+  const dim3 grid((T + INK2M_CD_TOK - 1) / INK2M_CD_TOK, rank / INK2M_CD_RK, 1);
+  FCUDA_TS("k_ink2m_ctrl_down", grid, k_ink2m_ctrl_down<<<grid, 256, 0, g_stream>>>(cs, n, rank, T));
   return ink2_last_error();
 }
 
@@ -253,11 +264,13 @@ extern "C" int fcuda_ink2p_ctrl_down_v2(const float *cur, const float *msg, cons
 #define INK2M_CA_WP 68
 #define INK2M_CA_GP 36
 
-__global__ void __launch_bounds__(256) k_ink2m_ctrl_apply(const float *cur, const float *msg, const float *g,
-                                                          const float *gainW, const float *forgetW, float *out, int n,
-                                                          int rank, int T) {
+__global__ void __launch_bounds__(256) k_ink2m_ctrl_apply(Ink2PCtrlSet cs, int n, int rank, int T) {
   extern __shared__ __align__(16) float ash[];
   float *gws = ash, *fws = ash + (size_t)rank * INK2M_CA_WP, *gs = ash + (size_t)rank * 2 * INK2M_CA_WP;
+  const int j = blockIdx.z;
+  const float *cur = cs.cur[j], *msg = cs.msg[j], *gainW = cs.gain[j], *forgetW = cs.forget[j];
+  const float *g = cs.g + (size_t)j * T * rank;
+  float *out = cs.out + (size_t)j * T * n;
   const int tid = threadIdx.x;
   const int i0 = blockIdx.x * INK2M_CA_CH, t0 = blockIdx.y * INK2M_CA_TOK;
   const int rq4 = rank >> 2;
@@ -327,12 +340,36 @@ extern "C" int fcuda_ink2p_ctrl_apply_v2(const float *cur, const float *msg, con
   if ((n & 3) || (rank & 3) || ((uintptr_t)cur & 15) || ((uintptr_t)msg & 15) || ((uintptr_t)out & 15) ||
       ((uintptr_t)gainW & 15) || ((uintptr_t)forgetW & 15))
     return fcuda_ink2p_ctrl_apply(cur, msg, g, gainW, forgetW, out, n, rank, T);
-  const dim3 grid((n + INK2M_CA_CH - 1) / INK2M_CA_CH, (T + INK2M_CA_TOK - 1) / INK2M_CA_TOK);
+  Ink2PCtrlSet cs = {};
+  cs.cur[0] = cur; cs.msg[0] = msg; cs.gain[0] = gainW; cs.forget[0] = forgetW;
+  cs.g = const_cast<float *>(g); cs.out = out;
+  const dim3 grid((n + INK2M_CA_CH - 1) / INK2M_CA_CH, (T + INK2M_CA_TOK - 1) / INK2M_CA_TOK, 1);
   const size_t smem = (size_t)rank * (2 * INK2M_CA_WP + INK2M_CA_GP) * sizeof(float);
   const int oe = ink2p_smem_optin((const void *)k_ink2m_ctrl_apply, smem);
   if (oe) return oe;
-  FCUDA_TS("k_ink2m_ctrl_apply", grid, k_ink2m_ctrl_apply<<<grid, 256, smem, g_stream>>>(
-      cur, msg, g, gainW, forgetW, out, n, rank, T));
+  FCUDA_TS("k_ink2m_ctrl_apply", grid, k_ink2m_ctrl_apply<<<grid, 256, smem, g_stream>>>(cs, n, rank, T));
+  return ink2_last_error();
+}
+
+extern "C" int fcuda_ink2p_ctrl_batch_v2(const float *const *ptrs, int nj, float *g, float *out, int n, int rank,
+                                          int T) {
+  if (nj < 1 || nj > INK2M_CTRL_MAX || n % INK2M_CD_KC != 0 || rank % INK2M_CD_RK != 0 || (n & 3) ||
+      (rank & 3)) return (int)cudaErrorInvalidValue;
+  Ink2PCtrlSet cs = {};
+  cs.g = g; cs.out = out;
+  for (int j = 0; j < nj; ++j) {
+    cs.cur[j] = ptrs[j]; cs.msg[j] = ptrs[3 + j]; cs.down[j] = ptrs[6 + j];
+    cs.gain[j] = ptrs[9 + j]; cs.forget[j] = ptrs[12 + j];
+    if (((uintptr_t)cs.cur[j] & 15) || ((uintptr_t)cs.msg[j] & 15) || ((uintptr_t)cs.down[j] & 15) ||
+        ((uintptr_t)cs.gain[j] & 15) || ((uintptr_t)cs.forget[j] & 15)) return (int)cudaErrorInvalidValue;
+  }
+  const dim3 dg((T + INK2M_CD_TOK - 1) / INK2M_CD_TOK, rank / INK2M_CD_RK, nj);
+  FCUDA_TS("k_ink2m_ctrl_down", dg, k_ink2m_ctrl_down<<<dg, 256, 0, g_stream>>>(cs, n, rank, T));
+  const dim3 ag((n + INK2M_CA_CH - 1) / INK2M_CA_CH, (T + INK2M_CA_TOK - 1) / INK2M_CA_TOK, nj);
+  const size_t smem = (size_t)rank * (2 * INK2M_CA_WP + INK2M_CA_GP) * sizeof(float);
+  const int oe = ink2p_smem_optin((const void *)k_ink2m_ctrl_apply, smem);
+  if (oe) return oe;
+  FCUDA_TS("k_ink2m_ctrl_apply", ag, k_ink2m_ctrl_apply<<<ag, 256, smem, g_stream>>>(cs, n, rank, T));
   return ink2_last_error();
 }
 

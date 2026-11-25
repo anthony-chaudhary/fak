@@ -121,7 +121,9 @@ internal/compute/cuda/inkling2_prefill_dense.cuh	k_ink2p_dense_quant	256	256	qg	
 internal/compute/cuda/inkling2_prefill_iq.cuh	k_ink2p_expert_iq_v2<F, NB, 2>	INK2Q_THREADS	256	grid	0
 internal/compute/cuda/inkling2_prefill_iq.cuh	k_ink2q_quant	INK2Q_THREADS	256	maxTiles	0
 internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_conv<K>	256	256	grid	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_apply	256	256	ag	smem
 internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_apply	256	256	grid	smem
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_down	256	256	dg	0
 internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_down	256	256	grid	0
 internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<1>	INK2M_MIX_THREADS	384	T	0
 internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<2>	INK2M_MIX_THREADS	384	T	0

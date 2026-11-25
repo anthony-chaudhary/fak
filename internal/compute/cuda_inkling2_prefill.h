@@ -16,6 +16,7 @@ int fcuda_ink2p_situ_v2(const float *gu, float *act, int k, int width, int actSt
 int fcuda_ink2p_ctrl_down_v2(const float *cur, const float *msg, const float *W, float *g, int n, int rank, int T);
 int fcuda_ink2p_ctrl_apply_v2(const float *cur, const float *msg, const float *g, const float *gainW,
                               const float *forgetW, float *out, int n, int rank, int T);
+int fcuda_ink2p_ctrl_batch_v2(const float *const *ptrs, int nj, float *g, float *out, int n, int rank, int T);
 int fcuda_ink2p_conv_v2(const float *x, const float *w, const float *dyn, float *hist, float *out,
                         const float *resid, int n, int heads, int kn, float norm, int T);
 int fcuda_ink2p_gemm_f32(const float *W, const float *X, float *Y, int rows, int cols, int T);

@@ -67,6 +67,12 @@ type Inkling2PrefillDevice interface {
 	Ink2PExpertSorted(stack Tensor, expertRows, nexp int, ids, x Ink2Ref, xDiv, xStride int, y Ink2Ref, npairs int, scale, scratch, sortIds, sortX, sortY Ink2Ref) (ok bool, err error)
 }
 
+// Inkling2PrefillControlBatchDevice optionally runs several independent loop
+// controllers in one CUDA grid. Outputs are controller-major [nj][T][n].
+type Inkling2PrefillControlBatchDevice interface {
+	Ink2PCtrlBatch(cur, msg, down, gain, forget []Ink2Ref, g, out Ink2Ref, n, rank, T int) error
+}
+
 // Ink2PGroupScratch is the int count of the grouped expert GEMM bucket scratch.
 func Ink2PGroupScratch(npairs, nexp int) int {
 	tiles := npairs/8 + nexp

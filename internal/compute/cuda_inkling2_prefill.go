@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	_ Inkling2PrefillDevice = (*cudaBackend)(nil)
-	_ Inkling2PrefillHalfKV = (*cudaBackend)(nil)
+	_ Inkling2PrefillDevice             = (*cudaBackend)(nil)
+	_ Inkling2PrefillHalfKV             = (*cudaBackend)(nil)
+	_ Inkling2PrefillControlBatchDevice = (*cudaBackend)(nil)
 )
 
 func (c *cudaBackend) Ink2PMatMul(w Tensor, x, y Ink2Ref, T int) error {
@@ -115,6 +116,26 @@ func (c *cudaBackend) Ink2PCtrlApply(cur, msg, g, gainW, forgetW, out Ink2Ref, n
 	}
 	return ink2Status("prefill ctrl apply", C.fcuda_ink2p_ctrl_apply(c.ink2F(cur), c.ink2F(msg), c.ink2F(g), c.ink2F(gainW), c.ink2F(forgetW),
 		c.ink2F(out), C.int(n), C.int(rank), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PCtrlBatch(cur, msg, down, gain, forget []Ink2Ref, g, out Ink2Ref, n, rank, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	nj := len(cur)
+	if nj < 1 || nj > 3 || len(msg) != nj || len(down) != nj || len(gain) != nj || len(forget) != nj {
+		return fmt.Errorf("cuda inkling2 prefill control batch: invalid operand counts")
+	}
+	ptrs := (*[15]*C.float)(C.malloc(C.size_t(15 * unsafe.Sizeof(uintptr(0)))))
+	defer C.free(unsafe.Pointer(ptrs))
+	for j := 0; j < nj; j++ {
+		ptrs[j] = c.ink2F(cur[j])
+		ptrs[3+j] = c.ink2F(msg[j])
+		ptrs[6+j] = c.ink2F(down[j])
+		ptrs[9+j] = c.ink2F(gain[j])
+		ptrs[12+j] = c.ink2F(forget[j])
+	}
+	return ink2Status("prefill ctrl batch", C.fcuda_ink2p_ctrl_batch_v2((**C.float)(unsafe.Pointer(ptrs)), C.int(nj),
+		c.ink2F(g), c.ink2F(out), C.int(n), C.int(rank), C.int(T)))
 }
 
 func (c *cudaBackend) Ink2PConv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn int, norm float32, T int) error {
