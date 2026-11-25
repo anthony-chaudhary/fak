@@ -5,6 +5,8 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -30,6 +32,9 @@ type inkling2Batch struct {
 	C, ctx int
 	pos    []int
 	seq    compute.Inkling2BatchDevice
+	mem    compute.Inkling2BatchMemory
+	need   int64
+	kvHalf bool
 
 	kc, vc, hist []ink2Ref
 	caps         []int
@@ -69,6 +74,7 @@ func newInkling2Batch(m *Inkling2LoopModel, be compute.Backend, C, ctx int) (*in
 	b, err := newInkling2BatchState(s, C, ctx)
 	if err != nil {
 		s.close()
+		inkling2TrimIdle(be)
 		return nil, err
 	}
 	return b, nil
@@ -87,6 +93,7 @@ func newInkling2BatchResident(m *Inkling2LoopModel, be compute.Backend) (*inklin
 	}
 	if s.hostRouting {
 		s.close()
+		inkling2TrimIdle(be)
 		return nil, fmt.Errorf("inkling2 batch: an expert dtype has no indexed kernel")
 	}
 	s.graph = false
@@ -103,26 +110,53 @@ func newInkling2BatchState(s *inkling2Resident, C, ctx int) (*inkling2Batch, err
 	if ctx < 1 || ctx > inkling2ResidentCtx {
 		return nil, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, inkling2ResidentCtx)
 	}
-	pd := s.be.(compute.Inkling2PrefillDevice)
+	be := s.be
+	seq := inkling2BatchSeqOps(be, os.LookupEnv)
+	kvHalf, err := inkling2BatchKVHalf(os.LookupEnv)
+	if err != nil {
+		return nil, err
+	}
+	if kvHalf && seq == nil {
+		// the per-sequence fallback addresses cache rows by float offsets
+		return nil, fmt.Errorf("inkling2 batch: FAK_INKLING2_BATCH_KV=f16 needs the sequence-batched device ops")
+	}
+	pd := be.(compute.Inkling2PrefillDevice)
 	hp := s.hp
-	b := &inkling2Batch{s: s, capC: C, capCtx: ctx, seq: inkling2BatchSeqOps(s.be, os.LookupEnv)}
-	b.p = ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts(), T: C}
+	b := &inkling2Batch{s: s, capC: C, capCtx: ctx, seq: seq, kvHalf: kvHalf, mem: inkling2BatchMem(be)}
+	b.p = ink2Prefill{s: s, pd: pd, T: C}
+	if b.mem != nil && inkling2BatchQ8RowTile(os.LookupEnv) {
+		b.p.rows = b.mem
+	}
 	keep, scr := s.prefillArenas(C)
 	scr += C*s.output.rows + 64
+	// a narrower cohort begun later may take the few-row path, so size for the widest one that can
+	if few := min(C, inkling2BatchFewRowsMost(os.LookupEnv)); few > 0 && inkling2BatchFewRows(be, few, os.LookupEnv) != nil {
+		scr += inkling2BatchFewRowsScratch(hp, few)
+	}
+	caps := inkling2BatchCaps(hp, s.caps, ctx)
+	b.need = inkling2BatchBytes(hp, caps, C, keep, scr, kvHalf)
+	if os.Getenv("FAK_INKLING2_BATCH_ADMIT") != "0" {
+		// idle pool blocks count as used to the driver; return them before probing
+		inkling2TrimIdle(be)
+		_, free, known := inkling2DeviceFree(be)
+		if err := inkling2BatchAdmit(C, b.need, free, known); err != nil {
+			return nil, err
+		}
+	}
 	b.p.keepFloats, b.p.scrFloats = keep, scr
 	b.p.keep, b.p.scr = b.alloc(keep), b.alloc(scr)
 	// each argmax takes a 4-int slot: the index, then its 8-byte reduction key
 	b.in, b.meta, b.argIdx = b.alloc(C*hp.Hidden), b.alloc(C), b.alloc(4*C)
 
-	caps := inkling2BatchCaps(hp, s.caps, ctx)
 	slots := len(caps)
 	kvDim := hp.KVHeads * hp.HeadDim
-	b.histStride = (2*kvDim + 2*hp.Hidden) * (hp.ConvKernel - 1)
+	b.histStride = inkling2BatchHistStride(hp)
 	b.kc, b.vc, b.hist = make([]ink2Ref, slots), make([]ink2Ref, slots), make([]ink2Ref, slots)
 	maxCap := 0
 	for slot, cap := range caps {
 		maxCap = max(maxCap, cap)
-		b.kc[slot], b.vc[slot] = b.alloc(C*cap*kvDim), b.alloc(C*cap*kvDim)
+		kv := inkling2BatchKVFloats(C*cap*kvDim, kvHalf)
+		b.kc[slot], b.vc[slot] = b.alloc(kv), b.alloc(kv)
 		b.hist[slot] = b.alloc(C * b.histStride)
 	}
 	// float64 scores rows per head per sequence, so sequences never serialize on them
@@ -139,12 +173,21 @@ func newInkling2BatchState(s *inkling2Resident, C, ctx int) (*inkling2Batch, err
 	return b, nil
 }
 
+// alloc takes n zeroed floats of batch state, device-only when the backend can refuse
+// rather than spill to managed memory.
 func (b *inkling2Batch) alloc(n int) ink2Ref {
-	t, err := b.s.dev.Ink2Alloc(n)
+	if b.err != nil {
+		return ink2Ref{}
+	}
+	var t compute.Tensor
+	var err error
+	if b.mem != nil {
+		t, err = b.mem.Ink2AllocDeviceOnly(n)
+	} else {
+		t, err = b.s.dev.Ink2Alloc(n)
+	}
 	if err != nil {
-		if b.err == nil {
-			b.err = err
-		}
+		b.err = fmt.Errorf("inkling2 batch: %d sequences: %w", b.capC, err)
 		return ink2Ref{}
 	}
 	b.owned = append(b.owned, t)
@@ -163,6 +206,13 @@ func (b *inkling2Batch) begin(C, ctx int) error {
 	hp := s.hp
 	b.C, b.ctx, b.pos = C, ctx, make([]int, C)
 	b.p.T = C
+	b.p.keepOff, b.p.scrOff = 0, 0
+	clear(b.p.q8)
+	b.p.grouped = inkling2BatchGrouped(C, os.LookupEnv)
+	b.p.vd, b.p.fewRows = nil, false
+	if vd := inkling2BatchFewRows(s.be, C, os.LookupEnv); vd != nil {
+		b.p.vd, b.p.fewRows = vd, true
+	}
 	b.caps = inkling2BatchCaps(hp, s.caps, ctx)
 	maxCap := 0
 	for _, c := range b.caps {
@@ -184,17 +234,200 @@ func (b *inkling2Batch) begin(C, ctx int) error {
 	return nil
 }
 
-// release frees the batch arenas and keeps the weight binding.
+// release frees the batch arenas and keeps the weight binding; the freed blocks go
+// back to the driver so the next state's admission probe sees them free.
 func (b *inkling2Batch) release() {
 	for _, t := range b.owned {
 		b.s.be.Free(t)
 	}
 	b.owned = nil
+	b.err = nil
+	inkling2TrimIdle(b.s.be)
 }
 
 func (b *inkling2Batch) close() {
 	b.release()
 	b.s.close()
+	inkling2TrimIdle(b.s.be)
+}
+
+// inkling2BatchGroupedMin is the smallest batch whose routed experts run the grouped
+// GEMM; below it the sorted decode GEMV is faster per step.
+const inkling2BatchGroupedMin = 3
+
+// inkling2BatchGrouped reports whether a C-sequence batch runs its experts grouped:
+// C >= FAK_INKLING2_BATCH_GROUPED_MIN (default inkling2BatchGroupedMin), unless
+// FAK_INKLING2_PREFILL_GROUPED=0 forces the sorted path at every C.
+func inkling2BatchGrouped(C int, lookup func(string) (string, bool)) bool {
+	if v, ok := lookup("FAK_INKLING2_PREFILL_GROUPED"); ok && v == "0" {
+		return false
+	}
+	least := inkling2BatchGroupedMin
+	if v, ok := lookup("FAK_INKLING2_BATCH_GROUPED_MIN"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 1 {
+			least = n
+		}
+	}
+	return C >= least
+}
+
+// inkling2BatchFewRowsMax is the largest batch that runs the few-row verify kernels
+// by default; the kernels themselves stop at inkling2FewRowsLimit rows.
+const (
+	inkling2BatchFewRowsMax = 8
+	inkling2FewRowsLimit    = 9
+)
+
+// inkling2BatchFewRows returns the backend's few-row verify device when a C-sequence
+// batch runs on it: C <= FAK_INKLING2_BATCH_ROWS_MAX (default inkling2BatchFewRowsMax,
+// 0 disables, capped at inkling2FewRowsLimit); nil otherwise.
+func inkling2BatchFewRows(be any, C int, lookup func(string) (string, bool)) compute.Inkling2VerifyDevice {
+	vd, ok := be.(compute.Inkling2VerifyDevice)
+	if !ok {
+		return nil
+	}
+	if C > inkling2BatchFewRowsMost(lookup) {
+		return nil
+	}
+	return vd
+}
+
+// inkling2BatchFewRowsMost is the widest batch the few-row kernels take under
+// FAK_INKLING2_BATCH_ROWS_MAX.
+func inkling2BatchFewRowsMost(lookup func(string) (string, bool)) int {
+	most := inkling2BatchFewRowsMax
+	if v, ok := lookup("FAK_INKLING2_BATCH_ROWS_MAX"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
+			most = n
+		}
+	}
+	return min(most, inkling2FewRowsLimit)
+}
+
+// inkling2BatchFewRowsScratch is the per-visit scratch the few-row path takes past the
+// prefill arenas: Q8_0 codes for each distinct matmul activation (the three attention
+// inputs, the router input or head input, and the attention output) and the
+// pairwise expert input repeated per routed slot.
+func inkling2BatchFewRowsScratch(hp model.Inkling2LoopHParams, C int) int {
+	pad := func(n int) int { return (n + 63) &^ 63 }
+	codes := func(n int) int { return pad(C * (n/4 + n/32)) }
+	qd := hp.Heads * hp.HeadDim
+	return 4*codes(hp.Hidden) + codes(qd) + pad(C*hp.ExpertsUsed*hp.Hidden)
+}
+
+// inkling2BatchMem returns the backend's strict allocator and row-tile matmul seam,
+// or nil for a backend without it.
+func inkling2BatchMem(be any) compute.Inkling2BatchMemory {
+	m, _ := be.(compute.Inkling2BatchMemory)
+	return m
+}
+
+// inkling2BatchQ8RowTile reports whether the batch pins its 2..127-row Q8_0 matmuls
+// to the row-tile panel GEMM (FAK_INKLING2_BATCH_Q8_ROWTILE=0 leaves them on the
+// backend's default small-panel kernel).
+func inkling2BatchQ8RowTile(lookup func(string) (string, bool)) bool {
+	v, ok := lookup("FAK_INKLING2_BATCH_Q8_ROWTILE")
+	return !ok || v != "0"
+}
+
+// inkling2BatchHeadroom is device memory kept free past the batch's own buffers for
+// kernel scratch that grows lazily on the first step and for the step's graph.
+const inkling2BatchHeadroom = 64 << 20
+
+// Inkling2BatchMemoryError refuses a batch whose buffers would not fit in free device
+// memory (FAK_INKLING2_BATCH_ADMIT=0 skips the check).
+type Inkling2BatchMemoryError struct {
+	Sequences  int
+	Need, Free int64
+}
+
+func (e *Inkling2BatchMemoryError) Error() string {
+	return fmt.Sprintf("inkling2 batch: %d sequences need %.1f MiB + %d MiB headroom, %.1f MiB device memory free",
+		e.Sequences, float64(e.Need)/(1<<20), inkling2BatchHeadroom>>20, float64(e.Free)/(1<<20))
+}
+
+// inkling2BatchAdmit refuses need bytes against a probed free; a device that cannot
+// report free memory fails open.
+func inkling2BatchAdmit(C int, need, free int64, known bool) error {
+	if !known || free < 0 || need+inkling2BatchHeadroom <= free {
+		return nil
+	}
+	return &Inkling2BatchMemoryError{Sequences: C, Need: need, Free: free}
+}
+
+// inkling2BatchKVHalf reports whether FAK_INKLING2_BATCH_KV stores the batch caches as
+// f16 ("f16"/"fp16") rather than the default fp32 (unset, "f32"/"fp32").
+func inkling2BatchKVHalf(lookup func(string) (string, bool)) (bool, error) {
+	v, _ := lookup("FAK_INKLING2_BATCH_KV")
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "f16", "fp16":
+		return true, nil
+	case "", "f32", "fp32":
+		return false, nil
+	}
+	return false, fmt.Errorf("inkling2 batch: FAK_INKLING2_BATCH_KV=%q is not f32 or f16", v)
+}
+
+// inkling2BatchKVFloats is the float allocation holding n cache elements.
+func inkling2BatchKVFloats(n int, half bool) int {
+	if half {
+		return (n + 1) / 2
+	}
+	return n
+}
+
+// inkling2BatchStateBytes is the device memory of C sequences' caches and conv
+// histories over slots of the given caps, the caches f16 when half.
+func inkling2BatchStateBytes(hp model.Inkling2LoopHParams, caps []int, C int, half bool) int64 {
+	kvDim := hp.KVHeads * hp.HeadDim
+	hist := int64(inkling2BatchHistStride(hp))
+	var n int64
+	for _, c := range caps {
+		n += 2*int64(inkling2BatchKVFloats(C*c*kvDim, half)) + hist*int64(C)
+	}
+	return 4 * n
+}
+
+// inkling2BatchBytes is every device buffer newInkling2Batch allocates past the
+// resident: the state, the keep and scratch arenas of keep and scr floats, the scores
+// rows, and the step's input, position and argmax rows.
+func inkling2BatchBytes(hp model.Inkling2LoopHParams, caps []int, C, keep, scr int, half bool) int64 {
+	maxCap := 0
+	for _, c := range caps {
+		maxCap = max(maxCap, c)
+	}
+	floats := int64(keep) + int64(scr) + int64(C)*int64(hp.Hidden+1+4+2*hp.Heads*maxCap)
+	return inkling2BatchStateBytes(hp, caps, C, half) + 4*floats
+}
+
+func inkling2BatchHistStride(hp model.Inkling2LoopHParams) int {
+	return (2*hp.KVHeads*hp.HeadDim + 2*hp.Hidden) * (hp.ConvKernel - 1)
+}
+
+// inkling2BatchTrimKeep is the largest idle allocator block a trim leaves cached, so
+// the small per-step buffers stay pooled while the batch arenas go back to the device.
+const inkling2BatchTrimKeep = 1 << 20
+
+// inkling2TrimIdle returns idle cached device blocks to the driver, so the next batch
+// and a free-memory probe see them free. A trim that fails leaves the blocks cached,
+// which costs headroom but not correctness, so its panic is dropped.
+func inkling2TrimIdle(be any) {
+	t, ok := be.(interface{ TrimLarge(int) })
+	if !ok {
+		return
+	}
+	defer func() { _ = recover() }()
+	t.TrimLarge(inkling2BatchTrimKeep)
+}
+
+func inkling2DeviceFree(be any) (total, free int64, known bool) {
+	d, ok := be.(interface {
+		DeviceMemory() (total, free int64, known bool)
+	})
+	if !ok {
+		return 0, compute.FreeUnknown, false
+	}
+	return d.DeviceMemory()
 }
 
 // inkling2BatchCaps is the cache capacity of every slot: ctx for a global slot, the
@@ -213,13 +446,7 @@ func inkling2BatchCaps(hp model.Inkling2LoopHParams, local []int, ctx int) []int
 
 // StateBytes is the device memory of every sequence's caches and conv histories.
 func (b *inkling2Batch) StateBytes() int64 {
-	hp := b.s.hp
-	kvDim := hp.KVHeads * hp.HeadDim
-	var n int64
-	for _, c := range b.caps {
-		n += int64(2*c*kvDim + b.histStride)
-	}
-	return 4 * n * int64(b.C)
+	return inkling2BatchStateBytes(b.s.hp, b.caps, b.C, b.kvHalf)
 }
 
 // inkling2SeqRow is sequence i's row of a strided operand; an absent operand stays
@@ -243,21 +470,42 @@ func (b *inkling2Batch) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs
 	inpSA := cur
 
 	in := [3]ink2Ref{cur, cur, cur}
+	// the few-row path folds the input norms into the mix when no controller sits
+	// between them, as a verify chunk does
+	normed := false
 	if l.resQRows > 0 {
+		var norms []ink2Ref
+		if p.fewRows && msgs == nil {
+			normed = true
+			norms = []ink2Ref{l.qNorm, l.kNorm, l.vNorm}
+			if local {
+				norms = []ink2Ref{l.attnNorm}
+			}
+		}
 		if local {
-			m := p.mix(with(*blocks, cur), l.resQ, 1)
+			m := p.mixNorm(with(*blocks, cur), l.resQ, 1, norms)
 			in = [3]ink2Ref{m[0], m[0], m[0]}
 		} else {
-			m := p.mix(with(*blocks, cur), l.resQ, 3)
+			m := p.mixNorm(with(*blocks, cur), l.resQ, 3, norms)
 			in = [3]ink2Ref{m[0], m[1], m[2]}
 		}
 	}
 	if msgs != nil {
-		for j := 0; j < 3; j++ {
-			in[j] = p.control(in[j], msgs[j], c, j)
+		if p.fewRows {
+			o := p.controls(in[:], msgs[:3], c)
+			in = [3]ink2Ref{o[0], o[1], o[2]}
+		} else {
+			for j := 0; j < 3; j++ {
+				in[j] = p.control(in[j], msgs[j], c, j)
+			}
 		}
 	}
 	switch {
+	case normed:
+	case local && msgs != nil && p.fewRows:
+		// controls left its three outputs contiguous
+		o := p.rmsRows(in[0], l.attnNorm, 3*b.C, h, hp.NormEps)
+		in = [3]ink2Ref{o, at(o, b.C*h), at(o, 2*b.C*h)}
 	case local && msgs != nil:
 		for j := 0; j < 3; j++ {
 			in[j] = p.rms(in[j], l.attnNorm, h, hp.NormEps)
@@ -302,10 +550,10 @@ func (b *inkling2Batch) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs
 		Sinks: l.sink.rows, KCache: cap * kvDim, VCache: cap * kvDim, Hist: b.histStride, Scores: b.scoreStride, Out: qd, Meta: 1}
 	if b.seq != nil {
 		if s.err == nil {
-			s.fail(b.seq.Ink2BQKVPost(q, r, k, v, l.qclip, l.relClip, b.kc[slot], b.vc[slot], b.meta, ap, cap, &cv, st, b.C))
+			s.fail(b.seq.Ink2BQKVPost(q, r, k, v, l.qclip, l.relClip, b.kc[slot], b.vc[slot], b.meta, ap, cap, &cv, st, b.kvHalf, b.C))
 		}
 		if s.err == nil {
-			s.fail(b.seq.Ink2BAttend(q, r, sinks, l.relBias, b.kc[slot], b.vc[slot], b.scores, attn, b.meta, ap, extent, window, cap, st, b.C))
+			s.fail(b.seq.Ink2BAttend(q, r, sinks, l.relBias, b.kc[slot], b.vc[slot], b.scores, attn, b.meta, ap, extent, window, cap, st, b.kvHalf, b.C))
 		}
 	}
 	for i := 0; b.seq == nil && i < b.C && s.err == nil; i++ {
@@ -333,11 +581,16 @@ func (b *inkling2Batch) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs
 		ffnInp = b.conv(slot, o, l.attnPostConv, inpSA, 2*kvDim, false)
 	}
 
-	x := p.mix(with(*blocks, ffnInp), l.ffnResQ, 1)[0]
-	if msgs != nil {
-		x = p.control(x, msgs[3], c, 3)
+	var x ink2Ref
+	if p.fewRows && msgs == nil {
+		x = p.mixNorm(with(*blocks, ffnInp), l.ffnResQ, 1, []ink2Ref{l.ffnNorm})[0]
+	} else {
+		x = p.mix(with(*blocks, ffnInp), l.ffnResQ, 1)[0]
+		if msgs != nil {
+			x = p.control(x, msgs[3], c, 3)
+		}
+		x = p.rms(x, l.ffnNorm, h, hp.NormEps)
 	}
-	x = p.rms(x, l.ffnNorm, h, hp.NormEps)
 	x = p.moe(l, x)
 	return b.conv(slot, x, l.ffnPostConv, ffnInp, 2*kvDim+h, true)
 }
@@ -376,11 +629,16 @@ func (b *inkling2Batch) forward() {
 	hp := s.hp
 	h := hp.Hidden
 	p.keepOff, p.scrOff = 0, 0
+	clear(p.q8)
 	cur := p.hold(b.C * h)
 	if s.err == nil {
 		s.fail(s.dev.Ink2RMS(b.in, s.tokNorm, cur, b.C, h, hp.NormEps))
 	}
-	visit := func() { p.scrOff = 0 }
+	// the few-row matmuls key cached Q8_0 codes by scratch offset, so they go with it
+	visit := func() {
+		p.scrOff = 0
+		clear(p.q8)
+	}
 	var blocks []ink2Ref
 	for il := 0; il < hp.CoreStart; il++ {
 		visit()
@@ -415,8 +673,13 @@ func (b *inkling2Batch) forward() {
 		cur = b.layer(il, il, cur, &blocks, nil, nil)
 	}
 	visit()
-	x := p.mix(with(blocks, cur), s.outResQ, 1)[0]
-	xn := p.rms(x, s.outNorm, h, hp.NormEps)
+	var xn ink2Ref
+	if p.fewRows {
+		xn = p.mixNorm(with(blocks, cur), s.outResQ, 1, []ink2Ref{s.outNorm})[0]
+	} else {
+		x := p.mix(with(blocks, cur), s.outResQ, 1)[0]
+		xn = p.rms(x, s.outNorm, h, hp.NormEps)
+	}
 	logits := p.mm(s.output, xn)
 	if b.seq != nil {
 		if s.err == nil {
@@ -493,10 +756,17 @@ func (b *inkling2Batch) step(tokens []int) ([]int, error) {
 // Inkling2LoopBatchStats times a lockstep batched greedy decode. Prompt covers the
 // steps in which some sequence still feeds a prompt token; Decode covers the
 // DecodeSteps steps in which every sequence feeds a generated token, and
-// DecodeTokens counts the kept tokens those steps produced.
+// DecodeTokens counts the kept tokens those steps produced. NeedBytes is the batch's
+// admission estimate; DeviceTotal, FreeBefore and FreeAfter probe device memory around
+// building the batch (FreeBefore precedes the resident upload; compute.FreeUnknown
+// when not probeable).
 type Inkling2LoopBatchStats struct {
 	Sequences    int
 	StateBytes   int64
+	NeedBytes    int64
+	DeviceTotal  int64
+	FreeBefore   int64
+	FreeAfter    int64
 	Prompt       time.Duration
 	Decode       time.Duration
 	DecodeSteps  int
@@ -524,12 +794,14 @@ func inkling2BatchGreedy(m *Inkling2LoopModel, be compute.Backend, prompts [][]i
 		}
 		longest = max(longest, len(pr))
 	}
+	st.DeviceTotal, st.FreeBefore, _ = inkling2DeviceFree(be)
 	b, err := newInkling2Batch(m, be, len(prompts), ctx)
 	if err != nil {
 		return nil, st, err
 	}
 	defer b.close()
-	st.StateBytes = b.StateBytes()
+	_, st.FreeAfter, _ = inkling2DeviceFree(be)
+	st.StateBytes, st.NeedBytes = b.StateBytes(), b.need
 	// a CUDA stream capture is bound to the OS thread that opened it
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

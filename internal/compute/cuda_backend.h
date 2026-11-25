@@ -999,16 +999,17 @@ int fcuda_ink2_iq_gemv_select(int mode);
 int fcuda_ink2_attend_split_select(int mode);
 /* Sequence-batched variants: one launch per kernel for C sequences. st holds 15 element
  * strides in the order q, r, k, v, kdyn, vdyn, sinks, kc, vc, hist, scores (floats, even),
- * out, meta, x, resid; each sequence's operand sits stride*i past the given pointer. */
+ * out, meta, x, resid; each sequence's operand sits stride*i past the given pointer.
+ * kvHalf != 0: kcache/vcache hold __half elements and the kc/vc strides count halves. */
 int fcuda_ink2_qkv_post_seq(float *q, float *r, const float *k, const float *v, const float *qclip,
     const float *rclip, float *kcache, float *vcache, const float *meta, int heads, int kvHeads,
     int headDim, int relLen, float qkClip, float relClip, float eps, int global, float alpha,
     float floorTok, int cap, const float *const *conv, float kNorm, float vNorm, int kn,
-    const long long *st, int C);
+    int kvHalf, const long long *st, int C);
 int fcuda_ink2_attend_seq(const float *q, const float *r, const float *sinks, const float *relBias,
     const float *kcache, const float *vcache, double *scores, float *out, const float *meta,
     int heads, int kvHeads, int headDim, int relLen, int extent, int window, int cap, float scale,
-    const long long *st, int C);
+    int kvHalf, const long long *st, int C);
 int fcuda_ink2_conv_seq(const float *x, const float *w, float *hist, float *out, const float *resid,
     int n, int kn, float norm, const long long *st, int C);
 int fcuda_ink2_softcap_argmax_seq(float *logits, int n, long long ld, float cap, int *outIdx, int C);

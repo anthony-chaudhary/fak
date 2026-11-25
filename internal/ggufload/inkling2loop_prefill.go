@@ -40,6 +40,11 @@ type ink2Prefill struct {
 	// commit and the head runs on every row.
 	verify bool
 	vd     compute.Inkling2VerifyDevice
+	// rows, when set, pins 2..127-row Q8_0 matmuls to the row-tile panel GEMM
+	rows compute.Inkling2BatchMemory
+	// fewRows runs dense matmuls, mixes and experts on vd's few-row kernels as a
+	// verify chunk does, without the verify chunk's conv log, device positions or head.
+	fewRows bool
 	// q8 maps a scratch activation offset to its Q8_0 codes for this visit
 	q8 map[int]ink2Ref
 }
@@ -136,12 +141,16 @@ func (p *ink2Prefill) mm(m ink2Mat, x ink2Ref) ink2Ref {
 	}
 	// a verify chunk reads each weight once for all its rows, each row equal to the
 	// decode GEMV
-	if p.verify && p.T <= 9 {
+	if (p.verify || p.fewRows) && p.T <= 9 {
 		ok, err := inkling2RowsMatMul(p.vd, m, x, y, p.T, p.q8Codes)
 		if err != nil || ok {
 			p.fail(err)
 			return y
 		}
+	}
+	if p.rows != nil && p.T >= 2 && p.T < 128 && m.t.Dtype == compute.Q8_0 {
+		p.fail(p.rows.Ink2PMatMulRows(m.t, x, y, p.T))
+		return y
 	}
 	p.fail(p.pd.Ink2PMatMul(m.t, x, y, p.T))
 	return y
@@ -220,7 +229,7 @@ func (p *ink2Prefill) rms(x, w ink2Ref, n int, eps float32) ink2Ref {
 func (p *ink2Prefill) mixNorm(states []ink2Ref, queries ink2Ref, nq int, norms []ink2Ref) []ink2Ref {
 	s := p.s
 	h := s.hp.Hidden
-	if p.verify && s.err == nil {
+	if (p.verify || p.fewRows) && s.err == nil {
 		out := p.tmp(nq * p.T * h)
 		ok, err := p.vd.Ink2VMix(states, queries, nq, norms, s.hp.NormEps, out, h, p.T)
 		if err != nil || ok {
@@ -524,7 +533,7 @@ func (p *ink2Prefill) moeRows(l *ink2Layer, x ink2Ref) (ink2Ref, ink2Ref) {
 	var bucket ink2Bucket
 	// a verify chunk runs the decode expert GEMV straight over its T*k pairs: at a
 	// few rows, bucketing pairs by expert costs more than it saves
-	pairwise := p.verify && !p.grouped
+	pairwise := (p.verify || p.fewRows) && !p.grouped
 	if pairwise {
 		xr := p.tmp(npairs * hp.Hidden)
 		if s.err == nil {

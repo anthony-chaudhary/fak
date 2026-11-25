@@ -3,6 +3,8 @@
 package ggufload
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -79,9 +81,16 @@ func TestInkling2CUDABatchDecodeBench(t *testing.T) {
 			prompts[i] = prompt
 		}
 		got, st, err := inkling2BatchGreedy(m, be, prompts, n, ctx)
+		var refused *Inkling2BatchMemoryError
+		if errors.As(err, &refused) {
+			t.Logf("inkling2 batch bench: C=%d refused: %v (device %s before the resident)", c, err, inkling2MiB(st.FreeBefore, st.DeviceTotal))
+			continue
+		}
 		if err != nil {
 			t.Fatalf("C=%d: %v", c, err)
 		}
+		t.Logf("inkling2 batch bench: C=%d memory: need %.1f MiB; device %s before the resident, %s after the batch",
+			c, float64(st.NeedBytes)/(1<<20), inkling2MiB(st.FreeBefore, st.DeviceTotal), inkling2MiB(st.FreeAfter, st.DeviceTotal))
 		same := true
 		for i := range got {
 			for j := range got[i] {
@@ -93,4 +102,12 @@ func TestInkling2CUDABatchDecodeBench(t *testing.T) {
 			c, st.DecodeSteps, st.Decode, agg, agg/float64(c), st.Decode.Seconds()*1000/float64(max(st.DecodeSteps, 1)),
 			float64(st.StateBytes)/(1<<20), st.Prompt, same, got[0][:min(8, len(got[0]))])
 	}
+}
+
+// inkling2MiB renders a free/total probe; an unprobed free prints as unknown.
+func inkling2MiB(free, total int64) string {
+	if free < 0 {
+		return fmt.Sprintf("free unknown of %.1f MiB", float64(total)/(1<<20))
+	}
+	return fmt.Sprintf("%.1f of %.1f MiB free", float64(free)/(1<<20), float64(total)/(1<<20))
 }
