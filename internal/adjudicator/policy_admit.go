@@ -54,43 +54,71 @@ func (a *Adjudicator) NeverAdmits(tool string) bool {
 
 // normalizeDenyMap returns a copy of deny with every tool-name key folded to
 // lowercase so explicit Deny lookups are consistently case-insensitive (#14512).
-// If both a mixed-case and an already-lowercase entry exist for the same tool,
-// the exact lowercase entry wins deterministically.
-func normalizeDenyMap(deny map[string]abi.ReasonCode) map[string]abi.ReasonCode {
+// Keys that collide after folding keep the strongest entry (denyEntryWins), so
+// map iteration order can never let a softenable reason shadow a hard one.
+// advisory must already be clamped by sanitizeAdvisoryReasons.
+func normalizeDenyMap(deny map[string]abi.ReasonCode, advisory map[abi.ReasonCode]bool) map[string]abi.ReasonCode {
 	if len(deny) == 0 {
 		return deny
 	}
 	out := make(map[string]abi.ReasonCode, len(deny))
+	winner := make(map[string]string, len(deny))
 	for k, r := range deny {
 		lk := strings.ToLower(k)
-		if _, exists := out[lk]; !exists || k == lk {
+		if prev, exists := winner[lk]; !exists || denyEntryWins(advisory, k, r, prev, deny[prev]) {
+			winner[lk] = k
 			out[lk] = r
 		}
 	}
 	return out
 }
 
-// lookupDeny looks up tool in deny case-insensitively. Fast-path O(1) when deny
-// has been normalized by New/SetPolicy; falls back to a case-folding scan for
-// raw Policy values (e.g. Policy.NeverAdmits called without Adjudicator.New).
-func lookupDeny(deny map[string]abi.ReasonCode, tool, lowerTool string) (abi.ReasonCode, bool) {
+// denySoftened reports whether this policy softens a deny citing r. It reads the
+// clamped view New installs, so a raw Policy and an installed one agree.
+func denySoftened(advisory map[abi.ReasonCode]bool, r abi.ReasonCode) bool {
+	return advisory[r] && AdvisoryEligible(r)
+}
+
+// denyEntryWins orders case-colliding Deny entries, strongest first: a reason
+// this policy does not soften, then one an operator approval cannot lift, then
+// one that can never be declared advisory, then the exact-lowercase key, then
+// the byte-smallest key. Keys are unique, so the order is total.
+func denyEntryWins(advisory map[abi.ReasonCode]bool, k string, r abi.ReasonCode, prevK string, prevR abi.ReasonCode) bool {
+	if soft, prevSoft := denySoftened(advisory, r), denySoftened(advisory, prevR); soft != prevSoft {
+		return !soft
+	}
+	if lift, prevLift := operatorApprovalLiftable(r), operatorApprovalLiftable(prevR); lift != prevLift {
+		return !lift
+	}
+	if hard, prevHard := !AdvisoryEligible(r), !AdvisoryEligible(prevR); hard != prevHard {
+		return hard
+	}
+	lk := strings.ToLower(k)
+	if exact, prevExact := k == lk, prevK == lk; exact != prevExact {
+		return exact
+	}
+	return k < prevK
+}
+
+// lookupDeny looks up lowerTool in deny case-insensitively. It scans rather than
+// indexing so a raw Policy (e.g. Policy.NeverAdmits without Adjudicator.New)
+// resolves case collisions exactly as normalizeDenyMap does.
+func lookupDeny(deny map[string]abi.ReasonCode, advisory map[abi.ReasonCode]bool, lowerTool string) (abi.ReasonCode, bool) {
 	if len(deny) == 0 {
 		return 0, false
 	}
-	if r, ok := deny[lowerTool]; ok {
-		return r, true
-	}
-	if tool != lowerTool {
-		if r, ok := deny[tool]; ok {
-			return r, true
-		}
-	}
+	var best string
+	var bestR abi.ReasonCode
+	found := false
 	for k, r := range deny {
-		if strings.EqualFold(k, tool) {
-			return r, true
+		if strings.ToLower(k) != lowerTool {
+			continue
+		}
+		if !found || denyEntryWins(advisory, k, r, best, bestR) {
+			best, bestR, found = k, r, true
 		}
 	}
-	return 0, false
+	return bestR, found
 }
 
 // NeverAdmits reports whether the floor can NEVER produce an Allow for this tool
@@ -108,10 +136,10 @@ func lookupDeny(deny map[string]abi.ReasonCode, tool, lowerTool string) (abi.Rea
 // never admitted, so they report true too; the inbound compactor only ever needs the
 // "model can't reach it" guarantee, which both classes satisfy.
 func (p Policy) NeverAdmits(tool string) bool {
-	if r, denied := lookupDeny(p.Deny, tool, strings.ToLower(tool)); denied {
+	if r, denied := lookupDeny(p.Deny, p.AdvisoryReasons, strings.ToLower(tool)); denied {
 		// A name-deny whose cited reason is advisory can still be admitted (the
 		// soften downgrade), so its tool-def must not be pruned.
-		return !p.AdvisoryReasons[r]
+		return !denySoftened(p.AdvisoryReasons, r)
 	}
 	if p.Posture == PostureDefaultOpen {
 		return false

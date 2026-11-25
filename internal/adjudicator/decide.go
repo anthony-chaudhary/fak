@@ -96,9 +96,9 @@ type Adjudicator struct {
 
 // New builds an adjudicator with the given policy.
 func New(p Policy) *Adjudicator {
-	p.Deny = normalizeDenyMap(p.Deny)                              // case-insensitive explicit Deny (#14512)
-	p.Profile = sanitizeProfile(p.Profile)                         // a profile may only narrow the floor
 	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // only heuristic reasons may soften
+	p.Deny = normalizeDenyMap(p.Deny, p.AdvisoryReasons)           // case-insensitive explicit Deny (#14512)
+	p.Profile = sanitizeProfile(p.Profile)                         // a profile may only narrow the floor
 	a := &Adjudicator{
 		receiptRoot: receiptWorkspaceRoot(),
 		recovery:    NewRecoveryAuditLedger(),
@@ -119,9 +119,9 @@ func (a *Adjudicator) RecoveryLedger() *RecoveryAuditLedger {
 
 // SetPolicy swaps the policy (used by tests + the bench harness).
 func (a *Adjudicator) SetPolicy(p Policy) {
-	p.Deny = normalizeDenyMap(p.Deny)                              // case-insensitive explicit Deny (#14512)
-	p.Profile = sanitizeProfile(p.Profile)                         // a profile may only narrow the floor
 	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // only heuristic reasons may soften
+	p.Deny = normalizeDenyMap(p.Deny, p.AdvisoryReasons)           // case-insensitive explicit Deny (#14512)
+	p.Profile = sanitizeProfile(p.Profile)                         // a profile may only narrow the floor
 	// Build the immutable predicate index before excluding readers. The lock then
 	// protects only the atomic policy+index pair swap, not O(predicate-count) work.
 	argByTool := indexArgPredicates(p.ArgPredicates)

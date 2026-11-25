@@ -988,7 +988,7 @@ func psPositionalOperands(args []shellWord, valueFlags ...string) []string {
 		if strings.HasPrefix(tok, "-") {
 			lt := strings.ToLower(tok)
 			if !strings.Contains(lt, ":") {
-				for _, vf := range valueFlags {
+				for _, vf := range append(valueFlags, psCommonValueParams...) {
 					if lt == vf {
 						skipNext = true
 						break
@@ -1002,6 +1002,97 @@ func psPositionalOperands(args []shellWord, valueFlags ...string) []string {
 	return out
 }
 
+// psCmdletParams lists each write cmdlet's own parameters so an abbreviated
+// parameter (`-Va` for -Value) resolves as PowerShell binds it; an unresolved
+// abbreviation would otherwise be read as a switch and shift the positional
+// path onto its value.
+var psCmdletParams = map[string][]string{
+	"set-content":   {"path", "literalpath", "value", "passthru", "filter", "include", "exclude", "force", "credential", "nonewline", "encoding", "asbytestream", "stream"},
+	"add-content":   {"path", "literalpath", "value", "passthru", "filter", "include", "exclude", "force", "credential", "nonewline", "encoding", "asbytestream", "stream"},
+	"out-file":      {"filepath", "literalpath", "encoding", "append", "force", "noclobber", "width", "nonewline", "inputobject"},
+	"tee-object":    {"filepath", "literalpath", "append", "encoding", "variable", "inputobject"},
+	"clear-content": {"path", "literalpath", "filter", "include", "exclude", "force", "credential", "stream"},
+	"remove-item":   {"path", "literalpath", "filter", "include", "exclude", "recurse", "force", "credential", "stream"},
+	"copy-item":     {"path", "literalpath", "destination", "container", "force", "filter", "include", "exclude", "recurse", "passthru", "credential", "fromsession", "tosession"},
+	"move-item":     {"path", "literalpath", "destination", "force", "filter", "include", "exclude", "passthru", "credential"},
+	"rename-item":   {"path", "literalpath", "newname", "force", "passthru", "credential"},
+	"new-item":      {"path", "name", "itemtype", "value", "force", "credential"},
+}
+
+var psAliasCmdlet = map[string]string{
+	"sc": "set-content", "ac": "add-content", "clc": "clear-content", "ni": "new-item",
+	"ri": "remove-item", "del": "remove-item", "erase": "remove-item", "rd": "remove-item",
+	"cpi": "copy-item", "copy": "copy-item", "mi": "move-item", "move": "move-item",
+	"rni": "rename-item", "ren": "rename-item",
+}
+
+// psCommonParams are the cmdlet-binding common parameters; the value-taking ones
+// are repeated in psCommonValueParams so their value is never taken for a path.
+var psCommonParams = []string{
+	"verbose", "debug", "whatif", "confirm",
+	"erroraction", "warningaction", "informationaction", "progressaction",
+	"errorvariable", "warningvariable", "informationvariable", "outvariable",
+	"outbuffer", "pipelinevariable",
+}
+
+var psCommonValueParams = []string{
+	"-erroraction", "-warningaction", "-informationaction", "-progressaction",
+	"-errorvariable", "-warningvariable", "-informationvariable", "-outvariable",
+	"-outbuffer", "-pipelinevariable",
+}
+
+var psParamAliases = map[string]string{
+	"ea": "erroraction", "wa": "warningaction", "infa": "informationaction", "proga": "progressaction",
+	"ev": "errorvariable", "wv": "warningvariable", "iv": "informationvariable", "ov": "outvariable",
+	"ob": "outbuffer", "pv": "pipelinevariable", "vb": "verbose", "db": "debug", "wi": "whatif", "cf": "confirm",
+	"pspath": "literalpath", "lp": "literalpath",
+}
+
+// psCanonicalParams rewrites each parameter token of a write cmdlet to its full
+// lowercase name when it is an alias, exact name, or unique prefix. Ambiguous
+// prefixes are left untouched: PowerShell refuses to bind them.
+func psCanonicalParams(head string, args []shellWord) []shellWord {
+	cmdlet := head
+	if c, ok := psAliasCmdlet[head]; ok {
+		cmdlet = c
+	}
+	params := append(append([]string(nil), psCmdletParams[cmdlet]...), psCommonParams...)
+	out := make([]shellWord, len(args))
+	for i, w := range args {
+		out[i] = w
+		if w.quoted || len(w.text) < 2 || w.text[0] != '-' || w.text[1] == '-' {
+			continue
+		}
+		name, rest := w.text[1:], ""
+		if j := strings.IndexByte(name, ':'); j >= 0 {
+			name, rest = name[:j], name[j:]
+		}
+		if canon := psResolveParam(strings.ToLower(name), params); canon != "" {
+			out[i].text = "-" + canon + rest
+		}
+	}
+	return out
+}
+
+func psResolveParam(name string, params []string) string {
+	if canon, ok := psParamAliases[name]; ok {
+		return canon
+	}
+	match, n := "", 0
+	for _, p := range params {
+		if p == name {
+			return p
+		}
+		if strings.HasPrefix(p, name) {
+			match, n = p, n+1
+		}
+	}
+	if n != 1 {
+		return ""
+	}
+	return match
+}
+
 // psWriteTargets extracts the write target paths from a PowerShell write cmdlet
 // or alias segment (#14513).
 func psWriteTargets(head, segment string) []string {
@@ -1010,7 +1101,7 @@ func psWriteTargets(head, segment string) []string {
 	if start >= len(words) {
 		return nil
 	}
-	args := words[start+1:]
+	args := psCanonicalParams(head, words[start+1:])
 	var targets []string
 	addAll := func(xs []string) {
 		for _, x := range xs {
