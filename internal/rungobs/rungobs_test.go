@@ -31,7 +31,9 @@ type mixedAdj struct{}
 
 func (mixedAdj) Adjudicate(_ context.Context, c *abi.ToolCall) abi.Verdict {
 	switch c.Tool {
-	case "allow_it":
+	case "allow_it", "vdso_hit":
+		// The fast path is only consulted for an admitted call, so the vDSO-served
+		// tool must be allowed here to reach it.
 		return abi.Verdict{Kind: abi.VerdictAllow, By: "mixed"}
 	case "deny_it":
 		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, By: "mixed"}
@@ -51,8 +53,8 @@ func (e *echoEngine) Complete(_ context.Context, c *abi.ToolCall) (*abi.Result, 
 }
 func (*echoEngine) Caps() []abi.Capability { return nil }
 
-// hitFP serves exactly one tool name from the vDSO so the rest fall through to
-// adjudication.
+// hitFP serves exactly one tool name from the vDSO; every other admitted call
+// misses and dispatches to the engine.
 type hitFP struct{ tool string }
 
 func (f hitFP) Lookup(_ context.Context, c *abi.ToolCall) (*abi.Result, bool) {
@@ -122,7 +124,7 @@ func TestRungObsReconcilesWithCounters(t *testing.T) {
 	abi.RegisterEmitter(obs)
 
 	k := kernel.New("e")
-	// 3 allows, 2 denies, 1 transform, 1 vDSO-served (not adjudicated) = 7 submits.
+	// 3 allows, 2 denies, 1 transform, 1 vDSO-served (admitted, no engine) = 7 submits.
 	seq := []string{"allow_it", "allow_it", "allow_it", "deny_it", "deny_it", "transform_it", "vdso_hit"}
 	for _, tool := range seq {
 		k.Syscall(context.Background(), call(tool))
@@ -195,7 +197,7 @@ func TestRungObsAttributesWinningRung(t *testing.T) {
 	}
 }
 
-// AC #3 — a vDSO-served call (EvVDSOHit, no adjudication ran) is counted under a
+// AC #3 — a vDSO-served call (EvVDSOHit, admitted then served locally) is counted under a
 // distinct rung="vdso" bucket and never misattributed to a structural rung.
 func TestRungObsVDSOBucketDistinct(t *testing.T) {
 	registerChain()

@@ -37,11 +37,10 @@ import (
 
 // routedTool is a tau2 airline tool the deterministic MockPlanner calls, so the owned loop
 // reaches adjudication under the real agent policy rather than a hand-allowed stub. It is
-// deliberately WRITE-shaped: the vDSO's tier-2 store is process-global and the agent loop
-// does not lower an isolation principal onto its calls, so a read-shaped tool
-// (get_user_details) is deduped across tests in this package and the second test's call
-// never reaches the adjudicator chain at all. A write-shaped tool is never served from
-// cache, so every test here observes its own live route binding.
+// deliberately WRITE-shaped: the vDSO's tier-2 store is process-global, so a read-shaped
+// tool (get_user_details) can be served from a sibling test's fill and never dispatch. A
+// write-shaped tool is never served from cache, so every test here observes its own live
+// dispatch and route binding.
 const routedTool = "book_flight"
 
 // engineRecorder captures the Engine bound to each tool call at ADJUDICATION time — the
@@ -51,10 +50,12 @@ type engineRecorder struct {
 	mu   sync.Mutex
 	seen map[string]string
 	// ledger appends EVERY adjudicated call in order, where seen keeps only the first
-	// binding per tool. The count is the load-bearing part for #5707: a call served from
-	// a vDSO tier-2 entry never reaches the chain at all, so "how many times did this
-	// (tool,args) reach the kernel" is exactly the cache-scoping witness.
+	// binding per tool. Adjudication runs on every call, cache-served or not, so the
+	// ledger alone cannot tell a dispatch from a vDSO hit: served marks the calls the
+	// vDSO answered, and "adjudicated but not served" is the cache-scoping witness.
 	ledger []recordedCall
+	calls  []*abi.ToolCall
+	served map[*abi.ToolCall]bool
 }
 
 // recordedCall is one adjudicated tool call as the kernel saw it: the route bound
@@ -65,7 +66,22 @@ type recordedCall struct {
 	Principal string
 }
 
-func newEngineRecorder() *engineRecorder { return &engineRecorder{seen: map[string]string{}} }
+func newEngineRecorder() *engineRecorder {
+	return &engineRecorder{seen: map[string]string{}, served: map[*abi.ToolCall]bool{}}
+}
+
+func (*engineRecorder) Subscriptions() []abi.EventKind { return []abi.EventKind{abi.EvVDSOHit} }
+
+// Emit marks a call the vDSO served. The kernel hands the fast path the same *ToolCall
+// it adjudicated, so pointer identity pairs the hit with its ledger entry.
+func (r *engineRecorder) Emit(ev abi.Event) {
+	if ev.Kind != abi.EvVDSOHit || ev.Call == nil {
+		return
+	}
+	r.mu.Lock()
+	r.served[ev.Call] = true
+	r.mu.Unlock()
+}
 
 func (*engineRecorder) Caps() []abi.Capability { return nil }
 
@@ -75,33 +91,26 @@ func (r *engineRecorder) Adjudicate(_ context.Context, c *abi.ToolCall) abi.Verd
 		r.seen[c.Tool] = c.Engine
 	}
 	r.ledger = append(r.ledger, recordedCall{Tool: c.Tool, Engine: c.Engine, Principal: c.Meta[vdso.MetaPrincipal]})
+	r.calls = append(r.calls, c)
 	r.mu.Unlock()
 	return abi.Verdict{Kind: abi.VerdictDefer, By: "engine-recorder"}
 }
 
-// count reports how many times a tool actually reached the adjudicator chain. A vDSO
-// tier-2 hit is served without a syscall, so a flat count across two callers means the
-// second was served from the first's fill.
+// count reports how many times a tool was DISPATCHED: adjudicated and not then served by
+// the vDSO. A flat count across two callers means the second was served from the first's
+// fill.
 func (r *engineRecorder) count(tool string) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	n := 0
-	for _, rc := range r.ledger {
-		if rc.Tool == tool {
-			n++
-		}
-	}
-	return n
+	return len(r.principalsOf(tool))
 }
 
-// principalsOf returns, in order, the isolation principal carried by each adjudicated
+// principalsOf returns, in order, the isolation principal carried by each dispatched
 // call for one tool — the direct read of what the loop lowered onto the call.
 func (r *engineRecorder) principalsOf(tool string) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []string
-	for _, rc := range r.ledger {
-		if rc.Tool == tool {
+	for i, rc := range r.ledger {
+		if rc.Tool == tool && !r.served[r.calls[i]] {
 			out = append(out, rc.Principal)
 		}
 	}
@@ -153,6 +162,7 @@ func nativeParityServer(t *testing.T, m *modelroute.Manifest, roster *modelroute
 	}
 	rec := newEngineRecorder()
 	abi.RegisterAdjudicator(0, rec)
+	abi.RegisterEmitter(rec)
 
 	srv, err := New(Config{
 		EngineID: "localtools", Model: "test-model", VDSO: true,
@@ -455,7 +465,7 @@ func TestNativeLoopScopesVdsoPerPrincipal(t *testing.T) {
 	if afterB == afterA {
 		t.Fatalf("CROSS-TENANT vDSO LEAK (#5707): principal %q read %q with the same args as %q and "+
 			"the call never reached the kernel — it was served from a tier-2 entry filled under a "+
-			"DIFFERENT principal (%d adjudications before %q's turn, %d after). The owned loop must "+
+			"DIFFERENT principal (%d dispatches before %q's turn, %d after). The owned loop must "+
 			"lower its principal onto ToolCall.Meta[%q] exactly as the proxy path's buildCall does, "+
 			"so one tenant can neither be served from nor fill another's entry. Ledger: %v",
 			tenantB, scopedReadTool, tenantA, afterA, tenantB, afterB, vdso.MetaPrincipal, rec.records())

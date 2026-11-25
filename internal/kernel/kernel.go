@@ -361,6 +361,13 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 	t0 := time.Now()
 	v := k.decide(ctx, c)
 	adjNs := time.Since(t0).Nanoseconds()
+	// An admitted call the vDSO serves emits EvVDSOHit as its ONE decision event, so
+	// subscribers that count a decision per submit never see the call twice.
+	if v.Kind == abi.VerdictAllow || v.Kind == abi.VerdictDefer {
+		if vdsoV, ok := k.tryFastPath(ctx, seq, c, adjNs); ok {
+			return h, vdsoV
+		}
+	}
 	emit(abi.Event{Kind: abi.EvDecide, Call: c, Verdict: &v, Fields: costFields(adjNs, transformTokenDelta(v, c.Args))})
 	switch v.Kind {
 	case abi.VerdictRequireWitness:
@@ -370,7 +377,7 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 		// abstains, so this preserves v0.1's deny-on-require-witness behavior.
 		v = k.resolveWitness(ctx, c, v)
 		if v.Kind == abi.VerdictAllow {
-			if vdsoV, ok := k.tryFastPath(ctx, seq, c); ok {
+			if vdsoV, ok := k.tryFastPath(ctx, seq, c, adjNs); ok {
 				return h, vdsoV
 			}
 			k.store(seq, &pendingCall{call: c, verdict: v})
@@ -395,11 +402,9 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 		return h, v
 	case abi.VerdictAllow, abi.VerdictDefer:
 		// The only dispatching outcomes: an affirmative allow (or a defer that the
-		// fold left unrefused). Consult the vDSO fast path only after adjudication
-		// admits the call so policy reloads and per-kernel chains stay authoritative.
-		if vdsoV, ok := k.tryFastPath(ctx, seq, c); ok {
-			return h, vdsoV
-		}
+		// fold left unrefused). The vDSO fast path already missed above; it is only
+		// ever consulted after adjudication admits the call, so policy reloads and
+		// per-kernel chains stay authoritative.
 		k.store(seq, &pendingCall{call: c, verdict: v})
 		return h, v
 	default:
@@ -417,8 +422,9 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 }
 
 // tryFastPath consults registered vDSO FastPaths for an already-admitted call.
-// Skipped entirely when --vdso=off is set.
-func (k *Kernel) tryFastPath(ctx context.Context, seq uint64, c *abi.ToolCall) (abi.Verdict, bool) {
+// Skipped entirely when --vdso=off is set. adjNs is the adjudication tax the call
+// paid before admission; it rides the hit event because no EvDecide is emitted.
+func (k *Kernel) tryFastPath(ctx context.Context, seq uint64, c *abi.ToolCall, adjNs int64) (abi.Verdict, bool) {
 	if k.vdsoOff {
 		return abi.Verdict{}, false
 	}
@@ -429,7 +435,7 @@ func (k *Kernel) tryFastPath(ctx context.Context, seq uint64, c *abi.ToolCall) (
 			k.store(seq, &pendingCall{call: c, verdict: v, ready: r})
 			// A vDSO hit SAVED the engine round-trip: the token-delta is negative,
 			// the local result's tokens the kernel did not have to generate (#1149).
-			emit(abi.Event{Kind: abi.EvVDSOHit, Call: c, Verdict: &v, Result: r, Fields: costFields(0, -refLen(r.Payload))})
+			emit(abi.Event{Kind: abi.EvVDSOHit, Call: c, Verdict: &v, Result: r, Fields: costFields(adjNs, -refLen(r.Payload))})
 			return v, true
 		}
 	}
