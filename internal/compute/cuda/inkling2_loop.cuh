@@ -121,13 +121,22 @@ __global__ void k_ink2_ctrl_pair(const float *cur, const float *msg, float *pair
 // One pass gathers every sum of squares and raw query dot (float per thread, float64
 // across warps); the score is the normalized dot (scale * raw dot).
 #define INK2_MIX_THREADS 1024
+// Declared once by the kernel: each NS instantiation of the body declaring its own
+// arrays would allocate them all side by side, past the 48 KB static shared limit.
+struct Ink2MixPlainShared {
+  float part[INK2_MIX_THREADS / 32][INK2_MAX_STATES * (1 + INK2_MAX_QUERIES)];
+  double tot[INK2_MAX_STATES * (1 + INK2_MAX_QUERIES)];
+  float scale[INK2_MAX_STATES];
+  float wts[INK2_MAX_QUERIES][INK2_MAX_STATES];
+};
+
 template <int NS, int NQ>
-__device__ void ink2_mix_body(const Ink2States &st, const float *queries, float *out, int n) {
+__device__ void ink2_mix_body(Ink2MixPlainShared &sm, const Ink2States &st, const float *queries, float *out, int n) {
   constexpr int NV = NS * (1 + NQ);
-  __shared__ float part[INK2_MIX_THREADS / 32][INK2_MAX_STATES * (1 + INK2_MAX_QUERIES)];
-  __shared__ double tot[INK2_MAX_STATES * (1 + INK2_MAX_QUERIES)];
-  __shared__ float scale[INK2_MAX_STATES];
-  __shared__ float wts[INK2_MAX_QUERIES][INK2_MAX_STATES];
+  auto &part = sm.part;
+  auto &tot = sm.tot;
+  auto &scale = sm.scale;
+  auto &wts = sm.wts;
   float acc[NV];
 #pragma unroll
   for (int v = 0; v < NV; ++v) acc[v] = 0.f;
@@ -191,7 +200,8 @@ __device__ void ink2_mix_body(const Ink2States &st, const float *queries, float 
 
 template <int NQ>
 __global__ void __launch_bounds__(INK2_MIX_THREADS) k_ink2_mix(Ink2States st, int ns, const float *queries, float *out, int n) {
-#define INK2_MIX_CALL(NS) ink2_mix_body<NS, NQ>(st, queries, out, n)
+  __shared__ Ink2MixPlainShared sm;
+#define INK2_MIX_CALL(NS) ink2_mix_body<NS, NQ>(sm, st, queries, out, n)
   INK2_NS_DISPATCH(ns, INK2_MIX_CALL)
 #undef INK2_MIX_CALL
 }

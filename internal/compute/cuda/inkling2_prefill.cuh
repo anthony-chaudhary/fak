@@ -8,13 +8,13 @@
 
 // Depth-mix of one token per block; out is query-major [nq][T][n].
 template <int NS, int NQ>
-__device__ void ink2p_mix_body(const Ink2States &st, size_t toff, const float *queries, float *out, size_t qstride,
-                               int n) {
+__device__ void ink2p_mix_body(Ink2MixPlainShared &sm, const Ink2States &st, size_t toff, const float *queries,
+                               float *out, size_t qstride, int n) {
   constexpr int NV = NS * (1 + NQ);
-  __shared__ float part[INK2_MIX_THREADS / 32][INK2_MAX_STATES * (1 + INK2_MAX_QUERIES)];
-  __shared__ double tot[INK2_MAX_STATES * (1 + INK2_MAX_QUERIES)];
-  __shared__ float scale[INK2_MAX_STATES];
-  __shared__ float wts[INK2_MAX_QUERIES][INK2_MAX_STATES];
+  auto &part = sm.part;
+  auto &tot = sm.tot;
+  auto &scale = sm.scale;
+  auto &wts = sm.wts;
   float acc[NV];
 #pragma unroll
   for (int v = 0; v < NV; ++v) acc[v] = 0.f;
@@ -80,7 +80,8 @@ template <int NQ>
 __global__ void __launch_bounds__(INK2_MIX_THREADS) k_ink2p_mix(Ink2States st, int ns, const float *queries, float *out,
                                                                int n, int T) {
   const size_t toff = (size_t)blockIdx.x * n, qs = (size_t)T * n;
-#define INK2P_MIX_CALL(NS) ink2p_mix_body<NS, NQ>(st, toff, queries, out, qs, n)
+  __shared__ Ink2MixPlainShared sm;
+#define INK2P_MIX_CALL(NS) ink2p_mix_body<NS, NQ>(sm, st, toff, queries, out, qs, n)
   INK2_NS_DISPATCH(ns, INK2P_MIX_CALL)
 #undef INK2P_MIX_CALL
 }
