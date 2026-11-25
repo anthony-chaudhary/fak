@@ -45,9 +45,12 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/build"
+	"go/doc"
 	"go/format"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -125,9 +128,25 @@ func mergeTags(a, b []string) []string {
 		if len(platform) == 1 && platform[0] == tag {
 			continue
 		}
+		if toolchainOwnedTag(tag) {
+			continue
+		}
 		features = append(features, tag)
 	}
 	return features
+}
+
+var releaseTagPattern = regexp.MustCompile(`^go1\.\d+$`)
+
+// toolchainOwnedTag reports tags the go command derives itself; forcing one with
+// -tags redeclares stdlib files (unix on Windows) or claims a toolchain the host
+// does not run, and a negated token is never a tag to set.
+func toolchainOwnedTag(tag string) bool {
+	switch tag {
+	case "unix", "cgo", "gc", "gccgo", "ignore":
+		return true
+	}
+	return strings.HasPrefix(tag, "!") || releaseTagPattern.MatchString(tag)
 }
 
 // ResolveSymptom adjudicates a `symptom:<ref>` claim: does the fix at <ref> carry a witness that
@@ -301,12 +320,6 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	if len(pkgs) > 0 && len(selections) == 0 {
 		return abi.WitnessAbstain, selectionDetail
 	}
-	predicted := fixOnlyTestReferences(ctx, r.run, r.dir, commit, parent, tests)
-	if len(pyTests) == 0 {
-		if detail, doomed := staticParentUnbuildable(ctx, r.run, r.dir, commit, selections, predicted); doomed {
-			return abi.WitnessAbstain, detail
-		}
-	}
 
 	// The build constraints the changed test files declare (#13243). A device-tagged test
 	// (`//go:build vulkan`, `metal`, `cuda`, …) is excluded from a bare `go test`, so without
@@ -314,6 +327,20 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	// An explicit caller hint (WithSymptomTags) is UNIONED with the derived truth — the hint
 	// can add a feature tag the derivation missed; GOOS/GOARCH remain target constraints.
 	tags := mergeTags(resolveGoBuildTags(ctx, r.run, r.dir, commit, tests), r.symptomTags)
+
+	if len(selections) > 0 {
+		var hostExcluded int
+		selections, hostExcluded = dropHostExcludedSelections(ctx, r.run, r.dir, commit, tests, tags, selections)
+		if len(selections) == 0 {
+			return abi.WitnessAbstain, fmt.Sprintf("symptom selector abstained: every selected changed test is excluded on %s/%s (%d host-excluded changed test file(s))", runtime.GOOS, runtime.GOARCH, hostExcluded)
+		}
+	}
+	predicted := fixOnlyTestReferences(ctx, r.run, r.dir, commit, parent, tests)
+	if len(pyTests) == 0 {
+		if detail, doomed := staticParentUnbuildable(ctx, r.run, r.dir, commit, selections, predicted); doomed {
+			return abi.WitnessAbstain, detail
+		}
+	}
 
 	// Materialize the candidate first, preserving the established verdict order:
 	// a bad candidate is reported before any parent preparation problem.
@@ -775,10 +802,24 @@ func topLevelGoTests(source string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	// `go test` compiles an Example without an output comment but never runs it.
+	runnableExamples := map[string]bool{}
+	for _, ex := range doc.Examples(file) {
+		if ex.Output != "" || ex.EmptyOutput {
+			runnableExamples["Example"+ex.Name] = true
+		}
+	}
 	out := map[string]string{}
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Recv != nil || !isGoTestEntryName(fn.Name.Name) {
+			continue
+		}
+		if strings.HasPrefix(fn.Name.Name, "Example") {
+			if !runnableExamples[fn.Name.Name] {
+				continue
+			}
+		} else if !isRunnableGoTestFunc(fn) {
 			continue
 		}
 		var rendered bytes.Buffer
@@ -788,6 +829,115 @@ func topLevelGoTests(source string) (map[string]string, error) {
 		out[fn.Name.Name] = rendered.String()
 	}
 	return out, nil
+}
+
+// isRunnableGoTestFunc reports whether `go test` emits a run event for a Test*
+// declaration: TestMain and any non-func(*testing.T) shape never run as a test.
+func isRunnableGoTestFunc(fn *ast.FuncDecl) bool {
+	if fn.Name.Name == "TestMain" || fn.Type.TypeParams != nil || fn.Type.Results.NumFields() != 0 {
+		return false
+	}
+	params := fn.Type.Params
+	if params == nil || len(params.List) != 1 || len(params.List[0].Names) > 1 {
+		return false
+	}
+	star, ok := params.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	switch x := star.X.(type) {
+	case *ast.SelectorExpr:
+		return x.Sel.Name == "T"
+	case *ast.Ident:
+		// A dot-imported testing package spells the parameter as *T.
+		return x.Name == "T"
+	}
+	return false
+}
+
+// dropHostExcludedSelections removes selected names declared only in changed test
+// files whose build constraints exclude them on this host: `go test -run` exits 0
+// without a run event for them, which would read as a selector that matched nothing.
+// A file whose constraints cannot be evaluated is kept.
+func dropHostExcludedSelections(ctx context.Context, git Runner, repoDir, commit string, tests, tags []string, selections []symptomSelection) ([]symptomSelection, int) {
+	if git == nil {
+		git = gitRunner
+	}
+	included := map[string]map[string]bool{}
+	excluded := map[string]map[string]bool{}
+	excludedFiles := 0
+	for _, rel := range tests {
+		rel = strings.ReplaceAll(strings.TrimSpace(rel), "\\", "/")
+		if !strings.HasSuffix(rel, "_test.go") {
+			continue
+		}
+		source, code, err := git(ctx, repoDir, "show", commit+":"+rel)
+		if err != nil || code != 0 {
+			continue
+		}
+		funcs, err := topLevelGoTests(source)
+		if err != nil {
+			continue
+		}
+		into := included
+		if !hostMatchesTestFile(rel, source, tags) {
+			into = excluded
+			excludedFiles++
+		}
+		pkg := goTestPackage(rel)
+		if into[pkg] == nil {
+			into[pkg] = map[string]bool{}
+		}
+		for name := range funcs {
+			into[pkg][name] = true
+		}
+	}
+	if excludedFiles == 0 {
+		return selections, 0
+	}
+	kept := make([]symptomSelection, 0, len(selections))
+	for _, selection := range selections {
+		var names []string
+		for _, name := range selection.Tests {
+			if excluded[selection.Package][name] && !included[selection.Package][name] {
+				continue
+			}
+			names = append(names, name)
+		}
+		if len(names) > 0 {
+			kept = append(kept, symptomSelection{Package: selection.Package, Tests: names})
+		}
+	}
+	return kept, excludedFiles
+}
+
+// hostMatchesTestFile evaluates the filename suffix and //go:build line of a
+// candidate blob against the host GOOS/GOARCH plus the feature tags the run will
+// set. Dropping a runnable test weakens the proof, so a file is excluded only when
+// no cgo setting and no toolchain release could include it: the go command's
+// effective cgo and release may differ from this binary's build.Default.
+func hostMatchesTestFile(rel, source string, tags []string) bool {
+	everyRelease := make([]string, 0, 99)
+	for minor := 1; minor <= 99; minor++ {
+		everyRelease = append(everyRelease, fmt.Sprintf("go1.%d", minor))
+	}
+	for _, cgo := range []bool{true, false} {
+		for _, release := range [][]string{build.Default.ReleaseTags, everyRelease} {
+			bctx := build.Default
+			bctx.CgoEnabled = cgo
+			bctx.ReleaseTags = release
+			bctx.BuildTags = append([]string(nil), tags...)
+			bctx.JoinPath = path.Join
+			bctx.OpenFile = func(string) (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader(source)), nil
+			}
+			match, err := bctx.MatchFile(path.Dir(rel), path.Base(rel))
+			if err != nil || match {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isGoTestEntryName(name string) bool {
