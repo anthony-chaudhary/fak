@@ -111,3 +111,60 @@ func inkling2MiB(free, total int64) string {
 	}
 	return fmt.Sprintf("%.1f of %.1f MiB free", float64(free)/(1<<20), float64(total)/(1<<20))
 }
+
+// A cohort prefilled as one ragged token stream gives every row the greedy tokens the
+// single-sequence resident session gives its prompt alone with the batched prefill.
+// The lockstep prompt path runs the prompt through the decode kernels, whose rounding
+// can flip a near-tied greedy token, so its divergence is logged, not asserted.
+func TestInkling2CUDACohortPrefillMatchesScalar(t *testing.T) {
+	m, be := openInkling2CUDAForTest(t, "")
+	defer m.Close()
+	t.Setenv("FAK_INKLING2_BATCHED_PREFILL", "1")
+	var prompts [][]int
+	for _, c := range inkling2OracleCases {
+		if len(c.prompt) < 256 {
+			prompts = append(prompts, c.prompt)
+		}
+	}
+	// eight rows: sixteen rows of fp32 KV at this context do not fit beside the scalar
+	// session on a 16 GB card
+	for len(prompts) < 8 {
+		prompts = append(prompts, inkling2PrefillPrompt(40+7*len(prompts)))
+	}
+	prompts = prompts[:8]
+	const n = 16
+	ctx := 0
+	for _, pr := range prompts {
+		ctx = max(ctx, len(pr)+n)
+	}
+	ctx = (ctx + inkling2BatchCtxAlign - 1) / inkling2BatchCtxAlign * inkling2BatchCtxAlign
+	cohort := func(prefill string) [][]int {
+		t.Setenv("FAK_INKLING2_COHORT_PREFILL", prefill)
+		got, st, err := inkling2BatchGreedy(m, be, prompts, n, ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("cohort prefill=%s C=%d prompt %s; %d decode steps %s = %.2f aggregate tok/s", prefill, st.Sequences, st.Prompt,
+			st.DecodeSteps, st.Decode, st.AggregateTokensPerSecond())
+		return got
+	}
+	pre, lock := cohort("1"), cohort("0")
+	for i, prompt := range prompts {
+		want, _, err := inkling2ResidentGreedy(m, be, prompt, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for j := range want {
+			if pre[i][j] != want[j] {
+				t.Errorf("row %d (%d prompt tokens): token %d prefilled %d, scalar %d", i, len(prompt), j, pre[i][j], want[j])
+				break
+			}
+		}
+		for j := range want {
+			if lock[i][j] != want[j] {
+				t.Logf("row %d: lockstep diverges from scalar at token %d (%d vs %d)", i, j, lock[i][j], want[j])
+				break
+			}
+		}
+	}
+}

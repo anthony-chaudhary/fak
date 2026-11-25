@@ -46,6 +46,10 @@ type inkling2Batch struct {
 
 	graph, graphReady, warm bool
 
+	// prefillT is the token width of a cohort prefill chunk; 0 sizes the state for
+	// lockstep prompts only
+	prefillT int
+
 	// capC and capCtx are the shape the arenas were sized for; owned are the arenas
 	owned        []compute.Tensor
 	capC, capCtx int
@@ -127,13 +131,19 @@ func newInkling2BatchState(s *inkling2Resident, C, ctx int) (*inkling2Batch, err
 	if b.mem != nil && inkling2BatchQ8RowTile(os.LookupEnv) {
 		b.p.rows = b.mem
 	}
-	keep, scr := s.prefillArenas(C)
+	if inkling2CohortPrefill(os.LookupEnv) && !kvHalf {
+		// the prefill kernels append fp32 keys and values
+		b.prefillT = min(inkling2PrefillChunk, C*ctx)
+	}
+	// the prefill chunks and the decode steps run one after the other on one arena pair
+	rowsT := max(C, b.prefillT)
+	keep, scr := s.prefillArenas(rowsT)
 	scr += C*s.output.rows + 64
 	// a narrower cohort begun later may take the few-row path, so size for the widest one that can
 	if few := min(C, inkling2BatchFewRowsMost(os.LookupEnv)); few > 0 && inkling2BatchFewRows(be, few, os.LookupEnv) != nil {
 		scr += inkling2BatchFewRowsScratch(hp, few)
 	}
-	caps := inkling2BatchCaps(hp, s.caps, ctx)
+	caps := inkling2BatchCaps(hp, s.caps, ctx, b.prefillT)
 	b.need = inkling2BatchBytes(hp, caps, C, keep, scr, kvHalf)
 	if os.Getenv("FAK_INKLING2_BATCH_ADMIT") != "0" {
 		// idle pool blocks count as used to the driver; return them before probing
@@ -146,7 +156,7 @@ func newInkling2BatchState(s *inkling2Resident, C, ctx int) (*inkling2Batch, err
 	b.p.keepFloats, b.p.scrFloats = keep, scr
 	b.p.keep, b.p.scr = b.alloc(keep), b.alloc(scr)
 	// each argmax takes a 4-int slot: the index, then its 8-byte reduction key
-	b.in, b.meta, b.argIdx = b.alloc(C*hp.Hidden), b.alloc(C), b.alloc(4*C)
+	b.in, b.meta, b.argIdx = b.alloc(rowsT*hp.Hidden), b.alloc(C), b.alloc(4*C)
 
 	slots := len(caps)
 	kvDim := hp.KVHeads * hp.HeadDim
@@ -213,7 +223,7 @@ func (b *inkling2Batch) begin(C, ctx int) error {
 	if vd := inkling2BatchFewRows(s.be, C, os.LookupEnv); vd != nil {
 		b.p.vd, b.p.fewRows = vd, true
 	}
-	b.caps = inkling2BatchCaps(hp, s.caps, ctx)
+	b.caps = inkling2BatchCaps(hp, s.caps, ctx, b.prefillT)
 	maxCap := 0
 	for _, c := range b.caps {
 		maxCap = max(maxCap, c)
@@ -431,14 +441,19 @@ func inkling2DeviceFree(be any) (total, free int64, known bool) {
 }
 
 // inkling2BatchCaps is the cache capacity of every slot: ctx for a global slot, the
-// resident's ring size for a local one.
-func inkling2BatchCaps(hp model.Inkling2LoopHParams, local []int, ctx int) []int {
+// resident's ring size for a local one, widened to window+chunk so a prefill chunk of
+// chunk tokens never evicts a key an earlier query of the same chunk attends to.
+func inkling2BatchCaps(hp model.Inkling2LoopHParams, local []int, ctx, chunk int) []int {
 	caps := make([]int, len(local))
 	for slot := range caps {
 		caps[slot] = ctx
 		if hp.LocalLayer[inkling2SlotLayer(hp, slot)] {
-			// a lockstep batch never passes position ctx-1, so a ring past ctx is never addressed
-			caps[slot] = min(local[slot], ctx)
+			ring := local[slot]
+			if chunk > 0 {
+				ring = max(ring, hp.SlidingWindow+chunk)
+			}
+			// a batch never passes position ctx-1, so a ring past ctx is never addressed
+			caps[slot] = min(ring, ctx)
 		}
 	}
 	return caps
@@ -782,9 +797,11 @@ func (st Inkling2LoopBatchStats) AggregateTokensPerSecond() float64 {
 	return float64(st.DecodeTokens) / st.Decode.Seconds()
 }
 
-// inkling2BatchGreedy decodes n greedy tokens after each prompt with every sequence
-// advancing in lockstep, one step per token: a sequence still inside its prompt
-// feeds its next prompt token, and the others feed their last generated token.
+// inkling2BatchGreedy decodes n greedy tokens after each prompt. With cohort prefill
+// every prompt is prefilled first and every step feeds generated tokens; otherwise
+// every sequence advances in lockstep from position 0, one step per token: a sequence
+// still inside its prompt feeds its next prompt token, and the others feed their last
+// generated token.
 func inkling2BatchGreedy(m *Inkling2LoopModel, be compute.Backend, prompts [][]int, n, ctx int) ([][]int, Inkling2LoopBatchStats, error) {
 	st := Inkling2LoopBatchStats{Sequences: len(prompts)}
 	longest := 0
@@ -808,10 +825,24 @@ func inkling2BatchGreedy(m *Inkling2LoopModel, be compute.Backend, prompts [][]i
 	outs := make([][]int, len(prompts))
 	tokens := make([]int, len(prompts))
 	start := time.Now()
-	for t := 0; ; t++ {
+	// skip is the prompt positions already fed before the first step
+	skip := 0
+	if b.prefillT > 0 {
+		first, err := b.prefill(prompts)
+		if err != nil {
+			return nil, st, err
+		}
+		for i := range outs {
+			outs[i] = append(outs[i], first[i])
+		}
+		skip = longest
+		st.Prompt = time.Since(start)
+		start = time.Now()
+	}
+	for t := skip; ; t++ {
 		done := true
 		for i, pr := range prompts {
-			if t < len(pr) {
+			if t < len(pr) && skip == 0 {
 				tokens[i] = pr[t]
 			} else {
 				tokens[i] = outs[i][len(outs[i])-1]
@@ -823,7 +854,7 @@ func inkling2BatchGreedy(m *Inkling2LoopModel, be compute.Backend, prompts [][]i
 		if done {
 			break
 		}
-		if t == longest {
+		if t == longest && skip == 0 {
 			st.Prompt = time.Since(start)
 			start = time.Now()
 		}
@@ -835,7 +866,7 @@ func inkling2BatchGreedy(m *Inkling2LoopModel, be compute.Backend, prompts [][]i
 			st.DecodeSteps++
 		}
 		for i, pr := range prompts {
-			if t >= len(pr)-1 && len(outs[i]) < n {
+			if (skip > 0 || t >= len(pr)-1) && len(outs[i]) < n {
 				outs[i] = append(outs[i], next[i])
 				if t >= longest {
 					st.DecodeTokens++
@@ -845,7 +876,7 @@ func inkling2BatchGreedy(m *Inkling2LoopModel, be compute.Backend, prompts [][]i
 	}
 	if st.DecodeSteps > 0 {
 		st.Decode = time.Since(start)
-	} else {
+	} else if skip == 0 {
 		st.Prompt = time.Since(start)
 	}
 	return outs, st, nil

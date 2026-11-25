@@ -21,6 +21,8 @@ type fakeInk2Cohort struct {
 	allocs, frees int
 	live          int
 	failArgmax    bool
+	// heads counts single-row output mixes, which only a cohort prefill's head runs
+	heads int
 }
 
 func newFakeInk2Cohort() *fakeInk2Cohort {
@@ -78,6 +80,12 @@ func (d *fakeInk2Cohort) Ink2PMix(states []compute.Ink2Ref, _ compute.Ink2Ref, n
 	for q := 0; q < nq; q++ {
 		copy(d.rows(out)[q*T*n:(q+1)*T*n], d.rows(states[len(states)-1])[:T*n])
 	}
+	return nil
+}
+
+func (d *fakeInk2Cohort) Ink2Mix(states []compute.Ink2Ref, _ compute.Ink2Ref, _ int, _ []compute.Ink2Ref, _ float32, out compute.Ink2Ref, n int) error {
+	d.heads++
+	copy(d.rows(out)[:n], d.rows(states[len(states)-1])[:n])
 	return nil
 }
 

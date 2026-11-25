@@ -66,7 +66,7 @@ func TestInkling2BatchCaps(t *testing.T) {
 	for i := range local {
 		local[i] = 160
 	}
-	got := inkling2BatchCaps(hp, local, 512)
+	got := inkling2BatchCaps(hp, local, 512, 0)
 	// slots 4, 5 revisit core layers 1, 2
 	want := []int{160, 512, 160, 512, 512, 160}
 	for i := range want {
@@ -75,7 +75,7 @@ func TestInkling2BatchCaps(t *testing.T) {
 		}
 	}
 	// a ring longer than ctx is cut to ctx: positions past ctx-1 never occur
-	for i, c := range inkling2BatchCaps(hp, local, 100) {
+	for i, c := range inkling2BatchCaps(hp, local, 100, 0) {
 		if c != 100 {
 			t.Fatalf("slot %d cap %d at ctx 100, want 100", i, c)
 		}
@@ -280,9 +280,9 @@ func TestInkling2BatchFewRowsSelection(t *testing.T) {
 	}
 }
 
-// With fewRows set the batch's dense matmuls take the verify chunk's few-row kernels,
-// quantizing a shared activation once per visit, without setting verify; unset, the
-// Q8_0 row-tile and prefill GEMMs stay as they were.
+// With fewRows set the batch's dense matmuls, dense F32 included, take the verify
+// chunk's few-row kernels, quantizing a shared activation once per visit, without
+// setting verify; unset, the Q8_0 row-tile and prefill GEMMs stay as they were.
 func TestInkling2BatchFewRowsMatMul(t *testing.T) {
 	f := &fakeInk2FewRows{}
 	p := &ink2Prefill{s: &inkling2Resident{}, pd: f, vd: f, rows: f, T: 4, scrFloats: 1 << 20, fewRows: true}
@@ -297,7 +297,7 @@ func TestInkling2BatchFewRowsMatMul(t *testing.T) {
 	p.scrOff = 0
 	clear(p.q8)
 	p.mm(q8, x)
-	want := []string{"q8rows+quant", "q8rows", "krows", "pmatmul", "q8rows+quant"}
+	want := []string{"q8rows+quant", "q8rows", "krows", "krows", "q8rows+quant"}
 	if p.verify || len(f.calls) != len(want) {
 		t.Fatalf("calls %v, want %v with verify unset", f.calls, want)
 	}

@@ -47,6 +47,10 @@ type ink2Prefill struct {
 	fewRows bool
 	// q8 maps a scratch activation offset to its Q8_0 codes for this visit
 	q8 map[int]ink2Ref
+	// in holds the chunk's embedding rows; unset reads the session's prefillIn
+	in ink2Ref
+	// cohort, when set, splits the chunk into the prompt segments of cohort sequences
+	cohort *ink2PrefillRows
 }
 
 func (p *ink2Prefill) fail(err error) { p.s.fail(err) }
@@ -393,7 +397,9 @@ func (p *ink2Prefill) conv(slot int, x, weight, dyn, resid ink2Ref, n, heads, of
 	} else {
 		out = p.tmp(p.T * n)
 	}
-	if s.err == nil && p.verify {
+	if s.err == nil && p.cohort != nil {
+		p.cohort.conv(p, slot, x, weight, dyn, resid, out, n, max(heads, 1), offset, norm)
+	} else if s.err == nil && p.verify {
 		L := kn - 1 + p.T
 		p.fail(p.vd.Ink2PConvLog(x, weight, dyn, at(s.hist[slot], offset*(kn-1)), at(s.convLog[slot], offset*L), out, resid,
 			n, max(heads, 1), kn, norm, p.T))
@@ -507,17 +513,19 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		Alpha: hp.LogScaleAlpha, Floor: hp.LogScaleFloor, Scale: float32(1 / math.Sqrt(float64(hp.HeadDim))),
 	}
 	cap := s.caps[slot]
-	if s.err == nil && p.verify {
-		p.fail(p.vd.Ink2PQKVPostDev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.verifyPos, ap, cap, p.T))
-	} else if s.err == nil {
-		p.fail(p.pd.Ink2PQKVPost(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], ap, cap, p.pos0, p.T))
-	}
 	extent, window := hp.RelExtent, 0
 	if local {
 		extent, window = hp.SlidingWindow, hp.SlidingWindow
 	}
-	attn := p.tmp(p.T * hp.Heads * hp.HeadDim)
 	if s.err == nil && p.verify {
+		p.fail(p.vd.Ink2PQKVPostDev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.verifyPos, ap, cap, p.T))
+	} else if s.err == nil && p.cohort == nil {
+		p.fail(p.pd.Ink2PQKVPost(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], ap, cap, p.pos0, p.T))
+	}
+	attn := p.tmp(p.T * hp.Heads * hp.HeadDim)
+	if s.err == nil && p.cohort != nil {
+		p.cohort.attend(p, slot, l, q, r, k, v, sinks, attn, ap, extent, window)
+	} else if s.err == nil && p.verify {
 		p.fail(p.vd.Ink2PAttendDev(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, s.verifyPos, ap, extent, window, cap, p.T))
 	} else if s.err == nil {
 		p.fail(p.pd.Ink2PAttend(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, ap, extent, window, cap, p.pos0, p.T))
@@ -673,7 +681,11 @@ func (p *ink2Prefill) forward(last bool) {
 	hp := s.hp
 	h := hp.Hidden
 	cur := p.hold(p.T * h)
-	p.rmsInto(s.prefillIn, s.tokNorm, cur, h, hp.NormEps)
+	in := p.in
+	if in.T.Buf() == nil {
+		in = s.prefillIn
+	}
+	p.rmsInto(in, s.tokNorm, cur, h, hp.NormEps)
 	// visit resets the layer scratch and, with a draft attached, keeps the visit's
 	// input when it is a draft tap
 	var taps []ink2Ref
@@ -734,6 +746,10 @@ func (p *ink2Prefill) forward(last bool) {
 	if s.draft != nil {
 		x := p.mixNorm(with(blocks, cur), s.outResQ, 1, []ink2Ref{s.outNorm})[0]
 		s.draft.commitContext(p, append(taps, x))
+	}
+	if p.cohort != nil {
+		p.cohort.head(p, blocks, cur)
+		return
 	}
 	if !last {
 		return
