@@ -105,90 +105,6 @@ func pipePressureBlob() []byte {
 	return bytes.Repeat(pattern, 4*gitPipeBufferSize/len(pattern))
 }
 
-// requestObserver exposes attempts to write the next request, even when the
-// downstream reader has not accepted it yet.
-type requestObserver struct {
-	ctx      context.Context
-	requests chan string
-}
-
-func (w requestObserver) Write(p []byte) (int, error) {
-	select {
-	case w.requests <- string(p):
-		return len(p), nil
-	case <-w.ctx.Done():
-		return 0, w.ctx.Err()
-	}
-}
-
-func TestWriteBlobRequestsWaitsForResponseAcknowledgment(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	oids := []string{strings.Repeat("a", 40), strings.Repeat("b", 40)}
-	var tree strings.Builder
-	for i, oid := range oids {
-		fmt.Fprintf(&tree, "100644 blob %s\tfile-%d%c", oid, i, byte(0))
-	}
-	requests := make(chan string)
-	entries := make(chan treeEntry)
-	responseDone := make(chan struct{})
-	result := make(chan error, 1)
-	root := t.TempDir()
-	go func() {
-		result <- writeBlobRequests(ctx, bufio.NewReader(strings.NewReader(tree.String())),
-			requestObserver{ctx, requests}, root, entries, responseDone)
-	}()
-	defer func() {
-		cancel()
-		select {
-		case <-result:
-		case <-time.After(5 * time.Second):
-			t.Error("request writer did not stop")
-		}
-	}()
-	for _, oid := range oids {
-		select {
-		case request := <-requests:
-			if request != oid+"\n" {
-				t.Fatalf("request = %q, want %q", request, oid+"\n")
-			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-		select {
-		case entry := <-entries:
-			if entry.oid != oid {
-				t.Fatalf("entry OID = %q, want %q", entry.oid, oid)
-			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-		select {
-		case request := <-requests:
-			t.Fatalf("request %q written before response acknowledgment", request)
-		case err := <-result:
-			// Put the result back for the deferred goroutine join.
-			result <- err
-			t.Fatalf("writer finished before response acknowledgment: %v", err)
-		case <-time.After(50 * time.Millisecond):
-		}
-		select {
-		case responseDone <- struct{}{}:
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-	}
-	select {
-	case err := <-result:
-		result <- err
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-}
-
 func TestMaterializeBlobRejectsTruncatedBatchResponse(t *testing.T) {
 	oid := strings.Repeat("a", 40)
 	for name, response := range map[string]string{
@@ -197,8 +113,7 @@ func TestMaterializeBlobRejectsTruncatedBatchResponse(t *testing.T) {
 		"terminator": oid + " blob 1\nx",
 	} {
 		t.Run(name, func(t *testing.T) {
-			entry := treeEntry{mode: 0o644, oid: oid, path: "file"}
-			err := writeBlobFile(bufio.NewReader(strings.NewReader(response)), t.TempDir(), entry)
+			_, err := readBatchObject(bufio.NewReader(strings.NewReader(response)), oid)
 			if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 				t.Fatalf("truncated %s error = %v, want EOF", name, err)
 			}
@@ -208,8 +123,8 @@ func TestMaterializeBlobRejectsTruncatedBatchResponse(t *testing.T) {
 
 func TestMaterializeBlobRejectsTraversal(t *testing.T) {
 	root := t.TempDir()
-	entry := treeEntry{mode: 0o644, oid: strings.Repeat("a", 40), path: "../escape"}
-	err := writeBlobFile(bufio.NewReader(strings.NewReader("")), root, entry)
+	entry := archiveEntry{gitMode: regularFileMode, oid: strings.Repeat("a", 40), path: "../escape"}
+	err := writeBlobFile(root, entry, nil)
 	if err == nil || !strings.Contains(err.Error(), "escapes extraction root") {
 		t.Fatalf("materialize traversal error = %v", err)
 	}
@@ -351,12 +266,8 @@ func TestCommittedTreeProcessTreeHelper(t *testing.T) {
 		if !scanner.Scan() {
 			os.Exit(3)
 		}
-		// The parent can consume the terminator and send its next request before
-		// this Write returns. A race between a reader and a post-write signal
-		// therefore cannot determine whether the parent acknowledged too early.
 		// Keep the large response synchronous: it must drain before this helper
-		// reads another request. The request writer's ACK contract is tested
-		// separately without relying on subprocess scheduling.
+		// reads another request, so the parent's reader is what makes progress.
 		body := pipePressureBlob()
 		_, _ = fmt.Fprintf(os.Stdout, "%s blob %d\n", scanner.Text(), len(body))
 		_, _ = os.Stdout.Write(body)
