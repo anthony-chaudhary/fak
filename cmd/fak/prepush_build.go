@@ -22,6 +22,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -50,9 +51,9 @@ import (
 //   - resolve the range this push adds (origin/<branch> → origin/main → origin/master), take
 //     its committed changed .go files via `git diff --name-only <base>...HEAD` (three-dot:
 //     the merge-base range = "commits this push adds", NEVER the dirty working tree);
-//   - materialize the committed tip in a throwaway checkout (`git archive HEAD` untarred
-//     IN-PROCESS via extractArchive), immune to peer WIP, under a hard deadline so a stalled
-//     `git archive` can never wedge the push (the #3432 fix — see prepushArchiveTimeout);
+//   - materialize the committed tip in a throwaway checkout (committedtree.WriteTar streamed
+//     IN-PROCESS into extractArchive), immune to peer WIP, under a hard deadline so a stalled
+//     snapshot can never wedge the push (the #3432 fix — see prepushArchiveTimeout);
 //   - build the import graph THERE (goListGraph in the archive dir) and select the changed
 //     packages PLUS their importer closure (affectedtests.Select) — the importer build is what
 //     surfaces the cross-package symbol break;
@@ -96,7 +97,7 @@ var (
 	prepushTreeResolveFn        = prepushGitRevParse
 	prepushWorkflowChangedFiles = gitChangedFilesBetweenTrees
 	prepushWorkflowTipPaths     = gitWorkflowPathsAtTip
-	prepushWorkflowExtractTip   = prepushArchiveTip
+	prepushWorkflowExtractTip   = prepushWorkflowArchiveTip
 	prepushWorkflowCheckTree    = workflowlint.CheckTree
 )
 
@@ -254,7 +255,7 @@ func envFlagDefault(name string, def bool) bool {
 	}
 }
 
-// prepushArchiveTimeout bounds the whole-repo `git archive` + in-process untar (extractArchive).
+// prepushArchiveTimeout bounds the whole-repo snapshot stream + in-process untar (extractArchive).
 // The gate is fail-open BY DESIGN (see the file header), but the archive step had NO deadline, so
 // a `git archive` that stalled — the witnessed #3432 wedge: it blocked writing to a full stdout
 // pipe that a dead/early-exiting external `tar` stopped draining — hung every agent's trunk push
@@ -267,7 +268,7 @@ var prepushArchiveTimeout = 2 * time.Minute
 
 // Host-wide advisory single-flight for the expensive trunk-build gate.
 //
-// The gate's whole-repo `git archive` + in-process untar + `go list` + importer-cone `go build` is
+// The gate's whole-repo snapshot + in-process untar + `go list` + importer-cone `go build` is
 // the heaviest push-seam step, and in the default FLEET_BUILD_GUARD=warn mode its verdict is
 // ADVISORY — it never blocks the push (warn = allow). When many peers push at once, running
 // that full build concurrently in every clone reproduces the SAME advisory N times while piling
@@ -1243,88 +1244,120 @@ func prepushGitVersion(out string) string {
 	return "git " + version
 }
 
-// prepushArchiveTip archives sha from repo r into a fresh temp dir (committed bytes only — `git
-// archive` never reads the working tree or index) and returns its path. A local twin of
-// ci_preflight's extractCommittedTip, kept here so the gate carries no cross-file dependency.
+// prepushArchiveTip snapshots sha from repo r into a fresh temp dir (committed objects only —
+// the snapshot never reads the working tree or index) and returns its path. It reads through
+// committedtree rather than `git archive`, so export-ignored paths (tests, docs, vendored headers)
+// are present: the build gate must compile the tree that was pushed, not an install-stripped one.
 //
-// Deadlock-proofing (#3432): the archive+extract runs under prepushArchiveTimeout, so `git
-// archive` can no longer wedge the push forever — the deadline kills it and the gate fails open.
+// Deadlock-proofing (#3432): the snapshot+extract runs under prepushArchiveTimeout, so a stalled
+// producer can no longer wedge the push forever — the deadline stops it and the gate fails open.
 // On any error the temp dir is removed so a partial extraction never leaks.
 func prepushArchiveTip(r, sha string) (string, error) {
+	return prepushArchiveTipPaths(r, sha)
+}
+
+// prepushArchiveTipPaths is prepushArchiveTip limited to the given path prefixes; with none it
+// snapshots the whole committed tree.
+func prepushArchiveTipPaths(r, sha string, paths ...string) (string, error) {
 	dir, err := os.MkdirTemp("", "fak-prepush-build-*")
 	if err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), prepushArchiveTimeout)
 	defer cancel()
-	if err := extractArchive(ctx, r, sha, dir); err != nil {
+	if err := extractArchive(ctx, r, sha, dir, paths...); err != nil {
 		os.RemoveAll(dir)
 		return "", err
 	}
 	return dir, nil
 }
 
-// extractArchive streams `git archive <sha>` from repo r and untars it into dir IN-PROCESS (Go's
-// archive/tar), under ctx. This is the load-bearing #3432 fix, and it closes the wedge in two
-// ways at once:
+// prepushWorkflowTreePath is the only subtree the workflow gate reads: workflowlint.CheckTree walks
+// it and nothing else, so the workflow snapshot carries just it.
+const prepushWorkflowTreePath = ".github/workflows"
+
+func prepushWorkflowArchiveTip(r, sha string) (string, error) {
+	return prepushArchiveTipPaths(r, sha, prepushWorkflowTreePath)
+}
+
+// prepushArchiveWriter streams the committed tree of sha in repo r to w as a tar, limited to paths
+// when any are given. It is a seam so a test can substitute a controllable producer (one that
+// streams valid data then stalls, ignores its context, or emits garbage) and witness the deadlock
+// property deterministically: extractArchive returns bounded whatever the producer does, so the
+// gate fails open and never wedges the push. The default reads through committedtree, which keeps
+// export-ignored paths in the snapshot.
+var prepushArchiveWriter = func(ctx context.Context, r, sha string, w io.Writer, paths ...string) error {
+	if len(paths) == 0 {
+		return committedtree.WriteTar(ctx, r, sha, w)
+	}
+	return committedtree.WriteTarPaths(ctx, r, sha, w, paths...)
+}
+
+// prepushProducerGrace bounds how long extractArchive waits for the producer to return once the
+// deadline has failed its read side. A producer that honours cancellation returns at once; one that
+// ignores it cannot be stopped in-process, so the wait is capped rather than unbounded.
+const prepushProducerGrace = 2 * time.Second
+
+// extractArchive snapshots sha from repo r and untars it into dir IN-PROCESS (Go's archive/tar),
+// under ctx, limited to paths when any are given. It closes the wedge in two ways at once:
 //
 //   - No external `tar`. The old pipe shelled out to `tar -x`; on this host the first `tar` on
 //     PATH is MSYS GNU tar, which cannot open a native Windows `-C` path and exits immediately.
-//     A consumer that dies early stops draining, so `git archive` blocks writing to a full 64 KiB
-//     pipe at ~0 CPU — the witnessed 14-hour wedge (a small archive that fits the buffer merely
-//     surfaces the error; a real repo tip hangs). Draining the stream in-process removes both the
-//     tar-flavor fragility AND the "nobody drains the producer" deadlock class entirely, on every
-//     OS.
-//   - Hard deadline. Even a `git archive` that stalls on its own is now bounded: ctx expiry kills
-//     it and we return a diagnostic error, so the gate fails open (COULD_NOT_RUN, push allowed)
-//     rather than hanging. Factored out so the no-wedge contract is unit-testable with a
-//     pre-expired deadline.
+//     Draining the stream in-process removes that fragility and the "nobody drains the producer"
+//     deadlock class on every OS.
+//   - Hard deadline. A producer that stalls on its own is bounded: ctx expiry cancels it, and
+//     closing the read side unblocks any write it is parked in, so we return a diagnostic error
+//     and the gate fails open (COULD_NOT_RUN, push allowed). The consumer waits on the producer
+//     only while ctx is live, so a producer that ignores cancellation cannot hold the deadline.
 //
-// The producer's stdout is always read to EOF (or it is killed) before Wait, so Wait never races a
-// live read. git-only: no `tar` binary is required to push anymore.
-// prepushArchiveCommand builds the `git archive` producer. It is a seam so a test can substitute a
-// controllable producer (one that streams valid data then stalls, or emits garbage) and thereby
-// witness the load-bearing #3432 property deterministically: a LIVE producer that stalls is killed
-// — by the deadline (the ctx.Err() branch) or by an untar error (the Process.Kill() branch) — so
-// extractArchive always returns bounded and the gate fails open, never wedging the push.
-var prepushArchiveCommand = func(ctx context.Context, r, sha string) *exec.Cmd {
-	return windowgate.CommandContext(ctx, "git", "-C", r, "archive", "--format=tar", sha)
-}
+// The producer's stream is always read to EOF (or abandoned) before the producer is waited on.
+// No `tar` binary is required to push.
+func extractArchive(ctx context.Context, r, sha, dir string, paths ...string) error {
+	pr, pw := io.Pipe()
+	// Stopping the producer is the in-process analogue of killing a subprocess: it is canceled on an
+	// untar error and, through ctx, on deadline.
+	pctx, stopProducer := context.WithCancel(ctx)
+	defer stopProducer()
+	// A producer that ignores its context still cannot outlive the deadline: failing the read side
+	// makes its next write return an error.
+	stopWatch := context.AfterFunc(ctx, func() { _ = pr.CloseWithError(ctx.Err()) })
+	defer stopWatch()
 
-func extractArchive(ctx context.Context, r, sha, dir string) error {
-	ar := prepushArchiveCommand(ctx, r, sha)
-	windowgate.ConfigureBackgroundCommand(ar)
-	stdout, err := ar.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	var stderr strings.Builder
-	ar.Stderr = &stderr
+	produced := make(chan error, 1)
+	go func() {
+		err := prepushArchiveWriter(pctx, r, sha, pw, paths...)
+		_ = pw.CloseWithError(err)
+		produced <- err
+	}()
 
-	if err := ar.Start(); err != nil {
-		return fmt.Errorf("git archive start: %w", err)
-	}
-	// Drain and extract in-process — this NEVER lets the producer block on a full pipe.
-	untarErr := untarInto(stdout, dir)
+	untarErr := untarInto(pr, dir)
 	if untarErr != nil {
-		// Extraction bailed before EOF; the producer may still be writing, so kill it rather than
-		// let ar.Wait() block on a stream nobody is reading.
-		_ = ar.Process.Kill()
+		// Extraction bailed before EOF; the producer may still be parked writing, so stop it and fail
+		// its writes rather than let it block on a stream nobody reads.
+		stopProducer()
+		_ = pr.CloseWithError(untarErr)
 	}
-	// Drain to EOF before Wait: tar.Reader.Next() stops at the logical end-of-archive marker, but
-	// `git archive` writes record padding AFTER it. Leaving that in the pipe lets git block on the
-	// write and never exit, so ar.Wait() would hang forever — the same #3432 wedge in a new guise.
-	// Reading to EOF also satisfies StdoutPipe's "all reads complete before Wait" contract.
-	_, _ = io.Copy(io.Discard, stdout)
-	waitErr := ar.Wait()
+	// Drain to EOF before waiting: tar.Reader.Next() stops at the logical end-of-archive marker, but
+	// the writer emits record padding AFTER it. A producer still blocked on that write would never
+	// finish, so it must be drained here.
+	_, _ = io.Copy(io.Discard, pr)
+	var produceErr error
+	select {
+	case produceErr = <-produced:
+	case <-ctx.Done():
+		select {
+		case produceErr = <-produced:
+		case <-time.After(prepushProducerGrace):
+		}
+	}
 
 	switch {
 	case ctx.Err() != nil:
 		return fmt.Errorf("archive timed out after %s (failing open): %w", prepushArchiveTimeout, ctx.Err())
 	case untarErr != nil:
 		return fmt.Errorf("untar archive: %w", untarErr)
-	case waitErr != nil:
-		return fmt.Errorf("git archive: %w (%s)", waitErr, strings.TrimSpace(stderr.String()))
+	case produceErr != nil:
+		return fmt.Errorf("snapshot committed tree: %w", produceErr)
 	}
 	return nil
 }

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"archive/zip"
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/disambiguation"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
@@ -743,23 +744,8 @@ func probeCommittedDisambiguation() ([]byte, error) {
 		return nil, err
 	}
 	defer os.RemoveAll(temp)
-	archivePath := filepath.Join(temp, "tip.zip")
-	ctxArchive, cancelArchive := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancelArchive()
-	archive := exec.CommandContext(ctxArchive, "git", "archive", "--format=zip", "-o", archivePath, "HEAD")
-	configureDispatchHelperCommand(archive)
-	archive.WaitDelay = 5 * time.Second
-	archive.Cancel = func() error {
-		if archive.Process != nil && archive.Process.Pid > 0 {
-			procguard.KillPID(archive.Process.Pid)
-		}
-		return nil
-	}
-	if output, err := archive.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("archive committed tip: %w: %s", err, bytes.TrimSpace(output))
-	}
 	root := filepath.Join(temp, "tip")
-	if err := extractDisambiguationArchive(archivePath, root); err != nil {
+	if err := extractDisambiguationCommittedTip(".", filepath.Join(temp, "tip.tar"), root); err != nil {
 		return nil, err
 	}
 	ctxCheck, cancelCheck := context.WithTimeout(context.Background(), 120*time.Second)
@@ -784,46 +770,78 @@ func probeCommittedDisambiguation() ([]byte, error) {
 	return artifact, nil
 }
 
-func extractDisambiguationArchive(archivePath, root string) error {
-	reader, err := zip.OpenReader(archivePath)
+// extractDisambiguationCommittedTip materializes the committed tree of repo's HEAD under root.
+// committedtree.WriteTar reads the tree through plumbing, so export-ignore rows
+// cannot strip the artifact and sources the regenerate check needs.
+func extractDisambiguationCommittedTip(repo, archivePath, root string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	file, err := os.Create(archivePath)
+	if err != nil {
+		return fmt.Errorf("create committed archive: %w", err)
+	}
+	writeErr := committedtree.WriteTar(ctx, repo, "HEAD", file)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return fmt.Errorf("archive committed tip: %w", writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("archive committed tip: %w", closeErr)
+	}
+	return extractDisambiguationTar(archivePath, root)
+}
+
+func extractDisambiguationTar(archivePath, root string) error {
+	file, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("open committed archive: %w", err)
 	}
-	defer reader.Close()
-	for _, file := range reader.File {
-		target := filepath.Join(root, filepath.FromSlash(file.Name))
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(root)+string(os.PathSeparator)) {
-			return fmt.Errorf("archive path escapes root: %s", file.Name)
+	defer file.Close()
+	reader := tar.NewReader(file)
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			return nil
 		}
-		if file.FileInfo().IsDir() {
+		if err != nil {
+			return fmt.Errorf("read committed archive: %w", err)
+		}
+		target := filepath.Join(root, filepath.FromSlash(header.Name))
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(root)+string(os.PathSeparator)) {
+			return fmt.Errorf("archive path escapes root: %s", header.Name)
+		}
+		switch header.Typeflag {
+		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return err
 			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		source, err := file.Open()
-		if err != nil {
-			return err
-		}
-		destination, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, file.Mode())
-		if err != nil {
-			source.Close()
-			return err
-		}
-		_, copyErr := io.Copy(destination, source)
-		closeErr := destination.Close()
-		source.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
+		case tar.TypeReg:
+			if err := writeDisambiguationTarFile(target, header.Mode, reader); err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			// Symlinks stay regular files holding the link text, as the zip extraction did.
+			if err := writeDisambiguationTarFile(target, header.Mode, strings.NewReader(header.Linkname)); err != nil {
+				return err
+			}
 		}
 	}
-	return nil
+}
+
+func writeDisambiguationTarFile(target string, mode int64, source io.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	destination, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(mode).Perm())
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(destination, source)
+	closeErr := destination.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 func runDisambiguationVersion(stdout, stderr io.Writer, args []string) int {

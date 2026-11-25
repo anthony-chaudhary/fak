@@ -389,7 +389,7 @@ func TestEvaluatePrePushBuildRevParseFailureFailsOpen(t *testing.T) {
 // TestEvaluatePrePushBuildArchiveStallFailsOpen pins the #3432 contract at the gate level: when
 // materializing the tip cannot complete (a timed-out / wedged `git archive`), the gate must FAIL
 // OPEN (COULD_NOT_RUN, exit 2 → push allowed), never block and never hang. The archive itself is
-// bounded by prepushArchiveTimeout (see TestExtractArchivePipeHonorsDeadline); here we assert the
+// bounded by prepushArchiveTimeout (see TestExtractArchiveHonorsDeadline); here we assert the
 // verdict the shell sees once that bound trips.
 func TestEvaluatePrePushBuildArchiveStallFailsOpen(t *testing.T) {
 	setupHappyPrepushSeams(t)
@@ -608,15 +608,12 @@ func TestPrePushBuildFixtureCatchesImporterBreak(t *testing.T) {
 	}
 }
 
-// TestExtractArchiveHonorsDeadline witnesses two #3432 properties end-to-end with a real `git
-// archive`: (1) a live context untars the committed tip in-process to disk (a nested dir proves
-// recursion); (2) an ALREADY-EXPIRED deadline makes extract RETURN promptly rather than hang — in
-// this half exec.CommandContext's Start() refuses to launch git at all, so NO producer is spawned
-// (that Start-refusal is exactly what this half asserts, not a kill). The complementary and
-// load-bearing case — the deadline killing a producer that is already RUNNING and stalled mid-stream
-// — is witnessed deterministically by TestExtractArchiveDeadlineKillsRunningProducer. Needs only git
-// now (extraction is in-process, no external tar), so it no longer depends on which tar flavor is
-// first on PATH — itself part of the #3432 fix.
+// TestExtractArchiveHonorsDeadline witnesses two #3432 properties end-to-end with a real git
+// repository: (1) a live context snapshots the committed tip in-process to disk (a nested dir proves
+// recursion); (2) an ALREADY-EXPIRED deadline makes extract RETURN promptly rather than hang. The
+// complementary case — the deadline stopping a producer that is already RUNNING and stalled
+// mid-stream — is witnessed by TestExtractArchiveDeadlineKillsRunningProducer. Needs only git (no
+// external tar), so it does not depend on which tar flavor is first on PATH.
 func TestExtractArchiveHonorsDeadline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: needs git")
@@ -645,9 +642,8 @@ func TestExtractArchiveHonorsDeadline(t *testing.T) {
 		}
 	}
 
-	// No-wedge (Start-refusal half): an already-expired deadline makes exec.CommandContext.Start()
-	// refuse to launch git, so extract RETURNS promptly without ever spawning a producer. A generous
-	// watchdog fails loudly if it ever hangs. The running-producer kill is covered separately by
+	// No-wedge: an already-expired deadline makes extract RETURN promptly. A generous watchdog fails
+	// loudly if it ever hangs. The running-producer case is covered by
 	// TestExtractArchiveDeadlineKillsRunningProducer.
 	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
 	defer cancel()
@@ -708,58 +704,60 @@ func TestUntarIntoRoundTripAndTraversal(t *testing.T) {
 	}
 }
 
-// TestHelperProcess is the controllable producer stand-in for `git archive`, injected via the
-// prepushArchiveCommand seam. Mode selects the stream shape, then it BLOCKS (never closes stdout,
-// never exits) so the consumer is left with a LIVE producer — the exact #3432 condition the shipped
-// TestExtractArchiveHonorsDeadline could not reach. It is a no-op unless run as a helper subprocess.
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	switch os.Getenv("GO_HELPER_MODE") {
-	case "garbage":
-		// A block of non-zero bytes: tar.Reader.Next() reads it as a header and fails its checksum
-		// → untarInto returns an error while THIS producer is still alive (exercises the kill branch).
-		junk := make([]byte, 4096)
-		for i := range junk {
-			junk[i] = 'A'
-		}
-		_, _ = os.Stdout.Write(junk)
-	case "valid-partial":
-		// A valid dir + file entry, then NO end-of-archive marker: untarInto consumes both and then
-		// blocks on the next header read, with this producer still alive (exercises the ctx branch).
-		tw := tar.NewWriter(os.Stdout)
-		_ = tw.WriteHeader(&tar.Header{Name: "pkg/", Typeflag: tar.TypeDir, Mode: 0o755})
-		body := []byte("package pkg\n")
-		_ = tw.WriteHeader(&tar.Header{Name: "pkg/a.go", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})
-		_, _ = tw.Write(body)
-		_ = tw.Flush()
-	}
-	_ = os.Stdout.Sync()
-	time.Sleep(10 * time.Minute) // block until the parent kills us
-	os.Exit(0)
-}
-
-// withHelperProducer swaps the git-archive seam for a helper-process producer of the given mode.
-func withHelperProducer(t *testing.T, mode string) {
+// withStubProducer swaps the archive producer for an in-process stub that writes a stream prefix and
+// then stalls, modelling the #3432 condition — a LIVE producer that never finishes — without a
+// subprocess. Modes: "garbage" writes bytes that are not a tar header; "valid-partial" writes a
+// complete dir and file with no end-of-archive marker; "ignores-ctx" is valid-partial but stalls
+// past cancellation, so only the consumer-side close can bound it.
+func withStubProducer(t *testing.T, mode string) {
 	t.Helper()
-	old := prepushArchiveCommand
-	prepushArchiveCommand = func(ctx context.Context, r, sha string) *exec.Cmd {
-		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHelperProcess$")
-		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "GO_HELPER_MODE="+mode)
-		return cmd
+	old := prepushArchiveWriter
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		prepushArchiveWriter = old
+	})
+	prepushArchiveWriter = func(ctx context.Context, r, sha string, w io.Writer, _ ...string) error {
+		switch mode {
+		case "garbage":
+			if _, err := w.Write(bytes.Repeat([]byte{'A'}, 4096)); err != nil {
+				return err
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		case "valid-partial", "ignores-ctx":
+			tw := tar.NewWriter(w)
+			if err := tw.WriteHeader(&tar.Header{Name: "pkg/", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+				return err
+			}
+			body := []byte("package pkg\n")
+			if err := tw.WriteHeader(&tar.Header{Name: "pkg/a.go", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))}); err != nil {
+				return err
+			}
+			if _, err := tw.Write(body); err != nil {
+				return err
+			}
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+			if mode == "ignores-ctx" {
+				<-release
+				return nil
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
 	}
-	t.Cleanup(func() { prepushArchiveCommand = old })
 }
 
-// TestExtractArchiveKillsProducerOnUntarError witnesses the kill-on-untar-error branch
-// (ar.Process.Kill() at prepush_build.go): a LIVE producer emits an unparseable stream, so untarInto
-// errors while the producer is still running; extractArchive must KILL it and return bounded, never
-// block in ar.Wait() on a producer that will never exit. Long deadline, so ctx.Err()==nil isolates
-// the untar-error branch. The watchdog fails loudly if the kill regresses (Wait would hang on the
-// helper's 10-minute sleep).
+// TestExtractArchiveKillsProducerOnUntarError witnesses the stop-on-untar-error branch: a LIVE
+// producer emits an unparseable stream, so untarInto errors while the producer is still running;
+// extractArchive must stop it and return bounded rather than wait on a producer parked on a write
+// nobody will read. Long deadline, so ctx.Err()==nil isolates the untar-error branch. The watchdog
+// fails loudly if the stop regresses.
 func TestExtractArchiveKillsProducerOnUntarError(t *testing.T) {
-	withHelperProducer(t, "garbage")
+	withStubProducer(t, "garbage")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	done := make(chan error, 1)
@@ -777,13 +775,92 @@ func TestExtractArchiveKillsProducerOnUntarError(t *testing.T) {
 	}
 }
 
+// TestExtractArchiveDeadlineBoundsCtxIgnoringProducer witnesses that a producer which ignores its
+// context cannot hold the deadline: the consumer closes the read side when ctx expires, so untarInto
+// unblocks and extractArchive returns a bounded timeout error.
+func TestExtractArchiveDeadlineBoundsCtxIgnoringProducer(t *testing.T) {
+	withStubProducer(t, "ignores-ctx")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- extractArchive(ctx, "x", "y", t.TempDir()) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected a deadline error from a ctx-ignoring producer, got: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("extractArchive hung past its deadline behind a ctx-ignoring producer")
+	}
+}
+
+// TestExtractArchiveKeepsExportIgnoredPaths guards why the snapshot reads through committedtree.
+// A .gitattributes export-ignore row strips a path from `git archive`, which would leave the build
+// gate compiling a tree that differs from the pushed one; the snapshot must still carry it.
+func TestExtractArchiveKeepsExportIgnoredPaths(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: needs git")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	repo := t.TempDir()
+	writeFile(t, repo, ".gitattributes", "secret.txt export-ignore\npkg/hidden/* export-ignore\n")
+	writeFile(t, repo, "keep.go", "package keep\n")
+	writeFile(t, repo, "secret.txt", "hidden\n")
+	writeFile(t, repo, "pkg/hidden/h.go", "package hidden\n")
+	gitFixture(t, repo, "init", "-q")
+	gitFixture(t, repo, "config", "user.email", "t@t")
+	gitFixture(t, repo, "config", "user.name", "t")
+	gitFixture(t, repo, "add", ".")
+	gitFixture(t, repo, "commit", "-q", "-m", "seed")
+	sha := strings.TrimSpace(mustGitOut(t, repo, "rev-parse", "HEAD"))
+
+	archived, err := exec.Command("git", "-C", repo, "archive", "--format=tar", sha).Output()
+	if err != nil {
+		t.Fatalf("git archive: %v", err)
+	}
+	for _, name := range tarEntryNames(t, archived) {
+		if name == "secret.txt" || name == "pkg/hidden/h.go" {
+			t.Fatalf("premise broken: git archive kept export-ignored %s", name)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := extractArchive(context.Background(), repo, sha, dir); err != nil {
+		t.Fatalf("extract failed: %v", err)
+	}
+	for _, rel := range []string{"keep.go", "secret.txt", "pkg/hidden/h.go"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("snapshot dropped %s: %v", rel, err)
+		}
+	}
+}
+
+// tarEntryNames lists the entry names of a tar stream.
+func tarEntryNames(t *testing.T, data []byte) []string {
+	t.Helper()
+	var names []string
+	tr := tar.NewReader(bytes.NewReader(data))
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return names
+		}
+		if err != nil {
+			t.Fatalf("read tar: %v", err)
+		}
+		names = append(names, hdr.Name)
+	}
+}
+
 // TestExtractArchiveDeadlineKillsRunningProducer witnesses the ctx.Err() timeout branch with a
-// genuinely RUNNING producer — the property TestExtractArchiveHonorsDeadline cannot reach (an
-// already-expired ctx makes Start refuse before launch). The producer streams a valid partial
-// archive then stalls; the deadline fires while untarInto is blocked on the next header;
-// CommandContext kills the producer and extractArchive returns a bounded timeout error.
+// RUNNING producer — the property TestExtractArchiveHonorsDeadline cannot reach (an already-expired
+// ctx is seen before any stream starts). The producer streams a valid partial archive then stalls;
+// the deadline fires while untarInto is blocked on the next header; the producer is canceled and
+// extractArchive returns a bounded timeout error.
 func TestExtractArchiveDeadlineKillsRunningProducer(t *testing.T) {
-	withHelperProducer(t, "valid-partial")
+	withStubProducer(t, "valid-partial")
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	done := make(chan error, 1)
@@ -1866,5 +1943,40 @@ func TestGoBuildPackagesRealCgoFinalLinkFailure(t *testing.T) {
 	detail, ok := prepushBuild(root, []string{"example.test/retention/a", "example.test/retention/broken", "example.test/retention/b"})
 	if ok || !strings.Contains(detail, "retention_missing_symbol") || !strings.Contains(detail, "link") {
 		t.Fatalf("missing final C symbol was not rejected by linker: ok=%v detail=%q", ok, detail)
+	}
+}
+
+// TestPrepushWorkflowArchiveTipSnapshotsOnlyWorkflows pins the narrowed workflow snapshot. The gate
+// lints .github/workflows and nothing else, so the snapshot carries that subtree and no other path.
+func TestPrepushWorkflowArchiveTipSnapshotsOnlyWorkflows(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: needs git")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	repo := t.TempDir()
+	writeFile(t, repo, ".github/workflows/ci.yml", "name: ci\n")
+	writeFile(t, repo, "cmd/fak/main.go", "package main\n")
+	writeFile(t, repo, "docs/readme.md", "docs\n")
+	gitFixture(t, repo, "init", "-q")
+	gitFixture(t, repo, "config", "user.email", "t@t")
+	gitFixture(t, repo, "config", "user.name", "t")
+	gitFixture(t, repo, "add", ".")
+	gitFixture(t, repo, "commit", "-q", "-m", "seed")
+	sha := strings.TrimSpace(mustGitOut(t, repo, "rev-parse", "HEAD"))
+
+	dir, err := prepushWorkflowArchiveTip(repo, sha)
+	if err != nil {
+		t.Fatalf("workflow snapshot failed: %v", err)
+	}
+	defer os.RemoveAll(dir)
+	if _, err := os.Stat(filepath.Join(dir, ".github", "workflows", "ci.yml")); err != nil {
+		t.Fatalf("workflow snapshot dropped .github/workflows/ci.yml: %v", err)
+	}
+	for _, rel := range []string{"cmd/fak/main.go", "docs/readme.md"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err == nil {
+			t.Errorf("workflow snapshot carried %s, which the gate does not read", rel)
+		}
 	}
 }
