@@ -42,6 +42,7 @@ CUDA (the RTX 5080 numbers). The CUDA backend compiles only under
 
 ```sh
 make cuda-build    # nvcc -> libfakcuda.a, then go build -tags cuda
+make cuda-build-sm120   # RTX 50-series such as the 5080; the default arch is sm_89
 ```
 
 The 119.9 tok/s number is the in-process decode bench, which runs as a
@@ -53,7 +54,7 @@ RTX 5080, are under "Reproduce" in
 
 **Title:**
 
-Show HN: fak – a guard and local runtime for coding agents, now running Inkling-2-Mini at 119.9 tok/s on a 5080
+Show HN: fak runs Inkling-2-Mini at 119.9 tok/s in-process decode on a 5080
 
 **First comment:**
 
@@ -62,28 +63,32 @@ Show HN: fak – a guard and local runtime for coding agents, now running Inklin
 > (Apache-2.0, looped MoE) natively on CUDA and Metal. On a 16 GB RTX 5080 with
 > the unsloth UD-Q3_K_XL GGUF, decode went from 6.32 to 119.9 tok/s through
 > resident weights, one replayed CUDA graph per token, and fused ops. Stock
-> llama.cpp gets 81.0 on that card and file and the realugbun fork gets 119.5,
+> llama.cpp got 81.0 on that card and file two days earlier under a different
+> harness, and the realugbun fork gets 119.5,
 > so this is parity with the realugbun llama.cpp fork, not a win. Where we lose:
 > prefill. Opt-in batched prefill reaches pp512 862.7, about a third of
-> llama.cpp, and we trail the fork at around 2K tokens of context. These are
+> llama.cpp's 2362 (measured on different boxes), and we trail the fork at
+> around 2K tokens of context. These are
 > in-process benches, not served rates. Inkling is not in v0.57.0 yet:
 > `go install github.com/anthony-chaudhary/fak/cmd/fak@main`, then
 > `fak run <path>.gguf`, gives the CPU and Apple Silicon Metal path. The CUDA
-> numbers need the `-tags cuda` build (`make cuda-build` on a CUDA host; see
+> numbers need the `-tags cuda` build (`make cuda-build`, or
+> `make cuda-build-sm120` for RTX 50-series, on a CUDA host; see
 > docs/cuda-dev.md). Each number links to a receipt.
 
 ## r/LocalLLaMA
 
 **Title:**
 
-Inkling-2-Mini on a 16 GB 5080: 119.9 tok/s decode in fak, 81.0 in stock llama.cpp, 119.5 in the realugbun fork (receipts, plus where we lose)
+Inkling-2-Mini on a 16 GB 5080: 119.9 tok/s decode in fak, 81.0 in stock llama.cpp (cross-day, different harness), 119.5 in the realugbun fork (receipts, plus where we lose)
 
 **Body:**
 
 > Same card and GGUF. M3 Pro Metal runs level with Splash (40.3 vs 37.5).
 > Opt-in speculative decode reached 151.7 tok/s on one node; it is off by
 > default because it is not bit-exact. We lose on prefill (about a third of
-> llama.cpp) and at around 2K tokens of depth. All numbers are in-process
+> llama.cpp, measured on different boxes) and at around 2K tokens of depth.
+> All numbers are in-process
 > benches. Build from main; the 5080 numbers need the `-tags cuda` build
 > (docs/cuda-dev.md), while plain `go install ...@main` covers CPU and Metal.
 > fak's actual job is guarding the tool calls of the
@@ -96,18 +101,20 @@ and [decode climb](assets/inkling2-decode-climb.svg).
 ## X thread
 
 1. fak guards your coding agent's tool calls and serves it a local model.
-   Inkling-2-Mini now runs natively: 119.9 tok/s decode on one RTX 5080, level
-   with the realugbun llama.cpp fork (119.5), above stock (81.0). Receipts linked.
-2. The climb in three days: 6.32 → 82.5 → 101.6 → 119.9. The 101.6 step was
+   Inkling-2-Mini now runs natively: 119.9 tok/s in-process decode bench (not a
+   served rate) on one RTX 5080. Receipts linked.
+2. That is level with the realugbun llama.cpp fork (119.5) and above stock
+   llama.cpp (81.0, measured on a different day with a different harness).
+3. The climb: 6.32 → 82.5 → 101.6 → 119.9. The 101.6 step was
    measured on a second box with the same card model.
    [chart: [inkling2-decode-climb.svg](assets/inkling2-decode-climb.svg)]
-3. Where we lose: prefill is about a third of llama.cpp, and we trail the fork
-   at around 2K tokens of context.
+4. Where we lose: prefill is about a third of llama.cpp (measured on different
+   boxes), and we trail the fork at around 2K tokens of context.
    [chart: [inkling2-decode-comparison.svg](assets/inkling2-decode-comparison.svg)]
-4. M3 Pro Metal: 40.3 tok/s, level with Splash.
-5. `fak claude` / `fak opencode` / `fak pi`: same agent, every tool call
-   checked. Install from main; CUDA is the separate `-tags cuda` build
-   (docs/cuda-dev.md).
+5. M3 Pro Metal: 40.3 tok/s, level with Splash.
+6. `fak claude` / `fak opencode` / `fak pi`: same agent, every tool call
+   checked. Inkling is not in v0.57.0; install from main; CUDA is the separate
+   `-tags cuda` build (docs/cuda-dev.md).
 
 ## fak versus alternatives
 
@@ -115,7 +122,7 @@ and [decode climb](assets/inkling2-decode-climb.svg).
 |---|---|---|
 | llama.cpp (stock and fork) | About 1.48x stock decode on Inkling-2-Mini (cross-day, different harness). Guard and router built in. | Ties the fork, does not beat it. Prefill is about a third of llama.cpp (862.7 vs 2362 pp512, different boxes). Trails the fork at 1946 tokens of depth (89.0 vs 113.8). |
 | Ollama, LM Studio | Fork-level decode on this model. Tool-call guard. No opaque model store. | They install in one click; fak needs a build from `main` for Inkling. No Vulkan or AMD backend. |
-| vLLM, SGLang | Runs Inkling-2-Mini on one 16 GB card. | Not a matched comparison. They are built for multi-GPU serving; fak has no measured served rate, and trails vLLM on 27B models and on H200. |
+| vLLM, SGLang | Runs Inkling-2-Mini on one 16 GB card. | Not a matched comparison. They are built for multi-GPU serving; fak has no measured served rate on this model, so there is no matched number to cite either way. |
 | LiteLLM, Portkey | Wraps the agent harness, not only the endpoint; failover headers are readable. | They lead on per-key limits and PII handling. Call it parity. |
 | Cloud-only harnesses | Local by default, binds 127.0.0.1; the router can still reach a cloud model. | Local model quality: Qwen3.8-27B leads the dev-work target match (44 vs 28–34 of 240 scored items in a 300-item set). |
 
