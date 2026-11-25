@@ -1023,4 +1023,38 @@ var admittedPostFreeze = []string{
 	"FAK_INKLING2_MTP_DIR",
 	"FAK_INKLING2_VERIFY_GROUPED",
 	"FAK_INKLING2_DSPARK_SHORTLIST",
+
+	// THIRTEENTH OCCURRENCE (release-unblock): four opt-out Inkling-2 serve/kernel toggles
+	// and one OS base-directory read shipped while the ratchet was red and unwatched again
+	// (the oldest, FAK_INKLING2_BATCH_GRAPH, 66 trunk advances at admission). As in the
+	// earlier occurrences they are admitted by name, not absorbed into baseline.go, and none
+	// can relocate until the typed config surface exists. Each is read at its literal call
+	// site, so the scan keeps corroborating it. Admission resolves the current offenses; it
+	// does not erase that liveness failure or pay the relocation debt.
+
+	// internal/ggufload/inkling2loop_batch.go — FAK_INKLING2_BATCH_GRAPH=0 runs every
+	// batched decode step eagerly instead of replaying the captured device graph, and
+	// FAK_INKLING2_BATCH_ADMIT=0 skips the free-device-memory admission check before a
+	// batch is sized. Two rollback toggles, not credentials.
+	// Relocates to: a typed Inkling-2 batched-decode config.
+	"FAK_INKLING2_BATCH_GRAPH",
+	"FAK_INKLING2_BATCH_ADMIT",
+
+	// internal/compute/inkling2_prefill_device.go — FAK_INKLING2_PREFILL_OLD lists prefill
+	// kernel families (comma separated, or "all") that keep the original kernel instead of
+	// the fast variant, for A/B attribution. A kernel-selection list, not a credential.
+	// Relocates to: a typed Inkling-2 prefill config.
+	"FAK_INKLING2_PREFILL_OLD",
+
+	// cmd/fak/serve_inkling2.go — FAK_INKLING2_PREFIX_REUSE=0|false|off disables KV prefix
+	// reuse across requests in the Inkling-2 serve loop. A cache toggle, not a credential.
+	// Relocates to: a typed Inkling-2 serve config.
+	"FAK_INKLING2_PREFIX_REUSE",
+
+	// internal/ctxmmu/restore_guard.go — XDG_STATE_HOME is the XDG base-directory root the
+	// quarantine ledger defaults under when no explicit state dir is set. An ambient OS
+	// variable fak does not own, the same class as the grandfathered XDG_CONFIG_HOME and the
+	// admitted XDG_DATA_HOME; it grants access to nothing and authenticates nothing.
+	// Relocates to: a typed ctxmmu state-directory config, or stays as ambient OS input.
+	"XDG_STATE_HOME",
 }
