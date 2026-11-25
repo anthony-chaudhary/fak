@@ -611,12 +611,26 @@ func runValidateAuditSelectionPhase(ctx context.Context, stdout io.Writer, res *
 	return 0, false
 }
 
+// treeContractDirs are whole-tree contract tests. Each scans files spread across the
+// repository, so no changed package's import closure reaches it and changed-package
+// selection alone never runs it. The gate runs them on every commit that reaches the
+// test phase, so a red entry blocks every commit: list only packages green at trunk that
+// finish in seconds.
+var treeContractDirs = []string{
+	"internal/envconfiglint",
+	"internal/conflationscore",
+	"internal/docfreshrsi/aeogen",
+	"internal/skillfootprint",
+}
+
 // selectValidatePackages restores deleted-path graph context, then records live
 // changed packages for tests and returns the live importer closure for vet plus the
 // subset of it that go build can name. A test-only package (every Go file it owns is a
 // _test.go, such as the external red-then-green witness internal/validate/timeoutregression)
 // is vetted but never built: `go build` refuses an explicitly named package with "no
 // non-test Go files", which would red every delta whose importer closure reaches it.
+// Tree-contract packages join the tested set only, not the vet or build targets; the
+// cross_build phase still compiles any of them that owns non-test Go files.
 func selectValidatePackages(res *validateResult, recorder *validateRecorder, dir string, paths []string, fileToPkg map[string]string, edges map[string][]string, baseFileToPkg map[string]string, baseEdges map[string][]string) (vetTargets, buildTargets []string) {
 	buildable := validateBuildablePackages(fileToPkg)
 	// Base-only files restore dependency context, not package liveness.
@@ -640,6 +654,7 @@ func selectValidatePackages(res *validateResult, recorder *validateRecorder, dir
 			res.Tested = append(res.Tested, pkg)
 		}
 	}
+	res.Tested = appendUniqueStrings(res.Tested, treeContractTestPackages(fileToPkg)...)
 	var vetPkgs, buildPkgs []string
 	for _, pkg := range selected {
 		if livePkgs[pkg] { // omit a package deleted by this delta
@@ -651,6 +666,23 @@ func selectValidatePackages(res *validateResult, recorder *validateRecorder, dir
 	}
 	phase.finish(nil)
 	return packagePatternsForRoot(dir, vetPkgs, fileToPkg), packagePatternsForRoot(dir, buildPkgs, fileToPkg)
+}
+
+// treeContractTestPackages returns the import paths of the declared contract dirs that
+// are live in this delta, in declaration order. A deleted contract package is absent
+// from fileToPkg and so is skipped.
+func treeContractTestPackages(fileToPkg map[string]string) []string {
+	pkgByDir := make(map[string]string, len(fileToPkg))
+	for file, pkg := range fileToPkg {
+		pkgByDir[filepath.ToSlash(filepath.Dir(file))] = pkg
+	}
+	var out []string
+	for _, dir := range treeContractDirs {
+		if pkg, ok := pkgByDir[dir]; ok {
+			out = append(out, pkg)
+		}
+	}
+	return out
 }
 
 // validateBuildablePackages reports the packages in fileToPkg that own at least one

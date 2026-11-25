@@ -113,3 +113,43 @@ func TestSelectValidatePackagesTestOnlyChangeHasNoBuildTarget(t *testing.T) {
 		t.Errorf("build target %q selected, want none for a test-only delta", target)
 	}
 }
+
+// TestSelectValidatePackagesAddsTreeContractTests pins that every live tree-contract
+// package joins the tested set even when the delta touches only an unrelated package,
+// and that a contract package the delta itself changes is listed exactly once.
+func TestSelectValidatePackagesAddsTreeContractTests(t *testing.T) {
+	const mod = "example.test/m"
+	contractPkgs := make([]string, 0, len(treeContractDirs))
+	fileToPkg := map[string]string{"internal/unrelated/u.go": mod + "/internal/unrelated"}
+	for _, dir := range treeContractDirs {
+		pkg := mod + "/" + dir
+		contractPkgs = append(contractPkgs, pkg)
+		fileToPkg[dir+"/contract.go"] = pkg
+	}
+
+	t.Run("unrelated change", func(t *testing.T) {
+		res, recorder := newStrixPhaseTestRecorder()
+		selectValidatePackages(res, recorder, t.TempDir(), []string{"internal/unrelated/u.go"}, cloneStrings(fileToPkg), map[string][]string{}, nil, nil)
+		want := append([]string{mod + "/internal/unrelated"}, contractPkgs...)
+		if !reflect.DeepEqual(res.Tested, want) {
+			t.Errorf("tested = %v, want %v", res.Tested, want)
+		}
+	})
+
+	t.Run("contract package changed", func(t *testing.T) {
+		res, recorder := newStrixPhaseTestRecorder()
+		changed := treeContractDirs[0] + "/contract.go"
+		selectValidatePackages(res, recorder, t.TempDir(), []string{changed}, cloneStrings(fileToPkg), map[string][]string{}, nil, nil)
+		if !reflect.DeepEqual(res.Tested, contractPkgs) {
+			t.Errorf("tested = %v, want each contract package once: %v", res.Tested, contractPkgs)
+		}
+	})
+}
+
+func cloneStrings(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
