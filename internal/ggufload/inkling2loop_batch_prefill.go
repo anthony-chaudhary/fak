@@ -1,7 +1,6 @@
 package ggufload
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -23,25 +22,32 @@ type ink2PrefillSeg struct {
 	last bool
 }
 
+// inkling2PrefillNextChunk packs the next chunk of at most T tokens from the rows'
+// remaining prompts, row after row, advancing cursor past what it packs. lens holds
+// each row's end position, so a row whose cursor has reached its end contributes
+// nothing; ending a dropped row at its cursor keeps it out of every later chunk.
+func inkling2PrefillNextChunk(lens, cursor []int, T int) []ink2PrefillSeg {
+	var segs []ink2PrefillSeg
+	used := 0
+	for row, n := range lens {
+		for cursor[row] < n && used < T {
+			done := cursor[row]
+			take := min(T-used, n-done)
+			segs = append(segs, ink2PrefillSeg{row: row, pos0: done, off: used, n: take, last: done+take == n})
+			used += take
+			cursor[row] = done + take
+		}
+	}
+	return segs
+}
+
 // inkling2PrefillChunks packs the prompts, row after row, into chunks of at most T
 // tokens; a prompt longer than the room left in a chunk continues in the next.
 func inkling2PrefillChunks(lens []int, T int) [][]ink2PrefillSeg {
+	cursor := make([]int, len(lens))
 	var chunks [][]ink2PrefillSeg
-	var cur []ink2PrefillSeg
-	used := 0
-	for row, n := range lens {
-		for done := 0; done < n; {
-			if used == T {
-				chunks, cur, used = append(chunks, cur), nil, 0
-			}
-			take := min(T-used, n-done)
-			cur = append(cur, ink2PrefillSeg{row: row, pos0: done, off: used, n: take, last: done+take == n})
-			used += take
-			done += take
-		}
-	}
-	if len(cur) > 0 {
-		chunks = append(chunks, cur)
+	for segs := inkling2PrefillNextChunk(lens, cursor, T); len(segs) > 0; segs = inkling2PrefillNextChunk(lens, cursor, T) {
+		chunks = append(chunks, segs)
 	}
 	return chunks
 }
@@ -136,17 +142,15 @@ func (r *ink2PrefillRows) head(p *ink2Prefill, blocks []ink2Ref, cur ink2Ref) {
 	}
 }
 
-// errInk2PrefillStopped is returned by prefill when stop ends it before its last chunk.
-var errInk2PrefillStopped = errors.New("inkling2 batch: prefill stopped")
-
-// prefill runs every row's whole prompt through the batched prefill forward, chunked
-// at prefillT tokens across rows, into each row's caches and histories, leaving row i
-// at position len(prompts[i]) exactly as feeding the prompt one lockstep step at a
-// time would. A row with an empty prompt is skipped. first is called with each row's
-// greedy token as soon as the chunk that ends its prompt has run, and stop, polled
-// before each chunk, ends the prefill with errInk2PrefillStopped when it reports true,
-// leaving every position unadvanced.
-func (b *inkling2Batch) prefill(prompts [][]int, stop func() bool, first func(row, token int)) error {
+// prefill runs every row's prompt through the batched prefill forward, chunked at
+// prefillT tokens across rows, into each row's caches and histories, leaving row i at
+// position cursor[i] exactly as feeding the prompt one lockstep step at a time would.
+// Every prompt must be non-empty. keep is polled before each chunk for every row that
+// still has prompt left; a row it refuses has its remaining prompt dropped from every
+// later chunk, so a cancelled row stops costing compute at the next chunk. A nil keep
+// keeps every row. first is called with each kept row's greedy token as soon as the
+// chunk that ends its prompt has run.
+func (b *inkling2Batch) prefill(prompts [][]int, keep func(row int) bool, first func(row, token int)) error {
 	s := b.s
 	h := s.hp.Hidden
 	if b.prefillT < 1 {
@@ -155,20 +159,32 @@ func (b *inkling2Batch) prefill(prompts [][]int, stop func() bool, first func(ro
 	if len(prompts) != b.C {
 		return fmt.Errorf("inkling2 batch: %d prompts for %d sequences", len(prompts), b.C)
 	}
-	lens := make([]int, b.C)
+	end := make([]int, b.C)
 	for i, pr := range prompts {
+		if len(pr) == 0 {
+			return fmt.Errorf("inkling2 batch: sequence %d has an empty prompt", i)
+		}
 		if b.pos[i] != 0 || len(pr) > b.ctx {
 			return fmt.Errorf("inkling2 batch: sequence %d at position %d cannot prefill %d tokens into %d", i, b.pos[i], len(pr), b.ctx)
 		}
-		lens[i] = len(pr)
+		end[i] = len(pr)
 	}
 	p := &ink2Prefill{s: s, pd: b.p.pd, grouped: inkling2GroupedExperts(), in: b.in,
 		keep: b.p.keep, scr: b.p.scr, keepFloats: b.p.keepFloats, scrFloats: b.p.scrFloats}
+	cursor := make([]int, b.C)
 	rows := make([]float32, b.prefillT*h)
-	for _, segs := range inkling2PrefillChunks(lens, b.prefillT) {
-		if stop != nil && stop() {
-			return errInk2PrefillStopped
+	for {
+		more := false
+		for i := range cursor {
+			if cursor[i] < end[i] && keep != nil && !keep(i) {
+				end[i] = cursor[i]
+			}
+			more = more || cursor[i] < end[i]
 		}
+		if !more {
+			break
+		}
+		segs := inkling2PrefillNextChunk(end, cursor, b.prefillT)
 		n := 0
 		for _, sg := range segs {
 			for j, tok := range prompts[sg.row][sg.pos0 : sg.pos0+sg.n] {
@@ -187,9 +203,7 @@ func (b *inkling2Batch) prefill(prompts [][]int, stop func() bool, first func(ro
 			return err
 		}
 	}
-	for i := range lens {
-		b.pos[i] = lens[i]
-	}
+	copy(b.pos, cursor)
 	if r, ok := s.be.(interface{ Recycle() }); ok {
 		r.Recycle()
 	}

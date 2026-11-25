@@ -3,8 +3,52 @@ package ggufload
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+// Ending a row at its cursor drops the rest of its prompt from every later chunk,
+// and the rows after it close up into the room it leaves.
+func TestInkling2PrefillNextChunkDropsEndedRow(t *testing.T) {
+	end, cursor := []int{5, 7, 9}, make([]int, 3)
+	var got [][]ink2PrefillSeg
+	for c := 0; ; c++ {
+		if c == 1 {
+			end[1] = cursor[1]
+		}
+		segs := inkling2PrefillNextChunk(end, cursor, 4)
+		if len(segs) == 0 {
+			break
+		}
+		got = append(got, segs)
+	}
+	want := [][]ink2PrefillSeg{
+		{{row: 0, pos0: 0, off: 0, n: 4}},
+		{{row: 0, pos0: 4, off: 0, n: 1, last: true}, {row: 2, pos0: 0, off: 1, n: 3}},
+		{{row: 2, pos0: 3, off: 0, n: 4}},
+		{{row: 2, pos0: 7, off: 0, n: 2, last: true}},
+	}
+	if !reflect.DeepEqual(got, want) || cursor[1] != 0 {
+		t.Fatalf("chunks %v cursor %v, want %v with row 1 never packed", got, cursor, want)
+	}
+}
+
+// prefill refuses an empty prompt instead of reading it as a skipped row, so a caller
+// that passes nil for a row it means to skip loses the guard it relied on.
+func TestInkling2PrefillRejectsEmptyPrompt(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	b, err := bt.acquire(2, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = b.prefill([][]int{{1, 2, 3}, {}}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "empty prompt") {
+		t.Fatalf("prefill with an empty prompt: err=%v, want an empty-prompt error", err)
+	}
+}
 
 // Every prompt position lands in exactly one chunk segment, in order, each chunk
 // packs at most T tokens contiguously, and only a row's final segment is last.

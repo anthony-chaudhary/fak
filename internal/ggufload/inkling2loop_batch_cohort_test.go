@@ -26,6 +26,13 @@ type fakeInk2Cohort struct {
 	// writes counts Ink2Write calls and onWrite, when set, sees each destination
 	writes  int
 	onWrite func(compute.Ink2Ref)
+	// writeLog records every Ink2Write in call order
+	writeLog []fakeInk2Write
+}
+
+type fakeInk2Write struct {
+	buf compute.Buffer
+	n   int
 }
 
 func newFakeInk2Cohort() *fakeInk2Cohort {
@@ -56,6 +63,7 @@ func (d *fakeInk2Cohort) rows(r compute.Ink2Ref) []float32 { return d.data[r.T.B
 
 func (d *fakeInk2Cohort) Ink2Write(dst compute.Ink2Ref, src []float32) error {
 	d.writes++
+	d.writeLog = append(d.writeLog, fakeInk2Write{buf: dst.T.Buf(), n: len(src)})
 	if d.onWrite != nil {
 		d.onWrite(dst)
 	}
@@ -439,6 +447,105 @@ func TestInkling2CohortPrefillSkipsCancelledRows(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A row cancelled while the cohort prefills is finished before the next chunk is
+// written: its Done fires with the cancellation, it is never emitted to, and its
+// remaining prompt is not packed into later chunks.
+func TestInkling2CohortPrefillDropsRowCancelledMidPrefill(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	const long = 3 * inkling2PrefillChunk
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	cohort := func() []Inkling2LoopBatchRequest {
+		emit := func(int) bool { return true }
+		return []Inkling2LoopBatchRequest{
+			{Prompt: fakeInk2CohortPrompt(20, 0), MaxTokens: 2, Emit: emit},
+			{Prompt: fakeInk2CohortPrompt(long, 1), MaxTokens: 2, Emit: emit},
+			{Prompt: fakeInk2CohortPrompt(long, 2), MaxTokens: 2, Emit: emit},
+		}
+	}
+	if _, err := bt.Generate(cohort()); err != nil {
+		t.Fatal(err)
+	}
+	in, meta := bt.b.in.T.Buf(), bt.b.meta.T.Buf()
+	ctxB, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+	var events []string
+	var emitted, live0, live2 []int
+	var inWritesAtDone int
+	d.writeLog = nil
+	d.onWrite = func(dst compute.Ink2Ref) {
+		if dst.T.Buf() == in {
+			cancelB()
+		}
+	}
+	reqs := cohort()
+	reqs[0].Emit = func(tok int) bool { live0 = append(live0, tok); return true }
+	reqs[0].Done = func(Inkling2LoopBatchResult) { events = append(events, "live done") }
+	reqs[1].Context = ctxB
+	reqs[1].Emit = func(tok int) bool { emitted = append(emitted, tok); return true }
+	reqs[1].Done = func(r Inkling2LoopBatchResult) {
+		events = append(events, "cancelled done")
+		inWritesAtDone = 0
+		for _, w := range d.writeLog {
+			if w.buf == in {
+				inWritesAtDone++
+			}
+		}
+		if !errors.Is(r.Err, context.Canceled) || r.Generated != 0 {
+			t.Errorf("cancelled row result %+v", r)
+		}
+	}
+	reqs[2].Emit = func(tok int) bool { live2 = append(live2, tok); return true }
+	reqs[2].Done = func(Inkling2LoopBatchResult) { events = append(events, "live done") }
+	results, err := bt.Generate(reqs)
+	d.onWrite = nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inWritesAtDone != 1 {
+		t.Fatalf("cancelled row finished after %d prefill chunks, want 1", inWritesAtDone)
+	}
+	if len(events) == 0 || events[0] != "cancelled done" {
+		t.Fatalf("finish order %v: the cancelled row must finish before any live row", events)
+	}
+	if len(emitted) != 0 {
+		t.Fatalf("cancelled row emitted %v", emitted)
+	}
+	// prefill chunk writes come before the first decode step's writes; a step writes its
+	// token row to in just before its meta row, so that one write is dropped
+	var chunkTokens []int
+	for _, w := range d.writeLog {
+		if w.buf == meta {
+			break
+		}
+		if w.buf == in {
+			chunkTokens = append(chunkTokens, w.n/bt.b.s.hp.Hidden)
+		}
+	}
+	chunkTokens = chunkTokens[:len(chunkTokens)-1]
+	// one chunk shared by the short row and the cancelled row, then the live long row alone
+	if want := 1 + (long+inkling2PrefillChunk-1)/inkling2PrefillChunk; len(chunkTokens) != want {
+		t.Fatalf("%d prefill chunks %v, want %d: the cancelled row's prompt was packed", len(chunkTokens), chunkTokens, want)
+	}
+	tokensAfterFirst := 0
+	for _, n := range chunkTokens[1:] {
+		tokensAfterFirst += n
+	}
+	if tokensAfterFirst != long {
+		t.Fatalf("%d prompt tokens written after the cancel, want %d (the live row alone)", tokensAfterFirst, long)
+	}
+	if !errors.Is(results[1].Err, context.Canceled) {
+		t.Fatalf("cancelled row result %+v", results[1])
+	}
+	if want := []int{20, 21}; !reflect.DeepEqual(live0, want) {
+		t.Fatalf("short live row emitted %v, want %v", live0, want)
+	}
+	if last := 2000 + long - 1; !reflect.DeepEqual(live2, []int{last + 1, last + 2}) {
+		t.Fatalf("long live row emitted %v, want %v", live2, []int{last + 1, last + 2})
+	}
 }
 
 // A row whose prompt ends in an early prefill chunk gets its first token at that

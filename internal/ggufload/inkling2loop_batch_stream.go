@@ -347,28 +347,26 @@ func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) (_ []In
 	return results, fatal
 }
 
-// prefillLanes prefills the prompts of the rows still live and hands each its first
-// greedy token at the chunk that ends its prompt, leaving the row where the lockstep
-// loop would be once it had fed the whole prompt. A row cancelled before its prefill
-// is finished unprefilled, and the prefill stops once every row left is cancelled or
-// done; a failed prefill finishes every unfinished row with the error, as a failed
-// step does.
+// prefillLanes prefills every lane's prompt and hands each live lane its first greedy
+// token at the chunk that ends its prompt, leaving the row where the lockstep loop
+// would be once it had fed the whole prompt. A lane cancelled before a chunk is
+// finished at that chunk, so its remaining prompt costs no compute and its caller
+// hears the cancellation as soon as the cohort reaches it. A failed prefill finishes
+// every unfinished lane with the error, as a failed step does.
 func prefillLanes(b *inkling2Batch, lanes []inkling2BatchLane) error {
 	prompts := make([][]int, len(lanes))
 	for i := range lanes {
+		prompts[i] = lanes[i].req.Prompt
+	}
+	keep := func(i int) bool {
 		lane := &lanes[i]
+		if lane.done {
+			return false
+		}
 		if err := lane.req.Context.Err(); err != nil {
 			lane.skip = len(lane.req.Prompt)
 			lane.finish(time.Now(), err)
-			continue
-		}
-		prompts[i] = lane.req.Prompt
-	}
-	stop := func() bool {
-		for i := range lanes {
-			if !lanes[i].done && lanes[i].req.Context.Err() == nil {
-				return false
-			}
+			return false
 		}
 		return true
 	}
@@ -378,22 +376,22 @@ func prefillLanes(b *inkling2Batch, lanes []inkling2BatchLane) error {
 			return
 		}
 		lane.skip = len(lane.req.Prompt)
+		if err := lane.req.Context.Err(); err != nil {
+			lane.finish(time.Now(), err)
+			return
+		}
 		lane.accept(token, time.Now())
 	}
-	err := b.prefill(prompts, stop, first)
-	stopped := errors.Is(err, errInk2PrefillStopped)
-	if stopped {
-		err = nil
-	}
+	err := b.prefill(prompts, keep, first)
 	now := time.Now()
 	for i := range lanes {
 		lane := &lanes[i]
 		switch {
 		case lane.done:
-		case stopped:
-			lane.finish(now, lane.req.Context.Err())
 		case err != nil:
 			lane.finish(now, err)
+		case lane.skip != len(lane.req.Prompt):
+			lane.finish(now, errors.New("inkling2 batch: prefill ended without a first token for a live row"))
 		}
 	}
 	return err
