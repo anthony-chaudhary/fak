@@ -336,6 +336,11 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o fak-linux-arm64 ./cmd/fak
 the `...@latest` pseudo-path resolves directly — no clone needed. You can equally use the
 prebuilt-binary download (sections 1 and 2 above) or the build-from-source fallback.
 
+Known gap: the Go module proxy cannot serve v0.57.0, because that tag's source tree is
+over the proxy's 500 MiB module zip cap. Until a smaller tag ships, `...@latest` installs
+v0.56.0. Use the prebuilt binary for a release; for features on `main` (such as Inkling-2-Mini)
+use [build from source](#build-from-source).
+
 ---
 
 ## Uninstall

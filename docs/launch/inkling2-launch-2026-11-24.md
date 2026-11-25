@@ -20,25 +20,34 @@ the copy must show the prefill loss next to the headline number.
 Three facts go in every post:
 
 - Inkling-2-Mini support is on `main`, not in a tagged release. v0.57.0 does not
-  contain it. Install from `main`.
+  contain it. Build from a clone of `main`.
 - All rates are in-process decode benches, not served-endpoint rates.
-- The plain `go install` binary has no CUDA backend. The RTX 5080 numbers need
+- The plain `go build` binary has no CUDA backend. The RTX 5080 numbers need
   the separate `-tags cuda` build.
 
 ### Install
 
-CPU, and Metal on Apple Silicon (cgo on, the Go default there). This is the
-install the M3 Pro receipt used:
+CPU, and Metal on Apple Silicon (cgo on, the Go default there). Needs Go 1.26
+or later and git:
 
 ```sh
-go install github.com/anthony-chaudhary/fak/cmd/fak@main
-fak run <path>/Inkling-2-Mini-UD-Q3_K_XL.gguf
+git clone --depth 1 https://github.com/anthony-chaudhary/fak.git
+cd fak
+go build -o fak ./cmd/fak      # fak.exe on Windows
+./fak run <path>/Inkling-2-Mini-UD-Q3_K_XL.gguf
 ```
+
+Do not point people at `go install` for this launch. The v0.57.0 tag cannot be
+fetched through the Go module proxy (its source tree is over the proxy's
+500 MiB module zip cap), so `go install ...@latest` still resolves to v0.56.0,
+and `...@main` downloads a module zip of about 116 MB before it compiles. The
+release installer (`install.sh`, Homebrew) installs the latest published
+release, which does not contain Inkling either.
 
 CUDA (the RTX 5080 numbers). The CUDA backend compiles only under
 `-tags cuda` with cgo, linked against kernels built by nvcc
 (`internal/compute/cuda.go`). Building it needs a CUDA toolkit; see
-[docs/cuda-dev.md](../cuda-dev.md). From a clone on a CUDA host:
+[docs/cuda-dev.md](../cuda-dev.md). From the same clone on a CUDA host:
 
 ```sh
 make cuda-build    # nvcc -> libfakcuda.a, then go build -tags cuda
@@ -69,9 +78,11 @@ Show HN: fak runs Inkling-2-Mini at 119.9 tok/s in-process decode on a 5080
 > prefill. Opt-in batched prefill reaches pp512 862.7, about a third of
 > llama.cpp's 2362 (measured on different boxes), and we trail the fork at
 > around 2K tokens of context. These are
-> in-process benches, not served rates. Inkling is not in v0.57.0 yet:
-> `go install github.com/anthony-chaudhary/fak/cmd/fak@main`, then
-> `fak run <path>.gguf`, gives the CPU and Apple Silicon Metal path. The CUDA
+> in-process benches, not served rates. Inkling is not in v0.57.0 yet, so build
+> from a clone: `git clone --depth 1 https://github.com/anthony-chaudhary/fak.git`,
+> then `cd fak && go build -o fak ./cmd/fak` and `./fak run <path>.gguf` gives
+> the CPU and Apple Silicon Metal path (`go install ...@latest` resolves to
+> v0.56.0, which predates Inkling). The CUDA
 > numbers need the `-tags cuda` build (`make cuda-build`, or
 > `make cuda-build-sm120` for RTX 50-series, on a CUDA host; see
 > docs/cuda-dev.md). Each number links to a receipt.
@@ -89,8 +100,9 @@ Inkling-2-Mini on a 16 GB 5080: 119.9 tok/s decode in fak, 81.0 in stock llama.c
 > default because it is not bit-exact. We lose on prefill (about a third of
 > llama.cpp, measured on different boxes) and at around 2K tokens of depth.
 > All numbers are in-process
-> benches. Build from main; the 5080 numbers need the `-tags cuda` build
-> (docs/cuda-dev.md), while plain `go install ...@main` covers CPU and Metal.
+> benches. Build from a clone of main (`git clone --depth 1`, then
+> `go build -o fak ./cmd/fak`) for CPU and Metal; the 5080 numbers need the
+> `-tags cuda` build (docs/cuda-dev.md).
 > fak's actual job is guarding the tool calls of the
 > coding agent you point at it; the engine work is so that the local model is
 > not the slow part.
@@ -113,8 +125,8 @@ and [decode climb](assets/inkling2-decode-climb.svg).
    [chart: [inkling2-decode-comparison.svg](assets/inkling2-decode-comparison.svg)]
 5. M3 Pro Metal: 40.3 tok/s, level with Splash.
 6. `fak claude` / `fak opencode` / `fak pi`: same agent, every tool call
-   checked. Inkling is not in v0.57.0; install from main; CUDA is the separate
-   `-tags cuda` build (docs/cuda-dev.md).
+   checked. Inkling is not in v0.57.0: clone main, `go build -o fak ./cmd/fak`.
+   CUDA is the separate `-tags cuda` build (docs/cuda-dev.md).
 
 ## fak versus alternatives
 
@@ -128,8 +140,9 @@ and [decode climb](assets/inkling2-decode-climb.svg).
 
 Other losses to state plainly: the CUDA backend is a separate `-tags cuda`
 build that needs a CUDA toolkit (Metal is in the default cgo build on Apple
-Silicon), and no
-fresh-user receipt yet covers `go install @main` through to the first token.
+Silicon), `go install` cannot fetch the v0.57.0 tag through the Go module
+proxy (source tree over the 500 MiB zip cap), and no fresh-user receipt yet
+covers the clone-and-build path through to the first token.
 
 ## Safe claims
 
@@ -139,7 +152,7 @@ fresh-user receipt yet covers `go install @main` through to the first token.
 | Every number has a receipt | Kernel changes kept output matching on the bench prompt (one long-context oracle case is order-sensitive) |
 | Tokenizer matches Hugging Face on 46/46 corpus lines | Speculative decode 151.7 tok/s (opt-in, not bit-exact, one node) |
 | Prefill trails llama.cpp | M3 Pro level with Splash (both use draft verification) |
-| Install from `main` | 35-task suite 89.5% vs 87.6% (model quality; both served by llama.cpp) |
+| Build from a clone of `main` | 35-task suite 89.5% vs 87.6% (model quality; both served by llama.cpp) |
 | The guard refuses with fixed reason codes | "Default-deny" only when naming strict mode; the shipped default allows unlisted tools |
 
 Do not say: "faster than llama.cpp", "fastest Inkling runtime", "bit-identical"

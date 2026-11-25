@@ -47,8 +47,11 @@ fak run inkling2-mini --max-tokens 256 "What is 2 + 2? Reply with the number onl
   needs `main` at or after 1f31533f2, the alias and the default need 6f56c684d,
   and serving needs c6c5f0ed6. The v0.57.0 release contains none of them; the
   first tag after v0.57.0 does. Until that tag ships, `install.sh` and Homebrew
-  still install a version without them, so build with
-  `go install github.com/anthony-chaudhary/fak/cmd/fak@main`.
+  still install a version without them, so build from a clone:
+  `git clone --depth 1 https://github.com/anthony-chaudhary/fak.git`, then
+  `cd fak && go build -o fak ./cmd/fak`. `go install ...@latest` resolves to
+  v0.56.0, because the v0.57.0 source tree is over the Go module proxy's
+  500 MiB zip cap.
 - An M3 or later chip and macOS 26.4 or later for the fast path that uses the
   DFlash2 draft. On an older chip or an older macOS, `fak run inkling2-mini`
   falls back to fak's own Metal forward without the draft, and `fak serve` refuses

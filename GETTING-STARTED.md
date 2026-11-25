@@ -48,6 +48,10 @@ gh attestation verify SHA256SUMS --repo anthony-chaudhary/fak
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 ```
 
+This currently installs v0.56.0: the Go module proxy cannot serve v0.57.0 because that
+tag's source tree is over its 500 MiB module zip cap. Use the release binary above for a
+release; for features on `main`, such as Inkling-2-Mini, build from source below.
+
 ### Build from source (contributors)
 
 ```bash
