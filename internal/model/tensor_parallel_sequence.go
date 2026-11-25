@@ -180,8 +180,9 @@ func spTopologySupported(t BlockTopology) error {
 	switch t {
 	case PreNorm, PostNorm, SandwichNorm:
 		return nil
+	default:
+		return fmt.Errorf("model: sequence-parallel ForwardTP supports PreNorm/PostNorm/SandwichNorm only (got %s; the shared-norm two-branch residual is a later lever)", t)
 	}
-	return fmt.Errorf("model: sequence-parallel ForwardTP supports PreNorm/PostNorm/SandwichNorm only (got %s; the shared-norm two-branch residual is a later lever)", t)
 }
 
 // spSublayer applies ONE residual sub-layer under sequence parallelism for topology t,

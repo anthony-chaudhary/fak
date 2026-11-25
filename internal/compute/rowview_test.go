@@ -19,6 +19,8 @@ type rowViewCase struct {
 
 // rowViewRawScaleOffsets are the f16 scale offsets inside one super-block (or,
 // for IQ4_NL, inside each 18-byte block) pinned small so every value is finite.
+//
+//enumlint:exempt only the dtypes this test builds raw payloads for have f16 scale offsets to pin; any other dtype reads nil and is never looked up.
 var rowViewRawScaleOffsets = map[Dtype][]int{
 	Q3_K: {108}, Q4_K: {0, 2}, Q5_K: {0, 2}, Q6_K: {208},
 	IQ2_XS: {0}, IQ2_S: {0}, IQ3_XXS: {0}, IQ3_S: {0}, IQ4_XS: {0},
@@ -103,8 +105,9 @@ func rowViewCases(t testing.TB, r *rand.Rand, out int) []rowViewCase {
 				return NewQ5K(be, shape, part)
 			case Q6_K:
 				return NewQ6K(be, shape, part)
+			default:
+				return NewRawIQ(be, dt, shape, part)
 			}
-			return NewRawIQ(be, dt, shape, part)
 		}})
 	}
 	return cases

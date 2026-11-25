@@ -106,8 +106,9 @@ func inkling2DeviceBytes(typ TensorType, rawLen, rows, cols int) int64 {
 	case TensorIQ4_NL:
 		padK := (cols + 255) / 256 * 256
 		return int64(rawLen) / int64(cols) * int64(padK)
+	default:
+		return int64(rawLen)
 	}
-	return int64(rawLen)
 }
 
 // inkling2MatrixDeviceBytes is the device footprint of m, 0 when it stays host.
@@ -121,6 +122,8 @@ func inkling2MatrixDeviceBytes(m model.Inkling2LoopMatrix) int64 {
 		if q.rows*q.cols < inkling2HostDenseLimit {
 			return 0
 		}
+	default:
+		// Quantized and other dense-free formats always go to the device when resident.
 	}
 	return inkling2DeviceBytes(q.typ, len(q.raw), q.rows, q.cols)
 }

@@ -417,6 +417,8 @@ func (p *S3FIFOPolicy) access(n *s3fifoNode) {
 		p.reorderProbation(n)
 	case S3FIFOProtected:
 		p.protected.moveToBack(n)
+	case S3FIFONotResident:
+		// An evicted node sits on no queue, so a hit has no list position to refresh.
 	}
 	p.hitsInSample++
 }
@@ -486,6 +488,9 @@ func (p *S3FIFOPolicy) adjustAccounted(n *s3fifoNode, oldWeight, newWeight uint6
 		p.windowWeightedSize = p.windowWeightedSize - oldWeight + newWeight
 	case S3FIFOProtected:
 		p.mainProtectedWeightedSize = p.mainProtectedWeightedSize - oldWeight + newWeight
+	case S3FIFOProbation, S3FIFONotResident:
+		// Probation carries no accounted total of its own: it is the remainder of
+		// weightedSize after the window and protected totals, so it needs no update here.
 	}
 }
 

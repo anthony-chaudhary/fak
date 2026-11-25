@@ -107,6 +107,8 @@ type Interconnect struct {
 // Layer split runs only across worker processes (modelengine.NewPipelineEngine) and
 // tensor parallel is a collective gate with no sharded serve forward, so both are
 // priced (what the hardware could do) but never chosen.
+//
+//enumlint:exempt the serving engine can run only single and expert splits; layer and tensor are priced for what the hardware could do and are deliberately absent here.
 func ServeExecutableSplits() []SplitMode { return []SplitMode{SplitSingle, SplitExpert} }
 
 // SplitPhase is one serial component of a split row's decode step.
@@ -177,6 +179,8 @@ func (p *planner) splitRates(ic Interconnect) splitRates {
 			r.hostBW, r.generic[rateHostBW] = t.bw, t.generic
 		case PlacementPoolNVMe:
 			r.nvmeBW, r.generic[rateNVMe] = t.bw, t.generic
+		default:
+			// Device-pool tiers are priced by effectiveRates above, not as offload tiers.
 		}
 	}
 	if positiveFinite(ic.HostFLOPsPerSec) {

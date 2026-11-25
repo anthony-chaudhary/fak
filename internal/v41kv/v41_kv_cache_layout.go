@@ -702,6 +702,8 @@ func (s V41KVWireSegment) ValidatePayload(payload []byte) error {
 					}
 				}
 			}
+		default:
+			return fmt.Errorf("%w: %s has no scale contract", ErrV41KVWireEncoding, s.Encoding)
 		}
 	}
 	return nil

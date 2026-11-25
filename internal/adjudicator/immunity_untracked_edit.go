@@ -183,6 +183,9 @@ func (a *Adjudicator) sessionAuthoredTestEditExempt(c *abi.ToolCall, lowerTool s
 		return false
 	case repoUnknown:
 		return false
+	case repoNeverSawFile:
+		// No repository has ever taken this file in, so the session's own recorded
+		// digests alone decide whether the edit is still the authored one.
 	}
 	current := testContentDigest(string(existing))
 	if current != entry.digests[0] && current != entry.digests[1] {

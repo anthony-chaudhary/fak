@@ -41,6 +41,8 @@ func (c *cudaBackend) Ink2PMatMul(w Tensor, x, y Ink2Ref, T int) error {
 			kind = 5
 		case Q6_K:
 			kind = 6
+		default:
+			// Every other dtype has no MMQ kernel and takes the launchers below.
 		}
 		if kind != 0 {
 			rc := C.fcuda_ink2p_dense_mmq(wb.ptr, scales, xp, yp, C.int(out), C.int(in), P, kind)
@@ -68,8 +70,9 @@ func (c *cudaBackend) Ink2PMatMul(w Tensor, x, y Ink2Ref, T int) error {
 	case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ2_S, IQ3_XXS, IQ3_S:
 		cudaIQGEMV(w.Dtype, wb, xp, yp, out, in, T)
 		return nil
+	default:
+		return fmt.Errorf("cuda inkling2 prefill matmul: unsupported weight dtype %s", w.Dtype)
 	}
-	return fmt.Errorf("cuda inkling2 prefill matmul: unsupported weight dtype %s", w.Dtype)
 }
 
 func (c *cudaBackend) Ink2PMix(states []Ink2Ref, queries Ink2Ref, nq int, out Ink2Ref, n, T int) error {
