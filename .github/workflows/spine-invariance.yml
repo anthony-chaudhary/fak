@@ -13,10 +13,9 @@ on:
 
 # Queue control (CI/CD run-speed): cancel a PR's superseded in-flight runs on a
 # re-push/force-push. On main / workflow_dispatch github.head_ref is empty, so the
-# group key falls back to the unique commit SHA — every trunk commit runs its own
-# invariant check in parallel, uncancelled.
+# group is per ref, so a newer trunk push supersedes the in-flight invariant check.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:

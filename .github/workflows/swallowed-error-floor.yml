@@ -35,10 +35,9 @@ on:
 permissions:
   contents: read
 
-# Cancel a PR's superseded in-flight runs on a re-push; every trunk commit
-# keeps its own floor verdict (group falls back to the unique SHA on main).
+# Cancel superseded in-flight runs on a re-push or a newer trunk push.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
