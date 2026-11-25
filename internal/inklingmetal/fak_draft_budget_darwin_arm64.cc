@@ -9,11 +9,74 @@
 #include "metal/abi/Sampling.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
+#include <stdexcept>
+#include <string_view>
 
 namespace fak::inkling {
 using namespace splash::model;
+namespace {
+// GPU milliseconds of one fused cycle (draft, target verify, acceptance and
+// commit in one submission) by verify rows: M3 Pro medians of cycles forced to
+// each width, as TestDeterministicWidthCalibration prints them, with rows 12
+// to 14 pooled at their mean so that no wider cycle is cheaper. Only the
+// ratios steer the choice.
+constexpr std::array<double, SPLASH_TARGET_VERIFY_ROWS + 1> kCycleMs{
+    0,    44.9, 51.6, 60.0, 65.1, 70.9, 73.4, 76.3, 80.0,
+    86.7, 89.7, 92.5, 95.8, 95.8, 95.8, 97.5, 100.0};
+
+const char *setting(const char *name) {
+  const char *value = std::getenv(name);
+  return value && *value ? value : nullptr;
+}
+} // namespace
+
+DraftBudget::Policy DraftBudget::policyFromEnvironment() {
+  Policy policy{.cycleMs = kCycleMs};
+  if (const char *name = setting("FAK_INKLING_METAL_WIDTH_SCHEDULE")) {
+    const std::string_view schedule{name};
+    if (schedule == "session")
+      policy.schedule = WidthSchedule::Session;
+    else if (schedule == "timed")
+      policy.schedule = WidthSchedule::Timed;
+    else if (schedule != "request")
+      throw std::invalid_argument(
+          "FAK_INKLING_METAL_WIDTH_SCHEDULE is request, session or timed");
+  }
+  if (const char *rows = setting("FAK_INKLING_METAL_VERIFY_ROWS")) {
+    char *end = nullptr;
+    const unsigned long forced = std::strtoul(rows, &end, 10);
+    if (*end || !forced || forced > SPLASH_TARGET_VERIFY_ROWS)
+      throw std::invalid_argument(
+          "FAK_INKLING_METAL_VERIFY_ROWS is a row count from 1 to 16");
+    policy.forcedRows = static_cast<uint32_t>(forced);
+  }
+  if (const char *costs = setting("FAK_INKLING_METAL_WIDTH_COSTS")) {
+    char *end = nullptr;
+    for (uint32_t rows = 1; rows <= SPLASH_TARGET_VERIFY_ROWS; ++rows) {
+      const double ms = std::strtod(costs, &end);
+      const bool last = rows == SPLASH_TARGET_VERIFY_ROWS;
+      if (end == costs || !std::isfinite(ms) || !(ms > 0) ||
+          *end != (last ? '\0' : ','))
+        throw std::invalid_argument("FAK_INKLING_METAL_WIDTH_COSTS is 16 "
+                                    "comma-separated positive milliseconds");
+      policy.cycleMs[rows] = ms;
+      costs = last ? end : end + 1;
+    }
+  }
+  if (const char *trace = setting("FAK_INKLING_METAL_WIDTH_TRACE"))
+    policy.trace = trace;
+  return policy;
+}
+
 void DraftBudget::resetRequest() {
+  policy_ = policyFromEnvironment();
+  if (policy_.schedule == WidthSchedule::Request) {
+    lookup_ = {};
+    confidence_ = {};
+  }
   index_ = LookupIndex{};
   match_ = 0;
   chain_.clear();
@@ -48,6 +111,8 @@ uint32_t DraftBudget::prepare(std::span<const uint32_t> committed,
     chance *= lookup_.rate(false, match_, i, LookupAgreement::Unknown);
     chainChances.push_back(chance);
   }
+  if (policy_.forcedRows)
+    return std::min(depth + 1, policy_.forcedRows);
   if (draftChances_.empty() && joinedChances_.empty())
     return std::min(depth + 1, std::max(8u, uint32_t(chain_.size() + 1)));
   const auto chances = VerifyBudget::laneChances(
@@ -59,7 +124,10 @@ uint32_t DraftBudget::prepare(std::span<const uint32_t> committed,
     return fitted ? fitted->first + fitted->second * rows
                   : CostLine::seed(1, rows);
   };
+  const bool timed = policy_.schedule == WidthSchedule::Timed;
   const auto price = [&](uint32_t rows) {
+    if (!timed)
+      return policy_.cycleMs[rows];
     if (rows <= 8)
       return narrowPrice(rows);
     if (wideTimes_[rows] > 0 && fitted)
@@ -123,6 +191,15 @@ void DraftBudget::observe(std::span<const uint32_t> tokens,
   const VerifyBudget::Lane lane{
       false, VerifyBudget::treeLabels(tokens, tree, scores, caps, selections)};
   confidence_.observe(std::span(&lane, 1));
+  // Calibration reads each cycle's rows, kept tokens, history and GPU
+  // milliseconds from this log.
+  if (!policy_.trace.empty()) {
+    if (std::FILE *trace = std::fopen(policy_.trace.c_str(), "a")) {
+      std::fprintf(trace, "%u %zu %zu %.4f\n", rows, selections.size(),
+                   index_.tokens().size(), gpuSeconds * 1000);
+      std::fclose(trace);
+    }
+  }
   if (std::isfinite(gpuSeconds) && gpuSeconds > 0) {
     if (rows <= 8)
       costs_.observe(1, false, rows, selections.size(), gpuSeconds * 1000);

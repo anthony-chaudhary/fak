@@ -4,7 +4,16 @@
 #include "model/StepCosts.hpp"
 #include "model/VerifyBudget.hpp"
 
+#include <string>
+
 namespace fak::inkling {
+// Target logits differ by verify width, so greedy output follows the width
+// schedule. Request and Session price a width from a constant table; Timed
+// prices it from measured GPU time, whose schedule moves with machine load.
+// Request also starts each request's acceptance learners from their priors,
+// which makes the schedule a function of that request alone.
+enum class WidthSchedule { Request, Session, Timed };
+
 class DraftBudget final {
 public:
   void resetRequest();
@@ -21,6 +30,14 @@ public:
   const auto &calibration() const { return confidence_.acceptance(false); }
 
 private:
+  struct Policy {
+    WidthSchedule schedule{WidthSchedule::Request};
+    uint32_t forcedRows{};
+    std::array<double, SPLASH_TARGET_VERIFY_ROWS + 1> cycleMs{};
+    std::string trace;
+  };
+  static Policy policyFromEnvironment();
+  Policy policy_{policyFromEnvironment()};
   splash::model::LookupIndex index_;
   splash::model::LookupAcceptance lookup_;
   splash::model::VerifyBudget confidence_;
