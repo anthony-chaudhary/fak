@@ -104,12 +104,16 @@ type inkling2LoopRequest struct {
 // One worker goroutine, locked to its OS thread because a resident session's CUDA
 // graph and context are bound to the thread that captured them, owns the session
 // and serves requests one at a time. When the session is an inkling2Rewinder and
-// reuse is on, the session persists across requests and a prompt that extends the
-// checkpointed prefix prefills only its suffix; otherwise each request runs on a
-// fresh session.
+// reuse is on, sessions persist across requests as prefix-cache slots, and a prompt
+// that extends a slot's checkpointed prefix prefills only its suffix; otherwise each
+// request runs on a fresh session.
 type inkling2LoopEngine struct {
 	open    inkling2LoopSessionOpener
 	noReuse bool
+	// slots bounds the resident sessions; capBytes bounds what they hold together
+	// once there is more than one. Zero values keep one slot.
+	slots    int
+	capBytes int64
 
 	life   sync.Mutex
 	closed bool
@@ -118,9 +122,9 @@ type inkling2LoopEngine struct {
 	done   chan struct{}
 
 	// owned by the worker goroutine
-	sess     ggufload.Inkling2LoopSession
-	hasCkpt  bool
-	ckpt     []int // the prompt tokens the checkpoint covers
+	cache    []*inkling2PrefixSlot
+	cur      *inkling2PrefixSlot // the slot the request in flight runs on
+	clock    uint64
 	closeErr error
 }
 
@@ -131,7 +135,8 @@ var _ agent.Inkling2LoopGenerator = (*inkling2LoopEngine)(nil)
 func (*inkling2LoopEngine) SerializesGPUAccess() bool { return true }
 
 func newInkling2LoopEngineFrom(open inkling2LoopSessionOpener) *inkling2LoopEngine {
-	return &inkling2LoopEngine{open: open, noReuse: !inkling2PrefixReuseEnabled()}
+	slots, capBytes := inkling2PrefixCacheFromEnv(os.LookupEnv)
+	return &inkling2LoopEngine{open: open, noReuse: !inkling2PrefixReuseEnabled(), slots: slots, capBytes: capBytes}
 }
 
 func newInkling2LoopEngine(m *ggufload.Inkling2LoopModel, be compute.Backend) *inkling2LoopEngine {
@@ -204,7 +209,7 @@ func (e *inkling2LoopEngine) run() {
 		case r := <-e.reqs:
 			e.serveRecovering(r)
 		case <-e.quit:
-			e.closeErr = e.dropSession()
+			e.closeErr = e.dropAllSlots()
 			return
 		}
 	}
@@ -217,64 +222,79 @@ func (e *inkling2LoopEngine) serveRecovering(r *inkling2LoopRequest) {
 	defer close(r.done)
 	defer func() {
 		if p := recover(); p != nil {
-			_ = e.dropSession()
+			_ = e.dropCurrent()
 			r.res, r.err = agent.Inkling2LoopGeneration{}, fmt.Errorf("inkling2_loop engine: request panicked: %v", p)
 		}
 	}()
 	r.res, r.err = e.serve(r)
 }
 
-func (e *inkling2LoopEngine) dropSession() error {
-	e.hasCkpt, e.ckpt = false, nil
-	if e.sess == nil {
-		return nil
-	}
-	err := e.sess.Close()
-	e.sess = nil
-	return err
-}
-
-// acquire positions a session for prompt and reports how many leading prompt
-// tokens its cache already holds; rw is nil when the request runs without reuse.
+// acquire positions a slot's session for prompt and reports how many leading prompt
+// tokens its cache already holds; rw is nil when the request runs without reuse. A
+// hit is the slot whose checkpoint is the longest proper prefix of prompt; a miss
+// runs on a new slot while the cache may grow, else on the slot victim picks.
 func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused int, err error) {
-	fresh := e.sess == nil
+	e.cur = nil
+	e.clock++
+	if !e.noReuse {
+		if sl := e.prefixHit(prompt); sl != nil {
+			e.cur, sl.used, sl.hasCkpt = sl, e.clock, false
+			rw := sl.sess.(inkling2Rewinder)
+			switch err := rw.Restore(); {
+			case err == nil:
+				if rw.Pos() == len(sl.ckpt) {
+					return rw, len(sl.ckpt), nil
+				}
+			case !errors.Is(err, ggufload.ErrInkling2NoCheckpoint):
+				return nil, 0, err
+			}
+			return e.resetCurrent(prompt, rw)
+		}
+	}
+	var sl *inkling2PrefixSlot
+	fresh := e.prefixCanGrow()
 	if fresh {
 		s, err := e.open()
-		if err != nil {
+		switch {
+		case err == nil:
+			sl = &inkling2PrefixSlot{sess: s}
+			e.cache = append(e.cache, sl)
+		case len(e.cache) == 0:
 			return nil, 0, err
+		default:
+			// a slot the device cannot open caps the cache at the slots it holds
+			e.slots, fresh = len(e.cache), false
 		}
-		e.sess = s
 	}
+	if !fresh {
+		sl = e.prefixVictim()
+		sl.hasCkpt = false
+	}
+	e.cur, sl.used = sl, e.clock
 	if e.noReuse {
 		return nil, 0, nil
 	}
-	rw, ok := e.sess.(inkling2Rewinder)
-	if !ok {
+	rw, ok := sl.sess.(inkling2Rewinder)
+	switch {
+	case !ok:
 		return nil, 0, nil
+	case fresh:
+		return rw, 0, nil
 	}
-	hit := e.hasCkpt && len(e.ckpt) < len(prompt) && inkling2HasPrefix(prompt, e.ckpt)
-	e.hasCkpt = false
-	if hit {
-		switch err := rw.Restore(); {
-		case err == nil:
-			if rw.Pos() == len(e.ckpt) {
-				return rw, len(e.ckpt), nil
-			}
-		case !errors.Is(err, ggufload.ErrInkling2NoCheckpoint):
-			return nil, 0, err
+	return e.resetCurrent(prompt, rw)
+}
+
+// resetCurrent rewinds the current slot's session to position 0.
+func (e *inkling2LoopEngine) resetCurrent(prompt []int, rw inkling2Rewinder) (inkling2Rewinder, int, error) {
+	err := rw.Reset()
+	if errors.Is(err, ggufload.ErrInkling2CheckpointUnavailable) {
+		// a fresh session starts at position 0 without the reset's zero fill
+		if err = e.dropCurrent(); err == nil {
+			return e.acquire(prompt)
 		}
 	}
-	if !fresh || hit {
-		err := rw.Reset()
-		if errors.Is(err, ggufload.ErrInkling2CheckpointUnavailable) {
-			// a fresh session starts at position 0 without the reset's zero fill
-			if err = e.dropSession(); err == nil {
-				return e.acquire(prompt)
-			}
-		}
-		if err != nil {
-			return nil, 0, err
-		}
+	if err != nil {
+		return nil, 0, err
 	}
 	return rw, 0, nil
 }
@@ -283,7 +303,7 @@ func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused 
 // prefills the last token alone. Reuse off keeps the same split so both modes run
 // identical kernels; a session that cannot rewind prefills the prompt whole. Decode
 // never extends the checkpoint, so no cache row written by decode is reused. A
-// session fault or a context cancelled during prefill drops the session.
+// session fault or a context cancelled during prefill drops that slot alone.
 func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2LoopGeneration, err error) {
 	if err := r.ctx.Err(); err != nil {
 		return res, err
@@ -294,21 +314,24 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	}
 	rw, reused, err := e.acquire(prompt)
 	if err != nil {
-		_ = e.dropSession()
+		_ = e.dropCurrent()
 		return res, err
 	}
 	fault := true
 	defer func() {
 		switch {
 		case fault:
-			_ = e.dropSession()
+			_ = e.dropCurrent()
 		case rw == nil:
-			if cerr := e.dropSession(); err == nil {
+			if cerr := e.dropCurrent(); err == nil {
 				err = cerr
 			}
+		default:
+			e.prefixTrim()
 		}
 	}()
-	s := e.sess
+	sl := e.cur
+	s := sl.sess
 	_, split := s.(inkling2Rewinder)
 	last := n - 1
 	if !split {
@@ -324,7 +347,7 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 		// the last prompt token and up to maxNew-1 decode steps run past it
 		switch err = rw.Checkpoint(max(r.maxNew, 1)); {
 		case err == nil:
-			e.ckpt, e.hasCkpt = append(e.ckpt[:0], prompt[:n-1]...), true
+			sl.ckpt, sl.hasCkpt = append(sl.ckpt[:0], prompt[:n-1]...), true
 		case errors.Is(err, ggufload.ErrInkling2CheckpointUnavailable):
 			err = nil
 		default:
@@ -538,11 +561,14 @@ func newInkling2MetalEngine(m *inklingmetal.Model, contextTokens int) *inkling2L
 }
 
 // warmInkling2Session runs one throwaway prefill of a turn opener on a session
-// from open and returns it to the model.
-func warmInkling2Session(open inkling2LoopSessionOpener, tok *tokenizer.Tokenizer) (err error) {
+// from open and returns it to the model; a ctx that ends first opens nothing.
+func warmInkling2Session(ctx context.Context, open inkling2LoopSessionOpener, tok *tokenizer.Tokenizer) (err error) {
 	ids, err := tok.Encode("<|message_user|><|content_text|>")
 	if err != nil || len(ids) == 0 {
 		return fmt.Errorf("encode warm-up prompt: %v", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	s, err := open()
 	if err != nil {
@@ -553,7 +579,7 @@ func warmInkling2Session(open inkling2LoopSessionOpener, tok *tokenizer.Tokenize
 			err = cerr
 		}
 	}()
-	_, err = s.Prefill(context.Background(), ids)
+	_, err = s.Prefill(ctx, ids)
 	return err
 }
 
@@ -647,7 +673,8 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		// The first prefill compiles the target graph and pages the weights in,
 		// which outlasts a request's first-token window; pay it before readiness.
 		tWarm := time.Now()
-		if err := warmInkling2Session(engine.open, tok); err != nil {
+		// no request ctx exists yet; an interrupt still ends the process at once
+		if err := warmInkling2Session(context.Background(), engine.open, tok); err != nil {
 			_ = closeModel()
 			fmt.Fprintln(os.Stderr, "fak serve: inkling2 Metal warm-up:", err)
 			os.Exit(2)
