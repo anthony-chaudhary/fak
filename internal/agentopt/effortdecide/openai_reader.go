@@ -34,6 +34,10 @@ type OpenAIReader struct {
 	Client          *http.Client
 }
 
+// fallbackClient backstops a caller that passes no deadline; Decider reads are
+// already bounded far below this by their context.
+var fallbackClient = &http.Client{Timeout: 30 * time.Second}
+
 type chatMsg struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -91,7 +95,7 @@ func (r *OpenAIReader) ReadOptions(ctx context.Context, prompt string, labels []
 	}
 	client := r.Client
 	if client == nil {
-		client = http.DefaultClient
+		client = fallbackClient
 	}
 	resp, err := client.Do(req)
 	if err != nil {

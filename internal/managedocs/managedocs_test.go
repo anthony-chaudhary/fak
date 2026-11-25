@@ -83,7 +83,7 @@ func TestCurrentGuardPosturesAreClassified(t *testing.T) {
 // the scanner or admitting arbitrary guard commands.
 func TestOperatorApprovalOccurrencesAreClassified(t *testing.T) {
 	want := []struct{ path, line string }{
-		{"README.md", "  with `fak guard allow --approve`; the agent cannot approve itself. The gateway's"},
+		{"README.md", "  exact refused call with `fak guard allow --approve` (the agent cannot approve"},
 		{"docs/integrations/openai-codex.md", "fak guard allow --user --approve ap-0123456789ab"},
 		{"docs/integrations/openai-codex.md", "fak guard allow --user --approve --remove ap-0123456789ab"},
 		{"docs/notes/GUARD-OPERATOR-APPROVAL-2026-10-23.md", "fak guard allow --user --approve ap-0123456789ab"},

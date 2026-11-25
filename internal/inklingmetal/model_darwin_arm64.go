@@ -1,4 +1,4 @@
-//go:build cgo
+//go:build darwin && arm64 && cgo
 
 package inklingmetal
 

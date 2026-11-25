@@ -1,4 +1,4 @@
-//go:build cgo
+//go:build darwin && arm64 && cgo
 
 // Package inklingmetalsources makes the C++ and Metal inputs visible to the Go build cache.
 package inklingmetalsources

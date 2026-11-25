@@ -342,7 +342,7 @@ concurrent = [
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
-  "hostfault", "hostplacement", "hostresurrect", "hil", "benchpromotion", "landingvoucher", "mtpbench", "rawdecode", "telemetry", "hwgatelint", "ideascout", "idempotency", "papers",
+  "hostfault", "hostplacement", "hostresurrect", "hil", "benchpromotion", "landingvoucher", "mtpbench", "inklingmetal","rawdecode", "telemetry", "hwgatelint", "ideascout", "idempotency", "papers",
   "intlist", "issuecohort", "issuecontractrepair", "issuecost",
   "issuededup", "issuehygiene", "issuesmallness", "issuesolved", "issuestriage", "jsonlledger", "kimik3page",
   "knobcensus", "knownbad", "kvbudget", "l3region",
@@ -1296,6 +1296,7 @@ hil = ["internal/hil/**"]
 benchpromotion = ["internal/benchpromotion/**"]
 landingvoucher = ["internal/landingvoucher/**"]
 mtpbench = ["internal/mtpbench/**"]
+inklingmetal = ["internal/inklingmetal/**"]
 rawdecode = ["internal/rawdecode/**"]
 telemetry = ["internal/telemetry/**"]
 hwgatelint = ["internal/hwgatelint/**"]
