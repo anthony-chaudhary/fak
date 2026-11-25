@@ -212,6 +212,9 @@ func (b *inkling2Batch) prefill(prompts [][]int, keep func(row int) bool, first 
 		end[i] = len(pr)
 	}
 	cursor := make([]int, b.C)
+	if err := b.prefillShared(prompts, end, cursor, keep); err != nil {
+		return err
+	}
 	for {
 		more := false
 		for i := range cursor {
@@ -299,6 +302,22 @@ func (b *inkling2Batch) deliverFirst(segs []ink2PrefillSeg, first func(row, toke
 // a prefilled row starts decoding at its own prompt length, so a finished short-budget
 // row would otherwise step past ctx while a longer row still decodes.
 func (b *inkling2Batch) park(i int) { b.pos[i] = min(b.pos[i], b.ctx-1) }
+
+// inkling2CohortSharedPrefixMin reads FAK_INKLING2_COHORT_SHARED_PREFIX, the shortest
+// common prompt prefix a cohort prefill computes once for every row sharing it.
+// Unset, empty, zero, negative and unparsable all mean off. It stays off by default
+// until a device receipt shows the copied state decodes as the recomputed state does.
+func inkling2CohortSharedPrefixMin(lookup func(string) (string, bool)) int {
+	v, ok := lookup("FAK_INKLING2_COHORT_SHARED_PREFIX")
+	if !ok {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
 
 // inkling2CohortLongPrefillCap reads FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD, the knob
 // of the native scheduler's long-prefill token threshold, so the cohort

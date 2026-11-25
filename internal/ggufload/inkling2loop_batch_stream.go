@@ -312,6 +312,9 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 		fatal = prefillLanes(b, lanes)
 	}
 	keep, first := prefillHooks(lanes)
+	if mixed && b.sharedMin > 0 {
+		fatal = prefillSharedLanes(b, lanes, keep)
+	}
 	tokens := make([]int, len(lanes))
 	for step := 0; fatal == nil; {
 		if mixed && admit != nil {
@@ -397,6 +400,29 @@ func prefillLanes(b *inkling2Batch, lanes []inkling2BatchLane) error {
 	err := b.prefill(prompts, keep, first)
 	finishPrefilledLanes(lanes, err)
 	return err
+}
+
+// prefillSharedLanes prefills the prompt prefix the cohort's lanes share once before
+// the mixed driver takes over, leaving each sharing row past the prefix; the mixed
+// chunks then start every row at its own position.
+func prefillSharedLanes(b *inkling2Batch, lanes []inkling2BatchLane, keep func(int) bool) error {
+	prompts := make([][]int, len(lanes))
+	end := make([]int, len(lanes))
+	for i := range lanes {
+		prompts[i] = lanes[i].req.Prompt
+		end[i] = len(prompts[i])
+	}
+	cursor := make([]int, len(lanes))
+	if err := b.prefillShared(prompts, end, cursor, keep); err != nil {
+		return err
+	}
+	for _, c := range cursor {
+		if c > 0 {
+			b.endPrefill(cursor)
+			break
+		}
+	}
+	return nil
 }
 
 // prefillHooks are the prefill callbacks for lanes: keep drops a cancelled lane at the

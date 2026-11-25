@@ -3,6 +3,7 @@ package ggufload
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"strconv"
 	"testing"
@@ -29,6 +30,8 @@ type fakeInk2Cohort struct {
 	onWrite func(compute.Ink2Ref)
 	// writeLog records every Ink2Write in call order
 	writeLog []fakeInk2Write
+	// reads counts Ink2Read calls
+	reads int
 }
 
 type fakeInk2Write struct {
@@ -70,6 +73,11 @@ func (d *fakeInk2Cohort) Ink2Write(dst compute.Ink2Ref, src []float32) error {
 	}
 	copy(d.rows(dst), src)
 	return nil
+}
+
+func (d *fakeInk2Cohort) Ink2Read(src compute.Ink2Ref, n int) ([]float32, error) {
+	d.reads++
+	return append([]float32(nil), d.rows(src)[:n]...), nil
 }
 
 func (d *fakeInk2Cohort) Ink2ReadInts(src compute.Ink2Ref, n int) ([]int32, error) {
@@ -1108,6 +1116,301 @@ func TestInkling2BatchResetRowClearsOnlyThatRowsHistory(t *testing.T) {
 			if row[j] != want {
 				t.Fatalf("slot %d element %d = %v, want %v", slot, j, row[j], want)
 			}
+		}
+	}
+}
+
+// fakeInk2SharedPrompt is prefix tokens every row shares followed by suffix tokens of
+// the row's own.
+func fakeInk2SharedPrompt(prefix, suffix, row int) []int {
+	p := make([]int, 0, prefix+suffix)
+	for j := 0; j < prefix; j++ {
+		p = append(p, 70000+j)
+	}
+	for j := 0; j < suffix; j++ {
+		p = append(p, 1000*row+j)
+	}
+	return p
+}
+
+// fakeInk2SharedRun is one cohort run under a shared-prefix knob value: every row's
+// emitted tokens and result, the prompt tokens of each prefill chunk, and the calls.
+type fakeInk2SharedRun struct {
+	got     [][]int
+	results []Inkling2LoopBatchResult
+	chunks  []int
+	log     []fakeInk2Write
+	heads   int
+	reads   int
+}
+
+func (r fakeInk2SharedRun) prefilled() int {
+	n := 0
+	for _, c := range r.chunks {
+		n += c
+	}
+	return n
+}
+
+// runFakeInk2Shared runs prompts as one cohort on a warmed state with the knob set to
+// knob ("" unsets it); cancel lists rows whose context is cancelled before the cohort
+// starts, and cancelAtChunk, when not -1, cancels that row as the first prefill chunk
+// is written.
+func runFakeInk2Shared(t *testing.T, knob string, prompts [][]int, maxNew int, cancel []int, cancelAtChunk int) fakeInk2SharedRun {
+	t.Helper()
+	t.Setenv("FAK_INKLING2_COHORT_SHARED_PREFIX", knob)
+	if knob == "" {
+		os.Unsetenv("FAK_INKLING2_COHORT_SHARED_PREFIX")
+	}
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	reqs := func(got [][]int, ctxs []context.Context) []Inkling2LoopBatchRequest {
+		out := make([]Inkling2LoopBatchRequest, len(prompts))
+		for i, p := range prompts {
+			out[i] = Inkling2LoopBatchRequest{Context: ctxs[i], Prompt: p, MaxTokens: maxNew,
+				Emit: func(tok int) bool { got[i] = append(got[i], tok); return true }}
+		}
+		return out
+	}
+	bg := make([]context.Context, len(prompts))
+	for i := range bg {
+		bg[i] = context.Background()
+	}
+	if _, err := bt.Generate(reqs(make([][]int, len(prompts)), bg)); err != nil {
+		t.Fatal(err)
+	}
+	in, meta := bt.b.in.T.Buf(), bt.b.meta.T.Buf()
+	ctxs := append([]context.Context(nil), bg...)
+	for _, i := range cancel {
+		c, stop := context.WithCancel(context.Background())
+		stop()
+		ctxs[i] = c
+	}
+	var stopAtChunk context.CancelFunc
+	if cancelAtChunk >= 0 {
+		c, stop := context.WithCancel(context.Background())
+		defer stop()
+		ctxs[cancelAtChunk], stopAtChunk = c, stop
+	}
+	d.writeLog, d.heads, d.reads = nil, 0, 0
+	d.onWrite = func(dst compute.Ink2Ref) {
+		if stopAtChunk != nil && dst.T.Buf() == in {
+			stopAtChunk()
+		}
+	}
+	run := fakeInk2SharedRun{got: make([][]int, len(prompts))}
+	results, err := bt.Generate(reqs(run.got, ctxs))
+	d.onWrite = nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.results, run.log, run.heads, run.reads = results, d.writeLog, d.heads, d.reads
+	run.chunks = fakeInk2ChunkTokens(t, d, in, meta, bt.b.s.hp.Hidden)
+	return run
+}
+
+// With the shared-prefix knob on, a cohort whose rows share a P-token prefix prefills
+// that prefix once: P + the suffixes instead of every row's whole prompt.
+func TestInkling2CohortSharedPrefixPrefillsPrefixOnce(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	const P = inkling2PrefillChunk + 88
+	suffixes := []int{5, 1, 40, 700}
+	prompts := make([][]int, len(suffixes))
+	sum := 0
+	for i, s := range suffixes {
+		prompts[i] = fakeInk2SharedPrompt(P, s, i)
+		sum += s
+	}
+	off := runFakeInk2Shared(t, "", prompts, 3, nil, -1)
+	on := runFakeInk2Shared(t, "64", prompts, 3, nil, -1)
+	if got, want := off.prefilled(), len(prompts)*P+sum; got != want {
+		t.Fatalf("knob off prefilled %d tokens, want %d", got, want)
+	}
+	if got, want := on.prefilled(), P+sum; got != want {
+		t.Fatalf("knob on prefilled %d tokens %v, want P + suffixes = %d", got, on.chunks, want)
+	}
+	if !reflect.DeepEqual(on.got, off.got) {
+		t.Fatalf("knob on emitted %v, off %v", on.got, off.got)
+	}
+	// a shared prefix shorter than the knob is not worth the copy
+	short := runFakeInk2Shared(t, strconv.Itoa(P+1), prompts, 3, nil, -1)
+	if got, want := short.prefilled(), len(prompts)*P+sum; got != want {
+		t.Fatalf("prefix below the minimum prefilled %d tokens, want %d", got, want)
+	}
+}
+
+// Every row emits the same tokens and ends the same way with the knob on as off. The
+// host fake's next token depends only on the fed token, so the copied state itself is
+// checked by TestInkling2BatchCopyRowStateCopiesOnlyTargetRow.
+func TestInkling2CohortSharedPrefixMatchesKnobOff(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	shared := fakeInk2SharedPrompt(700, 0, 0)
+	cases := []struct {
+		name          string
+		prompts       [][]int
+		cancel        []int
+		cancelAtChunk int
+		// saved is the prefill tokens the knob saves when no row is cancelled
+		saved int
+	}{
+		{name: "no shared prefix", prompts: [][]int{fakeInk2CohortPrompt(100, 0), fakeInk2CohortPrompt(100, 1), fakeInk2CohortPrompt(90, 2)}, cancelAtChunk: -1},
+		{name: "identical prompts", prompts: [][]int{shared[:300], shared[:300], shared[:300]}, cancelAtChunk: -1, saved: 2 * 299},
+		{name: "one row a strict prefix of another", prompts: [][]int{shared[:200], shared[:650]}, cancelAtChunk: -1, saved: 199},
+		{name: "pre-cancelled row", prompts: [][]int{fakeInk2SharedPrompt(120, 3, 0), fakeInk2SharedPrompt(120, 9, 1), fakeInk2SharedPrompt(120, 4, 2)},
+			cancel: []int{1}, cancelAtChunk: -1},
+		{name: "row cancelled mid shared prefix", prompts: [][]int{fakeInk2SharedPrompt(600, 3, 0), fakeInk2SharedPrompt(600, 9, 1), fakeInk2SharedPrompt(600, 4, 2)},
+			cancelAtChunk: 1},
+		{name: "one-token suffix", prompts: [][]int{fakeInk2SharedPrompt(150, 1, 0), fakeInk2SharedPrompt(150, 30, 1)}, cancelAtChunk: -1, saved: 150},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			off := runFakeInk2Shared(t, "", c.prompts, 4, c.cancel, c.cancelAtChunk)
+			on := runFakeInk2Shared(t, "16", c.prompts, 4, c.cancel, c.cancelAtChunk)
+			if !reflect.DeepEqual(on.got, off.got) {
+				t.Fatalf("knob on emitted %v, off %v", on.got, off.got)
+			}
+			for i := range c.prompts {
+				a, b := on.results[i], off.results[i]
+				if a.Generated != b.Generated || a.Stopped != b.Stopped || (a.Err == nil) != (b.Err == nil) || (b.Err != nil && !errors.Is(a.Err, b.Err)) {
+					t.Fatalf("row %d: knob on %+v, off %+v", i, a, b)
+				}
+			}
+			if got := off.prefilled() - on.prefilled(); c.saved > 0 && got != c.saved {
+				t.Fatalf("knob on saved %d prefill tokens (on %v, off %v), want %d", got, on.chunks, off.chunks, c.saved)
+			}
+			if c.name == "no shared prefix" && !reflect.DeepEqual(on.log, off.log) {
+				t.Fatal("no shared prefix, yet the knob changed the write sequence")
+			}
+		})
+	}
+}
+
+// With the knob off the cohort prefill packs, writes and reads exactly as before: the
+// chunks are today's planner's, no state is read back, and "0" equals unset.
+func TestInkling2CohortSharedPrefixKnobOffKeepsCallSequence(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	prompts := [][]int{fakeInk2SharedPrompt(600, 5, 0), fakeInk2SharedPrompt(600, 50, 1), fakeInk2SharedPrompt(600, 1, 2)}
+	unset := runFakeInk2Shared(t, "", prompts, 3, nil, -1)
+	zero := runFakeInk2Shared(t, "0", prompts, 3, nil, -1)
+	if !reflect.DeepEqual(unset.log, zero.log) || unset.heads != zero.heads || unset.reads != zero.reads {
+		t.Fatal("knob 0 changed the call sequence against unset")
+	}
+	lens := make([]int, len(prompts))
+	for i, p := range prompts {
+		lens[i] = len(p)
+	}
+	var want []int
+	for _, segs := range inkling2PrefillChunks(lens, inkling2PrefillChunk) {
+		n := 0
+		for _, sg := range segs {
+			n = max(n, sg.off+sg.n)
+		}
+		want = append(want, n)
+	}
+	if !reflect.DeepEqual(unset.chunks, want) {
+		t.Fatalf("knob off chunks %v, want the planner's packing %v", unset.chunks, want)
+	}
+	if unset.reads != 0 {
+		t.Fatalf("knob off read state back %d times", unset.reads)
+	}
+}
+
+// The mixed driver keeps every row's tokens with the knob on.
+func TestInkling2CohortSharedPrefixMixedMatchesKnobOff(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "64")
+	prompts := [][]int{fakeInk2SharedPrompt(300, 2, 0), fakeInk2SharedPrompt(300, 900, 1), fakeInk2SharedPrompt(300, 20, 2)}
+	off := runFakeInk2Shared(t, "", prompts, 5, nil, -1)
+	on := runFakeInk2Shared(t, "16", prompts, 5, nil, -1)
+	if !reflect.DeepEqual(on.got, off.got) {
+		t.Fatalf("mixed knob on emitted %v, off %v", on.got, off.got)
+	}
+	for i, p := range prompts {
+		if want := fakeInk2ScalarTokens(t, p, 5); !reflect.DeepEqual(on.got[i], want) {
+			t.Fatalf("row %d emitted %v, scalar %v", i, on.got[i], want)
+		}
+	}
+	if on.prefilled() >= off.prefilled() {
+		t.Fatalf("mixed knob on wrote %d chunk tokens, off %d: the shared prefix was not deduped", on.prefilled(), off.prefilled())
+	}
+}
+
+// fakeInk2Repeat adds the device row copy to the host fake.
+type fakeInk2Repeat struct {
+	*fakeInk2Cohort
+	repeats int
+}
+
+func (d *fakeInk2Repeat) Ink2VRepeatRows(x, out compute.Ink2Ref, n, rows, k int) error {
+	d.repeats++
+	for t := 0; t < rows; t++ {
+		for j := 0; j < k; j++ {
+			copy(d.rows(out)[(t*k+j)*n:(t*k+j+1)*n], d.rows(x)[t*n:(t+1)*n])
+		}
+	}
+	return nil
+}
+
+// copyRowState makes the destination row's caches and conv histories bitwise the
+// source row's in every slot, leaves every other row alone, and copies on the device
+// when the backend can.
+func TestInkling2BatchCopyRowStateCopiesOnlyTargetRow(t *testing.T) {
+	for _, device := range []bool{false, true} {
+		d := newFakeInk2Cohort()
+		rep := &fakeInk2Repeat{fakeInk2Cohort: d}
+		var be compute.Backend = d
+		if device {
+			be = rep
+		}
+		const C, stride, kvDim = 3, 5, 2
+		hp := model.Inkling2LoopHParams{KVHeads: 1, HeadDim: kvDim}
+		b := &inkling2Batch{s: &inkling2Resident{be: be, dev: d, hp: hp}, C: C, histStride: stride, caps: []int{4, 2}}
+		fill := func(n, tag int) ink2Ref {
+			tensor, err := d.Ink2Alloc(n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := compute.Ink2At(tensor, 0)
+			for j := range d.rows(r)[:n] {
+				d.rows(r)[j] = float32(100*tag+j) + 0.25
+			}
+			return r
+		}
+		for slot, cap := range b.caps {
+			b.kc = append(b.kc, fill(C*cap*kvDim, slot))
+			b.vc = append(b.vc, fill(C*cap*kvDim, slot+10))
+			b.hist = append(b.hist, fill(C*stride, slot+20))
+		}
+		before := map[compute.Buffer][]float32{}
+		for buf, data := range d.data {
+			before[buf] = append([]float32(nil), data...)
+		}
+		if err := b.copyRowState(0, 2); err != nil {
+			t.Fatal(err)
+		}
+		check := func(r ink2Ref, rowLen int) {
+			got, was := d.data[r.T.Buf()], before[r.T.Buf()]
+			for j := range got {
+				want := was[j]
+				if j/rowLen == 2 {
+					want = was[j%rowLen]
+				}
+				if got[j] != want {
+					t.Fatalf("device=%v element %d = %v, want %v", device, j, got[j], want)
+				}
+			}
+		}
+		for slot, cap := range b.caps {
+			check(b.kc[slot], cap*kvDim)
+			check(b.vc[slot], cap*kvDim)
+			check(b.hist[slot], stride)
+		}
+		if device && (rep.repeats == 0 || d.reads != 0) {
+			t.Fatalf("device copy ran %d repeats and %d host reads", rep.repeats, d.reads)
+		}
+		if !device && d.reads == 0 {
+			t.Fatal("host copy never read the source row")
 		}
 	}
 }

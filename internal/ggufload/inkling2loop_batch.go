@@ -49,6 +49,9 @@ type inkling2Batch struct {
 	// prefillT is the token width of a cohort prefill chunk; 0 sizes the state for
 	// lockstep prompts only
 	prefillT int
+	// sharedMin is the shortest common prompt prefix a cohort prefill computes once and
+	// copies into every row sharing it; 0 prefills every row's whole prompt
+	sharedMin int
 
 	// capC and capCtx are the shape the arenas were sized for; owned are the arenas
 	owned        []compute.Tensor
@@ -215,6 +218,7 @@ func (b *inkling2Batch) begin(C, ctx int) error {
 	s := b.s
 	hp := s.hp
 	b.C, b.ctx, b.pos = C, ctx, make([]int, C)
+	b.sharedMin = inkling2CohortSharedPrefixMin(os.LookupEnv)
 	b.p.T = C
 	b.p.keepOff, b.p.scrOff = 0, 0
 	clear(b.p.q8)
