@@ -37,7 +37,15 @@ func installWSLRetryTestFake(t *testing.T, onMaterialize func(n int) ([]byte, er
 	t.Helper()
 	fake := &wslRetryTestFake{}
 	prev := validateWSLCommand
-	t.Cleanup(func() { validateWSLCommand = prev })
+	prevArchive := validateWSLTipArchive
+	t.Cleanup(func() {
+		validateWSLCommand = prev
+		validateWSLTipArchive = prevArchive
+	})
+	// The fake repositories are not real Git repositories, so stand in for the staged tip.
+	validateWSLTipArchive = func(context.Context, string, string) (string, func(), error) {
+		return "/mnt/c/fak-validate-test/tip.tar", func() {}, nil
+	}
 	validateWSLCommand = func(_ context.Context, args ...string) ([]byte, error) {
 		args = append([]string(nil), args...)
 		fake.mu.Lock()
@@ -133,6 +141,9 @@ func TestExtractCommittedTipWSLRetriesTransientPackedRefsParse(t *testing.T) {
 	wslRetryTestSameScript(t, scripts)
 	if !strings.Contains(scripts[0], dir) {
 		t.Fatalf("returned dir %q is not the dir the script materialized:\n%s", dir, scripts[0])
+	}
+	if !strings.Contains(scripts[0], "tar -xf '/mnt/c/fak-validate-test/tip.tar'") {
+		t.Fatalf("materialize script does not extract the staged tip archive:\n%s", scripts[0])
 	}
 	if cleanup != 0 {
 		t.Fatalf("cleanup calls = %d, want 0 on success", cleanup)

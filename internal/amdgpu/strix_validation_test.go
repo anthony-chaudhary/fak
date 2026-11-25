@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 )
 
 const testTip = "0123456789abcdef0123456789abcdef01234567"
@@ -879,11 +881,11 @@ func TestBuildStrixCandidateArchiveCanceledBeforeTraversal(t *testing.T) {
 	}
 }
 
-func TestBuildStrixCandidateArchiveWrapsGitCancellation(t *testing.T) {
-	original := strixGitArchiveOutput
-	t.Cleanup(func() { strixGitArchiveOutput = original })
+func TestBuildStrixCandidateArchiveWrapsBaseTreeCancellation(t *testing.T) {
+	original := strixCommittedTreeTar
+	t.Cleanup(func() { strixCommittedTreeTar = original })
 	ctx, cancel := context.WithCancel(context.Background())
-	strixGitArchiveOutput = func(context.Context, string, string) ([]byte, error) {
+	strixCommittedTreeTar = func(context.Context, string, string) ([]byte, error) {
 		cancel()
 		return nil, context.Canceled
 	}
@@ -893,7 +895,7 @@ func TestBuildStrixCandidateArchiveWrapsGitCancellation(t *testing.T) {
 		t.Fatalf("git cancellation returned %v, want context.Canceled", err)
 	}
 	if len(archive.Bytes) != 0 || archive.SourceArchiveSHA256 != "" {
-		t.Fatalf("canceled git archive emitted receipt: %+v", archive)
+		t.Fatalf("canceled base tree read emitted receipt: %+v", archive)
 	}
 }
 
@@ -967,6 +969,96 @@ func TestBuildStrixCandidateArchiveAllowsRegularAndDeletionOverlays(t *testing.T
 	}
 }
 
+func TestBuildStrixCandidateArchiveCallerDeadlineReplacesPackageBudget(t *testing.T) {
+	root, tip := strixArchiveFixtureRepo(t, map[string]string{"base.txt": "base\n"})
+	// A budget no git call can meet: only a caller deadline can let the build finish.
+	t.Setenv(committedtree.ExtractionBudgetEnv, "1ns")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := BuildStrixCandidateArchive(ctx, root, tip, nil); err != nil {
+		t.Fatalf("caller deadline did not replace the package budget: %v", err)
+	}
+
+	_, err := BuildStrixCandidateArchive(context.Background(), root, tip, nil)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("package budget did not bound a deadline-free build: %v", err)
+	}
+}
+
+func TestBuildStrixCandidateArchiveOverlayModeIgnoresHostPermissions(t *testing.T) {
+	root, tip := strixArchiveFixtureRepo(t, map[string]string{"plain.txt": "one\n", "tool.sh": "#!/bin/sh\n"})
+	cmd := exec.Command("git", "-C", root, "update-index", "--chmod=+x", "tool.sh")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("mark tool.sh executable: %v: %s", err, out)
+	}
+	cmd = exec.Command("git", "-C", root, "commit", "-m", "exec bit")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("commit exec bit: %v: %s", err, out)
+	}
+	tip = strings.TrimSpace(mustGitOutput(t, root, "rev-parse", "HEAD"))
+	// Host permission bits differ by platform; the archive must not reflect them.
+	if err := os.Chmod(filepath.Join(root, "plain.txt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "tool.sh"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	archive, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{"plain.txt", "tool.sh"})
+	if err != nil {
+		t.Fatalf("BuildStrixCandidateArchive: %v", err)
+	}
+	modes := map[string]int64{}
+	tr := tar.NewReader(bytes.NewReader(archive.Bytes))
+	for {
+		h, er := tr.Next()
+		if er == io.EOF {
+			break
+		}
+		if er != nil {
+			t.Fatal(er)
+		}
+		modes[h.Name] = h.Mode
+	}
+	if modes["plain.txt"] != 0o664 {
+		t.Fatalf("plain overlay mode = %o, want 0664", modes["plain.txt"])
+	}
+	if modes["tool.sh"] != 0o775 {
+		t.Fatalf("committed executable overlay mode = %o, want 0775", modes["tool.sh"])
+	}
+}
+
+// strixArchiveFixtureRepo commits files into a fresh repository and returns its
+// root and HEAD.
+func strixArchiveFixtureRepo(t *testing.T, files map[string]string) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	mustGit := func(args ...string) string { return mustGitOutput(t, root, args...) }
+	mustGit("init")
+	mustGit("config", "user.email", "test@example.invalid")
+	mustGit("config", "user.name", "test")
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustGit("add", ".")
+	mustGit("commit", "-m", "fixture")
+	return root, strings.TrimSpace(mustGit("rev-parse", "HEAD"))
+}
+
+func mustGitOutput(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return string(out)
+}
+
 func TestArchiveRejectsCommittedLinksAndBindsOverlayBytes(t *testing.T) {
 	if err := rejectArchiveLinkEntry(&tar.Header{Name: "hard", Linkname: "../escape", Typeflag: tar.TypeLink}); err == nil {
 		t.Fatal("hardlink entry accepted")
@@ -1012,6 +1104,76 @@ func TestArchiveRejectsCommittedLinksAndBindsOverlayBytes(t *testing.T) {
 	}
 	if a.SourceArchiveSHA256 == b.SourceArchiveSHA256 {
 		t.Fatal("transported source digest did not bind changed overlay bytes")
+	}
+}
+
+func TestBuildStrixCandidateArchiveKeepsExportIgnoredTestFiles(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init")
+	run("config", "user.email", "test@example.invalid")
+	run("config", "user.name", "test")
+	files := map[string]string{
+		".gitattributes":                   "internal/compute/*_test.go export-ignore\n",
+		"internal/compute/compute.go":      "package compute\n",
+		"internal/compute/compute_test.go": "package compute\n",
+	}
+	for name, body := range files {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("add", ".")
+	run("commit", "-m", "fixture")
+	tip := run("rev-parse", "HEAD")
+
+	// Guard the fixture: the premise is that git archive really strips the test file.
+	gitArchive, err := exec.Command("git", "-C", root, "archive", "--format=tar", tip).Output()
+	if err != nil {
+		t.Fatalf("git archive: %v", err)
+	}
+	if tarNames(t, gitArchive)["internal/compute/compute_test.go"] {
+		t.Fatal("fixture invalid: git archive kept the export-ignored test file")
+	}
+
+	archive, err := BuildStrixCandidateArchive(context.Background(), root, tip, nil)
+	if err != nil {
+		t.Fatalf("BuildStrixCandidateArchive: %v", err)
+	}
+	names := tarNames(t, archive.Bytes)
+	for _, want := range []string{"internal/compute/compute.go", "internal/compute/compute_test.go"} {
+		if !names[want] {
+			t.Fatalf("candidate archive dropped %q; export-ignored test files must reach the remote build", want)
+		}
+	}
+}
+
+func tarNames(t *testing.T, data []byte) map[string]bool {
+	t.Helper()
+	names := map[string]bool{}
+	tr := tar.NewReader(bytes.NewReader(data))
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			return names
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[h.Name] = true
 	}
 }
 

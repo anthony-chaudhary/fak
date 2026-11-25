@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -137,9 +138,24 @@ func strixArchiveContextErr(ctx context.Context) error {
 	return nil
 }
 
-var strixGitArchiveOutput = func(ctx context.Context, root, baseTip string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", baseTip)
-	return cmd.Output()
+// Tar modes for overlay files. Host permission bits are not used: Windows and
+// POSIX report different bits for the same file, which would change the digest
+// bound into receipts.
+const (
+	strixRegularTarMode    = 0o664
+	strixExecutableTarMode = 0o775
+)
+
+// strixCommittedTreeTar streams the full committed tree, export-ignored paths
+// included: the remote build compiles the test files, which export-ignore
+// would otherwise strip from the snapshot. The caller context bounds the read;
+// the committedtree package budget applies only when ctx has no deadline.
+var strixCommittedTreeTar = func(ctx context.Context, root, baseTip string) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := committedtree.WriteTar(ctx, root, baseTip, &buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // resolveStrixOwnedOverlay rejects links in every existing component. Missing
@@ -201,7 +217,7 @@ func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, owned
 	if err != nil {
 		return StrixCandidateArchive{}, err
 	}
-	base, err := strixGitArchiveOutput(ctx, canonicalRoot, baseTip)
+	base, err := strixCommittedTreeTar(ctx, canonicalRoot, baseTip)
 	if err != nil {
 		if ctx.Err() != nil {
 			return StrixCandidateArchive{}, strixArchiveContextErr(ctx)
@@ -212,6 +228,7 @@ func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, owned
 		return StrixCandidateArchive{}, err
 	}
 	entries := map[string]tarEntry{}
+	committedModes := map[string]int64{}
 	tr := tar.NewReader(bytes.NewReader(base))
 	for {
 		if err := strixArchiveContextErr(ctx); err != nil {
@@ -239,6 +256,7 @@ func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, owned
 			return StrixCandidateArchive{}, er
 		}
 		entries[name] = tarEntry{name: name, mode: h.Mode, kind: h.Typeflag, link: h.Linkname, body: body}
+		committedModes[name] = h.Mode
 	}
 	for _, raw := range ownedPaths {
 		if err := strixArchiveContextErr(ctx); err != nil {
@@ -285,7 +303,12 @@ func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, owned
 			if e != nil {
 				return e
 			}
-			mode := int64(fi.Mode().Perm())
+			// An overlay keeps its committed executable bit; a new file gets the
+			// regular mode. Either way the result is independent of host permissions.
+			mode := int64(strixRegularTarMode)
+			if committedModes[name] == strixExecutableTarMode {
+				mode = strixExecutableTarMode
+			}
 			entries[name] = tarEntry{name: name, mode: mode, kind: tar.TypeReg, body: body}
 			return nil
 		}

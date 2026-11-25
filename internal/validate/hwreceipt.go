@@ -296,9 +296,7 @@ func loadAndCheckHWReceipt(ctx context.Context, root, tip, path string, mine []s
 		}
 	}
 
-	restore := pinCanonicalArchiveEOL()
 	candidate, err := buildStrixCandidateArchiveFn(ctx, root, base, mine)
-	restore()
 	if err != nil {
 		adm := hwReceiptAdmission{FileSHA256: fileSHA}
 		return adm, refuseHWReceipt(hwReceiptCandidate, "rebuild prospective candidate archive: %v", err)
@@ -309,44 +307,6 @@ func loadAndCheckHWReceipt(ctx context.Context, root, tip, path string, mine []s
 		adm.AdvancedTo = tip
 	}
 	return adm, err
-}
-
-// pinCanonicalArchiveEOL makes the gate's `git archive` emit the LF bytes a
-// Linux controller emits. git archive applies .gitattributes text conversion
-// using core.eol, which is CRLF on native Windows git, so without the pin the
-// same commit archives to different digests per controller OS and no Linux
-// receipt could ever match a Windows gate. The pin rides git's GIT_CONFIG_*
-// environment (inherited by the builder's child git) and is restored on return.
-// TODO(#13802 follow-up): move this pin, and git-mode normalization of
-// overlay entries, into amdgpu.BuildStrixCandidateArchive itself.
-func pinCanonicalArchiveEOL() func() {
-	keys := []string{"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1"}
-	saved := map[string]*string{}
-	for _, k := range keys {
-		if v, ok := os.LookupEnv(k); ok {
-			saved[k] = &v
-		} else {
-			saved[k] = nil
-		}
-	}
-	if saved["GIT_CONFIG_COUNT"] != nil {
-		// The caller already injects git config; do not renumber it.
-		return func() {}
-	}
-	os.Setenv("GIT_CONFIG_COUNT", "2")
-	os.Setenv("GIT_CONFIG_KEY_0", "core.eol")
-	os.Setenv("GIT_CONFIG_VALUE_0", "lf")
-	os.Setenv("GIT_CONFIG_KEY_1", "core.autocrlf")
-	os.Setenv("GIT_CONFIG_VALUE_1", "false")
-	return func() {
-		for k, v := range saved {
-			if v == nil {
-				os.Unsetenv(k)
-			} else {
-				os.Setenv(k, *v)
-			}
-		}
-	}
 }
 
 var hwReceiptGitFn = func(ctx context.Context, root string, args ...string) (string, error) {

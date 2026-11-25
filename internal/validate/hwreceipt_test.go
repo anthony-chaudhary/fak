@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -123,15 +124,14 @@ func TestCheckHWReceiptHeadVerifierIsStrict(t *testing.T) {
 	}
 }
 
-// A Windows checkout archives .gitattributes text files with CRLF unless the
-// gate pins core.eol; the pin must make it reproduce the Linux controller's LF
-// archive, and must leave the environment as it found it.
-func TestPinCanonicalArchiveEOLMatchesLinuxArchive(t *testing.T) {
+// The candidate archive is built from committed blob bytes, so its digest must
+// not depend on the host's line-ending settings. The fixture's text-attributed
+// file is one git archive would convert under core.eol=crlf, so the first
+// comparison is only meaningful when that conversion is observable.
+func TestCandidateArchiveDigestIgnoresHostEOL(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}
-	t.Setenv("GIT_CONFIG_COUNT", "")
-	os.Unsetenv("GIT_CONFIG_COUNT")
 	root := t.TempDir()
 	git := func(args ...string) string {
 		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@example.invalid"}, args...)...)
@@ -152,30 +152,35 @@ func TestPinCanonicalArchiveEOLMatchesLinuxArchive(t *testing.T) {
 	git("add", ".")
 	git("commit", "-q", "-m", "base")
 	tip := git("rev-parse", "HEAD")
-	git("config", "core.eol", "lf")
+
+	setEOL := func(autocrlf, eol string) {
+		git("config", "core.autocrlf", autocrlf)
+		git("config", "core.eol", eol)
+	}
+	setEOL("false", "lf")
+	gitArchive, err := exec.Command("git", "-C", root, "archive", "--format=tar", tip).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
 	lf, err := amdgpu.BuildStrixCandidateArchive(context.Background(), root, tip, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	git("config", "core.eol", "crlf") // native Windows behaviour
+
+	setEOL("true", "crlf")
+	crlfArchive, err := exec.Command("git", "-C", root, "archive", "--format=tar", tip).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(crlfArchive, gitArchive) {
+		t.Fatal("fixture does not exercise eol conversion in git archive")
+	}
 	crlf, err := amdgpu.BuildStrixCandidateArchive(context.Background(), root, tip, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if crlf.SourceArchiveSHA256 == lf.SourceArchiveSHA256 {
-		t.Fatal("fixture does not exercise eol conversion")
-	}
-	restore := pinCanonicalArchiveEOL()
-	pinned, err := amdgpu.BuildStrixCandidateArchive(context.Background(), root, tip, nil)
-	restore()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pinned.SourceArchiveSHA256 != lf.SourceArchiveSHA256 {
-		t.Fatalf("pinned archive %s != Linux LF archive %s", pinned.SourceArchiveSHA256, lf.SourceArchiveSHA256)
-	}
-	if _, ok := os.LookupEnv("GIT_CONFIG_COUNT"); ok {
-		t.Fatal("pin leaked GIT_CONFIG_COUNT into the environment")
+	if crlf.SourceArchiveSHA256 != lf.SourceArchiveSHA256 {
+		t.Fatalf("candidate archive under autocrlf=true/eol=crlf %s != autocrlf=false %s", crlf.SourceArchiveSHA256, lf.SourceArchiveSHA256)
 	}
 }
 
