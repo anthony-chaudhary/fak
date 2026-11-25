@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -61,6 +62,54 @@ func TestRunInkling2ExplicitPackedMetal(t *testing.T) {
 		}
 		if err != nil || be != nil || metal != (name != "cpu") {
 			t.Fatalf("backend %q: selected=%v metal=%v error=%v", name, be, metal, err)
+		}
+	}
+}
+
+func TestRunInkling2MetalTargetSelector(t *testing.T) {
+	for _, tc := range []struct {
+		selector          string
+		loopArch, present bool
+		want              bool
+		errHas            string
+	}{
+		{selector: "", loopArch: true, present: true, want: true},
+		{selector: "", loopArch: true, present: false},
+		{selector: "", loopArch: false, present: true},
+		{selector: " Vendored ", loopArch: true, present: true, want: true},
+		{selector: "vendored", loopArch: true, present: false, errHas: "not available"},
+		{selector: "vendored", loopArch: false, present: true, errHas: "architecture"},
+		{selector: "native", loopArch: true, present: true},
+		{selector: "NATIVE", loopArch: true, present: false},
+		{selector: "splash", loopArch: true, present: true, errHas: `unknown FAK_INKLING_METAL_TARGET="splash"`},
+	} {
+		got, err := inkling2MetalUseVendored(tc.selector, tc.loopArch, tc.present)
+		if tc.errHas != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.errHas) {
+				t.Errorf("%+v: error %v, want %q", tc, err, tc.errHas)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("%+v: vendored=%v error=%v", tc, got, err)
+		}
+	}
+}
+
+func TestRunInkling2MetalTargetLabels(t *testing.T) {
+	if inkling2MetalTargetVendoredLabel != "vendored-splash" || inkling2MetalTargetNativeLabel != "fak-metalgemm" {
+		t.Fatalf("labels %q %q", inkling2MetalTargetVendoredLabel, inkling2MetalTargetNativeLabel)
+	}
+	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "inkling2-metal-target-ab.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for selector, label := range map[string]string{
+		"vendored": inkling2MetalTargetVendoredLabel,
+		"native":   inkling2MetalTargetNativeLabel,
+	} {
+		if want := selector + `) echo "` + label + `"`; !strings.Contains(string(script), want) {
+			t.Errorf("A/B script lacks %s", want)
 		}
 	}
 }

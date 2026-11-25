@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# A/B the two Metal Inkling 2 forwards through the ordinary `fak run` entrypoint.
+# Emits JSON lines on stdout: one config record, one record per measured run,
+# one summary per target (median and range of prefill and decode tok/s and of
+# load-to-ready), and one compare record for the visible outputs.
+set -euo pipefail
+
+FAK="${FAK_BIN:-fak}"
+GGUF=""
+REPS=5
+# About 40 tokens are spent before the first visible byte even at --effort
+# none, so a smaller budget yields empty output and nothing to compare.
+MAX_TOKENS=128
+PROMPT="Name the capital of France."
+TARGETS="vendored native"
+RETRY_SECONDS=360
+
+usage() {
+  echo "usage: $0 --gguf PATH [--fak BIN] [--reps N] [--max-tokens N] [--prompt TEXT] [--targets 'vendored native'] [--retry-seconds N]" >&2
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --gguf) GGUF="$2"; shift 2 ;;
+    --fak) FAK="$2"; shift 2 ;;
+    --reps) REPS="$2"; shift 2 ;;
+    --max-tokens) MAX_TOKENS="$2"; shift 2 ;;
+    --prompt) PROMPT="$2"; shift 2 ;;
+    --targets) TARGETS="$2"; shift 2 ;;
+    --retry-seconds) RETRY_SECONDS="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; exit 2 ;;
+  esac
+done
+if [ -z "$GGUF" ] || [ ! -f "$GGUF" ]; then
+  usage
+  exit 2
+fi
+command -v jq >/dev/null || { echo "$0: jq is required" >&2; exit 2; }
+
+label_for() {
+  case "$1" in
+    vendored) echo "vendored-splash" ;;
+    native) echo "fak-metalgemm" ;;
+    *) echo "$0: unknown target $1" >&2; exit 2 ;;
+  esac
+}
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/inkling2-ab.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+
+ARGV=("$FAK" run "$GGUF" --effort none --timings --temp 0 --max-tokens "$MAX_TOKENS" --quiet "$PROMPT")
+
+ARGV_JSON="$(printf '%s\n' "${ARGV[@]}" | jq -R . | jq -cs .)"
+
+# Every FAK_* variable the child inherits, with the selector as the child sees
+# it. Credential-shaped names keep their key but not their value.
+fak_env_json() {
+  FAK_INKLING_METAL_TARGET="$1" jq -cn 'env
+    | with_entries(select(.key | startswith("FAK_")))
+    | with_entries(if (.key | test("KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL")) then .value = "<redacted>" else . end)'
+}
+
+jq -cn \
+  --argjson argv "$ARGV_JSON" \
+  --arg started "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  --arg version "$("$FAK" --version 2>&1 | head -n 1 || true)" \
+  --arg targets "$TARGETS" \
+  --argjson reps "$REPS" \
+  --argjson max_tokens "$MAX_TOKENS" \
+  --argjson env "$(fak_env_json "<per target>")" \
+  '{kind:"config", started_utc:$started, fak_version:$version, argv:$argv,
+    targets:($targets|split(" ")), reps:$reps, max_tokens:$max_tokens,
+    warmup_runs_per_target:1, fresh_process_per_run:true, env:$env}'
+
+LEASE_REFUSAL='Metal residency admission refused'
+
+# Only a refused GPU lease is worth waiting out; any other failure would repeat.
+run_once() {
+  local target="$1" out="$2" err="$3" deadline=$((SECONDS + RETRY_SECONDS)) rc
+  while :; do
+    rc=0
+    FAK_INKLING_METAL_TARGET="$target" "${ARGV[@]}" >"$out" 2>"$err" || rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    if ! grep -q "$LEASE_REFUSAL" "$err"; then
+      jq -cn --arg target "$target" --argjson rc "$rc" --rawfile stderr "$err" \
+        '{kind:"error", target:$target, reason:"run failed", exit_code:$rc, stderr:$stderr}'
+      exit 1
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      jq -cn --arg target "$target" --argjson rc "$rc" --rawfile stderr "$err" \
+        '{kind:"error", target:$target, reason:"GPU lease still held after the retry window", exit_code:$rc, stderr:$stderr}'
+      exit 1
+    fi
+    sleep 15
+  done
+}
+
+# Load-to-ready is the gap between the admit and steady admission receipts;
+# null when the run printed no such pair.
+load_ms() {
+  { grep '^fak native admission receipt: ' "$1" || true; } | sed 's/^fak native admission receipt: //' | jq -cs '
+    def at: (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) + ((capture("(?<f>\\.[0-9]+)Z$").f // "0") | tonumber);
+    (map(select(.stage == "admit")) | first | .timestamp) as $a
+    | (map(select(.stage == "steady")) | first | .timestamp) as $s
+    | if $a and $s then ((($s | at) - ($a | at)) * 1000 | round) else null end'
+}
+
+ALL="$WORK/all.jsonl"
+: >"$ALL"
+for target in $TARGETS; do
+  label="$(label_for "$target")"
+  env_json="$(fak_env_json "$target")"
+  runs="$WORK/$target.jsonl"
+  : >"$runs"
+  rep=0
+  while [ "$rep" -le "$REPS" ]; do
+    out="$WORK/$target.$rep.out"
+    err="$WORK/$target.$rep.err"
+    run_once "$target" "$out" "$err"
+    path_line="$(grep -m 1 '^fak run: ' "$err" || true)"
+    case "$path_line" in
+      *"target=$label "*) ;;
+      *)
+        jq -cn --arg target "$target" --arg want "$label" --arg got "$path_line" \
+          '{kind:"error", target:$target, reason:"path line does not name the requested target", want:$want, path_line:$got}'
+        exit 1
+        ;;
+    esac
+    timings="$(grep '"predicted_per_second"' "$err" | tail -n 1 || true)"
+    if [ -z "$timings" ]; then
+      jq -cn --arg target "$target" --rawfile stderr "$err" '{kind:"error", target:$target, reason:"no timings line", stderr:$stderr}'
+      exit 1
+    fi
+    # Repetition 0 pays the cold page-in and shader build; it is not measured.
+    if [ "$rep" -gt 0 ]; then
+      bytes="$(wc -c <"$out" | tr -d ' ')"
+      # A budget spent before the answer still prints the trailing newline.
+      visible="$(tr -d '[:space:]' <"$out" | wc -c | tr -d ' ')"
+      jq -cn --arg target "$target" --argjson rep "$rep" --arg path_line "$path_line" \
+        --arg sha "$(shasum -a 256 "$out" | cut -d ' ' -f 1)" --argjson t "$timings" \
+        --argjson bytes "$bytes" --argjson visible "$visible" --argjson load_ms "$(load_ms "$err")" --argjson env "$env_json" \
+        '{kind:"run", target:$target, selector:$target, rep:$rep, path_line:$path_line,
+          prefill_tok_s:$t.prompt_per_second, decode_tok_s:$t.predicted_per_second,
+          prompt_n:$t.prompt_n, predicted_n:$t.predicted_n, cache_n:$t.cache_n,
+          load_ms:$load_ms, output_bytes:$bytes, output_empty:($visible == 0),
+          output_sha256:$sha, env:$env}' |
+        tee -a "$runs"
+    fi
+    rep=$((rep + 1))
+  done
+  cat "$runs" >>"$ALL"
+  jq -cs --arg target "$target" --arg label "$label" '
+    def stats: sort | if length == 0 then null else {median: (if length % 2 == 1 then .[(length - 1) / 2] else (.[length / 2 - 1] + .[length / 2]) / 2 end), min: .[0], max: .[-1]} end;
+    {kind:"summary", target:$target, path:$label, runs:length,
+     prefill_tok_s:(map(.prefill_tok_s) | stats),
+     decode_tok_s:(map(.decode_tok_s) | stats),
+     load_ms:(map(.load_ms | select(. != null)) | stats),
+     empty_outputs:(map(select(.output_empty)) | length),
+     output_sha256:(map(.output_sha256) | unique),
+     note:"every repetition is a fresh process, so prefill_tok_s includes per-process first-use setup; load_ms (admit to steady admission receipt) is reported separately and is in neither rate, but a path that defers setup past the steady receipt pays it in prefill instead"}' "$runs"
+done
+
+# Empty output is the absence of an answer, so it never counts as agreement.
+jq -cs '
+  (map(select(.output_empty)) | length) as $empty
+  | (map(.output_sha256) | unique) as $shas
+  | {kind:"compare", targets:(map(.target) | unique), runs:length, empty_outputs:$empty,
+     distinct_outputs:($shas | length),
+     outputs_match:(if length == 0 or $empty > 0 then null else ($shas | length) == 1 end),
+     reason:(if length == 0 then "no measured runs"
+             elif $empty > 0 then "empty visible output; raise --max-tokens"
+             elif ($shas | length) == 1 then "all visible outputs identical"
+             else "visible outputs differ" end)}' "$ALL"

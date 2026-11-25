@@ -48,7 +48,10 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 	backendName := "cpu"
 	if metal {
 		backendName = "metal"
-		useTarget := arch == serveInkling2LoopArch && inklingmetal.Available()
+		useTarget, e := inkling2MetalUseVendored(os.Getenv(inkling2MetalTargetEnv), arch == serveInkling2LoopArch, inklingmetal.Available())
+		if e != nil {
+			return nil, nil, e
+		}
 		var weights localadmission.MemoryPlan
 		if useTarget {
 			// Match the launcher's default single-session context budget, including
@@ -105,14 +108,45 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 		return nil, nil, err
 	}
 	if target != nil {
-		fmt.Fprintln(os.Stderr, "fak run: inkling2_loop backend=metal native target layers=24 passes=3")
+		fmt.Fprintf(os.Stderr, "fak run: inkling2_loop backend=metal target=%s layers=24 passes=3\n", inkling2MetalTargetVendoredLabel)
 		return agent.NewInkling2MetalRunPlanner(name, target, tok, eos), release, nil
+	}
+	if metal {
+		backendName += " target=" + inkling2MetalTargetNativeLabel
 	}
 	fmt.Fprintf(os.Stderr, "fak run: %s backend=%s layers=%d passes=%d\n", arch, backendName, m.HP.Layers, m.HP.Passes)
 	if be != nil {
 		return agent.NewInkling2DeviceRunPlanner(name, m, be, tok, eos), release, nil
 	}
 	return agent.NewInkling2RunPlanner(name, m, tok, eos), release, nil
+}
+
+const (
+	inkling2MetalTargetEnv           = "FAK_INKLING_METAL_TARGET"
+	inkling2MetalTargetVendoredLabel = "vendored-splash"
+	inkling2MetalTargetNativeLabel   = "fak-metalgemm"
+)
+
+// inkling2MetalUseVendored picks between the vendored direct target and fak's
+// own packed-kernel forward. Only an unset selector may fall back: an explicit
+// request that cannot be honoured is refused so a measurement never reports
+// one path under the other's name.
+func inkling2MetalUseVendored(selector string, loopArch, vendoredAvailable bool) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(selector)) {
+	case "":
+		return loopArch && vendoredAvailable, nil
+	case "vendored":
+		if !loopArch {
+			return false, fmt.Errorf("Inkling 2: %s=vendored needs the %s architecture", inkling2MetalTargetEnv, serveInkling2LoopArch)
+		}
+		if !vendoredAvailable {
+			return false, fmt.Errorf("Inkling 2: %s=vendored but the vendored Metal target is not available in this build or on this device", inkling2MetalTargetEnv)
+		}
+		return true, nil
+	case "native":
+		return false, nil
+	}
+	return false, fmt.Errorf("Inkling 2: unknown %s=%q (want vendored or native)", inkling2MetalTargetEnv, selector)
 }
 
 // runInkling2Tokenizer is a seam so tests can bind a toy vocab to a synthetic GGUF.
