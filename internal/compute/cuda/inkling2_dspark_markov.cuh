@@ -9,6 +9,7 @@
 
 // Stage 1: each block keeps the M best of one vocab slice of one row.
 __global__ void k_ink2d_topm_slice(const float *logits, int rowStride, int vocab, int M, float *candV, int *candI) {
+  ink2_pdl_enter();
   __shared__ float bv[256];
   __shared__ int bi[256];
   __shared__ int chosen[INK2D_TOPM_MAX];
@@ -55,6 +56,7 @@ __global__ void k_ink2d_topm_slice(const float *logits, int rowStride, int vocab
 
 // Stage 2: the M best of one row's slice candidates, written to out[row][M].
 __global__ void k_ink2d_topm_merge(const float *candV, const int *candI, int M, int *out) {
+  ink2_pdl_enter();
   __shared__ float v[INK2D_TOPM_SLICES * INK2D_TOPM_MAX];
   __shared__ int id[INK2D_TOPM_SLICES * INK2D_TOPM_MAX];
   __shared__ float bv[256];
@@ -103,6 +105,7 @@ __global__ void k_ink2d_topm_merge(const float *candV, const int *candI, int M, 
 __global__ void k_ink2d_markov_in(const float *state, const unsigned short *w1, const int *anchor, const int *idx,
                                   int step, const float *h, const float *frnnRing, const int *posDev, int cap,
                                   int rank, int hidden, float *in) {
+  ink2_pdl_enter();
   const int prev = step == 0 ? *anchor : idx[4 * (step - 1)];
   const float *fr = frnnRing + (size_t)((*posDev - 1 + cap) % cap) * hidden;
   const int n = 2 * rank + 2 * hidden;
@@ -123,6 +126,7 @@ __global__ void k_ink2d_markov_in(const float *state, const unsigned short *w1, 
 // GRU-style update of state from raw + bias, and latent = tanh(raw[2r:] + bias).
 __global__ void k_ink2d_markov_gate(const float *raw, const float *bias, float *state, float *latent, int rank,
                                     int step) {
+  ink2_pdl_enter();
   const int c = blockIdx.x * blockDim.x + threadIdx.x;
   if (c >= rank) return;
   const float g = 1.f / (1.f + expf(-(raw[c] + bias[c])));
@@ -136,6 +140,7 @@ __global__ void k_ink2d_markov_gate(const float *raw, const float *bias, float *
 // lm_head a Q5_K [vocab][in] matrix decoded as k_q5k_gemm does. One warp per candidate.
 __global__ void k_ink2d_markov_pick(const unsigned char *W, int in, const float *base, const int *cand, int M,
                                     const float *z, const float *zb, int *idx, int step) {
+  ink2_pdl_enter();
   __shared__ float zs[4096];
   __shared__ float sv[32];
   __shared__ int si[32];

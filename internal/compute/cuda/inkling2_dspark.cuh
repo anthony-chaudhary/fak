@@ -25,6 +25,7 @@ __device__ __forceinline__ double ink2d_block_sum(double v, double *sh) {
 
 // out[row] = rms(sum_t a[t] * f_t[row]) * w, one block per row.
 __global__ void k_ink2d_fuse(Ink2DTaps tp, int taps, const float *w, float *out, int n, float eps) {
+  ink2_pdl_enter();
   __shared__ double sh[32];
   const size_t base = (size_t)blockIdx.x * n;
   double ss = 0;
@@ -44,6 +45,7 @@ __global__ void k_ink2d_fuse(Ink2DTaps tp, int taps, const float *w, float *out,
 // when not ring. Block (head, row), dim threads.
 __global__ void k_ink2d_qk(const float *x, const float *w, float *dst, int heads, int dim, const int *posDev, int cap,
                            int ring, float eps, double theta) {
+  ink2_pdl_enter();
   __shared__ double sh[32];
   __shared__ float v[256];
   const int h = blockIdx.x, row = blockIdx.y, i = threadIdx.x;
@@ -65,6 +67,7 @@ __global__ void k_ink2d_qk(const float *x, const float *w, float *dst, int heads
 
 // ring[(pos + row) % cap] = src[row] for rows rows of width floats.
 __global__ void k_ink2d_ring_store(const float *src, float *ring, int width, const int *posDev, int cap) {
+  ink2_pdl_enter();
   const int row = blockIdx.y;
   const int pos = *posDev + row;
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < width; i += gridDim.x * blockDim.x)
@@ -78,6 +81,7 @@ __global__ void k_ink2d_ring_store(const float *src, float *ring, int width, con
 __global__ void k_ink2d_attend(const float *q, const float *kb, const float *vb, const float *kc, const float *vc,
                                float *out, int heads, int kvHeads, int dim, int rows, const int *posDev, int window,
                                int cap) {
+  ink2_pdl_enter();
   extern __shared__ float sc[];
   __shared__ float red[32];
   const int h = blockIdx.x, r = blockIdx.y;
@@ -132,6 +136,7 @@ __global__ void k_ink2d_attend(const float *q, const float *kb, const float *vb,
 }
 
 __global__ void k_ink2d_silu_mul(const float *g, const float *u, float *out, int n) {
+  ink2_pdl_enter();
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x) {
     const float x = g[i];
     out[i] = x / (1.f + __expf(-x)) * u[i];

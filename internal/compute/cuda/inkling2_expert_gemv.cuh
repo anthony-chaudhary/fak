@@ -31,6 +31,7 @@ __global__ void __launch_bounds__(INK2_NV2_WARPS * 32)
     k_ink2_expert_nvfp4_v2(const uint8_t *__restrict__ Packed, const uint8_t *__restrict__ Scales,
                            const int *ids, const float *X, int xStride, float *Y, int rows, int in,
                            const float *escale, int situW, double beta, double lb) {
+  ink2_pdl_enter();
   extern __shared__ float4 xs4[];
   __shared__ float lut[16];
   const int slot = blockIdx.y;
@@ -260,6 +261,7 @@ template <int FMT, int R>
 __global__ void __launch_bounds__(256)
     k_ink2_expert_iq_v3(const unsigned char *__restrict__ W, const int *ids, const float *X, int xStride, float *Y,
                         int rows, int in, const float *escale, int situW, double beta, double lb) {
+  ink2_pdl_enter();
   extern __shared__ __align__(16) unsigned char ink2_iq3_sm[];
   constexpr int SB = Ink2IQShape<FMT>::SB, GBYTES = Ink2IQShape<FMT>::GRID_BYTES;
   float *xsh = (float *)ink2_iq3_sm;
@@ -363,6 +365,7 @@ template <int R>
 __global__ void __launch_bounds__(256)
     k_ink2_expert_iq4nl_v3(const unsigned char *__restrict__ W, const int *ids, const float *X, int xStride,
                            float *Y, int rows, int in, const float *escale, int situW, double beta, double lb) {
+  ink2_pdl_enter();
   extern __shared__ __align__(16) float ink2_kq_sm[];
   __shared__ float kv[16];
   const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;

@@ -3,6 +3,8 @@
 package ggufload
 
 import (
+	"fmt"
+	"hash/fnv"
 	"os"
 	"strconv"
 	"testing"
@@ -61,9 +63,15 @@ func TestInkling2CUDADecodeBench(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("inkling2 cuda bench: prompt %d prefill %s (%.2f tok/s); decode %d steps %s = %.2f tok/s; first tokens %v",
+	// The fnv64 of every generated id lets two arms (say FAK_INKLING2_PDL=0 and =1) be
+	// compared over the whole decode, not just the printed prefix.
+	h := fnv.New64a()
+	for _, id := range got {
+		_, _ = fmt.Fprintf(h, "%d,", id)
+	}
+	t.Logf("inkling2 cuda bench: prompt %d prefill %s (%.2f tok/s); decode %d steps %s = %.2f tok/s; first tokens %v; tokens %d fnv64 %016x",
 		len(prompt), st.Prefill, float64(len(prompt))/st.Prefill.Seconds(), st.DecodeSteps, st.Decode,
-		st.DecodeTokensPerSecond(), got[:min(8, len(got))])
+		st.DecodeTokensPerSecond(), got[:min(8, len(got))], len(got), h.Sum64())
 	if d := inkling2SpecDepth(); d > 0 {
 		sp := inkling2LastSpec
 		t.Logf("inkling2 cuda bench spec: depth %d, %d verifies, accepted %d/%d (%.2f tok/verify), draft %.3f ms/call, verify %.3f ms/call",

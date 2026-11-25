@@ -12,6 +12,7 @@
 // reduction, so a row's result equals the single-row GEMV's bit for bit.
 template <int R>
 __global__ void k_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int blockRows) {
+  ink2_pdl_enter();
   extern __shared__ float xs[];
   for (int i = threadIdx.x; i < R * in; i += blockDim.x) xs[i] = X[i];
   __syncthreads();
@@ -97,6 +98,7 @@ extern "C" int fcuda_ink2v_q5k_rows(const unsigned char *W, const float *X, floa
 // out[t*k + j] = x[t] for every row t and routed slot j: each (token, slot) pair gets
 // its token's input row, so the decode expert GEMV can run over T*k pairs.
 __global__ void k_ink2v_repeat_rows(const float *x, float *out, int n, int k) {
+  ink2_pdl_enter();
   const int pair = blockIdx.y;
   const float *src = x + (size_t)(pair / k) * n;
   float *dst = out + (size_t)pair * n;
@@ -117,6 +119,7 @@ __global__ void __launch_bounds__(INK2_Q8_WARPS * 32)
     k_ink2v_q8_rows(const signed char *__restrict__ W, const float *__restrict__ Wscale,
                     const signed char *__restrict__ qX, const float *__restrict__ xScale, float *__restrict__ Y, int out,
                     int in) {
+  ink2_pdl_enter();
   const int lane = threadIdx.x & 31;
   const int o = blockIdx.x * INK2_Q8_WARPS + (threadIdx.x >> 5);
   if (o >= out) return;
@@ -209,6 +212,7 @@ template <int NQ>
 __global__ void __launch_bounds__(1024)
     k_ink2v_mixc(Ink2States st, int ns, const float *queries, Ink2Norms nw, int norm, float eps, float *out, int n,
                  int T) {
+  ink2_pdl_enter();
   __shared__ Ink2MixShared sm;
   const size_t toff = (size_t)blockIdx.y * n;
   Ink2States sr;
@@ -263,6 +267,7 @@ extern "C" int fcuda_ink2v_mix(const float *const *states, int ns, const float *
 // k_ink2v_q5k_rows for a Q6_K W: every row keeps k_q6k_gemm<1>'s expression and order.
 template <int R>
 __global__ void k_ink2v_q6k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int blockRows) {
+  ink2_pdl_enter();
   extern __shared__ float xs[];
   for (int i = threadIdx.x; i < R * in; i += blockDim.x) xs[i] = X[i];
   __syncthreads();

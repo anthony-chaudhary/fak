@@ -33,6 +33,7 @@ __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
     k_ink2_attend_scores(const float *q, const float *r, const float *sinks, const float *relBias,
                          const float *kcache, double *scores, float *out, const float *meta, int heads, int kvHeads,
                          int headDim, int relLen, int extent, int window, int cap, float scale, Ink2Seq sq) {
+  ink2_pdl_enter();
   const int h = blockIdx.x, c = blockIdx.y, seq = blockIdx.z;
   q = ink2_row(q, sq.q, seq);
   r = ink2_row(r, sq.r, seq);
@@ -87,6 +88,7 @@ __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
 __global__ void __launch_bounds__(256)
     k_ink2_attend_exp(double *scores, const float *out, float *r, const float *meta, int headDim, int relLen,
                       int window, int cap, int chunks, Ink2Seq sq) {
+  ink2_pdl_enter();
   const int h = blockIdx.x, c = blockIdx.y, seq = blockIdx.z;
   scores = ink2_row(scores, sq.scores, seq);
   out = ink2_row(out, sq.out, seq);
@@ -112,6 +114,7 @@ template <bool STAGED>
 __global__ void __launch_bounds__(INK2_ATT_THREADS)
     k_ink2_attend_out(const double *scores, const float *vcache, const float *r, float *out, const float *meta,
                       int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq) {
+  ink2_pdl_enter();
   const int h = blockIdx.x, seq = blockIdx.z;
   scores = ink2_row(scores, sq.scores, seq);
   vcache = ink2_row(vcache, sq.vc, seq);

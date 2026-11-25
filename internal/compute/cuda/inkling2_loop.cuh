@@ -101,11 +101,13 @@ static __device__ void k_ink2_rms_row_body(const float *xr, const float *w, floa
 }
 
 __global__ void __launch_bounds__(1024) k_ink2_rms_rows(const float *x, const float *w, float *y, int n, float eps) {
+  ink2_pdl_enter();
   k_ink2_rms_row_body(x + (size_t)blockIdx.x * n, w, y + (size_t)blockIdx.x * n, n, eps);
 }
 
 // Two-input RMS (eps 1e-6, no weight) into the halves of a controller pair row.
 __global__ void k_ink2_ctrl_pair(const float *cur, const float *msg, float *pair, int n) {
+  ink2_pdl_enter();
   __shared__ double sh[33];
   const float *x = blockIdx.x == 0 ? cur : msg;
   float *y = pair + (size_t)blockIdx.x * n;
@@ -200,6 +202,7 @@ __device__ void ink2_mix_body(Ink2MixPlainShared &sm, const Ink2States &st, cons
 
 template <int NQ>
 __global__ void __launch_bounds__(INK2_MIX_THREADS) k_ink2_mix(Ink2States st, int ns, const float *queries, float *out, int n) {
+  ink2_pdl_enter();
   __shared__ Ink2MixPlainShared sm;
 #define INK2_MIX_CALL(NS) ink2_mix_body<NS, NQ>(sm, st, queries, out, n)
   INK2_NS_DISPATCH(ns, INK2_MIX_CALL)
@@ -368,6 +371,7 @@ __device__ void ink2_mixc_body(Ink2MixShared &sm, const Ink2States &st, const fl
 template <int NQ>
 __global__ void __launch_bounds__(1024)
     k_ink2_mixc(Ink2States st, int ns, const float *queries, Ink2Norms nw, int norm, float eps, float *out, int n) {
+  ink2_pdl_enter();
   __shared__ Ink2MixShared sm;
 #define INK2_MIXC_CALL(NS) ink2_mixc_body<NS, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n)
   INK2_NS_DISPATCH(ns, INK2_MIXC_CALL)
@@ -377,6 +381,7 @@ __global__ void __launch_bounds__(1024)
 // Block-per-row F32 GEMV: y[r] = W[r,:] . x for the small dense matrices (router,
 // controllers, sink and conv projections), which have few rows and long rows.
 __global__ void k_ink2_gemv_f32(const float *W, const float *x, float *y, int rows, int cols) {
+  ink2_pdl_enter();
   __shared__ float part[8];
   const int r = blockIdx.x;
   const float *wr = W + (size_t)r * cols;
@@ -404,6 +409,7 @@ struct Ink2CtrlSet {
 // g[j][r] = Down_j[r,:] . [rms(cur_j), rms(msg_j)], both RMS scales (eps 1e-6) folded out
 // of the dot; one block per (rank row, controller), float4 loads.
 __global__ void __launch_bounds__(256) k_ink2_ctrl_down4(Ink2CtrlSet cs, float *g, int n, int rank) {
+  ink2_pdl_enter();
   __shared__ float part[4][8];
   const int r = blockIdx.x, j = blockIdx.y;
   const float4 *c4 = (const float4 *)cs.cur[j], *m4 = (const float4 *)cs.msg[j];
@@ -445,6 +451,7 @@ __global__ void __launch_bounds__(256) k_ink2_ctrl_down4(Ink2CtrlSet cs, float *
 // every lane holds one output, so the float64 tanh runs on all 32 lanes at once.
 #define INK2_CTRL_APPLY_WARPS 4
 __global__ void __launch_bounds__(INK2_CTRL_APPLY_WARPS * 32) k_ink2_ctrl_apply64(Ink2CtrlSet cs, const float *g, float *out, int n) {
+  ink2_pdl_enter();
   const int j = blockIdx.y;
   const int lane = threadIdx.x & 31, half = lane >> 4, hl = lane & 15;
   const int base = (blockIdx.x * INK2_CTRL_APPLY_WARPS + (threadIdx.x >> 5)) * 32;
@@ -478,6 +485,7 @@ __global__ void __launch_bounds__(INK2_CTRL_APPLY_WARPS * 32) k_ink2_ctrl_apply6
 
 // RMS of `rows` contiguous rows, row q weighted by w.w[q] (null for none).
 __global__ void __launch_bounds__(1024) k_ink2_rms_multi(const float *x, Ink2Norms w, float *y, int n, float eps) {
+  ink2_pdl_enter();
   k_ink2_rms_row_body(x + (size_t)blockIdx.x * n, w.w[blockIdx.x], y + (size_t)blockIdx.x * n, n, eps);
 }
 
@@ -513,6 +521,7 @@ static __device__ __forceinline__ float ink2_conv_chan(float xc, int c, const fl
 __global__ void k_ink2_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
                             const float *resid, int n, int heads, int kn, float norm, const float *moeDown,
                             const float *moeWts, int moeK, Ink2Seq sq) {
+  ink2_pdl_enter();
   const int c = blockIdx.x * blockDim.x + threadIdx.x;
   if (c >= n) return;
   const int seq = blockIdx.y;
@@ -574,6 +583,7 @@ __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float 
                                 int heads, int kvHeads, int headDim, int relLen, float qkClip, float relClip,
                                 float eps, int global, float alpha, float floorTok, int cap, Ink2KVConv cv0,
                                 Ink2Seq sq) {
+  ink2_pdl_enter();
   const int lane = threadIdx.x & 31;
   const int b = blockIdx.x;
   const int seq = blockIdx.y;
@@ -645,6 +655,7 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
                               const float *kcache, const float *vcache, double *scores, float *out,
                               const float *meta, int heads, int kvHeads, int headDim, int relLen,
                               int extent, int window, int cap, float scale, Ink2Seq sq) {
+  ink2_pdl_enter();
   const int h = blockIdx.x;
   // blockIdx.y is the sequence, each with its own scores rows
   const int seq = blockIdx.y;
@@ -739,6 +750,7 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
 #include "inkling2_attend_split.cuh"
 
 __global__ void k_ink2_sigmoid_mul(float *x, const float *gate, int n) {
+  ink2_pdl_enter();
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) x[i] = __fmul_rn(x[i], ink2_sigmoid(gate[i]));
 }
@@ -747,6 +759,7 @@ __global__ void k_ink2_sigmoid_mul(float *x, const float *gate, int n) {
 // weights renormalized over the selected probabilities and scaled. One warp.
 __global__ void k_ink2_route(const float *logits, const float *bias, int *ids, float *wts, int nexp, int k,
                              float wscale) {
+  ink2_pdl_enter();
   __shared__ float probs[INK2_MAX_EXPERTS], sel[INK2_MAX_EXPERTS];
   const int lane = threadIdx.x;
   for (int i = lane; i < nexp; i += 32) {
@@ -791,12 +804,14 @@ __global__ void k_ink2_route(const float *logits, const float *bias, int *ids, f
 
 // Multiply each routed slot's rows by its expert's per-tensor scale.
 __global__ void k_ink2_expert_scale(float *y, const int *ids, const float *scale, int rows) {
+  ink2_pdl_enter();
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < rows) y[(size_t)blockIdx.y * rows + i] = __fmul_rn(y[(size_t)blockIdx.y * rows + i], scale[ids[blockIdx.y]]);
 }
 
 // SITU activation of one routed slot: act = beta*tanh(g/beta)*sigmoid(g) * lb*tanh(u/lb).
 __global__ void k_ink2_situ(const float *gu, float *act, int width, int actStride, double beta, double lb) {
+  ink2_pdl_enter();
   const int j = blockIdx.x * blockDim.x + threadIdx.x;
   if (j >= width) return;
   const float *row = gu + (size_t)blockIdx.y * 2 * width;
@@ -809,6 +824,7 @@ __global__ void k_ink2_situ(const float *gu, float *act, int width, int actStrid
 
 // out[j] = sum over routed slots, in routing order, of weight * down[slot][j].
 __global__ void k_ink2_moe_combine(const float *down, const float *wts, float *out, int k, int n) {
+  ink2_pdl_enter();
   const int j = blockIdx.x * blockDim.x + threadIdx.x;
   if (j >= n) return;
   float acc = 0.f;
@@ -817,6 +833,7 @@ __global__ void k_ink2_moe_combine(const float *down, const float *wts, float *o
 }
 
 __global__ void k_ink2_add(const float *a, const float *b, float *out, int n) {
+  ink2_pdl_enter();
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) out[i] = __fadd_rn(a[i], b[i]);
 }
@@ -832,6 +849,7 @@ static __device__ __forceinline__ unsigned long long ink2_argkey(float v, int i)
 // blockIdx.y is the row of a batched launch: logits advance by ld, keys by 2 (a [rows][4]
 // int layout whose ints 2..3 are the row's key).
 __global__ void k_ink2_softcap_argmax(float *logits, int n, float cap, unsigned long long *key, long long ld) {
+  ink2_pdl_enter();
   logits += ld * (long long)blockIdx.y;
   key += 2 * blockIdx.y;
   __shared__ unsigned long long best[32];
@@ -860,6 +878,7 @@ __global__ void k_ink2_softcap_argmax(float *logits, int n, float cap, unsigned 
 
 // Thread i decodes row i of the [rows][4] layout (key at ints 2..3).
 __global__ void k_ink2_argkey_index(const unsigned long long *key, int *outIdx) {
+  ink2_pdl_enter();
   const int i = threadIdx.x;
   outIdx[4 * i] = (int)(0xffffffffu - (unsigned int)(key[2 * i] & 0xffffffffull));
 }
@@ -890,6 +909,7 @@ enum { INK2_NVFP4 = 0, INK2_IQ2XS, INK2_IQ2S, INK2_IQ3XXS, INK2_IQ3S, INK2_IQ4NL
 template <int FMT>
 __global__ void k_ink2_expert_iq(const unsigned char *W, const int *ids, const float *X, int xStride, float *Y,
                                  int rows, int in, const float *escale, int situW, double beta, double lb) {
+  ink2_pdl_enter();
   extern __shared__ float xsh[];
   const int lane = threadIdx.x & 31;
   const int slot = blockIdx.y;
@@ -1000,6 +1020,7 @@ __global__ void k_ink2_expert_iq(const unsigned char *W, const int *ids, const f
 __global__ void k_ink2_expert_nvfp4(const uint8_t *Packed, const uint8_t *Scales, const int *ids, const float *X,
                                     int xStride, float *Y, int rows, int in, const float *escale, int situW,
                                     double beta, double lb) {
+  ink2_pdl_enter();
   extern __shared__ float xs[];
   __shared__ float lut[16];
   const int slot = blockIdx.y;
@@ -1146,6 +1167,7 @@ static int fcuda_ink2_mix_plain(const Ink2States &st, const float *queries, int 
 // Q8_0 block-32 quantization of x * sigmoid(gate), one warp per block: the value is
 // k_ink2_sigmoid_mul's and the codes k_q8_quant_act's.
 __global__ void k_ink2_q8_quant_gated(const float *x, const float *gate, signed char *qX, float *xScale) {
+  ink2_pdl_enter();
   const int i = blockIdx.x * 32 + threadIdx.x;
   const float v = __fmul_rn(x[i], ink2_sigmoid(gate[i]));
   const float a = q8_activation_warp_max(fmaxf(0.f, fabsf(v)));
@@ -1166,6 +1188,7 @@ __global__ void __launch_bounds__(INK2_Q8_WARPS * 32)
     k_ink2_q8_gemv(const signed char *__restrict__ W, const float *__restrict__ Wscale,
                    const signed char *__restrict__ qX, const float *__restrict__ xScale, float *__restrict__ Y, int out,
                    int in) {
+  ink2_pdl_enter();
   const int lane = threadIdx.x & 31;
   const int o = blockIdx.x * INK2_Q8_WARPS + (threadIdx.x >> 5);
   if (o >= out) return;
@@ -1528,6 +1551,11 @@ extern "C" int fcuda_ink2_graph_end(void) {
     cudaGraphExecDestroy(g_ink2_exec);
     g_ink2_exec = nullptr;
   }
+  const int pe = ink2_pdl_rewrite(graph);
+  if (pe != (int)cudaSuccess) {
+    cudaGraphDestroy(graph);
+    return pe;
+  }
   const cudaError_t ie = cudaGraphInstantiate(&g_ink2_exec, graph, 0);
   cudaGraphDestroy(graph);
   return (int)ie;
@@ -1555,6 +1583,11 @@ extern "C" int fcuda_ink2_graph_end_slot(int slot) {
   if (g_ink2_slot_exec[slot]) {
     cudaGraphExecDestroy(g_ink2_slot_exec[slot]);
     g_ink2_slot_exec[slot] = nullptr;
+  }
+  const int pe = ink2_pdl_rewrite(graph);
+  if (pe != (int)cudaSuccess) {
+    cudaGraphDestroy(graph);
+    return pe;
   }
   const cudaError_t ie = cudaGraphInstantiate(&g_ink2_slot_exec[slot], graph, 0);
   cudaGraphDestroy(graph);

@@ -289,6 +289,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/mega_moe_fp4.cuh"
 
 // inkling2_loop resident decode ops; uses the IQ grids and NVFP4 decoders above.
+#include "cuda/inkling2_pdl.cuh"
 #include "cuda/inkling2_loop.cuh"
 #include "cuda/inkling2_prefill.cuh"
 #include "cuda/inkling2_dspark.cuh"

@@ -262,6 +262,7 @@ template <int F, int BM>
 __global__ void __launch_bounds__(kThreads, 2)
     k_ink2d_mmq(const uint8_t *__restrict__ W, const float *__restrict__ S, const int8_t *__restrict__ qx,
                 const float2 *__restrict__ xs, float *__restrict__ Y, int out, int in, int T) {
+  ink2_pdl_enter();
   constexpr bool kSub16 = FmtTraits<F>::kSub16;
   constexpr bool kMin = FmtTraits<F>::kMin;
   constexpr int WM = BM / 32, WN = 8 / WM;
@@ -418,6 +419,7 @@ __global__ void __launch_bounds__(kThreads, 2)
 template <int TM>
 __global__ void __launch_bounds__(256) k_ink2d_f32(const float *__restrict__ W, const float *__restrict__ X,
                                                    float *__restrict__ Y, int out, int in, int T) {
+  ink2_pdl_enter();
   constexpr int R = TM / 16;
   __shared__ float sW[16][TM + 4];
   __shared__ float sX[16][TM + 4];
