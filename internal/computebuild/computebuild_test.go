@@ -155,6 +155,71 @@ func TestCUDAArchParsingAndGencode(t *testing.T) {
 		t.Errorf("expected error for unsupported arch sm_75")
 	}
 
+	// 4b. Arch-specific and family suffixes on a listed base emit their own image.
+	for arch, want := range map[string]string{
+		"sm_120f": "arch=compute_120f,code=sm_120f",
+		"sm_120a": "arch=compute_120a,code=sm_120a",
+		"120f":    "arch=compute_120f,code=sm_120f",
+		"sm_90a":  "arch=compute_90a,code=sm_90a",
+	} {
+		got, desc, err := ParseCUDAArchMatrix(sampleArchTxt, arch)
+		if err != nil || len(got) != 2 || got[0] != "-gencode" || got[1] != want {
+			t.Errorf("ParseCUDAArchMatrix(%q) = %v, %v; want %s", arch, got, err, want)
+		}
+		if !strings.Contains(desc, "(single-arch dev build)") {
+			t.Errorf("unexpected buildArchs for %q: %q", arch, desc)
+		}
+	}
+	// cuobjdump lists an sm_120f cubin as sm_120; sm_120a keeps its name.
+	for code, want := range map[string]string{"sm_120f": "sm_120", "sm_120a": "sm_120a", "sm_120": "sm_120"} {
+		if got := cudaListedSASSArch(code); got != want {
+			t.Errorf("cudaListedSASSArch(%q) = %q, want %q", code, got, want)
+		}
+	}
+	if !cudaImageSetMatches("ELF", []string{"sm_120"}, []string{"sm_120f"}) || !cudaImageSetMatches("ELF", []string{"sm_120f"}, []string{"sm_120f"}) {
+		t.Errorf("sm_120f requirement must accept its sm_120f or base-name listing")
+	}
+	if cudaImageSetMatches("ELF", []string{"sm_120"}, []string{"sm_120a"}) || cudaImageSetMatches("PTX", []string{"compute_120"}, []string{"compute_120f"}) {
+		t.Errorf("only the ELF family suffix may alias its base name")
+	}
+	if missing := checkRequestedCUDAImages([]string{"sm_120f"}, []string{"sm_120"}, nil); len(missing) != 1 {
+		t.Errorf("provenance check of sm_120f must not accept a bare sm_120 listing: %v", missing)
+	}
+	if !cudaNeedsFamilyMarker([]string{"sm_120"}, []string{"sm_120f"}) || cudaNeedsFamilyMarker([]string{"sm_120"}, []string{"sm_120"}) {
+		t.Errorf("only an aliased sm_120f listing needs the fatbin family marker")
+	}
+	// cuobjdump --dump-elf-symbols keeps the family suffix in each fatbin ELF header.
+	for _, c := range []struct {
+		dump string
+		want string
+	}{
+		{"member a.a:k.o:\n\nFatbin elf code:\n================\narch = sm_120f\ncode version = [1,8]\n\nsymbols:\nSTT_FUNC STB_GLOBAL STO_ENTRY arch = sm_75\nFatbin ptx code:\n================\narch = sm_120\n", "sm_120f"},
+		{"Fatbin elf code:\narch = sm_120f\nFatbin elf code:\narch = sm_120\n", "sm_120,sm_120f"},
+		{"Fatbin elf code:\r\narch = sm_120a\r\n", "sm_120a"},
+	} {
+		w := &cudaFatbinELFArches{}
+		for _, chunk := range strings.SplitAfter(c.dump, "e") {
+			if _, err := w.Write([]byte(chunk)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got, err := w.arches(); err != nil || strings.Join(got, ",") != c.want {
+			t.Errorf("fatbin ELF arches of %q = %v, %v; want %s", c.dump, got, err, c.want)
+		}
+	}
+	for _, dump := range []string{"", "Fatbin ptx code:\narch = sm_120\n", "Fatbin elf code:\narch = sm_120x\n"} {
+		w := &cudaFatbinELFArches{}
+		_, _ = w.Write([]byte(dump))
+		if got, err := w.arches(); err == nil {
+			t.Errorf("fatbin ELF arches of %q = %v, want refusal", dump, got)
+		}
+	}
+	for _, arch := range []string{"sm_75a", "sm_80a", "sm_90f", "sm_121f", "sm_120x", "sm_a", "sm_120af"} {
+		if _, _, err := ParseCUDAArchMatrix(sampleArchTxt, arch); err == nil {
+			t.Errorf("expected error for arch %q", arch)
+		}
+	}
+
 	// 5. Empty arch list
 	_, _, err = ParseCUDAArchMatrix("", "")
 	if err == nil {

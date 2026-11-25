@@ -135,6 +135,7 @@ func init() {
 	initCUDAQ4KPrefillArm(int(sm))
 	initCUDAQ4KDecodeArm()
 	initCUDAQ6KPrefillArm(int(sm))
+	initCUDAInk2PNVFP4W4A4()
 	if C.fcuda_ts_enabled() != 0 {
 		installCUDAKernelProfile()
 	}

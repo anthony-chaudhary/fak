@@ -466,12 +466,375 @@ static int ink2p_nv3_launch(const uint8_t *W, const uint8_t *scales, const int *
   return (int)cudaGetLastError();
 }
 
+// Native W4A4 path: activations are quantized to NVFP4 with the algorithm of
+// llama.cpp's quantize_mmq_nvfp4 (fp32 row scale amax / (6 * 448), one UE4M3 code per
+// 16 columns picked by a +-2 code squared-error search, RN-satfinite E2M1 values) but
+// IEEE-rounded at every step; llama.cpp builds with fast math, so near-tie codes can
+// differ from it, while the Go port in the tests matches this kernel bit for bit. And
+// each 64-wide K step is one block-scaled mma.m16n8k64 e2m1 x e2m1 with the
+// repacked E4M3 weight scales and the activation codes applied in hardware. The
+// repacked planes are already in MMA order (byte i = K 2i low, 2i+1 high), so the
+// output needs no factor beyond the row scale and escale. The instructions exist
+// only in sm_120a / sm_120f (and sm_121a) images; other images compile empty
+// kernels and the host learns which one loaded from k_ink2p_nvf4_probe.
+#if defined(__CUDA_ARCH__) &&                                                    \
+    (defined(__CUDA_ARCH_FEAT_SM120_ALL) || defined(__CUDA_ARCH_FEAT_SM121_ALL) || \
+     (defined(__CUDA_ARCH_FAMILY_SPECIFIC__) && __CUDA_ARCH_FAMILY_SPECIFIC__ == 1200))
+#define INK2P_NVF4_NATIVE 1
+#else
+#define INK2P_NVF4_NATIVE 0
+#endif
+
+#define INK2P_NVF4_BK 128
+
+#if INK2P_NVF4_NATIVE
+// Two floats to one byte of E2M1 codes; the first cvt source lands in the high nibble.
+static __device__ __forceinline__ uint32_t ink2p_nvf4_e2m1x2(float lo, float hi) {
+  uint16_t r;
+  asm("{ .reg .b8 t; cvt.rn.satfinite.e2m1x2.f32 t, %1, %2; cvt.u16.u8 %0, t; }" : "=h"(r) : "f"(hi), "f"(lo));
+  return r;
+}
+
+static __device__ __forceinline__ uint32_t ink2p_nvf4_e4m3(float x) {
+  uint16_t r;
+  asm("cvt.rn.satfinite.e4m3x2.f32 %0, %1, %2;" : "=h"(r) : "f"(0.f), "f"(x));
+  return r & 0xffu;
+}
+
+static __device__ __forceinline__ float ink2p_nvf4_e2m1abs(uint32_t c) {
+  const uint32_t e = (c >> 1) & 3u, m = c & 1u;
+  return __uint_as_float(e ? (((e + 126u) << 23) | (m << 22)) : (m ? 0x3f000000u : 0u));
+}
+
+// Squared reconstruction error of one 16-value block (v already divided by the row
+// scale) under block scale sc, summed in llama.cpp's element order.
+static __device__ __forceinline__ float ink2p_nvf4_err(const float (&v)[16], float sc) {
+  const float inv = sc > 0.f ? __frcp_rn(sc) : 0.f;
+  float err = 0.f;
+#pragma unroll
+  for (int k = 0; k < 16; k += 2) {
+    const uint32_t q = ink2p_nvf4_e2m1x2(__fmul_rn(v[k], inv), __fmul_rn(v[k + 1], inv));
+    const float e0 = __fsub_rn(fabsf(v[k]), __fmul_rn(ink2p_nvf4_e2m1abs(q & 0xfu), sc));
+    const float e1 = __fsub_rn(fabsf(v[k + 1]), __fmul_rn(ink2p_nvf4_e2m1abs(q >> 4), sc));
+    err = fmaf(e0, e0, err);
+    err = fmaf(e1, e1, err);
+  }
+  return err;
+}
+
+static __device__ __forceinline__ void ink2p_nvf4_mma(float (&d)[4], uint32_t a0, uint32_t a1, uint32_t a2,
+                                                      uint32_t a3, uint32_t b0, uint32_t b1, uint32_t sfa,
+                                                      uint32_t sfb) {
+  // {byte-id, thread-id} = {0, 0}: all four scale bytes are used; scale_A comes from
+  // lanes %4 == 0 (row g) and 1 (row g+8), scale_B from lane %4 == 0 (column g).
+  asm("mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 "
+      "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3}, %10, {0, 0}, %11, {0, 0};\n"
+      : "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3])
+      : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(sfa), "r"(sfb));
+}
+
+// Byte offset of 16-byte chunk c of 64-byte row r. XOR by (r >> 1) & 3 puts the
+// eight rows a fragment load touches on distinct bank quads.
+static __device__ __forceinline__ int ink2p_nvf4_swz(int r, int c) { return r * 64 + ((c ^ ((r >> 1) & 3)) << 4); }
+#endif
+
+__device__ int g_ink2p_nvf4_flag;
+__global__ void k_ink2p_nvf4_probe() { g_ink2p_nvf4_flag = INK2P_NVF4_NATIVE; }
+
+// One block per X row: Q[r] holds in/2 bytes of E2M1 pairs (low nibble = even column),
+// QS[r] in/16 UE4M3 codes, RS[r] the fp32 row scale. Requires in % 16 == 0.
+template <int T>
+__global__ void __launch_bounds__(T) k_ink2p_nvf4_quant(const int *offsets, const int *tiles, const int *ntiles,
+                                                        const float *X, int xDiv, int xStride, uint8_t *Q,
+                                                        uint8_t *QS, float *RS, int in) {
+#if INK2P_NVF4_NATIVE
+  __shared__ float wmax[T / 32];
+  const int nrows = ink2p_nv2_xrows(offsets, tiles, ntiles, xDiv);
+  const int nb = in / 16;
+  for (int r = blockIdx.x; r < nrows; r += gridDim.x) {
+    const float *x = X + (size_t)r * xStride;
+    float amax = 0.f;
+    for (int i = threadIdx.x; i < in; i += T) amax = fmaxf(amax, fabsf(x[i]));
+#pragma unroll
+    for (int o = 16; o > 0; o >>= 1) amax = fmaxf(amax, __shfl_xor_sync(0xffffffffu, amax, o));
+    if ((threadIdx.x & 31) == 0) wmax[threadIdx.x >> 5] = amax;
+    __syncthreads();
+    amax = wmax[0];
+#pragma unroll
+    for (int w = 1; w < T / 32; ++w) amax = fmaxf(amax, wmax[w]);
+    __syncthreads();
+    const float rs = __fdiv_rn(amax, 6.f * 448.f);
+    if (threadIdx.x == 0) RS[r] = rs;
+    const float ic = rs > 0.f ? __frcp_rn(rs) : 0.f;
+    for (int b = threadIdx.x; b < nb; b += T) {
+      float vals[16], v[16], amax16 = 0.f;
+#pragma unroll
+      for (int k = 0; k < 16; ++k) {
+        vals[k] = x[b * 16 + k];
+        v[k] = __fmul_rn(vals[k], ic);
+        amax16 = fmaxf(amax16, fabsf(v[k]));
+      }
+      const float a6 = __fdiv_rn(amax16, 6.f);
+      const int first = a6 > 0.f ? (int)ink2p_nvf4_e4m3(a6) : 0;
+      int code = first;
+      float sc = ink2p_nv2_e4m3x2((uint32_t)first).x;
+      float best = ink2p_nvf4_err(v, sc);
+#pragma unroll
+      for (int i = 1; i < 5; ++i) {
+        const int tc = first + ((i & 1) ? -((i + 1) >> 1) : (i >> 1));  // -1, +1, -2, +2
+        if (tc < 0 || tc > 0x7e) continue;
+        const float tsc = ink2p_nv2_e4m3x2((uint32_t)tc).x;
+        const float cur = ink2p_nvf4_err(v, tsc);
+        if (cur < best) {
+          best = cur;
+          code = tc;
+          sc = tsc;
+        }
+      }
+      const float s = __fmul_rn(ic, sc > 0.f ? __frcp_rn(sc) : 0.f);
+      uint32_t q0 = 0, q1 = 0;
+#pragma unroll
+      for (int i = 0; i < 4; ++i) {
+        q0 |= ink2p_nvf4_e2m1x2(__fmul_rn(vals[2 * i], s), __fmul_rn(vals[2 * i + 1], s)) << (8 * i);
+        q1 |= ink2p_nvf4_e2m1x2(__fmul_rn(vals[8 + 2 * i], s), __fmul_rn(vals[9 + 2 * i], s)) << (8 * i);
+      }
+      *reinterpret_cast<uint2 *>(Q + (size_t)r * (in / 2) + b * 8) = make_uint2(q0, q1);
+      QS[(size_t)r * nb + b] = (uint8_t)code;
+    }
+  }
+#endif
+}
+
+// Same bucketing contract, grid and epilogue placement as k_ink2p_expert_nvfp4_v2 with
+// NTILE = 1. Warp w owns rows [w*16*MT, (w+1)*16*MT) against every n8 tile of the 32
+// pairs; a stage carries INK2P_NVF4_BK columns of weights, weight scales, activation
+// nibbles and activation codes.
+template <int MT, int WARPS, int STAGES, int PF>
+__global__ void __launch_bounds__(WARPS * 32) k_ink2p_expert_nvfp4_w4a4(
+    const uint8_t *Packed, const uint8_t *Scales, const int *offsets, const int *order, const int *tiles,
+    const int *ntiles, const uint8_t *Q, const uint8_t *QS, const float *RS, int xDiv, float *Y, int rows, int in,
+    const float *escale) {
+#if INK2P_NVF4_NATIVE
+  constexpr int BK = INK2P_NVF4_BK, KB = BK / 16, BM = WARPS * 16 * MT, P = INK2P_NV2_PAIRS, NT = P / 8;
+  constexpr int T = WARPS * 32;
+  static_assert(BK / 2 == 64, "ink2p_nvf4_swz assumes 64-byte stage rows");
+  constexpr int SW = BM * (BK / 2), SWS = BM * KB, SX = P * (BK / 2), SXS = P * KB;
+  constexpr int STAGE = SW + SWS + SX + SXS;
+  extern __shared__ __align__(16) uint8_t ink2p_nvf4_smem[];
+  __shared__ int pairs[P], xrows[P];
+  __shared__ float prs[P];
+  if ((int)blockIdx.y >= ntiles[0]) return;
+  const int e = tiles[2 * blockIdx.y], start = tiles[2 * blockIdx.y + 1];
+  const int np = min(P, offsets[e + 1] - start);
+  const int tid = threadIdx.x;
+  for (int i = tid; i < P; i += T) {
+    const int p = order[start + (i < np ? i : 0)];
+    pairs[i] = i < np ? p : -1;
+    xrows[i] = p / xDiv;
+    prs[i] = RS[p / xDiv];
+  }
+  __syncthreads();
+  const int nta = (np + 7) >> 3;
+  const int rb = blockIdx.x * BM;
+  const size_t wrow0 = (size_t)e * rows + rb;
+  const int rowBytes = in / 2, nb = in / 16, nk = in / BK;
+
+  auto load = [&](int stage, int kc) {
+    uint8_t *s = ink2p_nvf4_smem + stage * STAGE;
+    const int k0 = kc * BK;
+    for (int i = tid; i < BM * 4; i += T) {
+      const int r = i >> 2, c = i & 3;
+      ink2p_nv2_cp16w<PF>(s + ink2p_nvf4_swz(r, c), Packed + (wrow0 + r) * rowBytes + k0 / 2 + c * 16);
+    }
+    for (int i = tid; i < BM; i += T) ink2p_nv2_cp8(s + SW + i * KB, Scales + (wrow0 + i) * nb + k0 / 16);
+    for (int i = tid; i < nta * 8 * 4; i += T) {
+      const int c = i >> 2, j = i & 3;
+      ink2p_nv2_cp16w<PF>(s + SW + SWS + ink2p_nvf4_swz(c, j), Q + (size_t)xrows[c] * rowBytes + k0 / 2 + j * 16);
+    }
+    for (int i = tid; i < nta * 8; i += T)
+      ink2p_nv2_cp8(s + SW + SWS + SX + i * KB, QS + (size_t)xrows[i] * nb + k0 / 16);
+  };
+
+  const int warp = tid >> 5, lane = tid & 31, g = lane >> 2, t = lane & 3;
+  const int wr = warp * 16 * MT;
+  float acc[MT][NT][4];
+#pragma unroll
+  for (int m = 0; m < MT; ++m)
+#pragma unroll
+    for (int n = 0; n < NT; ++n) acc[m][n][0] = acc[m][n][1] = acc[m][n][2] = acc[m][n][3] = 0.f;
+
+#pragma unroll
+  for (int s = 0; s < STAGES - 1; ++s) {
+    if (s < nk) load(s, s);
+    ink2p_nv2_commit();
+  }
+  for (int kc = 0; kc < nk; ++kc) {
+    ink2p_nv2_wait<STAGES - 2>();
+    __syncthreads();
+    {
+      const int nx = kc + STAGES - 1;
+      if (nx < nk) load(nx % STAGES, nx);
+      ink2p_nv2_commit();
+    }
+    const uint8_t *s = ink2p_nvf4_smem + (kc % STAGES) * STAGE;
+    const uint8_t *sw = s, *sws = s + SW, *sx = s + SW + SWS, *sxs = s + SW + SWS + SX;
+#pragma unroll
+    for (int ks = 0; ks < BK / 64; ++ks) {
+      uint32_t b0[NT], b1[NT], sb[NT];
+#pragma unroll
+      for (int n = 0; n < NT; ++n)
+        if (n < nta) {
+          const int c = n * 8 + g;
+          b0[n] = *reinterpret_cast<const uint32_t *>(sx + ink2p_nvf4_swz(c, 2 * ks) + 4 * t);
+          b1[n] = *reinterpret_cast<const uint32_t *>(sx + ink2p_nvf4_swz(c, 2 * ks + 1) + 4 * t);
+          sb[n] = *reinterpret_cast<const uint32_t *>(sxs + c * KB + 4 * ks);
+        }
+#pragma unroll
+      for (int m = 0; m < MT; ++m) {
+        const int r0 = wr + m * 16 + g;
+        const uint32_t a0 = *reinterpret_cast<const uint32_t *>(sw + ink2p_nvf4_swz(r0, 2 * ks) + 4 * t);
+        const uint32_t a1 = *reinterpret_cast<const uint32_t *>(sw + ink2p_nvf4_swz(r0 + 8, 2 * ks) + 4 * t);
+        const uint32_t a2 = *reinterpret_cast<const uint32_t *>(sw + ink2p_nvf4_swz(r0, 2 * ks + 1) + 4 * t);
+        const uint32_t a3 = *reinterpret_cast<const uint32_t *>(sw + ink2p_nvf4_swz(r0 + 8, 2 * ks + 1) + 4 * t);
+        const uint32_t sa = *reinterpret_cast<const uint32_t *>(sws + (r0 + 8 * (t & 1)) * KB + 4 * ks);
+#pragma unroll
+        for (int n = 0; n < NT; ++n)
+          if (n < nta) ink2p_nvf4_mma(acc[m][n], a0, a1, a2, a3, b0[n], b1[n], sa, sb[n]);
+      }
+    }
+  }
+  ink2p_nv2_wait<0>();
+  const float f = escale ? escale[e] : 1.f;
+#pragma unroll
+  for (int m = 0; m < MT; ++m)
+#pragma unroll
+    for (int n = 0; n < NT; ++n)
+#pragma unroll
+      for (int c = 0; c < 4; ++c) {
+        const int row = rb + wr + m * 16 + g + (c >= 2 ? 8 : 0), col = n * 8 + 2 * t + (c & 1);
+        if (n < nta && col < np) Y[(size_t)pairs[col] * rows + row] = acc[m][n][c] * prs[col] * f;
+      }
+#endif
+}
+
+// 1 when the loaded image carries the native kernels. Backend init probes eagerly so
+// capture and eager calls agree; only a successful probe is cached, and a probe is
+// skipped while g_stream captures or another call's error is still pending so that
+// error reaches its own status check.
+static int g_ink2p_nvf4_avail = -1;
+static int ink2p_nvf4_available() {
+  if (g_ink2p_nvf4_avail >= 0) return g_ink2p_nvf4_avail;
+  cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+  if (cudaStreamIsCapturing(g_stream, &capture) != cudaSuccess || capture != cudaStreamCaptureStatusNone) return 0;
+  if (cudaPeekAtLastError() != cudaSuccess) return 0;
+  int flag = 0;
+  k_ink2p_nvf4_probe<<<1, 1, 0, g_stream>>>();
+  cudaError_t e = cudaGetLastError();
+  if (e == cudaSuccess)
+    e = cudaMemcpyFromSymbolAsync(&flag, g_ink2p_nvf4_flag, sizeof(flag), 0, cudaMemcpyDeviceToHost, g_stream);
+  if (e == cudaSuccess) e = cudaStreamSynchronize(g_stream);
+  if (e != cudaSuccess) {
+    static bool logged = false;
+    if (!logged) {
+      fprintf(stderr, "fak-cuda: NVFP4 W4A4 image probe failed (%s); int8 path until a probe succeeds\n",
+              cudaGetErrorString(e));
+      logged = true;
+    }
+    (void)cudaGetLastError();
+    return 0;
+  }
+  g_ink2p_nvf4_avail = flag == 1 ? 1 : 0;
+  return g_ink2p_nvf4_avail;
+}
+
+extern "C" int fcuda_ink2p_nvfp4_w4a4_available(void) { return ink2p_nvf4_available(); }
+
+// Grow-only NVFP4 activation scratch: nibbles, then UE4M3 codes, then fp32 row scales.
+static uint8_t *g_ink2p_nvf4_q = nullptr;
+static size_t g_ink2p_nvf4_q_cap = 0;
+// Layout of the last quantize, for the test readback.
+static size_t g_ink2p_nvf4_q_rows = 0, g_ink2p_nvf4_q_bytes = 0, g_ink2p_nvf4_s_bytes = 0;
+static int g_ink2p_nvf4_q_in = 0;
+
+template <int MT, int WARPS, int STAGES, int PF = 1>
+static int ink2p_nvf4_launch(const uint8_t *W, const uint8_t *scales, const int *offsets, const int *order,
+                             const int *tiles, const int *ntiles, int maxTiles, const float *X, int xDiv, int xStride,
+                             float *Y, int rows, int in, const float *escale) {
+  constexpr int BK = INK2P_NVF4_BK, BM = WARPS * 16 * MT, P = INK2P_NV2_PAIRS, QT = 128;
+  constexpr int STAGE = BM * (BK / 2) + BM * (BK / 16) + P * (BK / 2) + P * (BK / 16);
+  constexpr int SMEM = STAGES * STAGE;
+  const size_t maxRows = ((size_t)P * maxTiles + xDiv - 1) / xDiv;
+  const size_t qBytes = (maxRows * (in / 2) + 15) & ~(size_t)15, sBytes = (maxRows * (in / 16) + 15) & ~(size_t)15;
+  const size_t need = qBytes + sBytes + maxRows * sizeof(float);
+  if (need > g_ink2p_nvf4_q_cap) {
+    // cudaMalloc/cudaFree inside a capture invalidate it; the caller must size the
+    // scratch with an eager call of the largest shape before capturing.
+    cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+    if (cudaStreamIsCapturing(g_stream, &capture) != cudaSuccess || capture != cudaStreamCaptureStatusNone)
+      return (int)cudaErrorStreamCaptureUnsupported;
+    if (g_ink2p_nvf4_q) cudaFree(g_ink2p_nvf4_q);
+    g_ink2p_nvf4_q = nullptr;
+    g_ink2p_nvf4_q_cap = 0;
+    const cudaError_t e = cudaMalloc(&g_ink2p_nvf4_q, need);
+    if (e != cudaSuccess) return (int)e;
+    g_ink2p_nvf4_q_cap = need;
+  }
+  uint8_t *q = g_ink2p_nvf4_q, *qs = q + qBytes;
+  float *rs = reinterpret_cast<float *>(qs + sBytes);
+  g_ink2p_nvf4_q_rows = maxRows;
+  g_ink2p_nvf4_q_bytes = qBytes;
+  g_ink2p_nvf4_s_bytes = sBytes;
+  g_ink2p_nvf4_q_in = in;
+  if (SMEM > 48 * 1024) {
+    static bool attr = false;
+    if (!attr) {
+      const cudaError_t e = cudaFuncSetAttribute(k_ink2p_expert_nvfp4_w4a4<MT, WARPS, STAGES, PF>,
+                                                 cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM);
+      if (e != cudaSuccess) return (int)e;
+      attr = true;
+    }
+  }
+  const int qgrid = (int)(maxRows < 1 ? 1 : maxRows < 4096 ? maxRows : 4096);
+  FCUDA_TS("k_ink2p_nvf4_quant", qgrid,
+           k_ink2p_nvf4_quant<QT><<<qgrid, QT, 0, g_stream>>>(offsets, tiles, ntiles, X, xDiv, xStride, q, qs, rs, in));
+  const dim3 grid(rows / BM, maxTiles);
+  FCUDA_TS("k_ink2p_expert_nvfp4_w4a4", grid,
+           (k_ink2p_expert_nvfp4_w4a4<MT, WARPS, STAGES, PF><<<grid, WARPS * 32, SMEM, g_stream>>>(
+               W, scales, offsets, order, tiles, ntiles, q, qs, rs, xDiv, Y, rows, in, escale)));
+  return (int)cudaGetLastError();
+}
+
+// Copies the first nrows rows of the last W4A4 activation quantize (nibbles, UE4M3
+// codes, row scales) to the host so a test can compare them with the host quantizer.
+extern "C" int fcuda_ink2p_nvfp4_w4a4_read_quant(int nrows, int in, uint8_t *q, uint8_t *qs, float *rs) {
+  if (!g_ink2p_nvf4_q || nrows < 0 || (size_t)nrows > g_ink2p_nvf4_q_rows || in != g_ink2p_nvf4_q_in)
+    return (int)cudaErrorInvalidValue;
+  const uint8_t *dq = g_ink2p_nvf4_q, *dqs = dq + g_ink2p_nvf4_q_bytes;
+  const uint8_t *drs = dqs + g_ink2p_nvf4_s_bytes;
+  cudaError_t e = cudaMemcpyAsync(q, dq, (size_t)nrows * (in / 2), cudaMemcpyDeviceToHost, g_stream);
+  if (e == cudaSuccess) e = cudaMemcpyAsync(qs, dqs, (size_t)nrows * (in / 16), cudaMemcpyDeviceToHost, g_stream);
+  if (e == cudaSuccess) e = cudaMemcpyAsync(rs, drs, (size_t)nrows * sizeof(float), cudaMemcpyDeviceToHost, g_stream);
+  if (e == cudaSuccess) e = cudaStreamSynchronize(g_stream);
+  return (int)e;
+}
+
+// Opt-in until the kernel has device, KL and greedy-parity receipts:
+// FAK_INKLING2_PREFILL_NVFP4_W4A4=1 selects W4A4 activations on a native image.
+static bool ink2p_nvf4_selected() {
+  const char *v = getenv("FAK_INKLING2_PREFILL_NVFP4_W4A4");
+  if (!v || strcmp(v, "1") != 0) return false;
+  return ink2p_nvf4_available() == 1;
+}
+
 // Drop-in for fcuda_ink2p_expert_nvfp4 (same arguments and bucket scratch); shapes the
 // int8 path does not tile fall back to the BF16 kernel.
 extern "C" int fcuda_ink2p_expert_nvfp4_v2(const uint8_t *W, const uint8_t *scales, const int *offsets,
                                            const int *order, const int *tiles, const int *ntiles, int maxTiles,
                                            const float *X, int xDiv, int xStride, float *Y, int rows, int in,
                                            const float *escale) {
+  if (scales && in % INK2P_NVF4_BK == 0 && rows % 256 == 0 && ink2p_nvf4_selected())
+    return ink2p_nvf4_launch<2, 8, 2>(W, scales, offsets, order, tiles, ntiles, maxTiles, X, xDiv, xStride, Y, rows,
+                                      in, escale);
   constexpr int MT = 2, WARPS = 8, STAGES = 3, BK = 64, NTILE = 1, PF = 1;
   if (!scales || in % BK != 0 || rows % (WARPS * 16 * MT) != 0 || INK2P_NV2_PAIRS != INK2P_NV_PAIRS)
     return fcuda_ink2p_expert_nvfp4(W, scales, offsets, order, tiles, ntiles, maxTiles, X, xDiv, xStride, Y, rows,

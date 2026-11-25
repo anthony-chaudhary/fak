@@ -2,6 +2,7 @@ package computebuild
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -59,6 +60,143 @@ func cudaArchiveImageRequirements(repoRoot, arch string) (sass, ptx []string, er
 	sortCUDAImageArchitectures(sass)
 	sortCUDAImageArchitectures(ptx)
 	return sass, ptx, nil
+}
+
+// cudaListedSASSArch is the base name some cuobjdump releases (12.9) list for a
+// family-specific sm_NNNf cubin, whose ELF arch flags equal sm_NNN's; sm_NNNa and
+// plain targets have no alias.
+func cudaListedSASSArch(code string) string {
+	if base, suffix, ok := SplitCUDAArchSuffix(code); ok && suffix == "f" {
+		return base
+	}
+	return code
+}
+
+// cudaImageSetMatches compares an observed image listing with the required one,
+// accepting the base-name listing of sm_NNNf images. That alias cannot tell an
+// sm_NNNf cubin from a plain sm_NNN one, so a caller that relies on it must confirm
+// the family images with cudaFatbinELFArches.
+func cudaImageSetMatches(kind string, observed, want []string) bool {
+	if strings.Join(observed, ",") == strings.Join(want, ",") {
+		return true
+	}
+	if kind != "ELF" {
+		return false
+	}
+	seen := make(map[string]bool, len(want))
+	var listed []string
+	for _, arch := range want {
+		if arch = cudaListedSASSArch(arch); !seen[arch] {
+			seen[arch] = true
+			listed = append(listed, arch)
+		}
+	}
+	sortCUDAImageArchitectures(listed)
+	return strings.Join(observed, ",") == strings.Join(listed, ",")
+}
+
+// cudaNeedsFamilyMarker reports whether observed matches want only through the
+// sm_NNNf base-name alias.
+func cudaNeedsFamilyMarker(observed, want []string) bool {
+	return strings.Join(observed, ",") != strings.Join(want, ",") && cudaImageSetMatches("ELF", observed, want)
+}
+
+// cudaFatbinELFArches collects the arch line of every "Fatbin elf code:" header in a
+// cuobjdump --dump-elf-symbols stream. The header keeps the family suffix that the
+// --list-elf cubin names drop, so it is the positive witness for sm_NNNf images.
+// Only short header lines are kept, so a symbol dump of any size stays bounded.
+type cudaFatbinELFArches struct {
+	partial []byte
+	inELF   bool
+	set     map[string]bool
+	invalid string
+}
+
+var cudaFatbinELFArch = regexp.MustCompile(`^sm_[0-9]+[af]?$`)
+
+func (w *cudaFatbinELFArches) Write(p []byte) (int, error) {
+	n := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			w.keep(p)
+			break
+		}
+		w.keep(p[:i])
+		w.line()
+		p = p[i+1:]
+	}
+	return n, nil
+}
+
+func (w *cudaFatbinELFArches) keep(p []byte) {
+	if room := 256 - len(w.partial); room > 0 {
+		w.partial = append(w.partial, p[:min(room, len(p))]...)
+	}
+}
+
+func (w *cudaFatbinELFArches) line() {
+	t := strings.TrimSpace(string(w.partial))
+	w.partial = w.partial[:0]
+	switch {
+	case t == "Fatbin elf code:":
+		w.inELF = true
+	case strings.HasPrefix(t, "Fatbin "):
+		w.inELF = false
+	case w.inELF && strings.HasPrefix(t, "arch = "):
+		arch := strings.TrimPrefix(t, "arch = ")
+		if !cudaFatbinELFArch.MatchString(arch) && w.invalid == "" {
+			w.invalid = arch
+		}
+		if w.set == nil {
+			w.set = make(map[string]bool)
+		}
+		w.set[arch] = true
+		w.inELF = false
+	}
+}
+
+// arches returns the sorted header architectures, refusing a stream with no ELF
+// header or a malformed one.
+func (w *cudaFatbinELFArches) arches() ([]string, error) {
+	if len(w.partial) > 0 {
+		w.line()
+	}
+	if w.invalid != "" {
+		return nil, fmt.Errorf("malformed fatbin ELF arch %q", w.invalid)
+	}
+	if len(w.set) == 0 {
+		return nil, errors.New("no fatbin ELF headers")
+	}
+	arches := make([]string, 0, len(w.set))
+	for arch := range w.set {
+		arches = append(arches, arch)
+	}
+	sortCUDAImageArchitectures(arches)
+	return arches, nil
+}
+
+// cudaFamilyELFArches runs cuobjdump --dump-elf-symbols on archive and returns its
+// fatbin ELF header architectures.
+func cudaFamilyELFArches(ctx context.Context, tool, archive string, tc *Toolchain) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, tool, "--dump-elf-symbols", archive)
+	cmd.WaitDelay = 2 * time.Second
+	if tc != nil && len(tc.VsDevEnv) > 0 {
+		cmd.Env = MergeEnviron(os.Environ(), tc.VsDevEnv)
+	}
+	headers := &cudaFatbinELFArches{}
+	diagnostic := &cudaImageOutput{limit: 4096}
+	cmd.Stdout, cmd.Stderr = headers, diagnostic
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%w: cuobjdump --dump-elf-symbols: %w (%s)", ErrCUDAImageAuditInvalid, err, strings.TrimSpace(string(diagnostic.data)))
+	}
+	arches, err := headers.arches()
+	if err != nil {
+		return nil, fmt.Errorf("%w: cuobjdump --dump-elf-symbols: %v", ErrCUDAImageAuditInvalid, err)
+	}
+	return arches, nil
 }
 
 func sortCUDAImageArchitectures(arches []string) {
@@ -285,8 +423,17 @@ func auditCUDAImages(ctx context.Context, tc *Toolchain, archive string, wantSAS
 		if err != nil {
 			return nil, err
 		}
-		if strings.Join(arches, ",") != strings.Join(spec.want, ",") {
+		if !cudaImageSetMatches(spec.kind, arches, spec.want) {
 			return nil, fmt.Errorf("%w: %s images: observed %v, require %v", ErrCUDAImageAuditInvalid, spec.kind, arches, spec.want)
+		}
+		if spec.kind == "ELF" && cudaNeedsFamilyMarker(arches, spec.want) {
+			listed := arches
+			if arches, err = cudaFamilyELFArches(ctx, tool, archive, tc); err != nil {
+				return nil, err
+			}
+			if strings.Join(arches, ",") != strings.Join(spec.want, ",") {
+				return nil, fmt.Errorf("%w: ELF images listed %v carry fatbin arches %v, require %v", ErrCUDAImageAuditInvalid, listed, arches, spec.want)
+			}
 		}
 		if spec.kind == "ELF" {
 			audit.SASS, audit.ELFImageCount = arches, count

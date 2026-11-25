@@ -292,8 +292,10 @@ func validateCUDAFirstLightAcceptance(data []byte, arch string, tokens int) erro
 	if err := json.Unmarshal(data, &receipt); err != nil {
 		return err
 	}
+	// The runtime reports the device tier without the image's a/f suffix.
+	tier, _, _ := computebuild.SplitCUDAArchSuffix(arch)
 	if receipt.Schema != "fak.gpucheck/1" || receipt.Engine != "fak-native" || receipt.Pass == nil || !*receipt.Pass ||
-		receipt.RequestedBackend != "cuda" || receipt.ObservedBackend != "cuda" || receipt.ObservedTier != arch ||
+		receipt.RequestedBackend != "cuda" || receipt.ObservedBackend != "cuda" || receipt.ObservedTier != tier ||
 		receipt.DeviceMemory == nil || !*receipt.DeviceMemory || receipt.BackendObserved == nil || !*receipt.BackendObserved ||
 		receipt.FallbackActive == nil || *receipt.FallbackActive || receipt.RequestedTokens != tokens ||
 		receipt.ComparedTokens < 1 || receipt.ComparedTokens > tokens || len(receipt.ReferenceTokens) != receipt.ComparedTokens || len(receipt.DeviceTokens) != receipt.ComparedTokens {

@@ -30,20 +30,18 @@ func ParseCUDAArchMatrix(archText string, targetArch string) ([]string, string, 
 	var buildArchs string
 
 	if targetArch != "" {
-		arch := targetArch
-		if !strings.HasPrefix(arch, "sm_") {
-			arch = "sm_" + arch
-		}
+		base, suffix, ok := SplitCUDAArchSuffix(targetArch)
 		found := false
 		for _, s := range supported {
-			if s == arch {
+			if s == base {
 				found = true
 				break
 			}
 		}
-		if !found {
-			return nil, "", fmt.Errorf("unsupported CUDA arch %q; choose one from: %s", targetArch, strings.Join(supported, ", "))
+		if !found || !ok {
+			return nil, "", fmt.Errorf("unsupported CUDA arch %q; choose one from: %s (a/f suffix on sm_90+/sm_100+)", targetArch, strings.Join(supported, ", "))
 		}
+		arch := base + suffix
 		cc := strings.TrimPrefix(arch, "sm_")
 		gencode = []string{"-gencode", fmt.Sprintf("arch=compute_%s,code=%s", cc, arch)}
 		buildArchs = fmt.Sprintf("%s (single-arch dev build)", arch)
@@ -59,6 +57,33 @@ func ParseCUDAArchMatrix(archText string, targetArch string) ([]string, string, 
 	}
 
 	return gencode, buildArchs, nil
+}
+
+// SplitCUDAArchSuffix splits a single target (sm_NN, bare NN, or either with an
+// arch-specific "a" or family "f" suffix) into sm_NN and the suffix. ok is false
+// for a malformed target or a suffix nvcc has no image for: "a" needs SM90+, "f"
+// needs SM100+.
+func SplitCUDAArchSuffix(arch string) (base, suffix string, ok bool) {
+	if !strings.HasPrefix(arch, "sm_") {
+		arch = "sm_" + arch
+	}
+	base = arch
+	if n := len(arch); n > len("sm_")+1 && (arch[n-1] == 'a' || arch[n-1] == 'f') {
+		base, suffix = arch[:n-1], arch[n-1:]
+	}
+	cc, err := strconv.Atoi(strings.TrimPrefix(base, "sm_"))
+	if err != nil || cc <= 0 {
+		return base, suffix, false
+	}
+	switch suffix {
+	case "a":
+		ok = cc >= 90
+	case "f":
+		ok = cc >= 100
+	default:
+		ok = true
+	}
+	return base, suffix, ok
 }
 
 // LoadCUDAArchMatrix loads cuda_arch.txt from repoRoot/internal/compute/ and parses gencode flags.

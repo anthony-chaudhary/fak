@@ -12,6 +12,7 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"unsafe"
 )
 
@@ -220,6 +221,39 @@ func (c *cudaBackend) Ink2PExpertGrouped(stack Tensor, expertRows, nexp int, ids
 	return true, ink2Status("prefill expert nvfp4", C.fcuda_ink2p_expert_nvfp4((*C.uint8_t)(b.ptr), (*C.uint8_t)(scales),
 		c.ink2I(offsets), c.ink2I(order), c.ink2I(tileList), c.ink2I(ntiles), C.int(tiles), c.ink2F(x), C.int(xDiv),
 		C.int(xStride), c.ink2F(y), C.int(expertRows), C.int(in), c.ink2F(scale)))
+}
+
+// CUDAInk2PNVFP4W4A4Env opts NVFP4 grouped prefill into W4A4 activations ("1") on
+// an image with the native SM120 kernels; anything else keeps int8 activations.
+const CUDAInk2PNVFP4W4A4Env = "FAK_INKLING2_PREFILL_NVFP4_W4A4"
+
+// initCUDAInk2PNVFP4W4A4 probes the image at backend init when W4A4 is opted in, so
+// the probe never runs inside a graph capture and captured and eager calls agree.
+func initCUDAInk2PNVFP4W4A4() {
+	if os.Getenv(CUDAInk2PNVFP4W4A4Env) == "1" {
+		C.fcuda_ink2p_nvfp4_w4a4_available()
+	}
+}
+
+// ink2pNVFP4W4A4Available reports whether the loaded CUDA image carries the native
+// SM120 NVFP4 W4A4 grouped kernel that Ink2PExpertGrouped selects when opted in.
+func (c *cudaBackend) ink2pNVFP4W4A4Available() bool {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return C.fcuda_ink2p_nvfp4_w4a4_available() == 1
+}
+
+// ink2pNVFP4W4A4Quant reads back the first nrows activation rows the last W4A4 call
+// quantized: packed E2M1 pairs, UE4M3 codes per 16 columns, and fp32 row scales.
+func (c *cudaBackend) ink2pNVFP4W4A4Quant(nrows, in int) (q, codes []byte, rs []float32, err error) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	q, codes, rs = make([]byte, nrows*in/2+1), make([]byte, nrows*in/16+1), make([]float32, nrows+1)
+	if rc := C.fcuda_ink2p_nvfp4_w4a4_read_quant(C.int(nrows), C.int(in), (*C.uint8_t)(unsafe.Pointer(&q[0])),
+		(*C.uint8_t)(unsafe.Pointer(&codes[0])), (*C.float)(unsafe.Pointer(&rs[0]))); rc != 0 {
+		return nil, nil, nil, fmt.Errorf("cuda inkling2 nvfp4 w4a4 quant readback: cuda error %d", int(rc))
+	}
+	return q[:nrows*in/2], codes[:nrows*in/16], rs[:nrows], nil
 }
 
 // ink2pBucketOnce is ink2pBucket, or only the scratch layout when bucketed says an

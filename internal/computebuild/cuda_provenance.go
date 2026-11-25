@@ -132,6 +132,11 @@ func observeCUDABuildProvenance(ctx context.Context, tc *Toolchain, repoRoot, ar
 	if err != nil {
 		return nil, err
 	}
+	if cudaNeedsFamilyMarker(sass, requestedCUDASASS(requested)) {
+		if sass, err = cudaProvenanceFamilyArches(ctx, run, tool, absArtifact); err != nil {
+			return nil, err
+		}
+	}
 	ptx, err := cudaProvenanceListing(ctx, run, tool, "--list-ptx", absArtifact)
 	if err != nil {
 		return nil, err
@@ -197,6 +202,36 @@ func requestedCUDAGencodeTargets(gencodeArgs []string) ([]string, error) {
 	}
 	sortCUDAImageArchitectures(targets)
 	return targets, nil
+}
+
+// requestedCUDASASS is the sorted sm_* subset of the requested gencode targets.
+func requestedCUDASASS(requested []string) []string {
+	var sass []string
+	for _, target := range requested {
+		if strings.HasPrefix(target, "sm_") {
+			sass = append(sass, target)
+		}
+	}
+	sortCUDAImageArchitectures(sass)
+	return sass
+}
+
+// cudaProvenanceFamilyArches reads the fatbin ELF header architectures through the
+// injected command seam, so recorded SASS names an sm_NNNf image only when the
+// artifact positively carries one.
+func cudaProvenanceFamilyArches(ctx context.Context, run cudaCommandRunner, tool, artifact string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	headers := &cudaFatbinELFArches{}
+	diagnostic := &cudaImageOutput{limit: 4096}
+	if err := run(ctx, tool, []string{"--dump-elf-symbols", artifact}, "", nil, headers, diagnostic); err != nil {
+		return nil, fmt.Errorf("%w: cuobjdump --dump-elf-symbols: %v (%s)", ErrCUDAProvenanceInvalid, err, strings.TrimSpace(string(diagnostic.data)))
+	}
+	arches, err := headers.arches()
+	if err != nil {
+		return nil, fmt.Errorf("%w: cuobjdump --dump-elf-symbols: %v", ErrCUDAProvenanceInvalid, err)
+	}
+	return arches, nil
 }
 
 // cudaProvenanceListing captures one bounded cuobjdump listing through the

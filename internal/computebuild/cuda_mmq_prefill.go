@@ -51,8 +51,9 @@ func cudaMMQPrefillFlags(ctx context.Context, args, env []string) ([]string, err
 // The integration reviewer must still verify the complete safety prerequisite
 // delta; a substring is not a substitute for source review or device witnesses.
 func prepareCUDAMMQPrefill(cfg *CUDAConfig, macros []string) error {
-	arch, err := strconv.Atoi(strings.TrimPrefix(cfg.Arch, "sm_"))
-	if err != nil || arch < 80 {
+	base, _, ok := SplitCUDAArchSuffix(cfg.Arch)
+	arch, err := strconv.Atoi(strings.TrimPrefix(base, "sm_"))
+	if cfg.Arch == "" || !ok || err != nil || arch < 80 {
 		return fmt.Errorf("MMQ qualification requires one explicit supported SM80+ architecture")
 	}
 	if _, _, err := LoadCUDAArchMatrix(cfg.RepoRoot, cfg.Arch); err != nil {

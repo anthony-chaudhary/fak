@@ -320,3 +320,27 @@ func TestCUDAFirstLightRefusesMissingCuobjdumpBeforeCompiling(t *testing.T) {
 		t.Fatalf("receipt after cuobjdump install: outcome=%s refusal=%q", r.Outcome, r.Refusal)
 	}
 }
+
+// fak-test:runtime fast est=5ms
+// fak-test:justify why=contract when=changed:internal/devcmd/**
+// An sm_120a/sm_120f image runs on a device the runtime reports as sm_120, so the
+// acceptance identity compares the suffix-free tier and still refuses another tier.
+func TestCUDAFirstLightAcceptanceSuffixedArch(t *testing.T) {
+	for _, c := range []struct {
+		arch, tier string
+		ok         bool
+	}{
+		{"sm_120f", "sm_120", true}, {"sm_120a", "sm_120", true}, {"sm_120", "sm_120", true},
+		{"sm_120f", "sm_89", false}, {"sm_120", "sm_120f", false},
+	} {
+		m := cudaFirstLightAcceptanceFixture()
+		m["observed_tier"] = c.tier
+		data, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateCUDAFirstLightAcceptance(data, c.arch, 2); (err == nil) != c.ok {
+			t.Errorf("arch %s, observed tier %s: err=%v, want accepted=%v", c.arch, c.tier, err, c.ok)
+		}
+	}
+}

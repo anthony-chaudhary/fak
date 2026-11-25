@@ -37,15 +37,27 @@ ARCH="${FAK_CUDA_ARCH:-}"
 GENCODE=()
 if [ -n "$ARCH" ]; then
   case "$ARCH" in sm_*) ;; *) ARCH="sm_$ARCH";; esac
+  # Mirrors computebuild.SplitCUDAArchSuffix: an a suffix needs SM90+, f needs SM100+.
+  base="${ARCH%[af]}"
+  sfx="${ARCH#"$base"}"
+  base_cc="${base#sm_}"
   arch_supported=false
-  for supported_arch in "${CUDA_ARCHES[@]}"; do
-    if [ "$ARCH" = "$supported_arch" ]; then
-      arch_supported=true
-      break
-    fi
-  done
+  case "$base_cc" in
+    ''|*[!0-9]*) ;;
+    *)
+      for supported_arch in "${CUDA_ARCHES[@]}"; do
+        if [ "$base" = "$supported_arch" ]; then
+          arch_supported=true
+          break
+        fi
+      done
+      if { [ "$sfx" = a ] && [ "$base_cc" -lt 90 ]; } || { [ "$sfx" = f ] && [ "$base_cc" -lt 100 ]; }; then
+        arch_supported=false
+      fi
+      ;;
+  esac
   if [ "$arch_supported" != true ]; then
-    echo "ERROR: unsupported CUDA arch '$ARCH'; choose one from $ARCH_FILE: ${CUDA_ARCHES[*]}" >&2
+    echo "ERROR: unsupported CUDA arch '$ARCH'; choose one from $ARCH_FILE: ${CUDA_ARCHES[*]} (a/f suffix on sm_90+/sm_100+)" >&2
     exit 2
   fi
   cc="${ARCH#sm_}"

@@ -8,8 +8,9 @@ import (
 
 // fak-test:runtime fast est=5ms lane=default
 // Every V4.1 candidate gate shares one allowlist: single-arch sm_120 or sm_90
-// (bare or sm_-prefixed) passes the arch gate; everything else, including fat
-// and multi-arch builds, is refused with the closed ErrCUDAV41Arch sentinel.
+// (bare or sm_-prefixed, SM120 also with an a/f suffix) passes the arch gate;
+// everything else, including fat and multi-arch builds, is refused with the
+// closed ErrCUDAV41Arch sentinel.
 func TestCUDAV41ArchAllowlist(t *testing.T) {
 	if want := []string{"sm_120", "sm_90"}; !reflect.DeepEqual(cudaV41Arches, want) {
 		t.Fatalf("cudaV41Arches = %v, want %v", cudaV41Arches, want)
@@ -25,7 +26,7 @@ func TestCUDAV41ArchAllowlist(t *testing.T) {
 		"shared_attention": prepareCUDAV41SharedAttention,
 		"tail_rope":        prepareCUDAV41TailRoPE,
 	}
-	admitted := []string{"sm_120", "120", "sm_90", "90"}
+	admitted := []string{"sm_120", "120", "sm_90", "90", "sm_120f", "sm_120a", "120f"}
 	refused := []string{"", "sm_89", "89", "sm_80", "sm_90a", "sm_100", "sm_100a", "sm_103f", "sm_90,sm_120", "sm_120,sm_90"}
 	for _, arch := range admitted {
 		if !cudaV41ArchAdmitted(arch) || requireCUDAV41Arch(arch, "x") != nil {

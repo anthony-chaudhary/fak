@@ -26,10 +26,13 @@ func cudaV41ArchAdmitted(arch string) bool {
 	if arch == "" {
 		return false
 	}
-	if !strings.HasPrefix(arch, "sm_") {
-		arch = "sm_" + arch
+	base, suffix, ok := SplitCUDAArchSuffix(arch)
+	// An sm_120a/sm_120f image runs the same V4.1 sources as sm_120, so a suffixed
+	// SM120 build keeps the default tag set and stays comparable to the plain arm.
+	if !ok || (suffix != "" && base != "sm_120") {
+		return false
 	}
-	return slices.Contains(cudaV41Arches, arch)
+	return slices.Contains(cudaV41Arches, base)
 }
 
 // requireCUDAV41Arch refuses candidate on a non-admitted target with
@@ -77,7 +80,14 @@ func CUDAV41DefaultTags() []string {
 // returns the tags it newly enabled. Fat multi-arch builds are left untouched:
 // every V4.1 candidate requires an explicit admitted target. Idempotent.
 func ApplyCUDAV41Defaults(cfg *CUDAConfig) []string {
-	if cfg == nil || cfg.DisableV41Defaults || !cudaV41ArchAdmitted(cfg.Arch) {
+	if cfg == nil || cfg.DisableV41Defaults {
+		return nil
+	}
+	if !cudaV41ArchAdmitted(cfg.Arch) {
+		if base, suffix, ok := SplitCUDAArchSuffix(cfg.Arch); ok && suffix != "" && slices.Contains(cudaV41Arches, base) {
+			fmt.Fprintf(os.Stderr, "computebuild: WARNING: --arch %s builds without the default V4.1 tags (%s) that %s gets; the two binaries differ by more than the arch\n",
+				cfg.Arch, strings.Join(CUDAV41DefaultTags(), ","), base)
+		}
 		return nil
 	}
 	var applied []string

@@ -91,6 +91,10 @@ int fcuda_ink2p_expert_nvfp4(const uint8_t *W, const uint8_t *scales, const int 
 int fcuda_ink2p_expert_nvfp4_v2(const uint8_t *W, const uint8_t *scales, const int *offsets, const int *order,
     const int *tiles, const int *ntiles, int maxTiles, const float *X, int xDiv, int xStride, float *Y, int rows,
     int in, const float *escale);
+/* 1 when the loaded image has the native SM120 NVFP4 W4A4 kernels fcuda_ink2p_expert_nvfp4_v2 selects. */
+int fcuda_ink2p_nvfp4_w4a4_available(void);
+/* Test readback of the last W4A4 activation quantize: nrows rows of in/2 nibble bytes, in/16 codes, one scale. */
+int fcuda_ink2p_nvfp4_w4a4_read_quant(int nrows, int in, uint8_t *q, uint8_t *qs, float *rs);
 /* int8 tensor-core grouped IQ/Q3_K GEMM (cuda/inkling2_prefill_iq.cuh); same contract. */
 int fcuda_ink2p_expert_iq_v2(int fmt, const uint8_t *W, const int *offsets, const int *order, const int *tiles,
     const int *ntiles, int maxTiles, const float *X, int xDiv, int xStride, float *Y, int rows, int in,
