@@ -100,6 +100,10 @@ __global__ void k_ink2v_q5k_rows(const unsigned char *W, const float *X, float *
   }
 }
 
+// Threads per block of the staged-X row kernels. From four rows the staged X leaves
+// room for fewer blocks on an SM, so each block carries twice the warps.
+static int ink2v_rows_threads(int rows) { return rows >= 4 ? 512 : 256; }
+
 template <int R>
 static int ink2v_q5k_rows_launch(const unsigned char *W, const float *X, float *Y, int out, int in) {
   const size_t smem = (size_t)R * in * sizeof(float);
@@ -112,10 +116,11 @@ static int ink2v_q5k_rows_launch(const unsigned char *W, const float *X, float *
   int blockRows = INK2V_BLOCK_ROWS;
   if (out < INK2V_BLOCK_ROWS * 256) blockRows = max(8, ((out / 256) + 7) & ~7);
   const int blocks = (out + blockRows - 1) / blockRows;
+  const int threads = ink2v_rows_threads(R);
   if (hdr16) {
-    FCUDA_TS("k_ink2v_q5k_rows", blocks, k_ink2v_q5k_rows<R, true><<<blocks, 256, smem, g_stream>>>(W, X, Y, out, in, blockRows));
+    FCUDA_TS("k_ink2v_q5k_rows", blocks, k_ink2v_q5k_rows<R, true><<<blocks, threads, smem, g_stream>>>(W, X, Y, out, in, blockRows));
   } else {
-    FCUDA_TS("k_ink2v_q5k_rows", blocks, k_ink2v_q5k_rows<R, false><<<blocks, 256, smem, g_stream>>>(W, X, Y, out, in, blockRows));
+    FCUDA_TS("k_ink2v_q5k_rows", blocks, k_ink2v_q5k_rows<R, false><<<blocks, threads, smem, g_stream>>>(W, X, Y, out, in, blockRows));
   }
   return ink2_last_error();
 }
@@ -253,6 +258,154 @@ extern "C" int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const f
   return ink2_last_error();
 }
 
+// Up to INK2V_Q8_MAX_SEGS Q8_0 products of one layer visit in a single launch: segment
+// i owns blocks [blk0, blk0 + ceil(out / INK2_Q8_WARPS)) and runs k_ink2v_q8_rows on its
+// own weight, codes and output, so every row equals that kernel's.
+#define INK2V_Q8_MAX_SEGS 8
+struct Ink2VQ8Seg {
+  const signed char *W;
+  const float *Wscale;
+  const signed char *qX;
+  const float *xScale;
+  float *Y;
+  int out, blk0;
+};
+struct Ink2VQ8Segs {
+  Ink2VQ8Seg s[INK2V_Q8_MAX_SEGS];
+};
+
+template <int MAXB, int R>
+__global__ void __launch_bounds__(INK2_Q8_WARPS * 32) k_ink2v_q8_segs(Ink2VQ8Segs segs, int nseg, int in) {
+  ink2_pdl_enter();
+  int si = 0;
+  for (int i = 1; i < nseg; ++i)
+    if ((int)blockIdx.x >= segs.s[i].blk0) si = i;
+  const signed char *__restrict__ W = segs.s[si].W;
+  const float *__restrict__ Wscale = segs.s[si].Wscale;
+  const signed char *__restrict__ qX = segs.s[si].qX;
+  const float *__restrict__ xScale = segs.s[si].xScale;
+  float *__restrict__ Y = segs.s[si].Y;
+  const int out = segs.s[si].out;
+  const int lane = threadIdx.x & 31;
+  const int o = ((int)blockIdx.x - segs.s[si].blk0) * INK2_Q8_WARPS + (threadIdx.x >> 5);
+  if (o >= out) return;
+  const int nblk = in >> 5;
+  const int4 *wrow = (const int4 *)(W + (size_t)o * in);
+  const float *wsc = Wscale + (size_t)o * nblk;
+  int4 w0[MAXB], w1[MAXB];
+  float ws[MAXB];
+#pragma unroll
+  for (int j = 0; j < MAXB; ++j) {
+    const int b = lane + 32 * j;
+    if (b < nblk) {
+      w0[j] = __ldcs(wrow + 2 * b);
+      w1[j] = __ldcs(wrow + 2 * b + 1);
+      ws[j] = __ldcs(wsc + b);
+    }
+  }
+#pragma unroll
+  for (int t = 0; t < R; ++t) {
+    const int4 *xrow = (const int4 *)(qX + (size_t)t * in);
+    const float *xsc = xScale + (size_t)t * nblk;
+    float sum = 0.f;
+#pragma unroll
+    for (int j = 0; j < MAXB; ++j) {
+      const int b = lane + 32 * j;
+      if (b < nblk) {
+        const int4 x0 = __ldg(xrow + 2 * b), x1 = __ldg(xrow + 2 * b + 1);
+        int acc = __dp4a(w0[j].x, x0.x, 0);
+        acc = __dp4a(w0[j].y, x0.y, acc);
+        acc = __dp4a(w0[j].z, x0.z, acc);
+        acc = __dp4a(w0[j].w, x0.w, acc);
+        acc = __dp4a(w1[j].x, x1.x, acc);
+        acc = __dp4a(w1[j].y, x1.y, acc);
+        acc = __dp4a(w1[j].z, x1.z, acc);
+        acc = __dp4a(w1[j].w, x1.w, acc);
+        sum += (float)acc * ws[j] * __ldg(xsc + b);
+      }
+    }
+#pragma unroll
+    for (int delta = 16; delta > 0; delta >>= 1) sum += __shfl_down_sync(0xffffffff, sum, delta);
+    if (lane == 0) Y[(size_t)t * out + o] = sum;
+  }
+}
+
+template <int MAXB>
+static void ink2v_q8_segs_launch(const Ink2VQ8Segs &segs, int nseg, int grid, int in, int rows) {
+#define INK2V_Q8_SEG_CASE(R)                                                                                          \
+  case R:                                                                                                             \
+    FCUDA_TS("k_ink2v_q8_rows", grid,                                                                                 \
+             k_ink2v_q8_segs<MAXB, R><<<grid, INK2_Q8_WARPS * 32, 0, g_stream>>>(segs, nseg, in));                    \
+    break;
+  switch (rows) {
+    INK2V_Q8_SEG_CASE(1) INK2V_Q8_SEG_CASE(2) INK2V_Q8_SEG_CASE(3) INK2V_Q8_SEG_CASE(4) INK2V_Q8_SEG_CASE(5)
+    INK2V_Q8_SEG_CASE(6) INK2V_Q8_SEG_CASE(7) INK2V_Q8_SEG_CASE(8) INK2V_Q8_SEG_CASE(9)
+  }
+#undef INK2V_Q8_SEG_CASE
+}
+
+// Y[i][t] = W[i].X[i][t] for nseg <= INK2V_Q8_MAX_SEGS resident Q8_0 (block 32) weights
+// of one input width and rows <= 9 rows each, in one GEMV launch. q holds the codes of
+// every distinct X (in first-use order, [rows][in] bytes each) and then their block
+// scales; distinct inputs that sit back to back are quantized by one launch. Returns
+// -1 (nothing launched) outside the kernel's contract.
+extern "C" int fcuda_ink2v_q8_segs(int nseg, const int8_t *const *W, const float *const *Wscale,
+                                   const float *const *X, void *q, float *const *Y, const int *out, int in,
+                                   int rows) {
+  const int nblk = in / 32;
+  if (nseg < 1 || nseg > INK2V_Q8_MAX_SEGS || in % 32 != 0 || (in & 15) != 0 || nblk > 288 || rows < 1 ||
+      rows > INK2V_MAX_ROWS || ((uintptr_t)q & 15) != 0)
+    return -1;
+  const float *xs[INK2V_Q8_MAX_SEGS];
+  int xi[INK2V_Q8_MAX_SEGS], nx = 0;
+  for (int i = 0; i < nseg; ++i) {
+    if (((uintptr_t)W[i] & 15) != 0 || out[i] < 1) return -1;
+    int d = 0;
+    while (d < nx && xs[d] != X[i]) ++d;
+    if (d == nx) xs[nx++] = X[i];
+    xi[i] = d;
+  }
+  signed char *codes = (signed char *)q;
+  float *scales = (float *)(codes + (size_t)nx * rows * in);
+  bool packed = true;
+  for (int d = 1; d < nx; ++d) packed = packed && xs[d] == xs[d - 1] + (size_t)rows * in;
+  if (packed) {
+    FCUDA_TS("k_q8_quant_act", dim3(nblk, nx * rows),
+             k_q8_quant_act<<<dim3(nblk, nx * rows), 32, 0, g_stream>>>(xs[0], codes, scales, nx * rows, in, 32));
+  } else {
+    for (int d = 0; d < nx; ++d)
+      FCUDA_TS("k_q8_quant_act", dim3(nblk, rows),
+               k_q8_quant_act<<<dim3(nblk, rows), 32, 0, g_stream>>>(xs[d], codes + (size_t)d * rows * in,
+                                                                     scales + (size_t)d * rows * nblk, rows, in, 32));
+  }
+  Ink2VQ8Segs segs;
+  int grid = 0;
+  for (int i = 0; i < INK2V_Q8_MAX_SEGS; ++i) {
+    Ink2VQ8Seg &g = segs.s[i];
+    if (i >= nseg) {
+      g = segs.s[0];
+      g.out = 0;
+      g.blk0 = 0x7fffffff;
+      continue;
+    }
+    g.W = (const signed char *)W[i];
+    g.Wscale = Wscale[i];
+    g.qX = codes + (size_t)xi[i] * rows * in;
+    g.xScale = scales + (size_t)xi[i] * rows * nblk;
+    g.Y = Y[i];
+    g.out = out[i];
+    g.blk0 = grid;
+    grid += (out[i] + INK2_Q8_WARPS - 1) / INK2_Q8_WARPS;
+  }
+  if (nblk <= 96)
+    ink2v_q8_segs_launch<3>(segs, nseg, grid, in, rows);
+  else if (nblk <= 128)
+    ink2v_q8_segs_launch<4>(segs, nseg, grid, in, rows);
+  else
+    ink2v_q8_segs_launch<9>(segs, nseg, grid, in, rows);
+  return ink2_last_error();
+}
+
 // The cluster depth mix (k_ink2_mixc) for each row of a verify chunk: cluster y mixes
 // token y, whose states sit at row y of each [T][n] state, and writes query q of it at
 // out[q][y] ([nq][T][n], the batched mix layout), with the optional RMS norm folded in.
@@ -364,7 +517,8 @@ static int ink2v_q6k_rows_launch(const unsigned char *W, const float *X, float *
   int blockRows = INK2V_BLOCK_ROWS;
   if (out < INK2V_BLOCK_ROWS * 256) blockRows = max(8, ((out / 256) + 7) & ~7);
   const int blocks = (out + blockRows - 1) / blockRows;
-  FCUDA_TS("k_ink2v_q6k_rows", blocks, k_ink2v_q6k_rows<R><<<blocks, 256, smem, g_stream>>>(W, X, Y, out, in, blockRows));
+  FCUDA_TS("k_ink2v_q6k_rows", blocks,
+           k_ink2v_q6k_rows<R><<<blocks, ink2v_rows_threads(R), smem, g_stream>>>(W, X, Y, out, in, blockRows));
   return ink2_last_error();
 }
 

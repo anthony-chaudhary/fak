@@ -456,10 +456,14 @@ func (c *cudaBackend) Ink2DMarkovPick(head Tensor, base, cand Ink2Ref, M int, z,
 func (c *cudaBackend) Ink2VRows(w Tensor, x, y Ink2Ref, rows int) (bool, error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if (w.Dtype != Q5_K && w.Dtype != Q6_K) || len(w.Shape) != 2 || rows < 1 || rows > 9 {
+	if (w.Dtype != Q5_K && w.Dtype != Q6_K && w.Dtype != F32) || len(w.Shape) != 2 || rows < 1 || rows > 9 {
 		return false, nil
 	}
 	wb := c.cudaBufForSubmit(w)
+	if w.Dtype == F32 {
+		return true, ink2Status("verify f32 rows", C.fcuda_ink2p_gemm_f32((*C.float)(wb.ptr), c.ink2F(x), c.ink2F(y), C.int(w.Shape[0]),
+			C.int(w.Shape[1]), C.int(rows)))
+	}
 	if w.Dtype == Q6_K {
 		return true, ink2Status("verify q6k rows", C.fcuda_ink2v_q6k_rows((*C.uchar)(wb.ptr), c.ink2F(x), c.ink2F(y), C.int(w.Shape[0]),
 			C.int(w.Shape[1]), C.int(rows)))
@@ -488,6 +492,42 @@ func (c *cudaBackend) Ink2VQ8Rows(w Tensor, x, gate, q, y Ink2Ref, rows int, qua
 	}
 	return true, ink2Status("verify q8 rows", rc)
 }
+
+func (c *cudaBackend) Ink2VQ8Segs(ws []Tensor, xs, ys []Ink2Ref, q Ink2Ref, rows int) (bool, error) {
+	n := len(ws)
+	if n < 1 || n > ink2VQ8MaxSegs || len(xs) != n || len(ys) != n {
+		return false, nil
+	}
+	for _, w := range ws {
+		if w.Dtype != Q8_0 || len(w.Shape) != 2 || w.Quant.Block != 32 || w.Shape[1] != ws[0].Shape[1] {
+			return false, nil
+		}
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	// one C block: weights, weight scales, inputs, outputs, then the row counts
+	const ptrSize = unsafe.Sizeof(uintptr(0))
+	blk := C.calloc(1, C.size_t(4*ink2VQ8MaxSegs*ptrSize+ink2VQ8MaxSegs*unsafe.Sizeof(C.int(0))))
+	defer C.free(blk)
+	ptrs := (*[4 * ink2VQ8MaxSegs]unsafe.Pointer)(blk)
+	outs := (*[ink2VQ8MaxSegs]C.int)(unsafe.Add(blk, 4*ink2VQ8MaxSegs*ptrSize))
+	for i, w := range ws {
+		wb := c.cudaBufForSubmit(w)
+		ptrs[i], ptrs[ink2VQ8MaxSegs+i] = wb.ptr, wb.scales
+		ptrs[2*ink2VQ8MaxSegs+i], ptrs[3*ink2VQ8MaxSegs+i] = c.ink2Ptr(xs[i]), c.ink2Ptr(ys[i])
+		outs[i] = C.int(w.Shape[0])
+	}
+	rc := C.fcuda_ink2v_q8_segs(C.int(n), (**C.int8_t)(unsafe.Pointer(&ptrs[0])), (**C.float)(unsafe.Pointer(&ptrs[ink2VQ8MaxSegs])),
+		(**C.float)(unsafe.Pointer(&ptrs[2*ink2VQ8MaxSegs])), c.ink2Ptr(q), (**C.float)(unsafe.Pointer(&ptrs[3*ink2VQ8MaxSegs])),
+		&outs[0], C.int(ws[0].Shape[1]), C.int(rows))
+	if rc == -1 {
+		return false, nil
+	}
+	return true, ink2Status("verify q8 segs", rc)
+}
+
+// ink2VQ8MaxSegs is INK2V_Q8_MAX_SEGS.
+const ink2VQ8MaxSegs = 8
 
 func (c *cudaBackend) Ink2VMix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2Ref, eps float32, out Ink2Ref, n, T int) (bool, error) {
 	cudaMu.Lock()

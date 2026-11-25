@@ -6,6 +6,10 @@
 
 #define INK2D_TOPM_MAX 64
 #define INK2D_TOPM_SLICES 64
+// Candidates a vocab slice hands to the merge. A shortlist with more than this many
+// tokens in one slice loses the slice's weakest; the draft only proposes, so a lost
+// candidate can cost an accepted token and never a wrong one.
+#define INK2D_TOPM_SLICE_KEEP 8
 
 // Selection order of the shortlist: larger value first, ties to the lower index; an
 // index below zero is no candidate.
@@ -38,11 +42,11 @@ static __device__ __forceinline__ void ink2d_topm_block_best(float &v, int &i, f
     }
 }
 
-// Stage 1: each block keeps the M best of one vocab slice of one row, in selection
+// Stage 1: each block keeps the S best of one vocab slice of one row, in selection
 // order. A thread owns every 256th logit of the slice and caches the best it still
 // holds; only the thread whose logit was taken rescans. The slice is at most 64 * 256
 // logits (taken is one bit per owned logit).
-__global__ void __launch_bounds__(256) k_ink2d_topm_slice(const float *logits, int rowStride, int vocab, int M,
+__global__ void __launch_bounds__(256) k_ink2d_topm_slice(const float *logits, int rowStride, int vocab, int S,
                                                           float *candV, int *candI) {
   ink2_pdl_enter();
   __shared__ float bufV[2][8];
@@ -54,7 +58,7 @@ __global__ void __launch_bounds__(256) k_ink2d_topm_slice(const float *logits, i
   unsigned long long taken = 0;
   float mine = -INFINITY;
   int minei = -1;
-  for (int m = 0; m < M; ++m) {
+  for (int m = 0; m < S; ++m) {
     if (minei < 0) {
       int j = 0;
       for (int t = lo + threadIdx.x; t < hi; t += 256, ++j) {
@@ -69,7 +73,7 @@ __global__ void __launch_bounds__(256) k_ink2d_topm_slice(const float *logits, i
     int besti = minei;
     ink2d_topm_block_best(best, besti, bufV[m & 1], bufI[m & 1]);
     if (threadIdx.x == 0) {
-      const size_t o = ((size_t)row * INK2D_TOPM_SLICES + slice) * M + m;
+      const size_t o = ((size_t)row * INK2D_TOPM_SLICES + slice) * S + m;
       candV[o] = besti >= 0 ? best : -INFINITY;
       candI[o] = besti;
     }
@@ -84,12 +88,13 @@ __global__ void __launch_bounds__(256) k_ink2d_topm_slice(const float *logits, i
 // Stage 2: the M best of one row's slice candidates, written to out[row][M] in
 // selection order (ties to the lower token). A thread owns every 256th candidate and
 // caches the best it still holds.
-__global__ void __launch_bounds__(256) k_ink2d_topm_merge(const float *candV, const int *candI, int M, int *out) {
+__global__ void __launch_bounds__(256) k_ink2d_topm_merge(const float *candV, const int *candI, int S, int M,
+                                                          int *out) {
   ink2_pdl_enter();
   __shared__ float bufV[2][8];
   __shared__ int bufI[2][8];
   const int row = blockIdx.x;
-  const int n = INK2D_TOPM_SLICES * M;
+  const int n = INK2D_TOPM_SLICES * S;
   const float *v = candV + (size_t)row * n;
   const int *id = candI + (size_t)row * n;
   unsigned int taken = 0;
@@ -230,9 +235,10 @@ extern "C" int fcuda_ink2d_topm(const float *logits, int rows, int rowStride, in
                                 int *candI, int *out) {
   if (M < 1 || M > INK2D_TOPM_MAX || vocab > INK2D_TOPM_SLICES * 64 * 256) return (int)cudaErrorInvalidValue;
   const dim3 g1(INK2D_TOPM_SLICES, rows);
+  const int S = M < INK2D_TOPM_SLICE_KEEP ? M : INK2D_TOPM_SLICE_KEEP;
   FCUDA_TS("k_ink2d_topm_slice", g1,
-           k_ink2d_topm_slice<<<g1, 256, 0, g_stream>>>(logits, rowStride, vocab, M, candV, candI));
-  FCUDA_TS("k_ink2d_topm_merge", rows, k_ink2d_topm_merge<<<rows, 256, 0, g_stream>>>(candV, candI, M, out));
+           k_ink2d_topm_slice<<<g1, 256, 0, g_stream>>>(logits, rowStride, vocab, S, candV, candI));
+  FCUDA_TS("k_ink2d_topm_merge", rows, k_ink2d_topm_merge<<<rows, 256, 0, g_stream>>>(candV, candI, S, M, out));
   return ink2_last_error();
 }
 

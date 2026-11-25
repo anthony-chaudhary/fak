@@ -77,9 +77,9 @@ type Inkling2VerifyDevice interface {
 	// Ink2PConvCommit sets hist[c][j] = log[c][keep+j] for channels*(past) entries,
 	// where every log row is L floats.
 	Ink2PConvCommit(hist, log Ink2Ref, channels, past, L, keep int) error
-	// Ink2VRows is Y[t] = W.X[t] for a Q5_K or Q6_K W and up to 9 rows in one weight
-	// pass, each row equal to the single-row GEMV; ok is false (nothing launched) for
-	// a dtype without one.
+	// Ink2VRows is Y[t] = W.X[t] for a Q5_K, Q6_K or F32 W and up to 9 rows in one
+	// weight pass, each row equal to the single-row GEMV; ok is false (nothing
+	// launched) for a dtype without one.
 	Ink2VRows(w Tensor, x, y Ink2Ref, rows int) (ok bool, err error)
 	// Ink2VQ8Rows is Y[t] = W.X[t] for a Q8_0 W and up to 9 rows, each row equal to the
 	// decode GEMV; q holds rows*(in/4 + in/32) floats of codes and scales, which
@@ -88,6 +88,11 @@ type Inkling2VerifyDevice interface {
 	// quantized and x left unscaled. ok is false (nothing launched) outside the
 	// kernel's contract.
 	Ink2VQ8Rows(w Tensor, x, gate, q, y Ink2Ref, rows int, quantize bool) (ok bool, err error)
+	// Ink2VQ8Segs is Ink2VQ8Rows (no gate) for up to 8 Q8_0 weights of one input
+	// width in a single launch: ys[i][t] = ws[i].xs[i][t]. q holds the codes and
+	// scales of every distinct x, rows*(in/4 + in/32) floats each. ok is false
+	// (nothing launched) outside the kernel's contract.
+	Ink2VQ8Segs(ws []Tensor, xs, ys []Ink2Ref, q Ink2Ref, rows int) (ok bool, err error)
 	// Ink2VMix is Ink2PMix ([nq][T][n] out) on the cluster mix kernel, with each query
 	// RMS-normalized by norms[q] when norms is set; ok is false (nothing launched)
 	// without cluster launch.
@@ -128,7 +133,8 @@ type Inkling2DraftDevice interface {
 	// Ink2DSiluMul is out = silu(g) * u.
 	Ink2DSiluMul(g, u, out Ink2Ref, n int) error
 	// Ink2DTopM writes the M largest of the first vocab logits of each row into
-	// out[row][M]; candV/candI are 64*M scratch per row.
+	// out[row][M], taking at most 8 from any one of the 64 vocab slices; candV/candI
+	// are 64*M scratch per row.
 	Ink2DTopM(logits Ink2Ref, rows, rowStride, vocab, M int, candV, candI, out Ink2Ref) error
 	// Ink2DMarkovIn assembles step's Markov input [state | w1[prev] | h | fRNN], w1 a
 	// BF16 [vocab][rank] table, prev the anchor at step 0 else idx[4*(step-1)], fRNN

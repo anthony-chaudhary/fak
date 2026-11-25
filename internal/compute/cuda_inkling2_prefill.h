@@ -57,6 +57,8 @@ int fcuda_ink2p_conv_pair_log(const float *const *x, const float *const *w, cons
 int fcuda_ink2v_repeat_rows(const float *x, float *out, int n, int rows, int k);
 int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, const float *gate, void *q, int quantize,
     float *Y, int out, int in, int rows, int block);
+int fcuda_ink2v_q8_segs(int nseg, const int8_t *const *W, const float *const *Wscale, const float *const *X, void *q,
+    float *const *Y, const int *out, int in, int rows);
 int fcuda_ink2d_topm(const float *logits, int rows, int rowStride, int vocab, int M, float *candV, int *candI,
     int *out);
 int fcuda_ink2d_markov_in(const float *state, const unsigned short *w1, const int *anchor, const int *idx, int step,

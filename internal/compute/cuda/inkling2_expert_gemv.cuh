@@ -129,7 +129,8 @@ static int ink2_nv2_blocks_per_slot(int rows, int k) {
   const int groups = (rows + INK2_NV2_ROWS - 1) / INK2_NV2_ROWS;
   const int needed = (groups + INK2_NV2_WARPS - 1) / INK2_NV2_WARPS;
   const int perSM = k > INK2_WIDE_SLOTS ? INK2_NV2_BLOCKS_PER_SM_WIDE : INK2_NV2_BLOCKS_PER_SM;
-  int g = (sms * perSM + k - 1) / k;
+  // a wide grid rounds down: a block past sms * perSM waits for a second wave
+  int g = k > INK2_WIDE_SLOTS ? (sms * perSM) / k : (sms * perSM + k - 1) / k;
   if (g > needed) g = needed;
   return g < 1 ? 1 : g;
 }
@@ -200,6 +201,13 @@ static bool ink2_expert_nvfp4_v2(const uint8_t *W, const uint8_t *scales, const 
 // Blocks per SM of the v3 IQ grids for k routed slots.
 static int ink2_iq3_blocks_per_sm(int k) {
   return k > INK2_WIDE_SLOTS ? INK2_IQ3_BLOCKS_PER_SM_WIDE : INK2_IQ3_BLOCKS_PER_SM;
+}
+
+// Blocks per routed slot of the v3 IQ grids; a wide grid rounds down so no block waits
+// for a second wave.
+static int ink2_iq3_blocks_per_slot(int sms, int k) {
+  const int total = sms * ink2_iq3_blocks_per_sm(k);
+  return k > INK2_WIDE_SLOTS ? total / k : (total + k - 1) / k;
 }
 
 template <int FMT> struct Ink2IQShape {
@@ -350,7 +358,7 @@ static bool ink2_expert_iq_v3(int fmt, const uint8_t *W, const int *ids, const f
     if (cudaGetDevice(&dev) != cudaSuccess || cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev) != cudaSuccess || sms <= 0) sms = 84;
   }
   const int needed = ((rows + INK2_IQ3_ROWS - 1) / INK2_IQ3_ROWS + 7) / 8;
-  int g = (sms * ink2_iq3_blocks_per_sm(k) + k - 1) / k;
+  int g = ink2_iq3_blocks_per_slot(sms, k);
   if (g > needed) g = needed;
   const dim3 grid(g < 1 ? 1 : g, k);
 #define INK2_IQ3_CASE(F)                                                                                          \
@@ -445,7 +453,7 @@ static bool ink2_expert_iq4nl_v3(const uint8_t *W, const int *ids, const float *
   int sms = 0, dev = 0;
   if (cudaGetDevice(&dev) != cudaSuccess || cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev) != cudaSuccess || sms <= 0) sms = 84;
   const int needed = ((rows + INK2_IQ3_ROWS - 1) / INK2_IQ3_ROWS + 7) / 8;
-  int g = (sms * ink2_iq3_blocks_per_sm(k) + k - 1) / k;
+  int g = ink2_iq3_blocks_per_slot(sms, k);
   if (g > needed) g = needed;
   const dim3 grid(g < 1 ? 1 : g, k);
   FCUDA_TS("k_ink2_expert_iq4nl_v3", grid, k_ink2_expert_iq4nl_v3<INK2_IQ3_ROWS><<<grid, 256, (size_t)in * 4, g_stream>>>(

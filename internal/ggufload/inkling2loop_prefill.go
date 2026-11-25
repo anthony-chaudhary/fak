@@ -143,6 +143,10 @@ func (p *ink2Prefill) mm(m ink2Mat, x ink2Ref) ink2Ref {
 	// decode GEMV
 	if (p.verify || p.fewRows) && p.T <= 9 {
 		ok, err := inkling2RowsMatMul(p.vd, m, x, y, p.T, p.q8Codes)
+		if err == nil && !ok && m.t.Dtype == compute.F32 {
+			// the prompt path's dense F32 GEMM is slow at a few rows and sums in another order
+			ok, err = p.vd.Ink2VRows(m.t, x, y, p.T)
+		}
 		if err != nil || ok {
 			p.fail(err)
 			return y
@@ -154,6 +158,67 @@ func (p *ink2Prefill) mm(m ink2Mat, x ink2Ref) ink2Ref {
 	}
 	p.fail(p.pd.Ink2PMatMul(m.t, x, y, p.T))
 	return y
+}
+
+// mmMany is mm for each (ms[i], xs[i]); on a verify chunk the Q8_0 weights of one
+// input width share a single launch.
+func (p *ink2Prefill) mmMany(ms []ink2Mat, xs []ink2Ref) []ink2Ref {
+	ys := make([]ink2Ref, len(ms))
+	done := make([]bool, len(ms))
+	if p.verify && p.T <= 9 && p.s.err == nil {
+		var err error
+		done, err = inkling2SegsMatMul(p.vd, ms, xs, ys, p.T, p.tmp)
+		p.fail(err)
+	}
+	for i, m := range ms {
+		if !done[i] {
+			ys[i] = p.mm(m, xs[i])
+		}
+	}
+	return ys
+}
+
+// inkling2SegsMatMul runs the Q8_0 weights of ms that share the first one's input
+// width in one launch, writing their ys (allocated with tmp), and reports which
+// products it ran.
+func inkling2SegsMatMul(vd compute.Inkling2VerifyDevice, ms []ink2Mat, xs, ys []ink2Ref, rows int, tmp func(int) ink2Ref) ([]bool, error) {
+	done := make([]bool, len(ms))
+	var idx []int
+	cols := 0
+	for i, m := range ms {
+		if m.t.Dtype != compute.Q8_0 || len(idx) == 8 {
+			continue
+		}
+		if len(idx) == 0 {
+			cols = m.cols
+		}
+		if m.cols == cols {
+			idx = append(idx, i)
+		}
+	}
+	if len(idx) < 2 {
+		return done, nil
+	}
+	ws, sx, sy := make([]compute.Tensor, len(idx)), make([]ink2Ref, len(idx)), make([]ink2Ref, len(idx))
+	distinct := 0
+	for j, i := range idx {
+		ws[j], sx[j], sy[j] = ms[i].t, xs[i], tmp(rows*ms[i].rows)
+		seen := false
+		for _, e := range idx[:j] {
+			seen = seen || (xs[e].T.Buf() == xs[i].T.Buf() && xs[e].Off == xs[i].Off)
+		}
+		if !seen {
+			distinct++
+		}
+	}
+	ok, err := vd.Ink2VQ8Segs(ws, sx, sy, tmp(distinct*rows*(cols/4+cols/32)), rows)
+	if err != nil || !ok {
+		return done, err
+	}
+	for j, i := range idx {
+		ys[i], done[i] = sy[j], true
+	}
+	return done, nil
 }
 
 // q8Codes returns the Q8_0 code buffer for activation x of rows*n floats and whether
@@ -218,10 +283,21 @@ func (p *ink2Prefill) rmsRows(x, w ink2Ref, rows, n int, eps float32) ink2Ref {
 
 func (p *ink2Prefill) rms(x, w ink2Ref, n int, eps float32) ink2Ref {
 	y := p.tmp(p.T * n)
-	if p.s.err == nil {
+	p.rmsInto(x, w, y, n, eps)
+	return y
+}
+
+// rmsInto RMS-normalizes the chunk's rows of x by w into y. A verify chunk keeps the
+// decode kernel: its tokens must be the decode step's, which the prompt kernels'
+// fp32 reductions do not promise.
+func (p *ink2Prefill) rmsInto(x, w, y ink2Ref, n int, eps float32) {
+	switch {
+	case p.s.err != nil:
+	case p.verify:
+		p.fail(p.s.dev.Ink2RMS(x, w, y, p.T, n, eps))
+	default:
 		p.fail(p.pd.Ink2PRMS(x, w, y, p.T, n, eps))
 	}
-	return y
 }
 
 // mixNorm is mix with query q RMS-normalized by norms[q] (norms nil: no norm). A
@@ -271,6 +347,12 @@ func (p *ink2Prefill) mixPlain(states []ink2Ref, queries ink2Ref, nq int) []ink2
 // controls runs controllers 0..len(cur)-1 of c on (cur[j], msg[j]) in one launch per
 // stage, the result of each equal to control's.
 func (p *ink2Prefill) controls(cur, msg []ink2Ref, c *ink2Ctrl) []ink2Ref {
+	return p.controlsAt(cur, msg, c, 0)
+}
+
+// controlsAt is controls for controllers j0..j0+len(cur)-1, each with the decode
+// controller's float64 tanh.
+func (p *ink2Prefill) controlsAt(cur, msg []ink2Ref, c *ink2Ctrl, j0 int) []ink2Ref {
 	h := p.s.hp.Hidden
 	J := len(cur)
 	g, out := make([]ink2Ref, J), make([]ink2Ref, J)
@@ -280,7 +362,7 @@ func (p *ink2Prefill) controls(cur, msg []ink2Ref, c *ink2Ctrl) []ink2Ref {
 		g[j], out[j] = at(gs, j*p.T*c.rank), at(outs, j*p.T*h)
 	}
 	if p.s.err == nil {
-		p.fail(p.vd.Ink2PControlMulti(cur, msg, c.down[:J], c.gain[:J], c.forget[:J], g, out, h, c.rank, p.T))
+		p.fail(p.vd.Ink2PControlMulti(cur, msg, c.down[j0:j0+J], c.gain[j0:j0+J], c.forget[j0:j0+J], g, out, h, c.rank, p.T))
 	}
 	return out
 }
@@ -398,21 +480,26 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		in[2] = p.rms(in[2], l.vNorm, h, hp.NormEps)
 	}
 
-	q := p.mm(l.wq, in[0])
+	// every product of the visit's attention inputs
+	fm := []ink2Mat{l.wq, l.wk, l.wv, l.rel, l.sink, l.gate}
+	fx := []ink2Ref{in[0], in[1], in[2], in[0], in[0], in[0]}
+	if !local {
+		fm = append(fm, l.kconv, l.vconv)
+		fx = append(fx, in[1], in[2])
+	}
+	fy := p.mmMany(fm, fx)
+	q, r, sinks, gate := fy[0], fy[3], fy[4], fy[5]
 	var kDyn, vDyn ink2Ref
 	if !local {
-		kDyn = p.mm(l.kconv, in[1])
-		vDyn = p.mm(l.vconv, in[2])
+		kDyn, vDyn = fy[6], fy[7]
 	}
 	var k, v ink2Ref
 	if p.verify {
-		k, v = p.convKV(slot, p.mm(l.wk, in[1]), p.mm(l.wv, in[2]), l, kDyn, vDyn)
+		k, v = p.convKV(slot, fy[1], fy[2], l, kDyn, vDyn)
 	} else {
-		k = p.conv(slot, p.mm(l.wk, in[1]), l.kconvW, kDyn, ink2Ref{}, kvDim, hp.KVHeads, 0, false)
-		v = p.conv(slot, p.mm(l.wv, in[2]), l.vconvW, vDyn, ink2Ref{}, kvDim, hp.KVHeads, kvDim, false)
+		k = p.conv(slot, fy[1], l.kconvW, kDyn, ink2Ref{}, kvDim, hp.KVHeads, 0, false)
+		v = p.conv(slot, fy[2], l.vconvW, vDyn, ink2Ref{}, kvDim, hp.KVHeads, kvDim, false)
 	}
-	r := p.mm(l.rel, in[0])
-	sinks := p.mm(l.sink, in[0])
 
 	ap := compute.Ink2AttnParams{
 		Heads: hp.Heads, KVHeads: hp.KVHeads, HeadDim: hp.HeadDim, RelLen: hp.RelLength,
@@ -435,7 +522,7 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	} else if s.err == nil {
 		p.fail(p.pd.Ink2PAttend(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, ap, extent, window, cap, p.pos0, p.T))
 	}
-	o := p.mmGated(l.wo, attn, p.mm(l.gate, in[0]), hp.Heads*hp.HeadDim)
+	o := p.mmGated(l.wo, attn, gate, hp.Heads*hp.HeadDim)
 	if ip%hp.AttnResBlock == 0 {
 		*blocks = append(*blocks, inpSA)
 		cur = p.conv(slot, o, l.attnPostConv, ink2Ref{}, ink2Ref{}, h, 0, 2*kvDim, false)
@@ -447,7 +534,11 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	var x ink2Ref
 	if msgs != nil {
 		x = p.mix(with(*blocks, cur), l.ffnResQ, 1)[0]
-		x = p.control(x, msgs[3], c, 3)
+		if p.verify {
+			x = p.controlsAt([]ink2Ref{x}, msgs[3:4], c, 3)[0]
+		} else {
+			x = p.control(x, msgs[3], c, 3)
+		}
 		x = p.rms(x, l.ffnNorm, h, hp.NormEps)
 	} else {
 		x = p.mixNorm(with(*blocks, cur), l.ffnResQ, 1, []ink2Ref{l.ffnNorm})[0]
@@ -545,7 +636,11 @@ func (p *ink2Prefill) moeRows(l *ink2Layer, x ink2Ref) (ink2Ref, ink2Ref) {
 	}
 	padK := l.down.padK
 	act := p.tmp(npairs * padK)
-	if s.err == nil {
+	switch {
+	case s.err != nil:
+	case p.verify:
+		p.fail(s.dev.Ink2Situ(gu, act, npairs, width, padK, float64(hp.SituBeta), float64(hp.SituLinearBeta)))
+	default:
 		p.fail(p.pd.Ink2PSitu(gu, act, npairs, width, padK, float64(hp.SituBeta), float64(hp.SituLinearBeta)))
 	}
 	down := p.tmp(npairs * hp.Hidden)
@@ -578,9 +673,7 @@ func (p *ink2Prefill) forward(last bool) {
 	hp := s.hp
 	h := hp.Hidden
 	cur := p.hold(p.T * h)
-	if s.err == nil {
-		p.fail(p.pd.Ink2PRMS(s.prefillIn, s.tokNorm, cur, p.T, h, hp.NormEps))
-	}
+	p.rmsInto(s.prefillIn, s.tokNorm, cur, h, hp.NormEps)
 	// visit resets the layer scratch and, with a draft attached, keeps the visit's
 	// input when it is a draft tap
 	var taps []ink2Ref

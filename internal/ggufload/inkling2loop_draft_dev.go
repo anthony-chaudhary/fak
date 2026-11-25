@@ -257,6 +257,27 @@ func (d *ink2DeviceDraft) forward() {
 		}
 		return y
 	}
+	// mmMany is mm for every weight in ms on the one activation x, the Q8_0 ones in a
+	// single launch
+	mmMany := func(x ink2Ref, rows int, ms ...ink2Mat) []ink2Ref {
+		ys := make([]ink2Ref, len(ms))
+		done := make([]bool, len(ms))
+		if s.err == nil {
+			xs := make([]ink2Ref, len(ms))
+			for i := range xs {
+				xs[i] = x
+			}
+			var err error
+			done, err = inkling2SegsMatMul(vdev, ms, xs, ys, rows, d.tmp)
+			run(err)
+		}
+		for i, m := range ms {
+			if !done[i] {
+				ys[i] = mm(m, x, rows)
+			}
+		}
+		return ys
+	}
 	res := d.in
 	for l := range d.layers {
 		// layer temporaries are dead once res is updated, so every layer reuses them
@@ -265,7 +286,8 @@ func (d *ink2DeviceDraft) forward() {
 		L := &d.layers[l]
 		x := d.tmp(B * H)
 		run(s.dev.Ink2RMS(res, L.inNorm, x, B, H, hp.NormEps))
-		q, k, v := mm(L.wq, x, B), mm(L.wk, x, B), mm(L.wv, x, B)
+		qkv := mmMany(x, B, L.wq, L.wk, L.wv)
+		q, k, v := qkv[0], qkv[1], qkv[2]
 		run(d.dd.Ink2DQK(q, L.qNorm, q, d.pos, B, hp.Heads, hp.HeadDim, 0, false, hp.NormEps, hp.RopeTheta))
 		run(d.dd.Ink2DQK(k, L.kNorm, k, d.pos, B, hp.KVHeads, hp.HeadDim, 0, false, hp.NormEps, hp.RopeTheta))
 		window := 0
@@ -277,7 +299,8 @@ func (d *ink2DeviceDraft) forward() {
 		run(s.dev.Ink2Add(res, mm(L.wo, o, B), res, B*H))
 		h := d.tmp(B * H)
 		run(s.dev.Ink2RMS(res, L.postNorm, h, B, H, hp.NormEps))
-		g, u := mm(L.gate, h, B), mm(L.up, h, B)
+		gu := mmMany(h, B, L.gate, L.up)
+		g, u := gu[0], gu[1]
 		run(d.dd.Ink2DSiluMul(g, u, g, B*hp.Intermediate))
 		run(s.dev.Ink2Add(res, mm(L.down, g, B), res, B*H))
 		_ = kvDim
