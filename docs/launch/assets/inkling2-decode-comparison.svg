@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" width="760" height="420" font-family="Helvetica, Arial, sans-serif">
+  <title>Inkling-2-Mini decode and prefill: fak, realugbun llama.cpp fork, stock llama.cpp</title>
+  <rect width="760" height="420" fill="#ffffff"/>
+
+  <!-- Panel 1: decode, scale 0-130 tok/s over 240 px (1.846 px per tok/s), baseline y=320 -->
+  <text x="190" y="36" font-size="16" font-weight="bold" text-anchor="middle" fill="#111">Decode, tok/s (higher is better)</text>
+  <text x="190" y="56" font-size="12" text-anchor="middle" fill="#444">same card and GGUF</text>
+  <line x1="40" y1="320" x2="350" y2="320" stroke="#333"/>
+  <rect x="60" y="98.7" width="70" height="221.3" fill="#1f6feb"/>
+  <text x="95" y="92" font-size="14" text-anchor="middle" fill="#111">119.9</text>
+  <text x="95" y="340" font-size="12" text-anchor="middle" fill="#111">fak</text>
+  <rect x="155" y="99.4" width="70" height="220.6" fill="#8b949e"/>
+  <text x="190" y="92" font-size="14" text-anchor="middle" fill="#111">119.5</text>
+  <text x="190" y="340" font-size="12" text-anchor="middle" fill="#111">llama.cpp fork</text>
+  <text x="190" y="355" font-size="11" text-anchor="middle" fill="#444">(realugbun)</text>
+  <rect x="250" y="170.5" width="70" height="149.5" fill="#c9d1d9"/>
+  <text x="285" y="164" font-size="14" text-anchor="middle" fill="#111">81.0</text>
+  <text x="285" y="340" font-size="12" text-anchor="middle" fill="#111">stock llama.cpp</text>
+  <text x="285" y="355" font-size="11" text-anchor="middle" fill="#444">(two days earlier)</text>
+
+  <!-- Panel 2: prefill pp512, scale 0-2500 tok/s over 240 px (0.096 px per tok/s), baseline y=320 -->
+  <line x1="380" y1="60" x2="380" y2="360" stroke="#ddd"/>
+  <text x="570" y="36" font-size="16" font-weight="bold" text-anchor="middle" fill="#111">Prefill pp512, tok/s: fak loses</text>
+  <text x="570" y="56" font-size="12" text-anchor="middle" fill="#b42318">different boxes, not a matched ratio</text>
+  <line x1="420" y1="320" x2="720" y2="320" stroke="#333"/>
+  <rect x="470" y="237.2" width="80" height="82.8" fill="#1f6feb"/>
+  <text x="510" y="230" font-size="14" text-anchor="middle" fill="#111">862.7</text>
+  <text x="510" y="340" font-size="12" text-anchor="middle" fill="#111">fak</text>
+  <text x="510" y="355" font-size="11" text-anchor="middle" fill="#444">(opt-in batched)</text>
+  <rect x="590" y="93.2" width="80" height="226.8" fill="#c9d1d9"/>
+  <text x="630" y="86" font-size="14" text-anchor="middle" fill="#111">2362</text>
+  <text x="630" y="340" font-size="12" text-anchor="middle" fill="#111">llama.cpp</text>
+
+  <text x="380" y="398" font-size="11" text-anchor="middle" fill="#444">in-process decode bench, Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB</text>
+  <text x="380" y="413" font-size="11" text-anchor="middle" fill="#444">not served-endpoint rates; decode parity holds at depth 0 only</text>
+</svg>

@@ -1,3 +1,5 @@
+> **Superseded draft.** This file predates the current positioning (guard first, Inkling-2-Mini speed as the proof). Use [inkling2-launch-2026-11-24.md](inkling2-launch-2026-11-24.md) for current launch copy.
+
 # Show HN: fak – Treat the model as untrusted and the tool call as a syscall
 
 **HN title (paste into the title field):**

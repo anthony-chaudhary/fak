@@ -1,3 +1,5 @@
+> **Superseded draft.** This file predates the current positioning (guard first, Inkling-2-Mini speed as the proof). Use [inkling2-launch-2026-11-24.md](inkling2-launch-2026-11-24.md) for current launch copy.
+
 # fak — launch asset: X-thread
 
 > Paste-ready. Two deliverables below: the **X/Twitter thread** (8 posts) and a **standalone Bluesky variant**. Visual pairings are noted per post in `[VISUAL: …]` tags — strip those tags before posting; they're production notes, not copy.

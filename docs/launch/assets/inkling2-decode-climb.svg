@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" width="760" height="420" font-family="Helvetica, Arial, sans-serif">
+  <title>Inkling-2-Mini fak decode climb: 6.32 to 119.9 tok/s</title>
+  <rect width="760" height="420" fill="#ffffff"/>
+  <text x="380" y="34" font-size="16" font-weight="bold" text-anchor="middle" fill="#111">fak decode on Inkling-2-Mini, tok/s, step by step</text>
+
+  <!-- scale 0-130 tok/s over 260 px (2 px per tok/s), baseline y=330 -->
+  <line x1="70" y1="330" x2="690" y2="330" stroke="#333"/>
+
+  <!-- reference lines -->
+  <line x1="70" y1="91" x2="690" y2="91" stroke="#8b949e" stroke-dasharray="6 4"/>
+  <text x="690" y="84" font-size="11" text-anchor="end" fill="#444">llama.cpp fork (realugbun) 119.5</text>
+  <line x1="70" y1="168" x2="690" y2="168" stroke="#c9d1d9" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="690" y="161" font-size="11" text-anchor="end" fill="#444">stock llama.cpp 81.0</text>
+
+  <!-- steps, drawn as a staircase -->
+  <polyline fill="none" stroke="#1f6feb" stroke-width="2" points="100,317.4 210,317.4 210,165 350,165 350,126.8 490,126.8 490,90.2 630,90.2"/>
+  <circle cx="155" cy="317.4" r="4" fill="#1f6feb"/>
+  <circle cx="280" cy="165" r="4" fill="#1f6feb"/>
+  <circle cx="420" cy="126.8" r="4" fill="#9a6700"/>
+  <circle cx="560" cy="90.2" r="4" fill="#1f6feb"/>
+  <text x="155" y="306" font-size="14" text-anchor="middle" fill="#111">6.32</text>
+  <text x="280" y="186" font-size="14" text-anchor="middle" fill="#111">82.5</text>
+  <text x="420" y="148" font-size="14" text-anchor="middle" fill="#111">101.6</text>
+  <text x="560" y="112" font-size="14" text-anchor="middle" fill="#111">119.9</text>
+
+  <text x="155" y="350" font-size="12" text-anchor="middle" fill="#111">first native run</text>
+  <text x="155" y="365" font-size="11" text-anchor="middle" fill="#444">per-call uploads</text>
+  <text x="280" y="350" font-size="12" text-anchor="middle" fill="#111">resident weights</text>
+  <text x="280" y="365" font-size="11" text-anchor="middle" fill="#444">default device path</text>
+  <text x="420" y="350" font-size="12" text-anchor="middle" fill="#9a6700">fused small ops</text>
+  <text x="420" y="365" font-size="11" text-anchor="middle" fill="#9a6700">second box</text>
+  <text x="560" y="350" font-size="12" text-anchor="middle" fill="#111">current main</text>
+  <text x="560" y="365" font-size="11" text-anchor="middle" fill="#444">build b64405de76</text>
+
+  <text x="380" y="398" font-size="11" text-anchor="middle" fill="#444">in-process decode bench, Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB</text>
+  <text x="380" y="413" font-size="11" text-anchor="middle" fill="#444">the 101.6 step was measured on a second box with the same card model; compare it within that box only</text>
+</svg>

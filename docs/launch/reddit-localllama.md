@@ -1,3 +1,5 @@
+> **Superseded draft.** This file predates the current positioning (guard first, Inkling-2-Mini speed as the proof). Use [inkling2-launch-2026-11-24.md](inkling2-launch-2026-11-24.md) for current launch copy.
+
 Disclosure up front: I wrote this. It's Apache-2.0, github.com/anthony-chaudhary/fak. I'll put the parity tables and the honest baseline in the first comment so this post stays about the mechanism.
 
 ## What it is, for self-hosters
