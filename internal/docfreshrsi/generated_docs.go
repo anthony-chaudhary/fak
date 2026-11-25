@@ -3,11 +3,13 @@ package docfreshrsi
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/docfreshrsi/aeogen"
 	"github.com/anthony-chaudhary/fak/internal/markerblock"
 	"github.com/anthony-chaudhary/fak/internal/milestonedoc"
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
@@ -251,28 +253,20 @@ func DefaultGeneratedDocs() []GeneratedDocEntry {
 			Path:        "docs/_includes/head-custom.html",
 			Description: "JSON-LD structured data and breadcrumbs in head-custom.html, FAQ.md, and index.md",
 			Check: func(root string) (bool, string, error) {
-				script := filepath.Join(root, "tools", "gen_structured_data.py")
-				if _, err := os.Stat(script); os.IsNotExist(err) {
-					return true, "not applicable (tools/gen_structured_data.py not present)", nil
+				if !exists(filepath.Join(root, "docs", "_includes", "head-custom.html")) {
+					return true, "not applicable (docs/_includes/head-custom.html not present)", nil
 				}
-				ok, out, err := runPythonTool(root, "tools/gen_structured_data.py", "--check")
-				if err != nil {
-					return false, fmt.Sprintf("failed running gen_structured_data.py: %v (%s)", err, out), err
-				}
+				ok, out := runGenerator(aeogen.RunStructuredData, root, true)
 				if !ok {
 					return false, out, nil
 				}
 				return true, "fresh", nil
 			},
 			Refresh: func(root string) (bool, string, error) {
-				script := filepath.Join(root, "tools", "gen_structured_data.py")
-				if _, err := os.Stat(script); os.IsNotExist(err) {
-					return false, "not applicable (tools/gen_structured_data.py not present)", nil
+				if !exists(filepath.Join(root, "docs", "_includes", "head-custom.html")) {
+					return false, "not applicable (docs/_includes/head-custom.html not present)", nil
 				}
-				ok, out, err := runPythonTool(root, "tools/gen_structured_data.py")
-				if err != nil {
-					return false, fmt.Sprintf("failed running gen_structured_data.py: %v (%s)", err, out), err
-				}
+				ok, out := runGenerator(aeogen.RunStructuredData, root, false)
 				return ok, out, nil
 			},
 		},
@@ -281,57 +275,37 @@ func DefaultGeneratedDocs() []GeneratedDocEntry {
 			Path:        "llms-full.txt",
 			Description: "llms-full.txt inlined documentation corpus generated from llms.txt",
 			Check: func(root string) (bool, string, error) {
-				script := filepath.Join(root, "tools", "gen_llms_full.py")
-				if _, err := os.Stat(script); os.IsNotExist(err) {
-					return true, "not applicable (tools/gen_llms_full.py not present)", nil
+				if !exists(filepath.Join(root, "llms.txt")) {
+					return true, "not applicable (llms.txt not present)", nil
 				}
-				ok, out, err := runPythonTool(root, "tools/gen_llms_full.py", "--check")
-				if err != nil {
-					return false, fmt.Sprintf("failed running gen_llms_full.py: %v (%s)", err, out), err
-				}
+				ok, out := runGenerator(aeogen.RunLLMSFull, root, true)
 				if !ok {
 					return false, out, nil
 				}
 				return true, "fresh", nil
 			},
 			Refresh: func(root string) (bool, string, error) {
-				script := filepath.Join(root, "tools", "gen_llms_full.py")
-				if _, err := os.Stat(script); os.IsNotExist(err) {
-					return false, "not applicable (tools/gen_llms_full.py not present)", nil
+				if !exists(filepath.Join(root, "llms.txt")) {
+					return false, "not applicable (llms.txt not present)", nil
 				}
-				ok, out, err := runPythonTool(root, "tools/gen_llms_full.py")
-				if err != nil {
-					return false, fmt.Sprintf("failed running gen_llms_full.py: %v (%s)", err, out), err
-				}
+				ok, out := runGenerator(aeogen.RunLLMSFull, root, false)
 				return ok, out, nil
 			},
 		},
 	}
 }
 
-func runPythonTool(root, scriptRel string, args ...string) (bool, string, error) {
-	scriptPath := filepath.Join(root, filepath.FromSlash(scriptRel))
-	if _, err := os.Stat(scriptPath); err != nil {
-		return false, fmt.Sprintf("%s does not exist", scriptRel), err
-	}
-
-	py, err := exec.LookPath("python")
-	if err != nil {
-		py, err = exec.LookPath("python3")
-	}
-	if err != nil {
-		return false, "python/python3 not found on PATH", err
-	}
-
-	cmdArgs := append([]string{scriptPath}, args...)
-	cmd := exec.Command(py, cmdArgs...)
-	cmd.Dir = root
+// runGenerator runs an in-process generator and returns its verdict with the combined
+// stdout/stderr text the Python original would have printed.
+func runGenerator(run func(root string, check bool, stdout, stderr io.Writer) int, root string, check bool) (bool, string) {
 	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	runErr := cmd.Run()
-	outputStr := strings.TrimSpace(out.String())
-	return runErr == nil, outputStr, nil
+	rc := run(root, check, &out, &out)
+	return rc == 0, strings.TrimSpace(out.String())
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // AuditGeneratedDocs audits every registered generated document in the repository.

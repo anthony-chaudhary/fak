@@ -1,0 +1,15 @@
+# Fixture map
+
+> A curated map for the aeogen fixture.
+
+- [Guide](docs/guide/start.md)
+- [FAQ](docs/FAQ.md#top)
+- [Web](https://example.com/x.md)
+- [Anchor](#local)
+- [Mail](mailto:a@b.test)
+- [Dup](docs/guide/start.md)
+- [Missing](docs/missing.md)
+- [Pic](visuals/pic.png)
+- [  Spaced title  ](docs/guide/two+words.md)
+- [CRLF](docs/crlf.md)
+- [Bad bytes](docs/bad.md)

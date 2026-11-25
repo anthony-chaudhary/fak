@@ -122,3 +122,42 @@ func TestAuditAndRefreshGeneratedDocsInTempDir(t *testing.T) {
 		t.Errorf("HARDWARE-MATRIX.md does not contain fresh supportmaturityscore.MatrixBlock()")
 	}
 }
+
+func TestAEOGeneratedDocsRunInProcess(t *testing.T) {
+	tmp := t.TempDir()
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(tmp, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("llms.txt", "# Map\n\n- [A](docs/a.md)\n")
+	mustWrite("docs/a.md", "# A\n\nbody\n")
+	mustWrite("docs/_includes/head-custom.html", "<!-- head -->\n")
+	entries := map[string]GeneratedDocEntry{}
+	for _, d := range DefaultGeneratedDocs() {
+		entries[d.ID] = d
+	}
+	for _, id := range []string{"structured-data", "llms-full"} {
+		d := entries[id]
+		if fresh, detail, err := d.Check(tmp); fresh || err != nil || !strings.Contains(detail, "OUT OF DATE") {
+			t.Fatalf("%s before refresh: fresh=%v detail=%q err=%v", id, fresh, detail, err)
+		}
+		if ok, detail, err := d.Refresh(tmp); !ok || err != nil {
+			t.Fatalf("%s refresh: ok=%v detail=%q err=%v", id, ok, detail, err)
+		}
+		if fresh, detail, err := d.Check(tmp); !fresh || err != nil {
+			t.Fatalf("%s after refresh: fresh=%v detail=%q err=%v", id, fresh, detail, err)
+		}
+	}
+	empty := t.TempDir()
+	for _, id := range []string{"structured-data", "llms-full"} {
+		if fresh, detail, _ := entries[id].Check(empty); !fresh || !strings.HasPrefix(detail, "not applicable") {
+			t.Fatalf("%s on a tree without its inputs: fresh=%v detail=%q", id, fresh, detail)
+		}
+	}
+}

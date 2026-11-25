@@ -173,3 +173,30 @@ func TestDocFreshnessDefaultTargetVersion(t *testing.T) {
 		t.Errorf("got %q, want v1.2.3", ver)
 	}
 }
+
+func TestDocFreshnessGenRunsGeneratorInPlaceOfPython(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "llms.txt"), []byte("# Map\n\n- [A](a.md)\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "a.md"), []byte("# A\n\nbody\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) (int, string) {
+		var out, errOut bytes.Buffer
+		rc := runDocFreshness(&out, &errOut, append(args, "--workspace", tmp))
+		return rc, out.String() + errOut.String()
+	}
+	if rc, out := run("--gen", "llms-full", "--check"); rc != 1 || !strings.Contains(out, "OUT OF DATE (missing)") {
+		t.Fatalf("missing corpus: rc=%d out=%q", rc, out)
+	}
+	if rc, out := run("--gen", "llms-full"); rc != 0 || !strings.Contains(out, ": 1 documents, ") {
+		t.Fatalf("write: rc=%d out=%q", rc, out)
+	}
+	if rc, out := run("--gen", "llms-full", "--check"); rc != 0 || !strings.Contains(out, "llms-full.txt up to date (1 documents, ") {
+		t.Fatalf("fresh check: rc=%d out=%q", rc, out)
+	}
+	if rc, out := run("--gen", "nope"); rc != 2 || !strings.Contains(out, "unknown --gen") {
+		t.Fatalf("unknown generator: rc=%d out=%q", rc, out)
+	}
+}

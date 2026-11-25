@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/docfreshrsi/aeogen"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -131,20 +132,9 @@ func runLLMSFull(args []string, stdout, stderr io.Writer) int {
 }
 
 func runLLMSGenerator(root string, check bool) (bool, string) {
-	python := "python3"
-	if filepath.Separator == '\\' {
-		python = "python"
-	}
-	args := []string{filepath.Join(root, "tools", "gen_llms_full.py"), "--root", root}
-	if check {
-		args = append(args, "--check")
-	}
-	cmd := exec.Command(python, args...)
-	cmd.Dir = root
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.CombinedOutput()
-	detail := strings.TrimSpace(string(out))
-	return err == nil, detail
+	var out bytes.Buffer
+	rc := aeogen.RunLLMSFull(root, check, &out, &out)
+	return rc == 0, strings.TrimSpace(out.String())
 }
 
 func dirtyPathsExcluding(root string, owned []string) ([]string, error) {

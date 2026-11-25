@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/docfreshrsi"
+	"github.com/anthony-chaudhary/fak/internal/docfreshrsi/aeogen"
 )
 
 // docFreshnessPayload is the machine-readable output for `fak doc-freshness --json`.
@@ -45,6 +46,7 @@ func runDocFreshness(stdout, stderr io.Writer, args []string) int {
 	targetVersion := fs.String("target-version", "", "override target release version pin (default: read from VERSION)")
 	workspace := fs.String("workspace", "", "workspace root directory (default: repo root)")
 	globsFlag := fs.String("globs", "", "comma-separated glob patterns to limit corpus scan (e.g. docs/**/*.md)")
+	gen := fs.String("gen", "", "run one generator in place of its tools/*.py original: llms-full | structured-data (honours --check, --workspace)")
 
 	if !parseFlags(fs, args) {
 		return 2
@@ -59,6 +61,10 @@ func runDocFreshness(stdout, stderr io.Writer, args []string) int {
 		root = repoRoot()
 	} else if abs, err := filepath.Abs(root); err == nil {
 		root = abs
+	}
+
+	if *gen != "" {
+		return runDocGenerator(stdout, stderr, *gen, root, *check)
 	}
 
 	// Default mode is check if refresh not passed
@@ -275,4 +281,17 @@ func runDocFreshness(stdout, stderr io.Writer, args []string) int {
 
 	fmt.Fprintln(stdout, "VERDICT: STALE (run `fak doc-freshness --refresh` to auto-repair)")
 	return 1
+}
+
+// runDocGenerator runs one in-process generator with the output and exit codes of the
+// Python script it replaces, so `fak doc-freshness --gen X [--check]` is a drop-in.
+func runDocGenerator(stdout, stderr io.Writer, name, root string, check bool) int {
+	switch name {
+	case "llms-full":
+		return aeogen.RunLLMSFull(root, check, stdout, stderr)
+	case "structured-data":
+		return aeogen.RunStructuredData(root, check, stdout, stderr)
+	}
+	fmt.Fprintf(stderr, "fak doc-freshness: unknown --gen %q (want llms-full or structured-data)\n", name)
+	return 2
 }

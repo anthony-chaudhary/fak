@@ -1,0 +1,32 @@
+# Fixture map
+
+<!-- WHATS-NEW:BEGIN (generated from docs/marketing/updates.json by `fak marketing aeo` — do not edit by hand) -->
+
+## What's new
+
+- **2026-01-02** — Shipped the <b>gate</b> & cache ([`abc1234`](https://github.com/o/r/commit/abc1234))
+- Undated ship ([`def5678`](https://github.com/o/r/commit/def5678))
+- **2026-01-03** — No commit url
+- **2026-01-06** — Item 6 ([`a6`](https://github.com/o/r/commit/a6))
+- **2026-01-07** — Item 7 ([`a7`](https://github.com/o/r/commit/a7))
+- **2026-01-08** — Item 8 ([`a8`](https://github.com/o/r/commit/a8))
+- **2026-01-09** — Item 9 ([`a9`](https://github.com/o/r/commit/a9))
+- **2026-01-10** — Item 10 ([`a10`](https://github.com/o/r/commit/a10))
+- **2026-01-11** — Item 11 ([`a11`](https://github.com/o/r/commit/a11))
+- **2026-01-12** — Item 12 ([`a12`](https://github.com/o/r/commit/a12))
+
+<!-- WHATS-NEW:END -->
+
+> A curated map for the aeogen fixture.
+
+- [Guide](docs/guide/start.md)
+- [FAQ](docs/FAQ.md#top)
+- [Web](https://example.com/x.md)
+- [Anchor](#local)
+- [Mail](mailto:a@b.test)
+- [Dup](docs/guide/start.md)
+- [Missing](docs/missing.md)
+- [Pic](visuals/pic.png)
+- [  Spaced title  ](docs/guide/two+words.md)
+- [CRLF](docs/crlf.md)
+- [Bad bytes](docs/bad.md)

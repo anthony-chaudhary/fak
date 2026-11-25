@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/docfreshrsi/aeogen"
 )
 
 func TestLLMSFullIsolatesOwnedDocsAndReportsProvenance(t *testing.T) {
@@ -143,17 +145,8 @@ func llmsFullFixture(t *testing.T) string {
 			t.Fatal(e)
 		}
 	}
-	mustMkdir("tools")
 	mustMkdir("docs")
-	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	script, err := os.ReadFile(filepath.Join(repoRoot, "tools", "gen_llms_full.py"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	files := map[string][]byte{"tools/gen_llms_full.py": script, "llms.txt": []byte("# Map\n\n- [Owned](docs/owned.md)\n- [Peer](docs/peer.md)\n"), "docs/owned.md": []byte("# Owned\n\nbase\n"), "docs/peer.md": []byte("# Peer\n\nbase peer\n")}
+	files := map[string][]byte{"llms.txt": []byte("# Map\n\n- [Owned](docs/owned.md)\n- [Peer](docs/peer.md)\n"), "docs/owned.md": []byte("# Owned\n\nbase\n"), "docs/peer.md": []byte("# Peer\n\nbase peer\n")}
 	for p, b := range files {
 		if e := os.WriteFile(filepath.Join(root, filepath.FromSlash(p)), b, 0644); e != nil {
 			t.Fatal(e)
@@ -166,11 +159,10 @@ func llmsFullFixture(t *testing.T) string {
 			t.Fatalf("%s %v: %v: %s", name, args, e, b)
 		}
 	}
-	py := "python3"
-	if filepath.Separator == '\\' {
-		py = "python"
+	var genOut bytes.Buffer
+	if rc := aeogen.RunLLMSFull(root, false, &genOut, &genOut); rc != 0 {
+		t.Fatalf("generate llms-full.txt: rc=%d %s", rc, genOut.String())
 	}
-	run(py, "tools/gen_llms_full.py", "--root", root)
 	run("git", "init")
 	run("git", "config", "user.email", "fixture@example.test")
 	run("git", "config", "user.name", "fixture")

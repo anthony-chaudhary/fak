@@ -1,0 +1,9 @@
+title: fixture
+url: "https://example.test/"
+baseurl: "/site"
+description: >-
+  A fixture site for the
+  structured data port, with <b>markup</b> & "quotes".
+
+logo: x
+image: "https://example.test/social.png"

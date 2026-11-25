@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/docfreshrsi/aeogen"
 	"github.com/anthony-chaudhary/fak/internal/marketing"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
@@ -130,9 +130,9 @@ func marketingPostSpec(art marketing.Artifact, channel, token string, dryRun boo
 // surface from the witnessed ships — docs/marketing/updates.json (a schema.org ItemList answer
 // engines ingest), docs/marketing/disambiguation-terms.json (a schema.org DefinedTermSet), and
 // the plain llms-updates.txt / llms-terms.txt feeds agents poll. With --inject it then runs
-// tools/gen_structured_data.py to fence a bounded "What's new" block into llms.txt + keep the
-// FAQ/SoftwareApplication JSON-LD in sync (Go produces the data; Python owns the in-place doc
-// injection, so hand-written prose is never clobbered). With --score it runs the SEO/AEO and
+// the structured-data generator to fence a bounded "What's new" block into llms.txt + keep the
+// FAQ/SoftwareApplication JSON-LD in sync (it rewrites only the marked spans, so hand-written
+// prose is never clobbered). With --score it runs the SEO/AEO and
 // agent-readiness scorecards as a freshness REPORT (not a hard gate in v1).
 func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak marketing aeo", flag.ContinueOnError)
@@ -141,7 +141,7 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 	rangeFlag := fs.String("range", "", "gather ships in this rev-range; wins over --since")
 	root := fs.String("root", ".", "repo root to read git/CLAIMS.md and write the feed under")
 	refresh := fs.Bool("refresh", true, "write docs/marketing/updates.json + llms-updates.txt")
-	inject := fs.Bool("inject", false, "after refresh, run tools/gen_structured_data.py to fence the What's-new block into llms.txt")
+	inject := fs.Bool("inject", false, "after refresh, run the structured-data generator to fence the What's-new block into llms.txt")
 	score := fs.Bool("score", false, "after refresh, run the SEO/AEO + agent-readiness scorecards as a freshness report")
 	dryRun := fs.Bool("dry-run", false, "print what would be written; do not touch any file")
 	if !parseFlags(fs, argv) {
@@ -234,7 +234,7 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *inject {
-		if rc := runPyTool(stdout, stderr, *root, "tools/gen_structured_data.py"); rc != 0 {
+		if rc := aeogen.RunStructuredData(*root, false, stdout, stderr); rc != 0 {
 			return rc
 		}
 	}
@@ -246,26 +246,6 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 		_ = runAgentReadinessScore(stdout, stderr, []string{"--workspace", *root})
 	}
 	return 0
-}
-
-// runPyTool runs a project python tool (python then python3) from root, streaming its output.
-// A non-zero exit is reported but not treated as fatal by the caller for scorecards (their
-// exit code is a verdict); for the generator a non-zero exit IS a real failure.
-func runPyTool(stdout, stderr io.Writer, root, tool string) int {
-	for _, bin := range []string{"python", "python3"} {
-		cmd := exec.CommandContext(ctx(), bin, tool)
-		cmd.Dir = root
-		cmd.Stdout, cmd.Stderr = stdout, stderr
-		if err := cmd.Run(); err != nil {
-			if _, ok := err.(*exec.ExitError); ok {
-				return 1 // ran but exited non-zero (the caller decides if that's fatal)
-			}
-			continue // interpreter not found — try the next
-		}
-		return 0
-	}
-	fmt.Fprintf(stderr, "fak marketing aeo: could not run %s (no python/python3)\n", tool)
-	return 1
 }
 
 // marketingPoster adapts the scoreboard chat.postMessage client to the marketing.Poster
