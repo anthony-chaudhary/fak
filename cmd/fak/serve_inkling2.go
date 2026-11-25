@@ -470,6 +470,9 @@ func serveInkling2MetalRoute(path string, backend compute.Backend, metal bool) (
 	if backend != nil || !metal || !serveIsInkling2GGUF(path) {
 		return false, nil
 	}
+	if err := serveInkling2MetalSelected(path, os.Getenv(inkling2MetalTargetEnv)); err != nil {
+		return true, err
+	}
 	arch, err := serveInkling2Arch(path)
 	if err != nil {
 		return true, err
@@ -625,7 +628,7 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		engine = newInkling2MetalEngine(target, contextTokens)
 		closer = func() error { return errors.Join(engine.Close(), target.Close()) }
 		gen, decode = engine, "greedy decode"
-		placement = fmt.Sprintf("%s native target on metal: one resident model, single-stream decode", serveInkling2LoopArch)
+		placement = fmt.Sprintf("%s on metal target=%s: one resident model, single-stream decode", serveInkling2LoopArch, inkling2MetalTargetVendoredLabel)
 	} else {
 		l, err := loadServeInkling2(path, rt.chatBackend, os.Stderr)
 		if err != nil {
