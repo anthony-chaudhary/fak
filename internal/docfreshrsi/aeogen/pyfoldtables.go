@@ -2,6 +2,10 @@
 
 package aeogen
 
+// pyFoldUnidataVersion is the Unicode database version of the Python the tables were
+// derived from.
+const pyFoldUnidataVersion = "14.0.0"
+
 // pyIgnoreCaseASCII maps each non-ASCII code point Python's re IGNORECASE matches
 // against an ASCII letter to that lowercase letter.
 var pyIgnoreCaseASCII = map[rune]rune{
