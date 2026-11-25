@@ -370,21 +370,25 @@ func newFocusedFixture(t *testing.T) focusedFixture {
 
 func focusedLinkExecutable(t *testing.T, source, target string) {
 	t.Helper()
-	if err := os.Link(source, target); err != nil {
-		in, err := os.Open(source)
-		if err != nil {
-			t.Fatal(err)
+	// Windows cannot delete a hard link to the running test image, so the temp dir cleanup would fail.
+	if runtime.GOOS != "windows" {
+		if err := os.Link(source, target); err == nil {
+			return
 		}
-		defer in.Close()
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, copyErr := io.Copy(out, in)
-		closeErr := out.Close()
-		if copyErr != nil || closeErr != nil {
-			t.Fatalf("copy Go helper executable: %v / %v", copyErr, closeErr)
-		}
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil || closeErr != nil {
+		t.Fatalf("copy Go helper executable: %v / %v", copyErr, closeErr)
 	}
 }
 
@@ -405,7 +409,9 @@ func (f focusedFixture) run(t *testing.T, executable string, args []string, inpu
 	t.Helper()
 	trace := filepath.Join(t.TempDir(), "calls.jsonl")
 	started := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// Each intercepted git/fak call re-execs this test binary; under -race that startup
+	// dominates, and the hook path makes about 15 such calls. The bound covers that sum.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := windowgate.CommandContext(ctx, executable, args...)
 	cmd.Dir, cmd.Stdin = f.root, strings.NewReader(input)

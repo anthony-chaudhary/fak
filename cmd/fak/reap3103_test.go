@@ -49,8 +49,26 @@ func dispatchReleaseShipReap3103() {
 		gc := exec.Command(os.Args[0])
 		gc.Env = append(os.Environ(), releaseShipReapGrandchildEnv+"=1")
 		_ = gc.Start()
+		// Hang only once the grandchild is beating, so the timeout kill always lands on
+		// a live subtree rather than racing the grandchild's own process startup.
+		awaitReleaseShipHeartbeat(os.Getenv(releaseShipReapHeartbeatEnv), 2*time.Minute)
 		time.Sleep(2 * time.Minute)
 		os.Exit(0)
+	}
+}
+
+// awaitReleaseShipHeartbeat blocks until path exists or limit elapses. An empty path
+// (no heartbeat wired) returns immediately.
+func awaitReleaseShipHeartbeat(path string, limit time.Duration) {
+	if path == "" {
+		return
+	}
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -77,14 +95,17 @@ func TestRunReleaseShipCommandTimeoutReapsGrandchild3103(t *testing.T) {
 	// os.Args[0] (this test binary) in child mode: it spawns the heartbeating
 	// grandchild and hangs. env=nil => runReleaseShipCommand leaves cmd.Env unset, so
 	// the child inherits our process env (the reap guards above) and dispatches to
-	// child mode. The 400ms timeout is the only path back out.
+	// child mode. The timeout is the only path back out. It must outlast process startup:
+	// the child and grandchild are both test binaries (~0.6s each plain, ~2s under -race
+	// on a loaded host), so a sub-second budget fires before the grandchild exists.
+	const reapTimeout = 10 * time.Second
 	start := time.Now()
-	code, out := runReleaseShipCommand(root, os.Args[0], nil, nil, 400*time.Millisecond)
+	code, out := runReleaseShipCommand(root, os.Args[0], nil, nil, reapTimeout)
 	if code != 124 || !strings.Contains(out, "timed out") {
 		t.Fatalf("expected a timeout result (code 124, output containing %q), got code=%d out=%q", "timed out", code, out)
 	}
-	if d := time.Since(start); d > 30*time.Second {
-		t.Fatalf("runReleaseShipCommand hung %s past the 400ms deadline — the timeout kill did not return", d)
+	if d := time.Since(start); d > reapTimeout+20*time.Second {
+		t.Fatalf("runReleaseShipCommand hung %s past the %s deadline — the timeout kill did not return", d, reapTimeout)
 	}
 
 	// The grandchild must have been reaped along with the child: its heartbeat must go
