@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
 	"github.com/anthony-chaudhary/fak/internal/gitbroker"
 	"github.com/anthony-chaudhary/fak/internal/processalive"
@@ -311,29 +312,24 @@ var (
 		}
 		return data, nil
 	}
+	// committedtree.WriteTar keeps export-ignored paths, which git archive
+	// would strip from the snapshot.
 	runDisambiguationArchive = func(ctx context.Context, repo, tree string) (disambiguationArchiveStream, error) {
-		cmd := exec.CommandContext(ctx, "git", "archive", "--format=tar", tree)
-		cmd.Dir = repo
-		windowgate.ConfigureBackgroundCommand(cmd)
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			return disambiguationArchiveStream{}, err
-		}
-		if err := cmd.Start(); err != nil {
-			_ = stdout.Close()
-			return disambiguationArchiveStream{}, err
-		}
+		pr, pw := io.Pipe()
+		produced := make(chan error, 1)
+		go func() {
+			// committedtree keeps git's stderr in its error text, so the
+			// snapshot's failure stays diagnosable without re-reading stderr here.
+			err := committedtree.WriteTar(ctx, repo, tree, pw)
+			if err != nil {
+				err = fmt.Errorf("snapshot tree %s: %w", tree, err)
+			}
+			_ = pw.CloseWithError(err)
+			produced <- err
+		}()
 		return disambiguationArchiveStream{
-			Reader: stdout,
-			Wait: func() error {
-				err := cmd.Wait()
-				if err != nil && stderr.Len() > 0 {
-					return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
-				}
-				return err
-			},
+			Reader: pr,
+			Wait:   func() error { return <-produced },
 		}, nil
 	}
 	runAnalyzer = func(ctx context.Context, root, generated string) ([]byte, error) {
@@ -717,9 +713,8 @@ func materializeDisambiguationArchive(ctx context.Context, repo, tree, dst strin
 
 	var drainErr error
 	if extractErr == nil {
-		// tar.Reader stops at the end marker, but #9461 keys the cache over every
-		// byte emitted by git archive. Drain padding and trailing bytes through
-		// the same hash to preserve the existing content-addressed identity.
+		// tar.Reader stops at the end marker; drain padding and trailing bytes
+		// through the same hash so the identity covers every byte of the stream.
 		setSubphase("git-archive")
 		_, drainErr = copyBounded(ctx, io.Discard, tee)
 	}
@@ -729,6 +724,11 @@ func materializeDisambiguationArchive(ctx context.Context, repo, tree, dst strin
 		// Preserve the failing subphase even though joining the producer is
 		// mandatory before returning.
 		setSubphase("extract-archive")
+	}
+	// The producer's failure reaches the reader through the pipe and again from
+	// Wait; keep one copy so the diagnosis is not repeated.
+	if extractErr != nil && errors.Is(extractErr, waitErr) {
+		extractErr = nil
 	}
 	if err := errors.Join(extractErr, drainErr, closeErr, waitErr); err != nil {
 		return "", err

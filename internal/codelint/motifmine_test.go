@@ -3,7 +3,9 @@ package codelint
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -560,6 +562,9 @@ func TestMineMotifsOverLiveTree(t *testing.T) {
 	if testing.Short() {
 		t.Skip("walks the whole repository")
 	}
+	// Snapshotting the whole repository runs past committedtree's 2m default on
+	// a loaded Windows host; the knob is the documented way to extend it.
+	t.Setenv("FAK_COMMITTEDTREE_EXTRACT_BUDGET", "20m")
 	root := filepath.Join("..", "..")
 	first, err := MineMotifsRevision(root, "HEAD")
 	if err != nil {
@@ -593,4 +598,101 @@ func TestMineMotifsOverLiveTree(t *testing.T) {
 		t.Fatal("live-tree JSON differs across runs")
 	}
 	t.Logf("live tree: scanned=%d findings=%d skipped=%d", first.Scanned, len(first.Findings), len(first.Skipped))
+}
+
+// TestMotifSnapshotKeepsExportIgnoredTests pins why the snapshot does not use
+// git archive: an export-ignore row would hide test files from the corpus.
+func TestMotifSnapshotKeepsExportIgnoredTests(t *testing.T) {
+	repo := t.TempDir()
+	motifWrite(t, repo, ".gitattributes", "*_test.go export-ignore\n")
+	motifWrite(t, repo, "pkg/rotate_test.go", motifSrcInspectEditVerify)
+	motifWrite(t, repo, "pkg/apply.go", motifSrcLeaseIsolateLand)
+	motifGit(t, repo, "init", "-q")
+	motifGit(t, repo, "add", "-A")
+	motifGit(t, repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "fixture")
+
+	archived, err := exec.Command("git", "-C", repo, "archive", "--format=tar", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git archive: %v", err)
+	}
+	if bytes.Contains(archived, []byte("rotate_test.go")) {
+		t.Fatal("fixture does not exercise export-ignore: git archive kept the test file")
+	}
+
+	treeDir := t.TempDir()
+	if err := motifSnapshotTree(repo, "HEAD", treeDir); err != nil {
+		t.Fatalf("motifSnapshotTree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(treeDir, "pkg", "rotate_test.go")); err != nil {
+		t.Fatalf("snapshot dropped the export-ignored test file: %v", err)
+	}
+
+	rep, err := MineMotifsRevision(repo, "HEAD")
+	if err != nil {
+		t.Fatalf("MineMotifsRevision: %v", err)
+	}
+	if rep.Scanned != 2 {
+		t.Fatalf("scanned=%d want 2 (apply.go and rotate_test.go)", rep.Scanned)
+	}
+	for _, f := range rep.Findings {
+		if f.Path == "pkg/rotate_test.go" {
+			return
+		}
+	}
+	t.Fatalf("no finding from the export-ignored test file: %+v", rep.Findings)
+}
+
+// TestMineMotifsReadsLinkedWorktreeWithOtherOSGitDir covers a linked worktree
+// whose .git file names its git dir in the other OS's spelling. Only a drive
+// path has a /mnt spelling to translate to, so this runs on Windows, where the
+// /mnt form of the real git dir is the unresolvable one.
+func TestMineMotifsReadsLinkedWorktreeWithOtherOSGitDir(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("needs a drive-letter git dir to name in its /mnt spelling")
+	}
+	repo := t.TempDir()
+	motifWrite(t, repo, "pkg/rotate.go", motifSrcInspectEditVerify)
+	motifGit(t, repo, "init", "-q")
+	motifGit(t, repo, "add", "-A")
+	motifGit(t, repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "fixture")
+	wt := filepath.Join(t.TempDir(), "wt")
+	motifGit(t, repo, "worktree", "add", "-q", "--detach", wt)
+
+	admin := filepath.ToSlash(filepath.Join(repo, ".git", "worktrees", "wt"))
+	if len(admin) < 3 || admin[1] != ':' {
+		t.Fatalf("temp repo has no drive letter: %s", admin)
+	}
+	mnt := "/mnt/" + strings.ToLower(admin[:1]) + admin[2:]
+	motifWrite(t, wt, ".git", "gitdir: "+mnt+"\n")
+
+	rep, err := MineMotifsRevision(wt, "HEAD")
+	if err != nil {
+		t.Fatalf("MineMotifsRevision(linked worktree, /mnt gitdir): %v", err)
+	}
+	if len(rep.Findings) == 0 {
+		t.Fatal("linked worktree mined no findings from its committed tree")
+	}
+}
+
+func TestMotifTranslateOSPathBothDirections(t *testing.T) {
+	cases := map[string]string{
+		"C:/work/fak/.git/worktrees/x": "/mnt/c/work/fak/.git/worktrees/x",
+		`D:\repo\.git`:                 "/mnt/d/repo/.git",
+		"/mnt/c/work/fak/.git":         "C:/work/fak/.git",
+		"/home/user/fak/.git":          "",
+		"relative/.git":                "",
+	}
+	for in, want := range cases {
+		if got := motifTranslateOSPath(in); got != want {
+			t.Errorf("motifTranslateOSPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func motifGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
 }

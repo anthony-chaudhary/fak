@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
 	"github.com/anthony-chaudhary/fak/internal/processstart"
 )
@@ -1248,4 +1249,90 @@ func tarDisambiguationFixture(t *testing.T, root string) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+func TestDisambiguationSnapshotKeepsExportIgnoredPaths(t *testing.T) {
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	writeDisambiguationFixture(t, root, ".gitattributes", "secret.txt export-ignore\n")
+	writeDisambiguationFixture(t, root, "secret.txt", "kept in snapshot\n")
+	writeDisambiguationFixture(t, root, "keep.txt", "kept\n")
+	mustGit(t, root, "add", "-A")
+	mustGit(t, root, "commit", "-q", "-m", "snapshot")
+
+	stream, err := runDisambiguationArchive(context.Background(), root, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, readErr := io.ReadAll(stream.Reader)
+	waitErr := stream.Wait()
+	if err := errors.Join(readErr, waitErr); err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	tr := tar.NewReader(bytes.NewReader(body))
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[h.Name] = true
+	}
+	for _, want := range []string{"keep.txt", "secret.txt"} {
+		if !names[want] {
+			t.Fatalf("snapshot entries %v lack %s; export-ignored paths must stay in the snapshot", names, want)
+		}
+	}
+
+	dst := t.TempDir()
+	if _, err := materializeDisambiguationArchive(context.Background(), root, "HEAD", dst, func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dst, "secret.txt"))
+	if err != nil || string(got) != "kept in snapshot\n" {
+		t.Fatalf("materialized export-ignored file: body=%q err=%v", got, err)
+	}
+}
+
+func TestDisambiguationArchiveFailureKeepsGitStderr(t *testing.T) {
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	writeDisambiguationFixture(t, root, "keep.txt", "kept\n")
+	mustGit(t, root, "add", "-A")
+	mustGit(t, root, "commit", "-q", "-m", "snapshot")
+
+	dst := t.TempDir()
+	_, err := materializeDisambiguationArchive(context.Background(), root, "no-such-tree-object", dst, func(string) {})
+	if err == nil {
+		t.Fatal("missing tree materialized without an error")
+	}
+	if !strings.Contains(err.Error(), "git ls-tree") || !strings.Contains(err.Error(), "fatal:") {
+		t.Fatalf("archive error dropped git stderr: %v", err)
+	}
+	if strings.Count(err.Error(), "fatal:") != 1 {
+		t.Fatalf("archive error repeats the producer failure: %v", err)
+	}
+}
+
+func TestDisambiguationArchiveCallerDeadlineIsNotBudgetError(t *testing.T) {
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	writeDisambiguationFixture(t, root, "keep.txt", "kept\n")
+	mustGit(t, root, "add", "-A")
+	mustGit(t, root, "commit", "-q", "-m", "snapshot")
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	dst := t.TempDir()
+	_, err := materializeDisambiguationArchive(ctx, root, "HEAD", dst, func(string) {})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expired caller deadline error = %v, want context deadline exceeded", err)
+	}
+	var budget *committedtree.BudgetError
+	if errors.As(err, &budget) {
+		t.Fatalf("caller deadline reported as package budget: %v", budget)
+	}
 }

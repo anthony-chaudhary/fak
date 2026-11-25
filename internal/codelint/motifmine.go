@@ -31,6 +31,7 @@ package codelint
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -40,11 +41,12 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 )
 
 // MotifMinerVersion versions the EVIDENCE RULES, not the code. Bump it whenever a
@@ -779,9 +781,10 @@ func MineMotifs(root string) (MotifReport, error) {
 // even while peers, tooling, or sibling test binaries churn the checkout
 // underneath; a walk of the live tree cannot make that guarantee because the
 // input itself moves between the two passes, and no amount of read retries
-// makes a moving target stationary. The revision's tree is streamed from
-// `git archive` into a private temp dir and then mined with the same
-// deterministic walk as MineMotifs.
+// makes a moving target stationary. The revision's tree is streamed from the
+// object store into a private temp dir and then mined with the same
+// deterministic walk as MineMotifs. The snapshot deliberately ignores
+// .gitattributes export-ignore so that test files are mined too.
 func MineMotifsRevision(repoRoot, revision string) (MotifReport, error) {
 	abs, err := filepath.Abs(repoRoot)
 	if err != nil {
@@ -799,29 +802,21 @@ func MineMotifsRevision(repoRoot, revision string) (MotifReport, error) {
 	return MineMotifs(treeDir)
 }
 
-// motifSnapshotTree streams `git archive <revision>` into treeDir. The git dir
-// is resolved explicitly so linked worktrees whose .git file names a path in
-// the other OS's spelling (this workspace's standard Windows-root /
-// WSL-testing split) still resolve.
+// motifSnapshotTree streams the committed tree of revision into treeDir. It
+// reads through committedtree rather than `git archive`, whose export-ignore
+// filtering would hide test files from the mining corpus.
 func motifSnapshotTree(repoRoot, revision, treeDir string) error {
-	gitDir, workTree, ok := motifResolveGitDirs(repoRoot)
-	cmd := exec.Command("git", "archive", "--format=tar", revision)
-	cmd.Dir = repoRoot
-	if ok {
-		cmd.Env = append(os.Environ(), "GIT_DIR="+gitDir, "GIT_WORK_TREE="+workTree)
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("git archive %s: %w", revision, err)
-	}
-	tr := tar.NewReader(stdout)
+	pr, pw := io.Pipe()
+	writeDone := make(chan error, 1)
+	repo := motifUsableRepo(repoRoot)
+	go func() {
+		err := committedtree.WriteTar(context.Background(), repo, revision, pw)
+		pw.CloseWithError(err)
+		writeDone <- err
+	}()
+	tr := tar.NewReader(pr)
 	var extractErr error
-	for extractErr == nil {
+	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
@@ -830,14 +825,18 @@ func motifSnapshotTree(repoRoot, revision, treeDir string) error {
 			extractErr = err
 			break
 		}
-		extractErr = motifWriteTarEntry(treeDir, hdr, tr)
+		if extractErr = motifWriteTarEntry(treeDir, hdr, tr); extractErr != nil {
+			break
+		}
 	}
-	waitErr := cmd.Wait()
+	// Closing the read side unblocks a writer still waiting on a full pipe.
+	pr.CloseWithError(io.ErrClosedPipe)
+	writeErr := <-writeDone
 	if extractErr != nil {
-		return fmt.Errorf("git archive %s: %v: %s", revision, extractErr, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("committed tree %s: %w", revision, extractErr)
 	}
-	if waitErr != nil {
-		return fmt.Errorf("git archive %s: %v: %s", revision, waitErr, strings.TrimSpace(stderr.String()))
+	if writeErr != nil {
+		return fmt.Errorf("committed tree %s: %w", revision, writeErr)
 	}
 	return nil
 }
@@ -879,40 +878,40 @@ func motifWriteTarEntry(dest string, hdr *tar.Header, r io.Reader) error {
 	}
 }
 
-// motifResolveGitDirs finds the git dir for repoRoot across OSes. A normal
-// checkout has a .git directory; a linked worktree has a .git FILE whose
-// "gitdir:" line names the real dir — which, when the worktree was created on
-// the other OS, may hold a path this OS cannot resolve (C:/... vs /mnt/c/...
-// and back). ok=false means nothing was found and plain `git -C repoRoot`
-// (which walks upward) should be trusted instead.
-func motifResolveGitDirs(repoRoot string) (gitDir, workTree string, ok bool) {
-	dotGit := filepath.Join(repoRoot, ".git")
-	info, err := os.Lstat(dotGit)
+// motifUsableRepo returns the directory git can open for repoRoot. committedtree
+// runs git with -C, so a linked worktree whose .git file names its git dir in
+// the other OS's spelling must be handed that git dir directly.
+func motifUsableRepo(repoRoot string) string {
+	if gitDir, ok := motifLinkedGitDir(repoRoot); ok {
+		return gitDir
+	}
+	return repoRoot
+}
+
+// motifLinkedGitDir returns the git dir named by a linked worktree's .git file,
+// in a spelling this OS can open. ok is false for a plain checkout (a .git
+// directory) or anything that is not a gitdir file. An unresolvable path is
+// returned unchanged so git produces its own diagnostic.
+func motifLinkedGitDir(repoRoot string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".git"))
 	if err != nil {
-		return "", "", false
+		return "", false
 	}
-	if info.IsDir() {
-		return dotGit, repoRoot, true
-	}
-	data, err := os.ReadFile(dotGit)
-	if err != nil {
-		return "", "", false
-	}
-	line := strings.TrimSpace(string(data))
 	const prefix = "gitdir:"
+	line := strings.TrimSpace(string(data))
 	if !strings.HasPrefix(line, prefix) {
-		return "", "", false
+		return "", false
 	}
 	p := strings.TrimSpace(strings.TrimPrefix(line, prefix))
 	if _, err := os.Stat(p); err == nil {
-		return p, repoRoot, true
+		return p, true
 	}
 	if alt := motifTranslateOSPath(p); alt != "" {
 		if _, err := os.Stat(alt); err == nil {
-			return alt, repoRoot, true
+			return alt, true
 		}
 	}
-	return p, repoRoot, true // let git produce its own diagnostic
+	return p, true
 }
 
 // motifTranslateOSPath translates a git-dir path between the Windows and WSL
@@ -924,7 +923,7 @@ func motifTranslateOSPath(p string) string {
 		return "/mnt/" + strings.ToLower(s[:1]) + s[2:]
 	}
 	if len(s) >= 7 && s[:5] == "/mnt/" && s[5] >= 'a' && s[5] <= 'z' && s[6] == '/' {
-		return strings.ToUpper(s[5:6]) + ":" + s[5:]
+		return strings.ToUpper(s[5:6]) + ":" + s[6:]
 	}
 	return ""
 }
