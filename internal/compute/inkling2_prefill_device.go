@@ -1,5 +1,26 @@
 package compute
 
+import (
+	"os"
+	"strings"
+)
+
+// ink2PrefillFast reports whether the prefill kernel family name runs its fast
+// variant; FAK_INKLING2_PREFILL_OLD lists families (comma separated, or "all") that
+// keep the original kernel, for A/B attribution.
+func ink2PrefillFast(name string) bool {
+	old := os.Getenv("FAK_INKLING2_PREFILL_OLD")
+	if old == "" {
+		return true
+	}
+	for _, f := range strings.Split(old, ",") {
+		if f = strings.TrimSpace(f); f == name || f == "all" {
+			return false
+		}
+	}
+	return true
+}
+
 // Inkling2PrefillDevice batches the Inkling2Device decode ops along the token axis
 // for a prompt chunk: token t of a T-token chunk sits at position pos0+t and every
 // activation is [T][width] rows. Ops that are already row-batched (Ink2RMS rows,
@@ -17,6 +38,10 @@ type Inkling2PrefillDevice interface {
 	Ink2PAttend(q, r, sinks, relBias, kcache, vcache, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error
 	Ink2PRoute(logits, bias, ids, wts Ink2Ref, nexp, k int, scale float32, T int) error
 	Ink2PCombine(down, wts, out Ink2Ref, k, n, T int) error
+	// Ink2PRMS and Ink2PSitu are the chunk forms of Ink2RMS and Ink2Situ; they may
+	// reduce in float32 where the decode ops keep float64.
+	Ink2PRMS(x, w, y Ink2Ref, rows, n int, eps float32) error
+	Ink2PSitu(gu, act Ink2Ref, k, width, actStride int, beta, linearBeta float64) error
 	// Ink2PExpertGrouped multiplies npairs routed (token, slot) pairs through one
 	// stacked expert tensor grouped by expert, so each expert block is decoded once
 	// per tile of pairs; pair i reads x row (i/xDiv)*xStride and writes y row i.

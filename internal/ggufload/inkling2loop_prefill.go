@@ -192,7 +192,7 @@ func (p *ink2Prefill) rmsRows(x, w ink2Ref, rows, n int, eps float32) ink2Ref {
 func (p *ink2Prefill) rms(x, w ink2Ref, n int, eps float32) ink2Ref {
 	y := p.tmp(p.T * n)
 	if p.s.err == nil {
-		p.fail(p.s.dev.Ink2RMS(x, w, y, p.T, n, eps))
+		p.fail(p.pd.Ink2PRMS(x, w, y, p.T, n, eps))
 	}
 	return y
 }
@@ -498,7 +498,7 @@ func (p *ink2Prefill) moe(l *ink2Layer, x ink2Ref) ink2Ref {
 	padK := l.down.padK
 	act := p.tmp(npairs * padK)
 	if s.err == nil {
-		p.fail(s.dev.Ink2Situ(gu, act, npairs, width, padK, float64(hp.SituBeta), float64(hp.SituLinearBeta)))
+		p.fail(p.pd.Ink2PSitu(gu, act, npairs, width, padK, float64(hp.SituBeta), float64(hp.SituLinearBeta)))
 	}
 	down := p.tmp(npairs * hp.Hidden)
 	if pairwise {
@@ -535,7 +535,7 @@ func (p *ink2Prefill) forward(last bool) {
 	h := hp.Hidden
 	cur := p.hold(p.T * h)
 	if s.err == nil {
-		p.fail(s.dev.Ink2RMS(s.prefillIn, s.tokNorm, cur, p.T, h, hp.NormEps))
+		p.fail(p.pd.Ink2PRMS(s.prefillIn, s.tokNorm, cur, p.T, h, hp.NormEps))
 	}
 	// visit resets the layer scratch and, with a draft attached, keeps the visit's
 	// input when it is a draft tap

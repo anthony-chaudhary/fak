@@ -6,6 +6,7 @@ package compute
 #include <stdlib.h>
 #include "cuda_backend.h"
 #include "cuda_inkling2_prefill.h"
+#include "cuda_inkling2_prefill_dense.h"
 */
 import "C"
 
@@ -26,9 +27,30 @@ func (c *cudaBackend) Ink2PMatMul(w Tensor, x, y Ink2Ref, T int) error {
 	wb := c.cudaBufForSubmit(w)
 	xp, yp := c.ink2F(x), c.ink2F(y)
 	P := C.int(T)
+	// Prompt panels run the int8 tensor-core GEMM; it declines (cudaErrorInvalidValue, nothing enqueued)
+	// on shapes it does not cover, which then take the legacy launcher below.
+	if T >= 16 && ink2PrefillFast("dense") {
+		kind, scales := C.int(0), (*C.float)(nil)
+		switch w.Dtype {
+		case Q8_0:
+			if w.Quant != nil && w.Quant.Block == 32 {
+				kind, scales = 8, (*C.float)(wb.scales)
+			}
+		case Q5_K:
+			kind = 5
+		case Q6_K:
+			kind = 6
+		}
+		if kind != 0 {
+			rc := C.fcuda_ink2p_dense_mmq(wb.ptr, scales, xp, yp, C.int(out), C.int(in), P, kind)
+			if rc != 1 {
+				return ink2Status("prefill matmul mmq", rc)
+			}
+		}
+	}
 	switch w.Dtype {
 	case F32:
-		return ink2Status("prefill matmul f32", C.fcuda_ink2p_gemm_f32((*C.float)(wb.ptr), xp, yp, C.int(out), C.int(in), P))
+		return ink2Status("prefill matmul f32", ink2PGemmF32((*C.float)(wb.ptr), xp, yp, C.int(out), C.int(in), P))
 	case Q8_0:
 		return ink2Status("prefill matmul q8_0", C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), xp, yp,
 			C.int(out), C.int(in), P, C.int(w.Quant.Block)))
@@ -60,6 +82,10 @@ func (c *cudaBackend) Ink2PMix(states []Ink2Ref, queries Ink2Ref, nq int, out In
 	for i, s := range states {
 		ptrs[i] = c.ink2F(s)
 	}
+	if ink2PrefillFast("mix") {
+		return ink2Status("prefill mix", C.fcuda_ink2p_mix_v2((**C.float)(unsafe.Pointer(ptrs)), C.int(len(states)), c.ink2F(queries), C.int(nq),
+			c.ink2F(out), C.int(n), C.int(T)))
+	}
 	return ink2Status("prefill mix", C.fcuda_ink2p_mix((**C.float)(unsafe.Pointer(ptrs)), C.int(len(states)), c.ink2F(queries), C.int(nq),
 		c.ink2F(out), C.int(n), C.int(T)))
 }
@@ -67,12 +93,19 @@ func (c *cudaBackend) Ink2PMix(states []Ink2Ref, queries Ink2Ref, nq int, out In
 func (c *cudaBackend) Ink2PCtrlDown(cur, msg, w, g Ink2Ref, n, rank, T int) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if ink2PrefillFast("ctrl") {
+		return ink2Status("prefill ctrl down", C.fcuda_ink2p_ctrl_down_v2(c.ink2F(cur), c.ink2F(msg), c.ink2F(w), c.ink2F(g), C.int(n), C.int(rank), C.int(T)))
+	}
 	return ink2Status("prefill ctrl down", C.fcuda_ink2p_ctrl_down(c.ink2F(cur), c.ink2F(msg), c.ink2F(w), c.ink2F(g), C.int(n), C.int(rank), C.int(T)))
 }
 
 func (c *cudaBackend) Ink2PCtrlApply(cur, msg, g, gainW, forgetW, out Ink2Ref, n, rank, T int) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if ink2PrefillFast("ctrl") {
+		return ink2Status("prefill ctrl apply", C.fcuda_ink2p_ctrl_apply_v2(c.ink2F(cur), c.ink2F(msg), c.ink2F(g), c.ink2F(gainW), c.ink2F(forgetW),
+			c.ink2F(out), C.int(n), C.int(rank), C.int(T)))
+	}
 	return ink2Status("prefill ctrl apply", C.fcuda_ink2p_ctrl_apply(c.ink2F(cur), c.ink2F(msg), c.ink2F(g), c.ink2F(gainW), c.ink2F(forgetW),
 		c.ink2F(out), C.int(n), C.int(rank), C.int(T)))
 }
@@ -80,8 +113,33 @@ func (c *cudaBackend) Ink2PCtrlApply(cur, msg, g, gainW, forgetW, out Ink2Ref, n
 func (c *cudaBackend) Ink2PConv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn int, norm float32, T int) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if ink2PrefillFast("conv") {
+		return ink2Status("prefill conv", C.fcuda_ink2p_conv_v2(c.ink2F(x), c.ink2F(w), c.ink2F(dyn), c.ink2F(hist), c.ink2F(out), c.ink2F(resid),
+			C.int(n), C.int(heads), C.int(kn), C.float(norm), C.int(T)))
+	}
 	return ink2Status("prefill conv", C.fcuda_ink2p_conv(c.ink2F(x), c.ink2F(w), c.ink2F(dyn), c.ink2F(hist), c.ink2F(out), c.ink2F(resid),
 		C.int(n), C.int(heads), C.int(kn), C.float(norm), C.int(T)))
+}
+
+// Ink2PRMS is Ink2RMS over the T rows of a chunk with an fp32 reduction; the decode
+// path keeps its float64 row sum.
+func (c *cudaBackend) Ink2PRMS(x, w, y Ink2Ref, rows, n int, eps float32) error {
+	if !ink2PrefillFast("rms") {
+		return c.Ink2RMS(x, w, y, rows, n, eps)
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("prefill rms", C.fcuda_ink2p_rms(c.ink2F(x), c.ink2F(w), c.ink2F(y), C.int(rows), C.int(n), C.float(eps)))
+}
+
+// Ink2PSitu is Ink2Situ in fp32 transcendentals for the chunk's routed slots.
+func (c *cudaBackend) Ink2PSitu(gu, act Ink2Ref, k, width, actStride int, beta, linearBeta float64) error {
+	if !ink2PrefillFast("situ") {
+		return c.Ink2Situ(gu, act, k, width, actStride, beta, linearBeta)
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("prefill situ", C.fcuda_ink2p_situ_v2(c.ink2F(gu), c.ink2F(act), C.int(k), C.int(width), C.int(actStride), C.double(beta), C.double(linearBeta)))
 }
 
 func (c *cudaBackend) Ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
@@ -96,6 +154,11 @@ func (c *cudaBackend) Ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2
 func (c *cudaBackend) Ink2PAttend(q, r, sinks, relBias, kcache, vcache, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if ink2PrefillFast("attn") {
+		return ink2Status("prefill attend", C.fcuda_ink2p_attend_v2(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias), c.ink2F(kcache),
+			c.ink2F(vcache), c.ink2F(out), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent),
+			C.int(window), C.int(cap), C.float(p.Scale), C.int(pos0), C.int(T)))
+	}
 	return ink2Status("prefill attend", C.fcuda_ink2p_attend(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias), c.ink2F(kcache),
 		c.ink2F(vcache), c.ink2F(out), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent),
 		C.int(window), C.int(cap), C.float(p.Scale), C.int(pos0), C.int(T)))
@@ -127,6 +190,11 @@ func (c *cudaBackend) Ink2PExpertGrouped(stack Tensor, expertRows, nexp int, ids
 			return true, err
 		}
 		tiles := int(C.fcuda_ink2p_max_tiles(C.int(npairs), C.int(nexp)))
+		if ink2PrefillFast("iq") {
+			return true, ink2Status("prefill expert iq", C.fcuda_ink2p_expert_iq_v2(f, (*C.uint8_t)(b.ptr), c.ink2I(offsets), c.ink2I(order),
+				c.ink2I(tileList), c.ink2I(ntiles), C.int(tiles), c.ink2F(x), C.int(xDiv), C.int(xStride), c.ink2F(y),
+				C.int(expertRows), C.int(stack.Shape[1]), c.ink2F(scale)))
+		}
 		return true, ink2Status("prefill expert iq", C.fcuda_ink2p_expert_iq(f, (*C.uint8_t)(b.ptr), c.ink2I(offsets), c.ink2I(order),
 			c.ink2I(tileList), c.ink2I(ntiles), C.int(tiles), c.ink2F(x), C.int(xDiv), C.int(xStride), c.ink2F(y),
 			C.int(expertRows), C.int(stack.Shape[1]), c.ink2F(scale)))
@@ -144,6 +212,11 @@ func (c *cudaBackend) Ink2PExpertGrouped(stack Tensor, expertRows, nexp int, ids
 		return true, err
 	}
 	tiles := int(C.fcuda_ink2p_max_tiles(C.int(npairs), C.int(nexp)))
+	if ink2PrefillFast("nvfp4") {
+		return true, ink2Status("prefill expert nvfp4", C.fcuda_ink2p_expert_nvfp4_v2((*C.uint8_t)(b.ptr), (*C.uint8_t)(scales),
+			c.ink2I(offsets), c.ink2I(order), c.ink2I(tileList), c.ink2I(ntiles), C.int(tiles), c.ink2F(x), C.int(xDiv),
+			C.int(xStride), c.ink2F(y), C.int(expertRows), C.int(in), c.ink2F(scale)))
+	}
 	return true, ink2Status("prefill expert nvfp4", C.fcuda_ink2p_expert_nvfp4((*C.uint8_t)(b.ptr), (*C.uint8_t)(scales),
 		c.ink2I(offsets), c.ink2I(order), c.ink2I(tileList), c.ink2I(ntiles), C.int(tiles), c.ink2F(x), C.int(xDiv),
 		C.int(xStride), c.ink2F(y), C.int(expertRows), C.int(in), c.ink2F(scale)))
@@ -442,4 +515,11 @@ func (c *cudaBackend) Ink2PConvPairLog(x, w, dyn, hist, log, out []Ink2Ref, norm
 	p := func(i int) **C.float { return (**C.float)(unsafe.Pointer(&tab[i])) }
 	return ink2Status("verify conv pair", C.fcuda_ink2p_conv_pair_log(p(0), p(2), p(4), p(6), p(8), p(10),
 		(*C.float)(unsafe.Pointer(nm)), C.int(n), C.int(heads), C.int(kn), C.int(T)))
+}
+
+func ink2PGemmF32(w, x, y *C.float, rows, cols, T C.int) C.int {
+	if ink2PrefillFast("dense") {
+		return C.fcuda_ink2p_gemm_f32_v2(w, x, y, rows, cols, T)
+	}
+	return C.fcuda_ink2p_gemm_f32(w, x, y, rows, cols, T)
 }

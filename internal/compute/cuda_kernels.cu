@@ -294,3 +294,8 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/inkling2_dspark.cuh"
 #include "cuda/inkling2_dspark_markov.cuh"
 #include "cuda/inkling2_verify_rows.cuh"
+#include "cuda/inkling2_prefill_misc.cuh"
+#include "cuda/inkling2_prefill_dense.cuh"
+#include "cuda/inkling2_prefill_nvfp4.cuh"
+#include "cuda/inkling2_prefill_attn.cuh"
+#include "cuda/inkling2_prefill_iq.cuh"
