@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -588,5 +589,333 @@ func TestInkling2CohortFirstTokenBeforeLongRowPrefill(t *testing.T) {
 	}
 	if !reflect.DeepEqual(short, []int{20, 21}) || results[0].Generated != 2 {
 		t.Fatalf("short row emitted %v, result %+v, want [20 21]", short, results[0])
+	}
+}
+
+// ink2Event is one callback of a mixed-prefill cohort: a token emitted by row, or
+// tok -1 for the Done of that row.
+type ink2Event struct{ row, tok int }
+
+// fakeInk2MixedCohort is a short row whose prompt ends in the first prefill chunk and
+// a long row that prefills for three chunks, both recording their callbacks in order.
+func fakeInk2MixedCohort(longCtx context.Context, events *[]ink2Event, got [][]int) []Inkling2LoopBatchRequest {
+	return fakeInk2MixedCohortOrder(longCtx, events, got, false)
+}
+
+// fakeInk2MixedCohortOrder is fakeInk2MixedCohort with the long row first or second in
+// the cohort; events and got are keyed by row identity (0 short, 1 long), not position.
+func fakeInk2MixedCohortOrder(longCtx context.Context, events *[]ink2Event, got [][]int, longFirst bool) []Inkling2LoopBatchRequest {
+	const long = 3 * inkling2PrefillChunk
+	row := func(i int) func(int) bool {
+		return func(tok int) bool {
+			got[i] = append(got[i], tok)
+			*events = append(*events, ink2Event{i, tok})
+			return true
+		}
+	}
+	done := func(i int) func(Inkling2LoopBatchResult) {
+		return func(Inkling2LoopBatchResult) { *events = append(*events, ink2Event{i, -1}) }
+	}
+	short := Inkling2LoopBatchRequest{Prompt: fakeInk2CohortPrompt(20, 0), MaxTokens: 6, Emit: row(0), Done: done(0)}
+	longReq := Inkling2LoopBatchRequest{Context: longCtx, Prompt: fakeInk2CohortPrompt(long, 1), MaxTokens: 2, Emit: row(1), Done: done(1)}
+	if longFirst {
+		return []Inkling2LoopBatchRequest{longReq, short}
+	}
+	return []Inkling2LoopBatchRequest{short, longReq}
+}
+
+// fakeInk2ScalarTokens is what one request emits on the single-sequence decode.
+func fakeInk2ScalarTokens(t *testing.T, prompt []int, maxNew int) []int {
+	t.Helper()
+	var want []int
+	turn := Inkling2LoopTurn{MaxTokens: maxNew, Emit: func(tok int) bool { want = append(want, tok); return true }}
+	if _, err := Inkling2LoopSessionDecode(context.Background(), fakeInk2Session{}, prompt, &turn); err != nil {
+		t.Fatal(err)
+	}
+	return want
+}
+
+// fakeInk2ChunkTokens returns the token count of each prefill chunk a cohort wrote
+// before its first lockstep step; the input write of that step is dropped.
+func fakeInk2ChunkTokens(t *testing.T, d *fakeInk2Cohort, in, meta compute.Buffer, hidden int) []int {
+	t.Helper()
+	var chunks []int
+	for _, w := range d.writeLog {
+		if w.buf == meta {
+			break
+		}
+		if w.buf == in {
+			chunks = append(chunks, w.n/hidden)
+		}
+	}
+	if len(chunks) == 0 {
+		t.Fatal("no prefill chunk wrote the input arena")
+	}
+	return chunks[:len(chunks)-1]
+}
+
+// With the long-prefill cap set, a row whose prompt has ended decodes in the chunks
+// that still prefill the long row: its whole budget is emitted before the long row
+// first token, and while it decodes each chunk carries at most the cap of prompt tokens.
+func TestInkling2CohortMixedPrefillDecodesShortRowDuringLongPrefill(t *testing.T) {
+	const capTok = 64
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", strconv.Itoa(capTok))
+	const long, shortLen, shortMax = 3 * inkling2PrefillChunk, 20, 6
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	if _, err := bt.Generate(fakeInk2MixedCohort(nil, &[]ink2Event{}, make([][]int, 2))); err != nil {
+		t.Fatal(err)
+	}
+	in, meta := bt.b.in.T.Buf(), bt.b.meta.T.Buf()
+	var events []ink2Event
+	got := make([][]int, 2)
+	d.writeLog = nil
+	results, err := bt.Generate(fakeInk2MixedCohort(nil, &events, got))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(shortLen, 0), shortMax); !reflect.DeepEqual(got[0], want) {
+		t.Fatalf("short row emitted %v, scalar %v", got[0], want)
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(long, 1), 2); !reflect.DeepEqual(got[1], want) {
+		t.Fatalf("long row emitted %v, scalar %v", got[1], want)
+	}
+	if results[0].Generated != shortMax || results[1].Generated != 2 {
+		t.Fatalf("generated %d and %d, want %d and 2", results[0].Generated, results[1].Generated, shortMax)
+	}
+	firstLong, shortTokens, shortDone := -1, 0, -1
+	for k, e := range events {
+		if e.row == 1 && firstLong < 0 {
+			firstLong = k
+		}
+		if e.row == 0 && firstLong < 0 {
+			if e.tok < 0 {
+				shortDone = k
+			} else {
+				shortTokens++
+			}
+		}
+	}
+	if firstLong < 0 || shortTokens != shortMax || shortDone < 0 {
+		t.Fatalf("events %v: short row must finish (%d tokens) before the long row first token", events, shortTokens)
+	}
+	chunks := fakeInk2ChunkTokens(t, d, in, meta, bt.b.s.hp.Hidden)
+	// the short row decodes in chunks 1..shortMax-1, each one decode token beside the
+	// cap of prompt tokens, or fewer if the chunk has less room left than the cap
+	wantChunk := min(capTok, inkling2PrefillChunk-1) + 1
+	for k := 1; k < shortMax; k++ {
+		if chunks[k] != wantChunk {
+			t.Fatalf("chunk %d carried %d tokens %v, want %d while the short row decodes", k, chunks[k], chunks, wantChunk)
+		}
+	}
+	total := 0
+	for _, n := range chunks {
+		total += n
+	}
+	if want := long + shortLen + shortMax - 1; total != want {
+		t.Fatalf("chunks carried %d tokens, want %d (every prompt once, one decode token per short-row feed)", total, want)
+	}
+}
+
+// With the long row first in the cohort, the short row still gets its prompt into the
+// first chunk: its first token arrives after that chunk, and all of its tokens arrive
+// before the long row's first token.
+func TestInkling2CohortMixedPrefillLongRowFirstShortRowNotStarved(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "64")
+	const shortMax = 6
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	if _, err := bt.Generate(fakeInk2MixedCohortOrder(nil, &[]ink2Event{}, make([][]int, 2), true)); err != nil {
+		t.Fatal(err)
+	}
+	in := bt.b.in.T.Buf()
+	writes, shortFirstAt := 0, -1
+	d.onWrite = func(dst compute.Ink2Ref) {
+		if dst.T.Buf() == in {
+			writes++
+		}
+	}
+	var events []ink2Event
+	got := make([][]int, 2)
+	reqs := fakeInk2MixedCohortOrder(nil, &events, got, true)
+	for i := range reqs {
+		if len(reqs[i].Prompt) == 20 {
+			emit := reqs[i].Emit
+			reqs[i].Emit = func(tok int) bool {
+				if shortFirstAt < 0 {
+					shortFirstAt = writes
+				}
+				return emit(tok)
+			}
+		}
+	}
+	d.writeLog = nil
+	results, err := bt.Generate(reqs)
+	d.onWrite = nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(20, 0), shortMax); !reflect.DeepEqual(got[0], want) {
+		t.Fatalf("short row emitted %v, scalar %v", got[0], want)
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(3*inkling2PrefillChunk, 1), 2); !reflect.DeepEqual(got[1], want) {
+		t.Fatalf("long row emitted %v, scalar %v", got[1], want)
+	}
+	// results follow request order: the long row is first here
+	if results[1].Generated != shortMax || results[0].Generated != 2 {
+		t.Fatalf("generated long %d and short %d, want 2 and %d", results[0].Generated, results[1].Generated, shortMax)
+	}
+	if shortFirstAt != 1 {
+		t.Fatalf("short row first token after %d prefill chunks, want 1", shortFirstAt)
+	}
+	firstLong, shortBefore, shortDoneBefore := -1, 0, false
+	for k, e := range events {
+		if e.row == 1 && firstLong < 0 {
+			firstLong = k
+		}
+		if e.row == 0 && firstLong < 0 {
+			if e.tok < 0 {
+				shortDoneBefore = true
+			} else {
+				shortBefore++
+			}
+		}
+	}
+	if firstLong < 0 || shortBefore != shortMax || !shortDoneBefore {
+		t.Fatalf("events %v: short row must emit %d tokens and finish before the long row first token", events, shortMax)
+	}
+}
+
+// Without the cap the cohort prefills every prompt before any lockstep step, so the
+// long row first token precedes the short row second: today order.
+func TestInkling2CohortLongPrefillWaitsWithoutCap(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "")
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	if _, err := bt.Generate(fakeInk2MixedCohort(nil, &[]ink2Event{}, make([][]int, 2))); err != nil {
+		t.Fatal(err)
+	}
+	var events []ink2Event
+	got := make([][]int, 2)
+	if _, err := bt.Generate(fakeInk2MixedCohort(nil, &events, got)); err != nil {
+		t.Fatal(err)
+	}
+	firstLong, secondShort, shortTokens := -1, -1, 0
+	for k, e := range events {
+		if e.row == 1 && e.tok >= 0 && firstLong < 0 {
+			firstLong = k
+		}
+		if e.row == 0 && e.tok >= 0 {
+			shortTokens++
+			if shortTokens == 2 {
+				secondShort = k
+			}
+		}
+	}
+	if firstLong < 0 || secondShort < 0 || firstLong > secondShort {
+		t.Fatalf("events %v: without the cap the long row first token must precede the short row second", events)
+	}
+}
+
+// Every parity case with a long row beside it emits what the single-sequence decode
+// emits, with the cap set and the mixed chunks running.
+func TestInkling2CohortMixedPrefillMatchesScalarParity(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "64")
+	const long = 3 * inkling2PrefillChunk
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	cases := inkling2ParityCases
+	longRow := len(cases)
+	got := make([][]int, len(cases)+1)
+	reqs := make([]Inkling2LoopBatchRequest, 0, len(cases)+1)
+	for i, c := range cases {
+		stop, emit := c.callbacks(&got[i])
+		reqs = append(reqs, Inkling2LoopBatchRequest{Prompt: c.prompt, MaxTokens: c.maxNew, Stop: stop, Emit: emit})
+	}
+	reqs = append(reqs, Inkling2LoopBatchRequest{Prompt: fakeInk2CohortPrompt(long, 9), MaxTokens: 3,
+		Emit: func(tok int) bool { got[longRow] = append(got[longRow], tok); return true }})
+	results, err := bt.Generate(reqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, c := range cases {
+		var want []int
+		stop, emit := c.callbacks(&want)
+		turn := Inkling2LoopTurn{MaxTokens: c.maxNew, Stop: stop, Emit: emit}
+		if _, err := Inkling2LoopSessionDecode(context.Background(), fakeInk2Session{}, c.prompt, &turn); err != nil {
+			t.Fatal(err)
+		}
+		r := results[i]
+		if !reflect.DeepEqual(got[i], want) || r.Generated != turn.Generated || r.Stopped != turn.Stopped || r.Err != nil {
+			t.Errorf("%s: batch emitted %v generated=%d stopped=%v err=%v; scalar emitted %v generated=%d stopped=%v",
+				c.name, got[i], r.Generated, r.Stopped, r.Err, want, turn.Generated, turn.Stopped)
+		}
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(long, 9), 3); !reflect.DeepEqual(got[longRow], want) {
+		t.Errorf("long row emitted %v, scalar %v", got[longRow], want)
+	}
+}
+
+// A long row cancelled while the mixed chunks run is dropped at the next chunk
+// boundary with its context error, and the short row tokens are unchanged.
+func TestInkling2CohortMixedPrefillDropsRowCancelledMidMixed(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "64")
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	if _, err := bt.Generate(fakeInk2MixedCohort(nil, &[]ink2Event{}, make([][]int, 2))); err != nil {
+		t.Fatal(err)
+	}
+	in, meta := bt.b.in.T.Buf(), bt.b.meta.T.Buf()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writes := 0
+	d.onWrite = func(dst compute.Ink2Ref) {
+		if dst.T.Buf() == in {
+			writes++
+			if writes == 2 {
+				cancel()
+			}
+		}
+	}
+	var events []ink2Event
+	got := make([][]int, 2)
+	d.writeLog = nil
+	results, err := bt.Generate(fakeInk2MixedCohort(ctx, &events, got))
+	d.onWrite = nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(results[1].Err, context.Canceled) || results[1].Generated != 0 {
+		t.Fatalf("cancelled row result %+v", results[1])
+	}
+	dones := [2]int{}
+	for _, e := range events {
+		if e.row == 1 && e.tok >= 0 {
+			t.Fatalf("cancelled row emitted %d", e.tok)
+		}
+		if e.tok < 0 {
+			dones[e.row]++
+		}
+	}
+	if dones != [2]int{1, 1} {
+		t.Fatalf("Done fired %v times per row (short, long), want once each", dones)
+	}
+	if want := fakeInk2ScalarTokens(t, fakeInk2CohortPrompt(20, 0), 6); !reflect.DeepEqual(got[0], want) {
+		t.Fatalf("short row emitted %v, scalar %v", got[0], want)
+	}
+	// the chunk that ended the short prompt and one mixed chunk ran; the remaining
+	// prompt of the cancelled row was never packed
+	if chunks := fakeInk2ChunkTokens(t, d, in, meta, bt.b.s.hp.Hidden); len(chunks) != 2 {
+		t.Fatalf("%d prefill chunks %v ran, want 2: the cancelled row prompt was packed", len(chunks), chunks)
 	}
 }

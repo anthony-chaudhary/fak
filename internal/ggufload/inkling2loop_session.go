@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -122,10 +123,50 @@ type inkling2ResidentSession struct {
 	ck *ink2Rewind
 }
 
+// inkling2GraphOwner is the resident session whose captures the device's
+// process-wide graph execs hold: a capture on one session replaces another's, and
+// closing any session destroys them all.
+var inkling2GraphOwner atomic.Pointer[inkling2Resident]
+
+// own makes r the graph owner before it runs. A session taking ownership from
+// another recaptures after one eager token instead of replaying an exec bound to
+// the other session's buffers.
+func (r *inkling2ResidentSession) own() {
+	if inkling2GraphOwner.Swap(r.s) == r.s {
+		return
+	}
+	s := r.s
+	s.graphReady, s.warm = false, false
+	s.verifyWarm, s.verifyReady, s.keepReady = false, false, false
+	s.tailWarm, s.tailReady, s.tailKeepReady = [inkling2SpecMaxDraft + 1]bool{}, [inkling2SpecMaxDraft + 1]bool{}, [inkling2SpecMaxDraft + 1]bool{}
+	if d := s.draft; d != nil {
+		d.warm, d.ready = false, false
+	}
+}
+
+// HeldBytes is the device memory the session owns: its cache, arenas, uploaded
+// small weights and checkpoint buffers, not the model weights it shares.
+func (r *inkling2ResidentSession) HeldBytes() int64 {
+	n := inkling2TensorBytes(r.s.owned)
+	if r.ck != nil {
+		n += inkling2TensorBytes(r.ck.base) + inkling2TensorBytes(r.ck.grown)
+	}
+	return n
+}
+
+func inkling2TensorBytes(ts []compute.Tensor) int64 {
+	var n int64
+	for _, t := range ts {
+		n += int64(t.Numel()) * int64(t.Dtype.Bytes())
+	}
+	return n
+}
+
 func (r *inkling2ResidentSession) Prefill(ctx context.Context, prompt []int) (int, error) {
 	if len(prompt) == 0 {
 		return 0, fmt.Errorf("inkling2_loop: empty prompt")
 	}
+	r.own()
 	if r.s.batched {
 		return r.s.prefill(ctx, prompt)
 	}
@@ -142,7 +183,10 @@ func (r *inkling2ResidentSession) Prefill(ctx context.Context, prompt []int) (in
 	return next, nil
 }
 
-func (r *inkling2ResidentSession) Step(token int) (int, error) { return r.s.step(token) }
+func (r *inkling2ResidentSession) Step(token int) (int, error) {
+	r.own()
+	return r.s.step(token)
+}
 
 func (r *inkling2ResidentSession) Close() error {
 	if r.ck != nil {
@@ -151,6 +195,7 @@ func (r *inkling2ResidentSession) Close() error {
 		r.ck = nil
 	}
 	r.s.close()
+	inkling2GraphOwner.Store(nil)
 	return nil
 }
 

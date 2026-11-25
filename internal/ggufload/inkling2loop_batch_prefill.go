@@ -2,6 +2,8 @@ package ggufload
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -50,6 +52,48 @@ func inkling2PrefillChunks(lens []int, T int) [][]ink2PrefillSeg {
 		chunks = append(chunks, segs)
 	}
 	return chunks
+}
+
+// inkling2MixedPrefillPlan plans one mixed chunk of at most T tokens without changing
+// cursor. A row is prefilling while its cursor is below its lens entry. Each prefilling
+// row first takes up to limit tokens, in row order, so a short prompt is not queued
+// behind a long one; the room left then goes to the prefilling rows in row order. Each
+// row in decoding adds one decode segment after the prompt segments, and while any row
+// decodes the chunk's prompt share is held to limit. Each row gets one contiguous segment.
+func inkling2MixedPrefillPlan(lens, cursor, decoding []int, T, limit int) []ink2PrefillSeg {
+	budget := T - len(decoding)
+	if len(decoding) > 0 {
+		budget = min(limit, budget)
+	}
+	left := max(budget, 0)
+	take := make([]int, len(lens))
+	for row := range lens {
+		if rem := lens[row] - cursor[row]; rem > 0 {
+			take[row] = min(rem, limit, left)
+			left -= take[row]
+		}
+	}
+	for row := range lens {
+		if rem := lens[row] - cursor[row] - take[row]; rem > 0 && left > 0 {
+			extra := min(rem, left)
+			take[row] += extra
+			left -= extra
+		}
+	}
+	var segs []ink2PrefillSeg
+	off := 0
+	for row, n := range take {
+		if n == 0 {
+			continue
+		}
+		segs = append(segs, ink2PrefillSeg{row: row, pos0: cursor[row], off: off, n: n, last: cursor[row]+n == lens[row]})
+		off += n
+	}
+	for _, row := range decoding {
+		segs = append(segs, ink2PrefillSeg{row: row, pos0: cursor[row], off: off, n: 1, last: true})
+		off++
+	}
+	return segs
 }
 
 // ink2PrefillRows makes a prefill chunk a ragged batch of cohort sequences: the dense
@@ -151,8 +195,6 @@ func (r *ink2PrefillRows) head(p *ink2Prefill, blocks []ink2Ref, cur ink2Ref) {
 // keeps every row. first is called with each kept row's greedy token as soon as the
 // chunk that ends its prompt has run.
 func (b *inkling2Batch) prefill(prompts [][]int, keep func(row int) bool, first func(row, token int)) error {
-	s := b.s
-	h := s.hp.Hidden
 	if b.prefillT < 1 {
 		return fmt.Errorf("inkling2 batch: state sized without cohort prefill")
 	}
@@ -169,10 +211,7 @@ func (b *inkling2Batch) prefill(prompts [][]int, keep func(row int) bool, first 
 		}
 		end[i] = len(pr)
 	}
-	p := &ink2Prefill{s: s, pd: b.p.pd, grouped: inkling2GroupedExperts(), in: b.in,
-		keep: b.p.keep, scr: b.p.scr, keepFloats: b.p.keepFloats, scrFloats: b.p.scrFloats}
 	cursor := make([]int, b.C)
-	rows := make([]float32, b.prefillT*h)
 	for {
 		more := false
 		for i := range cursor {
@@ -185,29 +224,52 @@ func (b *inkling2Batch) prefill(prompts [][]int, keep func(row int) bool, first 
 			break
 		}
 		segs := inkling2PrefillNextChunk(end, cursor, b.prefillT)
-		n := 0
-		for _, sg := range segs {
-			for j, tok := range prompts[sg.row][sg.pos0 : sg.pos0+sg.n] {
-				s.w.TokEmbd.Row(tok, rows[(sg.off+j)*h:(sg.off+j+1)*h])
-			}
-			n = sg.off + sg.n
+		toks := make([][]int, len(segs))
+		for k, sg := range segs {
+			toks[k] = prompts[sg.row][sg.pos0 : sg.pos0+sg.n]
 		}
-		s.fail(s.dev.Ink2Write(b.in, rows[:n*h]))
-		p.T, p.keepOff, p.scrOff = n, 0, 0
-		p.cohort = &ink2PrefillRows{b: b, segs: segs}
-		p.forward(false)
-		if s.err != nil {
-			return s.err
-		}
-		if err := b.deliverFirst(segs, first); err != nil {
+		if err := b.prefillChunk(segs, toks, first); err != nil {
 			return err
 		}
 	}
+	b.endPrefill(cursor)
+	return nil
+}
+
+// prefillChunk runs one ragged chunk: toks[k] are the tokens of segs[k], embedded at
+// the segment's offset in the chunk, and the forward writes each segment into its own
+// row. first is called with the greedy token of every segment that ends its row.
+func (b *inkling2Batch) prefillChunk(segs []ink2PrefillSeg, toks [][]int, first func(row, token int)) error {
+	s := b.s
+	h := s.hp.Hidden
+	n := 0
+	for _, sg := range segs {
+		n = max(n, sg.off+sg.n)
+	}
+	rows := make([]float32, n*h)
+	for k, sg := range segs {
+		for j, tok := range toks[k] {
+			s.w.TokEmbd.Row(tok, rows[(sg.off+j)*h:(sg.off+j+1)*h])
+		}
+	}
+	s.fail(s.dev.Ink2Write(b.in, rows))
+	p := &ink2Prefill{s: s, pd: b.p.pd, grouped: inkling2GroupedExperts(), in: b.in,
+		keep: b.p.keep, scr: b.p.scr, keepFloats: b.p.keepFloats, scrFloats: b.p.scrFloats}
+	p.T = n
+	p.cohort = &ink2PrefillRows{b: b, segs: segs}
+	p.forward(false)
+	if s.err != nil {
+		return s.err
+	}
+	return b.deliverFirst(segs, first)
+}
+
+// endPrefill leaves each row at its cursor for the lockstep decode that follows.
+func (b *inkling2Batch) endPrefill(cursor []int) {
 	copy(b.pos, cursor)
-	if r, ok := s.be.(interface{ Recycle() }); ok {
+	if r, ok := b.s.be.(interface{ Recycle() }); ok {
 		r.Recycle()
 	}
-	return nil
 }
 
 // deliverFirst reads the greedy tokens of the rows that ended their prompt in this
@@ -237,3 +299,22 @@ func (b *inkling2Batch) deliverFirst(segs []ink2PrefillSeg, first func(row, toke
 // a prefilled row starts decoding at its own prompt length, so a finished short-budget
 // row would otherwise step past ctx while a longer row still decodes.
 func (b *inkling2Batch) park(i int) { b.pos[i] = min(b.pos[i], b.ctx-1) }
+
+// inkling2CohortLongPrefillCap reads FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD, the knob
+// of the native scheduler's long-prefill token threshold, so the cohort
+// gives a row whose prompt has ended its decode tokens in the chunks of a long prompt
+// still prefilling, and caps that prompt's share of each such chunk. Unset, empty,
+// zero, negative and unparsable all mean off. It stays off by default until a device
+// receipt exists: a mixed chunk decodes through the prefill kernels, which differ
+// numerically from the step kernels on device.
+func inkling2CohortLongPrefillCap(lookup func(string) (string, bool)) int {
+	v, ok := lookup("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD")
+	if !ok {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}

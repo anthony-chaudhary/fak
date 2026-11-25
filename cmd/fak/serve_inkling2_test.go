@@ -69,6 +69,7 @@ type inkling2FakeSession struct {
 	ckErr    error
 	resetErr error
 	horizon  int
+	held     int64 // bytes HeldBytes reports on top of one per position
 
 	prefills [][]int
 	calls    []string
@@ -135,6 +136,9 @@ func (s *inkling2FakeSession) Reset() error {
 
 func (s *inkling2FakeSession) Close() error { s.closed = true; return nil }
 
+// HeldBytes grows with the history so the cache sees a session's footprint change.
+func (s *inkling2FakeSession) HeldBytes() int64 { return s.held + int64(s.pos) }
+
 var _ inkling2Rewinder = (*inkling2FakeSession)(nil)
 
 // inkling2PlainSession hides the rewinder so the engine must run it fresh per request.
@@ -155,6 +159,18 @@ func inkling2FakeOpener(canned []int, plain bool, opened *[]*inkling2FakeSession
 		}
 		return s, nil
 	}
+}
+
+// inkling2SlotEngine is a fake-session engine caching up to slots prefixes within
+// capBytes, each session reporting held bytes plus one per position.
+func inkling2SlotEngine(canned []int, slots int, capBytes, held int64) (*inkling2LoopEngine, *[]*inkling2FakeSession) {
+	var opened []*inkling2FakeSession
+	eng := &inkling2LoopEngine{slots: slots, capBytes: capBytes, open: func() (ggufload.Inkling2LoopSession, error) {
+		s := &inkling2FakeSession{canned: canned, held: held}
+		opened = append(opened, s)
+		return s, nil
+	}}
+	return eng, &opened
 }
 
 func inkling2FakeEngine(canned []int) (*inkling2LoopEngine, *[]*inkling2FakeSession) {
@@ -769,14 +785,14 @@ func TestInkling2MetalSessionDrivesOneCommittedRowPerToken(t *testing.T) {
 
 func TestInkling2WarmUpPrefillsOnceAndReturnsTheSession(t *testing.T) {
 	eng, opened := inkling2FakeEngine([]int{0})
-	if err := warmInkling2Session(eng.open, inkling2FakeTokenizer(t)); err != nil {
+	if err := warmInkling2Session(context.Background(), eng.open, inkling2FakeTokenizer(t)); err != nil {
 		t.Fatal(err)
 	}
 	if len(*opened) != 1 || len((*opened)[0].prompt) == 0 || len((*opened)[0].fed) != 0 || !(*opened)[0].closed {
 		t.Fatalf("warm-up sessions = %+v, want one prefilled, unstepped, closed session", *opened)
 	}
 	failing := func() (ggufload.Inkling2LoopSession, error) { return nil, errors.New("no device") }
-	if err := warmInkling2Session(failing, inkling2FakeTokenizer(t)); err == nil {
+	if err := warmInkling2Session(context.Background(), failing, inkling2FakeTokenizer(t)); err == nil {
 		t.Fatal("warm-up ignored a session that would not open")
 	}
 }

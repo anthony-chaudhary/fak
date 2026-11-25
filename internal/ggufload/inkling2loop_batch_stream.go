@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
@@ -290,7 +291,11 @@ func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) (_ []In
 		lanes[i] = newInkling2BatchLane(req, started)
 	}
 	if b.prefillT > 0 {
-		fatal = prefillLanes(b, lanes)
+		if longCap := inkling2CohortLongPrefillCap(os.LookupEnv); longCap > 0 {
+			fatal = prefillLanesMixed(b, lanes, longCap)
+		} else {
+			fatal = prefillLanes(b, lanes)
+		}
 	}
 	tokens := make([]int, len(lanes))
 	for step := 0; fatal == nil; step++ {
@@ -358,7 +363,16 @@ func prefillLanes(b *inkling2Batch, lanes []inkling2BatchLane) error {
 	for i := range lanes {
 		prompts[i] = lanes[i].req.Prompt
 	}
-	keep := func(i int) bool {
+	keep, first := prefillHooks(lanes)
+	err := b.prefill(prompts, keep, first)
+	finishPrefilledLanes(lanes, err)
+	return err
+}
+
+// prefillHooks are the prefill callbacks for lanes: keep drops a cancelled lane at the
+// chunk boundary, and first hands a lane its first greedy token.
+func prefillHooks(lanes []inkling2BatchLane) (keep func(int) bool, first func(int, int)) {
+	keep = func(i int) bool {
 		lane := &lanes[i]
 		if lane.done {
 			return false
@@ -370,7 +384,7 @@ func prefillLanes(b *inkling2Batch, lanes []inkling2BatchLane) error {
 		}
 		return true
 	}
-	first := func(i, token int) {
+	first = func(i, token int) {
 		lane := &lanes[i]
 		if lane.done {
 			return
@@ -382,7 +396,12 @@ func prefillLanes(b *inkling2Batch, lanes []inkling2BatchLane) error {
 		}
 		lane.accept(token, time.Now())
 	}
-	err := b.prefill(prompts, keep, first)
+	return keep, first
+}
+
+// finishPrefilledLanes ends the lanes a prefill left unfinished: with its error when
+// it failed, and with a plain error for a live lane that never got a first token.
+func finishPrefilledLanes(lanes []inkling2BatchLane, err error) {
 	now := time.Now()
 	for i := range lanes {
 		lane := &lanes[i]
@@ -394,5 +413,68 @@ func prefillLanes(b *inkling2Batch, lanes []inkling2BatchLane) error {
 			lane.finish(now, errors.New("inkling2 batch: prefill ended without a first token for a live row"))
 		}
 	}
+}
+
+// prefillLanesMixed prefills like prefillLanes, but a lane that has its first token
+// decodes one token in each chunk that still prefills other prompts. Each chunk is
+// planned per row (inkling2MixedPrefillPlan): a prefilling row takes at most longCap
+// tokens in the first pass in row order, so a prompt of at most longCap tokens ends in
+// the first chunk while that chunk has room for it. While any lane decodes, a chunk
+// carries at most longCap prompt tokens in total. A chunk never exceeds prefillT tokens.
+func prefillLanesMixed(b *inkling2Batch, lanes []inkling2BatchLane, longCap int) error {
+	keep, first := prefillHooks(lanes)
+	cursor, err := prefillMixedChunks(b, lanes, longCap, keep, first)
+	if err == nil {
+		b.endPrefill(cursor)
+	}
+	finishPrefilledLanes(lanes, err)
 	return err
+}
+
+// prefillMixedChunks runs the mixed chunks until no live lane has prompt left and
+// returns each row's cursor: the positions written, which the lockstep decode resumes at.
+func prefillMixedChunks(b *inkling2Batch, lanes []inkling2BatchLane, longCap int,
+	keep func(int) bool, first func(int, int)) ([]int, error) {
+	cursor := make([]int, len(lanes))
+	lens := make([]int, len(lanes))
+	for {
+		more := false
+		for i := range lanes {
+			lane := &lanes[i]
+			keep(i)
+			lens[i] = len(lane.req.Prompt)
+			if lane.done {
+				lens[i] = cursor[i]
+			}
+			more = more || (!lane.done && cursor[i] < len(lane.req.Prompt))
+		}
+		if !more {
+			return cursor, nil
+		}
+		var decoding []int
+		for i := range lanes {
+			if !lanes[i].done && cursor[i] >= len(lanes[i].req.Prompt) {
+				decoding = append(decoding, i)
+			}
+		}
+		if b.prefillT-len(decoding) < 1 {
+			return cursor, errors.New("inkling2 batch: no room in a prefill chunk for a prompt token")
+		}
+		segs := inkling2MixedPrefillPlan(lens, cursor, decoding, b.prefillT, longCap)
+		toks := make([][]int, len(segs))
+		for k, sg := range segs {
+			prompt := lanes[sg.row].req.Prompt
+			if sg.pos0 < len(prompt) {
+				toks[k] = prompt[sg.pos0 : sg.pos0+sg.n]
+			} else {
+				toks[k] = []int{lanes[sg.row].last}
+			}
+		}
+		if err := b.prefillChunk(segs, toks, first); err != nil {
+			return cursor, err
+		}
+		for _, sg := range segs {
+			cursor[sg.row] += sg.n
+		}
+	}
 }

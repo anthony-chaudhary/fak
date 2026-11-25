@@ -87,6 +87,72 @@ func TestInkling2PrefillChunksCoverEveryPromptOnce(t *testing.T) {
 	}
 }
 
+// The mixed planner gives a long row its cap and the short row its whole prompt in the
+// first chunk, then holds the chunk's prompt share to the cap beside a decode segment.
+func TestInkling2MixedPrefillPlanLiteral(t *testing.T) {
+	const T, capTok = inkling2PrefillChunk, 64
+	lens := []int{1536, 20}
+	got := inkling2MixedPrefillPlan(lens, []int{0, 0}, nil, T, capTok)
+	want := []ink2PrefillSeg{{row: 0, pos0: 0, off: 0, n: 492}, {row: 1, pos0: 0, off: 492, n: 20, last: true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("chunk 0 plan %+v, want %+v", got, want)
+	}
+	got = inkling2MixedPrefillPlan(lens, []int{492, 20}, []int{1}, T, capTok)
+	want = []ink2PrefillSeg{{row: 0, pos0: 492, off: 0, n: 64}, {row: 1, pos0: 20, off: 64, n: 1, last: true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("chunk 1 plan %+v, want %+v", got, want)
+	}
+}
+
+// With one prefilling row and nothing decoding, the mixed planner packs exactly as the
+// prompt-only packer does, chunk by chunk.
+func TestInkling2MixedPrefillPlanSingleRowMatchesPromptPacking(t *testing.T) {
+	const T, capTok = 300, 64
+	lens := []int{1000}
+	want := inkling2PrefillChunks(lens, T)
+	cursor := []int{0}
+	for k := range want {
+		got := inkling2MixedPrefillPlan(lens, cursor, nil, T, capTok)
+		if !reflect.DeepEqual(got, want[k]) {
+			t.Fatalf("chunk %d plan %+v, want %+v", k, got, want[k])
+		}
+		cursor[0] += got[0].n
+	}
+	if cursor[0] != lens[0] {
+		t.Fatalf("planned %d of %d prompt tokens", cursor[0], lens[0])
+	}
+}
+
+// Only a positive integer in the native long-prefill knob turns the mixed chunks on.
+func TestInkling2CohortLongPrefillCapParsesKnob(t *testing.T) {
+	const name = "FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD"
+	for _, tc := range []struct {
+		name string
+		set  bool
+		v    string
+		want int
+	}{
+		{"unset", false, "", 0},
+		{"empty", true, "", 0},
+		{"zero", true, "0", 0},
+		{"negative", true, "-5", 0},
+		{"unparsable", true, "abc", 0},
+		{"positive", true, "64", 64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := inkling2CohortLongPrefillCap(func(k string) (string, bool) {
+				if k != name {
+					t.Errorf("looked up %q, want %q", k, name)
+				}
+				return tc.v, tc.set
+			})
+			if got != tc.want {
+				t.Fatalf("cap %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 // A cohort prefilled as one ragged token stream emits, row for row, what the lockstep
 // prompt path and the single-sequence decode emit. The rows span several prefill
 // chunks, and a long-prompt row with a short budget finishes while a short-prompt row
