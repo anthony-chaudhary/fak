@@ -77,8 +77,10 @@ func inkling2HostType(t TensorType) bool {
 	case TensorF32, TensorF16, TensorBF16, TensorQ8_0, TensorQ3_K, TensorQ4_K, TensorQ5_K, TensorQ6_K,
 		TensorIQ2_XS, TensorIQ2_S, TensorIQ3_XXS, TensorIQ3_S, TensorIQ4_NL, TensorIQ4_XS, TensorNVFP4:
 		return true
+	default:
+		// Every other encoding is refused by the caller rather than decoded.
+		return false
 	}
-	return false
 }
 
 type UnsupportedInkling2LoopTensorTypeError struct{ Type TensorType }

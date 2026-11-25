@@ -35,12 +35,14 @@ var LifecycleStates = []LifecycleState{
 }
 
 var lifecycleEdges = map[LifecycleState][]LifecycleState{
-	LifecyclePending:  {LifecycleRunning, LifecycleFailed},
-	LifecycleRunning:  {LifecyclePausing, LifecycleStopping, LifecycleFailed},
-	LifecyclePausing:  {LifecyclePaused},
-	LifecyclePaused:   {LifecycleResuming, LifecycleStopping, LifecycleFailed},
-	LifecycleResuming: {LifecycleRunning, LifecycleFailed},
-	LifecycleStopping: {LifecycleTerminated},
+	LifecyclePending:    {LifecycleRunning, LifecycleFailed},
+	LifecycleRunning:    {LifecyclePausing, LifecycleStopping, LifecycleFailed},
+	LifecyclePausing:    {LifecyclePaused},
+	LifecyclePaused:     {LifecycleResuming, LifecycleStopping, LifecycleFailed},
+	LifecycleResuming:   {LifecycleRunning, LifecycleFailed},
+	LifecycleStopping:   {LifecycleTerminated},
+	LifecycleTerminated: nil,
+	LifecycleFailed:     nil,
 }
 
 // LifecycleCanTransition reports whether from -> to is a legal lifecycle edge.

@@ -483,6 +483,8 @@ func TestCtxmmuPreserveCurrentTurnReasoning(t *testing.T) {
 	sysPrompt := []byte("You are fak agent kernel assistant.")
 	toolSchemas := []byte(`[{"name":"bash","description":"execute command"}]`)
 	turn1User := []byte("Inspect the build log")
+	turn1Call := []byte(`{"name":"bash","input":{"command":"make linkcheck"}}`)
+	turn1Unclassified := []byte("unclassified history fragment")
 	turn1Result := makePayload("build log line ", 2048)
 	turn1Reasoning := []byte("Historical reasoning: the failing step is the linker.")
 	turn2User := []byte("Now check the tests")
@@ -497,6 +499,8 @@ func TestCtxmmuPreserveCurrentTurnReasoning(t *testing.T) {
 			{ID: 2, TurnIndex: 0, Kind: ctxmmu.PageKindPrefixTools, Role: "system", Content: toolSchemas, Tokens: ctxmmu.EstimateTokens(toolSchemas), Resident: true, Pinned: true},
 			{ID: 3, TurnIndex: 1, Kind: ctxmmu.PageKindUser, Role: "user", Content: turn1User, Tokens: 10, Resident: true},
 			{ID: 4, TurnIndex: 1, Kind: ctxmmu.PageKindToolResult, Role: "tool", ToolName: "bash", Content: turn1Result, Tokens: 512, Resident: true},
+			{ID: 11, TurnIndex: 1, Kind: ctxmmu.PageKindToolCall, Role: "assistant", ToolName: "bash", Content: turn1Call, Tokens: 12, Resident: true},
+			{ID: 12, TurnIndex: 1, Kind: ctxmmu.PageKindUnknown, Role: "user", Content: turn1Unclassified, Tokens: 8, Resident: true},
 			{ID: 5, TurnIndex: 1, Kind: ctxmmu.PageKindAssistant, Role: "assistant", Content: turn1Reasoning, Tokens: 20, Resident: true},
 			{ID: 6, TurnIndex: 2, Kind: ctxmmu.PageKindUser, Role: "user", Content: turn2User, Tokens: 10, Resident: true},
 			{ID: 7, TurnIndex: 2, Kind: ctxmmu.PageKindToolResult, Role: "tool", ToolName: "bash", Content: turn2Result, Tokens: 512, Resident: true},

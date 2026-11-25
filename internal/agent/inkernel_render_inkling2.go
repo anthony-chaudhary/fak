@@ -322,8 +322,10 @@ func (n inkling2JSONNode) truthy() bool {
 		return len(n.items) > 0
 	case inkling2JSONString:
 		return n.text != ""
+	case inkling2JSONLiteral:
+		return n.text != "null" && n.text != "false" && n.text != "0"
 	}
-	return n.text != "null" && n.text != "false" && n.text != "0"
+	return false
 }
 
 func (n inkling2JSONNode) write(b *strings.Builder, sortKeys bool) {

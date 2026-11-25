@@ -279,7 +279,14 @@ func (s *ColumnStore) newSetter(tag string, value any) func(int, any) {
 			col.values = append(col.values, v.([]float64)...)
 			col.offsets = append(col.offsets, len(col.values))
 		}
+	default:
+		// Numeric is the fallback store: columnNumeric, categorical, and the
+		// unsupported kind 0 from valueKind all land in a float column.
+		return s.numericSetter(tag)
 	}
+}
+
+func (s *ColumnStore) numericSetter(tag string) func(int, any) {
 	col := s.numeric[tag]
 	if col == nil {
 		col = nanColumn(s.capacity)

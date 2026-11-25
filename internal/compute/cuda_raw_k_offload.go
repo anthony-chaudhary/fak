@@ -61,6 +61,9 @@ func (c *cudaBackend) uploadRawKQuantClassWithOperations(t Tensor, hb HostBuffer
 				q := *t.Quant
 				refillQuant = &q
 			}
+		default:
+			// Only the IQ types the refill path re-decodes retain a quant spec;
+			// every other dtype uploads without one.
 		}
 	}
 	out, _ := c.devRawKQuantWithAllocator(t.Dtype, t.Shape, len(raw), func(nbytes int) *cudaBuf {

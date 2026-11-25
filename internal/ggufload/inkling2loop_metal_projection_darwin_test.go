@@ -155,6 +155,10 @@ func finiteProjectionBlocks(typ TensorType, b []byte, rng *rand.Rand) {
 			}
 		}
 		return
+	default:
+		// Only the host-reference encodings have a block layout here; any other
+		// type would leave block at zero and spin the loop below forever.
+		panic("finiteProjectionBlocks: no fixture layout for " + typ.String())
 	}
 	for i := 0; i < len(b); i += block {
 		binary.LittleEndian.PutUint16(b[i+scale:], uint16(0x3000+rng.Intn(1024)))
