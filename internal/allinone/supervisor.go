@@ -505,9 +505,8 @@ func (s *Supervisor) loadPolicy() (*adjudicator.Adjudicator, error) {
 }
 
 // adjudicateToolCall evaluates a tool call against the configured policy adjudicator.
-// For namespaced MCP tools (mcp__<server>__<tool>), both the full namespaced name and
-// the bare tool name are checked: an explicit deny on either always wins, while an
-// allow rule matching either permits the call under fail-closed posture.
+// For namespaced MCP tools (mcp__<server>__<tool>) an explicit deny on the bare
+// tool name also refuses; admission requires an Allow for the namespaced name.
 func (s *Supervisor) adjudicateToolCall(ctx context.Context, sessionID, toolName string, args json.RawMessage) (allowed bool, reason string) {
 	s.mu.RLock()
 	adj := s.adjudicator
@@ -538,30 +537,19 @@ func (s *Supervisor) adjudicateToolCall(ctx context.Context, sessionID, toolName
 		return "POLICY_BLOCK"
 	}
 
-	isAdmitted := func(v abi.Verdict) bool {
-		return v.Kind == abi.VerdictAllow || v.Kind == abi.VerdictTransform
-	}
-
 	vFull := adj.Adjudicate(ctx, makeCall(toolName))
 	if _, rawTool, ok := mcpbroker.ParseNamespacedTool(toolName); ok && rawTool != "" && rawTool != toolName {
+		// A bare-name deny narrows every server's tool of that name; a bare-name
+		// allow never widens, since it does not name the server.
 		vRaw := adj.Adjudicate(ctx, makeCall(rawTool))
-		// Explicit (non-default) deny on either namespaced or bare tool name always wins.
-		if vFull.Kind == abi.VerdictDeny && vFull.Reason != abi.ReasonDefaultDeny {
-			return false, formatReason(vFull)
-		}
 		if vRaw.Kind == abi.VerdictDeny && vRaw.Reason != abi.ReasonDefaultDeny {
 			return false, formatReason(vRaw)
 		}
-		if isAdmitted(vFull) || isAdmitted(vRaw) {
-			return true, ""
-		}
-		if vFull.Kind == abi.VerdictDeny {
-			return false, formatReason(vFull)
-		}
-		return false, formatReason(vRaw)
 	}
 
-	if isAdmitted(vFull) {
+	// The broker filter cannot apply a Transform's rewritten args or tool, so
+	// only an unconditional Allow dispatches.
+	if vFull.Kind == abi.VerdictAllow {
 		return true, ""
 	}
 	return false, formatReason(vFull)

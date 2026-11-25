@@ -116,7 +116,7 @@ func TestUpLockPolicyEnforcement(t *testing.T) {
 		policyJSON := `{
   "version": "fak-policy/v1",
   "posture": "fail_closed",
-  "allow": ["search_kb"],
+  "allow": ["mcp__support-mcp__search_kb"],
   "deny": {
     "refund_payment": "POLICY_BLOCK"
   }
