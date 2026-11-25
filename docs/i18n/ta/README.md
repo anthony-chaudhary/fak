@@ -68,7 +68,6 @@ fak manage claude      # உங்கள் இருக்கும் ஏஜ�
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection தடுக்கப்பட்டது, task எனினும் நிறைவு
 ```
 
 ## உங்கள் model-உடன்

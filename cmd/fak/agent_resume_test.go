@@ -14,9 +14,8 @@ func TestAgentCLISessionAndResume(t *testing.T) {
 	outPath1 := filepath.Join(dir, "out1.json")
 
 	// Phase 1: Start new session with 1 turn limit and session checkpointing
-	runAgent([]string{
+	cmdAgentWithMock([]string{
 		"--native",
-		"--offline",
 		"--session", sessionID,
 		"--session-dir", dir,
 		"--max-turns", "1",
@@ -40,9 +39,8 @@ func TestAgentCLISessionAndResume(t *testing.T) {
 	outPath2 := filepath.Join(dir, "out2.json")
 
 	// Phase 2: Resume session using --resume <session_id>
-	runAgent([]string{
+	cmdAgentWithMock([]string{
 		"--native",
-		"--offline",
 		"--resume", sessionID,
 		"--session-dir", dir,
 		"--max-turns", "10",
@@ -74,9 +72,8 @@ func TestAgentCLISubcommandResume(t *testing.T) {
 	outPath1 := filepath.Join(dir, "out1.json")
 
 	// Phase 1: Create initial checkpoint
-	runAgent([]string{
+	cmdAgentWithMock([]string{
 		"--native",
-		"--offline",
 		"--session", sessionID,
 		"--session-dir", dir,
 		"--max-turns", "1",
@@ -96,10 +93,9 @@ func TestAgentCLISubcommandResume(t *testing.T) {
 	outPath2 := filepath.Join(dir, "out2.json")
 
 	// Phase 2: Resume session using subcommand syntax `resume <session_id>`
-	runAgent([]string{
+	cmdAgentWithMock([]string{
 		"resume", sessionID,
 		"--native",
-		"--offline",
 		"--session-dir", dir,
 		"--max-turns", "10",
 		"--out", outPath2,
@@ -125,9 +121,8 @@ func TestAgentCLIResumeDirectPath(t *testing.T) {
 
 	outPath1 := filepath.Join(dir, "out1.json")
 
-	runAgent([]string{
+	cmdAgentWithMock([]string{
 		"--native",
-		"--offline",
 		"--session", sessionID,
 		"--session-dir", dir,
 		"--max-turns", "1",
@@ -140,9 +135,8 @@ func TestAgentCLIResumeDirectPath(t *testing.T) {
 	outPath2 := filepath.Join(dir, "out2.json")
 
 	// Resume using the absolute file path
-	runAgent([]string{
+	cmdAgentWithMock([]string{
 		"--native",
-		"--offline",
 		"--resume", directFilePath,
 		"--max-turns", "10",
 		"--out", outPath2,

@@ -68,6 +68,9 @@ func setupHermeticRepo(t testing.TB) string {
 	if err := os.MkdirAll(hwDir, 0755); err != nil {
 		t.Fatalf("failed to create hw dir: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(repoRoot, DefaultHardwareReadmePath), []byte(sampleReadme), 0644); err != nil {
+		t.Fatalf("failed to write hardware README: %v", err)
+	}
 	manifest := HardwareLatestManifest{
 		Schema: "fak-hardware-latest/1",
 		AsOf:   "2026-09-01",
@@ -433,6 +436,13 @@ func TestPublish_DryRun(t *testing.T) {
 	if strings.Contains(string(contentOnDisk), newNvidiaRow) {
 		t.Error("dry-run should not have modified README on disk")
 	}
+	hardwareOnDisk, err := os.ReadFile(filepath.Join(repoRoot, DefaultHardwareReadmePath))
+	if err != nil {
+		t.Fatalf("failed to read hardware README: %v", err)
+	}
+	if strings.Contains(string(hardwareOnDisk), newNvidiaRow) {
+		t.Error("dry-run should not have modified hardware README on disk")
+	}
 
 	// Verify docs/README-legacy.md was NOT created
 	legacyPath := filepath.Join(repoRoot, DefaultLegacyArchiveDoc)
@@ -444,7 +454,7 @@ func TestPublish_DryRun(t *testing.T) {
 func TestPublish_Live(t *testing.T) {
 	repoRoot := setupHermeticRepo(t)
 	oldNvidiaRow := "| NVIDIA | Older H100 result: 95 tok/s. | Verified baseline. | [NVIDIA](docs/nvidia.md) |"
-	newNvidiaRow := "| NVIDIA | Hopper H100 Q8_0: 111.9 tok/s | Verified | [NVIDIA](docs/nv.md) |"
+	newNvidiaRow := "| NVIDIA | Inkling-2-Mini: plain decode 119.9 tok/s; opt-in speculative decode 151.7 tok/s | Verified | [NVIDIA](published/aegis-inkling2-spec-decode/RESULTS.md) |"
 
 	f := &CandidateFragment{
 		Schema:           SchemaCandidate,
@@ -484,23 +494,29 @@ func TestPublish_Live(t *testing.T) {
 		t.Error("expected HardwareJSONUpdated to be true")
 	}
 
-	// 1. Verify README.md on disk
+	// 1. Verify the front page stays byte-identical.
 	readmeData, err := os.ReadFile(filepath.Join(repoRoot, DefaultReadmePath))
 	if err != nil {
 		t.Fatalf("failed to read README on disk: %v", err)
 	}
-	readmeStr := string(readmeData)
-	if !strings.Contains(readmeStr, newNvidiaRow) {
-		t.Errorf("README does not contain new NVIDIA row on disk")
-	}
-	if strings.Contains(readmeStr, oldNvidiaRow) {
-		t.Errorf("README still contains old NVIDIA row on disk")
-	}
-	if !strings.Contains(readmeStr, "## Latest hardware results — 2026-09-06") {
-		t.Errorf("README does not contain updated hardware header date")
+	if string(readmeData) != sampleReadme {
+		t.Errorf("front-page README changed during hardware publication")
 	}
 
-	// 2. Verify docs/README-legacy.md on disk
+	// 2. Verify the hardware README owns the new row and date.
+	hardwareData, err := os.ReadFile(filepath.Join(repoRoot, DefaultHardwareReadmePath))
+	if err != nil {
+		t.Fatalf("failed to read hardware README on disk: %v", err)
+	}
+	hardwareStr := string(hardwareData)
+	if !strings.Contains(hardwareStr, newNvidiaRow) || strings.Contains(hardwareStr, oldNvidiaRow) {
+		t.Errorf("hardware README did not replace the NVIDIA row")
+	}
+	if !strings.Contains(hardwareStr, "## Latest hardware results — 2026-09-06") {
+		t.Errorf("hardware README does not contain updated hardware header date")
+	}
+
+	// 3. Verify docs/README-legacy.md on disk
 	legacyData, err := os.ReadFile(filepath.Join(repoRoot, DefaultLegacyArchiveDoc))
 	if err != nil {
 		t.Fatalf("failed to read legacy doc on disk: %v", err)
@@ -537,6 +553,52 @@ func TestPublish_Live(t *testing.T) {
 	}
 	if nvEntry.Detail != "docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md" {
 		t.Errorf("expected detail path to match receipt, got %s", nvEntry.Detail)
+	}
+}
+
+func TestPublish_ReplacesArchivedTargetWithoutRepopulatingFrontPage(t *testing.T) {
+	repoRoot := setupHermeticRepo(t)
+	frontPageBefore, err := os.ReadFile(filepath.Join(repoRoot, DefaultReadmePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldParagraph := "- Inkling-2-Mini plain decode was 104.6 tok/s."
+	newParagraph := "- Inkling-2-Mini plain decode is 119.9 tok/s; opt-in speculative decode is 151.7 tok/s."
+	legacyPath := filepath.Join(repoRoot, DefaultLegacyArchiveDoc)
+	if err := os.WriteFile(legacyPath, []byte("# Legacy\n\n"+oldParagraph+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fragment := &CandidateFragment{
+		Schema:           SchemaCandidate,
+		Issue:            12000,
+		Topic:            "inkling-what-changed",
+		TargetSection:    TargetCustom,
+		CandidateContent: newParagraph,
+		RetireTarget: RetireTarget{
+			Action:     RetireActionNone,
+			TargetText: oldParagraph,
+		},
+		LawsChecklist: LawsChecklist{SOTAComparison: true},
+		Date:          "2026-11-24",
+	}
+
+	if _, err := Publish(repoRoot, []*CandidateFragment{fragment}, false); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	frontPageAfter, err := os.ReadFile(filepath.Join(repoRoot, DefaultReadmePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(frontPageAfter) != string(frontPageBefore) {
+		t.Fatal("archived exact-text replacement changed the front-page README")
+	}
+	legacyAfter, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(legacyAfter), newParagraph) || strings.Contains(string(legacyAfter), oldParagraph) {
+		t.Fatalf("archived target was not replaced in place:\n%s", legacyAfter)
 	}
 }
 

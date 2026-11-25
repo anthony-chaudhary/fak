@@ -23,20 +23,10 @@ This is the runnable witness for **[`CLAIMS.md`](../../CLAIMS.md) #40**. The
 (ALLOW/DENY); this demo shows the grammar rung that sits *in front* of it and repairs
 recoverable shape errors instead of refusing them.
 
-## Run it
+## Inspect a repair
 
-The end-to-end witness is the offline A/B loop — it registers the `convert_currency`
-grammar, drives the same deterministic planner over the same task twice (kernel-mediated
-vs. naive), and reports the in-syscall repair:
-
-```bash
-fak agent --offline --log agent-trace.log
-```
-
-No model, no network, no key — the offline planner is deterministic, so the kernel verdicts
-reproduce exactly. (A prebuilt binary works too: `C:\Users\USER\bin\fak.exe agent --offline`
-on Windows, or build from a clean checkout — see "Building" below.)
-Expected runtime: with a built binary, the offline witness completes in seconds.
+See [the recorded trace](EXAMPLE-OUTPUT.md) for a worked example from an earlier release.
+For a current model-backed run, follow the [agent A/B example](../agent-ab/README.md).
 
 ## What you see
 
@@ -127,24 +117,12 @@ go test ./internal/grammar/ -run 'TestAdjudicatePositional'
 #   TestAdjudicatePositionalUnrepairable  {"_positional":["a","b","c"]} (arity 3 vs 1)   Deny(MISROUTE)
 ```
 
-## Building (if you don't have a prebuilt `fak`)
-
-From a clean checkout of the repo root (the Go module root):
-
-```bash
-go build -o fak ./cmd/fak
-./fak agent --offline --log agent-trace.log
-```
-
-Do not run `go build`/`go test` from a dirty shared tree; build from a fresh
-`git archive HEAD` extract if needed.
-
 ## Files
 
 | file | what it is |
 |---|---|
 | `README.md` | this walkthrough |
-| `EXAMPLE-OUTPUT.md` | the captured `fak agent --offline` + `fak turntax` run |
+| `EXAMPLE-OUTPUT.md` | historical agent trace and turn-cost result |
 | `testdata/aliased-call.json` | the `from`/`to` → canonical alias-repair shape (the end-to-end case) |
 | `testdata/positional-call.json` | the positional→named arity-matched zip shape |
 | `testdata/arity-mismatch-call.json` | the unrepairable arity-mismatch → `Deny(MISROUTE)` shape |

@@ -169,7 +169,7 @@ wrong is debuggable from the JSON alone (no separate `--log` file needed). Each 
 deny, the deciding `by`, and a bounded args preview:
 
 ```bash
-fak agent --offline --out agent-report.json
+# Inspect a saved report from a model-backed A/B run.
 jq '.calls[] | select(.arm=="fak")' agent-report.json
 # {"arm":"fak","turn":2,"tool":"fetch_policy","verdict":"DENY","reason":"TRUST_VIOLATION","by":"ifc-sink", …}
 ```

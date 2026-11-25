@@ -25,7 +25,7 @@ Pass means the first call reports `DENY (POLICY_BLOCK)` and the second reports `
 
 **Route context:**
 
-- **Mode:** the check above is deterministic preflight mode with no model, key, or GPU. Containment evidence is scoped to `fak agent --offline`; production coverage is the documented `fak agent` or gateway path selected from [`GETTING-STARTED.md`](GETTING-STARTED.md), not an arbitrary integration or unmanaged client.
+- **Mode:** the check above is deterministic preflight mode with no model, key, or GPU. For production coverage, see the documented `fak agent` or gateway path selected from [`GETTING-STARTED.md`](GETTING-STARTED.md), not an arbitrary integration or unmanaged client.
 - **Generation:** this page documents the current `gen/now` floor. Future security work is not a current guarantee unless [`CLAIMS.md`](CLAIMS.md) marks it `[SHIPPED]`.
 - **Lifecycle:** `fak` is pre-1.0 with a rolling latest release; the supported line is defined under [Supported versions](#supported-versions).
 - **Support boundary:** capability-floor, containment, gateway/adjudication, and policy/signature bypasses are security reports. Detector evasion, permissive policy authoring, and model quality are scoped separately below.

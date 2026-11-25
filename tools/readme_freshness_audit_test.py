@@ -91,24 +91,23 @@ def test_freshness_stamp_ok_when_recent() -> None:
     assert c["status"] == "OK", c
 
 
-def _hardware_front_page(date: str = TODAY.isoformat(), *, extra_row: str = "") -> str:
+def _hardware_detail(date: str = TODAY.isoformat(), *, extra_row: str = "") -> str:
     return f"""## Latest hardware results — {date}
 
 **Latest** means the newest committed performance receipt for that platform.
 
 | Platform | Latest result | Qualification and detail |
 | :--- | :--- | :--- |
-| Mac | result observed 2026-06-18. | Historical/expired review. [Detail](docs/benchmarks/mac.md) |
-| AMD | result observed 2026-06-19. | Narrow microbench only. [Detail](docs/benchmarks/amd.md) |
-| NVIDIA | result captured 2026-06-20. | Held after failed cache quality. [Detail](docs/benchmarks/nvidia.md) |
+| Mac | result observed 2026-06-18. | Historical/expired review. [Detail](mac.md) |
+| AMD | result observed 2026-06-19. | Narrow microbench only. [Detail](amd.md) |
+| NVIDIA | result captured 2026-06-20. | Held after failed cache quality. [Detail](nvidia.md) |
 {extra_row}
-History and specific envelopes live in the [benchmark index](docs/benchmarks/README.md).
 """
 
 
 def _hardware_manifest(date: str = TODAY.isoformat(), *, platform: str | None = None,
                        row_suffix: str = "") -> str:
-    readme = _hardware_front_page(date)
+    readme = _hardware_detail(date)
     rows = {line.split("|", 2)[1].strip(): line for line in readme.splitlines()
             if line.startswith(("| Mac |", "| AMD |", "| NVIDIA |"))}
     if platform:
@@ -133,41 +132,46 @@ def _hardware_root(tmp_path: Path) -> Path:
 
 
 def _check_hardware(tmp_path: Path, readme: str | None = None,
-                    manifest: str | None = None) -> dict[str, object]:
+                    manifest: str | None = None,
+                    detail: str | None = None) -> dict[str, object]:
     return rfa.check_hardware_front_page(
-        readme or _hardware_front_page(),
+        readme or "See [benchmarks](docs/benchmarks/README.md).",
         _hardware_manifest() if manifest is None else manifest,
-        _hardware_root(tmp_path), today=TODAY, max_age_days=14)
+        _hardware_root(tmp_path), today=TODAY, max_age_days=14,
+        benchmark_index=_hardware_detail() if detail is None else detail)
 
 
-def test_hardware_front_page_accepts_exact_three_rows(tmp_path: Path) -> None:
+def test_hardware_front_page_accepts_linked_detail_rows(tmp_path: Path) -> None:
     assert _check_hardware(tmp_path)["status"] == "OK"
 
 
-def test_hardware_front_page_rejects_stale_date(tmp_path: Path) -> None:
+def test_hardware_front_page_accepts_historical_latest_date(tmp_path: Path) -> None:
     date = "2026-06-01"
-    c = _check_hardware(tmp_path, _hardware_front_page(date), _hardware_manifest(date))
-    assert c["status"] == "FAIL" and "fresh_date" in c["items"]
+    c = _check_hardware(tmp_path, manifest=_hardware_manifest(date),
+                        detail=_hardware_detail(date))
+    assert c["status"] == "OK", c
 
 
 def test_hardware_front_page_rejects_extra_result_row(tmp_path: Path) -> None:
-    c = _check_hardware(tmp_path, _hardware_front_page(
+    c = _check_hardware(tmp_path, detail=_hardware_detail(
         extra_row="| Ultracode | result | hold |"))
     assert c["status"] == "FAIL"
     assert "README must contain no extra result rows" in c["items"]
 
 
 def test_hardware_front_page_rejects_missing_platform(tmp_path: Path) -> None:
-    readme = _hardware_front_page().replace(
-        "| AMD | result observed 2026-06-19. | Narrow microbench only. [Detail](docs/benchmarks/amd.md) |\n", "")
-    c = _check_hardware(tmp_path, readme)
+    detail = _hardware_detail().replace(
+        "| AMD | result observed 2026-06-19. | Narrow microbench only. [Detail](amd.md) |\n", "")
+    c = _check_hardware(tmp_path, detail=detail)
     assert c["status"] == "FAIL"
     assert "README must contain exactly Mac, AMD, NVIDIA rows" in c["items"]
     assert any(item.startswith("AMD:") for item in c["items"])
 
 
 def test_hardware_front_page_rejects_generated_qwen_marker(tmp_path: Path) -> None:
-    c = _check_hardware(tmp_path, _hardware_front_page() + "\n<!-- qwen38-frontdoor:begin -->\n")
+    c = _check_hardware(
+        tmp_path,
+        "See [benchmarks](docs/benchmarks/README.md).\n<!-- qwen38-frontdoor:begin -->")
     assert c["status"] == "FAIL"
     assert "README must not contain generated qwen38-frontdoor markers" in c["items"]
 
@@ -207,6 +211,21 @@ def test_hardware_front_page_rejects_missing_detail_receipt(tmp_path: Path) -> N
     c = _check_hardware(tmp_path, manifest=json.dumps(manifest))
     assert c["status"] == "FAIL"
     assert "Mac" in c["detail"] and "does not exist" in c["detail"]
+
+
+def test_hardware_front_page_requires_direct_benchmark_index_link(tmp_path: Path) -> None:
+    c = _check_hardware(tmp_path, "See [benchmarks](docs/benchmarks/README.md#latest).")
+    assert c["status"] == "FAIL"
+    assert f"README must link directly to {rfa.BENCHMARK_INDEX_REL}" in c["items"]
+
+
+def test_hardware_front_page_resolves_row_links_from_benchmark_index(tmp_path: Path) -> None:
+    detail = _hardware_detail().replace("[Detail](mac.md)", "[Detail](docs/benchmarks/mac.md)")
+    manifest = _hardware_manifest().replace("[Detail](mac.md)",
+                                            "[Detail](docs/benchmarks/mac.md)")
+    c = _check_hardware(tmp_path, manifest=manifest, detail=detail)
+    assert c["status"] == "FAIL"
+    assert "row link does not resolve" in c["detail"]
 
 
 def test_standard_gates_run_actual_readme_audit() -> None:
@@ -252,7 +271,7 @@ _SHOWCASE_OK = """<!doctype html>
 <html><head><style>body { color: #000 }</style></head><body>
 <h1>fak</h1>
 <pre><code>curl -fsSL https://example.invalid/install.sh | sh
-fak agent --offline</code></pre>
+fak up</code></pre>
 <p>Every number traces to <a href="BENCHMARK-AUTHORITY.md">the benchmark
 authority</a>; the hero run was measured at fak v0.30.0.</p>
 <script>renderChart({series: [1, 2, 3]});</script>
@@ -261,10 +280,10 @@ authority</a>; the hero run was measured at fak v0.30.0.</p>
 
 _README_OK = """# fak
 
-Install the one binary and run one deterministic check:
+Follow the [install guide](INSTALL.md#local-model-setup) and
+[local-model setup](GETTING-STARTED.md#local-model-setup), then run on Apple Silicon:
 
-    curl -fsSL https://example.invalid/install.sh | sh
-    fak agent --offline
+    fak up
 
 Show it off: [the published showcase](docs/showcase.html) is the configured
 homepage. Numbers live in BENCHMARK-AUTHORITY.md.
@@ -281,44 +300,23 @@ def test_showcase_sync_ok_when_front_doors_agree() -> None:
     assert not c["items"], c
 
 
-def test_showcase_sync_fails_when_readme_does_not_link_it() -> None:
-    # The #5476 defect shape: the page is fine, nothing points at it.
+def test_showcase_sync_does_not_require_readme_to_link_offline_first_page() -> None:
     readme = _README_OK.replace("[the published showcase](docs/showcase.html)",
                                 "the demos")
     c = rfa.check_showcase_sync(readme, _SHOWCASE_OK, **_SHOWCASE_KW)
-    assert c["status"] == "FAIL" and "linked_from_readme" in c["items"], c
+    assert c["status"] == "OK", c
 
 
-def test_showcase_sync_fails_when_install_command_drifts() -> None:
-    # Rename the installer on one door only: the homepage now sends a visitor at
-    # a script the README does not stand behind.
+def test_showcase_sync_allows_installer_detail_to_stay_off_readme() -> None:
     showcase = _SHOWCASE_OK.replace("install.sh", "get-fak-v2.sh")
     c = rfa.check_showcase_sync(_README_OK, showcase, **_SHOWCASE_KW)
-    assert c["status"] == "FAIL" and "install_matches" in c["items"], c
-    assert "get-fak-v2.sh" in c["detail"], c
+    assert c["status"] == "OK", c
 
 
-def test_showcase_sync_fails_when_first_run_verb_is_fabricated() -> None:
-    # Anti-gaming, applied to the homepage: a first command the binary does not
-    # dispatch earns nothing, exactly as in lcd_onramp.
-    showcase = _SHOWCASE_OK.replace("fak agent --offline", "fak totally-made-up")
+def test_showcase_sync_does_not_make_showcase_commands_readme_requirements() -> None:
+    showcase = _SHOWCASE_OK.replace("fak up", "fak totally-made-up")
     c = rfa.check_showcase_sync(_README_OK, showcase, **_SHOWCASE_KW)
-    assert c["status"] == "FAIL" and "first_run_matches" in c["items"], c
-
-
-def test_showcase_sync_fails_when_a_real_verb_is_not_taught_by_the_readme() -> None:
-    # A real verb that only ONE door teaches is still a divergence.
-    showcase = _SHOWCASE_OK.replace("fak agent --offline", "fak serve --addr :8080")
-    c = rfa.check_showcase_sync(_README_OK, showcase, **_SHOWCASE_KW)
-    assert c["status"] == "FAIL" and "first_run_matches" in c["items"], c
-
-
-def test_showcase_sync_first_run_abstains_without_a_dispatch_set() -> None:
-    # No cmd/fak/main.go to parse (run outside the repo): fall back to "both
-    # doors name the same command" rather than inventing a defect.
-    c = rfa.check_showcase_sync(_README_OK, _SHOWCASE_OK,
-                                version="0.43.0", dataset_versions={"0.30.0"})
-    assert "first_run_matches" not in c["items"], c
+    assert c["status"] == "OK", c
 
 
 def test_showcase_sync_fails_when_authority_link_is_dropped() -> None:
@@ -364,7 +362,7 @@ def test_html_text_survives_a_script_mention_inside_a_comment() -> None:
     # page's real </script> and swallows the whole page. An empty extraction
     # makes every cross-check above vacuously true - a silent false GREEN.
     text = rfa.html_text(_SHOWCASE_OK)
-    assert "fak agent --offline" in text, text[:200]
+    assert "fak up" in text, text[:200]
     assert "benchmark" in text, "reader-visible prose after the comment was lost"
     assert "Hand-authored homepage" not in text, "comment text leaked into reader text"
     assert "renderChart" not in text, "script body leaked into reader text"
@@ -382,38 +380,64 @@ def test_bench_dataset_versions_reads_the_stamped_as_of(tmp_path: Path) -> None:
 
 # --- substance checks (graded affordances → 0..1 score) --------------------
 
-def test_guard_prominence_high_when_leads() -> None:
-    txt = ("```\nfak guard -- claude\n```\n"
-           "A drop-in secure floor; no api key needed, it forwards your credential.\n")
-    c = rfa.check_guard_prominence(txt, first_screen_lines=110)
-    assert c["status"] == "OK" and c["score"] >= 0.75, c
+def test_guard_prominence_key_tracks_real_integration_route(tmp_path: Path) -> None:
+    guide = tmp_path / "docs" / "integrations" / "README.md"
+    guide.parent.mkdir(parents=True)
+    guide.write_text("Guard an agent with the capability floor.\n", encoding="utf-8")
+    txt = "[Connect an agent](docs/integrations/README.md)."
+    c = rfa.check_guard_prominence(txt, first_screen_lines=110, root=tmp_path)
+    assert c["check"] == "guard_prominence"
+    assert c["status"] == "OK" and c["score"] == 1.0, c
 
 
-def test_guard_prominence_fails_when_absent() -> None:
-    c = rfa.check_guard_prominence("no guard here, just serve", first_screen_lines=110)
-    assert c["status"] == "FAIL" and c["score"] == 0.0, c
+def test_guard_prominence_does_not_require_guard_command() -> None:
+    c = rfa.check_guard_prominence("no guard command on this page", first_screen_lines=110)
+    assert c["status"] == "WARN" and c["score"] == 0.0, c
 
 
 def test_lcd_onramp_high_when_complete() -> None:
-    txt = ("# fak\n> **fak in one line:** put it in front of your agent.\n\n"
-           "No key, no model, no GPU. Install: `curl … install.sh | sh`.\n"
-           "```\nfak preflight --tool refund_payment   # -> DENY\n```\n")
+    txt = ("# fak\n> **fak in one line:** run local agents on a supported Mac.\n\n"
+           "Start on Apple Silicon: [Install](INSTALL.md#local-model-setup) and "
+           "[setup](GETTING-STARTED.md#local-model-setup).\n"
+           "```\nfak up   # -> [READY] http://127.0.0.1:8080\n```\n")
     c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8)
     assert c["status"] == "OK" and c["score"] >= 0.75, c
 
 
-def test_lcd_onramp_scores_real_fak_verb_when_dispatch_known() -> None:
-    txt = ("# fak\n> **fak in one line:** put it in front of your agent.\n\n"
-           "No key, no model, no GPU. Install: `curl … install.sh | sh`.\n"
-           "```\nfak preflight --tool refund_payment   # -> DENY\n```\n")
+def test_lcd_onramp_recognizes_real_repl_prompt() -> None:
+    txt = ("# fak\nRun a local model on Apple Silicon.\n\n"
+           "[Install](INSTALL.md#local-model-setup) and "
+           "[setup](GETTING-STARTED.md#local-model-setup).\n"
+           "```\nfak up\n```\nWhen you see `you>`, ask a coding question.\n")
     c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8,
-                             dispatch={"preflight"})
+                             dispatch={"up"})
+    assert "expected_output" not in c["items"], c
+
+
+def test_lcd_onramp_accepts_documented_model_selector() -> None:
+    txt = ("# fak\nRun a local model on Apple Silicon.\n\n"
+           "[Install](INSTALL.md#local-model-setup) and "
+           "[setup](GETTING-STARTED.md#local-model-setup).\n"
+           "```\nfak up --model 3B\n```\nWhen you see `you>`, ask a coding question.\n")
+    c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8,
+                             dispatch={"up"})
+    assert c["status"] == "OK" and "real_first_run" not in c["items"], c
+
+
+def test_lcd_onramp_scores_real_fak_verb_when_dispatch_known() -> None:
+    txt = ("# fak\n> **fak in one line:** local agents on a supported Mac.\n\n"
+           "Apple Silicon: [Install](INSTALL.md#local-model-setup), then "
+           "[setup](GETTING-STARTED.md#local-model-setup).\n"
+           "```\nfak up   # -> [READY]\n```\n")
+    c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8,
+                             dispatch={"up"})
     assert "bare_binary_cmd" not in c["items"], c
 
 
 def test_lcd_onramp_rejects_fake_fak_verb_when_dispatch_known() -> None:
-    txt = ("# fak\n> **fak in one line:** put it in front of your agent.\n\n"
-           "No key, no model, no GPU. Install: `curl … install.sh | sh`.\n"
+    txt = ("# fak\n> **fak in one line:** local agents on a supported Mac.\n\n"
+           "Apple Silicon: [Install](INSTALL.md#local-model-setup), "
+           "[setup](GETTING-STARTED.md#local-model-setup).\n"
            "```\nfak totally-made-up --tool refund_payment   # -> DENY\n```\n")
     c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8,
                              dispatch={"preflight", "guard"})
@@ -421,10 +445,33 @@ def test_lcd_onramp_rejects_fake_fak_verb_when_dispatch_known() -> None:
     assert c["score"] < 1.0, c
 
 
+def test_lcd_onramp_requires_real_setup_routes_and_up() -> None:
+    txt = ("# fak\n> **fak in one line:** local agents on Apple Silicon.\n\n"
+           "```\nfak up\n```\n")
+    c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8,
+                             dispatch={"up"})
+    assert c["status"] == "FAIL" and "install_reachable" in c["items"], c
+
+    txt = txt.replace("```", "[Install](INSTALL.md#local-model-setup).\n```", 1)
+    c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8,
+                             dispatch={"up"})
+    assert c["status"] == "FAIL" and "setup_reachable" in c["items"], c
+
+
+def test_lcd_onramp_rejects_tombstoned_offline_demo() -> None:
+    txt = ("# fak\n> **fak in one line:** local agents on Apple Silicon.\n\n"
+           "[Install](INSTALL.md#local-model-setup) and "
+           "[setup](GETTING-STARTED.md#local-model-setup).\n"
+           "```\nfak up   # -> [READY]\nfak agent --offline\n```\n")
+    c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8,
+                             dispatch={"up", "agent"})
+    assert c["status"] == "FAIL" and "no_offline_demo" in c["items"], c
+
+
 def test_lcd_onramp_fails_with_no_command() -> None:
     c = rfa.check_lcd_onramp("just prose, no code, no install", first_screen_lines=110,
                              one_glance_lines=8)
-    assert c["status"] == "FAIL" and c["score"] == 0.0, c
+    assert c["status"] == "FAIL" and "real_first_run" in c["items"], c
 
 
 def test_speed_claim_zero_without_a_speed_token() -> None:
@@ -480,7 +527,7 @@ def test_hero_above_fold_high_when_traced_sota() -> None:
 
 
 def test_audience_footholds_all_personas() -> None:
-    txt = ("Start here. No key, no GPU — run `fak agent --offline` for an ALLOW/DENY proof. "
+    txt = ("Start here. Copy-paste `fak up` on Apple Silicon and look for `[READY]`. "
            "A default-deny capability floor. Cache prefix reuse keeps the discount. "
            "See CLAIMS.md for what's real.")
     c = rfa.check_audience_footholds(txt, first_screen_lines=110)
@@ -654,12 +701,9 @@ def test_leanness_credit_scales_with_completeness() -> None:
     # LESS on a page missing an affordance, so you cannot score high by deleting
     # content — only by saying the same complete thing in fewer lines.
     full = _all_substance_ok()[:-1] + [_focus_check(lines_under=100)]
-    partial = (
-        [{"check": c, "status": "OK", "score": 1.0}
-         for c in rfa.SUBSTANCE_CHECKS if c not in ("front_page_focus", "hero_above_fold")]
-        + [{"check": "hero_above_fold", "status": "WARN", "score": 0.5,
-            "items": ["sota_framed"]}]
-        + [_focus_check(lines_under=100)])
+    partial = ([{"check": "lcd_onramp", "status": "WARN", "score": 0.5,
+                 "items": ["platform_envelope"]}]
+               + [_focus_check(lines_under=100)])
     p_full = rfa.build_payload(workspace=".", checks=full)
     p_partial = rfa.build_payload(workspace=".", checks=partial)
     assert p_partial["score"] < p_full["score"], (p_partial["score"], p_full["score"])
@@ -680,12 +724,9 @@ def test_lean_but_incomplete_page_is_still_flagged_thin() -> None:
     # The credit can lift an incomplete page's score above 100, but the verdict is
     # keyed to real completeness, not the score: a missing affordance is THIN even
     # when the number looks great. (This is what the old score<90 test missed.)
-    checks = (
-        [{"check": c, "status": "OK", "score": 1.0}
-         for c in rfa.SUBSTANCE_CHECKS if c not in ("front_page_focus", "hero_above_fold")]
-        + [{"check": "hero_above_fold", "status": "WARN", "score": 0.5,
-            "items": ["sota_framed"]}]
-        + [_focus_check(lines_under=180)])
+    checks = ([{"check": "lcd_onramp", "status": "WARN", "score": 0.5,
+               "items": ["platform_envelope"]}]
+              + [_focus_check(lines_under=180)])
     p = rfa.build_payload(workspace=".", checks=checks)
     assert p["score"] > 100, p
     assert p["finding"] == "readme_fresh_thin", p
@@ -774,10 +815,9 @@ def test_score_is_substance_only_not_padded_by_hygiene() -> None:
         {"check": "audience_footholds", "status": "OK", "score": 0.0},
     ]
     p = rfa.build_payload(workspace=".", checks=checks)
-    # substance-only: hygiene OK rows add zero penalty, so the score is driven
-    # purely by the missing substance affordances (weight-scaled: 2+2+1.5+1.5+1.5
-    # = 8.5 x SUBSTANCE_SHORTFALL_SCALE = 85 penalty => 100-85 = 15).
-    assert p["score"] == 15, p
+    # Legacy metrics remain visible but no longer tell editors to grow the README.
+    # Only the real first-run contract contributes (1.5 x 10 = 15 penalty).
+    assert p["score"] == 85, p
     assert p["finding"] == "readme_fresh_thin", p
 
 
@@ -801,8 +841,8 @@ def test_payload_debt_counts_hygiene_fails_and_missing_affordances() -> None:
          "items": ["bare_binary_cmd"]},
     ]
     p = rfa.build_payload(workspace=".", checks=checks)
-    assert p["readme_debt"] == 4, p
-    assert p["corpus"]["readme_debt"] == 4, p
+    assert p["readme_debt"] == 2, p
+    assert p["corpus"]["readme_debt"] == 2, p
 
 
 def test_hygiene_fail_caps_the_grade() -> None:

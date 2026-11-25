@@ -18,7 +18,7 @@ The primary `fak` binary (`fak.exe` on Windows) provides several verbs for runni
 | `fak preflight --tool <name> --args <json>` | Test a single tool call against the policy (rung-only check) |
 | `fak bench --suite <name>` | Run the vDSO ablation benchmark (in-process vs spawned-hook comparison) |
 | `fak turntax --suite <name>` | Price the extra error-code model turn the 1-shot kernel deletes |
-| `fak agent --offline\|--base-url` | Run live turn-count A/B tests against real models |
+| `fak agent --base-url <url>` | Run live turn-count A/B tests against real models |
 | `fak recall --session <dir>` | Persist a finished session as a core dump (durable quarantine) |
 | `fak dream --dir <dir>` | Offline cleanup pass over a session core image |
 | `fak debug --session <dir>` | Attach to a session core dump and demand-page the working set |

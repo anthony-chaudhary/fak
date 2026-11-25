@@ -91,7 +91,7 @@ python tools\subsystem_check_audit.py --profile smoke --out-json fak\experiments
 **Prerequisites:** **FAK 601**, **FAK 105**
 
 **You'll be able to:**
-- Run the four packet commands and state what each of the four witnesses proves
+- Run the three packet commands and state what each of the three witnesses proves
 - State what the packet's Non-Claims section deliberately does NOT prove (detector recall, production readiness, fleet-scale)
 - Put the smallest honest artifact in front of a skeptic
 
@@ -99,10 +99,10 @@ python tools\subsystem_check_audit.py --profile smoke --out-json fak\experiments
 
 **Lab:**
 ```bash
-go run ./cmd/fak policy --check examples/customer-support-readonly-policy.json && go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}" && go run ./cmd/fak agent --offline
+go run ./cmd/fak policy --check examples/customer-support-readonly-policy.json && go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 ```
 
-**Checkpoint:** Run the four packet commands and state, from the output, what each of the four witnesses proves and what the packet's Non-Claims section says it deliberately does NOT prove.
+**Checkpoint:** Run the three packet commands and state, from the output, what each of the three witnesses proves and what the packet's Non-Claims section says it deliberately does NOT prove.
 
 ### FAK 604 — The Fleet Benchmark Suite: Five Model-Agnostic Kernel Demos
 

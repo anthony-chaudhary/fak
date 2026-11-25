@@ -274,6 +274,21 @@ def test_live_rows_are_well_formed() -> None:
     assert wf["defects"] == [], f"malformed persona rows: {wf['defects']}"
 
 
+def test_live_free_tier_contract_is_real_local_inference() -> None:
+    """The consume score must not resurrect the retired preflight/demo first run."""
+    rows = {r["id"]: r for r in _live_payload()["_data"]["rows"]}
+    free = rows["free-tier-dev"]
+    affordances = {a["id"]: a for a in free["affordances"]}
+    assert "offline-first-run" not in affordances
+    first = affordances["local-model-first-run"]
+    assert first["tokens"] == ["fak up"] and first["severity"] == "hard"
+    assert affordances["platform-envelope"]["severity"] == "hard"
+    assert affordances["independent-evidence"]["severity"] == "hard"
+    decision = rows["decision-maker"]
+    identity = next(a for a in decision["affordances"] if a["id"] == "identity")
+    assert identity["tokens"] == ["model", "your own computer"]
+
+
 def test_live_tree_serves_every_persona_zero_debt() -> None:
     """THE sentinel: the real tree must fold to zero persona-debt with all top-10
     personas positioned. If this fails, a persona affordance regressed (a removed

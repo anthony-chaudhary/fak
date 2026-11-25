@@ -234,8 +234,7 @@ atmosphere clip. VO is the on-screen-truth layer.
 | 5–16 | The problem | `[A]` T2V, abstract: an agent firing tool calls at "production" | dimmed icons: shell, refund, delete | "We're giving AI agents real tools — shells, payments, prod. Prompt text is not a permission system." `ATMOSPHERE` |
 | 16–34 | **The boundary** | `[C]` animate `visuals/39-agent-kernel-card.svg` (I2V, subtle push-in) | `model proposes → fak policy boundary → admitted call → result quarantine → context` | "fak is an agent kernel — the model proposes, the kernel disposes." `CLAIM` |
 | 34–50 | **Denied destructive call** | `[C]` real `fak preflight` terminal capture | `refund_payment → POLICY_BLOCK`; `search_kb → allow` | "The support agent can search the docs. It cannot refund money. Policy-denied tools don't run." `CLAIM` |
-| 50–66 | **Poisoned-policy A/B** | `[C]` the offline A/B table (from `fak agent --offline`) | baseline reads the poison; protected arm quarantines it | "Same task, same poison. The baseline ingests it; the protected arm never sees it." `CLAIM` |
-| 66–75 | Close + repro | `[C]` title + command | `go run ./cmd/fak agent --offline` | "Permissions first. Filters second. Bring a trace — the verdict replays." `CLAIM` |
+| 66–75 | Close + repro | `[C]` title + command | `go run ./cmd/fak preflight --tool refund_payment --args "{}"` | "Permissions first. Filters second. Bring a trace — the verdict replays." `CLAIM` |
 
 **Generated shots: 2** (title sting + problem) — small, cheap, claim-free. Everything
 load-bearing is a real capture or a rendered diagram. Caption every claim shot with the
@@ -303,7 +302,7 @@ Tier-0 script using `comfy` local drafts; confirm ffmpeg concat + caption-burn +
 produces a 16:9 master and a 9:16 cut. Deliverable: a rough-cut "The agent kernel."
 
 **Phase B — Tier 0 polish:** swap the 2 atmosphere drafts for a hosted final pass
-(Wan/Veo), capture the real `fak preflight` / `fak agent --offline` output for the claim
+(Wan/Veo), capture the real `fak preflight` output for the claim
 shots, finalize captions + music. Deliverable: shippable Video #0 + thumbnail.
 
 **Phase C — Tier 1:** repeat the pipeline for P2/P3/P4, reusing the title system and the

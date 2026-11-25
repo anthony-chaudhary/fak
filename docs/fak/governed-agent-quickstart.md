@@ -1,6 +1,6 @@
 ---
 title: "Governed Agent in 10 Minutes: Zero to a Kernel-Governed Agent, Offline"
-description: "From a clean machine to a running, kernel-governed agent — offline, no key, no GPU. One command starts the gateway runtime with a default-deny floor, an audit journal, and a token cap; a POST runs a governed session; you watch a dangerous call get DENIED and read the tamper-evident audit tail."
+description: "Start a local gateway, test its tool policy and inspect the audit record."
 slug: governed-agent-quickstart
 keywords:
   - governed agent
@@ -13,38 +13,11 @@ keywords:
 date: 2026-07-23
 ---
 
-# Governed agent in 10 minutes (offline)
+# Check tool calls through a local gateway
 
-Getting *an* agent running is easy. Getting a **governed** one — an agent loop whose every
-tool call passes through a kernel that can deny it, on a durable audit record — is the part
-that usually takes a project. This page does it end to end **on a clean machine, offline,
-with no API key, no model download, and no GPU**, in under 10 minutes (the fast path is
-under 5).
-
-> **TL;DR.** Get the binary, then:
->
-> ```sh
-> fak agent --offline                                  # a full governed session, one command
-> ```
->
-> You watch the kernel deny a destructive call and quarantine a prompt injection while the
-> task still completes. The rest of this page does the same thing **server-side** —
-> `fak serve` with a default-deny floor + audit journal + token cap — and reads the DENY out
-> of the tamper-evident audit tail.
-
-**Audience:** you have never run `fak` and want to see a governed agent decide, not just
-read that it can. Every output block below is real, unedited terminal output from a clean
-build.
-
-- **Time:** ~2 min for the one-command proof; ~10 min total including the server-side path.
-- **Prereqs:** [Go 1.26+](https://go.dev/dl/) *or* a
-  [prebuilt binary](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md). Nothing
-  else — no key, no model, no GPU, no network after the install.
-- **Which runtime is this?** The gateway runtime and the agent application runtime, offline.
-  If those words are new, read [Two runtimes, one binary](../explainers/runtime-vs-client.md)
-  first — it names what `fak serve`, `fak serve --native`, and `fak manage` each are.
-
----
+Start a gateway with your tool policy, send a tool call, then inspect its verdict
+and audit record. To run a language model on your own computer, follow the
+[local model guide](../../GETTING-STARTED.md#local-model-setup).
 
 ## Step 1 — get the binary (~1–2 min)
 
@@ -70,49 +43,7 @@ fak version
 
 ---
 
-## Step 2 — a governed agent in one command (~1 min)
-
-The shortest path to a *complete governed session* needs no server. `fak agent --offline`
-drives fak's own agent loop against a deterministic mock planner (no key, no network),
-routing every tool call through the kernel:
-
-```sh
-fak agent --offline
-```
-
-**Real output** (abridged to the governance rows — the full table also prints token and
-turn economics):
-
-```
-== fak agent: turn-use vs now ==
-seam        : OFFLINE (deterministic mock planner)
-
-metric                        now(base)          fak
---------------------------   ----------   ----------
-in-syscall repairs                  n/a            1
-adjudicator denies                  n/a            1
-injection in context                YES           no
-destructive op executed             YES           no
-task completed (booked)             YES          YES
-
-HEADLINE
-  poisoned result blocked   : YES
-  destructive op prevented  : YES
-
-report written: agent-report.json
-```
-
-That is a governed agent reaching a witnessed terminal state (`task completed (booked)
-YES`) while the kernel **denied a destructive op** (`adjudicator denies 1`) and
-**quarantined a prompt injection** (`injection in context YES → no`) — offline. The
-per-session detail is in `agent-report.json`.
-
-This is enough to *see* governance. The next step is the shape you actually deploy: a
-**server** with a durable audit trail you can hand to an auditor.
-
----
-
-## Step 3 — start the gateway runtime: floor + audit + cap, offline (~1 min)
+## Step 2 — start the gateway runtime: floor + audit + cap, offline (~1 min)
 
 Dump the default capability floor (a safe default-deny policy — it already denies
 `shell_rm_rf` and `exfiltrate`), then start `fak serve` **with the audit journal on and a
@@ -155,7 +86,7 @@ the distinction.
 
 ---
 
-## Step 4 — run a governed session and watch a DENY (~1 min)
+## Step 3 — run a governed session and watch a DENY (~1 min)
 
 Send two adjudicated tool calls to the running gateway: one the floor **denies**, one it
 **allows**. **Real output:**
@@ -180,7 +111,7 @@ structure**, before any tool ran, with no model able to talk past it.
 
 ---
 
-## Step 5 — read the audit tail (~30 s)
+## Step 4 — read the audit tail (~30 s)
 
 Every verdict landed in the durable, **hash-chained** audit journal you enabled in Step 3.
 Read it. **Real output** (one JSON object per line; `prev_hash → hash` chains each record to

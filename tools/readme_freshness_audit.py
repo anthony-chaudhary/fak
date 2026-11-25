@@ -29,10 +29,10 @@ The checks split into two tiers.
   headline_authority each bolded headline number is an authority row   WARN if not mirrored
   freshness_stamp    the <!-- readme-verified: DATE … --> marker is     WARN if absent/older
                        present and not older than --max-age-days (14)        than the window
-  showcase_sync      the OTHER front door (docs/showcase.html, the repo's  FAIL on any
-                       configured homepage) is linked from the README and       shortfall
-                       still agrees with it on installer, first run, the
-                       benchmark authority, and every version it quotes
+  hardware_front_page README routes to the benchmark index; its manifest-backed
+                       hardware rows and receipt links agree                    FAIL on drift
+  showcase_sync      the configured homepage still traces benchmark authority
+                       and every version it quotes                              FAIL on drift
   jargon_density     count first-screen expert terms with no plain gloss ADVISORY count only
 
 **Substance** — does the page *do its job* for the whole audience? Each is a set
@@ -41,25 +41,15 @@ composite ``score``. A fresh-but-thin page passes every hygiene check yet still
 fails the reader — so these have teeth through the number even when they don't
 hard-gate ``ok``:
 
-  guard_prominence   `fak guard` (the least-friction onramp) leads, wraps a real
-                       agent, carries a one-line value + a no-key note            FAIL only if absent
-  lcd_onramp         the lowest-common-denominator reader (no key, won't read) gets
-                       a one-glance value, a copy-paste bare-binary command, and the
-                       expected output, all above the fold                        FAIL only if absent
-  speed_claim        a front-screen SPEED number (tok/s, ns, latency, ×), honestly
-                       framed (traced to authority or marked relayed) and bounded  WARN
-  hero_above_fold    at least one concrete headline RESULT on the first screen — a
-                       skeptic/perf/casual reader sees a number before scrolling    WARN
-  audience_footholds the first screen gives each reader (skeptic / security / perf /
-                       casual) a foothold + an explicit who-is-this-for router      WARN
+  lcd_onramp         the reader gets the real `fak up` path, published platform
+                       envelope, and exact setup links; offline demos are refused FAIL
   front_page_focus   the page stays SMALL — a line budget, a section-count budget, a
                        single-lead rule (pitch stated once, not thrice), and detail
                        linked OUT to an overflow sink                               WARN
 
-The substance checks split into two forces that must both live in the tool. Five
-reward ADDING an affordance; a page optimized to them alone only grows. The sixth,
-``front_page_focus``, is the counterweight — it rewards concision, so "halve the
-front page, then let it regrow every pass" stops being the stable equilibrium.
+The substance checks balance a complete real first run with front-page concision.
+Hardware rows, model inventories, shell-specific installers, and advanced guard
+recipes stay behind linked detail pages instead of becoming README requirements.
 
 FAIL is a required edit; WARN/ADVISORY are judgment calls. ``ok`` is False iff a
 *hygiene* FAIL fires (or a substance affordance is wholly absent, or the audit
@@ -80,7 +70,7 @@ here the README itself is the gamed surface, so a keyword with no real affordanc
 behind it still scores. The scorecard anti-gaming law (``.claude/skills/scorecard/
 SKILL.md``) requires the score be cross-checked against something the author cannot
 forge by editing prose. We defend the single highest-leverage affordance that way:
-``lcd_onramp``'s bare-binary command — the line the no-setup reader actually
+``lcd_onramp``'s bare-binary command — the line the new reader actually
 pastes — only scores when the ``fak <verb>`` it names RESOLVES to a verb the
 binary really dispatches, parsed live from ``cmd/fak/main.go`` (never a hand-list).
 A page that stuffs ``fak <made-up-verb>`` to look runnable does not earn the point;
@@ -88,13 +78,11 @@ the reader's first paste would have died on ``unknown verb``. When
 ``cmd/fak/main.go`` is unreadable (the tool run outside the repo) the check abstains
 to presence-only — a missing source of truth is not a README defect. The remaining
 affordances stay text-only by design; this is the beachhead, not the whole wall.
-``showcase_sync`` reuses that same dispatch set for the same reason: two front doors
-agreeing on a command only counts when the command is one the binary really has.
 
 The three operator front-page laws this enforces:
   1. SOTA-vs-us, never naive   -> naive_baseline FAIL
   2. 6th-grade / Feynman voice  -> jargon_density advisory
-  3. wide-audience appeal       -> audience_footholds / lcd_onramp / hero_above_fold
+  3. real-value first run       -> lcd_onramp / hardware_front_page
 
 Run from the repo ROOT (``python tools/readme_freshness_audit.py``); the I/O is
 pure-filesystem, no ``dos`` subprocess. The companion process is the
@@ -120,6 +108,7 @@ VERSION_REL = "VERSION"
 AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
 QWEN_INDEX_REL = "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md"
 QWEN_LATEST_REL = "docs/benchmarks/QWEN38-27B-LATEST.md"
+BENCHMARK_INDEX_REL = "docs/benchmarks/README.md"
 HARDWARE_LATEST_REL = "docs/benchmarks/hardware-latest.json"
 HARDWARE_LATEST_SCHEMA = "fak-hardware-latest/1"
 HARDWARE_PLATFORMS = {"Mac", "AMD", "NVIDIA"}
@@ -215,8 +204,7 @@ WEIGHTS: dict[str, float] = {
 # defect COUNT (unchanged); the score is 100 minus the unbounded penalty plus the
 # unbounded leanness credit below.
 SUBSTANCE_CHECKS = {
-    "guard_prominence", "lcd_onramp", "audience_footholds",
-    "front_page_focus", "speed_claim", "hero_above_fold",
+    "lcd_onramp", "front_page_focus",
 }
 
 # Score weights for the TWO-SIDED UNBOUNDED index: score = round(100 - penalty
@@ -498,10 +486,27 @@ def check_freshness_stamp(readme: str, *, today: _dt.date,
 
 
 def check_hardware_front_page(readme: str, hardware_latest: str, root: Path, *,
-                              today: _dt.date, max_age_days: int) -> dict[str, Any]:
-    """Bind the three README hardware rows to the latest-receipt authority."""
-    update_hint = f"update {HARDWARE_LATEST_REL} and {README_REL}"
+                              today: _dt.date, max_age_days: int,
+                              benchmark_index: str | None = None) -> dict[str, Any]:
+    """Bind the linked benchmark index's hardware rows to their authority.
+
+    Keep the public check name stable for control-pane consumers, but do not make
+    the repository front page duplicate the hardware ledger.  ``README.md`` only
+    owns a direct route to the benchmark index; that detail page owns the dated
+    table and rows mirrored by ``hardware-latest.json``.
+    """
+    del today, max_age_days  # Historical latest rows remain valid until replaced.
+    update_hint = f"update {HARDWARE_LATEST_REL} and {BENCHMARK_INDEX_REL}"
     failures: list[str] = []
+
+    readme_targets = {m.group("target").strip() for m in _LINK_RE.finditer(readme)}
+    if BENCHMARK_INDEX_REL not in readme_targets:
+        failures.append(f"README must link directly to {BENCHMARK_INDEX_REL}")
+    if benchmark_index is None:
+        benchmark_index = _safe_read(root / BENCHMARK_INDEX_REL)
+    if not benchmark_index:
+        failures.append(f"missing benchmark detail page: {BENCHMARK_INDEX_REL}")
+        benchmark_index = ""
 
     try:
         manifest = json.loads(hardware_latest)
@@ -525,9 +530,9 @@ def check_hardware_front_page(readme: str, hardware_latest: str, root: Path, *,
 
     match = re.search(
         r"^## Latest hardware results — (\d{4}-\d{2}-\d{2})\s*$"
-        r"(.*?)(?=^##\s|\Z)", readme, flags=re.MULTILINE | re.DOTALL)
+        r"(.*?)(?=^##\s|\Z)", benchmark_index, flags=re.MULTILINE | re.DOTALL)
     if match is None:
-        failures.append("missing dated 'Latest hardware results' section")
+        failures.append("benchmark index is missing dated 'Latest hardware results' section")
         heading_date = ""
         body = ""
     else:
@@ -536,18 +541,11 @@ def check_hardware_front_page(readme: str, hardware_latest: str, root: Path, *,
 
     as_of = manifest.get("as_of")
     try:
-        stamped = _dt.date.fromisoformat(as_of)
+        _dt.date.fromisoformat(as_of)
     except (TypeError, ValueError):
         failures.append("manifest as_of must be an ISO date")
-        stamped = None
     if heading_date and heading_date != as_of:
         failures.append(f"heading date differs from manifest as_of {as_of!r}")
-    if stamped is not None:
-        age = (today - stamped).days
-        if age < 0 or age > max_age_days:
-            failures.append("fresh_date")
-    else:
-        age = None
 
     rows: dict[str, str] = {}
     extra_rows: list[str] = []
@@ -578,7 +576,7 @@ def check_hardware_front_page(readme: str, hardware_latest: str, root: Path, *,
         if not isinstance(row, str) or not row.startswith(f"| {platform} |"):
             failures.append(f"{platform}: manifest row is missing or malformed")
         elif rows.get(platform) != row:
-            failures.append(f"{platform}: README row differs from latest manifest row")
+            failures.append(f"{platform}: benchmark index row differs from latest manifest row")
         if not isinstance(observed, str):
             failures.append(f"{platform}: observed must be an ISO date")
         else:
@@ -599,22 +597,26 @@ def check_hardware_front_page(readme: str, hardware_latest: str, root: Path, *,
             else:
                 if not detail_path.is_file():
                     failures.append(f"{platform}: indexed detail path does not exist: {detail}")
-            if isinstance(row, str) and detail not in row:
-                failures.append(f"{platform}: row does not link its indexed detail path")
+            if isinstance(row, str):
+                row_targets = [m.group("target").strip().split("#", 1)[0]
+                               for m in _LINK_RE.finditer(row)]
+                row_paths = [(root / "docs" / "benchmarks" / target).resolve()
+                             for target in row_targets if target]
+                if detail_path not in row_paths:
+                    failures.append(
+                        f"{platform}: row link does not resolve to indexed detail path {detail}")
 
     if not re.search(r"newest\s+committed performance receipt", body, re.IGNORECASE):
         failures.append("visible latest definition")
-    if "docs/benchmarks/README.md" not in body:
-        failures.append("benchmark/history index")
     if "qwen38-frontdoor" in readme.lower():
         failures.append("README must not contain generated qwen38-frontdoor markers")
 
     if failures:
         return {"check": "hardware_front_page", "status": "FAIL",
-                "detail": "hardware front page drift: " + "; ".join(failures) + f"; {update_hint}",
+                "detail": "hardware detail drift: " + "; ".join(failures) + f"; {update_hint}",
                 "items": failures + extra_rows + [update_hint]}
     return {"check": "hardware_front_page", "status": "OK",
-            "detail": f"manifest-backed hardware view dated {as_of} ({age}d old) has only Mac, AMD, NVIDIA",
+            "detail": f"README routes to a manifest-backed benchmark view dated {as_of} with only Mac, AMD, NVIDIA",
             "items": []}
 
 
@@ -641,7 +643,7 @@ def check_showcase_sync(readme: str, showcase: str | None, *,
                         version: str = "",
                         dataset_versions: set[str] | None = None,
                         dispatch: set[str] | None = None) -> dict[str, Any]:
-    """The OTHER front door cannot drift away from this one, or go unlinked.
+    """The OTHER front door cannot drift from shared evidence authority.
 
     GitHub's repo-level homepage setting points at the Pages copy of
     ``docs/showcase.html``, so a meaningful share of visitors meet *that* page
@@ -656,15 +658,6 @@ def check_showcase_sync(readme: str, showcase: str | None, *,
     no prose grading — and each names a way the two doors could tell a visitor
     different things:
 
-      linked_from_readme  the README names the showcase, so a maintainer editing
-                            the front page can see the other front door exists
-      install_matches     every ``curl … | sh`` installer the showcase publishes is
-                            one the README publishes too (rename install.sh and the
-                            homepage would keep pointing at the old script)
-      first_run_matches   a line-leading ``fak <verb>`` on the showcase is BOTH a
-                            verb the binary really dispatches AND one the README
-                            teaches — the same anti-gaming cross-check ``lcd_onramp``
-                            applies to the README, now applied to the homepage
       authority_linked    the showcase names ``BENCHMARK-AUTHORITY.md``, so both
                             doors answer to the one source ``headline_authority``
                             already traces the README's numbers against
@@ -694,16 +687,6 @@ def check_showcase_sync(readme: str, showcase: str | None, *,
     text = html_text(showcase)
     cur = _parse_version(version)
 
-    readme_installs = set(_INSTALL_CMD_RE.findall(readme))
-    page_installs = set(_INSTALL_CMD_RE.findall(text))
-
-    readme_verbs = set(_BARE_FAK_CMD_RE.findall(readme))
-    page_verbs = set(_BARE_FAK_CMD_RE.findall(text))
-    shared_verbs = page_verbs & readme_verbs
-    # With a known dispatch set a shared verb must also be REAL; without one (the
-    # source unreadable) abstain to "the two pages agree on some command".
-    real_shared = (shared_verbs & dispatch) if dispatch else shared_verbs
-
     known_versions = set(dataset_versions or ())
     if cur is not None:
         known_versions.add("%d.%d.%d" % cur)
@@ -711,17 +694,12 @@ def check_showcase_sync(readme: str, showcase: str | None, *,
     untraced_versions = sorted(page_versions - known_versions)
 
     subs = {
-        "linked_from_readme": (SHOWCASE_REL in readme)
-        or (Path(SHOWCASE_REL).name in readme),
-        "install_matches": bool(page_installs) and page_installs <= readme_installs,
-        "first_run_matches": bool(real_shared),
         "authority_linked": bool(_AUTHORITY_LINK_RE.search(showcase)),
         "version_traced": not untraced_versions,
     }
     out = _grade_subs(
         "showcase_sync", subs, fail_if_zero=True, warn_below=1.0,
-        label=(f"the configured homepage ({SHOWCASE_REL}) is linked from the README "
-               "and agrees with it"))
+        label=(f"the configured homepage ({SHOWCASE_REL}) agrees with shared evidence"))
     if out["items"]:
         # Hygiene tier: a partially-synced front door is a required edit, not a
         # judgment call, so any shortfall is a FAIL (not the _grade_subs WARN).
@@ -730,9 +708,6 @@ def check_showcase_sync(readme: str, showcase: str | None, *,
         if untraced_versions:
             bits.append("version(s) no dataset or VERSION backs: "
                         + ", ".join(untraced_versions))
-        if page_installs - readme_installs:
-            bits.append("installer(s) the README does not publish: "
-                        + ", ".join(sorted(page_installs - readme_installs)))
         if bits:
             out["detail"] += " — " + "; ".join(bits)
     return out
@@ -773,49 +748,37 @@ def check_jargon_density(readme: str, *, first_screen_lines: int) -> dict[str, A
 # reports the MISSING ones in `items` as the /refresh-readme work-list.
 # ---------------------------------------------------------------------------
 
-def check_guard_prominence(readme: str, *, first_screen_lines: int) -> dict[str, Any]:
-    """The least-friction onramp — `fak guard` — leads the front page.
-
-    `fak guard -- <agent>` is the lowest-effort way to adopt fak (wrap the agent
-    you already run; keep your key). A front page that buries it under the serve
-    / route paths makes adoption look harder than it is. Affordances:
-      present       `fak guard` appears above the fold
-      wraps_agent   shown wrapping a real CLI (`-- claude` / codex / opencode / …)
-      value_phrase  a one-line "why" sits next to it (drop-in / wrap the agent …)
-      no_key_note   the no-key / forwards-your-credential promise is nearby
-      floor_purpose its security purpose (floor / verdict / deny) is nearby
-      leads_onramp  it appears BEFORE the first `fak serve` (it is the lead path)
-    """
-    head = readme.splitlines()[:first_screen_lines]
-    headtext = "\n".join(head)
-    guard_idxs = _line_idxs(head, "fak guard")
-    serve_idxs = _line_idxs(head, "fak serve")
-    subs = {
-        "present": bool(guard_idxs),
-        "wraps_agent": bool(re.search(
-            r"fak guard[^\n]*--\s*(claude|codex|opencode|aider|cursor|gemini)",
-            headtext, re.IGNORECASE)),
-        "value_phrase": any(_near(head, i, 3, [
-            "drop-in", "wrap the agent", "agent you already", "one command",
-            "no rewrite", "in front of",
-        ]) for i in guard_idxs),
-        "no_key_note": any(_near(head, i, 6, [
-            "no api key", "no key", "subscription", "forwards", "credential",
-        ]) for i in guard_idxs),
-        "floor_purpose": any(_near(head, i, 6, [
-            "floor", "secure", "verdict", "deny", "decision", "policy",
-        ]) for i in guard_idxs),
-        "leads_onramp": bool(guard_idxs) and (not serve_idxs or guard_idxs[0] < serve_idxs[0]),
-    }
-    return _grade_subs(
-        "guard_prominence", subs, fail_if_zero=True,
-        label="`fak guard` (the least-friction onramp) leads the front page")
+def check_guard_prominence(readme: str, *, first_screen_lines: int,
+                           root: Path | None = None) -> dict[str, Any]:
+    """Retain the public key while routing guard setup to its real destination."""
+    del first_screen_lines
+    targets = [m.group("target").strip().split("#", 1)[0]
+               for m in _LINK_RE.finditer(readme)]
+    relevant = False
+    for target in targets:
+        if target != "docs/integrations/README.md" and "guard" not in target.lower():
+            continue
+        if root is None:
+            relevant = True
+            break
+        path = root / target
+        if path.is_dir():
+            path /= "README.md"
+        body = _safe_read(path).lower()
+        if "guard" in body and "capability floor" in body:
+            relevant = True
+            break
+    return {"check": "guard_prominence", "status": "OK" if relevant else "WARN",
+            "score": 1.0 if relevant else 0.0,
+            "detail": ("advanced guard setup routes to the integrations guide"
+                       if relevant else "link the integrations/guard guide; do not add a guard command"),
+            "items": [] if relevant else ["guard_guide"]}
 
 
 def check_lcd_onramp(readme: str, *, first_screen_lines: int,
                      one_glance_lines: int,
                      dispatch: set[str] | None = None) -> dict[str, Any]:
-    """The lowest-common-denominator reader gets a no-setup first command.
+    """A cold reader gets the real local-model first run and its envelope.
 
     The LCD reader landed from a link, will not read prose, has no key, and
     wants one line that visibly does something. Affordances:
@@ -828,8 +791,11 @@ def check_lcd_onramp(readme: str, *, first_screen_lines: int,
                           ``dispatch`` is the real verb set; when it is None/empty
                           (source unreadable) the check abstains to presence-only.
       expected_output   the expected result shown inline (`# -> DENY`, →, …)
-      no_setup_promise  "no key / no model / no GPU / no clone" stated above the fold
-      install_reachable how to GET the binary (curl|go install|Install link) is nearby
+      install_reachable the platform-aware install guide is linked
+      setup_reachable   the fuller getting-started route is linked
+      platform_envelope the currently published Apple Silicon start envelope is named
+      real_first_run    `fak up` is the demonstrated command
+      no_offline_demo   the tombstoned offline agent demo is absent
     """
     lines = readme.splitlines()
     head = lines[:first_screen_lines]
@@ -843,7 +809,9 @@ def check_lcd_onramp(readme: str, *, first_screen_lines: int,
         # line" marker within the first few lines (above any long paragraph).
         "one_glance_value": ("one line" in glance.lower())
         or bool(re.search(r"^\s*>\s*\*\*", glance, re.MULTILINE))
-        or bool(re.search(r"^\s*\*\*[^*]+\*\*\s*$", glance, re.MULTILINE)),
+        or bool(re.search(r"^\s*\*\*[^*]+\*\*\s*$", glance, re.MULTILINE))
+        or bool(re.search(r"^#\s+fak\s*$[\s\S]*?\n\s*\n\S.+[.!]\s*$",
+                          glance, re.MULTILINE)),
         "fenced_cmd": "```" in headtext,
         # Anti-gaming cross-check: a bare command scores only if its verb is real.
         # With a known dispatch set, a stuffed `fak <made-up-verb>` does not score;
@@ -851,16 +819,29 @@ def check_lcd_onramp(readme: str, *, first_screen_lines: int,
         "bare_binary_cmd": (any(v in dispatch for v in bare_verbs)
                             if dispatch else bool(bare_verbs)),
         "expected_output": bool(re.search(
-            r"#\s*->|#\s*=>|→|->\s*(ALLOW|DENY|TRANSFORM|QUARANTINE)", headtext)),
-        "no_setup_promise": any(k in headtext.lower() for k in [
-            "no key", "no api key", "no model", "no gpu", "no clone",
-        ]),
-        "install_reachable": bool(re.search(
-            r"curl[^\n]*install|go install|install\.sh|\[install\]", headtext, re.IGNORECASE)),
+            r"#\s*->|#\s*=>|→|\[READY\]|\byou>|task completed|http://127\.0\.0\.1",
+            headtext, re.IGNORECASE)),
+        "install_reachable": any(
+            m.group("target").strip() == "INSTALL.md#local-model-setup"
+            for m in _LINK_RE.finditer(readme)),
+        "setup_reachable": any(
+            m.group("target").strip() == "GETTING-STARTED.md#local-model-setup"
+            for m in _LINK_RE.finditer(readme)),
+        "platform_envelope": bool(re.search(
+            r"Apple\s+Silicon|supported\s+Mac", headtext, re.IGNORECASE)),
+        "real_first_run": bool(re.search(
+            r"^\s*fak\s+up(?:\s|$)", headtext, re.MULTILINE)),
+        "no_offline_demo": not bool(re.search(
+            r"fak\s+agent\s+--offline|agentdemo", readme, re.IGNORECASE)),
     }
-    return _grade_subs(
+    out = _grade_subs(
         "lcd_onramp", subs, fail_if_zero=True,
-        label="the lowest-common-denominator reader gets a no-setup, copy-paste first command")
+        label="the reader gets a supported local-model setup and real `fak up` first run")
+    required = ("install_reachable", "setup_reachable", "platform_envelope",
+                "real_first_run", "no_offline_demo")
+    if any(not subs[name] for name in required):
+        out["status"] = "FAIL"
+    return out
 
 
 def check_speed_claim(readme: str, authority: str, *,
@@ -979,6 +960,18 @@ def check_audience_footholds(readme: str, *, first_screen_lines: int) -> dict[st
         label="the first screen gives each reader (skeptic / security / perf / casual) a foothold")
 
 
+def check_detail_route(readme: str, check: str, targets: tuple[str, ...],
+                       label: str) -> dict[str, Any]:
+    """Keep legacy public result keys while rewarding linked depth, not README growth."""
+    linked = {m.group("target").strip().split("#", 1)[0]
+              for m in _LINK_RE.finditer(readme)}
+    missing = [target for target in targets if target not in linked]
+    return {"check": check, "status": "OK" if not missing else "WARN",
+            "score": 1.0 if not missing else 0.0,
+            "detail": label if not missing else "missing linked detail: " + ", ".join(missing),
+            "items": missing}
+
+
 def check_front_page_focus(readme: str, *, line_budget: int,
                            section_budget: int, max_lead: int) -> dict[str, Any]:
     """The size law, made checkable — the counterweight to the ADD-only checks.
@@ -1016,7 +1009,8 @@ def check_front_page_focus(readme: str, *, line_budget: int,
     sections_over = max(0, n_sections - section_budget)
     lead_over = max(0, lead_hits - max_lead)
     overflow_linked = bool(re.search(
-        r"README-legacy|overflow|going deeper", readme, re.IGNORECASE))
+        r"README-legacy|overflow|going deeper|docs/index\.md|"
+        r"docs/(?:benchmarks|integrations)/README\.md", readme, re.IGNORECASE))
     subs = {
         "within_line_budget": lines_over == 0,
         "sections_bounded": sections_over == 0,
@@ -1357,7 +1351,7 @@ def build_payload(*, workspace: str, checks: list[dict[str, Any]],
     else:
         ok, verdict, finding = True, "OK", "readme_fresh"
         reason = (f"score {score} ({grade}): front page is correct, complete, AND lean — "
-                  "links resolve, pins current, numbers traced, SOTA-led, guard/speed/hero above the fold")
+                  "links resolve, pins current, first run is real, and advanced detail is routed out")
         next_action = "no README action needed; re-run after the next front-page or VERSION change"
 
     return {
@@ -1495,12 +1489,17 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
                             dataset_versions=dataset_versions, dispatch=dispatch),
         check_jargon_density(readme, first_screen_lines=FIRST_SCREEN_LINES),
         # substance — does the page do its job for the whole audience?
-        check_guard_prominence(readme, first_screen_lines=FIRST_SCREEN_LINES),
+        check_guard_prominence(readme, first_screen_lines=FIRST_SCREEN_LINES, root=root),
         check_lcd_onramp(readme, first_screen_lines=FIRST_SCREEN_LINES,
                          one_glance_lines=ONE_GLANCE_LINES, dispatch=dispatch),
-        check_speed_claim(readme, authority, first_screen_lines=FIRST_SCREEN_LINES),
-        check_hero_above_fold(readme, authority, first_screen_lines=FIRST_SCREEN_LINES),
-        check_audience_footholds(readme, first_screen_lines=FIRST_SCREEN_LINES),
+        check_detail_route(readme, "speed_claim", (BENCHMARK_INDEX_REL,),
+                           "performance evidence stays in the linked benchmark index"),
+        check_detail_route(readme, "hero_above_fold", (BENCHMARK_INDEX_REL,),
+                           "headline evidence stays in the linked benchmark index"),
+        check_detail_route(readme, "audience_footholds",
+                           ("GETTING-STARTED.md", "docs/integrations/README.md",
+                            BENCHMARK_INDEX_REL),
+                           "adopters, integrators, and evidence readers have linked routes"),
         check_front_page_focus(readme, line_budget=FRONT_PAGE_LINE_BUDGET,
                                section_budget=FRONT_PAGE_SECTION_BUDGET,
                                max_lead=MAX_LEAD_RESTATEMENTS),

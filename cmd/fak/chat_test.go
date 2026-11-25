@@ -143,6 +143,22 @@ func TestChatTwoTurnsWithDeniedDestructive(t *testing.T) {
 	}
 }
 
+func TestChatRequiresRealEndpoint(t *testing.T) {
+	fs, _ := newChatFlagSet()
+	if fs.Lookup("offline") != nil {
+		t.Fatal("retired --offline flag is still public")
+	}
+	got := chatNoEndpointError().Error()
+	for _, want := range []string{"fak up --model 3B", "--base-url URL", "INSTALL.md#local-model-setup"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("no-endpoint remedy %q lacks %q", got, want)
+		}
+	}
+	if strings.Contains(strings.ToLower(got), "mock") || strings.Contains(got, "--offline") {
+		t.Fatalf("no-endpoint remedy revives the retired demo: %q", got)
+	}
+}
+
 // TestRunChatTurnMetrics drives the two scripted turns through runChat by reusing
 // the same end-to-end stream, then re-runs RunArm directly on the denied turn so
 // the value-not-crash assertions read off ArmMetrics precisely: a denied

@@ -65,14 +65,12 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest   # -> $(go env GOBIN
 
 ## Der 60-Sekunden-Beweis (kein Key, kein Modell, keine GPU)
 
-Das ist Tier 0: Die Capability-Floor verweigert einen Call strukturell (fail-closed), und die
-Prompt-Injection wird geblockt, während der Task trotzdem fertig wird.
+Diese Richtlinie erlaubt `search_kb` und verweigert `refund_payment`.
 
 ```bash
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
 Du schreibst deinen Agenten nicht um — du richtest eine Base-URL auf `fak serve`, oder du

@@ -61,10 +61,7 @@ var verbTiers = map[string]VerbTier{
 	// new evaluator is told to run, so it belongs in the visible front door rather
 	// than under `fak dev` (#5464). It is a REAL agent: it runs a real model and
 	// fails loud when none is configured — never the offline demo.
-	"agent": TierFrontdoor,
-	// `agentdemo` is the offline demo MOVED off `fak agent` (lower priority): the
-	// scripted mock turn-count A/B, no network/key/model. It must stay under `fak dev`.
-	"agentdemo":    TierDev,
+	"agent":        TierFrontdoor,
 	"capabilities": TierFrontdoor,
 	"attest":       TierFrontdoor,
 	"audit":        TierFrontdoor,
@@ -91,7 +88,10 @@ var verbTiers = map[string]VerbTier{
 	"signal":       TierFrontdoor,
 	"study":        TierFrontdoor,
 	"top":          TierFrontdoor,
-	"version":      TierFrontdoor,
+	// `up` is the released install-to-value entry. It owns real model planning
+	// and serving; an offline demo cannot substitute for this product path.
+	"up":      TierFrontdoor,
+	"version": TierFrontdoor,
 
 	// ---- hidden: internal re-exec/hook seams, never listed ----
 	"ablate-arm":         TierHidden,
@@ -511,7 +511,6 @@ var verbTiers = map[string]VerbTier{
 	"runtime-capabilities":          TierDev,
 	"runtime-mem":                   TierDev,
 	"shellprov":                     TierDev,
-	"up":                            TierDev,
 	"watchdog-audit-health":         TierDev,
 	"watchdog-audit-run":            TierDev,
 	"agentx":                        TierDev,

@@ -38,15 +38,9 @@ rápido**, sem reescrita.
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-O piso de capacidades (default-deny) é verificado **dentro do kernel, no mesmo caminho de
-chamada** — fail-closed. Uma ação que nunca esteve na lista de permissões não roda, não
-importa o que convençam o modelo a pedir. E os *resultados* de ferramentas suspeitos são
-mantidos em quarentena, **fora do contexto do modelo** — por estrutura, não por um detector.
-Em testes ao vivo, a injeção de prompt atingiu a linha de base desprotegida 5/5; o fak a
-isolou 5/5.
+Esta política permite `search_kb` e bloqueia `refund_payment`.
 
 ## O que é o fak
 

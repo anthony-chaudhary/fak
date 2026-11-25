@@ -136,7 +136,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "Can I try fak without a model, API key, or GPU?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes. With just Go 1.26+: refund_payment returns DENY (POLICY_BLOCK); search_kb returns ALLOW; and agent --offline runs the same task twice (tools wired directly vs. behind fak) and prints the before/after. Full walkthrough: repro packet."
+        "text": "Yes. With just Go 1.26+: refund_payment returns DENY (POLICY_BLOCK); search_kb returns ALLOW. Full walkthrough: repro packet."
       }
     },
     {
@@ -422,12 +422,9 @@ Yes. With just [Go 1.26+](https://go.dev/dl/):
 
 ```bash
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
-go run ./cmd/fak agent --offline
 ```
 
-`refund_payment` returns `DENY (POLICY_BLOCK)`; `search_kb` returns `ALLOW`; and
-`agent --offline` runs the same task twice (tools wired directly vs. behind `fak`) and
-prints the before/after. Full walkthrough: [repro packet](repro-packet.md).
+The policy denies `refund_payment`. For the matching allowed search, see the [reproduction steps](repro-packet.md).
 
 ## What language and license is fak?
 

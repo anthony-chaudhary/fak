@@ -2,6 +2,7 @@ package validate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -56,17 +57,31 @@ func runValidateSmokePhase(ctx context.Context, stdout io.Writer, res *validateR
 		return 0, false
 	}
 
-	// 4. Agent offline check: verifies full mock agent turn execution and report output.
-	tmpReport := filepath.Join(dir, "agent-smoke-report.json")
-	defer os.Remove(tmpReport)
-	tmpReportArg := filepath.ToSlash(tmpReport)
-	if out, ok := runValidateSmokeExec(ctx, dir, wslWorkspace, smokeBin, []string{"agent", "--offline", "--out", tmpReportArg}); !ok || !strings.Contains(out, "booked") {
-		recordValidateFailure(res, phase, "smoke", out, errors.New("smoke check 'fak agent --offline' failed"))
+	// 4. Product-entry check: exercise the real fak up planner that the released
+	// binary uses before model acquisition. Mock/offline demo output is not an
+	// onboarding witness; the release qualification owns the weight-backed first
+	// response on each native OS (#14508).
+	if out, ok := runValidateSmokeExec(ctx, dir, wslWorkspace, smokeBin, validateSmokeUpArgs()); !ok || !validateSmokeUpOutput(out) {
+		recordValidateFailure(res, phase, "smoke", out, errors.New("smoke check 'fak up --dry-run' failed"))
 		return 0, false
 	}
 
 	phase.finish(nil)
 	return 0, false
+}
+
+func validateSmokeUpArgs() []string {
+	return []string{"up", "--model", "3B", "--dry-run", "--json", "--memory-gib", "32"}
+}
+
+func validateSmokeUpOutput(out string) bool {
+	var plan struct {
+		Schema string `json:"schema"`
+		Tier   struct {
+			Name string `json:"name"`
+		} `json:"tier"`
+	}
+	return json.Unmarshal([]byte(out), &plan) == nil && plan.Schema == "fak-macfit-turnkey/1" && plan.Tier.Name == "3B"
 }
 
 func runValidateSmokeExec(ctx context.Context, dir string, wslWorkspace bool, bin string, args []string) (string, bool) {

@@ -81,7 +81,6 @@ var overviewGroups = []struct {
 		{"model", "resolve / cache an hf:// model ('fak pull' / 'fak ls' aliases)"},
 		{"self-update", "converge a built-from-source fak binary on origin/main"},
 		{"help", "this overview; 'help <verb>' for depth, 'help --all' for the catalog"},
-		{"agentdemo", "the offline demo moved off 'fak agent': the scripted mock A/B, no network"},
 	}},
 }
 

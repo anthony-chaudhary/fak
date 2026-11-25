@@ -95,10 +95,10 @@ func TestAgentRawMode(t *testing.T) {
 		t.Fatalf("raw receipt leaked fak arm: %s", data)
 	}
 
-	// 4. Verify CLI execution with --raw flag and offline mode writing to file
+	// 4. Verify CLI execution with --raw and an injected test planner writing to file.
 	out := filepath.Join(t.TempDir(), "raw.json")
 	stdout, stderr := captureAgentStdio(t, func() {
-		cmdAgent([]string{"--raw", "--offline", "--out", out})
+		cmdAgentWithMock([]string{"--raw", "--out", out})
 	})
 	if !strings.Contains(stdout, "Booked flight UA123") {
 		t.Fatalf("stdout did not carry the final answer:\n%s", stdout)
@@ -148,7 +148,7 @@ func TestAgentRawMode(t *testing.T) {
 
 	// 5. Verify CLI execution with --mode raw
 	outMode := filepath.Join(t.TempDir(), "raw_mode.json")
-	cmdAgent([]string{"--mode", "raw", "--offline", "--out", outMode})
+	cmdAgentWithMock([]string{"--mode", "raw", "--out", outMode})
 	bodyMode, err := os.ReadFile(outMode)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", outMode, err)
@@ -163,7 +163,7 @@ func TestAgentRawMode(t *testing.T) {
 
 	// 6. Verify CLI execution with --out - (stdout receipt)
 	stdoutDash, _ := captureAgentStdio(t, func() {
-		cmdAgent([]string{"--raw", "--offline", "--out", "-"})
+		cmdAgentWithMock([]string{"--raw", "--out", "-"})
 	})
 	var dashReceipt rawAgentReceipt
 	if err := json.Unmarshal([]byte(stdoutDash), &dashReceipt); err != nil {
@@ -199,31 +199,31 @@ func TestAgentPostureFlagAndBaseURLResolution(t *testing.T) {
 	})
 
 	outPath := filepath.Join(t.TempDir(), "report.json")
-	cmdAgent([]string{"--offline", "--posture", "fail_closed", "--out", outPath})
+	cmdAgentWithMock([]string{"--posture", "fail_closed", "--out", outPath})
 	if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
 		t.Fatalf("agent.ConfiguredPosture() = %v, want PostureFailClosed", got)
 	}
 
-	cmdAgent([]string{"--offline", "--posture", "admit_and_log", "--out", outPath})
+	cmdAgentWithMock([]string{"--posture", "admit_and_log", "--out", outPath})
 	if got := agent.ConfiguredPosture(); got != adjudicator.PostureAdmitAndLog {
 		t.Fatalf("agent.ConfiguredPosture() = %v, want PostureAdmitAndLog", got)
 	}
 
-	cmdAgent([]string{"--offline", "--posture", "default_open", "--out", outPath})
+	cmdAgentWithMock([]string{"--posture", "default_open", "--out", outPath})
 	if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
 		t.Fatalf("agent.ConfiguredPosture() = %v, want PostureDefaultOpen", got)
 	}
 
 	// 4. Test cmdAgent respects FAK_AGENT_POSTURE and FAK_GUARD_POSTURE env vars when flag not explicit
 	t.Setenv("FAK_AGENT_POSTURE", "fail_closed")
-	cmdAgent([]string{"--offline", "--out", outPath})
+	cmdAgentWithMock([]string{"--out", outPath})
 	if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
 		t.Fatalf("agent.ConfiguredPosture() with FAK_AGENT_POSTURE=fail_closed: got %v, want PostureFailClosed", got)
 	}
 
 	t.Setenv("FAK_AGENT_POSTURE", "")
 	t.Setenv("FAK_GUARD_POSTURE", "strict")
-	cmdAgent([]string{"--offline", "--out", outPath})
+	cmdAgentWithMock([]string{"--out", outPath})
 	if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
 		t.Fatalf("agent.ConfiguredPosture() with FAK_GUARD_POSTURE=strict: got %v, want PostureFailClosed", got)
 	}

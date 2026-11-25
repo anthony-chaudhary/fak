@@ -122,7 +122,8 @@ manifest and rerun both the allow and deny witness; do not compensate by prompti
 Load the validated file on the surface you actually operate:
 
 ```sh
-fak agent --policy policy.json --offline
+# With `fak up --model 3B` serving the local model in another terminal:
+fak agent --policy policy.json
 fak run --policy policy.json --trace trace.json
 fak serve --policy policy.json --addr 127.0.0.1:8080
 ```

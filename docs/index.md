@@ -9,13 +9,13 @@ description: "fak is an agent runtime: one operator-controlled boundary for cach
 
 FAK coordinates the whole agent path, not isolated components. Start with the [canonical architecture map](architecture.md#whole-path-coordination-target) for the five-layer observation → constrained-plan → typed-effect contract, then use the [glossary](glossary.md#whole-path-decision-terms) to keep coordination, orchestration, scheduling, routing, and serving distinct.
 
-**Default next action:** run the deterministic offline proof in [the reproducibility packet](repro-packet.md) with `fak agent --offline`. It needs no API key, model, or GPU and ends with checkable task-completion and blocked-operation results.
+**To get started,** [run a local model](../README.md#try-fak) and ask it a question.
 
 ## Choose your route
 
 | You are… | Start here | Use this route to… |
 |---|---|---|
-| Evaluating fak | [Reproducibility packet](repro-packet.md) | Identify the product, run the offline proof, then inspect its evidence. |
+| Evaluating fak | [Reproducibility packet](repro-packet.md) | Review the policy examples and reproduce the published results. |
 | Learning the whole system | [8-module flagship course](courses/end-to-end-inference-agent-harness-memory.md) | Follow one request across native inference, the agent harness, policy, context, memory, observability, and proof; use the [99-course learning path](../LEARNING-PATH.md) for prerequisite ordering and deeper study. |
 | Learning how inference uses memory, from the ground up | [The memory-hierarchy ladder](explainers/memory-hierarchy/README.md) | Start at Level 1 (what is a buffer?) with no math, then climb through SRAM, HBM/VRAM, and host DRAM to the offload frontier — each rung citing the real `internal/compute` and `internal/model` sources. |
 | Not sure which explainer to read | [The explainers index](explainers/README.md) | Pick your starting point by what you already know, not by topic — eight question-driven ladders (each written five or six times, once per reader) plus the single-page explainers, with a suggested order. |
@@ -35,7 +35,7 @@ For a human role map, use [`START-HERE.md`](../START-HERE.md). Agents that need 
 
 This page is the **current, public documentation landing page** for the current generation. Runtime behavior is authoritative in code and tests; operational pages link to their owning commands and proofs. Pages marked experimental, simulated, stubbed, superseded, or historical describe a narrower lifecycle and do not override current authorities. Dated material under [`notes/`](notes/) provides provenance rather than the default product contract.
 
-This landing page supports route selection for the offline proof, managed runtime, integrations, HTTP service, policy floor, deployment, and contribution workflow. It does not establish availability for accelerator hardware or private control channels; those environment-specific routes state their own prerequisites and support boundary. Begin with the offline proof unless your task requires one of those envelopes.
+This landing page supports route selection for local inference, the managed runtime, integrations, HTTP service, policy floor, deployment, and contribution workflow. It does not establish availability for accelerator hardware or private control channels; those environment-specific routes state their own prerequisites and support boundary. Start with the guide for your hardware.
 
 ## Choose the smallest efficiency layer
 
@@ -144,37 +144,11 @@ untrusted bytes have to pass a gate before they become model context. Read
 [POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md), and
 [the security model](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/security.md).
 
-## Try it in 2 minutes (no key, no model, no GPU)
+## Run a local model
 
-Get the binary — no clone, no Go toolchain. The installer detects your OS/arch,
-downloads the prebuilt static binary for the latest release, verifies its checksum, and
-drops `fak` on your PATH:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-fak version          # prints the installed version, e.g. 0.34.0
-```
-
-Now prove the floor from the bare binary — these need no clone and no `examples/` dir:
-
-```bash
-fak preflight --tool refund_payment --args "{}"   # -> DENY  (DEFAULT_DENY): unknown tool, fail-closed
-fak preflight --tool search_kb      --args "{}"   # -> ALLOW: a read-shaped name is not blanket-blocked
-fak agent --offline                               # runs one task twice — tools wired directly vs. behind fak — and prints the before/after
-```
-
-The dangerous action is refused by structure, before any model interpretation matters.
-Then wrap the agent you already run — one command, no rewrite, no key to start:
-
-```bash
-fak manage claude           # short: fak m claude; or: fak manage --provider openai -- opencode
-```
-
-> **Have the source already?** From a clone you can skip the install and run the same
-> proof against a named example floor, where the deny is by *argument value*:
-> `go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"`.
-> Full paths in [INSTALL.md](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md)
-> (one-line installer · manual download · Docker · build-from-source · Windows).
+Follow the [first-run instructions](../README.md#try-fak) to ask a model a question
+in your terminal. To use the local server from your editor or coding agent, choose
+your [integration guide](integrations/README.md).
 
 ## Learn more
 

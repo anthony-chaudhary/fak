@@ -2,7 +2,7 @@ The draft is mostly clean and the fences are unusually well-handled, but there i
 
 **Problems found**
 
-1. **The deletion self-check command exists in source.** `cmd/deletioncert/main.go` declares `-selfcheck` and constructs a tiny synthetic model for its eviction-versus-never-seen comparison. `go run ./cmd/deletioncert -selfcheck` is therefore a source-backed command, not an invented flag. This source review does not establish a fresh successful run, HuggingFace parity, hardware behavior, or elapsed time. The script below still displays `go run ./cmd/fak agent --offline`, which demonstrates tool-policy behavior and must not be presented as the deletion numerical witness.
+1. **The deletion self-check command exists in source.** `cmd/deletioncert/main.go` declares `-selfcheck` and constructs a tiny synthetic model for its eviction-versus-never-seen comparison. `go run ./cmd/deletioncert -selfcheck` is therefore a source-backed command, not an invented flag. This source review does not establish a fresh successful run, HuggingFace parity, hardware behavior, or elapsed time.
 
 2. **"resolves in ~1s" / "run the deletion proof yourself, offline, in about a second."** The ledger says "60-second proof," not one second. The ~1s figure is fabricated. Changed to "in about a minute, offline."
 
@@ -35,7 +35,7 @@ The WebVoyager comparison below is modeled prefill geometry, not measured speedu
 | **VO** | "We cut a poisoned tool result out of the *middle* of a live model's KV cache — and left it bit-for-bit identical to a run that never saw it. Max delta zero. Not one number differs." |
 | **ON-SCREEN TEXT** | `max|Δ| = 0` (large, centered) |
 | **B-ROLL** | Terminal showing two model runs side by side: one that saw the poisoned tool result, one with that span cut out. In post: highlight the poisoned span, then a hard cut as it vanishes and the two runs read identical, byte for byte. |
-| **COMMAND VISIBLE** | `go run ./cmd/fak agent --offline` |
+| **COMMAND VISIBLE** | `go run ./cmd/deletioncert -selfcheck` |
 
 **Spoken fence (immediately, same breath):** "No shipped engine does mid-run eviction — vLLM, SGLang, the API caches all reuse from the *front* only. This isn't a faster token engine. It's mid-run deletion, proven against a HuggingFace reference."
 
@@ -76,7 +76,7 @@ The WebVoyager comparison below is modeled prefill geometry, not measured speedu
 | | |
 |---|---|
 | **VO** | "One static Go binary, about thirteen megabytes, two extended-standard-library dependencies, Apache-2.0. Drops in front of Claude Code or Cursor with no agent-side changes. Every number traces to a commit. Repo and live demos in the description — run the proof yourself, offline, in about a minute." |
-| **ON-SCREEN TEXT** | `github.com/anthony-chaudhary/fak` <br> `go run ./cmd/fak agent --offline` <br> live demos → anthony-chaudhary.github.io/fak/demos.html |
+| **ON-SCREEN TEXT** | `github.com/anthony-chaudhary/fak` <br> `go run ./cmd/deletioncert -selfcheck` <br> live demos → anthony-chaudhary.github.io/fak/demos.html |
 | **B-ROLL** | Terminal re-running the offline proof: injection-in-context YES→no, destructive-op YES→no, task still completed. |
 
 ---
@@ -111,7 +111,7 @@ The WebVoyager comparison below is modeled prefill geometry, not measured speedu
 
 What I changed:
 
-1. **Correction to the earlier command-existence note:** `go run ./cmd/deletioncert -selfcheck` is implemented in source and uses a synthetic model. The earlier description of it as fabricated was incorrect. The displayed `go run ./cmd/fak agent --offline` remains a separate tool-policy demonstration; a matching deletion capture and its scope must be verified before publication.
+1. **Correction to the earlier command-existence note:** `go run ./cmd/deletioncert -selfcheck` is implemented in source and uses a synthetic model. The earlier description of it as fabricated was incorrect.
 2. **Fixed "~1s" → "about a minute."** Ledger says "60-second proof." The one-second claim was invented.
 3. **Stripped the literal token `109`** from the cold-open b-roll. The ledger proves `max|Δ|=0`; it specifies no token value. Kept the visual (poisoned span vanishes, runs match) without an unsourced on-screen number.
 4. **Removed "8-rung ladder"** → "per-rung decision ladder." Rung count isn't in the ledger (ledger only confirms `--explain/--json` per-rung trace).

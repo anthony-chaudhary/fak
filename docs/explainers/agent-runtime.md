@@ -39,9 +39,7 @@ run. The operator chooses the integration mode and supplies task and
 configuration; the model backend produces model turns; a tool implementation
 owns only the admitted external side effect.
 
-> **Default:** prove this boundary first with the deterministic, no-key
-> `fak agent --offline` path. Then choose a live-provider or server integration from the
-> interface table below.
+> Follow the [getting-started guide](../../GETTING-STARTED.md) to connect a model.
 
 ## Ownership at a glance
 
@@ -82,7 +80,6 @@ result admission → continuation**. For the syscall analogy behind the contract
 
 | Builder job | Interface | What it gives you |
 |---|---|---|
-| Prove or inspect the reference loop locally | `fak agent --offline` | A deterministic A/B run using the mock planner, local tools, policy denial, reuse, and result screening; no provider key or network is required. |
 | Exercise the reference loop with a live compatible provider | `fak agent` plus provider configuration | The same turn-and-tool path with live model calls; use the CLI help and environment/config authorities for the selected provider. |
 | Host the native managed runtime as a service | `fak serve --native` | A long-lived agent application runtime that hosts sessions and the loop. Start with [Runtime vs client](runtime-vs-client.md), then the [server quickstart](../fak/server-quickstart.md). |
 | Put an existing model client behind fak | `fak serve` | The gateway runtime for compatible model traffic; this governs calls but does not move the client's own agent loop into fak. See [Gateway](gateway.md). |
@@ -102,7 +99,7 @@ shapes remain authoritative in [`cmd/fak/`](../../cmd/fak/) and the
 | Mode | The detailed flow on this page describes fak-managed host-side execution. Gateway-only and guarded-client modes are valid choices, but they retain a client-owned loop. |
 | Generation | Current behavior; code and tests are authoritative when this explanation and runtime diverge. |
 | Lifecycle | `gen/now` builder route. Historical design notes are provenance, not this contract. |
-| Support boundary | The deterministic offline proof is the first supported diagnostic. Live-provider behavior also depends on the selected provider, credentials, model compatibility, and deployment configuration. Tool side effects remain the tool implementation's responsibility after admission. |
+| Support boundary | Live-provider behavior also depends on the selected provider, credentials, model compatibility, and deployment configuration. Tool side effects remain the tool implementation's responsibility after admission. |
 
 For security guarantees and their scope, use [`SECURITY.md`](../../SECURITY.md). For
 claim status, use [`CLAIMS.md`](../../CLAIMS.md); this route does not promote a simulated
@@ -110,16 +107,7 @@ or scoped result into a broader product claim.
 
 ## Next action
 
-Run exactly this from the repository root:
-
-```bash
-fak agent --offline
-```
-
-The proof passes when the fak column reports `task completed (booked) YES`, the headline
-reports `poisoned result blocked : YES`, and it reports
-`destructive op prevented : YES`. The complete first-run sequence and expected output
-live in the [repro packet](../repro-packet.md).
+Run a model and use it from your coding agent. See [getting started](../../GETTING-STARTED.md).
 
 ## Deeper routes
 

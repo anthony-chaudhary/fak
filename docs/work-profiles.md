@@ -11,7 +11,8 @@ different question: "how compact should the final prose be?" You can select eith
 
 ```bash
 fak agent profiles
-fak agent --work-profile ponytail:medium --output-style caveman:low --offline
+# With `fak up --model 3B` serving the local model in another terminal:
+fak agent --work-profile ponytail:medium --output-style caveman:low
 ```
 
 The default is `ponytail:medium`; every fak-owned agent loop therefore receives the medium
@@ -53,14 +54,16 @@ system policy and explicit user requirements
 ## Mix and match
 
 ```bash
+# Keep `fak up --model 3B` running in another terminal for these real-model runs.
+
 # Simpler implementation decisions, normal explanatory output
-fak agent --work-profile ponytail:medium --output-style full --offline
+fak agent --work-profile ponytail:medium --output-style full
 
 # Light simplicity pressure, highly compressed response
-fak agent --work-profile ponytail:low --output-style caveman:high --offline
+fak agent --work-profile ponytail:low --output-style caveman:high
 
 # Disable both axes
-fak agent --work-profile standard --output-style full --offline
+fak agent --work-profile standard --output-style full
 ```
 
 The selected family, implementation, intensity, and fragment digest are captured independently in

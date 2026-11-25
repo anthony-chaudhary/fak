@@ -3,23 +3,25 @@
     {
       "id": "free-tier-dev",
       "persona": "Free-tier solo dev",
-      "who": "Will download a prebuilt binary and run it; will NOT clone, build from source, or read the docs. Spends seconds, not minutes.",
-      "job": "Download a binary and watch it deny a tool call in under a minute — no toolchain, no key, no GPU.",
+      "who": "Will download a prebuilt binary and run a useful local model; will NOT clone or build from source. Spends seconds deciding whether the supported path is real.",
+      "job": "Install the supported build, start local inference, and ask a coding question with an observable answer.",
       "tier": "consume",
       "effort": "minimal",
       "entry_doc": "README.md",
       "affordances": [
         {"id": "release-binaries", "kind": "path_exists", "target": ".github/workflows/release-artifacts.yml", "need": "a CI job that cross-compiles and uploads prebuilt binaries to GitHub Releases", "severity": "hard"},
         {"id": "install-script", "kind": "path_exists", "target": "install.sh", "need": "a curl|sh installer that fetches the right prebuilt binary and verifies its checksum", "severity": "hard"},
-        {"id": "download-pointer", "kind": "doc_mentions", "doc": "README.md", "tokens": ["releases/latest", "install.sh", "prebuilt"], "match": "any", "need": "a no-toolchain download path on the front page (release archive or install.sh)", "severity": "hard"},
-        {"id": "offline-first-run", "kind": "fenced_command", "docs": ["README.md", "GETTING-STARTED.md", "docs/cli-reference.md"], "tokens": ["fak preflight", "fak agent --offline", "cmd/fak preflight"], "need": "a copy-pasteable no-key/no-GPU first command in a fenced block", "severity": "hard"},
+        {"id": "download-pointer", "kind": "doc_mentions", "doc": "README.md", "tokens": ["INSTALL.md#local-model-setup"], "match": "all", "need": "a direct route from the front page to the platform-aware install path", "severity": "hard"},
+        {"id": "local-model-first-run", "kind": "fenced_command", "docs": ["README.md", "GETTING-STARTED.md"], "tokens": ["fak up"], "need": "a copy-pasteable command that starts local inference on the published hardware envelope", "severity": "hard"},
+        {"id": "platform-envelope", "kind": "doc_mentions", "doc": "README.md", "tokens": ["Apple Silicon", "Windows", "Linux"], "match": "all", "need": "the first-run page names the qualified platform and routes other platforms without implying parity", "severity": "hard"},
+        {"id": "independent-evidence", "kind": "doc_mentions", "doc": "README.md", "tokens": ["docs/benchmarks/README.md"], "match": "all", "need": "the first-run page links independent benchmark evidence instead of duplicating claims", "severity": "hard"},
         {"id": "static-binary-claim", "kind": "claim_section", "section": "Claims", "tags": ["SHIPPED"], "need": "the honesty ledger backs the one-static-binary, no-dependencies claim (CLAIMS.md tags the product claim SHIPPED with a witness page; the ledger is a single ## Claims section of tagged claim links since the #9232 managed index)", "severity": "hard"},
         {"id": "package-manager", "kind": "doc_mentions", "doc": "README.md", "tokens": ["brew install", "winget", "scoop install"], "match": "any", "need": "a package-manager install (Homebrew/winget/scoop) for the dev who will not even curl", "severity": "soft"}
       ],
       "verdict": "served",
       "gaps": [
         "No Homebrew/winget/scoop package yet — the lowest-effort install is curl|sh or a release archive",
-        "The single command runs a demo/preflight; a polished one-window TUI would lower the bar further"
+        "The supported first-run envelope is narrower than the set of published builds; each additional platform needs its own real completion witness"
       ]
     },
     {

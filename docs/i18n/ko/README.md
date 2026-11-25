@@ -68,7 +68,6 @@ fak manage claude      # 기존 에이전트를 명령어 하나로 감쌉니다
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
 ## 여러분의 모델과 함께

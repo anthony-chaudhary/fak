@@ -6,6 +6,19 @@ AMD Strix Halo), and the NVIDIA CUDA container. CPU builds are secondary referen
 available through explicit selection. This page is for adopters installing without
 cloning the repository.
 
+## Local model setup
+
+| Platform | Install |
+| --- | --- |
+| Windows x64 | Follow the [PowerShell instructions](#windows-powershell) for the release zip. |
+| Apple Silicon Mac | Use the [one-line installer](#1-one-line-installer-recommended) for Metal. |
+| Linux x64 | Use the [CPU installer](#1-one-line-installer-recommended) with `--variant cpu` for the reference build. The default Vulkan build requires the driver and glibc versions listed below. |
+
+Once `fak version` works, [start the coding model](README.md#try-fak). See
+[local model setup](GETTING-STARTED.md#local-model-setup) for platform verification.
+
+## Other install options
+
 Three supported paths, fastest first:
 
 1. [One-line installer](#1-one-line-installer-recommended) — `curl | sh`, downloads a
@@ -21,8 +34,7 @@ status](#about-go-install) are at the end. The full map of options — Homebrew,
 Docker/OCI, Compose, Kubernetes/Helm, systemd, winget, macOS launchd — is in the
 [install-options matrix](#install-options-at-a-glance).
 
-Next: once `fak` is on your PATH, the [first-session tutorial](docs/fak/tutorial.md)
-walks you from the binary to your first adjudicated tool call — fully offline, no key or GPU.
+Once `fak` is on your PATH, [start your first model](README.md#try-fak).
 
 The GPU archive contract is `darwin/arm64` Metal and `linux/amd64` Vulkan.
 Vulkan archives require GNU glibc 2.39+ (Ubuntu 24.04+), the system Vulkan
@@ -36,8 +48,7 @@ The Metal archive is available on v0.54.0, backfilled from the exact tagged
 source; this adds an asset to the existing release, not a new version. This
 backfill is SHA-256-verified and ad-hoc-signed; it has no SLSA attestation or
 Apple notarization. Its checksum verifies download integrity, not source provenance.
-Vulkan publication remains pending its release and hardware gate. For Vulkan until then,
-build from source or explicitly request a CPU reference.
+The [v0.56.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.56.0) includes the Linux amd64 Vulkan archive.
 A packaged backend still needs qualification on the actual model and GPU.
 
 ---
@@ -108,14 +119,14 @@ Knobs (environment variables):
 
 | Variable | Effect | Default |
 | --- | --- | --- |
-| `FAK_VERSION` | Pin a version, e.g. `0.57.0` for Metal | latest release |
+| `FAK_VERSION` | Pin a published release version | latest release |
 | `FAK_INSTALL_DIR` | Install target directory | `/usr/local/bin` if writable, else `~/.local/bin` |
 | `FAK_REPO` | `owner/repo` override | `anthony-chaudhary/fak` |
 
-Example — install the available v0.54.0 Metal build on Apple Silicon into a user-local dir:
+Install the latest Metal build on Apple Silicon in your user-local directory.
 
 ```sh
-FAK_VERSION=0.57.0 FAK_INSTALL_DIR="$HOME/.local/bin" \
+FAK_INSTALL_DIR="$HOME/.local/bin" \
   sh -c 'curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh'
 ```
 
@@ -176,7 +187,8 @@ fak version
 This is the secondary CPU reference build.
 
 ```powershell
-$Version = "0.57.0"
+$Release = Invoke-RestMethod 'https://api.github.com/repos/anthony-chaudhary/fak/releases/latest'
+$Version = $Release.tag_name.TrimStart('v')
 $Archive = "fak_${Version}_windows_amd64.zip"
 $Base    = "https://github.com/anthony-chaudhary/fak/releases/download/v$Version"
 
@@ -189,9 +201,14 @@ $got  = (Get-FileHash $Archive -Algorithm SHA256).Hash.ToLower()
 if ($want -ne $got) { throw "checksum mismatch for $Archive" }
 
 Expand-Archive $Archive -DestinationPath fak-dist
-# Move fak-dist\fak.exe somewhere on your PATH.
+# Verify the extracted binary before adding its folder to PATH.
 .\fak-dist\fak.exe version
 ```
+
+Keep the extracted folder somewhere permanent. In the Start menu, search for
+**Edit environment variables for your account**. Under **User variables**, edit
+**Path**, choose **New**, and add the full path to the folder containing `fak.exe`.
+Open a new terminal and run `fak version`.
 
 The downloaded binary carries its version stamped at build time, so it reports the right
 version even with no `VERSION` file alongside it.

@@ -34,21 +34,13 @@ fak manage claude
 
 ## ৬০-সেকেন্ডের প্রমাণ (key নেই, model নেই, GPU নেই)
 
-কিছু download না করেই boundary-টা নিজে দেখুন — একটি structural DENY, একটি ALLOW,
-আর একটি offline agent যাতে injection আটকানো হয় কিন্তু task তবুও সম্পূর্ণ হয়:
+এই নীতি `search_kb` অনুমোদন করে এবং `refund_payment` প্রত্যাখ্যান করে।
 
 ```bash
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection আটকানো হলো, task তবুও সম্পূর্ণ
 ```
-
-permission নীতি kernel-এর *ভেতরে*, একই call path-এ চলে — **fail-closed**। allow-list-এ
-নেই এমন কোনো action চলতে পারে না, model-কে যত ভালোভাবেই ভোলানো হোক না কেন। সন্দেহজনক
-tool *results* আলাদা quarantine-এ রাখা হয়, যাতে সেগুলো model-এর context-এ ঢুকতেই না
-পারে — structure দিয়ে, কোনো classifier দিয়ে নয়। live পরীক্ষায় prompt injection
-অরক্ষিত baseline-এ ৫/৫ পৌঁছেছিল; fak সেটি ৫/৫ দেয়ালবন্দি করেছে।
 
 ## fak কী
 

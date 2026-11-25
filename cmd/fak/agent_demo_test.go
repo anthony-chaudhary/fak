@@ -1,8 +1,8 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -17,37 +17,22 @@ import (
 // test budget and reporting only a package timeout.
 const agentFailLoudHelperTimeout = 20 * time.Second
 
-// TestAgentDemoRunsOfflineDemo pins that `fak agentdemo` still runs the full
-// offline mock A/B: the demo moved off `fak agent`, but the verb is unchanged.
-func TestAgentDemoRunsOfflineDemo(t *testing.T) {
-	out := filepath.Join(t.TempDir(), "demo-report.json")
-
-	_, stderr := captureAgentStdio(t, func() {
-		cmdAgentDemo([]string{"--out", out, "--code-tools=false", "--sys-tools=false"})
-	})
-
-	if strings.Contains(stderr, "no model endpoint") {
-		t.Fatalf("fak agentdemo must run the offline demo, not fail loud.\ngot stderr:\n%s", stderr)
+func TestAgentDemoRetiredFromDispatch(t *testing.T) {
+	if dispatchCoreVerbA("agentdemo", nil) {
+		t.Fatal("retired agentdemo still dispatches")
 	}
-	body, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatalf("fak agentdemo must write %s: %v", out, err)
-	}
-	if len(body) == 0 {
-		t.Fatal("fak agentdemo wrote an empty report")
-	}
-	var res map[string]any
-	if err := json.Unmarshal(body, &res); err != nil {
-		t.Fatalf("report did not parse as JSON: %v\nbody:\n%s", err, body)
-	}
-	if len(res) == 0 {
-		t.Fatalf("report parsed to an empty JSON object: %s", body)
+	var out bytes.Buffer
+	printUnknownVerb(&out, "agentdemo")
+	for _, want := range []string{"unknown verb", "scripted demo was retired", "fak up", "fak agent"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("retirement guidance missing %q:\n%s", want, out.String())
+		}
 	}
 }
 
 // TestAgentNoEndpointFailsLoud pins that a bare `fak agent` with no model
 // endpoint fails loud (exit 2) with the guidance block, never silently running
-// the offline demo. The three provider base-url env vars are cleared because
+// a scripted planner. The three provider base-url env vars are cleared because
 // this appliance may carry an ambient OPENAI_BASE_URL, which would otherwise
 // make the bare run resolve a live endpoint and attempt a network call. The
 // router origin is also pinned to a dead port: the loopback family fallback
@@ -106,7 +91,7 @@ func TestAgentNoEndpointFailsLoud(t *testing.T) {
 	if got := ee.ExitCode(); got != 2 {
 		t.Fatalf("bare `fak agent` exit code = %d, want 2\noutput:\n%s", got, out)
 	}
-	for _, want := range []string{"no model endpoint configured", "fak agentdemo", "--base-url"} {
+	for _, want := range []string{"no model endpoint configured", "fak up", "--base-url"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("fail-loud guidance must contain %q.\ngot output:\n%s", want, out)
 		}
@@ -142,30 +127,33 @@ func TestAgentNoEndpointFailsLoudDeadlineExpiry(t *testing.T) {
 	t.Fatalf("a never-returning helper must hit the fixture deadline; ctx=%v runErr=%v", ctx.Err(), runErr)
 }
 
-// TestAgentOfflineFlagStillRunsDemo is the regression guard that the explicit
-// --offline opt-in still runs the demo in-process (no guidance, exit 0).
-func TestAgentOfflineFlagStillRunsDemo(t *testing.T) {
-	out := filepath.Join(t.TempDir(), "offline-report.json")
-
-	_, stderr := captureAgentStdio(t, func() {
-		cmdAgent([]string{"--offline", "--out", out, "--code-tools=false", "--sys-tools=false"})
-	})
-
-	if strings.Contains(stderr, "no model endpoint") {
-		t.Fatalf("--offline must run the demo, not fail loud.\ngot stderr:\n%s", stderr)
+func TestAgentOfflineFlagRetiredBeforeEndpointResolution(t *testing.T) {
+	if os.Getenv("TEST_AGENT_OFFLINE_RETIRED_HELPER") == "1" {
+		runAgent([]string{"--offline", "--out", os.Getenv("TEST_AGENT_RETIRED_OUT")})
+		return
 	}
-	body, err := os.ReadFile(out)
+	outPath := filepath.Join(t.TempDir(), "must-not-exist.json")
+	exe, err := os.Executable()
 	if err != nil {
-		t.Fatalf("fak agent --offline must write %s: %v", out, err)
+		t.Fatal(err)
 	}
-	if len(body) == 0 {
-		t.Fatal("fak agent --offline wrote an empty report")
+	cmd := exec.Command(exe, "-test.run=TestAgentOfflineFlagRetiredBeforeEndpointResolution")
+	cmd.Env = append(os.Environ(),
+		"TEST_AGENT_OFFLINE_RETIRED_HELPER=1",
+		"TEST_AGENT_RETIRED_OUT="+outPath,
+	)
+	output, runErr := cmd.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(runErr, &ee) || ee.ExitCode() != 2 {
+		t.Fatalf("retired --offline exit = %v, want 2\n%s", runErr, output)
 	}
-	var res map[string]any
-	if err := json.Unmarshal(body, &res); err != nil {
-		t.Fatalf("report did not parse as JSON: %v\nbody:\n%s", err, body)
+	if !strings.Contains(string(output), "flag provided but not defined: -offline") {
+		t.Fatalf("retired --offline was not rejected by flag parsing:\n%s", output)
 	}
-	if len(res) == 0 {
-		t.Fatalf("report parsed to an empty JSON object: %s", body)
+	if strings.Contains(string(output), "turn-use vs now") {
+		t.Fatalf("retired --offline ran the scripted demo:\n%s", output)
+	}
+	if _, statErr := os.Stat(outPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("retired --offline created a report: %v", statErr)
 	}
 }

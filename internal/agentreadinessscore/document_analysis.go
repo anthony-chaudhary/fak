@@ -144,8 +144,9 @@ func pathOperands(block string) []string {
 	return ops
 }
 
-// findFirstCommand reports whether a no-key/no-model/no-GPU first command sits inside a
-// fenced block of an adoption doc, and where.
+// findFirstCommand reports whether the real model-serving first command sits
+// inside a fenced block of an adoption doc, and where. Offline/mock demos do not
+// satisfy the adoption contract.
 func findFirstCommand(texts map[string]string) (bool, string) {
 	for _, doc := range firstCommandDocs {
 		for _, block := range fencedBlocks(texts[doc]) {

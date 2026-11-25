@@ -69,6 +69,9 @@ func setupHermeticReadmeRepo(t *testing.T) (string, string) {
 	if err := os.MkdirAll(hwDir, 0755); err != nil {
 		t.Fatalf("failed to create hw dir: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(repoRoot, readmenext.DefaultHardwareReadmePath), []byte(testSampleReadme), 0644); err != nil {
+		t.Fatalf("failed to write test hardware README: %v", err)
+	}
 	manifest := readmenext.HardwareLatestManifest{
 		Schema: "fak-hardware-latest/1",
 		AsOf:   "2026-09-01",
@@ -371,13 +374,13 @@ func TestReadme_PreviewNext(t *testing.T) {
 
 	// Valid fragment
 	oldRow := "| NVIDIA | Older H100 result: 95 tok/s. | Verified baseline. | [NVIDIA](docs/nvidia.md) |"
-	newRow := "| NVIDIA | Hopper H100 Q8_0: 111.9 tok/s | Witnessed | [NVIDIA](docs/nv.md) |"
+	newRow := "| NVIDIA | Inkling-2-Mini: plain decode 119.9 tok/s; opt-in speculative decode 151.7 tok/s | Witnessed | [NVIDIA](published/aegis-inkling2-spec-decode/RESULTS.md) |"
 	hwFrag := `{
 		"schema": "fak-readme-candidate/1",
 		"issue": 10944,
 		"topic": "nvidia-update",
 		"target_section": "hardware_table",
-		"candidate_content": "| NVIDIA | Hopper H100 Q8_0: 111.9 tok/s | Witnessed | [NVIDIA](docs/nv.md) |",
+		"candidate_content": "| NVIDIA | Inkling-2-Mini: plain decode 119.9 tok/s; opt-in speculative decode 151.7 tok/s | Witnessed | [NVIDIA](published/aegis-inkling2-spec-decode/RESULTS.md) |",
 		"retire_target": {
 			"action": "replace_row",
 			"target_text": "| NVIDIA | Older H100 result: 95 tok/s. | Verified baseline. | [NVIDIA](docs/nvidia.md) |"
@@ -413,6 +416,13 @@ func TestReadme_PreviewNext(t *testing.T) {
 	}
 	if !strings.Contains(string(origContent), oldRow) || strings.Contains(string(origContent), newRow) {
 		t.Errorf("preview should not touch README on disk")
+	}
+	hardwareContent, err := os.ReadFile(filepath.Join(repoRoot, readmenext.DefaultHardwareReadmePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(hardwareContent), oldRow) || strings.Contains(string(hardwareContent), newRow) {
+		t.Errorf("preview should not touch hardware README on disk")
 	}
 
 	// 2. Preview written to --out path
@@ -531,16 +541,23 @@ func TestReadme_Publish_DryRunAndApply(t *testing.T) {
 		t.Errorf("expected [SUCCESS] in stdout: %s", stdout.String())
 	}
 
-	// Check updated README.md
+	// Hardware rows publish to the benchmark guide; the front page stays untouched.
 	diskReadme, err = os.ReadFile(filepath.Join(repoRoot, readmenext.DefaultReadmePath))
 	if err != nil {
 		t.Fatalf("failed to read README after apply: %v", err)
 	}
-	if !strings.Contains(string(diskReadme), newRow) {
-		t.Errorf("README does not contain new row after publish")
+	if strings.Contains(string(diskReadme), newRow) {
+		t.Errorf("front-page README gained the hardware row after publish")
 	}
-	if strings.Contains(string(diskReadme), oldRow) {
-		t.Errorf("README still contains old row after publish")
+	diskHardware, err := os.ReadFile(filepath.Join(repoRoot, readmenext.DefaultHardwareReadmePath))
+	if err != nil {
+		t.Fatalf("failed to read hardware README after apply: %v", err)
+	}
+	if !strings.Contains(string(diskHardware), newRow) {
+		t.Errorf("hardware README does not contain new row after publish")
+	}
+	if strings.Contains(string(diskHardware), oldRow) {
+		t.Errorf("hardware README still contains old row after publish")
 	}
 
 	// Check legacy archive doc

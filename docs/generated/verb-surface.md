@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1371<br>
-rows: 1344<br>
-unverified rows: 0 / 1344<br>
-source-only rows absent from help: 1108
+parsed files: 1373<br>
+rows: 1340<br>
+unverified rows: 0 / 1340<br>
+source-only rows absent from help: 1105
 
 ## Surface table
 
@@ -20,19 +20,15 @@ source-only rows absent from help: 1108
 | `fak accounts` | config-home registry: every CLAUDE_CONFIG_DIR seat with its disk-true identity + tombstone rehome | cmdAccounts / internal/pathutil, internal/secretload, internal/strmatch | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak accounts headroom` |  | runAccountsHeadroom / internal/accounts, internal/fleetaccounts, internal/fleetcap, internal/strmatch | `if` arm of the dispatch in runAccounts() | NONE | — | **SOURCE ONLY** |
 | `fak affected` | fast inner loop: run go test only for the packages your working-tree change can affect | cmdAffected / internal/affectedtests | `case` arm of the dispatch switch in dispatchPrimaryVerb() | STRUCTURAL | `TEST_FAILED`, `TEST_RUN_ERROR` | yes |
-| `fak agent` | run one managed-agent task end to end against a real model; the native agent loop | cmdAgent / internal/adjudicator, internal/agent, internal/journal, internal/memoryread, internal/memq, internal/modelroute, internal/pathutil, internal/policy, internal/power, internal/syspromptmmu, internal/systools | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | yes |
-| `fak agent list` |  | runAgentsList / internal/agent, internal/pathutil | `if` arm of the dispatch in runAgent() | NONE | — | **SOURCE ONLY** |
-| `fak agent profiles` |  | printAgentOutputProfiles | `if` arm of the dispatch in runAgent() | NONE | — | **SOURCE ONLY** |
-| `fak agent resume` |  |  | `if` arm of the dispatch in runAgent() | N/A | — | **SOURCE ONLY** |
+| `fak agent` | run one managed-agent task end to end against a real model; the native agent loop | cmdAgent / internal/adjudicator, internal/agent, internal/journal, internal/memoryread, internal/memq, internal/modelroute, internal/pathutil, internal/policy, internal/power, internal/syspromptmmu, internal/systools | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
+| `fak agent list` |  | runAgentsList / internal/agent, internal/pathutil | `if` arm of the dispatch in runAgentWithPlanner() | NONE | — | **SOURCE ONLY** |
+| `fak agent profiles` |  | printAgentOutputProfiles | `if` arm of the dispatch in runAgentWithPlanner() | NONE | — | **SOURCE ONLY** |
+| `fak agent resume` |  |  | `if` arm of the dispatch in runAgentWithPlanner() | N/A | — | **SOURCE ONLY** |
 | `fak agent-queue` | reconcile an agent-pool snapshot into start/hold queue actions | cmdAgentQueue | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak agent-queue emit-reconciler` |  | runAgentQueueEmitReconciler | `case` arm of the dispatch switch in runAgentQueueContext() | NONE | — | **SOURCE ONLY** |
 | `fak agent-queue reconcile` |  | runAgentQueueReconcile / internal/agentqueue | `case` arm of the dispatch switch in runAgentQueueContext() | NONE | — | **SOURCE ONLY** |
 | `fak agent-queue reconcile-restart` |  | runAgentQueueReconcileRestart / internal/agentqueue | `case` arm of the dispatch switch in runAgentQueueContext() | NONE | — | **SOURCE ONLY** |
 | `fak agent-queue run` |  | runAgentQueueRun / internal/agentqueue | `case` arm of the dispatch switch in runAgentQueueContext() | NONE | — | **SOURCE ONLY** |
-| `fak agentdemo` | the offline demo moved off `fak agent`: the scripted mock turn-count A/B, no network/key/model | cmdAgentDemo / internal/adjudicator, internal/agent, internal/journal, internal/memoryread, internal/memq, internal/modelroute, internal/pathutil, internal/policy, internal/power, internal/syspromptmmu, internal/systools | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | yes |
-| `fak agentdemo list` |  | runAgentsList / internal/agent, internal/pathutil | `if` arm of the dispatch in runAgent() | NONE | — | **SOURCE ONLY** |
-| `fak agentdemo profiles` |  | printAgentOutputProfiles | `if` arm of the dispatch in runAgent() | NONE | — | **SOURCE ONLY** |
-| `fak agentdemo resume` |  |  | `if` arm of the dispatch in runAgent() | N/A | — | **SOURCE ONLY** |
 | `fak agentic` | compile a declared objective into a deterministic agentic execution contract | cmdAgentic / internal/agentic | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak agents` | query live and historical agent sessions with constrained SQL, grouping, counts, and JSON | cmdAgents / internal/agentquery, internal/secretload, internal/sessionjournal | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak agents list` |  | runAgentsList / internal/agent, internal/pathutil | `if` arm of the dispatch in runAgents() | NONE | — | **SOURCE ONLY** |
@@ -308,7 +304,7 @@ source-only rows absent from help: 1108
 | `fak debt-orchestrator` | coordinate bounded maturity debt burndown across dedicated debt lanes with witness tracking | cmdDebtOrchestrator | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak debug` | the context debugger: attach to a finished session as a core dump and demand-page its working set | cmdDebug / internal/appversion, internal/cdb, internal/contextq, internal/ctxplan, internal/pathutil, internal/policy, internal/recall | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak deepseekbench` | DeepSeek V4 Pro/Flash TTFT/TPOT scorecard: no-key dry-run fixture, live run gated by key + --spend | cmdDeepSeekBench / internal/deepseekbench | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
-| `fak demo` | zero-flag 60-second proof: run fak's offline scenario through the real kernel, one verdict per call class | cmdDemo / internal/demo | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
+| `fak demo` | legacy offline regression scenario for maintainers; not an onboarding or model-response witness | cmdDemo / internal/demo | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak dev` | research-to-issue feeder: score arXiv/GitHub/HN/Reddit candidates, deduplicate them against the tracker, and render issue plans | runDevHandoff | `if` arm of the dispatch in resolveEarlyDispatch() | RUNTIME | — | yes |
 | `fak dev availability` | reports the companion contract without requiring fak-dev to exist | runDevAvailability | `if` arm of the dispatch in runDevHandoff() | NONE | — | **SOURCE ONLY** |
 | `fak disambiguation` | query, audit, and generate the canonical concept disambiguation index | cmdDisambiguation | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
@@ -538,7 +534,7 @@ source-only rows absent from help: 1108
 | `fak guard-stops` | operator tally of the typed Stop-hook decision ledger: clean stops, bounded stand-downs, fail-open stops | cmdGuardStops / internal/jsonlledger, internal/strmatch | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak guard-stops-slack` | durable update-in-place Slack scoreboard feeder for the guard Stop-decision ledger | cmdGuardStopsSlack / internal/jsonlledger, internal/scoreboard, internal/slackenv, internal/slackoutbox | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak guard-verdict-rsi` | the guard verdict RSI loop: fold the decision journal, score verdict-quality, keep on gain | cmdGuardVerdictRSI / internal/dogfoodissues, internal/guardroute, internal/guardrsi, internal/procguard | `case` arm of the dispatch switch in dispatchExtendedVerbA() | RUNTIME | — | **SOURCE ONLY** |
-| `fak harness` | compose, inspect, resolve, and verify reusable agent harness stacks | cmdHarnessCommand / internal/agent, internal/harnessartifact, internal/harnessclassify, internal/harnesscompose, internal/harnesscontrolpacket, internal/harnesscontrolstudy, internal/harnesscreationreceipt, internal/harnesscreationstudy, internal/harnesscrossover, internal/harnessderive, internal/harnessdiscover, internal/harnessgallery, internal/harnesshost, internal/harnessinit, internal/harnessinspect, internal/harnesslint, internal/harnessmix, internal/harnessoverride, internal/harnesspreview, internal/harnessprotocol, internal/harnessrelease, internal/harnessresolve, internal/harnessselect, internal/harnessserver, internal/harnessverify, internal/harnessweb, internal/pathutil | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
+| `fak harness` | compose, inspect, resolve, and verify reusable agent harness stacks | cmdHarnessCommand / internal/harnessartifact, internal/harnessclassify, internal/harnesscompose, internal/harnesscontrolpacket, internal/harnesscontrolstudy, internal/harnesscreationreceipt, internal/harnesscreationstudy, internal/harnesscrossover, internal/harnessderive, internal/harnessdiscover, internal/harnessgallery, internal/harnesshost, internal/harnessinit, internal/harnessinspect, internal/harnesslint, internal/harnessmix, internal/harnessoverride, internal/harnesspreview, internal/harnessprotocol, internal/harnessrelease, internal/harnessresolve, internal/harnessselect, internal/harnessserver, internal/harnessverify, internal/harnessweb, internal/pathutil | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
 | `fak harness stack` |  | runHarnessStack / internal/stackresolve | `if` arm of the dispatch in runHarnessCommand() | NONE | — | **SOURCE ONLY** |
 | `fak harness-debt-dispatch` | harness-strength verdict -> backlog: file one deduped deletion issue per REDUNDANT/HOBBLING HARD scaffold | cmdHarnessDebtDispatch / internal/dogfoodissues, internal/strmatch | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak harness-hint` | resolve model-specific capability hints, reasoning tradeoffs, and context bounds for agent harnesses | cmdHarnessHint / internal/harnesshint | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
@@ -1233,7 +1229,7 @@ source-only rows absent from help: 1108
 | `fak ultracode status` |  | runUltracodeStatus / internal/orchestration, internal/processalive, internal/trajectory, internal/ultracodebench | `if` arm of the dispatch in runUltracode() | NONE | — | yes |
 | `fak unwired-debt-dispatch` | unwired-scorecard -> backlog: file one deduped issue per orphaned internal package | cmdUnwiredDebtDispatch / internal/dogfoodissues, internal/unwiredscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak unwired-scorecard` | score which code-complete internal packages are not wired into a runnable CLI surface | cmdUnwiredScorecard / internal/unwiredscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
-| `fak up` | start the local fak application surface and report readiness | cmdUp / internal/abi, internal/adjudicator, internal/agent, internal/allinone, internal/appversion, internal/compute, internal/gateway, internal/gpulease, internal/hfhub, internal/ifc, internal/journal, internal/macfit, internal/metalgemm, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/policy, internal/processalive, internal/tokenizer | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `NOT_SUPPORTED`, `POLICY_BLOCK` | **SOURCE ONLY** |
+| `fak up` | install-to-value entry: plan a local model, start the OpenAI-compatible endpoint, and report readiness | cmdUp / internal/abi, internal/adjudicator, internal/agent, internal/allinone, internal/appversion, internal/compute, internal/gateway, internal/gpulease, internal/hfhub, internal/ifc, internal/journal, internal/macfit, internal/metalgemm, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/policy, internal/processalive, internal/tokenizer | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `NOT_SUPPORTED`, `POLICY_BLOCK` | **SOURCE ONLY** |
 | `fak up off` |  | runUpServiceOff / internal/gpulease, internal/servicespec, internal/systemservice | `case` arm of the dispatch switch in runUpService() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
 | `fak up on` |  | runUpServiceOn / internal/gpulease, internal/servicespec, internal/systemservice | `case` arm of the dispatch switch in runUpService() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |
 | `fak up status` |  | runUpServiceStatus / internal/gpulease, internal/servicespec, internal/systemservice | `case` arm of the dispatch switch in runUpService() | STRUCTURAL | `NOT_SUPPORTED` | **SOURCE ONLY** |

@@ -38,20 +38,17 @@ no key, no GPU.
 ```bash
 go build -o fak ./cmd/fak
 ./fak version
-./fak agent --offline
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
 ```
 
-Expected: `fak agent --offline` books a task offline against an injection fixture;
-`refund_payment` returns **DENY** (`POLICY_BLOCK`) and `search_kb` returns **ALLOW**.
+Expected: `refund_payment` returns **DENY** (`POLICY_BLOCK`) and `search_kb` returns **ALLOW**.
 
 ### Windows (native build)
 
 ```powershell
 go build -o fak.exe .\cmd\fak
 .\fak.exe version
-.\fak.exe agent --offline
 .\fak.exe preflight --policy examples\customer-support-readonly-policy.json --tool refund_payment --args "{}"
 .\fak.exe preflight --policy examples\customer-support-readonly-policy.json --tool search_kb --args "{}"
 ```

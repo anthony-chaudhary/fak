@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -151,19 +152,31 @@ func TestAgentEndpointResolverExplicitBaseURLWinsNoProbe(t *testing.T) {
 	}
 }
 
-func TestAgentEndpointResolverOfflineSkipsProbe(t *testing.T) {
-	hit := false
-	stubAgentRouterProbe(t, "anything", true, &hit)
+func TestAgentFlagSetDoesNotExposeRetiredOfflineMode(t *testing.T) {
 	fs, af := newAgentFlagSet()
-	if err := fs.Parse([]string{"--offline"}); err != nil {
-		t.Fatalf("Parse: %v", err)
+	if fs.Lookup("offline") != nil {
+		t.Fatal("retired --offline flag is still public")
 	}
-	ep := agentEndpointResolver(af, false, false, false, io.Discard)
-	if hit {
-		t.Fatal("the router probe ran despite --offline")
+	if got := strings.TrimSpace(*af.task); got != "" {
+		t.Fatalf("agent default task = %q, want no scripted scenario", got)
 	}
-	if ep.baseURL != "" {
-		t.Fatalf("baseURL = %q, want empty", ep.baseURL)
+	if err := fs.Parse([]string{"--task", "--offline"}); err != nil {
+		t.Fatalf("task whose literal value is --offline must remain valid: %v", err)
+	}
+	if got := *af.task; got != "--offline" {
+		t.Fatalf("task = %q, want literal --offline", got)
+	}
+}
+
+func TestAgentOneShotRequiresOnlyUnrecoverableTask(t *testing.T) {
+	if err := validateAgentOneShotTask(true, ""); err != nil {
+		t.Fatalf("interactive agent unexpectedly requires a task: %v", err)
+	}
+	if err := validateAgentOneShotTask(false, "recovered checkpoint task"); err != nil {
+		t.Fatalf("recovered one-shot task unexpectedly rejected: %v", err)
+	}
+	if err := validateAgentOneShotTask(false, ""); !errors.Is(err, errAgentTaskRequired) {
+		t.Fatalf("missing one-shot task error = %v, want errAgentTaskRequired", err)
 	}
 }
 
@@ -230,8 +243,8 @@ func TestAgentNativeRouterFallbackBareRun(t *testing.T) {
 	if !strings.Contains(out, "not responding") || !strings.Contains(out, agentRouterOrigin) {
 		t.Fatalf("fail-loud guidance did not name the probed router (%s):\n%s", agentRouterOrigin, out)
 	}
-	if !strings.Contains(out, "fak agentdemo") || !strings.Contains(out, "--offline") {
-		t.Fatalf("fail-loud guidance did not name the explicit demo opt-ins:\n%s", out)
+	if !strings.Contains(out, "fak up") || strings.Contains(out, "agentdemo") || strings.Contains(out, "--offline") {
+		t.Fatalf("fail-loud guidance did not point to a real runtime, or retained retired demo guidance:\n%s", out)
 	}
 }
 

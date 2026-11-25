@@ -306,8 +306,8 @@
     </div>
 
     <div class="cta">
-      <a class="btn primary" href="#kernel">See how it works ↓</a>
-      <a class="btn ghost" href="demos.html">Try the live demos ↗</a>
+      <a class="btn primary" href="https://github.com/anthony-chaudhary/fak#try-fak">Run a local model</a>
+      <a class="btn ghost" href="#kernel">How fak works</a>
       <a class="btn ghost" href="https://github.com/anthony-chaudhary/fak" rel="noopener">fak on GitHub</a>
     </div>
   </div>
@@ -491,15 +491,9 @@
           </ul>
         </div>
 
-        <div class="cmd"><span class="c"># see it in 2 minutes — no key, no model, no GPU, no clone</span>
-curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-fak preflight --tool refund_payment --args "{}"
-<span class="c">#   → </span><span class="g">DENY (DEFAULT_DENY)</span><span class="c">  — unknown tool, refused by structure (fail-closed)</span>
-fak agent --offline
-<span class="c">#   → runs the task twice: tools wired direct vs. behind fak, prints the before/after</span>
-<span class="c"># hosted expected-state run: Colab Case A-C should show policy PROVEN, gateway DENY, bench PASS, turntax 9</span>
-<span class="c"># have the source? from a clone, deny by argument value against a named floor:</span>
-<span class="c">#   go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"  → DENY (POLICY_BLOCK)</span></div>
+        <div class="cmd"><span class="c"># Start the coding model after installing fak</span>
+fak up --model 3B
+<span class="c"># At the you&gt; prompt, ask which input would break a line of code.</span></div>
 
         <div class="p-foot">
           <a class="lnk go" href="https://github.com/anthony-chaudhary/fak" rel="noopener">

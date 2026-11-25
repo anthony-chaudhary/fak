@@ -75,7 +75,6 @@ fak manage claude      # enveloppe votre agent existant en une seule commande
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection bloquée, tâche quand même accomplie
 ```
 
 ## Avec votre modèle

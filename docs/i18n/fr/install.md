@@ -78,13 +78,9 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-Le `capability floor` en **default-deny** s'exécute *dans* le kernel, sur le même call path :
-une action absente de l'allow-list ne peut pas s'exécuter, quoi que l'on ait fait croire au
-modèle. En test live, une prompt injection a atteint la baseline non protégée 5/5 ; fak l'a
-murée 5/5.
+Cette politique autorise `search_kb` et refuse `refund_payment`.
 
 ## Licence et coût
 

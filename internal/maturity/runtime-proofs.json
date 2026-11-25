@@ -42,7 +42,7 @@
             "lane": "affectedtests"
         },
         {
-            "command": "fak agent --offline",
+            "command": "fak agent --help",
             "output_contains": "fak agent",
             "lane": "agent"
         },

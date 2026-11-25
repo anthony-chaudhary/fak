@@ -34,7 +34,6 @@ fak manage --gguf qwen2.5:7b -- claude
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
 `refund_payment`은 allow-list에 없어 **구조적으로** 거부됩니다(POLICY_BLOCK). 이 판정은

@@ -263,6 +263,80 @@ func appendRowToTableInSection(content string, sectionHeader string, row string)
 	return strings.Join(newLines, "\n"), nil
 }
 
+type routedFragments struct {
+	readme   []*CandidateFragment
+	hardware []*CandidateFragment
+	legacy   []*CandidateFragment
+	source   map[*CandidateFragment]string
+}
+
+func routeFragments(readmeContent, legacyContent string, fragments []*CandidateFragment) routedFragments {
+	routes := routedFragments{source: make(map[*CandidateFragment]string)}
+	for _, f := range fragments {
+		if f != nil && f.TargetSection == TargetHardwareTable {
+			routes.hardware = append(routes.hardware, f)
+			routes.source[f] = DefaultHardwareReadmePath
+		} else if f != nil && f.RetireTarget.TargetText != "" &&
+			!strings.Contains(readmeContent, f.RetireTarget.TargetText) &&
+			strings.Contains(legacyContent, f.RetireTarget.TargetText) {
+			routes.legacy = append(routes.legacy, f)
+			routes.source[f] = DefaultLegacyArchiveDoc
+		} else {
+			routes.readme = append(routes.readme, f)
+			routes.source[f] = DefaultReadmePath
+		}
+	}
+	return routes
+}
+
+func previewRouted(repoRoot, readmeContent, legacyContent string, routes routedFragments, includeEmptyReadme bool) (*RepositoryPreview, error) {
+	preview := &RepositoryPreview{}
+	if len(routes.readme) > 0 || includeEmptyReadme {
+		content, changes, err := PreviewNext(readmeContent, routes.readme)
+		if err != nil {
+			return nil, fmt.Errorf("README preview synthesis failed: %w", err)
+		}
+		preview.Documents = append(preview.Documents, DocumentPreview{Path: DefaultReadmePath, Content: content})
+		preview.Changes = append(preview.Changes, changes...)
+	}
+	if len(routes.hardware) > 0 {
+		path := filepath.Join(repoRoot, DefaultHardwareReadmePath)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read hardware README at %q: %w", path, err)
+		}
+		content, changes, err := PreviewNext(string(data), routes.hardware)
+		if err != nil {
+			return nil, fmt.Errorf("hardware preview synthesis failed: %w", err)
+		}
+		preview.Documents = append(preview.Documents, DocumentPreview{Path: DefaultHardwareReadmePath, Content: content})
+		preview.Changes = append(preview.Changes, changes...)
+	}
+	if len(routes.legacy) > 0 {
+		content, changes, err := PreviewNext(legacyContent, routes.legacy)
+		if err != nil {
+			return nil, fmt.Errorf("legacy preview synthesis failed: %w", err)
+		}
+		preview.Documents = append(preview.Documents, DocumentPreview{Path: DefaultLegacyArchiveDoc, Content: content})
+		preview.Changes = append(preview.Changes, changes...)
+	}
+	return preview, nil
+}
+
+// PreviewRepository routes fragments to their current owning document before synthesis.
+func PreviewRepository(repoRoot string, fragments []*CandidateFragment) (*RepositoryPreview, error) {
+	readmeData, err := os.ReadFile(filepath.Join(repoRoot, DefaultReadmePath))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read README: %w", err)
+	}
+	legacyData, err := os.ReadFile(filepath.Join(repoRoot, DefaultLegacyArchiveDoc))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to read legacy README: %w", err)
+	}
+	routes := routeFragments(string(readmeData), string(legacyData), fragments)
+	return previewRouted(repoRoot, string(readmeData), string(legacyData), routes, len(fragments) == 0)
+}
+
 // Publish coordinates the validation, preview, and atomic file-level publication
 // of candidate fragments to README.md, docs/README-legacy.md, and hardware-latest.json.
 func Publish(repoRoot string, fragments []*CandidateFragment, dryRun bool) (*PublishResult, error) {
@@ -273,6 +347,14 @@ func Publish(repoRoot string, fragments []*CandidateFragment, dryRun bool) (*Pub
 	}
 	readmeContent := string(data)
 
+	legacyPath := filepath.Join(repoRoot, DefaultLegacyArchiveDoc)
+	legacyData, err := os.ReadFile(legacyPath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to read legacy README at %q: %w", legacyPath, err)
+	}
+
+	routes := routeFragments(readmeContent, string(legacyData), fragments)
+
 	// Validate all fragments first
 	for _, f := range fragments {
 		if err := ValidateFragment(f, repoRoot); err != nil {
@@ -280,10 +362,33 @@ func Publish(repoRoot string, fragments []*CandidateFragment, dryRun bool) (*Pub
 		}
 	}
 
-	// Generate preview
-	simulatedReadme, changes, err := PreviewNext(readmeContent, fragments)
+	preview, err := previewRouted(repoRoot, readmeContent, string(legacyData), routes, false)
 	if err != nil {
-		return nil, fmt.Errorf("preview synthesis failed: %w", err)
+		return nil, err
+	}
+	changes := preview.Changes
+	simulatedReadme := readmeContent
+	simulatedHardwareReadme := ""
+	simulatedLegacyReadme := ""
+	for _, doc := range preview.Documents {
+		switch doc.Path {
+		case DefaultReadmePath:
+			simulatedReadme = doc.Content
+		case DefaultHardwareReadmePath:
+			simulatedHardwareReadme = doc.Content
+		case DefaultLegacyArchiveDoc:
+			simulatedLegacyReadme = doc.Content
+		}
+	}
+
+	hardwareReadmePath := ""
+	var hardwareReadmeData []byte
+	if len(routes.hardware) > 0 {
+		hardwareReadmePath = filepath.Join(repoRoot, DefaultHardwareReadmePath)
+		hardwareReadmeData, err = os.ReadFile(hardwareReadmePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read hardware README at %q: %w", hardwareReadmePath, err)
+		}
 	}
 
 	// Collect retired items and legacy appends
@@ -304,7 +409,8 @@ func Publish(repoRoot string, fragments []*CandidateFragment, dryRun bool) (*Pub
 				if dateStr == "" {
 					dateStr = time.Now().Format("2006-01-02")
 				}
-				entry := fmt.Sprintf("### Retired from README.md (%s, Issue #%d: %s)\n\n%s\n", dateStr, f.Issue, f.Topic, targetText)
+				sourceDoc := routes.source[f]
+				entry := fmt.Sprintf("### Retired from %s (%s, Issue #%d: %s)\n\n%s\n", sourceDoc, dateStr, f.Issue, f.Topic, targetText)
 				legacyAppendsByDoc[doc] = append(legacyAppendsByDoc[doc], entry)
 			}
 		}
@@ -359,7 +465,9 @@ func Publish(repoRoot string, fragments []*CandidateFragment, dryRun bool) (*Pub
 	}
 
 	primaryLegacyPath := ""
-	if len(legacyAppendsByDoc) > 0 {
+	if len(routes.legacy) > 0 {
+		primaryLegacyPath = legacyPath
+	} else if len(legacyAppendsByDoc) > 0 {
 		for docPath := range legacyAppendsByDoc {
 			primaryLegacyPath = filepath.Join(repoRoot, docPath)
 			break
@@ -370,6 +478,7 @@ func Publish(repoRoot string, fragments []*CandidateFragment, dryRun bool) (*Pub
 		Success:             true,
 		DryRun:              dryRun,
 		ReadmePath:          readmePath,
+		HardwareReadmePath:  hardwareReadmePath,
 		LegacyPath:          primaryLegacyPath,
 		HardwareJSONPath:    hwPath,
 		HardwareJSONUpdated: hardwareJSONUpdated,
@@ -388,11 +497,29 @@ func Publish(repoRoot string, fragments []*CandidateFragment, dryRun bool) (*Pub
 		if rollbackErr != nil {
 			// Restore original README content
 			_ = os.WriteFile(readmePath, data, 0644)
+			if hardwareReadmePath != "" {
+				_ = os.WriteFile(hardwareReadmePath, hardwareReadmeData, 0644)
+			}
+			if len(routes.legacy) > 0 {
+				_ = os.WriteFile(legacyPath, legacyData, 0644)
+			}
 		}
 	}()
 
 	if err := os.WriteFile(readmePath, []byte(simulatedReadme), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write updated README at %q: %w", readmePath, err)
+	}
+	if hardwareReadmePath != "" {
+		if err := os.WriteFile(hardwareReadmePath, []byte(simulatedHardwareReadme), 0644); err != nil {
+			rollbackErr = err
+			return nil, fmt.Errorf("failed to write updated hardware README at %q: %w", hardwareReadmePath, err)
+		}
+	}
+	if len(routes.legacy) > 0 {
+		if err := os.WriteFile(legacyPath, []byte(simulatedLegacyReadme), 0644); err != nil {
+			rollbackErr = err
+			return nil, fmt.Errorf("failed to write updated legacy README at %q: %w", legacyPath, err)
+		}
 	}
 
 	// Write legacy archives

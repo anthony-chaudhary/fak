@@ -99,11 +99,11 @@ func TestCronEmitTaskScheduler(t *testing.T) {
 
 func TestCronEmitCustomTickAndFakBin(t *testing.T) {
 	out := emitCron(t, "--target", "systemd", "--loop", "nightly",
-		"--fak-bin", "/usr/local/bin/fak", "--", "/usr/local/bin/fak", "agent", "--offline")
+		"--fak-bin", "/usr/local/bin/fak", "--", "/usr/local/bin/fak", "up", "--dry-run", "--memory-gib", "32")
 	// The wrapped tick lands verbatim after the `--`, and --fak-bin drives the
 	// invoked binary on the loop-run side.
 	mustContain(t, out,
-		"ExecStart=/usr/local/bin/fak loop run --loop nightly --source systemd -- /usr/local/bin/fak agent --offline",
+		"ExecStart=/usr/local/bin/fak loop run --loop nightly --source systemd -- /usr/local/bin/fak up --dry-run --memory-gib 32",
 	)
 }
 

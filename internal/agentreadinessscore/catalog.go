@@ -96,7 +96,7 @@ var guardrailClusters = []labeledPaths{
 }
 
 var (
-	firstCommandTokens = []string{"fak preflight", "fak agent --offline", "preflight --policy"}
+	firstCommandTokens = []string{"fak up"}
 	firstCommandDocs   = []string{agentsFile, "README.md", "START-HERE.md", "GETTING-STARTED.md"}
 	installTokens      = []string{"go install", "@latest"}
 	installDocs        = []string{agentsFile, "README.md", "GETTING-STARTED.md", "INSTALL.md"}

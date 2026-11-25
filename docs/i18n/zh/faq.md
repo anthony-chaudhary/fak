@@ -63,13 +63,12 @@ Ollama / vLLM / SGLang / llama.cpp / LM Studio，或任意 OpenAI 兼容 API。
 
 ## 60 秒自证（自己跑一遍）
 
-不必轻信上面的说法——克隆后自己跑一遍即可自证（能力闸门放行/拦截，注入被挡下且任务照常完成）：
+这项策略允许 `search_kb`，拒绝 `refund_payment`。
 
 ```bash
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
 ## Q8. 如何安装？

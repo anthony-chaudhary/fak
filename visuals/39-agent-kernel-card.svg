@@ -61,5 +61,5 @@
   </g>
 
   <text x="76" y="560" class="sans small">Policy-denied actions cannot run. Suspicious results do not automatically enter context.</text>
-  <text x="76" y="596" class="sans small">Run the no-key repro: go run ./cmd/fak agent --offline</text>
+  <text x="76" y="596" class="sans small">Check a tool before it runs: fak preflight --tool refund_payment</text>
 </svg>

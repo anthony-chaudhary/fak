@@ -5,15 +5,7 @@ description: "Narrower-audience and deep-dive sections that once lived on fak's 
 
 # fak — front-page overflow (moved off README.md)
 
-These sections used to live on the front page. They were moved here on
-2026-06-28 (a second batch on 2026-07-01, when the front page was halved, a
-third on 2026-10-03, and a fourth on 2026-11-24, both at the end of this page)
-to keep `README.md` focused on what the lowest-common-denominator reader needs
-first — performance and cost, the no-key demo, and the one-command wrap.
-Nothing here is deprecated; it is narrower-audience or deep-dive material that
-earns a link from the front page rather than a place on it. The pre-restructure
-front page is archived at
-[README-2026-06-25-before-fresh-start.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/README-2026-06-25-before-fresh-start.md).
+The [README](../README.md) walks through starting a local model. This page collects use cases, model sources and dated changes moved from it.
 
 Each claim still carries the same authority it did on the front page — every
 number traces to [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md), and every
@@ -414,12 +406,12 @@ This list of shipped behavior moved off the front page on 2026-11-24.
 - Inkling-2-Mini runs fak-native on Apple Metal: `fak run <path>/Inkling-2-Mini-UD-Q3_K_XL.gguf`
   picks Metal automatically and verifies DFlash2 draft tokens on the GPU when an
   `Inkling-2-Mini-DFlash2/` directory sits next to the GGUF (receipt in the
-  [Latest hardware results](../README.md) section of the front page).
+  [hardware results](benchmarks/README.md)).
   It landed after v0.57.0, so install from `main` (`go install github.com/anthony-chaudhary/fak/cmd/fak@main`)
   until the next release; `fak version` shows the commit on its `build:` line.
 - A second model family runs fak-native on NVIDIA: Inkling-2-Mini decodes resident on
   CUDA with one replayed graph per token, 119.9 tok/s on an RTX 5080 (receipt in the
-  [Latest hardware results](../README.md) section of the front page). Speculative decode is opt-in (`FAK_INKLING2_SPEC=2` plus
+  [hardware results](benchmarks/README.md)). Speculative decode is opt-in (`FAK_INKLING2_SPEC=2` plus
   `FAK_INKLING2_MTP_DIR`): the checkpoint's own draft head proposes two tokens and one
   batched forward checks them, 151.7 tok/s on the same card. It stays off by default
   because the batched check is not bit-exact to one-token-at-a-time decode. Its tokenizer
@@ -445,3 +437,18 @@ This list of shipped behavior moved off the front page on 2026-11-24.
 ---
 
 The current front page is [README.md](https://github.com/anthony-chaudhary/fak/blob/main/README.md).
+
+## Your machine, your files
+
+- **Local by default.** `fak serve` listens on `127.0.0.1:8080`. It refuses to start on an
+  address reachable from off this host unless you name an inbound token
+  (for example `--require-key-env`) or pass the deliberately named
+  `--unsafe-allow-unauthenticated-bind`.
+- **No opaque model store.** Downloaded models are plain files at
+  `<cache>/fak-models/hub/<owner>/<repo>/<revision>/<file>` (your user cache directory,
+  or `$FAK_MODELS_DIR/hub`). Copy, inspect, or delete them with ordinary tools.
+- **No phone-home.** No analytics SDK is linked, and fak runs no update check on its own:
+  `fak self-update` and `fak release-staleness` act only when you invoke them.
+- **Clean exit.** [Uninstall](../INSTALL.md#uninstall) covers the binary, services and shims, plus models and settings.
+- **Credit upstream.** Parts of fak are adapted from ggml / llama.cpp;
+  attributions and pinned revisions are in [NOTICE.md](../NOTICE.md).

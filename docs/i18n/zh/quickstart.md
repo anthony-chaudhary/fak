@@ -46,11 +46,9 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-第一行拒绝、第二行放行，靠的是内核**结构**而非分类器：不在允许清单上的动作根本无法执行——无论
-模型被怎样诱导。最后一行在离线状态下拦下注入，任务照样完成。
+这项策略允许 `search_kb`，拒绝 `refund_payment`。
 
 ## 什么是 fak
 

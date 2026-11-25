@@ -33,21 +33,13 @@ base URL を `fak serve` に向け直すだけでも同じ経路を通せます�
 
 ## 60 秒で確かめる（キー不要・モデル不要・GPU 不要）
 
-モデルのダウンロードも API キーも GPU もいりません。ツール呼び出しの境界だけを構造的に実証
-できます——`refund_payment` は既定拒否で **DENY**、`search_kb` は **ALLOW**、注入は阻止されても
-タスクは完了します。
+このポリシーは `search_kb` を許可し、`refund_payment` を拒否します。
 
 ```bash
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
-
-DENY は分類器（classifier）ではなく**構造**によるものです。許可リストに載っていない操作は、
-モデルが何を言いくるめられても実行できません（fail-closed）。疑わしいツールの*結果*は
-quarantine（隔離）に入れられ、そもそもモデルのコンテキストに到達しません。ライブテストでは、
-未保護のベースラインに prompt injection が 5/5 到達したのに対し、fak は 5/5 で遮断しました。
 
 ## fak とは何か
 

@@ -139,7 +139,6 @@ The single biggest lever: fak is a **structural answer to Simon Willison's "leth
 The repo is unusually clippable because the proof needs **no key, no model, no GPU** and resolves in one terminal frame:
 
 - **The 60-second preflight clip** is the money shot: `go run ./cmd/fak preflight ... refund_payment` → **DENY (POLICY_BLOCK)** in red; `search_kb` → **ALLOW** in green. Two words, two colors, one screen. That is a complete Fireship/Short with zero editing.
-- **`fak agent --offline`**: "injection-in-context YES→no, destructive-op YES→no, task still completed." Three before/after toggles = three hard cuts.
 - **The live browser demos** (the turn-tax race, model-reuse race vs *tuned* baseline) are a side-by-side race — inherently a Short, no terminal literacy required.
 - **max|Δ|=0** is a perfect on-screen artifact: "cut a poisoned span out of the *middle* of a live KV cache, and it's bit-for-bit identical to a run that never saw it — not one number differs." This is the offline synthetic-model eviction witness, not the separate HuggingFace forward-pass numerical check or a current survey of other engines. That's a genuine "wait, what?" frame.
 

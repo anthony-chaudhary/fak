@@ -34,7 +34,7 @@ Developers arriving from token-saving and minimal-code tools usually want the sa
 
 **fak is an open-source agent runtime for Claude Code, Codex, Cursor, OpenCode, and other OpenAI-, Anthropic-, or MCP-compatible clients.** One Go binary sits between an agent and its model and tools. At that boundary it can keep shared setup cache-stable, compact or page out superseded context, reuse repeated work, route requests, journal sessions for recovery, and apply the capability-floor tool policy.
 
-That means fak targets *systemic* token and work waste rather than asking the model to remember another instruction on every turn. Start with `fak manage claude` or `fak manage codex`; use `fak agent --offline` for a deterministic proof that needs no model or API key.
+That means fak targets *systemic* token and work waste rather than asking the model to remember another instruction on every turn. Start with `fak manage claude` or `fak manage codex`.
 
 ## Does fak replace Caveman?
 
@@ -79,9 +79,6 @@ Repository descriptions and popularity change. The revisions above make the comp
 ## Try the runtime layer
 
 ```bash
-# deterministic, no key/model/GPU
-fak agent --offline
-
 # manage an existing host
 fak manage claude
 fak manage codex

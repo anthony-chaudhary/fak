@@ -69,14 +69,12 @@ From the repository root:
 ```bash
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
-go run ./cmd/fak agent --offline
 ```
 
 Expected shape:
 
 - `refund_payment` is denied with `POLICY_BLOCK`.
 - `search_kb` is allowed.
-- `fak agent --offline` blocks the injected/destructive path while the task still books.
 
 That proves the capability floor is structural, not a model judgment.
 

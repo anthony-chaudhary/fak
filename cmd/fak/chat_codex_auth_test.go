@@ -110,7 +110,7 @@ func TestChatCodexSubscriptionLoopback(t *testing.T) {
 func TestChatAuthModeDiagnostics(t *testing.T) {
 	// Case 1: codex-auth selected - reports explicit auth mode and omits no-auth warning.
 	var codexBuf bytes.Buffer
-	p1 := chatPlannerWithStderr(&codexBuf, false, "http://127.0.0.1:8080", "openai-responses", "gpt-5.6-luna", "OPENAI_API_KEY", "auto", true)
+	p1 := chatPlannerWithStderr(&codexBuf, "http://127.0.0.1:8080", "openai-responses", "gpt-5.6-luna", "OPENAI_API_KEY", "auto", true)
 	if p1 == nil {
 		t.Fatal("expected non-nil planner")
 	}
@@ -125,7 +125,7 @@ func TestChatAuthModeDiagnostics(t *testing.T) {
 	// Case 2: unauthenticated local endpoint without codex-auth - preserves truly unauthenticated warning.
 	t.Setenv("TEST_EMPTY_API_KEY_ENV", "")
 	var localBuf bytes.Buffer
-	p2 := chatPlannerWithStderr(&localBuf, false, "http://127.0.0.1:8080", "openai-responses", "gpt-5.6-luna", "TEST_EMPTY_API_KEY_ENV", "auto", false)
+	p2 := chatPlannerWithStderr(&localBuf, "http://127.0.0.1:8080", "openai-responses", "gpt-5.6-luna", "TEST_EMPTY_API_KEY_ENV", "auto", false)
 	if p2 == nil {
 		t.Fatal("expected non-nil planner")
 	}

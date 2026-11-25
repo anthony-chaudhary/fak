@@ -11,9 +11,9 @@
       "affordances": [
         {"id": "benchmark-authority", "kind": "path_exists", "target": "BENCHMARK-AUTHORITY.md", "need": "a benchmark-authority doc every headline figure traces to — the number is sourced, not asserted", "severity": "hard"},
         {"id": "honesty-ledger-tagged", "kind": "claim_section", "section": "Claims", "tags": ["SHIPPED"], "need": "the honesty ledger (CLAIMS.md) backs the core product claim with a status tag, so a claim can be trusted instead of discounted (CLAIMS.md tags the product claim SHIPPED with a witness page; the ledger is a single ## Claims section of tagged claim links since the #9232 managed index)", "severity": "hard"},
-        {"id": "ledger-linked", "kind": "doc_mentions", "doc": "README.md", "tokens": ["CLAIMS.md"], "match": "any", "need": "the front page links the honesty ledger — the skeptic can reach the tagged claims in one hop", "severity": "hard"},
+        {"id": "evidence-route-linked", "kind": "doc_mentions", "doc": "README.md", "tokens": ["docs/benchmarks/README.md"], "match": "all", "need": "the front page links the independent benchmark index rather than duplicating evidence tables", "severity": "hard"},
         {"id": "comparison-positioning", "kind": "any_path_exists", "targets": ["docs/integrations/compatibility-matrix.md", "docs/industry-scorecard/README.md"], "need": "a positioning/comparison surface answering 'how is this different from the thing I already use'", "severity": "hard"},
-        {"id": "boundaries-honest", "kind": "doc_mentions", "doc": "README.md", "tokens": ["never a silent fallback", "not a current parity claim", "claim boundaries"], "match": "any", "need": "honest boundary statements on the front page naming what fak is NOT — llama.cpp is never a silent fallback, per-result parity/quality fences beside every number — the fastest trust-builder for a skeptic (the #9751 latest-hardware front page)", "severity": "hard"},
+        {"id": "boundaries-honest", "kind": "doc_mentions", "doc": "docs/benchmarks/README.md", "tokens": ["claim boundary", "stays historical"], "match": "all", "need": "the linked evidence page carries per-result boundaries and historical-result semantics", "severity": "hard"},
         {"id": "social-proof", "kind": "any_path_exists", "targets": ["docs/adoption/signals.md", "docs/adoption/directories.md", "docs/launch/README.md"], "need": "a social-proof / adoption surface (witnessed usage, directory presence) for 'other people use this'", "severity": "hard"},
         {"id": "license", "kind": "path_exists", "target": "LICENSE", "need": "a real OSS license file, so the visitor confirms they can actually use it", "severity": "hard"},
         {"id": "supported-catalogue", "kind": "path_exists", "target": "docs/supported/README.md", "need": "a catalogue of supported models/engines/harnesses — breadth-of-support proof", "severity": "soft"}
@@ -32,8 +32,8 @@
       "effort": "skim",
       "entry_doc": "README.md",
       "affordances": [
-        {"id": "install-oneliner", "kind": "doc_mentions", "doc": "README.md", "tokens": ["go install", "@latest"], "match": "all", "need": "the go install ...@latest one-liner on the front page (the module is at the repo root, so it resolves)", "severity": "hard"},
-        {"id": "module-root-path", "kind": "doc_mentions", "doc": "README.md", "tokens": ["github.com/anthony-chaudhary/fak/cmd/fak"], "match": "all", "need": "the EXACT installable module path, so `go install ...@latest` resolves directly — a stale path fails this", "severity": "hard"},
+        {"id": "install-guide-linked", "kind": "doc_mentions", "doc": "README.md", "tokens": ["INSTALL.md#local-model-setup"], "match": "all", "need": "the front page routes to the platform-aware install guide without embedding a shell-specific installer", "severity": "hard"},
+        {"id": "module-root-path", "kind": "doc_mentions", "doc": "INSTALL.md", "tokens": ["github.com/anthony-chaudhary/fak/cmd/fak", "@latest"], "match": "all", "need": "the detailed install page keeps the exact Go module path for developers who choose go install", "severity": "hard"},
         {"id": "install-doc", "kind": "path_exists", "target": "INSTALL.md", "need": "a fuller install doc (prebuilt archives, containers, per-platform notes) for the visitor who cannot go install", "severity": "hard"},
         {"id": "prebuilt-path", "kind": "any_path_exists", "targets": ["install.sh", ".github/workflows/release-artifacts.yml"], "need": "a no-toolchain path to the binary (a curl|sh installer or a release-artifacts CI job) for the visitor who will not build from source", "severity": "hard"}
       ],
@@ -45,21 +45,24 @@
     {
       "id": "act",
       "stage": "Act — the first win",
-      "visitor": "A visitor with the binary who wants a first success in under a minute — a command that runs with no key/model/GPU and prints an observable result they can recognize as 'it worked'.",
-      "job": "Run one offline command and see a labelled result (a cost/quality delta, a DENY verdict), backed by a quickstart from clone and a demo doc that shows what else to run.",
+      "visitor": "A visitor with supported hardware who wants an answer from a local language model.",
+      "job": "Start the model in a terminal and ask it a question.",
       "phase": "act",
       "effort": "glance",
       "entry_doc": "README.md",
       "affordances": [
-        {"id": "offline-first-command", "kind": "fenced_command", "docs": ["README.md"], "tokens": ["fak agent --offline", "fak routebench", "fak preflight"], "need": "a copy-pasteable no-key/no-model/no-GPU first command in a fenced block", "severity": "hard"},
-        {"id": "observable-signal", "kind": "doc_mentions", "doc": "README.md", "tokens": ["task completed (booked)", "poisoned result blocked", "destructive op prevented"], "match": "any", "need": "an observable success signal shown inline with the first command (an expected result marker), so the visitor can tell it WORKED", "severity": "hard"},
-        {"id": "first-command-resolves", "kind": "command_resolves", "command": "go run ./cmd/fak agent --offline", "need": "the first command's verb actually resolves against the binary's dispatch (documented in the CLI reference) — a doc that names a dead verb is an ambush", "severity": "hard"},
+        {"id": "local-model-first-command", "kind": "fenced_command", "docs": ["README.md"], "tokens": ["fak up"], "need": "a copy-pasteable command that starts local inference on supported hardware", "severity": "hard"},
+        {"id": "observable-signal", "kind": "doc_mentions", "doc": "README.md", "tokens": ["you>", "[READY]"], "match": "any", "need": "the first-run page names the actual prompt/readiness signal so the visitor can tell startup worked", "severity": "hard"},
+        {"id": "platform-envelope", "kind": "doc_mentions", "doc": "README.md", "tokens": ["Apple Silicon", "Windows", "Linux"], "match": "all", "need": "the first-run page names the qualified platform and scopes the other published builds", "severity": "hard"},
+        {"id": "setup-route", "kind": "doc_mentions", "doc": "README.md", "tokens": ["GETTING-STARTED.md#local-model-setup"], "match": "all", "need": "other platforms and advanced setup stay one linked hop away", "severity": "hard"},
+        {"id": "independent-evidence", "kind": "doc_mentions", "doc": "README.md", "tokens": ["docs/benchmarks/README.md"], "match": "all", "need": "the first win links independent evidence instead of making an unbounded front-page claim", "severity": "hard"},
+        {"id": "first-command-resolves", "kind": "command_resolves", "command": "go run ./cmd/fak up", "need": "the first command's verb actually resolves against the binary's dispatch (documented in the CLI reference) — a doc that names a dead verb is an ambush", "severity": "hard"},
         {"id": "quickstart", "kind": "any_path_exists", "targets": ["docs/fak/tutorial.md", "GETTING-STARTED.md", "START-HERE.md"], "need": "a quickstart/tutorial that carries the visitor from clone to a running kernel", "severity": "hard"},
-        {"id": "demo-doc", "kind": "path_exists", "target": "docs/run-the-demos.md", "need": "a demo doc that shows the visitor what else to run after the first win", "severity": "hard"}
+        {"id": "demo-doc", "kind": "path_exists", "target": "docs/run-the-demos.md", "need": "an optional demo catalogue after the real first win", "severity": "soft"}
       ],
       "verdict": "converts",
       "gaps": [
-        "The first win is a deterministic offline lens (routebench/preflight); a hosted one-click demo would remove the install step entirely for the lowest-effort visitor"
+        "The first model download takes time and the available backends depend on the operating system."
       ]
     }
   ]

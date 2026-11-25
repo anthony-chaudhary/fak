@@ -178,12 +178,11 @@ func TestAgentEffortHonored(t *testing.T) {
 		}
 	})
 
-	t.Run("CmdAgentOfflineEndToEnd", func(t *testing.T) {
+	t.Run("CmdAgentFixtureEndToEnd", func(t *testing.T) {
 		out := filepath.Join(t.TempDir(), "native_effort.json")
 		captureAgentStdio(t, func() {
-			cmdAgent([]string{
+			cmdAgentWithMock([]string{
 				"--native",
-				"--offline",
 				"--effort", "balanced",
 				"--thinking-budget", "512",
 				"--out", out,

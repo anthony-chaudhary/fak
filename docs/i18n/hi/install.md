@@ -79,12 +79,9 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-पहली दो पंक्तियाँ **default-deny capability floor** को कर्नेल के अंदर, उसी call path पर,
-fail-closed चलते हुए दिखाती हैं — allow-list पर न होने वाली action चल ही नहीं सकती। तीसरी पंक्ति
-prompt injection को structure से दीवार के पीछे रखते हुए task पूरा करती है।
+यह नीति `search_kb` की अनुमति देती है और `refund_payment` को रोकती है।
 
 ## भारत के लिए क्यों मायने रखता है
 

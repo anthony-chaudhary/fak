@@ -35,14 +35,12 @@ fak manage claude
 
 ## 60-సెకన్ల రుజువు (key లేదు, model లేదు, GPU లేదు)
 
-ఏ download-ఉ లేకుండా tool-call సరిహద్దును ఇప్పుడే చూడండి — ఒక structural DENY, ఒక
-ALLOW, మరియు offline-లో ఆగిపోయిన injection:
+ఈ విధానం `search_kb`ను అనుమతిస్తుంది, `refund_payment`ను నిరాకరిస్తుంది.
 
 ```bash
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
 ## fak అంటే ఏమిటి

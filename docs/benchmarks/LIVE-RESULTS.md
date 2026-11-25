@@ -30,9 +30,6 @@ description: "A live multi-turn A/B where a real model drives the same airline t
 Run it yourself:
 
 ```
-# offline, deterministic, no network:
-fak agent --offline
-
 # live (Gemini OpenAI-compat):
 export GEMINI_API_KEY=...
 fak agent --base-url 'https://generativelanguage.googleapis.com/v1beta/openai' \
@@ -121,7 +118,7 @@ nothing is wrong, the kernel costs nothing and changes nothing.
    > same work.** A derailed agent "wins" on turns by failing — the metric trap the
    > loop now guards against.
 
-## The mechanism witness (offline, deterministic — reproducible with no network)
+## Historical mechanism witness
 
 A real model rarely malforms on a declared schema, so the *turn-saving* mechanisms
 (grammar repair, vDSO dedup) are proven on a deterministic mock planner that

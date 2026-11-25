@@ -91,13 +91,11 @@ Tier 0 முழுவதும் offline மற்றும் deterministic. 
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
 இது **capability floor**-ஐ செயலில் காட்டுகிறது: allow-list-இல் இல்லாத ஒரு action
 model-ஐ எப்படி வற்புறுத்தினாலும் இயங்காது — kernel-இன் உள்ளே, அதே call path-இல்,
-**fail-closed**. `./fak agent --offline`-இல் prompt injection தடுக்கப்பட்டாலும் task
-நிறைவடைகிறது.
+**fail-closed**.
 
 ---
 

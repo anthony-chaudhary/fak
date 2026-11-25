@@ -37,12 +37,9 @@ fak manage claude
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-Первый вызов отклоняется структурно (`DENY`), второй разрешается (`ALLOW`), а `fak agent
---offline` доводит задачу до конца, отбив prompt injection. В живых тестах инъекция
-пробивала незащищённый базовый агент 5 из 5 раз; fak отсекал её 5 из 5.
+Эта политика разрешает `search_kb` и отклоняет `refund_payment`.
 
 ## Что такое fak
 

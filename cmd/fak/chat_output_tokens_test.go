@@ -141,19 +141,22 @@ func TestChatOutputTokensNegativeBeforeNetwork(t *testing.T) {
 
 // fak-test:justify why=regression when=changed:cmd/fak/chat.go witness=cmd/fak/chat.go#cmdChat
 // fak-test:runtime fast est=1s lane=default
-func TestChatOutputTokensOfflineRefusesExplicitBudget(t *testing.T) {
+func TestChatOfflineFlagIsRetired(t *testing.T) {
 	for _, budget := range []int{0, 12288} {
 		t.Run(fmt.Sprint(budget), func(t *testing.T) {
 			var requests atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
-				http.Error(w, "offline mode must not reach HTTP", http.StatusInternalServerError)
+				http.Error(w, "retired flag must not reach HTTP", http.StatusInternalServerError)
 			}))
 			defer srv.Close()
 			out, err := chatOutputTokensChild(t, "", "--offline", "--model=fixture-model", "--base-url="+srv.URL+"/v1", fmt.Sprintf("--max-output-tokens=%d", budget))
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) || exit.ExitCode() == 0 || requests.Load() != 0 {
-				t.Fatalf("offline budget exit=%v requests=%d output=%s", err, requests.Load(), out)
+				t.Fatalf("retired flag exit=%v requests=%d output=%s", err, requests.Load(), out)
+			}
+			if !strings.Contains(string(out), "flag provided but not defined: -offline") {
+				t.Fatalf("retired flag was not rejected by parsing: %s", out)
 			}
 		})
 	}

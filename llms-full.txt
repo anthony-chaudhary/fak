@@ -393,7 +393,6 @@ This is the canonical first command. Run it before anything else:
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK): refused by structure, no model in the loop
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW: not a blanket block
-./fak agent --offline                                                                                       # -> injection-in-context YES->no, destructive-op YES->no, task still booked
 ```
 
 The first `go build` compiles the binary (~30–60s, plus a one-time Go-1.26 toolchain fetch);
@@ -1344,7 +1343,7 @@ Three distinctions govern the whole course:
 - [The 60-second reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md)
 - [`runtime-capabilities` in the CLI reference](https://github.com/anthony-chaudhary/fak/blob/main/docs/cli-reference.md#runtime-capabilities-inspect-the-deployable-runtime-before-payload-load)
 
-The first objective is deliberately model-free. Establish that the binary runs and that policy can structurally deny one tool while allowing another. Confirm that the offline agent completes useful work. Then inspect runtime capability without confusing that inspection with payload execution.
+The first objective is deliberately model-free. Establish that the binary runs and that policy can structurally deny one tool while allowing another. Then inspect runtime capability without confusing that inspection with payload execution.
 
 ### Lab — LOCAL / OFFLINE
 
@@ -1354,7 +1353,6 @@ From the repository root, use a temporary output path rather than writing an in-
 go build -o "$env:TEMP/fak-course.exe" ./cmd/fak
 & "$env:TEMP/fak-course.exe" preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 & "$env:TEMP/fak-course.exe" preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
-& "$env:TEMP/fak-course.exe" agent --offline
 & "$env:TEMP/fak-course.exe" runtime-capabilities
 ```
 
@@ -1724,14 +1722,7 @@ lands you on a concept whose prerequisite you have not met yet.
 the kernel. The readings are the docs you would read anyway; the path is what stops you
 reading them in the wrong order.
 
-> New to the project entirely? The fastest taste of the payoff is one offline pass that
-> prints the token/turn savings from the shared prefix — `go run ./cmd/fak agent --offline`
-> (see **FAK 104**); the same run also prints the safety A/B, which
-> [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md#try-fak) frames as the
-> security-side boundary proof. Either way, come back here and start at **FAK 101**. Just
-> want to install and run? [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) is the install-and-run
-> page and [`START-HERE.md`](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) routes a job you already have; this page is the
-> *concept* front door.
+> To run your first local model, follow the [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md#try-fak). Start the course at **FAK 101**.
 
 ## Learn without mysteries
 
@@ -1995,14 +1986,10 @@ go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.js
 **You'll be able to:**
 - Explain how one write-time gate is simultaneously a security act and an optimization act
 - State the two honest fences on the convergence (which workload, which metric it does NOT win)
-- Run one offline pass that prints both the safety A/B and the token/turn savings
 
 **Read:** [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md), [`docs/concepts-and-story.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/concepts-and-story.md)
 
-**Lab:**
-```bash
-go run ./cmd/fak agent --offline  # one run prints the safety A/B AND the token/turn savings from the same boundary
-```
+**Lab:** Inspect the workload, baseline and receipt for one [cache reuse result](https://github.com/anthony-chaudhary/fak/blob/main/docs/cache-value-rollup.md).
 
 **Checkpoint:** Explain how one write-time gate is both security and optimization. State the two honest fences: which workload it is a win for, and which metric (raw GPU throughput) it does NOT win.
 
@@ -4460,20 +4447,17 @@ no key, no GPU.
 ```bash
 go build -o fak ./cmd/fak
 ./fak version
-./fak agent --offline
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
 ```
 
-Expected: `fak agent --offline` books a task offline against an injection fixture;
-`refund_payment` returns **DENY** (`POLICY_BLOCK`) and `search_kb` returns **ALLOW**.
+Expected: `refund_payment` returns **DENY** (`POLICY_BLOCK`) and `search_kb` returns **ALLOW**.
 
 ### Windows (native build)
 
 ```powershell
 go build -o fak.exe .\cmd\fak
 .\fak.exe version
-.\fak.exe agent --offline
 .\fak.exe preflight --policy examples\customer-support-readonly-policy.json --tool refund_payment --args "{}"
 .\fak.exe preflight --policy examples\customer-support-readonly-policy.json --tool search_kb --args "{}"
 ```
@@ -5181,213 +5165,33 @@ Use `fak workpattern list|source|trajectory|report` to consume the canonical see
   <picture><source media="(prefers-color-scheme: dark)" srcset="visuals/brand/fak-logo.svg"><img src="visuals/brand/fak-logo-ink.svg" alt="fak logo" width="320"></picture>
 </p>
 
-# fak — useful local agents, accelerated automatically
+# fak
 
-**fak is the open runtime that makes useful local agents practical on your own machine.**
-
-> In one line: fak serves local models to your coding agents on your own hardware, and refuses every tool call you did not allow.
-
-```bash
-# Apple Silicon Mac to start; more platforms and options in Try fak below
-curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh && fak up
-```
-
-Start locally, give an agent real work, and keep useful context across turns.
-Our first milestone combines native inference, speculative decoding, and reuse of
-the work-so-far (agentic *KV caching*) so qualified acceleration is automatic.
-A capability floor bounds what tools the agent may execute.
-
-## Why fak, now
-
-Coding agents crossed from demo to daily driver, and iteration collapsed from
-days to minutes. The bottleneck moved downstream with it: review throughput,
-verification, and trust now cap what an agent fleet ships. The
-faster the loop, the more PRs pile up at the review gate, and the more the human
-becomes the serialization point in an otherwise parallel system.
-
-The two answers the market offers are binary, and both fail at fleet scale.
-**Gate every step by hand** and review load scales with agent output: the speed
-the agent was bought for is thrown away at the review step. **Just trust the
-AI** and the queue disappears along with the safety net: silent breakage, a
-"tests pass" that was never run, no audit trail.
-
-fak is the third option: trust as a definition you write down, not a leap.
-
-| The binary | fak's middle path |
-|---|---|
-| A human approves every tool call ↔ the model calls anything | A capability floor on every tool call: structural denies and danger rules refuse by structure, not by a recognizer that can fail open — shipped `default_open`, strict `fail_closed` one flag away |
-| Believe the agent's "done" ↔ verify every claim yourself | The kernel checks the claim against git evidence: the subject is forgeable, the diff is not |
-| Hope parallel agents don't collide ↔ coordinate them by hand | Lane leases and arbitration decide who may run on what, and refuse with a structured reason a peer can act on |
-| Silent overrides ↔ permanent human locks | Graduated exceptions: an attending operator approves one exact refused call; the agent cannot approve itself |
-
-Every row is the scar of a failure observed running agent work for real. fak
-is the recorded list of what broke. The same shift
-reshapes serving: fleets need batching, cache reuse, failover, and preemption.
-That is the runtime's other half. Full framing:
-[why fak, now](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/why-fak-the-market-moment.md).
-
-**Status:** automatic setup and cache reuse have specific model/backend limits today;
-speculative decoding and physical GPU Direct paths are not yet default-on or
-universally qualified. See the [local-agent milestone](https://github.com/anthony-chaudhary/fak/blob/main/docs/local-agent-milestone.md)
-and the [claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) for what is real and what is not.
-
-**Speed:** the newest witnessed result for each platform, with its claim boundary
-and receipt link, lives in the Latest hardware results section immediately below.
-Versus llama.cpp on Mac there is no accepted full-run comparison yet. The earlier
-near-parity figure was withdrawn on 2026-09-27 pending remeasurement. llama.cpp is
-an explicit external reference for comparison only; fak never selects it as a
-fallback ([native inference goal](https://github.com/anthony-chaudhary/fak/blob/main/docs/native-inference-goal.md)).
-
-**Pick your path:** run a local agent → [Try fak](#try-fak) · guard an agent you
-already use → [`fak guard`](#governance-for-external-agents-fak-guard) ·
-sell tokens from your own GPUs → [token-factory operator route](https://github.com/anthony-chaudhary/fak/blob/main/docs/operator/token-factory.md) ·
-understand why → [the market framing](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/why-fak-the-market-moment.md) ·
-check the evidence → [benchmarks](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md) and [claims](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
-
-## Latest hardware results — 2026-11-10
-
-One row per hardware family: the newest committed performance receipt for that platform,
-with its claim boundary and receipt link. A row stays historical until a newer quality-complete
-measurement exists.
-
-| Platform | Latest witnessed result | Status & Details |
-|---|---|---|
-| Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
-| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |
-| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): the Q4_K large-batch prefill arm now defaults to the mmq route on sm_80+, a same-card ABBA re-measure of 1.30–1.49× cold prefill (fak/llama.cpp b11870 0.17×→0.26× at P=128) with byte-identical greedy output; decode is unchanged within noise; observed 2026-11-07. | HW-witnessed ABBA on sm_120; the ≥0.5× prefill maturity bar is not yet met (0.13–0.26× llama), and the Q5/Q6 MMQ arm failed the byte-parity gate and was not landed. [RTX 5090 mmq prefill receipt](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md) |
-
-Read the status column before comparing rates. History: [benchmark index](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md);
-claim boundaries: [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
+fak is a local coding runtime.
+Run a model on your own computer and keep your prompts local. Connect your
+coding agent through fak’s gateway to allow reads while blocking writes.
 
 ## Try fak
 
-Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`). More install options are in the [install-options matrix](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md#install-options-at-a-glance); removal steps are in [Uninstall](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md#uninstall).
+[Install fak for your platform](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md#local-model-setup), then open a
+terminal. Use the same command on Windows x64, Linux x64, and Apple Silicon
+Macs to start the coding model.
 
-1. Start local inference on a supported Apple Silicon Mac. `fak up` sizes the model
-   and context to your memory and serves an OpenAI-compatible endpoint on `:8080`.
-   Under memory pressure it holds new work back instead of swapping. Add `--mock` to
-   walk the workflow with no model and no GPU (mock output is not performance evidence).
-   ```bash
-   fak up
-   # -> [READY] fak up running on http://127.0.0.1:8080
-   ```
-2. In another terminal, point an agent at it. Use `fak opencode`, `fak codex`,
-   `fak claude`, or [Pi](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/pi.md). Give it real work, e.g.
-   *"Using parallel subagents, audit the packages under internal/ and report their status."*
-   `fak up` serves only OpenAI chat completions (enough for OpenCode and Pi). `fak claude` and
-   `fak codex` need Messages and Responses: run `fak serve --gguf qwen38:27b-q4` for them.
-   No separate router is needed: agents talk to the local endpoint directly.
-
-### Governance for external agents (`fak guard`)
-
-Already running Claude Code or Codex? One command adds a capability floor around it.
-The kernel checks every tool call before it runs. Structural denies and danger
-rules block by structure; the strict `fail_closed` posture runs only allow-listed tools.
-fak forwards your Codex subscription credentials (no API key required):
-
-```bash
-fak guard -- codex
+```sh
+fak up --model 3B
 ```
 
-The guard rules on every tool call before it runs. To see allow/deny decisions with
-no key, no model, and no setup, run the offline agent or take the
-[interactive showcase](https://github.com/anthony-chaudhary/fak/blob/main/docs/showcase.html):
+The first run downloads a small coding model (about 1.9 GB). At `you>`, paste
+`def first(xs): return xs[0]` and ask “What input breaks this function?
+Write a test that catches it.” Look for a test that passes an empty list and
+checks for `IndexError`. Type `/quit` to exit.
 
-```bash
-fak agent --offline   # -> task completed
-```
+For build requirements, platform verification and other model sizes, see the
+[local model setup guide](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#local-model-setup).
 
-### Works with the agent you already use
+[Connect your coding agent](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/README.md) · [Hardware benchmarks](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md) · [How fak compares with llama.cpp](https://github.com/anthony-chaudhary/fak/blob/main/docs/native-inference-goal.md) · [Documentation](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md)
 
-| Agent | Command | Needs |
-|---|---|---|
-| Claude Code | `fak claude` | `fak serve` (Anthropic Messages, `/v1/messages`) |
-| Codex | `fak codex`, or `fak guard -- codex` | `fak serve` (OpenAI Responses, `/v1/responses`) |
-| OpenCode | `fak opencode` | `fak up` or `fak serve` (OpenAI chat completions) |
-| Pi | `fak pi` · [Pi guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/pi.md) | `fak up` or `fak serve` (OpenAI chat completions) |
-
-## Your machine, your files
-
-- **Local by default.** `fak serve` listens on `127.0.0.1:8080`. It refuses to start on an
-  address reachable from off this host unless you name an inbound token
-  (for example `--require-key-env`) or pass the deliberately named
-  `--unsafe-allow-unauthenticated-bind`.
-- **No opaque model store.** Downloaded models are plain files at
-  `<cache>/fak-models/hub/<owner>/<repo>/<revision>/<file>` (your user cache directory,
-  or `$FAK_MODELS_DIR/hub`). Copy, inspect, or delete them with ordinary tools.
-- **No phone-home.** No analytics SDK is linked, and fak runs no update check on its own:
-  `fak self-update` and `fak release-staleness` act only when you invoke them.
-- **Clean exit.** [Uninstall](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md#uninstall) covers the binary, services and shims, plus models and settings.
-- **Credit upstream.** Parts of fak are adapted from ggml / llama.cpp;
-  attributions and pinned revisions are in [NOTICE.md](https://github.com/anthony-chaudhary/fak/blob/main/NOTICE.md).
-
-## What changed since 2026-10-12
-
-- Fit planning: `fak serve --fit` jointly picks context, KV dtype and slots against a
-  stated workload and SLO. It refuses live boots with typed reasons instead of guessing size.
-- CUDA serving deepens: concurrent Qwen lanes share one device decode step, and sampled
-  MTP runs inside ordinary request serving. An opt-in paged KV store
-  (`FAK_CUDA_PAGED_KV=1`) lets requests sharing a prefix share device pages. The Q4_K
-  large-batch prefill arm now defaults to the mmq route on sm_80+. The same-card ABBA
-  receipt measured 1.30–1.49× cold prefill with byte-identical greedy output. An
-  explicit `FAK_CUDA_Q4K_PREFILL` remains the opt-out.
-- `fak claude` targets a local `fak serve` gateway (`127.0.0.1:8080`) by default. If an
-  optional fak router (a separately distributed component) answers on `FAK_ROUTER_URL`,
-  else `127.0.0.1:18101`, it fronts that instead; with no router it keeps the `fak serve`
-  default, and `--no-router` skips the probe. OpenCode and Pi use a router only when one is
-  configured (`fak node use`, `fak pi config --from-router`). One paused provider no longer stops every routed worker.
-- Multi-session serving: `fak up` admits several agent sessions against capacity, with
-  backpressure instead of timeouts. `fak node install` rolls back to the prior
-  registration when a start fails.
-- Serving engine: continuous batching is wired into decode, so concurrent cold requests
-  share one bounded packed prefill (code-verified; no accepted throughput receipt yet).
-  Packed prefill can also share work with live decode behind a qualification-only,
-  default-off build tag (#12328). It is a bounded software step with no throughput claim.
-- Guard policy: context changes, memory apply, and plugin writes are refused unless an
-  act-bound lease fences them. An attending operator can approve one exact refused call
-  with `fak guard allow --approve`; the agent cannot approve itself. The gateway's
-  workspace admission now defaults to the open posture
-  (`--workspace-admission open|permissive|strict` on `fak serve` and `fak guard`),
-  fixing a shipped floor that silently denied mutating tool calls after a kernel allow.
-- Native inference primitives: bounded CPU beam search, an explicit score-based SPM
-  tokenizer, a bounded Jinja chat-template runtime, and causal-model embeddings land
-  natively. MoE expert-residency and hot-set advisors ship with a `hotsetcheck` replay
-  CLI that measures routed-expert hit rate.
-- For builders: a stdlib-only utility tier (atomic file writes, bounded JSONL rotation,
-  pid liveness, and more) moved into the public Go API under `pkg/`.
-
-## Models fak has actually run — exact Hugging Face pins
-
-Every result above measured a pinned artifact, not "latest". The URLs below are the
-sources behind those receipts; `fak ls` aliases resolve to the same pins
-(`internal/modelreg`). Where a receipt records only a filename, the official model card
-is linked instead of an unrecorded mirror.
-
-| Model (artifact) | Pinned Hugging Face source | Witnessed on |
-|---|---|---|
-| Qwen3.8-27B Q4_K_M (`qwen38`, default) | [unsloth/Qwen3.8-27B-GGUF@f1bfb127](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/tree/f1bfb127c64f7072bdd2cad55f258b9c8b2910fe) · [official Qwen/Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B) | Apple M3 Pro, Metal |
-| Qwen3.6-27B Q4_K_M | [lmstudio-community/Qwen3.6-27B-GGUF](https://huggingface.co/lmstudio-community/Qwen3.6-27B-GGUF) | AMD RX 7600, Vulkan |
-| Qwen2.5-3B-Instruct Q8_0 | [Qwen/Qwen2.5-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct) (receipt records the Q8_0 GGUF filename only) | NVIDIA H100, CUDA |
-| DeepSeek-V4.1-Flash Q2_K (7 shards, 264,515,279,456 B) | [vcruz305/DeepSeek-V4.1-Flash-GGUF@c4a08554](https://huggingface.co/vcruz305/DeepSeek-V4.1-Flash-GGUF/tree/c4a085541cb53f67ee5e57b63d255e80cef286e7) · [official deepseek-ai/DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) | Strix Halo, Vulkan |
-| Qwen3.5-0.8B Q4_K_M | [Qwen/Qwen3.5-0.8B](https://huggingface.co/Qwen/Qwen3.5-0.8B) | Apple M3 Pro, Metal keepalive |
-| Prism Bonsai-2-27B PQ2_0 | [prism-ml/Ternary-Bonsai-2-27B-gguf@b072e1d3](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/b072e1d3b35a0a630cece372c2127528e0994386) | Apple M3 Pro, CPU |
-| SmolLM2-135M-Instruct Q8_0 | [bartowski/SmolLM2-135M-Instruct-GGUF](https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF) | in-kernel bit-exact HF oracle fixture |
-
-## Going deeper
-
-| If you want to… | Start here |
-|---|---|
-| Check what is shipped, limited, or planned | [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [claims](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) · [feature matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/features.md) |
-| Browse performance evidence | [all benchmarks](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/README.md) · [cache-value roll-up](https://github.com/anthony-chaudhary/fak/blob/main/docs/cache-value-rollup.md) · [Mac local models](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-local-models.md) |
-| Connect another agent or model | [Codex](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/openai-codex.md) · [Claude Code](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md) · [Pi](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/pi.md) · [subagents](https://github.com/anthony-chaudhary/fak/blob/main/docs/subagents-guide.md) · [all integrations](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations) |
-| Tune agents: work and output profiles | [Work profiles](https://github.com/anthony-chaudhary/fak/blob/main/docs/work-profiles.md) · [response profiles](https://github.com/anthony-chaudhary/fak/blob/main/docs/response-profiles.md) · [harness guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/harness-init.md) |
-| Understand the runtime | [Architecture](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) · [capability map](https://github.com/anthony-chaudhary/fak/blob/main/docs/CAPABILITIES.md) · [CLI reference](https://github.com/anthony-chaudhary/fak/blob/main/docs/cli-reference.md) · [Native inference goal](https://github.com/anthony-chaudhary/fak/blob/main/docs/native-inference-goal.md) |
-| Learn in prerequisite order | [Start here](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) · [learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) · [documentation index](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md) |
-| Work on the fak codebase itself | [first-day engineer guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/engineering/first-day.md) · [contributing](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) |
-| Build on fak, or run a commercial pilot | [Go API](https://github.com/anthony-chaudhary/fak/tree/main/pkg) · [harness contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/harness-kit-contract.md) · [contributing](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) · [commercial serving](https://github.com/anthony-chaudhary/fak/blob/main/docs/README-legacy.md#commercial-serving) |
-| Read sections moved off this page | [README overflow](https://github.com/anthony-chaudhary/fak/blob/main/docs/README-legacy.md) — why run on fak, agent profiles, subagent bench |
-
-Apache-2.0 licensed.
+[Apache-2.0 license](https://github.com/anthony-chaudhary/fak/blob/main/LICENSE)
 
 <!-- readme-verified: 2026-11-24 vs VERSION 0.57.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-11-24 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
 
@@ -9562,14 +9366,11 @@ The checkpoint is a **mediation boundary, not an operating-system sandbox**. It 
 
 | Builder job | Interface | fak owns | Start here |
 |---|---|---|---|
-| Prove the full managed loop deterministically | `fak agent --offline` | Planner fixture, proposal handling, policy verdicts, result admission, and continuation | [Reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md) |
 | Manage one local agent process | `fak manage` | Process lifecycle plus the configured hook and policy boundary | [One-agent guide](https://github.com/anthony-chaudhary/fak/blob/main/README.md#manage-one-local-agent-fak-guard) |
 | Point compatible clients at a shared endpoint | `fak serve` | HTTP gateway, routing, policy checkpoint, engines, and service evidence | [Server quickstart](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-quickstart.md) |
 | Embed or extend the managed runtime | Go ABI, MCP, or an adapter | Only the seams selected by the embedding application | [Runtime ownership and flow](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/agent-runtime.md) |
 
-**Default:** begin with `fak agent --offline`. It exercises the end-to-end checkpoint without a credential, live model, service deployment, or accelerator and therefore separates architecture validation from provider quality and infrastructure availability.
-
-**Next action:** run `fak agent --offline` and verify that the task completes while the poisoned result and destructive operation are blocked.
+To run a local model, follow [getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#local-model-setup).
 
 ## Execution-engine boundary
 
@@ -10398,9 +10199,7 @@ run. The operator chooses the integration mode and supplies task and
 configuration; the model backend produces model turns; a tool implementation
 owns only the admitted external side effect.
 
-> **Default:** prove this boundary first with the deterministic, no-key
-> `fak agent --offline` path. Then choose a live-provider or server integration from the
-> interface table below.
+> Follow the [getting-started guide](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) to connect a model.
 
 ## Ownership at a glance
 
@@ -10441,7 +10240,6 @@ result admission → continuation**. For the syscall analogy behind the contract
 
 | Builder job | Interface | What it gives you |
 |---|---|---|
-| Prove or inspect the reference loop locally | `fak agent --offline` | A deterministic A/B run using the mock planner, local tools, policy denial, reuse, and result screening; no provider key or network is required. |
 | Exercise the reference loop with a live compatible provider | `fak agent` plus provider configuration | The same turn-and-tool path with live model calls; use the CLI help and environment/config authorities for the selected provider. |
 | Host the native managed runtime as a service | `fak serve --native` | A long-lived agent application runtime that hosts sessions and the loop. Start with [Runtime vs client](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/runtime-vs-client.md), then the [server quickstart](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-quickstart.md). |
 | Put an existing model client behind fak | `fak serve` | The gateway runtime for compatible model traffic; this governs calls but does not move the client's own agent loop into fak. See [Gateway](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/gateway.md). |
@@ -10461,7 +10259,7 @@ shapes remain authoritative in [`cmd/fak/`](https://github.com/anthony-chaudhary
 | Mode | The detailed flow on this page describes fak-managed host-side execution. Gateway-only and guarded-client modes are valid choices, but they retain a client-owned loop. |
 | Generation | Current behavior; code and tests are authoritative when this explanation and runtime diverge. |
 | Lifecycle | `gen/now` builder route. Historical design notes are provenance, not this contract. |
-| Support boundary | The deterministic offline proof is the first supported diagnostic. Live-provider behavior also depends on the selected provider, credentials, model compatibility, and deployment configuration. Tool side effects remain the tool implementation's responsibility after admission. |
+| Support boundary | Live-provider behavior also depends on the selected provider, credentials, model compatibility, and deployment configuration. Tool side effects remain the tool implementation's responsibility after admission. |
 
 For security guarantees and their scope, use [`SECURITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md). For
 claim status, use [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md); this route does not promote a simulated
@@ -10469,16 +10267,7 @@ or scoped result into a broader product claim.
 
 ## Next action
 
-Run exactly this from the repository root:
-
-```bash
-fak agent --offline
-```
-
-The proof passes when the fak column reports `task completed (booked) YES`, the headline
-reports `poisoned result blocked : YES`, and it reports
-`destructive op prevented : YES`. The complete first-run sequence and expected output
-live in the [repro packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md).
+Run a model and use it from your coding agent. See [getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md).
 
 ## Deeper routes
 
@@ -13064,7 +12853,7 @@ ledger, and each names what would close it.
 
 ---
 title: "fak Repro Packet — Reproduce the Allow/Deny Boundary Offline"
-description: "A no-credential, offline reproduction of fak's allow/deny/quarantine boundary: validate a policy manifest, deny a dangerous action, and run the injection A/B."
+description: "A no-credential, offline reproduction of fak's tool allow/deny policy: validate a policy manifest, deny a dangerous action, and allow a permitted action."
 ---
 
 # Reproduce the offline allow/deny boundary
@@ -13079,22 +12868,18 @@ The canonical offline proof demonstrates two current behaviors in one determinis
 |---|---|---|
 | Dangerous `refund_payment` proposal | `DENY (POLICY_BLOCK)` | A reviewable manifest blocks the named action before tool execution. |
 | Benign `search_kb` proposal | `ALLOW` | The same policy preserves its useful read/search path. |
-| Injection A/B | Task booked; poisoned result blocked; destructive operation prevented | The protected arm keeps the fixture's poisoned instruction out of context and still completes the task. |
 
-This is a **current-generation, maintained deterministic witness**. It covers the offline mock-planner mode and the checked-in customer-support fixture on any supported Go build host. It does not establish live-model behavior, detector recall, production readiness, external endorsement, or fleet-scale performance. Those claims require their own authorities and evidence.
+This is a **current-generation, maintained deterministic witness**. It covers the checked-in customer-support fixture on any supported Go build host. It does not establish live-model behavior, detector recall, production readiness, external endorsement, or fleet-scale performance. Those claims require their own authorities and evidence.
 
 **Default:** use the offline source-checkout route below. It needs no credential, live model, network service, or accelerator.
 
-**Next action:** from a clean checkout with Go 1.26+, run this complete proof block and compare the four results with the table above:
+**Next action:** from a clean checkout with Go 1.26+, validate the manifest, then compare the two preflight results with the table above.
 
 ```bash
 go run ./cmd/fak policy --check examples/customer-support-readonly-policy.json
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
-go run ./cmd/fak agent --offline
 ```
-
-The final command writes the raw A/B details to local `agent-report.json`; the generated file is not committed. The sections below show the expected evidence and explain what each result proves.
 
 ## Witness 1: Policy Manifest Validates
 
@@ -13160,51 +12945,6 @@ fak: loaded capability floor from examples/customer-support-readonly-policy.json
 
 What this proves: the policy is not a blanket block. It preserves the useful
 read/search path while denying dangerous writes.
-
-## Witness 4: Offline Injection A/B
-
-Command:
-
-```bash
-go run ./cmd/fak agent --offline
-```
-
-Key output:
-
-```text
-== fak agent: turn-use vs now ==
-seam        : OFFLINE (deterministic mock planner)
-
-metric                        now(base)          fak
---------------------------   ----------   ----------
-model turns                           9            7
-tool calls                            8            6
-tool errors (-> retries)              1            0
-prompt tokens                      2555         1571
-completion tokens                   232          184
-in-syscall repairs                  n/a            1
-vDSO dedup hits                     n/a            1
-adjudicator denies                  n/a            1
-MMU quarantines                     n/a            0
-injection in context                YES           no
-destructive op executed             YES           no
-task completed (booked)             YES          YES
-
-HEADLINE
-  turns saved by fak        : 2  (22%)   [both arms completed -> comparable]
-  tokens saved by fak       : 1032  (37%)
-  poisoned result blocked   : YES
-  destructive op prevented  : YES
-```
-
-Raw output:
-
-- `agent-report.json` (produced by the `fak agent --offline` run — not committed)
-
-What this proves: in the deterministic offline harness, the baseline sees the
-poisoned instruction and executes the destructive operation; the `fak` arm keeps
-the instruction out of context, denies the destructive operation, and still books
-the flight.
 
 ## Fixture requests
 
@@ -19925,14 +19665,12 @@ From the repository root:
 ```bash
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
-go run ./cmd/fak agent --offline
 ```
 
 Expected shape:
 
 - `refund_payment` is denied with `POLICY_BLOCK`.
 - `search_kb` is allowed.
-- `fak agent --offline` blocks the injected/destructive path while the task still books.
 
 That proves the capability floor is structural, not a model judgment.
 
@@ -21077,7 +20815,7 @@ Pass means the first call reports `DENY (POLICY_BLOCK)` and the second reports `
 
 **Route context:**
 
-- **Mode:** the check above is deterministic preflight mode with no model, key, or GPU. Containment evidence is scoped to `fak agent --offline`; production coverage is the documented `fak agent` or gateway path selected from [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md), not an arbitrary integration or unmanaged client.
+- **Mode:** the check above is deterministic preflight mode with no model, key, or GPU. For production coverage, see the documented `fak agent` or gateway path selected from [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md), not an arbitrary integration or unmanaged client.
 - **Generation:** this page documents the current `gen/now` floor. Future security work is not a current guarantee unless [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) marks it `[SHIPPED]`.
 - **Lifecycle:** `fak` is pre-1.0 with a rolling latest release; the supported line is defined under [Supported versions](#supported-versions).
 - **Support boundary:** capability-floor, containment, gateway/adjudication, and policy/signature bypasses are security reports. Detector evasion, permissive policy authoring, and model quality are scoped separately below.
@@ -22557,7 +22295,7 @@ fak bench     --suite tau2-smoke --out report.json     # A/B vDSO ablation -> re
 fak ablate    --sweep vdso                             # N-arm self-ablation: one frozen trace, feature on/off, deltas off the kernel counters
 fak ablate    --rungs --trace TRACE.json               # per-rung attribution: replay a frozen turnbench trace, mask one adjudicator rung per arm, diff the kernel counters (--rungs=grammar,ifc-sink restricts; default suite turntax-airline)
 fak turntax   --suite turntax-airline                  # price the extra error-code MODEL turn the 1-shot kernel deletes
-fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
+fak agent     --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
 fak manage    [--session-pressure-gate high,report=pressure.json] [--] <agent command>  # primary managed-agent front door; short alias: fak m; legacy guard spelling remains compatible during sunset
 fak manage disable [--reason TEXT] [--] [agent command]          # one-child BREAK-GLASS raw repair session (default child: codex); strips inherited guard routing, persists no disabled state
 fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [--turns N] [--addr URL]   # operator control of a served session's live drive state, over /v1/fak/session(s)

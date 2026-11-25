@@ -83,8 +83,6 @@ The first is the primary; it matches the vetted asset in
 > go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
 > ```
 >
-> `fak agent --offline` shows the same two gates in a full agent loop: injection-in-context
-> YES→no, destructive-op YES→no, task still completes.
 >
 > Repo: https://github.com/anthony-chaudhary/fak · live in-browser demos:
 > https://anthony-chaudhary.github.io/fak/demos.html
@@ -143,7 +141,7 @@ Use this when the venue rewards an idea-first essay rather than a link post.
 > run; your model, keys, and IDE stay exactly as they are. The prior-art audit scored 0/29
 > novel — every primitive is established engineering. The contribution is putting them in one
 > in-process gate where the tool call is the checkpoint. Don't trust that framing; run the
-> 60-second proof, then try to make the offline demo fire a destructive call. If you can, that's
+> 60-second proof, then test a prohibited tool against your own policy. If you can, that's
 > a real bug and I want the repro.
 
 Deeper, per-channel variants (r/LocalLLaMA primary post, the full paste-from objections list,
@@ -197,8 +195,7 @@ figures are **simulated**. Never present either as a shipped result.
 - [ ] **Green CI on the tip you're pointing at.** `make ci` passes on `main` (build + vet +
       test + claims-lint). A launch that links a red tree is the worst possible first impression.
 - [ ] **The 60-second proof reproduces on a clean checkout.** Run the two `preflight` commands
-      above and confirm `DENY (POLICY_BLOCK)` / `ALLOW` verbatim; run `fak agent --offline` and
-      confirm the two YES→no flips. (Last verified against the live binary 2026-06-22 — re-run.)
+      above and confirm `DENY (POLICY_BLOCK)` / `ALLOW` verbatim.
 - [ ] **Live demos load:** https://anthony-chaudhary.github.io/fak/demos.html returns the demo
       page, not a 404. The social-preview card resolves (`visuals/social-preview.png` tracked on `main`).
 - [ ] **Every number in the post traces to the ledger.** Cross-check against

@@ -38,14 +38,7 @@ lands you on a concept whose prerequisite you have not met yet.
 the kernel. The readings are the docs you would read anyway; the path is what stops you
 reading them in the wrong order.
 
-> New to the project entirely? The fastest taste of the payoff is one offline pass that
-> prints the token/turn savings from the shared prefix — `go run ./cmd/fak agent --offline`
-> (see **FAK 104**); the same run also prints the safety A/B, which
-> [`README.md`](README.md#try-fak) frames as the
-> security-side boundary proof. Either way, come back here and start at **FAK 101**. Just
-> want to install and run? [`GETTING-STARTED.md`](GETTING-STARTED.md) is the install-and-run
-> page and [`START-HERE.md`](START-HERE.md) routes a job you already have; this page is the
-> *concept* front door.
+> To run your first local model, follow the [README](README.md#try-fak). Start the course at **FAK 101**.
 
 ## Learn without mysteries
 
@@ -309,14 +302,10 @@ go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.js
 **You'll be able to:**
 - Explain how one write-time gate is simultaneously a security act and an optimization act
 - State the two honest fences on the convergence (which workload, which metric it does NOT win)
-- Run one offline pass that prints both the safety A/B and the token/turn savings
 
 **Read:** [`README.md`](README.md), [`docs/concepts-and-story.md`](docs/concepts-and-story.md)
 
-**Lab:**
-```bash
-go run ./cmd/fak agent --offline  # one run prints the safety A/B AND the token/turn savings from the same boundary
-```
+**Lab:** Inspect the workload, baseline and receipt for one [cache reuse result](docs/cache-value-rollup.md).
 
 **Checkpoint:** Explain how one write-time gate is both security and optimization. State the two honest fences: which workload it is a win for, and which metric (raw GPU throughput) it does NOT win.
 

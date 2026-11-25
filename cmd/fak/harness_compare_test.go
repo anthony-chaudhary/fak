@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 )
 
 func TestHarnessCompareCLIAll(t *testing.T) {
@@ -118,27 +116,16 @@ func TestHarnessSubcommandDispatch(t *testing.T) {
 	}
 }
 
-func TestHarnessCompareBench(t *testing.T) {
-	// The benchmark installs its tool policy on the shared monitor. Restore the
-	// caller's exact floor so later tests still reach workspace lease admission.
-	priorPolicy := adjudicator.Default.PolicySnapshot()
-	t.Cleanup(func() { adjudicator.Default.SetPolicy(priorPolicy) })
+func TestHarnessCompareBenchRetired(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rc := runHarnessCompare(&stdout, &stderr, []string{"--baseline", "opencode", "--bench", "--view", "json"})
-	if rc != 0 {
-		t.Fatalf("expected rc 0 from runHarnessCompare --bench, got %d; stderr: %s", rc, stderr.String())
+	if rc != 2 {
+		t.Fatalf("runHarnessCompare retired --bench rc = %d, want 2; stderr: %s", rc, stderr.String())
 	}
-	var report HarnessComparisonReport
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-		t.Fatalf("failed to unmarshal JSON: %v", err)
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -bench") {
+		t.Fatalf("retired --bench diagnostic = %q", stderr.String())
 	}
-	if report.EmpiricalOutcome == nil {
-		t.Fatal("expected EmpiricalOutcome to be populated with --bench")
-	}
-	if report.EmpiricalOutcome.FakTurns <= 0 {
-		t.Errorf("expected FakTurns > 0, got %d", report.EmpiricalOutcome.FakTurns)
-	}
-	if !report.EmpiricalOutcome.TaskCompleted {
-		t.Errorf("expected TaskCompleted=true on deterministic mock bench")
+	if stdout.Len() != 0 {
+		t.Fatalf("retired --bench wrote stdout: %q", stdout.String())
 	}
 }

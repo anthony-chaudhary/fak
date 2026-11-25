@@ -44,7 +44,7 @@ Classify each candidate once:
 | **Unsupported absolute** | `never`, `cannot`, or an equivalent universal claim lacks a named scope, generation, or proof. | Finding: scope and prove it, or remove it. |
 | **Historical or research-only** | The statement reports dated investigation or a superseded design rather than the current contract. | Move to a dated provenance route; do not use it as current front-door authority. |
 
-A contributor prohibition can be an affirmative boundary: for example, a named repository operation with an enforced guard and recovery action is scoped behavior, not unexplained product negation. Conversely, “no model is used” is a finding when the surrounding route does not say whether it means deterministic preflight, `agent --offline`, a policy decision, or every live request.
+A contributor prohibition can be an affirmative boundary: for example, a named repository operation with an enforced guard and recovery action is scoped behavior, not unexplained product negation. Conversely, “no model is used” is a finding when the surrounding route does not say whether it means deterministic preflight, a policy decision, or every live request.
 
 For every candidate, answer these checks before assigning a disposition:
 
@@ -73,7 +73,7 @@ The revision audit found **170 candidate lines across six routes**:
 Representative read-backs anchor the decision:
 
 - `README.md` identifies the deterministic mock planner before limiting what the offline proof establishes; it does not generalize that boundary to live-model quality or latency.
-- `SECURITY.md` names deterministic preflight and `agent --offline`, then routes production coverage to the selected managed path.
+- `SECURITY.md` names deterministic preflight, then routes production coverage to the selected managed path.
 - `AGENTS.md` uses strong prohibitions as enforceable contributor contracts, each attached to the affected operation and usually a recovery command; those statements do not describe runtime model behavior.
 
 The zero-finding result applies only to the stated files and revision. It is evidence that this bounded set passed the procedure, not a claim that every repository document or future revision is free of ambiguity.

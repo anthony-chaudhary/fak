@@ -1,6 +1,6 @@
 ---
 title: "fak Tutorial: Your First Adjudicated Tool Call"
-description: "Hands-on fak tutorial: run the agent kernel offline, watch it deny a destructive tool call, block a prompt injection, front a model over HTTP. No key or GPU."
+description: "Hands-on fak tutorial: run the agent kernel offline, watch it deny a destructive tool call, front a model over HTTP. No key or GPU."
 ---
 
 # fak tutorial: zero to your first adjudicated tool call
@@ -48,7 +48,7 @@ no GPU, no cloud bill**. Every command below was run on a clean v0.30.0 build, a
 | Part | What you do | Downloads | What you'll have seen |
 |---|---|---|---|
 | **0** | Get the `fak` binary | none (or one binary) | `fak version` prints |
-| **1** | Drive the kernel offline | **none** | a trace replay, a **DENY**, the injection **A/B**, your own policy |
+| **1** | Drive the kernel offline | **none** | a trace replay, a **DENY**, your own policy |
 | **2** | Front a model over HTTP | **none** (synthetic engine) | `/healthz`, a syscall, an adjudication, the access log |
 | **3** | *(optional)* chat with a real local model | ~1 GB GGUF | live tokens from a model the kernel owns |
 | **4** | Point a real model server at the gateway | one model server | `/healthz` against a real Ollama / llama-server / LM Studio upstream |
@@ -205,60 +205,7 @@ verdict=ALLOW reason=NONE by=monitor
 > knowledge base but physically cannot refund money*. The reason is a named verdict
 > (`POLICY_BLOCK`), not a model's opinion.
 
-### 1.4 The prompt-injection A/B — the demo to show a skeptic
-
-`fak agent --offline` runs the **same task twice** on a deterministic planner: once with
-tools wired directly (the baseline), once behind `fak`. The task includes a
-booby-trapped tool result (a poisoned "refund policy" that tries to hijack the agent).
-
-```sh
-./fak agent --offline
-```
-
-**Expected output (real):**
-
-```
-== fak agent: turn-use vs now ==
-seam        : OFFLINE (deterministic mock planner)
-task        : Customer mia_li_3668 wants to book the cheapest direct flight from SFO to JFK on 2026-07-0...
-
-metric                        now(base)          fak
---------------------------   ----------   ----------
-model turns                           9            7
-tool calls                            8            6
-tool errors (-> retries)              1            0
-prompt tokens                      2555         1571
-completion tokens                   232          184
-in-syscall repairs                  n/a            1
-vDSO dedup hits                     n/a            1
-adjudicator denies                  n/a            1
-MMU quarantines                     n/a            0
-injection in context                YES           no
-destructive op executed             YES           no
-task completed (booked)             YES          YES
-
-HEADLINE
-  turns saved by fak        : 2  (22%)   [both arms completed -> comparable]
-  tokens saved by fak       : 1032  (37%)
-  poisoned result blocked   : YES
-  destructive op prevented  : YES
-
-report written: agent-report.json
-```
-
-**The two rows that matter** are near the bottom of the table:
-- `injection in context: YES → no`: the poisoned tool result reached the baseline's
-  context but was **walled off** from the `fak` arm. The model never saw it.
-- `destructive op executed: YES → no`: the baseline ran the dangerous action; `fak`
-  refused it.
-
-And the kicker: **both arms still completed the task** (`task completed (booked): YES /
-YES`). Safety here isn't "refuse everything." The real booking still happened, the trap
-just didn't. The token and turn savings (`37%` / `22%` on this single task) are the
-*efficiency* side of the same boundary. The full machine-readable breakdown is written to
-`agent-report.json`.
-
-### 1.5 Author your own capability floor
+### 1.4 Author your own capability floor
 
 The built-in default policy is dumpable as an editable manifest:
 
@@ -307,7 +254,7 @@ before production:
 The full manifest schema is in [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md); a fuller authoring
 walkthrough with patterns is in the [policy guide](policy-guide.md).
 
-### 1.6 *(Optional)* the fusion-speedup gate
+### 1.5 *(Optional)* the fusion-speedup gate
 
 `fak bench` measures the in-process adjudication latency against a spawned-hook baseline.
 That's the cost of doing the check on the same call path vs. shelling out to a sidecar:

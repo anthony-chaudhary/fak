@@ -10,7 +10,7 @@ TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
 TEST_PACKAGE_BUDGET ?= 30s
 TEST_TEST_BUDGET ?= 5s
 SMOKE_FAK ?= ./fak
-SMOKE_AGENT_REPORT ?= .fak/smoke-agent.json
+SMOKE_UP_PLAN ?= .fak/smoke-up-plan.txt
 ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$$
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
@@ -273,17 +273,18 @@ dogfood-test:
 	@echo "dogfood-test OK"
 
 # smoke-exec: fast real-world hermetic CLI smoke test on the freshly built binary.
-# Proves binary linkage, policy adjudication, allow/deny verdicts, and offline agent execution.
+# Proves binary linkage, policy adjudication, allow/deny verdicts, and the real
+# fak up product-entry planner. The released-asset matrix owns the weight-backed
+# first response; mock/offline demo output is never accepted here (#14508).
 smoke-exec: build
 	$(SMOKE_FAK) version
 	$(SMOKE_FAK) preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}" | grep -q "verdict=DENY"
 	$(SMOKE_FAK) preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}" | grep -q "verdict=ALLOW"
-	@mkdir -p "$(dir $(SMOKE_AGENT_REPORT))"
-	@rm -f "$(SMOKE_AGENT_REPORT)"
-	@$(SMOKE_FAK) agent --offline --out "$(SMOKE_AGENT_REPORT)" >/dev/null
-	@test -s "$(SMOKE_AGENT_REPORT)" || { echo "smoke-exec: offline agent produced no report" >&2; exit 1; }
-	@grep -q '"both_completed": true' "$(SMOKE_AGENT_REPORT)" || { echo "smoke-exec: offline agent did not complete both arms" >&2; exit 1; }
-	@grep -q '"live": false' "$(SMOKE_AGENT_REPORT)" || { echo "smoke-exec: agent report is not the offline witness" >&2; exit 1; }
+	@mkdir -p "$(dir $(SMOKE_UP_PLAN))"
+	@rm -f "$(SMOKE_UP_PLAN)"
+	@$(SMOKE_FAK) up --model 3B --dry-run --json --memory-gib 32 >"$(SMOKE_UP_PLAN)"
+	@grep -q '"schema": "fak-macfit-turnkey/1"' "$(SMOKE_UP_PLAN)" || { echo "smoke-exec: fak up emitted no stable plan schema" >&2; exit 1; }
+	@grep -q '"name": "3B"' "$(SMOKE_UP_PLAN)" || { echo "smoke-exec: fak up did not select the README 3B tier" >&2; exit 1; }
 	@echo "smoke-exec OK (real-world CLI execution verified)"
 
 # smoke: end-to-end real-world smoke testing across binary execution and dogfood launcher tests.

@@ -224,12 +224,15 @@ func TestHonestyLedgerUsesClaimcheckDocumentSet(t *testing.T) {
 }
 
 func TestFindFirstCommandRequiresFence(t *testing.T) {
-	if ok, _ := findFirstCommand(map[string]string{"README.md": "Run fak preflight to see a denial."}); ok {
+	if ok, _ := findFirstCommand(map[string]string{"README.md": "Run fak up to start."}); ok {
 		t.Error("a prose token must not count as a first command")
 	}
-	ok, where := findFirstCommand(map[string]string{"README.md": "Try it:\n```\nfak preflight --policy p.json\n```\n"})
+	ok, where := findFirstCommand(map[string]string{"README.md": "Try it:\n```\nfak up\n```\n"})
 	if !ok || where != "README.md" {
 		t.Errorf("findFirstCommand(fenced) = (%v, %q), want (true, README.md)", ok, where)
+	}
+	if ok, _ := findFirstCommand(map[string]string{"README.md": "```\nfak agent --offline\n```\n"}); ok {
+		t.Error("offline demo must not satisfy the real first-command contract")
 	}
 }
 
@@ -880,14 +883,14 @@ func TestRefusalRecoveryMappedKpi(t *testing.T) {
 }
 
 func TestQuickstartSignalFindsSignalInProofBlock(t *testing.T) {
-	if f, s := quickstartSignal(map[string]string{"AGENTS.md": "Proof:\n```\nfak preflight --policy p.json   # -> DENY\n```\n"}); !f || !s {
-		t.Errorf("proof with -> signal => (%v,%v), want (true,true)", f, s)
+	if f, s := quickstartSignal(map[string]string{"README.md": "Try fak:\n```sh\nfak up --model 3B   # -> you>\n```\n"}); !f || !s {
+		t.Errorf("first run with -> signal => (%v,%v), want (true,true)", f, s)
 	}
-	if f, s := quickstartSignal(map[string]string{"AGENTS.md": "Proof:\n```\nfak preflight --policy p.json\n```\n"}); !f || s {
-		t.Errorf("proof without signal => (%v,%v), want (true,false)", f, s)
+	if f, s := quickstartSignal(map[string]string{"README.md": "Try fak:\n```sh\nfak up --model 3B\n```\n"}); !f || s {
+		t.Errorf("first run without signal => (%v,%v), want (true,false)", f, s)
 	}
-	if f, s := quickstartSignal(map[string]string{"AGENTS.md": "Proof:\n```\nfak preflight --allow-foo --policy p.json\n```\n"}); !f || s {
-		t.Errorf("incidental flag is not a success marker => (%v,%v), want (true,false)", f, s)
+	if f, s := quickstartSignal(map[string]string{"README.md": "Try fak:\n```sh\nfak up --model 3B\n# Downloads the selected model on first run.\n```\n"}); !f || s {
+		t.Errorf("setup prose is not a success marker => (%v,%v), want (true,false)", f, s)
 	}
 	if f, s := quickstartSignal(map[string]string{"README.md": "no fenced first command at all"}); f || s {
 		t.Errorf("no fenced command => (%v,%v), want (false,false)", f, s)

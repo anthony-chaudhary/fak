@@ -84,13 +84,9 @@ fak manage claude      # envuelve tu agente existente en un solo comando
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # inyección detenida, tarea igualmente completada
 ```
 
-El capability floor es **default-deny** y se comprueba *dentro* del kernel, en el mismo call
-path (**fail-closed**): una acción que no está en la allow-list no puede ejecutarse, por más
-que se convenza al modelo. En las pruebas en vivo, la prompt injection alcanzó la baseline sin
-proteger 5/5; fak la aisló 5/5.
+Esta política permite `search_kb` y deniega `refund_payment`.
 
 ## Por qué importa para España, la UE y América Latina
 

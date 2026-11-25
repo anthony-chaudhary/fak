@@ -270,6 +270,21 @@ def test_live_rows_are_well_formed() -> None:
     assert wf["defects"] == [], f"malformed funnel-stage rows: {wf['defects']}"
 
 
+def test_live_land_and_act_contracts_reward_real_value_and_linked_evidence() -> None:
+    """Front-door scoring must not pressure README to regrow demos or evidence tables."""
+    rows = {r["id"]: r for r in _live_payload()["_data"]["rows"]}
+    land = {a["id"]: a for a in rows["land"]["affordances"]}
+    act = {a["id"]: a for a in rows["act"]["affordances"]}
+    assert land["hero-first-command"]["tokens"] == ["fak up"]
+    assert "headline-number" not in land and "numbers-are-sourced" not in land
+    assert land["evidence-route"]["severity"] == "hard"
+    assert "offline-first-command" not in act
+    assert act["local-model-first-command"]["tokens"] == ["fak up"]
+    assert act["observable-signal"]["tokens"] == ["you>", "[READY]"]
+    assert act["platform-envelope"]["severity"] == "hard"
+    assert act["independent-evidence"]["severity"] == "hard"
+
+
 def test_live_front_door_converts_zero_debt() -> None:
     """THE sentinel: the real tree must fold to zero popularization-debt with every
     funnel stage positioned. If this fails, a front-door affordance regressed (a

@@ -177,10 +177,10 @@ func TestNativeAgentReceiptCalls(t *testing.T) {
 	})
 }
 
-func TestNativeAgentOfflinePrintsAnswerAndWritesReceipt(t *testing.T) {
+func TestNativeAgentFixturePrintsAnswerAndWritesReceipt(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "native.json")
 	stdout, stderr := captureAgentStdio(t, func() {
-		cmdAgent([]string{"--native", "--offline", "--out", out})
+		cmdAgentWithMock([]string{"--native", "--out", out})
 	})
 	if !strings.Contains(stdout, "Booked flight UA123") {
 		t.Fatalf("stdout did not carry the final answer:\n%s", stdout)
@@ -230,10 +230,10 @@ func TestRawAgentReceiptIsSingleBaselineArm(t *testing.T) {
 	}
 }
 
-func TestRawAgentOfflinePrintsAnswerAndWritesReceipt(t *testing.T) {
+func TestRawAgentFixturePrintsAnswerAndWritesReceipt(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "raw.json")
 	stdout, stderr := captureAgentStdio(t, func() {
-		cmdAgent([]string{"--raw", "--offline", "--out", out})
+		cmdAgentWithMock([]string{"--raw", "--out", out})
 	})
 	if !strings.Contains(stdout, "Booked flight UA123") {
 		t.Fatalf("stdout did not carry the final answer:\n%s", stdout)
@@ -274,11 +274,11 @@ func TestRawAgentOfflinePrintsAnswerAndWritesReceipt(t *testing.T) {
 	}
 }
 
-func TestRawAgentRespectsTaskOfflineAndOutFlags(t *testing.T) {
+func TestRawAgentRespectsTaskAndOutFlags(t *testing.T) {
 	customTask := "Plan trip to New York"
 	out := filepath.Join(t.TempDir(), "custom_raw.json")
 	captureAgentStdio(t, func() {
-		cmdAgent([]string{"--raw", "--task", customTask, "--offline", "--out", out})
+		cmdAgentWithMock([]string{"--raw", "--task", customTask, "--out", out})
 	})
 
 	body, err := os.ReadFile(out)
@@ -303,7 +303,7 @@ func TestRawAgentRespectsTaskOfflineAndOutFlags(t *testing.T) {
 func TestRawAgentModeFlag(t *testing.T) {
 	outRaw := filepath.Join(t.TempDir(), "mode_raw.json")
 	captureAgentStdio(t, func() {
-		cmdAgent([]string{"--mode", "raw", "--offline", "--out", outRaw})
+		cmdAgentWithMock([]string{"--mode", "raw", "--out", outRaw})
 	})
 	bodyRaw, err := os.ReadFile(outRaw)
 	if err != nil {
@@ -319,7 +319,7 @@ func TestRawAgentModeFlag(t *testing.T) {
 
 	outNative := filepath.Join(t.TempDir(), "mode_native.json")
 	captureAgentStdio(t, func() {
-		cmdAgent([]string{"--mode", "native", "--offline", "--out", outNative})
+		cmdAgentWithMock([]string{"--mode", "native", "--out", outNative})
 	})
 	bodyNative, err := os.ReadFile(outNative)
 	if err != nil {
@@ -349,7 +349,7 @@ func TestRawAgentZeroAdjudicationsWitness(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "unmediated.json")
 	captureAgentStdio(t, func() {
-		cmdAgent([]string{"--raw", "--offline", "--out", out})
+		cmdAgentWithMock([]string{"--raw", "--out", out})
 	})
 
 	body, err := os.ReadFile(out)

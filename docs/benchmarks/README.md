@@ -12,14 +12,26 @@ in [`../../BENCHMARK-GALLERY.md`](../../BENCHMARK-GALLERY.md). Each sheet below 
 own provenance labels (MEASURED / MODELED / WITNESSED / PENDING / GATED); this page just
 tells you where to look.
 
+## Latest hardware results — 2026-11-24
+
+One row per hardware family: the newest committed performance receipt for that platform,
+with its claim boundary and receipt link. A row stays historical until a newer quality-complete
+measurement exists.
+
+| Platform | Latest witnessed result | Status & Details |
+|---|---|---|
+| Mac | Inkling-2-Mini UD-Q3_K_XL on a 36 GB Apple M3 Pro (18-core GPU, Metal): fak-native decode with DFlash2 draft verification reached 97.5–107.4% of Splash 1.7.2 on natural prompts (40.3 vs 37.5 tok/s on 32-token capitals) and 148% on repeated text (177.1 vs 119.6); prefill was 98–108% of Splash; mainline llama.cpp b12681 decodes 18.9 tok/s on the same Mac and GGUF; observed 2026-11-24. | HW-witnessed ABBA, warm single request, same target and draft weights; 128-token Fibonacci trails Splash by 2.5% (63.6 vs 65.2). Short suites match token-for-token; one 128-token prompt diverges at near-ties in both engines. Needs `main` at or after 1f31533f2: **not in the v0.57.0 release**. [M3 Pro Inkling-2 receipt](published/m3pro-inkling2-mini-metal/RESULTS.md) |
+| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](STRIX-HALO-DEEPSEEK-V41-FLASH.md) |
+| NVIDIA | Inkling-2-Mini UD-Q3_K_XL on an RTX 5080 16 GB (sm_120): fak-native resident CUDA decode reached 119.9 tok/s single-stream on the default path, about 1.48x upstream llama.cpp tg128 (81.0 on the same card and GGUF) and level with the fastest llama.cpp fork measured (119.5 in the same window); opt-in speculative decode (`FAK_INKLING2_SPEC=2`) reached 151.7 tok/s, +26.6% over plain decode in the same window; greedy output matches the llama.cpp oracle on 3 of 4 cases; observed 2026-11-24. | HW-witnessed ABBA, in-process decode bench, not a served-endpoint rate. Speculative decode is off by default because its batched verify is not bit-exact to the per-token step. The fourth oracle case diverges at a known near-tie, and at 1,946 tokens of context plain decode still trails the fork (89.0 vs 113.8 tok/s). [Plain decode receipt](published/aegis-inkling2-fork-parity/RESULTS.md), [spec decode receipt](published/aegis-inkling2-spec-decode/RESULTS.md) |
+
+For past measurements, browse the sheets below. For comparisons and their limits, see the
+[benchmark authority](../../BENCHMARK-AUTHORITY.md). The [model sources](../supported/models.md#exact-hugging-face-pins-for-witnessed-models) identify the files used for these runs.
+
 ## Publishing the latest hardware result
 
-Keep detailed and historical receipts indexed here. Only the newest committed receipt for
-each of Mac, AMD, and NVIDIA belongs on the repository front page. When a receipt becomes the
-latest for one of those platforms, update its exact row and metadata in
-[`hardware-latest.json`](hardware-latest.json) and update the matching `README.md` row in the
-same change. The README freshness audit verifies the three-platform set, heading date, exact
-rows, observed dates, and that every indexed detail path exists.
+When a newer receipt qualifies, update the row above and its entry in
+[hardware-latest.json](hardware-latest.json) together. The freshness audit checks
+the dates, the three platform rows and the links to their receipts.
 
 ## Engine identity rule
 

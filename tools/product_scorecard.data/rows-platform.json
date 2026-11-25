@@ -43,7 +43,7 @@
       "entry_doc": "GETTING-STARTED.md",
       "verdict": "usable-today",
       "gaps": [
-        "Needs an upstream model server (ollama / vLLM / a provider) running; the offline feel is the no-server boundary (fak agent --offline / serve --stdio)",
+        "Needs an upstream model server (ollama / vLLM / a provider) running; the offline feel is the no-server boundary (fak preflight / serve --stdio)",
         "stream:true SSE is synthesized from the finished adjudicated turn, not true token-by-token streaming"
       ],
       "durability_note": "Gateway tests run on every commit; the wire client never supplies a Ref, so the IFC/secret/self-modify rungs stay armed on proxied calls."

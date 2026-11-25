@@ -1,6 +1,6 @@
 ---
 name: refresh-readme
-description: One repeatable pass over README.md — the front door — that keeps ONLY the most important points current and honestly framed. Runs the freshness auditor (tools/readme_freshness_audit.py), turns each FAIL into a required edit and each WARN into a judgment call, applies the three front-page laws (SOTA-vs-us-never-naive, 6th-grade/Feynman-but-accurate, wide-audience), re-stamps the readme-verified marker, and commits ONLY README.md (+ the tool) by explicit path. Use after a release / version bump, after a headline number changes, when a link dies, or on a /loop cadence.
+description: One repeatable pass over README.md — the front door — that keeps ONLY the first-run path and most important points current and honestly framed. Runs the freshness auditor (tools/readme_freshness_audit.py), turns each FAIL into a required edit and each WARN into a judgment call, keeps evidence inventories in linked detail pages, re-stamps the readme-verified marker, and commits only the owned README lane by explicit path.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/refresh-readme/SKILL.md
@@ -47,8 +47,8 @@ every pass.
 
 3. **Wide-audience appeal.** The first screen gives each reader a foothold: the
    skeptic (what's real / what's not), the security lead (the lock, not the
-   screener), the perf engineer (the reuse win + its fences), the casual reader
-   (the 2-minute no-key demo). If a section serves only one audience, ask whether
+   screener), the perf engineer (a route to bounded evidence), the casual reader
+   (the supported local-model first run). If a section serves only one audience, ask whether
    it belongs on the front page or behind a "Go deeper" link.
 
 And the size law that wraps all three: **the front page holds only the most
@@ -57,9 +57,9 @@ the page could hold only ten things?* If not, it belongs in a linked topic doc,
 not on the front page. Detail flows OUT to `docs/` and the "Go deeper" table; the
 front page stays small.
 
-**The size law now has teeth (it used to be aspirational).** Five of the six
-substance checks reward *adding* an affordance — put `fak guard` up top, add a
-speed number, add a hero result, add a persona router. Optimized to those alone,
+**The size law now has teeth (it used to be aspirational).** Substance checks
+must not reward duplicating advanced recipes or evidence inventories. Optimized
+for additions alone,
 the page only ever grows: the git log shows it halved on 2026-07-01 and
 immediately regrew, one well-meaning "surface X on the front page" commit at a
 time. `front_page_focus` is the counterweight — a line budget, a section-count
@@ -100,7 +100,7 @@ python tools/readme_freshness_audit.py            # human rendering of the same 
 
 `readme-before.json` is the mandatory first artifact. Quote every binding `FAIL` check name and
 its evidence before editing. Retire all binding FAIL rows before advisory prose polish; an
-advisory unglossed term such as `KV cache` must not displace a red `guard_prominence` check. The
+advisory unglossed term such as `KV cache` must not displace a red first-run check. The
 current README product defect belongs in its dedicated README issue, not in this skill-only
 adjudication.
 
@@ -113,6 +113,8 @@ It checks, and exits non-zero on any **FAIL**:
 | `naive_baseline` | a bolded headline that LEADS with a "naive" baseline (law 1) | **FAIL** |
 | `headline_authority` | a bolded multiplier not mirrored in `BENCHMARK-AUTHORITY` | WARN |
 | `freshness_stamp` | the `readme-verified` marker absent or older than 14d | WARN |
+| `hardware_front_page` | README does not link `docs/benchmarks/README.md`, or that page's rows drift from the hardware manifest/receipts | **FAIL** |
+| `lcd_onramp` | the front page lacks the local-model setup links, published platform envelope, or a real `fak up` startup (with an optional documented model selector); also refuses the retired offline-demo route | **FAIL** |
 | `jargon_density` | first-screen expert terms with no plain gloss nearby (law 2) | advisory |
 | `front_page_focus` | the page busts the line/section budget or restates the lead ≥3× (the size law) | debt |
 
@@ -148,6 +150,11 @@ Enter this step only after all binding FAIL rows are green.
   security lead, the perf engineer, and the casual reader each get a foothold in
   the first screen? If a point serves none of them, it's a candidate to move
   behind a link (the size law).
+- **Do not restore advanced commands or evidence tables.** Shell-specific install
+  recipes, `fak guard` invocations, hardware rows, and model-pin inventories live
+  in their linked topic pages. The README keeps the local-model setup links,
+  the `fak up` startup family, platform envelope, and benchmark-index link. Never restore
+  `fak agent --offline` or `agentdemo` as an adopter route.
 
 ## Step 4 — Re-stamp the freshness marker
 
@@ -218,36 +225,34 @@ the triggers fires early).
 
 ## Where a change goes
 
-The front page holds only: the headline and install, the status line, Latest
-hardware results, Try fak (including `fak guard` and the agent table), Your
-machine your files, and Going deeper. The why-now framing lives in
-[`docs/explainers/why-fak-the-market-moment.md`](../../../docs/explainers/why-fak-the-market-moment.md),
-not on the front page.
+The front page holds only the one-line description, Try fak (the install link,
+the one cross-platform `fak up` command and what a good first answer looks like)
+and links to deeper pages. Everything below goes to those pages, never the README.
 
-Three surfaces move; everything else is stable framing.
-
-- **A newer hardware result** replaces its platform row (Mac, AMD or NVIDIA) only
-  when a public receipt backs it: write `docs/benchmarks/receipts/<slug>/RESULTS.md`
-  first, then change the row in `docs/benchmarks/hardware-latest.json` and the README
-  table to the same bytes, and move the heading date with the manifest `as_of`.
-  Receipts carry no lab hostnames, IP addresses, private paths or lease ids.
+- **Hardware results** go to `docs/benchmarks/README.md` and its linked receipt
+  pages. Write the public receipt first, then change the platform row (Mac, AMD or
+  NVIDIA) there and in `docs/benchmarks/hardware-latest.json` to the same bytes; row
+  links are relative to the benchmark index while manifest `detail` paths stay
+  repository-root-relative.
 - **Shipped behavior** goes in [`docs/README-legacy.md`](../../../docs/README-legacy.md)
-  under `Changes since <date>` (today `#changes-since-2026-11-10`), not on the
-  README. The list is a rolling window: restart it from the previous stamp date,
-  build it from `git log --since=<date>`, and drop older items (one line at most
-  for anything still current). A claim whose evidence is not public waits.
+  under `Changes since <date>` (today `#changes-since-2026-11-10`). The list is a
+  rolling window: restart it from the previous stamp date, build it from
+  `git log --since=<date>`, and drop older items. A claim whose evidence is not public waits.
 - **A newly witnessed model** adds a row to the pins table in
   [`docs/supported/models.md`](../../../docs/supported/models.md)
-  (`Exact Hugging Face pins for witnessed models`) with its Hugging Face source
-  and the hardware it ran on.
+  (`Exact Hugging Face pins for witnessed models`) with its source and hardware.
+- **Install and guard recipes** go to `INSTALL.md` or the relevant integration
+  guide. The front page links `INSTALL.md#local-model-setup` and
+  `GETTING-STARTED.md#local-model-setup`; it does not duplicate a shell-specific
+  installer or guard command.
 
-Results first published in maintainer notes elsewhere follow the same path: a
-public receipt, then the row. A front-page line never links outside this repository.
+Receipts carry no lab hostnames, IP addresses, private paths, or lease ids, and a
+front-page line never links outside this repository.
 
 ## When to run this
 
 - After a `/release` or any `VERSION` bump (the stamp + any pin go stale at once).
-- When a headline number changes in `BENCHMARK-AUTHORITY`.
+- When a benchmark route or claim boundary changes.
 - When a doc the README links to moves or is renamed.
 - When a new public receipt or a notable public change lands (see Where a change goes).
 - When the daily `readme-freshness` loop (above) returns `ACTION`, or on a manual

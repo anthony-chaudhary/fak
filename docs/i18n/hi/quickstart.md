@@ -44,13 +44,9 @@ default-deny capability floor से गुज़रती है, और model 
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-पहली दो कमांड दिखाती हैं कि allow-list में न होने वाली action **संरचनात्मक रूप से** रुकती
-है — किसी attack को "पकड़ने" पर निर्भर नहीं, बल्कि **fail-closed** होकर। तीसरी कमांड एक
-live injection को दीवार के पीछे रखते हुए भी task पूरा करती है। (live tests में
-unprotected baseline तक injection 5/5 पहुँची; fak ने 5/5 रोकी।)
+यह नीति `search_kb` की अनुमति देती है और `refund_payment` को रोकती है।
 
 ## fak क्या है
 

@@ -1,30 +1,11 @@
 # Getting started with fak
 
-*[`README.md`](README.md) is the single canonical front door for the product overview and evaluation. This page owns one concrete job: guiding you through the setup sequence from an initial binary to a verified installation.*
-
-> **TL;DR:** Follow the three sequential steps below: verify offline with Tier 0, configure the gateway proxy with Tier 1, and explore in-kernel local serving with Tier 2.
-
-```bash
-# Quick install (macOS / Linux):
-curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-```
-
----
-
-## The setup sequence
-
-The setup workflow advances across three tiers:
-
-1. Step 1: Offline verification (Tier 0). Prove the tool-call boundary and capability floor with zero downloads (~2 min).
-2. Step 2: Gateway setup (Tier 1). Place `fak serve` in front of an existing model API or local engine like Ollama.
-3. Step 3: Local serve (Tier 2). Run in-kernel execution and local GGUF models on your machine.
-
----
+Start with the [local model setup](#local-model-setup) for your hardware. If you
+already have a model server such as Ollama, go straight to [gateway setup](#gateway-setup).
 
 ## 0. Prerequisites
 
-- Go 1.26+: `fak/go.mod` specifies Go 1.26. With Go's default `GOTOOLCHAIN=auto`, the toolchain fetches automatically on first build. Check with `go version`.
-- Tier 0 and Tier 2 (synthetic): require only the `fak` binary. No GPU, API key, or network access needed.
+- For source builds, Go 1.26+: `fak/go.mod` specifies Go 1.26. With Go's default `GOTOOLCHAIN=auto`, the toolchain fetches automatically on first build. Check with `go version`.
 - Tier 1 (gateway): requires any OpenAI-compatible model server (e.g. Ollama or vLLM) or a cloud provider key.
 - Tier 2 (real weights): requires Python 3.10+ for model conversion; see [in-kernel model documentation](docs/fak/in-kernel-model.md).
 
@@ -50,8 +31,7 @@ the system Vulkan loader, and a compatible GPU driver. CPU builds are secondary
 references (`--variant cpu`). The Metal archive is available on v0.54.0, backfilled
 from that exact tag without creating a new release. This backfill is SHA-256-verified
 and ad-hoc-signed; it has no SLSA attestation or Apple notarization. Its checksum
-verifies download integrity, not source provenance. Vulkan publication remains
-pending its release and hardware gate. Missing assets produce an error with
+verifies download integrity, not source provenance. The [v0.56.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.56.0) includes the Linux amd64 Vulkan archive. Missing assets produce an error with
 source-build or explicit CPU-reference instructions. Packaging does not establish
 model/GPU qualification.
 
@@ -81,33 +61,7 @@ go build -o fak ./cmd/fak
 
 ---
 
-## 2. Step 1: Offline verification (Tier 0 — zero downloads, ~2 min)
-
-Run the deterministic offline proof from any directory:
-
-```bash
-./fak agent --offline
-```
-
-### Expected output
-
-The run exercises a deterministic mock planner against an injection fixture. You should see output matching this capture:
-
-```text
-metric                        now(base)          fak
---------------------------   ----------   ----------
-injection in context                YES           no
-destructive op executed             YES           no
-task completed (booked)             YES          YES
-
-HEADLINE
-  poisoned result blocked   : YES
-  destructive op prevented  : YES
-
-report written: agent-report.json
-```
-
-The proof succeeds when `task completed (booked)` is `YES` in both columns, while `poisoned result blocked` and `destructive op prevented` are `YES` under `fak`.
+## Check a tool policy
 
 ### Capability floor preflight checks
 
@@ -153,6 +107,8 @@ export FAK_GUARD_POSTURE=fail_closed
 You can inspect or dump the strict fail-closed capability floor anytime with `fak guard --dump-strict-policy`. See [`POLICY.md`](POLICY.md) for complete posture rules, gotchas catalog details, and carveouts.
 
 ---
+
+<a id="gateway-setup"></a>
 
 ## 3. Step 2: Gateway setup (Tier 1 — practical serving path)
 
@@ -215,7 +171,36 @@ Clients can pass the key via `Authorization: Bearer <token>` or Anthropic's `x-a
 
 ---
 
+<a id="local-model-setup"></a>
+
 ## 4. Step 3: Local serve (Tier 2 — in-kernel model execution)
+
+[Install the build for your platform](INSTALL.md#local-model-setup). In a terminal, run:
+
+```sh
+fak up --model 3B
+```
+
+This selects Qwen2.5-Coder-3B-Instruct Q4_K_M and downloads about 1.9 GB
+on the first run. At `you>`, ask a coding question. Leave the terminal open
+to use its chat completions endpoint at `http://127.0.0.1:8080/v1`.
+
+The v0.56.0 Windows x64 and Linux x64 CPU archives both returned `IndexError`
+when asked what `[][0]` raises in Python (Linux was tested on Ubuntu 24.04 under WSL).
+Both loaded the Qwen2.5-Coder file, although this release labels the 3B tier
+`qwen3.8-3b-q4_k_m` in its startup message.
+Apple Silicon has [hardware evidence for serving this model](docs/_witnesses/issue-9587-nativeadmission/).
+Fresh installs and the first reply from each release build are tracked in
+[the platform verification ticket](https://github.com/anthony-chaudhary/fak/issues/14508).
+
+To let fak choose a larger model based on available memory, run `fak up`.
+In v0.56.0 the automatic 70B download can return HTTP 401. Select the public
+27B model with `fak up --model 27B` (about 17 GB) or keep using the 3B model.
+
+Connect OpenCode or Pi to the chat completions endpoint from a second terminal
+with `fak opencode` or `fak pi`. Claude Code and Codex use the Messages and
+Responses endpoints. Start `fak serve --gguf qwen38:27b-q4` for those clients,
+then run `fak claude` or `fak codex`. See the [agent guides](docs/integrations/README.md).
 
 For fully local, private inference without external servers, `fak` can run pure-Go model forward passes and local GGUF models directly in-kernel on your silicon:
 

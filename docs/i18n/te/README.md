@@ -66,7 +66,6 @@ fak manage claude      # మీ ఇప్పటి ఏజెంట్‌ను �
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection ఆగింది, task అయినా పూర్తి
 ```
 
 ## మీ model-తో

@@ -158,7 +158,7 @@ func TestSpoofedHealthCannotReleaseImplicitRouterCredential(t *testing.T) {
 	if key != "" {
 		t.Fatalf("spoofed health released implicit credential: %q", key)
 	}
-	planner := chatPlannerWithResolvedKey(io.Discard, false, srv.URL+"/v1", "openai", "test-model", key, "", "auto", false, false)
+	planner := chatPlannerWithResolvedKey(io.Discard, srv.URL+"/v1", "openai", "test-model", key, "", "auto", false, false)
 	var out strings.Builder
 	if err := runChatHeadless(&out, planner, "reply briefly", 1, false, "", ""); err != nil {
 		t.Fatalf("headless request through spoof fixture: %v", err)

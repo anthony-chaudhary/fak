@@ -169,13 +169,9 @@ The commands that produced it, run from a scratch directory with the staged bina
 go version -m ./fak | grep -E '^\s+(mod|dep|build\s+CGO)'
 ./fak preflight --policy ./customer-support-readonly-policy.json --tool refund_payment --args '{}'   # -> DENY  (POLICY_BLOCK)
 ./fak preflight --policy ./customer-support-readonly-policy.json --tool search_kb     --args '{}'   # -> ALLOW (NONE)
-./fak agent --offline
 ```
 
-What a reviewer should take from it: the refusal is **structural**. `refund_payment` is
-denied by the capability floor with no model in the loop, so there is no prompt to
-talk past; and in the governed session the injected instruction reaches the context in
-the baseline arm (`YES`) but not the fak arm (`no`), while the task still completes.
+The policy denies refunds and allows searches. The capture below dates from an earlier release.
 
 Captured 2026-07-24 at commit `1a9fcd5ad`, Go `go1.26.5`. The `+dirty` suffix is this
 shared-trunk working tree, not the release artifact — a release build stamps the tag.

@@ -7,7 +7,7 @@ description: "Integration index for fak — the agent kernel. Any agent or frame
 
 **Reader:** a builder choosing an integration by client, wire, and support status.
 **Lifecycle:** current · **Generation:** wire compatibility is release-independent; the `fak manage` subscription default and live token streaming on the OpenAI wire track the current build.
-**Authority:** [what fak supports](../supported/README.md) · [compatibility matrix](compatibility-matrix.md). **Proof:** `python3 examples/wire-proof/verify.py` (60s; no key, model, or GPU).
+**Authority:** [what fak supports](../supported/README.md) · [compatibility matrix](compatibility-matrix.md). See [check your gateway policy](#check-your-gateway-policy) for a local example.
 
 You don't rewrite your agent to adopt `fak`. You point it at `fak serve` — one kernel in
 front of the agent you already run — and the same loop comes out **cheaper and
@@ -236,7 +236,6 @@ watch it deny by structure with nothing installed but [Go 1.26+](https://go.dev/
 ```bash
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-go run ./cmd/fak agent --offline                                                                                       # injection in context YES->no; destructive op YES->no; task still booked
 ```
 
 `refund_payment` is refused with a *named reason* — not a model judgment call, a
@@ -244,68 +243,34 @@ structural one. Full walkthrough: [`../repro-packet.md`](../repro-packet.md).
 
 ---
 
-## See it adjudicate over the wire (same offline gate, the way your agent hits it)
+## Check your gateway policy
 
-The check above is the CLI; your agent hits the *same* gate over HTTP. Start `fak serve`
-with **no `--base-url`** — it serves a deterministic offline mock planner, so this is
-still no model, no key, no GPU — and send it a normal OpenAI request. The response comes
-back with the kernel's verdict attached, and your agent code never changed:
+Start the [local coding model](../../README.md#try-fak) and leave it running.
+From a checkout of this repository, open a second terminal. Put the example
+read-only policy in front of the model on port 8081:
 
-```bash
-fak serve --addr 127.0.0.1:8077 --policy examples/customer-support-readonly-policy.json &
-# from a clone, `go run ./cmd/fak serve …` works too
-
-# 1. A normal OpenAI Chat Completions request — exactly what your agent already sends.
-curl -s http://127.0.0.1:8077/v1/chat/completions \
-  -H 'content-type: application/json' \
-  -d '{"model":"mock","messages":[{"role":"user","content":"refund my last order"}]}'
+```sh
+fak serve --addr 127.0.0.1:8081 --base-url http://127.0.0.1:8080/v1 --policy examples/customer-support-readonly-policy.json
 ```
 
-The model proposes a tool call, and the kernel's inline adjudication rides along in a
-`fak` block (response abridged):
+To check what this gateway permits, run the following in a Python 3 console.
+The policy endpoint returns a decision without executing the proposed tool.
 
-```json
-{
-  "choices": [{ "message": { "tool_calls": [
-    { "id": "call_0", "type": "function",
-      "function": { "name": "get_user_details", "arguments": "{\"user_id\":\"mia_li_3668\"}" } }
-  ] }, "finish_reason": "tool_calls" }],
-  "fak": { "adjudications": [
-    { "tool_call_id": "call_0", "tool": "get_user_details", "admitted": true,
-      "verdict": { "kind": "ALLOW", "by": "monitor" } }
-  ] }
-}
+```python
+import json
+from urllib.request import Request, urlopen
+
+for tool in ("refund_payment", "search_kb"):
+    body = json.dumps({"tool": tool, "arguments": {}}).encode()
+    request = Request("http://127.0.0.1:8081/v1/fak/adjudicate", data=body,
+                      headers={"Content-Type": "application/json"})
+    with urlopen(request) as response:
+        print(tool, json.load(response)["verdict"]["kind"])
 ```
 
-`get_user_details` is on the allow-list, so the kernel **admitted** it and said so inline
-— the gate is just *there*, with no agent-side change. Ask it about a tool that is **not**
-sanctioned and it refuses by structure:
-
-```bash
-# 2. A verdict without executing — the path an MCP client takes before it runs a tool.
-curl -s http://127.0.0.1:8077/v1/fak/adjudicate \
-  -H 'content-type: application/json' \
-  -d '{"tool":"refund_payment","arguments":{"amount":500}}'
-# -> {"verdict":{"kind":"DENY","reason":"POLICY_BLOCK","by":"monitor","disposition":"TERMINAL"}, ...}
-```
-
-Same gate, two surfaces: transparently in front of the model (the proxy adds the `fak`
-block to every response) or asked directly (`/v1/fak/adjudicate`, verdict only — what the
-[MCP tools](mcp.md) expose). Swap the mock for your real engine by
-adding `--base-url`; nothing else changes.
-
-**Don't take the snippets on faith — run them.** The same two checks (plus an allow-case)
-are a one-command, self-verifying script that starts the offline gate, asserts the
-verdicts, and tears it down — `PASS`/`FAIL` with a CI-usable exit code, still no model or
-key:
-
-```bash
-python3 examples/wire-proof/verify.py   # -> PASS, exit 0
-```
-
-→ [`examples/wire-proof/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/wire-proof/README.md) (captured output included).
-
----
+Expect `refund_payment DENY` and `search_kb ALLOW`. To use the policy in a
+client, follow the [OpenCode gateway configuration](opencode.md#path-4--openai-compatible-gateway)
+with the gateway address `http://127.0.0.1:8081/v1`.
 
 ## What you get once it's in front
 

@@ -45,13 +45,9 @@ key, ni modelo, ni GPU:
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # inyección detenida, tarea igualmente completada
 ```
 
-El `DENY` es **estructural**: una acción que no está en la allow-list no puede ejecutarse, por
-más que se convenza al modelo — es **fail-closed**, decidido *dentro* del kernel en el mismo
-call path. En pruebas en vivo, la inyección de prompt alcanzó la baseline sin protección 5/5;
-fak la bloqueó 5/5.
+Esta política permite `search_kb` y deniega `refund_payment`.
 
 ## Qué es fak
 

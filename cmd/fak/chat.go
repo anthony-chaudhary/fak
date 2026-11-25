@@ -28,7 +28,6 @@ type chatFlags struct {
 	codexAuth             *bool
 	codexHome             *string
 	anthropicAuth         *string
-	offline               *bool
 	maxTurns              *int
 	maxOutputTokens       *int
 	policyPath            *string
@@ -59,13 +58,12 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	fs := flag.NewFlagSet("chat", flag.ExitOnError)
 	cf := &chatFlags{}
 	cf.provider = fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
-	cf.baseURL = fs.String("base-url", "", "provider base URL (empty => provider env or selected gateway, then offline mock when unconfigured)")
+	cf.baseURL = fs.String("base-url", "", "provider base URL (empty => provider env or selected gateway)")
 	cf.model = fs.String("model", "gemini-3.8-flash", "model id")
 	cf.apiKeyEnv = fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
 	cf.codexAuth = fs.Bool("codex-auth", false, "explicitly reuse a Codex-managed ChatGPT login read-only; Codex owns renewal")
 	cf.codexHome = fs.String("codex-home", "", "Codex credential home for --codex-auth (default: existing discovery)")
 	cf.anthropicAuth = fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key")
-	cf.offline = fs.Bool("offline", false, "force the deterministic mock planner (no network)")
 	cf.maxTurns = fs.Int("max-turns", 10, "max model turns the loop may take to resolve ONE human turn")
 	cf.maxOutputTokens = fs.Int("max-output-tokens", 0, "per-response output token budget for HTTP planners; 0 preserves the planner default (1024), subject to provider caps")
 	cf.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in production capability floor)")
@@ -103,7 +101,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 // It is deliberately NOT cmdAgent (a one-shot A/B benchmark) nor cmdTUI (a loops
 // console): each line of input is one human turn, driven through the fak arm of
 // RunArm in-process. A provider env or a selected gateway supplies the live
-// default; an unconfigured chat falls back to the offline mock planner.
+// default; an unconfigured chat stops with the real local-model setup action.
 // chatExit ends the process when a headless chat turn fails. It is a seam: a test
 // that drives cmdChat in-process must be able to witness the refusal (exit code plus
 // the rendered termination) instead of terminating the whole test binary, which
@@ -142,8 +140,8 @@ func cmdChat(argv []string) {
 		must(fmt.Errorf("fak chat: --codex-home requires --codex-auth"))
 	}
 	if *cf.codexAuth {
-		if *cf.offline || (apiKeyExplicit && *cf.apiKeyEnv != "") {
-			must(fmt.Errorf("fak chat: --codex-auth cannot be combined with --offline or an explicit API key environment"))
+		if apiKeyExplicit && *cf.apiKeyEnv != "" {
+			must(fmt.Errorf("fak chat: --codex-auth cannot be combined with an explicit API key environment"))
 		}
 		if *cf.provider != "openai-responses" || strings.TrimRight(*cf.baseURL, "/") != guardCodexChatGPTBackendBaseURL {
 			must(fmt.Errorf("fak chat: --codex-auth requires --provider openai-responses and --base-url %s", guardCodexChatGPTBackendBaseURL))
@@ -225,11 +223,11 @@ func cmdChat(argv []string) {
 	if effectiveBaseURL == "" {
 		if env := strings.TrimSpace(os.Getenv(dropin.EnvVar(*cf.provider, ""))); env != "" {
 			effectiveBaseURL = env
-		} else if providerExplicit && !*cf.offline {
+		} else if providerExplicit {
 			effectiveBaseURL = dropin.DefaultBaseURL(*cf.provider)
 		}
 	}
-	if effectiveBaseURL == "" && !*cf.offline && !baseURLExplicit {
+	if effectiveBaseURL == "" && !baseURLExplicit {
 		if origin, routerModel, ok := probeLocalRouterOrigin(); ok {
 			effectiveBaseURL = strings.TrimRight(origin, "/") + "/v1"
 			autoRouter = true
@@ -248,14 +246,17 @@ func cmdChat(argv []string) {
 				configured = true
 			}
 			if configured {
-				must(fmt.Errorf("fak chat: configured router at %s not responding; start it, select another with `fak node use`, or pass --offline for a mock", routerOrigin()))
+				must(fmt.Errorf("fak chat: configured router at %s not responding; start it or select another with `fak node use`", routerOrigin()))
 			}
 		}
-	} else if effectiveBaseURL != "" && !modelExplicit && !*cf.offline {
+	} else if effectiveBaseURL != "" && !modelExplicit {
 		if serverModel := detectServerModel(effectiveBaseURL); serverModel != "" && serverModel != "mock" {
 			*cf.model = serverModel
 			fmt.Fprintf(os.Stderr, "fak chat: connected to %s\n", effectiveBaseURL)
 		}
+	}
+	if effectiveBaseURL == "" {
+		must(chatNoEndpointError())
 	}
 
 	if *cf.effort != "" {
@@ -337,7 +338,6 @@ func cmdChat(argv []string) {
 	}
 	planner := chatPlannerWithResolvedKey(
 		os.Stderr,
-		*cf.offline,
 		effectiveBaseURL,
 		*cf.provider,
 		*cf.model,
@@ -389,6 +389,10 @@ func cmdChat(argv []string) {
 	runChatWithDisplay(os.Stdin, os.Stdout, planner, *cf.maxTurns, *cf.verbose, runOpts...)
 }
 
+func chatNoEndpointError() error {
+	return fmt.Errorf("fak chat: no live model endpoint configured; start one with `fak up --model 3B`, then retry, or pass --base-url URL (setup: INSTALL.md#local-model-setup)")
+}
+
 func nativeAgentPostureName(posture adjudicator.Posture) (string, bool) {
 	switch posture {
 	case adjudicator.PostureFailClosed:
@@ -402,20 +406,13 @@ func nativeAgentPostureName(posture adjudicator.Posture) (string, bool) {
 	}
 }
 
-func chatPlannerWithStderr(stderr io.Writer, offline bool, baseURL, provider, model, apiKeyEnv, anthropicAuth string, codexAuth bool) agent.Planner {
-	return chatPlannerWithResolvedKey(stderr, offline, baseURL, provider, model, resolveRouterAPIKey(apiKeyEnv, true, false, baseURL), apiKeyEnv, anthropicAuth, codexAuth, true)
+func chatPlannerWithStderr(stderr io.Writer, baseURL, provider, model, apiKeyEnv, anthropicAuth string, codexAuth bool) agent.Planner {
+	return chatPlannerWithResolvedKey(stderr, baseURL, provider, model, resolveRouterAPIKey(apiKeyEnv, true, false, baseURL), apiKeyEnv, anthropicAuth, codexAuth, true)
 }
 
-func chatPlannerWithResolvedKey(stderr io.Writer, offline bool, baseURL, provider, model, key, apiKeyEnv, anthropicAuth string, codexAuth, warnMissingKey bool) agent.Planner {
+func chatPlannerWithResolvedKey(stderr io.Writer, baseURL, provider, model, key, apiKeyEnv, anthropicAuth string, codexAuth, warnMissingKey bool) agent.Planner {
 	if stderr == nil {
 		stderr = os.Stderr
-	}
-	effectiveBaseURL := baseURL
-	if offline || effectiveBaseURL == "" {
-		if !offline {
-			fmt.Fprintln(stderr, "fak chat: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
-		}
-		return agent.NewMockPlanner(model)
 	}
 	if codexAuth {
 		fmt.Fprintln(stderr, "fak chat: auth mode: codex-auth")
@@ -424,7 +421,7 @@ func chatPlannerWithResolvedKey(stderr io.Writer, offline bool, baseURL, provide
 			fmt.Fprintf(stderr, "fak chat: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", apiKeyEnv)
 		}
 	}
-	p, err := agent.NewProviderHTTPPlanner(provider, effectiveBaseURL, model, key)
+	p, err := agent.NewProviderHTTPPlanner(provider, baseURL, model, key)
 	must(err)
 	scheme, ok := agent.ParseAnthropicAuthScheme(anthropicAuth)
 	if !ok {

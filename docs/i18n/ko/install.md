@@ -86,12 +86,9 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-allow-list에 없는 동작은 kernel 안, 같은 call path에서 fail-closed로 막힙니다(분류기가 아니라
-구조). 라이브 테스트에서 prompt injection은 보호되지 않은 baseline을 5/5로 뚫었고, fak은 이를
-5/5로 차단했습니다.
+이 정책은 `search_kb`를 허용하고 `refund_payment`를 거부합니다.
 
 ## 여러분의 모델과 함께
 

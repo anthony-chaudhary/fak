@@ -40,14 +40,9 @@ model download न करता, तुमच्या मशीनवरच too
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection थांबवले, task तरीही पूर्ण
 ```
 
-पहिले दोन कमांड दाखवतात की allow-list वर नसलेली action चालूच शकत नाही — हे **fail-closed**
-आहे, kernel च्या आत त्याच call path वर तपासले जाते. तिसरा कमांड दाखवतो की संशयास्पद tool
-*results* वेगळ्या quarantine मध्ये ठेवले जातात (structure द्वारे, classifier द्वारे नव्हे),
-तरीही task पूर्ण होते. थेट चाचणीत: unprotected baseline वर prompt injection 5/5 पोहोचले;
-fak ने ते 5/5 अडवले.
+हे धोरण `search_kb` ला अनुमती देते आणि `refund_payment` नाकारते.
 
 ## fak म्हणजे काय
 

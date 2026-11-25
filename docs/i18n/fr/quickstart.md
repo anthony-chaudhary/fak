@@ -40,16 +40,9 @@ réécrivez pas votre agent — vous l'enveloppez.
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-Ce que cela montre : une action hors de la liste d'autorisation est refusée **par
-structure** — un `DENY` fail-closed vérifié *dans* le kernel, sur le même call path — et
-la boucle d'agent termine sa tâche même lorsqu'une prompt injection est présente. Sur un
-banc d'essai en direct, l'injection a atteint la baseline non protégée **5/5** ; fak l'a
-murée **5/5**. Les *résultats* d'outils suspects sont mis en quarantaine hors du contexte
-du modèle — le détecteur qui les signale est traité comme ~100 % contournable par
-conception : un bonus, jamais le plancher.
+Cette politique autorise `search_kb` et refuse `refund_payment`.
 
 ## fak en bref
 

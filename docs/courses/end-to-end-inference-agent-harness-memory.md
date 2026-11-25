@@ -102,7 +102,7 @@ Three distinctions govern the whole course:
 - [The 60-second reproduction packet](../repro-packet.md)
 - [`runtime-capabilities` in the CLI reference](../cli-reference.md#runtime-capabilities-inspect-the-deployable-runtime-before-payload-load)
 
-The first objective is deliberately model-free. Establish that the binary runs and that policy can structurally deny one tool while allowing another. Confirm that the offline agent completes useful work. Then inspect runtime capability without confusing that inspection with payload execution.
+The first objective is deliberately model-free. Establish that the binary runs and that policy can structurally deny one tool while allowing another. Then inspect runtime capability without confusing that inspection with payload execution.
 
 ### Lab — LOCAL / OFFLINE
 
@@ -112,7 +112,6 @@ From the repository root, use a temporary output path rather than writing an in-
 go build -o "$env:TEMP/fak-course.exe" ./cmd/fak
 & "$env:TEMP/fak-course.exe" preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 & "$env:TEMP/fak-course.exe" preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
-& "$env:TEMP/fak-course.exe" agent --offline
 & "$env:TEMP/fak-course.exe" runtime-capabilities
 ```
 

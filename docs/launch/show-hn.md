@@ -20,7 +20,6 @@ go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.js
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
 ```
 
-`fak agent --offline` shows the same two gates in a full agent loop: injection-in-context YES->no, destructive-op YES->no, task still completes.
 
 **Live in-browser demos (GCP):** https://anthony-chaudhary.github.io/fak/demos.html
 **Repo:** https://github.com/anthony-chaudhary/fak
@@ -83,7 +82,6 @@ go run ./cmd/fak preflight search_kb         # -> ALLOW
 The ledger's verified command is `go run ./cmd/fak preflight ... refund_payment` — the `...` denotes elided arguments (preflight takes more than a bare tool name). The draft silently dropped the `...` and invented a clean two-token invocation. On HN someone *will* paste this, get a usage error, and call the whole post fake. This is the single highest-risk line in the asset. I rewrote it to match the ledger's literal form and labeled the placeholder.
 
 **Problem 2 — "the same loop end-to-end" overstates the offline demo. MEDIUM.**
-The ledger says `fak agent --offline` *shows* three states (injection YES→no, destructive YES→no, task completed). The draft's "shows the same loop end-to-end" implies the preflight DENY and the agent demo are one continuous run, which the ledger doesn't claim. Minor inflation of scope; tightened to "shows the same two gates in a full agent loop."
 
 **Problem 3 — "live model run" vs "kept model run." LOW but it's a security claim.**
 Draft: "reach into the *middle* of a live model run." Ledger says "a kept model run." "Live" implies mid-inference mutation of a running forward pass; "kept" means a retained/cached run. For the skeptical-netsec read this is a meaningful precision loss on the headline technical claim. Changed to "kept."

@@ -136,7 +136,7 @@
       "visual": null,
       "headline": "fak — the agent kernel",
       "subcaption": "Permissions first, fail-closed. Filters second. Bring a trace — the verdict replays.",
-      "footer": "go run ./cmd/fak agent --offline   ·   github.com/anthony-chaudhary/fak",
+      "footer": "fak up (Apple Silicon)   ·   github.com/anthony-chaudhary/fak",
       "motion": "static",
       "motion_intensity": 0.06,
       "transition_in": "fade",

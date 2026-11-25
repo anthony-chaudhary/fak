@@ -94,17 +94,12 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 
 ## 60-секундная проверка (без ключа, без модели, без GPU)
 
-Default-deny capability floor проверяется **внутри ядра**, на том же call path — fail-closed:
-действие, которого нет в allow-list, не запустится, как бы модель ни уговорили. Подозрительные
-tool *results* удерживаются вне контекста модели целиком (карантин — это структура, а не
-детектор). В живых тестах prompt injection достигал незащищённого baseline 5/5; fak отгородил
-его 5/5.
+Эта политика разрешает `search_kb` и отклоняет `refund_payment`.
 
 ```bash
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
 ## Куда дальше

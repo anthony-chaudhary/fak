@@ -9,12 +9,11 @@ import (
 // announceAgentReport tells the caller, in plain words, that `fak agent` just
 // left a file behind and exactly where it landed (#5473).
 //
-// `fak agent --offline` is the first command the README hands a stranger, and
-// the --out default is the bare name "agent-report.json" — a cwd-relative path —
-// so the proof drops a file into whatever directory the user's shell happened to
-// be in. The run summary already ends with "report written: <the --out value>",
-// but a bare filename does not say WHICH directory, which is the part a
-// first-time evaluator needs in order to read the evidence or delete it again.
+// The --out default is the bare name "agent-report.json" — a cwd-relative path —
+// so a run drops a file into whatever directory the user's shell happened to be
+// in. The run summary already ends with "report written: <the --out value>", but
+// a bare filename does not say WHICH directory, which is the part a caller needs
+// in order to read the evidence or delete it again.
 //
 // The notice resolves the path to an absolute one and names the flag that
 // redirects it. It goes to stderr on purpose: the report on stdout is a

@@ -59,9 +59,9 @@ func TestAgentProfileValueReadoutAcrossSourcesAndOff(t *testing.T) {
 				}
 			}
 			out := filepath.Join(dir, "agent-report.json")
-			args := []string{"--offline", "--code-tools=false", "--console-config", config, "--out", out}
+			args := []string{"--code-tools=false", "--console-config", config, "--out", out}
 			args = append(args, tt.flags...)
-			_, stderr := captureAgentStdio(t, func() { cmdAgent(args) })
+			_, stderr := captureAgentStdio(t, func() { cmdAgentWithMock(args) })
 
 			if got := strings.Count(stderr, "fak agent profile value:"); got != 1 {
 				t.Fatalf("profile readout count=%d, want 1:\n%s", got, stderr)

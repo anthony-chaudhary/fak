@@ -92,12 +92,13 @@ func runStrixKnownHostsBrokerEarly(stdout, stderr io.Writer, argv []string, chil
 }
 
 var unknownVerbSuggestions = map[string]string{
-	"changes":  `did you mean "fak whatschanged" or native git status?`,
-	"git":      `did you mean native git, "fak shadowgit", or "fak gitbroker"?`,
-	"lease":    `did you mean "dos arbitrate" or "dos lease-lane"?`,
-	"lane":     `did you mean "dos arbitrate" or "dos lease-lane"?`,
-	"headless": `did you mean "fak agent" or "fak ultracode"?`,
-	"exec":     `did you mean "fak agent" or "fak-dev"?`,
+	"changes":   `did you mean "fak whatschanged" or native git status?`,
+	"git":       `did you mean native git, "fak shadowgit", or "fak gitbroker"?`,
+	"lease":     `did you mean "dos arbitrate" or "dos lease-lane"?`,
+	"lane":      `did you mean "dos arbitrate" or "dos lease-lane"?`,
+	"headless":  `did you mean "fak agent" or "fak ultracode"?`,
+	"exec":      `did you mean "fak agent" or "fak-dev"?`,
+	"agentdemo": `the scripted demo was retired; start a local model with "fak up --model 3B", then run "fak agent"`,
 }
 
 func unknownVerbSuggestion(verb string) string {
@@ -120,8 +121,6 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdRedTeam(args)
 	case "agent":
 		cmdAgent(args)
-	case "agentdemo":
-		cmdAgentDemo(args)
 	case "agentic":
 		cmdAgentic(args)
 	case "agentx":

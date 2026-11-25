@@ -453,12 +453,9 @@ Run the no-credential proof before reading the architecture:
 go run ./cmd/fak policy --check examples/customer-support-readonly-policy.json
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
-go run ./cmd/fak agent --offline
 ```
 
-This shows the adoption posture in one screen: a dangerous support action is
-denied, a benign search is allowed, and the offline injection A/B blocks the
-poisoned instruction while the task still completes.
+The policy denies the refund and allows the search.
 
 ## Try the live gateway
 

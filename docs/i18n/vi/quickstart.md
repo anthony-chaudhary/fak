@@ -42,15 +42,9 @@ gì cả. Cách còn lại: trỏ **một** base URL sang `fak serve`.
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection bị chặn, task vẫn hoàn thành
 ```
 
-Vì sao đáng tin: tầng năng lực (capability floor) **mặc-định-từ-chối** được kiểm ngay *bên
-trong* kernel, trên cùng một call path — **fail-closed**. Một hành động không nằm trong
-allow-list thì không thể chạy, dù model có bị dụ thế nào. Và các tool *result* đáng ngờ bị giữ
-trong **quarantine**, hoàn toàn không đưa vào context của model — đây là **cấu trúc**, không
-phải một classifier. Trong kiểm thử trực tiếp, prompt injection xuyên qua baseline không bảo vệ
-5/5 lần; fak chặn được 5/5.
+Chính sách này cho phép `search_kb` và từ chối `refund_payment`.
 
 ## fak là gì và nhanh tới đâu (nói thật)
 

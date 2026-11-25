@@ -4,20 +4,20 @@
       "id": "land",
       "stage": "Land — first glance at the README",
       "visitor": "A first-time visitor who clicked a link. They will spend seconds, scanning the top of the README to decide whether to keep reading at all.",
-      "job": "In one glance, understand what fak is and see that it does something real — an identity line, a headline number, a runnable first command visible above the fold.",
+      "job": "In one glance, understand what fak does, see a runnable local-model first command, and reach independently bounded evidence.",
       "phase": "land",
       "effort": "glance",
       "entry_doc": "README.md",
       "affordances": [
-        {"id": "identity-line", "kind": "doc_mentions", "doc": "README.md", "tokens": ["fast, enforceable boundary between your agent and every tool call"], "match": "any", "need": "a one-sentence 'what fak is' the visitor can grasp in a glance, near the top of the README (the current front-door line: 'One binary puts a fast, enforceable boundary between your agent and every tool call')", "severity": "hard"},
-        {"id": "hero-first-command", "kind": "fenced_command", "docs": ["README.md"], "tokens": ["fak guard --", "fak routebench", "fak preflight"], "need": "a copy-pasteable hero command in a fenced block, so the visitor sees a runnable first move without scrolling", "severity": "hard"},
-        {"id": "headline-number", "kind": "doc_mentions", "doc": "README.md", "tokens": ["decode tok/s", "measured throughput"], "match": "any", "need": "the honest headline benchmark numbers on the front page — measured decode tok/s per hardware family, each with claim boundaries beside it and a receipt link (the #9751 latest-hardware front page)", "severity": "hard"},
-        {"id": "numbers-are-sourced", "kind": "doc_mentions", "doc": "README.md", "tokens": ["BENCHMARK-AUTHORITY", "CLAIMS.md"], "match": "any", "need": "the headline number is anchored to a source (benchmark authority + the honesty ledger) so it reads as real, not marketing", "severity": "hard"},
+        {"id": "identity-line", "kind": "doc_mentions", "doc": "README.md", "tokens": ["model", "your own computer"], "match": "all", "need": "a one-sentence statement of the local-model value the visitor can grasp immediately", "severity": "hard"},
+        {"id": "hero-first-command", "kind": "fenced_command", "docs": ["README.md"], "tokens": ["fak up"], "need": "a copy-pasteable local-model startup command visible without reading an advanced guide", "severity": "hard"},
+        {"id": "evidence-route", "kind": "doc_mentions", "doc": "README.md", "tokens": ["docs/benchmarks/README.md"], "match": "all", "need": "the front page routes performance readers to independently bounded evidence instead of copying hardware rows", "severity": "hard"},
+        {"id": "evidence-authority", "kind": "path_exists", "target": "BENCHMARK-AUTHORITY.md", "need": "benchmark claims have an independent authority even though the first-run page stays concise", "severity": "hard"},
         {"id": "hero-visual", "kind": "any_path_exists", "targets": ["visuals/hero-video.mp4", "visuals/hero-video.gif"], "need": "a hero visual the front page can lead with — one picture/video that makes the win legible in seconds", "severity": "soft"}
       ],
       "verdict": "converts",
       "gaps": [
-        "The hero is a benchmark video + numbers; an interactive in-browser demo would convert an even-lower-effort visitor"
+        "A short real-startup capture could lower uncertainty further once it is tied to a supported release and model artifact"
       ]
     },
     {
@@ -33,7 +33,7 @@
         {"id": "syscall-explainer", "kind": "path_exists", "target": "docs/explainers/tool-call-is-a-syscall.md", "need": "the flagship 'treat the tool call like a syscall' explainer — the one-page read that makes the whole design click", "severity": "hard"},
         {"id": "concept-glossary", "kind": "path_exists", "target": "docs/fak/concept-glossary.md", "need": "a concept glossary that gives each idea one canonical name and definition", "severity": "hard"},
         {"id": "machine-map", "kind": "path_exists", "target": "llms.txt", "need": "the machine-readable doc-map (llms.txt) so an answer engine can orient a visitor who asks it about fak", "severity": "hard"},
-        {"id": "docs-map", "kind": "doc_mentions", "doc": "README.md", "tokens": ["Going deeper", "documentation home by audience"], "match": "any", "need": "a docs map on the README that routes 'if you want X, read Y' — so orienting is one hop, not a search", "severity": "hard"},
+        {"id": "docs-map", "kind": "doc_mentions", "doc": "README.md", "tokens": ["docs/index.md"], "match": "all", "need": "the concise front page links the documentation map, so deeper orientation stays one hop away", "severity": "hard"},
         {"id": "learning-path", "kind": "any_path_exists", "targets": ["LEARNING-PATH.md", "START-HERE.md"], "need": "an ordered concept path for a visitor who wants to learn the ideas in sequence", "severity": "soft"}
       ],
       "verdict": "converts",

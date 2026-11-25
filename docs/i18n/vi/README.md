@@ -70,7 +70,6 @@ fak manage claude      # bọc agent hiện có của bạn chỉ bằng một l
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection bị chặn, tác vụ vẫn hoàn tất
 ```
 
 ## Với model của bạn

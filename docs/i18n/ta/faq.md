@@ -107,7 +107,6 @@ go build -o fak ./cmd/fak
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection தடுக்கப்பட்டது, task எனினும் நிறைவு
 ```
 
 ## Q9. அடுத்து எங்கே செல்வது?

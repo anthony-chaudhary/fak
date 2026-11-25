@@ -41,7 +41,6 @@ type agentFlags struct {
 	model                 *string
 	apiKeyEnv             *string
 	anthropicAuth         *string
-	offline               *bool
 	native                *bool
 	raw                   *bool
 	mode                  *string
@@ -79,7 +78,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	verbFlagUsage(fs, "agent")
 	af := &agentFlags{}
-	af.task = fs.String("task", agent.DefaultTask, "run one task and write a report; omit one-shot selectors to start the interactive governed agent")
+	af.task = fs.String("task", "", "task for a one-shot run; omit one-shot selectors to start the interactive governed agent")
 	af.outputStyle = fs.String("output-style", agentDefaultOutputStyle, "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; defaults to caveman:medium, full disables it (see `fak agent profiles`)")
 	af.consoleConfig = fs.String("console-config", defaultTUIConsoleFile(), "persisted operator preferences (default: FAK_CONSOLE_FILE, else ~/.fak/console.json)")
 	af.workProfile = fs.String("work-profile", agentDefaultWorkProfile, "implementation policy: ponytail:{low|medium|high}|standard; defaults to ponytail:medium, standard disables it (see `fak agent profiles`)")
@@ -91,7 +90,6 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.model = fs.String("model", "gemini-3.8-flash", "model id")
 	af.apiKeyEnv = fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
 	af.anthropicAuth = fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape - correct for api.anthropic.com), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key: auto would send x-api-key and the call would 401 even with a correct base URL, model, and body")
-	af.offline = fs.Bool("offline", false, "use the deterministic mock planner (no network)")
 	af.native = fs.Bool("native", false, "run one kernel-mediated arm and print its final answer (basic terminal mode)")
 	af.raw = fs.Bool("raw", false, "run one unmediated baseline harness arm (skipping the mediated fak kernel arm)")
 	af.mode = fs.String("mode", "", "one-shot execution mode: dual (default with an explicit task), native, or raw")
@@ -127,7 +125,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 
 // fak agent starts a governed native REPL when invoked without one-shot selectors.
 // An explicit task, resume, workflow, execution mode, or report output preserves the
-// one-shot harness: a real model (or the offline mock) drives a multi-turn tool-calling
+// one-shot harness: a real model drives a multi-turn tool-calling
 // conversation through the selected native, raw, or dual A/B execution path.
 func cmdAgent(argv []string) {
 	runAgent(argv)
@@ -205,7 +203,7 @@ func probeLocalRouterOrigin() (origin, model string, ok bool) {
 // agentEndpoint is the resolved endpoint the fak agent runs on.
 type agentEndpoint struct {
 	// baseURL is the effective provider base URL; "" means no endpoint was
-	// resolvable (the fail-loud case, unless --offline was explicit).
+	// resolvable (the fail-loud case).
 	baseURL string
 	// routerKey is populated only after the auto-connected path proves possession
 	// of the candidate credential. This is not process identity: a local proxy could
@@ -238,11 +236,11 @@ func resolveAgentEndpoint(af *agentFlags, baseURLExplicit, providerExplicit, mod
 	if effective == "" {
 		if env := os.Getenv(dropin.EnvVar(*af.provider, "")); env != "" {
 			effective = env
-		} else if providerExplicit && !*af.offline {
+		} else if providerExplicit {
 			effective = dropin.DefaultBaseURL(*af.provider)
 		}
 	}
-	if effective == "" && !*af.offline && !baseURLExplicit {
+	if effective == "" && !baseURLExplicit {
 		if origin, localModel, ok := agentRouterProbe(); ok {
 			effective = origin + "/v1"
 			if !modelExplicit && localModel != "" && localModel != "mock" {
@@ -259,7 +257,7 @@ func resolveAgentEndpoint(af *agentFlags, baseURLExplicit, providerExplicit, mod
 		}
 		return agentEndpoint{routerProbed: true}
 	}
-	if effective != "" && !modelExplicit && !*af.offline {
+	if effective != "" && !modelExplicit {
 		if serverModel := detectServerModel(effective); serverModel != "" && serverModel != "mock" {
 			*af.model = serverModel
 			fmt.Fprintf(stderr, "fak agent: auto-detected model %q from %s\n", *af.model, effective)
@@ -271,21 +269,46 @@ func resolveAgentEndpoint(af *agentFlags, baseURLExplicit, providerExplicit, mod
 // agentNoEndpointGuidance writes the fail-loud guidance emitted when a bare
 // `fak agent` has no model endpoint. When the native-router probe ran and the
 // router was not live, the message names the probed router rather than claiming
-// no base URL was given; the two explicit demo opt-ins are always named.
+// no base URL was given.
 func agentNoEndpointGuidance(stderr io.Writer, routerProbed bool) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
 	if routerProbed {
-		fmt.Fprintf(stderr, "fak agent: fak router at %s not responding; no model endpoint configured - the native agent runs a real model, not the offline demo\n", routerOrigin())
+		fmt.Fprintf(stderr, "fak agent: fak router at %s not responding; no model endpoint configured\n", routerOrigin())
 	} else {
-		fmt.Fprintln(stderr, "fak agent: no model endpoint configured - the native agent runs a real model, not the offline demo")
+		fmt.Fprintln(stderr, "fak agent: no model endpoint configured")
 	}
-	fmt.Fprintln(stderr, "  live run    : pass --base-url URL --model M --api-key-env VAR (or set the provider base-url env, e.g. OPENAI_BASE_URL, or start `fak serve`)")
-	fmt.Fprintln(stderr, "  offline demo: fak agentdemo  (or --offline, the explicit opt-in)")
+	fmt.Fprintln(stderr, "  pass --base-url URL --model M --api-key-env VAR (or set the provider base-url env, e.g. OPENAI_BASE_URL, or start `fak up --model 3B`)")
+}
+
+var errAgentTaskRequired = errors.New("--task is required for a one-shot run (resume may recover it from a checkpoint)")
+
+func validateAgentOneShotTask(interactive bool, task string) error {
+	if !interactive && strings.TrimSpace(task) == "" {
+		return errAgentTaskRequired
+	}
+	return nil
+}
+
+func agentLogIsAuditJournal(logOut string) bool {
+	return strings.HasSuffix(strings.ToLower(logOut), ".jsonl")
+}
+
+func validateAgentLogMode(isRaw bool, logOut string) error {
+	if isRaw && logOut != "" && !agentLogIsAuditJournal(logOut) {
+		return errors.New("fak agent: --raw does not support --log; use --out for its receipt")
+	}
+	return nil
 }
 
 func runAgent(argv []string) {
+	runAgentWithPlanner(argv, nil)
+}
+
+// runAgentWithPlanner is the dependency-injected form used by package tests.
+// Shipped CLI paths always call runAgent and therefore always resolve a real model.
+func runAgentWithPlanner(argv []string, plannerOverride agent.Planner) {
 	if len(argv) > 0 && (argv[0] == "list" || argv[0] == "descriptors" || argv[0] == "declarative") {
 		code := runAgentsList(os.Stdout, os.Stderr, argv[1:])
 		if code != 0 {
@@ -335,7 +358,6 @@ func runAgent(argv []string) {
 	modeExplicit := false
 	rawExplicit := false
 	nativeExplicit := false
-	offlineExplicit := false
 	workflowExplicit := false
 	resumeExplicit := false
 	outExplicit := false
@@ -365,8 +387,6 @@ func runAgent(argv []string) {
 			rawExplicit = true
 		case "native":
 			nativeExplicit = true
-		case "offline":
-			offlineExplicit = true
 		case "workflow":
 			workflowExplicit = true
 		case "resume":
@@ -435,7 +455,7 @@ func runAgent(argv []string) {
 	isRaw, isNative, err := resolveAgentMode(*af.raw, *af.native, *af.mode)
 	must(err)
 	interactive := !taskExplicit && !modeExplicit && !rawExplicit && !nativeExplicit &&
-		!offlineExplicit && !workflowExplicit && !resumeExplicit && !outExplicit && !logExplicit &&
+		!workflowExplicit && !resumeExplicit && !outExplicit && !logExplicit &&
 		strings.TrimSpace(*af.resume) == "" && strings.TrimSpace(*af.workflow) == ""
 
 	if af.reasoningProfile != nil && *af.reasoningProfile != "" {
@@ -450,6 +470,13 @@ func runAgent(argv []string) {
 			os.Exit(1)
 		}
 		return
+	}
+	if err := validateAgentLogMode(isRaw, *af.logOut); err != nil {
+		must(err)
+	}
+	if err := validateAgentOneShotTask(interactive, *af.task); err != nil {
+		fmt.Fprintf(os.Stderr, "fak agent: %v\n", err)
+		os.Exit(2)
 	}
 
 	keepAwakeMode, err := validateKeepAwake(*af.keepAwake)
@@ -559,9 +586,12 @@ func runAgent(argv []string) {
 		runOpts = append(runOpts, agent.WithSessionCheckpoint(*af.session, defaultSessionDir))
 	}
 
-	endpoint := agentEndpointResolver(af, baseURLExplicit, providerExplicit, modelExplicit, os.Stderr)
+	endpoint := agentEndpoint{}
+	if plannerOverride == nil {
+		endpoint = agentEndpointResolver(af, baseURLExplicit, providerExplicit, modelExplicit, os.Stderr)
+	}
 	effectiveBaseURL := endpoint.baseURL
-	if !*af.offline {
+	if plannerOverride == nil {
 		ensureAgentLocalEndpointDefaults(effectiveBaseURL, os.Stderr)
 	}
 	if *af.provider != "" {
@@ -572,12 +602,11 @@ func runAgent(argv []string) {
 	}
 
 	var planner agent.Planner
-	if *af.offline {
-		// Explicit --offline opt-in: the deterministic mock demo (also `fak agentdemo`).
-		planner = agent.NewMockPlanner(*af.model)
+	if plannerOverride != nil {
+		planner = plannerOverride
 	} else if effectiveBaseURL == "" {
-		// The native agent is a REAL agent: a run with no model endpoint resolvable
-		// fails loud with guidance, never silently runs the offline scripted demo.
+		// The native agent is a real agent: a run with no model endpoint resolvable
+		// fails loud rather than substituting a scripted planner.
 		agentNoEndpointGuidance(os.Stderr, endpoint.routerProbed)
 		os.Exit(2)
 	} else {
@@ -644,7 +673,7 @@ func runAgent(argv []string) {
 	}
 
 	var auditJournal *journal.Journal
-	if *af.logOut != "" && strings.HasSuffix(strings.ToLower(*af.logOut), ".jsonl") {
+	if *af.logOut != "" && agentLogIsAuditJournal(*af.logOut) {
 		if dir := filepath.Dir(*af.logOut); dir != "" && dir != "." {
 			_ = os.MkdirAll(dir, 0o755)
 		}
@@ -668,9 +697,6 @@ func runAgent(argv []string) {
 	}
 
 	if isRaw {
-		if *af.logOut != "" && auditJournal == nil {
-			must(errors.New("fak agent: --raw does not support --log; use --out for its receipt"))
-		}
 		activeWakeReleaser, _ := acquireAgentRunKeepAwake(*af.keepAwake)
 		metrics, err := agent.RunArm(ctx(), planner, *af.task, false, *af.maxTurns, nil, runOpts...)
 		if activeWakeReleaser != nil {

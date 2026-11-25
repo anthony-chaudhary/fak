@@ -269,13 +269,6 @@ func runReadmePreviewNext(stdout, stderr io.Writer, args []string) int {
 
 	repoRoot, stagingDir := resolveRepoAndDir(repoFlag, dirFlag)
 
-	readmePath := filepath.Join(repoRoot, readmenext.DefaultReadmePath)
-	readmeBytes, err := os.ReadFile(readmePath)
-	if err != nil {
-		fmt.Fprintf(stderr, "failed to read %s: %v\n", readmePath, err)
-		return 1
-	}
-
 	files, err := scanFragmentFiles(stagingDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "error scanning fragments in %s: %v\n", stagingDir, err)
@@ -293,18 +286,23 @@ func runReadmePreviewNext(stdout, stderr io.Writer, args []string) int {
 		validFragments = append(validFragments, f.Frag)
 	}
 
-	simulated, changes, err := readmenext.PreviewNext(string(readmeBytes), validFragments)
+	preview, err := readmenext.PreviewRepository(repoRoot, validFragments)
 	if err != nil {
 		fmt.Fprintf(stderr, "preview synthesis failed: %v\n", err)
 		return 1
 	}
-
-	if outPath == "-" {
-		_, _ = io.WriteString(stdout, simulated)
-		return 0
-	}
+	changes := preview.Changes
 
 	if outPath != "" {
+		if len(preview.Documents) != 1 {
+			fmt.Fprintf(stderr, "preview spans %d destination documents; omit --out and inspect the summary\n", len(preview.Documents))
+			return 1
+		}
+		simulated := preview.Documents[0].Content
+		if outPath == "-" {
+			_, _ = io.WriteString(stdout, simulated)
+			return 0
+		}
 		targetFile := outPath
 		if !filepath.IsAbs(targetFile) {
 			targetFile = filepath.Join(repoRoot, filepath.Clean(targetFile))

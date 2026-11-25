@@ -149,8 +149,8 @@ func kpiPresence(kpi string, found bool, absentScore int, absentDefect, absentDe
 
 func kpiFirstCommand(found bool, where string) KPI {
 	return kpiPresence("first_command", found, 20,
-		"no copy-pasteable no-key/no-model/no-GPU first command in a fenced block of "+strings.Join(firstCommandDocs, ", ")+" (e.g. `fak preflight …`)",
-		"no runnable no-setup first command",
+		"no copy-pasteable real model-serving first command in a fenced block of "+strings.Join(firstCommandDocs, ", ")+" (expected `fak up`)",
+		"no runnable real first command",
 		"first command present in "+where)
 }
 

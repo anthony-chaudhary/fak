@@ -1,9 +1,9 @@
 # Captured run — grammar auto-repair
 
-Captured 2026-06-28 with `fak` 0.34.0 (go1.26.3, windows/amd64). The kernel verdicts
-are deterministic, so the numbers below reproduce exactly under the offline planner.
+Captured on Windows with fak 0.34.0 on 2026-06-28. The following transcript
+records the retired flight demo. For current instructions, see [Inspect a repair](README.md#inspect-a-repair).
 
-## 1. End-to-end witness — `fak agent --offline`
+## 1. Recorded end-to-end run
 
 The offline A/B drives the SAME deterministic planner over the SAME task twice. On the
 fak arm every tool call is mediated by the in-process kernel; on the baseline (`now`) arm

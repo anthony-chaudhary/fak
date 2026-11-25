@@ -43,20 +43,13 @@ prüft jeden Tool-Call, bevor er läuft.
 
 ## Der 60-Sekunden-Beweis (kein Key, kein Modell, keine GPU)
 
-Ohne Download und ohne Modell siehst du die Tool-Call-Grenze als strukturelle
-Entscheidung — ein DENY, ein ALLOW, und eine geblockte Prompt-Injection:
+Diese Richtlinie erlaubt `search_kb` und verweigert `refund_payment`.
 
 ```bash
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
-
-Verdächtige Tool-*Ergebnisse* kommen dabei in eine Quarantäne, damit sie gar nicht erst in
-den Modell-Kontext gelangen — durch Struktur, nicht durch einen Classifier. In Live-Tests
-erreichte Prompt-Injection den ungeschützten Baseline-Agenten 5/5; fak hat sie 5/5
-abgewehrt.
 
 ## Was ist fak?
 

@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -120,6 +123,11 @@ func TestChatDefaultDeveloperPolicyFloor(t *testing.T) {
 	})
 
 	t.Run("CmdChatPostureResolution", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{}}`)
+		}))
+		defer srv.Close()
 		t.Setenv("FAK_AGENT_POSTURE", "")
 		t.Setenv("FAK_GUARD_POSTURE", "")
 
@@ -135,30 +143,31 @@ func TestChatDefaultDeveloperPolicyFloor(t *testing.T) {
 			exits = nil
 			_, stderr := captureAgentStdio(t, func() { cmdChat(args) })
 			if len(exits) != 0 {
-				t.Fatalf("cmdChat%v exited %v on a runnable offline turn; stderr=%s", args, exits, stderr)
+				t.Fatalf("cmdChat%v exited %v on a runnable live turn; stderr=%s", args, exits, stderr)
 			}
 			return stderr
 		}
 
-		run("--offline", "--task", "hello", "--tools=none")
+		live := []string{"--base-url", srv.URL + "/v1", "--model", "fixture", "--api-key-env", "FAK_TEST_EMPTY_CHAT_KEY", "--task", "hello", "--tools=none"}
+		run(live...)
 		if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
 			t.Fatalf("cmdChat default posture: got %v, want PostureDefaultOpen", got)
 		}
 
-		run("--offline", "--task", "hello", "--tools=none", "--posture", "default_open")
+		run(append(append([]string{}, live...), "--posture", "default_open")...)
 		if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
 			t.Fatalf("cmdChat --posture default_open: got %v, want PostureDefaultOpen", got)
 		}
 
 		t.Setenv("FAK_AGENT_POSTURE", "fail_closed")
-		run("--offline", "--task", "hello", "--tools=none")
+		run(live...)
 		if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
 			t.Fatalf("cmdChat FAK_AGENT_POSTURE=fail_closed: got %v, want PostureFailClosed", got)
 		}
 
 		t.Setenv("FAK_AGENT_POSTURE", "")
 		t.Setenv("FAK_GUARD_POSTURE", "default_open")
-		run("--offline", "--task", "hello", "--tools=none")
+		run(live...)
 		if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
 			t.Fatalf("cmdChat FAK_GUARD_POSTURE=default_open: got %v, want PostureDefaultOpen", got)
 		}

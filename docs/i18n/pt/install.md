@@ -80,13 +80,9 @@ go build -o fak ./cmd/fak          # -> ./fak   (Windows: build com -o fak.exe)
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-O capability floor é **default-deny, verificado dentro do kernel no mesmo caminho de chamada** (fail-closed):
-uma ação que nunca está na allow-list não roda, não importa o que convenceram o modelo a fazer. Resultados
-suspeitos de ferramentas ficam em **quarentena**, fora do contexto do modelo — por estrutura, não por um
-detector. Em testes ao vivo, a prompt injection atingiu a baseline desprotegida 5/5; fak a bloqueou 5/5.
+Esta política permite `search_kb` e bloqueia `refund_payment`.
 
 ## 4. Com o seu modelo
 

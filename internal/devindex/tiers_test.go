@@ -105,17 +105,16 @@ func TestVerbTiersNameOnlyLiveVerbs(t *testing.T) {
 // default (one command, no `fak console ablate`) and earns its own front-door
 // category (help.go overviewGroups), so it is a product surface, not dev tooling.
 //
-// 26 (was 25): `agent` promoted — README.md leads with `fak agent --offline` as
-// "the shortest public proof" and it is the first command a new evaluator is told
-// to run, but it was classified dev, so `fak help` did not list it and
-// `fak help agent` printed "fak dev agent — …". A newcomer could not find the one
-// command the front page told them to run. It is a product surface (#5464).
+// 26 (was 25): `agent` promoted as the native managed-agent loop. The retired
+// offline mode is not part of this classification; real model execution is.
 // 27 (was 26): `capabilities` promoted - the installed product can now answer
 // outcome-language queries such as "token savings" and "turn control" without
 // requiring the separately built maintainer executable. This is the discovery
 // front door for the other 26 verbs, not another specialist operation.
 // 28 (was 27): `study` is the product-owned local content-addressed receipt store;
 // its separate study-* forge/classify/link operators remain development commands.
+// 29 (was 28): `up` is the released first-run entry. Mock/offline output is not
+// onboarding evidence, so the front door points at the real serving path.
 func TestCurrentDispatchedVerbTiersStayClassified(t *testing.T) {
 	for _, name := range []string{"architecture", "catchup", "codex-resume", "component", "config", "decode-anatomy", "fanout", "harness", "progress", "quantbench", "stale-work", "test-quality", "windows-setup", "work-delivery"} {
 		if got, ok := TierOf(name); !ok || got != TierDev {
@@ -128,7 +127,7 @@ func TestCurrentDispatchedVerbTiersStayClassified(t *testing.T) {
 }
 
 func TestFrontdoorTierStaysSmall(t *testing.T) {
-	const ceiling = 28
+	const ceiling = 29
 	var front []string
 	for key, tier := range verbTiers {
 		if tier == TierFrontdoor {
@@ -138,6 +137,18 @@ func TestFrontdoorTierStaysSmall(t *testing.T) {
 	if len(front) > ceiling {
 		t.Fatalf("frontdoor tier has %d verbs (ceiling %d): %s — most verbs are dev; promote deliberately or classify as dev",
 			len(front), ceiling, strings.Join(front, ", "))
+	}
+}
+
+func TestUpIsTheProductEntryNotDevTooling(t *testing.T) {
+	if got, ok := TierOf("up"); !ok || got != TierFrontdoor {
+		t.Fatalf("TierOf(up) = (%q, %v), want frontdoor", got, ok)
+	}
+	if _, ok := TierOf("agentdemo"); ok {
+		t.Fatal("retired agentdemo must not remain in the tier index")
+	}
+	if got, ok := TierOf("demo"); !ok || got != TierDev {
+		t.Fatalf("TierOf(demo) = (%q, %v), want dev", got, ok)
 	}
 }
 

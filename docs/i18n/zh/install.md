@@ -88,12 +88,10 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
 `preflight` 展示的是**结构性、默认拒绝**的能力闸门（capability floor）：不在允许清单上的动作
-无法运行，与模型被如何说服无关——这是 fail-closed。`fak agent --offline` 是注入 A/B：在实测中，
-prompt 注入 5/5 攻破了无防护基线，fak 则 5/5 将其隔离在模型上下文之外。
+无法运行，与模型被如何说服无关——这是 fail-closed。
 
 ---
 

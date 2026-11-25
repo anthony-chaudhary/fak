@@ -10,7 +10,7 @@ flowchart TD
   subgraph P1["Part 1 - drive the kernel OFFLINE (no downloads)"]
     t1["fak run --trace        -> 12 verdicts, 6 vDSO fast-path hits"]:::kernel
     t2["fak preflight          -> DENY DEFAULT_DENY (not allow-listed)"]:::deny
-    t3["fak agent --offline    -> injection walled off, task still booked"]:::kernel
+    t3["fak policy --dump    -> inspect the active tool policy"]:::kernel
     t4["fak policy --dump/check -> author + validate your own floor"]:::gate
   end
 

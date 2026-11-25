@@ -35,13 +35,9 @@ fak manage --gguf qwen2.5:7b -- claude
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection مُوقَف، والمهمة تكتمل رغم ذلك
 ```
 
-الحدّ الافتراضي هو **الرفض (default-deny)**، ويُفحَص *داخل* النواة على مسار الاستدعاء
-نفسه: فعلٌ ليس على قائمة السماح لا يمكن أن يُنفَّذ مهما جرى إقناع النموذج به — فشلٌ آمن
-(fail-closed)، لا انفتاح. وفي اختبارات حيّة، اخترق حقنُ الأوامر (prompt injection) خطَّ
-الأساس غير المحمي ٥ من ٥، بينما جدَره fak ٥ من ٥.
+تسمح هذه السياسة باستدعاء `search_kb` وترفض `refund_payment`.
 
 ## ما هو fak؟
 

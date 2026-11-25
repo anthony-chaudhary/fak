@@ -3,6 +3,9 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -221,6 +224,11 @@ func TestNativeAgentEnforcementReceipt(t *testing.T) {
 		}
 		t.Fatal("chat enforcement receipt helper missing -- separator")
 	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"done"}}],"usage":{}}`)
+	}))
+	defer srv.Close()
 
 	type toolState struct {
 		System bool `json:"system"`
@@ -272,7 +280,8 @@ func TestNativeAgentEnforcementReceipt(t *testing.T) {
 			receiptPath := filepath.Join(t.TempDir(), "receipt.json")
 			args := []string{
 				os.Args[0], "-test.run=^TestNativeAgentEnforcementReceipt$", "--",
-				"--offline", "--task", "emit enforcement receipt", "--max-turns", "1",
+				"--base-url", srv.URL + "/v1", "--model", "fixture", "--api-key-env", "FAK_TEST_EMPTY_CHAT_KEY",
+				"--task", "emit enforcement receipt", "--max-turns", "1",
 				"--receipt", receiptPath, "--code-workspace", workspace, "--policy", policyPath,
 			}
 			args = append(args, tc.extra...)

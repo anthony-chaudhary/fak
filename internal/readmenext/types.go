@@ -29,6 +29,7 @@ const (
 // Default repository-relative paths.
 const (
 	DefaultLegacyArchiveDoc       = "docs/README-legacy.md"
+	DefaultHardwareReadmePath     = "docs/benchmarks/README.md"
 	DefaultHardwareJSONPath       = "docs/benchmarks/hardware-latest.json"
 	DefaultReadmePath             = "README.md"
 	DefaultBenchmarkAuthorityPath = "BENCHMARK-AUTHORITY.md"
@@ -74,12 +75,25 @@ type PublishResult struct {
 	Success             bool     `json:"success"`
 	DryRun              bool     `json:"dry_run"`
 	ReadmePath          string   `json:"readme_path"`
+	HardwareReadmePath  string   `json:"hardware_readme_path,omitempty"`
 	LegacyPath          string   `json:"legacy_path,omitempty"`
 	HardwareJSONPath    string   `json:"hardware_json_path,omitempty"`
 	HardwareJSONUpdated bool     `json:"hardware_json_updated"`
 	AppliedFragments    int      `json:"applied_fragments"`
 	Changes             []string `json:"changes"`
 	RetiredItems        []string `json:"retired_items"`
+}
+
+// DocumentPreview is one routed document produced by a repository-aware preview.
+type DocumentPreview struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// RepositoryPreview reports every document a fragment set would change.
+type RepositoryPreview struct {
+	Documents []DocumentPreview `json:"documents"`
+	Changes   []string          `json:"changes"`
 }
 
 // HardwareLatestManifest matches the schema in docs/benchmarks/hardware-latest.json.

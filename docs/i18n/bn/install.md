@@ -75,14 +75,9 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest   # -> $(go env GOBIN
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-default-deny capability floor kernel-এর *ভেতরে*, একই call path-এ চলে (fail-closed):
-allow-list-এ না থাকা action চলতেই পারে না, model-কে যা-ই বোঝানো হোক। সন্দেহজনক tool
-*results* আলাদা quarantine-এ থাকে, model-এর context-এ ঢোকে না — structure দিয়ে, কোনো
-classifier দিয়ে নয়। লাইভ পরীক্ষায় prompt injection অরক্ষিত baseline-এ পৌঁছেছে ৫/৫;
-fak আটকে দিয়েছে ৫/৫।
+এই নীতি `search_kb` অনুমোদন করে এবং `refund_payment` প্রত্যাখ্যান করে।
 
 > **কেন self-host (ভারত/বাংলাদেশ):** খরচ লাগে টাকায় (INR), token bill আসে ডলারে।
 > দীর্ঘ session-এ fak ভাগ-করা কাজ পুনর্ব্যবহার করে — একটি tuned warm-cache stack-এর

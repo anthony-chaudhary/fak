@@ -37,16 +37,9 @@ lebih dulu.
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-`refund_payment` ditolak karena tidak pernah ada di allow-list; `search_kb` diizinkan.
-Keputusan itu dicek **di dalam kernel**, di jalur panggilan yang sama, dan **fail-closed**:
-tindakan yang tidak ada di allow-list tidak bisa berjalan, sekeras apa pun model dibujuk.
-Pada perintah terakhir, prompt injection diblokir sementara task tetap tuntas — hasil tool
-yang mencurigakan di-*quarantine* penuh dari konteks model (ini soal struktur, bukan
-detektor). Dalam uji langsung, injection menembus baseline tanpa proteksi 5/5, dan fak
-menembokinya 5/5.
+Kebijakan ini mengizinkan `search_kb` dan menolak `refund_payment`.
 
 ## Apa itu fak
 

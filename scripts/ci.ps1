@@ -167,7 +167,16 @@ if ($LASTEXITCODE -ne 0 -or $allowOut -notmatch "verdict=ALLOW") {
     Write-Error "preflight search_kb did not return ALLOW"
     exit 1
 }
-$null = & $fakBin agent --offline --out .fak/smoke-agent.json
+$upPlanRaw = & $fakBin up --model 3B --dry-run --json --memory-gib 32
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "fak up model-selection smoke failed"
+    exit 1
+}
+$upPlan = ($upPlanRaw -join "`n") | ConvertFrom-Json
+if ($upPlan.schema -ne "fak-macfit-turnkey/1" -or $upPlan.tier.name -ne "3B") {
+    Write-Error "fak up did not select the README 3B tier with the stable plan schema"
+    exit 1
+}
 Write-Host "CLI smoke OK"
 
 if (Get-Command bash -ErrorAction SilentlyContinue) {

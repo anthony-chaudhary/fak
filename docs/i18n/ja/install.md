@@ -101,13 +101,9 @@ Tier 0 はすべてオフラインで決定的です。`fak/` の中から実行
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-`preflight` は **default-deny の capability floor** を示します——許可リストにない操作は
-fail-closed で拒否され、モデルが何を説得されても実行できません。`agent --offline` は
-prompt injection の A/B です：疑わしいツールの*結果*は quarantine（隔離）に入り、そもそも
-モデルのコンテキストへ到達しません——分類器ではなく、構造によって。
+このポリシーは `search_kb` を許可し、`refund_payment` を拒否します。
 
 ---
 

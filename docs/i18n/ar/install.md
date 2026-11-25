@@ -95,14 +95,9 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-هذا القرار **بنيوي لا مصنِّف**: أي فعل ليس على قائمة السماح لا يمكنه العمل مهما جرت
-مخادعة النموذج (default-deny، fail-closed)، ويُفحَص داخل النواة على مسار الاستدعاء
-نفسه. كما تُحتجَز *نتائج* الأدوات المشبوهة خارج سياق النموذج بالكامل (حجْر بنيوي، لا
-كاشف). في اختبارات حيّة: اخترق حقن التعليمات الخطَّ الأساس غير المحمي 5/5، وصدّته fak
-5/5.
+تسمح هذه السياسة باستدعاء `search_kb` وترفض `refund_payment`.
 
 ---
 

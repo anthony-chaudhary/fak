@@ -42,13 +42,9 @@ fak manage claude
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection blocked, task still completes
 ```
 
-முதல் இரண்டு வரிகள் kernel-இன் *உள்ளே* இயங்கும் default-deny முடிவைக் காட்டுகின்றன:
-allow-list-இல் இல்லாத action இயங்காது — model எப்படி ஏமாற்றப்பட்டாலும் (**fail-closed**).
-கடைசி வரி offline-இல் prompt injection தடுக்கப்படுவதைக் காட்டுகிறது; நேரடிச் சோதனையில்
-பாதுகாப்பற்ற baseline-ஐ injection 5/5 எட்டியது, fak அதை 5/5 தடுத்தது.
+இந்தக் கொள்கை `search_kb` அழைப்பை அனுமதிக்கிறது; `refund_payment` அழைப்பைத் தடுக்கிறது.
 
 ## fak என்றால் என்ன
 

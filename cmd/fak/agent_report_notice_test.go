@@ -8,10 +8,9 @@ import (
 	"testing"
 )
 
-// TestAgentOfflineAnnouncesReportPath is the #5473 witness.
+// TestAgentOneShotAnnouncesReportPath is the #5473 witness.
 //
-// `fak agent --offline` is the first command the README hands a stranger, and
-// the natural place to run it is wherever that stranger's shell happens to be.
+// A one-shot agent report belongs wherever the caller's shell happens to be.
 // Its --out default is the bare name "agent-report.json", so the run drops a
 // file into that directory. The run summary said only
 // "report written: agent-report.json" — a filename with no directory in it —
@@ -19,22 +18,22 @@ import (
 //
 // This test pins the stderr notice that names the absolute path actually
 // written plus the flag that redirects it. It FAILS before the fix, where
-// nothing at all reached stderr on the offline path.
-func TestAgentOfflineAnnouncesReportPath(t *testing.T) {
+// nothing at all reached stderr on the one-shot path.
+func TestAgentOneShotAnnouncesReportPath(t *testing.T) {
 	t.Chdir(t.TempDir())
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
 
-	stdout, stderr := captureAgentStdio(t, func() { cmdAgent([]string{"--offline"}) })
+	stdout, stderr := captureAgentStdio(t, func() { cmdAgentWithMock(nil) })
 
 	want := filepath.Join(cwd, "agent-report.json")
 	if _, err := os.Stat(want); err != nil {
-		t.Fatalf("fak agent --offline must write %s: %v", want, err)
+		t.Fatalf("one-shot agent must write %s: %v", want, err)
 	}
 	if !strings.Contains(stderr, want) {
-		t.Errorf("fak agent --offline must announce the FULL path of the file it drops in the caller's cwd (#5473).\n"+
+		t.Errorf("one-shot agent must announce the FULL path of the file it drops in the caller's cwd (#5473).\n"+
 			"want stderr to contain: %s\ngot stderr:\n%s", want, stderr)
 	}
 	if !strings.Contains(stderr, "--out") {
@@ -57,7 +56,7 @@ func TestAgentReportNoticeHonoursExplicitOut(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "chosen-report.json")
 
-	_, stderr := captureAgentStdio(t, func() { cmdAgent([]string{"--offline", "--out", out}) })
+	_, stderr := captureAgentStdio(t, func() { cmdAgentWithMock([]string{"--out", out}) })
 
 	if _, err := os.Stat(out); err != nil {
 		t.Fatalf("an explicit --out must still be honoured verbatim: %v", err)

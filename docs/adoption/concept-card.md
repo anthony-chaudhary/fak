@@ -65,7 +65,6 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 ```
 fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-fak agent --offline                                                                                       # -> injection YES→no, destructive YES→no, task still done
 ```
 
 The first command is denied *by structure* — no model in the loop. The second proves it is

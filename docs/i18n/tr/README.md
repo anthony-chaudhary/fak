@@ -72,7 +72,6 @@ fak manage claude      # mevcut ajanınızı tek bir komutla sarar
 go build -o fak ./cmd/fak
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
 ./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
-./fak agent --offline                                                                                       # injection engellendi, görev yine de tamamlanır
 ```
 
 ## Kendi modelinizle

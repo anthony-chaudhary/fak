@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
@@ -17,9 +18,8 @@ func TestAgentAuditJournalCLI(t *testing.T) {
 		logPath := filepath.Join(dir, "raw-cli.jsonl")
 		outPath := filepath.Join(dir, "out.json")
 
-		runAgent([]string{
+		cmdAgentWithMock([]string{
 			"--raw",
-			"--offline",
 			"--log", logPath,
 			"--out", outPath,
 			"--code-tools=false",
@@ -71,9 +71,8 @@ func TestAgentAuditJournalCLI(t *testing.T) {
 		logPath := filepath.Join(dir, "native-cli.jsonl")
 		outPath := filepath.Join(dir, "out.json")
 
-		runAgent([]string{
+		cmdAgentWithMock([]string{
 			"--native",
-			"--offline",
 			"--log", logPath,
 			"--out", outPath,
 			"--code-tools=false",
@@ -125,8 +124,7 @@ func TestAgentAuditJournalCLI(t *testing.T) {
 		logPath := filepath.Join(dir, "dual-cli.jsonl")
 		outPath := filepath.Join(dir, "out.json")
 
-		runAgent([]string{
-			"--offline",
+		cmdAgentWithMock([]string{
 			"--log", logPath,
 			"--out", outPath,
 			"--code-tools=false",
@@ -175,8 +173,7 @@ func TestAgentAuditJournalCLI(t *testing.T) {
 		logPath := filepath.Join(dir, "trace.txt")
 		outPath := filepath.Join(dir, "out.json")
 
-		runAgent([]string{
-			"--offline",
+		cmdAgentWithMock([]string{
 			"--log", logPath,
 			"--out", outPath,
 			"--code-tools=false",
@@ -197,7 +194,7 @@ func TestAgentAuditJournalLegacyRejection(t *testing.T) {
 	if os.Getenv("TEST_AGENT_AUDIT_HELPER") == "1" {
 		for i, arg := range os.Args {
 			if arg == "--" && i+1 < len(os.Args) {
-				runAgent(os.Args[i+1:])
+				runAgentWithPlanner(os.Args[i+1:], agent.NewMockPlanner("test"))
 				return
 			}
 		}
@@ -205,7 +202,7 @@ func TestAgentAuditJournalLegacyRejection(t *testing.T) {
 	}
 
 	t.Run("raw arm rejects plaintext log", func(t *testing.T) {
-		cmd := exec.Command(os.Args[0], "-test.run=TestAgentAuditJournalLegacyRejection", "--", "--raw", "--offline", "--log", "trace.txt", "--out", "out.json", "--code-tools=false", "--sys-tools=false")
+		cmd := exec.Command(os.Args[0], "-test.run=TestAgentAuditJournalLegacyRejection", "--", "--raw", "--log", "trace.txt", "--out", "out.json", "--code-tools=false", "--sys-tools=false")
 		cmd.Env = append(os.Environ(), "TEST_AGENT_AUDIT_HELPER=1")
 		out, err := cmd.CombinedOutput()
 		if err == nil {
@@ -218,7 +215,7 @@ func TestAgentAuditJournalLegacyRejection(t *testing.T) {
 
 	t.Run("native arm writes plaintext log", func(t *testing.T) {
 		dir := t.TempDir()
-		cmd := exec.Command(os.Args[0], "-test.run=TestAgentAuditJournalLegacyRejection", "--", "--native", "--offline", "--log", "trace.txt", "--out", "out.json", "--code-tools=false", "--sys-tools=false")
+		cmd := exec.Command(os.Args[0], "-test.run=TestAgentAuditJournalLegacyRejection", "--", "--native", "--task", "fix it", "--log", "trace.txt", "--out", "out.json", "--code-tools=false", "--sys-tools=false")
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "TEST_AGENT_AUDIT_HELPER=1")
 		out, err := cmd.CombinedOutput()
