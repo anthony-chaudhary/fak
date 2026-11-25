@@ -223,7 +223,11 @@ func TestPreCommitHookLinkedWorktreeFindsMainCheckoutCompanion(t *testing.T) {
 	f.write(wt, "change.txt", "lane\n", 0o644)
 	f.git(wt, nil, "add", "change.txt")
 
-	cmd := exec.Command("sh", filepath.Join(".githooks", "pre-commit"))
+	// The hook's shebang names bash; plain sh is dash on Debian-family hosts.
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+	cmd := exec.Command("bash", filepath.Join(".githooks", "pre-commit"))
 	cmd.Dir = wt
 	cmd.Env = f.env
 	out, err := cmd.CombinedOutput()
