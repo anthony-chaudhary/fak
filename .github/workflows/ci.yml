@@ -1086,16 +1086,17 @@ jobs:
   # so this is the reproducible home of the "race-free" claim. See
   # docs/testing/race-detector.md for how to run it locally (WSL/Linux/macOS).
   #
-  # LEG BUDGET: every leg is <= ~4 min of measured race test time so the unit
-  # fits the 5 min wall budget. Legs are the `legs` table in the shard step:
-  # big packages are split by test-name prefix (-run) with a SKIP leg whose -skip
-  # is the union of the others, so no test can fall through; small packages are
-  # split by exact test name; heavy-N packages share one leg each; rest-N are
-  # round-robin over every other package in `go list` order (computed at run
-  # time, so a new package is covered without editing this table).
-  # NO race build cache: the old gorace cache saved only on success (never), and
-  # ~420MB per leg per SHA would churn the repo's 10GB Actions cache, which the
-  # build-vet-test gobuild entries (1-1.5GB each) already fill.
+  # LEG BUDGET: a leg's measured race test time is <= ~150 s so the unit fits the
+  # 5 min wall budget once compile is cached. Legs are the `legs` table in the
+  # shard step: big packages are split by exact test name (-run) with a SKIP leg
+  # whose -skip is the union of the others, so no test can fall through; the
+  # heavy-N packages share one leg each; rest-N are a greedy bin-pack over every
+  # other package in `go list` order, costed by .github/race-package-costs.tsv
+  # (measured seconds; unknown packages get RACE_DEFAULT_COST). A new package is
+  # still covered without editing this table.
+  # RACE BUILD CACHE: a restore-only ~/.cache/go-build keyed on go.mod, saved by
+  # the single fak-01 leg on trunk pushes only, so legs reuse the std and package
+  # race compiles instead of cold-compiling each time.
   race-detector:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
@@ -1118,7 +1119,7 @@ jobs:
       cancel-in-progress: false
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 8
       matrix:
         shard:
           - fak-01
@@ -1195,6 +1196,12 @@ jobs:
           - heavy-5
           - heavy-6
           - heavy-7
+          - computebuild-01
+          - computebuild-02
+          - computebuild-03
+          - computebuild-04
+          - buildwitness-01
+          - buildwitness-02
           - rest-0
           - rest-1
           - rest-2
@@ -1205,6 +1212,20 @@ jobs:
           - rest-7
           - rest-8
           - rest-9
+          - rest-10
+          - rest-11
+          - rest-12
+          - rest-13
+          - rest-14
+          - rest-15
+          - rest-16
+          - rest-17
+          - rest-18
+          - rest-19
+          - rest-20
+          - rest-21
+          - rest-22
+          - rest-23
     env:
       GOTOOLCHAIN: auto
       # Keep race compilation under the same hosted-runner process ceiling.
@@ -1239,6 +1260,14 @@ jobs:
           [[ "$sha" == "$GITHUB_SHA" ]]
           go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
 
+      - name: restore race build cache (restore-only; legs never save)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: race-gocache-${{ runner.os }}-${{ hashFiles('go.mod') }}
+          restore-keys: |
+            race-gocache-${{ runner.os }}-
+
       - name: C toolchain present (the race detector needs cgo)
         run: cc --version
 
@@ -1247,7 +1276,8 @@ jobs:
         shell: bash
         env:
           SHARD: ${{ matrix.shard }}
-          RACE_REST_SHARDS: "10"
+          RACE_REST_SHARDS: "24"
+          RACE_DEFAULT_COST: "10"
         run: |
           set -euo pipefail
           mod=$(go list -m)
@@ -1321,6 +1351,12 @@ jobs:
             'conceptcatalog-02 internal/conceptcatalog - ^(TestClassifyRendersScorecardFromTheGitTreeNotThePeerDirtyWorktree|TestPlanPositionFailureLeavesAllFilesUnchanged|TestPlanClassifyManyIsAtomicIdempotentAndBounded|TestPlanClassifyPreservesEveryTopLevelMetaKey|TestProductionCorpusIgnoresRunArtifactDirectories|TestProductionCorpusManyKeepsTokensIndependent|TestApplyWritesEveryDestination|TestPlanPositionIncludesProposedGlossaryInCanonicalTree|TestValidatePositiveKindsAliasesAndClassifications|TestLoadDirReportsMalformedFile|TestExtractGitTreeStreamsAndReapsArchive|TestGeneratedBytesEqualNormalizesOnlyCheckoutLineEndings|TestCheckInvariantUsesOneGreenScorecardSnapshot|TestExecuteInvariantSnapshotReturnsProcessStartFailure|TestInvariantSnapshotHelperProcess|TestRegenerateFromGitTreeClearsTheFreshnessGate|TestResolvePythonHermetic|TestProbeFreshnessKeepsTheRanVerdicts|TestRenderFreshnessRanVerdicts|TestBackReferenceIsIdempotentAndRefusesUnknownRows|TestConceptProfilePayloadSelection|TestConceptProfileUnknownIsGeneric|TestConceptProfileQualifiedTreeEquivalence|TestConceptProfileUnknownImportSurfaceFallsBack|TestConceptProfileSelectedScriptCorruptionIsFatal|TestConceptProfileReusedOracleRefusesDrift|TestConceptProfilePartialRetirementBoundary)$'
             'windowgate-01 internal/windowgate ^(TestParseFileVersionAcceptsRealResourceSpellings|TestNormalizeConPTYVersionFoldsSplitBuild|TestConPTYPreflightPassesLiveUpToDatePairFromEitherSpelling|TestConPTYPreflightBreaksPrecisionTieTowardProductVersion|TestConPTYPreflightRefusesOlderMinor|TestConPTYPreflightStaleLibraryDominatesFreshHost|TestConPTYPreflightResolvesFirstSearchDirWins|TestConPTYPreflightWarnsOnUnreadableVersion|TestConPTYPreflightHonorsCustomFloor|TestConPTYPreflightAgainstRealHostPairIsSelfConsistent|TestConPTYBundleDirsAreNewestFirst|TestConfigureWorkerCommandSetsProcessGroupFlag|TestDetachedSpawnHasNoConsoleWhereBackgroundSpawnDoes|TestRunInNewJobPreservesExitErrorOnWindows|TestStartInNewJobReapsChildWhenAssignmentFails|TestCommandSuppressesConsoleWindow|TestManagedJobMemoryLimitDefaultsAndOverride|TestStartManagedAgentAppliesNativeIORateControlWhenSupported|TestStartOwnedProcessRequiresCleanupOwner|TestOwnedProcessWaitPreservesExitError|TestPowerShellFlags|TestPowerShellDynamicDeadlines|TestPowerShellSoftProgressiveWarning|TestPowerShellDualEngineStartFallback|TestPowerShellTimeoutHandling|TestPowerShellSuppressesAdvisoryLogSpam|TestTerminalWindowByIdentityFallsBackToAncestorWindow|TestTerminalRestoreLeavesVisibleAndLaterUserMinimizeUntouched|TestPSInstallerRules|TestPSStartProcessRules|TestClassifyVisibleWindows|TestClassifyLiveProcesses|TestEverySpawnConstructorChecked|TestPyHardBackgroundPathFlagsVariableSpawns|TestPySpawnCandidatesIgnoreStringLiterals|TestFakTestRunnerSuppressesGoToolchainWindow|TestGoExecViolationsAcceptSysprocCommandConstructor|TestGoExecCandidatesSurfaceLiteralConsoleTools|TestScanTreeIncludesUntrackedGoFiles|TestScoreAndObserverHelpersSuppressConsoleChildren|TestWindowgateTestsHaveNoUnsuppressedStartProcess|TestScanGoFileForExec)$ -'
             'windowgate-02 internal/windowgate - ^(TestParseFileVersionAcceptsRealResourceSpellings|TestNormalizeConPTYVersionFoldsSplitBuild|TestConPTYPreflightPassesLiveUpToDatePairFromEitherSpelling|TestConPTYPreflightBreaksPrecisionTieTowardProductVersion|TestConPTYPreflightRefusesOlderMinor|TestConPTYPreflightStaleLibraryDominatesFreshHost|TestConPTYPreflightResolvesFirstSearchDirWins|TestConPTYPreflightWarnsOnUnreadableVersion|TestConPTYPreflightHonorsCustomFloor|TestConPTYPreflightAgainstRealHostPairIsSelfConsistent|TestConPTYBundleDirsAreNewestFirst|TestConfigureWorkerCommandSetsProcessGroupFlag|TestDetachedSpawnHasNoConsoleWhereBackgroundSpawnDoes|TestRunInNewJobPreservesExitErrorOnWindows|TestStartInNewJobReapsChildWhenAssignmentFails|TestCommandSuppressesConsoleWindow|TestManagedJobMemoryLimitDefaultsAndOverride|TestStartManagedAgentAppliesNativeIORateControlWhenSupported|TestStartOwnedProcessRequiresCleanupOwner|TestOwnedProcessWaitPreservesExitError|TestPowerShellFlags|TestPowerShellDynamicDeadlines|TestPowerShellSoftProgressiveWarning|TestPowerShellDualEngineStartFallback|TestPowerShellTimeoutHandling|TestPowerShellSuppressesAdvisoryLogSpam|TestTerminalWindowByIdentityFallsBackToAncestorWindow|TestTerminalRestoreLeavesVisibleAndLaterUserMinimizeUntouched|TestPSInstallerRules|TestPSStartProcessRules|TestClassifyVisibleWindows|TestClassifyLiveProcesses|TestEverySpawnConstructorChecked|TestPyHardBackgroundPathFlagsVariableSpawns|TestPySpawnCandidatesIgnoreStringLiterals|TestFakTestRunnerSuppressesGoToolchainWindow|TestGoExecViolationsAcceptSysprocCommandConstructor|TestGoExecCandidatesSurfaceLiteralConsoleTools|TestScanTreeIncludesUntrackedGoFiles|TestScoreAndObserverHelpersSuppressConsoleChildren|TestWindowgateTestsHaveNoUnsuppressedStartProcess|TestScanGoFileForExec)$'
+            'computebuild-01 internal/computebuild ^(TestVulkanShadersCompleteness|TestCgoEnvFormatting|TestLiveToolchainDiscovery|TestCxxToolchainProbe|TestVulkanBinaryPropagatesReceiptWriteFailure|TestVerifyVulkanBinaryReceiptIdentityFailsClosedWithoutLinuxFDBinding|TestVerifyVulkanBinaryReceiptIdentityRejectsUnknownTrailingAndIndependentDrift|TestCUDAArchSpecificDeclarationRefuses|TestRequireCUDAImageAuditToolRefusesMissingCuobjdump|TestCUDAArchiveStampKeysOnKernelCodeNotNVCCTempNames|TestCUDACgoLoaderCompatibility|TestCUDACheckStrictReportsSkippedParseAndOKLine|TestStrictCUDACheckIsOptInOnly|TestCUDADeepGEMMWKVBuildContract|TestFlashMLADecodeRejectsOtherArchitectures|TestCUDAFlashMLAPrefillBuildContract|TestCUDAIncrementalContentAndToolchainInvalidation|TestCUDAKV16PrefillGQA4TypedSelection|TestCUDAMMQPrefillSelectionAndFlags|TestCUDAPagedKVCopyTypedSelection|TestCUDACheckPropagatesPreflightFailures|TestParseCUDAProvenanceListing|TestDecodeStrictCUDABuildReceipt|TestAttachCUDABuildProvenanceClearsOnFailure|TestCUDAQ56KMMQReceiptCache|TestCUDAQ56KMMVQReceiptCache|TestCUDATokenomosStagingTypedSelection|TestCUDATokenomosStagingCurrentSources|TestCUDAV41DefaultTags|TestCUDAV41TailRoPEBuildContract|TestQ4KCoopMatShaderDeclaresRequiredExtensions|TestVulkanV5IndexerScoreStructuralControls|TestVulkanReceiptV23CanonicalEvidence|TestVulkanReceiptV24CanonicalEvidence|TestVulkanReceiptV25CanonicalEvidence|TestVulkanReceiptV26CanonicalEvidence|TestVulkanReceiptV11Current71Boundary|TestVulkanReceiptV15Current78Boundary|TestVulkanReceiptV19TokenPanelBoundary|TestVulkanReceiptV27PrefillGEMM|TestVulkanReceiptV32CompressorRing|TestVulkanReceiptV36Q6KPanel|TestVulkanReceiptV3CurrentRegistryBoundary|TestVulkanSuccessorRegistryTable)$ -'
+            'computebuild-02 internal/computebuild ^(TestVulkanQwen35GDNQ8InputProjectionLoaderIsRegistered|TestToolchainDiscoveryMocked|TestReceiptGenerationAndFormatting|TestVulkanBinaryDirtySourceRefusesBeforeBuildTool|TestMergeToolchainOverridesPreservesDiscoveredDefaults|TestPinnedLinuxGitRunnerExecutesVerifiedDescriptorAfterPathSwap|TestVerifyVulkanBinaryReceiptIdentityRejectsInvalidSPIRVCensus|TestCUDAArchiveImageArchOrder|TestCUDAArchiveResetsMembershipAndPreservesFailure|TestCUDAArchiveStampRefusesWhatCannotNameAnArchive|TestCUDANCCLVersionedLibraryCompatibility|TestCUDACheckDoesNotWaitOnBuildLock|TestCUDACheckFailsClosedOnABIParityFailure|TestCUDAEngramIQ4NLQualificationSelection|TestFlashMLADecodeAmbientFlagsRefuse|TestCUDAVendorPinnedSourceRejectsMutation|TestCUDAIncrementalCorruptionFailureAndConcurrency|TestCUDAKV16PrefillGQA4Prerequisites|TestCUDAMMQPrefillNativeReceiptCache|TestCUDAPagedKVCopyPrerequisites|TestCUDACheckNormalizesRelativeRootBeforeToolExecution|TestCheckRequestedCUDAImages|TestCUDABuildReceiptWireSelector|TestCUDAQ56KMMQTypedSelection|TestCUDAQ56KMMVQTypedSelection|TestCUDAQwen35IQ2SequenceRecordedSelection|TestCUDATokenomosStagingPrerequisites|TestCUDAV41ArchAllowlist|TestCUDAV41MHCBuildContract|TestCUDACgoEnvLinksWSLDriverLibcuda|TestV41EPOwnerBuildContract|TestVulkanQualifiedArtifact|TestVulkanQualifiedActivationChunk|TestVulkanQualifiedDownChunk|TestVulkanQualifiedQ2TokenPair|TestVulkanReceiptReadBudget|TestVulkanReceiptV12Current72Boundary|TestVulkanReceiptV16Current79Boundary|TestVulkanReceiptV20RoutedRowBoundary|TestVulkanReceiptV28SplitKVAttention|TestVulkanReceiptV33SharedAttentionSplit|TestVulkanReceiptV37QwenResidualNorm|TestVulkanReceiptV4Current61Boundary|TestVulkanReceiptV7Current66Boundary)$ -'
+            'computebuild-03 internal/computebuild ^(TestVulkanQ4KScalarShaderStaysPortable|TestVsDevEnvParsing|TestShiftLeftSmokeExecution|TestVulkanBinaryToolFailureOmitsSuccessEvidence|TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary|TestVerifyVulkanBinaryReceiptIdentityNeutralizesHostileRepoConfigBeforeObservation|TestVerifyVulkanBinaryReceiptIdentityRequiresAuthenticatedComparison|TestCUDAArchiveImageAudit|TestBuildCUDALibStampsComputePackageWithArchiveDigest|TestCUDAAsyncQualificationProfiles|TestParseCUDAArchListIsCRLFTolerant|TestCUDACheckPythonHonorsPYTHONOverride|TestCUDACheckFailsClosedOnHeaderSyntaxFailure|TestCUDAEngramIQ4NLQualificationPreflight|TestFlashMLADecodeGenericMatrixComposition|TestCUDAGraphOnceSelectionAndFlags|TestCUDADependencyParser|TestCUDAKV16PrefillGQA4BothCompilerBranches|TestCUDAMMQPrefillNativeIntegration|TestCUDAPagedKVCopyBothCompilerBranches|TestParseCUDAVersion|TestParseCUBLASHeaderVersion|TestObserveCUDABuildProvenanceStubbed|TestCUDAQ56KMMQPrerequisites|TestCUDAQ56KMMVQPrerequisites|TestCUDANativeReceiptSeparatesBuildWorkFromHardwareEvidence|TestCUDATokenomosStagingBothCompilerBranches|TestCUDAV41BF16PublishBuildContract|TestCUDAV41RouterBuildContract|TestObserveCUDANVCCResolvesSymlink|TestV41EPOwnerLinkedPinELFContract|TestVulkanQualifiedBuilder|TestVulkanReceiptV24ActivationChunk|TestVulkanReceiptV25DownChunk|TestVulkanReceiptV26Q2TokenPair|TestVulkanReceiptV31RouterGate|TestVulkanReceiptV13Current73Boundary|TestVulkanReceiptV17Current81Boundary|TestVulkanReceiptV21DownRowBoundary|TestVulkanReceiptV29RawFiniteStatus|TestVulkanReceiptV34QwenGDNQ8Panel|TestVulkanReceiptV38Q5KPanel|TestVulkanReceiptV5Current62Boundary|TestVulkanReceiptV8Current67Boundary)$ -'
+            'computebuild-04 internal/computebuild - ^(TestVulkanShadersCompleteness|TestVulkanQwen35GDNQ8InputProjectionLoaderIsRegistered|TestVulkanQ4KScalarShaderStaysPortable|TestCgoEnvFormatting|TestToolchainDiscoveryMocked|TestVsDevEnvParsing|TestLiveToolchainDiscovery|TestReceiptGenerationAndFormatting|TestShiftLeftSmokeExecution|TestCxxToolchainProbe|TestVulkanBinaryDirtySourceRefusesBeforeBuildTool|TestVulkanBinaryToolFailureOmitsSuccessEvidence|TestVulkanBinaryPropagatesReceiptWriteFailure|TestMergeToolchainOverridesPreservesDiscoveredDefaults|TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary|TestVerifyVulkanBinaryReceiptIdentityFailsClosedWithoutLinuxFDBinding|TestPinnedLinuxGitRunnerExecutesVerifiedDescriptorAfterPathSwap|TestVerifyVulkanBinaryReceiptIdentityNeutralizesHostileRepoConfigBeforeObservation|TestVerifyVulkanBinaryReceiptIdentityRejectsUnknownTrailingAndIndependentDrift|TestVerifyVulkanBinaryReceiptIdentityRejectsInvalidSPIRVCensus|TestVerifyVulkanBinaryReceiptIdentityRequiresAuthenticatedComparison|TestCUDAArchSpecificDeclarationRefuses|TestCUDAArchiveImageArchOrder|TestCUDAArchiveImageAudit|TestRequireCUDAImageAuditToolRefusesMissingCuobjdump|TestCUDAArchiveResetsMembershipAndPreservesFailure|TestBuildCUDALibStampsComputePackageWithArchiveDigest|TestCUDAArchiveStampKeysOnKernelCodeNotNVCCTempNames|TestCUDAArchiveStampRefusesWhatCannotNameAnArchive|TestCUDAAsyncQualificationProfiles|TestCUDACgoLoaderCompatibility|TestCUDANCCLVersionedLibraryCompatibility|TestParseCUDAArchListIsCRLFTolerant|TestCUDACheckStrictReportsSkippedParseAndOKLine|TestCUDACheckDoesNotWaitOnBuildLock|TestCUDACheckPythonHonorsPYTHONOverride|TestStrictCUDACheckIsOptInOnly|TestCUDACheckFailsClosedOnABIParityFailure|TestCUDACheckFailsClosedOnHeaderSyntaxFailure|TestCUDADeepGEMMWKVBuildContract|TestCUDAEngramIQ4NLQualificationSelection|TestCUDAEngramIQ4NLQualificationPreflight|TestFlashMLADecodeRejectsOtherArchitectures|TestFlashMLADecodeAmbientFlagsRefuse|TestFlashMLADecodeGenericMatrixComposition|TestCUDAFlashMLAPrefillBuildContract|TestCUDAVendorPinnedSourceRejectsMutation|TestCUDAGraphOnceSelectionAndFlags|TestCUDAIncrementalContentAndToolchainInvalidation|TestCUDAIncrementalCorruptionFailureAndConcurrency|TestCUDADependencyParser|TestCUDAKV16PrefillGQA4TypedSelection|TestCUDAKV16PrefillGQA4Prerequisites|TestCUDAKV16PrefillGQA4BothCompilerBranches|TestCUDAMMQPrefillSelectionAndFlags|TestCUDAMMQPrefillNativeReceiptCache|TestCUDAMMQPrefillNativeIntegration|TestCUDAPagedKVCopyTypedSelection|TestCUDAPagedKVCopyPrerequisites|TestCUDAPagedKVCopyBothCompilerBranches|TestCUDACheckPropagatesPreflightFailures|TestCUDACheckNormalizesRelativeRootBeforeToolExecution|TestParseCUDAVersion|TestParseCUDAProvenanceListing|TestCheckRequestedCUDAImages|TestParseCUBLASHeaderVersion|TestDecodeStrictCUDABuildReceipt|TestCUDABuildReceiptWireSelector|TestObserveCUDABuildProvenanceStubbed|TestAttachCUDABuildProvenanceClearsOnFailure|TestCUDAQ56KMMQTypedSelection|TestCUDAQ56KMMQPrerequisites|TestCUDAQ56KMMQReceiptCache|TestCUDAQ56KMMVQTypedSelection|TestCUDAQ56KMMVQPrerequisites|TestCUDAQ56KMMVQReceiptCache|TestCUDAQwen35IQ2SequenceRecordedSelection|TestCUDANativeReceiptSeparatesBuildWorkFromHardwareEvidence|TestCUDATokenomosStagingTypedSelection|TestCUDATokenomosStagingPrerequisites|TestCUDATokenomosStagingBothCompilerBranches|TestCUDATokenomosStagingCurrentSources|TestCUDAV41ArchAllowlist|TestCUDAV41BF16PublishBuildContract|TestCUDAV41DefaultTags|TestCUDAV41MHCBuildContract|TestCUDAV41RouterBuildContract|TestCUDAV41TailRoPEBuildContract|TestCUDACgoEnvLinksWSLDriverLibcuda|TestObserveCUDANVCCResolvesSymlink|TestQ4KCoopMatShaderDeclaresRequiredExtensions|TestV41EPOwnerBuildContract|TestV41EPOwnerLinkedPinELFContract|TestVulkanV5IndexerScoreStructuralControls|TestVulkanQualifiedArtifact|TestVulkanQualifiedBuilder|TestVulkanReceiptV23CanonicalEvidence|TestVulkanQualifiedActivationChunk|TestVulkanReceiptV24ActivationChunk|TestVulkanReceiptV24CanonicalEvidence|TestVulkanQualifiedDownChunk|TestVulkanReceiptV25DownChunk|TestVulkanReceiptV25CanonicalEvidence|TestVulkanQualifiedQ2TokenPair|TestVulkanReceiptV26Q2TokenPair|TestVulkanReceiptV26CanonicalEvidence|TestVulkanReceiptReadBudget|TestVulkanReceiptV31RouterGate|TestVulkanReceiptV11Current71Boundary|TestVulkanReceiptV12Current72Boundary|TestVulkanReceiptV13Current73Boundary|TestVulkanReceiptV15Current78Boundary|TestVulkanReceiptV16Current79Boundary|TestVulkanReceiptV17Current81Boundary|TestVulkanReceiptV19TokenPanelBoundary|TestVulkanReceiptV20RoutedRowBoundary|TestVulkanReceiptV21DownRowBoundary|TestVulkanReceiptV27PrefillGEMM|TestVulkanReceiptV28SplitKVAttention|TestVulkanReceiptV29RawFiniteStatus|TestVulkanReceiptV32CompressorRing|TestVulkanReceiptV33SharedAttentionSplit|TestVulkanReceiptV34QwenGDNQ8Panel|TestVulkanReceiptV36Q6KPanel|TestVulkanReceiptV37QwenResidualNorm|TestVulkanReceiptV38Q5KPanel|TestVulkanReceiptV3CurrentRegistryBoundary|TestVulkanReceiptV4Current61Boundary|TestVulkanReceiptV5Current62Boundary|TestVulkanSuccessorRegistryTable|TestVulkanReceiptV7Current66Boundary|TestVulkanReceiptV8Current67Boundary)$'
+            'buildwitness-01 internal/buildwitness ^(TestBuildAdmissionOverlayMasksOnlyExcludedArtifacts|TestModelQuantizeCLI|TestPlatformNameListsMatchGoBuild|TestCheckPlatformFilenameAdmitsExplicitAndUnconstrained|TestServeProofCLIIntegration|TestSmokeExecRequiresFreshUpPlan|TestBuildGHAMatrixCoalescesOnlyEquivalentRows|TestVariantManifestRequiredFields|TestBuildGHAMatrix)$ -'
+            'buildwitness-02 internal/buildwitness - ^(TestBuildAdmissionOverlayMasksOnlyExcludedArtifacts|TestModelQuantizeCLI|TestPlatformNameListsMatchGoBuild|TestCheckPlatformFilenameAdmitsExplicitAndUnconstrained|TestServeProofCLIIntegration|TestSmokeExecRequiresFreshUpPlan|TestBuildGHAMatrixCoalescesOnlyEquivalentRows|TestVariantManifestRequiredFields|TestBuildGHAMatrix)$'
             'heavy-1 cmd/fak/startuptest,internal/unwiredscore - -'
             'heavy-2 experiments/negframe-steerability-ab,internal/seoaeoscore - -'
             'heavy-3 internal/serverlifecycle,internal/enumlint - -'
@@ -1342,8 +1378,18 @@ jobs:
           if [[ -n "$pkgs" ]]; then
             for rel in ${pkgs//,/ }; do printf '%s/%s\n' "$mod" "$rel"; done > "$RUNNER_TEMP/race-packages.txt"
           elif [[ "$SHARD" =~ ^rest-[0-9]+$ ]]; then
-            go list ./... | grep -vxF -f "$RUNNER_TEMP/excluded.txt" \
-              | awk -v n="$RACE_REST_SHARDS" -v i="${SHARD#rest-}" '(NR-1)%n==i' > "$RUNNER_TEMP/race-packages.txt"
+            # Greedy longest-processing-time bin-pack over measured seconds so every
+            # rest leg holds ~the same race test time; unknown packages get the default cost.
+            go list ./... | grep -vxF -f "$RUNNER_TEMP/excluded.txt" > "$RUNNER_TEMP/rest-all.txt"
+            LC_ALL=C awk -F'\t' -v mod="$mod" -v dflt="$RACE_DEFAULT_COST" \
+              'NR==FNR { cost[$1] = $2; next }
+               { rel = substr($0, length(mod) + 2); printf "%s\t%s\n", (rel in cost ? cost[rel] : dflt), $0 }' \
+              .github/race-package-costs.tsv "$RUNNER_TEMP/rest-all.txt" \
+              | LC_ALL=C sort -t$'\t' -k1,1gr -k2,2 \
+              | LC_ALL=C awk -F'\t' -v n="$RACE_REST_SHARDS" -v i="${SHARD#rest-}" \
+              'BEGIN { for (b = 0; b < n; b++) load[b] = 0 }
+               { best = 0; for (b = 1; b < n; b++) if (load[b] < load[best]) best = b
+                 load[best] += $1; if (best == i) print $2 }' > "$RUNNER_TEMP/race-packages.txt"
           else
             echo "::error::unknown race shard $SHARD"; exit 1
           fi
@@ -1367,6 +1413,16 @@ jobs:
           set -euo pipefail
           mapfile -t args < "$RUNNER_TEMP/race-args.txt"
           go test -race -count=1 -timeout=25m "${args[@]}"
+
+      # Only one designated leg saves the race build cache, and only from a trunk
+      # push. The key is fixed per go.mod, so a save on an existing key is a no-op
+      # and the cache never churns per commit.
+      - name: save race build cache (designated leg, trunk push only)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 'fak-01'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/go-build
+          key: race-gocache-${{ runner.os }}-${{ hashFiles('go.mod') }}
 
       - name: record exact verification provenance
         if: always()
