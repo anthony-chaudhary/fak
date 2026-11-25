@@ -25,6 +25,8 @@ int fcuda_ink2p_conv(const float *x, const float *w, const float *dyn, float *hi
     const float *resid, int n, int heads, int kn, float norm, int T);
 int fcuda_ink2p_conv_log(const float *x, const float *w, const float *dyn, float *hist, float *log,
     float *out, const float *resid, int n, int heads, int kn, float norm, int T);
+int fcuda_ink2p_combine_conv_log(const float *down, const float *wts, int k, const float *w, float *hist, float *log,
+    float *out, const float *resid, int n, int kn, float norm, int T);
 int fcuda_ink2p_conv_commit(float *hist, const float *log, int channels, int past, int L, int keep);
 int fcuda_ink2p_conv_commit_dev(float *hist, const float *log, int channels, int past, int L, const int *keepDev);
 int fcuda_ink2p_qkv_post_dev(float *q, float *r, const float *k, const float *v, const float *qclip,
@@ -53,8 +55,8 @@ int fcuda_ink2v_q6k_rows(const unsigned char *W, const float *X, float *Y, int o
 int fcuda_ink2p_conv_pair_log(const float *const *x, const float *const *w, const float *const *dyn,
     float *const *hist, float *const *log, float *const *out, const float *norm, int n, int heads, int kn, int T);
 int fcuda_ink2v_repeat_rows(const float *x, float *out, int n, int rows, int k);
-int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, void *q, int quantize, float *Y, int out, int in,
-    int rows, int block);
+int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, const float *gate, void *q, int quantize,
+    float *Y, int out, int in, int rows, int block);
 int fcuda_ink2d_topm(const float *logits, int rows, int rowStride, int vocab, int M, float *candV, int *candI,
     int *out);
 int fcuda_ink2d_markov_in(const float *state, const unsigned short *w1, const int *anchor, const int *idx, int step,

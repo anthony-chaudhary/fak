@@ -115,6 +115,9 @@ type inkling2Resident struct {
 	verifyLogits, verifyIdx            ink2Ref
 	verifyPos, verifyKeep              ink2Ref
 	verifyWarm, verifyReady, keepReady bool
+	// eager-warmed and captured verify graphs and captured commit graphs of the chunk
+	// widths under specMax, by width
+	tailWarm, tailReady, tailKeepReady [inkling2SpecMaxDraft + 1]bool
 	draft                              *ink2DeviceDraft
 }
 

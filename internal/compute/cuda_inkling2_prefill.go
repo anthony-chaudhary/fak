@@ -290,6 +290,13 @@ func (c *cudaBackend) Ink2PConvLog(x, w, dyn, hist, log, out, resid Ink2Ref, n, 
 		c.ink2F(out), c.ink2F(resid), C.int(n), C.int(heads), C.int(kn), C.float(norm), C.int(T)))
 }
 
+func (c *cudaBackend) Ink2PCombineConvLog(down, wts Ink2Ref, k int, w, hist, log, out, resid Ink2Ref, n, kn int, norm float32, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify combine conv", C.fcuda_ink2p_combine_conv_log(c.ink2F(down), c.ink2F(wts), C.int(k), c.ink2F(w),
+		c.ink2F(hist), c.ink2F(log), c.ink2F(out), c.ink2F(resid), C.int(n), C.int(kn), C.float(norm), C.int(T)))
+}
+
 func (c *cudaBackend) Ink2PConvCommit(hist, log Ink2Ref, channels, past, L, keep int) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -433,15 +440,15 @@ func (c *cudaBackend) Ink2VRepeatRows(x, out Ink2Ref, n, rows, k int) error {
 	return ink2Status("verify repeat rows", C.fcuda_ink2v_repeat_rows(c.ink2F(x), c.ink2F(out), C.int(n), C.int(rows), C.int(k)))
 }
 
-func (c *cudaBackend) Ink2VQ8Rows(w Tensor, x, q, y Ink2Ref, rows int, quantize bool) (bool, error) {
+func (c *cudaBackend) Ink2VQ8Rows(w Tensor, x, gate, q, y Ink2Ref, rows int, quantize bool) (bool, error) {
 	if w.Dtype != Q8_0 || len(w.Shape) != 2 || w.Quant.Block != 32 {
 		return false, nil
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	wb := c.cudaBufForSubmit(w)
-	rc := C.fcuda_ink2v_q8_rows((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.ink2F(x), c.ink2Ptr(q), ink2Bool(quantize), c.ink2F(y),
-		C.int(w.Shape[0]), C.int(w.Shape[1]), C.int(rows), C.int(w.Quant.Block))
+	rc := C.fcuda_ink2v_q8_rows((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.ink2F(x), c.ink2F(gate), c.ink2Ptr(q), ink2Bool(quantize),
+		c.ink2F(y), C.int(w.Shape[0]), C.int(w.Shape[1]), C.int(rows), C.int(w.Quant.Block))
 	if rc == -1 {
 		return false, nil
 	}

@@ -43,6 +43,7 @@ type ink2DeviceDraft struct {
 	// Markov head: shortlist M of base logits per row (0 = base argmax only), steps
 	// drafted per proposal
 	shortlist, steps               int
+	minMargin                      float32
 	w1, anchor, frnn               ink2Ref
 	rnnProj, hiddenOut             ink2Mat
 	rnnBias, hiddenOutBias, mkNorm ink2Ref
@@ -113,7 +114,7 @@ func (s *inkling2Resident) attachDraft(dm *Inkling2DSparkModel) (*ink2DeviceDraf
 	if hp.Taps > 4 || hp.Hidden != s.hp.Hidden || hp.HeadDim > 256 {
 		return nil, fmt.Errorf("inkling2 draft: unsupported geometry %+v", hp)
 	}
-	d := &ink2DeviceDraft{s: s, dd: dd, hp: hp, w: w, visits: dm.TargetVisits, steps: hp.Block - 1}
+	d := &ink2DeviceDraft{s: s, dd: dd, hp: hp, w: w, visits: dm.TargetVisits, steps: hp.Block - 1, minMargin: inkling2SpecMinMargin}
 	H := hp.Hidden
 	kvDim := hp.KVHeads * hp.HeadDim
 	for l := range w.Layers {
@@ -234,10 +235,20 @@ func (d *ink2DeviceDraft) forward() {
 		}
 	}
 	vdev := s.be.(compute.Inkling2VerifyDevice)
+	// a layer's temporaries are written once, so the weights that read one activation
+	// share its Q8_0 codes, keyed by its arena offset
+	q8 := map[int]ink2Ref{}
 	mm := func(m ink2Mat, x ink2Ref, rows int) ink2Ref {
 		y := d.tmp(rows * m.rows)
 		if s.err == nil {
-			codes := func(x ink2Ref, n int) (ink2Ref, bool) { return d.tmp(rows * (n/4 + n/32)), true }
+			codes := func(x ink2Ref, n int) (ink2Ref, bool) {
+				if q, ok := q8[x.Off]; ok {
+					return q, false
+				}
+				q := d.tmp(rows * (n/4 + n/32))
+				q8[x.Off] = q
+				return q, true
+			}
 			if ok, err := inkling2RowsMatMul(vdev, m, x, y, rows, codes); err != nil || ok {
 				run(err)
 				return y
@@ -250,6 +261,7 @@ func (d *ink2DeviceDraft) forward() {
 	for l := range d.layers {
 		// layer temporaries are dead once res is updated, so every layer reuses them
 		d.off = 0
+		clear(q8)
 		L := &d.layers[l]
 		x := d.tmp(B * H)
 		run(s.dev.Ink2RMS(res, L.inNorm, x, B, H, hp.NormEps))
@@ -300,8 +312,15 @@ func (d *ink2DeviceDraft) forward() {
 	}
 }
 
+// inkling2SpecMinMargin is the lead over the runner-up, in logits, a Markov draft step
+// needs to be proposed. Below it the step is accepted too rarely to pay for its verify
+// row, and a rejected step also wastes every row drafted after it.
+const inkling2SpecMinMargin = 2.5
+
 // propose drafts up to k tokens after anchor, the token at position pos whose
-// context (positions < pos) is already committed.
+// context (positions < pos) is already committed. With the Markov head the proposal
+// stops before the first step whose margin is under inkling2SpecMinMargin, so it can
+// be empty.
 func (d *ink2DeviceDraft) propose(anchor, pos, k int) ([]int, error) {
 	s, hp := d.s, d.hp
 	H := hp.Hidden
@@ -345,9 +364,12 @@ func (d *ink2DeviceDraft) propose(anchor, pos, k int) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]int, k)
-	for i := range out {
-		out[i] = int(got[4*i])
+	out := make([]int, 0, k)
+	for i := 0; i < k; i++ {
+		if d.shortlist > 0 && math.Float32frombits(uint32(got[4*i+1])) < d.minMargin {
+			break
+		}
+		out = append(out, int(got[4*i]))
 	}
 	return out, nil
 }

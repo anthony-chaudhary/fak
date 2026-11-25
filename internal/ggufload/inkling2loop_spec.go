@@ -15,11 +15,20 @@ import (
 // verify chunk is at most inkling2SpecMaxDraft+1 tokens.
 const inkling2SpecMaxDraft = 8
 
-// Device graph slots of a speculative session beside the decode graph.
+// Device graph slots of a speculative session beside the decode graph: the full-width
+// verify and its commit, the draft (inkling2DraftSlot), then a verify and a commit
+// slot for each shorter chunk width.
 const (
 	inkling2VerifySlot = 1
 	inkling2CommitSlot = 2
+	inkling2TailSlot0  = 4
 )
+
+// inkling2TailSlots returns the verify and commit graph slots of a T-token chunk
+// shorter than the full width.
+func inkling2TailSlots(T int) (verify, commit int) {
+	return inkling2TailSlot0 + 2*(T-1), inkling2TailSlot0 + 2*(T-1) + 1
+}
 
 // intBits carries an int32 through a float32 device word.
 func intBits(v int) float32 { return math.Float32frombits(uint32(int32(v))) }
@@ -42,9 +51,11 @@ func inkling2SpecDepth() int {
 }
 
 // inkling2Drafter proposes up to k tokens to follow history, whose last token is
-// the one the next forward consumes. Observe reports each verify outcome: the
-// tokens fed (fed[0] is that last token), how many were kept, and the session the
-// kept positions now live in.
+// the one the next forward consumes. A nil proposal runs the plain decode step; an
+// empty one still runs that token through the batched verify forward, which a
+// drafter whose context only that forward commits needs. Observe reports each verify
+// outcome: the tokens fed (fed[0] is that last token), how many were kept, and the
+// session the kept positions now live in.
 type inkling2Drafter interface {
 	Draft(history []int, k int) []int
 	Observe(s *inkling2Resident, fed []int, keep int) error
@@ -108,24 +119,30 @@ func (s *inkling2Resident) verify(tokens []int) ([]int, error) {
 		p.T, p.pos0 = T, s.pos
 		p.forward(true)
 	}
-	// the full-width verify is captured once, after an eager run has grown every
-	// lazily sized batched scratch; shorter tail verifies run eagerly
+	// each width is captured once, on its first run after an eager run of that width
+	// and of the full width have grown the lazily sized batched scratch, which a
+	// capture cannot allocate
 	full := T == s.specMax
+	slot, ready, warm := inkling2VerifySlot, &s.verifyReady, &s.verifyWarm
+	if !full {
+		slot, _ = inkling2TailSlots(T)
+		ready, warm = &s.tailReady[T], &s.tailWarm[T]
+	}
 	switch {
-	case full && s.verifyReady:
-		s.fail(vd.Ink2GraphLaunchSlot(inkling2VerifySlot))
-	case full && s.graph && s.verifyWarm:
+	case *ready:
+		s.fail(vd.Ink2GraphLaunchSlot(slot))
+	case s.graph && s.verifyWarm && *warm:
 		if err := s.dev.Ink2GraphBegin(); err != nil {
 			s.fail(err)
 			break
 		}
 		build()
-		s.fail(vd.Ink2GraphEndSlot(inkling2VerifySlot))
-		s.verifyReady = s.err == nil
-		s.fail(vd.Ink2GraphLaunchSlot(inkling2VerifySlot))
+		s.fail(vd.Ink2GraphEndSlot(slot))
+		*ready = s.err == nil
+		s.fail(vd.Ink2GraphLaunchSlot(slot))
 	default:
 		build()
-		s.verifyWarm = s.verifyWarm || full
+		*warm = true
 	}
 	if s.err != nil {
 		return nil, s.err
@@ -154,28 +171,27 @@ func (s *inkling2Resident) commitVerify(T, keep int) error {
 		kvDim := hp.KVHeads * hp.HeadDim
 		channels := 2*kvDim + 2*hp.Hidden
 		past := hp.ConvKernel - 1
-		switch {
-		case T != s.specMax:
-			for slot := range s.hist {
-				s.fail(vd.Ink2PConvCommit(s.hist[slot], s.convLog[slot], channels, past, past+T, keep))
-			}
-		default:
-			s.fail(s.dev.Ink2Write(s.verifyKeep, []float32{intBits(keep)}))
-			if !s.keepReady && s.graph {
-				if err := s.dev.Ink2GraphBegin(); err == nil {
-					for slot := range s.hist {
-						s.fail(vd.Ink2PConvCommitDev(s.hist[slot], s.convLog[slot], s.verifyKeep, channels, past, past+T))
-					}
-					s.fail(vd.Ink2GraphEndSlot(inkling2CommitSlot))
-					s.keepReady = s.err == nil
-				}
-			}
-			if s.keepReady {
-				s.fail(vd.Ink2GraphLaunchSlot(inkling2CommitSlot))
-			} else {
+		// the log row length depends on T, so each width has its own commit graph
+		gslot, ready := inkling2CommitSlot, &s.keepReady
+		if T != s.specMax {
+			_, gslot = inkling2TailSlots(T)
+			ready = &s.tailKeepReady[T]
+		}
+		s.fail(s.dev.Ink2Write(s.verifyKeep, []float32{intBits(keep)}))
+		if !*ready && s.graph {
+			if err := s.dev.Ink2GraphBegin(); err == nil {
 				for slot := range s.hist {
 					s.fail(vd.Ink2PConvCommitDev(s.hist[slot], s.convLog[slot], s.verifyKeep, channels, past, past+T))
 				}
+				s.fail(vd.Ink2GraphEndSlot(gslot))
+				*ready = s.err == nil
+			}
+		}
+		if *ready {
+			s.fail(vd.Ink2GraphLaunchSlot(gslot))
+		} else {
+			for slot := range s.hist {
+				s.fail(vd.Ink2PConvCommitDev(s.hist[slot], s.convLog[slot], s.verifyKeep, channels, past, past+T))
 			}
 		}
 	}
@@ -230,6 +246,17 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 	if err := s.commitVerify(len(warm), 0); err != nil {
 		return nil, st, err
 	}
+	// a drafter may propose fewer than depth tokens: run every shorter width eagerly
+	// and then capture it and its commit now, so no decode step pays for either
+	for i := 0; i < 2*depth && s.graph; i++ {
+		T := 1 + i/2
+		if _, err := s.verify(warm[:T]); err != nil {
+			return nil, st, err
+		}
+		if err := s.commitVerify(T, 0); err != nil {
+			return nil, st, err
+		}
+	}
 	st.Prefill = time.Since(start)
 	out := make([]int, 0, n+depth)
 	start = time.Now()
@@ -244,7 +271,7 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 		if s.err != nil {
 			return nil, st, s.err
 		}
-		if len(props) == 0 {
+		if props == nil {
 			if next, err = s.step(next); err != nil {
 				return nil, st, err
 			}

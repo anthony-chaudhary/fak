@@ -22,6 +22,12 @@
 #ifndef INK2_NV2_BLOCKS_PER_SM
 #define INK2_NV2_BLOCKS_PER_SM 4
 #endif
+// A verify chunk routes T*k slots through one launch; past INK2_WIDE_SLOTS slots a
+// sparser grid (fewer, longer blocks per SM) is the faster schedule.
+#define INK2_WIDE_SLOTS 16
+#ifndef INK2_NV2_BLOCKS_PER_SM_WIDE
+#define INK2_NV2_BLOCKS_PER_SM_WIDE 2
+#endif
 
 // Physical float4 slot of activation float4 j (0..3) of 16-value block b.
 static __device__ __forceinline__ int ink2_nv2_slot(int b, int j) { return b * 4 + ((j + (b >> 1)) & 3); }
@@ -122,7 +128,8 @@ static int ink2_nv2_blocks_per_slot(int rows, int k) {
   }
   const int groups = (rows + INK2_NV2_ROWS - 1) / INK2_NV2_ROWS;
   const int needed = (groups + INK2_NV2_WARPS - 1) / INK2_NV2_WARPS;
-  int g = (sms * INK2_NV2_BLOCKS_PER_SM + k - 1) / k;
+  const int perSM = k > INK2_WIDE_SLOTS ? INK2_NV2_BLOCKS_PER_SM_WIDE : INK2_NV2_BLOCKS_PER_SM;
+  int g = (sms * perSM + k - 1) / k;
   if (g > needed) g = needed;
   return g < 1 ? 1 : g;
 }
@@ -186,6 +193,14 @@ static bool ink2_expert_nvfp4_v2(const uint8_t *W, const uint8_t *scales, const 
 #ifndef INK2_IQ3_BLOCKS_PER_SM
 #define INK2_IQ3_BLOCKS_PER_SM 6
 #endif
+#ifndef INK2_IQ3_BLOCKS_PER_SM_WIDE
+#define INK2_IQ3_BLOCKS_PER_SM_WIDE 4
+#endif
+
+// Blocks per SM of the v3 IQ grids for k routed slots.
+static int ink2_iq3_blocks_per_sm(int k) {
+  return k > INK2_WIDE_SLOTS ? INK2_IQ3_BLOCKS_PER_SM_WIDE : INK2_IQ3_BLOCKS_PER_SM;
+}
 
 template <int FMT> struct Ink2IQShape {
   static constexpr int SB = FMT == INK2_IQ2XS ? 74 : FMT == INK2_IQ2S ? 82 : FMT == INK2_IQ3XXS ? 98 : 110;
@@ -335,7 +350,7 @@ static bool ink2_expert_iq_v3(int fmt, const uint8_t *W, const int *ids, const f
     if (cudaGetDevice(&dev) != cudaSuccess || cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev) != cudaSuccess || sms <= 0) sms = 84;
   }
   const int needed = ((rows + INK2_IQ3_ROWS - 1) / INK2_IQ3_ROWS + 7) / 8;
-  int g = (sms * INK2_IQ3_BLOCKS_PER_SM + k - 1) / k;
+  int g = (sms * ink2_iq3_blocks_per_sm(k) + k - 1) / k;
   if (g > needed) g = needed;
   const dim3 grid(g < 1 ? 1 : g, k);
 #define INK2_IQ3_CASE(F)                                                                                          \
@@ -430,7 +445,7 @@ static bool ink2_expert_iq4nl_v3(const uint8_t *W, const int *ids, const float *
   int sms = 0, dev = 0;
   if (cudaGetDevice(&dev) != cudaSuccess || cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev) != cudaSuccess || sms <= 0) sms = 84;
   const int needed = ((rows + INK2_IQ3_ROWS - 1) / INK2_IQ3_ROWS + 7) / 8;
-  int g = (sms * INK2_IQ3_BLOCKS_PER_SM + k - 1) / k;
+  int g = (sms * ink2_iq3_blocks_per_sm(k) + k - 1) / k;
   if (g > needed) g = needed;
   const dim3 grid(g < 1 ? 1 : g, k);
   FCUDA_TS("k_ink2_expert_iq4nl_v3", grid, k_ink2_expert_iq4nl_v3<INK2_IQ3_ROWS><<<grid, 256, (size_t)in * 4, g_stream>>>(

@@ -1567,8 +1567,8 @@ extern "C" int fcuda_ink2_graph_launch(void) {
 }
 
 // Extra capture slots beside the decode graph (slot 0): a speculative session keeps
-// its verify and commit graphs here.
-#define INK2_GRAPH_SLOTS 4
+// its draft graph and a verify and a commit graph per chunk width here.
+#define INK2_GRAPH_SLOTS 24
 static cudaGraphExec_t g_ink2_slot_exec[INK2_GRAPH_SLOTS] = {};
 
 extern "C" int fcuda_ink2_graph_end_slot(int slot) {

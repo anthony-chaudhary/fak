@@ -6,11 +6,30 @@
 // output rows per block: the staged X is reused across them
 #define INK2V_BLOCK_ROWS 128
 
+// Scale and min of group g from a Q5_K super-block's 12 packed scale bytes held as three
+// words (getScaleMinK4_dev on registers).
+static __device__ __forceinline__ unsigned int ink2v_k4_byte(const uint4 &h, int i) {
+  const unsigned int w = i < 4 ? h.y : i < 8 ? h.z : h.w;
+  return (w >> (8 * (i & 3))) & 0xffu;
+}
+
+static __device__ __forceinline__ void ink2v_k4_scale_min(const uint4 &h, int g, unsigned char *sc, unsigned char *mn) {
+  if (g < 4) {
+    *sc = (unsigned char)(ink2v_k4_byte(h, g) & 63);
+    *mn = (unsigned char)(ink2v_k4_byte(h, g + 4) & 63);
+  } else {
+    *sc = (unsigned char)((ink2v_k4_byte(h, g + 4) & 0x0f) | ((ink2v_k4_byte(h, g - 4) >> 6) << 4));
+    *mn = (unsigned char)((ink2v_k4_byte(h, g + 4) >> 4) | ((ink2v_k4_byte(h, g) >> 6) << 4));
+  }
+}
+
 // Y[t][o] = W[o] . X[t] for a Q5_K W and up to INK2V_MAX_ROWS rows of X, which are
 // staged once in shared memory; each weight is decoded once per block and applied to
 // every row. Every row keeps k_q5k_gemm<1>'s expression, K order and shuffle-down
-// reduction, so a row's result equals the single-row GEMV's bit for bit.
-template <int R>
+// reduction, so a row's result equals the single-row GEMV's bit for bit. HDR16 reads a
+// super-block's d, dmin and scale bytes as one 16-byte load (W must be 16-byte aligned)
+// instead of a byte load per group; it pays from three rows up and costs at one.
+template <int R, bool HDR16>
 __global__ void k_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int blockRows) {
   ink2_pdl_enter();
   extern __shared__ float xs[];
@@ -27,13 +46,29 @@ __global__ void k_ink2v_q5k_rows(const unsigned char *W, const float *X, float *
     const unsigned char *w1 = two ? w0 + (size_t)nsb * 176 : w0;
     for (int sb = 0; sb < nsb; ++sb) {
       const unsigned char *b0 = w0 + (size_t)sb * 176, *b1 = w1 + (size_t)sb * 176;
-      const float d0 = __half2float(*(const __half *)b0), dm0 = __half2float(*(const __half *)(b0 + 2));
-      const float d1 = __half2float(*(const __half *)b1), dm1 = __half2float(*(const __half *)(b1 + 2));
+      uint4 h0 = make_uint4(0u, 0u, 0u, 0u), h1 = h0;
+      float d0, dm0, d1, dm1;
+      if (HDR16) {
+        h0 = *(const uint4 *)b0;
+        h1 = *(const uint4 *)b1;
+        d0 = __half2float(__ushort_as_half((unsigned short)(h0.x & 0xffffu)));
+        dm0 = __half2float(__ushort_as_half((unsigned short)(h0.x >> 16)));
+        d1 = __half2float(__ushort_as_half((unsigned short)(h1.x & 0xffffu)));
+        dm1 = __half2float(__ushort_as_half((unsigned short)(h1.x >> 16)));
+      } else {
+        d0 = __half2float(*(const __half *)b0), dm0 = __half2float(*(const __half *)(b0 + 2));
+        d1 = __half2float(*(const __half *)b1), dm1 = __half2float(*(const __half *)(b1 + 2));
+      }
 #pragma unroll
       for (int g = 0; g < 8; ++g) {
         unsigned char sc0, mn0, sc1, mn1;
-        getScaleMinK4_dev(g, b0 + 4, &sc0, &mn0);
-        getScaleMinK4_dev(g, b1 + 4, &sc1, &mn1);
+        if (HDR16) {
+          ink2v_k4_scale_min(h0, g, &sc0, &mn0);
+          ink2v_k4_scale_min(h1, g, &sc1, &mn1);
+        } else {
+          getScaleMinK4_dev(g, b0 + 4, &sc0, &mn0);
+          getScaleMinK4_dev(g, b1 + 4, &sc1, &mn1);
+        }
         const int pair = g >> 1;
         int q0 = (g & 1) ? (b0[48 + pair * 32 + lane] >> 4) : (b0[48 + pair * 32 + lane] & 15);
         int q1 = (g & 1) ? (b1[48 + pair * 32 + lane] >> 4) : (b1[48 + pair * 32 + lane] & 15);
@@ -68,14 +103,20 @@ __global__ void k_ink2v_q5k_rows(const unsigned char *W, const float *X, float *
 template <int R>
 static int ink2v_q5k_rows_launch(const unsigned char *W, const float *X, float *Y, int out, int in) {
   const size_t smem = (size_t)R * in * sizeof(float);
-  const int oe = ink2p_smem_optin((const void *)k_ink2v_q5k_rows<R>, smem);
+  const bool hdr16 = R >= 3 && ((uintptr_t)W & 15) == 0;
+  const int oe = hdr16 ? ink2p_smem_optin((const void *)k_ink2v_q5k_rows<R, true>, smem)
+                       : ink2p_smem_optin((const void *)k_ink2v_q5k_rows<R, false>, smem);
   if (oe) return oe;
   // enough blocks to fill the SMs on a small matrix, else INK2V_BLOCK_ROWS rows per
   // block so the staged X is re-read from L2 as few times as possible
   int blockRows = INK2V_BLOCK_ROWS;
   if (out < INK2V_BLOCK_ROWS * 256) blockRows = max(8, ((out / 256) + 7) & ~7);
   const int blocks = (out + blockRows - 1) / blockRows;
-  FCUDA_TS("k_ink2v_q5k_rows", blocks, k_ink2v_q5k_rows<R><<<blocks, 256, smem, g_stream>>>(W, X, Y, out, in, blockRows));
+  if (hdr16) {
+    FCUDA_TS("k_ink2v_q5k_rows", blocks, k_ink2v_q5k_rows<R, true><<<blocks, 256, smem, g_stream>>>(W, X, Y, out, in, blockRows));
+  } else {
+    FCUDA_TS("k_ink2v_q5k_rows", blocks, k_ink2v_q5k_rows<R, false><<<blocks, 256, smem, g_stream>>>(W, X, Y, out, in, blockRows));
+  }
   return ink2_last_error();
 }
 
@@ -182,17 +223,24 @@ static void ink2v_q8_rows_launch(const signed char *W, const float *Wscale, cons
 
 // Y[t] = W.X[t] for a resident Q8_0 (block 32) W and rows <= 9 rows of X; q holds the
 // rows' codes ([rows][in] bytes) then their block scales; quantize = 0 reuses the codes an
-// earlier call on the same X left in q. Returns -1 (nothing launched) outside the kernel's
-// contract.
-extern "C" int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, void *q, int quantize,
-                                   float *Y, int out, int in, int rows, int block) {
+// earlier call on the same X left in q. gate (nullable, needs quantize) quantizes
+// X * sigmoid(gate) instead, leaving X unscaled. Returns -1 (nothing launched) outside
+// the kernel's contract.
+extern "C" int fcuda_ink2v_q8_rows(const int8_t *W, const float *Wscale, const float *X, const float *gate, void *q,
+                                   int quantize, float *Y, int out, int in, int rows, int block) {
   const int nblk = in / 32;
   const bool aligned = (((uintptr_t)W | (uintptr_t)q) & 15) == 0 && (in & 15) == 0;
-  if (block != 32 || in % 32 != 0 || !aligned || nblk > 288 || rows < 1 || rows > INK2V_MAX_ROWS)
+  if (block != 32 || in % 32 != 0 || !aligned || nblk > 288 || rows < 1 || rows > INK2V_MAX_ROWS ||
+      (gate && !quantize))
     return -1;
   signed char *codes = (signed char *)q;
   float *scales = (float *)(codes + (size_t)rows * in);
-  if (quantize)
+  // rows are contiguous in X, the codes and the scales, so the one-row gated kernel
+  // covers them as rows * nblk blocks
+  if (gate)
+    FCUDA_TS("k_ink2_q8_quant_gated", rows * nblk,
+             k_ink2_q8_quant_gated<<<rows * nblk, 32, 0, g_stream>>>(X, gate, codes, scales));
+  else if (quantize)
     FCUDA_TS("k_q8_quant_act", dim3(nblk, rows),
              k_q8_quant_act<<<dim3(nblk, rows), 32, 0, g_stream>>>(X, codes, scales, rows, in, 32));
   const signed char *w8 = (const signed char *)W;

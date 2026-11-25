@@ -173,11 +173,29 @@ func inkling2RowsMatMul(vd compute.Inkling2VerifyDevice, m ink2Mat, x, y ink2Ref
 	switch m.t.Dtype {
 	case compute.Q8_0:
 		q, fresh := codes(x, m.cols)
-		return vd.Ink2VQ8Rows(m.t, x, q, y, rows, fresh)
+		return vd.Ink2VQ8Rows(m.t, x, ink2Ref{}, q, y, rows, fresh)
 	case compute.Q5_K, compute.Q6_K:
 		return vd.Ink2VRows(m.t, x, y, rows)
 	}
 	return false, nil
+}
+
+// mmGated is mm(m, x * sigmoid(gate)) for x of n floats per row; on a verify chunk's
+// Q8_0 weight the gate is applied while x is quantized, so x itself stays unscaled.
+func (p *ink2Prefill) mmGated(m ink2Mat, x, gate ink2Ref, n int) ink2Ref {
+	s := p.s
+	if s.err == nil && p.verify && p.T <= 9 && m.t.Dtype == compute.Q8_0 {
+		y := p.tmp(p.T * m.rows)
+		ok, err := p.vd.Ink2VQ8Rows(m.t, x, gate, p.tmp(p.T*(m.cols/4+m.cols/32)), y, p.T, true)
+		if err != nil || ok {
+			p.fail(err)
+			return y
+		}
+	}
+	if s.err == nil {
+		p.fail(s.dev.Ink2SigmoidMul(x, gate, p.T*n))
+	}
+	return p.mm(m, x)
 }
 
 // rmsRows RMS-normalizes rows contiguous rows of x by w in one launch.
@@ -408,11 +426,7 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	} else if s.err == nil {
 		p.fail(p.pd.Ink2PAttend(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, ap, extent, window, cap, p.pos0, p.T))
 	}
-	gate := p.mm(l.gate, in[0])
-	if s.err == nil {
-		p.fail(s.dev.Ink2SigmoidMul(attn, gate, p.T*hp.Heads*hp.HeadDim))
-	}
-	o := p.mm(l.wo, attn)
+	o := p.mmGated(l.wo, attn, p.mm(l.gate, in[0]), hp.Heads*hp.HeadDim)
 	if ip%hp.AttnResBlock == 0 {
 		*blocks = append(*blocks, inpSA)
 		cur = p.conv(slot, o, l.attnPostConv, ink2Ref{}, ink2Ref{}, h, 0, 2*kvDim, false)
@@ -429,7 +443,20 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	} else {
 		x = p.mixNorm(with(*blocks, cur), l.ffnResQ, 1, []ink2Ref{l.ffnNorm})[0]
 	}
-	x = p.moe(l, x)
+	down, wts := p.moeRows(l, x)
+	if p.verify && s.err == nil {
+		// the combine is folded into the logged post conv
+		kn := hp.ConvKernel
+		out := p.hold(p.T * h)
+		offset := 2*kvDim + h
+		p.fail(p.vd.Ink2PCombineConvLog(down, wts, hp.ExpertsUsed, l.ffnPostConv, at(s.hist[slot], offset*(kn-1)),
+			at(s.convLog[slot], offset*(kn-1+p.T)), out, ffnInp, h, kn, inkling2ConvNorm(kn, ink2Ref{}), p.T))
+		return out
+	}
+	x = p.tmp(p.T * h)
+	if s.err == nil {
+		p.fail(p.pd.Ink2PCombine(down, wts, x, hp.ExpertsUsed, h, p.T))
+	}
 	return p.conv(slot, x, l.ffnPostConv, ink2Ref{}, ffnInp, h, 0, 2*kvDim+h, true)
 }
 
@@ -471,7 +498,19 @@ func (p *ink2Prefill) experts(e *ink2Experts, ids, x ink2Ref, xDiv, xStride int,
 	p.fail(err)
 }
 
+// moe is the MoE output for x: the routed pairs' down rows combined by their weights.
 func (p *ink2Prefill) moe(l *ink2Layer, x ink2Ref) ink2Ref {
+	down, wts := p.moeRows(l, x)
+	out := p.tmp(p.T * p.s.hp.Hidden)
+	if p.s.err == nil {
+		p.fail(p.pd.Ink2PCombine(down, wts, out, p.s.hp.ExpertsUsed, p.s.hp.Hidden, p.T))
+	}
+	return out
+}
+
+// moeRows returns the routed pairs' down rows ([T*k][hidden]) and weights, before the
+// combine.
+func (p *ink2Prefill) moeRows(l *ink2Layer, x ink2Ref) (ink2Ref, ink2Ref) {
 	s := p.s
 	hp := s.hp
 	k, width := hp.ExpertsUsed, hp.ExpertWidth
@@ -506,11 +545,7 @@ func (p *ink2Prefill) moe(l *ink2Layer, x ink2Ref) ink2Ref {
 	} else {
 		p.experts(&l.down, ids, act, 1, padK, down, hp.Hidden, &bucket)
 	}
-	out := p.tmp(p.T * hp.Hidden)
-	if s.err == nil {
-		p.fail(p.pd.Ink2PCombine(down, wts, out, k, hp.Hidden, p.T))
-	}
-	return out
+	return down, wts
 }
 
 // pairExperts runs npairs (token, slot) pairs through e with the decode expert GEMV,

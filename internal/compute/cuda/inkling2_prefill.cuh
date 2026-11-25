@@ -192,7 +192,8 @@ __global__ void __launch_bounds__(256) k_ink2p_ctrl_apply(Ink2PCtrl cs, int n, i
 #define INK2P_MAX_KN 8
 __device__ __forceinline__ void ink2p_conv_body(const float *x, const float *w, const float *dyn, float *hist,
                                                 float *out, const float *resid, int n, int heads, int kn, float norm,
-                                                int T, float *log) {
+                                                int T, float *log, const float *moeDown, const float *moeWts,
+                                                int moeK) {
   const int c = blockIdx.x * blockDim.x + threadIdx.x;
   if (c >= n) return;
   const int past = kn - 1;
@@ -209,7 +210,15 @@ __device__ __forceinline__ void ink2p_conv_body(const float *x, const float *w, 
   const int hd = dyn ? c / (n / heads) : 0;
   const int dstride = heads * kn;
   for (int tok = 0; tok < T; ++tok) {
-    const float xc = x[(size_t)tok * n + c];
+    float xc;
+    if (moeDown) {
+      // the sum of k_ink2p_combine, in routing order
+      xc = 0.f;
+      const size_t pair0 = (size_t)tok * moeK;
+      for (int sl = 0; sl < moeK; ++sl) xc = __fadd_rn(xc, __fmul_rn(moeWts[pair0 + sl], moeDown[(pair0 + sl) * n + c]));
+    } else {
+      xc = x[(size_t)tok * n + c];
+    }
     if (lc) lc[past + tok] = xc;
     float acc = 0.f;
     for (int t = 0; t < past; ++t) acc = __fadd_rn(acc, __fmul_rn(h[t], wv[t]));
@@ -230,9 +239,12 @@ __device__ __forceinline__ void ink2p_conv_body(const float *x, const float *w, 
   for (int t = 0; t < past; ++t) hc[t] = h[t];
 }
 
+// moeDown (nullable) makes input row t the MoE combine of the t-th moeK routed down rows
+// by moeWts, so the combine needs no launch of its own.
 __global__ void k_ink2p_conv(const float *x, const float *w, const float *dyn, float *hist, float *out,
-                             const float *resid, int n, int heads, int kn, float norm, int T, float *log) {
-  ink2p_conv_body(x, w, dyn, hist, out, resid, n, heads, kn, norm, T, log);
+                             const float *resid, int n, int heads, int kn, float norm, int T, float *log,
+                             const float *moeDown, const float *moeWts, int moeK) {
+  ink2p_conv_body(x, w, dyn, hist, out, resid, n, heads, kn, norm, T, log, moeDown, moeWts, moeK);
 }
 
 // Two logged convs of one verify visit (the k and v short convs) in one launch:
@@ -245,7 +257,8 @@ struct Ink2PConvPair {
 
 __global__ void k_ink2p_conv_pair(Ink2PConvPair cp, int n, int heads, int kn, int T) {
   const int j = blockIdx.y;
-  ink2p_conv_body(cp.x[j], cp.w[j], cp.dyn[j], cp.hist[j], cp.out[j], nullptr, n, heads, kn, cp.norm[j], T, cp.log[j]);
+  ink2p_conv_body(cp.x[j], cp.w[j], cp.dyn[j], cp.hist[j], cp.out[j], nullptr, n, heads, kn, cp.norm[j], T, cp.log[j],
+                  nullptr, nullptr, 0);
 }
 
 extern "C" int fcuda_ink2p_conv_pair_log(const float *const *x, const float *const *w, const float *const *dyn,
@@ -872,7 +885,7 @@ extern "C" int fcuda_ink2p_conv(const float *x, const float *w, const float *dyn
   if (kn < 1 || kn > INK2P_MAX_KN) return (int)cudaErrorInvalidValue;
   // one thread walks a channel along the whole chunk, so small blocks spread it over every SM
   FCUDA_TS("k_ink2p_conv", (n + 31) / 32, k_ink2p_conv<<<(n + 31) / 32, 32, 0, g_stream>>>(
-      x, w, dyn, hist, out, resid, n, heads, kn, norm, T, nullptr));
+      x, w, dyn, hist, out, resid, n, heads, kn, norm, T, nullptr, nullptr, nullptr, 0));
   return ink2_last_error();
 }
 
@@ -881,7 +894,17 @@ extern "C" int fcuda_ink2p_conv_log(const float *x, const float *w, const float 
                                     float *out, const float *resid, int n, int heads, int kn, float norm, int T) {
   if (kn < 1 || kn > INK2P_MAX_KN) return (int)cudaErrorInvalidValue;
   FCUDA_TS("k_ink2p_conv", (n + 31) / 32, k_ink2p_conv<<<(n + 31) / 32, 32, 0, g_stream>>>(
-      x, w, dyn, hist, out, resid, n, heads, kn, norm, T, log));
+      x, w, dyn, hist, out, resid, n, heads, kn, norm, T, log, nullptr, nullptr, 0));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_conv_log (no dynamic taps) on the MoE combine of down ([T*k][n]) by wts.
+extern "C" int fcuda_ink2p_combine_conv_log(const float *down, const float *wts, int k, const float *w, float *hist,
+                                            float *log, float *out, const float *resid, int n, int kn, float norm,
+                                            int T) {
+  if (kn < 1 || kn > INK2P_MAX_KN) return (int)cudaErrorInvalidValue;
+  FCUDA_TS("k_ink2p_conv", (n + 31) / 32, k_ink2p_conv<<<(n + 31) / 32, 32, 0, g_stream>>>(
+      nullptr, w, nullptr, hist, out, resid, n, 1, kn, norm, T, log, down, wts, k));
   return ink2_last_error();
 }
 
