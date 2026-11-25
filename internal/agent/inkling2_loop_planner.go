@@ -21,6 +21,20 @@ type Inkling2LoopGeneration struct {
 	Generated                     int
 	Stopped                       bool // a stop id or emit ended the turn before maxNew
 	PrefillSeconds, DecodeSeconds float64
+	// Width is how many requests shared the forward that decoded this one; 0 is unknown.
+	Width int
+}
+
+// inkling2LoopTimings is the turn's llama.cpp timings plus the width it decoded in.
+func inkling2LoopTimings(promptTokens int, res Inkling2LoopGeneration) *Timings {
+	t := NewTimings(promptTokens, 0, res.Generated, res.PrefillSeconds, res.DecodeSeconds)
+	if res.Width > 0 {
+		t.Inkling2Width, t.Inkling2Mode = res.Width, "scalar"
+		if res.Width > 1 {
+			t.Inkling2Mode = "batch"
+		}
+	}
+	return t
 }
 
 // Inkling2LoopGenerator decodes one request on a fresh KV cache: it prefills
@@ -28,6 +42,13 @@ type Inkling2LoopGeneration struct {
 // id is generated (it is not emitted), or maxNew ids were emitted.
 type Inkling2LoopGenerator interface {
 	Generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(id int) bool) (Inkling2LoopGeneration, error)
+}
+
+// inkling2LoopGPUOwner is implemented by a generator whose own executor serializes
+// every GPU call; the planner admits concurrent turns to such a generator so they
+// can share a cohort.
+type inkling2LoopGPUOwner interface {
+	SerializesGPUAccess() bool
 }
 
 // Inkling2LoopPlanner serves chat turns on the dedicated inkling2_loop forward,
@@ -59,6 +80,15 @@ func NewInkling2LoopPlanner(gen Inkling2LoopGenerator, tok *tokenizer.Tokenizer,
 		return nil, fmt.Errorf("inkling2_loop planner: tokenizer has no %s special token", Inkling2EndOfTurnMarker)
 	}
 	return &Inkling2LoopPlanner{gen: gen, tok: tok, cfg: cfg, modelID: modelID, stops: stops, contextTokens: contextTokens}, nil
+}
+
+func (p *Inkling2LoopPlanner) generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(int) bool) (Inkling2LoopGeneration, error) {
+	if owner, ok := p.gen.(inkling2LoopGPUOwner); ok && owner.SerializesGPUAccess() {
+		return p.gen.Generate(ctx, prompt, maxNew, stops, emit)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.gen.Generate(ctx, prompt, maxNew, stops, emit)
 }
 
 func (p *Inkling2LoopPlanner) Model() string { return p.modelID }
@@ -120,9 +150,7 @@ func (p *Inkling2LoopPlanner) Complete(ctx context.Context, messages []Message, 
 		}
 		return true
 	}
-	p.mu.Lock()
-	res, err := p.gen.Generate(ctx, ids, maxNew, p.stops, emit)
-	p.mu.Unlock()
+	res, err := p.generate(ctx, ids, maxNew, p.stops, emit)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +175,7 @@ func (p *Inkling2LoopPlanner) Complete(ctx context.Context, messages []Message, 
 		Message:      Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
 		FinishReason: finish,
 		Usage:        Usage{PromptTokens: len(ids), CompletionTokens: res.Generated, TotalTokens: len(ids) + res.Generated},
-		Timings:      NewTimings(len(ids), 0, res.Generated, res.PrefillSeconds, res.DecodeSeconds),
+		Timings:      inkling2LoopTimings(len(ids), res),
 	}
 	return normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages), nil
 }

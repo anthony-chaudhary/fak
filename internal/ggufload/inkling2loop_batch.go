@@ -40,6 +40,11 @@ type inkling2Batch struct {
 	in, meta, argIdx ink2Ref
 
 	graph, graphReady, warm bool
+
+	// capC and capCtx are the shape the arenas were sized for; owned are the arenas
+	owned        []compute.Tensor
+	capC, capCtx int
+	err          error
 }
 
 // inkling2BatchGraph reports whether the batched step is captured and replayed as a
@@ -57,18 +62,25 @@ func inkling2BatchSeqOps(be any, lookup func(string) (string, bool)) compute.Ink
 }
 
 func newInkling2Batch(m *Inkling2LoopModel, be compute.Backend, C, ctx int) (*inkling2Batch, error) {
-	if C < 1 {
-		return nil, fmt.Errorf("inkling2 batch: %d sequences", C)
+	s, err := newInkling2BatchResident(m, be)
+	if err != nil {
+		return nil, err
 	}
-	pd, ok := be.(compute.Inkling2PrefillDevice)
-	if !ok {
+	b, err := newInkling2BatchState(s, C, ctx)
+	if err != nil {
+		s.close()
+		return nil, err
+	}
+	return b, nil
+}
+
+// newInkling2BatchResident binds the weights a batch forward reads. It draws scratch
+// from the batch's own arenas, never the per-token one, and keeps every sequence's
+// state in the batch's strided arenas, so it carries no cohort-sized state itself.
+func newInkling2BatchResident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Resident, error) {
+	if _, ok := be.(compute.Inkling2PrefillDevice); !ok {
 		return nil, fmt.Errorf("inkling2 batch: backend %s has no row-batched ops", be.Name())
 	}
-	if ctx < 1 || ctx > inkling2ResidentCtx {
-		return nil, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, inkling2ResidentCtx)
-	}
-	// the batch forward draws scratch from its own arenas, never the per-token one, and
-	// keeps every sequence's state in its own strided arenas below
 	s, err := newInkling2ResidentSized(m, be, 0, 64)
 	if err != nil {
 		return nil, err
@@ -78,39 +90,112 @@ func newInkling2Batch(m *Inkling2LoopModel, be compute.Backend, C, ctx int) (*in
 		return nil, fmt.Errorf("inkling2 batch: an expert dtype has no indexed kernel")
 	}
 	s.graph = false
+	return s, nil
+}
+
+// newInkling2BatchState allocates the arenas of a C-sequence, ctx-position batch on
+// the binding s and readies it for a cohort of that shape; begin re-readies it for
+// any cohort no wider and no longer.
+func newInkling2BatchState(s *inkling2Resident, C, ctx int) (*inkling2Batch, error) {
+	if C < 1 {
+		return nil, fmt.Errorf("inkling2 batch: %d sequences", C)
+	}
+	if ctx < 1 || ctx > inkling2ResidentCtx {
+		return nil, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, inkling2ResidentCtx)
+	}
+	pd := s.be.(compute.Inkling2PrefillDevice)
 	hp := s.hp
-	b := &inkling2Batch{s: s, C: C, ctx: ctx, pos: make([]int, C), seq: inkling2BatchSeqOps(be, os.LookupEnv),
-		graph: inkling2BatchGraph() && inkling2DefaultOn(be, "FAK_INKLING2_GRAPH", os.LookupEnv)}
+	b := &inkling2Batch{s: s, capC: C, capCtx: ctx, seq: inkling2BatchSeqOps(s.be, os.LookupEnv)}
 	b.p = ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts(), T: C}
 	keep, scr := s.prefillArenas(C)
 	scr += C*s.output.rows + 64
 	b.p.keepFloats, b.p.scrFloats = keep, scr
-	b.p.keep, b.p.scr = s.alloc(keep), s.alloc(scr)
+	b.p.keep, b.p.scr = b.alloc(keep), b.alloc(scr)
 	// each argmax takes a 4-int slot: the index, then its 8-byte reduction key
-	b.in, b.meta, b.argIdx = s.alloc(C*hp.Hidden), s.alloc(C), s.alloc(4*C)
+	b.in, b.meta, b.argIdx = b.alloc(C*hp.Hidden), b.alloc(C), b.alloc(4*C)
 
-	b.caps = inkling2BatchCaps(hp, s.caps, ctx)
-	slots := len(b.caps)
+	caps := inkling2BatchCaps(hp, s.caps, ctx)
+	slots := len(caps)
 	kvDim := hp.KVHeads * hp.HeadDim
 	b.histStride = (2*kvDim + 2*hp.Hidden) * (hp.ConvKernel - 1)
 	b.kc, b.vc, b.hist = make([]ink2Ref, slots), make([]ink2Ref, slots), make([]ink2Ref, slots)
 	maxCap := 0
-	for slot, cap := range b.caps {
+	for slot, cap := range caps {
 		maxCap = max(maxCap, cap)
-		b.kc[slot], b.vc[slot] = s.alloc(C*cap*kvDim), s.alloc(C*cap*kvDim)
-		b.hist[slot] = s.alloc(C * b.histStride)
+		b.kc[slot], b.vc[slot] = b.alloc(C*cap*kvDim), b.alloc(C*cap*kvDim)
+		b.hist[slot] = b.alloc(C * b.histStride)
 	}
 	// float64 scores rows per head per sequence, so sequences never serialize on them
-	b.scoreStride = 2 * hp.Heads * maxCap
-	b.scores = s.alloc(C * b.scoreStride)
-	if s.err != nil {
-		s.close()
-		return nil, s.err
+	b.scores = b.alloc(C * 2 * hp.Heads * maxCap)
+	if b.err != nil {
+		err := b.err
+		b.release()
+		return nil, err
+	}
+	if err := b.begin(C, ctx); err != nil {
+		b.release()
+		return nil, err
 	}
 	return b, nil
 }
 
-func (b *inkling2Batch) close() { b.s.close() }
+func (b *inkling2Batch) alloc(n int) ink2Ref {
+	t, err := b.s.dev.Ink2Alloc(n)
+	if err != nil {
+		if b.err == nil {
+			b.err = err
+		}
+		return ink2Ref{}
+	}
+	b.owned = append(b.owned, t)
+	return compute.Ink2At(t, 0)
+}
+
+// begin readies the arenas for a cohort of C sequences at ctx positions. Every
+// stride is the cohort's own, so a narrower or shorter cohort addresses a prefix of
+// each arena. Attention only reads positions the cohort has written, but a conv reads
+// its history before the first write, so histories are cleared.
+func (b *inkling2Batch) begin(C, ctx int) error {
+	if C < 1 || C > b.capC || ctx < 1 || ctx > b.capCtx {
+		return fmt.Errorf("inkling2 batch: cohort %dx%d outside the %dx%d state", C, ctx, b.capC, b.capCtx)
+	}
+	s := b.s
+	hp := s.hp
+	b.C, b.ctx, b.pos = C, ctx, make([]int, C)
+	b.p.T = C
+	b.caps = inkling2BatchCaps(hp, s.caps, ctx)
+	maxCap := 0
+	for _, c := range b.caps {
+		maxCap = max(maxCap, c)
+	}
+	b.scoreStride = 2 * hp.Heads * maxCap
+	// a captured step bakes the previous cohort's width and strides
+	s.dev.Ink2GraphReset()
+	b.graphReady, b.warm = false, false
+	b.graph = inkling2BatchGraph() && inkling2DefaultOn(s.be, "FAK_INKLING2_GRAPH", os.LookupEnv)
+	if n := C * b.histStride; n > 0 {
+		zero := make([]float32, n)
+		for _, h := range b.hist {
+			if err := s.dev.Ink2Write(h, zero); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// release frees the batch arenas and keeps the weight binding.
+func (b *inkling2Batch) release() {
+	for _, t := range b.owned {
+		b.s.be.Free(t)
+	}
+	b.owned = nil
+}
+
+func (b *inkling2Batch) close() {
+	b.release()
+	b.s.close()
+}
 
 // inkling2BatchCaps is the cache capacity of every slot: ctx for a global slot, the
 // resident's ring size for a local one.

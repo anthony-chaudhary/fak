@@ -1,0 +1,81 @@
+{
+  "rows": [
+    {
+      "id": "inkling2-serve-loop-generator",
+      "canonical": "Inkling2LoopGenerator",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The agent interface the Inkling-2 chat planner drives to decode one request: Generate prefills the prompt on a fresh KV cache and hands each greedy id to emit until a stop id, emit refusal or maxNew. fak serve backs it with the serialized engine or, opt-in, the cohort batch engine.",
+      "distinction": "A DECODE CONTRACT the planner calls, not the looped depth forward itself and not a session: it owns no KV state between calls and says nothing about recurrence passes.",
+      "distinct_from": [
+        "inkling2-serve-loop-generation",
+        "inkling2-serve-loop-planner",
+        "inkling2-serve-loop-session"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopGenerator",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-serve-loop-generation",
+      "canonical": "Inkling2LoopGeneration",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The receipt one Inkling2LoopGenerator.Generate call returns: ids generated, whether a stop ended it, the cohort width that served it, and prefill and decode seconds for the response timings.",
+      "distinction": "A PER-CALL RESULT record, not a model generation or version and not a loop iteration count.",
+      "distinct_from": [
+        "inkling2-serve-loop-generator",
+        "inkling2-serve-loop-session"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopGeneration",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-serve-loop-max-batch",
+      "canonical": "Inkling2LoopMaxBatch",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The widest cohort, in sequences, that one row-batched Inkling-2 decode forward serves; fak serve's admission window closes a cohort at this width.",
+      "distinction": "A SEQUENCE-COUNT ceiling on one batched forward, not a token batch, prefill chunk or recurrence-pass bound.",
+      "distinct_from": [
+        "inkling2-serve-loop-generator",
+        "inkling2-serve-loop-session"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopMaxBatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-serve-loop-resident-context",
+      "canonical": "Inkling2LoopResidentContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The token capacity, prompt plus generated, of one resident Inkling-2 device session (FAK_INKLING2_CTX, default 4096); fak serve caps request budgets at it and sizes cohort KV no larger than it.",
+      "distinction": "A PER-SESSION KV capacity of the device-resident path, not the model's trained context length and not an agent context window; the host path has no fixed bound.",
+      "distinct_from": [
+        "inkling2-serve-loop-session",
+        "inkling2-serve-loop-planner"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopResidentContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

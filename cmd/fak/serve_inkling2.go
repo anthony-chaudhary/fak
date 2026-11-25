@@ -94,35 +94,30 @@ func (e *inkling2LoopEngine) Generate(ctx context.Context, prompt []int, maxNew 
 			err = cerr
 		}
 	}()
-	start := time.Now()
-	next, err := s.Prefill(prompt)
+	turn := ggufload.Inkling2LoopTurn{MaxTokens: maxNew, Stop: func(id int) bool { return stops[id] }, Emit: emit}
+	st, err := ggufload.Inkling2LoopSessionDecode(ctx, s, prompt, &turn)
+	res = agent.Inkling2LoopGeneration{Generated: turn.Generated, Stopped: turn.Stopped, Width: 1,
+		PrefillSeconds: st.Prefill.Seconds(), DecodeSeconds: st.Decode.Seconds()}
+	return res, err
+}
+
+// newServeInkling2Generator picks the serialized engine, or with
+// FAK_INKLING2_SERVE_BATCH=1 on a batch-eligible load the cohort engine, and names
+// the choice for the startup message.
+func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (agent.Inkling2LoopGenerator, string, error) {
+	scalar := newInkling2LoopEngine(m, be)
+	if !inkling2ServeBatchEnabled(lookup) {
+		return scalar, "greedy decode", nil
+	}
+	adm, err := inkling2AdmissionFromEnv(lookup)
 	if err != nil {
-		return res, err
+		return nil, "", err
 	}
-	res.PrefillSeconds = time.Since(start).Seconds()
-	start = time.Now()
-	defer func() { res.DecodeSeconds = time.Since(start).Seconds() }()
-	for res.Generated < maxNew {
-		if stops[next] {
-			res.Stopped = true
-			return res, nil
-		}
-		res.Generated++
-		if !emit(next) {
-			res.Stopped = true
-			return res, nil
-		}
-		if res.Generated == maxNew {
-			break
-		}
-		if err := ctx.Err(); err != nil {
-			return res, err
-		}
-		if next, err = s.Step(next); err != nil {
-			return res, err
-		}
+	if !ggufload.Inkling2LoopBatchEligible(m, be) {
+		return scalar, "greedy decode; FAK_INKLING2_SERVE_BATCH ignored: load is not batch eligible", nil
 	}
-	return res, nil
+	return newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, lookup),
+		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s", ggufload.Inkling2LoopMaxBatch, adm.gap, adm.maxWait), nil
 }
 
 // newServeInkling2LoopPlanner binds an engine to the chat surface with a config
@@ -304,6 +299,8 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 	contextTokens := ggufload.Inkling2LoopResidentContext
 	var (
 		engine    *inkling2LoopEngine
+		gen       agent.Inkling2LoopGenerator
+		decode    string
 		closer    func() error
 		placement string
 	)
@@ -315,6 +312,7 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			os.Exit(2)
 		}
 		engine, closer = newInkling2MetalEngine(target, contextTokens), target.Close
+		gen, decode = engine, "greedy decode"
 		placement = fmt.Sprintf("%s native target on metal: one resident model, single-stream decode", serveInkling2LoopArch)
 	} else {
 		l, err := loadServeInkling2(path, rt.chatBackend, os.Stderr)
@@ -323,7 +321,12 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			os.Exit(2)
 		}
 		m := l.Model
-		engine, closer = newInkling2LoopEngine(m, rt.chatBackend), m.Close
+		closer = m.Close
+		if gen, decode, err = newServeInkling2Generator(m, rt.chatBackend, os.LookupEnv); err != nil {
+			_ = m.Close()
+			fmt.Fprintln(os.Stderr, "fak serve:", err)
+			os.Exit(2)
+		}
 		placement = fmt.Sprintf("%s looped forward on %s: layers=%d hidden=%d passes=%d; %s",
 			m.Arch, rt.chatBackend.Name(), m.HP.Layers, m.HP.Hidden, m.HP.Passes, l.Placement)
 	}
@@ -345,7 +348,7 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 	if *sf.model == "mock" || *sf.model == "" {
 		*sf.model = serveInkling2LoopDefaultModelID
 	}
-	planner, err := newServeInkling2LoopPlanner(engine, tok, *sf.model, contextTokens)
+	planner, err := newServeInkling2LoopPlanner(gen, tok, *sf.model, contextTokens)
 	if err != nil {
 		_ = closeModel()
 		fmt.Fprintln(os.Stderr, "fak serve:", err)
@@ -366,6 +369,6 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 	rt.inkling2Planner, rt.inkling2Close, rt.inkling2Metal = planner, closeModel, metal
 	rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "model-load", Dur: loadDur})
 	rt.addStartupMessage(newServeStartupMessage("serve", "inkling2-loop", "info",
-		fmt.Sprintf("%s; context=%d model=%q (greedy decode)", placement, contextTokens, *sf.model)))
+		fmt.Sprintf("%s; context=%d model=%q (%s)", placement, contextTokens, *sf.model, decode)))
 	return true
 }

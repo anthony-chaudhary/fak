@@ -351,6 +351,10 @@ type Timings struct {
 	// only when the turn drafted tokens.
 	DraftN         int `json:"draft_n,omitempty"`
 	DraftNAccepted int `json:"draft_n_accepted,omitempty"`
+	// Inkling2Width is the cohort width an Inkling-2 turn decoded in (1 alone) and
+	// Inkling2Mode names that path, so a client can witness server-side coalescing.
+	Inkling2Width int    `json:"inkling2_width,omitempty"`
+	Inkling2Mode  string `json:"inkling2_mode,omitempty"`
 }
 
 // NewTimings builds Timings from token counts and phase seconds. Like llama.cpp,
