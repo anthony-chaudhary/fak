@@ -4,19 +4,21 @@
 
   <!-- Panel 1: decode, scale 0-130 tok/s over 240 px (1.846 px per tok/s), baseline y=320 -->
   <text x="190" y="36" font-size="16" font-weight="bold" text-anchor="middle" fill="#111">Decode, tok/s (higher is better)</text>
-  <text x="190" y="56" font-size="12" text-anchor="middle" fill="#444">same card and GGUF</text>
+  <text x="190" y="56" font-size="12" text-anchor="middle" fill="#444">same card and GGUF; fak and stock in one window</text>
   <line x1="40" y1="320" x2="350" y2="320" stroke="#333"/>
-  <rect x="60" y="98.7" width="70" height="221.3" fill="#1f6feb"/>
-  <text x="95" y="92" font-size="14" text-anchor="middle" fill="#111">119.9</text>
+  <rect x="60" y="102.0" width="70" height="218.0" fill="#1f6feb"/>
+  <text x="95" y="95" font-size="14" text-anchor="middle" fill="#111">118.1</text>
   <text x="95" y="340" font-size="12" text-anchor="middle" fill="#111">fak</text>
+  <text x="95" y="355" font-size="11" text-anchor="middle" fill="#444">(ABBA x2)</text>
   <rect x="155" y="99.4" width="70" height="220.6" fill="#8b949e"/>
   <text x="190" y="92" font-size="14" text-anchor="middle" fill="#111">119.5</text>
   <text x="190" y="340" font-size="12" text-anchor="middle" fill="#111">llama.cpp fork</text>
-  <text x="190" y="355" font-size="11" text-anchor="middle" fill="#444">(realugbun)</text>
+  <text x="190" y="355" font-size="11" text-anchor="middle" fill="#444">(realugbun,</text>
+  <text x="190" y="369" font-size="11" text-anchor="middle" fill="#444">separate window)</text>
   <rect x="250" y="170.5" width="70" height="149.5" fill="#c9d1d9"/>
   <text x="285" y="164" font-size="14" text-anchor="middle" fill="#111">81.0</text>
   <text x="285" y="340" font-size="12" text-anchor="middle" fill="#111">stock llama.cpp</text>
-  <text x="285" y="355" font-size="11" text-anchor="middle" fill="#444">(two days earlier)</text>
+  <text x="285" y="355" font-size="11" text-anchor="middle" fill="#444">(ABBA x2, 1.46x)</text>
 
   <!-- Panel 2: prefill pp512, scale 0-2500 tok/s over 240 px (0.096 px per tok/s), baseline y=320 -->
   <line x1="380" y1="60" x2="380" y2="360" stroke="#ddd"/>
