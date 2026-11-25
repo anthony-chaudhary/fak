@@ -236,7 +236,10 @@ var kernelTransferNames = map[string]bool{
 // publication or activation over an already projected row, not a projection.
 // CUDA names spell the same ops gemv/gemm (cuBLAS rows cublas_*gemm*), mul_mat
 // (the llama.cpp MMQ port), q3k_panel (the Q3_K panel product), and
-// fattn/attend/spec_verify/dsa_index for the attention family.
+// fattn/attend/spec_verify/dsa_index for the attention family. Inkling-2 names
+// its routed expert products expert_iq/expert_nvfp4, its low-rank controller
+// products ctrl_down/ctrl_apply, its multi-row quantized verify products
+// ink2v_q*, and its RMS norms rms.
 func KernelOpClass(name string) string {
 	switch {
 	case kernelTransferNames[name], name == "fak_paged_kv_copy_blocks":
@@ -250,17 +253,23 @@ func KernelOpClass(name string) string {
 		return KernelOpMatvec
 	case strings.Contains(name, "gdn"), strings.Contains(name, "kda"):
 		return KernelOpGDN
-	case strings.Contains(name, "matvec"), strings.Contains(name, "gemv"):
+	case strings.Contains(name, "matvec"), strings.Contains(name, "gemv"),
+		strings.Contains(name, "expert_iq"), strings.Contains(name, "expert_nvfp4"),
+		strings.Contains(name, "ctrl_down"), strings.Contains(name, "ctrl_apply"),
+		// The draft pick is a shortlist of lm_head row products; its argmax is the tail.
+		name == "k_ink2d_markov_pick":
 		return KernelOpMatvec
 	case strings.Contains(name, "matmul"), strings.Contains(name, "token_panel"), strings.Contains(name, "token_pair"),
 		strings.Contains(name, "gemm"), strings.Contains(name, "mul_mat"), strings.Contains(name, "q3k_panel"),
-		strings.Contains(name, "w4a16"):
+		strings.Contains(name, "w4a16"), strings.Contains(name, "ink2v_q"):
 		return KernelOpMatmul
 	case strings.Contains(name, "swiglu"):
 		return KernelOpSwiGLU
 	case strings.Contains(name, "rope"):
 		return KernelOpRope
-	case strings.Contains(name, "norm"):
+	case strings.Contains(name, "norm"), strings.Contains(name, "rms"),
+		// The controller pair row is a two-input RMS.
+		name == "k_ink2_ctrl_pair":
 		return KernelOpNorm
 	case strings.Contains(name, "argmax"):
 		return KernelOpArgmax

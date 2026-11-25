@@ -521,12 +521,13 @@ var (
 func cudaLaunchTimingName(path, launch, kernel string) string {
 	launch = strings.Join(strings.Fields(strings.TrimSuffix(launch, "<<<")), "")
 	aliases := map[string]string{
-		"cuda/quant_matmul.cuh:k_f32_to_f16_vec4":         "k_f32_to_f16",
-		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<1>": "k_iq4xs_mmvq_gemv",
-		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<2>": "k_iq4xs_mmvq_gemv",
-		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<3>": "k_iq4xs_mmvq_gemv",
-		"cuda/paged_attention_vllm.cuh:kern":              "fak_paged_attention_v1",
-		"cuda/paged_attention_vllm.cuh:kern2":             "fak_paged_attention_v2",
+		"cuda/quant_matmul.cuh:k_f32_to_f16_vec4":                                                                    "k_f32_to_f16",
+		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<1>":                                                            "k_iq4xs_mmvq_gemv",
+		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<2>":                                                            "k_iq4xs_mmvq_gemv",
+		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<3>":                                                            "k_iq4xs_mmvq_gemv",
+		"cuda/paged_attention_vllm.cuh:kern":                                                                         "fak_paged_attention_v1",
+		"cuda/inkling2_prefill.cuh:k_ink2p_conv_pair":                                                                "k_ink2p_conv",
+		"cuda/paged_attention_vllm.cuh:kern2":                                                                        "fak_paged_attention_v2",
 		"cuda/paged_attention_vllm.cuh:paged_attention_v2_reduce_kernel<float,HEAD_SIZE,NUM_THREADS,PARTITION_SIZE>": "fak_paged_attention_v2_reduce",
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_run_kernel":                                    "fak_paged_kv_write",
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_pages_kernel":                                  "fak_paged_kv_write_pages",
@@ -1226,6 +1227,24 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	// Engram row gathers/dequantization and poisoned-output status publication.
 	"v41_eg_q5": true, "v41_eg_q2": true, "v41_eg_f32": true, "v41_eg_rows": true,
 	"v41_eg_iq4nl": true, "v41_eg_iq4nl_row": true, "v41_eg_iq4nl_poison": true,
+	// Inkling-2 causal short convolution and its history commit: no conv class.
+	"k_ink2_conv": true, "k_ink2p_conv": true, "k_ink2p_conv_commit": true,
+	// Inkling-2 softmax state mix, MoE routing, SITU activation and weighted combine.
+	"k_ink2_mix": true, "k_ink2_mixc": true, "k_ink2v_mixc": true, "k_ink2p_mix": true,
+	"k_ink2_route": true, "k_ink2p_route": true, "k_ink2_situ": true, "k_situ_act": true,
+	"k_ink2_moe_combine": true, "k_ink2p_combine": true, "k_situ_combine": true,
+	// Inkling-2 attention prep: clips, tau, RoPE and cache append fused in one row.
+	"k_ink2_qkv_post": true, "k_ink2p_qkv_post": true, "k_ink2d_qk": true,
+	// Inkling-2 elementwise glue, activation quantization and key-to-index publication.
+	"k_ink2_add": true, "k_ink2_sigmoid_mul": true, "k_ink2d_silu_mul": true, "k_ink2_expert_scale": true,
+	"k_ink2_q8_quant_gated": true, "k_ink2_argkey_index": true,
+	// Inkling-2 pair bucketing, row gathers/scatters and ring stores.
+	"k_ink2p_bucket_count": true, "k_ink2p_bucket_scan": true, "k_ink2p_bucket_fill": true,
+	"k_ink2p_gather_pairs": true, "k_ink2p_scatter_pairs": true, "k_ink2v_repeat_rows": true,
+	"k_ink2d_ring_store": true,
+	// Inkling-2 draft tap fusion, top-M shortlist selection and Markov state glue.
+	"k_ink2d_fuse": true, "k_ink2d_topm_slice": true, "k_ink2d_topm_merge": true,
+	"k_ink2d_markov_in": true, "k_ink2d_markov_gate": true,
 }
 
 // fak-test:runtime fast est=20ms lane=default

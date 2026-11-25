@@ -293,6 +293,12 @@ BINDINGS += ("internal/compute/cuda_paged_kv.go",)
 BINDINGS += ("internal/compute/cuda_offload_refill.go", "internal/compute/cuda_qwen35_mtp.go",
              "internal/compute/cuda_qwen35_sequence_paged.go")
 BINDINGS_LABEL = ", ".join(BINDINGS)
+# Inkling-2 declares its C seam in a dedicated header that its own CGo bindings
+# include; enroll the header and both bindings rather than exempting the exports.
+HEADERS += ("internal/compute/cuda_inkling2_prefill.h",)
+HEADERS_LABEL = ", ".join(HEADERS)
+BINDINGS += ("internal/compute/cuda_inkling2.go", "internal/compute/cuda_inkling2_prefill.go")
+BINDINGS_LABEL = ", ".join(BINDINGS)
 
 
 def header_decls(text: str) -> set[str]:

@@ -191,7 +191,7 @@ func reserveContiguous(c *cudaBackend,k *cudaKV,l,n int)error{if len(k.K)==0{k.K
 func appendContiguous(k *cudaKV,l int,r,v,w Tensor,s,t int)error{for i,p:=range [][]dslice{k.Kraw,k.K,k.V}{src:=[]Tensor{r,v,w}[i];C.fcuda_d2d(offsetF(p[l].ptr,s*k.stride()),src.buf.(*cudaBuf).ptr,C.size_t(t*k.stride()*4));p[l].len=(s+t)*k.stride()};if l==0{for i:=0;i<t;i++{k.pos=append(k.pos,s+i)}};return nil}
 func(c *cudaBackend)qwen35BatchAttentionIntoLocked(q Tensor,k *cudaKV,l,p,h int,s float32,o Tensor)error{n:=C.fak_qwen35_causal_attention_panel_f32(c.cf(q),(*C.float)(k.K[l].ptr),(*C.float)(k.V[l].ptr),c.cf(o),1,C.int(p),C.int(h),C.int(k.cfg.NumKVHeads),C.int(k.cfg.HeadDim),C.float(s));if n!=0{return errors.New("attention")};return nil}
 const PreNorm=0
-type config struct{BlockTopology,VocabSize int}
+type config struct{BlockTopology,VocabSize,NumLayers int}
 func(config)IsQwen35Hybrid()bool{return true}
 func(config)IsMoE()bool{return false}
 type model struct{Cfg config}
@@ -200,6 +200,8 @@ func(h *fixtureHAL)mutateSequence(_ Backend,f func([]Qwen35SequenceState)(Qwen35
 type Session struct{M *model;Backend Backend;qwen35HAL *fixtureHAL;halKV KVStore;halFailure error;halClosed bool;req Qwen35SequencePrefillRequest}
 func(s *Session)ensureOpenBackendSession(){if s!=nil&&(s.halClosed||s.halFailure!=nil){panic("closed session")}}
 func(s *Session)requireGLM5NextSessionUnsupported(string){}
+// No fixture lane splits dense layers, so the batched path stays eligible.
+func(s *Session)denseGPULayers()int{return 0}
 func(s *Session)closeBackendOwned(){s.halClosed=true}
 func(s *Session)beginHALTokenLineageWrite([]int)func(){return func(){}}
 func qwen35CohortMutation(_ Backend,sessions []*Session,lanes []Qwen35SequencePrefillRequest,fn func()error)error{for i,s:=range sessions{lanes[i].States=s.qwen35HAL.states};return fn()}
