@@ -164,17 +164,22 @@ func TestImmunityAdmitsEditOfSessionAuthoredTestFile(t *testing.T) {
 	}))
 }
 
+// A slice, not a map: subtest order must be stable so go test -v output
+// reproduces byte-for-byte across hosts.
 func TestImmunityRefusesCommittedTestRemovedFromIndex(t *testing.T) {
-	for name, plumbing := range map[string][]string{
-		"update-index --force-remove": {"update-index", "--force-remove", "pkg/gate_test.go"},
-		"read-tree --empty":           {"read-tree", "--empty"},
-		"rm --cached -r":              {"rm", "-q", "--cached", "-r", "pkg"},
+	for _, c := range []struct {
+		name     string
+		plumbing []string
+	}{
+		{"update-index --force-remove", []string{"update-index", "--force-remove", "pkg/gate_test.go"}},
+		{"read-tree --empty", []string{"read-tree", "--empty"}},
+		{"rm --cached -r", []string{"rm", "-q", "--cached", "-r", "pkg"}},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			root, committed := authoredProbeRepo(t)
 			a := New(testImmunityBasePolicy())
 			authoredProbeAuthor(t, a, authoredProbeTrace, filepath.Join(root, "pkg", "wip_test.go"), authoredProbeBody)
-			authoredProbeGit(t, root, plumbing...)
+			authoredProbeGit(t, root, c.plumbing...)
 			if _, err := os.Stat(committed); err != nil {
 				t.Fatalf("committed test must remain on disk: %v", err)
 			}
