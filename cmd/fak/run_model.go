@@ -80,11 +80,13 @@ type parsedRunCommand struct {
 	errMessage string
 	modelRef   string
 	prompt     string
-	chatConfig chatModelConfig
-	tracePath  string
-	engineID   string
-	vdso       bool
-	policyPath string
+	// defaultModel marks a modelRef the platform default supplied.
+	defaultModel bool
+	chatConfig   chatModelConfig
+	tracePath    string
+	engineID     string
+	vdso         bool
+	policyPath   string
 }
 
 func newRunFlagSet(name string, errorHandling flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
@@ -119,19 +121,36 @@ func newRunFlagSet(name string, errorHandling flag.ErrorHandling) (*flag.FlagSet
 }
 
 func parseRunArgs(fs *flag.FlagSet, flags *runFlags, argv []string) (parsedRunCommand, error) {
-	if len(argv) == 0 {
-		return parsedRunCommand{
-			action:     runActionUsage,
-			errMessage: "fak run: model or --trace is required",
-		}, nil
-	}
-
 	var modelRef string
 	var prompt string
+	defaulted := false
+	// useDefault fills in the platform default when no model was named.
+	useDefault := func() bool {
+		ref, ok := runDefaultModel()
+		if ok {
+			modelRef, defaulted = ref, true
+		}
+		return ok
+	}
 
-	if !strings.HasPrefix(argv[0], "-") {
+	if len(argv) == 0 {
+		if !useDefault() {
+			return parsedRunCommand{
+				action:     runActionUsage,
+				errMessage: "fak run: model or --trace is required",
+			}, nil
+		}
+		if err := fs.Parse(nil); err != nil {
+			return parsedRunCommand{}, err
+		}
+	} else if !strings.HasPrefix(argv[0], "-") {
 		// Model specified as the first argument: fak run <model> [flags] [prompt]
-		modelRef = argv[0]
+		lead := ""
+		if runArgIsPrompt(argv[0]) && useDefault() {
+			lead = argv[0]
+		} else {
+			modelRef = argv[0]
+		}
 		if err := fs.Parse(argv[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return parsedRunCommand{action: runActionHelp}, nil
@@ -145,6 +164,9 @@ func parseRunArgs(fs *flag.FlagSet, flags *runFlags, argv []string) (parsedRunCo
 			}, nil
 		}
 		prompt = strings.Join(fs.Args(), " ")
+		if lead != "" {
+			prompt = strings.TrimSpace(lead + " " + prompt)
+		}
 	} else {
 		// Flag specified as first argument: fak run [flags] [model] [prompt]
 		if err := fs.Parse(argv); err != nil {
@@ -163,14 +185,21 @@ func parseRunArgs(fs *flag.FlagSet, flags *runFlags, argv []string) (parsedRunCo
 			}, nil
 		}
 		args := fs.Args()
-		if len(args) == 0 {
+		switch {
+		case len(args) > 0 && !runArgIsPrompt(args[0]):
+			modelRef = args[0]
+			prompt = strings.Join(args[1:], " ")
+		case useDefault():
+			prompt = strings.Join(args, " ")
+		case len(args) > 0:
+			modelRef = args[0]
+			prompt = strings.Join(args[1:], " ")
+		default:
 			return parsedRunCommand{
 				action:     runActionUsage,
 				errMessage: "fak run: model is required (or pass --trace FILE)",
 			}, nil
 		}
-		modelRef = args[0]
-		prompt = strings.Join(args[1:], " ")
 	}
 
 	if !*flags.raw {
@@ -179,9 +208,10 @@ func parseRunArgs(fs *flag.FlagSet, flags *runFlags, argv []string) (parsedRunCo
 		return parsedRunCommand{action: runActionUsage, errMessage: "fak run: --raw requires one prompt and cannot take a system message"}, nil
 	}
 	return parsedRunCommand{
-		action:   runActionChat,
-		modelRef: modelRef,
-		prompt:   prompt,
+		action:       runActionChat,
+		modelRef:     modelRef,
+		prompt:       prompt,
+		defaultModel: defaulted,
 		chatConfig: chatModelConfig{
 			modelRef:         modelRef,
 			prompt:           prompt,
@@ -229,6 +259,9 @@ func runUnifiedRun(argv []string) {
 	case runActionTrace:
 		executeTraceReplay(cmd.tracePath, cmd.engineID, cmd.vdso, cmd.policyPath)
 	case runActionChat:
+		if cmd.defaultModel {
+			fmt.Fprintf(os.Stderr, "fak run: no model named; using %s (override: fak run <model> [prompt])\n", cmd.modelRef)
+		}
 		if err := executeChatModel(cmd.chatConfig); err != nil {
 			fmt.Fprintln(os.Stderr, "fak run:", err)
 			os.Exit(1)
@@ -355,7 +388,7 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string, metalFla
 	}
 	ref = pathutil.ExpandTilde(ref)
 	if hfhub.IsURI(ref) {
-		resolved, err := hfhub.FetchURI(ctx, ref, os.Stderr)
+		resolved, err := fetchModelArtifact(ctx, ref, os.Stderr)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fak run: %v\n", err)
 			os.Exit(1)

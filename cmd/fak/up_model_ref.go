@@ -127,7 +127,8 @@ const turnkeyTierSizeTolerance = 0.25
 // normalizes the underscore/dash spelling to the K-quant form and returns "" when
 // no recognizable quant token is present, so callers only fail on a real signal.
 func inferQuantFromFilename(name string) string {
-	base := strings.ToUpper(strings.TrimSuffix(filepath.Base(name), ".gguf"))
+	// Some repos publish a GGUF as "<name>.gguf_file".
+	base := strings.ToUpper(strings.TrimSuffix(strings.TrimSuffix(filepath.Base(name), "_file"), ".gguf"))
 	base = strings.ReplaceAll(base, "_", "-")
 	for _, q := range []string{"IQ1-S", "IQ1-M", "IQ2-XXS", "IQ2-XS", "IQ2-S", "IQ3-XXS", "IQ3-XS", "IQ3-S", "IQ4-XS", "IQ4-NL"} {
 		if strings.Contains(base, q) {

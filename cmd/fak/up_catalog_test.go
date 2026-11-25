@@ -10,6 +10,8 @@ import (
 )
 
 func TestTurnkeyCatalogResolution(t *testing.T) {
+	// This test pins the standard tier ladder, whatever the host serves by default.
+	withTurnkeyInkling2Servable(t, errTurnkeyLadderOnly)
 	// Keep model resolution independent of user-local registry and cache state.
 	t.Setenv("FAK_MODELS_DIR", t.TempDir())
 	t.Setenv("FAK_MODEL_DIR", t.TempDir())

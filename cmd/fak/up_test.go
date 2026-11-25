@@ -396,6 +396,8 @@ func TestUpBootstrap(t *testing.T) {
 }
 
 func TestFakUpTurnkeyBootstrap(t *testing.T) {
+	// This test pins the standard tier ladder, whatever the host serves by default.
+	withTurnkeyInkling2Servable(t, errTurnkeyLadderOnly)
 	// Scoped Acceptance Criterion 1: fak up correctly inspects Apple Silicon unified memory and chooses compatible quant tier.
 	t.Run("MemoryInspectionAndTierSelection", func(t *testing.T) {
 		t.Setenv("FAK_UP_MEMORY_BYTES", fmt.Sprint(16*macfit.GiB))
@@ -918,6 +920,8 @@ func TestUpInKernelModelExecution(t *testing.T) {
 // KVBytesPerToken for the 3B geometry - while an unknown override (an alias,
 // .gguf path, or hf:// URI) keeps the label-only passthrough.
 func TestApplyTurnkeyModelOverrideSwapsGeometry(t *testing.T) {
+	// This test pins the standard tier ladder, whatever the host serves by default.
+	withTurnkeyInkling2Servable(t, errTurnkeyLadderOnly)
 	// Drive the real dry-run CLI path (present before the fix) so this test
 	// compiles against the parent source and fails there, then passes on the
 	// fix. Issue #12986: `--model <tier>` must select the named tier's geometry.

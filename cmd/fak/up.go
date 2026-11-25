@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -323,6 +324,9 @@ func applyTurnkeyModelOverride(plan *macfit.TurnkeyProfile, memoryBytes uint64, 
 			plan.KVPoolBytes = kvPoolBytes
 		}
 	}
+	if tier.FixedContextTokens > 0 {
+		contextBudget = tier.FixedContextTokens
+	}
 	plan.ContextBudgetTokens = contextBudget
 
 	allocatedBytes := tier.WeightBytes + (contextBudget * kvpt)
@@ -417,7 +421,13 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		os.Exit(1)
 	}
 
-	plan, err := macfit.ConfigureTurnkeyWithOptions(memoryBytes, macfit.TurnkeyOptions{KVPrecision: kvPrec})
+	turnkeyOpts := macfit.TurnkeyOptions{KVPrecision: kvPrec}
+	if *modelOverride == "" {
+		if tier, ok := turnkeyMacDefaultTierFor(runtime.GOOS, runtime.GOARCH, memoryBytes); ok {
+			turnkeyOpts.Tier = &tier
+		}
+	}
+	plan, err := macfit.ConfigureTurnkeyWithOptions(memoryBytes, turnkeyOpts)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak up: planning failed: %v\n", err)
 		os.Exit(1)
@@ -887,6 +897,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	var native *turnkeyNativeResources
 	var nativeModelPath string
 	var capturedMetalDecision serveMetalDecision
+	var inkling2Release func()
 	// Declare the boot phase honestly: until the model/planner is constructed and
 	// the listener is about to bind, a readiness probe must not claim ready.
 	ready := &readinessGate{}
@@ -907,7 +918,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 			}
 			ref = pathutil.ExpandTilde(ref)
 			if hfhub.IsURI(ref) {
-				resolved, err := hfhub.FetchURI(ctx, ref, os.Stderr)
+				resolved, err := fetchModelArtifact(ctx, ref, os.Stderr)
 				if err != nil {
 					return nil, fmt.Errorf("fetch %s: %w", ref, err)
 				}
@@ -921,49 +932,57 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 				return nil, err
 			}
 
-			deps := defaultTurnkeyNativeLoadDeps()
-			// Pin the loader's admission to a STABLE, reserve-based budget instead of
-			// a live host-free probe. A momentary dip in reclaimable memory (cold
-			// page cache, a just-loaded sibling) must not spuriously refuse the
-			// turnkey plan the reserve-based envelope already admitted; the same 20%
-			// reserve macfit plans against is the headroom here, so the two agree.
-			// Genuine live pressure is still caught downstream by the local
-			// admission reservation and the Metal GPU lease.
-			deps.fitOverride = turnkeyStableFitBudget(plan.MemoryBytes)
-			// The reservation lives below the loader and re-samples live memory,
-			// so it needs the SAME stable envelope: otherwise a momentary dip
-			// refuses a plan the loader just admitted (the macfit/loader and
-			// reservation budgets disagreeing is the original defect).
-			deps.fitFloor = deps.fitOverride
-			resolveBackend := deps.resolveBackend
-			admitMetal := deps.admitAndLoad
-			var selectedBackend compute.Backend
-			deps.resolveBackend = func() (compute.Backend, error) {
-				backend, err := resolveBackend()
-				selectedBackend = backend
-				return backend, err
-			}
-			deps.admitAndLoad = func(metal bool, path string, load func(), fitFloor *serveFitBudget) (func(), error) {
-				if selectedBackend != nil && selectedBackend.Name() == "vulkan" {
-					return loadLocalLauncherModelWithVulkanLease(true, path, gpulease.Options{}, load)
+			if serveIsInkling2GGUF(ref) {
+				// The generic loader below cannot hold the looped forward.
+				planner, inkling2Release, err = openTurnkeyInkling2(ref, plan.Tier.ModelID)
+				if err != nil {
+					return nil, err
 				}
-				return admitMetal(metal, path, load, fitFloor)
-			}
+			} else {
+				deps := defaultTurnkeyNativeLoadDeps()
+				// Pin the loader's admission to a STABLE, reserve-based budget instead of
+				// a live host-free probe. A momentary dip in reclaimable memory (cold
+				// page cache, a just-loaded sibling) must not spuriously refuse the
+				// turnkey plan the reserve-based envelope already admitted; the same 20%
+				// reserve macfit plans against is the headroom here, so the two agree.
+				// Genuine live pressure is still caught downstream by the local
+				// admission reservation and the Metal GPU lease.
+				deps.fitOverride = turnkeyStableFitBudget(plan.MemoryBytes)
+				// The reservation lives below the loader and re-samples live memory,
+				// so it needs the SAME stable envelope: otherwise a momentary dip
+				// refuses a plan the loader just admitted (the macfit/loader and
+				// reservation budgets disagreeing is the original defect).
+				deps.fitFloor = deps.fitOverride
+				resolveBackend := deps.resolveBackend
+				admitMetal := deps.admitAndLoad
+				var selectedBackend compute.Backend
+				deps.resolveBackend = func() (compute.Backend, error) {
+					backend, err := resolveBackend()
+					selectedBackend = backend
+					return backend, err
+				}
+				deps.admitAndLoad = func(metal bool, path string, load func(), fitFloor *serveFitBudget) (func(), error) {
+					if selectedBackend != nil && selectedBackend.Name() == "vulkan" {
+						return loadLocalLauncherModelWithVulkanLease(true, path, gpulease.Options{}, load)
+					}
+					return admitMetal(metal, path, load, fitFloor)
+				}
 
-			var err error
-			native, err = loadTurnkeyNativeResourcesWith(ctx, ref, plan.Tier.ModelID, contextTokens, deps)
-			if err != nil {
-				return nil, err
+				var err error
+				native, err = loadTurnkeyNativeResourcesWith(ctx, ref, plan.Tier.ModelID, contextTokens, deps)
+				if err != nil {
+					return nil, err
+				}
+				nativeModelPath = ref
+				metalDecision := serveMetalDecision{live: native.Startup.MetalLive}
+				if !metalDecision.live && native.Startup.MetalCompiled {
+					metalDecision.skippedBecause = skipReasonNoDevice
+				} else if !metalDecision.live {
+					metalDecision.skippedBecause = skipReasonNotCompiled
+				}
+				capturedMetalDecision = metalDecision
+				planner = native.Planner
 			}
-			nativeModelPath = ref
-			metalDecision := serveMetalDecision{live: native.Startup.MetalLive}
-			if !metalDecision.live && native.Startup.MetalCompiled {
-				metalDecision.skippedBecause = skipReasonNoDevice
-			} else if !metalDecision.live {
-				metalDecision.skippedBecause = skipReasonNotCompiled
-			}
-			capturedMetalDecision = metalDecision
-			planner = native.Planner
 		}
 	}
 	if contextWindow := turnkeyPlannerContextWindow(planner); contextWindow > 0 {
@@ -996,6 +1015,9 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	adjudicator, err := newTurnkeyToolAdjudicator(engineID)
 	if err != nil {
 		_ = native.Close()
+		if inkling2Release != nil {
+			inkling2Release()
+		}
 		return nil, fmt.Errorf("tool-call adjudicator: %w", err)
 	}
 	// Boot work (model load + planner construction) is complete here; the server
@@ -1006,6 +1028,9 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	if err != nil {
 		adjudicator.Close()
 		_ = native.Close()
+		if inkling2Release != nil {
+			inkling2Release()
+		}
 		return nil, fmt.Errorf("listen on %s: %w", addr, err)
 	}
 
@@ -1044,6 +1069,8 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 		// residency half of the bounded stop; requestResidencyRelease fires it
 		// when the last in-flight request drains, and Shutdown if already idle.
 		ts.residencyRelease = func() { native.ReleaseAdmission() }
+	} else if inkling2Release != nil {
+		ts.residencyRelease = inkling2Release
 	}
 
 	mux := http.NewServeMux()

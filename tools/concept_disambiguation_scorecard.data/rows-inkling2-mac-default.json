@@ -1,0 +1,36 @@
+{
+  "rows": [
+    {
+      "id": "context-ctx-fixedcontexttokens",
+      "canonical": "FixedContextTokens",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "FixedContextTokens (internal/macfit ModelTier) is the context length a tier's engine always admits. When it is non-zero the turnkey plan uses it as the context budget instead of sizing the context from the KV pool; zero keeps the pool-derived budget. Inkling2MiniTier sets it to the Inkling-2 launcher's single-session context.",
+      "distinction": "A per-tier planning constant of the Apple Silicon turnkey sizer, not a measured or negotiated window. It is NOT the context window concept itself, NOT the full-context token count of a request, and NOT a serve-time context budget flag: it only replaces the KV-pool-derived ContextBudgetTokens in a macfit TurnkeyProfile.",
+      "distinct_from": ["context-window", "fullcontexttokens"],
+      "aliases": ["fixedcontexttokens", "fixed_context_tokens"],
+      "grounding": "FixedContextTokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "internal/macfit/macfit.go",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "loop-refuseinkling2loopbackend",
+      "canonical": "RefuseInkling2LoopBackend",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "RefuseInkling2LoopBackend (internal/model/arch_support.go) is the single backend-admission predicate for the inkling2_loop looped forward: it returns nil when the named compute backend runs the looped forward and a typed UnsupportedInkling2LoopExecutionError otherwise. fak serve calls it before loading, and fak up calls it to decide whether Inkling-2-Mini may be the Apple Silicon default.",
+      "distinction": "A capability check on a compute backend name, not a loop and not a loop configuration. It is NOT Inkling2LoopConfig (the checkpoint's layer-pass schedule) and has nothing to do with agent, goal or orchestration loops; the word loop here names the model architecture it gates.",
+      "distinct_from": ["loop-inkling2-loopconfig"],
+      "aliases": ["refuseinkling2loopbackend"],
+      "grounding": "RefuseInkling2LoopBackend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "internal/model/arch_support.go",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

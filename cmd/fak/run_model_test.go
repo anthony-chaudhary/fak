@@ -54,6 +54,8 @@ func TestRunNativeControlsUseExplicitFlagsOverAmbientValues(t *testing.T) {
 // model execution (chat/REPL) and trace replay without ambiguous collisions or
 // misleading errors.
 func TestRunDispatchRule(t *testing.T) {
+	// The no-model rows are the behavior of a platform without a default model.
+	withRunDefaultModel(t, "", false)
 	cases := []struct {
 		argv       []string
 		wantAction runAction

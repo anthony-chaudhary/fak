@@ -238,6 +238,9 @@ type ModelTier struct {
 	KVHeads        uint64 `json:"kv_heads"`         // KV head count
 	HeadDim        uint64 `json:"head_dim"`         // dimension per head
 	MinMemoryBytes uint64 `json:"min_memory_bytes"` // minimum RAM required for this tier
+	// FixedContextTokens is the context a tier's engine always admits; 0 sizes
+	// the context from the KV pool.
+	FixedContextTokens uint64 `json:"fixed_context_tokens,omitempty"`
 }
 
 // StandardTiers defines the default Apple Silicon tier hierarchy.
@@ -307,6 +310,9 @@ func LookupModelTier(name string) (ModelTier, bool) {
 			return tier, true
 		}
 	}
+	if strings.EqualFold(Inkling2MiniTier.Name, trimmed) || strings.EqualFold(Inkling2MiniTier.ModelID, trimmed) {
+		return Inkling2MiniTier, true
+	}
 	return ModelTier{}, false
 }
 
@@ -331,6 +337,10 @@ type TurnkeyOptions struct {
 	// KV-bytes-per-token estimate below. The zero value ("" / fp16) preserves the
 	// historical FP16 arithmetic byte-for-byte, so no existing plan changes.
 	KVPrecision model.KVPrecision
+
+	// Tier, when non-nil, replaces the StandardTiers ladder selection. A tier whose
+	// weights leave no room inside the 20% reserve is refused rather than swapped.
+	Tier *ModelTier
 }
 
 // TurnkeyProfile describes the sizing calculation for turnkey model provisioning.
@@ -504,7 +514,12 @@ func ConfigureTurnkeyWithOptions(memoryBytes uint64, opts TurnkeyOptions) (Turnk
 
 	// 2. Select the optimal model tier that fits within usableBytes.
 	tier := SelectModelTier(memoryBytes)
-	if tier.WeightBytes >= usableBytes {
+	if opts.Tier != nil {
+		tier = *opts.Tier
+		if tier.WeightBytes >= usableBytes {
+			return TurnkeyProfile{}, fmt.Errorf("insufficient memory (%d bytes): tier %s cannot guarantee 20%% headroom", memoryBytes, tier.Name)
+		}
+	} else if tier.WeightBytes >= usableBytes {
 		fitted := false
 		for i := len(StandardTiers) - 1; i >= 0; i-- {
 			if StandardTiers[i].WeightBytes < usableBytes {
@@ -613,6 +628,13 @@ func ConfigureTurnkeyWithOptions(memoryBytes uint64, opts TurnkeyOptions) (Turnk
 			// Keep the reported pool self-consistent with the served context. This is
 			// still >= the context's own resident bytes, so HeadroomBytes never reports
 			// a negative (over-committed) allocation.
+			kvPoolBytes = used
+		}
+	}
+
+	if tier.FixedContextTokens > 0 {
+		contextBudget = tier.FixedContextTokens
+		if used := contextBudget * kvpt; kvPoolBytes < used {
 			kvPoolBytes = used
 		}
 	}
