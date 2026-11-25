@@ -92,6 +92,28 @@ func TestRunTreeVerifyMicrobenchmarkMatrixAndOverhead(t *testing.T) {
 	}
 }
 
+// The simulated overhead must not depend on host timing: the CI race job
+// inflated the timed ratio past the 1.15x bound at B=1/K=32.
+func TestRunTreeVerifyMicrobenchmarkSimulatedIsTimingIndependent(t *testing.T) {
+	for _, k := range []int{4, 8, 16, 32, 64} {
+		base := TreeVerifyBenchConfig{Backend: "simulated", BatchSize: 1, TreeSize: k, Topology: "wide", WarmupRuns: 1, MeasureRuns: 1}
+		heavy := base
+		heavy.BatchSize, heavy.WarmupRuns, heavy.MeasureRuns = 8, 50, 500
+		a, b := RunTreeVerifyMicrobenchmark(base), RunTreeVerifyMicrobenchmark(heavy)
+		if a.OverheadRatio != b.OverheadRatio {
+			t.Errorf("K=%d: simulated overhead varies with run shape: %v vs %v", k, a.OverheadRatio, b.OverheadRatio)
+		}
+		panel, err := BuildTreePanel(GenerateTargetSizeTree(k, "wide"))
+		if err != nil {
+			t.Fatalf("K=%d: BuildTreePanel: %v", k, err)
+		}
+		want := 1.0 + 0.0014*countedTreeComputeOverhead(panel.Mask, 64)
+		if a.OverheadRatio != want {
+			t.Errorf("K=%d: overhead ratio %v, want counted-work model %v", k, a.OverheadRatio, want)
+		}
+	}
+}
+
 func TestRunTreeVerifyMicrobenchmarkWithExplicitLatencies(t *testing.T) {
 	cfg := TreeVerifyBenchConfig{
 		Backend:       "cuda",

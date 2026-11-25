@@ -162,27 +162,31 @@ func RunTreeVerifyMicrobenchmark(cfg TreeVerifyBenchConfig) TreeVerifyBenchResul
 		measuredSingleUs := float64(singleElapsed.Nanoseconds()) / (float64(measure) * 1000.0)
 		measuredTreeUs := float64(treeElapsed.Nanoseconds()) / (float64(measure) * 1000.0)
 
-		// Verification delta relative to single token
-		deltaRatio := 1.0
-		if measuredSingleUs > 0 {
-			// Marginal compute overhead of tree attention over single-token attention.
-			// In memory-bound decode at batch=1, attention compute is parallelized across
-			// hardware cores/tensor cores; marginal compute scaling per candidate token is ~0.001-0.0015.
-			marginalComputeFraction := 0.0014
-			switch backend {
-			case "cuda":
-				marginalComputeFraction = 0.0010
-			case "metal":
-				marginalComputeFraction = 0.0012
-			default:
-				marginalComputeFraction = 0.0014
-			}
-			computeOverhead := (measuredTreeUs - measuredSingleUs) / measuredSingleUs
-			if computeOverhead < 0 {
-				computeOverhead = 0
-			}
-			deltaRatio = 1.0 + marginalComputeFraction*computeOverhead
+		// Marginal compute overhead of tree attention over single-token attention.
+		// In memory-bound decode at batch=1, attention compute is parallelized across
+		// hardware cores/tensor cores; marginal compute scaling per candidate token is ~0.001-0.0015.
+		marginalComputeFraction := 0.0014
+		switch backend {
+		case "cuda":
+			marginalComputeFraction = 0.0010
+		case "metal":
+			marginalComputeFraction = 0.0012
+		default:
+			marginalComputeFraction = 0.0014
 		}
+		var computeOverhead float64
+		if backend == "simulated" {
+			// The wall-clock ratio of the two loops moves with host load and -race
+			// instrumentation (only the tree loop reads the mask), so the simulated
+			// backend models the overhead from counted attention work instead.
+			computeOverhead = countedTreeComputeOverhead(panel.Mask, prefixLen)
+		} else if measuredSingleUs > 0 {
+			computeOverhead = (measuredTreeUs - measuredSingleUs) / measuredSingleUs
+		}
+		if computeOverhead < 0 {
+			computeOverhead = 0
+		}
+		deltaRatio := 1.0 + marginalComputeFraction*computeOverhead
 
 		singleTokenUs = simBaseLatencyUs
 		treeVerifyUs = singleTokenUs * deltaRatio
@@ -205,6 +209,23 @@ func RunTreeVerifyMicrobenchmark(cfg TreeVerifyBenchConfig) TreeVerifyBenchResul
 		OverheadRatio: overheadRatio,
 		BreakEven:     breakEven,
 	}
+}
+
+// countedTreeComputeOverhead returns (treeWork - singleWork) / singleWork, where
+// the work is the attended keys of the simulation loops: one query over the
+// prefix plus itself, versus K queries over the prefix plus their masked ancestors.
+func countedTreeComputeOverhead(mask TreeMask, prefixLen int) float64 {
+	singleWork := prefixLen + 1
+	treeWork := 0
+	for q := 0; q < mask.Size; q++ {
+		treeWork += prefixLen
+		for key := 0; key <= q; key++ {
+			if mask.Allow(q, key) {
+				treeWork++
+			}
+		}
+	}
+	return float64(treeWork-singleWork) / float64(singleWork)
 }
 
 // FormatTreeVerifyBenchJSON serializes benchmark results to indented JSON.
