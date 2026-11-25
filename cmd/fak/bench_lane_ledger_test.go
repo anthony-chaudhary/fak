@@ -218,6 +218,289 @@ func TestBenchLaneLedgerRefusals(t *testing.T) {
 	}
 }
 
+// sm80Args is the sm_80 launch of TestBenchLaneLedgerSM80HandValues with a caller-chosen grid and extra flags.
+func sm80Args(grid string, extra ...string) []string {
+	args := []string{"--arch", "sm_80", "--sms", "108", "--threads", "128", "--regs", "40", "--smem", "768", "--grid", grid}
+	return append(args, extra...)
+}
+
+// findByString returns the first object in list whose key holds want.
+func findByString(t *testing.T, list []any, key, want string) map[string]any {
+	t.Helper()
+	for _, item := range list {
+		if obj, ok := item.(map[string]any); ok && obj[key] == want {
+			return obj
+		}
+	}
+	t.Fatalf("no entry with %s=%q in %v", key, want, list)
+	return nil
+}
+
+// TestBenchLaneLedgerMeasuredHandValues joins a 1000-cycle window to the one-wave sm_80 launch. Each cell is
+// its lane-slot-waves times 1000 cycles: active 1152, unit_idle 202752, resident_unfilled 12672 and
+// resource_capped 4608. Together they fill 108*2048*1000 with nothing unattributed. The measured 1000000
+// active lane-cycles leaves a 152000 shortfall, which the model calls overstated.
+func TestBenchLaneLedgerMeasuredHandValues(t *testing.T) {
+	doc := runLaneLedgerJSON(t, sm80Args("9", "--cycles-per-sm", "1000", "--active-lane-cycles", "1000000")...)
+	m := laneLedgerObject(t, doc, "measured")
+	if m["unit"] != "lane-slot-cycles" {
+		t.Errorf("measured.unit = %v, want lane-slot-cycles", m["unit"])
+	}
+	wantInts := map[string]int64{
+		"cycles_per_sm":        1000,
+		"capacity_lane_cycles": 221184000,
+		"unattributed":         0,
+		"model_active":         1152000,
+		"measured_active":      1000000,
+		"active_shortfall":     152000,
+	}
+	for key, want := range wantInts {
+		if got := laneLedgerNumber(t, m, key); got != want {
+			t.Errorf("measured.%s = %d, want %d", key, got, want)
+		}
+	}
+	cells := laneLedgerObject(t, m, "cells")
+	wantCells := map[string]int64{
+		"active":            1152000,
+		"partial_warp":      0,
+		"resident_unfilled": 12672000,
+		"resource_capped":   4608000,
+		"unit_idle":         202752000,
+	}
+	for key, want := range wantCells {
+		if got := laneLedgerNumber(t, cells, key); got != want {
+			t.Errorf("measured.cells.%s = %d, want %d", key, got, want)
+		}
+	}
+	if m["verdict"] != "model_overstates_active" || m["active_supplied"] != true || m["assumed_equal_waves"] != true {
+		t.Errorf("verdict/active_supplied/assumed_equal_waves = %v/%v/%v", m["verdict"], m["active_supplied"], m["assumed_equal_waves"])
+	}
+
+	findings, _ := m["findings"].([]any)
+	if len(findings) == 0 {
+		t.Fatalf("measured.findings is empty")
+	}
+	if top, _ := findings[0].(map[string]any); top["name"] != "unit_idle" {
+		t.Errorf("largest measured finding = %v, want unit_idle", top["name"])
+	}
+	// The additive findings partition the capacity that is not active, so they must sum to it exactly.
+	var additiveSum int64
+	for _, item := range findings {
+		if f, _ := item.(map[string]any); f["additive"] == true {
+			additiveSum += laneLedgerNumber(t, f, "lane_slot_cycles")
+		}
+	}
+	if want := int64(221184000 - 1152000); additiveSum != want {
+		t.Errorf("additive findings sum to %d, want capacity minus active = %d", additiveSum, want)
+	}
+	inactive := findByString(t, findings, "name", "unexplained_inactive")
+	if inactive["additive"] != false || laneLedgerNumber(t, inactive, "lane_slot_cycles") != 152000 {
+		t.Errorf("unexplained_inactive = %v, want non-additive 152000", inactive)
+	}
+
+	caveats, _ := m["caveats"].([]any)
+	if len(caveats) != 5 {
+		t.Errorf("measured.caveats has %d entries, want 5 (four measured caveats plus the equal-waves note)", len(caveats))
+	}
+}
+
+// Without active_lane_cycles the active fields stay zero, the verdict is empty, and no unexplained_inactive
+// finding is emitted, since nothing was measured to fall short.
+func TestBenchLaneLedgerMeasuredWithoutActive(t *testing.T) {
+	doc := runLaneLedgerJSON(t, sm80Args("9", "--cycles-per-sm", "1000")...)
+	m := laneLedgerObject(t, doc, "measured")
+	if m["active_supplied"] != false {
+		t.Errorf("active_supplied = %v, want false", m["active_supplied"])
+	}
+	if m["verdict"] != "" {
+		t.Errorf("verdict = %q, want empty", m["verdict"])
+	}
+	if got := laneLedgerNumber(t, m, "active_shortfall"); got != 0 {
+		t.Errorf("active_shortfall = %d, want 0", got)
+	}
+	findings, _ := m["findings"].([]any)
+	for _, item := range findings {
+		if f, _ := item.(map[string]any); f["name"] == "unexplained_inactive" {
+			t.Errorf("unexplained_inactive emitted without active lanes: %v", f)
+		}
+	}
+}
+
+// A measured zero is still a supplied count: --active-lane-cycles 0 gets a verdict, not the empty one.
+func TestBenchLaneLedgerMeasuredZeroActiveSupplied(t *testing.T) {
+	doc := runLaneLedgerJSON(t, sm80Args("9", "--cycles-per-sm", "1000", "--active-lane-cycles", "0")...)
+	m := laneLedgerObject(t, doc, "measured")
+	if m["active_supplied"] != true || m["verdict"] != "model_overstates_active" {
+		t.Errorf("active_supplied/verdict = %v/%v, want true/model_overstates_active", m["active_supplied"], m["verdict"])
+	}
+	if got := laneLedgerNumber(t, m, "active_shortfall"); got != 1152000 {
+		t.Errorf("active_shortfall = %d, want 1152000", got)
+	}
+}
+
+// A measured count above the model's active lanes gets an explicit non-additive residual, unexplained_active,
+// so the measured active lanes are visible in a row and not only in the verdict.
+func TestBenchLaneLedgerMeasuredUnderstatesResidual(t *testing.T) {
+	doc := runLaneLedgerJSON(t, sm80Args("9", "--cycles-per-sm", "1000", "--active-lane-cycles", "1200000")...)
+	m := laneLedgerObject(t, doc, "measured")
+	if m["verdict"] != "model_understates_active" {
+		t.Fatalf("verdict = %v, want model_understates_active", m["verdict"])
+	}
+	findings, _ := m["findings"].([]any)
+	residual := findByString(t, findings, "name", "unexplained_active")
+	if residual["additive"] != false || laneLedgerNumber(t, residual, "lane_slot_cycles") != 48000 {
+		t.Errorf("unexplained_active = %v, want non-additive 48000", residual)
+	}
+	for _, item := range findings {
+		if f, _ := item.(map[string]any); f["name"] == "unexplained_inactive" {
+			t.Errorf("unexplained_inactive emitted for an understating verdict: %v", f)
+		}
+	}
+}
+
+// Without --cycles-per-sm the document keeps its original keys: no measured object appears.
+func TestBenchLaneLedgerDefaultOmitsMeasured(t *testing.T) {
+	doc := runLaneLedgerJSON(t, sm80Args("9")...)
+	if _, ok := doc["measured"]; ok {
+		t.Errorf("default mode emitted a measured key")
+	}
+}
+
+// TestBenchLaneLedgerMeasuredWaveWeights uses grid 1300, which is two waves: 1296 blocks fill every SM at 12
+// blocks each, and the final wave holds 4 blocks on 4 SMs. Full-wave shape: active 165888, resource_capped
+// 55296. Final-wave shape: active 512, resident_unfilled 5632, resource_capped 2048, unit_idle 212992. Weights
+// 800 and 200 give active 165888*800 + 512*200 = 132812800, and the four cells sum to 221184000 with nothing
+// unattributed.
+func TestBenchLaneLedgerMeasuredWaveWeights(t *testing.T) {
+	doc := runLaneLedgerJSON(t, sm80Args("1300", "--cycles-per-sm", "1000", "--wave-weights", "800,200")...)
+	if got := laneLedgerNumber(t, laneLedgerObject(t, doc, "ledger"), "waves"); got != 2 {
+		t.Fatalf("ledger.waves = %d, want 2", got)
+	}
+	m := laneLedgerObject(t, doc, "measured")
+	if m["assumed_equal_waves"] != false {
+		t.Errorf("assumed_equal_waves = %v, want false when weights are given", m["assumed_equal_waves"])
+	}
+	cells := laneLedgerObject(t, m, "cells")
+	wantCells := map[string]int64{
+		"active":            132812800,
+		"partial_warp":      0,
+		"resident_unfilled": 1126400,
+		"resource_capped":   44646400,
+		"unit_idle":         42598400,
+	}
+	for key, want := range wantCells {
+		if got := laneLedgerNumber(t, cells, key); got != want {
+			t.Errorf("measured.cells.%s = %d, want %d", key, got, want)
+		}
+	}
+	if got := laneLedgerNumber(t, m, "unattributed"); got != 0 {
+		t.Errorf("unattributed = %d, want 0", got)
+	}
+}
+
+func TestBenchLaneLedgerMeasuredRefusals(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "zero cycles refused by the measured join",
+			args:    sm80Args("9", "--cycles-per-sm", "0"),
+			wantErr: "CyclesPerSM must be positive",
+		},
+		{
+			name:    "wave weights without cycles refused",
+			args:    sm80Args("9", "--wave-weights", "1000"),
+			wantErr: "--wave-weights describes a measured window and needs --cycles-per-sm",
+		},
+		{
+			name:    "tolerance without cycles refused",
+			args:    sm80Args("9", "--tolerance", "0.1"),
+			wantErr: "--tolerance describes a measured window and needs --cycles-per-sm",
+		},
+		{
+			name:    "exact without cycles refused",
+			args:    sm80Args("9", "--exact"),
+			wantErr: "--exact describes a measured window and needs --cycles-per-sm",
+		},
+		{
+			name:    "tolerance above one refused",
+			args:    sm80Args("9", "--cycles-per-sm", "1000", "--tolerance", "1.5"),
+			wantErr: "ActiveTolerance must be a fraction in [0, 1]",
+		},
+		{
+			name:    "negative active lane-cycles refused",
+			args:    sm80Args("9", "--cycles-per-sm", "1000", "--active-lane-cycles", "-1"),
+			wantErr: "ActiveLaneCycles must not be negative",
+		},
+		{
+			name:    "active lane-cycles over window capacity refused",
+			args:    sm80Args("9", "--cycles-per-sm", "1000", "--active-lane-cycles", "221184001"),
+			wantErr: "exceeds the window capacity",
+		},
+		{
+			name:    "wave weights of the wrong length refused",
+			args:    sm80Args("1300", "--cycles-per-sm", "1000", "--wave-weights", "800,100,100"),
+			wantErr: "needs one entry per modelled wave",
+		},
+		{
+			name:    "non-integer wave weight refused",
+			args:    sm80Args("1300", "--cycles-per-sm", "1000", "--wave-weights", "800,x"),
+			wantErr: `"x" is not an integer cycle count`,
+		},
+		{
+			name:    "empty wave weight refused",
+			args:    sm80Args("1300", "--cycles-per-sm", "1000", "--wave-weights", "800,"),
+			wantErr: "is not an integer cycle count",
+		},
+		{
+			name:    "non-positive wave weight refused",
+			args:    sm80Args("1300", "--cycles-per-sm", "1000", "--wave-weights", "800,0"),
+			wantErr: "every WaveWeights entry must be positive",
+		},
+		{
+			name:    "sampled wave weights over the window refused, not clamped",
+			args:    sm80Args("1300", "--cycles-per-sm", "1000", "--wave-weights", "900,200"),
+			wantErr: "sampled WaveWeights sum exceeds CyclesPerSM; refused, not clamped",
+		},
+		{
+			name:    "exact wave weights over the window refused",
+			args:    sm80Args("1300", "--cycles-per-sm", "1000", "--wave-weights", "900,200", "--exact"),
+			wantErr: "exact WaveWeights sum exceeds CyclesPerSM",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := runBenchLaneLedger(&stdout, &stderr, tc.args); code == 0 {
+				t.Fatalf("exit 0, want non-zero; stdout: %s", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantErr) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tc.wantErr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("refusal wrote to stdout: %q", stdout.String())
+			}
+		})
+	}
+}
+
+func TestBenchLaneLedgerMeasuredHumanTable(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runBenchLaneLedger(&stdout, &stderr,
+		sm80Args("9", "--cycles-per-sm", "1000", "--active-lane-cycles", "1000000"))
+	if code != 0 {
+		t.Fatalf("exit %d; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"model cells over measured window (lane-slot-cycles)", "verdict=model_overstates_active", "unexplained_inactive", "model-apportioned findings", "unit_idle", "measured caveats:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("measured table missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestBenchLaneLedgerHumanTable(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runBenchLaneLedger(&stdout, &stderr,
