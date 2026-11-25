@@ -131,7 +131,7 @@ and [decode climb](assets/inkling2-decode-climb.svg).
 
 ## X thread
 
-1. fak guards your coding agent's tool calls and serves it a local model.
+1. fak checks your coding agent's tool calls and serves it a local model.
    Inkling-2-Mini now runs natively: 118.1 tok/s vs stock llama.cpp's 81.0 in
    one window on one RTX 5080 (1.46x, ABBA x2). In-process decode bench, not a
    served rate. Receipts linked.
