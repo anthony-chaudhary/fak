@@ -32,7 +32,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -288,6 +290,9 @@ func selectLoadArtifact(siblings []repoSibling) (string, error) {
 	if file, ok := oneArtifact(ggufs); ok {
 		return file, nil
 	}
+	if file, ok, err := oneSplitGGUFSet(ggufs); ok || err != nil {
+		return file, err
+	}
 	if len(ggufs) > 1 {
 		return "", fmt.Errorf("ambiguous GGUF artifacts: %s", strings.Join(ggufs, ", "))
 	}
@@ -313,6 +318,77 @@ func oneArtifact(files []string) (string, bool) {
 	return "", false
 }
 
+// splitGGUFPattern matches llama.cpp gguf-split shard names:
+// NAME-0000k-of-0000N.gguf, five digits, 1-indexed.
+var splitGGUFPattern = regexp.MustCompile(`^(.+)-([0-9]{5})-of-([0-9]{5})\.(?i:gguf)$`)
+
+// splitGGUF is one shard name of a gguf-split set. Dir and Prefix are
+// repo-relative; Shard is 1-indexed.
+type splitGGUF struct {
+	Dir    string
+	Prefix string
+	Ext    string
+	Shard  int
+	Total  int
+}
+
+func parseSplitGGUF(file string) (splitGGUF, bool) {
+	m := splitGGUFPattern.FindStringSubmatch(path.Base(file))
+	if m == nil {
+		return splitGGUF{}, false
+	}
+	k, err1 := strconv.Atoi(m[2])
+	n, err2 := strconv.Atoi(m[3])
+	if err1 != nil || err2 != nil || n < 1 || k < 1 || k > n {
+		return splitGGUF{}, false
+	}
+	ext := path.Base(file)[len(path.Base(file))-len(".gguf"):]
+	return splitGGUF{Dir: path.Dir(file), Prefix: m[1], Ext: ext, Shard: k, Total: n}, true
+}
+
+// shardFile is the repo-relative name of shard k in s's set.
+func (s splitGGUF) shardFile(k int) string {
+	name := fmt.Sprintf("%s-%05d-of-%05d%s", s.Prefix, k, s.Total, s.Ext)
+	if s.Dir == "." || s.Dir == "" {
+		return name
+	}
+	return s.Dir + "/" + name
+}
+
+func (s splitGGUF) setKey() string {
+	return s.shardFile(0)
+}
+
+// oneSplitGGUFSet resolves ggufs to shard 1 when every entry belongs to one
+// gguf-split set. A listing that is one set with holes is an error, not a
+// guess; anything else is reported as not-a-single-set.
+func oneSplitGGUFSet(ggufs []string) (string, bool, error) {
+	if len(ggufs) == 0 {
+		return "", false, nil
+	}
+	var set splitGGUF
+	present := map[int]bool{}
+	for i, f := range ggufs {
+		s, ok := parseSplitGGUF(f)
+		if !ok {
+			return "", false, nil
+		}
+		if i == 0 {
+			set = s
+		} else if s.setKey() != set.setKey() {
+			return "", false, nil
+		}
+		present[s.Shard] = true
+	}
+	for k := 1; k <= set.Total; k++ {
+		if !present[k] {
+			return "", false, fmt.Errorf("split GGUF set %s is incomplete: shard %d of %d (%s) missing from the repo listing",
+				set.shardFile(1), k, set.Total, set.shardFile(k))
+		}
+	}
+	return set.shardFile(1), true, nil
+}
+
 // CachePath is the absolute local path the ref caches to. It is returned by
 // Download and can be checked ahead of time for a cache hit.
 func (c *Client) CachePath(r Ref) string {
@@ -331,6 +407,13 @@ func (c *Client) CachePath(r Ref) string {
 // published (renamed) only after verification. progress, when non-nil,
 // receives human-readable status lines.
 func (c *Client) Download(ctx context.Context, r Ref, progress io.Writer) (string, error) {
+	return c.download(ctx, r, progress, true)
+}
+
+// download is Download with the legacy-cache fallback optional: split GGUF
+// shards must all land in one directory, so they only accept the canonical
+// cache path.
+func (c *Client) download(ctx context.Context, r Ref, progress io.Writer, allowAltCache bool) (string, error) {
 	dst := c.CachePath(r)
 	resolveURL := r.ResolveURL(c.base())
 	want := c.linkedSHA(ctx, resolveURL) // best-effort; "" when the Hub stamps none
@@ -349,6 +432,9 @@ func (c *Client) Download(ctx context.Context, r Ref, progress io.Writer) (strin
 	}
 
 	for _, alt := range candidateCachePaths(c.CacheDir, r) {
+		if !allowAltCache {
+			break
+		}
 		if fi, err := os.Stat(alt); err == nil && fi.Size() > 0 {
 			if want != "" {
 				got, err := fileSHA256(alt)
@@ -480,7 +566,10 @@ func FetchURI(ctx context.Context, uri string, progress io.Writer) (string, erro
 // that inject a Hub base URL or HTTP client. It returns the cached file path for a
 // single artifact, or — when the URI resolves to a sharded-safetensors model — the
 // cache DIRECTORY holding the index and every shard (the unit LoadSafetensorsDir
-// consumes).
+// consumes). A gguf-split shard name (NAME-0000k-of-0000N.gguf, given directly
+// or resolved from a bare repo holding exactly one such set) fetches all N
+// shards into one cache directory and returns the path of shard 1, the file
+// llama.cpp-style loaders open to find its siblings.
 func (c *Client) FetchURI(ctx context.Context, uri string, progress io.Writer) (string, error) {
 	ref, err := ParseURI(uri)
 	if err != nil {
@@ -493,7 +582,29 @@ func (c *Client) FetchURI(ctx context.Context, uri string, progress io.Writer) (
 	if path.Base(ref.File) == safetensorsIndexFile {
 		return c.downloadSharded(ctx, ref, progress)
 	}
+	if split, ok := parseSplitGGUF(ref.File); ok {
+		return c.downloadSplitGGUF(ctx, ref, split, progress)
+	}
 	return c.Download(ctx, ref, progress)
+}
+
+// downloadSplitGGUF fetches every shard of split's set, in order, each under
+// the single-file verification contract, and returns shard 1's local path.
+func (c *Client) downloadSplitGGUF(ctx context.Context, ref Ref, split splitGGUF, progress io.Writer) (string, error) {
+	var first string
+	for k := 1; k <= split.Total; k++ {
+		shardRef := Ref{Repo: ref.Repo, Revision: ref.Revision, File: split.shardFile(k)}
+		p, err := c.download(ctx, shardRef, progress, false)
+		if err != nil {
+			return "", fmt.Errorf("hfhub: split GGUF %s@%s: shard %d of %d (%s): %w",
+				ref.Repo, ref.Revision, k, split.Total, shardRef.File, err)
+		}
+		if k == 1 {
+			first = p
+		}
+	}
+	logf(progress, "resolved split GGUF %s@%s -> %d shards in %s", ref.Repo, ref.Revision, split.Total, filepath.Dir(first))
+	return first, nil
 }
 
 // shardIndex is the subset of a model.safetensors.index.json this loader needs:

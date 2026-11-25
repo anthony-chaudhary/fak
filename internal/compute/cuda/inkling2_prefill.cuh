@@ -80,16 +80,9 @@ template <int NQ>
 __global__ void __launch_bounds__(INK2_MIX_THREADS) k_ink2p_mix(Ink2States st, int ns, const float *queries, float *out,
                                                                int n, int T) {
   const size_t toff = (size_t)blockIdx.x * n, qs = (size_t)T * n;
-  switch (ns) {
-  case 1: ink2p_mix_body<1, NQ>(st, toff, queries, out, qs, n); break;
-  case 2: ink2p_mix_body<2, NQ>(st, toff, queries, out, qs, n); break;
-  case 3: ink2p_mix_body<3, NQ>(st, toff, queries, out, qs, n); break;
-  case 4: ink2p_mix_body<4, NQ>(st, toff, queries, out, qs, n); break;
-  case 5: ink2p_mix_body<5, NQ>(st, toff, queries, out, qs, n); break;
-  case 6: ink2p_mix_body<6, NQ>(st, toff, queries, out, qs, n); break;
-  case 7: ink2p_mix_body<7, NQ>(st, toff, queries, out, qs, n); break;
-  default: ink2p_mix_body<8, NQ>(st, toff, queries, out, qs, n); break;
-  }
+#define INK2P_MIX_CALL(NS) ink2p_mix_body<NS, NQ>(st, toff, queries, out, qs, n)
+  INK2_NS_DISPATCH(ns, INK2P_MIX_CALL)
+#undef INK2P_MIX_CALL
 }
 
 // Y[t][r] = W[r,:] . X[t,:] for the small dense F32 weights; one warp per (row, token).
@@ -406,7 +399,7 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2p_attend(const float *
 // k_ink2_route per token: block t routes logits row t into ids/wts [t][k].
 __global__ void k_ink2p_route(const float *logits, const float *bias, int *ids, float *wts, int nexp, int k,
                               float wscale) {
-  __shared__ float probs[256], sel[256];
+  __shared__ float probs[INK2_MAX_EXPERTS], sel[INK2_MAX_EXPERTS];
   const int lane = threadIdx.x;
   logits += (size_t)blockIdx.x * nexp;
   ids += (size_t)blockIdx.x * k;
@@ -984,7 +977,7 @@ extern "C" int fcuda_ink2p_attend_dev(const float *q, const float *r, const floa
 
 extern "C" int fcuda_ink2p_route(const float *logits, const float *bias, int *ids, float *wts, int nexp, int k,
                                  float wscale, int T) {
-  if (nexp > 256 || k > INK2_MAX_TOPK || k > nexp) return (int)cudaErrorInvalidValue;
+  if (nexp > INK2_MAX_EXPERTS || k > INK2_MAX_TOPK || k > nexp) return (int)cudaErrorInvalidValue;
   FCUDA_TS("k_ink2p_route", T, k_ink2p_route<<<T, 32, 0, g_stream>>>(logits, bias, ids, wts, nexp, k, wscale));
   return ink2_last_error();
 }
@@ -999,7 +992,7 @@ extern "C" int fcuda_ink2p_combine(const float *down, const float *wts, float *o
 // [nexp+1], order [npairs], tiles [2*(npairs/INK2P_NV_PAIRS + nexp)], ntiles [1].
 extern "C" int fcuda_ink2p_bucket(const int *ids, int npairs, int nexp, int *counts, int *offsets, int *order,
                                   int *tiles, int *ntiles) {
-  if (nexp > 256) return (int)cudaErrorInvalidValue;
+  if (nexp > INK2_MAX_EXPERTS) return (int)cudaErrorInvalidValue;
   cudaError_t e = cudaSuccess;
   FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(counts, 0, (size_t)nexp * sizeof(int), g_stream));
   if (e != cudaSuccess) return (int)e;

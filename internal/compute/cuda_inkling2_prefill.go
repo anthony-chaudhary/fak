@@ -52,11 +52,11 @@ func (c *cudaBackend) Ink2PMatMul(w Tensor, x, y Ink2Ref, T int) error {
 func (c *cudaBackend) Ink2PMix(states []Ink2Ref, queries Ink2Ref, nq int, out Ink2Ref, n, T int) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	ptrs := (*[8]*C.float)(C.malloc(C.size_t(8 * unsafe.Sizeof(uintptr(0)))))
-	defer C.free(unsafe.Pointer(ptrs))
-	if len(states) > len(ptrs) {
+	if len(states) > ink2MaxStates {
 		return fmt.Errorf("cuda inkling2 prefill mix: %d states", len(states))
 	}
+	ptrs := (*[ink2MaxStates]*C.float)(C.calloc(ink2MaxStates, C.size_t(unsafe.Sizeof(uintptr(0)))))
+	defer C.free(unsafe.Pointer(ptrs))
 	for i, s := range states {
 		ptrs[i] = c.ink2F(s)
 	}
@@ -378,25 +378,25 @@ func (c *cudaBackend) Ink2VQ8Rows(w Tensor, x, q, y Ink2Ref, rows int, quantize 
 func (c *cudaBackend) Ink2VMix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2Ref, eps float32, out Ink2Ref, n, T int) (bool, error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	ptrs := (*[8]*C.float)(C.malloc(C.size_t(8 * unsafe.Sizeof(uintptr(0)))))
-	defer C.free(unsafe.Pointer(ptrs))
-	if len(states) > len(ptrs) {
+	if len(states) > ink2MaxStates {
 		return false, fmt.Errorf("cuda inkling2 verify mix: %d states", len(states))
 	}
+	// Same block layout as Ink2Mix: states in [0, ink2MaxStates), norms after; calloc
+	// leaves an absent norm null so the kernel skips that weight.
+	const slots = ink2MaxStates + ink2MaxQueries
+	ptrs := (*[slots]*C.float)(C.calloc(slots, C.size_t(unsafe.Sizeof(uintptr(0)))))
+	defer C.free(unsafe.Pointer(ptrs))
 	for i, s := range states {
 		ptrs[i] = c.ink2F(s)
 	}
 	var np **C.float
 	if norms != nil {
-		nps := (*[4]*C.float)(C.malloc(C.size_t(4 * unsafe.Sizeof(uintptr(0)))))
-		defer C.free(unsafe.Pointer(nps))
-		for i := range nps {
-			nps[i] = nil
-			if i < len(norms) && norms[i].T.Buf() != nil {
-				nps[i] = c.ink2F(norms[i])
+		for i := 0; i < ink2MaxQueries && i < len(norms); i++ {
+			if norms[i].T.Buf() != nil {
+				ptrs[ink2MaxStates+i] = c.ink2F(norms[i])
 			}
 		}
-		np = (**C.float)(unsafe.Pointer(nps))
+		np = (**C.float)(unsafe.Pointer(&ptrs[ink2MaxStates]))
 	}
 	rc := C.fcuda_ink2v_mix((**C.float)(unsafe.Pointer(ptrs)), C.int(len(states)), c.ink2F(queries), C.int(nq), np, C.float(eps),
 		c.ink2F(out), C.int(n), C.int(T))

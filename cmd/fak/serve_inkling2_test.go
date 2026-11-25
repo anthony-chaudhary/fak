@@ -223,10 +223,10 @@ func writeInkling2HeaderGGUF(t *testing.T, arch string) string {
 
 func TestInkling2GGUFSniffAndGenericLoaderRefusal(t *testing.T) {
 	path := writeInkling2HeaderGGUF(t, serveInkling2LoopArch)
-	if !serveIsInkling2LoopGGUF(path) {
+	if !serveIsInkling2GGUF(path) {
 		t.Fatal("inkling2_loop header not recognised")
 	}
-	if serveIsInkling2LoopGGUF(writeInkling2HeaderGGUF(t, "llama")) || serveIsInkling2LoopGGUF(t.TempDir()) || serveIsInkling2LoopGGUF("") {
+	if serveIsInkling2GGUF(writeInkling2HeaderGGUF(t, "llama")) || serveIsInkling2GGUF(t.TempDir()) || serveIsInkling2GGUF("") {
 		t.Fatal("non-looped input recognised as inkling2_loop")
 	}
 	_, _, _, _, _, err := loadServeInKernelModelPlacedErr(path, nil, false, false, 0, nil, 1, nil)

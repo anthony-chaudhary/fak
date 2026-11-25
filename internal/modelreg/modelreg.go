@@ -149,6 +149,12 @@ var Catalog = map[string]string{
 	"glm-5.3-flash":      "hf://zai-org/GLM-5.3-Flash@04c4e9e95c5da8862dced7e5056455116f83a7e0",
 	"glm-5.3-flash:bf16": "hf://zai-org/GLM-5.3-Flash-BF16@f12e0fe1f6b2ea274c11a569582edfd99d993c5e",
 	"glm53":              "hf://zai-org/GLM-5.3-Flash@04c4e9e95c5da8862dced7e5056455116f83a7e0",
+	// Inkling-2 (Apache-2.0) loads through the inkling2 GGUF arm with VRAM-budgeted
+	// expert offload. Small is a 6-shard UD-Q2_K_XL set (~190.9 GiB); naming shard 1
+	// fetches every shard. Mini uses the Mainline_Support layout because the repo-root
+	// files are the pre-mainline tensor layout the loader does not bind.
+	"inkling2-small": "hf://unsloth/Inkling-2-Small-GGUF@42593c63926d23380ea03d643ab2cde742427608/UD-Q2_K_XL/Inkling-2-Small-UD-Q2_K_XL-00001-of-00006.gguf",
+	"inkling2-mini":  "hf://unsloth/Inkling-2-Mini-GGUF@8078d149286eec7193795413b9e0643da6d11fa1/Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file",
 }
 
 // codingAliases is the set of Catalog aliases that are CODING-tuned and emit the

@@ -1,7 +1,9 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -31,5 +33,38 @@ func TestInkling2LoopGenericArchSupportStillRefuses(t *testing.T) {
 	}
 	if msg := err.Error(); !strings.Contains(msg, "generic native forward") || strings.Contains(msg, "not implemented") {
 		t.Fatalf("generic refusal message: %s", msg)
+	}
+}
+
+// The safetensors path keeps refusing inkling2_loop, still as the typed
+// execution refusal, but now names the GGUF aliases that do run.
+func TestArchSupportInkling2SafetensorsRefusalPointsAtGGUFAliases(t *testing.T) {
+	data, err := os.ReadFile(inkling2MiniConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ClassifyForwardPath(cfg, nil)
+	var refusal *Inkling2SafetensorsRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("ClassifyForwardPath = %v, want Inkling2SafetensorsRefusal", err)
+	}
+	var unsupported *UnsupportedInkling2LoopExecutionError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("refusal %v does not unwrap to UnsupportedInkling2LoopExecutionError", err)
+	}
+	for _, alias := range Inkling2GGUFAliases {
+		if !strings.Contains(err.Error(), "fak run "+alias) {
+			t.Fatalf("refusal %q does not name alias %q", err, alias)
+		}
+	}
+}
+
+func TestArchSupportInkling2NonInklingConfigPasses(t *testing.T) {
+	if err := refuseUnsupportedHybridArch(Config{ModelType: "llama"}, nil); err != nil {
+		t.Fatalf("llama refused: %v", err)
 	}
 }

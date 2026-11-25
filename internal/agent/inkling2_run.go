@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/inklingmetal"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -16,14 +17,21 @@ import (
 type inkling2RunPlanner struct {
 	name  string
 	model *ggufload.Inkling2LoopModel
-	metal *inklingmetal.Model
-	tok   *tokenizer.Tokenizer
-	eos   int
+	// device is the CUDA backend a device-bound model decodes on; nil on the host.
+	device compute.Backend
+	metal  *inklingmetal.Model
+	tok    *tokenizer.Tokenizer
+	eos    int
 }
 
 // NewInkling2RunPlanner binds the interactive text runner to its checkpoint.
 func NewInkling2RunPlanner(name string, m *ggufload.Inkling2LoopModel, tok *tokenizer.Tokenizer, eos int) Planner {
 	return &inkling2RunPlanner{name: name, model: m, tok: tok, eos: eos}
+}
+
+// NewInkling2DeviceRunPlanner binds the runner to a model whose weights live on be.
+func NewInkling2DeviceRunPlanner(name string, m *ggufload.Inkling2LoopModel, be compute.Backend, tok *tokenizer.Tokenizer, eos int) Planner {
+	return &inkling2RunPlanner{name: name, model: m, device: be, tok: tok, eos: eos}
 }
 
 func NewInkling2MetalRunPlanner(name string, m *inklingmetal.Model, tok *tokenizer.Tokenizer, eos int) Planner {
@@ -192,6 +200,8 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 			}
 			return rows[0], sess.Commit(1)
 		}
+	} else if p.device != nil && temp == 0 && freq == 0 && pres == 0 {
+		return p.deviceGreedy(sp, ids, maxTokens)
 	} else {
 		h, err := model.NewInkling2LoopHost(p.model.HP, p.model.Weights)
 		if err != nil {
@@ -204,6 +214,23 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 		}
 		prefillPrompt = func() ([]float32, error) { return ggufload.Inkling2LoopPrefill(ctx, h, ids) }
 		step = func(id int) ([]float32, error) { return ggufload.Inkling2LoopStep(h, id) }
+		if r, ok := p.device.(interface{ Recycle() }); ok {
+			// Device intermediates are read back per token, so recycle at each
+			// token boundary instead of holding a whole batched prefill.
+			prefillPrompt = func() (logits []float32, err error) {
+				for i, id := range ids {
+					if logits, err = ggufload.Inkling2LoopPrefillToken(h, id, i == len(ids)-1); err != nil {
+						return nil, err
+					}
+					r.Recycle()
+				}
+				return logits, nil
+			}
+			step = func(id int) ([]float32, error) {
+				defer r.Recycle()
+				return ggufload.Inkling2LoopStep(h, id)
+			}
+		}
 	}
 	start := time.Now()
 	logits, err := prefillPrompt()
@@ -252,6 +279,23 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 		steps++
 	}
 	return p.result(sp, generated, len(ids), sampled, steps, reason, prefill, time.Since(start))
+}
+
+// deviceGreedy keeps the resident and speculative CUDA decoders, which only
+// expose fixed-length greedy runs; the reply is cut at the first EOS.
+func (p *inkling2RunPlanner) deviceGreedy(sp SampleParams, ids []int, maxTokens int) (*Completion, error) {
+	out, st, err := ggufload.Inkling2LoopGreedyTimed(p.model, p.device, ids, maxTokens)
+	if err != nil {
+		return nil, err
+	}
+	reason, sampled := "length", len(out)
+	for i, id := range out {
+		if id == p.eos {
+			out, sampled, reason = out[:i], i+1, "stop"
+			break
+		}
+	}
+	return p.result(sp, out, len(ids), sampled, st.DecodeSteps, reason, st.Prefill, st.Decode)
 }
 
 func (p *inkling2RunPlanner) result(sp SampleParams, generated []int, prompt, sampled, steps int, reason string, prefill, decode time.Duration) (*Completion, error) {

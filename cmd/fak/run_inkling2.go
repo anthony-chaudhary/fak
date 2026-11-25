@@ -19,12 +19,14 @@ import (
 
 // The looped forward owns independent KV/conv slots for each layer visit.
 func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeControlConfig) (agent.Planner, func(), error) {
-	f, err := ggufload.Open(path)
-	if err != nil {
-		return nil, nil, nil // Other loaders also admit directories and sharded GGUFs.
+	arch, err := serveInkling2Arch(path)
+	if err != nil || arch == "" {
+		return nil, nil, nil // Other loaders also admit directories and other architectures.
 	}
-	if arch, _ := f.String("general.architecture"); arch != "inkling2_loop" {
-		return nil, nil, nil
+	shards := serveInkling2ShardSet(path)
+	f, err := ggufload.Open(shards[0]) // only the first split shard carries the tokenizer
+	if err != nil {
+		return nil, nil, err
 	}
 	be, metal, err := inkling2RunBackend(backend, metalFlag)
 	if err != nil {
@@ -33,18 +35,12 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 	if err = applyNativeControls(be, cfg); err != nil {
 		return nil, nil, err
 	}
-	table, ok := f.GGMLTokenizer()
-	if !ok || table.EOS < 0 {
-		return nil, nil, fmt.Errorf("Inkling 2: checkpoint needs an embedded BPE tokenizer and EOS")
-	}
-	tok, err := tokenizer.FromGGML(table.Tokens, table.Merges, table.TokenTypes, table.Pre)
+	tok, eos, err := runInkling2Tokenizer(f)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, marker := range []string{"<|message_system|>", "<|message_user|>", "<|message_model|>", "<|content_text|>", "<|content_thinking|>", "<|end_message|>", "<|content_model_end_sampling|>"} {
-		if _, ok := tok.SpecialID(marker); !ok {
-			return nil, nil, fmt.Errorf("Inkling 2: checkpoint tokenizer lacks %s", marker)
-		}
+	if metal && len(shards) > 1 {
+		return nil, nil, fmt.Errorf("Inkling 2: the Metal path binds a single-file GGUF; %s is split into %d shards", path, len(shards))
 	}
 	var m *ggufload.Inkling2LoopModel
 	var target *inklingmetal.Model
@@ -52,7 +48,7 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 	backendName := "cpu"
 	if metal {
 		backendName = "metal"
-		useTarget := inklingmetal.Available()
+		useTarget := arch == serveInkling2LoopArch && inklingmetal.Available()
 		var weights localadmission.MemoryPlan
 		if useTarget {
 			// Match the launcher's default single-session context budget, including
@@ -94,22 +90,52 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 			err = loadErr
 		}
 	} else {
-		m, err = ggufload.OpenInkling2Loop(path)
-		release = func() { _ = m.Close() }
+		// CUDA binds under the free-VRAM budget and spills cold experts to host;
+		// with no device backend the host forward runs over the mapped shards.
+		var l *serveInkling2Loaded
+		if l, err = loadServeInkling2(path, be, os.Stderr); err == nil {
+			m = l.Model
+			release = func() { _ = l.Close() }
+			if be != nil {
+				backendName = be.Name()
+			}
+		}
 	}
 	if err != nil {
 		return nil, nil, err
 	}
 	if target != nil {
 		fmt.Fprintln(os.Stderr, "fak run: inkling2_loop backend=metal native target layers=24 passes=3")
-		return agent.NewInkling2MetalRunPlanner(name, target, tok, table.EOS), release, nil
+		return agent.NewInkling2MetalRunPlanner(name, target, tok, eos), release, nil
 	}
-	fmt.Fprintf(os.Stderr, "fak run: inkling2_loop backend=%s layers=%d passes=%d\n", backendName, m.HP.Layers, m.HP.Passes)
-	return agent.NewInkling2RunPlanner(name, m, tok, table.EOS), release, nil
+	fmt.Fprintf(os.Stderr, "fak run: %s backend=%s layers=%d passes=%d\n", arch, backendName, m.HP.Layers, m.HP.Passes)
+	if be != nil {
+		return agent.NewInkling2DeviceRunPlanner(name, m, be, tok, eos), release, nil
+	}
+	return agent.NewInkling2RunPlanner(name, m, tok, eos), release, nil
+}
+
+// runInkling2Tokenizer is a seam so tests can bind a toy vocab to a synthetic GGUF.
+var runInkling2Tokenizer = func(f *ggufload.File) (*tokenizer.Tokenizer, int, error) {
+	table, ok := f.GGMLTokenizer()
+	if !ok || table.EOS < 0 {
+		return nil, 0, fmt.Errorf("Inkling 2: checkpoint needs an embedded BPE tokenizer and EOS")
+	}
+	tok, err := tokenizer.FromGGML(table.Tokens, table.Merges, table.TokenTypes, table.Pre)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, marker := range []string{"<|message_system|>", "<|message_user|>", "<|message_model|>", "<|content_text|>", "<|content_thinking|>", "<|end_message|>", "<|content_model_end_sampling|>"} {
+		if _, ok := tok.SpecialID(marker); !ok {
+			return nil, 0, fmt.Errorf("Inkling 2: checkpoint tokenizer lacks %s", marker)
+		}
+	}
+	return tok, table.EOS, nil
 }
 
 // Inkling uses packed MSL kernels directly, including on devices where the
-// general MPS compute backend does not register.
+// general MPS compute backend does not register. CUDA takes the budgeted
+// device bind; every other device backend is refused.
 func inkling2RunBackend(name string, metalFlag bool) (compute.Backend, bool, error) {
 	selector := strings.TrimSpace(name)
 	if selector == "" {
@@ -126,7 +152,10 @@ func inkling2RunBackend(name string, metalFlag bool) (compute.Backend, bool, err
 		return nil, false, err
 	}
 	if be != nil {
-		return nil, false, fmt.Errorf("Inkling 2 run: unsupported backend %q", be.Name())
+		if be.Name() != "cuda" {
+			return nil, false, fmt.Errorf("Inkling 2 run: unsupported backend %q", be.Name())
+		}
+		return be, false, nil
 	}
 	metal, err := resolveRunMetal(metalFlag, os.Getenv("FAK_METAL") != "", name)
 	return be, metal, err

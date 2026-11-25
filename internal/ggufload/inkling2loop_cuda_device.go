@@ -296,6 +296,8 @@ type inkling2DeviceSet struct {
 	mu      sync.Mutex
 	tensors []compute.Tensor
 	next    io.Closer
+	// placement is the budget plan the bind applied.
+	placement Inkling2DevicePlacement
 }
 
 func (s *inkling2DeviceSet) keep(t compute.Tensor) {
@@ -381,11 +383,21 @@ func inkling2ExpertResidencyOrder(hp model.Inkling2LoopHParams, layers int) []in
 	return order
 }
 
-// bindInkling2Device swaps every packed matrix and expert stack of a host-bound
-// model for be-resident equivalents. The token embedding and small dense
-// matrices stay host-side; Close frees the device tensors before the mapping.
+// bindInkling2Device swaps every packed matrix and, while they fit the device
+// budget, expert stacks (in residency order) of a host-bound model for
+// be-resident equivalents. Experts over budget stay host quant experts that
+// MatVecBatch runs on the CPU. The token embedding and small dense matrices
+// stay host-side; Close frees the device tensors before the mapping.
 func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
-	s := &inkling2DeviceSet{be: be}
+	budget, err := inkling2DeviceBudget(be, os.LookupEnv)
+	if err != nil {
+		return err
+	}
+	resident, placement, ramRegions, err := planInkling2Device(m, budget)
+	if err != nil {
+		return err
+	}
+	s := &inkling2DeviceSet{be: be, placement: placement}
 	defer func() {
 		if err != nil {
 			s.Close()
@@ -411,6 +423,9 @@ func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
 		}
 	}
 	for _, i := range inkling2ExpertResidencyOrder(m.HP, len(w.Layers)) {
+		if !resident[i] {
+			continue
+		}
 		exps(&w.Layers[i].GateUp)
 		exps(&w.Layers[i].Down)
 	}
@@ -424,6 +439,11 @@ func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
 	}
 	if err != nil {
 		return err
+	}
+	// Prefetch only now, so cold-stack reads never race the uploads on NVMe;
+	// it wraps the mapping's closer, so Close stops it before the unmap.
+	if len(ramRegions) > 0 {
+		m.closer = inkling2StartRAMPrefetch(ramRegions, m.closer)
 	}
 	s.next = m.closer
 	m.closer = s
@@ -441,6 +461,10 @@ func OpenInkling2LoopDevice(path string, be compute.Backend) (*Inkling2LoopModel
 	if err := bindInkling2Device(m, be); err != nil {
 		m.Close()
 		return nil, err
+	}
+	// A spill drops the resident fast path, so it must never be silent.
+	if p, ok := Inkling2DevicePlacementOf(m); ok && !p.FullyResident() {
+		fmt.Fprintln(os.Stderr, p.String())
 	}
 	return m, nil
 }
@@ -553,7 +577,8 @@ func inkling2DefaultOn(be compute.Backend, env string, lookup func(string) (stri
 
 // inkling2ResidentEligible routes a device-bound model on a backend with the
 // inkling2 device ops through the resident forward; FAK_INKLING2_RESIDENT=0 keeps
-// the host-driven per-matrix path.
+// the host-driven per-matrix path. A model with any cold (host) expert stack
+// is ineligible: the resident forward has no host-expert fallback.
 func inkling2ResidentEligible(m *Inkling2LoopModel, be compute.Backend) bool {
 	if !inkling2DefaultOn(be, "FAK_INKLING2_RESIDENT", os.LookupEnv) || len(m.Weights.Layers) == 0 {
 		return false
@@ -561,6 +586,11 @@ func inkling2ResidentEligible(m *Inkling2LoopModel, be compute.Backend) bool {
 	if _, ok := be.(compute.Inkling2Device); !ok {
 		return false
 	}
-	_, ok := m.Weights.Layers[0].GateUp.(*inkling2DeviceExperts)
-	return ok
+	if p, ok := Inkling2DevicePlacementOf(m); ok && !p.FullyResident() {
+		return false
+	}
+	if _, ok := m.Weights.Layers[0].GateUp.(*inkling2DeviceExperts); !ok {
+		return false
+	}
+	return inkling2ExpertsAllResident(m.Weights)
 }

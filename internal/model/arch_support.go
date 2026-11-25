@@ -75,7 +75,7 @@ func refuseUnsupportedHybridArch(cfg Config, man map[string]tensorMeta) error {
 		return err
 	}
 	if err := refuseInkling2LoopNative(cfg); err != nil {
-		return err
+		return &Inkling2SafetensorsRefusal{Err: err}
 	}
 	if cfg.IsQwen35Hybrid() {
 		return nil // layer_types marks the linear-attention layers — GDN forward is wired
@@ -215,3 +215,18 @@ func (c Config) cacheLayout() cachelayout.ModelCacheLayout {
 		LinearConvKernelDim: c.LinearConvKernelDim,
 	})
 }
+
+// Inkling2GGUFAliases are the run-by-name aliases that load Inkling-2 through
+// the GGUF arm, which is the only inkling2 path fak runs.
+var Inkling2GGUFAliases = []string{"inkling2-small", "inkling2-mini"}
+
+// Inkling2SafetensorsRefusal is the safetensors/HF-path refusal for an
+// inkling2_loop checkpoint. It wraps the UnsupportedInkling2LoopExecutionError
+// and points the user at the GGUF aliases.
+type Inkling2SafetensorsRefusal struct{ Err error }
+
+func (e *Inkling2SafetensorsRefusal) Error() string {
+	return e.Err.Error() + "; fak runs Inkling-2 from GGUF: fak run " + strings.Join(Inkling2GGUFAliases, " | fak run ")
+}
+
+func (e *Inkling2SafetensorsRefusal) Unwrap() error { return e.Err }

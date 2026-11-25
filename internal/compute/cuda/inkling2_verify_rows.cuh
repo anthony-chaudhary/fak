@@ -215,16 +215,9 @@ __global__ void __launch_bounds__(1024)
   for (int s = 0; s < INK2_MAX_STATES; ++s) sr.p[s] = st.p[s] ? st.p[s] + toff : nullptr;
   float *o = out + toff;
   const size_t qs = (size_t)T * n;
-  switch (ns) {
-  case 1: ink2_mixc_body<1, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
-  case 2: ink2_mixc_body<2, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
-  case 3: ink2_mixc_body<3, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
-  case 4: ink2_mixc_body<4, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
-  case 5: ink2_mixc_body<5, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
-  case 6: ink2_mixc_body<6, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
-  case 7: ink2_mixc_body<7, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
-  default: ink2_mixc_body<8, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs); break;
-  }
+#define INK2V_MIXC_CALL(NS) ink2_mixc_body<NS, NQ>(sm, sr, queries, nw, norm, eps, o, n, qs)
+  INK2_NS_DISPATCH(ns, INK2V_MIXC_CALL)
+#undef INK2V_MIXC_CALL
 }
 
 template <int NQ>
@@ -250,7 +243,7 @@ extern "C" int fcuda_ink2v_mix(const float *const *states, int ns, const float *
                                const float *const *norms, float eps, float *out, int n, int T) {
   if (ns < 1 || ns > INK2_MAX_STATES || nq < 1 || nq > INK2_MAX_QUERIES || T < 1) return (int)cudaErrorInvalidValue;
   const int threads = ((n + INK2_MIX_CTAS - 1) / INK2_MIX_CTAS + 31) & ~31;
-  if (threads > 1024 || !ink2_cluster_ok()) return -1;
+  if (threads > 1024 || threads < ns * (1 + nq) || !ink2_cluster_ok()) return -1;
   Ink2States st;
   for (int i = 0; i < INK2_MAX_STATES; ++i) st.p[i] = i < ns ? states[i] : nullptr;
   Ink2Norms nw;

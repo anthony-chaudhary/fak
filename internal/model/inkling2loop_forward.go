@@ -131,15 +131,23 @@ type Inkling2LoopHost struct {
 	Features      [][]float32
 }
 
+// NewInkling2LoopHost builds the host forward. An empty core (CoreStart ==
+// CoreEnd) with one pass is the loopless base graph (Inkling-2-Small): no
+// controllers, one cache slot per physical layer.
 func NewInkling2LoopHost(hp Inkling2LoopHParams, w *Inkling2LoopWeights) (*Inkling2LoopHost, error) {
-	if hp.CoreStart <= 0 || hp.CoreEnd <= hp.CoreStart || hp.CoreEnd > hp.Layers || hp.Passes < 1 ||
+	if hp.CoreStart == hp.CoreEnd {
+		if hp.CoreStart < 0 || hp.CoreStart > hp.Layers || hp.Passes != 1 {
+			return nil, fmt.Errorf("inkling2_loop host: empty loop core at %d needs exactly 1 pass, got %d", hp.CoreStart, hp.Passes)
+		}
+	} else if hp.CoreStart <= 0 || hp.CoreEnd < hp.CoreStart || hp.CoreEnd > hp.Layers || hp.Passes < 1 ||
 		hp.CoreStart%hp.AttnResBlock != 0 || hp.CoreEnd%hp.AttnResBlock != 0 {
 		return nil, fmt.Errorf("inkling2_loop host: invalid loop core [%d,%d) x%d", hp.CoreStart, hp.CoreEnd, hp.Passes)
 	}
-	if len(w.Layers) != hp.Layers || len(w.Controllers) != hp.CoreEnd-hp.CoreStart || len(hp.LocalLayer) != hp.Layers {
+	core := hp.CoreEnd - hp.CoreStart
+	if len(w.Layers) != hp.Layers || (core > 0 && len(w.Controllers) != core) || len(hp.LocalLayer) != hp.Layers {
 		return nil, fmt.Errorf("inkling2_loop host: %d layers, %d controllers for %d layers", len(w.Layers), len(w.Controllers), hp.Layers)
 	}
-	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
+	slots := hp.Layers + (hp.Passes-1)*core
 	h := &Inkling2LoopHost{HP: hp, W: w}
 	h.keys = make([][][]float32, slots)
 	h.values = make([][][]float32, slots)
@@ -192,7 +200,8 @@ func (h *Inkling2LoopHost) PrefillToken(token int, final bool) []float32 {
 	prelude := cur
 	preludeBlocks := append([][]float32(nil), blocks...)
 	core := hp.CoreEnd - hp.CoreStart
-	for pass := 0; pass < hp.Passes; pass++ {
+	// a pass > 0 reads controllers and the pass-0 bank, both absent without a core
+	for pass := 0; pass < hp.Passes && (pass == 0 || core > 0); pass++ {
 		var bank [][]float32
 		var bankOut []float32
 		if pass > 0 {

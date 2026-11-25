@@ -693,7 +693,7 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 	ggufPath := modelPath
 	// The looped family is served by its own forward (serve_inkling2.go); every
 	// *Model loader below would mis-read its header keys.
-	if serveIsInkling2LoopGGUF(ggufPath) {
+	if serveIsInkling2GGUF(ggufPath) {
 		err := serveRefuseInkling2LoopGeneric(backend)
 		fmt.Fprintln(os.Stderr, "fak serve:", err)
 		return nil, false, nil, gateway.StartupPhase{}, nil, err

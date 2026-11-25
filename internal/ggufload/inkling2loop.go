@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"runtime"
 	"sync"
 
@@ -167,11 +168,27 @@ func (e inkling2QuantEmbedding) Row(token int, dst []float32) {
 	}
 }
 
-// Inkling2LoopModel is an inkling2_loop GGUF bound to the host reference.
+const (
+	inkling2ArchLoop = "inkling2_loop"
+	inkling2ArchBase = "inkling2"
+
+	// Published Inkling-2-Small GGUFs carry a stale log_scale_floor; the
+	// checkpoint was trained with 8192.
+	inkling2StaleLogScaleFloor   = 128000
+	inkling2CorrectLogScaleFloor = 8192
+)
+
+// Inkling2LoopModel is an inkling2 or inkling2_loop GGUF bound to the host
+// reference. An inkling2 model is the same graph with an empty loop core.
 type Inkling2LoopModel struct {
 	HP      model.Inkling2LoopHParams
 	Weights *model.Inkling2LoopWeights
-	closer  io.Closer
+	// Arch is the GGUF general.architecture that was bound.
+	Arch string
+	// LogScaleFloorOverridden reports that the stale published floor was
+	// replaced with the correct value.
+	LogScaleFloorOverridden bool
+	closer                  io.Closer
 }
 
 func (m *Inkling2LoopModel) Close() error {
@@ -181,21 +198,56 @@ func (m *Inkling2LoopModel) Close() error {
 	return m.closer.Close()
 }
 
-// OpenInkling2Loop maps an inkling2_loop GGUF (mainline llama.cpp layout).
+// Inkling2NonUniformHeadsError refuses per-layer head counts that differ: the
+// host reference has a single head geometry.
+type Inkling2NonUniformHeadsError struct {
+	Key    string
+	Counts []int
+}
+
+func (e *Inkling2NonUniformHeadsError) Error() string {
+	return fmt.Sprintf("inkling2: per-layer %s %v is not uniform", e.Key, e.Counts)
+}
+
+type inkling2Closers []io.Closer
+
+func (c inkling2Closers) Close() error {
+	var first error
+	for _, x := range c {
+		if err := x.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+// OpenInkling2Loop maps an inkling2 or inkling2_loop GGUF (mainline llama.cpp
+// layout). A split checkpoint may be opened through any of its shards.
 func OpenInkling2Loop(path string) (*Inkling2LoopModel, error) {
-	data, closer, ok, err := model.MmapOpen(path)
+	data, closer, err := inkling2MapFile(path)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, fmt.Errorf("inkling2_loop: cannot map %q", path)
-	}
-	m, err := bindInkling2Loop(data)
+	closers := inkling2Closers{closer}
+	f, err := ReadSize(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		closer.Close()
+		closers.Close()
 		return nil, err
 	}
-	m.closer = closer
+	shards := [][]byte{data}
+	if count, ok := f.Uint64("split.count"); ok && count > 1 {
+		closers.Close()
+		shards, closers, err = inkling2MapShards(path, int(count))
+		if err != nil {
+			return nil, err
+		}
+	}
+	m, err := bindInkling2Shards(shards, nil)
+	if err != nil {
+		closers.Close()
+		return nil, err
+	}
+	m.closer = closers
 	return m, nil
 }
 
@@ -204,33 +256,113 @@ type inkling2PackedWeight interface {
 	model.Inkling2LoopExperts
 }
 
+// inkling2Pack rebinds a quantized matrix or expert stack onto an accelerator.
 type inkling2Pack func(t TensorInfo) (inkling2PackedWeight, error)
+
+func inkling2MapFile(path string) ([]byte, io.Closer, error) {
+	data, closer, ok, err := model.MmapOpen(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ok {
+		if data, err = os.ReadFile(path); err != nil {
+			return nil, nil, err
+		}
+		closer = io.NopCloser(nil)
+	}
+	return data, closer, nil
+}
+
+// inkling2MapShards maps every shard of a -N-of-M.gguf set in order.
+func inkling2MapShards(path string, count int) ([][]byte, inkling2Closers, error) {
+	named, ok := shardPathCount(path)
+	if !ok {
+		return nil, nil, fmt.Errorf("inkling2: %s declares split.count=%d but its name is not a -N-of-M.gguf shard path", path, count)
+	}
+	if named != count {
+		return nil, nil, fmt.Errorf("inkling2: %s declares split.count=%d, but its filename names a %d-shard set", path, count, named)
+	}
+	first, err := firstShardPath(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	paths, err := shardPaths(first, count)
+	if err != nil {
+		return nil, nil, err
+	}
+	var closers inkling2Closers
+	shards := make([][]byte, 0, count)
+	for _, p := range paths {
+		data, c, err := inkling2MapFile(p)
+		if err != nil {
+			closers.Close()
+			return nil, nil, fmt.Errorf("inkling2: open shard %s: %w", p, err)
+		}
+		closers = append(closers, c)
+		shards = append(shards, data)
+	}
+	return shards, closers, nil
+}
 
 type inkling2Binder struct {
 	pack    inkling2Pack
 	f       *File
-	data    []byte
+	arch    string
+	prefix  string
+	shards  [][]byte
 	tensors map[string]TensorInfo
+	shardOf map[string]int
 	err     error
 }
 
-func bindInkling2Loop(data []byte) (*Inkling2LoopModel, error) {
-	return bindInkling2LoopWith(data, nil)
+// A pack resolves tensors by FileOffset, so it only binds a single-file GGUF.
+func bindInkling2LoopWith(data []byte, pack inkling2Pack) (*Inkling2LoopModel, error) {
+	return bindInkling2Shards([][]byte{data}, pack)
 }
 
-func bindInkling2LoopWith(data []byte, pack inkling2Pack) (*Inkling2LoopModel, error) {
-	f, err := ReadSize(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		return nil, err
+// bindInkling2Shards binds shards in filename order. Shard 1 must be the config
+// carrier (the one holding general.architecture); split.no is checked per shard
+// so a mislabelled set cannot bind tensors under the wrong config.
+func bindInkling2Shards(shards [][]byte, pack inkling2Pack) (*Inkling2LoopModel, error) {
+	if pack != nil && len(shards) != 1 {
+		return nil, fmt.Errorf("inkling2: packed bind needs a single-file GGUF, have %d shards", len(shards))
 	}
-	if a, _ := f.String("general.architecture"); a != "inkling2_loop" {
-		return nil, fmt.Errorf("inkling2_loop: general.architecture %q", a)
+	b := &inkling2Binder{pack: pack, shards: shards, tensors: map[string]TensorInfo{}, shardOf: map[string]int{}}
+	for i, data := range shards {
+		f, err := ReadSize(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			return nil, fmt.Errorf("inkling2: shard %d: %w", i+1, err)
+		}
+		if i == 0 {
+			b.f = f
+		}
+		if c, ok := f.Uint64("split.count"); ok && int(c) != len(shards) && (c > 1 || len(shards) > 1) {
+			return nil, fmt.Errorf("inkling2: shard %d declares split.count=%d, have %d shards", i+1, c, len(shards))
+		}
+		if len(shards) > 1 {
+			no, present := f.Uint64("split.no")
+			if !validShardNo(no, present, i+1) {
+				return nil, fmt.Errorf("inkling2: shard %d of %d declares split.no=%d", i+1, len(shards), no)
+			}
+		}
+		for _, t := range f.Tensors {
+			if _, dup := b.tensors[t.Name]; dup {
+				return nil, fmt.Errorf("inkling2: duplicate tensor %s in shard %d", t.Name, i+1)
+			}
+			b.tensors[t.Name] = t
+			b.shardOf[t.Name] = i
+		}
 	}
-	b := &inkling2Binder{f: f, data: data, pack: pack, tensors: map[string]TensorInfo{}}
-	for _, t := range f.Tensors {
-		b.tensors[t.Name] = t
+	arch, hasArch := b.f.String("general.architecture")
+	if !hasArch && len(shards) > 1 {
+		return nil, fmt.Errorf("inkling2: split shard 1 carries no config (general.architecture missing)")
 	}
-	hp, err := b.hparams()
+	if arch != inkling2ArchLoop && arch != inkling2ArchBase {
+		return nil, fmt.Errorf("inkling2: unsupported general.architecture %q", arch)
+	}
+	b.arch = arch
+	b.prefix = arch + "."
+	hp, overridden, err := b.hparams(arch)
 	if err != nil {
 		return nil, err
 	}
@@ -286,31 +418,43 @@ func bindInkling2LoopWith(data []byte, pack inkling2Pack) (*Inkling2LoopModel, e
 			cw.Forget[c] = b.mat(p + "loop_" + n + "_ctrl_forget.weight")
 		}
 		if b.err == nil && len(msg) != 4 {
-			b.err = fmt.Errorf("inkling2_loop: %sloop_msg_query has %d rows, want 4", p, len(msg))
+			b.err = fmt.Errorf("%s: %sloop_msg_query has %d rows, want 4", b.arch, p, len(msg))
 		}
 		w.Controllers = append(w.Controllers, cw)
 	}
 	if b.err != nil {
 		return nil, b.err
 	}
-	return &Inkling2LoopModel{HP: hp, Weights: w}, nil
+	return &Inkling2LoopModel{HP: hp, Weights: w, Arch: arch, LogScaleFloorOverridden: overridden}, nil
 }
 
-func (b *inkling2Binder) hparams() (model.Inkling2LoopHParams, error) {
-	const p = "inkling2_loop."
+func (b *inkling2Binder) hparams(arch string) (model.Inkling2LoopHParams, bool, error) {
+	hp, err := b.readHParams(arch)
+	if err != nil {
+		return hp, false, err
+	}
+	if arch == inkling2ArchBase && hp.LogScaleFloor == inkling2StaleLogScaleFloor {
+		hp.LogScaleFloor = inkling2CorrectLogScaleFloor
+		return hp, true, nil
+	}
+	return hp, false, nil
+}
+
+func (b *inkling2Binder) readHParams(arch string) (model.Inkling2LoopHParams, error) {
+	p := b.prefix
 	var hp model.Inkling2LoopHParams
 	u := func(key string, dst *int) {
 		if v, ok := b.f.Uint64(p + key); ok {
 			*dst = int(v)
 		} else if b.err == nil {
-			b.err = fmt.Errorf("inkling2_loop: missing %s%s", p, key)
+			b.err = fmt.Errorf("%s: missing %s%s", arch, p, key)
 		}
 	}
 	fl := func(key string, dst *float32, required bool) {
 		if v, ok := b.f.Float64(p + key); ok {
 			*dst = float32(v)
 		} else if required && b.err == nil {
-			b.err = fmt.Errorf("inkling2_loop: missing %s%s", p, key)
+			b.err = fmt.Errorf("%s: missing %s%s", arch, p, key)
 		}
 	}
 	u("embedding_length", &hp.Hidden)
@@ -325,10 +469,15 @@ func (b *inkling2Binder) hparams() (model.Inkling2LoopHParams, error) {
 	u("expert_count", &hp.Experts)
 	u("expert_used_count", &hp.ExpertsUsed)
 	u("expert_feed_forward_length", &hp.ExpertWidth)
-	u("loop.start", &hp.CoreStart)
-	u("loop.end", &hp.CoreEnd)
-	u("loop.count", &hp.Passes)
-	u("loop.gate_rank", &hp.GateRank)
+	if arch == inkling2ArchLoop {
+		u("loop.start", &hp.CoreStart)
+		u("loop.end", &hp.CoreEnd)
+		u("loop.count", &hp.Passes)
+		u("loop.gate_rank", &hp.GateRank)
+	} else {
+		// inkling2 has no loop core; stray loop.* keys must not add passes.
+		hp.Passes = 1
+	}
 	var floor int
 	u("attention.log_scale_floor", &floor)
 	fl("attention.layer_norm_rms_epsilon", &hp.NormEps, true)
@@ -340,24 +489,16 @@ func (b *inkling2Binder) hparams() (model.Inkling2LoopHParams, error) {
 	fl("expert_weights_scale", &hp.ExpertWeightsScale, false)
 	fl("final_logit_softcapping", &hp.FinalLogitSoftcap, false)
 	hp.LogScaleFloor = float32(floor)
-	heads, _ := b.f.IntArray(p + "attention.head_count")
-	kv, _ := b.f.IntArray(p + "attention.head_count_kv")
-	if len(heads) == 0 || len(kv) == 0 {
-		if v, ok := b.f.Uint64(p + "attention.head_count"); ok {
-			heads = []int{int(v)}
-		}
-		if v, ok := b.f.Uint64(p + "attention.head_count_kv"); ok {
-			kv = []int{int(v)}
-		}
-	}
+	heads := b.headCounts(p + "attention.head_count")
+	kv := b.headCounts(p + "attention.head_count_kv")
 	for _, h := range heads {
 		if h != heads[0] {
-			return hp, fmt.Errorf("inkling2_loop: per-layer head counts %v are not uniform", heads)
+			return hp, &Inkling2NonUniformHeadsError{Key: "attention.head_count", Counts: heads}
 		}
 	}
 	for _, h := range kv {
 		if h != kv[0] {
-			return hp, fmt.Errorf("inkling2_loop: per-layer kv head counts %v are not uniform", kv)
+			return hp, &Inkling2NonUniformHeadsError{Key: "attention.head_count_kv", Counts: kv}
 		}
 	}
 	if len(heads) > 0 && len(kv) > 0 {
@@ -368,16 +509,30 @@ func (b *inkling2Binder) hparams() (model.Inkling2LoopHParams, error) {
 		return hp, b.err
 	}
 	if len(hp.LocalLayer) != hp.Layers || hp.Heads == 0 || hp.KVHeads == 0 || hp.Heads%hp.KVHeads != 0 {
-		return hp, fmt.Errorf("inkling2_loop: invalid heads %d/%d or %d-entry layer pattern for %d layers", hp.Heads, hp.KVHeads, len(hp.LocalLayer), hp.Layers)
+		return hp, fmt.Errorf("%s: invalid heads %d/%d or %d-entry layer pattern for %d layers", arch, hp.Heads, hp.KVHeads, len(hp.LocalLayer), hp.Layers)
+	}
+	if hp.CoreStart < 0 || hp.CoreEnd < hp.CoreStart || hp.CoreEnd > hp.Layers || hp.Passes < 1 {
+		return hp, fmt.Errorf("%s: invalid loop core [%d,%d) x%d for %d layers", arch, hp.CoreStart, hp.CoreEnd, hp.Passes, hp.Layers)
 	}
 	return hp, nil
+}
+
+// headCounts reads a head count stored either as a scalar or as a per-layer array.
+func (b *inkling2Binder) headCounts(key string) []int {
+	if v, ok := b.f.IntArray(key); ok && len(v) > 0 {
+		return v
+	}
+	if v, ok := b.f.Uint64(key); ok {
+		return []int{int(v)}
+	}
+	return nil
 }
 
 func (b *inkling2Binder) info(name string) (TensorInfo, []byte, bool) {
 	t, ok := b.tensors[name]
 	if !ok {
 		if b.err == nil {
-			b.err = fmt.Errorf("inkling2_loop: missing tensor %s", name)
+			b.err = fmt.Errorf("%s: missing tensor %s", b.arch, name)
 		}
 		return t, nil, false
 	}
@@ -388,18 +543,19 @@ func (b *inkling2Binder) info(name string) (TensorInfo, []byte, bool) {
 	rb, err := inkling2RowBytes(t.Type, int(cols))
 	if err != nil {
 		if b.err == nil {
-			b.err = fmt.Errorf("inkling2_loop: %s: %w", name, err)
+			b.err = fmt.Errorf("%s: %s: %w", b.arch, name, err)
 		}
 		return t, nil, false
 	}
 	size := int64(rb) * int64(rest)
-	if t.FileOffset < 0 || t.FileOffset+size > int64(len(b.data)) {
+	data := b.shards[b.shardOf[name]]
+	if t.FileOffset < 0 || t.FileOffset+size > int64(len(data)) {
 		if b.err == nil {
-			b.err = fmt.Errorf("inkling2_loop: tensor %s runs past the file", name)
+			b.err = fmt.Errorf("%s: tensor %s runs past the file", b.arch, name)
 		}
 		return t, nil, false
 	}
-	return t, b.data[t.FileOffset : t.FileOffset+size], true
+	return t, data[t.FileOffset : t.FileOffset+size], true
 }
 
 func (b *inkling2Binder) vec(name string) []float32 {
@@ -416,7 +572,7 @@ func (b *inkling2Binder) vec(name string) []float32 {
 	out := make([]float32, n)
 	for r := 0; r < n/cols; r++ {
 		if err := inkling2DequantRow(t.Type, raw[r*rb:(r+1)*rb], out[r*cols:(r+1)*cols]); err != nil && b.err == nil {
-			b.err = fmt.Errorf("inkling2_loop: %s: %w", name, err)
+			b.err = fmt.Errorf("%s: %s: %w", b.arch, name, err)
 		}
 	}
 	return out
@@ -461,7 +617,7 @@ func (b *inkling2Binder) matrix(name string, usePacked bool) model.Inkling2LoopM
 	}
 	if len(t.Dims) != 2 {
 		if b.err == nil {
-			b.err = fmt.Errorf("inkling2_loop: %s has %d dims, want a matrix", name, len(t.Dims))
+			b.err = fmt.Errorf("%s: %s has %d dims, want a matrix", b.arch, name, len(t.Dims))
 		}
 		return nil
 	}
@@ -480,7 +636,7 @@ func (b *inkling2Binder) experts(name string) model.Inkling2LoopExperts {
 	}
 	if len(t.Dims) != 3 {
 		if b.err == nil {
-			b.err = fmt.Errorf("inkling2_loop: %s has %d dims, want experts", name, len(t.Dims))
+			b.err = fmt.Errorf("%s: %s has %d dims, want experts", b.arch, name, len(t.Dims))
 		}
 		return nil
 	}

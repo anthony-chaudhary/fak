@@ -1,0 +1,80 @@
+{
+  "rows": [
+    {
+      "id": "inkling2-small-device-run-planner",
+      "canonical": "NewInkling2DeviceRunPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Construct the agent Planner for an Inkling 2 model whose weights are bound to a compute backend device (CUDA), so prefill and decode run on that device instead of the host loop.",
+      "distinction": "Same request adapter as the host run planner, but carries the device backend the weights live on; it binds no weights itself and plans no memory placement.",
+      "distinct_from": [
+        "inkling2loop-run-planner",
+        "inkling2-small-plan-device"
+      ],
+      "aliases": [],
+      "grounding": "NewInkling2DeviceRunPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-small-plan-device",
+      "canonical": "planInkling2Device",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Size every device upload the Inkling 2 CUDA bind would make, choose which expert stacks stay VRAM-resident under the budget, and tier the cold stacks into RAM or NVMe, returning the RAM-tier regions to prefetch.",
+      "distinction": "A memory-placement plan for weights, computed before any upload; distinct from the agent run planners, which adapt an already bound model to generation requests.",
+      "distinct_from": [
+        "inkling2-small-device-run-planner",
+        "inkling2loop-run-planner"
+      ],
+      "aliases": [],
+      "grounding": "planInkling2Device",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-small-loop-prefill-token",
+      "canonical": "Inkling2LoopPrefillToken",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Consume one prompt token on the Inkling 2 loop host, updating attention and convolution state, and return logits only when it is the final prompt position.",
+      "distinction": "The per-token prompt path with dispatch-panic recovery; the batch prefill consumes the whole prompt at once and a decode step consumes one sampled token with logits every time.",
+      "distinct_from": [
+        "inkling2loop-prefill",
+        "inkling2loop-step"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopPrefillToken",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "inkling2-small-serve-loop-arch",
+      "canonical": "serveInkling2LoopArch",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "The GGUF general.architecture string of the looped Inkling 2 family (inkling2_loop), also the model_type its served config carries.",
+      "distinction": "A constant architecture label used for routing and config; the IsInkling2Loop predicate tests a file against it, and the loop model family row names the model itself.",
+      "distinct_from": [
+        "inkling2-serve-is-loop",
+        "inkling2loop-model-family"
+      ],
+      "aliases": [],
+      "grounding": "serveInkling2LoopArch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

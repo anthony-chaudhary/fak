@@ -15,6 +15,13 @@ import (
 
 var _ Inkling2Device = (*cudaBackend)(nil)
 
+// Mirror INK2_MAX_STATES, INK2_MAX_QUERIES and INK2_MAX_EXPERTS in cuda/inkling2_loop.cuh.
+const (
+	ink2MaxStates  = 16
+	ink2MaxQueries = 4
+	ink2MaxExperts = 512
+)
+
 func ink2Status(op string, rc C.int) error {
 	if rc != 0 {
 		return fmt.Errorf("cuda inkling2 %s: status %d", op, int(rc))
@@ -205,10 +212,13 @@ func (c *cudaBackend) Ink2CtrlPair(cur, msg, pair Ink2Ref, n int) error {
 func (c *cudaBackend) Ink2Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2Ref, eps float32, out Ink2Ref, n int) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if len(states) > 8 || len(norms) > 4 {
+	if len(states) > ink2MaxStates || len(norms) > ink2MaxQueries {
 		return fmt.Errorf("cuda inkling2 mix: %d states, %d norms", len(states), len(norms))
 	}
-	ptrs := (*[12]*C.float)(C.malloc(C.size_t(12 * unsafe.Sizeof(uintptr(0)))))
+	// One C block: states in [0, ink2MaxStates), norms after. calloc so a norms slice
+	// shorter than nq reads as null (skip the weight) rather than garbage.
+	const slots = ink2MaxStates + ink2MaxQueries
+	ptrs := (*[slots]*C.float)(C.calloc(slots, C.size_t(unsafe.Sizeof(uintptr(0)))))
 	defer C.free(unsafe.Pointer(ptrs))
 	for i, s := range states {
 		ptrs[i] = c.ink2F(s)
@@ -216,9 +226,9 @@ func (c *cudaBackend) Ink2Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms [
 	var np **C.float
 	if norms != nil {
 		for i, w := range norms {
-			ptrs[8+i] = c.ink2F(w)
+			ptrs[ink2MaxStates+i] = c.ink2F(w)
 		}
-		np = (**C.float)(unsafe.Pointer(&ptrs[8]))
+		np = (**C.float)(unsafe.Pointer(&ptrs[ink2MaxStates]))
 	}
 	return ink2Status("mix", C.fcuda_ink2_mix((**C.float)(unsafe.Pointer(ptrs)), C.int(len(states)), c.ink2F(queries), C.int(nq),
 		np, C.float(eps), c.ink2F(out), C.int(n)))
@@ -304,6 +314,9 @@ func (c *cudaBackend) Ink2SigmoidMul(x, gate Ink2Ref, n int) error {
 }
 
 func (c *cudaBackend) Ink2Route(logits, bias, ids, wts Ink2Ref, nexp, k int, scale float32) error {
+	if nexp > ink2MaxExperts {
+		return fmt.Errorf("cuda inkling2 route: %d experts exceeds %d", nexp, ink2MaxExperts)
+	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	return ink2Status("route", C.fcuda_ink2_route(c.ink2F(logits), c.ink2F(bias), c.ink2I(ids), c.ink2F(wts), C.int(nexp), C.int(k), C.float(scale)))

@@ -10,9 +10,32 @@
 
 #include <cooperative_groups.h>
 
-#define INK2_MAX_STATES 8
+#define INK2_MAX_STATES 16
 #define INK2_MAX_QUERIES 4
 #define INK2_MAX_TOPK 16
+// Router width: the route kernels stage every expert's probability in shared memory.
+#define INK2_MAX_EXPERTS 512
+
+// Expands CALL(NS) for the state count ns (1..INK2_MAX_STATES), one instantiation each.
+#define INK2_NS_DISPATCH(ns, CALL) \
+  switch (ns) {                    \
+  case 1: CALL(1); break;          \
+  case 2: CALL(2); break;          \
+  case 3: CALL(3); break;          \
+  case 4: CALL(4); break;          \
+  case 5: CALL(5); break;          \
+  case 6: CALL(6); break;          \
+  case 7: CALL(7); break;          \
+  case 8: CALL(8); break;          \
+  case 9: CALL(9); break;          \
+  case 10: CALL(10); break;        \
+  case 11: CALL(11); break;        \
+  case 12: CALL(12); break;        \
+  case 13: CALL(13); break;        \
+  case 14: CALL(14); break;        \
+  case 15: CALL(15); break;        \
+  default: CALL(16); break;        \
+  }
 
 struct Ink2States {
   const float *p[INK2_MAX_STATES];
@@ -154,16 +177,9 @@ __device__ void ink2_mix_body(const Ink2States &st, const float *queries, float 
 
 template <int NQ>
 __global__ void __launch_bounds__(INK2_MIX_THREADS) k_ink2_mix(Ink2States st, int ns, const float *queries, float *out, int n) {
-  switch (ns) {
-  case 1: ink2_mix_body<1, NQ>(st, queries, out, n); break;
-  case 2: ink2_mix_body<2, NQ>(st, queries, out, n); break;
-  case 3: ink2_mix_body<3, NQ>(st, queries, out, n); break;
-  case 4: ink2_mix_body<4, NQ>(st, queries, out, n); break;
-  case 5: ink2_mix_body<5, NQ>(st, queries, out, n); break;
-  case 6: ink2_mix_body<6, NQ>(st, queries, out, n); break;
-  case 7: ink2_mix_body<7, NQ>(st, queries, out, n); break;
-  default: ink2_mix_body<8, NQ>(st, queries, out, n); break;
-  }
+#define INK2_MIX_CALL(NS) ink2_mix_body<NS, NQ>(st, queries, out, n)
+  INK2_NS_DISPATCH(ns, INK2_MIX_CALL)
+#undef INK2_MIX_CALL
 }
 
 // Cluster form of the depth mix: INK2_MIX_CTAS blocks each own one slice of the hidden
@@ -244,22 +260,39 @@ __device__ void ink2_mixc_body(Ink2MixShared &sm, const Ink2States &st, const fl
   if (threadIdx.x < NS) scale[threadIdx.x] = (float)(1.0 / sqrt(tot[threadIdx.x] / (double)n + 1e-6));
   __syncthreads();
   if (threadIdx.x < 32) {
-    const int q = threadIdx.x / NS, s = threadIdx.x % NS;
-    const bool on = threadIdx.x < NS * NQ;
+    // NS * NQ can exceed a warp, so lane l owns pairs l, l + 32, ...
+    constexpr int NP = NS * NQ, PER = (NP + 31) / 32;
     const double inv = 1.0 / sqrt((double)n);
-    const double sc = on ? (double)(float)((double)scale[s] * tot[NS + s * NQ + q]) * inv : 0.0;
-    if (on) esc[q][s] = sc;
+    double sc[PER], mx[PER];
+#pragma unroll
+    for (int j = 0; j < PER; ++j) {
+      const int p = threadIdx.x + 32 * j, q = p / NS, s = p % NS;
+      sc[j] = p < NP ? (double)(float)((double)scale[s] * tot[NS + s * NQ + q]) * inv : 0.0;
+      if (p < NP) esc[q][s] = sc[j];
+    }
     __syncwarp();
-    double mx = -INFINITY;
-    if (on)
-      for (int t = 0; t < NS; ++t) mx = fmax(mx, esc[q][t]);
+#pragma unroll
+    for (int j = 0; j < PER; ++j) {
+      const int p = threadIdx.x + 32 * j, q = p / NS;
+      mx[j] = -INFINITY;
+      if (p < NP)
+        for (int t = 0; t < NS; ++t) mx[j] = fmax(mx[j], esc[q][t]);
+    }
     __syncwarp();
-    if (on) esc[q][s] = exp(sc - mx);
+#pragma unroll
+    for (int j = 0; j < PER; ++j) {
+      const int p = threadIdx.x + 32 * j, q = p / NS, s = p % NS;
+      if (p < NP) esc[q][s] = exp(sc[j] - mx[j]);
+    }
     __syncwarp();
-    if (on) {
-      double sum = 0;
-      for (int t = 0; t < NS; ++t) sum += esc[q][t];
-      wts[q][s] = (float)(esc[q][s] / sum);
+#pragma unroll
+    for (int j = 0; j < PER; ++j) {
+      const int p = threadIdx.x + 32 * j, q = p / NS, s = p % NS;
+      if (p < NP) {
+        double sum = 0;
+        for (int t = 0; t < NS; ++t) sum += esc[q][t];
+        wts[q][s] = (float)(esc[q][s] / sum);
+      }
     }
   }
   __syncthreads();
@@ -312,16 +345,9 @@ template <int NQ>
 __global__ void __launch_bounds__(1024)
     k_ink2_mixc(Ink2States st, int ns, const float *queries, Ink2Norms nw, int norm, float eps, float *out, int n) {
   __shared__ Ink2MixShared sm;
-  switch (ns) {
-  case 1: ink2_mixc_body<1, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
-  case 2: ink2_mixc_body<2, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
-  case 3: ink2_mixc_body<3, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
-  case 4: ink2_mixc_body<4, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
-  case 5: ink2_mixc_body<5, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
-  case 6: ink2_mixc_body<6, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
-  case 7: ink2_mixc_body<7, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
-  default: ink2_mixc_body<8, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n); break;
-  }
+#define INK2_MIXC_CALL(NS) ink2_mixc_body<NS, NQ>(sm, st, queries, nw, norm, eps, out, n, (size_t)n)
+  INK2_NS_DISPATCH(ns, INK2_MIXC_CALL)
+#undef INK2_MIXC_CALL
 }
 
 // Block-per-row F32 GEMV: y[r] = W[r,:] . x for the small dense matrices (router,
@@ -667,7 +693,7 @@ __global__ void k_ink2_sigmoid_mul(float *x, const float *gate, int n) {
 // weights renormalized over the selected probabilities and scaled. One warp.
 __global__ void k_ink2_route(const float *logits, const float *bias, int *ids, float *wts, int nexp, int k,
                              float wscale) {
-  __shared__ float probs[256], sel[256];
+  __shared__ float probs[INK2_MAX_EXPERTS], sel[INK2_MAX_EXPERTS];
   const int lane = threadIdx.x;
   for (int i = lane; i < nexp; i += 32) {
     probs[i] = ink2_sigmoid(logits[i]);
@@ -1024,7 +1050,8 @@ extern "C" int fcuda_ink2_mix(const float *const *states, int ns, const float *q
   Ink2Norms nw;
   for (int q = 0; q < INK2_MAX_QUERIES; ++q) nw.w[q] = norms && q < nq ? norms[q] : nullptr;
   const int threads = ((n + INK2_MIX_CTAS - 1) / INK2_MIX_CTAS + 31) & ~31;
-  if (threads <= 1024 && ink2_cluster_ok()) {
+  // the cluster body reduces one (state, query) sum per thread
+  if (threads <= 1024 && threads >= ns * (1 + nq) && ink2_cluster_ok()) {
     cudaError_t e = cudaSuccess;
     const int norm = norms ? 1 : 0;
     switch (nq) {
@@ -1271,7 +1298,7 @@ extern "C" int fcuda_ink2_sigmoid_mul(float *x, const float *gate, int n) {
 
 extern "C" int fcuda_ink2_route(const float *logits, const float *bias, int *ids, float *wts, int nexp, int k,
                                 float wscale) {
-  if (nexp > 256 || k > INK2_MAX_TOPK || k > nexp) return (int)cudaErrorInvalidValue;
+  if (nexp > INK2_MAX_EXPERTS || k > INK2_MAX_TOPK || k > nexp) return (int)cudaErrorInvalidValue;
   FCUDA_TS("k_ink2_route", 1, k_ink2_route<<<1, 32, 0, g_stream>>>(logits, bias, ids, wts, nexp, k, wscale));
   return ink2_last_error();
 }
