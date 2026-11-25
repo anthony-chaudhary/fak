@@ -51,7 +51,7 @@ var serviceOpsTick = func(ctx context.Context, stdout, stderr io.Writer) {
 		root = discoverRepoRoot()
 	}
 	if serviceOpsEngine == nil || serviceOpsEngine.RepoRoot != root {
-		engine, err := ops.NewEngine(root, ops.DefaultConfig())
+		engine, err := ops.NewEngineWithHostReach(root, ops.DefaultConfig(), opsHostReach())
 		if err == nil {
 			serviceOpsEngine = engine
 		}

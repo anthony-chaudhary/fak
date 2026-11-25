@@ -72,6 +72,9 @@ type PhaseLoad struct {
 	Ran     bool   `json:"ran"`
 	WallMS  int64  `json:"wall_ms"`
 	Mutated bool   `json:"mutated"`
+	// Skipped is each host-reaching step the phase declined because the engine
+	// was not granted that reach, so a confined tick is visible, not silent.
+	Skipped []ScopeSkip `json:"skipped,omitempty"`
 }
 
 // LoadCycle is one accounted maintenance tick under fak-ops-load/1.

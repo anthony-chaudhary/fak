@@ -12,6 +12,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ops"
 )
 
+// opsHostReach is what the operator's sweep and daemon entrypoints may touch
+// outside the repo root. A var so package tests can confine it.
+var opsHostReach = ops.HostReachFromEnv
+
 func runOps(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
 		fmt.Fprintln(stderr, "usage: fak ops <status|sweep|log|daemon|run|schedule> [options]")
@@ -104,7 +108,7 @@ func runOpsSweep(stdout, stderr io.Writer, root string, cfg ops.Config, args []s
 		return 2
 	}
 
-	engine, err := ops.NewEngine(root, cfg)
+	engine, err := ops.NewEngineWithHostReach(root, cfg, opsHostReach())
 	if err != nil {
 		fmt.Fprintf(stderr, "ops sweep: init engine: %v\n", err)
 		return 1
@@ -233,7 +237,7 @@ func runOpsDaemon(stdout, stderr io.Writer, root string, cfg ops.Config, args []
 		return 2
 	}
 
-	engine, err := ops.NewEngine(root, cfg)
+	engine, err := ops.NewEngineWithHostReach(root, cfg, opsHostReach())
 	if err != nil {
 		fmt.Fprintf(stderr, "ops daemon: init engine: %v\n", err)
 		return 1

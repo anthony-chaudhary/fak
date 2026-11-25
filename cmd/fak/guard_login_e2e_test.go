@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/ops"
 	"github.com/anthony-chaudhary/fak/internal/testgit"
 )
 
@@ -52,6 +53,9 @@ func TestMain(m *testing.M) {
 		// either way, a clean return is a 0 exit.
 		os.Exit(0)
 	}
+	// No test in this package may sweep the operator's Go cache or temp dumps,
+	// scan host processes, or kill one through an ops entrypoint.
+	opsHostReach = func() ops.HostReach { return ops.HostReach{} }
 	// Keep console-pane tests hermetic. The production default reads ~/.fak/console.json;
 	// a developer's local preference file must not change package test behavior.
 	_ = os.Setenv("FAK_CONSOLE_FILE", filepath.Join(os.TempDir(), "fak-test-missing-console.json"))

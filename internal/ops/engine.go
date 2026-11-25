@@ -39,8 +39,16 @@ type Engine struct {
 	clock func() time.Time
 }
 
-// NewEngine constructs a unified operations Engine.
+// NewEngine constructs an operations Engine confined to repoRoot: its Tick
+// never sweeps the host Go cache or temp dumps, never scans host processes, and
+// never kills. Use NewEngineWithHostReach to grant that reach.
 func NewEngine(repoRoot string, cfg Config) (*Engine, error) {
+	return NewEngineWithHostReach(repoRoot, cfg, HostReach{})
+}
+
+// NewEngineWithHostReach constructs an Engine whose Tick may act outside
+// repoRoot exactly as far as host allows.
+func NewEngineWithHostReach(repoRoot string, cfg Config, host HostReach) (*Engine, error) {
 	ledPath := DefaultLedgerPath(repoRoot)
 	led, err := OpenLedger(ledPath)
 	if err != nil {
@@ -63,6 +71,10 @@ func NewEngine(repoRoot string, cfg Config) (*Engine, error) {
 		selfCost:   DefaultSelfCost,
 		clock:      time.Now,
 	}
+	e.Storage.GoCacheRoot = host.GoCacheRoot
+	e.Storage.TempRoots = host.TempRoots
+	e.Process.Collect = host.CollectProcesses
+	e.Process.EnactAuthorized = host.EnactProcessReap
 	// Continue the tick ordinal across restarts so a gap in the load ledger is
 	// never mistaken for a tick that simply was not recorded.
 	if n, err := loadLed.Count(); err == nil {
@@ -223,6 +235,7 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 			failed = true
 		}
 		phaseWall(&phases, "process_runaways", durProc)
+		phaseSkipped(&phases, "process_runaways", procRes.Skipped)
 
 		if len(procRes.PIDsReaped) > 0 {
 			mutations++
@@ -262,6 +275,7 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 		reclaimRes, reclaimErr := e.Storage.ReclaimCascade(ctx, false)
 		dur := time.Since(start).Milliseconds()
 		phaseWall(&phases, "storage_reclaim", dur)
+		phaseSkipped(&phases, "storage_reclaim", reclaimRes.Skipped)
 		if reclaimErr != nil {
 			failed = true
 		}
@@ -288,6 +302,19 @@ func phaseWall(phases *[]PhaseLoad, name string, wallMS int64) {
 	for i := range *phases {
 		if (*phases)[i].Phase == name {
 			(*phases)[i].WallMS = wallMS
+			return
+		}
+	}
+}
+
+// phaseSkipped records the host-reaching steps a phase declined.
+func phaseSkipped(phases *[]PhaseLoad, name string, skips []ScopeSkip) {
+	if len(skips) == 0 {
+		return
+	}
+	for i := range *phases {
+		if (*phases)[i].Phase == name {
+			(*phases)[i].Skipped = append((*phases)[i].Skipped, skips...)
 			return
 		}
 	}

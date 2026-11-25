@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +25,8 @@ type StorageReclaimResult struct {
 	TotalBytes int64    `json:"total_bytes"`
 	FilesCount int      `json:"files_count"`
 	Actions    []string `json:"actions"`
+	// Skipped names each host-reaching tier declined for lack of HostReach.
+	Skipped []ScopeSkip `json:"skipped,omitempty"`
 }
 
 // StorageManager orchestrates watermarks and the 4-tier reclamation cascade.
@@ -34,9 +35,14 @@ type StorageManager struct {
 	Config       Config
 	ProcessAlive func(int) bool
 	DiskFree     func(string) (int64, error)
+	// GoCacheRoot and TempRoots are the only paths outside RepoRoot this
+	// manager touches; nil (the NewStorageManager default) skips those tiers.
+	GoCacheRoot func() string
+	TempRoots   func() []string
 }
 
-// NewStorageManager creates a StorageManager.
+// NewStorageManager creates a StorageManager confined to repoRoot. Assign
+// GoCacheRoot / TempRoots (see HostReach) to let it sweep host paths.
 func NewStorageManager(repoRoot string, cfg Config) *StorageManager {
 	return &StorageManager{
 		RepoRoot:     repoRoot,
@@ -110,6 +116,9 @@ func (sm *StorageManager) ReclaimCascade(ctx context.Context, dryRun bool) (Stor
 
 	// Tier 2: Go build cache LRU prune down to low_bytes when high_bytes is exceeded.
 	t2Bytes, t2Actions, err := sm.reclaimTier2(ctx, dryRun)
+	if sm.GoCacheRoot == nil {
+		res.Skipped = append(res.Skipped, SkipGoCacheUnauthorized)
+	}
 	if err == nil {
 		res.Tier2Bytes = t2Bytes
 		res.Actions = append(res.Actions, t2Actions...)
@@ -117,6 +126,9 @@ func (sm *StorageManager) ReclaimCascade(ctx context.Context, dryRun bool) (Stor
 
 	// Tier 3: External temp dumps (%TEMP%\opencode, /tmp/fak-*)
 	t3Bytes, t3Count, t3Actions, err := sm.reclaimTier3(ctx, dryRun)
+	if sm.TempRoots == nil {
+		res.Skipped = append(res.Skipped, SkipHostTempUnauthorized)
+	}
 	if err == nil {
 		res.Tier3Bytes = t3Bytes
 		res.FilesCount += t3Count
@@ -395,7 +407,10 @@ func (sm *StorageManager) reclaimTier1(ctx context.Context, dryRun bool) (int64,
 
 // reclaimTier2 runs Go build cache LRU prune down to low_bytes.
 func (sm *StorageManager) reclaimTier2(ctx context.Context, dryRun bool) (int64, []string, error) {
-	cacheRoot := treedoctor.GoCacheRootFromEnv(os.Getenv, os.UserCacheDir)
+	if sm.GoCacheRoot == nil {
+		return 0, nil, nil
+	}
+	cacheRoot := sm.GoCacheRoot()
 	if cacheRoot == "" {
 		return 0, nil, nil
 	}
@@ -425,14 +440,10 @@ func (sm *StorageManager) reclaimTier3(ctx context.Context, dryRun bool) (int64,
 	var count int
 	var actions []string
 
-	tempRoots := []string{}
-	if runtime.GOOS == "windows" {
-		if t := os.Getenv("TEMP"); t != "" {
-			tempRoots = append(tempRoots, filepath.Join(t, "opencode"))
-		}
-	} else {
-		tempRoots = append(tempRoots, "/tmp")
+	if sm.TempRoots == nil {
+		return 0, 0, nil, nil
 	}
+	tempRoots := sm.TempRoots()
 
 	now := time.Now()
 	for _, tr := range tempRoots {

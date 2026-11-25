@@ -16,15 +16,23 @@ type ProcessReapResult struct {
 	Names      []string `json:"names"`
 	Reasons    []string `json:"reasons"`
 	Errors     []string `json:"errors"`
+	// Skipped names each host-reaching step declined for lack of HostReach.
+	Skipped []ScopeSkip `json:"skipped,omitempty"`
 }
 
 // ProcessManager identifies and reaps orphan helpers, dead-parent shells, and resource runaways.
 type ProcessManager struct {
 	Config Config
 	Killer func(int) (bool, string)
+	// Collect is the process census; nil (the NewProcessManager default)
+	// skips the sweep, because the only census there is spans the whole host.
+	Collect func() ([]procguard.Proc, string)
+	// EnactAuthorized grants kill authority on top of Config.OrphanReapEnabled.
+	EnactAuthorized bool
 }
 
-// NewProcessManager creates a ProcessManager.
+// NewProcessManager creates a ProcessManager that neither scans nor kills
+// until Collect and EnactAuthorized are granted (see HostReach).
 func NewProcessManager(cfg Config) *ProcessManager {
 	return &ProcessManager{
 		Config: cfg,
@@ -53,7 +61,11 @@ func DefaultProcessKiller(pid int) (bool, string) {
 func (pm *ProcessManager) SweepProcessRunaways(ctx context.Context, dryRun bool) (ProcessReapResult, error) {
 	var res ProcessReapResult
 
-	procs, collectErr := procguard.CollectProcesses()
+	if pm.Collect == nil {
+		res.Skipped = append(res.Skipped, SkipProcessCensusUnauthorized)
+		return res, nil
+	}
+	procs, collectErr := pm.Collect()
 	if collectErr != "" && len(procs) == 0 {
 		return res, fmt.Errorf("collect processes: %s", collectErr)
 	}
@@ -62,9 +74,13 @@ func (pm *ProcessManager) SweepProcessRunaways(ctx context.Context, dryRun bool)
 		MaxThreads: pm.Config.MaxThreads,
 	}
 
+	wantEnact := !dryRun && pm.Config.OrphanReapEnabled
+	if wantEnact && !pm.EnactAuthorized {
+		res.Skipped = append(res.Skipped, SkipProcessReapUnauthorized)
+	}
 	opts := procguard.Options{
 		Thresholds: th,
-		Enact:      !dryRun && pm.Config.OrphanReapEnabled,
+		Enact:      wantEnact && pm.EnactAuthorized,
 		Killer:     pm.Killer,
 		Platform:   runtime.GOOS,
 	}
