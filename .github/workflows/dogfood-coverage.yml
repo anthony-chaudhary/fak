@@ -30,6 +30,7 @@ on:
       - "go.mod"
       - "go.sum"
       - "tools/issue_dispatch.py"
+      - "tools/dispatch_worker.py"
       - "tools/com.fak.serve-gateway.plist"
       - ".github/workflows/dogfood-coverage.yml"
   pull_request:
