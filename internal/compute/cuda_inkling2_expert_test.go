@@ -230,16 +230,45 @@ func TestCUDAInk2ExpertIQFastMatchesReference(t *testing.T) {
 // for local (window) and global (full-cache, wrapped ring) slots.
 // fak-test:runtime integration est=2s lane=optin
 func TestCUDAInk2AttendSplitMatchesReference(t *testing.T) {
-	ink2AttendSplitVsReference(t, true)
+	ink2AttendSplitVsReference(t, true, false, false, ink2SmallCapCases)
 }
 
 // The tree denominator and 16 key groups reorder double and float sums, so the
 // output is held to a tolerance instead of bit identity.
 func TestCUDAInk2AttendTreeNearReference(t *testing.T) {
-	ink2AttendSplitVsReference(t, false)
+	ink2AttendSplitVsReference(t, false, true, false, ink2SmallCapCases)
 }
 
-func ink2AttendSplitVsReference(t *testing.T, exact bool) {
+// Past the shared-memory staging limit (cap 16416 on an RTX 5080) the exact mode
+// tiles the weights and sums the denominator in parallel, so it matches the reference
+// to float rounding, for a short prompt in a long cache, a deep one and a wrapped ring.
+// fak-test:runtime integration est=2s lane=optin
+func TestCUDAInk2AttendSplitLargeCapMatchesReference(t *testing.T) {
+	ink2AttendSplitVsReference(t, true, true, false, ink2LargeCapCases)
+}
+
+// The same large-cap cases over f16 KV caches, the layout FAK_INKLING2_BATCH_KV=f16 uses.
+// fak-test:runtime integration est=2s lane=optin
+func TestCUDAInk2AttendSplitLargeCapF16MatchesReference(t *testing.T) {
+	ink2AttendSplitVsReference(t, true, true, true, ink2LargeCapCases)
+}
+
+type ink2AttendCase struct{ cap, window, extent, pos int }
+
+var ink2SmallCapCases = []ink2AttendCase{
+	{1024, 1024, 1024, 0}, {1024, 1024, 1024, 82}, {1024, 1024, 1024, 2000},
+	{4096, 0, 1024, 82}, {4096, 0, 1024, 2000}, {4096, 0, 1024, 5000},
+}
+
+var ink2LargeCapCases = []ink2AttendCase{
+	{16416, 0, 1024, 0}, {16416, 0, 1024, 82}, {16416, 0, 1024, 2047}, {16416, 0, 1024, 9000},
+	{16416, 0, 1024, 20000},
+}
+
+// ink2AttendSplitVsReference checks the split attend against the reference over cases.
+// exact selects the bit-identical output launch; tolerant accepts float rounding
+// instead of bit identity; kvHalf stores the caches as f16.
+func ink2AttendSplitVsReference(t *testing.T, exact, tolerant, kvHalf bool, cases []ink2AttendCase) {
 	cb := cudaNVFP4OrSkip(t)
 	defer ink2SelectAttendSplit(ink2SelectAttendSplit(true))
 	defer ink2SelectAttendExact(ink2SelectAttendExact(exact))
@@ -253,6 +282,13 @@ func ink2AttendSplitVsReference(t *testing.T, exact bool) {
 		}
 		return tt
 	}
+	// two f16 elements pack into one float32 word of the device buffer
+	allocKV := func(n int) Tensor {
+		if kvHalf {
+			return alloc(n / 2)
+		}
+		return alloc(n)
+	}
 	fill := func(tt Tensor, n int, sd float64) []float32 {
 		v := make([]float32, n)
 		for i := range v {
@@ -263,19 +299,30 @@ func ink2AttendSplitVsReference(t *testing.T, exact bool) {
 		}
 		return v
 	}
-	for _, c := range []struct{ cap, window, extent, pos int }{
-		{1024, 1024, 1024, 0}, {1024, 1024, 1024, 82}, {1024, 1024, 1024, 2000},
-		{4096, 0, 1024, 82}, {4096, 0, 1024, 2000}, {4096, 0, 1024, 5000},
-	} {
+	fillKV := func(tt Tensor, n int, sd float64) {
+		if !kvHalf {
+			fill(tt, n, sd)
+			return
+		}
+		words := make([]float32, n/2)
+		for i := range words {
+			lo, hi := f16Bits(float32(sd*r.NormFloat64())), f16Bits(float32(sd*r.NormFloat64()))
+			words[i] = math.Float32frombits(uint32(lo) | uint32(hi)<<16)
+		}
+		if err := cb.Ink2Write(Ink2At(tt, 0), words); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range cases {
 		q, rr, sinks, rel := alloc(p.Heads*p.HeadDim), alloc(p.Heads*p.RelLen), alloc(p.Heads), alloc(c.extent*p.RelLen)
-		kc, vc, meta := alloc(c.cap*kvDim), alloc(c.cap*kvDim), alloc(1)
+		kc, vc, meta := allocKV(c.cap*kvDim), allocKV(c.cap*kvDim), alloc(1)
 		scores := alloc(2 * p.Heads * c.cap)
 		fill(q, p.Heads*p.HeadDim, 1)
 		rv := fill(rr, p.Heads*p.RelLen, 1)
 		fill(sinks, p.Heads, 1)
 		fill(rel, c.extent*p.RelLen, 0.1)
-		fill(kc, c.cap*kvDim, 0.3)
-		fill(vc, c.cap*kvDim, 1)
+		fillKV(kc, c.cap*kvDim, 0.3)
+		fillKV(vc, c.cap*kvDim, 1)
 		if err := cb.Ink2Write(Ink2At(meta, 0), []float32{math.Float32frombits(uint32(c.pos))}); err != nil {
 			t.Fatal(err)
 		}
@@ -286,8 +333,15 @@ func ink2AttendSplitVsReference(t *testing.T, exact bool) {
 			}
 			ink2SelectAttendSplit(split)
 			out := alloc(p.Heads * p.HeadDim)
-			if err := cb.Ink2Attend(Ink2At(q, 0), Ink2At(rr, 0), Ink2At(sinks, 0), Ink2At(rel, 0), Ink2At(kc, 0), Ink2At(vc, 0),
-				Ink2At(scores, 0), Ink2At(out, 0), Ink2At(meta, 0), p, c.extent, c.window, c.cap); err != nil {
+			var err error
+			if kvHalf {
+				err = cb.Ink2BAttend(Ink2At(q, 0), Ink2At(rr, 0), Ink2At(sinks, 0), Ink2At(rel, 0), Ink2At(kc, 0), Ink2At(vc, 0),
+					Ink2At(scores, 0), Ink2At(out, 0), Ink2At(meta, 0), p, c.extent, c.window, c.cap, Ink2SeqStrides{}, true, 1)
+			} else {
+				err = cb.Ink2Attend(Ink2At(q, 0), Ink2At(rr, 0), Ink2At(sinks, 0), Ink2At(rel, 0), Ink2At(kc, 0), Ink2At(vc, 0),
+					Ink2At(scores, 0), Ink2At(out, 0), Ink2At(meta, 0), p, c.extent, c.window, c.cap)
+			}
+			if err != nil {
 				t.Fatal(err)
 			}
 			got, err := cb.Ink2Read(Ink2At(out, 0), p.Heads*p.HeadDim)
@@ -302,7 +356,7 @@ func ink2AttendSplitVsReference(t *testing.T, exact bool) {
 				t.Fatalf("cap %d window %d pos %d: reference out[%d] is NaN", c.cap, c.window, c.pos, i)
 			}
 			same := math.Float32bits(got[i]) == math.Float32bits(want[i])
-			if !exact {
+			if tolerant {
 				diff := math.Abs(float64(got[i]) - float64(want[i]))
 				same = diff <= 1e-6+1e-5*math.Abs(float64(want[i]))
 			}

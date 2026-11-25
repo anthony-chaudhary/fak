@@ -251,6 +251,80 @@ __global__ void __launch_bounds__(INK2_ATS_TREE_GROUPS * 32)
   }
 }
 
+// Keys per staged weight tile: a multiple of every groups * INK2_ATS_UNROLL, so a
+// thread keeps the keys congruent to its group across tiles and accumulates them in
+// the same order as the staged form. Shared memory is fixed at this tile size, so the
+// cost follows the live key count, not cap.
+#define INK2_ATS_TILE 2048
+
+// Past the staging limit in the exact mode: the denominator is a block-parallel sum over
+// the live keys, one fp32 reciprocal per head, and the weights are staged a tile at a
+// time. It matches the staged form to rounding, not bit for bit.
+template <class T>
+__global__ void __launch_bounds__(INK2_ATT_THREADS)
+    k_ink2_attend_out_tiled(const double *scores, const T *vcache, const float *r, float *out, const float *meta,
+                            int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq) {
+  ink2_pdl_enter();
+  const int h = blockIdx.x, seq = blockIdx.z;
+  scores = ink2_row(scores, sq.scores, seq);
+  vcache = ink2_row(vcache, sq.vc, seq);
+  r = ink2_row(r, sq.r, seq);
+  out = ink2_row(out, sq.out, seq);
+  meta = ink2_row(meta, sq.meta, seq);
+  const int kvh = h / (heads / kvHeads);
+  const int kvDim = kvHeads * headDim;
+  int first;
+  const int n = ink2_ats_keys(meta, window, cap, &first);
+  const double *sc = scores + (size_t)h * cap;
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+  __shared__ double wpart[INK2_ATT_THREADS / 32];
+  __shared__ float sinv;
+  double part = 0.0;
+  for (int j = threadIdx.x; j < n; j += blockDim.x) part += sc[j];
+  for (int o = 16; o > 0; o >>= 1) part += __shfl_xor_sync(0xffffffff, part, o);
+  if (lane == 0) wpart[warp] = part;
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    double denom = exp(-*(const double *)(r + (size_t)h * relLen));
+    for (int w = 0; w < (int)(blockDim.x >> 5); ++w) denom += wpart[w];
+    sinv = (float)(1.0 / denom);
+  }
+  __syncthreads();
+  const float inv = sinv;
+  const int groups = INK2_ATT_THREADS / headDim;
+  const int dd = blockIdx.y * 32 + lane, g = warp;
+  const bool active = g < groups && dd < headDim;
+  const T *vbase = vcache + (size_t)kvh * headDim + dd;
+  __shared__ float wsh[INK2_ATS_TILE];
+  __shared__ float gacc[INK2_ATT_GROUPS][32];
+  float acc = 0.f;
+  for (int t0 = 0; t0 < n; t0 += INK2_ATS_TILE) {
+    const int tn = min(INK2_ATS_TILE, n - t0);
+    __syncthreads();
+    for (int j = threadIdx.x; j < tn; j += blockDim.x) wsh[j] = __fmul_rn((float)sc[t0 + j], inv);
+    __syncthreads();
+    if (!active) continue;
+    const int kt = first + t0;
+    int j = g;
+    for (; j + (INK2_ATS_UNROLL - 1) * groups < tn; j += INK2_ATS_UNROLL * groups) {
+      float vv[INK2_ATS_UNROLL];
+#pragma unroll
+      for (int u = 0; u < INK2_ATS_UNROLL; ++u)
+        vv[u] = ink2_kv_f(vbase[(size_t)((kt + j + u * groups) % cap) * kvDim]);
+#pragma unroll
+      for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(wsh[j + u * groups], vv[u], acc);
+    }
+    for (; j < tn; j += groups) acc = fmaf(wsh[j], ink2_kv_f(vbase[(size_t)((kt + j) % cap) * kvDim]), acc);
+  }
+  if (active) gacc[g][lane] = acc;
+  __syncthreads();
+  if (threadIdx.x < 32 && dd < headDim) {
+    float a = 0.f;
+    for (int gg = 0; gg < groups; ++gg) a += gacc[gg][threadIdx.x];
+    out[(size_t)h * headDim + dd] = a;
+  }
+}
+
 static int g_ink2_ats_exact = -1;
 
 static bool ink2_ats_exact(void) {
@@ -341,8 +415,9 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
     FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<true, T><<<g3, othreads, osmem, g_stream>>>(
                                           scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq));
   } else {
-    FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<false, T><<<g3, othreads, 0, g_stream>>>(
-                                          scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq));
+    FCUDA_TS("k_ink2_attend_out_tiled", g3, k_ink2_attend_out_tiled<T><<<g3, othreads, 0, g_stream>>>(
+                                                scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
+                                                cap, sq));
   }
   return true;
 }
