@@ -243,20 +243,20 @@ func (c *cudaBackend) Ink2PExpertGrouped(stack Tensor, expertRows, nexp int, ids
 		C.int(xStride), c.ink2F(y), C.int(expertRows), C.int(in), c.ink2F(scale)))
 }
 
-// CUDAInk2PNVFP4W4A4Env opts NVFP4 grouped prefill into W4A4 activations ("1") on
-// an image with the native SM120 kernels; anything else keeps int8 activations.
+// CUDAInk2PNVFP4W4A4Env set to "0" keeps NVFP4 grouped prefill on int8 activations;
+// otherwise an image with the native SM120 kernels runs W4A4 activations.
 const CUDAInk2PNVFP4W4A4Env = "FAK_INKLING2_PREFILL_NVFP4_W4A4"
 
-// initCUDAInk2PNVFP4W4A4 probes the image at backend init when W4A4 is opted in, so
+// initCUDAInk2PNVFP4W4A4 probes the image at backend init unless W4A4 is opted out, so
 // the probe never runs inside a graph capture and captured and eager calls agree.
 func initCUDAInk2PNVFP4W4A4() {
-	if os.Getenv(CUDAInk2PNVFP4W4A4Env) == "1" {
+	if os.Getenv(CUDAInk2PNVFP4W4A4Env) != "0" {
 		C.fcuda_ink2p_nvfp4_w4a4_available()
 	}
 }
 
 // ink2pNVFP4W4A4Available reports whether the loaded CUDA image carries the native
-// SM120 NVFP4 W4A4 grouped kernel that Ink2PExpertGrouped selects when opted in.
+// SM120 NVFP4 W4A4 grouped kernel that Ink2PExpertGrouped selects unless opted out.
 func (c *cudaBackend) ink2pNVFP4W4A4Available() bool {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()

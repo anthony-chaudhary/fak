@@ -824,11 +824,11 @@ extern "C" int fcuda_ink2p_nvfp4_w4a4_read_quant(int nrows, int in, uint8_t *q, 
   return (int)e;
 }
 
-// Opt-in until the kernel has device, KL and greedy-parity receipts:
-// FAK_INKLING2_PREFILL_NVFP4_W4A4=1 selects W4A4 activations on a native image.
+// W4A4 activations run wherever the image carries the native kernel (sm_120f/a);
+// FAK_INKLING2_PREFILL_NVFP4_W4A4=0 keeps int8 activations.
 static bool ink2p_nvf4_selected() {
   const char *v = getenv("FAK_INKLING2_PREFILL_NVFP4_W4A4");
-  if (!v || strcmp(v, "1") != 0) return false;
+  if (v && strcmp(v, "0") == 0) return false;
   return ink2p_nvf4_available() == 1;
 }
 
