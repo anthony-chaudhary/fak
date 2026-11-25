@@ -1004,8 +1004,8 @@ var admittedPostFreeze = []string{
 	// Relocates to: a typed CUDA kernel-selection config.
 	"FAK_CUDA_RMSNORM_WIDTH_DISPATCH",
 
-	// internal/ggufload/inkling2loop_prefill.go — FAK_INKLING2_BATCHED_PREFILL=1 prefills
-	// a prompt in token-axis batches instead of per-token decode steps, and
+	// internal/ggufload/inkling2loop_prefill.go — FAK_INKLING2_BATCHED_PREFILL=0 prefills
+	// a prompt in per-token decode steps instead of token-axis batches, and
 	// FAK_INKLING2_PREFILL_GROUPED=0 swaps the expert-grouped GEMM in that prefill for
 	// the decode expert GEMV. Prefill-path toggles, not credentials.
 	// Relocates to: a typed Inkling-2 prefill config.

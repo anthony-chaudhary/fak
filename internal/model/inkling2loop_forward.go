@@ -163,6 +163,28 @@ func NewInkling2LoopHost(hp Inkling2LoopHParams, w *Inkling2LoopWeights) (*Inkli
 // Slots is the number of layer visits per token (cache slots).
 func (h *Inkling2LoopHost) Slots() int { return len(h.conv) }
 
+// Pos is the number of tokens the host has consumed.
+func (h *Inkling2LoopHost) Pos() int { return h.pos }
+
+// Inkling2LoopHostState is a saved host history: caches, conv state and position.
+type Inkling2LoopHostState struct{ s inkling2TreeState }
+
+// Save captures the host's history; later tokens never write into its storage.
+func (h *Inkling2LoopHost) Save() Inkling2LoopHostState { return Inkling2LoopHostState{h.snapshot()} }
+
+// Load makes a saved history live again; the saved state stays reusable.
+func (h *Inkling2LoopHost) Load(st Inkling2LoopHostState) { h.install(st.s) }
+
+// Reset returns the host to position 0 with empty caches and zero conv state.
+func (h *Inkling2LoopHost) Reset() {
+	for i := range h.conv {
+		h.keys[i], h.values[i], h.positions[i] = nil, nil, nil
+		clear(h.conv[i])
+	}
+	h.pos = 0
+	h.Features = nil
+}
+
 // Visits is the number of layer visits per token in execution order.
 func (h *Inkling2LoopHost) Visits() int {
 	return h.HP.Layers + (h.HP.Passes-1)*(h.HP.CoreEnd-h.HP.CoreStart)

@@ -18,8 +18,11 @@ const Inkling2LoopDefaultMaxTokens = 8192
 
 // Inkling2LoopGeneration is what one Inkling2LoopGenerator.Generate call did.
 type Inkling2LoopGeneration struct {
-	Generated                     int
-	Stopped                       bool // a stop id or emit ended the turn before maxNew
+	Generated int
+	Stopped   bool // a stop id or emit ended the turn before maxNew
+	// CachedPromptTokens leading prompt tokens were served from a cache kept
+	// from an earlier request; prefill computed only the rest.
+	CachedPromptTokens            int
 	PrefillSeconds, DecodeSeconds float64
 	// Width is how many requests shared the forward that decoded this one; 0 is unknown.
 	Width int
@@ -27,7 +30,7 @@ type Inkling2LoopGeneration struct {
 
 // inkling2LoopTimings is the turn's llama.cpp timings plus the width it decoded in.
 func inkling2LoopTimings(promptTokens int, res Inkling2LoopGeneration) *Timings {
-	t := NewTimings(promptTokens, 0, res.Generated, res.PrefillSeconds, res.DecodeSeconds)
+	t := NewTimings(promptTokens, res.CachedPromptTokens, res.Generated, res.PrefillSeconds, res.DecodeSeconds)
 	if res.Width > 0 {
 		t.Inkling2Width, t.Inkling2Mode = res.Width, "scalar"
 		if res.Width > 1 {
@@ -37,9 +40,10 @@ func inkling2LoopTimings(promptTokens int, res Inkling2LoopGeneration) *Timings 
 	return t
 }
 
-// Inkling2LoopGenerator decodes one request on a fresh KV cache: it prefills
-// prompt, then hands each generated id to emit until emit returns false, a stop
-// id is generated (it is not emitted), or maxNew ids were emitted.
+// Inkling2LoopGenerator decodes one request: it prefills prompt, possibly reusing
+// a cached prefix with output identical to a fresh cache, then hands each
+// generated id to emit until emit returns false, a stop id is generated (it is
+// not emitted), or maxNew ids were emitted.
 type Inkling2LoopGenerator interface {
 	Generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(id int) bool) (Inkling2LoopGeneration, error)
 }
@@ -176,6 +180,9 @@ func (p *Inkling2LoopPlanner) Complete(ctx context.Context, messages []Message, 
 		FinishReason: finish,
 		Usage:        Usage{PromptTokens: len(ids), CompletionTokens: res.Generated, TotalTokens: len(ids) + res.Generated},
 		Timings:      inkling2LoopTimings(len(ids), res),
+	}
+	if res.CachedPromptTokens > 0 {
+		comp.Usage.PromptTokensDetails = &UsageTokenDetails{CachedTokens: res.CachedPromptTokens}
 	}
 	return normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages), nil
 }

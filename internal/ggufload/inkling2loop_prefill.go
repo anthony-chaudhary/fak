@@ -14,9 +14,9 @@ import (
 const inkling2PrefillChunk = 512
 
 // inkling2BatchedPrefill reports whether the resident path prefills a prompt in
-// token-axis batches (FAK_INKLING2_BATCHED_PREFILL=1); unset or any other value keeps
-// the per-token decode step.
-func inkling2BatchedPrefill() bool { return os.Getenv("FAK_INKLING2_BATCHED_PREFILL") == "1" }
+// token-axis batches, which decode the same tokens as the per-token step;
+// FAK_INKLING2_BATCHED_PREFILL=0 keeps the per-token step.
+func inkling2BatchedPrefill() bool { return os.Getenv("FAK_INKLING2_BATCHED_PREFILL") != "0" }
 
 // inkling2GroupedExperts reports whether NVFP4 expert stacks run the expert-grouped
 // GEMM in prefill; FAK_INKLING2_PREFILL_GROUPED=0 runs every (token, slot) pair

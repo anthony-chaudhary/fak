@@ -77,6 +77,11 @@ int fcuda_ink2p_attend_v2(const float *q, const float *r, const float *sinks, co
 int fcuda_ink2p_attend(const float *q, const float *r, const float *sinks, const float *relBias,
     const float *kcache, const float *vcache, float *out, int heads, int kvHeads, int headDim, int relLen,
     int extent, int window, int cap, float scale, int pos0, int T);
+/* Attend score-row placement test hooks: select 1 forces the global-memory path;
+ * budget sets the global path's per-tile scratch bytes (0 keeps it). Both return
+ * the previous value. FAK_INKLING2_PREFILL_ATTEND_GLOBAL=1 sets the default. */
+int fcuda_ink2p_attend_global_select(int mode);
+unsigned long long fcuda_ink2p_attend_global_budget(unsigned long long bytes);
 int fcuda_ink2p_route(const float *logits, const float *bias, int *ids, float *wts, int nexp, int k,
     float wscale, int T);
 int fcuda_ink2p_combine(const float *down, const float *wts, float *out, int k, int n, int T);

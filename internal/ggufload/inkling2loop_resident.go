@@ -17,12 +17,14 @@ import (
 // paying device memory on every global slot, so the bench default stays small.
 var inkling2ResidentCtx = inkling2ResidentCtxFrom(os.LookupEnv)
 
-// inkling2ResidentCtxMax keeps the batched-prefill score row (4 B per key plus ~5.5 KiB
-// static) inside sm_120's 99 KiB per-block shared-memory opt-in.
+// inkling2ResidentCtxMax is bounded by device memory, not the prefill attend: a
+// span too long for the shared-memory score row takes the global-memory one. On a
+// 16 GiB card the global slots of a larger context exhaust VRAM, the allocator's
+// managed-memory fallback takes over, and prefill faults.
 const (
 	inkling2ResidentCtxDefault = 4096
 	inkling2ResidentCtxMin     = 512
-	inkling2ResidentCtxMax     = 23552
+	inkling2ResidentCtxMax     = 24576
 )
 
 func inkling2ResidentCtxFrom(lookup func(string) (string, bool)) int {
@@ -731,4 +733,8 @@ func inkling2ResidentGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []i
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	return inkling2SessionGreedy(&inkling2ResidentSession{s: s}, prompt, n)
+}
+
+func (s *inkling2Resident) isLocalSlot(slot int) bool {
+	return s.hp.LocalLayer[inkling2SlotLayer(s.hp, slot)]
 }

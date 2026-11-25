@@ -324,15 +324,20 @@ __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float
 
 // k_ink2_attend for every query of a chunk: block (head, token). The query at pos0+t
 // sees keys (pos-n, pos], n bounded by the sliding window; relative bias only within
-// extent (zero row past it). Scores live in dynamic shared memory.
+// extent (zero row past it). GLOBAL=false keeps the score row in dynamic shared
+// memory; GLOBAL=true runs the identical arithmetic on a per-block row of gscore
+// (span floats per block, token tile starting at tok0) for spans past the opt-in.
+template <bool GLOBAL>
 __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2p_attend(const float *q, const float *r, const float *sinks,
                                                                   const float *relBias, const float *kcache,
                                                                   const float *vcache, float *out, int heads,
                                                                   int kvHeads, int headDim, int relLen, int extent,
                                                                   int window, int cap, float scale, int pos0,
-                                                                  const int *posDev) {
-  extern __shared__ float sc[];
-  const int h = blockIdx.x, tok = blockIdx.y;
+                                                                  const int *posDev, float *gscore, int span,
+                                                                  int tok0) {
+  extern __shared__ float ink2p_att_dyn[];
+  float *sc = GLOBAL ? gscore + ((size_t)blockIdx.y * gridDim.x + blockIdx.x) * (size_t)span : ink2p_att_dyn;
+  const int h = blockIdx.x, tok = tok0 + blockIdx.y;
   const int kvh = h / (heads / kvHeads);
   const int kvDim = kvHeads * headDim;
   const int pos = (posDev ? *posDev : pos0) + tok;
@@ -962,22 +967,135 @@ extern "C" int fcuda_ink2p_qkv_post_dev(float *q, float *r, const float *k, cons
   return ink2_last_error();
 }
 
+static float *g_ink2p_att_scratch = nullptr;
+static size_t g_ink2p_att_scratch_cap = 0;            // floats
+static size_t g_ink2p_att_budget = (size_t)64 << 20;  // bytes per global-path token tile
+static int g_ink2p_att_global_mode = -1;
+static long long g_ink2p_att_smem_limit = -1; // opt-in bytes minus the kernel's static smem
+
+static bool ink2p_att_force_global(void) {
+  if (g_ink2p_att_global_mode < 0) {
+    const char *v = getenv("FAK_INKLING2_PREFILL_ATTEND_GLOBAL");
+    g_ink2p_att_global_mode = (v && v[0] == '1' && v[1] == 0) ? 1 : 0;
+  }
+  return g_ink2p_att_global_mode == 1;
+}
+
+// Test hook: 1 forces the global score-row path, 0 picks by span; returns the previous mode.
+extern "C" int fcuda_ink2p_attend_global_select(int mode) {
+  const int prev = ink2p_att_force_global() ? 1 : 0;
+  g_ink2p_att_global_mode = mode ? 1 : 0;
+  return prev;
+}
+
+// Test hook: the global path's per-tile scratch budget in bytes (0 keeps it); returns the previous.
+extern "C" unsigned long long fcuda_ink2p_attend_global_budget(unsigned long long bytes) {
+  const unsigned long long prev = g_ink2p_att_budget;
+  if (bytes) g_ink2p_att_budget = (size_t)bytes;
+  return prev;
+}
+
+static int ink2p_att_smem_fits(size_t bytes, bool *fits) {
+  if (g_ink2p_att_smem_limit < 0) {
+    int dev = 0, optin = 0;
+    cudaFuncAttributes fa;
+    cudaError_t e = cudaGetDevice(&dev);
+    if (e == cudaSuccess) e = cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, dev);
+    if (e == cudaSuccess) e = cudaFuncGetAttributes(&fa, (const void *)k_ink2p_attend<false>);
+    if (e != cudaSuccess) {
+      (void)cudaGetLastError();
+      return (int)e;
+    }
+    const long long lim = (long long)optin - (long long)fa.sharedSizeBytes;
+    g_ink2p_att_smem_limit = lim > 0 ? lim : 0;
+  }
+  *fits = (long long)bytes <= g_ink2p_att_smem_limit;
+  return 0;
+}
+
+// Growth is refused while a capture is open: a captured graph bakes the pointer.
+static int ink2p_att_reserve(size_t need) {
+  if (need <= g_ink2p_att_scratch_cap) return 0;
+  cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+  cudaError_t e = cudaStreamIsCapturing(g_stream, &capture);
+  if (e != cudaSuccess) return (int)e;
+  if (g_capture_open || capture != cudaStreamCaptureStatusNone) return (int)cudaErrorStreamCaptureUnsupported;
+  const size_t floor = g_ink2p_att_budget / sizeof(float);
+  const size_t want = need > floor ? need : floor;
+  if (g_ink2p_att_scratch) {
+    float *retiring = g_ink2p_att_scratch;
+    g_ink2p_att_scratch = nullptr;
+    g_ink2p_att_scratch_cap = 0;
+    fak_alloc_untrack(retiring);
+    e = cudaFree(retiring);
+    if (e != cudaSuccess) return (int)e;
+  }
+  float *p = nullptr;
+  e = fcuda_alloc_status(cudaMalloc(&p, want * sizeof(float)));
+  if (e != cudaSuccess || !p) {
+    (void)cudaGetLastError();
+    return (int)(e != cudaSuccess ? e : cudaErrorMemoryAllocation);
+  }
+  fak_alloc_track(p, FAK_ALLOC_ATTENTION_SCRATCH, FAK_ALLOC_DEVICE_LOCAL, FAK_ALLOC_SITE("inkling2-prefill-attend"),
+                  want * sizeof(float));
+  g_ink2p_att_scratch = p;
+  g_ink2p_att_scratch_cap = want;
+  return 0;
+}
+
+// Shared-memory scores when span fits the opt-in (unless forced global), else global
+// score rows launched over token tiles bounded by the scratch budget.
+static int ink2p_attend_launch(const float *q, const float *r, const float *sinks, const float *relBias,
+                               const float *kcache, const float *vcache, float *out, int heads, int kvHeads,
+                               int headDim, int relLen, int extent, int window, int cap, float scale, int pos0,
+                               const int *posDev, int T, int span) {
+  if (headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS) return (int)cudaErrorInvalidValue;
+  if (span < 1) span = 1;
+  const size_t smem = (size_t)span * sizeof(float);
+  bool fits = false;
+  if (!ink2p_att_force_global()) {
+    const int fe = ink2p_att_smem_fits(smem, &fits);
+    if (fe) return fe;
+  }
+  if (fits) {
+    const int oe = ink2p_smem_optin((const void *)k_ink2p_attend<false>, smem);
+    if (oe) {
+      (void)cudaGetLastError();
+      return oe;
+    }
+    const dim3 grid(heads, T);
+    FCUDA_TS("k_ink2p_attend", grid, k_ink2p_attend<false><<<grid, INK2_ATT_THREADS, smem, g_stream>>>(
+        q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, headDim, relLen, extent, window, cap, scale, pos0,
+        posDev, nullptr, span, 0));
+    return ink2_last_error();
+  }
+  const size_t row = (size_t)heads * (size_t)span;
+  size_t tile = g_ink2p_att_budget / (row * sizeof(float));
+  if (tile < 1) tile = 1;
+  if (tile > (size_t)T) tile = (size_t)T;
+  const int re = ink2p_att_reserve(row * tile);
+  if (re) return re;
+  for (int t0 = 0; t0 < T; t0 += (int)tile) {
+    const int nt = T - t0 < (int)tile ? T - t0 : (int)tile;
+    const dim3 grid(heads, nt);
+    FCUDA_TS("k_ink2p_attend_global", grid, k_ink2p_attend<true><<<grid, INK2_ATT_THREADS, 0, g_stream>>>(
+        q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, headDim, relLen, extent, window, cap, scale, pos0,
+        posDev, g_ink2p_att_scratch, span, t0));
+    const int le = ink2_last_error();
+    if (le) return le;
+  }
+  return 0;
+}
+
 extern "C" int fcuda_ink2p_attend(const float *q, const float *r, const float *sinks, const float *relBias,
                                   const float *kcache, const float *vcache, float *out, int heads, int kvHeads,
                                   int headDim, int relLen, int extent, int window, int cap, float scale, int pos0,
                                   int T) {
-  if (headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS) return (int)cudaErrorInvalidValue;
   int span = pos0 + T;
   if (window > 0 && span > window) span = window;
   if (span > cap) span = cap;
-  const size_t smem = (size_t)span * sizeof(float);
-  const int oe = ink2p_smem_optin((const void *)k_ink2p_attend, smem);
-  if (oe) return oe;
-  const dim3 grid(heads, T);
-  FCUDA_TS("k_ink2p_attend", grid, k_ink2p_attend<<<grid, INK2_ATT_THREADS, smem, g_stream>>>(
-      q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, headDim, relLen, extent, window, cap, scale, pos0,
-      nullptr));
-  return ink2_last_error();
+  return ink2p_attend_launch(q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, headDim, relLen, extent,
+                             window, cap, scale, pos0, nullptr, T, span);
 }
 
 // fcuda_ink2p_attend with the chunk position read from device memory; scores are
@@ -986,17 +1104,10 @@ extern "C" int fcuda_ink2p_attend_dev(const float *q, const float *r, const floa
                                       const float *kcache, const float *vcache, float *out, int heads, int kvHeads,
                                       int headDim, int relLen, int extent, int window, int cap, float scale,
                                       const int *posDev, int T) {
-  if (headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS) return (int)cudaErrorInvalidValue;
   int span = cap;
   if (window > 0 && span > window) span = window;
-  const size_t smem = (size_t)span * sizeof(float);
-  const int oe = ink2p_smem_optin((const void *)k_ink2p_attend, smem);
-  if (oe) return oe;
-  const dim3 grid(heads, T);
-  FCUDA_TS("k_ink2p_attend", grid, k_ink2p_attend<<<grid, INK2_ATT_THREADS, smem, g_stream>>>(
-      q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, headDim, relLen, extent, window, cap, scale, 0,
-      posDev));
-  return ink2_last_error();
+  return ink2p_attend_launch(q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, headDim, relLen, extent,
+                             window, cap, scale, 0, posDev, T, span);
 }
 
 extern "C" int fcuda_ink2p_route(const float *logits, const float *bias, int *ids, float *wts, int nexp, int k,

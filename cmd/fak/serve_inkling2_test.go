@@ -6,9 +6,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -47,40 +50,126 @@ func inkling2FakeTokenizer(t *testing.T) *tokenizer.Tokenizer {
 	return tok
 }
 
-// inkling2FakeSession replays a canned token stream: Prefill returns the first
-// token, each Step the next, and it records what it was fed.
+// inkling2FakeSession replays a canned token stream: the Prefill that ends a
+// request's prompt returns the first token, each Step the next. It keeps its
+// history across Prefill calls, implements the rewinder, and records what it was
+// fed and which rewinder calls ran.
 type inkling2FakeSession struct {
-	canned  []int
-	i       int
-	prompt  []int
-	fed     []int
-	closed  bool
-	stepErr error
+	canned   []int
+	i        int
+	prompt   []int // every token prefilled since the last Reset/Restore point
+	fed      []int
+	pos      int
+	ckPos    int
+	ckLen    int
+	hasCk    bool
+	closed   bool
+	stepErr  error
+	ckErr    error
+	resetErr error
+	horizon  int
+
+	prefills [][]int
+	calls    []string
+	busy     atomic.Int32
+	overlap  atomic.Bool
+}
+
+func (s *inkling2FakeSession) enter() func() {
+	if s.busy.Add(1) != 1 {
+		s.overlap.Store(true)
+	}
+	return func() { s.busy.Add(-1) }
 }
 
 func (s *inkling2FakeSession) Prefill(prompt []int) (int, error) {
-	s.prompt = append([]int(nil), prompt...)
+	defer s.enter()()
+	s.prompt = append(s.prompt, prompt...)
+	s.prefills = append(s.prefills, append([]int(nil), prompt...))
+	s.pos += len(prompt)
+	s.i, s.fed = 0, nil
 	return s.canned[0], nil
 }
 
 func (s *inkling2FakeSession) Step(token int) (int, error) {
+	defer s.enter()()
 	if s.stepErr != nil {
 		return 0, s.stepErr
 	}
 	s.fed = append(s.fed, token)
+	s.pos++
 	s.i++
 	return s.canned[s.i], nil
 }
 
+func (s *inkling2FakeSession) Pos() int { return s.pos }
+
+func (s *inkling2FakeSession) Checkpoint(horizon int) error {
+	s.calls = append(s.calls, "checkpoint")
+	if s.ckErr != nil {
+		s.hasCk = false
+		return s.ckErr
+	}
+	s.ckPos, s.ckLen, s.hasCk, s.horizon = s.pos, len(s.prompt), true, horizon
+	return nil
+}
+
+func (s *inkling2FakeSession) Restore() error {
+	s.calls = append(s.calls, "restore")
+	if !s.hasCk || s.pos-s.ckPos > s.horizon {
+		return ggufload.ErrInkling2NoCheckpoint
+	}
+	s.pos, s.prompt = s.ckPos, s.prompt[:s.ckLen]
+	return nil
+}
+
+func (s *inkling2FakeSession) Reset() error {
+	s.calls = append(s.calls, "reset")
+	if s.resetErr != nil {
+		return s.resetErr
+	}
+	s.pos, s.prompt, s.hasCk = 0, nil, false
+	return nil
+}
+
 func (s *inkling2FakeSession) Close() error { s.closed = true; return nil }
+
+var _ inkling2Rewinder = (*inkling2FakeSession)(nil)
+
+// inkling2PlainSession hides the rewinder so the engine must run it fresh per request.
+type inkling2PlainSession struct{ s *inkling2FakeSession }
+
+func (p inkling2PlainSession) Prefill(prompt []int) (int, error) { return p.s.Prefill(prompt) }
+func (p inkling2PlainSession) Step(token int) (int, error)       { return p.s.Step(token) }
+func (p inkling2PlainSession) Close() error                      { return p.s.Close() }
+
+func inkling2FakeOpener(canned []int, plain bool, opened *[]*inkling2FakeSession) inkling2LoopSessionOpener {
+	return func() (ggufload.Inkling2LoopSession, error) {
+		s := &inkling2FakeSession{canned: canned}
+		*opened = append(*opened, s)
+		if plain {
+			return inkling2PlainSession{s}, nil
+		}
+		return s, nil
+	}
+}
 
 func inkling2FakeEngine(canned []int) (*inkling2LoopEngine, *[]*inkling2FakeSession) {
 	var opened []*inkling2FakeSession
-	return &inkling2LoopEngine{open: func() (ggufload.Inkling2LoopSession, error) {
-		s := &inkling2FakeSession{canned: canned}
-		opened = append(opened, s)
-		return s, nil
-	}}, &opened
+	return &inkling2LoopEngine{open: inkling2FakeOpener(canned, false, &opened)}, &opened
+}
+
+func inkling2Gen(t *testing.T, eng *inkling2LoopEngine, prompt []int, maxNew int) (agent.Inkling2LoopGeneration, []int) {
+	t.Helper()
+	var got []int
+	res, err := eng.Generate(context.Background(), prompt, maxNew, nil, func(id int) bool {
+		got = append(got, id)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res, got
 }
 
 func TestInkling2AdapterStopsOnEndOfTurnNotEndMessage(t *testing.T) {
@@ -98,44 +187,234 @@ func TestInkling2AdapterStopsOnEndOfTurnNotEndMessage(t *testing.T) {
 	if !res.Stopped || res.Generated != len(want) || !inkling2EqualInts(got, want) {
 		t.Fatalf("emitted %v (stopped=%v n=%d), want %v stopped at the end-of-turn marker", got, res.Stopped, res.Generated, want)
 	}
+	if err := eng.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if s := (*opened)[0]; !s.closed || !inkling2EqualInts(s.prompt, []int{200, 'q'}) {
 		t.Fatalf("session prompt %v closed=%v", s.prompt, s.closed)
 	}
+	if _, err := eng.Generate(context.Background(), []int{'p'}, 1, nil, func(int) bool { return true }); !errors.Is(err, errInkling2LoopEngineClosed) {
+		t.Fatalf("Generate after Close = %v", err)
+	}
 }
 
-func TestInkling2AdapterMaxTokensAndFreshSessionPerRequest(t *testing.T) {
+func TestInkling2AdapterMaxTokensAndPrefixReuse(t *testing.T) {
 	eng, opened := inkling2FakeEngine([]int{'a', 'b', 'c', 'd', 'e'})
+	defer eng.Close()
+	first := []int{'s', 'y', 's', 'u'}
+	res, got := inkling2Gen(t, eng, first, 3)
+	if res.Stopped || res.Generated != 3 || !inkling2EqualInts(got, []int{'a', 'b', 'c'}) || res.CachedPromptTokens != 0 {
+		t.Fatalf("first request: emitted %v res=%+v, want a b c on the length limit, nothing cached", got, res)
+	}
+	s := (*opened)[0]
+	if want := [][]int{{'s', 'y', 's'}, {'u'}}; len(s.prefills) != 2 || !inkling2EqualInts(s.prefills[0], want[0]) || !inkling2EqualInts(s.prefills[1], want[1]) {
+		t.Fatalf("first request prefills %v, want P[:n-1] then the last token", s.prefills)
+	}
+
+	// extending the conversation reuses everything the checkpoint covers
+	second := append(append([]int(nil), first...), 'a', 'b', 'c', 'n', 'x')
+	s.prefills, s.calls = nil, nil
+	res, got = inkling2Gen(t, eng, second, 2)
+	if len(*opened) != 1 {
+		t.Fatalf("opened %d sessions, want the persistent one", len(*opened))
+	}
+	if !inkling2EqualInts(got, []int{'a', 'b'}) || res.CachedPromptTokens != len(first)-1 {
+		t.Fatalf("second request: emitted %v cached=%d, want a b with %d cached", got, res.CachedPromptTokens, len(first)-1)
+	}
+	if s.calls[0] != "restore" || len(s.prefills) != 2 || !inkling2EqualInts(s.prefills[0], second[len(first)-1:len(second)-1]) || !inkling2EqualInts(s.prefills[1], []int{'x'}) {
+		t.Fatalf("second request calls %v prefills %v, want restore then only the suffix", s.calls, s.prefills)
+	}
+	if !inkling2EqualInts(s.prompt, second) || s.pos != len(second)+1 {
+		t.Fatalf("session history %v pos %d after second request", s.prompt, s.pos)
+	}
+
+	// an identical repeat re-prefills only the last token
+	s.prefills, s.calls = nil, nil
+	res, _ = inkling2Gen(t, eng, second, 1)
+	if res.CachedPromptTokens != len(second)-1 || s.calls[0] != "restore" || len(s.prefills) != 1 || !inkling2EqualInts(s.prefills[0], []int{'x'}) {
+		t.Fatalf("repeat: cached=%d calls %v prefills %v", res.CachedPromptTokens, s.calls, s.prefills)
+	}
+
+	// divergence resets and prefills everything
+	diverged := []int{'o', 't', 'h', 'e', 'r'}
+	s.prefills, s.calls = nil, nil
+	res, _ = inkling2Gen(t, eng, diverged, 1)
+	if res.CachedPromptTokens != 0 || s.calls[0] != "reset" || len(s.prefills) != 2 || !inkling2EqualInts(s.prefills[0], diverged[:4]) {
+		t.Fatalf("divergence: cached=%d calls %v prefills %v", res.CachedPromptTokens, s.calls, s.prefills)
+	}
+	if len(*opened) != 1 || s.closed {
+		t.Fatalf("divergence reopened or closed the session: opened=%d closed=%v", len(*opened), s.closed)
+	}
+
+	// a one-token prompt checkpoints at position 0
+	s.prefills, s.calls = nil, nil
+	res, _ = inkling2Gen(t, eng, []int{'z'}, 1)
+	if res.CachedPromptTokens != 0 || len(s.prefills) != 1 || !inkling2EqualInts(s.prefills[0], []int{'z'}) {
+		t.Fatalf("one-token prompt: cached=%d prefills %v", res.CachedPromptTokens, s.prefills)
+	}
+}
+
+// A checkpoint the device cannot hold costs only the next request's reuse, and a
+// checkpoint overrun by more tokens than its horizon is a miss, not a fault.
+func TestInkling2AdapterCheckpointUnavailableOrOverrunFallsBackToFullPrefill(t *testing.T) {
+	eng, opened := inkling2FakeEngine([]int{'a', 'b', 'c', 'd', 'e'})
+	defer eng.Close()
+	first := []int{'s', 'y', 's', 'u'}
+	inkling2Gen(t, eng, first, 3)
+	s := (*opened)[0]
+	if s.horizon != 3 {
+		t.Fatalf("checkpoint horizon %d, want max_tokens 3", s.horizon)
+	}
+	s.ckErr = fmt.Errorf("wrapped: %w", ggufload.ErrInkling2CheckpointUnavailable)
+	second := append(append([]int(nil), first...), 'a', 'b', 'c', 'n', 'x')
+	res, got := inkling2Gen(t, eng, second, 2)
+	if !inkling2EqualInts(got, []int{'a', 'b'}) || res.CachedPromptTokens != len(first)-1 {
+		t.Fatalf("request with an unavailable checkpoint: emitted %v cached=%d", got, res.CachedPromptTokens)
+	}
+	s.ckErr, s.prefills, s.calls = nil, nil, nil
+	if res, _ = inkling2Gen(t, eng, second, 2); res.CachedPromptTokens != 0 || s.calls[0] != "reset" || !inkling2EqualInts(s.prefills[0], second[:len(second)-1]) {
+		t.Fatalf("after an unavailable checkpoint: cached=%d calls %v prefills %v, want a full prefill", res.CachedPromptTokens, s.calls, s.prefills)
+	}
+	s.horizon = 0
+	s.prefills, s.calls = nil, nil
+	if res, _ = inkling2Gen(t, eng, second, 2); res.CachedPromptTokens != 0 || len(s.calls) < 2 || s.calls[0] != "restore" || s.calls[1] != "reset" {
+		t.Fatalf("overrun checkpoint: cached=%d calls %v, want restore miss then reset", res.CachedPromptTokens, s.calls)
+	}
+	if len(*opened) != 1 || s.closed {
+		t.Fatalf("fallback reopened or closed the session: opened=%d closed=%v", len(*opened), s.closed)
+	}
+
+	// a reset that cannot get its zero fill reopens a fresh session instead of failing
+	s.resetErr = ggufload.ErrInkling2CheckpointUnavailable
+	if res, got := inkling2Gen(t, eng, []int{'o', 't', 'h'}, 2); !inkling2EqualInts(got, []int{'a', 'b'}) || res.CachedPromptTokens != 0 {
+		t.Fatalf("reset without memory: emitted %v cached=%d", got, res.CachedPromptTokens)
+	}
+	if len(*opened) != 2 || !s.closed || !inkling2EqualInts((*opened)[1].prompt, []int{'o', 't', 'h'}) {
+		t.Fatalf("reset without memory: opened=%d first closed=%v, want the request on a fresh session", len(*opened), s.closed)
+	}
+}
+
+func TestInkling2AdapterReuseOffOpensFreshSessionPerRequest(t *testing.T) {
+	t.Setenv("FAK_INKLING2_PREFIX_REUSE", "0")
+	var opened []*inkling2FakeSession
+	eng := newInkling2LoopEngineFrom(inkling2FakeOpener([]int{'a', 'b', 'c', 'd'}, false, &opened))
+	defer eng.Close()
 	for req := 0; req < 2; req++ {
-		var got []int
-		res, err := eng.Generate(context.Background(), []int{'p'}, 3, nil, func(id int) bool {
-			got = append(got, id)
-			return true
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if res.Stopped || res.Generated != 3 || !inkling2EqualInts(got, []int{'a', 'b', 'c'}) {
-			t.Fatalf("request %d: emitted %v stopped=%v, want a b c on the length limit", req, got, res.Stopped)
+		if res, got := inkling2Gen(t, eng, []int{'p', 'q', 'r'}, 3); !inkling2EqualInts(got, []int{'a', 'b', 'c'}) || res.CachedPromptTokens != 0 {
+			t.Fatalf("request %d: emitted %v res=%+v", req, got, res)
 		}
 	}
-	if len(*opened) != 2 || len((*opened)[1].fed) != 2 {
-		t.Fatalf("opened %d sessions, want one fresh session per request", len(*opened))
+	if len(opened) != 2 {
+		t.Fatalf("opened %d sessions, want one fresh session per request", len(opened))
+	}
+	for i, s := range opened {
+		if !s.closed || len(s.calls) != 0 || len(s.prefills) != 2 || len(s.prefills[0]) != 2 || len(s.fed) != 2 {
+			t.Fatalf("session %d: closed=%v calls=%v prefills=%v fed=%v, want closed, no rewinder calls, same split", i, s.closed, s.calls, s.prefills, s.fed)
+		}
+	}
+}
+
+func TestInkling2AdapterNonRewinderOpensFreshSessionPerRequest(t *testing.T) {
+	var opened []*inkling2FakeSession
+	eng := &inkling2LoopEngine{open: inkling2FakeOpener([]int{'a', 'b'}, true, &opened)}
+	defer eng.Close()
+	inkling2Gen(t, eng, []int{'p', 'q'}, 1)
+	inkling2Gen(t, eng, []int{'p', 'q', 'r'}, 1)
+	if len(opened) != 2 || !opened[0].closed || !opened[1].closed || len(opened[1].prefills) != 1 || len(opened[1].prefills[0]) != 3 {
+		t.Fatalf("opened %d sessions, want two closed fresh sessions each prefilling the whole prompt once", len(opened))
 	}
 }
 
 func TestInkling2AdapterEmitFalseAndStepErrorEndTheTurn(t *testing.T) {
 	eng, _ := inkling2FakeEngine([]int{'a', 'b', 'c'})
+	defer eng.Close()
 	res, err := eng.Generate(context.Background(), []int{'p'}, 10, nil, func(int) bool { return false })
 	if err != nil || !res.Stopped || res.Generated != 1 {
 		t.Fatalf("emit=false: res=%+v err=%v", res, err)
 	}
 	boom := errors.New("device fault")
-	failing := &inkling2LoopEngine{open: func() (ggufload.Inkling2LoopSession, error) {
-		return &inkling2FakeSession{canned: []int{'a', 'b'}, stepErr: boom}, nil
-	}}
-	if _, err := failing.Generate(context.Background(), []int{'p'}, 10, nil, func(int) bool { return true }); !errors.Is(err, boom) {
+	var opened []*inkling2FakeSession
+	failing := &inkling2LoopEngine{open: inkling2FakeOpener([]int{'a', 'b', 'c'}, false, &opened)}
+	defer failing.Close()
+	inkling2Gen(t, failing, []int{'p', 'q'}, 1)
+	opened[0].stepErr = boom
+	if _, err := failing.Generate(context.Background(), []int{'p', 'q', 'r'}, 10, nil, func(int) bool { return true }); !errors.Is(err, boom) {
 		t.Fatalf("step error = %v, want %v", err, boom)
 	}
+	if !opened[0].closed {
+		t.Fatal("faulted session was not closed")
+	}
+	res, _ = inkling2Gen(t, failing, []int{'p', 'q', 'r', 's'}, 1)
+	if len(opened) != 2 || res.CachedPromptTokens != 0 || len(opened[1].prefills[0]) != 3 {
+		t.Fatalf("after a fault: opened=%d cached=%d, want a fresh session with full prefill", len(opened), res.CachedPromptTokens)
+	}
+}
+
+func TestInkling2AdapterEmitPanicFailsOnlyThatRequest(t *testing.T) {
+	var opened []*inkling2FakeSession
+	eng := &inkling2LoopEngine{open: inkling2FakeOpener([]int{'a', 'b', 'c'}, false, &opened)}
+	defer eng.Close()
+	_, err := eng.Generate(context.Background(), []int{'p'}, 10, nil, func(int) bool { panic("decode blew up") })
+	if err == nil || !strings.Contains(err.Error(), "panicked") {
+		t.Fatalf("emit panic: err = %v, want a panicked error", err)
+	}
+	if !opened[0].closed {
+		t.Fatal("session used by the panicking request was not dropped")
+	}
+	if _, got := inkling2Gen(t, eng, []int{'p', 'q'}, 1); len(got) != 1 || len(opened) != 2 {
+		t.Fatalf("after a panic: got=%v opened=%d, want the worker alive with a fresh session", got, len(opened))
+	}
+}
+
+func TestInkling2AdapterSerializesConcurrentCallers(t *testing.T) {
+	eng, opened := inkling2FakeEngine([]int{'a', 'b', 'c', 'd', 'e', 'f'})
+	defer eng.Close()
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for g := 0; g < 16; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			prompt := []int{'p', 'q', 'a' + g%3}
+			if _, err := eng.Generate(context.Background(), prompt, 4, nil, func(int) bool { return true }); err != nil {
+				errs <- err
+			}
+		}(g)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	if len(*opened) != 1 || (*opened)[0].overlap.Load() {
+		t.Fatalf("opened=%d overlap=%v, want one session used by one request at a time", len(*opened), (*opened)[0].overlap.Load())
+	}
+}
+
+func TestInkling2AdapterQueuedCallerHonoursCancel(t *testing.T) {
+	eng, _ := inkling2FakeEngine([]int{'a', 'b', 'c'})
+	defer eng.Close()
+	inFlight, release := make(chan struct{}), make(chan struct{})
+	go func() {
+		_, _ = eng.Generate(context.Background(), []int{'p'}, 2, nil, func(int) bool {
+			close(inFlight)
+			<-release
+			return false
+		})
+	}()
+	<-inFlight
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := eng.Generate(ctx, []int{'q'}, 1, nil, func(int) bool { return true })
+		done <- err
+	}()
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued cancel = %v, want context.Canceled", err)
+	}
+	close(release)
+	inkling2Gen(t, eng, []int{'r'}, 1)
 }
 
 func TestInkling2AdapterPlannerRendersInklingAndLiftsToolCall(t *testing.T) {

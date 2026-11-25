@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,43 +65,315 @@ func serveRefuseInkling2LoopGeneric(backend compute.Backend) error {
 	return err
 }
 
-// inkling2LoopSessionOpener yields a fresh per-request decode session.
+// inkling2LoopSessionOpener yields a session at position 0.
 type inkling2LoopSessionOpener func() (ggufload.Inkling2LoopSession, error)
 
+// inkling2Rewinder mirrors ggufload.Inkling2LoopRewinder: a session that keeps its
+// cache across requests by checkpointing and restoring its history state.
+type inkling2Rewinder interface {
+	Pos() int
+	Checkpoint(horizon int) error
+	Restore() error
+	Reset() error
+}
+
+// inkling2PrefixReuseEnabled reads FAK_INKLING2_PREFIX_REUSE; reuse is on unless
+// it is 0, false or off.
+func inkling2PrefixReuseEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKLING2_PREFIX_REUSE"))) {
+	case "0", "false", "off":
+		return false
+	}
+	return true
+}
+
+var errInkling2LoopEngineClosed = errors.New("inkling2_loop engine: closed")
+
+type inkling2LoopRequest struct {
+	ctx    context.Context
+	prompt []int
+	maxNew int
+	stops  map[int]bool
+	emit   func(int) bool
+	res    agent.Inkling2LoopGeneration
+	err    error
+	done   chan struct{}
+}
+
 // inkling2LoopEngine adapts the looped forward to agent.Inkling2LoopGenerator.
+// One worker goroutine, locked to its OS thread because a resident session's CUDA
+// graph and context are bound to the thread that captured them, owns the session
+// and serves requests one at a time. When the session is an inkling2Rewinder and
+// reuse is on, the session persists across requests and a prompt that extends the
+// checkpointed prefix prefills only its suffix; otherwise each request runs on a
+// fresh session.
 type inkling2LoopEngine struct {
-	open inkling2LoopSessionOpener
+	open    inkling2LoopSessionOpener
+	noReuse bool
+
+	life   sync.Mutex
+	closed bool
+	reqs   chan *inkling2LoopRequest
+	quit   chan struct{}
+	done   chan struct{}
+
+	// owned by the worker goroutine
+	sess     ggufload.Inkling2LoopSession
+	hasCkpt  bool
+	ckpt     []int // the prompt tokens the checkpoint covers
+	closeErr error
 }
 
 var _ agent.Inkling2LoopGenerator = (*inkling2LoopEngine)(nil)
 
-func newInkling2LoopEngine(m *ggufload.Inkling2LoopModel, be compute.Backend) *inkling2LoopEngine {
-	return &inkling2LoopEngine{open: func() (ggufload.Inkling2LoopSession, error) {
-		return ggufload.NewInkling2LoopSession(m, be)
-	}}
+// SerializesGPUAccess lets the planner hand concurrent turns to the worker, which
+// queues them, so a caller that gives up while queued returns at once.
+func (*inkling2LoopEngine) SerializesGPUAccess() bool { return true }
+
+func newInkling2LoopEngineFrom(open inkling2LoopSessionOpener) *inkling2LoopEngine {
+	return &inkling2LoopEngine{open: open, noReuse: !inkling2PrefixReuseEnabled()}
 }
 
-func (e *inkling2LoopEngine) Generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(int) bool) (res agent.Inkling2LoopGeneration, err error) {
-	if err := ctx.Err(); err != nil {
-		return res, err
+func newInkling2LoopEngine(m *ggufload.Inkling2LoopModel, be compute.Backend) *inkling2LoopEngine {
+	return newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
+		return ggufload.NewInkling2LoopSession(m, be)
+	})
+}
+
+// worker starts the serving goroutine on first use; ok is false once closed.
+func (e *inkling2LoopEngine) worker() (reqs chan *inkling2LoopRequest, quit chan struct{}, ok bool) {
+	e.life.Lock()
+	defer e.life.Unlock()
+	if e.closed {
+		return nil, nil, false
 	}
-	// a resident session's CUDA graph is bound to the thread that captured it
+	if e.reqs == nil {
+		e.reqs, e.quit, e.done = make(chan *inkling2LoopRequest), make(chan struct{}), make(chan struct{})
+		go e.run()
+	}
+	return e.reqs, e.quit, true
+}
+
+// Generate hands the request to the worker and waits for it; a caller whose ctx
+// ends while queued returns without touching the session.
+func (e *inkling2LoopEngine) Generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
+	if err := ctx.Err(); err != nil {
+		return agent.Inkling2LoopGeneration{}, err
+	}
+	reqs, quit, ok := e.worker()
+	if !ok {
+		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
+	}
+	r := &inkling2LoopRequest{ctx: ctx, prompt: prompt, maxNew: maxNew, stops: stops, emit: emit, done: make(chan struct{})}
+	select {
+	case reqs <- r:
+	case <-ctx.Done():
+		return agent.Inkling2LoopGeneration{}, ctx.Err()
+	case <-quit:
+		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
+	}
+	<-r.done
+	return r.res, r.err
+}
+
+// Close finishes the in-flight request, refuses queued ones and closes the
+// session on the worker's thread.
+func (e *inkling2LoopEngine) Close() error {
+	e.life.Lock()
+	if e.closed {
+		e.life.Unlock()
+		return nil
+	}
+	e.closed = true
+	quit, done := e.quit, e.done
+	e.life.Unlock()
+	if quit == nil {
+		return nil
+	}
+	close(quit)
+	<-done
+	return e.closeErr
+}
+
+func (e *inkling2LoopEngine) run() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	s, err := e.open()
+	defer close(e.done)
+	for {
+		select {
+		case r := <-e.reqs:
+			e.serveRecovering(r)
+		case <-e.quit:
+			e.closeErr = e.dropSession()
+			return
+		}
+	}
+}
+
+// serveRecovering turns a panic in the caller's emit callback into that caller's
+// error: it runs on the shared worker, where net/http's per-handler recovery no
+// longer applies, so an unrecovered panic would end the whole serve.
+func (e *inkling2LoopEngine) serveRecovering(r *inkling2LoopRequest) {
+	defer close(r.done)
+	defer func() {
+		if p := recover(); p != nil {
+			_ = e.dropSession()
+			r.res, r.err = agent.Inkling2LoopGeneration{}, fmt.Errorf("inkling2_loop engine: request panicked: %v", p)
+		}
+	}()
+	r.res, r.err = e.serve(r)
+}
+
+func (e *inkling2LoopEngine) dropSession() error {
+	e.hasCkpt, e.ckpt = false, nil
+	if e.sess == nil {
+		return nil
+	}
+	err := e.sess.Close()
+	e.sess = nil
+	return err
+}
+
+// acquire positions a session for prompt and reports how many leading prompt
+// tokens its cache already holds; rw is nil when the request runs without reuse.
+func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused int, err error) {
+	fresh := e.sess == nil
+	if fresh {
+		s, err := e.open()
+		if err != nil {
+			return nil, 0, err
+		}
+		e.sess = s
+	}
+	if e.noReuse {
+		return nil, 0, nil
+	}
+	rw, ok := e.sess.(inkling2Rewinder)
+	if !ok {
+		return nil, 0, nil
+	}
+	hit := e.hasCkpt && len(e.ckpt) < len(prompt) && inkling2HasPrefix(prompt, e.ckpt)
+	e.hasCkpt = false
+	if hit {
+		switch err := rw.Restore(); {
+		case err == nil:
+			if rw.Pos() == len(e.ckpt) {
+				return rw, len(e.ckpt), nil
+			}
+		case !errors.Is(err, ggufload.ErrInkling2NoCheckpoint):
+			return nil, 0, err
+		}
+	}
+	if !fresh || hit {
+		err := rw.Reset()
+		if errors.Is(err, ggufload.ErrInkling2CheckpointUnavailable) {
+			// a fresh session starts at position 0 without the reset's zero fill
+			if err = e.dropSession(); err == nil {
+				return e.acquire(prompt)
+			}
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	return rw, 0, nil
+}
+
+// serve prefills prompt[:n-1] past the reused prefix, checkpoints there, then
+// prefills the last token alone. Reuse off keeps the same split so both modes run
+// identical kernels; a session that cannot rewind prefills the prompt whole. Decode never extends the checkpoint, so no cache row
+// written by decode is reused. A session fault drops the session; a cancelled
+// caller does not.
+func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2LoopGeneration, err error) {
+	if err := r.ctx.Err(); err != nil {
+		return res, err
+	}
+	prompt, n := r.prompt, len(r.prompt)
+	if n == 0 {
+		return res, errors.New("inkling2_loop engine: empty prompt")
+	}
+	rw, reused, err := e.acquire(prompt)
+	if err != nil {
+		_ = e.dropSession()
+		return res, err
+	}
+	fault := true
+	defer func() {
+		switch {
+		case fault:
+			_ = e.dropSession()
+		case rw == nil:
+			if cerr := e.dropSession(); err == nil {
+				err = cerr
+			}
+		}
+	}()
+	s := e.sess
+	_, split := s.(inkling2Rewinder)
+	last := n - 1
+	if !split {
+		last = 0
+	}
+	start := time.Now()
+	if last > reused {
+		if _, err = s.Prefill(prompt[reused:last]); err != nil {
+			return res, err
+		}
+	}
+	if rw != nil {
+		// the last prompt token and up to maxNew-1 decode steps run past it
+		switch err = rw.Checkpoint(max(r.maxNew, 1)); {
+		case err == nil:
+			e.ckpt, e.hasCkpt = append(e.ckpt[:0], prompt[:n-1]...), true
+		case errors.Is(err, ggufload.ErrInkling2CheckpointUnavailable):
+			err = nil
+		default:
+			return res, err
+		}
+	}
+	next, err := s.Prefill(prompt[last:])
 	if err != nil {
 		return res, err
 	}
-	defer func() {
-		if cerr := s.Close(); err == nil {
-			err = cerr
+	res.PrefillSeconds = time.Since(start).Seconds()
+	res.CachedPromptTokens, res.Width = reused, 1
+	start = time.Now()
+	defer func() { res.DecodeSeconds = time.Since(start).Seconds() }()
+	for res.Generated < r.maxNew {
+		if r.stops[next] {
+			res.Stopped = true
+			break
 		}
-	}()
-	turn := ggufload.Inkling2LoopTurn{MaxTokens: maxNew, Stop: func(id int) bool { return stops[id] }, Emit: emit}
-	st, err := ggufload.Inkling2LoopSessionDecode(ctx, s, prompt, &turn)
-	res = agent.Inkling2LoopGeneration{Generated: turn.Generated, Stopped: turn.Stopped, Width: 1,
-		PrefillSeconds: st.Prefill.Seconds(), DecodeSeconds: st.Decode.Seconds()}
-	return res, err
+		res.Generated++
+		if !r.emit(next) {
+			res.Stopped = true
+			break
+		}
+		if res.Generated == r.maxNew {
+			break
+		}
+		if cerr := r.ctx.Err(); cerr != nil {
+			fault = false
+			return res, cerr
+		}
+		if next, err = s.Step(next); err != nil {
+			return res, err
+		}
+	}
+	fault = false
+	return res, nil
+}
+
+func inkling2HasPrefix(s, prefix []int) bool {
+	if len(prefix) > len(s) {
+		return false
+	}
+	for i, v := range prefix {
+		if s[i] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // newServeInkling2Generator picks the serialized engine, or with
@@ -109,6 +384,8 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 	if !inkling2ServeBatchEnabled(lookup) {
 		return scalar, "greedy decode", nil
 	}
+	// a lone request's session must not stay resident beside the cohorts
+	scalar.noReuse = true
 	adm, err := inkling2AdmissionFromEnv(lookup)
 	if err != nil {
 		return nil, "", err
@@ -247,13 +524,13 @@ func (m inkling2MetalSession) Close() error { return m.s.Close() }
 // newInkling2MetalEngine decodes on the resident native target. Each request
 // resets the model's one idle session, sized for the whole served context.
 func newInkling2MetalEngine(m *inklingmetal.Model, contextTokens int) *inkling2LoopEngine {
-	return &inkling2LoopEngine{open: func() (ggufload.Inkling2LoopSession, error) {
+	return newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
 		s, err := m.NewSession(contextTokens)
 		if err != nil {
 			return nil, err
 		}
 		return inkling2MetalSession{s: s}, nil
-	}}
+	})
 }
 
 // warmInkling2Session runs one throwaway prefill of a turn opener on a session
@@ -311,7 +588,8 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			fmt.Fprintln(os.Stderr, "fak serve: inkling2 Metal load:", err)
 			os.Exit(2)
 		}
-		engine, closer = newInkling2MetalEngine(target, contextTokens), target.Close
+		engine = newInkling2MetalEngine(target, contextTokens)
+		closer = func() error { return errors.Join(engine.Close(), target.Close()) }
 		gen, decode = engine, "greedy decode"
 		placement = fmt.Sprintf("%s native target on metal: one resident model, single-stream decode", serveInkling2LoopArch)
 	} else {
@@ -321,11 +599,18 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			os.Exit(2)
 		}
 		m := l.Model
-		closer = m.Close
 		if gen, decode, err = newServeInkling2Generator(m, rt.chatBackend, os.LookupEnv); err != nil {
 			_ = m.Close()
 			fmt.Fprintln(os.Stderr, "fak serve:", err)
 			os.Exit(2)
+		}
+		// the engine's resident session is freed before the weights it reads
+		closer = func() error {
+			var cerr error
+			if c, ok := gen.(io.Closer); ok {
+				cerr = c.Close()
+			}
+			return errors.Join(cerr, m.Close())
 		}
 		placement = fmt.Sprintf("%s looped forward on %s: layers=%d hidden=%d passes=%d; %s",
 			m.Arch, rt.chatBackend.Name(), m.HP.Layers, m.HP.Hidden, m.HP.Passes, l.Placement)

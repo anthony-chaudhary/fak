@@ -165,6 +165,26 @@ func (c *cudaBackend) Ink2PAttend(q, r, sinks, relBias, kcache, vcache, out Ink2
 		C.int(window), C.int(cap), C.float(p.Scale), C.int(pos0), C.int(T)))
 }
 
+// ink2PSelectAttendGlobal forces (true) or releases (false) the prefill attend's
+// global-memory score rows and returns the previous choice.
+func ink2PSelectAttendGlobal(global bool) bool {
+	mode := C.int(0)
+	if global {
+		mode = 1
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return C.fcuda_ink2p_attend_global_select(mode) != 0
+}
+
+// ink2PAttendGlobalBudget sets the global path's per-tile scratch bytes (0 keeps it)
+// and returns the previous budget.
+func ink2PAttendGlobalBudget(bytes uint64) uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_ink2p_attend_global_budget(C.ulonglong(bytes)))
+}
+
 func (c *cudaBackend) Ink2PRoute(logits, bias, ids, wts Ink2Ref, nexp, k int, scale float32, T int) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
