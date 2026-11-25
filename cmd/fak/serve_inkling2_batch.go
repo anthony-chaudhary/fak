@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -195,6 +197,11 @@ type inkling2LoopBatchEngine struct {
 	pending *inkling2QueuedRequest
 	// admittedRows counts requests that joined a running cohort.
 	admittedRows atomic.Uint64
+	// split partitions a cohort by each row's len(prompt)+maxNew into sub-cohorts that
+	// fit device memory; nil runs every collected group as one cohort.
+	split func(positions []int) ([][]int, error)
+	// splitGroups counts cohorts split for memory, up front or after a refusal.
+	splitGroups atomic.Uint64
 	// releaseArenas frees the cached cohort arenas, keeping the weight binding, so
 	// a lone request's scalar session does not have to fit beside the widest
 	// cohort's KV. arenasCached is touched only by the run worker.
@@ -212,6 +219,7 @@ func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.I
 	e := newInkling2LoopBatchEngineWith(scalar, cohorts.Generate, adm, ggufload.Inkling2LoopResidentContext)
 	e.releaseArenas = cohorts.ReleaseArenas
 	e.batchAdmitting = cohorts.GenerateAdmitting
+	e.split = cohorts.Split
 	if v, _ := lookup("FAK_INKLING2_TRACE"); v == "1" {
 		e.trace = true
 	}
@@ -307,20 +315,76 @@ func (e *inkling2LoopBatchEngine) execute(group []*inkling2QueuedRequest) {
 		fmt.Fprintf(os.Stderr, "inkling2.admission width=%d queue_wait_ns=%v\n", len(group), waits)
 	}
 	if len(group) == 1 {
-		e.scalarGroups.Add(1)
-		if e.arenasCached && e.releaseArenas != nil {
-			e.releaseArenas()
+		e.runScalar(group[0])
+		return
+	}
+	for _, g := range e.splitGroup(group) {
+		e.runGroup(g, &owned)
+	}
+}
+
+// runScalar serves one row on the serialized engine, beside the weight binding only.
+func (e *inkling2LoopBatchEngine) runScalar(r *inkling2QueuedRequest) {
+	e.scalarGroups.Add(1)
+	if e.arenasCached && e.releaseArenas != nil {
+		e.releaseArenas()
+	}
+	e.arenasCached = false
+	gen, err := e.scalarGenerate(r.ctx, r.prompt, r.maxNew, r.stops, r.sink.send)
+	gen.Width = 1
+	r.done <- inkling2QueuedResult{gen: gen, err: err}
+}
+
+// splitGroup partitions a collected cohort into the sub-cohorts split plans, in plan
+// order. A failed plan keeps the cohort whole, so the batch reports the failure.
+func (e *inkling2LoopBatchEngine) splitGroup(group []*inkling2QueuedRequest) [][]*inkling2QueuedRequest {
+	if e.split == nil {
+		return [][]*inkling2QueuedRequest{group}
+	}
+	positions := make([]int, len(group))
+	for i, r := range group {
+		positions[i] = len(r.prompt) + r.maxNew
+	}
+	plan, err := e.split(positions)
+	if err != nil || len(plan) <= 1 {
+		return [][]*inkling2QueuedRequest{group}
+	}
+	e.splitGroups.Add(1)
+	groups := make([][]*inkling2QueuedRequest, len(plan))
+	widths := make([]int, len(plan))
+	for g, rows := range plan {
+		for _, i := range rows {
+			groups[g] = append(groups[g], group[i])
 		}
-		e.arenasCached = false
-		r := group[0]
-		gen, err := e.scalarGenerate(r.ctx, r.prompt, r.maxNew, r.stops, r.sink.send)
-		gen.Width = 1
-		r.done <- inkling2QueuedResult{gen: gen, err: err}
+		widths[g] = len(rows)
+	}
+	if e.trace {
+		fmt.Fprintf(os.Stderr, "inkling2.split width=%d groups=%v\n", len(group), widths)
+	}
+	return groups
+}
+
+// runGroup serves a sub-cohort: one row on the serialized engine, more as a batch. A
+// batch refused for device memory before any row ran is halved and each half served
+// the same way, so memory pressure narrows a cohort down to the serialized engine
+// instead of failing its rows.
+func (e *inkling2LoopBatchEngine) runGroup(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) {
+	if len(group) == 1 {
+		e.runScalar(group[0])
 		return
 	}
 	e.batchGroups.Add(1)
 	e.arenasCached = true
-	e.runBatch(group, &owned)
+	if e.runBatch(group, owned) {
+		return
+	}
+	e.splitGroups.Add(1)
+	if e.trace {
+		fmt.Fprintf(os.Stderr, "inkling2.split refused width=%d halves=%d+%d\n", len(group), len(group)/2, len(group)-len(group)/2)
+	}
+	half := len(group) / 2
+	e.runGroup(group[:half], owned)
+	e.runGroup(group[half:], owned)
 }
 
 func (e *inkling2LoopBatchEngine) observePeak(width int) {
@@ -335,10 +399,12 @@ func inkling2BatchRowResult(br ggufload.Inkling2LoopBatchResult, width int) inkl
 	}}
 }
 
-// inkling2Cohort is the set of rows one batch run owns. owned lists every row the
-// worker must answer if the run panics, and answered marks the rows already completed.
+// inkling2Cohort is the set of rows one batch run owns: rows are its collected and
+// admitted rows, answered marks those already completed, and owned is the worker's
+// list of every row it must answer if the run panics.
 type inkling2Cohort struct {
 	width    int
+	rows     []*inkling2QueuedRequest
 	owned    *[]*inkling2QueuedRequest
 	answered []bool
 }
@@ -360,6 +426,7 @@ func (c *inkling2Cohort) request(i int, r *inkling2QueuedRequest) ggufload.Inkli
 // admit records r as a cohort row and wraps it.
 func (c *inkling2Cohort) admit(r *inkling2QueuedRequest) ggufload.Inkling2LoopBatchRequest {
 	*c.owned = append(*c.owned, r)
+	c.rows = append(c.rows, r)
 	c.answered = append(c.answered, false)
 	return c.request(len(c.answered)-1, r)
 }
@@ -395,8 +462,10 @@ func (e *inkling2LoopBatchEngine) admitQueued(c *inkling2Cohort, maxPositions in
 // runBatch answers each row the moment it ends, so a row that stops or is cancelled
 // early does not wait for the cohort's longest row. Rows admitted while the cohort runs
 // are answered the same way; any row the batch leaves unanswered gets the batch's error.
-func (e *inkling2LoopBatchEngine) runBatch(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) {
-	c := &inkling2Cohort{width: len(group), owned: owned, answered: make([]bool, len(group))}
+// It reports false, answering nothing, when the batch was refused device memory before
+// any row ran: the caller serves those rows on narrower cohorts.
+func (e *inkling2LoopBatchEngine) runBatch(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) bool {
+	c := &inkling2Cohort{width: len(group), rows: append([]*inkling2QueuedRequest(nil), group...), owned: owned, answered: make([]bool, len(group))}
 	reqs := make([]ggufload.Inkling2LoopBatchRequest, len(group))
 	for i, r := range group {
 		reqs[i] = c.request(i, r)
@@ -410,7 +479,11 @@ func (e *inkling2LoopBatchEngine) runBatch(group []*inkling2QueuedRequest, owned
 	} else {
 		results, fatal = e.batchGenerate(reqs)
 	}
-	for i, r := range *owned {
+	var refused *ggufload.Inkling2BatchMemoryError
+	if errors.As(fatal, &refused) && len(c.rows) == len(group) && !slices.Contains(c.answered, true) {
+		return false
+	}
+	for i, r := range c.rows {
 		if c.answered[i] {
 			continue
 		}
@@ -424,4 +497,5 @@ func (e *inkling2LoopBatchEngine) runBatch(group []*inkling2QueuedRequest, owned
 		}
 		r.done <- inkling2QueuedResult{err: err}
 	}
+	return true
 }

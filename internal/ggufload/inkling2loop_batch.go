@@ -111,44 +111,21 @@ func newInkling2BatchResident(m *Inkling2LoopModel, be compute.Backend) (*inklin
 // the binding s and readies it for a cohort of that shape; begin re-readies it for
 // any cohort no wider and no longer.
 func newInkling2BatchState(s *inkling2Resident, C, ctx int) (*inkling2Batch, error) {
-	if C < 1 {
-		return nil, fmt.Errorf("inkling2 batch: %d sequences", C)
-	}
-	if ctx < 1 || ctx > inkling2ResidentCtx {
-		return nil, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, inkling2ResidentCtx)
-	}
-	be := s.be
-	seq := inkling2BatchSeqOps(be, os.LookupEnv)
-	kvHalf, err := inkling2BatchKVHalf(os.LookupEnv)
+	sh, err := s.batchShape(C, ctx)
 	if err != nil {
 		return nil, err
 	}
-	if kvHalf && seq == nil {
-		// the per-sequence fallback addresses cache rows by float offsets
-		return nil, fmt.Errorf("inkling2 batch: FAK_INKLING2_BATCH_KV=f16 needs the sequence-batched device ops")
-	}
+	be := s.be
 	pd := be.(compute.Inkling2PrefillDevice)
 	hp := s.hp
-	b := &inkling2Batch{s: s, capC: C, capCtx: ctx, seq: seq, kvHalf: kvHalf, mem: inkling2BatchMem(be)}
+	kvHalf, keep, scr, caps, rowsT := sh.kvHalf, sh.keep, sh.scr, sh.caps, sh.rowsT
+	b := &inkling2Batch{s: s, capC: C, capCtx: ctx, seq: sh.seq, kvHalf: kvHalf, mem: inkling2BatchMem(be),
+		prefillT: sh.prefillT, need: sh.need}
 	b.p = ink2Prefill{s: s, pd: pd, T: C}
 	if b.mem != nil && inkling2BatchQ8RowTile(os.LookupEnv) {
 		b.p.rows = b.mem
 	}
-	if inkling2CohortPrefill(os.LookupEnv) && !kvHalf {
-		// the prefill kernels append fp32 keys and values
-		b.prefillT = min(inkling2PrefillChunk, C*ctx)
-	}
-	// the prefill chunks and the decode steps run one after the other on one arena pair
-	rowsT := max(C, b.prefillT)
-	keep, scr := s.prefillArenas(rowsT)
-	scr += C*s.output.rows + 64
-	// a narrower cohort begun later may take the few-row path, so size for the widest one that can
-	if few := min(C, inkling2BatchFewRowsMost(os.LookupEnv)); few > 0 && inkling2BatchFewRows(be, few, os.LookupEnv) != nil {
-		scr += inkling2BatchFewRowsScratch(hp, few)
-	}
-	caps := inkling2BatchCaps(hp, s.caps, ctx, b.prefillT)
-	b.need = inkling2BatchBytes(hp, caps, C, keep, scr, kvHalf)
-	if os.Getenv("FAK_INKLING2_BATCH_ADMIT") != "0" {
+	if inkling2BatchAdmitOn(os.LookupEnv) {
 		// idle pool blocks count as used to the driver; return them before probing
 		inkling2TrimIdle(be)
 		_, free, known := inkling2DeviceFree(be)
@@ -200,11 +177,65 @@ func (b *inkling2Batch) alloc(n int) ink2Ref {
 		t, err = b.s.dev.Ink2Alloc(n)
 	}
 	if err != nil {
-		b.err = fmt.Errorf("inkling2 batch: %d sequences: %w", b.capC, err)
+		b.err = &Inkling2BatchMemoryError{Sequences: b.capC, Need: b.need, Free: compute.FreeUnknown, Alloc: err}
 		return ink2Ref{}
 	}
 	b.owned = append(b.owned, t)
 	return compute.Ink2At(t, 0)
+}
+
+// inkling2BatchShape is the buffer plan of a C-sequence, ctx-position batch, computed
+// without touching the device so a cohort can be sized before it is admitted.
+type inkling2BatchShape struct {
+	seq             compute.Inkling2BatchDevice
+	kvHalf          bool
+	prefillT, rowsT int
+	keep, scr       int
+	caps            []int
+	need            int64
+}
+
+func (s *inkling2Resident) batchShape(C, ctx int) (inkling2BatchShape, error) {
+	if C < 1 {
+		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: %d sequences", C)
+	}
+	if ctx < 1 || ctx > inkling2ResidentCtx {
+		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, inkling2ResidentCtx)
+	}
+	be := s.be
+	sh := inkling2BatchShape{seq: inkling2BatchSeqOps(be, os.LookupEnv)}
+	kvHalf, err := inkling2BatchKVHalf(os.LookupEnv)
+	if err != nil {
+		return inkling2BatchShape{}, err
+	}
+	if kvHalf && sh.seq == nil {
+		// the per-sequence fallback addresses cache rows by float offsets
+		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: FAK_INKLING2_BATCH_KV=f16 needs the sequence-batched device ops")
+	}
+	sh.kvHalf = kvHalf
+	hp := s.hp
+	if inkling2CohortPrefill(os.LookupEnv) && !kvHalf {
+		// the prefill kernels append fp32 keys and values
+		sh.prefillT = min(inkling2PrefillChunk, C*ctx)
+	}
+	// the prefill chunks and the decode steps run one after the other on one arena pair
+	sh.rowsT = max(C, sh.prefillT)
+	sh.keep, sh.scr = s.prefillArenas(sh.rowsT)
+	sh.scr += C*s.output.rows + 64
+	// a narrower cohort begun later may take the few-row path, so size for the widest one that can
+	if few := min(C, inkling2BatchFewRowsMost(os.LookupEnv)); few > 0 && inkling2BatchFewRows(be, few, os.LookupEnv) != nil {
+		sh.scr += inkling2BatchFewRowsScratch(hp, few)
+	}
+	sh.caps = inkling2BatchCaps(hp, s.caps, ctx, sh.prefillT)
+	sh.need = inkling2BatchBytes(hp, sh.caps, C, sh.keep, sh.scr, kvHalf)
+	return sh, nil
+}
+
+// inkling2BatchAdmitOn reports whether a batch is checked against free device memory
+// before it allocates (FAK_INKLING2_BATCH_ADMIT=0 skips the check).
+func inkling2BatchAdmitOn(lookup func(string) (string, bool)) bool {
+	v, _ := lookup("FAK_INKLING2_BATCH_ADMIT")
+	return v != "0"
 }
 
 // begin readies the arenas for a cohort of C sequences at ctx positions. Every
@@ -363,16 +394,24 @@ func inkling2BatchQ8RowTile(lookup func(string) (string, bool)) bool {
 const inkling2BatchHeadroom = 64 << 20
 
 // Inkling2BatchMemoryError refuses a batch whose buffers would not fit in free device
-// memory (FAK_INKLING2_BATCH_ADMIT=0 skips the check).
+// memory (FAK_INKLING2_BATCH_ADMIT=0 skips the check), or whose allocation the device
+// refused (Alloc). Either way no row of the cohort has run, so its rows can be served
+// by a narrower cohort or the serialized engine.
 type Inkling2BatchMemoryError struct {
 	Sequences  int
 	Need, Free int64
+	Alloc      error
 }
 
 func (e *Inkling2BatchMemoryError) Error() string {
+	if e.Alloc != nil {
+		return fmt.Sprintf("inkling2 batch: %d sequences: %v", e.Sequences, e.Alloc)
+	}
 	return fmt.Sprintf("inkling2 batch: %d sequences need %.1f MiB + %d MiB headroom, %.1f MiB device memory free",
 		e.Sequences, float64(e.Need)/(1<<20), inkling2BatchHeadroom>>20, float64(e.Free)/(1<<20))
 }
+
+func (e *Inkling2BatchMemoryError) Unwrap() error { return e.Alloc }
 
 // inkling2BatchAdmit refuses need bytes against a probed free; a device that cannot
 // report free memory fails open.

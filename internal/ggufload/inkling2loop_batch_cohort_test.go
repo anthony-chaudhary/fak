@@ -32,6 +32,9 @@ type fakeInk2Cohort struct {
 	writeLog []fakeInk2Write
 	// reads counts Ink2Read calls
 	reads int
+	// capFloats, when set, is the device's capacity: DeviceMemory reports what is not
+	// live, and a device-only allocation past it is refused
+	capFloats int
 }
 
 type fakeInk2Write struct {
@@ -113,7 +116,19 @@ func (d *fakeInk2Cohort) Ink2Mix(states []compute.Ink2Ref, _ compute.Ink2Ref, _ 
 	return nil
 }
 
-func (d *fakeInk2Cohort) Ink2AllocDeviceOnly(n int) (compute.Tensor, error) { return d.Ink2Alloc(n) }
+func (d *fakeInk2Cohort) Ink2AllocDeviceOnly(n int) (compute.Tensor, error) {
+	if d.capFloats > 0 && d.live+n > d.capFloats {
+		return compute.Tensor{}, errors.New("fake device out of memory")
+	}
+	return d.Ink2Alloc(n)
+}
+
+func (d *fakeInk2Cohort) DeviceMemory() (total, free int64, known bool) {
+	if d.capFloats == 0 {
+		return 0, compute.FreeUnknown, false
+	}
+	return 4 * int64(d.capFloats), 4 * int64(d.capFloats-d.live), true
+}
 
 func (d *fakeInk2Cohort) Ink2PMatMul(w compute.Tensor, x, y compute.Ink2Ref, T int) error {
 	return d.matmul(w, x, y, T)
@@ -249,16 +264,15 @@ func TestInkling2LoopBatchCohortsReuseStateAcrossCohorts(t *testing.T) {
 			}
 		}
 	}
-	run(2, 3, 4)
-	run(Inkling2LoopMaxBatch, 70, 2) // wider and past one 64-position block: regrow once
+	run(Inkling2LoopMaxBatch, 70, 2) // past one 64-position block: 16 x 128
 	allocs, live := d.allocs, d.live
 	for round := 0; round < 4; round++ {
-		run(2, 3, 4)
 		run(Inkling2LoopMaxBatch, 70, 2)
-		run(5, 10, 8)
+		run(Inkling2LoopMaxBatch-1, 80, 4)
+		run(Inkling2LoopMaxBatch, 100, 8)
 	}
 	if d.allocs != allocs || d.live != live {
-		t.Fatalf("cohorts that fit allocated again: allocs %d -> %d, live floats %d -> %d", allocs, d.allocs, live, d.live)
+		t.Fatalf("cohorts near the cached shape allocated again: allocs %d -> %d, live floats %d -> %d", allocs, d.allocs, live, d.live)
 	}
 	bt.Close()
 	if d.live != 0 || d.frees != d.allocs {

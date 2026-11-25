@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sort"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -177,9 +178,11 @@ func (lane *inkling2BatchLane) accept(token int, now time.Time) {
 }
 
 // Inkling2LoopCohorts runs cohorts on one cached state: the weight binding is made
-// once, and the per-sequence arenas grow to the widest and longest cohort seen and
-// are reused by every cohort that fits, so back-to-back cohorts neither rebind the
-// weights nor churn the device allocator. It is not safe for concurrent use.
+// once, and the per-sequence arenas are reused by every later cohort they cover
+// without holding much more than that cohort needs, so back-to-back cohorts of a
+// similar shape neither rebind the weights nor churn the device allocator, while a
+// narrower or shorter cohort after a wide one gives the surplus back. It is not safe
+// for concurrent use.
 type Inkling2LoopCohorts struct {
 	m  *Inkling2LoopModel
 	be compute.Backend
@@ -218,32 +221,117 @@ func (bt *Inkling2LoopCohorts) ReleaseArenas() {
 	bt.b = nil
 }
 
-// acquire returns the cached state readied for a C x ctx cohort, regrowing it to
-// cover both the old and the new shape when the cohort does not fit.
-func (bt *Inkling2LoopCohorts) acquire(C, ctx int) (*inkling2Batch, error) {
-	if bt.s == nil {
-		s, err := newInkling2BatchResident(bt.m, bt.be)
-		if err != nil {
-			return nil, err
-		}
-		bt.s = s
+func (bt *Inkling2LoopCohorts) bind() error {
+	if bt.s != nil {
+		return nil
 	}
-	if bt.b != nil && C <= bt.b.capC && ctx <= bt.b.capCtx {
+	s, err := newInkling2BatchResident(bt.m, bt.be)
+	if err != nil {
+		return err
+	}
+	bt.s = s
+	return nil
+}
+
+// inkling2BatchReuseSlack bounds the surplus a cached state may hold over a cohort it
+// covers and still serve it: a state with more than 1/inkling2BatchReuseSlack more
+// sequence positions (rows x ctx, which the KV and conv state scale with) than the
+// cohort is freed and rebuilt at the cohort's shape.
+const inkling2BatchReuseSlack = 4
+
+// reuses reports whether the cached state serves a C x ctx cohort.
+func (bt *Inkling2LoopCohorts) reuses(C, ctx int) bool {
+	b := bt.b
+	if b == nil || C > b.capC || ctx > b.capCtx {
+		return false
+	}
+	cells := C * ctx
+	return b.capC*b.capCtx <= cells+cells/inkling2BatchReuseSlack
+}
+
+// acquire returns a state readied for a C x ctx cohort: the cached one when it covers
+// the cohort without much surplus, else one built at exactly the cohort's shape. The
+// old state is freed first, so the two never coexist on the device.
+func (bt *Inkling2LoopCohorts) acquire(C, ctx int) (*inkling2Batch, error) {
+	if err := bt.bind(); err != nil {
+		return nil, err
+	}
+	if bt.reuses(C, ctx) {
 		return bt.b, bt.b.begin(C, ctx)
 	}
-	growC, growCtx := C, ctx
 	if bt.b != nil {
-		growC, growCtx = max(C, bt.b.capC), max(ctx, bt.b.capCtx)
-		// free first so the old and the grown state never coexist on the device
-		bt.b.release()
-		bt.b = nil
+		bt.ReleaseArenas()
 	}
-	b, err := newInkling2BatchState(bt.s, growC, growCtx)
+	b, err := newInkling2BatchState(bt.s, C, ctx)
 	if err != nil {
 		return nil, err
 	}
 	bt.b = b
-	return b, b.begin(C, ctx)
+	return b, nil
+}
+
+// Split partitions a cohort into sub-cohorts whose states each fit free device memory.
+// positions[i] is row i's len(prompt)+MaxTokens. A cohort that fits, or a device that
+// cannot report free memory, stays one group. Otherwise rows are taken shortest first
+// and each group grows while its state, sized at its own longest row, still fits, so
+// a long row never sizes the short rows' KV. A group of one row is for the serialized
+// engine: a cohort needs two. The cached state counts as free, since acquire frees it
+// before building one it does not reuse.
+func (bt *Inkling2LoopCohorts) Split(positions []int) ([][]int, error) {
+	all := make([]int, len(positions))
+	for i := range all {
+		all[i] = i
+	}
+	if len(positions) < 2 || !inkling2BatchAdmitOn(os.LookupEnv) {
+		return [][]int{all}, nil
+	}
+	if err := bt.bind(); err != nil {
+		return nil, err
+	}
+	inkling2TrimIdle(bt.be)
+	_, free, known := inkling2DeviceFree(bt.be)
+	if !known || free < 0 {
+		return [][]int{all}, nil
+	}
+	if bt.b != nil {
+		free += bt.b.need
+	}
+	ctxOf := func(n int) int {
+		ctx := (n + inkling2BatchCtxAlign - 1) / inkling2BatchCtxAlign * inkling2BatchCtxAlign
+		return max(1, min(Inkling2LoopResidentContext, ctx))
+	}
+	// groups run in plan order, so the cached state is there to reuse only until a
+	// planned group that does not reuse it has its acquire replace it
+	cached := true
+	fits := func(C, longest int) bool {
+		ctx := ctxOf(longest)
+		sh, err := bt.s.batchShape(C, ctx)
+		if err != nil {
+			return false
+		}
+		return (cached && bt.reuses(C, ctx)) || sh.need+inkling2BatchHeadroom <= free
+	}
+	longest := 0
+	for _, n := range positions {
+		longest = max(longest, n)
+	}
+	if len(positions) <= Inkling2LoopMaxBatch && fits(len(positions), longest) {
+		return [][]int{all}, nil
+	}
+	order := append([]int(nil), all...)
+	sort.SliceStable(order, func(a, b int) bool { return positions[order[a]] < positions[order[b]] })
+	var groups [][]int
+	group := []int{order[0]}
+	for _, i := range order[1:] {
+		if len(group) < Inkling2LoopMaxBatch && fits(len(group)+1, positions[i]) {
+			group = append(group, i)
+			continue
+		}
+		cached = cached && bt.reuses(len(group), ctxOf(positions[group[len(group)-1]]))
+		groups = append(groups, group)
+		group = []int{i}
+	}
+	return append(groups, group), nil
 }
 
 // Inkling2LoopBatchGenerate runs one cohort on a state built for it and freed after.
@@ -296,6 +384,10 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 	}()
 	b, err := bt.acquire(len(reqs), ctx)
 	if err != nil {
+		// a refused or failed arena allocation ran nothing on the binding, so it is kept
+		// for the narrower cohorts the caller retries with
+		var refused *Inkling2BatchMemoryError
+		clean = errors.As(err, &refused)
 		return nil, err
 	}
 
