@@ -7,16 +7,23 @@ name: spine-invariance
 on:
   push:
     branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/spine-invariance.yml"
   pull_request:
     branches: [main]
+  schedule:
+    # Weekly backstop for the path-filtered push trigger: the invariant matrix re-proves on a quiet tree.
+    - cron: "51 3 * * 4"
   workflow_dispatch:
 
-# Queue control (CI/CD run-speed): cancel a PR's superseded in-flight runs on a
-# re-push/force-push. On main / workflow_dispatch github.head_ref is empty, so the
-# group is per ref, so a newer trunk push supersedes the in-flight invariant check.
+# Trunk pushes: the in-flight run finishes and only the newest pending run survives.
+# Pull requests: a re-push cancels the superseded run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   spine-arm64:

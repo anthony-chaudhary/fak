@@ -24,6 +24,19 @@ name: security-audit
 on:
   push:
     branches: [main, master, fak-v0.1]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/**"
+      - "tools/security_audit.py"
+      - "tools/security_audit_test.py"
+      - "tools/scrub_public_copy.py"
+      - "tools/githooks/pre-commit"
+      - "SECURITY.md"
+      - ".github/SECURITY.md"
+      - "docs/SECURITY.md"
+      - ".github/workflows/security-audit.yml"
   pull_request:
   schedule:
     # 06:17 UTC every Monday — catch newly-disclosed CVEs against a quiet tree.

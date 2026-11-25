@@ -24,6 +24,15 @@ name: steering-guard
 on:
   push:
     branches: [main, master]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "tools/**"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - ".claude/skills/**"
+      - ".github/workflows/steering-guard.yml"
   schedule:
     # Daily 07:33 UTC — an off-the-hour minute clear of the other scheduled jobs
     # (dogfood-coverage 07:13, score-signal 07:41, garden 06:23, dogfood 06:41).

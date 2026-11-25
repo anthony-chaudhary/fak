@@ -24,7 +24,15 @@ name: bench
 on:
   push:
     branches: [main, master, fak-v0.1]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/bench.yml"
   pull_request:
+  schedule:
+    # Daily backstop for the path-filtered push trigger: a missed Go push still gets a nightly benchmark run.
+    - cron: "29 3 * * *"
 
 # Supersede stale branch/PR work, but preserve every scheduled or manual audit.
 concurrency:

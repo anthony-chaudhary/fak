@@ -25,6 +25,13 @@ name: dogfood-coverage
 on:
   push:
     branches: [main, master]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "tools/issue_dispatch.py"
+      - "tools/com.fak.serve-gateway.plist"
+      - ".github/workflows/dogfood-coverage.yml"
   pull_request:
   schedule:
     # Daily at 07:13 UTC — an off-the-hour minute so the fleet's scheduled jobs

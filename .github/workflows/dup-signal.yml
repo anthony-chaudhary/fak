@@ -30,6 +30,14 @@ name: dup-signal
 on:
   push:
     branches: [main, master]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/dup-signal.yml"
+  schedule:
+    # Daily backstop for the path-filtered push trigger: a schedule run guards the last 20 commits.
+    - cron: "23 3 * * *"
   workflow_dispatch:
 
 permissions:

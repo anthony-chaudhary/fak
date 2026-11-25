@@ -21,14 +21,28 @@ name: negframe-ratchet
 on:
   push:
     branches: [main, master, fak-v0.1]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - ".claude/skills/**"
+      - "Makefile"
+      - ".github/workflows/negframe-ratchet.yml"
   pull_request:
+  schedule:
+    # Daily backstop for the path-filtered push trigger: a schedule run ratchets the last 20 commits.
+    - cron: "7 3 * * *"
 
 permissions:
   contents: read
 
+# Trunk pushes: the in-flight run finishes and only the newest pending run survives.
+# Pull requests: a re-push cancels the superseded run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   negframe-ratchet:
@@ -53,8 +67,11 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
-          else
+          elif [ "${{ github.event_name }}" = "push" ]; then
             base="${{ github.event.before }}"
+          else
+            # schedule / manual: a 20-commit window (fetch-depth 0 has the history)
+            base="$(git rev-parse --verify -q HEAD~20 || true)"
           fi
           echo "ref=$base" >> "$GITHUB_OUTPUT"
 

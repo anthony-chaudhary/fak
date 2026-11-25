@@ -15,14 +15,25 @@ name: build-matrix
 on:
   push:
     branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "docs/build-variants.json"
+      - ".github/workflows/build-matrix.yml"
   pull_request:
+  schedule:
+    # Weekly backstop for the path-filtered push trigger: the variant matrix rebuilds on a quiet tree.
+    - cron: "39 3 * * 2"
 
 permissions:
   contents: read
 
+# Trunk pushes: the in-flight run finishes and only the newest pending run survives.
+# Pull requests: a re-push cancels the superseded run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   plan:

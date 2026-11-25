@@ -28,17 +28,24 @@ name: swallowed-error-floor
 on:
   push:
     branches: [main]
+    paths:
+      - "**/*.go"
+      - ".github/workflows/swallowed-error-floor.yml"
   pull_request:
     branches: [main]
+  schedule:
+    # Daily backstop for the path-filtered push trigger: the floor re-scans every tracked Go file on a quiet tree.
+    - cron: "19 3 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Cancel superseded in-flight runs on a re-push or a newer trunk push.
+# Trunk pushes: the in-flight run finishes and only the newest pending run survives.
+# Pull requests: a re-push cancels the superseded run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   swallowed-error-floor:

@@ -14,18 +14,24 @@ name: cross-platform
 on:
   push:
     branches: [main, master, fak-v0.1]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/cross-platform.yml"
   pull_request:
+  schedule:
+    # Weekly backstop for the path-filtered push trigger: catches a cross-OS build or vet drift no Go-path push exposed.
+    - cron: "47 3 * * 3"
 
 permissions:
   contents: read
 
-# Queue control (CI/CD run-speed): cancel a PR's superseded in-flight runs on a
-# re-push/force-push. On main — and on schedule/workflow_dispatch — github.head_ref
-# is empty, so trunk pushes share one per-ref group and a newer push supersedes the
-# in-flight per-OS build+vet matrix.
+# Trunk pushes: the in-flight run finishes and only the newest pending run survives.
+# Pull requests: a re-push cancels the superseded run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-vet:
