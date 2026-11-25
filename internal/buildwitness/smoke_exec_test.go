@@ -10,56 +10,60 @@ import (
 	"testing"
 )
 
-func TestSmokeExecPropagatesOfflineAgentFailure(t *testing.T) {
+const smokeUpPlanOK = "{\n  \"schema\": \"fak-macfit-turnkey/1\",\n  \"tier\": {\n    \"name\": \"3B\"\n  }\n}\n"
+
+func TestSmokeExecRequiresFreshUpPlan(t *testing.T) {
 	if _, err := exec.LookPath("make"); err != nil {
 		t.Skip("make is required to execute the smoke-exec recipe")
 	}
 	helper := fmt.Sprintf("%q -test.run=^TestHelperProcess$$ --", os.Args[0])
 	cases := []struct {
-		name       string
-		mode       string
-		stale      bool
-		wantOK     bool
-		wantReport bool
+		name     string
+		mode     string
+		stale    bool
+		wantOK   bool
+		wantDiag string
 	}{
 		{name: "nonzero child", mode: "fail"},
-		{name: "zero without report", mode: "missing"},
-		{name: "zero cannot reuse stale report", mode: "missing", stale: true},
-		{name: "fresh incomplete report", mode: "incomplete", wantReport: true},
-		{name: "completed fresh report", mode: "success", wantOK: true, wantReport: true},
+		{name: "zero without plan", mode: "missing", wantDiag: "emitted no stable plan schema"},
+		{name: "zero cannot reuse stale plan", mode: "missing", stale: true, wantDiag: "emitted no stable plan schema"},
+		{name: "wrong schema", mode: "wrong-schema", wantDiag: "emitted no stable plan schema"},
+		{name: "wrong tier", mode: "wrong-tier", wantDiag: "did not select the README 3B tier"},
+		{name: "fresh plan", mode: "success", wantOK: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reportPath := filepath.Join(t.TempDir(), "smoke-agent.json")
+			planPath := filepath.Join(t.TempDir(), "plan", "smoke-up-plan.txt")
 			if tc.stale {
-				stale := []byte("{\n  \"both_completed\": true,\n  \"live\": false\n}\n")
-				if err := os.WriteFile(reportPath, stale, 0o600); err != nil {
+				if err := os.MkdirAll(filepath.Dir(planPath), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(planPath, []byte(smokeUpPlanOK), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
 			cmd := exec.Command("make", "-C", repoRoot(t), "-o", "build", "smoke-exec",
-				"SMOKE_FAK="+helper, "SMOKE_AGENT_REPORT="+reportPath)
+				"SMOKE_FAK="+helper, "SMOKE_UP_PLAN="+planPath)
 			cmd.Env = append(os.Environ(),
 				"GO_WANT_SMOKE_EXEC_HELPER=1",
-				"SMOKE_EXEC_HELPER_AGENT_MODE="+tc.mode,
+				"SMOKE_EXEC_HELPER_UP_MODE="+tc.mode,
 			)
 			out, runErr := cmd.CombinedOutput()
-			marker := "SMOKE_EXEC_HELPER_AGENT:" + tc.mode
+			marker := "SMOKE_EXEC_HELPER_UP:" + tc.mode
 			if !strings.Contains(string(out), marker) {
-				t.Fatalf("smoke-exec did not reach the injected offline agent (%s):\n%s", marker, out)
+				t.Fatalf("smoke-exec did not reach the injected up planner (%s):\n%s", marker, out)
 			}
 			if tc.wantOK && runErr != nil {
-				t.Fatalf("smoke-exec failed with a completed fresh report: %v\n%s", runErr, out)
+				t.Fatalf("smoke-exec failed with a fresh 3B plan: %v\n%s", runErr, out)
 			}
 			if !tc.wantOK && runErr == nil {
-				t.Fatalf("smoke-exec succeeded without a completed fresh report:\n%s", out)
+				t.Fatalf("smoke-exec succeeded without a fresh 3B plan:\n%s", out)
 			}
 			if got := strings.Contains(string(out), "smoke-exec OK"); got != tc.wantOK {
 				t.Fatalf("success marker = %v, want %v:\n%s", got, tc.wantOK, out)
 			}
-			_, statErr := os.Stat(reportPath)
-			if got := statErr == nil; got != tc.wantReport {
-				t.Fatalf("fresh report present = %v, want %v (stat error: %v)", got, tc.wantReport, statErr)
+			if tc.wantDiag != "" && !strings.Contains(string(out), tc.wantDiag) {
+				t.Fatalf("missing diagnostic %q:\n%s", tc.wantDiag, out)
 			}
 		})
 	}
@@ -89,26 +93,24 @@ func TestHelperProcess(t *testing.T) {
 			}
 		}
 		os.Exit(2)
-	case "agent":
-		mode := os.Getenv("SMOKE_EXEC_HELPER_AGENT_MODE")
-		fmt.Fprintln(os.Stderr, "SMOKE_EXEC_HELPER_AGENT:"+mode)
+	case "up":
+		// The smoke must only plan: a recipe that drops --dry-run would start a real server.
+		if !slices.Contains(args, "--dry-run") || !slices.Contains(args, "--json") {
+			os.Exit(2)
+		}
+		mode := os.Getenv("SMOKE_EXEC_HELPER_UP_MODE")
+		fmt.Fprintln(os.Stderr, "SMOKE_EXEC_HELPER_UP:"+mode)
 		switch mode {
 		case "fail":
+			fmt.Print(smokeUpPlanOK)
 			os.Exit(23)
 		case "missing":
-			return
-		case "success", "incomplete":
-			for i, arg := range args {
-				if arg == "--out" && i+1 < len(args) {
-					completed := mode == "success"
-					report := []byte(fmt.Sprintf("{\n  \"fak\": {\"task_completed\": %t},\n  \"baseline\": {\"task_completed\": %t},\n  \"both_completed\": %t,\n  \"live\": false\n}\n", completed, completed, completed))
-					if err := os.WriteFile(args[i+1], report, 0o600); err != nil {
-						os.Exit(1)
-					}
-					return
-				}
-			}
-			os.Exit(2)
+		case "wrong-schema":
+			fmt.Print(strings.Replace(smokeUpPlanOK, "fak-macfit-turnkey/1", "fak-macfit-turnkey/0", 1))
+		case "wrong-tier":
+			fmt.Print(strings.Replace(smokeUpPlanOK, "\"3B\"", "\"1B\"", 1))
+		case "success":
+			fmt.Print(smokeUpPlanOK)
 		default:
 			os.Exit(2)
 		}
