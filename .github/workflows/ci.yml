@@ -227,6 +227,20 @@ jobs:
       # stale tier-table row cannot inherit a cached PASS from a previous commit (#1145).
       - name: architest tier gate (uncached)
         run: go test -count=1 ./internal/architest/ -run '^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$'
+      # The module zip budget reads the git tree through a subprocess, which the test
+      # cache cannot see, so a cached PASS would outlive the commit that broke it.
+      - name: root module zip budget (uncached)
+        run: go test -count=1 -v ./internal/architest/ -run '^TestRootModuleZipBudget$'
+      # An export-ignore rule or nested go.mod that drops a file some package embeds or
+      # compiles breaks `go install` for users while every checkout build stays green,
+      # so build what the module zip actually contains.
+      - name: module zip builds (what go install compiles)
+        run: |
+          set -euo pipefail
+          tree="$(mktemp -d)"
+          git archive --format=tar HEAD | tar -x -C "$tree"
+          cd "$tree"
+          GOFLAGS=-mod=mod GOWORK=off go build ./...
       - name: LiveCodeBench fixture smoke (no network, no model)
         run: |
           go test ./internal/livecodebench/...

@@ -312,6 +312,45 @@ jobs:
         with:
           subject-path: ${{ env.VULKAN_ARCHIVE }}
 
+  module-installable:
+    # `go install ...@TAG` is a release surface of its own: cmd/go refuses a module
+    # whose source tree is over its zip cap, and the proxy then keeps serving the
+    # previous tag as @latest without telling anyone. This job depends on no other
+    # job, so a failed build or aggregation cannot skip it.
+    name: go install resolves the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: root module zip budget
+        run: go test -count=1 -v ./internal/architest/ -run '^TestRootModuleZipBudget$'
+      - name: module zip builds from the tag
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          work="$(mktemp -d)"
+          cd "$work"
+          if ! env GOMODCACHE="$work/mod" GOFLAGS=-mod=mod GOPROXY=direct GOSUMDB=off \
+              go mod download -json "github.com/anthony-chaudhary/fak@${TAG}" > download.json 2> download.err \
+              || grep -q '"Error"' download.json; then
+            cat download.json download.err || true
+            echo "::error::go cannot build a module zip for ${TAG}; go install ...@${TAG} is broken and @latest will keep resolving to the previous tag"
+            exit 1
+          fi
+          zip="$(find "$work/mod/cache/download" -name '*.zip' | head -1)"
+          bytes="$(stat -c %s "$zip")"
+          {
+            echo "## module zip — ${TAG}"
+            echo "go mod download built the module zip: ${bytes} bytes compressed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   checksums:
     name: aggregate SHA256SUMS
     needs: [build, vulkan-build]
