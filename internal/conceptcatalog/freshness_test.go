@@ -622,3 +622,36 @@ func TestResolvePythonHermetic(t *testing.T) {
 		t.Fatalf("ResolvePython=%q, want python3", got)
 	}
 }
+
+// TestRelevantPathCoversEveryGeneratorInput pins the staleness gap: a commit touching only
+// a Go source the generator scans (or a doc it reads) must trigger the freshness gate,
+// while test files, which the generator skips, must not.
+func TestRelevantPathCoversEveryGeneratorInput(t *testing.T) {
+	relevant := []string{
+		"internal/hooks/gate_conceptfreshness.go",
+		"cmd/fak/main.go",
+		"docs/cli-reference.md",
+		"docs/fak/glossary-extra.md",
+		"README.md",
+		"CLAIMS.md",
+		"tools/concept_disambiguation_scorecard.py",
+		"tools/concept_disambiguation_scorecard.data/rows.json",
+		GeneratedIndex,
+	}
+	for _, p := range relevant {
+		if !RelevantPath(p) {
+			t.Errorf("RelevantPath(%q) = false; the generator reads this input, so a change must trigger the gate", p)
+		}
+	}
+	irrelevant := []string{
+		"internal/hooks/gate_conceptfreshness_test.go",
+		"platform/dispatch/runner.go",
+		"docs/images/logo.png",
+		"scripts/build.sh",
+	}
+	for _, p := range irrelevant {
+		if RelevantPath(p) {
+			t.Errorf("RelevantPath(%q) = true; the generator does not read this path", p)
+		}
+	}
+}

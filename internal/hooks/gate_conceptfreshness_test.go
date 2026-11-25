@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,5 +53,31 @@ func TestConceptFreshnessDetailNamesTheTreeScopedCure(t *testing.T) {
 func TestConceptFreshnessDetailDistinguishesTheTwoCommands(t *testing.T) {
 	if conceptcatalog.RegenerateStagedCommand == conceptcatalog.RegenerateCommand {
 		t.Fatal("the tree-scoped and worktree cures must stay distinct commands (#5829)")
+	}
+}
+
+// TestConceptFreshnessGateCountsGoSourceAsRelevant pins that a Go-only staged change reaches
+// the freshness check instead of being filtered out as unrelated. Root is a directory that
+// does not exist, so the git-tree scoring fails at once: the assertion is that the gate
+// counted the path as a concept-corpus input (and therefore tried to score it), not that it
+// produced a finding.
+func TestConceptFreshnessGateCountsGoSourceAsRelevant(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-root")
+
+	goOnly := &StagedDiff{Root: missing, StagedPaths: []string{"internal/hooks/gate_alphafence.go"}}
+	_, err := checkConceptFreshness(goOnly)
+	if err == nil {
+		t.Fatal("a staged Go source must reach CheckGitTree; the gate returned without scoring it")
+	}
+	if n, _, ok := goOnly.Candidates("CONCEPT_FRESHNESS"); !ok || n != 1 {
+		t.Fatalf("Go source must count as one concept-corpus input, got n=%d ok=%v", n, ok)
+	}
+
+	unrelated := &StagedDiff{Root: missing, StagedPaths: []string{"platform/dispatch/runner.go"}}
+	if _, err := checkConceptFreshness(unrelated); err != nil {
+		t.Fatalf("an unrelated staged path must not score the tree: %v", err)
+	}
+	if n, _, _ := unrelated.Candidates("CONCEPT_FRESHNESS"); n != 0 {
+		t.Fatalf("unrelated path counted as concept input: n=%d", n)
 	}
 }

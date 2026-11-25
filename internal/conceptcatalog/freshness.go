@@ -84,14 +84,35 @@ type InvariantResult struct {
 	Detail         string             `json:"detail,omitempty"`
 }
 
-// RelevantPath reports whether a change can affect the disambiguation snapshot.
+// RelevantPath reports whether a change can affect the disambiguation snapshot. It must
+// cover every input the generator reads, or a commit touching only an omitted input
+// stales the committed artifacts while the gate stays silent: the generator's
+// identifier map records which production Go file each name appears in, and it grounds
+// rows in doc headings, so Go sources and docs are inputs, not just the script.
 func RelevantPath(path string) bool {
 	p := filepath.ToSlash(path)
-	return p == "tools/concept_disambiguation_scorecard.py" ||
-		p == "docs/fak/concept-glossary.md" ||
-		p == GeneratedReadme ||
-		p == GeneratedIndex ||
-		strings.HasPrefix(p, "tools/concept_disambiguation_scorecard.data/")
+	switch p {
+	case "tools/concept_disambiguation_scorecard.py", "docs/fak/concept-glossary.md",
+		GeneratedReadme, GeneratedIndex:
+		return true
+	}
+	if strings.HasPrefix(p, "tools/concept_disambiguation_scorecard.data/") {
+		return true
+	}
+	if strings.HasPrefix(p, "docs/") && strings.HasSuffix(p, ".md") {
+		return true
+	}
+	if rootDocInputs[p] {
+		return true
+	}
+	return (strings.HasPrefix(p, "internal/") || strings.HasPrefix(p, "cmd/")) &&
+		strings.HasSuffix(p, ".go") && !strings.HasSuffix(p, "_test.go")
+}
+
+// rootDocInputs mirrors the root documents the generator reads for structural concepts.
+var rootDocInputs = map[string]bool{
+	"CLAIMS.md": true, "ARCHITECTURE.md": true, "README.md": true,
+	"AGENTS.md": true, "INDEX.md": true, "GLOSSARY.md": true,
 }
 
 // CheckFresh regenerates in scratch space and compares every tracked generated artifact.
