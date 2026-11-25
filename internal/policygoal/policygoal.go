@@ -88,84 +88,84 @@ type Inventory struct {
 var DefaultInventory = Inventory{Knobs: []Knob{
 	{
 		Name:         "--max-total-tokens",
-		Goals:        []Goal{GoalCapacity, GoalContextLength, GoalReliability},
+		Goals:        []Goal{GoalCapacity, GoalContextLength, GoalReliability}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: false,
 		Evidence:     "cmd/fak/serve.go:353; upper bound on a request's total tokens",
 	},
 	{
 		Name:         "--max-batch-prefill-tokens",
-		Goals:        []Goal{GoalBatch, GoalPrefillDecode, GoalP99},
+		Goals:        []Goal{GoalBatch, GoalPrefillDecode, GoalP99}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: false,
 		Evidence:     "cmd/fak/serve.go:354; upper bound on batch prefill tokens",
 	},
 	{
 		Name:         "--tenant-rate-rps",
-		Goals:        []Goal{GoalReliability, GoalCapacity, GoalP99},
+		Goals:        []Goal{GoalReliability, GoalCapacity, GoalP99}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: false,
 		Evidence:     "cmd/fak/serve.go:361; per-tenant request-rate admission",
 	},
 	{
 		Name:         "--tenant-max-inflight",
-		Goals:        []Goal{GoalCapacity, GoalReliability},
+		Goals:        []Goal{GoalCapacity, GoalReliability}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: false,
 		Evidence:     "cmd/fak/serve.go:363; per-tenant in-flight admission",
 	},
 	{
 		Name:         "--stream-progress-timeout",
-		Goals:        []Goal{GoalReliability, GoalP99, GoalInteractive},
+		Goals:        []Goal{GoalReliability, GoalP99, GoalInteractive}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: true,
 		Evidence:     "cmd/fak/serve.go:129; a negative value disables the hard stall deadline, hiding a real upstream stall",
 	},
 	{
 		Name:         "--ctx-view-budget",
-		Goals:        []Goal{GoalContextLength, GoalInteractive, GoalP50},
+		Goals:        []Goal{GoalContextLength, GoalInteractive, GoalP50}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: true,
 		Evidence:     "cmd/fak/serve.go:105; 0 means raw history byte-for-byte, hiding context sprawl",
 	},
 	{
 		Name:         "--compact-history-budget",
-		Goals:        []Goal{GoalContextLength, GoalP50, GoalInteractive},
+		Goals:        []Goal{GoalContextLength, GoalP50, GoalInteractive}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: true,
 		Evidence:     "cmd/fak/serve.go:106; 0 means no compaction, hiding context sprawl",
 	},
 	{
 		Name:         "--ctx-paging",
-		Goals:        []Goal{GoalContextLength, GoalInteractive},
+		Goals:        []Goal{GoalContextLength, GoalInteractive}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Hot,
 		DefectHiding: true,
 		Evidence:     "cmd/fak/serve.go:120; per-request X-Fak-Ctx-Paging header wins, so it can change live; OFF hides oversize tool results",
 	},
 	{
 		Name:         "--chat-elide",
-		Goals:        []Goal{GoalContextLength, GoalP50},
+		Goals:        []Goal{GoalContextLength, GoalP50}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Hot,
 		DefectHiding: true,
 		Evidence:     "cmd/fak/serve.go:121; per-request header wins; OFF hides tool-result elision",
 	},
 	{
 		Name:         "--elide-result-bytes",
-		Goals:        []Goal{GoalContextLength, GoalP50},
+		Goals:        []Goal{GoalContextLength, GoalP50}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: true,
 		Evidence:     "cmd/fak/serve.go:109; 0 means no elision, hiding oversized tool results",
 	},
 	{
 		Name:         "--speculative",
-		Goals:        []Goal{GoalInteractive, GoalP50, GoalP99},
+		Goals:        []Goal{GoalInteractive, GoalP50, GoalP99}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: false,
 		Evidence:     "cmd/fak/serve.go:132; structural speculative-decode selector",
 	},
 	{
 		Name:         "--llama-slot-affinity",
-		Goals:        []Goal{GoalBatch, GoalP50, GoalPrefillDecode},
+		Goals:        []Goal{GoalBatch, GoalP50, GoalPrefillDecode}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: false,
 		Evidence:     "cmd/fak/serve.go:135; llama-server prefix slot pinning",
@@ -179,14 +179,14 @@ var DefaultInventory = Inventory{Knobs: []Knob{
 	},
 	{
 		Name:         "--reset-on-budget",
-		Goals:        []Goal{GoalReliability, GoalContextLength},
+		Goals:        []Goal{GoalReliability, GoalContextLength}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: false,
 		Evidence:     "cmd/fak/serve.go:111; distills a carryover seed on budget exhaustion",
 	},
 	{
 		Name:         "--native-max-turns",
-		Goals:        []Goal{GoalInteractive, GoalReliability},
+		Goals:        []Goal{GoalInteractive, GoalReliability}, //enumlint:exempt a knob affects only the goals it names; the per-knob goal list is its footprint, not an exhaustive goal catalog
 		Hotness:      Cold,
 		DefectHiding: false,
 		Evidence:     "cmd/fak/serve.go:96; caps the owned native serve loop's model round-trips",

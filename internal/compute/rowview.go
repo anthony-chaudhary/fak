@@ -81,11 +81,14 @@ func rowViewGeometry(w Tensor) (rowBytes, scaleRowBytes int, reason string) {
 			return 0, 0, "needs in divisible by 16"
 		}
 		return in / 2, in / NVFP4BlockSize, ""
+	default:
+		// Native i-quant dtypes carry a super-block geometry; every other dtype has
+		// no row-view layout and is refused rather than aliased.
+		if f, ok := rawIQFormats[w.Dtype]; ok {
+			return super(f.blockBytes)
+		}
+		return 0, 0, "dtype has no row-view geometry"
 	}
-	if f, ok := rawIQFormats[w.Dtype]; ok {
-		return super(f.blockBytes)
-	}
-	return 0, 0, "dtype has no row-view geometry"
 }
 
 // rowViewQuant narrows a per-row scale vector (host Q8_0 scales) to the view's

@@ -202,6 +202,8 @@ func reconcileState(norm StreamSpec, persisted StreamState) StreamState {
 			state.FailedCount++
 		case ItemYielded:
 			state.YieldedCount++
+		case ItemPending, ItemLeaseAcquired, ItemExecuting, ItemWitnessed, ItemCommitted:
+			// Not summarized as terminal counters; the queue itself carries these states.
 		}
 	}
 	return state

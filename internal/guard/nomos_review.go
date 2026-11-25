@@ -61,6 +61,8 @@ func (c ActionCategory) IsKnown() bool {
 // policy refuses by default. These are the "overeager" actions Nomos would
 // flag: they are irreversible, escalate authority, or move data out of the
 // host, so they must not be auto-approved.
+//
+//enumlint:exempt the overeager set names only the categories refused by default; READ, WRITE and EXECUTE are benign by policy, so this set is partial by definition
 var OvereagerCategories = map[ActionCategory]struct{}{
 	CategoryDestructive:  {},
 	CategoryPrivilege:    {},
@@ -150,7 +152,7 @@ type ReviewPolicy struct {
 // read/write/execute, deny destructive/privilege/exfiltration.
 func DefaultReviewPolicy() ReviewPolicy {
 	return ReviewPolicy{
-		Allowed: map[ActionCategory]struct{}{
+		Allowed: map[ActionCategory]struct{}{ //enumlint:exempt the default policy auto-allows only READ, WRITE and EXECUTE; DESTRUCTIVE, PRIVILEGE and EXFILTRATION are denied by being absent from the allow set
 			CategoryRead:    {},
 			CategoryWrite:   {},
 			CategoryExecute: {},

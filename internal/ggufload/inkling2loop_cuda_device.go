@@ -266,10 +266,14 @@ func inkling2DeviceWeight(be compute.Backend, typ TensorType, raw []byte, rows, 
 			}
 		}
 		return be.Upload(compute.NewF32(be, shape, f), compute.F32), cols, nil
+	default:
+		// Tensor types without a device weight layout take the typed unsupported
+		// refusal below.
 	}
 	return compute.Tensor{}, 0, &UnsupportedInkling2LoopTensorTypeError{Type: typ}
 }
 
+//enumlint:exempt only these five i-quant tensor types have a raw device dtype; every other tensor type is uploaded through its own case in inkling2DeviceWeight
 var inkling2RawIQDtype = map[TensorType]compute.Dtype{
 	TensorIQ2_XS: compute.IQ2_XS, TensorIQ2_S: compute.IQ2_S, TensorIQ3_XXS: compute.IQ3_XXS,
 	TensorIQ3_S: compute.IQ3_S, TensorIQ4_XS: compute.IQ4_XS,
@@ -330,6 +334,9 @@ func (s *inkling2DeviceSet) matrix(m model.Inkling2LoopMatrix) (model.Inkling2Lo
 		if q.rows*q.cols < inkling2HostDenseLimit {
 			return m, nil
 		}
+	default:
+		// Quantized and i-quant matrices always go to the device; only small dense
+		// float matrices stay on the host.
 	}
 	w, padK, err := inkling2DeviceWeight(s.be, q.typ, q.raw, q.rows, q.cols)
 	if err != nil {

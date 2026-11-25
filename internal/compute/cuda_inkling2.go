@@ -115,8 +115,9 @@ func (c *cudaBackend) Ink2MatVec(w Tensor, x, y Ink2Ref) error {
 	case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ2_S, IQ3_XXS, IQ3_S:
 		cudaIQGEMV(w.Dtype, wb, xp, yp, out, in, 1)
 		return nil
+	default:
+		return fmt.Errorf("cuda inkling2 matvec: unsupported weight dtype %s", w.Dtype)
 	}
-	return fmt.Errorf("cuda inkling2 matvec: unsupported weight dtype %s", w.Dtype)
 }
 
 func (c *cudaBackend) Ink2MatVecQ8(w Tensor, x, gate, q Ink2Ref, quantize bool, y Ink2Ref) (bool, error) {
@@ -130,6 +131,7 @@ func (c *cudaBackend) Ink2MatVecQ8(w Tensor, x, gate, q Ink2Ref, quantize bool, 
 		c.ink2Ptr(q), ink2Bool(quantize), c.ink2F(y), C.int(w.Shape[0]), C.int(w.Shape[1]), C.int(w.Quant.Block)))
 }
 
+//enumlint:exempt the expert kernel only has format ids for these seven dtypes; every other dtype is absent from the table and takes the dense path, so the map is partial by design
 var ink2ExpertFormat = map[Dtype]C.int{NVFP4: 0, IQ2_XS: 1, IQ2_S: 2, IQ3_XXS: 3, IQ3_S: 4, IQ4_NL: 5, Q3_K: 6}
 
 func (c *cudaBackend) Ink2ExpertMatVec(stack Tensor, expertRows int, ids, x Ink2Ref, xStride int, y Ink2Ref, k int, scale Ink2Ref, situ *Ink2Situ) (bool, error) {

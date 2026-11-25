@@ -127,6 +127,9 @@ func absolutizeLink(root, sourceDir string, kinds pathKinds, whole, label, rawTa
 		return "[" + label + "](" + repoURL(rel, true) + suffix + ")"
 	case kindFile:
 		return "[" + label + "](" + repoURL(rel, false) + suffix + ")"
+	case kindMissing:
+		// A link that does not resolve to a file or directory is left as written.
+		return whole
 	}
 	return whole
 }
