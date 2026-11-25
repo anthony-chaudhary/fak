@@ -1222,6 +1222,8 @@ func cmdBench(argv []string) {
 			os.Exit(runBenchAgent(os.Stdout, os.Stderr, argv[1:]))
 		case "h2h":
 			os.Exit(runBenchH2H(os.Stdout, os.Stderr, argv[1:]))
+		case "lane-ledger":
+			os.Exit(runBenchLaneLedger(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)

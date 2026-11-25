@@ -30,12 +30,13 @@ package compute
 
 // ---- NVIDIA per-compute-capability occupancy limits -----------------------------
 //
-// The per-SM ISA limits the occupancy calculator reads. These are architecture (compute-capability)
-// constants from the CUDA C Programming Guide "Technical Specifications per Compute Capability"
-// table — NOT board-level specs. The SM COUNT is a per-SKU board property (an A100 has 108 enabled
-// SMs) and is deliberately NOT in this table: it is passed to Occupancy() as deviceSMs, the same way
-// rocm_arch.go keeps the ISA wavefront width in its table but not the CU count. Registers/threads/
-// warps/blocks-per-SM are identical across CC 8.0/9.0/10.0; only shared-memory-per-SM grew.
+// The per-SM ISA limits the occupancy calculator reads. The per-SM ceilings are the CUDA Programming
+// Guide "Compute Capabilities" appendix values, NOT board-level specs. The allocation granularities
+// are occupancy-calculator values that the same table omits. The SM COUNT is a per-SKU board property
+// (an A100 has 108 enabled SMs) and is deliberately NOT in this table: it is passed to Occupancy() as
+// deviceSMs, the same way rocm_arch.go keeps the ISA wavefront width in its table but not the CU count.
+// Warp size and registers-per-SM are identical across every modeled CC; the thread/warp/block ceilings
+// differ on CC 8.9 and 12.x, and shared memory grew from 8.0 to 9.0/10.0.
 
 // NVCompute is an NVIDIA compute capability fak models a decode launch against.
 type NVCompute uint8
@@ -49,38 +50,56 @@ const (
 	SM90
 	// SM100 is GB100 / B200 (CC 10.0) — Blackwell, the shortlist's real target (tmem, nvfp4, CLC).
 	SM100
+	// SM89 is CC 8.9 (Ada Lovelace) — the per-SM thread/warp/block/shared ceilings below SM80's.
+	SM89
+	// SM120 is CC 12.x — per-SM ceilings identical to SM89's in the vendor table.
+	SM120
 )
 
 // NVArch is one compute capability's per-SM occupancy limits: the four resource ceilings the
 // occupancy calculator takes the min over, plus the allocation granularities that round a launch's
-// demand up before it is charged. Every field is an ISA constant, host-known and device-independent.
+// demand up before it is charged. Every field is a per-capability constant, host-known and independent
+// of the SKU; the allocation granularities are repo-carried values (see Source).
 type NVArch struct {
 	Cap                  NVCompute
 	Label                string // short id, e.g. "sm_80"
-	RegsPerSM            int    // physical registers per SM (65536 on 8.0/9.0/10.0)
-	MaxThreadsPerSM      int    // resident-thread ceiling (2048 on 8.0/9.0/10.0)
+	RegsPerSM            int    // physical registers per SM (65536 on every modeled CC)
+	MaxThreadsPerSM      int    // resident-thread ceiling (2048 on 8.0/9.0/10.0; 1536 on 8.9/12.x)
 	MaxWarpsPerSM        int    // resident-warp ceiling (= MaxThreadsPerSM/WarpSize)
-	MaxBlocksPerSM       int    // resident-block ceiling (32 on 8.0/9.0/10.0)
-	SmemPerSM            int    // shared memory per SM in bytes (164 KiB on 8.0; 228 KiB on 9.0/10.0)
+	MaxBlocksPerSM       int    // resident-block ceiling (32 on 8.0/9.0/10.0; 24 on 8.9/12.x)
+	SmemPerSM            int    // shared memory per SM in bytes (164 KiB on 8.0; 228 KiB on 9.0/10.0; 100 KiB on 8.9/12.x)
 	WarpSize             int    // 32 on all NVIDIA
 	RegAllocUnit         int    // per-warp register allocation granularity (256 on Volta+)
 	WarpAllocGranularity int    // warps rounded to a multiple of this when charging registers (4)
 	SmemAllocUnit        int    // shared-memory allocation granularity in bytes (128 on Volta+)
+	Source               string // provenance of the per-SM limits and of the allocation granularities
 }
 
-// nvArches is the occupancy-limit table, one row per modeled compute capability, in generation
-// order. The values are the CUDA C Programming Guide per-compute-capability specs; sm_80 is the
+// nvSourceLimits names where each row's numbers come from. The per-SM ceilings are published in the
+// vendor table; the allocation granularities are occupancy-calculator values the same table omits,
+// so a reader must not take them as vendor-published.
+const nvSourceLimits = "per-SM limits: NVIDIA CUDA Programming Guide, Compute Capabilities; " +
+	"allocation granularities: occupancy-calculator values, not published in that table"
+
+// nvArches is the occupancy-limit table, one row per modeled compute capability, in registration
+// order. The per-SM ceilings are the CUDA Programming Guide per-compute-capability specs; sm_80 is the
 // row the A100 decode measurement is graded against, sm_100 the row the shortlist ultimately targets.
 var nvArches = []NVArch{
 	{Cap: SM80, Label: "sm_80", RegsPerSM: 65536, MaxThreadsPerSM: 2048, MaxWarpsPerSM: 64,
 		MaxBlocksPerSM: 32, SmemPerSM: 164 * 1024, WarpSize: 32, RegAllocUnit: 256,
-		WarpAllocGranularity: 4, SmemAllocUnit: 128},
+		WarpAllocGranularity: 4, SmemAllocUnit: 128, Source: nvSourceLimits},
 	{Cap: SM90, Label: "sm_90", RegsPerSM: 65536, MaxThreadsPerSM: 2048, MaxWarpsPerSM: 64,
 		MaxBlocksPerSM: 32, SmemPerSM: 228 * 1024, WarpSize: 32, RegAllocUnit: 256,
-		WarpAllocGranularity: 4, SmemAllocUnit: 128},
+		WarpAllocGranularity: 4, SmemAllocUnit: 128, Source: nvSourceLimits},
 	{Cap: SM100, Label: "sm_100", RegsPerSM: 65536, MaxThreadsPerSM: 2048, MaxWarpsPerSM: 64,
 		MaxBlocksPerSM: 32, SmemPerSM: 228 * 1024, WarpSize: 32, RegAllocUnit: 256,
-		WarpAllocGranularity: 4, SmemAllocUnit: 128},
+		WarpAllocGranularity: 4, SmemAllocUnit: 128, Source: nvSourceLimits},
+	{Cap: SM89, Label: "sm_89", RegsPerSM: 65536, MaxThreadsPerSM: 1536, MaxWarpsPerSM: 48,
+		MaxBlocksPerSM: 24, SmemPerSM: 100 * 1024, WarpSize: 32, RegAllocUnit: 256,
+		WarpAllocGranularity: 4, SmemAllocUnit: 128, Source: nvSourceLimits},
+	{Cap: SM120, Label: "sm_120", RegsPerSM: 65536, MaxThreadsPerSM: 1536, MaxWarpsPerSM: 48,
+		MaxBlocksPerSM: 24, SmemPerSM: 100 * 1024, WarpSize: 32, RegAllocUnit: 256,
+		WarpAllocGranularity: 4, SmemAllocUnit: 128, Source: nvSourceLimits},
 }
 
 var nvByCap = func() map[NVCompute]NVArch {
@@ -99,7 +118,7 @@ func LookupNVArch(cap NVCompute) (NVArch, bool) {
 	return a, ok
 }
 
-// KnownNVArches returns the occupancy-limit table in generation order.
+// KnownNVArches returns the occupancy-limit table in registration order.
 func KnownNVArches() []NVArch {
 	out := make([]NVArch, len(nvArches))
 	copy(out, nvArches)
@@ -198,6 +217,15 @@ type DecodeOccupancy struct {
 	DeviceOcc      float64 // achieved device-wide warp occupancy = resident warps / (DeviceSMs*MaxWarpsPerSM)
 }
 
+// registerWarps charges launch l's registers against the register file. A warp's registers round up to
+// RegAllocUnit, the file fits fitWarps of them, and the warp count rounds down to WarpAllocGranularity
+// to give grantedWarps. blocksPerSM and the register footprint both read this one arithmetic.
+func (a NVArch) registerWarps(l DecodeLaunch) (perWarp, fitWarps, grantedWarps int) {
+	perWarp = roundUpInt(l.RegsPerThread*a.WarpSize, a.RegAllocUnit)
+	fitWarps = a.RegsPerSM / perWarp
+	return perWarp, fitWarps, roundDownInt(fitWarps, a.WarpAllocGranularity)
+}
+
 // blocksPerSM runs the standard occupancy-calculator min over the four per-SM resource ceilings and
 // reports the binding one. Register demand is charged at warp granularity (regs/thread × warpSize,
 // rounded up to RegAllocUnit, then warps-per-SM rounded down to WarpAllocGranularity); shared memory
@@ -216,9 +244,8 @@ func (a NVArch) blocksPerSM(l DecodeLaunch) (n int, limiter string) {
 	// register ceiling (absent when the compiler count is unknown/zero)
 	blocksReg := maxInt32Blocks
 	if l.RegsPerThread > 0 {
-		regsPerWarp := roundUpInt(l.RegsPerThread*a.WarpSize, a.RegAllocUnit)
-		warpsByReg := roundDownInt(a.RegsPerSM/regsPerWarp, a.WarpAllocGranularity)
-		blocksReg = warpsByReg / warpsPerBlock
+		_, _, grantedWarps := a.registerWarps(l)
+		blocksReg = grantedWarps / warpsPerBlock
 	}
 
 	// shared-memory ceiling (absent when the kernel uses no dynamic smem)
@@ -273,8 +300,8 @@ func (a NVArch) Occupancy(l DecodeLaunch, deviceSMs int) DecodeOccupancy {
 		GridBlocks:     l.GridBlocks,
 		TotalSlots:     deviceSMs * bpsm,
 	}
-	// idle SMs: the scheduler spreads blocks one-per-SM first, so a grid smaller than the SM count
-	// leaves DeviceSMs−GridBlocks SMs with nothing to do this decode step. This is the underfill.
+	// idle SMs: the model places blocks one-per-SM first, so a grid smaller than the SM count leaves
+	// DeviceSMs−GridBlocks SMs with nothing to do this decode step. This is the underfill.
 	if l.GridBlocks < deviceSMs {
 		occ.IdleSMs = deviceSMs - l.GridBlocks
 	}

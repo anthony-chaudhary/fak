@@ -38,12 +38,31 @@ func TestNVArchTable(t *testing.T) {
 			t.Errorf("%v SmemPerSM wrong: %+v (ok=%v)", cap, g, ok)
 		}
 	}
+	// sm_89 and sm_120 share the smaller per-SM thread/warp/block ceilings and 100 KiB shared memory.
+	for _, cap := range []NVCompute{SM89, SM120} {
+		g, ok := LookupNVArch(cap)
+		if !ok || g.MaxThreadsPerSM != 1536 || g.MaxWarpsPerSM != 48 || g.MaxBlocksPerSM != 24 ||
+			g.SmemPerSM != 100*1024 || g.RegsPerSM != 65536 {
+			t.Errorf("%v per-SM limits wrong: %+v (ok=%v)", cap, g, ok)
+		}
+	}
+	if g, ok := LookupNVArch(SM89); !ok || g.Label != "sm_89" {
+		t.Errorf("SM89 label wrong: %+v (ok=%v)", g, ok)
+	}
+	if g, ok := LookupNVArch(SM120); !ok || g.Label != "sm_120" {
+		t.Errorf("SM120 label wrong: %+v (ok=%v)", g, ok)
+	}
+	for _, row := range KnownNVArches() {
+		if row.Source != nvSourceLimits {
+			t.Errorf("%s Source = %q, want the vendor-table provenance", row.Label, row.Source)
+		}
+	}
 	// fail-closed: the zero value is not a known arch.
 	if _, ok := LookupNVArch(NVUnknown); ok {
 		t.Error("NVUnknown must not resolve to an arch")
 	}
-	if n := len(KnownNVArches()); n != 3 {
-		t.Errorf("KnownNVArches len = %d, want 3", n)
+	if n := len(KnownNVArches()); n != 5 {
+		t.Errorf("KnownNVArches len = %d, want 5", n)
 	}
 }
 
