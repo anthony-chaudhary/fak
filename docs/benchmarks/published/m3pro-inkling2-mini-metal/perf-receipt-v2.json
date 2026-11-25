@@ -1,0 +1,301 @@
+{
+  "schema": "fak.perf-receipt/2",
+  "kind": "candidate",
+  "ticket": "inkling2-m3-qualification-final-20261124",
+  "step": "Qualify native Inkling 2 Metal target verification against Splash on one Apple M3 Pro",
+  "date": "2026-11-24",
+  "evidence_class": "HW-WITNESSED",
+  "hw_label": "[HW-WITNESSED Apple M3 Pro, 18 GPU cores, 36 GiB unified memory, macOS 27.0.1 arm64]",
+  "node": "One MacBook Pro. Four serial arms, 2026-11-24 23:26:09\u201323:29:01 UTC.",
+  "models": {
+    "target": "~/models/inkling2/Inkling-2-Mini-UD-Q3_K_XL.gguf",
+    "target_bytes": 13631779296,
+    "target_sha256": "e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639",
+    "draft": {
+      "revision": "incoai/Inkling-2-Mini-DFlash2@4f9088ea66c21f2b99ed657d1941c306b03e84d2",
+      "source_host": "aegis-fak",
+      "local_path": "~/models/inkling2/Inkling-2-Mini-DFlash2/model.safetensors",
+      "bytes": 989975616,
+      "sha256_local_and_source": "217980ab00d116693fa5946df7bbfd967caf5fac1f529afd541fbd470ddb54ee",
+      "verified_at": "2026-11-24T22:31:08.807522+00:00"
+    }
+  },
+  "engines": {
+    "baseline": {
+      "name": "Splash",
+      "version": "1.7.2",
+      "sha256": "3f572ab18f2098a902128d6393ae0aa197e030df6d0d0c339848c17f34250878",
+      "upstream_revision": "2afc7337aacc044722fa95e4cb3da75c281a19a8"
+    },
+    "candidate": {
+      "name": "Fak native Metal",
+      "revision": "1f31533f2ccba844c2f03d176bfbb98772913754",
+      "tree": "dde566bc86e93dad5aeb41a08b07bba4f07cf746",
+      "measured_binary_sha256": "f2f364878dd37d0aac7d20bcd208f5f22929a6c733c0b81c504a7f056c028f2a",
+      "cli_binary_sha256": "7f204a01e02ca1c25932a8fd80748ff1efe8ca3d1daa84dc1c84e429e94cafbf"
+    }
+  },
+  "workload": "Single-request full-depth greedy generation, raw prompt IDs, same target and draft. Each arm ran the same 24 requests in m-qualification.jsonl. Six measured samples per shape per engine. Prompt and decode are timed separately. Decode measures generated tokens after the first token.",
+  "argv": [
+    "/private/tmp/fak-inkling-oss.M2B53k/splash172/splash-1.7.2-arm64-macos26/engine/splash serve-native /private/tmp/fak-inkling-oss.M2B53k/splash-models/.resolved/66abcac71f8824c7d823e0b92e9751151425334d15f6b7dd62b359832d8cf181 4096 auto 0 --max-concurrent-requests 1",
+    "/tmp/fak-inkling2-mac-native-run/matched-port-N ~/models/inkling2/Inkling-2-Mini-UD-Q3_K_XL.gguf < m-qualification.jsonl"
+  ],
+  "env": [
+    "The paired launcher inherited its shell environment and supplied no per-arm overrides. The complete ambient environment was not recorded.",
+    "The Splash control used its packaged metallib and one request slot. The Fak target used embedded MSL and the native DFlash2 verifier. Each process was freshly opened for its arm."
+  ],
+  "token_time": {
+    "metric": "decode_tok_s",
+    "units": "tok/s",
+    "workload": "capitals, 19 input IDs, 128 output IDs, 127 timed decode steps",
+    "protocol": "A B B A: Splash, Fak, Fak, Splash. Median across six post-warmup samples per engine, ordered by arm and request.",
+    "baseline": {
+      "engine": "Splash 1.7.2 / DFlash2",
+      "decode_tok_s": [
+        41.24852463446337,
+        41.75055130452392,
+        39.189729205142804,
+        51.22597471534291,
+        52.13458275708199,
+        51.981646794942634
+      ],
+      "median_decode_tok_s": 46.48826300993341,
+      "ms_per_token": 21.51080585192706
+    },
+    "candidate": {
+      "engine": "Fak native Metal / DFlash2",
+      "decode_tok_s": [
+        47.022111870417426,
+        44.5063035337786,
+        43.92516609597719,
+        48.63057622253359,
+        49.227111747605,
+        48.50674732178149
+      ],
+      "median_decode_tok_s": 47.76442959609946,
+      "ms_per_token": 20.936081692089587
+    },
+    "speedup": 1.0274513716697344,
+    "profiling": "off during paired qualification",
+    "note": "See by_workload for every measured prompt, including the lowest sustained decode ratio."
+  },
+  "by_workload": {
+    "capitals/32": {
+      "prefill": {
+        "fak": 160.46369676621123,
+        "splash": 149.28369923229218,
+        "ratio": 1.0748909465093204,
+        "by_arm": {
+          "fak": [
+            153.836,
+            166.961
+          ],
+          "splash": [
+            147.32,
+            161.408
+          ]
+        }
+      },
+      "decode": {
+        "fak": 40.32888444761795,
+        "splash": 37.53708183530459,
+        "ratio": 1.0743745244918745,
+        "by_arm": {
+          "fak": [
+            38.318,
+            43.168
+          ],
+          "splash": [
+            36.403,
+            39.148
+          ]
+        }
+      }
+    },
+    "fibonacci/32": {
+      "prefill": {
+        "fak": 145.24863965711523,
+        "splash": 143.2063156272361,
+        "ratio": 1.0142614103360865,
+        "by_arm": {
+          "fak": [
+            144.068,
+            159.758
+          ],
+          "splash": [
+            138.788,
+            147.37
+          ]
+        }
+      },
+      "decode": {
+        "fak": 55.50371001340629,
+        "splash": 54.92421327521352,
+        "ratio": 1.0105508427638106,
+        "by_arm": {
+          "fak": [
+            53.136,
+            62.986
+          ],
+          "splash": [
+            49.779,
+            60.005
+          ]
+        }
+      }
+    },
+    "p128/32": {
+      "prefill": {
+        "fak": 320.73540124761263,
+        "splash": 323.7688841801212,
+        "ratio": 0.9906307150540725,
+        "by_arm": {
+          "fak": [
+            314.924,
+            326.547
+          ],
+          "splash": [
+            320.786,
+            336.255
+          ]
+        }
+      },
+      "decode": {
+        "fak": 177.05437551873518,
+        "splash": 119.58293230764706,
+        "ratio": 1.4805990462186798,
+        "by_arm": {
+          "fak": [
+            159.831,
+            181.884
+          ],
+          "splash": [
+            111.727,
+            128.134
+          ]
+        }
+      }
+    },
+    "pp512/1": {
+      "prefill": {
+        "fak": 458.7474786740507,
+        "splash": 467.3749396421746,
+        "ratio": 0.9815405999843956,
+        "by_arm": {
+          "fak": [
+            467.223,
+            450.2
+          ],
+          "splash": [
+            464.231,
+            470.226
+          ]
+        }
+      }
+    },
+    "capitals/128": {
+      "prefill": {
+        "fak": 153.05394407577847,
+        "splash": 148.18793889999975,
+        "ratio": 1.0328367154027454,
+        "by_arm": {
+          "fak": [
+            147.33,
+            161.153
+          ],
+          "splash": [
+            139.057,
+            172.386
+          ]
+        }
+      },
+      "decode": {
+        "fak": 47.76442959609946,
+        "splash": 46.48826300993342,
+        "ratio": 1.0274513716697342,
+        "by_arm": {
+          "fak": [
+            44.506,
+            48.631
+          ],
+          "splash": [
+            41.249,
+            51.982
+          ]
+        }
+      }
+    },
+    "fibonacci/128": {
+      "prefill": {
+        "fak": 145.5578691905198,
+        "splash": 148.0942027629642,
+        "ratio": 0.9828735120948389,
+        "by_arm": {
+          "fak": [
+            146.058,
+            137.845
+          ],
+          "splash": [
+            140.85,
+            158.348
+          ]
+        }
+      },
+      "decode": {
+        "fak": 63.573401509205794,
+        "splash": 65.21173803201614,
+        "ratio": 0.9748766622044945,
+        "by_arm": {
+          "fak": [
+            63.943,
+            63.204
+          ],
+          "splash": [
+            61.643,
+            66.758
+          ]
+        }
+      }
+    }
+  },
+  "parity": {
+    "short": "All six measured outputs per engine matched the short oracle in every shape.",
+    "fibonacci_128": "Six of six outputs per engine matched all 128 Koosh IDs.",
+    "capitals_128": {
+      "fak_prefix_lengths": [
+        41,
+        128,
+        111,
+        128,
+        128,
+        65
+      ],
+      "splash_prefix_lengths": [
+        128,
+        65,
+        41,
+        65,
+        111,
+        128
+      ],
+      "note": "Both engines varied at positions 41, 65 and 111 over six runs. Exact long capitals output occurred in three Fak runs and two Splash runs."
+    }
+  },
+  "profiles": {
+    "separate_runs": true,
+    "physical_command_phase_and_width": "receipts/independent-cycle-attribution.json",
+    "fixed_width_ablation": "receipts/N-fixed-width-summary.json",
+    "source_shader_control": "receipts/native-source-vs-release-metallib.json",
+    "input_and_logits": "receipts/long-oracle-verdict.json"
+  },
+  "artifacts": [
+    "m-qualification.jsonl",
+    "receipts/npaired-a-splash.jsonl",
+    "receipts/npaired-b-fak.jsonl",
+    "receipts/npaired-c-fak.jsonl",
+    "receipts/npaired-d-splash.jsonl",
+    "receipts/n-abba-summary.json",
+    "receipts/n-build-identity.json",
+    "receipts/independent-N-audit.json"
+  ]
+}

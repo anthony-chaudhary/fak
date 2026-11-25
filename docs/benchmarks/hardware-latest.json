@@ -8,9 +8,9 @@
       "row": "| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |"
     },
     "Mac": {
-      "observed": "2026-09-03",
-      "detail": "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md",
-      "row": "| Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |"
+      "observed": "2026-11-24",
+      "detail": "docs/benchmarks/published/m3pro-inkling2-mini-metal/RESULTS.md",
+      "row": "| Mac | Inkling-2-Mini UD-Q3_K_XL on a 36 GB Apple M3 Pro (18-core GPU, Metal): fak-native decode with DFlash2 draft verification reached 97.5–107.4% of Splash 1.7.2 on natural prompts (40.3 vs 37.5 tok/s on 32-token capitals) and 148% on repeated text (177.1 vs 119.6); prefill was 98–108% of Splash; mainline llama.cpp b12681 decodes 18.9 tok/s on the same Mac and GGUF; observed 2026-11-24. | HW-witnessed ABBA, warm single request, same target and draft weights; 128-token Fibonacci trails Splash by 2.5% (63.6 vs 65.2). Short suites match token-for-token; one 128-token prompt diverges at near-ties in both engines. Needs `main` at or after 1f31533f2: **not in the v0.57.0 release**. [M3 Pro Inkling-2 receipt](docs/benchmarks/published/m3pro-inkling2-mini-metal/RESULTS.md) |"
     },
     "NVIDIA": {
       "observed": "2026-11-24",

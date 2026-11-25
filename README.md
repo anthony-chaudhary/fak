@@ -73,7 +73,7 @@ measurement exists.
 
 | Platform | Latest witnessed result | Status & Details |
 |---|---|---|
-| Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
+| Mac | Inkling-2-Mini UD-Q3_K_XL on a 36 GB Apple M3 Pro (18-core GPU, Metal): fak-native decode with DFlash2 draft verification reached 97.5–107.4% of Splash 1.7.2 on natural prompts (40.3 vs 37.5 tok/s on 32-token capitals) and 148% on repeated text (177.1 vs 119.6); prefill was 98–108% of Splash; mainline llama.cpp b12681 decodes 18.9 tok/s on the same Mac and GGUF; observed 2026-11-24. | HW-witnessed ABBA, warm single request, same target and draft weights; 128-token Fibonacci trails Splash by 2.5% (63.6 vs 65.2). Short suites match token-for-token; one 128-token prompt diverges at near-ties in both engines. Needs `main` at or after 1f31533f2: **not in the v0.57.0 release**. [M3 Pro Inkling-2 receipt](docs/benchmarks/published/m3pro-inkling2-mini-metal/RESULTS.md) |
 | AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |
 | NVIDIA | Inkling-2-Mini UD-Q3_K_XL on an RTX 5080 16 GB (sm_120): fak-native resident CUDA decode reached 119.9 tok/s single-stream on the default path, about 1.48x upstream llama.cpp tg128 (81.0 on the same card and GGUF) and level with the fastest llama.cpp fork measured (119.5 in the same window); opt-in speculative decode (`FAK_INKLING2_SPEC=2`) reached 151.7 tok/s, +26.6% over plain decode in the same window; greedy output matches the llama.cpp oracle on 3 of 4 cases; observed 2026-11-24. | HW-witnessed ABBA, in-process decode bench, not a served-endpoint rate. Speculative decode is off by default because its batched verify is not bit-exact to the per-token step. The fourth oracle case diverges at a known near-tie, and at 1,946 tokens of context plain decode still trails the fork (89.0 vs 113.8 tok/s). [Plain decode receipt](docs/benchmarks/published/aegis-inkling2-fork-parity/RESULTS.md), [spec decode receipt](docs/benchmarks/published/aegis-inkling2-spec-decode/RESULTS.md) |
 
@@ -144,6 +144,11 @@ fak agent --offline   # -> task completed
 
 ## What changed since 2026-11-10
 
+- Inkling-2-Mini runs fak-native on Apple Metal: `fak run <path>/Inkling-2-Mini-UD-Q3_K_XL.gguf`
+  picks Metal automatically and verifies DFlash2 draft tokens on the GPU when an
+  `Inkling-2-Mini-DFlash2/` directory sits next to the GGUF (receipt in the table above).
+  It landed after v0.57.0, so install from `main` (`go install github.com/anthony-chaudhary/fak/cmd/fak@main`)
+  until the next release; `fak version` shows the commit on its `build:` line.
 - A second model family runs fak-native on NVIDIA: Inkling-2-Mini decodes resident on
   CUDA with one replayed graph per token, 119.9 tok/s on an RTX 5080 (receipt in the
   table above). Speculative decode is opt-in (`FAK_INKLING2_SPEC=2` plus
@@ -181,7 +186,7 @@ is linked instead of an unrecorded mirror.
 | Qwen3.8-27B Q4_K_M (`qwen38`, default) | [unsloth/Qwen3.8-27B-GGUF@f1bfb127](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/tree/f1bfb127c64f7072bdd2cad55f258b9c8b2910fe) · [official Qwen/Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B) | Apple M3 Pro, Metal |
 | Qwen3.6-27B Q4_K_M | [lmstudio-community/Qwen3.6-27B-GGUF](https://huggingface.co/lmstudio-community/Qwen3.6-27B-GGUF) | AMD RX 7600, Vulkan |
 | Qwen2.5-3B-Instruct Q8_0 | [Qwen/Qwen2.5-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct) (receipt records the Q8_0 GGUF filename only) | NVIDIA H100, CUDA |
-| Inkling-2-Mini UD-Q3_K_XL | [unsloth/Inkling-2-Mini-GGUF](https://huggingface.co/unsloth/Inkling-2-Mini-GGUF) (file under `Mainline_Support/`; receipt records its sha256) | NVIDIA RTX 5080, CUDA |
+| Inkling-2-Mini UD-Q3_K_XL | [unsloth/Inkling-2-Mini-GGUF](https://huggingface.co/unsloth/Inkling-2-Mini-GGUF) (file under `Mainline_Support/`; receipt records its sha256) · Metal draft [incoai/Inkling-2-Mini-DFlash2@4f9088ea](https://huggingface.co/incoai/Inkling-2-Mini-DFlash2/tree/4f9088ea66c21f2b99ed657d1941c306b03e84d2) | NVIDIA RTX 5080, CUDA · Apple M3 Pro, Metal |
 | DeepSeek-V4.1-Flash Q2_K (7 shards, 264,515,279,456 B) | [vcruz305/DeepSeek-V4.1-Flash-GGUF@c4a08554](https://huggingface.co/vcruz305/DeepSeek-V4.1-Flash-GGUF/tree/c4a085541cb53f67ee5e57b63d255e80cef286e7) · [official deepseek-ai/DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) | Strix Halo, Vulkan |
 | Qwen3.5-0.8B Q4_K_M | [Qwen/Qwen3.5-0.8B](https://huggingface.co/Qwen/Qwen3.5-0.8B) | Apple M3 Pro, Metal keepalive |
 | Prism Bonsai-2-27B PQ2_0 | [prism-ml/Ternary-Bonsai-2-27B-gguf@b072e1d3](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/b072e1d3b35a0a630cece372c2127528e0994386) | Apple M3 Pro, CPU |

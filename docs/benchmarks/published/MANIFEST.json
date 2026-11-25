@@ -1,7 +1,25 @@
 {
   "schema": "fak.benchpub.manifest.v1",
-  "generated_at": "2026-11-24T21:47:29Z",
+  "generated_at": "2026-11-25T01:36:01Z",
   "entries": [
+    {
+      "campaign": "m3pro-inkling2-mini-metal",
+      "date": "2026-11-24",
+      "source_dir": "docs/benchmarks/m3pro-inkling2-mini-metal",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "f996820ed4279136bdb756f147a98c75eaefc87ea7852dfa55e7ebf4cae5e5c7",
+          "bytes": 16406,
+          "source_sha256": "2e33033b00be0d839241145032c710a9ec6c2ef828ccc8f0738674b5edf38ee8"
+        },
+        {
+          "name": "perf-receipt-v2.json",
+          "sha256": "b20059a09db398c0d91cf9bcca3614aa132de7fa80990ba6f5f6189e587d449f",
+          "bytes": 8828
+        }
+      ]
+    },
     {
       "campaign": "aegis-inkling2-spec-decode",
       "date": "2026-11-24",

@@ -20,6 +20,7 @@ some pages report a run that was blocked or not made.
 | `aegis2-inkling2-batched-prefill` | 2026-11-24 | docs/benchmarks/aegis2-inkling2-batched-prefill | RESULTS.md (1) |
 | `aegis2-inkling2-expert-gemv-climb` | 2026-11-24 | docs/benchmarks/aegis2-inkling2-expert-gemv-climb | RESULTS.md, perf-receipt-v2.json (2) |
 | `aegis2-inkling2-fused-climb` | 2026-11-24 | docs/benchmarks/aegis2-inkling2-fused-climb | RESULTS.md (1) |
+| `m3pro-inkling2-mini-metal` | 2026-11-24 | docs/benchmarks/m3pro-inkling2-mini-metal | RESULTS.md, perf-receipt-v2.json (2) |
 | `aegis-inkling2-gpu-decode-climb` | 2026-11-23 | docs/benchmarks/aegis-inkling2-gpu-decode-climb | RESULTS.md, perf-receipt-v2.json (2) |
 | `aegis-inkling2-resident-cuda` | 2026-11-23 | docs/benchmarks/aegis-inkling2-resident-cuda | RESULTS.md, perf-receipt-v2.json (2) |
 | `deveval-multigold` | 2026-11-23 | docs/benchmarks/deveval-multigold | README.md (1) |
