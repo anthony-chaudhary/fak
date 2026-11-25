@@ -181,6 +181,15 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		// up to its max-age ceiling. Unarmed — the default — reuseServe is one lock-free
 		// map probe and a nil check, so the pre-#5119 path stays byte-identical.
 		if body, meta, ok := s.reuseServe(ctx, tool, tc.Function.Arguments); ok {
+			if serve, refusal := s.admitServedHit(ctx, tc, argsDigest, reqTrace); !serve {
+				if refusal != nil {
+					dropped++
+					adjs = append(adjs, *refusal)
+				} else {
+					pass = append(pass, tc)
+				}
+				continue
+			}
 			served = append(served, servedToolLine(tool, body, meta))
 			servedHits++
 			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: true,
@@ -290,6 +299,15 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 			pass = append(pass, tc)
 			continue
 		}
+		if serve, refusal := s.admitServedHit(ctx, tc, argsDigest, reqTrace); !serve {
+			if refusal != nil {
+				dropped++
+				adjs = append(adjs, *refusal)
+			} else {
+				pass = append(pass, tc)
+			}
+			continue
+		}
 		served = append(served, servedToolLine(tool, body, res.Meta))
 		servedHits++
 		if proofSource {
@@ -299,7 +317,8 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: true,
 			Verdict: WireVerdict{Kind: "ALLOW", Reason: "SERVED_INLINE", By: "vdso"}})
 	}
-	kept, adjs2, dropped := s.adjudicateProposed(ctx, pass, reqTrace)
+	kept, adjs2, passDropped := s.adjudicateProposed(ctx, pass, reqTrace)
+	dropped += passDropped
 	adjs = append(adjs, adjs2...)
 	fusedIDs := s.annotateToolLivelock(reqTrace, adjs)
 	// A fused call had its adjudication flipped to DENY above, but it is still sitting
@@ -320,6 +339,32 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		servedText = strings.Join(served, "\n")
 	}
 	return kept, adjs, dropped, servedText, servedHits
+}
+
+// admitServedHit folds this server's current adjudicator chain over a call a
+// cache seam is about to answer inline: cached bytes were admitted under some
+// earlier policy or another server's chain, so they prove nothing about this
+// call now. Only a plain ALLOW serves. A refusal is returned for the caller to
+// record as dropped; a TRANSFORM or build error returns (false, nil) so the call
+// takes the ordinary adjudicateProposed path, which owns repaired arguments and
+// MALFORMED handling.
+func (s *Server) admitServedHit(ctx context.Context, tc agent.ToolCall, argsDigest, reqTrace string) (bool, *ToolAdjudication) {
+	if s.k == nil {
+		return false, nil
+	}
+	tool := advertisedClientToolName(ctx, tc.Function.Name)
+	wv, _, err := s.adjudicate(ctx, tool, clientToolPolicyArguments(tool, tc.Function.Arguments), false, "", reqTrace)
+	if err != nil {
+		return false, nil
+	}
+	switch wv.Kind {
+	case "ALLOW":
+		return true, nil
+	case "TRANSFORM":
+		return false, nil
+	default:
+		return false, &ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: false, Verdict: wv}
+	}
 }
 
 // fakFreshMarker is the reserved arg key the served-cache line tells the model to set

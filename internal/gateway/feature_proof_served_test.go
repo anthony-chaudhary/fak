@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/engine"
+	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
@@ -41,7 +42,8 @@ func TestFeatureProofVDSOProductionTierWrapperAcceptedRealHit(t *testing.T) {
 		}
 	}
 
-	srv := &Server{metrics: newGatewayMetrics(time.Now())}
+	abi.RegisterAdjudicator(0, allowAllAdj{})
+	srv := &Server{metrics: newGatewayMetrics(time.Now()), k: kernel.New("")}
 	calls := []agent.ToolCall{{
 		ID:   "production-tier-proof",
 		Type: "function",
