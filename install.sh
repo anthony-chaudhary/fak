@@ -16,11 +16,21 @@
 #                     backend compiled in, published as
 #                     fak_<VERSION>_darwin_arm64_metal.tar.gz
 #   --variant vulkan  linux/amd64 GPU build, including AMD Strix Halo
+#   --variant cuda    Linux NVIDIA build compiled from source on this host (no CUDA
+#                     archive is published); needs git, Go, a C++ compiler and the
+#                     CUDA toolkit (nvcc). Auto-selected when nvidia-smi sees a GPU
+#                     and no working docker is available.
 #
 # Knobs (environment):
-#   FAK_VERSION       pin a version, e.g. 0.24.0 (default: latest release)
+#   FAK_VERSION       pin a version, e.g. 0.24.0 (default: latest release; for
+#                     --variant cuda, the source ref defaults to main)
 #   FAK_INSTALL_DIR   install target (default: /usr/local/bin, else ~/.local/bin)
 #   FAK_PREFER_DIRECT bypass Homebrew on macOS and force direct binary download (default: 0)
+#   CUDA_HOME         CUDA toolkit root for --variant cuda (default: from nvcc on
+#                     PATH, else /usr/local/cuda or /opt/cuda)
+#   FAK_CUDA_ARCH     GPU arch for --variant cuda, e.g. sm_120 (default: nvidia-smi)
+#   FAK_SRC_DIR       source checkout for --variant cuda (default: ~/.cache/fak/src)
+#   FAK_REF           git ref for --variant cuda (default: v$FAK_VERSION, else main)
 #   PUBLISH_REPO      owner/repo every published URL derives from — clone,
 #                     install, and releases (default: anthony-chaudhary/fak;
 #                     FAK_REPO is a back-compat alias)
@@ -34,13 +44,13 @@ while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || { printf 'install.sh: --variant requires an argument (auto|cpu|metal|vulkan)\n' >&2; exit 2; }
       VARIANT="$2"; shift 2 ;;
     --variant=*) VARIANT="${1#--variant=}"; shift ;;
-    -h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) printf 'install.sh: unknown argument %s — usage: install.sh [--variant auto|cpu|metal|vulkan]\n' "$1" >&2; exit 2 ;;
+    -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print } /^set -eu$/ { exit }' "$0"; exit 0 ;;
+    *) printf 'install.sh: unknown argument %s — usage: install.sh [--variant auto|cpu|metal|vulkan|cuda]\n' "$1" >&2; exit 2 ;;
   esac
 done
 case "$VARIANT" in
-  auto|cpu|metal|vulkan) : ;;
-  *) printf 'install.sh: unknown variant %s — usage: install.sh [--variant auto|cpu|metal|vulkan]\n' "$VARIANT" >&2; exit 2 ;;
+  auto|cpu|metal|vulkan|cuda) : ;;
+  *) printf 'install.sh: unknown variant %s — usage: install.sh [--variant auto|cpu|metal|vulkan|cuda]\n' "$VARIANT" >&2; exit 2 ;;
 esac
 
 # Single source of truth for every published URL (clone, install, releases).
@@ -62,6 +72,106 @@ fetch_stdout() { # fetch URL -> stdout
   if have curl; then curl -fsSL "$1"
   elif have wget; then wget -qO- "$1"
   else err "need curl or wget"; fi
+}
+
+# Pick an install dir we can actually write to, without auto-sudo.
+pick_dest() {
+  DEST="${FAK_INSTALL_DIR:-}"
+  if [ -z "$DEST" ]; then
+    if [ -w /usr/local/bin ] 2>/dev/null; then DEST=/usr/local/bin
+    elif [ "$GOOS" = "darwin" ] && [ -w /opt/homebrew/bin ] 2>/dev/null; then DEST=/opt/homebrew/bin
+    else DEST="${HOME}/.local/bin"; fi
+  fi
+  mkdir -p "$DEST" || err "cannot create install dir ${DEST}"
+  [ -w "$DEST" ] || err "no write permission to ${DEST} — re-run with FAK_INSTALL_DIR=~/.local/bin, or sudo"
+}
+
+path_hint() {
+  case ":${PATH}:" in
+    *":${DEST}:"*) : ;;
+    *)
+      rc="${HOME}/.profile"
+      case "${SHELL:-}" in
+        */zsh) rc="${HOME}/.zshrc" ;;
+        */bash) rc="${HOME}/.bashrc" ;;
+      esac
+      printf 'install.sh: note — %s is not on your PATH. Run now, and persist it:\n' "$DEST" >&2
+      printf '  export PATH="%s:$PATH"\n' "$DEST" >&2
+      printf "  echo 'export PATH=\"%s:\$PATH\"' >> %s\n" "$DEST" "$rc" >&2 ;;
+  esac
+}
+
+# CUDA toolkit root: CUDA_HOME/CUDA_PATH, else the nvcc on PATH, else the
+# conventional install roots (Ubuntu/NVIDIA .run: /usr/local/cuda, Arch: /opt/cuda).
+detect_cuda_home() {
+  for c in "${CUDA_HOME:-}" "${CUDA_PATH:-}"; do
+    [ -n "$c" ] && [ -x "${c}/bin/nvcc" ] && { printf '%s\n' "$c"; return 0; }
+  done
+  if have nvcc; then
+    nvcc_path="$(command -v nvcc)"
+    printf '%s\n' "$(dirname "$(dirname "$nvcc_path")")"; return 0
+  fi
+  for c in /usr/local/cuda /opt/cuda; do
+    [ -x "${c}/bin/nvcc" ] && { printf '%s\n' "$c"; return 0; }
+  done
+  return 1
+}
+
+# sm_XY from FAK_CUDA_ARCH or the first GPU's compute capability.
+detect_cuda_arch() {
+  if [ -n "${FAK_CUDA_ARCH:-}" ]; then printf '%s\n' "$FAK_CUDA_ARCH"; return 0; fi
+  cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' .\r')"
+  case "$cap" in
+    ''|*[!0-9]*) return 1 ;;
+    *) printf 'sm_%s\n' "$cap" ;;
+  esac
+}
+
+# No CUDA archive is published (the CUDA binary links the host driver and toolkit
+# runtime), so the native NVIDIA route compiles on this host and pins the toolkit
+# library dir into the binary's rpath so `fak` runs without LD_LIBRARY_PATH.
+install_cuda_from_source() {
+  for tool in git go nvidia-smi; do
+    have "$tool" || err "--variant cuda needs ${tool} on PATH (Go 1.26+: https://go.dev/dl/) — or use docker run --rm --gpus all ghcr.io/${REPO}:cuda-latest"
+  done
+  have c++ || have g++ || err "--variant cuda needs a C++ compiler (g++) on PATH"
+  cuda_home="$(detect_cuda_home)" || err "CUDA toolkit not found — install it (nvcc) and set CUDA_HOME, e.g. CUDA_HOME=/opt/cuda"
+  cuda_arch="$(detect_cuda_arch)" || err "could not read the GPU compute capability from nvidia-smi — set FAK_CUDA_ARCH, e.g. FAK_CUDA_ARCH=sm_120"
+  cuda_lib=""
+  for c in "${cuda_home}"/targets/*-linux/lib "${cuda_home}/lib64" "${cuda_home}/lib"; do
+    [ -d "$c" ] && { cuda_lib="$c"; break; }
+  done
+  [ -n "$cuda_lib" ] || err "no CUDA library dir under ${cuda_home} (looked for targets/*-linux/lib, lib64)"
+
+  ref="${FAK_REF:-}"
+  if [ -z "$ref" ]; then
+    ref=main
+    [ -n "${FAK_VERSION:-}" ] && ref="v${FAK_VERSION#v}"
+  fi
+  src="${FAK_SRC_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/fak/src}"
+  printf 'install.sh: CUDA source build — ref %s, %s, CUDA_HOME=%s, checkout %s\n' "$ref" "$cuda_arch" "$cuda_home" "$src" >&2
+  if [ -d "${src}/.git" ]; then
+    git -C "$src" fetch --depth 1 origin "$ref" || err "git fetch ${ref} failed in ${src}"
+    git -C "$src" checkout --force --detach FETCH_HEAD || err "git checkout ${ref} failed in ${src}"
+  else
+    mkdir -p "$(dirname "$src")"
+    git clone --depth 1 --branch "$ref" "https://github.com/${REPO}.git" "$src" || err "git clone of ${REPO}@${ref} failed"
+  fi
+
+  pick_dest
+  (
+    cd "$src" || exit 1
+    export CUDA_HOME="$cuda_home" CGO_ENABLED=1
+    export PATH="${cuda_home}/bin:${PATH}"
+    export LIBRARY_PATH="${cuda_lib}:${cuda_lib}/stubs${LIBRARY_PATH:+:${LIBRARY_PATH}}"
+    export CGO_LDFLAGS="-L${cuda_lib} -Wl,-rpath,${cuda_lib} ${CGO_LDFLAGS:-}"
+    go run ./cmd/fak-dev build-cuda build --arch "$cuda_arch" --cuda-home "$cuda_home" &&
+      go build -tags cuda -o "${DEST}/fak.new" ./cmd/fak
+  ) || err "CUDA source build failed in ${src} — see the output above; the build recipe is INSTALL.md 'Build from source' (NVIDIA CUDA)"
+  mv "${DEST}/fak.new" "${DEST}/fak"
+  "${DEST}/fak" version || err "installed CUDA binary failed to run — check the NVIDIA driver (nvidia-smi) and ${cuda_lib}"
+  printf 'install.sh: installed CUDA fak (%s, %s) to %s/fak; source kept in %s for rebuilds\n' "$ref" "$cuda_arch" "$DEST" "$src" >&2
+  path_hint
 }
 
 # --- detect target -------------------------------------------------------------
@@ -86,19 +196,25 @@ if [ "$VARIANT" = "auto" ]; then
     darwin/arm64) VARIANT=metal ;;
     linux/amd64)
       if have nvidia-smi && nvidia-smi -L >/dev/null 2>&1; then
-        CUDA_VERSION="${FAK_VERSION:-}"
-        CUDA_VERSION="${CUDA_VERSION#v}"
-        CUDA_TAG="${CUDA_VERSION:+${CUDA_VERSION}-cuda}"
-        CUDA_TAG="${CUDA_TAG:-cuda-latest}"
-        err "NVIDIA GPU detected — use docker run --rm --gpus all ghcr.io/${REPO}:${CUDA_TAG} version (then serve your supported model), or explicitly select --variant cpu for a CPU reference build"
-      fi
-      VARIANT=vulkan ;;
+        if have docker && docker info >/dev/null 2>&1; then
+          CUDA_VERSION="${FAK_VERSION:-}"
+          CUDA_VERSION="${CUDA_VERSION#v}"
+          CUDA_TAG="${CUDA_VERSION:+${CUDA_VERSION}-cuda}"
+          CUDA_TAG="${CUDA_TAG:-cuda-latest}"
+          err "NVIDIA GPU detected — use docker run --rm --gpus all ghcr.io/${REPO}:${CUDA_TAG} version (then serve your supported model), select --variant cuda to build natively from source, or explicitly select --variant cpu for a CPU reference build"
+        fi
+        printf 'install.sh: NVIDIA GPU detected and no working docker — building the CUDA variant from source\n' >&2
+        VARIANT=cuda
+      else
+        VARIANT=vulkan
+      fi ;;
     *) err "no default GPU archive for ${GOOS}/${GOARCH} — use Apple Silicon Metal or Linux amd64 Vulkan, the NVIDIA CUDA image ghcr.io/${REPO}:cuda-latest, or explicitly select --variant cpu for a CPU reference build" ;;
   esac
 fi
 case "$VARIANT" in
   metal) SUPPORTED=darwin/arm64 ;;
   vulkan) SUPPORTED=linux/amd64 ;;
+  cuda) SUPPORTED=linux/amd64; [ "$GOOS" = linux ] && SUPPORTED="linux/${GOARCH}" ;;
   cpu) SUPPORTED="${GOOS}/${GOARCH}" ;;
 esac
 [ "${GOOS}/${GOARCH}" = "$SUPPORTED" ] || err "the ${VARIANT} variant supports ${SUPPORTED} only; this host is ${GOOS}/${GOARCH} — choose a supported GPU host or explicitly select --variant cpu for a CPU reference build"
@@ -119,6 +235,11 @@ if [ "$VARIANT" = "vulkan" ]; then
     err "the Vulkan archive requires GNU glibc 2.39+ (Ubuntu 24.04+); this host has ${LIBC_VERSION} — upgrade the host, build Vulkan from source, or explicitly select --variant cpu"
   fi
   printf 'install.sh: Vulkan requires the system Vulkan loader and a compatible GPU driver\n' >&2
+fi
+
+if [ "$VARIANT" = "cuda" ]; then
+  install_cuda_from_source
+  exit 0
 fi
 
 # On macOS, prefer Homebrew when available unless an explicit install dir, version pin,
@@ -198,15 +319,7 @@ if [ "$VARIANT" = "vulkan" ]; then
   [ "$HAS_SPIRV" = 1 ] || err "Vulkan archive did not contain nonempty spirv/*.spv resources"
 fi
 
-# Pick an install dir we can actually write to, without auto-sudo.
-DEST="${FAK_INSTALL_DIR:-}"
-if [ -z "$DEST" ]; then
-  if [ -w /usr/local/bin ] 2>/dev/null; then DEST=/usr/local/bin
-  elif [ "$GOOS" = "darwin" ] && [ -w /opt/homebrew/bin ] 2>/dev/null; then DEST=/opt/homebrew/bin
-  else DEST="${HOME}/.local/bin"; fi
-fi
-mkdir -p "$DEST" || err "cannot create install dir ${DEST}"
-[ -w "$DEST" ] || err "no write permission to ${DEST} — re-run with FAK_INSTALL_DIR=~/.local/bin, or sudo"
+pick_dest
 if [ "$VARIANT" = "vulkan" ]; then
   mkdir -p "${DEST}/spirv"
   cp -R "${tmp}/spirv/." "${DEST}/spirv/"
@@ -220,7 +333,4 @@ fi
 
 "${DEST}/fak" version || err "installed binary failed to run; Vulkan requires the system Vulkan loader and compatible GPU driver — see INSTALL.md"
 printf 'install.sh: installed fak %s to %s/fak\n' "$VERSION" "$DEST" >&2
-case ":${PATH}:" in
-  *":${DEST}:"*) : ;;
-  *) printf 'install.sh: note — %s is not on your PATH; add it or move the binary.\n' "$DEST" >&2 ;;
-esac
+path_hint

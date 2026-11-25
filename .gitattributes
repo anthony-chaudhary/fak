@@ -96,3 +96,9 @@ internal/compute/v41_routed_down_chunk_spirv.h text eol=lf
 # Canonical paired-Q2 source/header are byte-attested across checkouts.
 internal/compute/shaders/v41_q2k_token_pair.comp text eol=lf
 internal/compute/v41_q2k_token_pair_spirv.h text eol=lf
+
+# cmd/go builds module zips with `git archive`, which honors export-ignore, and
+# refuses a module source tree over 500 MiB. These trees hold no Go packages, so
+# dropping them keeps `go install .../cmd/fak@vX` under the cap.
+docs/research/inventory/** export-ignore
+visuals/** export-ignore

@@ -87,9 +87,12 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 ```
 
 The installer ([`install.sh`](install.sh)) defaults to Metal on Apple Silicon and
-Vulkan on Linux amd64. If `nvidia-smi -L` detects NVIDIA, it prints the CUDA
-container command. Other platforms require explicit `--variant cpu` for a CPU
-reference. Missing GPU archives never silently fall back to CPU.
+Vulkan on Linux amd64. If `nvidia-smi -L` detects NVIDIA and a working `docker`
+is available, it prints the CUDA container command. Without docker it builds the
+CUDA variant from source on the host (`--variant cuda`, see
+[NVIDIA CUDA from source](#nvidia-cuda-from-source)). Other platforms require
+explicit `--variant cpu` for a CPU reference. Missing GPU archives never silently
+fall back to CPU.
 
 Downloads are verified against `SHA256SUMS` before installation. Vulkan shader
 resources are installed to `spirv/` beside `fak`. The installer needs POSIX `sh`,
@@ -325,6 +328,33 @@ CGo. The CPU reference cross-compiles cleanly:
 
 ```sh
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o fak-linux-arm64 ./cmd/fak
+```
+
+### NVIDIA CUDA from source
+
+No CUDA release archive is published: the CUDA binary links the host's NVIDIA
+driver (`libcuda.so.1`) and CUDA toolkit runtime. Without docker, build it on the
+GPU host. The installer does this for you:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh -s -- --variant cuda
+```
+
+It needs `git`, Go 1.26+, `g++`, the NVIDIA driver (`nvidia-smi`) and the CUDA
+toolkit (`nvcc`). It finds the toolkit from `CUDA_HOME`, the `nvcc` on `PATH`,
+`/usr/local/cuda` or `/opt/cuda` (Arch), reads the GPU arch from `nvidia-smi`
+(override with `FAK_CUDA_ARCH=sm_120`), keeps the checkout in `~/.cache/fak/src`
+(`FAK_SRC_DIR`), builds `main` (`FAK_REF`, or `FAK_VERSION` for a release tag),
+and embeds the toolkit library dir as the binary's rpath so `fak` runs without
+`LD_LIBRARY_PATH`. The manual equivalent, with `CUDA_HOME=/opt/cuda`:
+
+```sh
+git clone --depth 1 https://github.com/anthony-chaudhary/fak.git && cd fak
+lib="$CUDA_HOME/targets/x86_64-linux/lib"   # or $CUDA_HOME/lib64
+export CGO_ENABLED=1 LIBRARY_PATH="$lib" CGO_LDFLAGS="-L$lib -Wl,-rpath,$lib"
+go run ./cmd/fak-dev build-cuda build --arch sm_120 --cuda-home "$CUDA_HOME"
+go build -tags cuda -o ~/.local/bin/fak ./cmd/fak
+fak backends   # lists cuda when the driver sees the GPU
 ```
 
 ---

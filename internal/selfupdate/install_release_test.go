@@ -32,10 +32,44 @@ func TestMain(m *testing.M) {
 			fmt.Println(version)
 			os.Exit(0)
 		case "nvidia-smi":
-			if os.Getenv("FIXTURE_NVIDIA") == "1" {
+			if os.Getenv("FIXTURE_NVIDIA") != "1" {
+				os.Exit(1)
+			}
+			if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "--query-gpu=compute_cap") {
+				fmt.Println("12.0")
+			}
+			os.Exit(0)
+		case "docker":
+			if os.Getenv("FIXTURE_DOCKER") == "1" {
 				os.Exit(0)
 			}
 			os.Exit(1)
+		case "git":
+			// Record each call; a clone materializes the checkout it names last.
+			appendFixtureLog(strings.Join(os.Args[1:], " "))
+			if len(os.Args) > 1 && os.Args[1] == "clone" {
+				if err := os.MkdirAll(filepath.Join(os.Args[len(os.Args)-1], ".git"), 0700); err != nil {
+					os.Exit(1)
+				}
+			}
+			os.Exit(0)
+		case "go":
+			appendFixtureLog("go " + strings.Join(os.Args[1:], " ") + " CGO_LDFLAGS=" + os.Getenv("CGO_LDFLAGS"))
+			for i, arg := range os.Args {
+				if arg == "-o" && i+1 < len(os.Args) {
+					self, err := os.Executable()
+					if err != nil {
+						os.Exit(1)
+					}
+					data, err := os.ReadFile(self)
+					if err != nil || os.WriteFile(os.Args[i+1], data, 0755) != nil {
+						os.Exit(1)
+					}
+				}
+			}
+			os.Exit(0)
+		case "c++":
+			os.Exit(0)
 		case "brew":
 			_ = os.WriteFile(os.Getenv("FIXTURE_BREW_LOG"), []byte("called"), 0600)
 			os.Exit(1)
@@ -63,6 +97,15 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func appendFixtureLog(line string) {
+	f, err := os.OpenFile(os.Getenv("FIXTURE_CMD_LOG"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		os.Exit(1)
+	}
+	defer f.Close()
+	fmt.Fprintln(f, line)
+}
+
 func TestGPUFirstInstaller(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -78,12 +121,13 @@ func TestGPUFirstInstaller(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name, host, arch, variant, asset, want, libc string
-		nvidia, corrupt, missing, execFail           bool
+		nvidia, docker, corrupt, missing, execFail   bool
 	}{
 		{name: "apple-default", host: "Darwin", arch: "arm64", asset: "darwin_arm64_metal"},
 		{name: "linux-default", host: "Linux", arch: "x86_64", asset: "linux_amd64_vulkan"},
 		{name: "cpu-reference", host: "Darwin", arch: "arm64", variant: "cpu", asset: "darwin_arm64"},
-		{name: "nvidia", host: "Linux", arch: "x86_64", nvidia: true, want: "docker run --rm --gpus all ghcr.io/anthony-chaudhary/fak:cuda-latest version"},
+		{name: "nvidia", host: "Linux", arch: "x86_64", nvidia: true, docker: true, want: "docker run --rm --gpus all ghcr.io/anthony-chaudhary/fak:cuda-latest version"},
+		{name: "nvidia-no-docker", host: "Linux", arch: "x86_64", nvidia: true, asset: "cuda-source"},
 		{name: "old-glibc", host: "Linux", arch: "x86_64", libc: "glibc 2.35", want: "this host has 2.35"},
 		{name: "musl", host: "Linux", arch: "x86_64", libc: "musl", want: "requires GNU glibc 2.39+"},
 		{name: "unsupported-default", host: "Linux", arch: "aarch64", want: "explicitly select --variant cpu"},
@@ -102,13 +146,25 @@ func TestGPUFirstInstaller(t *testing.T) {
 			if err := os.MkdirAll(assets, 0700); err != nil {
 				t.Fatal(err)
 			}
-			for _, name := range []string{"uname", "curl", "brew", "nvidia-smi", "getconf"} {
+			for _, name := range []string{"uname", "curl", "brew", "nvidia-smi", "getconf", "docker", "git", "go", "c++"} {
 				if err := os.Symlink(executable, filepath.Join(bin, name)); err != nil {
 					t.Fatal(err)
 				}
 			}
 			archive := "fak_9.9.9_" + tc.asset + ".tar.gz"
-			if tc.asset != "" && !tc.missing {
+			cudaHome := filepath.Join(dir, "cuda")
+			cudaLib := filepath.Join(cudaHome, "targets", "x86_64-linux", "lib")
+			if err := os.MkdirAll(cudaLib, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(cudaHome, "bin"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cudaHome, "bin", "nvcc"), []byte("#!/bin/sh\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			cmdLog := filepath.Join(dir, "cmd.log")
+			if tc.asset != "" && tc.asset != "cuda-source" && !tc.missing {
 				f, err := os.Create(filepath.Join(assets, archive))
 				if err != nil {
 					t.Fatal(err)
@@ -158,7 +214,10 @@ func TestGPUFirstInstaller(t *testing.T) {
 			// HOME and the destination are private fixtures.
 			dest := filepath.Join(dir, "installed")
 			cmd.Env = []string{"PATH=" + bin + ":" + os.Getenv("PATH"), "HOME=" + dir, "FAK_INSTALL_FIXTURE=1", "FIXTURE_OS=" + tc.host, "FIXTURE_ARCH=" + tc.arch, "FIXTURE_ASSETS=" + assets, "FIXTURE_BREW_LOG=" + filepath.Join(dir, "brew-called"), "FAK_INSTALL_DIR=" + dest}
-			cmd.Env = append(cmd.Env, "FIXTURE_LIBC="+tc.libc)
+			cmd.Env = append(cmd.Env, "FIXTURE_LIBC="+tc.libc, "FIXTURE_CMD_LOG="+cmdLog, "CUDA_HOME="+cudaHome)
+			if tc.docker {
+				cmd.Env = append(cmd.Env, "FIXTURE_DOCKER=1")
+			}
 			if tc.execFail {
 				cmd.Env = append(cmd.Env, "FIXTURE_EXEC_FAIL=1")
 			}
@@ -178,7 +237,22 @@ func TestGPUFirstInstaller(t *testing.T) {
 			if err != nil {
 				t.Fatalf("installer: %v\n%s", err, out)
 			}
-			if !strings.Contains(string(out), archive) || !strings.Contains(string(out), "checksum OK") {
+			if tc.asset == "cuda-source" {
+				calls, err := os.ReadFile(cmdLog)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, want := range []string{
+					"clone --depth 1 --branch main https://github.com/anthony-chaudhary/fak.git",
+					"go run ./cmd/fak-dev build-cuda build --arch sm_120 --cuda-home " + cudaHome,
+					"go build -tags cuda -o",
+					"-Wl,-rpath," + cudaLib,
+				} {
+					if !strings.Contains(string(calls), want) {
+						t.Fatalf("CUDA source build missing %q; calls:\n%s\noutput:\n%s", want, calls, out)
+					}
+				}
+			} else if !strings.Contains(string(out), archive) || !strings.Contains(string(out), "checksum OK") {
 				t.Fatalf("wrong asset or unverified install: %s", out)
 			}
 			installed, err := os.ReadFile(filepath.Join(dest, "fak"))
