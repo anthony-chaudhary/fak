@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -128,12 +129,14 @@ def run_release_tests_at_ref(root: Path, ref: str, *, keep_worktree: bool = Fals
             suite["error"] = "could not resolve ref: " + sha.strip()[-300:]
             return suite
         sha = sha.strip()
+        # A loaded host can need far longer than the defaults to copy and materialize the tree.
+        git_timeout = int(os.environ.get("FAK_RELEASE_DRYRUN_GIT_TIMEOUT") or 0)
         code, out = run(["git", "clone", "--quiet", "--no-hardlinks", "--no-checkout", str(root), str(wt)],
-                        cwd=root, timeout=300)
+                        cwd=root, timeout=git_timeout or 300)
         if code != 0:
             suite["error"] = "isolated clone failed: " + out.strip()[-300:]
             return suite
-        code, out = run(["git", "checkout", "--detach", sha], cwd=wt, timeout=120)
+        code, out = run(["git", "checkout", "--detach", sha], cwd=wt, timeout=git_timeout or 120)
         if code != 0:
             suite["error"] = "checkout failed: " + out.strip()[-300:]
             return suite
