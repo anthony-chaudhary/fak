@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"context"
 	"math"
 	"reflect"
 	"testing"
@@ -41,7 +42,7 @@ func TestInkling2SessionPrefillStepIsFreshPerRequest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		next, err := s.Prefill(prompt)
+		next, err := s.Prefill(context.Background(), prompt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,7 +67,7 @@ func TestInkling2SessionPrefillRefusesEmptyPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Prefill(nil); err == nil {
+	if _, err := s.Prefill(context.Background(), nil); err == nil {
 		t.Fatal("empty prefill accepted")
 	}
 }
@@ -171,4 +172,15 @@ func ink2SessTinyModel() (model.Inkling2LoopHParams, *model.Inkling2LoopWeights)
 		w.Controllers = append(w.Controllers, cw)
 	}
 	return hp, w
+}
+
+// A cancelled prompt stops before its first token, so the host forward (nil here,
+// which would panic if reached) is never touched.
+func TestInkling2HostSessionPrefillStopsOnCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &inkling2HostSession{recycle: func() {}}
+	if _, err := s.Prefill(ctx, []int{1, 2, 3}); err != context.Canceled {
+		t.Fatalf("Prefill on a cancelled context = %v, want context.Canceled", err)
+	}
 }

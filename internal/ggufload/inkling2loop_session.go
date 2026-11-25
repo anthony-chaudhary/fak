@@ -18,9 +18,10 @@ var Inkling2LoopResidentContext = inkling2ResidentCtx
 // Prefill consumes the whole prompt and returns the greedy next token; Step
 // consumes one token and returns the greedy next token. A resident session
 // captures a CUDA graph bound to the OS thread that first steps it, so every
-// call on one session must come from a single locked thread.
+// call on one session must come from a single locked thread. A Prefill that ctx
+// ends leaves the session partly consumed; the caller must drop it, not reuse it.
 type Inkling2LoopSession interface {
-	Prefill(prompt []int) (int, error)
+	Prefill(ctx context.Context, prompt []int) (int, error)
 	Step(token int) (int, error)
 	Close() error
 }
@@ -70,19 +71,22 @@ func newInkling2HostSession(m *Inkling2LoopModel, be compute.Backend) (*inkling2
 	return s, nil
 }
 
-func (s *inkling2HostSession) Prefill(prompt []int) (int, error) {
+func (s *inkling2HostSession) Prefill(ctx context.Context, prompt []int) (int, error) {
 	if len(prompt) == 0 {
 		return 0, fmt.Errorf("inkling2_loop: empty prompt")
 	}
 	var logits []float32
 	var err error
 	if s.metal {
-		if logits, err = Inkling2LoopPrefill(context.Background(), s.h, prompt); err != nil {
+		if logits, err = Inkling2LoopPrefill(ctx, s.h, prompt); err != nil {
 			return 0, err
 		}
 		return inkling2Argmax(logits), nil
 	}
 	for i, t := range prompt {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		if logits, err = Inkling2LoopPrefillToken(s.h, t, i == len(prompt)-1); err != nil {
 			return 0, err
 		}
@@ -118,15 +122,18 @@ type inkling2ResidentSession struct {
 	ck *ink2Rewind
 }
 
-func (r *inkling2ResidentSession) Prefill(prompt []int) (int, error) {
+func (r *inkling2ResidentSession) Prefill(ctx context.Context, prompt []int) (int, error) {
 	if len(prompt) == 0 {
 		return 0, fmt.Errorf("inkling2_loop: empty prompt")
 	}
 	if r.s.batched {
-		return r.s.prefill(prompt)
+		return r.s.prefill(ctx, prompt)
 	}
 	next := 0
 	for _, t := range prompt {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		var err error
 		if next, err = r.s.step(t); err != nil {
 			return 0, err

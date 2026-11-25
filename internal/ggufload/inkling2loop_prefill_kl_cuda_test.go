@@ -3,6 +3,7 @@
 package ggufload
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -63,7 +64,7 @@ func inkling2TeacherForcedLogProbs(t *testing.T, m *Inkling2LoopModel, s *inklin
 	}
 	var err error
 	if s.batched {
-		_, err = s.prefill(prompt)
+		_, err = s.prefill(context.Background(), prompt)
 	} else {
 		for _, tok := range prompt {
 			if _, err = s.step(tok); err != nil {
@@ -164,7 +165,7 @@ func TestInkling2CUDABatchedPrefillKL(t *testing.T) {
 func inkling2ResidentGreedyOn(s *inkling2Resident, prompt []int, n int) ([]int, int, error) {
 	next, err := 0, error(nil)
 	if s.batched {
-		next, err = s.prefill(prompt)
+		next, err = s.prefill(context.Background(), prompt)
 	} else {
 		for _, tok := range prompt {
 			if next, err = s.step(tok); err != nil {

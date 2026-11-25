@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -95,6 +96,70 @@ func (p *Inkling2LoopPlanner) generate(ctx context.Context, prompt []int, maxNew
 	return p.gen.Generate(ctx, prompt, maxNew, stops, emit)
 }
 
+// inkling2StopScanner watches generated ids for the first token at which the
+// decoded output contains a stop string, and yields the output cut at the stops.
+//
+// Each token is decoded once and its bytes appended, so the scan is linear in the
+// output. A new match must end inside the newest piece, so only the last
+// longest-stop bytes before it need searching.
+type inkling2StopScanner struct {
+	decode  func(ids []int) (string, error)
+	stops   []string
+	longest int
+	text    []byte
+	err     error
+	stopped bool
+}
+
+func newInkling2StopScanner(decode func(ids []int) (string, error), stops []string) *inkling2StopScanner {
+	s := &inkling2StopScanner{decode: decode, stops: stops}
+	for _, stop := range stops {
+		s.longest = max(s.longest, len(stop))
+	}
+	return s
+}
+
+// push records id and reports whether generation should continue.
+func (s *inkling2StopScanner) push(id int) bool {
+	if s.err != nil {
+		return true
+	}
+	piece, err := s.decode([]int{id})
+	if err != nil {
+		s.err = err
+		return true
+	}
+	before := len(s.text)
+	s.text = append(s.text, piece...)
+	if s.longest == 0 {
+		return true
+	}
+	window := s.text[max(0, before-s.longest+1):]
+	for _, stop := range s.stops {
+		if stop != "" && bytes.Contains(window, []byte(stop)) {
+			s.stopped = true
+			return false
+		}
+	}
+	return true
+}
+
+// finish returns the generated text, cut at each stop in order when a stop ended generation.
+func (s *inkling2StopScanner) finish() (string, error) {
+	if s.err != nil {
+		return "", fmt.Errorf("inkling2_loop planner: decode output: %w", s.err)
+	}
+	text := string(s.text)
+	if s.stopped {
+		for _, stop := range s.stops {
+			if i := strings.Index(text, stop); stop != "" && i >= 0 {
+				text = text[:i]
+			}
+		}
+	}
+	return text, nil
+}
+
 func (p *Inkling2LoopPlanner) Model() string { return p.modelID }
 
 func (p *Inkling2LoopPlanner) StreamingSupported() bool { return true }
@@ -135,39 +200,14 @@ func (p *Inkling2LoopPlanner) Complete(ctx context.Context, messages []Message, 
 		maxNew = min(maxNew, p.contextTokens-len(ids))
 	}
 
-	var out []int
-	stopText := -1
-	emit := func(id int) bool {
-		out = append(out, id)
-		if len(sp.Stop) == 0 {
-			return true
-		}
-		text, err := p.tok.Decode(out)
-		if err != nil {
-			return true
-		}
-		for _, s := range sp.Stop {
-			if s != "" && strings.Contains(text, s) {
-				stopText = len(out)
-				return false
-			}
-		}
-		return true
-	}
-	res, err := p.generate(ctx, ids, maxNew, p.stops, emit)
+	scan := newInkling2StopScanner(p.tok.Decode, sp.Stop)
+	res, err := p.generate(ctx, ids, maxNew, p.stops, scan.push)
 	if err != nil {
 		return nil, err
 	}
-	text, err := p.tok.Decode(out)
+	text, err := scan.finish()
 	if err != nil {
-		return nil, fmt.Errorf("inkling2_loop planner: decode output: %w", err)
-	}
-	if stopText >= 0 {
-		for _, s := range sp.Stop {
-			if i := strings.Index(text, s); s != "" && i >= 0 {
-				text = text[:i]
-			}
-		}
+		return nil, err
 	}
 	reasoning, content := SplitInkling2Output(text)
 	finish := "length"

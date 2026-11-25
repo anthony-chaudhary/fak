@@ -281,9 +281,9 @@ func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused 
 
 // serve prefills prompt[:n-1] past the reused prefix, checkpoints there, then
 // prefills the last token alone. Reuse off keeps the same split so both modes run
-// identical kernels; a session that cannot rewind prefills the prompt whole. Decode never extends the checkpoint, so no cache row
-// written by decode is reused. A session fault drops the session; a cancelled
-// caller does not.
+// identical kernels; a session that cannot rewind prefills the prompt whole. Decode
+// never extends the checkpoint, so no cache row written by decode is reused. A
+// session fault or a context cancelled during prefill drops the session.
 func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2LoopGeneration, err error) {
 	if err := r.ctx.Err(); err != nil {
 		return res, err
@@ -316,7 +316,7 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	}
 	start := time.Now()
 	if last > reused {
-		if _, err = s.Prefill(prompt[reused:last]); err != nil {
+		if _, err = s.Prefill(r.ctx, prompt[reused:last]); err != nil {
 			return res, err
 		}
 	}
@@ -331,7 +331,7 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 			return res, err
 		}
 	}
-	next, err := s.Prefill(prompt[last:])
+	next, err := s.Prefill(r.ctx, prompt[last:])
 	if err != nil {
 		return res, err
 	}
@@ -384,8 +384,6 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 	if !inkling2ServeBatchEnabled(lookup) {
 		return scalar, "greedy decode", nil
 	}
-	// a lone request's session must not stay resident beside the cohorts
-	scalar.noReuse = true
 	adm, err := inkling2AdmissionFromEnv(lookup)
 	if err != nil {
 		return nil, "", err
@@ -393,6 +391,8 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 	if !ggufload.Inkling2LoopBatchEligible(m, be) {
 		return scalar, "greedy decode; FAK_INKLING2_SERVE_BATCH ignored: load is not batch eligible", nil
 	}
+	// a lone request's session must not stay resident beside the cohorts
+	scalar.noReuse = true
 	return newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, lookup),
 		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s", ggufload.Inkling2LoopMaxBatch, adm.gap, adm.maxWait), nil
 }
@@ -489,7 +489,7 @@ func inkling2MetalToken(id int) (int32, error) {
 	return int32(id), nil
 }
 
-func (m inkling2MetalSession) Prefill(prompt []int) (int, error) {
+func (m inkling2MetalSession) Prefill(ctx context.Context, prompt []int) (int, error) {
 	if len(prompt) == 0 {
 		return 0, fmt.Errorf("inkling2_loop: empty prompt")
 	}
@@ -499,6 +499,10 @@ func (m inkling2MetalSession) Prefill(prompt []int) (int, error) {
 		if ids[i], err = inkling2MetalToken(id); err != nil {
 			return 0, err
 		}
+	}
+	// the native prefill is one submission and cannot be interrupted once begun
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 	next, err := m.s.PrefillID(ids)
 	return int(next), err
@@ -549,7 +553,7 @@ func warmInkling2Session(open inkling2LoopSessionOpener, tok *tokenizer.Tokenize
 			err = cerr
 		}
 	}()
-	_, err = s.Prefill(ids)
+	_, err = s.Prefill(context.Background(), ids)
 	return err
 }
 

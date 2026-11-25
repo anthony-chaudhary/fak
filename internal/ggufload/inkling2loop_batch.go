@@ -828,8 +828,8 @@ func inkling2BatchGreedy(m *Inkling2LoopModel, be compute.Backend, prompts [][]i
 	// skip is the prompt positions already fed before the first step
 	skip := 0
 	if b.prefillT > 0 {
-		first, err := b.prefill(prompts)
-		if err != nil {
+		first := make([]int, len(prompts))
+		if err := b.prefill(prompts, nil, func(row, token int) { first[row] = token }); err != nil {
 			return nil, st, err
 		}
 		for i := range outs {

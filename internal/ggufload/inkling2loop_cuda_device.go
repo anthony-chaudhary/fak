@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -511,7 +512,7 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 func inkling2SessionGreedy(s Inkling2LoopSession, prompt []int, n int) ([]int, Inkling2LoopGreedyStats, error) {
 	var st Inkling2LoopGreedyStats
 	start := time.Now()
-	next, err := s.Prefill(prompt)
+	next, err := s.Prefill(context.Background(), prompt)
 	if err != nil {
 		return nil, st, err
 	}

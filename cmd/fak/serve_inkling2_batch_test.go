@@ -509,3 +509,46 @@ func TestInkling2BatchLoneRequestAfterCohortReleasesArenasFirst(t *testing.T) {
 		}
 	}
 }
+
+// An ineligible load serves through the serialized engine, which keeps prefix
+// reuse; the lone-session guard only matters beside a cohort engine.
+func TestInkling2ServeBatchIneligibleKeepsPrefixReuse(t *testing.T) {
+	on := func(k string) (string, bool) { return "1", k == "FAK_INKLING2_SERVE_BATCH" }
+	gen, _, err := newServeInkling2Generator(nil, nil, on)
+	eng, ok := gen.(*inkling2LoopEngine)
+	if err != nil || !ok {
+		t.Fatalf("gen=%T err=%v, want the serialized engine", gen, err)
+	}
+	if eng.noReuse {
+		t.Fatal("ineligible load disabled prefix reuse on the engine it returns")
+	}
+}
+
+// A row whose caller already gave up neither takes a cohort slot nor is prefilled,
+// and it is answered with its context error so nothing waits on it.
+func TestInkling2BatchCollectDropsCancelled(t *testing.T) {
+	adm := inkling2Admission{gap: inkling2BatchGapDefault, maxWait: inkling2BatchMaxWaitDefault, max: 2, clock: newFakeInkling2Clock()}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dead := &inkling2QueuedRequest{ctx: ctx, done: make(chan inkling2QueuedResult, 1)}
+	live := &inkling2QueuedRequest{ctx: context.Background(), done: make(chan inkling2QueuedResult, 1)}
+	tail := &inkling2QueuedRequest{ctx: context.Background(), done: make(chan inkling2QueuedResult, 1)}
+	queue := make(chan *inkling2QueuedRequest, 4)
+	queue <- dead
+	queue <- tail
+	group := adm.collect(live, queue)
+	if len(group) != 2 || group[0] != live || group[1] != tail {
+		t.Fatalf("cohort has %d rows, want the two live rows (cancelled row must not take a slot)", len(group))
+	}
+	select {
+	case res := <-dead.done:
+		if !errors.Is(res.err, context.Canceled) {
+			t.Fatalf("dropped row err=%v, want context.Canceled", res.err)
+		}
+	default:
+		t.Fatal("dropped row was never answered")
+	}
+	if g := adm.collect(dead, make(chan *inkling2QueuedRequest)); g != nil {
+		t.Fatalf("cancelled first row formed cohort %d rows, want none", len(g))
+	}
+}

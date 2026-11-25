@@ -23,6 +23,9 @@ type fakeInk2Cohort struct {
 	failArgmax    bool
 	// heads counts single-row output mixes, which only a cohort prefill's head runs
 	heads int
+	// writes counts Ink2Write calls and onWrite, when set, sees each destination
+	writes  int
+	onWrite func(compute.Ink2Ref)
 }
 
 func newFakeInk2Cohort() *fakeInk2Cohort {
@@ -52,6 +55,10 @@ func (d *fakeInk2Cohort) Ink2Alloc(n int) (compute.Tensor, error) {
 func (d *fakeInk2Cohort) rows(r compute.Ink2Ref) []float32 { return d.data[r.T.Buf()][r.Off:] }
 
 func (d *fakeInk2Cohort) Ink2Write(dst compute.Ink2Ref, src []float32) error {
+	d.writes++
+	if d.onWrite != nil {
+		d.onWrite(dst)
+	}
 	copy(d.rows(dst), src)
 	return nil
 }
@@ -89,7 +96,17 @@ func (d *fakeInk2Cohort) Ink2Mix(states []compute.Ink2Ref, _ compute.Ink2Ref, _ 
 	return nil
 }
 
+func (d *fakeInk2Cohort) Ink2AllocDeviceOnly(n int) (compute.Tensor, error) { return d.Ink2Alloc(n) }
+
 func (d *fakeInk2Cohort) Ink2PMatMul(w compute.Tensor, x, y compute.Ink2Ref, T int) error {
+	return d.matmul(w, x, y, T)
+}
+
+func (d *fakeInk2Cohort) Ink2PMatMulRows(w compute.Tensor, x, y compute.Ink2Ref, T int) error {
+	return d.matmul(w, x, y, T)
+}
+
+func (d *fakeInk2Cohort) matmul(w compute.Tensor, x, y compute.Ink2Ref, T int) error {
 	rows, cols := w.Shape[0], w.Shape[1]
 	for t := 0; t < T; t++ {
 		d.rows(y)[t*rows] = d.rows(x)[t*cols]
@@ -120,9 +137,11 @@ func fakeInk2CohortModel() *Inkling2LoopModel {
 
 type fakeInk2Session struct{}
 
-func (fakeInk2Session) Prefill(prompt []int) (int, error) { return prompt[len(prompt)-1] + 1, nil }
-func (fakeInk2Session) Step(token int) (int, error)       { return token + 1, nil }
-func (fakeInk2Session) Close() error                      { return nil }
+func (fakeInk2Session) Prefill(_ context.Context, prompt []int) (int, error) {
+	return prompt[len(prompt)-1] + 1, nil
+}
+func (fakeInk2Session) Step(token int) (int, error) { return token + 1, nil }
+func (fakeInk2Session) Close() error                { return nil }
 
 type inkling2ParityCase struct {
 	name     string
@@ -338,5 +357,129 @@ func TestInkling2LoopBatchCohortsReleaseArenasKeepsBinding(t *testing.T) {
 	bt.ReleaseArenas()
 	if d.live != 0 {
 		t.Fatalf("ReleaseArenas after a fault: %d floats live", d.live)
+	}
+}
+
+// fakeInk2CohortPrompt is a prompt of n tokens for row; the fake's first greedy token
+// after it is its last token plus one.
+func fakeInk2CohortPrompt(n, row int) []int {
+	p := make([]int, n)
+	for j := range p {
+		p[j] = 1000*row + j
+	}
+	return p
+}
+
+// A row whose context is already cancelled is never prefilled, and a cohort whose
+// every live row is cancelled stops before its next prefill chunk; a cancelled row
+// leaves the live rows' tokens as they are.
+func TestInkling2CohortPrefillSkipsCancelledRows(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Run("pre-cancelled row is not prefilled", func(t *testing.T) {
+		d := newFakeInk2Cohort()
+		bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+		defer bt.Close()
+		dead, cancel := context.WithCancel(context.Background())
+		cancel()
+		var live0, live2 []int
+		reqs := []Inkling2LoopBatchRequest{
+			{Prompt: []int{10, 11, 12}, MaxTokens: 2, Emit: func(tok int) bool { live0 = append(live0, tok); return true }},
+			{Context: dead, Prompt: []int{20, 21, 22, 23}, MaxTokens: 2, Emit: func(int) bool { t.Error("cancelled row emitted"); return true }},
+			{Prompt: []int{30, 31}, MaxTokens: 2, Emit: func(tok int) bool { live2 = append(live2, tok); return true }},
+		}
+		results, err := bt.Generate(reqs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !errors.Is(results[1].Err, context.Canceled) || results[1].Generated != 0 {
+			t.Fatalf("cancelled row result %+v", results[1])
+		}
+		if d.heads != 2 {
+			t.Fatalf("prefill heads %d, want 2: the cancelled row was prefilled", d.heads)
+		}
+		if !reflect.DeepEqual(live0, []int{13, 14}) || !reflect.DeepEqual(live2, []int{32, 33}) {
+			t.Fatalf("live rows emitted %v and %v, want [13 14] and [32 33]", live0, live2)
+		}
+	})
+	t.Run("all rows cancelled mid prefill stop before the next chunk", func(t *testing.T) {
+		d := newFakeInk2Cohort()
+		bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+		defer bt.Close()
+		cohort := func(ctx context.Context) []Inkling2LoopBatchRequest {
+			emit := func(int) bool { return true }
+			return []Inkling2LoopBatchRequest{
+				{Context: ctx, Prompt: fakeInk2CohortPrompt(1200, 0), MaxTokens: 2, Emit: emit},
+				{Context: ctx, Prompt: fakeInk2CohortPrompt(1200, 1), MaxTokens: 2, Emit: emit},
+			}
+		}
+		if _, err := bt.Generate(cohort(context.Background())); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancelAll := context.WithCancel(context.Background())
+		defer cancelAll()
+		in := bt.b.in.T.Buf()
+		chunks := 0
+		d.onWrite = func(dst compute.Ink2Ref) {
+			if dst.T.Buf() == in {
+				chunks++
+				cancelAll()
+			}
+		}
+		results, err := bt.Generate(cohort(ctx))
+		d.onWrite = nil
+		if err != nil {
+			t.Fatal(err)
+		}
+		if chunks != 1 {
+			t.Fatalf("%d prefill chunks ran after every row was cancelled, want 1", chunks)
+		}
+		for i, r := range results {
+			if !errors.Is(r.Err, context.Canceled) {
+				t.Fatalf("row %d result %+v, want cancelled", i, r)
+			}
+		}
+	})
+}
+
+// A row whose prompt ends in an early prefill chunk gets its first token at that
+// chunk, before a longer row's remaining chunks run.
+func TestInkling2CohortFirstTokenBeforeLongRowPrefill(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	cohort := func(onShort func(int) bool) []Inkling2LoopBatchRequest {
+		return []Inkling2LoopBatchRequest{
+			{Prompt: fakeInk2CohortPrompt(20, 0), MaxTokens: 2, Emit: onShort},
+			{Prompt: fakeInk2CohortPrompt(1200, 1), MaxTokens: 2, Emit: func(int) bool { return true }},
+		}
+	}
+	if _, err := bt.Generate(cohort(func(int) bool { return true })); err != nil {
+		t.Fatal(err)
+	}
+	in := bt.b.in.T.Buf()
+	inWrites, atFirst := 0, -1
+	d.onWrite = func(dst compute.Ink2Ref) {
+		if dst.T.Buf() == in {
+			inWrites++
+		}
+	}
+	var short []int
+	results, err := bt.Generate(cohort(func(tok int) bool {
+		if atFirst < 0 {
+			atFirst = inWrites
+		}
+		short = append(short, tok)
+		return true
+	}))
+	d.onWrite = nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atFirst != 1 {
+		t.Fatalf("short row's first token arrived after %d prefill chunks, want 1", atFirst)
+	}
+	if !reflect.DeepEqual(short, []int{20, 21}) || results[0].Generated != 2 {
+		t.Fatalf("short row emitted %v, result %+v, want [20 21]", short, results[0])
 	}
 }

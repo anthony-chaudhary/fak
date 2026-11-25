@@ -77,8 +77,13 @@ func inkling2AdmissionFromEnv(lookup func(string) (string, bool)) (inkling2Admis
 // collect grows a cohort from first until the queue goes quiet for gap, the
 // cohort reaches max, maxWait elapses since collection began, or the queue closes.
 // The deadline starts at collection, not arrival: requests that queued behind the
-// previous cohort are already waiting and must still be gathered.
+// previous cohort are already waiting and must still be gathered. A row whose
+// caller has already gone is answered here and never takes a slot, so it is never
+// prefilled; a nil result means no live row was collected.
 func (a inkling2Admission) collect(first *inkling2QueuedRequest, queue <-chan *inkling2QueuedRequest) []*inkling2QueuedRequest {
+	if !inkling2RowLive(first) {
+		return nil
+	}
 	group := []*inkling2QueuedRequest{first}
 	deadline := a.clock.Now().Add(a.maxWait)
 	for len(group) < a.max {
@@ -87,7 +92,9 @@ func (a inkling2Admission) collect(first *inkling2QueuedRequest, queue <-chan *i
 			if !ok {
 				return group
 			}
-			group = append(group, r)
+			if inkling2RowLive(r) {
+				group = append(group, r)
+			}
 			continue
 		default:
 		}
@@ -102,12 +109,28 @@ func (a inkling2Admission) collect(first *inkling2QueuedRequest, queue <-chan *i
 			if !ok {
 				return group
 			}
-			group = append(group, r)
+			if inkling2RowLive(r) {
+				group = append(group, r)
+			}
 		case <-fire:
 			return group
 		}
 	}
 	return group
+}
+
+// inkling2RowLive reports whether the row's caller still waits. A row whose caller
+// has gone is completed with the context error; done is buffered and the send is
+// non-blocking, so no reader is ever needed.
+func inkling2RowLive(r *inkling2QueuedRequest) bool {
+	if r.ctx == nil || r.ctx.Err() == nil {
+		return true
+	}
+	select {
+	case r.done <- inkling2QueuedResult{err: r.ctx.Err()}:
+	default:
+	}
+	return false
 }
 
 type inkling2QueuedRequest struct {
@@ -227,7 +250,9 @@ func (e *inkling2LoopBatchEngine) Generate(ctx context.Context, prompt []int, ma
 
 func (e *inkling2LoopBatchEngine) run() {
 	for first := range e.queue {
-		e.execute(e.admission.collect(first, e.queue))
+		if group := e.admission.collect(first, e.queue); len(group) > 0 {
+			e.execute(group)
+		}
 	}
 }
 

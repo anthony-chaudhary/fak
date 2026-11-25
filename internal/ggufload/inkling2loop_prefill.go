@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -92,8 +93,10 @@ func (s *inkling2Resident) prefillArenas(T int) (keep, scr int) {
 
 // prefill runs prompt through the batched forward in chunks, leaving every cache
 // slot and conv history where the per-token path would, and returns the greedy
-// token after the last prompt position.
-func (s *inkling2Resident) prefill(prompt []int) (int, error) {
+// token after the last prompt position. ctx is checked before each chunk, so a
+// cancelled prefill stops after the chunk in flight and leaves s.pos at the chunks
+// that ran.
+func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, error) {
 	pd, ok := s.be.(compute.Inkling2PrefillDevice)
 	if !ok {
 		return 0, fmt.Errorf("inkling2 prefill: backend %s has no batched prefill ops", s.be.Name())
@@ -112,6 +115,9 @@ func (s *inkling2Resident) prefill(prompt []int) (int, error) {
 	}
 	rows := make([]float32, T*hp.Hidden)
 	for start := 0; start < len(prompt); start += T {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		n := min(T, len(prompt)-start)
 		for i, tok := range prompt[start : start+n] {
 			s.w.TokEmbd.Row(tok, rows[i*hp.Hidden:(i+1)*hp.Hidden])

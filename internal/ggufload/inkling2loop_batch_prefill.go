@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -135,23 +136,29 @@ func (r *ink2PrefillRows) head(p *ink2Prefill, blocks []ink2Ref, cur ink2Ref) {
 	}
 }
 
+// errInk2PrefillStopped is returned by prefill when stop ends it before its last chunk.
+var errInk2PrefillStopped = errors.New("inkling2 batch: prefill stopped")
+
 // prefill runs every row's whole prompt through the batched prefill forward, chunked
 // at prefillT tokens across rows, into each row's caches and histories, leaving row i
 // at position len(prompts[i]) exactly as feeding the prompt one lockstep step at a
-// time would; it returns every row's greedy token after its prompt.
-func (b *inkling2Batch) prefill(prompts [][]int) ([]int, error) {
+// time would. A row with an empty prompt is skipped. first is called with each row's
+// greedy token as soon as the chunk that ends its prompt has run, and stop, polled
+// before each chunk, ends the prefill with errInk2PrefillStopped when it reports true,
+// leaving every position unadvanced.
+func (b *inkling2Batch) prefill(prompts [][]int, stop func() bool, first func(row, token int)) error {
 	s := b.s
 	h := s.hp.Hidden
 	if b.prefillT < 1 {
-		return nil, fmt.Errorf("inkling2 batch: state sized without cohort prefill")
+		return fmt.Errorf("inkling2 batch: state sized without cohort prefill")
 	}
 	if len(prompts) != b.C {
-		return nil, fmt.Errorf("inkling2 batch: %d prompts for %d sequences", len(prompts), b.C)
+		return fmt.Errorf("inkling2 batch: %d prompts for %d sequences", len(prompts), b.C)
 	}
 	lens := make([]int, b.C)
 	for i, pr := range prompts {
-		if b.pos[i] != 0 || len(pr) == 0 || len(pr) > b.ctx {
-			return nil, fmt.Errorf("inkling2 batch: sequence %d at position %d cannot prefill %d tokens into %d", i, b.pos[i], len(pr), b.ctx)
+		if b.pos[i] != 0 || len(pr) > b.ctx {
+			return fmt.Errorf("inkling2 batch: sequence %d at position %d cannot prefill %d tokens into %d", i, b.pos[i], len(pr), b.ctx)
 		}
 		lens[i] = len(pr)
 	}
@@ -159,6 +166,9 @@ func (b *inkling2Batch) prefill(prompts [][]int) ([]int, error) {
 		keep: b.p.keep, scr: b.p.scr, keepFloats: b.p.keepFloats, scrFloats: b.p.scrFloats}
 	rows := make([]float32, b.prefillT*h)
 	for _, segs := range inkling2PrefillChunks(lens, b.prefillT) {
+		if stop != nil && stop() {
+			return errInk2PrefillStopped
+		}
 		n := 0
 		for _, sg := range segs {
 			for j, tok := range prompts[sg.row][sg.pos0 : sg.pos0+sg.n] {
@@ -171,22 +181,42 @@ func (b *inkling2Batch) prefill(prompts [][]int) ([]int, error) {
 		p.cohort = &ink2PrefillRows{b: b, segs: segs}
 		p.forward(false)
 		if s.err != nil {
-			return nil, s.err
+			return s.err
+		}
+		if err := b.deliverFirst(segs, first); err != nil {
+			return err
 		}
 	}
-	got, err := s.dev.Ink2ReadInts(b.argIdx, 4*b.C)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]int, b.C)
-	for i := range out {
-		out[i] = int(got[4*i])
+	for i := range lens {
 		b.pos[i] = lens[i]
 	}
 	if r, ok := s.be.(interface{ Recycle() }); ok {
 		r.Recycle()
 	}
-	return out, nil
+	return nil
+}
+
+// deliverFirst reads the greedy tokens of the rows that ended their prompt in this
+// chunk; the head wrote each one to its row's slot of argIdx, which no later chunk
+// rewrites.
+func (b *inkling2Batch) deliverFirst(segs []ink2PrefillSeg, first func(row, token int)) error {
+	ended := false
+	for _, sg := range segs {
+		ended = ended || sg.last
+	}
+	if !ended || first == nil {
+		return nil
+	}
+	got, err := b.s.dev.Ink2ReadInts(b.argIdx, 4*b.C)
+	if err != nil {
+		return err
+	}
+	for _, sg := range segs {
+		if sg.last {
+			first(sg.row, int(got[4*sg.row]))
+		}
+	}
+	return nil
 }
 
 // park holds a finished row below the cache bound: every step advances every row, and

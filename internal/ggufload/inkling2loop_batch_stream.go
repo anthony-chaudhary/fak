@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"time"
@@ -51,7 +52,7 @@ func (t *Inkling2LoopTurn) Accept(token int) bool {
 // step greedily until the turn ends. ctx is checked before every step.
 func Inkling2LoopSessionDecode(ctx context.Context, s Inkling2LoopSession, prompt []int, turn *Inkling2LoopTurn) (st Inkling2LoopGreedyStats, err error) {
 	start := time.Now()
-	next, err := s.Prefill(prompt)
+	next, err := s.Prefill(ctx, prompt)
 	st.Prefill = time.Since(start)
 	if err != nil {
 		return st, err
@@ -346,24 +347,53 @@ func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) (_ []In
 	return results, fatal
 }
 
-// prefillLanes prefills every row's prompt and hands each live row its first greedy
-// token, leaving the row where the lockstep loop would be once it had fed the whole
-// prompt; a failed prefill finishes every row with the error, as a failed step does.
+// prefillLanes prefills the prompts of the rows still live and hands each its first
+// greedy token at the chunk that ends its prompt, leaving the row where the lockstep
+// loop would be once it had fed the whole prompt. A row cancelled before its prefill
+// is finished unprefilled, and the prefill stops once every row left is cancelled or
+// done; a failed prefill finishes every unfinished row with the error, as a failed
+// step does.
 func prefillLanes(b *inkling2Batch, lanes []inkling2BatchLane) error {
 	prompts := make([][]int, len(lanes))
 	for i := range lanes {
-		prompts[i] = lanes[i].req.Prompt
+		lane := &lanes[i]
+		if err := lane.req.Context.Err(); err != nil {
+			lane.skip = len(lane.req.Prompt)
+			lane.finish(time.Now(), err)
+			continue
+		}
+		prompts[i] = lane.req.Prompt
 	}
-	first, err := b.prefill(prompts)
+	stop := func() bool {
+		for i := range lanes {
+			if !lanes[i].done && lanes[i].req.Context.Err() == nil {
+				return false
+			}
+		}
+		return true
+	}
+	first := func(i, token int) {
+		lane := &lanes[i]
+		if lane.done {
+			return
+		}
+		lane.skip = len(lane.req.Prompt)
+		lane.accept(token, time.Now())
+	}
+	err := b.prefill(prompts, stop, first)
+	stopped := errors.Is(err, errInk2PrefillStopped)
+	if stopped {
+		err = nil
+	}
 	now := time.Now()
 	for i := range lanes {
 		lane := &lanes[i]
 		switch {
+		case lane.done:
+		case stopped:
+			lane.finish(now, lane.req.Context.Err())
 		case err != nil:
 			lane.finish(now, err)
-		default:
-			lane.skip = len(lane.req.Prompt)
-			lane.accept(first[i], now)
 		}
 	}
 	return err

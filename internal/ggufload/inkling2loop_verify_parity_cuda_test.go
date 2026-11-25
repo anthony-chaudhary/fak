@@ -3,6 +3,7 @@
 package ggufload
 
 import (
+	"context"
 	"math"
 	"os"
 	"runtime"
@@ -71,7 +72,7 @@ func TestInkling2CUDAVerifyCommitMatchesSerial(t *testing.T) {
 			if err := s.enableSpec(depth); err != nil {
 				t.Fatal(err)
 			}
-			next, err := s.prefill(prompt)
+			next, err := s.prefill(context.Background(), prompt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -203,7 +204,7 @@ func TestInkling2CUDAVerifyMatchesHostVerifyTree(t *testing.T) {
 	if err := s.enableSpec(T - 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.prefill(c.prompt); err != nil {
+	if _, err := s.prefill(context.Background(), c.prompt); err != nil {
 		t.Fatal(err)
 	}
 	vocab := s.hp.VocabUnpadded

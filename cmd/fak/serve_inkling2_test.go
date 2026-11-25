@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -82,7 +83,7 @@ func (s *inkling2FakeSession) enter() func() {
 	return func() { s.busy.Add(-1) }
 }
 
-func (s *inkling2FakeSession) Prefill(prompt []int) (int, error) {
+func (s *inkling2FakeSession) Prefill(_ context.Context, prompt []int) (int, error) {
 	defer s.enter()()
 	s.prompt = append(s.prompt, prompt...)
 	s.prefills = append(s.prefills, append([]int(nil), prompt...))
@@ -139,9 +140,11 @@ var _ inkling2Rewinder = (*inkling2FakeSession)(nil)
 // inkling2PlainSession hides the rewinder so the engine must run it fresh per request.
 type inkling2PlainSession struct{ s *inkling2FakeSession }
 
-func (p inkling2PlainSession) Prefill(prompt []int) (int, error) { return p.s.Prefill(prompt) }
-func (p inkling2PlainSession) Step(token int) (int, error)       { return p.s.Step(token) }
-func (p inkling2PlainSession) Close() error                      { return p.s.Close() }
+func (p inkling2PlainSession) Prefill(ctx context.Context, prompt []int) (int, error) {
+	return p.s.Prefill(ctx, prompt)
+}
+func (p inkling2PlainSession) Step(token int) (int, error) { return p.s.Step(token) }
+func (p inkling2PlainSession) Close() error                { return p.s.Close() }
 
 func inkling2FakeOpener(canned []int, plain bool, opened *[]*inkling2FakeSession) inkling2LoopSessionOpener {
 	return func() (ggufload.Inkling2LoopSession, error) {
@@ -291,6 +294,78 @@ func TestInkling2AdapterCheckpointUnavailableOrOverrunFallsBackToFullPrefill(t *
 	}
 	if len(*opened) != 2 || !s.closed || !inkling2EqualInts((*opened)[1].prompt, []int{'o', 't', 'h'}) {
 		t.Fatalf("reset without memory: opened=%d first closed=%v, want the request on a fresh session", len(*opened), s.closed)
+	}
+}
+
+// inkling2GatedSession holds its first Prefill until the caller cancels or the test
+// releases it, standing in for a long prompt on the device.
+type inkling2GatedSession struct {
+	*inkling2FakeSession
+	block   bool
+	entered chan struct{}
+}
+
+func (g *inkling2GatedSession) Prefill(ctx context.Context, prompt []int) (int, error) {
+	if g.block {
+		select {
+		case g.entered <- struct{}{}:
+		default:
+		}
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+	return g.inkling2FakeSession.Prefill(ctx, prompt)
+}
+
+func TestInkling2ServeGenerateCancelsDuringPrefill(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	var opened []*inkling2GatedSession
+	eng := newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
+		g := &inkling2GatedSession{
+			inkling2FakeSession: &inkling2FakeSession{canned: []int{'a', 'b', 'c', 'd', 'e'}},
+			block:               len(opened) == 0,
+			entered:             entered,
+		}
+		opened = append(opened, g)
+		return g, nil
+	})
+	defer eng.Close()
+
+	prompt := []int{'s', 'y', 's', 'u'}
+	ctx, cancel := context.WithCancel(context.Background())
+	errc := make(chan error, 1)
+	go func() {
+		_, err := eng.Generate(ctx, prompt, 3, nil, func(int) bool { return true })
+		errc <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first prefill never started")
+	}
+	cancel()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled Generate returned %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Generate still blocked 5s after the caller cancelled during prefill")
+	}
+	if !opened[0].closed {
+		t.Fatal("the session whose prefill was cancelled was not dropped")
+	}
+
+	// the next request runs a full prefill on a fresh session, not on the partial state
+	res, got := inkling2Gen(t, eng, prompt, 3)
+	if !inkling2EqualInts(got, []int{'a', 'b', 'c'}) || res.CachedPromptTokens != 0 {
+		t.Fatalf("request after a cancelled prefill: emitted %v cached=%d, want a b c with nothing reused", got, res.CachedPromptTokens)
+	}
+	if len(opened) != 2 {
+		t.Fatalf("opened %d sessions, want a fresh one after the cancelled prefill", len(opened))
+	}
+	if s := opened[1]; len(s.prefills) != 2 || !inkling2EqualInts(s.prefills[0], prompt[:3]) || !inkling2EqualInts(s.prefills[1], prompt[3:]) {
+		t.Fatalf("request after a cancelled prefill prefilled %v, want the whole prompt in order", s.prefills)
 	}
 }
 
@@ -673,10 +748,10 @@ func TestInkling2MetalSessionDrivesOneCommittedRowPerToken(t *testing.T) {
 	}
 
 	s := inkling2MetalSession{s: &inkling2FakeMetalTarget{next: []int32{1}}}
-	if _, err := s.Prefill(nil); err == nil {
+	if _, err := s.Prefill(context.Background(), nil); err == nil {
 		t.Fatal("empty prompt accepted")
 	}
-	if _, err := s.Prefill([]int{inklingmetal.Vocabulary}); err == nil {
+	if _, err := s.Prefill(context.Background(), []int{inklingmetal.Vocabulary}); err == nil {
 		t.Fatal("prompt token past the vocabulary accepted")
 	}
 	if _, err := s.Step(-1); err == nil {

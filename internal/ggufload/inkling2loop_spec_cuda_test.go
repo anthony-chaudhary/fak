@@ -3,6 +3,7 @@
 package ggufload
 
 import (
+	"context"
 	"os"
 	"runtime"
 	"strconv"
@@ -28,7 +29,7 @@ func TestInkling2CUDAVerifyCost(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	prompt := inkling2OracleCases[0].prompt
-	next, err := s.prefill(prompt)
+	next, err := s.prefill(context.Background(), prompt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +147,7 @@ func TestInkling2CUDASpecDiag(t *testing.T) {
 		if err := s.enableSpec(2); err != nil {
 			t.Fatal(err)
 		}
-		next, err := s.prefill(prompt)
+		next, err := s.prefill(context.Background(), prompt)
 		if err != nil {
 			t.Fatal(err)
 		}

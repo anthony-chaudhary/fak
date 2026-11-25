@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -227,7 +228,7 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 	if len(prompt) == 0 {
 		return nil, st, fmt.Errorf("inkling2 spec: empty prompt")
 	}
-	next, err := s.prefill(prompt)
+	next, err := s.prefill(context.Background(), prompt)
 	if err != nil {
 		return nil, st, err
 	}

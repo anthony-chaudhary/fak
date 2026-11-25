@@ -3,6 +3,7 @@
 package ggufload
 
 import (
+	"context"
 	"os"
 	"runtime"
 	"strings"
@@ -19,7 +20,7 @@ type ink2LogitSession struct {
 
 func (l *ink2LogitSession) feed(ids []int) {
 	if l.s.batched && len(ids) > 1 {
-		if _, err := l.s.prefill(ids); err != nil {
+		if _, err := l.s.prefill(context.Background(), ids); err != nil {
 			l.t.Fatal(err)
 		}
 		return

@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -50,7 +51,7 @@ func (d *ink2ReuseDriver) turn(prompt []int, gen int) ([]int, int, error) {
 	}
 	d.hasCk = false
 	if n-1 > reused {
-		if _, err := d.s.Prefill(prompt[reused : n-1]); err != nil {
+		if _, err := d.s.Prefill(context.Background(), prompt[reused:n-1]); err != nil {
 			return nil, 0, err
 		}
 	}
@@ -59,7 +60,7 @@ func (d *ink2ReuseDriver) turn(prompt []int, gen int) ([]int, int, error) {
 		return nil, 0, err
 	}
 	d.ck, d.hasCk = append(d.ck[:0], prompt[:n-1]...), true
-	next, err := d.s.Prefill(prompt[n-1:])
+	next, err := d.s.Prefill(context.Background(), prompt[n-1:])
 	if err != nil {
 		return nil, 0, err
 	}
@@ -85,7 +86,7 @@ func ink2FreshTurn(m *Inkling2LoopModel, prompt []int, gen int) ([]int, error) {
 		return nil, err
 	}
 	defer s.Close()
-	next, err := s.Prefill(prompt)
+	next, err := s.Prefill(context.Background(), prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +186,7 @@ func TestInkling2HostRewinderCheckpointRestoreReset(t *testing.T) {
 		t.Fatalf("restore without checkpoint: %v", err)
 	}
 	prefix := []int{1, 4, 2, 7, 3, 8}
-	if _, err := s.Prefill(prefix); err != nil {
+	if _, err := s.Prefill(context.Background(), prefix); err != nil {
 		t.Fatal(err)
 	}
 	if rw.Pos() != len(prefix) {
@@ -195,7 +196,7 @@ func TestInkling2HostRewinderCheckpointRestoreReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := func() []int {
-		next, err := s.Prefill([]int{5})
+		next, err := s.Prefill(context.Background(), []int{5})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -237,7 +238,7 @@ func TestInkling2HostRewinderCheckpointRestoreReset(t *testing.T) {
 		t.Fatalf("reset kept the checkpoint: %v", err)
 	}
 	p := []int{2, 9, 9, 1}
-	next, err := s.Prefill(p)
+	next, err := s.Prefill(context.Background(), p)
 	if err != nil {
 		t.Fatal(err)
 	}

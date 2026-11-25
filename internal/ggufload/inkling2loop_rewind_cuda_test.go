@@ -3,6 +3,7 @@
 package ggufload
 
 import (
+	"context"
 	"reflect"
 	"runtime"
 	"testing"
@@ -85,10 +86,10 @@ func TestInkling2CUDAPrefixReuseMatchesFresh(t *testing.T) {
 				start := time.Now()
 				// the engine's reuse-off mode: fresh session, same last-token split
 				var want []int
-				_, err = s.Prefill(p[:len(p)-1])
+				_, err = s.Prefill(context.Background(), p[:len(p)-1])
 				if err == nil {
 					var nx int
-					if nx, err = s.Prefill(p[len(p)-1:]); err == nil {
+					if nx, err = s.Prefill(context.Background(), p[len(p)-1:]); err == nil {
 						want, err = ink2DecodeFrom(s, nx, gen)
 					}
 				}
