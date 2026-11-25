@@ -31,7 +31,7 @@ int fcuda_mem_info(size_t *free_mem, size_t *total_mem);
  * initialize internal state or report preceding asynchronous errors. */
 int fcuda_device_l2_cache_size(int *bytes, int device);
 int fcuda_device_warp_size(int *threads, int device);
-/* Driver version via cuDriverGetVersion; returns its CUresult as an int
+/* Driver version via cudaDriverGetVersion; returns its cudaError_t as an int
  * (0 on success). Output is usable only on success. */
 int fcuda_driver_get_version(int *version);
 

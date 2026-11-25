@@ -170,6 +170,20 @@ jobs:
           fi
           echo "ok: $IMAGE is fetchable from ghcr"
 
+      # The smoke probes run without a GPU driver, exactly like `docker run`
+      # without `--gpus`. Name an unresolved load-time library up front; the
+      # probes below would only report it as an empty version string.
+      - name: Assert the CUDA binary loads without a GPU driver
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
+        run: |
+          set -euo pipefail
+          if unresolved="$(docker run --rm --entrypoint sh "$IMAGE" -c 'ldd /usr/local/bin/fak | grep "not found"')"; then
+            echo "::error::CUDA image fak cannot start without a GPU driver; unresolved load-time libraries: ${unresolved}"
+            exit 1
+          fi
+          echo "ok: every load-time library of the CUDA binary resolves inside the image"
+
       - name: Smoke — fak version inside the CUDA image
         env:
           VERSION: ${{ steps.meta.outputs.version }}

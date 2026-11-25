@@ -157,7 +157,7 @@ func BuildCUDADeviceReceipt(f CUDADeviceInitFacts, build CUDABuildArches) CUDADe
 }
 
 // formatCUDADriverVersion renders a CUDA version integer (MAJOR*1000 + MINOR*10 + PATCH, the
-// CUDA_VERSION layout cuDriverGetVersion returns) as "major.minor[.patch]": 12090 -> "12.9",
+// CUDA_VERSION layout the driver-version query returns) as "major.minor[.patch]": 12090 -> "12.9",
 // 13000 -> "13.0", 12091 -> "12.9.1". Values below 1000 do not encode a plausible version and
 // render as "" (unknown).
 func formatCUDADriverVersion(v int) string {

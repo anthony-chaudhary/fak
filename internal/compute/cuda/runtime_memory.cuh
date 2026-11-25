@@ -1,5 +1,3 @@
-#include <cuda.h>
-
 #include "alloc_status.h"
 // Idle device pool cap state; see fcuda_pool_evict_to_cap.
 static size_t g_pool_bytes = 0, g_pool_peak_bytes = 0;
@@ -76,8 +74,10 @@ extern "C" int fcuda_device_warp_size(int *threads, int device) {
   return (int)cudaDeviceGetAttribute(threads, cudaDevAttrWarpSize, device);
 }
 
+// Runtime-API query on purpose: a driver-API symbol here makes libcuda.so.1 a load-time
+// dependency, so the binary cannot even print its version on a host without the driver.
 extern "C" int fcuda_driver_get_version(int *version) {
-  return (int)cuDriverGetVersion(version);
+  return (int)cudaDriverGetVersion(version);
 }
 
 // Idle device pool byte cap. g_pool used to retain every freed exact-size buffer forever, so

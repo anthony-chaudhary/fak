@@ -23,7 +23,7 @@ package compute
 
 /*
 #cgo CFLAGS: -I${SRCDIR}
-#cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcuda -lcublas -lcublasLt -lstdc++ -lm
+#cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcublas -lcublasLt -lstdc++ -lm
 #include <stdlib.h>
 #include "cuda_backend.h"
 #include "cuda_kv_precision.h"
@@ -146,7 +146,7 @@ func init() {
 	applyCUDATF32()
 }
 
-// captureCUDADriverVersion asks the CUDA driver for its own version via cuDriverGetVersion
+// captureCUDADriverVersion asks the CUDA runtime for the driver version via cudaDriverGetVersion
 // and formats it as "major.minor[.patch]". It degrades to "" when the driver cannot answer, so
 // the receipt reports an unknown driver instead of failing init — the receipt is a surface,
 // never a gate. Safe to call here: fcuda_init already selected device 0 and loaded the driver.

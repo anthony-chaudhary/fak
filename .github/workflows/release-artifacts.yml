@@ -398,6 +398,12 @@ jobs:
             echo "::error::CPU compatibility and explicit reference tags resolve to different digests"
             exit 1
           fi
+          # This runner has no GPU driver. Name any library the image cannot
+          # resolve at load time; otherwise the probes below die with a bare 127.
+          if unresolved="$(docker run --rm --entrypoint sh "$cuda_digest" -c 'ldd /usr/local/bin/fak | grep "not found"')"; then
+            echo "::error::CUDA image fak cannot start without a GPU driver; unresolved load-time libraries: ${unresolved}"
+            exit 1
+          fi
           cuda_caps="$(docker run --rm --entrypoint fak "$cuda_digest" runtime-capabilities)"
           echo "$cuda_caps" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if "cuda" in (d.get("build_tags") or []) else 1)'
           cuda_version="$(docker run --rm --entrypoint fak "$cuda_digest" version 2>/dev/null | head -1)"
