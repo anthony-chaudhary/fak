@@ -28,24 +28,24 @@ func TestFastReleaseGateConvergesAndKeepsFullTestObservable(t *testing.T) {
 		// The go test step stays observable (#6982): tee'd log, the real exit
 		// status, and a heartbeat while it runs.
 		"- name: go test ./... (no -race)",
-		`go test -timeout=20m -skip "$CI_FAST_ADVISORY_TESTS" "${shard_pkgs[@]}" 2>&1 | tee`,
+		`go test -timeout=20m -skip "$CI_FAST_ADVISORY_TESTS" "${go_test_args[@]}" 2>&1 | tee`,
 		`status_file="$RUNNER_TEMP/ci-fast-go-test.status"`,
 		`"$RUNNER_TEMP/ci-fast-go-test.log"`,
 		"${PIPESTATUS[0]}",
 		"is still running",
 		`FAK_REQUIRE_OPENAPI_VALIDATOR: "1"`,
-		// The shards partition ONE package list: every job checks out the event
-		// commit resolved once by candidate, and the partition keys on the
-		// runner-provided matrix position so its modulus cannot drift from the
-		// matrix size.
+		// The test jobs divide ONE package list: every job checks out the event
+		// commit resolved once by candidate. Shards take a weighted share of it,
+		// split packages run as `-run` buckets of their own test list, and the
+		// verifier below proves each package and split test ran exactly once.
 		"ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}",
 		"ref: ${{ needs.candidate.outputs.sha }}",
 		"EXPECTED_TREE: ${{ needs.candidate.outputs.tree }}",
 		`! "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$`,
 		"go list ./...",
-		"SHARD_INDEX: ${{ strategy.job-index }}",
-		"SHARD_TOTAL: ${{ strategy.job-total }}",
-		"'(NR - 1) % n == i'",
+		"go run ./cmd/cifastshard partition -weights .github/ci-fast-package-weights.json",
+		`go test -list '.*' "$SPLIT"`,
+		"go run ./cmd/cifastshard buckets",
 		"fail-fast: false",
 		// Automatic runs retain the pre-shard check name. Manual runs cannot
 		// masquerade as the release check, even with requested intent release.
@@ -107,8 +107,9 @@ func TestFastReleaseGateShardOutlastsPerBinaryTimeout(t *testing.T) {
 }
 
 // This executes the workflow's verifier, not a second Go implementation of it.
-// The fixture names eight packages and their four partitions explicitly so a
-// dropped or duplicated package cannot be hidden by duplicating its algorithm.
+// The fixture names every shard's packages and every bucket's tests explicitly
+// so a dropped or duplicated package or test cannot be hidden by duplicating
+// the partition algorithm.
 // fak-test:runtime medium est=3s lane=default
 func TestFastReleaseGateRequiresCompleteSourceBoundProvenance(t *testing.T) {
 	t.Parallel()
@@ -137,7 +138,40 @@ func TestFastReleaseGateRequiresCompleteSourceBoundProvenance(t *testing.T) {
 			// A dispatch can test an immutable commit other than its event SHA.
 			f.bind("GITHUB_SHA", "represented_sha", strings.Repeat("c", 40))
 		}, verified: true},
-		{name: "missing shard", mutate: func(f *fastProvenanceFixture) { f.receipts = f.receipts[:4] }},
+		{name: "missing shard", mutate: func(f *fastProvenanceFixture) { f.receipts = append(f.receipts[:4], f.receipts[5:]...) }},
+		{name: "missing bucket", mutate: func(f *fastProvenanceFixture) { f.receipts = f.receipts[:len(f.receipts)-1] }},
+		{name: "duplicate bucket replaces missing bucket", mutate: func(f *fastProvenanceFixture) {
+			f.receipts[len(f.receipts)-1] = f.receipts[len(f.receipts)-2]
+		}},
+		{name: "package assigned to two shards", mutate: func(f *fastProvenanceFixture) {
+			shard := f.receipts[2]["coverage"].(map[string]any)
+			packages := append([]string{"example.invalid/project/a"}, shard["packages"].([]string)...)
+			shard["packages"] = packages
+			f.receipts[2]["commands"] = [][]string{fastShardCommand(packages...)}
+		}},
+		{name: "split package also run by a shard", mutate: func(f *fastProvenanceFixture) {
+			shard := f.receipts[1]["coverage"].(map[string]any)
+			packages := append(shard["packages"].([]string), "example.invalid/project/big")
+			shard["packages"] = packages
+			f.receipts[1]["commands"] = [][]string{fastShardCommand(packages...)}
+		}},
+		{name: "test assigned to two buckets", mutate: func(f *fastProvenanceFixture) {
+			bucket := f.receipts[9]["coverage"].(map[string]any)
+			tests := append(bucket["tests"].([]string), "TestB")
+			bucket["tests"] = tests
+			f.receipts[9]["commands"] = [][]string{fastBucketCommand("example.invalid/project/big", tests...)}
+		}},
+		{name: "bucket argv runs fewer tests than it claims", mutate: func(f *fastProvenanceFixture) {
+			f.receipts[9]["commands"] = [][]string{fastBucketCommand("example.invalid/project/big", "TestA")}
+		}},
+		{name: "bucket lists a different test universe", mutate: func(f *fastProvenanceFixture) {
+			f.receipts[10]["coverage"].(map[string]any)["all_tests"] = []string{"TestA", "TestB"}
+		}},
+		{name: "split list disagrees with bucket jobs", mutate: func(f *fastProvenanceFixture) {
+			for _, receipt := range f.receipts[1:9] {
+				receipt["coverage"].(map[string]any)["split_packages"] = []string{"example.invalid/project/big"}
+			}
+		}},
 		{name: "duplicate replaces missing shard", mutate: func(f *fastProvenanceFixture) { f.receipts[4] = f.receipts[3] }},
 		{name: "extra duplicate receipt", mutate: func(f *fastProvenanceFixture) { f.receipts = append(f.receipts, f.receipts[4]) }},
 		{name: "no receipts", mutate: func(f *fastProvenanceFixture) { f.receipts = nil }},
@@ -150,7 +184,7 @@ func TestFastReleaseGateRequiresCompleteSourceBoundProvenance(t *testing.T) {
 			f.bind("REQUESTED_INTENT", "requested_intent", "release")
 		}},
 		{name: "empty package universe", mutate: func(f *fastProvenanceFixture) {
-			for _, receipt := range f.receipts[1:] {
+			for _, receipt := range f.receipts[1:9] {
 				coverage := receipt["coverage"].(map[string]any)
 				coverage["all_packages"], coverage["packages"] = []string{}, []string{}
 				receipt["commands"] = [][]string{fastShardCommand()}
@@ -468,6 +502,10 @@ func fastShardCommand(packages ...string) []string {
 	return append([]string{"go", "test", "-timeout=20m", "-skip", fastAdvisorySkip}, packages...)
 }
 
+func fastBucketCommand(pkg string, tests ...string) []string {
+	return []string{"go", "test", "-timeout=20m", "-skip", fastAdvisorySkip, "-run", "^(" + strings.Join(tests, "|") + ")$", pkg}
+}
+
 // TestFastReleaseGateSkipsOnlyPinnedLiveTreeRatchets keeps the decisive gate's
 // -skip list from widening silently: the workflow value must name exactly the
 // pinned ratchets, each must still exist where pinned, and the full ci.yml test
@@ -537,12 +575,35 @@ func newFastProvenanceFixture() fastProvenanceFixture {
 		"CI_CLASS": "fast", "REQUESTED_INTENT": "", "CANDIDATE_RESULT": "success", "BUILD_VET_RESULT": "success", "GO_TEST_SHARDS_RESULT": "success",
 		"CI_FAST_ADVISORY_TESTS": fastAdvisorySkip,
 	}}
-	all := []string{
+	shardOwned := []string{
 		"example.invalid/project/a", "example.invalid/project/b", "example.invalid/project/c", "example.invalid/project/d",
 		"example.invalid/project/e", "example.invalid/project/f", "example.invalid/project/g", "example.invalid/project/h",
+		"example.invalid/project/i", "example.invalid/project/j", "example.invalid/project/k", "example.invalid/project/l",
+		"example.invalid/project/m", "example.invalid/project/n", "example.invalid/project/o", "example.invalid/project/p",
 	}
-	partitions := [][]string{{all[0], all[4]}, {all[1], all[5]}, {all[2], all[6]}, {all[3], all[7]}}
-	for _, job := range []string{"build-vet-fast", "go-test-shard-0", "go-test-shard-1", "go-test-shard-2", "go-test-shard-3"} {
+	split := []string{"example.invalid/project/big", "example.invalid/project/wide"}
+	all := append(append([]string{}, shardOwned...), split...)
+	var partitions [][]string
+	for i := 0; i < 8; i++ {
+		partitions = append(partitions, []string{shardOwned[i], shardOwned[i+8]})
+	}
+	type bucket struct {
+		pkg          string
+		index, total int
+		tests, all   []string
+	}
+	bigTests := []string{"ExampleA", "FuzzB", "TestA", "TestB", "TestC", "TestD", "TestE", "TestF"}
+	wideTests := []string{"TestP", "TestQ", "TestR"}
+	buckets := []bucket{
+		{split[0], 0, 4, []string{"ExampleA", "TestC"}, bigTests}, {split[0], 1, 4, []string{"FuzzB", "TestD"}, bigTests},
+		{split[0], 2, 4, []string{"TestA", "TestE"}, bigTests}, {split[0], 3, 4, []string{"TestB", "TestF"}, bigTests},
+		{split[1], 0, 2, []string{"TestP", "TestR"}, wideTests}, {split[1], 1, 2, []string{"TestQ"}, wideTests},
+	}
+	jobs := []string{"build-vet-fast"}
+	for i := 0; i < len(partitions)+len(buckets); i++ {
+		jobs = append(jobs, fmt.Sprintf("go-test-shard-%d", i))
+	}
+	for _, job := range jobs {
 		environment := map[string]string{
 			"GOVERSION": "go1.26.0", "GOOS": "linux", "GOARCH": "amd64", "CGO_ENABLED": "1", "GOFLAGS": "-p=2", "GOTOOLCHAIN": "auto", "GOMAXPROCS": "2",
 		}
@@ -555,8 +616,14 @@ func newFastProvenanceFixture() fastProvenanceFixture {
 		}
 		if job != "build-vet-fast" {
 			index := len(f.receipts) - 1
-			coverage = map[string]any{"kind": "go-test-shard", "shard_index": index, "shard_total": 4, "all_packages": all, "packages": partitions[index]}
-			commands = [][]string{fastShardCommand(partitions[index]...)}
+			if index < len(partitions) {
+				coverage = map[string]any{"kind": "go-test-shard", "shard_index": index, "shard_total": len(partitions), "all_packages": all, "split_packages": split, "packages": partitions[index]}
+				commands = [][]string{fastShardCommand(partitions[index]...)}
+			} else {
+				b := buckets[index-len(partitions)]
+				coverage = map[string]any{"kind": "go-test-bucket", "package": b.pkg, "bucket_index": b.index, "bucket_total": b.total, "tests": b.tests, "all_tests": b.all}
+				commands = [][]string{fastBucketCommand(b.pkg, b.tests...)}
+			}
 			environment["FAK_REQUIRE_OPENAPI_VALIDATOR"] = "1"
 			stepNames = []string{"tests"}
 		}

@@ -15,16 +15,20 @@
 # missing/unknown, release_decide FALLS BACK to the whole ci.yml run, so a
 # missing fast signal never cuts on a blind base.
 #
-# Shape (decisive on a 2-core hosted runner): one serial `go test ./...` summed
-# ~3100s of package test time over 2 slots plus compile/link and hit the 30m
-# step bound before it could conclude, so the run was never green. The test set
-# is now sharded over a deterministic partition of `go list ./...` into parallel
-# matrix jobs; build/vet/architest stay in one job; and the final
-# `build-vet-test-fast` job (same id and check name as before) needs every job
-# and is red unless all of them are green, so the run conclusion stays the one
-# meaningful verdict. Each shard runs `go test -timeout=20m` INSIDE a 35m step
-# bound: a hung test binary dies as a decisive, diagnosable go-test failure (with
-# its goroutine dump) before the runner kills the step.
+# Shape (decisive on a 2-core hosted runner): the run's wall is the slowest test
+# job, so the test set is divided by measured cost, not by package name. Eight
+# package shards fill greedily from committed per-package seconds
+# (.github/ci-fast-package-weights.json, via cmd/cifastshard); packages too slow
+# to share a shard (CI_FAST_SPLIT_PACKAGES) instead run as disjoint `-run`
+# buckets of their own `go test -list` names. build/vet/architest stay in one
+# job; and the final `build-vet-test-fast` job (same id and check name as
+# before) needs every job and is red unless all of them are green, so the run
+# conclusion stays the one meaningful verdict. Its evidence check re-proves from
+# the receipts alone that every package and every split test ran exactly once,
+# so a stale weights file can only slow the gate, never shrink what it tests.
+# Each test job runs `go test -timeout=20m` INSIDE a 35m step bound: a hung test
+# binary dies as a decisive, diagnosable go-test failure (with its goroutine
+# dump) before the runner kills the step.
 name: ci-fast
 run-name: ${{ github.event_name == 'workflow_dispatch' && 'ci-fast diagnostic (non-release)' || 'ci-fast' }} · ${{ github.sha }}
 
@@ -74,6 +78,10 @@ env:
   # and the verifier refuses any other value. The list is pinned, name by name, by
   # internal/releasereadiness TestFastReleaseGateSkipsOnlyPinnedLiveTreeRatchets.
   CI_FAST_ADVISORY_TESTS: "^(TestLiveTreeUnderCeiling|TestTreeEnumExhaustivenessNotGrowing|TestLiveInternalGoPackagesResolveToExplicitLaneTrees|TestCheckedInPageIsFresh|TestLiveGitGatherIsWellFormed|TestTestSuitePolicy)$"
+  # Each package here alone outlasts a whole shard, so the package shards skip it
+  # and the matrix `split` entries run it as buckets. The evidence check refuses
+  # a run where this list and the bucket jobs disagree.
+  CI_FAST_SPLIT_PACKAGES: "./cmd/fak ./internal/agentbench/taskrun"
 
 # These receipts bind checkout commits and reported job execution. They do not
 # seal generated/untracked files or external Go inputs, and grant no release
@@ -157,9 +165,11 @@ jobs:
       # Build/test cache: share the SAME content-addressed GOCACHE prefix as
       # ci.yml's build-vet-test job (gobuild, non-race) so a warm cache skips
       # unchanged packages. A restored entry is never wrong — a miss just
-      # rebuilds.
+      # rebuilds. Restore-only: ci.yml saves this exact key for the same commit,
+      # and a multi-GiB post-job save here would sit on the verdict's critical
+      # path.
       - name: cache Go build/test artifacts
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
           key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
@@ -199,34 +209,43 @@ jobs:
           REQUESTED_INTENT: ${{ inputs.intent }}
           JOB_RESULT: ${{ job.status }}
           JOB_ID: build-vet-fast
-          SHARD_INDEX: "0"
-          SHARD_TOTAL: "0"
           STEPS_JSON: ${{ toJSON(steps) }}
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
           test -s "$RUNNER_TEMP/ci-fast-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-fast-environment.json"
+          # Test lists outgrow one argv string, so receipts are assembled from files.
+          commands_file="$RUNNER_TEMP/ci-fast-commands.json"
+          coverage_file="$RUNNER_TEMP/ci-fast-coverage.json"
           if [[ "$JOB_ID" == build-vet-fast ]]; then
-            commands='[["bash",".github/scripts/verify-release-checksums_test.sh"],["go","build","./..."],["go","vet","./..."],["go","test","-count=1","./internal/architest/","-run","^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$"]]'
-            coverage='{"kind":"build-vet","package_scope":"./..."}'
+            echo '[["bash",".github/scripts/verify-release-checksums_test.sh"],["go","build","./..."],["go","vet","./..."],["go","test","-count=1","./internal/architest/","-run","^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$"]]' > "$commands_file"
+            echo '{"kind":"build-vet","package_scope":"./..."}' > "$coverage_file"
           else
-            test -f "$RUNNER_TEMP/ci-fast-packages.txt" || : > "$RUNNER_TEMP/ci-fast-packages.txt"
-            test -f "$RUNNER_TEMP/ci-fast-shard-packages.txt" || : > "$RUNNER_TEMP/ci-fast-shard-packages.txt"
-            packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-shard-packages.txt")
-            all_packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-packages.txt")
+            for name in packages shard-packages split-packages all-tests bucket-tests go-test-args; do
+              test -f "$RUNNER_TEMP/ci-fast-$name.txt" || : > "$RUNNER_TEMP/ci-fast-$name.txt"
+              jq -Rs 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-$name.txt" > "$RUNNER_TEMP/ci-fast-$name.json"
+            done
             jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-fast-environment.json" > "$RUNNER_TEMP/ci-fast-environment-complete.json"
             mv "$RUNNER_TEMP/ci-fast-environment-complete.json" "$RUNNER_TEMP/ci-fast-environment.json"
-            commands=$(jq -nc --arg skip "$CI_FAST_ADVISORY_TESTS" --argjson packages "$packages" '[["go","test","-timeout=20m","-skip",$skip] + $packages]')
-            coverage=$(jq -nc --argjson packages "$packages" --argjson all_packages "$all_packages" --argjson index "$SHARD_INDEX" --argjson total "$SHARD_TOTAL" '{kind:"go-test-shard",shard_index:$index,shard_total:$total,packages:$packages,all_packages:$all_packages}')
+            jq -n --arg skip "$CI_FAST_ADVISORY_TESTS" --slurpfile args "$RUNNER_TEMP/ci-fast-go-test-args.json" '[["go","test","-timeout=20m","-skip",$skip] + $args[0]]' > "$commands_file"
+            if [[ -n "$SPLIT" ]]; then
+              jq -n --slurpfile packages "$RUNNER_TEMP/ci-fast-shard-packages.json" --slurpfile tests "$RUNNER_TEMP/ci-fast-bucket-tests.json" \
+                --slurpfile all_tests "$RUNNER_TEMP/ci-fast-all-tests.json" --argjson index "$((BUCKET - 1))" --argjson total "$BUCKETS" \
+                '{kind:"go-test-bucket",package:($packages[0][0] // ""),bucket_index:$index,bucket_total:$total,tests:$tests[0],all_tests:$all_tests[0]}' > "$coverage_file"
+            else
+              jq -n --slurpfile packages "$RUNNER_TEMP/ci-fast-shard-packages.json" --slurpfile all_packages "$RUNNER_TEMP/ci-fast-packages.json" \
+                --slurpfile split_packages "$RUNNER_TEMP/ci-fast-split-packages.json" --argjson index "$((SHARD - 1))" --argjson total "$SHARDS" \
+                '{kind:"go-test-shard",shard_index:$index,shard_total:$total,packages:$packages[0],all_packages:$all_packages[0],split_packages:$split_packages[0]}' > "$coverage_file"
+            fi
           fi
           jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
             --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
             --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
             --arg intent "$REQUESTED_INTENT" --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
             --arg workflow_sha "$GITHUB_WORKFLOW_SHA" --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
-            --argjson commands "$commands" --argjson coverage "$coverage" --argjson steps "$STEPS_JSON" \
+            --slurpfile commands "$commands_file" --slurpfile coverage "$coverage_file" --argjson steps "$STEPS_JSON" \
             --slurpfile environment "$RUNNER_TEMP/ci-fast-environment.json" \
-            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,requested_intent:$intent,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:$coverage,environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,requested_intent:$intent,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands[0],coverage:$coverage[0],environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
             > "$RUNNER_TEMP/ci-fast-$JOB_ID.json"
       - name: upload job provenance
         if: always()
@@ -238,7 +257,7 @@ jobs:
 
   go-test-shard:
     needs: candidate
-    name: go test ./... (no -race) · shard ${{ matrix.shard }}/${{ strategy.job-total }}
+    name: go test ./... (no -race) · ${{ matrix.split && format('{0} bucket {1}/{2}', matrix.split, matrix.bucket, matrix.buckets) || format('shard {0}/{1}', matrix.shard, matrix.shards) }}
     runs-on: ubuntu-latest
     # Outlasts the 35m step bound below, so the step (not the job) is what ends
     # a stuck shard and the failure keeps its step identity in the run log.
@@ -248,10 +267,25 @@ jobs:
       # others and hide their failures from the same run.
       fail-fast: false
       matrix:
-        # Human labels only. The partition keys on strategy.job-index /
-        # strategy.job-total, so adding or removing a label re-partitions every
-        # package exactly once with no second number to keep in sync.
-        shard: [1, 2, 3, 4]
+        # A shard entry runs its share of the weighted package partition; a
+        # split entry runs one bucket of a CI_FAST_SPLIT_PACKAGES package. The
+        # verdict job pins the job count and proves the numbers here cover each
+        # package and each split test exactly once, so a typo cannot drop work.
+        include:
+          - { shard: 1, shards: 8 }
+          - { shard: 2, shards: 8 }
+          - { shard: 3, shards: 8 }
+          - { shard: 4, shards: 8 }
+          - { shard: 5, shards: 8 }
+          - { shard: 6, shards: 8 }
+          - { shard: 7, shards: 8 }
+          - { shard: 8, shards: 8 }
+          - { split: ./cmd/fak, bucket: 1, buckets: 4 }
+          - { split: ./cmd/fak, bucket: 2, buckets: 4 }
+          - { split: ./cmd/fak, bucket: 3, buckets: 4 }
+          - { split: ./cmd/fak, bucket: 4, buckets: 4 }
+          - { split: ./internal/agentbench/taskrun, bucket: 1, buckets: 2 }
+          - { split: ./internal/agentbench/taskrun, bucket: 2, buckets: 2 }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -284,8 +318,8 @@ jobs:
           go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "$GOMAXPROCS" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-fast-environment.json"
 
       # Restore-only: every shard starts from the shared gobuild GOCACHE prefix
-      # (ci.yml build-vet-test / build-vet-fast save it). Shards never save, so N
-      # parallel jobs do not multiply the repository's cache footprint.
+      # (ci.yml build-vet-test saves it). Shards never save, so N parallel jobs
+      # do not multiply the repository's cache footprint.
       - name: restore Go build/test cache
         uses: actions/cache/restore@v4
         with:
@@ -299,10 +333,11 @@ jobs:
         run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
 
       # The correctness gate: the same `go test ./...` package set as ci.yml,
-      # WITHOUT `-race`, split so each package runs in exactly one shard:
-      # package k (1-based, `go list ./...` order) belongs to shard (k-1) mod N.
-      # `go list` output is sorted and every job checks out the same commit, so
-      # the shards partition one package list deterministically. Keep the command
+      # WITHOUT `-race`. A shard runs its weighted share of `go list ./...` minus
+      # the split packages; a bucket runs one disjoint `-run` slice of a split
+      # package's `go test -list` names (sorted, name i in bucket i mod N). Every
+      # job checks out the same commit, so all derive from one package list. The
+      # exact argv is written out for the provenance receipt. Keep the command
       # observable: hosted runners have otherwise ended a 20-minute silent step
       # without retaining the package failure output (#6982). -timeout=20m is the
       # per-test-binary bound (the default 10m already clipped cmd/fak at
@@ -313,36 +348,68 @@ jobs:
         shell: bash
         env:
           FAK_REQUIRE_OPENAPI_VALIDATOR: "1"
-          SHARD_INDEX: ${{ strategy.job-index }}
-          SHARD_TOTAL: ${{ strategy.job-total }}
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ matrix.shards }}
+          SPLIT: ${{ matrix.split }}
+          BUCKET: ${{ matrix.bucket }}
+          BUCKETS: ${{ matrix.buckets }}
         run: |
           set -uo pipefail
           all_file="$RUNNER_TEMP/ci-fast-packages.txt"
           shard_file="$RUNNER_TEMP/ci-fast-shard-packages.txt"
-          if ! go list ./... > "$all_file"; then
-            echo "::error::go list ./... failed; cannot partition the package set"
+          split_file="$RUNNER_TEMP/ci-fast-split-packages.txt"
+          args_file="$RUNNER_TEMP/ci-fast-go-test-args.txt"
+          if ! go list ./... > "$all_file" || ! go list $CI_FAST_SPLIT_PACKAGES > "$split_file"; then
+            echo "::error::go list failed; cannot partition the package set"
             exit 1
           fi
-          awk -v n="$SHARD_TOTAL" -v i="$SHARD_INDEX" '(NR - 1) % n == i' "$all_file" > "$shard_file"
-          total=$(wc -l < "$all_file")
-          count=$(wc -l < "$shard_file")
-          echo "shard $((SHARD_INDEX + 1))/$SHARD_TOTAL: $count of $total packages at $(git rev-parse HEAD)"
-          if [ "$count" -eq 0 ]; then
-            echo "::error::shard $((SHARD_INDEX + 1))/$SHARD_TOTAL selected no packages from go list ./..."
-            exit 1
+          if [ -n "$SPLIT" ]; then
+            label="$SPLIT bucket $BUCKET/$BUCKETS"
+            tests_file="$RUNNER_TEMP/ci-fast-all-tests.txt"
+            bucket_file="$RUNNER_TEMP/ci-fast-bucket-tests.txt"
+            if ! go list "$SPLIT" > "$shard_file" || ! go test -list '.*' "$SPLIT" > "$RUNNER_TEMP/ci-fast-test-list.txt"; then
+              echo "::error::$label: cannot list the tests of $SPLIT"
+              exit 1
+            fi
+            # A listed name the ASCII pattern cannot select would otherwise vanish
+            # from both the buckets and the evidence universe.
+            if ! LC_ALL=C awk '/^(Test|Benchmark|Example|Fuzz)/ && !/^(Test|Benchmark|Example|Fuzz)[A-Za-z0-9_]*$/ { print "::error::unselectable test name: " $0; bad = 1 } END { exit bad }' "$RUNNER_TEMP/ci-fast-test-list.txt"; then
+              exit 1
+            fi
+            grep -E '^(Test|Benchmark|Example|Fuzz)[A-Za-z0-9_]*$' "$RUNNER_TEMP/ci-fast-test-list.txt" | LC_ALL=C sort -u > "$tests_file"
+            if ! go run ./cmd/cifastshard buckets -buckets "$BUCKETS" -index "$((BUCKET - 1))" < "$tests_file" > "$bucket_file" || [ ! -s "$bucket_file" ]; then
+              echo "::error::$label selected no tests from go test -list"
+              exit 1
+            fi
+            run_regex="^($(paste -sd'|' "$bucket_file"))\$"
+            # Linux caps one argv string at 128 KiB; fail here, not as an exec error.
+            if [ "${#run_regex}" -gt 120000 ]; then
+              echo "::error::$label -run pattern is ${#run_regex} bytes; raise the bucket count for $SPLIT"
+              exit 1
+            fi
+            go_test_args=(-run "$run_regex" "$(cat "$shard_file")")
+            echo "$label: $(wc -l < "$bucket_file") of $(wc -l < "$tests_file") top-level tests at $(git rev-parse HEAD)"
+          else
+            label="shard $SHARD/$SHARDS"
+            if ! go run ./cmd/cifastshard partition -weights .github/ci-fast-package-weights.json -shards "$SHARDS" -index "$((SHARD - 1))" -exclude-file "$split_file" < "$all_file" > "$shard_file" || [ ! -s "$shard_file" ]; then
+              echo "::error::$label selected no packages from go list ./..."
+              exit 1
+            fi
+            mapfile -t go_test_args < "$shard_file"
+            echo "$label: $(wc -l < "$shard_file") of $(wc -l < "$all_file") packages at $(git rev-parse HEAD)"
           fi
-          mapfile -t shard_pkgs < "$shard_file"
+          printf '%s\n' "${go_test_args[@]}" > "$args_file"
           status_file="$RUNNER_TEMP/ci-fast-go-test.status"
           (
             set +e
-            go test -timeout=20m -skip "$CI_FAST_ADVISORY_TESTS" "${shard_pkgs[@]}" 2>&1 | tee "$RUNNER_TEMP/ci-fast-go-test.log"
+            go test -timeout=20m -skip "$CI_FAST_ADVISORY_TESTS" "${go_test_args[@]}" 2>&1 | tee "$RUNNER_TEMP/ci-fast-go-test.log"
             printf '%s\n' "${PIPESTATUS[0]}" > "$status_file"
           ) &
           test_pid=$!
           while kill -0 "$test_pid" 2>/dev/null; do
             sleep 60
             if kill -0 "$test_pid" 2>/dev/null; then
-              echo "::notice::go test ./... shard $((SHARD_INDEX + 1))/$SHARD_TOTAL is still running ($(date -u +%FT%TZ))"
+              echo "::notice::go test ./... $label is still running ($(date -u +%FT%TZ))"
             fi
           done
           wait "$test_pid" || true
@@ -359,34 +426,48 @@ jobs:
           REQUESTED_INTENT: ${{ inputs.intent }}
           JOB_RESULT: ${{ job.status }}
           JOB_ID: go-test-shard-${{ strategy.job-index }}
-          SHARD_INDEX: ${{ strategy.job-index }}
-          SHARD_TOTAL: ${{ strategy.job-total }}
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ matrix.shards }}
+          SPLIT: ${{ matrix.split }}
+          BUCKET: ${{ matrix.bucket }}
+          BUCKETS: ${{ matrix.buckets }}
           STEPS_JSON: ${{ toJSON(steps) }}
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
           test -s "$RUNNER_TEMP/ci-fast-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-fast-environment.json"
+          # Test lists outgrow one argv string, so receipts are assembled from files.
+          commands_file="$RUNNER_TEMP/ci-fast-commands.json"
+          coverage_file="$RUNNER_TEMP/ci-fast-coverage.json"
           if [[ "$JOB_ID" == build-vet-fast ]]; then
-            commands='[["bash",".github/scripts/verify-release-checksums_test.sh"],["go","build","./..."],["go","vet","./..."],["go","test","-count=1","./internal/architest/","-run","^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$"]]'
-            coverage='{"kind":"build-vet","package_scope":"./..."}'
+            echo '[["bash",".github/scripts/verify-release-checksums_test.sh"],["go","build","./..."],["go","vet","./..."],["go","test","-count=1","./internal/architest/","-run","^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$"]]' > "$commands_file"
+            echo '{"kind":"build-vet","package_scope":"./..."}' > "$coverage_file"
           else
-            test -f "$RUNNER_TEMP/ci-fast-packages.txt" || : > "$RUNNER_TEMP/ci-fast-packages.txt"
-            test -f "$RUNNER_TEMP/ci-fast-shard-packages.txt" || : > "$RUNNER_TEMP/ci-fast-shard-packages.txt"
-            packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-shard-packages.txt")
-            all_packages=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-packages.txt")
+            for name in packages shard-packages split-packages all-tests bucket-tests go-test-args; do
+              test -f "$RUNNER_TEMP/ci-fast-$name.txt" || : > "$RUNNER_TEMP/ci-fast-$name.txt"
+              jq -Rs 'split("\n") | map(select(length > 0))' "$RUNNER_TEMP/ci-fast-$name.txt" > "$RUNNER_TEMP/ci-fast-$name.json"
+            done
             jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-fast-environment.json" > "$RUNNER_TEMP/ci-fast-environment-complete.json"
             mv "$RUNNER_TEMP/ci-fast-environment-complete.json" "$RUNNER_TEMP/ci-fast-environment.json"
-            commands=$(jq -nc --arg skip "$CI_FAST_ADVISORY_TESTS" --argjson packages "$packages" '[["go","test","-timeout=20m","-skip",$skip] + $packages]')
-            coverage=$(jq -nc --argjson packages "$packages" --argjson all_packages "$all_packages" --argjson index "$SHARD_INDEX" --argjson total "$SHARD_TOTAL" '{kind:"go-test-shard",shard_index:$index,shard_total:$total,packages:$packages,all_packages:$all_packages}')
+            jq -n --arg skip "$CI_FAST_ADVISORY_TESTS" --slurpfile args "$RUNNER_TEMP/ci-fast-go-test-args.json" '[["go","test","-timeout=20m","-skip",$skip] + $args[0]]' > "$commands_file"
+            if [[ -n "$SPLIT" ]]; then
+              jq -n --slurpfile packages "$RUNNER_TEMP/ci-fast-shard-packages.json" --slurpfile tests "$RUNNER_TEMP/ci-fast-bucket-tests.json" \
+                --slurpfile all_tests "$RUNNER_TEMP/ci-fast-all-tests.json" --argjson index "$((BUCKET - 1))" --argjson total "$BUCKETS" \
+                '{kind:"go-test-bucket",package:($packages[0][0] // ""),bucket_index:$index,bucket_total:$total,tests:$tests[0],all_tests:$all_tests[0]}' > "$coverage_file"
+            else
+              jq -n --slurpfile packages "$RUNNER_TEMP/ci-fast-shard-packages.json" --slurpfile all_packages "$RUNNER_TEMP/ci-fast-packages.json" \
+                --slurpfile split_packages "$RUNNER_TEMP/ci-fast-split-packages.json" --argjson index "$((SHARD - 1))" --argjson total "$SHARDS" \
+                '{kind:"go-test-shard",shard_index:$index,shard_total:$total,packages:$packages[0],all_packages:$all_packages[0],split_packages:$split_packages[0]}' > "$coverage_file"
+            fi
           fi
           jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
             --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
             --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
             --arg intent "$REQUESTED_INTENT" --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
             --arg workflow_sha "$GITHUB_WORKFLOW_SHA" --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
-            --argjson commands "$commands" --argjson coverage "$coverage" --argjson steps "$STEPS_JSON" \
+            --slurpfile commands "$commands_file" --slurpfile coverage "$coverage_file" --argjson steps "$STEPS_JSON" \
             --slurpfile environment "$RUNNER_TEMP/ci-fast-environment.json" \
-            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,requested_intent:$intent,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:$coverage,environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,requested_intent:$intent,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands[0],coverage:$coverage[0],environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
             > "$RUNNER_TEMP/ci-fast-$JOB_ID.json"
       - name: upload job provenance
         if: always()
@@ -448,18 +529,30 @@ jobs:
           shopt -s nullglob
           files=("$RUNNER_TEMP/ci-fast-provenance/"*.json)
           qualified=false
-          if [[ "$CANDIDATE_RESULT" == success && "$BUILD_VET_RESULT" == success && "$GO_TEST_SHARDS_RESULT" == success && ${#files[@]} == 5 ]]; then
+          if [[ "$CANDIDATE_RESULT" == success && "$BUILD_VET_RESULT" == success && "$GO_TEST_SHARDS_RESULT" == success && ${#files[@]} == 15 ]]; then
             qualified=$(jq -se --arg sha "$EXPECTED_SHA" --arg tree "$EXPECTED_TREE" \
               --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
               --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
               --arg intent "$REQUESTED_INTENT" --arg skip "$CI_FAST_ADVISORY_TESTS" '
               ([.[] | select(.job == "build-vet-fast")][0].environment) as $environment |
-              ([.[] | select(.coverage.kind == "go-test-shard")][0].coverage.all_packages) as $all |
+              [.[] | select(.coverage.kind == "go-test-shard")] as $shards |
+              [.[] | select(.coverage.kind == "go-test-bucket")] as $buckets |
+              ($shards[0].coverage.all_packages) as $all |
+              ($shards[0].coverage.split_packages) as $split |
               ($sha | test("^[0-9a-f]{40}$")) and ($tree | test("^[0-9a-f]{40}$")) and
               ($run | test("^[1-9][0-9]*$")) and ($attempt | test("^[1-9][0-9]*$")) and
               (($event == "workflow_dispatch" and $ci_class == "diagnostic") or (($event == "push" or $event == "pull_request") and $ci_class == "fast" and $sha == $represented)) and
-              (map(.job) | sort == ["build-vet-fast","go-test-shard-0","go-test-shard-1","go-test-shard-2","go-test-shard-3"]) and
+              (map(.job) | sort == (["build-vet-fast"] + [range(14) | "go-test-shard-\(.)"] | sort)) and
               ($all | type == "array" and length >= 4 and length == (unique | length) and all(.[]; type == "string" and length > 0)) and
+              ($split | type == "array" and length >= 1 and length == (unique | length)) and
+              ($shards | length == 8) and ([$shards[].coverage.shard_index] | sort == [range(8)]) and
+              (([$shards[].coverage.packages[]] + $split | sort) == ($all | sort)) and
+              ([$buckets[].coverage.package] | unique == ($split | sort)) and
+              all($split[]; . as $p | [$buckets[] | select(.coverage.package == $p)] as $b | ($b[0].coverage.all_tests) as $tests |
+                ($tests | type == "array" and length >= 1 and length == (unique | length) and all(.[]; type == "string" and test("^(Test|Benchmark|Example|Fuzz)[A-Za-z0-9_]*$"))) and
+                ([$b[].coverage.bucket_index] | sort == [range($b | length)]) and
+                all($b[]; .coverage.bucket_total == ($b | length) and .coverage.all_tests == $tests) and
+                (([$b[].coverage.tests[]] | sort) == ($tests | sort))) and
               all(.[];
                 .schema == "fak.ci-provenance.v1" and .workflow == "ci-fast" and .result == "success" and .release_eligible == false and
                 .source_scope == "git-commit-tree" and .effective_inputs_verified == false and
@@ -472,20 +565,27 @@ jobs:
                   .steps as $steps | all(["checksum","build","vet","tier"][]; $steps[.].outcome == "success" and $steps[.].conclusion == "success") and
                   .coverage == {kind:"build-vet",package_scope:"./..."} and
                   .commands == [["bash",".github/scripts/verify-release-checksums_test.sh"],["go","build","./..."],["go","vet","./..."],["go","test","-count=1","./internal/architest/","-run","^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$"]]
-                else
+                elif .coverage.kind == "go-test-shard" then
                   .steps.tests.outcome == "success" and .steps.tests.conclusion == "success" and
-                  (.coverage as $c | .environment.FAK_REQUIRE_OPENAPI_VALIDATOR == "1" and $c.kind == "go-test-shard" and $c.shard_total == 4 and
-                  ($c.shard_index | type == "number" and . >= 0 and . < 4 and . == floor) and
-                  .job == ("go-test-shard-" + ($c.shard_index|tostring)) and $c.all_packages == $all and
-                  $c.packages == [$all | to_entries[] | select(.key % 4 == $c.shard_index) | .value] and
+                  (.coverage as $c | .environment.FAK_REQUIRE_OPENAPI_VALIDATOR == "1" and $c.shard_total == 8 and
+                  ($c.shard_index | type == "number" and . >= 0 and . < 8 and . == floor) and
+                  .job == ("go-test-shard-" + ($c.shard_index|tostring)) and $c.all_packages == $all and $c.split_packages == $split and
+                  ($c.packages | type == "array" and length >= 1) and
                   .commands == [["go","test","-timeout=20m","-skip",$skip] + $c.packages])
+                elif .coverage.kind == "go-test-bucket" then
+                  .steps.tests.outcome == "success" and .steps.tests.conclusion == "success" and
+                  (.coverage as $c | .environment.FAK_REQUIRE_OPENAPI_VALIDATOR == "1" and
+                  ($c.bucket_index | type == "number" and . >= 0 and . == floor) and
+                  ($c.tests | type == "array" and length >= 1) and
+                  .commands == [["go","test","-timeout=20m","-skip",$skip,"-run",("^(" + ($c.tests | join("|")) + ")$"),$c.package]])
+                else false
                 end))' "${files[@]}" || echo false)
           fi
           [[ "$qualified" == true ]] || qualified=false
           jq -n --argjson qualified "$qualified" --arg sha "$EXPECTED_SHA" --arg tree "$EXPECTED_TREE" \
             --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
             --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" --arg intent "$REQUESTED_INTENT" \
-            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",ci_class:$ci_class,requested_intent:$intent,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,required_jobs:["build-vet-fast","go-test-shard-0","go-test-shard-1","go-test-shard-2","go-test-shard-3"],verified:$qualified,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,release_ineligibility_reason:(if $event == "workflow_dispatch" then "diagnostic-run" elif $qualified then "effective-input-identity-not-sealed" else "incomplete-evidence" end)}' \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",ci_class:$ci_class,requested_intent:$intent,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,required_jobs:(["build-vet-fast"] + [range(14) | "go-test-shard-\(.)"]),verified:$qualified,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,release_ineligibility_reason:(if $event == "workflow_dispatch" then "diagnostic-run" elif $qualified then "effective-input-identity-not-sealed" else "incomplete-evidence" end)}' \
             > "$RUNNER_TEMP/ci-fast-provenance.json"
           cat "$RUNNER_TEMP/ci-fast-provenance.json" >> "$GITHUB_STEP_SUMMARY"
           # Successful jobs from an earlier attempt are deliberately not reused.
