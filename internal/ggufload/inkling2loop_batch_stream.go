@@ -188,6 +188,9 @@ type Inkling2LoopCohorts struct {
 	be compute.Backend
 	s  *inkling2Resident
 	b  *inkling2Batch
+	// wideCooldown is how many more wide-wanting cohorts run at the base chunk before
+	// a refused wide chunk is tried again
+	wideCooldown int
 }
 
 func NewInkling2LoopCohorts(m *Inkling2LoopModel, be compute.Backend) *Inkling2LoopCohorts {
@@ -253,18 +256,35 @@ func (bt *Inkling2LoopCohorts) reuses(C, ctx int) bool {
 // the cohort without much surplus, else one built at exactly the cohort's shape. The
 // old state is freed first, so the two never coexist on the device.
 func (bt *Inkling2LoopCohorts) acquire(C, ctx int) (*inkling2Batch, error) {
+	return bt.acquireFor(C, ctx, 0)
+}
+
+// acquireFor is acquire for a cohort whose longest prompt is longest tokens: only a
+// cohort with a prompt past the base chunk asks for the wide one, and a cached state
+// built narrower than that is rebuilt. After a refusal the wide chunk is not probed
+// again for a few cohorts, so a full device does not rebuild the state on every cohort.
+func (bt *Inkling2LoopCohorts) acquireFor(C, ctx, longest int) (*inkling2Batch, error) {
 	if err := bt.bind(); err != nil {
 		return nil, err
 	}
-	if bt.reuses(C, ctx) {
+	want := inkling2CohortChunk(bt.s.chunkWanted, longest)
+	if want > inkling2PrefillChunkBase && bt.wideCooldown > 0 {
+		bt.wideCooldown--
+		want = inkling2PrefillChunkBase
+	}
+	if bt.reuses(C, ctx) && want <= bt.b.capT {
+		bt.b.usePrefill(want)
 		return bt.b, bt.b.begin(C, ctx)
 	}
 	if bt.b != nil {
 		bt.ReleaseArenas()
 	}
-	b, err := newInkling2BatchState(bt.s, C, ctx)
+	b, err := newInkling2BatchState(bt.s, C, ctx, want)
 	if err != nil {
 		return nil, err
+	}
+	if b.capT < want {
+		bt.wideCooldown = inkling2PrefillReprobeEvery
 	}
 	bt.b = b
 	return b, nil
@@ -382,7 +402,11 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 			bt.Close()
 		}
 	}()
-	b, err := bt.acquire(len(reqs), ctx)
+	longest := 0
+	for _, req := range reqs {
+		longest = max(longest, len(req.Prompt))
+	}
+	b, err := bt.acquireFor(len(reqs), ctx, longest)
 	if err != nil {
 		// a refused or failed arena allocation ran nothing on the binding, so it is kept
 		// for the narrower cohorts the caller retries with

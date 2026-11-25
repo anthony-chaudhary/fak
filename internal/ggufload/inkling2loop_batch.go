@@ -49,6 +49,9 @@ type inkling2Batch struct {
 	// prefillT is the token width of a cohort prefill chunk; 0 sizes the state for
 	// lockstep prompts only
 	prefillT int
+	// capT is the prefill chunk the state was built for and capPrefillT the widest
+	// prefillT its arenas and rings hold; a cohort that wants more rebuilds the state
+	capT, capPrefillT int
 	// sharedMin is the shortest common prompt prefix a cohort prefill computes once and
 	// copies into every row sharing it; 0 prefills every row's whole prompt
 	sharedMin int
@@ -73,12 +76,14 @@ func inkling2BatchSeqOps(be any, lookup func(string) (string, bool)) compute.Ink
 	return d
 }
 
-func newInkling2Batch(m *Inkling2LoopModel, be compute.Backend, C, ctx int) (*inkling2Batch, error) {
+// newInkling2Batch binds the weights and builds the state of one C x ctx cohort whose
+// longest prompt is longest tokens.
+func newInkling2Batch(m *Inkling2LoopModel, be compute.Backend, C, ctx, longest int) (*inkling2Batch, error) {
 	s, err := newInkling2BatchResident(m, be)
 	if err != nil {
 		return nil, err
 	}
-	b, err := newInkling2BatchState(s, C, ctx)
+	b, err := newInkling2BatchState(s, C, ctx, inkling2CohortChunk(s.chunkWanted, longest))
 	if err != nil {
 		s.close()
 		inkling2TrimIdle(be)
@@ -110,8 +115,22 @@ func newInkling2BatchResident(m *Inkling2LoopModel, be compute.Backend) (*inklin
 // newInkling2BatchState allocates the arenas of a C-sequence, ctx-position batch on
 // the binding s and readies it for a cohort of that shape; begin re-readies it for
 // any cohort no wider and no longer.
-func newInkling2BatchState(s *inkling2Resident, C, ctx int) (*inkling2Batch, error) {
-	sh, err := s.batchShape(C, ctx)
+//
+// want is the cohort prefill chunk the state is sized for. A wide want the device or
+// the admission refuses is rebuilt at the base chunk, whose rings and arenas are the
+// smaller ones; the returned state then reports capT below want.
+func newInkling2BatchState(s *inkling2Resident, C, ctx, want int) (*inkling2Batch, error) {
+	b, err := newInkling2BatchChunk(s, C, ctx, want)
+	if err != nil && want > inkling2PrefillChunkBase && inkling2ChunkRefusal(err) {
+		logInkling2PrefillFallback(err, want)
+		return newInkling2BatchChunk(s, C, ctx, inkling2PrefillChunkBase)
+	}
+	return b, err
+}
+
+// newInkling2BatchChunk builds the state with a cohort prefill chunk of chunk tokens.
+func newInkling2BatchChunk(s *inkling2Resident, C, ctx, chunk int) (*inkling2Batch, error) {
+	sh, err := s.batchShapeChunk(C, ctx, chunk)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +139,7 @@ func newInkling2BatchState(s *inkling2Resident, C, ctx int) (*inkling2Batch, err
 	hp := s.hp
 	kvHalf, keep, scr, caps, rowsT := sh.kvHalf, sh.keep, sh.scr, sh.caps, sh.rowsT
 	b := &inkling2Batch{s: s, capC: C, capCtx: ctx, seq: sh.seq, kvHalf: kvHalf, mem: inkling2BatchMem(be),
-		prefillT: sh.prefillT, need: sh.need}
+		prefillT: sh.prefillT, need: sh.need, capT: chunk, capPrefillT: sh.prefillT}
 	b.p = ink2Prefill{s: s, pd: pd, T: C}
 	if b.mem != nil && inkling2BatchQ8RowTile(os.LookupEnv) {
 		b.p.rows = b.mem
@@ -129,7 +148,11 @@ func newInkling2BatchState(s *inkling2Resident, C, ctx int) (*inkling2Batch, err
 		// idle pool blocks count as used to the driver; return them before probing
 		inkling2TrimIdle(be)
 		_, free, known := inkling2DeviceFree(be)
-		if err := inkling2BatchAdmit(C, b.need, free, known); err != nil {
+		admit := inkling2BatchAdmit
+		if b.prefillT > inkling2PrefillChunkBase {
+			admit = inkling2WideAdmit
+		}
+		if err := admit(C, b.need, free, known); err != nil {
 			return nil, err
 		}
 	}
@@ -195,7 +218,14 @@ type inkling2BatchShape struct {
 	need            int64
 }
 
+// batchShape is the plan of a cohort none of whose prompts passes the base chunk.
 func (s *inkling2Resident) batchShape(C, ctx int) (inkling2BatchShape, error) {
+	return s.batchShapeChunk(C, ctx, inkling2CohortChunk(s.chunkWanted, 0))
+}
+
+// batchShapeChunk is the plan at a cohort prefill chunk of chunk tokens (capped at the
+// state's C*ctx tokens), its rings widened from the base capacities by that chunk alone.
+func (s *inkling2Resident) batchShapeChunk(C, ctx, chunk int) (inkling2BatchShape, error) {
 	if C < 1 {
 		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: %d sequences", C)
 	}
@@ -216,7 +246,7 @@ func (s *inkling2Resident) batchShape(C, ctx int) (inkling2BatchShape, error) {
 	hp := s.hp
 	if inkling2CohortPrefill(os.LookupEnv) && !kvHalf {
 		// the prefill kernels append fp32 keys and values
-		sh.prefillT = min(inkling2PrefillChunk, C*ctx)
+		sh.prefillT = min(chunk, C*ctx)
 	}
 	// the prefill chunks and the decode steps run one after the other on one arena pair
 	sh.rowsT = max(C, sh.prefillT)
@@ -226,7 +256,7 @@ func (s *inkling2Resident) batchShape(C, ctx int) (inkling2BatchShape, error) {
 	if few := min(C, inkling2BatchFewRowsMost(os.LookupEnv)); few > 0 && inkling2BatchFewRows(be, few, os.LookupEnv) != nil {
 		sh.scr += inkling2BatchFewRowsScratch(hp, few)
 	}
-	sh.caps = inkling2BatchCaps(hp, s.caps, ctx, sh.prefillT)
+	sh.caps = inkling2BatchCaps(hp, s.baseCaps, ctx, sh.prefillT)
 	sh.need = inkling2BatchBytes(hp, sh.caps, C, sh.keep, sh.scr, kvHalf)
 	return sh, nil
 }
@@ -237,6 +267,11 @@ func inkling2BatchAdmitOn(lookup func(string) (string, bool)) bool {
 	v, _ := lookup("FAK_INKLING2_BATCH_ADMIT")
 	return v != "0"
 }
+
+// usePrefill sets the prefill chunk of the next cohort, at most the width the state
+// holds, so a narrower cohort on a wide state forwards and addresses its rings exactly
+// as it would on a state built for it.
+func (b *inkling2Batch) usePrefill(want int) { b.prefillT = min(want, b.capPrefillT) }
 
 // begin readies the arenas for a cohort of C sequences at ctx positions. Every
 // stride is the cohort's own, so a narrower or shorter cohort addresses a prefix of
@@ -258,7 +293,7 @@ func (b *inkling2Batch) begin(C, ctx int) error {
 	if vd := inkling2BatchFewRows(s.be, C, os.LookupEnv); vd != nil {
 		b.p.vd, b.p.fewRows = vd, true
 	}
-	b.caps = inkling2BatchCaps(hp, s.caps, ctx, b.prefillT)
+	b.caps = inkling2BatchCaps(hp, s.baseCaps, ctx, b.prefillT)
 	maxCap := 0
 	for _, c := range b.caps {
 		maxCap = max(maxCap, c)
@@ -869,7 +904,7 @@ func inkling2BatchGreedy(m *Inkling2LoopModel, be compute.Backend, prompts [][]i
 		longest = max(longest, len(pr))
 	}
 	st.DeviceTotal, st.FreeBefore, _ = inkling2DeviceFree(be)
-	b, err := newInkling2Batch(m, be, len(prompts), ctx)
+	b, err := newInkling2Batch(m, be, len(prompts), ctx, longest)
 	if err != nil {
 		return nil, st, err
 	}

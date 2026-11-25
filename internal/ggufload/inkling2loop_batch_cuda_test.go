@@ -250,3 +250,61 @@ func TestInkling2CUDACohortPrefillMatchesScalar(t *testing.T) {
 		t.Errorf("%d of %d rows are near ties, more than %d: the cohort drifts from scalar, not ties", ties, len(prompts), inkling2OracleMaxNearTies)
 	}
 }
+
+// A cohort whose packed prompts pass 512 tokens forwards a 1024-token chunk under
+// FAK_INKLING2_PREFILL_CHUNK=1024, and every row still gets the greedy tokens the
+// single-sequence session gives its prompt alone at the same chunk setting.
+func TestInkling2CUDAWideCohortPrefillMatchesScalar(t *testing.T) {
+	t.Setenv(inkling2PrefillChunkEnv, "1024")
+	t.Setenv("FAK_INKLING2_BATCHED_PREFILL", "1")
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	m, be := openInkling2CUDAForTest(t, "")
+	defer m.Close()
+	prompts := [][]int{inkling2PrefillPrompt(700), inkling2PrefillPrompt(600)}
+	const n = 16
+	longest := len(prompts[0])
+	ctx := (longest + n + inkling2BatchCtxAlign - 1) / inkling2BatchCtxAlign * inkling2BatchCtxAlign
+
+	// the state the cohort runs on, built the way inkling2BatchGreedy builds it
+	b, err := newInkling2Batch(m, be, len(prompts), ctx, longest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefillT := b.prefillT
+	b.close()
+	if prefillT != 1024 {
+		t.Fatalf("cohort prefill chunk %d, want 1024: the device refused the wide state", prefillT)
+	}
+	widest := 0
+	for _, segs := range inkling2PrefillChunks([]int{len(prompts[0]), len(prompts[1])}, prefillT) {
+		tokens := 0
+		for _, sg := range segs {
+			tokens += sg.n
+		}
+		widest = max(widest, tokens)
+	}
+	if widest != 1024 {
+		t.Fatalf("widest cohort forward %d tokens, want 1024", widest)
+	}
+
+	got, st, err := inkling2BatchGreedy(m, be, prompts, n, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("wide cohort C=%d prompt %s; %d decode steps %s", st.Sequences, st.Prompt, st.DecodeSteps, st.Decode)
+	for i, prompt := range prompts {
+		want, sst, err := inkling2ResidentGreedy(m, be, prompt, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sst.PrefillChunk != len(prompt) {
+			t.Fatalf("row %d: scalar reference forwarded %d tokens at once, want %d", i, sst.PrefillChunk, len(prompt))
+		}
+		for j := range want {
+			if got[i][j] != want[j] {
+				t.Errorf("row %d (%d prompt tokens): token %d cohort %d, scalar %d", i, len(prompt), j, got[i][j], want[j])
+				break
+			}
+		}
+	}
+}

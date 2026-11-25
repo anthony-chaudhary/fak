@@ -484,6 +484,9 @@ type Inkling2LoopGreedyStats struct {
 	DecodeSteps     int
 	// Passes is the loop depth the run executed; set by Inkling2LoopGenerate.
 	Passes int
+	// PrefillChunk is the widest batched prefill forward the run made, in tokens; 0
+	// when the prompt went through the per-token step.
+	PrefillChunk int
 }
 
 func (s Inkling2LoopGreedyStats) DecodeTokensPerSecond() float64 {

@@ -112,6 +112,13 @@ type inkling2Resident struct {
 	batched                            bool
 	prefillKeep, prefillScr, prefillIn ink2Ref
 	prefillCap                         int
+	// chunkMax is the widest prefill forward the local rings of this session hold and
+	// chunkWanted the width a cohort on this binding may use. baseCaps are the ring
+	// capacities at the base chunk, which every cohort state widens for itself.
+	// prefillWidest is the widest prefill forward the session has run.
+	chunkMax, chunkWanted int
+	baseCaps              []int
+	prefillWidest         int
 
 	// speculative verify state, allocated by enableSpec
 	specMax                            int
@@ -214,12 +221,32 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 // and an arenaFloats per-token arena. ctx 0 allocates no slot caches, histories or
 // scores (caps still hold the local ring sizes) for a caller that owns its own state.
 func newInkling2ResidentSized(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats int) (*inkling2Resident, error) {
+	wanted := inkling2PrefillChunkWanted(os.LookupEnv)
+	// a cohort binding (ctx 0) holds no per-sequence state: each cohort sizes its own
+	ring := inkling2PrefillChunkBase
+	if ctx > 0 && !inkling2ScalarWideHeld(wanted) {
+		ring = wanted
+	}
+	s, err := newInkling2ResidentRing(m, be, ctx, arenaFloats, ring, wanted)
+	if err != nil && ring > inkling2PrefillChunkBase && inkling2ChunkRefusal(err) {
+		// the refused build freed everything it took, so the base build starts from
+		// the memory a session that never opted in would have had
+		inkling2ScalarWideRefused(err, ring)
+		inkling2TrimIdle(be)
+		s, err = newInkling2ResidentRing(m, be, ctx, arenaFloats, inkling2PrefillChunkBase, wanted)
+	}
+	return s, err
+}
+
+// newInkling2ResidentRing builds the resident with local rings and prefill arenas for
+// a forward of ring tokens; wanted is the chunk its cohorts may use.
+func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats, ring, wanted int) (*inkling2Resident, error) {
 	dev, ok := be.(compute.Inkling2Device)
 	if !ok {
 		return nil, fmt.Errorf("inkling2 resident: backend %s has no inkling2 device ops", be.Name())
 	}
 	hp, w := m.HP, m.Weights
-	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats}
+	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats, chunkMax: ring, chunkWanted: wanted}
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
 	s.batched = hasPrefill && (inkling2BatchedPrefill() || inkling2SpecDepth() > 0)
 	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
@@ -259,18 +286,35 @@ func newInkling2ResidentSized(m *Inkling2LoopModel, be compute.Backend, ctx, are
 	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
 	kvDim := hp.KVHeads * hp.HeadDim
 	channels := 2*kvDim + 2*hp.Hidden
-	s.kc, s.vc, s.hist, s.caps = make([]ink2Ref, slots), make([]ink2Ref, slots), make([]ink2Ref, slots), make([]int, slots)
-	maxCap := hp.SlidingWindow
-	for slot := 0; slot < slots; slot++ {
-		cap := ctx
-		if hp.LocalLayer[inkling2SlotLayer(hp, slot)] {
-			cap = hp.SlidingWindow
-			if s.batched {
-				cap += inkling2PrefillChunk
+	for i := range s.layers {
+		for _, e := range []ink2Experts{s.layers[i].gateUp, s.layers[i].down} {
+			if !inkling2IndexedExpert(e.stack.Dtype) {
+				s.hostRouting = true
 			}
 		}
+	}
+	// a ring is addressed by its capacity, so it cannot be widened once the session
+	// holds positions: the wide chunk is decided, admitted and allocated here
+	wide := s.chunkMax > inkling2PrefillChunkBase && ctx > 0 && s.batched && !s.hostRouting
+	if wide && s.err != nil {
+		s.close()
+		return nil, s.err
+	}
+	if wide {
+		if err := s.admitWide(ctx, s.chunkMax); err != nil {
+			inkling2ScalarWideRefused(err, s.chunkMax)
+			wide = false
+		}
+	}
+	if !wide {
+		s.chunkMax = min(s.chunkMax, inkling2PrefillChunkBase)
+	}
+	s.kc, s.vc, s.hist = make([]ink2Ref, slots), make([]ink2Ref, slots), make([]ink2Ref, slots)
+	s.caps = inkling2ResidentCaps(hp, ctx, s.batched, s.chunkMax)
+	s.baseCaps = inkling2ResidentCaps(hp, ctx, s.batched, inkling2PrefillChunkBase)
+	maxCap := hp.SlidingWindow
+	for slot, cap := range s.caps {
 		maxCap = max(maxCap, cap)
-		s.caps[slot] = cap
 		if ctx > 0 {
 			s.kc[slot], s.vc[slot] = s.alloc(cap*kvDim), s.alloc(cap*kvDim)
 			s.hist[slot] = s.alloc(channels * (hp.ConvKernel - 1))
@@ -279,21 +323,24 @@ func newInkling2ResidentSized(m *Inkling2LoopModel, be compute.Backend, ctx, are
 	if ctx > 0 {
 		s.scores = s.alloc(2 * hp.Heads * maxCap)
 	}
+	if wide {
+		// allocated once at the full width, so no later prompt regrows the arenas and
+		// leaves a superseded pair behind
+		s.ensurePrefillArenas(s.chunkMax)
+	}
 	s.in = s.alloc(hp.Hidden + 4)
 	s.arena = s.alloc(arenaFloats)
 	s.argIdx = s.alloc(4)
-	for i := range s.layers {
-		for _, e := range []ink2Experts{s.layers[i].gateUp, s.layers[i].down} {
-			if !inkling2IndexedExpert(e.stack.Dtype) {
-				s.hostRouting = true
-			}
-		}
-	}
 	s.graph = inkling2DefaultOn(be, "FAK_INKLING2_GRAPH", os.LookupEnv) && !s.hostRouting
 	s.batched = s.batched && !s.hostRouting
 	if s.err != nil {
+		err := s.err
 		s.close()
-		return nil, s.err
+		if wide {
+			// whatever the wide build could not allocate, the base build may still fit
+			return nil, inkling2DeviceRefused{err}
+		}
+		return nil, err
 	}
 	return s, nil
 }
@@ -315,6 +362,24 @@ func inkling2IndexedExpert(dt compute.Dtype) bool {
 		return true
 	}
 	return false
+}
+
+// inkling2ResidentCaps is the cache capacity of every slot of a session: ctx for a
+// global slot and the sliding window for a local one, plus chunk when the session
+// prefills in batches so a chunk's appended keys never evict a key an earlier query
+// of the same chunk still attends to.
+func inkling2ResidentCaps(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int) []int {
+	caps := make([]int, hp.Layers+(hp.Passes-1)*(hp.CoreEnd-hp.CoreStart))
+	for slot := range caps {
+		caps[slot] = ctx
+		if hp.LocalLayer[inkling2SlotLayer(hp, slot)] {
+			caps[slot] = hp.SlidingWindow
+			if batched {
+				caps[slot] += chunk
+			}
+		}
+	}
+	return caps
 }
 
 // inkling2SlotLayer maps a cache slot to its physical layer.
@@ -732,7 +797,9 @@ func inkling2ResidentGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []i
 	// a CUDA stream capture is bound to the OS thread that opened it
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	return inkling2SessionGreedy(&inkling2ResidentSession{s: s}, prompt, n)
+	out, st, err := inkling2SessionGreedy(&inkling2ResidentSession{s: s}, prompt, n)
+	st.PrefillChunk = s.prefillWidest
+	return out, st, err
 }
 
 func (s *inkling2Resident) isLocalSlot(slot int) bool {

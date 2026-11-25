@@ -105,7 +105,7 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 	if s.pos+len(prompt) > inkling2ResidentCtx {
 		return 0, fmt.Errorf("inkling2 prefill: %d tokens exceed the %d-token global cache", s.pos+len(prompt), inkling2ResidentCtx)
 	}
-	T := min(inkling2PrefillChunk, len(prompt))
+	T := inkling2PrefillChunkFor(len(prompt), s.chunkMax)
 	p := &ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts()}
 	s.ensurePrefillArenas(T)
 	p.keepFloats, p.scrFloats = s.prefillArenas(s.prefillCap)
@@ -133,6 +133,7 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 			return 0, s.err
 		}
 		s.pos += n
+		s.prefillWidest = max(s.prefillWidest, n)
 	}
 	got, err := s.dev.Ink2ReadInts(s.argIdx, 1)
 	if err != nil {
