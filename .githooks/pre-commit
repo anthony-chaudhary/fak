@@ -70,6 +70,13 @@ if [ -n "$staged_files" ]; then
 fi
 
 # 3. Companion Discovery: check $FAK_PRIVATE_ROOT or sibling ../fak-private
+# A linked worktree (.worktrees/<ticket>) has no sibling of its own; the main
+# checkout's parent holds the companion.
+main_checkout_root=""
+common_git_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+if [ -n "$common_git_dir" ]; then
+    main_checkout_root="$(cd "$common_git_dir/.." 2>/dev/null && pwd || true)"
+fi
 companion=""
 if [ "${FAK_PRIVATE_ROOT:-}" = "none" ] || [ "${FAK_PRIVATE_ROOT:-}" = "off" ] || [ "${FAK_PRIVATE_ROOT:-}" = "disable" ]; then
     companion=""
@@ -77,6 +84,8 @@ elif [ -n "${FAK_PRIVATE_ROOT:-}" ] && [ -d "$FAK_PRIVATE_ROOT" ]; then
     companion="$FAK_PRIVATE_ROOT"
 elif [ -d "$WORKTREE_ROOT/../fak-private" ]; then
     companion="$WORKTREE_ROOT/../fak-private"
+elif [ -n "$main_checkout_root" ] && [ -d "$main_checkout_root/../fak-private" ]; then
+    companion="$main_checkout_root/../fak-private"
 elif [ -d "$HOOK_REPO_ROOT/../fak-private" ]; then
     companion="$HOOK_REPO_ROOT/../fak-private"
 elif [ -d "../fak-private" ]; then

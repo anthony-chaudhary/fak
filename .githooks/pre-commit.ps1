@@ -80,6 +80,13 @@ if ($stagedGo.Count -gt 0) {
 }
 
 # 3. Companion Discovery: check $env:FAK_PRIVATE_ROOT or sibling ../fak-private
+# A linked worktree (.worktrees/<ticket>) has no sibling of its own; the main
+# checkout's parent holds the companion.
+$mainCheckoutRoot = ""
+$commonGitDir = (git rev-parse --git-common-dir 2>$null)
+if ($commonGitDir) {
+    $mainCheckoutRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath([System.IO.Path]::Combine($worktreeRoot, $commonGitDir)))
+}
 $companion = ""
 if ($env:FAK_PRIVATE_ROOT -in @("none", "off", "disable")) {
     $companion = ""
@@ -87,6 +94,8 @@ if ($env:FAK_PRIVATE_ROOT -in @("none", "off", "disable")) {
     $companion = $env:FAK_PRIVATE_ROOT
 } elseif (Test-Path "$worktreeRoot/../fak-private") {
     $companion = (Resolve-Path "$worktreeRoot/../fak-private").Path
+} elseif ($mainCheckoutRoot -and (Test-Path "$mainCheckoutRoot/../fak-private")) {
+    $companion = (Resolve-Path "$mainCheckoutRoot/../fak-private").Path
 } elseif ($hookRepoRoot -and (Test-Path "$hookRepoRoot/../fak-private")) {
     $companion = (Resolve-Path "$hookRepoRoot/../fak-private").Path
 } elseif (Test-Path "../fak-private") {

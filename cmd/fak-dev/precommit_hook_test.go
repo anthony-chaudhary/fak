@@ -211,6 +211,33 @@ func TestPreCommitHookStaysInLinkedWorktree(t *testing.T) {
 	}
 }
 
+func TestPreCommitHookLinkedWorktreeFindsMainCheckoutCompanion(t *testing.T) {
+	f := newHookFixture(t)
+	companion := filepath.Join(filepath.Dir(f.main), "fak-private")
+	f.write(companion, "tools/scrub_public_copy.py", "# stubbed via PATH\n", 0o644)
+	wt := filepath.Join(f.main, ".worktrees", "ticket-relci-hook-companion")
+	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.git(f.main, nil, "worktree", "add", "-q", "-b", "lane", wt)
+	f.write(wt, "change.txt", "lane\n", 0o644)
+	f.git(wt, nil, "add", "change.txt")
+
+	cmd := exec.Command("sh", filepath.Join(".githooks", "pre-commit"))
+	cmd.Dir = wt
+	cmd.Env = f.env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("linked-worktree hook refused a clean change: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Companion fak-private detected") {
+		t.Fatalf("linked worktree did not resolve the main checkout's sibling companion:\n%s", out)
+	}
+	if got := f.readLog("audit.staged"); !strings.Contains(got, "change.txt") {
+		t.Fatalf("companion staged audit did not run on the lane change: saw %q", got)
+	}
+}
+
 func TestPreCommitHookBoundaryFailureBlocks(t *testing.T) {
 	f := newHookFixture(t)
 	f.write(f.main, "change.txt", "x\n", 0o644)
@@ -244,6 +271,9 @@ func TestPreCommitHookPowerShellParity(t *testing.T) {
 	}
 	if !strings.Contains(s, "rev-parse --show-toplevel") {
 		t.Fatal("pre-commit.ps1 must resolve the active worktree with git rev-parse --show-toplevel")
+	}
+	if !strings.Contains(s, "rev-parse --git-common-dir") {
+		t.Fatal("pre-commit.ps1 must resolve the main checkout with git rev-parse --git-common-dir for linked worktrees")
 	}
 	boundary := strings.Index(s, "& go run ./cmd/fak-dev boundary")
 	if boundary < 0 || !strings.Contains(s[boundary:min(len(s), boundary+200)], "$LASTEXITCODE -ne 0") {
