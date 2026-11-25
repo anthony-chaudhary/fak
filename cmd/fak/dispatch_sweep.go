@@ -158,7 +158,7 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 			Backend:      *backend,
 			ExcludeLanes: splitCommaList(*excludeLane),
 			Live:         *live,
-			// Refresh the fleet registry (the ~40s tools/fleet_sessions.py scan) only on the
+			// Refresh the fleet registry (the whole-home session transcript scan) only on the
 			// FIRST tick of the drain, then reuse it -- mirroring the wave execution loop's
 			// `i == 0` cadence (dispatch_wave.go). The scan's result is surfaced only as the
 			// payload's registry_refresh provenance field; seat admission reads LIVE pidfile

@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:20:00.000Z","message":{"role":"user","content":"deploy the preview"}}
+{"type":"assistant","sessionId":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:25:00.000Z","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth token has expired\"}} · Please run /login"}]}}

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -118,5 +121,64 @@ func TestResumeWatchdogOpenCodeExeResolution(t *testing.T) {
 	req := rwActuatorRequest(resume.WatchdogPlanRow{Harness: resumeactuator.HarnessOpenCode, Session: "50000000-0000-4000-8000-000000000001"}, "claude-bin")
 	if req.OpenCodeExe != "/opt/opencode/bin/opencode" {
 		t.Fatalf("request.OpenCodeExe = %q, want the resolved override", req.OpenCodeExe)
+	}
+}
+
+// A non-probing refresh is the in-process pass: it writes the registry into the tick's
+// regDir at the tick's window with no Python on PATH, and a failed pass becomes a note.
+// A probing refresh still needs the Python tool.
+func TestRwRefreshRegistryNonProbeRunsInProcess(t *testing.T) {
+	base := t.TempDir()
+	regDir := filepath.Join(base, "reg")
+	for k, v := range map[string]string{
+		"FLEET_USER_HOME":       filepath.Join(base, "home"),
+		"FLEET_CONFIG_HOME":     filepath.Join(base, "cfg"),
+		"FLEET_REG_DIR":         filepath.Join(base, "env-reg-not-the-tick-dir"),
+		"FAK_ACCOUNTS_REGISTRY": filepath.Join(base, "no-accounts-registry.json"),
+		"PATH":                  filepath.Join(base, "empty-path"),
+	} {
+		t.Setenv(k, v)
+	}
+	oldLive := fleetSessionsLiveSIDs
+	t.Cleanup(func() { fleetSessionsLiveSIDs = oldLive })
+	fleetSessionsLiveSIDs = func() map[string]bool { return map[string]bool{} }
+
+	for _, mode := range []string{"none", ""} {
+		if msg := rwRefreshRegistry(regDir, "", 2.5, mode, 30); msg != "" {
+			t.Fatalf("probe=%q refresh note = %q, want success", mode, msg)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(regDir, "sessions.json"))
+	if err != nil {
+		t.Fatalf("in-process refresh did not write sessions.json into the tick regDir: %v", err)
+	}
+	var reg struct {
+		Schema  string  `json:"schema"`
+		WindowH float64 `json:"window_h"`
+	}
+	if jerr := json.Unmarshal(raw, &reg); jerr != nil {
+		t.Fatal(jerr)
+	}
+	if reg.Schema != "fleet-sessions/3" || reg.WindowH != 2.5 {
+		t.Fatalf("sessions.json schema=%q window_h=%v, want fleet-sessions/3 at the tick window 2.5", reg.Schema, reg.WindowH)
+	}
+	if _, serr := os.Stat(filepath.Join(regDir, "resume_plan.json")); serr != nil {
+		t.Fatalf("in-process refresh did not write resume_plan.json: %v", serr)
+	}
+	if _, serr := os.Stat(filepath.Join(base, "env-reg-not-the-tick-dir")); !os.IsNotExist(serr) {
+		t.Fatalf("refresh wrote to $FLEET_REG_DIR instead of the tick regDir (stat err %v)", serr)
+	}
+
+	blocker := filepath.Join(base, "blocker")
+	if werr := os.WriteFile(blocker, []byte("x"), 0o644); werr != nil {
+		t.Fatal(werr)
+	}
+	msg := rwRefreshRegistry(filepath.Join(blocker, "reg"), "", 3, "none", 30)
+	if !strings.HasPrefix(msg, "refresh failed (") || !strings.HasSuffix(msg, "); acting on the existing plan file") {
+		t.Fatalf("failed in-process refresh note = %q, want a refresh-failed note", msg)
+	}
+
+	if msg := rwRefreshRegistry(regDir, "", 3, "blocked", 30); !strings.Contains(msg, "no python interpreter") {
+		t.Fatalf("probing refresh note = %q, want it to still require the Python tool", msg)
 	}
 }

@@ -1,0 +1,3 @@
+{"type":"user","sessionId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T03:00:00.000Z","message":{"role":"user","content":"look at the flaky test"}}
+{"type":"assistant","sessionId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T03:10:00.000Z","message":{"role":"assistant","model":"claude-opus","content":[{"type":"text","text":"It races on the temp dir."}]}}
+{"type":"user","sessionId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T03:20:00.000Z","message":{"role":"user","content":"can you check it again"}}

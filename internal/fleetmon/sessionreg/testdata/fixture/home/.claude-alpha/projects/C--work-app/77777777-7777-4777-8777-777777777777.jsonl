@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"77777777-7777-4777-8777-777777777777","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:20:00.000Z","message":{"role":"user","content":"run the full suite in the background"}}
+{"type":"assistant","sessionId":"77777777-7777-4777-8777-777777777777","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:35:00.000Z","message":{"role":"assistant","model":"claude-opus","content":[{"type":"text","text":"The suite is still running; awaiting the background task."}]}}

@@ -1,0 +1,84 @@
+{
+ "app_version": "fixture",
+ "generated_utc": "2026-11-24T12:00:00.250000+00:00",
+ "plan": [
+  {
+   "account": ".claude-beta",
+   "config_dir": "<ROOT>/home/.claude-beta",
+   "source_config_dir": "<ROOT>/home/.claude-beta",
+   "resume_account": ".claude-delta",
+   "resume_config_dir": "<ROOT>/home/.claude-delta",
+   "rehomed": true,
+   "session": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+   "cwd": "testdata/fixture/work",
+   "project": "C--work-app",
+   "disp": "STOPPED_LIMIT",
+   "resume_cmd": "New-Item -ItemType Directory -Force -Path '<ROOT>/home/.claude-delta/projects/C--work-app' | Out-Null; Copy-Item '<ROOT>/home/.claude-beta/projects/C--work-app/dddddddd-dddd-4ddd-8ddd-dddddddddddd.jsonl' '<ROOT>/home/.claude-delta/projects/C--work-app/dddddddd-dddd-4ddd-8ddd-dddddddddddd.jsonl' -Force; $env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-delta'; claude --resume dddddddd-dddd-4ddd-8ddd-dddddddddddd -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions"
+  },
+  {
+   "account": ".claude-alpha",
+   "config_dir": "<ROOT>/home/.claude-alpha",
+   "source_config_dir": "<ROOT>/home/.claude-alpha",
+   "resume_account": ".claude-delta",
+   "resume_config_dir": "<ROOT>/home/.claude-delta",
+   "rehomed": true,
+   "session": "a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a0a0",
+   "cwd": "testdata/fixture/work",
+   "project": "C--work-app",
+   "disp": "INFRA_ORG_DISABLED",
+   "resume_cmd": "New-Item -ItemType Directory -Force -Path '<ROOT>/home/.claude-delta/projects/C--work-app' | Out-Null; Copy-Item '<ROOT>/home/.claude-alpha/projects/C--work-app/a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a0a0.jsonl' '<ROOT>/home/.claude-delta/projects/C--work-app/a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a0a0.jsonl' -Force; $env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-delta'; claude --resume a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a0a0 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions"
+  },
+  {
+   "account": ".claude-alpha",
+   "config_dir": "<ROOT>/home/.claude-alpha",
+   "source_config_dir": "<ROOT>/home/.claude-alpha",
+   "resume_account": ".claude-alpha",
+   "resume_config_dir": "<ROOT>/home/.claude-alpha",
+   "rehomed": false,
+   "session": "55555555-5555-4555-8555-555555555555",
+   "cwd": "testdata/fixture/work",
+   "project": "C--work-app",
+   "disp": "STOPPED_APIERR",
+   "resume_cmd": "$env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-alpha'; claude --resume 55555555-5555-4555-8555-555555555555 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions"
+  },
+  {
+   "account": ".claude-alpha",
+   "config_dir": "<ROOT>/home/.claude-alpha",
+   "source_config_dir": "<ROOT>/home/.claude-alpha",
+   "resume_account": ".claude-alpha",
+   "resume_config_dir": "<ROOT>/home/.claude-alpha",
+   "rehomed": false,
+   "session": "66666666-6666-4666-8666-666666666666",
+   "cwd": "testdata/fixture/work",
+   "project": "C--work-app",
+   "disp": "NEVER_STARTED",
+   "resume_cmd": "$env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-alpha'; claude --resume 66666666-6666-4666-8666-666666666666 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions"
+  },
+  {
+   "account": ".claude-alpha",
+   "config_dir": "<ROOT>/home/.claude-alpha",
+   "source_config_dir": "<ROOT>/home/.claude-alpha",
+   "resume_account": ".claude-delta",
+   "resume_config_dir": "<ROOT>/home/.claude-delta",
+   "rehomed": true,
+   "session": "22222222-2222-4222-8222-222222222222",
+   "cwd": "testdata/fixture/work",
+   "project": "C--work-app",
+   "disp": "DEAD_MIDTOOL",
+   "resume_cmd": "New-Item -ItemType Directory -Force -Path '<ROOT>/home/.claude-delta/projects/C--work-app' | Out-Null; Copy-Item '<ROOT>/home/.claude-alpha/projects/C--work-app/22222222-2222-4222-8222-222222222222.jsonl' '<ROOT>/home/.claude-delta/projects/C--work-app/22222222-2222-4222-8222-222222222222.jsonl' -Force; $env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-delta'; claude --resume 22222222-2222-4222-8222-222222222222 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions"
+  },
+  {
+   "account": ".claude-alpha",
+   "config_dir": "<ROOT>/home/.claude-alpha",
+   "source_config_dir": "<ROOT>/home/.claude-alpha",
+   "resume_account": ".claude-alpha",
+   "resume_config_dir": "<ROOT>/home/.claude-alpha",
+   "rehomed": false,
+   "session": "99999999-9999-4999-8999-999999999999",
+   "cwd": "testdata/fixture/work",
+   "project": "C--work-app",
+   "disp": "DEAD_KILLED",
+   "resume_cmd": "$env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-alpha'; claude --resume 99999999-9999-4999-8999-999999999999 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions"
+  }
+ ]
+}

@@ -1,0 +1,100 @@
+{
+  "rows": [
+    {
+      "id": "fleet-sessionreg-package",
+      "canonical": "SessionRegistry",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Package internal/fleetmon/sessionreg: the Go session registry that scans Claude config dirs for session transcripts, classifies each stopped or live session, and writes the registry, resume plan and decisions log. It is the in-process replacement for the Python fleet session scan.",
+      "distinction": "The PACKAGE that owns the session-registry pass. It does not run the dispatch tick and does not own per-session runtime state; those stay with the session-runtime plane that consumes its registry output.",
+      "distinct_from": [
+        "session"
+      ],
+      "aliases": [
+        "sessionreg"
+      ],
+      "grounding": "sessionreg",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fleet-plan-doc-render",
+      "canonical": "ResumePlanRows",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The planRows local in sessionreg Run: the auto-resume entries extracted from the plan document that Options.planDoc builds from the registry rows. Its length is the AutoResume count in the registry summary.",
+      "distinction": "The rows of the resume PLAN document the registry emits, not a fleet dispatch plan and not a planner input. planDoc is the constructor; planRows is the extracted list.",
+      "distinct_from": [
+        "plan-planner"
+      ],
+      "aliases": [
+        "planRows"
+      ],
+      "grounding": "planRows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fleet-plan-doc-builder",
+      "canonical": "plandoc",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Options.planDoc in internal/fleetmon/sessionreg/output.go: builds the resume plan object (the plan key holding the auto-resume rows) from registry rows, rendered as the plan.out golden.",
+      "distinction": "The resume-plan document builder of the session registry. It does not plan work or choose dispatch targets; the dispatch planner is a different plane.",
+      "distinct_from": [
+        "plan-planner",
+        "fleet-plan-doc-render"
+      ],
+      "aliases": [],
+      "grounding": "planDoc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fleet-stopped-context-exhausted",
+      "canonical": "STOPPED_CONTEXT_EXHAUSTED",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Session registry disposition STOPPED_CONTEXT_EXHAUSTED in internal/fleetmon/sessionreg/classify.go: a stopped session whose wall was context exhaustion (INFRA, context_exhausted). Resume is refused for it because a resume re-hits the same wall; it needs a fresh continuation.",
+      "distinction": "A session-registry disposition about a stopped transcript's cause, not the context-window paging plane or a context-size budget. The ctx budget tokens remain in the context plane.",
+      "distinct_from": [
+        "context-mmu"
+      ],
+      "aliases": [],
+      "grounding": "STOPPED_CONTEXT_EXHAUSTED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fleet-default-cap-policy",
+      "canonical": "DefaultCapPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "DefaultCapPolicy in internal/fleetaccounts/capstate.go: the fleet account cap policy in force when no override is set. A weekly cap holds at most one real weekly window of seven days, and the override streak threshold is two.",
+      "distinction": "The fleet account cap-state policy value consumed by DisambiguateCap. It is not the runtime capability floor or the policy gate of the kernel.",
+      "distinct_from": [
+        "policy-loaded",
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "DefaultCapPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

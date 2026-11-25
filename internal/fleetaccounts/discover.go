@@ -194,9 +194,35 @@ func loadAccountsRegistry(home string) configaccounts.Registry {
 	}
 	reg, err := configaccounts.LoadRegistry(path)
 	if err != nil {
-		return configaccounts.Registry{}
+		// fleet_accounts reads any JSON object here, so a registry the strict loader
+		// refuses (an unknown field, a dangling rehome) still tombstones its seats.
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return configaccounts.Registry{}
+		}
+		var loose configaccounts.Registry
+		if json.Unmarshal(data, &loose) != nil {
+			return configaccounts.Registry{}
+		}
+		return loose
 	}
-	return reg.Refresh()
+	// The stored identity is the tombstone's record of the account it retired. Re-deriving it
+	// from the dir would bind a reused dir's NEW login to the old tombstone and exclude every
+	// live seat sharing that login.
+	return reg
+}
+
+// registryIdentityKey keys a registry seat's recorded identity the way
+// fleet_accounts._identity_account_key does: the lowercased account UUID, else the token
+// fingerprint.
+func registryIdentityKey(id configaccounts.Identity) string {
+	if uuid := strings.ToLower(strings.TrimSpace(id.AccountUUID)); uuid != "" {
+		return "uuid:" + uuid
+	}
+	if fp := strings.ToLower(strings.TrimSpace(id.TokenFP)); fp != "" {
+		return "tok:" + fp
+	}
+	return ""
 }
 
 func indexAccountsRegistry(reg configaccounts.Registry) accountsRegistryIndex {
@@ -210,7 +236,7 @@ func indexAccountsRegistry(reg configaccounts.Registry) accountsRegistryIndex {
 	for _, h := range reg.Homes {
 		name := strings.ToLower(strings.TrimSpace(h.Name))
 		dir := pathKey(h.Dir)
-		ident := h.Identity.AccountKey()
+		ident := registryIdentityKey(h.Identity)
 		if h.Active() {
 			if name != "" {
 				idx.activeNames[name] = h
@@ -882,7 +908,9 @@ func reconcileIdentities(rows []Account) {
 		}
 		r.TagLoginMatch = boolp(match)
 	}
-	// pass 2: role per worker.
+	// pass 2: role per worker. The canonical pick walks every member's transcript tree for
+	// recency, so it is made once per identity group, not once per member.
+	canonByGroup := map[string]*Account{}
 	for _, r := range workers {
 		uuid := derefStr(r.AccountUUID)
 		email := derefStr(r.LoginEmail)
@@ -907,7 +935,12 @@ func reconcileIdentities(rows []Account) {
 			r.IdentityRole = strp("unique")
 			continue
 		}
-		canonical := canonicalDir(group)
+		groupKey := r.Product + "\x00" + uuid
+		canonical, ok := canonByGroup[groupKey]
+		if !ok {
+			canonical = canonicalDir(group)
+			canonByGroup[groupKey] = canonical
+		}
 		if r == canonical {
 			r.IdentityRole = strp("canonical")
 		} else {

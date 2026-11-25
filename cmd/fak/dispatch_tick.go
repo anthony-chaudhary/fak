@@ -1223,8 +1223,8 @@ func dispatchRunPythonJSON(root string, stderr io.Writer, timeout time.Duration,
 			// semantic output mismatch, not a broken interpreter: re-running the
 			// SAME helper under the next interpreter cannot print different
 			// output, it only doubles the cost of the heaviest preflight step
-			// (a fleet_sessions.py registry scan is ~40s per run on an idle
-			// box, multiples under fleet load). Fail fast instead of retrying.
+			// (a transcript-scanning helper can take tens of seconds per run,
+			// multiples under fleet load). Fail fast instead of retrying.
 			return nil, fmt.Errorf("python helper %s (%s): no JSON object in helper output", strings.Join(args, " "), py)
 		}
 		lastErr = err

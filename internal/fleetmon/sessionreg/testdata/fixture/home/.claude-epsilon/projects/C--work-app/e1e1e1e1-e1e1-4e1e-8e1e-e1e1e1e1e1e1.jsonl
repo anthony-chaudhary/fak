@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:40:00.000Z","message":{"role":"user","content":"rotate the signing key"}}
+{"type":"assistant","sessionId":"e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:48:00.000Z","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Not logged in · Please run /login"}]}}

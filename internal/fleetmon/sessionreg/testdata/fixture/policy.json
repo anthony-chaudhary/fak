@@ -1,0 +1,5 @@
+{
+  "exclude": ["backup", "breakglass"],
+  "include_only": [],
+  "notes": {"backup": "break-glass backup account; never auto-resume"}
+}

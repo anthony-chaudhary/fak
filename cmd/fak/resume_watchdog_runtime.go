@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/codexresume"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
+	"github.com/anthony-chaudhary/fak/internal/fleetmon/sessionreg"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/resumeactuator"
@@ -290,12 +292,18 @@ func rwLoadHeadroomSeats(regDir string) []resume.HeadroomSeat {
 	return reg.Accounts
 }
 
-// rwRefreshRegistry runs the fleet_sessions.py registry refresh (the one remaining
-// Python child of this tick — porting fleet_sessions.py is the follow-on). FLEET_REG_DIR
-// is pinned so the child writes where this tick reads; FLEET_CLAUDE_EXE is passed when it
-// resolves so any probe spends its tiny turn on the same binary the resume uses. Returns
-// a note string when the refresh was skipped or failed ("" on success).
+// rwRefreshRegistry refreshes the registry this tick reads from regDir. A probing refresh
+// spends real provider turns, which only tools/fleet_sessions.py does, so it alone runs
+// the Python child (FLEET_CLAUDE_EXE passed so the probe uses the binary the resume
+// uses); every other refresh is the in-process sessionreg pass. Returns a note string
+// when the refresh was skipped or failed ("" on success).
 func rwRefreshRegistry(regDir, claudeExe string, windowH float64, probeMode string, probeMinIntervalMin int) string {
+	if probeMode == "none" || probeMode == "" {
+		if err := rwRefreshRegistryInProcess(regDir, windowH); err != nil {
+			return "refresh failed (" + err.Error() + "); acting on the existing plan file"
+		}
+		return ""
+	}
 	py := rwPythonExe()
 	if py == "" {
 		return "skipped (no python interpreter on PATH; acting on the existing plan file)"
@@ -305,10 +313,8 @@ func rwRefreshRegistry(regDir, claudeExe string, windowH float64, probeMode stri
 	if _, err := os.Stat(script); err != nil {
 		return "skipped (tools/fleet_sessions.py not found; acting on the existing plan file)"
 	}
-	args := []string{script, "registry", "--window", strconv.FormatFloat(windowH, 'f', -1, 64)}
-	if probeMode != "none" && probeMode != "" {
-		args = append(args, "--probe", probeMode, "--min-interval-min", strconv.Itoa(probeMinIntervalMin))
-	}
+	args := []string{script, "registry", "--window", strconv.FormatFloat(windowH, 'f', -1, 64),
+		"--probe", probeMode, "--min-interval-min", strconv.Itoa(probeMinIntervalMin)}
 	cmd := exec.Command(py, args...)
 	cmd.Env = append(os.Environ(), "FLEET_REG_DIR="+regDir)
 	if claudeExe != "" {
@@ -321,6 +327,24 @@ func rwRefreshRegistry(regDir, claudeExe string, windowH float64, probeMode stri
 		return "refresh child failed (" + err.Error() + "); acting on the existing plan file"
 	}
 	return ""
+}
+
+// rwRefreshRegistryInProcess is the non-probing registry pass, writing into regDir the
+// way the Python child did under FLEET_REG_DIR=regDir.
+var rwRefreshRegistryInProcess = func(regDir string, windowH float64) error {
+	cwd, _ := os.Getwd()
+	o := fleetSessionsOptions(findRepoRoot(cwd), time.Now())
+	if regDir != "" {
+		o.RegDir = regDir
+	}
+	o.WindowH = windowH
+	ctx := context.Background()
+	pass, err := sessionreg.Evaluate(ctx, o)
+	if err != nil {
+		return err
+	}
+	_, err = pass.WriteRegistry(ctx)
+	return err
 }
 
 // rwSpawnResume launches the detached `claude --resume` under the target account's

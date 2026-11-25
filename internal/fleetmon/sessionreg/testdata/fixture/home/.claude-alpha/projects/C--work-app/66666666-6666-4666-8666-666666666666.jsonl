@@ -1,0 +1,1 @@
+{"type":"user","sessionId":"66666666-6666-4666-8666-666666666666","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:44:00.000Z","message":{"role":"user","content":"<command-name>/loop</command-name>\n<command-args>triage the inbox every hour</command-args>"}}

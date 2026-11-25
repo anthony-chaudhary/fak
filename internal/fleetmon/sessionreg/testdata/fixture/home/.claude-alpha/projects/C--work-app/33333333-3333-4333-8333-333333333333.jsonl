@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"33333333-3333-4333-8333-333333333333","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:00:00.000Z","message":{"role":"user","content":"What does the scheduler do?"}}
+{"type":"assistant","sessionId":"33333333-3333-4333-8333-333333333333","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:10:00.000Z","message":{"role":"assistant","model":"claude-opus","content":[{"type":"text","text":"It orders the run queue — résumé of the design below.\nAll set."}],"stop_reason":"end_turn"}}

@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"ffffffff-ffff-4fff-8fff-ffffffffffff","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T10:40:00.000Z","message":{"role":"user","content":"tidy the changelog"}}
+{"type":"assistant","sessionId":"ffffffff-ffff-4fff-8fff-ffffffffffff","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T10:50:00.000Z","message":{"role":"assistant","model":"claude-opus","content":[{"type":"text","text":"Changelog tidied and committed."}],"stop_reason":"end_turn"}}

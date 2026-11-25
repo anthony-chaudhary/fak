@@ -57,7 +57,7 @@ func prepareDispatchTickEvaluation(opts *dispatchTickOptions, stderr io.Writer) 
 	// early error returns above the funnel cannot leak a warm console either: no console
 	// outlives the tick that opened it.
 	// Per-phase wall-clock attribution (observability): a slow tick is otherwise a
-	// black box -- the dominant cost (the ~40s fleet_sessions.py registry scan) and
+	// black box -- the dominant cost (the fleet session registry scan) and
 	// the per-tick subprocess fan-out (preflight PowerShell probes, router gh/dos
 	// spawns) were only ever asserted in comments, never witnessed. `timings` holds
 	// int64-millisecond durations, keyed per phase; a phase that did not run this

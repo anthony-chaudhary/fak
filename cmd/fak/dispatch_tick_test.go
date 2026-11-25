@@ -60,6 +60,10 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 	dispatchRunJSON = func(root string, _ io.Writer, _ time.Duration, args ...string) (map[string]any, error) {
 		return fn(root, args...)
 	}
+	oldSessionRegistry := dispatchSessionRegistry
+	dispatchSessionRegistry = func(root string, _ time.Duration) (map[string]any, error) {
+		return fn(root, filepath.Join("tools", "fleet_sessions.py"), "registry")
+	}
 	dispatchRunExternalJSON = func(root string, _ time.Duration, name string, args ...string) (map[string]any, error) {
 		if name == "dos" {
 			return map[string]any{"alive": float64(0), "target": float64(3), "verdict": "FILLING"}, nil
@@ -118,6 +122,7 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 	}
 	t.Cleanup(func() {
 		dispatchRunJSON = old
+		dispatchSessionRegistry = oldSessionRegistry
 		dispatchRunExternalJSON = oldExternal
 		dispatchProbeHostResources = oldResources
 		dispatchBuildHostResources = oldBuildResources

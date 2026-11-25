@@ -1,0 +1,3 @@
+{"type":"user","sessionId":"f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:30:00.000Z","message":{"role":"user","content":"prüfe den Ladefehler"}}
+{"type":"assistant","sessionId":"f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:35:00.000Z","message":{"role":"assistant","model":"claude-opus","content":[{"type":"text","text":"Welche Meldung siehst du?"}]}}
+{"type":"user","sessionId":"f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:45:00.000Z","message":{"role":"user","content":"Fehler é529 beim Laden, Code ü503ö"}}

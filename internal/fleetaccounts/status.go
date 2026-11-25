@@ -48,11 +48,17 @@ type Session struct {
 
 // LoadRegistry reads sessions.json best-effort: missing/malformed yields an empty Registry.
 func LoadRegistry(path string) Registry {
-	var reg Registry
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Registry{}
 	}
+	return ParseRegistry(data)
+}
+
+// ParseRegistry decodes sessions.json bytes the way LoadRegistry does, for a caller that
+// already holds the registry in memory; malformed input yields an empty Registry.
+func ParseRegistry(data []byte) Registry {
+	var reg Registry
 	if err := json.Unmarshal(data, &reg); err != nil {
 		return Registry{}
 	}
@@ -153,8 +159,8 @@ func resetIsFuture(reset string, now time.Time) *bool {
 // fleet_accounts._weekly_throttle_is_active: no weekly text means no weekly cap, a weekly
 // reset provably in the past means the cap expired, and anything else defers to the
 // throttle's own liveness.
-func weeklyThrottleIsActive(info map[string]any) bool {
-	return DisambiguateCap(info, CapObservation{}, time.Now().UTC(), DefaultCapPolicy()).WeeklyActive
+func weeklyThrottleIsActive(info map[string]any, now time.Time) bool {
+	return DisambiguateCap(info, CapObservation{}, now, DefaultCapPolicy()).WeeklyActive
 }
 
 // applyThrottleStatus stamps the carried-throttle block onto st, reading the disambiguated
@@ -162,8 +168,8 @@ func weeklyThrottleIsActive(info map[string]any) bool {
 // from the throttle map (absent -> None/null, present even "" -> the value; CapState.HasReset
 // /HasWeekly preserve that presence, not emptiness), and the block reason is the core's
 // composed "usage limit; resets X; weekly Y".
-func applyThrottleStatus(st RuntimeStatus, thr map[string]any) RuntimeStatus {
-	cs := DisambiguateCap(thr, CapObservation{}, time.Now().UTC(), DefaultCapPolicy())
+func applyThrottleStatus(st RuntimeStatus, thr map[string]any, now time.Time) RuntimeStatus {
+	cs := DisambiguateCap(thr, CapObservation{}, now, DefaultCapPolicy())
 	st.Available, st.Blocked = false, true
 	st.BlockKind, st.hasBlockKind = "usage", true
 	st.BlockReason = cs.BlockReason
@@ -182,11 +188,11 @@ func applyThrottleStatus(st RuntimeStatus, thr map[string]any) RuntimeStatus {
 // the roster can render "serving, cap resets X". A weekly-active cap never reaches here (it
 // holds the seat closed upstream); an absent/expired cap contributes nothing, so a normal
 // serving row gains no field and its byte-parity JSON is unchanged.
-func markUsageSoon(st *RuntimeStatus, thr map[string]any) {
+func markUsageSoon(st *RuntimeStatus, thr map[string]any, now time.Time) {
 	if thr == nil {
 		return
 	}
-	cs := DisambiguateCap(thr, CapObservation{}, time.Now().UTC(), DefaultCapPolicy())
+	cs := DisambiguateCap(thr, CapObservation{}, now, DefaultCapPolicy())
 	if !cs.Active || cs.WeeklyActive {
 		return
 	}
@@ -441,6 +447,13 @@ func collectRuntimeEvidence(account string, reg Registry) runtimeEvidence {
 }
 
 func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
+	return runtimeStatusAt(account, dir, reg, time.Now().UTC(), shouldConsultProbeLedger)
+}
+
+// runtimeStatusAt is computeRuntimeStatus at an injected instant. consult is asked only
+// once the synthetic-probe rungs have not decided, so a passive caller can switch the
+// probe-ledger rung off without paying for the registry-dir survey.
+func runtimeStatusAt(account, dir string, reg Registry, now time.Time, consult func() bool) RuntimeStatus {
 	throttleMap := normalizeThrottle(reg.Throttle)
 	evidence := collectRuntimeEvidence(account, reg)
 	acct := evidence.acct
@@ -480,11 +493,11 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 			if freshProbeOKRow != nil {
 				probeIdentity = sessionIdentity(*freshProbeOKRow)
 			}
-			if weeklyThrottleIsActive(thr) &&
+			if weeklyThrottleIsActive(thr, now) &&
 				throttleMatchesCurrentIdentity(account, dir, thr, reg, acct, probeIdentity) {
-				return applyThrottleStatus(st, thr)
+				return applyThrottleStatus(st, thr, now)
 			}
-			markUsageSoon(&st, thr)
+			markUsageSoon(&st, thr, now)
 		}
 		st.StatusSource = "probe"
 		return st
@@ -511,12 +524,11 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 	// (probe says OK, roster still "resets 11pm"). A ledger verdict within
 	// ProbeLedgerFreshMin is the same authoritative fresh probe. Mirrors
 	// fleet_accounts.runtime_status's probe-ledger rung.
-	now := time.Now().UTC()
 	// The cap-disambiguation cycles (aging + probe-override) fold a CapObservation drawn
 	// from the SAME probe ledger the fresh-probe rung reads, so gate it on the same switch:
 	// with the ledger unconsulted (or no carried throttle) capObs is zero and
 	// DisambiguateCap stays on its legacy single-shot path at both seams below.
-	consultLedger := shouldConsultProbeLedger()
+	consultLedger := consult()
 	var capObs CapObservation
 	if consultLedger && hasThr {
 		capObs = deriveCapObservation(account, "")
@@ -545,9 +557,9 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 					cs := DisambiguateCap(thr, capObs, now, DefaultCapPolicy())
 					if cs.WeeklyActive &&
 						throttleMatchesCurrentIdentity(account, dir, thr, reg, acct, nil) {
-						return applyThrottleStatus(st, thr)
+						return applyThrottleStatus(st, thr, now)
 					}
-					markUsageSoon(&st, thr)
+					markUsageSoon(&st, thr, now)
 				}
 				st.StatusSource = "probe-ledger"
 				return st
@@ -574,7 +586,7 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 	// episode start. Absent that (no ledger history, or a young/parseable-future cap),
 	// cs.Active equals the legacy throttleIsActive(thr).
 	if hasThr && DisambiguateCap(thr, capObs, now, DefaultCapPolicy()).Active {
-		return applyThrottleStatus(st, thr)
+		return applyThrottleStatus(st, thr, now)
 	}
 
 	if authCurrent {
@@ -657,17 +669,33 @@ func Annotate(rows []Account, reg Registry) []Account {
 // regDir. A fresh probe is authoritative because it exercised the same provider seam the
 // worker will use; stale entries are ignored so recovered seats become eligible again.
 func AnnotateWithProbes(rows []Account, reg Registry, regDir string) []Account {
+	return annotateRows(rows, func(r *Account) {
+		applyStatus(r, computeRuntimeStatus(r.Account, r.Dir, reg))
+		applyFreshProbeLoginOverride(r)
+		applyLoginGate(r)
+		applyCredExpiryGate(r, time.Now().UTC())
+		applyLatestProbeVerdict(r, regDir, time.Now().UTC())
+	})
+}
+
+// AnnotatePassive folds ONLY the registry evidence the caller hands in, at instant now: no
+// probe-ledger rung and no credential/fresh-probe gates. It is the roster a registry WRITER
+// publishes from the sessions it just classified (fleet_accounts.annotated_roster called
+// with an explicit registry), so its verdict is a function of that registry alone.
+func AnnotatePassive(rows []Account, reg Registry, now time.Time) []Account {
+	never := func() bool { return false }
+	return annotateRows(rows, func(r *Account) {
+		applyStatus(r, runtimeStatusAt(r.Account, r.Dir, reg, now, never))
+	})
+}
+
+func annotateRows(rows []Account, foldWorker func(r *Account)) []Account {
 	out := make([]Account, len(rows))
 	copy(out, rows)
 	for i := range out {
 		r := &out[i]
 		if r.Kind == KindWorker {
-			st := computeRuntimeStatus(r.Account, r.Dir, reg)
-			applyStatus(r, st)
-			applyFreshProbeLoginOverride(r)
-			applyLoginGate(r)
-			applyCredExpiryGate(r, time.Now().UTC())
-			applyLatestProbeVerdict(r, regDir, time.Now().UTC())
+			foldWorker(r)
 		} else {
 			r.Available = boolp(false)
 			r.Blocked = boolp(false)

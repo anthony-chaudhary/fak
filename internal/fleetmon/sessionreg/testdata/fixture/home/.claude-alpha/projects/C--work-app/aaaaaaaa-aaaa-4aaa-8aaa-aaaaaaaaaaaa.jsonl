@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","cwd":"{{WORK}}","gitBranch":"docs","timestamp":"2026-11-24T10:50:00.000Z","message":{"role":"user","content":"hello, read the readme"}}
+{"type":"assistant","sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","cwd":"{{WORK}}","gitBranch":"docs","timestamp":"2026-11-24T10:59:00.000Z","message":{"role":"assistant","model":"claude-opus","content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}],"stop_reason":"tool_use"}}

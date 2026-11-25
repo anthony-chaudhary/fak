@@ -1,0 +1,35 @@
+ACCOUNTS AVAILABLE NOW (worker, not blocked):
+  alpha, delta
+BLOCKED: beta (usage limit; resets Dec 31, 11pm), epsilon (auth/login required)
+
+# AUTO-RESUMABLE (autonomous, dead, account available) â€” safe to run:
+
+# [STOPPED_LIMIT] C--work-app (main)  age=5.0m
+New-Item -ItemType Directory -Force -Path '<ROOT>/home/.claude-delta/projects/C--work-app' | Out-Null; Copy-Item '<ROOT>/home/.claude-beta/projects/C--work-app/dddddddd-dddd-4ddd-8ddd-dddddddddddd.jsonl' '<ROOT>/home/.claude-delta/projects/C--work-app/dddddddd-dddd-4ddd-8ddd-dddddddddddd.jsonl' -Force; $env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-delta'; claude --resume dddddddd-dddd-4ddd-8ddd-dddddddddddd -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions
+
+# [INFRA_ORG_DISABLED] C--work-app (main)  age=8.0m
+New-Item -ItemType Directory -Force -Path '<ROOT>/home/.claude-delta/projects/C--work-app' | Out-Null; Copy-Item '<ROOT>/home/.claude-alpha/projects/C--work-app/a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a0a0.jsonl' '<ROOT>/home/.claude-delta/projects/C--work-app/a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a0a0.jsonl' -Force; $env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-delta'; claude --resume a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a0a0 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions
+
+# [STOPPED_APIERR] C--work-app (main)  age=10.0m
+$env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-alpha'; claude --resume 55555555-5555-4555-8555-555555555555 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions
+
+# [NEVER_STARTED] C--work-app (main)  age=15.0m
+$env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-alpha'; claude --resume 66666666-6666-4666-8666-666666666666 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions
+
+# [DEAD_MIDTOOL] C--work-app (fix/y)  age=30.0m
+New-Item -ItemType Directory -Force -Path '<ROOT>/home/.claude-delta/projects/C--work-app' | Out-Null; Copy-Item '<ROOT>/home/.claude-alpha/projects/C--work-app/22222222-2222-4222-8222-222222222222.jsonl' '<ROOT>/home/.claude-delta/projects/C--work-app/22222222-2222-4222-8222-222222222222.jsonl' -Force; $env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-delta'; claude --resume 22222222-2222-4222-8222-222222222222 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions
+
+# [DEAD_KILLED] C--work-app (main)  age=45.0m
+$env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-alpha'; claude --resume 99999999-9999-4999-8999-999999999999 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions
+
+# SURFACE â€” stopped but interactive; resume only if you mean to:
+
+# [STOPPED_QUIET] C--work-app age=14.0m  -- Fehler é529 beim Laden, Code ü503ö
+$env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-alpha'; claude --resume f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1 -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions
+
+# [DEAD_MIDTOOL] C--work-app age=60.0m  -- 
+$env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-alpha'; claude --resume aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions
+
+# [STOPPED_QUIET] C--work-app age=500.0m  -- can you check it again
+$env:CLAUDE_CONFIG_DIR='<ROOT>/home/.claude-alpha'; claude --resume cccccccc-cccc-4ccc-8ccc-cccccccccccc -p 'Resume where you left off; re-establish any /goal or /loop and continue toward it.' --dangerously-skip-permissions
+

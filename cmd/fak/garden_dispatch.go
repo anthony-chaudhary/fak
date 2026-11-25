@@ -299,7 +299,7 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 // the run early ("" when the run walked every candidate).
 func dispatchGardenCandidates(stderr io.Writer, plan *gardenDispatchPlan, candidates []gardenbundle.WalkDecision, laneByIssue map[int]string, root, backend, ledgerPath string, maxWorkers int, live, recordLoop bool) string {
 	stopVerdict := ""
-	// Refresh the fleet registry (the ~40s tools/fleet_sessions.py scan) only on the
+	// Refresh the fleet registry (the whole-home session transcript scan) only on the
 	// FIRST tick of the drain, then reuse it -- the same cadence sweep (iter==0) and
 	// wave (i==0) already use. The scan's result is surfaced only as the payload's
 	// registry_refresh provenance; seat admission reads live pidfile leases and the

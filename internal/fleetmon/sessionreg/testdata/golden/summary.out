@@ -1,0 +1,63 @@
+fleet_sessions @ 2026-11-24 12:00Z   window=3.0h   20 sessions
+
+ACCOUNTS AVAILABLE NOW (worker, not blocked):
+  alpha, delta
+BLOCKED: beta (usage limit; resets Dec 31, 11pm), epsilon (auth/login required)
+
+THROTTLED ACCOUNTS (resume will instantly re-die):
+  .claude-gone                   resets Dec 31, 11pm
+  .claude-beta                   resets Dec 31, 11pm
+
+category: INFRA=6  AGENT=9  USER=1  HANGING=3  LIVE=1
+disp:     STOPPED_LIMIT=1  STOPPED_APIERR=1  STOPPED_CONTEXT_EXHAUSTED=1  INFRA_AUTH=2  INFRA_ORG_DISABLED=1  DEAD_MIDTOOL=3  DEAD_KILLED=2  NEVER_STARTED=1  USER_CLOSED=1  STOPPED_QUIET=2  PARKED_WAIT=1  LIVE=1  DONE=3
+action:   AUTO_RESUME=6  BLOCKED_AUTH=1  DEFER_DUPLICATE_TASK=1  DEFER_THROTTLED=1  ESCALATE_FRESH_CONTINUATION=1  SKIP_DONE=3  SKIP_LIVE=1  SKIP_PARKED=1  SKIP_STALE_COPY=1  SKIP_USER_CLOSED=1  SURFACE=3
+initiated: agent=9  user=11
+storm:     apierr 15m=1 30m=1 60m=1  rate=0.033/min  frac30m=0.083
+neverstart:      15m=1 30m=1 60m=1  rate=0.033/min
+
+== STOPPED_LIMIT: 1 ==
+     5.0m A beta               C--work-app                dddddddd *AUTO -> delta  [THROTTLED]
+
+== STOPPED_APIERR: 1 ==
+    10.0m u alpha              C--work-app                55555555 *AUTO [529]
+
+== STOPPED_CONTEXT_EXHAUSTED: 1 ==
+     9.0m A delta              C--work-app                d0d0d0d0 fresh-cont
+
+== INFRA_AUTH: 2 ==
+    12.0m u epsilon            C--work-app                e1e1e1e1 blocked-auth
+    35.0m u beta               C--work-app                eeeeeeee defer  [THROTTLED] [401]
+
+== INFRA_ORG_DISABLED: 1 ==
+     8.0m A alpha              C--work-app                a0a0a0a0 *AUTO -> delta [403]
+
+== DEAD_MIDTOOL: 3 ==
+    30.0m A alpha              C--work-app                22222222 *AUTO -> delta  relaunch×2
+    60.0m u alpha              C--work-app                aaaaaaaa surface
+   120.0m A beta               C--work-app                22222222  [THROTTLED]  relaunch×2
+
+== DEAD_KILLED: 2 ==
+    40.0m A alpha              C--work-app                88888888 dup-task
+    45.0m A alpha              C--work-app                99999999 *AUTO
+
+== NEVER_STARTED: 1 ==
+    15.0m A alpha              C--work-app                66666666 *AUTO
+
+== USER_CLOSED: 1 ==
+    20.0m u alpha              C--work-app                44444444 user-closed
+
+== STOPPED_QUIET: 2 ==
+    14.0m u alpha              C--work-app                f1f1f1f1 surface
+   500.0m u alpha              C--work-app                cccccccc surface
+
+== PARKED_WAIT: 1 ==
+    25.0m u alpha              C--work-app                77777777
+
+== LIVE: 1 ==
+     1.0m A alpha              C--work-app                11111111
+
+== DONE: 3 ==
+    16.0m u alpha              C--work-app                f2f2f2f2 done
+    50.0m u alpha              C--work-app                33333333 done
+    70.0m u delta              C--work-app                ffffffff done
+

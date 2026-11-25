@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:20:00.000Z","message":{"role":"user","content":"tally the cost report"}}
+{"type":"assistant","sessionId":"f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:44:00.000Z","costUSD":NaN,"message":{"role":"assistant","model":"claude-opus","content":[{"type":"text","text":"The report is tallied."}],"stop_reason":"end_turn","usage":{"ratio":Infinity,"delta":-Infinity}}}

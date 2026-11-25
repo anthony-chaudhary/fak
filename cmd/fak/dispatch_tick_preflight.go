@@ -27,7 +27,7 @@ const fallbackCodexOAuthSessions = 10
 const dispatchPreflightTimeout = 30 * time.Second
 
 func dispatchRefreshRegistry(root string, stderr io.Writer) map[string]any {
-	obj, err := dispatchRunJSON(root, stderr, 120*time.Second, filepath.Join("tools", "fleet_sessions.py"), "registry")
+	obj, err := dispatchSessionRegistry(root, 120*time.Second)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}

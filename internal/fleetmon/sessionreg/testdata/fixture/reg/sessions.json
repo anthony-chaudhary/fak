@@ -1,0 +1,1 @@
+{"generated_utc": "2026-11-24T11:00:00+00:00", "throttle": {".claude-gone": {"reset": "Dec 31, 11pm", "age_min": 12.5}}, "auth": {".claude-delta": {"block_kind": "auth", "block_reason": "auth/login required", "seen_utc": "2026-11-24T10:00:00+00:00"}, ".claude-ghost": {"last": "Please run /login", "seen_utc": "2026-11-24T09:00:00+00:00"}}, "sessions": []}

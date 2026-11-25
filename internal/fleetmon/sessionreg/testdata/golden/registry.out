@@ -1,0 +1,3 @@
+wrote <ROOT>/reg/sessions.json (20 sessions)
+wrote <ROOT>/reg/resume_plan.json (6 AUTO_RESUME)
+{"ok": true, "mode": "registry", "sessions": 20, "auto_resume": 6, "probed": 0, "wrote": ["<ROOT>/reg/sessions.json", "<ROOT>/reg/resume_plan.json"]}

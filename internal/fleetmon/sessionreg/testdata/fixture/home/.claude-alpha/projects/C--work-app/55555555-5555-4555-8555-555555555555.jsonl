@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"55555555-5555-4555-8555-555555555555","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:40:00.000Z","message":{"role":"user","content":"summarize the incident log"}}
+{"type":"assistant","sessionId":"55555555-5555-4555-8555-555555555555","cwd":"{{WORK}}","gitBranch":"main","timestamp":"2026-11-24T11:49:00.000Z","isApiErrorMessage":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"}]}}
