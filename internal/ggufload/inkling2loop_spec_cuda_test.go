@@ -100,16 +100,16 @@ func TestInkling2CUDASpecOracle(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("inkling2 spec oracle: plain %.2f tok/s", st.DecodeTokensPerSecond())
-	check := func(t *testing.T, name string, depth int, corrupt func(int) bool) {
+	check := func(name string, depth int, corrupt func(int) bool) {
 		got, sst, err := inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(*inkling2Resident) (inkling2Drafter, error) {
 			return &inkling2OracleDrafter{ref: ref, corrupt: corrupt}, nil
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("inkling2 spec oracle: %s depth %d: %.2f tok/s; %d verifies, accepted %d/%d, plain steps %d, verify %.3f ms/call, adaptive widths %v",
+		t.Logf("inkling2 spec oracle: %s depth %d: %.2f tok/s; %d verifies, accepted %d/%d, plain steps %d, verify %.3f ms/call",
 			name, depth, sst.DecodeTokensPerSecond(), sst.Verifies, sst.Accepted, sst.Drafted, sst.PlainSteps,
-			ms(sst.Verify)/float64(max(1, sst.Verifies)), sst.AdaptWidths[1:depth+1])
+			ms(sst.Verify)/float64(max(1, sst.Verifies)))
 		for i := range got {
 			if got[i] != ref[i] {
 				t.Errorf("%s depth %d: token %d = %d, plain greedy %d", name, depth, i, got[i], ref[i])
@@ -117,17 +117,11 @@ func TestInkling2CUDASpecOracle(t *testing.T) {
 			}
 		}
 	}
-	check(t, "corrupt", 4, func(i int) bool { return i%5 == 2 })
-	check(t, "corrupt", 7, func(i int) bool { return i%9 == 4 || i%13 == 0 })
+	check("corrupt", 4, func(i int) bool { return i%5 == 2 })
+	check("corrupt", 7, func(i int) bool { return i%9 == 4 || i%13 == 0 })
 	for _, depth := range []int{1, 2, 3, 4, 5, 6, 7, 8} {
-		check(t, "perfect", depth, nil)
+		check("perfect", depth, nil)
 	}
-	t.Run("adaptive width", func(t *testing.T) {
-		t.Setenv("FAK_INKLING2_SPEC_ADAPT", "1")
-		check(t, "adaptive corrupt", 4, func(i int) bool { return i%5 == 2 })
-		check(t, "adaptive corrupt", 8, func(i int) bool { return i%3 != 0 })
-		check(t, "adaptive perfect", 8, nil)
-	})
 }
 
 // FAK_INKLING2_SPEC_DIAG=1 logs, for the first verifies of a perfect depth-2 draft,

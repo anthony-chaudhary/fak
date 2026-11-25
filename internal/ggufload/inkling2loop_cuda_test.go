@@ -107,8 +107,5 @@ func TestInkling2CUDADecodeBench(t *testing.T) {
 		t.Logf("inkling2 cuda bench spec: depth %d, %d verifies, accepted %d/%d (%.2f tok/verify), draft %.3f ms/call, verify %.3f ms/call",
 			d, sp.Verifies, sp.Accepted, sp.Drafted, float64(sp.Accepted+sp.Verifies)/float64(max(1, sp.Verifies)),
 			ms(sp.Draft)/float64(max(1, sp.Verifies)), ms(sp.Verify)/float64(max(1, sp.Verifies)))
-		if inkling2SpecAdapt() {
-			t.Logf("inkling2 cuda bench spec: adaptive steps by draft width 1..%d: %v", d, sp.AdaptWidths[1:d+1])
-		}
 	}
 }

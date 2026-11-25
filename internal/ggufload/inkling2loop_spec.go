@@ -67,9 +67,6 @@ type Inkling2SpecStats struct {
 	Inkling2LoopGreedyStats
 	Verifies, Drafted, Accepted, PlainSteps int
 	Draft, Verify                           time.Duration
-	// AdaptWidths counts the steps that asked for each draft width when
-	// FAK_INKLING2_SPEC_ADAPT picks it; all zero otherwise.
-	AdaptWidths [inkling2SpecMaxDraft + 1]int
 }
 
 // enableSpec allocates the verify chunk state for up to depth drafted tokens.
@@ -261,27 +258,6 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 			return nil, st, err
 		}
 	}
-	var chooser *inkling2SpecWidth
-	if inkling2SpecAdapt() {
-		c := newInkling2SpecWidth(depth)
-		chooser = &c
-		// a timed replay of every width gives the chooser a cost line before the
-		// drafter has produced any outcome; the untimed pass before it absorbs the
-		// capture of the full-width graph
-		for i := 0; i < 2*depth; i++ {
-			w := 1 + i%depth
-			t0 := time.Now()
-			if _, err := s.verify(warm[:w+1]); err != nil {
-				return nil, st, err
-			}
-			if err := s.commitVerify(w+1, 0); err != nil {
-				return nil, st, err
-			}
-			if i >= depth {
-				chooser.ObserveCost(w, time.Since(t0).Seconds())
-			}
-		}
-	}
 	st.Prefill = time.Since(start)
 	out := make([]int, 0, n+depth)
 	start = time.Now()
@@ -290,12 +266,8 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 		if len(out) == n {
 			break
 		}
-		width := inkling2SpecStepWidth(chooser, depth)
-		if chooser != nil {
-			st.AdaptWidths[width]++
-		}
 		t0 := time.Now()
-		props := d.Draft(out, width)
+		props := d.Draft(out, depth)
 		st.Draft += time.Since(t0)
 		if s.err != nil {
 			return nil, st, s.err
@@ -323,11 +295,7 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 		if err := s.commitVerify(len(fed), a+1); err != nil {
 			return nil, st, err
 		}
-		verified := time.Since(t0)
-		st.Verify += verified
-		if chooser != nil {
-			chooser.Observe(width, len(props), a, verified.Seconds())
-		}
+		st.Verify += time.Since(t0)
 		st.Verifies++
 		st.Drafted += len(props)
 		st.Accepted += a
