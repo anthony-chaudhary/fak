@@ -1,7 +1,7 @@
 package ctxmmu
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,19 +11,19 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 const (
-	quarantineLedgerEnv           = "FAK_QUARANTINE_LEDGER_PATH"
-	quarantineLedgerStateDirEnv   = "FAK_STATE_DIR"
-	maxQuarantineLedgerEntries    = 32768
-	quarantineLedgerSoftCap       = 28672 // proactively compact before hitting hard cap
-	quarantineLedgerCompactTarget = 24576 // retain freshest 75% after compaction
-	quarantineLedgerDefaultTTL    = 7 * 24 * time.Hour
-	maxQuarantineLedgerWALBytes   = 8 << 20
-	maxQuarantineLedgerKeyLength  = 128
-	quarantineLockTimeout         = 10 * time.Second
-	quarantineStaleLockTTL        = 30 * time.Second
+	quarantineLedgerEnv          = "FAK_QUARANTINE_LEDGER_PATH"
+	quarantineLedgerStateDirEnv  = "FAK_STATE_DIR"
+	maxQuarantineLedgerEntries   = 32768
+	quarantineLedgerSoftCap      = 28672 // rewrite-compact triggers here so expired denials leave the WAL
+	quarantineLedgerDefaultTTL   = 7 * 24 * time.Hour
+	maxQuarantineLedgerWALBytes  = 8 << 20
+	maxQuarantineLedgerKeyLength = 128
+	quarantineLockTimeout        = 10 * time.Second
 )
 
 var ErrQuarantineLedgerCapacity = errors.New("ctxmmu: quarantine authority capacity exhausted")
@@ -37,19 +37,18 @@ type quarantineRecord struct {
 // QuarantineLedger tracks quarantined digests in memory and optionally persists
 // refusal entries to disk/store so refusal survives process restarts (#12055, #12057).
 type QuarantineLedger struct {
-	mu            sync.RWMutex
-	path          string
-	entries       map[string]int64 // digest -> UnixNano timestamp
-	walSize       int64
-	fileModTime   time.Time
-	fileSize      int64
-	fileExists    bool
-	loadErr       error // an unreadable authority refuses generic restore; it never means "no quarantines"
-	maxEntries    int
-	softCap       int
-	compactTarget int
-	ttl           time.Duration
-	nowFn         func() time.Time
+	mu          sync.RWMutex
+	path        string
+	entries     map[string]int64 // digest -> UnixNano timestamp
+	walSize     int64
+	fileModTime time.Time
+	fileSize    int64
+	fileExists  bool
+	loadErr     error // an unreadable authority refuses generic restore; it never means "no quarantines"
+	maxEntries  int
+	softCap     int
+	ttl         time.Duration
+	nowFn       func() time.Time
 }
 
 func isGoTestBinary() bool {
@@ -112,13 +111,12 @@ func NewQuarantineLedger(path ...string) *QuarantineLedger {
 		p = defaultQuarantineLedgerPath()
 	}
 	l := &QuarantineLedger{
-		path:          p,
-		entries:       make(map[string]int64),
-		maxEntries:    maxQuarantineLedgerEntries,
-		softCap:       quarantineLedgerSoftCap,
-		compactTarget: quarantineLedgerCompactTarget,
-		ttl:           quarantineLedgerDefaultTTL,
-		nowFn:         time.Now,
+		path:       p,
+		entries:    make(map[string]int64),
+		maxEntries: maxQuarantineLedgerEntries,
+		softCap:    quarantineLedgerSoftCap,
+		ttl:        quarantineLedgerDefaultTTL,
+		nowFn:      time.Now,
 	}
 	if p != "" {
 		l.loadErr = l.loadInitial()
@@ -164,7 +162,7 @@ func (l *QuarantineLedger) loadLocked() error {
 	if l.path == "" {
 		return nil
 	}
-	f, err := os.Open(l.path)
+	data, err := os.ReadFile(l.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			clear(l.entries)
@@ -176,40 +174,22 @@ func (l *QuarantineLedger) loadLocked() error {
 		}
 		return err
 	}
-	defer f.Close()
-	info, statErr := f.Stat()
-	if statErr != nil {
-		return statErr
+	next, tornAt, err := parseQuarantineWAL(data)
+	if err != nil {
+		return err
 	}
-
-	next := make(map[string]int64)
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	// Callers hold the file lock, so repairing the tail cannot race a peer append.
+	if tornAt >= 0 {
+		if err := os.Truncate(l.path, tornAt); err != nil {
+			return fmt.Errorf("trim torn quarantine ledger tail: %w", err)
 		}
-		var rec quarantineRecord
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			return fmt.Errorf("quarantine ledger line %d: %w", lineNo, err)
-		}
-		key, err := quarantineLedgerKey(rec.Digest)
-		if err != nil {
-			return fmt.Errorf("quarantine ledger line %d: %w", lineNo, err)
-		}
-		switch rec.Op {
-		case "quarantine":
-			next[key] = rec.Time
-		case "clear":
-			delete(next, key)
-		default:
-			return fmt.Errorf("quarantine ledger line %d: unknown operation %q", lineNo, rec.Op)
+	} else if n := len(data); n > 0 && data[n-1] != '\n' {
+		if err := appendQuarantineNewline(l.path); err != nil {
+			return err
 		}
 	}
-	if err := scanner.Err(); err != nil {
+	info, err := os.Stat(l.path)
+	if err != nil {
 		return err
 	}
 	l.entries = next
@@ -218,9 +198,73 @@ func (l *QuarantineLedger) loadLocked() error {
 	l.fileModTime = info.ModTime()
 	l.fileExists = true
 	if len(l.entries) >= l.maxEntries {
-		l.enforceRetentionLocked(l.now().UnixNano(), l.effectiveCompactTarget())
+		l.pruneExpiredLocked(l.now().UnixNano())
 	}
 	return nil
+}
+
+// parseQuarantineWAL replays the WAL. A crash can only tear the record being
+// appended, so a damaged final line without its newline is reported by offset
+// and skipped; damage anywhere earlier is corruption and fails closed.
+func parseQuarantineWAL(data []byte) (map[string]int64, int64, error) {
+	entries := make(map[string]int64)
+	lineNo := 0
+	for start := 0; start < len(data); {
+		lineNo++
+		end, terminated := len(data), false
+		if i := bytes.IndexByte(data[start:], '\n'); i >= 0 {
+			end, terminated = start+i, true
+		}
+		if line := bytes.TrimSpace(data[start:end]); len(line) > 0 {
+			if err := applyQuarantineRecord(entries, line); err != nil {
+				if !terminated {
+					return entries, int64(start), nil
+				}
+				return nil, -1, fmt.Errorf("quarantine ledger line %d: %w", lineNo, err)
+			}
+		}
+		if !terminated {
+			break
+		}
+		start = end + 1
+	}
+	return entries, -1, nil
+}
+
+func applyQuarantineRecord(entries map[string]int64, line []byte) error {
+	var rec quarantineRecord
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return err
+	}
+	key, err := quarantineLedgerKey(rec.Digest)
+	if err != nil {
+		return err
+	}
+	switch rec.Op {
+	case "quarantine":
+		entries[key] = rec.Time
+	case "clear":
+		delete(entries, key)
+	default:
+		return fmt.Errorf("unknown operation %q", rec.Op)
+	}
+	return nil
+}
+
+func appendQuarantineNewline(path string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte{'\n'}); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func (l *QuarantineLedger) needsReloadLocked() bool {
@@ -254,52 +298,34 @@ func (l *QuarantineLedger) acquireFileLock() (func(), error) {
 	if err := ensureQuarantineLedgerDir(dir); err != nil {
 		return nil, err
 	}
+	// The kernel releases a flock when its holder dies, so unlike an O_EXCL
+	// lockfile there is no stale-lock reap that could steal a live lock.
 	lockPath := l.path + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open quarantine ledger lock %s: %w", lockPath, err)
+	}
 	deadline := time.Now().Add(quarantineLockTimeout)
 	backoff := time.Millisecond
 	for {
-		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		err := flock.TryLock(f)
 		if err == nil {
-			_, _ = fmt.Fprintf(f, "%d %d\n", os.Getpid(), time.Now().UnixNano())
-			_ = f.Close()
 			return func() {
-				_ = os.Remove(lockPath)
+				_ = flock.Unlock(f)
+				_ = f.Close()
 			}, nil
 		}
-		if !os.IsExist(err) && !os.IsPermission(err) {
+		if !errors.Is(err, flock.ErrLockBusy) {
+			_ = f.Close()
 			return nil, fmt.Errorf("acquire quarantine ledger lock %s: %w", lockPath, err)
 		}
-		if os.IsExist(err) {
-			if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > quarantineStaleLockTTL {
-				_ = os.Remove(lockPath)
-				continue
-			}
-		}
 		if time.Now().After(deadline) {
+			_ = f.Close()
 			return nil, fmt.Errorf("timeout acquiring quarantine ledger lock %s: %w", lockPath, err)
 		}
 		time.Sleep(backoff)
-		if backoff < 25*time.Millisecond {
-			backoff *= 2
-			if backoff > 25*time.Millisecond {
-				backoff = 25 * time.Millisecond
-			}
-		}
+		backoff = min(2*backoff, 25*time.Millisecond)
 	}
-}
-
-func (l *QuarantineLedger) effectiveCompactTarget() int {
-	target := l.compactTarget
-	if target <= 0 || target >= l.maxEntries {
-		target = l.maxEntries * 3 / 4
-	}
-	if target >= l.maxEntries {
-		target = l.maxEntries - 1
-	}
-	if target < 0 {
-		target = 0
-	}
-	return target
 }
 
 func (l *QuarantineLedger) effectiveSoftCap() int {
@@ -325,32 +351,6 @@ func (l *QuarantineLedger) pruneExpiredLocked(now int64) bool {
 	return pruned
 }
 
-func (l *QuarantineLedger) enforceRetentionLocked(now int64, target int) bool {
-	changed := l.pruneExpiredLocked(now)
-	if len(l.entries) <= target {
-		return changed
-	}
-	type entryAge struct {
-		key string
-		ts  int64
-	}
-	items := make([]entryAge, 0, len(l.entries))
-	for k, ts := range l.entries {
-		items = append(items, entryAge{key: k, ts: ts})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].ts != items[j].ts {
-			return items[i].ts < items[j].ts
-		}
-		return items[i].key < items[j].key
-	})
-	drop := len(l.entries) - target
-	for i := 0; i < drop; i++ {
-		delete(l.entries, items[i].key)
-	}
-	return true
-}
-
 // RecordQuarantine registers a digest as quarantined.
 func (l *QuarantineLedger) RecordQuarantine(digest string) error {
 	if l == nil {
@@ -365,7 +365,6 @@ func (l *QuarantineLedger) RecordQuarantine(digest string) error {
 	if l.path != "" {
 		unlock, err := l.acquireFileLock()
 		if err != nil {
-			l.loadErr = err
 			return err
 		}
 		defer unlock()
@@ -384,37 +383,38 @@ func (l *QuarantineLedger) RecordQuarantine(digest string) error {
 		return nil
 	}
 	now := l.now().UnixNano()
-	needCompact := len(l.entries)+1 >= l.effectiveSoftCap() || len(l.entries)+1 >= l.maxEntries
-	if needCompact {
-		target := l.effectiveCompactTarget()
-		if target >= l.maxEntries {
-			target = l.maxEntries - 1
-		}
-		l.enforceRetentionLocked(now, target)
+	pruned := false
+	if len(l.entries)+1 >= l.effectiveSoftCap() {
+		pruned = l.pruneExpiredLocked(now)
 	}
-	if l.path != "" {
-		rec, err := marshalQuarantineRecordAt("quarantine", key, now)
-		if err != nil {
-			return err
-		}
-		if needCompact || l.walSize+int64(len(rec)) > maxQuarantineLedgerWALBytes {
-			l.pruneExpiredLocked(now)
-			l.entries[key] = now
-			err = l.rewriteSnapshotLocked()
-			if err != nil {
-				delete(l.entries, key)
-				l.loadErr = err
-				return err
-			}
-			l.syncFileMetaLocked()
-			return nil
-		}
-		if err = l.appendBytesLocked(rec); err != nil {
+	// Only expired denials leave under pressure. A full authority refuses the new
+	// denial so the caller fails closed rather than silently forgetting a live one.
+	if len(l.entries) >= l.maxEntries {
+		return ErrQuarantineLedgerCapacity
+	}
+	if l.path == "" {
+		l.entries[key] = now
+		return nil
+	}
+	rec, err := marshalQuarantineRecordAt("quarantine", key, now)
+	if err != nil {
+		return err
+	}
+	if pruned || l.walSize+int64(len(rec)) > maxQuarantineLedgerWALBytes {
+		l.entries[key] = now
+		if err := l.rewriteSnapshotLocked(); err != nil {
+			delete(l.entries, key)
 			l.loadErr = err
 			return err
 		}
 		l.syncFileMetaLocked()
+		return nil
 	}
+	if err = l.appendBytesLocked(rec); err != nil {
+		l.loadErr = err
+		return err
+	}
+	l.syncFileMetaLocked()
 	l.entries[key] = now
 	return nil
 }
@@ -433,7 +433,6 @@ func (l *QuarantineLedger) ClearQuarantine(digest string) error {
 	if l.path != "" {
 		unlock, err := l.acquireFileLock()
 		if err != nil {
-			l.loadErr = err
 			return err
 		}
 		defer unlock()
@@ -479,26 +478,27 @@ func (l *QuarantineLedger) ClearQuarantine(digest string) error {
 	return nil
 }
 
-func (l *QuarantineLedger) refreshForRead() {
+// refreshForRead reloads the WAL when another process changed it. A lock failure
+// is returned to this read only; it is never cached as a permanent load error.
+func (l *QuarantineLedger) refreshForRead() error {
 	if l.path == "" {
-		return
+		return nil
 	}
 	l.mu.RLock()
 	need := l.needsReloadLocked()
 	l.mu.RUnlock()
 	if !need {
-		return
+		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.needsReloadLocked() {
-		return
+		return nil
 	}
 	if _, err := os.Stat(l.path); err == nil {
 		unlock, lockErr := l.acquireFileLock()
 		if lockErr != nil {
-			l.loadErr = lockErr
-			return
+			return lockErr
 		}
 		defer unlock()
 	}
@@ -507,6 +507,7 @@ func (l *QuarantineLedger) refreshForRead() {
 	} else {
 		l.loadErr = nil
 	}
+	return nil
 }
 
 // IsQuarantined checks whether a digest is currently quarantined.
@@ -518,7 +519,9 @@ func (l *QuarantineLedger) IsQuarantined(digest string) bool {
 	if err != nil {
 		return false
 	}
-	l.refreshForRead()
+	if err := l.refreshForRead(); err != nil {
+		return true
+	}
 
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -535,7 +538,7 @@ func (l *QuarantineLedger) Len() int {
 	if l == nil {
 		return 0
 	}
-	l.refreshForRead()
+	_ = l.refreshForRead()
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return len(l.entries)

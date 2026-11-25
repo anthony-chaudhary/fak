@@ -3,6 +3,7 @@ package ctxmmu
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,47 +11,53 @@ import (
 	"time"
 )
 
-// TestQuarantineLedgerBoundedRetentionAndCompaction verifies that proactive
-// compaction bounds active entries well below maxEntries without triggering
-// ErrQuarantineLedgerCapacity or setting loadErr (#14521).
+// TestQuarantineLedgerBoundedRetentionAndCompaction verifies the hard cap holds
+// without evicting live denials: once full, new denials are refused with
+// ErrQuarantineLedgerCapacity and the earlier live denials keep holding (#14521).
 func TestQuarantineLedgerBoundedRetentionAndCompaction(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "quarantine.jsonl")
 	l := NewQuarantineLedger(path)
 	l.maxEntries = 24
 	l.softCap = 18
-	l.compactTarget = 12
 	l.ttl = 24 * time.Hour
 
 	now := time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC)
 	l.nowFn = func() time.Time { return now }
 
 	const total = 40
+	accepted := 0
 	for i := 0; i < total; i++ {
 		now = now.Add(time.Second)
-		digest := fmt.Sprintf("%064x", i)
-		if err := l.RecordQuarantine(digest); err != nil {
-			t.Fatalf("RecordQuarantine(%d) failed: %v", i, err)
+		err := l.RecordQuarantine(fmt.Sprintf("%064x", i))
+		if err == nil {
+			accepted++
+			continue
 		}
-		if got := l.Len(); got >= l.maxEntries {
-			t.Fatalf("after %d inserts, Len()=%d reached hard cap %d", i+1, got, l.maxEntries)
+		if !errors.Is(err, ErrQuarantineLedgerCapacity) {
+			t.Fatalf("RecordQuarantine(%d) failed with %v, want capacity refusal", i, err)
 		}
 	}
-
+	if accepted != l.maxEntries {
+		t.Fatalf("accepted %d denials, want exactly maxEntries=%d before refusing", accepted, l.maxEntries)
+	}
 	if l.loadErr != nil {
 		t.Fatalf("unexpected loadErr after bounded retention: %v", l.loadErr)
 	}
-	if got := l.Len(); got > l.softCap {
-		t.Fatalf("final Len()=%d exceeds softCap=%d", got, l.softCap)
+	if got := l.Len(); got != accepted {
+		t.Fatalf("Len()=%d, want %d live denials", got, accepted)
 	}
 
-	// Newest entry must remain quarantined; oldest entry must have been evicted.
-	newest := fmt.Sprintf("%064x", total-1)
+	newest := fmt.Sprintf("%064x", accepted-1)
 	oldest := fmt.Sprintf("%064x", 0)
+	refused := fmt.Sprintf("%064x", total-1)
 	if !l.IsQuarantined(newest) {
-		t.Fatalf("newest digest %s was evicted", newest)
+		t.Fatalf("newest accepted digest %s was lost", newest)
 	}
-	if l.IsQuarantined(oldest) {
-		t.Fatalf("oldest digest %s should have been evicted by bounded retention", oldest)
+	if !l.IsQuarantined(oldest) {
+		t.Fatalf("oldest live digest %s was evicted to make room (fail-open)", oldest)
+	}
+	if l.IsQuarantined(refused) {
+		t.Fatalf("refused digest %s published as quarantined", refused)
 	}
 
 	// Reload from disk and verify every WAL line is valid JSON and state matches.
@@ -58,16 +65,13 @@ func TestQuarantineLedgerBoundedRetentionAndCompaction(t *testing.T) {
 	if reloaded.loadErr != nil {
 		t.Fatalf("reloaded ledger has loadErr: %v", reloaded.loadErr)
 	}
-	if !reloaded.IsQuarantined(newest) {
-		t.Fatalf("reloaded ledger missing newest digest %s", newest)
-	}
-	if reloaded.IsQuarantined(oldest) {
-		t.Fatalf("reloaded ledger resurrected evicted digest %s", oldest)
+	if !reloaded.IsQuarantined(newest) || !reloaded.IsQuarantined(oldest) {
+		t.Fatalf("reloaded ledger lost a live denial")
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		t.Fatalf("open compacted WAL: %v", err)
+		t.Fatalf("open WAL: %v", err)
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
@@ -80,10 +84,10 @@ func TestQuarantineLedgerBoundedRetentionAndCompaction(t *testing.T) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan compacted WAL: %v", err)
+		t.Fatalf("scan WAL: %v", err)
 	}
-	if lines == 0 || lines > l.softCap {
-		t.Fatalf("compacted WAL line count = %d, want in (0, %d]", lines, l.softCap)
+	if lines != accepted {
+		t.Fatalf("WAL line count = %d, want %d", lines, accepted)
 	}
 }
 
@@ -94,7 +98,6 @@ func TestQuarantineLedgerTTLExpirationOnCompaction(t *testing.T) {
 	l := NewQuarantineLedger(path)
 	l.maxEntries = 16
 	l.softCap = 6
-	l.compactTarget = 4
 	l.ttl = time.Hour
 
 	now := time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC)

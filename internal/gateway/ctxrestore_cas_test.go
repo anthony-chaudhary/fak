@@ -180,20 +180,26 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 		return
 
 	case "capacity-read":
-		ctxmmu.ResetQuarantineLedgerForTest()
-		// A full authority retires its oldest denials instead of refusing or
-		// faulting, so the freshest existing denial and a new one both hold.
+		// A full authority refuses a new denial rather than retiring a live one:
+		// every existing denial, the oldest and the freshest, must still hold.
+		firstDigest := fmt.Sprintf("%064x", 0)
 		freshestDigest := fmt.Sprintf("%064x", 32767)
 		newDigest := strings.Repeat("f", 64)
+		if !ctxmmu.IsQuarantined(firstDigest) {
+			t.Fatal("capacity load forgot an existing durable denial")
+		}
 		if !ctxmmu.IsQuarantined(freshestDigest) {
 			t.Fatal("capacity load forgot the freshest durable denial")
 		}
-		if err := ctxmmu.RecordQuarantine(newDigest); err != nil {
-			t.Fatalf("capacity authority refused a new denial: %v", err)
+		if err := ctxmmu.RecordQuarantine(newDigest); err == nil {
+			t.Fatal("capacity authority accepted a new denial")
+		}
+		if ctxmmu.IsQuarantined(newDigest) {
+			t.Fatal("capacity refusal published an uncommitted denial")
 		}
 		ctxmmu.ResetQuarantineLedgerForTest()
-		if !ctxmmu.IsQuarantined(freshestDigest) || !ctxmmu.IsQuarantined(newDigest) {
-			t.Fatal("capacity retention lost a live denial across restart")
+		if !ctxmmu.IsQuarantined(firstDigest) || !ctxmmu.IsQuarantined(freshestDigest) {
+			t.Fatal("capacity refusal evicted a live denial across restart")
 		}
 		return
 
