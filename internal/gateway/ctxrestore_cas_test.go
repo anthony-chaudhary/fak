@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
@@ -180,16 +181,19 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 
 	case "capacity-read":
 		ctxmmu.ResetQuarantineLedgerForTest()
-		firstDigest := fmt.Sprintf("%064x", 0)
+		// A full authority retires its oldest denials instead of refusing or
+		// faulting, so the freshest existing denial and a new one both hold.
+		freshestDigest := fmt.Sprintf("%064x", 32767)
 		newDigest := strings.Repeat("f", 64)
-		if !ctxmmu.IsQuarantined(firstDigest) {
-			t.Fatal("capacity load forgot an existing durable denial")
+		if !ctxmmu.IsQuarantined(freshestDigest) {
+			t.Fatal("capacity load forgot the freshest durable denial")
 		}
-		if err := ctxmmu.RecordQuarantine(newDigest); err == nil {
-			t.Fatal("capacity authority accepted a new denial")
+		if err := ctxmmu.RecordQuarantine(newDigest); err != nil {
+			t.Fatalf("capacity authority refused a new denial: %v", err)
 		}
-		if ctxmmu.IsQuarantined(newDigest) {
-			t.Fatal("capacity refusal published an uncommitted denial")
+		ctxmmu.ResetQuarantineLedgerForTest()
+		if !ctxmmu.IsQuarantined(freshestDigest) || !ctxmmu.IsQuarantined(newDigest) {
+			t.Fatal("capacity retention lost a live denial across restart")
 		}
 		return
 
@@ -222,13 +226,19 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 		return
 
 	case "ledger-off-check":
+		// A test binary has no durable default, so name one: the kill switch
+		// must still route to it rather than disable the authority.
+		defaultLedger, err := filepath.Abs(filepath.Join(".fak", "ctxmmu", "quarantine.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctxmmu.SetDefaultQuarantineLedgerPathForTest(defaultLedger)
 		ctxmmu.ResetQuarantineLedgerForTest()
 		digest := strings.Repeat("e", 64)
 		if err := ctxmmu.RecordQuarantine(digest); err != nil {
 			t.Fatalf("record ledger-off probe: %v", err)
 		}
-		_, err := os.Stat(filepath.Join(".fak", "ctxmmu", "quarantine.jsonl"))
-		if err != nil {
+		if _, err := os.Stat(defaultLedger); err != nil {
 			t.Fatalf("ledger kill-switch bypassed mandatory authority: %v", err)
 		}
 		return
@@ -280,6 +290,9 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestQuarantineRestoreRefusalSurvivesRestart$", "-test.count=1")
 		cmd.Dir = workspace
 		cmd.Env = append(envWithout("FAK_QUARANTINE_LEDGER_PATH", ctxRestoreCASEnvDir, "FAK_PAGEOUT_BACKEND", "FAK_BLOB_DIR", "FAK_BLOB_HTTP_URL", "FAK_STORE", "FAK_XENGINE_KV"), quarantineRestoreRestartPhase+"="+phase)
+		// The ledger default is not CWD-relative, so each restart pair shares
+		// its authority through an explicit workspace path.
+		cmd.Env = append(cmd.Env, "FAK_QUARANTINE_LEDGER_PATH="+filepath.Join(workspace, ".fak", "ctxmmu", "quarantine.jsonl"))
 		cmd.Env = append(cmd.Env, extraEnv...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s subprocess: %v\n%s", phase, err, out)
@@ -305,7 +318,9 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(compactLedger), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	oldRecord := []byte(`{"op":"quarantine","digest":"` + strings.Repeat("a", 64) + `","time":1}` + "\n")
+	// Fixture denials carry live timestamps: an expired one is legitimately retired.
+	liveTime := time.Now().Add(-time.Minute).UnixNano()
+	oldRecord := []byte(fmt.Sprintf(`{"op":"quarantine","digest":"%s","time":%d}`+"\n", strings.Repeat("a", 64), liveTime))
 	if err := os.WriteFile(compactLedger, bytes.Repeat(oldRecord, (8<<20)/len(oldRecord)+1), 0o600); err != nil {
 		t.Fatalf("oversized authority WAL fixture: %v", err)
 	}
@@ -319,7 +334,7 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 	}
 	var capacityRecords bytes.Buffer
 	for i := 0; i < 32768; i++ {
-		fmt.Fprintf(&capacityRecords, "{\"op\":\"quarantine\",\"digest\":\"%064x\",\"time\":1}\n", i)
+		fmt.Fprintf(&capacityRecords, "{\"op\":\"quarantine\",\"digest\":\"%064x\",\"time\":%d}\n", i, liveTime+int64(i))
 	}
 	if err := os.WriteFile(capacityLedger, capacityRecords.Bytes(), 0o600); err != nil {
 		t.Fatalf("capacity authority fixture: %v", err)

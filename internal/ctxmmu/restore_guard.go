@@ -65,7 +65,7 @@ func isGoTestBinary() bool {
 // leak .fak/ctxmmu/quarantine.jsonl into the working tree (#14521).
 func defaultQuarantineLedgerPath() string {
 	if isGoTestBinary() {
-		return ""
+		return defaultQuarantineLedgerPathForTest
 	}
 	if stateDir := strings.TrimSpace(os.Getenv(quarantineLedgerStateDirEnv)); stateDir != "" {
 		return filepath.Join(stateDir, "ctxmmu", "quarantine.jsonl")
@@ -77,6 +77,16 @@ func defaultQuarantineLedgerPath() string {
 		return filepath.Join(cacheDir, "fak", "ctxmmu", "quarantine.jsonl")
 	}
 	return filepath.Join(os.TempDir(), "fak", "ctxmmu", "quarantine.jsonl")
+}
+
+// defaultQuarantineLedgerPathForTest stays empty so test binaries persist
+// nothing unless a test opts in to exercise the durable default.
+var defaultQuarantineLedgerPathForTest string
+
+// SetDefaultQuarantineLedgerPathForTest sets the default ledger path a test
+// binary resolves when no explicit path is configured.
+func SetDefaultQuarantineLedgerPathForTest(path string) {
+	defaultQuarantineLedgerPathForTest = path
 }
 
 // NewQuarantineLedger constructs a new QuarantineLedger. If path is provided,
