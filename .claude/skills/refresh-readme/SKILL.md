@@ -168,7 +168,7 @@ commit discipline:
   peer's half-written code:
   ```bash
   fak sync reconcile --apply
-  fak commit --path README.md -F <msgfile> [--push]
+  fak commit --path README.md -F <msgfile> [--push]   # add --path per change sink touched
   fak sync push
   ```
 - **Doc-only diff → `docs(readme): …` subject**, NOT `fix(`/`feat(`. A
@@ -215,6 +215,12 @@ the triggers fires early).
 
 ## Where a change goes
 
+The front page holds only: the headline and install, the status line, Latest
+hardware results, Try fak (including `fak guard` and the agent table), Your
+machine your files, and Going deeper. The why-now framing lives in
+[`docs/explainers/why-fak-the-market-moment.md`](../../../docs/explainers/why-fak-the-market-moment.md),
+not on the front page.
+
 Three surfaces move; everything else is stable framing.
 
 - **A newer hardware result** replaces its platform row (Mac, AMD or NVIDIA) only
@@ -222,12 +228,15 @@ Three surfaces move; everything else is stable framing.
   first, then change the row in `docs/benchmarks/hardware-latest.json` and the README
   table to the same bytes, and move the heading date with the manifest `as_of`.
   Receipts carry no lab hostnames, IP addresses, private paths or lease ids.
-- **Shipped behavior** goes in `What changed since <date>`. The list is a rolling
-  window: restart it from the previous stamp date, build it from
-  `git log --since=<date>`, and drop older items (one line at most for anything
-  still current). A claim whose evidence is not public waits.
-- **A newly witnessed model** adds a row to the pins table with its Hugging Face
-  source and the hardware it ran on.
+- **Shipped behavior** goes in [`docs/README-legacy.md`](../../../docs/README-legacy.md)
+  under `Changes since <date>` (today `#changes-since-2026-11-10`), not on the
+  README. The list is a rolling window: restart it from the previous stamp date,
+  build it from `git log --since=<date>`, and drop older items (one line at most
+  for anything still current). A claim whose evidence is not public waits.
+- **A newly witnessed model** adds a row to the pins table in
+  [`docs/supported/models.md`](../../../docs/supported/models.md)
+  (`Exact Hugging Face pins for witnessed models`) with its Hugging Face source
+  and the hardware it ran on.
 
 Results first published in maintainer notes elsewhere follow the same path: a
 public receipt, then the row. A front-page line never links outside this repository.
@@ -241,6 +250,7 @@ public receipt, then the row. A front-page line never links outside this reposit
 - When the daily `readme-freshness` loop (above) returns `ACTION`, or on a manual
   `/loop` cadence to garden the front page ahead of the daily tick.
 
-The auditor is read-only; this skill's only writes are `README.md` and re-running
-the tool. It never edits a deep-dive doc — the front page is the only surface in
-scope.
+The auditor is read-only; this skill's only writes are `README.md`, the two change
+sinks above (`docs/README-legacy.md`, `docs/supported/models.md`) and the hardware
+receipt and manifest, plus re-running the tool. It never edits any other deep-dive
+doc.

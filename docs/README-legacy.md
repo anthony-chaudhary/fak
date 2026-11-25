@@ -6,8 +6,8 @@ description: "Narrower-audience and deep-dive sections that once lived on fak's 
 # fak — front-page overflow (moved off README.md)
 
 These sections used to live on the front page. They were moved here on
-2026-06-28 (a second batch on 2026-07-01, when the front page was halved, and a
-third on 2026-10-03, at the end of this page)
+2026-06-28 (a second batch on 2026-07-01, when the front page was halved, a
+third on 2026-10-03, and a fourth on 2026-11-24, both at the end of this page)
 to keep `README.md` focused on what the lowest-common-denominator reader needs
 first — performance and cost, the no-key demo, and the one-command wrap.
 Nothing here is deprecated; it is narrower-audience or deep-dive material that
@@ -349,6 +349,98 @@ Until 2026-10-03 the front page led with a Qwen3.8-27B M3 Pro full-run decode ra
 at near-parity with llama.cpp. That credit was retracted on 2026-09-27
 (`RETRACTED_PERFORMANCE_CREDIT`) and is not repeated here; the row and its
 remeasure criteria live in the [Qwen result index](benchmarks/QWEN-PERFORMANCE-INDEX.md).
+
+## Batch 4 — moved off the front page on 2026-11-24
+
+The 2026-11-24 refresh focused the front page on the initial launch by moving its
+market framing and two orientation paragraphs here. They are unchanged in
+substance; only links were re-rooted for this directory.
+
+### Why fak, now (front-page summary)
+
+This is the short front-page version. The fuller framing, with the six-row
+binary-to-middle-path table, lives in
+[why fak, now](explainers/why-fak-the-market-moment.md).
+
+Coding agents crossed from demo to daily driver, and iteration collapsed from
+days to minutes. The bottleneck moved downstream with it: review throughput,
+verification, and trust now cap what an agent fleet ships. The
+faster the loop, the more PRs pile up at the review gate, and the more the human
+becomes the serialization point in an otherwise parallel system.
+
+The two answers the market offers are binary, and both fail at fleet scale.
+**Gate every step by hand** and review load scales with agent output: the speed
+the agent was bought for is thrown away at the review step. **Just trust the
+AI** and the queue disappears along with the safety net: silent breakage, a
+"tests pass" that was never run, no audit trail.
+
+fak is the third option: trust as a definition you write down, not a leap.
+
+| The binary | fak's middle path |
+|---|---|
+| A human approves every tool call ↔ the model calls anything | A capability floor on every tool call: structural denies and danger rules refuse by structure, not by a recognizer that can fail open — shipped `default_open`, strict `fail_closed` one flag away |
+| Believe the agent's "done" ↔ verify every claim yourself | The kernel checks the claim against git evidence: the subject is forgeable, the diff is not |
+| Hope parallel agents don't collide ↔ coordinate them by hand | Lane leases and arbitration decide who may run on what, and refuse with a structured reason a peer can act on |
+| Silent overrides ↔ permanent human locks | Graduated exceptions: an attending operator approves one exact refused call; the agent cannot approve itself |
+
+Every row is the scar of a failure observed running agent work for real. fak
+is the recorded list of what broke. The same shift
+reshapes serving: fleets need batching, cache reuse, failover, and preemption.
+That is the runtime's other half. Full framing:
+[why fak, now](explainers/why-fak-the-market-moment.md).
+
+### Speed framing
+
+**Speed:** the newest witnessed result for each platform, with its claim boundary
+and receipt link, lives in the Latest hardware results section of the
+[front page](../README.md).
+Versus llama.cpp on Mac there is no accepted full-run comparison yet. The earlier
+near-parity figure was withdrawn on 2026-09-27 pending remeasurement. llama.cpp is
+an explicit external reference for comparison only; fak never selects it as a
+fallback ([native inference goal](native-inference-goal.md)).
+
+### Pick your path
+
+**Pick your path:** run a local agent → [Try fak](../README.md#try-fak) · guard an agent you
+already use → [`fak guard`](../README.md#governance-for-external-agents-fak-guard) ·
+sell tokens from your own GPUs → [token-factory operator route](operator/token-factory.md) ·
+understand why → [the market framing](explainers/why-fak-the-market-moment.md) ·
+check the evidence → [benchmarks](benchmarks/README.md) and [claims](../CLAIMS.md).
+
+## Changes since 2026-11-10
+
+This list of shipped behavior moved off the front page on 2026-11-24.
+
+- Inkling-2-Mini runs fak-native on Apple Metal: `fak run <path>/Inkling-2-Mini-UD-Q3_K_XL.gguf`
+  picks Metal automatically and verifies DFlash2 draft tokens on the GPU when an
+  `Inkling-2-Mini-DFlash2/` directory sits next to the GGUF (receipt in the
+  [Latest hardware results](../README.md) section of the front page).
+  It landed after v0.57.0, so install from `main` (`go install github.com/anthony-chaudhary/fak/cmd/fak@main`)
+  until the next release; `fak version` shows the commit on its `build:` line.
+- A second model family runs fak-native on NVIDIA: Inkling-2-Mini decodes resident on
+  CUDA with one replayed graph per token, 119.9 tok/s on an RTX 5080 (receipt in the
+  [Latest hardware results](../README.md) section of the front page). Speculative decode is opt-in (`FAK_INKLING2_SPEC=2` plus
+  `FAK_INKLING2_MTP_DIR`): the checkpoint's own draft head proposes two tokens and one
+  batched forward checks them, 151.7 tok/s on the same card. It stays off by default
+  because the batched check is not bit-exact to one-token-at-a-time decode. Its tokenizer
+  now matches Hugging Face on 46/46 corpus lines. A batched prompt prefill is opt-in
+  behind `FAK_INKLING2_BATCHED_PREFILL=1`; per-token prefill stays the default.
+- CUDA prefill defaults: dense K-quant prompt panels batch through the mmq kernel,
+  and Q6_K batched matmul uses mmq at 8+ prompt tokens on sm_80 and newer. The Q4_K
+  mmq default from 2026-11-07 stands.
+- `fak serve` on CUDA falls back to fit-with-offload when a dense model does not fit
+  in VRAM, and exits on a fatal warmup failure instead of serving a broken engine.
+- Cache reuse: native child tasks share the parent's stable system and tools
+  preamble, and the gateway exports `fak_gateway_fusion_cache_*` metrics that price
+  the prefill saved against no-reuse and same-session-only baselines.
+- Gateway: `GET` and `DELETE /v1/responses/{id}`, `service_tier` accepted, and a
+  forced hosted tool refused with a typed 400.
+- Guard policy: a `loop_depth` rule caps a looped model's recurrent depth per tool
+  scope. Still current from the previous window: an attending operator approves one
+  exact refused call with `fak guard allow --approve` (the agent cannot approve
+  itself), and workspace admission defaults to the open posture.
+- Docs: the router is optional (agents talk to `fak up` / `fak serve` directly), and
+  GPU owners get a [token-factory operator route](operator/token-factory.md).
 
 ---
 
