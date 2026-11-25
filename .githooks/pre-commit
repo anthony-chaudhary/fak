@@ -17,8 +17,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$REPO_ROOT"
+HOOK_REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Stay in the active worktree top-level; never jump out of detached worktrees (#14515).
+WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$WORKTREE_ROOT"
 
 echo "=================================================================="
 echo "🛡️  Running Companion-Aware Pre-Commit Check (fak)..."
@@ -73,8 +75,10 @@ if [ "${FAK_PRIVATE_ROOT:-}" = "none" ] || [ "${FAK_PRIVATE_ROOT:-}" = "off" ] |
     companion=""
 elif [ -n "${FAK_PRIVATE_ROOT:-}" ] && [ -d "$FAK_PRIVATE_ROOT" ]; then
     companion="$FAK_PRIVATE_ROOT"
-elif [ -d "$REPO_ROOT/../fak-private" ]; then
-    companion="$REPO_ROOT/../fak-private"
+elif [ -d "$WORKTREE_ROOT/../fak-private" ]; then
+    companion="$WORKTREE_ROOT/../fak-private"
+elif [ -d "$HOOK_REPO_ROOT/../fak-private" ]; then
+    companion="$HOOK_REPO_ROOT/../fak-private"
 elif [ -d "../fak-private" ]; then
     companion="../fak-private"
 fi
@@ -82,17 +86,17 @@ fi
 # 4. Execute checks based on companion presence
 if [ -n "$companion" ]; then
     echo "Companion fak-private detected at: $companion"
-    
-    # Unset Git environment variables so subprocess git commands in companion repo work cleanly
-    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX || true
-    
+
+    # Preserve GIT_INDEX_FILE and related git env vars for --staged audits so
+    # partial commits (git commit -- <paths>, git commit -p) and worktree indexes
+    # audit the exact staged snapshot (#14515).
     PYTHON_BIN="python"
     if ! command -v python >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
         PYTHON_BIN="python3"
     fi
 
     echo "Running secret leak audit on staged files..."
-    if ! "$PYTHON_BIN" "$companion/tools/scrub_public_copy.py" --audit-staged --root .; then
+    if ! "$PYTHON_BIN" "$companion/tools/scrub_public_copy.py" --audit-staged --root "$WORKTREE_ROOT"; then
         echo "" >&2
         echo "❌ COMMIT BLOCKED: Secret leak or private content detected in staged files!" >&2
         echo "   Please review diagnostics above and scrub private copy before committing." >&2
@@ -100,7 +104,7 @@ if [ -n "$companion" ]; then
     fi
 
     echo "Running 5-Gate boundary verification..."
-    if ! go -C "$companion" run ./cmd/fak-boundary check --staged --fak-dir "$REPO_ROOT" --private-dir "$companion"; then
+    if ! (env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_PREFIX go -C "$companion" run ./cmd/fak-boundary check --staged --fak-dir "$WORKTREE_ROOT" --private-dir "$companion"); then
         echo "" >&2
         echo "❌ COMMIT BLOCKED: 5-Gate boundary encapsulation or placement violation detected!" >&2
         echo "   Please review diagnostics above and see BOUNDARY.md for remediation." >&2
@@ -115,7 +119,7 @@ if [ -n "$companion" ]; then
     # token refuses; fak-run also exits 1 on its own build failures, which fail open.
     if command -v fak-run >/dev/null 2>&1; then
         set +e
-        guard_out=$( (cd "$companion" && fak-run fak-flow trunk commit-guard --repo-root "$REPO_ROOT") 2>&1 )
+        guard_out=$( (cd "$companion" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_PREFIX fak-run fak-flow trunk commit-guard --repo-root "$WORKTREE_ROOT") 2>&1 )
         guard_rc=$?
         set -e
         [ -n "$guard_out" ] && printf '%s\n' "$guard_out" >&2
@@ -135,8 +139,16 @@ if [ -n "$companion" ]; then
     fi
 else
     echo "ℹ️ Standalone public checkout (no companion fak-private detected)."
-    echo "Running public boundary lint..."
-    go run ./cmd/fak-dev boundary || true
+    if [ -d "$WORKTREE_ROOT/cmd/fak-dev" ]; then
+        echo "Running public boundary lint..."
+        if ! go run ./cmd/fak-dev boundary; then
+            echo "" >&2
+            echo "❌ COMMIT BLOCKED: Public boundary check failed!" >&2
+            exit 1
+        fi
+    else
+        echo "ℹ️ cmd/fak-dev not present; skipping public boundary lint."
+    fi
     echo "ℹ️ Standalone public checkout; public boundary checks passed."
 fi
 

@@ -1,9 +1,14 @@
 package ctxmmu_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -159,5 +164,131 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 	ctxmmu.ResetQuarantineLedgerForTest()
 	if ctxmmu.IsQuarantined(id) {
 		t.Fatalf("expected id %q to remain cleared after reload", id)
+	}
+}
+
+// TestQuarantineLedgerNoCWDLeakOnImportOrDefault verifies that importing ctxmmu
+// and using the default ledger without an explicit path never creates a CWD-relative
+// .fak/ctxmmu/quarantine.jsonl file (#14521).
+func TestQuarantineLedgerNoCWDLeakOnImportOrDefault(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	t.Setenv("FAK_QUARANTINE_LEDGER_PATH", "")
+	ctxmmu.ResetQuarantineLedgerForTest()
+
+	digest := fmt.Sprintf("%064x", 42)
+	if err := ctxmmu.RecordQuarantine(digest); err != nil {
+		t.Fatalf("RecordQuarantine: %v", err)
+	}
+	if !ctxmmu.IsQuarantined(digest) {
+		t.Fatalf("expected digest %s to be quarantined", digest)
+	}
+	cwdLeak := filepath.Join(tmp, ".fak", "ctxmmu", "quarantine.jsonl")
+	if _, err := os.Stat(cwdLeak); !os.IsNotExist(err) {
+		t.Fatalf("default quarantine ledger leaked into CWD: %s (stat err=%v)", cwdLeak, err)
+	}
+}
+
+// TestQuarantineLedgerConcurrentAppendAndCompact verifies that concurrent
+// independent QuarantineLedger instances sharing a WAL file serialize writes
+// via cross-process file locking with zero torn JSON lines (#14521).
+func TestQuarantineLedgerConcurrentAppendAndCompact(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "quarantine.jsonl")
+	const workers = 4
+	const perWorker = 15
+
+	var wg sync.WaitGroup
+	errs := make(chan error, workers*perWorker)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			// Separate instance per worker exercises the cross-process lockfile path.
+			l := ctxmmu.NewQuarantineLedger(path)
+			for i := 0; i < perWorker; i++ {
+				d := fmt.Sprintf("%032x%032x", workerID+1, i+1)
+				if err := l.RecordQuarantine(d); err != nil {
+					errs <- fmt.Errorf("worker %d record %d: %w", workerID, i, err)
+					return
+				}
+				if i%5 == 0 {
+					if err := l.ClearQuarantine(d); err != nil {
+						errs <- fmt.Errorf("worker %d clear %d: %w", workerID, i, err)
+						return
+					}
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+
+	// Verify every line in the WAL is valid JSON (zero torn writes).
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open WAL: %v", err)
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		var raw map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {
+			t.Fatalf("WAL line %d torn JSON: %v", lineNo, err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan WAL: %v", err)
+	}
+
+	// Reload fresh instance and verify expected active/cleared digests.
+	fresh := ctxmmu.NewQuarantineLedger(path)
+	for w := 0; w < workers; w++ {
+		for i := 0; i < perWorker; i++ {
+			d := fmt.Sprintf("%032x%032x", w+1, i+1)
+			want := i%5 != 0
+			if got := fresh.IsQuarantined(d); got != want {
+				t.Fatalf("worker %d item %d (%s): IsQuarantined=%v, want %v", w, i, d, got, want)
+			}
+		}
+	}
+}
+
+// TestQuarantineLedgerReloadOnExternalChange verifies that an existing ledger
+// instance reloads updates written by another instance/process (#14521).
+func TestQuarantineLedgerReloadOnExternalChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "quarantine.jsonl")
+	l1 := ctxmmu.NewQuarantineLedger(path)
+	l2 := ctxmmu.NewQuarantineLedger(path)
+
+	digest := fmt.Sprintf("%064x", 999)
+	if err := l1.RecordQuarantine(digest); err != nil {
+		t.Fatalf("l1.RecordQuarantine: %v", err)
+	}
+	if !l2.IsQuarantined(digest) {
+		t.Fatalf("l2 did not reload quarantine written by l1")
+	}
+	if err := l2.ClearQuarantine(digest); err != nil {
+		t.Fatalf("l2.ClearQuarantine: %v", err)
+	}
+	if l1.IsQuarantined(digest) {
+		t.Fatalf("l1 did not reload clear written by l2")
+	}
+}
+
+// TestQuarantineLedgerCorruptFileFailsClosed verifies that a corrupt/unreadable
+// ledger preserves fail-closed semantics (#14521).
+func TestQuarantineLedgerCorruptFileFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "quarantine.jsonl")
+	if err := os.WriteFile(path, []byte("{corrupt json line\n"), 0o600); err != nil {
+		t.Fatalf("write corrupt WAL: %v", err)
+	}
+	l := ctxmmu.NewQuarantineLedger(path)
+	if !l.IsQuarantined(fmt.Sprintf("%064x", 123)) {
+		t.Fatal("corrupt ledger must fail closed (IsQuarantined=true)")
 	}
 }
