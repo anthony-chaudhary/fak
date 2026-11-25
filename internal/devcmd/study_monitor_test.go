@@ -285,3 +285,34 @@ func TestStudyMonitorResolvesFromModuleRootSubdir(t *testing.T) {
 		t.Fatalf("expected modroot/repo in stdout, got:\n%s", stdout.String())
 	}
 }
+
+func TestStudyMonitorPrivateSiblingSeesRegistryShards(t *testing.T) {
+	root := t.TempDir()
+	fakDir := filepath.Join(root, "fak")
+	regPath := filepath.Join(root, "fak-private", "docs", "research", "monitored-repositories.json")
+	shardDir := filepath.Join(filepath.Dir(regPath), "monitored-repositories")
+	for _, dir := range []string{fakDir, shardDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	header := `{"schema":"fak-monitored-repositories/1","updated_at":"2026-08-14","methodology":"ranked","repositories":[]}`
+	shard := `{"repository":"shard/repo","url":"https://github.com/shard/repo","status":"candidate","priority":1,"why":"shard test","last_checked":"2026-08-01","checked_revision":"abcdef1234567890","stars_at_check":10,"last_push_at_check":"2026-08-13T00:00:00Z"}`
+	if err := os.WriteFile(regPath, []byte(header), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shardDir, "shard__repo.json"), []byte(shard), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(fakDir)
+	t.Setenv("FAK_STUDY_REGISTRY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := RunStudyMonitor(&stdout, &stderr, []string{"--as-of", "2026-08-14", "--due-days", "7"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "shard/repo status=candidate") {
+		t.Fatalf("expected shard/repo in stdout, got:\n%s", stdout.String())
+	}
+}

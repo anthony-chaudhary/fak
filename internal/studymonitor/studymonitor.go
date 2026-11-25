@@ -135,6 +135,9 @@ func Read(path string) (Registry, error) {
 	if err := json.Unmarshal(data, &registry); err != nil {
 		return Registry{}, fmt.Errorf("decode registry: %w", err)
 	}
+	if err := overlayRegistryShards(&registry, path, len(data)); err != nil {
+		return Registry{}, err
+	}
 	if err := registry.Validate(); err != nil {
 		return Registry{}, err
 	}
