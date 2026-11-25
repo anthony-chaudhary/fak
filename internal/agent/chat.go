@@ -1232,6 +1232,14 @@ func (p *HTTPPlanner) ProbeReachability(ctx context.Context) (int, error) {
 // omitted field keeps the planner default, so a no-opt call is identical to the
 // pre-seam behavior.
 func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	comp, err := p.completeOnce(ctx, messages, tools, opts...)
+	if p.localContextRetry(ctx, err) {
+		return p.completeOnce(withLocalCompact(ctx), messages, tools, opts...)
+	}
+	return comp, err
+}
+
+func (p *HTTPPlanner) completeOnce(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	offered := offeredToolsFor(ctx, tools)
 	call, err := p.prepareUpstreamContext(ctx, messages, tools, false, opts...)
 	if err != nil {

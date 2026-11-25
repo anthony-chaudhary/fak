@@ -561,6 +561,9 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 	if p.QuarantineTranscript {
 		safeMessages, quarantines = quarantineOutboundMessages(messages, sp.OversizePagingSuppressed)
 	}
+	if IsLocalEndpoint(p.BaseURL) {
+		safeMessages = p.fitLocalRequest(ctx, safeMessages, tools)
+	}
 	// §A4 coherence shaping: after the safety quarantine, give the coherence layer a
 	// chance to break the provider prefix when a world witness has been refuted. nil
 	// hook = unchanged path; applied copy-on-shape so the caller's slice is untouched.
@@ -938,6 +941,14 @@ func upstreamStreamsSSE(resp *http.Response) bool {
 }
 
 func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	comp, err := p.completeStreamOnce(ctx, sink, messages, tools, opts...)
+	if p.localContextRetry(ctx, err) {
+		return p.completeStreamOnce(withLocalCompact(ctx), sink, messages, tools, opts...)
+	}
+	return comp, err
+}
+
+func (p *HTTPPlanner) completeStreamOnce(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	offered := offeredToolsFor(ctx, tools)
 	if !p.StreamingSupported() {
 		return nil, ErrStreamingUnsupported

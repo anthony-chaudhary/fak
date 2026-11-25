@@ -275,7 +275,7 @@ func (c *upstreamCall) handleRejectedResponse(ctx context.Context, p *HTTPPlanne
 	if chatTemplateRejected(raw) {
 		return false, false, newUpstreamStatusError(status, raw, resp.Header, 400)
 	}
-	if status == http.StatusRequestEntityTooLarge || (!backpressureStatus(status) && IsContextOverflow(raw)) {
+	if status == http.StatusRequestEntityTooLarge || (!backpressureStatus(status) && IsContextOverflow(raw)) || localContextRefusal(p, status, raw) {
 		return false, false, &ContextOverflowError{Status: status, Cause: newUpstreamStatusError(status, raw, resp.Header, 400)}
 	}
 	if p != nil && p.TransientTargetFunc != nil && transientTargetStatus(status) && ctl.triedTransientRetry != nil && ctl.triedTransientTarget != nil {

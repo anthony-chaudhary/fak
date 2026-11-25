@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {
+      "id": "x-context-ctx-localcontextretry",
+      "canonical": "localContextRetry (agent compact-once gate)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "localContextRetry is the HTTPPlanner method in internal/agent/tool_result_budget.go that decides whether a failed call to a local endpoint should be compacted and resent exactly once, because the endpoint refused the prompt as too large and this call is not already the compacted retry.",
+      "distinction": "The RETRY DECISION for one failed call on a local endpoint - not compaction (the history-rewrite mechanism the retry applies) and not CompactionView (the lossy savings model), and not localContextRefusal (the status-and-body matcher that recognizes the 502 the serve returns).",
+      "distinct_from": ["x-context-ctx-compactionab", "compaction", "compactionview"],
+      "aliases": [],
+      "grounding": "localContextRetry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
