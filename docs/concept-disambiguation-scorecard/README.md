@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **100** (clarity 9 + coverage 91) |
+| **Disambiguation-debt (drive to 0)** | **101** (clarity 9 + coverage 92) |
 | **Crystal-clear concepts (and climbing)** | **1742** crystal of 4219 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4292 / 4383** (97.9% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **4292 / 4384** (97.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **3** of 322 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **97** of 5570 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -28,7 +28,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4219 concepts - score 93.7/100 (grade A) - disambiguation-debt 100
+concept-disambiguation chart - 4219 concepts - score 93.7/100 (grade A) - disambiguation-debt 101
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####################........ 1742
@@ -74,17 +74,17 @@ coverage by family (positioned / discovered):
   support-maturity ###########################. 146/150
   render-materialize ############################ 257/260
   policy-capability ############################ 294/296
+  witness-proof    ############################ 207/209
   decision         ############################ 69/70
   evict            ############################ 97/98
   score-debt       ############################ 141/142
-  witness-proof    ############################ 207/208
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   layout           ############################ 58/58
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.9%  (4292/4383 confusable tokens positioned)
+namespace coverage  [###############################.] 97.9%  (4292/4384 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 319
@@ -4534,10 +4534,10 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | support-maturity | 146 | 150 | 4 |
 | render-materialize | 257 | 260 | 3 |
 | policy-capability | 294 | 296 | 2 |
+| witness-proof | 207 | 209 | 2 |
 | decision | 69 | 70 | 1 |
 | evict | 97 | 98 | 1 |
 | score-debt | 141 | 142 | 1 |
-| witness-proof | 207 | 208 | 1 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | layout | 58 | 58 | 0 |
