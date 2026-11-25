@@ -89,3 +89,9 @@ func Estimate(path string, contextTokens int) (MemoryPlan, error) {
 	}
 	return estimateMemory(path, draft, contextTokens)
 }
+
+// EstimateWithDraft plans like Estimate for an explicit draft; an empty draft
+// plans target-only inference.
+func EstimateWithDraft(path, draft string, contextTokens int) (MemoryPlan, error) {
+	return estimateMemory(path, draft, contextTokens)
+}

@@ -1268,12 +1268,23 @@ func cmdServe(argv []string) {
 		// The admission seam owns the reservation lifecycle (#9587): a load that
 		// leaves no in-kernel model releases it without marking it steady, and the
 		// release frees the weights before handing capacity back.
+		inkling2Weights, err := serveInkling2MetalWeights(*sf.ggufPath, rt.chatBackend, rt.useMetal)
+		if err != nil {
+			metalErr = err
+			return
+		}
 		releaseMetalResidency, metalErr = admitLocalMetalModel(rt.useMetal, *sf.ggufPath, gpulease.Options{}, metalAdmissionSpec{
+			Weights: inkling2Weights,
 			Load: func() bool {
 				rt.loadModel(sf)
-				return rt.inKernelModel != nil
+				return rt.inKernelModel != nil || rt.inkling2Metal
 			},
-			Teardown: func() error { return closeAdmittedModelWeights(rt.inKernelModel) },
+			Teardown: func() error {
+				if rt.inkling2Metal {
+					return rt.inkling2Close()
+				}
+				return closeAdmittedModelWeights(rt.inKernelModel)
+			},
 		})
 	})
 	if err != nil {

@@ -8,18 +8,28 @@ import (
 	"testing"
 )
 
-func TestInkling2LoopRefuseBackendRelaxesOnlyCUDA(t *testing.T) {
-	if err := RefuseInkling2LoopBackend("cuda"); err != nil {
-		t.Fatalf("cuda refused: %v", err)
+func TestInkling2LoopRefuseBackendAdmitsCUDAAndMetal(t *testing.T) {
+	admitted := []string{"cuda"}
+	refused := map[string]string{"": "cpu", "cpu": "cpu", "vulkan": "vulkan", "rocm": "rocm", "Metal": "Metal"}
+	// only a build that links the native target admits metal
+	if inkling2MetalLinked {
+		admitted = append(admitted, "metal")
+	} else {
+		refused["metal"] = "metal"
 	}
-	for backend, want := range map[string]string{"": "cpu", "cpu": "cpu", "vulkan": "vulkan", "metal": "metal", "rocm": "rocm"} {
+	for _, backend := range admitted {
+		if err := RefuseInkling2LoopBackend(backend); err != nil {
+			t.Fatalf("%s refused: %v", backend, err)
+		}
+	}
+	for backend, want := range refused {
 		err := RefuseInkling2LoopBackend(backend)
 		var refusal *UnsupportedInkling2LoopExecutionError
 		if !errors.As(err, &refusal) || refusal.Backend != want {
 			t.Fatalf("%q: refusal = %v, want typed refusal naming %q", backend, err, want)
 		}
 		msg := err.Error()
-		if !strings.Contains(msg, "the "+want+" backend") || !strings.Contains(msg, "--backend cuda") || strings.Contains(msg, "not implemented") {
+		if !strings.Contains(msg, "the "+want+" backend") || !strings.Contains(msg, "--backend cuda") || !strings.Contains(msg, "--metal") || strings.Contains(msg, "not implemented") {
 			t.Fatalf("%q: stale or unhelpful refusal: %s", backend, msg)
 		}
 	}

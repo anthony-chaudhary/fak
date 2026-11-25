@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/inklingmetal"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
@@ -249,4 +250,179 @@ func inkling2EqualInts(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+func TestServeInkling2MetalAdmission(t *testing.T) {
+	if err := serveAdmitInkling2Metal("m.gguf", serveInkling2LoopArch, 1, true); err != nil {
+		t.Fatalf("single-file inkling2_loop on an available target refused: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		arch      string
+		shards    int
+		available bool
+		want      string
+		stub      bool
+	}{
+		"stub build":  {serveInkling2LoopArch, 1, false, "cgo", true},
+		"split GGUF":  {serveInkling2LoopArch, 3, true, "split into 3 shards", false},
+		"base arch":   {serveInkling2ArchBase, 1, true, "not " + serveInkling2ArchBase, false},
+		"stub+split":  {serveInkling2LoopArch, 2, false, "cgo", true},
+		"other+split": {serveInkling2ArchBase, 2, true, "split into 2 shards", false},
+	} {
+		err := serveAdmitInkling2Metal("m.gguf", tc.arch, tc.shards, tc.available)
+		var refusal *inkling2MetalServeRefusal
+		if !errors.As(err, &refusal) || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "m.gguf") {
+			t.Fatalf("%s: %v, want a typed refusal naming the file and %q", name, err, tc.want)
+		}
+		if errors.Is(err, inklingmetal.ErrUnavailable) != tc.stub {
+			t.Fatalf("%s: ErrUnavailable wrap = %v, want %v", name, !tc.stub, tc.stub)
+		}
+	}
+}
+
+// The route verdict follows the build: a darwin/arm64 cgo binary with a
+// supported GPU admits, every other build returns the stub's typed refusal.
+func TestServeInkling2MetalRouteFollowsBuild(t *testing.T) {
+	path := writeInkling2HeaderGGUF(t, serveInkling2LoopArch)
+	routed, err := serveInkling2MetalRoute(path, nil, true)
+	if !routed {
+		t.Fatal("inkling2_loop GGUF with Metal selected not routed to the native target")
+	}
+	if inklingmetal.Available() {
+		if err != nil {
+			t.Fatalf("available native target refused: %v", err)
+		}
+	} else {
+		var refusal *inkling2MetalServeRefusal
+		if !errors.As(err, &refusal) || !errors.Is(err, inklingmetal.ErrUnavailable) {
+			t.Fatalf("unavailable native target = %v, want the typed refusal wrapping ErrUnavailable", err)
+		}
+		if plan, err := serveInkling2MetalWeights(path, nil, true); plan != nil || !errors.As(err, &refusal) {
+			t.Fatalf("admission plan on an unavailable target = %v, %v", plan, err)
+		}
+	}
+	for name, off := range map[string]func() (bool, error){
+		"metal not selected": func() (bool, error) { return serveInkling2MetalRoute(path, nil, false) },
+		"other family": func() (bool, error) {
+			return serveInkling2MetalRoute(writeInkling2HeaderGGUF(t, "llama"), nil, true)
+		},
+		"no path": func() (bool, error) { return serveInkling2MetalRoute("", nil, true) },
+	} {
+		if routed, err := off(); routed || err != nil {
+			t.Fatalf("%s: routed=%v err=%v, want the route left alone", name, routed, err)
+		}
+	}
+	if plan, err := serveInkling2MetalWeights(path, nil, false); plan != nil || err != nil {
+		t.Fatalf("admission plan off the Metal route = %v, %v", plan, err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := filepath.Join(t.TempDir(), "m-00001-of-00002.gguf")
+	if err := os.WriteFile(first, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routed, err = serveInkling2MetalRoute(first, nil, true)
+	var refusal *inkling2MetalServeRefusal
+	if !routed || !errors.As(err, &refusal) {
+		t.Fatalf("split GGUF: routed=%v err=%v, want a typed refusal", routed, err)
+	}
+	if inklingmetal.Available() && !strings.Contains(err.Error(), "split into 2 shards") {
+		t.Fatalf("split refusal does not name the shard count: %v", err)
+	}
+}
+
+type inkling2FakeMetalTarget struct {
+	next     []int32
+	prefill  []int32
+	fed      []int32
+	commits  []int
+	rows     int
+	closed   bool
+	blockErr error
+}
+
+func (f *inkling2FakeMetalTarget) PrefillID(ids []int32) (int32, error) {
+	f.prefill = append([]int32(nil), ids...)
+	return f.next[0], nil
+}
+
+func (f *inkling2FakeMetalTarget) BeginBlockIDs(ids []int32) ([]int32, error) {
+	if f.blockErr != nil {
+		return nil, f.blockErr
+	}
+	f.fed = append(f.fed, ids...)
+	if f.rows > 0 {
+		return make([]int32, f.rows), nil
+	}
+	return []int32{f.next[len(f.fed)]}, nil
+}
+
+func (f *inkling2FakeMetalTarget) Commit(keep int) error {
+	f.commits = append(f.commits, keep)
+	return nil
+}
+
+func (f *inkling2FakeMetalTarget) Close() error { f.closed = true; return nil }
+
+func TestInkling2MetalSessionDrivesOneCommittedRowPerToken(t *testing.T) {
+	target := &inkling2FakeMetalTarget{next: []int32{11, 12, 13, 14}}
+	eng := &inkling2LoopEngine{open: func() (ggufload.Inkling2LoopSession, error) {
+		return inkling2MetalSession{s: target}, nil
+	}}
+	var out []int
+	res, err := eng.Generate(context.Background(), []int{5, 6}, 8, map[int]bool{14: true}, func(id int) bool {
+		out = append(out, id)
+		return true
+	})
+	if err != nil || !res.Stopped || res.Generated != 3 || !inkling2EqualInts(out, []int{11, 12, 13}) {
+		t.Fatalf("generate = %+v, %v, out %v", res, err, out)
+	}
+	if len(target.prefill) != 2 || target.prefill[0] != 5 || target.prefill[1] != 6 {
+		t.Fatalf("prefill ids = %v", target.prefill)
+	}
+	if len(target.fed) != 3 || target.fed[0] != 11 || target.fed[2] != 13 {
+		t.Fatalf("stepped ids = %v, want each emitted token fed back once", target.fed)
+	}
+	if len(target.commits) != 3 || target.commits[0] != 1 || target.commits[2] != 1 {
+		t.Fatalf("commits = %v, want one retained row per step", target.commits)
+	}
+	if !target.closed {
+		t.Fatal("session left open after the request")
+	}
+
+	s := inkling2MetalSession{s: &inkling2FakeMetalTarget{next: []int32{1}}}
+	if _, err := s.Prefill(nil); err == nil {
+		t.Fatal("empty prompt accepted")
+	}
+	if _, err := s.Prefill([]int{inklingmetal.Vocabulary}); err == nil {
+		t.Fatal("prompt token past the vocabulary accepted")
+	}
+	if _, err := s.Step(-1); err == nil {
+		t.Fatal("negative token accepted")
+	}
+	bad := &inkling2FakeMetalTarget{next: []int32{1}, rows: 2}
+	if _, err := (inkling2MetalSession{s: bad}).Step(1); err == nil || len(bad.commits) != 0 {
+		t.Fatalf("mis-sized target reply = %v with commits %v, want an error before any commit", err, bad.commits)
+	}
+	failing := &inkling2FakeMetalTarget{next: []int32{1}, blockErr: errors.New("device lost")}
+	if _, err := (inkling2MetalSession{s: failing}).Step(1); err == nil || len(failing.commits) != 0 {
+		t.Fatalf("failed step = %v with commits %v", err, failing.commits)
+	}
+}
+
+func TestInkling2WarmUpPrefillsOnceAndReturnsTheSession(t *testing.T) {
+	eng, opened := inkling2FakeEngine([]int{0})
+	if err := warmInkling2Session(eng.open, inkling2FakeTokenizer(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(*opened) != 1 || len((*opened)[0].prompt) == 0 || len((*opened)[0].fed) != 0 || !(*opened)[0].closed {
+		t.Fatalf("warm-up sessions = %+v, want one prefilled, unstepped, closed session", *opened)
+	}
+	failing := func() (ggufload.Inkling2LoopSession, error) { return nil, errors.New("no device") }
+	if err := warmInkling2Session(failing, inkling2FakeTokenizer(t)); err == nil {
+		t.Fatal("warm-up ignored a session that would not open")
+	}
 }

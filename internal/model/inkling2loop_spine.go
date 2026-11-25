@@ -316,8 +316,8 @@ func (e *UnsupportedInkling2LoopExecutionError) Error() string {
 	if e.Backend != "" {
 		where = "the " + e.Backend + " backend"
 	}
-	return fmt.Sprintf("%s: unsupported execution for %s/%s on %s: fak's looped forward runs only on the %s backend from an inkling2_loop GGUF (fak serve --engine inkernel --backend %s --gguf <file>); otherwise serve it on %s",
-		e.Engine, e.ModelType, e.Architecture, where, Inkling2LoopBackend, Inkling2LoopBackend, strings.Join(Inkling2LoopOSSRoutes, ", "))
+	return fmt.Sprintf("%s: unsupported execution for %s/%s on %s: fak's looped forward runs on the %s backend from an inkling2_loop GGUF (fak serve --engine inkernel --backend %s --gguf <file>) and on Apple-Silicon Metal in a darwin/arm64 cgo build (fak serve --%s --gguf <file>); otherwise serve it on %s",
+		e.Engine, e.ModelType, e.Architecture, where, Inkling2LoopBackend, Inkling2LoopBackend, Inkling2LoopMetalBackend, strings.Join(Inkling2LoopOSSRoutes, ", "))
 }
 
 // NativeExecution validates the config and returns the typed refusal.

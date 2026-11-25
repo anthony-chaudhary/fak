@@ -86,7 +86,10 @@ type serveRuntime struct {
 	warmDiskModelIdentity string
 	// inkling2Planner serves an inkling2_loop GGUF, which has no *fakmodel.Model.
 	inkling2Planner agent.Planner
-	inkling2Model   *ggufload.Inkling2LoopModel
+	// inkling2Close frees that model once; inkling2Metal marks the native
+	// Metal target, whose residency the Metal admission seam owns.
+	inkling2Close func() error
+	inkling2Metal bool
 
 	apiKey              string
 	engineCacheAdminKey string
@@ -930,8 +933,8 @@ func (rt *serveRuntime) closeEPGroup() {
 	if rt.inKernelModel != nil {
 		_ = rt.inKernelModel.CloseWeights()
 	}
-	if rt.inkling2Model != nil {
-		_ = rt.inkling2Model.Close()
+	if rt.inkling2Close != nil {
+		_ = rt.inkling2Close()
 	}
 	rt.releaseStrixKVBuffers()
 }

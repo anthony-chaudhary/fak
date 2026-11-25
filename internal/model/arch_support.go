@@ -93,10 +93,16 @@ func refuseUnsupportedHybridArch(cfg Config, man map[string]tensorMeta) error {
 // every backend because that forward is not a *Model.
 const Inkling2LoopBackend = "cuda"
 
+// Inkling2LoopMetalBackend names the Apple-Silicon native target. It is a
+// session forward selected with --metal, not a compute backend.
+const Inkling2LoopMetalBackend = "metal"
+
 // RefuseInkling2LoopBackend is nil when backend runs the looped forward and the
-// typed refusal naming backend otherwise; "" is the host CPU forward.
+// typed refusal naming backend otherwise; "" is the host CPU forward. Metal is
+// admitted only by a build that links the native target, so callers choosing a
+// default model from this gate never pick one the binary cannot run.
 func RefuseInkling2LoopBackend(backend string) error {
-	if backend == Inkling2LoopBackend {
+	if backend == Inkling2LoopBackend || (backend == Inkling2LoopMetalBackend && inkling2MetalLinked) {
 		return nil
 	}
 	if backend == "" {
