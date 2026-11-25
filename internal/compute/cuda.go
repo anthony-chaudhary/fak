@@ -511,6 +511,20 @@ func (c *cudaBackend) dallocClass(nbytes int, class MemoryClass, site string) *c
 	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, class: class}
 }
 
+// dallocDeviceClass reserves device-local storage without changing the requested
+// memory class after a miss. Callers whose state is consumed by every following
+// kernel use this path so a capacity refusal is returned before any work is
+// submitted instead of silently opting into UVM migration.
+// Caller holds cudaMu.
+func (c *cudaBackend) dallocDeviceClass(nbytes int, class MemoryClass, site string) (*cudaBuf, error) {
+	cls, siteID := cudaAllocTag(class, site, false)
+	p := C.fcuda_malloc_tagged(C.size_t(nbytes), cls, siteID)
+	if p == nil {
+		return nil, &DeviceAllocError{Bytes: nbytes, Site: site, Class: class}
+	}
+	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, class: class}, nil
+}
+
 // dallocDeviceOnlyClass is the strict allocator used by the whole-operation
 // GDN path. General CUDA operations may fall back to managed memory after a
 // device allocation miss; this path must instead return a typed refusal because
@@ -520,12 +534,11 @@ func (c *cudaBackend) dallocDeviceOnlyClass(nbytes int, class MemoryClass, site 
 	if err := qwen35GDNInjectedAllocationFailure(site, nbytes); err != nil {
 		return nil, err
 	}
-	cls, siteID := cudaAllocTag(class, site, false)
-	p := C.fcuda_malloc_tagged(C.size_t(nbytes), cls, siteID)
-	if p == nil {
+	buf, err := c.dallocDeviceClass(nbytes, class, site)
+	if err != nil {
 		return nil, &Qwen35GDNAllocationError{Operand: site, Bytes: nbytes}
 	}
-	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, class: class}, nil
+	return buf, nil
 }
 
 // dallocManagedClass allocates directly from cudaMallocManaged. Used by the residency-budget

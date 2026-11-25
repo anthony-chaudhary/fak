@@ -42,10 +42,17 @@ func (c *cudaBackend) ink2F(r Ink2Ref) *C.float { return (*C.float)(c.ink2Ptr(r)
 func (c *cudaBackend) ink2I(r Ink2Ref) *C.int   { return (*C.int)(c.ink2Ptr(r)) }
 
 func (c *cudaBackend) Ink2Alloc(n int) (Tensor, error) {
+	if n <= 0 || n > int(^uint(0)>>1)/4 {
+		return Tensor{}, fmt.Errorf("cuda inkling2 allocation: invalid element count %d", n)
+	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	b := c.dallocClass(n*4, MemoryActivation, "inkling2-resident")
+	b, err := c.dallocDeviceClass(n*4, MemoryActivation, "inkling2-resident")
+	if err != nil {
+		return Tensor{}, err
+	}
 	if err := ink2Status("zero", C.fcuda_ink2_zero(b.ptr, C.size_t(n*4))); err != nil {
+		C.fcuda_free(b.ptr)
 		return Tensor{}, err
 	}
 	return makeTensor(c, F32, RowMajor, []int{n}, nil, b), nil
