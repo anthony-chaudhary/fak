@@ -29,7 +29,7 @@
 #
 # USAGE
 #   bash tools/run_479_acceptance_on_gpu.sh
-#   env knobs (same as internal/compute/build_cuda.sh):
+#   env knobs (same as the fak-dev build-cuda legacy route):
 #     FAK_CUDA_ARCH=sm_89|sm_90|sm_100   GPU arch (default sm_89; "89" also accepted)
 #     CUDA_HOME=/usr/local/cuda          CUDA toolkit root (default ~/cudaenv, else PATH nvcc)
 set -euo pipefail
@@ -44,7 +44,7 @@ echo "== #479 on-GPU Evict acceptance =="
 echo "[479] repo root : $MOD_DIR"
 echo "[479] test      : $TEST_NAME (-tags cuda, ./internal/compute/)"
 
-# ---- resolve the CUDA toolchain (mirrors internal/compute/build_cuda.sh, portable) -
+# ---- resolve the CUDA toolchain (mirrors the fak-dev build-cuda legacy route, portable) -
 CUDA_HOME="${CUDA_HOME:-${HOME:-/tmp/fakgpu/home}/cudaenv}"
 NVCC="$CUDA_HOME/bin/nvcc"
 if [ ! -x "$NVCC" ]; then

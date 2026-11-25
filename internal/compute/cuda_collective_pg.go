@@ -13,7 +13,7 @@
 // and the plain CUDA build never link it.
 //
 // STATUS: unverified on a GPU-free host — builds and runs only on a real CUDA+NCCL toolchain
-// (internal/compute/build_cuda.sh test, FAK_CUDA_NCCL=1, 2+ processes on distinct GPUs).
+// (go run ./cmd/fak-dev build-cuda legacy test, FAK_CUDA_NCCL=1, 2+ processes on distinct GPUs).
 
 package compute
 

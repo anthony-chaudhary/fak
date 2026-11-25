@@ -24,7 +24,7 @@ func Validate(root string) ([]string, error) {
 		path    []string
 		needles []string
 	}{
-		{"linux delegation", []string{"internal", "compute", "build_cuda.sh"}, []string{`cd "$SCRIPT_DIR/../.."`, `exec "${GO:-go}" run ./cmd/fak-dev build-cuda legacy "$@"`}},
+		{"linux delegation", []string{"internal", "devcmd", "build_cuda_legacy.go"}, []string{"manifest := computebuild.CUDAArchManifestPath(root)", "supported := computebuild.ParseCUDAArchList(string(content))", "return runBuildCUDAWith(stdout, stderr, args,"}},
 		{"native", []string{"internal", "computebuild", "cuda.go"}, []string{
 			`filepath.Join(repoRoot, "internal", "compute", "cuda_arch.txt")`,
 			`gencodeArgs, buildArchs, err := LoadCUDAArchMatrix(repoRoot, arch)`,

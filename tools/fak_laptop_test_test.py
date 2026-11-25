@@ -268,7 +268,7 @@ class LaptopRunnerTest(unittest.TestCase):
         self.assertIn('cd "$FAK_SCRATCH"', plan[0].argv[-1])
         self.assertIn("FAK_SRC=/mnt/c/work/fleet/fak", plan[0].argv[-1])
         self.assertIn("setup_cuda_wsl.sh", plan[0].argv[-1])
-        self.assertIn("build_cuda.sh test", plan[1].argv[-1])
+        self.assertIn("build-cuda legacy test", plan[1].argv[-1])
         self.assertEqual(plan[0].env["FAK_FAST"], "1")
         self.assertIn("FAK_FAST/u", plan[0].env["WSLENV"])
 
@@ -316,7 +316,7 @@ class LaptopRunnerTest(unittest.TestCase):
 
         self.assertEqual(len(plan), 1)
         self.assertEqual(plan[0].cwd, Path("/repo/fleet/fak"))
-        self.assertEqual(plan[0].argv, ("bash", "internal/compute/build_cuda.sh", "build"))
+        self.assertEqual(plan[0].argv, ("go", "run", "./cmd/fak-dev", "build-cuda", "legacy", "build"))
 
     def test_all_lane_orders_cpu_before_nvidia(self) -> None:
         args = self.parse("--smoke", "all")
@@ -522,7 +522,7 @@ class LaptopRunnerTest(unittest.TestCase):
         self.assertTrue(any("TestHALSessionMatchesLegacyCPUReference" in part for part in plan[0].argv))
         self.assertEqual(plan[1].argv[:3], ("wsl.exe", "-d", "Ubuntu-24.04"))
         self.assertIn("setup_cuda_wsl.sh", plan[1].argv[-1])
-        self.assertIn("build_cuda.sh test", plan[2].argv[-1])
+        self.assertIn("build-cuda legacy test", plan[2].argv[-1])
         self.assertEqual(runner.proof_report(args, "run"), {
             "cpu_scope": "smoke",
             "mode": "cpu+nvidia",

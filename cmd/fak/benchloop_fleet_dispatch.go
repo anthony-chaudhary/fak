@@ -469,7 +469,7 @@ func benchFleetRemoteCommand(req benchFleetRequest) string {
 			arch = "sm_80"
 		}
 		if arch != "" {
-			return prefix + "export PATH=$HOME/.local/go/bin:$PATH; CUDA_HOME=/usr/local/cuda FAK_CUDA_ARCH=" + arch + " bash internal/compute/build_cuda.sh binary ./cmd/gpucheck /tmp/fak-gpucheck && /tmp/fak-gpucheck -hf ~/models/qwen05 -n 4"
+			return prefix + "export PATH=/usr/local/go/bin:$HOME/.local/go/bin:$PATH; CUDA_HOME=/usr/local/cuda FAK_CUDA_ARCH=" + arch + " go run ./cmd/fak-dev build-cuda legacy binary ./cmd/gpucheck /tmp/fak-gpucheck && /tmp/fak-gpucheck -hf ~/models/qwen05 -n 4"
 		}
 	}
 	return prefix + req.Command

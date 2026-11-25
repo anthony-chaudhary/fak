@@ -8,7 +8,7 @@ This is the operator entry point for Anthony's laptop-shaped hardware split:
   * all     -> CPU first, then NVIDIA
 
 The script is deliberately thin. It delegates to the repo's existing runners
-(`fak/test.ps1`, `fak/test.sh`, and `fak/internal/compute/build_cuda.sh`) and only
+(`fak/test.ps1`, `fak/test.sh`, and `go run ./cmd/fak-dev build-cuda legacy`) and only
 normalizes host selection, WSL invocation, and dry-run output.
 """
 
@@ -974,6 +974,7 @@ def wsl_repo_command_script(fak_dir: str, argv: tuple[str, ...]) -> str:
     return "\n".join(
         (
             "set -euo pipefail",
+            'export PATH="/usr/local/go/bin:$PATH"',
             "FAK_SRC=" + shlex.quote(fak_dir),
             'if [ "${FAK_FAST:-}" = "1" ]; then',
             '  FAK_SCRATCH="${FAK_FAST_DIR:-$HOME/.cache/fak-src}"',
@@ -1150,7 +1151,7 @@ def nvidia_commands(root: Path, args: argparse.Namespace, platform: str | None =
     actions: list[tuple[str, tuple[str, ...]]] = []
     if args.setup:
         actions.append(("nvidia-setup", ("bash", "internal/compute/setup_cuda_wsl.sh")))
-    actions.append(("nvidia", ("bash", "internal/compute/build_cuda.sh", args.nvidia_action)))
+    actions.append(("nvidia", ("go", "run", "./cmd/fak-dev", "build-cuda", "legacy", args.nvidia_action)))
     if args.nvidia_action == "bench":
         if args.model_dir:
             label, argv = actions[-1]
@@ -1299,7 +1300,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--require-nvidia", action="store_true", help="check lane: fail if NVIDIA/WSL GPU passthrough is unavailable")
     ap.add_argument("--require-cuda-toolchain", action="store_true", help="check lane: fail if the CUDA nvcc toolchain is unavailable")
     ap.add_argument("--setup", action="store_true", help="NVIDIA lane: run the no-sudo CUDA setup before build/test")
-    ap.add_argument("--nvidia-action", choices=NVIDIA_ACTIONS, default="test", help="NVIDIA lane action for build_cuda.sh")
+    ap.add_argument("--nvidia-action", choices=NVIDIA_ACTIONS, default="test", help="NVIDIA lane action for fak-dev build-cuda legacy")
     ap.add_argument("--model-dir", default="", help="NVIDIA bench model dir (only with --nvidia-action bench)")
     ap.add_argument("--decode-steps", type=int, default=128, help="NVIDIA bench decode steps")
     ap.add_argument("--wsl-distro", default="", help="WSL distro override; also sets FAK_WSL_DISTRO")

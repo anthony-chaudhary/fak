@@ -50,7 +50,7 @@ HEAD_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
   echo "=== HEAD $HEAD_SHA ==="
   echo "=== build libfakcuda.a ($FAK_CUDA_ARCH) ==="
 } > "$LOG"
-if ! bash internal/compute/build_cuda.sh build >> "$LOG" 2>&1; then
+if ! ( cd "$(git rev-parse --show-toplevel)" && go run ./cmd/fak-dev build-cuda legacy build ) >> "$LOG" 2>&1; then
   printf '%s' '{"schema":"glm-gpu-witness/1","error":"BUILD_FAIL"}' > "$JSONF"; emit 96; exit 96
 fi
 echo "[cuda] OK build" >> "$LOG"

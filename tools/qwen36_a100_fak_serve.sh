@@ -90,7 +90,7 @@ fi
 ph "MODEL_CONTRACT_OK repo=$EXPECTED_REPO file=$EXPECTED_FILE sha256=$EXPECTED_SHA256 bytes=$EXPECTED_SIZE"
 
 # 1. Ensure Go. The GCP Deep-Learning CUDA image ships nvcc but not always the Go toolchain
-#    build_cuda.sh expects at /usr/local/go/bin; install it once if missing.
+#    the fak-dev build-cuda legacy route expects at /usr/local/go/bin; install it once if missing.
 if ! command -v go >/dev/null 2>&1; then
   ph "INSTALL_GO ${GO_VERSION}"
   if curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz >>"$LOG" 2>&1 \
@@ -126,7 +126,7 @@ ph "MODEL_IDENTITY_OK repo=$REPO file=$(basename "$GGUF") sha256=$ACTUAL_SHA256 
 # 3. Build the -tags cuda fak binary (libfakcuda sm_80 + cmd/fak) via the canonical recipe.
 if [ ! -x "$FAK_BIN" ] || [ "${REBUILD_FAK:-0}" = "1" ]; then
   ph "BUILD_FAK_CUDA arch=$FAK_CUDA_ARCH out=$FAK_BIN"
-  if ( cd "$ROOT" && bash internal/compute/build_cuda.sh binary ./cmd/fak "$FAK_BIN" ) >>"$LOG" 2>&1; then :; else
+  if ( cd "$ROOT" && go run ./cmd/fak-dev build-cuda legacy binary ./cmd/fak "$FAK_BIN" ) >>"$LOG" 2>&1; then :; else
     ph "BUILD_FAK_FAIL"; tail -40 "$LOG" >&2 || true; exit 30
   fi
 fi

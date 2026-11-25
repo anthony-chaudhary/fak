@@ -73,7 +73,7 @@ Run on Linux or WSL with CUDA and `nvcc` available:
 examples/gpu-smoke/run-cuda.sh
 ```
 
-The script calls `internal/compute/build_cuda.sh binary` for the two binaries and
+The script calls `go run ./cmd/fak-dev build-cuda legacy binary` for the two binaries and
 defaults `FAK_CUDA_GRAPH=1`. On the documented RTX 4070 SmolLM2 run, that graph
 path reaches about 119-120 decode tok/s, matching llama.cpp Q8_0 for that small
 model. This does not claim large-model parity: the chosen model must fit the GPU,

@@ -43,7 +43,7 @@ cd "$SRC" || { echo nosrc >"$WORK/DONE.97"; exit 97; }
 
 # ensure libfakcuda.a is built for the cuda tag (idempotent; the run script may have built it)
 if [ ! -f internal/compute/libfakcuda.a ]; then
-  say "build libfakcuda.a ($FAK_CUDA_ARCH)"; bash internal/compute/build_cuda.sh build || true
+  say "build libfakcuda.a ($FAK_CUDA_ARCH)"; go run ./cmd/fak-dev build-cuda legacy build || true
 fi
 
 # fetch the model (config + safetensors; modelbench drives LCG token ids, no tokenizer needed)
@@ -53,7 +53,7 @@ curl -fsSL -o "$MODEL/config.json"        "$HF/config.json"        || { say "con
 curl -fsSL -o "$MODEL/model.safetensors"  "$HF/model.safetensors"  || { say "safetensors download FAILED"; echo dl >"$WORK/DONE.95"; exit 95; }
 say "model bytes: $(wc -c < "$MODEL/model.safetensors")"
 
-# cgo link flags for the -tags cuda modelbench (build_cuda.sh sets these for its own go
+# cgo link flags for the -tags cuda modelbench (the build-cuda legacy route sets these for its own go
 # commands but `go run -tags cuda` here needs them too, else ld can't find -lcudart/-lcublas).
 PKG="$SRC/internal/compute"
 export CGO_ENABLED=1

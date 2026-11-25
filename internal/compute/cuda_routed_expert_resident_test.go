@@ -1,7 +1,7 @@
 //go:build cuda && cgo
 
 // Resident routed-expert CUDA GEMV witnesses (RoutedExpertResidentKernel). On a CUDA host,
-// after build_cuda.sh build:
+// after go run ./cmd/fak-dev build-cuda legacy build:
 //
 //	FAK_CUDA_ROUTED_EXPERT_REQUIRED=1 go test -tags cuda ./internal/compute -run CUDARoutedExpertResident
 

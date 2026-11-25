@@ -435,7 +435,7 @@ _ENGINE_BASH = {
     "fak-cuda": r'''engine_fak_cuda(){
   cd "$SRC"
   export CUDA_HOME=/usr/local/cuda
-  FAK_CUDA_ARCH="$CUDA_CC" bash internal/compute/build_cuda.sh build
+  FAK_CUDA_ARCH="$CUDA_CC" go run ./cmd/fak-dev build-cuda legacy build
   export CGO_ENABLED=1
   export CGO_CFLAGS="-I/usr/local/cuda/include"
   export CGO_LDFLAGS="-L$SRC/internal/compute -L/usr/local/cuda/lib64 -Wl,-rpath,/usr/local/cuda/lib64"
@@ -455,7 +455,7 @@ _ENGINE_BASH = {
   cd "$SRC"
   if [ ! -x "$WORK/bin/modelbench-cuda" ]; then
     export CUDA_HOME=/usr/local/cuda
-    FAK_CUDA_ARCH="$CUDA_CC" bash internal/compute/build_cuda.sh build
+    FAK_CUDA_ARCH="$CUDA_CC" go run ./cmd/fak-dev build-cuda legacy build
     export CGO_ENABLED=1
     export CGO_CFLAGS="-I/usr/local/cuda/include"
     export CGO_LDFLAGS="-L$SRC/internal/compute -L/usr/local/cuda/lib64 -Wl,-rpath,/usr/local/cuda/lib64"
@@ -479,7 +479,7 @@ _ENGINE_BASH = {
   cd "$SRC"
   if [ ! -x "$WORK/bin/modelbench-cuda" ]; then
     export CUDA_HOME=/usr/local/cuda
-    FAK_CUDA_ARCH="$CUDA_CC" bash internal/compute/build_cuda.sh build
+    FAK_CUDA_ARCH="$CUDA_CC" go run ./cmd/fak-dev build-cuda legacy build
     export CGO_ENABLED=1
     export CGO_CFLAGS="-I/usr/local/cuda/include"
     export CGO_LDFLAGS="-L$SRC/internal/compute -L/usr/local/cuda/lib64 -Wl,-rpath,/usr/local/cuda/lib64"
@@ -510,7 +510,7 @@ log(){ echo "[vm-bench $(date -u +%H:%M:%S)] $*"; }
 fatal(){ python3 -c 'import json,sys;open(sys.argv[2],"w").write(json.dumps({"schema":"fak.gcp-vm-bench.v2","error":sys.argv[1]}))' "$1" "$WORK/result.json" 2>/dev/null || echo '{"schema":"fak.gcp-vm-bench.v2","error":"fatal (see serial log)"}' > "$WORK/result.json"; log "FATAL: $1"; exit 1; }
 
 # CUDA_CC is the GPU compute-capability number (89=L4, 100=B200) -- NOT the C compiler
-# (build_cuda.sh reads $CC for that), so it is deliberately named to never collide.
+# (the build-cuda legacy route reads $CC for that), so it is deliberately named to never collide.
 CUDA_CC="@@CC@@"
 MODEL_FILE="@@HF_FILE@@"
 MODEL_REPO="@@HF_REPO@@"

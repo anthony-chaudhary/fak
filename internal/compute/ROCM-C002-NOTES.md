@@ -33,7 +33,7 @@ second kernel set. So the deferred backend is expected to be:
    `cpu-ref` the `Reference` Default so nothing runs on the GPU unless explicitly selected
    (`FAK_BACKEND=rocm` / `--backend rocm`). The host already reports an unbuilt backend honestly
    (`serve.go`: "needs both a matching build tag (e.g. `-tags rocm`) and a reachable device").
-2. `build_rocm.sh` — the `build_cuda.sh` twin: `hipify` (or hipcc directly) over `cuda_kernels.cu`
+2. `build_rocm.sh` — the build-cuda legacy route twin (`fak-dev build-cuda legacy`): `hipify` (or hipcc directly) over `cuda_kernels.cu`
    → `librocfak.a`, with `--offload-arch` taken from `ROCmOffloadArch(<device gfx>)`.
 3. The op-level + full-forward witnesses (`-tags rocm`) mirroring `cuda_test.go` / `vulkan_test.go`.
 

@@ -101,7 +101,7 @@ the easiest way to be wrong about this backend:
 | `internal/compute/rocm_kv.go` (350 lines) — the KV-cache half | **yes** | **yes** — same run | **no** — same |
 | `internal/compute/rocm_backend_test.go` (1,455 lines, 25 `TestROCm*` funcs) | **yes** | **yes** — 4 of them ran | **no** — same |
 | `internal/compute/rocm_arch.go` + `rocm_arch_test.go` (961 + 713 lines) | **yes** | **yes** | **yes** — pure Go, no build tag |
-| `build_rocm.sh` — the `build_cuda.sh` twin | **no** | — | — |
+| `build_rocm.sh` — the twin of the CUDA build route (`fak-dev build-cuda legacy`) | **no** | — | — |
 
 So the accurate one-liner is: **the backend is written, and it has been compiled and run — on an
 AMD node, once, on 2026-09-10.** Every file above carries `//go:build linux && rocm && cgo`, so a
@@ -110,7 +110,7 @@ the arch taxonomy. The build recipe is not a script but a documented sequence of
 `internal/compute/ROCM.md:15` — `hipcc --offload-arch=gfx1151 -c rocm_kernels.hip`, then
 `ar rcs libfakrocm.a`, then `go build -tags rocm`. `internal/compute/rocm_arch.go:161` still
 refers to a "`build_rocm.sh`, deferred to an AMD node", and `git ls-files internal/compute` shows
-`build_cuda.sh` and `setup_cuda_wsl.sh` but no ROCm twin — the recipe was written down in prose
+the CUDA build route (now the Go driver behind `fak-dev build-cuda legacy`) and `setup_cuda_wsl.sh` but no ROCm twin — the recipe was written down in prose
 instead of being checked in as a script.
 
 Two naming corrections worth carrying, because the source note predates the code:

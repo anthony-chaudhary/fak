@@ -11,7 +11,7 @@
 // torchrun/MPI-style distributed training uses — distinct from ncclCommInitAll.
 //
 // Compiled offline by nvcc into libfakcuda.a alongside cuda_kernels.cu and cuda_nccl.cu only
-// when FAK_CUDA_NCCL=1 (build_cuda.sh), then linked by the cgo wrapper under `-tags cuda,nccl`
+// when FAK_CUDA_NCCL=1 (fak-dev build-cuda legacy), then linked by the cgo wrapper under `-tags cuda,nccl`
 // with -lnccl. The default `go build ./cmd/fak` excludes all of this, and plain `-tags cuda`
 // stays single-device.
 //
@@ -25,7 +25,7 @@
 // / DistComm pin, so this is an Approx peer (argmax-exact + cosine), never max|Δ|=0 vs the host
 // reduce it replaces.
 //
-// STATUS: builds ONLY under a real CUDA+NCCL toolchain (`internal/compute/build_cuda.sh test`
+// STATUS: builds ONLY under a real CUDA+NCCL toolchain (`go run ./cmd/fak-dev build-cuda legacy test`
 // with FAK_CUDA_NCCL=1) — unverified on a GPU-free host. See dist_device_collective.go and
 // cmd/fak/serve.go for the Go-side wiring that calls into this file's ABI.
 

@@ -7,7 +7,7 @@ import (
 )
 
 // TestCUDAArchCoverageMatchesFile is the anti-drift guard: the Go cubin table (via KnownCUDAArches)
-// must stay byte-equal to internal/compute/cuda_arch.txt, the single source build_cuda.sh reads. If
+// must stay byte-equal to internal/compute/cuda_arch.txt, the single source the legacy CUDA build reads. If
 // someone adds an arch to the file but not the table (or vice versa), coverage classification would
 // silently lie about what this build embeds — this test fails first.
 func TestCUDAArchCoverageMatchesFile(t *testing.T) {

@@ -606,7 +606,7 @@ class DriverScriptTest(unittest.TestCase):
         self.assertIn("-backend cuda", body)
         self.assertIn("-require-non-reference", body)
         self.assertNotIn("modelbench-cuda\" -gguf \"$MODEL\" -lean", body)
-        self.assertIn("build_cuda.sh build", body)
+        self.assertIn("build-cuda legacy build", body)
 
     def test_fak_cuda_q8_renders_lean_device_q8_with_honesty_gate(self):
         # fak-cuda-q8 is the apples-to-apples Q8 device GEMV row: -lean (resident Q8

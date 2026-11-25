@@ -12,7 +12,7 @@
 // shapes and owns the Tensor type; the C side carries only device pointers + shapes — a
 // seam that carries data, never trust.
 //
-// Build (WSL, no sudo; see build_cuda.sh):
+// Build (WSL, no sudo; see fak-dev build-cuda legacy):
 //   nvcc -O3 -arch=sm_89 -c cuda_kernels.cu -o cuda_kernels.o
 //   ar rcs libfakcuda.a cuda_kernels.o
 //   CGO_CFLAGS="-I$CUDA_HOME/include" \

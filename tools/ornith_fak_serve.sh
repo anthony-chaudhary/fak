@@ -168,7 +168,7 @@ case "$BACKEND" in
   cuda)
     if [ ! -x "$FAK_BIN" ] || [ "${REBUILD_FAK:-0}" = "1" ]; then
       ph "BUILD_FAK_CUDA arch=$FAK_CUDA_ARCH out=$FAK_BIN"
-      if ( cd "$ROOT" && bash internal/compute/build_cuda.sh binary ./cmd/fak "$FAK_BIN" ) >>"$LOG" 2>&1; then :; else
+      if ( cd "$ROOT" && go run ./cmd/fak-dev build-cuda legacy binary ./cmd/fak "$FAK_BIN" ) >>"$LOG" 2>&1; then :; else
         ph "BUILD_FAK_FAIL"; tail -40 "$LOG" >&2 || true; exit 30
       fi
     fi

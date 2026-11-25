@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="/usr/local/go/bin:$PATH"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
@@ -114,8 +116,8 @@ REPORT="$OUT/modelbench-cuda.json"
 echo "gpu-smoke(cuda): hf=$HF"
 echo "gpu-smoke(cuda): FAK_CUDA_GRAPH=${FAK_CUDA_GRAPH:-1}"
 
-bash internal/compute/build_cuda.sh binary ./cmd/gpucheck "$GPUCHECK"
-bash internal/compute/build_cuda.sh binary ./cmd/modelbench "$MODELBENCH"
+go run ./cmd/fak-dev build-cuda legacy binary ./cmd/gpucheck "$GPUCHECK"
+go run ./cmd/fak-dev build-cuda legacy binary ./cmd/modelbench "$MODELBENCH"
 
 export FAK_CUDA_GRAPH="${FAK_CUDA_GRAPH:-1}"
 

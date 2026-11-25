@@ -21,12 +21,12 @@ var errV4CollectiveCapacityRefused = errors.New("CAPACITY_REFUSED")
 
 // v4CollectiveBuildFix is the COMPLETE recipe both build-gate misses below point at. It names
 // the NATIVE step on purpose: `-tags cuda,nccl` alone does not link, because the NCCL objects
-// (cuda_nccl.cu / cuda_nccl_pg.cu) only enter libfakcuda.a when build_cuda.sh runs with
+// (cuda_nccl.cu / cuda_nccl_pg.cu) only enter libfakcuda.a when the legacy CUDA build runs with
 // FAK_CUDA_NCCL=1, which is also what adds -lnccl to the cgo link. A refusal that stops at the
 // Go tag therefore hands the operator a command that dies in a cgo link error instead of the
 // rung — the same misdirection this file already fixed one gate earlier, just one rung later,
 // and it burns the scarce multi-GPU window that is the whole cost of this acceptance run.
-const v4CollectiveBuildFix = "rebuild with FAK_CUDA_NCCL=1 bash internal/compute/build_cuda.sh build, then go test -tags cuda,nccl"
+const v4CollectiveBuildFix = "rebuild with FAK_CUDA_NCCL=1 go run ./cmd/fak-dev build-cuda legacy build, then go test -tags cuda,nccl"
 
 // admitV4DeviceCollective admits the production device-collective path over `world` ranks, or
 // returns a typed CAPACITY_REFUSED when the hardware cannot provide it.
@@ -127,7 +127,7 @@ func TestV4DeviceCollectiveAdmissionTypesBuildTagMisses(t *testing.T) {
 			// there is no libfakcuda.a carrying the NCCL objects (and no -lnccl), so the tagged
 			// command dies in a cgo link error on the very node this rung is scheduled for. The
 			// refusal has to carry the whole recipe or it just relocates the trap.
-			if !strings.Contains(err.Error(), "build_cuda.sh") {
+			if !strings.Contains(err.Error(), "build-cuda legacy") {
 				t.Fatalf("refusal names the Go tag but not the native NCCL build step, so following it verbatim cannot link: %v", err)
 			}
 			// It must NOT blame the node: the miss is a compile gate, reproducible on an 8-GPU box.
@@ -159,7 +159,7 @@ func (silentCollectiveBackend) Caps() compute.Caps       { return compute.Caps{}
 // a CORRECTLY BUILT binary — i.e. the ones the sanctioned GPU node itself can hit, which the
 // build-tag table above cannot reach. Both must stay typed CAPACITY_REFUSALS, and (the dual of
 // the test above) neither may misdirect to the native build recipe: the binary is already right,
-// so sending the operator back to build_cuda.sh burns the scarce multi-GPU window on a rebuild
+// so sending the operator back to the native CUDA build burns the scarce multi-GPU window on a rebuild
 // that cannot change the outcome. The node's GPU count is the cause.
 //
 // This is the load-bearing guard behind #5106's explicit non-claim — "a one-GPU run is explicitly
@@ -202,7 +202,7 @@ func TestV4DeviceCollectiveAdmissionTypesHardwareRefusals(t *testing.T) {
 			// The DUAL of the build-tag assertion above: a build-gate miss must name the build,
 			// and a hardware miss must NOT — otherwise both classes collapse into one message
 			// and the operator cannot tell which one they are holding.
-			if strings.Contains(err.Error(), "build_cuda.sh") {
+			if strings.Contains(err.Error(), "build-cuda legacy") {
 				t.Fatalf("hardware refusal misdirects to the native build recipe: %v", err)
 			}
 		})

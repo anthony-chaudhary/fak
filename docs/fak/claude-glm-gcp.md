@@ -296,7 +296,7 @@ the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 - `tools/glm52_fak_native_serve.sh` — the **pure fak kernel** on-node serve (datacenter GPU default)
 - `tools/private GLM-5.2 stage runner` — the **llama.cpp benchmark** on-node serve (the GPU server example)
 - `tools/glm52_sglang_vllm_serve.sh` / `tools/glm52_serve_preflight.py` — the sm_90 stock serve + arch gate
-- `internal/compute/build_cuda.sh binary <pkg> <out>` — the DRY `-tags cuda` binary build the fak-native serve uses
+- `go run ./cmd/fak-dev build-cuda legacy binary <pkg> <out>` — the DRY `-tags cuda` binary build the fak-native serve uses
 - [`GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md`](../notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md) — the honest fak-vs-llama.cpp comparison framework
 - [`always-on-dogfood-server.md`](always-on-dogfood-server.md) — the always-on tiers + GPU-burst lane
 - [`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) — the general one-command dogfood launcher

@@ -7,7 +7,7 @@
 # orchestration seam DIRECTION.md sanctions: it produces a toolchain, it is off the
 # request path, and the default `go build` needs none of it.
 #
-# Idempotent. After it runs, `source ~/cudaenv.env` then `bash build_cuda.sh test`.
+# Idempotent. After it runs, `source ~/cudaenv.env` then `go run ./cmd/fak-dev build-cuda legacy test` from the repo root.
 set -euo pipefail
 MAMBA=$HOME/bin/micromamba
 ENVDIR=$HOME/cudaenv-12.9

@@ -57,7 +57,7 @@ cd "$SRC" || { echo nosrc >"$WORK/DONE.97"; exit 97; }
 
 # build libfakcuda.a for sm_80 (idempotent)
 if [ ! -f internal/compute/libfakcuda.a ]; then
-  say "build libfakcuda.a ($FAK_CUDA_ARCH)"; bash internal/compute/build_cuda.sh build || true
+  say "build libfakcuda.a ($FAK_CUDA_ARCH)"; go run ./cmd/fak-dev build-cuda legacy build || true
 fi
 
 # fetch the model

@@ -3,7 +3,6 @@ package computebuild
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/build"
@@ -11,10 +10,8 @@ import (
 	"go/token"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -30,13 +27,6 @@ func init() {
 		if os.Getenv("FAK_CUDA_GRAPH") == "1" && os.Getenv("FAK_CUDA_GRAPH_PHASE_FAIL") == "1" {
 			os.Exit(28)
 		}
-		os.Exit(0)
-	}
-	if os.Getenv("FAK_CUDA_SHELL_DELEGATION_HELPER") == "1" {
-		if !FileExists(filepath.Join("cmd", "fak-dev", "main.go")) || !FileExists("go.mod") {
-			os.Exit(29)
-		}
-		_ = json.NewEncoder(os.Stdout).Encode(os.Args[1:])
 		os.Exit(0)
 	}
 }
@@ -90,42 +80,6 @@ func TestCUDATestGraphPassesShareCompileAndFailureReceipt(t *testing.T) {
 	}
 }
 
-// fak-test:justify why=contract when=changed:internal/compute/build_cuda.sh,internal/computebuild/**
-// fak-test:runtime fast est=1s
-func TestBuildCUDAScriptDelegatesToNativeDriver(t *testing.T) {
-	bash, err := exec.LookPath("bash")
-	if runtime.GOOS == "windows" {
-		bash = filepath.Join(os.Getenv("ProgramFiles"), "Git", "bin", "bash.exe")
-		_, err = os.Stat(bash)
-	}
-	if err != nil {
-		t.Skip("bash is required to exercise build_cuda.sh")
-	}
-	script, err := filepath.Abs(filepath.Join("..", "compute", "build_cuda.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command(bash, script, "binary", "./cmd/fak", "output with spaces/fak")
-	cmd.Dir = t.TempDir()
-	cmd.Env = append(os.Environ(), "GO="+self, "FAK_CUDA_SHELL_DELEGATION_HELPER=1")
-	raw, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var args []string
-	if err := json.Unmarshal(raw, &args); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"run", "./cmd/fak-dev", "build-cuda", "legacy", "binary", "./cmd/fak", "output with spaces/fak"}
-	if !slices.Equal(args, want) {
-		t.Fatalf("shell native delegation=%q; want %q", args, want)
-	}
-}
-
 // Two nvcc runs over identical sources differ only in the PID-derived host-stub name.
 func fixtureCUDAArchive(code, pid string) []byte {
 	return []byte("!<arch>\n\x00\x01" + code + "\x00tmpxft_" + pid + "_00000000-6_cuda_kernels.cudafe1.cpp\x00" +
@@ -157,7 +111,7 @@ func TestCUDAArchiveStampKeysOnKernelCodeNotNVCCTempNames(t *testing.T) {
 		t.Fatal("first archive did not write a stamp carrying its digest")
 	}
 	if fi, err := os.Stat(stampPath); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o644) {
-		t.Fatalf("stamp mode is not 0644 like build_cuda.sh writes: %v", err)
+		t.Fatalf("stamp mode is not 0644 like the legacy build writes: %v", err)
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), CUDAArchiveStampFile, baseSrc, parser.ParseComments)
 	if err != nil || file.Name.Name != "compute" || !ast.IsGenerated(file) {

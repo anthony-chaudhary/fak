@@ -67,7 +67,7 @@ func copyCUDAArchFixture(t *testing.T) string {
 	t.Helper()
 	sourceRoot := filepath.Join("..", "..")
 	destRoot := t.TempDir()
-	files := []string{"internal/compute/cuda_arch.txt", "internal/compute/build_cuda.sh", "internal/computebuild/cuda.go", "internal/devcmd/build_cuda.go", "tools/build_cuda_windows.ps1", "Dockerfile.cuda", "docs/cuda-dev.md"}
+	files := []string{"internal/compute/cuda_arch.txt", "internal/devcmd/build_cuda_legacy.go", "internal/computebuild/cuda.go", "internal/devcmd/build_cuda.go", "tools/build_cuda_windows.ps1", "Dockerfile.cuda", "docs/cuda-dev.md"}
 	for _, rel := range files {
 		contents, err := os.ReadFile(filepath.Join(sourceRoot, filepath.FromSlash(rel)))
 		if err != nil {

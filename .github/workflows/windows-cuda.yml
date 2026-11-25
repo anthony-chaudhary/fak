@@ -4,7 +4,7 @@
 # build-vet-test) builds `go build ./...` with NO build tags and stays pure-Go (DIRECTION
 # reviewer check 3). Nothing here touches that job, so the default build cannot regress from
 # this file. This workflow is the opt-in portability lane that ports the suite OFF the WSL
-# workaround (internal/compute/setup_cuda_wsl.sh + build_cuda.sh) onto a native Windows host.
+# workaround (internal/compute/setup_cuda_wsl.sh + the build-cuda legacy driver) onto a native Windows host.
 #
 # GATING: manual `workflow_dispatch` only — it never runs on push/PR, because it needs a
 # self-hosted Windows runner that actually has the CUDA Toolkit + an NVIDIA GPU + a signing
@@ -78,7 +78,7 @@ jobs:
           }
 
       # The acceptance gate from issue #481: the Approx gate passes natively on Windows, not
-      # only in WSL. Mirrors build_cuda.sh's `test` subcommand (default: graphs off).
+      # only in WSL. Mirrors the build-cuda legacy driver's `test` subcommand (default: graphs off).
       - name: Approx gate (go test -tags cuda)
         shell: pwsh
         run: go test -tags cuda -count=1 -run 'CUDA|HALDevice' ./internal/compute/ ./internal/model/

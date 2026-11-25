@@ -141,7 +141,7 @@ Decode speed depends on backend:
 - **Dequantization:** On-the-fly 4-bit unpacking with per-channel scaling
 - **GEMV:** Single-token decode (k_awq_gemv kernel)
 - **GEMM:** Batched prefill (k_awq_gemm kernel)
-- **Build:** Compiled with `-tags cuda` via nvcc (internal/compute/build_cuda.sh)
+- **Build:** Compiled with `-tags cuda` via nvcc (`go run ./cmd/fak-dev build-cuda legacy build`, `internal/devcmd/build_cuda_legacy.go`)
 
 The CUDA implementation computes the matmul directly on packed 4-bit weights without full dequantization, achieving near-Q8 throughput with ~3.5× memory savings.
 

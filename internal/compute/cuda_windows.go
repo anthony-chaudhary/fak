@@ -23,7 +23,7 @@
 //
 // contains spaces, which a `#cgo` directive cannot carry reliably; so the include/lib
 // directories are injected at build time via CGO_CFLAGS / CGO_LDFLAGS by
-// tools/build_cuda_windows.ps1. That is the SAME env-injection seam build_cuda.sh uses on
+// tools/build_cuda_windows.ps1. That is the SAME env-injection seam the legacy CUDA build uses on
 // Linux (it exports CGO_CFLAGS/CGO_LDFLAGS rather than baking paths into cuda.go). What this
 // file CAN pin portably — no spaces — is the in-tree search dir for the nvcc-built kernel
 // archive (libfakcuda.a, produced beside this file by the build script) and the package

@@ -88,7 +88,7 @@ var cudaEmbeddedArches = []cudaCC{
 }
 
 // cudaPTXFloor is the embedded PTX virtual-arch floor (compute_120): the highest arch in
-// cuda_arch.txt, matching build_cuda.sh's `-gencode arch=compute_${PTX_CC},code=compute_${PTX_CC}`
+// cuda_arch.txt, matching the legacy build's `-gencode arch=compute_${PTX_CC},code=compute_${PTX_CC}`
 // where PTX_CC is the last entry of the file. The driver can JIT this PTX onto any device of
 // compute capability >= this, across majors.
 var cudaPTXFloor = cudaCC{12, 0}

@@ -386,15 +386,11 @@ func TestClaudeGLMGCPFakNativeServeWiring(t *testing.T) {
 		"SMOKE_EP",                          // EP readiness fans one request to every rank before the NCCL reduce
 		"--expert-parallel",                 // no-cpu-offload resident-expert topology
 		"--context-budget-tokens",           // cap the KV plan (default 1M context => FitTooBig)
-		"build_cuda.sh binary ./cmd/fak",    // the canonical -tags cuda fak binary build
-		"GLM52_FAK_NATIVE_SERVE_READY",      // the real-chat-completion health gate
+		`go run ./cmd/fak-dev build-cuda legacy binary ./cmd/fak "$FAK_BIN"`, // the canonical -tags cuda fak binary build
+		"GLM52_FAK_NATIVE_SERVE_READY",                                       // the real-chat-completion health gate
 	} {
 		requireContainsForClaudeGLMGCP(t, serve, want)
 	}
-	bc := readRepoTextForClaudeGLMGCP(t, root, "internal", "compute", "build_cuda.sh")
-	// The compatibility shim forwards the legacy binary arguments to native Go;
-	// the binary implementation no longer lives in a shell case statement.
-	requireContainsForClaudeGLMGCP(t, bc, `exec "${GO:-go}" run ./cmd/fak-dev build-cuda legacy "$@"`)
 	build := readRepoTextForClaudeGLMGCP(t, root, "internal", "devcmd", "build_cuda.go")
 	requireContainsForClaudeGLMGCP(t, build, `if sub == "legacy" {`)
 	requireContainsForClaudeGLMGCP(t, build, `return runCUDALegacy(stdout, stderr, flagArgs, run, command)`)

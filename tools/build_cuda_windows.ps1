@@ -1,7 +1,7 @@
 <#
 build_cuda_windows.ps1 - native-Windows `-tags cuda` build + Authenticode sign (issue #481).
 
-Ports internal/compute/build_cuda.sh OFF the WSL workaround onto a native Windows host: it
+Ports the fak-dev build-cuda legacy route OFF the WSL workaround onto a native Windows host: it
 compiles the CUDA kernels with the Windows CUDA Toolkit's nvcc into an in-tree static archive,
 builds the `-tags cuda` variant of cmd/fak against it (cgo, CGO_CFLAGS/CGO_LDFLAGS injected here
 so internal/compute/cuda_windows.go does not have to bake the space-containing toolkit path into

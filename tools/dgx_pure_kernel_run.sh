@@ -110,15 +110,15 @@ if [ "${KCNT:-0}" -lt 3 ]; then
 fi
 
 # ---- build the kernels + the -tags cuda compute package -----------------------------
-step "build_cuda.sh build (nvcc sm_80 + go build -tags cuda)" bash internal/compute/build_cuda.sh build
+step "fak-dev build-cuda legacy build (nvcc sm_80 + go build -tags cuda)" go run ./cmd/fak-dev build-cuda legacy build
 
 # ---- pure-kernel device acceptance gates --------------------------------------------
 step "run_485 (native Q8_0 / Q4_K device GEMM, no dequant-to-f32)" bash tools/run_485_acceptance_on_gpu.sh
 step "run_486 (fused flash/online-softmax attention)"             bash tools/run_486_acceptance_on_gpu.sh
 
 # ---- the full -tags cuda witness suite incl. the multi-layer decode forward ---------
-# build_cuda.sh test runs CUDA|HALDevice across compute + model, graphs off then on.
-step "build_cuda.sh test (CUDA witnesses incl. TestCUDAForwardMatchesRef)" bash internal/compute/build_cuda.sh test
+# the build-cuda legacy test verb runs CUDA|HALDevice across compute + model, graphs off then on.
+step "fak-dev build-cuda legacy test (CUDA witnesses incl. TestCUDAForwardMatchesRef)" go run ./cmd/fak-dev build-cuda legacy test
 
 say "ALL STEPS DONE rc_global=$rc_global"
 echo "done" >"$WORK/DONE.$rc_global"

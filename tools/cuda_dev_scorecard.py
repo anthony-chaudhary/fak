@@ -90,7 +90,10 @@ GENERATED_SNAPSHOT = "docs/CUDA-DEV-SCORECARD.md"
 HEADER = cuda_abi_parity.HEADER
 KERNELS = cuda_abi_parity.KERNELS
 BINDING = cuda_abi_parity.BINDINGS[0]  # primary C binding (cuda.go); ABI tool now spans a tuple
-BUILD_SH = "internal/compute/build_cuda.sh"
+# The build driver is Go now; the arch, gencode and toolchain checks read these sources.
+BUILD_DRIVER_SRC = ("internal/devcmd/build_cuda_legacy.go", "internal/computebuild/cuda.go")
+# Host paths (WSL, GCP DLVM, DGX) are exercised by their entry points, not by the driver.
+HOST_ENTRY_SRC = ("tools/fak_laptop_test.py", "tools/gcp_bench.py", "tools/dgx_pure_kernel_run.sh")
 CUDA_ARCH_FILE = "internal/compute/cuda_arch.txt"
 # Blackwell datacenter (sm_100, B200/GB200) + consumer (sm_120, RTX 50-series). A build that
 # silently drops one of these — or the PTX floor that lets an unlisted card JIT-load — is
@@ -196,15 +199,15 @@ def _has(text: str | None, *tokens: str) -> bool:
     return any(t.lower() in low for t in tokens)
 
 
-def _ptx_floor_present(build_sh: str | None) -> bool:
+def _ptx_floor_present(build_src: str | None) -> bool:
     """A fatbin embeds a PTX floor when it emits a virtual `code=compute_NN` gencode entry —
     that PTX is what a future card not named in the SASS list JIT-compiles from. SASS-only
     entries (`code=sm_NN`) give no forward compatibility, so their absence is process debt."""
-    return bool(build_sh) and re.search(r"code=compute_", build_sh) is not None
+    return bool(build_src) and re.search(r"code=compute_", build_src) is not None
 
 
 def _blackwell_uncovered(arch_set: list[str]) -> list[str]:
-    """Blackwell arches declared-but-not-present in the arch set the build consumes. build_cuda.sh
+    """Blackwell arches declared-but-not-present in the arch set the build consumes. the build driver
     fans out over cuda_arch.txt, so a Blackwell arch missing from the declared set is missing from
     the build — a Blackwell-breaking regression that would otherwise not move the scorecard."""
     return [a for a in BLACKWELL_ARCHS if a not in arch_set]
@@ -293,7 +296,7 @@ def kpi_build_portable(host_missing: list[str], arch_executable: bool,
     if not ptx_floor:
         defects.append("the fatbin build embeds no PTX floor (no code=compute_NN gencode) — "
                        "forward-compat JIT is lost; a card newer than the SASS list cannot load")
-    soft = ([f"advertised arch not named in build_cuda.sh: {a}" for a in arch_named]
+    soft = ([f"advertised arch not named in the CUDA build driver: {a}" for a in arch_named]
             if arch_named else [])
     return {"kpi": "build_portable", "group": "build",
             "score": _clamp(100 - 22 * len(defects) - 5 * len(soft)),
@@ -312,7 +315,7 @@ def kpi_toolchain_pinned(version_pinned: bool, arch_override: bool) -> dict[str,
         defects.append(f"no pinned CUDA toolchain version in {SETUP_SH} (e.g. cuda-nvcc=12.6) — "
                        "the WSL toolkit is unpinned, so two devs can build against different nvcc")
     if not arch_override:
-        defects.append(f"no documented arch override (FAK_CUDA_ARCH) in {BUILD_SH}")
+        defects.append(f"no documented arch override (FAK_CUDA_ARCH) in {', '.join(BUILD_DRIVER_SRC)}")
     return {"kpi": "toolchain_pinned", "group": "build",
             "score": _clamp(100 - 50 * len(defects)),
             "detail": ("CUDA version pinned + arch override documented" if not defects
@@ -322,7 +325,7 @@ def kpi_toolchain_pinned(version_pinned: bool, arch_override: bool) -> dict[str,
 
 def kpi_task_runner(missing_verbs: list[str]) -> dict[str, Any]:
     """The cuda build/test/accept verbs must be reachable from the Makefile and actually
-    DELEGATE to the real scripts (cuda-build → build_cuda.sh, cuda-accept → cuda_acceptance.sh),
+    DELEGATE to the real scripts (cuda-build → the build-cuda driver, cuda-accept → cuda_acceptance.sh),
     not exist as named no-ops. Today the cuda build is reachable only by knowing the bare
     script path — no discoverable verb. ``missing_verbs`` is the list of absent/undelegating
     targets (collapsed to one unit: the runner has no cuda verbs)."""
@@ -330,7 +333,7 @@ def kpi_task_runner(missing_verbs: list[str]) -> dict[str, Any]:
     if missing_verbs:
         defects.append("the Makefile exposes no cuda build/test/accept verb that delegates to the "
                        f"real scripts (missing/undelegating: {', '.join(missing_verbs)}) — a dev has "
-                       "to know `bash internal/compute/build_cuda.sh` by heart")
+                       "to know `go run ./cmd/fak-dev build-cuda` by heart")
     return {"kpi": "task_runner", "group": "build",
             "score": 100 if not defects else 30,
             "detail": ("cuda-build/cuda-test/cuda-accept delegate to the real scripts" if not defects
@@ -615,7 +618,8 @@ def gather(root: Path) -> list[dict[str, Any]]:
         return (root / rel).exists()
 
     cuda_go = _safe_read(root / BINDING)
-    build_sh = _safe_read(root / BUILD_SH)
+    build_src = "\n".join(_safe_read(root / p) for p in BUILD_DRIVER_SRC)
+    host_src = "\n".join([build_src, *(_safe_read(root / p) for p in HOST_ENTRY_SRC)])
     setup_sh = _safe_read(root / SETUP_SH)
     makefile = _safe_read(root / MAKEFILE)
     ci_ps1 = _safe_read(root / CI_PS1)
@@ -626,10 +630,10 @@ def gather(root: Path) -> list[dict[str, Any]]:
     # --- author ---
     tool_present = present(ABI_TOOL)
     # The cuda-check recipe wires the local gate if it runs the parity tool directly OR delegates
-    # to `build_cuda.sh check` (which runs tools/cuda_abi_parity.py --check for it, #4183/#4185).
+    # to `$(CUDA_BUILD) check`, the build-cuda driver, which runs tools/cuda_abi_parity.py for it.
     _cc_block = (makefile.split("\ncuda-check:", 1)[-1].split("\n\n", 1)[0]
                  if re.search(r"(?m)^cuda-check:", makefile) else "")
-    make_cuda_check = bool(_cc_block) and _has(_cc_block, "cuda_abi_parity", "build_cuda.sh check")
+    make_cuda_check = bool(_cc_block) and _has(_cc_block, "cuda_abi_parity", "$(CUDA_BUILD) check")
     ps1_cuda_check = _has(ci_ps1, "cuda_abi_parity")
     # abi_parity: run the REAL parser over the workspace seam.
     parity_payload = cuda_abi_parity.collect(root)
@@ -659,29 +663,29 @@ def gather(root: Path) -> list[dict[str, Any]]:
 
     # --- build ---
     host_missing: list[str] = []
-    if not _has(build_sh, "wsl"):
+    if not _has(host_src, "wsl"):
         host_missing.append("WSL")
-    if not _has(build_sh, "/usr/local/cuda", "dgx", "datacenter"):
+    if not _has(host_src, "/usr/local/cuda", "dgx", "datacenter"):
         host_missing.append("datacenter/DGX")
-    if not _has(build_sh, "gcp", "dlvm", "deep-learning"):
+    if not _has(host_src, "gcp", "dlvm", "deep-learning"):
         host_missing.append("GCP DLVM")
     if not present(BUILD_PS1):
         host_missing.append("native Windows")
     # The FAK_CUDA_ARCH override must actually reach nvcc, not just sit in a comment. Accept the
     # legacy single `-arch="$ARCH"` form AND the #4183 fatbin form: a `-gencode ...,code=$ARCH`
     # entry built from the override and fed to nvcc via the "${GENCODE[@]}" array.
-    _arch_flag = bool(re.search(r'-arch="?\$?\{?ARCH', build_sh))
-    _gencode_arch = bool(re.search(r'code=\$\{?ARCH\}?', build_sh)) and _has(build_sh, "${GENCODE[@]}")
-    arch_executable = _has(build_sh, "FAK_CUDA_ARCH") and (_arch_flag or _gencode_arch)
+    _arch_flag = bool(re.search(r'-arch[= ]', build_src))
+    _gencode_arch = _has(build_src, "-gencode") and _has(build_src, "code=%s")
+    arch_executable = _has(build_src, "FAK_CUDA_ARCH") and (_arch_flag or _gencode_arch)
     arch_set = [line.strip() for line in _safe_read(root / CUDA_ARCH_FILE).splitlines() if line.strip()]
-    arch_named = [] if arch_set and _has(build_sh, "cuda_arch.txt") else arch_set
+    arch_named = [] if arch_set and _has(build_src, "cuda_arch.txt") else arch_set
     blackwell_missing = _blackwell_uncovered(arch_set)
-    ptx_floor = _ptx_floor_present(build_sh)
+    ptx_floor = _ptx_floor_present(build_src)
     version_pinned = bool(re.search(r"cuda-nvcc\s*=\s*\d", setup_sh)) or bool(re.search(r"\b12\.\d\b", setup_sh)) and _has(setup_sh, "nvcc")
-    arch_override = _has(build_sh, "FAK_CUDA_ARCH")
+    arch_override = _has(build_src, "FAK_CUDA_ARCH")
     # task_runner: targets that exist AND delegate to the real scripts.
     missing_verbs: list[str] = []
-    for verb, script in (("cuda-build", "build_cuda.sh"), ("cuda-test", "build_cuda.sh"),
+    for verb, script in (("cuda-build", "$(CUDA_BUILD) build"), ("cuda-test", "$(CUDA_BUILD) test"),
                          ("cuda-accept", "cuda_acceptance.sh")):
         body_ok = bool(re.search(rf"(?m)^{verb}:", makefile))
         # the recipe (the line[s] after the target) must reference the real script.

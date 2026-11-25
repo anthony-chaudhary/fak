@@ -68,7 +68,7 @@ This grades the **CUDA development loop**: changing `cuda_kernels.cu` / `cuda_ba
 - the GPU arch is not in an executable context (no FAK_CUDA_ARCH override + -arch="$ARCH" nvcc line) — the arch matrix is a comment, not a build path
 
 ### `task_runner` (build) — 1 defect(s), score 30
-- the Makefile exposes no cuda build/test/accept verb that delegates to the real scripts (missing/undelegating: cuda-build, cuda-test, cuda-accept) — a dev has to know `bash internal/compute/build_cuda.sh` by heart
+- the Makefile exposes no cuda build/test/accept verb that delegates to the real scripts (missing/undelegating: cuda-build, cuda-test, cuda-accept) — a dev has to know `go run ./cmd/fak-dev build-cuda legacy` by heart
 
 ### `dev_guide` (onboard) — 1 defect(s), score 82
 - docs/cuda-dev.md names an artifact that does not exist: internal/compute/cuda_archive_stamp_gen.go (doc-rot — a dev who pastes it hits a missing-file error)

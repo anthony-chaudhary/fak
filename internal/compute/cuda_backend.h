@@ -873,7 +873,7 @@ void fcuda_graph_prewarm(int extra);
  * and the in-process form the one-process fak serve drives. (Multi-PROCESS NCCL over a rank
  * file is the follow-on; this proves the device communicator works first.)
  *
- * Build adds NCCL to the link only under `-tags cuda,nccl` (build_cuda.sh:
+ * Build adds NCCL to the link only under `-tags cuda,nccl` (fak-dev build-cuda legacy:
  * FAK_CUDA_NCCL=1). Plain `-tags cuda` stays single-device and does not require NCCL headers or
  * libnccl; the default pure-Go binary never sees any of this.
  *

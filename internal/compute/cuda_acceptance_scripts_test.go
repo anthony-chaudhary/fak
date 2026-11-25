@@ -2,72 +2,11 @@ package compute_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
-
-func TestBuildCUDAScriptNormalizesCRLFArchitectureManifest(t *testing.T) {
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Skip("bash is required to exercise build_cuda.sh")
-	}
-	if out, err := exec.Command(bash, "-c", "exit 0").CombinedOutput(); err != nil {
-		t.Skipf("bash is not operational: %v (%s)", err, strings.TrimSpace(string(out)))
-	}
-	script, err := os.ReadFile("build_cuda.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	computeDir := filepath.Join(t.TempDir(), "internal", "compute")
-	if err := os.MkdirAll(computeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	scriptPath := filepath.Join(computeDir, "build_cuda.sh")
-	if err := os.WriteFile(scriptPath, script, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	manifest := "sm_80\r\nsm_89\r\nsm_90\r\nsm_100\r\n"
-	if err := os.WriteFile(filepath.Join(computeDir, "cuda_arch.txt"), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	bashScriptPath := toPOSIXPath(scriptPath, bash)
-	goBin := filepath.Join(t.TempDir(), "bin")
-	if err := os.MkdirAll(goBin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(goBin, "go"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	bashGoBin := toPOSIXPath(goBin, bash)
-	quotedGoBin := "'" + strings.ReplaceAll(bashGoBin, "'", `'"'"'`) + "'"
-	quotedScriptPath := "'" + strings.ReplaceAll(bashScriptPath, "'", `'"'"'`) + "'"
-	quotedStubPath := "'" + strings.ReplaceAll(strings.TrimSuffix(bashGoBin, "/")+"/go", "'", `'"'"'`) + "'"
-	run := func(arch string) (string, error) {
-		command := "PATH=" + quotedGoBin + ":/usr/bin:/bin FAK_CUDA_ARCH=" + arch + " PYTHON=" + quotedStubPath + " CC=" + quotedStubPath + " bash " + quotedScriptPath + " check"
-		cmd := exec.Command(bash, "-c", command)
-		out, err := cmd.CombinedOutput()
-		return string(out), err
-	}
-	if out, err := run("sm_89"); err != nil {
-		t.Fatalf("supported CRLF architecture refused: %v\n%s", err, out)
-	} else if !strings.Contains(out, "[cuda] OK check") {
-		t.Fatalf("supported CRLF architecture did not complete validation:\n%s", out)
-	}
-	out, err := run("sm_999")
-	if err == nil {
-		t.Fatalf("unknown architecture accepted:\n%s", out)
-	}
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok || exitErr.ExitCode() != 2 {
-		t.Fatalf("unknown architecture exit = %v, want status 2:\n%s", err, out)
-	}
-	if !strings.Contains(out, "unsupported CUDA arch 'sm_999'") {
-		t.Fatalf("unknown architecture did not fail at the exact membership check:\n%s", out)
-	}
-}
 
 // toPOSIXPath renders a Windows host path in the form the resolved bash expects.
 // Git-for-Windows (MSYS) bash translates "C:\dir" as "/c/dir" and splits PATH on
@@ -105,30 +44,6 @@ func TestToPOSIXPathTranslatesWindowsDrive(t *testing.T) {
 	}
 	if got, want := toPOSIXPath(winPath, `C:\Windows\System32\bash.exe`), "/mnt/c/tmp/bin"; got != want {
 		t.Fatalf("WSL translation = %q, want %q", got, want)
-	}
-}
-
-func TestBuildCUDAScriptRejectsIncompleteGoToolchainBeforeNVCC(t *testing.T) {
-	data, err := os.ReadFile("build_cuda.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := string(data)
-	preflight := strings.Index(script, "src/encoding/base32/base32.go")
-	nvcc := strings.Index(script, `echo "[cuda] nvcc compile kernels`)
-	if preflight < 0 || nvcc < 0 {
-		t.Fatalf("build_cuda.sh is missing the complete-toolchain preflight or nvcc boundary")
-	}
-	if preflight > nvcc {
-		t.Fatalf("complete-toolchain preflight occurs after the expensive nvcc build")
-	}
-	for _, required := range []string{"src/encoding/base32/base32.go", "src/go/types/api.go"} {
-		if !strings.Contains(script, required) {
-			t.Errorf("build_cuda.sh does not verify %s", required)
-		}
-	}
-	if !strings.Contains(script, "go env GOROOT") || !strings.Contains(script, "incomplete Go toolchain") {
-		t.Error("build_cuda.sh does not resolve and clearly refuse an incomplete GOROOT")
 	}
 }
 

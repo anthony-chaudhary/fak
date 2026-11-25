@@ -72,7 +72,6 @@ var grandfatheredScripts = map[string]bool{
 	"experiments/qwen36/witness-cpu-decode.sh":                                             true,
 	"experiments/vllm/glm52-agentic-battery/run.sh":                                        true,
 	"install.sh":                                      true,
-	"internal/compute/build_cuda.sh":                  true,
 	"internal/compute/build_vulkan.ps1":               true,
 	"internal/compute/setup_cuda_wsl.sh":              true,
 	"internal/fleetaccounts/testdata/parity_check.sh": true,

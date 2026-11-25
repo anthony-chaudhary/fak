@@ -26,7 +26,7 @@ and this document makes no raw single-GPU parity claim.
 | The tensor collective seam exists as the optional `compute.CollectiveBackend` interface with `AllReduceSum`, `AllGather`, `ReduceScatter`, and `AllToAll`. | [SEAM-ONLY] | `internal/compute/compute.go:477-515` |
 | CPU reference collectives are single-box, rank-order exact, fail closed on malformed parts, and the single-rank case is identity. | [SHIPPED] | `internal/compute/collective.go:115` (`AllReduceSum`), `:132` (`ReduceScatter`), `:153` (`AllGather`), `:191` (`AllToAll`) |
 | Cross-process host-f32 collectives exist through `model.DistComm`, but they are not a device/NCCL communicator. | [PARTIAL] | `internal/model/dist_collective.go`, `docs/serving/multi-node-compute.md` |
-| CUDA has per-rank device binding and a real multi-process NCCL process group (`ncclGetUniqueId` -> `ncclCommInitRank` -> `ncclAllReduce`), but only behind the opt-in CUDA+NCCL build gate. The default/plain-CUDA builds exclude it, its source says `unverified on a GPU-free host`, and NCCL ring/tree reduction makes it an Approx peer (argmax-exact + cosine), never a `max|Delta|=0` peer. | [PARTIAL] | `internal/compute/compute.go:434` (`ProcessGroupBackend`); `internal/compute/cuda_collective_pg.go:1-16`; `internal/compute/cuda_nccl_pg.cu:13-30`, `:46-80`; `internal/compute/cuda_kernels.cu:63` (device-0 probe), `:233-244` (per-rank binding/allocation); `internal/compute/build_cuda.sh:212-231` |
+| CUDA has per-rank device binding and a real multi-process NCCL process group (`ncclGetUniqueId` -> `ncclCommInitRank` -> `ncclAllReduce`), but only behind the opt-in CUDA+NCCL build gate. The default/plain-CUDA builds exclude it, its source says `unverified on a GPU-free host`, and NCCL ring/tree reduction makes it an Approx peer (argmax-exact + cosine), never a `max|Delta|=0` peer. | [PARTIAL] | `internal/compute/compute.go:434` (`ProcessGroupBackend`); `internal/compute/cuda_collective_pg.go:1-16`; `internal/compute/cuda_nccl_pg.cu:13-30`, `:46-80`; `internal/compute/cuda_kernels.cu:63` (device-0 probe), `:233-244` (per-rank binding/allocation); `internal/devcmd/build_cuda.go` (`FAK_CUDA_NCCL` opt-in), `internal/computebuild/cuda.go` (`CompileCUDAKernels`, `enableNCCL`) |
 | MoE routing and selected experts run in-process: router top-k, then per-expert SwiGLU, then weighted accumulation. | [PARTIAL] | `internal/model/moe.go:357` (`route`), `:449` (`moeFFN`) |
 | Native TP explicitly refuses MoE/GLM-MoE-DSA instead of mis-serving those decompositions. | [GAP] | `internal/model/tensor_parallel_forward.go:79-82` |
 
@@ -38,7 +38,7 @@ rg -n 'func \(c \*cpuBackend\) (AllReduceSum|ReduceScatter|AllGather|AllToAll)' 
 rg -n 'cudaSetDevice|fcuda_set_device|fcuda_malloc_on' internal/compute/cuda_kernels.cu
 rg -n 'ncclGetUniqueId|ncclCommInitRank|ncclAllReduce|STATUS:|GPU-free' internal/compute/cuda_nccl_pg.cu
 rg -n 'go:build cuda && nccl|STATUS:|GPU-free' internal/compute/cuda_collective_pg.go
-rg -n 'FAK_CUDA_NCCL|GO_TAGS="cuda,nccl"' internal/compute/build_cuda.sh
+rg -n 'FAK_CUDA_NCCL|enableNCCL' internal/devcmd/build_cuda.go internal/computebuild/cuda.go
 rg -n 'func route\(|type moeFFN|ForwardTP does not yet shard MoE' internal/model
 ```
 

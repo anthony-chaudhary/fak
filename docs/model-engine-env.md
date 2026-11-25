@@ -177,8 +177,8 @@ Read by the offline shim build scripts, not the running engine.
 
 | Variable | Type / units | Default | When to use | Source |
 |---|---|---|---|---|
-| `FAK_CUDA_ARCH` | `sm_XX` (e.g. `sm_80`, `sm_89`, `sm_90`; bare `89` also accepted) | `sm_89` (Ada / L4) | Target a different NVIDIA arch when building `libfakcuda` (e.g. `sm_80` for datacenter GPU). | `internal/compute/build_cuda.sh:51` |
-| `FAK_NVCC_CCBIN` | filesystem path | `/usr/bin/g++` | Point `nvcc` at a specific host compiler. | `internal/compute/build_cuda.sh:55` |
+| `FAK_CUDA_ARCH` | `sm_XX` (e.g. `sm_80`, `sm_89`, `sm_90`; bare `89` also accepted) | `sm_89` (Ada / L4) | Target a different NVIDIA arch when building `libfakcuda` (e.g. `sm_80` for datacenter GPU). | `internal/devcmd/build_cuda_legacy.go` (`runCUDALegacy`, `checkCUDALegacyArch`) |
+| `FAK_NVCC_CCBIN` | filesystem path | `/usr/bin/g++` | Point `nvcc` at a specific host compiler. | `internal/devcmd/build_cuda_legacy.go` (`runCUDALegacy`) |
 
 > `FAK_VULKAN_SPIRV` is set by `internal/compute/build_vulkan.ps1` after compiling
 > the shaders, but it is read by the engine **at runtime** to register the backend

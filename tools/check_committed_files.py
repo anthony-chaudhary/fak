@@ -201,7 +201,6 @@ GRANDFATHERED_SCRIPTS = frozenset({
     "experiments/qwen36/witness-cpu-decode.sh",
     "experiments/vllm/glm52-agentic-battery/run.sh",
     "install.sh",
-    "internal/compute/build_cuda.sh",
     "internal/compute/build_vulkan.ps1",
     "internal/compute/setup_cuda_wsl.sh",
     "internal/fleetaccounts/testdata/parity_check.sh",

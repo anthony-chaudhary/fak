@@ -9,7 +9,7 @@ import (
 
 var fixtureFiles = []string{
 	"internal/compute/cuda_arch.txt",
-	"internal/compute/build_cuda.sh",
+	"internal/devcmd/build_cuda_legacy.go",
 	"internal/computebuild/cuda.go",
 	"internal/devcmd/build_cuda.go",
 	"scripts/ci.ps1",
@@ -101,10 +101,10 @@ func TestRejectsMissingNativeSASS(t *testing.T) {
 
 // fak-test:runtime fast est=20ms
 func TestRejectsBrokenNativeDelegation(t *testing.T) {
-	for _, old := range []string{"build-cuda legacy", ` "$@"`} {
+	for _, old := range []string{"computebuild.CUDAArchManifestPath(root)", "return runBuildCUDAWith(stdout, stderr, args,"} {
 		t.Run(old, func(t *testing.T) {
 			root := fixture(t)
-			replaceFixture(t, root, "internal/compute/build_cuda.sh", old, "")
+			replaceFixture(t, root, "internal/devcmd/build_cuda_legacy.go", old, "")
 			assertErrorContains(t, root, "linux delegation")
 		})
 	}

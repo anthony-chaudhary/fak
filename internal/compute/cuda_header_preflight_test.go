@@ -120,7 +120,7 @@ func findHostCC() string {
 }
 
 // strictStandaloneParse runs the issue's exact technique: compile the header ALONE under a
-// strict toolchain (gcc -x c -std=c11 -fsyntax-only -Wall -Werror, mirroring build_cuda.sh's
+// strict toolchain (gcc -x c -std=c11 -fsyntax-only -Wall -Werror, mirroring the legacy build's
 // `check`). Returns nil if it parses clean, the compiler's diagnostics otherwise. Returns
 // (false, "") when no compiler is installed so the caller can skip rather than fail.
 func strictStandaloneParse(t *testing.T, src string) (ran bool, diag string) {

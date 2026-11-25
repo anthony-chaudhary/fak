@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// ParseCUDAArchMatrix parses architecture declarations and generates nvcc -gencode flags.
-func ParseCUDAArchMatrix(archText string, targetArch string) ([]string, string, error) {
+// ParseCUDAArchList returns the non-empty architecture lines of a cuda_arch.txt body, CRLF-tolerant.
+func ParseCUDAArchList(archText string) []string {
 	var supported []string
 	for _, line := range strings.Split(archText, "\n") {
 		line = strings.TrimSpace(line)
@@ -22,6 +22,17 @@ func ParseCUDAArchMatrix(archText string, targetArch string) ([]string, string, 
 			supported = append(supported, line)
 		}
 	}
+	return supported
+}
+
+// CUDAArchManifestPath is the architecture matrix every CUDA build validates against.
+func CUDAArchManifestPath(repoRoot string) string {
+	return filepath.Join(repoRoot, "internal", "compute", "cuda_arch.txt")
+}
+
+// ParseCUDAArchMatrix parses architecture declarations and generates nvcc -gencode flags.
+func ParseCUDAArchMatrix(archText string, targetArch string) ([]string, string, error) {
+	supported := ParseCUDAArchList(archText)
 	if len(supported) == 0 {
 		return nil, "", fmt.Errorf("cuda_arch.txt is empty or contains no valid architectures")
 	}
@@ -88,7 +99,7 @@ func SplitCUDAArchSuffix(arch string) (base, suffix string, ok bool) {
 
 // LoadCUDAArchMatrix loads cuda_arch.txt from repoRoot/internal/compute/ and parses gencode flags.
 func LoadCUDAArchMatrix(repoRoot string, targetArch string) ([]string, string, error) {
-	archFile := filepath.Join(repoRoot, "internal", "compute", "cuda_arch.txt")
+	archFile := CUDAArchManifestPath(repoRoot)
 	content, err := os.ReadFile(archFile)
 	if err != nil {
 		return nil, "", fmt.Errorf("reading %s: %w", archFile, err)
@@ -740,11 +751,17 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		return err
 	}
 	cfg.RepoRoot = root
-	ctx, unlock, err := lockCUDABuild(ctx, filepath.Join(root, "internal", "compute"))
-	if err != nil {
-		return err
+	// The strict check is the GPU-free preflight: it writes no build artifacts, so it neither waits
+	// on a long-running build holding the lock nor replaces the last build's receipt.
+	detachedCheck := cfg.Command == "check" && IsStrictCUDACheck(ctx)
+	if !detachedCheck {
+		var unlock func()
+		ctx, unlock, err = lockCUDABuild(ctx, filepath.Join(root, "internal", "compute"))
+		if err != nil {
+			return err
+		}
+		defer unlock()
 	}
-	defer unlock()
 	ctx = context.WithValue(ctx, cudaReceiptStartContext{}, time.Now().UTC())
 	if len(cfg.V41Defaults) > 0 {
 		ctx = context.WithValue(ctx, cudaV41DefaultsKey{}, append([]string(nil), cfg.V41Defaults...))
@@ -906,6 +923,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	tracker := newReceiptTracker("cuda", cfg.Command, cfg.ReceiptPath)
 	cfg.Receipt = tracker.receipt
 	defer func() {
+		if detachedCheck {
+			return
+		}
 		if err := tracker.finish(cfg.ReceiptPath); result == nil && err != nil {
 			result = err
 		}
@@ -937,16 +957,17 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	case "check":
 		return tracker.recordPhase("preflight_check", func() error {
 			// 1. Python ABI parity check
-			py, err := exec.LookPath("python3")
-			if err != nil {
-				py, err = exec.LookPath("python")
+			strict := IsStrictCUDACheck(ctx)
+			py, pyErr := cudaCheckPython(strict)
+			if pyErr != nil && strict {
+				return pyErr
 			}
-			if err == nil {
+			if pyErr == nil {
 				if cfg.Stdout != nil {
 					fmt.Fprintln(cfg.Stdout, "[cuda] GPU-free ABI/header portability check ...")
 				}
 				parityScript := filepath.Join(cfg.RepoRoot, "tools", "cuda_abi_parity.py")
-				if FileExists(parityScript) {
+				if strict || FileExists(parityScript) {
 					if err := RunCmd(ctx, py, []string{parityScript, "--check"}, cfg.RepoRoot, nil, cfg.Stdout, cfg.Stderr); err != nil {
 						return fmt.Errorf("CUDA ABI parity check: %w", err)
 					}
@@ -964,6 +985,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 			// 3. Strict standalone header parse
 			if cfg.Toolchain.CC != "" {
 				headerPath := filepath.Join(cfg.PkgDir, "cuda_backend.h")
+				if strict && !FileExists(headerPath) {
+					return fmt.Errorf("CUDA header syntax check: missing %s", headerPath)
+				}
 				if FileExists(headerPath) {
 					if cfg.Stdout != nil {
 						fmt.Fprintf(cfg.Stdout, "[cuda] strict standalone parse cuda_backend.h (%s) ...\n", cfg.Toolchain.CC)
@@ -973,6 +997,11 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 						return fmt.Errorf("CUDA header syntax check: %w", err)
 					}
 				}
+			} else if strict && cfg.Stdout != nil {
+				fmt.Fprintln(cfg.Stdout, "[cuda] strict standalone parse skipped: no C compiler on PATH")
+			}
+			if strict && cfg.Stdout != nil {
+				fmt.Fprintln(cfg.Stdout, "[cuda] OK check")
 			}
 			return nil
 		})

@@ -56,7 +56,7 @@ fi
 
 log "== build -tags cuda fak binary =="
 t=$(date +%s)
-if bash internal/compute/build_cuda.sh binary ./cmd/fak "$ROOT/fakbin" >"$ROOT/build.log" 2>&1; then
+if go run ./cmd/fak-dev build-cuda legacy binary ./cmd/fak "$ROOT/fakbin" >"$ROOT/build.log" 2>&1; then
   log "BUILD_OK $(( $(date +%s) - t ))s"
 else
   log "BUILD_FAIL"; tail -25 "$ROOT/build.log" | tee -a "$OUT"; echo 94 > "$DONE"; exit 94

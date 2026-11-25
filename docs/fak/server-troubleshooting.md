@@ -154,7 +154,7 @@ lsof -i :8080
 
 2. **Build with CUDA support:**
    ```bash
-   bash internal/compute/build_cuda.sh
+   go run ./cmd/fak-dev build-cuda legacy
    ```
 
 3. **Use CPU backend instead:**

@@ -196,24 +196,23 @@ to set, no version skew between the library and the binary that uses it. The cos
 the binary is bigger and must be rebuilt to change a kernel. For a kernel that changes
 rarely, that is the right trade.
 
-The build is wrapped in a script with a deliberate split of responsibilities. From
-[`internal/compute/build_cuda.sh:2-10`](../../../internal/compute/build_cuda.sh):
+The build is driven by a single Go program with a deliberate split of responsibilities. The
+native driver, `runCUDALegacy` in
+[`internal/devcmd/build_cuda_legacy.go`](../../../internal/devcmd/build_cuda_legacy.go)
+(reached as `fak-dev build-cuda legacy`), validates the architecture, runs the GPU-free
+`check` verb, refuses an incomplete Go toolchain, and then drives `nvcc` (kernel
+compilation to `libfakcuda.a`) and the `-tags cuda` go build, test and bench steps.
 
-> The GPU-free `check` contract (ABI/header portability, architecture-matrix check, strict
-> standalone header parse) and the complete-Go-toolchain preflight run here in bash; kernel
-> compilation (`nvcc` → `libfakcuda.a`), archiving, stamping and the `-tags cuda`
-> go build/test/bench dispatch are owned by the native Go driver (the fak-dev CUDA legacy
-> route), which this script delegates to after the preflight.
+So the driver does the part that needs no GPU and no compiler first — checking the arch
+list and the toolchain — and only then hands the rest to `nvcc` and `go`. That is a pattern
+worth noticing: **the portable part is in the portable language.**
 
-So the shell script does the part that needs no GPU and no compiler — checking that the
-toolchain exists — and hands the rest to a Go program. That is a pattern worth noticing:
-**the portable part is in the portable language.**
-
-The script is also explicit about the three hosts it must work on
-([`build_cuda.sh:2-10`](../../../internal/compute/build_cuda.sh)): a WSL box with a
-user-space CUDA env at `~/cudaenv`, the GPU server, and a GCP GPU VM with CUDA at
-`/usr/local/cuda`. Hence the environment variables at
-[`build_cuda.sh:14-20`](../../../internal/compute/build_cuda.sh):
+The driver's header documents the environment it reads, with the defaults that matter for
+the three hosts it runs on: a WSL box with a user-space CUDA env at `~/cudaenv` (the
+`CUDA_HOME` fallback), the GPU server, and a GCP GPU VM with CUDA at `/usr/local/cuda`. Hence
+the environment variables in
+[`build_cuda_legacy.go`](../../../internal/devcmd/build_cuda_legacy.go) (package header,
+lines 24-38):
 
 | Variable | Meaning |
 |---|---|
@@ -463,10 +462,10 @@ go version -m /tmp/fak-plain | grep -i cuda || echo "no cuda in the default buil
 sed -n '1,30p' internal/compute/cuda.go
 ```
 
-**Step 3.** Read the build script's header and its environment block.
+**Step 3.** Read the build driver's header and its environment block.
 
 ```bash
-sed -n '1,25p' internal/compute/build_cuda.sh
+sed -n '1,38p' internal/devcmd/build_cuda_legacy.go
 ```
 
 **Step 4.** Adjust one input. Set `FAK_CUDA_ARCH=sm_89` and trace what `GENCODE` contains.

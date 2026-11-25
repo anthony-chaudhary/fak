@@ -96,19 +96,18 @@ SASS. PTX is a promise about what *can* be produced. SASS is what the chip actua
 
 ## You can see both in the build
 
-fak's CUDA build makes the two-level structure explicit. From
-[`internal/compute/build_cuda.sh:52`](../../../internal/compute/build_cuda.sh):
+fak's CUDA build makes the two-level structure explicit. From the single-arch branch of
+`ParseCUDAArchMatrix` in [`internal/computebuild/cuda.go`](../../../internal/computebuild/cuda.go):
 
-```bash
-GENCODE=(-gencode "arch=compute_${cc},code=${ARCH}")
+```go
+gencode = []string{"-gencode", fmt.Sprintf("arch=compute_%s,code=%s", cc, arch)}
 ```
 
-and, in the fat-build branch, at
-[`build_cuda.sh:57`](../../../internal/compute/build_cuda.sh) and
-[`build_cuda.sh:60`](../../../internal/compute/build_cuda.sh):
+and, in the fat-build branch of the same function:
 
-```bash
-GENCODE+=(-gencode "arch=compute_${cc},code=${arch}")
+```go
+gencode = append(gencode, "-gencode", fmt.Sprintf("arch=compute_%s,code=%s", cc, arch))
+```
 ...
 GENCODE+=(-gencode "arch=compute_${PTX_CC},code=compute_${PTX_CC}")
 ```
@@ -424,7 +423,7 @@ after this rung.
 
 ```bash
 cat internal/compute/cuda_arch.txt
-sed -n '36,62p' internal/compute/build_cuda.sh
+sed -n '33,70p' internal/computebuild/cuda.go
 ```
 
 **Step 4.** Adjust one input. Pick one architecture out of `cuda_arch.txt` and trace what
@@ -435,8 +434,8 @@ one."
 **Checkpoint:** the fat build adds exactly one `code=compute_XX` entry. Which architecture
 does it use, and why that one?
 
-It uses the *last* one in the list, because the loop overwrites `PTX_CC` on each iteration
-([`build_cuda.sh:58`](../../../internal/compute/build_cuda.sh)). The newest architecture
+It uses the *last* one in the list, because the loop overwrites `lastCC` on each iteration
+([`ParseCUDAArchMatrix`](../../../internal/computebuild/cuda.go)). The newest architecture
 produces the PTX, because PTX is forward-compatible and one blob covers everything at or
 above its level.
 

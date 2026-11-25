@@ -65,8 +65,8 @@ jobs:
       # The offline preflight (header <-> kernels <-> cgo binding, plus standalone
       # cuda_backend.h portability). No CUDA toolkit, no GPU; on hosted Ubuntu it also runs
       # the strict `gcc -fsyntax-only` parse of the header alone.
-      - name: CUDA ABI/header preflight (build_cuda.sh check)
-        run: bash internal/compute/build_cuda.sh check
+      - name: CUDA ABI/header preflight (build-cuda legacy check)
+        run: go run ./cmd/fak-dev build-cuda legacy check
 
       # DIRECTION reviewer check 3: the DEFAULT build must stay pure-Go and pull ZERO cgo
       # files, so the shipped artifact is one pure-Go binary. Today this guard lives only in
@@ -127,8 +127,8 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Compile the kernels with build_cuda.sh's EXACT gencode shape for this arch so the gate
-      # exercises the real build path: arch=compute_<cc>,code=sm_<cc> matches build_cuda.sh's
+      # Compile the kernels with the build-cuda legacy driver's EXACT gencode shape for this arch so the gate
+      # exercises the real build path: arch=compute_<cc>,code=sm_<cc> matches the driver's
       # single-arch form (code=${ARCH}). The Blackwell legs additionally prove that
       # compute_100/compute_120 are reachable in the pinned toolkit.
       - name: nvcc compile cuda_kernels.cu -> libfakcuda.a (${{ matrix.arch }})

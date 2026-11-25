@@ -18,7 +18,7 @@
 | Device-resident KV cache (VRAM K/Kraw/V; on-device AppendKV/Clone) | `cuda.go:cudaKV` | **shipped** (Evict via host round-trip, deferred → #39) |
 | Model leaf runs decode through the HAL — same model on CPU (bit-exact) or GPU (Approx) | `internal/model/hal.go` | **shipped** |
 | **Reusable CUDA graph (`cudaGraphExecUpdate`) + kernel KV-append + cross-session weight share → decode parity with llama.cpp Q8_0 (≈120 tok/s)** | `cuda_kernels.cu`, `cuda.go` | **shipped, gated `FAK_CUDA_GRAPH=1`** (§3b) |
-| No-sudo WSL CUDA toolchain + two-step nvcc→static-lib→cgo build | `setup_cuda_wsl.sh`, `build_cuda.sh` | **shipped** |
+| No-sudo WSL CUDA toolchain + two-step nvcc→static-lib→cgo build | `setup_cuda_wsl.sh`, `fak-dev build-cuda legacy` | **shipped** |
 | Default `go build` stays one **pure-Go** artifact; CUDA is opt-in `-tags cuda` | — | **verified** |
 
 ## 1. The on-box witness (real runs, RTX 4070 Laptop, sm_89, CUDA 12.6, WSL2)
@@ -40,7 +40,7 @@ perturbed), while the **same code** runs Approx on the device. `compute.RequireR
 keeps the device off the bit-identity rungs by construction.
 
 Reproduce from `fak/`: `bash internal/compute/setup_cuda_wsl.sh` once, then
-`bash internal/compute/build_cuda.sh test`. From the repo root, the laptop lane runner wraps
+`go run ./cmd/fak-dev build-cuda legacy test`. From the repo root, the laptop lane runner wraps
 the same path and also exposes the CPU/Intel lane. On Anthony's Windows laptop, use the
 PowerShell wrapper:
 
@@ -231,7 +231,7 @@ Lifting it to dynamic/ring is the follow-up (dynamic/ring device KV), and fp16 i
 to also reach the F16 number. Native-Linux (no WSL per-call tax) would start from a far lower floor.
 
 Reproduce: fak `FAK_CUDA_GRAPH=1 go run -tags cuda ./cmd/modelbench -dir
-internal/model/.cache/smollm2-135m -backend cuda` (or `internal/compute/build_cuda.sh
+internal/model/.cache/smollm2-135m -backend cuda` (or `go run ./cmd/fak-dev build-cuda legacy
 bench`); llama `llama-bench -m SmolLM2-135M-Instruct-{f16,Q8_0}.gguf -ngl 99 -n 128`.
 
 ## 4. What's still open (decode parity reached; these extend it)

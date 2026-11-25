@@ -45,7 +45,7 @@ WORKDIR /src
 COPY . .
 RUN test -z "${CUDA_ARCH}" || grep -Fxq "${CUDA_ARCH}" internal/compute/cuda_arch.txt || (echo unsupported CUDA_ARCH ${CUDA_ARCH}; cat internal/compute/cuda_arch.txt; exit 2)
 
-# Compile the kernels with build_cuda.sh's exact flags (same nvcc invocation the CI
+# Compile the kernels with the build-cuda legacy driver's exact flags (same nvcc invocation the CI
 # nvcc job runs), then cgo-link the version-stamped -tags cuda binary against the
 # resident archive + this image's cudart/cublas libs.
 RUN cd internal/compute \

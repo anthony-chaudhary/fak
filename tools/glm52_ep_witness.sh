@@ -128,7 +128,7 @@ fi
 
 log "== build -tags cuda,nccl =="
 t=$(date +%s)
-if bash internal/compute/build_cuda.sh binary ./cmd/fak "$ROOT/fakbin_nccl" >"$ROOT/build_nccl.log" 2>&1; then
+if go run ./cmd/fak-dev build-cuda legacy binary ./cmd/fak "$ROOT/fakbin_nccl" >"$ROOT/build_nccl.log" 2>&1; then
   log "BUILD_OK $(( $(date +%s) - t ))s"
 else
   log "BUILD_FAIL"; tail -30 "$ROOT/build_nccl.log" | tee -a "$OUT"; echo 94 >"$DONE"; exit 94

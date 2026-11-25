@@ -45,8 +45,9 @@ any of it: `make cuda-check` runs without a toolchain.
   `~/cudaenv`, then `source ~/cudaenv.env`. The version is pinned so two devs build against the
   same `nvcc`.
 - **Datacenter / GPU server / GCP Deep-Learning-VM**: `nvcc` is already on `PATH` and CUDA
-  lives at `/usr/local/cuda`. Nothing to install — [`build_cuda.sh`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/build_cuda.sh)
-  detects the system toolchain automatically.
+  lives at `/usr/local/cuda`. Nothing to install — the legacy route
+  ([`build_cuda_legacy.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/devcmd/build_cuda_legacy.go),
+  `go run ./cmd/fak-dev build-cuda legacy`) detects the system toolchain automatically.
 - **Native Windows** (a Windows box with the CUDA Toolkit + a signing cert): use
   `fak-dev build-cuda build|binary`, which ports the build off the WSL workaround and
   code-signs the binary (on Windows, WDAC blocks unsigned fork/exec).
@@ -73,10 +74,12 @@ its module include order; see the [`cuda/` module guide](../internal/compute/cud
 Then run the local gate **before** you push to a GPU node:
 
 ```
-make cuda-check                 # wraps: bash internal/compute/build_cuda.sh check
+make cuda-check                 # wraps: go run ./cmd/fak-dev build-cuda check
 ```
 
-This runs [`build_cuda.sh check`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/build_cuda.sh): first the pure-text
+This runs the native `go run ./cmd/fak-dev build-cuda check` (the same GPU-free check the legacy verb reaches via `go run ./cmd/fak-dev build-cuda legacy check`)
+([`build_cuda_legacy.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/devcmd/build_cuda_legacy.go)), which validates `FAK_CUDA_ARCH` (`checkCUDALegacyArch`) against
+`cuda_arch.txt` (parsed by `ParseCUDAArchMatrix` in [`cuda.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/computebuild/cuda.go)) and then runs: first the pure-text
 [`tools/cuda_abi_parity.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cuda_abi_parity.py) cross-check that every `fcuda_*`
 prototype in the header is defined in the `.cu` and declared for every `C.fcuda_*` call in
 `cuda.go`, then a standalone `cuda_backend.h` parse with a strict host C compiler when one is
@@ -94,12 +97,14 @@ is deliberately toolkit-free): `go vet -tags cuda ./internal/compute/`.
 make cuda-build                 # nvcc -> libfakcuda.a, then go build -tags cuda
 ```
 
-This delegates to [`build_cuda.sh`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/build_cuda.sh), which compiles the
-kernels into an in-tree `libfakcuda.a` and builds the `-tags cuda` variant against it. The
-same script works unchanged on WSL, a datacenter image, and a GCP DLVM.
+This delegates to `go run ./cmd/fak-dev build-cuda legacy build`
+([`build_cuda_legacy.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/devcmd/build_cuda_legacy.go)), which compiles the
+kernels (`CompileCUDAKernels` in [`cuda.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/computebuild/cuda.go) supplies the nvcc `-gencode` flags)
+into an in-tree `libfakcuda.a` and builds the `-tags cuda` variant against it. The
+same route works unchanged on WSL, a datacenter image, and a GCP DLVM.
 
 Go keys builds on source content, not on cgo link inputs, so the archive alone never
-invalidates a linked binary. Both `build_cuda.sh` and `fak-dev build-cuda` therefore write
+invalidates a linked binary. Both `fak-dev build-cuda legacy` and `fak-dev build-cuda` therefore write
 the git-ignored `internal/compute/cuda_archive_stamp_gen.go`, which carries the archive digest
 (nvcc's per-process `tmpxft_<pid>` names masked). A kernel-only edit then relinks every
 `-tags cuda` binary and test binary, including a hand-run `go test -tags cuda -c`, while an
@@ -173,7 +178,7 @@ toolchain or building anything unless `FAK_CUDA_ACCEPT_HF` is explicit. The dire
 must contain a real HuggingFace `config.json` and compatible, unsharded
 `model.safetensors`; a GGUF file is not accepted. `FAK_CUDA_ACCEPT_TOKENS` selects the
 positive greedy-token count and defaults to 12. The model gate builds `cmd/gpucheck`
-through `build_cuda.sh binary`, then emits one JSON receipt on stdout while build progress
+through `go run ./cmd/fak-dev build-cuda legacy binary`, then emits one JSON receipt on stdout while build progress
 goes to stderr.
 
 For RTX PRO 6000 and RTX 50-series first light (`sm_120`), use the current Blackwell

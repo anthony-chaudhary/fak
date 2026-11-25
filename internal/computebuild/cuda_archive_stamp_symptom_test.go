@@ -17,7 +17,7 @@ import (
 // Symptom: Go never hashed libfakcuda.a, so after a kernel-only rebuild `go test -c` reused
 // the old test binary and a kernel mutant ran the previous kernel and passed. A kernel build
 // must leave the archive's digest in a -tags cuda compute source so the next link moves.
-// fak-test:justify why=regression when=changed:internal/computebuild/**,internal/compute/build_cuda.sh
+// fak-test:justify why=regression when=changed:internal/computebuild/**
 // fak-test:runtime fast est=2s
 func TestBuildCUDALibStampsComputePackageWithArchiveDigest(t *testing.T) {
 	t.Parallel()

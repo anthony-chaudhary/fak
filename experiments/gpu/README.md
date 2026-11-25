@@ -73,7 +73,7 @@ capture-safe CUDA graph, not a faster kernel — see `GPU-QWEN-RESULTS.md` §4.
 ## Reproduce
 ```bash
 # weights: huggingface_hub snapshot_download("Qwen/Qwen2.5-3B-Instruct") -> <dir>
-bash internal/compute/build_cuda.sh build
+go run ./cmd/fak-dev build-cuda legacy build
 FAK_CUDA_Q8=1 go run -tags cuda ./cmd/gpucheck  -hf <dir> -lean -backend cuda -n 12
 FAK_CUDA_Q8=1 go run -tags cuda ./cmd/modelbench -hf <dir> -lean -backend cuda \
     -decode-steps 128 -decode-reps 5 -decode-prompt 16 -out experiments/gpu/qwen2.5-3b-q8-cuda-4070.json

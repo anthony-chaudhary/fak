@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/computebuild"
@@ -15,6 +14,7 @@ import (
 
 // fak-test:runtime fast est=50ms
 func TestCUDALegacyArgumentsAndEnvironment(t *testing.T) {
+	isolateCUDALegacyEnv(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CUDA_HOME", "")
@@ -29,6 +29,17 @@ func TestCUDALegacyArgumentsAndEnvironment(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(toolkit, "bin", "nvcc"), []byte("fixture"), 0755); err != nil {
 		t.Fatal(err)
+	}
+	// A trimmed test binary reports an empty runtime GOROOT, so the toolchain root is a fixture.
+	goRoot := t.TempDir()
+	for _, name := range []string{"src/encoding/base32/base32.go", "src/go/types/api.go"} {
+		path := filepath.Join(goRoot, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("package x\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, spec := range []struct {
 		args                     []string
@@ -55,7 +66,7 @@ func TestCUDALegacyArgumentsAndEnvironment(t *testing.T) {
 			if name != "go" || len(args) != 2 || args[0] != "env" || args[1] != "GOROOT" {
 				t.Fatalf("unexpected compatibility command %s %q", name, args)
 			}
-			_, err := io.WriteString(out, runtime.GOROOT())
+			_, err := io.WriteString(out, goRoot)
 			return err
 		})
 		if code != 0 || calls != 1 {
@@ -66,6 +77,7 @@ func TestCUDALegacyArgumentsAndEnvironment(t *testing.T) {
 
 // fak-test:runtime fast est=20ms
 func TestCUDALegacyRefusesBeforeBuild(t *testing.T) {
+	isolateCUDALegacyEnv(t)
 	for _, args := range [][]string{{"unknown"}, {"binary", "pkg"}, {"bench", "model", "1", "extra"}, {"build", "extra"}, {"test"}} {
 		code := runCUDALegacy(io.Discard, io.Discard, args, func(context.Context, *computebuild.CUDAConfig) error {
 			t.Fatal("invalid input or incomplete Go toolchain reached CUDA build")

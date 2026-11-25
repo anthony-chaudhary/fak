@@ -29,7 +29,7 @@ git clone --depth 1 https://github.com/anthony-chaudhary/fak.git "$SRC" || { ech
 cd "$SRC" || { echo nosrc >"$WORK/DONE.97"; exit 97; }
 say "HEAD $(git rev-parse --short HEAD)"
 say "build libfakcuda.a ($FAK_CUDA_ARCH)"
-bash internal/compute/build_cuda.sh build
+go run ./cmd/fak-dev build-cuda legacy build
 PKG="$SRC/internal/compute"
 export CGO_ENABLED=1
 export CGO_CFLAGS="-I$CUDA_HOME/include"

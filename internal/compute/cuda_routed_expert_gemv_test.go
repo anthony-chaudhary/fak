@@ -1,6 +1,6 @@
 //go:build cuda && cgo
 
-// Routed-expert CUDA GEMV witnesses. On a CUDA host, after build_cuda.sh build:
+// Routed-expert CUDA GEMV witnesses. On a CUDA host, after go run ./cmd/fak-dev build-cuda legacy build:
 //
 //	FAK_CUDA_ROUTED_EXPERT_REQUIRED=1 go test -tags cuda ./internal/compute -run CUDARoutedExpert
 
