@@ -23,9 +23,10 @@ prompt, plain-to-speculative speedups run from 1.09x to 1.35x.
 
 Speed is the hook, not the pitch. The decode result answers the usual objection
 to the guard ("your engine is slow"). Against the fork it is parity, not a lead,
-and the losses sit next to the headline: prefill (862.4 against llama.cpp's
-2362, and the fork reference at 5106 on a box we did not match), and decode at
-1946 tokens of depth (89.0 against the fork's 113.8).
+and the losses sit next to the headline: decode at 1946 tokens of depth (89.0
+against the fork's 113.8). Prefill is now a matched win: batched prefill is on
+by default, and over HTTP on one card in one window fak's pp512 prompt rate is
+3880.4 tok/s against the fork's 3092.2 (1.25x). In-process it is 4598.2.
 
 Three facts go in every post:
 
@@ -108,9 +109,10 @@ Show HN: fak: Inkling-2-Mini at 118.1 tok/s vs stock llama.cpp 81.0 on one 5080
 > got 119.5 against our 119.9: parity with the fork, not a win. Opt-in
 > speculative decode reaches 171.5 tok/s at depth 2 and 180.9 at depth 4, against
 > 119.7 plain on the same receipt (1.43x and 1.51x). It is off by default and not
-> bit-exact on every prompt. Where we lose: prefill, where opt-in batched prefill
-> reaches pp512 862.4 against llama.cpp's 2362 (measured on different boxes) and
-> the fork reference at 5106 on a box we did not match; and decode at 1946 tokens
+> bit-exact on every prompt. Prefill is a matched win: with batched prefill on by
+> default, the pp512 prompt rate over HTTP is 3880.4 tok/s against the fork's
+> 3092.2 on the same card in the same window (1.25x; prompt rate, not end-to-end
+> latency). Where we lose: decode at 1946 tokens
 > of depth, 89.0 against the fork's 113.8. Batch-of-one is a loss too (65.3
 > against 119.9 single-stream). The batched path wins at width: 783.7 tok/s
 > aggregate across 24 streams (opt-in f16 KV, single run). These are in-process
@@ -139,8 +141,9 @@ Inkling-2-Mini on a 16 GB 5080: 118.1 tok/s decode in fak vs 81.0 in stock llama
 > every prompt; per-prompt speedups run from 1.09x to 1.35x. From a fresh clone,
 > the CUDA build took 507 s, and `fak run` gave a first token in about 13.1 s
 > (model load included) and 116.5 tok/s decode, measured through the command
-> rather than the bench. Where we lose: prefill against llama.cpp (862.4 against
-> 2362 pp512, measured on different boxes); decode at 1946 tokens of depth (89.0
+> rather than the bench. Prefill over HTTP beats the fork on the same card in
+> the same window: pp512 prompt rate 3880.4 against 3092.2 tok/s (1.25x, prompt
+> rate only). Where we lose: decode at 1946 tokens of depth (89.0
 > against 113.8); batch-of-one (65.3 against 119.9 single-stream, 0.54x); and the
 > opt-in PDL flag, which is slower on this card (110.7 against 117.2, 0.94x), so it
 > stays off. The batched path wins at width: 783.7 tok/s aggregate across 24
@@ -171,9 +174,9 @@ Attach the charts: [decode comparison](assets/inkling2-decode-comparison.svg),
    180.9 at depth 4, against 119.7 plain (1.43x and 1.51x). Not bit-exact on
    every prompt, off by default.
    [chart: [inkling2-decode-climb.svg](assets/inkling2-decode-climb.svg)]
-4. Where we lose: prefill is 862.4 against llama.cpp's 2362 (different boxes);
-   decode at 1946 tokens of depth is 89.0 against the fork's 113.8; batch of one
-   is 65.3 against 119.9.
+4. Prefill is a matched win: pp512 prompt rate over HTTP 3880.4 vs the fork's
+   3092.2, same card and window (1.25x). Where we lose: decode at 1946 tokens of
+   depth is 89.0 against the fork's 113.8; batch of one is 65.3 against 119.9.
    [chart: [inkling2-decode-comparison.svg](assets/inkling2-decode-comparison.svg)]
 5. Batched: 783.7 tok/s aggregate across 24 streams (opt-in f16 KV, single run;
    not per stream); cohort prefill end to end goes from 137.7 to 372.1 (2.70x) on
@@ -193,7 +196,7 @@ Attach the charts: [decode comparison](assets/inkling2-decode-comparison.svg),
 
 | Alternative | Where fak is better | Where fak loses today |
 |---|---|---|
-| llama.cpp (stock and fork) | Stock decode on Inkling-2-Mini, same window on one RTX 5080: fak in-process bench 118.1 vs llama-bench 81.0 tok/s (1.46x). Guard and router built in. | Ties the fork, does not beat it (119.9 vs 119.5). Prefill is 862.4 vs 2362 pp512 (different boxes). Trails the fork at 1946 tokens of depth (89.0 vs 113.8). |
+| llama.cpp (stock and fork) | Stock decode on Inkling-2-Mini, same window on one RTX 5080: fak in-process bench 118.1 vs llama-bench 81.0 tok/s (1.46x). Prefill over HTTP beats the fork in a matched window: pp512 prompt rate 3880.4 vs 3092.2 tok/s (1.25x). Guard and router built in. | Ties the fork on decode, does not beat it (119.9 vs 119.5). Trails the fork at 1946 tokens of depth (89.0 vs 113.8). |
 | Ollama, LM Studio | Fork-level decode on this model. Tool-call guard. No opaque model store. | They install in one click; fak needs a build from `main` for Inkling. No Vulkan or AMD backend. |
 | vLLM, SGLang | Runs Inkling-2-Mini on one 16 GB card. | Not a matched comparison. They are built for multi-GPU serving; fak has no measured served rate on this model, so there is no matched number to cite either way. |
 | LiteLLM, Portkey | Wraps the agent harness, not only the endpoint; failover headers are readable. | They lead on per-key limits and PII handling. Call it parity. |
@@ -217,7 +220,8 @@ tok/s, 0.94x), and speculative decode with PDL is slower too (137.1 against
 | Batched aggregate 783.7 tok/s across 24 streams | Aggregate across streams, not a per-stream rate; opt-in f16 KV; single run |
 | Cohort prefill 137.7 to 372.1 tok/s (2.70x) end to end, 16 HTTP streams | Chat prompts, not the 19-token OSS prompts; the OSS reference is 352.36 aggregate |
 | Context depth: 8192-token ms/token 21.47 to 13.30 (1.61x) | Short context (19 tokens) is within noise (8.63 against 8.55) |
-| Prefill trails llama.cpp (862.4 vs 2362 pp512) | Opt-in batched prefill; measured on a different box from llama.cpp |
+| Prefill: pp512 prompt rate over HTTP 3880.4 vs the realugbun fork's 3092.2 tok/s (1.25x) | Same card and window; prompt rate, not end-to-end latency; one window; the answer check abstained at the 32-token cap for every engine |
+| In-process batched prefill pp512 4598.2 tok/s, on by default | In-process bench, not an HTTP rate; one window |
 | M3 Pro 40.3 tok/s, level with Splash 37.5 | Parity, not a win; across its five cells the ratio runs 0.97x to 1.48x, and the 1.48x cell is not explained by its receipt and is not claimed |
 | Build from a clone of `main` | Inkling-2-Mini is not in a published release yet |
 | 35-task suite: 89.5% vs 87.6% (model quality, both served by llama.cpp) | Not indexed (receipt held privately); a model-quality score, not a fak engine rate |
@@ -270,9 +274,8 @@ share. A row that says "receipt held privately, not indexed" is not gated.
 | Opt-in speculative decode, earlier prior tree (superseded by the row above) | 151.7 tok/s, history only; superseded | RTX 5080 16 GB | ABBA n=2 per arm | yes (`93b941b07f`, landed equivalent) | climb history | `hl:spec.d2_prior.tok_s` |
 | Opt-in PDL decode, plain (a loss, off by default) | 110.7 vs 117.2 tok/s (0.94x) | RTX 5080 16 GB | ABBA n=2 per arm, 127 steps | yes (`cc6dca0b47`) | PDL campaign record (2026-11-25); PDL measured slower on sm_120 | `hl:pdl.plain.on_tok_s`, `hl:pdl.plain.off_tok_s` |
 | Opt-in PDL decode, with speculative depth 2 (a loss, off by default) | 137.1 vs 146.9 tok/s (0.93x) | RTX 5080 16 GB | ABBA n=2 per arm, 127 steps | yes (`cc6dca0b47`) | same PDL campaign record | `hl:pdl.spec.on_tok_s`, `hl:pdl.spec.off_tok_s` |
-| Opt-in batched prefill, pp512 (a loss) | 862.4 tok/s (mean of two ABBA samples, 862.7 and 862.1) | RTX 5080 16 GB (second box) | ABBA n=2 per arm, profile off | yes (`66bcd27c6e`) | batched prefill campaign record; cross-box vs llama.cpp, no ratio | `hl:prefill.batched.pp512_tok_s` |
-| llama.cpp prefill, pp512 (external reference, different box) | 2362 tok/s | RTX 5080 16 GB (different box) | `llama-bench -p 512 -r 3` | no commit (external) | OSS baseline campaign record | `hl:prefill.llamacpp.pp512_tok_s` |
-| realugbun fork prefill, pp512 (reference, unverified box, loss reference only) | 5106 tok/s | unverified | receipt reference | no commit | eligibility UNMATCHED; not measured on the batched prefill box | `hl:prefill.fork.pp512_tok_s` |
+| Batched prefill, pp512, in-process (on by default) | 4598.2 tok/s | RTX 5080 16 GB sm_120 | ABBA, median of the warm samples, profile off | base yes (`e4dc39ee1f`); measured build `97ccb4a7d9` is that base plus the opt-in prefill-chunk lane, run with the chunk unset | matched prefill campaign record (2026-11-25); in-process, not an HTTP rate | `hl:prefill.batched.pp512_tok_s` |
+| Prefill over HTTP, pp512 prompt rate, fak vs the realugbun fork (a matched win) | 3880.4 vs 3092.2 tok/s (1.25x) | RTX 5080 16 GB sm_120, same card and window | fork, native, native, fork order, server prompt time median | base yes (`e4dc39ee1f`, measured build as above); fork no commit (external) | same campaign record; prompt rate only, not end-to-end latency; the answer check abstained at the 32-token cap for every engine | `hl:prefill.http.native.pp512_tok_s`, `hl:prefill.http.fork.pp512_tok_s` |
 | Batch of one (C1) against the single-stream reader (a loss by design) | 65.3 vs 119.9 tok/s (0.54x) | RTX 5080 16 GB sm_120 | single run | yes (`2e7682ba2a`) | batched decode campaign record (2026-11-25) | `hl:batched.c1.decode_tok_s`, `hl:batched.single_stream.tok_s` |
 | Batched decode, C8, few-row kernels on and off (aggregate across 8 streams) | 333.7 vs 312.7 tok/s (1.07x) | RTX 5080 16 GB sm_120 | ABBA n=2 per arm | yes (`2e7682ba2a`) | batched decode campaign record | `hl:batched.c8.rows_on_tok_s`, `hl:batched.c8.rows_off_tok_s` |
 | Batched decode, C24, f16 KV (aggregate across 24 streams, not per stream) | 783.7 tok/s | RTX 5080 16 GB sm_120 | single run | yes (`2e7682ba2a`) | batched decode campaign record; opt-in f16 KV | `hl:batched.c24_f16.agg_tok_s` |

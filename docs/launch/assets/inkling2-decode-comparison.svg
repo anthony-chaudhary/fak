@@ -61,27 +61,26 @@
   <rect class="lv-bar" x="783.41" y="196.58" width="50.68" height="69.42" fill="#6e7781"/>
   <text x="808.75" y="190.58" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">113.8</text>
   <text x="808.75" y="280.00" font-size="10.50" fill="#444444" text-anchor="middle">fork</text>
-  <text x="40.00" y="338.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Prefill (a loss)</text>
-  <text x="40.00" y="352.00" font-size="10.50" fill="#444444" text-anchor="start">pp512; the fak bar is the second box</text>
+  <text x="40.00" y="338.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">Prefill, matched</text>
+  <text x="40.00" y="352.00" font-size="10.50" fill="#444444" text-anchor="start">pp512 prompt tok/s over HTTP; same box and window as the fork</text>
   <text x="71.00" y="519.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
-  <line x1="76.00" y1="475.33" x2="436.00" y2="475.33" stroke="#e5e7eb" stroke-width="1.00"/>
-  <text x="71.00" y="478.83" font-size="10.00" fill="#444444" text-anchor="end">2000</text>
-  <line x1="76.00" y1="434.67" x2="436.00" y2="434.67" stroke="#e5e7eb" stroke-width="1.00"/>
-  <text x="71.00" y="438.17" font-size="10.00" fill="#444444" text-anchor="end">4000</text>
+  <line x1="76.00" y1="485.50" x2="436.00" y2="485.50" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="489.00" font-size="10.00" fill="#444444" text-anchor="end">1000</text>
+  <line x1="76.00" y1="455.00" x2="436.00" y2="455.00" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="458.50" font-size="10.00" fill="#444444" text-anchor="end">2000</text>
+  <line x1="76.00" y1="424.50" x2="436.00" y2="424.50" stroke="#e5e7eb" stroke-width="1.00"/>
+  <text x="71.00" y="428.00" font-size="10.00" fill="#444444" text-anchor="end">3000</text>
   <line x1="76.00" y1="394.00" x2="436.00" y2="394.00" stroke="#e5e7eb" stroke-width="1.00"/>
-  <text x="71.00" y="397.50" font-size="10.00" fill="#444444" text-anchor="end">6000</text>
+  <text x="71.00" y="397.50" font-size="10.00" fill="#444444" text-anchor="end">4000</text>
   <text x="71.00" y="364.00" font-size="10.00" fill="#444444" text-anchor="end">tok/s</text>
   <line x1="76.00" y1="516.00" x2="436.00" y2="516.00" stroke="#333333" stroke-width="1.00"/>
-  <rect class="lv-bar" x="102.40" y="498.46" width="67.20" height="17.54" fill="#b42318"/>
-  <text x="136.00" y="492.46" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">862.4</text>
-  <text x="136.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">fak batched</text>
-  <rect class="lv-bar" x="222.40" y="467.97" width="67.20" height="48.03" fill="#6e7781"/>
-  <text x="256.00" y="461.97" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">2362</text>
-  <text x="256.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">llama.cpp</text>
-  <rect class="lv-bar" x="342.40" y="412.18" width="67.20" height="103.82" fill="#ffffff" stroke="#6e7781" stroke-width="1.5" stroke-dasharray="3 2"/>
-  <text x="376.00" y="406.18" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">5106</text>
-  <text x="376.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">fork ref.</text>
-  <text x="376.00" y="544.00" font-size="10.00" fill="#444444" text-anchor="middle">unmatched reference</text>
+  <rect class="lv-bar" x="130.00" y="397.65" width="72.00" height="118.35" fill="#1f6feb"/>
+  <text x="166.00" y="391.65" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">3880.4</text>
+  <text x="166.00" y="378.65" font-size="10.50" font-weight="bold" fill="#1f6feb" text-anchor="middle">1.25x</text>
+  <text x="166.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">fak</text>
+  <rect class="lv-bar" x="310.00" y="421.69" width="72.00" height="94.31" fill="#6e7781"/>
+  <text x="346.00" y="415.69" font-size="11.00" font-weight="bold" fill="#111111" text-anchor="middle">3092.2</text>
+  <text x="346.00" y="530.00" font-size="10.50" fill="#444444" text-anchor="middle">fork</text>
   <text x="458.00" y="338.00" font-size="13.00" font-weight="bold" fill="#111111" text-anchor="start">PDL flag (a loss)</text>
   <text x="458.00" y="352.00" font-size="10.50" fill="#444444" text-anchor="start">opt-in, off by default; plain, then speculative depth 2</text>
   <text x="489.00" y="519.50" font-size="10.00" fill="#444444" text-anchor="end">0</text>
@@ -109,10 +108,6 @@
   <text x="62.00" y="582.00" font-size="11.00" fill="#444444" text-anchor="start">opt-in, off by default</text>
   <rect x="215.60" y="573.00" width="12.00" height="10.00" fill="#b42318"/>
   <text x="237.60" y="582.00" font-size="11.00" fill="#444444" text-anchor="start">loss</text>
-  <rect x="286.80" y="573.00" width="12.00" height="10.00" fill="url(#lv-hatch)" stroke="#9a6700" stroke-width="1.5"/>
-  <text x="308.80" y="582.00" font-size="11.00" fill="#444444" text-anchor="start">second box, compared within it</text>
-  <rect x="508.80" y="573.00" width="12.00" height="10.00" fill="#ffffff" stroke="#6e7781" stroke-width="1.5" stroke-dasharray="3 2"/>
-  <text x="530.80" y="582.00" font-size="11.00" fill="#444444" text-anchor="start">unmatched reference, not measured on the same box</text>
   <text x="40.00" y="604.00" font-size="10.00" fill="#444444" text-anchor="start">Inkling-2-Mini UD-Q3_K_XL, RTX 5080 16 GB.</text>
   <text x="40.00" y="615.00" font-size="10.00" fill="#444444" text-anchor="start">Decode is an in-process decode bench, not served-endpoint rates; decode parity with the fork holds at depth 0 only.</text>
   <text x="40.00" y="626.00" font-size="10.00" fill="#444444" text-anchor="start">same window, ABBA x2; fak in-process decode bench vs llama-bench</text>
@@ -121,9 +116,9 @@
   <text x="40.00" y="659.00" font-size="10.00" fill="#444444" text-anchor="start">opt-in; not bit-exact on every prompt; capitals prompt</text>
   <text x="40.00" y="670.00" font-size="10.00" fill="#444444" text-anchor="start">single 31-step run at 1946 tokens of depth; trails the realugbun fork on a different harness; cross-engine, no ratio</text>
   <text x="40.00" y="681.00" font-size="10.00" fill="#444444" text-anchor="start">external comparator: realugbun llama.cpp 2eb2530e; cross-engine, different harness (llama-bench tg32 at depth), no ratio</text>
-  <text x="40.00" y="692.00" font-size="10.00" fill="#444444" text-anchor="start">opt-in; mean of two ABBA samples (862.74, 862.05); cross-box vs llama.cpp, no ratio</text>
-  <text x="40.00" y="703.00" font-size="10.00" fill="#444444" text-anchor="start">external comparator; measured on a different box from the batched prefill row; no ratio</text>
-  <text x="40.00" y="714.00" font-size="10.00" fill="#444444" text-anchor="start">unmatched reference: eligibility UNMATCHED and not measured on the batched prefill box; no ratio</text>
+  <text x="40.00" y="692.00" font-size="10.00" fill="#444444" text-anchor="start">same box and window as the fork; prompt rate only, not end-to-end latency; 32-token cap so the answer check abstained for every</text>
+  <text x="40.00" y="703.00" font-size="10.00" fill="#444444" text-anchor="start">engine; measured build 97ccb4a7d9 with the prefill chunk unset</text>
+  <text x="40.00" y="714.00" font-size="10.00" fill="#444444" text-anchor="start">external comparator: realugbun llama.cpp 2eb2530e, same box and window as the native HTTP row</text>
   <text x="40.00" y="725.00" font-size="10.00" fill="#444444" text-anchor="start">PDL measured slower on sm_120; opt-in FAK_INKLING2_PDL=1, default off; output bit-identical</text>
   <text x="40.00" y="736.00" font-size="10.00" fill="#444444" text-anchor="start">PDL measured slower with spec depth 2 as well; opt-in FAK_INKLING2_PDL=1, default off</text>
 </svg>

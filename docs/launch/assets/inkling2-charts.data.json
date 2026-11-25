@@ -1,7 +1,7 @@
 {
   "schema": "fak.launchvisual.charts.v1",
   "docs": ["docs/launch/inkling2-launch-2026-11-24.md"],
-  "superseded_tokens": ["151.7"],
+  "superseded_tokens": ["151.7", "862.4", "2362", "5106"],
   "allowed_numbers": [
     {"token": "2.0", "reason": "license name Apache-2.0 in the model description; not a measurement"},
     {"token": "1.26", "reason": "Go toolchain version the build needs; not a measurement"},
@@ -79,15 +79,14 @@
           ]
         },
         {
-          "title": "Prefill (a loss)",
-          "subtitle": "pp512; the fak bar is the second box",
+          "title": "Prefill, matched",
+          "subtitle": "pp512 prompt tok/s over HTTP; same box and window as the fork",
           "style": "bars",
           "axis": "prefill",
           "span": 2,
           "series": [
-            {"row": "prefill.batched.pp512_tok_s", "label": "fak batched", "tone": "box2"},
-            {"row": "prefill.llamacpp.pp512_tok_s", "label": "llama.cpp", "tone": "base"},
-            {"row": "prefill.fork.pp512_tok_s", "label": "fork ref.", "tone": "unmatched", "sub": "unmatched reference"}
+            {"row": "prefill.http.native.pp512_tok_s", "label": "fak", "tone": "fak"},
+            {"row": "prefill.http.fork.pp512_tok_s", "label": "fork", "tone": "base"}
           ]
         },
         {
