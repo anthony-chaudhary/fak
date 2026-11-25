@@ -47,8 +47,10 @@ func TestNativeHTTPChildInheritsBoundPlanner(t *testing.T) {
 		var task string
 		results := map[string]string{}
 		for _, m := range req.Messages {
-			if m.Role == agent.RoleUser && strings.HasPrefix(m.Content, "route-") {
-				task = m.Content
+			if m.Role == agent.RoleUser {
+				if prompt, _ := servedChildOwnedTask(m.Content, nil); strings.HasPrefix(prompt, "route-") {
+					task = prompt
+				}
 			}
 			if m.Role == agent.RoleTool {
 				results[m.Name] = m.Content
@@ -125,4 +127,28 @@ func TestNativeHTTPChildInheritsBoundPlanner(t *testing.T) {
 	if bootCalls.Load() != 0 || selectedParents.Load() != 3 || selectedChildren.Load() != 1 {
 		t.Fatalf("planner calls boot/parent/child=%d/%d/%d, want 0/3/1", bootCalls.Load(), selectedParents.Load(), selectedChildren.Load())
 	}
+}
+
+// servedChildOwnedTask returns the task a user turn carries and the capabilities
+// it grants. A child that shares its parent's request head declares the parent's
+// tool schemas for prefix reuse and names its own narrowed catalog in the brief,
+// so there the brief, not the declared list, is the capability witness.
+func servedChildOwnedTask(content string, declared []agent.ToolDef) (string, map[string]bool) {
+	const allowedMark, allowedEnd, taskMark = "Tools you may call: ", ". A call to any other declared tool", "\n\nTask:\n"
+	granted := map[string]bool{}
+	head, prompt, briefed := strings.Cut(content, taskMark)
+	if !briefed {
+		for _, tool := range declared {
+			granted[tool.Function.Name] = true
+		}
+		return content, granted
+	}
+	if _, list, ok := strings.Cut(head, allowedMark); ok {
+		if list, _, ok = strings.Cut(list, allowedEnd); ok {
+			for _, name := range strings.Split(list, ", ") {
+				granted[name] = true
+			}
+		}
+	}
+	return prompt, granted
 }

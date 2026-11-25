@@ -43,15 +43,16 @@ func (p *servedChildIndependentPlanner) CompleteStream(ctx context.Context, sink
 
 func (p *servedChildIndependentPlanner) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
 	var task string
+	names := map[string]bool{}
 	for _, m := range messages {
-		if m.Role == agent.RoleUser && (strings.HasPrefix(m.Content, "served-parent:") || strings.HasPrefix(m.Content, "served-child:")) {
-			task = m.Content
+		if m.Role != agent.RoleUser {
+			continue
+		}
+		prompt, granted := servedChildOwnedTask(m.Content, tools)
+		if strings.HasPrefix(prompt, "served-parent:") || strings.HasPrefix(prompt, "served-child:") {
+			task, names = prompt, granted
 			break
 		}
-	}
-	names := map[string]bool{}
-	for _, tool := range tools {
-		names[tool.Function.Name] = true
 	}
 	final := func(text string) (*agent.Completion, error) {
 		return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: text}, FinishReason: "stop"}, nil
