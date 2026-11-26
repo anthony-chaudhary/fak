@@ -61,23 +61,23 @@ jobs:
 
           # Invariant 1: One static pure-Go binary, zero deps, CGO_ENABLED=0
           echo "=== Invariant 1: Static binary (CGO_ENABLED=0) ===" > static-binary-arm64.txt
-          go test -v -run "TestRequestPathDefaultBuildIsCgoFree" ./internal/architest >> static-binary-arm64.txt 2>&1
+          go test -v -run "TestRequestPathDefaultBuildIsCgoFree" ./internal/architest >> static-binary-arm64.txt 2>> static-binary-arm64.stderr.txt
           
           # Invariant 2: Default-deny capability floor, fail closed
           echo "=== Invariant 2: Default-deny capability floor ===" > default-deny-arm64.txt
-          go test -v ./internal/adjudicator ./internal/policy >> default-deny-arm64.txt 2>&1
+          go test -v ./internal/adjudicator ./internal/policy >> default-deny-arm64.txt 2>> default-deny-arm64.stderr.txt
           
           # Invariant 3: Result quarantine at the write-time boundary
           echo "=== Invariant 3: Result quarantine ===" > quarantine-arm64.txt
-          go test -v -run "TestQuarantine|TestQuarantined" ./internal/ctxmmu ./internal/kernel ./internal/normgate >> quarantine-arm64.txt 2>&1
+          go test -v -run "TestQuarantine|TestQuarantined" ./internal/ctxmmu ./internal/kernel ./internal/normgate >> quarantine-arm64.txt 2>> quarantine-arm64.stderr.txt
           
           # Invariant 4: Bit-exact KV reuse + addressable eviction
           echo "=== Invariant 4: Bit-exact KV reuse ===" > kv-reuse-arm64.txt
-          go test -v -run "TestEvictEqualsNeverSaw|TestKVQuarantineEqualsNeverSaw" ./internal/model ./internal/kvmmu ./internal/xenginekv >> kv-reuse-arm64.txt 2>&1
+          go test -v -run "TestEvictEqualsNeverSaw|TestKVQuarantineEqualsNeverSaw" ./internal/model ./internal/kvmmu ./internal/xenginekv >> kv-reuse-arm64.txt 2>> kv-reuse-arm64.stderr.txt
           
           # Invariant 5: Tamper-evident audit: append-only, SHA-256 hash-chained
           echo "=== Invariant 5: Tamper-evident audit ===" > audit-arm64.txt
-          go test -v ./internal/journal >> audit-arm64.txt 2>&1
+          go test -v ./internal/journal >> audit-arm64.txt 2>> audit-arm64.stderr.txt
 
           for f in static-binary-arm64.txt default-deny-arm64.txt quarantine-arm64.txt kv-reuse-arm64.txt audit-arm64.txt; do
             normalize_go_test_output "$f"
