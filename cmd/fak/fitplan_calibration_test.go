@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -220,6 +221,17 @@ func TestFitPlanDecodeReceiptsFileKeepsItsEpoch(t *testing.T) {
 // fak-test:runtime medium est=1s lane=default
 func TestModelObserveCollectCalibrateAddsHostProbe(t *testing.T) {
 	store := fitPlanTestStore(t)
+	// The host copy benchmark's hard per-batch deadline (10ms target -> 60ms batch) is
+	// shorter than one 64 MiB copy under -race on a loaded runner, so the real probe
+	// fails on speed, not on wiring. This test checks that the probe result is recorded
+	// with provenance; the measurement itself is stubbed with a deterministic one.
+	old := measureHostMemoryRooflineForObserve
+	measureHostMemoryRooflineForObserve = func(_ context.Context, o modelperfobs.RooflineBenchmarkOptions) (modelperfobs.RooflineMeasurement, error) {
+		m := deterministicRooflineMeasurement(o)
+		m.MachineClass = runtime.GOOS + "/" + runtime.GOARCH
+		return m, nil
+	}
+	t.Cleanup(func() { measureHostMemoryRooflineForObserve = old })
 	if err := runModelObserveBandwidthCollect([]string{"--calibrate"}); err == nil {
 		t.Fatal("--calibrate without --measure-host-roofline accepted")
 	}
