@@ -81,9 +81,16 @@ func TestInk2PBenchBatchedWeightKernels(t *testing.T) {
 			})
 			rows := ink2PBenchGPU(t, d, func() error { return d.RowsMatMul(w, xr, hidden, batched, denseRows, T) })
 			ink2OpsTestSame(t, "dense", ink2OpsTestRead(t, d, batched, T*denseRows), ink2OpsTestRead(t, d, serial, T*denseRows))
+			gemm := ink2PBenchGPU(t, d, func() error {
+				ok, err := d.RowsGEMM(w, xr, hidden, batched, denseRows, T)
+				if err == nil && !ok {
+					t.Fatal("rows GEMM declined")
+				}
+				return err
+			})
 			elems := float64(T) * denseRows * hidden
-			t.Logf("dense [%d][%d] over %d rows: decode GEMV %.4fs (%.1f G weight-rows/s), rows kernel %.4fs (%.1f G/s), %.2fx",
-				denseRows, hidden, T, perToken, elems/perToken/1e9, rows, elems/rows/1e9, perToken/rows)
+			t.Logf("dense [%d][%d] over %d rows: decode GEMV %.4fs (%.1f G weight-rows/s), rows kernel %.4fs (%.1f G/s), %.2fx, GEMM %.4fs (%.1f G/s), %.2fx",
+				denseRows, hidden, T, perToken, elems/perToken/1e9, rows, elems/rows/1e9, perToken/rows, gemm, elems/gemm/1e9, perToken/gemm)
 
 			// Each token routes k distinct experts.
 			npairs := T * k
@@ -114,9 +121,17 @@ func TestInk2PBenchBatchedWeightKernels(t *testing.T) {
 				return d.PExpertGrouped(stack, idr, order, xr, k, hidden, yb, npairs, Ink2Ref{})
 			})
 			ink2OpsTestSame(t, "experts", ink2OpsTestRead(t, d, yb, npairs*expertRows), ink2OpsTestRead(t, d, ys, npairs*expertRows))
+			groupedGemm := ink2PBenchGPU(t, d, func() error {
+				ok, err := d.PExpertGEMM(stack, idr, order, offsets, xr, k, hidden, yb, npairs, Ink2Ref{})
+				if err == nil && !ok {
+					t.Fatal("grouped GEMM declined")
+				}
+				return err
+			})
 			elems = float64(npairs) * expertRows * hidden
-			t.Logf("%d pairs through %d experts of [%d][%d]: decode expert GEMV %.4fs (%.1f G/s), grouped kernel %.4fs (%.1f G/s), %.2fx",
-				npairs, experts, expertRows, hidden, routed, elems/routed/1e9, grouped, elems/grouped/1e9, routed/grouped)
+			t.Logf("%d pairs through %d experts of [%d][%d]: decode expert GEMV %.4fs (%.1f G/s), grouped kernel %.4fs (%.1f G/s), %.2fx, GEMM %.4fs (%.1f G/s), %.2fx",
+				npairs, experts, expertRows, hidden, routed, elems/routed/1e9, grouped, elems/grouped/1e9, routed/grouped,
+				groupedGemm, elems/groupedGemm/1e9, routed/groupedGemm)
 		})
 	}
 }

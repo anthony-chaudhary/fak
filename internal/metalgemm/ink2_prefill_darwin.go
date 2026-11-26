@@ -18,6 +18,12 @@ var ink2PrefillAttendSource string
 //go:embed ink2_prefill_packed.metal
 var ink2PrefillPacked string
 
+//go:embed ink2_prefill_gemm.metal
+var ink2PrefillGemm string
+
+//go:embed ink2_prefill_flash.metal
+var ink2PrefillFlashSource string
+
 const (
 	// The register tile of the batched weight kernels: weight rows a lane
 	// carries, and the activation rows, or routed pairs, that share one decode
@@ -27,16 +33,28 @@ const (
 	ink2PrefillGroupTile = 8
 	// The conv kernel keeps a channel's history in a register array of this.
 	ink2PrefillMaxKernel = 8
+	// The tiles of the GEMM kernels: activation rows (or routed pairs of one
+	// expert) by weight rows, over K steps of ink2GemmBK. Measured on an M3
+	// Pro: wider tiles spill the accumulators, a deeper K step costs occupancy.
+	ink2GemmBM = 32
+	ink2GemmBN = 64
+	ink2GemmBK = 32
+	// A SIMD group per 8 activation rows of the tile.
+	ink2GemmThreads = 4 * ink2GemmBM
 )
 
 // The batched weight kernels append to the packed decoders they instantiate.
 var ink2PrefillPackedSource = sync.OnceValue(func() string {
 	return packedCodebooks + packedDequant + packedGEMV +
 		fmt.Sprintf("#define INK2P_ROWS_R %d\n#define INK2P_ROWS_TILE %d\n#define INK2P_GROUP_TILE %d\n", ink2PrefillRowsR, ink2PrefillRowsTile, ink2PrefillGroupTile) +
-		ink2PrefillPacked
+		ink2PrefillPacked +
+		fmt.Sprintf("#define INK2G_BM %d\n#define INK2G_BN %d\n#define INK2G_BK %d\n", ink2GemmBM, ink2GemmBN, ink2GemmBK) +
+		ink2PrefillGemm
 })
 
 var ink2RowsKernel, ink2GroupedKernel = ink2PackedKernels("rows_"), ink2PackedKernels("grouped_")
+
+var ink2GemmRowsKernel, ink2GemmGroupedKernel = ink2PackedKernels("gemm_rows_"), ink2PackedKernels("gemm_grouped_")
 
 // ink2VerifyRowsKernel names the verify rows kernels over the same packed decoders.
 var ink2VerifyRowsKernel = ink2PackedKernels("ink2v_rows_")
@@ -135,6 +153,60 @@ func (d *Ink2Device) RowsMatMul(w Ink2Weight, x Ink2Ref, xStride int, y Ink2Ref,
 	return d.Dispatch(p, [3]int{(w.Rows + 4*ink2PrefillRowsR - 1) / (4 * ink2PrefillRowsR), (rows + ink2PrefillRowsTile - 1) / ink2PrefillRowsTile, 1}, [3]int{128, 1, 1}, args...)
 }
 
+// gemmBatch is packedBatch for the GEMM kernels, which also load the
+// activation as float4 vectors for the scalar types; ok is false for a shape
+// they do not tile (columns not a multiple of ink2GemmBK).
+func (d *Ink2Device) gemmBatch(w Ink2Weight, kernels *[41]string, x Ink2Ref, xStride int) (Ink2Pipeline, int, bool, error) {
+	if w.Cols%ink2GemmBK != 0 || x.Off%4 != 0 || xStride%4 != 0 {
+		return Ink2Pipeline{}, 0, false, nil
+	}
+	p, bytes, err := d.packedBatch(w, kernels, x, xStride)
+	if err == nil && p.maxThreads < ink2GemmThreads {
+		return p, bytes, false, fmt.Errorf("metalgemm: inkling2 kernel %s needs threadgroups of %d threads", kernels[w.Type], ink2GemmThreads)
+	}
+	return p, bytes, err == nil, err
+}
+
+// RowsGEMM is RowsMatMul on the tiled GEMM kernels: the same products, summed
+// in another order than MatVec's. ok is false (nothing encoded) for a shape
+// the kernels do not tile.
+func (d *Ink2Device) RowsGEMM(w Ink2Weight, x Ink2Ref, xStride int, y Ink2Ref, yStride, rows int) (bool, error) {
+	if !x.Valid() || !y.Valid() || rows < 1 || xStride < w.Cols || yStride < w.Rows ||
+		rows > math.MaxInt32/max(xStride, yStride, 1) {
+		return false, fmt.Errorf("%w: rows GEMM of %d rows, strides %d and %d", ErrInk2Shape, rows, xStride, yStride)
+	}
+	p, bytes, ok, err := d.gemmBatch(w, &ink2GemmRowsKernel, x, xStride)
+	if err != nil || !ok {
+		return false, err
+	}
+	args := append(w.args(x.Span((rows-1)*xStride+w.Cols), y.Span((rows-1)*yStride+w.Rows), bytes),
+		Ink2Const(ink2PackedRows{uint32(rows), uint32(xStride), uint32(yStride)}))
+	return true, d.Dispatch(p, [3]int{(w.Rows + ink2GemmBN - 1) / ink2GemmBN, (rows + ink2GemmBM - 1) / ink2GemmBM, 1}, [3]int{ink2GemmThreads, 1, 1}, args...)
+}
+
+// PExpertGEMM is PExpertGrouped on the tiled GEMM kernels, which also read
+// the offsets ([nexp+1]) PBucket left beside order; the sums run in another
+// order than ExpertMatVec's. ok is false (nothing encoded) for a shape the
+// kernels do not tile.
+func (d *Ink2Device) PExpertGEMM(w Ink2Weight, ids, order, offsets, x Ink2Ref, xDiv, xStride int, y Ink2Ref, npairs int, scale Ink2Ref) (bool, error) {
+	if !ids.Valid() || !order.Valid() || !offsets.Valid() || !x.Valid() || !y.Valid() || npairs < 1 || xDiv < 1 || xStride < w.Cols ||
+		npairs > math.MaxInt32/max(xStride, w.Rows, 1) {
+		return false, fmt.Errorf("%w: grouped expert GEMM of %d pairs, input stride %d", ErrInk2Shape, npairs, xStride)
+	}
+	p, bytes, ok, err := d.gemmBatch(w, &ink2GemmGroupedKernel, x, xStride)
+	if err != nil || !ok {
+		return false, err
+	}
+	rows := (npairs-1)/xDiv + 1
+	args := append(w.args(x.Span((rows-1)*xStride+w.Cols), y.Span(npairs*w.Rows), w.Experts*bytes),
+		ids.Span(npairs), order.Span(npairs), scale.Span(w.Experts),
+		Ink2Const(ink2PackedGroup{uint32(npairs), uint32(xDiv), uint32(xStride), uint32(btoi(scale.Valid()))}),
+		offsets.Span(w.Experts+1), Ink2Const(uint32(w.Experts)))
+	// Every expert run takes at most one partial tile.
+	tiles := (npairs+ink2GemmBM-1)/ink2GemmBM + w.Experts
+	return true, d.Dispatch(p, [3]int{(w.Rows + ink2GemmBN - 1) / ink2GemmBN, tiles, 1}, [3]int{ink2GemmThreads, 1, 1}, args...)
+}
+
 // PMix encodes nq depth mixes of every token row: states are [T][n], queries
 // [nq][n], and out is query-major [nq][T][n]. Row t of query q equals Mix of
 // the states' rows t. out must not overlap a state.
@@ -217,6 +289,58 @@ func (d *Ink2Device) PCtrlApply(cur, msg, g, gain, forget, out []Ink2Ref, n, ran
 	args = ink2PBind(ink2PBind(args, g, T*rank), out, T*n)
 	args = append(args, Ink2Const(ink2PCtrlShape{uint32(n), uint32(rank), uint32(T)}))
 	return d.DispatchThreads(p, [3]int{n, T, len(cur)}, [3]int{min(n, ink2OpsThreads, p.MaxThreads()), 1, 1}, args...)
+}
+
+type ink2PCtrlRows struct{ n, tokens uint32 }
+
+// CtrlGEMMTiles reports whether PCtrlDown's and PCtrlApply's products of
+// width n and rank tile into RowsGEMM.
+func CtrlGEMMTiles(n, rank int) bool { return n%ink2GemmBK == 0 && rank%ink2GemmBK == 0 }
+
+// PCtrlDownGEMM is PCtrlDown of one controller as a GEMM over the normalized
+// inputs, which take xs ([T][2n]) as scratch.
+func (d *Ink2Device) PCtrlDownGEMM(cur, msg, down, g, xs Ink2Ref, n, rank, T int) error {
+	if err := ink2PCtrlCheck("ctrl down", n, rank, T, []Ink2Ref{cur}, []Ink2Ref{msg}, []Ink2Ref{down}, []Ink2Ref{g}, []Ink2Ref{xs}); err != nil {
+		return err
+	}
+	if !CtrlGEMMTiles(n, rank) {
+		return fmt.Errorf("%w: ctrl GEMM of width %d, rank %d", ErrInk2Shape, n, rank)
+	}
+	p, err := d.prefillKernel("ink2p_ctrl_norm", true)
+	if err != nil {
+		return err
+	}
+	if err := d.Dispatch(p, [3]int{T, 1, 1}, [3]int{ink2OpsThreads, 1, 1}, cur.Span(T*n), msg.Span(T*n), xs.Span(2*T*n),
+		Ink2Const(ink2PCtrlRows{uint32(n), uint32(T)})); err != nil {
+		return err
+	}
+	_, err = d.RowsGEMM(Ink2DenseF32(down, rank, 2*n), xs, 2*n, g, rank, T)
+	return err
+}
+
+// PCtrlApplyGEMM is PCtrlApply of one controller as two GEMMs, whose outputs
+// take gs ([2][T][n]) as scratch.
+func (d *Ink2Device) PCtrlApplyGEMM(cur, msg, g, gain, forget, out, gs Ink2Ref, n, rank, T int) error {
+	if err := ink2PCtrlCheck("ctrl apply", n, rank, T, []Ink2Ref{cur}, []Ink2Ref{msg}, []Ink2Ref{g}, []Ink2Ref{gain},
+		[]Ink2Ref{forget}, []Ink2Ref{out}, []Ink2Ref{gs}); err != nil {
+		return err
+	}
+	if !CtrlGEMMTiles(n, rank) {
+		return fmt.Errorf("%w: ctrl GEMM of width %d, rank %d", ErrInk2Shape, n, rank)
+	}
+	fs := gs.At(T * n)
+	if _, err := d.RowsGEMM(Ink2DenseF32(gain, n, rank), g, rank, gs, n, T); err != nil {
+		return err
+	}
+	if _, err := d.RowsGEMM(Ink2DenseF32(forget, n, rank), g, rank, fs, n, T); err != nil {
+		return err
+	}
+	p, err := d.prefillKernel("ink2p_ctrl_gate", false)
+	if err != nil {
+		return err
+	}
+	return d.DispatchThreads(p, [3]int{n, T, 1}, [3]int{min(n, ink2OpsThreads, p.MaxThreads()), 1, 1},
+		cur.Span(T*n), msg.Span(T*n), gs.Span(T*n), fs.Span(T*n), out.Span(T*n), Ink2Const(ink2PCtrlRows{uint32(n), uint32(T)}))
 }
 
 // PConv encodes the causal short conv of n channels along T token rows, each
@@ -358,6 +482,62 @@ func (d *Ink2Device) PAttend(q, r, sinks, relBias, kcache, vcache, scores Ink2Re
 		}
 	}
 	return nil
+}
+
+type ink2PFlashShape struct {
+	heads, perKV, relLen, kvDim uint32
+	extent, window, cap, tokens uint32
+	pos0                        uint32
+	scale                       float32
+}
+
+const (
+	ink2FlashQueries = 16
+	ink2FlashHeadDim = 128
+	ink2FlashMaxRel  = 32
+)
+
+// PFlashAttend is PAttend as a tiled attention with an online softmax, which
+// needs no scores scratch and sums in another order. ok is false (nothing
+// encoded) for a shape it does not take: a head dim other than 128, more than
+// 32 relative-bias terms, or a cache whose length is not a multiple of 8.
+func (d *Ink2Device) PFlashAttend(q, r, sinks, relBias, kcache, vcache, out Ink2Ref,
+	p Ink2AttnParams, extent, window, cap, pos0, T int) (bool, error) {
+	const limit = math.MaxInt32
+	if p.HeadDim != ink2FlashHeadDim || p.RelLen > ink2FlashMaxRel || cap%8 != 0 {
+		return false, nil
+	}
+	if p.Heads < 1 || p.KVHeads < 1 || p.Heads%p.KVHeads != 0 || p.RelLen < 0 || extent < 0 || window < 0 ||
+		cap < 1 || T < 1 || pos0 < 0 || pos0 > limit-T || p.Heads > limit/p.HeadDim/T || extent > limit || window > limit ||
+		cap > limit/(p.KVHeads*p.HeadDim) || (p.RelLen > 0 && extent > limit/p.RelLen) {
+		return false, fmt.Errorf("%w: flash attend of %d rows at %d, %d heads over %d kv heads of %d dims, extent %d, window %d, cap %d",
+			ErrInk2Shape, T, pos0, p.Heads, p.KVHeads, p.HeadDim, extent, window, cap)
+	}
+	if p.RelLen == 0 {
+		extent = 0
+	}
+	if !q.Valid() || !sinks.Valid() || !kcache.Valid() || !vcache.Valid() || !out.Valid() ||
+		(extent > 0 && (!r.Valid() || !relBias.Valid())) {
+		return false, fmt.Errorf("%w: flash attend without an operand", ErrInk2Shape)
+	}
+	pipe, err := d.PipelinePrecise(ink2PrefillFlashSource, "ink2p_flash")
+	if err != nil {
+		return false, err
+	}
+	if pipe.ThreadWidth() != 32 || pipe.MaxThreads() < 128 {
+		return false, fmt.Errorf("metalgemm: inkling2 flash attend needs 32-wide SIMD groups of 128 threads")
+	}
+	rSpan, relSpan, relLen := Ink2Ref{}.Span(0), Ink2Ref{}.Span(0), 0
+	if extent > 0 {
+		rSpan, relSpan, relLen = r.Span(T*p.Heads*p.RelLen), relBias.Span(extent*p.RelLen), p.RelLen
+	}
+	kvDim := p.KVHeads * p.HeadDim
+	return true, d.Dispatch(pipe, [3]int{p.Heads, (T + ink2FlashQueries - 1) / ink2FlashQueries, 1}, [3]int{128, 1, 1},
+		q.Span(T*p.Heads*p.HeadDim), rSpan, sinks.Span(T*p.Heads), relSpan, kcache.Span(cap*kvDim), vcache.Span(cap*kvDim),
+		out.Span(T*p.Heads*p.HeadDim), Ink2Const(ink2PFlashShape{
+			heads: uint32(p.Heads), perKV: uint32(p.Heads / p.KVHeads), relLen: uint32(relLen), kvDim: uint32(kvDim),
+			extent: uint32(extent), window: uint32(window), cap: uint32(cap), tokens: uint32(T), pos0: uint32(pos0), scale: p.Scale,
+		}))
 }
 
 // PRoute encodes Route for each of T logits rows ([T][nexp]) into ids and wts

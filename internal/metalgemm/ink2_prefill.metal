@@ -489,3 +489,60 @@ kernel void ink2p_bucket_fill(device const int *ids [[buffer(0)]],
     for (uint j = 0; j < i; j++) rank += ids[j] == e ? 1 : 0;
     order[offsets[e] + rank] = int(i);
 }
+
+// The controller of a chunk wider than any verify chunk, as two GEMMs around
+// these kernels; unlike the kernels above it does not keep the decode
+// controller's order, so it is not bit-equal to it.
+struct Ink2PCtrlRows { uint n, tokens; };
+
+// xs[t] = [rms(cur[t]), rms(msg[t])], the GEMM input of the down projection:
+// a threadgroup per token.
+kernel void ink2p_ctrl_norm(device const float *cur [[buffer(0)]],
+                            device const float *msg [[buffer(1)]],
+                            device float *xs [[buffer(2)]],
+                            constant Ink2PCtrlRows &p [[buffer(3)]],
+                            uint tok [[threadgroup_position_in_grid]],
+                            uint tid [[thread_index_in_threadgroup]],
+                            uint lane [[thread_index_in_simdgroup]],
+                            uint sg [[simdgroup_index_in_threadgroup]]) {
+    threadgroup float part[2 * INK2_SG];
+    const uint n = p.n;
+    device const float *c = cur + ulong(tok) * n, *m = msg + ulong(tok) * n;
+    float ssc = 0.0f, ssm = 0.0f;
+    for (uint i = tid; i < n; i += INK2_TG) {
+        ssc = fma(c[i], c[i], ssc);
+        ssm = fma(m[i], m[i], ssm);
+    }
+    ssc = simd_sum(ssc);
+    ssm = simd_sum(ssm);
+    if (lane == 0) {
+        part[sg] = ssc;
+        part[INK2_SG + sg] = ssm;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float tc = 0.0f, tm = 0.0f;
+    for (uint s = 0; s < INK2_SG; s++) {
+        tc += part[s];
+        tm += part[INK2_SG + s];
+    }
+    const float sc = ink2_inv_rms(tc, n, 1e-6f), sm = ink2_inv_rms(tm, n, 1e-6f);
+    device float *x = xs + ulong(tok) * 2 * n;
+    for (uint i = tid; i < n; i += INK2_TG) {
+        x[i] = c[i] * sc;
+        x[n + i] = m[i] * sm;
+    }
+}
+
+// out = cur - tanh(forget)*cur + tanh(gain)*msg from the GEMMs' gain and forget.
+kernel void ink2p_ctrl_gate(device const float *cur [[buffer(0)]],
+                            device const float *msg [[buffer(1)]],
+                            device const float *gain [[buffer(2)]],
+                            device const float *forget [[buffer(3)]],
+                            device float *out [[buffer(4)]],
+                            constant Ink2PCtrlRows &p [[buffer(5)]],
+                            uint2 at [[thread_position_in_grid]]) {
+    if (at.x >= p.n || at.y >= p.tokens) return;
+    const ulong o = ulong(at.y) * p.n + at.x;
+    const float x = cur[o], f = tanh(forget[o]), t = tanh(gain[o]);
+    out[o] = (x - f * x) + t * msg[o];
+}

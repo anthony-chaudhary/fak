@@ -36,3 +36,20 @@ func (*Ink2Device) PBucket(ids, counts, offsets, order Ink2Ref, npairs, nexp int
 func (*Ink2Device) PExpertGrouped(w Ink2Weight, ids, order, x Ink2Ref, xDiv, xStride int, y Ink2Ref, npairs int, scale Ink2Ref) error {
 	return ErrMetalUnavailable
 }
+func (*Ink2Device) RowsGEMM(w Ink2Weight, x Ink2Ref, xStride int, y Ink2Ref, yStride, rows int) (bool, error) {
+	return false, ErrMetalUnavailable
+}
+func (*Ink2Device) PExpertGEMM(w Ink2Weight, ids, order, offsets, x Ink2Ref, xDiv, xStride int, y Ink2Ref, npairs int, scale Ink2Ref) (bool, error) {
+	return false, ErrMetalUnavailable
+}
+func CtrlGEMMTiles(n, rank int) bool { return false }
+func (*Ink2Device) PCtrlDownGEMM(cur, msg, down, g, xs Ink2Ref, n, rank, T int) error {
+	return ErrMetalUnavailable
+}
+func (*Ink2Device) PCtrlApplyGEMM(cur, msg, g, gain, forget, out, gs Ink2Ref, n, rank, T int) error {
+	return ErrMetalUnavailable
+}
+func (*Ink2Device) PFlashAttend(q, r, sinks, relBias, kcache, vcache, out Ink2Ref,
+	p Ink2AttnParams, extent, window, cap, pos0, T int) (bool, error) {
+	return false, ErrMetalUnavailable
+}

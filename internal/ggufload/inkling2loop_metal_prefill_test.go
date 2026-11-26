@@ -120,6 +120,9 @@ func TestInkling2MetalBatchedPrefillMatchesPerToken(t *testing.T) {
 		}
 		wall := time.Since(start)
 		after, _ := compute.MetalInkling2DeviceStats()
+		if prof := compute.MetalInkling2PrefillProfile(); prof != "" {
+			t.Logf("%s prefill profile: %s", arm, prof)
+		}
 		got := []int{next}
 		start = time.Now()
 		for len(got) < n {
