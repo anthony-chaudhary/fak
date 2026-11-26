@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -188,9 +189,40 @@ func TestParseWeightsReadsRunLogLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]float64{"example.invalid/a": 12.3, "example.invalid/d": 0}
+	want := map[string]float64{"example.invalid/a": 12.3, "example.invalid/c": 3, "example.invalid/d": 0}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestParseWeightsKeepsMaximumOfRepeatedLines(t *testing.T) {
+	log := "ok  \texample.invalid/a\t5.0s\nok  \texample.invalid/a\t9.0s\nFAIL\texample.invalid/a\t7.0s\n"
+	got, err := ParseWeights(strings.NewReader(log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["example.invalid/a"] != 9 {
+		t.Fatalf("repeated lines must keep the maximum, got %v", got["example.invalid/a"])
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestWeightsNeverRecordsBucketPartials(t *testing.T) {
+	log := "ok  \texample.invalid/cmd/fak\t300.0s\nok  \texample.invalid/whole\t12.0s\n"
+	var out bytes.Buffer
+	if err := runWeights([]string{"-partial", "example.invalid/cmd/fak"}, strings.NewReader(log), &out); err != nil {
+		t.Fatal(err)
+	}
+	var w Weights
+	if err := json.Unmarshal(out.Bytes(), &w); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := w.Packages["example.invalid/cmd/fak"]; ok {
+		t.Fatal("a bucket's partial time must not become the package weight")
+	}
+	if w.Packages["example.invalid/whole"] != 12 {
+		t.Fatalf("whole package lost: %v", w.Packages)
 	}
 }
 

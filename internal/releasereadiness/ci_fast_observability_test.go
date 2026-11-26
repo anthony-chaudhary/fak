@@ -28,7 +28,7 @@ func TestFastReleaseGateConvergesAndKeepsFullTestObservable(t *testing.T) {
 		// The go test step stays observable (#6982): tee'd log, the real exit
 		// status, and a heartbeat while it runs.
 		"- name: go test ./... (no -race)",
-		`go test -timeout=20m -skip "$CI_FAST_ADVISORY_TESTS" "${go_test_args[@]}" 2>&1 | tee`,
+		`go test -timeout=12m -skip "$CI_FAST_ADVISORY_TESTS" "${go_test_args[@]}" 2>&1 | tee`,
 		`status_file="$RUNNER_TEMP/ci-fast-go-test.status"`,
 		`"$RUNNER_TEMP/ci-fast-go-test.log"`,
 		"${PIPESTATUS[0]}",
@@ -98,8 +98,11 @@ func TestFastReleaseGateShardOutlastsPerBinaryTimeout(t *testing.T) {
 	if testTimeout <= 10 {
 		t.Fatalf("go test -timeout=%dm does not exceed the 10m default that clipped cmd/fak", testTimeout)
 	}
-	if stepTimeout < testTimeout+10 {
-		t.Fatalf("step timeout-minutes %d must outlast go test -timeout=%dm plus compile/link grace (>= %d)", stepTimeout, testTimeout, testTimeout+10)
+	// Compile and link run inside the step before go test starts its clock, so
+	// the step keeps at least this much grace past the per-binary timeout.
+	const compileLinkGraceMinutes = 5
+	if stepTimeout < testTimeout+compileLinkGraceMinutes {
+		t.Fatalf("step timeout-minutes %d must outlast go test -timeout=%dm plus compile/link grace (>= %d)", stepTimeout, testTimeout, testTimeout+compileLinkGraceMinutes)
 	}
 	if jobTimeout <= stepTimeout {
 		t.Fatalf("job timeout-minutes %d must outlast the go test step bound %d", jobTimeout, stepTimeout)
@@ -156,19 +159,19 @@ func TestFastReleaseGateRequiresCompleteSourceBoundProvenance(t *testing.T) {
 			f.receipts[1]["commands"] = [][]string{fastShardCommand(packages...)}
 		}},
 		{name: "test assigned to two buckets", mutate: func(f *fastProvenanceFixture) {
-			bucket := f.receipts[9]["coverage"].(map[string]any)
+			bucket := f.receipts[f.shards+1]["coverage"].(map[string]any)
 			tests := append(bucket["tests"].([]string), "TestB")
 			bucket["tests"] = tests
-			f.receipts[9]["commands"] = [][]string{fastBucketCommand("example.invalid/project/big", tests...)}
+			f.receipts[f.shards+1]["commands"] = [][]string{fastBucketCommand("example.invalid/project/big", tests...)}
 		}},
 		{name: "bucket argv runs fewer tests than it claims", mutate: func(f *fastProvenanceFixture) {
-			f.receipts[9]["commands"] = [][]string{fastBucketCommand("example.invalid/project/big", "TestA")}
+			f.receipts[f.shards+1]["commands"] = [][]string{fastBucketCommand("example.invalid/project/big", "TestA")}
 		}},
 		{name: "bucket lists a different test universe", mutate: func(f *fastProvenanceFixture) {
-			f.receipts[10]["coverage"].(map[string]any)["all_tests"] = []string{"TestA", "TestB"}
+			f.receipts[f.shards+2]["coverage"].(map[string]any)["all_tests"] = []string{"TestA", "TestB"}
 		}},
 		{name: "split list disagrees with bucket jobs", mutate: func(f *fastProvenanceFixture) {
-			for _, receipt := range f.receipts[1:9] {
+			for _, receipt := range f.receipts[1 : f.shards+1] {
 				receipt["coverage"].(map[string]any)["split_packages"] = []string{"example.invalid/project/big"}
 			}
 		}},
@@ -184,7 +187,7 @@ func TestFastReleaseGateRequiresCompleteSourceBoundProvenance(t *testing.T) {
 			f.bind("REQUESTED_INTENT", "requested_intent", "release")
 		}},
 		{name: "empty package universe", mutate: func(f *fastProvenanceFixture) {
-			for _, receipt := range f.receipts[1:9] {
+			for _, receipt := range f.receipts[1 : f.shards+1] {
 				coverage := receipt["coverage"].(map[string]any)
 				coverage["all_packages"], coverage["packages"] = []string{}, []string{}
 				receipt["commands"] = [][]string{fastShardCommand()}
@@ -268,7 +271,7 @@ func TestFastReleaseGateRequiresCompleteSourceBoundProvenance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newFastProvenanceFixture()
+			fixture := newFastProvenanceFixture(t)
 			if tc.mutate != nil {
 				tc.mutate(&fixture)
 			}
@@ -500,11 +503,11 @@ var fastAdvisoryRatchets = map[string]string{
 const fastAdvisorySkip = "^(TestLiveTreeUnderCeiling|TestTreeEnumExhaustivenessNotGrowing|TestLiveInternalGoPackagesResolveToExplicitLaneTrees|TestCheckedInPageIsFresh|TestLiveGitGatherIsWellFormed|TestTestSuitePolicy)$"
 
 func fastShardCommand(packages ...string) []string {
-	return append([]string{"go", "test", "-timeout=20m", "-skip", fastAdvisorySkip}, packages...)
+	return append([]string{"go", "test", "-timeout=12m", "-skip", fastAdvisorySkip}, packages...)
 }
 
 func fastBucketCommand(pkg string, tests ...string) []string {
-	return []string{"go", "test", "-timeout=20m", "-skip", fastAdvisorySkip, "-run", "^(" + strings.Join(tests, "|") + ")$", pkg}
+	return []string{"go", "test", "-timeout=12m", "-skip", fastAdvisorySkip, "-run", "^(" + strings.Join(tests, "|") + ")$", pkg}
 }
 
 // TestFastReleaseGateSkipsOnlyPinnedLiveTreeRatchets keeps the decisive gate's
@@ -573,6 +576,8 @@ type fastProvenanceFixture struct {
 	env       map[string]string
 	receipts  []map[string]any
 	malformed bool
+	// shards is the workflow's CI_FAST_SHARDS; receipts[:shards] are the shard jobs.
+	shards int
 }
 
 func (f *fastProvenanceFixture) bind(env, field, value string) {
@@ -582,38 +587,114 @@ func (f *fastProvenanceFixture) bind(env, field, value string) {
 	}
 }
 
-func newFastProvenanceFixture() fastProvenanceFixture {
-	f := fastProvenanceFixture{env: map[string]string{
+// workflowEnvNumber reads an integer planner input from the ci-fast workflow env,
+// so the fixture's job counts follow the committed matrix instead of a constant.
+func workflowEnvNumber(t *testing.T, name string) int {
+	t.Helper()
+	m := regexp.MustCompile(`(?m)^\s+` + regexp.QuoteMeta(name) + `: "(\d+)"\s*$`).FindStringSubmatch(readFastReleaseWorkflow(t))
+	if m == nil {
+		t.Fatalf("ci-fast workflow has no numeric env %s", name)
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n < 1 {
+		t.Fatalf("ci-fast env %s = %q, want a positive integer", name, m[1])
+	}
+	return n
+}
+
+// workflowEnvList reads a space-separated list from the ci-fast workflow env.
+func workflowEnvList(t *testing.T, name string) []string {
+	t.Helper()
+	m := regexp.MustCompile(`(?m)^\s+` + regexp.QuoteMeta(name) + `: "([^"]*)"\s*$`).FindStringSubmatch(readFastReleaseWorkflow(t))
+	if m == nil {
+		t.Fatalf("ci-fast workflow has no env %s", name)
+	}
+	return strings.Fields(m[1])
+}
+
+func workflowSplitBucketCounts(t *testing.T, splitNames []string) []int {
+	t.Helper()
+	workflow := readFastReleaseWorkflow(t)
+	counts := make([]int, len(splitNames))
+	for i, pkg := range splitNames {
+		m := regexp.MustCompile(`(?m)^\s+- \{ split: ` + regexp.QuoteMeta(pkg) + `, bucket: 1, buckets: (\d+) \}\s*$`).FindStringSubmatch(workflow)
+		if m == nil {
+			t.Fatalf("ci-fast workflow has no first bucket for split package %s", pkg)
+		}
+		count, err := strconv.Atoi(m[1])
+		if err != nil || count < 1 {
+			t.Fatalf("ci-fast split package %s has invalid bucket count %q", pkg, m[1])
+		}
+		for bucket := 1; bucket <= count; bucket++ {
+			row := fmt.Sprintf("- { split: %s, bucket: %d, buckets: %d }", pkg, bucket, count)
+			if strings.Count(workflow, row) != 1 {
+				t.Fatalf("ci-fast workflow needs exactly one matrix row %q", row)
+			}
+		}
+		counts[i] = count
+	}
+	return counts
+}
+
+func newFastProvenanceFixture(t *testing.T) fastProvenanceFixture {
+	t.Helper()
+	shards := workflowEnvNumber(t, "CI_FAST_SHARDS")
+	bucketTotal := workflowEnvNumber(t, "CI_FAST_BUCKETS")
+	splitNames := workflowEnvList(t, "CI_FAST_SPLIT_PACKAGES")
+	splitBucketCounts := workflowSplitBucketCounts(t, splitNames)
+	if len(splitNames) < 2 || bucketTotal < len(splitNames) {
+		t.Fatalf("fixture needs at least two split packages and one bucket each; env lists %d packages and %d buckets", len(splitNames), bucketTotal)
+	}
+	f := fastProvenanceFixture{shards: shards, env: map[string]string{
 		"EXPECTED_SHA": strings.Repeat("a", 40), "EXPECTED_TREE": strings.Repeat("b", 40), "GITHUB_SHA": strings.Repeat("a", 40),
 		"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main", "GITHUB_RUN_ID": "100", "GITHUB_RUN_ATTEMPT": "1",
 		"CI_CLASS": "fast", "REQUESTED_INTENT": "", "CANDIDATE_RESULT": "success", "BUILD_VET_RESULT": "success", "GO_TEST_SHARDS_RESULT": "success",
-		"CI_FAST_ADVISORY_TESTS": fastAdvisorySkip,
+		"CI_FAST_ADVISORY_TESTS": fastAdvisorySkip, "CI_FAST_SHARDS": strconv.Itoa(shards), "CI_FAST_BUCKETS": strconv.Itoa(bucketTotal),
 	}}
-	shardOwned := []string{
-		"example.invalid/project/a", "example.invalid/project/b", "example.invalid/project/c", "example.invalid/project/d",
-		"example.invalid/project/e", "example.invalid/project/f", "example.invalid/project/g", "example.invalid/project/h",
-		"example.invalid/project/i", "example.invalid/project/j", "example.invalid/project/k", "example.invalid/project/l",
-		"example.invalid/project/m", "example.invalid/project/n", "example.invalid/project/o", "example.invalid/project/p",
+	// Each shard owns two packages, so the fixture's universe scales with the shard count.
+	var shardOwned []string
+	for i := 0; i < 2*shards; i++ {
+		shardOwned = append(shardOwned, "example.invalid/project/"+string(rune('a'+i)))
 	}
-	split := []string{"example.invalid/project/big", "example.invalid/project/wide", "example.invalid/project/tall"}
+	split := []string{"example.invalid/project/big", "example.invalid/project/wide"}
+	for i := 2; i < len(splitNames); i++ {
+		split = append(split, fmt.Sprintf("example.invalid/project/split%02d", i))
+	}
 	all := append(append([]string{}, shardOwned...), split...)
 	var partitions [][]string
-	for i := 0; i < 8; i++ {
-		partitions = append(partitions, []string{shardOwned[i], shardOwned[i+8]})
+	for i := 0; i < shards; i++ {
+		partitions = append(partitions, []string{shardOwned[i], shardOwned[i+shards]})
 	}
 	type bucket struct {
 		pkg          string
 		index, total int
 		tests, all   []string
 	}
-	bigTests := []string{"ExampleA", "FuzzB", "TestA", "TestB", "TestC", "TestD", "TestE", "TestF"}
-	wideTests := []string{"TestP", "TestQ", "TestR"}
-	tallTests := []string{"TestX", "TestY", "TestZ"}
-	buckets := []bucket{
-		{split[0], 0, 4, []string{"ExampleA", "TestC"}, bigTests}, {split[0], 1, 4, []string{"FuzzB", "TestD"}, bigTests},
-		{split[0], 2, 4, []string{"TestA", "TestE"}, bigTests}, {split[0], 3, 4, []string{"TestB", "TestF"}, bigTests},
-		{split[1], 0, 2, []string{"TestP", "TestR"}, wideTests}, {split[1], 1, 2, []string{"TestQ"}, wideTests},
-		{split[2], 0, 3, []string{"TestX"}, tallTests}, {split[2], 1, 3, []string{"TestY"}, tallTests}, {split[2], 2, 3, []string{"TestZ"}, tallTests},
+	// Each split package's tests are dealt across the exact committed matrix
+	// bucket count by index mod k, the same rule the planner uses.
+	testUniverse := [][]string{
+		{"ExampleA", "FuzzB", "TestA", "TestB", "TestC", "TestD", "TestE", "TestF"},
+		{"TestP", "TestQ", "TestR"},
+	}
+	var buckets []bucket
+	for i, pkg := range split {
+		k := splitBucketCounts[i]
+		names := testUniverse[0]
+		if i > 0 {
+			names = testUniverse[1]
+		}
+		for j := 0; j < k; j++ {
+			var tests []string
+			for n, name := range names {
+				if n%k == j {
+					tests = append(tests, name)
+				}
+			}
+			buckets = append(buckets, bucket{pkg, j, k, tests, names})
+		}
+	}
+	if len(buckets) != bucketTotal {
+		t.Fatalf("ci-fast workflow matrix has %d split buckets, CI_FAST_BUCKETS declares %d", len(buckets), bucketTotal)
 	}
 	jobs := []string{"build-vet-fast"}
 	for i := 0; i < len(partitions)+len(buckets); i++ {
@@ -879,7 +960,7 @@ func TestFastReleaseGateWritesFailureEvidenceAfterRedGate(t *testing.T) {
 		t.Fatal("upload must consume the aggregate evidence written by the verifier")
 	}
 	requireProvenanceTools(t)
-	fixture := newFastProvenanceFixture()
+	fixture := newFastProvenanceFixture(t)
 	fixture.env["BUILD_VET_RESULT"] = "failure"
 	fixture.env["GO_TEST_SHARDS_RESULT"] = "failure"
 	fixture.receipts[0]["result"] = "failure"
