@@ -1652,7 +1652,7 @@ func execProgramArg(call *ast.CallExpr) (ast.Expr, bool) {
 		return nil, false
 	}
 	id, ok := sel.X.(*ast.Ident)
-	if !ok || id.Name != "exec" {
+	if !ok || (id.Name != "exec" && id.Name != "windowgate") {
 		return nil, false
 	}
 	switch sel.Sel.Name {
