@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -253,7 +254,6 @@ func materializeGitTree(root, treeish string) (conceptGitTree, func(), error) {
 	if err != nil {
 		return conceptGitTree{}, func() {}, err
 	}
-	// Freeze the archive object without losing commit export-subst context.
 	pinned, err := git(root, "rev-parse", "--verify", treeish)
 	if err != nil {
 		return conceptGitTree{}, func() {}, err
@@ -276,7 +276,11 @@ func materializeGitTree(root, treeish string) (conceptGitTree, func(), error) {
 	if profile != nil {
 		extract = extractConceptProfileTar
 	}
-	if err = extractGitTreeUsing(root, treeish, tmp, extract); err != nil {
+	if err = extractCommittedTreeUsing(root, treeish, tmp, extract); err != nil {
+		cleanup()
+		return conceptGitTree{}, func() {}, err
+	}
+	if err = expandCommitSubstitution(root, treeish, tmp); err != nil {
 		cleanup()
 		return conceptGitTree{}, func() {}, err
 	}
@@ -290,89 +294,238 @@ func materializeGitTree(root, treeish string) (conceptGitTree, func(), error) {
 	return conceptGitTree{root: tmp, profile: profile}, cleanup, nil
 }
 
-var gitArchiveCommand = func(treeish string) *exec.Cmd {
-	return exec.Command("git", "archive", "--format=tar", treeish)
+// extractCommittedTreeUsing streams the committed tree of treeish into tmp. The tree is
+// read through committedtree.WriteTar rather than git archive: export-ignore rows would
+// strip paths such as docs/ and tools/ from the snapshot, and the generator and its
+// freshness comparison read exactly those paths.
+func extractCommittedTreeUsing(root, treeish, tmp string, extract func(io.Reader, string) error) error {
+	return extractTarStreamUsing(treeish, tmp, extract, func(w io.Writer) error {
+		return committedtree.WriteTar(context.Background(), root, treeish, w)
+	})
 }
 
-func extractGitTree(root, treeish, tmp string) error {
-	return extractGitTreeUsing(root, treeish, tmp, extractGitTar)
+const (
+	exportSubstOpen  = "$Format:"
+	exportSubstClose = '$'
+)
+
+// commitIdentity is what git's export-subst placeholders can name for one commit.
+type commitIdentity struct {
+	hash, abbrevHash       string
+	tree, abbrevTree       string
+	parents, abbrevParents string
 }
 
-func extractGitTreeUsing(root, treeish, tmp string, extract func(io.Reader, string) error) error {
-	cmd := gitArchiveCommand(treeish)
+// expandCommitSubstitution applies git archive's export-subst expansion to the regular
+// files of treeish that carry the attribute, so the snapshot holds the bytes git archive
+// wrote. A tree object has no commit identity and git archive never expanded one, so it
+// is left as extracted.
+func expandCommitSubstitution(root, treeish, tmp string) error {
+	commit, err := peelToCommit(root, treeish)
+	if err != nil || commit == "" {
+		return err
+	}
+	paths, err := exportSubstPaths(root, commit)
+	if err != nil || len(paths) == 0 {
+		return err
+	}
+	id, err := identityOf(root, commit)
+	if err != nil {
+		return err
+	}
+	for _, p := range paths {
+		target := filepath.Join(tmp, filepath.FromSlash(p))
+		data, err := os.ReadFile(target)
+		if err != nil {
+			return fmt.Errorf("export-subst %s: %w", p, err)
+		}
+		out, err := expandExportSubst(data, id)
+		if err != nil {
+			return fmt.Errorf("export-subst %s: %w", p, err)
+		}
+		if !bytes.Equal(out, data) {
+			if err := os.WriteFile(target, out, 0o644); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// peelToCommit returns the commit treeish names, or "" when it names a tree.
+func peelToCommit(root, treeish string) (string, error) {
+	out, err := gitBytes(root, nil, "rev-parse", "--verify", "--quiet", treeish+"^{commit}")
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// exportSubstPaths lists the regular files of commit whose export-subst attribute is set,
+// as read from the commit's own .gitattributes rather than the shared worktree.
+func exportSubstPaths(root, commit string) ([]string, error) {
+	listing, err := gitBytes(root, nil, "ls-tree", "-r", "-z", commit)
+	if err != nil {
+		return nil, err
+	}
+	var regular [][]byte
+	for _, rec := range bytes.Split(listing, []byte{0}) {
+		meta, path, ok := bytes.Cut(rec, []byte{'\t'})
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(string(meta))
+		if len(fields) > 0 && (fields[0] == "100644" || fields[0] == "100755") {
+			regular = append(regular, path)
+		}
+	}
+	if len(regular) == 0 {
+		return nil, nil
+	}
+	query := append(bytes.Join(regular, []byte{0}), 0)
+	attrs, err := gitBytes(root, query, "check-attr", "-z", "--source="+commit, "export-subst", "--stdin")
+	if err != nil {
+		return nil, err
+	}
+	fields := bytes.Split(attrs, []byte{0})
+	var paths []string
+	for i := 0; i+2 < len(fields); i += 3 {
+		if string(fields[i+1]) == "export-subst" && string(fields[i+2]) == "set" {
+			paths = append(paths, string(fields[i]))
+		}
+	}
+	return paths, nil
+}
+
+// identityOf reads the commit fields export-subst can name. One log call supplies them
+// all, and its abbreviations match the ones git archive's placeholders produce.
+func identityOf(root, commit string) (commitIdentity, error) {
+	out, err := gitBytes(root, nil, "log", "-1", "--no-show-signature",
+		"--format=%H%x00%h%x00%T%x00%t%x00%P%x00%p", commit)
+	if err != nil {
+		return commitIdentity{}, err
+	}
+	f := strings.Split(strings.TrimRight(string(out), "\n"), "\x00")
+	if len(f) != 6 {
+		return commitIdentity{}, fmt.Errorf("commit identity for %s: unexpected fields %q", commit, f)
+	}
+	return commitIdentity{hash: f[0], abbrevHash: f[1], tree: f[2], abbrevTree: f[3], parents: f[4], abbrevParents: f[5]}, nil
+}
+
+// expandExportSubst replaces each $Format:...$ span with its expansion. An unterminated
+// span stays verbatim, as git leaves it. A placeholder the expansion does not support
+// is an error, never passed through.
+func expandExportSubst(data []byte, id commitIdentity) ([]byte, error) {
+	var out []byte
+	rest := data
+	expanded := false
+	for {
+		i := bytes.Index(rest, []byte(exportSubstOpen))
+		if i < 0 {
+			break
+		}
+		body := rest[i+len(exportSubstOpen):]
+		j := bytes.IndexByte(body, exportSubstClose)
+		if j < 0 {
+			break
+		}
+		expansion, err := formatCommitPlaceholder(body[:j], id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rest[:i]...)
+		out = append(out, expansion...)
+		rest = body[j+1:]
+		expanded = true
+	}
+	if !expanded {
+		return data, nil
+	}
+	return append(out, rest...), nil
+}
+
+// formatCommitPlaceholder expands one placeholder body in git's pretty-format syntax,
+// restricted to the commit-identity codes.
+func formatCommitPlaceholder(format []byte, id commitIdentity) ([]byte, error) {
+	var out []byte
+	for k := 0; k < len(format); k++ {
+		if format[k] != '%' {
+			out = append(out, format[k])
+			continue
+		}
+		k++
+		if k == len(format) {
+			return nil, fmt.Errorf("placeholder %q ends in %%", format)
+		}
+		switch format[k] {
+		case '%':
+			out = append(out, '%')
+		case 'n':
+			out = append(out, '\n')
+		case 'H':
+			out = append(out, id.hash...)
+		case 'h':
+			out = append(out, id.abbrevHash...)
+		case 'T':
+			out = append(out, id.tree...)
+		case 't':
+			out = append(out, id.abbrevTree...)
+		case 'P':
+			out = append(out, id.parents...)
+		case 'p':
+			out = append(out, id.abbrevParents...)
+		default:
+			return nil, fmt.Errorf("unsupported placeholder %%%s in %q", string(format[k]), format)
+		}
+	}
+	return out, nil
+}
+
+// gitBytes runs git in root and returns stdout alone, so NUL-delimited output is not
+// mixed with stderr. stdin is fed when non-nil.
+func gitBytes(root string, stdin []byte, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
-	var stderr gitArchiveStderr
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
+	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("git archive %s: %w", treeish, err)
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
-	if err := cmd.Start(); err != nil {
-		_ = stdout.Close()
-		return fmt.Errorf("git archive %s: %w", treeish, err)
-	}
+	return out, nil
+}
 
-	extractErr := extract(stdout, tmp)
+// extractTarStreamUsing runs produce concurrently and feeds its tar stream to extract.
+// A consumer that fails closes the pipe so a producer blocked on a write returns; a
+// consumer that finishes early drains the remaining padding so the producer can
+// complete. Consumer errors are reported first.
+func extractTarStreamUsing(treeish, tmp string, extract func(io.Reader, string) error, produce func(io.Writer) error) error {
+	pr, pw := io.Pipe()
+	produced := make(chan error, 1)
+	go func() {
+		err := produce(pw)
+		_ = pw.CloseWithError(err)
+		produced <- err
+	}()
+	extractErr := extract(pr, tmp)
 	var drainErr error
 	if extractErr == nil {
-		// tar.Reader stops at its end marker; consume the remaining padding so
-		// the producer can finish even when its output exceeds the pipe buffer.
-		_, drainErr = io.Copy(io.Discard, stdout)
+		_, drainErr = io.Copy(io.Discard, pr)
 	}
-	_ = stdout.Close()
-	if extractErr != nil || drainErr != nil {
-		// Extraction may fail before git has finished writing. Reap it without
-		// waiting for the rest of an archive that can no longer be consumed.
-		_ = cmd.Process.Kill()
+	_ = pr.Close()
+	var produceErr error
+	if err := <-produced; err != nil {
+		produceErr = fmt.Errorf("committed tree %s: %w", treeish, err)
 	}
-	waitErr := cmd.Wait()
-	if waitErr != nil {
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			exitErr.Stderr = stderr.Bytes()
-		}
-		waitErr = fmt.Errorf("git archive %s: %w", treeish, waitErr)
-	}
-	// Keep a consumer failure first, including when stopping git induced a
-	// second error, without hiding a genuine producer failure on a partial tar.
-	return errors.Join(extractErr, drainErr, waitErr)
-}
-
-// gitArchiveStderr retains the same bounded prefix/suffix diagnostics as
-// exec.Cmd.Output without retaining the archive itself.
-type gitArchiveStderr struct {
-	prefix, suffix []byte
-	total          int64
-}
-
-func (w *gitArchiveStderr) Write(p []byte) (int, error) {
-	const half = 32 << 10
-	n := len(p)
-	w.total += int64(n)
-	if remaining := half - len(w.prefix); remaining > 0 {
-		keep := min(remaining, len(p))
-		w.prefix = append(w.prefix, p[:keep]...)
-		p = p[keep:]
-	}
-	if len(p) >= half {
-		w.suffix = append(w.suffix[:0], p[len(p)-half:]...)
-	} else {
-		if overflow := len(w.suffix) + len(p) - half; overflow > 0 {
-			w.suffix = w.suffix[:copy(w.suffix, w.suffix[overflow:])]
-		}
-		w.suffix = append(w.suffix, p...)
-	}
-	return n, nil
-}
-
-func (w *gitArchiveStderr) Bytes() []byte {
-	var out bytes.Buffer
-	out.Write(w.prefix)
-	if omitted := w.total - int64(len(w.prefix)+len(w.suffix)); omitted > 0 {
-		fmt.Fprintf(&out, "\n... omitting %d bytes ...\n", omitted)
-	}
-	out.Write(w.suffix)
-	return out.Bytes()
+	return errors.Join(extractErr, drainErr, produceErr)
 }
 
 func extractGitTar(archive io.Reader, tmp string) error {

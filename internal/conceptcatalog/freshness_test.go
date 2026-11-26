@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -368,22 +369,18 @@ func fixtureRepo(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Tests use committed inputs so peer WIP cannot affect the fixture.
+	// Tests use committed inputs so peer WIP cannot affect the fixture. committedtree keeps
+	// export-ignored paths such as docs/ and tools/, which the generator reads.
 	tmp := t.TempDir()
-	out, err := git(root, "archive", "HEAD")
-	if err != nil {
+	var snapshot bytes.Buffer
+	if err := committedtree.WriteTar(context.Background(), root, "HEAD", &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	// CheckGitTree owns safe archive extraction; seed by cloning the tracked tree cheaply.
 	cmdRoot := filepath.Join(tmp, "repo")
 	if err := os.MkdirAll(cmdRoot, 0755); err != nil {
 		t.Fatal(err)
 	}
-	_ = out
-	// Use git archive through a temporary worktree-like extraction command for test brevity.
-	// tar is part of the repository's supported build environment.
-	// On Windows bsdtar is available as tar.exe.
-	tr := tar.NewReader(bytes.NewReader(out))
+	tr := tar.NewReader(&snapshot)
 	for {
 		h, e := tr.Next()
 		if e == io.EOF {
@@ -411,14 +408,6 @@ func fixtureRepo(t *testing.T) string {
 		if e = f.Close(); e != nil {
 			t.Fatal(e)
 		}
-	}
-	// Exercise the generator under test, while all corpus/data inputs remain the committed tree.
-	script, err := os.ReadFile(filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cmdRoot, "tools", "concept_disambiguation_scorecard.py"), script, 0644); err != nil {
-		t.Fatal(err)
 	}
 	if err := generate(cmdRoot, filepath.Join(cmdRoot, "docs", "concept-disambiguation-scorecard")); err != nil {
 		t.Fatal(err)
@@ -639,6 +628,276 @@ func TestRelevantPathCoversEveryGeneratorInput(t *testing.T) {
 	for _, p := range irrelevant {
 		if RelevantPath(p) {
 			t.Errorf("RelevantPath(%q) = true; the generator does not read this path", p)
+		}
+	}
+}
+
+// Test-only oracle: git archive is the one producer that applies export-ignore, so tests
+// compare committedtree snapshots against it to prove the export rules are in effect. It is
+// never a snapshot path.
+var gitArchiveCommand = func(treeish string) *exec.Cmd {
+	return exec.Command("git", "archive", "--format=tar", treeish)
+}
+
+func extractGitTree(root, treeish, tmp string) error {
+	return extractGitTreeUsing(root, treeish, tmp, extractGitTar)
+}
+
+func extractGitTreeUsing(root, treeish, tmp string, extract func(io.Reader, string) error) error {
+	cmd := gitArchiveCommand(treeish)
+	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
+	var stderr gitArchiveStderr
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("git archive %s: %w", treeish, err)
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		return fmt.Errorf("git archive %s: %w", treeish, err)
+	}
+
+	extractErr := extract(stdout, tmp)
+	var drainErr error
+	if extractErr == nil {
+		// tar.Reader stops at its end marker; consume the remaining padding so
+		// the producer can finish even when its output exceeds the pipe buffer.
+		_, drainErr = io.Copy(io.Discard, stdout)
+	}
+	_ = stdout.Close()
+	if extractErr != nil || drainErr != nil {
+		// Extraction may fail before git has finished writing. Reap it without
+		// waiting for the rest of an archive that can no longer be consumed.
+		_ = cmd.Process.Kill()
+	}
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			exitErr.Stderr = stderr.Bytes()
+		}
+		waitErr = fmt.Errorf("git archive %s: %w", treeish, waitErr)
+	}
+	// Keep a consumer failure first, including when stopping git induced a
+	// second error, without hiding a genuine producer failure on a partial tar.
+	return errors.Join(extractErr, drainErr, waitErr)
+}
+
+// gitArchiveStderr retains the same bounded prefix/suffix diagnostics as
+// exec.Cmd.Output without retaining the archive itself.
+type gitArchiveStderr struct {
+	prefix, suffix []byte
+	total          int64
+}
+
+func (w *gitArchiveStderr) Write(p []byte) (int, error) {
+	const half = 32 << 10
+	n := len(p)
+	w.total += int64(n)
+	if remaining := half - len(w.prefix); remaining > 0 {
+		keep := min(remaining, len(p))
+		w.prefix = append(w.prefix, p[:keep]...)
+		p = p[keep:]
+	}
+	if len(p) >= half {
+		w.suffix = append(w.suffix[:0], p[len(p)-half:]...)
+	} else {
+		if overflow := len(w.suffix) + len(p) - half; overflow > 0 {
+			w.suffix = w.suffix[:copy(w.suffix, w.suffix[overflow:])]
+		}
+		w.suffix = append(w.suffix, p...)
+	}
+	return n, nil
+}
+
+func (w *gitArchiveStderr) Bytes() []byte {
+	var out bytes.Buffer
+	out.Write(w.prefix)
+	if omitted := w.total - int64(len(w.prefix)+len(w.suffix)); omitted > 0 {
+		fmt.Fprintf(&out, "\n... omitting %d bytes ...\n", omitted)
+	}
+	out.Write(w.suffix)
+	return out.Bytes()
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestExtractTarStreamUsingCarriesFailuresWithoutDeadlock(t *testing.T) {
+	sentinel := errors.New("producer sentinel")
+	writeUntilRejected := func(w io.Writer) error {
+		chunk := make([]byte, 64<<10)
+		for {
+			if _, err := w.Write(chunk); err != nil {
+				return err
+			}
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		produce func(io.Writer) error
+		extract func(io.Reader, string) error
+		check   func(t *testing.T, dst string, err error)
+	}{
+		{
+			name: "stream",
+			produce: func(w io.Writer) error {
+				return writeTarFixture(w, "first.txt", "first body\n")
+			},
+			extract: extractGitTar,
+			check: func(t *testing.T, dst string, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if body, err := os.ReadFile(filepath.Join(dst, "first.txt")); err != nil || string(body) != "first body\n" {
+					t.Fatalf("extracted file = %q, %v", body, err)
+				}
+			},
+		},
+		{
+			name: "producer-error",
+			produce: func(w io.Writer) error {
+				if err := writeTarFixture(w, "first.txt", "first body\n"); err != nil {
+					return err
+				}
+				return sentinel
+			},
+			extract: extractGitTar,
+			check: func(t *testing.T, dst string, err error) {
+				if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "committed tree fixture-tree") {
+					t.Fatalf("producer failure = %v, want wrapped sentinel", err)
+				}
+			},
+		},
+		{
+			name: "consumer-error-stops-blocked-producer",
+			produce: func(w io.Writer) error {
+				tw := tar.NewWriter(w)
+				if err := tw.WriteHeader(&tar.Header{Name: "../escaped.txt", Mode: 0644, Size: 4 << 20}); err != nil {
+					return err
+				}
+				return writeUntilRejected(w)
+			},
+			extract: extractGitTar,
+			check: func(t *testing.T, dst string, err error) {
+				if err == nil || !strings.HasPrefix(err.Error(), `unsafe archive path "../escaped.txt"`) {
+					t.Fatalf("consumer failure was lost: %v", err)
+				}
+			},
+		},
+		{
+			name:    "early-consumer-drains-padding",
+			produce: func(w io.Writer) error { return writeTarFixture(w, "first.txt", "first body\n") },
+			extract: func(io.Reader, string) error { return nil },
+			check: func(t *testing.T, _ string, err error) {
+				if err != nil {
+					t.Fatalf("drained stream reported %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := t.TempDir()
+			done := make(chan error, 1)
+			go func() {
+				done <- extractTarStreamUsing("fixture-tree", dst, tc.extract, tc.produce)
+			}()
+			select {
+			case err := <-done:
+				tc.check(t, dst, err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("tar stream pipeline deadlocked")
+			}
+		})
+	}
+}
+
+func writeTarFixture(w io.Writer, name, body string) error {
+	tw := tar.NewWriter(w)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0644, Size: int64(len(body))}); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(tw, body); err != nil {
+		return err
+	}
+	return tw.Close()
+}
+
+// fak-test:runtime fast est=500ms lane=default
+func TestCommittedTreeSnapshotKeepsExportIgnoredPaths(t *testing.T) {
+	t.Setenv(conceptTreeProfileEnv, "")
+	root := t.TempDir()
+	files := map[string]string{
+		".gitattributes":                            "docs/** export-ignore\ntools/** export-ignore\n",
+		"docs/fak/concept-glossary.md":              "# glossary\n",
+		"tools/concept_disambiguation_scorecard.py": "print('scorecard')\n",
+		"internal/keep/keep.go":                     "package keep\n",
+	}
+	for rel, body := range files {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitInitFixture(t, root)
+
+	tree, cleanup, err := materializeGitTree(root, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	for _, rel := range []string{"docs/fak/concept-glossary.md", "tools/concept_disambiguation_scorecard.py", "internal/keep/keep.go"} {
+		if _, err := os.Stat(filepath.Join(tree.root, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("snapshot dropped %s: %v", rel, err)
+		}
+	}
+
+	// Without this, the assertions above could pass on a fixture that export-ignore never touches.
+	oracle := t.TempDir()
+	if err := extractGitTreeUsing(root, "HEAD", oracle, extractGitTar); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(oracle, "docs", "fak", "concept-glossary.md")); !os.IsNotExist(err) {
+		t.Fatalf("git archive kept an export-ignored path (%v); the fixture does not exercise export-ignore", err)
+	}
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestExpandExportSubstMatchesGitPlaceholders(t *testing.T) {
+	id := commitIdentity{
+		hash: "aaaa1111bbbb2222cccc3333dddd4444eeee5555", abbrevHash: "aaaa111",
+		tree: "tttt1111", abbrevTree: "tttt111",
+		parents: "pppp1111 pppp2222", abbrevParents: "pppp111 pppp222",
+	}
+	cases := []struct {
+		name, in, want string
+	}{
+		{"no placeholder", "plain\n", "plain\n"},
+		{"full hash", "$Format:%H$\n", id.hash + "\n"},
+		{"abbrev and tree", "$Format:%h %T %t$", "aaaa111 tttt1111 tttt111"},
+		{"parents", "$Format:%P|%p$", "pppp1111 pppp2222|pppp111 pppp222"},
+		{"literal and percent escape", "v=$Format:100%% %H$!", "v=100% " + id.hash + "!"},
+		{"newline code", "$Format:a%nb$", "a\nb"},
+		{"empty expansion keeps the rest", "$Format:$x", "x"},
+		{"unterminated span stays verbatim", "$Format:%H", "$Format:%H"},
+		{"two spans", "$Format:%h$-$Format:%h$", "aaaa111-aaaa111"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := expandExportSubst([]byte(tc.in), id)
+			if err != nil || string(got) != tc.want {
+				t.Fatalf("expand %q = %q, %v; want %q", tc.in, got, err, tc.want)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestExpandExportSubstRejectsUnsupportedPlaceholder(t *testing.T) {
+	for _, in := range []string{"$Format:%d$", "$Format:%ad$", "$Format:trailing %$"} {
+		if got, err := expandExportSubst([]byte(in), commitIdentity{}); err == nil {
+			t.Fatalf("expand %q passed through as %q; want a loud error", in, got)
 		}
 	}
 }
