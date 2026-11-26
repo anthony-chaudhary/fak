@@ -329,14 +329,8 @@ func (s *inkling2DeviceSet) matrix(m model.Inkling2LoopMatrix) (model.Inkling2Lo
 	if !ok {
 		return m, nil
 	}
-	switch q.typ {
-	case TensorF32, TensorF16, TensorBF16:
-		if q.rows*q.cols < inkling2HostDenseLimit {
-			return m, nil
-		}
-	default:
-		// Quantized and i-quant matrices always go to the device; only small dense
-		// float matrices stay on the host.
+	if inkling2MatrixStaysHost(q) {
+		return m, nil
 	}
 	w, padK, err := inkling2DeviceWeight(s.be, q.typ, q.raw, q.rows, q.cols)
 	if err != nil {
@@ -368,6 +362,41 @@ func (s *inkling2DeviceSet) experts(e model.Inkling2LoopExperts) (model.Inkling2
 	return out, nil
 }
 
+// upload moves every bind item to the device. A non-zero window streams the
+// cold load: uploads run in mapping order while a background readahead keeps
+// window bytes of the upcoming payloads queued on the disk.
+func (s *inkling2DeviceSet) upload(m *Inkling2LoopModel, resident []bool, window int64) error {
+	items := inkling2UploadItems(m, resident)
+	var ra *inkling2UploadReadahead
+	if window > 0 {
+		inkling2SortUploadsByMapping(items)
+		payloads := make([][]byte, 0, len(items))
+		for _, it := range items {
+			if r := it.raw(); len(r) > 0 {
+				payloads = append(payloads, r)
+			}
+		}
+		ra = startInkling2UploadReadahead(newInkling2ReadaheadChunks(payloads, window, inkling2UploadReadaheadChunk), inkling2UploadAdvise)
+		defer ra.close()
+	}
+	for _, it := range items {
+		n := len(it.raw())
+		var err error
+		if it.mat != nil {
+			*it.mat, err = s.matrix(*it.mat)
+		} else {
+			*it.exps, err = s.experts(*it.exps)
+		}
+		if err != nil {
+			return err
+		}
+		if ra != nil && n > 0 {
+			ra.advance(n)
+		}
+	}
+	return nil
+}
+
 // inkling2ExpertResidencyOrder lists layer indices in the order their expert
 // stacks claim device memory: layers in the loop core [CoreStart, CoreEnd) run
 // Passes times per token, so a byte of their experts saves Passes reads where
@@ -392,7 +421,7 @@ func inkling2ExpertResidencyOrder(hp model.Inkling2LoopHParams, layers int) []in
 }
 
 // bindInkling2Device swaps every packed matrix and, while they fit the device
-// budget, expert stacks (in residency order) of a host-bound model for
+// budget, expert stacks (chosen in residency order) of a host-bound model for
 // be-resident equivalents. Experts over budget stay host quant experts that
 // MatVecBatch runs on the CPU. The token embedding and small dense matrices
 // stay host-side; Close frees the device tensors before the mapping.
@@ -411,41 +440,7 @@ func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
 			s.Close()
 		}
 	}()
-	w := m.Weights
-	mat := func(dst *model.Inkling2LoopMatrix) {
-		if err == nil && *dst != nil {
-			*dst, err = s.matrix(*dst)
-		}
-	}
-	exps := func(dst *model.Inkling2LoopExperts) {
-		if err == nil && *dst != nil {
-			*dst, err = s.experts(*dst)
-		}
-	}
-	mat(&w.Output)
-	for i := range w.Layers {
-		lw := &w.Layers[i]
-		for _, p := range []*model.Inkling2LoopMatrix{&lw.Wq, &lw.Wk, &lw.Wv, &lw.Wo, &lw.Gate, &lw.Rel,
-			&lw.SinkProj, &lw.Router, &lw.KConvProj, &lw.VConvProj} {
-			mat(p)
-		}
-	}
-	for _, i := range inkling2ExpertResidencyOrder(m.HP, len(w.Layers)) {
-		if !resident[i] {
-			continue
-		}
-		exps(&w.Layers[i].GateUp)
-		exps(&w.Layers[i].Down)
-	}
-	for i := range w.Controllers {
-		cw := &w.Controllers[i]
-		for c := range cw.Down {
-			mat(&cw.Down[c])
-			mat(&cw.Gain[c])
-			mat(&cw.Forget[c])
-		}
-	}
-	if err != nil {
+	if err = s.upload(m, resident, inkling2UploadReadaheadWindow(be, os.LookupEnv)); err != nil {
 		return err
 	}
 	// Prefetch only now, so cold-stack reads never race the uploads on NVMe;
@@ -455,7 +450,7 @@ func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
 	}
 	s.next = m.closer
 	m.closer = s
-	w.Batcher = &inkling2DeviceBatcher{be: be}
+	m.Weights.Batcher = &inkling2DeviceBatcher{be: be}
 	return nil
 }
 

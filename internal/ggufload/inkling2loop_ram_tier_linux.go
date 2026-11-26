@@ -33,6 +33,24 @@ func inkling2RAMAdvise(regions [][]byte) {
 
 func inkling2RAMMlock(b []byte) error { return unix.Mlock(b) }
 
+const inkling2UploadAdviseOn = true
+
+// inkling2UploadAdvise queues readahead for one upcoming upload chunk, so the
+// H2D copy's page faults find the pages already cached. No MADV_SEQUENTIAL:
+// it would outlive the load on the split VMA, and the page-rounded length can
+// reach a neighbouring host-read tensor.
+func inkling2UploadAdvise(b []byte) {
+	if len(b) == 0 {
+		return
+	}
+	page := unix.Getpagesize()
+	skip := (page - int(uintptr(unsafe.Pointer(&b[0])))%page) % page
+	if skip >= len(b) {
+		return
+	}
+	_ = unix.Madvise(b[skip:], unix.MADV_WILLNEED)
+}
+
 // inkling2CgroupClamped reports whether the probe's avail sits materially
 // under /proc/meminfo MemAvailable, i.e. the compute probe lowered it to a
 // cgroup's headroom. The slack absorbs drift between the two reads.
