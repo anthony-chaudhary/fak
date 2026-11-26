@@ -17,14 +17,24 @@ type gocacheFile struct {
 	mtime int64
 }
 
+const gocacheTrimUsage = "usage: fak-dev gocache-trim <cache-dir> <ceiling-bytes>\n" +
+	"       fak-dev gocache-trim --check <cache-dir> <ceiling-bytes>"
+
 // RunGoCacheTrim bounds a Go build cache to a byte ceiling without wiping it. Above the
 // ceiling the least-recently-used files (oldest mtime first) are removed until the cache
 // is at or under it, so the newest entries survive. A removed entry is a cache miss for
 // Go, which rebuilds it, so a trim costs time and never changes output.
+//
+// With --check it only measures the cache and fails above the ceiling, using the same
+// byte total the trim uses, so a CI gate after a trim agrees with the trim's own verdict.
 func RunGoCacheTrim(stdout, stderr io.Writer, argv []string) int {
-	const usage = "usage: fak-dev gocache-trim <cache-dir> <ceiling-bytes>"
+	check := false
+	if len(argv) > 0 && argv[0] == "--check" {
+		check = true
+		argv = argv[1:]
+	}
 	if len(argv) != 2 {
-		fmt.Fprintln(stderr, usage)
+		fmt.Fprintln(stderr, gocacheTrimUsage)
 		return 2
 	}
 	dir := argv[0]
@@ -36,6 +46,9 @@ func RunGoCacheTrim(stdout, stderr io.Writer, argv []string) int {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		fmt.Fprintf(stdout, "go build cache: %s does not exist, nothing to bound\n", dir)
 		return 0
+	}
+	if check {
+		return checkGoCache(stdout, stderr, dir, ceiling)
 	}
 
 	entries, total, err := scanGoCache(dir)
@@ -80,7 +93,23 @@ func RunGoCacheTrim(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// checkGoCache reports the cache's byte total and fails when it is above the ceiling.
+func checkGoCache(stdout, stderr io.Writer, dir string, ceiling int64) int {
+	_, total, err := scanGoCache(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak-dev gocache-trim: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "go build cache to save: %d bytes (ceiling %d)\n", total, ceiling)
+	if total > ceiling {
+		fmt.Fprintf(stderr, "go build cache is %d bytes, above the %d-byte ceiling\n", total, ceiling)
+		return 1
+	}
+	return 0
+}
+
 // scanGoCache lists every regular file under dir with its size and mtime, and their total.
+// Directory entries are not counted, so the total is the file bytes a save would store.
 func scanGoCache(dir string) ([]gocacheFile, int64, error) {
 	var entries []gocacheFile
 	var total int64

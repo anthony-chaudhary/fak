@@ -1764,21 +1764,14 @@ jobs:
         run: go run ./cmd/fak-dev gocache-trim "$(go env GOCACHE)" "$GO_BUILD_CACHE_CEILING_BYTES"
 
       # Measures the cache the save step will actually store, after the trim above, so it
-      # fails only when trimming could not bring the cache under the ceiling.
+      # fails only when trimming could not bring the cache under the ceiling. It uses the
+      # same native byte count as the trim (regular files only), so it agrees with the trim.
       - name: go build cache size gate (fails above the pinned ceiling)
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         env:
           GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
-        run: |
-          set -euo pipefail
-          cache="$(go env GOCACHE)"
-          size=$(du -sb "$cache" | cut -f1)
-          echo "go build cache to save: $size bytes (ceiling $GO_BUILD_CACHE_CEILING_BYTES)"
-          if (( size > GO_BUILD_CACHE_CEILING_BYTES )); then
-            echo "::error::go build cache is $size bytes, above the $GO_BUILD_CACHE_CEILING_BYTES-byte ceiling after trimming; not saving it"
-            exit 1
-          fi
+        run: go run ./cmd/fak-dev gocache-trim --check "$(go env GOCACHE)" "$GO_BUILD_CACHE_CEILING_BYTES"
 
       # Saved last, after every build and test step, so the entry holds the compiled
       # cache this job produced rather than the restored copy. Default success() gating:
@@ -2247,7 +2240,22 @@ jobs:
 
       # Only one designated leg saves the race build cache, and only from a trunk
       # push. The key is fixed per go.mod, so a save on an existing key is a no-op
-      # and the cache never churns per commit.
+      # and the cache never churns per commit. The same bound as the build-vet-test
+      # save applies here: trim the path that is saved, then gate it before the save.
+      - name: bound race build cache to the pinned ceiling (designated leg, trunk push only)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 'fak-01'
+        shell: bash
+        env:
+          GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
+        run: go run ./cmd/fak-dev gocache-trim "$HOME/.cache/go-build" "$GO_BUILD_CACHE_CEILING_BYTES"
+
+      - name: race build cache size gate (fails above the pinned ceiling)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 'fak-01'
+        shell: bash
+        env:
+          GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
+        run: go run ./cmd/fak-dev gocache-trim --check "$HOME/.cache/go-build" "$GO_BUILD_CACHE_CEILING_BYTES"
+
       - name: save race build cache (designated leg, trunk push only)
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 'fak-01'
         uses: actions/cache/save@v4

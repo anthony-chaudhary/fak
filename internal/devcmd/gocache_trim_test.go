@@ -87,3 +87,61 @@ func TestGoCacheTrimRejectsBadArguments(t *testing.T) {
 		t.Fatalf("negative ceiling: exit %d, want 2", code)
 	}
 }
+
+func TestGoCacheCheckFailsAboveCeilingAndLeavesFilesIntact(t *testing.T) {
+	dir := t.TempDir()
+	writeCacheFile(t, dir, "a", 400, time.Hour)
+
+	var stdout, stderr bytes.Buffer
+	if code := RunGoCacheTrim(&stdout, &stderr, []string{"--check", dir, "350"}); code == 0 {
+		t.Fatalf("check above ceiling exited 0, want failure; stdout %q", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a")); err != nil {
+		t.Fatalf("check removed a file: %v", err)
+	}
+}
+
+func TestGoCacheCheckPassesAtOrUnderCeiling(t *testing.T) {
+	dir := t.TempDir()
+	writeCacheFile(t, dir, "a", 100, time.Hour)
+	writeCacheFile(t, dir, "b", 100, 2*time.Hour)
+
+	var stdout, stderr bytes.Buffer
+	if code := RunGoCacheTrim(&stdout, &stderr, []string{"--check", dir, "200"}); code != 0 {
+		t.Fatalf("check at ceiling: exit %d, stderr %q", code, stderr.String())
+	}
+}
+
+func TestGoCacheCheckAgreesWithTrimAfterBound(t *testing.T) {
+	dir := t.TempDir()
+	writeCacheFile(t, dir, "00/oldest", 400, 4*time.Hour)
+	writeCacheFile(t, dir, "01/newest", 100, time.Hour)
+
+	var stdout, stderr bytes.Buffer
+	if code := RunGoCacheTrim(&stdout, &stderr, []string{dir, "350"}); code != 0 {
+		t.Fatalf("trim: exit %d, stderr %q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunGoCacheTrim(&stdout, &stderr, []string{"--check", dir, "350"}); code != 0 {
+		t.Fatalf("check after trim: exit %d, stderr %q", code, stderr.String())
+	}
+}
+
+func TestGoCacheCheckIgnoresDirectoryEntries(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < 50; i++ {
+		if err := os.MkdirAll(filepath.Join(dir, "d", strconv.Itoa(i)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeCacheFile(t, dir, "d/file", 100, time.Hour)
+
+	_, total, err := scanGoCache(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 100 {
+		t.Fatalf("scanGoCache total %d, want 100 (regular file bytes only)", total)
+	}
+}
