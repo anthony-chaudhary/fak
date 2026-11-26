@@ -1,10 +1,18 @@
 package trunkbuildprobe
 
 import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 )
 
 // A real cmd/fak build-failure block (Windows `\` paths, every "no definition" shape).
@@ -271,6 +279,81 @@ func TestDiagnoseBuildBrokenOther(t *testing.T) {
 	}
 	if !strings.Contains(d.Summary, "genuine") {
 		t.Errorf("summary = %q", d.Summary)
+	}
+}
+
+// TestMaterializeHeadKeepsExportIgnoredBuildInputs fails if the snapshot ever goes
+// through `git archive`, which drops export-ignored paths a build compiles, and
+// checks that paths outside the build prefixes are not snapshotted at all.
+func TestMaterializeHeadKeepsExportIgnoredBuildInputs(t *testing.T) {
+	repo := t.TempDir()
+	writeRepoFile(t, repo, ".gitattributes", "secret.txt export-ignore\n")
+	writeRepoFile(t, repo, "go.mod", "module example.invalid/probe\n")
+	writeRepoFile(t, repo, "cmd/tool/main.go", "package main\n\nfunc main() {}\n")
+	writeRepoFile(t, repo, "cmd/tool/testdata/secret.txt", "kept in the committed tree\n")
+	writeRepoFile(t, repo, "docs/notes.md", "not a build input\n")
+	runGit(t, repo, "init", "-q")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
+		"-c", "commit.gpgsign=false", "commit", "-q", "-m", "init")
+
+	dest := t.TempDir()
+	if err := materializeHead(context.Background(), repo, dest); err != nil {
+		t.Fatalf("materializeHead: %v", err)
+	}
+	for _, name := range []string{"go.mod", "cmd/tool/main.go", "cmd/tool/testdata/secret.txt"} {
+		if _, err := os.Stat(filepath.Join(dest, filepath.FromSlash(name))); err != nil {
+			t.Errorf("snapshot missing %s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"docs/notes.md", ".gitattributes"} {
+		if _, err := os.Stat(filepath.Join(dest, filepath.FromSlash(name))); !os.IsNotExist(err) {
+			t.Errorf("snapshot should not contain %s (err=%v)", name, err)
+		}
+	}
+}
+
+// A caller deadline that has already passed must surface as a plain context
+// error, not as the package budget's BudgetError.
+func TestMaterializeHeadCallerDeadlineIsNotBudgetError(t *testing.T) {
+	repo := t.TempDir()
+	writeRepoFile(t, repo, "go.mod", "module example.invalid/probe\n")
+	runGit(t, repo, "init", "-q")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
+		"-c", "commit.gpgsign=false", "commit", "-q", "-m", "init")
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	err := materializeHead(ctx, repo, t.TempDir())
+	if err == nil {
+		t.Fatal("materializeHead with an expired caller deadline succeeded")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+	var budget *committedtree.BudgetError
+	if errors.As(err, &budget) {
+		t.Errorf("caller deadline reported as package BudgetError: %v", err)
+	}
+}
+
+func writeRepoFile(t *testing.T, repo, name, body string) {
+	t.Helper()
+	path := filepath.Join(repo, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runGit(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 

@@ -2,12 +2,16 @@ package wipref
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 )
 
 func testGit(t *testing.T, dir string, args ...string) string {
@@ -173,6 +177,33 @@ func TestRunRecoveryDrill_ValidCheckpoint(t *testing.T) {
 	}
 }
 
+func TestRunRecoveryDrill_RestoresExportIgnoredPaths(t *testing.T) {
+	dir, baseCommit := setupTestRepo(t)
+
+	session := "session-export-ignore"
+	ref, _ := createCheckpoint(t, dir, session, baseCommit, map[string]string{
+		".gitattributes": "secret.txt export-ignore\nvendor/** export-ignore\n",
+		"secret.txt":     "export-ignored content\n",
+		"vendor/lib.h":   "#define LIB 1\n",
+		"file1.txt":      "ordinary content\n",
+	})
+
+	report, err := RunRecoveryDrill(context.Background(), dir, DrillOptions{Session: session})
+	if err != nil {
+		t.Fatalf("RunRecoveryDrill failed: %v", err)
+	}
+	res := report.Results[0]
+	if res.Ref != ref {
+		t.Fatalf("ref mismatch: got %q, want %q", res.Ref, ref)
+	}
+	if res.Status != "PASS" {
+		t.Fatalf("expected PASS, got %q (detail: %s)", res.Status, res.Detail)
+	}
+	if res.RestoredPathCount != 4 {
+		t.Errorf("expected 4 restored paths including export-ignored ones, got %d", res.RestoredPathCount)
+	}
+}
+
 func TestRunRecoveryDrill_MissingObject(t *testing.T) {
 	dir, baseCommit := setupTestRepo(t)
 
@@ -331,5 +362,104 @@ func TestRunRecoveryDrill_MainTreePreserved(t *testing.T) {
 	untrackedRead, _ := os.ReadFile(untrackedFile)
 	if string(untrackedRead) != untrackedContent {
 		t.Errorf("untracked file changed")
+	}
+}
+
+func TestSnapshotFailure_DeadlineAndBudgetAreTimeouts(t *testing.T) {
+	cases := map[string]error{
+		"package budget":        &committedtree.BudgetError{Budget: time.Second},
+		"wrapped deadline":      fmt.Errorf("committed tree extraction canceled: %w", context.DeadlineExceeded),
+		"budget inside ls-tree": fmt.Errorf("git ls-tree: %w", &committedtree.BudgetError{Budget: time.Second}),
+	}
+	for name, err := range cases {
+		status, _ := snapshotFailure(err)
+		if status != "TIMEOUT" {
+			t.Errorf("%s: status %q, want TIMEOUT", name, status)
+		}
+	}
+}
+
+func TestSnapshotFailure_CorruptionStaysCorrupt(t *testing.T) {
+	status, _ := snapshotFailure(errors.New("git cat-file: exit status 128 (fatal: inflate: data stream error)"))
+	if status != "CORRUPT_OBJECT" {
+		t.Errorf("status %q, want CORRUPT_OBJECT", status)
+	}
+}
+
+func TestRestoreSnapshot_BudgetExpiryIsTimeoutNotCorrupt(t *testing.T) {
+	t.Setenv(committedtree.ExtractionBudgetEnv, "1ns")
+	dir, baseCommit := setupTestRepo(t)
+	ref, _ := createCheckpoint(t, dir, "session-budget", baseCommit, map[string]string{
+		"a.txt": "a\n",
+	})
+	tree := testGit(t, dir, "rev-parse", ref+"^{tree}")
+
+	_, status, detail := restoreSnapshot(context.Background(), dir, tree, t.TempDir(), map[string]bool{"a.txt": true})
+	if status != "TIMEOUT" {
+		t.Fatalf("status %q, want TIMEOUT (detail: %s)", status, detail)
+	}
+}
+
+func TestRestoreSnapshot_CallerDeadlineIsTimeoutNotCorrupt(t *testing.T) {
+	dir, baseCommit := setupTestRepo(t)
+	ref, _ := createCheckpoint(t, dir, "session-deadline", baseCommit, map[string]string{
+		"a.txt": "a\n",
+	})
+	tree := testGit(t, dir, "rev-parse", ref+"^{tree}")
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, status, detail := restoreSnapshot(ctx, dir, tree, t.TempDir(), nil)
+	if status != "TIMEOUT" {
+		t.Fatalf("status %q, want TIMEOUT (detail: %s)", status, detail)
+	}
+}
+
+func TestRestoreSnapshot_ReaderFailureStandsWhenWriterIsHealthy(t *testing.T) {
+	dir, baseCommit := setupTestRepo(t)
+	ref, _ := createCheckpoint(t, dir, "session-reader-fail", baseCommit, map[string]string{
+		"a.txt": "a\n",
+		"b.txt": "b\n",
+	})
+	tree := testGit(t, dir, "rev-parse", ref+"^{tree}")
+
+	// A directory where a.txt must be written makes the reader's own write fail
+	// while the writer still has blobs to send.
+	scratch := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(scratch, "a.txt"), 0755); err != nil {
+		t.Fatalf("mkdir blocker: %v", err)
+	}
+	_, status, detail := restoreSnapshot(context.Background(), dir, tree, scratch, nil)
+	if status != "HASH_MISMATCH" {
+		t.Fatalf("status %q, want HASH_MISMATCH from the reader (detail: %s)", status, detail)
+	}
+}
+
+func TestRestoreSnapshot_PathSelectionSkipsUnrelatedCorruptBlob(t *testing.T) {
+	dir, baseCommit := setupTestRepo(t)
+	ref, _ := createCheckpoint(t, dir, "session-partial", baseCommit, map[string]string{
+		"a.txt": "a\n",
+	})
+	tree := testGit(t, dir, "rev-parse", ref+"^{tree}")
+
+	// base.txt is in the checkpoint tree but outside the selection. Reading it
+	// would fail, so a pass shows the restore never read unselected blobs.
+	baseBlob := testGit(t, dir, "rev-parse", baseCommit+":base.txt")
+	objFile := filepath.Join(dir, ".git", "objects", baseBlob[:2], baseBlob[2:])
+	_ = os.Chmod(objFile, 0666)
+	if err := os.WriteFile(objFile, []byte{0x01, 0x02, 0x03, 0x04}, 0666); err != nil {
+		t.Fatalf("corrupt unrelated blob: %v", err)
+	}
+
+	scratch := t.TempDir()
+	restored, status, detail := restoreSnapshot(context.Background(), dir, tree, scratch, map[string]bool{"a.txt": true})
+	if status != "" {
+		t.Fatalf("status %q, want success (detail: %s)", status, detail)
+	}
+	if restored != 1 {
+		t.Errorf("restored %d, want 1", restored)
+	}
+	if _, err := os.Stat(filepath.Join(scratch, "base.txt")); !os.IsNotExist(err) {
+		t.Errorf("unselected base.txt was restored (stat err %v)", err)
 	}
 }

@@ -17,7 +17,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 )
 
 // RecoveryDrillSchema is the schema tag for RecoveryDrillReport.
@@ -326,70 +329,19 @@ func drillOneRef(ctx context.Context, repo, ref, commitSHA string) DrillResult {
 	}
 	defer os.RemoveAll(scratch)
 
-	// 7. Extract archive into isolation
-	archiveArgs := []string{"archive", "--format=tar", treeSHA}
+	// 7. Restore the committed tree into isolation. The tree is read through
+	// committedtree rather than git archive, which would drop export-ignored paths.
+	var wanted map[string]bool
 	if len(targetPaths) > 0 && len(targetPaths) <= 500 {
-		archiveArgs = append(archiveArgs, targetPaths...)
-	}
-	archiveBytes, archiveErrStr, archiveCode, archiveErr := gitCmdBytes(ctx, repo, nil, archiveArgs...)
-	if archiveErr != nil || archiveCode != 0 {
-		status := classifyGitObjectError(archiveErrStr)
-		if status == "" {
-			status = "CORRUPT_OBJECT"
+		wanted = make(map[string]bool, len(targetPaths))
+		for _, p := range targetPaths {
+			wanted[p] = true
 		}
+	}
+	restoredCount, status, detail := restoreSnapshot(ctx, repo, treeSHA, scratch, wanted)
+	if status != "" {
 		res.Status = status
-		res.Detail = fmt.Sprintf("git archive failed: %s", strings.TrimSpace(archiveErrStr))
-		res.DurationMs = time.Since(start).Milliseconds()
-		return res
-	}
-
-	tr := tar.NewReader(bytes.NewReader(archiveBytes))
-	restoredCount := 0
-	readArchiveFail := false
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			res.Status = "CORRUPT_OBJECT"
-			res.Detail = fmt.Sprintf("read archive stream: %v", err)
-			readArchiveFail = true
-			break
-		}
-		target := filepath.Join(scratch, filepath.FromSlash(hdr.Name))
-		cleanTarget := filepath.Clean(target)
-		cleanScratch := filepath.Clean(scratch)
-		if !strings.HasPrefix(cleanTarget, cleanScratch+string(filepath.Separator)) {
-			continue
-		}
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			_ = os.MkdirAll(cleanTarget, 0755)
-		case tar.TypeReg, tar.TypeRegA:
-			_ = os.MkdirAll(filepath.Dir(cleanTarget), 0755)
-			f, err := os.OpenFile(cleanTarget, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-			if err != nil {
-				res.Status = "HASH_MISMATCH"
-				res.Detail = fmt.Sprintf("open restored file %s: %v", hdr.Name, err)
-				readArchiveFail = true
-				break
-			}
-			_, err = io.Copy(f, tr)
-			f.Close()
-			if err != nil {
-				res.Status = "HASH_MISMATCH"
-				res.Detail = fmt.Sprintf("write restored file %s: %v", hdr.Name, err)
-				readArchiveFail = true
-				break
-			}
-			restoredCount++
-		}
-		if readArchiveFail {
-			break
-		}
-	}
-	if readArchiveFail {
+		res.Detail = detail
 		res.DurationMs = time.Since(start).Milliseconds()
 		return res
 	}
@@ -508,25 +460,135 @@ func gitCmd(ctx context.Context, dir string, env []string, args ...string) (stdo
 	return "", e.String(), -1, runErr
 }
 
-func gitCmdBytes(ctx context.Context, dir string, env []string, args ...string) (stdout []byte, stderr string, code int, err error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	if dir != "" {
-		cmd.Dir = dir
+// errRestoreAborted stops the tree writer when the restore gives up early.
+var errRestoreAborted = errors.New("restore aborted")
+
+// writeOutcome is the snapshot writer's result and its place in the order of
+// failures for this restore.
+type writeOutcome struct {
+	err error
+	seq int64
+}
+
+// restoreSnapshot writes the committed tree's regular files under scratch and
+// returns how many it wrote. A non-nil wanted set limits the read to those
+// paths, so only their blobs are read from git; nil restores every regular
+// file. A non-empty status reports a failure.
+//
+// When the reader and the writer both fail, the earlier failure is reported.
+// A reader failure is preferred unless the writer had already failed before
+// the reader noticed its own failure.
+func restoreSnapshot(ctx context.Context, repo, treeSHA, scratch string, wanted map[string]bool) (restored int, status, detail string) {
+	writeCtx, cancelWrite := context.WithCancel(ctx)
+	defer cancelWrite()
+
+	pr, pw := io.Pipe()
+	// failures numbers failure events in the order they happen. Wall-clock
+	// stamps are too coarse on Windows to tell two nearby failures apart.
+	var failures atomic.Int64
+	written := make(chan writeOutcome, 1)
+	go func() {
+		err := writeSnapshot(writeCtx, repo, treeSHA, pw, wanted)
+		written <- writeOutcome{err: err, seq: failures.Add(1)}
+		_ = pw.CloseWithError(err)
+	}()
+
+	var readerFailedSeq int64
+	fail := func(s, d string) {
+		status, detail = s, d
+		readerFailedSeq = failures.Add(1)
 	}
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
+
+	cleanScratch := filepath.Clean(scratch) + string(filepath.Separator)
+	tr := tar.NewReader(pr)
+loop:
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fail("CORRUPT_OBJECT", fmt.Sprintf("read archive stream: %v", err))
+			break
+		}
+		target := filepath.Clean(filepath.Join(scratch, filepath.FromSlash(hdr.Name)))
+		if !strings.HasPrefix(target, cleanScratch) {
+			continue
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if wanted == nil {
+				_ = os.MkdirAll(target, 0755)
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if wanted != nil && !wanted[hdr.Name] {
+				continue
+			}
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				fail("CORRUPT_OBJECT", fmt.Sprintf("read archive stream: %v", err))
+				break loop
+			}
+			_ = os.MkdirAll(filepath.Dir(target), 0755)
+			if err := os.WriteFile(target, data, 0644); err != nil {
+				fail("HASH_MISMATCH", fmt.Sprintf("write restored file %s: %v", hdr.Name, err))
+				break loop
+			}
+			restored++
+		}
 	}
-	configureDispatchHelperCommand(cmd)
-	var o, e bytes.Buffer
-	cmd.Stdout = &o
-	cmd.Stderr = &e
-	runErr := cmd.Run()
-	if runErr == nil {
-		return o.Bytes(), e.String(), 0, nil
+
+	if status != "" {
+		select {
+		case out := <-written:
+			// The writer finished on its own. Its error wins only if it came
+			// before the reader's failure; otherwise the reader's stands.
+			if out.err != nil && out.seq < readerFailedSeq {
+				status, detail = snapshotFailure(out.err)
+			}
+		default:
+			cancelWrite()
+			_ = pr.CloseWithError(errRestoreAborted)
+			<-written
+		}
+		return 0, status, detail
 	}
-	var ee *exec.ExitError
-	if errors.As(runErr, &ee) {
-		return o.Bytes(), e.String(), ee.ExitCode(), nil
+	_, _ = io.Copy(io.Discard, pr)
+	if out := <-written; out.err != nil {
+		status, detail = snapshotFailure(out.err)
+		return 0, status, detail
 	}
-	return nil, e.String(), -1, runErr
+	return restored, "", ""
+}
+
+// writeSnapshot writes the committed tree to w, limited to wanted when it is
+// non-nil. An empty wanted set writes nothing.
+func writeSnapshot(ctx context.Context, repo, treeSHA string, w io.Writer, wanted map[string]bool) error {
+	if wanted == nil {
+		return committedtree.WriteTar(ctx, repo, treeSHA, w)
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(wanted))
+	for p := range wanted {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	return committedtree.WriteTarPaths(ctx, repo, treeSHA, w, paths...)
+}
+
+// snapshotFailure classifies a committedtree failure. A deadline or budget
+// expiry says nothing about the objects, so it gets its own timeout status and
+// never reads as corruption.
+func snapshotFailure(err error) (status, detail string) {
+	msg := strings.TrimSpace(err.Error())
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "TIMEOUT", fmt.Sprintf("snapshot committed tree timed out: %s", msg)
+	}
+	status = classifyGitObjectError(msg)
+	if status == "" {
+		status = "CORRUPT_OBJECT"
+	}
+	return status, fmt.Sprintf("snapshot committed tree failed: %s", msg)
 }

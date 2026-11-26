@@ -35,6 +35,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,6 +46,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -370,8 +372,8 @@ func BuildCommittedTarget(root, target string, timeout time.Duration) (bool, str
 	return BuildCommittedTargetContext(ctx, root, target)
 }
 
-// BuildCommittedTargetContext bounds the complete external probe, including git archive
-// and compilation. Callers with an operator latency budget must not return while an
+// BuildCommittedTargetContext bounds the complete external probe, including the
+// snapshot and compilation. Callers with an operator latency budget must not return while an
 // unbounded archive or compiler child continues consuming the host in the background.
 func BuildCommittedTargetContext(ctx context.Context, root, target string) (bool, string, error) {
 	goBin, err := exec.LookPath("go")
@@ -384,20 +386,8 @@ func BuildCommittedTargetContext(ctx context.Context, root, target string) (bool
 	}
 	defer os.RemoveAll(tmp)
 
-	archive := windowgate.CommandContext(ctx, "git", "archive", "--format=tar", "HEAD")
-	windowgate.ConfigureBackgroundCommand(archive)
-	archive.Dir = root
-	var arBuf, arErr bytes.Buffer
-	archive.Stdout = &arBuf
-	archive.Stderr = &arErr
-	if err := archive.Run(); err != nil {
-		if ctx.Err() != nil {
-			return false, "", fmt.Errorf("committed tree archive timed out: %w", ctx.Err())
-		}
-		return false, "", fmt.Errorf("git archive: %s", trunc(arErr.String(), 400))
-	}
-	if err := extractTar(&arBuf, tmp); err != nil {
-		return false, "", fmt.Errorf("extract: %v", err)
+	if err := materializeHead(ctx, root, tmp); err != nil {
+		return false, "", err
 	}
 	neutralizeEscapingGoWork(tmp)
 
@@ -412,6 +402,78 @@ func BuildCommittedTargetContext(ctx context.Context, root, target string) (bool
 		return false, output, fmt.Errorf("committed tree build timed out: %w", ctx.Err())
 	}
 	return runErr == nil, output, nil
+}
+
+// buildSnapshotPrefixes is the committed tree a root-module `go build` reads.
+// Whole trees are listed where the module has no nested go.mod beneath them.
+// docs/, examples/, experiments/ and tools/ mix root-module packages with
+// nested modules and data, so their package directories are listed one by one.
+// visuals/ and the rest of docs/ hold no root-module Go source, so they are
+// skipped. third_party/ stays whole because cgo reaches inklingmetal's runtime
+// headers through ${SRCDIR}.
+var buildSnapshotPrefixes = []string{
+	"go.mod",
+	"go.sum",
+	"cmd",
+	"internal",
+	"pkg",
+	"third_party",
+	"docs/_witnesses/issue-8385-qwen38-mac-decode-windows",
+	"docs/_witnesses/issue-9044-q8-metal-residency",
+	"docs/_witnesses/issue-9093-qwen38-metal-gdn-sequence",
+	"docs/_witnesses/issue-9097-qwen38-metal-gdn-production",
+	"docs/_witnesses/issue-9108-qwen38-metal-gdn-panel-drain-canary",
+	"docs/_witnesses/issue-9482-qwen38-q4k-mmap",
+	"docs/_witnesses/issue-9495-metal-profile",
+	"docs/_witnesses/issue-9513-qwen38-m10-parity",
+	"docs/_witnesses/issue-9525-qwen38-sequence-prefill",
+	"docs/_witnesses/issue-9714-qwen36-launchd-ownership",
+	"examples/context-query",
+	"examples/custom-harness/embedded",
+	"examples/custom-harness/event-consumer",
+	"examples/custom-harness/queue-worker",
+	"examples/custom-harness/replay-fixture",
+	"examples/custom-harness/tui",
+	"examples/custom-harness/web",
+	"examples/independent-server",
+	"examples/local-hardware-benchmark",
+	"examples/macos-guard-child-memory-demo",
+	"examples/mcp/fault-plugin",
+	"examples/receipt-trigger-rsi",
+	"examples/release-steward",
+	"examples/security-fleet-governance",
+	"experiments/benchmark/runs/by-machine/modular-10078-live",
+	"experiments/negframe-steerability-ab",
+	"experiments/qwen36/coherence-gate",
+	"experiments/qwen36/gdn",
+	"experiments/qwen36/gdn-divergence-sensitivity",
+	"experiments/qwen36/gdn-quant-length-sensitivity",
+	"experiments/qwen36/gdn-recurrence-bench",
+	"experiments/qwen36/token3-divergence-probe",
+	"tools/doc.go",
+	"tools/grafana",
+	"tools/v41epguard",
+	"tools/videogen",
+}
+
+// materializeHead writes the build inputs of the committed HEAD tree of root
+// into dest. It reads blobs through committedtree rather than `git archive`,
+// which would drop export-ignored files the build may compile.
+func materializeHead(ctx context.Context, root, dest string) error {
+	var tree bytes.Buffer
+	if err := committedtree.WriteTarPaths(ctx, root, "HEAD", &tree, buildSnapshotPrefixes...); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("committed tree snapshot timed out: %w", ctx.Err())
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("committed tree snapshot timed out: %w", err)
+		}
+		return fmt.Errorf("committed tree snapshot: %s", trunc(err.Error(), 400))
+	}
+	if err := extractTar(&tree, dest); err != nil {
+		return fmt.Errorf("extract: %v", err)
+	}
+	return nil
 }
 
 // neutralizeEscapingGoWork removes a committed `go.work` in the extracted tree
