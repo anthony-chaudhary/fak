@@ -6,7 +6,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
-func checkQwen35PromptPanelEnds(t *testing.T, n int, ends []int) {
+func checkQwen35PromptPanelEnds(t *testing.T, n, maxW int, ends []int) {
 	t.Helper()
 	if n < qwen35PromptPanelQuantum {
 		if ends != nil {
@@ -14,7 +14,6 @@ func checkQwen35PromptPanelEnds(t *testing.T, n int, ends []int) {
 		}
 		return
 	}
-	maxW := metalgemm.PromptPanelMaxTokens
 	if want := (n + maxW - 1) / maxW; len(ends) != want {
 		t.Fatalf("n=%d: panels=%d want %d (%v)", n, len(ends), want, ends)
 	}
@@ -44,16 +43,18 @@ func TestQwen35PromptPanelEndsTable(t *testing.T) {
 		{33, []int{33}},
 		{127, []int{127}},
 		{128, []int{128}},
-		{129, []int{65, 129}},
-		{482, []int{121, 242, 362, 482}},
-		{497, []int{125, 249, 373, 497}},
-		{512, []int{128, 256, 384, 512}},
+		{256, []int{256}},
+		{257, []int{129, 257}},
+		{482, []int{241, 482}},
+		{497, []int{249, 497}},
+		{512, []int{256, 512}},
+		{1000, []int{250, 500, 750, 1000}},
 		{2050, nil},
 		{4224, nil},
 	}
 	for _, c := range cases {
-		got := qwen35PromptPanelEnds(c.n)
-		checkQwen35PromptPanelEnds(t, c.n, got)
+		got := qwen35PromptPanelEnds(c.n, 256)
+		checkQwen35PromptPanelEnds(t, c.n, 256, got)
 		if c.want == nil {
 			continue
 		}
@@ -69,7 +70,33 @@ func TestQwen35PromptPanelEndsTable(t *testing.T) {
 }
 
 func TestQwen35PromptPanelEndsExhaustive(t *testing.T) {
-	for n := 0; n <= 9000; n++ {
-		checkQwen35PromptPanelEnds(t, n, qwen35PromptPanelEnds(n))
+	for _, maxW := range []int{qwen35PromptPanelNarrowRows, metalgemm.PromptPanelMaxTokens} {
+		for n := 0; n <= 9000; n++ {
+			checkQwen35PromptPanelEnds(t, n, maxW, qwen35PromptPanelEnds(n, maxW))
+		}
+	}
+}
+
+// TestQwen35PromptPanelMaxRowsGatesByModelSize pins the command-buffer-time gate:
+// Qwen3.5-4B-class models take the full native ceiling, larger ones (Qwen3.5-9B,
+// Qwen3.8-27B) keep 128-row panels, and no width ever exceeds the native guard.
+func TestQwen35PromptPanelMaxRowsGatesByModelSize(t *testing.T) {
+	for _, c := range []struct {
+		name           string
+		layers, hidden int
+		want           int
+	}{
+		{"synthetic", 4, 256, metalgemm.PromptPanelMaxTokens},
+		{"qwen3.5-4b", 32, 2560, metalgemm.PromptPanelMaxTokens},
+		{"qwen3.5-9b", 32, 4096, qwen35PromptPanelNarrowRows},
+		{"qwen3.8-27b", 64, 5120, qwen35PromptPanelNarrowRows},
+	} {
+		got := qwen35PromptPanelMaxRows(Config{NumLayers: c.layers, HiddenSize: c.hidden})
+		if got != c.want || got > metalgemm.PromptPanelMaxTokens {
+			t.Fatalf("%s: max rows=%d, want %d (native ceiling %d)", c.name, got, c.want, metalgemm.PromptPanelMaxTokens)
+		}
+	}
+	if got := qwen35PromptPanelEnds(512, qwen35PromptPanelMaxRows(Config{NumLayers: 64, HiddenSize: 5120})); len(got) != 4 {
+		t.Fatalf("27B-class 512-token prompt panels=%v, want four 128-row panels", got)
 	}
 }

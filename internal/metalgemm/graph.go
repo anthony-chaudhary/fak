@@ -171,9 +171,11 @@ type Qwen35GraphAttentionResult struct {
 // graph's row count; the original witness set {1,2,3,4,32} was a conservative
 // enumeration, not a hardware bound. Widening the admitted set up to this ceiling
 // lets a long prompt ride one commit+terminal-wait per panel instead of one per
-// 32 tokens (issue #13041). Kept as a small multiple of the decode token so the
-// GDN recurrence and KV staging remain in the proven regime.
-const PromptPanelMaxTokens = 128
+// 32 tokens (issue #13041). 256 measured +2-7% over 128 on Qwen3.5-4B prefill
+// (482..2048 tokens), and 512 no better. This is the native ceiling; the model
+// walk narrows larger models' panels so one command buffer stays far below the
+// 10 s limit (qwen35PromptPanelMaxRows).
+const PromptPanelMaxTokens = 256
 
 // PromptPanelWitnessed reports whether the Qwen3.8 graph admits a prompt panel of
 // rows tokens in one whole-forward pass. rows==0 is refused, matching the native

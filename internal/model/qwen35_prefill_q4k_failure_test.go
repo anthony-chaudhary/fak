@@ -155,7 +155,7 @@ func TestPrefillQwen35HybridQ4KPanelFailureDoesNotPanic(t *testing.T) {
 			t.Fatalf("pre-commit panel decline panicked out of tryPrefillQwen35HybridQ4K: %v", rec)
 		}
 	}()
-	ids := make([]int, 256)
+	ids := make([]int, 2*metalgemm.PromptPanelMaxTokens)
 	for i := range ids {
 		ids[i] = i % 512
 	}
@@ -165,11 +165,11 @@ func TestPrefillQwen35HybridQ4KPanelFailureDoesNotPanic(t *testing.T) {
 	if s.q4kHybridPrefillChunks < 1 {
 		t.Fatalf("host fallback did not run after a mid-walk panel decline: chunks=%d", s.q4kHybridPrefillChunks)
 	}
-	// Panel 0 (128 rows) executed and was reconciled to the device triple before panel 1
+	// Panel 0 (one full-width panel) executed and was reconciled to the device triple before panel 1
 	// declined; this portable recording double appends no host rows for its stub panels,
-	// so the host cache holds exactly the unexecuted remainder (256-128) replayed by
+	// so the host cache holds exactly the unexecuted remainder (one panel) replayed by
 	// prefillQwen35HybridQ4KHidden. The aggregate accounting below is the no-skip witness.
-	const executedRows = 128
+	const executedRows = metalgemm.PromptPanelMaxTokens
 	if got := s.Cache.Len(); got != len(ids)-executedRows {
 		t.Fatalf("host remainder len after a mid-walk decline=%d, want %d", got, len(ids)-executedRows)
 	}
@@ -181,10 +181,10 @@ func TestPrefillQwen35HybridQ4KPanelFailureDoesNotPanic(t *testing.T) {
 
 // TestPrefillQwen35HybridQ4KDeviceKVPanelFailureReconcilesExecutedRows is the
 // device-resident half of the #13473 guard and the direct witness for the
-// `covered := executedRows` fix. Prompt 256 rides two 128-token device panels; panel 0
+// `covered := executedRows` fix. The prompt rides two full-width device panels; panel 0
 // executes and appends its rows to the device triple, panel 1 declines pre-commit. The
-// walk must reconcile the rows that ACTUALLY executed (128), not the planned cover
-// (256), then replay the unexecuted remainder through the host path.
+// walk must reconcile the rows that ACTUALLY executed (one panel), not the planned
+// cover (two panels), then replay the unexecuted remainder through the host path.
 //
 // A regression to the planned panelCover download would ask the device triple for rows
 // it never wrote and desynchronize the host cache; a regression to the pre-fix backend
@@ -203,7 +203,7 @@ func TestPrefillQwen35HybridQ4KDeviceKVPanelFailureReconcilesExecutedRows(t *tes
 			t.Fatalf("device-KV panel decline panicked out of tryPrefillQwen35HybridQ4K: %v", rec)
 		}
 	}()
-	ids := make([]int, 256)
+	ids := make([]int, 2*metalgemm.PromptPanelMaxTokens)
 	for i := range ids {
 		ids[i] = i % 512
 	}
@@ -218,15 +218,15 @@ func TestPrefillQwen35HybridQ4KDeviceKVPanelFailureReconcilesExecutedRows(t *tes
 	if base != 0 {
 		t.Fatalf("reconcile base=%d, want 0 for a fresh session", base)
 	}
-	// The load-bearing assertion: exactly the executed panel's rows (128), not
-	// panelCover (256), because panel 1 declined before appending to the device triple.
-	if rows != 128 {
-		t.Fatalf("reconcile rows=%d, want 128 (executed panel only, not the planned 256)", rows)
+	// The load-bearing assertion: exactly the executed panel's rows, not panelCover,
+	// because panel 1 declined before appending to the device triple.
+	if rows != metalgemm.PromptPanelMaxTokens {
+		t.Fatalf("reconcile rows=%d, want %d (executed panel only, not the planned %d)", rows, metalgemm.PromptPanelMaxTokens, len(ids))
 	}
 	// This portable double stubs the device download, so the host cache holds exactly the
-	// unexecuted remainder (256-128) replayed by prefillQwen35HybridQ4KHidden. The real
-	// ReconcileDeviceKV appends the 128 device rows, making the total 256; reconcile
-	// rows==128 + host remainder==128 is the portable witness that no token was skipped
+	// unexecuted remainder (panel 1) replayed by prefillQwen35HybridQ4KHidden. The real
+	// ReconcileDeviceKV appends the executed device rows, making the total len(ids);
+	// reconcile rows + host remainder == len(ids) is the portable witness that no token was skipped
 	// or duplicated.
 	if got := s.Cache.Len(); got != len(ids)-rows {
 		t.Fatalf("host remainder len after a device-panel decline=%d, want %d", got, len(ids)-rows)

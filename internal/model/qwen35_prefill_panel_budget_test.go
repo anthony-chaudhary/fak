@@ -165,7 +165,7 @@ func newPanelBudgetSession(t *testing.T) (*Session, *recordingQwen35PanelRunner)
 //
 // Control arm: the OLD serial panelization issued ceil(cover/32) command buffers and
 // terminal waits (one per 32-token panel); for the fixed 256-token prompt below that is
-// 8, comfortably above PrefillPanelRoundTripBudget=2, so the assertion is not vacuous.
+// 8, comfortably above PrefillPanelRoundTripBudget=1, so the assertion is not vacuous.
 // A regression to the per-panel barrier turns this test red instead of shipping.
 //
 // Count-only, [SW-VERIFIED]: no wall-time and no GPU-utilization claim.
@@ -199,8 +199,8 @@ func TestPrefillPanelRoundTripBudget(t *testing.T) {
 		t.Fatal("panel walk issued no panels")
 	}
 	for _, l := range lengths {
-		if l < 1 || l > 128 {
-			t.Fatalf("panel length %d outside the witnessed [1,128] range (lengths=%v)", l, lengths)
+		if l < 1 || l > metalgemm.PromptPanelMaxTokens {
+			t.Fatalf("panel length %d outside the witnessed [1,%d] range (lengths=%v)", l, metalgemm.PromptPanelMaxTokens, lengths)
 		}
 	}
 
@@ -281,7 +281,7 @@ func newDeviceKVSession(t *testing.T, admit bool) (*Session, *deviceKVRecorder) 
 // prompt, reconciles it ONCE (base = the host prefix at walk start, rows = the rows the
 // panels appended), and records a device panel/row count matching what the walk executed.
 // The per-panel host KV readback/re-upload is gone, so the host KV-append work no longer
-// scales with panel count; the aggregate CommandBuffers still stays ceil(cover/128).
+// scales with panel count; the aggregate CommandBuffers stays one per panel.
 //
 // The counters (s.q4kHybridPrefillDevicePanels/DeviceRows) are the typed receipt the
 // production backend fills; this double emulates that same increment on admission, so a
@@ -291,9 +291,8 @@ func newDeviceKVSession(t *testing.T, admit bool) (*Session, *deviceKVRecorder) 
 //
 // [SW-VERIFIED] — Go-only, no GPU.
 func TestPrefillQwen35HybridQ4KDeviceKVReceiptCollapse(t *testing.T) {
-	// A prompt that is a multiple of 32 but not of 128, so it rides multiple panels
-	// (cover=256 -> 2 panels of 128) and the device branch is unmistakably exercised.
-	const promptTokens = 256
+	// Two full-width panels, so the device pair is threaded across a panel boundary.
+	const promptTokens = 2 * metalgemm.PromptPanelMaxTokens
 	s, rec := newDeviceKVSession(t, true)
 	ids := make([]int, promptTokens)
 	for i := range ids {
@@ -341,15 +340,15 @@ func TestPrefillQwen35HybridQ4KDeviceKVReceiptCollapse(t *testing.T) {
 		t.Fatalf("emulated device rows=%d, want %d", got, promptTokens)
 	}
 	if calls != 2 {
-		t.Fatalf("panel calls=%d, want 2 (ceil(256/128))", calls)
+		t.Fatalf("panel calls=%d, want 2 full-width panels", calls)
 	}
 
 	// The panel round-trips still collapse (no regression from this change): the
 	// aggregate command buffers stay at the widened-panel count, not the per-panel
 	// KV round-trip count.
 	agg := s.Qwen35MetalForwardSequenceReceipt()
-	if agg.CommandBuffers > PrefillPanelRoundTripBudget {
-		t.Fatalf("prefill CommandBuffers=%d exceeds PrefillPanelRoundTripBudget=%d", agg.CommandBuffers, PrefillPanelRoundTripBudget)
+	if agg.CommandBuffers > 2 {
+		t.Fatalf("prefill CommandBuffers=%d, want at most one per panel (2)", agg.CommandBuffers)
 	}
 }
 

@@ -194,9 +194,9 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		if !receipt.Available || receipt.Path != Qwen35MetalGDNSequenceForwardPath {
 			t.Fatalf("long-context receipt=%+v", receipt)
 		}
-		// #13041: 4128 tokens = 33 wide (128-token) panels, not 129 P32 panels.
-		if receipt.SelectedPanels != 33 || receipt.ExecutedPanels != 33 {
-			t.Fatalf("long-context panels selected/executed=%d/%d, want 33/33", receipt.SelectedPanels, receipt.ExecutedPanels)
+		// #13041: 4128 tokens = 17 wide (<=256-token) panels, not 129 P32 panels.
+		if receipt.SelectedPanels != 17 || receipt.ExecutedPanels != 17 {
+			t.Fatalf("long-context panels selected/executed=%d/%d, want 17/17", receipt.SelectedPanels, receipt.ExecutedPanels)
 		}
 		if receipt.FallbackCount != 0 {
 			t.Fatalf("long-context fell back off the batched panel: FallbackCount=%d", receipt.FallbackCount)
@@ -225,8 +225,8 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		m.Quantize()
 		fillQ4KMajority(t, m, cfg)
 
-		// 135 tokens is not a multiple of 32; the whole prompt rides graph panels.
-		prompt := make([]int, 135)
+		// 263 tokens is not a multiple of 32; the whole prompt rides graph panels.
+		prompt := make([]int, 263)
 		for i := range prompt {
 			prompt[i] = (i*23 + 11) % cfg.VocabSize
 		}
@@ -249,23 +249,23 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		if !receipt.Available {
 			t.Fatal("expected receipt.Available")
 		}
-		if receipt.Tokens != 135 {
-			t.Fatalf("receipt.Tokens = %d, want 135", receipt.Tokens)
+		if receipt.Tokens != 263 {
+			t.Fatalf("receipt.Tokens = %d, want 263", receipt.Tokens)
 		}
-		// 135 tokens = two balanced graph panels (68 + 67) and no host remainder.
+		// 263 tokens = two balanced graph panels (132 + 131) and no host remainder.
 		if receipt.SelectedPanels != 2 {
 			t.Fatalf("receipt.SelectedPanels = %d, want 2", receipt.SelectedPanels)
 		}
 		if receipt.ExecutedPanels != 2 {
 			t.Fatalf("receipt.ExecutedPanels = %d, want 2", receipt.ExecutedPanels)
 		}
-		if candidate.Cache.Len() != 135 {
-			t.Fatalf("candidate cache len = %d, want 135", candidate.Cache.Len())
+		if candidate.Cache.Len() != 263 {
+			t.Fatalf("candidate cache len = %d, want 263", candidate.Cache.Len())
 		}
 
-		assertCosineAtLeast(t, "P135 remainder logits", wantLogits, gotLogits, Qwen35GDNParityCosineMin)
+		assertCosineAtLeast(t, "P263 remainder logits", wantLogits, gotLogits, Qwen35GDNParityCosineMin)
 		if argmax(wantLogits) != argmax(gotLogits) {
-			t.Fatalf("P135 argmax mismatch: want %d, got %d", argmax(wantLogits), argmax(gotLogits))
+			t.Fatalf("P263 argmax mismatch: want %d, got %d", argmax(wantLogits), argmax(gotLogits))
 		}
 
 		for l := 0; l < cfg.NumLayers; l++ {
@@ -273,10 +273,10 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 				continue
 			}
 			if c := cosine(control.Cache.K[l], candidate.Cache.K[l]); c < 0.99999 {
-				t.Fatalf("P135 K cache layer %d cosine=%g < 0.99999", l, c)
+				t.Fatalf("P263 K cache layer %d cosine=%g < 0.99999", l, c)
 			}
 			if c := cosine(control.Cache.V[l], candidate.Cache.V[l]); c < 0.99999 {
-				t.Fatalf("P135 V cache layer %d cosine=%g < 0.99999", l, c)
+				t.Fatalf("P263 V cache layer %d cosine=%g < 0.99999", l, c)
 			}
 		}
 
@@ -287,9 +287,9 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 
 		next := argmax(wantLogits)
 		wantStep, gotStep := control.Step(next), candidate.Step(next)
-		assertCosineAtLeast(t, "P135 resident decode continuation", wantStep, gotStep, Qwen35GDNParityCosineMin)
+		assertCosineAtLeast(t, "P263 resident decode continuation", wantStep, gotStep, Qwen35GDNParityCosineMin)
 		if argmax(wantStep) != argmax(gotStep) {
-			t.Fatalf("P135 continuation argmax=%d, want %d", argmax(gotStep), argmax(wantStep))
+			t.Fatalf("P263 continuation argmax=%d, want %d", argmax(gotStep), argmax(wantStep))
 		}
 	})
 

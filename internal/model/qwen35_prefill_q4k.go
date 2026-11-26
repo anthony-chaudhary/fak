@@ -175,11 +175,11 @@ const Qwen35MetalGDNSequenceForwardPath = "metal/qwen35-gdn-preprojected-sequenc
 // a function of len/32, so a regression back to one terminal GPU wait per
 // 32-token panel (256/32 == 8 round-trips) trips the assertion instead of merely
 // showing up in a timing table. At the widest witnessed panel
-// (metalgemm.PromptPanelMaxTokens == 128) 256 tokens is exactly two panels, so
-// the budget is 2. PrefillPanelRoundTripBudgetPromptTokens names the prompt the
+// (metalgemm.PromptPanelMaxTokens == 256) 256 tokens is exactly one panel, so
+// the budget is 1. PrefillPanelRoundTripBudgetPromptTokens names the prompt the
 // ceiling is fixed at; a longer prompt legitimately needs more panels
-// (O(len/128)) and is not what this L1 guard measures.
-const PrefillPanelRoundTripBudget = 2
+// (O(len/256)) and is not what this L1 guard measures.
+const PrefillPanelRoundTripBudget = 1
 
 // PrefillPanelRoundTripBudgetPromptTokens is the prompt length the
 // PrefillPanelRoundTripBudget ceiling is asserted against.
@@ -446,16 +446,35 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 // admitted for on a prompt walk; shorter prompts stay on the host forward.
 const qwen35PromptPanelQuantum = 32
 
+// qwen35PromptPanelNarrowRows is the panel width for models above the
+// qwen35PromptPanelWideLayerWidth class. A whole-forward panel is one command
+// buffer, whose GPU time scales with rows x weights: a 256-row Qwen3.5-4B panel
+// measured 448-668 ms on an M3 Pro across 0..4k context, which at Qwen3.8-27B's
+// ~6.75x weights is seconds and grows with context toward the 10 s limit.
+const qwen35PromptPanelNarrowRows = 128
+
+// qwen35PromptPanelWideLayerWidth is the largest NumLayers*HiddenSize (Qwen3.5-4B:
+// 32*2560) admitted to metalgemm.PromptPanelMaxTokens-row panels.
+const qwen35PromptPanelWideLayerWidth = 32 * 2560
+
+// qwen35PromptPanelMaxRows is the widest prompt panel the walk issues for cfg.
+func qwen35PromptPanelMaxRows(cfg Config) int {
+	if cfg.NumLayers*cfg.HiddenSize <= qwen35PromptPanelWideLayerWidth {
+		return metalgemm.PromptPanelMaxTokens
+	}
+	return min(qwen35PromptPanelNarrowRows, metalgemm.PromptPanelMaxTokens)
+}
+
 // qwen35PromptPanelEnds splits an n-token prompt into the fewest whole-forward
-// graph panels of at most metalgemm.PromptPanelMaxTokens rows, with widths that
-// differ by at most one, and returns each panel's exclusive end offset. Balancing
-// keeps every panel at least qwen35PromptPanelQuantum wide, so the walk covers the
-// whole prompt with no sub-quantum remainder. It returns nil below one quantum.
-func qwen35PromptPanelEnds(n int) []int {
+// graph panels of at most maxRows rows, with widths that differ by at most one,
+// and returns each panel's exclusive end offset. Balancing keeps every panel at
+// least qwen35PromptPanelQuantum wide, so the walk covers the whole prompt with no
+// sub-quantum remainder. It returns nil below one quantum.
+func qwen35PromptPanelEnds(n, maxRows int) []int {
 	if n < qwen35PromptPanelQuantum {
 		return nil
 	}
-	panels := (n + metalgemm.PromptPanelMaxTokens - 1) / metalgemm.PromptPanelMaxTokens
+	panels := (n + maxRows - 1) / maxRows
 	base, wider := n/panels, n%panels
 	ends := make([]int, panels)
 	end := 0
@@ -511,11 +530,12 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 	if s.qwen35HAL != nil && s.qwen35HAL.sequenceAccepted {
 		if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok {
 			// The whole-forward graph now witnesses prompt panels up to
-			// metalgemm.PromptPanelMaxTokens (128) tokens in ONE command buffer, so the
+			// metalgemm.PromptPanelMaxTokens (256) tokens in ONE command buffer (128 above
+			// the Qwen3.5-4B class, see qwen35PromptPanelMaxRows), so the
 			// prompt is walked in the widest admitted panels instead of the historical
 			// exact-32 panel. The panel count — and therefore the per-panel commit +
 			// terminal GPU wait + host KV readback — drops from O(len/32) to
-			// O(len/128) (#13041). A prompt of at least one quantum is covered entirely
+			// O(len/maxRows) (#13041). A prompt of at least one quantum is covered entirely
 			// by panels of balanced width (see qwen35PromptPanelEnds), so no panel is
 			// narrower than the quantum and no remainder falls to the host forward,
 			// which costs a fixed ~1.25 s on Qwen3.5-4B whatever its 1..31 rows.
@@ -531,7 +551,7 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 			// under memory pressure, failing closed with no host retry so the server
 			// never became ready (#13694). Panels narrower than the 32-token quantum
 			// need their own measured admission.
-			panelEnds := qwen35PromptPanelEnds(len(ids))
+			panelEnds := qwen35PromptPanelEnds(len(ids), qwen35PromptPanelMaxRows(s.M.Cfg))
 			panelCover := 0
 			if len(panelEnds) > 0 {
 				panelCover = panelEnds[len(panelEnds)-1]
