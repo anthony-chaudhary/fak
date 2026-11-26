@@ -31,6 +31,7 @@ import (
 // in-kernel serve.
 func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableControlIngress, buildErr error) {
 	ensureServeProxyTimeoutFloors(sf)
+	rt.ensureServeInkling2WriteTimeout()
 	resolveServeEngine(sf, rt.explicitFlags, rt.inKernelModel != nil)
 	native, _ := abi.Engine(*sf.engineID).(*modelengine.Engine)
 	if err := configureServeHostSwapBudget(sf, native); err != nil {

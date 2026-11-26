@@ -834,7 +834,7 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		placement += fmt.Sprintf("; warm-up %.1fs", time.Since(tWarm).Seconds())
 		loadDur = time.Since(tLoad)
 	}
-	rt.inkling2Planner, rt.inkling2Close, rt.inkling2Metal = planner, closeModel, metal
+	rt.inkling2Planner, rt.inkling2Close, rt.inkling2Metal, rt.inkling2MaxPromptTokens = planner, closeModel, metal, contextTokens
 	rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "model-load", Dur: loadDur})
 	rt.addStartupMessage(newServeStartupMessage("serve", "inkling2-loop", "info",
 		fmt.Sprintf("%s; context=%d model=%q (%s)", placement, contextTokens, *sf.model, decode)))

@@ -150,6 +150,9 @@ const (
 	// buffered proxied turn has no first token before the whole upstream completion, so the
 	// window bounds the entire agent turn, which a local engine can take minutes to produce.
 	FirstTokenWatchdogSourceProxyUpstream FirstTokenWatchdogSource = "proxy-upstream default"
+	// FirstTokenWatchdogSourceMetalContext: no override; a Metal Inkling-2 serve whose context
+	// is long enough that a cold full-context prefill outlasts the idle default.
+	FirstTokenWatchdogSourceMetalContext FirstTokenWatchdogSource = "metal-context default"
 	// FirstTokenWatchdogSourceDefault: no override; the backend-blind stream idle default.
 	FirstTokenWatchdogSourceDefault FirstTokenWatchdogSource = "default"
 )

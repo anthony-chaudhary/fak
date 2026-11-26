@@ -90,6 +90,8 @@ type serveRuntime struct {
 	// target (vendored or resident), whose residency the Metal admission seam owns.
 	inkling2Close func() error
 	inkling2Metal bool
+	// inkling2MaxPromptTokens is that model's served window, which bounds the longest prefill.
+	inkling2MaxPromptTokens int
 
 	apiKey              string
 	engineCacheAdminKey string

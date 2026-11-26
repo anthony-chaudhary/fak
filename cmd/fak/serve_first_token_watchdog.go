@@ -81,7 +81,47 @@ func (rt *serveRuntime) resolveServeFirstTokenWatchdog(sf *serveFlags) time.Dura
 	if source == agent.FirstTokenWatchdogSourceDefault && servesProxyUpstream(sf) {
 		window, source = agent.CPUBackendFirstTokenWatchdogTimeout, agent.FirstTokenWatchdogSourceProxyUpstream
 	}
+	if w := rt.inkling2PrefillWindow(); source == agent.FirstTokenWatchdogSourceDefault && w > window {
+		window, source = w, agent.FirstTokenWatchdogSourceMetalContext
+	}
 	rt.addStartupMessage(newServeStartupMessage("serve", "first-token-watchdog", "info",
 		fmt.Sprintf("buffered first-token watchdog window %s (source: %s)", window, source)))
 	return window
 }
+
+// inkling2MetalPrefillFloorTokPerS is a pessimistic Inkling-2 Metal prefill
+// rate: a full-context prompt arrives cold, and under serve the prefill chunk
+// can drop to 512 rows, so a 32k prompt needs minutes before its first token.
+const inkling2MetalPrefillFloorTokPerS = 100
+
+// inkling2PrefillWindow is how long a cold prompt filling the served Metal
+// Inkling-2 context may take to its first token at the floor rate, or zero when
+// no Metal Inkling-2 model is served or the default window already covers it.
+func (rt *serveRuntime) inkling2PrefillWindow() time.Duration {
+	if rt == nil || !rt.inkling2Metal || rt.inkling2MaxPromptTokens <= 0 {
+		return 0
+	}
+	w := time.Duration(rt.inkling2MaxPromptTokens/inkling2MetalPrefillFloorTokPerS) * time.Second
+	if w <= inkling2ServeIdleDefault {
+		return 0
+	}
+	return min(w, agent.CPUBackendFirstTokenWatchdogTimeout)
+}
+
+// ensureServeInkling2WriteTimeout lifts the HTTP write deadline for an
+// Inkling-2 serve when FAK_HTTP_WRITE_TIMEOUT_S is unset. Its planner is a local
+// model the gateway does not classify as in-kernel, so it would get the 90s
+// proxy deadline, while a buffered turn is written only after its whole prefill
+// and decode, which a long context stretches to minutes.
+func (rt *serveRuntime) ensureServeInkling2WriteTimeout() {
+	if rt == nil || rt.inkling2Planner == nil {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("FAK_HTTP_WRITE_TIMEOUT_S")) == "" {
+		_ = os.Setenv("FAK_HTTP_WRITE_TIMEOUT_S", "0")
+	}
+}
+
+// inkling2ServeIdleDefault mirrors the agent's 60s stream idle default, which
+// a short context's prefill already fits.
+const inkling2ServeIdleDefault = 60 * time.Second
