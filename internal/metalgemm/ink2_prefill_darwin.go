@@ -94,6 +94,19 @@ func ink2GroupedAdapt(w Ink2Weight) bool {
 // ink2VerifyRowsKernel names the verify rows kernels over the same packed decoders.
 var ink2VerifyRowsKernel = ink2PackedKernels("ink2v_rows_")
 
+// The MMA verify rows kernels in their MMA (ink2vm_) and scalar (ink2vs_) forms
+// of one arithmetic.
+var ink2VerifyMMARowsKernel, ink2VerifyScalarRowsKernel = ink2PackedKernels("ink2vm_rows_"), ink2PackedKernels("ink2vs_rows_")
+
+// Expert stacks are block-quantized: the float types have no experts kernel.
+var ink2VerifyMMAExpertsKernel, ink2VerifyScalarExpertsKernel = ink2VerifyMMAPacked("ink2vm_experts_"), ink2VerifyMMAPacked("ink2vs_experts_")
+
+func ink2VerifyMMAPacked(prefix string) [41]string {
+	k := ink2PackedKernels(prefix)
+	k[0], k[1], k[30] = "", "", ""
+	return k
+}
+
 type ink2PMixShape struct {
 	n, states, tokens uint32
 	invSqrtN          float32

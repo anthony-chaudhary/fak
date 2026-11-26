@@ -158,8 +158,9 @@ func (p *ink2Prefill) mm(m ink2Mat, x ink2Ref) ink2Ref {
 	// decode GEMV
 	if (p.verify || p.fewRows) && p.T <= 9 {
 		ok, err := inkling2RowsMatMul(p.vd, m, x, y, p.T, p.q8Codes)
-		if err == nil && !ok && m.t.Dtype == compute.F32 {
-			// the prompt path's dense F32 GEMM is slow at a few rows and sums in another order
+		if err == nil && !ok && (m.t.Dtype == compute.F32 || p.verify && inkling2VerifyMMA(p.s.be)) {
+			// the prompt path's dense F32 GEMM is slow at a few rows and sums in another
+			// order; in MMA mode every verify weight takes the MMA rows kernel
 			ok, err = p.vd.Ink2VRows(m.t, x, y, p.T)
 		}
 		if err != nil || ok {

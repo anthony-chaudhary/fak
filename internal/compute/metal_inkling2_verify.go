@@ -5,6 +5,7 @@ package compute
 import (
 	"fmt"
 	"math"
+	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
@@ -15,7 +16,8 @@ var (
 )
 
 // A verify row's bits never depend on the width of its chunk: every op below
-// runs the decode kernel's arithmetic with one grid coordinate per token row.
+// runs the decode kernel's arithmetic with one grid coordinate per token row,
+// or in MMA mode an MMA kernel whose K order is the same at every width.
 
 // metalInk2VerifyScoreBytes bounds the attention scores scratch; a chunk whose
 // rows do not fit is attended in token ranges over it.
@@ -56,8 +58,22 @@ func metalInk2VerifyScores(d *metalgemm.Ink2Device, heads, span, T int) (metalge
 	return metalgemm.Ink2Ref{Buf: s.buf}, s.floats, nil
 }
 
+// metalInk2VerifyMMA selects the simdgroup_matrix verify kernels
+// (FAK_INKLING2_VERIFY_MMA=1): a row stays width-invariant but leaves the decode
+// GEMV's bits, so the spec loop must take its plain steps as width-1 verifies.
+// FAK_INKLING2_VERIFY_MMA_EXPERTS=0 keeps the routed experts on the GEMV kernel,
+// which is width-invariant too and cheaper per lone pair.
+func metalInk2VerifyMMA() bool { return os.Getenv("FAK_INKLING2_VERIFY_MMA") == "1" }
+
+func metalInk2VerifyMMAExperts() bool {
+	return metalInk2VerifyMMA() && os.Getenv("FAK_INKLING2_VERIFY_MMA_EXPERTS") != "0"
+}
+
+// Ink2VerifyMMA reports whether verify rows leave the decode GEMV's bits.
+func (c *metalBackend) Ink2VerifyMMA() bool { return metalInk2VerifyMMA() }
+
 // metalInk2VerifyRows runs the tile rows kernel for any weight the decode GEMV
-// reads, so a verify row is that GEMV's bits.
+// reads, so a verify row is that GEMV's bits, or the MMA kernel in MMA mode.
 func (c *metalBackend) metalInk2VerifyRows(op string, w Tensor, x, y Ink2Ref, rows int) (bool, error) {
 	ink2MetalScope(op)
 	if len(w.Shape) != 2 {
@@ -72,6 +88,11 @@ func (c *metalBackend) metalInk2VerifyRows(op string, w Tensor, x, y Ink2Ref, ro
 	wv, _, err := ink2MetalWeight(w, false)
 	if err != nil {
 		return false, ink2MetalErr(op, err)
+	}
+	if metalInk2VerifyMMA() {
+		if ok, err := d.VerifyRowsMMA(wv, r[0], wv.Cols, r[1], wv.Rows, rows); err != nil || ok {
+			return true, ink2MetalErr(op, err)
+		}
 	}
 	return true, ink2MetalErr(op, d.VerifyRows(wv, r[0], wv.Cols, r[1], wv.Rows, rows))
 }
@@ -117,6 +138,12 @@ func (c *metalBackend) Ink2VExperts(stack Tensor, expertRows int, ids, x Ink2Ref
 		// launches already encoded keep the old buffer alive
 		d.Free(tab.buf)
 		tab.buf, tab.ints = buf, need
+	}
+	if metalInk2VerifyMMAExperts() {
+		ok, err := d.VerifyExpertsMMA(wv, r[0], r[1], xDiv, xStride, r[2], npairs, r[3], metalgemm.Ink2Ref{Buf: tab.buf})
+		if err != nil || ok {
+			return ok, ink2MetalErr("verify experts", err)
+		}
 	}
 	ok, err := d.VerifyExperts(wv, r[0], r[1], xDiv, xStride, r[2], npairs, r[3], metalgemm.Ink2Ref{Buf: tab.buf})
 	return ok, ink2MetalErr("verify experts", err)

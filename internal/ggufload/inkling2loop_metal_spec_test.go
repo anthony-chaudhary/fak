@@ -84,6 +84,10 @@ func TestInkling2MetalSpecGreedyMatchesResident(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
+	if inkling2VerifyMMA(sbe) {
+		ref, plain = inkling2MetalPlain(t, m, be, sbe, prompt, n)
+		t.Logf("MMA plain ids %v", ref)
+	}
 	// FAK_INKLING2_GRAPH stays at its default: Metal has no graph capture, and
 	// a full-width verify has to fall back to the eager chunk on its own.
 	t.Setenv("FAK_INKLING2_SPEC", "4")
@@ -164,10 +168,7 @@ func inkling2MetalSpecLookupWorkloads(t *testing.T, path string, m *Inkling2Loop
 	t.Setenv("FAK_INKLING2_SPEC_DRAFT", inkling2DraftLookup)
 	const n = 96
 	for _, w := range workloads {
-		want, plain, err := inkling2ResidentGreedy(m, be, w.prompt, n)
-		if err != nil {
-			t.Fatalf("%s plain: %v", w.name, err)
-		}
+		want, plain := inkling2MetalPlain(t, m, be, sbe, w.prompt, n)
 		for _, depth := range []int{4, 8} {
 			got, _, err := inkling2SpecGreedy(m, sbe, w.prompt, n, depth)
 			if err != nil {
@@ -350,12 +351,21 @@ func TestInkling2MetalSpecVerifyCostByWidth(t *testing.T) {
 		fmt.Sscan(v, &reps)
 	}
 	arms := []string{"new"}
+	if inkling2VerifyMMA(sbe) {
+		arms = []string{"gemv", "mma"}
+	}
 	best := make([][]time.Duration, len(arms))
 	for a := range arms {
 		best[a] = make([]time.Duration, len(widths))
 	}
 	for r := 0; r < reps; r++ {
-		for a := range arms {
+		for a, arm := range arms {
+			switch arm {
+			case "gemv":
+				t.Setenv("FAK_INKLING2_VERIFY_MMA", "0")
+			case "mma":
+				t.Setenv("FAK_INKLING2_VERIFY_MMA", "1")
+			}
 			for i, w := range widths {
 				rewind()
 				t0 := time.Now()
@@ -381,6 +391,9 @@ func TestInkling2MetalSpecVerifyCostByWidth(t *testing.T) {
 		t.Logf("verify_cost_by_width %s best of %d:%s; %s", name, reps, line.String(), inkling2MetalSpecLoad())
 	}
 	if p, ok := compute.MetalInkling2Profile(); ok && p.Enabled() {
+		if len(arms) > 1 {
+			t.Setenv("FAK_INKLING2_VERIFY_MMA", "1")
+		}
 		for _, w := range widths {
 			rewind()
 			if err := compute.MetalInkling2ProfileReset(); err != nil {

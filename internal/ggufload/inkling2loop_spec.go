@@ -276,6 +276,9 @@ func inkling2ResidentSpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, p
 	st.Prefill = time.Since(start)
 	out := make([]int, 0, n+depth)
 	costs, _ := d.(inkling2CostObserver)
+	// verify rows that leave the decode GEMV's bits need plain steps of the same
+	// arithmetic: a width-1 verify
+	verifyPlain := inkling2VerifyMMA(be)
 	start = time.Now()
 	for len(out) < n && next != eos {
 		out = append(out, next)
@@ -289,7 +292,8 @@ func inkling2ResidentSpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, p
 		if s.err != nil {
 			return nil, st, s.err
 		}
-		if props == nil {
+		plain := props == nil
+		if plain && !verifyPlain {
 			if next, err = s.step(next); err != nil {
 				return nil, st, err
 			}
@@ -319,10 +323,14 @@ func inkling2ResidentSpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, p
 		if costs != nil {
 			costs.ObserveCost(len(fed), took)
 		}
-		st.Verify += took
-		st.Verifies++
-		st.Drafted += len(props)
-		st.Accepted += a
+		if plain {
+			st.PlainSteps++
+		} else {
+			st.Verify += took
+			st.Verifies++
+			st.Drafted += len(props)
+			st.Accepted += a
+		}
 		if err := d.Observe(s, fed, a+1); err != nil {
 			return nil, st, err
 		}
@@ -438,3 +446,11 @@ var inkling2LastSpec Inkling2SpecStats
 // inkling2VerifyGrouped reports whether verify chunks use the grouped expert GEMM;
 // only FAK_INKLING2_VERIFY_GROUPED=1 selects it.
 func inkling2VerifyGrouped() bool { return os.Getenv("FAK_INKLING2_VERIFY_GROUPED") == "1" }
+
+// inkling2VerifyMMA reports whether be's verify rows run arithmetic other than
+// its decode step's (Metal's FAK_INKLING2_VERIFY_MMA), so a spec session takes
+// its plain steps as width-1 verifies.
+func inkling2VerifyMMA(be compute.Backend) bool {
+	m, ok := be.(interface{ Ink2VerifyMMA() bool })
+	return ok && m.Ink2VerifyMMA()
+}

@@ -109,10 +109,7 @@ func TestInkling2MetalSpecDFlash2GreedyMatchesResident(t *testing.T) {
 	}
 	totals := map[string]*tally{}
 	for _, w := range workloads {
-		want, plain, err := inkling2ResidentGreedy(m, be, w.prompt, n)
-		if err != nil {
-			t.Fatalf("%s plain: %v", w.name, err)
-		}
+		want, plain := inkling2MetalPlain(t, m, be, sbe, w.prompt, n)
 		t.Logf("workload %s (%d prompt tokens): plain %.2f tok/s, %s", w.name, len(w.prompt), plain.DecodeTokensPerSecond(), inkling2MetalSpecLoad())
 		for _, run := range []struct {
 			kind              string

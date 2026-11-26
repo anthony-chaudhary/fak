@@ -1050,14 +1050,6 @@ var admittedPostFreeze = []string{
 	// Relocates to: a typed Inkling-2 prefill config.
 	"FAK_INKLING2_PREFILL_OLD",
 
-	// internal/compute/metal_inkling2_prefill.go — FAK_INK2P_GEMM=0 keeps the decode-exact
-	// kernels for wide Metal prefill chunks instead of the tiled GEMMs, and
-	// FAK_INK2P_PROFILE=1 times each prefill op family. A rollback toggle and a profiler
-	// switch, not credentials.
-	// Relocates to: a typed Inkling-2 prefill config.
-	"FAK_INK2P_GEMM",
-	"FAK_INK2P_PROFILE",
-
 	// internal/ggufload/inkling2loop_prefill.go — FAK_INKLING2_PREFILL_CTRL_BATCH=1 runs a
 	// prefill visit's Q/K/V controllers as one grid per stage. An opt-in kernel-batching
 	// toggle, not a credential.
@@ -1101,6 +1093,15 @@ var admittedPostFreeze = []string{
 	// Relocates to: a typed Inkling-2 speculative-decode config.
 	"FAK_INKLING2_DFLASH2_DEPTH_FIXED",
 	"FAK_INKLING2_VERIFY_MMA",
+
+	// internal/compute/metal_inkling2_verify.go — FAK_INKLING2_VERIFY_MMA_EXPERTS=0 keeps the
+	// routed experts on the GEMV kernel under FAK_INKLING2_VERIFY_MMA=1, and
+	// internal/metalgemm/ink2_verify_mma_darwin.go — FAK_INK2VM_SCALAR_MAX sets the widest
+	// verify pass run in the bit-identical scalar form. Two kernel-selection toggles for A/B,
+	// not credentials.
+	// Relocates to: a typed Inkling-2 speculative-decode config.
+	"FAK_INKLING2_VERIFY_MMA_EXPERTS",
+	"FAK_INK2VM_SCALAR_MAX",
 }
 
 // helperReadCorroboration declares that an admitted name is still read at runtime through
