@@ -3,6 +3,7 @@ package compute
 import (
 	"go/ast"
 	"go/format"
+	"go/parser"
 	"go/token"
 	"strings"
 	"testing"
@@ -12,7 +13,11 @@ import (
 // This source contract complements, never replaces, actual tagged Read tests.
 func TestCUDAReadCheckedContract(t *testing.T) {
 	assertCUDAPrefillLockedWrappers(t)
-	fs, f := cudaPackageSyntax(t)
+	fs := token.NewFileSet()
+	f, err := parser.ParseFile(fs, "cuda_residency.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var body string
 	for _, d := range f.Decls {
 		if fn, ok := d.(*ast.FuncDecl); ok && fn.Name.Name == "readLocked" && fn.Recv != nil {

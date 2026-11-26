@@ -114,7 +114,7 @@ func TestCUDAPrefillOwnedInputHostContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
-	cmd = exec.CommandContext(ctx, goBin, "test", "-vet=off", "-timeout=20s", "-count=1", "-v", ".")
+	cmd = exec.CommandContext(ctx, goBin, "test", "-timeout=20s", "-count=1", "-v", ".")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=1", "GOMAXPROCS=2")
 	out, err := cmd.CombinedOutput()
@@ -628,7 +628,10 @@ func cudaUploadContractBodies(t *testing.T) map[string]string {
 
 // fak-test:runtime fast est=10ms lane=default
 func TestCUDAPrefillOwnedInputRouteContract(t *testing.T) {
-	_, f := cudaPackageSyntax(t)
+	f, err := parser.ParseFile(token.NewFileSet(), "cuda.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var route *ast.IfStmt
 	for _, d := range f.Decls {
 		fn, ok := d.(*ast.FuncDecl)
