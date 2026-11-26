@@ -139,6 +139,9 @@ fak guard --posture fail_closed -- claude
 export FAK_GUARD_POSTURE=fail_closed
 ```
 
+Under `fail_closed`, an unlisted tool is refused with
+`verdict=DENY reason=DEFAULT_DENY` instead of being admitted.
+
 You can inspect or dump the strict fail-closed capability floor anytime with `fak guard --dump-strict-policy`. See [`POLICY.md`](POLICY.md) for complete posture rules, gotchas catalog details, and carveouts.
 
 ---

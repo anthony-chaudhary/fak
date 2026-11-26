@@ -257,12 +257,14 @@ func TestInk2DraftStateDroppedWithDevice(t *testing.T) {
 		_, ok := ink2DFStates.m[k]
 		return ok
 	}
+	pace := time.NewTicker(10 * time.Millisecond)
+	defer pace.Stop()
 	for range 100 {
 		if !held() {
 			return
 		}
 		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+		<-pace.C
 	}
 	t.Fatal("a collected device's draft state is still held")
 }

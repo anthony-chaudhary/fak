@@ -12,7 +12,7 @@ verb index, and `fak <verb> --help` for any verb.
 |---|---|
 | `fak up` | Apple Silicon provisioner: picks a model tier for your memory, serves it on `127.0.0.1:8080`, opens a chat prompt. |
 | `fak run <model> [prompt]` | Runs an in-kernel model: a chat REPL, or one-shot with a prompt. Also replays recorded traces with `--trace`. |
-| `fak chat` | Minimal chat client against a running `fak serve` or `fak guard` gateway. |
+| `fak chat` | Minimal chat client against a running `fak serve` gateway. |
 | `fak serve` | The OpenAI-compatible model gateway, with a live dashboard at `http://127.0.0.1:8080/`. |
 | `fak model` | Resolve, download, list, and inspect model references. |
 | `fak manage` | Wraps an agent harness (for example `claude`) so every tool call passes the kernel. |
