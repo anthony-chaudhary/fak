@@ -120,9 +120,12 @@ var dispatchSessionRegistry = func(root string, timeout time.Duration) (map[stri
 		sum sessionreg.RegistrySummary
 		err error
 	}
+	// Resolve the options on the caller's goroutine: the abandoned pass outlives this call,
+	// and reading the package hooks or env from it races with their later reassignment.
+	opts := fleetSessionsOptions(root, time.Now())
 	done := make(chan result, 1)
 	go func() {
-		pass, evalErr := sessionreg.Evaluate(ctx, fleetSessionsOptions(root, time.Now()))
+		pass, evalErr := sessionreg.Evaluate(ctx, opts)
 		if evalErr != nil {
 			done <- result{err: evalErr}
 			return

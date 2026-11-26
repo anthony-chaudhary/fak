@@ -95,7 +95,16 @@ func collectLoopIndex(root string) loopindex.Loop {
 		}
 		return true
 	}
-	bothDoors := func(needle string) bool { return has("cmd/fak/serve.go", needle) && has("cmd/fak/guard.go", needle) }
+	// The serve door's wiring lives across these files since the serve god-file split.
+	serveDoorHas := func(needle string) bool {
+		for _, rel := range []string{"cmd/fak/serve.go", "cmd/fak/serve_gateway.go", "cmd/fak/servewiring.go"} {
+			if has(rel, needle) {
+				return true
+			}
+		}
+		return false
+	}
+	bothDoors := func(needle string) bool { return serveDoorHas(needle) && has("cmd/fak/guard.go", needle) }
 	mainCase := func(verb string) bool { return has("cmd/fak/main.go", `case "`+verb+`"`) }
 
 	// --- orient: recalled memory re-checked before trust; context ref-counted/GC'd ---
@@ -109,7 +118,7 @@ func collectLoopIndex(root string) loopindex.Loop {
 			liProbe("context_gc", "context is ref-counted / GC'd (internal/contextq + internal/ctxmmu)",
 				false, exists("internal/contextq") && exists("internal/ctxmmu")),
 			liProbe("ctxview_budget_default", "the ctxplan planned view is default-on in the guard door and posture-const-wired in the serve door (the 2026-11-10 hosting-simplification split: guard arms agent.DefaultCtxViewBudget, serve resolves gateway.DefaultServeCtxViewBudget)",
-				false, has("cmd/fak/guard.go", `fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`) && has("cmd/fak/serve.go", `fs.Int("ctx-view-budget", gateway.DefaultServeCtxViewBudget`)),
+				false, has("cmd/fak/guard.go", `fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`) && serveDoorHas(`fs.Int("ctx-view-budget", gateway.DefaultServeCtxViewBudget`)),
 		},
 	}
 
