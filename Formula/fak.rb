@@ -5,26 +5,26 @@
 class Fak < Formula
   desc "Fused Agent Kernel: single-binary agent governor, gateway, and runtime"
   homepage "https://github.com/anthony-chaudhary/fak"
-  version "0.53.0"
+  version "0.56.0"
   license "Apache-2.0"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/anthony-chaudhary/fak/releases/download/v0.53.0/fak_0.53.0_darwin_arm64.tar.gz"
-      sha256 "dcaef3674b6ce59a32e320e54c88ac8d6165de9bb60ad767c9c56fd91a68c183"
+      url "https://github.com/anthony-chaudhary/fak/releases/download/v0.56.0/fak_0.56.0_darwin_arm64.tar.gz"
+      sha256 "d4912e6f4843927a7305d4ea21e268ae5a048b550f9f480139d45e2589bb6a34"
     else
-      url "https://github.com/anthony-chaudhary/fak/releases/download/v0.53.0/fak_0.53.0_darwin_amd64.tar.gz"
-      sha256 "5385d297158c7479c84dfcc0cb4f12a1e7e020046d30b87eb6e618557b1d44e1"
+      url "https://github.com/anthony-chaudhary/fak/releases/download/v0.56.0/fak_0.56.0_darwin_amd64.tar.gz"
+      sha256 "ec2166b8e851745e44c58c0eccd8853e09d1a5d89618c2f115de45c0a40a11f5"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/anthony-chaudhary/fak/releases/download/v0.53.0/fak_0.53.0_linux_arm64.tar.gz"
-      sha256 "10762f52559696efe99aa83e74964bce8ef3c7189dfd5b111658fb0ecfee78d8"
+      url "https://github.com/anthony-chaudhary/fak/releases/download/v0.56.0/fak_0.56.0_linux_arm64.tar.gz"
+      sha256 "be421cfadeacf81294370ae1b3611b1f451d1fd3028f7837d20a8a1c105d78fa"
     else
-      url "https://github.com/anthony-chaudhary/fak/releases/download/v0.53.0/fak_0.53.0_linux_amd64.tar.gz"
-      sha256 "aa11869cc9e00c766ff7894a674661ef7fcae71603d3ff7f65bb8e88647bf23e"
+      url "https://github.com/anthony-chaudhary/fak/releases/download/v0.56.0/fak_0.56.0_linux_amd64.tar.gz"
+      sha256 "24b9f58551ff945394e8cc110a30e1b451eae6ed2d0db670089f0052d6d680c9"
     end
   end
 

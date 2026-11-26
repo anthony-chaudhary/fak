@@ -24,10 +24,10 @@ Write a test that catches it.” Look for a test that passes an empty list and
 checks for `IndexError`. Type `/quit` to exit.
 
 On an M3 or later Mac with 24 GB of memory or more and macOS 26.4 or later,
-fak v0.58.0 or later can also run Inkling-2-Mini on the GPU by name:
+fak v0.58.0 (pre-release) can also run Inkling-2-Mini on the GPU by name:
 
 ```sh
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest   # v0.58.0
+go install github.com/anthony-chaudhary/fak/cmd/fak@v0.58.0
 fak run inkling2-mini
 ```
 
@@ -44,6 +44,8 @@ has the requirements and the server commands.
 
 For build requirements, platform verification and other model sizes, see the
 [local model setup guide](GETTING-STARTED.md#local-model-setup).
+
+For the version history, see [CHANGELOG.md](CHANGELOG.md).
 
 [Connect your coding agent](docs/integrations/README.md) · [Hardware benchmarks](docs/benchmarks/README.md) · [How fak compares with llama.cpp](docs/native-inference-goal.md) · [Documentation](docs/index.md)
 

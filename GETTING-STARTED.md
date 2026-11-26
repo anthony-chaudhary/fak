@@ -45,10 +45,10 @@ gh attestation verify SHA256SUMS --repo anthony-chaudhary/fak
 ### Install with Go
 
 ```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest
+go install github.com/anthony-chaudhary/fak/cmd/fak@v0.58.0
 ```
 
-This installs v0.58.0, which includes Inkling-2-Mini. The release binary above resolves
+This installs the v0.58.0 pre-release, which includes Inkling-2-Mini. The release binary above resolves
 GitHub's Latest release, still v0.56.0; set `FAK_VERSION=0.58.0` to pin the installer to
 v0.58.0. The CUDA build is not in the v0.58.0 release assets; build it from source below.
 
