@@ -24,6 +24,7 @@
 #include <limits>
 #include <mutex>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -94,7 +95,7 @@ struct Weights {
   std::mutex device;
   const bool hasDraft;
   std::vector<std::unique_ptr<BatchLanes>> exactPasses, widePass;
-  // The prefill fak_ink_warm_pipelines ran at load when no archive listed
+  // The warmup fak_ink_warm_pipelines ran at load when no archive listed
   // pipelines; zero otherwise.
   double loadWarmupMs = 0;
 
@@ -103,9 +104,12 @@ struct Weights {
       : backend(""),
         operators(backend.capabilities(), ops::Int8Activations::On),
         hasDraft(*draft) {
-    // Before the weights load, whose repacking dispatches pipelines too.
+    // Before the weights load, whose repacking dispatches pipelines too. The
+    // key names what fak_ink_warm_pipelines runs, since it warms an empty
+    // archive only: a revision retires lists a narrower warmup filled, and a
+    // load with a draft, whose cycle a target-only list lacks, keeps its own.
     if (!planOnly)
-      backend.attachPipelineArchive(pipelines);
+      backend.attachPipelineArchive(pipelines, hasDraft ? "warmup-3;target+draft" : "warmup-3;target");
     const Inkling2LoopLayout layout;
     constexpr std::array<uint32_t, 4> taps{5, 23, 41, 48};
     const auto draftShape = draftLayout(
@@ -471,22 +475,52 @@ extern "C" char *fak_ink_warm_pipelines(FakInkModel *m) {
     if (const auto stats = owner.backend.pipelineCacheStats();
         !stats.attached || stats.archived)
       return;
-    // Nothing is listed yet: a short prefill and one verify step compile now
-    // the pipelines a prompt would otherwise wait for, and the archive keeps
-    // them for the next process.
+    // Nothing is listed yet, so compile now what a first request would wait
+    // for and let the archive keep it for the next process: a prefill whose
+    // context the decode steps attend to, those steps (a verify block and its
+    // commit, a fused draft cycle, and verify blocks of one and two row
+    // tiles), then one prefill of each row class this device's kernels split
+    // at, and one of the most rows, which warms the classes that list leaves
+    // to it (the direct attention past 128 rows among them).
     const auto started = std::chrono::steady_clock::now();
-    const uint32_t vocabulary = owner.geometry.target.vocabularyTokens;
-    std::vector<int32_t> ids(64);
+    const auto &target = owner.geometry.target;
+    const auto check = [](char *failure) {
+      if (failure)
+        throw std::runtime_error(std::unique_ptr<char, decltype(&free)>(failure, free).get());
+    };
+    std::optional<std::pair<ops::MoeShape, uint32_t>> moe;
+    if (target.ffnKind == QwenFfnKind::SparseMoe)
+      moe.emplace(target.moeShape(), target.moeRouterFormat);
+    constexpr auto relativeAttention = Inkling2LoopLayout{}.relativeAttention();
+    std::vector<uint32_t> prefillLengths =
+        owner.operators.prefillRowClasses(moe, relativeAttention, target.kvLayout);
+    prefillLengths.push_back(kPrefillRows);
+    constexpr uint32_t capacity = kPrefillRows;
+    std::vector<int32_t> ids(capacity);
     for (uint32_t i = 0; i < ids.size(); ++i)
-      ids[i] = int32_t((uint64_t(i) * 7919 + 11) % vocabulary);
+      ids[i] = int32_t((uint64_t(i) * 7919 + 11) % target.vocabularyTokens);
     FakInkSession *warm = nullptr;
-    if (char *failure = fak_ink_session(m, 128, &warm))
-      throw std::runtime_error(std::unique_ptr<char, decltype(&free)>(failure, free).get());
+    check(fak_ink_session(m, capacity, &warm));
     std::unique_ptr<FakInkSession, decltype(&fak_ink_free_session)> held(warm, fak_ink_free_session);
     int32_t argmax[maxBlock] = {};
-    for (const auto &[count, prefill] : {std::pair<uint32_t, int>{uint32_t(ids.size()), 1}, {1, 0}})
-      if (char *failure = fak_ink_step(warm, ids.data(), count, prefill, nullptr, argmax))
-        throw std::runtime_error(std::unique_ptr<char, decltype(&free)>(failure, free).get());
+    for (const auto &[count, prefill] : {std::pair<uint32_t, int>{64, 1}, {1, 0}})
+      check(fak_ink_step(warm, ids.data(), count, prefill, nullptr, argmax));
+    check(fak_ink_commit(warm, 1));
+    if (owner.hasDraft) {
+      constexpr uint32_t depth = SPLASH_TARGET_VERIFY_ROWS - 1;
+      int32_t tree[3 * (depth + 1)], validated[depth + 1];
+      uint32_t count = 0, retained = 0;
+      check(fak_ink_cycle(warm, ids[1], depth, 4, depth + 1, -1, tree,
+                          validated, &count, &retained));
+    }
+    for (const uint32_t rows : {SPLASH_TARGET_VERIFY_ROWS / 2, SPLASH_TARGET_VERIFY_ROWS}) {
+      check(fak_ink_step(warm, ids.data(), rows, 0, nullptr, argmax));
+      check(fak_ink_commit(warm, 1));
+    }
+    for (const uint32_t rows : prefillLengths) {
+      check(fak_ink_reset(warm, capacity));
+      check(fak_ink_step(warm, ids.data(), rows, 1, nullptr, argmax));
+    }
     held.reset();
     std::lock_guard lock(owner.device);
     owner.backend.flushPipelineArchive();

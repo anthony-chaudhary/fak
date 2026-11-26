@@ -1377,20 +1377,22 @@ struct MetalBackend::Impl {
     // decimal, comma-separated.
     static constexpr const char *kListFile = "pipelines.list";
 
-    void attachArchive(const std::string &root) {
+    void attachArchive(const std::string &root, std::string_view configuration) {
         if (library || pipelineArchive.archive || root.empty()) return;
         // A compiled pipeline belongs to the device and the OS compiler, and
         // a shader edit keys a new subdirectory, so an archive never answers
         // for other sources.
         uint64_t key = fak::inkling::shaders::Libraries::fingerprint();
-        const auto mix = [&](NSString *text) {
-            for (const char *c = text.UTF8String ?: ""; *c; ++c)
-                key = (key ^ static_cast<unsigned char>(*c)) * 0x100000001b3ull;
+        const auto mix = [&](std::string_view text) {
+            for (const char c : text) key = (key ^ static_cast<unsigned char>(c)) * 0x100000001b3ull;
             key = (key ^ 0xff) * 0x100000001b3ull;
         };
-        mix(device.name);
-        mix(device.architecture.name);
-        mix(NSProcessInfo.processInfo.operatingSystemVersionString);
+        const auto text = [](NSString *s) { return std::string_view(s.UTF8String ?: ""); };
+        // The caller's configuration keys archives its loads must not share.
+        mix(configuration);
+        mix(text(device.name));
+        mix(text(device.architecture.name));
+        mix(text(NSProcessInfo.processInfo.operatingSystemVersionString));
         std::ostringstream name;
         name << "inkling-" << std::hex << std::setw(16) << std::setfill('0') << key;
         const std::filesystem::path directory = std::filesystem::path(root) / name.str();
@@ -2905,10 +2907,10 @@ void MetalBackend::preparePipelines(
     static_cast<void>(impl_->prepare(dispatches));
 }
 
-void MetalBackend::attachPipelineArchive(const std::string &directory) {
+void MetalBackend::attachPipelineArchive(const std::string &directory, std::string_view configuration) {
     checkOperation();
     @autoreleasepool {
-        impl_->attachArchive(directory);
+        impl_->attachArchive(directory, configuration);
     }
 }
 

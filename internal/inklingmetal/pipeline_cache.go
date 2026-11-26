@@ -20,7 +20,8 @@ type PipelineStats struct {
 	// ArchiveWarmMS the load time spent creating them.
 	Archived      int
 	ArchiveWarmMS float64
-	// LoadWarmupMS is the prefill run at load when the archive listed none.
+	// LoadWarmupMS is the prefill and decode run at load when the archive
+	// listed none.
 	LoadWarmupMS float64
 	Attached     bool
 }

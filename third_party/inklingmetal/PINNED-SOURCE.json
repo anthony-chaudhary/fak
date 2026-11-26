@@ -175,21 +175,21 @@
     },
     {
       "path": "third_party/inklingmetal/runtime/metal/MetalBackend.hpp",
-      "bytes": 28532,
-      "sha256": "6afef2324464579f64b33710d1de28145007a21f3e27644d0dd90744bc208313",
+      "bytes": 28620,
+      "sha256": "22141f8576dec42ece71e4152ec2f9a737a2a4576b2c70a86045f49842626f0d",
       "status": "modified",
       "upstream_path": "runtime/metal/MetalBackend.hpp",
       "upstream_sha256": "3b462ee00db2eef9df4d61f6ce1dbc6a1c6edc6f6486cd405f0e958a7e1b22fa",
-      "local_change": "Declare the pipeline archive API: attachPipelineArchive, flushPipelineArchive and pipelineCacheStats."
+      "local_change": "Declare the pipeline archive API: attachPipelineArchive (with a caller configuration that keys the archive), flushPipelineArchive and pipelineCacheStats."
     },
     {
       "path": "third_party/inklingmetal/runtime/metal/MetalBackend.mm",
-      "bytes": 145518,
-      "sha256": "7050b96348dc55d342f910a3dcfd97627e46e20cbe4d5df42218f6cfa38a7861",
+      "bytes": 145776,
+      "sha256": "6e5db846e7ce45756be363e28d443862ff41c43346a096aa75625f9c7cbc1dde",
       "status": "modified",
       "upstream_path": "runtime/metal/MetalBackend.mm",
       "upstream_sha256": "238f1bd64d60c6bfefc70e29148faa37b440e7074dc141465dbfd79d65018316",
-      "local_change": "Compile pipelines from the embedded MSL sources (FakEmbeddedShaders.hpp) when no metallib path is given, instead of requiring a prebuilt metallib. Persist created pipelines in an MTLBinaryArchive under a caller-given directory keyed by the embedded shader sources, device and OS (attachPipelineArchive / flushPipelineArchive / pipelineCacheStats), compiling the listed pipelines' sources and creating them from the archive at attach."
+      "local_change": "Compile pipelines from the embedded MSL sources (FakEmbeddedShaders.hpp) when no metallib path is given, instead of requiring a prebuilt metallib. Persist created pipelines in an MTLBinaryArchive under a caller-given directory keyed by the embedded shader sources, device, OS and a caller-given configuration string (attachPipelineArchive / flushPipelineArchive / pipelineCacheStats), compiling the listed pipelines' sources and creating them from the archive at attach."
     },
     {
       "path": "third_party/inklingmetal/runtime/metal/Residency.hpp",

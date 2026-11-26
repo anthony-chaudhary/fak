@@ -528,11 +528,11 @@ public:
   // tens of seconds inside the first request, and macOS evicts that cache
   // under its own policy. An attached archive keeps each pipeline this
   // backend creates in an MTLBinaryArchive under `directory`, in a
-  // subdirectory keyed by the embedded shader sources, the device and the OS
-  // build, and creates now, from the archive, every pipeline a previous
-  // process listed there. Without embedded sources (a metallib backend) it
-  // does nothing.
-  void attachPipelineArchive(const std::string &directory);
+  // subdirectory keyed by the embedded shader sources, the device, the OS
+  // build and the caller's `configuration` (what its load runs), and creates
+  // now, from the archive, every pipeline a previous process listed there.
+  // Without embedded sources (a metallib backend) it does nothing.
+  void attachPipelineArchive(const std::string &directory, std::string_view configuration = {});
   // Writes the archive and its pipeline list when pipelines were added since
   // they were read or last written; true when it wrote them. Each file is
   // replaced whole, so a reader never sees half of one.
