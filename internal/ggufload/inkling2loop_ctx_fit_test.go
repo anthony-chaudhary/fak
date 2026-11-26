@@ -38,7 +38,7 @@ func TestInkling2FitResidentCtx(t *testing.T) {
 		{"exact multiple kept", 1256 * perPos, 0, perPos, 1024},
 		{"below floor refuses", 511 * perPos, 0, perPos, 0},
 		{"at floor fits", 512 * perPos, 0, perPos, 512},
-		{"ceiling clamps", 64 * gib, 0, perPos, inkling2ResidentCtxMax},
+		{"ceiling clamps", 64 * gib, 0, perPos, Inkling2ResidentCtxMax(inkling2ResidentBackend)},
 		{"reserve swallows free", gib, 2 * gib, perPos, 0},
 		{"zero per position refuses", gib, 0, 0, 0},
 	}

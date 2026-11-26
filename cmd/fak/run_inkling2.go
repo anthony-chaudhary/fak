@@ -183,15 +183,14 @@ func inkling2MetalSelect(selector string, loopArch, vendoredAvailable, residentA
 	return 0, fmt.Errorf("Inkling 2: unknown %s=%q (want vendored, native or resident)", inkling2MetalTargetEnv, selector)
 }
 
-// These mirror the resident driver's unexported sizing in internal/ggufload
-// (inkling2ResidentCtxFrom, inkling2ArenaFloats); admission has to price the
-// session before the driver exists.
+// The resident driver's sizing; admission has to price the session before the
+// driver exists, and this path binds Metal.
 const (
-	inkling2ResidentCtxEnv      = "FAK_INKLING2_CTX"
-	inkling2ResidentCtxDefault  = 4096
-	inkling2ResidentCtxMin      = 512
-	inkling2ResidentCtxMax      = 23552
-	inkling2ResidentArenaFloats = 16 << 20
+	inkling2ResidentCtxEnv      = ggufload.Inkling2ResidentCtxEnv
+	inkling2ResidentCtxDefault  = ggufload.Inkling2ResidentCtxDefault
+	inkling2ResidentCtxMin      = ggufload.Inkling2ResidentCtxMin
+	inkling2ResidentCtxMax      = ggufload.Inkling2ResidentCtxMaxMetal
+	inkling2ResidentArenaFloats = ggufload.Inkling2ResidentArenaFloats
 	// Metal rounds a shared buffer up to whole pages.
 	inkling2ResidentBufferAlign = 16 << 10
 )

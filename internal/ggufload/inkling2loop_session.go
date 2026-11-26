@@ -11,8 +11,8 @@ import (
 )
 
 // Inkling2LoopResidentContext is the token capacity (prompt plus generated) of one
-// resident device session (FAK_INKLING2_CTX, default 4096); the host path has no
-// fixed bound.
+// resident device session (FAK_INKLING2_CTX, default 4096), already clamped to the
+// bound of the build's resident backend; the host path has no fixed bound.
 var Inkling2LoopResidentContext = inkling2ResidentCtx
 
 // Inkling2LoopSession is one request's decode state over a fresh KV cache.
