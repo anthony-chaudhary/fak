@@ -28,7 +28,7 @@ below and run that row's preflight before dispatching the workload.
 The evidence requirement selects the target. “GPU” alone is insufficient: a live serving
 check, a single-device kernel witness, a multi-GPU result, and a recurring nightly ledger
 are different jobs. Select an eligible enrolled local or LAN target whose current
-capability matches the required evidence. A retired DGX or GCP record is historical,
+capability matches the required evidence. A retired GPU server or GCP record is historical,
 not an active route. If no target passes admission, record the precise unverified gap;
 a cloud login, provisioning plan, or operator handoff is not a passing test.
 

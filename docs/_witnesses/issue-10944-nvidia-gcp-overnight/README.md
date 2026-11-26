@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-05  
 **Verdict**: `KEEP_NATIVE_ACCELERATION_CONFIRMED`  
-**Execution Plane**: Live GCP Compute Fleet in `us-central1-f` (NVIDIA A100-SXM4-40GB GPUs)  
+**Execution Plane**: Live GCP Compute Fleet in `us-central1-f` (40 GB datacenter GPUs)  
 **Witness Test**: `go test -v ./docs/_witnesses/issue-10944-nvidia-gcp-overnight/...`
 
 ---
@@ -10,7 +10,7 @@
 ## 1. Executive Summary
 
 This campaign executes an empirical overnight evaluation of NVIDIA A100 GPU performance and high-concurrency multi-subagent orchestration against live cloud GPU infrastructure. It captures real, unmodeled measurements across three distinct execution environments:
-1. **In-Kernel fak CUDA Serving (`fak-qwen-serve`)**: Dedicated native CUDA runtime (`fak-00684f03a4-cuda`) serving `Qwen3.8-27B-Q4_K_M` directly on one NVIDIA A100-SXM4-40GB GPU.
+1. **In-Kernel fak CUDA Serving (`fak-qwen-serve`)**: Dedicated native CUDA runtime (`fak-00684f03a4-cuda`) serving `Qwen3.8-27B-Q4_K_M` directly on one 40 GB datacenter GPU.
 2. **Reference vLLM FP8 (`fak-qwen38-fp8-perf`)**: Single A100-40GB running vLLM 0.27.1 on `Qwen/Qwen3.8-27B-FP8`.
 3. **Reference vLLM BF16 TP=2 (`fak-qwen38-bf16-tp2-perf`)**: Dual A100-40GB (Tensor Parallelism = 2) running vLLM 0.27.1 on `Qwen/Qwen3.8-27B-BF16`.
 
@@ -27,9 +27,9 @@ This campaign executes an empirical overnight evaluation of NVIDIA A100 GPU perf
 
 | VM Instance | Region / Zone | Machine Type | Accelerator Architecture | Driver / CUDA | Engine / Runtime | Model Artifact |
 |---|---|---|---|---|---|---|
-| `fak-qwen-serve` | `us-central1-f` | `a2-highgpu-1g` | 1× NVIDIA A100-SXM4-40GB | 580.159.03 / 13.0 | `fak-00684f03a4-cuda` (in-kernel CUDA) | `Qwen3.8-27B-Q4_K_M.gguf` (25,562 MiB VRAM) |
-| `fak-qwen38-fp8-perf` | `us-central1-f` | `a2-highgpu-1g` | 1× NVIDIA A100-SXM4-40GB | 580.173.02 / 13.0 | vLLM 0.27.1 (TP=1) | `Qwen/Qwen3.8-27B-FP8` (31,866 MiB VRAM) |
-| `fak-qwen38-bf16-tp2-perf` | `us-central1-f` | `a2-highgpu-2g` | 2× NVIDIA A100-SXM4-40GB | 580.173.02 / 13.0 | vLLM 0.27.1 (TP=2) | `Qwen/Qwen3.8-27B-BF16` (35,724 MiB VRAM / GPU) |
+| `fak-qwen-serve` | `us-central1-f` | `a2-highgpu-1g` | 1× 40 GB datacenter GPU | 580.159.03 / 13.0 | `fak-00684f03a4-cuda` (in-kernel CUDA) | `Qwen3.8-27B-Q4_K_M.gguf` (25,562 MiB VRAM) |
+| `fak-qwen38-fp8-perf` | `us-central1-f` | `a2-highgpu-1g` | 1× 40 GB datacenter GPU | 580.173.02 / 13.0 | vLLM 0.27.1 (TP=1) | `Qwen/Qwen3.8-27B-FP8` (31,866 MiB VRAM) |
+| `fak-qwen38-bf16-tp2-perf` | `us-central1-f` | `a2-highgpu-2g` | 2× 40 GB datacenter GPU | 580.173.02 / 13.0 | vLLM 0.27.1 (TP=2) | `Qwen/Qwen3.8-27B-BF16` (35,724 MiB VRAM / GPU) |
 
 ---
 

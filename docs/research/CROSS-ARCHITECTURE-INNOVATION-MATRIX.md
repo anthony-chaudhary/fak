@@ -12,7 +12,7 @@ When independent systems engineers encounter extreme hardware boundaries on fron
 - Apple Silicon developers invent **high-QD asynchronous direct-storage expert streaming** to survive 48 GB RAM limits.
 - AMD Strix Halo developers invent **USB4 RoCE-RDMA kernel bypasses** to link $2,000 APU mini-PCs into a 300B-class cluster.
 - NVIDIA Blackwell developers invent **direct-I/O loopback KV caching** and **linear scale swizzle overlays** to hit 300 tok/s on consumer GPUs.
-- Enterprise DGX Spark operators invent **HashK polynomial embedding compression** to run 51 GB n-gram tables in 12.8 GB VRAM.
+- Enterprise GB10 workstation operators invent **HashK polynomial embedding compression** to run 51 GB n-gram tables in 12.8 GB VRAM.
 
 **The Failure Mode:** These breakthroughs remain siloed inside single-platform repos (`slotstream` for MLX, `vllm-strix-halo` for AMD, `ninfer` for Windows WDDM, `ferrite` for Rust/sm100a).  
 **The FAK Mandate:** Systematically translate each platform-specific breakthrough across architectural boundaries. A discovery in MLX must inform CUDA and ROCm; an AMD USB4 RDMA driver must inform multi-Mac clustering; a Grace-Blackwell UMA memory fix must inform AMD APUs.

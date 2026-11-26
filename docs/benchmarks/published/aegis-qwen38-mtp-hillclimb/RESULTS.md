@@ -53,7 +53,7 @@ advertised context 262144→196608 in one change, in three places: the router pi
 `aegis/qwen3.8-27b` + `qwen/qwen3.8-27b`, and the operator overlay. Otherwise requests between 192k and 262k
 fail at the server instead of compacting.
 
-## Context: r/LocalLLM "RTX 5080 PC vs DGX Spark" (operator-supplied)
+## Context: r/LocalLLM "RTX 5080 PC vs GB10 workstation" (operator-supplied)
 
 The post's 5080 ran Qwen3.8-Flash-Next IQ3_S (83.6 GB) through Strata with MTP4 and a hybrid GPU/RAM
 placement, reporting 40–67 tok/s decode. Aegis holds the Strata source and a 63 GB Flash-Next Q2_0, but has only

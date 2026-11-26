@@ -1,6 +1,6 @@
 ---
 title: "CONCEPT-STUDY: airawatraj/dgx-spark-qwen38-flash-agent: HashK GPU PLE compression, Mamba DeltaNet speculative rollback invariants, and Blackwell SM121 kernel fixes"
-description: "Exhaustive, code-grounded deep study of airawatraj/dgx-spark-qwen38-flash-agent on NVIDIA DGX Spark (GB10 / SM121), analyzing 4x HashK PLE compression (SplitMix64 + identity ridge bypass), recurrent state rollback under speculative rejection, Grace-Blackwell kernel bugfixes, and silent wedge detection."
+description: "Exhaustive, code-grounded deep study of airawatraj/dgx-spark-qwen38-flash-agent on NVIDIA GB10 workstation (GB10 / SM121), analyzing 4x HashK PLE compression (SplitMix64 + identity ridge bypass), recurrent state rollback under speculative rejection, Grace-Blackwell kernel bugfixes, and silent wedge detection."
 date: 2026-09-03
 ---
 
@@ -16,7 +16,7 @@ date: 2026-09-03
 
 ## Executive Verdict
 
-`airawatraj/dgx-spark-qwen38-flash-agent` is an authoritative, high-performance serving cookbook and runtime patch kit for running [RadixArk/Qwen3.8-Flash-Next-NVFP4](https://huggingface.co/RadixArk/Qwen3.8-Flash-Next-NVFP4) (~176B total parameters: 125B MoE backbone + 51B $n$-gram Prompt/Path Lookup Embedding (PLE) table, 6B active) on a single **NVIDIA DGX Spark / Grace-Blackwell GB10** node (128 GB unified memory).
+`airawatraj/dgx-spark-qwen38-flash-agent` is an authoritative, high-performance serving cookbook and runtime patch kit for running [RadixArk/Qwen3.8-Flash-Next-NVFP4](https://huggingface.co/RadixArk/Qwen3.8-Flash-Next-NVFP4) (~176B total parameters: 125B MoE backbone + 51B $n$-gram Prompt/Path Lookup Embedding (PLE) table, 6B active) on a single **NVIDIA GB10 workstation / Grace-Blackwell GB10** node (128 GB unified memory).
 
 The project resolves five critical systems and machine learning challenges when serving giant hybrid MoE/recurrent models in constrained unified memory:
 
@@ -41,7 +41,7 @@ The project resolves five critical systems and machine learning challenges when 
 | **Upstream Branch** | `main` (latest commit dated 2026-09-03) |
 | **License** | MIT License (Copyright (c) 2026 Rajendra Singh Rawat) |
 | **Upstream Patches** | SGLang (Apache-2.0) & FlashAttention (BSD-3) |
-| **Target Architecture** | NVIDIA DGX Spark (Grace-Blackwell GB10 / SM121, 128 GB Unified Memory) |
+| **Target Architecture** | NVIDIA GB10 workstation (Grace-Blackwell GB10 / SM121, 128 GB Unified Memory) |
 | **Model Evaluated** | `RadixArk/Qwen3.8-Flash-Next-NVFP4` (176B total, 6B active) |
 | **Durable Study Receipt** | `study_09d87cac2703515c678a679f94fba63a68e82a3515df7c431ed067a85dad93f9` |
 | **Registry Update** | Added to `docs/research/monitored-repositories.json` |
@@ -50,10 +50,10 @@ The project resolves five critical systems and machine learning challenges when 
 
 ## 2. Worldview Reconstruction: Who They Built It For & Core Tradeoffs
 
-To understand `airawatraj`'s design decisions without ego dismissal, we reconstruct the exact hardware economics, developer constraints, and failure modes they navigated on DGX Spark:
+To understand `airawatraj`'s design decisions without ego dismissal, we reconstruct the exact hardware economics, developer constraints, and failure modes they navigated on GB10 workstation:
 
 ### A. The Hardware Memory Budget Crisis on Grace-Blackwell GB10
-NVIDIA DGX Spark features a single Grace-Blackwell GB10 chip with **128 GB unified LPDDR5X memory** shared across the Grace CPU and Blackwell GPU over a 273 GB/s coherent bus. In practice, system reservation and OS overhead leave **~115–118 GB of usable memory** for containerized inference.
+NVIDIA GB10 workstation features a single Grace-Blackwell GB10 chip with **128 GB unified LPDDR5X memory** shared across the Grace CPU and Blackwell GPU over a 273 GB/s coherent bus. In practice, system reservation and OS overhead leave **~115–118 GB of usable memory** for containerized inference.
 
 The parameter breakdown of Qwen3.8-Flash-Next creates an impossible memory budget under standard serving stacks:
 - **MoE Experts (NVFP4):** 60.4 GB (125B parameters quantized to FP4).
@@ -64,7 +64,7 @@ The parameter breakdown of Qwen3.8-Flash-Next creates an impossible memory budge
 If loaded uncompressed, static weights consume 100% of usable memory, leaving **0 bytes** for KV cache, activation memory, or speculative draft models.
 
 ### B. The Failure of Previous Paradigms: Disk MMAP and Load-Time NVFP4 Packing
-Prior open-source attempts on DGX Spark (such as `hasso5703/dgx-spark-qwen38` and early vLLM recipes) took one of two unsatisfactory routes:
+Prior open-source attempts on GB10 workstation (such as `hasso5703/dgx-spark-qwen38` and early vLLM recipes) took one of two unsatisfactory routes:
 
 1. **NVMe SSD MMAP (`src/vllm_ple_mmap.py`, v1.0.0 baseline):**
    - The 51.2 GB PLE table was left on NVMe SSD and accessed via `np.memmap` through the Linux OS page cache.
@@ -311,7 +311,7 @@ The deployment container bind-mounts 4 critical runtime patches to overcome hard
 ### E. Operational Reliability & Silent Wedge Watchdog
 *Source:* `tools/watchdog.sh:1-42@659fa22981c07606bcb29269b5444c0e45ee7b55`.
 
-A major operational discovery on production DGX Spark nodes is the **Silent Wedge State**:
+A major operational discovery on production GB10 workstation nodes is the **Silent Wedge State**:
 - **Symptoms:** Following sudden client disconnects or aborted HTTP streams, the engine can enter a degraded state where running requests stall at ~5 tok/s and state slots leak.
 - **The Health Check Paradox:** Standard Kubernetes / Docker health probes (`GET /health`) query the outer event loop and return `HTTP 200 OK`.
 - **The Telemetry Signature:** Speculative decoding rejects every draft token, causing the log line `Decode batch ... accept len: 1.00` to repeat indefinitely on every active request (healthy traffic exhibits $2.5\text{--}3.5+$ tokens).
@@ -342,7 +342,7 @@ A major operational discovery on production DGX Spark nodes is the **Silent Wedg
   - `patches/qwen4_exp_nvfp4.py:105-151@659fa22981c07606bcb29269b5444c0e45ee7b55`
 - **Fak Seam:** `internal/compute/hashk` & `internal/model` (embedding lookup and sparse $n$-gram drafters, complementing #3197 and #4209).
 - **Axis:** Embedding table VRAM footprint vs. gather latency and reconstruction accuracy.
-- **Why their users made them build it:** Disk MMAP over NVMe SSD incurs random page faults and CPU gather overhead (~10–23 tok/s), while uncompressed storage exceeds DGX Spark's 128 GB memory budget. Compressing to 12.8 GB VRAM enables pure GPU residency and frees 16 GB to load the 8 GB MTP draft model.
+- **Why their users made them build it:** Disk MMAP over NVMe SSD incurs random page faults and CPU gather overhead (~10–23 tok/s), while uncompressed storage exceeds GB10 workstation's 128 GB memory budget. Compressing to 12.8 GB VRAM enables pure GPU residency and frees 16 GB to load the 8 GB MTP draft model.
 - **Witness on-axis:** `ABSENT`.
 - **Disposition:** `DEFAULT` (for hybrid models with massive lookup tables).
 - **Tracking Issue:** [#10954](https://github.com/anthony-chaudhary/fak/issues/10954)
@@ -406,7 +406,7 @@ A major operational discovery on production DGX Spark nodes is the **Silent Wedg
 - **Witness on-axis:** `ABSENT`.
 - **Disposition:** `RECIPE`.
 - **Tracking Issue:** [#10954](https://github.com/anthony-chaudhary/fak/issues/10954)
-- **First Checkable Step:** Add an operational note to `docs/fleet-compute-nodes.md` under the DGX Spark GB10 section detailing the CuTe-DSL TMA-O ragged sequence constraint.
+- **First Checkable Step:** Add an operational note to `docs/fleet-compute-nodes.md` under the GB10 workstation section detailing the CuTe-DSL TMA-O ragged sequence constraint.
 
 ---
 
@@ -430,5 +430,5 @@ A major operational discovery on production DGX Spark nodes is the **Silent Wedg
   - Issue #3197 (`feat(model): n-gram speculative decoding drafter`)
   - Issue #4209 (`feat(ggufload): support loading FP8 E4M3/E5M2 quantized tensors`)
   - Issue #4539 / #4202 (`feat(quality): speculative-parity differential oracle`)
-  - `docs/fleet-compute-nodes.md` (DGX Spark GB10 / SM121 cluster topology)
+  - `docs/fleet-compute-nodes.md` (GB10 workstation / SM121 cluster topology)
   - `docs/research/qwen38_glm53_deep_subagent_inventory.md` (Qwen3.8 serving inventory)

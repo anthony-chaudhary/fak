@@ -17,7 +17,7 @@
 
 `adrienbrault/qwen3.8-27b-rtx5090` is an empirical systems-engineering tour de force that demonstrates production-grade serving of **Qwen3.8-27B** (262,144 context, W4A4 weights, FP8/NVFP4 KV cache) on dual consumer NVIDIA GeForce RTX 5090 (32 GB GDDR7, Blackwell `sm_120`) in a single desktop workstation (ASRock X870, AMD Ryzen 7 9800X3D, 64 GB DDR5).
 
-The repository bridges the chasm between **datacenter assumptions in upstream vLLM** (which assume HGX/DGX clusters with SM100, NVLink, terabytes of host RAM, and external Kubernetes PVC evictors) and the realities of **consumer hardware running long-context agentic workloads**.
+The repository bridges the chasm between **datacenter assumptions in upstream vLLM** (which assume HGX/GPU-server clusters with SM100, NVLink, terabytes of host RAM, and external Kubernetes PVC evictors) and the realities of **consumer hardware running long-context agentic workloads**.
 
 Key technical breakthroughs and empirical findings in this repository:
 1. **SM120 NVFP4 Linear V-Scale Store Overlay**: Upstream vLLM unconditionally writes NVFP4 V-block scale factors in an SM100 `trtllm-gen` 4-token swizzled layout (`nvfp4_kv_cache_kernels.cu:291-298`). On consumer Blackwell (SM120/SM121), FlashInfer's FlashAttention-2 (FA2) paged reader expects linear scales. Because the data layout matches but scale factors are permuted across 4-token groups, output remains superficially fluent and passes coarse needle tests, but suffers **2.7× to 10× attention L2 error** and an 8.8% ΔNLL degradation. The author ships a custom C++/PyTorch overlay (`torch.ops.vllm_sm12x.reshape_and_cache_nvfp4`) and a rigorous numerical tensor diagnostic (`diag_vsf_layout.py`) that isolates the scale permutation.

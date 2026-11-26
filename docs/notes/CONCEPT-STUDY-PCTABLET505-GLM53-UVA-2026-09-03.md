@@ -15,7 +15,7 @@
 
 ## Executive Summary
 
-Serving **GLM-5.3-Flash** (`glm5_next`: 45 layers, 320B total parameters, 18B active parameters, 288 routed experts top-8 + 1 shared expert, 1M context) requires 181.3 GiB of weight memory under standard NVFP4 quantization. This geometry fundamentally exceeds the physical VRAM capacity of single high-end workstation GPUs like the NVIDIA RTX PRO 6000 Ada (96 GiB) or single DGX Spark nodes without tensor parallelism.
+Serving **GLM-5.3-Flash** (`glm5_next`: 45 layers, 320B total parameters, 18B active parameters, 288 routed experts top-8 + 1 shared expert, 1M context) requires 181.3 GiB of weight memory under standard NVFP4 quantization. This geometry fundamentally exceeds the physical VRAM capacity of single high-end workstation GPUs like the NVIDIA RTX PRO 6000 Ada (96 GiB) or single GB10 workstation nodes without tensor parallelism.
 
 Traditional Unified Virtual Addressing (UVA) or PCIe offloading mechanisms suffer from three catastrophic performance bottlenecks:
 1. **Scattered BAR Reads (~23.4 GB/s)**: Host-to-device PCIe Gen5 transfer efficiency collapses due to fine-grained, non-coalesced memory reads across non-contiguous host memory blocks during scattered expert parameter lookups.

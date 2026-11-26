@@ -1,4 +1,4 @@
-# Concept Study: vcruz305/GLM-5.3-Flash-EXL3-K2-DGX-Spark-recipe — Single-Spark 128 GB UMA Serving & CUDA Kernel Forensics
+# Concept Study: vcruz305/GLM-5.3-Flash-EXL3-K2 GB10 recipe — Single-Spark 128 GB UMA Serving & CUDA Kernel Forensics
 
 **Source:** https://github.com/vcruz305/GLM-5.3-Flash-EXL3-K2-DGX-Spark-recipe  
 **Pinned Revision:** `9ced8ba911ea6a0720384c4de1875d64d5470ef1`  
@@ -17,7 +17,7 @@
 
 ## Executive Summary
 
-`vcruz305/GLM-5.3-Flash-EXL3-K2-DGX-Spark-recipe` documents a complete, production-verified recipe for serving **GLM-5.3-Flash** (`glm5_next`: 45 layers, 34 KDA linear-attention + 11 DSA sparse-attention layers, 288 routed experts top-8 + 1 shared expert, 320B total / 18B active parameters, 1M native context) on a **single NVIDIA DGX Spark / GB10 (SM121)** workstation with ~121.7 GiB unified memory (UMA).
+`vcruz305/GLM-5.3-Flash-EXL3-K2-DGX-Spark-recipe` documents a complete, production-verified recipe for serving **GLM-5.3-Flash** (`glm5_next`: 45 layers, 34 KDA linear-attention + 11 DSA sparse-attention layers, 288 routed experts top-8 + 1 shared expert, 320B total / 18B active parameters, 1M native context) on a **single NVIDIA GB10 workstation / GB10 (SM121)** workstation with ~121.7 GiB unified memory (UMA).
 
 Prior to this work, deploying 320B-class MoE models required either multi-node clusters ($200,000+) or dual-Spark tensor-parallel setups (MiaAI-Lab TP=2). Initial single-node community attempts suffered from severe regressions: models were reported as "loopy", suffered sudden engine crashes (`CUDA illegal memory access`) around 2,200 generated tokens, and hung indefinitely during prefill beyond 163k tokens.
 
@@ -262,7 +262,7 @@ In `docs/MEASUREMENTS.md:40-56`:
 #### The Unified Memory Allocator Ratchet
 On discrete GPUs with dedicated VRAM, memory allocation exhaustion causes `cudaMalloc` to return `cudaErrorMemoryAllocation`, triggering PyTorch's caching allocator to search its cache, coalesce blocks, and free unused cached blocks.
 
-On the NVIDIA DGX Spark GB10, the CPU and GPU share a single 128 GB LPDDR5X physical memory pool via NVIDIA Grace/Blackwell unified memory architecture (UMA). In this environment:
+On the NVIDIA GB10 workstation, the CPU and GPU share a single 128 GB LPDDR5X physical memory pool via NVIDIA Grace/Blackwell unified memory architecture (UMA). In this environment:
 1. `cudaMalloc` calls succeed almost indefinitely by claiming virtual memory from the OS.
 2. In vLLM's `split_indexer_prefill_chunks` (`v1/attention/backends/mla/indexer.py`), chunked prefill allocates an fp32 logits buffer of shape `(sub_m, N_compressed)` up to `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB = 512`.
 3. Because the sequence prefix grows by 2,048 tokens at every chunked prefill step, each successive step requires slightly larger buffers than the previous step.

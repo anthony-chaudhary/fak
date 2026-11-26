@@ -163,7 +163,7 @@ In `fak`, **UltraCode is not a marketing buzzword or an oversized token budget**
 
 ### B. NVIDIA A100 Datacenter GPU Benchmarks (`fak-qwen-serve`, us-central1-f)
 *Source: `BENCHMARK-AUTHORITY.md`, `docs/_witnesses/issue-10944-nvidia-gcp-overnight/fak_native_qwen38_a100_bench_raw.json`*
-*Hardware: NVIDIA A100-SXM4-40GB, CUDA 13.0. Model: Qwen3.8-27B-Q4_K_M.*
+*Hardware: 40 GB datacenter GPU, CUDA 13.0. Model: Qwen3.8-27B-Q4_K_M.*
 
 ```
 NVIDIA A100 Concurrency Sweep (Shared Prefix = 1,370 tokens)

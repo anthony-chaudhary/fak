@@ -2,7 +2,7 @@
 
 ## Summary
 
-This witness proves the first live, empirical run of the FAK native CUDA inference kernel executing a **20,480-token (20k context)** prompt with the two-bit Unsloth Dynamic quantization `Qwen3.8-27B-UD-Q2_K_XL.gguf` on an NVIDIA A100-SXM4-40GB GPU (`fak-qwen-serve`, GCP `us-central1-f`).
+This witness proves the first live, empirical run of the FAK native CUDA inference kernel executing a **20,480-token (20k context)** prompt with the two-bit Unsloth Dynamic quantization `Qwen3.8-27B-UD-Q2_K_XL.gguf` on a 40 GB datacenter GPU (`fak-qwen-serve`, GCP `us-central1-f`).
 
 ## Key Empirical Findings
 

@@ -124,7 +124,7 @@ audit of all 174 notification surfaces across both repos found these:
 | --- | --- | --- |
 | `tools/slack_post.py` | public | its own stdlib-only Python poster; builds the URL and calls `urllib.request.urlopen` directly |
 | `tools/node_report.py` | private | its own `_slack_call` over `urllib` |
-| `tools/dgxbridge/internal/slack.go` | private | the DGX bridge's hand-rolled client (`chat.postMessage` / `chat.delete`) |
+| `tools/dgxbridge/internal/slack.go` | private | the GPU server bridge's hand-rolled client (`chat.postMessage` / `chat.delete`) |
 | `ops/glm52_local_ud_post.sh` | private | a raw `curl` to `chat.postMessage` |
 | `platform/alertnotify` | private | an ntfy-compatible webhook, not Slack at all — a different transport with its own topic URL |
 

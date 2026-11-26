@@ -15,7 +15,7 @@
 
 ## Executive Summary
 
-`hasso5703/dgx-spark-qwen38` is a production-grade, hardened serving stack engineered specifically for serving the **Qwen3.8** model family on a single **NVIDIA DGX Spark** workstation (GB10 Grace Blackwell, 128 GB Unified Memory Architecture). While the broader open-source ecosystem runs Qwen3.8-Flash-Next (176B/6B hybrid MoE) across multi-node clusters or dual DGX Spark systems (TP2), this repository achieves single-node serving with full 262K context, native vision support, lossless speculative decoding, and working prefix caching.
+`hasso5703/dgx-spark-qwen38` is a production-grade, hardened serving stack engineered specifically for serving the **Qwen3.8** model family on a single **NVIDIA GB10 workstation** workstation (GB10 Grace Blackwell, 128 GB Unified Memory Architecture). While the broader open-source ecosystem runs Qwen3.8-Flash-Next (176B/6B hybrid MoE) across multi-node clusters or dual GB10 workstation systems (TP2), this repository achieves single-node serving with full 262K context, native vision support, lossless speculative decoding, and working prefix caching.
 
 The project demonstrates exceptional systems engineering rigor, solving critical edge cases that cause silent failure in long-running agent workloads:
 1. **Zero-Copy NVMe Memory-Mapped Embedding Backing (51B PLE Table)**: Bypasses the ~48 GB pinned host RAM requirement for Qwen3.8-Flash-Next's Position-Linked Embedding (n-gram) table by mapping it from NVMe via `torch.from_file(shared=True)` with explicit `madvise(MADV_RANDOM)` and persistent sidecar completion markers. Leveraging GB10's coherent CPU-GPU memory bus, GPU gather kernels dereference pageable host pointers directly without table residency, incurring less than 3% runtime overhead.
@@ -206,7 +206,7 @@ Standard benchmarking scripts measure time-to-first-token by checking `delta.con
 
 ### 1. Single-Node Workstation Reality vs Hyperscale Abstractions
 Hyperscale serving frameworks (vLLM, Dynamo, Mooncake) assume homogeneous data-center nodes with discrete GPU VRAM (e.g. H100 SXM5 with 80 GB dedicated HBM3), out-of-band RDMA fabrics, and independent front-end load balancers.
-The author's worldview is anchored in the reality of **workstation-class Unified Memory Architecture (NVIDIA DGX Spark / GB10)**:
+The author's worldview is anchored in the reality of **workstation-class Unified Memory Architecture (NVIDIA GB10 workstation / GB10)**:
 - Memory is a single shared pool of 128 GB LPDDR5X. An allocation spike on the GPU directly starves the Linux kernel, systemd, SSH, and developer tools.
 - SGLang's internal memory profiler fails to account for 25–40 GB of transient allocations during FlashInfer FP8 autotuning and CUDA graph capture.
 - Running `--mem-fraction-static 0.80` (the official SGLang cookbook setting) causes instant out-of-memory kernel panics under multi-client concurrency. The author enforces `--mem-fraction-static 0.50` (native) or `0.70` (1m context mode) inside a strict Docker `--memory 100g` container cgroup.
@@ -296,7 +296,7 @@ The following 5 borrow candidates represent high-value architectural techniques 
 
 ## Empirical Benchmarks & Hardware Receipts
 
-The following empirical measurements were captured directly from the reference DGX Spark (GB10 128 GB) environment running revision `a08dea9cd8cda4cee61c007d4176f7b97908de8e`:
+The following empirical measurements were captured directly from the reference GB10 workstation (GB10 128 GB) environment running revision `a08dea9cd8cda4cee61c007d4176f7b97908de8e`:
 
 ### 1. Speculative Decoding Throughput (Qwen3.8-27B NVFP4, Batch 1 Decode)
 
@@ -309,7 +309,7 @@ The following empirical measurements were captured directly from the reference D
 | **8 Concurrent Streams (Aggregate)** | **135–148 tok/s** | 100–104 tok/s | ~92 tok/s |
 | **32 Concurrent Streams (Aggregate)** | **258 tok/s** | Not measured | Not measured |
 
-### 2. Qwen3.8-Flash-Next 176B on Single DGX Spark GB10
+### 2. Qwen3.8-Flash-Next 176B on Single GB10 workstation
 
 | Measurement Axis | Measured Receipt | Notes |
 |---|---|---|
