@@ -36,10 +36,13 @@ func inkling2TailSlots(T int) (verify, commit int) {
 func intBits(v int) float32 { return math.Float32frombits(uint32(int32(v))) }
 
 // inkling2SpecDepth is the drafted-token count of a speculative step from
-// FAK_INKLING2_SPEC (unset or 0 = plain decode; 1 = the default depth).
+// FAK_INKLING2_SPEC (unset = the default depth 4; 0 = plain decode; 1 = depth 4).
 func inkling2SpecDepth() int {
 	v := os.Getenv("FAK_INKLING2_SPEC")
-	if v == "" || v == "0" {
+	if v == "" {
+		return 4
+	}
+	if v == "0" {
 		return 0
 	}
 	n, err := strconv.Atoi(v)
