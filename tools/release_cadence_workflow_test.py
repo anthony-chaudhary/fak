@@ -48,6 +48,18 @@ class ReleaseCadenceWorkflowTest(unittest.TestCase):
         self.assertIn("python tools/release_publish.py", text)
         self.assertIn("--execute", text)
 
+    def test_cadence_can_dispatch_ci_fast_with_job_scoped_actions_write(self) -> None:
+        text = WORKFLOW.read_text(encoding="utf-8")
+        global_scope, jobs = text.split("\njobs:\n", 1)
+        self.assertIn("\npermissions:\n  contents: read\n", global_scope)
+        self.assertNotIn("actions: write", global_scope)
+
+        cadence = jobs.split("  cadence:\n", 1)[1]
+        permissions = cadence.split("\n    steps:\n", 1)[0].split("\n    permissions:\n", 1)[1]
+        self.assertIn("\n      contents: write\n", "\n" + permissions)
+        self.assertIn("\n      actions: write\n", "\n" + permissions)
+        self.assertIn("gh workflow run ci-fast.yml", cadence)
+
     def test_cadence_cut_shares_the_release_lock(self) -> None:
         # #1391: a SCHEDULED auto-cut and a human `/release` must share the SAME
         # single-writer lock so the unattended tick cannot race VERSION / the tag
