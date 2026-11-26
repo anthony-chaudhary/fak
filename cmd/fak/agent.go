@@ -52,6 +52,7 @@ type agentFlags struct {
 	codeTools             *bool
 	codeWorkspace         *string
 	allowBashCommands     exactBashCommandList
+	bashPolicy            string
 	bashCommandTimeout    *time.Duration
 	bashCommandTimeoutSet bool
 	sysTools              *bool
@@ -100,7 +101,8 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in floor plus bounded repository code tools when enabled; see `fak policy --dump`)")
 	af.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current repository; use --code-tools=false to disable")
 	af.codeWorkspace = fs.String("code-workspace", "", "override the workspace root for default-on bounded repository code tools")
-	fs.Var(&af.allowBashCommands, "allow-bash-command", "grant one byte-exact command to the bounded native Bash tool (repeatable; focused defaults and all other safety gates remain active)")
+	fs.Var(&af.allowBashCommands, "allow-bash-command", "grant one byte-exact command in focused native Bash (repeatable; selects focused in auto mode)")
+	fs.Func("bash-policy", "native Bash admission: auto (focused with grants, a policy manifest, or fail_closed; default_open otherwise), default_open, or focused", af.setBashPolicy)
 	af.bashCommandTimeout = fs.Duration("bash-command-timeout", 2*time.Minute, "hard timeout for each bounded native Bash command (positive, maximum 10m)")
 	af.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
 	af.mcpTools = fs.Bool("mcp-tools", true, "arm native fak MCP features (fak_read, fak_tools_search, fak_adjudicate, fak_syscall); use --mcp-tools=false to disable")
@@ -471,6 +473,7 @@ func runAgentWithPlanner(argv []string, plannerOverride agent.Planner) {
 		}
 		return
 	}
+	must(af.constrainBashPolicy(isNative || interactive))
 	if err := validateAgentLogMode(isRaw, *af.logOut); err != nil {
 		must(err)
 	}
@@ -534,6 +537,13 @@ func runAgentWithPlanner(argv []string, plannerOverride agent.Planner) {
 	}
 	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*af.routeManifest, *af.routeAccounts)
 	must(err)
+	if !isRaw && (*af.policyPath != "" || strings.TrimSpace(os.Getenv("FAK_PROFILE")) != "") {
+		snapshot := adjudicator.Default.PolicySnapshot()
+		if postureExplicit || os.Getenv("FAK_AGENT_POSTURE") != "" || os.Getenv("FAK_GUARD_POSTURE") != "" {
+			snapshot.Posture = agent.ConfiguredPosture()
+		}
+		runOpts = append(runOpts, agent.WithPolicySnapshot(snapshot))
+	}
 	runOpts = append(runOpts, agent.WithResponseProfileSource(preference.Source))
 	if loadedRoute != nil && !isRaw {
 		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *af.routeManifest)

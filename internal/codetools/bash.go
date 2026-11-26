@@ -111,7 +111,7 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	defer cancel()
 	gotmpDir := t.ensureGoTmpDir()
 	execCommand := a.Command
-	if t.focusedCommands && focusedCommandAllowed(execCommand) {
+	if isGitCommand(execCommand) && focusedCommandAllowed(execCommand) {
 		execCommand = hardenGitArgs(execCommand)
 	}
 	command := t.rewriteCommandForContainment(execCommand, cwd, gotmpDir)
