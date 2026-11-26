@@ -10,7 +10,7 @@ import "errors"
 // without linking the Metal graph, so the constant is part of the portable
 // contract42 and must not be darwin-only. Kept byte-identical to graph.go's value;
 // prompt_panel_lockstep_test.go pins the two to each other.
-const PromptPanelMaxTokens = 128
+const PromptPanelMaxTokens = 256
 
 type GraphReceipt struct {
 	Committed, CompletedWait, TimingAvailable bool

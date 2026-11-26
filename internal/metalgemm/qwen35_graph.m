@@ -493,7 +493,7 @@ static void qg_dispatch(id<MTLComputeCommandEncoder>e,id<MTLComputePipelineState
 // kernels loop generically over the graph's row count; the historical {1,2,3,4,32}
 // enumeration was conservative, not a hardware bound. Keep the two in lockstep: a
 // mismatch turns a wider Go-side admission into a native nil-PSO decline.
-#define QG_MAX_ROWS 128
+#define QG_MAX_ROWS 256
 static int qg_ordered_rows(void*g){int rows=mg_graph_prompt(g);return rows>=1&&rows<=QG_MAX_ROWS?rows:0;}
 // qg_split_policy picks split-KV flash decoding for the single-token decode at long
 // context: one SIMDgroup per (head, KV split) exposes nH*splits-wide parallelism

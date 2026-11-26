@@ -48,7 +48,7 @@ func TestPrefillQwen35HybridQ4KDeviceKVPanelHostReadbackFlat(t *testing.T) {
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
 
-	const promptTokens = 256 // exactly two 128-token panels
+	const promptTokens = 2 * metalgemm.PromptPanelMaxTokens // exactly two full-width panels
 	type arm struct {
 		nKV          int
 		kvWidth      int
@@ -118,7 +118,7 @@ func TestPrefillQwen35HybridQ4KDeviceKVPanelHostReadbackFlat(t *testing.T) {
 	}
 	first := arms[0]
 	if first.devicePanels != 2 {
-		t.Fatalf("device panels=%d, want 2 (ceil(256/128))", first.devicePanels)
+		t.Fatalf("device panels=%d, want 2 (two full-width panels)", first.devicePanels)
 	}
 	if first.deviceRows != promptTokens {
 		t.Fatalf("device rows=%d, want %d", first.deviceRows, promptTokens)
@@ -185,8 +185,9 @@ func TestPrefillQwen35HybridQ4KDeviceKVWalkPlanMatchesProductionPanelizer(t *tes
 		panels []int
 	}{
 		{prompt: 100, cover: 96, panels: []int{96}},
-		{prompt: 300, cover: 288, panels: []int{128, 128, 32}},
-		{prompt: 256, cover: 256, panels: []int{128, 128}},
+		{prompt: 300, cover: 288, panels: []int{256, 32}},
+		{prompt: 256, cover: 256, panels: []int{256}},
+		{prompt: 512, cover: 512, panels: []int{256, 256}},
 	} {
 		cover, panels := panelize(tc.prompt)
 		if cover != tc.cover {

@@ -22,8 +22,8 @@ func withPinnedCrossoverRow(t *testing.T, row q4kM5CrossoverRow, fn func()) {
 
 // TestQ4KM5ProductionSeamDefaultsToWideTile pins the end-to-end production seam that fak#13124
 // left dormant: with the model-layer opt-in now default-ON (FAK_Q4K_M5 unset), the exact call the
-// prefill walk makes — SetQ4KGEMMMode(Q4KGEMMModeForPrompt(P)) at the production panel width
-// PromptPanelMaxTokens (128) — must select mode 2 on the receipted Apple M3 Pro / macOS 26 box, and
+// prefill walk makes — SetQ4KGEMMMode(Q4KGEMMModeForPrompt(P)) at P=128, the top of the receipted
+// M5 crossover band [64,128] — must select mode 2 on the receipted Apple M3 Pro / macOS 26 box, and
 // the graph must report that mode. Off the receipted device the crossover gate keeps the request
 // inert, so the same call yields scalar and the scalar identity stays executed (fail-closed).
 func TestQ4KM5ProductionSeamDefaultsToWideTile(t *testing.T) {
@@ -48,7 +48,7 @@ func TestQ4KM5ProductionSeamDefaultsToWideTile(t *testing.T) {
 	SetGEMMUseMulMM(false)
 	defer SetGEMMUseMulMM(priorMulMM)
 
-	P := PromptPanelMaxTokens // 128: the production panel width (P>=64 wide-tile envelope)
+	P := 128 // top of the receipted M5 band [64,128]; wider panels ride the mul_mm default
 	g, err := BeginProjectionGraph(make([]float32, P*in), nil, nil, P, in)
 	if err != nil {
 		t.Fatal(err)

@@ -26,10 +26,10 @@ import (
 // Panelization matches the production walk owner
 // (tryPrefillQwen35HybridQ4K, internal/model/qwen35_prefill_q4k.go): the panel
 // quantum is 32 (`panelCover = (L/32)*32`) and each panel is capped at
-// PromptPanelMaxTokens (128). So:
+// PromptPanelMaxTokens (256). So:
 //
 //	L=100 -> cover 96  -> panels [96]        (a 4-row host remainder, not device)
-//	L=300 -> cover 288 -> panels [128,128,32]
+//	L=300 -> cover 288 -> panels [256,32]
 //
 // The multi-panel walk exercises the crossover the change exists for: panel p+1
 // reads its Kpost/V prefix on the device, from the rows panel p appended, with no
@@ -54,8 +54,8 @@ func TestProjectionGraphQwenDeviceKVByteParityL100L300(t *testing.T) {
 	const panelQuantum = 32
 	productionPanels := func(t *testing.T, promptLen int) (cover int, panels []int) {
 		t.Helper()
-		if PromptPanelMaxTokens != 128 {
-			t.Fatalf("PromptPanelMaxTokens=%d, witness pinned to the production 128", PromptPanelMaxTokens)
+		if PromptPanelMaxTokens != 256 {
+			t.Fatalf("PromptPanelMaxTokens=%d, witness pinned to the production 256", PromptPanelMaxTokens)
 		}
 		cover = (promptLen / panelQuantum) * panelQuantum
 		for start := 0; start < cover; start += PromptPanelMaxTokens {
@@ -207,7 +207,7 @@ func TestProjectionGraphQwenDeviceKVByteParityL100L300(t *testing.T) {
 		wantPanel []int
 	}{
 		{name: "L100", promptLen: 100, wantCover: 96, wantPanel: []int{96}},
-		{name: "L300", promptLen: 300, wantCover: 288, wantPanel: []int{128, 128, 32}},
+		{name: "L300", promptLen: 300, wantCover: 288, wantPanel: []int{256, 32}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cover, panels := productionPanels(t, tc.promptLen)

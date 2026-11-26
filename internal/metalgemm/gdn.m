@@ -43,7 +43,7 @@ enum { MG_GDN_MAX_OWNERS = 512 };
 // conv/QK-norm/recurrent panel kernels all loop generically over `tokens`, so the
 // historical {1,2,3,4,32} admission was a conservative enumeration, not a hardware
 // bound. Keep the two in lockstep for the #13041 wider-panel collapse.
-enum { MG_GDN_GRAPH_MAX_TOKENS = 128 };
+enum { MG_GDN_GRAPH_MAX_TOKENS = 256 };
 static MGGDNOwner gGDNOwners[MG_GDN_MAX_OWNERS];
 static uint64_t gGDNNextHandle = 1;
 static id<MTLComputePipelineState> gGDNConvPSO;
