@@ -1,6 +1,7 @@
 package modelengine
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -25,6 +26,9 @@ const (
 	envNativeKVElasticBlocks  = "FAK_NATIVE_KV_ELASTIC_BLOCKS"
 	envNativePrefillInterval  = "FAK_NATIVE_PREFILL_INTERVAL"
 	envNativeSpecAdmissionPad = "FAK_NATIVE_SPEC_ADMISSION_PAD"
+	// Shared with the Inkling-2 cohort: both read it as the per-step prompt-token
+	// cap on a long prefill while other requests compete for the step.
+	envNativeLongPrefillTokenThreshold = "FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD"
 )
 
 func nativeEnvOn(name string) bool {
@@ -142,6 +146,26 @@ func applyNativeServeKnobs(sched *NativeScheduler, blockTokens int) {
 	// Unset or 0 keeps historical admission byte-for-byte.
 	if n := nativeEnvPositiveInt(envNativeSpecAdmissionPad); n > 0 {
 		sched.SetSpecAdmissionPad(n)
+	}
+	applyNativeLongPrefillTokenThreshold(sched)
+}
+
+// applyNativeLongPrefillTokenThreshold arms the long-prefill fairness cap from
+// FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD. Unset, empty or 0 keeps it off
+// silently; any other value the scheduler cannot honor keeps it off and is
+// logged, so an operator who set the knob learns it did not take effect.
+func applyNativeLongPrefillTokenThreshold(sched *NativeScheduler) {
+	raw := strings.TrimSpace(os.Getenv(envNativeLongPrefillTokenThreshold))
+	if raw == "" || raw == "0" {
+		return
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		log.Printf("modelengine: %s=%q ignored: want a non-negative integer; long prefill cap stays off", envNativeLongPrefillTokenThreshold, raw)
+		return
+	}
+	if err := sched.SetLongPrefillTokenThreshold(n); err != nil {
+		log.Printf("modelengine: %s=%d ignored: %v; long prefill cap stays off", envNativeLongPrefillTokenThreshold, n, err)
 	}
 }
 
