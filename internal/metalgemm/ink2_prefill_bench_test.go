@@ -3,10 +3,16 @@
 package metalgemm
 
 import (
+	"math"
 	"math/rand"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/gpulease"
 )
 
 // ink2PBenchGPU returns the GPU seconds of the launches encode adds, after one
@@ -228,4 +234,135 @@ func TestInk2PBenchController(t *testing.T) {
 	})
 	t.Logf("controller of %d rows, width %d, rank %d: down GEMM %.1fus, split %.1fus, decode-order %.1fus; apply GEMM %.1fus, tile %.1fus, decode-order %.1fus",
 		T, n, rank, 1e6*downGEMM, 1e6*downTile, 1e6*downRows, 1e6*applyGEMM, 1e6*applyTile, 1e6*applyRows)
+}
+
+func init() {
+	// FAK_INK2P_BENCH_GTILE=gm,gn,sm,sn swaps the grouped tile before the
+	// kernels compile, to time a tile without a rebuild.
+	if s := os.Getenv("FAK_INK2P_BENCH_GTILE"); s != "" {
+		var v [4]int
+		for i, f := range strings.Split(s, ",") {
+			if i < 4 {
+				v[i], _ = strconv.Atoi(f)
+			}
+		}
+		ink2GemmGrouped = ink2GemmTile{v[0], v[1], v[2], v[3]}
+	}
+}
+
+// The expert-grouped NVFP4 GEMM at the shapes of an Inkling-2-Mini layer: T*8
+// routed pairs through 128 experts (FAK_INK2P_BENCH_EXPERTS), gate-up
+// [2304][2304] and down [2304][1152].
+// FAK_INK2P_BENCH_GROUPED=<T>[,<T>...] runs it.
+// fak-test:runtime slow est=60s
+func TestInk2PBenchGroupedGEMM(t *testing.T) {
+	var lens []int
+	for _, f := range strings.Split(os.Getenv("FAK_INK2P_BENCH_GROUPED"), ",") {
+		if T, _ := strconv.Atoi(f); T > 0 {
+			lens = append(lens, T)
+		}
+	}
+	if len(lens) == 0 {
+		t.Skip("set FAK_INK2P_BENCH_GROUPED to chunk lengths to time the grouped expert GEMM")
+	}
+	lease, err := gpulease.Acquire(gpulease.Options{Timeout: 20 * time.Minute, Logf: t.Logf})
+	if err != nil {
+		t.Skipf("NOT RUN: %v", err)
+	}
+	defer lease.Release()
+	d := ink2TestDevice(t)
+	rng := rand.New(rand.NewSource(91))
+	const typ, k, hidden = 40, 8, 2304
+	experts := 128
+	if n, _ := strconv.Atoi(os.Getenv("FAK_INK2P_BENCH_EXPERTS")); n >= k {
+		experts = n
+	}
+	// FAK_INK2P_BENCH_SKEW=<sigma> routes by lognormal expert popularity, so
+	// run lengths spread as a trained router's do.
+	skew, _ := strconv.ParseFloat(os.Getenv("FAK_INK2P_BENCH_SKEW"), 64)
+	pop := make([]float64, experts)
+	for e := range pop {
+		pop[e] = math.Exp(skew * rng.NormFloat64())
+	}
+	route := func() []int {
+		picked := make([]int, 0, k)
+		for len(picked) < k {
+			sum := 0.0
+			for e, w := range pop {
+				if !slices.Contains(picked, e) {
+					sum += w
+				}
+			}
+			u := rng.Float64() * sum
+			for e, w := range pop {
+				if slices.Contains(picked, e) {
+					continue
+				}
+				if u -= w; u <= 0 {
+					picked = append(picked, e)
+					break
+				}
+			}
+		}
+		return picked
+	}
+	page := os.Getpagesize()
+	for _, shape := range [][2]int{{2304, 2304}, {2304, 1152}} {
+		rows, cols := shape[0], shape[1]
+		block, blockBytes, err := packedBlock(typ)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store, data := ink2TestStore(t, experts*rows*(cols/block*blockBytes)/page+8)
+		stackM, _ := ink2PTestWeights(t, store, data, rng, 64, typ, rows, cols, experts)
+		stack, ok := stackM.stack.Ink2Stack()
+		if !ok {
+			t.Fatal("stack split across views")
+		}
+		for _, T := range lens {
+			npairs := T * k
+			ids := make([]int32, 0, npairs)
+			for range T {
+				for _, e := range route() {
+					ids = append(ids, int32(e))
+				}
+			}
+			xr := ink2OpsTestPut(t, d, 0, ink2OpsTestRand(rng, npairs*hidden, .5))
+			idr := ink2OpsTestPut(t, d, 0, ink2PTestInts(ids))
+			counts, offsets, order := ink2TestAlloc(t, d, experts), ink2TestAlloc(t, d, experts+1), ink2TestAlloc(t, d, npairs)
+			yb := ink2TestAlloc(t, d, npairs*rows)
+			if err := d.PBucket(idr, counts, offsets, order, npairs, experts); err != nil {
+				t.Fatal(err)
+			}
+			// x is per pair (xDiv 1) at the down shape and per token at gate-up.
+			xDiv := k
+			if cols != hidden {
+				xDiv = 1
+			}
+			var want []float32
+			for v, name := range []string{"default", "adaptive", "pick"} {
+				ink2GroupedForce = v
+				if name == "pick" {
+					ink2GroupedForce = -1
+				}
+				gpu := ink2PBenchGPU(t, d, func() error {
+					ok, err := d.PExpertGEMM(stack, idr, order, offsets, xr, xDiv, hidden, yb, npairs, Ink2Ref{})
+					if err == nil && !ok {
+						t.Fatal("grouped GEMM declined")
+					}
+					return err
+				})
+				got := ink2OpsTestRead(t, d, yb, npairs*rows)
+				if want == nil {
+					want = got
+				} else {
+					ink2OpsTestSame(t, name, got, want)
+				}
+				wbytes := float64(experts*rows) * float64(cols/block*blockBytes)
+				t.Logf("tile %-8s T=%d pairs=%d run=%.1f [%d][%d]: %.3f ms, weights %.1f GB/s, %.1f GFLOP/s",
+					name, T, npairs, float64(npairs)/float64(experts), rows, cols, gpu*1e3, wbytes/gpu/1e9, 2*float64(npairs*rows*cols)/gpu/1e9)
+			}
+			ink2GroupedForce = -1
+		}
+	}
 }

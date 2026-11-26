@@ -99,8 +99,11 @@ func TestInk2PGemmGroupedMatchesExpertMatVecAndHost(t *testing.T) {
 	d := ink2TestDevice(t)
 	rng := rand.New(rand.NewSource(92))
 	const experts, k = 5, 3
-	// Enough pairs that expert 1 runs past one tile.
-	rows, T := ink2GemmGrouped.bn()+6, 40*max(1, ink2GemmGrouped.bm()/32)
+	// Enough pairs that expert 1 runs past one tile, and rows past one
+	// column tile of every grouped tile.
+	rows, T := max(ink2GemmGrouped.bn(), 128)+6, 40*max(1, ink2GemmGrouped.bm()/32)
+	ink2GroupedForce = 0
+	defer func() { ink2GroupedForce = -1 }()
 	npairs := T * k
 	// Expert 4 is never routed; expert 1 holds runs of more than one tile, and
 	// the others end in partial tiles.
@@ -147,6 +150,16 @@ func TestInk2PGemmGroupedMatchesExpertMatVecAndHost(t *testing.T) {
 					t.Fatalf("%s: grouped GEMM: ok %v, %v", form.name, ok, err)
 				}
 				got, want := ink2OpsTestRead(t, d, batched, npairs*rows), ink2OpsTestRead(t, d, serial, npairs*rows)
+				// The adaptive kernel sums each element in the same order.
+				if ink2GemmGroupedAdaptKernel[c.typ] != "" {
+					ink2GroupedForce = 1
+					ok, err := d.PExpertGEMM(stack, idr, orr, ofr, xr, form.xDiv, xStride, batched, npairs, sc)
+					ink2GroupedForce = 0
+					if err != nil || !ok {
+						t.Fatalf("%s: adaptive grouped GEMM: ok %v, %v", form.name, ok, err)
+					}
+					ink2OpsTestSame(t, form.name+" adaptive", ink2OpsTestRead(t, d, batched, npairs*rows), got)
+				}
 				for i, e := range ids {
 					ink2PGemmClose(t, fmt.Sprintf("%s: pair %d (expert %d)", form.name, i, e), got[i*rows:][:rows], want[i*rows:][:rows])
 					if m.ref == nil {

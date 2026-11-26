@@ -69,6 +69,28 @@ var ink2RowsKernel, ink2GroupedKernel = ink2PackedKernels("rows_"), ink2PackedKe
 
 var ink2GemmRowsKernel, ink2GemmGroupedKernel = ink2PackedKernels("gemm_rows_"), ink2PackedKernels("gemm_grouped_")
 
+// The nvfp4 grouped GEMM kernel that splits its SIMD groups by the tile's
+// live pairs (gemm_grouped_adapt_nvfp4), and the tile it dispatches by.
+// Measured on an M3 Pro over 384 experts at mean runs of 11 to 43 pairs:
+// 3-16% faster than the default tile.
+var (
+	ink2GemmGroupedAdaptKernel = func() (k [41]string) { k[40] = "gemm_grouped_adapt_nvfp4"; return }()
+	ink2GemmGroupedAdapt       = ink2GemmTile{4, 1, 1, 16}
+)
+
+// ink2GroupedForce pins PExpertGEMM to the default tile (0) or the adaptive
+// one (1) when non-negative, for the tests and benches.
+var ink2GroupedForce = -1
+
+// ink2GroupedAdapt reports whether PExpertGEMM runs w on the adaptive kernel,
+// whose nvfp4 decoder loads words.
+func ink2GroupedAdapt(w Ink2Weight) bool {
+	if ink2GroupedForce >= 0 {
+		return ink2GroupedForce == 1 && ink2GemmGroupedAdaptKernel[w.Type] != "" && w.ByteOff%4 == 0
+	}
+	return ink2GemmGroupedAdaptKernel[w.Type] != "" && w.ByteOff%4 == 0
+}
+
 // ink2VerifyRowsKernel names the verify rows kernels over the same packed decoders.
 var ink2VerifyRowsKernel = ink2PackedKernels("ink2v_rows_")
 
@@ -206,7 +228,11 @@ func (d *Ink2Device) PExpertGEMM(w Ink2Weight, ids, order, offsets, x Ink2Ref, x
 		npairs > math.MaxInt32/max(xStride, w.Rows, 1) {
 		return false, fmt.Errorf("%w: grouped expert GEMM of %d pairs, input stride %d", ErrInk2Shape, npairs, xStride)
 	}
-	p, bytes, ok, err := d.gemmBatch(w, &ink2GemmGroupedKernel, x, xStride)
+	tile, kernels := ink2GemmGrouped, &ink2GemmGroupedKernel
+	if ink2GroupedAdapt(w) {
+		tile, kernels = ink2GemmGroupedAdapt, &ink2GemmGroupedAdaptKernel
+	}
+	p, bytes, ok, err := d.gemmBatch(w, kernels, x, xStride)
 	if err != nil || !ok {
 		return false, err
 	}
@@ -216,8 +242,8 @@ func (d *Ink2Device) PExpertGEMM(w Ink2Weight, ids, order, offsets, x Ink2Ref, x
 		Ink2Const(ink2PackedGroup{uint32(npairs), uint32(xDiv), uint32(xStride), uint32(btoi(scale.Valid()))}),
 		offsets.Span(w.Experts+1), Ink2Const(uint32(w.Experts)))
 	// Every expert run takes at most one partial tile.
-	tiles := (npairs+ink2GemmGrouped.bm()-1)/ink2GemmGrouped.bm() + w.Experts
-	return true, d.Dispatch(p, [3]int{(w.Rows + ink2GemmGrouped.bn() - 1) / ink2GemmGrouped.bn(), tiles, 1}, [3]int{ink2GemmThreads, 1, 1}, args...)
+	tiles := (npairs+tile.bm()-1)/tile.bm() + w.Experts
+	return true, d.Dispatch(p, [3]int{(w.Rows + tile.bn() - 1) / tile.bn(), tiles, 1}, [3]int{ink2GemmThreads, 1, 1}, args...)
 }
 
 // PMix encodes nq depth mixes of every token row: states are [T][n], queries
