@@ -3,7 +3,9 @@ package newmodel
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"go/format"
@@ -274,7 +276,8 @@ func TestCensusHFRangeReadsHeadersOnlyOverHTTP(t *testing.T) {
 	}
 	var headerTotal int64
 	for _, sh := range census.Shards {
-		if sh.ShardBytes != int64(len(hub.files[sh.File])) || sh.HeaderBytes <= 0 || len(sh.HeaderSHA256) != 64 {
+		if digest, err := hex.DecodeString(sh.HeaderSHA256); err != nil || len(digest) != sha256.Size ||
+			sh.ShardBytes != int64(len(hub.files[sh.File])) || sh.HeaderBytes <= 0 {
 			t.Fatalf("shard %+v, file is %d bytes", sh, len(hub.files[sh.File]))
 		}
 		headerTotal += 8 + sh.HeaderBytes

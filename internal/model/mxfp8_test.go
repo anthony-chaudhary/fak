@@ -233,8 +233,8 @@ func TestMXFP8TailRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tail33 quantize: %v", err)
 	}
-	if len(data) != 33 || len(scales) != 2 {
-		t.Fatalf("tail33: data %d bytes, %d scales, want 33 and 2", len(data), len(scales))
+	if len(data) != len(values) || len(scales) != 2 {
+		t.Fatalf("tail33: data %d bytes for %d values, %d scales, want one byte per value and 2 blocks", len(data), len(values), len(scales))
 	}
 	if scaleShape[0] != 1 || scaleShape[1] != 2 {
 		t.Fatalf("tail33 scale shape %v, want [1 2]", scaleShape)
@@ -381,8 +381,8 @@ func TestMXFP8BytesForms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("f32 bytes: %v", err)
 	}
-	if shape[0] != 1 || shape[1] != 32 || len(f32b) != 128 {
-		t.Fatalf("f32 bytes: shape %v len %d, want [1 32] and 128", shape, len(f32b))
+	if shape[0] != 1 || shape[1] != 32 || len(f32b) != 4*len(data) {
+		t.Fatalf("f32 bytes: shape %v len %d, want [1 32] and one f32 per fp8 byte (%d)", shape, len(f32b), 4*len(data))
 	}
 	for i, want := range []uint32{
 		math.Float32bits(1), math.Float32bits(-1), math.Float32bits(2), math.Float32bits(0.5),

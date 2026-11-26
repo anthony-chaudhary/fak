@@ -196,6 +196,7 @@ func TestExpertCacheLrfuSelectedClassHeadAndListIntegrity(t *testing.T) {
 		assertExpertCacheLrfuLists(t, c)
 	}
 	c, _ = NewExpertCacheLRFU(1, 1, 1)
+	const lastClass = 7
 	classes := map[int]bool{}
 	for uses := 1; uses <= 300; uses++ {
 		if _, err := c.Plan(0, []int{0}, 0); err != nil {
@@ -203,7 +204,7 @@ func TestExpertCacheLrfuSelectedClassHeadAndListIntegrity(t *testing.T) {
 		}
 		entry, _ := c.Inspect(0, 0)
 		want := 0
-		for threshold := 2; threshold <= uses && want < 7; threshold *= 2 {
+		for threshold := 2; threshold <= uses && want < lastClass; threshold *= 2 {
 			want++
 		}
 		if entry.Class != want || entry.CRF != float32(uses) {
@@ -212,8 +213,10 @@ func TestExpertCacheLrfuSelectedClassHeadAndListIntegrity(t *testing.T) {
 		classes[entry.Class] = true
 		assertExpertCacheLrfuLists(t, c)
 	}
-	if len(classes) != 8 {
-		t.Fatalf("class coverage = %v", classes)
+	for class := 0; class <= lastClass; class++ {
+		if !classes[class] {
+			t.Fatalf("class %d never reached; class coverage = %v", class, classes)
+		}
 	}
 }
 

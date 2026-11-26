@@ -9,6 +9,7 @@ package model
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -169,6 +170,7 @@ func TestWeightDeltaMultiAdapterComposition(t *testing.T) {
 func TestWeightDeltaEpochMonotonicAcrossApplyAndRevert(t *testing.T) {
 	_, wds, _ := weightDeltaFixture(t)
 	seen := []uint64{wds.Epoch()} // 0
+	var ran []string
 
 	step := func(label string, fn func() error) {
 		t.Helper()
@@ -180,6 +182,7 @@ func TestWeightDeltaEpochMonotonicAcrossApplyAndRevert(t *testing.T) {
 			t.Fatalf("%s: epoch %d does not advance past %d (monotonicity violated)", label, e, seen[len(seen)-1])
 		}
 		seen = append(seen, e)
+		ran = append(ran, label)
 	}
 
 	a1 := newTestAdapter("math", weightDeltaTestTarget, 32, 32, 4, 8, 21)
@@ -192,8 +195,9 @@ func TestWeightDeltaEpochMonotonicAcrossApplyAndRevert(t *testing.T) {
 	step("revert D1", revert)
 	step("re-apply D1", func() error { d := weightDeltaOf(a1); d.BaseDigest = wds.Digest(); _, err := wds.Apply(d); return err })
 
-	if len(seen) != 6 {
-		t.Fatalf("observed %d generations, want 6", len(seen))
+	wantRan := []string{"apply D1", "apply D2", "revert D2", "revert D1", "re-apply D1"}
+	if !reflect.DeepEqual(ran, wantRan) {
+		t.Fatalf("operations that advanced the epoch = %v, want %v", ran, wantRan)
 	}
 	for i := range seen {
 		for j := i + 1; j < len(seen); j++ {

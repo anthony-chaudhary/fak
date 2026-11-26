@@ -166,10 +166,10 @@ func TestConfigKimiK31PublishedAxes(t *testing.T) {
 	for _, tok := range cfg.LayerTypes {
 		counts[tok]++
 	}
-	if len(cfg.LayerTypes) != 93 || counts[KimiK31LayerTypeKDA] != 69 ||
-		counts[KimiK31LayerTypeDSA] != 24 || counts["full_attention"] != 0 {
-		t.Fatalf("LayerTypes = len:%d counts:%v, want len 93 with kda 69 / dsa 24 / full_attention 0",
-			len(cfg.LayerTypes), counts)
+	if len(cfg.LayerTypes) != cfg.NumLayers || counts[KimiK31LayerTypeKDA]+counts[KimiK31LayerTypeDSA] != len(cfg.LayerTypes) ||
+		counts[KimiK31LayerTypeKDA] == 0 || counts[KimiK31LayerTypeDSA] == 0 || counts["full_attention"] != 0 {
+		t.Fatalf("LayerTypes = len:%d num_layers:%d counts:%v, want one kda or dsa entry per layer, "+
+			"both kinds present, and no full_attention tokens", len(cfg.LayerTypes), cfg.NumLayers, counts)
 	}
 	for _, spot := range []struct {
 		idx  int

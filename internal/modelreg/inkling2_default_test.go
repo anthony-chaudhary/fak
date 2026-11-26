@@ -21,7 +21,7 @@ func TestMacDefaultAliasIsPinnedCatalogTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ref.Revision) != 40 || ref.File == "" {
+	if !isFullGitCommitSHA(ref.Revision) || ref.File == "" {
 		t.Fatalf("%s target %q is not pinned to a commit and file", MacDefaultAlias, uri)
 	}
 	if DefaultAlias == MacDefaultAlias {
@@ -36,7 +36,7 @@ func TestCompanionsAreMetalOnlyAndPinned(t *testing.T) {
 		t.Fatalf("Companions on darwin/arm64 = %+v", got)
 	}
 	c := got[0]
-	if c.Repo != "incoai/Inkling-2-Mini-DFlash2" || len(c.Revision) != 40 || strings.Trim(c.Revision, "0123456789abcdef") != "" {
+	if c.Repo != "incoai/Inkling-2-Mini-DFlash2" || !isFullGitCommitSHA(c.Revision) {
 		t.Fatalf("companion is not pinned to a commit: %+v", c)
 	}
 	if strings.Join(c.Files, ",") != "model.safetensors,config.json" {
