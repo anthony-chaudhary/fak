@@ -28,10 +28,12 @@ const (
 // Cold expert stacks split into a RAM tier (prefaulted mapped pages) and an
 // NVMe tier (pages streamed from the mapping on demand).
 type Inkling2DevicePlacement struct {
-	BudgetBytes   int64
-	DenseBytes    int64
-	ResidentBytes int64
-	ColdBytes     int64
+	BudgetBytes                        int64
+	DenseBytes                         int64
+	ResidentBytes                      int64
+	ColdBytes                          int64
+	MappedHostBytes                    int64
+	MappedHostStacks, MappedHostLayers int
 	// ResidentLayers / ColdLayers count layers whose expert stacks are on the
 	// device / left as host (mmap) quant experts.
 	ResidentLayers, ColdLayers int
@@ -50,7 +52,7 @@ type Inkling2DevicePlacement struct {
 }
 
 // FullyResident reports whether every expert stack is on the device.
-func (p Inkling2DevicePlacement) FullyResident() bool { return p.ColdLayers == 0 }
+func (p Inkling2DevicePlacement) FullyResident() bool { return p.ColdLayers == p.MappedHostLayers }
 
 // VRAMBytes is the planned device footprint: dense weights plus hot experts.
 func (p Inkling2DevicePlacement) VRAMBytes() int64 { return p.DenseBytes + p.ResidentBytes }
@@ -62,6 +64,9 @@ func (p Inkling2DevicePlacement) String() string {
 	}
 	if p.KVBytes > 0 {
 		tail += fmt.Sprintf("; kv cache %.2f GiB", inkling2GiB(p.KVBytes))
+	}
+	if p.MappedHostBytes > 0 {
+		tail += fmt.Sprintf("; mapped-host experts %.2f GiB (%d stacks)", inkling2GiB(p.MappedHostBytes), p.MappedHostStacks)
 	}
 	return fmt.Sprintf("inkling2 placement: vram %.1f GiB (dense+hot, %d expert layers), ram %.1f GiB (%d layers), nvme %.1f GiB (%d layers); %s",
 		inkling2GiB(p.VRAMBytes()), p.ResidentLayers, inkling2GiB(p.RAMBytes), p.RAMLayers, inkling2GiB(p.NVMeBytes), p.NVMeLayers, tail)

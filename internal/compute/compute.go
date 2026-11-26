@@ -529,6 +529,16 @@ type ClassedAsyncUploader interface {
 	UploadAsyncClass(t Tensor, as Dtype, class MemoryClass, site string) (Tensor, Fence)
 }
 
+// MappedHostWeightUploader is an OPTIONAL capacity fallback for immutable
+// packed weights. A successful upload returns an ordinary device-visible
+// Tensor whose storage remains host-resident and pinned; maxBytes is a hard
+// per-call bound. ok=false leaves the source untouched when mapped host memory
+// is unavailable. Implementations must never apply this placement to mutable
+// activations, scratch, or KV storage.
+type MappedHostWeightUploader interface {
+	UploadMappedHostWeight(t Tensor, as Dtype, maxBytes int64) (weight Tensor, ok bool, err error)
+}
+
 // CollectiveInitializer is an OPTIONAL extension for backends whose collective capability needs
 // an explicit world-size bootstrap before Caps().Collective can honestly report true.
 type CollectiveInitializer interface {

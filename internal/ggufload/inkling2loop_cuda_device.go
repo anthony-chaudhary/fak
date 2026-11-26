@@ -465,6 +465,24 @@ func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
 	if err = s.uploadStreamed(m, resident, inkling2UploadReadaheadOn(be), lead, ra); err != nil {
 		return err
 	}
+	mappedBound, err := inkling2MappedExpertBound(os.LookupEnv)
+	if err != nil {
+		return err
+	}
+	mappedStacks, mappedBytes, err := s.mapColdExperts(m, resident, mappedBound)
+	if err != nil {
+		return err
+	}
+	if mappedStacks > 0 {
+		s.placement.MappedHostStacks = mappedStacks
+		s.placement.MappedHostBytes = mappedBytes
+		s.placement.MappedHostLayers = s.placement.ColdLayers
+		s.placement.RAMBytes, s.placement.NVMeBytes = 0, 0
+		s.placement.RAMLayers, s.placement.NVMeLayers = 0, 0
+		s.placement.RAMNeededForAllExpertsBytes = 0
+		ramRegions = nil
+		fmt.Fprintf(os.Stderr, "inkling2 mapped-host experts: %d stacks, %.2f GiB (bound %.2f GiB)\n", mappedStacks, inkling2GiB(mappedBytes), inkling2GiB(mappedBound))
+	}
 	// Prefetch only now, so cold-stack reads never race the uploads on NVMe;
 	// it wraps the mapping's closer, so Close stops it before the unmap.
 	if len(ramRegions) > 0 {

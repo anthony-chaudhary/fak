@@ -123,6 +123,9 @@ void fcuda_panel_peak_reset(void);
 void fcuda_h2d(void *d, const void *h, size_t bytes);
 /* Returns the CUDA copy status; failure does not certify stream drain. */
 int fcuda_h2d_checked(void *d, const void *h, size_t bytes);
+/* Immutable mapped-host weight storage: host owns allocation, device is only an alias. */
+int fcuda_mapped_host_alloc(size_t bytes, void **host, void **device);
+int fcuda_mapped_host_free(void *host);
 /* Private, single-owner host-prefill input. All calls require cudaMu. */
 int fcuda_prefill_input_admit(void);
 int fcuda_prefill_input_acquire(const void *host, size_t bytes, int panel, void **out, int *managed);

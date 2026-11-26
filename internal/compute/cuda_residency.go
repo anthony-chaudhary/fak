@@ -435,7 +435,12 @@ func (c *cudaBackend) cudaFreeStorageLocked(t Tensor) {
 			C.fcuda_free(db.scales)
 			db.scales = nil
 		}
-		if db.device != 0 {
+		if db.mappedHost != nil {
+			if status := int(C.fcuda_mapped_host_free(db.mappedHost)); status != 0 {
+				panic(fmt.Sprintf("cuda mapped-host weight free: cuda status %d", status))
+			}
+			db.mappedHost = nil
+		} else if db.device != 0 {
 			C.fcuda_free_on(C.int(db.device), db.ptr)
 		} else {
 			C.fcuda_free(db.ptr)

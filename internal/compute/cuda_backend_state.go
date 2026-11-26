@@ -44,6 +44,7 @@ type cudaBuf struct {
 	be              *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
 	bornGen         uint64         // fence generation in which this async buffer was enqueued
 	managed         bool           // ptr came from cudaMallocManaged, not pooled cudaMalloc
+	mappedHost      unsafe.Pointer // cudaHostAllocMapped owner; ptr is its device alias
 	// invalid is set when an in-place Qwen GDN operation reports a launch or
 	// asynchronous execution failure. Such a buffer may be freed, but never read
 	// or submitted again as a usable state/output.

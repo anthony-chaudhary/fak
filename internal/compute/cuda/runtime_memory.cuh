@@ -594,6 +594,46 @@ extern "C" int fcuda_h2d_checked(void *d, const void *h, size_t n) {
 extern "C" void fcuda_h2d(void *d, const void *h, size_t n) {
   (void)fcuda_h2d_checked(d, h, n);
 }
+extern "C" int fcuda_mapped_host_alloc(size_t n, void **host, void **device) {
+  if (!host || !device || n == 0) return (int)cudaErrorInvalidValue;
+  *host = nullptr;
+  *device = nullptr;
+  int ordinal = 0;
+  cudaError_t e = cudaGetDevice(&ordinal);
+  cudaDeviceProp prop{};
+  if (e == cudaSuccess) e = cudaGetDeviceProperties(&prop, ordinal);
+  if (e == cudaSuccess && !prop.canMapHostMemory) e = cudaErrorNotSupported;
+  void *h = nullptr;
+  if (e == cudaSuccess) e = cudaHostAlloc(&h, n, cudaHostAllocMapped);
+  void *d = nullptr;
+  if (e == cudaSuccess) e = cudaHostGetDevicePointer(&d, h, 0);
+  if (e == cudaSuccess && !d) e = cudaErrorInvalidDevicePointer;
+  if (e != cudaSuccess) {
+    if (h) {
+      cudaError_t cleanup = cudaFreeHost(h);
+      if (cleanup != cudaSuccess) {
+        // Return the still-owned allocation so the Go transaction can retry
+        // checked cleanup or terminate; never turn a lost owner into decline.
+        *host = h;
+        return (int)cleanup;
+      }
+    }
+    return (int)e;
+  }
+  *host = h;
+  *device = d;
+  return 0;
+}
+extern "C" int fcuda_mapped_host_free(void *host) {
+  if (!host) return 0;
+  // Unlike cudaFree(device), cudaFreeHost does not define our stream-ordering
+  // contract. Settle every kernel that may still dereference the alias first;
+  // on failure retain the owner so a caller never reports freed storage whose
+  // device reads were still uncertain.
+  cudaError_t e = cudaStreamSynchronize(g_stream);
+  if (e != cudaSuccess) return (int)e;
+  return (int)cudaFreeHost(host);
+}
 extern "C" int fcuda_d2h_checked(void *h, const void *d, size_t n) {
   fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
