@@ -2,98 +2,124 @@
 // standalone source: it follows ink2_prefill_packed.metal, whose PackedRows,
 // PackedGroup and the packed decoders it uses.
 //
-// A threadgroup of four SIMD groups owns INK2G_BM activation rows (or routed
-// pairs of one expert) by INK2G_BN weight rows. Each K step of INK2G_BK decodes the
-// weight slab into threadgroup memory once for all INK2G_BM rows and feeds
-// fp32 8x8 simdgroup_matrix products. The sum runs in another order than the
-// decode GEMV's, so these kernels are not bit-equal to it: the Go side gives
-// them only chunks wider than any speculative verify chunk.
+// A threadgroup of four SIMD groups owns BM activation rows (or routed pairs
+// of one expert) by BN weight rows, the SIMD groups split GM x GN, each a
+// block of SM x SN 8x8 fp32 accumulators. Each K step of INK2G_BK decodes the
+// weight slab into threadgroup memory once for all BM rows and feeds 8x8
+// simdgroup_matrix products, which then go straight from the accumulators to
+// the output. The sum runs in another order than the decode
+// GEMV's, so these kernels are not bit-equal to it: the Go side gives them
+// only chunks wider than any speculative verify chunk.
 
-// Row pitch of the threadgroup tiles: 4 floats of padding staggers the banks
-// of the 8 rows a simdgroup_load reads.
-#define INK2G_PITCH (INK2G_BK + 4)
+#define INK2G_THREADS 128
+static_assert(INK2G_BK % 16 == 0, "a thread decodes 16 weights at a time");
 
-// The operand slabs, and after the K loop the output tile. fp32 operands: half
-// ones measured no more than 8% faster on an M3 Pro.
-union Ink2GTiles {
-    struct {
-        float x[INK2G_BM * INK2G_PITCH];
-        float w[INK2G_BN * INK2G_PITCH];
-    } op;
-    float c[INK2G_BM * INK2G_BN];
-};
+// Activations are staged as float, weights as TW: half for the formats whose
+// every decoded weight a half holds exactly (nvfp4, f16), which halves the
+// slab and so lifts occupancy with the products unchanged. 16 bytes of row
+// padding stagger the banks of the 8 rows a simdgroup_load reads.
+#define INK2G_PITCH(T) (INK2G_BK + 16 / sizeof(T))
 
-// The four SIMD groups split the tile 2 x 2: each owns INK2G_BM/2 activation
-// rows by INK2G_BN/2 weight rows, as 8x8 accumulators.
-#define INK2G_SM 2
-#define INK2G_SN (INK2G_BN / 16)
+// The threadgroup floats of a tile's operand slabs.
+#define INK2G_TG_FLOATS(BM, BN, TW) (((BN) * INK2G_PITCH(TW) * sizeof(TW) + (BM) * INK2G_PITCH(float) * 4) / 4)
 
-// rows is the tile's live activation rows: 8-row blocks past them skip their
+// live is the tile's live activation rows: 8-row blocks past them skip their
 // products, which is most of a short expert run's tile.
-inline void ink2g_mma(threadgroup const Ink2GTiles &tl, uint simd, uint rows, thread simdgroup_float8x8 (&acc)[INK2G_SM][INK2G_SN]) {
-    const uint mr = (simd / 2) * 16, nr = (simd % 2) * (INK2G_BN / 2);
-    static_assert(INK2G_SM == 2, "a SIMD group holds two 8-row blocks");
-    if (mr >= rows) return;
-    const bool both = mr + 8 < rows;
+template <typename TW, uint GN, uint SM, uint SN>
+inline void ink2g_mma(threadgroup const float *xs, threadgroup const TW *ws, uint simd, uint live,
+                      thread simdgroup_float8x8 (&acc)[SM][SN]) {
+    const uint mr = (simd / GN) * SM * 8, nr = (simd % GN) * SN * 8;
+    if (mr >= live) return;
+    const uint left = live - mr;
+    #pragma clang loop unroll(full)
     for (uint k = 0; k < INK2G_BK; k += 8) {
-        simdgroup_float8x8 a[INK2G_SM], b[INK2G_SN];
-        for (uint i = 0; i < INK2G_SM; i++) simdgroup_load(a[i], tl.op.x + (mr + 8 * i) * INK2G_PITCH + k, INK2G_PITCH);
+        simdgroup_float8x8 a[SM];
+        simdgroup_matrix<TW, 8, 8> b[SN];
+        #pragma clang loop unroll(full)
+        for (uint i = 0; i < SM; i++)
+            if (8 * i < left) simdgroup_load(a[i], xs + (mr + 8 * i) * INK2G_PITCH(float) + k, INK2G_PITCH(float));
         // B[k][n] = W[n][k]: the weight tile read transposed.
-        for (uint j = 0; j < INK2G_SN; j++) simdgroup_load(b[j], tl.op.w + (nr + 8 * j) * INK2G_PITCH + k, INK2G_PITCH, ulong2(0), true);
-        for (uint j = 0; j < INK2G_SN; j++) simdgroup_multiply_accumulate(acc[0][j], a[0], b[j], acc[0][j]);
-        if (both)
-            for (uint j = 0; j < INK2G_SN; j++) simdgroup_multiply_accumulate(acc[1][j], a[1], b[j], acc[1][j]);
+        #pragma clang loop unroll(full)
+        for (uint j = 0; j < SN; j++) simdgroup_load(b[j], ws + (nr + 8 * j) * INK2G_PITCH(TW) + k, INK2G_PITCH(TW), ulong2(0), true);
+        #pragma clang loop unroll(full)
+        for (uint i = 0; i < SM; i++)
+            if (8 * i < left)
+                #pragma clang loop unroll(full)
+                for (uint j = 0; j < SN; j++) simdgroup_multiply_accumulate(acc[i][j], a[i], b[j], acc[i][j]);
     }
 }
 
-// Leaves the accumulators as the [INK2G_BM][INK2G_BN] tile tl.c for the caller
-// to write out.
-inline void ink2g_spill(threadgroup Ink2GTiles &tl, uint simd, thread simdgroup_float8x8 (&acc)[INK2G_SM][INK2G_SN]) {
-    const uint mr = (simd / 2) * 16, nr = (simd % 2) * (INK2G_BN / 2);
-    threadgroup float *c = tl.c;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    for (uint i = 0; i < INK2G_SM; i++)
-        for (uint j = 0; j < INK2G_SN; j++) simdgroup_store(acc[i][j], c + (mr + 8 * i) * INK2G_BN + nr + 8 * j, INK2G_BN);
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-}
-
-// A SIMD group per 8 activation rows: 4 threads load each row of the
-// activation slab, and the first 2*INK2G_BN decode the weight slab.
-#define INK2G_THREADS (4 * INK2G_BM)
-static_assert(INK2G_BN * 2 <= INK2G_THREADS, "a thread decodes half a weight row");
-static_assert(INK2G_BK % 32 == 0, "a thread decodes 16 weights of each 32 columns");
-
-// Thread tid decodes 16 weights of each 32 columns of slab row tid/2;
-// row is the absolute weight row (expert stacks add the expert's base).
+// Each decoder writes the 16 weights of row from column k (a multiple of 16).
 #define INK2G_DECODE_PACKED(TYPE, BLOCK) \
-inline void ink2g_w_##TYPE(device const uchar *raw, constant PackedShape &shape, size_t row, uint k0, uint tid, threadgroup Ink2GTiles &tl) { \
-    device const block_##TYPE *w = (device const block_##TYPE *)(raw + shape.byte_offset) + row * (shape.cols / BLOCK); \
-    for (uint h = 0; h < INK2G_BK / 32; h++) { \
-        const uint k = k0 + 32 * h + 16 * (tid % 2); \
+struct Ink2GDec_##TYPE { \
+    template <typename TW> \
+    static inline void chunk(device const uchar *raw, constant PackedShape &shape, size_t row, uint k, threadgroup TW *dst) { \
+        device const block_##TYPE *w = (device const block_##TYPE *)(raw + shape.byte_offset) + row * (shape.cols / BLOCK); \
         float4x4 v; \
         dequantize_##TYPE(w + k / BLOCK, short((k % BLOCK) / 16), v); \
-        threadgroup float4 *dst = (threadgroup float4 *)(tl.op.w + (tid / 2) * INK2G_PITCH + 32 * h + 16 * (tid % 2)); \
-        for (int i = 0; i < 4; i++) dst[i] = v[i]; \
+        threadgroup vec<TW, 4> *d4 = (threadgroup vec<TW, 4> *)dst; \
+        for (int i = 0; i < 4; i++) d4[i] = vec<TW, 4>(v[i]); \
     } \
-}
+};
 
 #define INK2G_DECODE_SCALAR(NAME, CT) \
-inline void ink2g_w_##NAME(device const uchar *raw, constant PackedShape &shape, size_t row, uint k0, uint tid, threadgroup Ink2GTiles &tl) { \
-    for (uint h = 0; h < INK2G_BK / 32; h++) { \
-        device const CT *w = (device const CT *)(raw + shape.byte_offset) + row * shape.cols + k0 + 32 * h + 16 * (tid % 2); \
-        threadgroup float *dst = tl.op.w + (tid / 2) * INK2G_PITCH + 32 * h + 16 * (tid % 2); \
-        for (int i = 0; i < 16; i++) dst[i] = decode_scalar(w[i]); \
+struct Ink2GDec_##NAME { \
+    template <typename TW> \
+    static inline void chunk(device const uchar *raw, constant PackedShape &shape, size_t row, uint k, threadgroup TW *dst) { \
+        device const CT *w = (device const CT *)(raw + shape.byte_offset) + row * shape.cols + k; \
+        for (int i = 0; i < 16; i++) dst[i] = TW(decode_scalar(w[i])); \
     } \
-}
+};
 
-// Thread tid loads 8 floats of each 32 columns of each 32-row band of the
-// activation slab.
-inline void ink2g_x(device const float *x, size_t xo, uint k0, uint tid, threadgroup Ink2GTiles &tl) {
-    for (uint h = 0; h < INK2G_BK / 32; h++) {
-            device const float4 *src = (device const float4 *)(x + xo + k0 + 32 * h + 8 * (tid % 4));
-            threadgroup float4 *dst = (threadgroup float4 *)(tl.op.x + (tid / 4) * INK2G_PITCH + 32 * h + 8 * (tid % 4));
-            dst[0] = src[0];
-            dst[1] = src[1];
+// The K loop shared by both kernels, handing each element (m, n) of the
+// [BM][BN] product tile to store(m, n, v). Thread tid loads the activation
+// float4s tid + 128r of each slab, from the rows whose offsets xo holds, and
+// decodes the 16-weight chunks tid + 128r of each weight slab, of rows
+// wbase + min(n0 + slab row, shape.rows - 1).
+template <typename D, typename TW, uint GM, uint GN, uint SM, uint SN, uint XR, typename S>
+inline void ink2g_k_loop(device const uchar *raw, constant PackedShape &shape, device const float *x, thread const size_t (&xo)[XR],
+                         size_t wbase, uint n0, uint live, threadgroup float *tg, uint tid, uint simd, S store) {
+    constexpr uint BM = GM * SM * 8, BN = GN * SN * 8;
+    constexpr uint WR = BN * INK2G_BK / 16 / INK2G_THREADS, PW = INK2G_PITCH(TW), PX = INK2G_PITCH(float);
+    static_assert(XR * 4 * INK2G_THREADS == BM * INK2G_BK, "the activation slab splits evenly");
+    static_assert(WR * 16 * INK2G_THREADS == BN * INK2G_BK, "the weight slab splits evenly");
+    threadgroup TW *ws = (threadgroup TW *)tg;
+    threadgroup float *xs = (threadgroup float *)(ws + BN * PW);
+    size_t wrow[WR];
+    #pragma clang loop unroll(full)
+    for (uint r = 0; r < WR; r++) wrow[r] = wbase + min(n0 + (tid + INK2G_THREADS * r) / (INK2G_BK / 16), shape.rows - 1);
+    simdgroup_float8x8 acc[SM][SN];
+    #pragma clang loop unroll(full)
+    for (uint i = 0; i < SM; i++)
+        #pragma clang loop unroll(full)
+        for (uint j = 0; j < SN; j++) acc[i][j] = simdgroup_float8x8(0.0f);
+    for (uint k0 = 0; k0 < shape.cols; k0 += INK2G_BK) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        #pragma clang loop unroll(full)
+        for (uint r = 0; r < WR; r++) {
+            const uint c = tid + INK2G_THREADS * r, row = c / (INK2G_BK / 16), col = 16 * (c % (INK2G_BK / 16));
+            D::template chunk<TW>(raw, shape, wrow[r], k0 + col, ws + row * PW + col);
+        }
+        #pragma clang loop unroll(full)
+        for (uint r = 0; r < XR; r++) {
+            const uint c = tid + INK2G_THREADS * r, row = c / (INK2G_BK / 4), col = 4 * (c % (INK2G_BK / 4));
+            *(threadgroup float4 *)(xs + row * PX + col) = *(device const float4 *)(x + xo[r] + k0 + col);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        ink2g_mma<TW, GN, SM, SN>(xs, ws, simd, live, acc);
+    }
+    // Lane l of a SIMD group holds elements (fm, fn) and (fm, fn + 1) of each
+    // 8x8 product.
+    const uint mr = (simd / GN) * SM * 8, nr = (simd % GN) * SN * 8;
+    const uint lane = tid % 32, q = lane / 4;
+    const uint fm = (q & 4) + (lane / 2) % 4, fn = (q & 2) * 2 + (lane % 2) * 2;
+    #pragma clang loop unroll(full)
+    for (uint i = 0; i < SM; i++)
+        #pragma clang loop unroll(full)
+        for (uint j = 0; j < SN; j++) {
+            const thread vec<float, 2> &v = reinterpret_cast<const thread vec<float, 2> &>(acc[i][j].thread_elements());
+            store(mr + 8 * i + fm, nr + 8 * j + fn, v[0]);
+            store(mr + 8 * i + fm, nr + 8 * j + fn + 1, v[1]);
         }
 }
 
@@ -107,29 +133,29 @@ inline void ink2g_x(device const float *x, size_t xo, uint k0, uint tid, threadg
     uint tid [[thread_index_in_threadgroup]], \
     uint simd [[simdgroup_index_in_threadgroup]]
 
-// Y[t][n] = W[n,:] . X[t,:]: group.x a tile of INK2G_BN weight rows, group.y of
-// INK2G_BM activation rows. Rows past either end repeat the last one unwritten.
-#define GEMM_ROWS_KERNEL(TYPE) \
+#define INK2G_R_BM (INK2G_R_GM * INK2G_R_SM * 8)
+#define INK2G_R_BN (INK2G_R_GN * INK2G_R_SN * 8)
+#define INK2G_G_BM (INK2G_G_GM * INK2G_G_SM * 8)
+#define INK2G_G_BN (INK2G_G_GN * INK2G_G_SN * 8)
+static_assert(INK2G_R_GM * INK2G_R_GN * 32 == INK2G_THREADS, "four SIMD groups");
+static_assert(INK2G_G_GM * INK2G_G_GN * 32 == INK2G_THREADS, "four SIMD groups");
+
+// Y[t][n] = W[n,:] . X[t,:]: group.x a tile of INK2G_R_BN weight rows,
+// group.y of INK2G_R_BM activation rows. Rows past either end repeat the last
+// one unwritten.
+#define GEMM_ROWS_KERNEL(TYPE, TW) \
 kernel void gemm_rows_##TYPE(GEMM_ROWS_ARGS) { \
-    threadgroup Ink2GTiles tl; \
-    const uint n0 = group.x * INK2G_BN, t0 = group.y * INK2G_BM; \
-    const size_t wrow = min(n0 + tid / 2, shape.rows - 1); \
-    const size_t xo = size_t(min(t0 + tid / 4, batch.tokens - 1)) * batch.xStride; \
-    simdgroup_float8x8 acc[INK2G_SM][INK2G_SN]; \
-    for (uint i = 0; i < INK2G_SM; i++) \
-        for (uint j = 0; j < INK2G_SN; j++) acc[i][j] = simdgroup_float8x8(0.0f); \
-    for (uint k0 = 0; k0 < shape.cols; k0 += INK2G_BK) { \
-        threadgroup_barrier(mem_flags::mem_threadgroup); \
-        if (tid < 2 * INK2G_BN) ink2g_w_##TYPE(raw, shape, wrow, k0, tid, tl); \
-        ink2g_x(x, xo, k0, tid, tl); \
-        threadgroup_barrier(mem_flags::mem_threadgroup); \
-        ink2g_mma(tl, simd, batch.tokens - t0, acc); \
-    } \
-    ink2g_spill(tl, simd, acc); \
-    for (uint e = tid; e < INK2G_BM * INK2G_BN; e += INK2G_THREADS) { \
-        const uint t = t0 + e / INK2G_BN, n = n0 + e % INK2G_BN; \
-        if (t < batch.tokens && n < shape.rows) y[size_t(t) * batch.yStride + n] = tl.c[e]; \
-    } \
+    constexpr uint BM = INK2G_R_BM, BN = INK2G_R_BN, XR = BM * INK2G_BK / 4 / INK2G_THREADS; \
+    threadgroup float tg[INK2G_TG_FLOATS(INK2G_R_BM, INK2G_R_BN, TW)]; \
+    const uint n0 = group.x * BN, t0 = group.y * BM; \
+    size_t xo[XR]; \
+    for (uint r = 0; r < XR; r++) \
+        xo[r] = size_t(min(t0 + (tid + INK2G_THREADS * r) / (INK2G_BK / 4), batch.tokens - 1)) * batch.xStride; \
+    ink2g_k_loop<Ink2GDec_##TYPE, TW, INK2G_R_GM, INK2G_R_GN, INK2G_R_SM, INK2G_R_SN>(raw, shape, x, xo, 0, n0, batch.tokens - t0, tg, tid, simd, \
+        [&](uint m, uint c, float v) { \
+            const uint t = t0 + m, n = n0 + c; \
+            if (t < batch.tokens && n < shape.rows) y[size_t(t) * batch.yStride + n] = v; \
+        }); \
 }
 
 #define GEMM_GROUPED_ARGS \
@@ -148,60 +174,49 @@ kernel void gemm_rows_##TYPE(GEMM_ROWS_ARGS) { \
     uint simd [[simdgroup_index_in_threadgroup]]
 
 // The expert-grouped GEMM over the routed pairs PBucket sorted: group.y is
-// one INK2G_BM-pair tile of one expert's run in order (offsets[e]..[e+1]),
+// one INK2G_G_BM-pair tile of one expert's run in order (offsets[e]..[e+1]),
 // numbered across experts in expert order; the grid's bound of
-// npairs/INK2G_BM + nexp tiles leaves the surplus groups idle. shape.rows is
+// npairs/INK2G_G_BM + nexp tiles leaves the surplus groups idle. shape.rows is
 // the rows of one expert.
-#define GEMM_GROUPED_KERNEL(TYPE) \
+#define GEMM_GROUPED_KERNEL(TYPE, TW) \
 kernel void gemm_grouped_##TYPE(GEMM_GROUPED_ARGS) { \
-    threadgroup Ink2GTiles tl; \
+    constexpr uint BM = INK2G_G_BM, BN = INK2G_G_BN, XR = BM * INK2G_BK / 4 / INK2G_THREADS; \
+    threadgroup float tg[INK2G_TG_FLOATS(INK2G_G_BM, INK2G_G_BN, TW)]; \
     uint e = 0, first = 0, tiles = 0; \
     for (; e < nexp; e++) { \
         const uint lo = uint(offsets[e]), hi = uint(offsets[e + 1]); \
-        const uint n = (hi - lo + INK2G_BM - 1) / INK2G_BM; \
-        if (group.y < tiles + n) { first = lo + (group.y - tiles) * INK2G_BM; break; } \
+        const uint n = (hi - lo + BM - 1) / BM; \
+        if (group.y < tiles + n) { first = lo + (group.y - tiles) * BM; break; } \
         tiles += n; \
     } \
     if (e == nexp) return; \
-    const uint count = min(uint(INK2G_BM), uint(offsets[e + 1]) - first); \
-    const uint n0 = group.x * INK2G_BN; \
-    const size_t wrow = size_t(e) * shape.rows + min(n0 + tid / 2, shape.rows - 1); \
-    const size_t xo = size_t(uint(order[first + min(tid / 4, count - 1)]) / grp.xDiv) * grp.xStride; \
-    simdgroup_float8x8 acc[INK2G_SM][INK2G_SN]; \
-    for (uint i = 0; i < INK2G_SM; i++) \
-        for (uint j = 0; j < INK2G_SN; j++) acc[i][j] = simdgroup_float8x8(0.0f); \
-    for (uint k0 = 0; k0 < shape.cols; k0 += INK2G_BK) { \
-        threadgroup_barrier(mem_flags::mem_threadgroup); \
-        if (tid < 2 * INK2G_BN) ink2g_w_##TYPE(raw, shape, wrow, k0, tid, tl); \
-        ink2g_x(x, xo, k0, tid, tl); \
-        threadgroup_barrier(mem_flags::mem_threadgroup); \
-        ink2g_mma(tl, simd, count, acc); \
-    } \
-    ink2g_spill(tl, simd, acc); \
-    const float s = grp.scaled != 0 ? escale[e] : 1.0f; \
-    for (uint i = tid; i < INK2G_BM * INK2G_BN; i += INK2G_THREADS) { \
-        const uint p = i / INK2G_BN, n = n0 + i % INK2G_BN; \
-        if (p < count && n < shape.rows) { \
-            const float v = tl.c[i]; \
-            y[size_t(order[first + p]) * shape.rows + n] = grp.scaled != 0 ? v * s : v; \
-        } \
-    } \
+    const uint count = min(BM, uint(offsets[e + 1]) - first); \
+    const uint n0 = group.x * BN; \
+    size_t xo[XR]; \
+    for (uint r = 0; r < XR; r++) \
+        xo[r] = size_t(uint(order[first + min((tid + INK2G_THREADS * r) / (INK2G_BK / 4), count - 1)]) / grp.xDiv) * grp.xStride; \
+    ink2g_k_loop<Ink2GDec_##TYPE, TW, INK2G_G_GM, INK2G_G_GN, INK2G_G_SM, INK2G_G_SN>(raw, shape, x, xo, size_t(e) * shape.rows, n0, count, tg, tid, simd, \
+        [&](uint p, uint c, float v) { \
+            const uint n = n0 + c; \
+            if (p < count && n < shape.rows) y[size_t(order[first + p]) * shape.rows + n] = grp.scaled != 0 ? v * escale[e] : v; \
+        }); \
 }
 
-#define INK2G_PACKED(TYPE, BLOCK) INK2G_DECODE_PACKED(TYPE, BLOCK) GEMM_ROWS_KERNEL(TYPE) GEMM_GROUPED_KERNEL(TYPE)
-#define INK2G_SCALAR(NAME, CT) INK2G_DECODE_SCALAR(NAME, CT) GEMM_ROWS_KERNEL(NAME) GEMM_GROUPED_KERNEL(NAME)
+#define INK2G_PACKED(TYPE, BLOCK, TW) INK2G_DECODE_PACKED(TYPE, BLOCK) GEMM_ROWS_KERNEL(TYPE, TW) GEMM_GROUPED_KERNEL(TYPE, TW)
+#define INK2G_SCALAR(NAME, CT, TW) INK2G_DECODE_SCALAR(NAME, CT) GEMM_ROWS_KERNEL(NAME, TW) GEMM_GROUPED_KERNEL(NAME, TW)
 
-INK2G_PACKED(q8_0, 32)
-INK2G_PACKED(q3_K, 256)
-INK2G_PACKED(q4_K, 256)
-INK2G_PACKED(q5_K, 256)
-INK2G_PACKED(q6_K, 256)
-INK2G_PACKED(iq2_xs, 256)
-INK2G_PACKED(iq2_s, 256)
-INK2G_PACKED(iq3_xxs, 256)
-INK2G_PACKED(iq3_s, 256)
-INK2G_PACKED(iq4_nl, 32)
-INK2G_PACKED(nvfp4, 64)
-INK2G_SCALAR(f32, float)
-INK2G_SCALAR(f16, half)
-INK2G_SCALAR(bf16, ushort)
+INK2G_PACKED(q8_0, 32, float)
+INK2G_PACKED(q3_K, 256, float)
+INK2G_PACKED(q4_K, 256, float)
+INK2G_PACKED(q5_K, 256, float)
+INK2G_PACKED(q6_K, 256, float)
+INK2G_PACKED(iq2_xs, 256, float)
+INK2G_PACKED(iq2_s, 256, float)
+INK2G_PACKED(iq3_xxs, 256, float)
+INK2G_PACKED(iq3_s, 256, float)
+INK2G_PACKED(iq4_nl, 32, float)
+// A 2-bit-mantissa value times a UE4M3 scale fits a half's 11 bits and range.
+INK2G_PACKED(nvfp4, 64, half)
+INK2G_SCALAR(f32, float, float)
+INK2G_SCALAR(f16, half, half)
+INK2G_SCALAR(bf16, ushort, float)

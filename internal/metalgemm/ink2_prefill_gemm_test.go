@@ -49,7 +49,7 @@ func TestInk2PGemmRowsMatchesMatVecAndHost(t *testing.T) {
 	d := ink2TestDevice(t)
 	rng := rand.New(rand.NewSource(91))
 	// Two weight tiles, the second partial.
-	const rows = ink2GemmBN + 6
+	rows := ink2GemmRows.bn() + 6
 	for _, c := range ink2PGemmTypes() {
 		t.Run(c.name, func(t *testing.T) {
 			store, data := ink2TestStore(t, 64)
@@ -59,10 +59,10 @@ func TestInk2PGemmRowsMatchesMatVecAndHost(t *testing.T) {
 				t.Fatal(err)
 			}
 			xStride, yStride := c.cols+4, rows+3
-			const maxT = 2*ink2GemmBM + 5
+			maxT := 2*ink2GemmRows.bm() + 5
 			x := ink2OpsTestRand(rng, maxT*xStride, .5)
 			xr := ink2OpsTestPut(t, d, 8, x)
-			for _, T := range []int{1, ink2GemmBM, maxT} {
+			for _, T := range []int{1, ink2GemmRows.bm(), maxT} {
 				serial, batched := ink2TestAlloc(t, d, T*yStride), ink2TestAlloc(t, d, T*yStride)
 				for tok := range T {
 					if err := d.MatVec(w, xr.At(tok*xStride), serial.At(tok*yStride)); err != nil {
@@ -98,8 +98,10 @@ func TestInk2PGemmRowsMatchesMatVecAndHost(t *testing.T) {
 func TestInk2PGemmGroupedMatchesExpertMatVecAndHost(t *testing.T) {
 	d := ink2TestDevice(t)
 	rng := rand.New(rand.NewSource(92))
-	const experts, rows, k, T = 5, ink2GemmBN + 6, 3, 40
-	const npairs = T * k
+	const experts, k = 5, 3
+	// Enough pairs that expert 1 runs past one tile.
+	rows, T := ink2GemmGrouped.bn()+6, 40*max(1, ink2GemmGrouped.bm()/32)
+	npairs := T * k
 	// Expert 4 is never routed; expert 1 holds runs of more than one tile, and
 	// the others end in partial tiles.
 	ids := make([]int32, npairs)

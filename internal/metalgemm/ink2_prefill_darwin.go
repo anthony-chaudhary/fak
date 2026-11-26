@@ -33,14 +33,26 @@ const (
 	ink2PrefillGroupTile = 8
 	// The conv kernel keeps a channel's history in a register array of this.
 	ink2PrefillMaxKernel = 8
-	// The tiles of the GEMM kernels: activation rows (or routed pairs of one
-	// expert) by weight rows, over K steps of ink2GemmBK. Measured on an M3
-	// Pro: wider tiles spill the accumulators, a deeper K step costs occupancy.
-	ink2GemmBM = 32
-	ink2GemmBN = 64
-	ink2GemmBK = 32
-	// A SIMD group per 8 activation rows of the tile.
-	ink2GemmThreads = 4 * ink2GemmBM
+	// The K step and threadgroup (four SIMD groups) of the GEMM kernels.
+	// Measured on an M3 Pro: a K step of 64, or two staged slabs, cost more
+	// occupancy than their fewer barriers win.
+	ink2GemmBK      = 32
+	ink2GemmThreads = 128
+)
+
+// A GEMM tile: SIMD groups split gm x gn, each sm x sn 8x8 accumulators.
+type ink2GemmTile struct{ gm, gn, sm, sn int }
+
+func (t ink2GemmTile) bm() int { return 8 * t.gm * t.sm }
+func (t ink2GemmTile) bn() int { return 8 * t.gn * t.sn }
+
+// The tiles of the rows kernel and the expert-grouped kernel: each SIMD group
+// owns 8 rows by all 64 columns, so one past an expert run's pairs idles
+// whole. Measured on an M3 Pro: 64-row or 128-column tiles, or 2 x 2 splits,
+// are slower; expert runs average a tile of pairs.
+var (
+	ink2GemmRows    = ink2GemmTile{4, 1, 1, 8}
+	ink2GemmGrouped = ink2GemmTile{4, 1, 1, 8}
 )
 
 // The batched weight kernels append to the packed decoders they instantiate.
@@ -48,7 +60,8 @@ var ink2PrefillPackedSource = sync.OnceValue(func() string {
 	return packedCodebooks + packedDequant + packedGEMV +
 		fmt.Sprintf("#define INK2P_ROWS_R %d\n#define INK2P_ROWS_TILE %d\n#define INK2P_GROUP_TILE %d\n", ink2PrefillRowsR, ink2PrefillRowsTile, ink2PrefillGroupTile) +
 		ink2PrefillPacked +
-		fmt.Sprintf("#define INK2G_BM %d\n#define INK2G_BN %d\n#define INK2G_BK %d\n", ink2GemmBM, ink2GemmBN, ink2GemmBK) +
+		fmt.Sprintf("#define INK2G_BK %d\n#define INK2G_R_GM %d\n#define INK2G_R_GN %d\n#define INK2G_R_SM %d\n#define INK2G_R_SN %d\n#define INK2G_G_GM %d\n#define INK2G_G_GN %d\n#define INK2G_G_SM %d\n#define INK2G_G_SN %d\n",
+			ink2GemmBK, ink2GemmRows.gm, ink2GemmRows.gn, ink2GemmRows.sm, ink2GemmRows.sn, ink2GemmGrouped.gm, ink2GemmGrouped.gn, ink2GemmGrouped.sm, ink2GemmGrouped.sn) +
 		ink2PrefillGemm
 })
 
@@ -181,7 +194,7 @@ func (d *Ink2Device) RowsGEMM(w Ink2Weight, x Ink2Ref, xStride int, y Ink2Ref, y
 	}
 	args := append(w.args(x.Span((rows-1)*xStride+w.Cols), y.Span((rows-1)*yStride+w.Rows), bytes),
 		Ink2Const(ink2PackedRows{uint32(rows), uint32(xStride), uint32(yStride)}))
-	return true, d.Dispatch(p, [3]int{(w.Rows + ink2GemmBN - 1) / ink2GemmBN, (rows + ink2GemmBM - 1) / ink2GemmBM, 1}, [3]int{ink2GemmThreads, 1, 1}, args...)
+	return true, d.Dispatch(p, [3]int{(w.Rows + ink2GemmRows.bn() - 1) / ink2GemmRows.bn(), (rows + ink2GemmRows.bm() - 1) / ink2GemmRows.bm(), 1}, [3]int{ink2GemmThreads, 1, 1}, args...)
 }
 
 // PExpertGEMM is PExpertGrouped on the tiled GEMM kernels, which also read
@@ -203,8 +216,8 @@ func (d *Ink2Device) PExpertGEMM(w Ink2Weight, ids, order, offsets, x Ink2Ref, x
 		Ink2Const(ink2PackedGroup{uint32(npairs), uint32(xDiv), uint32(xStride), uint32(btoi(scale.Valid()))}),
 		offsets.Span(w.Experts+1), Ink2Const(uint32(w.Experts)))
 	// Every expert run takes at most one partial tile.
-	tiles := (npairs+ink2GemmBM-1)/ink2GemmBM + w.Experts
-	return true, d.Dispatch(p, [3]int{(w.Rows + ink2GemmBN - 1) / ink2GemmBN, tiles, 1}, [3]int{ink2GemmThreads, 1, 1}, args...)
+	tiles := (npairs+ink2GemmGrouped.bm()-1)/ink2GemmGrouped.bm() + w.Experts
+	return true, d.Dispatch(p, [3]int{(w.Rows + ink2GemmGrouped.bn() - 1) / ink2GemmGrouped.bn(), tiles, 1}, [3]int{ink2GemmThreads, 1, 1}, args...)
 }
 
 // PMix encodes nq depth mixes of every token row: states are [T][n], queries
