@@ -28,10 +28,8 @@ Download prebuilt binaries from the [latest release](https://github.com/anthony-
 The installer defaults to Apple Silicon Metal or Linux amd64 Vulkan, including
 AMD Strix Halo. The Vulkan archive requires GNU glibc 2.39+ (Ubuntu 24.04+),
 the system Vulkan loader, and a compatible GPU driver. CPU builds are secondary
-references (`--variant cpu`). The Metal archive is available on v0.54.0, backfilled
-from that exact tag without creating a new release. This backfill is SHA-256-verified
-and ad-hoc-signed; it has no SLSA attestation or Apple notarization. Its checksum
-verifies download integrity, not source provenance. The [v0.56.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.56.0) includes the Linux amd64 Vulkan archive. Missing assets produce an error with
+references (`--variant cpu`). The [v0.59.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.59.0)
+includes both GPU archives and their SHA-256 checksums. Missing assets produce an error with
 source-build or explicit CPU-reference instructions. Packaging does not establish
 model/GPU qualification.
 
@@ -45,12 +43,15 @@ gh attestation verify SHA256SUMS --repo anthony-chaudhary/fak
 ### Install with Go
 
 ```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@v0.58.0
+go install github.com/anthony-chaudhary/fak/cmd/fak@v0.59.0
 ```
 
-This builds from source and installs the v0.58.0 pre-release, which includes Inkling-2-Mini. On Apple Silicon the Metal GPU build requires CGo, so leave `CGO_ENABLED` at its default (1) with the Xcode command line tools installed. The prebuilt Metal archive comes from the installer instead. The release binary above resolves
-GitHub's Latest release, still v0.56.0; set `FAK_VERSION=0.58.0` to pin the installer to
-v0.58.0. The CUDA build is not in the v0.58.0 release assets; build it from source below.
+This builds v0.59.0 from source and includes Inkling-2-Mini. On Apple Silicon
+the Metal build requires CGo and the Xcode command line tools. Leave
+`CGO_ENABLED` at its default of 1. For a prebuilt binary, the installer
+downloads GitHub's Latest release. Set `FAK_VERSION=0.59.0` to pin it.
+For NVIDIA CUDA, use the published `ghcr.io/anthony-chaudhary/fak:0.59.0-cuda`
+image or build from source below.
 
 ### Build from source (contributors)
 
@@ -258,7 +259,7 @@ On Apple Silicon, the installer selects the native Metal GPU archive by default.
 The backend must still be qualified on the actual machine and supported model.
 CPU reference archives cannot provide Metal acceleration. Ways to obtain a GPU build:
 
-1. **`sh install.sh`** — installs `fak_<VERSION>_darwin_arm64_metal.tar.gz`, a CGO darwin/arm64 (Apple Silicon) release asset with the Metal backend compiled in; macOS Apple Silicon only. The asset is available on v0.54.0 as a backfill from its exact tagged source; if it is missing for another version, use option 2.
+1. **`sh install.sh`** downloads `fak_<VERSION>_darwin_arm64_metal.tar.gz` on Apple Silicon. The v0.59.0 archive includes the Metal backend. For another version without that archive, use option 2.
 2. **Build from source with `CGO_ENABLED=1`** — see the [Mac local models guide](docs/fak/mac-local-models.md) for the build and qualification steps.
 3. **NVIDIA GPUs** ship as the separate ghcr `-cuda` container image instead — see the [deployment guide](docs/fak/deployment-guide.md).
 

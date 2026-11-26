@@ -44,12 +44,14 @@ build Vulkan from source for older distributions.
 CPU reference archives remain available for `linux/amd64`, `linux/arm64`,
 `darwin/amd64`, `darwin/arm64`, and `windows/amd64`.
 
-The Metal archive is available on v0.54.0, backfilled from the exact tagged
-source; this adds an asset to the existing release, not a new version. This
-backfill is SHA-256-verified and ad-hoc-signed; it has no SLSA attestation or
-Apple notarization. Its checksum verifies download integrity, not source provenance.
-The [v0.59.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.59.0) includes the Linux amd64 Vulkan archive.
+The [v0.59.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.59.0)
+includes the Apple Silicon Metal and Linux amd64 Vulkan archives, a checksum
+alongside each download, and the aggregate `SHA256SUMS`.
 A packaged backend still needs qualification on the actual model and GPU.
+
+The older v0.54.0 Metal archive was backfilled from its tagged source. Its
+SHA-256 checksum and ad-hoc signature are available. That backfill has no
+SLSA attestation or Apple notarization.
 
 ---
 
@@ -366,11 +368,11 @@ fak backends   # lists cuda when the driver sees the GPU
 the `...@latest` pseudo-path resolves directly — no clone needed. You can equally use the
 prebuilt-binary download (sections 1 and 2 above) or the build-from-source fallback.
 
-`...@latest` resolves to the newest tag the Go module proxy serves. That is v0.58.0, which
-includes Inkling-2-Mini. The prebuilt-binary installer resolves GitHub's Latest release,
-which is still v0.59.0 until v0.59.0 is promoted; set `FAK_VERSION=0.59.0` to pin it. The
-CUDA build is not among the v0.58.0 release assets, so use [build from source](#build-from-source)
-for the `-tags cuda` build.
+The Go module proxy and GitHub's Latest release both serve v0.59.0, which
+includes Inkling-2-Mini. Use `@v0.59.0` with Go or set `FAK_VERSION=0.59.0`
+with the prebuilt installer to pin that version. For CUDA, use the
+`ghcr.io/anthony-chaudhary/fak:0.59.0-cuda` image or follow the
+[source build instructions](#build-from-source).
 
 ---
 

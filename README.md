@@ -44,10 +44,10 @@ fak run smollm2 "What input breaks def first(xs): return xs[0]? Write a test tha
 Look for a test that passes an empty list and checks for `IndexError`.
 
 On an M3 or later Mac with 24 GB of memory or more and macOS 26.4 or later,
-fak v0.58.0 (pre-release) can also run Inkling-2-Mini on the GPU by name:
+fak v0.59.0 can also run Inkling-2-Mini on the GPU by name:
 
 ```sh
-go install github.com/anthony-chaudhary/fak/cmd/fak@v0.58.0
+go install github.com/anthony-chaudhary/fak/cmd/fak@v0.59.0
 fak run inkling2-mini
 ```
 
@@ -56,9 +56,8 @@ https://github.com/anthony-chaudhary/fak.git`, then `go build -o fak ./cmd/fak`
 (needs Go 1.26+).
 
 The first run downloads about 14.6 GB. On an Apple Silicon Mac with 24 GB or
-more, `fak run` with no model picks Inkling-2-Mini as well. Inkling-2-Mini is
-in v0.58.0. v0.58.0 is still a GitHub pre-release, so `install.sh`
-installs an older release unless you set `FAK_VERSION=0.58.0`. Smaller Macs and other
+more, `fak run` with no model picks Inkling-2-Mini as well. The release
+installer downloads the prebuilt Metal archive on Apple Silicon. Smaller Macs and other
 platforms get smaller model tiers instead. The [Mac guide](docs/fak/mac-local-models.md#inkling-2-mini-the-first-run-default)
 has the requirements and the server commands.
 
@@ -73,4 +72,4 @@ For the version history, see [CHANGELOG.md](CHANGELOG.md).
 
 [Apache-2.0 license](LICENSE)
 
-<!-- readme-verified: 2026-11-25 vs VERSION 0.58.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-11-25 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
+<!-- readme-verified: 2026-11-26 vs VERSION 0.59.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-11-25 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->

@@ -43,12 +43,10 @@ fak run inkling2-mini --max-tokens 256 "What is 2 + 2? Reply with the number onl
 
 **Requirements.**
 
-- A `darwin/arm64` build with CGo from a current `main`. The native runner
-  needs `main` at or after 1f31533f2, the alias and the default need 6f56c684d,
-  and serving needs c6c5f0ed6. Tag v0.58.0 (`d928c421584`) contains all of
-  them: `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` installs it.
-  `install.sh` resolves GitHub's Latest release, still v0.56.0, unless you set
-  `FAK_VERSION=0.58.0`. A clone of `main` also works:
+- A `darwin/arm64` build with CGo. The v0.59.0 installer supplies the
+  prebuilt Metal archive on Apple Silicon. To build that release locally, run
+  `go install github.com/anthony-chaudhary/fak/cmd/fak@v0.59.0` with CGo
+  enabled and the Xcode command line tools installed. A clone of `main` also works:
   `git clone --depth 1 https://github.com/anthony-chaudhary/fak.git`, then
   `cd fak && go build -o fak ./cmd/fak`.
 - An M3 or later chip and macOS 26.4 or later for the fast path that uses the
