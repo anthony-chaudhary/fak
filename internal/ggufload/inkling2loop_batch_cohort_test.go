@@ -1428,3 +1428,19 @@ func TestInkling2BatchCopyRowStateCopiesOnlyTargetRow(t *testing.T) {
 		}
 	}
 }
+
+// A cohort binding holds no global cache, so its batch shapes are bounded by the
+// resident context rather than by the binding's own (zero) context.
+func TestInkling2CohortBindingBoundsContextByResident(t *testing.T) {
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), newFakeInk2Cohort())
+	defer bt.Close()
+	if err := bt.bind(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bt.s.batchShape(1, Inkling2LoopResidentContext); err != nil {
+		t.Fatalf("context at the resident cap refused: %v", err)
+	}
+	if _, err := bt.s.batchShape(1, Inkling2LoopResidentContext+1); err == nil {
+		t.Fatal("context past the resident cap accepted")
+	}
+}

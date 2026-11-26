@@ -232,8 +232,13 @@ func (s *inkling2Resident) batchShapeChunk(C, ctx, chunk int) (inkling2BatchShap
 	if C < 1 {
 		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: %d sequences", C)
 	}
-	if ctx < 1 || ctx > s.ctx {
-		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, s.ctx)
+	limit := s.ctx
+	if limit == 0 {
+		// a cohort binding holds no global cache, so each cohort is bounded by the resident context
+		limit = Inkling2LoopResidentContext
+	}
+	if ctx < 1 || ctx > limit {
+		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, limit)
 	}
 	be := s.be
 	sh := inkling2BatchShape{seq: inkling2BatchSeqOps(be, os.LookupEnv)}
