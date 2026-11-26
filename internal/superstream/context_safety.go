@@ -2,6 +2,7 @@ package superstream
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 )
@@ -244,13 +245,10 @@ func buildCarryoverSeedNormalized(norm StreamSpec, state StreamState) StreamCarr
 			rotate = (rotate + 1) % window
 		}
 	}
-	if rotate != 0 {
-		// Restore chronological order after ring-buffer overwrite.
-		rotated := make([]ItemSummary, 0, window)
-		rotated = append(rotated, receipts[rotate:]...)
-		rotated = append(rotated, receipts[:rotate]...)
-		receipts = rotated
-	}
+	// Restore chronological order in place: the oldest receipt sits at rotate.
+	slices.Reverse(receipts[:rotate])
+	slices.Reverse(receipts[rotate:])
+	slices.Reverse(receipts)
 
 	var cur *WorkItem
 	var next *WorkItem
