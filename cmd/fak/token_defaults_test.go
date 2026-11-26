@@ -96,19 +96,9 @@ func serveSourceFiles() ([]string, error) {
 	return out, nil
 }
 
-// parseServeEntrypoint merges the declarations of every serve*.go source into one ast.File, so
+// parseServeMerged merges the declarations of every serve*.go source into one ast.File, so
 // an AST wiring assertion sees the whole serve surface regardless of which sibling holds a
 // function.
-func parseServeEntrypoint(t *testing.T) *ast.File {
-	t.Helper()
-	file, err := parseServeMerged()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return file
-}
-
-// parseServeMerged is the error-returning core of parseServeEntrypoint.
 func parseServeMerged() (*ast.File, error) {
 	names, err := filepath.Glob("serve*.go")
 	if err != nil {

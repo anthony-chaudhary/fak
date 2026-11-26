@@ -694,7 +694,13 @@ func TestNativeServeGoTestCompilationContained(t *testing.T) {
 		t.Fatalf("git commit: %v: %s", err, out)
 	}
 
-	srv, err := New(Config{EngineID: "localtools", Model: "test", VDSO: true, Native: true, NativeMaxTurns: 4, NativeCodeWorkspace: root})
+	// The focused default refuses `go test -c`; the operator grant below is the only path that
+	// can produce a test binary, and that path must keep it inside _scratch/gotmp.
+	srv, err := New(Config{
+		EngineID: "localtools", Model: "test", VDSO: true, Native: true, NativeMaxTurns: 4,
+		NativeCodeWorkspace:        root,
+		NativeExactAllowedCommands: []string{"go test -c"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
