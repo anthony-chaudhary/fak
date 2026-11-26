@@ -15,24 +15,24 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **101** (clarity 9 + coverage 92) |
-| **Crystal-clear concepts (and climbing)** | **1742** crystal of 4219 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4292 / 4384** (97.9% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **104** (clarity 9 + coverage 95) |
+| **Crystal-clear concepts (and climbing)** | **1743** crystal of 4221 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4296 / 4391** (97.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **3** of 322 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **97** of 5570 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **97** of 5574 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 93.7/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 93.6/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4219 concepts - score 93.7/100 (grade A) - disambiguation-debt 101
+concept-disambiguation chart - 4221 concepts - score 93.6/100 (grade A) - disambiguation-debt 104
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1742
-  o defined       ############################ 2477
+  * crystal       ####################........ 1743
+  o defined       ############################ 2478
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -41,7 +41,7 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ******************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 102 crystal)
   cache            *****************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (419 concept(s); 173 crystal)
-  context-ctx      *************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (313 concept(s); 109 crystal)
+  context-ctx      *************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (314 concept(s); 109 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ****************************************ooooooooooooooooooooooooo (65 concept(s); 40 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -55,22 +55,22 @@ clarity mix by family (each cell = one concept):
   pool             ****************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (111 concept(s); 40 crystal)
   render-materialize ****************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (239 concept(s); 52 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 35 crystal)
-  session-runtime  **********************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (370 concept(s); 142 crystal)
+  session-runtime  ***********************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (371 concept(s); 143 crystal)
   support-maturity ********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 68 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (220 concept(s); 91 crystal)
 
 coverage by family (positioned / discovered):
-  context-ctx      ###########################. 340/359
+  context-ctx      ###########################. 343/362
   plan             ###########################. 667/681
-  session-runtime  ###########################. 391/402
-  cache            ############################ 467/475
+  session-runtime  ###########################. 392/403
+  cache            ###########################. 467/476
   attention        ###########################. 244/251
+  gateway-engine   ###########################. 327/333
   loop             ###########################. 150/156
   guard-gate       ############################ 584/589
   pool             ###########################. 117/122
-  gateway-engine   ############################ 327/331
   support-maturity ###########################. 146/150
   render-materialize ############################ 257/260
   policy-capability ############################ 294/296
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.9%  (4292/4384 confusable tokens positioned)
+namespace coverage  [###############################.] 97.8%  (4296/4391 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 319
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      #........................... 3
   pairs separated   [################################] 319/322
 
-name index: 5570 lookup name(s) -> 4219 concept(s), 97 ambiguous
+name index: 5574 lookup name(s) -> 4221 concept(s), 97 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **319 / 322** (319 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **3** |
 | Entangled concepts (own twin undrawn) | 6 |
-| Boundaries drawn (mutual / total) | 3732 / 8106 |
+| Boundaries drawn (mutual / total) | 3732 / 8111 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5570 over 4219 concepts |
+| Lookup names indexed | 5574 over 4221 concepts |
 | Lookup names landing on several concepts | 97 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4219 |
+| Concepts carrying a contrast set | 4221 |
 
 ## The concepts (best verdict first)
 
@@ -1589,6 +1589,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **SessionRegistry** - Package internal/fleetmon/sessionreg: the Go session registry that scans Claude config dirs for session transcripts, classifies each stopped or live session, and writes the registry, resume plan and decisions log. It is the in-process replacement for the Python fleet session scan. |
 | * | crystal | symbol | session-runtime | **handleFakAgentSessions (gateway route)** - Server.handleFakAgentSessions is the /v1/fak/agent/sessions HTTP handler (#3258, epic #3256): POST a goal and it runs ONE kernel-governed owned-loop agent session (agent.RunGovernedArm over the server's planner) and streams the session back as NDJSON events — session.start, per-call adjudicated call rows, session.end with the ArmMetrics witness. |
 | * | crystal | symbol | session-runtime | **Inkling2LoopSession** - One request's greedy decode state over a fresh inkling2_loop KV cache: Prefill consumes the prompt and returns the next token, Step consumes one token and returns the next, Close frees it. NewInkling2LoopSession opens the resident CUDA-graph session when the backend qualifies, else the host-driven one. |
+| * | crystal | symbol | session-runtime | **Model.NewSessionFor (Metal prefix-reuse session)** - The inklingmetal constructor that opens a request's Metal decode session knowing its prompt: when the model's idle session last served a prompt under the same scope, the leading prefill chunks both prompts share stay in place and the first Prefill computes only the rows after them; otherwise it prefills in full. |
 | * | crystal | symbol | session-runtime | **loadTUISessions (TUI session-list loader)** - loadTUISessions is the cmd/fak input adapter that loads a gateway SessionListResponse either from an operator-provided JSON snapshot or from the live /v1/fak/sessions endpoint for TUI rendering and control selection. |
 | * | crystal | config | session-runtime | **sessionsJSON (--sessions-json TUI snapshot input)** - sessionsJSON is the cmd/fak flag binding that carries an operator-supplied SessionListResponse snapshot path into the standalone sessions view or the overview sessions card. |
 | * | crystal | symbol | session-runtime | **releaseWeightSession (model-weight hold release)** - releaseWeightSession decrements the model weight-closer session hold after a native inference path finishes and completes deferred weight teardown when the last active holder leaves after CloseWeights begins. |
@@ -2419,6 +2420,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | context-ctx | **NewCtxStore (recall adapter constructor)** - NewCtxStore is the internal/recall constructor wrapping a reloaded *Session as a ctxplan.Store - the first REAL store implementation the ctxplan planner views, so a sealed page reads as a Sealed Span and a tombstoned page as a Tombstoned one. |
 | o | defined | symbol | context-ctx | **principalFromContext (isolation principal)** - principalFromContext is the internal/gateway function returning the request-scoped isolation principal (or empty) from a Go context.Context - the per-principal boundary that scopes restore/spans reads to the caller's own trace. |
 | o | defined | config | context-ctx | **RequiredContext (capacity signal)** - RequiredContext is the internal/modelroute CapacitySignal field carrying the minimum context-window tokens a target model must offer to accept a reroute - the routing-side dual of context-window, checked against a target's usable context. |
+| o | defined | symbol | context-ctx | **localContextRetry (agent compact-once gate)** - localContextRetry is the HTTPPlanner method in internal/agent/tool_result_budget.go that decides whether a failed call to a local endpoint should be compacted and resent exactly once, because the endpoint refused the prompt as too large and this call is not already the compacted retry. |
 | o | defined | symbol | context-ctx | **SpeculationContext** - Transient state for brainstorm epochs: (Speculative, Epoch, ParentEpoch) marking provisional effects produced under speculation. |
 | o | defined | symbol | context-ctx | **ContextChangeRequest** - Negative-only context mutation request: one persisted recall-page tombstone with reason, requestor, and witness. |
 | o | defined | symbol | context-ctx | **RecallProof** - Self-describing proof of a recall cost calculation: shows the gate's work (PrefixTokens, UnitTokens, ReadMult, siblings, cost breakdown). |
@@ -4506,8 +4508,8 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 40 | 3 | 3 confusable pair(s) with no line drawn |
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 34 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4374/8106 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4219 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4379/8111 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4221 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -4516,21 +4518,21 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `alias_resolved` | 100 | 0 | every alias resolves in the tree (token or wire key) |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5570 lookup name(s) resolves - 97 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5574 lookup name(s) resolves - 97 land on several concepts, all separated |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| context-ctx | 340 | 359 | 19 |
+| context-ctx | 343 | 362 | 19 |
 | plan | 667 | 681 | 14 |
-| session-runtime | 391 | 402 | 11 |
-| cache | 467 | 475 | 8 |
+| session-runtime | 392 | 403 | 11 |
+| cache | 467 | 476 | 9 |
 | attention | 244 | 251 | 7 |
+| gateway-engine | 327 | 333 | 6 |
 | loop | 150 | 156 | 6 |
 | guard-gate | 584 | 589 | 5 |
 | pool | 117 | 122 | 5 |
-| gateway-engine | 327 | 331 | 4 |
 | support-maturity | 146 | 150 | 4 |
 | render-materialize | 257 | 260 | 3 |
 | policy-capability | 294 | 296 | 2 |
