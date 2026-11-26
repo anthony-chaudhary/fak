@@ -176,19 +176,17 @@ jobs:
       - name: concept generated-artifact freshness
         run: go run ./cmd/fak concept freshness --check --json
 
-      # Build/test cache: setup-go's built-in cache is off (no go.sum to key on), but the
-      # GOCACHE — compiled packages AND cached test results — is the biggest CI-time lever
-      # on this zero-dep module. `go build ./...` and `go test ./...` otherwise recompile and
-      # re-run the whole tree every push. Key on go.mod (the toolchain) with a per-commit save
-      # and a prefix restore, so a warm cache skips unchanged packages and unchanged tests.
+      # Build/test cache: the GOCACHE (compiled packages and cached test results) is the
+      # biggest CI-time lever on this module. The key is content-addressed on the module
+      # files, so every commit with the same dependencies shares one entry instead of
+      # creating a new multi-GiB one. Only trunk pushes save; other runs restore.
       # GOCACHE is content-addressed, so a restored entry is never wrong — a miss just rebuilds.
-      - name: cache Go build/test artifacts
-        uses: actions/cache@v4
+      - name: restore Go build/test cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
       # Fleet guard installation (#19): arm git guards (leak/claim/trunk) on every CI node.
@@ -1031,6 +1029,16 @@ jobs:
         run: |
           cp internal/rsiloop/testdata/main-kpi-baseline.jsonl "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
           go run ./cmd/rsiloop -mode track -repo . -baseline-ref HEAD -journal "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
+
+      # Saved last, after every build and test step, so the entry holds the compiled
+      # cache this job produced rather than the restored copy. Default success() gating:
+      # a red job does not save, since its partial cache would be reused under the same key.
+      - name: save Go build/test cache (trunk push only)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
 
       - name: record exact verification provenance
         if: always()

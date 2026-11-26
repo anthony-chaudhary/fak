@@ -162,19 +162,17 @@ jobs:
         run: |
           go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "$GOMAXPROCS" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-fast-environment.json"
 
-      # Build/test cache: share the SAME content-addressed GOCACHE prefix as
+      # Build/test cache: share the SAME content-addressed GOCACHE key as
       # ci.yml's build-vet-test job (gobuild, non-race) so a warm cache skips
       # unchanged packages. A restored entry is never wrong — a miss just
-      # rebuilds. Restore-only: ci.yml saves this exact key for the same commit,
-      # and a multi-GiB post-job save here would sit on the verdict's critical
-      # path.
+      # rebuilds. Restore-only: ci.yml is the sole saver, and a multi-GiB
+      # post-job save here would sit on the verdict's critical path.
       - name: cache Go build/test artifacts
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
       # No Go/network dependency: proves the release-artifacts post-publish
@@ -317,16 +315,15 @@ jobs:
         run: |
           go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "$GOMAXPROCS" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-fast-environment.json"
 
-      # Restore-only: every shard starts from the shared gobuild GOCACHE prefix
+      # Restore-only: every shard starts from the shared gobuild GOCACHE key
       # (ci.yml build-vet-test saves it). Shards never save, so N parallel jobs
       # do not multiply the repository's cache footprint.
       - name: restore Go build/test cache
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
       - name: install pinned OpenAPI validator

@@ -38,19 +38,7 @@
       "digest": "",
       "license_record": "none",
       "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
-      "note": "Restore-only sub-action of actions/cache used by the sharded ci-fast go test jobs (246b2a618); moving major tag like its parent."
-    },
-    {
-      "class": "ci_action",
-      "reference": "actions/cache@v4",
-      "consumer_domains": [
-        ".github/workflows"
-      ],
-      "status": "used",
-      "pin": "unresolved",
-      "digest": "",
-      "license_record": "none",
-      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+      "note": "Restore-only sub-action of actions/cache used by the sharded ci-fast go test jobs and the ci.yml build-vet-test job; moving major tag like its parent."
     },
     {
       "class": "ci_action",
