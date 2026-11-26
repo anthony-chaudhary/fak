@@ -43,7 +43,7 @@ func plannerKind(p agent.Planner) string {
 		return "proxy"
 	case *ReplicaDispatch:
 		return "replica"
-	case *agent.InKernelPlanner:
+	case *agent.InKernelPlanner, *agent.Inkling2LoopPlanner:
 		return "inkernel"
 	case *DualPlanner:
 		return "dual"

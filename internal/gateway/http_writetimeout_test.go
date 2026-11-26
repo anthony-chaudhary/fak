@@ -3,6 +3,8 @@ package gateway
 import (
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // http_writetimeout_test.go pins the #1015 fix: a non-streaming /v1/chat/completions turn on
@@ -54,5 +56,21 @@ func TestServeWriteTimeoutEnvOverridesInkernel(t *testing.T) {
 func TestPlannerKindClassifiesInkernel(t *testing.T) {
 	if got := plannerKind(nil); got != "unknown" {
 		t.Errorf("a nil planner must be unknown (conservative), got %q", got)
+	}
+	inkling := &agent.Inkling2LoopPlanner{}
+	if got := plannerKind(inkling); got != "inkernel" {
+		t.Fatalf("Inkling2LoopPlanner kind = %q, want inkernel", got)
+	}
+	if got := serveWriteTimeoutDefault(plannerKind(inkling)); got != 0 {
+		t.Fatalf("Inkling native write timeout = %v, want 0", got)
+	}
+	if got := servingModeVerdict(plannerKind(inkling))["real_model_output"]; got != true {
+		t.Fatalf("Inkling native real_model_output = %v, want true", got)
+	}
+	if got := plannerKind(&agent.HTTPPlanner{}); got != "proxy" {
+		t.Fatalf("HTTPPlanner kind = %q, want proxy", got)
+	}
+	if got := plannerKind(&agent.MockPlanner{}); got != "mock" {
+		t.Fatalf("MockPlanner kind = %q, want mock", got)
 	}
 }
