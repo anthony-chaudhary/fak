@@ -18,6 +18,8 @@ type inkling2TreeState struct {
 	conv         [][]float32
 	pos          int
 	features     [][]float32
+	// lastLoopKV travels with the rows because it decides which slot they are in.
+	lastLoopKV bool
 }
 
 // Inkling2TreeVerify holds one verified token tree. Logits[i] are node i's
@@ -35,12 +37,13 @@ type Inkling2TreeVerify struct {
 // reallocates instead of writing into storage a sibling also reads.
 func (h *Inkling2LoopHost) snapshot() inkling2TreeState {
 	s := inkling2TreeState{
-		keys:      make([][][]float32, len(h.keys)),
-		values:    make([][][]float32, len(h.values)),
-		positions: make([][]int, len(h.positions)),
-		conv:      make([][]float32, len(h.conv)),
-		pos:       h.pos,
-		features:  h.Features,
+		keys:       make([][][]float32, len(h.keys)),
+		values:     make([][][]float32, len(h.values)),
+		positions:  make([][]int, len(h.positions)),
+		conv:       make([][]float32, len(h.conv)),
+		pos:        h.pos,
+		features:   h.Features,
+		lastLoopKV: h.lastLoopKV,
 	}
 	for i := range h.keys {
 		s.keys[i] = h.keys[i][:len(h.keys[i]):len(h.keys[i])]
@@ -60,6 +63,7 @@ func (h *Inkling2LoopHost) install(s inkling2TreeState) {
 	}
 	h.pos = s.pos
 	h.Features = s.features
+	h.lastLoopKV = s.lastLoopKV
 }
 
 // VerifyTree runs every node of a token tree in one call, each at its depth's

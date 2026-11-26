@@ -124,6 +124,8 @@ type Inkling2LoopHost struct {
 	keys, values [][][]float32
 	positions    [][]int
 	conv         [][]float32
+	// lastLoopKV keys K/V by physical layer instead of by visit.
+	lastLoopKV bool
 	// FeatureVisits are layer visits (loop passes counted) whose input partial
 	// Step copies into Features; visit Visits() is the final-norm output. They
 	// are the target features a DSpark draft reads.
@@ -162,6 +164,48 @@ func NewInkling2LoopHost(hp Inkling2LoopHParams, w *Inkling2LoopWeights) (*Inkli
 
 // Slots is the number of layer visits per token (cache slots).
 func (h *Inkling2LoopHost) Slots() int { return len(h.conv) }
+
+// SetLastLoopKV makes the loop passes of one physical layer share a single K/V
+// history in which past tokens keep only their last pass's rows, so the cache
+// grows by Layers rows per token instead of Visits. Rows of one prompt panel
+// still attend each other at the same pass, so an empty-cache panel prefill
+// equals the per-visit cache. Across panels and in decode a token sees earlier
+// tokens at their last pass only, so results depend on where panels break and
+// differ slightly from the per-visit cache; hence the mode is opt-in.
+// Short-conv state stays per visit.
+func (h *Inkling2LoopHost) SetLastLoopKV(on bool) error {
+	if h.pos != 0 {
+		return fmt.Errorf("inkling2_loop host: KV mode is fixed once %d tokens are cached", h.pos)
+	}
+	h.lastLoopKV = on
+	return nil
+}
+
+// KVRows is the number of cached K/V rows across all slots.
+func (h *Inkling2LoopHost) KVRows() int {
+	n := 0
+	for _, k := range h.keys {
+		n += len(k)
+	}
+	return n
+}
+
+// storeKV appends this position's row; under last-loop KV a later pass
+// replaces the row an earlier pass wrote for the same position instead.
+func (h *Inkling2LoopHost) storeKV(slot int, k, v []float32) {
+	if h.lastLoopKV {
+		pos := h.positions[slot]
+		for i := len(pos) - 1; i >= 0 && pos[i] >= h.pos; i-- {
+			if pos[i] == h.pos {
+				h.keys[slot][i], h.values[slot][i] = k, v
+				return
+			}
+		}
+	}
+	h.keys[slot] = append(h.keys[slot], k)
+	h.values[slot] = append(h.values[slot], v)
+	h.positions[slot] = append(h.positions[slot], h.pos)
+}
 
 // Pos is the number of tokens the host has consumed.
 func (h *Inkling2LoopHost) Pos() int { return h.pos }
@@ -346,15 +390,17 @@ func (h *Inkling2LoopHost) layer(slot, ip int, cur []float32, blocks *[][]float3
 		}
 	}
 
-	h.keys[slot] = append(h.keys[slot], k)
-	h.values[slot] = append(h.values[slot], v)
-	h.positions[slot] = append(h.positions[slot], h.pos)
+	kv := slot
+	if h.lastLoopKV {
+		kv = ip
+	}
+	h.storeKV(kv, k, v)
 
 	extent := hp.RelExtent
 	if local {
 		extent = hp.SlidingWindow
 	}
-	attn := h.attend(slot, q, r, sinks, lw.RelBias, extent, local)
+	attn := h.attend(kv, q, r, sinks, lw.RelBias, extent, local)
 
 	for i := range attn {
 		attn[i] *= sigmoid32(gate[i])
