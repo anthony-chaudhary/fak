@@ -48,7 +48,7 @@ The Metal archive is available on v0.54.0, backfilled from the exact tagged
 source; this adds an asset to the existing release, not a new version. This
 backfill is SHA-256-verified and ad-hoc-signed; it has no SLSA attestation or
 Apple notarization. Its checksum verifies download integrity, not source provenance.
-The [v0.58.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.58.0) includes the Linux amd64 Vulkan archive.
+The [v0.59.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.59.0) includes the Linux amd64 Vulkan archive.
 A packaged backend still needs qualification on the actual model and GPU.
 
 ---
@@ -106,7 +106,7 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 Then confirm:
 
 ```sh
-fak version          # prints the installed version, e.g. 0.58.0
+fak version          # prints the installed version, e.g. 0.59.0
 ```
 
 What you'll see: a single version line on stdout (the release you just installed). If
@@ -245,7 +245,7 @@ Containers must bind `0.0.0.0`, not loopback — the default `CMD` already does
 (`serve --addr 0.0.0.0:8080`). Stamp a specific version into the binary at build time:
 
 ```sh
-docker build --build-arg APP_VERSION=0.58.0 -t fak:0.58.0 .
+docker build --build-arg APP_VERSION=0.59.0 -t fak:0.59.0 .
 ```
 
 Override the entrypoint command to run `fak agent`, `fak policy`, etc. instead of the
@@ -368,7 +368,7 @@ prebuilt-binary download (sections 1 and 2 above) or the build-from-source fallb
 
 `...@latest` resolves to the newest tag the Go module proxy serves. That is v0.58.0, which
 includes Inkling-2-Mini. The prebuilt-binary installer resolves GitHub's Latest release,
-which is still v0.56.0 until v0.58.0 is promoted; set `FAK_VERSION=0.58.0` to pin it. The
+which is still v0.59.0 until v0.59.0 is promoted; set `FAK_VERSION=0.59.0` to pin it. The
 CUDA build is not among the v0.58.0 release assets, so use [build from source](#build-from-source)
 for the `-tags cuda` build.
 
