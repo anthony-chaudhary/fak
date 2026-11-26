@@ -18,13 +18,38 @@ import (
 // metalAvailabilityVerdict names why no Metal backend is registered, mirroring the
 // Vulkan guard's two-state reason: compiled-out of this binary vs built-but-unusable.
 func metalAvailabilityVerdict() string {
-	if !metalgemm.Compiled() {
+	return metalAvailabilityVerdictFor(metalgemm.Compiled(), metalgemm.Available(), metalgemm.MPSAvailable())
+}
+
+const (
+	metalSkipNoDevice    = "metal backend not registered (no reachable Metal device)"
+	metalSkipMPSNotOptIn = "metal device present but MPS not opted in (set FAK_METAL_MPS=1)"
+)
+
+// metalAvailabilityVerdictFor is pure so every state is testable on any host. The backend
+// registers only with MPS, which is opt-in because probing it can fault headless, so a
+// present device without MPS must not be reported as "no device".
+func metalAvailabilityVerdictFor(compiled, device, mps bool) string {
+	switch {
+	case !compiled:
 		return "built without darwin/arm64 cgo"
-	}
-	if !metalgemm.MPSAvailable() {
+	case !device:
 		return "no usable Metal device"
+	case !mps:
+		return metalSkipMPSNotOptIn
 	}
 	return "metal init failed"
+}
+
+func metalSkipReasonFor(device, mps bool) string {
+	if device && !mps {
+		return metalSkipMPSNotOptIn
+	}
+	return metalSkipNoDevice
+}
+
+func metalSkipReason() string {
+	return metalSkipReasonFor(metalgemm.Available(), metalgemm.MPSAvailable())
 }
 
 // metalGuardVerdict is the pure decision core of metalOrSkip — the Metal twin of the vk(t)
@@ -42,7 +67,7 @@ func metalGuardVerdict(registered bool, tier string) (fatalReason, skipReason st
 	if os.Getenv("FAK_METAL_REQUIRE_DEVICE") == "1" {
 		return "required Metal device is not registered: " + metalAvailabilityVerdict(), ""
 	}
-	return "", "metal backend not registered (no reachable Metal device)"
+	return "", metalSkipReason()
 }
 
 // TestMetalGuardRequireDeviceFailsLoudOnMetalLessHost pins the fail-loud rung on the
@@ -59,7 +84,7 @@ func TestMetalGuardRequireDeviceFailsLoudOnMetalLessHost(t *testing.T) {
 		t.Fatalf("guard with FAK_METAL_REQUIRE_DEVICE=1 on unregistered device = (%q, %q), want fatal naming the reason, no skip", fatal, skip)
 	}
 	if !strings.Contains(fatal, "required Metal device is not registered") ||
-		(!strings.Contains(fatal, "built without darwin/arm64 cgo") && !strings.Contains(fatal, "no usable Metal device")) {
+		(!strings.Contains(fatal, "built without darwin/arm64 cgo") && !strings.Contains(fatal, "no usable Metal device") && !strings.Contains(fatal, "MPS not opted in")) {
 		t.Fatalf("fatal %q must name the two-state availability reason (compiled-out OR no device)", fatal)
 	}
 	// Pin that the fatal's named reason matches the compiled/unavailable state. A
@@ -67,7 +92,7 @@ func TestMetalGuardRequireDeviceFailsLoudOnMetalLessHost(t *testing.T) {
 	// legitimate "no usable Metal device" host: the backend stays unregistered even
 	// though it compiled, so Compiled() alone must not be assumed false.
 	if metalgemm.Compiled() {
-		if !strings.Contains(fatal, "no usable Metal device") && !strings.Contains(fatal, "metal init failed") {
+		if !strings.Contains(fatal, "no usable Metal device") && !strings.Contains(fatal, "MPS not opted in") && !strings.Contains(fatal, "metal init failed") {
 			t.Fatalf("compiled Metal host with no registered backend named reason %q, want the device-unavailable state", fatal)
 		}
 	} else if !strings.Contains(fatal, "built without darwin/arm64 cgo") {
@@ -84,8 +109,28 @@ func TestMetalGuardUnsetEnvPreservesSkip(t *testing.T) {
 	}
 	t.Setenv("FAK_METAL_REQUIRE_DEVICE", "")
 	fatal, skip := metalGuardVerdict(false, "")
-	if skip != "metal backend not registered (no reachable Metal device)" || fatal != "" {
-		t.Fatalf("guard unset on unregistered device = (%q, %q), want the original skip verbatim, no fatal", fatal, skip)
+	if want := metalSkipReason(); skip != want || fatal != "" {
+		t.Fatalf("guard unset on unregistered device = (%q, %q), want skip %q, no fatal", fatal, skip, want)
+	}
+}
+
+func TestMetalAvailabilityVerdictStates(t *testing.T) {
+	cases := []struct {
+		compiled, device, mps bool
+		verdict, skip         string
+	}{
+		{false, false, false, "built without darwin/arm64 cgo", metalSkipNoDevice},
+		{true, false, false, "no usable Metal device", metalSkipNoDevice},
+		{true, true, false, metalSkipMPSNotOptIn, metalSkipMPSNotOptIn},
+		{true, true, true, "metal init failed", metalSkipNoDevice},
+	}
+	for _, c := range cases {
+		if got := metalAvailabilityVerdictFor(c.compiled, c.device, c.mps); got != c.verdict {
+			t.Errorf("verdict(compiled=%v device=%v mps=%v) = %q, want %q", c.compiled, c.device, c.mps, got, c.verdict)
+		}
+		if got := metalSkipReasonFor(c.device, c.mps); got != c.skip {
+			t.Errorf("skip(device=%v mps=%v) = %q, want %q", c.device, c.mps, got, c.skip)
+		}
 	}
 }
 

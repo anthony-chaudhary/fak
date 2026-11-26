@@ -65,7 +65,7 @@ func benchMatMul(b *testing.B, be Backend, P int) {
 func BenchmarkMetalMatMulGEMV(b *testing.B) {
 	be := Pick("metal")
 	if _, ok := be.(*metalBackend); !ok {
-		b.Skip("metal backend not registered (no reachable Metal device)")
+		b.Skip(metalSkipReason())
 	}
 	benchMatMul(b, be, 1)
 }
@@ -75,7 +75,7 @@ func BenchmarkCPURefMatMulGEMV(b *testing.B) { benchMatMul(b, Default(), 1) }
 func BenchmarkMetalMatMulGEMM64(b *testing.B) {
 	be := Pick("metal")
 	if _, ok := be.(*metalBackend); !ok {
-		b.Skip("metal backend not registered (no reachable Metal device)")
+		b.Skip(metalSkipReason())
 	}
 	benchMatMul(b, be, 64)
 }
