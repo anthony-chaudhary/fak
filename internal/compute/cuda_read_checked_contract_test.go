@@ -3,9 +3,7 @@ package compute
 import (
 	"go/ast"
 	"go/format"
-	"go/parser"
 	"go/token"
-	"os"
 	"strings"
 	"testing"
 )
@@ -14,19 +12,11 @@ import (
 // This source contract complements, never replaces, actual tagged Read tests.
 func TestCUDAReadCheckedContract(t *testing.T) {
 	assertCUDAPrefillLockedWrappers(t)
-	src, err := os.ReadFile("cuda_residency.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fs := token.NewFileSet()
-	f, err := parser.ParseFile(fs, "cuda_residency.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fs, f := cudaPackageSyntax(t)
 	var body string
 	for _, d := range f.Decls {
 		if fn, ok := d.(*ast.FuncDecl); ok && fn.Name.Name == "readLocked" && fn.Recv != nil {
-			body = string(src[fs.Position(fn.Pos()).Offset:fs.Position(fn.End()).Offset])
+			body = cudaSourceText(t, fs, fn)
 		}
 	}
 	if body == "" {
@@ -56,7 +46,7 @@ func TestCUDAReadCheckedContract(t *testing.T) {
 			}
 			for _, name := range v.Names {
 				if name.Name == "cudaReadNative" {
-					native = string(src[fs.Position(v.Pos()).Offset:fs.Position(v.End()).Offset])
+					native = cudaSourceText(t, fs, v)
 				}
 			}
 		}
@@ -69,7 +59,7 @@ func TestCUDAReadCheckedContract(t *testing.T) {
 // Assert both public locking boundaries before checking their leaf semantics.
 func assertCUDAPrefillLockedWrappers(t *testing.T) {
 	t.Helper()
-	f := parseCUDABackendSources(t, token.NewFileSet())
+	_, f := cudaPackageSyntax(t)
 	expected := map[string]string{
 		"Read":          "{\n\tcudaMu.Lock()\n\tdefer cudaMu.Unlock()\n\treturn c.readLocked(t)\n}",
 		"BatchedMatMul": "{\n\tcudaMu.Lock()\n\tdefer cudaMu.Unlock()\n\treturn c.batchedMatMulLocked(w, X, P)\n}",

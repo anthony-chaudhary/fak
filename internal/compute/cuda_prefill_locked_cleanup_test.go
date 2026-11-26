@@ -5,7 +5,6 @@ import (
 	"context"
 	"go/ast"
 	"go/format"
-	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,8 +18,7 @@ import (
 // operation/runtime results. This verifies host ordering, not CUDA execution.
 // fak-test:runtime medium est=2s lane=default
 func TestCUDAPrefillLockedCleanupOrder(t *testing.T) {
-	fs := token.NewFileSet()
-	f := parseCUDABackendSources(t, fs)
+	fs, f := cudaPackageSyntax(t)
 	methods := map[string]*ast.FuncDecl{}
 	for _, d := range f.Decls {
 		if fn, ok := d.(*ast.FuncDecl); ok {

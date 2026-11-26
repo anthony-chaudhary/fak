@@ -83,7 +83,7 @@ func TestCUDAQ56KMMQSourceContract(t *testing.T) {
 		!strings.Contains(header, "if (kind == 6) return fak_q56k_mmq::run<6>") {
 		t.Fatal("typed immutable selection/final shared fence contract changed")
 	}
-	ordinary := read("cuda.go") + read("cuda_residency.go")
+	ordinary := cudaPackageText(t)
 	if !strings.Contains(ordinary, "c.validateQ56KProjectionOperands(w, X, P)") ||
 		!strings.Contains(ordinary, "c.q56KProjectionStatus(w, wb, X, y, P)") ||
 		!strings.Contains(ordinary, "cudaQ56KMMQRetirementFailedLocked(status)") ||

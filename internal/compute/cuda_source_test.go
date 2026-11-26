@@ -2,6 +2,9 @@ package compute
 
 import (
 	"bufio"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +13,72 @@ import (
 )
 
 var cudaQuotedIncludeRE = regexp.MustCompile(`^\s*#\s*include\s*"([^"\r\n]+)"`)
+
+// cudaProductionFiles lists the package's CUDA production sources. Contract
+// checks read these rather than one filename, because the god-file split moves
+// declarations between siblings.
+func cudaProductionFiles(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package directory: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() && strings.HasPrefix(name, "cuda") && strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		t.Fatal("no CUDA production sources found")
+	}
+	return names
+}
+
+// cudaPackageSyntax merges the top-level declarations of every CUDA production
+// source into one file, so a declaration is found whichever sibling holds it.
+func cudaPackageSyntax(t *testing.T) (*token.FileSet, *ast.File) {
+	t.Helper()
+	fset := token.NewFileSet()
+	merged := &ast.File{Name: ast.NewIdent("compute")}
+	for _, name := range cudaProductionFiles(t) {
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		merged.Decls = append(merged.Decls, f.Decls...)
+	}
+	return fset, merged
+}
+
+// cudaSourceText returns the exact source text of a node parsed by
+// cudaPackageSyntax, read from the sibling file that declares it.
+func cudaSourceText(t *testing.T, fset *token.FileSet, n ast.Node) string {
+	t.Helper()
+	start, end := fset.Position(n.Pos()), fset.Position(n.End())
+	data, err := os.ReadFile(start.Filename)
+	if err != nil {
+		t.Fatalf("read %s: %v", start.Filename, err)
+	}
+	return string(data[start.Offset:end.Offset])
+}
+
+// cudaPackageText concatenates the CUDA production sources for marker checks
+// that may land in any sibling file.
+func cudaPackageText(t *testing.T) string {
+	t.Helper()
+	var out strings.Builder
+	for _, name := range cudaProductionFiles(t) {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		out.Write(data)
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
 
 // cudaSourceClosure reads each CUDA source root and its repository-local quoted
 // includes exactly once. It makes source-contract tests follow focused fragments

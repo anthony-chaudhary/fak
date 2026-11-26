@@ -2,18 +2,13 @@ package compute
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"testing"
 )
 
 // Estimate only; not timed. Parses source without linking or executing CUDA.
 // fak-test:runtime fast est=20ms lane=default
 func TestCUDACloneTensorSerializesAllocationAndCopy(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "cuda_residency.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, file := cudaPackageSyntax(t)
 	var clone *ast.FuncDecl
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)

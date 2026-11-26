@@ -98,10 +98,7 @@ func TestCUDAMatMulTracePayloadContract(t *testing.T) {
 
 func assertCUDAMatMulTraceWiring(t *testing.T) {
 	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), "cuda.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, file := cudaPackageSyntax(t)
 	declFile, err := parser.ParseFile(token.NewFileSet(), "cuda_matmul_trace.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -238,10 +235,7 @@ func assertCUDAMatMulTraceWiring(t *testing.T) {
 // Pin the public lock/forwarding boundary as well as the implementation body.
 func assertCUDAMatMulLockedWrapper(t *testing.T) {
 	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), "cuda.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, file := cudaPackageSyntax(t)
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != "MatMul" || fn.Recv == nil {

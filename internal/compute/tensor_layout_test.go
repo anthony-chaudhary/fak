@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -182,11 +183,19 @@ func TestTensorLayoutCUDAUploadPackingContract(t *testing.T) {
 
 func tensorLayoutMethod(t *testing.T, filename, backend, method string) *ast.FuncDecl {
 	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), filename, nil, parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatalf("parse %s: %v", filename, err)
+	var decls []ast.Decl
+	if strings.HasPrefix(filename, "cuda") {
+		// CUDA methods move between sibling files, so search the whole backend.
+		_, file := cudaPackageSyntax(t)
+		decls = file.Decls
+	} else {
+		file, err := parser.ParseFile(token.NewFileSet(), filename, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", filename, err)
+		}
+		decls = file.Decls
 	}
-	for _, decl := range file.Decls {
+	for _, decl := range decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != method || fn.Recv == nil {
 			continue

@@ -14,9 +14,19 @@ import (
 
 // fak-test:runtime fast est=2ms lane=default
 func TestCUDAReadTerminalAdmissionContract(t *testing.T) {
-	source, err := os.ReadFile("cuda_residency.go")
-	if err != nil {
-		t.Fatal(err)
+	var source []byte
+	for _, name := range cudaProductionFiles(t) {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(data, []byte("func (c *cudaBackend) readLocked(")) {
+			source = data
+			break
+		}
+	}
+	if source == nil {
+		t.Fatal("readLocked declaration missing from CUDA sources")
 	}
 	if err := cudaReadTerminalPrefix(source); err != nil {
 		t.Fatal(err)

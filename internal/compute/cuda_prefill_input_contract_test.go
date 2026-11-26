@@ -18,7 +18,7 @@ import (
 
 func assertCUDAUploadLockedBoundary(t *testing.T) {
 	t.Helper()
-	f := parseCUDABackendSources(t, token.NewFileSet())
+	_, f := cudaPackageSyntax(t)
 	for _, d := range f.Decls {
 		fn, ok := d.(*ast.FuncDecl)
 		if !ok || fn.Recv == nil || fn.Name.Name != "uploadClass" {
@@ -114,10 +114,14 @@ func TestCUDAPrefillOwnedInputHostContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
-	cmd = exec.CommandContext(ctx, goBin, "test", "-timeout=20s", "-count=1", "-v", ".")
+	cmd = exec.CommandContext(ctx, goBin, "test", "-vet=off", "-timeout=20s", "-count=1", "-v", ".")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=1", "GOMAXPROCS=2")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("actual owner/cgo fixture stopped by its %v deadline (err %v; a cold cgo build on a loaded host can exceed it, a killed child reports exit status 1 on Windows)\n%s", 45*time.Second, ctx.Err(), out)
+	}
+	if err != nil {
 		t.Fatalf("actual owner/cgo fixture: %v\n%s", err, out)
 	} else {
 		t.Log(string(out))
@@ -624,10 +628,7 @@ func cudaUploadContractBodies(t *testing.T) map[string]string {
 
 // fak-test:runtime fast est=10ms lane=default
 func TestCUDAPrefillOwnedInputRouteContract(t *testing.T) {
-	f, err := parser.ParseFile(token.NewFileSet(), "cuda.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, f := cudaPackageSyntax(t)
 	var route *ast.IfStmt
 	for _, d := range f.Decls {
 		fn, ok := d.(*ast.FuncDecl)
