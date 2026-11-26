@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1320" height="860" viewBox="0 0 1320 860" role="img" aria-labelledby="sw-title sw-desc">
   <title id="sw-title">fak — the agent kernel, the benchmark sweep</title>
-  <desc id="sw-desc">An eight-panel benchmark sweep across serving efficiency, correctness and the security kernel, each panel a grouped bar chart with fak in green against one honest reference; the eighth panel is the single-stream fence where llama.cpp leads. Figures: 4.1x fleet serving, 86.7% KV hit, 6.95x RadixAttention, max|delta|=0 mid-run eviction, 7.50x exact token reuse, 2,849x in-process decide, injection quarantine, and 8.7 vs 17.3 tok/s decode.</desc>
+  <desc id="sw-desc">An eight-panel benchmark sweep. Inkling-2-Mini on an RTX 5080: decode 118.1 vs 81.0 tok/s for stock llama.cpp in the same window, 119.9 vs 119.5 for the fastest llama.cpp fork (parity), opt-in speculative decode at depth 2 171.5 vs 119.7 plain, and NVFP4 W4A4 prefill 5861 vs 3012 tok/s for the fork on a 512-token prompt (1.95x, prompt rate only). On an M3 Pro, 32-token capitals prompt: decode 40.3 vs 37.5 for Splash and 23.4 for the fastest llama.cpp fork. Kernel: cache invalidation on an external write is bit-exact (max|delta|=0); an in-process guard decision costs 2.4 us against 6.9 ms for a spawned hook, 2,849x. Fence: at 1,946 tokens of context fak decodes 89.0 vs 113.8 tok/s for the fork.</desc>
   <defs>
     <linearGradient id="sw-bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#fbfcfd"/>
@@ -24,136 +24,140 @@
     </style>
   </defs>
   <rect width="1320" height="860" fill="url(#sw-bg)"/>
-  <text x="56" y="58" class="k">BENCHMARK SWEEP · 8 AXES ACROSS THREE PILLARS</text>
-  <text x="56" y="96" class="ti">fak by the benchmarks — breadth, not a single number</text>
-  <text x="56" y="124" class="sub">Eight axes spanning serving efficiency, correctness, and the security kernel — each fak figure (green) against one honest reference; the last</text>
-  <text x="56" y="146" class="sub">panel is the single-stream fence fak does not target, where llama.cpp leads.</text>
+  <text x="56" y="58" class="k">BENCHMARK SWEEP · INKLING-2-MINI ON RTX 5080 AND M3 PRO · 2026-11-25</text>
+  <text x="56" y="96" class="ti">fak by the benchmarks — Inkling-2-Mini, then the kernel</text>
+  <text x="56" y="124" class="sub">Five inference axes for Inkling-2-Mini UD-Q3_K_XL on one RTX 5080 16 GB and one 36 GB M3 Pro, each fak figure (green) against the engine it</text>
+  <text x="56" y="146" class="sub">has to beat on the same card and file, then two kernel axes measured without a model; the last panel is the fence where fak still trails.</text>
   <line x1="68" y1="356" x2="328" y2="356" stroke="#dfe5ea" stroke-width="1.5"/>
-  <rect x="125" y="222.3" width="58" height="133.7" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
-  <text x="154" y="212.3" class="val" text-anchor="middle">4.1×</text>
-  <rect x="145" y="226.3" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
-  <text x="154" y="239.3" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
+  <rect x="125" y="225.7" width="58" height="130.3" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
+  <text x="154" y="215.7" class="val" text-anchor="middle">118.1 tok/s</text>
+  <rect x="145" y="229.7" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
+  <text x="154" y="242.7" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
   <text x="154" y="371" class="who" text-anchor="middle">fak</text>
-  <rect x="213" y="323.4" width="58" height="32.6" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
-  <text x="242" y="313.4" class="valm" text-anchor="middle">1.0×</text>
-  <rect x="233" y="327.4" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
-  <text x="242" y="340.4" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">S</text>
-  <text x="242" y="371" class="who" text-anchor="middle">tuned SOTA</text>
-  <rect x="96" y="386" width="205" height="26" rx="13" fill="#ffffff" stroke="#3a7d9c" stroke-width="1.5"/>
-  <text x="198" y="404" class="pill" text-anchor="middle">Fleet serving efficiency</text>
-  <text x="198" y="430" class="foot" text-anchor="middle">less serving work · 50t × 5a</text>
-  <text x="198" y="446" class="cm" text-anchor="middle">2bbda6f</text>
+  <rect x="213" y="266.7" width="58" height="89.3" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
+  <text x="242" y="256.7" class="valm" text-anchor="middle">81.0</text>
+  <rect x="233" y="270.7" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
+  <text x="242" y="283.7" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">L</text>
+  <text x="242" y="371" class="who" text-anchor="middle">llama.cpp</text>
+  <rect x="92" y="386" width="213" height="26" rx="13" fill="#ffffff" stroke="#2e6fb0" stroke-width="1.5"/>
+  <text x="198" y="404" class="pill" text-anchor="middle">Decode vs stock llama.cpp</text>
+  <text x="198" y="430" class="foot" text-anchor="middle">RTX 5080 · same window · 1.46× · launch notes</text>
+  <text x="198" y="446" class="cm" text-anchor="middle">cc6dca0b47</text>
   <line x1="376" y1="356" x2="636" y2="356" stroke="#dfe5ea" stroke-width="1.5"/>
-  <rect x="433" y="239.9" width="58" height="116.1" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
-  <text x="462" y="229.9" class="val" text-anchor="middle">86.7%</text>
-  <rect x="453" y="243.9" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
-  <text x="462" y="256.9" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
+  <rect x="433" y="223.8" width="58" height="132.2" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
+  <text x="462" y="213.8" class="val" text-anchor="middle">119.9 tok/s</text>
+  <rect x="453" y="227.8" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
+  <text x="462" y="240.8" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
   <text x="462" y="371" class="who" text-anchor="middle">fak</text>
-  <rect x="521" y="222.1" width="58" height="133.9" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
-  <text x="550" y="212.1" class="valm" text-anchor="middle">100%</text>
-  <rect x="541" y="226.1" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
-  <text x="550" y="239.1" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">◎</text>
-  <text x="550" y="371" class="who" text-anchor="middle">optimal</text>
-  <rect x="432" y="386" width="149" height="26" rx="13" fill="#ffffff" stroke="#3a7d9c" stroke-width="1.5"/>
-  <text x="506" y="404" class="pill" text-anchor="middle">KV-cache hit rate</text>
-  <text x="506" y="430" class="foot" text-anchor="middle">= 100% of optimal</text>
-  <text x="506" y="446" class="cm" text-anchor="middle">92896a4</text>
+  <rect x="521" y="224.2" width="58" height="131.8" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
+  <text x="550" y="214.2" class="valm" text-anchor="middle">119.5</text>
+  <rect x="541" y="228.2" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
+  <text x="550" y="241.2" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">F</text>
+  <text x="550" y="371" class="who" text-anchor="middle">llama.cpp fork</text>
+  <rect x="412" y="386" width="189" height="26" rx="13" fill="#ffffff" stroke="#2e6fb0" stroke-width="1.5"/>
+  <text x="506" y="404" class="pill" text-anchor="middle">Decode vs fastest fork</text>
+  <text x="506" y="430" class="foot" text-anchor="middle">RTX 5080 · parity · fork via llama-bench</text>
+  <text x="506" y="446" class="cm" text-anchor="middle">b64405de76</text>
   <line x1="684" y1="356" x2="944" y2="356" stroke="#dfe5ea" stroke-width="1.5"/>
-  <rect x="741" y="228.9" width="58" height="127.1" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
-  <text x="770" y="218.9" class="val" text-anchor="middle">6.95×</text>
-  <rect x="761" y="232.9" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
-  <text x="770" y="245.9" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
-  <text x="770" y="371" class="who" text-anchor="middle">fak</text>
-  <rect x="829" y="218.8" width="58" height="137.2" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
-  <text x="858" y="208.8" class="valm" text-anchor="middle">7.50×</text>
-  <rect x="849" y="222.8" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
-  <text x="858" y="235.8" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">▲</text>
-  <text x="858" y="371" class="who" text-anchor="middle">ceiling</text>
-  <rect x="720" y="386" width="189" height="26" rx="13" fill="#ffffff" stroke="#3a7d9c" stroke-width="1.5"/>
-  <text x="814" y="404" class="pill" text-anchor="middle">RadixAttention prefill</text>
-  <text x="814" y="430" class="foot" text-anchor="middle">fewer prefill FLOPs</text>
-  <text x="814" y="446" class="cm" text-anchor="middle">92896a4</text>
+  <rect x="741" y="224.1" width="58" height="131.9" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
+  <text x="770" y="214.1" class="val" text-anchor="middle">171.5 tok/s</text>
+  <rect x="761" y="228.1" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
+  <text x="770" y="241.1" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
+  <text x="770" y="371" class="who" text-anchor="middle">fak spec</text>
+  <rect x="829" y="263.9" width="58" height="92.1" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
+  <text x="858" y="253.9" class="valm" text-anchor="middle">119.7</text>
+  <rect x="849" y="267.9" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
+  <text x="858" y="280.9" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">·</text>
+  <text x="858" y="371" class="who" text-anchor="middle">fak plain</text>
+  <rect x="736" y="386" width="157" height="26" rx="13" fill="#ffffff" stroke="#2e6fb0" stroke-width="1.5"/>
+  <text x="814" y="404" class="pill" text-anchor="middle">Speculative decode</text>
+  <text x="814" y="430" class="foot" text-anchor="middle">RTX 5080 · opt-in, depth 2 · 1.43×</text>
+  <text x="814" y="446" class="cm" text-anchor="middle">67bb976926a</text>
   <line x1="992" y1="356" x2="1252" y2="356" stroke="#dfe5ea" stroke-width="1.5"/>
-  <rect x="1049" y="206.0" width="58" height="150.0" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
-  <text x="1078" y="196.0" class="val" text-anchor="middle">max|Δ|=0</text>
-  <rect x="1069" y="210.0" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
-  <text x="1078" y="223.0" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
-  <text x="1078" y="371" class="who" text-anchor="middle">fak</text>
-  <rect x="1137" y="353" width="58" height="3" rx="1.5" fill="#cdd5dd"/>
-  <text x="1166" y="344.0" class="valm" text-anchor="middle">—</text>
-  <rect x="1157" y="328.0" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
-  <text x="1166" y="341.0" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">—</text>
-  <text x="1166" y="371" class="who" text-anchor="middle">field</text>
-  <rect x="1052" y="386" width="141" height="26" rx="13" fill="#ffffff" stroke="#7a5cb0" stroke-width="1.5"/>
-  <text x="1122" y="404" class="pill" text-anchor="middle">Mid-run eviction</text>
-  <text x="1122" y="430" class="foot" text-anchor="middle">bit-exact vs a clean run</text>
-  <text x="1122" y="446" class="cm" text-anchor="middle">0fc39aa</text>
+  <rect x="1005" y="224.6" width="58" height="131.4" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
+  <text x="1034" y="214.6" class="val" text-anchor="middle">40.3</text>
+  <rect x="1025" y="228.6" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
+  <text x="1034" y="241.6" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
+  <text x="1034" y="371" class="who" text-anchor="middle">fak</text>
+  <rect x="1093" y="233.7" width="58" height="122.3" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
+  <text x="1122" y="223.7" class="valm" text-anchor="middle">37.5</text>
+  <rect x="1113" y="237.7" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
+  <text x="1122" y="250.7" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">S</text>
+  <text x="1122" y="371" class="who" text-anchor="middle">Splash</text>
+  <rect x="1181" y="279.7" width="58" height="76.3" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
+  <text x="1210" y="269.7" class="valm" text-anchor="middle">23.4</text>
+  <rect x="1201" y="283.7" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
+  <text x="1210" y="296.7" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">F</text>
+  <text x="1210" y="371" class="who" text-anchor="middle">llama.cpp fork</text>
+  <rect x="1076" y="386" width="93" height="26" rx="13" fill="#ffffff" stroke="#2e6fb0" stroke-width="1.5"/>
+  <text x="1122" y="404" class="pill" text-anchor="middle">Mac decode</text>
+  <text x="1122" y="430" class="foot" text-anchor="middle">M3 Pro · capitals; natural prompts 97.5–107.4%</text>
+  <text x="1122" y="446" class="cm" text-anchor="middle">1f31533f2</text>
   <line x1="68" y1="650" x2="328" y2="650" stroke="#dfe5ea" stroke-width="1.5"/>
-  <rect x="125" y="512.8" width="58" height="137.2" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
-  <text x="154" y="502.8" class="val" text-anchor="middle">7.50×</text>
-  <rect x="145" y="516.8" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
-  <text x="154" y="529.8" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
+  <rect x="125" y="518.8" width="58" height="131.2" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
+  <text x="154" y="508.8" class="val" text-anchor="middle">5861 tok/s</text>
+  <rect x="145" y="522.8" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
+  <text x="154" y="535.8" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
   <text x="154" y="665" class="who" text-anchor="middle">fak</text>
-  <rect x="213" y="631.7" width="58" height="18.3" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
-  <text x="242" y="621.7" class="valm" text-anchor="middle">1.0×</text>
-  <rect x="233" y="622.0" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
-  <text x="242" y="635.0" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">·</text>
-  <text x="242" y="665" class="who" text-anchor="middle">re-prefill</text>
-  <rect x="124" y="680" width="149" height="26" rx="13" fill="#ffffff" stroke="#7a5cb0" stroke-width="1.5"/>
-  <text x="198" y="698" class="pill" text-anchor="middle">Exact token reuse</text>
-  <text x="198" y="724" class="foot" text-anchor="middle">fewer tokens, exact accounting</text>
-  <text x="198" y="740" class="cm" text-anchor="middle">92896a4</text>
+  <rect x="213" y="582.6" width="58" height="67.4" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
+  <text x="242" y="572.6" class="valm" text-anchor="middle">3012</text>
+  <rect x="233" y="586.6" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
+  <text x="242" y="599.6" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">F</text>
+  <text x="242" y="665" class="who" text-anchor="middle">llama.cpp fork</text>
+  <rect x="100" y="680" width="197" height="26" rx="13" fill="#ffffff" stroke="#2e6fb0" stroke-width="1.5"/>
+  <text x="198" y="698" class="pill" text-anchor="middle">Prefill vs fastest fork</text>
+  <text x="198" y="724" class="foot" text-anchor="middle">RTX 5080 · W4A4 · pp512 prompt rate · 1.95×</text>
+  <text x="198" y="740" class="cm" text-anchor="middle">d3317d16fc</text>
   <line x1="376" y1="650" x2="636" y2="650" stroke="#dfe5ea" stroke-width="1.5"/>
   <rect x="433" y="500.0" width="58" height="150.0" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
-  <text x="462" y="490.0" class="val" text-anchor="middle">362 ns</text>
+  <text x="462" y="490.0" class="val" text-anchor="middle">max|Δ|=0</text>
   <rect x="453" y="504.0" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
   <text x="462" y="517.0" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
   <text x="462" y="665" class="who" text-anchor="middle">fak</text>
-  <rect x="521" y="617.0" width="58" height="33.0" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
-  <text x="550" y="607.0" class="valm" text-anchor="middle">1× (≈1 ms)</text>
-  <rect x="541" y="621.0" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
-  <text x="550" y="634.0" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">H</text>
-  <text x="550" y="665" class="who" text-anchor="middle">spawned hook</text>
-  <text x="632" y="520" class="lmul" text-anchor="end">2,849× faster</text>
-  <rect x="432" y="680" width="149" height="26" rx="13" fill="#ffffff" stroke="#1c7c92" stroke-width="1.5"/>
-  <text x="506" y="698" class="pill" text-anchor="middle">In-process decide</text>
-  <text x="506" y="724" class="foot" text-anchor="middle">faster than a spawned hook (log)</text>
-  <text x="506" y="740" class="cm" text-anchor="middle">bcad56e</text>
+  <rect x="521" y="647" width="58" height="3" rx="1.5" fill="#cdd5dd"/>
+  <text x="550" y="638.0" class="valm" text-anchor="middle">—</text>
+  <rect x="541" y="622.0" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
+  <text x="550" y="635.0" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">—</text>
+  <text x="550" y="665" class="who" text-anchor="middle">field</text>
+  <rect x="380" y="680" width="253" height="26" rx="13" fill="#ffffff" stroke="#7a5cb0" stroke-width="1.5"/>
+  <text x="506" y="698" class="pill" text-anchor="middle">Invalidation on external write</text>
+  <text x="506" y="724" class="foot" text-anchor="middle">bit-exact vs a clean run</text>
+  <text x="506" y="740" class="cm" text-anchor="middle">0fc39aa</text>
   <line x1="684" y1="650" x2="944" y2="650" stroke="#dfe5ea" stroke-width="1.5"/>
   <rect x="741" y="500.0" width="58" height="150.0" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1"/>
-  <text x="770" y="490.0" class="val" text-anchor="middle">QUARANTINE</text>
+  <text x="770" y="490.0" class="val" text-anchor="middle">2.4 µs</text>
   <rect x="761" y="504.0" width="18" height="18" rx="5" fill="#2e8b57" stroke="#1f6b46" stroke-width="1.1"/>
   <text x="770" y="517.0" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
   <text x="770" y="665" class="who" text-anchor="middle">fak</text>
-  <rect x="829" y="647" width="58" height="3" rx="1.5" fill="#cdd5dd"/>
-  <text x="858" y="638.0" class="valm" text-anchor="middle">—</text>
-  <rect x="849" y="622.0" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
-  <text x="858" y="635.0" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">—</text>
-  <text x="858" y="665" class="who" text-anchor="middle">field</text>
-  <rect x="724" y="680" width="181" height="26" rx="13" fill="#ffffff" stroke="#1c7c92" stroke-width="1.5"/>
-  <text x="814" y="698" class="pill" text-anchor="middle">Injection containment</text>
-  <text x="814" y="724" class="foot" text-anchor="middle">quarantined out of context</text>
+  <rect x="829" y="617.0" width="58" height="33.0" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
+  <text x="858" y="607.0" class="valm" text-anchor="middle">6.9 ms</text>
+  <rect x="849" y="621.0" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
+  <text x="858" y="634.0" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">H</text>
+  <text x="858" y="665" class="who" text-anchor="middle">spawned hook</text>
+  <text x="940" y="520" class="lmul" text-anchor="end">2,849× faster</text>
+  <rect x="716" y="680" width="197" height="26" rx="13" fill="#ffffff" stroke="#1c7c92" stroke-width="1.5"/>
+  <text x="814" y="698" class="pill" text-anchor="middle">Guard decision boundary</text>
+  <text x="814" y="724" class="foot" text-anchor="middle">in-process vs spawned hook · M3 Pro (log)</text>
   <text x="814" y="740" class="cm" text-anchor="middle">bcad56e</text>
   <line x1="992" y1="650" x2="1252" y2="650" stroke="#dfe5ea" stroke-width="1.5"/>
-  <rect x="1049" y="581.3" width="58" height="68.7" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
-  <text x="1078" y="571.3" class="valm" text-anchor="middle">8.7 tok/s</text>
-  <rect x="1069" y="585.3" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
-  <text x="1078" y="598.3" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">f</text>
+  <rect x="1049" y="545.7" width="58" height="104.3" rx="5" fill="#cdd5dd" stroke="#aeb9c4" stroke-width="1"/>
+  <text x="1078" y="535.7" class="valm" text-anchor="middle">89.0 tok/s</text>
+  <rect x="1069" y="549.7" width="18" height="18" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.1"/>
+  <text x="1078" y="562.7" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">f</text>
   <text x="1078" y="665" class="who" text-anchor="middle">fak</text>
-  <rect x="1137" y="513.4" width="58" height="136.6" rx="5" fill="#3b4a7a" stroke="#3b4a7a" stroke-width="1"/>
-  <text x="1166" y="503.4" class="val" text-anchor="middle">17.3 tok/s</text>
-  <rect x="1157" y="517.4" width="18" height="18" rx="5" fill="#3b4a7a" stroke="#3b4a7a" stroke-width="1.1"/>
-  <text x="1166" y="530.4" class="bdg" text-anchor="middle" style="fill:#ffffff;">L</text>
-  <text x="1166" y="665" class="who" text-anchor="middle">llama.cpp</text>
-  <rect x="1036" y="680" width="173" height="26" rx="13" fill="#ffffff" stroke="#6a7685" stroke-width="1.5"/>
-  <text x="1122" y="698" class="pill" text-anchor="middle">Single-stream decode</text>
-  <text x="1122" y="724" class="foot" text-anchor="middle">fak does NOT target this — llama.cpp leads</text>
-  <text x="1122" y="740" class="cm" text-anchor="middle">34c74f4</text>
+  <rect x="1137" y="516.6" width="58" height="133.4" rx="5" fill="#3b4a7a" stroke="#3b4a7a" stroke-width="1"/>
+  <text x="1166" y="506.6" class="val" text-anchor="middle">113.8 tok/s</text>
+  <rect x="1157" y="520.6" width="18" height="18" rx="5" fill="#3b4a7a" stroke="#3b4a7a" stroke-width="1.1"/>
+  <text x="1166" y="533.6" class="bdg" text-anchor="middle" style="fill:#ffffff;">F</text>
+  <text x="1166" y="665" class="who" text-anchor="middle">llama.cpp fork</text>
+  <rect x="1028" y="680" width="189" height="26" rx="13" fill="#ffffff" stroke="#6a7685" stroke-width="1.5"/>
+  <text x="1122" y="698" class="pill" text-anchor="middle">Decode at 1,946 tokens</text>
+  <text x="1122" y="724" class="foot" text-anchor="middle">fak trails here — the fork leads</text>
+  <text x="1122" y="740" class="cm" text-anchor="middle">b64405de76</text>
   <rect x="176" y="785" width="22" height="14" rx="3" fill="#2e8b57"/>
   <text x="206" y="798" class="leg">fak (the subject)</text>
   <rect x="396" y="785" width="22" height="14" rx="3" fill="#9aa6b2"/>
-  <text x="426" y="798" class="leg">honest reference — baseline / ceiling / optimal / SOTA leader</text>
-  <text x="56" y="828" class="ftr">Apple M3 Pro 6P+6E 36 GB · app_version 0.30.0 · llama.cpp b9707, same box. Each fak figure traces to fak/BENCHMARK-AUTHORITY.md by the commit under its panel.</text>
-  <text x="56" y="843" class="ftr">Capability panels (max|Δ|=0, containment) compare against a field that ships no such gate; the in-process-decide panel is a log multiplier (2,849× vs a spawned hook);</text>
-  <text x="56" y="858" class="ftr">the fence panel inverts the accent to the SOTA leader.</text>
+  <text x="426" y="798" class="leg">honest reference — the engine to beat on the same card and file, or a tuned baseline</text>
+  <text x="56" y="828" class="ftr">Same GGUF per comparison. RTX 5080 decode: fak in-process bench (ABBA) vs llama-bench, so small gaps read as parity; spec decode opt-in. Prefill: server prompt rate,</text>
+  <text x="56" y="843" class="ftr">sm_120f build from main; fak's first visible token is still slower. M3 Pro vs Splash 1.7.2; 128-token Fibonacci trails, 63.6 vs 65.2. Kernel: BENCHMARK-AUTHORITY.md.</text>
 </svg>

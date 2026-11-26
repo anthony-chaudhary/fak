@@ -8,6 +8,19 @@ fak is a local coding runtime.
 Run a model on your own computer and keep your prompts local. Connect your
 coding agent through fak’s gateway to allow reads while blocking writes.
 
+[![fak benchmark sweep: Inkling-2-Mini decode and prefill on an RTX 5080 and decode on an M3 Pro, then two kernel checks, and where fak still trails](visuals/61-hero-benchmark-sweep.png)](docs/benchmarks/README.md)
+
+On one RTX 5080, fak’s own engine decodes Inkling-2-Mini at 119.9 tok/s,
+level with the fastest llama.cpp fork at 119.5. That is parity, not a lead:
+fak’s number comes from its in-process bench and the fork’s from `llama-bench`.
+Prefill is where fak pulls ahead: with 4-bit expert weights and activations
+(NVFP4 W4A4, the default on an `sm_120f` build from `main`), it reads a
+512-token prompt at 5861 tok/s against 3012 for the fork, 1.95x. That is the
+server’s prompt rate; fak’s first visible token still arrives later than the
+fork’s. At 1,946 tokens of context fak still trails the fork on decode, 89.0 vs
+113.8 tok/s. The [benchmark index](docs/benchmarks/README.md) links the
+receipts and the other comparisons.
+
 ## Try fak
 
 [Install fak for your platform](INSTALL.md#local-model-setup), then open a
@@ -37,8 +50,8 @@ https://github.com/anthony-chaudhary/fak.git`, then `go build -o fak ./cmd/fak`
 
 The first run downloads about 14.6 GB. On an Apple Silicon Mac with 24 GB or
 more, `fak run` with no model picks Inkling-2-Mini as well. Inkling-2-Mini is
-in v0.58.0. GitHub's Latest release is still v0.56.0, so `install.sh` delivers
-v0.56.0 unless you set `FAK_VERSION=0.58.0`. Smaller Macs and other
+in v0.58.0. v0.58.0 is still a GitHub pre-release, so `install.sh`
+installs an older release unless you set `FAK_VERSION=0.58.0`. Smaller Macs and other
 platforms keep the Qwen coding models. The [Mac guide](docs/fak/mac-local-models.md#inkling-2-mini-the-first-run-default)
 has the requirements and the server commands.
 
@@ -51,4 +64,4 @@ For the version history, see [CHANGELOG.md](CHANGELOG.md).
 
 [Apache-2.0 license](LICENSE)
 
-<!-- readme-verified: 2026-11-24 vs VERSION 0.57.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-11-24 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
+<!-- readme-verified: 2026-11-25 vs VERSION 0.58.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-11-25 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->

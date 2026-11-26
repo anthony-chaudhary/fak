@@ -4,7 +4,8 @@
 fak's analog of the GLM-5.2 "LLM Performance Evaluation" 2x4 bar-grid: one small
 grouped-bar panel per benchmark, a value label on top of each bar, a monogram
 badge on the bar, the benchmark name in a pill below, the subject bar in the
-bright accent. Eight axes span the three pillars + an honest single-stream fence.
+bright accent. Eight axes: Inkling-2-Mini inference first, then the kernel's
+serving and security axes, then an honest fence where fak still trails.
 
 Honesty is structural:
   * every fak figure is the bright green bar and traces to a commit;
@@ -12,7 +13,7 @@ Honesty is structural:
     baseline, a deterministic ceiling, the optimal, a spawned hook, or — for the
     two capability panels — a field that ships no such gate), never a fabricated
     competitor number;
-  * the final panel is the single-stream fence and INVERTS the accent: llama.cpp
+  * the final panel is the fence and INVERTS the accent: the engine that leads
     owns the tall navy bar, fak shows its honest lower number in grey.
 
   Source of truth : tools/hero_sweep.data.json
@@ -39,7 +40,7 @@ GREEN, GREEN_DK = "#2e8b57", "#1f6b46"
 NAVY = "#3b4a7a"
 GREY_BAR, GREY_STROKE = "#cdd5dd", "#aeb9c4"
 INK, BODY, MUTED, MICRO = "#14202b", "#415266", "#5b6a7a", "#8090a0"
-PILLAR = {"SERVING": "#3a7d9c", "CORRECTNESS": "#7a5cb0", "SECURITY": "#1c7c92", "FENCE": "#6a7685"}
+PILLAR = {"INFERENCE": "#2e6fb0", "SERVING": "#3a7d9c", "CORRECTNESS": "#7a5cb0", "SECURITY": "#1c7c92", "FENCE": "#6a7685"}
 
 # geometry
 W = 1320
@@ -180,7 +181,7 @@ def svg_sweep(d: dict) -> str:
         f'viewBox="0 0 {W} {H}" role="img" aria-labelledby="sw-title sw-desc">'
     )
     out.append(f'  <title id="sw-title">{esc(d["meta"]["title"])}</title>')
-    out.append('  <desc id="sw-desc">An eight-panel benchmark sweep across serving efficiency, correctness and the security kernel, each panel a grouped bar chart with fak in green against one honest reference; the eighth panel is the single-stream fence where llama.cpp leads. Figures: 4.1x fleet serving, 86.7% KV hit, 6.95x RadixAttention, max|delta|=0 mid-run eviction, 7.50x exact token reuse, 2,849x in-process decide, injection quarantine, and 8.7 vs 17.3 tok/s decode.</desc>')
+    out.append(f'  <desc id="sw-desc">{esc(d.get("desc", d["subtitle"]))}</desc>')
     out.append(STYLE)
     out.append(f'  <rect width="{W}" height="{H}" fill="url(#sw-bg)"/>')
 

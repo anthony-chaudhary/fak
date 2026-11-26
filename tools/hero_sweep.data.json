@@ -1,35 +1,212 @@
 {
-  "_about": "SOURCE OF TRUTH for the fak BENCHMARK SWEEP grid (visuals/61-hero-benchmark-sweep.svg), rendered by tools/hero_sweep_gen.py. fak's analog of the GLM-5.2 'LLM Performance Evaluation' 2x4 bar-grid: one small grouped-bar panel per benchmark, value labels on top, a badge on each bar, the benchmark name in a pill below, the subject (fak) bar in the bright accent. Honesty rules: every fak figure traces to fak/BENCHMARK-AUTHORITY.md by commit and is the bright bar; each panel compares fak against ONE named, honest reference (a tuned-SOTA baseline, a deterministic ceiling, the optimal, the spawned-hook, or — for capability panels — a field that does not ship it), never a fabricated competitor number. The final panel is the SINGLE-STREAM fence and INVERTS the accent: llama.cpp owns the bright/tall bar, fak shows its honest lower number. Edit this file, then run `python tools/hero_sweep_gen.py`.",
+  "_about": "SOURCE OF TRUTH for the fak BENCHMARK SWEEP grid (visuals/61-hero-benchmark-sweep.svg), rendered by tools/hero_sweep_gen.py. fak's analog of the GLM-5.2 'LLM Performance Evaluation' 2x4 bar-grid: one small grouped-bar panel per benchmark, value labels on top, a badge on each bar, the benchmark name in a pill below, the subject (fak) bar in the bright accent. Honesty rules: every fak figure traces to fak/BENCHMARK-AUTHORITY.md by commit and is the bright bar; each panel compares fak against ONE named, honest reference (a tuned-SOTA baseline, a deterministic ceiling, the optimal, the spawned-hook, or — for capability panels — a field that does not ship it), never a fabricated competitor number. The final panel is the SINGLE-STREAM fence and INVERTS the accent: llama.cpp owns the bright/tall bar, fak shows its honest lower number. Panels lead with Inkling-2-Mini decode and prefill from the public receipts (docs/launch/inkling2-launch-2026-11-24.md, docs/benchmarks/published/), then model-independent kernel axes. Edit this file, then run `python tools/hero_sweep_gen.py`.",
   "meta": {
     "title": "fak — the agent kernel, the benchmark sweep",
-    "as_of": "2026-06-21",
+    "as_of": "2026-11-25",
     "out_svg": "visuals/61-hero-benchmark-sweep.svg",
-    "authority": "fak/BENCHMARK-AUTHORITY.md"
+    "authority": "fak/BENCHMARK-AUTHORITY.md",
+    "receipts": "docs/launch/inkling2-launch-2026-11-24.md; docs/benchmarks/published/aegis-inkling2-fork-parity; docs/benchmarks/published/aegis-inkling2-spec-decode; docs/benchmarks/published/m3pro-inkling2-mini-metal; docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4"
   },
-  "kicker": "BENCHMARK SWEEP · 8 AXES ACROSS THREE PILLARS",
-  "title": "fak by the benchmarks — breadth, not a single number",
-  "subtitle": "Eight axes spanning serving efficiency, correctness, and the security kernel — each fak figure (green) against one honest reference; the last panel is the single-stream fence fak does not target, where llama.cpp leads.",
+  "kicker": "BENCHMARK SWEEP · INKLING-2-MINI ON RTX 5080 AND M3 PRO · 2026-11-25",
+  "title": "fak by the benchmarks — Inkling-2-Mini, then the kernel",
+  "subtitle": "Five inference axes for Inkling-2-Mini UD-Q3_K_XL on one RTX 5080 16 GB and one 36 GB M3 Pro, each fak figure (green) against the engine it has to beat on the same card and file, then two kernel axes measured without a model; the last panel is the fence where fak still trails.",
   "legend": [
-    { "label": "fak (the subject)", "color": "#2e8b57" },
-    { "label": "honest reference — baseline / ceiling / optimal / SOTA leader", "color": "#9aa6b2" }
+    {
+      "label": "fak (the subject)",
+      "color": "#2e8b57"
+    },
+    {
+      "label": "honest reference — the engine to beat on the same card and file, or a tuned baseline",
+      "color": "#9aa6b2"
+    }
   ],
   "panels": [
-    { "name": "Fleet serving efficiency", "pillar": "SERVING", "foot": "less serving work · 50t × 5a", "commit": "2bbda6f", "y_max": 4.6,
-      "bars": [ { "who": "fak", "badge": "f", "v": 4.1, "label": "4.1×", "subject": true }, { "who": "tuned SOTA", "badge": "S", "v": 1.0, "label": "1.0×" } ] },
-    { "name": "KV-cache hit rate", "pillar": "SERVING", "foot": "= 100% of optimal", "commit": "92896a4", "y_max": 112,
-      "bars": [ { "who": "fak", "badge": "f", "v": 86.7, "label": "86.7%", "subject": true }, { "who": "optimal", "badge": "◎", "v": 100, "label": "100%" } ] },
-    { "name": "RadixAttention prefill", "pillar": "SERVING", "foot": "fewer prefill FLOPs", "commit": "92896a4", "y_max": 8.2,
-      "bars": [ { "who": "fak", "badge": "f", "v": 6.95, "label": "6.95×", "subject": true }, { "who": "ceiling", "badge": "▲", "v": 7.50, "label": "7.50×" } ] },
-    { "name": "Mid-run eviction", "pillar": "CORRECTNESS", "foot": "bit-exact vs a clean run", "commit": "0fc39aa", "y_max": 1.0, "capability": true,
-      "bars": [ { "who": "fak", "badge": "f", "v": 1.0, "label": "max|Δ|=0", "subject": true }, { "who": "field", "badge": "—", "v": 0.0, "label": "—" } ] },
-    { "name": "Exact token reuse", "pillar": "CORRECTNESS", "foot": "fewer tokens, exact accounting", "commit": "92896a4", "y_max": 8.2,
-      "bars": [ { "who": "fak", "badge": "f", "v": 7.50, "label": "7.50×", "subject": true }, { "who": "re-prefill", "badge": "·", "v": 1.0, "label": "1.0×" } ] },
-    { "name": "In-process decide", "pillar": "SECURITY", "foot": "faster than a spawned hook (log)", "commit": "bcad56e", "y_max": 1.0, "log_multiplier": "2,849×",
-      "bars": [ { "who": "fak", "badge": "f", "v": 1.0, "label": "362 ns", "subject": true }, { "who": "spawned hook", "badge": "H", "v": 0.22, "label": "1× (≈1 ms)" } ] },
-    { "name": "Injection containment", "pillar": "SECURITY", "foot": "quarantined out of context", "commit": "bcad56e", "y_max": 1.0, "capability": true,
-      "bars": [ { "who": "fak", "badge": "f", "v": 1.0, "label": "QUARANTINE", "subject": true }, { "who": "field", "badge": "—", "v": 0.0, "label": "—" } ] },
-    { "name": "Single-stream decode", "pillar": "FENCE", "foot": "fak does NOT target this — llama.cpp leads", "commit": "34c74f4", "y_max": 19, "fence": true,
-      "bars": [ { "who": "fak", "badge": "f", "v": 8.7, "label": "8.7 tok/s" }, { "who": "llama.cpp", "badge": "L", "v": 17.3, "label": "17.3 tok/s", "subject": true } ] }
+    {
+      "name": "Decode vs stock llama.cpp",
+      "pillar": "INFERENCE",
+      "foot": "RTX 5080 · same window · 1.46× · launch notes",
+      "commit": "cc6dca0b47",
+      "y_max": 136,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 118.1,
+          "label": "118.1 tok/s",
+          "subject": true
+        },
+        {
+          "who": "llama.cpp",
+          "badge": "L",
+          "v": 81.0,
+          "label": "81.0"
+        }
+      ]
+    },
+    {
+      "name": "Decode vs fastest fork",
+      "pillar": "INFERENCE",
+      "foot": "RTX 5080 · parity · fork via llama-bench",
+      "commit": "b64405de76",
+      "y_max": 136,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 119.9,
+          "label": "119.9 tok/s",
+          "subject": true
+        },
+        {
+          "who": "llama.cpp fork",
+          "badge": "F",
+          "v": 119.5,
+          "label": "119.5"
+        }
+      ]
+    },
+    {
+      "name": "Speculative decode",
+      "pillar": "INFERENCE",
+      "foot": "RTX 5080 · opt-in, depth 2 · 1.43×",
+      "commit": "67bb976926a",
+      "y_max": 195,
+      "bars": [
+        {
+          "who": "fak spec",
+          "badge": "f",
+          "v": 171.5,
+          "label": "171.5 tok/s",
+          "subject": true
+        },
+        {
+          "who": "fak plain",
+          "badge": "·",
+          "v": 119.7,
+          "label": "119.7"
+        }
+      ]
+    },
+    {
+      "name": "Mac decode",
+      "pillar": "INFERENCE",
+      "foot": "M3 Pro · capitals; natural prompts 97.5–107.4%",
+      "commit": "1f31533f2",
+      "y_max": 46,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 40.3,
+          "label": "40.3",
+          "subject": true
+        },
+        {
+          "who": "Splash",
+          "badge": "S",
+          "v": 37.5,
+          "label": "37.5"
+        },
+        {
+          "who": "llama.cpp fork",
+          "badge": "F",
+          "v": 23.4,
+          "label": "23.4"
+        }
+      ]
+    },
+    {
+      "name": "Prefill vs fastest fork",
+      "pillar": "INFERENCE",
+      "foot": "RTX 5080 · W4A4 · pp512 prompt rate · 1.95×",
+      "commit": "d3317d16fc",
+      "y_max": 6700,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 5861.0,
+          "label": "5861 tok/s",
+          "subject": true
+        },
+        {
+          "who": "llama.cpp fork",
+          "badge": "F",
+          "v": 3012.4,
+          "label": "3012"
+        }
+      ]
+    },
+    {
+      "name": "Invalidation on external write",
+      "pillar": "CORRECTNESS",
+      "foot": "bit-exact vs a clean run",
+      "commit": "0fc39aa",
+      "y_max": 1.0,
+      "capability": true,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 1.0,
+          "label": "max|Δ|=0",
+          "subject": true
+        },
+        {
+          "who": "field",
+          "badge": "—",
+          "v": 0.0,
+          "label": "—"
+        }
+      ]
+    },
+    {
+      "name": "Guard decision boundary",
+      "pillar": "SECURITY",
+      "foot": "in-process vs spawned hook · M3 Pro (log)",
+      "commit": "bcad56e",
+      "y_max": 1.0,
+      "log_multiplier": "2,849×",
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 1.0,
+          "label": "2.4 µs",
+          "subject": true
+        },
+        {
+          "who": "spawned hook",
+          "badge": "H",
+          "v": 0.22,
+          "label": "6.9 ms"
+        }
+      ]
+    },
+    {
+      "name": "Decode at 1,946 tokens",
+      "pillar": "FENCE",
+      "foot": "fak trails here — the fork leads",
+      "commit": "b64405de76",
+      "y_max": 128,
+      "fence": true,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 89.0,
+          "label": "89.0 tok/s"
+        },
+        {
+          "who": "llama.cpp fork",
+          "badge": "F",
+          "v": 113.8,
+          "label": "113.8 tok/s",
+          "subject": true
+        }
+      ]
+    }
   ],
-  "footer": "Apple M3 Pro 6P+6E 36 GB · app_version 0.30.0 · llama.cpp b9707, same box. Each fak figure traces to fak/BENCHMARK-AUTHORITY.md by the commit under its panel. Capability panels (max|Δ|=0, containment) compare against a field that ships no such gate; the in-process-decide panel is a log multiplier (2,849× vs a spawned hook); the fence panel inverts the accent to the SOTA leader."
+  "footer": "Same GGUF per comparison. RTX 5080 decode: fak in-process bench (ABBA) vs llama-bench, so small gaps read as parity; spec decode opt-in. Prefill: server prompt rate, sm_120f build from main; fak's first visible token is still slower. M3 Pro vs Splash 1.7.2; 128-token Fibonacci trails, 63.6 vs 65.2. Kernel: BENCHMARK-AUTHORITY.md.",
+  "desc": "An eight-panel benchmark sweep. Inkling-2-Mini on an RTX 5080: decode 118.1 vs 81.0 tok/s for stock llama.cpp in the same window, 119.9 vs 119.5 for the fastest llama.cpp fork (parity), opt-in speculative decode at depth 2 171.5 vs 119.7 plain, and NVFP4 W4A4 prefill 5861 vs 3012 tok/s for the fork on a 512-token prompt (1.95x, prompt rate only). On an M3 Pro, 32-token capitals prompt: decode 40.3 vs 37.5 for Splash and 23.4 for the fastest llama.cpp fork. Kernel: cache invalidation on an external write is bit-exact (max|delta|=0); an in-process guard decision costs 2.4 us against 6.9 ms for a spawned hook, 2,849x. Fence: at 1,946 tokens of context fak decodes 89.0 vs 113.8 tok/s for the fork."
 }
