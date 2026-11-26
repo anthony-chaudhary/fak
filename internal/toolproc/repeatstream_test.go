@@ -197,7 +197,7 @@ func TestCapturedTop100ReplayDistribution(t *testing.T) {
 	commands := []observed{
 		{"git status --short --branch", 3707},
 		{"Get-Content -Raw C:/Users/example/.codex/skills/super-loop/SKILL.md", 640},
-		{"type C:\\Users\\USER\\.codex\\skills\\super-loop\\SKILL.md", 204},
+		{"type C:\\Users\\example\\.codex\\skills\\super-loop\\SKILL.md", 204},
 		{"python tools/dispatch_status.py --fast", 631},
 		{"python tools\\dispatch_status.py --fast", 274},
 		{"git push origin main", 474},

@@ -136,6 +136,7 @@ func TestInkling2PrefillChunkUnsetMatchesTrunk(t *testing.T) {
 	hp := m.HP
 	for _, batched := range []string{"1", "0"} {
 		t.Setenv("FAK_INKLING2_BATCHED_PREFILL", batched)
+		t.Setenv("FAK_INKLING2_SPEC", "0")
 		d := newFakeInk2Budget(1 << 30)
 		s, err := newInkling2ResidentSized(m, d, fakeInk2RingCtx, fakeInk2RingArena)
 		if err != nil {

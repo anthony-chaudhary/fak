@@ -57,7 +57,7 @@ func TestGobuildCacheSaveFollowsEveryBuildAndTestCommand(t *testing.T) {
 	if saveAt < 0 {
 		t.Fatal("build-vet-test has no gobuild save step")
 	}
-	if testAt := strings.Index(job, "name: test (+ coverage profile)"); testAt < 0 || testAt > saveAt {
+	if testAt := strings.Index(job, "name: root module zip budget (uncached)"); testAt < 0 || testAt > saveAt {
 		t.Fatalf("gobuild save step must come after the test step (test at %d, save at %d)", testAt, saveAt)
 	}
 	for _, cmd := range []string{"go test ", "go build ", "go run ", "go vet ", "go install "} {

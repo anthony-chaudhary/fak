@@ -255,6 +255,39 @@ jobs:
       - name: install pinned OpenAPI validator
         run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
 
+      # Bounded before the save: the GOCACHE grows with every commit that adds packages, and an
+      # unbounded save is what filled the repository's 10 GB cache cap. Trunk pushes only, and
+      # only after the job is green. The ceiling is 1.5x the cache a fresh build, vet and test
+      # compile of this tree measured (3775336016 bytes), so a normal run never trims. Above it
+      # the least-recently-used files are removed and the newest entries kept; the cache is
+      # never wiped, so the warm entries survive.
+      - name: bound Go build cache to the pinned ceiling (trunk push, green job only)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
+        run: go run ./cmd/fak-dev gocache-trim "$(go env GOCACHE)" "$GO_BUILD_CACHE_CEILING_BYTES"
+
+      # Measures the cache the save step will actually store, after the trim above, so it
+      # fails only when trimming could not bring the cache under the ceiling. It uses the
+      # same native byte count as the trim (regular files only), so it agrees with the trim.
+      - name: go build cache size gate (fails above the pinned ceiling)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
+        run: go run ./cmd/fak-dev gocache-trim --check "$(go env GOCACHE)" "$GO_BUILD_CACHE_CEILING_BYTES"
+
+      # Saved last, after every build and test step, so the entry holds the compiled
+      # cache this job produced rather than the restored copy. Default success() gating:
+      # a red job does not save, since its partial cache would be reused under the same key.
+      - name: save Go build/test cache (trunk push only)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
+
       - name: record exact verification provenance
         if: always()
         shell: bash
@@ -411,9 +444,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
       - name: install dos-kernel (dos-backed tests and gates)
@@ -551,9 +583,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
       - name: download coverage shard profiles
@@ -740,9 +771,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
       - name: install dos-kernel (dos-backed tests and gates)
@@ -922,9 +952,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
       - name: install dos-kernel (dos-backed tests and gates)
@@ -1188,9 +1217,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
       - name: install dos-kernel (dos-backed tests and gates)
@@ -1547,9 +1575,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
             ${{ runner.os }}-gobuild-
 
       - name: install dos-kernel (dos-backed tests and gates)
@@ -1749,39 +1776,6 @@ jobs:
         run: |
           cp internal/rsiloop/testdata/main-kpi-baseline.jsonl "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
           go run ./cmd/rsiloop -mode track -repo . -baseline-ref HEAD -journal "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
-
-      # Bounded before the save: the GOCACHE grows with every commit that adds packages, and an
-      # unbounded save is what filled the repository's 10 GB cache cap. Trunk pushes only, and
-      # only after the job is green. The ceiling is 1.5x the cache a fresh build, vet and test
-      # compile of this tree measured (3775336016 bytes), so a normal run never trims. Above it
-      # the least-recently-used files are removed and the newest entries kept; the cache is
-      # never wiped, so the warm entries survive.
-      - name: bound Go build cache to the pinned ceiling (trunk push, green job only)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: bash
-        env:
-          GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
-        run: go run ./cmd/fak-dev gocache-trim "$(go env GOCACHE)" "$GO_BUILD_CACHE_CEILING_BYTES"
-
-      # Measures the cache the save step will actually store, after the trim above, so it
-      # fails only when trimming could not bring the cache under the ceiling. It uses the
-      # same native byte count as the trim (regular files only), so it agrees with the trim.
-      - name: go build cache size gate (fails above the pinned ceiling)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: bash
-        env:
-          GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
-        run: go run ./cmd/fak-dev gocache-trim --check "$(go env GOCACHE)" "$GO_BUILD_CACHE_CEILING_BYTES"
-
-      # Saved last, after every build and test step, so the entry holds the compiled
-      # cache this job produced rather than the restored copy. Default success() gating:
-      # a red job does not save, since its partial cache would be reused under the same key.
-      - name: save Go build/test cache (trunk push only)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
 
       - name: record exact verification provenance
         if: always()
