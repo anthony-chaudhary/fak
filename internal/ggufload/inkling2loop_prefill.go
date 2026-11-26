@@ -106,8 +106,8 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 		return 0, fmt.Errorf("inkling2 prefill: backend %s has no batched prefill ops", s.be.Name())
 	}
 	hp := s.hp
-	if s.pos+len(prompt) > inkling2ResidentCtx {
-		return 0, fmt.Errorf("inkling2 prefill: %d tokens exceed the %d-token global cache", s.pos+len(prompt), inkling2ResidentCtx)
+	if s.pos+len(prompt) > s.ctx {
+		return 0, fmt.Errorf("inkling2 prefill: %d tokens exceed the %d-token global cache", s.pos+len(prompt), s.ctx)
 	}
 	T := inkling2PrefillChunkFor(len(prompt), s.chunkMax)
 	p := &ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts()}

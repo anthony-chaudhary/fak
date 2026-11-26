@@ -92,6 +92,8 @@ type inkling2Resident struct {
 	tokNorm, outNorm, outResQ ink2Ref
 	output                    ink2Mat
 
+	// ctx is the global-slot cache capacity this session was built with, fixed at bind.
+	ctx               int
 	in, arena, scores ink2Ref
 	argIdx            ink2Ref
 	logits            ink2Ref // the last step's or prefill's softcapped logits
@@ -225,7 +227,113 @@ func concatRows(rows [][]float32) []float32 {
 }
 
 func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Resident, error) {
-	return newInkling2ResidentSized(m, be, inkling2ResidentCtx, inkling2ArenaFloats)
+	ctx := inkling2ResidentCtx
+	switch {
+	case inkling2ResidentCtxPinned > 0:
+		ctx = inkling2ResidentCtxPinned
+	case inkling2ResidentCtxAutoSet(os.LookupEnv):
+		ctx = inkling2ResidentCtxAuto
+	}
+	return newInkling2ResidentSized(m, be, ctx, inkling2ArenaFloats)
+}
+
+// inkling2ResidentCtxPinned is a context a caller already admitted, which the next
+// resident session builds exactly, instead of sizing it again.
+var inkling2ResidentCtxPinned int
+
+// Inkling2ResidentCtxPin fixes the global cache of the next resident session at ctx.
+// The caller must have admitted that size against the memory it will use.
+func Inkling2ResidentCtxPin(ctx int) { inkling2ResidentCtxPinned = ctx }
+
+// Inkling2ResidentCtxAuto reports whether the resident session sizes its context from
+// free device memory, which is the default when FAK_INKLING2_CTX is unset or blank.
+func Inkling2ResidentCtxAuto(lookup func(string) (string, bool)) bool {
+	return inkling2ResidentCtxAutoSet(lookup)
+}
+
+// Inkling2ResidentFitCtx is the largest resident global context hp fits in free bytes
+// after the reserve the device budget keeps, or 0 when even the floor does not fit.
+func Inkling2ResidentFitCtx(hp model.Inkling2LoopHParams, free int64) int {
+	return inkling2FitResidentCtx(free, inkling2ResidentReserve(free), inkling2ResidentPerPosBytes(hp))
+}
+
+// inkling2ResidentCtxAuto asks newInkling2ResidentRing to size the global slots from
+// the device memory left once the weights are bound.
+const inkling2ResidentCtxAuto = -1
+
+// inkling2ResidentCtxAutoSet reports whether FAK_INKLING2_CTX is unset or blank, the
+// default that derives the context from free device memory.
+func inkling2ResidentCtxAutoSet(lookup func(string) (string, bool)) bool {
+	v, ok := lookup("FAK_INKLING2_CTX")
+	return !ok || strings.TrimSpace(v) == ""
+}
+
+// inkling2ResidentPerPosBytes is the device cost of one global-slot cache position:
+// its f32 K and V rows in every global slot, plus the attention score row, which
+// grows with the global context.
+func inkling2ResidentPerPosBytes(hp model.Inkling2LoopHParams) int64 {
+	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
+	var global int64
+	for slot := 0; slot < slots; slot++ {
+		if !hp.LocalLayer[inkling2SlotLayer(hp, slot)] {
+			global++
+		}
+	}
+	kvDim := int64(hp.KVHeads * hp.HeadDim)
+	return global*2*4*kvDim + 2*4*int64(hp.Heads)
+}
+
+// inkling2FitResidentCtx is the largest global context whose cache and score rows fit
+// in free bytes after reserve, in 256-position steps, clamped to the device ceiling.
+// It returns 0 when even the floor does not fit.
+func inkling2FitResidentCtx(free, reserve, perPos int64) int {
+	if perPos <= 0 || free-reserve < perPos*inkling2ResidentCtxMin {
+		return 0
+	}
+	n := int((free - reserve) / perPos)
+	n = min(n/256*256, inkling2ResidentCtxMax)
+	return n
+}
+
+// inkling2AutoCtxCeiling is the largest derived context the default may take: 16384 is the
+// all-VRAM context measured to load and decode on a 16 GiB RTX 5080.
+const inkling2AutoCtxCeiling = 16384
+
+// inkling2ResolveAutoCtx sizes the global cache from the device memory free now,
+// after the weights bound. A backend that cannot report free memory keeps the
+// fixed default rather than guess.
+func inkling2ResolveAutoCtx(be compute.Backend, hp model.Inkling2LoopHParams, prefill int64) (int, error) {
+	_, free, known := compute.DeviceMemoryInfo(be)
+	if !known || free == compute.FreeUnknown || free < 0 {
+		fmt.Fprintf(os.Stderr, "inkling2 resident: device free memory unknown, context %d (default)\n", inkling2ResidentCtxDefault)
+		return inkling2ResidentCtxDefault, nil
+	}
+	perPos := inkling2ResidentPerPosBytes(hp)
+	ctx := min(inkling2FitResidentCtx(free, inkling2ResidentReserve(free)+prefill, perPos), inkling2AutoCtxCeiling)
+	if ctx == 0 {
+		return 0, fmt.Errorf("inkling2 resident: %d free bytes after weights hold no %d-token global cache at %d bytes per position; set %s to a smaller context",
+			free, inkling2ResidentCtxMin, perPos, "FAK_INKLING2_CTX")
+	}
+	fmt.Fprintf(os.Stderr, "inkling2 resident: context %d (auto: %.2f GiB free after weights, %d bytes per position)\n",
+		ctx, float64(free)/(1<<30), perPos)
+	return ctx, nil
+}
+
+// prefillWidestBytes is the device memory of the prefill arenas at the widest chunk the
+// session may use (chunkWanted, never narrower than the base chunk). ensurePrefillArenas
+// allocates exactly these, so the global cache must leave them room; a narrower reserve
+// lets a long prompt's wide prefill fail on the activation alloc after the session binds.
+func (s *inkling2Resident) prefillWidestBytes() int64 {
+	T := max(s.chunkWanted, inkling2PrefillChunkBase)
+	keep, scr := s.prefillArenas(T)
+	return 4 * int64(keep+scr+T*s.hp.Hidden)
+}
+
+// inkling2ResidentReserve is what the resident session keeps free of the global cache:
+// the per-token arena and the same headroom share the device budget keeps.
+func inkling2ResidentReserve(free int64) int64 {
+	headroom := min(free*inkling2VRAMHeadroomPct/100, inkling2VRAMHeadroomCap)
+	return headroom + 4*inkling2ArenaFloats
 }
 
 // newInkling2ResidentSized is newInkling2Resident with ctx global-slot cache positions
@@ -235,7 +343,7 @@ func newInkling2ResidentSized(m *Inkling2LoopModel, be compute.Backend, ctx, are
 	wanted := inkling2PrefillChunkWanted(os.LookupEnv)
 	// a cohort binding (ctx 0) holds no per-sequence state: each cohort sizes its own
 	ring := inkling2PrefillChunkBase
-	if ctx > 0 && !inkling2ScalarWideHeld(wanted) {
+	if ctx != 0 && !inkling2ScalarWideHeld(wanted) {
 		ring = wanted
 	}
 	s, err := newInkling2ResidentRing(m, be, ctx, arenaFloats, ring, wanted)
@@ -294,6 +402,15 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 		}
 	}
 
+	if ctx == inkling2ResidentCtxAuto {
+		resolved, err := inkling2ResolveAutoCtx(be, hp, s.prefillWidestBytes())
+		if err != nil {
+			s.close()
+			return nil, err
+		}
+		ctx = resolved
+	}
+	s.ctx = ctx
 	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
 	kvDim := hp.KVHeads * hp.HeadDim
 	channels := 2*kvDim + 2*hp.Hidden
@@ -748,8 +865,8 @@ func (s *inkling2Resident) forward() {
 // step consumes one token at the next position and returns the greedy next token.
 func (s *inkling2Resident) step(token int) (int, error) {
 	hp := s.hp
-	if s.pos >= inkling2ResidentCtx {
-		return 0, fmt.Errorf("inkling2 resident: position %d exceeds the %d-token global cache", s.pos, inkling2ResidentCtx)
+	if s.pos >= s.ctx {
+		return 0, fmt.Errorf("inkling2 resident: position %d exceeds the %d-token global cache", s.pos, s.ctx)
 	}
 	row := make([]float32, hp.Hidden+4)
 	s.w.TokEmbd.Row(token, row[:hp.Hidden])

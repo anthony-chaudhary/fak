@@ -70,7 +70,10 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 			weights.SteadyBytes = int64(planned.Bytes())
 			weights.StartupPeakBytes, _ = metalServeStartupPeakBytes(serveLoadArmResidentQ4K, weights.SteadyBytes, 0, false)
 		case inkling2MetalResident:
-			residentCtx = inkling2ResidentCtx(os.LookupEnv(inkling2ResidentCtxEnv))
+			residentCtx, err = inkling2AdmitResidentCtx(path, f, arch)
+			if err != nil {
+				return nil, nil, err
+			}
 			weights, err = inkling2RunResidentMemory(path, f, arch, residentCtx)
 		default:
 			weights, err = inkling2RunMetalMemory(path, f)

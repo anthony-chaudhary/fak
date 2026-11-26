@@ -125,7 +125,7 @@ func (s *inkling2Resident) attachDraft(dm *Inkling2DSparkModel) (*ink2DeviceDraf
 			wq: s.q8Mat(lw.Wq), wk: s.q8Mat(lw.Wk), wv: s.q8Mat(lw.Wv), wo: s.q8Mat(lw.Wo),
 			wkCtx: s.q8Mat(lw.WkCtx), wvCtx: s.q8Mat(lw.WvCtx),
 			gate: s.q8Mat(lw.Gate), up: s.q8Mat(lw.Up), down: s.q8Mat(lw.Down),
-			kc: s.alloc(inkling2ResidentCtx * kvDim), vc: s.alloc(inkling2ResidentCtx * kvDim),
+			kc: s.alloc(s.ctx * kvDim), vc: s.alloc(s.ctx * kvDim),
 			alpha: inkling2SoftmaxF32(w.FuseWeight[l]),
 		})
 	}
@@ -145,7 +145,7 @@ func (s *inkling2Resident) attachDraft(dm *Inkling2DSparkModel) (*ink2DeviceDraf
 		}
 		d.w1 = s.upload(packed)
 		d.anchor = s.alloc(4)
-		d.frnn = s.alloc(inkling2ResidentCtx * H)
+		d.frnn = s.alloc(s.ctx * H)
 		d.rnnProj, d.hiddenOut = s.q8Mat(w.RnnProj), s.q8Mat(w.HiddenOut)
 		d.rnnBias, d.hiddenOutBias, d.mkNorm = s.upload(w.RnnBias), s.upload(w.HiddenOutBias), s.upload(w.MarkovNorm)
 		d.mkAlpha = inkling2SoftmaxF32(w.FuseWeight[hp.Layers])
@@ -210,17 +210,17 @@ func (d *ink2DeviceDraft) commitTaps(p *ink2Prefill, taps []ink2Ref) {
 			s.fail(p.pd.Ink2PMatMul(L.wvCtx.t, ctx, v, p.T))
 		}
 		if s.err == nil {
-			s.fail(d.dd.Ink2DQK(k, L.kNormCtx, L.kc, s.verifyPos, p.T, hp.KVHeads, hp.HeadDim, inkling2ResidentCtx, true, hp.NormEps, hp.RopeTheta))
+			s.fail(d.dd.Ink2DQK(k, L.kNormCtx, L.kc, s.verifyPos, p.T, hp.KVHeads, hp.HeadDim, d.s.ctx, true, hp.NormEps, hp.RopeTheta))
 		}
 		if s.err == nil {
-			s.fail(d.dd.Ink2DRingStore(v, L.vc, s.verifyPos, p.T, kvDim, inkling2ResidentCtx))
+			s.fail(d.dd.Ink2DRingStore(v, L.vc, s.verifyPos, p.T, kvDim, d.s.ctx))
 		}
 	}
 	if d.shortlist > 0 && s.err == nil {
 		f := p.tmp(p.T * hp.Hidden)
 		s.fail(d.dd.Ink2DFuse(taps, d.mkAlpha, d.mkNorm, f, p.T, hp.Hidden, hp.NormEps))
 		if s.err == nil {
-			s.fail(d.dd.Ink2DRingStore(f, d.frnn, s.verifyPos, p.T, hp.Hidden, inkling2ResidentCtx))
+			s.fail(d.dd.Ink2DRingStore(f, d.frnn, s.verifyPos, p.T, hp.Hidden, d.s.ctx))
 		}
 	}
 }
@@ -299,7 +299,7 @@ func (d *ink2DeviceDraft) forward() {
 			window = hp.SlidingWindow
 		}
 		o := d.tmp(B * qDim)
-		run(d.dd.Ink2DAttend(q, k, v, L.kc, L.vc, o, d.pos, B, hp.Heads, hp.KVHeads, hp.HeadDim, window, inkling2ResidentCtx))
+		run(d.dd.Ink2DAttend(q, k, v, L.kc, L.vc, o, d.pos, B, hp.Heads, hp.KVHeads, hp.HeadDim, window, d.s.ctx))
 		run(s.dev.Ink2Add(res, mm(L.wo, o, B), res, B*H))
 		h := d.tmp(B * H)
 		run(s.dev.Ink2RMS(res, L.postNorm, h, B, H, hp.NormEps))
@@ -330,7 +330,7 @@ func (d *ink2DeviceDraft) forward() {
 	in := d.tmp(2*r + 2*H)
 	raw, latent := d.tmp(3*r), d.tmp(r)
 	for i := 0; i < d.steps; i++ {
-		run(d.dd.Ink2DMarkovIn(d.state, d.w1, d.anchor, d.idx, i, at(hid, (i+1)*H), d.frnn, d.pos, inkling2ResidentCtx, r, H, in))
+		run(d.dd.Ink2DMarkovIn(d.state, d.w1, d.anchor, d.idx, i, at(hid, (i+1)*H), d.frnn, d.pos, d.s.ctx, r, H, in))
 		run(pd.Ink2PMatMul(d.rnnProj.t, in, raw, 1))
 		run(d.dd.Ink2DMarkovGate(raw, d.rnnBias, d.state, latent, r, i))
 		z := d.tmp(H)

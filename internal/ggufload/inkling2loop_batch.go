@@ -232,8 +232,8 @@ func (s *inkling2Resident) batchShapeChunk(C, ctx, chunk int) (inkling2BatchShap
 	if C < 1 {
 		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: %d sequences", C)
 	}
-	if ctx < 1 || ctx > inkling2ResidentCtx {
-		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, inkling2ResidentCtx)
+	if ctx < 1 || ctx > s.ctx {
+		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, s.ctx)
 	}
 	be := s.be
 	sh := inkling2BatchShape{seq: inkling2BatchSeqOps(be, os.LookupEnv)}
