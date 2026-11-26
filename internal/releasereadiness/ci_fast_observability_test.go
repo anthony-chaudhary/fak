@@ -595,7 +595,7 @@ func newFastProvenanceFixture() fastProvenanceFixture {
 		"example.invalid/project/i", "example.invalid/project/j", "example.invalid/project/k", "example.invalid/project/l",
 		"example.invalid/project/m", "example.invalid/project/n", "example.invalid/project/o", "example.invalid/project/p",
 	}
-	split := []string{"example.invalid/project/big", "example.invalid/project/wide"}
+	split := []string{"example.invalid/project/big", "example.invalid/project/wide", "example.invalid/project/tall"}
 	all := append(append([]string{}, shardOwned...), split...)
 	var partitions [][]string
 	for i := 0; i < 8; i++ {
@@ -608,10 +608,12 @@ func newFastProvenanceFixture() fastProvenanceFixture {
 	}
 	bigTests := []string{"ExampleA", "FuzzB", "TestA", "TestB", "TestC", "TestD", "TestE", "TestF"}
 	wideTests := []string{"TestP", "TestQ", "TestR"}
+	tallTests := []string{"TestX", "TestY", "TestZ"}
 	buckets := []bucket{
 		{split[0], 0, 4, []string{"ExampleA", "TestC"}, bigTests}, {split[0], 1, 4, []string{"FuzzB", "TestD"}, bigTests},
 		{split[0], 2, 4, []string{"TestA", "TestE"}, bigTests}, {split[0], 3, 4, []string{"TestB", "TestF"}, bigTests},
 		{split[1], 0, 2, []string{"TestP", "TestR"}, wideTests}, {split[1], 1, 2, []string{"TestQ"}, wideTests},
+		{split[2], 0, 3, []string{"TestX"}, tallTests}, {split[2], 1, 3, []string{"TestY"}, tallTests}, {split[2], 2, 3, []string{"TestZ"}, tallTests},
 	}
 	jobs := []string{"build-vet-fast"}
 	for i := 0; i < len(partitions)+len(buckets); i++ {

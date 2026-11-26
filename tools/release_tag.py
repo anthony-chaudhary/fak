@@ -36,7 +36,10 @@ Runner = Callable[[list[str]], tuple[int, str]]
 # is admitted only when its aggregate provenance binds this sha and the run
 # executed the same ci-fast workflow bytes as the tested commit.
 CI_FAST_WORKFLOW_PATH = ".github/workflows/ci-fast.yml"
-CI_FAST_REQUIRED_JOBS = ["build-vet-fast"] + [f"go-test-shard-{index}" for index in range(14)]
+# Must equal the matrix size ci-fast.yml seals into its provenance; release_tag_test
+# checks the two agree so a new split bucket cannot silently refuse every release run.
+CI_FAST_GO_TEST_JOBS = 17
+CI_FAST_REQUIRED_JOBS = ["build-vet-fast"] + [f"go-test-shard-{index}" for index in range(CI_FAST_GO_TEST_JOBS)]
 RELEASE_CI_CLASS = "release"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 # `gh run watch` is bounded by the runner timeout; re-watch rather than fail a

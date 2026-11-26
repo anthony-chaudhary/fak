@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -406,7 +407,7 @@ class ReleaseTagTest(unittest.TestCase):
                 "ci_class": "release", "requested_intent": "release", "event": "workflow_dispatch",
                 "ref": "refs/heads/main", "tested_sha": self.SHA, "tested_tree": "b" * 40,
                 "represented_sha": self.HEAD, "run_id": "4242", "run_attempt": "1",
-                "required_jobs": ["build-vet-fast"] + [f"go-test-shard-{index}" for index in range(14)],
+                "required_jobs": list(load().CI_FAST_REQUIRED_JOBS),
                 "release_eligible": False}
         prov.update(overrides)
         return prov
@@ -897,6 +898,15 @@ class ReleaseTagTest(unittest.TestCase):
         self.assertFalse(context["ok"])
         self.assertIn("ci_not_green:NO_SIGNAL", context["errors"])
         self.assertEqual(context["cut_base"]["sha"], None)
+
+
+class CIFastRequiredJobsTest(unittest.TestCase):
+    def test_required_jobs_match_ci_fast_workflow_matrix(self):
+        rt = load()
+        workflow = (ROOT / rt.CI_FAST_WORKFLOW_PATH).read_text(encoding="utf-8")
+        counts = {int(n) for n in re.findall(r'range\((\d+)\) \| "go-test-shard-', workflow)}
+        self.assertEqual(counts, {rt.CI_FAST_GO_TEST_JOBS},
+                         "ci-fast.yml go-test-shard job count drifted from release_tag.CI_FAST_GO_TEST_JOBS")
 
 
 if __name__ == "__main__":
