@@ -54,6 +54,18 @@
     },
     {
       "class": "ci_action",
+      "reference": "actions/cache/save@v4",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
       "reference": "actions/checkout@v4",
       "consumer_domains": [
         ".github/workflows"
