@@ -44,11 +44,23 @@ static __device__ __forceinline__ uint32_t ink2p_nv2_dec4(uint32_t codes) {
   return __byte_perm(pos, neg, 0x3210u | ((codes >> 1) & 0x4444u));
 }
 
+// One E4M3 byte to float, exact; the fallback for targets below sm_89, which lack the cvt.
+static __device__ __forceinline__ float ink2p_nv2_e4m3(uint32_t b) {
+  const uint32_t sign = (b & 0x80u) << 24, e = (b >> 3) & 0xFu, m = b & 7u;
+  if (e == 0xFu && m == 7u) return __uint_as_float(sign | 0x7fc00000u);
+  if (e == 0u) return __uint_as_float(sign | __float_as_uint((float)m * 0x1p-9f));
+  return __uint_as_float(sign | ((e + 120u) << 23) | (m << 20));
+}
+
 // Two E4M3 bytes (low byte first) to two floats.
 static __device__ __forceinline__ float2 ink2p_nv2_e4m3x2(uint32_t raw16) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
   uint32_t h2;
   asm("{.reg .b16 r; cvt.u16.u32 r, %1; cvt.rn.f16x2.e4m3x2 %0, r;}\n" : "=r"(h2) : "r"(raw16));
   return __half22float2(*reinterpret_cast<__half2 *>(&h2));
+#else
+  return make_float2(ink2p_nv2_e4m3(raw16 & 0xFFu), ink2p_nv2_e4m3((raw16 >> 8) & 0xFFu));
+#endif
 }
 
 // Rows of X that the bucketed pairs read: (npairs - 1) / xDiv + 1, npairs from the tile list.
