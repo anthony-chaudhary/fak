@@ -160,9 +160,9 @@ func runServeWiring(stdout, stderr io.Writer, argv []string) int {
 		root = abs
 	}
 
-	serveSrc, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "serve.go"))
+	serveSrc, err := readServeEntrypointSources(root)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak serve-wiring: read serve.go: %v\n", err)
+		fmt.Fprintf(stderr, "fak serve-wiring: read serve sources: %v\n", err)
 		return 1
 	}
 	gwSrc, err := os.ReadFile(filepath.Join(root, "internal", "gateway", "config.go"))
@@ -172,7 +172,7 @@ func runServeWiring(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	configFields := parseConfigFields(string(gwSrc))
-	serveSets := serveConfigAssignments(string(serveSrc))
+	serveSets := serveConfigAssignments(serveSrc)
 
 	var drift []string
 
@@ -278,6 +278,29 @@ var assignRe = regexp.MustCompile(`(?m)^\t\t([A-Z][A-Za-z0-9]*):\s+`)
 
 // serveConfigAssignments returns the set of gateway.Config field names assigned inside the
 // gateway.New(gateway.Config{...}) literal in serve.go.
+// readServeEntrypointSources concatenates cmd/fak's non-test serve*.go sources in name order.
+// The serve wiring is split across siblings (flags in serve.go, the gateway.Config literal in
+// serve_gateway.go), so the drift check must read all of them.
+func readServeEntrypointSources(root string) (string, error) {
+	names, err := filepath.Glob(filepath.Join(root, "cmd", "fak", "serve*.go"))
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(name)
+		if err != nil {
+			return "", err
+		}
+		sb.Write(b)
+		sb.WriteString("\n")
+	}
+	return sb.String(), nil
+}
+
 func serveConfigAssignments(src string) map[string]bool {
 	// The literal ends at the matching "})" that closes New(Config{...}.
 	return scanFieldSet(src, "gateway.New(gateway.Config{", "\n\t})", assignRe)

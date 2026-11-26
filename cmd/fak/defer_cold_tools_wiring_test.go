@@ -59,7 +59,15 @@ func TestDeferColdToolsWiredIntoGatewayConfig(t *testing.T) {
 		{file: "guard.go"},
 		{file: "serve.go", receiver: "sf"},
 	} {
-		if !hasDeferColdToolsGatewayWiring(t, readEntrypoint(t, door.file), door.receiver) {
+		sources := []string{readEntrypoint(t, door.file)}
+		if door.file == "serve.go" {
+			sources = serveEntrypointFiles(t)
+		}
+		wired := false
+		for _, source := range sources {
+			wired = wired || hasDeferColdToolsGatewayWiring(t, source, door.receiver)
+		}
+		if !wired {
 			t.Errorf("%s must wire the parsed deferColdTools flag into gateway.Config.DeferColdTools", door.file)
 		}
 	}

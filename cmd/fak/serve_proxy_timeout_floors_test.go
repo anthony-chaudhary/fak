@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -62,12 +61,10 @@ func TestEnsureServeProxyTimeoutFloors(t *testing.T) {
 // The floors only help if they are in the environment before gateway.New builds the proxy
 // planners and before the listener reads its write deadline.
 func TestServeBuildGatewayAppliesProxyTimeoutFloorsBeforeGatewayNew(t *testing.T) {
-	root := repoRootFromTest(t)
-	body, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "serve.go"))
+	src, err := serveSourceText()
 	if err != nil {
-		t.Fatalf("read serve.go: %v", err)
+		t.Fatalf("read serve sources: %v", err)
 	}
-	src := string(body)
 	fn := strings.Index(src, "func (rt *serveRuntime) buildGateway(")
 	floors := strings.Index(src, "ensureServeProxyTimeoutFloors(sf)")
 	build := strings.Index(src, "gateway.New(gateway.Config{")

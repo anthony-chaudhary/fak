@@ -24,13 +24,10 @@ func TestServeWiringCheckPassesOnRealTree(t *testing.T) {
 }
 
 func TestServeRegistersFakReadEngineBeforeGatewayNew(t *testing.T) {
-	root := repoRootFromTest(t)
-	servePath := filepath.Join(root, "cmd", "fak", "serve.go")
-	body, err := os.ReadFile(servePath)
+	src, err := serveSourceText()
 	if err != nil {
-		t.Fatalf("read serve.go: %v", err)
+		t.Fatalf("read serve sources: %v", err)
 	}
-	src := string(body)
 	for _, want := range []string{
 		`"github.com/anthony-chaudhary/fak/internal/agent"`,
 		"func configureServeToolEngines()",

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -19,13 +18,13 @@ import (
 // auth/rate_limited and TransientWireErrorSnapshot just the transport scalar, so bridging
 // from either would drop "stalled" again while looking correct.
 func TestUpstreamErrorKindsIsBridgedToTheDurableRow(t *testing.T) {
-	src, err := os.ReadFile("serve.go")
+	serveSrc, err := serveSourceText()
 	if err != nil {
-		t.Fatalf("read serve.go: %v", err)
+		t.Fatalf("read serve sources: %v", err)
 	}
-	body, ok := funcBodyText(string(src), "func gatewayUsageCounters(")
+	body, ok := funcBodyText(serveSrc, "func gatewayUsageCounters(")
 	if !ok {
-		t.Fatal("gatewayUsageCounters not found in serve.go — if it moved, move this witness with it")
+		t.Fatal("gatewayUsageCounters not found in the serve sources — if it moved, move this witness with it")
 	}
 	if !strings.Contains(body, "UpstreamErrorKinds:") {
 		t.Fatal("Counters.UpstreamErrorKinds is never assigned in gatewayUsageCounters — the gateway " +

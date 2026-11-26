@@ -20,7 +20,11 @@ package main
 // body byte-identical to the inbound → the client's prompt-cache prefix survives).
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -39,6 +43,90 @@ func readEntrypoint(t *testing.T, name string) string {
 		t.Fatalf("read %s: %v", name, err)
 	}
 	return string(b)
+}
+
+// readServeSources returns the serve entrypoint's non-test sources, concatenated in name
+// order. The serve wiring is split across serve*.go siblings (serve.go holds the flags and
+// the runtime, serve_gateway.go the gateway.Config literal), so a wiring assertion must bind
+// the whole serve surface rather than one file.
+func readServeSources(t *testing.T) string {
+	t.Helper()
+	src, err := serveSourceText()
+	if err != nil {
+		t.Fatalf("read serve sources: %v", err)
+	}
+	return src
+}
+
+// serveEntrypointFiles returns each non-test serve*.go source separately, in name order.
+// Callers that must parse Go (go/parser rejects several package clauses in one string) take
+// one file at a time.
+func serveEntrypointFiles(t *testing.T) []string {
+	t.Helper()
+	files, err := serveSourceFiles()
+	if err != nil {
+		t.Fatalf("read serve sources: %v", err)
+	}
+	return files
+}
+
+// serveSourceText joins serveSourceFiles with newlines for substring wiring assertions.
+func serveSourceText() (string, error) {
+	files, err := serveSourceFiles()
+	return strings.Join(files, "\n"), err
+}
+
+// serveSourceFiles reads each non-test serve*.go source in name order.
+func serveSourceFiles() ([]string, error) {
+	names, err := filepath.Glob("serve*.go")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, string(b))
+	}
+	return out, nil
+}
+
+// parseServeEntrypoint merges the declarations of every serve*.go source into one ast.File, so
+// an AST wiring assertion sees the whole serve surface regardless of which sibling holds a
+// function.
+func parseServeEntrypoint(t *testing.T) *ast.File {
+	t.Helper()
+	file, err := parseServeMerged()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+// parseServeMerged is the error-returning core of parseServeEntrypoint.
+func parseServeMerged() (*ast.File, error) {
+	names, err := filepath.Glob("serve*.go")
+	if err != nil {
+		return nil, err
+	}
+	merged := &ast.File{}
+	fset := token.NewFileSet()
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		merged.Decls = append(merged.Decls, file.Decls...)
+	}
+	return merged, nil
 }
 
 // TestTokenDefault_CompactHistoryDefaultsOn pins the 2026-11-10 hosting-simplification split
@@ -75,7 +163,11 @@ func TestTokenDefault_VdsoDefaultsOn(t *testing.T) {
 // tool definitions from the Anthropic passthrough (fewer tool-definition tokens, fail-safe).
 func TestTokenDefault_ToolFloorDefaultsOn(t *testing.T) {
 	for _, f := range []string{"serve.go", "guard.go"} {
-		if !strings.Contains(readEntrypoint(t, f), "ToolFloorDenies:") {
+		source := readEntrypoint(t, f)
+		if f == "serve.go" {
+			source = readServeSources(t)
+		}
+		if !strings.Contains(source, "ToolFloorDenies:") {
 			t.Errorf("%s must set gateway Config ToolFloorDenies (tool-floor pruning on by default)", f)
 		}
 	}

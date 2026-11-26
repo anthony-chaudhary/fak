@@ -127,7 +127,7 @@ var glueCensusInventory = []GlueCallSite{
 	{ID: "cuda-primitive-h2d", File: "internal/compute/cuda.go", Func: "",
 		Pattern: "C.fcuda_h2d(", Class: GluePrimitive, Factor: 0,
 		Note: "host->device copy primitive (all upload paths funnel through it)"},
-	{ID: "cuda-primitive-d2h", File: "internal/compute/cuda.go", Func: "",
+	{ID: "cuda-primitive-d2h", File: "internal/compute/cuda_residency.go", Func: "",
 		Pattern: "C.fcuda_d2h_on_checked(", Class: GluePrimitive, Factor: 0,
 		Note: "device->host copy primitive (Read's stream-syncing drain)"},
 	{ID: "seam-mul", File: "internal/model/kernel.go", Func: "mul",
@@ -350,6 +350,7 @@ var glueCensusDiscoverFiles = []string{
 	"internal/model/moe_offload.go",
 	"internal/model/hal.go",
 	"internal/compute/cuda.go",
+	"internal/compute/cuda_residency.go",
 }
 
 // glueCensusSyncMarkers are the high-signal synchronous host<->device

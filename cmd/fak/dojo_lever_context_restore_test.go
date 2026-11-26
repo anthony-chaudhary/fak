@@ -13,13 +13,13 @@ import (
 )
 
 func TestGatewayUsageCountersPopulatesCompactionRestoredTurns(t *testing.T) {
-	src, err := os.ReadFile("serve.go")
+	serveSrc, err := serveSourceText()
 	if err != nil {
-		t.Fatalf("read serve.go: %v", err)
+		t.Fatalf("read serve sources: %v", err)
 	}
-	body, ok := funcBodyText(string(src), "func gatewayUsageCounters(")
+	body, ok := funcBodyText(serveSrc, "func gatewayUsageCounters(")
 	if !ok {
-		t.Fatal("gatewayUsageCounters not found in serve.go")
+		t.Fatal("gatewayUsageCounters not found in the serve sources")
 	}
 	if !strings.Contains(body, "CompactionRestoredTurns:   adj.CompactionRestoredTurns") &&
 		!strings.Contains(body, "CompactionRestoredTurns: adj.CompactionRestoredTurns") {

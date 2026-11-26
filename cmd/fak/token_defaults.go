@@ -51,7 +51,7 @@ type tokenDefaultSources struct {
 
 func loadTokenDefaultSources(root string) tokenDefaultSources {
 	s := tokenDefaultSources{root: root}
-	s.serve = s.read("cmd/fak/serve.go")
+	s.serve = s.readServeSources()
 	s.guard = s.read("cmd/fak/guard.go")
 	// The gateway's configuration and server-state declarations live in cohesive
 	// package modules. Inspect the complete split source surface so moving a default
@@ -71,6 +71,21 @@ func loadTokenDefaultSources(root string) tokenDefaultSources {
 	s.messages = s.read("internal/gateway/messages.go")
 	s.agentSeam = s.read("internal/agent/ctxplan_seam.go")
 	return s
+}
+
+// readServeSources joins the serve entrypoint's non-test sources in name order. The serve
+// wiring is split across cmd/fak/serve*.go siblings (flags in serve.go, the gateway.Config
+// literal in serve_gateway.go), so the lever scan must see all of them.
+func (s tokenDefaultSources) readServeSources() string {
+	names, _ := filepath.Glob(filepath.Join(s.root, "cmd", "fak", "serve*.go"))
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		parts = append(parts, s.read("cmd/fak/"+filepath.Base(name)))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (s tokenDefaultSources) read(rel string) string {

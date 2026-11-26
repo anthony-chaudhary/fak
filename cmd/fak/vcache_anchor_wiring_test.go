@@ -47,7 +47,7 @@ func TestVCacheAnchorWiredIntoGatewayConfig(t *testing.T) {
 	if !strings.Contains(readEntrypoint(t, "guard.go"), "VCacheAnchor:") {
 		t.Errorf("guard.go must set gateway Config VCacheAnchor: *vcacheAnchor (wire the parsed flag through)")
 	}
-	if !strings.Contains(readEntrypoint(t, "serve.go"), "VCacheAnchor:") {
+	if !strings.Contains(readServeSources(t), "VCacheAnchor:") {
 		t.Errorf("serve.go must set gateway Config VCacheAnchor: *sf.vcacheAnchor (wire the parsed flag through)")
 	}
 }

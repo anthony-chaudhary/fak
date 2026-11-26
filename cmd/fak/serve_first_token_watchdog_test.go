@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -94,12 +92,10 @@ func TestResolveServeFirstTokenWatchdogPassesCPUBackend(t *testing.T) {
 // reports this field DEAD_WIRED and TestServeWiringCheckPassesOnRealTree reds while serve.go
 // does not set it.
 func TestServeSourceWiresFirstTokenWatchdogIntoGatewayNew(t *testing.T) {
-	root := repoRootFromTest(t)
-	body, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "serve.go"))
+	src, err := serveSourceText()
 	if err != nil {
-		t.Fatalf("read serve.go: %v", err)
+		t.Fatalf("read serve sources: %v", err)
 	}
-	src := string(body)
 	if !strings.Contains(src, "FirstTokenWatchdog:") || !strings.Contains(src, "rt.resolveServeFirstTokenWatchdog(sf)") {
 		t.Fatal("serve.go must set Config.FirstTokenWatchdog: rt.resolveServeFirstTokenWatchdog(sf) — without it the first-token watchdog resolver is dead and the gateway keeps the backend-blind 60s default")
 	}

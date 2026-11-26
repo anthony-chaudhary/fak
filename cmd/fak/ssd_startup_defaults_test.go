@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -171,10 +169,9 @@ func diskOutcome(receipt agent.WarmReceipt) string {
 
 // fak-test:runtime fast est=100ms lane=default
 func TestServeWarmDiskModelIdentityCallerWiring(t *testing.T) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "serve.go", nil, 0)
+	file, err := parseServeMerged()
 	if err != nil {
-		t.Fatalf("parse serve.go: %v", err)
+		t.Fatalf("parse serve sources: %v", err)
 	}
 	var build *ast.FuncDecl
 	for _, decl := range file.Decls {

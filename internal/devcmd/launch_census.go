@@ -182,7 +182,7 @@ var launchCensusInventory = []LaunchCallSite{
 	{ID: "cuda-copy-h2d", File: "internal/compute/cuda.go", Func: "",
 		Pattern: "C.fcuda_h2d(", Class: LaunchPrimitive, Factor: 0,
 		Note: "host->device copy submission (all upload paths funnel through it)"},
-	{ID: "cuda-copy-d2h", File: "internal/compute/cuda.go", Func: "",
+	{ID: "cuda-copy-d2h", File: "internal/compute/cuda_residency.go", Func: "",
 		Pattern: "C.fcuda_d2h_on_checked(", Class: LaunchPrimitive, Factor: 0,
 		Note: "device->host copy submission (Read's stream-syncing drain)"},
 	{ID: "cuda-matmul-submit", File: "internal/compute/cuda.go", Func: "cudaMatMulLocked",
@@ -383,6 +383,7 @@ var launchCensusDiscoverFiles = []string{
 	"internal/model/hal.go",
 	"internal/model/parallel.go",
 	"internal/compute/cuda.go",
+	"internal/compute/cuda_residency.go",
 }
 
 // launchCensusMarkers are the high-signal Go-visible launch/dispatch

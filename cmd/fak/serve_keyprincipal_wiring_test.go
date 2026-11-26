@@ -21,8 +21,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -156,12 +154,10 @@ func TestServeKeyPrincipalsRefusesToBoot(t *testing.T) {
 // MISSING assignment (its coverage walk only visits fields serve.go already sets), so the
 // tree needs this assertion spelled out.
 func TestServeSourceWiresKeyPrincipalsIntoGatewayNew(t *testing.T) {
-	root := repoRootFromTest(t)
-	body, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "serve.go"))
+	src, err := serveSourceText()
 	if err != nil {
-		t.Fatalf("read serve.go: %v", err)
+		t.Fatalf("read serve sources: %v", err)
 	}
-	src := string(body)
 
 	for _, want := range []string{
 		`fs.Var(&sf.keyPrincipal, "key-principal"`,

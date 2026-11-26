@@ -2,8 +2,6 @@ package main
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"strings"
 	"testing"
 )
@@ -83,7 +81,7 @@ func TestServeWorkspaceAdmissionUnknownTokenFailsLoud(t *testing.T) {
 
 // fak-test:runtime fast est=1s
 func TestServeWorkspaceAdmissionPermissiveBuildGatewaySeam(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "serve.go", nil, 0)
+	file, err := parseServeMerged()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,13 +23,13 @@ import (
 // whole-struct name match would be a false alarm generator, and a test that cries
 // wolf gets deleted.
 func TestEverySelfHostedSplitFieldIsBridgedToTheDurableRow(t *testing.T) {
-	src, err := os.ReadFile("serve.go")
+	serveSrc, err := serveSourceText()
 	if err != nil {
-		t.Fatalf("read serve.go: %v", err)
+		t.Fatalf("read serve sources: %v", err)
 	}
-	body, ok := funcBodyText(string(src), "func gatewayUsageCounters(")
+	body, ok := funcBodyText(serveSrc, "func gatewayUsageCounters(")
 	if !ok {
-		t.Fatal("gatewayUsageCounters not found in serve.go — if it moved, move this witness with it")
+		t.Fatal("gatewayUsageCounters not found in the serve sources — if it moved, move this witness with it")
 	}
 
 	rt := reflect.TypeOf(gatewayusageledger.Counters{})

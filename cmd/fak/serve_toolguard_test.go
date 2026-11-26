@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"strings"
 	"testing"
@@ -92,7 +90,7 @@ func TestServeToolGuardEnvSpellings(t *testing.T) {
 
 // fak-test:runtime fast est=1s
 func TestServeToolGuardBuildGatewaySeam(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "serve.go", nil, 0)
+	file, err := parseServeMerged()
 	if err != nil {
 		t.Fatal(err)
 	}

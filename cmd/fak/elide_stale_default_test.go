@@ -53,7 +53,7 @@ func TestElideStaleReadsWiredIntoGatewayConfig(t *testing.T) {
 	if !strings.Contains(collapse(readEntrypoint(t, "guard.go")), "ElideStaleReads: *elideStaleReads,") {
 		t.Errorf("guard.go must set gateway Config ElideStaleReads from the parsed *elideStaleReads flag")
 	}
-	if !strings.Contains(collapse(readEntrypoint(t, "serve.go")), "ElideStaleReads: *sf.elideStaleReads,") {
+	if !strings.Contains(collapse(readServeSources(t)), "ElideStaleReads: *sf.elideStaleReads,") {
 		t.Errorf("serve.go must set gateway Config ElideStaleReads from the parsed *sf.elideStaleReads flag")
 	}
 }

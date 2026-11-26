@@ -88,7 +88,7 @@ func TestResolveServeChatToolResultElidePrecedence(t *testing.T) {
 // bool from gateway.DefaultServeChatToolResultElide, so the posture consts stay the
 // single authoritative default for the serving router.
 func TestServeContextPlaneFlagsWiredToPostureConsts(t *testing.T) {
-	serve := readEntrypoint(t, "serve.go")
+	serve := readServeSources(t)
 	if !strings.Contains(serve, `fs.String("ctx-paging", gateway.DefaultServeCtxPaging`) {
 		t.Errorf("serve.go must wire --ctx-paging to gateway.DefaultServeCtxPaging (the raw serving-router posture)")
 	}
