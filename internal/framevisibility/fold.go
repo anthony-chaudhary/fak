@@ -435,7 +435,11 @@ func Fold(homesRoot, project string) (*Counts, []SessionRow, error) {
 func Run(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("frame-visibility", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	homesRoot := fs.String("homes", `C:\Users\USER`, "directory holding the .claude* home directories")
+	defaultHomes := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		defaultHomes = filepath.Dir(home)
+	}
+	homesRoot := fs.String("homes", defaultHomes, "directory holding the .claude* home directories")
 	project := fs.String("project", "C--work-fak", "project slug under <home>/projects")
 	out := fs.String("out", "fold.json", "machine-readable fold output")
 	if err := fs.Parse(args); err != nil {

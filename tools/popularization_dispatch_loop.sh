@@ -19,7 +19,7 @@ LIVE_FLAG=""
 [ "${POP_LIVE:-0}" = "1" ] && LIVE_FLAG="--live"
 
 # ticket -> lane map lives in the generator; re-emit the lane sidecars once.
-LANEMAP="C:/Users/USER/AppData/Local/Temp/pop_lanes.tsv"
+LANEMAP="${TMPDIR:-/tmp}/pop_lanes.tsv"
 if [ ! -s "$LANEMAP" ]; then
   if [ -x ./fak ]; then
     ./fak popularization-tickets --lanes-tsv > "$LANEMAP"

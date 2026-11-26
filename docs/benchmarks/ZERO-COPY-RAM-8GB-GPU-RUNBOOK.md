@@ -55,7 +55,7 @@ Load a model that exceeds 8 GB VRAM (such as `Qwen3.6-27B-Q4_K_M.gguf` ~16.5 GB 
 $env:FAK_GPU_BUDGET_MB="7000"
 
 go run ./cmd/modelbench `
-  -gguf C:\Users\USER\.cache\fak-models\gguf\Qwen3.6-27B-Q4_K_M.gguf `
+  -gguf %USERPROFILE%\.cache\fak-models\gguf\Qwen3.6-27B-Q4_K_M.gguf `
   -backend vulkan `
   -vulkan-q4k-profile `
   -lean `

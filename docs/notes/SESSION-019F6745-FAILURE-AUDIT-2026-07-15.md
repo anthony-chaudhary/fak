@@ -13,8 +13,8 @@ Target worker it was asked to repair: `019f6726-74d9-7260-8026-df6ef2520295`
 
 This audit is based on independent read-back, not the worker's narration:
 
-- Codex rollout: `C:\Users\USER\.codex\sessions\2026\07\15\rollout-2026-07-15T12-34-18-019f6745-d998-7252-8777-b3f89d0f0e95.jsonl`
-- Guard witness: `C:\Users\USER\.codex\fak-guarded-sessions\019f6745-d998-7252-8777-b3f89d0f0e95.json`
+- Codex rollout: `%USERPROFILE%\.codex\sessions\2026\07\15\rollout-2026-07-15T12-34-18-019f6745-d998-7252-8777-b3f89d0f0e95.jsonl`
+- Guard witness: `%USERPROFILE%\.codex\fak-guarded-sessions\019f6745-d998-7252-8777-b3f89d0f0e95.json`
 - Executive-reporting worker stream: `C:\work\executive-reporting\.dos\streams\019f6726-74d9-7260-8026-df6ef2520295.jsonl`
 - Worker wait markers: `C:\work\executive-reporting\.dos\markers\019f6726-74d9-7260-8026-df6ef2520295.jsonl`
 - Guard complaint: [#4986](https://github.com/anthony-chaudhary/fak/issues/4986)

@@ -56,7 +56,7 @@ fak-run --committed --strict --module-ref github.com/anthony-chaudhary/fak-priva
 ```
 
 Use a new task-owned `FAK_RUN_CACHE` for the first run; preserve it for four hits.
-Use the existing warm `C:/Users/USER/AppData/Local/go-build` compiler cache for all
+Use the existing warm `%USERPROFILE%/AppData/Local/go-build` compiler cache for all
 runs. Keep `GOMAXPROCS=2`, `GOMEMLIMIT=1GiB`, `GOFLAGS=-p=2`, Windows/amd64 and
 Go 1.26.10 fixed. Clear inherited module-pin maps; pass both explicit pins. The
 launcher SHA256 was unchanged before/after. Both source pair and executable

@@ -287,7 +287,7 @@ func TestLaunchCommandShapeRedactsSensitiveFields(t *testing.T) {
 	}
 	got := LaunchCommandShape(raw, `C:\private\fak`, Account{
 		Tag: "acct-secret",
-		Dir: `C:\Users\USER\.claude\acct-secret`,
+		Dir: `C:\Users\example\.claude\acct-secret`,
 	})
 	joined := strings.Join(got, " ")
 	for _, leak := range []string{`C:\private\fak`, "acct-secret", "oauth-token", "api_key", "sk-live"} {

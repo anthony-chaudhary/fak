@@ -36,7 +36,7 @@ func (bs *BatchSession) PrefillEach(prompts [][]int) [][]float32
 
 ### 4. 3B Model Identified ✓
 - **Model:** Qwen2.5-3B-Instruct
-- **Location:** `C:\Users\USER\.cache\fak-models\hf\Qwen2.5-3B-Instruct`
+- **Location:** `%USERPROFILE%\.cache\fak-models\hf\Qwen2.5-3B-Instruct`
 - **Status:** Race in progress (expected ~5-10 min)
 - **Expected:** ~11-15 tok/s at Q8
 

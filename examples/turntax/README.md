@@ -35,7 +35,7 @@ fak turntax --trace examples/turntax/sample-trace.json
 fak turntax --trace examples/turntax/sample-trace-happy.json
 ```
 
-On Windows with the prebuilt binary: `C:\Users\USER\bin\fak.exe turntax --trace
+On Windows with the prebuilt binary: `%USERPROFILE%\bin\fak.exe turntax --trace
 examples\turntax\sample-trace.json`. Run from the repo root so the relative `--trace` path
 resolves. (`--trace PATH` loads a trace file directly; the sibling `--suite NAME` form looks
 for `testdata/turntax/<NAME>.json` relative to your working directory.)

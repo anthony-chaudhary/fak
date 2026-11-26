@@ -5,7 +5,7 @@
   stale binary.
 
 .WHY
-  The guard fleet launches a FIXED binary (default C:\Users\USER\bin\fak.exe) and only
+  The guard fleet launches a FIXED binary (default %USERPROFILE%\bin\fak.exe) and only
   re-execs it on restart. Nothing rebuilds that file on its own, so without this task a
   restart re-execs the SAME stale binary. `fak self-update` builds from a pristine
   origin/main checkout, GATES it (build -> vet -> `version` smoke), and only then
@@ -31,14 +31,14 @@
 
 .EXAMPLE
   .\install_self_update_schedule.ps1                       # register (every 15 min), default target
-  .\install_self_update_schedule.ps1 -Target C:\Users\USER\bin\fak.exe -IntervalMin 10
+  .\install_self_update_schedule.ps1 -Target %USERPROFILE%\bin\fak.exe -IntervalMin 10
   .\install_self_update_schedule.ps1 -RunNow               # register AND run once immediately
   .\install_self_update_schedule.ps1 -Uninstall
 #>
 [CmdletBinding()]
 param(
   [string]$RepoRoot = 'C:\work\fak',                       # the fak checkout to build origin/main from
-  [string]$Target   = 'C:\Users\USER\bin\fak.exe',         # the installed FLEET binary to converge
+  [string]$Target   = (Join-Path $env:USERPROFILE 'bin\fak.exe'),         # the installed FLEET binary to converge
   [int]$IntervalMin = 15,
   [string]$TaskName = 'FakSelfUpdate',
   # Where each tick's output is appended. Without this the task ran under

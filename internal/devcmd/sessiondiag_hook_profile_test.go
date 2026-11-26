@@ -42,7 +42,7 @@ func TestBuildCodexHookProfileExplainsPrecedenceAndCompetingHomes(t *testing.T) 
 				CurrentHash:  "sha256:workspace",
 				TrustStatus:  "trusted",
 				Executables: []codexExecutableIdentity{{
-					Name: "fak", Path: `C:\Users\USER\bin\fak.exe`, Exists: true,
+					Name: "fak", Path: `C:\Users\example\bin\fak.exe`, Exists: true,
 					Build: "bb5089042542",
 				}},
 			},

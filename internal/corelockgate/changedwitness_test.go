@@ -89,7 +89,7 @@ func TestChangedWitnessRefusesAFileTheChangeDoesNotCarry(t *testing.T) {
 		// The exact shape found four times in the record: a `path:` witness on an
 		// absolute temp file the clearing agent had written itself. Spelled as
 		// `changed:` it is refused by name.
-		{ChangedWitnessKind + `:C:\Users\USER\AppData\Local\Temp\fak-5146-adjudicator-witness.txt`, "outside the repository"},
+		{ChangedWitnessKind + `:C:\Users\example\AppData\Local\Temp\fak-5146-adjudicator-witness.txt`, "outside the repository"},
 		{ChangedWitnessKind + ":/tmp/fak-core-witness.txt", "outside the repository"},
 		// A tracked file that is not part of THIS change — the whole weakness of
 		// `committed:`, which any of the repository's tracked paths satisfies.

@@ -23,7 +23,7 @@ The task text is frozen here before paired execution so later selection cannot f
 Command:
 
 ```text
-fak sessions workflow-default-report --codex-home C:\Users\USER\.codex-anthonydefault1 --json
+fak sessions workflow-default-report --codex-home %USERPROFILE%\.codex-anthonydefault1 --json
 ```
 
 Captured result (`_scratch/workflow-default-dogfood/report.json`, SHA-256 `ebbee7249f468a15454e2dd83ed10a3b0c82463eb591b38adbb7d457d8004858`):

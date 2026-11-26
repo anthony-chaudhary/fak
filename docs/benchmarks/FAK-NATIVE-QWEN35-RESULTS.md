@@ -47,8 +47,8 @@ OpenAI-compatible proxy, and no llama.cpp in the execution path:
 
 ```sh
 /usr/bin/time -l go -C fak run ./cmd/fakchat \
-  --gguf /Users/USER/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf \
-  --tokenizer /Users/USER/.cache/fak-models/tokenizers/qwen3.6 \
+  --gguf ~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf \
+  --tokenizer ~/.cache/fak-models/tokenizers/qwen3.6 \
   --prompt "Say OK." \
   --max-new 1
 ```

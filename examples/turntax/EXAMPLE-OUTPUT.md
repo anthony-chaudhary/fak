@@ -122,6 +122,6 @@ top. Price your own trace, not the demo.
 ---
 
 Reproduce: run the three commands above from the repo root with the prebuilt binary
-(`C:\Users\USER\bin\fak.exe` on Windows) or `go build -o fak ./cmd/fak` from a clean
+(`%USERPROFILE%\bin\fak.exe` on Windows) or `go build -o fak ./cmd/fak` from a clean
 checkout. The Go witnesses are `TestRun_HappyPathSavesNothing` and
 `TestRun_VDSOAblationIsARealPathSwap` in `internal/turnbench/turnbench_test.go`.

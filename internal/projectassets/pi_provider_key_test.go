@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	fragileHiveKeyCommand   = `!powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content -LiteralPath 'C:\Users\USER\.fak\keys\hive.key' -Raw).Trim()"`
+	fragileHiveKeyCommand   = `!powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content -LiteralPath 'C:\Users\example\.fak\keys\hive.key' -Raw).Trim()"`
 	testHiveAPIBaseURL      = "https://api-cdn.thehive.ai/api/v3"
 	testHiveAPIKeyReference = "${HIVE_API_KEY}"
 )
@@ -22,7 +22,7 @@ func TestPiProviderKeyCommandIsFragile(t *testing.T) {
 	}{
 		{"powershell get-content", fragileHiveKeyCommand, true},
 		{"pwsh get-content", `!pwsh -NoProfile -Command "(Get-Content -LiteralPath 'C:\k.key' -Raw).Trim()"`, true},
-		{"cat command", `!cat 'C:/Users/USER/.fak/keys/hive.key'`, false},
+		{"cat command", `!cat 'C:/Users/example/.fak/keys/hive.key'`, false},
 		{"environment reference", `${HIVE_API_KEY}`, false},
 		{"literal", "fak", false},
 		{"unrelated command", "!op read op://vault/hive/key", false},
@@ -63,7 +63,7 @@ func TestNormalizePiProviderKeyCommandScopesLegacyPath(t *testing.T) {
 }
 
 func TestRepairPiProviderKeyCommandScopesManagedHiveProvider(t *testing.T) {
-	const userFailure = `!cat 'C:/Users/USER/.fak/keys/hive.key'`
+	const userFailure = `!cat 'C:/Users/example/.fak/keys/hive.key'`
 	const customPath = `!cat 'D:/operator/custom.key'`
 	cases := []struct {
 		name        string
@@ -91,14 +91,14 @@ func TestRepairPiProviderKeyCommandScopesManagedHiveProvider(t *testing.T) {
 }
 
 // TestEnsurePiProviderConfigRepairsExactUserFailure witnesses the observed
-// `!cat 'C:/Users/USER/.fak/keys/hive.key'` failure without reading that file.
+// `!cat 'C:/Users/example/.fak/keys/hive.key'` failure without reading that file.
 func TestEnsurePiProviderConfigRepairsExactUserFailure(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "models.json")
 	existing := map[string]interface{}{
 		"rootMarker": "preserve",
 		"providers": map[string]interface{}{
 			"hive-ai": map[string]interface{}{
-				"api": "openai-completions", "apiKey": `!cat 'C:/Users/USER/.fak/keys/hive.key'`,
+				"api": "openai-completions", "apiKey": `!cat 'C:/Users/example/.fak/keys/hive.key'`,
 				"baseUrl": testHiveAPIBaseURL, "customField": "preserve",
 				"models": []interface{}{map[string]interface{}{"id": "deepseek-ai/DeepSeek-V4.1-Flash"}},
 			},
@@ -107,7 +107,7 @@ func TestEnsurePiProviderConfigRepairsExactUserFailure(t *testing.T) {
 				"baseUrl": testHiveAPIBaseURL, "models": []interface{}{map[string]interface{}{"id": "custom-path-model"}},
 			},
 			"custom-endpoint": map[string]interface{}{
-				"api": "openai-completions", "apiKey": `!cat 'C:/Users/USER/.fak/keys/hive.key'`,
+				"api": "openai-completions", "apiKey": `!cat 'C:/Users/example/.fak/keys/hive.key'`,
 				"baseUrl": "https://operator.example/v1", "models": []interface{}{map[string]interface{}{"id": "custom-endpoint-model"}},
 			},
 			"literal": map[string]interface{}{

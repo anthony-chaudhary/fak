@@ -133,7 +133,7 @@ Commands:
 ```powershell
 go -C fak run ./cmd/modelbench `
   -lean `
-  -gguf C:\Users\USER\.cache\fak-models\gguf\Qwen3.6-27B-Q4_K_M.gguf `
+  -gguf %USERPROFILE%\.cache\fak-models\gguf\Qwen3.6-27B-Q4_K_M.gguf `
   -prefill-sizes 16,64,256 `
   -prefill-reps 1 `
   -decode-prompt 16 `
@@ -141,8 +141,8 @@ go -C fak run ./cmd/modelbench `
   -decode-reps 1 `
   -out experiments\qwen36\native-gguf-q8-hybrid-headscan-p16-64-256-20260619.json
 
-& C:\Users\USER\AppData\Local\Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe\llama-bench.exe `
-  -m C:\Users\USER\.cache\fak-models\gguf\Qwen3.6-27B-Q4_K_M.gguf `
+& %USERPROFILE%\AppData\Local\Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe\llama-bench.exe `
+  -m %USERPROFILE%\.cache\fak-models\gguf\Qwen3.6-27B-Q4_K_M.gguf `
   -p 16,64,256 `
   -n 1 `
   -r 1 `

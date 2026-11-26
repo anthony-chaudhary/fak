@@ -276,7 +276,7 @@ func TestRenderSteerLifecycleStatusScrubsPathIdentities(t *testing.T) {
 	body := renderSteerLifecycleStatus(workerworktree.StatusProjection{
 		State:       workerworktree.DisplayActive,
 		IssueNumber: 10551,
-		Lane:        `C:\Users\USER\worker-worktree`,
+		Lane:        `C:\Users\example\worker-worktree`,
 		Session:     "/tmp/RID-7",
 	})
 	if strings.Contains(body, "Users") || strings.Contains(body, "/tmp") || strings.Contains(body, "Lane:") || strings.Contains(body, "Session:") {

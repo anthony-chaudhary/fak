@@ -8,7 +8,7 @@ description: "Measured 2026-08-14 from local Claude Code transcripts. This findi
 recomputable with:
 
 ```powershell
-go run ./cmd/framevisibility --homes C:\Users\USER --project C--work-fak --out <scratch>\fold.json
+go run ./cmd/framevisibility --homes %USERPROFILE% --project C--work-fak --out <scratch>\fold.json
 ```
 
 The committed verb emits aggregate numbers plus per-session counts; raw transcript

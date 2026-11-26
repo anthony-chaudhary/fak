@@ -141,7 +141,7 @@ def write_preflight_ok_watch(path: Path) -> None:
         "node_report": {
             "imported": True,
             "status": "PREFLIGHT_OK",
-            "archive": r"C:\Users\USER\Downloads\qwen36-node-reports-nvidia.zip",
+            "archive": r"C:\Users\example\Downloads\qwen36-node-reports-nvidia.zip",
             "report_dir": r"C:\work\fleet\fak\experiments\qwen36\node-reports\qwen36-node-reports-nvidia",
             "latest_preflight": {
                 "path": r"C:\work\fleet\fak\experiments\qwen36\node-reports\qwen36-node-reports-nvidia\preflight-nvidia.json",

@@ -71,7 +71,7 @@ func TestWitnessNamingAnUntouchedFileIsUncorrelated(t *testing.T) {
 func TestSelfAuthoredTempFileWitnessIsUncorrelated(t *testing.T) {
 	changed := []string{"internal/adjudicator/setpolicy_benchmark_test.go"}
 	for _, claim := range []string{
-		`path:C:\Users\USER\AppData\Local\Temp\fak-5146-adjudicator-witness.txt`,
+		`path:C:\Users\example\AppData\Local\Temp\fak-5146-adjudicator-witness.txt`,
 		"path:/tmp/fak-core-witness.txt",
 	} {
 		got := CorrelateWitness(claim, changed)

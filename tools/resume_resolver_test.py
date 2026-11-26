@@ -592,7 +592,7 @@ class ProjectSlugTests(unittest.TestCase):
         # lands the transcript and the memory under two different slugs.
         import re
         import sync_memory  # noqa: F401  (its default_home_memory inlines the harness rule)
-        for p in (r"C:\work\fak", r"C:\work\my app@2", r"C:\Users\USER\AppData\Local\x.y"):
+        for p in (r"C:\work\fak", r"C:\work\my app@2", r"C:\Users\example\AppData\Local\x.y"):
             harness_slug = re.sub(r"[^A-Za-z0-9]", "-", p)  # the rule sync_memory uses
             self.assertEqual(resume_resolver.project_slug(p), harness_slug)
 

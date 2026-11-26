@@ -13,7 +13,7 @@ historical 5,583× capture is a third. All three pass the same witness gate — 
 ## The run
 
 ```console
-$ C:\Users\USER\bin\fak.exe bench --suite tau2-smoke --baseline-n 100 --out report.json
+$ %USERPROFILE%\bin\fak.exe bench --suite tau2-smoke --baseline-n 100 --out report.json
 == fak bench: tau2-airline-smoke ==
 in-process adjudication p50 : 3086 ns
 spawned-hook        p50     : 9857700 ns (9.858 ms, n=100)

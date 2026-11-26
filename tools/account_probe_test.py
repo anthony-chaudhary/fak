@@ -42,7 +42,7 @@ def runner_returning(exit_code=0, stdout="", stderr="", timed_out=False, spawn_e
 
 
 def worker_row(account=".claude-gem8-acct", tag="gem8"):
-    return {"dir": f"C:/Users/USER/{account}", "product": "claude",
+    return {"dir": f"C:/Users/example/{account}", "product": "claude",
             "account": account, "tag": tag, "kind": "worker"}
 
 
@@ -486,7 +486,7 @@ class SummaryTest(unittest.TestCase):
 
 
 def opencode_row(account="opencode", tag="zai-coding-plan",
-                 config_dir="C:/Users/USER/.config/opencode"):
+                 config_dir="C:/Users/example/.config/opencode"):
     return {"dir": config_dir, "product": "opencode", "account": account,
             "tag": tag, "kind": "worker", "model": "zai-coding-plan/glm-4.5-air"}
 

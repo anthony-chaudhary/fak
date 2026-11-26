@@ -8,8 +8,8 @@ package selfinstall
 //
 //	repo root  C:\work\fak\fak.exe            e5fc01af20cd +uncommitted   <- adjudicates the spawn gate
 //	worker     <repo>\tools\.bin\fak.exe      0c96937b61ac                <- fronts every dispatched worker
-//	PATH       C:\Users\USER\bin\fak.exe      0c96937b61ac                <- the installed fleet binary
-//	Go bin     C:\Users\USER\go\bin\fak.exe   7298f8f2abbb                <- what scheduled tasks executed
+//	PATH       C:\Users\example\bin\fak.exe      0c96937b61ac                <- the installed fleet binary
+//	Go bin     C:\Users\example\go\bin\fak.exe   7298f8f2abbb                <- what scheduled tasks executed
 //
 // Three different builds, one of them an unreviewed working-tree compile, and NOTHING on the
 // host could name that set: `self-update --target X` converged X (plus two ad-hoc siblings) and

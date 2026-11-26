@@ -333,7 +333,7 @@ class RollupTextTest(unittest.TestCase):
                 "throttled": False,
                 "block_kind": "auth",
                 "block_reason": "auth/login required",
-                "config_dir": "C:/Users/USER/.claude-gem7-netra",
+                "config_dir": "C:/Users/example/.claude-gem7-netra",
             }],
             "throttle": {},
         }, workspace="C:/work/fak", window_h=10.0, now="2026-06-29T18:00:00Z")

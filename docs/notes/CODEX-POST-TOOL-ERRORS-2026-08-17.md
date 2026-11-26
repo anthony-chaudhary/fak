@@ -3,7 +3,7 @@
 ## Verdict
 
 The red rows observed on this workstation are not recurring `PostToolUse` hook failures.
-The active profile (`CODEX_HOME=C:\Users\USER\.codex-anthonydefault1`) recorded 53
+The active profile (`CODEX_HOME=%USERPROFILE%\.codex-anthonydefault1`) recorded 53
 `ERROR` rows in the preceding 24 hours; all 53 came from
 `codex_core::tools::router` after `shell_command` returned non-success (51 exit 1, one
 exit 124, one interrupted process). The same window contained zero actual post-tool
@@ -40,8 +40,8 @@ not semantics.
 
 ## Running dev update
 
-The installed `C:\Users\USER\bin\fak.exe` was stale (`b6fe10685473` versus
+The installed `%USERPROFILE%\bin\fak.exe` was stale (`b6fe10685473` versus
 `origin/main fda04d2a5a16`). `fak self-update --root C:\work\fak --target
-C:\Users\USER\bin\fak.exe` gated and installed `fda04d2a5a16`. Existing long-lived
+%USERPROFILE%\bin\fak.exe` gated and installed `fda04d2a5a16`. Existing long-lived
 processes keep their already-loaded image; new invocations resolve the updated binary.
 The in-repo `fak.exe` is a dirty audit-only hot copy and was intentionally not replaced.

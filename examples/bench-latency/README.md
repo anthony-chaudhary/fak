@@ -47,7 +47,7 @@ On Windows with the prebuilt binary, from the repo root (so the cwd-relative `te
 suite resolves):
 
 ```powershell
-C:\Users\USER\bin\fak.exe bench --suite tau2-smoke --baseline-n 100 --out report.json
+%USERPROFILE%\bin\fak.exe bench --suite tau2-smoke --baseline-n 100 --out report.json
 ```
 
 `--baseline-n N` sets the spawned-hook sample count (default 30; CLAIMS uses 100). The run

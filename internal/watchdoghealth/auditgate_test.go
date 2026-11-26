@@ -16,7 +16,7 @@ import (
 const redAuditLog = `==============================================================
  watchdog-watchdog audit (n2/n3)   2026-08-11T19:15:04Z
 ==============================================================
-live registry     : C:\Users\USER\AppData\Local\Fleet\registry
+live registry     : C:\Users\example\AppData\Local\Fleet\registry
 newest ledger     : 412.6 min ago  (STALL threshold 15 min)
 supervision tower : 14 tasks | 3 DOWN | 6 latent-Interactive
 

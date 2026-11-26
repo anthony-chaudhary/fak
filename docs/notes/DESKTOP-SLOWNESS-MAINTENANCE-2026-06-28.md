@@ -55,7 +55,7 @@ audit (MsMpEng was idle in the sample), so this is preventive -- it helps most d
 build bursts, not idle typing. Run elevated (UAC prompt):
 
     Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-NoExit','-Command',
-      'Add-MpPreference -ExclusionPath "C:\work","C:\Users\USER\AppData\Local\go-build","C:\Users\USER\go";
+      'Add-MpPreference -ExclusionPath "C:\work","%USERPROFILE%\AppData\Local\go-build","%USERPROFILE%\go";
        Add-MpPreference -ExclusionProcess "go.exe","gopls.exe","git.exe","python.exe","node.exe","fak.exe","claude.exe","compile.exe","link.exe";
        (Get-MpPreference).ExclusionPath'
 

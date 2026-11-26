@@ -339,7 +339,7 @@ func TestDispatchCodexProcessPIDsCollapseNodeWrapperAndNativeChild(t *testing.T)
 			PID:     10,
 			PPID:    1,
 			Name:    "node.exe",
-			Cmdline: `C:\Program Files\nodejs\node.exe C:\Users\USER\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
+			Cmdline: `C:\Program Files\nodejs\node.exe C:\Users\example\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
 		},
 		{PID: 11, PPID: 10, Name: "codex.exe", Cmdline: `C:\...\codex.exe`},
 		{
@@ -362,7 +362,7 @@ func TestDispatchCodexProcessPIDsExcludeSidecarAncestorChild(t *testing.T) {
 			PID:     10,
 			PPID:    5,
 			Name:    "node.exe",
-			Cmdline: `C:\Program Files\nodejs\node.exe C:\Users\USER\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
+			Cmdline: `C:\Program Files\nodejs\node.exe C:\Users\example\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
 		},
 		{PID: 11, PPID: 10, Name: "codex.exe", Cmdline: `C:\...\codex.exe`},
 		{PID: 20, PPID: 1, Name: "codex.exe", Cmdline: `C:\...\codex.exe`},
@@ -1489,7 +1489,7 @@ func TestLaunchBrokerMetadataRedactsRawSecrets(t *testing.T) {
 			"BEARER_TOKEN":      "bearer-secret",
 			"PATH":              "set",
 		},
-		`C:\Users\USER\.claude-secret`,
+		`C:\Users\example\.claude-secret`,
 	)
 	grant := allowLaunchBrokerGrant(attempt, "allowed")
 	blob, err := json.Marshal(launchBrokerGrantMap(grant))

@@ -19888,7 +19888,7 @@ guard. These exact authentication-management commands bypass only the provider r
 the subscription credential probe; ordinary and model-bearing Codex commands remain guarded.
 
 ```powershell
-$env:CODEX_HOME = 'C:\Users\USER\.codex-codexFOUR'
+$env:CODEX_HOME = '%USERPROFILE%\.codex-codexFOUR'
 fak guard -- codex login
 fak guard -- codex login status
 fak guard -- codex
@@ -20056,7 +20056,7 @@ If the guarded authentication bootstrap itself cannot start on Windows, invoke t
 Codex launcher directly for authentication only:
 
 ```powershell
-$env:CODEX_HOME = 'C:\Users\USER\.codex-codexFOUR'
+$env:CODEX_HOME = '%USERPROFILE%\.codex-codexFOUR'
 & "$env:APPDATA\npm\codex.cmd" login
 & "$env:APPDATA\npm\codex.cmd" login status
 ```
@@ -20670,7 +20670,7 @@ fak codex --raw --dry-run
 fak codex --raw --probe "Explain prefix caching in one sentence"
 
 # Connect to a remote or custom-port fak serve
-fak codex --raw --base-url http://192.168.1.50:8080/v1 --model qwen38:27b-q4
+fak codex --raw --base-url http://<lan-ip>:8080/v1 --model qwen38:27b-q4
 ```
 
 ### 2. Standalone config generation: `fak codex config`

@@ -243,7 +243,7 @@ class FleetControlPaneTest(unittest.TestCase):
                 {
                     "account": ".claude-c10",
                     "tag": "c10",
-                    "config_dir": "C:/Users/USER/.claude-c10",
+                    "config_dir": "C:/Users/example/.claude-c10",
                     "available": False,
                     "block_kind": "usage",
                     "block_reason": "usage",
@@ -268,7 +268,7 @@ class FleetControlPaneTest(unittest.TestCase):
         self.assertEqual(got["accounts"]["blocked"][0]["reason"], "usage")
         self.assertEqual(got["accounts"]["blocked_count"], 1)
         self.assertEqual(got["accounts"]["usage_blocked_count"], 1)
-        self.assertEqual(got["accounts"]["blocked"][0]["config_dir"], "C:/Users/USER/.claude-c10")
+        self.assertEqual(got["accounts"]["blocked"][0]["config_dir"], "C:/Users/example/.claude-c10")
         self.assertNotIn("command", got["accounts"]["blocked"][0])
 
     def test_summarize_resume_plan_reads_registry_plan(self) -> None:
@@ -280,7 +280,7 @@ class FleetControlPaneTest(unittest.TestCase):
             "plan": [
                 {
                     "account": ".claude-gem8",
-                    "config_dir": "C:/Users/USER/.claude-gem8",
+                    "config_dir": "C:/Users/example/.claude-gem8",
                     "session": "abcdef1234567890",
                     "cwd": "C:/work/fleet",
                     "project": "fleet",
@@ -288,7 +288,7 @@ class FleetControlPaneTest(unittest.TestCase):
                 },
                 {
                     "account": ".claude-c10",
-                    "config_dir": "C:/Users/USER/.claude-c10",
+                    "config_dir": "C:/Users/example/.claude-c10",
                     "session": "fedcba9876543210",
                     "cwd": "C:/work/job",
                     "project": "job",
@@ -1738,20 +1738,20 @@ class FleetControlPaneTest(unittest.TestCase):
             {
                 "tag": "node-agent",
                 "account": ".claude-agent",
-                "config_dir": "C:/Users/USER/.claude-agent",
+                "config_dir": "C:/Users/example/.claude-agent",
                 "block_kind": "auth",
                 "reason": "auth/login required",
                 "auth_blocked_sessions": 61,
-                "command": "$env:CLAUDE_CONFIG_DIR='C:/Users/USER/.claude-agent'; claude",
+                "command": "$env:CLAUDE_CONFIG_DIR='C:/Users/example/.claude-agent'; claude",
             },
             {
                 "tag": "c10",
                 "account": ".claude-c10",
-                "config_dir": "C:/Users/USER/.claude-c10",
+                "config_dir": "C:/Users/example/.claude-c10",
                 "block_kind": "auth",
                 "reason": "auth/login required",
                 "auth_blocked_sessions": 0,
-                "command": "$env:CLAUDE_CONFIG_DIR='C:/Users/USER/.claude-c10'; claude",
+                "command": "$env:CLAUDE_CONFIG_DIR='C:/Users/example/.claude-c10'; claude",
             },
         ]
         status = {
@@ -2399,11 +2399,11 @@ class FleetControlPaneTest(unittest.TestCase):
                         {
                             "tag": "c10",
                             "account": ".claude-c10",
-                            "config_dir": "C:/Users/USER/.claude-c10",
+                            "config_dir": "C:/Users/example/.claude-c10",
                             "block_kind": "auth",
                             "reason": "auth/login required",
                             "auth_blocked_sessions": 1,
-                            "command": "$env:CLAUDE_CONFIG_DIR='C:/Users/USER/.claude-c10'; claude",
+                            "command": "$env:CLAUDE_CONFIG_DIR='C:/Users/example/.claude-c10'; claude",
                         }
                     ],
                 },
@@ -3480,7 +3480,7 @@ class FleetControlPaneTest(unittest.TestCase):
             "plan": [
                 {
                     "account": ".claude-gem8",
-                    "config_dir": "C:/Users/USER/.claude-gem8",
+                    "config_dir": "C:/Users/example/.claude-gem8",
                     "session": "abcdef1234567890",
                     "cwd": "C:/work/fleet",
                     "project": "fleet",

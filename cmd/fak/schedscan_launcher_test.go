@@ -334,7 +334,7 @@ func TestSchedLauncherAuditFlagsADeadActionProgram(t *testing.T) {
 		TaskName:        "FakSelfUpdate",
 		LogonType:       "S4U",
 		ActionExecute:   "cmd.exe",
-		ActionArguments: `/d /s /c "C:\work\fak\tools\.bin\fak.exe" self-update --root C:\work\fak --target C:\Users\USER\bin\fak.exe`,
+		ActionArguments: `/d /s /c "C:\work\fak\tools\.bin\fak.exe" self-update --root C:\work\fak --target C:\Users\example\bin\fak.exe`,
 	}, capturedTaskRepoRoot)
 
 	if p.Verdict != schedVerdictBroken || p.Allowed {

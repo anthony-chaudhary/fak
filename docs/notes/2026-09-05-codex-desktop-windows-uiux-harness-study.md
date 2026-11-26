@@ -38,9 +38,9 @@ Inspection of the local Windows development workstation reveals an active, produ
 ### Filesystem Storage Layout
 
 * **Application Binaries:** `C:\Program Files\WindowsApps\OpenAI.Codex_26.901.5280.0_x64__2p2nqsd0c76g0\app\`
-* **CLI & Helper Tools:** `C:\Users\USER\AppData\Local\OpenAI\Codex\bin\27d6a192e9c98618\`
-* **Virtualized Web Profile:** `C:\Users\USER\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Roaming\Codex\`
-* **User Configuration & Workspace State:** `C:\Users\USER\.codex\` (linked via NTFS Junction to `.codex-codexFOUR`):
+* **CLI & Helper Tools:** `%USERPROFILE%\AppData\Local\OpenAI\Codex\bin\27d6a192e9c98618\`
+* **Virtualized Web Profile:** `%USERPROFILE%\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Roaming\Codex\`
+* **User Configuration & Workspace State:** `%USERPROFILE%\.codex\` (linked via NTFS Junction to `.codex-codexFOUR`):
   * `config.toml`: Execution policy, model selector, active MCP server definitions (`[mcp_servers.fak]`).
   * `thread_history_1.sqlite` (~8.7 GB) & `logs_2.sqlite` (~1.8 GB): Structured session history, OTEL logs, and turn transcripts.
   * `state_5.sqlite`, `goals_1.sqlite`, `memories_1.sqlite`, `queue_1.sqlite`: Granular subagent task trees and persistent state.

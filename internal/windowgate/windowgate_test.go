@@ -167,7 +167,7 @@ func TestClassifyLiveScheduledTasks(t *testing.T) {
 		},
 		{
 			TaskPath: "\\", TaskName: "VisibleFak", State: "Ready", LogonType: "InteractiveToken",
-			Execute: `C:\Users\USER\bin\fak.exe`, Arguments: "dispatch auto --live",
+			Execute: `C:\Users\example\bin\fak.exe`, Arguments: "dispatch auto --live",
 		},
 		{
 			TaskPath: "\\GoogleUserPEH\\", TaskName: "ChromeHelper", State: "Ready", LogonType: "InteractiveToken",
@@ -195,7 +195,7 @@ func TestClassifyVisibleWindows(t *testing.T) {
 		},
 		{
 			PID: 3, Name: "chrome", Title: "Apply",
-			CommandLine:       `chrome.exe --remote-debugging-port=9223 --window-position=-32000,-32000 --user-data-dir=C:\Users\USER\AppData\Local\Chrome-CDP-Apply-anthony-1 --single-argument https://example.test/oauth?state=abc&code_challenge=def`,
+			CommandLine:       `chrome.exe --remote-debugging-port=9223 --window-position=-32000,-32000 --user-data-dir=C:\Users\example\AppData\Local\Chrome-CDP-Apply-anthony-1 --single-argument https://example.test/oauth?state=abc&code_challenge=def`,
 			ParentPID:         26560,
 			ParentName:        "python.exe",
 			ParentCommandLine: `python.exe C:\work\job\scripts\run_apply_next_xco_tick.py --profile anthony --keep-going`,
@@ -208,7 +208,7 @@ func TestClassifyVisibleWindows(t *testing.T) {
 			CommandLine:       `gh issue create --title "T" --body-file -`,
 			ParentPID:         41600,
 			ParentName:        "python.exe",
-			ParentCommandLine: `python.exe C:\Users\USER\AppData\Local\Temp\claude\C--work-fak\scratchpad\file_issues.py`,
+			ParentCommandLine: `python.exe C:\Users\example\AppData\Local\Temp\claude\C--work-fak\scratchpad\file_issues.py`,
 		},
 	})
 	if len(rep.Violations) != 2 {
@@ -318,7 +318,7 @@ func TestClassifyLiveProcesses(t *testing.T) {
 			CommandLine:       `gh issue create --title "T" --body-file -`,
 			ParentPID:         9,
 			ParentName:        "python.exe",
-			ParentCommandLine: `python.exe C:\Users\USER\AppData\Local\Temp\claude\C--work-fak\scratchpad\file_issues.py`,
+			ParentCommandLine: `python.exe C:\Users\example\AppData\Local\Temp\claude\C--work-fak\scratchpad\file_issues.py`,
 		},
 		{
 			PID: 11, Name: "cmd.exe",
@@ -328,14 +328,14 @@ func TestClassifyLiveProcesses(t *testing.T) {
 		},
 		{
 			PID: 12, Name: "chrome.exe",
-			CommandLine:       `chrome.exe --remote-debugging-port=9223 --window-position=-32000,-32000 --user-data-dir=C:\Users\USER\AppData\Local\Chrome-CDP-Apply-anthony-1`,
+			CommandLine:       `chrome.exe --remote-debugging-port=9223 --window-position=-32000,-32000 --user-data-dir=C:\Users\example\AppData\Local\Chrome-CDP-Apply-anthony-1`,
 			ParentPID:         7,
 			ParentName:        "python.exe",
 			ParentCommandLine: `python.exe C:\work\job\scripts\run_apply_next_xco_tick.py --profile anthony`,
 		},
 		{
 			PID: 13, Name: "chrome.exe",
-			CommandLine: `chrome.exe --type=renderer --remote-debugging-port=9223 --user-data-dir=C:\Users\USER\AppData\Local\Chrome-CDP-Apply-anthony-1`,
+			CommandLine: `chrome.exe --type=renderer --remote-debugging-port=9223 --user-data-dir=C:\Users\example\AppData\Local\Chrome-CDP-Apply-anthony-1`,
 		},
 		{
 			PID: 14, Name: "notepad.exe", CommandLine: "notepad.exe",

@@ -6,7 +6,7 @@ budget: { max_iters: 20 }
 lane: gateway
 ---
 # Objective
-Audit, design, and implement context-aware dashboard link creation and navigation across model serving runtimes (`fak serve`, `cmd/fak-server`, and `cmd/fak-strix`). Eliminate the category error where remote access to the server dashboard (e.g. `http://192.168.1.208:8080/?key=...`) issues hardcoded redirects to `http://localhost:3000/d/fak-gateway-observability`, failing with `ERR_CONNECTION_REFUSED` on client workstations. Establish dynamic authority derivation, optional single-port gateway reverse-proxying (`/grafana/*`), dashboard catalog adaptation (`fak-strix-*` on appliances vs generic gateway dashboards in dev), and seamless authentication handover.
+Audit, design, and implement context-aware dashboard link creation and navigation across model serving runtimes (`fak serve`, `cmd/fak-server`, and `cmd/fak-strix`). Eliminate the category error where remote access to the server dashboard (e.g. `http://<lan-ip>:8080/?key=...`) issues hardcoded redirects to `http://localhost:3000/d/fak-gateway-observability`, failing with `ERR_CONNECTION_REFUSED` on client workstations. Establish dynamic authority derivation, optional single-port gateway reverse-proxying (`/grafana/*`), dashboard catalog adaptation (`fak-strix-*` on appliances vs generic gateway dashboards in dev), and seamless authentication handover.
 
 ---
 
@@ -14,17 +14,17 @@ Audit, design, and implement context-aware dashboard link creation and navigatio
 
 When an operator launches an appliance or remote server and accesses:
 ```text
-http://192.168.1.208:8080/?key=15cc2f12f82370b253c11b214415addf3fc20cea8aa0a202ad9a4069722a1cbe
+http://<lan-ip>:8080/?key=15cc2f12f82370b253c11b214415addf3fc20cea8aa0a202ad9a4069722a1cbe
 ```
 the following execution sequence currently occurs:
 
 1. **Appliance CLI URL Generation (`cmd/fak-strix/main.go`, `tools/strix.py`):**
-   - The CLI probes the appliance's network interface via `ip route get 1.1.1.1` and reads `/etc/fak/gateway.env` to discover `IP=192.168.1.208` and `FAK_GATEWAY_KEY`.
-   - It outputs the web dashboard URL: `http://192.168.1.208:8080/?key=<KEY>`.
-   - It separately outputs the Grafana index URL: `http://192.168.1.208:3000/d/fak-strix-index`.
+   - The CLI probes the appliance's network interface via `ip route get 1.1.1.1` and reads `/etc/fak/gateway.env` to discover `IP=<lan-ip>` and `FAK_GATEWAY_KEY`.
+   - It outputs the web dashboard URL: `http://<lan-ip>:8080/?key=<KEY>`.
+   - It separately outputs the Grafana index URL: `http://<lan-ip>:3000/d/fak-strix-index`.
 
 2. **Gateway Homepage Rendering (`internal/gateway/home.go`):**
-   - The user opens `http://192.168.1.208:8080/?key=...` in their browser on a client workstation (e.g. laptop).
+   - The user opens `http://<lan-ip>:8080/?key=...` in their browser on a client workstation (e.g. laptop).
    - `handleHome` renders `homePageTemplate`.
    - JavaScript extracts `?key=` from `window.location.search`, preserves it in `sessionStorage`, and dynamically appends `&key=...` to all dashboard cards.
    - Cards are rendered with links such as:
@@ -34,7 +34,7 @@ the following execution sequence currently occurs:
 
 3. **Rich Dashboard Resolution & Redirect (`internal/gateway/rich_dashboard.go`):**
    - The user clicks "Gateway observability" (`fak-gateway-observability`).
-   - The browser sends `GET /?dashboard=rich&uid=fak-gateway-observability&key=...` to `http://192.168.1.208:8080`.
+   - The browser sends `GET /?dashboard=rich&uid=fak-gateway-observability&key=...` to `http://<lan-ip>:8080`.
    - `handleRichDashboard(w, r)` calls `s.richDashboards.ensure()`.
    - `richDashboardManager.activate()` runs on the appliance. Because `FAK_GRAFANA_URL` is unset, it defaults to:
      ```go
@@ -53,8 +53,8 @@ the following execution sequence currently occurs:
      ```
 
 4. **The Client Failure Mode:**
-   - The client browser (running on the operator's laptop at `192.168.1.50`) receives the `303 See Other` response and follows `Location: http://localhost:3000/d/fak-gateway-observability`.
-   - The client browser attempts to connect to `localhost:3000` **on the client's laptop**, NOT on the remote appliance `192.168.1.208`.
+   - The client browser (running on the operator's laptop at `<lan-ip>`) receives the `303 See Other` response and follows `Location: http://localhost:3000/d/fak-gateway-observability`.
+   - The client browser attempts to connect to `localhost:3000` **on the client's laptop**, NOT on the remote appliance `<lan-ip>`.
    - The connection immediately fails with:
      ```text
      This site can’t be reached.
@@ -64,7 +64,7 @@ the following execution sequence currently occurs:
    - If the developer happens to run a local dev service (e.g. Next.js, Rails, local Grafana) on port 3000 on their laptop, it connects to that unrelated service instead!
 
 5. **Secondary Defect — Dashboard Catalog Mismatch:**
-   - Even if the destination hostname were corrected to `http://192.168.1.208:3000/d/fak-gateway-observability`, the AMD Strix Halo appliance does **not** provision `fak-gateway-observability.json`.
+   - Even if the destination hostname were corrected to `http://<lan-ip>:3000/d/fak-gateway-observability`, the AMD Strix Halo appliance does **not** provision `fak-gateway-observability.json`.
    - The appliance observability suite (`platform/installer/observability/assets/dashboards/`) provisions:
      `fak-strix-index`, `fak-strix-appliance`, `fak-strix-serving`, `fak-strix-cache`, `fak-strix-cluster`, `fak-strix-agents`, `fak-strix-orchestration`.
    - Navigating to `fak-gateway-observability` on the appliance results in a Grafana 404 "Dashboard not found".
@@ -83,7 +83,7 @@ Link creation must be context-aware across all 6 production operating contexts:
 | Access Context | Client Dialed Authority (`r.Host`) | Target Server & Grafana Topology | Defective Current Behavior | Required Correct Behavior |
 |:---|:---|:---|:---|:---|
 | **1. Local Workstation (Loopback)** | `localhost:8080` or `127.0.0.1:8080` | Gateway & Grafana running on local laptop (`127.0.0.1:3000`) | Redirects to `http://localhost:3000/d/...` (works by coincidence) | Continue resolving to `http://localhost:3000/d/...` |
-| **2. Remote LAN IP** | `192.168.1.208:8080` | Gateway & Grafana running on Strix Halo APU on LAN | Redirects to `http://localhost:3000/d/...` (**fails**: connects to client laptop) | Dynamically rewrite host to client authority: `http://192.168.1.208:3000/d/...` |
+| **2. Remote LAN IP** | `<lan-ip>:8080` | Gateway & Grafana running on Strix Halo APU on LAN | Redirects to `http://localhost:3000/d/...` (**fails**: connects to client laptop) | Dynamically rewrite host to client authority: `http://<lan-ip>:3000/d/...` |
 | **3. Local DNS / mDNS** | `strix-halo-fak.local:8080` | Gateway & Grafana addressed via Zeroconf / Avahi | Redirects to `http://localhost:3000/d/...` (**fails**) | Dynamically rewrite host: `http://strix-halo-fak.local:3000/d/...` |
 | **4. VPN / Overlay Mesh (Tailscale)** | `100.64.0.10:8080` or `strix1.tailnet.ts.net:8080` | Appliance accessed over Tailscale / WireGuard | Redirects to `http://localhost:3000/d/...` (**fails**) | Dynamically rewrite host: `http://100.64.0.10:3000/d/...` or `http://strix1.tailnet.ts.net:3000/d/...` |
 | **5. Reverse Proxy / Public FQDN** | `ai.example.com` (port 443, `X-Forwarded-Host`) | Ingress exposes port 8080; port 3000 is firewalled | Redirects to `http://localhost:3000/d/...` (**fails**) or `:3000` (**times out**) | Reverse-proxy Grafana via `/grafana/*` on gateway port 8080, or use configured public Grafana URL |
@@ -164,7 +164,7 @@ Update `homePageData` and template rendering:
 ### 3. Gateway Reverse Proxy for Grafana (Optional Single-Port Mode)
 Implement `httputil.ReverseProxy` mounted at `/grafana/` in `internal/gateway/`:
 - Enabled via flag `--proxy-grafana` or `config.toml [observability] proxy_grafana = true`.
-- Transparently proxies requests from `http://192.168.1.208:8080/grafana/` to internal `http://127.0.0.1:3000/`.
+- Transparently proxies requests from `http://<lan-ip>:8080/grafana/` to internal `http://127.0.0.1:3000/`.
 - Rewrites headers (`X-Forwarded-Host`, `X-Forwarded-Proto`, and subpath prefix).
 - Simplifies firewall rules: **only port 8080 needs to be opened**.
 
@@ -228,8 +228,8 @@ Implement `httputil.ReverseProxy` mounted at `/grafana/` in `internal/gateway/`:
 - [ ] 5. **Milestone 5: Live Hardware Witness & End-to-End Verification**
   - Deploy updated gateway to `strix1` via `go run ./cmd/fak-strix upgrade` or `push`.
   - Execute end-to-end verification from external client browser:
-    - Dial `http://192.168.1.208:8080/?key=...`
-    - Click dashboard cards and verify HTTP 303 redirects to `http://192.168.1.208:3000/d/fak-strix-index` (0 calls to `localhost:3000`).
+    - Dial `http://<lan-ip>:8080/?key=...`
+    - Click dashboard cards and verify HTTP 303 redirects to `http://<lan-ip>:3000/d/fak-strix-index` (0 calls to `localhost:3000`).
   - Run regression test suite: `go test -v ./internal/gateway/... ./cmd/fak-strix/...`.
 
 ---
@@ -240,10 +240,10 @@ Implement `httputil.ReverseProxy` mounted at `/grafana/` in `internal/gateway/`:
    ```bash
    go test -v ./internal/gateway/ -run "TestRichDashboardClientBaseURL"
    ```
-   Must verify that requests with `Host: 192.168.1.208:8080` redirect to `http://192.168.1.208:3000/d/...` while requests with `Host: localhost:8080` redirect to `http://localhost:3000/d/...`.
+   Must verify that requests with `Host: <lan-ip>:8080` redirect to `http://<lan-ip>:3000/d/...` while requests with `Host: localhost:8080` redirect to `http://localhost:3000/d/...`.
 
 2. **Hardware Remote Dial Witness:**
    ```bash
-   curl -s -i "http://192.168.1.208:8080/?dashboard=rich&uid=fak-strix-index" -H "Host: 192.168.1.208:8080"
+   curl -s -i "http://<lan-ip>:8080/?dashboard=rich&uid=fak-strix-index" -H "Host: <lan-ip>:8080"
    ```
-   Must assert `HTTP/1.1 303 See Other` with `Location: http://192.168.1.208:3000/d/fak-strix-index` (zero presence of `localhost:3000`).
+   Must assert `HTTP/1.1 303 See Other` with `Location: http://<lan-ip>:3000/d/fak-strix-index` (zero presence of `localhost:3000`).

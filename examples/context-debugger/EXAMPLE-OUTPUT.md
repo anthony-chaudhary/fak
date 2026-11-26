@@ -7,7 +7,7 @@ indented blocks are the raw `fak debug` output. Reproduce with `./run.sh`.
 
 ```text
 [cdb] 1) info — ingest the sample transcript as a core image and read its decomposition
-    ingested C:/work/fak/examples/context-debugger/sample-transcript.jsonl -> core image C:/Users/USER/AppData/Local/Temp/tmp.YRBm25iLs6/cdb-image/  (9 records, 7 tool calls, 7 pages, 2 sealed)
+    ingested C:/work/fak/examples/context-debugger/sample-transcript.jsonl -> core image %USERPROFILE%/AppData/Local/Temp/tmp.YRBm25iLs6/cdb-image/  (9 records, 7 tool calls, 7 pages, 2 sealed)
     {
       "session_id": "cdb-sample-transcript",
       "version": "recall.v1",
