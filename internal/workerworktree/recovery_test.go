@@ -1,6 +1,7 @@
 package workerworktree
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -214,8 +215,9 @@ func TestRecoveryMirrorStampFailurePreservesPrior(t *testing.T) {
 					return 0, stamp + "@{1000100000}"
 				case "update-ref":
 					updates++
-					if len(args) != 7 || args[4] != stamp || args[5] != "event1234" || args[6] != "old1234" {
-						t.Fatalf("not expected-old CAS: %v", args)
+					wantArgs := []string{"update-ref", "--create-reflog", "-m", mirrorReflogMessage, stamp, "event1234", "old1234"}
+					if !reflect.DeepEqual(args, wantArgs) {
+						t.Fatalf("not expected-old CAS: %v, want %v", args, wantArgs)
 					}
 					return 1, "concurrent writer changed stamp"
 				default:

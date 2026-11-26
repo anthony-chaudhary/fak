@@ -235,7 +235,8 @@ func TestStepJournalCancelRetriedUntilCommitted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failures := 9
+	const injectedFailures = 9
+	failures := injectedFailures
 	commits := 0
 	j.appendLine = func(path string, offset int64, line []byte) error {
 		if failures > 0 {
@@ -249,8 +250,8 @@ func TestStepJournalCancelRetriedUntilCommitted(t *testing.T) {
 	if err := j.CancelRun(ctx, "attempt-cancel", "operator stop"); err != nil {
 		t.Fatal(err)
 	}
-	if commits != 1 || len(waits) != 9 {
-		t.Fatalf("commits = %d, waits = %d; want 1 commit after 9 backoffs", commits, len(waits))
+	if commits != 1 || len(waits) != injectedFailures {
+		t.Fatalf("commits = %d, waits = %d; want 1 commit with one backoff per injected failure (%d)", commits, len(waits), injectedFailures)
 	}
 	for i := 1; i < len(waits); i++ {
 		if waits[i] < waits[i-1] || waits[i] > cancelBackoffMax {

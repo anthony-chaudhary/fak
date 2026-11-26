@@ -1,6 +1,8 @@
 package policy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -24,8 +26,9 @@ func TestAPFPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("APFArtifactDigest: %v", err)
 		}
-		if len(dig) != 64 {
-			t.Fatalf("digest length = %d, want 64 (hex sha256)", len(dig))
+		raw, err := hex.DecodeString(dig)
+		if err != nil || len(raw) != sha256.Size {
+			t.Fatalf("digest %q is not a hex sha256 (%d bytes decoded, err %v)", dig, len(raw), err)
 		}
 		// Content binding: same document, different signature bytes -> same digest.
 		dig2, err := APFArtifactDigest(doc)

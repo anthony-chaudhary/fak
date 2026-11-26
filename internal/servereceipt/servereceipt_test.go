@@ -275,9 +275,6 @@ func TestPlanWarnings(t *testing.T) {
 // TestProfiles pins the built-in catalog shape and lookup behavior.
 func TestProfiles(t *testing.T) {
 	profiles := AllProfiles()
-	if len(profiles) != 5 {
-		t.Fatalf("AllProfiles = %d entries, want 5", len(profiles))
-	}
 	want := map[string]GPUProfile{
 		"rtx-pro-6000-blackwell-96gb": {Key: "rtx-pro-6000-blackwell-96gb", VRAMGB: 96, SM: "12.0", FP4Native: true, NVLink: false, PCIe: "5.0 x16"},
 		"b200-180gb":                  {Key: "b200-180gb", VRAMGB: 180, SM: "10.0", FP4Native: true, NVLink: true},
@@ -285,10 +282,20 @@ func TestProfiles(t *testing.T) {
 		"h200-141gb":                  {Key: "h200-141gb", VRAMGB: 140.4, SM: "9.0", FP4Native: false, NVLink: true},
 		"rtx-6000-ada-48gb":           {Key: "rtx-6000-ada-48gb", VRAMGB: 48, SM: "8.9", FP4Native: false, NVLink: false},
 	}
+	seen := map[string]bool{}
 	for _, p := range profiles {
 		w, ok := want[p.Key]
 		if !ok || p != w {
 			t.Fatalf("profile %q = %+v, want %+v", p.Key, p, w)
+		}
+		if seen[p.Key] {
+			t.Fatalf("AllProfiles lists %q twice", p.Key)
+		}
+		seen[p.Key] = true
+	}
+	for key := range want {
+		if !seen[key] {
+			t.Fatalf("AllProfiles is missing the pinned profile %q", key)
 		}
 	}
 	keys := ProfileKeys()

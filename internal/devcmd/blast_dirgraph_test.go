@@ -70,6 +70,20 @@ func newBlastFixtureModule(t *testing.T) string {
 	return root
 }
 
+// blastFixturePackageDirs is every package directory newBlastFixtureModule
+// produces, in the sorted order countBlastScans reports.
+var blastFixturePackageDirs = []string{".", "a", "b", "c", "cmd/tool", "d"}
+
+// requireBlastFullScan fails unless a rescan visited exactly the fixture's package
+// directories: no package skipped, and no non-package directory such as tools/ or
+// the cache itself scanned.
+func requireBlastFullScan(t *testing.T, scanned []string, what string) {
+	t.Helper()
+	if !reflect.DeepEqual(scanned, blastFixturePackageDirs) {
+		t.Fatalf("%s scanned %v, want exactly the package dirs %v", what, scanned, blastFixturePackageDirs)
+	}
+}
+
 // countBlastScans swaps the package-scan seam for one that records which
 // directories were rescanned, relative to root.
 func countBlastScans(t *testing.T, root string) func() []string {
@@ -192,18 +206,14 @@ func TestBlastEstimateCachedMatchesUncached(t *testing.T) {
 
 	t.Setenv(blastGraphEnvCache, "off")
 	uncached := runBlastEstimateJSON(t, "a")
-	if got := scans(); len(got) != 6 {
-		t.Fatalf("uncached run scanned %v, want all 6 package dirs", got)
-	}
+	requireBlastFullScan(t, scans(), "uncached run")
 	if !strings.Contains(uncached, `"cmd/tool"`) || !strings.Contains(uncached, `"lane-b"`) {
 		t.Fatalf("uncached estimate is missing the expected radius or held lease:\n%s", uncached)
 	}
 
 	t.Setenv(blastGraphEnvCache, t.TempDir())
 	cold := runBlastEstimateJSON(t, "a")
-	if got := scans(); len(got) != 6 {
-		t.Fatalf("cold cached run scanned %v, want all 6 package dirs", got)
-	}
+	requireBlastFullScan(t, scans(), "cold cached run")
 	warm := runBlastEstimateJSON(t, "a")
 	if got := scans(); len(got) != 0 {
 		t.Fatalf("warm cached run rescanned %v, want none", got)
@@ -290,9 +300,7 @@ func TestBlastGraphCacheDroppedWhenGoModChanges(t *testing.T) {
 	if _, _, _, _, err := scanDirGraph(root, cachePath); err != nil {
 		t.Fatal(err)
 	}
-	if got := scans(); len(got) != 6 {
-		t.Errorf("rescanned %v after a go.mod change, want all 6 package dirs", got)
-	}
+	requireBlastFullScan(t, scans(), "rescan after a go.mod change")
 }
 
 func TestBlastGraphCacheIgnoresCorruptAndOversizedFiles(t *testing.T) {

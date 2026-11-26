@@ -686,6 +686,16 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 		if enq[0].run.status != "running" {
 			t.Fatalf("the first trunk push must run; got %s", enq[0].run.status)
 		}
+		// Coalescing only supersedes queued runs. The in-flight push's
+		// fast/build evidence must reach completion, and the newest head must
+		// reach a terminal conclusion too.
+		done := sim.drain(enq[0].group)
+		if len(done) == 0 || done[0] != enq[0].run {
+			t.Fatalf("the in-flight trunk push must finish first and uncancelled; got %d terminal runs", len(done))
+		}
+		if newest := enq[len(enq)-1].run; newest.status != "completed" {
+			t.Fatalf("the newest trunk head must reach a terminal conclusion; got %s", newest.status)
+		}
 	})
 
 	t.Run("ordinary-main race coalesces to one running plus one pending", func(t *testing.T) {

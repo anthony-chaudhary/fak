@@ -257,8 +257,17 @@ func TestS3FIFOEviction(t *testing.T) {
 			t.Fatal("zero capacity must be ignored")
 		}
 		ev := p.SetCapacity(40)
-		if len(ev) != 60 || p.Len() != 40 || p.Capacity() != 40 {
-			t.Fatalf("shrink evicted %d, len %d", len(ev), p.Len())
+		evicted := map[uint64]bool{}
+		for _, k := range ev {
+			evicted[k] = true
+		}
+		if len(evicted) != len(ev) || p.Len() != 40 || p.Capacity() != 40 {
+			t.Fatalf("shrink evicted %d distinct of %d, len %d", len(evicted), len(ev), p.Len())
+		}
+		for k := uint64(0); k < 100; k++ {
+			if p.Contains(k) == evicted[k] {
+				t.Fatalf("key %d must be exactly one of resident or evicted (resident=%t, evicted=%t)", k, p.Contains(k), evicted[k])
+			}
 		}
 		checkS3FIFOInvariants(t, p)
 	})

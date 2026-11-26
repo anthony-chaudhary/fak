@@ -201,8 +201,20 @@ func TestTinyLFUAdmission(t *testing.T) {
 			keys = append(keys, k)
 		}
 		victims, ok := a.Admit(in, 7, 7, 7, residents(keys...))
-		if !ok || len(victims) != 7 {
-			t.Fatalf("ok=%v victims=%d, want admitted after evicting all 7", ok, len(victims))
+		if !ok {
+			t.Fatalf("ok=%v victims=%v, want admitted after evicting every resident", ok, victims)
+		}
+		evicted := map[uint64]bool{}
+		for _, v := range victims {
+			evicted[v.Key] = true
+		}
+		for _, k := range keys {
+			if !evicted[k] {
+				t.Fatalf("resident %d survived admission; victims=%v", k, victims)
+			}
+		}
+		if len(evicted) != len(keys) {
+			t.Fatalf("evicted %d distinct keys, want exactly the %d residents", len(evicted), len(keys))
 		}
 	})
 

@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -93,12 +94,24 @@ func TestDCGMTelemetry(t *testing.T) {
 
 	t.Run("fields_in_group", func(t *testing.T) {
 		health := FieldsInGroup(FieldGroupHealth)
-		if len(health) != 6 {
-			t.Fatalf("expected 6 health fields, got %d", len(health))
-		}
 		thermal := FieldsInGroup(FieldGroupThermal)
-		if len(thermal) != 3 {
-			t.Fatalf("expected 3 thermal fields, got %d", len(thermal))
+		var wantHealth, wantThermal []Field
+		for _, f := range HealthThermalFields() {
+			switch f.Group {
+			case FieldGroupHealth:
+				wantHealth = append(wantHealth, f)
+			case FieldGroupThermal:
+				wantThermal = append(wantThermal, f)
+			}
+		}
+		if len(wantHealth) == 0 || len(wantThermal) == 0 {
+			t.Fatal("pinned vocabulary has no health or thermal fields to check the groups against")
+		}
+		if !reflect.DeepEqual(health, wantHealth) {
+			t.Fatalf("health group = %+v, want the pinned health fields %+v", health, wantHealth)
+		}
+		if !reflect.DeepEqual(thermal, wantThermal) {
+			t.Fatalf("thermal group = %+v, want the pinned thermal fields %+v", thermal, wantThermal)
 		}
 		for _, f := range health {
 			if f.Group != FieldGroupHealth {

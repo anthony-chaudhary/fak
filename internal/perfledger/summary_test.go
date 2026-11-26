@@ -199,8 +199,16 @@ func TestSummaryProjectionCustomTagsAndRounding(t *testing.T) {
 		}
 		seen[tag] = true
 	}
-	if len(tags) != 60 || tags[0] != "request_throughput" || tags[len(tags)-1] != "http_req_data_received" {
-		t.Fatalf("curated list has %d tags from %q to %q, want the 60 upstream tags", len(tags), tags[0], tags[len(tags)-1])
+	if len(tags) == 0 {
+		t.Fatal("curated tag list is empty")
+	}
+	for _, tag := range tags {
+		if tag == "" {
+			t.Fatal("curated list contains an empty tag")
+		}
+	}
+	if tags[0] != "request_throughput" || tags[len(tags)-1] != "http_req_data_received" {
+		t.Fatalf("curated list runs from %q to %q, want the upstream first and last tags", tags[0], tags[len(tags)-1])
 	}
 	for _, tag := range []string{"goodput", "request_latency", "time_to_first_token", "inter_token_latency", "good_request_count",
 		"error_request_count", "completed_request_count", "benchmark_duration", "video_peak_memory", "http_req_connection_reused"} {

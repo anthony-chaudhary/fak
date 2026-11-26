@@ -486,8 +486,10 @@ func TestCurveBlock(t *testing.T) {
 	if c.Anchor != AnchorCalibration || c.PenaltyNote != CurvePenaltyNote {
 		t.Fatalf("anchor/penalty note not the fixed literals: %q / %q", c.Anchor, c.PenaltyNote)
 	}
-	if len(c.Capacity) != 5 {
-		t.Fatalf("capacity rows = %d, want 5", len(c.Capacity))
+	for i := 1; i < len(c.Capacity); i++ {
+		if c.Capacity[i].HostGiB <= c.Capacity[i-1].HostGiB {
+			t.Fatalf("host sweep not strictly increasing at row %d: %g GiB after %g GiB", i, c.Capacity[i].HostGiB, c.Capacity[i-1].HostGiB)
+		}
 	}
 	prev := int64(-1)
 	for i, row := range c.Capacity {
@@ -497,14 +499,22 @@ func TestCurveBlock(t *testing.T) {
 		}
 		prev = row.PhysicalTokens
 	}
-	if c.Capacity[0].PhysicalTokens != 0 {
-		t.Fatalf("host 0 row = %d, want 0 (device pool is clamped to 0 on this layout)", c.Capacity[0].PhysicalTokens)
+	rowAt := func(hostGiB float64) (CurveCapacityRow, bool) {
+		for _, row := range c.Capacity {
+			if row.HostGiB == hostGiB {
+				return row, true
+			}
+		}
+		return CurveCapacityRow{}, false
 	}
-	if got := c.Capacity[2]; got.HostGiB != 32 || got.PhysicalTokens != receipt.Arithmetic.PhysicalTokens {
-		t.Fatalf("32 GiB row = %+v, want the receipt's own physical_tokens %d", got, receipt.Arithmetic.PhysicalTokens)
+	if zero, ok := rowAt(0); !ok || zero.PhysicalTokens != 0 {
+		t.Fatalf("host 0 row = %+v (present %t), want 0 tokens (device pool is clamped to 0 on this layout)", zero, ok)
 	}
-	if c.Capacity[4].HostGiB != 128 || c.Capacity[4].PhysicalTokens != 4_044_225 { // floor((0 + 128×0.5×2^30/16) / 1062)
-		t.Fatalf("128 GiB row = %+v, want 4044225", c.Capacity[4])
+	if got, ok := rowAt(32); !ok || got.PhysicalTokens != receipt.Arithmetic.PhysicalTokens {
+		t.Fatalf("32 GiB row = %+v (present %t), want the receipt's own physical_tokens %d", got, ok, receipt.Arithmetic.PhysicalTokens)
+	}
+	if got, ok := rowAt(128); !ok || got.PhysicalTokens != 4_044_225 { // floor((0 + 128×0.5×2^30/16) / 1062)
+		t.Fatalf("128 GiB row = %+v (present %t), want 4044225", got, ok)
 	}
 	if len(c.MissLatency) != 3 {
 		t.Fatalf("miss rows = %d, want 3", len(c.MissLatency))

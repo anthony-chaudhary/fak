@@ -2,6 +2,8 @@ package witness
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -25,7 +27,7 @@ func TestExecutionMaterializerPinsBothSourcesAndOverlay(t *testing.T) {
 	var dirs, refs []string
 	releases := 0
 	ctx := WithExecutionMaterializer(context.Background(), func(ctx context.Context, repo, ref string) (string, func(), error) {
-		if repo != root || len(ref) != 40 {
+		if _, err := hex.DecodeString(ref); repo != root || err != nil || len(ref) != hex.EncodedLen(sha1.Size) {
 			t.Fatalf("provider received repo=%q ref=%q", repo, ref)
 		}
 		dir, cleanup, err := v.scratchWorktree(context.Background(), ref)

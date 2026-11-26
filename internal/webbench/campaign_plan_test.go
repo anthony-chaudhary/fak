@@ -114,9 +114,6 @@ func TestK31CampaignPlanShapeIsDeterministic(t *testing.T) {
 	if want := []string{"#14368", "#14371", "#14370"}; !reflect.DeepEqual(plan.PromotionRequires, want) {
 		t.Fatalf("promotion requires = %v, want %v", plan.PromotionRequires, want)
 	}
-	if len(plan.SpecArms) != 12 || len(plan.OffloadArms) != 3 {
-		t.Fatalf("arm matrix = %d spec points / %d offload placeholders, want 12 / 3", len(plan.SpecArms), len(plan.OffloadArms))
-	}
 	wantArms := []struct {
 		name, config string
 		concurrency  int
@@ -134,6 +131,9 @@ func TestK31CampaignPlanShapeIsDeterministic(t *testing.T) {
 		{CampaignArmSpecDSpark5, CampaignSpecConfigDSpark5, 32},
 		{CampaignArmSpecDSpark5, CampaignSpecConfigDSpark5, 64},
 	}
+	if len(plan.SpecArms) != len(wantArms) {
+		t.Fatalf("spec arm matrix has %d points, want exactly the %d named spec points", len(plan.SpecArms), len(wantArms))
+	}
 	for i, want := range wantArms {
 		got := plan.SpecArms[i]
 		if got.Name != want.name || got.SpeculativeConfig != want.config || got.Concurrency != want.concurrency {
@@ -147,6 +147,9 @@ func TestK31CampaignPlanShapeIsDeterministic(t *testing.T) {
 		{"offload-h050", 0.5},
 		{"offload-h075", 0.75},
 		{"offload-h085", 0.85},
+	}
+	if len(plan.OffloadArms) != len(wantOffload) {
+		t.Fatalf("offload placeholders = %d, want exactly the %d named placeholders", len(plan.OffloadArms), len(wantOffload))
 	}
 	for i, want := range wantOffload {
 		got := plan.OffloadArms[i]
@@ -203,17 +206,18 @@ func TestFoldCampaignIndexProjectsArmReceiptsOntoPlanMatrix(t *testing.T) {
 	if index.Model != model || !strings.HasPrefix(index.WorkloadDigest, "sha256:") {
 		t.Fatalf("index comparability identity = model %q workload %q", index.Model, index.WorkloadDigest)
 	}
-	if len(index.Rows) != 12 {
-		t.Fatalf("index rows = %d, want 12 (offload placeholders excluded until #14372)", len(index.Rows))
-	}
-	for i, want := range []struct {
+	wantRows := []struct {
 		arm string
 		c   int
 	}{
 		{CampaignArmSpecNone, 1}, {CampaignArmSpecNone, 8}, {CampaignArmSpecNone, 32}, {CampaignArmSpecNone, 64},
 		{CampaignArmSpecDSpark4, 1}, {CampaignArmSpecDSpark4, 8}, {CampaignArmSpecDSpark4, 32}, {CampaignArmSpecDSpark4, 64},
 		{CampaignArmSpecDSpark5, 1}, {CampaignArmSpecDSpark5, 8}, {CampaignArmSpecDSpark5, 32}, {CampaignArmSpecDSpark5, 64},
-	} {
+	}
+	if len(index.Rows) != len(wantRows) {
+		t.Fatalf("index rows = %d, want one per plan spec point (%d; offload placeholders excluded until #14372)", len(index.Rows), len(wantRows))
+	}
+	for i, want := range wantRows {
 		if row := index.Rows[i]; row.Arm != want.arm || row.Concurrency != want.c {
 			t.Fatalf("row %d = %s@c%d, want %s@c%d (row order must follow the plan)", i, row.Arm, row.Concurrency, want.arm, want.c)
 		}
@@ -278,8 +282,8 @@ func TestFoldCampaignIndexProjectsArmReceiptsOntoPlanMatrix(t *testing.T) {
 		t.Fatalf("index JSON schema = %v, want %q", rendered["schema"], CampaignIndexSchema)
 	}
 	rows, ok := rendered["rows"].([]any)
-	if !ok || len(rows) != 12 {
-		t.Fatalf("index JSON rows = %#v, want 12", rendered["rows"])
+	if !ok || len(rows) != len(index.Rows) {
+		t.Fatalf("index JSON rows = %#v, want the %d in-memory rows", rendered["rows"], len(index.Rows))
 	}
 }
 

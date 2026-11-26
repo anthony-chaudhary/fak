@@ -306,8 +306,9 @@ func TestArtifactGatePreflightRefusals(t *testing.T) {
 		if c := gateCheck(t, v, "artifact.preflight"); c.Status != ArtifactCheckFailed {
 			t.Fatalf("%s: preflight check = %q, want failed", name, c.Status)
 		}
-		if len(v.Unverified) != 6 {
-			t.Fatalf("%s: Unverified = %v, want every item listed for an unread artifact", name, v.Unverified)
+		wantUnverified := []string{UnverifiedContentType, UnverifiedDeclaredFields, UnverifiedDeclaredSHA256, UnverifiedDeclaredSize, UnverifiedMagicBytes, UnverifiedMeasurement}
+		if !reflect.DeepEqual(v.Unverified, wantUnverified) {
+			t.Fatalf("%s: Unverified = %v, want every item listed for an unread artifact: %v", name, v.Unverified, wantUnverified)
 		}
 	}
 }
