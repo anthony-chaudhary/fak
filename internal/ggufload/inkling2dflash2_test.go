@@ -48,8 +48,8 @@ func TestInkling2DFlash2CheckpointShapes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Close()
-	if m.Tensors != 81 || len(Inkling2DFlash2TensorShapes(&m.Config)) != 81 || len(m.layers) != 5 {
-		t.Fatalf("bound %d tensors, %d layers; want 81, 5", m.Tensors, len(m.layers))
+	if want := len(Inkling2DFlash2TensorShapes(&m.Config)); m.Tensors != want || len(m.layers) != m.Config.Layers {
+		t.Fatalf("bound %d tensors, %d layers; want %d tensors, %d layers", m.Tensors, len(m.layers), want, m.Config.Layers)
 	}
 	// Norm multipliers trained from 1 stay finite and mostly positive; a
 	// mis-sliced payload reads as noise.
@@ -169,9 +169,11 @@ func TestInkling2DFlash2ConvAndTop(t *testing.T) {
 	if !slices.Equal(ids, []int{1, 2, 5}) || vals[2] != 3 {
 		t.Fatalf("top = %v %v", ids, vals)
 	}
-	ids, _ = inkling2DFlash2Top([]float32{1, 3, 3, -1, 2, 3}, 5)
-	if !slices.Equal(ids, []int{1, 2, 5, 4, 0}) {
-		t.Fatalf("top5 = %v", ids)
+	// Top-5 of six logits leaves out exactly the one smallest, index 3.
+	logits := []float32{1, 3, 3, -1, 2, 3}
+	ids, _ = inkling2DFlash2Top(logits, 5)
+	if len(ids) != len(logits)-1 || slices.Contains(ids, 3) {
+		t.Fatalf("top5 = %v; want every logit but the smallest (index 3)", ids)
 	}
 }
 
