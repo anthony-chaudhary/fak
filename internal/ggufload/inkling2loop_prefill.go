@@ -787,17 +787,26 @@ func (p *ink2Prefill) forward(last bool) {
 	}
 }
 
-// ensurePrefillArenas sizes the batched-forward arenas for chunks of up to T tokens,
-// regrowing them when a longer chunk arrives.
+// ensurePrefillArenas sizes the batched-forward arenas for chunks of up to T tokens.
+// A longer chunk replaces them: the old arenas are freed rather than left beside the
+// new ones, and every capture that addressed them is recaptured.
 func (s *inkling2Resident) ensurePrefillArenas(T int) {
 	if s.prefillKeep.T.Buf() != nil && T <= s.prefillCap {
 		return
 	}
 	T = max(T, s.prefillCap)
+	if s.prefillKeep.T.Buf() != nil {
+		// captured verify graphs address the arenas being replaced
+		s.dropCaptures()
+		s.release(s.prefillKeep, s.prefillScr, s.prefillIn)
+	}
 	keep, scr := s.prefillArenas(T)
 	s.prefillKeep, s.prefillScr = s.alloc(keep), s.alloc(scr)
 	s.prefillIn = s.alloc(T * s.hp.Hidden)
 	s.prefillCap = T
+	if s.err != nil {
+		s.prefillKeep, s.prefillScr, s.prefillIn, s.prefillCap = ink2Ref{}, ink2Ref{}, ink2Ref{}, 0
+	}
 }
 
 // headRows runs the output head on every row of the chunk and leaves row t's greedy

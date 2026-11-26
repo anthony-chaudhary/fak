@@ -135,13 +135,7 @@ func (r *inkling2ResidentSession) own() {
 	if inkling2GraphOwner.Swap(r.s) == r.s {
 		return
 	}
-	s := r.s
-	s.graphReady, s.warm = false, false
-	s.verifyWarm, s.verifyReady, s.keepReady = false, false, false
-	s.tailWarm, s.tailReady, s.tailKeepReady = [inkling2SpecMaxDraft + 1]bool{}, [inkling2SpecMaxDraft + 1]bool{}, [inkling2SpecMaxDraft + 1]bool{}
-	if d := s.draft; d != nil {
-		d.warm, d.ready = false, false
-	}
+	r.s.dropCaptures()
 }
 
 // HeldBytes is the device memory the session owns: its cache, arenas, uploaded
