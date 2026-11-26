@@ -122,5 +122,65 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "cache-inkling2prefixcachefromenv",
+      "canonical": "inkling2PrefixCacheFromEnv (FAK_INKLING2_PREFIX_SLOTS, FAK_INKLING2_PREFIX_CACHE_MIB)",
+      "family": "cache",
+      "kind": "config",
+      "definition": "inkling2PrefixCacheFromEnv reads FAK_INKLING2_PREFIX_SLOTS (how many resident Inkling-2 device sessions fak serve keeps warm for prefix reuse, default 1, capped at 8) and FAK_INKLING2_PREFIX_CACHE_MIB (the device bytes more than one slot may hold together, default 4096).",
+      "distinction": "The per-request resident-session slot pool of fak serve, keyed by prompt prefix and evicted LRU on device memory - not Inkling2BatchPrefixCacheMiB (the host-side cross-request store batch cohorts restore rows from) and not the generic prefixcache.",
+      "distinct_from": [
+        "c4681-prefixcache",
+        "cache-inkling2batchprefixcachemib"
+      ],
+      "aliases": ["FAK_INKLING2_PREFIX_SLOTS", "FAK_INKLING2_PREFIX_CACHE_MIB"],
+      "grounding": "inkling2PrefixCacheFromEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "cache-inkling2batchprefixcachemib",
+      "canonical": "Inkling2BatchPrefixCacheMiB (FAK_INKLING2_BATCH_PREFIX_CACHE_MIB)",
+      "family": "cache",
+      "kind": "config",
+      "definition": "Inkling2BatchPrefixCacheMiB reports the host MiB FAK_INKLING2_BATCH_PREFIX_CACHE_MIB gives the Inkling-2 batch cohort cross-request prefix store and whether that turns it on, refusing a malformed value or a store cohorts could never use because cohort prefill is off.",
+      "distinction": "The host-memory prefix store that batch cohorts restore a row's KV from mid-prompt - not inkling2PrefixCacheFromEnv (the device-resident session slot pool of scalar serve) and not the generic prefixcache.",
+      "distinct_from": [
+        "c4681-prefixcache",
+        "cache-inkling2prefixcachefromenv"
+      ],
+      "aliases": ["FAK_INKLING2_BATCH_PREFIX_CACHE_MIB"],
+      "grounding": "Inkling2BatchPrefixCacheMiB",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "loop-loadinkling2loopmodel",
+      "canonical": "loadInkling2LoopModel",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "loadInkling2LoopModel is fak serve's loader stage for an inkling2-family GGUF: it claims the load for the dedicated looped forward (CUDA free-VRAM bound or the native resident Metal target), refuses a backend without that forward, and hands the native chat planner to the gateway.",
+      "distinction": "The serve-side load stage that claims an inkling2_loop GGUF - not inkling2loop-model (the in-memory looped model it produces) and not loop-inkling2-loopconfig (the per-model loop depth config it reads).",
+      "distinct_from": [
+        "inkling2loop-model",
+        "loop-inkling2-loopconfig"
+      ],
+      "aliases": [],
+      "grounding": "loadInkling2LoopModel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

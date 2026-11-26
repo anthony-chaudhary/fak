@@ -2,22 +2,19 @@ package main
 
 import "fmt"
 
-// serveInkling2MetalSelected applies the run selector to serve, which binds
-// only the vendored target: an explicit request for one of fak's own forwards
-// is refused rather than served under the other path's name.
-func serveInkling2MetalSelected(path, selector string) error {
-	kind, err := inkling2MetalSelect(selector, true, true, true)
+// serveInkling2MetalSelected applies the run selector to serve, which binds the
+// vendored target and fak's device-resident forward: an explicit request for the
+// host-driven native forward is refused rather than served under another path's name.
+func serveInkling2MetalSelected(path, selector string) (inkling2MetalPath, error) {
+	kind, err := inkling2MetalSelect(selector, true, true, inkling2MetalResidentAvailable)
 	if err != nil {
-		return err
+		return kind, err
 	}
-	label := inkling2MetalTargetNativeLabel
 	switch kind {
-	case inkling2MetalVendored:
-		return nil
-	case inkling2MetalResident:
-		label = inkling2MetalTargetResidentLabel
+	case inkling2MetalVendored, inkling2MetalResident:
+		return kind, nil
 	}
-	return &inkling2MetalServeRefusal{Path: path,
-		Reason: fmt.Sprintf("%s=%s selects the %s forward, which is not supported by serve yet; unset it or set it to vendored",
-			inkling2MetalTargetEnv, selector, label)}
+	return kind, &inkling2MetalServeRefusal{Path: path,
+		Reason: fmt.Sprintf("%s=%s selects the %s forward, which is not supported by serve yet; unset it or set it to vendored or resident",
+			inkling2MetalTargetEnv, selector, inkling2MetalTargetNativeLabel)}
 }

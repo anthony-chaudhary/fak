@@ -8,8 +8,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/inklingmetal"
 )
 
-// Serve binds only the vendored target, so the run selector either agrees with
-// it or is refused before any admission; other routes never read the selector.
+// Serve binds the vendored target and the resident forward, so the run selector
+// either picks one of them or is refused before any admission; other routes
+// never read the selector.
 func TestServeInkling2MetalRouteHonoursTargetSelector(t *testing.T) {
 	path := writeInkling2HeaderGGUF(t, serveInkling2LoopArch)
 	t.Setenv(inkling2MetalTargetEnv, "")

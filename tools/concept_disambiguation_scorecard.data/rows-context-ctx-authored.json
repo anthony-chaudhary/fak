@@ -135,10 +135,32 @@
       "distinction": "The requested token capacity of one resident Inkling-2 session before it exists - not context-window (the model's fixed trained limit) and not FixedContextTokens (macfit's per-model planning constant); admission prices this value against device memory.",
       "distinct_from": [
         "context-window",
-        "context-ctx-fixedcontexttokens"
+        "context-ctx-fixedcontexttokens",
+        "context-ctx-inkling2residentctxmax"
       ],
       "aliases": [],
       "grounding": "Inkling2ResidentCtxEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "context-ctx-inkling2residentctxmax",
+      "canonical": "Inkling2ResidentCtxMax",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Inkling2ResidentCtxMax(backend) is the largest global-slot KV context a resident Inkling-2 device session takes on the named backend: 32768 on Metal, 24576 on every other backend (the CUDA bound).",
+      "distinction": "The backend's hard ceiling that FAK_INKLING2_CTX is clamped to and fak serve refuses past - not Inkling2ResidentCtxEnv (the requested capacity knob), not context-window (the model's trained limit), and not FixedContextTokens (macfit's planning constant).",
+      "distinct_from": [
+        "context-ctx-inkling2residentctxenv",
+        "context-window",
+        "context-ctx-fixedcontexttokens"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2ResidentCtxMax",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

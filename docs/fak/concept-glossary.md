@@ -2707,3 +2707,31 @@ StepDecision (superstream.StepDecision) is the pure verdict DecideStep produces 
 Inkling2ResidentCtxEnv names FAK_INKLING2_CTX, the environment knob that sets the global-slot KV capacity of a resident Inkling-2 device session, clamped to the build backend's resident bound (32768 on Metal, 24576 on CUDA) and floored at 512.
 
 **Distinct from:** The requested token capacity of one resident Inkling-2 session before it exists - not context-window (the model's fixed trained limit) and not FixedContextTokens (macfit's per-model planning constant); admission prices this value against device memory.
+
+
+### inkling2PrefixCacheFromEnv (FAK_INKLING2_PREFIX_SLOTS, FAK_INKLING2_PREFIX_CACHE_MIB)
+
+inkling2PrefixCacheFromEnv reads FAK_INKLING2_PREFIX_SLOTS (how many resident Inkling-2 device sessions fak serve keeps warm for prefix reuse, default 1, capped at 8) and FAK_INKLING2_PREFIX_CACHE_MIB (the device bytes more than one slot may hold together, default 4096).
+
+**Distinct from:** The per-request resident-session slot pool of fak serve, keyed by prompt prefix and evicted LRU on device memory - not Inkling2BatchPrefixCacheMiB (the host-side cross-request store batch cohorts restore rows from) and not the generic prefixcache.
+
+
+### Inkling2BatchPrefixCacheMiB (FAK_INKLING2_BATCH_PREFIX_CACHE_MIB)
+
+Inkling2BatchPrefixCacheMiB reports the host MiB FAK_INKLING2_BATCH_PREFIX_CACHE_MIB gives the Inkling-2 batch cohort cross-request prefix store and whether that turns it on, refusing a malformed value or a store cohorts could never use because cohort prefill is off.
+
+**Distinct from:** The host-memory prefix store that batch cohorts restore a row's KV from mid-prompt - not inkling2PrefixCacheFromEnv (the device-resident session slot pool of scalar serve) and not the generic prefixcache.
+
+
+### Inkling2ResidentCtxMax
+
+Inkling2ResidentCtxMax(backend) is the largest global-slot KV context a resident Inkling-2 device session takes on the named backend: 32768 on Metal, 24576 on every other backend (the CUDA bound).
+
+**Distinct from:** The backend's hard ceiling that FAK_INKLING2_CTX is clamped to and fak serve refuses past - not Inkling2ResidentCtxEnv (the requested capacity knob), not context-window (the model's trained limit), and not FixedContextTokens (macfit's planning constant).
+
+
+### loadInkling2LoopModel
+
+loadInkling2LoopModel is fak serve's loader stage for an inkling2-family GGUF: it claims the load for the dedicated looped forward (CUDA free-VRAM bound or the native resident Metal target), refuses a backend without that forward, and hands the native chat planner to the gateway.
+
+**Distinct from:** The serve-side load stage that claims an inkling2_loop GGUF - not inkling2loop-model (the in-memory looped model it produces) and not loop-inkling2-loopconfig (the per-model loop depth config it reads).

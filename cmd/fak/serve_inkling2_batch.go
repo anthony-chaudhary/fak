@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,7 +75,29 @@ func inkling2AdmissionFromEnv(lookup func(string) (string, bool)) (inkling2Admis
 	if err != nil {
 		return inkling2Admission{}, err
 	}
-	return inkling2Admission{gap: gap, maxWait: wait, max: ggufload.Inkling2LoopMaxBatch, clock: inkling2RealClock{}}, nil
+	rows, err := inkling2ServeBatchRows(lookup)
+	if err != nil {
+		return inkling2Admission{}, err
+	}
+	return inkling2Admission{gap: gap, maxWait: wait, max: rows, clock: inkling2RealClock{}}, nil
+}
+
+// inkling2ServeBatchRowsEnv bounds the cohort width; collection never gathers more
+// rows than this, and a running cohort only admits into a finished row's slot.
+const inkling2ServeBatchRowsEnv = "FAK_INKLING2_SERVE_BATCH_ROWS"
+
+// inkling2ServeBatchRows is FAK_INKLING2_SERVE_BATCH_ROWS in [1, Inkling2LoopMaxBatch];
+// unset is the widest cohort the forward serves.
+func inkling2ServeBatchRows(lookup func(string) (string, bool)) (int, error) {
+	v, ok := lookup(inkling2ServeBatchRowsEnv)
+	if v = strings.TrimSpace(v); !ok || v == "" {
+		return ggufload.Inkling2LoopMaxBatch, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > ggufload.Inkling2LoopMaxBatch {
+		return 0, fmt.Errorf("%s=%q must be a row count in [1, %d]", inkling2ServeBatchRowsEnv, v, ggufload.Inkling2LoopMaxBatch)
+	}
+	return n, nil
 }
 
 // collect grows a cohort from first until the queue goes quiet for gap, the

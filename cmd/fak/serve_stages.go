@@ -86,8 +86,8 @@ type serveRuntime struct {
 	warmDiskModelIdentity string
 	// inkling2Planner serves an inkling2_loop GGUF, which has no *fakmodel.Model.
 	inkling2Planner agent.Planner
-	// inkling2Close frees that model once; inkling2Metal marks the native
-	// Metal target, whose residency the Metal admission seam owns.
+	// inkling2Close frees that model once; inkling2Metal marks a Metal
+	// target (vendored or resident), whose residency the Metal admission seam owns.
 	inkling2Close func() error
 	inkling2Metal bool
 

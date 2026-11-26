@@ -436,7 +436,7 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 	}
 	ignored := inkling2ScalarBehindCohorts(scalar)
 	return newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, lookup),
-		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", ggufload.Inkling2LoopMaxBatch, adm.gap, adm.maxWait, prefix, ignored), nil
+		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", adm.max, adm.gap, adm.maxWait, prefix, ignored), nil
 }
 
 // newServeInkling2LoopPlanner binds an engine to the chat surface with a config
@@ -482,24 +482,44 @@ func serveAdmitInkling2Metal(path, arch string, shards int, available bool) erro
 // serveInkling2MetalRoute reports whether path is an inkling2-family GGUF the
 // Metal session forward was selected for, with its admission verdict.
 func serveInkling2MetalRoute(path string, backend compute.Backend, metal bool) (bool, error) {
+	routed, _, err := serveInkling2MetalPathOf(path, backend, metal)
+	return routed, err
+}
+
+// serveInkling2MetalPathOf is serveInkling2MetalRoute naming the Metal path selected.
+func serveInkling2MetalPathOf(path string, backend compute.Backend, metal bool) (bool, inkling2MetalPath, error) {
 	if backend != nil || !metal || !serveIsInkling2GGUF(path) {
-		return false, nil
+		return false, 0, nil
 	}
-	if err := serveInkling2MetalSelected(path, os.Getenv(inkling2MetalTargetEnv)); err != nil {
-		return true, err
+	kind, err := serveInkling2MetalSelected(path, os.Getenv(inkling2MetalTargetEnv))
+	if err != nil {
+		return true, kind, err
 	}
 	arch, err := serveInkling2Arch(path)
 	if err != nil {
-		return true, err
+		return true, kind, err
 	}
-	return true, serveAdmitInkling2Metal(path, arch, len(serveInkling2ShardSet(path)), inklingmetal.Available())
+	shards := len(serveInkling2ShardSet(path))
+	if kind == inkling2MetalResident {
+		return true, kind, serveAdmitInkling2Resident(path, shards)
+	}
+	return true, kind, serveAdmitInkling2Metal(path, arch, shards, inklingmetal.Available())
 }
 
-// serveInkling2MetalWeights is the admission plan of the target-only native
-// model with one session at the served context, or nil off the Metal route.
+// serveInkling2MetalWeights is the admission plan of the selected Metal path at
+// the served context, or nil off the Metal route: the target-only vendored model
+// with one session, or the resident weights with every prefix slot the engine may hold.
 func serveInkling2MetalWeights(path string, backend compute.Backend, metal bool) (*localadmission.MemoryPlan, error) {
-	if routed, err := serveInkling2MetalRoute(path, backend, metal); !routed || err != nil {
+	routed, kind, err := serveInkling2MetalPathOf(path, backend, metal)
+	if !routed || err != nil {
 		return nil, err
+	}
+	if kind == inkling2MetalResident {
+		sz, err := serveInkling2ResidentSizingOf(path, os.LookupEnv)
+		if err != nil {
+			return nil, err
+		}
+		return &sz.Plan, nil
 	}
 	planned, err := inklingmetal.EstimateWithDraft(path, "", ggufload.Inkling2LoopResidentContext)
 	if err != nil {
@@ -697,7 +717,7 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		fmt.Fprintln(os.Stderr, "fak serve:", err)
 		os.Exit(2)
 	}
-	metal, err := serveInkling2MetalRoute(path, rt.chatBackend, rt.useMetal)
+	metal, kind, err := serveInkling2MetalPathOf(path, rt.chatBackend, rt.useMetal)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -710,8 +730,36 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		closer    func() error
 		placement string
 	)
+	resident := metal && kind == inkling2MetalResident
 	tLoad := time.Now()
-	if metal {
+	switch {
+	case resident:
+		sz, err := serveInkling2ResidentSizingOf(path, os.LookupEnv)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve:", err)
+			os.Exit(2)
+		}
+		m, be, err := openInkling2MetalResident(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: inkling2 resident Metal load:", err)
+			os.Exit(2)
+		}
+		engine = newInkling2LoopEngine(m, be)
+		if gen, decode, err = newServeInkling2Generator(m, be, serveInkling2ResidentLookup(os.LookupEnv, sz)); err != nil {
+			_ = m.Close()
+			fmt.Fprintln(os.Stderr, "fak serve:", err)
+			os.Exit(2)
+		}
+		closer = func() error {
+			var cerr error
+			if c, ok := gen.(io.Closer); ok {
+				cerr = c.Close()
+			}
+			return errors.Join(cerr, m.Close())
+		}
+		contextTokens = sz.Ctx
+		placement = inkling2ServeResidentPlacement(m.Arch, m.HP.Layers, m.HP.Hidden, m.HP.Passes, sz)
+	case metal:
 		target, err := inklingmetal.OpenWithDraft(path, "")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "fak serve: inkling2 Metal load:", err)
@@ -721,7 +769,7 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		closer = func() error { return errors.Join(engine.Close(), target.Close()) }
 		gen, decode = engine, "greedy decode"
 		placement = fmt.Sprintf("%s on metal target=%s: one resident model, single-stream decode", serveInkling2LoopArch, inkling2MetalTargetVendoredLabel)
-	} else {
+	default:
 		l, err := loadServeInkling2(path, rt.chatBackend, os.Stderr)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "fak serve: inkling2 load:", err)
