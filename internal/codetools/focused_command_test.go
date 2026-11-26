@@ -121,6 +121,12 @@ func TestFocusedCommandReadOnlyPipeFilters(t *testing.T) {
 		"go test ./... | tail -5 > out.txt",
 		"go test ./... > out.txt 2>&1 | tail -5",
 		"go test ./... | tail -5 2>/dev/null",
+		"go test ./... | tail -5 2>&1",
+		"go test ./... 2>&1",
+		"2>&1 go test ./... | tail -5",
+		"ls | head -5",
+		"pwd | wc -l",
+		"git diff | grep #comment",
 		"go test ./... | head -5 < input",
 		"go test ./... 2>&1x | tail -5",
 		"go test ./... | tail -$(echo 5)",
@@ -141,6 +147,12 @@ func TestFocusedCommandReadOnlyPipeFilters(t *testing.T) {
 		if focusedCommandAllowed(command) {
 			t.Errorf("focusedCommandAllowed(%q)=true", command)
 		}
+	}
+}
+
+func TestFocusedPipelinePreservesGitHardening(t *testing.T) {
+	if got := hardenGitArgs("git diff|head -5"); got != "git diff --no-ext-diff --no-textconv |head -5" {
+		t.Fatalf("hardened Git invocation = %q", got)
 	}
 }
 

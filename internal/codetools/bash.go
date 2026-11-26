@@ -161,8 +161,98 @@ func shellCommand(command string) (string, []string) {
 	return "/bin/sh", []string{"-c", command}
 }
 
+// An allowed command may be followed by read-only output filters joined with `|`.
+// `2>&1` is the only redirect admitted, and only as a whole field, so stderr
+// reaches the same pipe as stdout.
 func focusedCommandAllowed(command string) bool {
-	if strings.ContainsAny(command, "\r\n;&|<>`$%") {
+	if strings.ContainsAny(command, "\r\n") {
+		return false
+	}
+	if !strings.Contains(command, "|") {
+		return focusedSimpleCommandAllowed(command)
+	}
+
+	// Admit only whitespace that the shell and the validator both tokenize.
+	if strings.IndexFunc(command, func(r rune) bool { return r != '\t' && (r < 32 || r > 126) }) >= 0 {
+		return false
+	}
+	segments := strings.Split(command, "|")
+	producer := strings.Fields(segments[0])
+	if len(producer) > 1 && producer[len(producer)-1] == "2>&1" {
+		producer = producer[:len(producer)-1]
+	}
+	// ls and pwd have in-process implementations on Windows.
+	if len(producer) == 0 || producer[0] == "ls" || producer[0] == "pwd" ||
+		!focusedSimpleCommandAllowed(strings.Join(producer, " ")) {
+		return false
+	}
+	for _, filter := range segments[1:] {
+		if !readOnlyFilterAllowed(filter) {
+			return false
+		}
+	}
+	return true
+}
+
+// Only filters that cannot write files or read paths outside the pipe: no file
+// operands, no pattern files, and no follow mode.
+func readOnlyFilterAllowed(segment string) bool {
+	fields := strings.Fields(segment)
+	if len(fields) == 0 {
+		return false
+	}
+	args := fields[1:]
+	switch fields[0] {
+	case "head", "tail":
+		return lineCountArgsAllowed(args)
+	case "wc":
+		return len(args) == 1 && args[0] == "-l"
+	case "grep":
+		return grepPipeArgsAllowed(args)
+	default:
+		return false
+	}
+}
+
+var lineCountFlagRe = regexp.MustCompile(`^-n?[0-9]{1,6}$`)
+
+func lineCountArgsAllowed(args []string) bool {
+	switch {
+	case len(args) == 1:
+		return lineCountFlagRe.MatchString(args[0])
+	case len(args) == 2:
+		return args[0] == "-n" && goDigitsValue(args[1])
+	default:
+		return false
+	}
+}
+
+var (
+	grepPipePatternRe = regexp.MustCompile(`^[A-Za-z0-9_:=/,-]+$`)
+	grepPipeFlags     = map[string]bool{"-i": true, "-v": true, "-n": true, "-c": true, "-F": true, "-w": true}
+)
+
+// A single literal-looking pattern and no path operands: grep then reads only
+// the piped output, never a file.
+func grepPipeArgsAllowed(args []string) bool {
+	pattern := ""
+	for _, arg := range args {
+		switch {
+		case strings.HasPrefix(arg, "-"):
+			if !grepPipeFlags[arg] {
+				return false
+			}
+		case pattern != "" || !grepPipePatternRe.MatchString(arg):
+			return false
+		default:
+			pattern = arg
+		}
+	}
+	return pattern != ""
+}
+
+func focusedSimpleCommandAllowed(command string) bool {
+	if strings.ContainsAny(command, ";&|<>`$%") {
 		return false
 	}
 	fields := strings.Fields(command)
@@ -422,12 +512,17 @@ func gitArgsAllowed(args []string) bool {
 // diff and log run the repo's external diff and textconv drivers, which are
 // programs named by repo config; the per-invocation flags switch them off.
 func hardenGitArgs(command string) string {
-	fields := strings.Fields(command)
+	producer, filters, piped := strings.Cut(command, "|")
+	fields := strings.Fields(producer)
 	if len(fields) < 2 || fields[0] != "git" || (fields[1] != "diff" && fields[1] != "log") {
 		return command
 	}
 	out := append([]string{"git", fields[1], "--no-ext-diff", "--no-textconv"}, fields[2:]...)
-	return strings.Join(out, " ")
+	hardened := strings.Join(out, " ")
+	if piped {
+		hardened += " |" + filters
+	}
+	return hardened
 }
 
 func isGitCommand(command string) bool {
