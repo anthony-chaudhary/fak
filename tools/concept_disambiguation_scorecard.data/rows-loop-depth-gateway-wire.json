@@ -37,6 +37,25 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "capability-trained-loops",
+      "canonical": "TrainedLoops",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "capabilitymatrix.Capabilities.TrainedLoops (wire trained_loops): the recurrent pass count a checkpoint was trained at, registered from the GGUF loop.count; the gateway floors irreversible or shell-scoped loop depth at it after the policy cap.",
+      "distinction": "The TRAINED FLOOR for irreversible depth, not the MODEL CAPABILITY ceiling (MaxLoops) and not the policy cap (LoopDepthRule) that may lower a request.",
+      "distinct_from": [
+        "capability-max-loops",
+        "policy-loop-depth-rule"
+      ],
+      "aliases": [],
+      "grounding": "TrainedLoops",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

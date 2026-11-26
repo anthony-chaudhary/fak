@@ -232,6 +232,34 @@ func ResolveLoopDepth(profile string, maxLoops int, turnContext ...TurnAssessmen
 	return max(1, min(loops, maxLoops))
 }
 
+// ResolveTrainedLoopDepth is ResolveLoopDepth with a floor at the checkpoint's
+// trained recurrence count. Effort can raise depth toward maxLoops but never
+// lowers it below trained, because a looped model run below its trained depth
+// has no quality guarantee. A trained count <= 0 means unknown and is treated
+// as fixed-depth (trained = maxLoops).
+func ResolveTrainedLoopDepth(profile string, maxLoops, trainedLoops int, turnContext ...TurnAssessment) int {
+	if maxLoops <= 1 {
+		return 1
+	}
+	if trainedLoops <= 0 {
+		trainedLoops = maxLoops
+	}
+	floor := min(trainedLoops, maxLoops)
+	return max(floor, ResolveLoopDepth(profile, maxLoops, turnContext...))
+}
+
+// ResolveIrreversibleLoopFloor keeps a granted depth at the trained recurrence
+// count when the request's tool scope includes an irreversible tool. A policy
+// cap may lower ordinary depth, but a looped model run below its trained count
+// proposes destructive actions far more often, so irreversible work never drops
+// under it. An unknown trained count (<= 0) leaves the grant unchanged.
+func ResolveIrreversibleLoopFloor(granted, trainedLoops int, irreversible bool) int {
+	if !irreversible || trainedLoops <= 0 {
+		return granted
+	}
+	return max(granted, trainedLoops)
+}
+
 // IsRoutineToolName reports whether a tool name represents a routine inspection tool.
 func IsRoutineToolName(name string) bool {
 	return isRoutineToolName(name)

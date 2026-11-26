@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	capmatrix "github.com/anthony-chaudhary/fak/internal/capabilitymatrix"
 	"github.com/anthony-chaudhary/fak/internal/policy"
@@ -32,6 +34,11 @@ type LoopDepthReceipt struct {
 // modelMaxLoops is the per-model loop capability from the capability matrix
 // (max_loops, overridable via FAK_MODEL_CAPABILITIES). Unknown models are depth 1.
 var modelMaxLoops = func(model string) int { return max(1, capmatrix.Lookup(model).MaxLoops) }
+
+// modelTrainedLoops is the checkpoint's trained recurrence count (GGUF loop.count
+// via the capability matrix). Zero means unknown, which the resolver treats as
+// fixed-depth at maxLoops.
+var modelTrainedLoops = func(model string) int { return capmatrix.Lookup(model).TrainedLoops }
 
 // requestedLoops reads the per-request loop count from the two wire shapes vLLM
 // accepts: top-level "loops" and vllm_xargs.loops. Both present must agree.
@@ -63,20 +70,42 @@ func requestedLoops(req ChatRequest) (*int, string) {
 // resolveLoopDepth selects the loop count for req against maxLoops, then clamps
 // it under rule. A nil receipt with an empty message means the request does not
 // touch loop depth and the response stays byte-identical to a non-looped turn.
-func resolveLoopDepth(req ChatRequest, maxLoops int, rule *policy.LoopDepthRule) (*LoopDepthReceipt, string) {
-	receipt, msg := selectLoopDepth(req, maxLoops)
+func resolveLoopDepth(req ChatRequest, maxLoops, trainedLoops int, rule *policy.LoopDepthRule) (*LoopDepthReceipt, string) {
+	receipt, msg := selectLoopDepth(req, maxLoops, trainedLoops)
 	if receipt == nil || receipt.MaxLoops <= 1 {
 		return receipt, msg
 	}
-	// The gateway turn carries no tool scope, so only the rule's default cap applies.
+	// The policy cap has no tool scope here, so only the rule's default cap applies.
 	if granted, clamped := rule.ClampLoopDepth("", receipt.Loops); clamped {
 		receipt.Loops = min(max(1, granted), receipt.MaxLoops)
 		receipt.Source = LoopDepthSourcePolicyClamp
 	}
+	// The floor runs after the clamp so a cap cannot drop irreversible work
+	// below the trained pass count.
+	if requestIrreversible(req) {
+		receipt.Loops = min(agent.ResolveIrreversibleLoopFloor(receipt.Loops, trainedLoops, true), receipt.MaxLoops)
+	}
 	return receipt, ""
 }
 
-func selectLoopDepth(req ChatRequest, maxLoops int) (*LoopDepthReceipt, string) {
+// shellToolNames are tools that execute arbitrary commands. Their destructive
+// reach is only known per call, so the scope counts as irreversible up front.
+var shellToolNames = map[string]bool{"bash": true, "shell": true, "sh": true, "exec": true, "run_command": true, "execute_command": true, "terminal": true}
+
+// requestIrreversible reports whether the request's tool scope can take an
+// irreversible action. Per-call arguments do not exist at depth-selection time, so
+// a tool counts when its name is irreversible or it is a shell that can run any command.
+func requestIrreversible(req ChatRequest) bool {
+	for _, t := range req.Tools {
+		name := strings.ToLower(t.Function.Name)
+		if shellToolNames[name] || adjudicator.ClassifyReversibility(name, nil).Class == adjudicator.ReversibilityIrreversible {
+			return true
+		}
+	}
+	return false
+}
+
+func selectLoopDepth(req ChatRequest, maxLoops, trainedLoops int) (*LoopDepthReceipt, string) {
 	if maxLoops < 1 {
 		maxLoops = 1
 	}
@@ -94,7 +123,9 @@ func selectLoopDepth(req ChatRequest, maxLoops int) (*LoopDepthReceipt, string) 
 		return nil, ""
 	}
 	if req.ReasoningEffort != "" {
-		return &LoopDepthReceipt{Loops: agent.ResolveLoopDepth(req.ReasoningEffort, maxLoops), MaxLoops: maxLoops, Source: LoopDepthSourceEffort}, ""
+		// Effort may raise depth toward maxLoops but never lowers it below the
+		// trained count; an unknown trained count is fixed-depth at maxLoops.
+		return &LoopDepthReceipt{Loops: agent.ResolveTrainedLoopDepth(req.ReasoningEffort, maxLoops, trainedLoops), MaxLoops: maxLoops, Source: LoopDepthSourceEffort}, ""
 	}
 	// A looped model without an explicit count or effort runs its native full depth.
 	return &LoopDepthReceipt{Loops: maxLoops, MaxLoops: maxLoops, Source: LoopDepthSourceDefault}, ""
@@ -113,7 +144,7 @@ func (s *Server) SetLoopDepthRule(rule *policy.LoopDepthRule) error {
 
 // resolveChatLoopDepth writes a 400 and returns ok=false on an inadmissible loop count.
 func resolveChatLoopDepth(w http.ResponseWriter, req ChatRequest, rule *policy.LoopDepthRule) (*LoopDepthReceipt, bool) {
-	receipt, msg := resolveLoopDepth(req, modelMaxLoops(req.Model), rule)
+	receipt, msg := resolveLoopDepth(req, modelMaxLoops(req.Model), modelTrainedLoops(req.Model), rule)
 	if msg != "" {
 		writeErrCode(w, http.StatusBadRequest, codeLoopsOutOfRange, msg)
 		return nil, false

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	capmatrix "github.com/anthony-chaudhary/fak/internal/capabilitymatrix"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -723,6 +724,11 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			os.Exit(2)
 		}
 		m := l.Model
+		served := *sf.model
+		if served == "mock" || served == "" {
+			served = serveInkling2LoopDefaultModelID
+		}
+		capmatrix.RegisterCheckpointTrainedLoops(served, m.HP.Passes)
 		if gen, decode, err = newServeInkling2Generator(m, rt.chatBackend, os.LookupEnv); err != nil {
 			_ = m.Close()
 			fmt.Fprintln(os.Stderr, "fak serve:", err)

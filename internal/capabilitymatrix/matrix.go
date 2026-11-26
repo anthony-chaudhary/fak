@@ -23,6 +23,10 @@ type Capabilities struct {
 	// MaxLoops is the trained recurrent depth of a looped model; 0 or 1 means
 	// the model is not looped and requests must stay byte-identical.
 	MaxLoops int `json:"max_loops,omitempty"`
+	// TrainedLoops is the recurrent pass count a looped checkpoint was trained
+	// at (GGUF loop.count). It is the floor effort and policy must not lower
+	// below for irreversible work; 0 means unknown.
+	TrainedLoops int `json:"trained_loops,omitempty"`
 }
 
 // MarshalJSON preserves backward and forward wire compatibility for both direct nouns
@@ -51,6 +55,9 @@ func (c Capabilities) MarshalJSON() ([]byte, error) {
 	}
 	if c.MaxLoops > 0 {
 		m["max_loops"] = c.MaxLoops
+	}
+	if c.TrainedLoops > 0 {
+		m["trained_loops"] = c.TrainedLoops
 	}
 	return json.Marshal(m)
 }
@@ -93,6 +100,7 @@ func (c *Capabilities) UnmarshalJSON(data []byte) error {
 	c.ContextWindow = getInt("context_window")
 	c.MaxOutputTokens = getInt("max_output_tokens")
 	c.MaxLoops = getInt("max_loops")
+	c.TrainedLoops = getInt("trained_loops")
 	return nil
 }
 
@@ -425,8 +433,39 @@ func Lookup(model string) Capabilities {
 		caps = inferCapabilities(m)
 	}
 
+	if n := checkpointTrainedLoopsFor(m); n > 0 {
+		caps.TrainedLoops = n
+	}
 	applyEnvOverrides(m, &caps)
 	return caps
+}
+
+var (
+	checkpointMu           sync.RWMutex
+	checkpointTrainedLoops = map[string]int{}
+)
+
+// RegisterCheckpointTrainedLoops records the pass count a loaded checkpoint
+// declares in its GGUF metadata (loop.count) for the served model slug. The
+// GGUF value is authoritative over the static profile. A count <= 0 clears it.
+func RegisterCheckpointTrainedLoops(model string, loops int) {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" {
+		return
+	}
+	checkpointMu.Lock()
+	defer checkpointMu.Unlock()
+	if loops <= 0 {
+		delete(checkpointTrainedLoops, m)
+		return
+	}
+	checkpointTrainedLoops[m] = loops
+}
+
+func checkpointTrainedLoopsFor(model string) int {
+	checkpointMu.RLock()
+	defer checkpointMu.RUnlock()
+	return checkpointTrainedLoops[model]
 }
 
 // LookupProfile returns the ModelProfile for the given model.
@@ -721,6 +760,10 @@ func applyEnvOverrides(model string, caps *Capabilities) {
 		case "maxloops":
 			if num, ok := val.(float64); ok {
 				caps.MaxLoops = int(num)
+			}
+		case "trainedloops":
+			if num, ok := val.(float64); ok {
+				caps.TrainedLoops = int(num)
 			}
 		}
 	}

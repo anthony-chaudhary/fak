@@ -32,6 +32,7 @@ func stubModelMaxLoops(t *testing.T, caps map[string]int) {
 // fak-test:runtime fast est=5ms lane=default
 func TestResolveChatLoopDepthContract(t *testing.T) {
 	stubModelMaxLoops(t, map[string]int{"looped-stub": 4})
+	stubModelTrainedLoops(t, map[string]int{"looped-stub": 1})
 	cases := []struct {
 		name       string
 		body       string

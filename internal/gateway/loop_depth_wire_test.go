@@ -29,6 +29,8 @@ func TestModelMaxLoopsReadsCapabilityMatrix(t *testing.T) {
 // fak-test:runtime fast est=5ms lane=default
 func TestResolveLoopDepthEffortAndPolicyClamp(t *testing.T) {
 	stubModelMaxLoops(t, map[string]int{"looped-stub": 8})
+	// A varloop checkpoint (trained 1 of max 8) keeps the effort tier table.
+	stubModelTrainedLoops(t, map[string]int{"looped-stub": 1})
 	capAt := func(n int) *policy.LoopDepthRule { return &policy.LoopDepthRule{MaxLoopDepth: n} }
 	cases := []struct {
 		name string
@@ -52,7 +54,7 @@ func TestResolveLoopDepthEffortAndPolicyClamp(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := decodeLoopDepthChatRequest(t, tc.body)
-			got, msg := resolveLoopDepth(req, modelMaxLoops(req.Model), tc.rule)
+			got, msg := resolveLoopDepth(req, modelMaxLoops(req.Model), modelTrainedLoops(req.Model), tc.rule)
 			if msg != "" {
 				t.Fatalf("unexpected refusal %q", msg)
 			}
