@@ -243,6 +243,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// declined a restored prefix and the request falls back to a fresh session.
 	for {
 		p.configureNativeSession(s)
+		applyPromptPanelHeadroom(ctx, s)
 		p.preReservePackedQ4KRequest(s, len(ids), maxNew)
 		qwen35MetalStateIdentityEnabled = false
 		if shouldEnableQwen35MetalStateIdentity(p, measurement, ids, matched, cachedLogits) {

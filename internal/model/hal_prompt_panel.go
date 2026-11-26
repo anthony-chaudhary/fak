@@ -271,20 +271,39 @@ func (s *Session) promptPanelSelect(ids []int) (promptPanelBackend, promptPanelW
 }
 
 // promptPanelChunkTokens sizes a chunk so its peak scratch fits the per-token transient demand
-// compute.EstimateHALTransientMemoryPlan already prices, capped at promptPanelMaxTokens.
+// compute.EstimateHALTransientMemoryPlan already prices plus the admitted
+// PromptPanelHeadroomBytes, capped at promptPanelMaxTokens.
 func (s *Session) promptPanelChunkTokens() int {
 	if promptPanelChunkOverride > 0 {
 		return promptPanelChunkOverride
 	}
-	c := s.M.Cfg
+	return compute.PromptPanelChunkTokensWithHeadroom(s.M.promptPanelScratchConfig(), promptPanelMaxTokens, s.PromptPanelHeadroomBytes)
+}
+
+func (m *Model) promptPanelScratchConfig() compute.TransformerScratchConfig {
+	c := m.Cfg
 	// An MoE-only width declaration (deepseek_v4) prices the row's FFN transient at the
 	// expert width; the live-expert transients are hidden/router-wide, so this over-prices
 	// conservatively and the estimate only ever refuses MORE rows.
-	return compute.PromptPanelChunkTokens(compute.TransformerScratchConfig{
+	return compute.TransformerScratchConfig{
 		HiddenSize: c.HiddenSize, IntermediateSize: c.ScratchFFNWidth(), VocabSize: c.VocabSize,
 		NumLayers: c.NumLayers, NumHeads: c.NumHeads, NumKVHeads: c.NumKVHeads, HeadDim: c.HeadDim,
 		IncludeLogits: true,
-	}, promptPanelMaxTokens)
+	}
+}
+
+// PromptPanelHeadroomDemand prices the extra prompt-panel rows a promptTokens-long prefill on
+// be can run inside availBytes of unclaimed device budget. Its total is the value a caller
+// that admitted it stores in Session.PromptPanelHeadroomBytes. A backend without the panel
+// seam, or a budget that buys no extra row, returns nil.
+func (m *Model) PromptPanelHeadroomDemand(be compute.Backend, promptTokens int, availBytes int64) compute.MemoryPlan {
+	if m == nil || promptPanelChunkOverride > 0 {
+		return nil
+	}
+	if _, ok := be.(promptPanelBackend); !ok {
+		return nil
+	}
+	return compute.PromptPanelHeadroomDemand(m.promptPanelScratchConfig(), promptPanelMaxTokens, promptTokens, availBytes)
 }
 
 // prefillHALPanel is the batched twin of the prefillHAL token loop for a PreNorm model. It

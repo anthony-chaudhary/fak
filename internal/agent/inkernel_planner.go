@@ -1752,6 +1752,7 @@ func (p *InKernelPlanner) admitDeviceOOMRetry(ctx context.Context, err error, pr
 	if !p.prepareDeviceOOMRetry(err) {
 		return false, err
 	}
+	revokePromptPanelHeadroom(ctx)
 	if capErr := p.refuseOversizeRequest(promptTokens, maxNew); capErr != nil {
 		// No retry ran, so none is booked: the retry counter counts attempted retries.
 		return false, capErr
@@ -2336,6 +2337,7 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 				if err := p.refuseOversizeRequest(promptTokens, maxNew); err != nil {
 					return nil, err
 				}
+				ctx = withPromptPanelHeadroom(ctx, p.promptPanelHeadroomGrantBytes(promptTokens, maxNew))
 			} else if p.concurrencyProfile != nil {
 				// Concurrent-unfused path (coalescing or CPU): still record the boundary
 				// so the timeline can distinguish "no mutex serialized us" from "no

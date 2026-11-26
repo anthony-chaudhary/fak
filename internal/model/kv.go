@@ -48,6 +48,11 @@ type Session struct {
 	// host CPU. GPULayers is supported as an alias. 0 (default) runs all layers on Backend.
 	DenseGPULayers int
 	GPULayers      int
+	// PromptPanelHeadroomBytes is device scratch beyond the per-token transient budget that
+	// this session's request admission priced for the prompt panel (Model.PromptPanelHeadroomDemand).
+	// It widens prefill chunks; only a caller whose fit included it may set it. 0 keeps the
+	// transient-only chunk.
+	PromptPanelHeadroomBytes int64
 	// Q4KGateUpOutputSlab explicitly enables the experimental session-owned Metal
 	// gate/up output slab. The default remains off until the measured KEEP gate lands.
 	Q4KGateUpOutputSlab bool

@@ -290,10 +290,20 @@ func PromptPanelRowBytes(cfg TransformerScratchConfig) int64 {
 // panel chunk therefore never needs memory the context fit did not admit. Incomplete geometry
 // returns 1.
 func PromptPanelChunkTokens(cfg TransformerScratchConfig, maxTokens int) int {
+	return PromptPanelChunkTokensWithHeadroom(cfg, maxTokens, 0)
+}
+
+// PromptPanelChunkTokensWithHeadroom is PromptPanelChunkTokens with headroomBytes of
+// already-admitted panel scratch added to the transient budget. The headroom must come from a
+// fit that priced it (PromptPanelHeadroomDemand); a non-positive headroom is the plain chunk.
+func PromptPanelChunkTokensWithHeadroom(cfg TransformerScratchConfig, maxTokens int, headroomBytes int64) int {
 	row := PromptPanelRowBytes(cfg)
 	budget := EstimateHALTransientMemoryPlan(cfg).Total()
 	if maxTokens < 1 || row <= 0 || budget <= 0 {
 		return 1
+	}
+	if headroomBytes > 0 {
+		budget = saturatingAddInt64(budget, headroomBytes)
 	}
 	n := budget / row
 	if n < 1 {
@@ -303,6 +313,32 @@ func PromptPanelChunkTokens(cfg TransformerScratchConfig, maxTokens int) int {
 		return maxTokens
 	}
 	return int(n)
+}
+
+// PromptPanelHeadroomDemand prices the prompt-panel rows a promptTokens-long prefill could run
+// beyond the transient-only chunk, given availBytes of device budget the rest of the request
+// plan leaves unclaimed. The demand's bytes, passed back as PromptPanelChunkTokensWithHeadroom's
+// headroom, yield exactly the priced chunk. It returns nil when the spare budget buys no extra
+// row, so a plan with no headroom stays byte-for-byte unchanged.
+func PromptPanelHeadroomDemand(cfg TransformerScratchConfig, maxTokens, promptTokens int, availBytes int64) MemoryPlan {
+	row := PromptPanelRowBytes(cfg)
+	budget := EstimateHALTransientMemoryPlan(cfg).Total()
+	if maxTokens < 1 || promptTokens < 1 || row <= 0 || budget <= 0 || availBytes <= 0 {
+		return nil
+	}
+	base := PromptPanelChunkTokens(cfg, maxTokens)
+	want := int64(min(maxTokens, promptTokens))
+	if n := saturatingAddInt64(budget, availBytes) / row; n < want {
+		want = n
+	}
+	if want <= int64(base) {
+		return nil
+	}
+	bytes := saturatingMulInt64(want, row) - budget
+	if bytes <= 0 {
+		return nil
+	}
+	return MemoryPlan{{Class: MemoryScratchpad, Bytes: bytes, Detail: "prompt-panel-headroom", Scope: MemoryScopeDevice, DType: F32.String()}}
 }
 
 // DequantGEMMScratchRows is the activation row count at which the CUDA quantized GEMM

@@ -468,6 +468,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 	}()
 	p.configureNativeSession(s)
+	applyPromptPanelHeadroom(ctx, s)
 
 	// Choose the request stream once, before constructing the draft. The host
 	// fallback retains its own RNG; no probability callback consumes either RNG.
@@ -507,6 +508,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			s.Close()
 			s = p.newSpeculativeSession()
 			p.configureNativeSession(s)
+			applyPromptPanelHeadroom(ctx, s)
 			matched = 0
 			cachedLogits = nil
 			sourceTier = radixkv.SnapshotTierMiss
@@ -1448,6 +1450,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	}
 	defer s.Close()
 	p.configureNativeSession(s)
+	applyPromptPanelHeadroom(ctx, s)
 
 	p.recordTurnTax(promptTok, cacheable, matched)
 	enginestep.Default.ObservePrefixMatched(matched)

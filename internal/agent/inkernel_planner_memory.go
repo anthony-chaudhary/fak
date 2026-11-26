@@ -565,3 +565,40 @@ func (p *InKernelPlanner) includeResidentWeightsInRequestFit() bool {
 	_, free, known := compute.DeviceMemoryInfo(p.backend)
 	return !known || free < 0
 }
+
+// promptPanelHeadroomGrantBytes prices the prompt-panel rows the device can hold beyond the
+// transient-only chunk for a request that already passed refuseOversizeRequest, and returns
+// the granted bytes. The grant is the spare of one live device snapshot after the full request
+// plan, and the plan plus the grant must pass the same refusal against that snapshot, so the
+// widened chunk stays inside the fit and the typed mid-prefill OOM contract holds. Unknown free
+// memory, a non-panel backend, or no spare budget grants 0.
+//
+// Callers must hold the device serialization lock: the snapshot's spare budget is only this
+// request's while no other forward can allocate.
+func (p *InKernelPlanner) promptPanelHeadroomGrantBytes(promptTokens, maxNew int) int64 {
+	if p == nil || p.backend == nil || p.m == nil {
+		return 0
+	}
+	total, free, known := compute.DeviceMemoryInfo(p.backend)
+	if !known || total <= 0 || free < 0 {
+		return 0
+	}
+	plan, err := p.requestMemoryPlanWithExtras(promptTokens, maxNew, p.requestMTPHistoryEligible(maxNew))
+	if err != nil || len(plan) == 0 {
+		return 0
+	}
+	verdict, avail := compute.FitsCapacity(total, free, known, plan.DeviceTotal(), inKernelRequestDeviceHeadroom)
+	if verdict != compute.FitOK {
+		return 0
+	}
+	demand := p.m.PromptPanelHeadroomDemand(p.backend, promptTokens, avail-plan.DeviceTotal())
+	if len(demand) == 0 {
+		return 0
+	}
+	priced := append(append(compute.MemoryPlan(nil), plan...), demand...)
+	if compute.RefuseMemoryPlanIfTooBigForReportedDevice(p.backend, priced, total, free, known, inKernelRequestDeviceHeadroom) != nil {
+		return 0
+	}
+	p.recordRequestMemoryPlan(promptTokens, maxNew, priced)
+	return demand.Total()
+}
