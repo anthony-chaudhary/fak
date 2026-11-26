@@ -22,7 +22,7 @@
     "required_rocm_version": ">=6.3"
   },
   "fail_closed_validation": {
-    "script": "run-mi300x-baselines.sh",
+    "script": "run-mi300x-baselines.txt",
     "contract": "mi300x-packet.json",
     "host_prerequisites": [
       "docker present and executable",

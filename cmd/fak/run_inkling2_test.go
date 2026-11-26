@@ -158,7 +158,7 @@ func TestRunInkling2MetalTargetLabels(t *testing.T) {
 	if inkling2MetalTargetVendoredLabel != "vendored-splash" || inkling2MetalTargetNativeLabel != "fak-metalgemm" || inkling2MetalTargetResidentLabel != "fak-metal-resident" {
 		t.Fatalf("labels %q %q %q", inkling2MetalTargetVendoredLabel, inkling2MetalTargetNativeLabel, inkling2MetalTargetResidentLabel)
 	}
-	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "inkling2-metal-target-ab.sh"))
+	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "inkling2-metal-target-ab.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}

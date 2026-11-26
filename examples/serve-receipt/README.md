@@ -6,7 +6,7 @@ in `internal/servereceipt/doc.go`).
 
 Regenerate the receipt for the bundled model (markdown to stdout):
 
-    ./run.sh
+    go run ./cmd/fak serve-receipt plan --facts examples/serve-receipt/kimi-k31-pro-nvfp4.facts.json --gpu rtx-pro-6000-blackwell-96gb --tp 8 --pp 3
 
 A captured run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 

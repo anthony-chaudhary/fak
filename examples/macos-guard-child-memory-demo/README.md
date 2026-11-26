@@ -22,7 +22,7 @@ Or run the full walkthrough or JSON output:
 ```bash
 go run ./examples/macos-guard-child-memory-demo
 go run ./examples/macos-guard-child-memory-demo -json
-./examples/macos-guard-child-memory-demo/run.sh
+go run ./examples/macos-guard-child-memory-demo -selfcheck
 ```
 
 The demo completes in under 1 second. Determinism: every run produces deterministic, byte-identical decisions and receipts across invocations.

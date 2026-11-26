@@ -17,8 +17,8 @@
   "go_version": "go version go1.26.0 windows/amd64",
   "generated_at_utc": "2026-09-12T20:40:48.5510791Z",
   "files": [
-    "mtp-count25.log",
-    "agent-package.log",
+    "mtp-count25.txt",
+    "agent-package.txt",
     "receipt.json"
   ]
 }

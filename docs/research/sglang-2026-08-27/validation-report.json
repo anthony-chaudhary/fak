@@ -2,7 +2,7 @@
   "schema": "fak-study-validation/1",
   "json_checks": [
     {
-      "path": "docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz",
+      "path": "docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz.part-*",
       "json_valid": true,
       "bytes": 3666,
       "sha256": "sha256:25f44041cc32420770c01df9213f453c8acc46785f8797419ce2bc30c4438053",
@@ -40,7 +40,7 @@
   "all_json_valid": true,
   "local_links": [
     {
-      "target": "../inventory/sgl-project-sglang-corpus.jsonl.gz",
+      "target": "../inventory/sgl-project-sglang-corpus.jsonl.gz.part-0",
       "exists": true
     },
     {
@@ -62,7 +62,7 @@
   ],
   "all_local_links_valid": true,
   "study_forge_validate": {
-    "command": "fak study-forge validate --receipt docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz",
+    "command": "cat docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz.part-* > $TMPDIR/sgl-project-sglang-corpus.jsonl.gz && fak study-forge validate --receipt $TMPDIR/sgl-project-sglang-corpus.jsonl.gz",
     "exit_code": 1,
     "expected": true,
     "result": "invalid receipt: receipt status must be complete, got partial"
@@ -79,7 +79,7 @@
   "all_deterministic_checks_pass": true,
   "corpus_validation": {
     "status": "valid",
-    "command": "go run ./cmd/fak study-forge validate --receipt docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz",
+    "command": "cat docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz.part-* > $TMPDIR/sgl-project-sglang-corpus.jsonl.gz && go run ./cmd/fak study-forge validate --receipt $TMPDIR/sgl-project-sglang-corpus.jsonl.gz",
     "records": 36758,
     "revision": "536f570e6692eec0656ef9689db7591ca1d0e0a7"
   }

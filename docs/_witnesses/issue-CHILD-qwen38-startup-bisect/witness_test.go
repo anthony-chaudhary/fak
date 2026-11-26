@@ -114,7 +114,7 @@ func TestStartupBisectReadback(t *testing.T) {
 		t.Fatalf("execution = %#v", got.Execution)
 	}
 
-	for _, name := range []string{"accepted.log", "current-main-run-1.log", "current-main-run-2.log"} {
+	for _, name := range []string{"accepted.txt", "current-main-run-1.txt", "current-main-run-2.txt"} {
 		assertScrubbedLog(t, name)
 	}
 }

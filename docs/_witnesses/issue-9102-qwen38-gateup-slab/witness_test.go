@@ -273,11 +273,11 @@ func TestGateUpSlabWitness(t *testing.T) {
 		t.Fatalf("memory aggregate=%d/%d/%d/%d receipt=%+v", peakRSS, minFree, maxCompressor, maxSwap, receipt.ObservedMemory)
 	}
 
-	assertContains(t, "control-server-summary.log", "control_selector FAK_Q4K_GATEUP_SLAB=0", "control_gateup_slab_execution_lines=0", "candidate_executed=false", "forward_path=metal/qwen35-hybrid-session-v1")
-	assertContains(t, "campaign-state.log", "arm_directories=01-control-rep1", "candidate_arm_directories=0", "candidate_executed=false")
-	assertContains(t, "watcher.log", "matched_terms=0", "unmatched_signals=0", "reused_pid_signals=0")
-	assertContains(t, "isolation-summary.log", "global_gpu_lease=held_during_control", "restored_model=qwen3.6-27b", "restored_stable_seconds=90", "stale_helper_samples=30")
-	assertContains(t, "restore.log", "stable_seconds=90", "stale_helper_samples=30")
+	assertContains(t, "control-server-summary.txt", "control_selector FAK_Q4K_GATEUP_SLAB=0", "control_gateup_slab_execution_lines=0", "candidate_executed=false", "forward_path=metal/qwen35-hybrid-session-v1")
+	assertContains(t, "campaign-state.txt", "arm_directories=01-control-rep1", "candidate_arm_directories=0", "candidate_executed=false")
+	assertContains(t, "watcher.txt", "matched_terms=0", "unmatched_signals=0", "reused_pid_signals=0")
+	assertContains(t, "isolation-summary.txt", "global_gpu_lease=held_during_control", "restored_model=qwen3.6-27b", "restored_stable_seconds=90", "stale_helper_samples=30")
+	assertContains(t, "restore.txt", "stable_seconds=90", "stale_helper_samples=30")
 	assertContains(t, "restore-models.json", "qwen3.6-27b")
 	stale := strings.Split(strings.TrimSpace(string(readFile(t, "stale-helper-samples.tsv"))), "\n")
 	if len(stale) != 30 {

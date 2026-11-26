@@ -134,7 +134,7 @@ func TestReceiptFailsClosedOnConsumedLaunchWithoutRequest(t *testing.T) {
 }
 
 func TestCandidateLogBindsOneLaunchAndZeroRequests(t *testing.T) {
-	b := mustRead(t, "candidate.log")
+	b := mustRead(t, "candidate.txt")
 	s := string(b)
 	if strings.Count(s, "candidate_launch count=1") != 1 || strings.Count(s, "method=POST") != 0 ||
 		strings.Count(s, "method=GET path=/health status=404") != 9 ||
@@ -148,7 +148,7 @@ func TestCandidateLogBindsOneLaunchAndZeroRequests(t *testing.T) {
 		"gpu_lease released=true signal=TERM",
 	} {
 		if !strings.Contains(s, want) {
-			t.Fatalf("candidate.log missing %q", want)
+			t.Fatalf("candidate.txt missing %q", want)
 		}
 	}
 	rows := readTSV(t, "memory-samples.tsv")
@@ -215,10 +215,10 @@ func TestPacketIsPublicAndCorrectedDryChecksGiveNoAcceptanceCredit(t *testing.T)
 			}
 		}
 	}
-	dry := string(mustRead(t, "dry-checks.log"))
+	dry := string(mustRead(t, "dry-checks.txt"))
 	for _, want := range []string{"watcher_swap_parser=green", "cleanup=noop", "full_dry_run=green", "context_only=true", "relaunch_performed=false"} {
 		if !strings.Contains(dry, want) {
-			t.Fatalf("dry-checks.log missing %q", want)
+			t.Fatalf("dry-checks.txt missing %q", want)
 		}
 	}
 	r := readReceipt(t)

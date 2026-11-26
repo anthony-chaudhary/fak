@@ -11,7 +11,7 @@
       "sha256": "4cdf791013514300f6f2dc7031a0c596e3721e242909802b23b4b0416c1e0398"
     },
     {
-      "path": "docs/_witnesses/issue-9108-qwen38-metal-gdn-panel-drain-canary/candidate.log",
+      "path": "docs/_witnesses/issue-9108-qwen38-metal-gdn-panel-drain-canary/candidate.txt",
       "sha256": "0b195a3a988e15d4005300a36d3651dd91a690f370be6ca3255992ade496aee6"
     }
   ],
@@ -105,5 +105,5 @@
       "source_sha256": "79d12aab993ba7051f953b6a5335b1b7da7efc3cfc4ea2330a77ba1f6f63c203"
     }
   ],
-  "bundle_sha256": "548e222bf9ea2249bb2e70d2897d012ad8e95cfebe8e955939d04734f474c9c5"
+  "bundle_sha256": "d9632088e658d882ece18b924f626abca75824062e0b370658aeb19083068f18"
 }

@@ -83,7 +83,7 @@ tokens per request. `k_q4k_mmvq_gemv` and `k_q6k_gemm` (grid y=1) are decode ker
 - llama.cpp b9724 on Windows, Qwen3.8-27B UD-Q2_K_XL: llama-bench pp128/512/2048 1268/1696/1670 tok/s
   (`raw/egpu-a-llama-bench-q2kxl.md`).
 - fak (WSL2 build, same tree) plans 26.45 GiB of weights for that 9.8 GB file, against a 13.5 GiB fit
-  budget, and refuses with a typed `FitTooBig` (`raw/egpu-a-fak-fit-refusal.log`). The 27B only runs
+  budget, and refuses with a typed `FitTooBig` (`raw/egpu-a-fak-fit-refusal.txt`). The 27B only runs
   there with layer offload, which another receipt measured at 0.2 tok/s decode. No fak eGPU prefill
   number exists.
 - A native Windows `-tags cuda` link fails: MSVC-compiled `libfakcuda.a` against mingw ld gives

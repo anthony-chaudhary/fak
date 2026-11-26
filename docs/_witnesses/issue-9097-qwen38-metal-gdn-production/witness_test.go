@@ -207,19 +207,19 @@ func TestRejectReceiptBindsThreeSampleSafetyTripAndRestore(t *testing.T) {
 }
 
 func TestScrubbedNativeLogBindsPathAndContainsNoPrivatePath(t *testing.T) {
-	b, err := os.ReadFile("native.log")
+	b, err := os.ReadFile("native.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(b)
 	for _, want := range []string{"engine=inkernel backend=metal forward_path=" + forwardPath, "q4k=true fallback=false llama_cpp=false", "signal=TERM", "restore_stable_complete seconds=90", ownerSHA} {
 		if !strings.Contains(s, want) {
-			t.Fatalf("native.log missing %q", want)
+			t.Fatalf("native.txt missing %q", want)
 		}
 	}
 	for _, forbidden := range []string{"/Users/", "/private/", "ssh", "token=", "password=", "secret="} {
 		if strings.Contains(strings.ToLower(s), strings.ToLower(forbidden)) {
-			t.Fatalf("native.log contains private marker %q", forbidden)
+			t.Fatalf("native.txt contains private marker %q", forbidden)
 		}
 	}
 }

@@ -264,7 +264,7 @@ func verifyCanary(t *testing.T, packet closurePacket) {
 	pins := map[string]string{
 		"receipt.json":       packet.LiveCanary.ChildReceiptSHA256,
 		"memory-samples.tsv": packet.LiveCanary.MemorySamplesSHA256,
-		"native.log":         packet.LiveCanary.NativeLogSHA256,
+		"native.txt":         packet.LiveCanary.NativeLogSHA256,
 		"witness_test.go":    packet.LiveCanary.ChildWitnessSHA256,
 	}
 	for name, want := range pins {
@@ -367,19 +367,19 @@ func verifyCanary(t *testing.T, packet closurePacket) {
 		t.Fatalf("canary isolation/restoration=%+v", receipt.Isolation)
 	}
 
-	nativeLog := strings.ToLower(string(readFile(t, filepath.Join(childDir, "native.log"))))
+	nativeLog := strings.ToLower(string(readFile(t, filepath.Join(childDir, "native.txt"))))
 	for _, want := range []string{
 		"engine=inkernel backend=metal forward_path=" + wantForwardPath,
 		"q4k=true fallback=false llama_cpp=false",
 		"restore_stable_complete seconds=90",
 	} {
 		if !strings.Contains(nativeLog, want) {
-			t.Fatalf("native.log missing %q", want)
+			t.Fatalf("native.txt missing %q", want)
 		}
 	}
 	for _, forbidden := range []string{"/users/", "/private/", "ssh ", "token=", "password=", "secret="} {
 		if strings.Contains(nativeLog, forbidden) {
-			t.Fatalf("native.log contains private marker %q", forbidden)
+			t.Fatalf("native.txt contains private marker %q", forbidden)
 		}
 	}
 }

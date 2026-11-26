@@ -1,4 +1,4 @@
-# folded from the last cumulative ts-profile block (batches=96) of runs/P1-mmq-profile.serve.log; [P]=grid y>1 (prompt panel), [1]=grid y==1
+# folded from the last cumulative ts-profile block (batches=96) of runs/P1-mmq-profile.serve.txt; [P]=grid y>1 (prompt panel), [1]=grid y==1
 # total_ms	kernel
 10057.2	k_q6k_gemm_panel [P]
 2196.7	cublas_gemm_ex [P]

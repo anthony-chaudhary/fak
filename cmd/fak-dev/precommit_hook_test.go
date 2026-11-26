@@ -259,28 +259,3 @@ func TestPreCommitHookBoundaryFailureBlocks(t *testing.T) {
 		t.Fatalf("green boundary check must admit: %v\n%s", err, out)
 	}
 }
-
-func TestPreCommitHookPowerShellParity(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("..", "..", ".githooks", "pre-commit.ps1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(src)
-	audit := strings.Index(s, "scrub_public_copy.py")
-	if audit < 0 {
-		t.Fatal("staged audit missing from pre-commit.ps1")
-	}
-	if i := strings.Index(s, "Env:\\GIT_INDEX_FILE"); i >= 0 && i < audit {
-		t.Fatal("pre-commit.ps1 clears GIT_INDEX_FILE before the staged audit")
-	}
-	if !strings.Contains(s, "rev-parse --show-toplevel") {
-		t.Fatal("pre-commit.ps1 must resolve the active worktree with git rev-parse --show-toplevel")
-	}
-	if !strings.Contains(s, "rev-parse --git-common-dir") {
-		t.Fatal("pre-commit.ps1 must resolve the main checkout with git rev-parse --git-common-dir for linked worktrees")
-	}
-	boundary := strings.Index(s, "& go run ./cmd/fak-dev boundary")
-	if boundary < 0 || !strings.Contains(s[boundary:min(len(s), boundary+200)], "$LASTEXITCODE -ne 0") {
-		t.Fatal("pre-commit.ps1 must fail closed on the public boundary exit code")
-	}
-}

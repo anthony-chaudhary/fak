@@ -9,7 +9,7 @@ identity or safety row can be accepted. There was no rerun.
 
 This is distinct from the pre-drain #9097 result. The post-#9103 binary reached
 its HTTP listener, but nine readiness probes observed `/health` HTTP 404 while
-`/v1/models` returned 200. Those GETs are preserved in `candidate.log`; the log
+`/v1/models` returned 200. Those GETs are preserved in `candidate.txt`; the log
 contains no POST. Because the frozen P=32,800/T=8 body was never transmitted,
 the packet does not claim a generated token, `ORCHID-7319`, the resident-GDN
 forward path, Q4_K execution, or fallback status.

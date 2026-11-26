@@ -34,7 +34,7 @@ Artifacts:
 - `control-arm.json` — scrubbed structured terminal control record;
 - `control-memory-samples.tsv` — all 89 load/request pressure samples;
 - `safety-trip.txt` — exact terminal crossing;
-- `watcher.log` — zero-overlap watcher close record;
+- `watcher.txt` — zero-overlap watcher close record;
 - `restore-samples.tsv` — exact command/health/model restoration samples; and
 - `stale-helper-samples.tsv` — 30 post-restore helper checks.
 

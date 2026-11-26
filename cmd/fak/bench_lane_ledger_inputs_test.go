@@ -224,7 +224,7 @@ func TestBenchLaneObservedRejectsMalformedProfile(t *testing.T) {
 	bad := benchLaneWriteTemp(t, "bad.json", `[{"name": "k", "gx": 0, "gy": 1, "calls": 1, "total_ns": 5}]`)
 	var stdout, stderr bytes.Buffer
 	code := runBenchLaneLedger(&stdout, &stderr, []string{
-		"observed", "--profile", bad, "--ptxas-log", "testdata/bench_lane_ledger/ptxas_sm120_excerpt.log",
+		"observed", "--profile", bad, "--ptxas-log", "testdata/bench_lane_ledger/ptxas_sm120_excerpt.txt",
 		"--device-props", benchLaneProps,
 	})
 	if code == 0 {

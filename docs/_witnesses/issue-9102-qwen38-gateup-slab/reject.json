@@ -103,13 +103,13 @@
     "stale_helper_samples": 30
   },
   "artifacts": {
-    "campaign-state.log": "860b54dc531dd513ceab5c4adcf9e89839bd269a04bbf8ce657f62a633234a4a",
+    "campaign-state.txt": "860b54dc531dd513ceab5c4adcf9e89839bd269a04bbf8ce657f62a633234a4a",
     "control-memory-samples.raw.tsv": "e3080facbf9d7b05e9a40c19c1a79dfcf937019fcf9c0836691bda8af685d646",
     "control-response.json": "efbe3ef9fc89b46ad447714b5558a58a99fc2f69c5f6b115c9ab6b8b384fb25c",
-    "control-server-summary.log": "4acb125910fba4646ec122af819b5e092cc326e7a6fffc31221e4a08ccbd1a39",
-    "isolation-summary.log": "4fec84933f9fc1f440475106008b78c024ea7f689ce38cafe516febf9a397ecd",
-    "watcher.log": "84a86be8e4fa2b5e9f9b76480d54e78ec6c9dcf357216523b59c0c3fc1f620c5",
-    "restore.log": "981a89a50a75cec8cb5973c45d06c1dd5ad5eec330b8fae6c627b80b3a647272",
+    "control-server-summary.txt": "4acb125910fba4646ec122af819b5e092cc326e7a6fffc31221e4a08ccbd1a39",
+    "isolation-summary.txt": "4fec84933f9fc1f440475106008b78c024ea7f689ce38cafe516febf9a397ecd",
+    "watcher.txt": "84a86be8e4fa2b5e9f9b76480d54e78ec6c9dcf357216523b59c0c3fc1f620c5",
+    "restore.txt": "981a89a50a75cec8cb5973c45d06c1dd5ad5eec330b8fae6c627b80b3a647272",
     "restore-models.json": "245715f95437973677acf27417e0b251cc40e1132e29392d4550c67559528fb5",
     "restore-samples.tsv": "2ca5ab330468fb22d25ccd21035988a40df35e168a7b7b6357809c95f53cbef2",
     "stale-helper-samples.tsv": "6c5a5d8b995ae5ef7dd33c74d34dab10250237daa294406e4196cacfc284f4ad"

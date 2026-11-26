@@ -26,8 +26,8 @@ the candidate arm therefore remained unexecuted.
 `control-memory-samples.raw.tsv` and `control-response.json` are byte-for-byte
 copies of the path-free raw campaign artifacts. The raw sampler wrote literal
 `\t` separators; the witness test deliberately parses that exact format instead
-of normalizing it. `campaign-state.log` records that the run produced one control
-arm directory and zero candidate arm directories. `control-server-summary.log` and `isolation-summary.log` are
+of normalizing it. `campaign-state.txt` records that the run produced one control
+arm directory and zero candidate arm directories. `control-server-summary.txt` and `isolation-summary.txt` are
 scrubbed summaries: they retain execution identity, selector, hashes, teardown,
 and restoration while removing local paths and PIDs. The watcher and restoration
 files are copied unchanged because they contain no credentials or private paths.

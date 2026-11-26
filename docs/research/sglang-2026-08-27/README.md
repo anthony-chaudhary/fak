@@ -17,7 +17,7 @@ description: "Study of SGLang upstream source tree and forge capture receipt."
 - Raw payload: 165249827 bytes, `sha256:bf45531c67368675a2919013aafda770da21a053852f8f1eb2a3632c138f61c4`; retained in allocated scratch, not committed.
 - Validation: `fak study-forge validate` refused status `partial`. Exact cause: `only_in_mixed=29033`, `only_in_dedicated=29053`, `total=58086`, policy limit `1000`. The differing endpoint numeric IDs prevent a responsible completeness claim even though PR numbers/node IDs correspond.
 
-The complete receipt is gzip-compressed for transport (33.8 MB; 165.2 MB expanded): [`../inventory/sgl-project-sglang-corpus.jsonl.gz`](../inventory/sgl-project-sglang-corpus.jsonl.gz). Full class accounting is in [`source-completeness.json`](source-completeness.json).
+The complete receipt is gzip-compressed for transport (33.8 MB; 165.2 MB expanded) and split into three parts under the 25 MiB file-admission cap: [`../inventory/sgl-project-sglang-corpus.jsonl.gz.part-0`](../inventory/sgl-project-sglang-corpus.jsonl.gz.part-0), `.part-1`, `.part-2`. Reassemble with `cat ../inventory/sgl-project-sglang-corpus.jsonl.gz.part-* > sgl-project-sglang-corpus.jsonl.gz` before validating; the joined file is byte-identical to the captured receipt. Full class accounting is in [`source-completeness.json`](source-completeness.json).
 
 ## Candidate ledger
 
@@ -58,9 +58,11 @@ The machine ledger is [`candidate-ledger.json`](candidate-ledger.json). It recor
 Run:
 
 ```powershell
-gzip -dc docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz > $TMPDIR/sglang-corpus.json`npython -m json.tool $TMPDIR/sglang-corpus.json > /dev/null
+cat docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz.part-* > $TMPDIR/sglang-corpus.jsonl.gz
+gzip -dc $TMPDIR/sglang-corpus.jsonl.gz > $TMPDIR/sglang-corpus.json
+python -m json.tool $TMPDIR/sglang-corpus.json > /dev/null
 Get-ChildItem docs/research/sglang-2026-08-27/*.json | ForEach-Object { python -m json.tool $_.FullName > $null }
-fak study-forge validate --receipt $TMPDIR/sglang-corpus.json  # -> valid
+fak study-forge validate --receipt $TMPDIR/sglang-corpus.jsonl.gz  # -> valid
 ```
 
 See [`validation-report.json`](validation-report.json) for the executed checks and checksums.

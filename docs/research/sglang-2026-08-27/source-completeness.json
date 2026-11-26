@@ -86,7 +86,7 @@
   },
   "validation": {
     "study_forge_validate": "valid",
-    "command": "go run ./cmd/fak study-forge validate --receipt docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz",
+    "command": "cat docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz.part-* > $TMPDIR/sgl-project-sglang-corpus.jsonl.gz && go run ./cmd/fak study-forge validate --receipt $TMPDIR/sgl-project-sglang-corpus.jsonl.gz",
     "records": 36758,
     "sha256": "7ae4e72ed6b40e1372c0a5640e3180bf7bdc73a3cddce7de5d19d3713e7e71e1",
     "bytes": 165203383,

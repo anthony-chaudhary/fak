@@ -1,6 +1,6 @@
 #!/bin/bash
 # scratch-only remote runner: one serve arm + pinned h2h client (cold 128/512/2048) on raider 5090.
-# usage: raider-arm.sh <label> <binary> [ENV=VAL ...]
+# usage: raider-arm.txt <label> <binary> [ENV=VAL ...]
 label=$1; bin=$2; shift 2
 W=~/cuda-prefill-sm120-20261106; out=$W/runs; mkdir -p $out
 PORT=18181
@@ -14,9 +14,9 @@ CTX=${CTX:-4096}; SPEC=${SPEC-}; COLD=${COLD:-128,512,2048}; REPS=${REPS:-3}
 cd $W
 { echo "$(date -u +%FT%TZ) $label env: $* | $bin serve --config $W/config.toml --engine inkernel --backend cuda --gguf $M --model $MID --kv-precision fp32 --native-context-tokens $CTX --addr 127.0.0.1:$PORT --speculative '$SPEC'"; sha256sum $bin; } >> $out/argv.txt
 $bin serve --config $W/config.toml --engine inkernel --backend cuda --gguf $M --model $MID --kv-precision fp32 \
-  --native-context-tokens $CTX --addr 127.0.0.1:$PORT --speculative "$SPEC" > $out/$label.serve.log 2>&1 &
+  --native-context-tokens $CTX --addr 127.0.0.1:$PORT --speculative "$SPEC" > $out/$label.serve.txt 2>&1 &
 spid=$!
-t0=$(date +%s); for i in $(seq 1 300); do curl -sf -o /dev/null http://127.0.0.1:$PORT/readyz && break; kill -0 $spid 2>/dev/null || { echo SERVE_DIED; tail -15 $out/$label.serve.log; echo "ARM_DONE $label"; exit 3; }; sleep 2; done
+t0=$(date +%s); for i in $(seq 1 300); do curl -sf -o /dev/null http://127.0.0.1:$PORT/readyz && break; kill -0 $spid 2>/dev/null || { echo SERVE_DIED; tail -15 $out/$label.serve.txt; echo "ARM_DONE $label"; exit 3; }; sleep 2; done
 echo "ready_after_s=$(( $(date +%s)-t0 ))"
 nvidia-smi --query-gpu=timestamp,memory.used,power.draw,power.limit,clocks.sm --format=csv,noheader -lms 1000 > $out/$label.smi.csv 2>&1 &
 smipid=$!

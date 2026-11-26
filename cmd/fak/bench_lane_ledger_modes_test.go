@@ -410,7 +410,7 @@ func TestBenchLaneLedgerSitesTableResolutionColumn(t *testing.T) {
 
 // ---- sweep ----
 
-const benchLaneExcerpt = "testdata/bench_lane_ledger/ptxas_sm120_excerpt.log"
+const benchLaneExcerpt = "testdata/bench_lane_ledger/ptxas_sm120_excerpt.txt"
 
 // benchLaneSweepDocOf runs the sweep verb on the excerpt with the given extra flags and returns its document.
 func benchLaneSweepDocOf(t *testing.T, extra ...string) map[string]any {

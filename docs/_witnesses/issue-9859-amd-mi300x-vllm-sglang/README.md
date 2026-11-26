@@ -30,15 +30,18 @@ than reusing the mutable tag.
 
 ## Safe validation (no accelerator or network)
 
+The runner is kept as the recorded procedure `run-mi300x-baselines.txt`, not as a
+committed `.sh`. Copy it to a scratch `.sh` outside the repository before running it.
 From the repository root:
 
 ```bash
-bash -n docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.sh
+cp docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.txt "$TEMP/run-mi300x-baselines.sh"
+bash -n "$TEMP/run-mi300x-baselines.sh"
 python3 -m json.tool docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/mi300x-packet.json >/dev/null
 python3 -m json.tool docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/receipt.json >/dev/null
-bash docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.sh --dry-run
+bash "$TEMP/run-mi300x-baselines.sh" --dry-run
 git diff --check -- docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/README.md \
-  docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.sh \
+  docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.txt \
   docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/mi300x-packet.json \
   docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/receipt.json
 ```
@@ -52,8 +55,9 @@ Run only on an operator-approved Linux host with Docker, Go, ROCm tools, suffici
 local storage, and exclusive access to an MI300X. From the repository root:
 
 ```bash
+cp docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.txt "$TEMP/run-mi300x-baselines.sh"
 MI300X_PACKET_OUT="$PWD/mi300x-results" \
-  bash docs/_witnesses/issue-9859-amd-mi300x-vllm-sglang/run-mi300x-baselines.sh
+  bash "$TEMP/run-mi300x-baselines.sh"
 ```
 
 The runner stops on the first violated condition. Host admission requires character
