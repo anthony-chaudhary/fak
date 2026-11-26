@@ -153,6 +153,7 @@ func newInkling2BatchChunk(s *inkling2Resident, C, ctx, chunk int) (*inkling2Bat
 		admit := inkling2BatchAdmit
 		if b.prefillT > inkling2PrefillChunkBase {
 			admit = inkling2WideAdmit
+			free, known = inkling2WideFree(be, free, known)
 		}
 		if err := admit(C, b.need, free, known); err != nil {
 			return nil, err

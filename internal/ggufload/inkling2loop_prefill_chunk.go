@@ -8,11 +8,13 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // inkling2PrefillChunkEnv opts into another batched prefill forward width. Unset keeps
-// the 512-token chunk and every buffer size that goes with it. "1024" (or any multiple
+// the 512-token chunk and every buffer size that goes with it, except on Metal, whose
+// unset default is inkling2PrefillChunkMetal. "1024" (or any multiple
 // of 16 in [64, 2048]) sets the width, and "auto" selects 1024.
 //
 // A wide setting costs memory at bind, long prompt or not: a scalar session widens
@@ -63,6 +65,44 @@ func inkling2PrefillChunkWanted(lookup func(string) (string, bool)) int {
 		log.Printf("inkling2 prefill: %v; using %d", err, n)
 	}
 	return n
+}
+
+// inkling2PrefillChunkMetal is the chunk of a Metal session that did not set
+// FAK_INKLING2_PREFILL_CHUNK: with hundreds of experts a 512-token chunk leaves each
+// expert's grouped GEMM a handful of rows, so the wider chunk pays for its arenas.
+const inkling2PrefillChunkMetal = 2048
+
+// inkling2PrefillChunkWantedOn is inkling2PrefillChunkWanted on backend be: an unset
+// setting on Metal asks for inkling2PrefillChunkMetal, still subject to admission.
+func inkling2PrefillChunkWantedOn(be any, lookup func(string) (string, bool)) int {
+	if v, set := lookup(inkling2PrefillChunkEnv); (!set || strings.TrimSpace(v) == "") && inkling2OnMetal(be) {
+		return inkling2PrefillChunkMetal
+	}
+	return inkling2PrefillChunkWanted(lookup)
+}
+
+func inkling2OnMetal(be any) bool {
+	n, ok := be.(interface{ Name() string })
+	return ok && n.Name() == "metal"
+}
+
+// inkling2MetalWorkingSet is swapped by tests that run without a Metal device.
+var inkling2MetalWorkingSet = compute.DarwinWorkingSetLimits
+
+// inkling2WideFree is the free device memory a wide chunk is admitted against. Metal
+// reports no free figure; on unified memory the working set the driver recommends,
+// less what this process already holds on the device, is the room a wide chunk may
+// take without the driver paging it.
+func inkling2WideFree(be any, free int64, known bool) (int64, bool) {
+	if (known && free >= 0) || !inkling2OnMetal(be) {
+		return free, known
+	}
+	lim := inkling2MetalWorkingSet()
+	if lim.RecommendedMaxWorkingSet == 0 {
+		return free, known
+	}
+	rec, used := int64(lim.RecommendedMaxWorkingSet), int64(lim.CurrentAllocatedSize)
+	return max(0, rec-used), true
 }
 
 // inkling2CohortChunk is the prefill chunk of a cohort whose longest prompt is longest
@@ -167,7 +207,22 @@ func (s *inkling2Resident) wideBindBytes(ctx, chunk int) int64 {
 // allocated.
 func (s *inkling2Resident) admitWide(ctx, chunk int) error {
 	_, free, known := inkling2DeviceFree(s.be)
+	free, known = inkling2WideFree(s.be, free, known)
 	return inkling2WideAdmit(1, s.wideBindBytes(ctx, chunk), free, known)
+}
+
+// admitWideChunk narrows s.chunkMax, halving it toward the base chunk, to the widest
+// chunk the device admits, so a device short of the asked width still gets a wide
+// chunk; the error is the refusal of the narrowest wide width tried.
+func (s *inkling2Resident) admitWideChunk(ctx int) error {
+	var err error
+	for c := s.chunkMax; c > inkling2PrefillChunkBase; c = (c / 2) &^ 15 {
+		if err = s.admitWide(ctx, c); err == nil {
+			s.chunkMax = c
+			return nil
+		}
+	}
+	return err
 }
 
 // inkling2WideAdmit admits the bytes of a wide chunk against the probed free memory.

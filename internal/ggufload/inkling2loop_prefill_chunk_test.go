@@ -934,3 +934,99 @@ func TestInkling2PrefillChunkWideCohortDropsCancelledRow(t *testing.T) {
 		t.Fatalf("prefill chunks %v, want %v: the cancelled row's prompt was packed", chunks, want)
 	}
 }
+
+type fakeInk2Named string
+
+func (n fakeInk2Named) Name() string { return string(n) }
+
+// An unset setting widens only a Metal session; an explicit one wins everywhere.
+func TestInkling2PrefillChunkMetalDefault(t *testing.T) {
+	unset := func(string) (string, bool) { return "", false }
+	set := func(v string) func(string) (string, bool) { return func(string) (string, bool) { return v, true } }
+	cases := []struct {
+		be     any
+		lookup func(string) (string, bool)
+		want   int
+	}{
+		{fakeInk2Named("metal"), unset, inkling2PrefillChunkMetal},
+		{fakeInk2Named("metal"), set(" "), inkling2PrefillChunkMetal},
+		{fakeInk2Named("metal"), set("512"), inkling2PrefillChunkBase},
+		{fakeInk2Named("metal"), set("1024"), 1024},
+		{fakeInk2Named("cuda"), unset, inkling2PrefillChunkBase},
+		{fakeInk2Named("cuda"), set("auto"), inkling2PrefillChunkWide},
+		{nil, unset, inkling2PrefillChunkBase},
+	}
+	for i, c := range cases {
+		if got := inkling2PrefillChunkWantedOn(c.be, c.lookup); got != c.want {
+			t.Errorf("case %d: chunk %d, want %d", i, got, c.want)
+		}
+	}
+}
+
+// Metal's unknown free is read from the working set; any other backend's stays unknown.
+func TestInkling2WideFreeFromMetalWorkingSet(t *testing.T) {
+	prev := inkling2MetalWorkingSet
+	defer func() { inkling2MetalWorkingSet = prev }()
+	lim := compute.DarwinMemoryLimits{RecommendedMaxWorkingSet: 10 << 30, CurrentAllocatedSize: 7 << 30}
+	inkling2MetalWorkingSet = func() compute.DarwinMemoryLimits { return lim }
+
+	if free, known := inkling2WideFree(fakeInk2Named("metal"), compute.FreeUnknown, false); !known || free != 3<<30 {
+		t.Fatalf("metal: free %d known %v, want 3 GiB", free, known)
+	}
+	if free, known := inkling2WideFree(fakeInk2Named("cuda"), compute.FreeUnknown, false); known || free != compute.FreeUnknown {
+		t.Fatalf("cuda: free %d known %v, want unknown", free, known)
+	}
+	if free, known := inkling2WideFree(fakeInk2Named("metal"), 1<<30, true); !known || free != 1<<30 {
+		t.Fatalf("a reported free must win: %d %v", free, known)
+	}
+	lim.CurrentAllocatedSize = 12 << 30
+	if free, known := inkling2WideFree(fakeInk2Named("metal"), compute.FreeUnknown, false); !known || free != 0 {
+		t.Fatalf("over-committed working set: free %d known %v, want 0", free, known)
+	}
+	if err := inkling2WideAdmit(1, 1<<20, 0, true); err == nil {
+		t.Fatal("a full working set must refuse the wide chunk")
+	}
+	lim = compute.DarwinMemoryLimits{}
+	if _, known := inkling2WideFree(fakeInk2Named("metal"), compute.FreeUnknown, false); known {
+		t.Fatal("no working-set figure must stay unknown")
+	}
+}
+
+// A device with room for a 1024-token chunk but not the 2048 asked for binds at 1024,
+// not at the base chunk.
+func TestInkling2PrefillChunkScalarAdmissionHalvesTowardBase(t *testing.T) {
+	logged := captureInk2Log(t)
+	t.Setenv(inkling2PrefillChunkEnv, "2048")
+	m := fakeInk2RingModel()
+	bind := func(capBytes int64) (*inkling2Resident, *fakeInk2Budget) {
+		t.Helper()
+		resetInk2ScalarWide(t)
+		d := newFakeInk2Budget(capBytes)
+		s, err := newInkling2ResidentSized(m, d, fakeInk2RingCtx, fakeInk2RingArena)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s, d
+	}
+	// the smallest device that admits the 2048-token chunk
+	lo, hi := int64(1), int64(1)<<40
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		s, _ := bind(mid)
+		if s.chunkMax == 2048 {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+		s.close()
+	}
+	logged.Reset()
+	s, d := bind(lo - 1)
+	defer s.close()
+	if s.chunkMax != 1024 || s.prefillCap != 1024 || s.caps[0] != fakeInk2RingWindow+1024 || d.refusals != 0 {
+		t.Fatalf("bound chunk %d, arenas %d, ring %d, %d refusals; want 1024", s.chunkMax, s.prefillCap, s.caps[0], d.refusals)
+	}
+	if ink2LogLines(logged) != 0 {
+		t.Fatalf("an admitted narrower chunk logged %q", logged)
+	}
+}

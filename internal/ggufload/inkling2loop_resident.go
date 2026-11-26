@@ -362,7 +362,7 @@ func inkling2ResidentReserve(free int64) int64 {
 // and an arenaFloats per-token arena. ctx 0 allocates no slot caches, histories or
 // scores (caps still hold the local ring sizes) for a caller that owns its own state.
 func newInkling2ResidentSized(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats int) (*inkling2Resident, error) {
-	wanted := inkling2PrefillChunkWanted(os.LookupEnv)
+	wanted := inkling2PrefillChunkWantedOn(be, os.LookupEnv)
 	// a cohort binding (ctx 0) holds no per-sequence state: each cohort sizes its own
 	ring := inkling2PrefillChunkBase
 	if ctx != 0 && !inkling2ScalarWideHeld(wanted) {
@@ -453,7 +453,7 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 		return nil, s.err
 	}
 	if wide {
-		if err := s.admitWide(ctx, s.chunkMax); err != nil {
+		if err := s.admitWideChunk(ctx); err != nil {
 			inkling2ScalarWideRefused(err, s.chunkMax)
 			wide = false
 		}

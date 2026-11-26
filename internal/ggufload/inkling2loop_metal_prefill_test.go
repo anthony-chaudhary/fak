@@ -108,14 +108,35 @@ func TestInkling2MetalBatchedPrefillMatchesPerToken(t *testing.T) {
 	t.Logf("%d layers (%d cache slots), hidden %d, %d experts of width %d (%d routed), window %d, chunk %d",
 		hp.Layers, hp.Layers+(hp.Passes-1)*(hp.CoreEnd-hp.CoreStart), hp.Hidden, hp.Experts, hp.ExpertWidth, hp.ExpertsUsed,
 		hp.SlidingWindow, inkling2PrefillChunkWanted(os.LookupEnv))
+	spec, specSet := os.LookupEnv("FAK_INKLING2_SPEC")
 	run := func(arm, batched string, prompt []int) []int {
 		t.Helper()
 		t.Setenv("FAK_INKLING2_BATCHED_PREFILL", batched)
+		// speculative decode binds the batched forward too, so the reference turns it off
+		switch {
+		case batched == "0":
+			t.Setenv("FAK_INKLING2_SPEC", "0")
+		case specSet:
+			t.Setenv("FAK_INKLING2_SPEC", spec)
+		default:
+			t.Setenv("FAK_INKLING2_SPEC", "")
+		}
 		s, err := NewInkling2LoopSession(m, be)
 		if err != nil {
 			t.Fatalf("%s: %v", arm, err)
 		}
 		defer s.Close()
+		if rs, ok := s.(*inkling2ResidentSession); ok {
+			ring := 0
+			for slot, c := range rs.s.caps {
+				if hp.LocalLayer[inkling2SlotLayer(hp, slot)] {
+					ring = max(ring, c)
+				}
+			}
+			ws := compute.DarwinWorkingSetLimits()
+			t.Logf("%s: chunk %d, local ring %d, %.0f MiB on the device of a %.0f MiB working set",
+				arm, rs.s.chunkMax, ring, float64(ws.CurrentAllocatedSize)/(1<<20), float64(ws.RecommendedMaxWorkingSet)/(1<<20))
+		}
 		before, err := compute.MetalInkling2DeviceStats()
 		if err != nil {
 			t.Fatal(err)
