@@ -1046,6 +1046,12 @@ var admittedPostFreeze = []string{
 	// Relocates to: a typed Inkling-2 prefill config.
 	"FAK_INKLING2_PREFILL_OLD",
 
+	// internal/ggufload/inkling2loop_prefill.go — FAK_INKLING2_PREFILL_CTRL_BATCH=1 runs a
+	// prefill visit's Q/K/V controllers as one grid per stage. An opt-in kernel-batching
+	// toggle, not a credential.
+	// Relocates to: a typed Inkling-2 prefill config.
+	"FAK_INKLING2_PREFILL_CTRL_BATCH",
+
 	// cmd/fak/serve_inkling2.go — FAK_INKLING2_PREFIX_REUSE=0|false|off disables KV prefix
 	// reuse across requests in the Inkling-2 serve loop. A cache toggle, not a credential.
 	// Relocates to: a typed Inkling-2 serve config.
@@ -1057,4 +1063,19 @@ var admittedPostFreeze = []string{
 	// admitted XDG_DATA_HOME; it grants access to nothing and authenticates nothing.
 	// Relocates to: a typed ctxmmu state-directory config, or stays as ambient OS input.
 	"XDG_STATE_HOME",
+}
+
+// helperReadCorroboration declares that an admitted name is still read at runtime through
+// a name-parameter helper the literal scanner cannot see. The admission holds only while
+// the named file still contains the call helper("NAME"); TestAdmittedPostFreezeStaysHonest
+// and TestHelperReadCorroborationsStayLive red when that call or file disappears, so each
+// entry expires with its read rather than becoming a blanket allowlist.
+type helperReadCorroboration struct {
+	name   string
+	file   string
+	helper string
+}
+
+var helperReadCorroborations = []helperReadCorroboration{
+	{name: "FAK_INKLING2_BATCH_ADMIT", file: "internal/ggufload/inkling2loop_batch.go", helper: "lookup"},
 }

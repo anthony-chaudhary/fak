@@ -301,14 +301,104 @@ func TestAdmittedPostFreezeStaysHonest(t *testing.T) {
 			live[n] = true
 		}
 	}
+	contains := func(file, needle string) bool {
+		ok, err := committedFileContains(root, file, needle)
+		return err == nil && ok
+	}
 	for _, n := range admittedPostFreeze {
 		if IsSecretName(n) {
 			t.Errorf("admittedPostFreeze carries secret-shaped %s; IsSecretName already allows it — drop the entry", n)
 		}
-		if !live[n] {
-			t.Errorf("admittedPostFreeze carries %s, which is no longer read in the committed non-test tree; "+
-				"the read was relocated or deleted, so delete this entry too (the ledger must only shrink)", n)
+		if problem := admittedReadProblem(n, live, helperReadCorroborations, contains); problem != "" {
+			t.Error(problem)
 		}
+	}
+}
+
+// admittedReadProblem returns why an admitted name has no live read, or "" when it is read
+// literally in the committed tree or through a declared helper call that is still present.
+func admittedReadProblem(name string, live map[string]bool, corr []helperReadCorroboration, contains func(file, needle string) bool) string {
+	if live[name] || helperReadCorroborated(name, corr, contains) {
+		return ""
+	}
+	return "admittedPostFreeze carries " + name + ", which is no longer read in the committed non-test tree " +
+		"(no literal read and no declared helper call); the read was relocated or deleted, so delete this " +
+		"entry too (the ledger must only shrink)"
+}
+
+func helperReadCorroborated(name string, corr []helperReadCorroboration, contains func(file, needle string) bool) bool {
+	for _, c := range corr {
+		if c.name == name && contains(c.file, c.helper+`("`+c.name+`")`) {
+			return true
+		}
+	}
+	return false
+}
+
+// committedFileContains reports whether a file in the HEAD commit contains needle, matching the
+// immutable-revision binding committedEnvReadMatches uses.
+func committedFileContains(repoRoot, file, needle string) (bool, error) {
+	revision, err := gitOutput(repoRoot, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return false, err
+	}
+	body, err := gitOutput(repoRoot, "show", strings.TrimSpace(revision)+":"+file)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(body, needle), nil
+}
+
+// TestHelperReadCorroborationsStayLive makes each declared helper read expire with its
+// read: the admitted name must still be in the ledger and its helper call must still be in
+// the committed file.
+func TestHelperReadCorroborationsStayLive(t *testing.T) {
+	root := repoRoot(t)
+	admitted := map[string]bool{}
+	for _, n := range admittedPostFreeze {
+		admitted[n] = true
+	}
+	for _, c := range helperReadCorroborations {
+		if !admitted[c.name] {
+			t.Errorf("helper corroboration for %s has no admittedPostFreeze entry; delete it", c.name)
+		}
+		ok, err := committedFileContains(root, c.file, c.helper+`("`+c.name+`")`)
+		if err != nil || !ok {
+			t.Errorf("helper corroboration for %s: %s no longer contains %s(%q) in the committed tree (err=%v); "+
+				"the read is gone, so delete the entry and the admission", c.name, c.file, c.helper, c.name, err)
+		}
+	}
+}
+
+// TestAdmittedNameWithNoReadStaysRed is the mutation check: an admission with no literal
+// read and no declared helper call must red the honesty verdict, even when a helper entry
+// exists for a different name.
+func TestAdmittedNameWithNoReadStaysRed(t *testing.T) {
+	always := func(string, string) bool { return true }
+	corr := []helperReadCorroboration{{name: "FAK_OTHER", file: "x.go", helper: "lookup"}}
+	if problem := admittedReadProblem("FAK_MUTANT_ADMIT", map[string]bool{}, corr, always); problem == "" {
+		t.Fatal("admitted name with no read anywhere must red the honesty verdict")
+	}
+	if problem := admittedReadProblem("FAK_MUTANT_ADMIT", map[string]bool{"FAK_MUTANT_ADMIT": true}, nil, always); problem != "" {
+		t.Fatalf("literal read must keep the admission honest, got %q", problem)
+	}
+}
+
+// TestHelperCorroborationRedsWhenCallIsGone pins that a helper entry corroborates only while
+// the file still holds the call for that exact name and helper.
+func TestHelperCorroborationRedsWhenCallIsGone(t *testing.T) {
+	corr := []helperReadCorroboration{{name: "FAK_X", file: "f.go", helper: "lookup"}}
+	gone := func(string, string) bool { return false }
+	if problem := admittedReadProblem("FAK_X", map[string]bool{}, corr, gone); problem == "" {
+		t.Fatal("helper entry whose call is gone must red")
+	}
+	var seen string
+	present := func(file, needle string) bool { seen = file + "|" + needle; return true }
+	if problem := admittedReadProblem("FAK_X", map[string]bool{}, corr, present); problem != "" {
+		t.Fatalf("present helper call must corroborate, got %q", problem)
+	}
+	if seen != `f.go|lookup("FAK_X")` {
+		t.Fatalf("corroboration searched %q, want the exact helper call in the declared file", seen)
 	}
 }
 
