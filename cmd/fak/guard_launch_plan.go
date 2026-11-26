@@ -6,6 +6,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
+// guardLaunchPlan separates the wrapped harness's admitted identity from the argv that
+// launch adapters are free to rewrite. Its fields stay private and every slice accessor
+// clones, so a broker, trampoline, or exec-boundary transform cannot mutate the semantic
+// command or the resolved profile in place.
 type guardLaunchPlan struct {
 	semantic          []string
 	executable        []string

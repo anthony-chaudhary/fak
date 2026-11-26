@@ -7,7 +7,7 @@ package godfileceiling
 // Baseline pins today's god-files (> HardCeiling lines) at their current LOC. Under Repin a pinned file
 // may only shrink; an unpinned file may not exceed HardCeiling. See doc.go.
 var Baseline = map[string]int{
-	"cmd/fak/guard.go":                                             1506,
+	"cmd/fak/guard.go":                                             1502,
 	"cmd/fak/serve.go":                                             1584,
 	"internal/agent/inkernel_decode.go":                            1686,
 	"internal/agent/inkernel_planner.go":                           3305,
