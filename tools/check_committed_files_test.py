@@ -286,6 +286,367 @@ def test_tracked_tree_has_no_ungrandfathered_script() -> None:
     assert not hits, "ungrandfathered scripts tracked in tree:\n" + "\n".join(hits)
 
 
+# --- per-commit shipped-bytes budget ----------------------------------------
+
+BUDGET = cc.DEFAULT_COMMIT_SHIPPED_BYTES
+KIB = 1024
+
+
+def _fake_git(answers, calls=None):
+    """Stand-in for cc._git that answers by the first git argument; a None answer is a failure."""
+    def run(args, root):
+        if calls is not None:
+            calls.append(args)
+        out = answers.get(args[0])
+        return subprocess.CompletedProcess(args, 0 if out is not None else 128, stdout=out or "", stderr="")
+    return run
+
+
+def _with_git(fake, fn):
+    real = cc._git
+    cc._git = fake
+    try:
+        fn()
+    finally:
+        cc._git = real
+
+
+def _with_env(name, value, fn):
+    import os
+    old = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        fn()
+    finally:
+        if old is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = old
+
+
+def _real_git(root, *args):
+    return subprocess.run(["git", "-C", root, *args], capture_output=True, text=True, check=True)
+
+
+def test_commit_budget_refuses_bulk_add_and_names_largest() -> None:
+    sizes = {"assets/big.bin": 300 * KIB, "assets/small.bin": 1024}
+    msg = cc._commit_budget_refusal(list(sizes), BUDGET, [], set(), sizes)
+    assert msg is not None, "300 KiB over a 256 KiB budget must be refused"
+    for want in ("assets/big.bin", "export-ignore", "sha256", "per commit", "FAK_COMMIT_SHIPPED_BYTES="):
+        assert want in msg, (want, msg)
+
+
+def test_commit_budget_admits_ordinary_commit() -> None:
+    sizes = {"assets/a.bin": 100 * KIB, "assets/b.bin": 100 * KIB}
+    assert cc._commit_budget_refusal(list(sizes), BUDGET, [], set(), sizes) is None
+
+
+def test_commit_budget_boundary_is_inclusive() -> None:
+    assert cc._commit_budget_refusal(["a.bin"], 8, [], set(), {"a.bin": 8}) is None
+    assert cc._commit_budget_refusal(["b.bin"], 8, [], set(), {"b.bin": 9}) is not None
+
+
+def test_commit_budget_skips_export_ignored_bytes() -> None:
+    sizes = {"docs/receipts/big.bin": 300 * KIB}
+    assert cc._commit_budget_refusal(list(sizes), BUDGET, [], {"docs/receipts/big.bin"}, sizes) is None
+
+
+def test_commit_budget_skips_nested_module_bytes() -> None:
+    sizes = {"docs/nightrun/data/big.bin": 300 * KIB}
+    tracked = ["docs/nightrun/go.mod", "docs/nightrun/data/big.bin"]
+    assert cc._commit_budget_refusal(list(sizes), BUDGET, tracked, set(), sizes) is None
+
+
+def test_commit_budget_skips_text_go_sources() -> None:
+    sizes = {"internal/tables/generated.go": 300 * KIB}
+    assert cc._commit_budget_refusal(list(sizes), BUDGET, [], set(), sizes,
+                                     text_go={"internal/tables/generated.go"}) is None
+
+
+def test_commit_budget_bills_binary_go_blob() -> None:
+    # A .go name only exempts a text blob; a binary one ships like any other file.
+    sizes = {"internal/blob/data.go": 300 * KIB}
+    assert cc._commit_budget_refusal(list(sizes), BUDGET, [], set(), sizes) is not None
+
+
+def test_staged_blob_sizes_reads_index_blob_size_in_one_listing() -> None:
+    calls = []
+    listing = ("100644 blob aaaa 307200\tassets/big.bin\x00"
+               "160000 commit bbbb -\tvendor/sub\x00")
+    fake = _fake_git({"write-tree": "tree1\n", "ls-tree": listing}, calls)
+
+    def check() -> None:
+        assert cc._staged_blob_sizes("/unused") == {"assets/big.bin": 307200, "vendor/sub": 0}
+        assert [c[0] for c in calls] == ["write-tree", "ls-tree"], calls
+    _with_git(fake, check)
+
+
+def test_worktree_divergence_is_judged_on_index_blob() -> None:
+    # The worktree copy is one byte; the commit ships the 300 KiB index blob.
+    with tempfile.TemporaryDirectory() as d:
+        Path(d, "assets").mkdir()
+        Path(d, "assets", "big.bin").write_bytes(b"a")
+
+        def check() -> None:
+            msg = cc._commit_budget_refusal(["assets/big.bin"], BUDGET, [], set(),
+                                            cc._staged_blob_sizes(d))
+            assert msg is not None, "a truncated worktree copy must not hide the indexed bytes"
+        _with_git(_fake_git({"write-tree": "tree1\n", "ls-tree": "100644 blob aaaa 307200\tassets/big.bin\x00"}),
+                  check)
+
+
+def test_unlisted_staged_path_fails_closed() -> None:
+    sizes = {"assets/a.bin": 1024}
+    msg = cc._commit_budget_refusal(["assets/a.bin", "assets/unlisted.bin"], BUDGET, [], set(), sizes)
+    assert msg is not None and "assets/unlisted.bin" in msg and "fail closed" in msg, msg
+
+
+def test_export_ignore_is_read_from_the_index() -> None:
+    calls = []
+
+    def check() -> None:
+        ignored = cc._export_ignored("/unused", ["docs/receipts/big.bin"])
+        assert ignored == set(), ignored
+        assert calls and "--cached" in calls[0], calls
+    _with_git(_fake_git({"check-attr": "docs/receipts/big.bin\0export-ignore\0unspecified\0"}, calls), check)
+
+
+def test_export_ignore_set_in_index_is_honored() -> None:
+    def check() -> None:
+        assert cc._export_ignored("/unused", ["docs/receipts/big.bin"]) == {"docs/receipts/big.bin"}
+    _with_git(_fake_git({"check-attr": "docs/receipts/big.bin\0export-ignore\0set\0"}), check)
+
+
+def test_commit_shipped_budget_env_falls_back_on_garbage() -> None:
+    import os
+    old = os.environ.get("FAK_COMMIT_SHIPPED_BYTES")
+    try:
+        for raw, want in [("", cc.DEFAULT_COMMIT_SHIPPED_BYTES), ("nope", cc.DEFAULT_COMMIT_SHIPPED_BYTES),
+                          ("0", cc.DEFAULT_COMMIT_SHIPPED_BYTES), ("4096", 4096)]:
+            os.environ["FAK_COMMIT_SHIPPED_BYTES"] = raw
+            assert cc._commit_shipped_budget() == want, raw
+    finally:
+        if old is None:
+            os.environ.pop("FAK_COMMIT_SHIPPED_BYTES", None)
+        else:
+            os.environ["FAK_COMMIT_SHIPPED_BYTES"] = old
+
+
+# Each git read on the budget path must refuse the commit. The base answers describe a commit that
+# is admitted, so each case differs from it by exactly one failed read.
+_BUDGET_BASE_ANSWERS = {
+    "diff": "A\0assets/a.bin\0A\0internal/small.go\0",
+    "rev-parse": ".git/MERGE_HEAD\n",
+    "--literal-pathspecs": "internal/small.go\0",
+    "check-attr": "",
+    "ls-files": "assets/a.bin\0internal/small.go\0",
+    "write-tree": "tree1\n",
+    "ls-tree": "100644 blob aaaa 1024\tassets/a.bin\x00100644 blob bbbb 1024\tinternal/small.go\x00",
+}
+
+
+def test_budget_base_commit_is_admitted() -> None:
+    _with_git(_fake_git(_BUDGET_BASE_ANSWERS), lambda: _assert_admitted())
+
+
+def _assert_admitted() -> None:
+    assert cc._staged_budget_refusal("/unused") is None
+
+
+def test_failed_reads_fail_closed() -> None:
+    cases = [
+        ("diff", None, "list the staged names"),
+        ("rev-parse", None, "read whether a merge is in progress"),
+        ("rev-parse", "\n", "read whether a merge is in progress"),
+        ("--literal-pathspecs", None, "check which staged .go files are text"),
+        ("check-attr", None, "read export-ignore"),
+        ("ls-files", None, "list the tracked paths"),
+        ("write-tree", None, "size the staged blobs"),
+        ("ls-tree", None, "size the staged blobs"),
+    ]
+    for key, value, phrase in cases:
+        answers = dict(_BUDGET_BASE_ANSWERS, **{key: value})
+        result = []
+        _with_git(_fake_git(answers), lambda: result.append(cc._staged_budget_refusal("/unused")))
+        msg = result[0]
+        assert msg is not None and phrase in msg and "fail closed" in msg, (key, msg)
+
+
+def test_git_that_cannot_run_fails_closed() -> None:
+    def boom(args, root):
+        raise FileNotFoundError("git")
+    result = []
+    _with_git(boom, lambda: result.append(cc._staged_budget_refusal("/unused")))
+    assert result[0] is not None and "fail closed" in result[0], result
+
+
+def test_export_query_failure_refuses_even_a_small_commit() -> None:
+    # A failed attribute query must refuse, not bill the file as shipped and hope it is small.
+    answers = dict(_BUDGET_BASE_ANSWERS, **{"check-attr": None})
+    result = []
+    _with_git(_fake_git(answers), lambda: result.append(cc._staged_budget_refusal("/unused")))
+    assert result[0] is not None and "read export-ignore" in result[0], result
+
+
+def _budget_refusal_in_real_repo(name, size, export_ignore=False):
+    """Stage one file in a real repo with core.quotepath=true and return the budget refusal."""
+    with tempfile.TemporaryDirectory() as d:
+        _real_git(d, "init", "-q")
+        _real_git(d, "config", "core.quotepath", "true")
+        Path(d, name).write_bytes(b"a" * size)
+        staged = [name]
+        if export_ignore:
+            Path(d, ".gitattributes").write_text(f"{name} export-ignore\n", encoding="utf-8")
+            staged.append(".gitattributes")
+        _real_git(d, "add", "--", *staged)
+        return cc._staged_budget_refusal(d)
+
+
+def test_non_ascii_bulk_name_refused_under_quotepath() -> None:
+    msg = _budget_refusal_in_real_repo("naïve big.bin", 300 * KIB)
+    assert msg is not None and "commit adds" in msg and "naïve big.bin" in msg, msg
+
+
+def test_non_ascii_ordinary_name_admitted_under_quotepath() -> None:
+    assert _budget_refusal_in_real_repo("naïve small.bin", 100 * KIB) is None
+
+
+def test_non_ascii_export_ignored_bulk_admitted_under_quotepath() -> None:
+    assert _budget_refusal_in_real_repo("bulké.bin", 300 * KIB, export_ignore=True) is None
+
+
+def _commit_repo(d, files):
+    """Init a repo in `d` with core.quotepath on and commit `files` (name -> bytes) as the parent."""
+    _real_git(d, "init", "-q")
+    _real_git(d, "config", "core.quotepath", "true")
+    for name, data in files.items():
+        Path(d, name).parent.mkdir(parents=True, exist_ok=True)
+        Path(d, name).write_bytes(data)
+    _real_git(d, "add", "--", *files)
+    _real_git(d, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "base")
+
+
+def test_binary_go_blob_is_billed_in_real_repo() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"README.md": b"x\n"})
+        Path(td, "internal", "blob").mkdir(parents=True)
+        Path(td, "internal", "blob", "data.go").write_bytes(b"\0" * (300 * KIB))
+        _real_git(td, "add", "--", "internal/blob/data.go")
+        msg = cc._staged_budget_refusal(td)
+        assert msg is not None and "internal/blob/data.go" in msg, msg
+
+
+def test_text_go_blob_is_admitted_in_real_repo() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"README.md": b"x\n"})
+        Path(td, "gen.go").write_bytes(b"// generated\n" * 25000)  # 325 KiB of text
+        _real_git(td, "add", "--", "gen.go")
+        assert cc._staged_budget_refusal(td) is None
+
+
+def test_pure_move_of_shipped_asset_is_refused_in_real_repo() -> None:
+    # A rename bills its full new blob, so a pure move of 300 KiB is refused.
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"assets/old.bin": b"a" * (300 * KIB)})
+        _real_git(td, "mv", "assets/old.bin", "assets/new.bin")
+        msg = cc._staged_budget_refusal(td)
+        assert msg is not None and "commit adds 300 KiB" in msg and "pure move" in msg, msg
+        assert f"FAK_COMMIT_SHIPPED_BYTES={300 * KIB}" in msg, msg
+
+
+def test_pure_move_admitted_when_budget_raised_in_real_repo() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"assets/old.bin": b"a" * (300 * KIB)})
+        _real_git(td, "mv", "assets/old.bin", "assets/new.bin")
+        _with_env("FAK_COMMIT_SHIPPED_BYTES", str(300 * KIB), lambda: _assert_move_admitted(td))
+
+
+def _assert_move_admitted(td) -> None:
+    assert cc._staged_budget_refusal(td) is None
+
+
+def test_small_pure_move_is_admitted_in_real_repo() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"assets/old.bin": b"a" * (100 * KIB)})
+        _real_git(td, "mv", "assets/old.bin", "assets/new.bin")
+        assert cc._staged_budget_refusal(td) is None
+
+
+def _move_into_shipped_dir(td, old, new):
+    Path(td, new).parent.mkdir(parents=True, exist_ok=True)
+    _real_git(td, "mv", old, new)
+
+
+def test_rename_from_export_ignored_source_is_billed_in_full() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"docs/receipts/old.bin": b"a" * (300 * KIB),
+                          ".gitattributes": b"docs/receipts/old.bin export-ignore\n"})
+        _move_into_shipped_dir(td, "docs/receipts/old.bin", "assets/new.bin")
+        msg = cc._staged_budget_refusal(td)
+        assert msg is not None and "commit adds 300 KiB" in msg, msg
+
+
+def test_rename_from_nested_module_source_is_billed_in_full() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"docs/nightrun/go.mod": b"module x\n",
+                          "docs/nightrun/data/old.bin": b"a" * (300 * KIB)})
+        _move_into_shipped_dir(td, "docs/nightrun/data/old.bin", "assets/new.bin")
+        msg = cc._staged_budget_refusal(td)
+        assert msg is not None and "commit adds 300 KiB" in msg, msg
+
+
+def test_rename_from_text_go_source_is_billed_in_full() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"gen.go": b"// generated\n" * 25000})  # 317 KiB of text
+        _move_into_shipped_dir(td, "gen.go", "assets/gen.bin")
+        msg = cc._staged_budget_refusal(td)
+        assert msg is not None and "commit adds 317 KiB" in msg, msg
+
+
+def test_rename_from_binary_go_is_billed_in_full() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"internal/blob/old.go": b"\0" * (300 * KIB)})
+        _move_into_shipped_dir(td, "internal/blob/old.go", "assets/new.bin")
+        msg = cc._staged_budget_refusal(td)
+        assert msg is not None and "commit adds 300 KiB" in msg, msg
+
+
+def test_rename_plus_growth_bills_full_new_blob_in_real_repo() -> None:
+    # 400 KiB base, then 300 KiB appended: git still detects the rename (>=50% similar), and the
+    # commit bills the whole 700 KiB new blob, not just the growth.
+    with tempfile.TemporaryDirectory() as td:
+        base = b"asset row\n" * 40960  # 400 KiB
+        _commit_repo(td, {"assets/old.bin": base})
+        _real_git(td, "mv", "assets/old.bin", "assets/new.bin")
+        Path(td, "assets", "new.bin").write_bytes(base + b"extra row\n" * 30720)  # +300 KiB
+        _real_git(td, "add", "--", "assets/new.bin")
+        msg = cc._staged_budget_refusal(td)
+        assert msg is not None and "commit adds 700 KiB" in msg, msg
+
+
+def test_merge_in_progress_skips_budget_in_real_repo() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"README.md": b"x\n"})
+        Path(td, "assets").mkdir()
+        Path(td, "assets", "big.bin").write_bytes(b"a" * (300 * KIB))
+        _real_git(td, "add", "--", "assets/big.bin")
+        assert cc._staged_budget_refusal(td) is not None, "control: refused outside a merge"
+        Path(td, ".git", "MERGE_HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+        assert cc._staged_budget_refusal(td) is None
+
+
+def test_tracked_listing_keeps_names_with_spaces_whole() -> None:
+    # Whitespace-split listing would make "my dir/go.mod" tracked as "dir/go.mod" and exempt the
+    # staged dir/big.bin under it. The NUL-delimited listing keeps the name whole.
+    with tempfile.TemporaryDirectory() as td:
+        _commit_repo(td, {"my dir/go.mod": b"module x\n", "README.md": b"x\n"})
+        Path(td, "dir").mkdir()
+        Path(td, "dir", "big.bin").write_bytes(b"a" * (300 * KIB))
+        _real_git(td, "add", "--", "dir/big.bin")
+        assert "my dir/go.mod" in cc._budget_tracked(td)
+        assert cc._staged_budget_refusal(td) is not None
+
+
 def _run() -> int:
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

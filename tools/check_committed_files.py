@@ -443,8 +443,9 @@ def _staged_paths(root):
 
 
 def _tracked(root):
-    r = _git(["ls-files"], root)
-    return r.stdout.split() if r.returncode == 0 else None
+    # -z: plain ls-files C-quotes non-ASCII names, and split() on whitespace breaks names with spaces.
+    r = _git(["ls-files", "-z"], root)
+    return [n for n in r.stdout.split("\0") if n] if r.returncode == 0 else None
 
 
 def _classify(path, root, max_bytes):
@@ -489,6 +490,174 @@ def _size(root, path):
         return None
 
 
+# Per-commit budget on non-Go bytes a staged commit may ADD to module-shipped paths. Kept in
+# lockstep with commitShippedBudget in internal/hooks/gate_fileadmission.go.
+DEFAULT_COMMIT_SHIPPED_BYTES = 256 * 1024
+
+
+class _BudgetReadError(Exception):
+    """A git read the budget needs failed, so the commit's shipped bytes cannot be bounded."""
+
+
+def _commit_shipped_budget() -> int:
+    try:
+        v = int(os.environ.get("FAK_COMMIT_SHIPPED_BYTES", "").strip())
+    except ValueError:
+        return DEFAULT_COMMIT_SHIPPED_BYTES
+    return v if v > 0 else DEFAULT_COMMIT_SHIPPED_BYTES
+
+
+def _budget_git(root, args, what, ok=(0,)):
+    """Stdout of one git read on the budget path. Any other exit, or a git that cannot run, raises
+    _BudgetReadError naming the step that failed."""
+    try:
+        r = _git(args, root)
+    except (OSError, ValueError) as e:
+        raise _BudgetReadError(f"{what} (git {args[0]} could not run: {e.__class__.__name__})") from e
+    if r.returncode not in ok:
+        raise _BudgetReadError(f"{what} (git {args[0]} exited {r.returncode})")
+    return r.stdout
+
+
+def _unboundable(what):
+    return ("cannot " + what + "; refusing (fail closed): the commit's shipped bytes cannot be bounded.")
+
+
+def _merge_in_progress(root):
+    """True while MERGE_HEAD exists. Its inputs were each gated at their own commit, so the per-commit
+    budget does not apply. Anything but a clean answer raises: the budget never guesses."""
+    p = _budget_git(root, ["rev-parse", "--git-path", "MERGE_HEAD"], "read whether a merge is in progress").strip()
+    if not p:
+        raise _BudgetReadError("read whether a merge is in progress (rev-parse printed no MERGE_HEAD path)")
+    p = p if os.path.isabs(p) else os.path.join(root, p)
+    try:
+        os.stat(p)
+    except FileNotFoundError:
+        return False
+    except OSError as e:
+        raise _BudgetReadError(f"read whether a merge is in progress ({e.__class__.__name__})") from e
+    return True
+
+
+def _staged_added_renamed(root):
+    """Staged added and renamed paths, NUL-delimited so git does not C-quote non-ASCII names, which
+    would miss every size lookup. A rename is billed at its new path's full size, like an addition."""
+    out = _budget_git(root, ["diff", "--cached", "-z", "--name-status", "-M", "--diff-filter=AR"],
+                      "list the staged names")
+    fields = out.split("\0")
+    paths = []
+    i = 0
+    while i < len(fields) and fields[i]:
+        n = 3 if fields[i].startswith("R") else 2
+        if i + n > len(fields):
+            raise _BudgetReadError("list the staged names (malformed name-status listing)")
+        paths.append(fields[i + n - 1])
+        i += n
+    return paths
+
+
+def _budget_tracked(root):
+    """The index's tracked paths. A failed listing raises: nested go.mod detection depends on it."""
+    out = _budget_git(root, ["ls-files", "-z"], "list the tracked paths")
+    return [n for n in out.split("\0") if n]
+
+
+def _text_go_paths(root, paths):
+    """The staged .go paths whose blob is text: no NUL byte in the first 8000 bytes, the test git
+    grep -I applies. A path git grep does not answer is absent and so billed as binary."""
+    text = set()
+    for i in range(0, len(paths), 100):
+        # The tree-ish must follow the options: git reads every argument after it as a revision.
+        out = _budget_git(root, ["--literal-pathspecs", "grep", "-I", "-l", "-z", "-F", "-e", "",
+                                 "--cached", "--"] + paths[i:i + 100],
+                          "check which staged .go files are text", ok=(0, 1))
+        text.update(n for n in out.split("\0") if n)
+    return text
+
+
+def _export_ignored(root, paths):
+    """Paths the index marks export-ignore; those never reach `git archive`, so never the module zip.
+    --cached reads the .gitattributes being committed, not an uncommitted worktree edit. -z keeps
+    non-ASCII names raw so the lookup matches."""
+    ignored = set()
+    for i in range(0, len(paths), 200):
+        out = _budget_git(root, ["check-attr", "-z", "--cached", "export-ignore", "--"] + paths[i:i + 200],
+                          "read export-ignore for the staged paths")
+        # -z emits NUL-terminated triples: path, attribute, value.
+        fields = out.split("\0")
+        for j in range(0, len(fields) - 2, 3):
+            if fields[j + 1] == "export-ignore" and fields[j + 2] == "set":
+                ignored.add(fields[j])
+    return ignored
+
+
+def _staged_blob_sizes(root):
+    """Byte size of the blob each staged path ships. Writes the index as a tree and lists it once, so
+    the cost is two git processes for the whole commit. Gitlinks ship no bytes and map to 0; a path
+    absent from the map could not be sized."""
+    tree = _budget_git(root, ["write-tree"], "size the staged blobs").strip()
+    listing = _budget_git(root, ["ls-tree", "-r", "-l", "-z", tree], "size the staged blobs")
+    sizes = {}
+    for rec in listing.split("\0"):
+        head, sep, path = rec.partition("\t")
+        fields = head.split()
+        if not sep or len(fields) != 4:
+            continue
+        if fields[1] == "commit":
+            sizes[path] = 0
+        elif fields[1] == "blob" and fields[3].isascii() and fields[3].isdigit():
+            sizes[path] = int(fields[3])
+    return sizes
+
+
+def _commit_budget_refusal(names, budget, tracked, ignored, sizes, text_go=frozenset()):
+    """Return a refusal message when the non-Go bytes this commit adds to module-shipped paths exceed
+    `budget`, else None. Shipped excludes text .go sources (`text_go`), export-ignored paths, and any
+    path under a nested go.mod directory. A staged path with no size is refused (fail closed)."""
+    nested = [p[: -len("go.mod")] for p in tracked if p.endswith("/go.mod")]
+    shipped = []
+    unsized = []
+    for n in names:
+        if n in text_go or n in ignored or any(n.startswith(d) for d in nested):
+            continue
+        if n in sizes:
+            shipped.append((sizes[n], n))
+        else:
+            unsized.append(n)
+    if unsized:
+        return _unboundable("read the staged blob size of " + ", ".join(unsized))
+    total = sum(sz for sz, _ in shipped)
+    if total <= budget:
+        return None
+    shipped.sort(key=lambda t: -t[0])
+    top = ", ".join(f"{n} ({sz // 1024} KiB)" for sz, n in shipped[:3])
+    return (f"commit adds {total // 1024} KiB of non-Go bytes to module-shipped paths "
+            f"(budget {budget // 1024} KiB); largest: {top}. "
+            "fix: put evidence under an export-ignored path (.gitattributes export-ignore), "
+            "or commit a pointer (path, sha256, size) instead of the bytes. A pure move of "
+            "already-shipped files can be admitted for this one commit with "
+            f"FAK_COMMIT_SHIPPED_BYTES={total}. The budget is per commit and accepts these limits: "
+            "splitting bulk across commits, overwriting a tracked file, and text .go of any size; "
+            "the tree-wide ratchet (internal/architest TestRootModuleZipBudget) is the backstop.")
+
+
+def _staged_budget_refusal(root, budget=None):
+    """The per-commit budget verdict for the staged commit at `root`, or None. Every git read fails
+    closed: a failed read refuses the commit rather than skipping the check."""
+    try:
+        if _merge_in_progress(root):
+            return None
+        names = _staged_added_renamed(root)
+        text_go = _text_go_paths(root, [n for n in names if n.endswith(".go")])
+        ignored = _export_ignored(root, [n for n in names if n not in text_go])
+        tracked = _budget_tracked(root)
+        sizes = _staged_blob_sizes(root)
+    except _BudgetReadError as e:
+        return _unboundable(str(e))
+    return _commit_budget_refusal(names, _commit_shipped_budget() if budget is None else budget,
+                                  tracked, ignored, sizes, text_go)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group(required=True)
@@ -531,15 +700,21 @@ def main() -> int:
                       "keep it gitignored")
         if reason:
             bad.append((n, reason))
-    if not bad:
+
+    # Per-commit budget: staged-only, because the commit is the unit it bounds.
+    budget_msg = _staged_budget_refusal(root) if a.audit_staged else None
+    if not bad and budget_msg is None:
         print(f"file-admission: clean ({scope}).")
         return 0
 
-    print(f"FILE_ADMISSION: {len(bad)} file(s) that should not be committed:", file=sys.stderr)
-    for n, why in bad:
-        print(f"  {n}  —  {why}", file=sys.stderr)
-    print("  fix: drop it (it is regenerable), gitignore it, or move data under "
-          "fak/experiments|testdata/. Oversized blobs: use Git LFS or trim.", file=sys.stderr)
+    if bad:
+        print(f"FILE_ADMISSION: {len(bad)} file(s) that should not be committed:", file=sys.stderr)
+        for n, why in bad:
+            print(f"  {n}  —  {why}", file=sys.stderr)
+        print("  fix: drop it (it is regenerable), gitignore it, or move data under "
+              "fak/experiments|testdata/. Oversized blobs: use Git LFS or trim.", file=sys.stderr)
+    if budget_msg is not None:
+        print(f"FILE_ADMISSION: {budget_msg}", file=sys.stderr)
     if a.audit_staged:
         print("  override once: ALLOW_STRAY_FILE=1 <git cmd>.", file=sys.stderr)
     return 1
