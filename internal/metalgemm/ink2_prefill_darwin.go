@@ -38,6 +38,9 @@ var ink2PrefillPackedSource = sync.OnceValue(func() string {
 
 var ink2RowsKernel, ink2GroupedKernel = ink2PackedKernels("rows_"), ink2PackedKernels("grouped_")
 
+// ink2VerifyRowsKernel names the verify rows kernels over the same packed decoders.
+var ink2VerifyRowsKernel = ink2PackedKernels("ink2v_rows_")
+
 type ink2PMixShape struct {
 	n, states, tokens uint32
 	invSqrtN          float32

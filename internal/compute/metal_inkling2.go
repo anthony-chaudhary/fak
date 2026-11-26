@@ -444,3 +444,7 @@ func (c *metalBackend) Ink2GraphBegin() error  { return metalgemm.ErrInk2GraphUn
 func (c *metalBackend) Ink2GraphEnd() error    { return metalgemm.ErrInk2GraphUnsupported }
 func (c *metalBackend) Ink2GraphLaunch() error { return metalgemm.ErrInk2GraphUnsupported }
 func (c *metalBackend) Ink2GraphReset()        {}
+
+// A verify chunk is already one command buffer, so there is no slot to capture.
+func (c *metalBackend) Ink2GraphEndSlot(int) error    { return metalgemm.ErrInk2GraphUnsupported }
+func (c *metalBackend) Ink2GraphLaunchSlot(int) error { return metalgemm.ErrInk2GraphUnsupported }
