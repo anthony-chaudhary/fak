@@ -19,6 +19,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -147,6 +148,8 @@ type Inkling2DFlash2Model struct {
 	// mapped is the whole checkpoint mapping every matrix payload lies in
 	mapped []byte
 	closer io.Closer
+	// shared is the process cache entry a cached handle reads through
+	shared *inkling2DFlash2Shared
 }
 
 func (m *Inkling2DFlash2Model) Close() error {
@@ -172,11 +175,26 @@ func Inkling2DFlash2AdjacentDir(ggufPath string) (string, error) {
 
 // OpenInkling2DFlash2 reads dir/config.json and maps dir/model.safetensors,
 // refusing any geometry, dtype, shape, missing, extra or overlapping tensor.
+// The mapping is cached for the process: reopening an unchanged checkpoint
+// returns a handle on the same mapping, and Close releases only the handle.
 func OpenInkling2DFlash2(dir string) (*Inkling2DFlash2Model, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, inkling2DFlash2Config))
 	if err != nil {
 		return nil, err
 	}
+	if inkling2DFlash2FaultCounter != nil {
+		t0, f0 := time.Now(), inkling2DFlash2FaultsNow()
+		defer func() {
+			inkling2DFlash2LastOpen = inkling2DFlash2OpenStats{time.Since(t0), inkling2DFlash2FaultsNow().sub(f0)}
+		}()
+	}
+	if inkling2DFlash2Uncached {
+		return openInkling2DFlash2Mapped(dir, raw)
+	}
+	return openInkling2DFlash2Cached(dir, raw)
+}
+
+func openInkling2DFlash2Mapped(dir string, raw []byte) (*Inkling2DFlash2Model, error) {
 	var cfg Inkling2DFlash2Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("inkling2 dflash2: %s: %w", inkling2DFlash2Config, err)

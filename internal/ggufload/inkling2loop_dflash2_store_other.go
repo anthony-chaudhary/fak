@@ -20,3 +20,5 @@ func (*inkling2DFlash2Store) view([]byte, int, int) (compute.Tensor, bool) {
 }
 
 func (*inkling2DFlash2Store) Close() {}
+
+func (*inkling2DFlash2Store) drainClose() {}

@@ -42,6 +42,8 @@ type ink2DFlash2Draft struct {
 	pred   compute.Tensor
 	succ   compute.Tensor
 	store  *inkling2DFlash2Store
+	// sharedStore marks a store the checkpoint cache owns and closes
+	sharedStore bool
 
 	hiddenNorm, norm                                    ink2Ref
 	x, n, dyn, conv, q, k, v, attn, o, g, u, down, proj ink2Ref
@@ -73,10 +75,20 @@ func (s *inkling2Resident) attachDFlash2(dm *Inkling2DFlash2Model) (*ink2DFlash2
 		return nil, fmt.Errorf("inkling2 dflash2: draft %+v does not fit a %d-wide target of %d visits", c, hp.Hidden, visits)
 	}
 	d := &ink2DFlash2Draft{s: s, dd: dd, cfg: c, visits: append([]int(nil), taps[:len(taps)-1]...), eps: float32(c.Eps)}
-	if len(dm.mapped) > 0 {
+	t0 := time.Now()
+	f0 := inkling2DFlash2FaultsNow()
+	switch {
+	case dm.shared != nil:
+		// the cached checkpoint's store outlives the request, its views stay wired
+		d.store, d.sharedStore = dm.shared.deviceStore(), true
+	case len(dm.mapped) > 0:
 		// a mapping the device cannot alias leaves every matrix to the upload path
 		d.store, _ = openInkling2DFlash2Store(dm.mapped)
 	}
+	defer func() {
+		d.run2.attach = time.Since(t0)
+		d.run2.attachFaults = inkling2DFlash2FaultsNow().sub(f0)
+	}()
 	bf := func(m *inkling2BF16Matrix) compute.Tensor { return d.bf16(m.raw, m.rows, m.cols) }
 	base := func(v []float32) compute.Tensor {
 		raw := make([]byte, 2*len(v))
@@ -349,7 +361,8 @@ func (d *ink2DFlash2Draft) close() {
 	if inkling2DFlash2Fences != nil {
 		inkling2DFlash2LastRun = d.run2
 	}
-	if d.store == nil {
+	if d.store == nil || d.sharedStore {
+		d.store = nil
 		return
 	}
 	if t, err := d.s.dev.Ink2Alloc(1); err == nil {
@@ -373,6 +386,11 @@ type inkling2DFlash2RunStats struct {
 	// and commit) by drafted length; logged, never read by the chooser
 	stepTime [inkling2SpecMaxDraft + 1]time.Duration
 	drafted  time.Time
+	// attach is the bind time and first the first drafted call's wall time,
+	// with the page faults each took while a test reads faults
+	attach, first             time.Duration
+	attachFaults, firstFaults inkling2DFlash2Faults
+	calls                     int
 }
 
 // inkling2DFlash2LastRun is the stats of the last closed draft, recorded only
@@ -404,7 +422,16 @@ func (a inkling2DFlash2Drafter) Draft(history []int, k int) []int {
 	if inkling2DFlash2Fences != nil {
 		f0 = inkling2DFlash2Fences()
 	}
+	var t0 time.Time
+	var p0 inkling2DFlash2Faults
+	if d.run2.calls == 0 {
+		t0, p0 = time.Now(), inkling2DFlash2FaultsNow()
+	}
 	props, err := d.propose(history[len(history)-1], d.s.pos, n)
+	if d.run2.calls == 0 {
+		d.run2.first, d.run2.firstFaults = time.Since(t0), inkling2DFlash2FaultsNow().sub(p0)
+	}
+	d.run2.calls++
 	if inkling2DFlash2Fences != nil {
 		d.run2.draftFences += inkling2DFlash2Fences() - f0
 	}
