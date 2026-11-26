@@ -73,3 +73,5 @@ func (*Ink2Device) Add(a, b, out Ink2Ref, n int) error { return ErrMetalUnavaila
 func (*Ink2Device) SoftcapArgmax(logits Ink2Ref, n int, softcap float32, outIdx Ink2Ref) error {
 	return ErrMetalUnavailable
 }
+
+func (*Ink2Device) MakeResident([]Ink2Buf) error { return ErrMetalUnavailable }

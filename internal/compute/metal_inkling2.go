@@ -45,6 +45,35 @@ func MetalInkling2Stats() (metalgemm.Ink2Stats, bool) {
 	return d.Stats(), true
 }
 
+// MetalInkling2MakeResident wires bufs for the process-wide inkling2 device and
+// waits for it.
+func MetalInkling2MakeResident(bufs []metalgemm.Ink2Buf) error {
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	d, err := metalInk2Device()
+	if err != nil {
+		return ink2MetalErr("resident", err)
+	}
+	return ink2MetalErr("resident", d.MakeResident(bufs))
+}
+
+// MetalInkling2Buffers is the Metal buffers behind ts: device allocations and
+// every view of a packed weight. Tensors of other backends contribute none.
+func MetalInkling2Buffers(ts []Tensor) []metalgemm.Ink2Buf {
+	var out []metalgemm.Ink2Buf
+	for _, t := range ts {
+		switch b := t.buf.(type) {
+		case *metalBuf:
+			if b.ptr != nil {
+				out = append(out, metalgemm.Ink2AdoptBuffer(b.ptr))
+			}
+		case *metalInk2Weight:
+			out = append(out, b.m.Ink2Buffers()...)
+		}
+	}
+	return out
+}
+
 // MetalInkling2Profile returns the per-dispatch profile of the process-wide
 // inkling2 device, which is empty unless FAK_INK2_PROFILE selected a mode.
 func MetalInkling2Profile() (metalgemm.Ink2Profile, bool) {

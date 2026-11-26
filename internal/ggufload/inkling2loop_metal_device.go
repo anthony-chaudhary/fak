@@ -123,6 +123,10 @@ func OpenInkling2LoopMetalDevice(path string) (*Inkling2LoopModel, compute.Backe
 		m.closer, m.path = s, path
 		err = s.bind(m)
 	}
+	if err == nil {
+		// wiring the mapped weights here keeps the page-in out of the first prefill
+		err = compute.MetalInkling2MakeResident(store.Ink2Buffers())
+	}
 	if err != nil {
 		s.Close()
 		return nil, nil, err

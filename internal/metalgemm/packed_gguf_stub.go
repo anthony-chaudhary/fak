@@ -13,6 +13,7 @@ func (*PackedGGUFStore) Matrix(offset int, ggmlType uint32, rows, cols, experts 
 }
 func (*PackedGGUFStore) Run(jobs []PackedGGUFJob) error { return ErrMetalUnavailable }
 func (*PackedGGUFStore) Close()                         {}
+func (*PackedGGUFStore) Ink2Buffers() []Ink2Buf         { return nil }
 func (*PackedGGUFStore) ExpertMLP(job PackedExpertMLP, x, dst []float32) error {
 	return ErrMetalUnavailable
 }

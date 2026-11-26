@@ -72,3 +72,11 @@ func (s *inkling2DFlash2Store) drainClose() {
 	}
 	s.Close()
 }
+
+// ink2Buffers is every Metal view the draft's matrices alias.
+func (s *inkling2DFlash2Store) ink2Buffers() []metalgemm.Ink2Buf {
+	if s == nil {
+		return nil
+	}
+	return s.store.Ink2Buffers()
+}

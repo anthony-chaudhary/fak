@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
 // inkling2DFlash2Store is absent off Apple GPUs: every draft matrix uploads.
@@ -22,3 +23,5 @@ func (*inkling2DFlash2Store) view([]byte, int, int) (compute.Tensor, bool) {
 func (*inkling2DFlash2Store) Close() {}
 
 func (*inkling2DFlash2Store) drainClose() {}
+
+func (*inkling2DFlash2Store) ink2Buffers() []metalgemm.Ink2Buf { return nil }

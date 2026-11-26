@@ -191,6 +191,15 @@ func (s *inkling2Resident) fail(err error) {
 	}
 }
 
+// makeResident wires the session's buffers from s.owned[from:] on, plus extra, on
+// Metal, so the first prefill's command buffer starts without paying for it.
+func (s *inkling2Resident) makeResident(from int, extra []metalgemm.Ink2Buf) {
+	if s.err != nil || s.be.Name() != "metal" {
+		return
+	}
+	s.fail(compute.MetalInkling2MakeResident(append(compute.MetalInkling2Buffers(s.owned[from:]), extra...)))
+}
+
 func (s *inkling2Resident) alloc(n int) ink2Ref {
 	t, err := s.dev.Ink2Alloc(n)
 	if err != nil {
@@ -508,6 +517,7 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 	s.graph = inkling2DefaultOn(be, "FAK_INKLING2_GRAPH", os.LookupEnv) && !s.hostRouting && be.Name() != "metal"
 	s.batched = s.batched && !s.hostRouting
 	s.enablePipe(ctx)
+	s.makeResident(0, nil)
 	if s.err != nil {
 		err := s.err
 		s.close()

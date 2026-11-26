@@ -78,6 +78,7 @@ func (s *inkling2Resident) attachDFlash2(dm *Inkling2DFlash2Model) (*ink2DFlash2
 		return nil, fmt.Errorf("inkling2 dflash2: draft %+v does not fit a %d-wide target of %d visits", c, hp.Hidden, visits)
 	}
 	d := &ink2DFlash2Draft{s: s, dd: dd, cfg: c, visits: append([]int(nil), taps[:len(taps)-1]...), eps: float32(c.Eps)}
+	owned0 := len(s.owned)
 	t0 := time.Now()
 	f0 := inkling2DFlash2FaultsNow()
 	switch {
@@ -134,6 +135,7 @@ func (s *inkling2Resident) attachDFlash2(dm *Inkling2DFlash2Model) (*ink2DFlash2
 	for r := 1; r < B; r++ {
 		copy(d.rows[r*H:(r+1)*H], d.mask)
 	}
+	s.makeResident(owned0, d.store.ink2Buffers())
 	if s.err != nil {
 		d.close()
 		return nil, s.err
