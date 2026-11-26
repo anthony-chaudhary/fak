@@ -32,12 +32,13 @@ var inkling2StreamToolOpeners = []string{
 	deepSeekDSMLCallsOpen, "```",
 }
 
-// inkling2ContentStream projects raw decoded Inkling-2 output onto the content that
-// SplitInkling2Output and the tool-call lift produce for the finished turn. It
-// releases a byte only when no continuation can drop, move or trim it: text-block
-// bytes outside any possible marker or tool-call opener, with leading whitespace
-// dropped and inner whitespace held until a later visible rune. Anything it cannot
-// classify stops the projection; the final content then supplies the remainder.
+// inkling2ContentStream projects raw decoded Inkling-2 output onto the content and
+// the reasoning that SplitInkling2Output produces for the finished turn. It releases
+// a byte only when no continuation can drop, move or trim it: text-block bytes
+// outside any possible marker or tool-call opener, and thinking-block bytes outside
+// a possible block or turn end, each with leading whitespace dropped and inner
+// whitespace held until a later visible rune. Anything it cannot classify stops the
+// projection; the final turn then supplies the remainder.
 type inkling2ContentStream struct {
 	liftable bool // the request offers tools, so text dialects may lift calls
 	state    int
@@ -46,6 +47,11 @@ type inkling2ContentStream struct {
 	sep      bool   // a text block closed; the next one is joined by "\n"
 	space    []byte // whitespace held until a visible rune follows it
 	emitted  strings.Builder
+
+	thought      strings.Builder // reasoning released so far
+	thoughtBlock bool            // the current thinking block released a visible rune
+	thoughtSep   bool            // a thinking block with visible text closed; the next is joined by "\n"
+	thoughtSpace []byte          // whitespace held until a visible rune follows it in the block
 }
 
 func newInkling2ContentStream(liftable bool) *inkling2ContentStream {
@@ -53,19 +59,19 @@ func newInkling2ContentStream(liftable bool) *inkling2ContentStream {
 }
 
 // feed consumes raw output that no stop string can cut and returns the newly
-// provable content.
-func (s *inkling2ContentStream) feed(raw []byte) string {
+// provable content and reasoning.
+func (s *inkling2ContentStream) feed(raw []byte) (content, reasoning string) {
 	if s.state == inkling2StreamHeld {
-		return ""
+		return "", ""
 	}
 	s.buf = append(s.buf, raw...)
-	before := s.emitted.Len()
+	before, thoughtBefore := s.emitted.Len(), s.thought.Len()
 	for s.state != inkling2StreamHeld && s.step() {
 	}
 	if s.state == inkling2StreamHeld {
 		s.buf = nil
 	}
-	return s.emitted.String()[before:]
+	return s.emitted.String()[before:], s.thought.String()[thoughtBefore:]
 }
 
 // step advances one state transition and reports whether another may follow.
@@ -77,7 +83,7 @@ func (s *inkling2ContentStream) step() bool {
 	case inkling2StreamHeader:
 		return s.open(inkling2ContentText, inkling2ContentThinking)
 	case inkling2StreamThinking:
-		return s.skipThinking()
+		return s.thinking()
 	case inkling2StreamText:
 		return s.text()
 	}
@@ -119,22 +125,63 @@ func (s *inkling2ContentStream) open(markers ...string) bool {
 	return false
 }
 
-func (s *inkling2ContentStream) skipThinking() bool {
+// thinking releases reasoning as it decodes. Reasoning is never content and never a
+// call, so only a block end or the turn end bounds it; the final split trims each
+// block, which putThought reproduces by holding whitespace until a visible rune.
+// The one remaining hold: once a tool or unknown block makes the projection held,
+// later reasoning is delivered after the turn as the remainder.
+func (s *inkling2ContentStream) thinking() bool {
 	end := bytes.Index(s.buf, []byte(inkling2EndMessage))
 	eot := bytes.Index(s.buf, []byte(Inkling2EndOfTurnMarker))
 	switch {
 	case eot >= 0 && (end < 0 || eot < end):
+		s.putThought(string(s.buf[:eot]))
 		s.state = inkling2StreamHeld
 		return false
 	case end >= 0:
+		s.putThought(string(s.buf[:end]))
+		s.closeThought()
 		s.buf = s.buf[end+len(inkling2EndMessage):]
 		s.state = inkling2StreamBetween
 		return true
 	}
-	if keep := len(Inkling2EndOfTurnMarker) - 1; len(s.buf) > keep {
-		s.buf = s.buf[len(s.buf)-keep:]
-	}
+	n := completeRunePrefix(s.buf[:len(s.buf)-holdSuffix(s.buf, inkling2ThinkingEnds)])
+	s.putThought(string(s.buf[:n]))
+	s.buf = append(s.buf[:0], s.buf[n:]...)
 	return false
+}
+
+// inkling2ThinkingEnds are the only markers that can end a thinking block or the turn.
+var inkling2ThinkingEnds = []string{inkling2EndMessage, Inkling2EndOfTurnMarker}
+
+// putThought applies the per-block TrimSpace of SplitInkling2Output: whitespace is
+// released only once a visible rune of the same block follows it.
+func (s *inkling2ContentStream) putThought(text string) {
+	for len(text) > 0 {
+		r, size := utf8.DecodeRuneInString(text)
+		if unicode.IsSpace(r) {
+			if s.thoughtBlock {
+				s.thoughtSpace = append(s.thoughtSpace, text[:size]...)
+			}
+		} else {
+			if !s.thoughtBlock && s.thoughtSep {
+				s.thought.WriteByte('\n')
+				s.thoughtSep = false
+			}
+			s.thought.Write(s.thoughtSpace)
+			s.thoughtSpace = s.thoughtSpace[:0]
+			s.thought.WriteString(text[:size])
+			s.thoughtBlock = true
+		}
+		text = text[size:]
+	}
+}
+
+// closeThought drops the block's trailing whitespace and joins the next visible block by "\n".
+func (s *inkling2ContentStream) closeThought() {
+	s.thoughtSpace = s.thoughtSpace[:0]
+	s.thoughtSep = s.thoughtSep || s.thoughtBlock
+	s.thoughtBlock = false
 }
 
 func (s *inkling2ContentStream) guards() [][]string {
@@ -178,12 +225,19 @@ func (s *inkling2ContentStream) text() bool {
 func (s *inkling2ContentStream) heldSuffix() int {
 	held := 0
 	for _, set := range s.guards() {
-		for _, g := range set {
-			for n := min(len(g)-1, len(s.buf)); n > held; n-- {
-				if bytes.HasSuffix(s.buf, []byte(g[:n])) {
-					held = n
-					break
-				}
+		held = max(held, holdSuffix(s.buf, set))
+	}
+	return held
+}
+
+// holdSuffix is the length of the longest suffix of buf that may still grow into one of markers.
+func holdSuffix(buf []byte, markers []string) int {
+	held := 0
+	for _, m := range markers {
+		for n := min(len(m)-1, len(buf)); n > held; n-- {
+			if bytes.HasSuffix(buf, []byte(m[:n])) {
+				held = n
+				break
 			}
 		}
 	}
@@ -226,12 +280,19 @@ func (s *inkling2ContentStream) put(text string) {
 	}
 }
 
+// inkling2Delta is one released piece of output: reasoning or content.
+type inkling2Delta struct {
+	text      string
+	reasoning bool
+}
+
 // inkling2StreamPump hands deltas from the generator's emit callback to the
-// request's sink on another goroutine, so a slow client never stalls the decode
-// that emit runs inside (a cohort worker serves every row from one loop).
+// request's sinks on another goroutine, so a slow client never stalls the decode
+// that emit runs inside (a cohort worker serves every row from one loop). Content
+// and reasoning share one queue, so the client sees them in decode order.
 type inkling2StreamPump struct {
 	mu       sync.Mutex
-	pending  strings.Builder
+	pending  []inkling2Delta
 	err      error
 	panicked any
 	wake     chan struct{}
@@ -240,16 +301,22 @@ type inkling2StreamPump struct {
 	stopOnce sync.Once
 }
 
-func startInkling2StreamPump(sink StreamSink, cancel func()) *inkling2StreamPump {
+func startInkling2StreamPump(content, reasoning StreamSink, cancel func()) *inkling2StreamPump {
+	send := func(d inkling2Delta) error {
+		if d.reasoning {
+			return reasoning(d.text)
+		}
+		return content(d.text)
+	}
 	q := &inkling2StreamPump{wake: make(chan struct{}, 1), done: make(chan struct{}), exited: make(chan struct{})}
 	go func() {
 		defer close(q.exited)
 		for {
 			select {
 			case <-q.wake:
-				q.deliver(sink, cancel)
+				q.deliver(send, cancel)
 			case <-q.done:
-				q.deliver(sink, cancel)
+				q.deliver(send, cancel)
 				return
 			}
 		}
@@ -257,15 +324,19 @@ func startInkling2StreamPump(sink StreamSink, cancel func()) *inkling2StreamPump
 	return q
 }
 
-// put queues delta and reports whether the sink is still accepting.
-func (q *inkling2StreamPump) put(delta string) bool {
+// put queues text and reports whether the sinks are still accepting.
+func (q *inkling2StreamPump) put(text string, reasoning bool) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.err != nil {
 		return false
 	}
-	if delta != "" {
-		q.pending.WriteString(delta)
+	if text != "" {
+		if n := len(q.pending); n > 0 && q.pending[n-1].reasoning == reasoning {
+			q.pending[n-1].text += text
+		} else {
+			q.pending = append(q.pending, inkling2Delta{text: text, reasoning: reasoning})
+		}
 		select {
 		case q.wake <- struct{}{}:
 		default:
@@ -274,15 +345,11 @@ func (q *inkling2StreamPump) put(delta string) bool {
 	return true
 }
 
-func (q *inkling2StreamPump) deliver(sink StreamSink, cancel func()) {
+func (q *inkling2StreamPump) deliver(send func(inkling2Delta) error, cancel func()) {
 	q.mu.Lock()
-	delta := q.pending.String()
-	q.pending.Reset()
-	failed := q.err != nil
+	batch := q.pending
+	q.pending = nil
 	q.mu.Unlock()
-	if delta == "" || failed {
-		return
-	}
 	// A sink panic is re-raised on the request goroutine by stop, where the
 	// server's per-request recovery applies; here it would end the process.
 	defer func() {
@@ -291,9 +358,18 @@ func (q *inkling2StreamPump) deliver(sink StreamSink, cancel func()) {
 			cancel()
 		}
 	}()
-	if err := sink(delta); err != nil {
-		q.fail(err, nil)
-		cancel()
+	for _, d := range batch {
+		q.mu.Lock()
+		failed := q.err != nil
+		q.mu.Unlock()
+		if failed {
+			return
+		}
+		if err := send(d); err != nil {
+			q.fail(err, nil)
+			cancel()
+			return
+		}
 	}
 }
 

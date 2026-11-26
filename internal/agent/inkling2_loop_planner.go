@@ -193,12 +193,14 @@ func (p *Inkling2LoopPlanner) StreamingSupported() bool { return true }
 
 // CompleteStream streams content while the turn decodes: each delta is text that
 // the finished turn's content provably starts with, so tool-call text never reaches
-// the client before adjudication. The returned Completion is the one Complete
-// builds, and the deltas concatenate to its content. A forced tool choice may
-// rewrite content, so that turn is delivered once decoded. Text streamed before
-// a decode error stays delivered; the error follows it. Tokens that stream no
-// content report held activity so the caller can keep the stream warm: the first
-// one before any content, then one per inkling2HeldActivityEvery in a row.
+// the client before adjudication. Reasoning streams the same way to the reasoning
+// sink on ctx, as a prefix of the finished turn's reasoning. The returned Completion
+// is the one Complete builds, and the deltas concatenate to its content. A forced
+// tool choice may rewrite content, so that turn is delivered once decoded. Text
+// streamed before a decode error stays delivered; the error follows it. Tokens that
+// deliver nothing to either sink report held activity so the caller can keep the
+// stream warm: the first one before any delivery, then one per
+// inkling2HeldActivityEvery in a row.
 func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	sp := applySampleOpts(opts...)
 	if sink == nil {
@@ -222,14 +224,19 @@ func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSin
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	projector := newInkling2ContentStream(len(offeredToolsFor(ctx, tools).names) > 0)
-	pump := startInkling2StreamPump(sink, cancel)
+	reasoningSink := streamReasoningSink(ctx)
+	pump := startInkling2StreamPump(sink, reasoningSink, cancel)
 	defer pump.stop()
 	comp, err := p.complete(streamCtx, messages, tools, sp, func(raw []byte) bool {
-		delta := projector.feed(raw)
+		content, reasoning := projector.feed(raw)
 		if held != nil {
-			held.token(delta != "")
+			held.token(content != "" || (reasoningSink != nil && reasoning != ""))
 		}
-		return pump.put(delta)
+		live := pump.put(content, false)
+		if reasoningSink != nil {
+			live = pump.put(reasoning, true) && live
+		}
+		return live
 	})
 	if sinkErr := pump.stop(); sinkErr != nil {
 		return nil, sinkErr
@@ -240,6 +247,9 @@ func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSin
 	streamed := projector.emitted.String()
 	if !strings.HasPrefix(comp.Message.Content, streamed) {
 		return nil, fmt.Errorf("inkling2_loop planner: streamed content is not a prefix of the final content")
+	}
+	if reasoningSink != nil && !strings.HasPrefix(comp.Message.ReasoningContent, projector.thought.String()) {
+		return nil, fmt.Errorf("inkling2_loop planner: streamed reasoning is not a prefix of the final reasoning")
 	}
 	if rest := comp.Message.Content[len(streamed):]; rest != "" {
 		if err := sink(rest); err != nil {

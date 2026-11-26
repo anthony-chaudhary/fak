@@ -451,3 +451,116 @@ func TestInkling2StreamInterleavedHeldTokensReportNoActivity(t *testing.T) {
 		t.Fatalf("held %d (want 1), stream %q vs content %q", held, capture.joined(), comp.Message.Content)
 	}
 }
+
+// waitFor polls until the capture has joined to want or the deadline passes. The
+// pump delivers on its own goroutine, so a turn still decoding is observed live.
+func (c *inkling2StreamCapture) waitFor(want string, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for c.joined() != want {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return true
+}
+
+// Reasoning reaches the live reasoning sink while the turn is still decoding, not
+// only after the Completion, and the streamed reasoning is the Completion's reasoning.
+func TestInkling2StreamReasoningLiveBeforeTurnEnds(t *testing.T) {
+	turn := inkling2RoleModel + inkling2ContentThinking + "think about it" + inkling2EndMessage +
+		inkling2RoleModel + inkling2ContentText + "Hello world, this is a long answer." + inkling2EndMessage + Inkling2EndOfTurnMarker
+	ids := inkling2StreamIDs(t, turn, false)
+	reasoning := newInkling2StreamCapture()
+	var early bool
+	gen := &inkling2StreamGen{ids: ids, afterEmit: func(i int) {
+		if i == len(ids)-3 { // the answer's last rune is decoded; the turn has not ended
+			early = reasoning.waitFor("think about it", 5*time.Second)
+		}
+	}}
+	ctx := WithStreamReasoningSink(context.Background(), reasoning.sink)
+	comp, err := inkling2StreamPlanner(t, gen).CompleteStream(ctx, newInkling2StreamCapture().sink, inkling2StreamUser, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !early {
+		t.Fatalf("reasoning %q reached the sink only after the turn finished decoding", reasoning.joined())
+	}
+	if got := reasoning.joined(); got != comp.Message.ReasoningContent || got != "think about it" {
+		t.Fatalf("stream reasoning %q, completion reasoning %q", got, comp.Message.ReasoningContent)
+	}
+}
+
+// A tool-call turn streams its reasoning, but never its call as content, and its
+// Completion keeps the call.
+func TestInkling2StreamToolTurnStreamsReasoningOnly(t *testing.T) {
+	turn := inkling2RoleModel + inkling2ContentThinking + "need ls" + inkling2EndMessage +
+		inkling2RoleModel + "Bash" + inkling2InvokeToolJSON + `{"name":"Bash","args":{"command":"ls"}}` + inkling2EndMessage + Inkling2EndOfTurnMarker
+	reasoning, content := newInkling2StreamCapture(), newInkling2StreamCapture()
+	ctx := WithStreamReasoningSink(context.Background(), reasoning.sink)
+	comp, err := inkling2StreamPlanner(t, &inkling2StreamGen{ids: inkling2StreamIDs(t, turn, false)}).CompleteStream(ctx, content.sink, inkling2StreamUser, inkling2StreamTools())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comp.Message.ToolCalls) != 1 || comp.Message.Content != "" {
+		t.Fatalf("completion %+v", comp.Message)
+	}
+	if got := content.joined(); got != "" {
+		t.Fatalf("tool-call turn streamed content %q", got)
+	}
+	if got := reasoning.joined(); got != "need ls" {
+		t.Fatalf("reasoning %q, want %q", got, "need ls")
+	}
+}
+
+// Every streamed reasoning delta is a prefix of the Completion's reasoning, and for
+// the turns where the reasoning is fully decoded before a later block or the turn
+// end, the streamed reasoning is the whole of it.
+func TestInkling2StreamReasoningIsAlwaysAPrefix(t *testing.T) {
+	thought := func(s string) string { return inkling2RoleModel + inkling2ContentThinking + s + inkling2EndMessage }
+	text := func(s string) string { return inkling2RoleModel + inkling2ContentText + s + inkling2EndMessage }
+	eot := Inkling2EndOfTurnMarker
+	whole := []struct{ name, raw string }{
+		{"two thoughts joined", thought(" one \n ") + thought("\n two  ") + text("ans") + eot},
+		{"empty thought between", thought("a") + thought("  \n ") + thought("b") + text("c") + eot},
+		{"partial end marker in thought", inkling2ContentThinking + "a <|end" + inkling2EndMessage + text("x") + eot},
+		{"thought cut by end of turn", inkling2RoleModel + inkling2ContentThinking + "unfinished" + eot},
+		{"thought then call", thought("need ls") + inkling2RoleModel + "Bash" + inkling2InvokeToolJSON + `{"name":"Bash","args":{}}` + inkling2EndMessage + eot},
+	}
+	check := func(name, raw string, tools []ToolDef, spell, full bool) {
+		t.Helper()
+		ids := inkling2StreamIDs(t, raw, spell)
+		want, err := inkling2StreamPlanner(t, &inkling2StreamGen{ids: ids}).Complete(context.Background(), inkling2StreamUser, tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reasoning := newInkling2StreamCapture()
+		ctx := WithStreamReasoningSink(context.Background(), reasoning.sink)
+		comp, err := inkling2StreamPlanner(t, &inkling2StreamGen{ids: ids}).CompleteStream(ctx, newInkling2StreamCapture().sink, inkling2StreamUser, tools)
+		if err != nil {
+			t.Fatalf("%s spell=%v: %v", name, spell, err)
+		}
+		got := reasoning.joined()
+		if !strings.HasPrefix(want.Message.ReasoningContent, got) {
+			t.Errorf("%s spell=%v: streamed reasoning %q is not a prefix of %q", name, spell, got, want.Message.ReasoningContent)
+		}
+		if got+StreamReasoningRemainder(got, comp.Message.ReasoningContent) != comp.Message.ReasoningContent {
+			t.Errorf("%s spell=%v: streamed reasoning plus remainder is not the completion's reasoning", name, spell)
+		}
+		if full && got != want.Message.ReasoningContent {
+			t.Errorf("%s spell=%v: streamed reasoning %q, Complete reasoning %q", name, spell, got, want.Message.ReasoningContent)
+		}
+	}
+	for _, spell := range []bool{false, true} {
+		for _, w := range whole {
+			check(w.name, w.raw, nil, spell, true)
+		}
+		for _, c := range inkling2StreamCases() {
+			var tools []ToolDef
+			if c.tools {
+				tools = inkling2StreamTools()
+			}
+			check(c.name, c.raw, tools, spell, false)
+		}
+	}
+}
