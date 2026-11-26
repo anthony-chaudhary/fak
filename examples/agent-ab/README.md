@@ -39,6 +39,17 @@ exit summary use.
 
 Each result applies to the model, task and settings in its report.
 
+## What this does not claim
+
+- The offline A/B uses a deterministic mock planner. It shows the mechanics of
+  the policy checks, not how a real model behaves.
+- A live run measures one model, one task and one set of settings. It does not
+  claim a general improvement in tool-use quality or safety.
+- `time saved by fak` is a projection from turns spared times observed per-turn
+  latency. It is not a measured end-to-end saving for a user workflow.
+- One test booking task is not a safety benchmark. The adversarial coverage is
+  in the red-team battery linked below.
+
 ## See also
 
 - [`CLAIMS.md`](../../CLAIMS.md) #104 — the live-seam claim this example backs.
