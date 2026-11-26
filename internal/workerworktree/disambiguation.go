@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -874,6 +875,12 @@ func computeDisambiguationWitness(ctx context.Context, repo, treeID string, w Di
 	return w, true
 }
 
+// disambiguationWriteWorkers bounds concurrent directory creates and blob
+// writes. File creation on a loaded workstation is latency-bound (per-create
+// filesystem scanning), so a small pool overlaps those waits; it is a variable
+// so the measurement harness can sweep it.
+var disambiguationWriteWorkers = min(16, runtime.NumCPU())
+
 func materializeDisambiguationTree(ctx context.Context, repo, treeID, dst string) error {
 	listing, err := listDisambiguationTree(ctx, repo, treeID)
 	if err != nil {
@@ -886,13 +893,32 @@ func materializeDisambiguationTree(ctx context.Context, repo, treeID, dst string
 	if err := os.MkdirAll(dst, 0755); err != nil {
 		return err
 	}
+	corpus := make([]disambiguationTreeEntry, 0, len(entries))
+	targets := make([]string, 0, len(entries))
+	dirSet := make(map[string]struct{})
 	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		if !disambiguationCorpusPath(entry.Path, entry.Size) {
 			continue
 		}
+		target, err := disambiguationTarget(dst, entry.Path)
+		if err != nil {
+			return err
+		}
+		corpus = append(corpus, entry)
+		targets = append(targets, target)
+		dirSet[filepath.Dir(target)] = struct{}{}
+	}
+	dirs := make([]string, 0, len(dirSet))
+	for dir := range dirSet {
+		dirs = append(dirs, dir)
+	}
+	if err := forEachBounded(ctx, disambiguationWriteWorkers, len(dirs), func(_ context.Context, i int) error {
+		return os.MkdirAll(dirs[i], 0755)
+	}); err != nil {
+		return err
+	}
+	return forEachBounded(ctx, disambiguationWriteWorkers, len(corpus), func(ctx context.Context, i int) error {
+		entry := corpus[i]
 		body, err := readDisambiguationObject(ctx, repo, entry.ObjectID)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", entry.Path, err)
@@ -900,22 +926,66 @@ func materializeDisambiguationTree(ctx context.Context, repo, treeID, dst string
 		if int64(len(body)) != entry.Size {
 			return fmt.Errorf("read %s: blob size %d, want %d", entry.Path, len(body), entry.Size)
 		}
-		target, err := disambiguationTarget(dst, entry.Path)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-			return err
-		}
 		mode := os.FileMode(0644)
 		if entry.Mode == "100755" {
 			mode = 0755
 		}
-		if err := os.WriteFile(target, body, mode); err != nil {
-			return err
+		return os.WriteFile(targets[i], body, mode)
+	})
+}
+
+// forEachBounded runs fn(i) for i in [0,n) on at most workers goroutines. It
+// returns the first error from fn (cancelling the rest) or the context error
+// if ctx ends first, and only returns once every goroutine it started has
+// exited.
+func forEachBounded(ctx context.Context, workers, n int, fn func(ctx context.Context, i int) error) error {
+	if n == 0 {
+		return ctx.Err()
+	}
+	workers = max(1, min(workers, n))
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobs := make(chan int)
+	var (
+		wg       sync.WaitGroup
+		errOnce  sync.Once
+		firstErr error
+	)
+	fail := func(err error) {
+		errOnce.Do(func() {
+			firstErr = err
+			cancel()
+		})
+	}
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if runCtx.Err() != nil {
+					continue
+				}
+				if err := fn(runCtx, i); err != nil {
+					fail(err)
+				}
+			}
+		}()
+	}
+feed:
+	for i := range n {
+		select {
+		case jobs <- i:
+		case <-runCtx.Done():
+			break feed
 		}
 	}
-	return nil
+	close(jobs)
+	wg.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	return ctx.Err()
 }
 
 func parseDisambiguationTree(listing []byte) ([]disambiguationTreeEntry, error) {
