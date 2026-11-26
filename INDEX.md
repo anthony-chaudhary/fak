@@ -308,6 +308,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Why fak-native: what every upstream engine is missing for Kimi-K3.1-Pro (2026-11-12)](docs/notes/2026-11-12-fak-native-value-kimi-k31-pro-upstream-gaps.md) -- auto-indexed dated note.
 - [Lane ledger: bottom-up model of one decode launch](docs/notes/2026-11-25-lane-ledger-bottom-up-model.md) -- auto-indexed dated note.
 - [SubagentSupervisor: deliberately tested-but-unwired (decision record)](docs/notes/2026-11-17-subagent-supervisor-unwired-decision.md) -- auto-indexed dated note.
 - [Kimi-K3.1-Pro-NVFP4 on H200 — sizing verdict + serving recipes (2026-11-12)](docs/notes/2026-11-12-kimi-k31-pro-nvfp4-h200-sizing.md) -- auto-indexed dated note.
