@@ -5,9 +5,13 @@ This is the executable spine for the final `/release` step: inspect a committed
 ref, require the release dry-run, fold the GitHub Actions signal for that exact
 commit when available, and only then create the local annotated vX.Y.Z tag.
 
+The root module zip budget is measured against the ref before any tag is cut:
+a tree the Go proxy would refuse must not become a public release tag.
+
 Default mode is read-only. Use `--execute` to create the local tag and `--push`
 to push that tag. The helper never creates a release commit and never pushes the
-trunk branch.
+trunk branch. `--module-zip-only` runs just the budget measurement, so the
+release workflow can refuse before it pushes trunk.
 """
 from __future__ import annotations
 
@@ -16,6 +20,9 @@ import json
 import re
 import subprocess
 import sys
+import tarfile
+import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -26,6 +33,35 @@ CI_BILLING_PATTERNS = (
     "spending limit",
     "billing & plans",
 )
+
+MODULE_ZIP_BUDGET_FILE = "internal/architest/module_zip_budget_test.go"
+MODULE_ZIP_BUDGET_NAMES = (
+    "moduleZipProxyCapBytes",
+    "moduleZipBudgetBytes",
+    "moduleZipNonGoBudget",
+    "moduleZipNonGoFileLimit",
+)
+MODULE_ZIP_CONST_RE = re.compile(
+    r"^\s*(moduleZip\w+)\s*=\s*(\d+)(?:\s*<<\s*(\d+))?\s*$", re.MULTILINE,
+)
+# The Go proxy's external limit. Kept here, not read from the ref, so a commit
+# cannot raise its own budget past it.
+MODULE_ZIP_HARD_CAP_BYTES = 500 << 20
+# Caps the per-file non-Go limit the same way the total cap bounds the ref.
+MODULE_ZIP_FILE_HARD_CAP_BYTES = 5 << 20
+MODULE_ZIP_ARCHIVE_TIMEOUT_S = 600
+MODULE_ZIP_REMEDY = (
+    "move evidence, receipts and vendored bulk out of the root module (its own "
+    "go.mod or export-ignore), or commit a pointer (path, sha256, size) instead of the raw artifact"
+)
+
+
+class ModuleZipUnmeasurable(Exception):
+    pass
+
+
+def _mib(n: int) -> str:
+    return f"{n / (1 << 20):.1f} MiB"
 
 
 def run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 600) -> tuple[int, str]:
@@ -387,6 +423,140 @@ def verify_release_lock(root: Path) -> dict:
     return payload
 
 
+def module_zip_budgets(root: Path, sha: str) -> dict[str, int]:
+    ok, text = show_text(root, sha, MODULE_ZIP_BUDGET_FILE)
+    if not ok:
+        raise ModuleZipUnmeasurable(f"{MODULE_ZIP_BUDGET_FILE} is missing at the ref")
+    found = {name: int(base) << int(shift or 0)
+             for name, base, shift in MODULE_ZIP_CONST_RE.findall(text)}
+    missing = [name for name in MODULE_ZIP_BUDGET_NAMES if name not in found]
+    if missing:
+        raise ModuleZipUnmeasurable(
+            "budget constants not found at the ref (each must be a bare `name = value` "
+            "line with no trailing comment): " + ", ".join(missing)
+        )
+    return {name: found[name] for name in MODULE_ZIP_BUDGET_NAMES}
+
+
+def module_zip_entries(root: Path, sha: str) -> list[tuple[str, int]]:
+    # git archive applies export-ignore exactly as the module proxy's zip does,
+    # so the measured set is the installable tree, not the raw tracked tree.
+    # The watchdog bounds a hung git; stderr goes to a file so it cannot fill a pipe.
+    entries: list[tuple[str, int]] = []
+    with tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen(
+            ["git", "archive", "--format=tar", sha],
+            cwd=str(root), stdout=subprocess.PIPE, stderr=err,
+        )
+        watchdog = threading.Timer(MODULE_ZIP_ARCHIVE_TIMEOUT_S, proc.kill)
+        watchdog.start()
+        try:
+            try:
+                with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
+                    for member in archive:
+                        if member.isfile():
+                            entries.append((member.name, member.size))
+                # Drain the record padding after the tar end marker, or git sees EPIPE.
+                proc.stdout.read()
+            except Exception as exc:
+                proc.kill()
+                proc.wait()
+                raise ModuleZipUnmeasurable(f"git archive stream unreadable: {exc}") from exc
+            returncode = proc.wait()
+        finally:
+            watchdog.cancel()
+            proc.stdout.close()
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        err.seek(0)
+        stderr = err.read().decode("utf-8", errors="replace")
+    if returncode != 0:
+        raise ModuleZipUnmeasurable(f"git archive failed: {stderr.strip()[-200:]}")
+    return entries
+
+
+def _inside_nested_module(path: str, nested: set[str]) -> bool:
+    parts = path.split("/")[:-1]
+    return any("/".join(parts[:i]) in nested for i in range(1, len(parts) + 1))
+
+
+def module_zip_check(root: Path, sha: str) -> dict:
+    try:
+        budgets = module_zip_budgets(root, sha)
+        entries = module_zip_entries(root, sha)
+    except ModuleZipUnmeasurable as exc:
+        return {
+            "pass": False,
+            "verdict": "UNMEASURABLE",
+            "errors": [f"module_zip_unmeasurable: {exc}; refusing to tag without a measured module zip"],
+        }
+
+    paths = [name for name, _ in entries]
+    if "go.mod" not in paths:
+        return {
+            "pass": False,
+            "verdict": "UNMEASURABLE",
+            "errors": ["module_zip_unmeasurable: no root go.mod in the archive; wrong ref or tree"],
+        }
+    # Mirrors the architest budget: a directory with its own go.mod is a nested
+    # module and is not shipped in the root module zip.
+    nested = {p[: -len("/go.mod")] for p in paths if p.endswith("/go.mod")}
+    file_limit = min(budgets["moduleZipNonGoFileLimit"], MODULE_ZIP_FILE_HARD_CAP_BYTES)
+    total = 0
+    non_go = 0
+    oversized: list[tuple[str, int]] = []
+    for name, size in entries:
+        if _inside_nested_module(name, nested):
+            continue
+        total += size
+        if not name.endswith(".go"):
+            non_go += size
+            if size > file_limit:
+                oversized.append((name, size))
+    budget_total = min(budgets["moduleZipBudgetBytes"], MODULE_ZIP_HARD_CAP_BYTES)
+    budget_non_go = min(budgets["moduleZipNonGoBudget"], MODULE_ZIP_HARD_CAP_BYTES)
+    errors: list[str] = []
+    if total > budget_total:
+        errors.append(
+            f"module_zip_over_budget: root module source tree is {_mib(total)}, over the "
+            f"{_mib(budget_total)} budget (Go proxy cap "
+            f"{_mib(MODULE_ZIP_HARD_CAP_BYTES)}); remedy: {MODULE_ZIP_REMEDY}"
+        )
+    if non_go > budget_non_go:
+        errors.append(
+            f"module_zip_non_go_over_budget: non-Go content is {_mib(non_go)}, over the "
+            f"{_mib(budget_non_go)} budget; remedy: {MODULE_ZIP_REMEDY}"
+        )
+    for name, size in sorted(oversized, key=lambda item: -item[1])[:5]:
+        errors.append(
+            f"module_zip_file_over_limit: {name} is {_mib(size)}, over the "
+            f"{_mib(file_limit)} per-file limit; remedy: {MODULE_ZIP_REMEDY}"
+        )
+    return {
+        "pass": not errors,
+        "verdict": "WITHIN_BUDGET" if not errors else "OVER_BUDGET",
+        "total_bytes": total,
+        "non_go_bytes": non_go,
+        "budgets": {**budgets, "hard_cap_bytes": MODULE_ZIP_HARD_CAP_BYTES},
+        "errors": errors,
+    }
+
+
+def module_zip_only(root: Path, ref: str) -> dict:
+    sha = ref_sha(root, ref)
+    if not sha:
+        return {"ok": False, "ref": ref, "sha": None, "errors": ["unresolvable_ref"]}
+    check = module_zip_check(root, sha)
+    return {
+        "ok": check["pass"],
+        "ref": ref,
+        "sha": sha,
+        "checks": {"module_zip": check},
+        "errors": check["errors"],
+    }
+
+
 def build_context(root: Path, *, version: str | None, ref: str,
                   require_ci: bool = False, skip_ci: bool = False,
                   wait_ci: bool = False, skip_dry_run: bool = False,
@@ -415,6 +585,10 @@ def build_context(root: Path, *, version: str | None, ref: str,
     if not sha:
         errors.append("unresolvable_ref")
         return result
+
+    module_zip = module_zip_check(root, sha)
+    result["checks"]["module_zip"] = module_zip
+    errors.extend(module_zip["errors"])
 
     ref_version = version_at_ref(root, sha)
     version_check = {"pass": ref_version == normalized, "at_ref": ref_version}
@@ -582,11 +756,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-lock", action="store_true", help="skip release lock during --execute")
     parser.add_argument("--lock-already-held", action="store_true",
                         help="execute under a parent-held release lock; verifies ownership and does not release it")
+    parser.add_argument("--module-zip-only", action="store_true",
+                        help="measure the root module zip budget for --ref and stop; no tag, no CI")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
 
     root = repo_root()
     try:
+        if args.module_zip_only:
+            result = module_zip_only(root, args.ref)
+            if args.as_json:
+                json.dump(result, sys.stdout, indent=2)
+                sys.stdout.write("\n")
+            else:
+                print(f"[release-tag] {'OK' if result['ok'] else 'REFUSED'} module zip ({args.ref})")
+                for error in result["errors"]:
+                    print(f"  ERROR: {error}", file=sys.stderr)
+            return 0 if result["ok"] else 1
         context = build_context(
             root,
             version=args.version,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,18 @@ def git(root: Path, *args: str) -> str:
 def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+MODULE_BUDGET_REL = "internal/architest/module_zip_budget_test.go"
+MODULE_BUDGET_GO = """package architest
+
+const (
+	moduleZipProxyCapBytes  = 500 << 20
+	moduleZipBudgetBytes    = {budget}
+	moduleZipNonGoBudget    = 190 << 20
+	moduleZipNonGoFileLimit = 5 << 20
+)
+"""
 
 
 class ReleaseTagTest(unittest.TestCase):
@@ -66,10 +79,140 @@ class ReleaseTagTest(unittest.TestCase):
         git(root, "init", "-b", "master")
         write(root / "VERSION", version + "\n")
         write(root / "docs" / "releases" / f"v{version}.md", f"# v{version}\n")
-        git(root, "add", "VERSION", f"docs/releases/v{version}.md")
+        write(root / "go.mod", "module example.com/root\n\ngo 1.22\n")
+        write(root / MODULE_BUDGET_REL, MODULE_BUDGET_GO.format(budget="375 << 20"))
+        git(root, "add", "VERSION", f"docs/releases/v{version}.md", "go.mod", MODULE_BUDGET_REL)
         git(root, "commit", "-m", f"v{version}: seed release")
         sha = git(root, "rev-parse", "HEAD")
         return root, sha
+
+    def _commit(self, root: Path, files: dict[str, object]) -> str:
+        for rel, body in files.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(body, bytes):
+                path.write_bytes(body)
+            else:
+                write(path, str(body))
+            git(root, "add", rel)
+        git(root, "commit", "-m", "change module contents")
+        return git(root, "rev-parse", "HEAD")
+
+    def test_module_zip_refuses_over_budget_before_any_tag(self) -> None:
+        rt = load()
+        root, _ = self._repo()
+        sha = self._commit(root, {
+            MODULE_BUDGET_REL: MODULE_BUDGET_GO.format(budget="1 << 20"),
+            "docs/blob.txt": b"x" * (2 << 20),
+        })
+        context = rt.build_context(
+            root, version="0.1.0", ref=sha,
+            skip_dry_run=True, skip_ci=True, skip_remote_tag=True,
+        )
+        self.assertFalse(context["ok"])
+        errors = "\n".join(context["errors"])
+        self.assertIn("module_zip_over_budget", errors)
+        self.assertIn("2.0 MiB", errors)
+        self.assertIn("1.0 MiB budget", errors)
+        self.assertIn("export-ignore", errors)
+
+        result = rt.execute_tag(root, context)
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["tag_created"])
+        self.assertEqual(git(root, "tag", "-l", "v0.1.0"), "")
+
+    def test_module_zip_passes_with_export_ignored_and_nested_bulk(self) -> None:
+        rt = load()
+        root, _ = self._repo()
+        sha = self._commit(root, {
+            MODULE_BUDGET_REL: MODULE_BUDGET_GO.format(budget="2 << 20"),
+            ".gitattributes": "evidence/** export-ignore\n",
+            "pkg/payload.txt": b"p" * (3 << 19),
+            "evidence/receipt.bin": b"e" * (3 << 20),
+            "sub/go.mod": "module example.com/sub\n",
+            "sub/blob.txt": b"s" * (3 << 20),
+        })
+        check = rt.module_zip_check(root, sha)
+        self.assertTrue(check["pass"], check["errors"])
+        self.assertEqual(check["verdict"], "WITHIN_BUDGET")
+
+    def test_module_zip_fails_closed_when_budget_cannot_be_read(self) -> None:
+        rt = load()
+        root, _ = self._repo()
+        sha = self._commit(root, {MODULE_BUDGET_REL: "package architest\n"})
+        check = rt.module_zip_check(root, sha)
+        self.assertFalse(check["pass"])
+        self.assertIn("module_zip_unmeasurable", "\n".join(check["errors"]))
+
+        git(root, "rm", "-q", "--", MODULE_BUDGET_REL)
+        git(root, "commit", "-m", "drop budget file")
+        sha = git(root, "rev-parse", "HEAD")
+        check = rt.module_zip_check(root, sha)
+        self.assertFalse(check["pass"])
+        self.assertIn("is missing at the ref", "\n".join(check["errors"]))
+
+    def test_module_zip_ref_cannot_raise_the_hard_cap(self) -> None:
+        rt = load()
+        original_cap = rt.MODULE_ZIP_HARD_CAP_BYTES
+        rt.MODULE_ZIP_HARD_CAP_BYTES = 1 << 20
+        self.addCleanup(setattr, rt, "MODULE_ZIP_HARD_CAP_BYTES", original_cap)
+        root, _ = self._repo()
+        sha = self._commit(root, {
+            MODULE_BUDGET_REL: MODULE_BUDGET_GO.format(budget="600 << 20"),
+            "docs/blob.txt": b"x" * (2 << 20),
+        })
+        check = rt.module_zip_check(root, sha)
+        self.assertFalse(check["pass"])
+        self.assertIn("module_zip_over_budget", "\n".join(check["errors"]))
+        self.assertIn("1.0 MiB", "\n".join(check["errors"]))
+
+        context = rt.build_context(
+            root, version="0.1.0", ref=sha,
+            skip_dry_run=True, skip_ci=True, skip_remote_tag=True,
+        )
+        self.assertFalse(context["ok"])
+        self.assertIn("module_zip_over_budget", "\n".join(context["errors"]))
+
+    def test_module_zip_only_cli_refuses_before_publish(self) -> None:
+        root, _ = self._repo()
+        sha = self._commit(root, {
+            MODULE_BUDGET_REL: MODULE_BUDGET_GO.format(budget="1 << 20"),
+            "docs/blob.txt": b"x" * (2 << 20),
+        })
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "--module-zip-only", "--ref", sha, "--json"],
+            cwd=root, text=True, encoding="utf-8", capture_output=True,
+        )
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertFalse(payload["ok"])
+        self.assertIn("module_zip_over_budget", "\n".join(payload["errors"]))
+
+    def test_workflow_measures_module_zip_before_publishing_trunk(self) -> None:
+        text = (ROOT / ".github" / "workflows" / "release-cadence.yml").read_text(encoding="utf-8")
+        cut = text.index("python tools/release_cut.py --execute")
+        refuse = text.index("--module-zip-only")
+        publish = text.index("python tools/fleet_control_pane.py publish --apply")
+        self.assertLess(cut, refuse)
+        self.assertLess(refuse, publish)
+        start = text.index("      - name: Measure module zip before publish")
+        block = text[start:text.index("      - name: Push trunk", start)]
+        self.assertNotIn("continue-on-error", block)
+        self.assertIsNone(re.search(r"^\s*if:", block, re.MULTILINE))
+
+    def test_module_zip_per_file_limit_is_capped_by_ref_raise(self) -> None:
+        rt = load()
+        root, _ = self._repo()
+        sha = self._commit(root, {
+            MODULE_BUDGET_REL: MODULE_BUDGET_GO.format(budget="1 << 30").replace(
+                "moduleZipNonGoFileLimit = 5 << 20", "moduleZipNonGoFileLimit = 1 << 30",
+            ),
+            "docs/bulk.tsv": b"x" * (6 << 20),
+        })
+        check = rt.module_zip_check(root, sha)
+        self.assertFalse(check["pass"])
+        self.assertIn("module_zip_file_over_limit", "\n".join(check["errors"]))
+        self.assertIn("5.0 MiB per-file limit", "\n".join(check["errors"]))
 
     def test_fold_ci_runs_classifies_green_red_pending_and_no_signal(self) -> None:
         rt = load()

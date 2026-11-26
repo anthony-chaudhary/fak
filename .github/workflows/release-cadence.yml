@@ -355,6 +355,29 @@ jobs:
             echo "sha=$sha"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Measure module zip before publish
+        # Runs before the trunk push, the first irreversible step: an over-budget
+        # root module must never reach origin, not only fail at the tag. No
+        # step-level if: here, so a skipped cut cannot silently skip the measure.
+        run: |
+          set -euo pipefail
+          sha="${{ steps.cut.outputs.sha }}"
+          if [ -z "$sha" ]; then
+            echo "no release commit was cut; nothing to measure"
+            exit 0
+          fi
+          # The receipt lives outside the checkout so the tree stays clean for the publish.
+          receipt="$RUNNER_TEMP/module-zip.json"
+          set +e
+          python tools/release_tag.py --module-zip-only --ref "$sha" --json > "$receipt"
+          code=$?
+          set -e
+          cat "$receipt"
+          if [ "$code" -ne 0 ]; then
+            echo "::error::module zip over budget or unmeasurable at the release commit; refusing to publish trunk or tag"
+            exit 1
+          fi
+
       - name: Push trunk
         if: steps.cut.outputs.sha != ''
         run: |
