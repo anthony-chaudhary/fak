@@ -69,7 +69,9 @@
         "inkling2-serve-loop-session",
         "inkling2-serve-loop-planner"
       ],
-      "aliases": [],
+      "aliases": [
+        "FAK_INKLING2_CTX"
+      ],
       "grounding": "Inkling2LoopResidentContext",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",

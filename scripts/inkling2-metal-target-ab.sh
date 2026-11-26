@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A/B the two Metal Inkling 2 forwards through the ordinary `fak run` entrypoint.
+# A/B the Metal Inkling 2 forwards through the ordinary `fak run` entrypoint.
 # Emits JSON lines on stdout: one config record, one record per measured run,
 # one summary per target (median and range of prefill and decode tok/s and of
 # load-to-ready), and one compare record for the visible outputs.
@@ -14,9 +14,10 @@ MAX_TOKENS=128
 PROMPT="Name the capital of France."
 TARGETS="vendored native"
 RETRY_SECONDS=360
+KEEP=""
 
 usage() {
-  echo "usage: $0 --gguf PATH [--fak BIN] [--reps N] [--max-tokens N] [--prompt TEXT] [--targets 'vendored native'] [--retry-seconds N]" >&2
+  echo "usage: $0 --gguf PATH [--fak BIN] [--reps N] [--max-tokens N] [--prompt TEXT] [--targets 'vendored native resident'] [--retry-seconds N] [--keep DIR]" >&2
 }
 
 while [ $# -gt 0 ]; do
@@ -28,6 +29,7 @@ while [ $# -gt 0 ]; do
     --prompt) PROMPT="$2"; shift 2 ;;
     --targets) TARGETS="$2"; shift 2 ;;
     --retry-seconds) RETRY_SECONDS="$2"; shift 2 ;;
+    --keep) KEEP="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
@@ -42,12 +44,24 @@ label_for() {
   case "$1" in
     vendored) echo "vendored-splash" ;;
     native) echo "fak-metalgemm" ;;
+    resident) echo "fak-metal-resident" ;;
     *) echo "$0: unknown target $1" >&2; exit 2 ;;
   esac
 }
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/inkling2-ab.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT
+# --keep leaves every run's stdout and stderr behind for inspection.
+if [ -n "$KEEP" ]; then
+  mkdir -p "$KEEP"
+  WORK="$KEEP"
+else
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/inkling2-ab.XXXXXX")"
+  trap 'rm -rf "$WORK"' EXIT
+fi
+
+# The GPU is shared with the CPU side of every forward, so host load moves the rates.
+loadavg() {
+  uptime | sed 's/.*load averages*: *//' | tr -d ','
+}
 
 ARGV=("$FAK" run "$GGUF" --effort none --timings --temp 0 --max-tokens "$MAX_TOKENS" --quiet "$PROMPT")
 
@@ -117,6 +131,7 @@ for target in $TARGETS; do
   while [ "$rep" -le "$REPS" ]; do
     out="$WORK/$target.$rep.out"
     err="$WORK/$target.$rep.err"
+    load_before="$(loadavg)"
     run_once "$target" "$out" "$err"
     path_line="$(grep -m 1 '^fak run: ' "$err" || true)"
     case "$path_line" in
@@ -140,7 +155,9 @@ for target in $TARGETS; do
       jq -cn --arg target "$target" --argjson rep "$rep" --arg path_line "$path_line" \
         --arg sha "$(shasum -a 256 "$out" | cut -d ' ' -f 1)" --argjson t "$timings" \
         --argjson bytes "$bytes" --argjson visible "$visible" --argjson load_ms "$(load_ms "$err")" --argjson env "$env_json" \
+        --arg load_before "$load_before" --arg load_after "$(loadavg)" \
         '{kind:"run", target:$target, selector:$target, rep:$rep, path_line:$path_line,
+          loadavg_before:$load_before, loadavg_after:$load_after,
           prefill_tok_s:$t.prompt_per_second, decode_tok_s:$t.predicted_per_second,
           prompt_n:$t.prompt_n, predicted_n:$t.predicted_n, cache_n:$t.cache_n,
           load_ms:$load_ms, output_bytes:$bytes, output_empty:($visible == 0),
@@ -167,6 +184,7 @@ jq -cs '
   | (map(.output_sha256) | unique) as $shas
   | {kind:"compare", targets:(map(.target) | unique), runs:length, empty_outputs:$empty,
      distinct_outputs:($shas | length),
+     by_target:(group_by(.target) | map({key: .[0].target, value: (map(.output_sha256) | unique)}) | from_entries),
      outputs_match:(if length == 0 or $empty > 0 then null else ($shas | length) == 1 end),
      reason:(if length == 0 then "no measured runs"
              elif $empty > 0 then "empty visible output; raise --max-tokens"

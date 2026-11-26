@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -45,15 +47,17 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 	var m *ggufload.Inkling2LoopModel
 	var target *inklingmetal.Model
 	var release func()
+	residentCtx := 0
 	backendName := "cpu"
 	if metal {
 		backendName = "metal"
-		useTarget, e := inkling2MetalUseVendored(os.Getenv(inkling2MetalTargetEnv), arch == serveInkling2LoopArch, inklingmetal.Available())
+		kind, e := inkling2MetalSelect(os.Getenv(inkling2MetalTargetEnv), arch == serveInkling2LoopArch, inklingmetal.Available(), inkling2MetalResidentAvailable)
 		if e != nil {
 			return nil, nil, e
 		}
 		var weights localadmission.MemoryPlan
-		if useTarget {
+		switch kind {
+		case inkling2MetalVendored:
 			// Match the launcher's default single-session context budget, including
 			// the direct target's packed images, verification scratch and KV extents.
 			planned, e := inklingmetal.Estimate(path, gateway.DefaultAdmissionPolicy().TokenBudget)
@@ -65,19 +69,25 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 			}
 			weights.SteadyBytes = int64(planned.Bytes())
 			weights.StartupPeakBytes, _ = metalServeStartupPeakBytes(serveLoadArmResidentQ4K, weights.SteadyBytes, 0, false)
-		} else {
+		case inkling2MetalResident:
+			residentCtx = inkling2ResidentCtx(os.LookupEnv(inkling2ResidentCtxEnv))
+			weights, err = inkling2RunResidentMemory(path, f, arch, residentCtx)
+		default:
 			weights, err = inkling2RunMetalMemory(path, f)
-			if err != nil {
-				return nil, nil, err
-			}
+		}
+		if err != nil {
+			return nil, nil, err
 		}
 		var loadErr error
 		release, err = admitLocalMetalModel(true, path, gpulease.Options{}, metalAdmissionSpec{
 			Weights: &weights,
 			Load: func() bool {
-				if useTarget {
+				switch kind {
+				case inkling2MetalVendored:
 					target, loadErr = inklingmetal.Open(path)
-				} else {
+				case inkling2MetalResident:
+					m, be, loadErr = openInkling2MetalResident(path)
+				default:
 					m, loadErr = ggufload.OpenInkling2LoopMetal(path)
 				}
 				return loadErr == nil
@@ -111,6 +121,10 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 		fmt.Fprintf(os.Stderr, "fak run: inkling2_loop backend=metal target=%s layers=24 passes=3\n", inkling2MetalTargetVendoredLabel)
 		return agent.NewInkling2MetalRunPlanner(name, target, tok, eos), release, nil
 	}
+	if residentCtx > 0 {
+		fmt.Fprintf(os.Stderr, "fak run: %s backend=metal target=%s layers=%d passes=%d ctx=%d\n", arch, inkling2MetalTargetResidentLabel, m.HP.Layers, m.HP.Passes, residentCtx)
+		return inkling2ResidentPlanner{agent.NewInkling2DeviceRunPlanner(name, m, be, tok, eos), residentCtx}, release, nil
+	}
 	if metal {
 		backendName += " target=" + inkling2MetalTargetNativeLabel
 	}
@@ -125,28 +139,204 @@ const (
 	inkling2MetalTargetEnv           = "FAK_INKLING_METAL_TARGET"
 	inkling2MetalTargetVendoredLabel = "vendored-splash"
 	inkling2MetalTargetNativeLabel   = "fak-metalgemm"
+	inkling2MetalTargetResidentLabel = "fak-metal-resident"
 )
 
-// inkling2MetalUseVendored picks between the vendored direct target and fak's
-// own packed-kernel forward. Only an unset selector may fall back: an explicit
-// request that cannot be honoured is refused so a measurement never reports
-// one path under the other's name.
-func inkling2MetalUseVendored(selector string, loopArch, vendoredAvailable bool) (bool, error) {
+type inkling2MetalPath int
+
+const (
+	inkling2MetalNative inkling2MetalPath = iota
+	inkling2MetalVendored
+	inkling2MetalResident
+)
+
+// inkling2MetalSelect picks between the vendored direct target, fak's
+// host-driven packed-kernel forward and fak's device-resident forward. Only an
+// unset selector may fall back: an explicit request that cannot be honoured is
+// refused so a measurement never reports one path under another's name.
+func inkling2MetalSelect(selector string, loopArch, vendoredAvailable, residentAvailable bool) (inkling2MetalPath, error) {
 	switch strings.ToLower(strings.TrimSpace(selector)) {
 	case "":
-		return loopArch && vendoredAvailable, nil
+		if loopArch && vendoredAvailable {
+			return inkling2MetalVendored, nil
+		}
+		return inkling2MetalNative, nil
 	case "vendored":
 		if !loopArch {
-			return false, fmt.Errorf("Inkling 2: %s=vendored needs the %s architecture", inkling2MetalTargetEnv, serveInkling2LoopArch)
+			return 0, fmt.Errorf("Inkling 2: %s=vendored needs the %s architecture", inkling2MetalTargetEnv, serveInkling2LoopArch)
 		}
 		if !vendoredAvailable {
-			return false, fmt.Errorf("Inkling 2: %s=vendored but the vendored Metal target is not available in this build or on this device", inkling2MetalTargetEnv)
+			return 0, fmt.Errorf("Inkling 2: %s=vendored but the vendored Metal target is not available in this build or on this device", inkling2MetalTargetEnv)
 		}
-		return true, nil
+		return inkling2MetalVendored, nil
 	case "native":
-		return false, nil
+		return inkling2MetalNative, nil
+	case "resident":
+		if !residentAvailable {
+			return 0, fmt.Errorf("Inkling 2: %s=resident but the device-resident Metal forward is not available in this build", inkling2MetalTargetEnv)
+		}
+		return inkling2MetalResident, nil
 	}
-	return false, fmt.Errorf("Inkling 2: unknown %s=%q (want vendored or native)", inkling2MetalTargetEnv, selector)
+	return 0, fmt.Errorf("Inkling 2: unknown %s=%q (want vendored, native or resident)", inkling2MetalTargetEnv, selector)
+}
+
+// These mirror the resident driver's unexported sizing in internal/ggufload
+// (inkling2ResidentCtxFrom, inkling2ArenaFloats); admission has to price the
+// session before the driver exists.
+const (
+	inkling2ResidentCtxEnv      = "FAK_INKLING2_CTX"
+	inkling2ResidentCtxDefault  = 4096
+	inkling2ResidentCtxMin      = 512
+	inkling2ResidentCtxMax      = 23552
+	inkling2ResidentArenaFloats = 16 << 20
+	// Metal rounds a shared buffer up to whole pages.
+	inkling2ResidentBufferAlign = 16 << 10
+)
+
+func inkling2ResidentCtx(v string, set bool) int {
+	if !set {
+		return inkling2ResidentCtxDefault
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < inkling2ResidentCtxMin {
+		return inkling2ResidentCtxDefault
+	}
+	return min(n, inkling2ResidentCtxMax)
+}
+
+// inkling2ResidentShape is the part of the hyperparameters that sizes a
+// resident session's device buffers.
+type inkling2ResidentShape struct {
+	Hidden, Heads, KVHeads, HeadDim int
+	SlidingWindow, ConvKernel       int
+	CoreStart, CoreEnd, Passes      int
+	Local                           []bool
+}
+
+func inkling2ResidentShapeOf(f *ggufload.File, arch string) (inkling2ResidentShape, error) {
+	var s inkling2ResidentShape
+	var err error
+	p := arch + "."
+	u := func(key string, dst *int) {
+		v, ok := f.Uint64(p + key)
+		if !ok && err == nil {
+			err = fmt.Errorf("Inkling 2: %s lacks %s%s", arch, p, key)
+		}
+		*dst = int(v)
+	}
+	// A head count is a scalar or a per-layer array; the binder requires the array uniform.
+	heads := func(key string, dst *int) {
+		if v, ok := f.IntArray(p + key); ok && len(v) > 0 {
+			*dst = v[0]
+			return
+		}
+		u(key, dst)
+	}
+	u("embedding_length", &s.Hidden)
+	u("attention.key_length", &s.HeadDim)
+	u("attention.sliding_window", &s.SlidingWindow)
+	u("shortconv.l_cache", &s.ConvKernel)
+	heads("attention.head_count", &s.Heads)
+	heads("attention.head_count_kv", &s.KVHeads)
+	s.Passes = 1
+	if arch == serveInkling2LoopArch {
+		u("loop.start", &s.CoreStart)
+		u("loop.end", &s.CoreEnd)
+		u("loop.count", &s.Passes)
+	}
+	s.Local, _ = f.BoolArray(p + "attention.sliding_window_pattern")
+	if err == nil && (len(s.Local) == 0 || s.CoreStart < 0 || s.CoreEnd < s.CoreStart || s.CoreEnd > len(s.Local) || s.Passes < 1) {
+		err = fmt.Errorf("Inkling 2: %s has an invalid loop core [%d,%d) x%d over %d layers", arch, s.CoreStart, s.CoreEnd, s.Passes, len(s.Local))
+	}
+	return s, err
+}
+
+// inkling2ResidentSessionBytes replays the allocations of the resident
+// driver's session constructor for one unbatched session: K and V caches and a
+// convolution history per layer visit, the attention score row, the token
+// input, the per-token arena and the argmax index.
+func inkling2ResidentSessionBytes(s inkling2ResidentShape, ctx int) int64 {
+	var total int64
+	alloc := func(floats int) {
+		b := 4 * int64(floats)
+		total += (b + inkling2ResidentBufferAlign - 1) / inkling2ResidentBufferAlign * inkling2ResidentBufferAlign
+	}
+	layers, core := len(s.Local), s.CoreEnd-s.CoreStart
+	kvDim := s.KVHeads * s.HeadDim
+	channels := 2*kvDim + 2*s.Hidden
+	maxCap := s.SlidingWindow
+	for slot := 0; slot < layers+(s.Passes-1)*core; slot++ {
+		layer := slot
+		if slot >= layers {
+			// Slots past the first pass belong to the revisited core.
+			layer = s.CoreStart + (slot-layers)%core
+		}
+		cap := ctx
+		if s.Local[layer] {
+			cap = s.SlidingWindow
+		}
+		maxCap = max(maxCap, cap)
+		alloc(cap * kvDim)
+		alloc(cap * kvDim)
+		alloc(channels * (s.ConvKernel - 1))
+	}
+	alloc(2 * s.Heads * maxCap)
+	alloc(s.Hidden + 4)
+	alloc(inkling2ResidentArenaFloats)
+	alloc(4)
+	return total
+}
+
+// inkling2RunResidentMemory is the weight plan plus what the resident forward
+// holds on the device: the session buffers and an F32 copy of each loop
+// controller projection, which that path uploads instead of reading in place.
+func inkling2RunResidentMemory(path string, f *ggufload.File, arch string, ctx int) (localadmission.MemoryPlan, error) {
+	plan, err := inkling2RunMetalMemory(path, f)
+	if err != nil {
+		return plan, err
+	}
+	shape, err := inkling2ResidentShapeOf(f, arch)
+	if err != nil {
+		return localadmission.MemoryPlan{}, err
+	}
+	extra := inkling2ResidentSessionBytes(shape, ctx)
+	for _, t := range f.Tensors {
+		if !inkling2RunControllerWeight(t.Name) {
+			continue
+		}
+		// inkling2RunMetalMemory has already bounded every dimension product.
+		var bytes int64 = 4
+		for _, n := range t.Dims {
+			bytes *= int64(n)
+		}
+		extra += bytes
+	}
+	if extra > math.MaxInt64-plan.SteadyBytes {
+		return localadmission.MemoryPlan{}, fmt.Errorf("Inkling 2: resident session plan overflow")
+	}
+	plan.SteadyBytes += extra
+	plan.StartupPeakBytes, _ = metalServeStartupPeakBytes(serveLoadArmResidentQ4K, plan.SteadyBytes, 0, false)
+	return plan, nil
+}
+
+// inkling2ResidentPlanner names the context limit when the driver runs out of it.
+type inkling2ResidentPlanner struct {
+	agent.Planner
+	ctx int
+}
+
+func (p inkling2ResidentPlanner) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	c, err := p.Planner.Complete(ctx, messages, tools, opts...)
+	return c, inkling2ResidentCtxError(err, p.ctx)
+}
+
+// The driver reports an exhausted cache only as text.
+func inkling2ResidentCtxError(err error, ctx int) error {
+	if err == nil || !strings.Contains(err.Error(), "global cache") {
+		return err
+	}
+	return fmt.Errorf("Inkling 2: prompt plus output exceeds the %d-token context of the %s Metal path (%s; default %d, max %d): %w",
+		ctx, inkling2MetalTargetResidentLabel, inkling2ResidentCtxEnv, inkling2ResidentCtxDefault, inkling2ResidentCtxMax, err)
 }
 
 // runInkling2Tokenizer is a seam so tests can bind a toy vocab to a synthetic GGUF.
@@ -240,6 +430,16 @@ func inkling2RunMappedWeight(name string) bool {
 		"attn_k_conv_proj.weight", "attn_v_conv_proj.weight", "ffn_gate_inp.weight", "ffn_gate_up_exps.weight", "ffn_down_exps.weight":
 		return true
 	}
+	return inkling2RunControllerField(field)
+}
+
+func inkling2RunControllerWeight(name string) bool {
+	block, _ := strings.CutPrefix(name, "blk.")
+	_, field, _ := strings.Cut(block, ".")
+	return inkling2RunControllerField(field)
+}
+
+func inkling2RunControllerField(field string) bool {
 	controller, ok := strings.CutPrefix(field, "loop_")
 	if !ok {
 		return false
