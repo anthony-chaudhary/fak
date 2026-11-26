@@ -410,18 +410,19 @@ func TestCIProvenanceFullGateRejectsMixedAttempts(t *testing.T) {
 		{name: "manual retained previous routed attempt", event: "workflow_dispatch", job: "testroute-ci-only", field: "run_attempt", value: "1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			required := []string{"build-vet-test", "race-detector", "head-snapshot-build"}
+			full := []string{"build-vet-test", "coverage-shard", "coverage-merge", "gates-a", "gates-b", "gates-c", "gates-d", "race-detector"}
+			required := append(append([]string{}, full...), "head-snapshot-build")
 			class := "full"
 			ref := "refs/heads/main"
 			if tc.event == "pull_request" {
-				required = []string{"build-vet-test", "race-detector"}
+				required = full
 				ref = "refs/pull/17/merge"
 			} else if tc.event == "workflow_dispatch" {
 				required = []string{"testroute-ci-only"}
 				class = "diagnostic"
 			}
 			jobs := map[string]any{}
-			for _, id := range []string{"build-vet-test", "race-detector", "head-snapshot-build", "testroute-ci-only"} {
+			for _, id := range append(append([]string{}, full...), "head-snapshot-build", "testroute-ci-only") {
 				jobs[id] = map[string]any{"result": "skipped", "outputs": map[string]string{}}
 			}
 			for _, id := range required {
@@ -550,8 +551,16 @@ func TestFastReleaseGateSkipsOnlyPinnedLiveTreeRatchets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(full), "run: go test -timeout=20m -coverprofile=coverage.out ./...") {
-		t.Fatal("ci.yml must keep running the full go test ./..., so the ratchets still run on every push")
+	// The coverage shards partition `go list ./...` (plus the split-package buckets)
+	// and run every partition without -skip, so the full package set still runs.
+	for _, want := range []string{
+		`go test -timeout=20m -coverprofile="$profile" "${go_test_args[@]}"`,
+		"go list ./... > \"$all_file\"",
+		"go run ./cmd/cifastshard partition",
+	} {
+		if !strings.Contains(string(full), want) {
+			t.Fatalf("ci.yml must keep running the full go test ./... through the coverage shards (missing %q), so the ratchets still run on every push", want)
+		}
 	}
 	for _, line := range strings.Split(string(full), "\n") {
 		if strings.Contains(line, "go test") && strings.Contains(line, "-skip") {

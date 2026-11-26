@@ -126,7 +126,7 @@ jobs:
       run_id: ${{ steps.source.outputs.run_id }}
       run_attempt: ${{ steps.source.outputs.run_attempt }}
     if: github.event_name != 'workflow_dispatch'
-    name: build · vet · test · claims-lint
+    name: build · vet · architest (source binder for every verification job)
     runs-on: ubuntu-latest
     env:
       # The exact toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets
@@ -224,10 +224,12 @@ jobs:
       # stale tier-table row cannot inherit a cached PASS from a previous commit (#1145).
       - name: architest tier gate (uncached)
         run: go test -count=1 ./internal/architest/ -run '^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$'
+
       # The module zip budget reads the git tree through a subprocess, which the test
       # cache cannot see, so a cached PASS would outlive the commit that broke it.
       - name: root module zip budget (uncached)
         run: go test -count=1 -v ./internal/architest/ -run '^TestRootModuleZipBudget$'
+
       # An export-ignore rule or nested go.mod that drops a file some package embeds or
       # compiles breaks `go install` for users while every checkout build stays green,
       # so build what the module zip actually contains.
@@ -238,11 +240,6 @@ jobs:
           git archive --format=tar HEAD | tar -x -C "$tree"
           cd "$tree"
           GOFLAGS=-mod=mod GOWORK=off go build ./...
-      - name: LiveCodeBench fixture smoke (no network, no model)
-        run: |
-          go test ./internal/livecodebench/...
-          go run ./cmd/livecodebench --fixture internal/livecodebench/testdata/fixture.json --check --json > /tmp/livecodebench-smoke.json
-          grep -q '"result_claim_allowed": false' /tmp/livecodebench-smoke.json
 
       # `dos` must be on PATH BEFORE `go test ./...`, not after (#5518). Two smokes shell
       # to the real binary and skip gracefully when it is absent — handoff_chain_smoke_test.go
@@ -258,15 +255,340 @@ jobs:
       - name: install pinned OpenAPI validator
         run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
 
-      # Test + coverage profile in one run (E-002): the same `go test ./...` gate, now
-      # also writing a merged statement-coverage profile so the total is reported every
-      # run. Reporting (not a hard threshold) is the foundation — a specific floor is a
-      # follow-on tuning once the baseline is known (issue #34).
-      - name: test (+ coverage profile)
+      - name: record exact verification provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          JOB_RESULT: ${{ job.status }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+          JOB_ID: build-vet-test
+          CI_CLASS: full
+          CORE_COMMANDS_JSON: '[["go","build","./..."],["go","vet","./..."]]'
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-environment.json"
+          if [[ "$JOB_ID" != race-detector ]]; then
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-environment.json" > "$RUNNER_TEMP/ci-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
+          fi
+          commands="$CORE_COMMANDS_JSON"
+          if [[ "$CI_CLASS" == diagnostic ]]; then
+            if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson steps "$STEPS_JSON" --slurpfile environment "$RUNNER_TEMP/ci-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:{scope:"core-verification-commands",job:$job},environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-$JOB_ID.json"
+          cat "$RUNNER_TEMP/ci-$JOB_ID.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-build-vet-test
+          path: ${{ runner.temp }}/ci-build-vet-test.json
+          if-no-files-found: error
+
+
+  # Coverage tests, sharded so each leg's test step stays within the 5-minute unit
+  # budget. Shards are a greedy fill on committed per-package seconds
+  # (.github/ci-fast-package-weights.json via cmd/cifastshard); packages too slow for
+  # one shard run as disjoint -run buckets. The merge job requires every leg green and
+  # pins the leg count; change both together.
+  coverage-shard:
+    needs: build-vet-test
+    if: github.event_name != 'workflow_dispatch'
+    name: go test ./... (coverage) · ${{ matrix.id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
+    env:
+      GOTOOLCHAIN: auto
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=2"
+      COVER_SPLIT_PACKAGES: "./cmd/fak ./internal/agentbench/taskrun ./internal/model ./internal/tokencache ./internal/compute ./internal/agent ./internal/devindex ./internal/devcmd"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: s01, shard: 1, shards: 34 }
+          - { id: s02, shard: 2, shards: 34 }
+          - { id: s03, shard: 3, shards: 34 }
+          - { id: s04, shard: 4, shards: 34 }
+          - { id: s05, shard: 5, shards: 34 }
+          - { id: s06, shard: 6, shards: 34 }
+          - { id: s07, shard: 7, shards: 34 }
+          - { id: s08, shard: 8, shards: 34 }
+          - { id: s09, shard: 9, shards: 34 }
+          - { id: s10, shard: 10, shards: 34 }
+          - { id: s11, shard: 11, shards: 34 }
+          - { id: s12, shard: 12, shards: 34 }
+          - { id: s13, shard: 13, shards: 34 }
+          - { id: s14, shard: 14, shards: 34 }
+          - { id: s15, shard: 15, shards: 34 }
+          - { id: s16, shard: 16, shards: 34 }
+          - { id: s17, shard: 17, shards: 34 }
+          - { id: s18, shard: 18, shards: 34 }
+          - { id: s19, shard: 19, shards: 34 }
+          - { id: s20, shard: 20, shards: 34 }
+          - { id: s21, shard: 21, shards: 34 }
+          - { id: s22, shard: 22, shards: 34 }
+          - { id: s23, shard: 23, shards: 34 }
+          - { id: s24, shard: 24, shards: 34 }
+          - { id: s25, shard: 25, shards: 34 }
+          - { id: s26, shard: 26, shards: 34 }
+          - { id: s27, shard: 27, shards: 34 }
+          - { id: s28, shard: 28, shards: 34 }
+          - { id: s29, shard: 29, shards: 34 }
+          - { id: s30, shard: 30, shards: 34 }
+          - { id: s31, shard: 31, shards: 34 }
+          - { id: s32, shard: 32, shards: 34 }
+          - { id: s33, shard: 33, shards: 34 }
+          - { id: s34, shard: 34, shards: 34 }
+          - { id: fak-1, split: ./cmd/fak, bucket: 1, buckets: 7 }
+          - { id: fak-2, split: ./cmd/fak, bucket: 2, buckets: 7 }
+          - { id: fak-3, split: ./cmd/fak, bucket: 3, buckets: 7 }
+          - { id: fak-4, split: ./cmd/fak, bucket: 4, buckets: 7 }
+          - { id: fak-5, split: ./cmd/fak, bucket: 5, buckets: 7 }
+          - { id: fak-6, split: ./cmd/fak, bucket: 6, buckets: 7 }
+          - { id: fak-7, split: ./cmd/fak, bucket: 7, buckets: 7 }
+          - { id: taskrun-1, split: ./internal/agentbench/taskrun, bucket: 1, buckets: 4 }
+          - { id: taskrun-2, split: ./internal/agentbench/taskrun, bucket: 2, buckets: 4 }
+          - { id: taskrun-3, split: ./internal/agentbench/taskrun, bucket: 3, buckets: 4 }
+          - { id: taskrun-4, split: ./internal/agentbench/taskrun, bucket: 4, buckets: 4 }
+          - { id: model-1, split: ./internal/model, bucket: 1, buckets: 3 }
+          - { id: model-2, split: ./internal/model, bucket: 2, buckets: 3 }
+          - { id: model-3, split: ./internal/model, bucket: 3, buckets: 3 }
+          - { id: tokencache-1, split: ./internal/tokencache, bucket: 1, buckets: 3 }
+          - { id: tokencache-2, split: ./internal/tokencache, bucket: 2, buckets: 3 }
+          - { id: tokencache-3, split: ./internal/tokencache, bucket: 3, buckets: 3 }
+          - { id: compute-1, split: ./internal/compute, bucket: 1, buckets: 2 }
+          - { id: compute-2, split: ./internal/compute, bucket: 2, buckets: 2 }
+          - { id: agent-1, split: ./internal/agent, bucket: 1, buckets: 2 }
+          - { id: agent-2, split: ./internal/agent, bucket: 2, buckets: 2 }
+          - { id: devindex-1, split: ./internal/devindex, bucket: 1, buckets: 2 }
+          - { id: devindex-2, split: ./internal/devindex, bucket: 2, buckets: 2 }
+          - { id: devcmd-1, split: ./internal/devcmd, bucket: 1, buckets: 2 }
+          - { id: devcmd-2, split: ./internal/devcmd, bucket: 2, buckets: 2 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: the release-substrate tests read the release note
+          # AT the tag (`git show v0.30.0:docs/releases/...`), which a default shallow
+          # checkout doesn't fetch — the tag's tree is absent and the check 404s.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: bind exact verification source and environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
+
+      # Restore-only: every job here starts from the GOCACHE prefix that build-vet-test
+      # saves, so parallel legs never multiply the cache footprint.
+      - name: restore Go build/test cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gobuild-
+
+      - name: install dos-kernel (dos-backed tests and gates)
+        run: python -m pip install --quiet --disable-pip-version-check dos-kernel
+
+      - name: install pinned OpenAPI validator
+        run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
+
+      - name: go test ./... (coverage profile · ${{ matrix.id }})
         id: tests
+        timeout-minutes: 25
+        shell: bash
         env:
           FAK_REQUIRE_OPENAPI_VALIDATOR: "1"
-        run: go test -timeout=20m -coverprofile=coverage.out ./...
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ matrix.shards }}
+          SPLIT: ${{ matrix.split }}
+          BUCKET: ${{ matrix.bucket }}
+          BUCKETS: ${{ matrix.buckets }}
+          ID: ${{ matrix.id }}
+        run: |
+          set -uo pipefail
+          all_file="$RUNNER_TEMP/cover-packages.txt"
+          shard_file="$RUNNER_TEMP/cover-shard-packages.txt"
+          split_file="$RUNNER_TEMP/cover-split-packages.txt"
+          if ! go list ./... > "$all_file" || ! go list $COVER_SPLIT_PACKAGES > "$split_file"; then
+            echo "::error::go list failed; cannot partition the package set"
+            exit 1
+          fi
+          if [ -n "$SPLIT" ]; then
+            label="$SPLIT bucket $BUCKET/$BUCKETS"
+            tests_file="$RUNNER_TEMP/cover-all-tests.txt"
+            bucket_file="$RUNNER_TEMP/cover-bucket-tests.txt"
+            if ! go list "$SPLIT" > "$shard_file" || ! go test -list '.*' "$SPLIT" > "$RUNNER_TEMP/cover-test-list.txt"; then
+              echo "::error::$label: cannot list the tests of $SPLIT"
+              exit 1
+            fi
+            if ! LC_ALL=C awk '/^(Test|Benchmark|Example|Fuzz)/ && !/^(Test|Benchmark|Example|Fuzz)[A-Za-z0-9_]*$/ { print "::error::unselectable test name: " $0; bad = 1 } END { exit bad }' "$RUNNER_TEMP/cover-test-list.txt"; then
+              exit 1
+            fi
+            grep -E '^(Test|Benchmark|Example|Fuzz)[A-Za-z0-9_]*$' "$RUNNER_TEMP/cover-test-list.txt" | LC_ALL=C sort -u > "$tests_file"
+            if ! go run ./cmd/cifastshard buckets -buckets "$BUCKETS" -index "$((BUCKET - 1))" < "$tests_file" > "$bucket_file" || [ ! -s "$bucket_file" ]; then
+              echo "::error::$label selected no tests from go test -list"
+              exit 1
+            fi
+            run_regex="^($(paste -sd'|' "$bucket_file"))\$"
+            if [ "${#run_regex}" -gt 120000 ]; then
+              echo "::error::$label -run pattern is ${#run_regex} bytes; raise the bucket count for $SPLIT"
+              exit 1
+            fi
+            go_test_args=(-run "$run_regex" "$(cat "$shard_file")")
+            echo "$label: $(wc -l < "$bucket_file") of $(wc -l < "$tests_file") top-level tests at $(git rev-parse HEAD)"
+          else
+            label="shard $SHARD/$SHARDS"
+            if ! go run ./cmd/cifastshard partition -weights .github/ci-fast-package-weights.json -shards "$SHARDS" -index "$((SHARD - 1))" -exclude-file "$split_file" < "$all_file" > "$shard_file" || [ ! -s "$shard_file" ]; then
+              echo "::error::$label selected no packages from go list ./..."
+              exit 1
+            fi
+            mapfile -t go_test_args < "$shard_file"
+            echo "$label: $(wc -l < "$shard_file") of $(wc -l < "$all_file") packages at $(git rev-parse HEAD)"
+          fi
+          profile="coverage-$ID.out"
+          status_file="$RUNNER_TEMP/cover-$ID.status"
+          (
+            set +e
+            go test -timeout=20m -coverprofile="$profile" "${go_test_args[@]}" 2>&1 | tee "$RUNNER_TEMP/cover-$ID.log"
+            printf '%s\n' "${PIPESTATUS[0]}" > "$status_file"
+          ) &
+          test_pid=$!
+          while kill -0 "$test_pid" 2>/dev/null; do
+            sleep 60
+            if kill -0 "$test_pid" 2>/dev/null; then
+              echo "::notice::go test $label is still running ($(date -u +%FT%TZ))"
+            fi
+          done
+          wait "$test_pid" || true
+          test -s "$status_file"
+          status="$(cat "$status_file")"
+          if [ "$status" != 0 ]; then
+            exit "$status"
+          fi
+          test -s "$profile" || { echo "::error::$label wrote no coverage profile"; exit 1; }
+
+      - name: upload coverage profile shard
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.id }}
+          path: coverage-${{ matrix.id }}.out
+          if-no-files-found: error
+
+
+  coverage-merge:
+    needs: [build-vet-test, coverage-shard]
+    if: github.event_name != 'workflow_dispatch'
+    name: coverage · merge shard profiles · report + trend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
+    env:
+      GOTOOLCHAIN: auto
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: the release-substrate tests read the release note
+          # AT the tag (`git show v0.30.0:docs/releases/...`), which a default shallow
+          # checkout doesn't fetch — the tag's tree is absent and the check 404s.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: bind exact verification source and environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
+
+      # Restore-only: every job here starts from the GOCACHE prefix that build-vet-test
+      # saves, so parallel legs never multiply the cache footprint.
+      - name: restore Go build/test cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gobuild-
+
+      - name: download coverage shard profiles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage-parts
+
+      - name: merge shard profiles into one coverage.out
+        shell: bash
+        env:
+          EXPECTED_PROFILES: "59"
+        run: |
+          set -euo pipefail
+          mapfile -t parts < <(find coverage-parts -type f -name '*.out' | LC_ALL=C sort)
+          if [ "${#parts[@]}" -ne "$EXPECTED_PROFILES" ]; then
+            echo "::error::expected $EXPECTED_PROFILES coverage profiles, found ${#parts[@]}"
+            exit 1
+          fi
+          mode="$(head -1 "${parts[0]}")"
+          case "$mode" in mode:*) ;; *) echo "::error::unrecognized profile header: $mode"; exit 1 ;; esac
+          for p in "${parts[@]}"; do
+            if [ "$(head -1 "$p")" != "$mode" ]; then
+              echo "::error::$p has a different coverage mode than $mode"
+              exit 1
+            fi
+          done
+          # Blocks are keyed by range and statement count; hit counts add across legs.
+          {
+            echo "$mode"
+            for p in "${parts[@]}"; do tail -n +2 "$p"; done \
+              | awk 'NF == 3 { k = $1 " " $2; c[k] += $3 } END { for (k in c) print k, c[k] }' \
+              | LC_ALL=C sort
+          } > coverage.out
+          echo "merged ${#parts[@]} coverage profiles into coverage.out"
 
       # Coverage report + gap analysis + trend surfacing (E-002 / #233): the profile
       # was previously reduced to one `tail -1` line lost in the logs. This step keeps
@@ -330,6 +652,110 @@ jobs:
           name: coverage-profile
           path: coverage.out
           if-no-files-found: ignore
+
+      - name: record exact verification provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          JOB_RESULT: ${{ job.status }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+          JOB_ID: coverage-merge
+          CI_CLASS: full
+          CORE_COMMANDS_JSON: '[["go","tool","cover","-func=coverage.out"]]'
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-environment.json"
+          if [[ "$JOB_ID" != race-detector ]]; then
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-environment.json" > "$RUNNER_TEMP/ci-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
+          fi
+          commands="$CORE_COMMANDS_JSON"
+          if [[ "$CI_CLASS" == diagnostic ]]; then
+            if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson steps "$STEPS_JSON" --slurpfile environment "$RUNNER_TEMP/ci-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:{scope:"core-verification-commands",job:$job},environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-$JOB_ID.json"
+          cat "$RUNNER_TEMP/ci-$JOB_ID.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-coverage-merge
+          path: ${{ runner.temp }}/ci-coverage-merge.json
+          if-no-files-found: error
+
+
+  gates-a:
+    needs: build-vet-test
+    if: github.event_name != 'workflow_dispatch'
+    name: gates · claims · repo hygiene · demo + doc-tool tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
+    env:
+      GOTOOLCHAIN: auto
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: the release-substrate tests read the release note
+          # AT the tag (`git show v0.30.0:docs/releases/...`), which a default shallow
+          # checkout doesn't fetch — the tag's tree is absent and the check 404s.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: bind exact verification source and environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
+
+      # Restore-only: every job here starts from the GOCACHE prefix that build-vet-test
+      # saves, so parallel legs never multiply the cache footprint.
+      - name: restore Go build/test cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gobuild-
+
+      - name: install dos-kernel (dos-backed tests and gates)
+        run: python -m pip install --quiet --disable-pip-version-check dos-kernel
+
+      - name: install pinned OpenAPI validator
+        run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
+
+      - name: LiveCodeBench fixture smoke (no network, no model)
+        run: |
+          go test ./internal/livecodebench/...
+          go run ./cmd/livecodebench --fixture internal/livecodebench/testdata/fixture.json --check --json > /tmp/livecodebench-smoke.json
+          grep -q '"result_claim_allowed": false' /tmp/livecodebench-smoke.json
 
       # The out-of-tree driver example (#454) is a SEPARATE module under
       # examples/extdriver, so the root `go build ./...` / `go test ./...` above
@@ -409,6 +835,103 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           python tools/demo_headless_smoke.py --timeout 120
+
+      - name: record exact verification provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          JOB_RESULT: ${{ job.status }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+          JOB_ID: gates-a
+          CI_CLASS: full
+          CORE_COMMANDS_JSON: '[["go","run","./cmd/fak","disambiguation","generate","--check","--json"],["go","test","-count=1","-v","-run","TestCLAIMSLedger","./internal/claimcheck/"]]'
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-environment.json"
+          if [[ "$JOB_ID" != race-detector ]]; then
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-environment.json" > "$RUNNER_TEMP/ci-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
+          fi
+          commands="$CORE_COMMANDS_JSON"
+          if [[ "$CI_CLASS" == diagnostic ]]; then
+            if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson steps "$STEPS_JSON" --slurpfile environment "$RUNNER_TEMP/ci-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:{scope:"core-verification-commands",job:$job},environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-$JOB_ID.json"
+          cat "$RUNNER_TEMP/ci-$JOB_ID.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-gates-a
+          path: ${{ runner.temp }}/ci-gates-a.json
+          if-no-files-found: error
+
+  gates-d:
+    needs: build-vet-test
+    if: github.event_name != 'workflow_dispatch'
+    name: gates · release substrate · dos loop · hero benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
+    env:
+      GOTOOLCHAIN: auto
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: the release-substrate tests read the release note
+          # AT the tag (`git show v0.30.0:docs/releases/...`), which a default shallow
+          # checkout doesn't fetch — the tag's tree is absent and the check 404s.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: bind exact verification source and environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
+
+      # Restore-only: every job here starts from the GOCACHE prefix that build-vet-test
+      # saves, so parallel legs never multiply the cache footprint.
+      - name: restore Go build/test cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gobuild-
+
+      - name: install dos-kernel (dos-backed tests and gates)
+        run: python -m pip install --quiet --disable-pip-version-check dos-kernel
+
+      - name: install pinned OpenAPI validator
+        run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
 
       # Skill-frontmatter lint: the load-bearing Claude-only SKILL.md frontmatter keys
       # (allowed-tools / disable-model-invocation / user-invocable) that opencode silently
@@ -576,6 +1099,105 @@ jobs:
           go run ./cmd/fak turntax visual --check
           go run ./cmd/fak launch-visual --check
           python tools/hero_sweep_gen.py --check
+
+      - name: record exact verification provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          JOB_RESULT: ${{ job.status }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+          JOB_ID: gates-d
+          CI_CLASS: full
+          CORE_COMMANDS_JSON: '[["go","run","./cmd/fak","disambiguation","generate","--check","--json"],["go","test","-count=1","-v","-run","TestCLAIMSLedger","./internal/claimcheck/"]]'
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-environment.json"
+          if [[ "$JOB_ID" != race-detector ]]; then
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-environment.json" > "$RUNNER_TEMP/ci-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
+          fi
+          commands="$CORE_COMMANDS_JSON"
+          if [[ "$CI_CLASS" == diagnostic ]]; then
+            if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson steps "$STEPS_JSON" --slurpfile environment "$RUNNER_TEMP/ci-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:{scope:"core-verification-commands",job:$job},environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-$JOB_ID.json"
+          cat "$RUNNER_TEMP/ci-$JOB_ID.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-gates-d
+          path: ${{ runner.temp }}/ci-gates-d.json
+          if-no-files-found: error
+
+
+
+  gates-b:
+    needs: build-vet-test
+    if: github.event_name != 'workflow_dispatch'
+    name: gates · docs + demo + scorecards
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
+    env:
+      GOTOOLCHAIN: auto
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: the release-substrate tests read the release note
+          # AT the tag (`git show v0.30.0:docs/releases/...`), which a default shallow
+          # checkout doesn't fetch — the tag's tree is absent and the check 404s.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: bind exact verification source and environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
+
+      # Restore-only: every job here starts from the GOCACHE prefix that build-vet-test
+      # saves, so parallel legs never multiply the cache footprint.
+      - name: restore Go build/test cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gobuild-
+
+      - name: install dos-kernel (dos-backed tests and gates)
+        run: python -m pip install --quiet --disable-pip-version-check dos-kernel
+
+      - name: install pinned OpenAPI validator
+        run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
 
       # Docs scorecard: the whole-corpus analogue of the README freshness audit.
       # Grades every core / reader-reachable doc on five KPIs and counts doc-debt
@@ -838,6 +1460,104 @@ jobs:
             scorecard-cards/
           if-no-files-found: ignore
 
+      - name: record exact verification provenance
+        if: always()
+        shell: bash
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.sha }}
+          TESTED_TREE: ${{ steps.source.outputs.tree }}
+          JOB_RESULT: ${{ job.status }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+          JOB_ID: gates-b
+          CI_CLASS: full
+          CORE_COMMANDS_JSON: '[]'
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
+          test -s "$RUNNER_TEMP/ci-environment.json" || echo '{}' > "$RUNNER_TEMP/ci-environment.json"
+          if [[ "$JOB_ID" != race-detector ]]; then
+            jq '. + {FAK_REQUIRE_OPENAPI_VALIDATOR:"1"}' "$RUNNER_TEMP/ci-environment.json" > "$RUNNER_TEMP/ci-environment-complete.json"
+            mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
+          fi
+          commands="$CORE_COMMANDS_JSON"
+          if [[ "$CI_CLASS" == diagnostic ]]; then
+            if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
+          fi
+          jq -n --arg job "$JOB_ID" --arg sha "$TESTED_SHA" --arg tree "$TESTED_TREE" \
+            --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
+            --arg result "$JOB_RESULT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --arg runner_os "$RUNNER_OS" --arg runner_arch "$RUNNER_ARCH" \
+            --argjson commands "$commands" --argjson steps "$STEPS_JSON" --slurpfile environment "$RUNNER_TEMP/ci-environment.json" \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:{scope:"core-verification-commands",job:$job},environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
+            > "$RUNNER_TEMP/ci-$JOB_ID.json"
+          cat "$RUNNER_TEMP/ci-$JOB_ID.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload job provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-gates-b
+          path: ${{ runner.temp }}/ci-gates-b.json
+          if-no-files-found: error
+
+
+  gates-c:
+    needs: build-vet-test
+    if: github.event_name != 'workflow_dispatch'
+    name: gates · scorecard regressions · leak + dos review + rsi
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tree: ${{ steps.source.outputs.tree }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
+    env:
+      GOTOOLCHAIN: auto
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: the release-substrate tests read the release note
+          # AT the tag (`git show v0.30.0:docs/releases/...`), which a default shallow
+          # checkout doesn't fetch — the tag's tree is absent and the check 404s.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: bind exact verification source and environment
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse HEAD^{tree})
+          printf 'sha=%s\ntree=%s\nrun_id=%s\nrun_attempt=%s\n' "$sha" "$tree" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          [[ "$sha" == "$GITHUB_SHA" ]]
+          go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
+
+      # Restore-only: every job here starts from the GOCACHE prefix that build-vet-test
+      # saves, so parallel legs never multiply the cache footprint.
+      - name: restore Go build/test cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gobuild-
+
+      - name: install dos-kernel (dos-backed tests and gates)
+        run: python -m pip install --quiet --disable-pip-version-check dos-kernel
+
+      - name: install pinned OpenAPI validator
+        run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
+
       # Learning-docs scorecard: the pedagogy measuring stick for the teaching
       # corpus (the university, the how-to set, the explainers). It had `--json` /
       # `--markdown` / `--stamp` but no gate — which is why the corpus drifted 34
@@ -1048,9 +1768,9 @@ jobs:
           TESTED_TREE: ${{ steps.source.outputs.tree }}
           JOB_RESULT: ${{ job.status }}
           STEPS_JSON: ${{ toJSON(steps) }}
-          JOB_ID: build-vet-test
+          JOB_ID: gates-c
           CI_CLASS: full
-          CORE_COMMANDS_JSON: '[["go","build","./..."],["go","vet","./..."],["go","test","-timeout=20m","-coverprofile=coverage.out","./..."],["go","test","-count=1","-v","-run","TestCLAIMSLedger","./internal/claimcheck/"]]'
+          CORE_COMMANDS_JSON: '[]'
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
@@ -1072,13 +1792,15 @@ jobs:
             '{schema:"fak.ci-provenance.v1",workflow:"ci",job:$job,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,ci_class:$ci_class,result:$result,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,workflow_ref:$workflow_ref,workflow_sha:$workflow_sha,runner:{os:$runner_os,arch:$runner_arch},commands:$commands,coverage:{scope:"core-verification-commands",job:$job},environment:$environment[0],steps:($steps | with_entries(.value |= {outcome,conclusion}))}' \
             > "$RUNNER_TEMP/ci-$JOB_ID.json"
           cat "$RUNNER_TEMP/ci-$JOB_ID.json" >> "$GITHUB_STEP_SUMMARY"
+
       - name: upload job provenance
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-build-vet-test
-          path: ${{ runner.temp }}/ci-build-vet-test.json
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-gates-c
+          path: ${{ runner.temp }}/ci-gates-c.json
           if-no-files-found: error
+
 
   # E-001 (Go Race Detector Support): the data-race gate. The build-vet-test job
   # above runs `go test ./...` WITHOUT instrumentation; this job re-runs the SAME
@@ -1634,7 +2356,7 @@ jobs:
 
   ci-provenance:
     name: verify CI evidence class and fixed job set
-    needs: [testroute-ci-only, build-vet-test, race-detector, head-snapshot-build]
+    needs: [testroute-ci-only, build-vet-test, coverage-shard, coverage-merge, gates-a, gates-b, gates-c, gates-d, race-detector, head-snapshot-build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1649,12 +2371,13 @@ jobs:
           # Outputs name actual checked-out commits; GitHub success alone is insufficient.
           jq -ne --argjson jobs "$NEEDS_JSON" --arg sha "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" \
             --arg ref "$GITHUB_REF" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" '
-            (if $event == "workflow_dispatch" then ["testroute-ci-only"] elif $event == "push" then ["build-vet-test","race-detector","head-snapshot-build"] else ["build-vet-test","race-detector"] end) as $required |
+            (["build-vet-test","coverage-shard","coverage-merge","gates-a","gates-b","gates-c","gates-d","race-detector"]) as $full |
+            (if $event == "workflow_dispatch" then ["testroute-ci-only"] elif $event == "push" then $full + ["head-snapshot-build"] else $full end) as $required |
             ($jobs[$required[0]].outputs.tree // "") as $tree |
             (($sha | test("^[0-9a-f]{40}$")) and ($tree | test("^[0-9a-f]{40}$")) and
               ($run | test("^[1-9][0-9]*$")) and ($attempt | test("^[1-9][0-9]*$")) and
               all($required[]; $jobs[.].result == "success" and $jobs[.].outputs.sha == $sha and $jobs[.].outputs.tree == $tree and $jobs[.].outputs.run_id == $run and $jobs[.].outputs.run_attempt == $attempt) and
-              (if $event == "workflow_dispatch" then $jobs["build-vet-test"].result == "skipped" and $jobs["race-detector"].result == "skipped" and $jobs["head-snapshot-build"].result == "skipped"
+              (if $event == "workflow_dispatch" then all(["build-vet-test","coverage-shard","coverage-merge","gates-a","gates-b","gates-c","gates-d","race-detector","head-snapshot-build"][]; $jobs[.].result == "skipped")
                elif $event == "push" then $jobs["testroute-ci-only"].result == "skipped" and $jobs["head-snapshot-build"].result == "success"
                elif $event == "pull_request" then $jobs["testroute-ci-only"].result == "skipped" and $jobs["head-snapshot-build"].result == "skipped"
                else false end)) as $verified |
