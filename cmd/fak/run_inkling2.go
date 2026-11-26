@@ -10,10 +10,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
-	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
-	"github.com/anthony-chaudhary/fak/internal/inklingmetal"
 	"github.com/anthony-chaudhary/fak/internal/localadmission"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -45,30 +43,17 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 		return nil, nil, fmt.Errorf("Inkling 2: the Metal path binds a single-file GGUF; %s is split into %d shards", path, len(shards))
 	}
 	var m *ggufload.Inkling2LoopModel
-	var target *inklingmetal.Model
 	var release func()
 	residentCtx := 0
 	backendName := "cpu"
 	if metal {
 		backendName = "metal"
-		kind, e := inkling2MetalSelect(os.Getenv(inkling2MetalTargetEnv), arch == serveInkling2LoopArch, inklingmetal.Available(), inkling2MetalResidentAvailable)
+		kind, e := inkling2MetalSelect(os.Getenv(inkling2MetalTargetEnv), inkling2MetalResidentAvailable)
 		if e != nil {
 			return nil, nil, e
 		}
 		var weights localadmission.MemoryPlan
 		switch kind {
-		case inkling2MetalVendored:
-			// Match the launcher's default single-session context budget, including
-			// the direct target's packed images, verification scratch and KV extents.
-			planned, e := inklingmetal.Estimate(path, gateway.DefaultAdmissionPolicy().TokenBudget)
-			if e != nil {
-				return nil, nil, e
-			}
-			if planned.Bytes() > math.MaxInt64 {
-				return nil, nil, fmt.Errorf("Inkling 2: Metal plan exceeds address space")
-			}
-			weights.SteadyBytes = int64(planned.Bytes())
-			weights.StartupPeakBytes, _ = metalServeStartupPeakBytes(serveLoadArmResidentQ4K, weights.SteadyBytes, 0, false)
 		case inkling2MetalResident:
 			residentCtx, err = inkling2AdmitResidentCtx(path, f, arch)
 			if err != nil {
@@ -86,8 +71,6 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 			Weights: &weights,
 			Load: func() bool {
 				switch kind {
-				case inkling2MetalVendored:
-					target, loadErr = inklingmetal.Open(path)
 				case inkling2MetalResident:
 					m, be, loadErr = openInkling2MetalResident(path)
 				default:
@@ -95,12 +78,7 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 				}
 				return loadErr == nil
 			},
-			Teardown: func() error {
-				if target != nil {
-					return target.Close()
-				}
-				return m.Close()
-			},
+			Teardown: func() error { return m.Close() },
 		})
 		if err == nil {
 			err = loadErr
@@ -120,10 +98,6 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 	if err != nil {
 		return nil, nil, err
 	}
-	if target != nil {
-		fmt.Fprintf(os.Stderr, "fak run: inkling2_loop backend=metal target=%s layers=24 passes=3\n", inkling2MetalTargetVendoredLabel)
-		return agent.NewInkling2MetalRunPlanner(name, target, tok, eos), release, nil
-	}
 	if residentCtx > 0 {
 		// greedy decode speculates unless FAK_INKLING2_SPEC=0; sampled decode stays plain
 		m.SpecDefault = ggufload.Inkling2MetalSpecDefault(be)
@@ -142,38 +116,34 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 
 const (
 	inkling2MetalTargetEnv           = "FAK_INKLING_METAL_TARGET"
-	inkling2MetalTargetVendoredLabel = "vendored-splash"
 	inkling2MetalTargetNativeLabel   = "fak-metalgemm"
 	inkling2MetalTargetResidentLabel = "fak-metal-resident"
+	// Only serve still binds the vendored target, under this label.
+	inkling2MetalTargetVendoredLabel = "vendored-splash"
 )
 
 type inkling2MetalPath int
 
 const (
 	inkling2MetalNative inkling2MetalPath = iota
-	inkling2MetalVendored
 	inkling2MetalResident
+	// inkling2MetalVendored is reachable only through inkling2MetalServeSelect.
+	inkling2MetalVendored
 )
 
-// inkling2MetalSelect picks between the vendored direct target, fak's
-// host-driven packed-kernel forward and fak's device-resident forward. Only an
-// unset selector may fall back: an explicit request that cannot be honoured is
-// refused so a measurement never reports one path under another's name.
-func inkling2MetalSelect(selector string, loopArch, vendoredAvailable, residentAvailable bool) (inkling2MetalPath, error) {
+// inkling2MetalSelect picks between fak's device-resident forward and its
+// host-driven packed-kernel forward. Only an unset selector may fall back to
+// native: an explicit request that cannot be honoured is refused so a
+// measurement never reports one path under another's name.
+func inkling2MetalSelect(selector string, residentAvailable bool) (inkling2MetalPath, error) {
 	switch strings.ToLower(strings.TrimSpace(selector)) {
 	case "":
-		if loopArch && vendoredAvailable {
-			return inkling2MetalVendored, nil
+		if residentAvailable {
+			return inkling2MetalResident, nil
 		}
 		return inkling2MetalNative, nil
 	case "vendored":
-		if !loopArch {
-			return 0, fmt.Errorf("Inkling 2: %s=vendored needs the %s architecture", inkling2MetalTargetEnv, serveInkling2LoopArch)
-		}
-		if !vendoredAvailable {
-			return 0, fmt.Errorf("Inkling 2: %s=vendored but the vendored Metal target is not available in this build or on this device", inkling2MetalTargetEnv)
-		}
-		return inkling2MetalVendored, nil
+		return 0, fmt.Errorf("Inkling 2: %s=vendored was removed from public fak; the vendored Splash comparison build lives in fak-private (cmd/fak-splash-serve); unset it or set resident or native", inkling2MetalTargetEnv)
 	case "native":
 		return inkling2MetalNative, nil
 	case "resident":
@@ -182,7 +152,18 @@ func inkling2MetalSelect(selector string, loopArch, vendoredAvailable, residentA
 		}
 		return inkling2MetalResident, nil
 	}
-	return 0, fmt.Errorf("Inkling 2: unknown %s=%q (want vendored, native or resident)", inkling2MetalTargetEnv, selector)
+	return 0, fmt.Errorf("Inkling 2: unknown %s=%q (want resident or native)", inkling2MetalTargetEnv, selector)
+}
+
+// inkling2MetalServeSelect keeps serve's selector meaning while serve still
+// binds the vendored target by default: unset and vendored select it there, and
+// every other value is judged like run's.
+func inkling2MetalServeSelect(selector string) (inkling2MetalPath, error) {
+	switch strings.ToLower(strings.TrimSpace(selector)) {
+	case "", "vendored":
+		return inkling2MetalVendored, nil
+	}
+	return inkling2MetalSelect(selector, inkling2MetalResidentAvailable)
 }
 
 // The resident driver's sizing; admission has to price the session before the

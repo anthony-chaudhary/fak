@@ -12,12 +12,12 @@ REPS=5
 # none, so a smaller budget yields empty output and nothing to compare.
 MAX_TOKENS=128
 PROMPT="Name the capital of France."
-TARGETS="vendored native"
+TARGETS="resident native"
 RETRY_SECONDS=360
 KEEP=""
 
 usage() {
-  echo "usage: $0 --gguf PATH [--fak BIN] [--reps N] [--max-tokens N] [--prompt TEXT] [--targets 'vendored native resident'] [--retry-seconds N] [--keep DIR]" >&2
+  echo "usage: $0 --gguf PATH [--fak BIN] [--reps N] [--max-tokens N] [--prompt TEXT] [--targets 'resident native'] [--retry-seconds N] [--keep DIR]" >&2
 }
 
 while [ $# -gt 0 ]; do
@@ -42,7 +42,6 @@ command -v jq >/dev/null || { echo "$0: jq is required" >&2; exit 2; }
 
 label_for() {
   case "$1" in
-    vendored) echo "vendored-splash" ;;
     native) echo "fak-metalgemm" ;;
     resident) echo "fak-metal-resident" ;;
     *) echo "$0: unknown target $1" >&2; exit 2 ;;

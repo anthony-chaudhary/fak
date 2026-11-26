@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **104** (clarity 9 + coverage 95) |
-| **Crystal-clear concepts (and climbing)** | **1743** crystal of 4221 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4296 / 4391** (97.8% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **106** (clarity 9 + coverage 97) |
+| **Crystal-clear concepts (and climbing)** | **1750** crystal of 4228 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4304 / 4401** (97.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **3** of 322 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **97** of 5574 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **97** of 5583 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 93.6/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4221 concepts - score 93.6/100 (grade A) - disambiguation-debt 104
+concept-disambiguation chart - 4228 concepts - score 93.6/100 (grade A) - disambiguation-debt 106
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1743
+  * crystal       ####################........ 1750
   o defined       ############################ 2478
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -40,8 +40,8 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        ******************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 102 crystal)
-  cache            *****************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (419 concept(s); 173 crystal)
-  context-ctx      *************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (314 concept(s); 109 crystal)
+  cache            *******************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (421 concept(s); 175 crystal)
+  context-ctx      ***************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (316 concept(s); 111 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ****************************************ooooooooooooooooooooooooo (65 concept(s); 40 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -49,8 +49,8 @@ clarity mix by family (each cell = one concept):
   gateway-engine   **************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (278 concept(s); 98 crystal)
   guard-gate       ****************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (520 concept(s); 232 crystal)
   layout           *************************************oooooooooooooooooooooooo (61 concept(s); 37 crystal)
-  loop             *******************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (136 concept(s); 79 crystal)
-  plan             *************************************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (596 concept(s); 253 crystal)
+  loop             *********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (138 concept(s); 81 crystal)
+  plan             **************************************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (597 concept(s); 254 crystal)
   policy-capability ****************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (267 concept(s); 136 crystal)
   pool             ****************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (111 concept(s); 40 crystal)
   render-materialize ****************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (239 concept(s); 52 crystal)
@@ -62,14 +62,14 @@ clarity mix by family (each cell = one concept):
   witness-proof    *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (220 concept(s); 91 crystal)
 
 coverage by family (positioned / discovered):
-  context-ctx      ###########################. 343/362
-  plan             ###########################. 667/681
-  session-runtime  ###########################. 392/403
-  cache            ###########################. 467/476
+  context-ctx      ##########################.. 345/365
+  plan             ###########################. 667/680
+  session-runtime  ###########################. 393/404
+  cache            ###########################. 471/481
   attention        ###########################. 244/251
+  guard-gate       ############################ 584/591
   gateway-engine   ###########################. 327/333
-  loop             ###########################. 150/156
-  guard-gate       ############################ 584/589
+  loop             ###########################. 151/156
   pool             ###########################. 117/122
   support-maturity ###########################. 146/150
   render-materialize ############################ 257/260
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.8%  (4296/4391 confusable tokens positioned)
+namespace coverage  [###############################.] 97.8%  (4304/4401 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 319
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      #........................... 3
   pairs separated   [################################] 319/322
 
-name index: 5574 lookup name(s) -> 4221 concept(s), 97 ambiguous
+name index: 5583 lookup name(s) -> 4228 concept(s), 97 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **319 / 322** (319 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **3** |
 | Entangled concepts (own twin undrawn) | 6 |
-| Boundaries drawn (mutual / total) | 3732 / 8111 |
+| Boundaries drawn (mutual / total) | 3738 / 8128 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5574 over 4221 concepts |
+| Lookup names indexed | 5583 over 4228 concepts |
 | Lookup names landing on several concepts | 97 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4221 |
+| Concepts carrying a contrast set | 4228 |
 
 ## The concepts (best verdict first)
 
@@ -246,6 +246,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **ExpertTierLedger** - The record of ONE expert tier transition: the from/to rungs, whether a promotion or demotion happened, how many candidates a demotion pass preserved because they were pinned, and why. |
 | * | crystal | symbol | cache | **ExpertNVMeGeometry** - The aligned read geometry of one NVMe expert fault: the alignment granularity plus the start/end and byte length a fault's unaligned range rounds to, stated without issuing the read. |
 | * | crystal | symbol | cache | **readExpertPageCache** - The #1302 page-cache-aware expert read: reads one expert's stride through a mapped region, serving a warm fault zero-copy and issuing an aligned device ReadAt only on a cold fault. |
+| * | crystal | config | cache | **inkling2PrefixCacheFromEnv (FAK_INKLING2_PREFIX_SLOTS, FAK_INKLING2_PREFIX_CACHE_MIB)** - inkling2PrefixCacheFromEnv reads FAK_INKLING2_PREFIX_SLOTS (how many resident Inkling-2 device sessions fak serve keeps warm for prefix reuse, default 1, capped at 8) and FAK_INKLING2_PREFIX_CACHE_MIB (the device bytes more than one slot may hold together, default 4096). |
+| * | crystal | config | cache | **Inkling2BatchPrefixCacheMiB (FAK_INKLING2_BATCH_PREFIX_CACHE_MIB)** - Inkling2BatchPrefixCacheMiB reports the host MiB FAK_INKLING2_BATCH_PREFIX_CACHE_MIB gives the Inkling-2 batch cohort cross-request prefix store and whether that turns it on, refusing a malformed value or a store cohorts could never use because cohort prefill is off. |
 | * | crystal | cli-verb | cache | **cachesweep (stale-cache reaping verb)** - internal/cachesweep (the package) and `fak cachesweep` (the verb) reap stale or orphaned cache artifacts the dispatcher and session layers leave behind, bounded by a lane-aware scan so a sweep never touches a live session's working set. |
 | * | crystal | subsystem | cache | **dispatchcache (per-lane dispatch result cache)** - internal/dispatchcache is the per-lane dispatch result cache that memoizes a dispatch tick's issue-to-worker routing decisions so a re-tick does not recompute the full pairwise scan, backed by a bounded queue and a backlog. |
 | * | crystal | config | cache | **CacheTTL5m (default ephemeral cache tier)** - gateway.CacheTTL5m ("5m") is the const pinning the default ephemeral provider cache tier - the 5-minute TTL window a prefix lives at when the managed-cache posture is OFF or auto-unupgraded, mirrored by the ablate package and the warm-resume scale-to-zero path. |
@@ -423,6 +425,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **parallelQuantLoadContextBudget (ggufload hierarchical quant load)** - The internal/ggufload WeightSource method that runs the production hierarchical, cancellable quantized tensor load: an outer tensor fan-out with a per-tensor inner worker budget, applying each computed tensor serially under the caller's context. |
 | * | crystal | symbol | context-ctx | **QuantModelQ4KProfileOptionsContext (cancellable Q4_K model build)** - The internal/ggufload WeightSource entry point that builds a Q4_K quantized model from a GGUF under a caller context, a load profile, and functional load options such as streamed experts; the context-aware form the plain QuantModelQ4K wrappers delegate to. |
 | * | crystal | symbol | context-ctx | **nativeStructuredConstraintFromContext** - nativeStructuredConstraintFromContext retrieves the request-local native JSON-schema decoder constraint stored in a Go context.Context so reused and direct decode paths apply the same token mask. |
+| * | crystal | config | context-ctx | **Inkling2ResidentCtxEnv (FAK_INKLING2_CTX)** - Inkling2ResidentCtxEnv names FAK_INKLING2_CTX, the environment knob that sets the global-slot KV capacity of a resident Inkling-2 device session, clamped to the build backend's resident bound (32768 on Metal, 24576 on CUDA) and floored at 512. |
+| * | crystal | symbol | context-ctx | **Inkling2ResidentCtxMax** - Inkling2ResidentCtxMax(backend) is the largest global-slot KV context a resident Inkling-2 device session takes on the named backend: 32768 on Metal, 24576 on every other backend (the CUDA bound). |
 | * | crystal | symbol | context-ctx | **ContextEpoch** - ContextEpoch is the span during which one initially rendered System Context stays the immutable baseline for a session's provider cache. The gateway holds a bounded per-session store of that baseline, and every turn reconciles against it; the epoch ends, bumping a baseline sequence number, when the session compacts, the session identity moves, or an incompatible transition invalidates the rendering. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextual** - `contextual` is the context-ctx symbol declared or used at `cmd/fak/harness_preview.go:21` as `currentDomain := fs.String("current-domain", "", "last admitted contextual domain")`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextid** - `ContextID` is the context-ctx symbol declared or used at `cmd/microcontextdemo/effect_batch.go:22` as `ContextID string `json:"context_id"``. This row positions that concrete implementation surface, not merely the family label. |
@@ -977,6 +981,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | loop | **loop_observe.go (agent progress-observer seam)** - loop_observe.go is the agent package's OUTBOUND loop-state seam (#5148): WithProgressObserver installs a typed, nil-safe ProgressObserver that runArm emits closed-set ProgressEvent lifecycle transitions through (turn_started, tool_started, call_adjudicated, result_admitted, turn_done), which the native gateway stream renders as structured SSE. Unset, every emit is a no-op and the loop is byte-for-byte the historical loop. |
 | * | crystal | symbol | loop | **loop_midflight** - loop_midflight.go is the agent package's owned per-run MID-FLIGHT verb mailbox and tamper-evident hash-chained journal (#5158, the write half of #2403 / epic #2388): a transport enqueues interrupt / drop-pending-call / set-budget verbs that the owned loop consumes at its next CLEAN turn boundary (never mid-tool, never mid-adjudication) to stop the arm, skip one named queued call, or write a fresh budget through to the session table; nil-safe, so with no verb issued the loop is byte-for-byte the historical loop. |
 | * | crystal | symbol | loop | **loop_toolterminal_verbosity.go (agent background-completion wake verbosity seam)** - The verbosity axis of the background-process completion watcher: decides WHICH terminal tool-process transitions wake a new agent turn (off/error/result/all) and HOW MUCH of the folded toolproc verdict rides into that turn. |
+| * | crystal | symbol | loop | **loadInkling2LoopModel** - loadInkling2LoopModel is fak serve's loader stage for an inkling2-family GGUF: it claims the load for the dedicated looped forward (CUDA free-VRAM bound or the native resident Metal target), refuses a backend without that forward, and hands the native chat planner to the gateway. |
 | * | crystal | symbol | loop | **loop implementation surface for loopturnreceipt** - `LoopTurnReceipt` is the loop symbol declared or used at `cmd/fak/loop.go:396`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | loop | **loop implementation surface for loopturnscored** - `LoopTurnScored` is the loop symbol declared or used at `cmd/fak/loop_card_test.go:95`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | loop | **loop implementation surface for loopturnunavailable** - `LoopTurnUnavailable` is the loop symbol declared or used at `cmd/fak/loop_card_test.go:133`. This row positions that concrete implementation surface, not merely the family label. |
@@ -1025,6 +1030,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | loop | **loop implementation surface for startgatewayusagesnapshotloop** - `startGatewayUsageSnapshotLoop` is the loop symbol declared or used at `cmd/fak/serve.go:884` as `// startGatewayUsageSnapshotLoop starts the optional --metrics-snapshot periodic`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | loop | **LoopDepthRule** - policy.LoopDepthRule: the compiled policy cap on a looped model's per-request recurrent depth (max_loop_depth plus per-scope overrides); the gateway clamps the resolved loop count under its default cap and stamps Source policy_clamp when it lowered the depth. |
 | * | crystal | symbol | loop | **MaxLoops** - capabilitymatrix.Capabilities.MaxLoops (wire max_loops): a model's trained recurrent depth, read by the gateway as the per-model loop capability; 0 or 1 means not looped, so requests forward byte-identical bodies with no vllm_xargs.loops. |
+| * | crystal | symbol | loop | **TrainedLoops** - capabilitymatrix.Capabilities.TrainedLoops (wire trained_loops): the recurrent pass count a checkpoint was trained at, registered from the GGUF loop.count; the gateway floors irreversible or shell-scoped loop depth at it after the policy cap. |
 | * | crystal | concept | loop | **loop (the ring)** - The generic engineering abstraction: sense -> decide -> act -> witness, at any altitude (tool-call / turn / session / fleet / RSI / intent). |
 | * | crystal | subsystem | loop | **super loop (fak superloop)** - A read-only operator-INTENT walker: an interior node that reads its member loops' status worst-first and folds a worklist, mutating nothing at its own altitude. |
 | * | crystal | subsystem | loop | **fak loop (loopmgr ledger + governor)** - The durable hash-chained loop ledger (.fak/loops.jsonl) plus the admission governor (loopmgr.Admit): it records loop events and folds them into an advisory admit/refuse, it does not schedule or spawn. |
@@ -1135,6 +1141,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **ResumePlanRows** - The planRows local in sessionreg Run: the auto-resume entries extracted from the plan document that Options.planDoc builds from the registry rows. Its length is the AutoResume count in the registry summary. |
 | * | crystal | symbol | plan | **plandoc** - Options.planDoc in internal/fleetmon/sessionreg/output.go: builds the resume plan object (the plan key holding the auto-resume rows) from registry rows, rendered as the plan.out golden. |
 | * | crystal | concept | plan | **candidate_budget (runtime topology search)** - Serialized StopReason literal emitted when unvisited runtime topology configurations remain and the number evaluated has reached MaxCandidates, truncating finite observed-only search. |
+| * | crystal | symbol | plan | **inkling2MixedPrefillPlan** - Splits one Inkling-2 batch step of at most T tokens across rows: each prefilling row first takes up to limit prompt tokens in row order, leftover room goes to prefilling rows in order, and each decoding row adds one decode segment after the prompt segments. |
 | * | crystal | symbol | plan | **Inkling2LoopPlanner** - The agent.StreamingPlanner that serves chat turns on the dedicated inkling2_loop forward: it renders the request with the Inkling-2 chat template, tokenizes it, caps prompt plus completion at the context budget, drives an Inkling2LoopGenerator and lifts tool calls from the output. NewInkling2LoopPlanner builds it; fak serve holds it as inkling2Planner. |
 | * | crystal | symbol | plan | **NativeChatPlanner** - The gateway.Config field carrying a ready agent.Planner for a local model that has no *model.Model (today the inkling2_loop forward). When set and no proxy upstream is configured, the gateway uses it as the chat planner ahead of InKernelModel. |
 | * | crystal | symbol | plan | **NewInkling2DeviceRunPlanner** - Construct the agent Planner for an Inkling 2 model whose weights are bound to a compute backend device (CUDA), so prefill and decode run on that device instead of the host loop. |
@@ -4363,7 +4370,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 Most readers cannot hold every concept at once. The optional `parent` forest lets the catalog roll concepts up to the abstraction that HEADS them - and the roll-up is **weakest-link**: an abstraction reads as crystal only when *every* concept beneath it is. A single `defined` leaf keeps the whole head from rolling up to crystal, so the collapsed view can never hide fog it contains. `!` marks a head whose declared verdict reads clearer than its subtree supports.
 
 ```text
-concept-disambiguation roll-up: 51 top-level abstraction(s), 62 head(s) total, max depth 3 (220 concepts in the forest)
+concept-disambiguation roll-up: 51 top-level abstraction(s), 62 head(s) total, max depth 3 (221 concepts in the forest)
 
 Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest
 descendant. '!' = the head verdict reads clearer than the subtree supports.
@@ -4408,7 +4415,7 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    o defined     defined         2    0  oo                   context-ctx / CtxValueReport
    o defined     defined         2    0  *o                   plan / MemoryPlan (compute)
    o defined     defined         2    0  oo                   cache / anthropic_cachebp (offensive cache-breakpoint placement module)
-   * crystal     crystal        23    0  *********************** loop / inkling2loop
+   * crystal     crystal        24    0  ************************ loop / inkling2loop
    * crystal     crystal         5    0  *****                trajectory-control / trajectory control (trajctl)
    * crystal     crystal         4    0  ****                 cache / managed cache
    * crystal     crystal         4    0  ****                 cache / Prompt cache
@@ -4487,7 +4494,7 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | o | **CtxValueReport** (`x-context-ctx-ctxvaluereport`) | defined | defined | 2 | 0 | x-context-ctx-ctxvaluereport = defined |
 | o | **MemoryPlan (compute)** (`x-plan-memoryplan`) | defined | defined | 2 | 0 | x-plan-memoryplan = defined |
 | o | **anthropic_cachebp (offensive cache-breakpoint placement module)** (`x4-cache-anthropiccachebp`) | defined | defined | 2 | 0 | x4-cache-anthropiccachebp = defined |
-| * | **inkling2loop** (`inkling2loop-model-family`) | crystal | crystal | 23 | 0 | inkling2-serve-is-loop = crystal |
+| * | **inkling2loop** (`inkling2loop-model-family`) | crystal | crystal | 24 | 0 | inkling2-mixed-prefill-plan = crystal |
 | * | **trajectory control (trajctl)** (`trajctl-control-plane`) | crystal | crystal | 5 | 0 | trajctl-control-plane = crystal |
 | * | **managed cache** (`managed-cache`) | crystal | crystal | 4 | 0 | config-cachettl1h = crystal |
 | * | **Prompt cache** (`prompt-cache`) | crystal | crystal | 4 | 0 | cache-control = crystal |
@@ -4508,8 +4515,8 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 40 | 3 | 3 confusable pair(s) with no line drawn |
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 34 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4379/8111 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4221 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4390/8128 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4228 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -4518,20 +4525,20 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `alias_resolved` | 100 | 0 | every alias resolves in the tree (token or wire key) |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5574 lookup name(s) resolves - 97 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5583 lookup name(s) resolves - 97 land on several concepts, all separated |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| context-ctx | 343 | 362 | 19 |
-| plan | 667 | 681 | 14 |
-| session-runtime | 392 | 403 | 11 |
-| cache | 467 | 476 | 9 |
+| context-ctx | 345 | 365 | 20 |
+| plan | 667 | 680 | 13 |
+| session-runtime | 393 | 404 | 11 |
+| cache | 471 | 481 | 10 |
 | attention | 244 | 251 | 7 |
+| guard-gate | 584 | 591 | 7 |
 | gateway-engine | 327 | 333 | 6 |
-| loop | 150 | 156 | 6 |
-| guard-gate | 584 | 589 | 5 |
+| loop | 151 | 156 | 5 |
 | pool | 117 | 122 | 5 |
 | support-maturity | 146 | 150 | 4 |
 | render-materialize | 257 | 260 | 3 |

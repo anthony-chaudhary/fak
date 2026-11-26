@@ -198,9 +198,7 @@
       "distinct_from": [
         "inkling2loop-open"
       ],
-      "aliases": [
-        "NewInkling2MetalRunPlanner"
-      ],
+      "aliases": [],
       "grounding": "NewInkling2RunPlanner",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",

@@ -70,26 +70,25 @@ func TestRunInkling2ExplicitPackedMetal(t *testing.T) {
 }
 
 func TestRunInkling2MetalTargetSelector(t *testing.T) {
+	const removed = "removed from public fak; the vendored Splash comparison build lives in fak-private (cmd/fak-splash-serve)"
 	for _, tc := range []struct {
-		selector                    string
-		loopArch, present, resident bool
-		want                        inkling2MetalPath
-		errHas                      string
+		selector string
+		resident bool
+		want     inkling2MetalPath
+		errHas   string
 	}{
-		{selector: "", loopArch: true, present: true, resident: true, want: inkling2MetalVendored},
-		{selector: "", loopArch: true, present: false, resident: true, want: inkling2MetalNative},
-		{selector: "", loopArch: false, present: true, want: inkling2MetalNative},
-		{selector: " Vendored ", loopArch: true, present: true, want: inkling2MetalVendored},
-		{selector: "vendored", loopArch: true, present: false, errHas: "not available"},
-		{selector: "vendored", loopArch: false, present: true, errHas: "architecture"},
-		{selector: "native", loopArch: true, present: true, resident: true, want: inkling2MetalNative},
-		{selector: "NATIVE", loopArch: true, present: false, want: inkling2MetalNative},
-		{selector: "resident", loopArch: true, present: true, resident: true, want: inkling2MetalResident},
-		{selector: " Resident", loopArch: false, present: false, resident: true, want: inkling2MetalResident},
-		{selector: "resident", loopArch: true, present: true, errHas: "device-resident Metal forward is not available"},
-		{selector: "splash", loopArch: true, present: true, errHas: `unknown FAK_INKLING_METAL_TARGET="splash" (want vendored, native or resident)`},
+		{selector: "", resident: true, want: inkling2MetalResident},
+		{selector: "", resident: false, want: inkling2MetalNative},
+		{selector: "vendored", resident: true, errHas: removed},
+		{selector: " Vendored ", resident: false, errHas: removed},
+		{selector: "native", resident: true, want: inkling2MetalNative},
+		{selector: "NATIVE", resident: false, want: inkling2MetalNative},
+		{selector: "resident", resident: true, want: inkling2MetalResident},
+		{selector: " Resident", resident: true, want: inkling2MetalResident},
+		{selector: "resident", resident: false, errHas: "device-resident Metal forward is not available"},
+		{selector: "splash", resident: true, errHas: `unknown FAK_INKLING_METAL_TARGET="splash" (want resident or native)`},
 	} {
-		got, err := inkling2MetalSelect(tc.selector, tc.loopArch, tc.present, tc.resident)
+		got, err := inkling2MetalSelect(tc.selector, tc.resident)
 		if tc.errHas != "" {
 			if err == nil || !strings.Contains(err.Error(), tc.errHas) {
 				t.Errorf("%+v: error %v, want %q", tc, err, tc.errHas)
@@ -155,20 +154,22 @@ func TestRunInkling2ResidentCtxError(t *testing.T) {
 }
 
 func TestRunInkling2MetalTargetLabels(t *testing.T) {
-	if inkling2MetalTargetVendoredLabel != "vendored-splash" || inkling2MetalTargetNativeLabel != "fak-metalgemm" || inkling2MetalTargetResidentLabel != "fak-metal-resident" {
-		t.Fatalf("labels %q %q %q", inkling2MetalTargetVendoredLabel, inkling2MetalTargetNativeLabel, inkling2MetalTargetResidentLabel)
+	if inkling2MetalTargetNativeLabel != "fak-metalgemm" || inkling2MetalTargetResidentLabel != "fak-metal-resident" {
+		t.Fatalf("labels %q %q", inkling2MetalTargetNativeLabel, inkling2MetalTargetResidentLabel)
 	}
 	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "inkling2-metal-target-ab.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for selector, label := range map[string]string{
-		"vendored": inkling2MetalTargetVendoredLabel,
 		"native":   inkling2MetalTargetNativeLabel,
 		"resident": inkling2MetalTargetResidentLabel,
 	} {
 		if want := selector + `) echo "` + label + `"`; !strings.Contains(string(script), want) {
 			t.Errorf("A/B script lacks %s", want)
 		}
+	}
+	if strings.Contains(string(script), "vendored") {
+		t.Error("A/B script still offers the removed vendored target")
 	}
 }

@@ -6,7 +6,7 @@ import "fmt"
 // vendored target and fak's device-resident forward: an explicit request for the
 // host-driven native forward is refused rather than served under another path's name.
 func serveInkling2MetalSelected(path, selector string) (inkling2MetalPath, error) {
-	kind, err := inkling2MetalSelect(selector, true, true, inkling2MetalResidentAvailable)
+	kind, err := inkling2MetalServeSelect(selector)
 	if err != nil {
 		return kind, err
 	}

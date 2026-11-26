@@ -78,6 +78,25 @@
       "parent": "inkling2loop-model-family",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "inkling2-mixed-prefill-plan",
+      "canonical": "inkling2MixedPrefillPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Splits one Inkling-2 batch step of at most T tokens across rows: each prefilling row first takes up to limit prompt tokens in row order, leftover room goes to prefilling rows in order, and each decoding row adds one decode segment after the prompt segments.",
+      "distinction": "A per-step TOKEN BUDGET split over a live batch, not the agent Planner and not a query or execution plan: it returns contiguous per-row segments and leaves every cursor unchanged.",
+      "distinct_from": [
+        "plan-planner",
+        "inkling2-serve-loop-generator"
+      ],
+      "aliases": [],
+      "grounding": "inkling2MixedPrefillPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

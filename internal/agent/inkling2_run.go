@@ -5,13 +5,10 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
-	"github.com/anthony-chaudhary/fak/internal/inklingmetal"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
@@ -21,7 +18,6 @@ type inkling2RunPlanner struct {
 	model *ggufload.Inkling2LoopModel
 	// device is the CUDA backend a device-bound model decodes on; nil on the host.
 	device compute.Backend
-	metal  *inklingmetal.Model
 	tok    *tokenizer.Tokenizer
 	eos    int
 }
@@ -36,38 +32,7 @@ func NewInkling2DeviceRunPlanner(name string, m *ggufload.Inkling2LoopModel, be 
 	return &inkling2RunPlanner{name: name, model: m, device: be, tok: tok, eos: eos}
 }
 
-func NewInkling2MetalRunPlanner(name string, m *inklingmetal.Model, tok *tokenizer.Tokenizer, eos int) Planner {
-	return &inkling2RunPlanner{name: name, metal: m, tok: tok, eos: eos}
-}
-
 func (p *inkling2RunPlanner) Model() string { return p.name }
-
-// inkling2PrefixReuse reads FAK_INKLING2_PREFIX_REUSE: any of off, 0, false or
-// no makes every request prefill its whole prompt.
-func inkling2PrefixReuse(env string) bool {
-	switch strings.ToLower(strings.TrimSpace(env)) {
-	case "off", "0", "false", "no":
-		return false
-	}
-	return true
-}
-
-// metalSession opens the request on the session the last one left when the
-// two prompts share leading prefill chunks, so a growing chat prefills only
-// what follows them.
-func (p *inkling2RunPlanner) metalSession(ids []int, capacity int) (*inklingmetal.Session, error) {
-	if !inkling2PrefixReuse(os.Getenv("FAK_INKLING2_PREFIX_REUSE")) {
-		return p.metal.NewSession(capacity)
-	}
-	prompt := make([]int32, len(ids))
-	for i, id := range ids {
-		if id < 0 || id >= inklingmetal.Vocabulary {
-			return p.metal.NewSession(capacity)
-		}
-		prompt[i] = int32(id)
-	}
-	return p.metal.NewSessionFor(capacity, p.name, prompt)
-}
 
 // The text-only profile of the checkpoint template. Keep operator content ordinary,
 // including text that happens to spell a model control token.
@@ -187,78 +152,35 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var prefillPrompt func() ([]float32, error)
-	var step func(int) ([]float32, error)
-	if p.metal != nil {
-		sess, err := p.metalSession(ids, len(ids)+maxTokens)
-		if err != nil {
-			return nil, err
-		}
-		defer sess.Close()
-		if temp == 0 && freq == 0 && pres == 0 {
-			rows := inklingmetal.MaxBlock
-			if sp.SpeculativeNMax != nil {
-				rows = 1 + min(rows-1, max(0, *sp.SpeculativeNMax))
-			}
-			generated, st, err := ggufload.Inkling2MetalGreedy(ctx, sess, sess, ggufload.Inkling2MetalGreedyRequest{
-				Prompt: ids, MaxTokens: maxTokens, Vocab: inklingmetal.Vocabulary, EOS: p.eos, VerifyRows: rows, DraftDepth: min(rows-1, 15), TreeWidth: 4,
-			})
-			if err != nil {
-				return nil, err
-			}
-			sampled := len(generated)
-			reason := "length"
-			if sampled < maxTokens {
-				sampled++
-				reason = "stop"
-			}
-			return p.result(sp, generated, len(ids), sampled, st.DecodeSteps, reason, st.Prefill, st.Decode)
-		}
-		input := make([]int32, len(ids))
-		for i, id := range ids {
-			if id < 0 || id >= inklingmetal.Vocabulary {
-				return nil, fmt.Errorf("Inkling 2: prompt token %d outside vocabulary", id)
-			}
-			input[i] = int32(id)
-		}
-		prefillPrompt = func() ([]float32, error) { return sess.Prefill(input) }
-		step = func(id int) ([]float32, error) {
-			rows, err := sess.BeginBlock([]int32{int32(id)})
-			if err != nil {
-				return nil, err
-			}
-			return rows[0], sess.Commit(1)
-		}
-	} else if p.device != nil && temp == 0 && freq == 0 && pres == 0 {
+	if p.device != nil && temp == 0 && freq == 0 && pres == 0 {
 		return p.deviceGreedy(sp, ids, maxTokens)
-	} else {
-		h, err := model.NewInkling2LoopHost(p.model.HP, p.model.Weights)
-		if err != nil {
-			return nil, err
+	}
+	h, err := model.NewInkling2LoopHost(p.model.HP, p.model.Weights)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		if id < 0 || id >= p.model.HP.VocabUnpadded {
+			return nil, fmt.Errorf("Inkling 2: prompt token %d outside vocabulary", id)
 		}
-		for _, id := range ids {
-			if id < 0 || id >= p.model.HP.VocabUnpadded {
-				return nil, fmt.Errorf("Inkling 2: prompt token %d outside vocabulary", id)
-			}
-		}
-		prefillPrompt = func() ([]float32, error) { return ggufload.Inkling2LoopPrefill(ctx, h, ids) }
-		step = func(id int) ([]float32, error) { return ggufload.Inkling2LoopStep(h, id) }
-		if r, ok := p.device.(interface{ Recycle() }); ok {
-			// Device intermediates are read back per token, so recycle at each
-			// token boundary instead of holding a whole batched prefill.
-			prefillPrompt = func() (logits []float32, err error) {
-				for i, id := range ids {
-					if logits, err = ggufload.Inkling2LoopPrefillToken(h, id, i == len(ids)-1); err != nil {
-						return nil, err
-					}
-					r.Recycle()
+	}
+	prefillPrompt := func() ([]float32, error) { return ggufload.Inkling2LoopPrefill(ctx, h, ids) }
+	step := func(id int) ([]float32, error) { return ggufload.Inkling2LoopStep(h, id) }
+	if r, ok := p.device.(interface{ Recycle() }); ok {
+		// Device intermediates are read back per token, so recycle at each
+		// token boundary instead of holding a whole batched prefill.
+		prefillPrompt = func() (logits []float32, err error) {
+			for i, id := range ids {
+				if logits, err = ggufload.Inkling2LoopPrefillToken(h, id, i == len(ids)-1); err != nil {
+					return nil, err
 				}
-				return logits, nil
+				r.Recycle()
 			}
-			step = func(id int) ([]float32, error) {
-				defer r.Recycle()
-				return ggufload.Inkling2LoopStep(h, id)
-			}
+			return logits, nil
+		}
+		step = func(id int) ([]float32, error) {
+			defer r.Recycle()
+			return ggufload.Inkling2LoopStep(h, id)
 		}
 	}
 	start := time.Now()
@@ -330,10 +252,5 @@ func (p *inkling2RunPlanner) result(sp SampleParams, generated []int, prompt, sa
 		return nil, err
 	}
 	t := NewTimings(prompt, 0, steps, prefill.Seconds(), decode.Seconds())
-	if p.metal != nil {
-		if st := p.metal.PipelineStats(); st.Attached || st.Compiled > 0 {
-			t.MetalPipelines = &MetalPipelineTimings{Compiled: st.Compiled, ArchiveHits: st.ArchiveHits, Archived: st.Archived, LoadMS: st.ArchiveWarmMS + st.LoadWarmupMS}
-		}
-	}
 	return &Completion{Model: p.name, Message: msg, FinishReason: reason, Usage: Usage{PromptTokens: prompt, CompletionTokens: sampled, TotalTokens: prompt + sampled}, Timings: t}, nil
 }
