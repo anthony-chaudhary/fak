@@ -25,6 +25,9 @@ type Inkling2LoopGeneration struct {
 	// from an earlier request; prefill computed only the rest.
 	CachedPromptTokens            int
 	PrefillSeconds, DecodeSeconds float64
+	// FirstEmitSeconds is request receipt to the first emitted id, 0 when no id was emitted
+	// or the engine does not stamp it.
+	FirstEmitSeconds float64
 	// Width is how many requests shared the forward that decoded this one; 0 is unknown.
 	Width int
 }
@@ -32,6 +35,9 @@ type Inkling2LoopGeneration struct {
 // inkling2LoopTimings is the turn's llama.cpp timings plus the width it decoded in.
 func inkling2LoopTimings(promptTokens int, res Inkling2LoopGeneration) *Timings {
 	t := NewTimings(promptTokens, res.CachedPromptTokens, res.Generated, res.PrefillSeconds, res.DecodeSeconds)
+	if res.FirstEmitSeconds > 0 {
+		t.FirstEmitMS = res.FirstEmitSeconds * 1e3
+	}
 	if res.Width > 0 {
 		t.Inkling2Width, t.Inkling2Mode = res.Width, "scalar"
 		if res.Width > 1 {

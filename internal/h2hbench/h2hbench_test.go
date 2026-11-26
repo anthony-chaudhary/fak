@@ -72,7 +72,7 @@ func (f *fakeEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		delete(final, "usage")
 	}
 	if f.timings {
-		final["timings"] = ServerTimings{CacheN: cached, PromptN: tokens - cached, PredictedN: req.Max, PredictedPerSecond: 99}
+		final["timings"] = ServerTimings{CacheN: cached, PromptN: tokens - cached, PredictedN: req.Max, PredictedMS: 5, PredictedPerSecond: 99}
 	}
 	b, _ := json.Marshal(final)
 	fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", b)

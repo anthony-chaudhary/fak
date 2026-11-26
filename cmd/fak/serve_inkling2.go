@@ -101,6 +101,9 @@ type inkling2LoopRequest struct {
 	res    agent.Inkling2LoopGeneration
 	err    error
 	done   chan struct{}
+	// received is the engine Generate entry, not HTTP receipt, so first_emit
+	// includes engine queue wait; the span ends when the first emit callback returns.
+	received time.Time
 }
 
 // inkling2LoopEngine adapts the looped forward to agent.Inkling2LoopGenerator.
@@ -172,7 +175,7 @@ func (e *inkling2LoopEngine) Generate(ctx context.Context, prompt []int, maxNew 
 	if !ok {
 		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
 	}
-	r := &inkling2LoopRequest{ctx: ctx, prompt: prompt, maxNew: maxNew, stops: stops, emit: emit, done: make(chan struct{})}
+	r := &inkling2LoopRequest{ctx: ctx, prompt: prompt, maxNew: maxNew, stops: stops, emit: emit, done: make(chan struct{}), received: time.Now()}
 	select {
 	case reqs <- r:
 	case <-ctx.Done():
@@ -377,6 +380,10 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 		if !r.emit(next) {
 			res.Stopped = true
 			break
+		}
+		// Stamped after emit returns: first_byte_sent is the callback's return, not the socket write.
+		if res.Generated == 1 && !r.received.IsZero() {
+			res.FirstEmitSeconds = time.Since(r.received).Seconds()
 		}
 		if res.Generated == r.maxNew {
 			break

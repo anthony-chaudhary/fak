@@ -22,6 +22,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/httptrust"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/timingspan"
 )
 
 // Role constants for chat messages.
@@ -347,6 +348,9 @@ type Timings struct {
 	PredictedMS         float64 `json:"predicted_ms"`
 	PredictedPerTokenMS float64 `json:"predicted_per_token_ms"`
 	PredictedPerSecond  float64 `json:"predicted_per_second"`
+	// FirstEmitMS is request receipt to the first byte sent to the client; it
+	// includes the whole prefill and any reasoning decode that ran before it.
+	FirstEmitMS float64 `json:"first_emit_ms,omitempty"`
 	// DraftN / DraftNAccepted are llama.cpp's speculative-decoding pair, present
 	// only when the turn drafted tokens.
 	DraftN         int `json:"draft_n,omitempty"`
@@ -395,6 +399,32 @@ func NewTimings(promptTokens, cachedTokens, predicted int, prefillS, decodeS flo
 		}
 	}
 	return t
+}
+
+// MarshalJSON adds "spans", naming the span each measured clock field timed.
+// It is derived here rather than stored so Timings stays comparable.
+func (t Timings) MarshalJSON() ([]byte, error) {
+	type plain Timings
+	var spans map[string]string
+	declare := func(field string, s timingspan.Span) {
+		if spans == nil {
+			spans = map[string]string{}
+		}
+		spans[field] = s.String()
+	}
+	if t.PromptMS > 0 {
+		declare("prompt_ms", timingspan.PromptSpan)
+	}
+	if t.PredictedMS > 0 {
+		declare("predicted_ms", timingspan.DecodeSpan)
+	}
+	if t.FirstEmitMS > 0 {
+		declare("first_emit_ms", timingspan.FirstEmitSpan)
+	}
+	return json.Marshal(struct {
+		plain
+		Spans map[string]string `json:"spans,omitempty"`
+	}{plain(t), spans})
 }
 
 // UsageTokenDetails carries provider-specific prompt/input token subcounters.

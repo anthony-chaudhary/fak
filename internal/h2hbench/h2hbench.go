@@ -36,6 +36,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/timingspan"
 )
 
 const (
@@ -219,8 +221,25 @@ type Row struct {
 	CompletionTokens int     `json:"completion_tokens"`
 	TTFTMS           float64 `json:"ttft_ms"`
 	E2EMS            float64 `json:"e2e_ms"`
-	PrefillTPS       float64 `json:"prefill_tps"` // uncached prompt tokens / TTFT
-	DecodeTPS        float64 `json:"decode_tps"`  // (completion-1) / (e2e - TTFT)
+	// PrefillTPS is uncached prompt tokens per second of the server's own prefill
+	// clock (prefill_start..prefill_end). It is 0 when the arm reported no such
+	// clock; client TTFT never stands in, because it also holds HTTP and any
+	// reasoning decode. PrefillUnmeasured then says why the rate is absent.
+	PrefillTPS float64 `json:"prefill_tps"`
+	// PrefillSpan names the clock behind PrefillTPS; empty when no prefill clock was reported.
+	PrefillSpan string `json:"prefill_span,omitempty"`
+	// PrefillUnmeasured is "no_server_prefill_clock" on a served row with prompt
+	// tokens but no prefill clock; empty when PrefillTPS was measured.
+	PrefillUnmeasured string `json:"prefill_unmeasured,omitempty"`
+	// DecodeTPS is (predicted_n - 1) over the server's decode clock
+	// (prefill_end..last_token). Client E2E-minus-TTFT is never used: it would
+	// count reasoning tokens against a client-side boundary.
+	DecodeTPS float64 `json:"decode_tps"`
+	// DecodeSpan names the clock behind DecodeTPS; empty when no decode clock was reported.
+	DecodeSpan string `json:"decode_span,omitempty"`
+	// DecodeUnmeasured is "no_server_decode_clock" on a served row with more than
+	// one completion token but no decode clock; empty when DecodeTPS was measured.
+	DecodeUnmeasured string  `json:"decode_unmeasured,omitempty"`
 	CacheRatio       float64 `json:"cache_ratio"` // cached / prompt
 	// BusySlots is the most upstream slots other clients held just before or
 	// just after this request (nil = not probed). >0 marks a contended reading.
@@ -681,17 +700,48 @@ func measureOnce(ctx context.Context, cfg Config, arm Arm, msgs []message, maxTo
 	if r.Server != nil && r.CachedTokens == 0 && r.Server.CacheN > 0 {
 		r.CachedTokens = r.Server.CacheN
 	}
-	if r.PromptTokens > 0 {
-		r.CacheRatio = float64(r.CachedTokens) / float64(r.PromptTokens)
-		if uncached := r.PromptTokens - r.CachedTokens; uncached > 0 && r.TTFTMS > 0 {
-			r.PrefillTPS = float64(uncached) / (r.TTFTMS / 1000)
-		}
-	}
-	if dt := r.E2EMS - r.TTFTMS; r.CompletionTokens > 1 && dt > 0 {
-		r.DecodeTPS = float64(r.CompletionTokens-1) / (dt / 1000)
-	}
+	deriveRates(r)
 	r.OK = true
 	return answer.String(), nil
+}
+
+// deriveRates folds the rates a row reports. PrefillTPS needs a prefill clock:
+// client TTFT also carries HTTP and any reasoning decode, so it never stands in.
+func deriveRates(r *Row) {
+	if r.PromptTokens > 0 {
+		r.CacheRatio = float64(r.CachedTokens) / float64(r.PromptTokens)
+	}
+	r.PrefillTPS, r.PrefillSpan, r.PrefillUnmeasured = 0, "", ""
+	if r.Server != nil && r.Server.PromptMS > 0 && r.Server.PromptN > 0 {
+		r.PrefillTPS = float64(r.Server.PromptN) / (r.Server.PromptMS / 1000)
+		r.PrefillSpan = timingspan.PromptSpan.String()
+	} else if r.PromptTokens > 0 {
+		r.PrefillUnmeasured = "no_server_prefill_clock"
+	}
+	r.DecodeTPS, r.DecodeSpan, r.DecodeUnmeasured = 0, "", ""
+	if r.Server != nil && r.Server.PredictedMS > 0 && r.Server.PredictedN > 1 {
+		r.DecodeTPS = float64(r.Server.PredictedN-1) / (r.Server.PredictedMS / 1000)
+		r.DecodeSpan = timingspan.DecodeSpan.String()
+	} else if r.CompletionTokens > 1 {
+		r.DecodeUnmeasured = "no_server_decode_clock"
+	}
+}
+
+// Metric is one rate and the span its clock covered.
+type Metric struct {
+	Value float64
+	Span  timingspan.Span
+}
+
+// RatioOf forms num/den only when both were timed over the same span.
+func RatioOf(num, den Metric) (float64, error) {
+	if err := timingspan.RequireSameSpan(num.Span, den.Span); err != nil {
+		return 0, err
+	}
+	if den.Value == 0 {
+		return 0, errors.New("ratio: zero denominator")
+	}
+	return num.Value / den.Value, nil
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
@@ -713,8 +763,18 @@ type Cell struct {
 	TTFTP50              float64 `json:"ttft_ms_p50"`
 	TTFTP90              float64 `json:"ttft_ms_p90"`
 	PrefillP50           float64 `json:"prefill_tps_p50"`
-	DecodeP50            float64 `json:"decode_tps_p50"`
-	CacheRatio           float64 `json:"cache_ratio_mean"`
+	// PrefillSpan is the clock every PrefillP50 sample timed; "mixed" when the
+	// samples disagree, and empty when no row reported a prefill clock.
+	PrefillSpan string `json:"prefill_span,omitempty"`
+	// PrefillDropped counts measured rows that carried no server prefill clock,
+	// so they contribute no prefill rate. Their absence is surfaced, not silent.
+	PrefillDropped int `json:"prefill_dropped,omitempty"`
+	// DecodeSpan is the clock every DecodeP50 sample timed; "mixed" when the samples disagree.
+	DecodeSpan string `json:"decode_span,omitempty"`
+	// DecodeDropped counts rows with completion tokens but no server decode clock.
+	DecodeDropped int     `json:"decode_dropped,omitempty"`
+	DecodeP50     float64 `json:"decode_tps_p50"`
+	CacheRatio    float64 `json:"cache_ratio_mean"`
 }
 
 // Loss is one cell where a fak arm trails the best rival by more than lossTolerance.
@@ -766,6 +826,10 @@ type Report struct {
 	ConcurrencyCells []ConcCell `json:"concurrency_cells,omitempty"`
 	Losses           []Loss     `json:"losses"`
 	Wins             []Loss     `json:"wins"` // same shape; Gap is how far fak leads
+	// SpanRefusals names each fak-vs-rival comparison withheld because the two
+	// sides timed different declared spans. Legacy cells with no declared span
+	// stay comparable.
+	SpanRefusals []string `json:"span_refusals,omitempty"`
 }
 
 func quantile(xs []float64, q float64) float64 {
@@ -811,6 +875,8 @@ func Summarize(rows []Row) Report {
 		ttft, prompts            []float64
 		ttftP, prefillP, decodeP map[int][]float64 // by Pos
 		cache                    float64
+		prefillSpan              string // clock of the prefill samples; "mixed" when they disagree
+		decodeSpan               string // clock of the decode samples; "mixed" when they disagree
 	}
 	accs := map[key]*acc{}
 	var keys []key
@@ -847,9 +913,15 @@ func Summarize(rows []Row) Report {
 				a.prompts = append(a.prompts, float64(r.PromptTokens))
 				if r.PrefillTPS > 0 {
 					a.prefillP[r.Pos] = append(a.prefillP[r.Pos], r.PrefillTPS)
+					a.prefillSpan = joinClock(a.prefillSpan, r.PrefillSpan)
+				} else if r.PrefillUnmeasured != "" {
+					a.cell.PrefillDropped++
 				}
 				if r.DecodeTPS > 0 {
 					a.decodeP[r.Pos] = append(a.decodeP[r.Pos], r.DecodeTPS)
+					a.decodeSpan = joinClock(a.decodeSpan, r.DecodeSpan)
+				} else if r.DecodeUnmeasured != "" {
+					a.cell.DecodeDropped++
 				}
 				a.cache += r.CacheRatio
 			}
@@ -875,13 +947,15 @@ func Summarize(rows []Row) Report {
 		c := a.cell
 		c.TTFTP50, c.TTFTP90 = balancedMedian(a.ttftP), quantile(a.ttft, 0.9)
 		c.PrefillP50, c.DecodeP50 = balancedMedian(a.prefillP), balancedMedian(a.decodeP)
+		c.PrefillSpan = a.prefillSpan
+		c.DecodeSpan = a.decodeSpan
 		c.PromptTokens = int(quantile(a.prompts, 0.5))
 		if c.N > 0 {
 			c.CacheRatio = a.cache / float64(c.N)
 		}
 		rep.Cells = append(rep.Cells, c)
 	}
-	rep.Losses, rep.Wins = Compare(rep.Cells)
+	rep.Losses, rep.Wins, rep.SpanRefusals = compareCells(rep.Cells)
 	rep.ConcurrencyCells = foldConcurrency(rows)
 	return rep
 }
@@ -975,6 +1049,36 @@ func scenarioRank(s string) int {
 // Compare pits every fak cell against the best baseline cell of the same
 // (scenario, size) on the metrics that scenario is built to measure.
 func Compare(cells []Cell) (losses, wins []Loss) {
+	losses, wins, _ = compareCells(cells)
+	return losses, wins
+}
+
+// joinClock folds one row's clock into the clock of a set of samples.
+func joinClock(have, next string) string {
+	switch {
+	case have == "":
+		return next
+	case have != next:
+		return "mixed"
+	}
+	return have
+}
+
+// sameClock refuses a comparison whose two declared spans differ. A side with no
+// declaration is a legacy cell and stays comparable, as before spans were recorded.
+func sameClock(fakSpan, rivalSpan string) error {
+	if fakSpan == "" || rivalSpan == "" {
+		return nil
+	}
+	fs, ferr := timingspan.ParseSpan(fakSpan)
+	rs, rerr := timingspan.ParseSpan(rivalSpan)
+	if ferr != nil || rerr != nil {
+		return fmt.Errorf("clock not a declared span (fak %q, rival %q)", fakSpan, rivalSpan)
+	}
+	return timingspan.RequireSameSpan(fs, rs)
+}
+
+func compareCells(cells []Cell) (losses, wins []Loss, refusals []string) {
 	losses, wins = []Loss{}, []Loss{}
 	type sk struct {
 		scenario, speculation string
@@ -993,19 +1097,20 @@ func Compare(cells []Cell) (losses, wins []Loss) {
 		name        string
 		get         func(Cell) float64
 		lowerBetter bool
+		span        func(Cell) string // nil when the metric has no declared clock
 	}
 	for _, k := range order {
 		var ms []metric
 		switch k.scenario {
 		case ScenarioCold:
-			ms = []metric{{"ttft_ms_p50", func(c Cell) float64 { return c.TTFTP50 }, true}, {"prefill_tps_p50", func(c Cell) float64 { return c.PrefillP50 }, false}}
+			ms = []metric{{"ttft_ms_p50", func(c Cell) float64 { return c.TTFTP50 }, true, nil}, {"prefill_tps_p50", func(c Cell) float64 { return c.PrefillP50 }, false, func(c Cell) string { return c.PrefillSpan }}}
 		case ScenarioDecode:
-			ms = []metric{{"decode_tps_p50", func(c Cell) float64 { return c.DecodeP50 }, false}}
+			ms = []metric{{"decode_tps_p50", func(c Cell) float64 { return c.DecodeP50 }, false, func(c Cell) string { return c.DecodeSpan }}}
 		case ScenarioMultiTurn:
 			if k.size != WarmTurns {
 				continue
 			}
-			ms = []metric{{"ttft_ms_p50", func(c Cell) float64 { return c.TTFTP50 }, true}, {"cache_ratio_mean", func(c Cell) float64 { return c.CacheRatio }, false}}
+			ms = []metric{{"ttft_ms_p50", func(c Cell) float64 { return c.TTFTP50 }, true, nil}, {"cache_ratio_mean", func(c Cell) float64 { return c.CacheRatio }, false, nil}}
 		}
 		for _, m := range ms {
 			var best *Cell
@@ -1028,6 +1133,12 @@ func Compare(cells []Cell) (losses, wins []Loss) {
 					continue
 				}
 				fv, bv := m.get(c), m.get(*best)
+				if m.span != nil {
+					if err := sameClock(m.span(c), m.span(*best)); err != nil {
+						refusals = append(refusals, fmt.Sprintf("%s %s size=%d %s: %v", k.scenario, c.Arm, k.size, m.name, err))
+						continue
+					}
+				}
 				gap := relGap(fv, bv, m.lowerBetter)
 				l := Loss{RequestedSpeculation: k.speculation, Scenario: k.scenario, Size: k.size, Metric: m.name, FakArm: c.Arm, FakValue: fv, Rival: best.Arm, RivalVal: bv}
 				switch {
@@ -1043,7 +1154,7 @@ func Compare(cells []Cell) (losses, wins []Loss) {
 	}
 	sort.SliceStable(losses, func(i, j int) bool { return losses[i].Gap > losses[j].Gap })
 	sort.SliceStable(wins, func(i, j int) bool { return wins[i].Gap > wins[j].Gap })
-	return losses, wins
+	return losses, wins, refusals
 }
 
 func better(a, b float64, lowerBetter bool) bool {

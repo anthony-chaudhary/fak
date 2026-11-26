@@ -971,6 +971,21 @@ func (m *gatewayMetrics) attributeServedTurn(loc servingLocality, promptTok, com
 	m.inferenceMu.Unlock()
 }
 
+// prefilledPromptTokens is the prompt tokens that ran through prefill: a cache
+// read was served without prefill, a cache write was prefilled.
+func prefilledPromptTokens(promptTok, cachedTok int) int {
+	if promptTok <= 0 {
+		return 0
+	}
+	if cachedTok < 0 {
+		cachedTok = 0
+	}
+	if cachedTok > promptTok {
+		cachedTok = promptTok
+	}
+	return promptTok - cachedTok
+}
+
 // observeInferenceTimed is observeInference with an explicit time-to-first-token
 // split. ttft is the wall-clock from the planner call starting to the FIRST content
 // delta arriving (the prefill phase: prompt ingest + first token); dur is the whole
@@ -980,7 +995,8 @@ func (m *gatewayMetrics) attributeServedTurn(loc servingLocality, promptTok, com
 // (a buffered turn, or a stream that produced no delta), the whole duration counts as
 // decode total and the prefill split is left untouched. inferDecodeSecs stays the
 // FULL inference wall-clock in both cases so the existing output_tokens_per_second and
-// the fleet-value agent-seconds denominator are byte-identical to before.
+// the fleet-value agent-seconds denominator are byte-identical to before. That
+// output rate is blended with prefill; the decode-only rate is decode_tokens_per_second.
 func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
 	m.observeInferenceTimedAt(localityUnknown, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft)
 }
@@ -1037,11 +1053,12 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 	m.observeByClientLocked(detail.src, promptTok, cachedTok)
 	if dur > 0 {
 		m.inferDecodeSecs += dur.Seconds()
-		// e2e distribution: every served non-synthetic turn lands here.
-		if rh != nil {
-			m.inferE2EHist.observe(dur.Seconds())
-			rh.e2e.observe(dur.Seconds())
-		}
+	}
+	// e2e distribution: every served non-synthetic turn lands here, including one
+	// the clock measured as zero, so the count tracks served turns.
+	if rh != nil {
+		m.inferE2EHist.observe(dur.Seconds())
+		rh.e2e.observe(dur.Seconds())
 	}
 	// Split prefill from decode only when TTFT was actually observed and is sane
 	// (positive and within the total). A clamp guards against a clock skew producing
@@ -1058,8 +1075,8 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 			m.inferTTFTHist.observe(pre.Seconds())
 			rh.ttft.observe(pre.Seconds())
 		}
-		if promptTok > 0 {
-			m.inferPrefillPromptTokens += uint64(promptTok)
+		if n := prefilledPromptTokens(promptTok, cachedTok); n > 0 {
+			m.inferPrefillPromptTokens += uint64(n)
 		}
 		decodeSecs := (dur - pre).Seconds()
 		m.inferMeasuredDecodeSecs += decodeSecs

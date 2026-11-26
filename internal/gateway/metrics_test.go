@@ -639,6 +639,17 @@ func TestInferenceVarsMatchPrometheus(t *testing.T) {
 	}
 }
 
+// TestZeroDurationServedTurnCountsInE2E pins that a served turn the clock measured as
+// zero still lands in the e2e distribution: its count must track served turns, not
+// the turns that happened to take a nonzero wall-clock.
+func TestZeroDurationServedTurnCountsInE2E(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeInference(200, 100, 0, 0, "stop", 0)
+	if out := renderInference(m); !strings.Contains(out, "fak_gateway_inference_e2e_seconds_count 1\n") {
+		t.Fatalf("zero-duration served turn missing from e2e count\n%s", out)
+	}
+}
+
 func renderInference(m *gatewayMetrics) string {
 	var b strings.Builder
 	m.writeInferenceMetrics(&b)
