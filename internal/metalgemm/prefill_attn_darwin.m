@@ -54,9 +54,9 @@ struct PrefillAttnParams {
 
 // Threadgroup layout: K tile [BK][HD], V tile [BK][HD], then per simdgroup an S/P tile [8][BK]
 // and an 8x8 diagonal scratch. One simdgroup owns one query head and the threadgroup's 8 rows.
-template <int HD, int BK, bool QREG>
+template <int HD, int BK, bool QREG, bool GATED>
 inline void prefill_attn_body(device const float* Q, device const float* K, device const float* V,
-                              device float* O, constant PrefillAttnParams& p, threadgroup float* tg,
+                              device float* O, device const float* G, constant PrefillAttnParams& p, threadgroup float* tg,
                               uint2 tgp, ushort tid, ushort sg, ushort lane, ushort nthreads) {
     constexpr int ND = HD / 8;   // 8-wide head-dim tiles
     constexpr int NK = BK / 8;   // 8-wide key tiles per block
@@ -200,11 +200,12 @@ inline void prefill_attn_body(device const float* Q, device const float* K, devi
     simdgroup_load(dm, tD, 8);
     simdgroup_barrier(mem_flags::mem_threadgroup);
     device float* op = O + (long)qt0 * qstride + (long)h * HD;
+    device const float* gp = G + (long)qt0 * qstride + (long)h * HD;
     const bool full = qt0 + 8 <= p.P;
     for (int i = 0; i < ND; i++) {
         simdgroup_float8x8 t;
         simdgroup_multiply(t, dm, om[i]);
-        if (full) {
+        if (full && !GATED) {
             simdgroup_store(t, op + i * 8, (ulong)qstride);
         } else {
             simdgroup_store(t, tD, 8);
@@ -212,7 +213,10 @@ inline void prefill_attn_body(device const float* Q, device const float* K, devi
             for (int e = 0; e < 2; e++) {
                 const int idx = (int)lane * 2 + e;
                 const int rr = idx / 8, cc = idx % 8;
-                if (qt0 + rr < p.P) op[(long)rr * qstride + i * 8 + cc] = tD[idx];
+                if (qt0 + rr < p.P) {
+                    const long off = (long)rr * qstride + i * 8 + cc;
+                    op[off] = GATED ? tD[idx] / (1.0f + exp(-gp[off])) : tD[idx];
+                }
             }
             simdgroup_barrier(mem_flags::mem_threadgroup);
         }
@@ -230,15 +234,34 @@ kernel void NAME(device const float* Q [[buffer(0)]], \
                  ushort tid [[thread_index_in_threadgroup]], \
                  ushort sg [[simdgroup_index_in_threadgroup]], \
                  ushort lane [[thread_index_in_simdgroup]]) { \
-    prefill_attn_body<HD, BK, QREG>(Q, K, V, O, p, tg, tgp, tid, sg, lane, (ushort)(p.hg * 32)); \
+    prefill_attn_body<HD, BK, QREG, false>(Q, K, V, O, O, p, tg, tgp, tid, sg, lane, (ushort)(p.hg * 32)); \
+}
+
+#define PREFILL_ATTN_GATED_KERNEL(NAME, HD, BK, QREG) \
+kernel void NAME(device const float* Q [[buffer(0)]], \
+                 device const float* K [[buffer(1)]], \
+                 device const float* V [[buffer(2)]], \
+                 device float*       O [[buffer(3)]], \
+                 constant PrefillAttnParams& p [[buffer(4)]], \
+                 device const float* G [[buffer(5)]], \
+                 threadgroup float* tg [[threadgroup(0)]], \
+                 uint2 tgp [[threadgroup_position_in_grid]], \
+                 ushort tid [[thread_index_in_threadgroup]], \
+                 ushort sg [[simdgroup_index_in_threadgroup]], \
+                 ushort lane [[thread_index_in_simdgroup]]) { \
+    prefill_attn_body<HD, BK, QREG, true>(Q, K, V, O, G, p, tg, tgp, tid, sg, lane, (ushort)(p.hg * 32)); \
 }
 
 PREFILL_ATTN_KERNEL(prefill_attn_hd64, 64, 16, true)
 PREFILL_ATTN_KERNEL(prefill_attn_hd128, 128, 16, true)
 PREFILL_ATTN_KERNEL(prefill_attn_hd256, 256, 8, false)
+PREFILL_ATTN_GATED_KERNEL(prefill_attn_gated_hd64, 64, 16, true)
+PREFILL_ATTN_GATED_KERNEL(prefill_attn_gated_hd128, 128, 16, true)
+PREFILL_ATTN_GATED_KERNEL(prefill_attn_gated_hd256, 256, 8, false)
 )MSL";
 
 static id<MTLComputePipelineState> gPAPSO[3]; // hd 64, 128, 256
+static id<MTLComputePipelineState> gPAGatedPSO[3];
 static dispatch_once_t gPAOnce;
 static id<MTLBuffer> gPAQ = nil, gPAK = nil, gPAV = nil, gPAO = nil;
 static size_t gPAQCap = 0, gPAKVCap = 0, gPAOCap = 0;
@@ -264,6 +287,8 @@ static void mg_pa_init(void) {
         for (int i = 0; i < 3; i++) {
             id<MTLFunction> fn = [lib newFunctionWithName:names[i]];
             if (fn) gPAPSO[i] = [gDev newComputePipelineStateWithFunction:fn error:&err];
+            fn = [lib newFunctionWithName:[NSString stringWithFormat:@"prefill_attn_gated_hd%d", 64 << i]];
+            if (fn) gPAGatedPSO[i] = [gDev newComputePipelineStateWithFunction:fn error:&err];
         }
     });
 }
@@ -360,4 +385,38 @@ int mg_prefill_attn(const float* q, const float* k, const float* v, float* out,
         memcpy(out, gPAO.contents, oBytes);
     }
     return 0;
+}
+
+// mg_prefill_attn_encode encodes the same tiled causal attention into a caller-owned command
+// buffer over device-resident Q/K/V, so a whole-forward graph keeps attention on its own
+// timeline. Q must be readable for ceil(P/8)*8 rows (the 8-row tile load); rows past P only
+// feed rows that are never stored. A non-nil gate applies out *= sigmoid(gate) per element
+// (gate laid out like out). Returns 1 when encoded, 0 when the geometry is unsupported.
+int mg_prefill_attn_encode(void* cbp, void* qp, void* kp, unsigned long kOff, void* vp, unsigned long vOff,
+                           void* gatep, void* outp, int P, int kv_len, int nH, int nKV, int hd, float scale) {
+    if (!cbp || !qp || !kp || !vp || !outp || P <= 0 || kv_len < P) return 0;
+    if (!mg_prefill_attn_supported(hd, nH, nKV)) return 0;
+    int slot = mg_pa_slot(hd);
+    id<MTLComputePipelineState> pso = gatep ? gPAGatedPSO[slot] : gPAPSO[slot];
+    if (pso == nil) return 0;
+    int grp = nH / nKV;
+    int hg = mg_pa_heads_per_tg(grp);
+    int bk = mg_pa_bk(hd);
+    PrefillAttnParams prm = {P, kv_len, nH, nKV, grp, hg, 0, scale};
+    id<MTLCommandBuffer> cb = (__bridge id<MTLCommandBuffer>)cbp;
+    id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+    if (e == nil) return 0;
+    [e setComputePipelineState:pso];
+    [e setBuffer:(__bridge id<MTLBuffer>)qp offset:0 atIndex:0];
+    [e setBuffer:(__bridge id<MTLBuffer>)kp offset:(NSUInteger)kOff atIndex:1];
+    [e setBuffer:(__bridge id<MTLBuffer>)vp offset:(NSUInteger)vOff atIndex:2];
+    [e setBuffer:(__bridge id<MTLBuffer>)outp offset:0 atIndex:3];
+    [e setBytes:&prm length:sizeof(prm) atIndex:4];
+    [e setBuffer:(__bridge id<MTLBuffer>)(gatep ? gatep : outp) offset:0 atIndex:5];
+    NSUInteger tgBytes = (NSUInteger)(2 * bk * hd + hg * (8 * bk + 64)) * sizeof(float);
+    [e setThreadgroupMemoryLength:tgBytes atIndex:0];
+    [e dispatchThreadgroups:MTLSizeMake((NSUInteger)((P + 7) / 8), (NSUInteger)(nKV * (grp / hg)), 1)
+       threadsPerThreadgroup:MTLSizeMake((NSUInteger)(hg * 32), 1, 1)];
+    [e endEncoding];
+    return 1;
 }

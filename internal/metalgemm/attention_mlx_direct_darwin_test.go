@@ -76,6 +76,8 @@ func TestAttentionMLXDirectOracle(t *testing.T) {
 
 // fak-test:runtime medium est=10s
 func TestAttentionMLXDirectTiming(t *testing.T) {
+	// The p=16 rows would otherwise ride the tiled panel kernel; this test times the per-row MLX kernel.
+	t.Setenv("FAK_QWEN35_ATTN_TILED", "0")
 	lease, err := gpulease.Acquire(gpulease.Options{NoWait: true})
 	if err != nil {
 		t.Fatal(err)
