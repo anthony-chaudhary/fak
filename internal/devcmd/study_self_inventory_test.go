@@ -299,17 +299,24 @@ func TestStudyInventoryVerificationCacheCorruptEntryRecomputesFailure(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	absRepo, err := filepath.Abs(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
 	key := studySelfInventoryCacheKey{
 		CacheSchema:     studySelfInventoryCacheSchema,
 		InventorySchema: studymonitor.SelfInventorySchema,
 		Tip:             string(bytes.TrimSpace(tipBytes)),
-		RepositoryRoot:  repo,
+		RepositoryRoot:  absRepo,
 		Repository:      "anthony-chaudhary/fak",
 		ManifestPath:    studymonitor.DefaultSelfInventoryPath,
 	}
 	cachePath, err := studySelfInventoryCachePath(key)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(cachePath); err != nil {
+		t.Fatalf("verification cache entry for the warm run missing at %s: %v", cachePath, err)
 	}
 	if err := os.WriteFile(cachePath, []byte("not-json"), 0o644); err != nil {
 		t.Fatal(err)

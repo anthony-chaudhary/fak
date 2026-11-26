@@ -91,15 +91,10 @@ func runStudySelfInventory(stdout, stderr io.Writer, args []string) int {
 		}
 	}
 
-	committedRoot, err := studySelfInventoryExtract(repoRoot, tip)
-	if err != nil {
-		fmt.Fprintf(stderr, "study-inventory: extract committed tree %s: %v\n", short(tip), err)
-		return 1
-	}
-	defer os.RemoveAll(committedRoot)
-
 	if *refresh {
-		manifest, err := studymonitor.BuildSelfInventory(committedRoot, *repository, *manifestPath)
+		manifest, err := studymonitor.BuildSelfInventoryFromTree(*repository, *manifestPath, func(visit func(string, []byte) error) error {
+			return committedtree.ForEachRegularFile(repoRoot, tip, visit)
+		})
 		if err != nil {
 			fmt.Fprintf(stderr, "study-inventory: build: %v\n", err)
 			return 1
@@ -121,6 +116,13 @@ func runStudySelfInventory(stdout, stderr io.Writer, args []string) int {
 		output := studySelfInventoryOutput{Operation: "refresh", Tip: tip, ManifestPath: *manifestPath, ContentRoot: manifest.ContentRoot, TrackedFiles: manifest.TrackedFiles}
 		return renderStudySelfInventory(stdout, output, *asJSON)
 	}
+
+	committedRoot, err := studySelfInventoryExtract(repoRoot, tip)
+	if err != nil {
+		fmt.Fprintf(stderr, "study-inventory: extract committed tree %s: %v\n", short(tip), err)
+		return 1
+	}
+	defer os.RemoveAll(committedRoot)
 
 	verification, err := studymonitor.VerifySelfInventory(committedRoot, *manifestPath, *repository)
 	if err != nil {

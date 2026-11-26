@@ -150,11 +150,7 @@ func BuildSelfInventory(committedRoot, repository, manifestPath string) (SelfInv
 					readErrs[i] = err
 					continue
 				}
-				digest := sha256.Sum256(data)
-				entries[i] = SelfInventoryEntry{
-					Path: item.rel, ContentSHA256: "sha256:" + hex.EncodeToString(digest[:]), Bytes: int64(len(data)),
-					Classification: selfInventoryClassification(item.class), SourceClasses: item.class.SourceClasses,
-				}
+				entries[i] = newSelfInventoryEntry(item.rel, item.class, data)
 			}
 		}()
 	}
@@ -168,6 +164,51 @@ func BuildSelfInventory(committedRoot, repository, manifestPath string) (SelfInv
 			return SelfInventory{}, fmt.Errorf("read %s: %w", pending[i].rel, err)
 		}
 	}
+	return assembleSelfInventory(repository, manifestPath, entries), nil
+}
+
+// BuildSelfInventoryFromTree produces the same manifest as BuildSelfInventory from
+// committed regular files streamed by forEach, so a refresh can hash blobs without
+// writing a checkout. forEach may yield the manifest path and the excluded control
+// trees; they are dropped here, so the output matches the on-disk builder exactly.
+func BuildSelfInventoryFromTree(repository, manifestPath string, forEach func(visit func(rel string, data []byte) error) error) (SelfInventory, error) {
+	manifestPath, err := normalizeSelfPath(manifestPath)
+	if err != nil {
+		return SelfInventory{}, fmt.Errorf("manifest path: %w", err)
+	}
+	var entries []SelfInventoryEntry
+	err = forEach(func(rel string, data []byte) error {
+		if selfTreeExcluded(rel, manifestPath) {
+			return nil
+		}
+		entries = append(entries, newSelfInventoryEntry(rel, classifyInventoryFile(rel), data))
+		return nil
+	})
+	if err != nil {
+		return SelfInventory{}, err
+	}
+	return assembleSelfInventory(repository, manifestPath, entries), nil
+}
+
+// selfTreeExcluded mirrors the directory skips of BuildSelfInventory's walk: the
+// top-level .git and worktrees control trees and the manifest itself.
+func selfTreeExcluded(rel, manifestPath string) bool {
+	if rel == manifestPath {
+		return true
+	}
+	first, _, nested := strings.Cut(rel, "/")
+	return nested && (first == ".git" || first == "worktrees")
+}
+
+func newSelfInventoryEntry(rel string, class inventoryFileClass, data []byte) SelfInventoryEntry {
+	digest := sha256.Sum256(data)
+	return SelfInventoryEntry{
+		Path: rel, ContentSHA256: "sha256:" + hex.EncodeToString(digest[:]), Bytes: int64(len(data)),
+		Classification: selfInventoryClassification(class), SourceClasses: class.SourceClasses,
+	}
+}
+
+func assembleSelfInventory(repository, manifestPath string, entries []SelfInventoryEntry) SelfInventory {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	var total int64
 	for _, entry := range entries {
@@ -180,7 +221,7 @@ func BuildSelfInventory(committedRoot, repository, manifestPath string) (SelfInv
 		RefreshWitness: SelfRefreshWitness{
 			MutationVerdict: "typed changed-path drift", Repair: "fak study-inventory --self --refresh", FreshVerdict: "verified",
 		},
-	}, nil
+	}
 }
 
 func ReadSelfInventory(r io.Reader) (SelfInventory, error) {
