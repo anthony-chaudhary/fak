@@ -1065,6 +1065,21 @@ var admittedPostFreeze = []string{
 	// admitted XDG_DATA_HOME; it grants access to nothing and authenticates nothing.
 	// Relocates to: a typed ctxmmu state-directory config, or stays as ambient OS input.
 	"XDG_STATE_HOME",
+
+	// FOURTEENTH OCCURRENCE (release-unblock): two Inkling-2 Metal prefill diagnostic toggles
+	// shipped in internal/compute/metal_inkling2_prefill.go while the ratchet was red and
+	// unwatched (the oldest landed 10 trunk advances before this admission). As in the earlier
+	// occurrences they are admitted by name, not absorbed into baseline.go, and neither can
+	// relocate until the typed config surface exists. Admission resolves the current offenses;
+	// it does not erase that liveness failure or pay the relocation debt.
+
+	// internal/compute/metal_inkling2_prefill.go — FAK_INK2P_GEMM=0 falls back from the batched
+	// Metal GEMM prefill to the per-token path for A/B attribution, and FAK_INK2P_PROFILE=1
+	// flushes around each batched prefill op to attribute GPU time. Two diagnostic toggles,
+	// not credentials.
+	// Relocates to: a typed Inkling-2 Metal prefill config.
+	"FAK_INK2P_GEMM",
+	"FAK_INK2P_PROFILE",
 }
 
 // helperReadCorroboration declares that an admitted name is still read at runtime through

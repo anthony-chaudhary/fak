@@ -660,7 +660,7 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 		t.Fatalf("race-detector cancel-in-progress must be the literal false; got %q", raceJob.cancel)
 	}
 
-	t.Run("per-commit fast/build evidence is preserved", func(t *testing.T) {
+	t.Run("trunk pushes share one per-ref group with cancel-in-progress off", func(t *testing.T) {
 		sim := newGHConcurrency()
 		var enq []enqueued
 		for i := 0; i < 10; i++ {
@@ -669,6 +669,9 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 				sha: fmt.Sprintf("sha%02d", i), runID: fmt.Sprintf("%d", i),
 			}
 			group, cancel := resolveContract(t, topLevel, ev)
+			if cancel {
+				t.Fatalf("trunk push %s must not cancel in-progress runs", ev.sha)
+			}
 			r := &ghRun{name: ev.sha}
 			sim.enqueue(group, cancel, r)
 			enq = append(enq, enqueued{group, r})
@@ -677,13 +680,11 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 		for _, e := range enq {
 			seen[e.group]++
 		}
-		if len(seen) != 10 {
-			t.Fatalf("per-commit fast/build evidence must occupy 10 distinct groups (one per SHA); got %d: %v", len(seen), seen)
+		if len(seen) != 1 {
+			t.Fatalf("trunk pushes must coalesce into one per-ref group; got %d: %v", len(seen), seen)
 		}
-		for _, e := range enq {
-			if e.run.status != "running" {
-				t.Fatalf("run %s in group %s must remain running; got %s", e.run.name, e.group, e.run.status)
-			}
+		if enq[0].run.status != "running" {
+			t.Fatalf("the first trunk push must run; got %s", enq[0].run.status)
 		}
 	})
 
