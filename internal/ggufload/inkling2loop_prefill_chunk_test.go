@@ -124,6 +124,9 @@ func TestInkling2PrefillChunkUnsetMatchesTrunk(t *testing.T) {
 	logged := captureInk2Log(t)
 	unsetInk2Chunk(t)
 	resetInk2ScalarWide(t)
+	// spec decode defaults on and widens the ring to the batched shape by itself,
+	// so the batched knob alone only decides the trunk caps with spec pinned off
+	t.Setenv("FAK_INKLING2_SPEC", "0")
 	if got := inkling2PrefillChunkWanted(os.LookupEnv); got != 512 {
 		t.Fatalf("unset chunk = %d, want 512", got)
 	}
