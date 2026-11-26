@@ -2498,7 +2498,7 @@ Copyright 2026 KVCache.AI. Licensed under the Apache License, Version 2.0.
 
 ## Splash
 
-Portions of this product are adapted from Splash: https://github.com/incoai/splash, at revisions 2afc7337aacc044722fa95e4cb3da75c281a19a8 and 6c6002d42aabdddb9e31b96c9bba9041e2fba29f. Changes were made.
+Techniques in this product's own source are adapted from Splash: https://github.com/incoai/splash, at revisions 2afc7337aacc044722fa95e4cb3da75c281a19a8 and 6c6002d42aabdddb9e31b96c9bba9041e2fba29f. Changes were made.
 
 ```text
                                  Apache License

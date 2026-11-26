@@ -16,7 +16,7 @@
 // verifies here must take its plain steps here too.
 //
 // The MMA form keeps every operand in registers: the register MMA pattern of
-// third_party/inklingmetal sgmatrix.h (incoai/splash@2afc7337, Apache-2.0).
+// incoai/splash@2afc7337 runtime/metal/kernels/common/sgmatrix.h (Apache-2.0).
 // Lane l holds elements (fm, fn) and (fm, fn+1) of each fragment, so it
 // decodes the 16 columns of weight row fm at 16*(fn/2) in the group, and those
 // weights feed the group's 8 MMAs in pairs.
