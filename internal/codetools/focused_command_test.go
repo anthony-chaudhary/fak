@@ -33,6 +33,60 @@ func TestFocusedCommandAllowlist(t *testing.T) {
 	}
 }
 
+func TestFocusedCommandOrientationForms(t *testing.T) {
+	for _, command := range []string{
+		"ls",
+		"ls -la",
+		"ls -la internal/codetools",
+		"ls ./internal",
+		"pwd",
+		"git status",
+		"git status --short --branch",
+		"git log --oneline -3",
+		"go build ./...",
+		"go build -tags=fast ./internal/codetools",
+		"go vet ./internal/codetools",
+		"go version",
+		"go list ./...",
+		"gofmt -l .",
+		"gofmt -d internal/codetools/bash.go",
+	} {
+		if !focusedCommandAllowed(command) {
+			t.Errorf("focusedCommandAllowed(%q)=false", command)
+		}
+	}
+	for _, command := range []string{
+		"ls /etc",
+		"ls ..",
+		"ls internal/../../x",
+		"ls C:/Users",
+		"gofmt -w x.go",
+		"gofmt x.go",
+		"gofmt -l",
+		"go run ./x",
+		"go install ./x",
+		"go generate ./...",
+		"go get example.com/x",
+		"go build -o x ./cmd/x",
+		"go vet -vettool=./x ./...",
+		"go",
+		"git",
+		"git log --output=x",
+		"git push",
+		"git commit -m x",
+		"ls && pwd",
+		"pwd; rm -rf x",
+		"go build ./... | tee x",
+		"rm x",
+		"mv a b",
+		"curl http://example.com",
+	} {
+		if focusedCommandAllowed(command) {
+			t.Errorf("focusedCommandAllowed(%q)=true", command)
+		}
+	}
+}
+
 func TestFocusedToolsetReturnsTypedCommandDenial(t *testing.T) {
 	ts, err := New(Config{Root: t.TempDir(), FocusedCommands: true})
 	if err != nil {
