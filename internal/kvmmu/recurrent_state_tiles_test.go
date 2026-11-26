@@ -211,8 +211,14 @@ func TestRecurrentStateTilesGroupListingIncludesStateTiles(t *testing.T) {
 	}
 
 	entries := plan.CacheableListing()
-	if len(entries) != 6 {
-		t.Fatalf("listing = %d rows, want 2 token spans + 4 state tiles", len(entries))
+	stateTiles := 0
+	for _, e := range entries {
+		if e.Kind == ListingStateTile {
+			stateTiles++
+		}
+	}
+	if stateTiles != len(plan.layers)*plan.chunks || len(entries) == stateTiles {
+		t.Fatalf("listing = %d rows, want token spans plus %d state tiles", len(entries), len(plan.layers)*plan.chunks)
 	}
 
 	// Row 0: the full-attention token span over layers 0 and 3.

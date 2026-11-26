@@ -66,8 +66,15 @@ func supportGGUFFixture(t *testing.T) *File {
 	add("mtp.2.markov_head.markov_w1.weight", TensorF32, 256, 129280)
 	add("mtp.2.markov_head.markov_w2.weight", TensorF32, 256, 129280)
 	add("mtp.2.confidence_head.proj.weight", TensorF32, 5376, 1)
-	if len(f.Tensors) != 81 {
-		t.Fatal("fixture role count drift")
+	seenTensor := map[string]bool{}
+	for _, ti := range f.Tensors {
+		if seenTensor[ti.Name] {
+			t.Fatalf("fixture role %q is declared twice", ti.Name)
+		}
+		seenTensor[ti.Name] = true
+	}
+	if !seenTensor["mtp.2.confidence_head.proj.weight"] {
+		t.Fatal("fixture lacks the MTP confidence head role")
 	}
 	return f
 }

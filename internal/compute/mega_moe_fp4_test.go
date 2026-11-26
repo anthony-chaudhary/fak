@@ -358,8 +358,8 @@ func TestMegaMoeFP4TokenBucketTactics(t *testing.T) {
 			ids[id]++
 		}
 	}
-	if len(ids) != 8 {
-		t.Fatalf("tactic table covers %d distinct ids, want 8", len(ids))
+	if want := len(megaMoeFP4ReferenceEnvelopes) * 4; len(ids) != want {
+		t.Fatalf("tactic table covers %d distinct ids, want envelopes x 4 buckets = %d", len(ids), len(megaMoeFP4ReferenceEnvelopes)*4)
 	}
 	a, _ := tacticFor(megaMoeFP4ReferenceEnvelopes[0], 8)
 	b, _ := tacticFor(megaMoeFP4ReferenceEnvelopes[0], 8)

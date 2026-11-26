@@ -222,7 +222,7 @@ func TestTuneRecordsExecutionAndTimingFailuresUnderSignTest(t *testing.T) {
 			t.Fatalf("selected %q, want fast", got)
 		}
 		st := resultByID(report.Profiles[0].Candidates, "fast").SignTest
-		if st == nil || !st.Leads || st.Rounds != 7 || st.Ahead != 7 || len(st.Ratios) != 7 || st.Wealth*alpha < 1 {
+		if st == nil || !st.Leads || st.Rounds != 7 || st.Ahead != 7 || len(st.Ratios) != st.Rounds || st.Wealth*alpha < 1 {
 			t.Fatalf("sign test receipt = %+v, want a lead after seven rounds all ahead", st)
 		}
 		for i, ratio := range st.Ratios {

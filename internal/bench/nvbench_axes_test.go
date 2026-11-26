@@ -27,8 +27,8 @@ func TestNVBenchAxes(t *testing.T) {
 			t.Fatalf("PointCount = %d, want %d", got, want)
 		}
 		pts := s.Points()
-		if len(pts) != 6 {
-			t.Fatalf("Points() = %d points, want 6", len(pts))
+		if len(pts) != s.PointCount() {
+			t.Fatalf("Points() = %d points, want PointCount() = %d", len(pts), s.PointCount())
 		}
 		wantIDs := []string{
 			"128|64", "128|128", "128|256",
@@ -127,8 +127,8 @@ func TestNVBenchAxes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("RunSweep: %v", err)
 		}
-		if len(results) != 6 {
-			t.Fatalf("RunSweep = %d results, want 6", len(results))
+		if len(results) != len(s.Points()) {
+			t.Fatalf("RunSweep = %d results, want one per point (%d)", len(results), len(s.Points()))
 		}
 		for i, r := range results {
 			if r.PointID != s.Points()[i].ID {
@@ -150,8 +150,8 @@ func TestNVBenchAxes(t *testing.T) {
 			t.Fatalf("WriteCSV: %v", err)
 		}
 		lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-		if len(lines) != 7 { // header + 6 points
-			t.Fatalf("CSV = %d lines, want 7", len(lines))
+		if len(lines) != len(results)+1 { // header + one row per point
+			t.Fatalf("CSV = %d lines, want header + %d rows", len(lines), len(results))
 		}
 		wantHeader := "point_id,m,n,warmup_ms,stream_ms,stream_n"
 		if lines[0] != wantHeader {

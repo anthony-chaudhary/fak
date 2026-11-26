@@ -128,7 +128,7 @@ func TestSiluMulFp8QuantMatchesOracle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SiluMulFp8QuantRow returned %v, want nil", err)
 		}
-		if len(codes) != 300 || len(scales) != 3 {
+		if len(codes) != hidden || len(scales) != (hidden+127)/128 {
 			t.Fatalf("got %d codes / %d scales, want 300 / 3",
 				len(codes), len(scales))
 		}

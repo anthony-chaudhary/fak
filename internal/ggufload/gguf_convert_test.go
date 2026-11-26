@@ -105,7 +105,7 @@ func TestConvertGGUFKQuant(t *testing.T) {
 				t.Fatal("converted matrix differs from row encoder")
 			}
 			decoded, _, err := loaded.TensorF32("matrix")
-			if err != nil || len(decoded) != 512 {
+			if err != nil || len(decoded) != len(row) {
 				t.Fatalf("reload %d: %v", len(decoded), err)
 			}
 			if _, err := ConvertGGUF(t.Context(), input, output, typ); err == nil {

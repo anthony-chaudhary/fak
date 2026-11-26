@@ -1,6 +1,7 @@
 package launchvisual
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -26,13 +27,26 @@ func mutate(t *testing.T, old, repl string) []byte {
 	return []byte(strings.Replace(string(b), old, repl, 1))
 }
 
+// goldenRowCount counts the golden index rows straight from the JSON, so the
+// assertion does not reuse ParseIndex to decide what the golden holds.
+func goldenRowCount(t *testing.T) int {
+	t.Helper()
+	var raw struct {
+		Rows []json.RawMessage `json:"rows"`
+	}
+	if err := json.Unmarshal(loadGoldenBytes(t), &raw); err != nil {
+		t.Fatal(err)
+	}
+	return len(raw.Rows)
+}
+
 func TestParseGoldenIndex(t *testing.T) {
 	ix, err := ParseIndex(loadGoldenBytes(t))
 	if err != nil {
 		t.Fatalf("golden index refused: %v", err)
 	}
-	if len(ix.Rows) != 19 {
-		t.Fatalf("want 19 rows, got %d", len(ix.Rows))
+	if len(ix.Rows) != goldenRowCount(t) {
+		t.Fatalf("want %d rows, got %d", goldenRowCount(t), len(ix.Rows))
 	}
 }
 

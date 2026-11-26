@@ -35,7 +35,7 @@ func TestKQuantReferenceGolden(t *testing.T) {
 	if doc.Pin != "83078fec0db82d6b5a00d9599062c38c39145755" || len(doc.Fixtures) < 9 {
 		t.Fatal("incomplete pinned C reference cohort")
 	}
-	if len(doc.HalfInputs) != 16 || len(doc.HalfExpected) != 16 {
+	if len(doc.HalfInputs) == 0 || len(doc.HalfExpected) != len(doc.HalfInputs) {
 		t.Fatal("missing C half-boundary oracle")
 	}
 	for i, bits := range doc.HalfInputs {

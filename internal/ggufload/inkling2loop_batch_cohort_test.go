@@ -765,7 +765,7 @@ func TestInkling2CohortMixedPrefillLongRowFirstShortRowNotStarved(t *testing.T) 
 	got := make([][]int, 2)
 	reqs := fakeInk2MixedCohortOrder(nil, &events, got, true)
 	for i := range reqs {
-		if len(reqs[i].Prompt) == 20 {
+		if len(reqs[i].Prompt) < inkling2PrefillChunk {
 			emit := reqs[i].Emit
 			reqs[i].Emit = func(tok int) bool {
 				if shortFirstAt < 0 {

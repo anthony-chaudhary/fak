@@ -1,6 +1,8 @@
 package inklingmetal
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -67,7 +69,7 @@ func TestPrefixReserve(t *testing.T) {
 
 func TestPrefixKeySeparatesEveryField(t *testing.T) {
 	base := PrefixKey{Model: "/m.gguf", Draft: "/d", ModelBytes: 1, ModelModified: 2, DraftModified: 3, Layers: 48, KVFormat: 1, StateFormat: 2, ChunkRows: 2048, DraftWindow: 2048, Scope: "run"}
-	if base.String() != base.String() || len(base.String()) != 64 {
+	if base.String() != base.String() || len(base.String()) != hex.EncodedLen(sha256.Size) {
 		t.Fatalf("unstable key %q", base.String())
 	}
 	seen := map[string]string{base.String(): "base"}

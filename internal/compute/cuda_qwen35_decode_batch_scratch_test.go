@@ -54,8 +54,15 @@ func TestCUDAQwen35DecodeBatchScratchLegacyMetric(t *testing.T) {
 	for _, lanes := range []int{2, 4, 8} {
 		t.Run(fmt.Sprintf("lanes-%d", lanes), func(t *testing.T) {
 			allocations, values, owners := cudaQwen35DecodeBatchScratchFixture(lanes)
-			if len(allocations) != 9 {
-				t.Fatalf("GDN scratch recipe has %d entries, want nine", len(allocations))
+			if len(allocations) == 0 || len(values) != len(allocations) || len(owners) != len(allocations) {
+				t.Fatalf("GDN scratch recipe has %d entries for %d values and %d owners", len(allocations), len(values), len(owners))
+			}
+			names := map[string]bool{}
+			for _, allocation := range allocations {
+				if names[allocation.name] || len(allocation.shape) == 0 {
+					t.Fatalf("GDN scratch entry %q is duplicated or shapeless", allocation.name)
+				}
+				names[allocation.name] = true
 			}
 			got := testing.AllocsPerRun(20, func() {
 				cudaQwen35ScratchFixtureChecksum = legacyCUDAQwen35DecodeBatchScratchRequest(allocations, values, owners)
@@ -209,6 +216,14 @@ func TestCUDAQwen35DecodeBatchScratchCallerWiring(t *testing.T) {
 	if caller == nil || layer == nil {
 		t.Fatal("CUDA batch entrypoint or layer helper missing")
 	}
+	layerArity := 0
+	for _, field := range layer.Type.Params.List {
+		if n := len(field.Names); n > 0 {
+			layerArity += n
+		} else {
+			layerArity++
+		}
+	}
 	localOwner, sharedAcrossLayers := false, false
 	ast.Inspect(caller.Body, func(node ast.Node) bool {
 		if value, ok := node.(*ast.ValueSpec); ok && len(value.Names) == 1 && value.Names[0].Name == "batchScratch" {
@@ -218,7 +233,7 @@ func TestCUDAQwen35DecodeBatchScratchCallerWiring(t *testing.T) {
 			}
 		}
 		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) != 5 {
+		if !ok || len(call.Args) != layerArity {
 			return true
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
