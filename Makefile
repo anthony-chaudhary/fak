@@ -168,6 +168,8 @@ test-durations:
 # is refused, not wedged. Pair with `make test-affected` for the REAL (no -short) oracle
 # on the packages your change can reach: race everywhere (short) + oracle on what you
 # touched, without the CI round-trip. See docs/testing/race-detector.md.
+# test-race is local-only: its -timeout=25m is not the CI unit bound, which is
+# 12m inside a 15m job (see docs/testing/race-detector.md).
 test-race:
 	@command -v cc >/dev/null 2>&1 && cc --version >/dev/null 2>&1 || { \
 		echo "test-race: BLOCKED -- no working C compiler (cc); the Go race detector needs cgo (CGO_ENABLED=1)." >&2; \

@@ -1833,18 +1833,19 @@ jobs:
   # so this is the reproducible home of the "race-free" claim. See
   # docs/testing/race-detector.md for how to run it locally (WSL/Linux/macOS).
   #
-  # LEG BUDGET: a leg's measured go test step is sized to ~200 s so the unit fits
-  # the 5 min wall budget (setup included) with margin. Legs are the `legs` table
-  # in the shard step: a package split over several legs is cut into prefix
-  # buckets of its Test/Example names (-run ^(...)), and its last leg is a -skip
-  # complement of the others, so no test can fall through; the rest-N legs are a
-  # greedy bin-pack over every other package in `go list` order, costed by
-  # .github/race-package-costs.tsv (measured seconds, apportioned by test count;
-  # unknown packages get RACE_DEFAULT_COST). A new package is still covered
-  # without editing this table.
-  # RACE BUILD CACHE: a restore-only ~/.cache/go-build keyed on go.mod, saved by
-  # the single fak-01 leg on trunk pushes only, so legs reuse the std and package
-  # race compiles instead of cold-compiling each time.
+  # UNIT BUDGET: every matrix entry is a unit whose predicted wall (overhead, the
+  # per-unit compile charge of a shard or the per-bucket compile charge of a split
+  # package, then its -p=1 race test time) stays within RACE_UNIT_BUDGET_S. Packages
+  # are costed by .github/race-package-weights.json and packed into shards by
+  # cmd/cifastshard; a package too heavy for one unit runs as disjoint `-run`
+  # buckets of its own `go test -race -list` names. Generated:
+  #   go run ./cmd/cifastshard plan -weights .github/race-package-weights.json   #     -unit-budget 660 -parallel 1 -overhead 100 -bucket-skew 1.3 -auto-split   #     -max-parallel 12 -shards 28 -matrix
+  # TestCommittedRacePlanFitsBudget fails when the matrix drifts from that output.
+  # The total budget is the interim frontier choice (see the unit-wall plan report):
+  # no budget met the summed and makespan caps, so the smallest summed among the
+  # budgets whose slowest unit plus the 120 s tail fits 900 s was taken.
+  # RACE BUILD CACHE: restore-only, keyed on go.mod (the immutable base key). Only
+  # the shard-1 unit saves it, and only from a trunk push.
   race-detector:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
@@ -1852,166 +1853,99 @@ jobs:
       run_id: ${{ steps.source.outputs.run_id }}
       run_attempt: ${{ steps.source.outputs.run_attempt }}
     if: github.event_name != 'workflow_dispatch'
-    name: race detector · go test -race (${{ matrix.shard }})
+    name: race detector · go test -race (${{ matrix.split && format('{0} bucket {1}/{2}', matrix.split, matrix.bucket, matrix.buckets) || format('shard {0}/{1}', matrix.shard, matrix.shards) }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     # Race is the most expensive gate and trunk pushes arrive faster than one
-    # run's legs can drain, so per-leg concurrency without cancel-in-progress
+    # run's units can drain, so per-unit concurrency without cancel-in-progress
     # keeps one running + one pending leg per shard per ref; a newer push replaces
     # the stale pending leg, so the race verdict rolls up to the trunk tip and a
     # superseded commit's race-detector reads cancelled (ci-provenance then
     # refuses it as incomplete, never a false green). max-parallel leaves slots
     # free for build-vet-test, ci-fast and head-snapshot-build.
     concurrency:
-      group: race-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}-${{ matrix.shard }}
+      group: race-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}-${{ matrix.shard || format('{0}-{1}', matrix.split, matrix.bucket) }}
       cancel-in-progress: false
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 12
       matrix:
-        shard:
-          - fak-01
-          - fak-02
-          - fak-03
-          - fak-04
-          - fak-05
-          - fak-06
-          - fak-07
-          - fak-08
-          - fak-09
-          - fak-10
-          - fak-11
-          - fak-12
-          - fak-13
-          - fak-14
-          - fak-15
-          - fak-16
-          - fak-17
-          - fak-18
-          - fak-19
-          - fak-20
-          - fak-21
-          - fak-22
-          - fak-23
-          - fak-24
-          - fak-25
-          - fak-26
-          - model-01
-          - model-02
-          - model-03
-          - model-04
-          - model-05
-          - model-06
-          - model-07
-          - model-08
-          - model-09
-          - model-10
-          - model-11
-          - model-12
-          - model-13
-          - model-14
-          - model-15
-          - model-16
-          - model-17
-          - model-18
-          - agent-01
-          - agent-02
-          - agent-03
-          - agent-04
-          - agent-05
-          - compute-01
-          - compute-02
-          - compute-03
-          - turnbench-01
-          - turnbench-02
-          - turnbench-03
-          - turnbench-04
-          - branchrole-01
-          - branchrole-02
-          - branchrole-03
-          - branchrole-04
-          - branchrole-05
-          - branchrole-06
-          - branchrole-07
-          - branchrole-08
-          - branchrole-09
-          - branchrole-10
-          - branchrole-11
-          - branchrole-12
-          - branchrole-13
-          - branchrole-14
-          - branchrole-15
-          - branchrole-16
-          - branchrole-17
-          - branchrole-18
-          - deepseekv4moe-01
-          - deepseekv4moe-02
-          - deepseekv4moe-03
-          - deepseekv4moe-04
-          - hooks-01
-          - hooks-02
-          - hooks-03
-          - devcmd-01
-          - devcmd-02
-          - devcmd-03
-          - modelengine-01
-          - modelengine-02
-          - modelengine-03
-          - modelengine-04
-          - devindex-01
-          - devindex-02
-          - devindex-03
-          - codelint-01
-          - codelint-02
-          - codelint-03
-          - codelint-04
-          - architest-01
-          - architest-02
-          - architest-03
-          - taskrun-01
-          - taskrun-02
-          - taskrun-03
-          - conceptcatalog-01
-          - conceptcatalog-02
-          - windowgate-01
-          - windowgate-02
-          - computebuild-01
-          - computebuild-02
-          - computebuild-03
-          - buildwitness-01
-          - gateway-01
-          - gateway-02
-          - gateway-03
-          - rest-0
-          - rest-1
-          - rest-2
-          - rest-3
-          - rest-4
-          - rest-5
-          - rest-6
-          - rest-7
-          - rest-8
-          - rest-9
-          - rest-10
-          - rest-11
-          - rest-12
-          - rest-13
-          - rest-14
-          - rest-15
-          - rest-16
-          - rest-17
-          - rest-18
-          - rest-19
-          - rest-20
-          - rest-21
-          - rest-22
-          - rest-23
-          - rest-24
-          - rest-25
-          - rest-26
-          - rest-27
-          - rest-28
-          - rest-29
+        include:
+          - { shard: 1, shards: 28 }
+          - { shard: 2, shards: 28 }
+          - { shard: 3, shards: 28 }
+          - { shard: 4, shards: 28 }
+          - { shard: 5, shards: 28 }
+          - { shard: 6, shards: 28 }
+          - { shard: 7, shards: 28 }
+          - { shard: 8, shards: 28 }
+          - { shard: 9, shards: 28 }
+          - { shard: 10, shards: 28 }
+          - { shard: 11, shards: 28 }
+          - { shard: 12, shards: 28 }
+          - { shard: 13, shards: 28 }
+          - { shard: 14, shards: 28 }
+          - { shard: 15, shards: 28 }
+          - { shard: 16, shards: 28 }
+          - { shard: 17, shards: 28 }
+          - { shard: 18, shards: 28 }
+          - { shard: 19, shards: 28 }
+          - { shard: 20, shards: 28 }
+          - { shard: 21, shards: 28 }
+          - { shard: 22, shards: 28 }
+          - { shard: 23, shards: 28 }
+          - { shard: 24, shards: 28 }
+          - { shard: 25, shards: 28 }
+          - { shard: 26, shards: 28 }
+          - { shard: 27, shards: 28 }
+          - { shard: 28, shards: 28 }
+          - { split: ./cmd/fak, bucket: 1, buckets: 8 }
+          - { split: ./cmd/fak, bucket: 2, buckets: 8 }
+          - { split: ./cmd/fak, bucket: 3, buckets: 8 }
+          - { split: ./cmd/fak, bucket: 4, buckets: 8 }
+          - { split: ./cmd/fak, bucket: 5, buckets: 8 }
+          - { split: ./cmd/fak, bucket: 6, buckets: 8 }
+          - { split: ./cmd/fak, bucket: 7, buckets: 8 }
+          - { split: ./cmd/fak, bucket: 8, buckets: 8 }
+          - { split: ./internal/agent, bucket: 1, buckets: 2 }
+          - { split: ./internal/agent, bucket: 2, buckets: 2 }
+          - { split: ./internal/agentbench/taskrun, bucket: 1, buckets: 2 }
+          - { split: ./internal/agentbench/taskrun, bucket: 2, buckets: 2 }
+          - { split: ./internal/architest, bucket: 1, buckets: 2 }
+          - { split: ./internal/architest, bucket: 2, buckets: 2 }
+          - { split: ./internal/branchrole, bucket: 1, buckets: 4 }
+          - { split: ./internal/branchrole, bucket: 2, buckets: 4 }
+          - { split: ./internal/branchrole, bucket: 3, buckets: 4 }
+          - { split: ./internal/branchrole, bucket: 4, buckets: 4 }
+          - { split: ./internal/codelint, bucket: 1, buckets: 2 }
+          - { split: ./internal/codelint, bucket: 2, buckets: 2 }
+          - { split: ./internal/computebuild, bucket: 1, buckets: 2 }
+          - { split: ./internal/computebuild, bucket: 2, buckets: 2 }
+          - { split: ./internal/conceptcatalog, bucket: 1, buckets: 1 }
+          - { split: ./internal/deepseekv4moe, bucket: 1, buckets: 3 }
+          - { split: ./internal/deepseekv4moe, bucket: 2, buckets: 3 }
+          - { split: ./internal/deepseekv4moe, bucket: 3, buckets: 3 }
+          - { split: ./internal/devcmd, bucket: 1, buckets: 2 }
+          - { split: ./internal/devcmd, bucket: 2, buckets: 2 }
+          - { split: ./internal/devindex, bucket: 1, buckets: 2 }
+          - { split: ./internal/devindex, bucket: 2, buckets: 2 }
+          - { split: ./internal/gateway, bucket: 1, buckets: 2 }
+          - { split: ./internal/gateway, bucket: 2, buckets: 2 }
+          - { split: ./internal/hooks, bucket: 1, buckets: 2 }
+          - { split: ./internal/hooks, bucket: 2, buckets: 2 }
+          - { split: ./internal/model, bucket: 1, buckets: 6 }
+          - { split: ./internal/model, bucket: 2, buckets: 6 }
+          - { split: ./internal/model, bucket: 3, buckets: 6 }
+          - { split: ./internal/model, bucket: 4, buckets: 6 }
+          - { split: ./internal/model, bucket: 5, buckets: 6 }
+          - { split: ./internal/model, bucket: 6, buckets: 6 }
+          - { split: ./internal/modelengine, bucket: 1, buckets: 2 }
+          - { split: ./internal/modelengine, bucket: 2, buckets: 2 }
+          - { split: ./internal/turnbench, bucket: 1, buckets: 3 }
+          - { split: ./internal/turnbench, bucket: 2, buckets: 3 }
+          - { split: ./internal/turnbench, bucket: 3, buckets: 3 }
+          - { split: ./internal/windowgate, bucket: 1, buckets: 2 }
+          - { split: ./internal/windowgate, bucket: 2, buckets: 2 }
     env:
       GOTOOLCHAIN: auto
       # Keep race compilation under the same hosted-runner process ceiling.
@@ -2020,6 +1954,10 @@ jobs:
       # Set explicitly so the job FAILS LOUDLY if it ever lands on a cgo-less
       # image, instead of silently building a non-instrumented (race-blind) binary.
       CGO_ENABLED: "1"
+      # Planner inputs for the matrix (see the UNIT BUDGET note above).
+      RACE_UNIT_OVERHEAD_S: "100"
+      RACE_UNIT_BUDGET_S: "660"
+      RACE_SPLIT_PACKAGES: "./cmd/fak ./internal/agent ./internal/agentbench/taskrun ./internal/architest ./internal/branchrole ./internal/codelint ./internal/computebuild ./internal/conceptcatalog ./internal/deepseekv4moe ./internal/devcmd ./internal/devindex ./internal/gateway ./internal/hooks ./internal/model ./internal/modelengine ./internal/turnbench ./internal/windowgate"
     defaults:
       run:
         working-directory: .
@@ -2046,7 +1984,7 @@ jobs:
           [[ "$sha" == "$GITHUB_SHA" ]]
           go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
 
-      - name: restore race build cache (restore-only; legs never save)
+      - name: restore race build cache (restore-only; units never save)
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
@@ -2062,196 +2000,86 @@ jobs:
         shell: bash
         env:
           SHARD: ${{ matrix.shard }}
-          RACE_REST_SHARDS: "30"
-          RACE_DEFAULT_COST: "10"
+          SHARDS: ${{ matrix.shards }}
+          SPLIT: ${{ matrix.split }}
+          BUCKET: ${{ matrix.bucket }}
+          BUCKETS: ${{ matrix.buckets }}
         run: |
           set -euo pipefail
-          mod=$(go list -m)
-          # One entry per leg: "<shard> <packages,comma> <-run regex|-> <-skip regex|->".
-          # Every package lands in exactly one leg; the rest-N legs take the others.
-          legs=(
-            'fak-01 cmd/fak ^(TestAs|TestCodexF|TestCodexP|TestComb|TestDispatchO|TestDispatchT|TestDispatche|TestEP|TestEv|TestGuardN|TestRew|TestSl) -'
-            'fak-02 cmd/fak ^(TestAM|TestCI|TestCa|TestCodexM|TestCos|TestCronC|TestDif|TestDispatchWo|TestEl|TestHo|TestRunM) -'
-            'fak-03 cmd/fak ^(TestAJ|TestAS|TestBg|TestDen|TestDet|TestDr|TestFp|TestGi|TestK|TestOp|TestRem|TestRunG) -'
-            'fak-04 cmd/fak ^(TestAb|TestAw|TestBa|TestBo|TestCodexL|TestDispatchE|TestEm|TestGH|TestHI|TestOu|TestRunC|TestSe) ^TestServeNativeContextAutoAdmitsLongNativeHTTP$'
-            'fak-05 cmd/fak ^(TestAB|TestAW|TestAg|TestAm|TestCodexS|TestComm|TestCronE|TestDispatchWi|TestGuardB|TestLL|TestRunH|TestRunN) -'
-            'fak-06 cmd/fak ^(TestAN|TestCR|TestCodexO|TestCronR|TestDer|TestDia|TestInK|TestNa|TestPa|TestRen|TestRunR|TestRunU) -'
-            'fak-07 cmd/fak ^(TestAf|TestClau|TestCm|TestCodes|TestDec|TestDed|TestDisc|TestGC|TestRea|TestRef|TestT) -'
-            'fak-08 cmd/fak ^(TestAR|TestBi|TestCronT|TestDispatchH|TestGr|TestLe|TestLow|TestPo|TestPr|TestRW|TestRo|TestRunF) -'
-            'fak-09 cmd/fak ^(TestDispatchP|TestEn|TestFr|TestInk|TestInt|TestLog|TestPu|TestRunB|TestRunL|TestSh|TestV) -'
-            'fak-10 cmd/fak ^(TestAn|TestBr|TestDev|TestDo|TestGuardI|TestGuardQ|TestGuardT|TestLS|TestPi|TestRung|TestSk|TestSt) -'
-            'fak-11 cmd/fak ^(TestAT|TestBe|TestCh|TestCodeQ|TestCronF|TestGP|TestGuardP|TestGuarde|TestPS|TestPe|TestRunP) -'
-            'fak-12 cmd/fak ^(TestClas|TestClu|TestCodeb|TestDispatchI|TestGuardR|TestH2|TestRes|TestRunS|TestRunW|TestSa|TestSn|TestW) -'
-            'fak-13 cmd/fak ^(TestAC|TestAD|TestAu|TestCodexD|TestCu|TestDispatchC|TestDispatchL|TestInc|TestInj|TestMe|TestRel|TestReq) -'
-            'fak-14 cmd/fak ^(TestAl|TestBl|TestCor|TestDeb|TestDispatchB|TestFu|TestGG|TestGuardA|TestGuardH|TestGuardO|TestLa|TestRunQ) -'
-            'fak-15 cmd/fak ^(TestCodexE|TestDem|TestDispatchF|TestDispatchM|TestGa|TestLoa|TestLoo|TestRed|TestReg|TestRunA|TestRunT) -'
-            'fak-16 cmd/fak ^(TestAL|TestCe|TestCodexH|TestCoo|TestDisa|TestDispW|TestDispatchV|TestEx|TestGuardF|TestHa|TestInf|TestRev) -'
-            'fak-17 cmd/fak ^(TestCL|TestCle|TestCodexR|TestCronH|TestDef|TestFi|TestFo|TestMC|TestOr|TestRa|TestRunO) -'
-            'fak-18 cmd/fak ^(TestAd|TestComp|TestCre|TestCronP|TestGe|TestIns|TestLi|TestOn|TestRec|TestRuns|TestSi|TestSy) -'
-            'fak-19 cmd/fak ^(E|TestAP|TestAt|TestBu|TestCodexC|TestCra|TestEg|TestGl|TestHu|TestIs|TestNe|TestRw) -'
-            'fak-20 cmd/fak ^(TestAv|TestCi|TestCronA|TestDispatchS|TestEs|TestFl|TestGuardD|TestGuardM|TestGuardU|TestNo|TestRunV) -'
-            'fak-21 cmd/fak ^(TestAr|TestCodexW|TestDispatchA|TestDispatchD|TestGuardJ|TestGuardL|TestId|TestIne|TestMa|TestOv|TestRunI|TestSp) -'
-            'fak-22 cmd/fak ^(TestClai|TestCodexU|TestCol|TestDispatchG|TestDispatchWa|TestEd|TestGuardW|TestMo|TestNi|TestQ|TestSo|TestSw) -'
-            'fak-23 cmd/fak ^(TestAc|TestCon|TestDispatchR|TestDispatchWe|TestDu|TestEf|TestGuardE|TestML|TestOb|TestPR|TestRep|TestRunD) -'
-            'fak-24 cmd/fak ^(TestAp|TestClam|TestCronU|TestFa|TestFe|TestGo|TestGuardC|TestGuardG|TestHe|TestPl|TestSu) -'
-            'fak-25 cmd/fak - ^(E|TestAB|TestAC|TestAD|TestAJ|TestAL|TestAM|TestAN|TestAP|TestAR|TestAS|TestAT|TestAW|TestAb|TestAc|TestAd|TestAf|TestAg|TestAl|TestAm|TestAn|TestAp|TestAr|TestAs|TestAt|TestAu|TestAv|TestAw|TestBa|TestBe|TestBg|TestBi|TestBl|TestBo|TestBr|TestBu|TestCI|TestCL|TestCR|TestCa|TestCe|TestCh|TestCi|TestClai|TestClam|TestClas|TestClau|TestCle|TestClu|TestCm|TestCodeQ|TestCodeb|TestCodes|TestCodexC|TestCodexD|TestCodexE|TestCodexF|TestCodexH|TestCodexL|TestCodexM|TestCodexO|TestCodexP|TestCodexR|TestCodexS|TestCodexU|TestCodexW|TestCol|TestComb|TestComm|TestComp|TestCon|TestCoo|TestCor|TestCos|TestCra|TestCre|TestCronA|TestCronC|TestCronE|TestCronF|TestCronH|TestCronP|TestCronR|TestCronT|TestCronU|TestCu|TestDeb|TestDec|TestDed|TestDef|TestDem|TestDen|TestDer|TestDet|TestDev|TestDia|TestDif|TestDisa|TestDisc|TestDispW|TestDispatchA|TestDispatchB|TestDispatchC|TestDispatchD|TestDispatchE|TestDispatchF|TestDispatchG|TestDispatchH|TestDispatchI|TestDispatchL|TestDispatchM|TestDispatchO|TestDispatchP|TestDispatchR|TestDispatchS|TestDispatchT|TestDispatchV|TestDispatchWa|TestDispatchWe|TestDispatchWi|TestDispatchWo|TestDispatche|TestDo|TestDr|TestDu|TestEP|TestEd|TestEf|TestEg|TestEl|TestEm|TestEn|TestEs|TestEv|TestEx|TestFa|TestFe|TestFi|TestFl|TestFo|TestFp|TestFr|TestFu|TestGC|TestGG|TestGH|TestGP|TestGa|TestGe|TestGi|TestGl|TestGo|TestGr|TestGuardA|TestGuardB|TestGuardC|TestGuardD|TestGuardE|TestGuardF|TestGuardG|TestGuardH|TestGuardI|TestGuardJ|TestGuardL|TestGuardM|TestGuardN|TestGuardO|TestGuardP|TestGuardQ|TestGuardR|TestGuardT|TestGuardU|TestGuardW|TestGuarde|TestH2|TestHI|TestHa|TestHe|TestHo|TestHu|TestId|TestInK|TestInc|TestIne|TestInf|TestInj|TestInk|TestIns|TestInt|TestIs|TestK|TestLL|TestLS|TestLa|TestLe|TestLi|TestLoa|TestLog|TestLoo|TestLow|TestMC|TestML|TestMa|TestMe|TestMo|TestNa|TestNe|TestNi|TestNo|TestOb|TestOn|TestOp|TestOr|TestOu|TestOv|TestPR|TestPS|TestPa|TestPe|TestPi|TestPl|TestPo|TestPr|TestPu|TestQ|TestRW|TestRa|TestRea|TestRec|TestRed|TestRef|TestReg|TestRel|TestRem|TestRen|TestRep|TestReq|TestRes|TestRev|TestRew|TestRo|TestRunA|TestRunB|TestRunC|TestRunD|TestRunF|TestRunG|TestRunH|TestRunI|TestRunL|TestRunM|TestRunN|TestRunO|TestRunP|TestRunQ|TestRunR|TestRunS|TestRunT|TestRunU|TestRunV|TestRunW|TestRung|TestRuns|TestRw|TestSa|TestSe|TestSh|TestSi|TestSk|TestSl|TestSn|TestSo|TestSp|TestSt|TestSu|TestSw|TestSy|TestT|TestV|TestW)'
-            'model-01 internal/model ^(TestQ2|TestQG|TestS|TestV41Ch|TestV41Con|TestV41EngramR|TestV41Exa|TestV41ExpertD|TestV41Pu|TestV41St|TestV41Su) -'
-            'model-02 internal/model ^(TestQwen35D|TestQwen35V|TestV41EngramF|TestV41EngramO|TestV41EngramP|TestV41ExpertB|TestV41GroupedD|TestV41IndexerW|TestV41MH|TestV41RoutedI|TestV4F) -'
-            'model-03 internal/model ^(TestP|TestQwenG|TestV41EngramH|TestV41EngramQ|TestV41ExpertC|TestV41HostArmA|TestV41K|TestV41Mo|TestV41RoutedS|TestV41RoutedU|TestV4S) -'
-            'model-04 internal/model ^(TestB|TestQ3|TestQ6|TestQwen35P|TestQwenS|TestU|TestV41CE|TestV41ExpertG|TestV41HostS|TestV41Pre|TestVe|TestY) -'
-            'model-05 internal/model ^(TestF|TestQwen35Q|TestV41De|TestV41EngramL|TestV41EngramM|TestV41Fl|TestV41Fo|TestV41GroupedR|TestV41Ra|TestV41RoutedC|TestVi) -'
-            'model-06 internal/model ^(TestQ8|TestQwen35L|TestQwen35M|TestV41Com|TestV41Cr|TestV41Do|TestV41EngramB|TestV41EngramI|TestV41IndexK|TestV41RoP|TestVa) -'
-            'model-07 internal/model ^(TestD|TestI|TestQd|TestQwen35T|TestV41B|TestV41CP|TestV41El|TestV41Fi|TestV41Pa|TestV41RM|TestVo) -'
-            'model-08 internal/model ^(TestK|TestQwen35C|TestQwen35F|TestQwenC|TestV41A|TestV41Em|TestV41FF|TestV41Fa|TestV41GroupedF|TestV41HostArmS|TestV41Pl|TestV41RoutedA) -'
-            'model-09 internal/model ^(TestA|TestN|TestO|TestQwen35I|TestV41EngramA|TestV41EngramC|TestV41GroupedO|TestV41HostArmC|TestV41IndexS|TestV41V|TestV4D) -'
-            'model-10 internal/model ^(TestH|TestQ4|TestQwen35R|TestV41ExpertS|TestV41ExpertT|TestV41GroupedS|TestV41He|TestV41IndexT|TestV41IndexW|TestV41L|TestV41Ma|TestV4R) -'
-            'model-11 internal/model ^(E|TestQwen35S|TestR|TestV41EngramN|TestV41ExpertN|TestV41Hoo|TestV41HostArmM|TestV41Inc|TestV41Rop|TestV41Se|TestV4C|TestV4E) -'
-            'model-12 internal/model ^(TestQK|TestV41EngramD|TestV41EngramS|TestV41HostArmE|TestV41HostArmH|TestV41IndexM|TestV41Pro|TestV41RoutedH|TestV41Router|TestV4L|TestV4P|TestW) -'
-            'model-13 internal/model ^(TestC|TestM|TestQS|TestV41Ca|TestV41EngramV|TestV41GroupedG|TestV41GroupedW|TestV41IndexO|TestV41IndexerS|TestV41Inv|TestV41RoutedO|TestV41Si) -'
-            'model-14 internal/model ^(TestL|TestQwen2|TestQwen35U|TestT|TestV41FP|TestV41IndexerK|TestV41IndexerO|TestV41Q|TestV41RoutedG|TestV41Sh|TestV4A|TestV4B|TestV4H) -'
-            'model-15 internal/model ^(TestQwen35H|TestV41Col|TestV41EngramT|TestV41Gre|TestV41GroupedP|TestV41Im|TestV41IndexerB|TestV41IndexerP|TestV41RoutedL|TestV41Sc|TestV41T|TestV4G) -'
-            'model-16 internal/model ^(TestG|TestQM|TestQwen35B|TestQwen35G|TestV41ExpertF|TestV41ExpertP|TestV41N|TestV41Re|TestV41RoutedF|TestV41RoutedP|TestV41So|TestV41Sw|TestV41W) -'
-            'model-17 internal/model ^(TestQ5|TestQu|TestQwenH|TestV41Coh|TestV41DS|TestV41EngramG|TestV41Fu|TestV41GroupedT|TestV41O|TestV41Rot|TestV41RoutedE|TestV41Sp) -'
-            'model-18 internal/model - ^(E|TestA|TestB|TestC|TestD|TestF|TestG|TestH|TestI|TestK|TestL|TestM|TestN|TestO|TestP|TestQ2|TestQ3|TestQ4|TestQ5|TestQ6|TestQ8|TestQG|TestQK|TestQM|TestQS|TestQd|TestQu|TestQwen2|TestQwen35B|TestQwen35C|TestQwen35D|TestQwen35F|TestQwen35G|TestQwen35H|TestQwen35I|TestQwen35L|TestQwen35M|TestQwen35P|TestQwen35Q|TestQwen35R|TestQwen35S|TestQwen35T|TestQwen35U|TestQwen35V|TestQwenC|TestQwenG|TestQwenH|TestQwenS|TestR|TestS|TestT|TestU|TestV41A|TestV41B|TestV41CE|TestV41CP|TestV41Ca|TestV41Ch|TestV41Coh|TestV41Col|TestV41Com|TestV41Con|TestV41Cr|TestV41DS|TestV41De|TestV41Do|TestV41El|TestV41Em|TestV41EngramA|TestV41EngramB|TestV41EngramC|TestV41EngramD|TestV41EngramF|TestV41EngramG|TestV41EngramH|TestV41EngramI|TestV41EngramL|TestV41EngramM|TestV41EngramN|TestV41EngramO|TestV41EngramP|TestV41EngramQ|TestV41EngramR|TestV41EngramS|TestV41EngramT|TestV41EngramV|TestV41Exa|TestV41ExpertB|TestV41ExpertC|TestV41ExpertD|TestV41ExpertF|TestV41ExpertG|TestV41ExpertN|TestV41ExpertP|TestV41ExpertS|TestV41ExpertT|TestV41FF|TestV41FP|TestV41Fa|TestV41Fi|TestV41Fl|TestV41Fo|TestV41Fu|TestV41Gre|TestV41GroupedD|TestV41GroupedF|TestV41GroupedG|TestV41GroupedO|TestV41GroupedP|TestV41GroupedR|TestV41GroupedS|TestV41GroupedT|TestV41GroupedW|TestV41He|TestV41Hoo|TestV41HostArmA|TestV41HostArmC|TestV41HostArmE|TestV41HostArmH|TestV41HostArmM|TestV41HostArmS|TestV41HostS|TestV41Im|TestV41Inc|TestV41IndexK|TestV41IndexM|TestV41IndexO|TestV41IndexS|TestV41IndexT|TestV41IndexW|TestV41IndexerB|TestV41IndexerK|TestV41IndexerO|TestV41IndexerP|TestV41IndexerS|TestV41IndexerW|TestV41Inv|TestV41K|TestV41L|TestV41MH|TestV41Ma|TestV41Mo|TestV41N|TestV41O|TestV41Pa|TestV41Pl|TestV41Pre|TestV41Pro|TestV41Pu|TestV41Q|TestV41RM|TestV41Ra|TestV41Re|TestV41RoP|TestV41Rop|TestV41Rot|TestV41RoutedA|TestV41RoutedC|TestV41RoutedE|TestV41RoutedF|TestV41RoutedG|TestV41RoutedH|TestV41RoutedI|TestV41RoutedL|TestV41RoutedO|TestV41RoutedP|TestV41RoutedS|TestV41RoutedU|TestV41Router|TestV41Sc|TestV41Se|TestV41Sh|TestV41Si|TestV41So|TestV41Sp|TestV41St|TestV41Su|TestV41Sw|TestV41T|TestV41V|TestV41W|TestV4A|TestV4B|TestV4C|TestV4D|TestV4E|TestV4F|TestV4G|TestV4H|TestV4L|TestV4P|TestV4R|TestV4S|TestVa|TestVe|TestVi|TestVo|TestW|TestY)'
-            'agent-01 internal/agent ^(TestC|TestH|TestInKernelH|TestInKernelI|TestInKernelK|TestInKernelN|TestInKernelQ|TestInKernelR|TestInKernelT|TestInb|TestInc|TestInd|TestSP|TestW) -'
-            'agent-02 internal/agent ^(TestInKernelO|TestInKernelP|TestInKernelS|TestInKernelV|TestInj|TestN|TestO|TestRa|TestRo|TestSh|TestSi|TestSp|TestSu|TestT) -'
-            'agent-03 internal/agent ^(TestB|TestIm|TestInKernelD|TestInKernelM|TestInf|TestInk|TestInt|TestL|TestP|TestQ|TestRe|TestRu|TestSc) -'
-            'agent-04 internal/agent ^(TestA|TestE|TestF|TestInKernelB|TestInKernelG|TestInKernelL|TestInKernelU|TestIs|TestM|TestSa|TestSe|TestSk|TestSm|TestSt) -'
-            'agent-05 internal/agent - ^(TestA|TestB|TestC|TestE|TestF|TestH|TestIm|TestInKernelB|TestInKernelD|TestInKernelG|TestInKernelH|TestInKernelI|TestInKernelK|TestInKernelL|TestInKernelM|TestInKernelN|TestInKernelO|TestInKernelP|TestInKernelQ|TestInKernelR|TestInKernelS|TestInKernelT|TestInKernelU|TestInKernelV|TestInb|TestInc|TestInd|TestInf|TestInj|TestInk|TestInt|TestIs|TestL|TestM|TestN|TestO|TestP|TestQ|TestRa|TestRe|TestRo|TestRu|TestSP|TestSa|TestSc|TestSe|TestSh|TestSi|TestSk|TestSm|TestSp|TestSt|TestSu|TestT|TestW)'
-            'compute-01 internal/compute ^(TestB|TestK|TestL|TestO|TestR|TestV|TestW) -'
-            'compute-02 internal/compute ^(TestC|TestD|TestH|TestM|TestN|TestT|TestU) -'
-            'compute-03 internal/compute - ^(TestB|TestC|TestD|TestH|TestK|TestL|TestM|TestN|TestO|TestR|TestT|TestU|TestV|TestW)'
-            'turnbench-01 internal/turnbench ^(TestFl|TestL|TestRunS|TestRung|TestW) -'
-            'turnbench-02 internal/turnbench ^(TestFa|TestN|TestPo|TestPr|TestRe|TestRun_) -'
-            'turnbench-03 internal/turnbench ^(TestD|TestM|TestO|TestPh|TestT) -'
-            'turnbench-04 internal/turnbench - ^(TestD|TestFa|TestFl|TestL|TestM|TestN|TestO|TestPh|TestPo|TestPr|TestRe|TestRunS|TestRun_|TestRung|TestT|TestW)'
-            'fak-26 cmd/fak ^TestServeNativeContextAutoAdmitsLongNativeHTTP$ -'
-            'branchrole-01 internal/branchrole ^(TestPilotN) -'
-            'branchrole-02 internal/branchrole ^(TestLoadFileRejectsD) -'
-            'branchrole-03 internal/branchrole ^(TestH) -'
-            'branchrole-04 internal/branchrole ^(TestClassifyH) -'
-            'branchrole-05 internal/branchrole ^(TestPilotO) -'
-            'branchrole-06 internal/branchrole ^(TestCu) -'
-            'branchrole-07 internal/branchrole ^(TestPu) -'
-            'branchrole-08 internal/branchrole ^(TestLoadW) -'
-            'branchrole-09 internal/branchrole ^(TestLoadFileRejectsE) -'
-            'branchrole-10 internal/branchrole ^(TestClassifyP) -'
-            'branchrole-11 internal/branchrole ^(TestA) -'
-            'branchrole-12 internal/branchrole ^(TestS) -'
-            'branchrole-13 internal/branchrole ^(TestPilotM) -'
-            'branchrole-14 internal/branchrole ^(TestPilotI) -'
-            'branchrole-15 internal/branchrole ^(TestPilotD) -'
-            'branchrole-16 internal/branchrole ^(TestLoadFileRejectsI) -'
-            'branchrole-17 internal/branchrole ^(TestLoadFileRea) -'
-            'branchrole-18 internal/branchrole - ^(TestA|TestClassifyH|TestClassifyP|TestCu|TestH|TestLoadFileRea|TestLoadFileRejectsD|TestLoadFileRejectsE|TestLoadFileRejectsI|TestLoadW|TestPilotD|TestPilotI|TestPilotM|TestPilotN|TestPilotO|TestPu|TestS)'
-            'deepseekv4moe-01 internal/deepseekv4moe ^(TestCacheT|TestCas|TestP|TestSimulateExpertCacheE|TestSimulateExpertCacheF|TestSimulateExpertCacheV|TestW) -'
-            'deepseekv4moe-02 internal/deepseekv4moe ^(TestCachePolicyM|TestCachePolicyR|TestCachePolicyS|TestE|TestSh|TestSimulateExpertCacheT|TestZ) -'
-            'deepseekv4moe-03 internal/deepseekv4moe ^(TestAda|TestAdm|TestB|TestG|TestM|TestSc|TestSimulateExpertCacheC|TestSimulateV) -'
-            'deepseekv4moe-04 internal/deepseekv4moe - ^(TestAda|TestAdm|TestB|TestCachePolicyM|TestCachePolicyR|TestCachePolicyS|TestCacheT|TestCas|TestE|TestG|TestM|TestP|TestSc|TestSh|TestSimulateExpertCacheC|TestSimulateExpertCacheE|TestSimulateExpertCacheF|TestSimulateExpertCacheT|TestSimulateExpertCacheV|TestSimulateV|TestW|TestZ)'
-            'hooks-01 internal/hooks ^(TestC|TestF|TestGateG|TestGateP|TestGateU|TestGo|TestN|TestO|TestR|TestV) -'
-            'hooks-02 internal/hooks ^(TestA|TestGateA|TestGateB|TestGateD|TestGateE|TestGateS|TestI|TestL|TestM|TestS|TestT) -'
-            'hooks-03 internal/hooks - ^(TestA|TestC|TestF|TestGateA|TestGateB|TestGateD|TestGateE|TestGateG|TestGateP|TestGateS|TestGateU|TestGo|TestI|TestL|TestM|TestN|TestO|TestR|TestS|TestT|TestV)'
-            'devcmd-01 internal/devcmd ^(TestB|TestE|TestH|TestIn|TestIssueD|TestIssueF|TestIssueI|TestIssueP|TestIssueR|TestN|TestRe|TestRunF|TestRunI|TestT|TestW) -'
-            'devcmd-02 internal/devcmd ^(TestA|TestC|TestD|TestIssueA|TestIssueE|TestJ|TestM|TestRunA|TestRunB|TestRunC|TestRunP|TestRunS|TestU|TestV) -'
-            'devcmd-03 internal/devcmd - ^(TestA|TestB|TestC|TestD|TestE|TestH|TestIn|TestIssueA|TestIssueD|TestIssueE|TestIssueF|TestIssueI|TestIssueP|TestIssueR|TestJ|TestM|TestN|TestRe|TestRunA|TestRunB|TestRunC|TestRunF|TestRunI|TestRunP|TestRunS|TestT|TestU|TestV|TestW)'
-            'modelengine-01 internal/modelengine ^(TestC|TestF|TestL|TestNativeO|TestNativeSchedulerR|TestNativeSchedulerS|TestNativeSchedulerU|TestP|TestQ|TestSp) -'
-            'modelengine-02 internal/modelengine ^(TestE|TestNativeH|TestNativeSchedulerD|TestNativeSchedulerI|TestNativeSchedulerL|TestNativeSchedulerT|TestSc|TestSe|TestSt|TestT|TestW) -'
-            'modelengine-03 internal/modelengine ^(TestA|TestD|TestH|TestI|TestNativeP|TestNativeSchedulerC|TestSu|TestSw) -'
-            'modelengine-04 internal/modelengine - ^(TestA|TestC|TestD|TestE|TestF|TestH|TestI|TestL|TestNativeH|TestNativeO|TestNativeP|TestNativeSchedulerC|TestNativeSchedulerD|TestNativeSchedulerI|TestNativeSchedulerL|TestNativeSchedulerR|TestNativeSchedulerS|TestNativeSchedulerT|TestNativeSchedulerU|TestP|TestQ|TestSc|TestSe|TestSp|TestSt|TestSu|TestSw|TestT|TestW)'
-            'devindex-01 internal/devindex ^(TestF|TestI|TestM|TestN|TestP|TestV) -'
-            'devindex-02 internal/devindex ^(TestA|TestB|TestE|TestG|TestJ|TestL|TestS) -'
-            'devindex-03 internal/devindex - ^(TestA|TestB|TestE|TestF|TestG|TestI|TestJ|TestL|TestM|TestN|TestP|TestS|TestV)'
-            'codelint-01 internal/codelint ^(TestL|TestMineMotifsA|TestMineMotifsD|TestPac) -'
-            'codelint-02 internal/codelint ^(TestFindingT|TestMineMotifsO|TestMo|TestS) -'
-            'codelint-03 internal/codelint ^(TestG|TestMineMotifsE|TestMineMotifsI|TestMineMotifsR|TestO|TestPar|TestR) -'
-            'codelint-04 internal/codelint - ^(TestFindingT|TestG|TestL|TestMineMotifsA|TestMineMotifsD|TestMineMotifsE|TestMineMotifsI|TestMineMotifsO|TestMineMotifsR|TestMo|TestO|TestPac|TestPar|TestR|TestS)'
-            'architest-01 internal/architest ^(TestF|TestR|TestS|TestU|TestW|TestZ) -'
-            'architest-02 internal/architest ^(TestA|TestC|TestE|TestG|TestI|TestK|TestM|TestP) -'
-            'architest-03 internal/architest - ^(TestA|TestC|TestE|TestF|TestG|TestI|TestK|TestM|TestP|TestR|TestS|TestU|TestW|TestZ)'
-            'taskrun-01 internal/agentbench/taskrun ^(TestAgentBenchH|TestAgentBenchR|TestAgentBenchW|TestAgg|TestC|TestE) -'
-            'taskrun-02 internal/agentbench/taskrun ^(TestAgentBenchF|TestAgentBenchV|TestD|TestL|TestM|TestO|TestP|TestR) -'
-            'taskrun-03 internal/agentbench/taskrun - ^(TestAgentBenchF|TestAgentBenchH|TestAgentBenchR|TestAgentBenchV|TestAgentBenchW|TestAgg|TestC|TestD|TestE|TestL|TestM|TestO|TestP|TestR)'
-            'conceptcatalog-01 internal/conceptcatalog ^(TestA|TestCo|TestE|TestL|TestM|TestR|TestV) -'
-            'conceptcatalog-02 internal/conceptcatalog - ^(TestA|TestCo|TestE|TestL|TestM|TestR|TestV)'
-            'windowgate-01 internal/windowgate ^(TestCl|TestCom|TestCon|TestE|TestF|TestN|TestS|TestT) -'
-            'windowgate-02 internal/windowgate - ^(TestCl|TestCom|TestCon|TestE|TestF|TestN|TestS|TestT)'
-            'computebuild-01 internal/computebuild ^(TestA|TestCUDAI|TestCUDAK|TestCUDAP|TestCUDAQ|TestCUDAV|TestCh|TestCx|TestF|TestM|TestQ|TestV4|TestVulkanD|TestVulkanReceiptV2|TestVulkanReceiptV4|TestVulkanReceiptV9) -'
-            'computebuild-02 internal/computebuild ^(TestCUDAA|TestCUDAC|TestCUDAD|TestCUDAF|TestCUDAG|TestCUDAM|TestCUDAN|TestCUDAT|TestD|TestP|TestS|TestVs|TestVulkanC|TestVulkanQ|TestVulkanReceiptR|TestVulkanReceiptV8|TestVulkanV) -'
-            'computebuild-03 internal/computebuild - ^(TestA|TestCUDAA|TestCUDAC|TestCUDAD|TestCUDAF|TestCUDAG|TestCUDAI|TestCUDAK|TestCUDAM|TestCUDAN|TestCUDAP|TestCUDAQ|TestCUDAT|TestCUDAV|TestCh|TestCx|TestD|TestF|TestM|TestP|TestQ|TestS|TestV4|TestVs|TestVulkanC|TestVulkanD|TestVulkanQ|TestVulkanReceiptR|TestVulkanReceiptV2|TestVulkanReceiptV4|TestVulkanReceiptV8|TestVulkanReceiptV9|TestVulkanV)'
-            'buildwitness-01 internal/buildwitness - -'
-            'gateway-01 internal/gateway ^(TestE|TestF|TestL|TestP|TestR|TestU|TestZ) -'
-            'gateway-02 internal/gateway ^(TestB|TestD|TestH|TestI|TestJ|TestK|TestN|TestS|TestT) -'
-            'gateway-03 internal/gateway - ^(TestB|TestD|TestE|TestF|TestH|TestI|TestJ|TestK|TestL|TestN|TestP|TestR|TestS|TestT|TestU|TestZ)'
-          )
-          : > "$RUNNER_TEMP/excluded.txt"
-          for l in "${legs[@]}"; do
-            read -r name p _ _ <<< "$l"
-            for rel in ${p//,/ }; do printf '%s/%s\n' "$mod" "$rel" >> "$RUNNER_TEMP/excluded.txt"; done
-          done
-          pkgs=""; run="-"; skip="-"
-          for l in "${legs[@]}"; do
-            read -r name p r s <<< "$l"
-            if [[ "$name" == "$SHARD" ]]; then pkgs="$p"; run="$r"; skip="$s"; fi
-          done
-          if [[ -n "$pkgs" ]]; then
-            for rel in ${pkgs//,/ }; do printf '%s/%s\n' "$mod" "$rel"; done > "$RUNNER_TEMP/race-packages.txt"
-          elif [[ "$SHARD" =~ ^rest-[0-9]+$ ]]; then
-            # Greedy longest-processing-time bin-pack over measured seconds so every
-            # rest leg holds ~the same race test time; unknown packages get the default cost.
-            go list ./... | grep -vxF -f "$RUNNER_TEMP/excluded.txt" > "$RUNNER_TEMP/rest-all.txt"
-            LC_ALL=C awk -F'\t' -v mod="$mod" -v dflt="$RACE_DEFAULT_COST" \
-              'NR==FNR { cost[$1] = $2; next }
-               { rel = substr($0, length(mod) + 2); printf "%s\t%s\n", (rel in cost ? cost[rel] : dflt), $0 }' \
-              .github/race-package-costs.tsv "$RUNNER_TEMP/rest-all.txt" \
-              | LC_ALL=C sort -t$'\t' -k1,1gr -k2,2 \
-              | LC_ALL=C awk -F'\t' -v n="$RACE_REST_SHARDS" -v i="${SHARD#rest-}" \
-              'BEGIN { for (b = 0; b < n; b++) load[b] = 0 }
-               { best = 0; for (b = 1; b < n; b++) if (load[b] < load[best]) best = b
-                 load[best] += $1; if (best == i) print $2 }' > "$RUNNER_TEMP/race-packages.txt"
-          else
-            echo "::error::unknown race shard $SHARD"; exit 1
+          all_file="$RUNNER_TEMP/race-all-packages.txt"
+          split_file="$RUNNER_TEMP/race-split-packages.txt"
+          args_file="$RUNNER_TEMP/race-args.txt"
+          if ! go list ./... > "$all_file" || ! go list $RACE_SPLIT_PACKAGES > "$split_file"; then
+            echo "::error::go list failed; cannot partition the package set"
+            exit 1
           fi
-          test -s "$RUNNER_TEMP/race-packages.txt"
-          {
-            if [[ "$run" != "-" ]]; then printf '%s\n' -run "$run"; fi
-            if [[ "$skip" != "-" ]]; then printf '%s\n' -skip "$skip"; fi
-            cat "$RUNNER_TEMP/race-packages.txt"
-          } > "$RUNNER_TEMP/race-args.txt"
-          echo "shard $SHARD: $(wc -l < "$RUNNER_TEMP/race-packages.txt") packages, run=$run skip=${skip:0:40}"
+          if [ -n "$SPLIT" ]; then
+            label="$SPLIT bucket $BUCKET/$BUCKETS"
+            tests_file="$RUNNER_TEMP/race-all-tests.txt"
+            bucket_file="$RUNNER_TEMP/race-bucket-tests.txt"
+            if ! go list "$SPLIT" > "$RUNNER_TEMP/race-split-pkg.txt" || ! go test -race -list '.*' "$SPLIT" > "$RUNNER_TEMP/race-test-list.txt"; then
+              echo "::error::$label: cannot list the tests of $SPLIT"
+              exit 1
+            fi
+            # A listed name the ASCII pattern cannot select would otherwise vanish
+            # from both the buckets and the evidence universe.
+            if ! LC_ALL=C awk '/^(Test|Benchmark|Example|Fuzz)/ && !/^(Test|Benchmark|Example|Fuzz)[A-Za-z0-9_]*$/ { print "::error::unselectable test name: " $0; bad = 1 } END { exit bad }' "$RUNNER_TEMP/race-test-list.txt"; then
+              exit 1
+            fi
+            # Benchmark names run only under -bench, so they never join a bucket.
+            grep -E '^(Test|Example|Fuzz)[A-Za-z0-9_]*$' "$RUNNER_TEMP/race-test-list.txt" | LC_ALL=C sort -u > "$tests_file" || true
+            if [ ! -s "$tests_file" ]; then
+              echo "::error::$label: zero test names match the test pattern in go test -list"
+              exit 1
+            fi
+            if ! go run ./cmd/cifastshard buckets -buckets "$BUCKETS" -index "$((BUCKET - 1))" < "$tests_file" > "$bucket_file" || [ ! -s "$bucket_file" ]; then
+              echo "::error::$label selected no tests from go test -list"
+              exit 1
+            fi
+            run_regex="^($(paste -sd'|' "$bucket_file"))\$"
+            printf '%s\n' -run "$run_regex" "$(cat "$RUNNER_TEMP/race-split-pkg.txt")" > "$args_file"
+            echo "$label: $(wc -l < "$bucket_file") of $(wc -l < "$tests_file") top-level tests at $(git rev-parse HEAD)"
+          else
+            label="shard $SHARD/$SHARDS"
+            if ! go run ./cmd/cifastshard partition -weights .github/race-package-weights.json -shards "$SHARDS" -index "$((SHARD - 1))" -exclude-file "$split_file" < "$all_file" > "$args_file" || [ ! -s "$args_file" ]; then
+              echo "::error::$label selected no packages from go list ./..."
+              exit 1
+            fi
+            echo "$label: $(wc -l < "$args_file") packages at $(git rev-parse HEAD)"
+          fi
 
       - name: go test -race <shard> (zero data races)
         id: race_tests
         shell: bash
         # -count=1 forces a real, uncached run — the honest "fresh read-back" of
         # the race-free claim on every push/PR, never a cached green from before.
-        # -timeout=25m: ThreadSanitizer instrumentation makes CPU-bound packages
-        # 5-10x slower than plain go test. This only grants wall-clock; it
-        # changes nothing about which tests run.
+        # -timeout=12m stays inside the 15m job bound and holds because every
+        # predicted unit plus the 120 s tail fits 900 s. It only grants wall-clock;
+        # it changes nothing about which tests run.
         run: |
           set -euo pipefail
           mapfile -t args < "$RUNNER_TEMP/race-args.txt"
-          go test -race -count=1 -timeout=25m "${args[@]}"
+          go test -race -count=1 -timeout=12m "${args[@]}"
 
-      # Only one designated leg saves the race build cache, and only from a trunk
-      # push. The key is fixed per go.mod, so a save on an existing key is a no-op
-      # and the cache never churns per commit. The same bound as the build-vet-test
-      # save applies here: trim the path that is saved, then gate it before the save.
-      - name: bound race build cache to the pinned ceiling (designated leg, trunk push only)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 'fak-01'
+      # Only the shard-1 unit saves the race build cache, and only from a trunk
+      # push. The key is the immutable go.mod-hash key, so a push that finds an
+      # entry does not re-upload the ~565 MB archive and churn the repository quota.
+      - name: bound race build cache to the pinned ceiling (shard 1, trunk push only)
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 }}
         shell: bash
         env:
           GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
         run: go run ./cmd/fak-dev gocache-trim "$HOME/.cache/go-build" "$GO_BUILD_CACHE_CEILING_BYTES"
 
       - name: race build cache size gate (fails above the pinned ceiling)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 'fak-01'
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 }}
         shell: bash
         env:
           GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
         run: go run ./cmd/fak-dev gocache-trim --check "$HOME/.cache/go-build" "$GO_BUILD_CACHE_CEILING_BYTES"
 
-      - name: save race build cache (designated leg, trunk push only)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 'fak-01'
+      - name: save race build cache (shard 1, trunk push only)
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 }}
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/go-build
@@ -2267,7 +2095,7 @@ jobs:
           STEPS_JSON: ${{ toJSON(steps) }}
           JOB_ID: race-detector
           CI_CLASS: full
-          CORE_COMMANDS_JSON: '[["go","test","-race","-count=1","-timeout=25m","./..."]]'
+          CORE_COMMANDS_JSON: '[["go","test","-race","-count=1","-timeout=12m","./..."]]'
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
@@ -2278,7 +2106,7 @@ jobs:
           fi
           commands="$CORE_COMMANDS_JSON"
           if [[ -s "$RUNNER_TEMP/race-args.txt" ]]; then
-            commands=$(jq -Rn '[["go","test","-race","-count=1","-timeout=25m"] + [inputs]]' < "$RUNNER_TEMP/race-args.txt")
+            commands=$(jq -Rn '[["go","test","-race","-count=1","-timeout=12m"] + [inputs]]' < "$RUNNER_TEMP/race-args.txt")
           fi
           if [[ "$CI_CLASS" == diagnostic ]]; then
             if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
@@ -2296,7 +2124,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-race-detector-${{ matrix.shard }}
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-race-detector-${{ strategy.job-index }}
           path: ${{ runner.temp }}/ci-race-detector.json
           if-no-files-found: error
 

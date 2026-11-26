@@ -107,17 +107,17 @@ func TestRaceJobHasExplicitWallClockDeadline(t *testing.T) {
 		t.Fatalf("race-detector job in ci.yml must define an explicit job-level %s deadline", timeoutKey)
 	}
 
-	// 2. The deadline exceeds the observed envelope (test -timeout=25m) plus bounded grace.
+	// 2. The deadline exceeds the go test envelope (-timeout=12m) plus bounded grace.
 	// Contract coverage distinguishes job-level timeout from go test -timeout.
-	const testStepTimeout = "-timeout=25m"
+	const testStepTimeout = "-timeout=12m"
 	if !strings.Contains(raceBlock, testStepTimeout) {
 		t.Fatalf("race-detector job must run go test with %s", testStepTimeout)
 	}
 
-	if jobTimeout < 30 {
-		t.Fatalf("job timeout-minutes (%d) must exceed go test timeout of 25m with grace (expected >= 30)", jobTimeout)
+	if jobTimeout < 13 {
+		t.Fatalf("job timeout-minutes (%d) must exceed go test timeout of 12m with grace (expected >= 13)", jobTimeout)
 	}
-	if jobTimeout > 45 {
-		t.Fatalf("job timeout-minutes (%d) exceeds bounded upper grace limit (expected <= 45)", jobTimeout)
+	if jobTimeout > 15 {
+		t.Fatalf("job timeout-minutes (%d) exceeds the 15m unit bound (expected <= 15)", jobTimeout)
 	}
 }
