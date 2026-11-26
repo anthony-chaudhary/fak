@@ -531,6 +531,7 @@ func preparedDisambiguationAnalyzerIdentity() string {
 		disambiguationCacheSchema,
 		disambiguationAnalyzerConfig,
 		disambiguationAnalyzerVersion,
+		disambiguationAnalyzerSources,
 		disambiguationAnalyzerContractPath,
 	})
 }

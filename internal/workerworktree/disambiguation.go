@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
+	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 	"github.com/anthony-chaudhary/fak/internal/gitbroker"
 	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/processstart"
@@ -332,24 +332,22 @@ var (
 			Wait:   func() error { return <-produced },
 		}, nil
 	}
+	// runAnalyzer folds the candidate tree in-process, writes the generated doc
+	// folder, and returns only the verdict fields checkInvariantBounded decodes,
+	// so the land path never pays for encoding the full scorecard payload.
 	runAnalyzer = func(ctx context.Context, root, generated string) ([]byte, error) {
-		python := "python3"
-		if runtime.GOOS == "windows" {
-			python = "python"
+		p, err := scorecard.Generate(ctx, root, "", generated)
+		if err != nil {
+			return nil, err
 		}
-		cmd := exec.CommandContext(ctx, python,
-			filepath.Join(root, filepath.FromSlash(disambiguationAnalyzerContractPath)),
-			"--workspace", root,
-			"--json",
-			"--markdown-dir", generated,
-		)
-		cmd.Dir = root
-		windowgate.ConfigureBackgroundCommand(cmd)
-		return cmd.Output()
+		return json.Marshal(p.Summary())
 	}
 	disambiguationCacheSchema     = "disambiguation-witness-v2"
 	disambiguationAnalyzerConfig  = "json+markdown;catalog-invariant-v1"
-	disambiguationAnalyzerVersion = "concept-disambiguation-scorecard-v1"
+	disambiguationAnalyzerVersion = "concept-disambiguation-scorecard-go-v2"
+	// The analyzer is compiled in, so its own sources are part of the witness
+	// identity: a tree-keyed entry must not outlive the code that computed it.
+	disambiguationAnalyzerSources = scorecard.SourceDigest()
 	disambiguationCacheRoot       = func(repo string) (string, error) {
 		cmd := exec.Command("git", "rev-parse", "--git-common-dir")
 		cmd.Dir = repo
@@ -759,6 +757,8 @@ func newDisambiguationArchiveHash() hash.Hash {
 	h.Write([]byte{0})
 	io.WriteString(h, disambiguationAnalyzerVersion)
 	h.Write([]byte{0})
+	io.WriteString(h, disambiguationAnalyzerSources)
+	h.Write([]byte{0})
 	return h
 }
 
@@ -769,6 +769,8 @@ func disambiguationCacheKey(treeID string) string {
 	io.WriteString(h, disambiguationAnalyzerConfig)
 	h.Write([]byte{0})
 	io.WriteString(h, disambiguationAnalyzerVersion)
+	h.Write([]byte{0})
+	io.WriteString(h, disambiguationAnalyzerSources)
 	h.Write([]byte{0})
 	io.WriteString(h, treeID)
 	return fmt.Sprintf("%x", h.Sum(nil))
@@ -986,10 +988,9 @@ func disambiguationTarget(root, path string) (string, error) {
 
 // checkInvariantBounded is the context-aware equivalent of
 // conceptcatalog.CheckInvariant for the isolated land path. It deliberately
-// drives the scorecard once with both --json and --markdown-dir: the same
-// payload supplies the semantic/coverage verdict and the generated artifacts
-// used for freshness, while CommandContext makes the expensive Python process
-// terminate with the pre-CAS deadline.
+// drives the scorecard once for both the verdict and the generated doc folder:
+// the same fold supplies the semantic/coverage verdict and the artifacts used
+// for freshness, and the fold observes the pre-CAS deadline between phases.
 func checkInvariantBounded(ctx context.Context, root string, setSubphase func(string)) (conceptcatalog.InvariantResult, error) {
 	out, err := os.MkdirTemp("", "fak-concept-fresh-*")
 	if err != nil {

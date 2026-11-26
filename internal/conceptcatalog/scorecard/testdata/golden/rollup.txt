@@ -1,0 +1,12 @@
+concept-disambiguation roll-up: 2 top-level abstraction(s), 4 head(s) total, max depth 5 (6 concepts in the forest)
+
+Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest
+descendant. '!' = the head verdict reads clearer than the subtree supports.
+
+     rolled       head         size debt  mix                  family / canonical
+   * crystal     crystal         2    2  **                   gate / Decision (kernel)
+   o defined     defined         2    1  oo                   cache / KV Cache Duplicate
+
+abstraction overclaims: none - every head verdict is backed by its whole subtree
+
+(weakest-link: one 'defined' leaf keeps its abstraction from rolling up to crystal - anchor the leaf, or accept the honest lower roll-up.)

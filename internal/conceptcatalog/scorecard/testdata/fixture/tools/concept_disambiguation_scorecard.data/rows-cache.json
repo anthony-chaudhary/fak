@@ -1,0 +1,29 @@
+{
+  "rows": [
+    {"id": "kvcache", "canonical": "KVCache (engine)", "family": "cache", "kind": "symbol",
+     "definition": "Engine-side paged attention state, keyed by <layer> & position.",
+     "distinction": "Not the provider's prompt cache.", "distinct_from": ["promptcache"],
+     "aliases": ["kv_cache", "FAK_DEMO_CACHE_TTL", "kv_cache"], "grounding": "KVCache", "grounding_kind": "symbol",
+     "glossary_anchor": "docs/fak/glossary.md", "parent": "", "verdict": "crystal", "gaps": []},
+    {"id": "promptcache", "canonical": "PromptCache", "family": "cache", "kind": "concept",
+     "definition": "The provider-side prompt cache.", "distinction": "Not engine pages.",
+     "distinct_from": ["kvcache"], "aliases": ["demo.cache.size", "missing.wire.key"], "grounding": "PromptCache",
+     "grounding_kind": "symbol", "glossary_anchor": "docs/fak/glossary.md", "verdict": "crystal", "gaps": []},
+    {"id": "cachettl5m", "canonical": "CacheTTL5m", "family": "cache", "kind": "config",
+     "definition": "Five-minute cache lifetime.", "distinction": "Not the engine cache.",
+     "distinct_from": ["kvcache"], "aliases": [], "grounding": "CacheTTL5m", "grounding_kind": "symbol",
+     "glossary_anchor": "", "verdict": "defined", "gaps": ["draw the line against CacheTTL1h"]},
+    {"id": "cachettl1h", "canonical": "CacheTTL1h", "family": "cache", "kind": "config",
+     "definition": "One-hour cache lifetime.", "distinction": "Longer than the five-minute TTL.",
+     "distinct_from": ["cachettl5m"], "aliases": [], "grounding": "CacheTTL1h", "grounding_kind": "symbol",
+     "glossary_anchor": "", "verdict": "defined", "gaps": []},
+    {"id": "cachemeta", "canonical": "Cache Meta (store)", "family": "cache", "kind": "subsystem",
+     "definition": "", "distinction": "", "distinct_from": [], "aliases": [],
+     "grounding": "cacheMeta", "grounding_kind": "path", "glossary_anchor": "", "verdict": "undocumented",
+     "gaps": ["one", "two", "three", "four", "five"]},
+    {"id": "metacache", "canonical": "MetaCache", "family": "cache", "kind": "symbol",
+     "definition": "Metadata about cached pages.", "distinction": "Not the cache meta store.",
+     "distinct_from": ["cachemeta", "Cache Meta"], "aliases": [], "grounding": "MetaCache", "grounding_kind": "symbol",
+     "glossary_anchor": "", "parent": "kvcache", "verdict": "defined", "gaps": []}
+  ]
+}

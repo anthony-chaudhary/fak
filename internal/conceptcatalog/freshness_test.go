@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -249,28 +250,21 @@ func TestCheckInvariantParsesStructuredRedExit(t *testing.T) {
 	}
 }
 
-func TestExecuteInvariantSnapshotReturnsProcessStartFailure(t *testing.T) {
-	old := invariantSnapshotCommand
-	t.Cleanup(func() { invariantSnapshotCommand = old })
-	invariantSnapshotCommand = func(_, _ string) *exec.Cmd {
-		return exec.Command(filepath.Join(t.TempDir(), "missing-scorecard-executable"))
-	}
+func TestCheckInvariantReturnsSnapshotFailure(t *testing.T) {
+	old := runInvariantSnapshot
+	t.Cleanup(func() { runInvariantSnapshot = old })
+	want := errors.New("scorecard fold failed")
+	runInvariantSnapshot = func(_, _ string) (scorecard.Summary, error) { return scorecard.Summary{}, want }
 
-	_, err := executeInvariantSnapshot(t.TempDir(), filepath.Join(t.TempDir(), "generated"))
-	if err == nil {
-		t.Fatal("missing executable must return its process-start error")
-	}
-	if _, ok := err.(*exec.ExitError); ok {
-		t.Fatalf("process-start failure was misclassified as a scorecard verdict: %v", err)
+	if _, err := CheckInvariant(t.TempDir()); !errors.Is(err, want) {
+		t.Fatalf("snapshot failure = %v, want %v", err, want)
 	}
 }
 
-func TestExecuteInvariantSnapshotReturnsMissingArtifactError(t *testing.T) {
-	root := t.TempDir()
-	generated := filepath.Join(t.TempDir(), "generated")
+func TestCheckInvariantReturnsMissingArtifactError(t *testing.T) {
 	installInvariantSnapshotHelper(t, "missing-artifact")
 
-	_, err := executeInvariantSnapshot(root, generated)
+	_, err := CheckInvariant(t.TempDir())
 	if err == nil {
 		t.Fatal("partial snapshot must return the missing artifact error")
 	}
@@ -282,55 +276,45 @@ func TestExecuteInvariantSnapshotReturnsMissingArtifactError(t *testing.T) {
 	}
 }
 
+// installInvariantSnapshotHelper replaces the in-process snapshot with a fixed
+// verdict that copies the tracked artifacts as its generated output.
 func installInvariantSnapshotHelper(t *testing.T, mode string) *int {
 	t.Helper()
-	old := invariantSnapshotCommand
-	t.Cleanup(func() { invariantSnapshotCommand = old })
+	old := runInvariantSnapshot
+	t.Cleanup(func() { runInvariantSnapshot = old })
 	calls := 0
-	invariantSnapshotCommand = func(root, generated string) *exec.Cmd {
+	runInvariantSnapshot = func(root, generated string) (scorecard.Summary, error) {
 		calls++
-		cmd := exec.Command(os.Args[0], "-test.run=^TestInvariantSnapshotHelperProcess$")
-		cmd.Env = append(os.Environ(),
-			"FAK_TEST_INVARIANT_HELPER=1",
-			"FAK_TEST_INVARIANT_MODE="+mode,
-			"FAK_TEST_INVARIANT_ROOT="+root,
-			"FAK_TEST_INVARIANT_GENERATED="+generated,
-		)
-		return cmd
+		if err := os.MkdirAll(generated, 0755); err != nil {
+			return scorecard.Summary{}, err
+		}
+		for i, art := range generatedArtifacts {
+			if mode == "missing-artifact" && i == len(generatedArtifacts)-1 {
+				continue
+			}
+			b, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(art.Tracked)))
+			if readErr != nil {
+				b = []byte("synthetic generated artifact\n")
+			}
+			if writeErr := os.WriteFile(filepath.Join(generated, art.Name), b, 0644); writeErr != nil {
+				return scorecard.Summary{}, writeErr
+			}
+		}
+		var s scorecard.Summary
+		if mode == "red" || mode == "missing-artifact" {
+			s.Reason = "clarity debt remains"
+			s.Corpus.CoverageDebt, s.Corpus.ClarityDefects = 9, 3
+			s.Corpus.Coverage.CoveragePct = 97.75
+			s.Corpus.Coverage.PerFamily = []scorecard.FamilyCount{{Family: "cache", Discovered: 8, Covered: 6}}
+			return s, nil
+		}
+		s.OK = true
+		s.Corpus.CoverageDebt = 7
+		s.Corpus.Coverage.CoveragePct = 98.25
+		s.Corpus.Coverage.PerFamily = []scorecard.FamilyCount{{Family: "cache", Discovered: 8, Covered: 7}}
+		return s, nil
 	}
 	return &calls
-}
-
-func TestInvariantSnapshotHelperProcess(t *testing.T) {
-	if os.Getenv("FAK_TEST_INVARIANT_HELPER") != "1" {
-		return
-	}
-	root := os.Getenv("FAK_TEST_INVARIANT_ROOT")
-	generated := os.Getenv("FAK_TEST_INVARIANT_GENERATED")
-	mode := os.Getenv("FAK_TEST_INVARIANT_MODE")
-	if err := os.MkdirAll(generated, 0755); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	for i, art := range generatedArtifacts {
-		if mode == "missing-artifact" && i == len(generatedArtifacts)-1 {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(art.Tracked)))
-		if err != nil {
-			b = []byte("synthetic generated artifact\n")
-		}
-		if err := os.WriteFile(filepath.Join(generated, art.Name), b, 0644); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	}
-	if mode == "red" || mode == "missing-artifact" {
-		fmt.Print(`{"ok":false,"reason":"clarity debt remains","corpus":{"coverage_debt":9,"clarity_defects":3,"coverage":{"coverage_pct":97.75,"per_family":[{"family":"cache","discovered":8,"covered":6}]}}}`)
-		os.Exit(1)
-	}
-	fmt.Print(`{"ok":true,"reason":"","corpus":{"coverage_debt":7,"clarity_defects":0,"coverage":{"coverage_pct":98.25,"per_family":[{"family":"cache","discovered":8,"covered":7}]}}}`)
-	os.Exit(0)
 }
 
 // TestGeneratedReadmeRoundTripsThroughGitStaging is the #5136 regression: the
@@ -575,7 +559,7 @@ func fixtureGitRepo(t *testing.T) string {
 	return root
 }
 
-func TestGenerateFailsLoudWhenPythonMissing(t *testing.T) {
+func TestGenerateFailsLoudWithoutACatalog(t *testing.T) {
 	root := t.TempDir()
 	out := filepath.Join(root, "docs", "concept-disambiguation-scorecard")
 	if err := os.MkdirAll(out, 0755); err != nil {
@@ -586,15 +570,18 @@ func TestGenerateFailsLoudWhenPythonMissing(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	emptyPath := t.TempDir()
-	t.Setenv("PATH", emptyPath)
 
 	err := generate(root, out)
 	if err == nil {
-		t.Fatal("generate must fail loudly when Python interpreter is missing, even if artifacts pre-exist on disk")
+		t.Fatal("generate must fail loudly without a catalog, even if artifacts pre-exist on disk")
 	}
-	if !strings.Contains(err.Error(), "Python interpreter not found") {
+	if !strings.Contains(err.Error(), "refusing to render an undated scorecard") {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+	for _, art := range generatedArtifacts {
+		if b, _ := os.ReadFile(filepath.Join(out, art.Name)); string(b) != "stale content\n" {
+			t.Fatalf("%s was rewritten by a failed generation: %q", art.Name, b)
+		}
 	}
 }
 

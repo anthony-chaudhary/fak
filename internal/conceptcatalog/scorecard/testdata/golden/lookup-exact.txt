@@ -1,0 +1,6 @@
+'kv cache' -> 1 lookup name(s)
+
+  KVCache   (also: KVCache (engine), kv_cache)
+    -> KV Cache Duplicate  [cache / symbol / defined]  via alias+canonical+grounding
+       Duplicate id row.
+       not to be confused with: promptcache

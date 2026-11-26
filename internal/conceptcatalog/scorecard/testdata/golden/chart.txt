@@ -1,0 +1,34 @@
+concept-disambiguation chart - 27 concepts - score 61.1/100 (grade D) - disambiguation-debt 63
+
+clarity ladder (count of concepts, best -> fog):
+  * crystal       #########................... 5
+  o defined       ############################ 16
+  ~ drifting      ##.......................... 1
+  = entangled     ####........................ 2
+  x colliding     ##.......................... 1
+  . undocumented  ##.......................... 1
+
+clarity mix by family (each cell = one concept):
+  cache            **oooo.            (7 concept(s); 2 crystal)
+  gate             ***oox             (6 concept(s); 3 crystal)
+  loop             ooo~               (4 concept(s); 0 crystal)
+  nofamily                            (1 concept(s); 0 crystal)
+  session          ooooooo==          (9 concept(s); 0 crystal)
+
+coverage by family (positioned / discovered):
+  cache            ################............ 7/12
+  gate             #####################....... 3/4
+  session          ########################.... 6/7
+  loop             ............................ 0/0
+
+namespace coverage  [######################..........] 69.6%  (16/23 confusable tokens positioned)
+
+pairwise separation (of the name-pairs a reader cannot keep apart):
+  mutual       ##############.............. 5
+  one-sided    ###########................. 4
+  undrawn      ###......................... 1
+  pairs separated   [#############################...] 9/10
+
+name index: 31 lookup name(s) -> 27 concept(s), 5 ambiguous
+
+legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented

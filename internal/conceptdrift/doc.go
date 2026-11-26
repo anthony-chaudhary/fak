@@ -1,8 +1,8 @@
 // Package conceptdrift is the concept-coverage drift watcher, ported from the
 // retired tools/concept_drift_watcher.py pair (NEW_PYTHON_TOOL ratchet).
 //
-// The concept-disambiguation scorecard (tools/concept_disambiguation_scorecard.py,
-// grandfathered Python that STAYS) computes coverage_debt against the
+// The concept-disambiguation scorecard (internal/conceptcatalog/scorecard, the Go
+// port of tools/concept_disambiguation_scorecard.py) computes coverage_debt against the
 // confusable-token universe it discovers in the tree. That number is a SNAPSHOT:
 // it says nothing about whether it has MOVED since the last time anyone looked.
 // And it moves - proven 2026-11-07/08, where merges re-opened debt 2 twice
@@ -24,11 +24,11 @@
 //	AutoTicket       on a real drift, best-effort create a positioning ticket via
 //	                 `fak-run fak-ticket create concept-coverage-drift-<ts> ...`.
 //
-// The scorecard runs as a SUBPROCESS (python tools/concept_disambiguation_scorecard.py
-// --json) so the watcher never re-implements discovery; its stdout is read through a
-// pipe (clean bytes), and a BOM / UTF-16 header is tolerated for manually redirected
-// output. Read-only over the tree; the only writes are the baseline + receipt JSONs.
-// Deterministic, ASCII.
+// The scorecard runs IN-PROCESS (internal/conceptcatalog/scorecard) so the watcher
+// never re-implements discovery and reads only the coverage/standing slice of the
+// fold instead of decoding the whole --json payload. DecodeJSONBytes still accepts a
+// BOM / UTF-16 header for manually redirected payloads. Read-only over the tree; the
+// only writes are the baseline + receipt JSONs. Deterministic, ASCII.
 //
 // # Port notes (behavior preserved from the Python original)
 //
@@ -36,16 +36,12 @@
 //     recorded baselines remain readable: schema strings, key sets, 2-space
 //     indentation, sorted keys, trailing newline, and the drift-receipt-<ts>.json
 //     naming next to the baseline.
-//   - The Python watcher anchored the scorecard script to its OWN install location
-//     (the repo carrying tools/). The Go equivalent anchors it to the local repo
-//     root (the git toplevel of the invoking cwd, resolved by the cmd/fak shell);
-//     Options.Scorecard overrides it, and an empty value falls back to
-//     <workspace>/tools/concept_disambiguation_scorecard.py - the layout when the
-//     workspace IS the fak repo root, the only supported production shape.
+//   - Options.Scorecard named the Python script the watcher used to launch; the
+//     fold is in-process now, so the field is accepted and not consulted.
 //   - Likewise the Python simulate default data dir anchored to the script's repo
 //     root; the Go version anchors it to the resolved workspace (identical for the
 //     supported production shape).
-//   - All spawned processes (git, python, fak-run) use the house window-suppressed
+//   - All spawned processes (git, fak-run) use the house window-suppressed
 //     spawn (pkg/sysproc ConfigureBackground: HideWindow + CREATE_NO_WINDOW on
 //     Windows) so the watcher can run from background automation without flashing
 //     console windows (windowgate UNSUPPRESSED_SPAWN posture).

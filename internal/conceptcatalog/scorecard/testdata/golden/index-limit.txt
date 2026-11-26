@@ -1,0 +1,18 @@
+concept-disambiguation name index: 31 lookup name(s) over 27 concept(s) - 5 ambiguous
+
+Every surface a name can arrive as (canonical / alias / grounding token) resolves
+to the concept it denotes plus that concept's contrast set. '!' marks a name that
+lands on more than one concept - a LOOKUP ambiguity the canonical names do not show.
+
+  AdmissionGate
+    -> AdmissionGate  [gate / cli-verb / crystal]  via canonical
+       Admits a request.
+       not to be confused with: rungate
+  BadParent
+    -> BadParent  [loop / concept / drifting]  via canonical
+       Dangling parent.
+       not to be confused with: cyclea
+  Cache Meta (store)   (also: cacheMeta)
+    -> Cache Meta (store)  [cache / subsystem / undocumented]  via canonical+grounding
+       not to be confused with: metacache
+  ... and 28 more name(s) (omit --limit for all)

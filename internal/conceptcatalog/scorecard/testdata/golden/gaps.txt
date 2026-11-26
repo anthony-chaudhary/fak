@@ -1,0 +1,17 @@
+concept-disambiguation coverage backlog (position every confusable token):
+
+FAMILY cache: 7/12 positioned (5 unpositioned)
+  - cacheevictor
+  - hiddencacheprobe
+  - cachestore
+  - hiddencache
+  - rootdoccache
+
+FAMILY gate: 3/4 positioned (1 unpositioned)
+  - cachegateway
+
+FAMILY session: 6/7 positioned (1 unpositioned)
+  - sessionledger
+
+FAMILY loop: 0/0 positioned (0 unpositioned)
+

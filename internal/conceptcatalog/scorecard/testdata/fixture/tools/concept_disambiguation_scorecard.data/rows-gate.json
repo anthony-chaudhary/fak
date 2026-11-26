@@ -1,0 +1,28 @@
+{
+  "rows": [
+    {"id": "decisionkernel", "canonical": "Decision (kernel)", "family": "gate", "kind": "symbol",
+     "definition": "The kernel's allow/deny decision.", "distinction": "Not the scheduler decision.",
+     "distinct_from": ["decisionsched"], "aliases": [], "grounding": "Decision", "grounding_kind": "symbol",
+     "glossary_anchor": "docs/fak/glossary.md", "verdict": "crystal", "gaps": []},
+    {"id": "decisionsched", "canonical": "Decision (scheduler)", "family": "gate", "kind": "cli-verb",
+     "definition": "The scheduler's placement decision.", "distinction": "Not the kernel decision.",
+     "distinct_from": ["Decision", "ghost-concept"], "aliases": [], "grounding": "decision-sched",
+     "grounding_kind": "verb", "glossary_anchor": "docs/fak/glossary.md", "verdict": "crystal", "gaps": []},
+    {"id": "admissiongate", "canonical": "AdmissionGate", "family": "gate", "kind": "cli-verb",
+     "definition": "Admits a request.", "distinction": "Not the run gate.", "distinct_from": ["rungate"],
+     "aliases": [], "grounding": "AdmissionGate", "grounding_kind": "symbol",
+     "glossary_anchor": "docs/missing.md", "parent": "decisionkernel", "verdict": "crystal", "gaps": []},
+    {"id": "rungate", "canonical": "RunGate", "family": "gate", "kind": "metric",
+     "definition": "Counts run admissions.", "distinction": "Not admission.", "distinct_from": ["admissiongate"],
+     "aliases": ["fabricatedAlias"], "grounding": "notInTreeAnywhere", "grounding_kind": "symbol",
+     "glossary_anchor": "", "verdict": "defined", "gaps": []},
+    {"id": "gatepolicy1", "canonical": "GatePolicy", "family": "gate", "kind": "symbol",
+     "definition": "Policy one.", "distinction": "Not policy two.", "distinct_from": ["gatepolicy2"],
+     "aliases": [], "grounding": "GatePolicy", "grounding_kind": "symbol", "glossary_anchor": "",
+     "verdict": "defined", "gaps": []},
+    {"id": "gatepolicy2", "canonical": "gate_policy", "family": "gate", "kind": "symbol",
+     "definition": "Policy two.", "distinction": "Not policy one.", "distinct_from": ["gatepolicy1"],
+     "aliases": [], "grounding": "GatePolicy", "grounding_kind": "symbol", "glossary_anchor": "",
+     "verdict": "colliding", "gaps": []}
+  ]
+}

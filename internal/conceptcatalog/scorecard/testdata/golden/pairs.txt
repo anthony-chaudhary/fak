@@ -1,0 +1,38 @@
+concept-disambiguation pairwise separation: 10 confusable name-pair(s) discovered - 1 undrawn, 4 one-sided, 5 mutual
+
+A pair is CONFUSABLE when its two names collide by spelling alone, in one of three
+ways: homonym (identical once the parenthetical gloss is stripped), permuted (the
+same words in a different order), or near (within 2 edits AND sharing a head or
+tail run of 5+ characters, so a bare family root is not enough).
+Pairs are DISCOVERED from the names themselves, never declared, so landing a
+near-twin name raises the bar automatically. Being clean per-row does not separate
+a pair: a concept in a large family satisfies `disambiguated` by naming ANY sibling,
+while the twin it is genuinely mistakable for goes undrawn.
+
+  x undrawn    neither names the other - the twins sit in the catalog unseparated
+  > one-sided  drawn from one side only - a reader arriving at the other is unwarned
+  = mutual     both name each other - a reader arriving from EITHER side is told
+
+  x [near    ] 'SessionKey'     'SessionKeys'
+      1 edit(s) apart sharing 10 characters: sessionkey / sessionkeys   (sessionkey / sessionkeys)
+  > [homonym ] "Session'Q (a)" --> "Session'Q (b)"
+      both are plainly named 'sessionq' once the gloss is stripped   (sessionquote1 / sessionquote2)
+  > [near    ] 'CacheTTL1h' --> 'CacheTTL5m'
+      2 edit(s) apart sharing 8 characters: cachettl5m / cachettl1h   (cachettl1h / cachettl5m)
+  > [near    ] 'SessionKey' --> 'SessionRef'
+      2 edit(s) apart sharing 7 characters: sessionref / sessionkey   (sessionkey / sessionref)
+  > [permuted] 'Cache Meta (store)' <-- 'MetaCache'
+      same words in a different order: cache meta   (cachemeta / metacache)
+  = [homonym ] 'Decision (kernel)' <-> 'Decision (scheduler)'
+      both are plainly named 'decision' once the gloss is stripped   (decisionkernel / decisionsched)
+  = [homonym ] 'GatePolicy' <-> 'gate_policy'
+      both are plainly named 'gatepolicy' once the gloss is stripped   (gatepolicy1 / gatepolicy2)
+  = [homonym ] 'Q"uo\'te (one)' <-> 'Q"uo\'te (two)'
+      both are plainly named 'quote' once the gloss is stripped   (quoteboth1 / quoteboth2)
+  = [near    ] 'CycleA' <-> 'CycleB'
+      1 edit(s) apart sharing 5 characters: cyclea / cycleb   (cyclea / cycleb)
+  = [near    ] 'SessionRef' <-> 'SessionRow'
+      2 edit(s) apart sharing 8 characters: sessionref / sessionrow   (sessionref / sessionrow)
+
+whole-graph mutuality: 14/23 boundaries are drawn from both sides (9 one-way; advisory outside confusable pairs)
+dangling references: 1

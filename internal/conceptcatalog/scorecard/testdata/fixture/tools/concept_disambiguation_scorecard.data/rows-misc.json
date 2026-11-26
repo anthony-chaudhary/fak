@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {"id": "cyclea", "canonical": "CycleA", "family": "loop", "kind": "concept", "definition": "First of a cycle.",
+     "distinction": "Not B.", "distinct_from": ["cycleb"], "aliases": [], "grounding": "CycleA",
+     "grounding_kind": "symbol", "glossary_anchor": "", "parent": "cycleb", "verdict": "defined", "gaps": []},
+    {"id": "cycleb", "canonical": "CycleB", "family": "loop", "kind": "concept", "definition": "Second of a cycle.",
+     "distinction": "Not A.", "distinct_from": ["cyclea"], "aliases": [], "grounding": "CycleB",
+     "grounding_kind": "symbol", "glossary_anchor": "", "parent": "cyclea", "verdict": "defined", "gaps": []},
+    {"id": "selfparent", "canonical": "SelfParent", "family": "loop", "kind": "concept", "definition": "Points at itself.",
+     "distinction": "Alone.", "distinct_from": ["cyclea"], "aliases": [], "grounding": "SelfParent",
+     "grounding_kind": "symbol", "glossary_anchor": "", "parent": "selfparent", "verdict": "defined", "gaps": []},
+    {"id": "badparent", "canonical": "BadParent", "family": "loop", "kind": "concept", "definition": "Dangling parent.",
+     "distinction": "Alone.", "distinct_from": ["cyclea"], "aliases": [], "grounding": "BadParent",
+     "grounding_kind": "symbol", "glossary_anchor": "", "parent": "nonexistent", "verdict": "drifting", "gaps": []},
+    {"canonical": "Orphan Thing", "family": "nofamily", "kind": "weird", "verdict": "bogus", "grounding_kind": "nope"},
+    {"id": "kvcache", "canonical": "KV Cache Duplicate", "family": "cache", "kind": "symbol",
+     "definition": "Duplicate id row.", "distinction": "Dup.", "distinct_from": ["promptcache"], "aliases": [],
+     "grounding": "KVCache", "grounding_kind": "symbol", "glossary_anchor": "", "verdict": "defined", "gaps": []}
+  ]
+}

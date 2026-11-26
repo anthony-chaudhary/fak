@@ -665,6 +665,7 @@ func TestDisambiguationWitnessPersistentContentCache(t *testing.T) {
 	oldRoot := disambiguationCacheRoot
 	oldConfig := disambiguationAnalyzerConfig
 	oldVersion := disambiguationAnalyzerVersion
+	oldSources := disambiguationAnalyzerSources
 	defer func() {
 		resolveDisambiguationTree = oldResolve
 		listDisambiguationTree = oldList
@@ -673,6 +674,7 @@ func TestDisambiguationWitnessPersistentContentCache(t *testing.T) {
 		disambiguationCacheRoot = oldRoot
 		disambiguationAnalyzerConfig = oldConfig
 		disambiguationAnalyzerVersion = oldVersion
+		disambiguationAnalyzerSources = oldSources
 	}()
 
 	bodies := map[string][]byte{
@@ -746,13 +748,19 @@ func TestDisambiguationWitnessPersistentContentCache(t *testing.T) {
 		t.Fatalf("changed tool version did not miss: %+v calls=%d", tool, analyzerCalls)
 	}
 	disambiguationAnalyzerVersion = oldVersion
+	disambiguationAnalyzerSources = oldSources + "+changed"
+	sources := read("/repo-a", "tree-a")
+	if sources.CacheState != "miss" || sources.CacheIdentity == oracle.CacheIdentity || analyzerCalls != 5 {
+		t.Fatalf("changed analyzer sources did not miss: %+v calls=%d", sources, analyzerCalls)
+	}
+	disambiguationAnalyzerSources = oldSources
 
 	cachePath := filepath.Join(cacheRoot, oracle.CacheIdentity+".json")
 	if err := os.WriteFile(cachePath, []byte("not-json"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	corrupt := read("/repo-a", "tree-a")
-	if corrupt.CacheState != "miss" || corrupt.CacheReason != "corrupt" || analyzerCalls != 5 {
+	if corrupt.CacheState != "miss" || corrupt.CacheReason != "corrupt" || analyzerCalls != 6 {
 		t.Fatalf("corrupt cache was not a miss: %+v calls=%d", corrupt, analyzerCalls)
 	}
 	if !bytes.Equal(semanticJSON(corrupt), semanticJSON(oracle)) {

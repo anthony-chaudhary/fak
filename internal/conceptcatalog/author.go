@@ -3,17 +3,17 @@ package conceptcatalog
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 )
 
 type PositionRequest struct {
@@ -334,10 +334,6 @@ func generateShadow(c Catalog, plan Plan) (Plan, shadowSnapshot, error) {
 		}
 	}
 	outDir := filepath.Join(shadow, "generated")
-	python, err := ResolvePython()
-	if err != nil {
-		return Plan{}, snap, fmt.Errorf("canonical generation unsupported: %w", err)
-	}
 	workspace := conceptGitTree{root: root}
 	if plan.Mode == "position" {
 		var cleanup func()
@@ -347,42 +343,14 @@ func generateShadow(c Catalog, plan Plan) (Plan, shadowSnapshot, error) {
 		}
 		defer cleanup()
 	}
-	// Use the exported script as well as exported source: a peer's generator
-	// edit must not affect the bytes represented by this plan.
-	script = filepath.Join(workspace.root, "tools", "concept_disambiguation_scorecard.py")
-	cmd := exec.Command(python, script, "--workspace", workspace.root, "--data", shadow, "--markdown-dir", outDir, "--json")
-	if workspace.profile != nil {
-		cmd, err = workspace.profile.command(workspace.root, outDir, true)
-		if err != nil {
-			return Plan{}, snap, err
-		}
-		cmd.Args = append(cmd.Args, "--data", shadow)
+	// Score the exported source, not the live worktree: a peer's edit must not
+	// affect the bytes represented by this plan. An ACTION verdict (for example,
+	// unrelated families still carry coverage debt) is valid content.
+	payload, err := scorecard.Generate(context.Background(), workspace.root, shadow, outDir)
+	if err != nil {
+		return Plan{}, snap, fmt.Errorf("canonical generation failed: %w", err)
 	}
-	cmd.Dir = workspace.root
-	windowgate.ConfigureBackgroundCommand(cmd)
-	// Keep stderr off stdout: stdout is the snapshot JSON this plan is judged on.
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	b, er := cmd.Output()
-	if er != nil {
-		// The scorecard exits 1 for an honestly generated ACTION snapshot (for
-		// example, unrelated families still carry coverage debt). Exit 2 and
-		// missing output are generator failures; exit 1 is valid content.
-		var exitErr *exec.ExitError
-		if !errors.As(er, &exitErr) || exitErr.ExitCode() != 1 {
-			return Plan{}, snap, fmt.Errorf("canonical generation failed: %v: %s", er, strings.TrimSpace(stderr.String()))
-		}
-	}
-	if err = json.Unmarshal(b, &snap); err != nil {
-		// An exit-1 with EMPTY stdout is a generator crash, not an ACTION snapshot. The
-		// branch above deliberately admits exit 1 as valid content, so a Python traceback
-		// — which also exits 1 — arrives here as a bare "unexpected end of JSON input"
-		// with the only diagnosis, stderr, already discarded. Name the real failure.
-		if len(bytes.TrimSpace(b)) == 0 {
-			return Plan{}, snap, fmt.Errorf("canonical generator wrote no snapshot (exit ok, empty stdout): %s", strings.TrimSpace(stderr.String()))
-		}
-		return Plan{}, snap, fmt.Errorf("decode planned snapshot: %w", err)
-	}
+	snap = shadowSnapshotOf(payload)
 	// Every generated artifact ages with the catalog: a fresh scorecard beside a
 	// stale name index would answer one of the two questions from a retired catalog.
 	for _, art := range generatedArtifacts {

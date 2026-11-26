@@ -1,0 +1,3 @@
+package hiddencache
+
+func HiddenCacheProbe() {}

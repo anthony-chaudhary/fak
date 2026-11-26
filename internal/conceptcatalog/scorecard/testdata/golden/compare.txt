@@ -1,0 +1,14 @@
+disambiguation-debt: 63 -> 63   (1.0x fewer defects+gaps)
+  clarity:    56 -> 56
+  coverage:   7 -> 7
+score:        61.1/100 -> 61.1/100   (+0.0)
+crystal:      5 -> 5 crystal concepts
+pairs undrawn: 1 -> 1   (mutual 5 -> 5)
+ambiguous names: 5 -> 5
+  well-formed   18 -> 18
+  distinctness  8 -> 8
+  separation    6 -> 6
+  indexed       4 -> 4
+  grounded      10 -> 10
+  honesty       10 -> 10
+VERDICT: not yet 2x - need debt <=31 (now 63); 3x target <=21.

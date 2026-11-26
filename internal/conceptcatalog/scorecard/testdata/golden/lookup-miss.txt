@@ -1,0 +1,2 @@
+no lookup name matches 'zzqqxx' among 31 name(s) over 27 concept(s).
+The name is unpositioned: `--gaps` lists the tree tokens still waiting for a concept, and `fak concept position` lands one.

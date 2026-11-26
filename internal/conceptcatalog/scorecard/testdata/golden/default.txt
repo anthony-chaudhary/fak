@@ -1,0 +1,131 @@
+concept-disambiguation: ACTION (disambiguation_debt)
+  56 clarity defect(s) + 7 coverage gap(s) = disambiguation-debt 63; score 61.1/100 (grade D); heaviest KPI: well_formed (18); coverage 69.6% (16/23 confusable tree tokens positioned); standing 5 crystal / 16 defined / 1 drifting / 2 entangled / 1 colliding / 1 undocumented
+
+score 61.1/100 (grade D) = 6.1/10 - DISAMBIGUATION-DEBT 63 (clarity 56 + coverage 7) - 15 advisory
+coverage: 69.6% (16/23 confusable tree tokens positioned) - 27 concepts scored - 5 crystal
+standing: 5 crystal - 16 defined - 1 drifting - 2 entangled - 1 colliding - 1 undocumented
+separation: 10 confusable name-pair(s) - 5 mutual, 4 one-sided, 1 undrawn - 23 boundaries drawn (9 one-way); see --pairs
+index: 31 lookup name(s) -> 27 concept(s) - 5 shared by several, 4 of those unseparated; see --index
+debt by group: well-formed:18  distinctness:8  separation:6  indexed:4  grounded:10  honesty:10
+roll-up: 2 top-level abstraction(s) over 6 concepts (weakest-link) - 0 overclaim(s); see --rollup
+
+concepts (best verdict first):
+  verdict       kind       family           canonical
+  * crystal     symbol     cache            KVCache (engine)
+  * crystal     concept    cache            PromptCache
+  * crystal     symbol     gate             Decision (kernel)
+  * crystal     cli-verb   gate             Decision (scheduler)
+  * crystal     cli-verb   gate             AdmissionGate  ! expected defined
+  o defined     config     cache            CacheTTL5m  ! expected entangled
+  o defined     config     cache            CacheTTL1h
+  o defined     symbol     cache            MetaCache
+  o defined     symbol     cache            KV Cache Duplicate
+  o defined     metric     gate             RunGate
+  o defined     symbol     gate             GatePolicy  ! expected colliding
+  o defined     concept    loop             CycleA
+  o defined     concept    loop             CycleB
+  o defined     concept    loop             SelfParent
+  o defined     symbol     session          SessionRef  ! expected entangled
+  o defined     symbol     session          SessionRow
+  o defined     doc-term   session          SessionÉtat 🙂
+  o defined     concept    session          Session'Q (a)  ! expected entangled
+  o defined     concept    session          Session'Q (b)  ! expected entangled
+  o defined     concept    session          Q"uo'te (one)  ! expected entangled
+  o defined     concept    session          Q"uo'te (two)  ! expected entangled
+  ~ drifting    concept    loop             BadParent  ! expected defined
+  = entangled   symbol     session          SessionKey
+  = entangled   symbol     session          SessionKeys
+  x colliding   symbol     gate             gate_policy
+  . undocumented subsystem  cache            Cache Meta (store)
+    bogus       weird      nofamily         Orphan Thing  ! expected undocumented
+
+per-KPI (worst first):
+  score debt  group         kpi                    detail
+      0   18  well-formed   well_formed            18 malformed field(s)
+      0   10  honesty       clarity_consistent     10 verdict overclaim(s)
+      4    6  grounded      grounded               6 ungrounded concept(s)
+     20    4  distinctness  disambiguated          4 undisambiguated confusable concept(s)
+     28    4  indexed       index_resolves         4 unresolvable shared lookup name(s)
+     60    4  separation    pair_mutual            4 one-sided boundary on a confusable pair
+     64    3  grounded      alias_resolved         3 unresolvable alias(es)
+     50    2  distinctness  canonical_unique       2 canonical-name collision(s)
+     68    2  distinctness  defined                2 undefined concept(s)
+     80    1  separation    pair_separated         1 confusable pair(s) with no line drawn
+     86    1  separation    reference_resolves     1 dangling distinct_from reference(s)
+     88    1  grounded      anchored               1 missing/dangling anchor(s)
+     76    0  honesty       hierarchy_soft         4 hierarchy issue(s)
+     88    0  honesty       kind_grounding_soft    2 kind/grounding mismatch
+    100    0  separation    mutuality_soft         9/23 boundaries drawn one-way only
+
+coverage by family (covered / discovered):
+  cache              7/12   (5 unpositioned)
+  gate               3/4    (1 unpositioned)
+  session            6/7    (1 unpositioned)
+  loop               0/0    (0 unpositioned)
+
+disambiguation-debt work-list:
+  well_formed (18):
+      - row[16]: missing field 'id'
+      - row[16]: missing field 'definition'
+      - row[16]: missing field 'distinction'
+      - row[16]: missing field 'distinct_from'
+      - row[16]: missing field 'aliases'
+      - row[16]: missing field 'grounding'
+      - row[16]: missing field 'glossary_anchor'
+      - row[16]: missing field 'gaps'
+      - row[16]: missing id
+      - row[16]: family 'nofamily' not declared in _meta.json
+      - row[16]: kind 'weird' not in ['cli-verb', 'concept', 'config', 'doc-term', 'metric', 'subsystem', 'symbol']
+      - row[16]: grounding_kind 'nope' not in ['claims', 'doc', 'metric', 'path', 'symbol', 'verb']
+      ... and 6 more
+  clarity_consistent (10):
+      - cachettl5m: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin cachettl1h (2 edit(s) apart sharing 8 characters: cachettl5m / cachettl1h)
+      - admissiongate: claims 'crystal' but evidence implies 'defined' - boundary drawn but not written in a discoverable doc
+      - gatepolicy1: claims 'defined' but evidence implies 'colliding' - shares a canonical name with another concept
+      - badparent: claims 'drifting' but evidence implies 'defined' - boundary drawn but not written in a discoverable doc
+      - 16: claims 'bogus' but evidence implies 'undocumented' - no definition
+      - sessionref: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin sessionkey (2 edit(s) apart sharing 7 characters: sessionref / sessionkey)
+      - sessionquote1: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin quoteboth1 (both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it))
+      - sessionquote2: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin sessionquote1 (both are plainly named 'sessionq' once the gloss is stripped)
+      - quoteboth1: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin sessionquote1 (both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it))
+      - quoteboth2: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin sessionquote1 (both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it))
+  grounded (6):
+      - decisionsched: grounding 'decision-sched' does not appear in the production corpus
+      - rungate: grounding 'notInTreeAnywhere' does not appear in the production corpus
+      - cyclea: grounding 'CycleA' does not appear in the production corpus
+      - cycleb: grounding 'CycleB' does not appear in the production corpus
+      - selfparent: grounding 'SelfParent' does not appear in the production corpus
+      - badparent: grounding 'BadParent' does not appear in the production corpus
+  disambiguated (4):
+      - cachemeta: in family 'cache' with siblings but no distinction line (what is it NOT?)
+      - cachemeta: distinct_from is empty but family 'cache' has siblings
+      - decisionsched: distinct_from ['Decision', 'ghost-concept'] resolves to no catalog id/canonical
+      - sessionquote2: distinct_from is empty but family 'session' has siblings
+  pair_mutual (4):
+      - sessionquote2: sessionquote1 separates from it, but it does not separate back (both are plainly named 'sessionq' once the gloss is stripped) - a reader arriving at sessionquote2 is not warned
+      - cachemeta: metacache separates from it, but it does not separate back (same words in a different order: cache meta) - a reader arriving at cachemeta is not warned
+      - cachettl5m: cachettl1h separates from it, but it does not separate back (2 edit(s) apart sharing 8 characters: cachettl5m / cachettl1h) - a reader arriving at cachettl5m is not warned
+      - sessionref: sessionkey separates from it, but it does not separate back (2 edit(s) apart sharing 7 characters: sessionref / sessionkey) - a reader arriving at sessionref is not warned
+  index_resolves (4):
+      - quoteboth1: shares a lookup name with sessionquote1 (Q"uo'te (one) vs Session'Q (a)) - both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it) - but they do not separate from each other; add sessionquote1 to quoteboth1's distinct_from (and back)
+      - quoteboth1: shares a lookup name with sessionquote2 (Q"uo'te (one) vs Session'Q (b)) - both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it) - but they do not separate from each other; add sessionquote2 to quoteboth1's distinct_from (and back)
+      - quoteboth2: shares a lookup name with sessionquote1 (Q"uo'te (two) vs Session'Q (a)) - both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it) - but they do not separate from each other; add sessionquote1 to quoteboth2's distinct_from (and back)
+      - quoteboth2: shares a lookup name with sessionquote2 (Q"uo'te (two) vs Session'Q (b)) - both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it) - but they do not separate from each other; add sessionquote2 to quoteboth2's distinct_from (and back)
+  alias_resolved (3):
+      - promptcache: alias 'missing.wire.key' resolves nowhere in the tree - a fabricated or stale alias retires coverage debt dishonestly
+      - rungate: alias 'fabricatedAlias' resolves nowhere in the tree - a fabricated or stale alias retires coverage debt dishonestly
+      - sessionetat: alias 'Сессия' resolves nowhere in the tree - a fabricated or stale alias retires coverage debt dishonestly
+  canonical_unique (2):
+      - gatepolicy1: canonical name collides with gatepolicy2 - rename one
+      - gatepolicy2: canonical name collides with gatepolicy1 - rename one
+  defined (2):
+      - cachemeta: no definition - one sentence on what it IS
+      - 16: no definition - one sentence on what it IS
+  reference_resolves (1):
+      - decisionsched: distinct_from 'ghost-concept' resolves to no catalog id, canonical name or index key - a dangling boundary
+  pair_separated (1):
+      - sessionkey: confusable with sessionkeys (1 edit(s) apart sharing 10 characters: sessionkey / sessionkeys) but neither names the other - add sessionkeys to sessionkey's distinct_from (and back)
+  anchored (1):
+      - admissiongate: glossary_anchor 'docs/missing.md' does not exist in the tree
+
+next: retire disambiguation-debt worst-first (--critical + per-KPI defects): rename true collisions, write missing definitions, draw + anchor the distinctions; then close coverage (--gaps); re-run to prove the drop

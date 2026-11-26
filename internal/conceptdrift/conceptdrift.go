@@ -12,13 +12,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf16"
 
+	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
@@ -63,8 +63,8 @@ type Options struct {
 	// Baseline is the baseline JSON path; empty means <data-dir>/drift-baseline.json
 	// (with data dir falling back to the workspace default above).
 	Baseline string
-	// Scorecard is the path to the grandfathered scorecard script; empty means
-	// <workspace>/tools/concept_disambiguation_scorecard.py.
+	// Scorecard named the Python scorecard script; the scorecard now runs
+	// in-process, so the value is accepted and not consulted.
 	Scorecard string
 	// RecordBaseline runs the scorecard once and records the baseline.
 	RecordBaseline bool
@@ -234,70 +234,70 @@ func GitHead(workspace string) string {
 // Scorecard subprocess + snapshot extraction.
 // ---------------------------------------------------------------------------
 
-// resolvePython finds an available Python interpreter ("python" on Windows,
-// "python3" elsewhere first, then the other spelling).
-func resolvePython() (string, error) {
-	primary, fallback := "python3", "python"
-	if runtime.GOOS == "windows" {
-		primary, fallback = "python", "python3"
-	}
-	if p, err := exec.LookPath(primary); err == nil {
-		return p, nil
-	}
-	if p, err := exec.LookPath(fallback); err == nil {
-		return p, nil
-	}
-	return "", fmt.Errorf("Python interpreter not found (tried %q and %q)", primary, fallback)
-}
-
-// RunScorecard runs the sibling scorecard as a subprocess and parses its --json
-// payload. A non-zero exit is NOT an error here: the scorecard exits 1 whenever
-// the namespace is not ok - which is exactly the drift state this watcher
-// measures. Only a missing / undecodable payload is an operational failure.
-func RunScorecard(workspace, dataDir, scorecard string) (map[string]any, error) {
-	python, err := resolvePython()
-	if err != nil {
-		return nil, fmt.Errorf("cannot launch scorecard: %v", err)
-	}
-	if scorecard == "" {
-		scorecard = filepath.Join(workspace, "tools", ScorecardName)
-	}
-	args := []string{scorecard, "--json", "--workspace", workspace}
-	if dataDir != "" {
-		args = append(args, "--data", dataDir)
-	}
+// RunScorecard folds the workspace through the in-process scorecard and returns
+// the slice of its payload this watcher reads, in the payload's decoded JSON
+// shape (numbers as float64): ok / verdict / finding / reason, corpus.standing
+// and corpus.coverage. A not-ok namespace is the drift state being measured, not
+// an error. The scorecard argument is accepted for compatibility with callers
+// that named the retired Python script; the fold no longer launches it.
+func RunScorecard(workspace, dataDir, _ string) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), scorecardTimeout)
 	defer cancel()
-	cmd := sysproc.CommandContext(ctx, python, args...)
-	cmd.Dir = workspace
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-	out, runErr := cmd.Output()
-	if runErr != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	p, err := scorecard.Generate(ctx, workspace, dataDir, "")
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("scorecard timed out after %s", scorecardTimeout)
 		}
-		var exitErr *exec.ExitError
-		if !errors.As(runErr, &exitErr) {
-			return nil, fmt.Errorf("cannot launch scorecard: %v", runErr)
-		}
-		// A non-zero exit still carries a parseable payload: fall through.
+		return nil, fmt.Errorf("cannot run scorecard: %v", err)
 	}
-	payload, err := DecodeJSONBytes(out)
+	return snapshotDoc(p), nil
+}
+
+// snapshotDoc projects the fields ExtractSnapshot and AuditError read.
+func snapshotDoc(p *scorecard.Payload) map[string]any {
+	corpus := map[string]any{}
+	if c := p.Corpus; c != nil {
+		standing := map[string]any{}
+		for _, kv := range c.Standing {
+			standing[kv.Key] = float64(kv.N)
+		}
+		uncovered := make([]any, 0, len(c.Coverage.Uncovered))
+		for _, u := range c.Coverage.Uncovered {
+			uncovered = append(uncovered, map[string]any{"family": jsonScalar(u.Family), "token": u.Token})
+		}
+		corpus["standing"] = standing
+		corpus["coverage"] = map[string]any{
+			"discovered":    float64(c.Coverage.Discovered),
+			"covered":       float64(c.Coverage.Covered),
+			"coverage_pct":  float64(c.Coverage.CoveragePct),
+			"coverage_debt": float64(c.Coverage.CoverageDebt),
+			"uncovered":     uncovered,
+		}
+		corpus["coverage_debt"] = float64(c.CoverageDebt)
+		corpus["clarity_defects"] = float64(c.ClarityDefects)
+		corpus["disambiguation_debt"] = float64(c.DisambiguationDebt)
+	}
+	return map[string]any{
+		"schema": p.Schema, "ok": p.OK, "verdict": p.Verdict, "finding": p.Finding,
+		"reason": p.Reason, "workspace": p.Workspace, "corpus": corpus,
+	}
+}
+
+// jsonScalar renders a family id the way decoding its JSON would: a string as
+// itself, anything else as its JSON text.
+func jsonScalar(v scorecard.Value) any {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, err := json.Marshal(v)
 	if err != nil {
-		tail := tailOf(stderrBuf.Bytes(), 400)
-		exitCode := 0
-		var exitErr *exec.ExitError
-		if errors.As(runErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		}
-		return nil, fmt.Errorf("cannot parse scorecard JSON (exit %d): %v; stderr: %s", exitCode, err, tail)
+		return nil
 	}
-	doc, ok := payload.(map[string]any)
-	if !ok {
-		return nil, errors.New("scorecard payload is not a JSON object")
+	var out any
+	if json.Unmarshal(b, &out) != nil {
+		return nil
 	}
-	return doc, nil
+	return out
 }
 
 // tailOf returns the last n bytes of b as trimmed ASCII-safe text.

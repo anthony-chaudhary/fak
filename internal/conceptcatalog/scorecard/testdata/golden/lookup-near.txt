@@ -1,0 +1,46 @@
+'Sess' -> 8 lookup name(s) (no exact match; nearest keys)
+
+  SessionEtat
+    -> SessionÉtat 🙂  [session / doc-term / defined]  via grounding
+       État d'une session — with 'single' and "double" quotes.
+       not to be confused with: sessionkey
+  SessionKey
+    -> SessionKey  [session / symbol / entangled]  via canonical
+       One session key.
+       not to be confused with: sessionkeys, sessionref
+  SessionKeys
+    -> SessionKeys  [session / symbol / entangled]  via canonical
+       Many session keys.
+       not to be confused with: sessionkey, sessionrow
+! Session'Q (a)   (also: Session'Q (b))
+    -> Session'Q (a)  [session / concept / defined]  via canonical
+       Apostrophe one | piped.
+       not to be confused with: sessionquote2
+    -> Session'Q (b)  [session / concept / defined]  via canonical
+       Apostrophe two.
+       not to be confused with: sessionquote1
+  SessionRef
+    -> SessionRef  [session / symbol / defined]  via canonical
+       A reference to a session.
+       not to be confused with: sessionkey, sessionrow
+  SessionRow
+    -> SessionRow  [session / symbol / defined]  via canonical
+       A stored session row.
+       not to be confused with: sessionref
+! SessionSweep
+    -> Q"uo'te (one)  [session / concept / defined]  via grounding
+       Both quotes.
+       not to be confused with: quoteboth2, sessionquote1, sessionquote2
+    -> Q"uo'te (two)  [session / concept / defined]  via grounding
+       Both quotes again.
+       not to be confused with: quoteboth1, sessionquote1, sessionquote2
+    -> Session'Q (a)  [session / concept / defined]  via grounding
+       Apostrophe one | piped.
+       not to be confused with: quoteboth1, quoteboth2, sessionquote2
+    -> Session'Q (b)  [session / concept / defined]  via grounding
+       Apostrophe two.
+       not to be confused with: quoteboth1, quoteboth2, sessionquote1
+  SessionÉtat 🙂
+    -> SessionÉtat 🙂  [session / doc-term / defined]  via canonical
+       État d'une session — with 'single' and "double" quotes.
+       not to be confused with: sessionkey

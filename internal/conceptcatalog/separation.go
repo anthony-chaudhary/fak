@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 )
 
 // Separation is a MUTUAL property of two concepts, not a property of one row.
@@ -254,6 +256,19 @@ type shadowSnapshot struct {
 			Unseparated []UnseparatedPair `json:"unseparated"`
 		} `json:"separation"`
 	} `json:"corpus"`
+}
+
+// shadowSnapshotOf takes the unseparated pairs straight off the in-process fold.
+func shadowSnapshotOf(p *scorecard.Payload) shadowSnapshot {
+	var s shadowSnapshot
+	if p == nil || p.Corpus == nil {
+		return s
+	}
+	for _, u := range p.Corpus.Separation.Unseparated {
+		s.Corpus.Separation.Unseparated = append(s.Corpus.Separation.Unseparated,
+			UnseparatedPair{A: u.A, B: u.B, Kind: u.Kind, Why: u.Why, State: u.State})
+	}
+	return s
 }
 
 // unseparatedFor lists the twins of id that the planned catalog would leave

@@ -18,7 +18,7 @@ func conceptCLIFixture(t *testing.T) (conceptcatalog.Catalog, string) {
 	data := filepath.Join(root, conceptcatalog.DataRel)
 	os.MkdirAll(data, 0755)
 	meta := conceptcatalog.Metadata{Families: []conceptcatalog.Family{{ID: "cache", Name: "Cache", Roots: []string{"cache"}}}}
-	b, _ := json.Marshal(meta)
+	b, _ := json.Marshal(map[string]any{"meta": map[string]string{"as_of": "2026-11-24", "fak_version": "test"}, "families": meta.Families})
 	os.WriteFile(filepath.Join(data, "_meta.json"), b, 0600)
 	os.MkdirAll(filepath.Join(root, "docs"), 0755)
 	os.WriteFile(filepath.Join(root, "docs", "glossary.md"), []byte("# Glossary\n"), 0600)
@@ -61,25 +61,40 @@ func TestConceptGeneratePreservesClassification(t *testing.T) {
 	if err := os.MkdirAll(tools, 0755); err != nil {
 		t.Fatal(err)
 	}
-	script := `import argparse, json
-from pathlib import Path
-p=argparse.ArgumentParser()
-p.add_argument("--workspace")
-p.add_argument("--data")
-p.add_argument("--markdown-dir")
-p.add_argument("--json", action="store_true")
-a=p.parse_args()
-data=Path(a.data) if a.data else Path(a.workspace)/"tools"/"concept_disambiguation_scorecard.data"
-meta=json.loads((data/"_meta.json").read_text())
-tokens=[x.get("token") for x in meta["families"][0].get("classifications", [])]
-out=Path(a.markdown_dir); out.mkdir(parents=True, exist_ok=True)
-for name in ("README.md","INDEX.md","DEBT.md","GAPS.md","PAIRS.md","CONCEPTS.md","FAMILIES.md","SOURCES.md","ADR.md"):
-    (out/name).write_text("tokens="+",".join(tokens)+"\n")
-print(json.dumps({"families": [{"id": "cache", "gaps": [], "coverage": 1.0}], "critical": {"unresolved": 0, "low_coverage_families": 0}}))
-`
-	if err := os.WriteFile(filepath.Join(tools, "concept_disambiguation_scorecard.py"), []byte(script), 0600); err != nil {
+	// The script's presence marks a tree that carries generated concept docs;
+	// the generator itself runs in-process.
+	if err := os.WriteFile(filepath.Join(tools, "concept_disambiguation_scorecard.py"), []byte("# parity oracle\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Two production files make the probe token a discovered, uncovered member
+	// of the cache family, so the generated page must change once it is
+	// classified away.
+	for _, pkg := range []string{"a", "b"} {
+		dir := filepath.Join(root, "internal", pkg)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, pkg+".go"), []byte("package "+pkg+"\n\nconst cache_probe_token = 1\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	generatePages := func(cat conceptcatalog.Catalog) string {
+		t.Helper()
+		var out, errb bytes.Buffer
+		if code := runConceptGenerate(&out, &errb, cat, []string{"--json"}); code != 0 {
+			t.Fatalf("generate code=%d err=%s", code, errb.String())
+		}
+		var pages strings.Builder
+		for _, name := range []string{"README.md", "INDEX.md"} {
+			page, err := os.ReadFile(filepath.Join(root, "docs", "concept-disambiguation-scorecard", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pages.Write(page)
+		}
+		return pages.String()
+	}
+	before := generatePages(c)
 
 	var out, errb bytes.Buffer
 	if code := runConceptClassify(&out, &errb, c, []string{"--family", "cache", "--token", "cache_probe_token", "--category", "incidental", "--reason", "fixture"}); code != 0 {
@@ -89,11 +104,7 @@ print(json.dumps({"families": [{"id": "cache", "gaps": [], "coverage": 1.0}], "c
 	if err != nil {
 		t.Fatal(err)
 	}
-	out.Reset()
-	errb.Reset()
-	if code := runConceptGenerate(&out, &errb, reloaded, []string{"--json"}); code != 0 {
-		t.Fatalf("generate code=%d err=%s", code, errb.String())
-	}
+	after := generatePages(reloaded)
 	meta, err := os.ReadFile(filepath.Join(root, conceptcatalog.DataRel, "_meta.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -101,12 +112,18 @@ print(json.dumps({"families": [{"id": "cache", "gaps": [], "coverage": 1.0}], "c
 	if !bytes.Contains(meta, []byte("cache_probe_token")) {
 		t.Fatal("classification disappeared from canonical source after regeneration")
 	}
-	page, err := os.ReadFile(filepath.Join(root, "docs", "concept-disambiguation-scorecard", "README.md"))
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(before, "| As of | 2026-11-24 (fak test) |") {
+		t.Fatalf("generator did not render the catalog it was given:\n%s", before)
 	}
-	if !bytes.Contains(page, []byte("cache_probe_token")) {
-		t.Fatal("generator did not read back the classification written by concept classify")
+	// Coverage-by-family row: positioned | discovered | uncovered.
+	if !strings.Contains(before, "| cache | 0 | 1 | 1 |") {
+		t.Fatalf("unclassified probe token is not an uncovered cache token before classify:\n%s", before)
+	}
+	if !strings.Contains(after, "| cache | 0 | 0 | 0 |") || strings.Contains(after, "| cache | 0 | 1 | 1 |") {
+		t.Fatalf("generated page did not read back the classification written by concept classify:\n%s", after)
+	}
+	if !strings.Contains(after, "**0** (clarity 0 + coverage 0)") {
+		t.Fatalf("classified token still counts as coverage debt on the generated page:\n%s", after)
 	}
 }
 
@@ -181,8 +198,21 @@ func runGitAt(root string, args ...string) (string, error) {
 	return string(out), err
 }
 
-func TestConceptGenerateFailsLoudWhenPythonMissing(t *testing.T) {
+// undateConceptFixture drops the meta block, which the generator refuses.
+func undateConceptFixture(t *testing.T, c conceptcatalog.Catalog) {
+	t.Helper()
+	b, err := json.Marshal(c.Meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(c.Dir, "_meta.json"), b, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConceptGenerateFailsLoudOnUndatedCatalog(t *testing.T) {
 	c, root := conceptCLIFixture(t)
+	undateConceptFixture(t, c)
 	outDir := filepath.Join(root, "docs", "concept-disambiguation-scorecard")
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		t.Fatal(err)
@@ -192,48 +222,48 @@ func TestConceptGenerateFailsLoudWhenPythonMissing(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	emptyPath := t.TempDir()
-	t.Setenv("PATH", emptyPath)
 
 	var out, errb bytes.Buffer
 	code := runConceptGenerate(&out, &errb, c, []string{})
 	if code == 0 {
-		t.Fatal("concept generate must fail with non-zero code when python interpreter is missing")
+		t.Fatal("concept generate must fail with non-zero code when the catalog is undated")
 	}
-	if !strings.Contains(errb.String(), "Python interpreter not found") {
-		t.Fatalf("concept generate must report missing interpreter, got: %s", errb.String())
+	if !strings.Contains(errb.String(), "refusing to render an undated scorecard") {
+		t.Fatalf("concept generate must report the refusal, got: %s", errb.String())
 	}
 	if strings.Contains(out.String(), "GENERATED concept scorecard") {
 		t.Fatal("concept generate must not report success when generation failed")
+	}
+	for _, name := range []string{"README.md", "INDEX.md"} {
+		if got, _ := os.ReadFile(filepath.Join(outDir, name)); string(got) != "stale\n" {
+			t.Fatalf("%s was rewritten by a refused generation: %q", name, got)
+		}
 	}
 }
 
 // fak-test:runtime fast est=600ms
 func TestConceptGenerateRequiresNewCompleteArtifacts(t *testing.T) {
-	if _, err := conceptcatalog.ResolvePython(); err != nil {
-		t.Skip(err)
-	}
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip(err)
 	}
 	for _, tc := range []struct {
 		name     string
 		args     []string
-		script   string
+		undated  bool
 		wantCode int
 	}{
-		{"crash", nil, "raise RuntimeError('generation failed')\n", 1},
-		{"partial ACTION", nil, "(out/'README.md').write_bytes(b'new\\n')\nraise SystemExit(1)\n", 1},
-		{"partial success", nil, "(out/'README.md').write_bytes(b'new\\n')\n", 1},
-		{"complete failure", nil, "for name in ('README.md', 'INDEX.md'): (out/name).write_bytes(b'new\\n')\nraise SystemExit(2)\n", 1},
-		{"complete ACTION", []string{"--json"}, "for name in ('README.md', 'INDEX.md'): (out/name).write_bytes(b'new\\n')\nraise SystemExit(1)\n", 0},
-		{"explicit worktree", []string{"--staged=false", "--json"}, "for name in ('README.md', 'INDEX.md'): (out/name).write_bytes(b'new\\n')\nraise SystemExit(1)\n", 0},
-		{"tree requires staged mode", []string{"--tree", "HEAD"}, "raise RuntimeError('must not run')\n", 2},
-		{"unknown flag", []string{"--unknown"}, "raise RuntimeError('must not run')\n", 2},
-		{"positional unsupported", []string{"extra"}, "raise RuntimeError('must not run')\n", 2},
+		{"undated refusal", nil, true, 1},
+		{"complete ACTION", []string{"--json"}, false, 0},
+		{"explicit worktree", []string{"--staged=false", "--json"}, false, 0},
+		{"tree requires staged mode", []string{"--tree", "HEAD"}, false, 2},
+		{"unknown flag", []string{"--unknown"}, false, 2},
+		{"positional unsupported", []string{"extra"}, false, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, root := conceptCLIFixture(t)
+			c, root := conceptCLIFixture(t)
+			if tc.undated {
+				undateConceptFixture(t, c)
+			}
 			if out, err := runGitAt(root, "init"); err != nil {
 				t.Fatalf("git init: %v: %s", err, out)
 			}
@@ -247,25 +277,11 @@ func TestConceptGenerateRequiresNewCompleteArtifacts(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			script := `import argparse
-from pathlib import Path
-p = argparse.ArgumentParser()
-p.add_argument('--workspace')
-p.add_argument('--markdown-dir')
-a = p.parse_args()
-out = Path(a.markdown_dir)
-out.mkdir(parents=True, exist_ok=True)
-` + tc.script
-			if err := os.WriteFile(filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"), []byte(script), 0600); err != nil {
-				t.Fatal(err)
-			}
 			var out, errb bytes.Buffer
 			if code := runConceptCLI(&out, &errb, append([]string{"generate"}, tc.args...)); code != tc.wantCode {
 				t.Fatalf("code=%d want=%d stdout=%s stderr=%s", code, tc.wantCode, out.String(), errb.String())
 			}
-			want := "old\n"
 			if tc.wantCode == 0 {
-				want = "new\n"
 				var result struct {
 					OK bool `json:"ok"`
 				}
@@ -275,12 +291,37 @@ out.mkdir(parents=True, exist_ok=True)
 			} else if out.Len() != 0 || errb.Len() == 0 {
 				t.Fatalf("failure must be diagnostic only: stdout=%s stderr=%s", out.String(), errb.String())
 			}
-			for _, name := range []string{"README.md", "INDEX.md"} {
+			for name, title := range map[string]string{"README.md": "fak concept-disambiguation scorecard", "INDEX.md": "fak concept name index"} {
 				got, err := os.ReadFile(filepath.Join(outDir, name))
-				if err != nil || string(got) != want {
-					t.Fatalf("%s = %q, %v; want %q", name, got, err, want)
+				if err != nil {
+					t.Fatal(err)
+				}
+				regenerated := strings.HasPrefix(string(got), "---\ntitle: \""+title)
+				if regenerated != (tc.wantCode == 0) || (!regenerated && string(got) != "old\n") {
+					t.Fatalf("%s = %q after exit %d", name, got, tc.wantCode)
 				}
 			}
 		})
+	}
+}
+
+func TestConceptScorecardVerbFoldsInProcess(t *testing.T) {
+	_, root := conceptCLIFixture(t)
+	var out, errb bytes.Buffer
+	code := runConcept(&out, &errb, []string{"scorecard", "--workspace", root, "--json"})
+	if code != 0 && code != 1 {
+		t.Fatalf("code=%d err=%s", code, errb.String())
+	}
+	var payload struct {
+		Schema string `json:"schema"`
+		Corpus struct {
+			Rows int `json:"rows"`
+		} `json:"corpus"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("scorecard --json is not JSON: %v: %s", err, out.String())
+	}
+	if payload.Schema != "fak-concept-disambiguation-scorecard/1" {
+		t.Fatalf("schema = %q", payload.Schema)
 	}
 }

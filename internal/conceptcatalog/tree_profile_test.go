@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 )
 
 // fak-test:runtime fast est=10ms lane=default
@@ -149,14 +149,14 @@ func TestConceptProfileUnknownIsGeneric(t *testing.T) {
 
 // fak-test:runtime fast est=1ms lane=default
 func TestConceptProfileVersionedPins(t *testing.T) {
-	for _, tc := range []struct{ profile, digest, stdlib string }{
-		{conceptTreeProfileV1, "62313b76d15080e1d912367e6a29170fc5dd71489522e446d10719331a65ddb2", "bcd17fc66d37e32b97d12ceda5d089bf47e7ea6e1b494615c5c434ab17297fc8"},
-		{conceptTreeProfileV2, "4312ceeba9394b80c3f4145dc4afe413d3eb4b085513b9fc7ae93b0b80caeade", "c8646082e9310ad2fa3cb8cd0038c87e63041f95444adba8bffa6163484bff14"},
-		{conceptTreeProfileV3, "54a7277caa27eb516064e7d3a088dd68074b5ba45742c89efedb68c760e36e63", "c8646082e9310ad2fa3cb8cd0038c87e63041f95444adba8bffa6163484bff14"},
-		{"", "", ""}, {"isolated-v4", "", ""}, {"isolated-v2 ", "", ""}, {"isolated-v3 ", "", ""},
+	for _, tc := range []struct{ profile, digest string }{
+		{conceptTreeProfileV1, "62313b76d15080e1d912367e6a29170fc5dd71489522e446d10719331a65ddb2"},
+		{conceptTreeProfileV2, "4312ceeba9394b80c3f4145dc4afe413d3eb4b085513b9fc7ae93b0b80caeade"},
+		{conceptTreeProfileV3, "54a7277caa27eb516064e7d3a088dd68074b5ba45742c89efedb68c760e36e63"},
+		{"", ""}, {"isolated-v4", ""}, {"isolated-v2 ", ""}, {"isolated-v3 ", ""},
 	} {
-		got, stdlib, selected := conceptProfilePins(tc.profile)
-		if got != tc.digest || stdlib != tc.stdlib || selected != (tc.digest != "") {
+		got, selected := conceptProfilePins(tc.profile)
+		if got != tc.digest || selected != (tc.digest != "") {
 			t.Fatalf("profile %q: digest=%q selected=%v", tc.profile, got, selected)
 		}
 	}
@@ -206,28 +206,11 @@ func TestConceptProfileQualifiedTreeEquivalence(t *testing.T) {
 				t.Fatal(e)
 			}
 			out := filepath.Join(tmp, "generated")
-			cmd := newInvariantSnapshotCommand(export, out)
-			if mode != "full-ordinary" {
-				cmd, e = p.command(export, out, true)
-				if e != nil {
-					t.Fatal(e)
-				}
-			}
-			cmd.Dir = export
-			windowgate.ConfigureBackgroundCommand(cmd)
-			raw, runErr := cmd.Output()
-			if runErr != nil {
-				if _, ok := runErr.(*exec.ExitError); !ok {
-					t.Fatal(runErr)
-				}
-			}
+			raw, status := runConceptProfileScorecard(t, export, out)
 			if reused != "" && mode != "sparse-isolated" {
 				if e = extractGitTreeUsing(root, tree, export, compareConceptOracleTar); e != nil {
 					t.Fatal(e)
 				}
-			}
-			if e = p.verifyRuntime(); e != nil {
-				t.Fatal(e)
 			}
 			dest := filepath.Join(evidence, mode)
 			if e = os.MkdirAll(dest, 0755); e != nil {
@@ -281,10 +264,6 @@ func TestConceptProfileQualifiedTreeEquivalence(t *testing.T) {
 			if walkErr != nil {
 				t.Fatal(walkErr)
 			}
-			status := 0
-			if runErr != nil {
-				status = runErr.(*exec.ExitError).ExitCode()
-			}
 			metrics, _ := json.Marshal(map[string]any{"tree": tree, "allocated_bytes": allocated, "logical_bytes": logical, "exit_code": status})
 			if e = os.WriteFile(filepath.Join(dest, "storage.json"), metrics, 0644); e != nil {
 				t.Fatal(e)
@@ -301,20 +280,66 @@ func TestConceptProfileQualifiedTreeEquivalence(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=10ms lane=default
-func TestConceptProfileEnvironmentDrift(t *testing.T) {
-	for _, key := range []string{"PYTHONPATH", "PYTHONHOME", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT"} {
-		if conceptProfileEnvironmentEligible([]string{key + "=changed"}) {
-			t.Fatal("accepted", key)
+// runConceptProfileScorecard runs the in-process scorecard CLI exactly as a
+// generator invocation would, returning its --json stdout and exit status.
+func runConceptProfileScorecard(t *testing.T, workspace, out string) ([]byte, int) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	status := scorecard.Main([]string{"--workspace", workspace, "--markdown-dir", out, "--json"}, &stdout, &stderr, workspace)
+	if status != 0 && status != 1 {
+		t.Fatalf("scorecard exit %d: %s", status, stderr.String())
+	}
+	return stdout.Bytes(), status
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestConceptProfileQualifiesWithoutInterpreter(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tools", "concept_disambiguation_scorecard.data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := []byte("# archived generator\n")
+	for name, body := range map[string][]byte{
+		"tools/concept_disambiguation_scorecard.py":              script,
+		"tools/concept_disambiguation_scorecard.data/_meta.json": []byte("{}\n"),
+		"tools/helper.txt": []byte("surface\n"),
+	} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), body, 0644); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if !conceptProfileEnvironmentEligible([]string{"PATH=/bin", "PYTHONPATH="}) {
-		t.Fatal("ordinary environment refused")
-	}
-	t.Setenv("LD_AUDIT", "changed")
-	// The selected descriptor fails before touching even an invalid runtime.
-	if _, err := (&conceptTreeProfile{}).command(t.TempDir(), t.TempDir(), false); err == nil || !strings.Contains(err.Error(), "environment changed") {
+	gitInitFixture(t, root)
+	tree := gitWriteTree(t, root)
+	listing, err := git(root, "ls-tree", "-rz", tree, "--", "tools")
+	if err != nil {
 		t.Fatal(err)
+	}
+	surface, present, err := conceptToolsSurface(listing)
+	if err != nil || !present {
+		t.Fatalf("tools surface: present=%v err=%v", present, err)
+	}
+	// Leave only git reachable; qualification must not need an interpreter.
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip(err)
+	}
+	bin := t.TempDir()
+	if os.Symlink(gitPath, filepath.Join(bin, filepath.Base(gitPath))) != nil {
+		bin = filepath.Dir(gitPath)
+	}
+	t.Setenv("PATH", bin)
+	if python, lookErr := ResolvePython(); lookErr == nil {
+		t.Logf("interpreter %s shares git's directory; qualification still takes no runtime input", python)
+	}
+	p, err := qualifyConceptTree(root, tree, surface, conceptDigest(script))
+	if err != nil || p == nil || p.tree != tree {
+		t.Fatalf("pinned tree not qualified without an interpreter: %v %v", p, err)
+	}
+	if p, err = qualifyConceptTree(root, tree, surface, conceptDigest([]byte("other script\n"))); err != nil || p != nil {
+		t.Fatalf("changed archived script qualified: %v %v", p, err)
+	}
+	if p, err = qualifyConceptTree(root, tree, conceptDigest(nil), conceptDigest(script)); err != nil || p != nil {
+		t.Fatalf("changed tools surface qualified: %v %v", p, err)
 	}
 }
 
@@ -375,31 +400,32 @@ func TestConceptProfileDefaultPreservesCommitSubstitution(t *testing.T) {
 
 // fak-test:runtime integration est=1s lane=default
 func TestConceptProfileSelectedScriptCorruptionIsFatal(t *testing.T) {
-	if os.Getenv("FAK_TEST_CONCEPT_ROOT") == "" {
-		t.Skip("explicit runtime qualification only")
+	root, tree := os.Getenv("FAK_TEST_CONCEPT_ROOT"), os.Getenv("FAK_TEST_CONCEPT_TREE")
+	if root == "" || tree == "" {
+		t.Skip("explicit pinned-tree qualification only")
 	}
-	version := os.Getenv(conceptTreeProfileEnv)
-	if version == "" {
-		version = conceptTreeProfileV1
+	if os.Getenv(conceptTreeProfileEnv) == "" {
+		t.Setenv(conceptTreeProfileEnv, conceptTreeProfileV1)
 	}
-	_, stdlib, selected := conceptProfilePins(version)
-	if !selected {
-		t.Fatal("unknown explicit profile")
-	}
-	p, err := conceptRuntimeProfile(stdlib)
-	if err != nil || p == nil {
-		t.Fatalf("runtime: %v %v", p, err)
-	}
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "tools"), 0755); err != nil {
+	// Qualification reads the pinned tree; the archive stream then carries a
+	// corrupted script, which must refuse rather than fall back to a full export.
+	corrupt := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(corrupt, "tools"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "tools/concept_disambiguation_scorecard.py"), []byte("raise RuntimeError('corrupted archived generator')\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(corrupt, "tools/concept_disambiguation_scorecard.py"), []byte("raise RuntimeError('corrupted archived generator')\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	cmd, err := p.command(root, t.TempDir(), true)
-	if cmd != nil || err == nil || !strings.Contains(err.Error(), "archived generator identity") {
-		t.Fatalf("selected corruption must fail without fallback: %v %v", cmd, err)
+	gitInitFixture(t, corrupt)
+	old := gitArchiveCommand
+	t.Cleanup(func() { gitArchiveCommand = old })
+	gitArchiveCommand = func(string) *exec.Cmd {
+		return exec.Command("git", "-C", corrupt, "archive", "--format=tar", "HEAD")
+	}
+	got, cleanup, err := materializeGitTree(root, tree)
+	cleanup()
+	if err == nil || !strings.Contains(err.Error(), "archived generator identity") {
+		t.Fatalf("selected corruption must fail without fallback: %v %v", got.profile, err)
 	}
 }
 
@@ -740,24 +766,7 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 		}
 	} else {
 		out = t.TempDir()
-		cmd, e := p.command(partial, out, true)
-		if e != nil {
-			t.Fatal(e)
-		}
-		cmd.Dir = partial
-		windowgate.ConfigureBackgroundCommand(cmd)
-		var runErr error
-		raw, runErr = cmd.Output()
-		if runErr != nil {
-			exit, ok := runErr.(*exec.ExitError)
-			if !ok {
-				t.Fatal(runErr)
-			}
-			status = exit.ExitCode()
-		}
-	}
-	if err = p.verifyRuntime(); err != nil {
-		t.Fatal(err)
+		raw, status = runConceptProfileScorecard(t, partial, out)
 	}
 	if err = extractGitTreeUsing(root, tree, partial, compare); err != nil {
 		t.Fatal(err)

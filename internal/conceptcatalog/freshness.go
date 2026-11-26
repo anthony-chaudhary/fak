@@ -3,6 +3,7 @@ package conceptcatalog
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -474,82 +476,27 @@ func generate(root, out string) error {
 	return generateProfile(root, out, nil)
 }
 
-func generateProfile(root, out string, profile *conceptTreeProfile) error {
-	script := filepath.Join(root, "tools", "concept_disambiguation_scorecard.py")
-	python, err := ResolvePython()
-	if err != nil {
+// generateProfile renders the doc folder in-process. A profile only selects the
+// sparse export, which keeps every byte the scorecard reads, so it does not
+// change what is generated.
+func generateProfile(root, out string, _ *conceptTreeProfile) error {
+	if _, err := scorecard.Generate(context.Background(), root, "", out); err != nil {
 		return fmt.Errorf("generate scorecard: %w", err)
-	}
-	cmd := exec.Command(python, script, "--workspace", root, "--markdown-dir", out)
-	if profile != nil {
-		cmd, err = profile.command(root, out, false)
-		if err != nil {
-			return err
-		}
-	}
-	cmd.Dir = root
-	windowgate.ConfigureBackgroundCommand(cmd)
-	var stderr bytes.Buffer
-	cmd.Stdout = io.Discard
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
-			return fmt.Errorf("generate scorecard: %w: %s", err, strings.TrimSpace(stderr.String()))
-		}
-		for _, art := range generatedArtifacts {
-			if _, statErr := os.Stat(filepath.Join(out, art.Name)); statErr != nil {
-				return fmt.Errorf("generate scorecard: %w: %s", err, strings.TrimSpace(stderr.String()))
-			}
-		}
 	}
 	return nil
 }
 
 // runInvariantSnapshot is the single scorecard snapshot CheckInvariant consumes. It
-// emits the freshness artifacts and JSON verdict together, so both answers describe
-// exactly the same workspace walk.
+// writes the freshness artifacts and returns the verdict from the same fold, so both
+// answers describe exactly the same workspace walk.
 var runInvariantSnapshot = executeInvariantSnapshot
 
-// invariantSnapshotCommand is a test seam for process exit and transport behavior.
-// Production always uses the canonical Python scorecard command below.
-var invariantSnapshotCommand = newInvariantSnapshotCommand
-
-func newInvariantSnapshotCommand(root, generated string) *exec.Cmd {
-	script := filepath.Join(root, "tools", "concept_disambiguation_scorecard.py")
-	python, err := ResolvePython()
+func executeInvariantSnapshot(root, generated string) (scorecard.Summary, error) {
+	p, err := scorecard.Generate(context.Background(), root, "", generated)
 	if err != nil {
-		python = "python3"
-		if runtime.GOOS == "windows" {
-			python = "python"
-		}
+		return scorecard.Summary{}, fmt.Errorf("generate invariant snapshot: %w", err)
 	}
-	return exec.Command(python, script, "--workspace", root, "--markdown-dir", generated, "--json")
-}
-
-func executeInvariantSnapshot(root, generated string) ([]byte, error) {
-	cmd := invariantSnapshotCommand(root, generated)
-	cmd.Dir = root
-	windowgate.ConfigureBackgroundCommand(cmd)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		if _, ok := err.(*exec.ExitError); !ok {
-			return nil, err
-		}
-		// ACTION is a valid scorecard verdict. A non-zero exit is therefore a
-		// usable snapshot when stdout and every generated artifact are present.
-		if len(bytes.TrimSpace(out)) == 0 {
-			return nil, fmt.Errorf("generate invariant snapshot: %w: %s", err, strings.TrimSpace(stderr.String()))
-		}
-	}
-	for _, art := range generatedArtifacts {
-		if _, statErr := os.Stat(filepath.Join(generated, art.Name)); statErr != nil {
-			return nil, fmt.Errorf("generate invariant snapshot: missing %s: %w", art.Name, statErr)
-		}
-	}
-	return out, nil
+	return p.Summary(), nil
 }
 
 // CheckInvariant validates freshness, semantic catalog structure and scorecard critical state.
@@ -560,7 +507,7 @@ func CheckInvariant(root string) (InvariantResult, error) {
 	}
 	defer os.RemoveAll(tmp)
 	generated := filepath.Join(tmp, "generated")
-	out, err := runInvariantSnapshot(root, generated)
+	payload, err := runInvariantSnapshot(root, generated)
 	if err != nil {
 		return InvariantResult{}, err
 	}
@@ -578,28 +525,9 @@ func CheckInvariant(root string) (InvariantResult, error) {
 		b, _ := json.Marshal(ds)
 		inv.Detail = string(b)
 	}
-	var payload struct {
-		OK     bool   `json:"ok"`
-		Reason string `json:"reason"`
-		Corpus struct {
-			CoverageDebt int `json:"coverage_debt"`
-			ClarityDebt  int `json:"clarity_defects"`
-			Coverage     struct {
-				CoveragePct float64 `json:"coverage_pct"`
-				PerFamily   []struct {
-					Family     string `json:"family"`
-					Discovered int    `json:"discovered"`
-					Covered    int    `json:"covered"`
-				} `json:"per_family"`
-			} `json:"coverage"`
-		} `json:"corpus"`
-	}
-	if err := json.Unmarshal(out, &payload); err != nil {
-		return inv, fmt.Errorf("decode scorecard: %w", err)
-	}
-	inv.ClarityDebt = payload.Corpus.ClarityDebt
+	inv.ClarityDebt = payload.Corpus.ClarityDefects
 	inv.CriticalClean = inv.SemanticValid && inv.ClarityDebt == 0
-	inv.Coverage = payload.Corpus.Coverage.CoveragePct
+	inv.Coverage = float64(payload.Corpus.Coverage.CoveragePct)
 	inv.CoverageDebt = payload.Corpus.CoverageDebt
 	for _, f := range payload.Corpus.Coverage.PerFamily {
 		if f.Discovered > 0 {

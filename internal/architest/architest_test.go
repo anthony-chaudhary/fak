@@ -598,7 +598,7 @@ var tier = map[string]int{
 	"streamrules":           0, // #5920 (epic #5917): pure stdlib-only streaming rule matcher; per-call buffers, scopes, regex/glob matching, diagnostics, and turn reset. No decision-path wiring and imports no sibling leaf.
 	"testenv":               2, // credential-free test process boundary (#5914); imports envconfiglint(1), off the hot path.
 	"benchsweep":            1, // engine-agnostic benchmark sweep mechanics; stdlib-only, imports nothing internal.
-	"conceptdrift":          1, // concept-coverage drift watcher; stdlib plus pkg/sysproc, imports nothing internal.
+	"conceptdrift":          2, // concept-coverage drift watcher; folds the in-process conceptcatalog(2) scorecard plus pkg/sysproc, off the hot path.
 	"envchild":              1, // environment a tool child process may inherit; stdlib-only, imported by codetools(2) and sandbox(2).
 	"layoutoracle":          1, // independent tensor geometry/stride oracle; stdlib-only, imports nothing internal.
 	"opencoderesume":        1, // verifies OpenCode session identities before resume; stdlib-only, imported by sessionrecovery(2).

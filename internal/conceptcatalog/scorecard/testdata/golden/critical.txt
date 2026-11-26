@@ -1,0 +1,32 @@
+concept-disambiguation critical backlog (clarify worst-first):
+
+  [4 debt - undocumented] cachemeta (cache)
+      - one
+      - two
+      - three
+      - four
+  [3 debt - defined] quoteboth1 (session)
+  [3 debt - defined] quoteboth2 (session)
+  [3 debt - defined] sessionquote2 (session)
+  [3 debt - crystal] decisionsched (gate)
+  [2 debt - drifting] badparent (loop)
+  [2 debt - defined] cachettl5m (cache)
+      - draw the line against CacheTTL1h
+  [2 debt - defined] gatepolicy1 (gate)
+  [2 debt - defined] rungate (gate)
+  [2 debt - defined] sessionref (session)
+  [2 debt - crystal] admissiongate (gate)
+  [1 debt - colliding] gatepolicy2 (gate)
+  [1 debt - entangled] sessionkey (session)
+  [1 debt - defined] cyclea (loop)
+  [1 debt - defined] cycleb (loop)
+  [1 debt - defined] kvcache (cache)
+  [1 debt - defined] selfparent (loop)
+  [1 debt - defined] sessionetat (session)
+  [1 debt - defined] sessionquote1 (session)
+  [1 debt - crystal] kvcache (cache)
+  [1 debt - crystal] promptcache (cache)
+  [0 debt - bogus] None (nofamily)
+  [0 debt - entangled] sessionkeys (session)
+
+(rows with 0 debt and a crystal/defined verdict are omitted - they are not critical.)

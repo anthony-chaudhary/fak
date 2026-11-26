@@ -13,14 +13,24 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
+	"github.com/anthony-chaudhary/fak/internal/conceptcatalog/scorecard"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func runConcept(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak concept <position|classify|validate|freshness|admission> [flags]")
+		fmt.Fprintln(stderr, "usage: fak concept <position|classify|validate|freshness|admission|scorecard> [flags]")
 		return 2
+	}
+	// The scorecard takes its own --workspace/--data, so it must run before the
+	// catalog load below can refuse a workspace it was never asked to read.
+	if args[0] == "scorecard" {
+		root, rootErr := conceptRoot()
+		if rootErr != nil {
+			root = "."
+		}
+		return scorecard.Main(args[1:], stdout, stderr, root)
 	}
 	root, err := conceptRoot()
 	if err != nil {

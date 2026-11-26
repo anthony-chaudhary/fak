@@ -1,0 +1,2841 @@
+{
+  "schema": "fak-concept-disambiguation-scorecard/1",
+  "ok": false,
+  "verdict": "ACTION",
+  "finding": "disambiguation_debt",
+  "reason": "56 clarity defect(s) + 7 coverage gap(s) = disambiguation-debt 63; score 61.1/100 (grade D); heaviest KPI: well_formed (18); coverage 69.6% (16/23 confusable tree tokens positioned); standing 5 crystal / 16 defined / 1 drifting / 2 entangled / 1 colliding / 1 undocumented",
+  "next_action": "retire disambiguation-debt worst-first (--critical + per-KPI defects): rename true collisions, write missing definitions, draw + anchor the distinctions; then close coverage (--gaps); re-run to prove the drop",
+  "workspace": "<WORKSPACE>",
+  "corpus": {
+    "value": 0.611,
+    "value_unit": "quality_ratio",
+    "score": 61.1,
+    "legacy_score": 61.1,
+    "legacy_score_scale": 100,
+    "grade": "D",
+    "clarity_score": 45.2,
+    "clarity_value": 0.452,
+    "disambiguation_debt": 63,
+    "clarity_defects": 56,
+    "coverage_debt": 7,
+    "coverage": {
+      "discovered": 23,
+      "covered": 16,
+      "coverage_pct": 69.6,
+      "coverage_debt": 7,
+      "per_family": [
+        {
+          "family": "cache",
+          "discovered": 12,
+          "covered": 7,
+          "uncovered": [
+            "cacheevictor",
+            "hiddencacheprobe",
+            "cachestore",
+            "hiddencache",
+            "rootdoccache"
+          ]
+        },
+        {
+          "family": "gate",
+          "discovered": 4,
+          "covered": 3,
+          "uncovered": [
+            "cachegateway"
+          ]
+        },
+        {
+          "family": "session",
+          "discovered": 7,
+          "covered": 6,
+          "uncovered": [
+            "sessionledger"
+          ]
+        },
+        {
+          "family": "loop",
+          "discovered": 0,
+          "covered": 0,
+          "uncovered": []
+        }
+      ],
+      "uncovered": [
+        {
+          "family": "cache",
+          "token": "cacheevictor"
+        },
+        {
+          "family": "gate",
+          "token": "cachegateway"
+        },
+        {
+          "family": "cache",
+          "token": "cachestore"
+        },
+        {
+          "family": "cache",
+          "token": "hiddencache"
+        },
+        {
+          "family": "cache",
+          "token": "hiddencacheprobe"
+        },
+        {
+          "family": "cache",
+          "token": "rootdoccache"
+        },
+        {
+          "family": "session",
+          "token": "sessionledger"
+        }
+      ]
+    },
+    "soft_signals": 15,
+    "rows": 27,
+    "crystal_concepts": 5,
+    "families": 4,
+    "as_of": "2026-11-24",
+    "fak_version": "0.0.0-fixture",
+    "standing": {
+      "crystal": 5,
+      "defined": 16,
+      "drifting": 1,
+      "entangled": 2,
+      "colliding": 1,
+      "undocumented": 1
+    },
+    "debt_by_group": {
+      "well-formed": 18,
+      "distinctness": 8,
+      "separation": 6,
+      "indexed": 4,
+      "grounded": 10,
+      "honesty": 10
+    },
+    "kpi_scores": {
+      "well_formed": 0,
+      "canonical_unique": 50,
+      "defined": 68,
+      "disambiguated": 20,
+      "reference_resolves": 86,
+      "pair_separated": 80,
+      "pair_mutual": 60,
+      "grounded": 4,
+      "alias_resolved": 64,
+      "anchored": 88,
+      "index_resolves": 28,
+      "clarity_consistent": 0,
+      "kind_grounding_soft": 88,
+      "hierarchy_soft": 76,
+      "mutuality_soft": 100
+    },
+    "debt_by_kpi": {
+      "well_formed": 18,
+      "canonical_unique": 2,
+      "defined": 2,
+      "disambiguated": 4,
+      "reference_resolves": 1,
+      "pair_separated": 1,
+      "pair_mutual": 4,
+      "grounded": 6,
+      "alias_resolved": 3,
+      "anchored": 1,
+      "index_resolves": 4,
+      "clarity_consistent": 10,
+      "kind_grounding_soft": 0,
+      "hierarchy_soft": 0,
+      "mutuality_soft": 0
+    },
+    "breakdown": [
+      {
+        "kpi": "well_formed",
+        "group": "well-formed",
+        "score": 0,
+        "value": 0.0,
+        "debt": 18,
+        "detail": "18 malformed field(s)"
+      },
+      {
+        "kpi": "clarity_consistent",
+        "group": "honesty",
+        "score": 0,
+        "value": 0.0,
+        "debt": 10,
+        "detail": "10 verdict overclaim(s)"
+      },
+      {
+        "kpi": "grounded",
+        "group": "grounded",
+        "score": 4,
+        "value": 0.04,
+        "debt": 6,
+        "detail": "6 ungrounded concept(s)"
+      },
+      {
+        "kpi": "disambiguated",
+        "group": "distinctness",
+        "score": 20,
+        "value": 0.2,
+        "debt": 4,
+        "detail": "4 undisambiguated confusable concept(s)"
+      },
+      {
+        "kpi": "index_resolves",
+        "group": "indexed",
+        "score": 28,
+        "value": 0.28,
+        "debt": 4,
+        "detail": "4 unresolvable shared lookup name(s)"
+      },
+      {
+        "kpi": "pair_mutual",
+        "group": "separation",
+        "score": 60,
+        "value": 0.6,
+        "debt": 4,
+        "detail": "4 one-sided boundary on a confusable pair"
+      },
+      {
+        "kpi": "alias_resolved",
+        "group": "grounded",
+        "score": 64,
+        "value": 0.64,
+        "debt": 3,
+        "detail": "3 unresolvable alias(es)"
+      },
+      {
+        "kpi": "canonical_unique",
+        "group": "distinctness",
+        "score": 50,
+        "value": 0.5,
+        "debt": 2,
+        "detail": "2 canonical-name collision(s)"
+      },
+      {
+        "kpi": "defined",
+        "group": "distinctness",
+        "score": 68,
+        "value": 0.68,
+        "debt": 2,
+        "detail": "2 undefined concept(s)"
+      },
+      {
+        "kpi": "pair_separated",
+        "group": "separation",
+        "score": 80,
+        "value": 0.8,
+        "debt": 1,
+        "detail": "1 confusable pair(s) with no line drawn"
+      },
+      {
+        "kpi": "reference_resolves",
+        "group": "separation",
+        "score": 86,
+        "value": 0.86,
+        "debt": 1,
+        "detail": "1 dangling distinct_from reference(s)"
+      },
+      {
+        "kpi": "anchored",
+        "group": "grounded",
+        "score": 88,
+        "value": 0.88,
+        "debt": 1,
+        "detail": "1 missing/dangling anchor(s)"
+      },
+      {
+        "kpi": "hierarchy_soft",
+        "group": "honesty",
+        "score": 76,
+        "value": 0.76,
+        "debt": 0,
+        "detail": "4 hierarchy issue(s)"
+      },
+      {
+        "kpi": "kind_grounding_soft",
+        "group": "honesty",
+        "score": 88,
+        "value": 0.88,
+        "debt": 0,
+        "detail": "2 kind/grounding mismatch"
+      },
+      {
+        "kpi": "mutuality_soft",
+        "group": "separation",
+        "score": 100,
+        "value": 1.0,
+        "debt": 0,
+        "detail": "9/23 boundaries drawn one-way only"
+      }
+    ],
+    "leaderboard": [
+      {
+        "id": "kvcache",
+        "canonical": "KVCache (engine)",
+        "family": "cache",
+        "kind": "symbol",
+        "verdict": "crystal",
+        "expected_verdict": "crystal",
+        "definition": "Engine-side paged attention state, keyed by <layer> & position.",
+        "distinct_from": [
+          "promptcache"
+        ],
+        "grounding": "KVCache",
+        "glossary_anchor": "docs/fak/glossary.md"
+      },
+      {
+        "id": "promptcache",
+        "canonical": "PromptCache",
+        "family": "cache",
+        "kind": "concept",
+        "verdict": "crystal",
+        "expected_verdict": "crystal",
+        "definition": "The provider-side prompt cache.",
+        "distinct_from": [
+          "kvcache"
+        ],
+        "grounding": "PromptCache",
+        "glossary_anchor": "docs/fak/glossary.md"
+      },
+      {
+        "id": "cachettl5m",
+        "canonical": "CacheTTL5m",
+        "family": "cache",
+        "kind": "config",
+        "verdict": "defined",
+        "expected_verdict": "entangled",
+        "definition": "Five-minute cache lifetime.",
+        "distinct_from": [
+          "kvcache"
+        ],
+        "grounding": "CacheTTL5m",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "cachettl1h",
+        "canonical": "CacheTTL1h",
+        "family": "cache",
+        "kind": "config",
+        "verdict": "defined",
+        "expected_verdict": "defined",
+        "definition": "One-hour cache lifetime.",
+        "distinct_from": [
+          "cachettl5m"
+        ],
+        "grounding": "CacheTTL1h",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "cachemeta",
+        "canonical": "Cache Meta (store)",
+        "family": "cache",
+        "kind": "subsystem",
+        "verdict": "undocumented",
+        "expected_verdict": "undocumented",
+        "definition": "",
+        "distinct_from": [],
+        "grounding": "cacheMeta",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "metacache",
+        "canonical": "MetaCache",
+        "family": "cache",
+        "kind": "symbol",
+        "verdict": "defined",
+        "expected_verdict": "defined",
+        "definition": "Metadata about cached pages.",
+        "distinct_from": [
+          "cachemeta",
+          "Cache Meta"
+        ],
+        "grounding": "MetaCache",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "decisionkernel",
+        "canonical": "Decision (kernel)",
+        "family": "gate",
+        "kind": "symbol",
+        "verdict": "crystal",
+        "expected_verdict": "crystal",
+        "definition": "The kernel's allow/deny decision.",
+        "distinct_from": [
+          "decisionsched"
+        ],
+        "grounding": "Decision",
+        "glossary_anchor": "docs/fak/glossary.md"
+      },
+      {
+        "id": "decisionsched",
+        "canonical": "Decision (scheduler)",
+        "family": "gate",
+        "kind": "cli-verb",
+        "verdict": "crystal",
+        "expected_verdict": "crystal",
+        "definition": "The scheduler's placement decision.",
+        "distinct_from": [
+          "Decision",
+          "ghost-concept"
+        ],
+        "grounding": "decision-sched",
+        "glossary_anchor": "docs/fak/glossary.md"
+      },
+      {
+        "id": "admissiongate",
+        "canonical": "AdmissionGate",
+        "family": "gate",
+        "kind": "cli-verb",
+        "verdict": "crystal",
+        "expected_verdict": "defined",
+        "definition": "Admits a request.",
+        "distinct_from": [
+          "rungate"
+        ],
+        "grounding": "AdmissionGate",
+        "glossary_anchor": "docs/missing.md"
+      },
+      {
+        "id": "rungate",
+        "canonical": "RunGate",
+        "family": "gate",
+        "kind": "metric",
+        "verdict": "defined",
+        "expected_verdict": "defined",
+        "definition": "Counts run admissions.",
+        "distinct_from": [
+          "admissiongate"
+        ],
+        "grounding": "notInTreeAnywhere",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "gatepolicy1",
+        "canonical": "GatePolicy",
+        "family": "gate",
+        "kind": "symbol",
+        "verdict": "defined",
+        "expected_verdict": "colliding",
+        "definition": "Policy one.",
+        "distinct_from": [
+          "gatepolicy2"
+        ],
+        "grounding": "GatePolicy",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "gatepolicy2",
+        "canonical": "gate_policy",
+        "family": "gate",
+        "kind": "symbol",
+        "verdict": "colliding",
+        "expected_verdict": "colliding",
+        "definition": "Policy two.",
+        "distinct_from": [
+          "gatepolicy1"
+        ],
+        "grounding": "GatePolicy",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "cyclea",
+        "canonical": "CycleA",
+        "family": "loop",
+        "kind": "concept",
+        "verdict": "defined",
+        "expected_verdict": "defined",
+        "definition": "First of a cycle.",
+        "distinct_from": [
+          "cycleb"
+        ],
+        "grounding": "CycleA",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "cycleb",
+        "canonical": "CycleB",
+        "family": "loop",
+        "kind": "concept",
+        "verdict": "defined",
+        "expected_verdict": "defined",
+        "definition": "Second of a cycle.",
+        "distinct_from": [
+          "cyclea"
+        ],
+        "grounding": "CycleB",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "selfparent",
+        "canonical": "SelfParent",
+        "family": "loop",
+        "kind": "concept",
+        "verdict": "defined",
+        "expected_verdict": "defined",
+        "definition": "Points at itself.",
+        "distinct_from": [
+          "cyclea"
+        ],
+        "grounding": "SelfParent",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "badparent",
+        "canonical": "BadParent",
+        "family": "loop",
+        "kind": "concept",
+        "verdict": "drifting",
+        "expected_verdict": "defined",
+        "definition": "Dangling parent.",
+        "distinct_from": [
+          "cyclea"
+        ],
+        "grounding": "BadParent",
+        "glossary_anchor": ""
+      },
+      {
+        "id": null,
+        "canonical": "Orphan Thing",
+        "family": "nofamily",
+        "kind": "weird",
+        "verdict": "bogus",
+        "expected_verdict": "undocumented",
+        "definition": null,
+        "distinct_from": [],
+        "grounding": null,
+        "glossary_anchor": ""
+      },
+      {
+        "id": "kvcache",
+        "canonical": "KV Cache Duplicate",
+        "family": "cache",
+        "kind": "symbol",
+        "verdict": "defined",
+        "expected_verdict": "defined",
+        "definition": "Duplicate id row.",
+        "distinct_from": [
+          "promptcache"
+        ],
+        "grounding": "KVCache",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "sessionref",
+        "canonical": "SessionRef",
+        "family": "session",
+        "kind": "symbol",
+        "verdict": "defined",
+        "expected_verdict": "entangled",
+        "definition": "A reference to a session.",
+        "distinct_from": [
+          "sessionrow"
+        ],
+        "grounding": "SessionRef",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "sessionrow",
+        "canonical": "SessionRow",
+        "family": "session",
+        "kind": "symbol",
+        "verdict": "defined",
+        "expected_verdict": "defined",
+        "definition": "A stored session row.",
+        "distinct_from": [
+          "sessionref"
+        ],
+        "grounding": "SessionRow",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "sessionkey",
+        "canonical": "SessionKey",
+        "family": "session",
+        "kind": "symbol",
+        "verdict": "entangled",
+        "expected_verdict": "entangled",
+        "definition": "One session key.",
+        "distinct_from": [
+          "sessionref"
+        ],
+        "grounding": "SessionKey",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "sessionkeys",
+        "canonical": "SessionKeys",
+        "family": "session",
+        "kind": "symbol",
+        "verdict": "entangled",
+        "expected_verdict": "entangled",
+        "definition": "Many session keys.",
+        "distinct_from": [
+          "sessionrow"
+        ],
+        "grounding": "SessionKeys",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "sessionetat",
+        "canonical": "Session\u00c9tat \ud83d\ude42",
+        "family": "session",
+        "kind": "doc-term",
+        "verdict": "defined",
+        "expected_verdict": "defined",
+        "definition": "\u00c9tat d'une session \u2014 with 'single' and \"double\" quotes.",
+        "distinct_from": [
+          "sessionkey"
+        ],
+        "grounding": "SessionEtat",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "sessionquote1",
+        "canonical": "Session'Q (a)",
+        "family": "session",
+        "kind": "concept",
+        "verdict": "defined",
+        "expected_verdict": "entangled",
+        "definition": "Apostrophe one | piped.",
+        "distinct_from": [
+          "sessionquote2"
+        ],
+        "grounding": "SessionSweep",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "sessionquote2",
+        "canonical": "Session'Q (b)",
+        "family": "session",
+        "kind": "concept",
+        "verdict": "defined",
+        "expected_verdict": "entangled",
+        "definition": "Apostrophe two.",
+        "distinct_from": [],
+        "grounding": "SessionSweep",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "quoteboth1",
+        "canonical": "Q\"uo'te (one)",
+        "family": "session",
+        "kind": "concept",
+        "verdict": "defined",
+        "expected_verdict": "entangled",
+        "definition": "Both quotes.",
+        "distinct_from": [
+          "quoteboth2"
+        ],
+        "grounding": "SessionSweep",
+        "glossary_anchor": ""
+      },
+      {
+        "id": "quoteboth2",
+        "canonical": "Q\"uo'te (two)",
+        "family": "session",
+        "kind": "concept",
+        "verdict": "defined",
+        "expected_verdict": "entangled",
+        "definition": "Both quotes again.",
+        "distinct_from": [
+          "quoteboth1"
+        ],
+        "grounding": "SessionSweep",
+        "glossary_anchor": ""
+      }
+    ],
+    "critical": [
+      {
+        "id": "cachemeta",
+        "canonical": "Cache Meta (store)",
+        "family": "cache",
+        "verdict": "undocumented",
+        "debt": 4,
+        "distance": 5,
+        "gaps": [
+          "one",
+          "two",
+          "three",
+          "four",
+          "five"
+        ]
+      },
+      {
+        "id": "quoteboth1",
+        "canonical": "Q\"uo'te (one)",
+        "family": "session",
+        "verdict": "defined",
+        "debt": 3,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "quoteboth2",
+        "canonical": "Q\"uo'te (two)",
+        "family": "session",
+        "verdict": "defined",
+        "debt": 3,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "sessionquote2",
+        "canonical": "Session'Q (b)",
+        "family": "session",
+        "verdict": "defined",
+        "debt": 3,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "decisionsched",
+        "canonical": "Decision (scheduler)",
+        "family": "gate",
+        "verdict": "crystal",
+        "debt": 3,
+        "distance": 0,
+        "gaps": []
+      },
+      {
+        "id": "badparent",
+        "canonical": "BadParent",
+        "family": "loop",
+        "verdict": "drifting",
+        "debt": 2,
+        "distance": 2,
+        "gaps": []
+      },
+      {
+        "id": "cachettl5m",
+        "canonical": "CacheTTL5m",
+        "family": "cache",
+        "verdict": "defined",
+        "debt": 2,
+        "distance": 1,
+        "gaps": [
+          "draw the line against CacheTTL1h"
+        ]
+      },
+      {
+        "id": "gatepolicy1",
+        "canonical": "GatePolicy",
+        "family": "gate",
+        "verdict": "defined",
+        "debt": 2,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "rungate",
+        "canonical": "RunGate",
+        "family": "gate",
+        "verdict": "defined",
+        "debt": 2,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "sessionref",
+        "canonical": "SessionRef",
+        "family": "session",
+        "verdict": "defined",
+        "debt": 2,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "admissiongate",
+        "canonical": "AdmissionGate",
+        "family": "gate",
+        "verdict": "crystal",
+        "debt": 2,
+        "distance": 0,
+        "gaps": []
+      },
+      {
+        "id": "gatepolicy2",
+        "canonical": "gate_policy",
+        "family": "gate",
+        "verdict": "colliding",
+        "debt": 1,
+        "distance": 4,
+        "gaps": []
+      },
+      {
+        "id": "sessionkey",
+        "canonical": "SessionKey",
+        "family": "session",
+        "verdict": "entangled",
+        "debt": 1,
+        "distance": 3,
+        "gaps": []
+      },
+      {
+        "id": "cyclea",
+        "canonical": "CycleA",
+        "family": "loop",
+        "verdict": "defined",
+        "debt": 1,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "cycleb",
+        "canonical": "CycleB",
+        "family": "loop",
+        "verdict": "defined",
+        "debt": 1,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "kvcache",
+        "canonical": "KV Cache Duplicate",
+        "family": "cache",
+        "verdict": "defined",
+        "debt": 1,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "selfparent",
+        "canonical": "SelfParent",
+        "family": "loop",
+        "verdict": "defined",
+        "debt": 1,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "sessionetat",
+        "canonical": "Session\u00c9tat \ud83d\ude42",
+        "family": "session",
+        "verdict": "defined",
+        "debt": 1,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "sessionquote1",
+        "canonical": "Session'Q (a)",
+        "family": "session",
+        "verdict": "defined",
+        "debt": 1,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "kvcache",
+        "canonical": "KVCache (engine)",
+        "family": "cache",
+        "verdict": "crystal",
+        "debt": 1,
+        "distance": 0,
+        "gaps": []
+      },
+      {
+        "id": "promptcache",
+        "canonical": "PromptCache",
+        "family": "cache",
+        "verdict": "crystal",
+        "debt": 1,
+        "distance": 0,
+        "gaps": []
+      },
+      {
+        "id": null,
+        "canonical": "Orphan Thing",
+        "family": "nofamily",
+        "verdict": "bogus",
+        "debt": 0,
+        "distance": 9,
+        "gaps": []
+      },
+      {
+        "id": "sessionkeys",
+        "canonical": "SessionKeys",
+        "family": "session",
+        "verdict": "entangled",
+        "debt": 0,
+        "distance": 3,
+        "gaps": []
+      },
+      {
+        "id": "cachettl1h",
+        "canonical": "CacheTTL1h",
+        "family": "cache",
+        "verdict": "defined",
+        "debt": 0,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "metacache",
+        "canonical": "MetaCache",
+        "family": "cache",
+        "verdict": "defined",
+        "debt": 0,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "sessionrow",
+        "canonical": "SessionRow",
+        "family": "session",
+        "verdict": "defined",
+        "debt": 0,
+        "distance": 1,
+        "gaps": []
+      },
+      {
+        "id": "decisionkernel",
+        "canonical": "Decision (kernel)",
+        "family": "gate",
+        "verdict": "crystal",
+        "debt": 0,
+        "distance": 0,
+        "gaps": []
+      }
+    ],
+    "rollup": {
+      "abstractions": [
+        {
+          "id": "cyclea",
+          "canonical": "CycleA",
+          "family": "loop",
+          "declared_verdict": "defined",
+          "rolled_verdict": "defined",
+          "subtree_size": 2,
+          "child_count": 1,
+          "subtree_debt": 2,
+          "verdict_mix": {
+            "crystal": 0,
+            "defined": 2,
+            "drifting": 0,
+            "entangled": 0,
+            "colliding": 0,
+            "undocumented": 0
+          },
+          "depth": 28,
+          "weakest": {
+            "id": "cyclea",
+            "verdict": "defined"
+          },
+          "overclaim": false
+        },
+        {
+          "id": "cycleb",
+          "canonical": "CycleB",
+          "family": "loop",
+          "declared_verdict": "defined",
+          "rolled_verdict": "defined",
+          "subtree_size": 2,
+          "child_count": 1,
+          "subtree_debt": 2,
+          "verdict_mix": {
+            "crystal": 0,
+            "defined": 2,
+            "drifting": 0,
+            "entangled": 0,
+            "colliding": 0,
+            "undocumented": 0
+          },
+          "depth": 28,
+          "weakest": {
+            "id": "cyclea",
+            "verdict": "defined"
+          },
+          "overclaim": false
+        },
+        {
+          "id": "decisionkernel",
+          "canonical": "Decision (kernel)",
+          "family": "gate",
+          "declared_verdict": "crystal",
+          "rolled_verdict": "crystal",
+          "subtree_size": 2,
+          "child_count": 1,
+          "subtree_debt": 2,
+          "verdict_mix": {
+            "crystal": 2,
+            "defined": 0,
+            "drifting": 0,
+            "entangled": 0,
+            "colliding": 0,
+            "undocumented": 0
+          },
+          "depth": 0,
+          "weakest": {
+            "id": "admissiongate",
+            "verdict": "crystal"
+          },
+          "overclaim": false
+        },
+        {
+          "id": "kvcache",
+          "canonical": "KV Cache Duplicate",
+          "family": "cache",
+          "declared_verdict": "defined",
+          "rolled_verdict": "defined",
+          "subtree_size": 2,
+          "child_count": 1,
+          "subtree_debt": 1,
+          "verdict_mix": {
+            "crystal": 0,
+            "defined": 2,
+            "drifting": 0,
+            "entangled": 0,
+            "colliding": 0,
+            "undocumented": 0
+          },
+          "depth": 0,
+          "weakest": {
+            "id": "kvcache",
+            "verdict": "defined"
+          },
+          "overclaim": false
+        }
+      ],
+      "heads": 4,
+      "roots": 2,
+      "forest_nodes": 6,
+      "max_depth": 5,
+      "overclaims": []
+    },
+    "separation": {
+      "confusable_pairs": 10,
+      "separated": 9,
+      "mutual": 5,
+      "one_sided": 4,
+      "undrawn": 1,
+      "entangled_concepts": 9,
+      "boundaries": 23,
+      "mutual_boundaries": 14,
+      "one_way_boundaries": 9,
+      "dangling_references": 1,
+      "pairs": [
+        {
+          "a": "decisionkernel",
+          "b": "decisionsched",
+          "kind": "homonym",
+          "why": "both are plainly named 'decision' once the gloss is stripped",
+          "state": "mutual",
+          "a_to_b": true,
+          "b_to_a": true,
+          "a_canonical": "Decision (kernel)",
+          "b_canonical": "Decision (scheduler)",
+          "a_family": "gate",
+          "b_family": "gate"
+        },
+        {
+          "a": "gatepolicy1",
+          "b": "gatepolicy2",
+          "kind": "homonym",
+          "why": "both are plainly named 'gatepolicy' once the gloss is stripped",
+          "state": "mutual",
+          "a_to_b": true,
+          "b_to_a": true,
+          "a_canonical": "GatePolicy",
+          "b_canonical": "gate_policy",
+          "a_family": "gate",
+          "b_family": "gate"
+        },
+        {
+          "a": "quoteboth1",
+          "b": "quoteboth2",
+          "kind": "homonym",
+          "why": "both are plainly named 'quote' once the gloss is stripped",
+          "state": "mutual",
+          "a_to_b": true,
+          "b_to_a": true,
+          "a_canonical": "Q\"uo'te (one)",
+          "b_canonical": "Q\"uo'te (two)",
+          "a_family": "session",
+          "b_family": "session"
+        },
+        {
+          "a": "sessionquote1",
+          "b": "sessionquote2",
+          "kind": "homonym",
+          "why": "both are plainly named 'sessionq' once the gloss is stripped",
+          "state": "one_sided",
+          "a_to_b": true,
+          "b_to_a": false,
+          "a_canonical": "Session'Q (a)",
+          "b_canonical": "Session'Q (b)",
+          "a_family": "session",
+          "b_family": "session"
+        },
+        {
+          "a": "cachemeta",
+          "b": "metacache",
+          "kind": "permuted",
+          "why": "same words in a different order: cache meta",
+          "state": "one_sided",
+          "a_to_b": false,
+          "b_to_a": true,
+          "a_canonical": "Cache Meta (store)",
+          "b_canonical": "MetaCache",
+          "a_family": "cache",
+          "b_family": "cache"
+        },
+        {
+          "a": "cachettl1h",
+          "b": "cachettl5m",
+          "kind": "near",
+          "why": "2 edit(s) apart sharing 8 characters: cachettl5m / cachettl1h",
+          "state": "one_sided",
+          "a_to_b": true,
+          "b_to_a": false,
+          "a_canonical": "CacheTTL1h",
+          "b_canonical": "CacheTTL5m",
+          "a_family": "cache",
+          "b_family": "cache"
+        },
+        {
+          "a": "cyclea",
+          "b": "cycleb",
+          "kind": "near",
+          "why": "1 edit(s) apart sharing 5 characters: cyclea / cycleb",
+          "state": "mutual",
+          "a_to_b": true,
+          "b_to_a": true,
+          "a_canonical": "CycleA",
+          "b_canonical": "CycleB",
+          "a_family": "loop",
+          "b_family": "loop"
+        },
+        {
+          "a": "sessionkey",
+          "b": "sessionkeys",
+          "kind": "near",
+          "why": "1 edit(s) apart sharing 10 characters: sessionkey / sessionkeys",
+          "state": "undrawn",
+          "a_to_b": false,
+          "b_to_a": false,
+          "a_canonical": "SessionKey",
+          "b_canonical": "SessionKeys",
+          "a_family": "session",
+          "b_family": "session"
+        },
+        {
+          "a": "sessionkey",
+          "b": "sessionref",
+          "kind": "near",
+          "why": "2 edit(s) apart sharing 7 characters: sessionref / sessionkey",
+          "state": "one_sided",
+          "a_to_b": true,
+          "b_to_a": false,
+          "a_canonical": "SessionKey",
+          "b_canonical": "SessionRef",
+          "a_family": "session",
+          "b_family": "session"
+        },
+        {
+          "a": "sessionref",
+          "b": "sessionrow",
+          "kind": "near",
+          "why": "2 edit(s) apart sharing 8 characters: sessionref / sessionrow",
+          "state": "mutual",
+          "a_to_b": true,
+          "b_to_a": true,
+          "a_canonical": "SessionRef",
+          "b_canonical": "SessionRow",
+          "a_family": "session",
+          "b_family": "session"
+        }
+      ],
+      "unseparated": [
+        {
+          "a": "cachemeta",
+          "b": "metacache",
+          "kind": "permuted",
+          "why": "same words in a different order: cache meta",
+          "state": "one_sided",
+          "a_to_b": false,
+          "b_to_a": true
+        },
+        {
+          "a": "cachettl1h",
+          "b": "cachettl5m",
+          "kind": "near",
+          "why": "2 edit(s) apart sharing 8 characters: cachettl5m / cachettl1h",
+          "state": "one_sided",
+          "a_to_b": true,
+          "b_to_a": false
+        },
+        {
+          "a": "quoteboth1",
+          "b": "sessionquote1",
+          "kind": "shared-name",
+          "why": "both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it)",
+          "state": "undrawn",
+          "a_to_b": false,
+          "b_to_a": false
+        },
+        {
+          "a": "quoteboth1",
+          "b": "sessionquote2",
+          "kind": "shared-name",
+          "why": "both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it)",
+          "state": "undrawn",
+          "a_to_b": false,
+          "b_to_a": false
+        },
+        {
+          "a": "quoteboth2",
+          "b": "sessionquote1",
+          "kind": "shared-name",
+          "why": "both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it)",
+          "state": "undrawn",
+          "a_to_b": false,
+          "b_to_a": false
+        },
+        {
+          "a": "quoteboth2",
+          "b": "sessionquote2",
+          "kind": "shared-name",
+          "why": "both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it)",
+          "state": "undrawn",
+          "a_to_b": false,
+          "b_to_a": false
+        },
+        {
+          "a": "sessionkey",
+          "b": "sessionkeys",
+          "kind": "near",
+          "why": "1 edit(s) apart sharing 10 characters: sessionkey / sessionkeys",
+          "state": "undrawn",
+          "a_to_b": false,
+          "b_to_a": false
+        },
+        {
+          "a": "sessionkey",
+          "b": "sessionref",
+          "kind": "near",
+          "why": "2 edit(s) apart sharing 7 characters: sessionref / sessionkey",
+          "state": "one_sided",
+          "a_to_b": true,
+          "b_to_a": false
+        },
+        {
+          "a": "sessionquote1",
+          "b": "sessionquote2",
+          "kind": "homonym",
+          "why": "both are plainly named 'sessionq' once the gloss is stripped",
+          "state": "one_sided",
+          "a_to_b": true,
+          "b_to_a": false
+        }
+      ]
+    },
+    "index": {
+      "keys": 31,
+      "ambiguous_keys": 5,
+      "shared_name_pairs": 4,
+      "unresolved_shared_names": 4,
+      "ambiguous": [
+        {
+          "key": "decision",
+          "spellings": [
+            "Decision",
+            "Decision (kernel)",
+            "Decision (scheduler)"
+          ],
+          "targets": [
+            "decisionkernel",
+            "decisionsched"
+          ],
+          "via": {
+            "decisionkernel": [
+              "canonical",
+              "grounding"
+            ],
+            "decisionsched": [
+              "canonical"
+            ]
+          },
+          "ambiguous": true
+        },
+        {
+          "key": "gatepolicy",
+          "spellings": [
+            "GatePolicy",
+            "gate_policy"
+          ],
+          "targets": [
+            "gatepolicy1",
+            "gatepolicy2"
+          ],
+          "via": {
+            "gatepolicy1": [
+              "canonical"
+            ],
+            "gatepolicy2": [
+              "canonical",
+              "grounding"
+            ]
+          },
+          "ambiguous": true
+        },
+        {
+          "key": "quote",
+          "spellings": [
+            "Q\"uo'te (one)",
+            "Q\"uo'te (two)"
+          ],
+          "targets": [
+            "quoteboth1",
+            "quoteboth2"
+          ],
+          "via": {
+            "quoteboth1": [
+              "canonical"
+            ],
+            "quoteboth2": [
+              "canonical"
+            ]
+          },
+          "ambiguous": true
+        },
+        {
+          "key": "sessionq",
+          "spellings": [
+            "Session'Q (a)",
+            "Session'Q (b)"
+          ],
+          "targets": [
+            "sessionquote1",
+            "sessionquote2"
+          ],
+          "via": {
+            "sessionquote1": [
+              "canonical"
+            ],
+            "sessionquote2": [
+              "canonical"
+            ]
+          },
+          "ambiguous": true
+        },
+        {
+          "key": "sessionsweep",
+          "spellings": [
+            "SessionSweep"
+          ],
+          "targets": [
+            "quoteboth1",
+            "quoteboth2",
+            "sessionquote1",
+            "sessionquote2"
+          ],
+          "via": {
+            "quoteboth1": [
+              "grounding"
+            ],
+            "quoteboth2": [
+              "grounding"
+            ],
+            "sessionquote1": [
+              "grounding"
+            ],
+            "sessionquote2": [
+              "grounding"
+            ]
+          },
+          "ambiguous": true
+        }
+      ],
+      "contrast_concepts": 25
+    }
+  },
+  "kpis": [
+    {
+      "kpi": "well_formed",
+      "group": "well-formed",
+      "score": 0,
+      "value": 0.0,
+      "detail": "18 malformed field(s)",
+      "defects": [
+        "row[16]: missing field 'id'",
+        "row[16]: missing field 'definition'",
+        "row[16]: missing field 'distinction'",
+        "row[16]: missing field 'distinct_from'",
+        "row[16]: missing field 'aliases'",
+        "row[16]: missing field 'grounding'",
+        "row[16]: missing field 'glossary_anchor'",
+        "row[16]: missing field 'gaps'",
+        "row[16]: missing id",
+        "row[16]: family 'nofamily' not declared in _meta.json",
+        "row[16]: kind 'weird' not in ['cli-verb', 'concept', 'config', 'doc-term', 'metric', 'subsystem', 'symbol']",
+        "row[16]: grounding_kind 'nope' not in ['claims', 'doc', 'metric', 'path', 'symbol', 'verb']",
+        "row[16]: verdict 'bogus' not in ['crystal', 'defined', 'drifting', 'entangled', 'colliding', 'undocumented']",
+        "row[16]: distinct_from must be a list",
+        "row[16]: aliases must be a list",
+        "row[16]: gaps must be a list",
+        "row[16]: missing grounding (a token that must appear in the tree)",
+        "kvcache: duplicate id"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "canonical_unique",
+      "group": "distinctness",
+      "score": 50,
+      "value": 0.5,
+      "detail": "2 canonical-name collision(s)",
+      "defects": [
+        "gatepolicy1: canonical name collides with gatepolicy2 - rename one",
+        "gatepolicy2: canonical name collides with gatepolicy1 - rename one"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "defined",
+      "group": "distinctness",
+      "score": 68,
+      "value": 0.68,
+      "detail": "2 undefined concept(s)",
+      "defects": [
+        "cachemeta: no definition - one sentence on what it IS",
+        "16: no definition - one sentence on what it IS"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "disambiguated",
+      "group": "distinctness",
+      "score": 20,
+      "value": 0.2,
+      "detail": "4 undisambiguated confusable concept(s)",
+      "defects": [
+        "cachemeta: in family 'cache' with siblings but no distinction line (what is it NOT?)",
+        "cachemeta: distinct_from is empty but family 'cache' has siblings",
+        "decisionsched: distinct_from ['Decision', 'ghost-concept'] resolves to no catalog id/canonical",
+        "sessionquote2: distinct_from is empty but family 'session' has siblings"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "reference_resolves",
+      "group": "separation",
+      "score": 86,
+      "value": 0.86,
+      "detail": "1 dangling distinct_from reference(s)",
+      "defects": [
+        "decisionsched: distinct_from 'ghost-concept' resolves to no catalog id, canonical name or index key - a dangling boundary"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "pair_separated",
+      "group": "separation",
+      "score": 80,
+      "value": 0.8,
+      "detail": "1 confusable pair(s) with no line drawn",
+      "defects": [
+        "sessionkey: confusable with sessionkeys (1 edit(s) apart sharing 10 characters: sessionkey / sessionkeys) but neither names the other - add sessionkeys to sessionkey's distinct_from (and back)"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "pair_mutual",
+      "group": "separation",
+      "score": 60,
+      "value": 0.6,
+      "detail": "4 one-sided boundary on a confusable pair",
+      "defects": [
+        "sessionquote2: sessionquote1 separates from it, but it does not separate back (both are plainly named 'sessionq' once the gloss is stripped) - a reader arriving at sessionquote2 is not warned",
+        "cachemeta: metacache separates from it, but it does not separate back (same words in a different order: cache meta) - a reader arriving at cachemeta is not warned",
+        "cachettl5m: cachettl1h separates from it, but it does not separate back (2 edit(s) apart sharing 8 characters: cachettl5m / cachettl1h) - a reader arriving at cachettl5m is not warned",
+        "sessionref: sessionkey separates from it, but it does not separate back (2 edit(s) apart sharing 7 characters: sessionref / sessionkey) - a reader arriving at sessionref is not warned"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "grounded",
+      "group": "grounded",
+      "score": 4,
+      "value": 0.04,
+      "detail": "6 ungrounded concept(s)",
+      "defects": [
+        "decisionsched: grounding 'decision-sched' does not appear in the production corpus",
+        "rungate: grounding 'notInTreeAnywhere' does not appear in the production corpus",
+        "cyclea: grounding 'CycleA' does not appear in the production corpus",
+        "cycleb: grounding 'CycleB' does not appear in the production corpus",
+        "selfparent: grounding 'SelfParent' does not appear in the production corpus",
+        "badparent: grounding 'BadParent' does not appear in the production corpus"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "alias_resolved",
+      "group": "grounded",
+      "score": 64,
+      "value": 0.64,
+      "detail": "3 unresolvable alias(es)",
+      "defects": [
+        "promptcache: alias 'missing.wire.key' resolves nowhere in the tree - a fabricated or stale alias retires coverage debt dishonestly",
+        "rungate: alias 'fabricatedAlias' resolves nowhere in the tree - a fabricated or stale alias retires coverage debt dishonestly",
+        "sessionetat: alias '\u0421\u0435\u0441\u0441\u0438\u044f' resolves nowhere in the tree - a fabricated or stale alias retires coverage debt dishonestly"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "anchored",
+      "group": "grounded",
+      "score": 88,
+      "value": 0.88,
+      "detail": "1 missing/dangling anchor(s)",
+      "defects": [
+        "admissiongate: glossary_anchor 'docs/missing.md' does not exist in the tree"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "index_resolves",
+      "group": "indexed",
+      "score": 28,
+      "value": 0.28,
+      "detail": "4 unresolvable shared lookup name(s)",
+      "defects": [
+        "quoteboth1: shares a lookup name with sessionquote1 (Q\"uo'te (one) vs Session'Q (a)) - both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it) - but they do not separate from each other; add sessionquote1 to quoteboth1's distinct_from (and back)",
+        "quoteboth1: shares a lookup name with sessionquote2 (Q\"uo'te (one) vs Session'Q (b)) - both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it) - but they do not separate from each other; add sessionquote2 to quoteboth1's distinct_from (and back)",
+        "quoteboth2: shares a lookup name with sessionquote1 (Q\"uo'te (two) vs Session'Q (a)) - both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it) - but they do not separate from each other; add sessionquote1 to quoteboth2's distinct_from (and back)",
+        "quoteboth2: shares a lookup name with sessionquote2 (Q\"uo'te (two) vs Session'Q (b)) - both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it) - but they do not separate from each other; add sessionquote2 to quoteboth2's distinct_from (and back)"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "clarity_consistent",
+      "group": "honesty",
+      "score": 0,
+      "value": 0.0,
+      "detail": "10 verdict overclaim(s)",
+      "defects": [
+        "cachettl5m: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin cachettl1h (2 edit(s) apart sharing 8 characters: cachettl5m / cachettl1h)",
+        "admissiongate: claims 'crystal' but evidence implies 'defined' - boundary drawn but not written in a discoverable doc",
+        "gatepolicy1: claims 'defined' but evidence implies 'colliding' - shares a canonical name with another concept",
+        "badparent: claims 'drifting' but evidence implies 'defined' - boundary drawn but not written in a discoverable doc",
+        "16: claims 'bogus' but evidence implies 'undocumented' - no definition",
+        "sessionref: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin sessionkey (2 edit(s) apart sharing 7 characters: sessionref / sessionkey)",
+        "sessionquote1: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin quoteboth1 (both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it))",
+        "sessionquote2: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin sessionquote1 (both are plainly named 'sessionq' once the gloss is stripped)",
+        "quoteboth1: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin sessionquote1 (both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it))",
+        "quoteboth2: claims 'defined' but evidence implies 'entangled' - names no boundary against its twin sessionquote1 (both answer to the lookup name 'sessionsweep' (via grounding; 4 concepts share it))"
+      ],
+      "soft": []
+    },
+    {
+      "kpi": "kind_grounding_soft",
+      "group": "honesty",
+      "score": 88,
+      "value": 0.88,
+      "detail": "2 kind/grounding mismatch",
+      "defects": [],
+      "soft": [
+        "admissiongate: kind 'cli-verb' but grounding_kind 'symbol' (expected 'verb')",
+        "rungate: kind 'metric' but grounding_kind 'symbol' (expected 'metric')"
+      ]
+    },
+    {
+      "kpi": "hierarchy_soft",
+      "group": "honesty",
+      "score": 76,
+      "value": 0.76,
+      "detail": "4 hierarchy issue(s)",
+      "defects": [],
+      "soft": [
+        "selfparent: parent points at itself",
+        "badparent: parent 'nonexistent' resolves to no catalog id",
+        "cyclea: parent chain cycles",
+        "cycleb: parent chain cycles"
+      ]
+    },
+    {
+      "kpi": "mutuality_soft",
+      "group": "separation",
+      "score": 100,
+      "value": 1.0,
+      "detail": "9/23 boundaries drawn one-way only",
+      "defects": [],
+      "soft": [
+        "badparent -> cyclea",
+        "cachettl1h -> cachettl5m",
+        "cachettl5m -> kvcache",
+        "metacache -> cachemeta",
+        "selfparent -> cyclea",
+        "sessionetat -> sessionkey",
+        "sessionkey -> sessionref",
+        "sessionkeys -> sessionrow",
+        "sessionquote1 -> sessionquote2"
+      ]
+    }
+  ],
+  "_data": {
+    "rows": [
+      {
+        "id": "kvcache",
+        "canonical": "KVCache (engine)",
+        "family": "cache",
+        "kind": "symbol",
+        "definition": "Engine-side paged attention state, keyed by <layer> & position.",
+        "distinction": "Not the provider's prompt cache.",
+        "distinct_from": [
+          "promptcache"
+        ],
+        "aliases": [
+          "kv_cache",
+          "FAK_DEMO_CACHE_TTL",
+          "kv_cache"
+        ],
+        "grounding": "KVCache",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "docs/fak/glossary.md",
+        "parent": "",
+        "verdict": "crystal",
+        "gaps": [],
+        "_source_file": "rows-cache.json"
+      },
+      {
+        "id": "promptcache",
+        "canonical": "PromptCache",
+        "family": "cache",
+        "kind": "concept",
+        "definition": "The provider-side prompt cache.",
+        "distinction": "Not engine pages.",
+        "distinct_from": [
+          "kvcache"
+        ],
+        "aliases": [
+          "demo.cache.size",
+          "missing.wire.key"
+        ],
+        "grounding": "PromptCache",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "docs/fak/glossary.md",
+        "verdict": "crystal",
+        "gaps": [],
+        "_source_file": "rows-cache.json"
+      },
+      {
+        "id": "cachettl5m",
+        "canonical": "CacheTTL5m",
+        "family": "cache",
+        "kind": "config",
+        "definition": "Five-minute cache lifetime.",
+        "distinction": "Not the engine cache.",
+        "distinct_from": [
+          "kvcache"
+        ],
+        "aliases": [],
+        "grounding": "CacheTTL5m",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [
+          "draw the line against CacheTTL1h"
+        ],
+        "_source_file": "rows-cache.json"
+      },
+      {
+        "id": "cachettl1h",
+        "canonical": "CacheTTL1h",
+        "family": "cache",
+        "kind": "config",
+        "definition": "One-hour cache lifetime.",
+        "distinction": "Longer than the five-minute TTL.",
+        "distinct_from": [
+          "cachettl5m"
+        ],
+        "aliases": [],
+        "grounding": "CacheTTL1h",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-cache.json"
+      },
+      {
+        "id": "cachemeta",
+        "canonical": "Cache Meta (store)",
+        "family": "cache",
+        "kind": "subsystem",
+        "definition": "",
+        "distinction": "",
+        "distinct_from": [],
+        "aliases": [],
+        "grounding": "cacheMeta",
+        "grounding_kind": "path",
+        "glossary_anchor": "",
+        "verdict": "undocumented",
+        "gaps": [
+          "one",
+          "two",
+          "three",
+          "four",
+          "five"
+        ],
+        "_source_file": "rows-cache.json"
+      },
+      {
+        "id": "metacache",
+        "canonical": "MetaCache",
+        "family": "cache",
+        "kind": "symbol",
+        "definition": "Metadata about cached pages.",
+        "distinction": "Not the cache meta store.",
+        "distinct_from": [
+          "cachemeta",
+          "Cache Meta"
+        ],
+        "aliases": [],
+        "grounding": "MetaCache",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "parent": "kvcache",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-cache.json"
+      },
+      {
+        "id": "decisionkernel",
+        "canonical": "Decision (kernel)",
+        "family": "gate",
+        "kind": "symbol",
+        "definition": "The kernel's allow/deny decision.",
+        "distinction": "Not the scheduler decision.",
+        "distinct_from": [
+          "decisionsched"
+        ],
+        "aliases": [],
+        "grounding": "Decision",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "docs/fak/glossary.md",
+        "verdict": "crystal",
+        "gaps": [],
+        "_source_file": "rows-gate.json"
+      },
+      {
+        "id": "decisionsched",
+        "canonical": "Decision (scheduler)",
+        "family": "gate",
+        "kind": "cli-verb",
+        "definition": "The scheduler's placement decision.",
+        "distinction": "Not the kernel decision.",
+        "distinct_from": [
+          "Decision",
+          "ghost-concept"
+        ],
+        "aliases": [],
+        "grounding": "decision-sched",
+        "grounding_kind": "verb",
+        "glossary_anchor": "docs/fak/glossary.md",
+        "verdict": "crystal",
+        "gaps": [],
+        "_source_file": "rows-gate.json"
+      },
+      {
+        "id": "admissiongate",
+        "canonical": "AdmissionGate",
+        "family": "gate",
+        "kind": "cli-verb",
+        "definition": "Admits a request.",
+        "distinction": "Not the run gate.",
+        "distinct_from": [
+          "rungate"
+        ],
+        "aliases": [],
+        "grounding": "AdmissionGate",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "docs/missing.md",
+        "parent": "decisionkernel",
+        "verdict": "crystal",
+        "gaps": [],
+        "_source_file": "rows-gate.json"
+      },
+      {
+        "id": "rungate",
+        "canonical": "RunGate",
+        "family": "gate",
+        "kind": "metric",
+        "definition": "Counts run admissions.",
+        "distinction": "Not admission.",
+        "distinct_from": [
+          "admissiongate"
+        ],
+        "aliases": [
+          "fabricatedAlias"
+        ],
+        "grounding": "notInTreeAnywhere",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-gate.json"
+      },
+      {
+        "id": "gatepolicy1",
+        "canonical": "GatePolicy",
+        "family": "gate",
+        "kind": "symbol",
+        "definition": "Policy one.",
+        "distinction": "Not policy two.",
+        "distinct_from": [
+          "gatepolicy2"
+        ],
+        "aliases": [],
+        "grounding": "GatePolicy",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-gate.json"
+      },
+      {
+        "id": "gatepolicy2",
+        "canonical": "gate_policy",
+        "family": "gate",
+        "kind": "symbol",
+        "definition": "Policy two.",
+        "distinction": "Not policy one.",
+        "distinct_from": [
+          "gatepolicy1"
+        ],
+        "aliases": [],
+        "grounding": "GatePolicy",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "colliding",
+        "gaps": [],
+        "_source_file": "rows-gate.json"
+      },
+      {
+        "id": "cyclea",
+        "canonical": "CycleA",
+        "family": "loop",
+        "kind": "concept",
+        "definition": "First of a cycle.",
+        "distinction": "Not B.",
+        "distinct_from": [
+          "cycleb"
+        ],
+        "aliases": [],
+        "grounding": "CycleA",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "parent": "cycleb",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-misc.json"
+      },
+      {
+        "id": "cycleb",
+        "canonical": "CycleB",
+        "family": "loop",
+        "kind": "concept",
+        "definition": "Second of a cycle.",
+        "distinction": "Not A.",
+        "distinct_from": [
+          "cyclea"
+        ],
+        "aliases": [],
+        "grounding": "CycleB",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "parent": "cyclea",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-misc.json"
+      },
+      {
+        "id": "selfparent",
+        "canonical": "SelfParent",
+        "family": "loop",
+        "kind": "concept",
+        "definition": "Points at itself.",
+        "distinction": "Alone.",
+        "distinct_from": [
+          "cyclea"
+        ],
+        "aliases": [],
+        "grounding": "SelfParent",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "parent": "selfparent",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-misc.json"
+      },
+      {
+        "id": "badparent",
+        "canonical": "BadParent",
+        "family": "loop",
+        "kind": "concept",
+        "definition": "Dangling parent.",
+        "distinction": "Alone.",
+        "distinct_from": [
+          "cyclea"
+        ],
+        "aliases": [],
+        "grounding": "BadParent",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "parent": "nonexistent",
+        "verdict": "drifting",
+        "gaps": [],
+        "_source_file": "rows-misc.json"
+      },
+      {
+        "canonical": "Orphan Thing",
+        "family": "nofamily",
+        "kind": "weird",
+        "verdict": "bogus",
+        "grounding_kind": "nope",
+        "_source_file": "rows-misc.json"
+      },
+      {
+        "id": "kvcache",
+        "canonical": "KV Cache Duplicate",
+        "family": "cache",
+        "kind": "symbol",
+        "definition": "Duplicate id row.",
+        "distinction": "Dup.",
+        "distinct_from": [
+          "promptcache"
+        ],
+        "aliases": [],
+        "grounding": "KVCache",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-misc.json"
+      },
+      {
+        "id": "sessionref",
+        "canonical": "SessionRef",
+        "family": "session",
+        "kind": "symbol",
+        "definition": "A reference to a session.",
+        "distinction": "Not a row.",
+        "distinct_from": [
+          "sessionrow"
+        ],
+        "aliases": [],
+        "grounding": "SessionRef",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-session.json"
+      },
+      {
+        "id": "sessionrow",
+        "canonical": "SessionRow",
+        "family": "session",
+        "kind": "symbol",
+        "definition": "A stored session row.",
+        "distinction": "Not a ref.",
+        "distinct_from": [
+          "sessionref"
+        ],
+        "aliases": [],
+        "grounding": "SessionRow",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-session.json"
+      },
+      {
+        "id": "sessionkey",
+        "canonical": "SessionKey",
+        "family": "session",
+        "kind": "symbol",
+        "definition": "One session key.",
+        "distinction": "Not the ref.",
+        "distinct_from": [
+          "sessionref"
+        ],
+        "aliases": [],
+        "grounding": "SessionKey",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "entangled",
+        "gaps": [],
+        "_source_file": "rows-session.json"
+      },
+      {
+        "id": "sessionkeys",
+        "canonical": "SessionKeys",
+        "family": "session",
+        "kind": "symbol",
+        "definition": "Many session keys.",
+        "distinction": "Not the row.",
+        "distinct_from": [
+          "sessionrow"
+        ],
+        "aliases": [],
+        "grounding": "SessionKeys",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "entangled",
+        "gaps": [],
+        "_source_file": "rows-session.json"
+      },
+      {
+        "id": "sessionetat",
+        "canonical": "Session\u00c9tat \ud83d\ude42",
+        "family": "session",
+        "kind": "doc-term",
+        "definition": "\u00c9tat d'une session \u2014 with 'single' and \"double\" quotes.",
+        "distinction": "Not a key.",
+        "distinct_from": [
+          "sessionkey"
+        ],
+        "aliases": [
+          "\u0421\u0435\u0441\u0441\u0438\u044f"
+        ],
+        "grounding": "SessionEtat",
+        "grounding_kind": "doc",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-session.json"
+      },
+      {
+        "id": "sessionquote1",
+        "canonical": "Session'Q (a)",
+        "family": "session",
+        "kind": "concept",
+        "definition": "Apostrophe one | piped.",
+        "distinction": "Not two.",
+        "distinct_from": [
+          "sessionquote2"
+        ],
+        "aliases": [],
+        "grounding": "SessionSweep",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-session.json"
+      },
+      {
+        "id": "sessionquote2",
+        "canonical": "Session'Q (b)",
+        "family": "session",
+        "kind": "concept",
+        "definition": "Apostrophe two.",
+        "distinction": "Not one.",
+        "distinct_from": [],
+        "aliases": [],
+        "grounding": "SessionSweep",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-session.json"
+      },
+      {
+        "id": "quoteboth1",
+        "canonical": "Q\"uo'te (one)",
+        "family": "session",
+        "kind": "concept",
+        "definition": "Both quotes.",
+        "distinction": "Not the other.",
+        "distinct_from": [
+          "quoteboth2"
+        ],
+        "aliases": [],
+        "grounding": "SessionSweep",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-session.json"
+      },
+      {
+        "id": "quoteboth2",
+        "canonical": "Q\"uo'te (two)",
+        "family": "session",
+        "kind": "concept",
+        "definition": "Both quotes again.",
+        "distinction": "Not the first.",
+        "distinct_from": [
+          "quoteboth1"
+        ],
+        "aliases": [],
+        "grounding": "SessionSweep",
+        "grounding_kind": "symbol",
+        "glossary_anchor": "",
+        "verdict": "defined",
+        "gaps": [],
+        "_source_file": "rows-session.json"
+      }
+    ],
+    "families": [
+      {
+        "id": "cache",
+        "roots": [
+          "cache"
+        ],
+        "ignore": [
+          "cacheIgnored"
+        ],
+        "exclude": [
+          "gateway"
+        ],
+        "min_files": 2
+      },
+      {
+        "id": "gate",
+        "roots": [
+          "gate",
+          "decision"
+        ],
+        "min_files": 2
+      },
+      {
+        "id": "session",
+        "roots": [
+          "session"
+        ],
+        "min_files": "2"
+      },
+      {
+        "id": "loop",
+        "roots": [
+          "cycle"
+        ]
+      }
+    ]
+  },
+  "_index": {
+    "entries": [
+      {
+        "key": "admissiongate",
+        "spellings": [
+          "AdmissionGate"
+        ],
+        "targets": [
+          "admissiongate"
+        ],
+        "via": {
+          "admissiongate": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "badparent",
+        "spellings": [
+          "BadParent"
+        ],
+        "targets": [
+          "badparent"
+        ],
+        "via": {
+          "badparent": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "cachemeta",
+        "spellings": [
+          "Cache Meta (store)",
+          "cacheMeta"
+        ],
+        "targets": [
+          "cachemeta"
+        ],
+        "via": {
+          "cachemeta": [
+            "canonical",
+            "grounding"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "cachettl1h",
+        "spellings": [
+          "CacheTTL1h"
+        ],
+        "targets": [
+          "cachettl1h"
+        ],
+        "via": {
+          "cachettl1h": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "cachettl5m",
+        "spellings": [
+          "CacheTTL5m"
+        ],
+        "targets": [
+          "cachettl5m"
+        ],
+        "via": {
+          "cachettl5m": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "cyclea",
+        "spellings": [
+          "CycleA"
+        ],
+        "targets": [
+          "cyclea"
+        ],
+        "via": {
+          "cyclea": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "cycleb",
+        "spellings": [
+          "CycleB"
+        ],
+        "targets": [
+          "cycleb"
+        ],
+        "via": {
+          "cycleb": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "decision",
+        "spellings": [
+          "Decision",
+          "Decision (kernel)",
+          "Decision (scheduler)"
+        ],
+        "targets": [
+          "decisionkernel",
+          "decisionsched"
+        ],
+        "via": {
+          "decisionkernel": [
+            "canonical",
+            "grounding"
+          ],
+          "decisionsched": [
+            "canonical"
+          ]
+        },
+        "ambiguous": true
+      },
+      {
+        "key": "decisionsched",
+        "spellings": [
+          "decision-sched"
+        ],
+        "targets": [
+          "decisionsched"
+        ],
+        "via": {
+          "decisionsched": [
+            "grounding"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "democachesize",
+        "spellings": [
+          "demo.cache.size"
+        ],
+        "targets": [
+          "promptcache"
+        ],
+        "via": {
+          "promptcache": [
+            "alias"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "fabricatedalias",
+        "spellings": [
+          "fabricatedAlias"
+        ],
+        "targets": [
+          "rungate"
+        ],
+        "via": {
+          "rungate": [
+            "alias"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "fakdemocachettl",
+        "spellings": [
+          "FAK_DEMO_CACHE_TTL"
+        ],
+        "targets": [
+          "kvcache"
+        ],
+        "via": {
+          "kvcache": [
+            "alias"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "gatepolicy",
+        "spellings": [
+          "GatePolicy",
+          "gate_policy"
+        ],
+        "targets": [
+          "gatepolicy1",
+          "gatepolicy2"
+        ],
+        "via": {
+          "gatepolicy1": [
+            "canonical"
+          ],
+          "gatepolicy2": [
+            "canonical",
+            "grounding"
+          ]
+        },
+        "ambiguous": true
+      },
+      {
+        "key": "kvcache",
+        "spellings": [
+          "KVCache",
+          "KVCache (engine)",
+          "kv_cache"
+        ],
+        "targets": [
+          "kvcache"
+        ],
+        "via": {
+          "kvcache": [
+            "alias",
+            "canonical",
+            "grounding"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "kvcacheduplicate",
+        "spellings": [
+          "KV Cache Duplicate"
+        ],
+        "targets": [
+          "kvcache"
+        ],
+        "via": {
+          "kvcache": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "metacache",
+        "spellings": [
+          "MetaCache"
+        ],
+        "targets": [
+          "metacache"
+        ],
+        "via": {
+          "metacache": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "missingwirekey",
+        "spellings": [
+          "missing.wire.key"
+        ],
+        "targets": [
+          "promptcache"
+        ],
+        "via": {
+          "promptcache": [
+            "alias"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "notintreeanywhere",
+        "spellings": [
+          "notInTreeAnywhere"
+        ],
+        "targets": [
+          "rungate"
+        ],
+        "via": {
+          "rungate": [
+            "grounding"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "orphanthing",
+        "spellings": [
+          "Orphan Thing"
+        ],
+        "targets": [
+          "row[16]"
+        ],
+        "via": {
+          "row[16]": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "promptcache",
+        "spellings": [
+          "PromptCache"
+        ],
+        "targets": [
+          "promptcache"
+        ],
+        "via": {
+          "promptcache": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "quote",
+        "spellings": [
+          "Q\"uo'te (one)",
+          "Q\"uo'te (two)"
+        ],
+        "targets": [
+          "quoteboth1",
+          "quoteboth2"
+        ],
+        "via": {
+          "quoteboth1": [
+            "canonical"
+          ],
+          "quoteboth2": [
+            "canonical"
+          ]
+        },
+        "ambiguous": true
+      },
+      {
+        "key": "rungate",
+        "spellings": [
+          "RunGate"
+        ],
+        "targets": [
+          "rungate"
+        ],
+        "via": {
+          "rungate": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "selfparent",
+        "spellings": [
+          "SelfParent"
+        ],
+        "targets": [
+          "selfparent"
+        ],
+        "via": {
+          "selfparent": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "sessionetat",
+        "spellings": [
+          "SessionEtat"
+        ],
+        "targets": [
+          "sessionetat"
+        ],
+        "via": {
+          "sessionetat": [
+            "grounding"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "sessionkey",
+        "spellings": [
+          "SessionKey"
+        ],
+        "targets": [
+          "sessionkey"
+        ],
+        "via": {
+          "sessionkey": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "sessionkeys",
+        "spellings": [
+          "SessionKeys"
+        ],
+        "targets": [
+          "sessionkeys"
+        ],
+        "via": {
+          "sessionkeys": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "sessionq",
+        "spellings": [
+          "Session'Q (a)",
+          "Session'Q (b)"
+        ],
+        "targets": [
+          "sessionquote1",
+          "sessionquote2"
+        ],
+        "via": {
+          "sessionquote1": [
+            "canonical"
+          ],
+          "sessionquote2": [
+            "canonical"
+          ]
+        },
+        "ambiguous": true
+      },
+      {
+        "key": "sessionref",
+        "spellings": [
+          "SessionRef"
+        ],
+        "targets": [
+          "sessionref"
+        ],
+        "via": {
+          "sessionref": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "sessionrow",
+        "spellings": [
+          "SessionRow"
+        ],
+        "targets": [
+          "sessionrow"
+        ],
+        "via": {
+          "sessionrow": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      },
+      {
+        "key": "sessionsweep",
+        "spellings": [
+          "SessionSweep"
+        ],
+        "targets": [
+          "quoteboth1",
+          "quoteboth2",
+          "sessionquote1",
+          "sessionquote2"
+        ],
+        "via": {
+          "quoteboth1": [
+            "grounding"
+          ],
+          "quoteboth2": [
+            "grounding"
+          ],
+          "sessionquote1": [
+            "grounding"
+          ],
+          "sessionquote2": [
+            "grounding"
+          ]
+        },
+        "ambiguous": true
+      },
+      {
+        "key": "sessiontat",
+        "spellings": [
+          "Session\u00c9tat \ud83d\ude42"
+        ],
+        "targets": [
+          "sessionetat"
+        ],
+        "via": {
+          "sessionetat": [
+            "canonical"
+          ]
+        },
+        "ambiguous": false
+      }
+    ],
+    "keys": 31,
+    "ambiguous": [
+      {
+        "key": "decision",
+        "spellings": [
+          "Decision",
+          "Decision (kernel)",
+          "Decision (scheduler)"
+        ],
+        "targets": [
+          "decisionkernel",
+          "decisionsched"
+        ],
+        "via": {
+          "decisionkernel": [
+            "canonical",
+            "grounding"
+          ],
+          "decisionsched": [
+            "canonical"
+          ]
+        },
+        "ambiguous": true
+      },
+      {
+        "key": "gatepolicy",
+        "spellings": [
+          "GatePolicy",
+          "gate_policy"
+        ],
+        "targets": [
+          "gatepolicy1",
+          "gatepolicy2"
+        ],
+        "via": {
+          "gatepolicy1": [
+            "canonical"
+          ],
+          "gatepolicy2": [
+            "canonical",
+            "grounding"
+          ]
+        },
+        "ambiguous": true
+      },
+      {
+        "key": "quote",
+        "spellings": [
+          "Q\"uo'te (one)",
+          "Q\"uo'te (two)"
+        ],
+        "targets": [
+          "quoteboth1",
+          "quoteboth2"
+        ],
+        "via": {
+          "quoteboth1": [
+            "canonical"
+          ],
+          "quoteboth2": [
+            "canonical"
+          ]
+        },
+        "ambiguous": true
+      },
+      {
+        "key": "sessionq",
+        "spellings": [
+          "Session'Q (a)",
+          "Session'Q (b)"
+        ],
+        "targets": [
+          "sessionquote1",
+          "sessionquote2"
+        ],
+        "via": {
+          "sessionquote1": [
+            "canonical"
+          ],
+          "sessionquote2": [
+            "canonical"
+          ]
+        },
+        "ambiguous": true
+      },
+      {
+        "key": "sessionsweep",
+        "spellings": [
+          "SessionSweep"
+        ],
+        "targets": [
+          "quoteboth1",
+          "quoteboth2",
+          "sessionquote1",
+          "sessionquote2"
+        ],
+        "via": {
+          "quoteboth1": [
+            "grounding"
+          ],
+          "quoteboth2": [
+            "grounding"
+          ],
+          "sessionquote1": [
+            "grounding"
+          ],
+          "sessionquote2": [
+            "grounding"
+          ]
+        },
+        "ambiguous": true
+      }
+    ],
+    "ambiguous_keys": 5,
+    "by_key": {
+      "admissiongate": [
+        "admissiongate"
+      ],
+      "badparent": [
+        "badparent"
+      ],
+      "cachemeta": [
+        "cachemeta"
+      ],
+      "cachettl1h": [
+        "cachettl1h"
+      ],
+      "cachettl5m": [
+        "cachettl5m"
+      ],
+      "cyclea": [
+        "cyclea"
+      ],
+      "cycleb": [
+        "cycleb"
+      ],
+      "decision": [
+        "decisionkernel",
+        "decisionsched"
+      ],
+      "decisionsched": [
+        "decisionsched"
+      ],
+      "democachesize": [
+        "promptcache"
+      ],
+      "fabricatedalias": [
+        "rungate"
+      ],
+      "fakdemocachettl": [
+        "kvcache"
+      ],
+      "gatepolicy": [
+        "gatepolicy1",
+        "gatepolicy2"
+      ],
+      "kvcache": [
+        "kvcache"
+      ],
+      "kvcacheduplicate": [
+        "kvcache"
+      ],
+      "metacache": [
+        "metacache"
+      ],
+      "missingwirekey": [
+        "promptcache"
+      ],
+      "notintreeanywhere": [
+        "rungate"
+      ],
+      "orphanthing": [
+        "row[16]"
+      ],
+      "promptcache": [
+        "promptcache"
+      ],
+      "quote": [
+        "quoteboth1",
+        "quoteboth2"
+      ],
+      "rungate": [
+        "rungate"
+      ],
+      "selfparent": [
+        "selfparent"
+      ],
+      "sessionetat": [
+        "sessionetat"
+      ],
+      "sessionkey": [
+        "sessionkey"
+      ],
+      "sessionkeys": [
+        "sessionkeys"
+      ],
+      "sessionq": [
+        "sessionquote1",
+        "sessionquote2"
+      ],
+      "sessionref": [
+        "sessionref"
+      ],
+      "sessionrow": [
+        "sessionrow"
+      ],
+      "sessionsweep": [
+        "quoteboth1",
+        "quoteboth2",
+        "sessionquote1",
+        "sessionquote2"
+      ],
+      "sessiontat": [
+        "sessionetat"
+      ]
+    }
+  }
+}
