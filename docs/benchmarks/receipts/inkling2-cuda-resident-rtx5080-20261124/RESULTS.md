@@ -63,6 +63,9 @@ context tokens, past the 1024-token local window.
 ```bash
 go run ./cmd/fak-dev build-cuda build --arch sm_120 --cuda-home /opt/cuda
 go test -c -tags cuda ./internal/ggufload
+# Serving binary with the CUDA backend (GETTING-STARTED.md, "Inkling-2-Mini on NVIDIA CUDA"):
+go run ./cmd/fak-dev build-cuda binary --arch sm_120 --cuda-home /opt/cuda ./cmd/fak ./fak
+./fak run /var/lib/fak/models/inkling2/gguf-mainline/Inkling-2-Mini-UD-Q3_K_XL.gguf
 FAK_INKLING2_GGUF=<gguf> FAK_INKLING2_BENCH=128 ./ggufload.test -test.run TestInkling2CUDADecodeBench -test.v
 FAK_INKLING2_GGUF=<gguf> ./ggufload.test -test.run TestInkling2CUDAOracleGreedyMatchesLlamaCpp -test.v
 ```

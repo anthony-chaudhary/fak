@@ -61,6 +61,22 @@ go build -o fak ./cmd/fak
 ./fak help
 ```
 
+### Inkling-2-Mini on NVIDIA CUDA
+
+The plain `go build` above runs Inkling-2 on the host CPU. For the CUDA device path,
+build the binary with the CUDA backend, then run the pinned GGUF:
+
+```bash
+go run ./cmd/fak-dev build-cuda binary --arch sm_120 --cuda-home /opt/cuda ./cmd/fak ./fak
+./fak run /var/lib/fak/models/inkling2/gguf-mainline/Inkling-2-Mini-UD-Q3_K_XL.gguf
+```
+
+- `--arch` is the card's compute capability (`sm_120` for RTX 50-series). `--cuda-home` is the CUDA Toolkit root.
+- `make cuda-build-sm120` builds only the kernel library (`libfakcuda.a`); it does not produce a runnable `./fak` with the CUDA backend. Use the `binary` command above.
+- On WSL, if the link fails with `cannot find -lcuda`, set `LIBRARY_PATH=<cuda>/lib64/stubs` (or `lib/stubs`) for the build.
+- The binary needs the CUDA 12 runtime sonames (`libcudart.so.12`, `libcublas.so.12`, `libcublasLt.so.12`) on `LD_LIBRARY_PATH`.
+- Backend choice: with `--backend` omitted, a CUDA build selects CUDA for Inkling-2 when the binary's cubins cover the card. The run prints `fak run: <arch> backend=cuda layers=<N> passes=<N>` to stderr (`cmd/fak/run_inkling2.go`), where `<arch>` is the GGUF's `general.architecture` (`inkling2` or `inkling2_loop`), not a fixed `inkling2` string. A CPU fallback prints `backend=cpu`. Check that line before trusting any throughput number. Pass `--backend cuda` to fail loud instead of falling back to CPU.
+
 > **Windows note:** Build natively with `go build -o fak.exe ./cmd/fak`. Microsoft Defender Antivirus real-time ML detections repeatedly quarantine freshly compiled test binaries (the 2026-08-25 audit for issue #8919 supersedes the earlier Application-Control diagnosis — see [docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md)); run test suites inside WSL with `./test.ps1`. The binary itself runs natively without issues.
 
 ---
