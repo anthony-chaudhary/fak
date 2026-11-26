@@ -1,373 +1,374 @@
-file	kernel	threads_expr	threads_per_block	grid_expr	smem_expr
-internal/compute/cuda/attention.cuh	k_attention	128	128	nH	0
-internal/compute/cuda/attention.cuh	k_flash_attention<false>	FLASH_THREADS	128	nH	shmem
-internal/compute/cuda/attention.cuh	k_prompt_causal_attention_panel	FLASH_THREADS	128	tokens * nH	shmem
-internal/compute/cuda/attention.cuh	k_qwen38_causal_attention_panel_hd256	FLASH_THREADS	128	tokens * nH	shmem
-internal/compute/cuda/attention.cuh	k_qwen38_causal_attention_panel_hd256_splitkv_partial	FLASH_THREADS	128	tokens * nH * nsplits	shmem
-internal/compute/cuda/attention.cuh	k_qwen38_splitkv_lse_merge_hd256	FLASH_THREADS	128	tokens * nH	0
-internal/compute/cuda/attention_generic.cuh	k_attention_generic_merge	128	128	nH	0
-internal/compute/cuda/attention_generic.cuh	k_attention_generic_tiled<NS>	ATTN_GENERIC_WARPS * 32	128	grid	smem
-internal/compute/cuda/blockscaled_wkv.cuh	check_output	256	256	(rows * 512 + 255) / 256	0
-internal/compute/cuda/blockscaled_wkv.cuh	k_mxfp8_cast_f32	128	128	rows * 40	0
-internal/compute/cuda/blockscaled_wkv.cuh	repack	256	256	(rows * 40 + 255) / 256	0
-internal/compute/cuda/fattn_mma_hd256.cuh	fak_fattn_mma::k_qwen38_fattn_mma_hd256	dim3(fak_fattn_mma::warp_size, fak_fattn_mma::nthreads / fak_fattn_mma::warp_size, 1)	0	grid	shmem
-internal/compute/cuda/fattn_mma_hd256.cuh	fak_fattn_mma::k_qwen38_fattn_stage_kv_f16	stageThreads	256	(unsigned) (stageBlocks < 65535 ? stageBlocks : 65535)	0
-internal/compute/cuda/gdn_decode_vllm.cuh	k_qwen35_gdn_post_conv_vllm<Ratio, true>	kThreads	256	grid	0
-internal/compute/cuda/gdn_decode_vllm.cuh	k_qwen35_gdn_post_conv_vllm<Ratio>	kThreads	256	nV	0
-internal/compute/cuda/gdn_mtp_decode_vllm.cuh	k_qwen35_gdn_mtp_post_conv_vllm<Ratio>	kThreads	256	nV	0
-internal/compute/cuda/gdn_shared_split.cuh	k_fp16_split	256	256	(xn + 255) / 256	0
-internal/compute/cuda/gdn_shared_split.cuh	k_q8_dequant_split	256	256	(wn + 255) / 256	0
-internal/compute/cuda/graph_capture_once.cuh	k_flash_attention<true>	FLASH_THREADS	128	heads	shmem
-internal/compute/cuda/graph_capture_once.cuh	k_graph_once_copyrow	256	256	(unsigned)width / 256 + (width % 256 != 0)	0
-internal/compute/cuda/graph_capture_once.cuh	k_graph_once_position	1	1	1	0
-internal/compute/cuda/graph_capture_once.cuh	k_partial_rope_copy<true>	256	256	kblocks	0
-internal/compute/cuda/graph_capture_once.cuh	k_partial_rope_copy<true>	256	256	qblocks	0
-internal/compute/cuda/graph_capture_once.cuh	k_rope<true>	128	128	total / 128 + (total % 128 != 0)	0
-internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_conv_state	256	256	blocks	0
-internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_fused_in_proj	256	256	g.fused	0
-internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_out_proj	256	256	r->hidden	0
-internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_qk_norm	g.q_threads	0	r->key_heads	(size_t)2*g.q_threads*sizeof(float)
-internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_recurrent_gated_norm	g.v_threads	0	r->value_heads	(size_t)g.v_threads*sizeof(float)
-internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_recurrent_gated_norm_regstate	g.v_threads	0	r->value_heads	(size_t)g.v_threads*sizeof(float)
-internal/compute/cuda/graph_quant_workspace.cuh	k_q8_gemm	256	256	grid	0
-internal/compute/cuda/graph_quant_workspace.cuh	k_q8_quant_act	32	32	qgrid	0
-internal/compute/cuda/graph_quant_workspace.cuh	mul_mat_vec_q<1>	block	0	grid	0
-internal/compute/cuda/graph_quant_workspace.cuh	quantize_q8_1	256	256	qgrid	0
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_exp	256	256	g1	0
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out<true, T>	othreads	0	g3	osmem
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tiled<T>	othreads	0	g3	0
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<false, T>	INK2_ATS_TREE_GROUPS * 32	512	g3	0
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<true, T>	INK2_ATS_TREE_GROUPS * 32	512	g3	osmem
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_scores<T>	INK2_ATS_WARPS * 32	256	g1	0
-internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_attend	128	128	grid	smem
-internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_fuse	256	256	rows	0
-internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_qk	dim	0	grid	0
-internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_ring_store	256	256	grid	0
-internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_silu_mul	256	256	(n + 255) / 256	0
-internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_markov_gate	256	256	(rank + 255) / 256	0
-internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_markov_in	256	256	(n + 255) / 256	0
-internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_markov_pick	512	512	1	0
-internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_topm_merge	256	256	rows	0
-internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_topm_slice	256	256	g1	0
-internal/compute/cuda/inkling2_expert_gemv.cuh	k_ink2_expert_iq4nl_v3<INK2_IQ3_ROWS>	256	256	grid	(size_t)in * 4
-internal/compute/cuda/inkling2_expert_gemv.cuh	k_ink2_expert_iq_v3<F, INK2_IQ3_ROWS>	256	256	grid	smem
-internal/compute/cuda/inkling2_expert_gemv.cuh	k_ink2_expert_nvfp4_v2<KB, INK2_NV2_ROWS>	INK2_NV2_WARPS * 32	256	grid	smem
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_add	256	256	(n + 255) / 256	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_argkey_index	1	1	1	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_argkey_index	C	0	1	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_attend<T>	INK2_ATT_THREADS	512	g	smem
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_conv	256	256	(n + 255) / 256	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_conv	256	256	g	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_ctrl_apply64	INK2_CTRL_APPLY_WARPS * 32	128	ag	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_ctrl_down4	256	256	dim3(rank, nj)	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_ctrl_pair	256	256	2	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ2S>	256	256	iqgrid	in * sizeof(float)
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ2XS>	256	256	iqgrid	in * sizeof(float)
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ3S>	256	256	iqgrid	in * sizeof(float)
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ3XXS>	256	256	iqgrid	in * sizeof(float)
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ4NL>	256	256	iqgrid	in * sizeof(float)
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_Q3K>	256	256	iqgrid	in * sizeof(float)
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_nvfp4	256	256	nvgrid	in * sizeof(float)
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_scale	256	256	dim3((rows + 255) / 256, k)	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_gemv_f32	256	256	rows	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_mix<1>	INK2_MIX_THREADS	1024	1	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_mix<2>	INK2_MIX_THREADS	1024	1	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_mix<3>	INK2_MIX_THREADS	1024	1	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_mix<4>	INK2_MIX_THREADS	1024	1	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_moe_combine	256	256	(n + 255) / 256	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_q8_gemv<3>	INK2_Q8_WARPS * 32	256	grid	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_q8_gemv<4>	INK2_Q8_WARPS * 32	256	grid	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_q8_quant_gated	32	32	nblk	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_qkv_post<__half>	32	32	blocks	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_qkv_post<float>	32	32	blocks	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_rms_multi	1024	1024	nj	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_rms_rows	1024	1024	1	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_rms_rows	1024	1024	rows	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_route	32	32	1	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_sigmoid_mul	256	256	(n + 255) / 256	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_situ	64	64	dim3((width + 63) / 64, k)	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_softcap_argmax	256	256	128	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_softcap_argmax	256	256	g	0
-internal/compute/cuda/inkling2_loop.cuh	k_q8_gemm	256	256	dim3((out + 7) / 8, 1)	0
-internal/compute/cuda/inkling2_loop.cuh	k_q8_quant_act	qt	0	dim3(nblk, 1)	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_attend<false>	INK2_ATT_THREADS	512	grid	smem
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_attend<true>	INK2_ATT_THREADS	512	grid	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_bucket_count	256	256	(npairs + 255) / 256	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_bucket_fill	256	256	nexp	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_bucket_scan	32	32	1	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_combine	256	256	grid	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_conv	32	32	(n + 31) / 32	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_conv_commit	256	256	(n + 255) / 256	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_conv_pair	32	32	grid	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_ctrl_apply	256	256	grid	smem
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_ctrl_down	256	256	dim3(rank, T)	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_ctrl_down	256	256	dim3(rank, T, J)	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_expert_iq<F>	INK2P_IQ_THREADS	512	grid	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_expert_nvfp4	256	256	grid	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_gather_pairs	256	256	grid	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_gemm_f32	32 * INK2P_GEMM_TOK	256	grid	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<1>	INK2_MIX_THREADS	1024	T	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<2>	INK2_MIX_THREADS	1024	T	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<3>	INK2_MIX_THREADS	1024	T	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<4>	INK2_MIX_THREADS	1024	T	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_qkv_post	32	32	grid	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_route	32	32	T	0
-internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_scatter_pairs	256	256	grid	0
-internal/compute/cuda/inkling2_prefill_attn.cuh	k_ink2p_attend_v2<QW, KT, REL, PIPE>	32 * kG * QW	0	grid	smem
-internal/compute/cuda/inkling2_prefill_dense.cuh	ink2d::k_ink2d_f32<32>	256	256	grid	0
-internal/compute/cuda/inkling2_prefill_dense.cuh	ink2d::k_ink2d_f32<64>	256	256	grid	0
-internal/compute/cuda/inkling2_prefill_dense.cuh	k_ink2d_mmq<F, BM>	kThreads	256	grid	0
-internal/compute/cuda/inkling2_prefill_dense.cuh	k_ink2p_dense_quant	256	256	qg	0
-internal/compute/cuda/inkling2_prefill_iq.cuh	k_ink2p_expert_iq_v2<F, NB, 2>	INK2Q_THREADS	256	grid	0
-internal/compute/cuda/inkling2_prefill_iq.cuh	k_ink2q_quant	INK2Q_THREADS	256	maxTiles	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_conv<K>	256	256	grid	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_apply	256	256	ag	smem
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_apply	256	256	grid	smem
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_down	256	256	dg	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_down	256	256	grid	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<1>	INK2M_MIX_THREADS	384	T	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<2>	INK2M_MIX_THREADS	384	T	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<3>	INK2M_MIX_THREADS	384	T	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<4>	INK2M_MIX_THREADS	384	T	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_rms	INK2M_RMS_THREADS	256	rows	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_situ1	256	256	grid	0
-internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_situ4	128	128	grid	0
-internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_expert_nvfp4_v2<MT, WARPS, STAGES, BK, NTILE, PF>	WARPS * 32	0	grid	SMEM
-internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_expert_nvfp4_v3<MT, WARPS, STAGES, BK, NTILE, MINB, PF>	WARPS * 32	0	grid	SMEM
-internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_expert_nvfp4_w4a4<MT, WARPS, STAGES, PF>	WARPS * 32	0	grid	SMEM
-internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_nv2_quant<16>	256	256	qgrid	0
-internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_nv2_quant<32>	256	256	qgrid	0
-internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_nvf4_probe	1	1	1	0
-internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_nvf4_quant<QT>	QT	0	qgrid	0
-internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2_q8_quant_gated	32	32	rows * nblk	0
-internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q5k_rows<R, false>	threads	0	blocks	smem
-internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q5k_rows<R, true>	threads	0	blocks	smem
-internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q6k_rows<R>	ink2v_rows_threads(R)	0	blocks	smem
-internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q8_rows<MAXB, R>	INK2_Q8_WARPS * 32	256	grid	0
-internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q8_segs<MAXB, R>	INK2_Q8_WARPS * 32	256	grid	0
-internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_repeat_rows	256	256	grid	0
-internal/compute/cuda/inkling2_verify_rows.cuh	k_q8_quant_act	32	32	dim3(nblk, nx * rows)	0
-internal/compute/cuda/inkling2_verify_rows.cuh	k_q8_quant_act	32	32	dim3(nblk, rows)	0
-internal/compute/cuda/iq23s_gemv.cuh	k_iq2s_gemv	256	256	dim3((out + 7) / 8, P)	0
-internal/compute/cuda/iq23s_gemv.cuh	k_iq3s_gemv	256	256	dim3((out + 7) / 8, P)	0
-internal/compute/cuda/iq23s_gemv.cuh	k_iq3xxs_gemv	256	256	dim3((out + 7) / 8, P)	0
-internal/compute/cuda/iq4xs_mmvq.cuh	fak_iq4xs::mul_mat_vec_q<1>	block	0	grid	0
-internal/compute/cuda/iq4xs_mmvq.cuh	fak_iq4xs::mul_mat_vec_q<2>	block	0	grid	0
-internal/compute/cuda/iq4xs_mmvq.cuh	fak_iq4xs::mul_mat_vec_q<3>	block	0	grid	0
-internal/compute/cuda/iq4xs_mmvq.cuh	fak_q4k_mmvq::quantize_q8_1	256	256	qgrid	0
-internal/compute/cuda/iq4xs_mmvq.cuh	k_fp16_split	256	256	(xn + 255) / 256	0
-internal/compute/cuda/iq4xs_mmvq.cuh	k_iq4xs_dequant_split	32	32	nb	0
-internal/compute/cuda/iq4xs_mmvq.cuh	k_iq4xs_gemv	256	256	grid	0
-internal/compute/cuda/iq_gemv.cuh	k_iq1m_gemv	256	256	dim3((out + 7) / 8, P)	0
-internal/compute/cuda/iq_gemv.cuh	k_iq2xs_gemv	256	256	dim3((out + 7) / 8, P)	0
-internal/compute/cuda/iq_gemv.cuh	k_iq2xxs_gemv	256	256	dim3((out + 7) / 8, P)	0
-internal/compute/cuda/iq_gemv.cuh	k_iq4nl_gemv	256	256	dim3((out + 7) / 8, P)	0
-internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::attention	128	128	tokens*heads	shared
-internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::dequantize	256	256	rows	0
-internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::quantize	256	256	rows	0
-internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::validate3	256	256	((size_t)n + 255)/256	0
-internal/compute/cuda/kv_fp8_rotary.cuh	fak_kv_fp8::partial_rope_stage	256	256	(n+255)/256	0
-internal/compute/cuda/kv_precision.cuh	k_kv_attention_prompt4_gqa4_typed	512	512	grid	(size_t)16*hd*sizeof(float)
-internal/compute/cuda/kv_precision.cuh	k_kv_attention_prompt4_typed	128	128	grid	(size_t)16*hd*sizeof(float)
-internal/compute/cuda/kv_precision.cuh	k_kv_attention_typed	FLASH_THREADS	128	tokens*heads	((size_t)hd+FLASH_THREADS)*sizeof(float)
-internal/compute/cuda/kv_precision.cuh	k_kv_load_typed	256	256	((size_t)n+255)/256	0
-internal/compute/cuda/kv_precision.cuh	k_kv_store_typed	256	256	((size_t)n+255)/256	0
-internal/compute/cuda/minference_vertical_slash_index.cuh	fak_minference::vertical_slash_index_kernel	dimBlock	0	dimGrid	
-internal/compute/cuda/mla_cache_insert_vllm.cuh	fak_vllm_mla::mla_concat_cache_ds_pages_kernel	96	96	tokens	0
-internal/compute/cuda/mla_cache_insert_vllm.cuh	fak_vllm_mla::mla_concat_cache_grouped_pages_kernel	threads	0	grid	0
-internal/compute/cuda/mla_cache_insert_vllm.cuh	fak_vllm_mla::mla_concat_cache_pages_kernel	threads	0	tokens	0
-internal/compute/cuda/model_candidates.cuh	k_qwen35_embedding_gather	256	256	(n + 255) / 256	0
-internal/compute/cuda/model_candidates.cuh	k_v41_bf16_publish	256	256	blocks	0
-internal/compute/cuda/model_candidates.cuh	k_v41_bf16_publish_status	1	1	1	0
-internal/compute/cuda/model_candidates.cuh	k_v41_tail_rope	256	256	blocks	0
-internal/compute/cuda/mxfp8_cast.cuh	k_mxfp8_cast_f32	128	128	blocks	0
-internal/compute/cuda/nvfp4_warp_gemv.cuh	k_nvfp4_w4a16_warp_f32	256	256	grid	0
-internal/compute/cuda/paged_attention_vllm.cuh	fak_paged_kv_copy_blocks_kernel	256	256	planes	0
-internal/compute/cuda/paged_attention_vllm.cuh	fak_vllm_pa::paged_gather_rows_kernel	threads	0	tokens	0
-internal/compute/cuda/paged_attention_vllm.cuh	fak_vllm_pa::paged_store_int_kernel	1	1	1	0
-internal/compute/cuda/paged_attention_vllm.cuh	fak_vllm_pa::reshape_and_cache_pages_kernel	threads	0	tokens	0
-internal/compute/cuda/paged_attention_vllm.cuh	fak_vllm_pa::reshape_and_cache_run_kernel	threads	0	tokens	0
-internal/compute/cuda/paged_attention_vllm.cuh	kern	block	0	grid	shared_mem_size
-internal/compute/cuda/paged_attention_vllm.cuh	kern2	block	0	grid	shared_mem_size
-internal/compute/cuda/paged_attention_vllm.cuh	paged_attention_v2_reduce_kernel<float, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE>	block	0	reduce_grid	reduce_shared_mem_size
-internal/compute/cuda/q2k_mmq.cuh	mul_mat_q<J, fallback>	block_dims	0	block_nums_stream_k	nbytes
-internal/compute/cuda/q2k_mmq.cuh	mul_mat_q_stream_k_fixup<J, fallback>	block_dims_fixup	0	block_nums_fixup	0
-internal/compute/cuda/q2k_mmq.cuh	quantize_mmq_q8_1_d2s6	block_size	0	num_blocks	0
-internal/compute/cuda/q3k_matmul.cuh	k_q3k_panel<1>	256	256	grid	0
-internal/compute/cuda/q3k_matmul.cuh	k_q3k_panel<4>	256	256	grid	0
-internal/compute/cuda/q3k_mmq.cuh	mul_mat_q<J, fallback>	block_dims	0	block_nums_stream_k	nbytes
-internal/compute/cuda/q3k_mmq.cuh	mul_mat_q_stream_k_fixup<J, fallback>	block_dims_fixup	0	block_nums_fixup	0
-internal/compute/cuda/q3k_mmq.cuh	quantize_mmq_q8_1_d4	block_size	0	num_blocks	0
-internal/compute/cuda/q3k_mmvq.cuh	dequantize_block_q3_K	64	64	nb	0
-internal/compute/cuda/q3k_mmvq.cuh	fak_q3k_mmvq::mul_mat_vec_q<1>	block	0	grid	0
-internal/compute/cuda/q3k_mmvq.cuh	fak_q3k_mmvq::mul_mat_vec_q<2>	block	0	grid	0
-internal/compute/cuda/q3k_mmvq.cuh	fak_q3k_mmvq::mul_mat_vec_q<3>	block	0	grid	0
-internal/compute/cuda/q3k_mmvq.cuh	fak_q4k_mmvq::quantize_q8_1	256	256	qgrid	0
-internal/compute/cuda/q3k_mmvq.cuh	k_fp16_split	256	256	(xn + 255) / 256	0
-internal/compute/cuda/q4k_fp8lt.cuh	amax<false>	256	256	grid(xn)	0
-internal/compute/cuda/q4k_fp8lt.cuh	amax<true>	256	256	grid(wn)	0
-internal/compute/cuda/q4k_fp8lt.cuh	convert<false>	256	256	grid(xpad)	0
-internal/compute/cuda/q4k_fp8lt.cuh	convert<true>	256	256	grid(wn)	0
-internal/compute/cuda/q4k_fp8lt.cuh	finish_scales	32	32	1	0
-internal/compute/cuda/q4k_mmq.cuh	mul_mat_q<J, fallback>	block_dims	0	block_nums_stream_k	nbytes
-internal/compute/cuda/q4k_mmq.cuh	mul_mat_q_stream_k_fixup<J, fallback>	block_dims_fixup	0	block_nums_fixup	0
-internal/compute/cuda/q4k_mmq.cuh	quantize_mmq_q8_1_ds4	block_size	0	num_blocks	0
-internal/compute/cuda/q4k_mmvq.cuh	mul_mat_vec_q<1>	block	0	grid	0
-internal/compute/cuda/q4k_mmvq.cuh	mul_mat_vec_q<2>	block	0	grid	0
-internal/compute/cuda/q4k_mmvq.cuh	mul_mat_vec_q<3>	block	0	grid	0
-internal/compute/cuda/q4k_mmvq.cuh	quantize_q8_1	256	256	qgrid	0
-internal/compute/cuda/q4k_shared_input.cuh	mul_mat_vec_q<1>	block	0	grid	0
-internal/compute/cuda/q4k_shared_input.cuh	quantize_q8_1	256	256	qgrid	0
-internal/compute/cuda/q56k_mmq.cuh	mul_mat_q<kind,J,fallback>	block	0	grid	shared_bytes
-internal/compute/cuda/q56k_mmq.cuh	mul_mat_q_stream_k_fixup<J,fallback>	fblock	0	fgrid	0
-internal/compute/cuda/q56k_mmq.cuh	quantize_mmq_q8_1<kind>	CUDA_QUANTIZE_BLOCK_SIZE_MMQ	128	qgrid	0
-internal/compute/cuda/q8_mmq.cuh	mul_mat_q<J, fallback>	block_dims	0	block_nums_stream_k	nbytes
-internal/compute/cuda/q8_mmq.cuh	mul_mat_q_stream_k_fixup<J, fallback>	block_dims_fixup	0	block_nums_fixup	0
-internal/compute/cuda/q8_mmq.cuh	quantize_mmq_q8_1_d4	block_size	0	num_blocks	0
-internal/compute/cuda/quant_matmul.cuh	fak_q4k_mmvq::mul_mat_vec_q<1,Dot>	block	0	grid	0
-internal/compute/cuda/quant_matmul.cuh	fak_q4k_mmvq::mul_mat_vec_q<2,Dot>	block	0	grid	0
-internal/compute/cuda/quant_matmul.cuh	fak_q4k_mmvq::mul_mat_vec_q<3,Dot>	block	0	grid	0
-internal/compute/cuda/quant_matmul.cuh	fak_q4k_mmvq::quantize_q8_1	256	256	qgrid	0
-internal/compute/cuda/quant_matmul.cuh	k_f32_to_f16	256	256	(n + 255) / 256	0
-internal/compute/cuda/quant_matmul.cuh	k_f32_to_f16_T	256	256	(total + 255) / 256	0
-internal/compute/cuda/quant_matmul.cuh	k_f32_to_f16_vec4	256	256	(n4 + 255) / 256	0
-internal/compute/cuda/quant_matmul.cuh	k_fp16_split	256	256	(xn + 255) / 256	0
-internal/compute/cuda/quant_matmul.cuh	k_nvfp4_w4a16_f32	256	256	(unsigned int)blocks	0
-internal/compute/cuda/quant_matmul.cuh	k_q2_0_gemm	256	256	dim3(out, P)	0
-internal/compute/cuda/quant_matmul.cuh	k_q2k_dequant_split	256	256	(wn + 255) / 256	0
-internal/compute/cuda/quant_matmul.cuh	k_q2k_gemm_panel<token_tile>	32	32	dim3(out, (P + token_tile - 1) / token_tile)	0
-internal/compute/cuda/quant_matmul.cuh	k_q2k_gemv	256	256	dim3((out + 7) / 8, P)	0
-internal/compute/cuda/quant_matmul.cuh	k_q4k_coeffs	256	256	(n + 255) / 256	0
-internal/compute/cuda/quant_matmul.cuh	k_q4k_dequant_split	256	256	(wn + 255) / 256	0
-internal/compute/cuda/quant_matmul.cuh	k_q4k_gemm	256	256	dim3((out + 1) / 2, P)	0
-internal/compute/cuda/quant_matmul.cuh	k_q4k_gemm_panel<token_tile>	32	32	dim3(out, (P + token_tile - 1) / token_tile)	0
-internal/compute/cuda/quant_matmul.cuh	k_q5k_gemm<1>	256	256	dim3((o + 7) / 8, p)	0
-internal/compute/cuda/quant_matmul.cuh	k_q5k_gemm<4>	256	256	dim3((o + 7) / 8, tiles)	0
-internal/compute/cuda/quant_matmul.cuh	k_q6k_gemm<1>	256	256	dim3((o + 7) / 8, p)	0
-internal/compute/cuda/quant_matmul.cuh	k_q6k_gemm<4>	256	256	dim3((o + 7) / 8, tiles)	0
-internal/compute/cuda/quant_matmul.cuh	k_q8_gemm	256	256	dim3((out + 7) / 8, P)	0
-internal/compute/cuda/quant_matmul.cuh	k_q8_gemm_rowtile	kQ8TileWarps * 32	256	dim3(tiles, outGroups)	0
-internal/compute/cuda/quant_matmul.cuh	k_q8_quant_act	quant_threads	0	dim3(nblk, P)	0
-internal/compute/cuda/qwen35_attention_postprocess.cuh	k_qwen35_attention_postprocess	256	256	tokens * 32	0
-internal/compute/cuda/qwen35_gdn.cuh	k_fp16_split	256	256	(wn + 255) / 256	0
-internal/compute/cuda/qwen35_gdn.cuh	k_fp16_split	256	256	(xn + 255) / 256	0
-internal/compute/cuda/qwen35_gdn.cuh	k_q8_dequant_split	256	256	(wn + 255) / 256	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_conv_panel_history	256	256	convBlocks	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_conv_panel_tiled	256	256	dim3(convBlocks, convTiles)	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_conv_state	256	256	convBlocks	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_conv_state_lanes	256	256	convGrid	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj	256	256	(int)fusedRows64	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj	256	256	dim3(fusedRows, tokens)	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj_lanes	256	256	(int)fusedRows64	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj_lanes	256	256	fusedRows	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj_warp	256	256	grid	qwen35_gdn_rowdot_smem(hidden)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_gate_panel	256	256	(unsigned)((gates + 255) / 256)	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_norm_panel	vThreads	0	dim3(tokens, nV)	(size_t)vThreads * sizeof(float)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_proj	256	256	dim3(hidden, tokens)	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_proj	256	256	hidden	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_proj_lanes	256	256	hidden	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_proj_warp	256	256	grid	qwen35_gdn_rowdot_smem(valueDim)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_qk_norm	qThreads	0	nK	(size_t)2 * qThreads * sizeof(float)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_qk_norm_panel	qThreads	0	dim3(nK, lanes)	(size_t)2 * qThreads * sizeof(float)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_qk_norm_panel	qThreads	0	dim3(nK, tokens)	(size_t)2 * qThreads * sizeof(float)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_chunks	128	128	nV * chunkCols	0
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_gated_norm	vThreads	0	nV	(size_t)vThreads * sizeof(float)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_gated_norm_lanes<false>	vThreads	0	recGrid	(size_t)vThreads * sizeof(float)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_gated_norm_lanes<true>	vThreads	0	recGrid	(size_t)vThreads * sizeof(float)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_gated_norm_regstate	vThreads	0	nV	(size_t)vThreads * sizeof(float)
-internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_panel_cols	kQwen35GDNPanelCols	32	nV * colBlocks	0
-internal/compute/cuda/qwen35_qknorm_rope_cache_vllm.cuh	k_qwen35_qknorm_rope_cache_vllm<HD, WIDE>	128	128	blocks	0
-internal/compute/cuda/runtime_services.cuh	k_qwen4exp_ple_hash_i64	threads	0	tokens	0
-internal/compute/cuda/sampling_candidates.cuh	k_sampling_candidates_cutoff	256	256	1	0
-internal/compute/cuda/sampling_candidates.cuh	k_sampling_candidates_emit	256	256	blocks	0
-internal/compute/cuda/sampling_candidates.cuh	k_sampling_candidates_histogram	256	256	blocks	0
-internal/compute/cuda/situ_moe.cuh	k_situ_act	256	256	grid	0
-internal/compute/cuda/situ_moe.cuh	k_situ_combine	256	256	(hidden + 255) / 256	0
-internal/compute/cuda/spec_graph.cuh	k_argmax	256	256	1	0
-internal/compute/cuda/spec_graph.cuh	k_dsa_index_score	threads	0	nKeys	0
-internal/compute/cuda/spec_graph.cuh	k_dsa_index_topk	threads	0	1	0
-internal/compute/cuda/spec_graph.cuh	k_dsa_sparse_attend	FLASH_THREADS	128	nH	shmem
-internal/compute/cuda/spec_graph.cuh	k_spec_verify_attention	block_attn	0	grid_attn	shmem_attn
-internal/compute/cuda/spec_graph.cuh	k_spec_verify_combine	block_combine	0	grid_combine	0
-internal/compute/cuda/transformer_ops.cuh	k_add	256	256	(n + 255) / 256	0
-internal/compute/cuda/transformer_ops.cuh	k_add_bias	256	256	(rows * width + 255) / 256	0
-internal/compute/cuda/transformer_ops.cuh	k_copyrow	256	256	blocks	0
-internal/compute/cuda/transformer_ops.cuh	k_partial_rope_copy<false>	256	256	(kn+255)/256	0
-internal/compute/cuda/transformer_ops.cuh	k_partial_rope_copy<false>	256	256	(qn+255)/256	0
-internal/compute/cuda/transformer_ops.cuh	k_qwen35_partial_rope_panel	256	256	(kn + 255) / 256	0
-internal/compute/cuda/transformer_ops.cuh	k_qwen35_partial_rope_panel	256	256	(qn + 255) / 256	0
-internal/compute/cuda/transformer_ops.cuh	k_qwen35_split_qg_panel	256	256	(n + 255) / 256	0
-internal/compute/cuda/transformer_ops.cuh	k_rmsnorm	256	256	rows	0
-internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_fused_residual_add	256	256	rows	0
-internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<16>	256	256	blocks	0
-internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<1>	256	256	blocks	0
-internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<2>	256	256	blocks	0
-internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<4>	256	256	blocks	0
-internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<8>	256	256	blocks	0
-internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_warp_per_row	warps * 32	0	blocks	0
-internal/compute/cuda/transformer_ops.cuh	k_rope<false>	128	128	(total + 127) / 128	0
-internal/compute/cuda/transformer_ops.cuh	k_rope_panel	128	128	(unsigned)((total + 127) / 128)	0
-internal/compute/cuda/transformer_ops.cuh	k_sigmoid_mul	256	256	(n+255)/256	0
-internal/compute/cuda/transformer_ops.cuh	k_split_qwen35_qg	256	256	(n+255)/256	0
-internal/compute/cuda/transformer_ops.cuh	k_swiglu	256	256	(n + 255) / 256	0
-internal/compute/cuda/v41_compressor.cuh	v41c_compressor_store_kernel	V41C_THREADS	256	blocks	0
-internal/compute/cuda/v41_compressor.cuh	v41c_compressor_update_pool_kernel	V41C_THREADS	256	blocks	0
-internal/compute/cuda/v41_compressor.cuh	v41c_status_kernel	V41C_THREADS	256	blocks	0
-internal/compute/cuda/v41_embed_gather.cuh	v41_eg_f32	256	256	blocks<65535?blocks:65535	0
-internal/compute/cuda/v41_embed_gather.cuh	v41_eg_iq4nl	32	32	blocks<65535?blocks:65535	0
-internal/compute/cuda/v41_embed_gather.cuh	v41_eg_iq4nl_poison	256	256	1	0
-internal/compute/cuda/v41_embed_gather.cuh	v41_eg_iq4nl_row	32	32	1	0
-internal/compute/cuda/v41_embed_gather.cuh	v41_eg_q2	64	64	blocks<65535?blocks:65535	0
-internal/compute/cuda/v41_embed_gather.cuh	v41_eg_q5	64	64	blocks<65535?blocks:65535	0
-internal/compute/cuda/v41_embed_gather.cuh	v41_eg_rows	64	64	blocks	0
-internal/compute/cuda/weight_formats.cuh	k_awq_gemm	threads	0	blocks	0
-internal/compute/cuda/weight_formats.cuh	k_awq_gemv	threads	0	out	0
-internal/compute/cuda/weight_formats.cuh	k_gptq_gemv	threads	0	out	0
-internal/compute/cuda/weight_formats.cuh	k_nvfp4_lt_swizzle_scales	256	256	blocks	0
-internal/compute/cuda_flashmla_sparse_prefill.cu	flash_permute	256	256	((uint64_t)x.queries*32768+255)/256	0
-internal/compute/cuda_flashmla_sparse_prefill.cu	flash_unpack	512	512	x.queries*64	0
-internal/compute/cuda_sm10x_probe.cu	fak_sm10x_tmem_probe	32	32	1	0
-internal/compute/cuda_v41_compressor_pool.cu	k_v41_pool	128	128	blocks	0
-internal/compute/cuda_v41_engram_gate.cu	k_v41_engram	128	128	blocks	0
-internal/compute/cuda_v41_indexer.cu	k_v41_indexer_score_f32	128	128	blocks	0
-internal/compute/cuda_v41_indexer.cu	k_v41_indexer_score_tiled_f32	64	64	blocks	0
-internal/compute/cuda_v41_mhc.cu	k_mhc	128	128	blocks	0
-internal/compute/cuda_v41_routed_mmid.cu	fak_q4k_mmvq::quantize_q8_1	256	256	qgrid	0
-internal/compute/cuda_v41_routed_mmid.cu	fak_v41_mmid::routed_publish_down_sum	256	256	blocks	0
-internal/compute/cuda_v41_routed_mmid.cu	fak_v41_mmid::routed_swiglu_id	256	256	grid	0
-internal/compute/cuda_v41_routed_mmid.cu	k_v41_bf16_publish	256	256	blocks	0
-internal/compute/cuda_v41_routed_mmid.cu	k_v41_bf16_publish_status	1	1	1	0
-internal/compute/cuda_v41_routed_mmid.cu	k_v41_routed_swiglu	128	128	blocks	0
-internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_down_sum<type_q2_K>	block	0	grid	0
-internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_down_sum<type_q3_K>	block	0	grid	0
-internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_id<type_q2_K, false>	block	0	grid	0
-internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_id<type_q2_K, true>	block	0	grid	0
-internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_id<type_q3_K, false>	block	0	grid	0
-internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_id<type_q3_K, true>	block	0	grid	0
-internal/compute/cuda_v41_routed_swiglu.cu	k_v41_routed_swiglu	128	128	blocks	0
-internal/compute/cuda_v41_router.cu	k_v41_router_argmax_topk	block	0	blocks	0
-internal/compute/cuda_v41_shared_attention.cu	k_v41_shared_attention_combine	V41SA_COMBINE_THREADS	128	heads	0
-internal/compute/cuda_v41_shared_attention.cu	k_v41_shared_attention_split	V41SA_THREADS	256	grid	smem
-internal/compute/dsv41_k_quant.cu	k_dsv41_kq_dequant_gather_mxfp8_one_pass	128	128	grid	0
-internal/compute/dsv41_k_quant.cu	k_dsv41_kq_dequant_gather_mxfp8_per_block	128	128	grid	0
-internal/compute/dsv41_k_quant.cu	k_dsv41_kq_quant_insert_mxfp8	128	128	tokens	0
-internal/compute/eplb_map_record.cu	k_emr_map_record_i32	EMR_THREADS	256	grid	0
-internal/compute/grammar_bitmask.cu	k_grammar_bitmask_apply	128	128	grid	0
-internal/compute/kv_swap_batch.cu	k_ksb_swap_blocks	KSB_THREADS	256	grid	0
-internal/compute/logprob_topk.cu	k_lptk_gather	gather_threads	256	gather_grid	0
-internal/compute/logprob_topk.cu	k_lptk_rank	block	0	num_rows	LPTK_THREADS * sizeof(int32_t)
-internal/compute/logprob_topk.cu	k_lptk_row_lse	block	0	num_rows	smem
-internal/compute/moe_align_sort.cu	k_mae_align_block_size	MAE_THREADS	1024	1	0
-internal/compute/moe_align_sort.cu	k_mae_fill_sentinel	MAE_FILL_THREADS	256	fillGrid	0
-internal/compute/moe_align_sort.cu	k_mae_scatter_expert_tokens	MAE_SCATTER_THREADS	256	scatterGrid	0
-internal/compute/moe_align_sort.cu	k_mae_sum_topk_f32	MAE_SCATTER_THREADS	256	grid	0
-internal/compute/rmsnorm_fp8_quant.cu	k_rfq_fused_add_rmsnorm_fp8_quant	RFQ_THREADS	256	grid	0
-internal/compute/rmsnorm_fp8_quant.cu	k_rfq_rmsnorm_fp8_quant	RFQ_THREADS	256	grid	0
-internal/compute/routed_expert_gemv.cu	k_rex_gemv_fp8_block32_e8m0	REX_THREADS	256	(unsigned int)g.blocks	0
-internal/compute/routed_expert_gemv.cu	k_rex_gemv_mxfp4_e8m0	REX_THREADS	256	(unsigned int)g.blocks	0
-internal/compute/sampling_topk.cu	k_sampling_draw_f32	SAMPLING_TOPK_THREADS	1024	grid	smem
-internal/compute/sampling_topk.cu	k_sampling_nucleus_f32	SAMPLING_TOPK_THREADS	1024	grid	smem
-internal/compute/sampling_topk.cu	k_sampling_repetition_penalty_f32	SAMPLING_TOPK_THREADS	1024	grid	0
-internal/compute/sampling_topk.cu	k_sampling_topk_truncate_f32	SAMPLING_TOPK_THREADS	1024	grid	smem
-internal/compute/silu_mul_fp8_quant.cu	k_silu_mul_fp8_quant	SMFQ_THREADS	128	blocks	0
-internal/compute/tree_attention.cu	k_tree_verify_attention	TREE_ATTN_THREADS	128	grid	shmem
+file	kernel	threads_expr	threads_per_block	threads_resolution	grid_expr	smem_expr
+internal/compute/cuda/attention.cuh	k_attention	128	128	literal	nH	0
+internal/compute/cuda/attention.cuh	k_flash_attention<false>	FLASH_THREADS	128	resolved-chain	nH	shmem
+internal/compute/cuda/attention.cuh	k_prompt_causal_attention_panel	FLASH_THREADS	128	resolved-chain	tokens * nH	shmem
+internal/compute/cuda/attention.cuh	k_qwen38_causal_attention_panel_hd256	FLASH_THREADS	128	resolved-chain	tokens * nH	shmem
+internal/compute/cuda/attention.cuh	k_qwen38_causal_attention_panel_hd256_splitkv_partial	FLASH_THREADS	128	resolved-chain	tokens * nH * nsplits	shmem
+internal/compute/cuda/attention.cuh	k_qwen38_splitkv_lse_merge_hd256	FLASH_THREADS	128	resolved-chain	tokens * nH	0
+internal/compute/cuda/attention_generic.cuh	k_attention_generic_merge	128	128	literal	nH	0
+internal/compute/cuda/attention_generic.cuh	k_attention_generic_tiled<NS>	ATTN_GENERIC_WARPS * 32	128	resolved-chain	grid	smem
+internal/compute/cuda/blockscaled_wkv.cuh	check_output	256	256	literal	(rows * 512 + 255) / 256	0
+internal/compute/cuda/blockscaled_wkv.cuh	k_mxfp8_cast_f32	128	128	literal	rows * 40	0
+internal/compute/cuda/blockscaled_wkv.cuh	repack	256	256	literal	(rows * 40 + 255) / 256	0
+internal/compute/cuda/fattn_mma_hd256.cuh	fak_fattn_mma::k_qwen38_fattn_mma_hd256	dim3(fak_fattn_mma::warp_size, fak_fattn_mma::nthreads / fak_fattn_mma::warp_size, 1)	128	resolved-chain	grid	shmem
+internal/compute/cuda/fattn_mma_hd256.cuh	fak_fattn_mma::k_qwen38_fattn_stage_kv_f16	stageThreads	256	resolved-chain	(unsigned) (stageBlocks < 65535 ? stageBlocks : 65535)	0
+internal/compute/cuda/gdn_decode_vllm.cuh	k_qwen35_gdn_post_conv_vllm<Ratio, true>	kThreads	256	resolved-chain	grid	0
+internal/compute/cuda/gdn_decode_vllm.cuh	k_qwen35_gdn_post_conv_vllm<Ratio>	kThreads	256	resolved-chain	nV	0
+internal/compute/cuda/gdn_mtp_decode_vllm.cuh	k_qwen35_gdn_mtp_post_conv_vllm<Ratio>	kThreads	256	resolved-chain	nV	0
+internal/compute/cuda/gdn_shared_split.cuh	k_fp16_split	256	256	literal	(xn + 255) / 256	0
+internal/compute/cuda/gdn_shared_split.cuh	k_q8_dequant_split	256	256	literal	(wn + 255) / 256	0
+internal/compute/cuda/graph_capture_once.cuh	k_flash_attention<true>	FLASH_THREADS	128	resolved-chain	heads	shmem
+internal/compute/cuda/graph_capture_once.cuh	k_graph_once_copyrow	256	256	literal	(unsigned)width / 256 + (width % 256 != 0)	0
+internal/compute/cuda/graph_capture_once.cuh	k_graph_once_position	1	1	literal	1	0
+internal/compute/cuda/graph_capture_once.cuh	k_partial_rope_copy<true>	256	256	literal	kblocks	0
+internal/compute/cuda/graph_capture_once.cuh	k_partial_rope_copy<true>	256	256	literal	qblocks	0
+internal/compute/cuda/graph_capture_once.cuh	k_rope<true>	128	128	literal	total / 128 + (total % 128 != 0)	0
+internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_conv_state	256	256	literal	blocks	0
+internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_fused_in_proj	256	256	literal	g.fused	0
+internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_out_proj	256	256	literal	r->hidden	0
+internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_qk_norm	g.q_threads	0	runtime	r->key_heads	(size_t)2*g.q_threads*sizeof(float)
+internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_recurrent_gated_norm	g.v_threads	0	runtime	r->value_heads	(size_t)g.v_threads*sizeof(float)
+internal/compute/cuda/graph_gdn_capture.cuh	k_qwen35_gdn_recurrent_gated_norm_regstate	g.v_threads	0	runtime	r->value_heads	(size_t)g.v_threads*sizeof(float)
+internal/compute/cuda/graph_quant_workspace.cuh	k_q8_gemm	256	256	literal	grid	0
+internal/compute/cuda/graph_quant_workspace.cuh	k_q8_quant_act	32	32	literal	qgrid	0
+internal/compute/cuda/graph_quant_workspace.cuh	mul_mat_vec_q<1>	block	128	resolved-chain	grid	0
+internal/compute/cuda/graph_quant_workspace.cuh	quantize_q8_1	256	256	literal	qgrid	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_exp	256	256	literal	g1	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out<true, T>	othreads	0	runtime	g3	osmem
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tiled<T>	othreads	0	runtime	g3	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<false, T>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<true, T>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	osmem
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_scores<T>	INK2_ATS_WARPS * 32	256	resolved-chain	g1	0
+internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_attend	128	128	literal	grid	smem
+internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_fuse	256	256	literal	rows	0
+internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_qk	dim	0	runtime	grid	0
+internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_ring_store	256	256	literal	grid	0
+internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_silu_mul	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_markov_gate	256	256	literal	(rank + 255) / 256	0
+internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_markov_in	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_markov_pick	512	512	literal	1	0
+internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_topm_merge	256	256	literal	rows	0
+internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_topm_slice	256	256	literal	g1	0
+internal/compute/cuda/inkling2_expert_gemv.cuh	k_ink2_expert_iq4nl_v3<INK2_IQ3_ROWS>	256	256	literal	grid	(size_t)in * 4
+internal/compute/cuda/inkling2_expert_gemv.cuh	k_ink2_expert_iq_v3<F, INK2_IQ3_ROWS>	256	256	literal	grid	smem
+internal/compute/cuda/inkling2_expert_gemv.cuh	k_ink2_expert_nvfp4_v2<KB, INK2_NV2_ROWS>	INK2_NV2_WARPS * 32	256	resolved-chain	grid	smem
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_add	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_argkey_index	1	1	literal	1	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_argkey_index	C	0	runtime	1	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_attend<T>	INK2_ATT_THREADS	512	resolved-chain	g	smem
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_conv	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_conv	256	256	literal	g	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_ctrl_apply64	INK2_CTRL_APPLY_WARPS * 32	128	resolved-chain	ag	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_ctrl_down4	256	256	literal	dim3(rank, nj)	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_ctrl_pair	256	256	literal	2	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ2S>	256	256	literal	iqgrid	in * sizeof(float)
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ2XS>	256	256	literal	iqgrid	in * sizeof(float)
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ3S>	256	256	literal	iqgrid	in * sizeof(float)
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ3XXS>	256	256	literal	iqgrid	in * sizeof(float)
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_IQ4NL>	256	256	literal	iqgrid	in * sizeof(float)
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_iq<INK2_Q3K>	256	256	literal	iqgrid	in * sizeof(float)
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_nvfp4	256	256	literal	nvgrid	in * sizeof(float)
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_expert_scale	256	256	literal	dim3((rows + 255) / 256, k)	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_gemv_f32	256	256	literal	rows	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_mix<1>	INK2_MIX_THREADS	1024	resolved-chain	1	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_mix<2>	INK2_MIX_THREADS	1024	resolved-chain	1	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_mix<3>	INK2_MIX_THREADS	1024	resolved-chain	1	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_mix<4>	INK2_MIX_THREADS	1024	resolved-chain	1	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_moe_combine	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_q8_gemv<3>	INK2_Q8_WARPS * 32	256	resolved-chain	grid	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_q8_gemv<4>	INK2_Q8_WARPS * 32	256	resolved-chain	grid	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_q8_quant_gated	32	32	literal	nblk	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_qkv_post<__half>	32	32	literal	blocks	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_qkv_post<float>	32	32	literal	blocks	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_rms_multi	1024	1024	literal	nj	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_rms_rows	1024	1024	literal	1	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_rms_rows	1024	1024	literal	rows	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_route	32	32	literal	1	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_sigmoid_mul	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_situ	64	64	literal	dim3((width + 63) / 64, k)	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_softcap_argmax	256	256	literal	128	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_softcap_argmax	256	256	literal	g	0
+internal/compute/cuda/inkling2_loop.cuh	k_q8_gemm	256	256	literal	dim3((out + 7) / 8, 1)	0
+internal/compute/cuda/inkling2_loop.cuh	k_q8_quant_act	qt	0	runtime	dim3(nblk, 1)	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_attend<false>	INK2_ATT_THREADS	512	resolved-chain	grid	smem
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_attend<true>	INK2_ATT_THREADS	512	resolved-chain	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_bucket_count	256	256	literal	(npairs + 255) / 256	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_bucket_fill	256	256	literal	nexp	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_bucket_scan	32	32	literal	1	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_combine	256	256	literal	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_conv	32	32	literal	(n + 31) / 32	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_conv_commit	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_conv_pair	32	32	literal	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_ctrl_apply	256	256	literal	grid	smem
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_ctrl_down	256	256	literal	dim3(rank, T)	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_ctrl_down	256	256	literal	dim3(rank, T, J)	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_expert_iq<F>	INK2P_IQ_THREADS	512	resolved-chain	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_expert_nvfp4	256	256	literal	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_gather_pairs	256	256	literal	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_gemm_f32	32 * INK2P_GEMM_TOK	256	resolved-chain	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<1>	INK2_MIX_THREADS	1024	resolved-chain	T	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<2>	INK2_MIX_THREADS	1024	resolved-chain	T	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<3>	INK2_MIX_THREADS	1024	resolved-chain	T	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<4>	INK2_MIX_THREADS	1024	resolved-chain	T	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_qkv_post<__half>	32	32	literal	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_qkv_post<float>	32	32	literal	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_route	32	32	literal	T	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_scatter_pairs	256	256	literal	grid	0
+internal/compute/cuda/inkling2_prefill_attn.cuh	k_ink2p_attend_v2<QW, KT, REL, PIPE, E>	32 * kG * QW	0	template	grid	smem
+internal/compute/cuda/inkling2_prefill_dense.cuh	ink2d::k_ink2d_f32<32>	256	256	literal	grid	0
+internal/compute/cuda/inkling2_prefill_dense.cuh	ink2d::k_ink2d_f32<64>	256	256	literal	grid	0
+internal/compute/cuda/inkling2_prefill_dense.cuh	k_ink2d_mmq<F, BM>	kThreads	256	resolved-chain	grid	0
+internal/compute/cuda/inkling2_prefill_dense.cuh	k_ink2p_dense_quant	256	256	literal	qg	0
+internal/compute/cuda/inkling2_prefill_iq.cuh	k_ink2p_expert_iq_v2<F, NB, 2>	INK2Q_THREADS	256	resolved-chain	grid	0
+internal/compute/cuda/inkling2_prefill_iq.cuh	k_ink2q_quant	INK2Q_THREADS	256	resolved-chain	maxTiles	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_conv<K>	256	256	literal	grid	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_apply	256	256	literal	ag	smem
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_apply	256	256	literal	grid	smem
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_down	256	256	literal	dg	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_ctrl_down	256	256	literal	grid	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<1>	INK2M_MIX_THREADS	384	resolved-chain	T	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<2>	INK2M_MIX_THREADS	384	resolved-chain	T	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<3>	INK2M_MIX_THREADS	384	resolved-chain	T	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_mix<4>	INK2M_MIX_THREADS	384	resolved-chain	T	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_rms	INK2M_RMS_THREADS	256	resolved-chain	rows	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_situ1	256	256	literal	grid	0
+internal/compute/cuda/inkling2_prefill_misc.cuh	k_ink2m_situ4	128	128	literal	grid	0
+internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_expert_nvfp4_v2<MT, WARPS, STAGES, BK, NTILE, PF>	WARPS * 32	0	template	grid	SMEM
+internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_expert_nvfp4_v3<MT, WARPS, STAGES, BK, NTILE, MINB, PF>	WARPS * 32	0	template	grid	SMEM
+internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_expert_nvfp4_w4a4<MT, WARPS, STAGES, PF>	WARPS * 32	0	template	grid	SMEM
+internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_nv2_quant<16>	256	256	literal	qgrid	0
+internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_nv2_quant<32>	256	256	literal	qgrid	0
+internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_nvf4_probe	1	1	literal	1	0
+internal/compute/cuda/inkling2_prefill_nvfp4.cuh	k_ink2p_nvf4_quant<QT>	QT	128	resolved-chain	qgrid	0
+internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2_q8_quant_gated	32	32	literal	rows * nblk	0
+internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q5k_rows<R, false>	threads	0	template	blocks	smem
+internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q5k_rows<R, true>	threads	0	template	blocks	smem
+internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q6k_rows<R>	ink2v_rows_threads(R)	0	template	blocks	smem
+internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q8_rows<MAXB, R>	INK2_Q8_WARPS * 32	256	resolved-chain	grid	0
+internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_q8_segs<MAXB, R>	INK2_Q8_WARPS * 32	256	resolved-chain	grid	0
+internal/compute/cuda/inkling2_verify_rows.cuh	k_ink2v_repeat_rows	256	256	literal	grid	0
+internal/compute/cuda/inkling2_verify_rows.cuh	k_q8_quant_act	32	32	literal	dim3(nblk, nx * rows)	0
+internal/compute/cuda/inkling2_verify_rows.cuh	k_q8_quant_act	32	32	literal	dim3(nblk, rows)	0
+internal/compute/cuda/iq23s_gemv.cuh	k_iq2s_gemv	256	256	literal	dim3((out + 7) / 8, P)	0
+internal/compute/cuda/iq23s_gemv.cuh	k_iq3s_gemv	256	256	literal	dim3((out + 7) / 8, P)	0
+internal/compute/cuda/iq23s_gemv.cuh	k_iq3xxs_gemv	256	256	literal	dim3((out + 7) / 8, P)	0
+internal/compute/cuda/iq4xs_mmvq.cuh	fak_iq4xs::mul_mat_vec_q<1>	block	128	resolved-chain	grid	0
+internal/compute/cuda/iq4xs_mmvq.cuh	fak_iq4xs::mul_mat_vec_q<2>	block	128	resolved-chain	grid	0
+internal/compute/cuda/iq4xs_mmvq.cuh	fak_iq4xs::mul_mat_vec_q<3>	block	128	resolved-chain	grid	0
+internal/compute/cuda/iq4xs_mmvq.cuh	fak_q4k_mmvq::quantize_q8_1	256	256	literal	qgrid	0
+internal/compute/cuda/iq4xs_mmvq.cuh	k_fp16_split	256	256	literal	(xn + 255) / 256	0
+internal/compute/cuda/iq4xs_mmvq.cuh	k_iq4xs_dequant_split	32	32	literal	nb	0
+internal/compute/cuda/iq4xs_mmvq.cuh	k_iq4xs_gemv	256	256	literal	grid	0
+internal/compute/cuda/iq_gemv.cuh	k_iq1m_gemv	256	256	literal	dim3((out + 7) / 8, P)	0
+internal/compute/cuda/iq_gemv.cuh	k_iq2xs_gemv	256	256	literal	dim3((out + 7) / 8, P)	0
+internal/compute/cuda/iq_gemv.cuh	k_iq2xxs_gemv	256	256	literal	dim3((out + 7) / 8, P)	0
+internal/compute/cuda/iq_gemv.cuh	k_iq4nl_gemv	256	256	literal	dim3((out + 7) / 8, P)	0
+internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::attention	128	128	literal	tokens*heads	shared
+internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::dequantize	256	256	literal	rows	0
+internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::quantize	256	256	literal	rows	0
+internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::validate3	256	256	literal	((size_t)n + 255)/256	0
+internal/compute/cuda/kv_fp8_rotary.cuh	fak_kv_fp8::partial_rope_stage	256	256	literal	(n+255)/256	0
+internal/compute/cuda/kv_precision.cuh	k_kv_attention_prompt4_gqa4_typed	512	512	literal	grid	(size_t)16*hd*sizeof(float)
+internal/compute/cuda/kv_precision.cuh	k_kv_attention_prompt4_typed	128	128	literal	grid	(size_t)16*hd*sizeof(float)
+internal/compute/cuda/kv_precision.cuh	k_kv_attention_typed	FLASH_THREADS	128	resolved-chain	tokens*heads	((size_t)hd+FLASH_THREADS)*sizeof(float)
+internal/compute/cuda/kv_precision.cuh	k_kv_load_typed	256	256	literal	((size_t)n+255)/256	0
+internal/compute/cuda/kv_precision.cuh	k_kv_store_typed	256	256	literal	((size_t)n+255)/256	0
+internal/compute/cuda/minference_vertical_slash_index.cuh	fak_minference::vertical_slash_index_kernel	dimBlock	64	resolved-chain	dimGrid	
+internal/compute/cuda/mla_cache_insert_vllm.cuh	fak_vllm_mla::mla_concat_cache_ds_pages_kernel	96	96	literal	tokens	0
+internal/compute/cuda/mla_cache_insert_vllm.cuh	fak_vllm_mla::mla_concat_cache_grouped_pages_kernel	threads	0	runtime	grid	0
+internal/compute/cuda/mla_cache_insert_vllm.cuh	fak_vllm_mla::mla_concat_cache_pages_kernel	threads	0	runtime	tokens	0
+internal/compute/cuda/model_candidates.cuh	k_qwen35_embedding_gather	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/model_candidates.cuh	k_v41_bf16_publish	256	256	literal	blocks	0
+internal/compute/cuda/model_candidates.cuh	k_v41_bf16_publish_status	1	1	literal	1	0
+internal/compute/cuda/model_candidates.cuh	k_v41_tail_rope	256	256	literal	blocks	0
+internal/compute/cuda/mxfp8_cast.cuh	k_mxfp8_cast_f32	128	128	literal	blocks	0
+internal/compute/cuda/nvfp4_warp_gemv.cuh	k_nvfp4_w4a16_warp_f32	256	256	literal	grid	0
+internal/compute/cuda/paged_attention_vllm.cuh	fak_paged_kv_copy_blocks_kernel	256	256	literal	planes	0
+internal/compute/cuda/paged_attention_vllm.cuh	fak_vllm_pa::paged_gather_rows_kernel	threads	0	runtime	tokens	0
+internal/compute/cuda/paged_attention_vllm.cuh	fak_vllm_pa::paged_store_int_kernel	1	1	literal	1	0
+internal/compute/cuda/paged_attention_vllm.cuh	fak_vllm_pa::reshape_and_cache_pages_kernel	threads	0	runtime	tokens	0
+internal/compute/cuda/paged_attention_vllm.cuh	fak_vllm_pa::reshape_and_cache_run_kernel	threads	0	runtime	tokens	0
+internal/compute/cuda/paged_attention_vllm.cuh	kern	block	128	resolved-chain	grid	shared_mem_size
+internal/compute/cuda/paged_attention_vllm.cuh	kern2	block	128	resolved-chain	grid	shared_mem_size
+internal/compute/cuda/paged_attention_vllm.cuh	paged_attention_v2_reduce_kernel<float, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE>	block	128	resolved-chain	reduce_grid	reduce_shared_mem_size
+internal/compute/cuda/q2k_mmq.cuh	mul_mat_q<J, fallback>	block_dims	256	resolved-chain	block_nums_stream_k	nbytes
+internal/compute/cuda/q2k_mmq.cuh	mul_mat_q_stream_k_fixup<J, fallback>	block_dims_fixup	128	resolved-chain	block_nums_fixup	0
+internal/compute/cuda/q2k_mmq.cuh	quantize_mmq_q8_1_d2s6	block_size	128	resolved-chain	num_blocks	0
+internal/compute/cuda/q3k_matmul.cuh	k_q3k_panel<1>	256	256	literal	grid	0
+internal/compute/cuda/q3k_matmul.cuh	k_q3k_panel<4>	256	256	literal	grid	0
+internal/compute/cuda/q3k_mmq.cuh	mul_mat_q<J, fallback>	block_dims	256	resolved-chain	block_nums_stream_k	nbytes
+internal/compute/cuda/q3k_mmq.cuh	mul_mat_q_stream_k_fixup<J, fallback>	block_dims_fixup	128	resolved-chain	block_nums_fixup	0
+internal/compute/cuda/q3k_mmq.cuh	quantize_mmq_q8_1_d4	block_size	128	resolved-chain	num_blocks	0
+internal/compute/cuda/q3k_mmvq.cuh	dequantize_block_q3_K	64	64	literal	nb	0
+internal/compute/cuda/q3k_mmvq.cuh	fak_q3k_mmvq::mul_mat_vec_q<1>	block	128	resolved-chain	grid	0
+internal/compute/cuda/q3k_mmvq.cuh	fak_q3k_mmvq::mul_mat_vec_q<2>	block	128	resolved-chain	grid	0
+internal/compute/cuda/q3k_mmvq.cuh	fak_q3k_mmvq::mul_mat_vec_q<3>	block	128	resolved-chain	grid	0
+internal/compute/cuda/q3k_mmvq.cuh	fak_q4k_mmvq::quantize_q8_1	256	256	literal	qgrid	0
+internal/compute/cuda/q3k_mmvq.cuh	k_fp16_split	256	256	literal	(xn + 255) / 256	0
+internal/compute/cuda/q4k_fp8lt.cuh	amax<false>	256	256	literal	grid(xn)	0
+internal/compute/cuda/q4k_fp8lt.cuh	amax<true>	256	256	literal	grid(wn)	0
+internal/compute/cuda/q4k_fp8lt.cuh	convert<false>	256	256	literal	grid(xpad)	0
+internal/compute/cuda/q4k_fp8lt.cuh	convert<true>	256	256	literal	grid(wn)	0
+internal/compute/cuda/q4k_fp8lt.cuh	finish_scales	32	32	literal	1	0
+internal/compute/cuda/q4k_mmq.cuh	mul_mat_q<J, fallback>	block_dims	256	resolved-chain	block_nums_stream_k	nbytes
+internal/compute/cuda/q4k_mmq.cuh	mul_mat_q_stream_k_fixup<J, fallback>	block_dims_fixup	128	resolved-chain	block_nums_fixup	0
+internal/compute/cuda/q4k_mmq.cuh	quantize_mmq_q8_1_ds4	block_size	128	resolved-chain	num_blocks	0
+internal/compute/cuda/q4k_mmvq.cuh	mul_mat_vec_q<1>	block	128	resolved-chain	grid	0
+internal/compute/cuda/q4k_mmvq.cuh	mul_mat_vec_q<2>	block	128	resolved-chain	grid	0
+internal/compute/cuda/q4k_mmvq.cuh	mul_mat_vec_q<3>	block	128	resolved-chain	grid	0
+internal/compute/cuda/q4k_mmvq.cuh	quantize_q8_1	256	256	literal	qgrid	0
+internal/compute/cuda/q4k_shared_input.cuh	mul_mat_vec_q<1>	block	128	resolved-chain	grid	0
+internal/compute/cuda/q4k_shared_input.cuh	quantize_q8_1	256	256	literal	qgrid	0
+internal/compute/cuda/q56k_mmq.cuh	mul_mat_q<kind,J,fallback>	block	256	resolved-chain	grid	shared_bytes
+internal/compute/cuda/q56k_mmq.cuh	mul_mat_q_stream_k_fixup<J,fallback>	fblock	128	resolved-chain	fgrid	0
+internal/compute/cuda/q56k_mmq.cuh	quantize_mmq_q8_1<kind>	CUDA_QUANTIZE_BLOCK_SIZE_MMQ	128	resolved-chain	qgrid	0
+internal/compute/cuda/q8_mmq.cuh	mul_mat_q<J, fallback>	block_dims	256	resolved-chain	block_nums_stream_k	nbytes
+internal/compute/cuda/q8_mmq.cuh	mul_mat_q_stream_k_fixup<J, fallback>	block_dims_fixup	128	resolved-chain	block_nums_fixup	0
+internal/compute/cuda/q8_mmq.cuh	quantize_mmq_q8_1_d4	block_size	128	resolved-chain	num_blocks	0
+internal/compute/cuda/quant_matmul.cuh	fak_q4k_mmvq::mul_mat_vec_q<1,Dot>	block	128	resolved-chain	grid	0
+internal/compute/cuda/quant_matmul.cuh	fak_q4k_mmvq::mul_mat_vec_q<2,Dot>	block	128	resolved-chain	grid	0
+internal/compute/cuda/quant_matmul.cuh	fak_q4k_mmvq::mul_mat_vec_q<3,Dot>	block	128	resolved-chain	grid	0
+internal/compute/cuda/quant_matmul.cuh	fak_q4k_mmvq::quantize_q8_1	256	256	literal	qgrid	0
+internal/compute/cuda/quant_matmul.cuh	k_f32_to_f16	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/quant_matmul.cuh	k_f32_to_f16_T	256	256	literal	(total + 255) / 256	0
+internal/compute/cuda/quant_matmul.cuh	k_f32_to_f16_vec4	256	256	literal	(n4 + 255) / 256	0
+internal/compute/cuda/quant_matmul.cuh	k_fp16_split	256	256	literal	(xn + 255) / 256	0
+internal/compute/cuda/quant_matmul.cuh	k_nvfp4_w4a16_f32	256	256	literal	(unsigned int)blocks	0
+internal/compute/cuda/quant_matmul.cuh	k_q2_0_gemm	256	256	literal	dim3(out, P)	0
+internal/compute/cuda/quant_matmul.cuh	k_q2k_dequant_split	256	256	literal	(wn + 255) / 256	0
+internal/compute/cuda/quant_matmul.cuh	k_q2k_gemm_panel<token_tile>	32	32	literal	dim3(out, (P + token_tile - 1) / token_tile)	0
+internal/compute/cuda/quant_matmul.cuh	k_q2k_gemv	256	256	literal	dim3((out + 7) / 8, P)	0
+internal/compute/cuda/quant_matmul.cuh	k_q4k_coeffs	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/quant_matmul.cuh	k_q4k_dequant_split	256	256	literal	(wn + 255) / 256	0
+internal/compute/cuda/quant_matmul.cuh	k_q4k_gemm	256	256	literal	dim3((out + 1) / 2, P)	0
+internal/compute/cuda/quant_matmul.cuh	k_q4k_gemm_panel<token_tile>	32	32	literal	dim3(out, (P + token_tile - 1) / token_tile)	0
+internal/compute/cuda/quant_matmul.cuh	k_q5k_gemm<1>	256	256	literal	dim3((o + 7) / 8, p)	0
+internal/compute/cuda/quant_matmul.cuh	k_q5k_gemm<4>	256	256	literal	dim3((o + 7) / 8, tiles)	0
+internal/compute/cuda/quant_matmul.cuh	k_q6k_gemm<1>	256	256	literal	dim3((o + 7) / 8, p)	0
+internal/compute/cuda/quant_matmul.cuh	k_q6k_gemm<4>	256	256	literal	dim3((o + 7) / 8, tiles)	0
+internal/compute/cuda/quant_matmul.cuh	k_q8_gemm	256	256	literal	dim3((out + 7) / 8, P)	0
+internal/compute/cuda/quant_matmul.cuh	k_q8_gemm_rowtile	kQ8TileWarps * 32	256	resolved-chain	dim3(tiles, outGroups)	0
+internal/compute/cuda/quant_matmul.cuh	k_q8_quant_act	quant_threads	0	runtime	dim3(nblk, P)	0
+internal/compute/cuda/qwen35_attention_postprocess.cuh	k_qwen35_attention_postprocess	256	256	literal	tokens * 32	0
+internal/compute/cuda/qwen35_gdn.cuh	k_fp16_split	256	256	literal	(wn + 255) / 256	0
+internal/compute/cuda/qwen35_gdn.cuh	k_fp16_split	256	256	literal	(xn + 255) / 256	0
+internal/compute/cuda/qwen35_gdn.cuh	k_q8_dequant_split	256	256	literal	(wn + 255) / 256	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_conv_panel_history	256	256	literal	convBlocks	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_conv_panel_tiled	256	256	literal	dim3(convBlocks, convTiles)	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_conv_state	256	256	literal	convBlocks	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_conv_state_lanes	256	256	literal	convGrid	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj	256	256	literal	(int)fusedRows64	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj	256	256	literal	dim3(fusedRows, tokens)	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj_lanes	256	256	literal	(int)fusedRows64	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj_lanes	256	256	literal	fusedRows	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_fused_in_proj_warp	256	256	literal	grid	qwen35_gdn_rowdot_smem(hidden)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_gate_panel	256	256	literal	(unsigned)((gates + 255) / 256)	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_norm_panel	vThreads	0	runtime	dim3(tokens, nV)	(size_t)vThreads * sizeof(float)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_proj	256	256	literal	dim3(hidden, tokens)	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_proj	256	256	literal	hidden	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_proj_lanes	256	256	literal	hidden	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_out_proj_warp	256	256	literal	grid	qwen35_gdn_rowdot_smem(valueDim)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_qk_norm	qThreads	0	runtime	nK	(size_t)2 * qThreads * sizeof(float)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_qk_norm_panel	qThreads	0	runtime	dim3(nK, lanes)	(size_t)2 * qThreads * sizeof(float)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_qk_norm_panel	qThreads	0	runtime	dim3(nK, tokens)	(size_t)2 * qThreads * sizeof(float)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_chunks	128	128	literal	nV * chunkCols	0
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_gated_norm	vThreads	0	runtime	nV	(size_t)vThreads * sizeof(float)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_gated_norm_lanes<false>	vThreads	0	runtime	recGrid	(size_t)vThreads * sizeof(float)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_gated_norm_lanes<true>	vThreads	0	runtime	recGrid	(size_t)vThreads * sizeof(float)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_gated_norm_regstate	vThreads	0	runtime	nV	(size_t)vThreads * sizeof(float)
+internal/compute/cuda/qwen35_gdn.cuh	k_qwen35_gdn_recurrent_panel_cols	kQwen35GDNPanelCols	32	resolved-chain	nV * colBlocks	0
+internal/compute/cuda/qwen35_qknorm_rope_cache_vllm.cuh	k_qwen35_qknorm_rope_cache_vllm<HD, WIDE>	128	128	literal	blocks	0
+internal/compute/cuda/runtime_services.cuh	k_qwen4exp_ple_hash_i64	threads	0	runtime	tokens	0
+internal/compute/cuda/sampling_candidates.cuh	k_sampling_candidates_cutoff	256	256	literal	1	0
+internal/compute/cuda/sampling_candidates.cuh	k_sampling_candidates_emit	256	256	literal	blocks	0
+internal/compute/cuda/sampling_candidates.cuh	k_sampling_candidates_histogram	256	256	literal	blocks	0
+internal/compute/cuda/situ_moe.cuh	k_situ_act	256	256	literal	grid	0
+internal/compute/cuda/situ_moe.cuh	k_situ_combine	256	256	literal	(hidden + 255) / 256	0
+internal/compute/cuda/spec_graph.cuh	k_argmax	256	256	literal	1	0
+internal/compute/cuda/spec_graph.cuh	k_dsa_index_score	threads	256	resolved-chain	nKeys	0
+internal/compute/cuda/spec_graph.cuh	k_dsa_index_topk	threads	256	resolved-chain	1	0
+internal/compute/cuda/spec_graph.cuh	k_dsa_sparse_attend	FLASH_THREADS	128	resolved-chain	nH	shmem
+internal/compute/cuda/spec_graph.cuh	k_spec_verify_attention	block_attn	128	resolved-chain	grid_attn	shmem_attn
+internal/compute/cuda/spec_graph.cuh	k_spec_verify_combine	block_combine	128	resolved-chain	grid_combine	0
+internal/compute/cuda/transformer_ops.cuh	k_add	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/transformer_ops.cuh	k_add_bias	256	256	literal	(rows * width + 255) / 256	0
+internal/compute/cuda/transformer_ops.cuh	k_copyrow	256	256	literal	blocks	0
+internal/compute/cuda/transformer_ops.cuh	k_partial_rope_copy<false>	256	256	literal	(kn+255)/256	0
+internal/compute/cuda/transformer_ops.cuh	k_partial_rope_copy<false>	256	256	literal	(qn+255)/256	0
+internal/compute/cuda/transformer_ops.cuh	k_qwen35_partial_rope_panel	256	256	literal	(kn + 255) / 256	0
+internal/compute/cuda/transformer_ops.cuh	k_qwen35_partial_rope_panel	256	256	literal	(qn + 255) / 256	0
+internal/compute/cuda/transformer_ops.cuh	k_qwen35_split_qg_panel	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/transformer_ops.cuh	k_rmsnorm	256	256	literal	rows	0
+internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_fused_residual_add	256	256	literal	rows	0
+internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<16>	256	256	literal	blocks	0
+internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<1>	256	256	literal	blocks	0
+internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<2>	256	256	literal	blocks	0
+internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<4>	256	256	literal	blocks	0
+internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_subwarp_per_row<8>	256	256	literal	blocks	0
+internal/compute/cuda/transformer_ops.cuh	k_rmsnorm_warp_per_row	warps * 32	256	resolved-chain	blocks	0
+internal/compute/cuda/transformer_ops.cuh	k_rope<false>	128	128	literal	(total + 127) / 128	0
+internal/compute/cuda/transformer_ops.cuh	k_rope_panel	128	128	literal	(unsigned)((total + 127) / 128)	0
+internal/compute/cuda/transformer_ops.cuh	k_sigmoid_mul	256	256	literal	(n+255)/256	0
+internal/compute/cuda/transformer_ops.cuh	k_split_qwen35_qg	256	256	literal	(n+255)/256	0
+internal/compute/cuda/transformer_ops.cuh	k_swiglu	256	256	literal	(n + 255) / 256	0
+internal/compute/cuda/v41_compressor.cuh	v41c_compressor_store_kernel	V41C_THREADS	256	resolved-chain	blocks	0
+internal/compute/cuda/v41_compressor.cuh	v41c_compressor_update_pool_kernel	V41C_THREADS	256	resolved-chain	blocks	0
+internal/compute/cuda/v41_compressor.cuh	v41c_status_kernel	V41C_THREADS	256	resolved-chain	blocks	0
+internal/compute/cuda/v41_embed_gather.cuh	v41_eg_f32	256	256	literal	blocks<65535?blocks:65535	0
+internal/compute/cuda/v41_embed_gather.cuh	v41_eg_iq4nl	32	32	literal	blocks<65535?blocks:65535	0
+internal/compute/cuda/v41_embed_gather.cuh	v41_eg_iq4nl_poison	256	256	literal	1	0
+internal/compute/cuda/v41_embed_gather.cuh	v41_eg_iq4nl_row	32	32	literal	1	0
+internal/compute/cuda/v41_embed_gather.cuh	v41_eg_q2	64	64	literal	blocks<65535?blocks:65535	0
+internal/compute/cuda/v41_embed_gather.cuh	v41_eg_q5	64	64	literal	blocks<65535?blocks:65535	0
+internal/compute/cuda/v41_embed_gather.cuh	v41_eg_rows	64	64	literal	blocks	0
+internal/compute/cuda/weight_formats.cuh	k_awq_gemm	threads	256	resolved-chain	blocks	0
+internal/compute/cuda/weight_formats.cuh	k_awq_gemv	threads	256	resolved-chain	out	0
+internal/compute/cuda/weight_formats.cuh	k_gptq_gemv	threads	256	resolved-chain	out	0
+internal/compute/cuda/weight_formats.cuh	k_nvfp4_lt_swizzle_scales	256	256	literal	blocks	0
+internal/compute/cuda_flashmla_sparse_prefill.cu	flash_permute	256	256	literal	((uint64_t)x.queries*32768+255)/256	0
+internal/compute/cuda_flashmla_sparse_prefill.cu	flash_unpack	512	512	literal	x.queries*64	0
+internal/compute/cuda_sm10x_probe.cu	fak_sm10x_tmem_probe	32	32	literal	1	0
+internal/compute/cuda_v41_compressor_pool.cu	k_v41_pool	128	128	literal	blocks	0
+internal/compute/cuda_v41_engram_gate.cu	k_v41_engram	128	128	literal	blocks	0
+internal/compute/cuda_v41_indexer.cu	k_v41_indexer_score_f32	128	128	literal	blocks	0
+internal/compute/cuda_v41_indexer.cu	k_v41_indexer_score_tiled_f32	64	64	literal	blocks	0
+internal/compute/cuda_v41_mhc.cu	k_mhc	128	128	literal	blocks	0
+internal/compute/cuda_v41_routed_mmid.cu	fak_q4k_mmvq::quantize_q8_1	256	256	literal	qgrid	0
+internal/compute/cuda_v41_routed_mmid.cu	fak_v41_mmid::routed_publish_down_sum	256	256	literal	blocks	0
+internal/compute/cuda_v41_routed_mmid.cu	fak_v41_mmid::routed_swiglu_id	256	256	literal	grid	0
+internal/compute/cuda_v41_routed_mmid.cu	k_v41_bf16_publish	256	256	literal	blocks	0
+internal/compute/cuda_v41_routed_mmid.cu	k_v41_bf16_publish_status	1	1	literal	1	0
+internal/compute/cuda_v41_routed_mmid.cu	k_v41_routed_swiglu	128	128	literal	blocks	0
+internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_down_sum<type_q2_K>	block	128	resolved-chain	grid	0
+internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_down_sum<type_q3_K>	block	128	resolved-chain	grid	0
+internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_id<type_q2_K, false>	block	128	resolved-chain	grid	0
+internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_id<type_q2_K, true>	block	128	resolved-chain	grid	0
+internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_id<type_q3_K, false>	block	128	resolved-chain	grid	0
+internal/compute/cuda_v41_routed_mmid.cu	mul_mat_vec_q_id<type_q3_K, true>	block	128	resolved-chain	grid	0
+internal/compute/cuda_v41_routed_swiglu.cu	k_v41_routed_swiglu	128	128	literal	blocks	0
+internal/compute/cuda_v41_router.cu	k_v41_router_argmax_topk	block	128	resolved-chain	blocks	0
+internal/compute/cuda_v41_shared_attention.cu	k_v41_shared_attention_combine	V41SA_COMBINE_THREADS	128	resolved-chain	heads	0
+internal/compute/cuda_v41_shared_attention.cu	k_v41_shared_attention_split	V41SA_THREADS	256	resolved-chain	grid	smem
+internal/compute/dsv41_k_quant.cu	k_dsv41_kq_dequant_gather_mxfp8_one_pass	128	128	literal	grid	0
+internal/compute/dsv41_k_quant.cu	k_dsv41_kq_dequant_gather_mxfp8_per_block	128	128	literal	grid	0
+internal/compute/dsv41_k_quant.cu	k_dsv41_kq_quant_insert_mxfp8	128	128	literal	tokens	0
+internal/compute/eplb_map_record.cu	k_emr_map_record_i32	EMR_THREADS	256	resolved-chain	grid	0
+internal/compute/grammar_bitmask.cu	k_grammar_bitmask_apply	128	128	literal	grid	0
+internal/compute/kv_swap_batch.cu	k_ksb_swap_blocks	KSB_THREADS	256	resolved-chain	grid	0
+internal/compute/logprob_topk.cu	k_lptk_gather	gather_threads	256	resolved-chain	gather_grid	0
+internal/compute/logprob_topk.cu	k_lptk_rank	block	128	resolved-chain	num_rows	LPTK_THREADS * sizeof(int32_t)
+internal/compute/logprob_topk.cu	k_lptk_row_lse	block	128	resolved-chain	num_rows	smem
+internal/compute/moe_align_sort.cu	k_mae_align_block_size	MAE_THREADS	1024	resolved-chain	1	0
+internal/compute/moe_align_sort.cu	k_mae_fill_sentinel	MAE_FILL_THREADS	256	resolved-chain	fillGrid	0
+internal/compute/moe_align_sort.cu	k_mae_scatter_expert_tokens	MAE_SCATTER_THREADS	256	resolved-chain	scatterGrid	0
+internal/compute/moe_align_sort.cu	k_mae_sum_topk_f32	MAE_SCATTER_THREADS	256	resolved-chain	grid	0
+internal/compute/rmsnorm_fp8_quant.cu	k_rfq_fused_add_rmsnorm_fp8_quant	RFQ_THREADS	256	resolved-chain	grid	0
+internal/compute/rmsnorm_fp8_quant.cu	k_rfq_rmsnorm_fp8_quant	RFQ_THREADS	256	resolved-chain	grid	0
+internal/compute/routed_expert_gemv.cu	k_rex_gemv_fp8_block32_e8m0	REX_THREADS	256	resolved-chain	(unsigned int)g.blocks	0
+internal/compute/routed_expert_gemv.cu	k_rex_gemv_mxfp4_e8m0	REX_THREADS	256	resolved-chain	(unsigned int)g.blocks	0
+internal/compute/sampling_topk.cu	k_sampling_draw_f32	SAMPLING_TOPK_THREADS	1024	resolved-chain	grid	smem
+internal/compute/sampling_topk.cu	k_sampling_nucleus_f32	SAMPLING_TOPK_THREADS	1024	resolved-chain	grid	smem
+internal/compute/sampling_topk.cu	k_sampling_repetition_penalty_f32	SAMPLING_TOPK_THREADS	1024	resolved-chain	grid	0
+internal/compute/sampling_topk.cu	k_sampling_topk_truncate_f32	SAMPLING_TOPK_THREADS	1024	resolved-chain	grid	smem
+internal/compute/silu_mul_fp8_quant.cu	k_silu_mul_fp8_quant	SMFQ_THREADS	128	resolved-chain	blocks	0
+internal/compute/tree_attention.cu	k_tree_verify_attention	TREE_ATTN_THREADS	128	resolved-chain	grid	shmem

@@ -559,3 +559,26 @@ func TestScanKernelNames(t *testing.T) {
 		})
 	}
 }
+
+// TestLaunchSiteEmbeddedResolutionClasses loads the embedded inventory through the exported accessor, the path
+// the bench verbs take, and checks that each row's resolution class agrees with whether its count is judged.
+func TestLaunchSiteEmbeddedResolutionClasses(t *testing.T) {
+	sites := LaunchSites()
+	if len(sites) == 0 {
+		t.Fatalf("%s yields no launch sites", launchSiteDataFile)
+	}
+	for _, s := range sites {
+		switch s.Resolution {
+		case LaunchGenResLiteral, LaunchGenResChain:
+			if s.ThreadsPerBlock <= 0 {
+				t.Errorf("%s %s: %s row has threads_per_block %d", s.File, s.Kernel, s.Resolution, s.ThreadsPerBlock)
+			}
+		case LaunchGenResRuntime, LaunchGenResTemplate:
+			if s.ThreadsPerBlock != 0 {
+				t.Errorf("%s %s: %s row has threads_per_block %d", s.File, s.Kernel, s.Resolution, s.ThreadsPerBlock)
+			}
+		default:
+			t.Errorf("%s %s: unknown resolution %q", s.File, s.Kernel, s.Resolution)
+		}
+	}
+}
