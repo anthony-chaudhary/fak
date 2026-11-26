@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "description": "Hard limits this project depends on and does not control. Each row names the meter that measures current use against the limit, or UNMETERED when none exists. A meter is either test:<TestName> (a Test function in a *_test.go file in the tree) or ci:<workflow path>#<step or job name> (an uncommented name: line in the workflow file equals that name). A meter entry proves the named check exists, not that it enforces the limit. Checked by internal/architest/limits_register_test.go.",
+  "rows": [
+    {
+      "limit": "Go module zip size (cmd/go refuses to build a module zip above this)",
+      "value": "500 MiB (524288000 bytes), uncompressed sum of module files",
+      "owner": "Go toolchain (cmd/go, golang.org/x/mod/zip MaxZipFile)",
+      "breaks": "go install <module>@latest silently keeps resolving to the last tag under the cap; users see no error",
+      "meters": [
+        "test:TestRootModuleZipBudget",
+        "ci:.github/workflows/ci.yml#module zip builds (what go install compiles)",
+        "ci:.github/workflows/release-artifacts.yml#go install resolves the tag"
+      ],
+      "budget": "375 MiB ratchet for the root module (moduleZipBudgetBytes); 190 MiB non-Go ratchet (moduleZipNonGoBudget)",
+      "evidence": "internal/architest/module_zip_budget_test.go:25-28; .github/workflows/release-artifacts.yml:315"
+    },
+    {
+      "limit": "GitHub maximum size of a single file in a push",
+      "value": "100 MiB per file",
+      "owner": "GitHub (remote rejects the push)",
+      "breaks": "git push is rejected for the oversized blob; the landing fails at push time",
+      "meters": [
+        "UNMETERED"
+      ],
+      "budget": "none",
+      "evidence": "no in-repo meter; the 5 MiB per-file ratchet at internal/architest/module_zip_budget_test.go:28 is self-imposed and does not measure this limit"
+    },
+    {
+      "limit": "GitHub Actions cache storage per repository",
+      "value": "10 GiB per repository",
+      "owner": "GitHub Actions (eviction policy)",
+      "breaks": "once exceeded, the oldest caches are evicted; CI goes cold and slower with no red",
+      "meters": [
+        "UNMETERED"
+      ],
+      "budget": "none",
+      "evidence": "actions/cache used in .github/workflows/ci.yml (3 uses) and .github/workflows/ci-fast.yml (2 uses); no size meter"
+    },
+    {
+      "limit": "GitHub release asset size",
+      "value": "2 GiB per asset",
+      "owner": "GitHub Releases",
+      "breaks": "gh release upload fails for an oversized asset; the release job goes red at upload",
+      "meters": [
+        "UNMETERED"
+      ],
+      "budget": "none",
+      "evidence": ".github/workflows/release-artifacts.yml:460 (gh release upload); .github/workflows/release-vulkan.yml:170"
+    }
+  ]
+}
