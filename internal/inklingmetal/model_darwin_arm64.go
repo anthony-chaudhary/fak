@@ -27,6 +27,10 @@ type Model struct {
 	idle         *C.FakInkSession
 	idleCapacity int
 	hasDraft     bool
+	path, draft  string
+	// idleKey is the PrefixKey the idle session's tokens were computed under.
+	idleKey string
+	prefix  prefixIdentity
 }
 type Session struct {
 	mu       sync.Mutex
@@ -34,6 +38,11 @@ type Session struct {
 	failure  error
 	model    *Model
 	capacity int
+	key      string
+	// held is the leading tokens already in place of a prompt of whole tokens.
+	// The first prefill skips them.
+	held          []int32
+	whole, reused int
 }
 
 func nativeError(msg *C.char) error {
@@ -47,7 +56,7 @@ func openModel(path, draft string) (*Model, error) {
 	cp, cd := C.CString(path), C.CString(draft)
 	defer C.free(unsafe.Pointer(cp))
 	defer C.free(unsafe.Pointer(cd))
-	m := &Model{hasDraft: draft != ""}
+	m := &Model{hasDraft: draft != "", path: path, draft: draft}
 	if err := nativeError(C.fak_ink_model(cp, cd, &m.ptr)); err != nil {
 		return nil, err
 	}
@@ -67,6 +76,7 @@ func (m *Model) NewSession(capacity int) (*Session, error) {
 		ptr, cap := m.idle, m.idleCapacity
 		m.idle = nil
 		m.idleCapacity = 0
+		m.idleKey = ""
 		if cap >= capacity {
 			if err := nativeError(C.fak_ink_reset(ptr, C.uint32_t(capacity))); err != nil {
 				C.fak_ink_free_session(ptr)
@@ -108,6 +118,7 @@ func (s *Session) Close() error {
 		C.fak_ink_free_session(m.idle)
 		m.idle = s.ptr
 		m.idleCapacity = s.capacity
+		m.idleKey = s.key
 	} else {
 		C.fak_ink_free_session(s.ptr)
 	}
@@ -118,11 +129,17 @@ func (s *Session) ready() error {
 	if s.ptr == nil {
 		return errors.New("closed Inkling session")
 	}
+	if s.failure == nil && s.held != nil {
+		return errors.New("Inkling session expects the prompt it was opened for")
+	}
 	return s.failure
 }
 func (s *Session) step(ids []int32, prefill bool, scores []float32, argmax []int32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if prefill && s.held != nil && len(ids) == s.whole && slices.Equal(ids[:len(s.held)], s.held) {
+		ids, s.held = ids[len(s.held):], nil
+	}
 	if err := s.ready(); err != nil {
 		return err
 	}

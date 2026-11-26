@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -39,6 +41,33 @@ func NewInkling2MetalRunPlanner(name string, m *inklingmetal.Model, tok *tokeniz
 }
 
 func (p *inkling2RunPlanner) Model() string { return p.name }
+
+// inkling2PrefixReuse reads FAK_INKLING2_PREFIX_REUSE: any of off, 0, false or
+// no makes every request prefill its whole prompt.
+func inkling2PrefixReuse(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "off", "0", "false", "no":
+		return false
+	}
+	return true
+}
+
+// metalSession opens the request on the session the last one left when the
+// two prompts share leading prefill chunks, so a growing chat prefills only
+// what follows them.
+func (p *inkling2RunPlanner) metalSession(ids []int, capacity int) (*inklingmetal.Session, error) {
+	if !inkling2PrefixReuse(os.Getenv("FAK_INKLING2_PREFIX_REUSE")) {
+		return p.metal.NewSession(capacity)
+	}
+	prompt := make([]int32, len(ids))
+	for i, id := range ids {
+		if id < 0 || id >= inklingmetal.Vocabulary {
+			return p.metal.NewSession(capacity)
+		}
+		prompt[i] = int32(id)
+	}
+	return p.metal.NewSessionFor(capacity, p.name, prompt)
+}
 
 // The text-only profile of the checkpoint template. Keep operator content ordinary,
 // including text that happens to spell a model control token.
@@ -161,7 +190,7 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 	var prefillPrompt func() ([]float32, error)
 	var step func(int) ([]float32, error)
 	if p.metal != nil {
-		sess, err := p.metal.NewSession(len(ids) + maxTokens)
+		sess, err := p.metalSession(ids, len(ids)+maxTokens)
 		if err != nil {
 			return nil, err
 		}
