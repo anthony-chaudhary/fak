@@ -1159,6 +1159,8 @@ func installDispatchManagedFixture(t *testing.T, root string) func(map[string]an
 	if err := os.Unsetenv("FLEET_WORKER_WORKTREE"); err != nil {
 		t.Fatal(err)
 	}
+	// An operator's shared Go cache would redirect the worker GOCACHE out of the worktree.
+	t.Setenv(workerworktree.SharedGoCacheEnv, "")
 	roles := "[branch_roles]\ndevelopment_branch = \"dev\"\nrelease_branch = \"main\"\nrelease_source = \"dev\"\npublic_front_door = \"main\"\n"
 	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte(roles), 0o644); err != nil {
 		t.Fatal(err)

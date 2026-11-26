@@ -106,11 +106,25 @@ func TestServeStreamProgressTimeoutOffSpellingIsZero(t *testing.T) {
 // serve.go already sets, so the assignment itself needs saying out loud here.
 func TestServeSourceWiresStreamProgressTimeoutIntoGatewayNew(t *testing.T) {
 	root := repoRootFromTest(t)
-	body, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "serve.go"))
+	// The serve front door is split across serve*.go (the flag lives in serve.go, the
+	// gateway.New literal in serve_gateway.go), so the wiring is checked over the merged set.
+	names, err := filepath.Glob(filepath.Join(root, "cmd", "fak", "serve*.go"))
 	if err != nil {
-		t.Fatalf("read serve.go: %v", err)
+		t.Fatalf("glob serve*.go: %v", err)
 	}
-	src := string(body)
+	var merged strings.Builder
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", filepath.Base(name), err)
+		}
+		merged.Write(body)
+		merged.WriteByte('\n')
+	}
+	src := merged.String()
 
 	for _, want := range []string{
 		// Defaulted from the constant, never a bare 300*time.Second literal.
@@ -118,11 +132,11 @@ func TestServeSourceWiresStreamProgressTimeoutIntoGatewayNew(t *testing.T) {
 		"StreamProgressTimeout: serveStreamProgressTimeout(*sf.streamProgressTimeout),",
 	} {
 		if !strings.Contains(src, want) {
-			t.Fatalf("serve.go must contain %q — without it --stream-progress-timeout is parse-only", want)
+			t.Fatalf("serve*.go must contain %q — without it --stream-progress-timeout is parse-only", want)
 		}
 	}
 	if !serveConfigAssignments(src)["StreamProgressTimeout"] {
-		t.Fatal("serve.go's gateway.New(gateway.Config{...}) literal must set StreamProgressTimeout; without it newConfiguredHTTPPlanner gets a zero and the flag is dropped on the floor")
+		t.Fatal("serve*.go's gateway.New(gateway.Config{...}) literal must set StreamProgressTimeout; without it newConfiguredHTTPPlanner gets a zero and the flag is dropped on the floor")
 	}
 }
 

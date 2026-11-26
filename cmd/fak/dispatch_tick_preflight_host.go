@@ -1244,7 +1244,7 @@ func dispatchProbeTreeBuildRun(cacheRoot, head string, stamp binstamp.Stamp, bui
 		strings.Contains(lowered, ": directory not found") ||
 		strings.Contains(lowered, "cannot load module") ||
 		strings.Contains(lowered, "listed in go.work") ||
-		strings.Contains(lowered, "not a valid object name: head") ||
+		strings.Contains(lowered, "not a valid object name") ||
 		strings.Contains(lowered, "not a git repository") ||
 		strings.Contains(lowered, "does not have any commits yet") ||
 		strings.Contains(lowered, "signal: killed") {

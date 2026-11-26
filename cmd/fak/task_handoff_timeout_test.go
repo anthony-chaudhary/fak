@@ -18,7 +18,7 @@ func TestRunBoundedGHCmdKillsWedgedGH(t *testing.T) {
 	const bound = 150 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHelperProcess$")
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTaskHandoffGHWedgedHelperProcess$")
 	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
 
 	type res struct {
@@ -46,6 +46,16 @@ func TestRunBoundedGHCmdKillsWedgedGH(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("runBoundedGHCmd never returned after the deadline — the gh subprocess is unbounded (#3470 regression)")
 	}
+}
+
+// TestTaskHandoffGHWedgedHelperProcess is the wedged-gh stand-in. It is a no-op unless
+// re-exec'd with GO_WANT_HELPER_PROCESS=1, in which case it blocks far past any deadline
+// so the parent's context kill is the only way the child ends.
+func TestTaskHandoffGHWedgedHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	time.Sleep(10 * time.Minute)
 }
 
 // TestRunBoundedGHCmdReportsSuccess is the non-deadline control: a command that exits 0
