@@ -363,6 +363,9 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	}
 	res.PrefillSeconds = time.Since(start).Seconds()
 	res.CachedPromptTokens, res.Width = reused, 1
+	if r, ok := s.(interface{ Reused() int }); ok {
+		res.CachedPromptTokens = r.Reused()
+	}
 	start = time.Now()
 	defer func() { res.DecodeSeconds = time.Since(start).Seconds() }()
 	for res.Generated < r.maxNew {
@@ -519,16 +522,24 @@ func inkling2MetalToken(id int) (int32, error) {
 	return int32(id), nil
 }
 
-func (m inkling2MetalSession) Prefill(ctx context.Context, prompt []int) (int, error) {
+func inkling2MetalIDs(prompt []int) ([]int32, error) {
 	if len(prompt) == 0 {
-		return 0, fmt.Errorf("inkling2_loop: empty prompt")
+		return nil, fmt.Errorf("inkling2_loop: empty prompt")
 	}
 	ids := make([]int32, len(prompt))
 	for i, id := range prompt {
 		var err error
 		if ids[i], err = inkling2MetalToken(id); err != nil {
-			return 0, err
+			return nil, err
 		}
+	}
+	return ids, nil
+}
+
+func (m inkling2MetalSession) Prefill(ctx context.Context, prompt []int) (int, error) {
+	ids, err := inkling2MetalIDs(prompt)
+	if err != nil {
+		return 0, err
 	}
 	// the native prefill is one submission and cannot be interrupted once begun
 	if err := ctx.Err(); err != nil {
@@ -555,15 +566,84 @@ func (m inkling2MetalSession) Step(token int) (int, error) {
 
 func (m inkling2MetalSession) Close() error { return m.s.Close() }
 
-// newInkling2MetalEngine decodes on the resident native target. Each request
-// resets the model's one idle session, sized for the whole served context.
-func newInkling2MetalEngine(m *inklingmetal.Model, contextTokens int) *inkling2LoopEngine {
-	return newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
-		s, err := m.NewSession(contextTokens)
+// inkling2MetalScope keys the native prefix cache entries this server writes.
+const inkling2MetalScope = "fak-serve-inkling2"
+
+// inkling2MetalPromptSession opens its native session on the first Prefill, the
+// only call that carries the whole prompt, so the native session can keep the
+// leading prefill chunks the model's idle session still holds for that prompt.
+// Only the whole prompt reaches Prefill in serve, which keeps that contract.
+type inkling2MetalPromptSession struct {
+	capacity int
+	open     func(capacity int, ids []int32) (inkling2MetalTarget, error)
+	s        inkling2MetalSession
+	reused   int
+}
+
+func (p *inkling2MetalPromptSession) Prefill(ctx context.Context, prompt []int) (int, error) {
+	if p.s.s == nil {
+		ids, err := inkling2MetalIDs(prompt)
+		if err != nil {
+			return 0, err
+		}
+		t, err := p.open(p.capacity, ids)
+		if err != nil {
+			return 0, err
+		}
+		p.s = inkling2MetalSession{s: t}
+		if r, ok := t.(interface{ Reused() int }); ok {
+			p.reused = r.Reused()
+		}
+	}
+	return p.s.Prefill(ctx, prompt)
+}
+
+func (p *inkling2MetalPromptSession) Step(token int) (int, error) {
+	if p.s.s == nil {
+		return 0, fmt.Errorf("inkling2_loop: step before prefill")
+	}
+	return p.s.Step(token)
+}
+
+func (p *inkling2MetalPromptSession) Close() error {
+	if p.s.s == nil {
+		return nil
+	}
+	return p.s.Close()
+}
+
+// Reused is how many leading prompt tokens the native session held when it opened.
+func (p *inkling2MetalPromptSession) Reused() int { return p.reused }
+
+// inkling2MetalOpener opens native sessions for one resident model. With reuse
+// on, NewSessionFor resumes the model's idle session when it shares leading
+// prefill chunks with the prompt; otherwise every session starts at position 0.
+func inkling2MetalOpener(m *inklingmetal.Model, reuse bool) func(int, []int32) (inkling2MetalTarget, error) {
+	return func(capacity int, ids []int32) (inkling2MetalTarget, error) {
+		var (
+			s   *inklingmetal.Session
+			err error
+		)
+		if reuse {
+			s, err = m.NewSessionFor(capacity, inkling2MetalScope, ids)
+		} else {
+			s, err = m.NewSession(capacity)
+		}
 		if err != nil {
 			return nil, err
 		}
-		return inkling2MetalSession{s: s}, nil
+		return s, nil
+	}
+}
+
+// newInkling2MetalEngine decodes on the resident native target. Each request
+// opens a session sized for the whole served context on the model's one idle
+// session, and with FAK_INKLING2_PREFIX_REUSE on it keeps the chunks the
+// previous prompt shares with it.
+func newInkling2MetalEngine(m *inklingmetal.Model, contextTokens int) *inkling2LoopEngine {
+	open := inkling2MetalOpener(m, inkling2PrefixReuseEnabled())
+	return newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
+		return &inkling2MetalPromptSession{capacity: contextTokens, open: open}, nil
 	})
 }
 
