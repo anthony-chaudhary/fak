@@ -524,6 +524,33 @@ public:
   void beginServing() noexcept;
   [[nodiscard]] uint64_t pipelinesCreatedWhileServing() const noexcept;
 
+  // A cold system shader cache makes Metal compile every pipeline again,
+  // tens of seconds inside the first request, and macOS evicts that cache
+  // under its own policy. An attached archive keeps each pipeline this
+  // backend creates in an MTLBinaryArchive under `directory`, in a
+  // subdirectory keyed by the embedded shader sources, the device and the OS
+  // build, and creates now, from the archive, every pipeline a previous
+  // process listed there. Without embedded sources (a metallib backend) it
+  // does nothing.
+  void attachPipelineArchive(const std::string &directory);
+  // Writes the archive and its pipeline list when pipelines were added since
+  // they were read or last written; true when it wrote them. Each file is
+  // replaced whole, so a reader never sees half of one.
+  bool flushPipelineArchive();
+  struct PipelineCacheStats {
+    // Pipelines Metal compiled for this backend: archive misses, or all of
+    // them without an archive.
+    uint64_t compiled = 0;
+    // Pipelines created from the attached archive without compiling.
+    uint64_t archiveHits = 0;
+    // Pipelines the archive's list named when it was attached.
+    uint64_t archived = 0;
+    // Time attachPipelineArchive spent creating the listed pipelines.
+    double warmMilliseconds = 0;
+    bool attached = false;
+  };
+  [[nodiscard]] PipelineCacheStats pipelineCacheStats() const;
+
   [[nodiscard]] MetalMemoryStats memoryStats() const noexcept;
   // Explicit safe-point refresh for memory admission/reclamation code. A
   // control-plane status query must use memoryStats() so it can never wait

@@ -22,6 +22,27 @@ struct Export { std::string_view name; size_t unit; };
 class Libraries final {
 public:
     static bool has(std::string_view name) { return locate(name) != nullptr; }
+    // The translation unit that exports `name`; SIZE_MAX for none.
+    static size_t unitOf(std::string_view name) {
+        const Export *entry = locate(name);
+        return entry ? entry->unit : SIZE_MAX;
+    }
+    // FNV-1a over every unit's name and source bytes and the language
+    // version they compile at: any edit to an embedded shader changes it.
+    static uint64_t fingerprint() noexcept {
+        uint64_t hash = 0xcbf29ce484222325ull;
+        const auto mix = [&](const void *data, size_t size) {
+            for (size_t k = 0; k < size; ++k)
+                hash = (hash ^ static_cast<const unsigned char *>(data)[k]) * 0x100000001b3ull;
+        };
+        const auto version = static_cast<uint64_t>(MTLLanguageVersion4_0);
+        mix(&version, sizeof version);
+        for (const Unit &unit : units) {
+            mix(unit.name, std::char_traits<char>::length(unit.name) + 1);
+            for (size_t j = 0; j < unit.count; ++j) mix(unit.parts[j].data, unit.parts[j].size);
+        }
+        return hash;
+    }
     id<MTLLibrary> forFunction(id<MTLDevice> device, std::string_view function) {
         const Export *entry = locate(function);
         if (!entry) throw splash::metal::MetalBackendError("missing embedded shader: " + std::string(function));

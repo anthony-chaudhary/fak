@@ -10,6 +10,8 @@ type Session struct{}
 func openModel(path, draft string) (*Model, error)             { return nil, ErrUnavailable }
 func (*Model) NewSession(int) (*Session, error)                { return nil, ErrUnavailable }
 func (*Model) Close() error                                    { return nil }
+func (*Model) PipelineStats() PipelineStats                    { return PipelineStats{} }
+func (*Model) FlushPipelines() bool                            { return false }
 func (*Session) Close() error                                  { return nil }
 func (*Session) Prefill([]int32) ([]float32, error)            { return nil, ErrUnavailable }
 func (*Session) BeginBlock([]int32) ([][]float32, error)       { return nil, ErrUnavailable }

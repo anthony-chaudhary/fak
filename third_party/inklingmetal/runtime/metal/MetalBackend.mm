@@ -24,6 +24,8 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <mutex>
@@ -332,14 +334,30 @@ id<MTLLibrary> loadLibrary(id<MTLDevice> device, const std::string &metallibPath
     return library;
 }
 
+// The binary archive pipelines are looked up in and added to
+// (MetalBackend::attachPipelineArchive), and the count of each outcome. The
+// archive is nil until one is attached; the mutex guards its use, as Metal
+// does not promise an archive may be read while another thread adds to it.
+struct PipelineArchive {
+    __strong id<MTLBinaryArchive> archive = nil;
+    std::filesystem::path directory;
+    std::mutex mutex;
+    // Pipelines were added since the archive was read or written.
+    bool dirty = false;
+    std::atomic<uint64_t> compiled{0};
+    std::atomic<uint64_t> hits{0};
+};
+
 // The pipeline of function `name` of `source` at these function constants,
 // and with `stagedExpertTiles` (an instrumented backend's,
 // BackendInstrumentation::stageExpertTiles) kMoeStagedOnly true where the
-// function declares it. It touches no backend state, and Metal's device and
-// library are thread-safe, so any thread may create one.
+// function declares it: from `cache`'s archive when it holds it, compiled
+// and added to the archive otherwise. It touches no other backend state,
+// and Metal's device and library are thread-safe, so any thread may create
+// one.
 id<MTLComputePipelineState> createPipeline(id<MTLDevice> device, id<MTLLibrary> source,
                                            std::string_view name, std::span<const uint32_t> constants,
-                                           [[maybe_unused]] bool stagedExpertTiles) {
+                                           [[maybe_unused]] bool stagedExpertTiles, PipelineArchive &cache) {
     NSString *key = checkedNSString(name, "pipeline name");
     NSError *error = nil;
     id<MTLFunction> function = nil;
@@ -362,12 +380,38 @@ id<MTLComputePipelineState> createPipeline(id<MTLDevice> device, id<MTLLibrary> 
             "missing Metal function: " + std::string(name) +
             (error ? ": " + errorDescription(error) : ""));
     }
+    MTLComputePipelineDescriptor *descriptor = [MTLComputePipelineDescriptor new];
+    descriptor.computeFunction = function;
+    if (cache.archive) {
+        std::lock_guard lock(cache.mutex);
+        descriptor.binaryArchives = @[cache.archive];
+        id<MTLComputePipelineState> archived =
+            [device newComputePipelineStateWithDescriptor:descriptor
+                                                  options:MTLPipelineOptionFailOnBinaryArchiveMiss
+                                               reflection:nil
+                                                    error:nil];
+        descriptor.binaryArchives = nil;
+        if (archived) {
+            cache.hits.fetch_add(1, std::memory_order_relaxed);
+            return archived;
+        }
+    }
     id<MTLComputePipelineState> result =
-        [device newComputePipelineStateWithFunction:function error:&error];
+        [device newComputePipelineStateWithDescriptor:descriptor
+                                              options:MTLPipelineOptionNone
+                                           reflection:nil
+                                                error:&error];
     if (!result) {
         throw MetalBackendError(
             "unable to create Metal pipeline " + std::string(name) +
             ": " + errorDescription(error));
+    }
+    cache.compiled.fetch_add(1, std::memory_order_relaxed);
+    if (cache.archive) {
+        // A pipeline the archive cannot take is still created; only the
+        // next process compiles it again.
+        std::lock_guard lock(cache.mutex);
+        if ([cache.archive addComputePipelineFunctionsWithDescriptor:descriptor error:nil]) cache.dirty = true;
     }
     return result;
 }
@@ -1325,6 +1369,192 @@ struct MetalBackend::Impl {
     std::unordered_map<PipelineKey, id<MTLComputePipelineState>,
                        PipelineKeyHash, PipelineKeyEqual>
         pipelines;
+    PipelineArchive pipelineArchive;
+    uint64_t archivedPipelines = 0;
+    double archiveWarmMilliseconds = 0;
+    static constexpr const char *kArchiveFile = "pipelines.metalarchive";
+    // One pipeline a line: its name, a tab, then its function constants in
+    // decimal, comma-separated.
+    static constexpr const char *kListFile = "pipelines.list";
+
+    void attachArchive(const std::string &root) {
+        if (library || pipelineArchive.archive || root.empty()) return;
+        // A compiled pipeline belongs to the device and the OS compiler, and
+        // a shader edit keys a new subdirectory, so an archive never answers
+        // for other sources.
+        uint64_t key = fak::inkling::shaders::Libraries::fingerprint();
+        const auto mix = [&](NSString *text) {
+            for (const char *c = text.UTF8String ?: ""; *c; ++c)
+                key = (key ^ static_cast<unsigned char>(*c)) * 0x100000001b3ull;
+            key = (key ^ 0xff) * 0x100000001b3ull;
+        };
+        mix(device.name);
+        mix(device.architecture.name);
+        mix(NSProcessInfo.processInfo.operatingSystemVersionString);
+        std::ostringstream name;
+        name << "inkling-" << std::hex << std::setw(16) << std::setfill('0') << key;
+        const std::filesystem::path directory = std::filesystem::path(root) / name.str();
+        std::error_code failed;
+        std::filesystem::create_directories(directory, failed);
+        if (failed) return;
+        pruneStaleArchives(directory);
+        const std::filesystem::path file = directory / kArchiveFile;
+        id<MTLBinaryArchive> archive = nil;
+        if (std::filesystem::exists(file, failed)) {
+            MTLBinaryArchiveDescriptor *existing = [MTLBinaryArchiveDescriptor new];
+            existing.url = [NSURL fileURLWithPath:checkedNSString(file.string(), "archive path")];
+            archive = [device newBinaryArchiveWithDescriptor:existing error:nil];
+        }
+        const bool loaded = archive != nil;
+        if (!archive) {
+            std::filesystem::remove(directory / kListFile, failed);
+            archive = [device newBinaryArchiveWithDescriptor:[MTLBinaryArchiveDescriptor new] error:nil];
+        }
+        if (!archive) return;
+        {
+            std::lock_guard lock(pipelineArchive.mutex);
+            pipelineArchive.archive = archive;
+            pipelineArchive.directory = directory;
+        }
+        if (!loaded) return;
+        const std::vector<PipelineKey> listed = readPipelineList(directory / kListFile);
+        archivedPipelines = listed.size();
+        std::vector<PipelineKeyView> missing;
+        for (const PipelineKey &listedKey : listed)
+            if (fak::inkling::shaders::Libraries::has(listedKey.name) && !pipelines.contains(PipelineKeyView(listedKey)))
+                missing.push_back(listedKey);
+        const auto started = AwakeClock::now();
+        compileSources(missing);
+        try {
+            createPipelines(missing);
+        } catch (...) {
+            // A listed pipeline this build cannot create is left to the
+            // dispatch that names it, which reports why.
+        }
+        archiveWarmMilliseconds = millisecondsSince(started);
+    }
+
+    // An archive no backend attached for this long belongs to shaders or an
+    // OS that are gone; each holds megabytes. Attaching marks `current` used.
+    static constexpr auto kStaleArchive = std::chrono::hours(24 * 14);
+    static void pruneStaleArchives(const std::filesystem::path &current) {
+        std::error_code failed;
+        const auto now = std::filesystem::file_time_type::clock::now();
+        std::filesystem::last_write_time(current, now, failed);
+        try {
+            for (const auto &entry : std::filesystem::directory_iterator(current.parent_path(), failed)) {
+                const std::filesystem::path sibling = entry.path();
+                if (sibling == current || !sibling.filename().string().starts_with("inkling-") ||
+                    !entry.is_directory(failed))
+                    continue;
+                const auto written = std::filesystem::last_write_time(sibling, failed);
+                if (!failed && now - written > kStaleArchive) std::filesystem::remove_all(sibling, failed);
+            }
+        } catch (const std::filesystem::filesystem_error &) {
+            // Pruning is housekeeping; an unreadable sibling stays.
+        }
+    }
+
+    // Compiles the embedded sources of `keys`' functions, a unit per worker
+    // (kPipelinesCreatedAtOnce). An archived pipeline still needs its
+    // function, and once macOS has evicted its own cache each unit compiles
+    // from source again, seconds apiece. A unit that fails is left to the
+    // pipeline that names it.
+    void compileSources(std::span<const PipelineKeyView> keys) {
+        if (library) return;
+        std::vector<std::string_view> units;
+        std::vector<size_t> seen;
+        for (const PipelineKeyView key : keys) {
+            const size_t unit = fak::inkling::shaders::Libraries::unitOf(key.name);
+            if (unit == SIZE_MAX || std::ranges::find(seen, unit) != seen.end()) continue;
+            seen.push_back(unit);
+            units.push_back(key.name);
+        }
+        if (units.empty()) return;
+        std::atomic<size_t> claimed{0};
+        std::atomic<size_t> *next = &claimed;
+        const std::string_view *names = units.data();
+        const size_t count = units.size();
+        fak::inkling::shaders::Libraries *sources = &embedded;
+        id<MTLDevice> target = device;
+        dispatch_apply(std::min(count, kPipelinesCreatedAtOnce), DISPATCH_APPLY_AUTO, ^(size_t) {
+            for (size_t index = next->fetch_add(1); index < count; index = next->fetch_add(1)) {
+                @autoreleasepool {
+                    try {
+                        static_cast<void>(sources->forFunction(target, names[index]));
+                    } catch (...) {
+                    }
+                }
+            }
+        });
+    }
+
+    static std::vector<PipelineKey> readPipelineList(const std::filesystem::path &path) {
+        std::vector<PipelineKey> keys;
+        std::ifstream in(path);
+        for (std::string line; std::getline(in, line);) {
+            const size_t tab = line.find('\t');
+            if (tab == 0 || tab == std::string::npos) continue;
+            PipelineKey key{line.substr(0, tab), {}};
+            std::istringstream values(line.substr(tab + 1));
+            bool valid = true;
+            for (std::string value; std::getline(values, value, ',');) {
+                char *end = nullptr;
+                const unsigned long parsed = std::strtoul(value.c_str(), &end, 10);
+                if (value.empty() || *end || parsed > std::numeric_limits<uint32_t>::max()) {
+                    valid = false;
+                    break;
+                }
+                key.constants.push_back(static_cast<uint32_t>(parsed));
+            }
+            if (valid) keys.push_back(std::move(key));
+        }
+        return keys;
+    }
+
+    // Writes `path` through a sibling that `write` fills and that is then
+    // renamed over it.
+    static bool replaceWhole(const std::filesystem::path &path,
+                             const std::function<bool(const std::filesystem::path &)> &write) {
+        std::filesystem::path partial = path;
+        // Two backends of one process may share the directory.
+        static std::atomic<uint64_t> writes{0};
+        partial += ".partial." + std::to_string(getpid()) + "." + std::to_string(writes.fetch_add(1));
+        std::error_code failed;
+        if (!write(partial)) {
+            std::filesystem::remove(partial, failed);
+            return false;
+        }
+        std::filesystem::rename(partial, path, failed);
+        if (failed) std::filesystem::remove(partial, failed);
+        return !failed;
+    }
+
+    bool flushArchive() {
+        std::lock_guard lock(pipelineArchive.mutex);
+        if (!pipelineArchive.archive || !pipelineArchive.dirty) return false;
+        id<MTLBinaryArchive> archive = pipelineArchive.archive;
+        const bool serialized = replaceWhole(pipelineArchive.directory / kArchiveFile, [&](const std::filesystem::path &partial) {
+            return [archive serializeToURL:[NSURL fileURLWithPath:checkedNSString(partial.string(), "archive path")]
+                                     error:nil] == YES;
+        });
+        if (!serialized) return false;
+        // The list names what the archive now holds: every pipeline this
+        // backend created, from the archive or compiled into it.
+        const bool listed = replaceWhole(pipelineArchive.directory / kListFile, [&](const std::filesystem::path &partial) {
+            std::ofstream out(partial, std::ios::trunc);
+            for (const auto &[listedKey, pipeline] : pipelines) {
+                out << listedKey.name << '\t';
+                for (size_t i = 0; i < listedKey.constants.size(); ++i) out << (i ? "," : "") << listedKey.constants[i];
+                out << '\n';
+            }
+            out.close();
+            return static_cast<bool>(out);
+        });
+        if (listed) pipelineArchive.dirty = false;
+        return listed;
+    }
+
     // From Ready on (MetalBackend::beginServing), the pipelines created since.
     std::atomic<bool> serving{false};
     std::atomic<uint64_t> pipelinesWhileServing{0};
@@ -1430,6 +1660,7 @@ struct MetalBackend::Impl {
 #endif
         std::atomic<size_t> claimed{0};
         std::atomic<size_t> *next = &claimed;
+        PipelineArchive *archive = &pipelineArchive;
         // Each worker creates the next pipeline no other has taken.
         dispatch_apply(std::min(keys.size(), kPipelinesCreatedAtOnce), DISPATCH_APPLY_AUTO, ^(size_t) {
             for (size_t index = next->fetch_add(1); index < keys.size(); index = next->fetch_add(1)) {
@@ -1437,7 +1668,7 @@ struct MetalBackend::Impl {
                     const auto started = AwakeClock::now();
                     try {
                         created[index].pipeline = createPipeline(device, sourceFor(requested[index].name), requested[index].name,
-                                                                 requested[index].constants, staged);
+                                                                 requested[index].constants, staged, *archive);
                     } catch (...) {
                         created[index].failure = std::current_exception();
                     }
@@ -1485,7 +1716,7 @@ struct MetalBackend::Impl {
     // outside the cache.
     id<MTLComputePipelineState> newPipeline(id<MTLLibrary> source, std::string_view name) {
         const auto started = AwakeClock::now();
-        id<MTLComputePipelineState> result = createPipeline(device, source, name, {}, false);
+        id<MTLComputePipelineState> result = createPipeline(device, source, name, {}, false, pipelineArchive);
         noteCreated(name, {}, millisecondsSince(started));
         return result;
     }
@@ -2672,6 +2903,29 @@ void MetalBackend::preparePipelines(
     std::span<const ComputeDispatch> dispatches) {
     checkOperation();
     static_cast<void>(impl_->prepare(dispatches));
+}
+
+void MetalBackend::attachPipelineArchive(const std::string &directory) {
+    checkOperation();
+    @autoreleasepool {
+        impl_->attachArchive(directory);
+    }
+}
+
+bool MetalBackend::flushPipelineArchive() {
+    @autoreleasepool {
+        return impl_->flushArchive();
+    }
+}
+
+MetalBackend::PipelineCacheStats MetalBackend::pipelineCacheStats() const {
+    return {
+        impl_->pipelineArchive.compiled.load(std::memory_order_relaxed),
+        impl_->pipelineArchive.hits.load(std::memory_order_relaxed),
+        impl_->archivedPipelines,
+        impl_->archiveWarmMilliseconds,
+        impl_->pipelineArchive.archive != nil,
+    };
 }
 
 void MetalBackend::beginServing() noexcept {

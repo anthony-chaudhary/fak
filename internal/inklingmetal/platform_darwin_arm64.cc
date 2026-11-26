@@ -25,7 +25,7 @@ int fak_ink_available() { return 0; }
 char *fak_ink_plan(const char *, const char *, uint32_t, FakInkMemory *) {
   return unavailable();
 }
-char *fak_ink_model(const char *, const char *, FakInkModel **) {
+char *fak_ink_model(const char *, const char *, const char *, FakInkModel **) {
   return unavailable();
 }
 void fak_ink_free_model(FakInkModel *) {}

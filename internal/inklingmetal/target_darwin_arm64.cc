@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -93,11 +94,18 @@ struct Weights {
   std::mutex device;
   const bool hasDraft;
   std::vector<std::unique_ptr<BatchLanes>> exactPasses, widePass;
+  // The prefill fak_ink_warm_pipelines ran at load when no archive listed
+  // pipelines; zero otherwise.
+  double loadWarmupMs = 0;
 
-  Weights(const char *file, const char *draft, bool planOnly = false)
+  Weights(const char *file, const char *draft, bool planOnly = false,
+          const char *pipelines = "")
       : backend(""),
         operators(backend.capabilities(), ops::Int8Activations::On),
         hasDraft(*draft) {
+    // Before the weights load, whose repacking dispatches pipelines too.
+    if (!planOnly)
+      backend.attachPipelineArchive(pipelines);
     const Inkling2LoopLayout layout;
     constexpr std::array<uint32_t, 4> taps{5, 23, 41, 48};
     const auto draftShape = draftLayout(
@@ -414,13 +422,13 @@ extern "C" char *fak_ink_plan(const char *file, const char *draft,
   });
 }
 extern "C" char *fak_ink_model(const char *gguf, const char *draft,
-                               FakInkModel **out) {
+                               const char *pipelines, FakInkModel **out) {
   return guard([&] {
     if (!fak_ink_available())
       throw std::runtime_error(
           "Inkling Metal requires an M3 or later on macOS 26.4+");
     auto m = std::make_unique<FakInkModel>();
-    m->owner = std::make_shared<Weights>(gguf, draft);
+    m->owner = std::make_shared<Weights>(gguf, draft, false, pipelines);
     *out = m.release();
   });
 }
@@ -456,6 +464,51 @@ extern "C" void fak_ink_kernels(FakInkModel *m, FakInkKernels *out) {
           kPrefillRows,
           m->owner->hasDraft ? SPLASH_DRAFT_SLIDING_WINDOW : 0,
           g.contextTokens()};
+}
+extern "C" char *fak_ink_warm_pipelines(FakInkModel *m) {
+  return guard([&] {
+    Weights &owner = *m->owner;
+    if (const auto stats = owner.backend.pipelineCacheStats();
+        !stats.attached || stats.archived)
+      return;
+    // Nothing is listed yet: a short prefill and one verify step compile now
+    // the pipelines a prompt would otherwise wait for, and the archive keeps
+    // them for the next process.
+    const auto started = std::chrono::steady_clock::now();
+    const uint32_t vocabulary = owner.geometry.target.vocabularyTokens;
+    std::vector<int32_t> ids(64);
+    for (uint32_t i = 0; i < ids.size(); ++i)
+      ids[i] = int32_t((uint64_t(i) * 7919 + 11) % vocabulary);
+    FakInkSession *warm = nullptr;
+    if (char *failure = fak_ink_session(m, 128, &warm))
+      throw std::runtime_error(std::unique_ptr<char, decltype(&free)>(failure, free).get());
+    std::unique_ptr<FakInkSession, decltype(&fak_ink_free_session)> held(warm, fak_ink_free_session);
+    int32_t argmax[maxBlock] = {};
+    for (const auto &[count, prefill] : {std::pair<uint32_t, int>{uint32_t(ids.size()), 1}, {1, 0}})
+      if (char *failure = fak_ink_step(warm, ids.data(), count, prefill, nullptr, argmax))
+        throw std::runtime_error(std::unique_ptr<char, decltype(&free)>(failure, free).get());
+    held.reset();
+    std::lock_guard lock(owner.device);
+    owner.backend.flushPipelineArchive();
+    owner.loadWarmupMs = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - started)
+                             .count();
+  });
+}
+extern "C" int fak_ink_pipeline_flush(FakInkModel *m) {
+  try {
+    std::lock_guard lock(m->owner->device);
+    return m->owner->backend.flushPipelineArchive();
+  } catch (...) {
+    return 0;
+  }
+}
+extern "C" void fak_ink_pipeline_stats(FakInkModel *m,
+                                       FakInkPipelineStats *out) {
+  const auto stats = m->owner->backend.pipelineCacheStats();
+  *out = {stats.compiled,         stats.archiveHits,
+          stats.archived,         stats.warmMilliseconds,
+          m->owner->loadWarmupMs, stats.attached};
 }
 extern "C" char *fak_ink_keep_boundaries(FakInkSession *s, uint32_t most) {
   return guard([&] {
@@ -892,6 +945,11 @@ char *fak_ink_step_batch(FakInkSession *const *, const int32_t *, uint32_t,
 }
 uint64_t fak_ink_batch_bytes(FakInkModel *) { return 0; }
 void fak_ink_kernels(FakInkModel *, FakInkKernels *) {}
+char *fak_ink_warm_pipelines(FakInkModel *) { return nullptr; }
+int fak_ink_pipeline_flush(FakInkModel *) { return 0; }
+void fak_ink_pipeline_stats(FakInkModel *, FakInkPipelineStats *out) {
+  *out = {};
+}
 char *fak_ink_keep_boundaries(FakInkSession *, uint32_t) {
   return strdup(
       "Inkling Metal requires macOS 26.4 SDK and Metal 4 shader support");

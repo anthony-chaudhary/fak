@@ -53,14 +53,44 @@ func nativeError(msg *C.char) error {
 	return errors.New(C.GoString(msg))
 }
 func openModel(path, draft string) (*Model, error) {
-	cp, cd := C.CString(path), C.CString(draft)
+	cp, cd, cc := C.CString(path), C.CString(draft), C.CString(pipelineCacheDir())
 	defer C.free(unsafe.Pointer(cp))
 	defer C.free(unsafe.Pointer(cd))
+	defer C.free(unsafe.Pointer(cc))
 	m := &Model{hasDraft: draft != "", path: path, draft: draft}
-	if err := nativeError(C.fak_ink_model(cp, cd, &m.ptr)); err != nil {
+	if err := nativeError(C.fak_ink_model(cp, cd, cc, &m.ptr)); err != nil {
 		return nil, err
 	}
+	// The warmup only moves pipeline compiles ahead of the first prompt; a
+	// prompt that hits the same failure reports it.
+	_ = nativeError(C.fak_ink_warm_pipelines(m.ptr))
 	return m, nil
+}
+
+// PipelineStats reports the model's Metal pipeline archive: zero once closed.
+func (m *Model) PipelineStats() PipelineStats {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ptr == nil {
+		return PipelineStats{}
+	}
+	var st C.FakInkPipelineStats
+	C.fak_ink_pipeline_stats(m.ptr, &st)
+	return PipelineStats{
+		Compiled:      int(st.compiled),
+		ArchiveHits:   int(st.archive_hits),
+		Archived:      int(st.archived),
+		ArchiveWarmMS: float64(st.archive_warm_ms),
+		LoadWarmupMS:  float64(st.load_warmup_ms),
+		Attached:      st.attached != 0,
+	}
+}
+
+// FlushPipelines writes the pipeline archive when this process added to it.
+func (m *Model) FlushPipelines() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ptr != nil && C.fak_ink_pipeline_flush(m.ptr) != 0
 }
 func (m *Model) NewSession(capacity int) (*Session, error) {
 	m.mu.Lock()
@@ -101,6 +131,9 @@ func (m *Model) Close() error {
 	C.fak_ink_free_session(m.idle)
 	m.idle = nil
 	m.idleCapacity = 0
+	if m.ptr != nil {
+		C.fak_ink_pipeline_flush(m.ptr)
+	}
 	C.fak_ink_free_model(m.ptr)
 	m.ptr = nil
 	return nil

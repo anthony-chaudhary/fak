@@ -355,6 +355,19 @@ type Timings struct {
 	// Inkling2Mode names that path, so a client can witness server-side coalescing.
 	Inkling2Width int    `json:"inkling2_width,omitempty"`
 	Inkling2Mode  string `json:"inkling2_mode,omitempty"`
+	// MetalPipelines is present when the model keeps a Metal pipeline archive,
+	// so a cold start that compiled reads apart from an archive hit.
+	MetalPipelines *MetalPipelineTimings `json:"metal_pipelines,omitempty"`
+}
+
+// MetalPipelineTimings counts the model's Metal pipelines since it loaded:
+// those Metal compiled, those created from the archive, the archive's listed
+// count at load, and the load time spent creating pipelines before any prompt.
+type MetalPipelineTimings struct {
+	Compiled    int     `json:"compiled"`
+	ArchiveHits int     `json:"archive_hits"`
+	Archived    int     `json:"archived"`
+	LoadMS      float64 `json:"load_ms"`
 }
 
 // NewTimings builds Timings from token counts and phase seconds. Like llama.cpp,

@@ -7,8 +7,8 @@
   "upstream_root": "runtime",
   "vendor_root": "third_party/inklingmetal/runtime",
   "counts": {
-    "identical": 272,
-    "modified": 1,
+    "identical": 271,
+    "modified": 2,
     "fak_added": 2
   },
   "upstream_runtime": {
@@ -163,8 +163,8 @@
     },
     {
       "path": "third_party/inklingmetal/runtime/metal/FakEmbeddedShaders.hpp",
-      "bytes": 2513,
-      "sha256": "7ead299fa2e83e5a895b2c008ee3910ecadaa933c78da2ce0fb67e20469927c2",
+      "bytes": 3545,
+      "sha256": "249bc465bc32424abb07361fcda7722b871e413d18e5588863aecfef02f576ff",
       "status": "fak-added"
     },
     {
@@ -175,20 +175,21 @@
     },
     {
       "path": "third_party/inklingmetal/runtime/metal/MetalBackend.hpp",
-      "bytes": 27140,
-      "sha256": "3b462ee00db2eef9df4d61f6ce1dbc6a1c6edc6f6486cd405f0e958a7e1b22fa",
-      "status": "identical",
+      "bytes": 28532,
+      "sha256": "6afef2324464579f64b33710d1de28145007a21f3e27644d0dd90744bc208313",
+      "status": "modified",
       "upstream_path": "runtime/metal/MetalBackend.hpp",
-      "upstream_sha256": "3b462ee00db2eef9df4d61f6ce1dbc6a1c6edc6f6486cd405f0e958a7e1b22fa"
+      "upstream_sha256": "3b462ee00db2eef9df4d61f6ce1dbc6a1c6edc6f6486cd405f0e958a7e1b22fa",
+      "local_change": "Declare the pipeline archive API: attachPipelineArchive, flushPipelineArchive and pipelineCacheStats."
     },
     {
       "path": "third_party/inklingmetal/runtime/metal/MetalBackend.mm",
-      "bytes": 133576,
-      "sha256": "968d6af4d13a1e13e248a9122a185a0dc683db82325e42bdafd69cf7f7bf197c",
+      "bytes": 145518,
+      "sha256": "7050b96348dc55d342f910a3dcfd97627e46e20cbe4d5df42218f6cfa38a7861",
       "status": "modified",
       "upstream_path": "runtime/metal/MetalBackend.mm",
       "upstream_sha256": "238f1bd64d60c6bfefc70e29148faa37b440e7074dc141465dbfd79d65018316",
-      "local_change": "Compile pipelines from the embedded MSL sources (FakEmbeddedShaders.hpp) when no metallib path is given, instead of requiring a prebuilt metallib."
+      "local_change": "Compile pipelines from the embedded MSL sources (FakEmbeddedShaders.hpp) when no metallib path is given, instead of requiring a prebuilt metallib. Persist created pipelines in an MTLBinaryArchive under a caller-given directory keyed by the embedded shader sources, device and OS (attachPipelineArchive / flushPipelineArchive / pipelineCacheStats), compiling the listed pipelines' sources and creating them from the archive at attach."
     },
     {
       "path": "third_party/inklingmetal/runtime/metal/Residency.hpp",

@@ -332,5 +332,11 @@ func (p *inkling2RunPlanner) result(sp SampleParams, generated []int, prompt, sa
 	if err != nil {
 		return nil, err
 	}
-	return &Completion{Model: p.name, Message: msg, FinishReason: reason, Usage: Usage{PromptTokens: prompt, CompletionTokens: sampled, TotalTokens: prompt + sampled}, Timings: NewTimings(prompt, 0, steps, prefill.Seconds(), decode.Seconds())}, nil
+	t := NewTimings(prompt, 0, steps, prefill.Seconds(), decode.Seconds())
+	if p.metal != nil {
+		if st := p.metal.PipelineStats(); st.Attached || st.Compiled > 0 {
+			t.MetalPipelines = &MetalPipelineTimings{Compiled: st.Compiled, ArchiveHits: st.ArchiveHits, Archived: st.Archived, LoadMS: st.ArchiveWarmMS + st.LoadWarmupMS}
+		}
+	}
+	return &Completion{Model: p.name, Message: msg, FinishReason: reason, Usage: Usage{PromptTokens: prompt, CompletionTokens: sampled, TotalTokens: prompt + sampled}, Timings: t}, nil
 }
