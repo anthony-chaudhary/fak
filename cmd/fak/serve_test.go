@@ -46,7 +46,7 @@ func TestSpeculativeSelectorAdmitsDFlash2(t *testing.T) {
 	}
 
 	// Unknown modes fail startup with the closed sentinel, not a bare error.
-	for _, bad := range []string{"eagle", "MTP2", "off", "mt p"} {
+	for _, bad := range []string{"eagle", "MTP2", "mt p", "on"} {
 		_, err := resolveSpeculativeMode(bad, noEnv)
 		if !errors.Is(err, ErrSpeculativeModeUnknown) {
 			t.Fatalf("unknown %q: err=%v, want errors.Is(ErrSpeculativeModeUnknown)", bad, err)

@@ -967,8 +967,9 @@ func (c Config) HasMTPHead() bool {
 // declared-but-dropped head cannot be addressed, and a retain flag on a head-less model
 // retains nothing — so this predicate is the single seam that joins the two.
 //
-// READINESS CHECK ONLY: no draft/verify decode consumes it yet, and RetainMTP defaults
-// off, so this is false on every default decode and changes no runtime behavior.
+// READINESS CHECK ONLY: no draft/verify decode consumes it yet. RetainMTP is set per
+// serve load (the default retains only for Qwen3.5-family artifacts), so this is false
+// on every decode that does not opt in and changes no runtime behavior.
 func (c Config) SelfSpeculationSubstrateReady() bool {
 	return c.HasMTPHead() && RetainMTP
 }

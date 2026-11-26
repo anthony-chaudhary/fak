@@ -276,6 +276,9 @@ func (rt *serveRuntime) loadServeInKernelModelFitted(sf *serveFlags, expertShard
 	}
 	res, err := runServeFitCommit(cfg, func(l serveFitCommitLayout) (serveFitCommitResult, error) {
 		m, q4k, prof, phase, plan, err := loadServeInKernelModelPlacedErr(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, rt.requireDeviceExecution, l.ContextTokens, expertShard, expertRanks, l.DeviceFit)
+		if serveNoteMTPRetentionFallback(err, os.Getenv) {
+			m, q4k, prof, phase, plan, err = loadServeInKernelModelPlacedErr(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, rt.requireDeviceExecution, l.ContextTokens, expertShard, expertRanks, l.DeviceFit)
+		}
 		return serveFitCommitResult{Model: m, Q4K: q4k, Profile: prof, Phase: phase, Plan: plan}, err
 	})
 	if err != nil {

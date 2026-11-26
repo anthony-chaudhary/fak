@@ -589,6 +589,9 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 // shrunken believed-free layout can be tried before the process gives up.
 func loadServeInKernelModelPlaced(modelPath string, backend compute.Backend, cpuOffloadExperts, requireDevice bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int, fit *serveFitBudget) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	m, q4k, prof, ph, _, err := loadServeInKernelModelPlacedErr(modelPath, backend, cpuOffloadExperts, requireDevice, contextBudgetTokens, expertShard, expertRanks, fit)
+	if serveNoteMTPRetentionFallback(err, os.Getenv) {
+		m, q4k, prof, ph, _, err = loadServeInKernelModelPlacedErr(modelPath, backend, cpuOffloadExperts, requireDevice, contextBudgetTokens, expertShard, expertRanks, fit)
+	}
 	must(err)
 	return m, q4k, prof, ph
 }

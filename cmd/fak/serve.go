@@ -480,16 +480,15 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.memoryGovernor = fs.Bool("memory-governor", false, "enable dynamic zero-swap memory governor admission on Apple Silicon / Metal serving (auto-enabled with --metal or FAK_MEMORY_GOVERNOR=1)")
 	sf.gpudirectOverflow = fs.Bool("gpudirect-overflow", false, "reserved compatibility flag; GPU Direct overflow is not implemented on this command (default off)")
 	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move supported expert GEMMs off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). Mixed k-quant expert formats without backend kernels (for example Q5_K/Q6_K today) still use the host k-quant fallback; set FAK_KQ_INT8=1 to use its production int8 path. The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (go run ./cmd/fak-dev build-cuda legacy build: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
-	// Structural speculative-decode selector (#1891 + DFlash2 wiring): the DEFAULT
-	// front door sets the fast decode route by construction instead of leaving it
-	// env-only. "mtp" (default) selects the resident Metal/Vulkan MTP path where
-	// the admissibility envelope holds; "ngram" selects prompt n-gram speculation;
-	// "dflash2" is recognized but refuses until serve owns an authenticated target;
-	// "" leaves the route unselected. FAK_SPECULATIVE / SPECULATIVE remain the
-	// operator override and win when set, so this flag only supplies the structural
-	// default. The closed set is admitted at startup (resolveSpeculativeMode): an
-	// unknown value fails loud before any weight load.
-	sf.speculative = fs.String("speculative", "mtp", "structural speculative-decode selector: mtp (default), ngram, or dflash2 (serve owner unavailable; refuses before load); empty disables; FAK_SPECULATIVE/SPECULATIVE env overrides win; an unknown value fails startup")
+	// Structural speculative-decode selector: the DEFAULT front door sets the fast
+	// decode route by construction. "mtp" (default) is on whenever the model carries
+	// an MTP head; "off" (or none/false/disabled/0) is the explicit opt-out for
+	// specific circumstances or dev work only. "ngram" selects prompt n-gram
+	// speculation; "dflash2" is recognized but refuses until serve owns an
+	// authenticated target. FAK_SPECULATIVE / SPECULATIVE remain the operator
+	// override and win when set. The closed set is admitted at startup
+	// (resolveSpeculativeMode): an unknown value fails loud before any weight load.
+	sf.speculative = fs.String("speculative", "mtp", "structural speculative-decode selector: mtp (default; on whenever the model carries an MTP head), ngram, or dflash2 (serve owner unavailable; refuses before load); off/none/false/disabled/0 opts out (specific circumstances or dev work only); FAK_SPECULATIVE/SPECULATIVE env overrides win; an unknown value fails startup")
 	// Native P/D role selector (#28): the closed set is admitted at startup
 	// (resolveServePDRole) BEFORE any weight load, so a misspelled role refuses
 	// startup instead of silently booting an ordinary combined serve.
@@ -538,13 +537,31 @@ const (
 	serveSpeculativeDFlash2 = "dflash2"
 )
 
+// serveSpeculativeOptOutTokens are the explicit opt-out spellings. They normalize to
+// the disabled selector "" so every downstream route sees the same off state.
+var serveSpeculativeOptOutTokens = map[string]bool{
+	"off": true, "none": true, "false": true, "disabled": true, "0": true,
+}
+
+// serveRetainMTPHead reports whether the in-kernel load must keep the MTP head tensors.
+// Only the resolved mtp route on a backend that consumes the head (Metal, or resident
+// Vulkan/CUDA) keeps it; other routes load the head-free layout.
+func serveRetainMTPHead(resolvedMode string, metal bool, backendName string) bool {
+	if resolvedMode != serveSpeculativeMTP {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(backendName))
+	return metal || name == "vulkan" || name == "cuda"
+}
+
 // resolveSpeculativeMode resolves the effective structural speculative-decode selector
 // for `fak serve`. The FAK_SPECULATIVE / SPECULATIVE operator overrides win over the
 // --speculative flag (FAK_SPECULATIVE first), mirroring the gateway's historical env-OR
 // precedence; normalization (lowercase, trim) matches the gateway's own comparison so an
-// admitted value reaches every downstream route byte-for-byte. The winner must land in
-// the closed admission set {mtp, ngram, dflash2, empty}; anything else fails startup
-// with ErrSpeculativeModeUnknown before any weight load. An admitted value is returned
+// admitted value reaches every downstream route byte-for-byte. An opt-out token resolves
+// to "" (disabled). The winner must land in the closed admission set
+// {mtp, ngram, dflash2, empty}; anything else fails startup with
+// ErrSpeculativeModeUnknown before any weight load. An admitted value is returned
 // verbatim for buildGateway to thread into gateway.Config.SpeculativeMode — including
 // "dflash2". The CLI separately refuses that route before acquisition until its
 // authenticated target owner is wired; gateway/library owner support is unchanged.
@@ -559,11 +576,14 @@ func resolveSpeculativeMode(flagValue string, getenv func(string) string) (strin
 			break
 		}
 	}
+	if serveSpeculativeOptOutTokens[effective] {
+		return "", nil
+	}
 	switch effective {
 	case "", serveSpeculativeMTP, serveSpeculativeNGram, serveSpeculativeDFlash2:
 		return effective, nil
 	default:
-		return "", fmt.Errorf("%w: %q (admitted: mtp, ngram, dflash2, empty)", ErrSpeculativeModeUnknown, effective)
+		return "", fmt.Errorf("%w: %q (admitted: mtp, ngram, dflash2, empty; opt-out: off)", ErrSpeculativeModeUnknown, effective)
 	}
 }
 
@@ -1236,6 +1256,13 @@ func cmdServe(argv []string) {
 	// weight load, the session plane before the gateway, the observer seams resolved
 	// before the gateway exists but installed only after it does.
 	rt.resolveCompute(sf)
+	// Retention needs the resolved backend, so it is decided here: the MTP head is
+	// dropped at load unless retained, and only a consuming route keeps it.
+	mtpBackendName := ""
+	if rt.chatBackend != nil {
+		mtpBackendName = rt.chatBackend.Name()
+	}
+	fakmodel.SetRetainMTP(serveRetainMTPForModel(*sf.speculative, rt.useMetal, mtpBackendName, serveMTPPeekModelType(*sf.ggufPath), serveMTPEnvForced(os.Getenv)))
 	defer rt.closeEPGroup()
 	if *sf.dryAdmit {
 		if err := rt.runServeDryAdmit(sf, os.Stdout); err != nil {
