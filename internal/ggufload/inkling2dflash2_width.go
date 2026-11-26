@@ -6,21 +6,40 @@ import (
 )
 
 // inkling2DFlash2Cost is a step's cost model in units of one width-1 verify:
-// a verify of width w costs 1+(w-1)*row, and a step that drafts also pays
-// draft. The numbers are measured constants, never live timings, so a
-// request's draft lengths and therefore its ids are the same on every run.
-type inkling2DFlash2Cost struct{ row, draft float64 }
+// verify[n] is a verify of n drafted rows plus the root, and a step that drafts
+// also pays draft. The numbers are measured constants, never live timings, so
+// a request's draft lengths and therefore its ids are the same on every run.
+type inkling2DFlash2Cost struct {
+	verify [inkling2SpecMaxDraft + 1]float64
+	draft  float64
+}
 
-// Measured on an M3 Pro: a width-1 verify is 43.8 ms and each extra row 13.7
-// ms on the GEMV path (w8 139.5 ms); on the MMA path 8.4 ms per row of a 40.8
-// ms width-1. The fused draft, its fence included, is 11.9 ms in the loop.
+// Measured on an M3 Pro, one session, verify widths interleaved best of 10,
+// each path over its own width-1 verify (GEMV 40.4 ms, MMA 43.8 ms), the draft
+// over the same width-1 so both terms share one unit. GEMV is linear, so its
+// row is the least-squares 0.3435 (13.9 ms) that smooths the odd/even zigzag of
+// single widths. MMA bends, +13.4 ms for the second row and 6-9 ms after as the
+// NVFP4 expert groups fill, so it keeps the measured table. The fused draft,
+// fence included, is 11.5 ms in the loop.
 var (
-	inkling2DFlash2CostGEMV = inkling2DFlash2Cost{row: 13.7 / 43.8, draft: 11.9 / 43.8}
-	inkling2DFlash2CostMMA  = inkling2DFlash2Cost{row: 8.4 / 40.8, draft: 11.9 / 43.8}
+	inkling2DFlash2CostGEMV = inkling2DFlash2Cost{
+		verify: [...]float64{1, 1.344, 1.687, 2.031, 2.374, 2.718, 3.061, 3.405, 3.748},
+		draft:  11.5 / 40.4,
+	}
+	inkling2DFlash2CostMMA = inkling2DFlash2Cost{
+		verify: [...]float64{1, 1.305, 1.517, 1.741, 1.925, 2.026, 2.195, 2.331, 2.603},
+		draft:  11.5 / 43.8,
+	}
 )
 
+// step is the cost of a step drafting n tokens; past the table it extends the
+// last row's growth.
 func (c inkling2DFlash2Cost) step(n int) float64 {
-	v := 1 + float64(n)*c.row
+	last := len(c.verify) - 1
+	v := c.verify[min(max(n, 0), last)]
+	if n > last {
+		v += float64(n-last) * (c.verify[last] - c.verify[last-1])
+	}
 	if n > 0 {
 		v += c.draft
 	}

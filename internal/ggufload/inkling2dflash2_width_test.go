@@ -61,14 +61,16 @@ func TestInkling2DFlash2WidthCollapse(t *testing.T) {
 
 func TestInkling2DFlash2WidthDeepensWithAcceptance(t *testing.T) {
 	t.Setenv("FAK_INKLING2_DFLASH2_DEPTH_FIXED", "")
-	for _, mma := range []string{"", "1"} {
+	// GEMV rows cost a third of a width-1 verify, so decayed full acceptance
+	// pays for 4 drafted; MMA's flatter table pays for at least 5
+	for mma, deep := range map[string]int{"": 4, "1": 5} {
 		t.Setenv("FAK_INKLING2_VERIFY_MMA", mma)
 		hi := newInkling2DFlash2Width(7)
 		gotHi := runInkling2DFlash2Width(hi, 60, func(_, n int) int { return n })
 		mid := newInkling2DFlash2Width(7)
 		gotMid := runInkling2DFlash2Width(mid, 60, func(_, n int) int { return min(n, 1) })
 		// unjudged positions keep the prior, so depth grows a step at a time
-		if last := gotHi[len(gotHi)-1]; last < 5 || last <= gotHi[0] {
+		if last := gotHi[len(gotHi)-1]; last < deep || last <= gotHi[0] {
 			t.Errorf("mma=%q: full acceptance settles at depth %d from %d: %v", mma, last, gotHi[0], gotHi)
 		}
 		if gotMid[len(gotMid)-1] >= gotHi[len(gotHi)-1] {
