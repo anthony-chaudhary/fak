@@ -493,7 +493,7 @@ func v41RoleContinuationSeed(t *testing.T, m *Model, prefix []int) *v41ForwardSt
 	return st
 }
 
-// fak-test:runtime fast est=2s lane=default
+// fak-test:runtime fast est=500ms lane=default
 func TestV41RoleAttentionContinuationParity(t *testing.T) {
 	for _, indexed := range []bool{false, true} {
 		m := v41ReaderWidthFixture(t)
@@ -575,7 +575,7 @@ func TestV41RoleAttentionContinuationParity(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=1s lane=default
+// fak-test:runtime fast est=100ms lane=default
 func TestV41RoleAttentionContinuationBoundaries(t *testing.T) {
 	m := v41ReaderWidthFixture(t)
 	prefix := []int{1, 2, 3}
@@ -621,7 +621,7 @@ func TestV41RoleAttentionContinuationBoundaries(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=20s lane=default
+// fak-test:runtime slow est=47s lane=default
 func TestV41RoleAttentionContinuationAllocations(t *testing.T) {
 	for _, indexed := range []bool{false, true} {
 		m := v41ReaderWidthFixture(t)
@@ -690,7 +690,7 @@ func TestV41RoleAttentionContinuationAllocations(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=1s lane=default
+// fak-test:runtime fast est=250ms lane=default
 func TestV41RoleAttentionContinuationFailures(t *testing.T) {
 	m := v41ReaderWidthFixture(t)
 	prefix := []int{1, 2, 3}
@@ -801,7 +801,7 @@ func TestV41RoleAttentionContinuationCleanupOwnership(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=200ms lane=default
+// fak-test:runtime fast est=80ms lane=default
 func TestV41RoleAttentionContinuationFailureAllocationCost(t *testing.T) {
 	m := v41ReaderWidthFixture(t)
 	prefix := []int{1, 2, 3}

@@ -205,6 +205,7 @@ func (s *Session) prefillQ4KFreshNormReference(ids []int) []float32 {
 	return m.finalNorm(last)
 }
 
+// fak-test:runtime slow est=28s lane=default
 func TestPrefillQ4KNormReuseExactAndAllocation(t *testing.T) {
 	old := NumWorkers()
 	defer SetWorkers(old)

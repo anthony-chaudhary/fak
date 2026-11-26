@@ -184,7 +184,7 @@ func TestV41ColdStageRecorderPartition(t *testing.T) {
 
 // TestV41ColdStageAllocs: the disabled brackets are nil-receiver no-ops and an
 // enabled recorder folds into fixed rows, so neither allocates per region.
-// fak-test:runtime fast est=500ms lane=default
+// fak-test:runtime slow est=24s lane=default
 func TestV41ColdStageAllocs(t *testing.T) {
 	var disabled *v41ColdStageRecorder
 	st := &v41ForwardState{callbackOwner: &Session{}}
@@ -381,7 +381,7 @@ func v41StageWitnessFixtures() []v41DecodeSubmitsFixture {
 // fake's aggregate, incremental decode lands in Unassigned, and the recorder
 // leaves every logit bit-identical to a seamless host session.
 // fak-test:justify why=contract when=changed:internal/model/v41_forward*.go,internal/model/v41_cold_stage_attribution*.go
-// fak-test:runtime medium est=5s lane=default
+// fak-test:runtime medium est=2s lane=default
 func TestV41ColdStageAttributionCPURef(t *testing.T) {
 	seen := map[string]int{}
 	for _, fx := range v41StageWitnessFixtures() {

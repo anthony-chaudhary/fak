@@ -506,6 +506,7 @@ func qwen38HybridMTPEnabledSyntheticModelBench(b *testing.B) *Model {
 // tree mask stays bit-identical to P sequential Steps, the mask is consulted once per (q, k)
 // rather than per layer x head, and the tree path allocates less than the chain path, which
 // still builds a fresh score slice per query x head x layer.
+// fak-test:runtime slow est=43s lane=default
 func TestVerifyForwardTreeHoistedKeySetMatchesSerial(t *testing.T) {
 	m := NewSynthetic(cfgV(64, 4, 4, 2, 16, 128))
 	prompt := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}

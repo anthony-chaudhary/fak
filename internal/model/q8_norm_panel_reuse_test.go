@@ -192,6 +192,7 @@ func (s *Session) prefillFreshNormReference(ids []int) []float32 {
 	return m.finalNorm(last)
 }
 
+// fak-test:runtime slow est=35s lane=default
 func TestQ8NormPanelReuseExactAndAllocation(t *testing.T) {
 	old := NumWorkers()
 	defer SetWorkers(old)

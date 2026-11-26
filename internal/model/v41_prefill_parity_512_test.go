@@ -28,7 +28,7 @@ func v41ParityPrompt(vocab, n int) []int {
 	return ids
 }
 
-// fak-test:runtime slow est=60s lane=default
+// fak-test:runtime slow est=2.5s lane=default
 func TestV41GroupedPrefillMatchesTokenMajor512(t *testing.T) {
 	t.Cleanup(func() { v41ForceTokenMajor = false })
 	grouped, _ := v41TierOnlyBudgetModel(t, 0)
@@ -61,7 +61,7 @@ func TestV41GroupedPrefillMatchesTokenMajor512(t *testing.T) {
 	t.Logf("digest=%s reads grouped=%d token-major=%d", gd, gReads, tmReads)
 }
 
-// fak-test:runtime medium est=5s lane=default
+// fak-test:runtime medium est=400ms lane=default
 func TestV41SuffixPrefillMatchesColdPrefill512(t *testing.T) {
 	const prefixLen, tol = v41ParityPromptTokens / 2, 1e-5
 	m := v41IncrementalPlainModel(t, 2)

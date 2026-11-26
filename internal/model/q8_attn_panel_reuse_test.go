@@ -196,6 +196,7 @@ func (s *Session) prefillFreshAttnReference(ids []int) []float32 {
 	return m.finalNorm(last)
 }
 
+// fak-test:runtime slow est=31s lane=default
 func TestQ8AttnPanelReuseExactAndAllocation(t *testing.T) {
 	old := NumWorkers()
 	defer SetWorkers(old)

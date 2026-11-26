@@ -102,7 +102,7 @@ var qwen35MoEPromptB = []int{2, 13, 89, 41, 8, 77, 30, 64, 9, 15, 50, 21, 33, 44
 // non-zero base (restored conv/recurrent state). The tolerance is the established Q8
 // panel-vs-GEMV drift of the dense hybrid's own gate; the FFN sublayer itself is pinned
 // bit-for-bit by TestQwen35MoERowFFNQMatchesTokenLoopSublayer. [SW-VERIFIED, synthetic]
-// fak-test:runtime fast est=200ms lane=default
+// fak-test:runtime fast est=100ms lane=default
 func TestQwen35MoEHybridQuantBatchedPrefillMatchesTokenLoop(t *testing.T) {
 	m := newQuantQwen35MoEHybrid(t)
 	cfg := m.Cfg
@@ -209,7 +209,7 @@ func intsEqual(a, b []int) bool {
 // TestQwen35MoEHybridQuantPrefillTakesBatchedLane proves Prefill routes qwen3_5_moe to the
 // batched hybrid lane: the batched linear recurrence and per-row FFN phases are recorded,
 // and blockStep's mlp_decode (once per token x layer on the token loop) never runs.
-// fak-test:runtime fast est=100ms lane=default
+// fak-test:runtime fast est=30ms lane=default
 func TestQwen35MoEHybridQuantPrefillTakesBatchedLane(t *testing.T) {
 	m := newQuantQwen35MoEHybrid(t)
 	s := m.NewSession()
@@ -234,7 +234,7 @@ func TestQwen35MoEHybridQuantPrefillTakesBatchedLane(t *testing.T) {
 // TestQwen35MoEHybridObserversKeepTokenLoop: a hidden-state tap or an enabled residual hook
 // is invoked only inside blockStep, so a qwen3_5_moe session carrying one keeps the token
 // loop (mlp_decode once per token x layer) and the hook still fires per token x layer.
-// fak-test:runtime fast est=100ms lane=default
+// fak-test:runtime fast est=250ms lane=default
 func TestQwen35MoEHybridObserversKeepTokenLoop(t *testing.T) {
 	prompt := qwen35MoEPromptA
 	t.Run("tap", func(t *testing.T) {
@@ -320,7 +320,7 @@ func newQ4KQwen35MoEHybrid(t *testing.T, mutate func(*Config)) *Model {
 // decode reduction. Native Q8 minority legs retain the existing 0.9999 cosine contract.
 // Q4_K activation quantization is disabled in every leg to isolate Q8 reduction drift;
 // these are not full configured-Q4_K decode qualification. [SW-VERIFIED, synthetic]
-// fak-test:runtime fast est=3s lane=default
+// fak-test:runtime fast est=2.2s lane=default
 func TestQwen35MoEHybridQ4KBatchedPrefillMatchesTokenLoop(t *testing.T) {
 	oldSDOT := q4kSDOTForce
 	setQ4KSDOTForTest(false)
@@ -500,7 +500,7 @@ func TestQwen35MoEHybridQ4KPrefillTakesBatchedLane(t *testing.T) {
 // (prefillQwen35HybridQHidden), with the routed FFN taken per row once per layer. What this
 // cannot witness off-device is the GPU f16 GEMM and the darwin wiring around the core.
 // [SW-VERIFIED, synthetic; Metal runtime not exercised]
-// fak-test:runtime fast est=300ms lane=default
+// fak-test:runtime fast est=30ms lane=default
 func TestQwen35MoEHybridViaMMMatchesTokenLoop(t *testing.T) {
 	m := newQuantQwen35MoEHybrid(t)
 	prompt := qwen35MoEPromptA
@@ -552,7 +552,7 @@ func TestQwen35MoEHybridViaMMMatchesTokenLoop(t *testing.T) {
 // cfg-only metalQwen35HybridPrefillOK admits qwen3_5_moe, so a session carrying a tap or a
 // residual hook must be held on the token loop by qwen35MetalHybridMoEKeepsTokenLoop, while
 // the dense hybrid's Metal routing is never affected by it.
-// fak-test:runtime fast est=50ms lane=default
+// fak-test:runtime fast est=250ms lane=default
 func TestQwen35MetalHybridMoEKeepsTokenLoop(t *testing.T) {
 	m := newQuantQwen35MoEHybrid(t)
 	tapped := m.NewSession()

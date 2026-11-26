@@ -210,6 +210,7 @@ func (s *Session) prefillFreshQKVReference(ids []int) []float32 {
 	return m.finalNorm(last)
 }
 
+// fak-test:runtime slow est=37s lane=default
 func TestQ8QKVPanelReuseExactAndAllocation(t *testing.T) {
 	old := NumWorkers()
 	defer SetWorkers(old)
