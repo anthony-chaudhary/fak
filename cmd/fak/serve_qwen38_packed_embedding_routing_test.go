@@ -217,7 +217,7 @@ func writeServePackedQ2KEmbeddingFixture(t *testing.T, base string) string {
 	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Truncate(path, qwen38UDQ2KXLArtifactBytes); err != nil {
+	if err := truncateServeArtifactFixture(path, qwen38UDQ2KXLArtifactBytes); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -270,7 +270,7 @@ func writeServePackedEmbeddingFixture(t *testing.T, base string, witnessedSize b
 		t.Fatal(err)
 	}
 	if witnessedSize {
-		if err := os.Truncate(path, qwen38Q4KMArtifactBytes); err != nil {
+		if err := truncateServeArtifactFixture(path, qwen38Q4KMArtifactBytes); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -298,7 +298,7 @@ func TestServeQwen38UDQ4KMPackedEmbeddingRouting(t *testing.T) {
 	}
 	udFixture := func(t *testing.T, base string, size int64) string {
 		path := writeServePackedEmbeddingFixture(t, base, false)
-		if err := os.Truncate(path, size); err != nil {
+		if err := truncateServeArtifactFixture(path, size); err != nil {
 			t.Fatal(err)
 		}
 		return path
@@ -356,7 +356,7 @@ func TestServeQwen38UDQ4KMEmbeddingPlanChargesPackedBytes(t *testing.T) {
 	plan := func(base string) map[string]int64 {
 		t.Helper()
 		path := writeServePackedEmbeddingFixture(t, base, false)
-		if err := os.Truncate(path, qwen38UDQ4KMArtifactBytes); err != nil {
+		if err := truncateServeArtifactFixture(path, qwen38UDQ4KMArtifactBytes); err != nil {
 			t.Fatal(err)
 		}
 		ws, err := ggufload.OpenWeights(path)

@@ -705,7 +705,7 @@ func TestStreamedQ4KReservationUsesProcessPeakNotHostFloor(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "Qwen3.8-27B-Q4_K_M.gguf")
 	writeSynth27BGGUF(t, path, false)
-	if err := os.Truncate(path, qwen38Q4KMArtifactBytes); err != nil {
+	if err := truncateServeArtifactFixture(path, qwen38Q4KMArtifactBytes); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := estimateMetalModelMemoryBounds(path)

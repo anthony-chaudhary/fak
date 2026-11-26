@@ -373,7 +373,7 @@ func writeServePackedQ2EmbeddingFixture(t *testing.T, base string, witnessedSize
 		t.Fatal(err)
 	}
 	if witnessedSize {
-		if err := os.Truncate(path, qwen38UDQ2KXLArtifactBytes); err != nil {
+		if err := truncateServeArtifactFixture(path, qwen38UDQ2KXLArtifactBytes); err != nil {
 			t.Fatal(err)
 		}
 	}
