@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "inklingmetal-prefix-session-constructor",
+      "canonical": "Model.NewSessionFor (Metal prefix-reuse session)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The inklingmetal constructor that opens a request's Metal decode session knowing its prompt: when the model's idle session last served a prompt under the same scope, the leading prefill chunks both prompts share stay in place and the first Prefill computes only the rows after them; otherwise it prefills in full.",
+      "distinction": "A constructor that REUSES the idle session's KV in place for one model, not a copy: SessionFromPrefix clones a prefix cache into a new model.Session, and Inkling2LoopSession always starts on a fresh KV cache. Scores match a new session; only prefill work is saved.",
+      "distinct_from": [
+        "x-session-runtime-sessionfromprefix",
+        "inkling2-serve-loop-session"
+      ],
+      "aliases": [],
+      "grounding": "NewSessionFor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

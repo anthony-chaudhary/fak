@@ -10,6 +10,12 @@ typedef struct {
   uint64_t target_images, draft_images, prefill_scratch, decode_scratch, state,
       kv;
 } FakInkMemory;
+// What a model's kernels fix beyond its files. A session's state repeats only
+// under the same values.
+typedef struct {
+  uint32_t layers, kv_format, state_format, chunk_rows, draft_window,
+      context_tokens;
+} FakInkKernels;
 int fak_ink_available(void);
 char *fak_ink_plan(const char *, const char *, uint32_t, FakInkMemory *);
 char *fak_ink_model(const char *gguf, const char *draft, FakInkModel **model);
@@ -17,6 +23,15 @@ void fak_ink_free_model(FakInkModel *model);
 char *fak_ink_session(FakInkModel *model, uint32_t capacity,
                       FakInkSession **session);
 char *fak_ink_reset(FakInkSession *, uint32_t);
+void fak_ink_kernels(FakInkModel *, FakInkKernels *);
+// Keeps the state after each of a session's newest leading prefill chunks.
+char *fak_ink_keep_boundaries(FakInkSession *, uint32_t most);
+// Reports the committed tokens a session shares with ids, its count of leading
+// full prefill chunks, and the fewest of them it can still restart after.
+char *fak_ink_shared(FakInkSession *, const int32_t *ids, uint32_t n,
+                     uint32_t *shared, uint32_t *oldest, uint32_t *chunks);
+// Resets a session for a new request that keeps its first chunks.
+char *fak_ink_rewind(FakInkSession *, uint32_t capacity, uint32_t chunks);
 void fak_ink_free_session(FakInkSession *session);
 char *fak_ink_step(FakInkSession *s, const int32_t *tokens, uint32_t n,
                    int prefill, float *scores, int32_t *argmax);

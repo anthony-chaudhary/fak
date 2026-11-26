@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -134,6 +135,12 @@ func (s *inkling2Resident) verify(tokens []int) ([]int, error) {
 		s.fail(vd.Ink2GraphLaunchSlot(slot))
 	case s.graph && s.verifyWarm && *warm:
 		if err := s.dev.Ink2GraphBegin(); err != nil {
+			if errors.Is(err, errors.ErrUnsupported) {
+				// a device without capture verifies eagerly, as step decodes
+				s.graph = false
+				build()
+				break
+			}
 			s.fail(err)
 			break
 		}

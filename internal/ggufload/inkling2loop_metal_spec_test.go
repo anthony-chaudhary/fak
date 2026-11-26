@@ -1,0 +1,377 @@
+//go:build darwin && arm64 && cgo
+
+package ggufload
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"os/exec"
+	"runtime"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/gpulease"
+	"github.com/anthony-chaudhary/fak/internal/model"
+)
+
+// inkling2MetalChunkBackend lends a backend that has the verify ops the
+// token-batched prefill ops the chunk driver also calls, each composed from a
+// verify or decode op of the same arithmetic. A backend with its own prefill
+// ops is used as is.
+type inkling2MetalChunkBackend struct {
+	compute.Backend
+	compute.Inkling2Device
+	compute.Inkling2VerifyDevice
+	pos    ink2Ref
+	posSet bool
+	posVal int
+	down   ink2Ref
+}
+
+var _ compute.Inkling2PrefillDevice = (*inkling2MetalChunkBackend)(nil)
+
+func inkling2MetalChunkBackendFor(be compute.Backend) (compute.Backend, func(), error) {
+	if _, ok := be.(compute.Inkling2PrefillDevice); ok {
+		return be, func() {}, nil
+	}
+	dev, okDev := be.(compute.Inkling2Device)
+	vd, okVerify := be.(compute.Inkling2VerifyDevice)
+	if !okDev || !okVerify {
+		return nil, nil, fmt.Errorf("backend %s has no inkling2 verify ops", be.Name())
+	}
+	t, err := dev.Ink2Alloc(4)
+	if err != nil {
+		return nil, nil, err
+	}
+	b := &inkling2MetalChunkBackend{Backend: be, Inkling2Device: dev, Inkling2VerifyDevice: vd, pos: compute.Ink2At(t, 0)}
+	return b, func() { be.Free(t) }, nil
+}
+
+// Ink2PRMS and Ink2PSitu are the decode ops over the chunk's rows.
+func (b *inkling2MetalChunkBackend) Ink2PRMS(x, w, y ink2Ref, rows, n int, eps float32) error {
+	return b.Ink2RMS(x, w, y, rows, n, eps)
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PSitu(gu, act ink2Ref, k, width, actStride int, beta, linearBeta float64) error {
+	return b.Ink2Situ(gu, act, k, width, actStride, beta, linearBeta)
+}
+
+// position returns the device word holding pos0. A write fences the launches
+// already encoded, so they keep the value they were encoded against.
+func (b *inkling2MetalChunkBackend) position(pos0 int) (ink2Ref, error) {
+	if b.posSet && b.posVal == pos0 {
+		return b.pos, nil
+	}
+	b.posSet, b.posVal = true, pos0
+	return b.pos, b.Ink2Write(b.pos, []float32{intBits(pos0)})
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PMatMul(w compute.Tensor, x, y ink2Ref, T int) error {
+	ok, err := b.Ink2VRows(w, x, y, T)
+	if err == nil && !ok {
+		err = fmt.Errorf("no rows kernel for a %s weight", w.Dtype)
+	}
+	return err
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PMix(states []ink2Ref, queries ink2Ref, nq int, out ink2Ref, n, T int) error {
+	ok, err := b.Ink2VMix(states, queries, nq, nil, 0, out, n, T)
+	if err == nil && !ok {
+		err = fmt.Errorf("no verify mix")
+	}
+	return err
+}
+
+// The driver follows every Ink2PCtrlDown with the Ink2PCtrlApply of the same
+// controller, so the pair runs as one multi-controller call.
+func (b *inkling2MetalChunkBackend) Ink2PCtrlDown(cur, msg, w, g ink2Ref, n, rank, T int) error {
+	b.down = w
+	return nil
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PCtrlApply(cur, msg, g, gainW, forgetW, out ink2Ref, n, rank, T int) error {
+	return b.Ink2PControlMulti([]ink2Ref{cur}, []ink2Ref{msg}, []ink2Ref{b.down}, []ink2Ref{gainW}, []ink2Ref{forgetW},
+		[]ink2Ref{g}, []ink2Ref{out}, n, rank, T)
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PConv(x, w, dyn, hist, out, resid ink2Ref, n, heads, kn int, norm float32, T int) error {
+	return b.Ink2PConvLog(x, w, dyn, hist, ink2Ref{}, out, resid, n, heads, kn, norm, T)
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache ink2Ref, p compute.Ink2AttnParams, cap, pos0, T int) error {
+	pos, err := b.position(pos0)
+	if err != nil {
+		return err
+	}
+	return b.Ink2PQKVPostDev(q, r, k, v, qclip, rclip, kcache, vcache, pos, p, cap, T)
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PAttend(q, r, sinks, relBias, kcache, vcache, out ink2Ref, p compute.Ink2AttnParams, extent, window, cap, pos0, T int) error {
+	pos, err := b.position(pos0)
+	if err != nil {
+		return err
+	}
+	return b.Ink2PAttendDev(q, r, sinks, relBias, kcache, vcache, out, pos, p, extent, window, cap, T)
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PRoute(logits, bias, ids, wts ink2Ref, nexp, k int, scale float32, T int) error {
+	for t := 0; t < T; t++ {
+		if err := b.Ink2Route(at(logits, t*nexp), bias, at(ids, t*k), at(wts, t*k), nexp, k, scale); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PCombine(down, wts, out ink2Ref, k, n, T int) error {
+	for t := 0; t < T; t++ {
+		if err := b.Ink2Combine(at(down, t*k*n), at(wts, t*k), at(out, t*n), k, n); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PExpertGrouped(compute.Tensor, int, int, ink2Ref, ink2Ref, int, int, ink2Ref, int, ink2Ref, ink2Ref, bool) (bool, error) {
+	return false, nil
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PExpertSorted(stack compute.Tensor, expertRows, nexp int, ids, x ink2Ref, xDiv, xStride int, y ink2Ref, npairs int, scale, scratch, sortIds, sortX, sortY ink2Ref) (bool, error) {
+	if xDiv > 1 {
+		if err := b.Ink2VRepeatRows(x, sortX, xStride, npairs/xDiv, xDiv); err != nil {
+			return false, err
+		}
+		x = sortX
+	}
+	return b.Ink2ExpertMatVec(stack, expertRows, ids, x, xStride, y, npairs, scale, nil)
+}
+
+// inkling2LookupDrafter drafts by prompt lookup: the tokens that followed the
+// most recent earlier occurrence of the context's longest repeated suffix. It
+// owns no weights and no device state.
+type inkling2LookupDrafter struct {
+	prompt []int
+	ngram  model.NgramDrafter
+}
+
+func (d *inkling2LookupDrafter) Draft(history []int, k int) []int {
+	n := d.ngram
+	n.MaxDraft = k
+	return n.Draft(append(slices.Clone(d.prompt), history...))
+}
+
+func (d *inkling2LookupDrafter) Observe(*inkling2Resident, []int, int) error { return nil }
+
+// inkling2MetalSpecLoad is the host load beside a timing: every number here is
+// taken on a shared machine.
+func inkling2MetalSpecLoad() string {
+	out, err := exec.Command("sysctl", "-n", "vm.loadavg").Output()
+	if err != nil {
+		return "load average unavailable"
+	}
+	return "load average " + strings.TrimSpace(string(out))
+}
+
+// FAK_INKLING2_TEST_GGUF runs fak's chain speculation on the Apple GPU: the
+// multi-row verify must be width-invariant on the real model, and speculative
+// greedy must reproduce the resident path's ids with accepts, rejects and
+// history rewinds in play.
+//
+// fak-test:runtime slow est=240s
+func TestInkling2MetalSpecGreedyMatchesResident(t *testing.T) {
+	path := os.Getenv("FAK_INKLING2_TEST_GGUF")
+	if path == "" {
+		t.Skip("set FAK_INKLING2_TEST_GGUF to run on Apple GPU")
+	}
+	lease, err := gpulease.Acquire(gpulease.Options{Timeout: 8 * time.Minute, Logf: t.Logf})
+	if errors.Is(err, gpulease.ErrTimeout) {
+		t.Skipf("NOT RUN: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+
+	m, be, err := OpenInkling2LoopMetalDevice(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	const n = 64
+	prompt := inkling2OracleCases[0].prompt
+
+	// The first run compiles every kernel and faults the weights in.
+	var ref []int
+	var plain Inkling2LoopGreedyStats
+	for run := range 2 {
+		if ref, plain, err = inkling2ResidentGreedy(m, be, prompt, n); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("resident run %d: prefill %s, %d decode steps in %s (%.2f tok/s), %s",
+			run, plain.Prefill, plain.DecodeSteps, plain.Decode, plain.DecodeTokensPerSecond(), inkling2MetalSpecLoad())
+	}
+	t.Logf("resident ids %v", ref)
+
+	sbe, release, err := inkling2MetalChunkBackendFor(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	_, lent := sbe.(*inkling2MetalChunkBackend)
+	t.Logf("prefill ops lent from the verify ops: %v", lent)
+	// FAK_INKLING2_GRAPH stays at its default: Metal has no graph capture, and
+	// a full-width verify has to fall back to the eager chunk on its own.
+	t.Setenv("FAK_INKLING2_SPEC", "4")
+
+	t.Run("verify rows are width invariant", func(t *testing.T) { inkling2MetalSpecWidths(t, m, sbe, prompt, ref) })
+
+	check := func(name string, depth int, mk func() inkling2Drafter) {
+		got, st, err := inkling2ResidentSpecGreedy(m, sbe, prompt, n, depth, func(*inkling2Resident) (inkling2Drafter, error) { return mk(), nil })
+		if err != nil {
+			t.Fatalf("%s depth %d: %v", name, depth, err)
+		}
+		perVerify := float64(st.Accepted) / float64(max(1, st.Verifies))
+		t.Logf("spec %s depth %d: %.2f tok/s (plain %.2f); %d verifies, accepted %d/%d (%.2f per verify), plain steps %d, verify %.1f ms/call, prefill %s, %s",
+			name, depth, st.DecodeTokensPerSecond(), plain.DecodeTokensPerSecond(), st.Verifies, st.Accepted, st.Drafted, perVerify,
+			st.PlainSteps, float64(st.Verify.Microseconds())/1000/float64(max(1, st.Verifies)), st.Prefill, inkling2MetalSpecLoad())
+		if !slices.Equal(got, ref) {
+			t.Errorf("spec %s depth %d decoded %v, resident %v", name, depth, got, ref)
+		}
+	}
+	lookup := func() inkling2Drafter {
+		return &inkling2LookupDrafter{prompt: prompt, ngram: model.NgramDrafter{Enabled: true, MinMatch: 2, MaxMatch: 64}}
+	}
+	oracle := func(corrupt func(int) bool) func() inkling2Drafter {
+		return func() inkling2Drafter { return &inkling2OracleDrafter{ref: ref, corrupt: corrupt} }
+	}
+	check("prompt lookup", 4, lookup)
+	check("prompt lookup", 8, lookup)
+	check("oracle with rejects", 4, oracle(func(i int) bool { return i%5 == 2 }))
+	check("oracle with rejects", 7, oracle(func(i int) bool { return i%9 == 4 || i%13 == 0 }))
+	for _, depth := range []int{1, 2, 4, 8} {
+		check("oracle", depth, oracle(nil))
+	}
+	t.Run("verify cost by width", func(t *testing.T) { inkling2MetalSpecCost(t, m, sbe, prompt, ref) })
+}
+
+// inkling2MetalSpecSession prefills prompt into a session with verify state
+// for the deepest draft and returns it with a rewind to that point.
+func inkling2MetalSpecSession(t *testing.T, m *Inkling2LoopModel, be compute.Backend, prompt, ref []int) (*inkling2Resident, func()) {
+	s, err := newInkling2Resident(m, be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.close)
+	if err := s.enableSpec(inkling2SpecMaxDraft); err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.prefill(context.Background(), prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != ref[0] {
+		t.Fatalf("chunked prefill predicts %d, resident %d", next, ref[0])
+	}
+	base := s.pos
+	hp := s.hp
+	histFloats := (2*hp.KVHeads*hp.HeadDim + 2*hp.Hidden) * (hp.ConvKernel - 1)
+	hists := make([][]float32, len(s.hist))
+	for slot := range hists {
+		if hists[slot], err = s.dev.Ink2Read(s.hist[slot], histFloats); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s, func() {
+		for slot := range hists {
+			if err := s.dev.Ink2Write(s.hist[slot], hists[slot]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		s.pos = base
+	}
+}
+
+// inkling2MetalSpecWidths feeds the same eight tokens through verify chunks of
+// 1, 2, 4 and 8 rows from one state and requires every row's logits to carry
+// the same bits at every width.
+func inkling2MetalSpecWidths(t *testing.T, m *Inkling2LoopModel, be compute.Backend, prompt, ref []int) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	s, rewind := inkling2MetalSpecSession(t, m, be, prompt, ref)
+	const rows = 8
+	toks := ref[:rows]
+	vocab := s.output.rows
+	var want []float32
+	var wantIDs []int
+	for _, width := range []int{1, 2, 4, 8} {
+		rewind()
+		logits, ids := make([]float32, 0, rows*vocab), make([]int, 0, rows)
+		for at0 := 0; at0 < rows; at0 += width {
+			got, err := s.verify(toks[at0 : at0+width])
+			if err != nil {
+				t.Fatalf("width %d: %v", width, err)
+			}
+			l, err := s.dev.Ink2Read(s.verifyLogits, width*vocab)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.commitVerify(width, width); err != nil {
+				t.Fatal(err)
+			}
+			logits, ids = append(logits, l...), append(ids, got...)
+		}
+		if width == 1 {
+			want, wantIDs = logits, ids
+			if !slices.Equal(ids, ref[1:rows+1]) {
+				t.Errorf("single-row verifies predict %v, resident %v", ids, ref[1:rows+1])
+			}
+			continue
+		}
+		if !slices.Equal(ids, wantIDs) {
+			t.Errorf("width %d predicts %v, single rows %v", width, ids, wantIDs)
+		}
+		for i := range want {
+			if math.Float32bits(logits[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("width %d: row %d logit %d = %v (%#x), alone %v (%#x)", width, i/vocab, i%vocab,
+					logits[i], math.Float32bits(logits[i]), want[i], math.Float32bits(want[i]))
+			}
+		}
+		t.Logf("width %d: %d rows of %d logits bit-identical to single-row verifies", width, rows, vocab)
+	}
+}
+
+// inkling2MetalSpecCost logs the wall time of one verify chunk by width, each
+// from the same state.
+func inkling2MetalSpecCost(t *testing.T, m *Inkling2LoopModel, be compute.Backend, prompt, ref []int) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	s, rewind := inkling2MetalSpecSession(t, m, be, prompt, ref)
+	const reps = 4
+	feed := ref[:inkling2SpecMaxDraft+1]
+	var one time.Duration
+	for _, width := range []int{1, 2, 3, 5, 9} {
+		var total time.Duration
+		for r := 0; r < reps+1; r++ {
+			rewind()
+			t0 := time.Now()
+			if _, err := s.verify(feed[:width]); err != nil {
+				t.Fatalf("width %d: %v", width, err)
+			}
+			if r > 0 {
+				total += time.Since(t0)
+			}
+		}
+		per := total / reps
+		if width == 1 {
+			one = per
+		}
+		t.Logf("verify cost: %d rows %.1f ms = %.2fx one row, %.1f ms/row, %s",
+			width, float64(per.Microseconds())/1000, per.Seconds()/one.Seconds(), float64(per.Microseconds())/1000/float64(width), inkling2MetalSpecLoad())
+	}
+}

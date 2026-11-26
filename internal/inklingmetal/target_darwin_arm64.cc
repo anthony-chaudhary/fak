@@ -149,6 +149,11 @@ struct FakInkSession {
   std::unique_ptr<fak::inkling::TreeVerify> verifier;
   std::vector<fak::inkling::DraftRow> stagedTree;
   MetalBuffer scoreBuffer;
+  // boundaries[k] is the convolution state after the k + 1 leading full
+  // prefill chunks, empty once evicted. A chunk's kernels round its rows
+  // together, so only a whole chunk repeats in a later request's prefill.
+  std::vector<std::vector<uint8_t>> boundaries;
+  uint32_t keptBoundaries = 0;
 
   FakInkSession(std::shared_ptr<Weights> model, uint32_t cap)
       : owner(std::move(model)), limit(cap),
@@ -255,10 +260,44 @@ struct FakInkSession {
     (void)owner->backend.submitCommandAsync(graph.dispatches()).wait();
   }
 
+  void recordBoundary(uint32_t rows) {
+    if (!keptBoundaries || rows != kPrefillRows ||
+        position != (boundaries.size() + 1) * uint64_t{kPrefillRows})
+      return;
+    const auto *state = static_cast<const uint8_t *>(current.contents());
+    boundaries.emplace_back(state, state + current.sizeBytes());
+    if (boundaries.size() > keptBoundaries)
+      std::vector<uint8_t>().swap(
+          boundaries[boundaries.size() - keptBoundaries - 1]);
+  }
+
+  // Restarts the request at the end of a leading full prefill chunk. KV below
+  // it stays visible by position. The draft's rings are emptied with the rest
+  // of the request state, so the caller prefills their whole window again.
+  void rewind(uint32_t capacity, uint32_t chunks) {
+    const uint64_t end = uint64_t{chunks} * kPrefillRows;
+    if (!chunks || chunks > boundaries.size() ||
+        boundaries[chunks - 1].size() != current.sizeBytes() ||
+        position != tokens.size() || !stagedTree.empty() || end > position ||
+        end >= capacity)
+      throw std::invalid_argument("no retained Inkling prefix at that chunk");
+    auto states = std::move(boundaries);
+    auto prefix = std::move(tokens);
+    reset(capacity);
+    states.resize(chunks);
+    prefix.resize(end);
+    boundaries = std::move(states);
+    tokens = std::move(prefix);
+    position = end;
+    std::memcpy(current.contents(), boundaries.back().data(),
+                current.sizeBytes());
+  }
+
   void reset(uint32_t capacity) {
     if (!capacity || capacity > owner->geometry.target.contextTokens() ||
         capacity > uint64_t(pageIds.size()) * kv::kPageTokens)
       throw std::invalid_argument("reused Inkling arena capacity exceeded");
+    boundaries.clear();
     // Absolute position alone gates KV visibility. No command is outstanding
     // when a session returns to the model; committed taps and control masks
     // are reset independently of how the last request ended.
@@ -409,6 +448,48 @@ extern "C" void fak_ink_free_session(FakInkSession *s) {
   std::lock_guard lock(owner->device);
   delete s;
 }
+extern "C" void fak_ink_kernels(FakInkModel *m, FakInkKernels *out) {
+  const auto &g = m->owner->geometry.target;
+  *out = {g.layers,
+          uint32_t(g.kvLayout.format),
+          uint32_t(g.stateLayout.format),
+          kPrefillRows,
+          m->owner->hasDraft ? SPLASH_DRAFT_SLIDING_WINDOW : 0,
+          g.contextTokens()};
+}
+extern "C" char *fak_ink_keep_boundaries(FakInkSession *s, uint32_t most) {
+  return guard([&] {
+    std::lock_guard lock(s->owner->device);
+    s->keptBoundaries = most;
+    if (!most)
+      s->boundaries.clear();
+  });
+}
+extern "C" char *fak_ink_shared(FakInkSession *s, const int32_t *ids,
+                                uint32_t n, uint32_t *shared, uint32_t *oldest,
+                                uint32_t *chunks) {
+  return guard([&] {
+    std::lock_guard lock(s->owner->device);
+    *shared = 0;
+    *chunks = s->boundaries.size();
+    *oldest = *chunks + 1;
+    while (*oldest > 1 && !s->boundaries[*oldest - 2].empty())
+      --*oldest;
+    if (s->position != s->tokens.size() || !s->stagedTree.empty())
+      return;
+    const uint32_t most = std::min<uint64_t>(s->tokens.size(), n);
+    while (*shared < most && ids[*shared] >= 0 &&
+           s->tokens[*shared] == uint32_t(ids[*shared]))
+      ++*shared;
+  });
+}
+extern "C" char *fak_ink_rewind(FakInkSession *s, uint32_t cap,
+                                uint32_t chunks) {
+  return guard([&] {
+    std::lock_guard lock(s->owner->device);
+    s->rewind(cap, chunks);
+  });
+}
 extern "C" char *fak_ink_step(FakInkSession *s, const int32_t *ids, uint32_t n,
                               int prefill, float *scores, int32_t *argmax) {
   return guard([&] {
@@ -440,6 +521,7 @@ extern "C" char *fak_ink_step(FakInkSession *s, const int32_t *ids, uint32_t n,
         if (prefill) {
           s->position += count;
           std::swap(s->current, s->next);
+          s->recordBoundary(count);
         }
       }
     const float *head = static_cast<const float *>(s->scoreBuffer.contents());
@@ -809,4 +891,18 @@ char *fak_ink_step_batch(FakInkSession *const *, const int32_t *, uint32_t,
       "Inkling Metal requires macOS 26.4 SDK and Metal 4 shader support");
 }
 uint64_t fak_ink_batch_bytes(FakInkModel *) { return 0; }
+void fak_ink_kernels(FakInkModel *, FakInkKernels *) {}
+char *fak_ink_keep_boundaries(FakInkSession *, uint32_t) {
+  return strdup(
+      "Inkling Metal requires macOS 26.4 SDK and Metal 4 shader support");
+}
+char *fak_ink_shared(FakInkSession *, const int32_t *, uint32_t, uint32_t *,
+                     uint32_t *, uint32_t *) {
+  return strdup(
+      "Inkling Metal requires macOS 26.4 SDK and Metal 4 shader support");
+}
+char *fak_ink_rewind(FakInkSession *, uint32_t, uint32_t) {
+  return strdup(
+      "Inkling Metal requires macOS 26.4 SDK and Metal 4 shader support");
+}
 #endif

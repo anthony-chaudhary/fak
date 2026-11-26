@@ -52,3 +52,11 @@ func TestRunInkling2OutputChannels(t *testing.T) {
 		t.Fatalf("raw %+v, err %v", raw, err)
 	}
 }
+
+func TestInkling2PrefixReuseOptOut(t *testing.T) {
+	for env, want := range map[string]bool{"": true, "on": true, "1": true, "off": false, " OFF ": false, "0": false, "false": false, "no": false} {
+		if got := inkling2PrefixReuse(env); got != want {
+			t.Errorf("FAK_INKLING2_PREFIX_REUSE=%q reuse %v, want %v", env, got, want)
+		}
+	}
+}
