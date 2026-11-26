@@ -20,6 +20,10 @@
 # tests are platform-independent.
 *.golden text eol=lf
 
+# The workflow branch audit is generated and compared byte-for-byte against
+# LF output; keep Windows checkouts from materializing a stale-looking CRLF copy.
+docs/ci/workflow-branch-audit.md text eol=lf
+
 # CUDA reference producers are PROVENANCE-PINNED by SHA-256 (internal/kvint2eval/testdata,
 # docs/research/quantization/int2-kv-rotation.md), and a digest only names one artifact if every
 # checkout holds the same bytes. Under core.autocrlf=true a Windows checkout would rewrite these
