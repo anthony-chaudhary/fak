@@ -673,6 +673,7 @@ def module_zip_entries(root: Path, sha: str) -> list[tuple[str, int]]:
         proc = subprocess.Popen(
             ["git", "archive", "--format=tar", sha],
             cwd=str(root), stdout=subprocess.PIPE, stderr=err,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         watchdog = threading.Timer(MODULE_ZIP_ARCHIVE_TIMEOUT_S, proc.kill)
         watchdog.start()
