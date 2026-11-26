@@ -550,8 +550,13 @@ func TestFastReleaseGateSkipsOnlyPinnedLiveTreeRatchets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(full), "-skip") || !strings.Contains(string(full), "run: go test -timeout=20m -coverprofile=coverage.out ./...") {
-		t.Fatal("ci.yml must keep running the full go test ./... with no -skip, so the ratchets still run on every push")
+	if !strings.Contains(string(full), "run: go test -timeout=20m -coverprofile=coverage.out ./...") {
+		t.Fatal("ci.yml must keep running the full go test ./..., so the ratchets still run on every push")
+	}
+	for _, line := range strings.Split(string(full), "\n") {
+		if strings.Contains(line, "go test") && strings.Contains(line, "-skip") {
+			t.Fatalf("ci.yml go test command skips tests, so ratchets may not run on every push: %s", strings.TrimSpace(line))
+		}
 	}
 }
 
