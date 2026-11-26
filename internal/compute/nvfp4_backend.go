@@ -5,6 +5,7 @@
 package compute
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 )
@@ -30,12 +31,13 @@ func NewNVFP4(be Backend, shape []int, packed, blockScales []byte, globalScale f
 	if err := nvfp4ValidateScales(blockScales, globalScale); err != nil {
 		return Tensor{}, err
 	}
-	payload := make([]byte, weightBytes+scaleBytes)
-	copy(payload, packed)
-	copy(payload[weightBytes:], blockScales)
+	payload := make([]int8, weightBytes+scaleBytes)
+	raw := i8View(payload)
+	copy(raw, packed)
+	copy(raw[weightBytes:], blockScales)
 	q := &QuantSpec{Block: NVFP4BlockSize, Axis: 2, Bits: 4, Symmetric: true, Scale: []float32{globalScale}}
 	return makeTensor(be, NVFP4, RowMajor, append([]int(nil), shape...), q,
-		&hostBuf{i8: bytesAsI8(payload), nvfp4: true}), nil
+		&hostBuf{i8: payload, nvfp4: true}), nil
 }
 
 func nvfp4PayloadShape(shape []int) (int, int, error) {
@@ -53,13 +55,45 @@ func nvfp4ValidateScales(scales []byte, globalScale float32) error {
 	if !nvfp4Finite(globalScale) || globalScale < 0 {
 		return fmt.Errorf("%w: tensor scale must be finite and non-negative", ErrNVFP4Scale)
 	}
-	for index, raw := range scales {
-		value := DecodeE4M3(raw)
-		if !nvfp4Finite(value) || value < 0 {
-			return fmt.Errorf("%w: block scale %d must be finite and non-negative", ErrNVFP4Scale, index)
-		}
+	if index := nvfp4FirstInvalidScale(scales); index >= 0 {
+		return fmt.Errorf("%w: block scale %d must be finite and non-negative", ErrNVFP4Scale, index)
 	}
 	return nil
+}
+
+// nvfp4ScaleByteValid is the bytewise form of "DecodeE4M3(b) is finite and not
+// below zero": 0x00..0x7E are the non-negative finite codes, 0x7F is NaN, and
+// with the sign bit set only negative zero (0x80) passes. Load validates about
+// a billion scale bytes, so decoding each one to a float dominated model load.
+func nvfp4ScaleByteValid(b byte) bool {
+	return b < 0x7F || b == 0x80
+}
+
+// nvfp4FirstInvalidScale returns the index of the first scale byte that fails
+// nvfp4ScaleByteValid, or -1. Eight bytes are tested per step: a word passes
+// when no byte has its sign bit set and no byte's low seven bits are all ones;
+// adding one to each masked byte carries into bit 7 exactly for 0x7F, and
+// cannot carry across bytes. Words that fail fall back to the bytewise check.
+func nvfp4FirstInvalidScale(scales []byte) int {
+	const low7, ones, high = 0x7F7F7F7F7F7F7F7F, 0x0101010101010101, 0x8080808080808080
+	index := 0
+	for ; index+8 <= len(scales); index += 8 {
+		word := binary.LittleEndian.Uint64(scales[index:])
+		if (word|((word&low7)+ones))&high == 0 {
+			continue
+		}
+		for offset, raw := range scales[index : index+8] {
+			if !nvfp4ScaleByteValid(raw) {
+				return index + offset
+			}
+		}
+	}
+	for ; index < len(scales); index++ {
+		if !nvfp4ScaleByteValid(scales[index]) {
+			return index
+		}
+	}
+	return -1
 }
 
 func nvfp4Tensor(w Tensor) bool {
