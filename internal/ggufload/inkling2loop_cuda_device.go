@@ -529,26 +529,33 @@ func (s Inkling2LoopGreedyStats) DecodeTokensPerSecond() float64 {
 // backend with a token-boundary Recycle is recycled after every step; every
 // device intermediate is already read back by then.
 func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []int, n int) ([]int, Inkling2LoopGreedyStats, error) {
+	return Inkling2LoopGreedyUntil(m, be, prompt, n, -1)
+}
+
+// Inkling2LoopGreedyUntil is Inkling2LoopGreedyTimed that stops when the model
+// emits eos, which is not returned; a negative eos decodes all n tokens.
+// DecodeSteps then counts the forward that produced eos.
+func Inkling2LoopGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, eos int) ([]int, Inkling2LoopGreedyStats, error) {
 	var st Inkling2LoopGreedyStats
 	if len(prompt) == 0 {
 		return nil, st, fmt.Errorf("inkling2_loop: empty prompt")
 	}
 	if inkling2ResidentEligible(m, be) {
-		if depth := inkling2SpecDepth(); depth > 0 {
-			return inkling2SpecGreedy(m, be, prompt, n, depth)
+		if depth := inkling2SpecDepthFor(m); depth > 0 {
+			return inkling2SpecGreedyUntil(m, be, prompt, n, depth, eos)
 		}
-		return inkling2ResidentGreedy(m, be, prompt, n)
+		return inkling2ResidentGreedyUntil(m, be, prompt, n, eos)
 	}
 	s, err := newInkling2HostSession(m, be)
 	if err != nil {
 		return nil, st, err
 	}
-	return inkling2SessionGreedy(s, prompt, n)
+	return inkling2GreedyStepsUntil(s, prompt, n, eos)
 }
 
-// inkling2SessionGreedy decodes n greedy tokens from a fresh session; the first
-// comes from prefill.
-func inkling2SessionGreedy(s Inkling2LoopSession, prompt []int, n int) ([]int, Inkling2LoopGreedyStats, error) {
+// inkling2GreedyStepsUntil decodes up to n greedy tokens from a fresh session, the
+// first from prefill, stopping before eos.
+func inkling2GreedyStepsUntil(s Inkling2LoopSession, prompt []int, n, eos int) ([]int, Inkling2LoopGreedyStats, error) {
 	var st Inkling2LoopGreedyStats
 	start := time.Now()
 	next, err := s.Prefill(context.Background(), prompt)
@@ -558,7 +565,7 @@ func inkling2SessionGreedy(s Inkling2LoopSession, prompt []int, n int) ([]int, I
 	st.Prefill = time.Since(start)
 	out := make([]int, 0, n)
 	start = time.Now()
-	for len(out) < n {
+	for len(out) < n && next != eos {
 		out = append(out, next)
 		if len(out) == n {
 			break

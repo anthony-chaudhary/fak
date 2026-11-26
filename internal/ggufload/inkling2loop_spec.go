@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"time"
 
@@ -225,6 +226,13 @@ func (s *inkling2Resident) commitVerify(T, keep int) error {
 // no proposal runs the plain graph step.
 func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth int,
 	mk func(*inkling2Resident) (inkling2Drafter, error)) ([]int, Inkling2SpecStats, error) {
+	return inkling2ResidentSpecGreedyUntil(m, be, prompt, n, depth, -1, mk)
+}
+
+// inkling2ResidentSpecGreedyUntil is inkling2ResidentSpecGreedy that stops at eos
+// the way inkling2GreedyStepsUntil does, also when eos is an accepted draft token.
+func inkling2ResidentSpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth, eos int,
+	mk func(*inkling2Resident) (inkling2Drafter, error)) ([]int, Inkling2SpecStats, error) {
 	var st Inkling2SpecStats
 	s, err := newInkling2Resident(m, be)
 	if err != nil {
@@ -251,26 +259,17 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 	if err := d.Observe(s, prompt, len(prompt)); err != nil {
 		return nil, st, err
 	}
-	// one full-width verify grows every batched scratch before the decode graph is
-	// captured; keep 0 rewinds it
-	warm := make([]int, depth+1)
-	for i := range warm {
-		warm[i] = next
-	}
-	if _, err := s.verify(warm); err != nil {
-		return nil, st, err
-	}
-	if err := s.commitVerify(len(warm), 0); err != nil {
-		return nil, st, err
-	}
-	// a drafter may propose fewer than depth tokens: run every shorter width eagerly
-	// and then capture it and its commit now, so no decode step pays for either
-	for i := 0; i < 2*depth && s.graph; i++ {
-		T := 1 + i/2
-		if _, err := s.verify(warm[:T]); err != nil {
+	if s.graph {
+		// one full-width verify grows every batched scratch before the decode graph
+		// is captured; keep 0 rewinds it. Shorter widths warm and capture on first use.
+		warm := make([]int, depth+1)
+		for i := range warm {
+			warm[i] = next
+		}
+		if _, err := s.verify(warm); err != nil {
 			return nil, st, err
 		}
-		if err := s.commitVerify(T, 0); err != nil {
+		if err := s.commitVerify(len(warm), 0); err != nil {
 			return nil, st, err
 		}
 	}
@@ -278,7 +277,7 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 	out := make([]int, 0, n+depth)
 	costs, _ := d.(inkling2CostObserver)
 	start = time.Now()
-	for len(out) < n {
+	for len(out) < n && next != eos {
 		out = append(out, next)
 		if len(out) == n {
 			break
@@ -327,12 +326,22 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 		if err := d.Observe(s, fed, a+1); err != nil {
 			return nil, st, err
 		}
+		if stop := slices.Index(props[:a], eos); stop >= 0 {
+			out = append(out, props[:stop]...)
+			next = eos
+			break
+		}
 		out = append(out, props[:a]...)
 		next = g[a]
 	}
 	st.Decode = time.Since(start)
-	out = out[:n]
-	st.DecodeSteps = n - 1
+	if len(out) >= n {
+		out = out[:n]
+		st.DecodeSteps = n - 1
+	} else {
+		// every kept token ran one forward, the last of which produced eos
+		st.DecodeSteps = len(out)
+	}
 	return out, st, nil
 }
 
@@ -363,7 +372,12 @@ func (o *inkling2OracleDrafter) Observe(*inkling2Resident, []int, int) error { r
 // step: FAK_INKLING2_SPEC sets the draft depth, FAK_INKLING2_SPEC_DRAFT the draft
 // source, and FAK_INKLING2_MTP_DIR the HF snapshot holding mtp.safetensors.
 func inkling2SpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth int) ([]int, Inkling2LoopGreedyStats, error) {
-	kind, err := inkling2SpecDraftKind()
+	return inkling2SpecGreedyUntil(m, be, prompt, n, depth, -1)
+}
+
+// inkling2SpecGreedyUntil is inkling2SpecGreedy stopping at eos.
+func inkling2SpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth, eos int) ([]int, Inkling2LoopGreedyStats, error) {
+	kind, err := inkling2SpecDraftKindFor(m)
 	if err != nil {
 		return nil, Inkling2LoopGreedyStats{}, err
 	}
@@ -373,7 +387,7 @@ func inkling2SpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, 
 	dflashDir := inkling2DFlash2DirFor(m, be)
 	switch inkling2ResolveSpecDraft(kind, dir, dflashDir) {
 	case inkling2DraftLookup:
-		out, st, err = inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(*inkling2Resident) (inkling2Drafter, error) {
+		out, st, err = inkling2ResidentSpecGreedyUntil(m, be, prompt, n, depth, eos, func(*inkling2Resident) (inkling2Drafter, error) {
 			return newInkling2LookupDrafter(prompt), nil
 		})
 	case inkling2DraftDSpark:
@@ -386,7 +400,7 @@ func inkling2SpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, 
 		}
 		defer dm.Close()
 		depth = min(depth, dm.HP.Block-1)
-		out, st, err = inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(s *inkling2Resident) (inkling2Drafter, error) {
+		out, st, err = inkling2ResidentSpecGreedyUntil(m, be, prompt, n, depth, eos, func(s *inkling2Resident) (inkling2Drafter, error) {
 			d, err := s.attachDraft(dm)
 			if err == nil {
 				d.steps = depth
@@ -404,7 +418,7 @@ func inkling2SpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, 
 		defer dm.Close()
 		depth = min(depth, dm.Config.DFlash.Block-1)
 		var dd *ink2DFlash2Draft
-		out, st, err = inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(s *inkling2Resident) (inkling2Drafter, error) {
+		out, st, err = inkling2ResidentSpecGreedyUntil(m, be, prompt, n, depth, eos, func(s *inkling2Resident) (inkling2Drafter, error) {
 			d, err := s.attachDFlash2(dm)
 			dd = d
 			return inkling2DFlash2Drafter{d}, err

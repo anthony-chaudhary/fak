@@ -310,19 +310,16 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 	return p.result(sp, generated, len(ids), sampled, steps, reason, prefill, time.Since(start))
 }
 
-// deviceGreedy keeps the resident and speculative CUDA decoders, which only
-// expose fixed-length greedy runs; the reply is cut at the first EOS.
+// deviceGreedy runs the resident and speculative device decoders, which stop
+// at EOS like the sampled loop: the reply excludes it and it counts as sampled.
 func (p *inkling2RunPlanner) deviceGreedy(sp SampleParams, ids []int, maxTokens int) (*Completion, error) {
-	out, st, err := ggufload.Inkling2LoopGreedyTimed(p.model, p.device, ids, maxTokens)
+	out, st, err := ggufload.Inkling2LoopGreedyUntil(p.model, p.device, ids, maxTokens, p.eos)
 	if err != nil {
 		return nil, err
 	}
 	reason, sampled := "length", len(out)
-	for i, id := range out {
-		if id == p.eos {
-			out, sampled, reason = out[:i], i+1, "stop"
-			break
-		}
+	if sampled < maxTokens {
+		reason, sampled = "stop", sampled+1
 	}
 	return p.result(sp, out, len(ids), sampled, st.DecodeSteps, reason, st.Prefill, st.Decode)
 }

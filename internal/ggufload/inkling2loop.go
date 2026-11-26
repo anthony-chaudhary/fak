@@ -196,6 +196,8 @@ type Inkling2LoopModel struct {
 	// readahead is the map-time page-cache reader awaiting the device bind; the
 	// closer chain stops it before the unmap.
 	readahead *inkling2UploadReadahead
+	// SpecDefault is the greedy speculation run while FAK_INKLING2_SPEC is unset.
+	SpecDefault Inkling2SpecDefault
 }
 
 func (m *Inkling2LoopModel) Close() error {

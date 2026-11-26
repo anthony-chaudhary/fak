@@ -125,7 +125,9 @@ func openInkling2Run(path, name, backend string, metalFlag bool, cfg nativeContr
 		return agent.NewInkling2MetalRunPlanner(name, target, tok, eos), release, nil
 	}
 	if residentCtx > 0 {
-		fmt.Fprintf(os.Stderr, "fak run: %s backend=metal target=%s layers=%d passes=%d ctx=%d\n", arch, inkling2MetalTargetResidentLabel, m.HP.Layers, m.HP.Passes, residentCtx)
+		// greedy decode speculates unless FAK_INKLING2_SPEC=0; sampled decode stays plain
+		m.SpecDefault = ggufload.Inkling2MetalSpecDefault(be)
+		fmt.Fprintf(os.Stderr, "fak run: %s backend=metal target=%s layers=%d passes=%d ctx=%d %s\n", arch, inkling2MetalTargetResidentLabel, m.HP.Layers, m.HP.Passes, residentCtx, ggufload.Inkling2SpecLabel(m, be))
 		return inkling2ResidentPlanner{agent.NewInkling2DeviceRunPlanner(name, m, be, tok, eos), residentCtx}, release, nil
 	}
 	if metal {
