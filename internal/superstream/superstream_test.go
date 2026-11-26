@@ -1,6 +1,7 @@
 package superstream
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -242,5 +243,33 @@ func TestContendedHeadSkipsToDisjointItem(t *testing.T) {
 	dNext := DecideStep(spec, state, holder, peerLeases, tax)
 	if dNext.Action != ActionAcquireLease {
 		t.Fatalf("dNext.Action = %s, want %s", dNext.Action, ActionAcquireLease)
+	}
+}
+
+// TestCarryoverSeedWindowKeepsNewestInOrder pins the receipt window after it
+// wraps: with more completions than DefaultCarryoverReceiptWindow, the seed
+// keeps the newest receipts in completion order and still counts every one.
+func TestCarryoverSeedWindowKeepsNewestInOrder(t *testing.T) {
+	const completed = DefaultCarryoverReceiptWindow + 8
+	queue := make([]WorkItem, completed)
+	for i := range queue {
+		queue[i] = WorkItem{ID: fmt.Sprintf("item-%d", i), Lane: "docs", Status: ItemCompleted}
+	}
+	spec := StreamSpec{ID: "stream-window", Intent: "window", Queue: queue}
+	state := StreamState{StreamID: spec.ID, Intent: spec.Intent, ActiveIndex: completed, Queue: spec.Queue}
+
+	seed := BuildCarryoverSeed(spec, state)
+
+	if seed.CompletedItemsTotal != completed {
+		t.Fatalf("CompletedItemsTotal = %d, want %d", seed.CompletedItemsTotal, completed)
+	}
+	if len(seed.CompletedItems) != DefaultCarryoverReceiptWindow {
+		t.Fatalf("len(CompletedItems) = %d, want %d", len(seed.CompletedItems), DefaultCarryoverReceiptWindow)
+	}
+	for i, got := range seed.CompletedItems {
+		want := fmt.Sprintf("item-%d", completed-DefaultCarryoverReceiptWindow+i)
+		if got.ID != want {
+			t.Fatalf("CompletedItems[%d].ID = %q, want %q", i, got.ID, want)
+		}
 	}
 }
