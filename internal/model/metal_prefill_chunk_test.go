@@ -17,7 +17,7 @@ import (
 //     prefill as a single whole-forward panel, not one P32 panel per 32 tokens.
 //  2. Complete aggregate receipt counters are produced with zero fallback.
 //  3. Bit-exact / numerical parity of logits, greedy continuation, and KV cache.
-//  4. Preserves non-multiple-of-32 remainder and append semantics.
+//  4. Covers a non-multiple-of-32 prompt on the graph and preserves append semantics.
 //  5. Fail-closed handling after accepted error: never replays through host forward.
 //  6. Exact Qwen3.8-27B geometry acceptance and positive net prefill latency movement.
 func TestMetalPrefillChunkedGraph(t *testing.T) {
@@ -225,7 +225,7 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		m.Quantize()
 		fillQ4KMajority(t, m, cfg)
 
-		// 135 tokens = 4 panels of 32 (128) + 7 remainder tokens
+		// 135 tokens is not a multiple of 32; the whole prompt rides graph panels.
 		prompt := make([]int, 135)
 		for i := range prompt {
 			prompt[i] = (i*23 + 11) % cfg.VocabSize
@@ -252,12 +252,12 @@ func TestMetalPrefillChunkedGraph(t *testing.T) {
 		if receipt.Tokens != 135 {
 			t.Fatalf("receipt.Tokens = %d, want 135", receipt.Tokens)
 		}
-		// #13041: 135 tokens = one wide 128-token panel + a 7-token host remainder.
-		if receipt.SelectedPanels != 1 {
-			t.Fatalf("receipt.SelectedPanels = %d, want 1", receipt.SelectedPanels)
+		// 135 tokens = two balanced graph panels (68 + 67) and no host remainder.
+		if receipt.SelectedPanels != 2 {
+			t.Fatalf("receipt.SelectedPanels = %d, want 2", receipt.SelectedPanels)
 		}
-		if receipt.ExecutedPanels != 1 {
-			t.Fatalf("receipt.ExecutedPanels = %d, want 1", receipt.ExecutedPanels)
+		if receipt.ExecutedPanels != 2 {
+			t.Fatalf("receipt.ExecutedPanels = %d, want 2", receipt.ExecutedPanels)
 		}
 		if candidate.Cache.Len() != 135 {
 			t.Fatalf("candidate cache len = %d, want 135", candidate.Cache.Len())

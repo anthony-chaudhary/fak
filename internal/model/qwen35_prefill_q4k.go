@@ -169,7 +169,7 @@ const Qwen35MetalGDNSequenceForwardPath = "metal/qwen35-gdn-preprojected-sequenc
 
 // PrefillPanelRoundTripBudget is the L1 ceiling on the aggregate command-buffer
 // round-trips a resident-Q4_K Qwen3.8 prefill may spend serving the fixed
-// 256-token L1 prompt, EXCLUSIVE of the host-served tail. It mirrors the private
+// 256-token L1 prompt. It mirrors the private
 // perfpattern DecodeRoundTripBudgetPerToken recipe (issue #13042) without
 // importing the private package: the ceiling is a small per-prompt constant, NOT
 // a function of len/32, so a regression back to one terminal GPU wait per
@@ -442,6 +442,33 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 	return len(snapshots) > 0, nil
 }
 
+// qwen35PromptPanelQuantum is the narrowest panel the whole-forward graph is
+// admitted for on a prompt walk; shorter prompts stay on the host forward.
+const qwen35PromptPanelQuantum = 32
+
+// qwen35PromptPanelEnds splits an n-token prompt into the fewest whole-forward
+// graph panels of at most metalgemm.PromptPanelMaxTokens rows, with widths that
+// differ by at most one, and returns each panel's exclusive end offset. Balancing
+// keeps every panel at least qwen35PromptPanelQuantum wide, so the walk covers the
+// whole prompt with no sub-quantum remainder. It returns nil below one quantum.
+func qwen35PromptPanelEnds(n int) []int {
+	if n < qwen35PromptPanelQuantum {
+		return nil
+	}
+	panels := (n + metalgemm.PromptPanelMaxTokens - 1) / metalgemm.PromptPanelMaxTokens
+	base, wider := n/panels, n%panels
+	ends := make([]int, panels)
+	end := 0
+	for i := range ends {
+		end += base
+		if i < wider {
+			end++
+		}
+		ends[i] = end
+	}
+	return ends
+}
+
 // tryPrefillQwen35HybridQ4K is the production selection seam. A declined
 // geometry returns before the resident implementation can mutate KV, convolution,
 // or recurrent state; the caller retains the historical token-loop behavior.
@@ -488,25 +515,29 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 			// prompt is walked in the widest admitted panels instead of the historical
 			// exact-32 panel. The panel count — and therefore the per-panel commit +
 			// terminal GPU wait + host KV readback — drops from O(len/32) to
-			// O(len/128) (#13041). Panels cover the largest multiple-of-32 prefix and a
-			// trailing <32 remainder still rides the historical host path, so the
-			// non-multiple-of-32 and append semantics are unchanged.
+			// O(len/128) (#13041). A prompt of at least one quantum is covered entirely
+			// by panels of balanced width (see qwen35PromptPanelEnds), so no panel is
+			// narrower than the quantum and no remainder falls to the host forward,
+			// which costs a fixed ~1.25 s on Qwen3.5-4B whatever its 1..31 rows.
 			//
 			// The panel attention has no 4096 cap: mg_qwen35_graph_attention uses
 			// qg_attn_online (O(head_dim) ordered online softmax) above 4096 context, so
 			// a long prompt stays on the batched panel rather than being forced through
 			// the CPU per-token loop. See TestProjectionGraphQwenOrderedLongContextAttention.
 			//
-			// The <32 remainder (every prompt under 32 tokens) deliberately stays on the
-			// host batched path: walking it on the whole-sequence device graph was measured
-			// on Qwen3.8-27B to stall past the 10 s command-buffer limit for a 12-token
-			// warmup prompt under memory pressure, failing closed with no host retry so the
-			// server never became ready (#13694). Widening the cover below the 32-token
-			// quantum needs its own measured admission.
-			const panelQuantum = 32
-			panelCover := (len(ids) / panelQuantum) * panelQuantum
+			// A prompt under 32 tokens deliberately stays on the host batched path:
+			// walking it on the whole-sequence device graph was measured on Qwen3.8-27B
+			// to stall past the 10 s command-buffer limit for a 12-token warmup prompt
+			// under memory pressure, failing closed with no host retry so the server
+			// never became ready (#13694). Panels narrower than the 32-token quantum
+			// need their own measured admission.
+			panelEnds := qwen35PromptPanelEnds(len(ids))
+			panelCover := 0
+			if len(panelEnds) > 0 {
+				panelCover = panelEnds[len(panelEnds)-1]
+			}
 			if panelCover > 0 {
-				nPanels := (panelCover + metalgemm.PromptPanelMaxTokens - 1) / metalgemm.PromptPanelMaxTokens
+				nPanels := len(panelEnds)
 				// #13087 device-resident KV: when the native backend admits it, one
 				// device KV triple is allocated for the whole prompt and attached for
 				// the panel walk. Every full-attention layer then reads its prefix on
@@ -542,13 +573,10 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 				selectedPanels := nPanels
 				executedPanels := 0
 				executedRows := 0
-				for p := 0; p < nPanels; p++ {
-					start := p * metalgemm.PromptPanelMaxTokens
-					end := start + metalgemm.PromptPanelMaxTokens
-					if end > panelCover {
-						end = panelCover
-					}
+				start := 0
+				for _, end := range panelEnds {
 					panelIDs := ids[start:end]
+					start = end
 					h, receipt, accepted, err := runner.Qwen35MetalForwardSequence(s, panelIDs)
 					if !accepted {
 						break
