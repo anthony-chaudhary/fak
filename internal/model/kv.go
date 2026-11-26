@@ -551,6 +551,11 @@ func (s *Session) validatePackedQ2KEmbeddingGuards() {
 		if !s.Q4K {
 			panic("model: tied Q6_K embedding head requires a Q4K session (resident k-quant head)")
 		}
+		// Only the hybrid Metal routes gather from the packed table; the dense Metal prefill and
+		// decode index the f32 table that a tied Q6_K load no longer holds.
+		if !s.M.Cfg.IsQwen35Hybrid() && (s.Metal || s.MetalQ4K) {
+			panic("model: tied Q6_K embedding on a dense non-hybrid model requires a host Q4K session (no Metal)")
+		}
 		if s.Backend == nil && !s.Q4 && !s.F16 && !s.GPTQ && s.PrecisionPolicy == nil &&
 			s.DenseGPULayers == 0 && s.GPULayers == 0 {
 			return

@@ -18,6 +18,10 @@ import (
 // Q6_K (denseKQuantRetained), i.e. the selected backend can execute a resident Q6_K head. A
 // backend that sends Q6_K to the dequant-to-Q8 path keeps the legacy two-copy layout, and
 // WithTiedQ6KEmbeddingResident(false) restores it explicitly.
+//
+// A dense Qwen2 checkpoint (e.g. Qwen2.5-Coder-3B Q4_K_M: 151936x2048) has the same table
+// layout and head use and is admitted, but only on explicit opt-in: its device serve rides the
+// HAL prompt panel, CUDA graph replay and fused f32 head, which all still require the f32 table.
 
 type tiedQ6KEmbeddingMode uint8
 
@@ -73,7 +77,7 @@ func (s *WeightSource) resolveTiedQ6KEmbedding(cfg model.Config, o *q4kLoadOptio
 		o.residentTiedQ6KEmbedding = true
 		return nil
 	}
-	if otherPacked || !denseKQuantRetained(*o, TensorQ6_K) || o.streamedExperts || o.expertShardSet {
+	if otherPacked || !denseKQuantRetained(*o, TensorQ6_K) || o.streamedExperts || o.expertShardSet || !cfg.IsQwen35Hybrid() {
 		return nil
 	}
 	if s.validateTiedQ6KEmbedding(cfg) == nil {
@@ -82,12 +86,22 @@ func (s *WeightSource) resolveTiedQ6KEmbedding(cfg model.Config, o *q4kLoadOptio
 	return nil
 }
 
-// validateTiedQ6KEmbedding is the tied twin of validateResidentPackedEmbedding: dense
-// Qwen3.5-family hybrid, tie_word_embeddings, a Q6_K token_embd.weight of exactly
+// tiedQ6KEmbeddingArch reports whether cfg's forward reads the token table only through the
+// packed-aware row gather and the resident k-quant head. Dense Qwen3.5-family hybrids and dense
+// Qwen2 qualify; MoE and other families keep embedding consumers that index the f32 table.
+func tiedQ6KEmbeddingArch(cfg model.Config) bool {
+	if cfg.IsMoE() {
+		return false
+	}
+	return cfg.IsQwen35Hybrid() || cfg.ModelType == "qwen2"
+}
+
+// validateTiedQ6KEmbedding is the tied twin of validateResidentPackedEmbedding: a
+// tiedQ6KEmbeddingArch model, tie_word_embeddings, a Q6_K token_embd.weight of exactly
 // vocab x hidden/256 x 210 bytes, and NO distinct output.weight.
 func (s *WeightSource) validateTiedQ6KEmbedding(cfg model.Config) error {
-	if !cfg.IsQwen35Hybrid() || cfg.IsMoE() {
-		return fmt.Errorf("gguf: tied Q6_K embedding requires a dense Qwen3.5-family hybrid model")
+	if !tiedQ6KEmbeddingArch(cfg) {
+		return fmt.Errorf("gguf: tied Q6_K embedding requires a dense Qwen3.5-family hybrid or dense Qwen2 model")
 	}
 	if !cfg.TieWordEmbeddings {
 		return fmt.Errorf("gguf: tied Q6_K embedding requires tied word embeddings")

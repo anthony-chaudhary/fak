@@ -234,12 +234,21 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 		return out
 	}
 
-	embed := m.embedRows()
 	X := make([]float32, P*H)
-	for t, id := range ids {
-		copy(X[t*H:(t+1)*H], embed[id*H:(id+1)*H])
-		m.prismInverseEmbeddingRow("model.embed_tokens.weight", X[t*H:(t+1)*H])
-		scaleEmbedInPlace(X[t*H:(t+1)*H], cfg) // Gemma; no-op for Llama/Qwen
+	if m.Q2KEmbedding != nil {
+		scale := cfg.embedScale()
+		for t, id := range ids {
+			if err := m.Q2KEmbedding.GatherRow(id, X[t*H:(t+1)*H], scale); err != nil {
+				panic(err)
+			}
+		}
+	} else {
+		embed := m.embedRows()
+		for t, id := range ids {
+			copy(X[t*H:(t+1)*H], embed[id*H:(id+1)*H])
+			m.prismInverseEmbeddingRow("model.embed_tokens.weight", X[t*H:(t+1)*H])
+			scaleEmbedInPlace(X[t*H:(t+1)*H], cfg) // Gemma; no-op for Llama/Qwen
+		}
 	}
 
 	cosP := make([][]float32, P)
