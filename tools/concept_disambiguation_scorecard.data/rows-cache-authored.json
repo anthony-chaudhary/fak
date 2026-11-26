@@ -181,6 +181,61 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "bounded-windows-go-cache-directory",
+      "canonical": "ensureWindowsGoCacheDir",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Selects and creates the Go build-cache directory for a bounded Windows command. The ordinary per-user cache is preferred, with a fallback directory under the coding workspace.",
+      "distinction": "Chooses the filesystem path. enforceGoCacheEnv passes the chosen path to the child process.",
+      "distinct_from": [
+        "bounded-windows-go-cache-environment"
+      ],
+      "aliases": [],
+      "grounding": "ensureWindowsGoCacheDir",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "bounded-windows-go-cache-environment",
+      "canonical": "enforceGoCacheEnv",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Replaces GOCACHE in a bounded Go child environment with the directory selected by the native agent.",
+      "distinction": "Builds the child environment. ensureWindowsGoCacheDir owns path selection and directory creation.",
+      "distinct_from": [
+        "bounded-windows-go-cache-directory"
+      ],
+      "aliases": [],
+      "grounding": "enforceGoCacheEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "go-build-cache-directory",
+      "canonical": "GoCacheDir",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The resolved Go build cache directory supplied to gitdaily.Options for cache maintenance. An empty option disables that lifecycle.",
+      "distinction": "The bounded Windows command passes its selected directory to enforceGoCacheEnv. Only the gitdaily option configures cache maintenance.",
+      "distinct_from": [
+        "bounded-windows-go-cache-directory",
+        "bounded-windows-go-cache-environment"
+      ],
+      "aliases": [],
+      "grounding": "GoCacheDir",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

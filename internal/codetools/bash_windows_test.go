@@ -4,7 +4,9 @@ package codetools
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -42,5 +44,41 @@ func TestBashWindowsMissingCwdAvoidsError267(t *testing.T) {
 	got := decodeResult(t, out)
 	if !strings.Contains(got["stdout"].(string), "ok") {
 		t.Fatalf("stdout=%v, want ok", got["stdout"])
+	}
+}
+
+func TestWindowsGoCacheUsesOrdinaryUserCache(t *testing.T) {
+	localCache := t.TempDir()
+	t.Setenv("LocalAppData", localCache)
+	ts, _ := newTestToolset(t)
+	if got, want := ts.ensureWindowsGoCacheDir(), filepath.Join(localCache, "go-build"); got != want {
+		t.Fatalf("Windows Go cache=%q, want ordinary user cache %q", got, want)
+	}
+}
+
+// fak-test:runtime slow est=90s lane=default
+func TestBashWindowsGoTestUsesWorkspaceCache(t *testing.T) {
+	t.Setenv("GOCACHE", "")
+	t.Setenv("LocalAppData", "")
+
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(packageDir, "..", ".."))
+	ts, err := New(Config{Root: root, FocusedCommands: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: "go test ./internal/codetools -run NoTests -count=1"}))
+	if bad {
+		t.Fatalf("bounded go test refused: %s", out)
+	}
+	got := decodeResult(t, out)
+	if exitCode := int(got["exit_code"].(float64)); exitCode != 0 {
+		t.Fatalf("bounded go test exit=%d stdout=%q stderr=%q", exitCode, got["stdout"], got["stderr"])
+	}
+	if _, err := os.Stat(filepath.Join(root, "_scratch", "gocache")); err != nil {
+		t.Fatalf("workspace Go cache missing: %v", err)
 	}
 }

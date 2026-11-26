@@ -750,6 +750,10 @@ The per-launch random credential written into the guarded child's MCP HTTP confi
 **Distinct from:** It proves guard-child launch provenance for MCP requests; it is not the gateway RequireKey/defaultGatewayBearerToken traffic credential and not the stored SHA-256 digest.
 
 
+### ensureWindowsGoCacheDir and enforceGoCacheEnv
+
+`ensureWindowsGoCacheDir` selects a writable build-cache directory for the native agent's Go command. It first tries the current user's Go cache and falls back to `_scratch/gocache` under the coding workspace. `enforceGoCacheEnv` sets `GOCACHE` to that directory in the bounded child environment, replacing any earlier entry. The child receives the path without inheriting the parent's profile variables. The `gitdaily.Options.GoCacheDir` field selects the Go cache for maintenance. A bounded Go test only uses its selected cache directory. Worker worktree cache selection is described under `sharedCache` below.
+
 ### sharedCache (requested worker Go build-cache path)
 
 sharedCache is the requested Go build-cache path read by internal/workerworktree.WorktreeEnv from an explicit caller-map FAK_SHARED_GOCACHE value, otherwise the process environment. An explicit empty value suppresses ambient opt-in. After trimming, an absolute path without NUL selects GOCACHE; invalid or disabled input retains the worktree-local default.

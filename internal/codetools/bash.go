@@ -119,8 +119,13 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	cmd := exec.CommandContext(runCtx, name, args...)
 	cmd.Dir = cwd
 	// #14450: the child starts from the allowlisted minimal host environment, so
-	// gateway key variable names never reach it; GOTMPDIR is pinned afterwards.
-	cmd.Env = noCwdExecutableEnv(enforceGoTmpEnv(envchild.ChildEnv(os.Environ(), envchild.Options{Protected: t.protectedEnv}), gotmpDir))
+	// gateway key variable names never reach it; writable Go paths are injected
+	// explicitly rather than widening the inherited environment.
+	childEnv := enforceGoTmpEnv(envchild.ChildEnv(os.Environ(), envchild.Options{Protected: t.protectedEnv}), gotmpDir)
+	if runtime.GOOS == "windows" && isGoCommand(execCommand) {
+		childEnv = enforceGoCacheEnv(childEnv, t.ensureWindowsGoCacheDir())
+	}
+	cmd.Env = noCwdExecutableEnv(childEnv)
 	if isGitCommand(a.Command) {
 		cmd.Env = gitHardenedEnv(cmd.Env)
 	}
@@ -528,6 +533,11 @@ func hardenGitArgs(command string) string {
 func isGitCommand(command string) bool {
 	fields := strings.Fields(command)
 	return len(fields) > 0 && fields[0] == "git"
+}
+
+func isGoCommand(command string) bool {
+	fields := strings.Fields(command)
+	return len(fields) > 0 && (strings.EqualFold(fields[0], "go") || strings.EqualFold(fields[0], "go.exe"))
 }
 
 // Git reads its pager, fsmonitor hook and diff driver from repo and environment

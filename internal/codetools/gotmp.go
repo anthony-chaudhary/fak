@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -20,6 +21,24 @@ func (t *Toolset) ensureGoTmpDir() string {
 	return fallback
 }
 
+// ensureWindowsGoCacheDir derives Go's ordinary per-user cache path in the
+// parent, so the child need not inherit LocalAppData. Workspace scratch is the
+// fallback when the host cache directory is unavailable.
+func (t *Toolset) ensureWindowsGoCacheDir() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	if parentCache, err := os.UserCacheDir(); err == nil && parentCache != "" {
+		gocache := filepath.Join(parentCache, "go-build")
+		if err := os.MkdirAll(gocache, 0o755); err == nil {
+			return gocache
+		}
+	}
+	fallback := filepath.Join(t.root, "_scratch", "gocache")
+	_ = os.MkdirAll(fallback, 0o755)
+	return fallback
+}
+
 // enforceGoTmpEnv ensures GOTMPDIR is set in the environment slice.
 func enforceGoTmpEnv(base []string, gotmpDir string) []string {
 	out := make([]string, 0, len(base)+1)
@@ -31,6 +50,19 @@ func enforceGoTmpEnv(base []string, gotmpDir string) []string {
 		out = append(out, entry)
 	}
 	out = append(out, "GOTMPDIR="+gotmpDir)
+	return out
+}
+
+func enforceGoCacheEnv(base []string, gocacheDir string) []string {
+	out := make([]string, 0, len(base)+1)
+	for _, entry := range base {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(key, "GOCACHE") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	out = append(out, "GOCACHE="+gocacheDir)
 	return out
 }
 
