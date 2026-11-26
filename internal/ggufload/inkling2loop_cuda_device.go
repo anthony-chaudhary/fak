@@ -363,21 +363,37 @@ func (s *inkling2DeviceSet) experts(e model.Inkling2LoopExperts) (model.Inkling2
 }
 
 // upload moves every bind item to the device. A non-zero window streams the
-// cold load: uploads run in mapping order while a background readahead keeps
-// window bytes of the upcoming payloads queued on the disk.
+// cold load: uploads run in mapping order while a background reader keeps
+// window bytes of the upcoming payloads read into the page cache.
 func (s *inkling2DeviceSet) upload(m *Inkling2LoopModel, resident []bool, window int64) error {
+	return s.uploadStreamed(m, resident, window > 0, window, nil)
+}
+
+// uploadStreamed is upload with the mapping-order sort set apart from the
+// reader: ra, a reader started at map time, is retargeted onto the uploads;
+// without one a non-zero window starts a reader here. Either way the reader
+// is closed before uploadStreamed returns.
+func (s *inkling2DeviceSet) uploadStreamed(m *Inkling2LoopModel, resident []bool, sorted bool, window int64, ra *inkling2UploadReadahead) error {
+	if ra != nil {
+		defer ra.close()
+	}
 	items := inkling2UploadItems(m, resident)
-	var ra *inkling2UploadReadahead
-	if window > 0 {
+	if sorted || ra != nil || window > 0 {
 		inkling2SortUploadsByMapping(items)
+	}
+	if ra != nil || window > 0 {
 		payloads := make([][]byte, 0, len(items))
 		for _, it := range items {
 			if r := it.raw(); len(r) > 0 {
 				payloads = append(payloads, r)
 			}
 		}
-		ra = startInkling2UploadReadahead(newInkling2ReadaheadChunks(payloads, window, inkling2UploadReadaheadChunk), inkling2UploadAdvise)
-		defer ra.close()
+		if ra != nil {
+			ra.retarget(payloads, inkling2UploadReadaheadChunk)
+		} else {
+			ra = startInkling2UploadReadahead(newInkling2ReadaheadChunks(payloads, window, inkling2UploadReadaheadChunk), newInkling2UploadReader())
+			defer ra.close()
+		}
 	}
 	for _, it := range items {
 		n := len(it.raw())
@@ -440,7 +456,13 @@ func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
 			s.Close()
 		}
 	}()
-	if err = s.upload(m, resident, inkling2UploadReadaheadWindow(be, os.LookupEnv)); err != nil {
+	ra := m.readahead
+	m.readahead = nil
+	lead := int64(0)
+	if ra == nil {
+		lead = inkling2UploadReadaheadLead(be, os.LookupEnv, inkling2HostMemoryProbe)
+	}
+	if err = s.uploadStreamed(m, resident, inkling2UploadReadaheadOn(be), lead, ra); err != nil {
 		return err
 	}
 	// Prefetch only now, so cold-stack reads never race the uploads on NVMe;
@@ -456,11 +478,23 @@ func bindInkling2Device(m *Inkling2LoopModel, be compute.Backend) (err error) {
 
 // OpenInkling2LoopDevice maps an inkling2_loop GGUF like OpenInkling2Loop and
 // moves its packed weights onto be.
+//
+// On the streamed cold-load path a reader starts as soon as the GGUF is mapped,
+// so the shard bind, the device budget probe and the placement plan overlap
+// disk reads; the bind then retargets it onto the uploads.
 func OpenInkling2LoopDevice(path string, be compute.Backend) (*Inkling2LoopModel, error) {
-	m, err := OpenInkling2Loop(path)
+	lead := inkling2UploadReadaheadLead(be, os.LookupEnv, inkling2HostMemoryProbe)
+	var ra *inkling2UploadReadahead
+	m, err := openInkling2Loop(path, func(shards []inkling2MappedShard, f *File) io.Closer {
+		if ra = startInkling2MappedUploadReadahead(shards, f, lead); ra == nil {
+			return nil
+		}
+		return ra
+	})
 	if err != nil {
 		return nil, err
 	}
+	m.readahead = ra
 	if err := bindInkling2Device(m, be); err != nil {
 		m.Close()
 		return nil, err

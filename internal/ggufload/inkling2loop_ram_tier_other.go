@@ -2,14 +2,17 @@
 
 package ggufload
 
-import "errors"
+import (
+	"errors"
+	"syscall"
+)
 
 // Without madvise the prefetch relies on its page-touch loop alone.
 func inkling2RAMAdvise([][]byte) {}
 
 const inkling2UploadAdviseOn = false
 
-func inkling2UploadAdvise([]byte) {}
+func inkling2UploadPopulate([]byte) error { return syscall.ENOSYS }
 
 func inkling2RAMMlock([]byte) error {
 	return errors.New("mlock is only supported on linux")

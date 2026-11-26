@@ -193,6 +193,9 @@ type Inkling2LoopModel struct {
 	closer                  io.Closer
 	// path is the GGUF the model was opened from, where adjacent drafts are looked up
 	path string
+	// readahead is the map-time page-cache reader awaiting the device bind; the
+	// closer chain stops it before the unmap.
+	readahead *inkling2UploadReadahead
 }
 
 func (m *Inkling2LoopModel) Close() error {
@@ -228,6 +231,13 @@ func (c inkling2Closers) Close() error {
 // OpenInkling2Loop maps an inkling2 or inkling2_loop GGUF (mainline llama.cpp
 // layout). A split checkpoint may be opened through any of its shards.
 func OpenInkling2Loop(path string) (*Inkling2LoopModel, error) {
+	return openInkling2Loop(path, nil)
+}
+
+// openInkling2Loop is OpenInkling2Loop with a hook that runs once the shards
+// are mapped, before they are bound; f is nil for a split checkpoint. The
+// closer it returns, if any, runs before the unmap.
+func openInkling2Loop(path string, mapped func(shards []inkling2MappedShard, f *File) io.Closer) (*Inkling2LoopModel, error) {
 	data, closer, err := inkling2MapFile(path)
 	if err != nil {
 		return nil, err
@@ -239,11 +249,22 @@ func OpenInkling2Loop(path string) (*Inkling2LoopModel, error) {
 		return nil, err
 	}
 	shards := [][]byte{data}
+	paths := []string{path}
 	if count, ok := f.Uint64("split.count"); ok && count > 1 {
 		closers.Close()
-		shards, closers, err = inkling2MapShards(path, int(count))
+		f = nil
+		shards, closers, paths, err = inkling2MapShards(path, int(count))
 		if err != nil {
 			return nil, err
+		}
+	}
+	if mapped != nil {
+		mappedShards := make([]inkling2MappedShard, len(shards))
+		for i := range shards {
+			mappedShards[i] = inkling2MappedShard{data: shards[i], path: paths[i]}
+		}
+		if c := mapped(mappedShards, f); c != nil {
+			closers = append(inkling2Closers{c}, closers...)
 		}
 	}
 	m, err := bindInkling2Shards(shards, nil)
@@ -278,21 +299,21 @@ func inkling2MapFile(path string) ([]byte, io.Closer, error) {
 }
 
 // inkling2MapShards maps every shard of a -N-of-M.gguf set in order.
-func inkling2MapShards(path string, count int) ([][]byte, inkling2Closers, error) {
+func inkling2MapShards(path string, count int) ([][]byte, inkling2Closers, []string, error) {
 	named, ok := shardPathCount(path)
 	if !ok {
-		return nil, nil, fmt.Errorf("inkling2: %s declares split.count=%d but its name is not a -N-of-M.gguf shard path", path, count)
+		return nil, nil, nil, fmt.Errorf("inkling2: %s declares split.count=%d but its name is not a -N-of-M.gguf shard path", path, count)
 	}
 	if named != count {
-		return nil, nil, fmt.Errorf("inkling2: %s declares split.count=%d, but its filename names a %d-shard set", path, count, named)
+		return nil, nil, nil, fmt.Errorf("inkling2: %s declares split.count=%d, but its filename names a %d-shard set", path, count, named)
 	}
 	first, err := firstShardPath(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	paths, err := shardPaths(first, count)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var closers inkling2Closers
 	shards := make([][]byte, 0, count)
@@ -300,12 +321,12 @@ func inkling2MapShards(path string, count int) ([][]byte, inkling2Closers, error
 		data, c, err := inkling2MapFile(p)
 		if err != nil {
 			closers.Close()
-			return nil, nil, fmt.Errorf("inkling2: open shard %s: %w", p, err)
+			return nil, nil, nil, fmt.Errorf("inkling2: open shard %s: %w", p, err)
 		}
 		closers = append(closers, c)
 		shards = append(shards, data)
 	}
-	return shards, closers, nil
+	return shards, closers, paths, nil
 }
 
 type inkling2Binder struct {

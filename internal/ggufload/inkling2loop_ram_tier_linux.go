@@ -5,6 +5,7 @@ package ggufload
 import (
 	"bufio"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -35,20 +36,25 @@ func inkling2RAMMlock(b []byte) error { return unix.Mlock(b) }
 
 const inkling2UploadAdviseOn = true
 
-// inkling2UploadAdvise queues readahead for one upcoming upload chunk, so the
-// H2D copy's page faults find the pages already cached. No MADV_SEQUENTIAL:
-// it would outlive the load on the split VMA, and the page-rounded length can
-// reach a neighbouring host-read tensor.
-func inkling2UploadAdvise(b []byte) {
+// inkling2UploadPopulate faults one upcoming upload chunk into the page cache
+// and returns once it is read. MADV_WILLNEED is no substitute: on recent
+// kernels it starts only a few MiB of readahead per call, whatever the length.
+// madvise needs a page-aligned start, so the range is widened down to its page
+// as raw addresses; a Go pointer below b's start would be invalid. No
+// MADV_SEQUENTIAL: it would outlive the load on the split VMA.
+func inkling2UploadPopulate(b []byte) error {
 	if len(b) == 0 {
-		return
+		return nil
 	}
-	page := unix.Getpagesize()
-	skip := (page - int(uintptr(unsafe.Pointer(&b[0])))%page) % page
-	if skip >= len(b) {
-		return
+	start := uintptr(unsafe.Pointer(&b[0]))
+	addr := start &^ uintptr(unix.Getpagesize()-1)
+	n := uintptr(len(b)) + (start - addr)
+	_, _, errno := unix.Syscall(unix.SYS_MADVISE, addr, n, unix.MADV_POPULATE_READ)
+	runtime.KeepAlive(b)
+	if errno != 0 {
+		return errno
 	}
-	_ = unix.Madvise(b[skip:], unix.MADV_WILLNEED)
+	return nil
 }
 
 // inkling2CgroupClamped reports whether the probe's avail sits materially
