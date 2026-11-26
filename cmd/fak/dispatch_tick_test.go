@@ -301,6 +301,9 @@ func TestDispatchPromptCarriesResumeWitnessState(t *testing.T) {
 			},
 		},
 	})
+	oldView := dispatchTickView
+	dispatchTickView = "current"
+	t.Cleanup(func() { dispatchTickView = oldView })
 	oldFetchIssue := dispatchFetchIssue
 	dispatchFetchIssue = func(root string, issue int) dispatchIssueInfo {
 		return dispatchIssueInfo{

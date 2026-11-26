@@ -5,7 +5,7 @@ description: "fak's demo-quality scorecard grades 113 demos on five deterministi
 
 # Demo-quality scorecard
 
-<!-- demo-quality-scorecard: 2026-11-23 · process: tools/demo_quality_scorecard.py -->
+<!-- demo-quality-scorecard: 2026-11-26 · process: tools/demo_quality_scorecard.py -->
 
 > Regenerate: `python tools/demo_quality_scorecard.py --markdown --stamp DATE > docs/DEMO-QUALITY-SCORECARD.md`
 > Verify snapshot freshness: `python tools/demo_quality_scorecard.py --check-doc`
@@ -17,10 +17,10 @@ description: "fak's demo-quality scorecard grades 113 demos on five deterministi
 | Metric | Value |
 |---|---|
 | Demos scored | 113 |
-| **Demo-debt (total defects)** | **6** |
-| Mean score | 98.3/100 |
-| Median / min / max | 100.0 / 61.4 / 100.0 |
-| Grade distribution | A:110 B:1 C:0 D:2 F:0 |
+| **Demo-debt (total defects)** | **0** |
+| Mean score | 98.8/100 |
+| Median / min / max | 100.0 / 89.0 / 100.0 |
+| Grade distribution | A:112 B:1 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -28,14 +28,14 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 | Score | Grade | Debt | run | repro | scope | self | docs | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
-| 61.4 | D | 3 | 45 | 48 | 48 | 100 | 78 | `examples/serve-receipt` |
-| 67.4 | D | 3 | 86 | 62 | 48 | 88 | 48 | `cmd/piidemo` |
 | 89.0 | B | 0 | 86 | 100 | 90 | 88 | 78 | `cmd/qwen36codedemo` |
 | 91.0 | A | 0 | 86 | 100 | 100 | 88 | 78 | `examples/mobile-ffi` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/playground` |
 | 93.1 | A | 0 | 86 | 100 | 100 | 100 | 78 | `examples/trace-authoring` |
+| 93.2 | A | 0 | 100 | 86 | 100 | 88 | 90 | `examples/serve-receipt` |
 | 94.2 | A | 0 | 100 | 100 | 90 | 88 | 90 | `examples/grammar-repair-demo` |
 | 94.2 | A | 0 | 100 | 100 | 90 | 88 | 90 | `cmd/dropindemo` |
+| 94.7 | A | 0 | 86 | 100 | 100 | 100 | 88 | `examples/grammar-repair` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/bench-latency` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/gpu-smoke` |
 | 95.0 | A | 0 | 86 | 100 | 100 | 100 | 90 | `examples/turntax` |
@@ -44,9 +44,9 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/fanbench` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/plan-cfi` |
 | 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `cmd/extseamsdemo` |
+| 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `cmd/piidemo` |
 | 96.4 | A | 0 | 100 | 100 | 90 | 100 | 90 | `examples/normgate-evasion` |
 | 96.6 | A | 0 | 86 | 100 | 100 | 100 | 100 | `examples/deny-as-value` |
-| 96.6 | A | 0 | 86 | 100 | 100 | 100 | 100 | `examples/grammar-repair` |
 | 97.8 | A | 0 | 100 | 100 | 100 | 88 | 100 | `examples/local-hardware-benchmark` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/addressable-evict` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/admit-and-log` |
@@ -144,30 +144,9 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 
 ## Demo-debt work-list
 
-### `examples/serve-receipt` — 3 defect(s), score 61.4 (D)
-- runnable: no runnable entry: no run script / `go run` / `python x.py` / make command, and no `__main__` script — there is no one-command way to run it
-- reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run — a reader cannot tell what a correct run looks like
-- honest_scope: no scope / 'what this does not claim' statement — a demo that only shows the win overclaims; state the boundary honestly
-
-### `cmd/piidemo` — 3 defect(s), score 67.4 (D)
-- reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run — a reader cannot tell what a correct run looks like
-- honest_scope: no scope / 'what this does not claim' statement — a demo that only shows the win overclaims; state the boundary honestly
-- documented: no H1 title (a '# Title' line) in the README
+No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 
 ## Soft signals (score only, not debt)
-
-### `examples/serve-receipt`
-- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
-- honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
-- documented: no run/usage section and no visible run command — hard to find how to start
-- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
-
-### `cmd/piidemo`
-- runnable: a runnable script exists but the README shows no paste-able command to launch it
-- honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
-- self_contained: no stated prerequisites — a cold runner can't tell what to install first
-- documented: no run/usage section and no visible run command — hard to find how to start
-- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `cmd/qwen36codedemo`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
@@ -192,6 +171,11 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 - documented: no run/usage section and no visible run command — hard to find how to start
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
+### `examples/serve-receipt`
+- reproducible: no exit-code / determinism statement — the demo doesn't say how to tell pass from fail (a CI gate needs this)
+- self_contained: no stated prerequisites — a cold runner can't tell what to install first
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
 ### `examples/grammar-repair-demo`
 - honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
 - self_contained: no stated prerequisites — a cold runner can't tell what to install first
@@ -201,6 +185,10 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 - honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
 - self_contained: no stated prerequisites — a cold runner can't tell what to install first
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `examples/grammar-repair`
+- runnable: a runnable script exists but the README shows no paste-able command to launch it
+- documented: no run/usage section and no visible run command — hard to find how to start
 
 ### `examples/bench-latency`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
@@ -234,14 +222,15 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 - self_contained: no stated prerequisites — a cold runner can't tell what to install first
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
+### `cmd/piidemo`
+- self_contained: no stated prerequisites — a cold runner can't tell what to install first
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
 ### `examples/normgate-evasion`
 - honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/deny-as-value`
-- runnable: a runnable script exists but the README shows no paste-able command to launch it
-
-### `examples/grammar-repair`
 - runnable: a runnable script exists but the README shows no paste-able command to launch it
 
 ### `examples/local-hardware-benchmark`

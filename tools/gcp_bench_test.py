@@ -500,7 +500,8 @@ class EngineSelectionTest(unittest.TestCase):
     def test_all_is_the_curated_default_and_excludes_vllm(self):
         # `all` stays the fak-vs-llama.cpp default; vLLM is opt-in (a ~5 GB install), so
         # it must NOT be pulled into every default run.
-        self.assertEqual(gcp_bench.resolve_engines("all"), ["llama", "fak-cpu", "fak-cuda"])
+        self.assertEqual(gcp_bench.resolve_engines("all"),
+                         ["llama", "fak-cpu", "fak-cuda", "fak-cuda-q8"])
         self.assertNotIn("vllm", gcp_bench.resolve_engines("all"))
 
     def test_fak_alias_is_both_fak_engines(self):
@@ -525,15 +526,14 @@ class EngineSelectionTest(unittest.TestCase):
         self.assertEqual(gcp_bench.resolve_engines("fak-cuda,vllm,llama"),
                          ["llama", "vllm", "fak-cuda"])
 
-    def test_fak_cuda_q8_is_an_optin_apples_to_apples_engine(self):
+    def test_fak_cuda_q8_is_promoted_into_all_apples_to_apples_engine(self):
         # fak-cuda-q8 is the Q8 device GEMV row (apples-to-apples vs llama.cpp Q8_0).
-        # Like vLLM it is opt-in: registered + CUDA-flagged + selectable, ordered right
-        # after fak-cuda, but NOT in the curated `all` default until a green Hopper run
-        # witnesses the device Q8 GEMV (then it is promoted into DEFAULT_ALL).
+        # It is registered + CUDA-flagged + selectable, ordered right after fak-cuda, and
+        # promoted into the curated `all` default after the Hopper H100 witness.
         self.assertIn("fak-cuda-q8", gcp_bench.ENGINES)
         self.assertTrue(gcp_bench.ENGINES["fak-cuda-q8"].needs_cuda)
         self.assertIn("fak-cuda-q8", gcp_bench.ENGINE_ORDER)
-        self.assertNotIn("fak-cuda-q8", gcp_bench.resolve_engines("all"))
+        self.assertIn("fak-cuda-q8", gcp_bench.resolve_engines("all"))
         self.assertEqual(gcp_bench.resolve_engines("fak-cuda-q8"), ["fak-cuda-q8"])
         # The apples-to-apples head-to-head, in stable ENGINE_ORDER regardless of input order.
         self.assertEqual(gcp_bench.resolve_engines("fak-cuda-q8,fak-cuda,llama"),

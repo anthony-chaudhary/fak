@@ -207,13 +207,14 @@ func TestInkling2MappedRegionsSkipHeaderAndTokenEmbedding(t *testing.T) {
 		{Name: "output.weight", FileOffset: 60},
 	}}
 	regions := inkling2MappedRegions([]inkling2MappedShard{{data: data}}, f)
-	if len(regions) != 2 || inkling2Offset(data, regions[0]) != 16 || len(regions[0]) != 16 ||
-		inkling2Offset(data, regions[1]) != 60 || len(regions[1]) != 40 {
+	embd, output := f.Tensors[1].FileOffset, f.Tensors[2].FileOffset
+	if len(regions) != 2 || inkling2Offset(data, regions[0]) != int(f.TensorDataOffset) || len(regions[0]) != int(embd-f.TensorDataOffset) ||
+		inkling2Offset(data, regions[1]) != int(output) || len(regions[1]) != len(data)-int(output) {
 		t.Fatalf("regions %d, want [16:32] and [60:100]", len(regions))
 	}
 	// A trailing embedding leaves only the front.
 	f.Tensors[1].FileOffset, f.Tensors[2].FileOffset = 80, 40
-	if regions = inkling2MappedRegions([]inkling2MappedShard{{data: data}}, f); len(regions) != 1 || len(regions[0]) != 64 {
+	if regions = inkling2MappedRegions([]inkling2MappedShard{{data: data}}, f); len(regions) != 1 || len(regions[0]) != int(f.Tensors[1].FileOffset-f.TensorDataOffset) {
 		t.Fatalf("trailing embedding: %d regions", len(regions))
 	}
 	// Split shards are walked whole, in address order.
