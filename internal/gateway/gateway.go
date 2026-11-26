@@ -478,6 +478,7 @@ func New(cfg Config) (*Server, error) {
 	// HTTPPlanner carries the loop — direct, unwrapped from a dual planner's proxy side, or across every
 	// upstream in a replica fleet; mock and in-kernel planners don't, so this is a no-op for them.
 	walkHTTPPlanners(planner, func(hp *agent.HTTPPlanner) {
+		hp.LocalFitDisabled = true
 		hp.RetryNotify = s.onUpstreamRetry
 		hp.AuthRefreshNotify = s.onAuthRefresh
 		hp.ForbiddenRetryNotify = s.onForbiddenRetry

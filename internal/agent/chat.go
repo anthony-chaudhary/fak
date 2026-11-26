@@ -891,6 +891,10 @@ type HTTPPlanner struct {
 	SoftStallNotify      func(SoftProgressStall)
 	Client               *http.Client
 	QuarantineTranscript bool
+	// LocalFitDisabled keeps a local endpoint's transcript exactly as the caller sent it:
+	// no per-result byte bound, no whole-prompt fit, and no compacted retry. The gateway
+	// sets it because it forwards a client's transcript and owns its own context paging.
+	LocalFitDisabled bool
 	// LlamaSlotAffinity opts this planner into the advisory llama-server prompt-cache hint
 	// (llama_slot_affinity.go): a background GET /props discovers total_slots and, once
 	// known, requests carry cache_prompt:true and no id_slot, leaving slot choice to the

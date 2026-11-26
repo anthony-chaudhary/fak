@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,7 +112,75 @@ func TestAgentHardenLegacyRetryStillRecovers(t *testing.T) {
 	}
 }
 
-func TestAgentHardenContextOverflowNeverRetried(t *testing.T) {
+// agentHardenOversizeMsgs carries a tool result above the local per-result bound,
+// so the compacted retry visibly shrinks the request body.
+func agentHardenOversizeMsgs() []Message {
+	return []Message{
+		{Role: RoleUser, Content: "read it"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_1", Type: "function", Function: Func{Name: "read", Arguments: "{}"}}}},
+		{Role: RoleTool, ToolCallID: "call_1", Name: "read", Content: strings.Repeat("x", 6<<10)},
+	}
+}
+
+// agentHardenRedirect sends every request to target, so a planner whose BaseURL names
+// a hosted host still reaches the fixture server.
+type agentHardenRedirect struct {
+	target *url.URL
+	next   http.RoundTripper
+}
+
+func (rt agentHardenRedirect) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.URL.Scheme = rt.target.Scheme
+	r.URL.Host = rt.target.Host
+	r.Host = rt.target.Host
+	return rt.next.RoundTrip(r)
+}
+
+// A local endpoint that refuses the prompt as too large gets one compacted resend,
+// and a second refusal ends the call rather than looping.
+func TestAgentHardenContextOverflowCompactsOnceOnLocal(t *testing.T) {
+	agentHardenFastRetry(t)
+	for _, status := range []int{http.StatusBadRequest, http.StatusInternalServerError, http.StatusRequestEntityTooLarge} {
+		for _, stream := range []bool{false, true} {
+			t.Run(strconv.Itoa(status)+"/stream="+strconv.FormatBool(stream), func(t *testing.T) {
+				var mu sync.Mutex
+				var bodies []int
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					raw, _ := io.ReadAll(r.Body)
+					mu.Lock()
+					bodies = append(bodies, len(raw))
+					mu.Unlock()
+					agentHardenStatus(w, status, `{"error":{"code":"context_length_exceeded"}}`)
+				}))
+				t.Cleanup(srv.Close)
+				p := agentHardenPlanner(srv, 0)
+				// Quarantine would page the oversize result out before the local fit runs.
+				p.QuarantineTranscript = false
+				var err error
+				if stream {
+					_, err = p.CompleteStream(agentHardenCtx(t), nil, agentHardenOversizeMsgs(), nil)
+				} else {
+					_, err = p.Complete(agentHardenCtx(t), agentHardenOversizeMsgs(), nil)
+				}
+				if !errors.Is(err, ErrContextOverflow) {
+					t.Fatalf("err = %v, want ErrContextOverflow", err)
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				if len(bodies) != 2 {
+					t.Fatalf("POSTs = %d, want 2 (one compacted retry)", len(bodies))
+				}
+				if bodies[0]-bodies[1] < 3<<10 {
+					t.Fatalf("second POST was not compacted: bodies = %v", bodies)
+				}
+			})
+		}
+	}
+}
+
+// A hosted endpoint has no local compaction, so a context refusal is never resent.
+func TestAgentHardenContextOverflowNeverRetriedOnHosted(t *testing.T) {
 	agentHardenFastRetry(t)
 	for _, status := range []int{http.StatusBadRequest, http.StatusInternalServerError, http.StatusRequestEntityTooLarge} {
 		for _, stream := range []bool{false, true} {
@@ -119,7 +188,14 @@ func TestAgentHardenContextOverflowNeverRetried(t *testing.T) {
 				srv, posts := agentHardenServer(t, func(_ int32, w http.ResponseWriter) {
 					agentHardenStatus(w, status, `{"error":{"code":"context_length_exceeded"}}`)
 				})
-				err := agentHardenCall(t, agentHardenPlanner(srv, 0), stream)
+				target, err := url.Parse(srv.URL)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p := agentHardenPlanner(srv, 0)
+				p.BaseURL = "https://api.hosted-provider.example"
+				p.Client = &http.Client{Transport: agentHardenRedirect{target: target, next: srv.Client().Transport}}
+				err = agentHardenCall(t, p, stream)
 				if !errors.Is(err, ErrContextOverflow) {
 					t.Fatalf("err = %v, want ErrContextOverflow", err)
 				}
@@ -143,8 +219,8 @@ func TestAgentHardenRunArmContextOverflowEndsArm(t *testing.T) {
 	if m.EndedBy != EndedByContextOverflow || m.InfraReprompts != 0 {
 		t.Fatalf("metrics = %+v", m)
 	}
-	if got := posts.Load(); got != 1 {
-		t.Fatalf("POSTs = %d, want 1", got)
+	if got := posts.Load(); got != 2 {
+		t.Fatalf("POSTs = %d, want 2 (compacted retry, then the arm ends)", got)
 	}
 }
 

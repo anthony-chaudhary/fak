@@ -267,6 +267,12 @@ func (p *HTTPPlanner) fitLocalRequest(ctx context.Context, messages []Message, t
 	return out
 }
 
+// localFitActive reports whether the local-endpoint transcript fit and its
+// compacted retry apply to this planner's requests.
+func (p *HTTPPlanner) localFitActive() bool {
+	return p != nil && !p.LocalFitDisabled && IsLocalEndpoint(p.BaseURL)
+}
+
 // localContextRetry reports whether a failed call should be compacted and resent
 // once: a local endpoint refused the prompt as too large, and this call has not
 // already been the compacted retry.
@@ -274,14 +280,14 @@ func (p *HTTPPlanner) localContextRetry(ctx context.Context, err error) bool {
 	if err == nil || p == nil || ctx == nil || ctx.Err() != nil || localCompactRequested(ctx) {
 		return false
 	}
-	return errors.Is(err, ErrContextOverflow) && IsLocalEndpoint(p.BaseURL)
+	return errors.Is(err, ErrContextOverflow) && p.localFitActive()
 }
 
 // localContextRefusal recognizes the 502 a local serve returns when the prompt
 // exceeds its context. The serve logs the cause but the client only sees the
 // generic body, so the local-only match is what makes the refusal compactable.
 func localContextRefusal(p *HTTPPlanner, status int, raw []byte) bool {
-	if p == nil || status != http.StatusBadGateway || !IsLocalEndpoint(p.BaseURL) {
+	if status != http.StatusBadGateway || !p.localFitActive() {
 		return false
 	}
 	return bodyContainsAny(raw, "upstream model error", "leaves no room in")

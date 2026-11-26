@@ -561,7 +561,7 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 	if p.QuarantineTranscript {
 		safeMessages, quarantines = quarantineOutboundMessages(messages, sp.OversizePagingSuppressed)
 	}
-	if IsLocalEndpoint(p.BaseURL) {
+	if p.localFitActive() {
 		safeMessages = p.fitLocalRequest(ctx, safeMessages, tools)
 	}
 	// §A4 coherence shaping: after the safety quarantine, give the coherence layer a
