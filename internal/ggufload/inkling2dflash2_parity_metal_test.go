@@ -246,6 +246,16 @@ func inkling2DFlash2ProfileParts(t *testing.T, d *ink2DFlash2Draft, anchor, pos,
 		return float64(b.Microseconds()) / 1000
 	}
 	layers := best(d.layersForward)
+	layersUnfused := best(func() {
+		inkling2DFlash2Unfused = true
+		d.layersForward()
+		inkling2DFlash2Unfused = false
+	})
+	allUnfused := best(func() {
+		inkling2DFlash2Unfused = true
+		d.forward(depth)
+		inkling2DFlash2Unfused = false
+	})
 	head := best(func() { d.head(depth) })
 	rowsHead := best(func() {
 		inkling2DFlash2RowsHead = true
@@ -262,6 +272,6 @@ func inkling2DFlash2ProfileParts(t *testing.T, d *ink2DFlash2Draft, anchor, pos,
 	if s.err != nil {
 		t.Fatal(s.err)
 	}
-	t.Logf("draft parts (best of 8, ms): layers %.2f, head %.2f (rows head %.2f), select %.2f, whole %.2f (with rows head %.2f)",
-		layers, head, rowsHead, sel, all, rowsAll)
+	t.Logf("draft parts (best of 8, ms): layers %.2f (unfused %.2f), head %.2f (rows head %.2f), select %.2f, whole %.2f (unfused %.2f, with rows head %.2f)",
+		layers, layersUnfused, head, rowsHead, sel, all, allUnfused, rowsAll)
 }

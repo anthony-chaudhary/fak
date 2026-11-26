@@ -104,3 +104,46 @@ func (c *metalBackend) Ink2DFSelect(logits Ink2Ref, rows, rowStride, vocab, k in
 	}
 	return ink2MetalErr("draft select", d.DraftSelect(r[0], rows, rowStride, vocab, k, r[1], pv, sv, r[2], softcap, r[3], r[4], r[5]))
 }
+
+var _ Inkling2DFlash2FusedDevice = (*metalBackend)(nil)
+
+func (c *metalBackend) Ink2DFLinearMulti(x []Ink2Ref, w []Tensor, y []Ink2Ref, tokens int) error {
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	if len(w) == 0 || len(y) != len(w) {
+		return ink2MetalErr("draft linear multi", fmt.Errorf("%d weights into %d outputs", len(w), len(y)))
+	}
+	d, ys, err := ink2MetalBind(y...)
+	if err != nil {
+		return ink2MetalErr("draft linear multi", err)
+	}
+	xs, err := ink2MetalRefs(x)
+	if err != nil {
+		return ink2MetalErr("draft linear multi input", err)
+	}
+	ws := make([]metalgemm.Ink2Weight, len(w))
+	for i := range w {
+		if ws[i], err = ink2MetalBF16(w[i]); err != nil {
+			return ink2MetalErr("draft linear multi", err)
+		}
+	}
+	return ink2MetalErr("draft linear multi", d.DraftLinearMulti(xs, ws, ys, tokens))
+}
+
+func (c *metalBackend) Ink2DFLinearSiluMul(x Ink2Ref, gate, up Tensor, y, scratch Ink2Ref, tokens int) error {
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	d, r, err := ink2MetalBind(x, y, scratch)
+	if err != nil {
+		return ink2MetalErr("draft gated linear", err)
+	}
+	gv, err := ink2MetalBF16(gate)
+	if err != nil {
+		return ink2MetalErr("draft gated linear gate", err)
+	}
+	uv, err := ink2MetalBF16(up)
+	if err != nil {
+		return ink2MetalErr("draft gated linear up", err)
+	}
+	return ink2MetalErr("draft gated linear", d.DraftLinearSiluMul(r[0], gv, uv, r[1], r[2], tokens))
+}

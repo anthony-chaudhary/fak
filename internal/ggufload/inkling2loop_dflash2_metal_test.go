@@ -4,11 +4,14 @@ package ggufload
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
@@ -96,9 +99,13 @@ func TestInkling2MetalSpecDFlash2GreedyMatchesResident(t *testing.T) {
 	if _, _, err := inkling2ResidentGreedy(m, be, workloads[0].prompt, 8); err != nil {
 		t.Fatal(err)
 	}
+	submissions := func() uint64 { st, _ := compute.MetalInkling2Stats(); return st.Submissions }
+	inkling2DFlash2Fences = submissions
+	defer func() { inkling2DFlash2Fences = nil }()
 	type tally struct {
-		verifies, accepted, drafted int
-		draft                       time.Duration
+		verifies, accepted, drafted, draftedVerifies int
+		draft                                        time.Duration
+		run                                          inkling2DFlash2RunStats
 	}
 	totals := map[string]*tally{}
 	for _, w := range workloads {
@@ -108,15 +115,18 @@ func TestInkling2MetalSpecDFlash2GreedyMatchesResident(t *testing.T) {
 		}
 		t.Logf("workload %s (%d prompt tokens): plain %.2f tok/s, %s", w.name, len(w.prompt), plain.DecodeTokensPerSecond(), inkling2MetalSpecLoad())
 		for _, run := range []struct {
-			kind     string
-			depth    int
-			rowsHead bool
-		}{{inkling2DraftDFlash, 4, false}, {inkling2DraftDFlash, 7, true}, {inkling2DraftDFlash, 7, false},
-			{inkling2DraftDFlash, 7, true}, {inkling2DraftLookup, 4, false}} {
+			kind              string
+			depth             int
+			rowsHead, unfused bool
+		}{{inkling2DraftDFlash, 4, false, false}, {inkling2DraftDFlash, 7, true, false}, {inkling2DraftDFlash, 7, false, false},
+			{inkling2DraftDFlash, 7, false, true}, {inkling2DraftLookup, 4, false, false}} {
 			t.Setenv("FAK_INKLING2_SPEC_DRAFT", run.kind)
-			inkling2DFlash2RowsHead = run.rowsHead
+			inkling2DFlash2RowsHead, inkling2DFlash2Unfused = run.rowsHead, run.unfused
+			inkling2DFlash2LastRun = inkling2DFlash2RunStats{}
+			sub0 := submissions()
 			got, _, err := inkling2SpecGreedy(m, sbe, w.prompt, n, run.depth)
-			inkling2DFlash2RowsHead = false
+			subs := submissions() - sub0
+			inkling2DFlash2RowsHead, inkling2DFlash2Unfused = false, false
 			if err != nil {
 				t.Fatalf("%s %s depth %d: %v", w.name, run.kind, run.depth, err)
 			}
@@ -124,6 +134,9 @@ func TestInkling2MetalSpecDFlash2GreedyMatchesResident(t *testing.T) {
 			label := run.kind
 			if run.rowsHead {
 				label += " (rows head)"
+			}
+			if run.unfused {
+				label += " (unfused)"
 			}
 			t.Logf("  %s depth %d: %.2f tok/s (%.2fx plain); %d verifies, accepted %d/%d (mean %.2f per verify), plain steps %d, draft %.1f ms/call, verify %.1f ms/call",
 				label, run.depth, st.DecodeTokensPerSecond(), st.DecodeTokensPerSecond()/plain.DecodeTokensPerSecond(),
@@ -137,22 +150,70 @@ func TestInkling2MetalSpecDFlash2GreedyMatchesResident(t *testing.T) {
 			if run.rowsHead {
 				key += " rows head"
 			}
+			if run.unfused {
+				key += " unfused"
+			}
 			if totals[key] == nil {
 				totals[key] = &tally{}
 			}
-			totals[key].verifies += st.Verifies
-			totals[key].accepted += st.Accepted
-			totals[key].drafted += st.Drafted
-			totals[key].draft += st.Draft
+			c := totals[key]
+			c.verifies += st.Verifies
+			c.accepted += st.Accepted
+			c.drafted += st.Drafted
+			c.draft += st.Draft
+			if run.kind != inkling2DraftDFlash {
+				c.draftedVerifies += st.Verifies
+				continue
+			}
+			r := inkling2DFlash2LastRun
+			dv := 0
+			for _, k := range r.depths[1:] {
+				dv += k
+			}
+			c.draftedVerifies += dv
+			for i := range r.depths {
+				c.run.depths[i] += r.depths[i]
+				c.run.stepTime[i] += r.stepTime[i]
+			}
+			for j := range r.judged {
+				c.run.judged[j] += r.judged[j]
+				c.run.accepted[j] += r.accepted[j]
+			}
+			c.run.draftFences += r.draftFences
+			t.Logf("    depths %v; %.2f command buffers per drafted call, %.2f per verify over the run (%d)",
+				r.depths, float64(r.draftFences)/float64(max(1, dv)), float64(subs)/float64(max(1, st.Verifies)), subs)
+			t.Logf("    per-position acceptance %s", inkling2DFlash2PositionLine(r))
 		}
 	}
-	for _, key := range []string{"dflash2 d4", "dflash2 d7 rows head", "dflash2 d7", "lookup d4"} {
+	for _, key := range []string{"dflash2 d4", "dflash2 d7 rows head", "dflash2 d7", "dflash2 d7 unfused", "lookup d4"} {
 		c := totals[key]
-		t.Logf("%s over %d workloads: mean accepted %.2f per verify (%d/%d drafted), draft %.1f ms/call", key, len(workloads),
-			float64(c.accepted)/float64(max(1, c.verifies)), c.accepted, c.drafted,
-			float64(c.draft.Microseconds())/1000/float64(max(1, c.verifies)))
+		// an undrafted width-1 verify accepts nothing by construction, so only drafted verifies count
+		t.Logf("%s over %d workloads: mean accepted %.2f per drafted verify (%d/%d drafted over %d of %d verifies), draft %.1f ms/drafted call",
+			key, len(workloads), float64(c.accepted)/float64(max(1, c.draftedVerifies)), c.accepted, c.drafted, c.draftedVerifies, c.verifies,
+			float64(c.draft.Microseconds())/1000/float64(max(1, c.draftedVerifies)))
+		if strings.HasPrefix(key, "dflash2") {
+			t.Logf("    depth histogram %v; acceptance %s", c.run.depths, inkling2DFlash2PositionLine(c.run))
+		}
 	}
-	if c := totals["dflash2 d7"]; float64(c.accepted)/float64(max(1, c.verifies)) < 1.5 {
-		t.Errorf("dflash2 depth 7 accepts %.2f per verify; a wired draft accepts several", float64(c.accepted)/float64(max(1, c.verifies)))
+	if c := totals["dflash2 d7"]; float64(c.accepted)/float64(max(1, c.draftedVerifies)) < 1.5 {
+		t.Errorf("dflash2 depth 7 accepts %.2f per drafted verify; a wired draft accepts several", float64(c.accepted)/float64(max(1, c.draftedVerifies)))
 	}
+}
+
+// inkling2DFlash2PositionLine renders a run's conditional acceptance per draft
+// position and its verify+commit wall time by drafted length.
+func inkling2DFlash2PositionLine(r inkling2DFlash2RunStats) string {
+	var b strings.Builder
+	for j := range r.judged {
+		if r.judged[j] > 0 {
+			fmt.Fprintf(&b, " p%d %d/%d=%.2f", j, r.accepted[j], r.judged[j], float64(r.accepted[j])/float64(r.judged[j]))
+		}
+	}
+	b.WriteString("; verify ms by drafted n:")
+	for n, k := range r.depths {
+		if k > 0 {
+			fmt.Fprintf(&b, " %d:%.1f", n, float64(r.stepTime[n].Microseconds())/1000/float64(k))
+		}
+	}
+	return b.String()
 }

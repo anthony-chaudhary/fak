@@ -208,3 +208,60 @@ func TestMetalInkling2DraftOpsThroughBackend(t *testing.T) {
 		}
 	}
 }
+
+// The fused draft linears through the backend equal their separate ops.
+//
+// fak-test:runtime integration est=1s lane=default
+func TestMetalInkling2DraftFusedLinearsThroughBackend(t *testing.T) {
+	be := metalInk2TestBackend(t)
+	const tokens, cols = 3, 64
+	small := func(n, mod int) []float32 {
+		v := make([]float32, n)
+		for i := range v {
+			v[i] = float32((i*7)%mod) - float32(mod/2)
+		}
+		return v
+	}
+	x := Ink2At(metalInk2TestUpload(t, be, small(tokens*cols, 5)), 0)
+	rows := []int{16, 8, 24}
+	var ws []Tensor
+	var sep, fused []Ink2Ref
+	for i, r := range rows {
+		ws = append(ws, metalInk2TestBF16(t, be, small(r*cols+i, 3+i)[i:], r, cols))
+		a, b := Ink2At(metalInk2TestUpload(t, be, make([]float32, tokens*r)), 0), Ink2At(metalInk2TestUpload(t, be, make([]float32, tokens*r)), 0)
+		if err := be.Ink2DFLinear([]Ink2Ref{x}, ws[i], a, tokens); err != nil {
+			t.Fatal(err)
+		}
+		sep, fused = append(sep, a), append(fused, b)
+	}
+	if err := be.Ink2DFLinearMulti([]Ink2Ref{x}, ws, fused, tokens); err != nil {
+		t.Fatal(err)
+	}
+	read := func(r Ink2Ref, n int) []float32 {
+		v, err := be.Ink2Read(r, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	for i, r := range rows {
+		if !slices.Equal(read(fused[i], tokens*r), read(sep[i], tokens*r)) {
+			t.Fatalf("multi output %d differs from Ink2DFLinear", i)
+		}
+	}
+	up := metalInk2TestBF16(t, be, small(rows[0]*cols, 7), rows[0], cols)
+	u := Ink2At(metalInk2TestUpload(t, be, make([]float32, tokens*rows[0])), 0)
+	if err := be.Ink2DFLinear([]Ink2Ref{x}, up, u, tokens); err != nil {
+		t.Fatal(err)
+	}
+	if err := be.Ink2DFSiluMul(sep[0], u, sep[0], tokens*rows[0]); err != nil {
+		t.Fatal(err)
+	}
+	g := Ink2At(metalInk2TestUpload(t, be, make([]float32, tokens*rows[0])), 0)
+	if err := be.Ink2DFLinearSiluMul(x, ws[0], up, g, Ink2Ref{}, tokens); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(read(g, tokens*rows[0]), read(sep[0], tokens*rows[0])) {
+		t.Fatal("gated linear differs from Ink2DFLinear and Ink2DFSiluMul")
+	}
+}

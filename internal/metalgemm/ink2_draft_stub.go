@@ -15,3 +15,9 @@ func (*Ink2Device) DraftSelect(logits Ink2Ref, rows, rowStride, vocab, k int, pr
 	anchorDev Ink2Ref, softcap float32, scratch, path, cand Ink2Ref) error {
 	return ErrMetalUnavailable
 }
+func (*Ink2Device) DraftLinearMulti(x []Ink2Ref, w []Ink2Weight, y []Ink2Ref, tokens int) error {
+	return ErrMetalUnavailable
+}
+func (*Ink2Device) DraftLinearSiluMul(x Ink2Ref, gate, up Ink2Weight, y, scratch Ink2Ref, tokens int) error {
+	return ErrMetalUnavailable
+}

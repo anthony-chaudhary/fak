@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -47,6 +48,9 @@ type ink2DFlash2Draft struct {
 	logits, scratch, path, pos, anchor, ch, chn, ck, cv ink2Ref
 	rows, mask                                          []float32
 	eps                                                 float32
+	// width sizes each step's draft; nil until the first Draft of a request
+	width *inkling2DFlash2Width
+	run2  inkling2DFlash2RunStats
 	// tapSink, when set, receives each target forward's taps ([tap][T*Hidden])
 	// so a test can feed the host reference the same context.
 	tapSink func(T int, taps [][]float32)
@@ -96,7 +100,7 @@ func (s *inkling2Resident) attachDFlash2(dm *Inkling2DFlash2Model) (*ink2DFlash2
 	d.hiddenNorm, d.norm = s.upload(dm.hiddenNorm), s.upload(dm.norm)
 	B := c.DFlash.Block
 	qDim := c.Heads * c.HeadDim
-	d.x, d.n, d.conv, d.o, d.down = s.alloc(B*H), s.alloc(B*H), s.alloc(B*H), s.alloc(B*H), s.alloc(B*H)
+	d.n, d.conv, d.o, d.down = s.alloc(B*H), s.alloc(B*H), s.alloc(B*H), s.alloc(B*H)
 	d.dyn = s.alloc(B * c.dynamicWidth())
 	d.q, d.attn = s.alloc(B*qDim), s.alloc(B*qDim)
 	d.k, d.v = s.alloc(B*kvDim), s.alloc(B*kvDim)
@@ -104,11 +108,14 @@ func (s *inkling2Resident) attachDFlash2(dm *Inkling2DFlash2Model) (*ink2DFlash2
 	d.proj = s.alloc(B * c.DFlash.Rank)
 	d.logits = s.alloc((B - 1) * s.output.rows)
 	d.scratch = s.alloc(metalgemm.DraftSelectScratch(B-1, c.DFlash.TopK))
-	d.path, d.pos, d.anchor = s.alloc(B), s.alloc(4), s.alloc(4)
+	d.path = s.alloc(B)
+	// x rows, pos and anchor share one buffer so a proposal stages them in one write
+	stage := s.alloc(B*H + 8)
+	d.x, d.pos, d.anchor = stage, at(stage, B*H), at(stage, B*H+4)
 	d.ch, d.chn = s.alloc(inkling2DFlash2Rows*H), s.alloc(inkling2DFlash2Rows*H)
 	d.ck, d.cv = s.alloc(inkling2DFlash2Rows*kvDim), s.alloc(inkling2DFlash2Rows*kvDim)
 	d.mask = d.tokenRow(c.DFlash.Mask)
-	d.rows = make([]float32, B*H)
+	d.rows = make([]float32, B*H+8)
 	for r := 1; r < B; r++ {
 		copy(d.rows[r*H:(r+1)*H], d.mask)
 	}
@@ -184,6 +191,11 @@ func (d *ink2DFlash2Draft) commitTaps(p *ink2Prefill, taps []ink2Ref) {
 			d.tapSink(p.T, host)
 		}
 	}
+	if !p.verify {
+		// a prefill starts a request: acceptance of earlier ones must not size its drafts
+		d.width = nil
+	}
+	fd := d.fused()
 	segs := make([]ink2Ref, len(taps))
 	for g0 := 0; g0 < p.T && s.err == nil; g0 += inkling2DFlash2Rows {
 		n := min(inkling2DFlash2Rows, p.T-g0)
@@ -194,13 +206,29 @@ func (d *ink2DFlash2Draft) commitTaps(p *ink2Prefill, taps []ink2Ref) {
 		d.run(s.dev.Ink2RMS(d.ch, d.hiddenNorm, d.chn, n, H, d.eps))
 		for l := range d.layers {
 			L := &d.layers[l]
-			d.run(d.dd.Ink2DFLinear([]ink2Ref{d.chn}, L.wk, d.ck, n))
-			d.run(d.dd.Ink2DFLinear([]ink2Ref{d.chn}, L.wv, d.cv, n))
+			if fd != nil {
+				d.run(fd.Ink2DFLinearMulti([]ink2Ref{d.chn}, []compute.Tensor{L.wk, L.wv}, []ink2Ref{d.ck, d.cv}, n))
+			} else {
+				d.run(d.dd.Ink2DFLinear([]ink2Ref{d.chn}, L.wk, d.ck, n))
+				d.run(d.dd.Ink2DFLinear([]ink2Ref{d.chn}, L.wv, d.cv, n))
+			}
 			d.run(d.dd.Ink2DFQKRope(d.ck, L.kNorm, L.kc, s.verifyPos, n, c.KVHeads, c.HeadDim, inkling2DFlash2Ring, g0, true,
 				d.eps, c.Rope.Theta))
 			d.run(d.dd.Ink2DFRingStore(d.cv, L.vc, s.verifyPos, n, kvDim, inkling2DFlash2Ring, g0))
 		}
 	}
+}
+
+// inkling2DFlash2Unfused sends the draft through the one-weight launches, the
+// A side of a timing comparison.
+var inkling2DFlash2Unfused bool
+
+// fused is the backend's fused draft launches, or nil.
+func (d *ink2DFlash2Draft) fused() compute.Inkling2DFlash2FusedDevice {
+	if fd, ok := d.dd.(compute.Inkling2DFlash2FusedDevice); ok && !inkling2DFlash2Unfused {
+		return fd
+	}
+	return nil
 }
 
 // forward enqueues the block forward from d.x at anchor position *d.pos and
@@ -219,14 +247,19 @@ func (d *ink2DFlash2Draft) layersForward() {
 	lin := func(x ink2Ref, w compute.Tensor, y ink2Ref, rows int) {
 		d.run(d.dd.Ink2DFLinear([]ink2Ref{x}, w, y, rows))
 	}
+	fd := d.fused()
 	for l := range d.layers {
 		L := &d.layers[l]
 		d.run(s.dev.Ink2RMS(d.x, L.inNorm, d.n, B, H, d.eps))
 		lin(d.n, L.attnDyn, d.dyn, B)
 		d.run(d.dd.Ink2DFConv(d.n, d.dyn, L.attnBase, ink2Ref{}, d.conv, B, H, G, kn, 0))
-		lin(d.conv, L.wq, d.q, B)
-		lin(d.conv, L.wk, d.k, B)
-		lin(d.conv, L.wv, d.v, B)
+		if fd != nil {
+			d.run(fd.Ink2DFLinearMulti([]ink2Ref{d.conv}, []compute.Tensor{L.wq, L.wk, L.wv}, []ink2Ref{d.q, d.k, d.v}, B))
+		} else {
+			lin(d.conv, L.wq, d.q, B)
+			lin(d.conv, L.wk, d.k, B)
+			lin(d.conv, L.wv, d.v, B)
+		}
 		d.run(d.dd.Ink2DFQKRope(d.q, L.qNorm, d.q, d.pos, B, c.Heads, c.HeadDim, 0, 0, false, d.eps, c.Rope.Theta))
 		d.run(d.dd.Ink2DFQKRope(d.k, L.kNorm, d.k, d.pos, B, c.KVHeads, c.HeadDim, 0, 0, false, d.eps, c.Rope.Theta))
 		d.run(d.dd.Ink2DFAttend(d.q, d.k, d.v, L.kc, L.vc, d.attn, d.pos, B, c.Heads, c.KVHeads, c.HeadDim, c.Window,
@@ -236,9 +269,13 @@ func (d *ink2DFlash2Draft) layersForward() {
 		d.run(s.dev.Ink2RMS(d.x, L.postNorm, d.n, B, H, d.eps))
 		lin(d.n, L.mlpDyn, d.dyn, B)
 		d.run(d.dd.Ink2DFConv(d.n, d.dyn, L.mlpBase, ink2Ref{}, d.conv, B, H, G, kn, 0))
-		lin(d.conv, L.gate, d.g, B)
-		lin(d.conv, L.up, d.u, B)
-		d.run(d.dd.Ink2DFSiluMul(d.g, d.u, d.g, B*c.Intermediate))
+		if fd != nil {
+			d.run(fd.Ink2DFLinearSiluMul(d.conv, L.gate, L.up, d.g, d.u, B))
+		} else {
+			lin(d.conv, L.gate, d.g, B)
+			lin(d.conv, L.up, d.u, B)
+			d.run(d.dd.Ink2DFSiluMul(d.g, d.u, d.g, B*c.Intermediate))
+		}
 		lin(d.g, L.down, d.down, B)
 		d.run(d.dd.Ink2DFConv(d.down, d.dyn, L.mlpBase, d.x, d.x, B, H, G, kn, 1))
 	}
@@ -283,9 +320,9 @@ func (d *ink2DFlash2Draft) propose(anchor, pos, k int) ([]int, error) {
 		return nil, nil
 	}
 	copy(d.rows, d.tokenRow(anchor))
+	BH := d.cfg.DFlash.Block * d.cfg.Hidden
+	d.rows[BH], d.rows[BH+4] = intBits(pos), intBits(anchor)
 	s.fail(s.dev.Ink2Write(d.x, d.rows))
-	s.fail(s.dev.Ink2Write(d.pos, []float32{intBits(pos)}))
-	s.fail(s.dev.Ink2Write(d.anchor, []float32{intBits(anchor)}))
 	if s.err == nil {
 		d.forward(depth)
 	}
@@ -306,7 +343,13 @@ func (d *ink2DFlash2Draft) propose(anchor, pos, k int) ([]int, error) {
 // close releases the in-place weight views once the device has drained; the
 // session frees the uploaded buffers.
 func (d *ink2DFlash2Draft) close() {
-	if d == nil || d.store == nil {
+	if d == nil {
+		return
+	}
+	if inkling2DFlash2Fences != nil {
+		inkling2DFlash2LastRun = d.run2
+	}
+	if d.store == nil {
 		return
 	}
 	if t, err := d.s.dev.Ink2Alloc(1); err == nil {
@@ -317,16 +360,81 @@ func (d *ink2DFlash2Draft) close() {
 	d.store = nil
 }
 
-// inkling2DFlash2Drafter adapts the device draft to the speculative loop.
+// inkling2DFlash2RunStats is what one request's draft did, for tests: the
+// chooser's depth histogram and, with inkling2DFlash2Fences set, the command
+// buffers its drafted calls submitted.
+type inkling2DFlash2RunStats struct {
+	depths      [inkling2SpecMaxDraft + 1]int
+	draftFences uint64
+	// judged and accepted count, per draft position, the verifies that reached
+	// it and the ones that kept it
+	judged, accepted [inkling2SpecMaxDraft]int
+	// stepTime is the wall time from a Draft's return to its Observe (verify
+	// and commit) by drafted length; logged, never read by the chooser
+	stepTime [inkling2SpecMaxDraft + 1]time.Duration
+	drafted  time.Time
+}
+
+// inkling2DFlash2LastRun is the stats of the last closed draft, recorded only
+// while a test has set inkling2DFlash2Fences so production closes never share it.
+var inkling2DFlash2LastRun inkling2DFlash2RunStats
+
+// inkling2DFlash2Fences, set by a test, counts the device's submitted command
+// buffers.
+var inkling2DFlash2Fences func() uint64
+
+// inkling2DFlash2Drafter adapts the device draft to the speculative loop. A
+// step the width chooser does not draft returns an empty proposal, never nil:
+// the width-1 verify it runs commits the draft context taps, which the plain
+// step does not.
 type inkling2DFlash2Drafter struct{ d *ink2DFlash2Draft }
 
 func (a inkling2DFlash2Drafter) Draft(history []int, k int) []int {
-	props, err := a.d.propose(history[len(history)-1], a.d.s.pos, k)
+	d := a.d
+	if d.width == nil || d.width.max != min(k, d.cfg.DFlash.Block-1) {
+		d.width = newInkling2DFlash2Width(min(k, d.cfg.DFlash.Block-1))
+	}
+	n := d.width.choose()
+	d.run2.depths[n]++
+	if n == 0 {
+		d.run2.drafted = time.Now()
+		return []int{}
+	}
+	var f0 uint64
+	if inkling2DFlash2Fences != nil {
+		f0 = inkling2DFlash2Fences()
+	}
+	props, err := d.propose(history[len(history)-1], d.s.pos, n)
+	if inkling2DFlash2Fences != nil {
+		d.run2.draftFences += inkling2DFlash2Fences() - f0
+	}
+	d.run2.drafted = time.Now()
 	if err != nil {
-		a.d.s.fail(err)
+		d.s.fail(err)
 		return nil
 	}
 	return props
 }
 
-func (inkling2DFlash2Drafter) Observe(*inkling2Resident, []int, int) error { return nil }
+// Observe feeds the chooser the outcome of a drafted step; the prefill and
+// undrafted steps carry no acceptance.
+func (a inkling2DFlash2Drafter) Observe(_ *inkling2Resident, fed []int, keep int) error {
+	w, r := a.d.width, &a.d.run2
+	if w == nil || len(fed) != w.pending+1 || r.drafted.IsZero() {
+		return nil
+	}
+	r.stepTime[w.pending] += time.Since(r.drafted)
+	r.drafted = time.Time{}
+	if w.pending == 0 {
+		return nil
+	}
+	for j := 0; j < w.pending && j <= keep-1; j++ {
+		r.judged[j]++
+		if j < keep-1 {
+			r.accepted[j]++
+		}
+	}
+	w.observe(w.pending, keep-1)
+	w.pending = 0
+	return nil
+}

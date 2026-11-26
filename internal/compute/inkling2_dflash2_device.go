@@ -23,3 +23,14 @@ type Inkling2DFlash2Device interface {
 	// Ink2DFSiluMul is out = silu(g) * u.
 	Ink2DFSiluMul(g, u, out Ink2Ref, n int) error
 }
+
+// Inkling2DFlash2FusedDevice is the optional fused launches of the draft
+// block; each writes what its separate Inkling2DFlash2Device ops write.
+type Inkling2DFlash2FusedDevice interface {
+	// Ink2DFLinearMulti is Ink2DFLinear of up to three weights of equal
+	// columns over one input, in one launch: y[i] = x w[i]^T.
+	Ink2DFLinearMulti(x []Ink2Ref, w []Tensor, y []Ink2Ref, tokens int) error
+	// Ink2DFLinearSiluMul is y = silu(x gate^T) * (x up^T), Ink2DFLinear twice
+	// and Ink2DFSiluMul; scratch ([tokens][rows]) is used only on the fallback.
+	Ink2DFLinearSiluMul(x Ink2Ref, gate, up Tensor, y, scratch Ink2Ref, tokens int) error
+}

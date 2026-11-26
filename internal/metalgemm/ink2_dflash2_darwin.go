@@ -115,7 +115,15 @@ func (d *Ink2Device) DraftHead(w Ink2Weight, x Ink2Ref, xStride int, y Ink2Ref, 
 		return false, fmt.Errorf("metalgemm: inkling2 draft head needs 4 SIMD groups of 32")
 	}
 	bytes := w.Rows * (w.Cols / block * blockBytes)
-	return true, d.Dispatch(p, [3]int{(w.Rows + 31) / 32, 1, 1}, [3]int{128, 1, 1},
+	rowsPerGroup := 32
+	if w.Type == 13 && w.ByteOff%4 == 0 && w.Cols%256 == 0 && x.Off%4 == 0 && xStride%4 == 0 {
+		if p, err = d.Pipeline(ink2DFlash2HeadSource(), "ink2_df2_head_q5_K_reg"); err != nil {
+			return false, err
+		}
+		// two SIMD groups of 8 rows each measured fastest
+		rowsPerGroup = 16
+	}
+	return true, d.Dispatch(p, [3]int{(w.Rows + rowsPerGroup - 1) / rowsPerGroup, 1, 1}, [3]int{128 * rowsPerGroup / 32, 1, 1},
 		Ink2BufferAt(w.Buf, w.ByteOff&^3, bytes+w.ByteOff&3), x.Span((tokens-1)*xStride+w.Cols), y.Span((tokens-1)*yStride+w.Rows),
 		Ink2Const(ink2DF2HeadShape{rows: uint32(w.Rows), cols: uint32(w.Cols), byteOffset: uint32(w.ByteOff & 3), tokens: uint32(tokens),
 			xStride: uint32(xStride), yStride: uint32(yStride)}))

@@ -455,3 +455,59 @@ func TestInk2DraftBlockGPUTime(t *testing.T) {
 	t.Logf("GPU per op, block of %d: fc fuse %dx%d %v (gate %dx%d %v), conv %v, attend %d ctx %v, select %d rows x %d vocab %v",
 		rows, hidden, 4*hidden, fuse, inter, hidden, gateTime, conv, window-1, attend, props, vocab, sel)
 }
+
+// The fused draft linears write exactly what their separate launches write,
+// on the vector kernels and on the fallback a misaligned weight takes.
+//
+// fak-test:runtime integration est=3s lane=default
+func TestInk2DraftFusedLinearsMatchSeparate(t *testing.T) {
+	d := ink2TestDevice(t)
+	rng := rand.New(rand.NewSource(17))
+	const cols = 512
+	for _, pad := range []int{0, 1} {
+		for _, tokens := range []int{1, 3, 8} {
+			x := ink2ConvTestPut(t, d, 0, ink2ConvTestRand(rng, tokens*cols, 1))
+			shapes := []int{70, 16, 33}
+			var ws []Ink2Weight
+			var sep, fused []Ink2Ref
+			for _, r := range shapes {
+				w, _ := ink2DFTestBF16(t, d, ink2ConvTestRand(rng, r*cols, .05), r, cols, 8*pad)
+				if pad == 1 {
+					w, _ = ink2DFTestBF16(t, d, ink2ConvTestRand(rng, r*cols, .05), r, cols, 3)
+				}
+				ws = append(ws, w)
+				a, b := ink2TestAlloc(t, d, tokens*r), ink2TestAlloc(t, d, tokens*r)
+				if err := d.DraftLinear([]Ink2Ref{x}, w, a, tokens); err != nil {
+					t.Fatal(err)
+				}
+				sep, fused = append(sep, a), append(fused, b)
+			}
+			for n := 1; n <= 3; n++ {
+				if err := d.DraftLinearMulti([]Ink2Ref{x}, ws[:n], fused[:n], tokens); err != nil {
+					t.Fatal(err)
+				}
+				for i := range n {
+					want, got := ink2ConvTestRead(t, d, sep[i], tokens*shapes[i]), ink2ConvTestRead(t, d, fused[i], tokens*shapes[i])
+					if !slices.Equal(got, want) {
+						t.Fatalf("pad %d, %d tokens, %d weights: output %d differs from DraftLinear", pad, tokens, n, i)
+					}
+				}
+			}
+			up, _ := ink2DFTestBF16(t, d, ink2ConvTestRand(rng, shapes[0]*cols, .05), shapes[0], cols, 8*pad)
+			u, g := ink2TestAlloc(t, d, tokens*shapes[0]), ink2TestAlloc(t, d, tokens*shapes[0])
+			if err := d.DraftLinear([]Ink2Ref{x}, up, u, tokens); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.DraftSiluMul(sep[0], u, sep[0], tokens*shapes[0]); err != nil {
+				t.Fatal(err)
+			}
+			scratch := ink2TestAlloc(t, d, tokens*shapes[0])
+			if err := d.DraftLinearSiluMul(x, ws[0], up, g, scratch, tokens); err != nil {
+				t.Fatal(err)
+			}
+			if want, got := ink2ConvTestRead(t, d, sep[0], tokens*shapes[0]), ink2ConvTestRead(t, d, g, tokens*shapes[0]); !slices.Equal(got, want) {
+				t.Fatalf("pad %d, %d tokens: gated linear differs from DraftLinear and DraftSiluMul", pad, tokens)
+			}
+		}
+	}
+}
