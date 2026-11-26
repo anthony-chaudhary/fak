@@ -187,8 +187,8 @@ Attach the charts: [decode comparison](assets/inkling2-decode-comparison.svg),
 6. Fresh user, through `fak run` rather than the bench: from-source CUDA build
    507 s, first token about 13.1 s, 116.5 tok/s decode.
 7. M3 Pro Metal: 40.3 tok/s, level with Splash at 37.5 (1.07x on the short
-   cell). Across its five cells the ratio runs 0.97x to 1.48x; the 1.48x cell is
-   not explained by its receipt, so we do not claim it.
+   cell). One of its five cells is not explained by its receipt, so we do not
+   claim that cell.
 8. `fak claude` / `fak opencode` / `fak pi`: same agent, every tool call
    checked. Inkling ships in v0.58.0: `go install ...@latest`. CUDA is a clone
    and the `-tags cuda` build (docs/cuda-dev.md).
