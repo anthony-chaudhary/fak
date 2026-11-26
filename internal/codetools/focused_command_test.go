@@ -409,8 +409,7 @@ func TestFocusedToolsetExactAllowedCommandsMatrix(t *testing.T) {
 			"powershell -noprofile -command get-date",
 			"powershell -NoProfile -Command get-date",
 			// Near-matches of default commands
-			"git status",                     // missing --short
-			"git status --short --branch",    // extra argument
+			"git status --output=x",          // output redirection outside orientation forms
 			"git diff; rm -rf /",             // command injection with semicolon
 			"git diff && git status --short", // command chaining with &&
 			"git diff | grep foo",            // command piping

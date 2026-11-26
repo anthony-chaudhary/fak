@@ -176,7 +176,9 @@ func TestNativeExactCommandGrantChatAdjudication(t *testing.T) {
 
 // fak-test:runtime fast est=5s
 func TestNativeExactCommandGrantOwnedGateway(t *testing.T) {
-	const granted = "go version"
+	// go version is in the focused default allowlist, so the probe must be a
+	// command the defaults do not admit.
+	const granted = "go env GOPATH"
 
 	defaults, _ := runNativeExactCommands(t, Config{}, granted, "git status --short")
 	if !strings.Contains(defaults[0], string(codetools.CodeCommandDeny)) {
@@ -195,7 +197,7 @@ func TestNativeExactCommandGrantOwnedGateway(t *testing.T) {
 	abi.RegisterRegionBackend(inlineBackend{})
 	cfg.EngineID, cfg.Model, cfg.VDSO, cfg.Native = "localtools", "test-model", true, true
 	cfg.NativeMaxTurns, cfg.NativeCodeWorkspace = 5, t.TempDir()
-	planner := &nativeExactCommandPlanner{commands: []string{granted, granted + " && echo suffix", "go env GOPATH"}}
+	planner := &nativeExactCommandPlanner{commands: []string{granted, granted + " && echo suffix", "go env GOROOT"}}
 	srv, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +212,7 @@ func TestNativeExactCommandGrantOwnedGateway(t *testing.T) {
 	if rec.Code != http.StatusOK || len(planner.results) != 3 {
 		t.Fatalf("native owned loop status=%d results=%q body=%s", rec.Code, planner.results, rec.Body.String())
 	}
-	if strings.Contains(planner.results[0], string(codetools.CodeCommandDeny)) || !strings.Contains(planner.results[0], "go version") {
+	if strings.Contains(planner.results[0], string(codetools.CodeCommandDeny)) || !strings.Contains(planner.results[0], `"exit_code":0`) {
 		t.Fatalf("exact server grant did not execute: %s", planner.results[0])
 	}
 	for i, result := range planner.results[1:] {

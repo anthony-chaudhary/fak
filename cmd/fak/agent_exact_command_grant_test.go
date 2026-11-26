@@ -88,7 +88,9 @@ func runAgentBashCommandGrants(t *testing.T, args []string, commands ...string) 
 
 // fak-test:runtime fast est=3s
 func TestAgentExactCommandGrantReachesNativeBash(t *testing.T) {
-	const granted = "go version"
+	// go version is in the focused default allowlist, so the probe must be a
+	// command the defaults do not admit.
+	const granted = "go env GOPATH"
 
 	defaults := runAgentBashCommandGrants(t, nil, granted, "git status --short")
 	if !strings.Contains(defaults[0], string(codetools.CodeCommandDeny)) {
@@ -100,9 +102,9 @@ func TestAgentExactCommandGrantReachesNativeBash(t *testing.T) {
 
 	grantedResults := runAgentBashCommandGrants(t,
 		[]string{"--allow-bash-command", granted, "--allow-bash-command", "git status --short"},
-		granted, granted+" && echo suffix", "go env GOPATH",
+		granted, granted+" && echo suffix", "go env GOROOT",
 	)
-	if strings.Contains(grantedResults[0], string(codetools.CodeCommandDeny)) || !strings.Contains(grantedResults[0], "go version") {
+	if strings.Contains(grantedResults[0], string(codetools.CodeCommandDeny)) || !strings.Contains(grantedResults[0], `"exit_code":0`) {
 		t.Fatalf("exact CLI grant did not execute through native Bash: %s", grantedResults[0])
 	}
 	for i, result := range grantedResults[1:] {
