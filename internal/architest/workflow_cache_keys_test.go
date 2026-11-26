@@ -49,25 +49,53 @@ func TestGobuildCacheSaveIsTrunkOnly(t *testing.T) {
 	}
 }
 
-// A save that runs before the job's last build or test command persists a cache
-// that does not contain what the job compiled, so the save must come last.
+// A gobuild save persists the cache as the job leaves it, so it must follow every
+// build, test and vet command in its own job. Save steps are discovered across all
+// jobs rather than pinned to one job's layout, so moving the test step between jobs
+// does not break the guard.
 func TestGobuildCacheSaveFollowsEveryBuildAndTestCommand(t *testing.T) {
-	job := ciJobBlock(t, readCIWorkflow(t), "build-vet-test")
-	saveAt := strings.Index(job, "save Go build/test cache (trunk push only)")
-	if saveAt < 0 {
-		t.Fatal("build-vet-test has no gobuild save step")
-	}
-	if testAt := strings.Index(job, "name: root module zip budget (uncached)"); testAt < 0 || testAt > saveAt {
-		t.Fatalf("gobuild save step must come after the test step (test at %d, save at %d)", testAt, saveAt)
-	}
-	for _, cmd := range []string{"go test ", "go build ", "go run ", "go vet ", "go install "} {
-		if last := strings.LastIndex(job, cmd); last > saveAt {
-			t.Errorf("build-vet-test runs %q after the gobuild save step; move the save to the end of the job", cmd)
+	jobs := ciJobs(t, readCIWorkflow(t))
+	trunkSaves := 0
+	for _, job := range jobs {
+		saves := gobuildSaveSteps(job.body)
+		if len(saves) == 0 {
+			continue
 		}
+		trunkSaves++
+		for _, save := range saves {
+			block := job.body[save.start:save.end]
+			if !strings.Contains(block, "github.ref == 'refs/heads/main'") || !strings.Contains(block, "github.event_name == 'push'") {
+				t.Errorf("%s: gobuild save step is not gated to trunk push:\n%s", job.name, block)
+			}
+			if !containsAny(job.body[:save.start], gobuildCommands) {
+				t.Errorf("%s saves the gobuild cache with no go build, test or vet command before the save", job.name)
+			}
+			for _, cmd := range gobuildCommands {
+				if last := strings.LastIndex(job.body, cmd); last > save.start {
+					t.Errorf("%s runs %q after the gobuild save step; move the save to the end of the job", job.name, cmd)
+				}
+			}
+		}
+	}
+	if trunkSaves == 0 {
+		t.Fatal("ci.yml has no job that saves the gobuild cache")
 	}
 }
 
+var gobuildCommands = []string{"go test ", "go build ", "go run ", "go vet ", "go install "}
+
 var ciJobHeader = regexp.MustCompile(`(?m)^  [A-Za-z0-9_-]+:$`)
+
+var ciStepStart = regexp.MustCompile(`(?m)^      - `)
+
+type ciJob struct {
+	name string
+	body string
+}
+
+type ciStep struct {
+	start, end int
+}
 
 func readCIWorkflow(t *testing.T) string {
 	t.Helper()
@@ -79,21 +107,61 @@ func readCIWorkflow(t *testing.T) string {
 	return strings.ReplaceAll(string(raw), "\r\n", "\n")
 }
 
-// ciJobBlock returns the named top-level job with comment-only lines removed, so
-// commands quoted in comments cannot satisfy or break the ordering check.
-func ciJobBlock(t *testing.T, src, name string) string {
+// ciJobs returns every top-level job in ci.yml in file order, each body with
+// comment-only lines removed, so commands quoted in comments cannot satisfy or
+// break the ordering check.
+func ciJobs(t *testing.T, src string) []ciJob {
 	t.Helper()
-	header := "\n  " + name + ":\n"
-	start := strings.Index(src, header)
-	if start < 0 {
-		t.Fatalf("ci.yml has no %s job", name)
+	at := strings.Index(src, "\njobs:\n")
+	if at < 0 {
+		t.Fatal("ci.yml has no jobs section")
 	}
-	rest := src[start+len(header):]
-	if loc := ciJobHeader.FindStringIndex(rest); loc != nil {
-		rest = rest[:loc[0]]
+	body := src[at:]
+	headers := ciJobHeader.FindAllStringIndex(body, -1)
+	if len(headers) == 0 {
+		t.Fatal("ci.yml jobs section has no jobs")
 	}
+	jobs := make([]ciJob, 0, len(headers))
+	for i, h := range headers {
+		end := len(body)
+		if i+1 < len(headers) {
+			end = headers[i+1][0]
+		}
+		name := strings.TrimSuffix(strings.TrimSpace(body[h[0]:h[1]]), ":")
+		jobs = append(jobs, ciJob{name: name, body: stripCommentLines(body[h[1]:end])})
+	}
+	return jobs
+}
+
+// gobuildSaveSteps returns the steps of a job body that save the gobuild cache.
+func gobuildSaveSteps(job string) []ciStep {
+	starts := ciStepStart.FindAllStringIndex(job, -1)
+	var saves []ciStep
+	for i, loc := range starts {
+		end := len(job)
+		if i+1 < len(starts) {
+			end = starts[i+1][0]
+		}
+		block := job[loc[0]:end]
+		if strings.Contains(block, "uses: actions/cache/save@") && strings.Contains(block, "-gobuild-") {
+			saves = append(saves, ciStep{start: loc[0], end: end})
+		}
+	}
+	return saves
+}
+
+func containsAny(s string, needles []string) bool {
+	for _, n := range needles {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
+}
+
+func stripCommentLines(s string) string {
 	var kept []string
-	for _, line := range strings.Split(rest, "\n") {
+	for _, line := range strings.Split(s, "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
 			kept = append(kept, line)
 		}
