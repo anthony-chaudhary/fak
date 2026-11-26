@@ -65,7 +65,7 @@ jobs:
       FAK_RELEASE_OWNER: release-cadence-${{ github.run_id }}-${{ github.run_attempt }}
     permissions:
       contents: write
-      actions: read
+      actions: write
       # #4025: the publish-staleness escalation may file/bump ONE deduped tracking issue
       # via the shared gate-signal feeder when @latest is VERY_STALE under a killed auto-cut.
       issues: write
