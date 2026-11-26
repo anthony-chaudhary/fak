@@ -60,6 +60,7 @@ func RegisterKernelProfileReader(backend string, read func() (KernelProfile, boo
 // With a reader it may block behind in-flight device work, so it must never be
 // called while that backend's device lock is held.
 func KernelProfileSnapshot() *KernelProfile {
+	joinDeferredBackends()
 	r := kernelProfileReaderSlot.Load()
 	if r == nil {
 		return nil

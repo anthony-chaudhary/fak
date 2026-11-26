@@ -102,12 +102,18 @@ func applyCUDATF32() {
 	}
 }
 
-func init() {
+// Context creation, the cuBLAS handle, the workspace and the arm probes cost a few hundred
+// ms, so they run on first registry read (or StartBackendInit) instead of before main.
+func init() { registerDeferred(startCUDABackend) }
+
+// startCUDABackend brings the device up and returns the backend to register, or nil when
+// no CUDA device is reachable so cpu-ref stays the only backend.
+func startCUDABackend() Backend {
 	var name [256]C.char
 	var sm C.int
 	var total C.size_t
 	if C.fcuda_init(&name[0], 256, &sm, &total) != 0 {
-		return // no reachable CUDA device — leave cpu-ref as the only backend
+		return nil
 	}
 	graphEnabled = os.Getenv("FAK_CUDA_GRAPH") == "1"
 	// Typed device receipt (ticket rtx5090-sm120-detection-receipt): capture the raw init facts
@@ -129,7 +135,6 @@ func init() {
 			DriverVersion: captureCUDADriverVersion(),
 		}, CUDABuildArches{}),
 	}
-	Register(cudaDev)
 	RegisterDeviceWorkReader("cuda", readCUDADeviceWork)
 	initCUDAQ4KPrefillArm(int(sm))
 	initCUDAQ4KDecodeArm()
@@ -144,6 +149,7 @@ func init() {
 	// via EnableCUDATF32().
 	tf32Enabled = os.Getenv("FAK_CUDA_TF32") == "1"
 	applyCUDATF32()
+	return cudaDev
 }
 
 // captureCUDADriverVersion asks the CUDA runtime for the driver version via cudaDriverGetVersion

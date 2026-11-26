@@ -18,6 +18,7 @@ package compute
 // through fcuda_set_tf32, which guards a nil handle. The non-cuda build provides an empty twin
 // (tf32_nocuda.go) so a host can call this unconditionally without a build-tag branch.
 func EnableCUDATF32() {
+	joinDeferredBackends()
 	tf32Enabled = true
 	applyCUDATF32()
 }

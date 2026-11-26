@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/deploymanifest"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
@@ -860,6 +861,8 @@ func cmdServe(argv []string) {
 	// t0 anchors the boot timeline exposed as fak_gateway_time_to_ready_seconds; it
 	// must be the FIRST statement so flag parse + policy + weight load are accounted.
 	t0 := time.Now()
+	// Device bring-up overlaps flag parse and preflight; the backend lookup joins it.
+	compute.StartBackendInit()
 	// Registered first so it runs last: a nonzero exit waits for every deferred cleanup below.
 	exitCode := 0
 	defer func() {

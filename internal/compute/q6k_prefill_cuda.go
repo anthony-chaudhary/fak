@@ -38,6 +38,7 @@ func applyCUDAQ6KPrefillArm(arm CUDAQ6KPrefillArm) {
 // SetCUDAQ6KPrefillArm switches the Q6_K P>=8 BatchedMatMul arm at runtime. A refused arm
 // returns its error and leaves the current arm in place.
 func SetCUDAQ6KPrefillArm(arm CUDAQ6KPrefillArm) error {
+	joinDeferredBackends()
 	sm := 0
 	if cudaDev != nil {
 		sm = cudaBackendSM(cudaDev)
@@ -51,6 +52,7 @@ func SetCUDAQ6KPrefillArm(arm CUDAQ6KPrefillArm) error {
 
 // CUDAQ6KPrefillArmInUse reports the arm the Q6_K P>=8 BatchedMatMul offers panels to.
 func CUDAQ6KPrefillArmInUse() CUDAQ6KPrefillArm {
+	joinDeferredBackends()
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	return cudaQ6KPrefillArmCur

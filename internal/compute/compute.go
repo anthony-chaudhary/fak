@@ -630,7 +630,8 @@ type CollectiveBackend interface {
 // ---- Registry -------------------------------------------------------------------
 //
 // The registry replaces the //go:build amd64 fork as the dispatch mechanism: backends
-// self-register in init(); the host picks one by name. The package deliberately does
+// self-register in init() (a slow device reserves its slot and comes up on first registry
+// read, or earlier via StartBackendInit); the host picks one by name. The package deliberately does
 // NOT read os.Getenv itself (it is empty on wasm and the package must stay portable) —
 // the host resolves the name (from FAK_BACKEND on native, from a JS config on wasm) and
 // passes it to Pick. Default() returns the Reference floor, which is always present.
@@ -640,6 +641,8 @@ var registry []Backend
 // Register adds a backend to the registry. Called from a backend's init(). A second
 // registration with the same Name replaces the first (so a test double can override).
 func Register(b Backend) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
 	for i, e := range registry {
 		if e.Name() == b.Name() {
 			registry[i] = b
@@ -651,6 +654,9 @@ func Register(b Backend) {
 
 // Registered returns the names of all registered backends, Reference first.
 func Registered() []string {
+	joinDeferredBackends()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	out := make([]string, 0, len(registry))
 	for _, b := range registry {
 		out = append(out, b.Name())
@@ -662,6 +668,9 @@ func Registered() []string {
 // user-facing backend selector should use this rather than Pick so a typo cannot
 // silently run on the Reference floor and masquerade as an accelerator result.
 func Lookup(name string) (Backend, bool) {
+	joinDeferredBackends()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	for _, b := range registry {
 		if b.Name() == name {
 			return b, true
@@ -685,6 +694,9 @@ func Pick(name string) Backend {
 // Default returns the first registered Reference backend, else the first registered
 // backend, else nil. The Reference is the portable floor every target degrades to.
 func Default() Backend {
+	joinDeferredBackends()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	for _, b := range registry {
 		if b.Class() == Reference {
 			return b

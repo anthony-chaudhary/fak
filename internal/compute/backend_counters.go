@@ -110,6 +110,7 @@ func ReadDeviceWork(backend string) (DeviceWork, bool) {
 }
 
 func registeredDeviceWorkReader(backend string) func() DeviceWork {
+	joinDeferredBackends()
 	deviceWorkReaders.mu.RLock()
 	defer deviceWorkReaders.mu.RUnlock()
 	return deviceWorkReaders.byBackend[backend]

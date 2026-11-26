@@ -94,7 +94,7 @@ func TestCUDAInitConstructsSessionFaultLatch(t *testing.T) {
 	file := parseCUDAWiringSource(t, "cuda.go")
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "init" || fn.Recv != nil {
+		if !ok || fn.Name.Name != "startCUDABackend" || fn.Recv != nil {
 			continue
 		}
 		found := false
@@ -109,11 +109,11 @@ func TestCUDAInitConstructsSessionFaultLatch(t *testing.T) {
 			return true
 		})
 		if !found {
-			t.Fatal("cuda.go init() registers the backend without constructing its session fault latch")
+			t.Fatal("cuda.go startCUDABackend() returns the backend without constructing its session fault latch")
 		}
 		return
 	}
-	t.Fatal("cuda.go: no init() found")
+	t.Fatal("cuda.go: no startCUDABackend() found")
 }
 
 func TestCUDABackendPublishesDeviceFaultReporterCapability(t *testing.T) {

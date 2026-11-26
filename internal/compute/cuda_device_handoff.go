@@ -34,6 +34,7 @@ func cudaHandoffErr(stage string, rc C.int) error {
 
 // CUDADeviceCount reports the CUDA devices visible to this process.
 func CUDADeviceCount() (int, error) {
+	joinDeferredBackends()
 	var n C.int
 	if err := cudaHandoffErr("device count", C.fcuda_handoff_device_count(&n)); err != nil {
 		return 0, err
@@ -43,6 +44,7 @@ func CUDADeviceCount() (int, error) {
 
 // CUDAPeerAccess reports whether device src can copy straight into device dst.
 func CUDAPeerAccess(src, dst int) (bool, error) {
+	joinDeferredBackends()
 	var can C.int
 	if err := cudaHandoffErr("peer probe", C.fcuda_handoff_peer_probe(C.int(src), C.int(dst), &can)); err != nil {
 		return false, err
@@ -52,6 +54,7 @@ func CUDAPeerAccess(src, dst int) (bool, error) {
 
 // HopF32 implements HiddenStateHop on real devices.
 func (h CUDAHop) HopF32(src []float32, srcDev, dstDev int) ([]float32, DeviceHandoffReceipt, error) {
+	joinDeferredBackends() // before cudaMu: bring-up takes it
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	n, err := CUDADeviceCount()

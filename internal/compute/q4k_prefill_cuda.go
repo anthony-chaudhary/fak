@@ -61,6 +61,7 @@ func applyCUDAQ4KPrefillArm(arm CUDAQ4KPrefillArm, err error) {
 // SetCUDAQ4KPrefillArm switches the P >= 128 Q4_K GEMM arm at runtime. A refused arm returns
 // its typed error and leaves the current arm in place.
 func SetCUDAQ4KPrefillArm(arm CUDAQ4KPrefillArm) error {
+	joinDeferredBackends()
 	sm := 0
 	if cudaDev != nil {
 		sm = cudaBackendSM(cudaDev)
@@ -75,6 +76,7 @@ func SetCUDAQ4KPrefillArm(arm CUDAQ4KPrefillArm) error {
 
 // CUDAQ4KPrefillArmInUse reports the arm the P >= 128 Q4_K GEMM runs, or the latched refusal.
 func CUDAQ4KPrefillArmInUse() (CUDAQ4KPrefillArm, error) {
+	joinDeferredBackends()
 	cudaQ4KPrefillArmMu.Lock()
 	defer cudaQ4KPrefillArmMu.Unlock()
 	return cudaQ4KPrefillArm, cudaQ4KPrefillArmErr
@@ -162,6 +164,7 @@ func applyCUDAQ4KDecodeArm(arm CUDAQ4KDecodeArm) {
 // SetCUDAQ4KDecodeArm switches the P < 4 Q4_K GEMV arm at runtime. An unknown arm returns
 // ErrCUDAQ4KDecodeArmUnknown and leaves the current arm in place.
 func SetCUDAQ4KDecodeArm(arm CUDAQ4KDecodeArm) error {
+	joinDeferredBackends()
 	if err := CheckCUDAQ4KDecodeArm(arm); err != nil {
 		return err
 	}
@@ -171,6 +174,7 @@ func SetCUDAQ4KDecodeArm(arm CUDAQ4KDecodeArm) error {
 
 // CUDAQ4KDecodeArmInUse reports the arm the P < 4 Q4_K GEMV runs.
 func CUDAQ4KDecodeArmInUse() CUDAQ4KDecodeArm {
+	joinDeferredBackends()
 	cudaQ4KPrefillArmMu.Lock()
 	defer cudaQ4KPrefillArmMu.Unlock()
 	return cudaQ4KDecodeArm

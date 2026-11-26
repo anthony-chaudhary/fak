@@ -16,7 +16,10 @@ package compute
 // to call when no CUDA device was found at init (graphEnabled simply gates a path the
 // cpu-ref backend never advertises). The non-cuda build provides an empty twin so a
 // host can call this unconditionally.
-func EnableCUDAGraph() { graphEnabled = true }
+func EnableCUDAGraph() {
+	joinDeferredBackends()
+	graphEnabled = true
+}
 
 // CUDAGraphReplays reports how many captured decode graphs have replayed and fenced cleanly.
 func CUDAGraphReplays() uint64 { return cudaGraphReplays.Load() }
@@ -30,6 +33,7 @@ func CUDAGraphReplays() uint64 { return cudaGraphReplays.Load() }
 // 3 buffers (K, Kraw, V) × numKVHeads × headDim × positions × 4B per layer — a large budget
 // is real VRAM, so size it to the context you actually serve, not the architectural maximum.
 func SetCUDAGraphKVCapacity(positions int) {
+	joinDeferredBackends()
 	if positions > cudaKVMaxPos {
 		cudaKVMaxPos = positions
 	}

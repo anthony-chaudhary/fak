@@ -68,6 +68,7 @@ func RegisterDeviceWorkReader(backend string, read func() DeviceWork) (unregiste
 // DeviceBackendRegistered reports whether any device backend registered its
 // work reader, so a host-run stage can tell it ran beside a live device.
 func DeviceBackendRegistered() bool {
+	joinDeferredBackends()
 	deviceWorkReaders.mu.RLock()
 	defer deviceWorkReaders.mu.RUnlock()
 	return len(deviceWorkReaders.byBackend) > 0
@@ -76,6 +77,7 @@ func DeviceBackendRegistered() bool {
 // DeviceWorkSnapshot reads every registered backend, sorted by backend name.
 // It never waits on device work.
 func DeviceWorkSnapshot() []DeviceWork {
+	joinDeferredBackends()
 	deviceWorkReaders.mu.RLock()
 	out := make([]DeviceWork, 0, len(deviceWorkReaders.byBackend))
 	for backend, read := range deviceWorkReaders.byBackend {
