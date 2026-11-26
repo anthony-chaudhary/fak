@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1380<br>
-rows: 1340<br>
-unverified rows: 0 / 1340<br>
-source-only rows absent from help: 1105
+parsed files: 1394<br>
+rows: 1346<br>
+unverified rows: 0 / 1346<br>
+source-only rows absent from help: 1111
 
 ## Surface table
 
@@ -110,6 +110,11 @@ source-only rows absent from help: 1105
 | `fak bench h2h report` |  | runBenchH2HReport / internal/h2hbench | `case` arm of the dispatch switch in runBenchH2H() | NONE | — | **SOURCE ONLY** |
 | `fak bench h2h run` |  | runBenchH2HRun / internal/h2hbench | `case` arm of the dispatch switch in runBenchH2H() | NONE | — | **SOURCE ONLY** |
 | `fak bench h2h serve-wait` | polls GET <armURL>/models on every --arm until each one answers 200 (and lists --model when set) or the deadline passes | runBenchH2HServeWait / internal/h2hbench | `case` arm of the dispatch switch in runBenchH2H() | RUNTIME | — | **SOURCE ONLY** |
+| `fak bench lane-ledger` | testable entry point: args follow the "lane-ledger" verb | runBenchLaneLedger / internal/compute | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
+| `fak bench lane-ledger fill` |  | runLaneLedgerFill / internal/compute | `case` arm of the dispatch switch in runBenchLaneLedger() | NONE | — | **SOURCE ONLY** |
+| `fak bench lane-ledger observed` |  | benchLaneRunObserved / internal/compute | `case` arm of the dispatch switch in runBenchLaneLedger() | NONE | — | **SOURCE ONLY** |
+| `fak bench lane-ledger sites` |  | runLaneLedgerSites / internal/compute | `case` arm of the dispatch switch in runBenchLaneLedger() | NONE | — | **SOURCE ONLY** |
+| `fak bench lane-ledger sweep` |  | benchLaneRunSweep / internal/compute | `case` arm of the dispatch switch in runBenchLaneLedger() | NONE | — | **SOURCE ONLY** |
 | `fak bench local` |  | runBenchLocal / internal/localbench | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench post` | handles `fak bench post`. | runBenchPost / internal/benchpost, internal/scoreboard, internal/slackenv, internal/slackoutbox, internal/slackquiet, internal/slackwire | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench request` | handles `fak bench request` — the next-test-per-machine run-request | runBenchRequest / internal/benchpost, internal/scoreboard, internal/slackenv, internal/slackoutbox, internal/slackquiet, internal/slackwire, internal/windowgate | `case` arm of the dispatch switch in cmdBench() | RUNTIME | — | **SOURCE ONLY** |
@@ -255,7 +260,7 @@ source-only rows absent from help: 1105
 | `fak compute-trace profile` | prints the per-(layer, stage) activation error profile of an actual trace against a reference trace. | runComputeTraceProfile / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace summary` |  | eventDuration | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak computetune` | storage-compute arbitration: recompute prompt KV on UMA DRAM vs offload to NVMe SSD | cmdComputetune / internal/computetune | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
-| `fak concept` | position, classify, or validate entries in the concept catalog | runConceptCLI / internal/conceptcatalog, internal/hooks, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
+| `fak concept` | position, classify, or validate entries in the concept catalog | runConceptCLI / internal/conceptcatalog, internal/conceptcatalog/scorecard, internal/hooks, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
 | `fak concept freshness` | answers the question the gate asks, so an operator can check a pathspec before paying for a refusal. | runConceptFreshnessStaged / internal/conceptcatalog, internal/windowgate | `case` arm of the dispatch switch in runConceptCLI() | RUNTIME | — | **SOURCE ONLY** |
 | `fak concept generate` | command CONCEPT_FRESHNESS prints when it refuses | runConceptGenerateStaged / internal/conceptcatalog, internal/windowgate | `case` arm of the dispatch switch in runConceptCLI() | RUNTIME | — | **SOURCE ONLY** |
 | `fak concept-usage-score` | native concept-usage scorecard control-pane payload | cmdConceptUsageScore / internal/conceptusage | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
@@ -631,6 +636,7 @@ source-only rows absent from help: 1105
 | `fak launch stats` |  | runLaunchStats / internal/launchshim | `case` arm of the dispatch switch in runLaunch() | NONE | — | **SOURCE ONLY** |
 | `fak launch status` |  | runLaunchStatus / internal/appversion, internal/launchshim, internal/strmatch | `case` arm of the dispatch switch in runLaunch() | NONE | — | yes |
 | `fak launch uninstall` |  | runLaunchUninstall / internal/launchshim | `case` arm of the dispatch switch in runLaunch() | NONE | — | yes |
+| `fak launch-visual` | write or check the launch SVG charts and launch-doc numbers against the headline index | cmdLaunchVisual / internal/launchvisual | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak launchguard` | repeated-crash quarantine guard: per-identity attempt budget with status/reset | cmdLaunchguard / internal/launchguard | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak launchguard reset` |  |  | `case` arm of the dispatch switch in runLaunchguard() | N/A | — | **SOURCE ONLY** |
 | `fak launchguard status` |  |  | `case` arm of the dispatch switch in runLaunchguard() | N/A | — | **SOURCE ONLY** |
