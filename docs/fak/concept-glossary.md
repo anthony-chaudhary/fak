@@ -2700,3 +2700,10 @@ The context option that installs a witness snapshot observer: receives acquisiti
 StepDecision (superstream.StepDecision) is the pure verdict DecideStep produces for one super-workstream invocation: the exact next queue action (ACQUIRE_LEASE, EXECUTE_ITEM, WITNESS_AND_COMMIT, RELEASE_LEASE, ADVANCE_QUEUE, RESET_CONTEXT, YIELD_CONTENDED, STREAM_COMPLETE/HALTED), the active item index, the optional lease request, the context-safety verdict, the optional carryover seed, and the reason / next-safe-step text.
 
 **Distinct from:** It is the per-invocation decision record of the superstream queue state machine, NOT DriveDecision (superloop's read-first worst-loop member selection), NOT SteerDecision (trajctl's per-session steering verdict), and NOT laneadmit's lease-admission verdict (which only answers whether one lease request may be admitted); DecideStep computes it, ApplyStep mutates StreamState from it.
+
+
+### Inkling2ResidentCtxEnv (FAK_INKLING2_CTX)
+
+Inkling2ResidentCtxEnv names FAK_INKLING2_CTX, the environment knob that sets the global-slot KV capacity of a resident Inkling-2 device session, clamped to the build backend's resident bound (32768 on Metal, 24576 on CUDA) and floored at 512.
+
+**Distinct from:** The requested token capacity of one resident Inkling-2 session before it exists - not context-window (the model's fixed trained limit) and not FixedContextTokens (macfit's per-model planning constant); admission prices this value against device memory.

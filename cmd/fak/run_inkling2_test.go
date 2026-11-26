@@ -109,7 +109,7 @@ func TestRunInkling2ResidentCtx(t *testing.T) {
 		want int
 	}{
 		{"", false, 4096}, {"8192", true, 8192}, {" 512 ", true, 512}, {"511", true, 4096},
-		{"many", true, 4096}, {"23552", true, 23552}, {"100000", true, 23552},
+		{"many", true, 4096}, {"23552", true, 23552}, {"24576", true, 24576}, {"32768", true, 32768}, {"100000", true, 32768},
 	} {
 		if got := inkling2ResidentCtx(tc.v, tc.set); got != tc.want {
 			t.Errorf("ctx(%q, %v) = %d, want %d", tc.v, tc.set, got, tc.want)
@@ -144,7 +144,7 @@ func TestRunInkling2ResidentCtxError(t *testing.T) {
 	}
 	full := errors.New("inkling2 resident: position 4096 exceeds the 4096-token global cache")
 	got := inkling2ResidentCtxError(full, 4096)
-	for _, want := range []string{"4096-token context", "fak-metal-resident", "FAK_INKLING2_CTX", "default 4096", "max 23552"} {
+	for _, want := range []string{"4096-token context", "fak-metal-resident", "FAK_INKLING2_CTX", "default 4096", "max 32768"} {
 		if got == nil || !strings.Contains(got.Error(), want) {
 			t.Errorf("context error %v lacks %q", got, want)
 		}

@@ -20,164 +20,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
-// inkling2MetalChunkBackend lends a backend that has the verify ops the
-// token-batched prefill ops the chunk driver also calls, each composed from a
-// verify or decode op of the same arithmetic. A backend with its own prefill
-// ops is used as is.
-type inkling2MetalChunkBackend struct {
-	compute.Backend
-	compute.Inkling2Device
-	compute.Inkling2VerifyDevice
-	// set from the wrapped backend, so a DFlash2 draft runs on the lent ops
-	compute.Inkling2DFlash2Device
-	pos    ink2Ref
-	posSet bool
-	posVal int
-	down   ink2Ref
-}
-
-var (
-	_ compute.Inkling2PrefillDevice = (*inkling2MetalChunkBackend)(nil)
-	_ compute.Inkling2VerifyMoE     = (*inkling2MetalChunkBackend)(nil)
-)
-
+// inkling2MetalChunkBackendFor is be when it has every op the speculative chunk
+// driver calls; the production Metal backend implements them all.
 func inkling2MetalChunkBackendFor(be compute.Backend) (compute.Backend, func(), error) {
-	if _, ok := be.(compute.Inkling2PrefillDevice); ok {
-		return be, func() {}, nil
+	if !inkling2SpecCapable(be) {
+		return nil, nil, fmt.Errorf("backend %s has no inkling2 prefill and verify ops", be.Name())
 	}
-	dev, okDev := be.(compute.Inkling2Device)
-	vd, okVerify := be.(compute.Inkling2VerifyDevice)
-	if !okDev || !okVerify {
-		return nil, nil, fmt.Errorf("backend %s has no inkling2 verify ops", be.Name())
-	}
-	t, err := dev.Ink2Alloc(4)
-	if err != nil {
-		return nil, nil, err
-	}
-	b := &inkling2MetalChunkBackend{Backend: be, Inkling2Device: dev, Inkling2VerifyDevice: vd, pos: compute.Ink2At(t, 0)}
-	b.Inkling2DFlash2Device, _ = be.(compute.Inkling2DFlash2Device)
-	return b, func() { be.Free(t) }, nil
-}
-
-// Ink2PRMS and Ink2PSitu are the decode ops over the chunk's rows.
-func (b *inkling2MetalChunkBackend) Ink2PRMS(x, w, y ink2Ref, rows, n int, eps float32) error {
-	return b.Ink2RMS(x, w, y, rows, n, eps)
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PSitu(gu, act ink2Ref, k, width, actStride int, beta, linearBeta float64) error {
-	return b.Ink2Situ(gu, act, k, width, actStride, beta, linearBeta)
-}
-
-// position returns the device word holding pos0. A write fences the launches
-// already encoded, so they keep the value they were encoded against.
-func (b *inkling2MetalChunkBackend) position(pos0 int) (ink2Ref, error) {
-	if b.posSet && b.posVal == pos0 {
-		return b.pos, nil
-	}
-	b.posSet, b.posVal = true, pos0
-	return b.pos, b.Ink2Write(b.pos, []float32{intBits(pos0)})
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PMatMul(w compute.Tensor, x, y ink2Ref, T int) error {
-	ok, err := b.Ink2VRows(w, x, y, T)
-	if err == nil && !ok {
-		err = fmt.Errorf("no rows kernel for a %s weight", w.Dtype)
-	}
-	return err
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PMix(states []ink2Ref, queries ink2Ref, nq int, out ink2Ref, n, T int) error {
-	ok, err := b.Ink2VMix(states, queries, nq, nil, 0, out, n, T)
-	if err == nil && !ok {
-		err = fmt.Errorf("no verify mix")
-	}
-	return err
-}
-
-// The driver follows every Ink2PCtrlDown with the Ink2PCtrlApply of the same
-// controller, so the pair runs as one multi-controller call.
-func (b *inkling2MetalChunkBackend) Ink2PCtrlDown(cur, msg, w, g ink2Ref, n, rank, T int) error {
-	b.down = w
-	return nil
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PCtrlApply(cur, msg, g, gainW, forgetW, out ink2Ref, n, rank, T int) error {
-	return b.Ink2PControlMulti([]ink2Ref{cur}, []ink2Ref{msg}, []ink2Ref{b.down}, []ink2Ref{gainW}, []ink2Ref{forgetW},
-		[]ink2Ref{g}, []ink2Ref{out}, n, rank, T)
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PConv(x, w, dyn, hist, out, resid ink2Ref, n, heads, kn int, norm float32, T int) error {
-	return b.Ink2PConvLog(x, w, dyn, hist, ink2Ref{}, out, resid, n, heads, kn, norm, T)
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache ink2Ref, p compute.Ink2AttnParams, cap, pos0, T int) error {
-	pos, err := b.position(pos0)
-	if err != nil {
-		return err
-	}
-	return b.Ink2PQKVPostDev(q, r, k, v, qclip, rclip, kcache, vcache, pos, p, cap, T)
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PAttend(q, r, sinks, relBias, kcache, vcache, out ink2Ref, p compute.Ink2AttnParams, extent, window, cap, pos0, T int) error {
-	pos, err := b.position(pos0)
-	if err != nil {
-		return err
-	}
-	return b.Ink2PAttendDev(q, r, sinks, relBias, kcache, vcache, out, pos, p, extent, window, cap, T)
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PRoute(logits, bias, ids, wts ink2Ref, nexp, k int, scale float32, T int) error {
-	return b.Ink2VRoute(logits, bias, ids, wts, nexp, k, scale, T)
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PCombine(down, wts, out ink2Ref, k, n, T int) error {
-	return b.Ink2VCombine(down, wts, out, k, n, T)
-}
-
-func (b *inkling2MetalChunkBackend) Ink2VRoute(logits, bias, ids, wts ink2Ref, nexp, k int, scale float32, T int) error {
-	if m, ok := b.Backend.(compute.Inkling2VerifyMoE); ok {
-		return m.Ink2VRoute(logits, bias, ids, wts, nexp, k, scale, T)
-	}
-	for t := 0; t < T; t++ {
-		if err := b.Ink2Route(at(logits, t*nexp), bias, at(ids, t*k), at(wts, t*k), nexp, k, scale); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (b *inkling2MetalChunkBackend) Ink2VCombine(down, wts, out ink2Ref, k, n, T int) error {
-	if m, ok := b.Backend.(compute.Inkling2VerifyMoE); ok {
-		return m.Ink2VCombine(down, wts, out, k, n, T)
-	}
-	for t := 0; t < T; t++ {
-		if err := b.Ink2Combine(at(down, t*k*n), at(wts, t*k), at(out, t*n), k, n); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PExpertGrouped(compute.Tensor, int, int, ink2Ref, ink2Ref, int, int, ink2Ref, int, ink2Ref, ink2Ref, bool) (bool, error) {
-	return false, nil
-}
-
-func (b *inkling2MetalChunkBackend) Ink2PExpertSorted(stack compute.Tensor, expertRows, nexp int, ids, x ink2Ref, xDiv, xStride int, y ink2Ref, npairs int, scale, scratch, sortIds, sortX, sortY ink2Ref) (bool, error) {
-	if xDiv > 1 {
-		if err := b.Ink2VRepeatRows(x, sortX, xStride, npairs/xDiv, xDiv); err != nil {
-			return false, err
-		}
-		x = sortX
-	}
-	return b.Ink2ExpertMatVec(stack, expertRows, ids, x, xStride, y, npairs, scale, nil)
-}
-
-func (b *inkling2MetalChunkBackend) Ink2VExperts(stack compute.Tensor, expertRows int, ids, x ink2Ref, xDiv, xStride int, y ink2Ref, npairs int, scale ink2Ref) (bool, error) {
-	ve, ok := b.Backend.(compute.Inkling2VerifyMoE)
-	if !ok {
-		return false, nil
-	}
-	return ve.Ink2VExperts(stack, expertRows, ids, x, xDiv, xStride, y, npairs, scale)
+	return be, func() {}, nil
 }
 
 // inkling2MetalSpecLoad is the host load beside a timing: every number here is
@@ -235,8 +84,6 @@ func TestInkling2MetalSpecGreedyMatchesResident(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	_, lent := sbe.(*inkling2MetalChunkBackend)
-	t.Logf("prefill ops lent from the verify ops: %v", lent)
 	// FAK_INKLING2_GRAPH stays at its default: Metal has no graph capture, and
 	// a full-width verify has to fall back to the eager chunk on its own.
 	t.Setenv("FAK_INKLING2_SPEC", "4")

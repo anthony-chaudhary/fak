@@ -33,8 +33,8 @@ func TestInkling2AdmittedCtxPricedWithinFree(t *testing.T) {
 		if ctx == 0 {
 			continue
 		}
-		if ctx%256 != 0 || ctx > 24576 {
-			t.Fatalf("free %d: ctx %d is off the 256 step or above the 24576 cap", free, ctx)
+		if ctx%256 != 0 || ctx > inkling2ResidentCtxMax {
+			t.Fatalf("free %d: ctx %d is off the 256 step or above the %d cap", free, ctx, inkling2ResidentCtxMax)
 		}
 		if priced := inkling2ResidentSessionBytes(s, ctx); priced > free {
 			t.Fatalf("free %d: ctx %d prices %d bytes, above free", free, ctx, priced)

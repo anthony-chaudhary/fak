@@ -66,6 +66,9 @@ func (s *inkling2Resident) attachDFlash2(dm *Inkling2DFlash2Model) (*ink2DFlash2
 	if !ok {
 		return nil, fmt.Errorf("inkling2 dflash2: backend %s has no draft ops", s.be.Name())
 	}
+	if !inkling2SpecCapable(s.be) {
+		return nil, fmt.Errorf("inkling2 dflash2: backend %s has no verify or prefill ops", s.be.Name())
+	}
 	c := dm.Config
 	hp := s.hp
 	visits := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)

@@ -110,6 +110,9 @@ func (s *inkling2Resident) attachDraft(dm *Inkling2DSparkModel) (*ink2DeviceDraf
 	if !ok {
 		return nil, fmt.Errorf("inkling2 draft: backend %s has no draft ops", s.be.Name())
 	}
+	if !inkling2SpecCapable(s.be) {
+		return nil, fmt.Errorf("inkling2 draft: backend %s has no verify or prefill ops", s.be.Name())
+	}
 	hp, w := dm.HP, dm.Weights
 	if hp.Taps > 4 || hp.Hidden != s.hp.Hidden || hp.HeadDim > 256 {
 		return nil, fmt.Errorf("inkling2 draft: unsupported geometry %+v", hp)

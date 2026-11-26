@@ -263,7 +263,7 @@
       "kind": "concept",
       "definition": "The model's hard token budget that the planner allocates resident spans within.",
       "distinction": "The hard token BUDGET - NOT ctxplan (which allocates within it) and NOT recall (the overflow store it spills to).",
-      "distinct_from": ["ctxplan", "recall", "refuse-context-length-helper"],
+      "distinct_from": ["ctxplan", "recall", "refuse-context-length-helper", "context-ctx-inkling2residentctxenv"],
       "aliases": ["contextlength"],
       "grounding": "contextwindow",
       "grounding_kind": "symbol",

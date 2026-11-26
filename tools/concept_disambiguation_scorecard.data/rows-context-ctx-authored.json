@@ -125,5 +125,25 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "context-ctx-inkling2residentctxenv",
+      "canonical": "Inkling2ResidentCtxEnv (FAK_INKLING2_CTX)",
+      "family": "context-ctx",
+      "kind": "config",
+      "definition": "Inkling2ResidentCtxEnv names FAK_INKLING2_CTX, the environment knob that sets the global-slot KV capacity of a resident Inkling-2 device session, clamped to the build backend's resident bound (32768 on Metal, 24576 on CUDA) and floored at 512.",
+      "distinction": "The requested token capacity of one resident Inkling-2 session before it exists - not context-window (the model's fixed trained limit) and not FixedContextTokens (macfit's per-model planning constant); admission prices this value against device memory.",
+      "distinct_from": [
+        "context-window",
+        "context-ctx-fixedcontexttokens"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2ResidentCtxEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

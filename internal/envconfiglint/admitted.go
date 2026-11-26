@@ -1012,12 +1012,14 @@ var admittedPostFreeze = []string{
 	"FAK_INKLING2_BATCHED_PREFILL",
 	"FAK_INKLING2_PREFILL_GROUPED",
 
-	// internal/ggufload/inkling2loop_spec.go + inkling2dspark.go — the opt-in DSpark
-	// speculative decode: FAK_INKLING2_SPEC is the draft depth (unset or 0 keeps plain
-	// decode), FAK_INKLING2_MTP_DIR is the snapshot directory holding the draft head
+	// internal/ggufload/inkling2loop_spec.go + inkling2dspark.go — speculative greedy
+	// decode: FAK_INKLING2_SPEC is the draft depth (0 keeps plain decode; unset is plain
+	// except on the resident Metal target of fak run, which defaults to lookup drafting
+	// and FAK_INKLING2_SPEC=0 opts out of), FAK_INKLING2_MTP_DIR is the snapshot directory holding the draft head
 	// weights, FAK_INKLING2_VERIFY_GROUPED=1 selects the grouped expert GEMM for verify
 	// chunks, FAK_INKLING2_DSPARK_SHORTLIST sizes the draft head's logit shortlist, and
-	// FAK_INKLING2_SPEC_DRAFT picks the draft source (lookup, dspark, dflash2 or auto).
+	// FAK_INKLING2_SPEC_DRAFT picks the draft source (lookup, dspark, dflash2 or auto;
+	// unset is the target's default draft, else auto).
 	// A depth, a local path, a draft selector and two kernel toggles, not credentials.
 	// Relocates to: a typed Inkling-2 speculative-decode config.
 	"FAK_INKLING2_SPEC",
@@ -1047,6 +1049,14 @@ var admittedPostFreeze = []string{
 	// the fast variant, for A/B attribution. A kernel-selection list, not a credential.
 	// Relocates to: a typed Inkling-2 prefill config.
 	"FAK_INKLING2_PREFILL_OLD",
+
+	// internal/compute/metal_inkling2_prefill.go — FAK_INK2P_GEMM=0 keeps the decode-exact
+	// kernels for wide Metal prefill chunks instead of the tiled GEMMs, and
+	// FAK_INK2P_PROFILE=1 times each prefill op family. A rollback toggle and a profiler
+	// switch, not credentials.
+	// Relocates to: a typed Inkling-2 prefill config.
+	"FAK_INK2P_GEMM",
+	"FAK_INK2P_PROFILE",
 
 	// internal/ggufload/inkling2loop_prefill.go — FAK_INKLING2_PREFILL_CTRL_BATCH=1 runs a
 	// prefill visit's Q/K/V controllers as one grid per stage. An opt-in kernel-batching
