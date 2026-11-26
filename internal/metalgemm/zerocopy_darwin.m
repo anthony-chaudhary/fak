@@ -51,8 +51,12 @@ size_t mg_zerocopy_buffer_length(void* handle) {
 // mg_zerocopy_buffer_contents returns the CPU-accessible memory pointer of the Metal shared buffer.
 void* mg_zerocopy_buffer_contents(void* handle) {
     if (handle == NULL) return NULL;
-    id<MTLBuffer> buf = (__bridge id<MTLBuffer>)handle;
-    return buf.contents;
+    // Called from Go threads with no pool: the getter's autoreleased reference
+    // would outlive mg_zerocopy_buffer_free and pin the buffer.
+    @autoreleasepool {
+        id<MTLBuffer> buf = (__bridge id<MTLBuffer>)handle;
+        return buf.contents;
+    }
 }
 
 // mg_zerocopy_buffer_free releases the retained Metal buffer handle.
