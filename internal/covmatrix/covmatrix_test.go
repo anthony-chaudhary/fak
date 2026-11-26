@@ -311,33 +311,58 @@ func modelSource(t *testing.T, name string) string {
 	return string(b)
 }
 
-// kernelTopologyCases parses internal/model/config.go's family -> BlockTopology default
-// switch and returns each assigned topology mapped to the `case` condition that assigns it.
+// modelProductionSources returns every non-test .go file under internal/model, so the
+// topology switch is found wherever a split of the package has moved it (config_axes.go).
+func modelProductionSources(t *testing.T) []string {
+	t.Helper()
+	dir := filepath.Join(repotest.Root(t), "internal", "model")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skipf("internal/model not readable (%v); cross-check skipped", err)
+	}
+	var srcs []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		srcs = append(srcs, modelSource(t, name))
+	}
+	return srcs
+}
+
+// kernelTopologyCases scans the family -> BlockTopology default switch across the given
+// sources and returns each assigned topology mapped to the `case` condition that assigns it.
 // The switch is a flat "case <family predicates>: c.BlockTopology = X" ladder, so remembering
 // the last `case` line and reading the assignment under it is enough — no go/ast needed, and a
-// restructure that breaks the shape is caught by the completeness check in the caller.
-func kernelTopologyCases(src string) map[Topology]string {
+// restructure that breaks the shape is caught by the completeness check in the caller. Each
+// source is scanned on its own so a pending `case` cannot pair with an assignment in another file.
+func kernelTopologyCases(srcs ...string) map[Topology]string {
 	assigned := map[string]Topology{
 		"PostNorm":         PostNorm,
 		"SandwichNorm":     SandwichNorm,
 		"ParallelResidual": ParallelResidual,
 	}
 	out := map[Topology]string{}
-	pending := ""
-	for _, line := range strings.Split(src, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "case ") {
-			pending = trimmed
-			continue
+	for _, src := range srcs {
+		pending := ""
+		for _, line := range strings.Split(src, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "case ") {
+				pending = trimmed
+				continue
+			}
+			rhs, isAssign := strings.CutPrefix(trimmed, "c.BlockTopology = ")
+			if !isAssign || pending == "" {
+				continue
+			}
+			if topo, known := assigned[rhs]; known {
+				if _, seen := out[topo]; !seen {
+					out[topo] = pending
+				}
+			}
+			pending = ""
 		}
-		rhs, isAssign := strings.CutPrefix(trimmed, "c.BlockTopology = ")
-		if !isAssign || pending == "" {
-			continue
-		}
-		if topo, known := assigned[rhs]; known {
-			out[topo] = pending
-		}
-		pending = ""
 	}
 	return out
 }
@@ -350,15 +375,15 @@ func kernelTopologyCases(src string) map[Topology]string {
 // here moves the whole climb-debt headline the milestone scorecard folds.
 //
 // The binding runs both ways. A family the roster calls PostNorm/SandwichNorm/
-// ParallelResidual must be named by the config.go case that assigns exactly that topology; a
+// ParallelResidual must be named by the internal/model case that assigns exactly that topology; a
 // family the roster calls PreNorm (or SparseAttn, which is a covmatrix-local fence axis, not
 // a model.BlockTopology — the MLA/DSA/MSA families lower to the PreNorm zero value) must be
 // named by NO case, because the kernel's switch is what would move it off PreNorm.
 func TestFamilyTopologyMatchesKernel(t *testing.T) {
-	cases := kernelTopologyCases(modelSource(t, "config.go"))
+	cases := kernelTopologyCases(modelProductionSources(t)...)
 	for _, topo := range []Topology{PostNorm, SandwichNorm, ParallelResidual} {
 		if cases[topo] == "" {
-			t.Fatalf("no `case ...: c.BlockTopology = %s` found in internal/model/config.go; the topology switch moved or changed shape — re-derive this cross-check before trusting the roster", topo)
+			t.Fatalf("no `case ...: c.BlockTopology = %s` found in any internal/model production file; the topology switch moved or changed shape — re-derive this cross-check before trusting the roster", topo)
 		}
 	}
 
@@ -372,11 +397,11 @@ func TestFamilyTopologyMatchesKernel(t *testing.T) {
 		for topo, cond := range cases {
 			named := strings.Contains(cond, needle)
 			if topo == f.Topology && !named {
-				t.Errorf("family %q pins Topology %s but config.go's %s case does not name %q — the roster has drifted from the kernel: %s",
+				t.Errorf("family %q pins Topology %s but the internal/model %s case does not name %q — the roster has drifted from the kernel: %s",
 					f.Name, f.Topology, topo, f.ResolverToken, cond)
 			}
 			if topo != f.Topology && named {
-				t.Errorf("family %q pins Topology %s but config.go assigns %s for %q — the roster has drifted from the kernel: %s",
+				t.Errorf("family %q pins Topology %s but internal/model assigns %s for %q — the roster has drifted from the kernel: %s",
 					f.Name, f.Topology, topo, f.ResolverToken, cond)
 			}
 		}
