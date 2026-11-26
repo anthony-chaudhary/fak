@@ -215,11 +215,11 @@ func inkling2DeviceWeight(be compute.Backend, typ TensorType, raw []byte, rows, 
 	shape := []int{rows, cols}
 	switch typ {
 	case TensorNVFP4:
-		packed, scales, err := repackInkling2NVFP4(raw, rows, cols)
+		payload, _, err := repackInkling2NVFP4Payload(raw, rows, cols)
 		if err != nil {
 			return compute.Tensor{}, 0, err
 		}
-		host, err := compute.NewNVFP4(be, shape, packed, scales, 1)
+		host, err := compute.NewNVFP4Owned(be, shape, payload, 1)
 		if err != nil {
 			return compute.Tensor{}, 0, err
 		}

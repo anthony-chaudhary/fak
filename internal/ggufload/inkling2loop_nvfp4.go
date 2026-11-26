@@ -10,18 +10,31 @@ import (
 // layout: packed E2M1 [rows, cols/2] with even K in the low nibble, then one
 // E4M3FN scale byte per 16 values. ggml's doubled E2M1 table and halved UE4M3
 // scale cancel, so codes and scale bits carry over unchanged and the global
-// scale is 1.
+// scale is 1. packed and scales are adjacent views of one buffer. The device
+// load path uses repackInkling2NVFP4Payload; this split form serves the tests.
 func repackInkling2NVFP4(raw []byte, rows, cols int) (packed, scales []byte, err error) {
+	payload, packedBytes, err := repackInkling2NVFP4Payload(raw, rows, cols)
+	if err != nil {
+		return nil, nil, err
+	}
+	return payload[:packedBytes:packedBytes], payload[packedBytes:], nil
+}
+
+// repackInkling2NVFP4Payload is repackInkling2NVFP4 into the single
+// [packed|scales] buffer compute.NewNVFP4Owned adopts, so load allocates and
+// writes each expert stack once.
+func repackInkling2NVFP4Payload(raw []byte, rows, cols int) (payload []byte, packedBytes int, err error) {
 	if rows <= 0 || cols <= 0 || cols%qkNVFP4 != 0 {
-		return nil, nil, fmt.Errorf("inkling2_loop: NVFP4 repack of [%d %d] needs cols divisible by %d", rows, cols, qkNVFP4)
+		return nil, 0, fmt.Errorf("inkling2_loop: NVFP4 repack of [%d %d] needs cols divisible by %d", rows, cols, qkNVFP4)
 	}
 	blocks := rows * (cols / qkNVFP4)
 	if len(raw) != blocks*blockNVFP4Bytes {
-		return nil, nil, fmt.Errorf("inkling2_loop: NVFP4 repack has %d bytes, want %d", len(raw), blocks*blockNVFP4Bytes)
+		return nil, 0, fmt.Errorf("inkling2_loop: NVFP4 repack has %d bytes, want %d", len(raw), blocks*blockNVFP4Bytes)
 	}
 	const subs = qkNVFP4 / qkNVFP4Sub
-	packed = make([]byte, blocks*qkNVFP4/2)
-	scales = make([]byte, blocks*subs)
+	packedBytes = blocks * qkNVFP4 / 2
+	payload = make([]byte, packedBytes+blocks*subs)
+	packed, scales := payload[:packedBytes:packedBytes], payload[packedBytes:]
 	// A whole expert stack is ~10^7 blocks; split it across cores.
 	workers := max(1, min(runtime.GOMAXPROCS(0), blocks/4096))
 	errs := make([]error, workers)
@@ -36,10 +49,10 @@ func repackInkling2NVFP4(raw []byte, rows, cols int) (packed, scales []byte, err
 	wg.Wait()
 	for _, err := range errs {
 		if err != nil {
-			return nil, nil, err
+			return nil, 0, err
 		}
 	}
-	return packed, scales, nil
+	return payload, packedBytes, nil
 }
 
 func repackInkling2NVFP4Blocks(raw, packed, scales []byte, lo, hi int) error {

@@ -43,6 +43,9 @@ type hostBuf struct {
 	// nvfp4Scales, when set, holds the NVFP4 block scales apart from the packed
 	// codes in i8 (a row view cannot keep the two planes adjacent).
 	nvfp4Scales []int8
+	// nvfp4ScalesValid records that NewNVFP4Owned validated the block scales of
+	// a payload no caller can still write, so readers skip re-validating them.
+	nvfp4ScalesValid bool
 }
 
 // Ready reports the host buffer materialized; the CPU reference is synchronous so it is always true.

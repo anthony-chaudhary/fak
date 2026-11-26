@@ -8,6 +8,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"runtime"
+	"sync"
+	"unsafe"
 )
 
 // NewNVFP4 owns a row-major [out,in] W4A16 weight with in divisible by 16.
@@ -35,9 +38,70 @@ func NewNVFP4(be Backend, shape []int, packed, blockScales []byte, globalScale f
 	raw := i8View(payload)
 	copy(raw, packed)
 	copy(raw[weightBytes:], blockScales)
+	return nvfp4HostTensor(be, shape, payload, globalScale, false), nil
+}
+
+// NewNVFP4Owned is NewNVFP4 for a payload already laid out as packed E2M1
+// bytes followed by the block scales. The tensor takes ownership of payload
+// without copying it, so the caller must not write it afterwards, including
+// through HostBuffer.I8 on the returned tensor. The scales
+// are validated once here, in parallel; because nothing else holds a writable
+// alias, the upload path does not validate them again.
+func NewNVFP4Owned(be Backend, shape []int, payload []byte, globalScale float32) (Tensor, error) {
+	weightBytes, scaleBytes, err := nvfp4PayloadShape(shape)
+	if err != nil {
+		return Tensor{}, err
+	}
+	if len(payload) != weightBytes+scaleBytes {
+		return Tensor{}, fmt.Errorf("%w: payload has %d bytes, want %d", ErrNVFP4Shape, len(payload), weightBytes+scaleBytes)
+	}
+	if !nvfp4Finite(globalScale) || globalScale < 0 {
+		return Tensor{}, fmt.Errorf("%w: tensor scale must be finite and non-negative", ErrNVFP4Scale)
+	}
+	if index := nvfp4FirstInvalidScaleParallel(payload[weightBytes:]); index >= 0 {
+		return Tensor{}, fmt.Errorf("%w: block scale %d must be finite and non-negative", ErrNVFP4Scale, index)
+	}
+	owned := unsafe.Slice((*int8)(unsafe.Pointer(&payload[0])), len(payload))
+	return nvfp4HostTensor(be, shape, owned, globalScale, true), nil
+}
+
+func nvfp4HostTensor(be Backend, shape []int, payload []int8, globalScale float32, scalesValid bool) Tensor {
 	q := &QuantSpec{Block: NVFP4BlockSize, Axis: 2, Bits: 4, Symmetric: true, Scale: []float32{globalScale}}
 	return makeTensor(be, NVFP4, RowMajor, append([]int(nil), shape...), q,
-		&hostBuf{i8: payload, nvfp4: true}), nil
+		&hostBuf{i8: payload, nvfp4: true, nvfp4ScalesValid: scalesValid})
+}
+
+// nvfp4ScaleChunk keeps one validation worker's range large enough that
+// goroutine startup is noise against the scan.
+const nvfp4ScaleChunk = 1 << 20
+
+// nvfp4FirstInvalidScaleParallel returns the same index as
+// nvfp4FirstInvalidScale, splitting the scan across cores.
+func nvfp4FirstInvalidScaleParallel(scales []byte) int {
+	workers := min(runtime.GOMAXPROCS(0), len(scales)/nvfp4ScaleChunk)
+	if workers <= 1 {
+		return nvfp4FirstInvalidScale(scales)
+	}
+	found := make([]int, workers)
+	var wg sync.WaitGroup
+	for w := range workers {
+		lo, hi := len(scales)*w/workers, len(scales)*(w+1)/workers
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			found[w] = nvfp4FirstInvalidScale(scales[lo:hi])
+			if found[w] >= 0 {
+				found[w] += lo
+			}
+		}()
+	}
+	wg.Wait()
+	for _, index := range found {
+		if index >= 0 {
+			return index
+		}
+	}
+	return -1
 }
 
 func nvfp4PayloadShape(shape []int) (int, int, error) {
@@ -137,6 +201,12 @@ func checkedNVFP4WeightPayload(w Tensor) (packed, scales []byte, globalScale flo
 	packed, scales, globalScale = payload[:weightBytes], payload[weightBytes:], q.Scale[0]
 	if split {
 		scales = i8View(storage.nvfp4Scales)
+	}
+	if storage.nvfp4ScalesValid {
+		if !nvfp4Finite(globalScale) || globalScale < 0 {
+			return nil, nil, 0, fmt.Errorf("%w: tensor scale must be finite and non-negative", ErrNVFP4Scale)
+		}
+		return packed, scales, globalScale, nil
 	}
 	if err := nvfp4ValidateScales(scales, globalScale); err != nil {
 		return nil, nil, 0, err
