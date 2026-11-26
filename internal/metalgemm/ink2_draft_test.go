@@ -74,7 +74,7 @@ func ink2DFTestLinearHost(x [][]float32, w []float32, outRows, cols, tokens int)
 
 // fak-test:runtime integration est=2s lane=default
 func TestInk2DraftLinearMatchesHost(t *testing.T) {
-	d := ink2TestDevice(t)
+	d := ink2TestBF16DraftDevice(t)
 	rng := rand.New(rand.NewSource(11))
 	// xoff and pad multiples of 4 and 8 with seg a multiple of 8 take the
 	// vector kernel; the rest the scalar one.
@@ -403,7 +403,7 @@ func TestInk2DraftBlockGPUTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("allocates the full-vocabulary codebooks")
 	}
-	d := ink2TestDevice(t)
+	d := ink2TestBF16DraftDevice(t)
 	rng := rand.New(rand.NewSource(15))
 	const (
 		rows, hidden, inter, heads, kvHeads, dim = 8, 2304, 6912, 32, 8, 128
@@ -461,7 +461,7 @@ func TestInk2DraftBlockGPUTime(t *testing.T) {
 //
 // fak-test:runtime integration est=3s lane=default
 func TestInk2DraftFusedLinearsMatchSeparate(t *testing.T) {
-	d := ink2TestDevice(t)
+	d := ink2TestBF16DraftDevice(t)
 	rng := rand.New(rand.NewSource(17))
 	const cols = 512
 	for _, pad := range []int{0, 1} {
@@ -510,4 +510,12 @@ func TestInk2DraftFusedLinearsMatchSeparate(t *testing.T) {
 			}
 		}
 	}
+}
+
+// ink2TestBF16DraftDevice is a test device whose draft linears read their
+// BF16 weights, which the host references hold.
+func ink2TestBF16DraftDevice(t *testing.T) *Ink2Device {
+	d := ink2TestDevice(t)
+	d.dfState().q8 = -1
+	return d
 }

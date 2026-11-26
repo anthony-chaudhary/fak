@@ -5,9 +5,11 @@ package metalgemm
 import (
 	"math"
 	"math/rand"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
+	"weak"
 )
 
 // The key-split attention matches the single-pass kernel at the shipped
@@ -174,4 +176,93 @@ func TestInk2DraftQ8GPUTime(t *testing.T) {
 		b := best[mode]
 		t.Logf("int8 %v: fc %dx%d %v, qkv %v, gate+up silu %v", mode > 0, hidden, 4*hidden, b[0], b[1], b[2])
 	}
+}
+
+// The int8 copies are on by default, found by a weight's bytes rather than its
+// buffer, and follow a buffer whose bytes change.
+//
+// fak-test:runtime integration est=1s lane=default
+func TestInk2DraftQ8CacheFollowsContent(t *testing.T) {
+	d := ink2TestDevice(t)
+	t.Setenv(DraftQ8Env, "")
+	if !d.draftQ8() {
+		t.Fatal("int8 draft linears off by default")
+	}
+	t.Setenv(DraftQ8Env, "0")
+	if d.draftQ8() {
+		t.Fatalf("%s=0 leaves the int8 draft linears on", DraftQ8Env)
+	}
+	rng := rand.New(rand.NewSource(31))
+	const rows, cols = 24, 256
+	a, b := ink2ConvTestRand(rng, rows*cols, .05), ink2ConvTestRand(rng, rows*cols, .05)
+	w1, _ := ink2DFTestBF16(t, d, a, rows, cols, 0)
+	w2, _ := ink2DFTestBF16(t, d, a, rows, cols, 0)
+	w3, _ := ink2DFTestBF16(t, d, b, rows, cols, 0)
+	get := func(w Ink2Weight) Ink2Buf {
+		t.Helper()
+		q, ok, err := d.draftQ8Weight(w)
+		if err != nil || !ok {
+			t.Fatalf("int8 copy: ok %v, %v", ok, err)
+		}
+		return q.buf
+	}
+	q1 := get(w1)
+	if get(w1) != q1 || get(w2) != q1 {
+		t.Fatal("equal weight bytes in another buffer quantized again")
+	}
+	q3 := get(w3)
+	if q3 == q1 {
+		t.Fatal("other weight bytes of the same shape found the first copy")
+	}
+	// The bytes of b, staged as ink2DFTestBF16 lays them out, overwrite w1.
+	staged, _ := ink2DFTestBF16(t, d, b, rows, cols, 0)
+	words, err := d.Read(Ink2Ref{Buf: staged.Buf}, rows*cols/2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Write(Ink2Ref{Buf: w1.Buf}, words); err != nil {
+		t.Fatal(err)
+	}
+	if get(w1) != q3 {
+		t.Fatal("a view whose bytes changed kept its old int8 copy")
+	}
+	st := d.dfState()
+	n := 0
+	for _, es := range st.cache {
+		n += len(es)
+	}
+	if n != 2 {
+		t.Fatalf("%d int8 copies cached for 2 distinct weights", n)
+	}
+}
+
+// A collected device's draft state leaves the per-device map.
+//
+// fak-test:runtime integration est=1s lane=default
+func TestInk2DraftStateDroppedWithDevice(t *testing.T) {
+	if !Available() {
+		t.Skip("requires a Metal device")
+	}
+	d, err := NewInk2Device()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.dfState()
+	k := weak.Make(d)
+	d.Close()
+	d = nil
+	held := func() bool {
+		ink2DFStates.Lock()
+		defer ink2DFStates.Unlock()
+		_, ok := ink2DFStates.m[k]
+		return ok
+	}
+	for range 100 {
+		if !held() {
+			return
+		}
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("a collected device's draft state is still held")
 }
