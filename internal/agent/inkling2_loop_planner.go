@@ -287,7 +287,7 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 	}
 	if p.contextTokens > 0 {
 		if len(ids) >= p.contextTokens {
-			return nil, fmt.Errorf("inkling2_loop planner: prompt of %d tokens leaves no room in the %d-token context", len(ids), p.contextTokens)
+			return nil, &InKernelContextLengthError{PromptTokens: len(ids), MaxNewTokens: maxNew, MaxContext: p.contextTokens}
 		}
 		maxNew = min(maxNew, p.contextTokens-len(ids))
 	}
@@ -296,7 +296,11 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 	scan.release = release
 	res, err := p.generate(ctx, ids, maxNew, p.stops, scan.push)
 	if err != nil {
-		return nil, err
+		var stage *model.BackendForwardOperationError
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || IsLocalForwardError(err) || errors.As(err, &stage) {
+			return nil, err
+		}
+		return nil, NewLocalForwardError("Inkling-2 generation", err, classifiedDeviceOOM(err))
 	}
 	text, err := scan.finish()
 	if err != nil {

@@ -1,13 +1,67 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
+
+func TestInkling2LoopPlannerContextBoundary(t *testing.T) {
+	p := inkling2StreamPlanner(t, &inkling2StreamGen{ids: []int{'a', 'b'}})
+	msgs := []Message{{Role: RoleUser, Content: "hello"}}
+	turn, err := p.Complete(t.Context(), msgs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.contextTokens = turn.Usage.PromptTokens
+	_, err = p.Complete(t.Context(), msgs, nil)
+	var overflow *InKernelContextLengthError
+	if !errors.As(err, &overflow) || overflow.PromptTokens != p.contextTokens || overflow.MaxContext != p.contextTokens || overflow.MaxNewTokens != Inkling2LoopDefaultMaxTokens {
+		t.Fatalf("full prompt: got %#v, err %v", overflow, err)
+	}
+	p.contextTokens++
+	turn, err = p.Complete(t.Context(), msgs, nil)
+	if err != nil || turn.Usage.CompletionTokens != 1 {
+		t.Fatalf("one token free: turn=%+v err=%v", turn, err)
+	}
+}
+
+type inkling2FailingGenerator struct{ err error }
+
+func (g inkling2FailingGenerator) Generate(context.Context, []int, int, map[int]bool, func(int) bool) (Inkling2LoopGeneration, error) {
+	return Inkling2LoopGeneration{}, g.err
+}
+
+func TestInkling2LoopPlannerGenerationFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cause     error
+		local     bool
+		retryable bool
+	}{
+		{"unsupported checkpoint", errors.New("checkpoint unavailable"), true, false},
+		{"allocation failure", &compute.DeviceAllocError{Bytes: 4096, Class: compute.MemoryScratchpad}, true, true},
+		{"existing classification", NewLocalForwardError("prefill", errors.New("device busy"), true), true, true},
+		{"device stage", &model.BackendForwardOperationError{}, false, false},
+		{"canceled", context.Canceled, false, false},
+		{"deadline", context.DeadlineExceeded, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := inkling2StreamPlanner(t, inkling2FailingGenerator{tc.cause})
+			_, err := p.Complete(t.Context(), []Message{{Role: RoleUser, Content: "hello"}}, nil)
+			if !errors.Is(err, tc.cause) || IsLocalForwardError(err) != tc.local || LocalForwardErrorRetryable(err) != tc.retryable {
+				t.Fatalf("unexpected error classification: %v", err)
+			}
+		})
+	}
+}
 
 // Byte-level fixture: "Ã" and "©" are the two UTF-8 bytes of "é", so a stop
 // string can straddle a token boundary inside one rune.
