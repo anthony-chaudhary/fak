@@ -87,6 +87,63 @@ func TestFocusedCommandOrientationForms(t *testing.T) {
 	}
 }
 
+func TestFocusedCommandReadOnlyPipeFilters(t *testing.T) {
+	for _, command := range []string{
+		"go test ./... 2>&1 | tail -40",
+		"go test ./... -count=1 2>&1 | head -50",
+		"go test ./... 2>&1 | head -n 20",
+		"go test ./... 2>&1 | tail -n30",
+		"go vet ./internal/codetools 2>&1 | tail -5",
+		"go build ./... 2>&1 | wc -l",
+		"go test ./... 2>&1 | grep -v ok | tail -20",
+		"go test ./... 2>&1 | grep -F FAIL",
+		"go test ./... 2>&1 | grep -c FAIL",
+		"go test ./... | grep -i -n TestFixture",
+		"git diff -- fixture.go | head -30",
+		"git status --short | wc -l",
+		"git log --oneline -3 | head -n 2",
+		"go test ./...|tail -5",
+	} {
+		if !focusedCommandAllowed(command) {
+			t.Errorf("focusedCommandAllowed(%q)=false", command)
+		}
+	}
+	for _, command := range []string{
+		"go test ./... 2>&1 | tail -40; rm -rf x",
+		"go test ./... 2>&1 | tail -40 && rm x",
+		"go test ./... | head -5 || true",
+		"go test ./... | tail -f",
+		"go test ./... | sh",
+		"go test ./... | cat",
+		"go test ./... | tee x",
+		"go test ./... | xargs rm",
+		"go test ./... | head -5 | sh",
+		"go test ./... | tail -5 > out.txt",
+		"go test ./... > out.txt 2>&1 | tail -5",
+		"go test ./... | tail -5 2>/dev/null",
+		"go test ./... | head -5 < input",
+		"go test ./... 2>&1x | tail -5",
+		"go test ./... | tail -$(echo 5)",
+		"go test ./... | tail `echo 5`",
+		"go test ./... | grep -r FAIL .",
+		"go test ./... | grep FAIL file.txt",
+		"go test ./... | grep -f patterns",
+		"go test ./... | grep 'FAIL'",
+		"go test ./... | head -99999999",
+		"go test ./... | tail -5 |",
+		"go test ./... || tail -5",
+		"go test ./... |",
+		"| tail -5",
+		"go test ./... \n| tail -5",
+		"pytest -x 2>&1 | head -50",
+		"rm -rf . | tail -5",
+	} {
+		if focusedCommandAllowed(command) {
+			t.Errorf("focusedCommandAllowed(%q)=true", command)
+		}
+	}
+}
+
 func TestFocusedToolsetReturnsTypedCommandDenial(t *testing.T) {
 	ts, err := New(Config{Root: t.TempDir(), FocusedCommands: true})
 	if err != nil {
@@ -412,7 +469,7 @@ func TestFocusedToolsetExactAllowedCommandsMatrix(t *testing.T) {
 			"git status --output=x",          // output redirection outside orientation forms
 			"git diff; rm -rf /",             // command injection with semicolon
 			"git diff && git status --short", // command chaining with &&
-			"git diff | grep foo",            // command piping
+			"git diff | sh",                  // command piping into a non-filter
 		}
 		for _, cmd := range nearMatches {
 			out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: cmd}))
