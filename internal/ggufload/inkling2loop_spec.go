@@ -82,6 +82,10 @@ type Inkling2SpecStats struct {
 
 // enableSpec allocates the verify chunk state for up to depth drafted tokens.
 func (s *inkling2Resident) enableSpec(depth int) error {
+	if s.kvHalf {
+		// the verify and draft ops read fp32 caches only
+		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=f16 has no speculative decode; unset FAK_INKLING2_SPEC or FAK_INKLING2_KV")
+	}
 	if _, ok := s.be.(compute.Inkling2VerifyDevice); !ok || !s.batched {
 		return fmt.Errorf("inkling2 spec: backend %s has no batched verify ops", s.be.Name())
 	}

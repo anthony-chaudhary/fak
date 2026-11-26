@@ -200,6 +200,15 @@ func (r *inkling2ResidentSession) Close() error {
 
 func (r *inkling2ResidentSession) Pos() int { return r.s.pos }
 
+// checkpointable is rewindable plus the global-cache copies a checkpoint makes, which
+// read f16 caches in float32 element strides and so refuse FAK_INKLING2_KV=f16.
+func (s *inkling2Resident) checkpointable() error {
+	if s.kvHalf {
+		return fmt.Errorf("inkling2 resident: f16 global KV (FAK_INKLING2_KV=f16) cannot be checkpointed")
+	}
+	return s.rewindable()
+}
+
 func (s *inkling2Resident) rewindable() error {
 	// every rewind entry reads or replaces the state a speculative forward changed
 	s.settle()
@@ -328,7 +337,7 @@ func (r *inkling2ResidentSession) copyDev(dst, src, fill ink2Ref, n int) {
 // horizon more tokens.
 func (r *inkling2ResidentSession) Checkpoint(horizon int) error {
 	s := r.s
-	if err := s.rewindable(); err != nil {
+	if err := s.checkpointable(); err != nil {
 		return err
 	}
 	ck, err := r.baseBuffers()
@@ -373,7 +382,7 @@ func (r *inkling2ResidentSession) Checkpoint(horizon int) error {
 
 func (r *inkling2ResidentSession) Restore() error {
 	s := r.s
-	if err := s.rewindable(); err != nil {
+	if err := s.checkpointable(); err != nil {
 		return err
 	}
 	ck := r.ck

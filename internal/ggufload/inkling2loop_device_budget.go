@@ -130,7 +130,12 @@ func (e *Inkling2KVOverBudgetError) Error() string {
 // would not fit. Speculative draft caches and verify state are allocated after the
 // build and are not counted in other.
 func inkling2KVFit(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, other, free int64) (int64, error) {
-	kv := inkling2ResidentKVBytes(hp, ctx, batched, chunk)
+	return inkling2KVFitDtype(hp, ctx, batched, chunk, false, other, free)
+}
+
+// inkling2KVFitDtype is inkling2KVFit with the global-slot caches f16 when half.
+func inkling2KVFitDtype(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, half bool, other, free int64) (int64, error) {
+	kv := inkling2ResidentKVBytesDtype(hp, ctx, batched, chunk, half)
 	need := kv + other
 	if free == compute.FreeUnknown {
 		ceiling := Inkling2ResidentCtxMax(inkling2ResidentBackend)
@@ -145,7 +150,7 @@ func inkling2KVFit(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk in
 	}
 	maxCtx := 0
 	if left := budget - other; left >= 0 {
-		maxCtx = inkling2MaxResidentCtx(hp, batched, chunk, ctx-1, left)
+		maxCtx = inkling2MaxResidentCtxDtype(hp, batched, chunk, half, ctx-1, left)
 	}
 	if maxCtx < Inkling2ResidentCtxMin {
 		maxCtx = 0

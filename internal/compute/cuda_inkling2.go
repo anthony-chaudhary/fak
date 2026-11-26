@@ -301,6 +301,16 @@ func ink2Bool(b bool) C.int {
 }
 
 func (c *cudaBackend) Ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	return c.ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta, p, cap, cv, false)
+}
+
+func (c *cudaBackend) Ink2QKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	return c.ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta, p, cap, cv, true)
+}
+
+// ink2QKVPost runs the single-sequence QKV post; kvHalf takes the sequence kernel's f16
+// cache path with no strides, which is the one-sequence case of that kernel.
+func (c *cudaBackend) ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv, kvHalf bool) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	var conv **C.float
@@ -314,19 +324,40 @@ func (c *cudaBackend) Ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta
 		conv = (**C.float)(unsafe.Pointer(ptrs))
 		kNorm, vNorm, kn = C.float(cv.KNorm), C.float(cv.VNorm), C.int(cv.Kn)
 	}
-	return ink2Status("qkv post", C.fcuda_ink2_qkv_post(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v), c.ink2F(qclip), c.ink2F(rclip),
+	if !kvHalf {
+		return ink2Status("qkv post", C.fcuda_ink2_qkv_post(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v), c.ink2F(qclip), c.ink2F(rclip),
+			c.ink2F(kcache), c.ink2F(vcache), c.ink2F(meta), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen),
+			C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps), ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor), C.int(cap),
+			conv, kNorm, vNorm, kn))
+	}
+	return ink2Status("qkv post f16", C.fcuda_ink2_qkv_post_seq(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v), c.ink2F(qclip), c.ink2F(rclip),
 		c.ink2F(kcache), c.ink2F(vcache), c.ink2F(meta), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen),
 		C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps), ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor), C.int(cap),
-		conv, kNorm, vNorm, kn))
+		conv, kNorm, vNorm, kn, ink2Bool(true), (*C.longlong)(nil), C.int(1)))
 }
 
 func (c *cudaBackend) Ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	return c.ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta, p, extent, window, cap, false)
+}
+
+func (c *cudaBackend) Ink2AttendHalf(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	return c.ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta, p, extent, window, cap, true)
+}
+
+func (c *cudaBackend) ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int, kvHalf bool) error {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	return ink2Status("attend", C.fcuda_ink2_attend(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias), c.ink2F(kcache),
+	if !kvHalf {
+		return ink2Status("attend", C.fcuda_ink2_attend(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias), c.ink2F(kcache),
+			c.ink2F(vcache), (*C.double)(c.ink2Ptr(scores)), c.ink2F(out), c.ink2F(meta), C.int(p.Heads), C.int(p.KVHeads),
+			C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap), C.float(p.Scale)))
+	}
+	return ink2Status("attend f16", C.fcuda_ink2_attend_seq(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias), c.ink2F(kcache),
 		c.ink2F(vcache), (*C.double)(c.ink2Ptr(scores)), c.ink2F(out), c.ink2F(meta), C.int(p.Heads), C.int(p.KVHeads),
-		C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap), C.float(p.Scale)))
+		C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap), C.float(p.Scale), ink2Bool(true), (*C.longlong)(nil), C.int(1)))
 }
+
+var _ Inkling2HalfKVDevice = (*cudaBackend)(nil)
 
 func (c *cudaBackend) Ink2SigmoidMul(x, gate Ink2Ref, n int) error {
 	cudaMu.Lock()

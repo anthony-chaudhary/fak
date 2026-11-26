@@ -93,3 +93,12 @@ type Inkling2Device interface {
 	Ink2GraphLaunch() error
 	Ink2GraphReset()
 }
+
+// Inkling2HalfKVDevice is the decode QKV post and attend over f16 global-slot caches;
+// local rings stay fp32. A backend without it keeps every cache fp32.
+type Inkling2HalfKVDevice interface {
+	// Ink2QKVPostHalf is Ink2QKVPost with kcache and vcache holding __half elements.
+	Ink2QKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error
+	// Ink2AttendHalf is Ink2Attend over f16 kcache and vcache.
+	Ink2AttendHalf(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error
+}

@@ -35,6 +35,7 @@ func inkling2PrefillControlBatch() bool { return os.Getenv("FAK_INKLING2_PREFILL
 type ink2Prefill struct {
 	s          *inkling2Resident
 	pd         compute.Inkling2PrefillDevice
+	half       compute.Inkling2PrefillHalfKV // set when s stores f16 global caches
 	T, pos0    int
 	keep, scr  ink2Ref
 	keepOff    int
@@ -122,6 +123,10 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 	}
 	T := inkling2PrefillChunkFor(len(prompt), s.chunkMax)
 	p := &ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts()}
+	if s.kvHalf {
+		// inkling2ResidentHalfKV has already checked these ops exist on this backend
+		p.half, _ = s.be.(compute.Inkling2PrefillHalfKV)
+	}
 	s.ensurePrefillArenas(T)
 	p.keepFloats, p.scrFloats = s.prefillArenas(s.prefillCap)
 	p.keep, p.scr = s.prefillKeep, s.prefillScr
@@ -565,6 +570,8 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	}
 	if s.err == nil && p.verify {
 		p.fail(p.vd.Ink2PQKVPostDev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.verifyPos, ap, cap, p.T))
+	} else if s.err == nil && p.cohort == nil && s.kvHalfSlot(slot) {
+		p.fail(p.half.Ink2PQKVPostHalf(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], ap, cap, p.pos0, p.T))
 	} else if s.err == nil && p.cohort == nil {
 		p.fail(p.pd.Ink2PQKVPost(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], ap, cap, p.pos0, p.T))
 	}
@@ -573,6 +580,8 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		p.cohort.attend(p, slot, l, q, r, k, v, sinks, attn, ap, extent, window)
 	} else if s.err == nil && p.verify {
 		p.fail(p.vd.Ink2PAttendDev(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, s.verifyPos, ap, extent, window, cap, p.T))
+	} else if s.err == nil && s.kvHalfSlot(slot) {
+		p.fail(p.half.Ink2PAttendHalf(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, ap, extent, window, cap, p.pos0, p.T))
 	} else if s.err == nil {
 		p.fail(p.pd.Ink2PAttend(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, ap, extent, window, cap, p.pos0, p.T))
 	}
