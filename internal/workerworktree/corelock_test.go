@@ -54,7 +54,7 @@ func installLiveDisambiguationFixture(t *testing.T, repo string) {
 		"docs/concept-disambiguation-scorecard/README.md":        "# Synthetic concept scorecard\n\nNo concepts are declared in this fixture.\n",
 		"docs/concept-disambiguation-scorecard/INDEX.md":         "# Synthetic concept index\n\nNo concept names are declared in this fixture.\n",
 		"docs/fak/concept-glossary.md":                           "# Synthetic concept glossary\n\nThis live-land fixture declares no concepts.\n",
-		"tools/concept_disambiguation_scorecard.data/_meta.json": "{\"families\":[]}\n",
+		"tools/concept_disambiguation_scorecard.data/_meta.json": "{\"meta\":{\"as_of\":\"2026-11-25\",\"fak_version\":\"0.0.0-fixture\"},\"families\":[]}\n",
 		"tools/concept_disambiguation_scorecard.py": `import argparse
 import json
 import os

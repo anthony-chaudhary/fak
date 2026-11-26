@@ -160,6 +160,15 @@ func (r *contextBlockingArchiveReader) Read([]byte) (int, error) {
 
 func (*contextBlockingArchiveReader) Close() error { return nil }
 
+// initDisambiguationFixtureRepo sets a commit identity explicitly because CI
+// runners have no global git user.
+func initDisambiguationFixtureRepo(t *testing.T, root string) {
+	t.Helper()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	mustGit(t, root, "config", "user.email", "trunk@test")
+	mustGit(t, root, "config", "user.name", "trunk")
+}
+
 func writeDisambiguationFixture(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
@@ -1261,7 +1270,7 @@ func tarDisambiguationFixture(t *testing.T, root string) []byte {
 
 func TestDisambiguationSnapshotKeepsExportIgnoredPaths(t *testing.T) {
 	root := t.TempDir()
-	mustGit(t, root, "init", "-q", "-b", "main")
+	initDisambiguationFixtureRepo(t, root)
 	writeDisambiguationFixture(t, root, ".gitattributes", "secret.txt export-ignore\n")
 	writeDisambiguationFixture(t, root, "secret.txt", "kept in snapshot\n")
 	writeDisambiguationFixture(t, root, "keep.txt", "kept\n")
@@ -1307,7 +1316,7 @@ func TestDisambiguationSnapshotKeepsExportIgnoredPaths(t *testing.T) {
 
 func TestDisambiguationArchiveFailureKeepsGitStderr(t *testing.T) {
 	root := t.TempDir()
-	mustGit(t, root, "init", "-q", "-b", "main")
+	initDisambiguationFixtureRepo(t, root)
 	writeDisambiguationFixture(t, root, "keep.txt", "kept\n")
 	mustGit(t, root, "add", "-A")
 	mustGit(t, root, "commit", "-q", "-m", "snapshot")
@@ -1327,7 +1336,7 @@ func TestDisambiguationArchiveFailureKeepsGitStderr(t *testing.T) {
 
 func TestDisambiguationArchiveCallerDeadlineIsNotBudgetError(t *testing.T) {
 	root := t.TempDir()
-	mustGit(t, root, "init", "-q", "-b", "main")
+	initDisambiguationFixtureRepo(t, root)
 	writeDisambiguationFixture(t, root, "keep.txt", "kept\n")
 	mustGit(t, root, "add", "-A")
 	mustGit(t, root, "commit", "-q", "-m", "snapshot")
