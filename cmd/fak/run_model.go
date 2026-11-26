@@ -298,7 +298,7 @@ func executeChatModel(cfg chatModelConfig) error {
 	var err error
 	if cfg.prompt != "" {
 		// One-shot: answer and exit.
-		_, err = runChatTurn(ctx, planner, cfg.system, nil, cfg.prompt, opts, !cfg.quiet, cfg.timings, cfg.raw)
+		_, err = runChatTurn(oneShotRunContext(ctx, planner), planner, cfg.system, nil, cfg.prompt, opts, !cfg.quiet, cfg.timings, cfg.raw)
 	} else {
 		// REPL: interactive session.
 		err = runChatREPL(ctx, planner, cfg.system, opts, !cfg.quiet, cfg.timings)
@@ -493,6 +493,17 @@ func runSampleOpts(maxTokens int, temp, topP float64, topK int, frequencyPenalty
 	}
 	opts = append(opts, extraOpts...)
 	return opts
+}
+
+// oneShotRunContext drops prefix-cache admission for a one-shot turn whose cache dies
+// with the process. Admission splits the prompt at a radix checkpoint into two device
+// walks plus snapshots, which no later request can restore; a persistent local-SSD
+// tier keeps admission because a later process can.
+func oneShotRunContext(ctx context.Context, planner agent.Planner) context.Context {
+	if p, ok := planner.(*agent.InKernelPlanner); ok && p.RadixLocalSSD().Bytes <= 0 {
+		return agent.WithoutPrefixAdmission(ctx)
+	}
+	return ctx
 }
 
 // runChatTurn runs one completion and prints the assistant text to stdout. history

@@ -102,6 +102,14 @@ func (b *hostMemoryBudget) structural(used int64) bool {
 // but whose retained prefix-cache copies would not: it is served, but not cached.
 type inKernelSkipPrefixAdmissionKey struct{}
 
+// WithoutPrefixAdmission serves the request's lookup as usual but admits nothing
+// into the prefix cache: for a caller whose cache cannot outlive the request (a
+// one-shot process with no persistent tier), every checkpoint split and snapshot
+// would be pure prefill latency.
+func WithoutPrefixAdmission(ctx context.Context) context.Context {
+	return context.WithValue(ctx, inKernelSkipPrefixAdmissionKey{}, true)
+}
+
 func inKernelSkipPrefixAdmission(ctx context.Context) bool {
 	skip, _ := ctx.Value(inKernelSkipPrefixAdmissionKey{}).(bool)
 	return skip
