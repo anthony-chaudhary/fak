@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // inkling2PrefixStore keeps cohort row checkpoints across cohorts, keyed by the exact
@@ -19,6 +21,10 @@ import (
 type inkling2PrefixStore struct {
 	capBytes  int64
 	minTokens int
+	// loopSlots is the KV slot count of the loop config the store is bound to; a
+	// checkpoint at another loop depth has a different slot layout and is refused.
+	// Zero leaves the store unbound.
+	loopSlots int
 	held      int64
 	tick      uint64
 	entries   []*ink2PrefixEntry
@@ -113,8 +119,17 @@ func (bt *Inkling2LoopCohorts) UsePrefixStore(lookup func(string) (string, bool)
 	if err != nil {
 		return false, err
 	}
+	if st != nil && bt.m != nil {
+		st.loopSlots = inkling2LoopSlots(bt.m.HP)
+	}
 	bt.store = st
 	return st != nil, nil
+}
+
+// inkling2LoopSlots is the KV slot count one row holds at hp's loop depth: every layer
+// visit gets a slot, and each extra core pass adds its core slots again.
+func inkling2LoopSlots(hp model.Inkling2LoopHParams) int {
+	return hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
 }
 
 // PrefixStats reads the prefix store's counters; zero when the store is off.
@@ -191,9 +206,13 @@ func (st *inkling2PrefixStore) branch(prompt []int, from int, peers [][]int, sel
 
 // put records ck as the state after tokens, replacing an entry for the same tokens,
 // then evicts least recently used entries until the store is within its cap. A
-// checkpoint shorter than the minimum or larger than the whole cap is not kept.
+// checkpoint shorter than the minimum, larger than the whole cap, or at another loop
+// depth than the store is bound to is not kept.
 func (st *inkling2PrefixStore) put(tokens []int, ck *ink2RowCkpt) {
 	if ck == nil || len(tokens) != ck.pos || len(tokens) < st.minTokens {
+		return
+	}
+	if st.loopSlots != 0 && len(ck.slots) != st.loopSlots {
 		return
 	}
 	bytes := ck.Bytes() + int64(8*len(tokens))
