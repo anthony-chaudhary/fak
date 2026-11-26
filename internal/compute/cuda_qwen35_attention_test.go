@@ -148,7 +148,7 @@ func TestQwen38PromptAttentionHardwareWitnessRemainsExplicit(t *testing.T) {
 	}
 }
 
-func TestQwen38PromptAttentionMMADispatchIsOptInAndFallsBack(t *testing.T) {
+func TestQwen38PromptAttentionMMADispatchIsDefaultAndFallsBack(t *testing.T) {
 	cu := cudaSourceClosure(t, "cuda_kernels.cu")
 	body := qwen38SourceFunction(t, cu, "extern \"C\" int fak_qwen35_causal_attention_panel_f32(")
 	clearError := strings.Index(body, "cudaGetLastError()")
@@ -181,9 +181,9 @@ func TestQwen38PromptAttentionMMADispatchIsOptInAndFallsBack(t *testing.T) {
 			t.Errorf("prompt-attention kernel selector missing %q", want)
 		}
 	}
-	// SIMT stays the default until the P-05 hardware A/B records a keep verdict.
-	if !strings.Contains(cu, "#define QWEN38_PREFILL_ATTN_MMA_DEFAULT 0") {
-		t.Fatal("mma prompt attention became the default without a hardware keep receipt")
+	// The P-05 hardware A/B kept mma; FAK_CUDA_QWEN38_PREFILL_ATTN=simt stays the rollback.
+	if !strings.Contains(cu, "#define QWEN38_PREFILL_ATTN_MMA_DEFAULT 1") {
+		t.Fatal("mma prompt attention is no longer the default the P-05 receipt kept")
 	}
 	launcher := qwen38SourceFunction(t, cu, "static int fak_qwen38_fattn_mma_hd256_launch(")
 	capacity := strings.Index(launcher, "if (major < 8) return -2;")

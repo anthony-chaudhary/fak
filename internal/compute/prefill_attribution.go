@@ -163,7 +163,7 @@ func LongPromptStageTable(g Qwen38HybridGeometry, P int) []AttributionStage {
 		int64(2)*int64(P)*int64(g.NHeads)*int64(g.HeadDim)*4 // Q read + Out write
 	add(scale(StageCost{Name: "causal_attention_panel", FLOPs: attnFLOPs, WeightBytes: 0,
 		ActBytes: attnBytes, Intensity: ratio(attnFLOPs, attnBytes)}, nFA),
-		nFA, "O(P^2)", "attention.cuh k_qwen38_causal_attention_panel_hd256 (SIMT arm; MMA arm default-OFF pending P-05 receipt)")
+		nFA, "O(P^2)", "attention.cuh k_qwen38_causal_attention_panel_hd256 (MMA arm by default on sm_80+; SIMT arm below sm_80 or with FAK_CUDA_QWEN38_PREFILL_ATTN=simt)")
 	// Elementwise sigmoid gate on the attention output: attn ⊙ sigmoid(gate), P*qOut wide.
 	gateElems := int64(P) * qOut
 	add(scale(StageCost{Name: "attn_gate_sigmoid_mul", FLOPs: 2 * gateElems, WeightBytes: 0,

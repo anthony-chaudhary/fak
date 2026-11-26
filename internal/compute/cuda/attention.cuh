@@ -461,9 +461,10 @@ __global__ void k_qwen38_splitkv_lse_merge_hd256(
 
 // FAK_CUDA_QWEN38_PREFILL_ATTN selects the Qwen3.8 prompt-attention kernel: "simt" forces
 // the SIMT kernel above (the parity oracle and rollback), "mma" the tensor-core port in
-// fattn_mma_hd256.cuh on sm_80+. Unset keeps SIMT until the P-05 hardware A/B records a
-// keep verdict; that receipt flips QWEN38_PREFILL_ATTN_MMA_DEFAULT to 1.
-#define QWEN38_PREFILL_ATTN_MMA_DEFAULT 0
+// fattn_mma_hd256.cuh on sm_80+. Unset selects mma: the P-05 hardware A/B kept it (the
+// SIMT panel is O(P^2) scalar work, tens of times slower from P=512 up). Below sm_80, or
+// when the launcher returns -2, the SIMT kernel still runs.
+#define QWEN38_PREFILL_ATTN_MMA_DEFAULT 1
 static bool qwen38_prefill_attention_wants_mma(void) {
   const char *mode = getenv("FAK_CUDA_QWEN38_PREFILL_ATTN");
   if (mode && strcmp(mode, "simt") == 0) return false;

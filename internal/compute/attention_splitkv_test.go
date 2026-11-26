@@ -432,7 +432,7 @@ func TestSplitKVPrefillMergeMatchesPanelOracle(t *testing.T) {
 			// Short prefixes keep the unchanged single-pass panel bitwise, and
 			// the P-05 gate semantics stay put.
 			"FCUDA_TS(\"k_qwen38_causal_attention_panel_hd256\", tokens * nH,",
-			"#define QWEN38_PREFILL_ATTN_MMA_DEFAULT 0",
+			"#define QWEN38_PREFILL_ATTN_MMA_DEFAULT 1",
 			"FAK_CUDA_QWEN38_PREFILL_ATTN",
 		} {
 			if !strings.Contains(src, want) {
