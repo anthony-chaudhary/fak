@@ -543,6 +543,7 @@ var verbManifest = []Verb{
 	{Name: "gate", Synopsis: "run companion placement and encapsulation verification", Lane: "cmd"},
 	{Name: "goal-fleet", Synopsis: "run a serialized goal-worker fleet", Lane: "cmd"},
 	{Name: "goal-launch", Synopsis: "launch a detached goal worker", Lane: "cmd"},
+	{Name: "gocache-trim", Synopsis: "bound a Go build cache by removing least-recently-used files above a byte ceiling (--check only reports)", Lane: "cmd"},
 	{Name: "kernel-oracle", Synopsis: "rank Vulkan kernel operations and shapes against an identified reference", Lane: "cmd"},
 	{Name: "keys", Synopsis: "billing key + unit-ledger operator surface: mint/topup/balance/revoke/list over keystore + ledger", Lane: "cmd"},
 	{Name: "papers", Synopsis: "fetch and search research papers in a local BM25 index", Lane: "cmd"},

@@ -182,6 +182,7 @@ var maintainerDevCommands = []string{
 	// kernel seams, not a portable adopter pattern.
 	"glue-census",
 	"go",
+	"gocache-trim",
 	"goal",
 	"goal-park",
 	// Ratcheting god-file LOC ceiling gate over fak's own tree (debtwave2 lane):

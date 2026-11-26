@@ -799,7 +799,8 @@ var tier = map[string]int{
 	"testgit":        2, // hermetic test-process helpers; a foundation-composite because ProcessTempDir composes processalive(1) to reap dead owners' temp dirs.
 	"fakroot":        1,
 	"stepobs":        2,
-	"h2hbench":       1, // off-path engine head-to-head benchmark; stdlib-only, imports nothing internal.
+	"h2hbench":       2, // off-path engine head-to-head benchmark; a foundation-composite because it composes the timingspan(1) span-ratio guard into its metrics.
+	"timingspan":     1, // named clock endpoints and span-equality guard for timing fields; stdlib-only pure library.
 	"worktreeprune":  1, // stdlib-only broad `git worktree prune` refusal on foreign-OS registrations plus own-registration cleanup.
 	"fitplan":        2,
 

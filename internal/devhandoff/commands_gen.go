@@ -44,6 +44,7 @@ var Commands = []Command{
 	{Name: "glue-census", Owner: "dev", Handler: "devcmd.RunGlueCensus", SourceOrigin: "internal/devcmd/glue_census.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "goal-fleet", Owner: "dev", Handler: "devcmd.RunGoalFleet", SourceOrigin: "internal/devcmd/goal_launch.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "goal-launch", Owner: "dev", Handler: "devcmd.RunGoalLaunch", SourceOrigin: "internal/devcmd/goal_launch.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "gocache-trim", Owner: "dev", Handler: "devcmd.RunGoCacheTrim", SourceOrigin: "internal/devcmd/gocache_trim.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "graph-audit", Owner: "dev", Handler: "devcmd.RunGraphAudit", SourceOrigin: "internal/devcmd/graph_audit.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "h2d-inventory", Owner: "dev", Handler: "devcmd.RunH2DInventory", SourceOrigin: "internal/devcmd/h2d_inventory.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "hostregress", Owner: "dev", Handler: "runHostRegress", SourceOrigin: "cmd/fak-dev/hostregress.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
