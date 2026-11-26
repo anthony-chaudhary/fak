@@ -65,7 +65,12 @@ fak run inkling2-mini --max-tokens 256 "What is 2 + 2? Reply with the number onl
 **What the alias fetches.** `inkling2-mini` is pinned to
 `Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file` in
 [unsloth/Inkling-2-Mini-GGUF](https://huggingface.co/unsloth/Inkling-2-Mini-GGUF)
-(13,631,779,296 bytes). On Apple Silicon, `fak` also fetches the DFlash2 draft
+(13,631,779,296 bytes, sha256 `e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639`).
+The pinned fetch in `internal/modelreg` (`FetchVerified`) rejects any copy whose
+size or digest differs, both after a download and on a cache hit, and deletes it,
+so a swapped or corrupt file fails closed. The search-directory reuse described
+below checks size only, not digest.
+On Apple Silicon, `fak` also fetches the DFlash2 draft
 from [incoai/Inkling-2-Mini-DFlash2](https://huggingface.co/incoai/Inkling-2-Mini-DFlash2)
 (989,975,616 bytes, about 990 MB) into an `Inkling-2-Mini-DFlash2/` directory next to the GGUF. If
 the draft download fails, `fak` warns and runs the target model alone, which

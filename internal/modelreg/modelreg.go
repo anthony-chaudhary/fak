@@ -19,9 +19,13 @@
 package modelreg
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -154,10 +158,148 @@ var Catalog = map[string]string{
 	// fetches every shard. Mini uses the Mainline_Support layout because the repo-root
 	// files are the pre-mainline tensor layout the loader does not bind.
 	"inkling2-small": "hf://unsloth/Inkling-2-Small-GGUF@42593c63926d23380ea03d643ab2cde742427608/UD-Q2_K_XL/Inkling-2-Small-UD-Q2_K_XL-00001-of-00006.gguf",
-	"inkling2-mini":  "hf://unsloth/Inkling-2-Mini-GGUF@8078d149286eec7193795413b9e0643da6d11fa1/Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file",
+	"inkling2-mini":  inklingMiniURI,
 	// Short names chain to inkling2-mini so the pin lives in one place.
 	"inkling":        "inkling2-mini",
 	"inkling-2-mini": "inkling2-mini",
+}
+
+// inklingMiniURI is the exact file the inkling2-mini alias names. artifactPins is
+// keyed by it, so a move to another revision or file must come with a new digest.
+const inklingMiniURI = "hf://unsloth/Inkling-2-Mini-GGUF@8078d149286eec7193795413b9e0643da6d11fa1/Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file"
+
+// ArtifactPin is the content a fetched file must have. The Hub revision names
+// the bytes; the sha256 proves they are the bytes fak was measured against.
+type ArtifactPin struct {
+	SHA256 string
+	Bytes  int64
+}
+
+var artifactPins = map[string]ArtifactPin{
+	inklingMiniURI: {
+		SHA256: "e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639",
+		Bytes:  13631779296,
+	},
+}
+
+// PinnedArtifact reports the content pin for an hf:// URI, if one is registered.
+func PinnedArtifact(uri string) (ArtifactPin, bool) {
+	pin, ok := artifactPins[strings.TrimSpace(uri)]
+	return pin, ok
+}
+
+// FetchVerified returns the local path of uri only after its bytes match the pin
+// registered for it. URIs without a pin are fetched unchecked, as before.
+func FetchVerified(ctx context.Context, client *hfhub.Client, uri string, progress io.Writer) (string, error) {
+	pin, ok := PinnedArtifact(uri)
+	if !ok {
+		return client.FetchURI(ctx, uri, progress)
+	}
+	return fetchPinned(ctx, client, uri, pin, progress)
+}
+
+// fetchPinned verifies on every call, including a cache hit that hfhub returns
+// without touching the network. A file that fails the pin is removed so a later
+// run cannot reuse it.
+func fetchPinned(ctx context.Context, client *hfhub.Client, uri string, pin ArtifactPin, progress io.Writer) (string, error) {
+	path, err := client.FetchURI(ctx, uri, progress)
+	if err != nil {
+		return "", err
+	}
+	if err := verifyStamped(path, pin); err != nil {
+		_ = os.Remove(path)
+		_ = os.Remove(stampPath(path))
+		return "", err
+	}
+	return path, nil
+}
+
+// verifyStamped checks path against pin. A stamp written by an earlier successful
+// hash is trusted only while the file's size, mtime and pinned digest still match
+// it, so a multi-gigabyte model is hashed once per content change, not per load.
+func verifyStamped(path string, pin ArtifactPin) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("modelreg: stat %s for pin check: %w", path, err)
+	}
+	if fi.Size() != pin.Bytes {
+		return fmt.Errorf("modelreg: %s is %d bytes, pin requires %d", path, fi.Size(), pin.Bytes)
+	}
+	if stampMatches(path, fi, pin) {
+		return nil
+	}
+	if err := verifyArtifact(path, pin); err != nil {
+		return err
+	}
+	// A failed stamp write only costs a re-hash on the next load.
+	_ = writeStamp(path, fi, pin)
+	return nil
+}
+
+// verifiedStamp records a successful digest check. Size and mtime bind it to the
+// bytes that were hashed; SHA256 binds it to the pin that accepted them.
+type verifiedStamp struct {
+	SHA256  string `json:"sha256"`
+	Size    int64  `json:"size"`
+	MtimeNS int64  `json:"mtime_ns"`
+}
+
+func stampPath(path string) string { return path + ".sha256-verified" }
+
+func stampMatches(path string, fi os.FileInfo, pin ArtifactPin) bool {
+	raw, err := os.ReadFile(stampPath(path))
+	if err != nil {
+		return false
+	}
+	var s verifiedStamp
+	if json.Unmarshal(raw, &s) != nil {
+		return false
+	}
+	return s.SHA256 == pin.SHA256 && s.Size == fi.Size() && s.MtimeNS == fi.ModTime().UnixNano()
+}
+
+// writeStamp takes fi from before the hash. If the file changed during the hash
+// its mtime no longer matches the stamp, so the next load re-hashes.
+func writeStamp(path string, fi os.FileInfo, pin ArtifactPin) error {
+	raw, err := json.Marshal(verifiedStamp{SHA256: pin.SHA256, Size: fi.Size(), MtimeNS: fi.ModTime().UnixNano()})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(stampPath(path), raw, 0o644)
+}
+
+func verifyArtifact(path string, pin ArtifactPin) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("modelreg: open %s for pin check: %w", path, err)
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("modelreg: stat %s for pin check: %w", path, err)
+	}
+	if fi.Size() != pin.Bytes {
+		return fmt.Errorf("modelreg: %s is %d bytes, pin requires %d", path, fi.Size(), pin.Bytes)
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("modelreg: hash %s: %w", path, err)
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != pin.SHA256 {
+		return fmt.Errorf("modelreg: %s sha256 %s does not match pin %s", path, got, pin.SHA256)
+	}
+	return nil
+}
+
+// VerifyLocalArtifact applies the pin registered for uri to a file already on
+// disk, such as a local copy that bypasses the fetch. A mismatch fails closed
+// and leaves the file in place, since the user placed it there.
+func VerifyLocalArtifact(uri, path string) error {
+	pin, ok := PinnedArtifact(uri)
+	if !ok {
+		return nil
+	}
+	return verifyStamped(path, pin)
 }
 
 // codingAliases is the set of Catalog aliases that are CODING-tuned and emit the

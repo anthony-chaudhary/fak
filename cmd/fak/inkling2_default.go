@@ -73,10 +73,13 @@ func runArgIsPrompt(arg string) bool {
 // companion fetch is reported and the artifact still loads.
 func fetchModelArtifact(ctx context.Context, uri string, progress io.Writer) (string, error) {
 	if local, ok := modelreg.LocalMacDefaultArtifact(uri); ok {
+		if err := modelreg.VerifyLocalArtifact(uri, local); err != nil {
+			return "", err
+		}
 		fmt.Fprintf(progress, "using local copy: %s\n", local)
 		return local, nil
 	}
-	resolved, err := hfhub.FetchURI(ctx, uri, progress)
+	resolved, err := modelreg.FetchVerified(ctx, hfhub.NewClient(), uri, progress)
 	if err != nil {
 		return "", err
 	}
