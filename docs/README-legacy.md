@@ -416,8 +416,8 @@ This list of shipped behavior moved off the front page on 2026-11-24.
   `FAK_INKLING2_MTP_DIR`): the checkpoint's own draft head proposes two tokens and one
   batched forward checks them, 151.7 tok/s on the same card. It stays off by default
   because the batched check is not bit-exact to one-token-at-a-time decode. Its tokenizer
-  now matches Hugging Face on 46/46 corpus lines. A batched prompt prefill is opt-in
-  behind `FAK_INKLING2_BATCHED_PREFILL=1`; per-token prefill stays the default.
+  now matches Hugging Face on 46/46 corpus lines. A batched prompt prefill is the default
+  on CUDA; `FAK_INKLING2_BATCHED_PREFILL=0` opts out to the per-token prefill step.
 - CUDA prefill defaults: dense K-quant prompt panels batch through the mmq kernel,
   and Q6_K batched matmul uses mmq at 8+ prompt tokens on sm_80 and newer. The Q4_K
   mmq default from 2026-11-07 stands.

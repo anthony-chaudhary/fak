@@ -796,3 +796,26 @@ func TestInkling2WarmUpPrefillsOnceAndReturnsTheSession(t *testing.T) {
 		t.Fatal("warm-up ignored a session that would not open")
 	}
 }
+
+// TestInkling2PrefillTimerIncludesSlotAcquire pins that PrefillSeconds, the prompt
+// time the receipts report as prefill tok/s and TTFT, covers the wait to acquire a
+// slot. A fresh slot opens a session, which is the slow part of acquire here.
+func TestInkling2PrefillTimerIncludesSlotAcquire(t *testing.T) {
+	const acquireWait = 200 * time.Millisecond
+	var opened []*inkling2FakeSession
+	eng := &inkling2LoopEngine{open: func() (ggufload.Inkling2LoopSession, error) {
+		time.Sleep(acquireWait)
+		s := &inkling2FakeSession{canned: []int{'a'}}
+		opened = append(opened, s)
+		return s, nil
+	}}
+	defer eng.Close()
+
+	res, _ := inkling2Gen(t, eng, []int{'s', 'y', 's', 'u'}, 1)
+	if len(opened) != 1 {
+		t.Fatalf("opened %d sessions, want the one fresh slot", len(opened))
+	}
+	if res.PrefillSeconds < acquireWait.Seconds() {
+		t.Fatalf("PrefillSeconds = %.3f, want at least the %.3fs slot acquire wait", res.PrefillSeconds, acquireWait.Seconds())
+	}
+}

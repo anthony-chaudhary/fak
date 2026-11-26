@@ -319,6 +319,7 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	if n == 0 {
 		return res, errors.New("inkling2_loop engine: empty prompt")
 	}
+	start := time.Now()
 	rw, reused, err := e.acquire(prompt)
 	if err != nil {
 		_ = e.dropCurrent()
@@ -344,7 +345,6 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	if !split {
 		last = 0
 	}
-	start := time.Now()
 	if last > reused {
 		if _, err = s.Prefill(r.ctx, prompt[reused:last]); err != nil {
 			return res, err
