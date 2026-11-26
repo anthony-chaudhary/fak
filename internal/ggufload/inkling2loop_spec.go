@@ -63,6 +63,12 @@ type inkling2Drafter interface {
 	Observe(s *inkling2Resident, fed []int, keep int) error
 }
 
+// inkling2CostObserver is a drafter that sizes its drafts from the wall time of
+// plain steps (width 1) and verifies of each width.
+type inkling2CostObserver interface {
+	ObserveCost(width int, took time.Duration)
+}
+
 // Inkling2SpecStats extends the greedy stats with the speculative step counts.
 type Inkling2SpecStats struct {
 	Inkling2LoopGreedyStats
@@ -267,6 +273,7 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 	}
 	st.Prefill = time.Since(start)
 	out := make([]int, 0, n+depth)
+	costs, _ := d.(inkling2CostObserver)
 	start = time.Now()
 	for len(out) < n {
 		out = append(out, next)
@@ -276,12 +283,16 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 		t0 := time.Now()
 		props := d.Draft(out, depth)
 		st.Draft += time.Since(t0)
+		t0 = time.Now()
 		if s.err != nil {
 			return nil, st, s.err
 		}
 		if props == nil {
 			if next, err = s.step(next); err != nil {
 				return nil, st, err
+			}
+			if costs != nil {
+				costs.ObserveCost(1, time.Since(t0))
 			}
 			st.PlainSteps++
 			if err := d.Observe(s, []int{out[len(out)-1]}, 1); err != nil {
@@ -302,7 +313,11 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 		if err := s.commitVerify(len(fed), a+1); err != nil {
 			return nil, st, err
 		}
-		st.Verify += time.Since(t0)
+		took := time.Since(t0)
+		if costs != nil {
+			costs.ObserveCost(len(fed), took)
+		}
+		st.Verify += took
 		st.Verifies++
 		st.Drafted += len(props)
 		st.Accepted += a
@@ -341,27 +356,42 @@ func (o *inkling2OracleDrafter) Draft(history []int, k int) []int {
 
 func (o *inkling2OracleDrafter) Observe(*inkling2Resident, []int, int) error { return nil }
 
-// inkling2SpecGreedy routes Inkling2LoopGreedyTimed through the DSpark speculative
-// step: FAK_INKLING2_SPEC sets the draft depth and FAK_INKLING2_MTP_DIR the HF
-// snapshot holding mtp.safetensors.
+// inkling2SpecGreedy routes Inkling2LoopGreedyTimed through the speculative
+// step: FAK_INKLING2_SPEC sets the draft depth, FAK_INKLING2_SPEC_DRAFT the draft
+// source, and FAK_INKLING2_MTP_DIR the HF snapshot holding mtp.safetensors.
 func inkling2SpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth int) ([]int, Inkling2LoopGreedyStats, error) {
-	dir := os.Getenv("FAK_INKLING2_MTP_DIR")
-	if dir == "" {
-		return nil, Inkling2LoopGreedyStats{}, fmt.Errorf("inkling2 spec: FAK_INKLING2_SPEC needs FAK_INKLING2_MTP_DIR")
-	}
-	dm, err := OpenInkling2DSpark(dir, m)
+	kind, err := inkling2SpecDraftKind()
 	if err != nil {
 		return nil, Inkling2LoopGreedyStats{}, err
 	}
-	defer dm.Close()
-	depth = min(depth, dm.HP.Block-1)
-	out, st, err := inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(s *inkling2Resident) (inkling2Drafter, error) {
-		d, err := s.attachDraft(dm)
-		if err == nil {
-			d.steps = depth
+	dir := os.Getenv("FAK_INKLING2_MTP_DIR")
+	var st Inkling2SpecStats
+	var out []int
+	switch inkling2ResolveSpecDraft(kind, dir) {
+	case inkling2DraftLookup:
+		out, st, err = inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(*inkling2Resident) (inkling2Drafter, error) {
+			return newInkling2LookupDrafter(prompt), nil
+		})
+	case inkling2DraftDSpark:
+		if dir == "" {
+			return nil, Inkling2LoopGreedyStats{}, fmt.Errorf("inkling2 spec: the dspark draft needs FAK_INKLING2_MTP_DIR")
 		}
-		return inkling2DSparkDrafter{d}, err
-	})
+		dm, oerr := OpenInkling2DSpark(dir, m)
+		if oerr != nil {
+			return nil, Inkling2LoopGreedyStats{}, oerr
+		}
+		defer dm.Close()
+		depth = min(depth, dm.HP.Block-1)
+		out, st, err = inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(s *inkling2Resident) (inkling2Drafter, error) {
+			d, err := s.attachDraft(dm)
+			if err == nil {
+				d.steps = depth
+			}
+			return inkling2DSparkDrafter{d}, err
+		})
+	default:
+		return nil, Inkling2LoopGreedyStats{}, fmt.Errorf("inkling2 spec: the %s draft has no device drafter in this host loop; use lookup or dspark", kind)
+	}
 	inkling2LastSpec = st
 	return out, st.Inkling2LoopGreedyStats, err
 }

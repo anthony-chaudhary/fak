@@ -17,7 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
-	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // inkling2MetalChunkBackend lends a backend that has the verify ops the
@@ -152,22 +152,6 @@ func (b *inkling2MetalChunkBackend) Ink2PExpertSorted(stack compute.Tensor, expe
 	return b.Ink2ExpertMatVec(stack, expertRows, ids, x, xStride, y, npairs, scale, nil)
 }
 
-// inkling2LookupDrafter drafts by prompt lookup: the tokens that followed the
-// most recent earlier occurrence of the context's longest repeated suffix. It
-// owns no weights and no device state.
-type inkling2LookupDrafter struct {
-	prompt []int
-	ngram  model.NgramDrafter
-}
-
-func (d *inkling2LookupDrafter) Draft(history []int, k int) []int {
-	n := d.ngram
-	n.MaxDraft = k
-	return n.Draft(append(slices.Clone(d.prompt), history...))
-}
-
-func (d *inkling2LookupDrafter) Observe(*inkling2Resident, []int, int) error { return nil }
-
 // inkling2MetalSpecLoad is the host load beside a timing: every number here is
 // taken on a shared machine.
 func inkling2MetalSpecLoad() string {
@@ -244,9 +228,7 @@ func TestInkling2MetalSpecGreedyMatchesResident(t *testing.T) {
 			t.Errorf("spec %s depth %d decoded %v, resident %v", name, depth, got, ref)
 		}
 	}
-	lookup := func() inkling2Drafter {
-		return &inkling2LookupDrafter{prompt: prompt, ngram: model.NgramDrafter{Enabled: true, MinMatch: 2, MaxMatch: 64}}
-	}
+	lookup := func() inkling2Drafter { return newInkling2LookupDrafter(prompt) }
 	oracle := func(corrupt func(int) bool) func() inkling2Drafter {
 		return func() inkling2Drafter { return &inkling2OracleDrafter{ref: ref, corrupt: corrupt} }
 	}
@@ -258,6 +240,73 @@ func TestInkling2MetalSpecGreedyMatchesResident(t *testing.T) {
 		check("oracle", depth, oracle(nil))
 	}
 	t.Run("verify cost by width", func(t *testing.T) { inkling2MetalSpecCost(t, m, sbe, prompt, ref) })
+	t.Run("lookup draft by workload", func(t *testing.T) { inkling2MetalSpecLookupWorkloads(t, path, m, be, sbe) })
+}
+
+// inkling2MetalSpecLookupWorkloads times plain greedy against the production
+// lookup draft, selected through FAK_INKLING2_SPEC_DRAFT, on a prompt the reply
+// repeats and on open chat, holding the ids to plain greedy on both.
+func inkling2MetalSpecLookupWorkloads(t *testing.T, path string, m *Inkling2LoopModel, be, sbe compute.Backend) {
+	f, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	table, ok := f.GGMLTokenizer()
+	if !ok {
+		t.Fatal("checkpoint has no embedded BPE tokenizer")
+	}
+	tok, err := tokenizer.FromGGML(table.Tokens, table.Merges, table.TokenTypes, table.Pre)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := func(s string) tokenizer.Segment { return tokenizer.Segment{Text: s, Trusted: true} }
+	chat := func(user string) []int {
+		ids, err := tok.EncodeSegments([]tokenizer.Segment{
+			control("<|message_system|><|content_text|>"), {Text: "Thinking effort level: 0.0"}, control("<|end_message|>"),
+			control("<|message_user|><|content_text|>"), {Text: user}, control("<|end_message|>"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ids
+	}
+	const code = `func sumPositive(xs []int) int {
+	acc := 0
+	for _, x := range xs {
+		if x > 0 {
+			acc += x
+		}
+	}
+	return acc
+}`
+	workloads := []struct {
+		name   string
+		prompt []int
+	}{
+		{"code edit", chat("Rename the variable acc to total in this Go function and reply with the whole function only, no prose:\n\n" + code)},
+		{"open chat", chat("Tell me something interesting about octopuses.")},
+	}
+	t.Setenv("FAK_INKLING2_SPEC_DRAFT", inkling2DraftLookup)
+	const n = 96
+	for _, w := range workloads {
+		want, plain, err := inkling2ResidentGreedy(m, be, w.prompt, n)
+		if err != nil {
+			t.Fatalf("%s plain: %v", w.name, err)
+		}
+		for _, depth := range []int{4, 8} {
+			got, _, err := inkling2SpecGreedy(m, sbe, w.prompt, n, depth)
+			if err != nil {
+				t.Fatalf("%s lookup depth %d: %v", w.name, depth, err)
+			}
+			st := inkling2LastSpec
+			t.Logf("workload %s (%d prompt tokens): plain %.2f tok/s, lookup depth %d %.2f tok/s (%.2fx); %d verifies, accepted %d/%d, plain steps %d, %s",
+				w.name, len(w.prompt), plain.DecodeTokensPerSecond(), depth, st.DecodeTokensPerSecond(),
+				st.DecodeTokensPerSecond()/plain.DecodeTokensPerSecond(), st.Verifies, st.Accepted, st.Drafted, st.PlainSteps, inkling2MetalSpecLoad())
+			if !slices.Equal(got, want) {
+				t.Errorf("%s lookup depth %d decoded %v, plain %v", w.name, depth, got, want)
+			}
+		}
+	}
 }
 
 // inkling2MetalSpecSession prefills prompt into a session with verify state

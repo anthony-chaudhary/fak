@@ -1016,10 +1016,12 @@ var admittedPostFreeze = []string{
 	// speculative decode: FAK_INKLING2_SPEC is the draft depth (unset or 0 keeps plain
 	// decode), FAK_INKLING2_MTP_DIR is the snapshot directory holding the draft head
 	// weights, FAK_INKLING2_VERIFY_GROUPED=1 selects the grouped expert GEMM for verify
-	// chunks, and FAK_INKLING2_DSPARK_SHORTLIST sizes the draft head's logit shortlist.
-	// A depth, a local path and two kernel toggles, not credentials.
+	// chunks, FAK_INKLING2_DSPARK_SHORTLIST sizes the draft head's logit shortlist, and
+	// FAK_INKLING2_SPEC_DRAFT picks the draft source (lookup, dspark, dflash2 or auto).
+	// A depth, a local path, a draft selector and two kernel toggles, not credentials.
 	// Relocates to: a typed Inkling-2 speculative-decode config.
 	"FAK_INKLING2_SPEC",
+	"FAK_INKLING2_SPEC_DRAFT",
 	"FAK_INKLING2_MTP_DIR",
 	"FAK_INKLING2_VERIFY_GROUPED",
 	"FAK_INKLING2_DSPARK_SHORTLIST",
