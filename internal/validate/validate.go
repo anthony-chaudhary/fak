@@ -623,6 +623,7 @@ var treeContractDirs = []string{
 	"internal/conflationscore",
 	"internal/docfreshrsi/aeogen",
 	"internal/skillfootprint",
+	"internal/agentsindex",
 }
 
 // selectValidatePackages restores deleted-path graph context, then records live
