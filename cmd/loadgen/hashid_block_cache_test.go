@@ -75,9 +75,10 @@ func TestHashIDBlockCache(t *testing.T) {
 			t.Fatal("tail pad repeated across requests; it must be a fresh draw")
 		}
 
-		unhashed, layout := mustBuild(t, c, 12, nil, 10)
-		if layout != HashIDLayoutUnhashed || len(unhashed) != 12 {
-			t.Fatalf("unhashed layout = %v len = %d", layout, len(unhashed))
+		const requested = 12
+		unhashed, layout := mustBuild(t, c, requested, nil, 10)
+		if layout != HashIDLayoutUnhashed || len(unhashed) != requested {
+			t.Fatalf("unhashed layout = %v len = %d, want the requested %d tokens", layout, len(unhashed), requested)
 		}
 	})
 

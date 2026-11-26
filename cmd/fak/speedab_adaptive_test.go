@@ -171,15 +171,15 @@ func TestAdaptiveScaleCommand(t *testing.T) {
 		t.Fatalf("code=%d stderr=%s", code, errb.String())
 	}
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("stdout lines = %d, want 4 events + 1 result:\n%s", len(lines), out.String())
-	}
 	var res adaptiveScaleResult
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
 		t.Fatalf("result decode: %v", err)
 	}
 	if res.Schema != adaptiveScaleSchemaName || res.Boundary != 16 || res.FailedAt != 32 || res.Sustained != 16 || len(res.Events) != 4 {
 		t.Fatalf("result = %+v", res)
+	}
+	if len(lines) != len(res.Events)+1 {
+		t.Fatalf("stdout lines = %d, want one line per ramp event (%d) plus the result:\n%s", len(lines), len(res.Events), out.String())
 	}
 
 	bad := filepath.Join(dir, "bad.json")

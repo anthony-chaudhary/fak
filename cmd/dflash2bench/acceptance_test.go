@@ -94,8 +94,16 @@ func TestPriceSpecDecodePicksInteriorBestNotLargest(t *testing.T) {
 		t.Fatalf("schema %q", verdict.Schema)
 	}
 	closeTo(t, verdict.Plain.TokensPerSecond, 1.0)
-	if len(verdict.Rounds) != 8 {
-		t.Fatalf("rounds %d, want 8", len(verdict.Rounds))
+	if len(verdict.Rounds) == 0 {
+		t.Fatal("no draft lengths were priced")
+	}
+	for i, round := range verdict.Rounds {
+		if round.DraftLength != i+1 {
+			t.Fatalf("round %d priced draft length %d, want %d: every length from 1 up is priced in order", i, round.DraftLength, i+1)
+		}
+	}
+	if last := verdict.Rounds[len(verdict.Rounds)-1].DraftLength; last != 8 {
+		t.Fatalf("priced draft lengths stop at %d, want the accept curve's maximum 8", last)
 	}
 	// L=3: committed 1+0.875, round 0.05*3 + 1.0 = 1.15 -> best.
 	best := verdict.Best

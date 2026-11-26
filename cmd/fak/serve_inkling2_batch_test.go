@@ -86,27 +86,50 @@ func collectAsync(a inkling2Admission, first *inkling2QueuedRequest, queue chan 
 func TestInkling2BatchAdmissionCoalescesSpreadArrivalsIntoOneCohort(t *testing.T) {
 	clk := newFakeInkling2Clock()
 	queue := make(chan *inkling2QueuedRequest, 16)
-	got := collectAsync(testInkling2Admission(clk), &inkling2QueuedRequest{}, queue)
+	first := &inkling2QueuedRequest{}
+	sent := []*inkling2QueuedRequest{first}
+	got := collectAsync(testInkling2Admission(clk), first, queue)
 	// 15 more arrivals 650us apart: ~10ms of spread, every gap under the 4ms window
 	for i := 1; i < 16; i++ {
 		clk.waitArmed(t)
 		clk.advance(650 * time.Microsecond)
-		queue <- &inkling2QueuedRequest{}
+		r := &inkling2QueuedRequest{}
+		sent = append(sent, r)
+		queue <- r
 	}
-	if group := <-got; len(group) != 16 {
-		t.Fatalf("cohort width %d, want 16", len(group))
+	requireInkling2Cohort(t, <-got, sent)
+}
+
+// requireInkling2Cohort asserts the collected cohort is exactly the requests that were sent, in any order.
+func requireInkling2Cohort(t *testing.T, got, sent []*inkling2QueuedRequest) {
+	t.Helper()
+	if len(got) != len(sent) {
+		t.Fatalf("cohort width %d, want %d (every sent request, none extra)", len(got), len(sent))
+	}
+	want := make(map[*inkling2QueuedRequest]bool, len(sent))
+	for _, r := range sent {
+		want[r] = true
+	}
+	for _, r := range got {
+		if !want[r] {
+			t.Fatal("cohort holds a request that was not sent or was already admitted")
+		}
+		delete(want, r)
 	}
 }
 
 func TestInkling2BatchAdmissionGathersAlreadyQueuedWithoutWaiting(t *testing.T) {
 	clk := newFakeInkling2Clock()
 	queue := make(chan *inkling2QueuedRequest, 16)
+	var sent []*inkling2QueuedRequest
 	for i := 0; i < 15; i++ {
-		queue <- &inkling2QueuedRequest{}
+		r := &inkling2QueuedRequest{}
+		sent = append(sent, r)
+		queue <- r
 	}
-	if group := testInkling2Admission(clk).collect(&inkling2QueuedRequest{}, queue); len(group) != 16 {
-		t.Fatalf("cohort width %d, want 16", len(group))
-	}
+	first := &inkling2QueuedRequest{}
+	sent = append(sent, first)
+	requireInkling2Cohort(t, testInkling2Admission(clk).collect(first, queue), sent)
 	if len(clk.armed) != 0 {
 		t.Fatal("a full queue must not arm a timer")
 	}
@@ -116,14 +139,18 @@ func TestInkling2BatchAdmissionMaxWaitBoundsTheCohort(t *testing.T) {
 	clk := newFakeInkling2Clock()
 	queue := make(chan *inkling2QueuedRequest, 16)
 	start := clk.Now()
-	got := collectAsync(testInkling2Admission(clk), &inkling2QueuedRequest{}, queue)
+	first := &inkling2QueuedRequest{}
+	sent := []*inkling2QueuedRequest{first}
+	got := collectAsync(testInkling2Admission(clk), first, queue)
 	var group []*inkling2QueuedRequest
 	for group == nil {
 		select {
 		case d := <-clk.armed:
 			if d >= 3*time.Millisecond {
 				clk.advance(3 * time.Millisecond)
-				queue <- &inkling2QueuedRequest{}
+				r := &inkling2QueuedRequest{}
+				sent = append(sent, r)
+				queue <- r
 			} else {
 				clk.advance(d)
 			}
@@ -136,9 +163,7 @@ func TestInkling2BatchAdmissionMaxWaitBoundsTheCohort(t *testing.T) {
 	if elapsed := clk.Now().Sub(start); elapsed != inkling2BatchMaxWaitDefault {
 		t.Fatalf("cohort closed after %s, want %s", elapsed, inkling2BatchMaxWaitDefault)
 	}
-	if len(group) != 9 {
-		t.Fatalf("cohort width %d, want 9 (first + 8 arrivals in 25ms)", len(group))
-	}
+	requireInkling2Cohort(t, group, sent)
 }
 
 func TestInkling2BatchAdmissionLoneRequestRunsScalarAfterGap(t *testing.T) {

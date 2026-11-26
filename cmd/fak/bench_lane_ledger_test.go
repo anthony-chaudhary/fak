@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -123,8 +124,29 @@ func TestBenchLaneLedgerSM80HandValues(t *testing.T) {
 	}
 
 	caveats, _ := doc["caveats"].([]any)
-	if len(caveats) != 5 {
-		t.Errorf("caveats has %d entries, want 5", len(caveats))
+	assertLaneLedgerCaveats(t, caveats, laneLedgerCaveats)
+}
+
+// assertLaneLedgerCaveats requires the reported caveats to be exactly the expected set: every entry a
+// non-empty string drawn from want, and every wanted caveat reported.
+func assertLaneLedgerCaveats(t *testing.T, got []any, want []string) {
+	t.Helper()
+	reported := make(map[string]bool, len(got))
+	for _, item := range got {
+		text, _ := item.(string)
+		if text == "" {
+			t.Errorf("caveat %v is not a non-empty string", item)
+			continue
+		}
+		if !slices.Contains(want, text) {
+			t.Errorf("unexpected caveat %q", text)
+		}
+		reported[text] = true
+	}
+	for _, w := range want {
+		if !reported[w] {
+			t.Errorf("caveat missing: %q", w)
+		}
 	}
 }
 
@@ -299,9 +321,7 @@ func TestBenchLaneLedgerMeasuredHandValues(t *testing.T) {
 	}
 
 	caveats, _ := m["caveats"].([]any)
-	if len(caveats) != 5 {
-		t.Errorf("measured.caveats has %d entries, want 5 (four measured caveats plus the equal-waves note)", len(caveats))
-	}
+	assertLaneLedgerCaveats(t, caveats, append(append([]string(nil), laneLedgerMeasuredCaveats...), laneLedgerEqualWavesCaveat))
 }
 
 // Without active_lane_cycles the active fields stay zero, the verdict is empty, and no unexplained_inactive

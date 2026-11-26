@@ -7,6 +7,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -126,8 +128,8 @@ func TestServeBillingLoadsAllFourPiecesAndReportsState(t *testing.T) {
 		}
 	}
 	wantStamp := rt.PriceBook.VersionStamp()
-	if len(wantStamp) != 64 || !strings.Contains(block, "sha256:"+wantStamp) {
-		t.Errorf("startup block must carry the price book's 64-hex version stamp:\n%s", block)
+	if digest, err := hex.DecodeString(wantStamp); err != nil || len(digest) != sha256.Size || !strings.Contains(block, "sha256:"+wantStamp) {
+		t.Errorf("startup block must carry the price book's sha256 version stamp as hex:\n%s", block)
 	}
 }
 

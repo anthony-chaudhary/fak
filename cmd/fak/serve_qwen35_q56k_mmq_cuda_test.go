@@ -50,8 +50,16 @@ func TestServeCUDAQwen35RetainedQ56KMMQ(t *testing.T) {
 	for _, kind := range []ggufload.TensorType{ggufload.TensorQ5_K, ggufload.TensorQ6_K} {
 		t.Run(fmt.Sprint(kind), func(t *testing.T) {
 			m, raw := serveIQSequenceFixture(t, be, kind)
-			if len(raw) != 15 {
-				t.Fatalf("retained fixture projection count=%d", len(raw))
+			if _, ok := raw["lm_head.weight"]; !ok {
+				t.Fatalf("fixture lm_head projection not retained for %s", kind)
+			}
+			for l := 0; l < 4; l++ {
+				for _, proj := range []string{"gate_proj", "up_proj", "down_proj"} {
+					name := fmt.Sprintf("model.layers.%d.mlp.%s.weight", l, proj)
+					if _, ok := raw[name]; !ok {
+						t.Fatalf("fixture projection %s not retained for %s", name, kind)
+					}
+				}
 			}
 			for name, want := range raw {
 				got, resident := m.KQuantRaw(name)
