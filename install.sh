@@ -201,9 +201,9 @@ if [ "$VARIANT" = "auto" ]; then
           CUDA_VERSION="${CUDA_VERSION#v}"
           CUDA_TAG="${CUDA_VERSION:+${CUDA_VERSION}-cuda}"
           CUDA_TAG="${CUDA_TAG:-cuda-latest}"
-          err "NVIDIA GPU detected — use docker run --rm --gpus all ghcr.io/${REPO}:${CUDA_TAG} version (then serve your supported model), select --variant cuda to build natively from source, or explicitly select --variant cpu for a CPU reference build"
+          printf 'install.sh: hint: docker is available; the CUDA image is ghcr.io/%s:%s (docker run --rm --gpus all ... version)\n' "$REPO" "$CUDA_TAG" >&2
         fi
-        printf 'install.sh: NVIDIA GPU detected and no working docker — building the CUDA variant from source\n' >&2
+        printf 'install.sh: NVIDIA GPU detected — building the CUDA variant from source (--variant cpu for a CPU reference build)\n' >&2
         VARIANT=cuda
       else
         VARIANT=vulkan

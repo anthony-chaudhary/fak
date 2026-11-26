@@ -24,17 +24,24 @@ receipts and the other comparisons.
 ## Try fak
 
 [Install fak for your platform](INSTALL.md#local-model-setup), then open a
-terminal. Use the same command on Windows x64, Linux x64, and Apple Silicon
-Macs to start the coding model.
+terminal.
+
+On Apple Silicon, `fak up` probes unified memory, picks a model tier, and
+opens a chat prompt:
 
 ```sh
-fak up --model 3B
+fak up
 ```
 
-The first run downloads a small coding model (about 1.9 GB). At `you>`, paste
-`def first(xs): return xs[0]` and ask “What input breaks this function?
-Write a test that catches it.” Look for a test that passes an empty list and
-checks for `IndexError`. Type `/quit` to exit.
+On Windows x64 and Linux x64, `fak up` is not available (it is the Apple
+Silicon provisioner). Run the small SmolLM2 model in-kernel instead. The first
+run downloads it:
+
+```sh
+fak run smollm2 "What input breaks def first(xs): return xs[0]? Write a test that catches it."
+```
+
+Look for a test that passes an empty list and checks for `IndexError`.
 
 On an M3 or later Mac with 24 GB of memory or more and macOS 26.4 or later,
 fak v0.58.0 (pre-release) can also run Inkling-2-Mini on the GPU by name:
@@ -52,8 +59,10 @@ The first run downloads about 14.6 GB. On an Apple Silicon Mac with 24 GB or
 more, `fak run` with no model picks Inkling-2-Mini as well. Inkling-2-Mini is
 in v0.58.0. v0.58.0 is still a GitHub pre-release, so `install.sh`
 installs an older release unless you set `FAK_VERSION=0.58.0`. Smaller Macs and other
-platforms keep the Qwen coding models. The [Mac guide](docs/fak/mac-local-models.md#inkling-2-mini-the-first-run-default)
+platforms get smaller model tiers instead. The [Mac guide](docs/fak/mac-local-models.md#inkling-2-mini-the-first-run-default)
 has the requirements and the server commands.
+
+For the commands and their main flags, see the [CLI reference](docs/CLI.md).
 
 For build requirements, platform verification and other model sizes, see the
 [local model setup guide](GETTING-STARTED.md#local-model-setup).

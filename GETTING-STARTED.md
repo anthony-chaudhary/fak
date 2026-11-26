@@ -48,7 +48,7 @@ gh attestation verify SHA256SUMS --repo anthony-chaudhary/fak
 go install github.com/anthony-chaudhary/fak/cmd/fak@v0.58.0
 ```
 
-This installs the v0.58.0 pre-release, which includes Inkling-2-Mini. The release binary above resolves
+This builds from source and installs the v0.58.0 pre-release, which includes Inkling-2-Mini. On Apple Silicon the Metal GPU build requires CGo, so leave `CGO_ENABLED` at its default (1) with the Xcode command line tools installed. The prebuilt Metal archive comes from the installer instead. The release binary above resolves
 GitHub's Latest release, still v0.56.0; set `FAK_VERSION=0.58.0` to pin the installer to
 v0.58.0. The CUDA build is not in the v0.58.0 release assets; build it from source below.
 
@@ -85,17 +85,32 @@ go run ./cmd/fak-dev build-cuda binary --arch sm_120 --cuda-home /opt/cuda ./cmd
 
 ### Capability floor preflight checks
 
-Verify structural refusal independent of any model:
+Verify structural refusal independent of any model. The built-in floor is
+default-open, so unlisted tools are allowed until you deny them. Write a
+small policy that denies one tool, then check it:
 
 ```bash
-# Blocked: create_user is not on the default allow-list
-./fak preflight --tool create_user --args '{"_positional":["alice"]}'
-# -> verdict=DENY reason=DEFAULT_DENY by=monitor
+cat > floor.json <<'EOF'
+{
+  "version": "fak-policy/v1",
+  "posture": "default_open",
+  "allow": ["get_user_details"],
+  "deny": {"refund_payment": "POLICY_BLOCK"}
+}
+EOF
+./fak policy --check floor.json
 
-# Allowed: get_user_details is on the allow-list
-./fak preflight --tool get_user_details --args '{}'
-# -> verdict=ALLOW
+# Blocked by the manifest's explicit deny
+./fak preflight --tool refund_payment --args '{"amount":10}' --policy floor.json
+# -> verdict=DENY reason=POLICY_BLOCK by=monitor
+
+# Allowed: no rule matches, so the default-open posture admits it
+./fak preflight --tool get_user_details --args '{}' --policy floor.json
+# -> verdict=ALLOW reason=NONE by=monitor
 ```
+
+Pass `--policy` to test a manifest; without it, preflight uses the built-in
+floor, which admits most tools by default.
 
 > **Windows shell note:** The single-quoted `--args '{...}'` works unchanged in git-bash and PowerShell 7. Windows PowerShell 5.1 strips the inner JSON quotes at the native-process boundary; use `--args '{\"_positional\":[\"alice\"]}'` there. On cmd.exe, use `--args "{""_positional"":[""alice""]}"`.
 
@@ -141,11 +156,11 @@ messages state the resolved posture.
 
 ### Example with Ollama
 
-Start Ollama and pull a test model:
+Start Ollama and pull a model. Replace `<model>` below with any tag from `ollama list`:
 
 ```bash
 ollama serve &
-ollama pull qwen2.5:1.5b
+ollama pull <model>
 ```
 
 Launch `fak serve` pointing to Ollama:
@@ -153,14 +168,14 @@ Launch `fak serve` pointing to Ollama:
 ```bash
 ./fak serve --addr 127.0.0.1:8080 \
   --base-url http://localhost:11434/v1 \
-  --model qwen2.5:1.5b
+  --model <model>
 ```
 
 Verify service health from another terminal:
 
 ```bash
 curl -s http://127.0.0.1:8080/healthz
-# {"engine":"inkernel","model":"qwen2.5:1.5b","ok":true}
+# {"engine":"inkernel","model":"<model>","ok":true}
 ```
 
 Point any OpenAI-compatible client or agent at `http://127.0.0.1:8080/v1`.
@@ -182,7 +197,7 @@ Point any OpenAI-compatible client or agent at `http://127.0.0.1:8080/v1`.
 Harden the gateway by enforcing a policy manifest and API authentication:
 
 ```bash
-./fak serve --addr 0.0.0.0:8080 --base-url http://localhost:11434/v1 --model qwen2.5:1.5b \
+./fak serve --addr 0.0.0.0:8080 --base-url http://localhost:11434/v1 --model <model> \
   --policy floor.json \
   --require-key-env FAK_TOKEN
 ```
@@ -198,24 +213,22 @@ Clients can pass the key via `Authorization: Bearer <token>` or Anthropic's `x-a
 [Install the build for your platform](INSTALL.md#local-model-setup). In a terminal, run:
 
 ```sh
-fak up --model 3B
+fak up
 ```
 
-This selects Qwen2.5-Coder-3B-Instruct Q4_K_M and downloads about 1.9 GB
-on the first run. At `you>`, ask a coding question. Leave the terminal open
-to use its chat completions endpoint at `http://127.0.0.1:8080/v1`.
+On Apple Silicon, `fak up` picks the model tier for your unified memory and
+downloads it on the first run. At `you>`, ask a coding question. Leave the
+terminal open to use its chat completions endpoint at
+`http://127.0.0.1:8080/v1`. On Windows and Linux, `fak up` is not available;
+use `fak run smollm2` from the [quick start](README.md#try-fak).
 
-The v0.56.0 Windows x64 and Linux x64 CPU archives both returned `IndexError`
-when asked what `[][0]` raises in Python (Linux was tested on Ubuntu 24.04 under WSL).
-Both loaded the Qwen2.5-Coder file, although this release labels the 3B tier
-`qwen3.8-3b-q4_k_m` in its startup message.
 Apple Silicon has [hardware evidence for serving this model](docs/_witnesses/issue-9587-nativeadmission/).
 Fresh installs and the first reply from each release build are tracked in
 [the platform verification ticket](https://github.com/anthony-chaudhary/fak/issues/14508).
 
 To let fak choose a larger model based on available memory, run `fak up`.
 In v0.56.0 the automatic 70B download can return HTTP 401. Select the public
-27B model with `fak up --model 27B` (about 17 GB) or keep using the 3B model.
+27B model with `fak up --model 27B` (about 17 GB).
 
 Connect OpenCode or Pi to the chat completions endpoint from a second terminal
 with `fak opencode` or `fak pi`. Claude Code and Codex use the Messages and
