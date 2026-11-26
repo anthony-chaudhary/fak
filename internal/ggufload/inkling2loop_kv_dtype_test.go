@@ -15,6 +15,7 @@ func TestInkling2KVHalfFromParsesSelector(t *testing.T) {
 		refused     bool
 	}{
 		{"unset defaults to fp32", "", false, false, false},
+		{"unset ignores lookup placeholder", "junk", false, false, false},
 		{"explicit fp32", "fp32", true, false, false},
 		{"explicit f32", "f32", true, false, false},
 		{"f16", "f16", true, true, false},
@@ -31,6 +32,29 @@ func TestInkling2KVHalfFromParsesSelector(t *testing.T) {
 				t.Fatalf("half = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+func TestInkling2KVDTypeFromMatchesResidentAliases(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		want  Inkling2KVDType
+	}{
+		{"", Inkling2KVF32}, {"f32", Inkling2KVF32}, {"FP32", Inkling2KVF32},
+		{"f16", Inkling2KVF16}, {" FP16 ", Inkling2KVF16},
+	} {
+		got, err := Inkling2KVDTypeFrom(func(string) (string, bool) { return c.value, c.value != "" })
+		if err != nil || got != c.want {
+			t.Errorf("FAK_INKLING2_KV=%q: dtype=%v err=%v, want %v", c.value, got, err, c.want)
+		}
+	}
+	if _, err := Inkling2KVDTypeFrom(func(k string) (string, bool) {
+		if k != "FAK_INKLING2_KV" {
+			t.Fatalf("parser read unexpected env %q", k)
+		}
+		return "bf16", true
+	}); err == nil {
+		t.Fatal("bf16 selector accepted")
 	}
 }
 

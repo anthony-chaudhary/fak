@@ -77,7 +77,7 @@ func (e *inkling2LoopEngine) prefixCanGrow() bool {
 	if len(e.cache) == 0 {
 		return true
 	}
-	if e.noReuse || len(e.cache) >= max(e.slots, 1) {
+	if e.prefixReuse.disabled() || len(e.cache) >= max(e.slots, 1) {
 		return false
 	}
 	held, largest, ok := e.prefixMeter()
@@ -158,7 +158,10 @@ func (e *inkling2LoopEngine) prefixSlotCount() int { return len(e.cache) }
 
 // inkling2PrefixSlotsNote names a slot count above the default for the startup message.
 func inkling2PrefixSlotsNote(e *inkling2LoopEngine) string {
-	if e.noReuse || e.slots <= 1 {
+	if e.prefixReuse == inkling2PrefixReuseOffF16 {
+		return "; prefix reuse disabled for FAK_INKLING2_KV=f16"
+	}
+	if e.prefixReuse.disabled() || e.slots <= 1 {
 		return ""
 	}
 	return fmt.Sprintf("; prefix slots=%d cap=%dMiB", e.slots, e.capBytes>>20)
@@ -170,7 +173,7 @@ func inkling2PrefixSlotsNote(e *inkling2LoopEngine) string {
 // without taking the resident graph owner, so a kept session could replay a
 // cohort's exec, and nothing frees the slots before a cohort sizes its arenas.
 func inkling2ScalarBehindCohorts(scalar *inkling2LoopEngine) string {
-	scalar.noReuse = true
+	scalar.prefixReuse = inkling2PrefixReuseOffCohort
 	if scalar.slots <= 1 {
 		return ""
 	}

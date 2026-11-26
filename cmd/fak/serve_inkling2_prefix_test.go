@@ -327,7 +327,7 @@ func TestInkling2ServeGeneratorReadsPrefixSlotsFromLookup(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("gen=%T err=%v, want the serialized engine", gen, err)
 	}
-	if eng.noReuse || eng.slots != 3 || eng.capBytes != 6144<<20 {
+	if eng.prefixReuse.disabled() || eng.slots != 3 || eng.capBytes != 6144<<20 {
 		t.Fatalf("slots=%d cap=%d, want the lookup's 3 slots and 6144 MiB, not the process env", eng.slots, eng.capBytes)
 	}
 	if !strings.Contains(msg, "prefix slots=3") {
@@ -335,6 +335,80 @@ func TestInkling2ServeGeneratorReadsPrefixSlotsFromLookup(t *testing.T) {
 	}
 	if _, msg, _ := newServeInkling2Generator(nil, nil, func(string) (string, bool) { return "", false }); strings.Contains(msg, "prefix slots") {
 		t.Fatalf("default startup message %q names slots the default does not add", msg)
+	}
+}
+
+// F16 global caches cannot use the scalar checkpoint copies. The ordinary serve
+// generator therefore runs each request in one fresh session even when the operator
+// left reuse at its on-by-default value and configured a large multi-slot budget.
+func TestInkling2ServeGeneratorF16DisablesPrefixReuseAndSnapshotBudget(t *testing.T) {
+	lookup := func(k string) (string, bool) {
+		switch k {
+		case "FAK_INKLING2_KV":
+			return "fp16", true
+		case "FAK_INKLING2_PREFIX_REUSE":
+			return "1", true
+		case "FAK_INKLING2_PREFIX_SLOTS":
+			return "8", true
+		case "FAK_INKLING2_PREFIX_CACHE_MIB":
+			return "65536", true
+		}
+		return "", false
+	}
+	gen, msg, err := newServeInkling2Generator(nil, nil, lookup)
+	eng, ok := gen.(*inkling2LoopEngine)
+	if err != nil || !ok {
+		t.Fatalf("gen=%T err=%v, want serialized engine", gen, err)
+	}
+	if eng.prefixReuse != inkling2PrefixReuseOffF16 || !strings.Contains(msg, "prefix reuse disabled") {
+		t.Fatalf("mode=%v startup=%q, want typed f16 no-reuse truth", eng.prefixReuse, msg)
+	}
+	var opened []*inkling2FakeSession
+	eng.open = inkling2FakeOpener([]int{'x', 'y'}, false, &opened)
+	defer eng.Close()
+	inkling2Gen(t, eng, []int{'a', 'b'}, 1)
+	inkling2Gen(t, eng, []int{'a', 'b', 'c'}, 1)
+	if len(opened) != 2 || !opened[0].closed || !opened[1].closed {
+		t.Fatalf("opened=%d closed=%v/%v, want one closed session per request", len(opened), len(opened) > 0 && opened[0].closed, len(opened) > 1 && opened[1].closed)
+	}
+	for i, s := range opened {
+		for _, call := range s.calls {
+			if call == "checkpoint" || call == "restore" {
+				t.Fatalf("session %d calls %v, f16 must not allocate or restore a checkpoint", i, s.calls)
+			}
+		}
+	}
+	if held, slots := eng.prefixHeldBytes(), eng.prefixSlotCount(); held != 0 || slots != 0 {
+		t.Fatalf("post-request prefix budget holds %d bytes in %d slots, want 0/0", held, slots)
+	}
+}
+
+func TestInkling2ServeGeneratorF32PreservesExplicitPrefixReuse(t *testing.T) {
+	lookup := func(k string) (string, bool) {
+		switch k {
+		case "FAK_INKLING2_KV":
+			return "fp32", true
+		case "FAK_INKLING2_PREFIX_REUSE", "FAK_INKLING2_PREFIX_SLOTS":
+			return "1", true
+		}
+		return "", false
+	}
+	gen, _, err := newServeInkling2Generator(nil, nil, lookup)
+	eng, ok := gen.(*inkling2LoopEngine)
+	if err != nil || !ok {
+		t.Fatalf("gen=%T err=%v, want serialized engine", gen, err)
+	}
+	if eng.prefixReuse != inkling2PrefixReuseOn {
+		t.Fatalf("mode=%v, want f32 reuse on", eng.prefixReuse)
+	}
+	var opened []*inkling2FakeSession
+	eng.open = inkling2FakeOpener([]int{'x', 'y'}, false, &opened)
+	defer eng.Close()
+	prompt := []int{'a', 'b'}
+	inkling2Gen(t, eng, prompt, 1)
+	res, _ := inkling2Gen(t, eng, inkling2Extend(prompt, 'c'), 1)
+	if len(opened) != 1 || res.CachedPromptTokens != len(prompt)-1 {
+		t.Fatalf("opened=%d cached=%d, want one reused f32 session and %d tokens", len(opened), res.CachedPromptTokens, len(prompt)-1)
 	}
 }
 

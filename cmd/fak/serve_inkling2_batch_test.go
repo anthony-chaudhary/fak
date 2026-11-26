@@ -545,7 +545,7 @@ func TestInkling2ServeBatchIneligibleKeepsPrefixReuse(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("gen=%T err=%v, want the serialized engine", gen, err)
 	}
-	if eng.noReuse {
+	if eng.prefixReuse.disabled() {
 		t.Fatal("ineligible load disabled prefix reuse on the engine it returns")
 	}
 }

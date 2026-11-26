@@ -91,6 +91,31 @@ func inkling2PrefixReuseFrom(lookup func(string) (string, bool)) bool {
 	return true
 }
 
+type inkling2PrefixReuseMode uint8
+
+const (
+	inkling2PrefixReuseOn inkling2PrefixReuseMode = iota
+	inkling2PrefixReuseOff
+	inkling2PrefixReuseOffF16
+	inkling2PrefixReuseOffCohort
+)
+
+func (m inkling2PrefixReuseMode) disabled() bool { return m != inkling2PrefixReuseOn }
+
+func inkling2PrefixReuseModeFrom(lookup func(string) (string, bool)) (inkling2PrefixReuseMode, error) {
+	if !inkling2PrefixReuseFrom(lookup) {
+		return inkling2PrefixReuseOff, nil
+	}
+	dtype, err := ggufload.Inkling2KVDTypeFrom(lookup)
+	if err != nil {
+		return inkling2PrefixReuseOff, err
+	}
+	if dtype == ggufload.Inkling2KVF16 {
+		return inkling2PrefixReuseOffF16, nil
+	}
+	return inkling2PrefixReuseOn, nil
+}
+
 var errInkling2LoopEngineClosed = errors.New("inkling2_loop engine: closed")
 
 type inkling2LoopRequest struct {
@@ -115,8 +140,8 @@ type inkling2LoopRequest struct {
 // that extends a slot's checkpointed prefix prefills only its suffix; otherwise each
 // request runs on a fresh session.
 type inkling2LoopEngine struct {
-	open    inkling2LoopSessionOpener
-	noReuse bool
+	open        inkling2LoopSessionOpener
+	prefixReuse inkling2PrefixReuseMode
 	// slots bounds the resident sessions; capBytes bounds what they hold together
 	// once there is more than one. Zero values keep one slot.
 	slots    int
@@ -143,7 +168,11 @@ func (*inkling2LoopEngine) SerializesGPUAccess() bool { return true }
 
 func newInkling2LoopEngineFrom(open inkling2LoopSessionOpener) *inkling2LoopEngine {
 	slots, capBytes := inkling2PrefixCacheFromEnv(os.LookupEnv)
-	return &inkling2LoopEngine{open: open, noReuse: !inkling2PrefixReuseEnabled(), slots: slots, capBytes: capBytes}
+	mode := inkling2PrefixReuseOn
+	if !inkling2PrefixReuseEnabled() {
+		mode = inkling2PrefixReuseOff
+	}
+	return &inkling2LoopEngine{open: open, prefixReuse: mode, slots: slots, capBytes: capBytes}
 }
 
 func newInkling2LoopEngine(m *ggufload.Inkling2LoopModel, be compute.Backend) *inkling2LoopEngine {
@@ -243,7 +272,7 @@ func (e *inkling2LoopEngine) serveRecovering(r *inkling2LoopRequest) {
 func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused int, err error) {
 	e.cur = nil
 	e.clock++
-	if !e.noReuse {
+	if !e.prefixReuse.disabled() {
 		if sl := e.prefixHit(prompt); sl != nil {
 			e.cur, sl.used, sl.hasCkpt = sl, e.clock, false
 			rw := sl.sess.(inkling2Rewinder)
@@ -278,7 +307,7 @@ func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused 
 		sl.hasCkpt = false
 	}
 	e.cur, sl.used = sl, e.clock
-	if e.noReuse {
+	if e.prefixReuse.disabled() {
 		return nil, 0, nil
 	}
 	rw, ok := sl.sess.(inkling2Rewinder)
@@ -418,7 +447,11 @@ func inkling2HasPrefix(s, prefix []int) bool {
 // the choice for the startup message.
 func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (agent.Inkling2LoopGenerator, string, error) {
 	scalar := newInkling2LoopEngine(m, be)
-	scalar.noReuse = !inkling2PrefixReuseFrom(lookup)
+	mode, err := inkling2PrefixReuseModeFrom(lookup)
+	if err != nil {
+		return nil, "", err
+	}
+	scalar.prefixReuse = mode
 	scalar.slots, scalar.capBytes = inkling2PrefixCacheFromEnv(lookup)
 	if !inkling2ServeBatchEnabled(lookup) {
 		return scalar, "greedy decode" + inkling2PrefixSlotsNote(scalar), nil

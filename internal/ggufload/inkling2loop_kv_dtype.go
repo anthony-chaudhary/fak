@@ -14,17 +14,35 @@ import (
 // keeps every resident cache float32.
 var inkling2KVHalfRequested, inkling2KVHalfErr = inkling2KVHalfFrom(os.LookupEnv)
 
+// Inkling2KVDType is the resident global-cache dtype selected by FAK_INKLING2_KV.
+type Inkling2KVDType uint8
+
+const (
+	Inkling2KVF32 Inkling2KVDType = iota
+	Inkling2KVF16
+)
+
+// Inkling2KVDTypeFrom parses the public resident-KV selector. The serving layer
+// uses the same typed result to disable checkpoint-backed prefix reuse for f16.
+func Inkling2KVDTypeFrom(lookup func(string) (string, bool)) (Inkling2KVDType, error) {
+	v, ok := lookup("FAK_INKLING2_KV")
+	if !ok {
+		v = ""
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "f16", "fp16":
+		return Inkling2KVF16, nil
+	case "", "f32", "fp32":
+		return Inkling2KVF32, nil
+	}
+	return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32 or f16", v)
+}
+
 // inkling2KVHalfFrom parses FAK_INKLING2_KV: f16/fp16 selects f16 global-slot caches,
 // unset/f32/fp32 keeps fp32, and anything else is refused.
 func inkling2KVHalfFrom(lookup func(string) (string, bool)) (bool, error) {
-	v, _ := lookup("FAK_INKLING2_KV")
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "f16", "fp16":
-		return true, nil
-	case "", "f32", "fp32":
-		return false, nil
-	}
-	return false, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32 or f16", v)
+	dtype, err := Inkling2KVDTypeFrom(lookup)
+	return dtype == Inkling2KVF16, err
 }
 
 var inkling2KVHalfFallbackOnce sync.Once
