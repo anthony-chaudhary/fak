@@ -952,8 +952,45 @@ def execute_plan(root: Path, plan: dict, *, includes: list[str], overwrite_notes
             run([sys.executable, str(root / "tools" / "release_lock.py"), "release"], cwd=root)
 
 
+MAX_RECUTS = 2
+PUBLISH_RACE_STATE = "diverged"
+
+
+def publish_retry_decision(publish: dict, *, recuts_used: int, max_recuts: int = MAX_RECUTS) -> dict:
+    """Decide the step after one trunk publish attempt.
+
+    A diverged publish means trunk moved under the cut, so re-cutting from the new
+    head is the only safe retry. Any other refusal fails at once, and re-cuts stop at
+    max_recuts so a busy trunk cannot keep the tick spinning.
+    """
+    state = publish.get("state")
+    if publish.get("ok") is True:
+        return {"action": "published", "recuts_used": recuts_used, "reason": "trunk publish ok"}
+    if state != PUBLISH_RACE_STATE:
+        return {
+            "action": "fail",
+            "recuts_used": recuts_used,
+            "reason": f"publish refused without a trunk race (state={state})",
+        }
+    if recuts_used >= max_recuts:
+        return {
+            "action": "fail",
+            "recuts_used": recuts_used,
+            "reason": f"trunk moved under the cut {recuts_used + 1} time(s); gave up after {max_recuts} re-cut(s)",
+        }
+    return {
+        "action": "recut",
+        "recuts_used": recuts_used + 1,
+        "reason": f"trunk diverged under the cut; re-cutting from the new head ({recuts_used + 1} of {max_recuts})",
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Plan or execute a mechanical fleet release cut.")
+    parser.add_argument("--publish-decision", default=None,
+                        help="read a fleet_control_pane publish JSON and print the retry decision, then exit")
+    parser.add_argument("--recuts-used", type=int, default=0,
+                        help="re-cuts already spent before this publish attempt; used with --publish-decision")
     parser.add_argument("--version", default=None, help="target X.Y.Z; default from release_decide")
     parser.add_argument("--level", choices=["patch", "minor", "major"], default=None)
     parser.add_argument("--theme", action="append", default=[], help="release-note theme; repeatable")
@@ -978,6 +1015,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ttl", type=int, default=1800)
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
+
+    if args.publish_decision:
+        publish = json.loads(Path(args.publish_decision).read_text(encoding="utf-8"))
+        decision = publish_retry_decision(publish, recuts_used=args.recuts_used)
+        json.dump(decision, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 0 if decision["action"] in {"published", "recut"} else 1
 
     root = repo_root()
     plan = build_plan(

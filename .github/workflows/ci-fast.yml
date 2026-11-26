@@ -30,7 +30,7 @@
 # binary dies as a decisive, diagnosable go-test failure (with its goroutine
 # dump) before the runner kills the step.
 name: ci-fast
-run-name: ${{ github.event_name == 'workflow_dispatch' && 'ci-fast diagnostic (non-release)' || 'ci-fast' }} · ${{ github.sha }}
+run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.intent == 'release' && inputs.sha != '' && 'ci-fast release' || (github.event_name == 'workflow_dispatch' && 'ci-fast diagnostic (non-release)' || 'ci-fast') }} · ${{ github.sha }}
 
 on:
   push:
@@ -43,7 +43,7 @@ on:
         required: false
         type: string
       intent:
-        description: "Requested scheduling intent only; every manual run is diagnostic, non-release"
+        description: "release = exact-sha release dispatch (requires sha); any other manual run is diagnostic, non-release"
         required: false
         default: "release"
         type: string
@@ -114,6 +114,7 @@ jobs:
         shell: bash
         env:
           REQUESTED_SHA: ${{ inputs.sha }}
+          REQUESTED_INTENT: ${{ inputs.intent }}
         run: |
           set -euo pipefail
           sha=$(git rev-parse HEAD)
@@ -122,6 +123,7 @@ jobs:
           [[ "$sha" == "$expected" && "$sha" =~ ^[0-9a-f]{40}$ && "$tree" =~ ^[0-9a-f]{40}$ ]]
           ci_class=fast
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then ci_class=diagnostic; fi
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$REQUESTED_INTENT" == release && -n "$REQUESTED_SHA" ]]; then ci_class=release; fi
           printf 'sha=%s\ntree=%s\nci_class=%s\n' "$sha" "$tree" "$ci_class" >> "$GITHUB_OUTPUT"
           printf 'Tested commit: %s\nTested tree: %s\nRepresented event SHA: %s\nCI class: %s\n' "$sha" "$tree" "$GITHUB_SHA" "$ci_class" >> "$GITHUB_STEP_SUMMARY"
 
@@ -538,7 +540,7 @@ jobs:
               ($shards[0].coverage.split_packages) as $split |
               ($sha | test("^[0-9a-f]{40}$")) and ($tree | test("^[0-9a-f]{40}$")) and
               ($run | test("^[1-9][0-9]*$")) and ($attempt | test("^[1-9][0-9]*$")) and
-              (($event == "workflow_dispatch" and $ci_class == "diagnostic") or (($event == "push" or $event == "pull_request") and $ci_class == "fast" and $sha == $represented)) and
+              (($event == "workflow_dispatch" and ($ci_class == "diagnostic" or ($ci_class == "release" and $intent == "release"))) or (($event == "push" or $event == "pull_request") and $ci_class == "fast" and $sha == $represented)) and
               (map(.job) | sort == (["build-vet-fast"] + [range(14) | "go-test-shard-\(.)"] | sort)) and
               ($all | type == "array" and length >= 4 and length == (unique | length) and all(.[]; type == "string" and length > 0)) and
               ($split | type == "array" and length >= 1 and length == (unique | length)) and

@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -195,10 +194,13 @@ class ReleaseTagTest(unittest.TestCase):
         publish = text.index("python tools/fleet_control_pane.py publish --apply")
         self.assertLess(cut, refuse)
         self.assertLess(refuse, publish)
-        start = text.index("      - name: Measure module zip before publish")
-        block = text[start:text.index("      - name: Push trunk", start)]
+        # The measure runs inside the cut-and-push step, before every publish attempt,
+        # so a refused measure must exit the step before any trunk push.
+        start = text.index("      - name: Cut and push release commit")
+        block = text[start:text.index("      - name: Dispatch release CI", start)]
         self.assertNotIn("continue-on-error", block)
-        self.assertIsNone(re.search(r"^\s*if:", block, re.MULTILINE))
+        self.assertGreater(refuse, start)
+        self.assertIn("exit 1", text[refuse:publish])
 
     def test_module_zip_per_file_limit_is_capped_by_ref_raise(self) -> None:
         rt = load()
@@ -387,6 +389,158 @@ class ReleaseTagTest(unittest.TestCase):
         self.assertFalse(context["ok"], context)
         self.assertIn("ci_not_green:NO_SIGNAL", context["errors"])
         self.assertNotIn("v0.1.0", git(root, "tag", "-l"))
+
+    # Release-dispatch evidence: pure folds over stubbed gh rows, no Git or network.
+    SHA = "a" * 40
+    HEAD = "c" * 40
+
+    def _dispatch_row(self, **overrides) -> dict:
+        row = {"event": "workflow_dispatch", "headBranch": "main", "headSha": self.HEAD,
+               "status": "completed", "conclusion": "success", "databaseId": 4242, "attempt": 1,
+               "displayTitle": f"ci-fast release · {self.SHA}"}
+        row.update(overrides)
+        return row
+
+    def _provenance(self, **overrides) -> dict:
+        prov = {"schema": "fak.ci-provenance.v1", "workflow": "ci-fast", "verified": True,
+                "ci_class": "release", "requested_intent": "release", "event": "workflow_dispatch",
+                "ref": "refs/heads/main", "tested_sha": self.SHA, "tested_tree": "b" * 40,
+                "represented_sha": self.HEAD, "run_id": "4242", "run_attempt": "1",
+                "required_jobs": ["build-vet-fast"] + [f"go-test-shard-{index}" for index in range(14)],
+                "release_eligible": False}
+        prov.update(overrides)
+        return prov
+
+    def _dispatch_signal(self, rt, rows, provenance, *, blobs=None, wait=False, sleeps=None):
+        blobs = blobs if blobs is not None else {self.SHA: "blob1", self.HEAD: "blob1"}
+        calls: list[list[str]] = []
+        rows_iter = list(rows) if isinstance(rows, list) and rows and isinstance(rows[0], list) else None
+
+        def runner(cmd: list[str]) -> tuple[int, str]:
+            calls.append(cmd)
+            if cmd[:3] == ["gh", "run", "list"]:
+                self.assertEqual(cmd[cmd.index("--event") + 1], "workflow_dispatch")
+                self.assertEqual(cmd[cmd.index("--branch") + 1], "main")
+                if rows_iter is not None:
+                    return 0, json.dumps(rows_iter.pop(0) if len(rows_iter) > 1 else rows_iter[0])
+                return 0, json.dumps(rows)
+            if cmd[:3] == ["gh", "run", "watch"]:
+                return 0, "done"
+            raise AssertionError(cmd)
+
+        folded = rt.release_dispatch_signal(
+            Path("repo"), self.SHA, workflow="ci-fast.yml", trunk="main", require_ci=True,
+            wait=wait, runner=runner, fetch_provenance=lambda row: provenance,
+            blob_at=lambda rev: blobs.get(rev), sleep=(sleeps.append if sleeps is not None else lambda s: None))
+        return folded, calls
+
+    def test_release_dispatch_accepts_exact_sha_verified_provenance(self) -> None:
+        rt = load()
+        folded, _ = self._dispatch_signal(rt, [self._dispatch_row()], self._provenance())
+        self.assertEqual(folded["verdict"], "GREEN", folded)
+        self.assertTrue(folded["pass"])
+        self.assertEqual(folded["evidence"], "release-dispatch")
+
+    def test_release_dispatch_rejects_wrong_sha_or_foreign_binding(self) -> None:
+        rt = load()
+        for name, prov, row, blobs in (
+            ("tested another commit", self._provenance(tested_sha="d" * 40), self._dispatch_row(), None),
+            ("represented sha is not the run head", self._provenance(represented_sha="e" * 40), self._dispatch_row(), None),
+            ("other run's provenance", self._provenance(run_id="9999"), self._dispatch_row(), None),
+            ("stale attempt", self._provenance(run_attempt="2"), self._dispatch_row(), None),
+            ("unverified aggregate", self._provenance(verified=False), self._dispatch_row(), None),
+            ("missing shard job", self._provenance(required_jobs=["build-vet-fast"]), self._dispatch_row(), None),
+            ("off-trunk run", self._provenance(ref="refs/heads/feature"), self._dispatch_row(headBranch="feature"), None),
+            ("workflow differs at run head", self._provenance(), self._dispatch_row(),
+             {self.SHA: "blob1", self.HEAD: "blob2"}),
+            ("workflow unreadable", self._provenance(), self._dispatch_row(), {}),
+            ("no provenance", None, self._dispatch_row(), None),
+        ):
+            with self.subTest(name):
+                folded, _ = self._dispatch_signal(rt, [row], prov, blobs=blobs)
+                self.assertEqual(folded["verdict"], "UNVERIFIED", folded)
+                self.assertFalse(folded["pass"])
+        # A run titled for another sha is never selected.
+        folded, _ = self._dispatch_signal(
+            rt, [self._dispatch_row(displayTitle=f"ci-fast release · {'d' * 40}")], self._provenance())
+        self.assertEqual(folded["verdict"], "NO_SIGNAL")
+        self.assertFalse(folded["pass"])
+
+    def test_release_dispatch_rejects_failed_or_cancelled_run(self) -> None:
+        rt = load()
+        for conclusion in ("failure", "cancelled", "timed_out", None):
+            with self.subTest(conclusion=conclusion):
+                folded, _ = self._dispatch_signal(
+                    rt, [self._dispatch_row(conclusion=conclusion)], self._provenance())
+                self.assertEqual(folded["verdict"], "RED", folded)
+                self.assertFalse(folded["pass"])
+
+    def test_release_dispatch_rejects_plain_diagnostic_dispatch(self) -> None:
+        rt = load()
+        for prov in (self._provenance(ci_class="diagnostic"),
+                     self._provenance(ci_class="diagnostic", requested_intent="diagnostic"),
+                     self._provenance(ci_class="fast")):
+            with self.subTest(prov["ci_class"], intent=prov["requested_intent"]):
+                folded, _ = self._dispatch_signal(rt, [self._dispatch_row()], prov)
+                self.assertEqual(folded["verdict"], "UNVERIFIED", folded)
+                self.assertFalse(folded["pass"])
+        # A diagnostic run's title never names the release form.
+        folded, _ = self._dispatch_signal(
+            rt, [self._dispatch_row(displayTitle=f"ci-fast diagnostic (non-release) · {self.HEAD}")],
+            self._provenance())
+        self.assertEqual(folded["verdict"], "NO_SIGNAL")
+
+    def test_release_dispatch_waits_for_appearance_and_completion(self) -> None:
+        rt = load()
+        sleeps: list[float] = []
+        pending = self._dispatch_row(status="in_progress", conclusion="")
+        folded, calls = self._dispatch_signal(
+            rt, [[], [pending], [self._dispatch_row()]], self._provenance(), wait=True, sleeps=sleeps)
+        self.assertEqual(folded["verdict"], "GREEN", folded)
+        self.assertEqual(len(sleeps), 1)
+        self.assertIn(["gh", "run", "watch", "4242", "--exit-status"], calls)
+
+    def test_push_run_evidence_unchanged_with_release_dispatch_enabled(self) -> None:
+        rt = load()
+        for conclusion, expected in (("success", "GREEN"), ("failure", "RED")):
+            with self.subTest(conclusion=conclusion):
+                def runner(cmd: list[str]) -> tuple[int, str]:
+                    if cmd[:3] == ["gh", "run", "list"]:
+                        self.assertEqual(cmd[cmd.index("--event") + 1], "push")
+                        return 0, json.dumps([{"event": "push", "status": "completed",
+                                               "conclusion": conclusion, "databaseId": "push-1"}])
+                    if cmd == ["gh", "run", "view", "push-1", "--json", "jobs"]:
+                        return 0, json.dumps({"jobs": []})
+                    raise AssertionError(cmd)
+
+                def no_dispatch(*args, **kwargs):
+                    raise AssertionError("a push signal must not consult release dispatches")
+
+                folded = rt.ci_signal(Path("repo"), self.SHA, workflow="ci-fast.yml", require_ci=True,
+                                      runner=runner, release_dispatch=True, dispatch_signal=no_dispatch)
+                self.assertEqual(folded["verdict"], expected)
+                self.assertNotIn("evidence", folded)
+
+    def test_release_dispatch_only_consulted_when_enabled_and_no_push_run(self) -> None:
+        rt = load()
+        consulted = []
+
+        def runner(cmd: list[str]) -> tuple[int, str]:
+            return 0, "[]"
+
+        def dispatch(root, sha, **kwargs):
+            consulted.append(kwargs["trunk"])
+            return {"pass": True, "verdict": "GREEN", "advisory": False, "evidence": "release-dispatch"}
+
+        off = rt.ci_signal(Path("repo"), self.SHA, workflow="ci-fast.yml", require_ci=True,
+                           runner=runner, dispatch_signal=dispatch)
+        self.assertEqual(off["verdict"], "NO_SIGNAL")
+        self.assertEqual(consulted, [])
+        on = rt.ci_signal(Path("repo"), self.SHA, workflow="ci-fast.yml", require_ci=True,
+                          runner=runner, release_dispatch=True, trunk="main", dispatch_signal=dispatch)
+        self.assertEqual(on["verdict"], "GREEN")
+        self.assertEqual(on["push_signal"]["verdict"], "NO_SIGNAL")
+        self.assertEqual(consulted, ["main"])
 
     def test_ci_signal_diagnoses_billing_annotation_on_red_run(self) -> None:
         rt = load()
@@ -627,6 +781,122 @@ class ReleaseTagTest(unittest.TestCase):
             capture_output=True,
         ).stdout
         self.assertEqual(after, before)
+
+    def _chain(self, length: int) -> tuple[Path, list[str]]:
+        """Build a first-parent chain; returns shas newest first."""
+        root, _ = self._repo()
+        for i in range(length - 1):
+            write(root / "touch.txt", f"{i}\n")
+            git(root, "add", "touch.txt")
+            git(root, "commit", "-m", f"change {i}")
+        shas = git(root, "rev-list", "--first-parent", "HEAD").splitlines()
+        return root, shas
+
+    @staticmethod
+    def _fake_ci(verdicts: dict[str, str]):
+        def fake(root, sha, *, workflow, require_ci, wait=False, runner=None,
+                 release_dispatch=False, trunk="main"):
+            verdict = verdicts.get(sha, "NO_SIGNAL")
+            passed = verdict == "GREEN"
+            return {"pass": passed, "verdict": verdict, "advisory": False}
+        return fake
+
+    def test_candidate_skips_coalesced_head_to_newest_green_ancestor(self) -> None:
+        rt = load()
+        root, shas = self._chain(3)
+        original = rt.ci_signal
+        self.addCleanup(setattr, rt, "ci_signal", original)
+        rt.ci_signal = self._fake_ci({shas[1]: "GREEN"})
+        selection = rt.select_green_candidate(root, shas[0], workflow="ci.yml")
+        self.assertTrue(selection["pass"])
+        self.assertEqual(selection["sha"], shas[1])
+        self.assertEqual([row["verdict"] for row in selection["scanned"]], ["NO_SIGNAL", "GREEN"])
+
+    def test_candidate_tolerates_pending_newer_run_but_blocks_on_red(self) -> None:
+        rt = load()
+        root, shas = self._chain(3)
+        original = rt.ci_signal
+        self.addCleanup(setattr, rt, "ci_signal", original)
+        rt.ci_signal = self._fake_ci({shas[0]: "PENDING", shas[1]: "GREEN"})
+        self.assertEqual(rt.select_green_candidate(root, shas[0], workflow="ci.yml")["sha"], shas[1])
+        rt.ci_signal = self._fake_ci({shas[0]: "PENDING", shas[1]: "RED", shas[2]: "GREEN"})
+        blocked = rt.select_green_candidate(root, shas[0], workflow="ci.yml")
+        self.assertFalse(blocked["pass"])
+        self.assertIsNone(blocked["sha"])
+        self.assertEqual(blocked["ci"]["verdict"], "RED")
+
+    def test_candidate_window_is_bounded_and_refuses_when_no_green(self) -> None:
+        rt = load()
+        root, shas = self._chain(4)
+        original = rt.ci_signal
+        self.addCleanup(setattr, rt, "ci_signal", original)
+        rt.ci_signal = self._fake_ci({shas[3]: "GREEN"})
+        beyond = rt.select_green_candidate(root, shas[0], workflow="ci.yml", depth=3)
+        self.assertFalse(beyond["pass"])
+        self.assertEqual(beyond["ci"]["verdict"], "NO_SIGNAL")
+        self.assertEqual(len(beyond["scanned"]), 3)
+        within = rt.select_green_candidate(root, shas[0], workflow="ci.yml", depth=4)
+        self.assertEqual(within["sha"], shas[3])
+
+    def test_gated_context_never_tags_green_ancestor_for_uncovered_cut(self) -> None:
+        rt = load()
+        root, shas = self._chain(2)
+        original = rt.ci_signal
+        self.addCleanup(setattr, rt, "ci_signal", original)
+        rt.ci_signal = self._fake_ci({shas[1]: "GREEN"})
+        context = rt.build_context(
+            root,
+            version="0.1.0",
+            ref="HEAD",
+            trunk="master",
+            require_ci=True,
+            skip_dry_run=True,
+            skip_remote_tag=True,
+        )
+        self.assertFalse(context["ok"])
+        self.assertEqual(context["sha"], shas[0])
+        self.assertIn("ci_not_green:NO_SIGNAL", context["errors"])
+        self.assertFalse(context["checks"]["ci"]["pass"])
+        self.assertEqual(context["cut_base"]["sha"], shas[1])
+        self.assertNotIn("release_candidate", context)
+
+    def test_gated_context_tags_cut_only_with_its_own_green_run(self) -> None:
+        rt = load()
+        root, shas = self._chain(2)
+        original = rt.ci_signal
+        self.addCleanup(setattr, rt, "ci_signal", original)
+        rt.ci_signal = self._fake_ci({shas[0]: "GREEN", shas[1]: "GREEN"})
+        context = rt.build_context(
+            root,
+            version="0.1.0",
+            ref="HEAD",
+            trunk="master",
+            require_ci=True,
+            skip_dry_run=True,
+            skip_remote_tag=True,
+        )
+        self.assertTrue(context["ok"], context["errors"])
+        self.assertEqual(context["sha"], shas[0])
+        self.assertTrue(context["checks"]["ci"]["pass"])
+
+    def test_gated_context_refuses_when_no_green_candidate(self) -> None:
+        rt = load()
+        root, shas = self._chain(2)
+        original = rt.ci_signal
+        self.addCleanup(setattr, rt, "ci_signal", original)
+        rt.ci_signal = self._fake_ci({})
+        context = rt.build_context(
+            root,
+            version="0.1.0",
+            ref="HEAD",
+            trunk="master",
+            require_ci=True,
+            skip_dry_run=True,
+            skip_remote_tag=True,
+        )
+        self.assertFalse(context["ok"])
+        self.assertIn("ci_not_green:NO_SIGNAL", context["errors"])
+        self.assertEqual(context["cut_base"]["sha"], None)
 
 
 if __name__ == "__main__":

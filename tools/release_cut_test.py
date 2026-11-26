@@ -726,5 +726,55 @@ class ReleaseCutTest(unittest.TestCase):
         self.assertLess(strict_idx, audit_idx)
 
 
+class PublishRetryDecisionTest(unittest.TestCase):
+    """Bounded re-cut after a trunk race: only 'diverged' retries, at most MAX_RECUTS."""
+
+    def setUp(self) -> None:
+        self.mod = load()
+
+    def test_ok_publish_is_published_without_recut(self) -> None:
+        d = self.mod.publish_retry_decision({"ok": True, "state": "ahead"}, recuts_used=0)
+        self.assertEqual(d["action"], "published")
+
+    def test_diverged_publish_recuts_until_the_bound(self) -> None:
+        diverged = {"ok": False, "state": "diverged"}
+        self.assertEqual(self.mod.MAX_RECUTS, 2)
+        first = self.mod.publish_retry_decision(diverged, recuts_used=0)
+        self.assertEqual((first["action"], first["recuts_used"]), ("recut", 1))
+        second = self.mod.publish_retry_decision(diverged, recuts_used=1)
+        self.assertEqual((second["action"], second["recuts_used"]), ("recut", 2))
+        third = self.mod.publish_retry_decision(diverged, recuts_used=2)
+        self.assertEqual(third["action"], "fail")
+        self.assertIn("gave up after 2 re-cut(s)", third["reason"])
+
+    def test_non_race_refusal_fails_without_recut(self) -> None:
+        for state in ("behind", "no-remote-ref", "ahead"):
+            d = self.mod.publish_retry_decision({"ok": False, "state": state}, recuts_used=0)
+            self.assertEqual(d["action"], "fail", state)
+            self.assertEqual(d["recuts_used"], 0, state)
+
+    def test_custom_bound_is_honored(self) -> None:
+        d = self.mod.publish_retry_decision({"ok": False, "state": "diverged"}, recuts_used=1, max_recuts=1)
+        self.assertEqual(d["action"], "fail")
+
+    def test_cli_prints_decision_and_exit_code(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="publish_decision_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        publish = tmp / "publish.json"
+        publish.write_text(json.dumps({"ok": False, "state": "diverged"}), encoding="utf-8")
+        recut = subprocess.run(
+            [sys.executable, "-X", "utf8", str(SCRIPT), "--publish-decision", str(publish), "--recuts-used", "0"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(recut.returncode, 0, recut.stderr)
+        self.assertEqual(json.loads(recut.stdout)["action"], "recut")
+        exhausted = subprocess.run(
+            [sys.executable, "-X", "utf8", str(SCRIPT), "--publish-decision", str(publish), "--recuts-used", "2"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(exhausted.returncode, 1, exhausted.stderr)
+        self.assertEqual(json.loads(exhausted.stdout)["action"], "fail")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

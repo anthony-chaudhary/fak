@@ -23,11 +23,28 @@ import sys
 import tarfile
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+# First-parent window searched for the newest green cut base below the cut commit.
+RELEASE_CANDIDATE_MAX_DEPTH = 25
 Runner = Callable[[list[str]], tuple[int, str]]
+# A bot-pushed cut commit (GITHUB_TOKEN) starts no push-triggered run, so the
+# cadence dispatches ci-fast for that exact sha with intent=release. Such a run
+# is admitted only when its aggregate provenance binds this sha and the run
+# executed the same ci-fast workflow bytes as the tested commit.
+CI_FAST_WORKFLOW_PATH = ".github/workflows/ci-fast.yml"
+CI_FAST_REQUIRED_JOBS = ["build-vet-fast"] + [f"go-test-shard-{index}" for index in range(14)]
+RELEASE_CI_CLASS = "release"
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# `gh run watch` is bounded by the runner timeout; re-watch rather than fail a
+# run that outlives one bound.
+DEFAULT_WATCH_ROUNDS = 5
+# A dispatched run is listed a few seconds after `gh workflow run` returns.
+DEFAULT_APPEAR_POLLS = 12
+APPEAR_POLL_SECONDS = 10
 CI_BILLING_PATTERNS = (
     "payments have failed",
     "spending limit",
@@ -308,8 +325,159 @@ def diagnose_failed_ci_run(run_id: object, runner: Runner) -> dict:
     }
 
 
+def verify_release_dispatch(sha: str, run_row: Any, provenance: Any, *, trunk: str,
+                            workflow_blob_at_run: str | None,
+                            workflow_blob_at_sha: str | None) -> str | None:
+    """Return why a dispatched ci-fast run is not release evidence for sha, or None.
+
+    The aggregate provenance is the ci-fast verdict job's own check that every
+    required job tested one commit and tree with the release command set; this
+    re-binds it to the GitHub-reported run so a branch-modified workflow or a
+    run of another commit cannot stand in for the release commit.
+    """
+    if not isinstance(run_row, dict):
+        return "run row is not an object"
+    run_id = str(run_row.get("databaseId") or "")
+    attempt = str(run_row.get("attempt") or "")
+    head_sha = str(run_row.get("headSha") or "")
+    if run_row.get("event") != "workflow_dispatch":
+        return "run is not a workflow_dispatch run"
+    if run_row.get("headBranch") != trunk:
+        return f"run did not execute on trunk {trunk}"
+    if (str(run_row.get("status") or "").lower() != "completed"
+            or str(run_row.get("conclusion") or "").lower() != "success"):
+        return "run did not complete successfully"
+    if (not re.fullmatch(r"[1-9][0-9]*", run_id) or not re.fullmatch(r"[1-9][0-9]*", attempt)
+            or not SHA_RE.match(head_sha)):
+        return "run identity (id, attempt, head) is malformed"
+    if not isinstance(provenance, dict):
+        return "aggregate provenance missing or unreadable"
+    expected = {
+        "schema": "fak.ci-provenance.v1",
+        "workflow": "ci-fast",
+        "verified": True,
+        "ci_class": RELEASE_CI_CLASS,
+        "requested_intent": "release",
+        "event": "workflow_dispatch",
+        "ref": f"refs/heads/{trunk}",
+        "tested_sha": sha,
+        "represented_sha": head_sha,
+        "run_id": run_id,
+        "run_attempt": attempt,
+        "required_jobs": CI_FAST_REQUIRED_JOBS,
+    }
+    for key, want in expected.items():
+        if provenance.get(key) != want:
+            return f"provenance {key}={provenance.get(key)!r}, want {want!r}"
+    if not SHA_RE.match(str(provenance.get("tested_tree") or "")):
+        return "provenance tested_tree is malformed"
+    if not workflow_blob_at_run or not workflow_blob_at_sha:
+        return f"cannot read {CI_FAST_WORKFLOW_PATH} at the run head and the tested commit"
+    if workflow_blob_at_run != workflow_blob_at_sha:
+        return f"{CI_FAST_WORKFLOW_PATH} at run head {head_sha[:12]} differs from the tested commit"
+    return None
+
+
+def blob_id(root: Path, rev: str, path: str, *, remote: str = "origin") -> str | None:
+    for attempt in range(2):
+        code, out = git(root, ["rev-parse", "--verify", "--quiet", f"{rev}:{path}"])
+        if code == 0 and out.strip():
+            return out.strip()
+        if attempt == 0:
+            git(root, ["fetch", "--quiet", remote, rev], timeout=300)
+    return None
+
+
+def download_provenance(run_row: dict, runner: Runner) -> Any:
+    run_id, attempt = run_row.get("databaseId"), run_row.get("attempt")
+    with tempfile.TemporaryDirectory(prefix="release-tag-provenance-") as tmp:
+        code, _ = runner(["gh", "run", "download", str(run_id),
+                          "-n", f"ci-fast-provenance-{run_id}-{attempt}", "-D", tmp])
+        path = Path(tmp) / "ci-fast-provenance.json"
+        if code != 0 or not path.is_file():
+            return None
+        return _json_value(path.read_text(encoding="utf-8", errors="replace"))
+
+
+def release_dispatch_signal(root: Path, sha: str, *, workflow: str, trunk: str, require_ci: bool,
+                            wait: bool = False, runner: Runner | None = None,
+                            fetch_provenance: Callable[[dict], Any] | None = None,
+                            blob_at: Callable[[str], str | None] | None = None,
+                            sleep: Callable[[float], None] = time.sleep,
+                            appear_polls: int = DEFAULT_APPEAR_POLLS,
+                            watch_rounds: int = DEFAULT_WATCH_ROUNDS) -> dict:
+    runner = runner or (lambda cmd: run(cmd, cwd=root, timeout=900))
+    fetch_provenance = fetch_provenance or (lambda row: download_provenance(row, runner))
+    blob_at = blob_at or (lambda rev: blob_id(root, rev, CI_FAST_WORKFLOW_PATH))
+    # The run title only locates the candidate; admission rests on provenance.
+    title = f"ci-fast release · {sha}"
+    cmd = [
+        "gh", "run", "list",
+        "--workflow", workflow,
+        "--event", "workflow_dispatch",
+        "--branch", trunk,
+        "--limit", "30",
+        "--json", "databaseId,status,conclusion,url,createdAt,headSha,headBranch,event,attempt,displayTitle",
+    ]
+
+    def find() -> dict | None:
+        code, out = runner(cmd)
+        rows = _json_value(out) if code == 0 else None
+        if not isinstance(rows, list):
+            return None
+        for row in rows:
+            if isinstance(row, dict) and row.get("displayTitle") == title:
+                return row
+        return None
+
+    run_row = find()
+    polls = 0
+    while run_row is None and wait and polls < appear_polls:
+        sleep(APPEAR_POLL_SECONDS)
+        polls += 1
+        run_row = find()
+    if run_row is None:
+        return {
+            "pass": not require_ci,
+            "verdict": "NO_SIGNAL",
+            "advisory": not require_ci,
+            "evidence": "release-dispatch",
+            "reason": f"no trunk {workflow} release dispatch found for commit {sha[:12]}",
+        }
+    rounds = 0
+    while wait and str(run_row.get("status") or "").lower() != "completed" and rounds < watch_rounds:
+        runner(["gh", "run", "watch", str(run_row.get("databaseId")), "--exit-status"])
+        rounds += 1
+        run_row = find() or run_row
+    status = str(run_row.get("status") or "").lower()
+    conclusion = str(run_row.get("conclusion") or "").lower()
+    base = {"evidence": "release-dispatch", "run": run_row}
+    if status != "completed":
+        return {**base, "pass": not require_ci, "verdict": "PENDING", "advisory": not require_ci,
+                "reason": f"{workflow} release dispatch status is {status or '(unknown)'}"}
+    if conclusion != "success":
+        return {**base, "pass": False, "verdict": "RED", "advisory": False,
+                "reason": f"{workflow} release dispatch completed with conclusion {conclusion or '(none)'}"}
+    provenance = fetch_provenance(run_row)
+    head_sha = str(run_row.get("headSha") or "")
+    refusal = verify_release_dispatch(
+        sha, run_row, provenance, trunk=trunk,
+        workflow_blob_at_run=blob_at(head_sha) if SHA_RE.match(head_sha) else None,
+        workflow_blob_at_sha=blob_at(sha),
+    )
+    if refusal:
+        return {**base, "pass": False, "verdict": "UNVERIFIED", "advisory": False,
+                "provenance": provenance,
+                "reason": f"release dispatch is not evidence for {sha[:12]}: {refusal}"}
+    return {**base, "pass": True, "verdict": "GREEN", "advisory": False, "provenance": provenance,
+            "reason": (f"{workflow} release dispatch tested exact commit {sha[:12]} "
+                       f"(tree {provenance['tested_tree'][:12]})")}
+
+
 def ci_signal(root: Path, sha: str, *, workflow: str, require_ci: bool,
-              wait: bool = False, runner: Runner | None = None) -> dict:
+              wait: bool = False, runner: Runner | None = None,
+              release_dispatch: bool = False, trunk: str = "main",
+              dispatch_signal: Callable[..., dict] | None = None) -> dict:
     runner = runner or (lambda cmd: run(cmd, cwd=root, timeout=900))
     cmd = [
         "gh", "run", "list",
@@ -339,8 +507,17 @@ def ci_signal(root: Path, sha: str, *, workflow: str, require_ci: bool,
             "detail": out.strip()[-300:],
         }
     folded = fold_ci_runs(runs, require_ci=require_ci)
+    if release_dispatch and folded.get("verdict") == "NO_SIGNAL":
+        # A push run is the normal signal; only a sha with none falls back to its
+        # own release-intent dispatch, which must itself be green for this sha.
+        signal = dispatch_signal or release_dispatch_signal
+        dispatched = signal(root, sha, workflow=workflow, trunk=trunk, require_ci=require_ci,
+                            wait=wait, runner=runner)
+        dispatched["push_signal"] = folded
+        folded = dispatched
     run_row = folded.get("run") or {}
-    if wait and folded.get("verdict") == "PENDING" and run_row.get("databaseId"):
+    if (wait and folded.get("evidence") != "release-dispatch" and folded.get("verdict") == "PENDING"
+            and run_row.get("databaseId")):
         watch_code, watch_out = runner(["gh", "run", "watch", str(run_row["databaseId"]), "--exit-status"])
         folded["watch_exit_code"] = watch_code
         folded["watch_tail"] = watch_out.strip()[-300:]
@@ -360,6 +537,55 @@ def ci_signal(root: Path, sha: str, *, workflow: str, require_ci: bool,
             folded["verdict"] = str(diagnosis.get("verdict"))
             folded["reason"] = str(diagnosis.get("detail"))
     return folded
+
+
+def first_parent_chain(root: Path, head: str, depth: int) -> list[str]:
+    code, out = git(root, ["rev-list", "--first-parent", f"--max-count={depth}", head])
+    if code != 0:
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+# Verdicts that let the candidate search look past a commit to an older one.
+# Anything else (RED, billing, invalid evidence) blocks the search, so a
+# tag never lands on an ancestor older than a known-bad newer run.
+CANDIDATE_TOLERATED_VERDICTS = frozenset({"GREEN", "NO_SIGNAL", "PENDING"})
+
+
+def select_green_candidate(root: Path, head: str, *, workflow: str, wait: bool = False,
+                           depth: int = RELEASE_CANDIDATE_MAX_DEPTH) -> dict:
+    """Pick the newest first-parent commit of head that has its own green push run.
+
+    Coalesced trunk CI leaves superseded commits without a run, so the tag
+    candidate is the first ancestor whose exact-sha push run concluded success.
+    Newer commits that are still pending or have no run are tolerated; a
+    newer red or unreadable run blocks the search.
+    """
+    scanned: list[dict[str, Any]] = []
+    head_ci: dict | None = None
+    for index, candidate in enumerate(first_parent_chain(root, head, depth)):
+        ci = ci_signal(root, candidate, workflow=workflow, require_ci=True,
+                       wait=wait and index == 0)
+        if index == 0:
+            head_ci = ci
+        verdict = str(ci.get("verdict"))
+        scanned.append({"sha": candidate, "verdict": verdict})
+        if verdict == "GREEN":
+            return {"sha": candidate, "ci": ci, "scanned": scanned,
+                    "pass": True, "reason": "newest first-parent commit with a green push run"}
+        if verdict not in CANDIDATE_TOLERATED_VERDICTS:
+            return {"sha": None, "ci": ci, "scanned": scanned, "pass": False,
+                    "reason": f"{verdict} at {candidate[:12]} blocks the candidate search"}
+    # Nothing green in the window: report HEAD's own signal so the refusal
+    # names the same verdict a non-gated check would.
+    return {
+        "sha": None,
+        "ci": head_ci or {"pass": False, "verdict": "NO_SIGNAL", "advisory": False,
+                           "reason": "HEAD has no first-parent history to search"},
+        "scanned": scanned,
+        "pass": False,
+        "reason": f"no green push run within {depth} first-parent commits of HEAD",
+    }
 
 
 def tag_message(tag: str, sha: str, dry_run_trailer: str) -> str:
@@ -561,7 +787,8 @@ def build_context(root: Path, *, version: str | None, ref: str,
                   require_ci: bool = False, skip_ci: bool = False,
                   wait_ci: bool = False, skip_dry_run: bool = False,
                   workflow: str = "ci.yml", trunk: str = "main",
-                  remote: str = "origin", skip_remote_tag: bool = False) -> dict:
+                  remote: str = "origin", skip_remote_tag: bool = False,
+                  release_dispatch: bool = False) -> dict:
     errors: list[str] = []
     warnings: list[str] = []
     skips: list[str] = []
@@ -654,11 +881,22 @@ def build_context(root: Path, *, version: str | None, ref: str,
         ci = {"pass": True, "verdict": "SKIPPED", "advisory": True}
         skips.append("ci_check_skipped")
     else:
-        ci = ci_signal(root, sha, workflow=workflow, require_ci=require_ci, wait=wait_ci)
+        # The tagged sha is always the cut commit itself: it must carry its own
+        # green run (push, or its exact-sha release dispatch) before tagging.
+        ci = ci_signal(root, sha, workflow=workflow, require_ci=require_ci, wait=wait_ci,
+                       release_dispatch=release_dispatch, trunk=trunk or "main")
         if ci.get("advisory"):
             warnings.append(str(ci.get("reason") or ci.get("verdict")))
         if not ci.get("pass"):
             errors.append(f"ci_not_green:{ci.get('verdict')}")
+            if require_ci:
+                # The newest green ancestor is reported as the cut base only; it
+                # never becomes the tagged sha.
+                base = select_green_candidate(root, f"{sha}^", workflow=workflow)
+                result["cut_base"] = {"sha": base["sha"], "reason": base["reason"],
+                                      "scanned": base["scanned"]}
+                if base["sha"]:
+                    warnings.append(f"cut base {base['sha'][:12]} is green; cut {sha[:12]} is not covered")
     result["checks"]["ci"] = ci
 
     result["ok"] = not errors
@@ -748,6 +986,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--wait-ci", action="store_true", help="watch a pending GitHub Actions run before folding CI")
     parser.add_argument("--skip-ci", action="store_true", help="skip CI folding; intended for tests only")
     parser.add_argument("--skip-dry-run", action="store_true", help="skip release_dry_run; intended for tests only")
+    parser.add_argument("--release-dispatch", action="store_true",
+                        help="with no push run for --ref, accept a trunk release-intent dispatch of --workflow "
+                             "whose verified provenance tested exactly --ref")
     parser.add_argument("--skip-remote-tag", action="store_true",
                         help="skip remote tag collision check; intended for tests only")
     parser.add_argument("--execute", action="store_true", help="create the local annotated tag")
@@ -785,6 +1026,7 @@ def main(argv: list[str] | None = None) -> int:
             trunk=args.trunk,
             remote=args.remote,
             skip_remote_tag=args.skip_remote_tag,
+            release_dispatch=args.release_dispatch,
         )
         result = execute_tag(
             root,

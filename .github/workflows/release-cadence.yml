@@ -324,7 +324,10 @@ jobs:
           fi
           exit "$code"
 
-      - name: Cut release commit
+      - name: Cut and push release commit
+        # Cut, then publish. A diverged publish means trunk moved under the cut, so the
+        # cut is discarded and re-run from the new head. At most MAX_RECUTS re-cuts
+        # (release_cut.publish_retry_decision); after that the tick fails loudly.
         id: cut
         if: >-
           steps.decide.outputs.decision == 'release' &&
@@ -336,59 +339,75 @@ jobs:
           set -euo pipefail
           git config user.name "fleet-release-cadence[bot]"
           git config user.email "fleet-release-cadence@users.noreply.github.com"
-          rc=0
-          python tools/release_cut.py --execute --json --require-ci-green --limit-commits 50 --lock-already-held > cut.json || rc=$?
-          cat cut.json
-          if [ "$rc" -ne 0 ]; then
-            echo "::error::release_cut execute exited $rc: $(python -c 'import json; d=json.load(open("cut.json")); print(d.get("aborted"), d.get("foreign_dirty") or d.get("detail") or "")' 2>/dev/null || echo 'unreadable cut.json')"
-            exit "$rc"
-          fi
-          ok="$(python -c 'import json; print(json.load(open("cut.json"))["ok"])')"
-          if [ "$ok" != "True" ]; then
-            echo "::error::release_cut execute refused"
-            exit 1
-          fi
-          version="$(python -c 'import json; print(json.load(open("cut.json"))["version"])')"
+          recuts=0
+          while :; do
+            rc=0
+            python tools/release_cut.py --execute --json --require-ci-green --limit-commits 50 --lock-already-held > cut.json || rc=$?
+            cat cut.json
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::release_cut execute exited $rc: $(python -c 'import json; d=json.load(open("cut.json")); print(d.get("aborted"), d.get("foreign_dirty") or d.get("detail") or "")' 2>/dev/null || echo 'unreadable cut.json')"
+              exit "$rc"
+            fi
+            ok="$(python -c 'import json; print(json.load(open("cut.json"))["ok"])')"
+            if [ "$ok" != "True" ]; then
+              echo "::error::release_cut execute refused"
+              exit 1
+            fi
+            version="$(python -c 'import json; print(json.load(open("cut.json"))["version"])')"
+
+            # The receipt lives outside the checkout so the tree stays clean for the publish.
+            # An over-budget root module must never reach origin, so it is measured before every publish.
+            set +e
+            python tools/release_tag.py --module-zip-only --ref "$(git rev-parse HEAD)" --json > "$RUNNER_TEMP/module-zip.json"
+            zcode=$?
+            set -e
+            cat "$RUNNER_TEMP/module-zip.json"
+            if [ "$zcode" -ne 0 ]; then
+              echo "::error::module zip over budget or unmeasurable at the release commit; refusing to publish trunk or tag"
+              exit 1
+            fi
+
+            # publish exits nonzero on refusal; the retry decision below reads its JSON.
+            python tools/fleet_control_pane.py publish --apply --json > publish.json || true
+            cat publish.json
+            decision="$(python tools/release_cut.py --publish-decision publish.json --recuts-used "$recuts")" || true
+            echo "$decision"
+            action="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["action"])' "$decision")"
+            reason="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["reason"])' "$decision")"
+            if [ "$action" = "published" ]; then
+              break
+            fi
+            if [ "$action" != "recut" ]; then
+              echo "::error::checked publish refused: $reason"
+              exit 1
+            fi
+            recuts="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["recuts_used"])' "$decision")"
+            echo "::notice::$reason"
+            git fetch --quiet origin main
+            git reset --hard --quiet origin/main
+          done
+
           sha="$(git rev-parse HEAD)"
           {
             echo "version=$version"
             echo "sha=$sha"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Measure module zip before publish
-        # Runs before the trunk push, the first irreversible step: an over-budget
-        # root module must never reach origin, not only fail at the tag. No
-        # step-level if: here, so a skipped cut cannot silently skip the measure.
-        run: |
-          set -euo pipefail
-          sha="${{ steps.cut.outputs.sha }}"
-          if [ -z "$sha" ]; then
-            echo "no release commit was cut; nothing to measure"
-            exit 0
-          fi
-          # The receipt lives outside the checkout so the tree stays clean for the publish.
-          receipt="$RUNNER_TEMP/module-zip.json"
-          set +e
-          python tools/release_tag.py --module-zip-only --ref "$sha" --json > "$receipt"
-          code=$?
-          set -e
-          cat "$receipt"
-          if [ "$code" -ne 0 ]; then
-            echo "::error::module zip over budget or unmeasurable at the release commit; refusing to publish trunk or tag"
-            exit 1
-          fi
-
-      - name: Push trunk
+      - name: Dispatch release CI for cut commit
         if: steps.cut.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CUT_SHA: ${{ steps.cut.outputs.sha }}
         run: |
           set -euo pipefail
-          python tools/fleet_control_pane.py publish --apply --json > publish.json
-          cat publish.json
-          ok="$(python -c 'import json; print(json.load(open("publish.json"))["ok"])')"
-          if [ "$ok" != "True" ]; then
-            echo "::error::checked publish refused"
+          # A bot-pushed cut commit starts no push run. The exact cut sha gets its
+          # own release-intent ci-fast run; release_tag admits it only by provenance.
+          git fetch --quiet origin main
+          if [ "$(git rev-parse origin/main)" != "$CUT_SHA" ]; then
+            echo "::error::trunk moved past the cut commit before release CI dispatch"
             exit 1
           fi
+          gh workflow run ci-fast.yml --ref main -f intent=release -f sha="$CUT_SHA"
 
       - name: Tag after green CI
         id: tag
@@ -397,19 +416,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          rc=0
           python tools/release_tag.py \
             --version "${{ steps.cut.outputs.version }}" \
             --ref HEAD \
+            --workflow ci-fast.yml \
             --require-ci \
+            --release-dispatch \
             --wait-ci \
             --execute \
             --push \
             --lock-already-held \
-            --json > tag.json
+            --json > tag.json || rc=$?
           cat tag.json
           ok="$(python -c 'import json; print(json.load(open("tag.json"))["ok"])')"
-          if [ "$ok" != "True" ]; then
-            echo "::error::release_tag refused"
+          if [ "$ok" != "True" ] || [ "$rc" -ne 0 ]; then
+            echo "::error::release_tag refused (exit $rc)"
             exit 1
           fi
 
