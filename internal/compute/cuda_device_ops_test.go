@@ -147,11 +147,14 @@ func TestCUDAIQWeightCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := findRepoRootForTest(t, wd)
-	data, err := os.ReadFile(filepath.Join(root, "internal", "compute", "cuda.go"))
-	if err != nil {
-		t.Fatal(err)
+	source := ""
+	for _, name := range []string{"cuda.go", "cuda_residency.go"} {
+		data, err := os.ReadFile(filepath.Join(root, "internal", "compute", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		source += string(data)
 	}
-	source := string(data)
 	for _, binding := range []string{
 		"func (c *cudaBackend) SupportsDeviceWeightDtype(dt Dtype) bool {\n\treturn cudaDeviceWeightDtypeSupported(dt)\n}",
 		"if cudaRawUploadIsVerbatim(t.Dtype) {\n\t\tif as != t.Dtype {",

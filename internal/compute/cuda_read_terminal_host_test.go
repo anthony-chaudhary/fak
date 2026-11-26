@@ -48,7 +48,7 @@ func TestCUDAReadTerminalExactHost(t *testing.T) {
 		}
 		return out.String()
 	}
-	read := extract("cuda.go", "Read", "readLocked")
+	read := extract("cuda_residency.go", "Read", "readLocked")
 	const call = "\tcudaV41CheckedSubmit()\n"
 	if strings.Count(read, call) != 1 {
 		t.Fatal("actual Read must contain exactly one shared terminal guard")

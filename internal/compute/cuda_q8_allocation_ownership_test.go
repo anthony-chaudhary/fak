@@ -149,20 +149,22 @@ func TestCUDADevQ8SuccessfulAndEmptyLayout(t *testing.T) {
 // Pin the allocation transaction to both real upload variants and native leaves.
 // fak-test:runtime fast est=10ms lane=default
 func TestCUDADevQ8NativeAllocationBinding(t *testing.T) {
-	raw, err := os.ReadFile("cuda.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	set := token.NewFileSet()
-	file, err := parser.ParseFile(set, "cuda.go", raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
 	bodies := map[string]string{}
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Body != nil {
-			bodies[fn.Name.Name] = string(raw[set.Position(fn.Body.Pos()).Offset:set.Position(fn.Body.End()).Offset])
+	for _, name := range []string{"cuda.go", "cuda_residency.go", "cuda_upload.go"} {
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		set := token.NewFileSet()
+		file, err := parser.ParseFile(set, name, raw, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if ok && fn.Body != nil {
+				bodies[fn.Name.Name] = string(raw[set.Position(fn.Body.Pos()).Offset:set.Position(fn.Body.End()).Offset])
+			}
 		}
 	}
 	for _, want := range []string{"c.devQ8WithOperations(", "c.dallocWeight,", "c.dallocClass(bytes, MemoryWeights, \"q8-scale\")", "C.fcuda_free(ptr)"} {

@@ -18,10 +18,7 @@ import (
 
 func assertCUDAUploadLockedBoundary(t *testing.T) {
 	t.Helper()
-	f, err := parser.ParseFile(token.NewFileSet(), "cuda.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := parseCUDABackendSources(t, token.NewFileSet())
 	for _, d := range f.Decls {
 		fn, ok := d.(*ast.FuncDecl)
 		if !ok || fn.Recv == nil || fn.Name.Name != "uploadClass" {
@@ -605,7 +602,7 @@ int main(){
 func cudaUploadContractBodies(t *testing.T) map[string]string {
 	t.Helper()
 	bodies := map[string]string{}
-	for _, name := range []string{"cuda.go", "cuda_upload.go"} {
+	for _, name := range []string{"cuda.go", "cuda_residency.go", "cuda_upload.go"} {
 		raw, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)

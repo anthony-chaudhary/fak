@@ -34,7 +34,7 @@ func TestCUDAUploadCacheGeometryHost(t *testing.T) {
 	program.Write(src[fs.Position(fn.Pos()).Offset:fs.Position(fn.End()).Offset])
 	program.WriteByte('\n')
 	for _, route := range []struct{ file, method string }{
-		{"cuda.go", "uploadClassLocked"},
+		{"cuda_residency.go", "uploadClassLocked"},
 		{"cuda_upload.go", "uploadQ2Resident"},
 		{"cuda_upload.go", "uploadRawKQuant"},
 	} {

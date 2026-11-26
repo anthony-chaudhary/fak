@@ -5,7 +5,6 @@ import (
 	"context"
 	"go/ast"
 	"go/format"
-	"go/parser"
 	"go/token"
 	"os"
 	"os/exec"
@@ -21,10 +20,7 @@ import (
 // fak-test:runtime medium est=2s lane=default
 func TestCUDAPrefillLockedCleanupOrder(t *testing.T) {
 	fs := token.NewFileSet()
-	f, err := parser.ParseFile(fs, "cuda.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := parseCUDABackendSources(t, fs)
 	methods := map[string]*ast.FuncDecl{}
 	for _, d := range f.Decls {
 		if fn, ok := d.(*ast.FuncDecl); ok {

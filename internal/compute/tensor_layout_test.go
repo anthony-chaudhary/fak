@@ -248,7 +248,7 @@ func tensorLayoutRequireGuard(t *testing.T, statement ast.Stmt, name string) {
 // fak-test:runtime fast est=1s
 func TestTensorLayoutGPUUploadAdmissionBeforeSideEffects(t *testing.T) {
 	for _, tc := range []struct{ filename, backend, method, guard string }{
-		{"cuda.go", "cudaBackend", "uploadClass", "requireCUDAUploadLayout"},
+		{"cuda_residency.go", "cudaBackend", "uploadClass", "requireCUDAUploadLayout"},
 		{"metal.go", "metalBackend", "uploadClass", "requireRowMajor"},
 		{"vulkan.go", "vulkanBackend", "uploadClass", "requireRowMajor"},
 	} {
@@ -325,7 +325,7 @@ func TestTensorLayoutGPUUploadAdmissionBeforeSideEffects(t *testing.T) {
 		}
 	})
 	for _, tc := range []struct{ filename, backend string }{
-		{"cuda.go", "cudaBackend"}, {"metal.go", "metalBackend"}, {"vulkan.go", "vulkanBackend"},
+		{"cuda_residency.go", "cudaBackend"}, {"metal.go", "metalBackend"}, {"vulkan.go", "vulkanBackend"},
 	} {
 		for _, method := range []string{"Upload", "UploadClass"} {
 			fn := tensorLayoutMethod(t, tc.filename, tc.backend, method)

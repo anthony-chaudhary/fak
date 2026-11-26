@@ -14,7 +14,7 @@ import (
 
 // fak-test:runtime fast est=2ms lane=default
 func TestCUDAReadTerminalAdmissionContract(t *testing.T) {
-	source, err := os.ReadFile("cuda.go")
+	source, err := os.ReadFile("cuda_residency.go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestCUDAReadTerminalAdmissionContract(t *testing.T) {
 // The host view and existing invalid-buffer error keep their original precedence.
 func cudaReadTerminalPrefix(source []byte) error {
 	fs := token.NewFileSet()
-	f, err := parser.ParseFile(fs, "cuda.go", source, 0)
+	f, err := parser.ParseFile(fs, "cuda_residency.go", source, 0)
 	if err != nil {
 		return err
 	}

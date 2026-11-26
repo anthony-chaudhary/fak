@@ -22,7 +22,7 @@ func TestCUDAInkling2ResidentAllocationIsDeviceOnly(t *testing.T) {
 		}
 	}
 
-	allocator := namedFunction(t, parseGoFile(t, "cuda.go"), "dallocDeviceClass")
+	allocator := namedFunction(t, parseGoFile(t, "cuda_residency.go"), "dallocDeviceClass")
 	allocatorCalls := selectorCalls(allocator.Body)
 	if allocatorCalls["fcuda_malloc_tagged"] != 1 {
 		t.Fatalf("dallocDeviceClass fcuda_malloc_tagged calls = %d, want 1", allocatorCalls["fcuda_malloc_tagged"])

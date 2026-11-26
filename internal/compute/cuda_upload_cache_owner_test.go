@@ -41,7 +41,7 @@ func TestCUDAUploadCacheOwnerHost(t *testing.T) {
 		"*cudaBackend.cudaFreeStorageLocked": false,
 		"*cudaBackend.Recycle":               false, "*cudaBackend.releaseTransientBuffers": false,
 	}
-	for _, path := range []string{"compute.go", "tensor_layout.go", "quant_q2.go", "cuda_upload.go", "cuda_device_ops.go", "cuda.go"} {
+	for _, path := range []string{"compute.go", "tensor_layout.go", "quant_q2.go", "cuda_upload.go", "cuda_device_ops.go", "cuda.go", "cuda_residency.go"} {
 		src, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)

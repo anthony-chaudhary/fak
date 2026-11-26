@@ -10,7 +10,7 @@ import (
 // Estimate only; not timed. Parses source without linking or executing CUDA.
 // fak-test:runtime fast est=20ms lane=default
 func TestCUDACloneTensorSerializesAllocationAndCopy(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "cuda.go", nil, 0)
+	file, err := parser.ParseFile(token.NewFileSet(), "cuda_residency.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
