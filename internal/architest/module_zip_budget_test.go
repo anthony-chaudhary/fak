@@ -17,23 +17,26 @@ import (
 // that fit.
 //
 // The module is the whole repository minus nested modules and export-ignore
-// paths, so it grows with every receipt, witness dump and vendored header
-// anyone commits. These budgets are a ratchet set just above today's size, so
-// the commit that adds bulk is the one that goes red. Lower them whenever a
-// carve lands; raise them only for product Go, in the commit that needs it.
+// paths (.gitattributes). That export block leaves out tests, docs, evidence,
+// media, experiments, agent assets, tool scripts and bulky vendored headers, so
+// what remains is product code plus whatever a new commit adds. These budgets
+// are a ratchet set just above today's size, so the commit that adds bulk is
+// the one that goes red. Lower them whenever a carve lands; raise them only for
+// product Go, in the commit that needs it.
 const (
 	moduleZipProxyCapBytes  = 500 << 20
-	moduleZipBudgetBytes    = 375 << 20
-	moduleZipNonGoBudget    = 190 << 20
-	moduleZipNonGoFileLimit = 5 << 20
+	moduleZipBudgetBytes    = 125 << 20
+	moduleZipNonGoBudget    = 30 << 20
+	moduleZipNonGoFileLimit = 4 << 20
 )
 
-const moduleZipRemedy = `Everything tracked in the root module ships to every go install user. Evidence,
-research, media and fixtures belong under a tree that is out of the module zip (its own
-go.mod, as docs/research and visuals have), and one artifact should be a receipt or
-summary, not a raw dump: over the per-file limit, commit a pointer (path, sha256, size).
-Raise a budget only for product Go that has genuinely grown, in the same commit, with
-the reason.`
+const moduleZipRemedy = `Everything tracked in the root module that is not export-ignored ships to every
+go install user. Evidence, research, media and fixtures belong under a path the
+.gitattributes export block already leaves out (or a new export-ignore row for that
+path, in the same commit), or under a tree with its own go.mod. One artifact should be
+a receipt or summary, not a raw dump: over the per-file limit, commit a pointer
+(path, sha256, size). Raise a budget only for product Go that has genuinely grown, in
+the same commit, with the reason.`
 
 func TestRootModuleZipBudget(t *testing.T) {
 	root, err := gitOutput(".", "rev-parse", "--show-toplevel")

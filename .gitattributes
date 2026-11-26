@@ -98,10 +98,27 @@ internal/compute/shaders/v41_q2k_token_pair.comp text eol=lf
 internal/compute/v41_q2k_token_pair_spirv.h text eol=lf
 
 # cmd/go builds module zips with `git archive`, which honors export-ignore, and
-# refuses a module source tree over 500 MiB. These trees hold no Go packages, so
-# dropping them keeps `go install .../cmd/fak@vX` under the cap.
-docs/research/inventory/** export-ignore
+# refuses a module source tree over 500 MiB. The module zip is what every
+# `go install .../cmd/fak@vX` user downloads and compiles, so it leaves out
+# tests, docs, evidence, media, experiments, agent assets, tool scripts and the
+# vendored CUDA headers that only a from-source build uses. A checkout is
+# unaffected. Anything a kept package embeds or compiles must stay exported
+# (most testdata is embedded, so it is not ignored wholesale); CI builds every
+# package from the archive to prove that. Gates that need the committed tree
+# as it is use internal/committedtree, never git archive.
+*_test.go export-ignore
+docs/** export-ignore
 visuals/** export-ignore
+experiments/** export-ignore
+internal/ggufload/testdata/** export-ignore
+third_party/cutlass/** export-ignore
+third_party/deepgemm_cutlass/** export-ignore
+tools/**/*.py export-ignore
+tools/grafana/** export-ignore
+.agents/** export-ignore
+.claude/** export-ignore
+.github/** export-ignore
+llms-full.txt export-ignore
 
 # Launch charts and the headline index are compared byte for byte against their render, so
 # pin LF: a CRLF checkout would make every chart drift.
