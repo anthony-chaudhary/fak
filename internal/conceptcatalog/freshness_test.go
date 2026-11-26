@@ -538,6 +538,15 @@ func fixtureGitRepo(t *testing.T) string {
 	if _, err := git(root, "config", "core.autocrlf", "false"); err != nil {
 		t.Fatal(err)
 	}
+	// The fixture stages tens of thousands of loose objects, which would make the
+	// commit below spawn a detached `gc --auto` that keeps writing into .git after the
+	// test returns, racing t.TempDir's RemoveAll. The fixture is short-lived: no
+	// background maintenance.
+	for _, kv := range [][2]string{{"gc.auto", "0"}, {"gc.autoDetach", "false"}, {"maintenance.auto", "false"}} {
+		if _, err := git(root, "config", kv[0], kv[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := git(root, "add", "-A"); err != nil {
 		t.Fatal(err)
 	}
