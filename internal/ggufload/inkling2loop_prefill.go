@@ -728,7 +728,7 @@ func (p *ink2Prefill) forward(last bool) {
 		p.scrOff = 0
 		clear(p.q8)
 		if s.draft != nil {
-			for _, v := range s.draft.visits {
+			for _, v := range s.draft.tapVisits() {
 				if v == nv {
 					taps = append(taps, cur)
 				}
@@ -773,13 +773,13 @@ func (p *ink2Prefill) forward(last bool) {
 	if p.verify {
 		final := p.headRows(blocks, cur)
 		if s.draft != nil {
-			s.draft.commitContext(p, append(taps, final))
+			s.draft.commitTaps(p, append(taps, final))
 		}
 		return
 	}
 	if s.draft != nil {
 		x := p.mixNorm(with(blocks, cur), s.outResQ, 1, []ink2Ref{s.outNorm})[0]
-		s.draft.commitContext(p, append(taps, x))
+		s.draft.commitTaps(p, append(taps, x))
 	}
 	if p.cohort != nil {
 		p.cohort.head(p, blocks, cur)

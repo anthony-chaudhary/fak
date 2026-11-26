@@ -16,7 +16,8 @@ func TestInkling2ResidentSessionsRecaptureAfterAnotherSessionRan(t *testing.T) {
 		s.graph, s.graphReady, s.warm = true, true, true
 		s.verifyWarm, s.verifyReady, s.keepReady = true, true, true
 		s.tailWarm[1], s.tailReady[1], s.tailKeepReady[1] = true, true, true
-		s.draft.warm, s.draft.ready = true, true
+		d := s.draft.(*ink2DeviceDraft)
+		d.warm, d.ready = true, true
 	}
 	a := &inkling2ResidentSession{s: &inkling2Resident{draft: &ink2DeviceDraft{}}}
 	b := &inkling2ResidentSession{s: &inkling2Resident{draft: &ink2DeviceDraft{}}}
@@ -33,7 +34,7 @@ func TestInkling2ResidentSessionsRecaptureAfterAnotherSessionRan(t *testing.T) {
 	if s := a.s; s.graphReady || s.warm || s.verifyWarm || s.verifyReady || s.keepReady || s.tailWarm[1] || s.tailReady[1] || s.tailKeepReady[1] {
 		t.Fatalf("session resumed after another ran with captured state %+v", s)
 	}
-	if d := a.s.draft; d.ready || d.warm {
+	if d := a.s.draft.(*ink2DeviceDraft); d.ready || d.warm {
 		t.Fatal("the draft would launch the slot exec another session captured")
 	}
 	if !a.s.graph {

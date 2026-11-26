@@ -7,7 +7,7 @@ func (s *inkling2Resident) dropCaptures() {
 	s.verifyWarm, s.verifyReady, s.keepReady = false, false, false
 	s.tailWarm, s.tailReady, s.tailKeepReady = [inkling2SpecMaxDraft + 1]bool{}, [inkling2SpecMaxDraft + 1]bool{}, [inkling2SpecMaxDraft + 1]bool{}
 	if d := s.draft; d != nil {
-		d.warm, d.ready = false, false
+		d.dropCaptures()
 	}
 }
 

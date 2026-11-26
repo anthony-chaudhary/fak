@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // Draft sources the speculative host loop can verify.
@@ -213,7 +215,9 @@ func inkling2SpecDraftKind() (string, error) {
 
 // inkling2ResolveSpecDraft turns auto into the neural draft whose weights are
 // on disk, else prompt lookup, so speculation never needs a draft model.
-func inkling2ResolveSpecDraft(kind, mtpDir string) string {
+// dflashDir is the DFlash2 checkpoint beside the target, "" when it is absent
+// or the backend has no DFlash2 ops.
+func inkling2ResolveSpecDraft(kind, mtpDir, dflashDir string) string {
 	if kind != inkling2DraftAuto {
 		return kind
 	}
@@ -222,7 +226,25 @@ func inkling2ResolveSpecDraft(kind, mtpDir string) string {
 			return inkling2DraftDSpark
 		}
 	}
+	if dflashDir != "" {
+		if fi, err := os.Stat(filepath.Join(dflashDir, inkling2DFlash2Weights)); err == nil && fi.Mode().IsRegular() {
+			return inkling2DraftDFlash
+		}
+	}
 	return inkling2DraftLookup
+}
+
+// inkling2DFlash2DirFor is the DFlash2 checkpoint beside m's GGUF when be can
+// run it, else "".
+func inkling2DFlash2DirFor(m *Inkling2LoopModel, be compute.Backend) string {
+	if _, ok := be.(compute.Inkling2DFlash2Device); !ok || m.path == "" {
+		return ""
+	}
+	dir, err := Inkling2DFlash2AdjacentDir(m.path)
+	if err != nil {
+		return ""
+	}
+	return dir
 }
 
 // bucketOf is the acceptance tracker a match of this length trains and reads.

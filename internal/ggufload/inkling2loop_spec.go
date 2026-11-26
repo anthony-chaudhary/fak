@@ -367,7 +367,8 @@ func inkling2SpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, 
 	dir := os.Getenv("FAK_INKLING2_MTP_DIR")
 	var st Inkling2SpecStats
 	var out []int
-	switch inkling2ResolveSpecDraft(kind, dir) {
+	dflashDir := inkling2DFlash2DirFor(m, be)
+	switch inkling2ResolveSpecDraft(kind, dir, dflashDir) {
 	case inkling2DraftLookup:
 		out, st, err = inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(*inkling2Resident) (inkling2Drafter, error) {
 			return newInkling2LookupDrafter(prompt), nil
@@ -389,8 +390,25 @@ func inkling2SpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, 
 			}
 			return inkling2DSparkDrafter{d}, err
 		})
+	case inkling2DraftDFlash:
+		if dflashDir == "" {
+			return nil, Inkling2LoopGreedyStats{}, fmt.Errorf("inkling2 spec: the dflash2 draft needs %s beside the GGUF and a backend with DFlash2 ops", Inkling2DFlash2DirName)
+		}
+		dm, oerr := OpenInkling2DFlash2(dflashDir)
+		if oerr != nil {
+			return nil, Inkling2LoopGreedyStats{}, oerr
+		}
+		defer dm.Close()
+		depth = min(depth, dm.Config.DFlash.Block-1)
+		var dd *ink2DFlash2Draft
+		out, st, err = inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(s *inkling2Resident) (inkling2Drafter, error) {
+			d, err := s.attachDFlash2(dm)
+			dd = d
+			return inkling2DFlash2Drafter{d}, err
+		})
+		dd.close()
 	default:
-		return nil, Inkling2LoopGreedyStats{}, fmt.Errorf("inkling2 spec: the %s draft has no device drafter in this host loop; use lookup or dspark", kind)
+		return nil, Inkling2LoopGreedyStats{}, fmt.Errorf("inkling2 spec: the %s draft has no device drafter in this host loop; use lookup, dspark or dflash2", kind)
 	}
 	inkling2LastSpec = st
 	return out, st.Inkling2LoopGreedyStats, err

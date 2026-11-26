@@ -191,6 +191,8 @@ type Inkling2LoopModel struct {
 	// replaced with the correct value.
 	LogScaleFloorOverridden bool
 	closer                  io.Closer
+	// path is the GGUF the model was opened from, where adjacent drafts are looked up
+	path string
 }
 
 func (m *Inkling2LoopModel) Close() error {
@@ -249,7 +251,7 @@ func OpenInkling2Loop(path string) (*Inkling2LoopModel, error) {
 		closers.Close()
 		return nil, err
 	}
-	m.closer = closers
+	m.closer, m.path = closers, path
 	return m, nil
 }
 

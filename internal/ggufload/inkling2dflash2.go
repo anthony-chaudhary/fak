@@ -144,7 +144,9 @@ type Inkling2DFlash2Model struct {
 	selProj    *inkling2BF16Matrix
 	predCB     *inkling2BF16Matrix
 	succCB     *inkling2BF16Matrix
-	closer     io.Closer
+	// mapped is the whole checkpoint mapping every matrix payload lies in
+	mapped []byte
+	closer io.Closer
 }
 
 func (m *Inkling2DFlash2Model) Close() error {
@@ -191,7 +193,7 @@ func OpenInkling2DFlash2(dir string) (*Inkling2DFlash2Model, error) {
 		closer.Close()
 		return nil, err
 	}
-	m.Dir, m.closer = dir, closer
+	m.Dir, m.closer, m.mapped = dir, closer, data
 	return m, nil
 }
 

@@ -171,6 +171,10 @@ func (s *inkling2Resident) attachDraft(dm *Inkling2DSparkModel) (*ink2DeviceDraf
 	return d, nil
 }
 
+func (d *ink2DeviceDraft) tapVisits() []int { return d.visits }
+
+func (d *ink2DeviceDraft) dropCaptures() { d.warm, d.ready = false, false }
+
 func (d *ink2DeviceDraft) tmp(n int) ink2Ref {
 	n = (n + 63) &^ 63
 	if d.off+n > d.scrFloats {
@@ -182,10 +186,10 @@ func (d *ink2DeviceDraft) tmp(n int) ink2Ref {
 	return r
 }
 
-// commitContext writes the context K/V of the T rows of a target forward from its
+// commitTaps writes the context K/V of the T rows of a target forward from its
 // tapped features (taps in TargetVisits order; the last is the final-norm output)
 // at positions *s.verifyPos + t.
-func (d *ink2DeviceDraft) commitContext(p *ink2Prefill, taps []ink2Ref) {
+func (d *ink2DeviceDraft) commitTaps(p *ink2Prefill, taps []ink2Ref) {
 	s, hp := d.s, d.hp
 	if len(taps) != hp.Taps {
 		s.fail(fmt.Errorf("inkling2 draft: %d target taps, want %d", len(taps), hp.Taps))

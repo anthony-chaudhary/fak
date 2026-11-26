@@ -213,7 +213,7 @@ func TestInkling2ResolveSpecDraftAutoNeedsWeights(t *testing.T) {
 		{inkling2DraftDSpark, "", inkling2DraftDSpark},
 		{inkling2DraftDFlash, "", inkling2DraftDFlash},
 	} {
-		if got := inkling2ResolveSpecDraft(c.kind, c.dir); got != c.want {
+		if got := inkling2ResolveSpecDraft(c.kind, c.dir, ""); got != c.want {
 			t.Errorf("resolve(%q, %q) = %q, want %q", c.kind, c.dir, got, c.want)
 		}
 	}

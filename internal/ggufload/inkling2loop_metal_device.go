@@ -120,7 +120,7 @@ func OpenInkling2LoopMetalDevice(path string) (*Inkling2LoopModel, compute.Backe
 	s := &inkling2MetalDeviceSet{be: be, store: store, mapping: mapping, data: data}
 	m, err := bindInkling2Shards([][]byte{data}, nil)
 	if err == nil {
-		m.closer = s
+		m.closer, m.path = s, path
 		err = s.bind(m)
 	}
 	if err != nil {

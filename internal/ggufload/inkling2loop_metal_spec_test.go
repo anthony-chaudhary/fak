@@ -28,6 +28,8 @@ type inkling2MetalChunkBackend struct {
 	compute.Backend
 	compute.Inkling2Device
 	compute.Inkling2VerifyDevice
+	// set from the wrapped backend, so a DFlash2 draft runs on the lent ops
+	compute.Inkling2DFlash2Device
 	pos    ink2Ref
 	posSet bool
 	posVal int
@@ -50,6 +52,7 @@ func inkling2MetalChunkBackendFor(be compute.Backend) (compute.Backend, func(), 
 		return nil, nil, err
 	}
 	b := &inkling2MetalChunkBackend{Backend: be, Inkling2Device: dev, Inkling2VerifyDevice: vd, pos: compute.Ink2At(t, 0)}
+	b.Inkling2DFlash2Device, _ = be.(compute.Inkling2DFlash2Device)
 	return b, func() { be.Free(t) }, nil
 }
 

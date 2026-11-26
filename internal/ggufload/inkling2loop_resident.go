@@ -129,7 +129,18 @@ type inkling2Resident struct {
 	// eager-warmed and captured verify graphs and captured commit graphs of the chunk
 	// widths under specMax, by width
 	tailWarm, tailReady, tailKeepReady [inkling2SpecMaxDraft + 1]bool
-	draft                              *ink2DeviceDraft
+	draft                              ink2ContextDraft
+}
+
+// ink2ContextDraft is a device draft whose context every target forward writes
+// from the inputs of the tapped layer visits.
+type ink2ContextDraft interface {
+	// tapVisits are the visits whose input is a tap; the final-norm output is
+	// always appended after them.
+	tapVisits() []int
+	commitTaps(p *ink2Prefill, taps []ink2Ref)
+	// dropCaptures forgets any graph the draft captured over freed buffers.
+	dropCaptures()
 }
 
 func (s *inkling2Resident) fail(err error) {
