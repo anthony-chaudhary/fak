@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	_ "embed"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,24 +37,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/toolcallcontrol"
 )
 
-// guardLaunchPlan separates the wrapped harness's admitted identity from the argv that
-// launch adapters are free to rewrite. Its fields stay private and every slice accessor
-// clones, so a broker, trampoline, or exec-boundary transform cannot mutate the semantic
-// command or the resolved profile in place.
-
 func cmdGuard(argv []string) {
 	cmdManageCommand("guard", argv)
-}
-
-// resolveGuardMetal mirrors resolveRunMetal: it resolves the Apple-Silicon Metal
-// session-forward decision through the shared serve resolver, rewriting the verb in the
-// error so a guard failure reads "fak guard:" rather than "fak serve:".
-func resolveGuardMetal(flag, env bool, backendName string) (bool, error) {
-	use, err := resolveServeMetal(flag, env, backendName)
-	if err != nil {
-		return false, errors.New(strings.ReplaceAll(err.Error(), "fak serve:", "fak guard:"))
-	}
-	return use, nil
 }
 
 func cmdManageCommand(commandName string, argv []string) {
@@ -1497,18 +1480,8 @@ func cmdManageCommand(commandName string, argv []string) {
 	// On a genuine launch FAILURE, spill the full startup report to stderr — except under
 	// --banner=full, which already streamed it at boot (avoid printing it twice).
 	dumpStartupOnLaunchFail := guardDumpStartupOnLaunchFail(bannerMode)
-	startupProgress.Phase("lease admission")
-	var arbitrateStderr strings.Builder
-	arbitrateLease, arbitrateErr := guardArbitrateAcquire(context.Background(), &arbitrateStderr, guardArbitrateConfig{
-		Mode: arbitrateConfig.Mode, Lane: arbitrateConfig.Lane, Tree: arbitrateConfig.Tree, Force: arbitrateConfig.Force,
-	})
-	if arbitrateStderr.Len() > 0 {
-		startupProgress.EndLine()
-		fmt.Fprint(os.Stderr, arbitrateStderr.String())
-	}
+	arbitrateLease, arbitrateErr := admitGuardLaunchLease(startupProgress, arbitrateConfig)
 	if arbitrateErr != nil {
-		startupProgress.Abort()
-		fmt.Fprintf(os.Stderr, "fak guard: %v\n", arbitrateErr)
 		cancel()
 		os.Exit(1)
 	}
@@ -1526,28 +1499,4 @@ func cmdManageCommand(commandName string, argv []string) {
 		return
 	}
 	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, sessionStartInstall.StatePath, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
-}
-
-// configureGuardCodexApproveForMe ensures a Codex command uses automated approval reviewer
-// integration (approvals_reviewer = "auto_review") without stripping the sandbox.
-func configureGuardCodexApproveForMe(command []string) []string {
-	if len(command) == 0 {
-		return command
-	}
-	filtered := make([]string, 0, len(command))
-	for _, arg := range command {
-		if arg != "--dangerously-bypass-approvals-and-sandbox" {
-			filtered = append(filtered, arg)
-		}
-	}
-	command = filtered
-	for _, arg := range command {
-		if strings.Contains(arg, "approvals_reviewer") {
-			return command
-		}
-	}
-	out := make([]string, 0, len(command)+2)
-	out = append(out, command[0], "-c", `approvals_reviewer="auto_review"`)
-	out = append(out, command[1:]...)
-	return out
 }
