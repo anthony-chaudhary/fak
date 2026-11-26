@@ -21,6 +21,20 @@ fork’s. At 1,946 tokens of context fak still trails the fork on decode, 89.0 v
 113.8 tok/s. The [benchmark index](docs/benchmarks/README.md) links the
 receipts and the other comparisons.
 
+With the opt-in CUDA profile below, a matched HTTP test on one RTX 5080
+measured aggregate prefill for uncached 512-token prompts with one output token
+per request. Fak revision `e7ad0c8dee5` led the realugbun llama.cpp fork, the
+faster of the two OSS builds tested, in both halves of the ABBA run.
+
+| Concurrent requests | Fak prompt tok/s | Fork prompt tok/s | Smaller half-run speedup |
+| ---: | ---: | ---: | ---: |
+| 2 | 6,038 | 3,337 | 1.802× |
+| 4 | 6,038 | 3,538 | 1.675× |
+| 8 | 6,034 | 3,649 | 1.633× |
+
+The rates are pooled medians. The one-token fixture yielded no visible first
+token, so this run measured prompt throughput and left visible latency unmeasured.
+
 ## Try fak
 
 [Install fak for your platform](INSTALL.md#local-model-setup), then open a
@@ -60,6 +74,22 @@ more, `fak run` with no model picks Inkling-2-Mini as well. The release
 installer downloads the prebuilt Metal archive on Apple Silicon. Smaller Macs and other
 platforms get smaller model tiers instead. The [Mac guide](docs/fak/mac-local-models.md#inkling-2-mini-the-first-run-default)
 has the requirements and the server commands.
+
+On an `sm_120f` CUDA build with NVFP4 W4A4, load the opt-in
+[concurrent-prefill profile](examples/inkling2-cuda-prefill.env.example) from
+the checkout root. It sets a 640-token context, f16 cohort KV, a 25 ms batch
+gap, and a 75 ms batch wait. Use the path to your GGUF file.
+
+```sh
+(
+  set -ae
+  . ./examples/inkling2-cuda-prefill.env.example
+  set +a
+  fak serve --engine inkernel --backend cuda \
+    --gguf /path/to/Inkling-2-Mini-UD-Q3_K_XL.gguf \
+    --session-state off --session-registry off --addr 127.0.0.1:8080
+)
+```
 
 For the commands and their main flags, see the [CLI reference](docs/CLI.md).
 
