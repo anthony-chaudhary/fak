@@ -346,3 +346,73 @@ func TestMetalInkling2VerifyGraphSlotsAndBadOperands(t *testing.T) {
 		t.Errorf("a rejected op encoded work: %+v (before %+v)", s, before)
 	}
 }
+
+// fak-test:runtime integration est=2s lane=default
+func TestMetalInkling2VerifyExpertsMatchExpertMatVec(t *testing.T) {
+	be := metalInk2TestBackend(t)
+	var moe Inkling2VerifyMoE = be
+	rng := rand.New(rand.NewSource(83))
+	const experts, rows, cols, k, maxT = 5, 10, 96, 3, 9
+	data, err := syscall.Mmap(-1, 0, 4*os.Getpagesize(), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Munmap(data)
+	const base = 96
+	for b := 0; b < experts*rows*cols/32; b++ {
+		at := base + 34*b
+		binary.LittleEndian.PutUint16(data[at:], uint16(0x3000+rng.Intn(1024)))
+		rng.Read(data[at+2 : at+34])
+	}
+	store, err := metalgemm.NewPackedGGUFStore(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	matrix, err := store.Matrix(base, 8, rows, cols, experts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := MetalInkling2Weight(matrix, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]int32, 0, maxT*k)
+	for range maxT {
+		for _, e := range rng.Perm(experts)[:k] {
+			ids = append(ids, int32(e))
+		}
+	}
+	idBits := make([]float32, len(ids))
+	for i, id := range ids {
+		idBits[i] = math.Float32frombits(uint32(id))
+	}
+	idr := Ink2At(metalInk2TestUpload(t, be, idBits), 0)
+	scr := Ink2At(metalInk2TestUpload(t, be, []float32{2, -0.5, 1.25, 3, 0.75}), 0)
+	x := metalInk2TestRand(rng, maxT*cols)
+	xr := Ink2At(metalInk2TestUpload(t, be, x), 0)
+	for _, T := range []int{1, 2, 5, maxT} {
+		npairs := T * k
+		rep := make([]float32, npairs*cols)
+		for i := range npairs {
+			copy(rep[i*cols:(i+1)*cols], x[(i/k)*cols:(i/k+1)*cols])
+		}
+		repr := Ink2At(metalInk2TestUpload(t, be, rep), 0)
+		want, got := Ink2At(metalInk2TestAlloc(t, be, npairs*rows), 0), Ink2At(metalInk2TestAlloc(t, be, npairs*rows), 0)
+		if ok, err := be.Ink2ExpertMatVec(stack, rows, idr, repr, cols, want, npairs, scr, nil); err != nil || !ok {
+			t.Fatalf("expert matvec: ok=%v err=%v", ok, err)
+		}
+		if ok, err := moe.Ink2VExperts(stack, rows, idr, xr, k, cols, got, npairs, scr); err != nil || !ok {
+			t.Fatalf("verify experts: ok=%v err=%v", ok, err)
+		}
+		w, err := be.Ink2Read(want, npairs*rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := be.Ink2Read(got, npairs*rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		metalInk2VerifySame(t, fmt.Sprintf("width %d", T), g, w)
+	}
+}

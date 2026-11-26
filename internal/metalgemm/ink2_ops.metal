@@ -342,7 +342,12 @@ kernel void ink2_route(device const float *logits [[buffer(0)]],
                        device int *ids [[buffer(2)]],
                        device float *wts [[buffer(3)]],
                        constant Ink2RouteShape &p [[buffer(4)]],
-                       uint lane [[thread_index_in_threadgroup]]) {
+                       uint lane [[thread_index_in_threadgroup]],
+                       uint tok [[threadgroup_position_in_grid]]) {
+    // A batched route runs token tok's logits row into its slots.
+    logits += ulong(tok) * p.experts;
+    ids += ulong(tok) * p.slots;
+    wts += ulong(tok) * p.slots;
     const uint none = 0xffffffffu;
     const uint strides = (p.experts + INK2_ROUTE_THREADS - 1) / INK2_ROUTE_THREADS;
     float probs[INK2_ROUTE_STRIDE], sel[INK2_ROUTE_STRIDE];
@@ -420,7 +425,12 @@ kernel void ink2_combine(device const float *down [[buffer(0)]],
                          device const float *wts [[buffer(1)]],
                          device float *out [[buffer(2)]],
                          constant Ink2CombineShape &p [[buffer(3)]],
-                         uint j [[thread_position_in_grid]]) {
+                         uint2 at [[thread_position_in_grid]]) {
+    // A batched combine runs token at.y's slots into its row.
+    const uint j = at.x;
+    down += ulong(at.y) * p.slots * p.n;
+    wts += ulong(at.y) * p.slots;
+    out += ulong(at.y) * p.n;
     float acc = 0.0f;
     for (uint t = 0; t < p.slots; t++) acc += wts[t] * down[ulong(t) * p.n + j];
     out[j] = acc;

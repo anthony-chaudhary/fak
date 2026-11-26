@@ -11,7 +11,9 @@ import "C"
 import (
 	"fmt"
 	"math"
+	"os"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -32,6 +34,10 @@ type Ink2Device struct {
 	pipes   map[ink2Kernel]Ink2Pipeline
 	args    []C.mg_ink2_arg
 	consts  []byte
+	names   []string
+	encode  time.Duration
+	wait    time.Duration
+	prof    ink2Profiler
 }
 
 type ink2Source struct {
@@ -79,7 +85,16 @@ func Ink2Const[T any](v T) Ink2Arg {
 	return Ink2Arg{bytes: append([]byte(nil), unsafe.Slice((*byte)(unsafe.Pointer(&v)), unsafe.Sizeof(v))...)}
 }
 
+// NewInk2Device opens a device in the profile mode FAK_INK2_PROFILE names.
 func NewInk2Device() (*Ink2Device, error) {
+	mode, err := parseInk2ProfileMode(os.Getenv(Ink2ProfileEnv))
+	if err != nil {
+		return nil, err
+	}
+	return newInk2Device(mode)
+}
+
+func openInk2Device() (*Ink2Device, error) {
 	if !Available() {
 		return nil, ErrMetalUnavailable
 	}
@@ -143,7 +158,11 @@ func (d *Ink2Device) flushLocked() error {
 		return nil
 	}
 	d.pending = 0
-	if C.mg_ink2_flush(d.ctx) == 0 {
+	start := time.Now()
+	ok := C.mg_ink2_flush(d.ctx) != 0
+	d.wait += time.Since(start)
+	d.profileFlushed(ok)
+	if !ok {
 		return d.lastError("flush")
 	}
 	return nil
@@ -227,7 +246,9 @@ func (d *Ink2Device) Stats() Ink2Stats {
 	var s C.mg_ink2_stats
 	C.mg_ink2_get_stats(d.ctx, &s)
 	return Ink2Stats{Submissions: uint64(s.submissions), Dispatches: uint64(s.dispatches),
-		Pending: int(s.pending), GPUSeconds: float64(s.gpu_seconds)}
+		Pending: int(s.pending), GPUSeconds: float64(s.gpu_seconds),
+		EncodeSeconds: d.encode.Seconds(), WaitSeconds: d.wait.Seconds(),
+		QueueSeconds: float64(s.queue_seconds), TailSeconds: float64(s.tail_seconds), SchedSeconds: float64(s.kernel_seconds)}
 }
 
 // Pipeline returns the kernel named function of an MSL source, compiling the
@@ -272,6 +293,10 @@ func (d *Ink2Device) pipeline(source, function string, precise bool) (Ink2Pipeli
 		return Ink2Pipeline{}, d.lastError("pipeline")
 	}
 	p := Ink2Pipeline{id: int32(id) + 1, width: uint32(width), maxThreads: uint32(maxThreads)}
+	for len(d.names) <= int(id) {
+		d.names = append(d.names, "")
+	}
+	d.names[id] = function
 	d.pipes[key] = p
 	return p, nil
 }
@@ -305,6 +330,7 @@ func (d *Ink2Device) dispatch(p Ink2Pipeline, size, perGroup [3]int, exact bool,
 	if p.id == 0 || len(args) == 0 {
 		return fmt.Errorf("%w: dispatch without a pipeline or arguments", ErrInk2Shape)
 	}
+	start := time.Now()
 	var dims [6]C.uint32_t
 	group := 1
 	for i := range 3 {
@@ -336,6 +362,11 @@ func (d *Ink2Device) dispatch(p Ink2Pipeline, size, perGroup [3]int, exact bool,
 		return d.lastError("dispatch")
 	}
 	d.pending++
+	encode := time.Since(start)
+	d.encode += encode
+	if d.prof.mode != Ink2ProfileOff {
+		return d.profileDispatch(d.names[p.id-1], size, perGroup, exact, encode)
+	}
 	return nil
 }
 
@@ -355,6 +386,16 @@ func (d *Ink2Device) Barrier() {
 var ink2PackedSource = sync.OnceValue(func() string { return packedCodebooks + packedDequant + packedGEMV })
 
 var ink2MVKernel, ink2RoutedKernel = ink2PackedKernels("mv_"), ink2PackedKernels("routed_")
+
+// ink2v_pair_rows_, the rows kernel of a chunk of up to ink2VerifyPairMax rows.
+var ink2VerifyPairRowsKernel = ink2PackedKernels("ink2v_pair_rows_")
+
+// ink2VerifyExpertsKernel has the block types only: no expert stack is scalar.
+var ink2VerifyExpertsKernel = func() [41]string {
+	k := ink2PackedKernels("ink2v_experts_")
+	k[0], k[1], k[30] = "", "", ""
+	return k
+}()
 
 func ink2PackedKernels(prefix string) (names [41]string) {
 	for typ, name := range map[int]string{0: "f32", 1: "f16", 8: "q8_0", 11: "q3_K", 12: "q4_K", 13: "q5_K", 14: "q6_K",
@@ -420,6 +461,7 @@ func (d *Ink2Device) MatVec(w Ink2Weight, x, y Ink2Ref) error {
 	if !x.Valid() || !y.Valid() {
 		return fmt.Errorf("%w: matvec without an input or output", ErrInk2Shape)
 	}
+	d.profileDetail("%dx%d", w.Rows, w.Cols)
 	return d.Dispatch(p, [3]int{(w.Rows + 3) / 4, 1, 1}, [3]int{128, 1, 1}, w.args(x.Span(w.Cols), y.Span(w.Rows), bytes)...)
 }
 
@@ -444,6 +486,7 @@ func (d *Ink2Device) ExpertMatVec(w Ink2Weight, ids, x Ink2Ref, xStride int, y I
 	if !ids.Valid() || !x.Valid() || !y.Valid() || k < 1 || xStride < 0 || xStride > math.MaxUint32 {
 		return false, fmt.Errorf("%w: expert matvec of %d slots, input stride %d", ErrInk2Shape, k, xStride)
 	}
+	d.profileDetail("%dx%d k=%d of %d", w.Rows, w.Cols, k, w.Experts)
 	args := append(w.args(x.Span((k-1)*xStride+w.Cols), y.Span(k*w.Rows), w.Experts*bytes), ids.Span(k), Ink2Const(uint32(xStride)))
 	if err := d.Dispatch(p, [3]int{(w.Rows + 3) / 4, k, 1}, [3]int{128, 1, 1}, args...); err != nil {
 		return false, err

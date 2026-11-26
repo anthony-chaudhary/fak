@@ -24,6 +24,9 @@ var ink2VerifyRowsSource = sync.OnceValue(func() string {
 	return packedCodebooks + packedDequant + packedGEMV + ink2VerifyRows
 })
 
+// Past this many rows the 9-row tiles of ink2v_rows_ spread wider over the GPU.
+const ink2VerifyPairMax = 16
+
 const (
 	// Activation rows one rows threadgroup covers; INK2V_ROWS_TILE.
 	ink2VerifyRowsTile = 9
@@ -32,6 +35,14 @@ const (
 )
 
 type ink2VerifyRowsShape struct{ tokens, xStride, yStride uint32 }
+
+type ink2VerifyExpertsShape struct{ npairs, xStride, xDiv uint32 }
+
+// INK2V_GROUP_MAX: the pairs one grouping covers.
+const ink2VerifyGroupMax = 1024
+
+// VerifyExpertsTable is the int count of VerifyExperts' grouping table.
+func VerifyExpertsTable(npairs int) int { return 1 + 5*npairs }
 
 type ink2VerifyMixShape struct {
 	n, states, tokens, norm, weighted uint32
@@ -106,18 +117,82 @@ func (d *Ink2Device) VerifyRows(w Ink2Weight, x Ink2Ref, xStride int, y Ink2Ref,
 		return fmt.Errorf("%w: type %d weight of %d columns with the activation at offset %d, stride %d",
 			ErrInk2Shape, w.Type, w.Cols, x.Off, xStride)
 	}
-	name := ink2VerifyRowsKernel[w.Type]
-	p, err := d.Pipeline(ink2VerifyRowsSource(), name)
+	// Which kernel runs never changes a row's bits.
+	name, grid := ink2VerifyPairRowsKernel[w.Type], [3]int{(w.Rows + 7) / 8, 1, 1}
+	if rows > ink2VerifyPairMax {
+		name, grid = ink2VerifyRowsKernel[w.Type], [3]int{(w.Rows + 3) / 4, (rows + ink2VerifyRowsTile - 1) / ink2VerifyRowsTile, 1}
+	}
+	p, err := d.verifyRowsPipeline(name)
 	if err != nil {
 		return err
 	}
-	if p.width != 32 || p.maxThreads < 128 {
-		return fmt.Errorf("metalgemm: inkling2 kernel %s needs 32-wide SIMD groups of 128 threads", name)
-	}
+	d.profileDetail("%dx%d rows=%d", w.Rows, w.Cols, rows)
 	bytes := w.Rows * (w.Cols / block * blockBytes)
 	args := append(w.args(x.Span((rows-1)*xStride+w.Cols), y.Span((rows-1)*yStride+w.Rows), bytes),
 		Ink2Const(ink2VerifyRowsShape{uint32(rows), uint32(xStride), uint32(yStride)}))
-	return d.Dispatch(p, [3]int{(w.Rows + 3) / 4, (rows + ink2VerifyRowsTile - 1) / ink2VerifyRowsTile, 1}, [3]int{128, 1, 1}, args...)
+	return d.Dispatch(p, grid, [3]int{128, 1, 1}, args...)
+}
+
+func (d *Ink2Device) verifyRowsPipeline(name string) (Ink2Pipeline, error) {
+	p, err := d.Pipeline(ink2VerifyRowsSource(), name)
+	if err != nil {
+		return Ink2Pipeline{}, err
+	}
+	if p.width != 32 || p.maxThreads < 128 {
+		return Ink2Pipeline{}, fmt.Errorf("metalgemm: inkling2 kernel %s needs 32-wide SIMD groups of 128 threads", name)
+	}
+	return p, nil
+}
+
+// VerifyExperts encodes, for npairs routed pairs i, y[i] = W[ids[i]] x[i/xDiv]
+// with x row r at x + r*xStride and y[i] at y + i*w.Rows, then the optional
+// per-expert scale, reading each routed expert once for all its pairs. Pair i
+// is ExpertMatVec's slot i bit for bit, however the chunk routes. It declines
+// (false) a weight type without a grouped kernel.
+// tab holds VerifyExpertsTable(npairs) ints, the grouping of this call.
+func (d *Ink2Device) VerifyExperts(w Ink2Weight, ids, x Ink2Ref, xDiv, xStride int, y Ink2Ref, npairs int, scale, tab Ink2Ref) (bool, error) {
+	if int(w.Type) >= len(ink2VerifyExpertsKernel) || ink2VerifyExpertsKernel[w.Type] == "" {
+		return false, nil
+	}
+	if !w.Buf.Valid() || w.ByteOff < 0 || w.Rows < 1 || w.Rows > math.MaxInt32 || w.Cols < 1 || w.Cols > math.MaxInt32 || w.Experts < 1 {
+		return false, fmt.Errorf("%w: weight type %d [%d %d] x%d", ErrInk2Shape, w.Type, w.Rows, w.Cols, w.Experts)
+	}
+	if !ids.Valid() || !x.Valid() || !y.Valid() || !tab.Valid() || npairs < 1 || npairs > ink2VerifyGroupMax || xDiv < 1 ||
+		xStride < w.Cols || xStride > math.MaxUint32 || npairs > math.MaxInt32/max(w.Rows, xStride) {
+		return false, fmt.Errorf("%w: verify experts of %d pairs, input stride %d every %d pairs", ErrInk2Shape, npairs, xStride, xDiv)
+	}
+	block, blockBytes, err := packedBlock(w.Type)
+	if err != nil {
+		return false, err
+	}
+	if w.Cols%block != 0 || x.Off%4 != 0 || xStride%4 != 0 {
+		return false, fmt.Errorf("%w: type %d weight of %d columns with the activation at offset %d, stride %d",
+			ErrInk2Shape, w.Type, w.Cols, x.Off, xStride)
+	}
+	gp, err := d.Pipeline(ink2VerifyRowsSource(), "ink2v_group_pairs")
+	if err != nil {
+		return false, err
+	}
+	p, err := d.verifyRowsPipeline(ink2VerifyExpertsKernel[w.Type])
+	if err != nil {
+		return false, err
+	}
+	shape := Ink2Const(ink2VerifyExpertsShape{uint32(npairs), uint32(xStride), uint32(xDiv)})
+	tabSpan := tab.Span(VerifyExpertsTable(npairs))
+	if err := d.Dispatch(gp, [3]int{1, 1, 1}, [3]int{min(npairs, gp.MaxThreads()), 1, 1}, ids.Span(npairs), tabSpan, shape); err != nil {
+		return false, err
+	}
+	d.profileDetail("%dx%d pairs=%d of %d", w.Rows, w.Cols, npairs, w.Experts)
+	xRows := (npairs-1)/xDiv + 1
+	args := append(w.args(x.Span((xRows-1)*xStride+w.Cols), y.Span(npairs*w.Rows), w.Experts*w.Rows*(w.Cols/block*blockBytes)),
+		tabSpan, shape)
+	if err := d.Dispatch(p, [3]int{(w.Rows + 7) / 8, npairs, 1}, [3]int{128, 1, 1}, args...); err != nil {
+		return false, err
+	}
+	if !scale.Valid() {
+		return true, nil
+	}
+	return true, d.ExpertScale(y, ids, scale, npairs, w.Rows)
 }
 
 // VerifyMix encodes Mix for each of T token rows: states are [T][n] and out is

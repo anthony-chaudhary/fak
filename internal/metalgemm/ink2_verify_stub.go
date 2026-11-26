@@ -29,3 +29,7 @@ func (*Ink2Device) VerifyAttend(q, r, sinks, relBias, kcache, vcache, scores Ink
 	return ErrMetalUnavailable
 }
 func (*Ink2Device) VerifyRepeatRows(x, out Ink2Ref, n, rows, k int) error { return ErrMetalUnavailable }
+func VerifyExpertsTable(npairs int) int                                   { return 0 }
+func (*Ink2Device) VerifyExperts(w Ink2Weight, ids, x Ink2Ref, xDiv, xStride int, y Ink2Ref, npairs int, scale, tab Ink2Ref) (bool, error) {
+	return false, ErrMetalUnavailable
+}

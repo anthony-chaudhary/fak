@@ -36,7 +36,10 @@ type inkling2MetalChunkBackend struct {
 	down   ink2Ref
 }
 
-var _ compute.Inkling2PrefillDevice = (*inkling2MetalChunkBackend)(nil)
+var (
+	_ compute.Inkling2PrefillDevice = (*inkling2MetalChunkBackend)(nil)
+	_ compute.Inkling2VerifyMoE     = (*inkling2MetalChunkBackend)(nil)
+)
 
 func inkling2MetalChunkBackendFor(be compute.Backend) (compute.Backend, func(), error) {
 	if _, ok := be.(compute.Inkling2PrefillDevice); ok {
@@ -124,6 +127,17 @@ func (b *inkling2MetalChunkBackend) Ink2PAttend(q, r, sinks, relBias, kcache, vc
 }
 
 func (b *inkling2MetalChunkBackend) Ink2PRoute(logits, bias, ids, wts ink2Ref, nexp, k int, scale float32, T int) error {
+	return b.Ink2VRoute(logits, bias, ids, wts, nexp, k, scale, T)
+}
+
+func (b *inkling2MetalChunkBackend) Ink2PCombine(down, wts, out ink2Ref, k, n, T int) error {
+	return b.Ink2VCombine(down, wts, out, k, n, T)
+}
+
+func (b *inkling2MetalChunkBackend) Ink2VRoute(logits, bias, ids, wts ink2Ref, nexp, k int, scale float32, T int) error {
+	if m, ok := b.Backend.(compute.Inkling2VerifyMoE); ok {
+		return m.Ink2VRoute(logits, bias, ids, wts, nexp, k, scale, T)
+	}
 	for t := 0; t < T; t++ {
 		if err := b.Ink2Route(at(logits, t*nexp), bias, at(ids, t*k), at(wts, t*k), nexp, k, scale); err != nil {
 			return err
@@ -132,7 +146,10 @@ func (b *inkling2MetalChunkBackend) Ink2PRoute(logits, bias, ids, wts ink2Ref, n
 	return nil
 }
 
-func (b *inkling2MetalChunkBackend) Ink2PCombine(down, wts, out ink2Ref, k, n, T int) error {
+func (b *inkling2MetalChunkBackend) Ink2VCombine(down, wts, out ink2Ref, k, n, T int) error {
+	if m, ok := b.Backend.(compute.Inkling2VerifyMoE); ok {
+		return m.Ink2VCombine(down, wts, out, k, n, T)
+	}
 	for t := 0; t < T; t++ {
 		if err := b.Ink2Combine(at(down, t*k*n), at(wts, t*k), at(out, t*n), k, n); err != nil {
 			return err
@@ -153,6 +170,14 @@ func (b *inkling2MetalChunkBackend) Ink2PExpertSorted(stack compute.Tensor, expe
 		x = sortX
 	}
 	return b.Ink2ExpertMatVec(stack, expertRows, ids, x, xStride, y, npairs, scale, nil)
+}
+
+func (b *inkling2MetalChunkBackend) Ink2VExperts(stack compute.Tensor, expertRows int, ids, x ink2Ref, xDiv, xStride int, y ink2Ref, npairs int, scale ink2Ref) (bool, error) {
+	ve, ok := b.Backend.(compute.Inkling2VerifyMoE)
+	if !ok {
+		return false, nil
+	}
+	return ve.Ink2VExperts(stack, expertRows, ids, x, xDiv, xStride, y, npairs, scale)
 }
 
 // inkling2MetalSpecLoad is the host load beside a timing: every number here is
@@ -425,5 +450,104 @@ func inkling2MetalSpecCost(t *testing.T, m *Inkling2LoopModel, be compute.Backen
 		}
 		t.Logf("verify cost: %d rows %.1f ms = %.2fx one row, %.1f ms/row, %s",
 			width, float64(per.Microseconds())/1000, per.Seconds()/one.Seconds(), float64(per.Microseconds())/1000/float64(width), inkling2MetalSpecLoad())
+	}
+}
+
+// FAK_INKLING2_TEST_GGUF times verify chunks of 1, 2, 5 and 8 rows from one
+// state, interleaved and best of several, and with FAK_INK2_PROFILE set logs
+// the per-dispatch GPU profile of each width: where an extra row's cost goes.
+//
+// fak-test:runtime slow est=90s
+func TestInkling2MetalSpecVerifyCostByWidth(t *testing.T) {
+	path := os.Getenv("FAK_INKLING2_TEST_GGUF")
+	if path == "" {
+		t.Skip("set FAK_INKLING2_TEST_GGUF to run on Apple GPU")
+	}
+	lease, err := gpulease.Acquire(gpulease.Options{Timeout: 8 * time.Minute, Logf: t.Logf})
+	if errors.Is(err, gpulease.ErrTimeout) {
+		t.Skipf("NOT RUN: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	m, be, err := OpenInkling2LoopMetalDevice(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	prompt := inkling2OracleCases[0].prompt
+	ref, _, err := inkling2ResidentGreedy(m, be, prompt, inkling2SpecMaxDraft+2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sbe, release, err := inkling2MetalChunkBackendFor(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	t.Setenv("FAK_INKLING2_SPEC", "4")
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	s, rewind := inkling2MetalSpecSession(t, m, sbe, prompt, ref)
+	widths := []int{1, 2, 5, 8}
+	feed := ref[:widths[len(widths)-1]]
+	for _, w := range widths {
+		rewind()
+		if _, err := s.verify(feed[:w]); err != nil {
+			t.Fatalf("warm width %d: %v", w, err)
+		}
+	}
+	reps := 6
+	if v := os.Getenv("FAK_INKLING2_VERIFY_REPS"); v != "" {
+		fmt.Sscan(v, &reps)
+	}
+	arms := []string{"new"}
+	best := make([][]time.Duration, len(arms))
+	for a := range arms {
+		best[a] = make([]time.Duration, len(widths))
+	}
+	for r := 0; r < reps; r++ {
+		for a := range arms {
+			for i, w := range widths {
+				rewind()
+				t0 := time.Now()
+				if _, err := s.verify(feed[:w]); err != nil {
+					t.Fatalf("width %d: %v", w, err)
+				}
+				if d := time.Since(t0); best[a][i] == 0 || d < best[a][i] {
+					best[a][i] = d
+				}
+			}
+		}
+	}
+	ms := func(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
+	for a, name := range arms {
+		var line strings.Builder
+		for i, w := range widths {
+			extra := 0.0
+			if w > 1 {
+				extra = (ms(best[a][i]) - ms(best[a][0])) / float64(w-1)
+			}
+			fmt.Fprintf(&line, " w%d=%.1fms(%.2fx,+%.1fms/row)", w, ms(best[a][i]), best[a][i].Seconds()/best[a][0].Seconds(), extra)
+		}
+		t.Logf("verify_cost_by_width %s best of %d:%s; %s", name, reps, line.String(), inkling2MetalSpecLoad())
+	}
+	if p, ok := compute.MetalInkling2Profile(); ok && p.Enabled() {
+		for _, w := range widths {
+			rewind()
+			if err := compute.MetalInkling2ProfileReset(); err != nil {
+				t.Fatal(err)
+			}
+			st0, _ := compute.MetalInkling2Stats()
+			t0 := time.Now()
+			if _, err := s.verify(feed[:w]); err != nil {
+				t.Fatal(err)
+			}
+			wall := time.Since(t0)
+			st1, _ := compute.MetalInkling2Stats()
+			p, _ := compute.MetalInkling2Profile()
+			t.Logf("verify profile width %d:\n%s", w, p.Format(1, wall, st1.Sub(st0)))
+		}
 	}
 }

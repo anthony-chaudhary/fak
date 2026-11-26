@@ -79,6 +79,20 @@ func Ink2PGroupScratch(npairs, nexp int) int {
 	return nexp + (nexp + 1) + npairs + 2*tiles + 1
 }
 
+// Inkling2VerifyMoE is the optional verify-chunk MoE of a device whose batched
+// kernels keep the decode ops' bits per token row.
+type Inkling2VerifyMoE interface {
+	// Ink2VExperts is Ink2PExpertGrouped with pair i equal, bit for bit, to slot i
+	// of the decode Ink2ExpertMatVec whatever the other pairs route to, so a
+	// verify row does not depend on its chunk. ok is false (nothing launched) for
+	// a dtype without one.
+	Ink2VExperts(stack Tensor, expertRows int, ids, x Ink2Ref, xDiv, xStride int, y Ink2Ref, npairs int, scale Ink2Ref) (ok bool, err error)
+	// Ink2VRoute and Ink2VCombine are Ink2PRoute and Ink2PCombine in one launch,
+	// each token row the decode Ink2Route or Ink2Combine of that row.
+	Ink2VRoute(logits, bias, ids, wts Ink2Ref, nexp, k int, scale float32, T int) error
+	Ink2VCombine(down, wts, out Ink2Ref, k, n, T int) error
+}
+
 // Inkling2VerifyDevice adds what a speculative verify chunk needs beyond prefill:
 // a conv that also logs its entry history and every chunk input, and the commit that
 // rewinds a history to the state after the first keep tokens of that chunk.

@@ -1,6 +1,7 @@
 //go:build darwin && arm64 && cgo
 
 #import <Metal/Metal.h>
+#include <mach/mach_time.h>
 #include "ink2_device.h"
 
 extern id<MTLDevice> gDev;
@@ -17,8 +18,24 @@ int mg_init(void);
     id<MTLComputeCommandEncoder> encoder;
     NSString *error;
     mg_ink2_stats stats;
+    // Pass profiling: one compute pass per dispatch, two samples per pass.
+    BOOL passProfile;
+    id<MTLCounterSet> timestamps;
+    NSMutableArray<id<MTLCounterSampleBuffer>> *samples;
+    NSUInteger passes, flushedPasses;
+    uint64_t gpu0;
+    double host0;
 }
 @end
+
+// Passes per sample buffer; a command buffer takes as many buffers as it needs.
+enum { kInk2PassesPerBuffer = 512 };
+
+static double ink2_now(void) {
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    return (double)mach_absolute_time() * tb.numer / tb.denom * 1e-9;
+}
 
 @implementation MGInk2Device
 @end
@@ -119,6 +136,80 @@ int mg_ink2_pipeline(void *dev, int library, const char *function, uint32_t *wid
     }
 }
 
+int mg_ink2_profile_passes(void *dev) {
+    @autoreleasepool {
+        MGInk2Device *d = (__bridge MGInk2Device *)dev;
+        if (d->command) return 0;
+        if (@available(macOS 11.0, *)) {
+            if (![gDev supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary]) return 0;
+            for (id<MTLCounterSet> set in gDev.counterSets)
+                if ([set.name isEqualToString:MTLCommonCounterSetTimestamp]) d->timestamps = set;
+            if (!d->timestamps) return 0;
+            d->samples = [NSMutableArray array];
+            uint64_t cpu = 0;
+            [gDev sampleTimestamps:&cpu gpuTimestamp:&d->gpu0];
+            d->host0 = ink2_now();
+            d->passProfile = YES;
+            return 1;
+        }
+        return 0;
+    }
+}
+
+// The encoder of the next pass, sampling its start and end into the pooled
+// sample buffers.
+static id<MTLComputeCommandEncoder> ink2_pass(MGInk2Device *d) API_AVAILABLE(macos(11.0)) {
+    NSUInteger buffer = d->passes / kInk2PassesPerBuffer, slot = d->passes % kInk2PassesPerBuffer;
+    while (d->samples.count <= buffer) {
+        MTLCounterSampleBufferDescriptor *desc = [[MTLCounterSampleBufferDescriptor alloc] init];
+        desc.counterSet = d->timestamps;
+        desc.storageMode = MTLStorageModeShared;
+        desc.sampleCount = 2 * kInk2PassesPerBuffer;
+        NSError *err = nil;
+        id<MTLCounterSampleBuffer> sb = [gDev newCounterSampleBufferWithDescriptor:desc error:&err];
+        if (!sb) {
+            ink2_fail(d, [NSString stringWithFormat:@"counter sample buffer: %@", err.localizedDescription]);
+            return nil;
+        }
+        [d->samples addObject:sb];
+    }
+    MTLComputePassDescriptor *pass = [MTLComputePassDescriptor computePassDescriptor];
+    pass.dispatchType = MTLDispatchTypeSerial;
+    MTLComputePassSampleBufferAttachmentDescriptor *at = pass.sampleBufferAttachments[0];
+    at.sampleBuffer = d->samples[buffer];
+    at.startOfEncoderSampleIndex = 2 * slot;
+    at.endOfEncoderSampleIndex = 2 * slot + 1;
+    return [d->command computeCommandEncoderWithDescriptor:pass];
+}
+
+int mg_ink2_profile_take(void *dev, double *out, int cap) {
+    @autoreleasepool {
+        MGInk2Device *d = (__bridge MGInk2Device *)dev;
+        NSUInteger n = d->flushedPasses;
+        d->flushedPasses = 0;
+        if (n == 0 || (NSUInteger)cap < n) return (int)n;
+        if (@available(macOS 11.0, *)) {
+            // Timestamps are in a device unit, measured here against the host
+            // clock since profiling began; nanoseconds until that is known.
+            uint64_t cpu = 0, gpu = 0;
+            [gDev sampleTimestamps:&cpu gpuTimestamp:&gpu];
+            double elapsed = ink2_now() - d->host0, tick = 1e-9;
+            if (gpu > d->gpu0 && elapsed > 1e-3) tick = elapsed / (double)(gpu - d->gpu0);
+            for (NSUInteger done = 0; done < n; done += kInk2PassesPerBuffer) {
+                NSUInteger count = MIN(n - done, (NSUInteger)kInk2PassesPerBuffer);
+                NSData *data = [d->samples[done / kInk2PassesPerBuffer] resolveCounterRange:NSMakeRange(0, 2 * count)];
+                const MTLCounterResultTimestamp *ts = data.bytes;
+                for (NSUInteger i = 0; i < count; i++) {
+                    BOOL ok = data.length >= 2 * count * sizeof(*ts) && ts[2 * i].timestamp != MTLCounterErrorValue &&
+                              ts[2 * i + 1].timestamp != MTLCounterErrorValue && ts[2 * i + 1].timestamp >= ts[2 * i].timestamp;
+                    out[done + i] = ok ? (double)(ts[2 * i + 1].timestamp - ts[2 * i].timestamp) * tick : -1;
+                }
+            }
+        }
+        return (int)n;
+    }
+}
+
 int mg_ink2_dispatch(void *dev, int pipeline, const mg_ink2_arg *args, int count,
                      const void *constants, const uint32_t *size, int exact) {
     @autoreleasepool {
@@ -133,8 +224,11 @@ int mg_ink2_dispatch(void *dev, int pipeline, const mg_ink2_arg *args, int count
                 return ink2_fail(d, [NSString stringWithFormat:@"argument %d: %zu bytes at offset %zu exceed a %zu-byte buffer",
                                                                i, args[i].length, args[i].offset, length]);
         }
-        if (!d->encoder) {
-            d->command = [gQueue commandBuffer];
+        if (!d->command) d->command = [gQueue commandBuffer];
+        if (d->passProfile) {
+            if (@available(macOS 11.0, *)) d->encoder = ink2_pass(d);
+            if (!d->encoder) return 0;
+        } else if (!d->encoder) {
             d->encoder = [d->command computeCommandEncoder];
             if (!d->encoder) {
                 d->command = nil;
@@ -153,6 +247,11 @@ int mg_ink2_dispatch(void *dev, int pipeline, const mg_ink2_arg *args, int count
         MTLSize group = MTLSizeMake(size[3], size[4], size[5]);
         if (exact) [enc dispatchThreads:grid threadsPerThreadgroup:group];
         else [enc dispatchThreadgroups:grid threadsPerThreadgroup:group];
+        if (d->passProfile) {
+            [enc endEncoding];
+            d->encoder = nil;
+            d->passes++;
+        }
         d->stats.pending++;
         d->stats.dispatches++;
         return 1;
@@ -167,19 +266,33 @@ void mg_ink2_barrier(void *dev) {
 int mg_ink2_flush(void *dev) {
     @autoreleasepool {
         MGInk2Device *d = (__bridge MGInk2Device *)dev;
-        if (!d->encoder) return 1;
+        if (!d->command) return 1;
         id<MTLCommandBuffer> cb = d->command;
         [d->encoder endEncoding];
         d->encoder = nil;
         d->command = nil;
         d->stats.pending = 0;
         d->stats.submissions++;
+        d->stats.last_gpu_seconds = 0;
+        NSUInteger passes = d->passes;
+        d->passes = 0;
+        double committed = ink2_now();
         [cb commit];
         [cb waitUntilCompleted];
+        double resumed = ink2_now();
         if (cb.status != MTLCommandBufferStatusCompleted)
             return ink2_fail(d, [NSString stringWithFormat:@"command buffer: %@", cb.error.localizedDescription]);
+        d->flushedPasses = passes;
         CFTimeInterval gpu = cb.GPUEndTime - cb.GPUStartTime;
-        if (gpu > 0) d->stats.gpu_seconds += gpu;
+        if (gpu > 0) {
+            d->stats.gpu_seconds += gpu;
+            d->stats.last_gpu_seconds = gpu;
+            // The GPU times share the host clock of ink2_now.
+            if (cb.GPUStartTime > committed) d->stats.queue_seconds += cb.GPUStartTime - committed;
+            if (resumed > cb.GPUEndTime) d->stats.tail_seconds += resumed - cb.GPUEndTime;
+        }
+        CFTimeInterval kernel = cb.kernelEndTime - cb.kernelStartTime;
+        if (kernel > 0) d->stats.kernel_seconds += kernel;
         return 1;
     }
 }

@@ -667,13 +667,15 @@ func (p *ink2Prefill) moeRows(l *ink2Layer, x ink2Ref) (ink2Ref, ink2Ref) {
 	// a verify chunk runs the decode expert GEMV straight over its T*k pairs: at a
 	// few rows, bucketing pairs by expert costs more than it saves
 	pairwise := (p.verify || p.fewRows) && !p.grouped
-	if pairwise {
+	switch {
+	case pairwise && p.verifyExperts(&l.gateUp, ids, x, k, hp.Hidden, gu, 2*width, npairs):
+	case pairwise:
 		xr := p.tmp(npairs * hp.Hidden)
 		if s.err == nil {
 			p.fail(p.vd.Ink2VRepeatRows(x, xr, hp.Hidden, p.T, k))
 		}
 		p.pairExperts(&l.gateUp, ids, xr, hp.Hidden, gu, 2*width, npairs)
-	} else {
+	default:
 		p.experts(&l.gateUp, ids, x, k, hp.Hidden, gu, 2*width, &bucket)
 	}
 	padK := l.down.padK
@@ -686,12 +688,28 @@ func (p *ink2Prefill) moeRows(l *ink2Layer, x ink2Ref) (ink2Ref, ink2Ref) {
 		p.fail(p.pd.Ink2PSitu(gu, act, npairs, width, padK, float64(hp.SituBeta), float64(hp.SituLinearBeta)))
 	}
 	down := p.tmp(npairs * hp.Hidden)
-	if pairwise {
+	switch {
+	case pairwise && p.verifyExperts(&l.down, ids, act, 1, padK, down, hp.Hidden, npairs):
+	case pairwise:
 		p.pairExperts(&l.down, ids, act, padK, down, hp.Hidden, npairs)
-	} else {
+	default:
 		p.experts(&l.down, ids, act, 1, padK, down, hp.Hidden, &bucket)
 	}
 	return down, wts
+}
+
+// verifyExperts runs npairs pairs through e reading each routed expert once for
+// all its pairs, on a device whose grouped kernel keeps the decode GEMV's bits;
+// false (nothing launched) sends the caller to the pairwise GEMV.
+func (p *ink2Prefill) verifyExperts(e *ink2Experts, ids, x ink2Ref, xDiv, xStride int, y ink2Ref, rows, npairs int) bool {
+	s := p.s
+	ve, ok := s.be.(compute.Inkling2VerifyMoE)
+	if !ok || s.err != nil {
+		return s.err != nil
+	}
+	ok, err := ve.Ink2VExperts(e.stack, rows, ids, x, xDiv, xStride, y, npairs, e.scale)
+	p.fail(err)
+	return ok || err != nil
 }
 
 // pairExperts runs npairs (token, slot) pairs through e with the decode expert GEMV,

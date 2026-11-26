@@ -13,6 +13,10 @@ func (*Ink2Device) Alloc(n int) (Ink2Buf, error)   { return Ink2Buf{}, ErrMetalU
 func (*Ink2Device) Free(b Ink2Buf)                 {}
 func (*Ink2Device) Flush() error                   { return ErrMetalUnavailable }
 func (*Ink2Device) Stats() Ink2Stats               { return Ink2Stats{} }
+func (*Ink2Device) ProfileMode() Ink2ProfileMode   { return Ink2ProfileOff }
+func (*Ink2Device) SetProfileScope(string)         {}
+func (*Ink2Device) Profile() Ink2Profile           { return Ink2Profile{} }
+func (*Ink2Device) ResetProfile() error            { return nil }
 func (*Ink2Device) Zero(dst Ink2Ref, n int) error  { return ErrMetalUnavailable }
 func (*Ink2Device) Write(Ink2Ref, []float32) error { return ErrMetalUnavailable }
 func (*Ink2Device) Read(Ink2Ref, int) ([]float32, error) {
@@ -60,8 +64,12 @@ func (*Ink2Device) Route(logits, bias, ids, wts Ink2Ref, nexp, k int, scale floa
 func (*Ink2Device) Situ(gu, act Ink2Ref, k, width, actStride int, beta, linearBeta float64) error {
 	return ErrMetalUnavailable
 }
-func (*Ink2Device) Combine(down, wts, out Ink2Ref, k, n int) error { return ErrMetalUnavailable }
-func (*Ink2Device) Add(a, b, out Ink2Ref, n int) error             { return ErrMetalUnavailable }
+func (*Ink2Device) Combine(down, wts, out Ink2Ref, k, n int) error        { return ErrMetalUnavailable }
+func (*Ink2Device) CombineRows(down, wts, out Ink2Ref, k, n, T int) error { return ErrMetalUnavailable }
+func (*Ink2Device) RouteRows(logits, bias, ids, wts Ink2Ref, nexp, k int, scale float32, T int) error {
+	return ErrMetalUnavailable
+}
+func (*Ink2Device) Add(a, b, out Ink2Ref, n int) error { return ErrMetalUnavailable }
 func (*Ink2Device) SoftcapArgmax(logits Ink2Ref, n int, softcap float32, outIdx Ink2Ref) error {
 	return ErrMetalUnavailable
 }

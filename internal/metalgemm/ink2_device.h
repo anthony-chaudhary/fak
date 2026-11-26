@@ -14,7 +14,9 @@ typedef struct {
 
 typedef struct {
     uint64_t submissions, dispatches, pending;
-    double gpu_seconds;
+    // queue is commit to GPU start, tail is GPU end to the waiter resuming, and
+    // kernel is the driver's scheduling time; last_gpu is the latest buffer's.
+    double gpu_seconds, kernel_seconds, queue_seconds, tail_seconds, last_gpu_seconds;
 } mg_ink2_stats;
 
 void *mg_ink2_create(void);
@@ -35,6 +37,14 @@ int mg_ink2_dispatch(void *dev, int pipeline, const mg_ink2_arg *args, int count
 void mg_ink2_barrier(void *dev);
 // Submits the open command buffer and waits for it. A no-op when nothing is pending.
 int mg_ink2_flush(void *dev);
+
+// Gives every later dispatch its own compute pass with boundary timestamps.
+// Returns 0, changing nothing, when the device cannot sample them.
+int mg_ink2_profile_passes(void *dev);
+// Resolves the passes of the last flushed command buffer into GPU seconds per
+// dispatch, in encode order (negative where the sample is invalid), and
+// returns how many there were.
+int mg_ink2_profile_take(void *dev, double *out, int cap);
 
 void mg_ink2_get_stats(void *dev, mg_ink2_stats *out);
 size_t mg_ink2_error(void *dev, char *dst, size_t cap);

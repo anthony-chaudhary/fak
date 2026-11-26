@@ -118,7 +118,7 @@ func TestInk2VRowsAreWidthInvariantAndMatchMatVec(t *testing.T) {
 			want := ink2OpsTestRead(t, d, decode, maxT*rows)
 			ink2VTestFinite(t, "decode", want)
 			ink2OpsTestSame(t, "a row verified alone vs the decode GEMV", ink2OpsTestRead(t, d, alone, maxT*rows), want)
-			for _, T := range append([]int{9, 10, maxT}, ink2VTestWidths...) {
+			for _, T := range append([]int{3, 5, 6, 7, 9, 10, 11, 12, maxT}, ink2VTestWidths...) {
 				y := ink2VTestPut(t, d, make([]float32, T*yStride))
 				if err := d.VerifyRows(w, xr, xStride, y, yStride, T); err != nil {
 					t.Fatal(err)
@@ -134,6 +134,120 @@ func TestInk2VRowsAreWidthInvariantAndMatchMatVec(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// fak-test:runtime integration est=5s lane=default
+func TestInk2VExpertsMatchExpertMatVecPerPair(t *testing.T) {
+	d := ink2TestDevice(t)
+	store, data := ink2TestStore(t, 128)
+	rng := rand.New(rand.NewSource(73))
+	const rows, cols, nexp, k, maxT = 13, 512, 6, 3, 11
+	const xStride = cols + 32
+	x := ink2OpsTestRand(rng, maxT*k*xStride, 1)
+	xr := ink2VTestPut(t, d, x)
+	scale := make([]float32, nexp)
+	for i := range scale {
+		scale[i] = 0.5 + rng.Float32()
+	}
+	sr := ink2VTestPut(t, d, scale)
+	// k distinct experts a token, so an expert holds at most one pair a token
+	// and up to maxT pairs a chunk, more than the kernel's tile.
+	ids := make([]int, 0, maxT*k)
+	for range maxT {
+		perm := rng.Perm(nexp)
+		if rng.Intn(3) == 0 {
+			perm = []int{0, 1, 2}
+		}
+		ids = append(ids, perm[:k]...)
+	}
+	ir := ink2VTestPut(t, d, ink2VTestInts(ids...))
+	tab := ink2TestAlloc(t, d, VerifyExpertsTable(len(ids)))
+	for _, c := range []struct {
+		name string
+		typ  uint32
+	}{{"q8_0", 8}, {"q3_K", 11}, {"q4_K", 12}, {"q5_K", 13}, {"q6_K", 14},
+		{"iq2_xs", 17}, {"iq3_xxs", 18}, {"iq4_nl", 20}, {"iq3_s", 21}, {"iq2_s", 22}, {"nvfp4", 40}} {
+		t.Run(c.name, func(t *testing.T) {
+			ink2VTestWeight(t, store, data, rng, 64, c.typ, rows*nexp, cols)
+			m, err := store.Matrix(64, c.typ, rows, cols, nexp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w, ok := m.Ink2Stack()
+			if !ok {
+				t.Fatal("expert stack split across buffers")
+			}
+			for _, xDiv := range []int{1, k} {
+				for _, T := range []int{1, 2, 5, 8, maxT} {
+					npairs := T * k
+					// The decode expert GEMV over each pair's own input row.
+					rep := make([]float32, npairs*xStride)
+					for i := range npairs {
+						copy(rep[i*xStride:(i+1)*xStride], x[(i/xDiv)*xStride:(i/xDiv+1)*xStride])
+					}
+					repr := ink2VTestPut(t, d, rep)
+					want, got := ink2TestAlloc(t, d, npairs*rows), ink2TestAlloc(t, d, npairs*rows)
+					if _, err := d.ExpertMatVec(w, ir, repr, xStride, want, npairs, sr, nil); err != nil {
+						t.Fatal(err)
+					}
+					ok, err := d.VerifyExperts(w, ir, xr, xDiv, xStride, got, npairs, sr, tab)
+					if err != nil || !ok {
+						t.Fatalf("verify experts: ok=%v err=%v", ok, err)
+					}
+					wv := ink2OpsTestRead(t, d, want, npairs*rows)
+					ink2VTestFinite(t, "decode experts", wv)
+					ink2OpsTestSame(t, fmt.Sprintf("xDiv %d width %d", xDiv, T), ink2OpsTestRead(t, d, got, npairs*rows), wv)
+				}
+			}
+		})
+	}
+	if ok, err := d.VerifyExperts(Ink2Weight{Type: 30}, ir, xr, 1, xStride, xr, 1, Ink2Ref{}, tab); ok || err != nil {
+		t.Fatalf("a bf16 stack: ok=%v err=%v, want a decline", ok, err)
+	}
+}
+
+// fak-test:runtime integration est=1s lane=default
+func TestInk2VRouteAndCombineRowsMatchPerToken(t *testing.T) {
+	d := ink2TestDevice(t)
+	rng := rand.New(rand.NewSource(79))
+	const nexp, k, n, maxT = 128, 8, 96, 9
+	logits := ink2OpsTestRand(rng, maxT*nexp, 1.5)
+	lr, br := ink2VTestPut(t, d, logits), ink2VTestPut(t, d, ink2OpsTestRand(rng, nexp, 0.2))
+	down := ink2VTestPut(t, d, ink2OpsTestRand(rng, maxT*k*n, 1))
+	for _, T := range []int{1, 2, 5, maxT} {
+		ids, wts := ink2TestAlloc(t, d, T*k), ink2TestAlloc(t, d, T*k)
+		oneIds, oneWts := ink2TestAlloc(t, d, T*k), ink2TestAlloc(t, d, T*k)
+		out, one := ink2TestAlloc(t, d, T*n), ink2TestAlloc(t, d, T*n)
+		if err := d.RouteRows(lr, br, ids, wts, nexp, k, 2.5, T); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.CombineRows(down, wts, out, k, n, T); err != nil {
+			t.Fatal(err)
+		}
+		for r := range T {
+			if err := d.Route(lr.At(r*nexp), br, oneIds.At(r*k), oneWts.At(r*k), nexp, k, 2.5); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Combine(down.At(r*k*n), oneWts.At(r*k), one.At(r*n), k, n); err != nil {
+				t.Fatal(err)
+			}
+		}
+		gotIds, err := d.ReadInts(ids, T*k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantIds, err := d.ReadInts(oneIds, T*k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range wantIds {
+			if gotIds[i] != wantIds[i] {
+				t.Fatalf("width %d: slot %d routes to %d, alone %d", T, i, gotIds[i], wantIds[i])
+			}
+		}
+		ink2OpsTestSame(t, fmt.Sprintf("width %d route weights", T), ink2OpsTestRead(t, d, wts, T*k), ink2OpsTestRead(t, d, oneWts, T*k))
+		ink2OpsTestSame(t, fmt.Sprintf("width %d combine", T), ink2OpsTestRead(t, d, out, T*n), ink2OpsTestRead(t, d, one, T*n))
 	}
 }
 

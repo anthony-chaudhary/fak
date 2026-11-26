@@ -12,16 +12,56 @@ import (
 var _ Inkling2Device = (*metalBackend)(nil)
 
 var metalInk2 struct {
-	once     sync.Once
-	dev      *metalgemm.Ink2Device
-	err      error
-	fallback *metalBackend
+	once      sync.Once
+	dev       *metalgemm.Ink2Device
+	err       error
+	profiling bool
+	fallback  *metalBackend
 }
 
 // metalInk2Device is the process-wide deferred encoder behind every Ink2 op.
 func metalInk2Device() (*metalgemm.Ink2Device, error) {
-	metalInk2.once.Do(func() { metalInk2.dev, metalInk2.err = metalgemm.NewInk2Device() })
+	metalInk2.once.Do(func() {
+		metalInk2.dev, metalInk2.err = metalgemm.NewInk2Device()
+		metalInk2.profiling = metalInk2.err == nil && metalInk2.dev.ProfileMode() != metalgemm.Ink2ProfileOff
+	})
 	return metalInk2.dev, metalInk2.err
+}
+
+// ink2MetalScope labels the dispatches of the op that follows for the profiler.
+func ink2MetalScope(op string) {
+	if _, err := metalInk2Device(); err == nil && metalInk2.profiling {
+		metalInk2.dev.SetProfileScope(op)
+	}
+}
+
+// MetalInkling2Stats reports the process-wide inkling2 device's counters; ok is
+// false without a Metal device.
+func MetalInkling2Stats() (metalgemm.Ink2Stats, bool) {
+	d, err := metalInk2Device()
+	if err != nil {
+		return metalgemm.Ink2Stats{}, false
+	}
+	return d.Stats(), true
+}
+
+// MetalInkling2Profile returns the per-dispatch profile of the process-wide
+// inkling2 device, which is empty unless FAK_INK2_PROFILE selected a mode.
+func MetalInkling2Profile() (metalgemm.Ink2Profile, bool) {
+	d, err := metalInk2Device()
+	if err != nil {
+		return metalgemm.Ink2Profile{}, false
+	}
+	return d.Profile(), true
+}
+
+// MetalInkling2ProfileReset starts a new profile window at a fence.
+func MetalInkling2ProfileReset() error {
+	d, err := metalInk2Device()
+	if err != nil {
+		return err
+	}
+	return d.ResetProfile()
 }
 
 // MetalInkling2Backend returns the Metal backend that carries the inkling2
@@ -205,6 +245,7 @@ func (c *metalBackend) Ink2ReadInts(src Ink2Ref, n int) ([]int32, error) {
 }
 
 func (c *metalBackend) Ink2MatVec(w Tensor, x, y Ink2Ref) error {
+	ink2MetalScope("Ink2MatVec")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(x, y)
@@ -219,6 +260,7 @@ func (c *metalBackend) Ink2MatVec(w Tensor, x, y Ink2Ref) error {
 }
 
 func (c *metalBackend) Ink2MatVecQ8(w Tensor, x, gate, q Ink2Ref, quantize bool, y Ink2Ref) (bool, error) {
+	ink2MetalScope("Ink2MatVecQ8")
 	if w.Dtype != Q8_0 || len(w.Shape) != 2 {
 		return false, nil
 	}
@@ -237,6 +279,7 @@ func (c *metalBackend) Ink2MatVecQ8(w Tensor, x, gate, q Ink2Ref, quantize bool,
 }
 
 func (c *metalBackend) Ink2ExpertMatVec(stack Tensor, expertRows int, ids, x Ink2Ref, xStride int, y Ink2Ref, k int, scale Ink2Ref, situ *Ink2Situ) (bool, error) {
+	ink2MetalScope("Ink2ExpertMatVec")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(ids, x, y, scale)
@@ -259,6 +302,7 @@ func (c *metalBackend) Ink2ExpertMatVec(stack Tensor, expertRows int, ids, x Ink
 }
 
 func (c *metalBackend) Ink2RMS(x, w, y Ink2Ref, rows, n int, eps float32) error {
+	ink2MetalScope("Ink2RMS")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(x, w, y)
@@ -269,6 +313,7 @@ func (c *metalBackend) Ink2RMS(x, w, y Ink2Ref, rows, n int, eps float32) error 
 }
 
 func (c *metalBackend) Ink2CtrlPair(cur, msg, pair Ink2Ref, n int) error {
+	ink2MetalScope("Ink2CtrlPair")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(cur, msg, pair)
@@ -279,6 +324,7 @@ func (c *metalBackend) Ink2CtrlPair(cur, msg, pair Ink2Ref, n int) error {
 }
 
 func (c *metalBackend) Ink2Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2Ref, eps float32, out Ink2Ref, n int) error {
+	ink2MetalScope("Ink2Mix")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(queries, out)
@@ -297,6 +343,7 @@ func (c *metalBackend) Ink2Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms 
 }
 
 func (c *metalBackend) Ink2Control(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norms []Ink2Ref, eps float32) error {
+	ink2MetalScope("Ink2Control")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(g, out)
@@ -320,6 +367,7 @@ func (c *metalBackend) Ink2Control(ctl Ink2Controls, g, out Ink2Ref, n, rank int
 }
 
 func (c *metalBackend) Ink2Conv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn int, norm float32) error {
+	ink2MetalScope("Ink2Conv")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(x, w, dyn, hist, out, resid)
@@ -330,6 +378,7 @@ func (c *metalBackend) Ink2Conv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, k
 }
 
 func (c *metalBackend) Ink2CombineConv(down, wts Ink2Ref, k int, w, hist, out, resid Ink2Ref, n, kn int, norm float32) error {
+	ink2MetalScope("Ink2CombineConv")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(down, wts, w, hist, out, resid)
@@ -340,6 +389,7 @@ func (c *metalBackend) Ink2CombineConv(down, wts Ink2Ref, k int, w, hist, out, r
 }
 
 func (c *metalBackend) Ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	ink2MetalScope("Ink2QKVPost")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, o, err := ink2MetalBind(q, r, k, v, qclip, rclip, kcache, vcache, meta)
@@ -359,6 +409,7 @@ func (c *metalBackend) Ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, met
 }
 
 func (c *metalBackend) Ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	ink2MetalScope("Ink2Attend")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, o, err := ink2MetalBind(q, r, sinks, relBias, kcache, vcache, scores, out, meta)
@@ -369,6 +420,7 @@ func (c *metalBackend) Ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, 
 }
 
 func (c *metalBackend) Ink2SigmoidMul(x, gate Ink2Ref, n int) error {
+	ink2MetalScope("Ink2SigmoidMul")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(x, gate)
@@ -379,6 +431,7 @@ func (c *metalBackend) Ink2SigmoidMul(x, gate Ink2Ref, n int) error {
 }
 
 func (c *metalBackend) Ink2Route(logits, bias, ids, wts Ink2Ref, nexp, k int, scale float32) error {
+	ink2MetalScope("Ink2Route")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(logits, bias, ids, wts)
@@ -389,6 +442,7 @@ func (c *metalBackend) Ink2Route(logits, bias, ids, wts Ink2Ref, nexp, k int, sc
 }
 
 func (c *metalBackend) Ink2ExpertScale(y, ids, scale Ink2Ref, k, rows int) error {
+	ink2MetalScope("Ink2ExpertScale")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(y, ids, scale)
@@ -399,6 +453,7 @@ func (c *metalBackend) Ink2ExpertScale(y, ids, scale Ink2Ref, k, rows int) error
 }
 
 func (c *metalBackend) Ink2Situ(gu, act Ink2Ref, k, width, actStride int, beta, linearBeta float64) error {
+	ink2MetalScope("Ink2Situ")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(gu, act)
@@ -409,6 +464,7 @@ func (c *metalBackend) Ink2Situ(gu, act Ink2Ref, k, width, actStride int, beta, 
 }
 
 func (c *metalBackend) Ink2Combine(down, wts, out Ink2Ref, k, n int) error {
+	ink2MetalScope("Ink2Combine")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(down, wts, out)
@@ -419,6 +475,7 @@ func (c *metalBackend) Ink2Combine(down, wts, out Ink2Ref, k, n int) error {
 }
 
 func (c *metalBackend) Ink2Add(a, b, out Ink2Ref, n int) error {
+	ink2MetalScope("Ink2Add")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(a, b, out)
@@ -429,6 +486,7 @@ func (c *metalBackend) Ink2Add(a, b, out Ink2Ref, n int) error {
 }
 
 func (c *metalBackend) Ink2SoftcapArgmax(logits Ink2Ref, n int, softcap float32, outIdx Ink2Ref) error {
+	ink2MetalScope("Ink2SoftcapArgmax")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, r, err := ink2MetalBind(logits, outIdx)

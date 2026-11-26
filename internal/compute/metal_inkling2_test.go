@@ -486,3 +486,50 @@ func TestMetalInkling2QKVPostFeedsAttend(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime integration est=1s lane=default
+func TestMetalInkling2StatsAndProfileWrappers(t *testing.T) {
+	be := metalInk2TestBackend(t)
+	dev, err := metalInk2Device()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rng := rand.New(rand.NewSource(43))
+	const n = 32
+	w := metalInk2TestUpload(t, be, metalInk2TestRand(rng, n*n))
+	w.Shape = []int{n, n}
+	arena := metalInk2TestAlloc(t, be, 128)
+	if err := be.Ink2Write(Ink2At(arena, 0), metalInk2TestRand(rng, n)); err != nil {
+		t.Fatal(err)
+	}
+	if err := MetalInkling2ProfileReset(); err != nil {
+		t.Fatal(err)
+	}
+	before, ok := MetalInkling2Stats()
+	if !ok {
+		t.Fatal("no stats from a live device")
+	}
+	if err := be.Ink2MatVec(w, Ink2At(arena, 0), Ink2At(arena, 64)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := be.Ink2Read(Ink2At(arena, 64), n); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := MetalInkling2Stats()
+	if d := after.Sub(before); d.Dispatches != 1 || d.Submissions != 1 || d.EncodeSeconds <= 0 || d.WaitSeconds <= 0 || d.GPUSeconds <= 0 {
+		t.Fatalf("stats delta %+v, want one timed dispatch in one submission", d)
+	}
+	p, ok := MetalInkling2Profile()
+	if !ok || p.Mode != dev.ProfileMode() {
+		t.Fatalf("profile mode %q (ok %v), device %q", p.Mode, ok, dev.ProfileMode())
+	}
+	if !p.Enabled() {
+		if len(p.Rows) != 0 {
+			t.Fatalf("profile off collected %+v", p.Rows)
+		}
+		return
+	}
+	if len(p.Rows) != 1 || p.Rows[0].Scope != "Ink2MatVec" || p.Rows[0].Kernel != "mv_f32" || p.Rows[0].Detail != "32x32" || p.Rows[0].Dispatches != 1 {
+		t.Fatalf("profile rows %+v, want one Ink2MatVec mv_f32 32x32 dispatch", p.Rows)
+	}
+}

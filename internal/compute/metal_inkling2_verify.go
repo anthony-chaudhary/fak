@@ -9,7 +9,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
-var _ Inkling2VerifyDevice = (*metalBackend)(nil)
+var (
+	_ Inkling2VerifyDevice = (*metalBackend)(nil)
+	_ Inkling2VerifyMoE    = (*metalBackend)(nil)
+)
 
 // A verify row's bits never depend on the width of its chunk: every op below
 // runs the decode kernel's arithmetic with one grid coordinate per token row.
@@ -23,6 +26,13 @@ const metalInk2VerifyScoreBytes = 64 << 20
 var metalInk2VerifyScratch struct {
 	buf    metalgemm.Ink2Buf
 	floats int
+}
+
+// metalInk2VerifyTable is the expert grouping of the verify expert ops, each
+// launch regrouping before it reads; guarded by metalMu.
+var metalInk2VerifyTable struct {
+	buf  metalgemm.Ink2Buf
+	ints int
 }
 
 // metalInk2VerifyScores returns a scores scratch for a T-row attend of heads
@@ -49,6 +59,7 @@ func metalInk2VerifyScores(d *metalgemm.Ink2Device, heads, span, T int) (metalge
 // metalInk2VerifyRows runs the tile rows kernel for any weight the decode GEMV
 // reads, so a verify row is that GEMV's bits.
 func (c *metalBackend) metalInk2VerifyRows(op string, w Tensor, x, y Ink2Ref, rows int) (bool, error) {
+	ink2MetalScope(op)
 	if len(w.Shape) != 2 {
 		return false, nil
 	}
@@ -77,6 +88,60 @@ func (c *metalBackend) Ink2VQ8Rows(w Tensor, x, gate, q, y Ink2Ref, rows int, qu
 		return false, nil
 	}
 	return c.metalInk2VerifyRows("verify q8_0 rows", w, x, y, rows)
+}
+
+func (c *metalBackend) Ink2VExperts(stack Tensor, expertRows int, ids, x Ink2Ref, xDiv, xStride int, y Ink2Ref, npairs int, scale Ink2Ref) (bool, error) {
+	ink2MetalScope("Ink2VExperts")
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	d, r, err := ink2MetalBind(ids, x, y, scale)
+	if err != nil {
+		return false, ink2MetalErr("verify experts", err)
+	}
+	wv, indexed, err := ink2MetalWeight(stack, true)
+	if err != nil || !indexed {
+		return false, ink2MetalErr("verify experts", err)
+	}
+	if wv.Experts == 1 && expertRows > 0 && wv.Rows%expertRows == 0 {
+		wv.Experts, wv.Rows = wv.Rows/expertRows, expertRows
+	}
+	if wv.Rows != expertRows {
+		return false, fmt.Errorf("metal inkling2 verify experts: %d rows per expert, stack has %d", expertRows, wv.Rows)
+	}
+	tab := &metalInk2VerifyTable
+	if need := metalgemm.VerifyExpertsTable(npairs); tab.ints < need {
+		buf, err := d.Alloc(need)
+		if err != nil {
+			return false, ink2MetalErr("verify experts", err)
+		}
+		// launches already encoded keep the old buffer alive
+		d.Free(tab.buf)
+		tab.buf, tab.ints = buf, need
+	}
+	ok, err := d.VerifyExperts(wv, r[0], r[1], xDiv, xStride, r[2], npairs, r[3], metalgemm.Ink2Ref{Buf: tab.buf})
+	return ok, ink2MetalErr("verify experts", err)
+}
+
+func (c *metalBackend) Ink2VRoute(logits, bias, ids, wts Ink2Ref, nexp, k int, scale float32, T int) error {
+	ink2MetalScope("Ink2VRoute")
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	d, r, err := ink2MetalBind(logits, bias, ids, wts)
+	if err != nil {
+		return ink2MetalErr("verify route", err)
+	}
+	return ink2MetalErr("verify route", d.RouteRows(r[0], r[1], r[2], r[3], nexp, k, scale, T))
+}
+
+func (c *metalBackend) Ink2VCombine(down, wts, out Ink2Ref, k, n, T int) error {
+	ink2MetalScope("Ink2VCombine")
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	d, r, err := ink2MetalBind(down, wts, out)
+	if err != nil {
+		return ink2MetalErr("verify combine", err)
+	}
+	return ink2MetalErr("verify combine", d.CombineRows(r[0], r[1], r[2], k, n, T))
 }
 
 // Ink2VQ8Segs has no single-launch Metal form; each weight runs as Ink2VQ8Rows.

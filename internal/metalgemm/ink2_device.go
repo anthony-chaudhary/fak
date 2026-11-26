@@ -58,6 +58,14 @@ type Ink2Stats struct {
 	// Pending is the number of dispatches encoded but not yet submitted.
 	Pending    int
 	GPUSeconds float64
+	// EncodeSeconds is host time spent encoding dispatches and WaitSeconds host
+	// time blocked in fences, so a token's wall time is these two plus the
+	// caller's own. A wait is QueueSeconds from commit to the GPU starting,
+	// GPUSeconds, then TailSeconds until the waiter resumes.
+	EncodeSeconds, WaitSeconds float64
+	QueueSeconds, TailSeconds  float64
+	// SchedSeconds is the driver's scheduling time for the command buffers.
+	SchedSeconds float64
 }
 
 // The types below mirror the operand structs of compute.Inkling2Device field

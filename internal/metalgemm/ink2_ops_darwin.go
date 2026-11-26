@@ -226,15 +226,22 @@ func (d *Ink2Device) SigmoidMul(x, gate Ink2Ref, n int) error {
 // int32 ids, and their sigmoid probabilities renormalized over the selection
 // and multiplied by a nonzero scale as wts.
 func (d *Ink2Device) Route(logits, bias, ids, wts Ink2Ref, nexp, k int, scale float32) error {
-	if !logits.Valid() || !ids.Valid() || !wts.Valid() || nexp < 1 || nexp > ink2OpsMaxExperts || k < 1 || k > ink2OpsMaxTopK || k > nexp {
-		return fmt.Errorf("%w: route of %d experts to %d slots", ErrInk2Shape, nexp, k)
+	return d.RouteRows(logits, bias, ids, wts, nexp, k, scale, 1)
+}
+
+// RouteRows is Route for T tokens in one launch: token t's logits at
+// logits + t*nexp, its ids and weights at t*k. Each token is Route's bits.
+func (d *Ink2Device) RouteRows(logits, bias, ids, wts Ink2Ref, nexp, k int, scale float32, T int) error {
+	if !logits.Valid() || !ids.Valid() || !wts.Valid() || nexp < 1 || nexp > ink2OpsMaxExperts || k < 1 || k > ink2OpsMaxTopK || k > nexp ||
+		T < 1 || T > math.MaxInt32/nexp {
+		return fmt.Errorf("%w: route of %d experts to %d slots for %d tokens", ErrInk2Shape, nexp, k, T)
 	}
 	p, err := d.opsKernel("ink2_route", true)
 	if err != nil {
 		return err
 	}
-	return d.Dispatch(p, [3]int{1, 1, 1}, [3]int{ink2OpsRouteThreads, 1, 1},
-		logits.Span(nexp), bias.Span(nexp), ids.Span(k), wts.Span(k),
+	return d.Dispatch(p, [3]int{T, 1, 1}, [3]int{ink2OpsRouteThreads, 1, 1},
+		logits.Span(T*nexp), bias.Span(nexp), ids.Span(T*k), wts.Span(T*k),
 		Ink2Const(ink2RouteShape{experts: uint32(nexp), slots: uint32(k), biased: uint32(btoi(bias.Valid())), weightScale: scale}))
 }
 
@@ -257,14 +264,20 @@ func (d *Ink2Device) Situ(gu, act Ink2Ref, k, width, actStride int, beta, linear
 // Combine encodes out[j] = sum over the k routed rows of down ([k][n]), in
 // routing order, of wts[t] * down[t][j].
 func (d *Ink2Device) Combine(down, wts, out Ink2Ref, k, n int) error {
-	if !down.Valid() || !wts.Valid() || !out.Valid() || k < 1 || n < 1 || k > math.MaxInt32/n {
-		return fmt.Errorf("%w: moe combine of %d slots of width %d", ErrInk2Shape, k, n)
+	return d.CombineRows(down, wts, out, k, n, 1)
+}
+
+// CombineRows is Combine for T tokens in one launch: token t's [k][n] down rows
+// at down + t*k*n, its weights at t*k and its output at t*n.
+func (d *Ink2Device) CombineRows(down, wts, out Ink2Ref, k, n, T int) error {
+	if !down.Valid() || !wts.Valid() || !out.Valid() || k < 1 || n < 1 || T < 1 || k > math.MaxInt32/n || T > math.MaxInt32/(k*n) {
+		return fmt.Errorf("%w: moe combine of %d slots of width %d for %d tokens", ErrInk2Shape, k, n, T)
 	}
 	p, err := d.opsKernel("ink2_combine", false)
 	if err != nil {
 		return err
 	}
-	return d.opsEach(p, n, 1, down.Span(k*n), wts.Span(k), out.Span(n), Ink2Const(ink2CombineShape{slots: uint32(k), n: uint32(n)}))
+	return d.opsEach(p, n, T, down.Span(T*k*n), wts.Span(T*k), out.Span(T*n), Ink2Const(ink2CombineShape{slots: uint32(k), n: uint32(n)}))
 }
 
 // Add encodes out = a + b over n elements.
