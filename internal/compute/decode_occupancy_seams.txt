@@ -1,0 +1,8 @@
+persistent-kernel-work-stealing-tail-fix	internal/compute/cuda/weight_formats.cuh (k_awq_gemv) / internal/compute/cuda/attention.cuh (k_flash_attention, grid=nH)
+l1-cache-hints-decode	internal/compute/cuda/attention.cuh (k_flash_attention K/V load loops)
+clc-decode-tile-scheduling	internal/compute/cuda/quant_matmul.cuh (k_q8_gemm)
+moe-launch-fusion-ladder	internal/compute/fusion_traffic.go (PrefillGeometry.MLPHBMTraffic, the MLP fusion traffic)
+tmem-accumulator-migration	internal/compute/cuda/attention.cuh (float acc[FLASH_ACC_MAX] in k_flash_attention)
+clc-try-cancel-speculative	internal/compute/discard_admit.go (discard-aware admission)
+nvfp4-two-level-block-scale	internal/ggufload/gguf_dequant.go (dequant path; the tree has no nvfp4 implementation)
+pdl-moe-kernel-overlap	internal/compute/cuda/quant_matmul.cuh (k_q8_quant_act -> k_q8_gemm)

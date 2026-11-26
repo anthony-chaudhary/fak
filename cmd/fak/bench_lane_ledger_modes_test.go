@@ -78,9 +78,14 @@ func TestBenchLaneLedgerSitesHandValues(t *testing.T) {
 		}
 	}
 
-	unjudged := findBySiteKernel(t, findings, "fak_fattn_mma::k_qwen38_fattn_mma_hd256")
+	unjudged := findBySiteKernel(t, findings, "k_qwen35_gdn_qk_norm")
 	if unjudged["kind"] != "unjudged" || laneLedgerNumber(t, laneLedgerObject(t, unjudged, "site"), "threads_per_block") != 0 {
-		t.Errorf("unjudged finding = %v, want a symbolic site with threads_per_block 0", unjudged)
+		t.Errorf("unjudged finding = %v, want a runtime site with threads_per_block 0", unjudged)
+	}
+	for _, item := range findings {
+		if siteKernel(item.(map[string]any)) == "fak_fattn_mma::k_qwen38_fattn_mma_hd256" {
+			t.Errorf("k_qwen38_fattn_mma_hd256 resolves to 128 threads (a warp multiple), so it is no finding: %v", item)
+		}
 	}
 
 	counts := laneLedgerObject(t, doc, "counts")
@@ -360,5 +365,391 @@ func TestBenchLaneLedgerFillHumanTable(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("fill table missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// ---- sites resolution ----
+
+func TestBenchLaneLedgerSitesResolutionCounts(t *testing.T) {
+	doc := runLaneLedgerJSON(t, "sites")
+	counts := laneLedgerObject(t, doc, "resolution_counts")
+	want := map[string]int{}
+	for _, s := range compute.LaunchSites() {
+		want[s.Resolution]++
+	}
+	total := 0
+	for class, n := range want {
+		if got := laneLedgerNumber(t, counts, class); got != int64(n) {
+			t.Errorf("resolution_counts[%q] = %d, want %d", class, got, n)
+		}
+		total += n
+	}
+	if total != len(compute.LaunchSites()) {
+		t.Errorf("classes sum to %d, want %d rows", total, len(compute.LaunchSites()))
+	}
+	for _, item := range doc["sites"].([]any) {
+		site := item.(map[string]any)
+		if _, ok := site["threads_resolution"].(string); !ok {
+			t.Fatalf("site %v has no threads_resolution", site["kernel"])
+		}
+	}
+}
+
+func TestBenchLaneLedgerSitesTableResolutionColumn(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runBenchLaneLedger(&stdout, &stderr, []string{"sites"}); code != 0 {
+		t.Fatalf("exit %d; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"RES", "resolution: literal=", "resolved-chain=", "runtime=", "template="} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sites table missing %q", want)
+		}
+	}
+}
+
+// ---- sweep ----
+
+const benchLaneExcerpt = "testdata/bench_lane_ledger/ptxas_sm120_excerpt.log"
+
+// benchLaneSweepDocOf runs the sweep verb on the excerpt with the given extra flags and returns its document.
+func benchLaneSweepDocOf(t *testing.T, extra ...string) map[string]any {
+	t.Helper()
+	args := append([]string{"sweep", "--ptxas-log", benchLaneExcerpt}, extra...)
+	return runLaneLedgerJSON(t, args...)
+}
+
+func TestBenchLaneSweepJSONKeys(t *testing.T) {
+	doc := benchLaneSweepDocOf(t, "--arch", "sm_120", "--sms", "84")
+	for _, key := range []string{
+		"schema", "unit", "arch", "device_sms", "grid_blocks", "grid_source", "provenance", "parse",
+		"archs_seen", "join", "limiter_histogram", "rows_total", "rows_shown", "rows", "caveats",
+	} {
+		if _, ok := doc[key]; !ok {
+			t.Errorf("top-level key %q missing", key)
+		}
+	}
+	if doc["schema"] != "fak.lane-ptxas-sweep/1" {
+		t.Errorf("schema = %v, want fak.lane-ptxas-sweep/1", doc["schema"])
+	}
+	if _, ok := doc["device_props"]; ok {
+		t.Error("device_props present without --device-props")
+	}
+	join := laneLedgerObject(t, doc, "join")
+	for _, key := range []string{"site_count", "joined_site_count", "join_rate", "unjoined_site_count", "unjoined_entry_count"} {
+		if _, ok := join[key]; !ok {
+			t.Errorf("join.%s missing", key)
+		}
+	}
+}
+
+// TestBenchLaneSweepHandValues pins three rows of the excerpt against values worked out by hand on sm_120.
+// k_ink2d_fuse: 256 threads at 42 registers is 1536 registers per warp, 12288 per block, 65536/12288 = 5 blocks
+// per SM, 40 warps, register-limited. k_copyrow: 10 registers round to 512 per warp, so the 1536-thread limit
+// gives 6 blocks, 48 warps, warp-limited. k_rope_panel: 128 threads gives 12 blocks, warp-limited.
+// The capacity is 84 SMs times 1536 threads, 129024 lane-slot-waves.
+func TestBenchLaneSweepHandValues(t *testing.T) {
+	doc := benchLaneSweepDocOf(t, "--device-props", benchLaneProps, "--top", "50")
+	rows := doc["rows"].([]any)
+	cases := []struct {
+		kernel  string
+		blocks  int64
+		warps   int64
+		limiter string
+		threads int64
+		regs    int64
+	}{
+		{"k_ink2d_fuse", 5, 40, "register", 256, 42},
+		{"k_copyrow", 6, 48, "warp", 256, 10},
+		{"k_rope_panel", 12, 48, "warp", 128, 32},
+	}
+	for _, c := range cases {
+		row := findByString(t, rows, "kernel", c.kernel)
+		if got := laneLedgerNumber(t, row, "blocks_per_sm"); got != c.blocks {
+			t.Errorf("%s blocks_per_sm = %d, want %d", c.kernel, got, c.blocks)
+		}
+		if got := laneLedgerNumber(t, row, "warps_per_sm"); got != c.warps {
+			t.Errorf("%s warps_per_sm = %d, want %d", c.kernel, got, c.warps)
+		}
+		if row["limiter"] != c.limiter {
+			t.Errorf("%s limiter = %v, want %s", c.kernel, row["limiter"], c.limiter)
+		}
+		if got := laneLedgerNumber(t, row, "threads_per_block"); got != c.threads {
+			t.Errorf("%s threads_per_block = %d, want %d", c.kernel, got, c.threads)
+		}
+		if got := laneLedgerNumber(t, row, "regs_per_thread"); got != c.regs {
+			t.Errorf("%s regs_per_thread = %d, want %d", c.kernel, got, c.regs)
+		}
+		if got := laneLedgerNumber(t, row, "capacity_lane_slot_waves"); got != 129024 {
+			t.Errorf("%s capacity = %d, want 129024", c.kernel, got)
+		}
+	}
+	if got := laneLedgerNumber(t, doc, "grid_blocks"); got != 84 {
+		t.Errorf("grid_blocks = %d, want the SM count 84 by default", got)
+	}
+	if !strings.HasPrefix(doc["grid_source"].(string), "default:") {
+		t.Errorf("grid_source = %v, want the default stated", doc["grid_source"])
+	}
+	if _, ok := doc["device_props"]; !ok {
+		t.Error("device_props missing with --device-props")
+	}
+}
+
+func TestBenchLaneSweepCallerGridIsStated(t *testing.T) {
+	doc := benchLaneSweepDocOf(t, "--arch", "sm_120", "--sms", "84", "--grid", "168")
+	if got := laneLedgerNumber(t, doc, "grid_blocks"); got != 168 {
+		t.Errorf("grid_blocks = %d, want 168", got)
+	}
+	if doc["grid_source"] != "caller input: --grid" {
+		t.Errorf("grid_source = %v", doc["grid_source"])
+	}
+}
+
+func TestBenchLaneSweepTopBoundsRows(t *testing.T) {
+	doc := benchLaneSweepDocOf(t, "--arch", "sm_120", "--sms", "84", "--top", "2")
+	if got := laneLedgerNumber(t, doc, "rows_shown"); got != 2 {
+		t.Errorf("rows_shown = %d, want 2", got)
+	}
+	if got := len(doc["rows"].([]any)); got != 2 {
+		t.Errorf("rows has %d entries, want 2", got)
+	}
+	if rt := laneLedgerNumber(t, doc, "rows_total"); rt < 2 {
+		t.Errorf("rows_total = %d, want the full joined pair count", rt)
+	}
+}
+
+func TestBenchLaneSweepRefusals(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "no hardware refused", args: []string{"sweep", "--ptxas-log", benchLaneExcerpt}, wantErr: "--arch is missing"},
+		{name: "missing ptxas log refused", args: []string{"sweep", "--arch", "sm_120", "--sms", "84"}, wantErr: "--ptxas-log is required"},
+		{name: "zero top refused", args: []string{"sweep", "--ptxas-log", benchLaneExcerpt, "--arch", "sm_120", "--sms", "84", "--top", "0"}, wantErr: "--top must be positive"},
+		{name: "zero grid refused", args: []string{"sweep", "--ptxas-log", benchLaneExcerpt, "--arch", "sm_120", "--sms", "84", "--grid", "0"}, wantErr: "--grid must be positive"},
+		{name: "log for another arch refused", args: []string{"sweep", "--ptxas-log", benchLaneExcerpt, "--arch", "sm_89", "--sms", "84"}, wantErr: "log has sm_120, NVArch is sm_89"},
+		{name: "arch disagreeing with props refused", args: []string{"sweep", "--ptxas-log", benchLaneExcerpt, "--arch", "sm_89", "--device-props", benchLaneProps}, wantErr: "--arch disagrees"},
+		{name: "refuted props refused", args: []string{"sweep", "--ptxas-log", benchLaneExcerpt, "--device-props", "testdata/bench_lane_ledger/rtx5080_props_refuted.json"}, wantErr: "refutes the NVArch row"},
+		{name: "missing log file refused", args: []string{"sweep", "--ptxas-log", "testdata/bench_lane_ledger/none.log", "--arch", "sm_120", "--sms", "84"}, wantErr: "--ptxas-log"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := runBenchLaneLedger(&stdout, &stderr, tc.args); code == 0 {
+				t.Fatalf("exit 0, want non-zero; stdout: %s", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantErr) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tc.wantErr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("refusal wrote to stdout: %q", stdout.String())
+			}
+		})
+	}
+}
+
+func TestBenchLaneSweepHumanTable(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runBenchLaneLedger(&stdout, &stderr, []string{
+		"sweep", "--ptxas-log", benchLaneExcerpt, "--device-props", benchLaneProps, "--top", "3",
+	})
+	if code != 0 {
+		t.Fatalf("exit %d; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"fak bench lane-ledger sweep", "device props check: arch=sm_120", "join: sites=", "limiter histogram", "ranked rows", "caveats:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sweep table missing %q", want)
+		}
+	}
+}
+
+// ---- observed ----
+
+const benchLaneProfile = "testdata/bench_lane_ledger/observed_profile.json"
+
+// benchLaneObservedDocOf runs the observed verb on the excerpt and fixture profile with the device props.
+func benchLaneObservedDocOf(t *testing.T, extra ...string) map[string]any {
+	t.Helper()
+	args := append([]string{"observed", "--profile", benchLaneProfile, "--ptxas-log", benchLaneExcerpt, "--device-props", benchLaneProps}, extra...)
+	return runLaneLedgerJSON(t, args...)
+}
+
+func TestBenchLaneObservedJSONKeys(t *testing.T) {
+	doc := benchLaneObservedDocOf(t)
+	for _, key := range []string{"schema", "unit", "arch", "device_sms", "device_props", "inputs", "totals", "rows_total", "top_modelled", "top_unmodelled", "caveats"} {
+		if _, ok := doc[key]; !ok {
+			t.Errorf("top-level key %q missing", key)
+		}
+	}
+	if doc["schema"] != "fak.lane-observed/1" {
+		t.Errorf("schema = %v, want fak.lane-observed/1", doc["schema"])
+	}
+	totals := laneLedgerObject(t, doc, "totals")
+	for _, key := range []string{"total_ns", "modelled_ns", "unmodelled_ns", "modelled_share", "unmodelled_ns_by_reason", "time_weighted_idle_ns", "cell_time_ns"} {
+		if _, ok := totals[key]; !ok {
+			t.Errorf("totals.%s missing", key)
+		}
+	}
+	caveats, _ := doc["caveats"].([]any)
+	joined := ""
+	for _, c := range caveats {
+		joined += c.(string) + "\n"
+	}
+	for _, want := range []string{"prioritisation heuristic", "measured input", "model-only"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("caveats do not state %q", want)
+		}
+	}
+}
+
+// TestBenchLaneObservedHandValues: k_copyrow is 84 blocks on sm_120 at 256 threads, 6 resident blocks per SM,
+// so its active share is 256*84 over 129024, which is 1/6. Its 1000 ns splits as 167 active and 833 idle: the
+// largest-remainder rule gives the .67 remainder of the active cell to it. k_ink2d_fuse is 500 ns with the same
+// active share; its three cells tie at .33, so the lower-numbered active cell takes the spare nanosecond:
+// 84 active and 416 idle. k_not_in_log has no registers in the ptxas log, so it stays unmodelled.
+func TestBenchLaneObservedHandValues(t *testing.T) {
+	doc := benchLaneObservedDocOf(t, "--top", "5")
+	modelled := doc["top_modelled"].([]any)
+	copyrow := findByString(t, modelled, "kernel", "k_copyrow")
+	if got := laneLedgerNumber(t, copyrow, "total_ns"); got != 1000 {
+		t.Errorf("k_copyrow total_ns = %d, want 1000", got)
+	}
+	model := laneLedgerObject(t, copyrow, "model")
+	if got := laneLedgerNumber(t, model, "time_weighted_idle_ns"); got != 833 {
+		t.Errorf("k_copyrow time_weighted_idle_ns = %d, want 833", got)
+	}
+	if got := model["active_share"].(float64); got < 0.16666 || got > 0.16667 {
+		t.Errorf("k_copyrow active_share = %v, want 1/6", got)
+	}
+	if got := laneLedgerNumber(t, model, "blocks_per_sm"); got != 6 {
+		t.Errorf("k_copyrow blocks_per_sm = %d, want 6", got)
+	}
+	ink := findByString(t, modelled, "kernel", "k_ink2d_fuse")
+	if got := laneLedgerNumber(t, laneLedgerObject(t, ink, "model"), "time_weighted_idle_ns"); got != 416 {
+		t.Errorf("k_ink2d_fuse time_weighted_idle_ns = %d, want 416", got)
+	}
+
+	unmodelled := doc["top_unmodelled"].([]any)
+	missing := findByString(t, unmodelled, "kernel", "k_not_in_log")
+	if missing["unmodelled_reason"] != "regs_unmeasured" {
+		t.Errorf("k_not_in_log reason = %v, want regs_unmeasured", missing["unmodelled_reason"])
+	}
+
+	totals := laneLedgerObject(t, doc, "totals")
+	if got := laneLedgerNumber(t, totals, "total_ns"); got != 1750 {
+		t.Errorf("total_ns = %d, want 1750", got)
+	}
+	if got := laneLedgerNumber(t, totals, "unmodelled_ns"); got != 250 {
+		t.Errorf("unmodelled_ns = %d, want 250", got)
+	}
+	byReason := laneLedgerObject(t, totals, "unmodelled_ns_by_reason")
+	if got := laneLedgerNumber(t, byReason, "regs_unmeasured"); got != 250 {
+		t.Errorf("regs_unmeasured ns = %d, want 250", got)
+	}
+	if got := laneLedgerNumber(t, totals, "time_weighted_idle_ns"); got != 1249 {
+		t.Errorf("time_weighted_idle_ns = %d, want 833+416=1249", got)
+	}
+}
+
+func TestBenchLaneObservedRefusals(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "missing profile refused", args: []string{"observed", "--ptxas-log", benchLaneExcerpt, "--device-props", benchLaneProps}, wantErr: "--profile is required"},
+		{name: "missing ptxas log refused", args: []string{"observed", "--profile", benchLaneProfile, "--device-props", benchLaneProps}, wantErr: "--ptxas-log is required"},
+		{name: "no hardware refused", args: []string{"observed", "--profile", benchLaneProfile, "--ptxas-log", benchLaneExcerpt}, wantErr: "--arch is missing"},
+		{name: "empty profile refused", args: []string{"observed", "--profile", "testdata/bench_lane_ledger/observed_empty.json", "--ptxas-log", benchLaneExcerpt, "--device-props", benchLaneProps}, wantErr: "no launch rows"},
+		{name: "zero top refused", args: []string{"observed", "--profile", benchLaneProfile, "--ptxas-log", benchLaneExcerpt, "--device-props", benchLaneProps, "--top", "0"}, wantErr: "--top must be positive"},
+		{name: "sms disagreeing with props refused", args: []string{"observed", "--profile", benchLaneProfile, "--ptxas-log", benchLaneExcerpt, "--device-props", benchLaneProps, "--sms", "80"}, wantErr: "--sms disagrees"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := runBenchLaneLedger(&stdout, &stderr, tc.args); code == 0 {
+				t.Fatalf("exit 0, want non-zero; stdout: %s", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantErr) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tc.wantErr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("refusal wrote to stdout: %q", stdout.String())
+			}
+		})
+	}
+}
+
+func TestBenchLaneObservedHumanTable(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runBenchLaneLedger(&stdout, &stderr, []string{
+		"observed", "--profile", benchLaneProfile, "--ptxas-log", benchLaneExcerpt, "--device-props", benchLaneProps,
+	})
+	if code != 0 {
+		t.Fatalf("exit %d; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"fak bench lane-ledger observed", "coverage:", "unmodelled ns by reason:", "time_weighted_idle_ns", "top modelled rows", "top unmodelled rows", "input conflicts", "caveats:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("observed table missing %q", want)
+		}
+	}
+}
+
+// ---- default mode with --device-props ----
+
+// TestBenchLaneLedgerDevicePropsHandValues: 256 threads at 137 registers is 4608 registers per warp, 36864 per
+// block, so one block fits per SM (65536 registers), register-limited. The capacity is 84 SMs times 1536.
+func TestBenchLaneLedgerDevicePropsHandValues(t *testing.T) {
+	doc := runLaneLedgerJSON(t, "--device-props", benchLaneProps, "--threads", "256", "--regs", "137", "--grid", "84")
+	launch := laneLedgerObject(t, doc, "launch")
+	if got := laneLedgerNumber(t, launch, "device_sms"); got != 84 {
+		t.Errorf("device_sms = %d, want 84 from the file", got)
+	}
+	ledger := laneLedgerObject(t, doc, "ledger")
+	if got := laneLedgerNumber(t, ledger, "blocks_per_sm"); got != 1 {
+		t.Errorf("blocks_per_sm = %d, want 1", got)
+	}
+	if ledger["limiter"] != "register" {
+		t.Errorf("limiter = %v, want register", ledger["limiter"])
+	}
+	if got := laneLedgerNumber(t, ledger, "capacity"); got != 129024 {
+		t.Errorf("capacity = %d, want 129024", got)
+	}
+	check := laneLedgerObject(t, doc, "device_props")
+	if check["verdict"] != "confirmed" {
+		t.Errorf("device_props verdict = %v, want confirmed", check["verdict"])
+	}
+	caveats := doc["caveats"].([]any)
+	for _, c := range caveats {
+		if strings.Contains(c.(string), "the SM count is a caller input") {
+			t.Error("caller-input SM caveat kept although the file supplied the SM count")
+		}
+	}
+}
+
+func TestBenchLaneLedgerDevicePropsRefusals(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "sms disagreeing refused", args: []string{"--device-props", benchLaneProps, "--sms", "80", "--threads", "256", "--regs", "137", "--grid", "84"}, wantErr: "--sms disagrees"},
+		{name: "arch disagreeing refused", args: []string{"--device-props", benchLaneProps, "--arch", "sm_89", "--threads", "256", "--regs", "137", "--grid", "84"}, wantErr: "--arch disagrees"},
+		{name: "refuted refused", args: []string{"--device-props", "testdata/bench_lane_ledger/rtx5080_props_refuted.json", "--threads", "256", "--regs", "137", "--grid", "84"}, wantErr: "refutes"},
+		{name: "missing file refused", args: []string{"--device-props", "testdata/bench_lane_ledger/none.json", "--threads", "256", "--regs", "137", "--grid", "84"}, wantErr: "--device-props"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := runBenchLaneLedger(&stdout, &stderr, tc.args); code == 0 {
+				t.Fatalf("exit 0, want non-zero; stdout: %s", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantErr) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tc.wantErr)
+			}
+		})
 	}
 }

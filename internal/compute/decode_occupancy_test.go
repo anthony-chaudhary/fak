@@ -108,20 +108,71 @@ func TestUnderfillRegisterIndependent(t *testing.T) {
 	}
 }
 
-// TestDecodeGEMVWaveQuant checks the OTHER decode shape: the P=1 GEMV fills the machine (no idle
-// SMs) but its grid tiles into scheduling waves whose ragged final wave wastes >5% — the tail the
-// CLC tile-scheduling candidate targets.
+// TestDecodeGEMVWaveQuant checks the P=1 FFN GEMV (out = DFF = 1536). k_q8_gemm runs eight output rows
+// per block, so the grid is ceil(1536/8) = 192 blocks, not 1536. Hand arithmetic, with the register
+// count 40 the witness uses as its placeholder:
+//   - warps per block = 256/32 = 8
+//   - registers: perWarp = roundUp(40*32, 256) = 1280; fitWarps = 65536/1280 = 51;
+//     grantedWarps = roundDown(51, 4) = 48; blocksReg = 48/8 = 6
+//   - shared memory 0 (does not bind); warp ceiling 64/8 = 8; block ceiling 32
+//   - so BlocksPerSM = 6 (register binds), TotalSlots = 108*6 = 648
+//   - Waves = ceil(192/648) = 1: a single wave, so there is no ragged final wave to quantize
+//   - IdleSMs = 0 (192 >= 108)
+//   - WaveQuantWaste = 1 - 192/648 = 456/648 = 19/27
 func TestDecodeGEMVWaveQuant(t *testing.T) {
 	a, _ := LookupNVArch(SM80)
 	occ := a.Occupancy(Q8GemmDecodeLaunch(smolLM2_135M.DFF, 40), A100SMs)
-	if occ.GridBlocks != 1536 {
-		t.Errorf("GridBlocks = %d, want 1536 (DFF)", occ.GridBlocks)
+	if occ.GridBlocks != 192 {
+		t.Errorf("GridBlocks = %d, want 192 (ceil(1536/8) rows-per-block launch)", occ.GridBlocks)
+	}
+	if occ.BlocksPerSM != 6 || occ.TotalSlots != 648 {
+		t.Errorf("BlocksPerSM=%d TotalSlots=%d, want 6 and 648", occ.BlocksPerSM, occ.TotalSlots)
+	}
+	if occ.Waves != 1 {
+		t.Errorf("Waves = %d, want 1 (192 blocks fit the 648 resident slots)", occ.Waves)
 	}
 	if occ.IdleSMs != 0 {
-		t.Errorf("IdleSMs = %d, want 0 (grid ≫ SMs fills the machine)", occ.IdleSMs)
+		t.Errorf("IdleSMs = %d, want 0 (192 blocks ≥ 108 SMs)", occ.IdleSMs)
 	}
-	if occ.WaveQuantWaste <= decodeTailGapFloor {
-		t.Errorf("WaveQuantWaste = %g, want > %g (a real tail)", occ.WaveQuantWaste, decodeTailGapFloor)
+	decApprox(t, "WaveQuantWaste", occ.WaveQuantWaste, 19.0/27.0, 1e-12)
+}
+
+// TestDecodeGridMatchesLiveLaunch pins each modelled decode grid to the live launch expression of its
+// kernel, at output widths that are and are not multiples of eight. Live expressions at decode (P=1):
+// k_q8_gemm `dim3((out + 7) / 8, P)` with 256 threads (cuda/quant_matmul.cuh, q8_rows_matmul);
+// k_awq_gemv `<<<out, 256>>>` (cuda/weight_formats.cuh, fcuda_awq_gemv); k_flash_attention
+// `<<<nH, 128, (hd+128)*4>>>` (cuda/attention.cuh, fcuda_flash_attention_f32).
+func TestDecodeGridMatchesLiveLaunch(t *testing.T) {
+	for _, c := range []struct{ out, grid int }{
+		{1, 1},        // (1+7)/8 = 1
+		{7, 1},        // (7+7)/8 = 1
+		{8, 1},        // (8+7)/8 = 1
+		{9, 2},        // (9+7)/8 = 2
+		{576, 72},     // 576/8 = 72 exactly
+		{1536, 192},   // 1536/8 = 192
+		{49152, 6144}, // 49152/8 = 6144
+	} {
+		l := Q8GemmDecodeLaunch(c.out, 40)
+		if l.GridBlocks != c.grid || l.ThreadsPerBlock != 256 || l.Kernel != "k_q8_gemm" {
+			t.Errorf("Q8GemmDecodeLaunch(%d): grid=%d threads=%d kernel=%q, want grid=%d threads=256",
+				c.out, l.GridBlocks, l.ThreadsPerBlock, l.Kernel, c.grid)
+		}
+	}
+	for out := 1; out <= 256; out++ {
+		if got, live := Q8GemmDecodeLaunch(out, 40).GridBlocks, (out+7)/8; got != live {
+			t.Errorf("out=%d: modelled grid %d != live (out+7)/8 = %d", out, got, live)
+		}
+	}
+	for _, out := range []int{1, 9, 49152} {
+		l := AWQGemvDecodeLaunch(out, 40)
+		if l.GridBlocks != out || l.ThreadsPerBlock != 256 {
+			t.Errorf("AWQGemvDecodeLaunch(%d): grid=%d threads=%d, want grid=%d threads=256", out, l.GridBlocks, l.ThreadsPerBlock, out)
+		}
+	}
+	// SmolLM2: 9 query heads, hd 64, so smem = (64+128)*4 = 768 bytes and grid = 9 with 128 threads.
+	f := FlashDecodeLaunch(smolLM2_135M, 40)
+	if f.GridBlocks != 9 || f.ThreadsPerBlock != 128 || f.SmemBytesPerBlock != 768 {
+		t.Errorf("FlashDecodeLaunch: grid=%d threads=%d smem=%d, want 9/128/768", f.GridBlocks, f.ThreadsPerBlock, f.SmemBytesPerBlock)
 	}
 }
 
@@ -152,9 +203,11 @@ func TestDecodeTraffic(t *testing.T) {
 	}
 }
 
-// TestDecodeGapReport pins the promotion verdicts: exactly the four A100-measurable candidates with
-// a real modeled gap file; tmem (measurable, but grid-bound so no gap) and the three Blackwell/
-// Hopper-only mechanisms do not.
+// TestDecodeGapReport pins the promotion verdicts: exactly the three A100-measurable candidates with a
+// real modeled gap file (persistent and moe on flash-grid underfill, l1 on the memory-bound KV stream).
+// clc does not file: after the q8 grid fix its GEMV is a single wave (Waves=1, see TestDecodeGEMVWaveQuant),
+// so there is no tail. tmem (measurable, but grid-bound so no gap) and the three Blackwell/Hopper-only
+// mechanisms do not file either.
 func TestDecodeGapReport(t *testing.T) {
 	a, _ := LookupNVArch(SM80)
 	report := DecodeGapReport(a, A100SMs, smolLM2_135M, 40)
@@ -164,7 +217,7 @@ func TestDecodeGapReport(t *testing.T) {
 	wantFile := map[string]bool{
 		"persistent-kernel-work-stealing-tail-fix": true,
 		"l1-cache-hints-decode":                    true,
-		"clc-decode-tile-scheduling":               true,
+		"clc-decode-tile-scheduling":               false,
 		"moe-launch-fusion-ladder":                 true,
 		"tmem-accumulator-migration":               false,
 		"clc-try-cancel-speculative":               false,

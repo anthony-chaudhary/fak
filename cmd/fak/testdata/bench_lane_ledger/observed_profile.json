@@ -1,0 +1,5 @@
+[
+  {"name": "k_copyrow", "gx": 84, "gy": 1, "calls": 10, "total_ns": 1000},
+  {"name": "k_ink2d_fuse", "gx": 84, "gy": 1, "calls": 2, "total_ns": 500},
+  {"name": "k_not_in_log", "gx": 4, "gy": 1, "calls": 1, "total_ns": 250}
+]

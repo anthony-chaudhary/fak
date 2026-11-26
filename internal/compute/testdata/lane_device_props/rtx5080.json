@@ -1,0 +1,88 @@
+{
+ "name": "NVIDIA GeForce RTX 5080",
+ "driverVersion": 13050,
+ "totalGlobalMem": 16665542656,
+ "api": "cuda driver API via ctypes libcuda.so.1 (cuDeviceGetAttribute)",
+ "attributes": {
+  "maxThreadsPerBlock": {
+   "attr_id": 1,
+   "rc": 0,
+   "value": 1024
+  },
+  "warpSize": {
+   "attr_id": 10,
+   "rc": 0,
+   "value": 32
+  },
+  "regsPerBlock": {
+   "attr_id": 12,
+   "rc": 0,
+   "value": 65536
+  },
+  "clockRate_kHz": {
+   "attr_id": 13,
+   "rc": 0,
+   "value": 2700000
+  },
+  "multiProcessorCount": {
+   "attr_id": 16,
+   "rc": 0,
+   "value": 84
+  },
+  "memoryClockRate_kHz": {
+   "attr_id": 36,
+   "rc": 0,
+   "value": 15001000
+  },
+  "memoryBusWidth": {
+   "attr_id": 37,
+   "rc": 0,
+   "value": 256
+  },
+  "l2CacheSize": {
+   "attr_id": 38,
+   "rc": 0,
+   "value": 67108864
+  },
+  "maxThreadsPerMultiProcessor": {
+   "attr_id": 39,
+   "rc": 0,
+   "value": 1536
+  },
+  "sharedMemPerBlock": {
+   "attr_id": 8,
+   "rc": 0,
+   "value": 49152
+  },
+  "sharedMemPerBlockOptin": {
+   "attr_id": 97,
+   "rc": 0,
+   "value": 101376
+  },
+  "sharedMemPerMultiprocessor": {
+   "attr_id": 81,
+   "rc": 0,
+   "value": 102400
+  },
+  "regsPerMultiprocessor": {
+   "attr_id": 82,
+   "rc": 0,
+   "value": 65536
+  },
+  "maxBlocksPerMultiProcessor": {
+   "attr_id": 106,
+   "rc": 0,
+   "value": 24
+  },
+  "computeCapabilityMajor": {
+   "attr_id": 75,
+   "rc": 0,
+   "value": 12
+  },
+  "computeCapabilityMinor": {
+   "attr_id": 76,
+   "rc": 0,
+   "value": 0
+  }
+ }
+}

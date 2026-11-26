@@ -1,0 +1,19 @@
+{
+ "name": "NVIDIA GeForce RTX 5080",
+ "driverVersion": 13050,
+ "totalGlobalMem": 16665542656,
+ "api": "cuda driver API via ctypes libcuda.so.1 (cuDeviceGetAttribute)",
+ "maxThreadsPerBlock": 1024,
+ "warpSize": 32,
+ "regsPerBlock": 65536,
+ "clockRate_kHz": 2700000,
+ "multiProcessorCount": 84,
+ "maxThreadsPerMultiProcessor": 1536,
+ "sharedMemPerBlock": 49152,
+ "sharedMemPerBlockOptin": 101376,
+ "sharedMemPerMultiprocessor": 102400,
+ "regsPerMultiprocessor": 65536,
+ "maxBlocksPerMultiProcessor": 24,
+ "computeCapabilityMajor": 12,
+ "computeCapabilityMinor": 0
+}

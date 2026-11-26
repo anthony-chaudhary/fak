@@ -1,8 +1,7 @@
 package compute
 
 // decode_occupancy.go — the host-tractable, decode-shaped occupancy + HBM-traffic witness
-// for the KernelWiki Blackwell decode-kernel shortlist (docs/notes/2026-07-10-kernelwiki-study.md,
-// "Noted, not filed — Blackwell decode-kernel shortlist"). That shortlist deliberately filed NO
+// for the KernelWiki Blackwell decode-kernel shortlist ("Noted, not filed — Blackwell decode-kernel shortlist"). That shortlist deliberately filed NO
 // tickets: each wiki witness said "measure the fak-side occupancy/traffic gap FIRST," so this
 // file lands that measurement scaffold. It answers, per decode kernel, the two questions a
 // device profiler would — how full is the machine (occupancy), and how much HBM does the kernel
@@ -11,7 +10,7 @@ package compute
 //
 // Why decode is its own shape, distinct from prefill.go. Prefill drives a P-token panel: every
 // GEMM has grid ∝ P·out and the machine fills. DECODE emits ONE token: the flash-attention launch
-// is `k_flash_attention<<<nH, 128, …>>>` (cuda_kernels.cu:701,758) — one block per QUERY HEAD, so
+// is `k_flash_attention<<<nH, 128, …>>>` (internal/compute/cuda/attention.cuh) — one block per QUERY HEAD, so
 // the entire grid is nH blocks. On an A100 (108 SMs) a 9-head model (SmolLM2-135M) launches 9
 // blocks onto 108 SMs: 99 SMs sit idle every decode step, and no per-SM occupancy tuning can fill
 // them because there is no more grid to schedule. That grid-underfill is the load-bearing decode
@@ -144,14 +143,14 @@ type DecodeLaunch struct {
 	GridBlocks        int // blocks launched this decode step (the whole grid, not per-SM)
 }
 
-// flashDecodeThreads mirrors FLASH_THREADS in cuda_kernels.cu (the flash/DSA attention block size).
+// flashDecodeThreads mirrors FLASH_THREADS in internal/compute/cuda/attention.cuh (the flash attention block size).
 const flashDecodeThreads = 128
 
-// FlashDecodeLaunch is the launch of k_flash_attention at a decode step (cuda_kernels.cu:758):
-// `<<<nH, FLASH_THREADS, (hd+FLASH_THREADS)*4>>>` — one block per query head, so GridBlocks = nH.
-// regsPerThread is the compiler's register count (ncu launch__registers_per_thread); the grid-
-// underfill verdict does not depend on it, but the per-SM limiter does. This is the launch the
-// tmem-accumulator (:719) and __ldcs (:726,742) candidates both target.
+// FlashDecodeLaunch is the decode launch of k_flash_attention (internal/compute/cuda/attention.cuh,
+// fcuda_flash_attention_f32): `<<<nH, FLASH_THREADS, (hd+FLASH_THREADS)*4>>>` — one block per query
+// head, so GridBlocks = nH. regsPerThread is the compiler's register count (ncu
+// launch__registers_per_thread); the grid-underfill verdict does not depend on it, but the per-SM
+// limiter does.
 func FlashDecodeLaunch(g DecodeGeometry, regsPerThread int) DecodeLaunch {
 	return DecodeLaunch{
 		Kernel:            "k_flash_attention",
@@ -162,24 +161,29 @@ func FlashDecodeLaunch(g DecodeGeometry, regsPerThread int) DecodeLaunch {
 	}
 }
 
-// Q8GemmDecodeLaunch is the launch of k_q8_gemm at a decode step (cuda_kernels.cu:455):
-// `<<<dim3(out, P), 256>>>` with P=1 → GridBlocks = out (one block per output row). This is the
-// decode GEMV the clc-decode-tile-scheduling (:455) candidate targets; its grid is LARGE (out is a
-// projection width), so unlike flash attention it fills the machine — its gap is the ragged final
-// wave (wave quantization), not global underfill.
+// decodeQ8ThreadsPerBlock is the k_q8_gemm block size. decodeQ8LanesPerRow matches the k_q8_gemm row
+// split (threadIdx.x >> 5), so one warp owns each output row and a block covers decodeQ8RowsPerBlock rows.
+const (
+	decodeQ8ThreadsPerBlock = 256
+	decodeQ8LanesPerRow     = 32
+	decodeQ8RowsPerBlock    = decodeQ8ThreadsPerBlock / decodeQ8LanesPerRow
+)
+
+// Q8GemmDecodeLaunch is the decode (P=1) launch of k_q8_gemm (internal/compute/cuda/quant_matmul.cuh,
+// reached through q8_rows_matmul): `dim3((out + 7) / 8, P)` with 256 threads. A block holds eight
+// output rows, so GridBlocks = ceil(out/8), not out. The P=1 decode step is the only shape modelled.
 func Q8GemmDecodeLaunch(out, regsPerThread int) DecodeLaunch {
 	return DecodeLaunch{
 		Kernel:            "k_q8_gemm",
-		ThreadsPerBlock:   256,
+		ThreadsPerBlock:   decodeQ8ThreadsPerBlock,
 		RegsPerThread:     regsPerThread,
 		SmemBytesPerBlock: 0,
-		GridBlocks:        out, // dim3(out, 1) at decode
+		GridBlocks:        ceilDivInt(out, decodeQ8RowsPerBlock),
 	}
 }
 
-// AWQGemvDecodeLaunch is the launch of k_awq_gemv (cuda_kernels.cu:1083): `<<<out, 256>>>` — one
-// block per output row. The persistent-kernel-work-stealing-tail-fix (:1084) candidate targets this
-// one-block-per-row shape; like q8_gemm it fills when out is large and leaves a wave-quant tail.
+// AWQGemvDecodeLaunch is the launch of k_awq_gemv (internal/compute/cuda/weight_formats.cuh,
+// fcuda_awq_gemv): `<<<out, 256>>>` — one block per output row, so GridBlocks = out.
 func AWQGemvDecodeLaunch(out, regsPerThread int) DecodeLaunch {
 	return DecodeLaunch{
 		Kernel:            "k_awq_gemv",
@@ -213,7 +217,7 @@ type DecodeOccupancy struct {
 	TotalSlots     int     // DeviceSMs * BlocksPerSM — resident blocks the whole device can hold
 	IdleSMs        int     // SMs that get NO block this step (the decode-underfill headline; 0 if grid ≥ SMs)
 	Waves          int     // ceil(GridBlocks / TotalSlots) — scheduling waves the grid needs
-	WaveQuantWaste float64 // 1 − GridBlocks/(Waves*TotalSlots): the ragged-final-wave idle fraction
+	WaveQuantWaste float64 // 1 − GridBlocks/(Waves*TotalSlots): idle fraction of the scheduled slots (a ragged tail only when Waves > 1)
 	DeviceOcc      float64 // achieved device-wide warp occupancy = resident warps / (DeviceSMs*MaxWarpsPerSM)
 }
 
@@ -475,8 +479,9 @@ type DecodeKernelGap struct {
 // candidate to a ticket only when this witness can measure it AND the model shows a real gap.
 func (g DecodeKernelGap) ShouldFile() bool { return g.Measurable && g.PredictedGap }
 
-// wave-quant waste above this fraction is a real tail worth a persistent/CLC tile scheduler; below
-// it the ragged final wave is negligible. 5% is a deliberately conservative floor.
+// wave-quant waste above this fraction, on a grid that needs more than one wave, is a real tail worth
+// a persistent/CLC tile scheduler; below it the ragged final wave is negligible. 5% is a deliberately
+// conservative floor.
 const decodeTailGapFloor = 0.05
 
 // DecodeGapReport grades all eight shortlist candidates against the occupancy + traffic model at
@@ -495,54 +500,55 @@ func DecodeGapReport(a NVArch, deviceSMs int, g DecodeGeometry, flashRegs int) [
 	underfill := flash.IdleSMs > 0
 	// memory-bound on a use-once KV stream that dominates traffic.
 	streamingGap := traffic.MemoryBound() && traffic.KVStreamFrac > 0.5
-	// ragged final wave on the (otherwise machine-filling) decode GEMV.
-	tailGap := gemv.WaveQuantWaste > decodeTailGapFloor
+	// ragged final wave on the decode GEMV. A tail needs a second wave: a single partial wave is
+	// resident-slot underfill, which a tile scheduler does not reclaim.
+	tailGap := gemv.Waves > 1 && gemv.WaveQuantWaste > decodeTailGapFloor
 
 	return []DecodeKernelGap{
 		{
-			Candidate: "persistent-kernel-work-stealing-tail-fix", Seam: "cuda_kernels.cu:1084 (k_awq_gemv) / :758 (flash decode grid=nH)",
+			Candidate: "persistent-kernel-work-stealing-tail-fix", Seam: decodeSeamOf("persistent-kernel-work-stealing-tail-fix"),
 			Measurable: true, PredictedGap: underfill,
 			KeysOn:    "IdleSMs",
 			Rationale: "flash decode launches one block per query head (grid=nH); on A100 that leaves nH≪108 SMs, so most SMs idle every step. A persistent/work-stealing kernel that keeps all SMs busy across heads+positions closes exactly this underfill.",
 		},
 		{
-			Candidate: "l1-cache-hints-decode", Seam: "cuda_kernels.cu:726,742 (K/V load loops)",
+			Candidate: "l1-cache-hints-decode", Seam: decodeSeamOf("l1-cache-hints-decode"),
 			Measurable: true, PredictedGap: streamingGap,
 			KeysOn:    "Intensity(MemoryBound), KVStreamFrac",
 			Rationale: "decode attention is memory-bound (~0.5 FLOP/byte) and the K/V stream is the dominant HBM traffic, read use-once; __ldcs streaming loads avoid polluting L1/L2 with that use-once stream, protecting the reused query row.",
 		},
 		{
-			Candidate: "clc-decode-tile-scheduling", Seam: "cuda_kernels.cu:455 (k_q8_gemm)",
+			Candidate: "clc-decode-tile-scheduling", Seam: decodeSeamOf("clc-decode-tile-scheduling"),
 			Measurable: true, PredictedGap: tailGap,
 			KeysOn:    "WaveQuantWaste",
-			Rationale: "the P=1 decode GEMV fills the machine but its grid=out tiles into scheduling waves whose ragged final wave leaves the tail idle; a CLC/persistent tile scheduler reclaims that wave-quantization waste.",
+			Rationale: "the P=1 decode GEMV launches ceil(out/8) blocks of eight rows; at the FFN width that is a single wave resident in full, so no ragged final wave exists to reclaim. A CLC/persistent tile scheduler needs a multi-wave grid, which this decode GEMV does not produce.",
 		},
 		{
-			Candidate: "moe-launch-fusion-ladder", Seam: "internal/compute/fusion_traffic.go:141",
+			Candidate: "moe-launch-fusion-ladder", Seam: decodeSeamOf("moe-launch-fusion-ladder"),
 			Measurable: true, PredictedGap: underfill,
 			KeysOn:    "IdleSMs (per-expert GEMV)",
 			Rationale: "an MoE decode step routes a handful of tokens to each expert, so every expert GEMV is a tiny-grid launch that underfills the machine like flash decode; fusing the launch ladder amortizes the many underfilled launches. (Exercised only by an MoE model — the dense A100 bench witnesses the same underfill shape.)",
 		},
 		{
-			Candidate: "tmem-accumulator-migration", Seam: "cuda_kernels.cu:719 (float acc[FLASH_ACC_MAX])",
+			Candidate: "tmem-accumulator-migration", Seam: decodeSeamOf("tmem-accumulator-migration"),
 			Measurable: true, PredictedGap: false, // decided below-comment: grid-bound, not per-SM-bound
 			KeysOn:    "BindingLimiter, IdleSMs",
 			Rationale: "migrating the acc[] register array to Blackwell tensor memory raises PER-SM occupancy, but decode is GRID-bound (IdleSMs>0): the device already runs only nH≪SMs blocks, so freeing registers adds no schedulable work. No device-level gap — do not file (also an sm_100-only mechanism).",
 		},
 		{
-			Candidate: "clc-try-cancel-speculative", Seam: "internal/compute/discard_admit.go:44",
+			Candidate: "clc-try-cancel-speculative", Seam: decodeSeamOf("clc-try-cancel-speculative"),
 			Measurable: false, PredictedGap: false,
 			KeysOn:    "—",
 			Rationale: "host-side speculative admission + CLC try-cancel is a Hopper+ launch-control mechanism, not an intra-kernel decode-occupancy phenomenon; this occupancy/traffic witness cannot see it. Defer to a launch-control witness.",
 		},
 		{
-			Candidate: "nvfp4-two-level-block-scale", Seam: "internal/ggufload/gguf_dequant.go:422",
+			Candidate: "nvfp4-two-level-block-scale", Seam: decodeSeamOf("nvfp4-two-level-block-scale"),
 			Measurable: false, PredictedGap: false,
 			KeysOn:    "—",
 			Rationale: "nvfp4 is an sm_100-only numeric format; the A100 (sm_80) bench has no nvfp4 path to profile. Measure two-level block-scale traffic on a Blackwell node.",
 		},
 		{
-			Candidate: "pdl-moe-kernel-overlap", Seam: "cuda_kernels.cu:454 (k_q8_quant_act → k_q8_gemm)",
+			Candidate: "pdl-moe-kernel-overlap", Seam: decodeSeamOf("pdl-moe-kernel-overlap"),
 			Measurable: false, PredictedGap: false,
 			KeysOn:    "—",
 			Rationale: "programmatic dependent launch (PDL) overlaps consecutive kernels and is sm_90+; the gap it targets is inter-kernel launch latency, which an intra-kernel occupancy witness does not measure. Defer to a launch-latency witness on Hopper+.",

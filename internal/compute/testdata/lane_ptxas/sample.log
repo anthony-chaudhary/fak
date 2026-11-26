@@ -1,0 +1,70 @@
+##### UNIT cuda_kernels.cu  exit=0
+ptxas info    : 26021 bytes gmem
+ptxas info    : Compiling entry function '_ZN6ink2pa17k_ink2p_attend_v2ILi2ELi16ELi1ELi1EEEvPKfS2_S2_S2_S2_S2_Pfiiiiifii' for 'sm_120'
+ptxas info    : Function properties for _ZN6ink2pa17k_ink2p_attend_v2ILi2ELi16ELi1ELi1EEEvPKfS2_S2_S2_S2_S2_Pfiiiiifii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 165 registers, used 1 barriers
+ptxas info    : Compile time = 37.643 ms
+ptxas info    : Compiling entry function '_ZN5ink2d11k_ink2d_mmqILi6ELi64EEEvPKhPKfPKaPK6float2Pfiii' for 'sm_120'
+ptxas info    : Function properties for _ZN5ink2d11k_ink2d_mmqILi6ELi64EEEvPKhPKfPKaPK6float2Pfiii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 1 barriers, 22528 bytes smem
+ptxas info    : Compile time = 53.440 ms
+ptxas info    : Compiling entry function '_ZN5ink2d11k_ink2d_mmqILi6ELi128EEEvPKhPKfPKaPK6float2Pfiii' for 'sm_120'
+ptxas info    : Function properties for _ZN5ink2d11k_ink2d_mmqILi6ELi128EEEvPKhPKfPKaPK6float2Pfiii
+    48 bytes stack frame, 112 bytes spill stores, 48 bytes spill loads
+ptxas info    : Used 128 registers, used 1 barriers, 48 bytes cumulative stack size, 33792 bytes smem
+ptxas info    : Compile time = 70.974 ms
+ptxas info    : Compiling entry function '_ZN5ink2d11k_ink2d_mmqILi5ELi64EEEvPKhPKfPKaPK6float2Pfiii' for 'sm_120'
+ptxas info    : Function properties for _ZN5ink2d11k_ink2d_mmqILi5ELi64EEEvPKhPKfPKaPK6float2Pfiii
+    96 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 1 barriers, 96 bytes cumulative stack size, 22528 bytes smem
+ptxas info    : Compile time = 27.655 ms
+ptxas info    : Compiling entry function '_ZN13fak_fattn_mma24k_qwen38_fattn_mma_hd256EPKfPK7__half2S4_Pfiiiif' for 'sm_120'
+ptxas info    : Function properties for _ZN13fak_fattn_mma24k_qwen38_fattn_mma_hd256EPKfPK7__half2S4_Pfiiiif
+    16 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 249 registers, used 1 barriers, 16 bytes cumulative stack size
+ptxas info    : Compile time = 154.454 ms
+ptxas info    : Compiling entry function '_ZN12fak_q56k_mmq9mul_mat_qILi6ELi112ELb0EEEvPKcPKiPfS5_5uint3iiiiiS6_' for 'sm_120'
+ptxas info    : Function properties for _ZN12fak_q56k_mmq9mul_mat_qILi6ELi112ELb0EEEvPKcPKiPfS5_5uint3iiiiiS6_
+    56 bytes stack frame, 72 bytes spill stores, 64 bytes spill loads
+ptxas info    : Used 255 registers, used 1 barriers, 56 bytes cumulative stack size
+ptxas info    : Compile time = 290.041 ms
+ptxas info    : Function properties for __internal_accurate_pow
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z12k_ink2d_fuse9Ink2DTapsiPKfPfif' for 'sm_120'
+ptxas info    : Function properties for _Z12k_ink2d_fuse9Ink2DTapsiPKfPfif
+    48 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 42 registers, used 1 barriers, 48 bytes cumulative stack size, 256 bytes smem
+ptxas info    : Compile time = 14.880 ms
+ptxas info    : Function properties for __internal_accurate_pow
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z9k_copyrowPfPKfii' for 'sm_120'
+ptxas info    : Function properties for _Z9k_copyrowPfPKfii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.059 ms
+ptxas info    : Function properties for __internal_accurate_pow
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z12k_rope_panelPKfPfiiiid' for 'sm_120'
+ptxas info    : Function properties for _Z12k_rope_panelPKfPfiiiid
+    40 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers, 40 bytes cumulative stack size
+ptxas info    : Compile time = 18.592 ms
+ptxas info    : Function properties for __internal_accurate_pow
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_Z28k_rmsnorm_fused_residual_addPKfS0_S0_PfS1_iif' for 'sm_120'
+ptxas info    : Function properties for _Z28k_rmsnorm_fused_residual_addPKfS0_S0_PfS1_iif
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 22 registers, used 1 barriers, 1024 bytes smem
+ptxas info    : Compile time = 6.159 ms
+##### UNIT cuda_sm10x_probe.cu  exit=255
+ptxas /tmp/tmpxft_00311afd_00000000-6_cuda_sm10x_probe.ptx, line 27; error   : Instruction 'tcgen05.alloc' not supported on .target 'sm_120'

@@ -1,0 +1,378 @@
+[
+ {
+  "kernel_mangled": "_ZN6ink2pa17k_ink2p_attend_v2ILi2ELi16ELi1ELi1EEEvPKfS2_S2_S2_S2_S2_Pfiiiiifii",
+  "kernel": "void ink2pa::k_ink2p_attend_v2<2, 16, 1, 1>(float const*, float const*, float const*, float const*, float const*, float const*, float*, int, int, int, int, int, float, int, int)",
+  "registers": 165,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN5ink2d11k_ink2d_mmqILi6ELi64EEEvPKhPKfPKaPK6float2Pfiii",
+  "kernel": "void ink2d::k_ink2d_mmq<6, 64>(unsigned char const*, float const*, signed char const*, float2 const*, float*, int, int, int)",
+  "registers": 128,
+  "smem_bytes": 22528,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN5ink2d11k_ink2d_mmqILi6ELi128EEEvPKhPKfPKaPK6float2Pfiii",
+  "kernel": "void ink2d::k_ink2d_mmq<6, 128>(unsigned char const*, float const*, signed char const*, float2 const*, float*, int, int, int)",
+  "registers": 128,
+  "smem_bytes": 33792,
+  "stack_bytes": 48,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN5ink2d11k_ink2d_mmqILi5ELi64EEEvPKhPKfPKaPK6float2Pfiii",
+  "kernel": "void ink2d::k_ink2d_mmq<5, 64>(unsigned char const*, float const*, signed char const*, float2 const*, float*, int, int, int)",
+  "registers": 128,
+  "smem_bytes": 22528,
+  "stack_bytes": 96,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN5ink2d11k_ink2d_mmqILi5ELi128EEEvPKhPKfPKaPK6float2Pfiii",
+  "kernel": "void ink2d::k_ink2d_mmq<5, 128>(unsigned char const*, float const*, signed char const*, float2 const*, float*, int, int, int)",
+  "registers": 128,
+  "smem_bytes": 33792,
+  "stack_bytes": 176,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN5ink2d11k_ink2d_mmqILi4ELi64EEEvPKhPKfPKaPK6float2Pfiii",
+  "kernel": "void ink2d::k_ink2d_mmq<4, 64>(unsigned char const*, float const*, signed char const*, float2 const*, float*, int, int, int)",
+  "registers": 128,
+  "smem_bytes": 22528,
+  "stack_bytes": 64,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN5ink2d11k_ink2d_mmqILi4ELi128EEEvPKhPKfPKaPK6float2Pfiii",
+  "kernel": "void ink2d::k_ink2d_mmq<4, 128>(unsigned char const*, float const*, signed char const*, float2 const*, float*, int, int, int)",
+  "registers": 128,
+  "smem_bytes": 33792,
+  "stack_bytes": 128,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN5ink2d11k_ink2d_mmqILi0ELi64EEEvPKhPKfPKaPK6float2Pfiii",
+  "kernel": "void ink2d::k_ink2d_mmq<0, 64>(unsigned char const*, float const*, signed char const*, float2 const*, float*, int, int, int)",
+  "registers": 124,
+  "smem_bytes": 21504,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN19fak_blockscaled_wkv6repackEPKjPji",
+  "kernel": "fak_blockscaled_wkv::repack(unsigned int const*, unsigned int*, int)",
+  "registers": 14,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN11fak_vllm_pa25paged_attention_v2_kernelIffLi128ELi16ELi128ELi512EEEvPfS1_PT_PKS2_PKT0_S8_ifPKiSA_iiii",
+  "kernel": "void fak_vllm_pa::paged_attention_v2_kernel<float, float, 128, 16, 128, 512>(float*, float*, float*, float const*, float const*, float const*, int, float, int const*, int const*, int, int, int, int)",
+  "registers": 95,
+  "smem_bytes": 544,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN11fak_vllm_pa25paged_attention_v1_kernelIffLi80ELi16ELi128EEEvPT_PKS1_PKT0_S7_ifPKiS9_iiii",
+  "kernel": "void fak_vllm_pa::paged_attention_v1_kernel<float, float, 80, 16, 128>(float*, float const*, float const*, float const*, int, float, int const*, int const*, int, int, int, int)",
+  "registers": 72,
+  "smem_bytes": 352,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN9fak_iq4xs13mul_mat_vec_qILi3EEEvPKvPKN12fak_q4k_mmvq10block_q8_1EPfii",
+  "kernel": "void fak_iq4xs::mul_mat_vec_q<3>(void const*, fak_q4k_mmvq::block_q8_1 const*, float*, int, int)",
+  "registers": 130,
+  "smem_bytes": 2304,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN12fak_q3k_mmvq13mul_mat_vec_qILi3EEEvPKvPKN12fak_q4k_mmvq10block_q8_1EPfii",
+  "kernel": "void fak_q3k_mmvq::mul_mat_vec_q<3>(void const*, fak_q4k_mmvq::block_q8_1 const*, float*, int, int)",
+  "registers": 108,
+  "smem_bytes": 2304,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN12fak_q56k_mmq24mul_mat_q_stream_k_fixupILi48ELb0EEEvPfPKf5uint3iiiS4_",
+  "kernel": "void fak_q56k_mmq::mul_mat_q_stream_k_fixup<48, false>(float*, float const*, uint3, int, int, int, uint3)",
+  "registers": 44,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN12fak_q56k_mmq9mul_mat_qILi6ELi128ELb1EEEvPKcPKiPfS5_5uint3iiiiiS6_",
+  "kernel": "void fak_q56k_mmq::mul_mat_q<6, 128, true>(char const*, int const*, float*, float*, uint3, int, int, int, int, int, uint3)",
+  "registers": 255,
+  "smem_bytes": 0,
+  "stack_bytes": 48,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN12fak_q56k_mmq24mul_mat_q_stream_k_fixupILi32ELb1EEEvPfPKf5uint3iiiS4_",
+  "kernel": "void fak_q56k_mmq::mul_mat_q_stream_k_fixup<32, true>(float*, float const*, uint3, int, int, int, uint3)",
+  "registers": 38,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN12fak_q4k_mmvq13quantize_q8_1EPKfPNS_10block_q8_1Ei",
+  "kernel": "fak_q4k_mmvq::quantize_q8_1(float const*, fak_q4k_mmvq::block_q8_1*, int)",
+  "registers": 23,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN11fak_q4k_mmq9mul_mat_qILi40ELb0EEEvPKcPKiPfS5_5uint3iiiiiS6_",
+  "kernel": "void fak_q4k_mmq::mul_mat_q<40, false>(char const*, int const*, float*, float*, uint3, int, int, int, int, int, uint3)",
+  "registers": 255,
+  "smem_bytes": 0,
+  "stack_bytes": 8,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN11fak_q4k_mmq24mul_mat_q_stream_k_fixupILi96ELb1EEEvPfPKf5uint3iiiS4_",
+  "kernel": "void fak_q4k_mmq::mul_mat_q_stream_k_fixup<96, true>(float*, float const*, uint3, int, int, int, uint3)",
+  "registers": 70,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN11fak_q4k_mmq9mul_mat_qILi24ELb1EEEvPKcPKiPfS5_5uint3iiiiiS6_",
+  "kernel": "void fak_q4k_mmq::mul_mat_q<24, true>(char const*, int const*, float*, float*, uint3, int, int, int, int, int, uint3)",
+  "registers": 254,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_ZN12fak_gdn_vllm27k_qwen35_gdn_post_conv_vllmILi4ELb1EEEvPKfS2_S2_S2_S2_PfS2_S2_S3_iiiifNS_21IndependentLaneStatesE",
+  "kernel": "void fak_gdn_vllm::k_qwen35_gdn_post_conv_vllm<4, true>(float const*, float const*, float const*, float const*, float const*, float*, float const*, float const*, float*, int, int, int, int, float, fak_gdn_vllm::IndependentLaneStates)",
+  "registers": 79,
+  "smem_bytes": 45632,
+  "stack_bytes": 64,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z16k_ink2v_q6k_rowsILi9EEvPKhPKfPfiii",
+  "kernel": "void k_ink2v_q6k_rows<9>(unsigned char const*, float const*, float*, int, int, int)",
+  "registers": 40,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z15k_ink2v_q8_segsILi9ELi9EEv11Ink2VQ8Segsii",
+  "kernel": "void k_ink2v_q8_segs<9, 9>(Ink2VQ8Segs, int, int)",
+  "registers": 128,
+  "smem_bytes": 0,
+  "stack_bytes": 32,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z15k_ink2v_q8_segsILi4ELi5EEv11Ink2VQ8Segsii",
+  "kernel": "void k_ink2v_q8_segs<4, 5>(Ink2VQ8Segs, int, int)",
+  "registers": 60,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z15k_ink2v_q8_segsILi3ELi1EEv11Ink2VQ8Segsii",
+  "kernel": "void k_ink2v_q8_segs<3, 1>(Ink2VQ8Segs, int, int)",
+  "registers": 48,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z15k_ink2v_q8_rowsILi4ELi6EEvPKaPKfS1_S3_Pfii",
+  "kernel": "void k_ink2v_q8_rows<4, 6>(signed char const*, float const*, signed char const*, float const*, float*, int, int)",
+  "registers": 60,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z15k_ink2v_q8_rowsILi3ELi2EEvPKaPKfS1_S3_Pfii",
+  "kernel": "void k_ink2v_q8_rows<3, 2>(signed char const*, float const*, signed char const*, float const*, float*, int, int)",
+  "registers": 52,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z16k_ink2v_q5k_rowsILi4ELb1EEvPKhPKfPfiii",
+  "kernel": "void k_ink2v_q5k_rows<4, true>(unsigned char const*, float const*, float*, int, int, int)",
+  "registers": 48,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z13k_ink2_attendI6__halfEvPKfS2_S2_S2_PKT_S5_PdPfS2_iiiiiiif7Ink2Seq",
+  "kernel": "void k_ink2_attend<__half>(float const*, float const*, float const*, float const*, __half const*, __half const*, double*, float*, float const*, int, int, int, int, int, int, int, float, Ink2Seq)",
+  "registers": 40,
+  "smem_bytes": 4384,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z20k_ink2p_expert_iq_v2ILi5ELi64ELi2EEvPKhPKiS3_S3_S3_PKaPKfPfiiS7_",
+  "kernel": "void k_ink2p_expert_iq_v2<5, 64, 2>(unsigned char const*, int const*, int const*, int const*, int const*, signed char const*, float const*, float*, int, int, float const*)",
+  "registers": 122,
+  "smem_bytes": 43264,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z12k_ink2m_convILi7EEvPKfS1_S1_PfS2_S1_iifi",
+  "kernel": "void k_ink2m_conv<7>(float const*, float const*, float const*, float*, float*, float const*, int, int, float, int)",
+  "registers": 38,
+  "smem_bytes": 5120,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z19k_ink2d_markov_pickPKhiPKfPKiiS2_S2_Pii",
+  "kernel": "k_ink2d_markov_pick(unsigned char const*, int, float const*, int const*, int, float const*, float const*, int*, int)",
+  "registers": 40,
+  "smem_bytes": 16768,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z17k_ink2p_expert_iqILi3EEvPKhPKiS3_S3_S3_PKfiiPfiiS5_",
+  "kernel": "void k_ink2p_expert_iq<3>(unsigned char const*, int const*, int const*, int const*, int const*, float const*, int, int, float*, int, int, float const*)",
+  "registers": 128,
+  "smem_bytes": 16512,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z20k_ink2p_bucket_countPKiPii",
+  "kernel": "k_ink2p_bucket_count(int const*, int*, int)",
+  "registers": 10,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z16k_ink2_expert_iqILi4EEvPKhPKiPKfiPfiiS5_idd",
+  "kernel": "void k_ink2_expert_iq<4>(unsigned char const*, int const*, float const*, int, float*, int, int, float const*, int, double, double)",
+  "registers": 44,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z22k_ink2_expert_iq4nl_v3ILi2EEvPKhPKiPKfiPfiiS5_idd",
+  "kernel": "void k_ink2_expert_iq4nl_v3<2>(unsigned char const*, int const*, float const*, int, float*, int, int, float const*, int, double, double)",
+  "registers": 47,
+  "smem_bytes": 64,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z19k_ink2_expert_nvfp4PKhS0_PKiPKfiPfiiS4_idd",
+  "kernel": "k_ink2_expert_nvfp4(unsigned char const*, unsigned char const*, int const*, float const*, int, float*, int, int, float const*, int, double, double)",
+  "registers": 48,
+  "smem_bytes": 64,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z17k_ink2_ctrl_down411Ink2CtrlSetPfii",
+  "kernel": "k_ink2_ctrl_down4(Ink2CtrlSet, float*, int, int)",
+  "registers": 40,
+  "smem_bytes": 128,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z19k_dsa_sparse_attendPKfS0_S0_Pfiiiif",
+  "kernel": "k_dsa_sparse_attend(float const*, float const*, float const*, float*, int, int, int, int, float)",
+  "registers": 40,
+  "smem_bytes": 0,
+  "stack_bytes": 32,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z37k_qwen38_causal_attention_panel_hd256PKfS0_S0_Pfiiiif",
+  "kernel": "k_qwen38_causal_attention_panel_hd256(float const*, float const*, float const*, float*, int, int, int, int, float)",
+  "registers": 31,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z5k_addPfPKfi",
+  "kernel": "k_add(float*, float const*, int)",
+  "registers": 10,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z25k_rmsnorm_subwarp_per_rowILi2EEvPKfS1_Pfiif",
+  "kernel": "void k_rmsnorm_subwarp_per_row<2>(float const*, float const*, float*, int, int, float)",
+  "registers": 19,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z13k_iq2xxs_gemvPKhPKfPfiii",
+  "kernel": "k_iq2xxs_gemv(unsigned char const*, float const*, float*, int, int, int)",
+  "registers": 36,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z16k_q4k_gemm_panelILi4EEvPKhPKfPfiii",
+  "kernel": "void k_q4k_gemm_panel<4>(unsigned char const*, float const*, float*, int, int, int)",
+  "registers": 40,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z27k_qwen35_gdn_out_proj_lanesPKvPKfiS2_Pfiii",
+  "kernel": "k_qwen35_gdn_out_proj_lanes(void const*, float const*, int, float const*, float*, int, int, int)",
+  "registers": 91,
+  "smem_bytes": 256,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z20k_qwen35_gdn_qk_normPKfPfS1_ii",
+  "kernel": "k_qwen35_gdn_qk_norm(float const*, float*, float*, int, int)",
+  "registers": 24,
+  "smem_bytes": 0,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ },
+ {
+  "kernel_mangled": "_Z23k_qwen4exp_ple_hash_i64PKlS0_PKiS0_S0_S0_Pliiiiiil",
+  "kernel": "k_qwen4exp_ple_hash_i64(long const*, long const*, int const*, long const*, long const*, long const*, long*, int, int, int, int, int, int, long)",
+  "registers": 40,
+  "smem_bytes": 16,
+  "stack_bytes": 0,
+  "source_unit": "cuda_kernels.cu"
+ }
+]

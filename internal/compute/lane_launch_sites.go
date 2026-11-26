@@ -11,23 +11,23 @@ import (
 // lane_launch_sites.go is the static inventory of CUDA kernel launches under internal/compute. Each row of
 // lane_launch_sites.txt is one distinct launch text in its file: the kernel with its template arguments and
 // the grid, threads and dynamic shared-memory expressions. TestLaunchSitesCoverScan enforces that each file's
-// launch texts match the rows, so an edit to a launch configuration fails until the data file changes.
+// launch texts match the rows, and TestLaunchSitesGenerated enforces that every row equals what the resolver
+// in the package's tests derives from source, so an edit to a launch configuration fails until the table is
+// regenerated.
 //
-// ThreadsPerBlock is a literal only when the threads expression resolves to a positive integer through
-// integer arithmetic, dim3 products, and #define or constexpr integers whose every definition in
-// internal/compute agrees. Zero means symbolic: the count depends on a runtime value, a struct member,
-// or a name with conflicting definitions, so a symbolic site is unjudged rather than clean. The values come
-// from a generator outside this repo; no test re-resolves a macro or identifier to its value.
+// Resolution says how the thread count was judged. A literal or resolved-chain row carries its count in
+// ThreadsPerBlock; a runtime or template row keeps the count at zero, so it is unjudged and never clean.
 
 // LaunchSite is one CUDA kernel launch as written in source.
 type LaunchSite struct {
 	File, Kernel, ThreadsExpr string
 	ThreadsPerBlock           int
+	Resolution                string
 	GridExpr, SmemExpr        string
 }
 
-// LaunchSiteFinding flags one launch. Kind is LaunchFindingPartialWarp when the literal thread count
-// leaves a partial warp in every block, or LaunchFindingUnjudged when the count is symbolic.
+// LaunchSiteFinding flags one launch. Kind is LaunchFindingPartialWarp when the resolved thread count leaves a
+// partial warp in every block, or LaunchFindingUnjudged when the count is not resolved.
 type LaunchSiteFinding struct {
 	Site         LaunchSite
 	Kind         string
@@ -37,6 +37,16 @@ type LaunchSiteFinding struct {
 const (
 	LaunchFindingPartialWarp = "partial_warp"
 	LaunchFindingUnjudged    = "unjudged"
+)
+
+// Resolution classes of a launch's thread count. Literal is a bare integer; resolved-chain is an integer reached
+// through constants, macros, dim3 products or single-return helpers; runtime and template are unresolved, the
+// template class when the count depends on a template parameter.
+const (
+	LaunchGenResLiteral  = "literal"
+	LaunchGenResChain    = "resolved-chain"
+	LaunchGenResRuntime  = "runtime"
+	LaunchGenResTemplate = "template"
 )
 
 // LaunchSites returns a copy of the inventory in (File, Kernel, ThreadsExpr, GridExpr, SmemExpr) order.
@@ -49,9 +59,9 @@ func LaunchSites() []LaunchSite {
 	return sites
 }
 
-// PartialWarpLanes returns the active lanes in the trailing warp of each block, or 0 when the block fills
-// its warps exactly. known is false when the thread count is symbolic or warpSize is not positive.
-func (s LaunchSite) PartialWarpLanes(warpSize int) (lanes int, known bool) {
+// PartialWarpActiveLanes returns the active lanes in the trailing warp of each block, or 0 when the block fills
+// its warps exactly. known is false when the thread count is unresolved or warpSize is not positive.
+func (s LaunchSite) PartialWarpActiveLanes(warpSize int) (lanes int, known bool) {
 	if warpSize <= 0 || s.ThreadsPerBlock <= 0 {
 		return 0, false
 	}
@@ -59,12 +69,12 @@ func (s LaunchSite) PartialWarpLanes(warpSize int) (lanes int, known bool) {
 }
 
 // LaunchSiteFindings flags every launch that leaves a partial warp in each block and every launch whose
-// thread count is symbolic. Symbolic launches are reported as unjudged, never as clean.
+// thread count is unresolved. Unresolved launches are reported as unjudged, never as clean.
 func LaunchSiteFindings(warpSize int) []LaunchSiteFinding {
 	var out []LaunchSiteFinding
 	for _, r := range launchSiteRows() {
 		s := r.site
-		lanes, known := s.PartialWarpLanes(warpSize)
+		lanes, known := s.PartialWarpActiveLanes(warpSize)
 		switch {
 		case !known:
 			out = append(out, LaunchSiteFinding{Site: s, Kind: LaunchFindingUnjudged})
@@ -76,7 +86,7 @@ func LaunchSiteFindings(warpSize int) []LaunchSiteFinding {
 }
 
 // launchSiteDataHeader names the tab-separated columns of lane_launch_sites.txt, in order.
-const launchSiteDataHeader = "file\tkernel\tthreads_expr\tthreads_per_block\tgrid_expr\tsmem_expr"
+const launchSiteDataHeader = "file\tkernel\tthreads_expr\tthreads_per_block\tthreads_resolution\tgrid_expr\tsmem_expr"
 
 // launchSiteRow is one parsed data row with its 1-based line in the data file, so a maintainer can be sent
 // to the exact line that needs editing.
@@ -89,18 +99,18 @@ type launchSiteRow struct {
 var launchSiteData string
 
 var (
-	launchSiteOnce  sync.Once
-	launchSiteCache []launchSiteRow
-	launchSiteErr   error
+	launchSiteOnce   sync.Once
+	launchSiteParsed []launchSiteRow
+	launchSiteErr    error
 )
 
 // launchSiteRowsChecked parses the embedded data once and returns the error instead of panicking, so the
 // tests can report a malformed table with its line number.
 func launchSiteRowsChecked() ([]launchSiteRow, error) {
 	launchSiteOnce.Do(func() {
-		launchSiteCache, launchSiteErr = parseLaunchSiteRows(launchSiteData)
+		launchSiteParsed, launchSiteErr = parseLaunchSiteRows(launchSiteData)
 	})
-	return launchSiteCache, launchSiteErr
+	return launchSiteParsed, launchSiteErr
 }
 
 // launchSiteRows panics on a malformed embedded table. The panic happens on first use, not at package init,
@@ -121,31 +131,57 @@ func parseLaunchSiteRows(data string) ([]launchSiteRow, error) {
 	var rows []launchSiteRow
 	for i, text := range lines[1:] {
 		line := i + 2
-		fields := strings.Split(text, "\t")
-		if len(fields) != 6 {
-			return nil, fmt.Errorf("line %d has %d tab-separated fields, want 6", line, len(fields))
+		row, err := launchGenParseRow(text, line)
+		if err != nil {
+			return nil, err
 		}
-		if fields[0] == "" || fields[1] == "" {
-			return nil, fmt.Errorf("line %d has an empty file or kernel", line)
-		}
-		tpb, err := strconv.Atoi(fields[3])
-		if err != nil || tpb < 0 {
-			return nil, fmt.Errorf("line %d threads_per_block %q is not a non-negative integer", line, fields[3])
-		}
-		rows = append(rows, launchSiteRow{
-			site: LaunchSite{
-				File:            fields[0],
-				Kernel:          fields[1],
-				ThreadsExpr:     fields[2],
-				ThreadsPerBlock: tpb,
-				GridExpr:        fields[4],
-				SmemExpr:        fields[5],
-			},
-			line: line,
-		})
+		rows = append(rows, row)
 	}
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("no launch rows after the header")
 	}
 	return rows, nil
+}
+
+func launchGenParseRow(text string, line int) (launchSiteRow, error) {
+	fields := strings.Split(text, "\t")
+	if len(fields) != 7 {
+		return launchSiteRow{}, fmt.Errorf("line %d has %d tab-separated fields, want 7", line, len(fields))
+	}
+	if fields[0] == "" || fields[1] == "" {
+		return launchSiteRow{}, fmt.Errorf("line %d has an empty file or kernel", line)
+	}
+	tpb, err := strconv.Atoi(fields[3])
+	if err != nil || tpb < 0 {
+		return launchSiteRow{}, fmt.Errorf("line %d threads_per_block %q is not a non-negative integer", line, fields[3])
+	}
+	res := fields[4]
+	switch res {
+	case LaunchGenResLiteral:
+		if n, err := strconv.Atoi(fields[2]); err != nil || n != tpb || tpb <= 0 {
+			return launchSiteRow{}, fmt.Errorf("line %d literal resolution needs threads_expr %q to equal a positive threads_per_block %d", line, fields[2], tpb)
+		}
+	case LaunchGenResChain:
+		if tpb <= 0 {
+			return launchSiteRow{}, fmt.Errorf("line %d resolved-chain needs a positive threads_per_block", line)
+		}
+	case LaunchGenResRuntime, LaunchGenResTemplate:
+		if tpb != 0 {
+			return launchSiteRow{}, fmt.Errorf("line %d %s is unresolved, so threads_per_block must be 0", line, res)
+		}
+	default:
+		return launchSiteRow{}, fmt.Errorf("line %d threads_resolution %q is not one of literal, resolved-chain, runtime, template", line, res)
+	}
+	return launchSiteRow{
+		site: LaunchSite{
+			File:            fields[0],
+			Kernel:          fields[1],
+			ThreadsExpr:     fields[2],
+			ThreadsPerBlock: tpb,
+			Resolution:      res,
+			GridExpr:        fields[5],
+			SmemExpr:        fields[6],
+		},
+		line: line,
+	}, nil
 }

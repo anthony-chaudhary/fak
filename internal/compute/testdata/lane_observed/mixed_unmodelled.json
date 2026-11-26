@@ -1,0 +1,4 @@
+[
+  {"name": "kernel_a", "gx": 108, "gy": 1, "calls": 10, "total_ns": 1000, "note": "extra metadata is ignored"},
+  {"name": "kernel_c", "gx": 108, "gy": 1, "calls": 2, "total_ns": 500}
+]

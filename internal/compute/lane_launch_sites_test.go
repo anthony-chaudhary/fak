@@ -250,15 +250,9 @@ func launchInventory(t *testing.T) map[string][]launchSiteRow {
 	return inv
 }
 
-// dataRowText renders a launch as the tab-separated line lane_launch_sites.txt expects, so a missing-row
-// failure can be pasted into the data file.
-func dataRowText(file string, l scannedLaunch) string {
-	tpb := 0
-	if n, err := strconv.Atoi(l.ThreadsExpr); err == nil && n > 0 {
-		tpb = n
-	}
-	return strings.Join([]string{file, l.Kernel, l.ThreadsExpr, strconv.Itoa(tpb), l.GridExpr, l.SmemExpr}, "\t")
-}
+// launchGenHint names the regeneration command in a failure: a missing or stale row is written by the
+// generator, not by hand.
+var launchGenHint = fmt.Sprintf("regenerate with %s=1 go test -run TestLaunchSitesGenerated", launchGenUpdateEnv)
 
 func launchStrings(launches []scannedLaunch) []string {
 	out := make([]string, len(launches))
@@ -303,8 +297,7 @@ func compareLaunches(t *testing.T, file string, got []scannedLaunch, want []laun
 	}
 	sort.Slice(missing, func(i, j int) bool { return missing[i].String() < missing[j].String() })
 	for _, l := range missing {
-		t.Errorf("%s: source launch %s has no row; add this line to %s:\n%s",
-			file, l, launchSiteDataFile, dataRowText(file, l))
+		t.Errorf("%s: source launch %s has no row in %s; %s", file, l, launchSiteDataFile, launchGenHint)
 	}
 	var stale []launchSiteRow
 	for l, r := range inTable {
@@ -314,8 +307,8 @@ func compareLaunches(t *testing.T, file string, got []scannedLaunch, want []laun
 	}
 	sort.Slice(stale, func(i, j int) bool { return stale[i].line < stale[j].line })
 	for _, r := range stale {
-		t.Errorf("%s: %s line %d lists %s, which is no longer in source; delete that line",
-			file, launchSiteDataFile, r.line, launchSiteRowLabel(r.site))
+		t.Errorf("%s: %s line %d lists %s, which is no longer in source; %s",
+			file, launchSiteDataFile, r.line, launchSiteRowLabel(r.site), launchGenHint)
 	}
 }
 
@@ -350,8 +343,7 @@ func TestLaunchSitesCoverScan(t *testing.T) {
 			continue
 		}
 		for _, l := range scanFile(t, local) {
-			t.Errorf("%s: source launch %s has no row; add this line to %s:\n%s",
-				file, l, launchSiteDataFile, dataRowText(file, l))
+			t.Errorf("%s: source launch %s has no row in %s; %s", file, l, launchSiteDataFile, launchGenHint)
 		}
 	}
 }
@@ -369,10 +361,16 @@ func TestLaunchSiteDataParses(t *testing.T) {
 	bad := []struct{ name, data, want string }{
 		{"empty", "", "line 1 must be the header"},
 		{"wrong header", "file\tkernel\n", "line 1 must be the header"},
-		{"short row", launchSiteDataHeader + "\na\tb\t1\n", "line 2 has 3 tab-separated fields"},
-		{"empty kernel", launchSiteDataHeader + "\na\t\t1\t1\tg\ts\n", "line 2 has an empty file or kernel"},
-		{"bad threads", launchSiteDataHeader + "\na\tk\t1\tx\tg\ts\n", "line 2 threads_per_block \"x\""},
-		{"blank line", launchSiteDataHeader + "\na\tk\t1\t1\tg\ts\n\n", "line 3 has 1 tab-separated fields"},
+		{"short row", launchSiteDataHeader + "\na\tb\t1\n", "line 2 has 3 tab-separated fields, want 7"},
+		{"empty kernel", launchSiteDataHeader + "\na\t\t1\t1\tliteral\tg\ts\n", "line 2 has an empty file or kernel"},
+		{"bad threads", launchSiteDataHeader + "\na\tk\t1\tx\tliteral\tg\ts\n", "line 2 threads_per_block \"x\""},
+		{"blank line", launchSiteDataHeader + "\na\tk\t1\t1\tliteral\tg\ts\n\n", "line 3 has 1 tab-separated fields"},
+		{"unknown resolution", launchSiteDataHeader + "\na\tk\t1\t1\tguess\tg\ts\n", "threads_resolution \"guess\""},
+		{"literal not its count", launchSiteDataHeader + "\na\tk\tN\t1\tliteral\tg\ts\n", "literal resolution needs"},
+		{"literal zero", launchSiteDataHeader + "\na\tk\t0\t0\tliteral\tg\ts\n", "literal resolution needs"},
+		{"chain without count", launchSiteDataHeader + "\na\tk\tN\t0\tresolved-chain\tg\ts\n", "resolved-chain needs a positive"},
+		{"runtime with count", launchSiteDataHeader + "\na\tk\tN\t128\truntime\tg\ts\n", "runtime is unresolved, so threads_per_block must be 0"},
+		{"template with count", launchSiteDataHeader + "\na\tk\tN\t64\ttemplate\tg\ts\n", "template is unresolved, so threads_per_block must be 0"},
 	}
 	for _, tt := range bad {
 		t.Run(tt.name, func(t *testing.T) {
@@ -395,8 +393,8 @@ func TestLaunchSiteLiteralThreads(t *testing.T) {
 			continue
 		}
 		literal++
-		if s.ThreadsPerBlock != n {
-			t.Errorf("%s %s: threads %q recorded as %d", s.File, s.Kernel, s.ThreadsExpr, s.ThreadsPerBlock)
+		if s.ThreadsPerBlock != n || s.Resolution != LaunchGenResLiteral {
+			t.Errorf("%s %s: threads %q recorded as %d (%s)", s.File, s.Kernel, s.ThreadsExpr, s.ThreadsPerBlock, s.Resolution)
 		}
 	}
 	if literal == 0 {
@@ -454,9 +452,9 @@ func TestLaunchSitePartialWarpLanes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lanes, known := tt.site.PartialWarpLanes(tt.warp)
+			lanes, known := tt.site.PartialWarpActiveLanes(tt.warp)
 			if lanes != tt.lanes || known != tt.known {
-				t.Errorf("PartialWarpLanes(%d) = (%d, %v), want (%d, %v)", tt.warp, lanes, known, tt.lanes, tt.known)
+				t.Errorf("PartialWarpActiveLanes(%d) = (%d, %v), want (%d, %v)", tt.warp, lanes, known, tt.lanes, tt.known)
 			}
 		})
 	}

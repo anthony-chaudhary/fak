@@ -1,0 +1,4 @@
+[
+  {"name": "kernel_a", "gx": 108, "gy": 1, "calls": 10, "total_ns": 1000},
+  {"name": "kernel_b", "gx": 1728, "gy": 1, "calls": 1, "total_ns": 3000}
+]

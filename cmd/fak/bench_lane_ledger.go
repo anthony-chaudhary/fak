@@ -30,7 +30,7 @@ var laneLedgerCaveats = []string{
 	"placement assumes one block per SM first, before any SM takes a second block",
 	"waves are static (no block backfill): wave_tail is an upper bound on what a dynamic scheduler would lose",
 	"register allocation unit, warp allocation granularity and shared-memory allocation unit are occupancy-calculator values, not vendor-published",
-	"the SM count is a caller input (--sms): a SKU property, not an ISA constant",
+	benchLaneSMCallerCaveat,
 }
 
 // laneLedgerMeasuredCaveats labels the measured section: its window and counts are caller inputs, and
@@ -58,6 +58,10 @@ type laneLedgerOptions struct {
 	grid    int
 	kernel  string
 	json    bool
+
+	// deviceProps names a probe file that supplies sms and arch; deviceCheck is set from it once resolved.
+	deviceProps string
+	deviceCheck *compute.DevicePropsCheck
 
 	cyclesPerSM      int64
 	waveWeights      string
@@ -124,8 +128,15 @@ type laneLedgerReport struct {
 	RegisterFootprint compute.RegisterFootprint    `json:"register_footprint"`
 	RegisterFindings  []compute.RegisterGapFinding `json:"register_findings"`
 	Caveats           []string                     `json:"caveats"`
+	DeviceCheck       *compute.DevicePropsCheck    `json:"device_props,omitempty"`
 	Measured          *laneLedgerMeasured          `json:"measured,omitempty"`
 }
+
+// benchLaneDevicePropsCaveat replaces the caller-input SM caveat when a probe file supplies the SM count and arch.
+const benchLaneDevicePropsCaveat = "device_sms and arch come from the --device-props probe file, checked field by field against the NVArch row; the allocation granularities are not reported by the device and never change the check"
+
+// benchLaneSMCallerCaveat is the entry of laneLedgerCaveats that a probe file replaces.
+const benchLaneSMCallerCaveat = "the SM count is a caller input (--sms): a SKU property, not an ISA constant"
 
 // runBenchLaneLedger is the testable entry point: args follow the "lane-ledger" verb. A leading "sites" or
 // "fill" selects the static inventory or the lane-fill model; anything else is the per-launch partition.
@@ -136,6 +147,10 @@ func runBenchLaneLedger(stdout, stderr io.Writer, args []string) int {
 			return runLaneLedgerSites(stdout, stderr, args[1:])
 		case "fill":
 			return runLaneLedgerFill(stdout, stderr, args[1:])
+		case "sweep":
+			return benchLaneRunSweep(stdout, stderr, args[1:])
+		case "observed":
+			return benchLaneRunObserved(stdout, stderr, args[1:])
 		}
 	}
 	opt, err := parseLaneLedgerArgs(args, stderr)
@@ -144,6 +159,12 @@ func runBenchLaneLedger(stdout, stderr io.Writer, args []string) int {
 	}
 	if err != nil {
 		return 2
+	}
+	if opt.deviceProps != "" {
+		if err := benchLaneApplyDeviceProps(&opt, stderr); err != nil {
+			fmt.Fprintf(stderr, "fak bench lane-ledger: %v\n", err)
+			return 2
+		}
 	}
 	if err := opt.validate(); err != nil {
 		fmt.Fprintf(stderr, "fak bench lane-ledger: %v\n", err)
@@ -172,7 +193,8 @@ func parseLaneLedgerArgs(args []string, stderr io.Writer) (laneLedgerOptions, er
 	fs.SetOutput(stderr)
 	var opt laneLedgerOptions
 	fs.StringVar(&opt.arch, "arch", "", "compute capability: "+laneLedgerArchLabels()+" (required)")
-	fs.IntVar(&opt.sms, "sms", 0, "device SM count of the SKU (required; a caller input with no default)")
+	fs.IntVar(&opt.sms, "sms", 0, "device SM count of the SKU (required unless --device-props; a caller input with no default)")
+	fs.StringVar(&opt.deviceProps, "device-props", "", "CUDA device probe JSON: supplies --sms and --arch, checks the arch row field by field, and refuses a disagreement")
 	fs.IntVar(&opt.threads, "threads", 0, "threads per block (required)")
 	fs.IntVar(&opt.regs, "regs", 0, "registers per thread from a measurement (required)")
 	fs.IntVar(&opt.smem, "smem", 0, "dynamic shared memory bytes per block")
@@ -306,7 +328,8 @@ func buildLaneLedgerReport(opt laneLedgerOptions) (laneLedgerReport, error) {
 		Findings:          orEmptySlice(ledger.Findings()),
 		RegisterFootprint: footprint,
 		RegisterFindings:  orEmptySlice(footprint.Findings(ledger.Limiter)),
-		Caveats:           laneLedgerCaveats,
+		Caveats:           benchLaneCaveatsFor(opt.deviceCheck != nil),
+		DeviceCheck:       opt.deviceCheck,
 	}
 	if opt.set["cycles-per-sm"] {
 		measured, err := laneLedgerMeasuredOf(ledger, opt)
@@ -361,6 +384,19 @@ func laneLedgerMeasuredOf(x compute.LaneLedger, opt laneLedgerOptions) (laneLedg
 	}, nil
 }
 
+// benchLaneCaveatsFor copies the report caveats, swapping the caller-input SM caveat for the probe-file caveat
+// when a device check supplied the SM count and arch.
+func benchLaneCaveatsFor(fromProbe bool) []string {
+	out := make([]string, 0, len(laneLedgerCaveats)+1)
+	for _, c := range laneLedgerCaveats {
+		if fromProbe && c == benchLaneSMCallerCaveat {
+			c = benchLaneDevicePropsCaveat
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 func laneLedgerSummaryOf(x compute.LaneLedger) laneLedgerSummary {
 	return laneLedgerSummary{
 		Capacity:           x.Capacity,
@@ -409,6 +445,9 @@ func writeLaneLedgerTable(w io.Writer, r laneLedgerReport) {
 	fmt.Fprintf(w, "fak bench lane-ledger  arch=%s kernel=%s device_sms=%d\n", r.Arch, r.Launch.Kernel, r.Launch.DeviceSMs)
 	fmt.Fprintf(w, "launch: threads=%d regs=%d smem=%d grid=%d\n",
 		r.Launch.ThreadsPerBlock, r.Launch.RegsPerThread, r.Launch.SmemBytesPerBlock, r.Launch.GridBlocks)
+	if r.DeviceCheck != nil {
+		benchLaneWriteDeviceCheck(w, *r.DeviceCheck)
+	}
 	fmt.Fprintf(w, "ledger: blocks/SM=%d limiter=%s waves=%d capacity=%d block_slots_unfilled=%d conserved=%t\n\n",
 		r.Ledger.BlocksPerSM, r.Ledger.Limiter, r.Ledger.Waves, r.Ledger.Capacity,
 		r.Ledger.BlockSlotsUnfilled, r.Ledger.Conserved)
