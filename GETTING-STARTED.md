@@ -48,9 +48,9 @@ gh attestation verify SHA256SUMS --repo anthony-chaudhary/fak
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 ```
 
-This currently installs v0.56.0: the Go module proxy cannot serve v0.57.0 because that
-tag's source tree is over its 500 MiB module zip cap. Use the release binary above for a
-release; for features on `main`, such as Inkling-2-Mini, build from source below.
+This installs v0.58.0, which includes Inkling-2-Mini. The release binary above resolves
+GitHub's Latest release, still v0.56.0; set `FAK_VERSION=0.58.0` to pin the installer to
+v0.58.0. The CUDA build is not in the v0.58.0 release assets; build it from source below.
 
 ### Build from source (contributors)
 

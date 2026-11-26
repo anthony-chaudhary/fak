@@ -854,7 +854,7 @@
       "campaign": "aegis-inkling2-pdl-20261125",
       "receipt_sha256": "5863b9d8a52ceb5c504e96f3f4a3f38e1660d79fd804b63d109aaecc3bae2ddf",
       "receipt_pointer": "md:RESULTS.md#| 117.16 | 110.67 | -5.5% |",
-      "caveat": "PDL measured slower on sm_120; opt-in FAK_INKLING2_PDL=1, default off; output bit-identical"
+      "caveat": "PDL measured slower on sm_120; opt-in FAK_INKLING2_PDL=1, default off"
     },
     {
       "id": "pdl.spec.off_tok_s",

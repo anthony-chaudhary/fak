@@ -366,10 +366,11 @@ fak backends   # lists cuda when the driver sees the GPU
 the `...@latest` pseudo-path resolves directly — no clone needed. You can equally use the
 prebuilt-binary download (sections 1 and 2 above) or the build-from-source fallback.
 
-Known gap: the Go module proxy cannot serve v0.57.0, because that tag's source tree is
-over the proxy's 500 MiB module zip cap. Until a smaller tag ships, `...@latest` installs
-v0.56.0. Use the prebuilt binary for a release; for features on `main` (such as Inkling-2-Mini)
-use [build from source](#build-from-source).
+`...@latest` resolves to the newest tag the Go module proxy serves. That is v0.58.0, which
+includes Inkling-2-Mini. The prebuilt-binary installer resolves GitHub's Latest release,
+which is still v0.56.0 until v0.58.0 is promoted; set `FAK_VERSION=0.58.0` to pin it. The
+CUDA build is not among the v0.58.0 release assets, so use [build from source](#build-from-source)
+for the `-tags cuda` build.
 
 ---
 

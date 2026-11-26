@@ -119,6 +119,6 @@
   <text x="40.00" y="692.00" font-size="10.00" fill="#444444" text-anchor="start">same box and window as the fork; prompt rate only, not end-to-end latency; 32-token cap so the answer check abstained for every</text>
   <text x="40.00" y="703.00" font-size="10.00" fill="#444444" text-anchor="start">engine; measured build 97ccb4a7d9 with the prefill chunk unset</text>
   <text x="40.00" y="714.00" font-size="10.00" fill="#444444" text-anchor="start">external comparator: realugbun llama.cpp 2eb2530e, same box and window as the native HTTP row</text>
-  <text x="40.00" y="725.00" font-size="10.00" fill="#444444" text-anchor="start">PDL measured slower on sm_120; opt-in FAK_INKLING2_PDL=1, default off; output bit-identical</text>
+  <text x="40.00" y="725.00" font-size="10.00" fill="#444444" text-anchor="start">PDL measured slower on sm_120; opt-in FAK_INKLING2_PDL=1, default off</text>
   <text x="40.00" y="736.00" font-size="10.00" fill="#444444" text-anchor="start">PDL measured slower with spec depth 2 as well; opt-in FAK_INKLING2_PDL=1, default off</text>
 </svg>

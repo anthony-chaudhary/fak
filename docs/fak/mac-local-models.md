@@ -5,7 +5,7 @@ description: "How to run local models (Inkling-2-Mini, Qwen3.8-27B and peers) na
 
 # Run local models on Mac (Apple Silicon Metal) and interactive chat
 
-**fak** runs open models directly on Apple Silicon unified memory using native Metal compute kernels. No Python, no PyTorch, and no separate runtime daemon required — one native binary runs the model, accelerates KV-cache prefix reuse, and secures tool execution behind a default-deny capability floor. On an M3 or later Mac with 24 GB or more, start with [`fak run inkling2-mini`](#inkling-2-mini-the-first-run-default), which needs a current `main` build and is not in v0.57.0.
+**fak** runs open models directly on Apple Silicon unified memory using native Metal compute kernels. No Python, no PyTorch, and no separate runtime daemon required — one native binary runs the model, accelerates KV-cache prefix reuse, and secures tool execution behind a default-deny capability floor. On an M3 or later Mac with 24 GB or more, start with [`fak run inkling2-mini`](#inkling-2-mini-the-first-run-default), which is in v0.58.0 and later.
 
 > **TL;DR — Two ways to chat with Qwen3.8 on macOS:**
 >
@@ -45,13 +45,12 @@ fak run inkling2-mini --max-tokens 256 "What is 2 + 2? Reply with the number onl
 
 - A `darwin/arm64` build with CGo from a current `main`. The native runner
   needs `main` at or after 1f31533f2, the alias and the default need 6f56c684d,
-  and serving needs c6c5f0ed6. The v0.57.0 release contains none of them; the
-  first tag after v0.57.0 does. Until that tag ships, `install.sh` and Homebrew
-  still install a version without them, so build from a clone:
+  and serving needs c6c5f0ed6. Tag v0.58.0 (`d928c421584`) contains all of
+  them: `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` installs it.
+  `install.sh` resolves GitHub's Latest release, still v0.56.0, unless you set
+  `FAK_VERSION=0.58.0`. A clone of `main` also works:
   `git clone --depth 1 https://github.com/anthony-chaudhary/fak.git`, then
-  `cd fak && go build -o fak ./cmd/fak`. `go install ...@latest` resolves to
-  v0.56.0, because the v0.57.0 source tree is over the Go module proxy's
-  500 MiB zip cap.
+  `cd fak && go build -o fak ./cmd/fak`.
 - An M3 or later chip and macOS 26.4 or later for the fast path that uses the
   DFlash2 draft. On an older chip or an older macOS, `fak run inkling2-mini`
   falls back to fak's own Metal forward without the draft, and `fak serve` refuses
