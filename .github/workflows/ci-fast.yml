@@ -81,7 +81,7 @@ env:
   # Each package here alone outlasts a whole shard, so the package shards skip it
   # and the matrix `split` entries run it as buckets. The evidence check refuses
   # a run where this list and the bucket jobs disagree.
-  CI_FAST_SPLIT_PACKAGES: "./cmd/fak ./internal/agentbench/taskrun"
+  CI_FAST_SPLIT_PACKAGES: "./cmd/fak ./internal/agentbench/taskrun ./internal/model"
 
 # These receipts bind checkout commits and reported job execution. They do not
 # seal generated/untracked files or external Go inputs, and grant no release
@@ -286,6 +286,9 @@ jobs:
           - { split: ./cmd/fak, bucket: 4, buckets: 4 }
           - { split: ./internal/agentbench/taskrun, bucket: 1, buckets: 2 }
           - { split: ./internal/agentbench/taskrun, bucket: 2, buckets: 2 }
+          - { split: ./internal/model, bucket: 1, buckets: 3 }
+          - { split: ./internal/model, bucket: 2, buckets: 3 }
+          - { split: ./internal/model, bucket: 3, buckets: 3 }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -528,7 +531,7 @@ jobs:
           shopt -s nullglob
           files=("$RUNNER_TEMP/ci-fast-provenance/"*.json)
           qualified=false
-          if [[ "$CANDIDATE_RESULT" == success && "$BUILD_VET_RESULT" == success && "$GO_TEST_SHARDS_RESULT" == success && ${#files[@]} == 15 ]]; then
+          if [[ "$CANDIDATE_RESULT" == success && "$BUILD_VET_RESULT" == success && "$GO_TEST_SHARDS_RESULT" == success && ${#files[@]} == 18 ]]; then
             qualified=$(jq -se --arg sha "$EXPECTED_SHA" --arg tree "$EXPECTED_TREE" \
               --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
               --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" \
@@ -541,7 +544,7 @@ jobs:
               ($sha | test("^[0-9a-f]{40}$")) and ($tree | test("^[0-9a-f]{40}$")) and
               ($run | test("^[1-9][0-9]*$")) and ($attempt | test("^[1-9][0-9]*$")) and
               (($event == "workflow_dispatch" and ($ci_class == "diagnostic" or ($ci_class == "release" and $intent == "release"))) or (($event == "push" or $event == "pull_request") and $ci_class == "fast" and $sha == $represented)) and
-              (map(.job) | sort == (["build-vet-fast"] + [range(14) | "go-test-shard-\(.)"] | sort)) and
+              (map(.job) | sort == (["build-vet-fast"] + [range(17) | "go-test-shard-\(.)"] | sort)) and
               ($all | type == "array" and length >= 4 and length == (unique | length) and all(.[]; type == "string" and length > 0)) and
               ($split | type == "array" and length >= 1 and length == (unique | length)) and
               ($shards | length == 8) and ([$shards[].coverage.shard_index] | sort == [range(8)]) and
@@ -584,7 +587,7 @@ jobs:
           jq -n --argjson qualified "$qualified" --arg sha "$EXPECTED_SHA" --arg tree "$EXPECTED_TREE" \
             --arg represented "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg ref "$GITHUB_REF" \
             --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg ci_class "$CI_CLASS" --arg intent "$REQUESTED_INTENT" \
-            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",ci_class:$ci_class,requested_intent:$intent,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,required_jobs:(["build-vet-fast"] + [range(14) | "go-test-shard-\(.)"]),verified:$qualified,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,release_ineligibility_reason:(if $event == "workflow_dispatch" then "diagnostic-run" elif $qualified then "effective-input-identity-not-sealed" else "incomplete-evidence" end)}' \
+            '{schema:"fak.ci-provenance.v1",workflow:"ci-fast",ci_class:$ci_class,requested_intent:$intent,tested_sha:$sha,tested_tree:$tree,represented_sha:$represented,event:$event,ref:$ref,run_id:$run,run_attempt:$attempt,required_jobs:(["build-vet-fast"] + [range(17) | "go-test-shard-\(.)"]),verified:$qualified,release_eligible:false,source_scope:"git-commit-tree",effective_inputs_verified:false,release_ineligibility_reason:(if $event == "workflow_dispatch" then "diagnostic-run" elif $qualified then "effective-input-identity-not-sealed" else "incomplete-evidence" end)}' \
             > "$RUNNER_TEMP/ci-fast-provenance.json"
           cat "$RUNNER_TEMP/ci-fast-provenance.json" >> "$GITHUB_STEP_SUMMARY"
           # Successful jobs from an earlier attempt are deliberately not reused.
