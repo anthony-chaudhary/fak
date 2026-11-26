@@ -252,5 +252,6 @@ func prefetchActivatedExperts(m *Model, layer int, picks []routePick, mat matKer
 	case backendKernel:
 		sess = mk.s
 	}
+	sess.recordPrefillWarmPicks(layer, picks)
 	sess.prefetchActivatedExperts(layer, picks)
 }

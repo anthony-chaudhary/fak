@@ -289,6 +289,7 @@ func (s *Session) ApplyExpertSpillPlacement(p ExpertSpillPlacement) {
 	s.ExpertRingBytes = p.RingBytes
 	s.CPUOffloadExperts = p.Fit.SpillLayers > 0
 	s.spillOnHost = gradedExpertSpillPredicate(p.spilled)
+	s.armPrefillExpertWarmFromEnv()
 }
 
 // expertSpillOnHost is the placement predicate splitKernel runs — hostOffloadWeight GRADED by layer:

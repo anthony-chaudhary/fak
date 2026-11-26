@@ -289,6 +289,7 @@ func (sh *SharedExpertRing) attach(s *Session, agent string, modelManaged bool) 
 	s.ringAgent = agent
 	s.expertRing = sh.ring
 	s.ExpertRingBytes = sh.ring.budget()
+	s.armPrefillExpertWarmFromEnv()
 	return nil
 }
 

@@ -85,6 +85,8 @@ func lmHeadProjectedRows(selected []float32, hiddenSize int) int {
 type prefillExpertWarmArm struct {
 	enabled bool
 	hook    func(layer int)
+	// warmer is set when the env-armed next-layer warmer owns hook (prefill_expert_warm.go).
+	warmer *prefillNextLayerWarmer
 }
 
 // prefillExpertWarmArms attaches an arm to a *Session without widening the Session
