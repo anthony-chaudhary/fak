@@ -250,12 +250,13 @@ func (b *inkling2Batch) prefill(prompts [][]int, keep func(row int) bool, first 
 		if len(pr) == 0 {
 			return fmt.Errorf("inkling2 batch: sequence %d has an empty prompt", i)
 		}
-		if b.pos[i] != 0 || len(pr) > b.ctx {
+		// a row restored from the prefix store starts past its cached tokens
+		if b.pos[i] >= len(pr) || len(pr) > b.ctx {
 			return fmt.Errorf("inkling2 batch: sequence %d at position %d cannot prefill %d tokens into %d", i, b.pos[i], len(pr), b.ctx)
 		}
 		end[i] = len(pr)
 	}
-	cursor := make([]int, b.C)
+	cursor := append([]int(nil), b.pos...)
 	if err := b.prefillShared(prompts, end, cursor, keep); err != nil {
 		return err
 	}

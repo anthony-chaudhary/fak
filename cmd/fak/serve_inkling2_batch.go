@@ -208,6 +208,11 @@ type inkling2LoopBatchEngine struct {
 	releaseArenas func()
 	arenasCached  bool
 	trace         bool
+	// loneCohort serves a lone request as a one-row cohort rather than on the
+	// serialized engine, so it reads and feeds the cohorts' cross-request prefix store
+	loneCohort bool
+	// prefixStats reads the prefix store's counters for the trace; nil when it is off
+	prefixStats func() ggufload.Inkling2PrefixStoreStats
 }
 
 var _ agent.Inkling2LoopGenerator = (*inkling2LoopBatchEngine)(nil)
@@ -220,6 +225,10 @@ func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.I
 	e.releaseArenas = cohorts.ReleaseArenas
 	e.batchAdmitting = cohorts.GenerateAdmitting
 	e.split = cohorts.Split
+	if on, _ := cohorts.UsePrefixStore(lookup); on {
+		e.loneCohort = true
+		e.prefixStats = cohorts.PrefixStats
+	}
 	if v, _ := lookup("FAK_INKLING2_TRACE"); v == "1" {
 		e.trace = true
 	}
@@ -314,7 +323,7 @@ func (e *inkling2LoopBatchEngine) execute(group []*inkling2QueuedRequest) {
 		}
 		fmt.Fprintf(os.Stderr, "inkling2.admission width=%d queue_wait_ns=%v\n", len(group), waits)
 	}
-	if len(group) == 1 {
+	if len(group) == 1 && !e.loneCohort {
 		e.runScalar(group[0])
 		return
 	}
@@ -369,13 +378,22 @@ func (e *inkling2LoopBatchEngine) splitGroup(group []*inkling2QueuedRequest) [][
 // the same way, so memory pressure narrows a cohort down to the serialized engine
 // instead of failing its rows.
 func (e *inkling2LoopBatchEngine) runGroup(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) {
-	if len(group) == 1 {
+	if len(group) == 1 && !e.loneCohort {
 		e.runScalar(group[0])
 		return
 	}
 	e.batchGroups.Add(1)
 	e.arenasCached = true
-	if e.runBatch(group, owned) {
+	ran := e.runBatch(group, owned)
+	if e.trace && e.prefixStats != nil {
+		fmt.Fprintf(os.Stderr, "inkling2.prefix width=%d store=%+v\n", len(group), e.prefixStats())
+	}
+	if ran {
+		return
+	}
+	if len(group) == 1 {
+		// a one-row cohort refused device memory still fits the serialized engine
+		e.runScalar(group[0])
 		return
 	}
 	e.splitGroups.Add(1)
@@ -394,7 +412,7 @@ func (e *inkling2LoopBatchEngine) observePeak(width int) {
 
 func inkling2BatchRowResult(br ggufload.Inkling2LoopBatchResult, width int) inkling2QueuedResult {
 	return inkling2QueuedResult{err: br.Err, gen: agent.Inkling2LoopGeneration{
-		Generated: br.Generated, Stopped: br.Stopped, Width: width,
+		Generated: br.Generated, Stopped: br.Stopped, Width: width, CachedPromptTokens: br.Restored,
 		PrefillSeconds: br.Stats.Prefill.Seconds(), DecodeSeconds: br.Stats.Decode.Seconds(),
 	}}
 }

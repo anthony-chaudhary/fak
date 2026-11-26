@@ -91,6 +91,9 @@ type Inkling2LoopBatchResult struct {
 	Generated int
 	Stopped   bool
 	Err       error
+	// Restored is the leading prompt tokens restored from the prefix store or a
+	// cohort peer's checkpoint rather than prefilled
+	Restored int
 }
 
 // Inkling2LoopBatchEligible reports whether the row-batched forward can serve m on
@@ -133,6 +136,11 @@ type inkling2BatchLane struct {
 	skip int
 	// origin is the request index a cohort lane answers, or -1 for an admitted one
 	origin int
+	// gen is every token the lane accepted; cached is its prompt tokens restored
+	// rather than prefilled; saved marks a finished lane the prefix store has seen
+	gen    []int
+	cached int
+	saved  bool
 }
 
 func newInkling2BatchLane(req Inkling2LoopBatchRequest, started time.Time) inkling2BatchLane {
@@ -147,7 +155,7 @@ func newInkling2BatchLane(req Inkling2LoopBatchRequest, started time.Time) inkli
 func (lane *inkling2BatchLane) finish(now time.Time, err error) {
 	lane.done = true
 	r := &lane.result
-	r.Err, r.Generated, r.Stopped = err, lane.turn.Generated, lane.turn.Stopped
+	r.Err, r.Generated, r.Stopped, r.Restored = err, lane.turn.Generated, lane.turn.Stopped, lane.cached
 	r.Stats.DecodeSteps = max(0, r.Generated-1)
 	if lane.decodeStart.IsZero() {
 		r.Stats.Prefill = now.Sub(lane.started)
@@ -168,6 +176,7 @@ func (lane *inkling2BatchLane) accept(token int, now time.Time) {
 		lane.finish(now, err)
 		return
 	}
+	lane.gen = append(lane.gen, token)
 	t0 := time.Now()
 	more := lane.turn.Accept(token)
 	lane.sinkTime += time.Since(t0)
@@ -191,6 +200,8 @@ type Inkling2LoopCohorts struct {
 	// wideCooldown is how many more wide-wanting cohorts run at the base chunk before
 	// a refused wide chunk is tried again
 	wideCooldown int
+	// store is the cross-request prefix store; host memory, so it outlives Close
+	store *inkling2PrefixStore
 }
 
 func NewInkling2LoopCohorts(m *Inkling2LoopModel, be compute.Backend) *Inkling2LoopCohorts {
@@ -379,8 +390,14 @@ func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) ([]Inkl
 // error rather than admitted. A joined row restarts at position 0 on a cleared history,
 // and attention reads no position its row has not written.
 func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest, admit func(maxPositions int) (Inkling2LoopBatchRequest, bool)) (_ []Inkling2LoopBatchResult, fatal error) {
-	if len(reqs) < 2 || len(reqs) > Inkling2LoopMaxBatch {
-		return nil, fmt.Errorf("inkling2 batch stream: cohort size %d outside 2..%d", len(reqs), Inkling2LoopMaxBatch)
+	// with the prefix store on a lone request runs as a one-row cohort, so it reads and
+	// feeds the store
+	least := 2
+	if bt.store != nil {
+		least = 1
+	}
+	if len(reqs) < least || len(reqs) > Inkling2LoopMaxBatch {
+		return nil, fmt.Errorf("inkling2 batch stream: cohort size %d outside %d..%d", len(reqs), least, Inkling2LoopMaxBatch)
 	}
 	for i, req := range reqs {
 		if len(req.Prompt) == 0 || req.MaxTokens <= 0 || req.Emit == nil {
@@ -415,6 +432,7 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 		return nil, err
 	}
 
+	b.store = bt.store
 	started := time.Now()
 	lanes := make([]inkling2BatchLane, len(reqs))
 	results := make([]Inkling2LoopBatchResult, len(reqs))
@@ -424,15 +442,27 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 	}
 	longCap := inkling2CohortLongPrefillCap(os.LookupEnv)
 	mixed := b.prefillT > 0 && longCap > 0
-	if b.prefillT > 0 && !mixed {
+	keep, first := prefillHooks(lanes)
+	for i := range lanes {
+		if fatal == nil {
+			fatal = b.restoreLane(i, &lanes[i])
+		}
+	}
+	if fatal == nil {
+		fatal = b.prefillBranches(lanes, keep)
+	}
+	if fatal == nil && b.prefillT > 0 && !mixed {
 		fatal = prefillLanes(b, lanes)
 	}
-	keep, first := prefillHooks(lanes)
-	if mixed && b.sharedMin > 0 {
+	if fatal == nil && mixed && b.sharedMin > 0 {
 		fatal = prefillSharedLanes(b, lanes, keep)
 	}
 	tokens := make([]int, len(lanes))
 	for step := 0; fatal == nil; {
+		// a finished row is checkpointed before it is parked or handed to an admitted request
+		if fatal = b.saveFinished(lanes); fatal != nil {
+			break
+		}
 		if mixed && admit != nil {
 			if fatal = admitLanes(b, lanes, results, admit); fatal != nil {
 				break
@@ -489,6 +519,9 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 		}
 		step++
 	}
+	if fatal == nil {
+		fatal = b.saveFinished(lanes)
+	}
 	if fatal != nil {
 		finishLive(lanes, fatal)
 	}
@@ -528,7 +561,8 @@ func prefillSharedLanes(b *inkling2Batch, lanes []inkling2BatchLane, keep func(i
 		prompts[i] = lanes[i].req.Prompt
 		end[i] = len(prompts[i])
 	}
-	cursor := make([]int, len(lanes))
+	// a row restored from the prefix store keeps its position; prefillShared skips it
+	cursor := append([]int(nil), b.pos...)
 	if err := b.prefillShared(prompts, end, cursor, keep); err != nil {
 		return err
 	}
@@ -678,6 +712,9 @@ func admitLanes(b *inkling2Batch, lanes []inkling2BatchLane, results []Inkling2L
 		lanes[i] = newInkling2BatchLane(req, time.Now())
 		lanes[i].origin = -1
 		if err := b.resetRow(i); err != nil {
+			return err
+		}
+		if err := b.restoreLane(i, &lanes[i]); err != nil {
 			return err
 		}
 	}

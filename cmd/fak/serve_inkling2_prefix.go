@@ -176,3 +176,15 @@ func inkling2ScalarBehindCohorts(scalar *inkling2LoopEngine) string {
 	}
 	return fmt.Sprintf("; FAK_INKLING2_PREFIX_SLOTS=%d ignored: lone requests run on a fresh session beside cohorts", scalar.slots)
 }
+
+// inkling2BatchPrefixNote names the cohorts' cross-request prefix store for the
+// startup message, and refuses at startup a FAK_INKLING2_BATCH_PREFIX_CACHE_MIB that is
+// malformed or that the cohorts on be could not use, rather than serving without the
+// store the operator asked for.
+func inkling2BatchPrefixNote(be any, lookup func(string) (string, bool)) (string, error) {
+	mib, on, err := ggufload.Inkling2BatchPrefixCacheMiB(be, lookup)
+	if err != nil || !on {
+		return "", err
+	}
+	return fmt.Sprintf("; batch prefix cache=%dMiB (lone requests run as one-row cohorts)", mib), nil
+}

@@ -430,9 +430,13 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 	if !ggufload.Inkling2LoopBatchEligible(m, be) {
 		return scalar, "greedy decode; FAK_INKLING2_SERVE_BATCH ignored: load is not batch eligible" + inkling2PrefixSlotsNote(scalar), nil
 	}
+	prefix, err := inkling2BatchPrefixNote(be, lookup)
+	if err != nil {
+		return nil, "", err
+	}
 	ignored := inkling2ScalarBehindCohorts(scalar)
 	return newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, lookup),
-		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s", ggufload.Inkling2LoopMaxBatch, adm.gap, adm.maxWait, ignored), nil
+		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", ggufload.Inkling2LoopMaxBatch, adm.gap, adm.maxWait, prefix, ignored), nil
 }
 
 // newServeInkling2LoopPlanner binds an engine to the chat surface with a config

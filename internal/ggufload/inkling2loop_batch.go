@@ -57,6 +57,8 @@ type inkling2Batch struct {
 	// sharedMin is the shortest common prompt prefix a cohort prefill computes once and
 	// copies into every row sharing it; 0 prefills every row's whole prompt
 	sharedMin int
+	// store is the cohorts' cross-request prefix store, nil when it is off
+	store *inkling2PrefixStore
 
 	// capC and capCtx are the shape the arenas were sized for; owned are the arenas
 	owned        []compute.Tensor
@@ -545,6 +547,12 @@ func inkling2DeviceFree(be any) (total, free int64, known bool) {
 	return d.DeviceMemory()
 }
 
+// inkling2LocalRing reports whether a cache slot belongs to a sliding-window layer,
+// whose cache is a ring of recent positions rather than the whole context.
+func inkling2LocalRing(hp model.Inkling2LoopHParams, slot int) bool {
+	return hp.LocalLayer[inkling2SlotLayer(hp, slot)]
+}
+
 // inkling2BatchCaps is the cache capacity of every slot: ctx for a global slot, the
 // resident's ring size for a local one, widened to window+chunk so a prefill chunk of
 // chunk tokens never evicts a key an earlier query of the same chunk attends to.
@@ -552,7 +560,7 @@ func inkling2BatchCaps(hp model.Inkling2LoopHParams, local []int, ctx, chunk int
 	caps := make([]int, len(local))
 	for slot := range caps {
 		caps[slot] = ctx
-		if hp.LocalLayer[inkling2SlotLayer(hp, slot)] {
+		if inkling2LocalRing(hp, slot) {
 			ring := local[slot]
 			if chunk > 0 {
 				ring = max(ring, hp.SlidingWindow+chunk)
