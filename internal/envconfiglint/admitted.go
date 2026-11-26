@@ -1080,6 +1080,17 @@ var admittedPostFreeze = []string{
 	// Relocates to: a typed Inkling-2 Metal prefill config.
 	"FAK_INK2P_GEMM",
 	"FAK_INK2P_PROFILE",
+
+	// FIFTEENTH OCCURRENCE (release-unblock): two Inkling-2 DFlash2 draft-depth diagnostic
+	// toggles landed one trunk advance after the fourteenth admission. Admitted by name on
+	// the same terms; the relocation debt stands.
+
+	// internal/ggufload/inkling2dflash2_width.go — FAK_INKLING2_VERIFY_MMA=1 selects the MMA
+	// verify cost table, and FAK_INKLING2_DFLASH2_DEPTH_FIXED pins every step's draft depth
+	// for A/B against the chooser. Two diagnostic toggles, not credentials.
+	// Relocates to: a typed Inkling-2 speculative-decode config.
+	"FAK_INKLING2_DFLASH2_DEPTH_FIXED",
+	"FAK_INKLING2_VERIFY_MMA",
 }
 
 // helperReadCorroboration declares that an admitted name is still read at runtime through
