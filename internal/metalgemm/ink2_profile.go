@@ -25,20 +25,36 @@ const (
 	Ink2ProfileCommit Ink2ProfileMode = "commit"
 )
 
+// ink2ProfileStats samples nothing per dispatch: it only asks the decode driver
+// to report the always-on counters of its decode window.
+const ink2ProfileStats = "stats"
+
+// Ink2ReportRequested is whether FAK_INK2_PROFILE asks for a decode-window
+// report: any profile mode, or stats for the counters alone.
+func Ink2ReportRequested(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "", "0", "off":
+		return false
+	}
+	return true
+}
+
 func parseInk2ProfileMode(s string) (Ink2ProfileMode, error) {
 	switch m := Ink2ProfileMode(strings.ToLower(strings.TrimSpace(s))); m {
-	case "", "0", "off":
+	case "", "0", "off", ink2ProfileStats:
 		return Ink2ProfileOff, nil
 	case Ink2ProfilePass, Ink2ProfileCommit:
 		return m, nil
 	}
-	return Ink2ProfileOff, fmt.Errorf("metalgemm: %s=%q, want pass or commit", Ink2ProfileEnv, s)
+	return Ink2ProfileOff, fmt.Errorf("metalgemm: %s=%q, want pass, commit or stats", Ink2ProfileEnv, s)
 }
 
 // Sub returns the work done between an earlier snapshot o and s.
 func (s Ink2Stats) Sub(o Ink2Stats) Ink2Stats {
 	s.Submissions -= o.Submissions
 	s.Dispatches -= o.Dispatches
+	s.Barriers -= o.Barriers
+	s.Commits -= o.Commits
 	s.GPUSeconds -= o.GPUSeconds
 	s.EncodeSeconds -= o.EncodeSeconds
 	s.WaitSeconds -= o.WaitSeconds
@@ -173,9 +189,10 @@ func (p Ink2Profile) Format(tokens int, wall time.Duration, st Ink2Stats) string
 			perTok(gpu), perTok(p.BufferGPUSeconds), cover, perTok(encode))
 	}
 	wallS := wall.Seconds()
-	fmt.Fprintf(&b, "totals: tokens=%d wall=%.3f ms/tok (%.2f tok/s) encode=%.3f wait=%.3f [queue=%.3f gpu=%.3f tail=%.3f] host_remainder=%.3f ms/tok; kernel=%.3f ms/tok submissions/tok=%.2f dispatches/tok=%.1f\n",
+	fmt.Fprintf(&b, "totals: tokens=%d wall=%.3f ms/tok (%.2f tok/s) encode=%.3f wait=%.3f [queue=%.3f gpu=%.3f tail=%.3f] host_remainder=%.3f ms/tok; kernel=%.3f ms/tok submissions/tok=%.2f dispatches/tok=%.1f barriers/tok=%.1f commits/tok=%.2f\n",
 		tokens, perTok(wallS), float64(tokens)/max(wallS, 1e-12), perTok(st.EncodeSeconds), perTok(st.WaitSeconds), perTok(st.QueueSeconds),
 		perTok(st.GPUSeconds), perTok(st.TailSeconds), perTok(wallS-st.EncodeSeconds-st.WaitSeconds), perTok(st.SchedSeconds),
-		float64(st.Submissions)/float64(tokens), float64(st.Dispatches)/float64(tokens))
+		float64(st.Submissions)/float64(tokens), float64(st.Dispatches)/float64(tokens),
+		float64(st.Barriers)/float64(tokens), float64(st.Commits)/float64(tokens))
 	return b.String()
 }

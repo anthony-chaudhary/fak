@@ -7,8 +7,10 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -132,6 +134,13 @@ type inkling2Resident struct {
 	// widths under specMax, by width
 	tailWarm, tailReady, tailKeepReady [inkling2SpecMaxDraft + 1]bool
 	draft                              ink2ContextDraft
+
+	// decode-window report of FAK_INK2_PROFILE on a Metal device, printed at
+	// close; it counts plain steps only, so speculative tokens inflate it
+	report       bool
+	decN         int
+	decT0, decT1 time.Time
+	decS0, decS1 metalgemm.Ink2Stats
 }
 
 // ink2ContextDraft is a device draft whose context every target forward writes
@@ -366,6 +375,7 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 	}
 	hp, w := m.HP, m.Weights
 	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats, chunkMax: ring, chunkWanted: wanted}
+	s.report = metalgemm.Ink2ReportRequested(os.Getenv(metalgemm.Ink2ProfileEnv))
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
 	s.batched = hasPrefill && (inkling2BatchedPrefill() || inkling2SpecDepth() > 0)
 	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
@@ -520,6 +530,12 @@ func inkling2SlotLayer(hp model.Inkling2LoopHParams, slot int) int {
 }
 
 func (s *inkling2Resident) close() {
+	if s.report && s.decN > 0 {
+		s.report = false
+		if p, ok := compute.MetalInkling2Profile(); ok {
+			fmt.Fprint(os.Stderr, p.Format(s.decN, s.decT1.Sub(s.decT0), s.decS1.Sub(s.decS0)))
+		}
+	}
 	if s.dev != nil {
 		s.dev.Ink2GraphReset()
 	}
@@ -865,6 +881,16 @@ func (s *inkling2Resident) forward() {
 // step consumes one token at the next position and returns the greedy next token.
 func (s *inkling2Resident) step(token int) (int, error) {
 	hp := s.hp
+	if s.report && s.decN == 0 && s.warm {
+		// the window opens one eager token in, so lazily sized scratch is excluded
+		if err := compute.MetalInkling2ProfileReset(); err != nil {
+			s.report = false
+		} else {
+			s.decS0, _ = compute.MetalInkling2Stats()
+			s.decT0 = time.Now()
+			s.decN = -1
+		}
+	}
 	if s.pos >= s.ctx {
 		return 0, fmt.Errorf("inkling2 resident: position %d exceeds the %d-token global cache", s.pos, s.ctx)
 	}
@@ -903,6 +929,11 @@ func (s *inkling2Resident) step(token int) (int, error) {
 		return 0, err
 	}
 	s.pos++
+	if s.decN != 0 {
+		s.decN = max(s.decN, 0) + 1
+		s.decS1, _ = compute.MetalInkling2Stats()
+		s.decT1 = time.Now()
+	}
 	if r, ok := s.be.(interface{ Recycle() }); ok {
 		// token boundary for the backend's profile and transient bookkeeping
 		r.Recycle()

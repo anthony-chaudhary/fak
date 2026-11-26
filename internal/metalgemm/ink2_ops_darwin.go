@@ -88,12 +88,12 @@ func (d *Ink2Device) RMS(x, w, y Ink2Ref, rows, n int, eps float32) error {
 	if !x.Valid() || !y.Valid() || rows < 1 || n < 1 || n > ink2OpsMaxWidth || rows > math.MaxInt32/n {
 		return fmt.Errorf("%w: rms of %d rows of %d", ErrInk2Shape, rows, n)
 	}
-	return d.rmsRows(x, y, []Ink2Ref{w}, false, rows, n, eps)
+	return d.rmsRows(x, y, []Ink2Ref{w}, false, rows, n, eps, ink2OpsLegacy.rms)
 }
 
 // rmsRows is RMS with, when perRow, row r weighted by w[r] (absent for none).
-func (d *Ink2Device) rmsRows(x, y Ink2Ref, w []Ink2Ref, perRow bool, rows, n int, eps float32) error {
-	p, err := d.opsKernel("ink2_rms", true)
+func (d *Ink2Device) rmsRows(x, y Ink2Ref, w []Ink2Ref, perRow bool, rows, n int, eps float32, legacy bool) error {
+	p, _, err := d.opsOrLean("ink2_rms", "ink2_rms_lean", legacy, n)
 	if err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func (d *Ink2Device) Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2
 		n < 1 || n > ink2OpsMaxWidth || !queries.Valid() || !out.Valid() || ink2OpsOverlap(queries, nq*n, out, nq*n) {
 		return fmt.Errorf("%w: mix of %d states by %d queries of width %d", ErrInk2Shape, ns, nq, n)
 	}
-	p, err := d.opsKernel("ink2_mix", true)
+	p, _, err := d.opsOrLean("ink2_mix", "ink2_mix_lean", ink2OpsLegacy.mix, n)
 	if err != nil {
 		return err
 	}
@@ -179,11 +179,11 @@ func (d *Ink2Device) Control(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norm
 			return fmt.Errorf("%w: controller %d is missing an operand", ErrInk2Shape, j)
 		}
 	}
-	down, err := d.opsKernel("ink2_ctrl_down", true)
+	down, _, err := d.opsOrLean("ink2_ctrl_down", "ink2_ctrl_down_lean", ink2OpsLegacy.ctrl, n)
 	if err != nil {
 		return err
 	}
-	apply, err := d.opsKernel("ink2_ctrl_apply", false)
+	apply, err := d.ctrlApplyKernel(n, rank)
 	if err != nil {
 		return err
 	}
@@ -206,7 +206,7 @@ func (d *Ink2Device) Control(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norm
 	if norms == nil {
 		return nil
 	}
-	return d.rmsRows(out, out, norms, true, nj, n, eps)
+	return d.rmsRows(out, out, norms, true, nj, n, eps, ink2OpsLegacy.rms || ink2OpsLegacy.ctrl)
 }
 
 // SigmoidMul encodes x *= sigmoid(gate) over n elements.
@@ -236,7 +236,7 @@ func (d *Ink2Device) RouteRows(logits, bias, ids, wts Ink2Ref, nexp, k int, scal
 		T < 1 || T > math.MaxInt32/nexp {
 		return fmt.Errorf("%w: route of %d experts to %d slots for %d tokens", ErrInk2Shape, nexp, k, T)
 	}
-	p, err := d.opsKernel("ink2_route", true)
+	p, _, err := d.opsOrLean("ink2_route", "ink2_route_lean", ink2OpsLegacy.route || nexp > ink2LeanMaxExperts, 1)
 	if err != nil {
 		return err
 	}

@@ -55,6 +55,9 @@ func Ink2DenseF32(r Ink2Ref, rows, cols int) Ink2Weight {
 // Ink2Stats counts device work since the device was opened.
 type Ink2Stats struct {
 	Submissions, Dispatches uint64
+	// Barriers is how many buffer barriers ordered dispatches, and Commits how
+	// many command buffers the submissions took.
+	Barriers, Commits uint64
 	// Pending is the number of dispatches encoded but not yet submitted.
 	Pending    int
 	GPUSeconds float64

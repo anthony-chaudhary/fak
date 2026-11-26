@@ -13,7 +13,8 @@ typedef struct {
 } mg_ink2_arg;
 
 typedef struct {
-    uint64_t submissions, dispatches, pending;
+    // A submission is one fence; commits counts the command buffers it took.
+    uint64_t submissions, dispatches, pending, barriers, commits;
     // queue is commit to GPU start, tail is GPU end to the waiter resuming, and
     // kernel is the driver's scheduling time; last_gpu is the latest buffer's.
     double gpu_seconds, kernel_seconds, queue_seconds, tail_seconds, last_gpu_seconds;
@@ -34,6 +35,10 @@ int mg_ink2_pipeline(void *dev, int library, const char *function, uint32_t *wid
 // instead of x*y*z threadgroups. Encodes only: nothing is submitted.
 int mg_ink2_dispatch(void *dev, int pipeline, const mg_ink2_arg *args, int count,
                      const void *constants, const uint32_t *size, int exact);
+// concurrent selects a concurrent encoder with barriers only at hazards;
+// commit_every > 0 commits the command buffer without waiting after that many
+// dispatches. Dispatches binding untracked are never ordered by it.
+void mg_ink2_configure(void *dev, int concurrent, int commit_every, void *untracked);
 void mg_ink2_barrier(void *dev);
 // Submits the open command buffer and waits for it. A no-op when nothing is pending.
 int mg_ink2_flush(void *dev);

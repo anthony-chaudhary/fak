@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -110,7 +111,36 @@ func openInk2Device() (*Ink2Device, error) {
 		return nil, err
 	}
 	d.null = null
+	// Early commits measured no gain, so decode commits once per fence; the
+	// schedule tests still drive them.
+	d.setSchedule(!Ink2Legacy("serial"), 0)
 	return d, nil
+}
+
+// Ink2LegacyEnv lists, comma-separated, the device behaviours to run the
+// previous way: "serial" encodes every dispatch on a serial encoder; the
+// routed GEMV ("routed", "scale", "nvfp4w") and lean op ("mix", "ctrl", "rms",
+// "route") families parse their own names from the same list.
+const Ink2LegacyEnv = "FAK_INK2_LEGACY"
+
+// Ink2Legacy reports whether FAK_INK2_LEGACY names name.
+func Ink2Legacy(name string) bool {
+	for _, f := range strings.Split(os.Getenv(Ink2LegacyEnv), ",") {
+		if strings.EqualFold(strings.TrimSpace(f), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// setSchedule picks the encoder: concurrent places a buffer barrier only
+// where a dispatch's bindings overlap an unbarriered earlier dispatch's writes
+// (or it writes what one read); commitEvery > 0 commits early. Either keeps
+// every dispatch's inputs exactly what the serial encoder gives it.
+func (d *Ink2Device) setSchedule(concurrent bool, commitEvery int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	C.mg_ink2_configure(d.ctx, C.int(btoi(concurrent)), C.int(commitEvery), d.null.h)
 }
 
 // Close drops any dispatches that were never fenced.
@@ -246,6 +276,7 @@ func (d *Ink2Device) Stats() Ink2Stats {
 	var s C.mg_ink2_stats
 	C.mg_ink2_get_stats(d.ctx, &s)
 	return Ink2Stats{Submissions: uint64(s.submissions), Dispatches: uint64(s.dispatches),
+		Barriers: uint64(s.barriers), Commits: uint64(s.commits),
 		Pending: int(s.pending), GPUSeconds: float64(s.gpu_seconds),
 		EncodeSeconds: d.encode.Seconds(), WaitSeconds: d.wait.Seconds(),
 		QueueSeconds: float64(s.queue_seconds), TailSeconds: float64(s.tail_seconds), SchedSeconds: float64(s.kernel_seconds)}
@@ -309,8 +340,11 @@ func btoi(b bool) int {
 }
 
 // Dispatch encodes one launch of p over groups threadgroups of perGroup
-// threads each. Launches of one command buffer run in the order encoded, so a
-// later one reads what an earlier one wrote.
+// threads each. A later launch reads what an earlier one wrote: launches run
+// as if in encode order. Ordering follows the bound extents and the kernel's
+// const qualifiers, so an argument must declare every byte the kernel may
+// touch (a zero length means the rest of the buffer), and a kernel must not
+// write through a pointer it declares device const.
 func (d *Ink2Device) Dispatch(p Ink2Pipeline, groups, perGroup [3]int, args ...Ink2Arg) error {
 	return d.dispatch(p, groups, perGroup, false, args)
 }
@@ -370,9 +404,8 @@ func (d *Ink2Device) dispatch(p Ink2Pipeline, size, perGroup [3]int, exact bool,
 	return nil
 }
 
-// Barrier orders the launches encoded so far before the ones that follow. The
-// serial encoder already runs launches in order; this is for a kernel pair
-// that proves to need the explicit barrier.
+// Barrier orders the launches encoded so far before the ones that follow,
+// whether or not their bindings overlap.
 func (d *Ink2Device) Barrier() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -419,22 +452,33 @@ kernel void ink2_expert_scale(device float *y [[buffer(0)]],
 
 type ink2PackedShape struct{ rows, cols, byteOffset uint32 }
 
-// packed validates a weight for the mv_/routed_ kernels and returns its
-// pipeline and the bytes one expert occupies. Slot t reads its activation at
-// x + t*xStride.
-func (d *Ink2Device) packed(w Ink2Weight, kernels *[41]string, x Ink2Ref, xStride int) (Ink2Pipeline, int, error) {
+// packedShape validates a weight for the packed kernels and returns the bytes
+// one expert occupies. Slot t reads its activation at x + t*xStride.
+func (d *Ink2Device) packedShape(w Ink2Weight, x Ink2Ref, xStride int) (int, error) {
 	if !w.Buf.Valid() || w.ByteOff < 0 || w.Rows < 1 || w.Rows > math.MaxInt32 || w.Cols < 1 || w.Cols > math.MaxInt32 ||
-		w.Experts < 1 || int(w.Type) >= len(kernels) || kernels[w.Type] == "" {
-		return Ink2Pipeline{}, 0, fmt.Errorf("%w: weight type %d [%d %d] x%d", ErrInk2Shape, w.Type, w.Rows, w.Cols, w.Experts)
+		w.Experts < 1 || int(w.Type) >= len(ink2MVKernel) || ink2MVKernel[w.Type] == "" {
+		return 0, fmt.Errorf("%w: weight type %d [%d %d] x%d", ErrInk2Shape, w.Type, w.Rows, w.Cols, w.Experts)
 	}
 	block, blockBytes, err := packedBlock(w.Type)
 	if err != nil {
-		return Ink2Pipeline{}, 0, err
+		return 0, err
 	}
 	// The block kernels load the activation as float4 vectors.
 	if w.Cols%block != 0 || (block > 1 && (x.Off%4 != 0 || xStride%4 != 0)) {
-		return Ink2Pipeline{}, 0, fmt.Errorf("%w: type %d weight of %d columns with the activation at offset %d, stride %d",
+		return 0, fmt.Errorf("%w: type %d weight of %d columns with the activation at offset %d, stride %d",
 			ErrInk2Shape, w.Type, w.Cols, x.Off, xStride)
+	}
+	return w.Rows * (w.Cols / block * blockBytes), nil
+}
+
+// packed is packedShape plus the weight type's pipeline from kernels.
+func (d *Ink2Device) packed(w Ink2Weight, kernels *[41]string, x Ink2Ref, xStride int) (Ink2Pipeline, int, error) {
+	if int(w.Type) >= len(kernels) || kernels[w.Type] == "" {
+		return Ink2Pipeline{}, 0, fmt.Errorf("%w: weight type %d [%d %d] x%d", ErrInk2Shape, w.Type, w.Rows, w.Cols, w.Experts)
+	}
+	bytes, err := d.packedShape(w, x, xStride)
+	if err != nil {
+		return Ink2Pipeline{}, 0, err
 	}
 	p, err := d.Pipeline(ink2PackedSource(), kernels[w.Type])
 	if err != nil {
@@ -443,7 +487,7 @@ func (d *Ink2Device) packed(w Ink2Weight, kernels *[41]string, x Ink2Ref, xStrid
 	if p.width != 32 || p.maxThreads < 128 {
 		return Ink2Pipeline{}, 0, fmt.Errorf("metalgemm: inkling2 kernel %s needs 32-wide SIMD groups of 128 threads", kernels[w.Type])
 	}
-	return p, w.Rows * (w.Cols / block * blockBytes), nil
+	return p, bytes, nil
 }
 
 func (w Ink2Weight) args(x Ink2Arg, y Ink2Arg, bytes int) []Ink2Arg {
@@ -472,12 +516,25 @@ func (d *Ink2Device) MatVecQ8(w Ink2Weight, x, gate, q Ink2Ref, quantize bool, y
 }
 
 // ExpertMatVec encodes, for each of k routed slots t, y[t] = W[ids[t]] x[t]
-// with x[t] at x + t*xStride and y[t] at y + t*w.Rows, then the optional
+// with x[t] at x + t*xStride and y[t] at y + t*w.Rows, times the optional
 // per-expert scale. It declines (false) a fused SITU input: the caller's
 // separate Situ op feeds the same product.
 func (d *Ink2Device) ExpertMatVec(w Ink2Weight, ids, x Ink2Ref, xStride int, y Ink2Ref, k int, scale Ink2Ref, situ *Ink2Situ) (bool, error) {
 	if situ != nil {
 		return false, nil
+	}
+	if pl := ink2DecRoutedPick(w.Type); pl.kernel != "" {
+		if _, err := d.packedShape(w, x, xStride); err != nil {
+			return false, err
+		}
+		d.profileDetail("%dx%d k=%d of %d", w.Rows, w.Cols, k, w.Experts)
+		if !ink2DecLegacy.scale || !scale.Valid() {
+			return true, d.routedDec(pl, w, ids, x, xStride, y, k, scale)
+		}
+		if err := d.routedDec(pl, w, ids, x, xStride, y, k, Ink2Ref{}); err != nil {
+			return false, err
+		}
+		return true, d.ExpertScale(y, ids, scale, k, w.Rows)
 	}
 	p, bytes, err := d.packed(w, &ink2RoutedKernel, x, xStride)
 	if err != nil {
