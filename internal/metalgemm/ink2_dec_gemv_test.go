@@ -213,9 +213,22 @@ func ink2DecPrevious(t *testing.T, d *Ink2Device, w Ink2Weight, a *ink2DecOperan
 }
 
 var ink2DecNVFP4Arms = []ink2DecPlan{
-	{"ink2_dec_routed_nvfp4", 2}, {"ink2_dec_routed_nvfp4w", 2}, {"ink2_dec_routed_nvfp4w", 0}, {"ink2_dec_routed_nvfp4w", 1},
-	{"ink2_dec_routed_nvfp4w", 3}, {"ink2_dec_routed_nvfp4u", 2}, {"ink2_dec_routed_nvfp4u", 3},
-	{"ink2_dec_routed_nvfp4t", 2}, {"ink2_dec_routed_nvfp4t", 3}, {"ink2_dec_routed_nvfp4t", 4},
+	{kernel: "ink2_dec_routed_nvfp4", rowBits: 2}, {kernel: "ink2_dec_routed_nvfp4w", rowBits: 2}, {kernel: "ink2_dec_routed_nvfp4w", rowBits: 0}, {kernel: "ink2_dec_routed_nvfp4w", rowBits: 1},
+	{kernel: "ink2_dec_routed_nvfp4w", rowBits: 3}, {kernel: "ink2_dec_routed_nvfp4u", rowBits: 2}, {kernel: "ink2_dec_routed_nvfp4u", rowBits: 3},
+	{kernel: "ink2_dec_routed_nvfp4t", rowBits: 2}, {kernel: "ink2_dec_routed_nvfp4t", rowBits: 3}, {kernel: "ink2_dec_routed_nvfp4t", rowBits: 4},
+}
+
+// ink2DecShapedArms lists every compile-time-shaped kernel of a type at cols
+// under each threadgroup of 1, 2 and 4 SIMD groups of two rows each.
+func ink2DecShapedArms(typ uint32, cols int) (arms []ink2DecPlan) {
+	if _, ok := ink2DecShaped[ink2DecShapeKey{typ, cols}]; !ok {
+		return nil
+	}
+	name := ink2RoutedKernel[typ][len("routed_"):]
+	for rowBits := range 3 {
+		arms = append(arms, ink2DecPlan{fmt.Sprintf("ink2_dec_routed_%sc%dr2", name, cols), rowBits, 2, cols})
+	}
+	return arms
 }
 
 // fak-test:runtime integration est=10s lane=default
@@ -242,7 +255,7 @@ func TestInk2DecRoutedMatchesRoutedAndScaleBitForBit(t *testing.T) {
 			}
 			m := ink2DecWeight(t, d, typ, rows, cols, experts, off, uint64(rng.Int63()))
 			a := ink2DecPut(t, d, rng, cols, k, experts, k*rows)
-			arms := []ink2DecPlan{ink2DecRoutedPick(typ)}
+			arms := append([]ink2DecPlan{ink2DecRoutedPick(typ, cols)}, ink2DecShapedArms(typ, cols)...)
 			if typ == 40 {
 				arms = append(arms, ink2DecNVFP4Arms...)
 			}
@@ -341,18 +354,33 @@ func TestInk2DecLegacyNames(t *testing.T) {
 	if got := parseInk2DecLegacy("routed"); got != (ink2DecLegacySet{routed: true}) {
 		t.Fatalf("parsed %+v", got)
 	}
+	if got := parseInk2DecLegacy("routed2"); got != (ink2DecLegacySet{routed2: true}) {
+		t.Fatalf("parsed %+v", got)
+	}
 	ink2DecUseLegacy(t, ink2DecLegacySet{})
 	for typ, want := range map[uint32]string{40: ink2DecRoutedNVFP4.kernel, 8: "ink2_dec_routed_q8_0", 0: "ink2_dec_routed_f32", 9: ""} {
-		if got := ink2DecRoutedPick(typ).kernel; got != want {
+		if got := ink2DecRoutedPick(typ, 512).kernel; got != want {
 			t.Errorf("type %d: planned %q, want %q", typ, got, want)
 		}
 	}
+	for key, want := range ink2DecShaped {
+		if got := ink2DecRoutedPick(key.typ, key.cols); got != want {
+			t.Errorf("type %d at %d columns: planned %+v, want %+v", key.typ, key.cols, got, want)
+		}
+	}
+	ink2DecLegacy = ink2DecLegacySet{routed2: true}
+	if got := ink2DecRoutedPick(18, 2304).kernel; got != "ink2_dec_routed_iq3_xxs" {
+		t.Errorf("routed2 legacy: planned %q", got)
+	}
 	ink2DecLegacy = ink2DecLegacySet{nvfp4w: true}
-	if got := ink2DecRoutedPick(40).kernel; got != "ink2_dec_routed_nvfp4" {
+	if got := ink2DecRoutedPick(40, 2304).kernel; got != "ink2_dec_routed_nvfp4" {
+		t.Errorf("nvfp4w legacy at 2304 columns: planned %q", got)
+	}
+	if got := ink2DecRoutedPick(40, 512).kernel; got != "ink2_dec_routed_nvfp4" {
 		t.Errorf("nvfp4w legacy: planned %q", got)
 	}
 	ink2DecLegacy = ink2DecLegacySet{routed: true}
-	if got := ink2DecRoutedPick(40).kernel; got != "" {
+	if got := ink2DecRoutedPick(40, 512).kernel; got != "" {
 		t.Errorf("routed legacy: planned %q", got)
 	}
 }
@@ -427,8 +455,8 @@ func ink2DecBenchRun(t *testing.T, d *Ink2Device, arms []ink2DecBenchArm, perSam
 	return median, best
 }
 
-// Times the routed NVFP4 kernels at the resident forward's shapes: the
-// routed_ kernel with its scale pass against every bit-identical arm.
+// Times the routed kernels at the resident forward's shapes: the routed_
+// kernel with its scale pass against every bit-identical arm.
 // FAK_INK2_MICROBENCH_REPS sets the repetitions, FAK_INK2_MICROBENCH_ONLY
 // (regexp) the arms.
 //
@@ -473,15 +501,20 @@ func TestInk2DecRoutedMicrobench(t *testing.T) {
 	defer d.Free(fillBuf)
 
 	const experts, k, sets, perSample = 128, 8, 16, 8
-	for _, shape := range [][2]int{{2304, 2304}, {2304, 1152}} {
-		rows, cols := shape[0], shape[1]
-		rowBytes := cols / 64 * 36
+	for _, shape := range [][3]int{{40, 2304, 2304}, {40, 2304, 1152}, {18, 2304, 2304}, {22, 2304, 2304},
+		{21, 2304, 2304}, {11, 2304, 2304}, {17, 2304, 2304}, {20, 2304, 1152}} {
+		typ, rows, cols := uint32(shape[0]), shape[1], shape[2]
+		block, blockBytes, err := packedBlock(typ)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rowBytes := cols / block * blockBytes
 		total := experts * rows * rowBytes
 		buf, err := d.Alloc(total/4 + 16)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ink2DecRandom(t, ink2DecHost(t, d, buf, total/4)[:total], 40, uint64(cols))
+		ink2DecRandom(t, ink2DecHost(t, d, buf, total/4)[:total], typ, uint64(cols))
 		stride := (cols + 63) &^ 63
 		yOff := k*stride + 4096
 		arena := ink2TestAlloc(t, d, yOff+k*rows+2048)
@@ -507,7 +540,7 @@ func TestInk2DecRoutedMicrobench(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		stack := Ink2Weight{Buf: buf, Type: 40, Rows: rows, Cols: cols, Experts: experts}
+		stack := Ink2Weight{Buf: buf, Type: typ, Rows: rows, Cols: cols, Experts: experts}
 		fillOut := arena.At(yOff + k*rows)
 		fill := func() error {
 			p, err := d.Pipeline(ink2DecBenchFillSource, "ink2_dec_bench_fill")
@@ -525,8 +558,13 @@ func TestInk2DecRoutedMicrobench(t *testing.T) {
 			_, err := d.ExpertMatVec(stack, ids.At(i%sets*k), x, stride, y, k, scale, nil)
 			return err
 		}}}
-		for _, pl := range ink2DecNVFP4Arms {
-			arms = append(arms, ink2DecBenchArm{fmt.Sprintf("%s R%d", pl.kernel[len("ink2_dec_routed_"):], 1<<pl.rowBits), func(i int) error {
+		plans := append([]ink2DecPlan{{kernel: "ink2_dec_routed_" + ink2RoutedKernel[typ][len("routed_"):], rowBits: 2}},
+			ink2DecShapedArms(typ, cols)...)
+		if typ == 40 {
+			plans = append(ink2DecNVFP4Arms, ink2DecShapedArms(typ, cols)...)
+		}
+		for _, pl := range plans {
+			arms = append(arms, ink2DecBenchArm{fmt.Sprintf("%s G%d S%d", pl.kernel[len("ink2_dec_routed_"):], 1<<pl.rowBits, pl.rowsPerSIMD()), func(i int) error {
 				return d.routedDec(pl, stack, ids.At(i%sets*k), x, stride, y, k, scale)
 			}})
 		}
@@ -534,8 +572,8 @@ func TestInk2DecRoutedMicrobench(t *testing.T) {
 		median, best := ink2DecBenchRun(t, d, arms, perSample, reps, fill)
 		bytes := float64(k * rows * rowBytes)
 		for i, a := range arms {
-			t.Logf("MICROBENCH nvfp4 %dx%d k=%d | %-26s | median %7.1f us | best %7.1f us | %6.1f GB/s best | x%.3f median vs routed_",
-				rows, cols, k, a.name, median[i], best[i], bytes/best[i]/1e3, median[0]/median[i])
+			t.Logf("MICROBENCH %s %dx%d k=%d | %-26s | median %7.1f us | best %7.1f us | %6.1f GB/s best | x%.3f median vs routed_",
+				ink2RoutedKernel[typ][len("routed_"):], rows, cols, k, a.name, median[i], best[i], bytes/best[i]/1e3, median[0]/median[i])
 		}
 		d.Free(buf)
 	}

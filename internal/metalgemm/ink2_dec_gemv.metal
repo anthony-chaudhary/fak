@@ -139,3 +139,58 @@ kernel void ink2_dec_routed_nvfp4t(INK2_DEC_ARGS, uint2 at [[thread_position_in_
     float total = simd_sum(acc.x + acc.y + acc.z + acc.w);
     INK2_DEC_STORE(total, id, row);
 }
+
+// Routed products with the column count fixed at compile time and RS rows per
+// SIMD group. Every load is named before its fma instead of waiting on a
+// runtime trip count, the rows share each step's activation loads, and each
+// row keeps lane l's groups l, l+32, ... in step order, so every sum is the
+// routed_ kernel's. NVFP4 has none: it timed no faster this way.
+#define INK2_DEC_ROWS(COLS_PER_ROW) \
+    uint row0 = ((group.x << p.row_bits) + simd) * RS; \
+    if (row0 >= p.rows) return; \
+    uint id = ids[group.y]; \
+    device const float4 *xv = (device const float4 *)(x + group.y*p.xstride); \
+    constexpr uint G = COLS / 16, STEPS = (G + 31) / 32, TAIL = G % 32; \
+    bool tail = TAIL == 0 || lane < TAIL; \
+    size_t rowAt[RS]; \
+    for (uint r = 0; r < RS; r++) rowAt[r] = (size_t(id)*p.rows + min(row0 + r, p.rows - 1)) * (COLS_PER_ROW)
+
+#define INK2_DEC_ROWS_STORE \
+    for (uint r = 0; r < RS; r++) { \
+        float total = simd_sum(acc[r].x + acc[r].y + acc[r].z + acc[r].w); \
+        if (row0 + r < p.rows) INK2_DEC_STORE(total, id, row0 + r); \
+    }
+
+#define INK2_DEC_CBLOCK(TYPE, BLOCK) \
+template <uint COLS, uint RS> \
+kernel void ink2_dec_routed_##TYPE##c(INK2_DEC_ARGS) { \
+    INK2_DEC_ROWS(COLS / BLOCK); \
+    device const block_##TYPE *w = (device const block_##TYPE *)(raw + p.byte_offset); \
+    float4 acc[RS]; \
+    for (uint r = 0; r < RS; r++) acc[r] = 0; \
+    for (uint s = 0; s < STEPS; s++) { \
+        if (s + 1 == STEPS && !tail) break; \
+        uint g = lane + 32*s; \
+        float4 v0 = xv[4*g], v1 = xv[4*g + 1], v2 = xv[4*g + 2], v3 = xv[4*g + 3]; \
+        for (uint r = 0; r < RS; r++) { \
+            float4x4 values; \
+            dequantize_##TYPE(w + rowAt[r] + g / (BLOCK/16), g % (BLOCK/16), values); \
+            acc[r] = fma(values[0], v0, acc[r]); acc[r] = fma(values[1], v1, acc[r]); \
+            acc[r] = fma(values[2], v2, acc[r]); acc[r] = fma(values[3], v3, acc[r]); \
+        } \
+    } \
+    INK2_DEC_ROWS_STORE \
+}
+
+INK2_DEC_CBLOCK(iq2_xs, 256)
+INK2_DEC_CBLOCK(iq3_xxs, 256)
+INK2_DEC_CBLOCK(iq3_s, 256)
+INK2_DEC_CBLOCK(iq4_nl, 32)
+
+#define INK2_DEC_C(TYPE, COLS, RS) \
+template [[host_name("ink2_dec_routed_" #TYPE "c" #COLS "r" #RS)]] kernel void ink2_dec_routed_##TYPE##c<COLS, RS>(INK2_DEC_ARGS);
+
+INK2_DEC_C(iq2_xs, 2304, 2)
+INK2_DEC_C(iq3_xxs, 2304, 2)
+INK2_DEC_C(iq3_s, 2304, 2)
+INK2_DEC_C(iq4_nl, 1152, 2)

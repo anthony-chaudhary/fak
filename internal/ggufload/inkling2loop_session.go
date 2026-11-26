@@ -161,8 +161,13 @@ func (r *inkling2ResidentSession) Prefill(ctx context.Context, prompt []int) (in
 		return 0, fmt.Errorf("inkling2_loop: empty prompt")
 	}
 	r.own()
+	r.s.settle()
 	if r.s.batched {
-		return r.s.prefill(ctx, prompt)
+		next, err := r.s.prefill(ctx, prompt)
+		if err == nil {
+			r.s.pipeExpect(next)
+		}
+		return next, err
 	}
 	next := 0
 	for _, t := range prompt {
@@ -196,6 +201,8 @@ func (r *inkling2ResidentSession) Close() error {
 func (r *inkling2ResidentSession) Pos() int { return r.s.pos }
 
 func (s *inkling2Resident) rewindable() error {
+	// every rewind entry reads or replaces the state a speculative forward changed
+	s.settle()
 	if s.draft != nil || s.specMax > 0 {
 		return fmt.Errorf("inkling2 resident: speculative state cannot be checkpointed")
 	}
@@ -291,7 +298,7 @@ func (r *inkling2ResidentSession) growRows(ck *ink2Rewind, rows int) error {
 	ck.rows, ck.k, ck.v = 0, make([]ink2Ref, len(s.hist)), make([]ink2Ref, len(s.hist))
 	var err error
 	for slot := 0; slot < len(s.hist) && err == nil; slot++ {
-		if !s.isLocalSlot(slot) {
+		if !s.localAt(slot) {
 			continue
 		}
 		if ck.k[slot], err = r.allocInto(&ck.grown, rows*kvDim); err == nil {
@@ -332,7 +339,7 @@ func (r *inkling2ResidentSession) Checkpoint(horizon int) error {
 	ck.pos, ck.horizon = s.pos, max(horizon, 1)
 	ck.lo, ck.hi = 0, 0
 	for slot := range s.hist {
-		if !s.isLocalSlot(slot) {
+		if !s.localAt(slot) {
 			continue
 		}
 		lo, hi := inkling2SavedSpan(s.pos, s.hp.SlidingWindow, s.caps[slot], ck.horizon)
@@ -352,7 +359,7 @@ func (r *inkling2ResidentSession) Checkpoint(horizon int) error {
 	hf := s.histFloats()
 	for slot := range s.hist {
 		r.copyDev(ck.hist[slot], s.hist[slot], ck.histFill, hf)
-		if !s.isLocalSlot(slot) {
+		if !s.localAt(slot) {
 			continue
 		}
 		for _, sp := range inkling2RingSpans(ck.lo, ck.hi, s.caps[slot]) {
@@ -380,7 +387,7 @@ func (r *inkling2ResidentSession) Restore() error {
 	hf := s.histFloats()
 	for slot := range s.hist {
 		r.copyDev(s.hist[slot], ck.hist[slot], ck.histFill, hf)
-		if !s.isLocalSlot(slot) {
+		if !s.localAt(slot) {
 			continue
 		}
 		for _, sp := range inkling2RingSpans(ck.lo, ck.hi, s.caps[slot]) {

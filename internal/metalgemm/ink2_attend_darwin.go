@@ -50,7 +50,11 @@ func (d *Ink2Device) Attend(q, r, sinks, relBias, kcache, vcache, scores, out, m
 		return fmt.Errorf("%w: attend without an operand", ErrInk2Shape)
 	}
 	// Fast math off: the softmax leans on exp's precise form.
-	pipe, err := d.PipelinePrecise(ink2AttendSource, "ink2_attend")
+	source := ink2AttendNamedSource
+	if ink2TinyFuseLegacy {
+		source = ink2AttendSource
+	}
+	pipe, err := d.PipelinePrecise(source, "ink2_attend")
 	if err != nil {
 		return err
 	}

@@ -39,6 +39,8 @@ typedef struct {
     // on the previous one's event value.
     NSUInteger commitEvery, encoded;
     NSMutableArray<id<MTLCommandBuffer>> *inflight;
+    // Host commit time of each inflight buffer.
+    NSMutableArray<NSNumber *> *committedAt;
     id<MTLEvent> chain;
     uint64_t chainValue;
     double firstCommit;
@@ -88,6 +90,7 @@ void mg_ink2_close(void *dev) {
         // Committed buffers must finish before the buffers they bind are freed.
         for (id<MTLCommandBuffer> cb in d->inflight) [cb waitUntilCompleted];
         d->inflight = nil;
+        d->committedAt = nil;
         free(d->writeMasks);
         free(d->reads.at);
         free(d->writes.at);
@@ -353,9 +356,12 @@ static void ink2_commit_early(MGInk2Device *d) {
     if (!d->chain) d->chain = [gDev newEvent];
     [d->command encodeSignalEvent:d->chain value:++d->chainValue];
     if (!d->inflight) d->inflight = [NSMutableArray array];
-    if (d->inflight.count == 0) d->firstCommit = ink2_now();
+    if (!d->committedAt) d->committedAt = [NSMutableArray array];
+    double now = ink2_now();
+    if (d->inflight.count == 0) d->firstCommit = now;
     [d->command commit];
     [d->inflight addObject:d->command];
+    [d->committedAt addObject:@(now)];
     d->command = nil;
     d->encoded = 0;
     d->stats.commits++;
@@ -420,12 +426,32 @@ void mg_ink2_barrier(void *dev) {
     if (d->encoder) ink2_barrier(d);
 }
 
+// Adds the GPU, queue and tail time of buffers, committed oldest first from
+// committed on, to the stats.
+static void ink2_account(MGInk2Device *d, NSArray<id<MTLCommandBuffer>> *buffers, double committed, double resumed) {
+    double gpu = 0;
+    for (id<MTLCommandBuffer> cb in buffers) {
+        if (cb.GPUEndTime > cb.GPUStartTime) gpu += cb.GPUEndTime - cb.GPUStartTime;
+        CFTimeInterval kernel = cb.kernelEndTime - cb.kernelStartTime;
+        if (kernel > 0) d->stats.kernel_seconds += kernel;
+    }
+    id<MTLCommandBuffer> first = buffers.firstObject, last = buffers.lastObject;
+    if (gpu > 0) {
+        d->stats.gpu_seconds += gpu;
+        d->stats.last_gpu_seconds = gpu;
+        // The GPU times share the host clock of ink2_now.
+        if (first.GPUStartTime > committed) d->stats.queue_seconds += first.GPUStartTime - committed;
+        if (resumed > last.GPUEndTime) d->stats.tail_seconds += resumed - last.GPUEndTime;
+    }
+}
+
 int mg_ink2_flush(void *dev) {
     @autoreleasepool {
         MGInk2Device *d = (__bridge MGInk2Device *)dev;
         if (!d->command && d->inflight.count == 0) return 1;
         NSMutableArray<id<MTLCommandBuffer>> *buffers = d->inflight ? d->inflight : [NSMutableArray array];
         d->inflight = nil;
+        d->committedAt = nil;
         double committed = buffers.count ? d->firstCommit : ink2_now();
         if (d->command) {
             [d->encoder endEncoding];
@@ -450,21 +476,49 @@ int mg_ink2_flush(void *dev) {
         double resumed = ink2_now();
         if (failed) return ink2_fail(d, [NSString stringWithFormat:@"command buffer: %@", failed]);
         d->flushedPasses = passes;
-        double gpu = 0;
-        for (id<MTLCommandBuffer> cb in buffers) {
-            if (cb.GPUEndTime > cb.GPUStartTime) gpu += cb.GPUEndTime - cb.GPUStartTime;
-            CFTimeInterval kernel = cb.kernelEndTime - cb.kernelStartTime;
-            if (kernel > 0) d->stats.kernel_seconds += kernel;
-        }
-        id<MTLCommandBuffer> first = buffers.firstObject, last = buffers.lastObject;
-        if (gpu > 0) {
-            d->stats.gpu_seconds += gpu;
-            d->stats.last_gpu_seconds = gpu;
-            // The GPU times share the host clock of ink2_now.
-            if (first.GPUStartTime > committed) d->stats.queue_seconds += first.GPUStartTime - committed;
-            if (resumed > last.GPUEndTime) d->stats.tail_seconds += resumed - last.GPUEndTime;
-        }
+        ink2_account(d, buffers, committed, resumed);
         return 1;
+    }
+}
+
+uint64_t mg_ink2_commit(void *dev) {
+    @autoreleasepool {
+        MGInk2Device *d = (__bridge MGInk2Device *)dev;
+        if (d->command && d->encoder) ink2_commit_early(d);
+        return d->chainValue;
+    }
+}
+
+int mg_ink2_wait(void *dev, uint64_t value) {
+    @autoreleasepool {
+        MGInk2Device *d = (__bridge MGInk2Device *)dev;
+        NSUInteger n = d->inflight.count;
+        // Every inflight buffer came from ink2_commit_early, which signals the
+        // chain one value higher than the buffer before it.
+        uint64_t first = d->chainValue - n + 1;
+        NSUInteger take = value >= first ? (NSUInteger)MIN((uint64_t)n, value - first + 1) : 0;
+        if (take > 0) {
+            NSRange r = NSMakeRange(0, take);
+            NSArray<id<MTLCommandBuffer>> *buffers = [d->inflight subarrayWithRange:r];
+            double committed = [d->committedAt[0] doubleValue];
+            [d->inflight removeObjectsInRange:r];
+            [d->committedAt removeObjectsInRange:r];
+            if (d->inflight.count) d->firstCommit = [d->committedAt[0] doubleValue];
+            d->stats.submissions++;
+            d->stats.last_gpu_seconds = 0;
+            NSString *failed = nil;
+            for (id<MTLCommandBuffer> cb in buffers) {
+                [cb waitUntilCompleted];
+                if (cb.status != MTLCommandBufferStatusCompleted && !failed) failed = cb.error.localizedDescription ?: @"not completed";
+            }
+            double resumed = ink2_now();
+            if (failed) {
+                ink2_fail(d, [NSString stringWithFormat:@"command buffer: %@", failed]);
+                return -1;
+            }
+            ink2_account(d, buffers, committed, resumed);
+        }
+        return (int)d->inflight.count + (d->command ? 1 : 0);
     }
 }
 

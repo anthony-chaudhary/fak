@@ -138,6 +138,11 @@ func (s *inkling2MetalDeviceSet) bind(m *Inkling2LoopModel) (err error) {
 		}
 	}
 	mat(&w.Output)
+	if q, ok := w.TokEmbd.(inkling2QuantEmbedding); ok {
+		if d, ok := s.embedding(q); ok {
+			w.TokEmbd = d
+		}
+	}
 	for i := range w.Layers {
 		lw := &w.Layers[i]
 		for _, p := range []*model.Inkling2LoopMatrix{&lw.Wq, &lw.Wk, &lw.Wv, &lw.Wo, &lw.Gate, &lw.Rel,

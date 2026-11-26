@@ -5,6 +5,7 @@ package metalgemm
 import (
 	_ "embed"
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"strings"
@@ -14,9 +15,10 @@ import (
 var ink2LeanSource string
 
 // The decode op names in FAK_INK2_LEGACY, each keeping its family's first kernels:
-// "mix", "ctrl" (the controller's kernels and its normalize), "rms" and "route".
+// "mix", "ctrl" (the controller's kernels and its normalize), "rms" and "route";
+// "ctrlmix" keeps float32 controller weights and a mix compiled for any state count.
 // Names of other families are left to their own parsers.
-type ink2DecLegacyOps struct{ mix, ctrl, rms, route bool }
+type ink2DecLegacyOps struct{ mix, ctrl, rms, route, ctrlmix bool }
 
 func parseInk2OpsLegacy(s string) (l ink2DecLegacyOps) {
 	for _, name := range strings.Split(s, ",") {
@@ -29,6 +31,8 @@ func parseInk2OpsLegacy(s string) (l ink2DecLegacyOps) {
 			l.rms = true
 		case "route":
 			l.route = true
+		case "ctrlmix":
+			l.ctrlmix = true
 		}
 	}
 	return l
@@ -113,4 +117,45 @@ func (d *Ink2Device) ctrlApplyKernel(n, rank int) (Ink2Pipeline, error) {
 		}
 	}
 	return d.opsKernel("ink2_ctrl_apply", false)
+}
+
+// ink2CtrlBF16 reports whether a controller of width n and rank runs on
+// bfloat16 weights.
+func ink2CtrlBF16(n, rank int) bool {
+	_, ok := ink2LeanBuildFor(n)
+	return ok && !ink2OpsLegacy.ctrl && !ink2OpsLegacy.ctrlmix && slices.Contains(ink2LeanCtrlRanks, rank)
+}
+
+// mixLeanName is the lean mix kernel for ns states.
+func mixLeanName(ns int) string {
+	if ink2OpsLegacy.ctrlmix {
+		return "ink2_mix_lean"
+	}
+	return fmt.Sprintf("ink2_mix_lean_%d", ns)
+}
+
+// PackBF16 returns the n float32 values at src as bfloat16, two to a word in
+// element order, or false when the bfloat16 controller is off or a value is
+// not exactly a bfloat16.
+func (d *Ink2Device) PackBF16(src Ink2Ref, n int) ([]float32, bool, error) {
+	if ink2OpsLegacy.ctrl || ink2OpsLegacy.ctrlmix {
+		return nil, false, nil
+	}
+	v, err := d.Read(src, n)
+	if err != nil {
+		return nil, false, err
+	}
+	words := make([]uint32, (n+1)/2)
+	for i, x := range v {
+		b := math.Float32bits(x)
+		if b&0xffff != 0 {
+			return nil, false, nil
+		}
+		words[i/2] |= (b >> 16) << (16 * (i % 2))
+	}
+	out := make([]float32, len(words))
+	for i, w := range words {
+		out[i] = math.Float32frombits(w)
+	}
+	return out, true, nil
 }

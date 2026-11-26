@@ -132,7 +132,7 @@ func (d *Ink2Device) Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2
 		n < 1 || n > ink2OpsMaxWidth || !queries.Valid() || !out.Valid() || ink2OpsOverlap(queries, nq*n, out, nq*n) {
 		return fmt.Errorf("%w: mix of %d states by %d queries of width %d", ErrInk2Shape, ns, nq, n)
 	}
-	p, _, err := d.opsOrLean("ink2_mix", "ink2_mix_lean", ink2OpsLegacy.mix, n)
+	p, _, err := d.opsOrLean("ink2_mix", mixLeanName(ns), ink2OpsLegacy.mix, n)
 	if err != nil {
 		return err
 	}
@@ -168,6 +168,20 @@ func (d *Ink2Device) Mix(states []Ink2Ref, queries Ink2Ref, nq int, norms []Ink2
 // Down_j is [rank][2n]; Gain_j and Forget_j are [n][rank]. With norms non-nil
 // each output row is then RMS-normalized (eps) and scaled by its weight.
 func (d *Ink2Device) Control(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norms []Ink2Ref, eps float32) error {
+	return d.control(ctl, g, out, n, rank, norms, eps, false)
+}
+
+// ControlBF16 is Control with Down, Gain and Forget packed by PackBF16, the
+// same bits at half the weight traffic. ok is false (nothing launched) when
+// the bfloat16 controller is off or has no kernel for width n and rank.
+func (d *Ink2Device) ControlBF16(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norms []Ink2Ref, eps float32) (bool, error) {
+	if !ink2CtrlBF16(n, rank) {
+		return false, nil
+	}
+	return true, d.control(ctl, g, out, n, rank, norms, eps, true)
+}
+
+func (d *Ink2Device) control(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norms []Ink2Ref, eps float32, bf16 bool) error {
 	nj := len(ctl.Cur)
 	if nj < 1 || nj > ink2OpsMaxRows || len(ctl.Msg) != nj || len(ctl.Down) != nj || len(ctl.Gain) != nj ||
 		len(ctl.Forget) != nj || len(norms) > nj || !g.Valid() || !out.Valid() ||
@@ -179,11 +193,20 @@ func (d *Ink2Device) Control(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norm
 			return fmt.Errorf("%w: controller %d is missing an operand", ErrInk2Shape, j)
 		}
 	}
-	down, _, err := d.opsOrLean("ink2_ctrl_down", "ink2_ctrl_down_lean", ink2OpsLegacy.ctrl, n)
-	if err != nil {
-		return err
+	var down, apply Ink2Pipeline
+	var err error
+	if bf16 {
+		build, _ := ink2LeanBuildFor(n)
+		if down, err = d.PipelinePrecise(ink2LeanSources[build], "ink2_ctrl_down_lean_bf16"); err != nil {
+			return err
+		}
+		apply, err = d.PipelinePrecise(ink2LeanSources[build], fmt.Sprintf("ink2_ctrl_apply_lean_bf16_%d", rank))
+	} else {
+		if down, _, err = d.opsOrLean("ink2_ctrl_down", "ink2_ctrl_down_lean", ink2OpsLegacy.ctrl, n); err != nil {
+			return err
+		}
+		apply, err = d.ctrlApplyKernel(n, rank)
 	}
-	apply, err := d.ctrlApplyKernel(n, rank)
 	if err != nil {
 		return err
 	}
@@ -193,13 +216,23 @@ func (d *Ink2Device) Control(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norm
 		}
 		return args
 	}
+	// A packed weight of count values spans its 2*count bytes.
+	bindWeights := func(args []Ink2Arg, refs []Ink2Ref, count int) []Ink2Arg {
+		if !bf16 {
+			return bind(args, refs, count)
+		}
+		for _, r := range ink2OpsSlots(refs) {
+			args = append(args, Ink2BufferAt(r.Buf, 4*r.Off, 2*count))
+		}
+		return args
+	}
 	shape := Ink2Const(ink2CtrlShape{n: uint32(n), rank: uint32(rank)})
 	inputs := bind(bind(make([]Ink2Arg, 0, 19), ctl.Cur, n), ctl.Msg, n)
-	args := append(bind(inputs[:len(inputs):len(inputs)], ctl.Down, rank*2*n), g.Span(nj*rank), shape)
+	args := append(bindWeights(inputs[:len(inputs):len(inputs)], ctl.Down, rank*2*n), g.Span(nj*rank), shape)
 	if err := d.Dispatch(down, [3]int{rank, nj, 1}, [3]int{ink2OpsThreads, 1, 1}, args...); err != nil {
 		return err
 	}
-	args = append(bind(bind(inputs, ctl.Gain, n*rank), ctl.Forget, n*rank), g.Span(nj*rank), out.Span(nj*n), shape)
+	args = append(bindWeights(bindWeights(inputs, ctl.Gain, n*rank), ctl.Forget, n*rank), g.Span(nj*rank), out.Span(nj*n), shape)
 	if err := d.opsEach(apply, n, nj, args...); err != nil {
 		return err
 	}

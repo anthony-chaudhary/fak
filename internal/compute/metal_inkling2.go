@@ -346,24 +346,74 @@ func (c *metalBackend) Ink2Control(ctl Ink2Controls, g, out Ink2Ref, n, rank int
 	ink2MetalScope("Ink2Control")
 	metalMu.Lock()
 	defer metalMu.Unlock()
-	d, r, err := ink2MetalBind(g, out)
+	d, mc, r, ns, err := ink2MetalControls(ctl, g, out, norms)
 	if err != nil {
 		return ink2MetalErr("control", err)
 	}
+	return ink2MetalErr("control", d.Control(mc, r[0], r[1], n, rank, ns, eps))
+}
+
+// Ink2ControlBF16 is Ink2Control with Down, Gain and Forget packed by
+// Ink2PackBF16. ok is false (nothing launched) when the device has no
+// bfloat16 controller for width n and rank.
+func (c *metalBackend) Ink2ControlBF16(ctl Ink2Controls, g, out Ink2Ref, n, rank int, norms []Ink2Ref, eps float32) (bool, error) {
+	ink2MetalScope("Ink2Control")
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	d, mc, r, ns, err := ink2MetalControls(ctl, g, out, norms)
+	if err != nil {
+		return false, ink2MetalErr("control", err)
+	}
+	ok, err := d.ControlBF16(mc, r[0], r[1], n, rank, ns, eps)
+	return ok, ink2MetalErr("control", err)
+}
+
+// Ink2PackBF16 returns a new device tensor holding the n float32 values at src
+// as bfloat16 when each is exactly one, for Ink2ControlBF16; ok is false
+// (nothing allocated) otherwise or when the bfloat16 controller is off.
+func (c *metalBackend) Ink2PackBF16(src Ink2Ref, n int) (Tensor, bool, error) {
+	packed, ok, err := func() ([]float32, bool, error) {
+		metalMu.Lock()
+		defer metalMu.Unlock()
+		d, r, err := ink2MetalBind(src)
+		if err != nil {
+			return nil, false, err
+		}
+		return d.PackBF16(r[0], n)
+	}()
+	if err != nil || !ok {
+		return Tensor{}, false, ink2MetalErr("pack bf16", err)
+	}
+	t, err := c.Ink2Alloc(len(packed))
+	if err != nil {
+		return Tensor{}, false, err
+	}
+	if err := c.Ink2Write(Ink2At(t, 0), packed); err != nil {
+		c.Free(t)
+		return Tensor{}, false, err
+	}
+	return t, true, nil
+}
+
+func ink2MetalControls(ctl Ink2Controls, g, out Ink2Ref, norms []Ink2Ref) (*metalgemm.Ink2Device, metalgemm.Ink2Controls, []metalgemm.Ink2Ref, []metalgemm.Ink2Ref, error) {
 	var mc metalgemm.Ink2Controls
+	d, r, err := ink2MetalBind(g, out)
+	if err != nil {
+		return nil, mc, nil, nil, err
+	}
 	for _, f := range []struct {
 		dst *[]metalgemm.Ink2Ref
 		src []Ink2Ref
 	}{{&mc.Cur, ctl.Cur}, {&mc.Msg, ctl.Msg}, {&mc.Down, ctl.Down}, {&mc.Gain, ctl.Gain}, {&mc.Forget, ctl.Forget}} {
 		if *f.dst, err = ink2MetalRefs(f.src); err != nil {
-			return ink2MetalErr("control", err)
+			return nil, mc, nil, nil, err
 		}
 	}
 	ns, err := ink2MetalRefs(norms)
 	if err != nil {
-		return ink2MetalErr("control norms", err)
+		return nil, mc, nil, nil, fmt.Errorf("norms: %w", err)
 	}
-	return ink2MetalErr("control", d.Control(mc, r[0], r[1], n, rank, ns, eps))
+	return d, mc, r, ns, nil
 }
 
 func (c *metalBackend) Ink2Conv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn int, norm float32) error {
@@ -506,3 +556,83 @@ func (c *metalBackend) Ink2GraphReset()        {}
 // A verify chunk is already one command buffer, so there is no slot to capture.
 func (c *metalBackend) Ink2GraphEndSlot(int) error    { return metalgemm.ErrInk2GraphUnsupported }
 func (c *metalBackend) Ink2GraphLaunchSlot(int) error { return metalgemm.ErrInk2GraphUnsupported }
+
+// Ink2EmbedRow encodes out = row idx[0] of the token table, dequantized as the
+// host does, followed by pos as int32 bits.
+func (c *metalBackend) Ink2EmbedRow(table Tensor, idx Ink2Ref, pos int, out Ink2Ref) error {
+	ink2MetalScope("Ink2EmbedRow")
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	d, r, err := ink2MetalBind(idx, out)
+	if err != nil {
+		return ink2MetalErr("embed row", err)
+	}
+	wv, _, err := ink2MetalWeight(table, false)
+	if err != nil {
+		return ink2MetalErr("embed row", err)
+	}
+	return ink2MetalErr("embed row", d.EmbedRow(wv, r[0], pos, r[1]))
+}
+
+// Ink2CanEmbed reports whether Ink2EmbedRow reads table.
+func (c *metalBackend) Ink2CanEmbed(table Tensor) bool {
+	b, ok := table.buf.(*metalInk2Weight)
+	if !ok || b.expert < 0 {
+		return false
+	}
+	typ, _, _, _ := b.m.Dims()
+	return metalgemm.Ink2CanEmbed(typ)
+}
+
+// Ink2CopySpans encodes dst[i] = src[i] over n[i] floats for each i.
+func (c *metalBackend) Ink2CopySpans(src, dst []Ink2Ref, n []int) error {
+	ink2MetalScope("Ink2CopySpans")
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	if len(src) != len(n) || len(dst) != len(n) {
+		return fmt.Errorf("metal inkling2 copy spans: %d sources, %d destinations, %d lengths", len(src), len(dst), len(n))
+	}
+	ss, err := ink2MetalRefs(src)
+	if err != nil {
+		return ink2MetalErr("copy spans", err)
+	}
+	ds, err := ink2MetalRefs(dst)
+	if err != nil {
+		return ink2MetalErr("copy spans", err)
+	}
+	d, err := metalInk2Device()
+	if err != nil {
+		return ink2MetalErr("copy spans", err)
+	}
+	from, to := make([]metalgemm.Ink2Span, len(n)), make([]metalgemm.Ink2Span, len(n))
+	for i := range n {
+		from[i], to[i] = metalgemm.Ink2Span{At: ss[i], N: n[i]}, metalgemm.Ink2Span{At: ds[i], N: n[i]}
+	}
+	return ink2MetalErr("copy spans", d.CopySpans(from, to))
+}
+
+// Ink2Commit submits the encoded dispatches without waiting; the returned
+// ticket is what Ink2ReadIntsAfter waits for.
+func (c *metalBackend) Ink2Commit() (uint64, error) {
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	d, err := metalInk2Device()
+	if err != nil {
+		return 0, ink2MetalErr("commit", err)
+	}
+	t, err := d.Commit()
+	return t, ink2MetalErr("commit", err)
+}
+
+// Ink2ReadIntsAfter waits for the dispatches committed up to ticket and reads n
+// int32 at src, leaving later submissions running.
+func (c *metalBackend) Ink2ReadIntsAfter(ticket uint64, src Ink2Ref, n int) ([]int32, error) {
+	metalMu.Lock()
+	defer metalMu.Unlock()
+	d, r, err := ink2MetalBind(src)
+	if err != nil {
+		return nil, ink2MetalErr("read-ints after", err)
+	}
+	out, err := d.ReadIntsAfter(ticket, r[0], n)
+	return out, ink2MetalErr("read-ints after", err)
+}

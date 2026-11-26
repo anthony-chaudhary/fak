@@ -18,9 +18,11 @@ var ink2DecGEMV string
 var ink2DecSource = func() string { return packedCodebooks + packedDequant + packedGEMV + ink2DecGEMV }()
 
 // The routed-product names in FAK_INK2_LEGACY: "routed" (the routed_ kernels and
-// the separate scale pass), "scale" (only the separate scale pass) and "nvfp4w"
-// (NVFP4 weights decoded from the table). Names of other families are ignored here.
-type ink2DecLegacySet struct{ routed, scale, nvfp4w bool }
+// the separate scale pass), "scale" (only the separate scale pass), "nvfp4w"
+// (NVFP4 weights decoded from the table) and "routed2" (runtime column counts
+// instead of the compile-time-shaped kernels). Names of other families are
+// ignored here.
+type ink2DecLegacySet struct{ routed, scale, nvfp4w, routed2 bool }
 
 var ink2DecLegacy = parseInk2DecLegacy(os.Getenv(Ink2LegacyEnv))
 
@@ -33,32 +35,57 @@ func parseInk2DecLegacy(s string) (set ink2DecLegacySet) {
 			set.scale = true
 		case "nvfp4w":
 			set.nvfp4w = true
+		case "routed2":
+			set.routed2 = true
 		}
 	}
 	return set
 }
 
-// ink2DecPlan is a routed kernel and its threadgroup of 1<<rowBits rows.
+// ink2DecPlan is a routed kernel, its threadgroup of 1<<rowBits SIMD groups
+// and the rows each SIMD group computes (0 means 1); a compile-time-shaped
+// kernel also names the only column count it computes.
 type ink2DecPlan struct {
 	kernel  string
 	rowBits int
+	rows    int
+	cols    int
 }
+
+func (pl ink2DecPlan) rowsPerSIMD() int { return max(pl.rows, 1) }
 
 // ink2DecRoutedNVFP4 is the NVFP4 routed kernel that the microbenchmark timed
 // fastest at the resident forward's gate_up and down shapes.
-var ink2DecRoutedNVFP4 = ink2DecPlan{"ink2_dec_routed_nvfp4w", 1}
+var ink2DecRoutedNVFP4 = ink2DecPlan{kernel: "ink2_dec_routed_nvfp4w", rowBits: 1}
+
+type ink2DecShapeKey struct {
+	typ  uint32
+	cols int
+}
+
+// ink2DecShaped holds the compile-time-shaped kernels (ink2_dec_routed_<type>c<cols>r<rows>)
+// the microbenchmark timed fastest at the resident forward's routed shapes.
+var ink2DecShaped = map[ink2DecShapeKey]ink2DecPlan{
+	{17, 2304}: {"ink2_dec_routed_iq2_xsc2304r2", 1, 2, 2304},
+	{18, 2304}: {"ink2_dec_routed_iq3_xxsc2304r2", 2, 2, 2304},
+	{21, 2304}: {"ink2_dec_routed_iq3_sc2304r2", 0, 2, 2304},
+	{20, 1152}: {"ink2_dec_routed_iq4_nlc1152r2", 1, 2, 1152},
+}
 
 // ink2DecRoutedPick picks the routed kernel of a weight type, or none for the
 // routed_ kernel and its separate scale pass.
-func ink2DecRoutedPick(typ uint32) ink2DecPlan {
+func ink2DecRoutedPick(typ uint32, cols int) ink2DecPlan {
 	legacy := ink2DecLegacy
 	if legacy.routed || int(typ) >= len(ink2RoutedKernel) || ink2RoutedKernel[typ] == "" {
 		return ink2DecPlan{}
 	}
+	if pl, ok := ink2DecShaped[ink2DecShapeKey{typ, cols}]; ok && !legacy.routed2 {
+		return pl
+	}
 	if typ == 40 && !legacy.nvfp4w {
 		return ink2DecRoutedNVFP4
 	}
-	return ink2DecPlan{"ink2_dec_routed_" + ink2RoutedKernel[typ][len("routed_"):], 2}
+	return ink2DecPlan{kernel: "ink2_dec_routed_" + ink2RoutedKernel[typ][len("routed_"):], rowBits: 2}
 }
 
 type ink2DecShape struct{ rows, cols, byteOffset, xStride, scaled, rowBits uint32 }
@@ -74,7 +101,7 @@ func (d *Ink2Device) routedDec(pl ink2DecPlan, w Ink2Weight, ids, x Ink2Ref, xSt
 		return err
 	}
 	if !ids.Valid() || !x.Valid() || !y.Valid() || k < 1 || xStride < 0 || xStride > math.MaxUint32 ||
-		pl.rowBits < 0 || pl.rowBits > 5 || (pl.kernel == "ink2_dec_routed_nvfp4t" && w.Cols > ink2DecXMax) {
+		pl.rowBits < 0 || pl.rowBits > 5 || pl.rows < 0 || (pl.cols != 0 && pl.cols != w.Cols) || (pl.kernel == "ink2_dec_routed_nvfp4t" && w.Cols > ink2DecXMax) {
 		return fmt.Errorf("%w: routed matvec of %d slots, input stride %d, plan %+v", ErrInk2Shape, k, xStride, pl)
 	}
 	p, err := d.Pipeline(ink2DecSource, pl.kernel)
@@ -93,7 +120,8 @@ func (d *Ink2Device) routedDec(pl ink2DecPlan, w Ink2Weight, ids, x Ink2Ref, xSt
 		shape.scaled, scaleArg = 1, scale.Span(0)
 	}
 	// A Metal binding offset is 4-byte aligned; the kernel adds the remainder.
-	return d.Dispatch(p, [3]int{(w.Rows + 1<<pl.rowBits - 1) >> pl.rowBits, k, 1}, [3]int{group, 1, 1},
+	perGroup := pl.rowsPerSIMD() << pl.rowBits
+	return d.Dispatch(p, [3]int{(w.Rows + perGroup - 1) / perGroup, k, 1}, [3]int{group, 1, 1},
 		Ink2BufferAt(w.Buf, w.ByteOff&^3, w.Experts*bytes+w.ByteOff&3),
 		x.Span((k-1)*xStride+w.Cols), y.Span(k*w.Rows), ids.Span(k), scaleArg, Ink2Const(shape))
 }

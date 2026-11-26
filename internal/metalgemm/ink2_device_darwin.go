@@ -118,9 +118,12 @@ func openInk2Device() (*Ink2Device, error) {
 }
 
 // Ink2LegacyEnv lists, comma-separated, the device behaviours to run the
-// previous way: "serial" encodes every dispatch on a serial encoder; the
-// routed GEMV ("routed", "scale", "nvfp4w") and lean op ("mix", "ctrl", "rms",
-// "route") families parse their own names from the same list.
+// previous way: "serial" encodes every dispatch on a serial encoder;
+// "pipeline" reads each decode token back before encoding the next; the
+// routed GEMV ("routed", "scale", "nvfp4w", "routed2"), lean op ("mix",
+// "ctrl", "rms", "route", "ctrlmix") and matvec ("mvlat") families parse their
+// own names from the same list, and "tinyfuse" keeps the general loops of the
+// decode attend and qkv post.
 const Ink2LegacyEnv = "FAK_INK2_LEGACY"
 
 // Ink2Legacy reports whether FAK_INK2_LEGACY names name.
@@ -210,6 +213,11 @@ func (d *Ink2Device) host(r Ink2Ref, n int) ([]byte, error) {
 	if err := d.flushLocked(); err != nil {
 		return nil, err
 	}
+	return d.view(r, n)
+}
+
+// view is the host view of n elements at r, without a fence.
+func (d *Ink2Device) view(r Ink2Ref, n int) ([]byte, error) {
 	if !r.Valid() || r.Off < 0 || n < 0 {
 		return nil, fmt.Errorf("%w: %d floats at offset %d", ErrInk2Shape, n, r.Off)
 	}
@@ -506,6 +514,9 @@ func (d *Ink2Device) MatVec(w Ink2Weight, x, y Ink2Ref) error {
 		return fmt.Errorf("%w: matvec without an input or output", ErrInk2Shape)
 	}
 	d.profileDetail("%dx%d", w.Rows, w.Cols)
+	if pl := ink2MVPick(w.Type, w.Cols); pl.kernel != "" {
+		return d.matVecDec(pl, w, x, y)
+	}
 	return d.Dispatch(p, [3]int{(w.Rows + 3) / 4, 1, 1}, [3]int{128, 1, 1}, w.args(x.Span(w.Cols), y.Span(w.Rows), bytes)...)
 }
 
@@ -523,7 +534,7 @@ func (d *Ink2Device) ExpertMatVec(w Ink2Weight, ids, x Ink2Ref, xStride int, y I
 	if situ != nil {
 		return false, nil
 	}
-	if pl := ink2DecRoutedPick(w.Type); pl.kernel != "" {
+	if pl := ink2DecRoutedPick(w.Type, w.Cols); pl.kernel != "" {
 		if _, err := d.packedShape(w, x, xStride); err != nil {
 			return false, err
 		}

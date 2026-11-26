@@ -42,6 +42,12 @@ void mg_ink2_configure(void *dev, int concurrent, int commit_every, void *untrac
 void mg_ink2_barrier(void *dev);
 // Submits the open command buffer and waits for it. A no-op when nothing is pending.
 int mg_ink2_flush(void *dev);
+// Commits the open command buffer without waiting and returns the event value
+// it signals; the next command buffer waits on it.
+uint64_t mg_ink2_commit(void *dev);
+// Waits for the committed buffers that signal at most value and returns how many
+// command buffers are still outstanding, or -1 with the reason left for mg_ink2_error.
+int mg_ink2_wait(void *dev, uint64_t value);
 
 // Gives every later dispatch its own compute pass with boundary timestamps.
 // Returns 0, changing nothing, when the device cannot sample them.

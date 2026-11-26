@@ -118,6 +118,10 @@ struct Ink2LMixShape {
 
 #define INK2L_EACH_STATE(X) X(0) X(1) X(2) X(3) X(4) X(5) X(6) X(7) X(8) X(9) X(10) X(11) X(12) X(13) X(14) X(15)
 
+#ifndef INK2L_MIX_HELD
+#define INK2L_MIX_HELD 9
+#endif
+
 struct Ink2LStates {
     device const float *at[INK2L_STATES];
 };
@@ -131,12 +135,14 @@ struct Ink2LMixShared {
 
 // The depth mix of ink2_mix. One SIMD group takes the softmax, a state per
 // lane, and the rest read its result: the scores are a few dozen operations
-// that every thread would otherwise repeat.
+// that every thread would otherwise repeat. S, when nonzero, is the state
+// count at compile time, so no load waits on a state-count branch.
+template <uint S>
 static inline void ink2l_mix(thread const Ink2LStates &st, device const float *queries,
                              device const float *norm0, device const float *norm1, device const float *norm2,
                              device const float *norm3, device float *outs, constant Ink2LMixShape &p, uint q, uint tid,
                              uint lane, uint sg, threadgroup Ink2LMixShared &sh) {
-    const uint n = p.n, states = p.states;
+    const uint n = p.n, states = S ? S : p.states;
     device const float *query = queries + ulong(q) * n;
     device float *out = outs + ulong(q) * n;
     const bool weighted = p.norm != 0 && ((p.weighted >> q) & 1);
@@ -146,7 +152,15 @@ static inline void ink2l_mix(thread const Ink2LStates &st, device const float *q
     INK2L_EACH_ROW(INK2L_QUERY, _)
 #undef INK2L_QUERY
 
-#define INK2L_LOAD(a, k) const float x##k = st.at[a][c##k];
+    // With a few states fixed at compile time every state's elements load at
+    // once, held for both the scores and the blend; more would spill.
+    const bool held = S != 0 && S <= INK2L_MIX_HELD;
+#define INK2L_HOLD(a, k) const float x##a##_##k = held && S > a ? st.at[a][c##k] : 0.0f;
+#define INK2L_HOLD_STATE(a) INK2L_EACH_ROW(INK2L_HOLD, a)
+    INK2L_EACH_STATE(INK2L_HOLD_STATE)
+#undef INK2L_HOLD_STATE
+#undef INK2L_HOLD
+#define INK2L_LOAD(a, k) const float x##k = held ? x##a##_##k : st.at[a][c##k];
 #define INK2L_CHAIN(a, k)              \
     if (on##k) {                       \
         ss = fma(x##k, x##k, ss);      \
@@ -239,6 +253,7 @@ static inline void ink2l_mix(thread const Ink2LStates &st, device const float *q
 #define INK2L_STATE_ITEM(k) st##k,
 
 // ink2_mix, bound alike.
+template <uint S>
 kernel void ink2_mix_lean(INK2L_MIX_PARAMS
                           uint3 group [[threadgroup_position_in_grid]],
                           uint tid [[thread_index_in_threadgroup]],
@@ -246,8 +261,37 @@ kernel void ink2_mix_lean(INK2L_MIX_PARAMS
                           uint sg [[simdgroup_index_in_threadgroup]]) {
     threadgroup Ink2LMixShared sh;
     const Ink2LStates st = {{INK2L_EACH_STATE(INK2L_STATE_ITEM)}};
-    ink2l_mix(st, queries, norm0, norm1, norm2, norm3, outs, p, group.x, tid, lane, sg, sh);
+    ink2l_mix<S>(st, queries, norm0, norm1, norm2, norm3, outs, p, group.x, tid, lane, sg, sh);
 }
+
+#define INK2L_MIX_KERNEL(S, NAME)                                                                       \
+    template [[host_name(NAME)]] kernel void ink2_mix_lean<S>(INK2L_MIX_PARAMS uint3, uint, uint, uint);
+#undef INK2L_PARAM
+#define INK2L_PARAM(k) device const float *,
+#undef INK2L_MIX_PARAMS
+#define INK2L_MIX_PARAMS                                                                                \
+    INK2L_EACH_STATE(INK2L_PARAM) device const float *, device const float *, device const float *,     \
+        device const float *, device const float *, device float *, constant Ink2LMixShape &,
+INK2L_MIX_KERNEL(0, "ink2_mix_lean")
+#define INK2L_MIX_FIXED(S) INK2L_MIX_KERNEL(S, "ink2_mix_lean_" #S)
+INK2L_MIX_FIXED(1)
+INK2L_MIX_FIXED(2)
+INK2L_MIX_FIXED(3)
+INK2L_MIX_FIXED(4)
+INK2L_MIX_FIXED(5)
+INK2L_MIX_FIXED(6)
+INK2L_MIX_FIXED(7)
+INK2L_MIX_FIXED(8)
+INK2L_MIX_FIXED(9)
+INK2L_MIX_FIXED(10)
+INK2L_MIX_FIXED(11)
+INK2L_MIX_FIXED(12)
+INK2L_MIX_FIXED(13)
+INK2L_MIX_FIXED(14)
+INK2L_MIX_FIXED(15)
+INK2L_MIX_FIXED(16)
+#undef INK2L_MIX_FIXED
+#undef INK2L_MIX_KERNEL
 
 #undef INK2L_STATE_ITEM
 #undef INK2L_PARAM
@@ -325,7 +369,14 @@ struct Ink2LCtrlShape {
     uint n, rank;
 };
 
+// A controller weight is float32, or bfloat16 when every value is exactly one:
+// its float32 is the bfloat16 bits followed by sixteen zero bits, so widening
+// it is the same value at half the bytes read.
+static inline float ink2l_wt(device const float *w, uint i) { return w[i]; }
+static inline float ink2l_wt(device const ushort *w, uint i) { return as_type<float>(uint(w[i]) << 16); }
+
 // ink2_ctrl_down with each thread's columns named, bound alike.
+template <typename W>
 kernel void ink2_ctrl_down_lean(device const float *cur0 [[buffer(0)]],
                                 device const float *cur1 [[buffer(1)]],
                                 device const float *cur2 [[buffer(2)]],
@@ -334,10 +385,10 @@ kernel void ink2_ctrl_down_lean(device const float *cur0 [[buffer(0)]],
                                 device const float *msg1 [[buffer(5)]],
                                 device const float *msg2 [[buffer(6)]],
                                 device const float *msg3 [[buffer(7)]],
-                                device const float *down0 [[buffer(8)]],
-                                device const float *down1 [[buffer(9)]],
-                                device const float *down2 [[buffer(10)]],
-                                device const float *down3 [[buffer(11)]],
+                                device const W *down0 [[buffer(8)]],
+                                device const W *down1 [[buffer(9)]],
+                                device const W *down2 [[buffer(10)]],
+                                device const W *down3 [[buffer(11)]],
                                 device float *g [[buffer(12)]],
                                 constant Ink2LCtrlShape &p [[buffer(13)]],
                                 uint3 group [[threadgroup_position_in_grid]],
@@ -348,10 +399,11 @@ kernel void ink2_ctrl_down_lean(device const float *cur0 [[buffer(0)]],
     const uint r = group.x, j = group.y, n = p.n;
     device const float *cur = ink2l_pick4(j, cur0, cur1, cur2, cur3);
     device const float *msg = ink2l_pick4(j, msg0, msg1, msg2, msg3);
-    device const float *wc = ink2l_pick4(j, down0, down1, down2, down3) + ulong(r) * 2 * n;
-    device const float *wm = wc + n;
+    device const W *wc = ink2l_pick4(j, down0, down1, down2, down3) + ulong(r) * 2 * n;
+    device const W *wm = wc + n;
     INK2L_EACH_ROW(INK2L_INDEX, _)
-#define INK2L_LOAD(a, k) const float x##k = cur[c##k], y##k = msg[c##k], u##k = wc[c##k], v##k = wm[c##k];
+#define INK2L_LOAD(a, k) \
+    const float x##k = cur[c##k], y##k = msg[c##k], u##k = ink2l_wt(wc, c##k), v##k = ink2l_wt(wm, c##k);
     INK2L_EACH_ROW(INK2L_LOAD, _)
 #undef INK2L_LOAD
     float ssc = 0.0f, ssm = 0.0f, dc = 0.0f, dm = 0.0f;
@@ -381,9 +433,18 @@ kernel void ink2_ctrl_down_lean(device const float *cur0 [[buffer(0)]],
     }
 }
 
+#define INK2L_CTRL_DOWN(W, NAME)                                                                                   \
+    template [[host_name(NAME)]] kernel void ink2_ctrl_down_lean<W>(                                               \
+        device const float *, device const float *, device const float *, device const float *, device const float *, \
+        device const float *, device const float *, device const float *, device const W *, device const W *,       \
+        device const W *, device const W *, device float *, constant Ink2LCtrlShape &, uint3, uint, uint, uint);
+INK2L_CTRL_DOWN(float, "ink2_ctrl_down_lean")
+INK2L_CTRL_DOWN(ushort, "ink2_ctrl_down_lean_bf16")
+#undef INK2L_CTRL_DOWN
+
 // ink2_ctrl_apply for a rank fixed at compile time, so a thread's loads of
 // both rank-long rows issue together instead of four per loop trip.
-template <uint R>
+template <uint R, typename W>
 kernel void ink2_ctrl_apply_lean(device const float *cur0 [[buffer(0)]],
                                  device const float *cur1 [[buffer(1)]],
                                  device const float *cur2 [[buffer(2)]],
@@ -392,47 +453,50 @@ kernel void ink2_ctrl_apply_lean(device const float *cur0 [[buffer(0)]],
                                  device const float *msg1 [[buffer(5)]],
                                  device const float *msg2 [[buffer(6)]],
                                  device const float *msg3 [[buffer(7)]],
-                                 device const float *gain0 [[buffer(8)]],
-                                 device const float *gain1 [[buffer(9)]],
-                                 device const float *gain2 [[buffer(10)]],
-                                 device const float *gain3 [[buffer(11)]],
-                                 device const float *forget0 [[buffer(12)]],
-                                 device const float *forget1 [[buffer(13)]],
-                                 device const float *forget2 [[buffer(14)]],
-                                 device const float *forget3 [[buffer(15)]],
+                                 device const W *gain0 [[buffer(8)]],
+                                 device const W *gain1 [[buffer(9)]],
+                                 device const W *gain2 [[buffer(10)]],
+                                 device const W *gain3 [[buffer(11)]],
+                                 device const W *forget0 [[buffer(12)]],
+                                 device const W *forget1 [[buffer(13)]],
+                                 device const W *forget2 [[buffer(14)]],
+                                 device const W *forget3 [[buffer(15)]],
                                  device const float *g [[buffer(16)]],
                                  device float *out [[buffer(17)]],
                                  constant Ink2LCtrlShape &p [[buffer(18)]],
                                  uint2 at [[thread_position_in_grid]]) {
     const uint i = at.x, j = at.y;
     device const float *gj = g + ulong(j) * R;
-    device const float *gr = ink2l_pick4(j, gain0, gain1, gain2, gain3) + ulong(i) * R;
-    device const float *fr = ink2l_pick4(j, forget0, forget1, forget2, forget3) + ulong(i) * R;
+    device const W *gr = ink2l_pick4(j, gain0, gain1, gain2, gain3) + ulong(i) * R;
+    device const W *fr = ink2l_pick4(j, forget0, forget1, forget2, forget3) + ulong(i) * R;
     float4 gain4 = float4(0.0f), forget4 = float4(0.0f);
     uint c = 0;
 #pragma unroll
     for (; c + 4 <= R; c += 4) {
         const float4 gv = float4(gj[c], gj[c + 1], gj[c + 2], gj[c + 3]);
-        gain4 = fma(float4(gr[c], gr[c + 1], gr[c + 2], gr[c + 3]), gv, gain4);
-        forget4 = fma(float4(fr[c], fr[c + 1], fr[c + 2], fr[c + 3]), gv, forget4);
+        gain4 = fma(float4(ink2l_wt(gr, c), ink2l_wt(gr, c + 1), ink2l_wt(gr, c + 2), ink2l_wt(gr, c + 3)), gv, gain4);
+        forget4 = fma(float4(ink2l_wt(fr, c), ink2l_wt(fr, c + 1), ink2l_wt(fr, c + 2), ink2l_wt(fr, c + 3)), gv, forget4);
     }
     float gain = (gain4.x + gain4.y) + (gain4.z + gain4.w), forget = (forget4.x + forget4.y) + (forget4.z + forget4.w);
 #pragma unroll
     for (; c < R; c++) {
-        gain = fma(gr[c], gj[c], gain);
-        forget = fma(fr[c], gj[c], forget);
+        gain = fma(ink2l_wt(gr, c), gj[c], gain);
+        forget = fma(ink2l_wt(fr, c), gj[c], forget);
     }
     const float x = ink2l_pick4(j, cur0, cur1, cur2, cur3)[i], m = ink2l_pick4(j, msg0, msg1, msg2, msg3)[i];
     const float f = tanh(forget), t = tanh(gain);
     out[ulong(j) * p.n + i] = (x - f * x) + t * m;
 }
 
-#define INK2L_CTRL_APPLY(R)                                                                                          \
-    template [[host_name("ink2_ctrl_apply_lean_" #R)]] kernel void ink2_ctrl_apply_lean<R>(                           \
+#define INK2L_CTRL_APPLY_AS(R, W, NAME)                                                                              \
+    template [[host_name(NAME)]] kernel void ink2_ctrl_apply_lean<R, W>(                                              \
         device const float *, device const float *, device const float *, device const float *, device const float *, \
-        device const float *, device const float *, device const float *, device const float *, device const float *, \
-        device const float *, device const float *, device const float *, device const float *, device const float *, \
-        device const float *, device const float *, device float *, constant Ink2LCtrlShape &, uint2);
+        device const float *, device const float *, device const float *, device const W *, device const W *,       \
+        device const W *, device const W *, device const W *, device const W *, device const W *, device const W *, \
+        device const float *, device float *, constant Ink2LCtrlShape &, uint2);
+#define INK2L_CTRL_APPLY(R)                                        \
+    INK2L_CTRL_APPLY_AS(R, float, "ink2_ctrl_apply_lean_" #R)      \
+    INK2L_CTRL_APPLY_AS(R, ushort, "ink2_ctrl_apply_lean_bf16_" #R)
 INK2L_CTRL_APPLY(16)
 INK2L_CTRL_APPLY(32)
 INK2L_CTRL_APPLY(48)

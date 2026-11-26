@@ -88,6 +88,135 @@ static inline void ink2_clip(device float *x, device const float *scale, bool sc
     }
 }
 
+// The host builds this source again with INK2_QKV_NAMED for heads of 128
+// dims, 16 relative states, 32 lanes and convs of 4 taps. That build's
+// ink2_qkv_post (the general one is described below) keeps every operation and
+// its order but loads a lane's elements, and a conv's taps and history, before
+// its first store.
+#ifdef INK2_QKV_NAMED
+#define INK2_QKV_PER 4u
+#define INK2_QKV_LANES 32u
+#define INK2_QKV_HD (INK2_QKV_PER * INK2_QKV_LANES)
+#define INK2_QKV_REL 16u
+
+// ink2_clip of this lane's values v, already loaded, into x.
+static inline void ink2_clip_regs(thread float *v, uint per, device float *x, device const float *scale, bool scaled,
+                                  float thr, uint lane, float gain, bool gained) {
+    float ss = 0.0f;
+    for (uint t = 0; t < per; t++) {
+        if (scaled) v[t] *= scale[lane + t * INK2_QKV_LANES];
+        ss = fma(v[t], v[t], ss);
+    }
+    ss = simd_sum(ss);
+    float f = thr / (sqrt(ss) + 1e-6f);
+    if (f > 1.0f) f = 1.0f;
+    if (f < 0.0f) f = 0.0f;
+    for (uint t = 0; t < per; t++) {
+        float u = v[t] * f;
+        if (gained) u *= gain;
+        x[lane + t * INK2_QKV_LANES] = u;
+    }
+}
+
+// ink2_conv_chan of four taps for INK2_QKV_PER channels c0 + t * INK2_QKV_LANES.
+static inline void ink2_conv4_regs(thread float *xs, uint c0, device const float *w, device const float *dyn,
+                                   bool dynamic, device float *hist, float norm) {
+    float h[INK2_QKV_PER][3], wt[INK2_QKV_PER][4], dt[INK2_QKV_PER][4];
+    for (uint t = 0; t < INK2_QKV_PER; t++) {
+        const uint c = c0 + t * INK2_QKV_LANES;
+        device const float *hc = hist + ulong(c) * 3;
+        device const float *wc = w + ulong(c) * 4;
+        device const float *dh = dyn + ulong(c / INK2_QKV_HD) * 4;
+        for (uint i = 0; i < 3; i++) h[t][i] = hc[i];
+        for (uint i = 0; i < 4; i++) wt[t][i] = wc[i];
+        for (uint i = 0; i < 4; i++) dt[t][i] = 0.0f;
+        if (dynamic)
+            for (uint i = 0; i < 4; i++) dt[t][i] = dh[i];
+    }
+    for (uint t = 0; t < INK2_QKV_PER; t++) {
+        const float xc = xs[t];
+        float acc = 0.0f;
+        for (uint i = 0; i < 3; i++) acc += h[t][i] * wt[t][i];
+        acc += xc * wt[t][3];
+        if (dynamic) {
+            acc += dt[t][0] * xc;
+            for (uint lag = 1; lag < 4; lag++) acc += dt[t][lag] * h[t][3 - lag];
+        }
+        xs[t] = (xc + acc) * norm;
+        device float *hc = hist + ulong(c0 + t * INK2_QKV_LANES) * 3;
+        hc[0] = h[t][1];
+        hc[1] = h[t][2];
+        hc[2] = xc;
+    }
+}
+
+kernel void ink2_qkv_post(device float *q [[buffer(0)]],
+                          device float *r [[buffer(1)]],
+                          device const float *k [[buffer(2)]],
+                          device const float *v [[buffer(3)]],
+                          device const float *qclip [[buffer(4)]],
+                          device const float *rclip [[buffer(5)]],
+                          device float *kcache [[buffer(6)]],
+                          device float *vcache [[buffer(7)]],
+                          device const int *meta [[buffer(8)]],
+                          device const float *kw [[buffer(9)]],
+                          device const float *vw [[buffer(10)]],
+                          device const float *kdyn [[buffer(11)]],
+                          device const float *vdyn [[buffer(12)]],
+                          device float *khist [[buffer(13)]],
+                          device float *vhist [[buffer(14)]],
+                          constant Ink2QKVShape &s [[buffer(15)]],
+                          uint b [[threadgroup_position_in_grid]],
+                          uint lane [[thread_index_in_threadgroup]]) {
+    const uint pos = uint(meta[0]);
+    const uint kvDim = s.kvHeads * INK2_QKV_HD;
+    float xs[INK2_QKV_PER];
+    if (b < s.heads) {
+        float tau = 1.0f;
+        if (s.global != 0) tau = 1.0f + s.alpha * log(max(1.0f, float(pos + 1) / s.floorTok));
+        device float *qh = q + ulong(b) * INK2_QKV_HD;
+        device float *rh = r + ulong(b) * INK2_QKV_REL;
+        for (uint t = 0; t < INK2_QKV_PER; t++) xs[t] = qh[lane + t * INK2_QKV_LANES];
+        float rv = lane < INK2_QKV_REL ? rh[lane] : 0.0f;
+        ink2_clip_regs(xs, INK2_QKV_PER, qh, qclip + ulong(b) * INK2_QKV_HD, true, s.qkClip, lane, tau, s.global != 0);
+        // A lane past the relative states holds a zero and stores nothing.
+        float rs = 0.0f;
+        if (lane < INK2_QKV_REL) {
+            rv *= rclip[ulong(b) * INK2_QKV_REL + lane];
+            rs = fma(rv, rv, rs);
+        }
+        rs = simd_sum(rs);
+        float f = s.relClip / (sqrt(rs) + 1e-6f);
+        if (f > 1.0f) f = 1.0f;
+        if (f < 0.0f) f = 0.0f;
+        if (lane < INK2_QKV_REL) {
+            float u = rv * f;
+            if (s.global != 0) u *= tau;
+            rh[lane] = u;
+        }
+        return;
+    }
+    const ulong row = ulong(pos % s.cap) * kvDim;
+    const bool isK = b < s.heads + s.kvHeads;
+    const uint first = (isK ? b - s.heads : b - s.heads - s.kvHeads) * INK2_QKV_HD;
+    device const float *src = isK ? k : v;
+    for (uint t = 0; t < INK2_QKV_PER; t++) xs[t] = src[first + lane + t * INK2_QKV_LANES];
+    if (s.conv != 0) {
+        if (isK) ink2_conv4_regs(xs, first + lane, kw, kdyn, s.kDynamic != 0, khist, s.kNorm);
+        else ink2_conv4_regs(xs, first + lane, vw, vdyn, s.vDynamic != 0, vhist, s.vNorm);
+    }
+    if (isK) {
+        ink2_clip_regs(xs, INK2_QKV_PER, kcache + row + first, kcache, false, s.qkClip, lane, 1.0f, false);
+        return;
+    }
+    float ss = 0.0f;
+    for (uint t = 0; t < INK2_QKV_PER; t++) ss = fma(xs[t], xs[t], ss);
+    ss = simd_sum(ss);
+    const float scale = 1.0f / sqrt(ss / float(INK2_QKV_HD) + s.eps);
+    device float *dst = vcache + row + first;
+    for (uint t = 0; t < INK2_QKV_PER; t++) dst[lane + t * INK2_QKV_LANES] = xs[t] * scale;
+}
+#else
 // Post-projection attention prep of one layer visit: per-head q and r clips
 // with the global log-scale tau, the k clip, the v RMS, and the append of k and
 // v into the slot cache row of the current position (a ring for local slots),
@@ -152,3 +281,4 @@ kernel void ink2_qkv_post(device float *q [[buffer(0)]],
     const float scale = 1.0f / sqrt(ss / float(s.headDim) + s.eps);
     for (uint i = lane; i < s.headDim; i += s.lanes) dst[i] *= scale;
 }
+#endif

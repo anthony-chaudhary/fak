@@ -77,6 +77,17 @@ type ink2Ctrl struct {
 	down         [4]ink2Ref
 	gain, forget [4]ink2Ref
 	rank         int
+	// half holds down, gain and forget as bfloat16 when every value is exactly
+	// one, which the decode step reads instead for the same bits.
+	half *ink2CtrlHalf
+}
+
+type ink2CtrlHalf struct{ down, gain, forget [4]ink2Ref }
+
+// ink2BF16Controls is a device that runs the controllers on bfloat16 weights.
+type ink2BF16Controls interface {
+	Ink2PackBF16(src compute.Ink2Ref, n int) (compute.Tensor, bool, error)
+	Ink2ControlBF16(ctl compute.Ink2Controls, g, out compute.Ink2Ref, n, rank int, norms []compute.Ink2Ref, eps float32) (bool, error)
 }
 
 // inkling2Resident runs the inkling2_loop decode forward with every activation,
@@ -134,6 +145,8 @@ type inkling2Resident struct {
 	// widths under specMax, by width
 	tailWarm, tailReady, tailKeepReady [inkling2SpecMaxDraft + 1]bool
 	draft                              ink2ContextDraft
+
+	pipe *ink2Pipe // decode pipelining, nil when the device or table cannot run it
 
 	// decode-window report of FAK_INK2_PROFILE on a Metal device, printed at
 	// close; it counts plain steps only, so speculative tokens inflate it
@@ -410,6 +423,7 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 			c.gain[j] = s.f32Ref(cw.Gain[j])
 			c.forget[j] = s.f32Ref(cw.Forget[j])
 		}
+		s.packCtrl(c, hp.Hidden)
 	}
 
 	if ctx == inkling2ResidentCtxAuto {
@@ -471,6 +485,7 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 	s.argIdx = s.alloc(4)
 	s.graph = inkling2DefaultOn(be, "FAK_INKLING2_GRAPH", os.LookupEnv) && !s.hostRouting
 	s.batched = s.batched && !s.hostRouting
+	s.enablePipe(ctx)
 	if s.err != nil {
 		err := s.err
 		s.close()
@@ -484,6 +499,39 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 }
 
 func (m ink2Mat) ref() ink2Ref { return compute.Ink2At(m.t, 0) }
+
+// packCtrl gives c its bfloat16 weights when the device runs them and every
+// weight packs.
+func (s *inkling2Resident) packCtrl(c *ink2Ctrl, n int) {
+	pk, ok := s.dev.(ink2BF16Controls)
+	if !ok || s.err != nil {
+		return
+	}
+	var h ink2CtrlHalf
+	var made []compute.Tensor
+	pack := func(dst *ink2Ref, src ink2Ref, count int) bool {
+		t, ok, err := pk.Ink2PackBF16(src, count)
+		if err != nil {
+			s.fail(err)
+		}
+		if !ok {
+			return false
+		}
+		made = append(made, t)
+		*dst = compute.Ink2At(t, 0)
+		return true
+	}
+	for j := range 4 {
+		if !pack(&h.down[j], c.down[j], c.rank*2*n) || !pack(&h.gain[j], c.gain[j], n*c.rank) || !pack(&h.forget[j], c.forget[j], n*c.rank) {
+			for _, t := range made {
+				s.be.Free(t)
+			}
+			return
+		}
+	}
+	s.owned = append(s.owned, made...)
+	c.half = &h
+}
 
 // f32Ref is a weight the controller kernel reads directly as dense F32 rows.
 func (s *inkling2Resident) f32Ref(m model.Inkling2LoopMatrix) ink2Ref {
@@ -530,6 +578,7 @@ func inkling2SlotLayer(hp model.Inkling2LoopHParams, slot int) int {
 }
 
 func (s *inkling2Resident) close() {
+	s.pipeDrain()
 	if s.report && s.decN > 0 {
 		s.report = false
 		if p, ok := compute.MetalInkling2Profile(); ok {
@@ -560,8 +609,13 @@ func at(r ink2Ref, off int) ink2Ref { return compute.Ink2At(r.T, r.Off+off) }
 
 func (s *inkling2Resident) mv(m ink2Mat, x ink2Ref) ink2Ref {
 	y := s.tmp(m.rows)
+	s.mvInto(m, x, y)
+	return y
+}
+
+func (s *inkling2Resident) mvInto(m ink2Mat, x, y ink2Ref) {
 	if s.err != nil {
-		return y
+		return
 	}
 	if m.t.Dtype == compute.Q8_0 && x.T.Buf() == s.arena.T.Buf() {
 		// arena slots are never reused within a token, so the offset names the value
@@ -573,11 +627,10 @@ func (s *inkling2Resident) mv(m ink2Mat, x ink2Ref) ink2Ref {
 		ok, err := s.dev.Ink2MatVecQ8(m.t, x, ink2Ref{}, q, !seen, y)
 		if err != nil || ok {
 			s.fail(err)
-			return y
+			return
 		}
 	}
 	s.fail(s.dev.Ink2MatVec(m.t, x, y))
-	return y
 }
 
 // mvGated is mv(m, x * sigmoid(gate)); on a Q8_0 weight the gate is applied while x
@@ -623,17 +676,28 @@ func (s *inkling2Resident) mixNorm(states []ink2Ref, queries ink2Ref, nq int, no
 // outputs as consecutive rows, each RMS-normalized by norms[i].
 func (s *inkling2Resident) control(curs, msgs []ink2Ref, c *ink2Ctrl, js []int, norms []ink2Ref) ink2Ref {
 	h := s.hp.Hidden
-	ctl := compute.Ink2Controls{Cur: curs, Msg: msgs}
-	for _, j := range js {
-		ctl.Down = append(ctl.Down, c.down[j])
-		ctl.Gain = append(ctl.Gain, c.gain[j])
-		ctl.Forget = append(ctl.Forget, c.forget[j])
+	weights := func(down, gain, forget *[4]ink2Ref) compute.Ink2Controls {
+		ctl := compute.Ink2Controls{Cur: curs, Msg: msgs}
+		for _, j := range js {
+			ctl.Down = append(ctl.Down, down[j])
+			ctl.Gain = append(ctl.Gain, gain[j])
+			ctl.Forget = append(ctl.Forget, forget[j])
+		}
+		return ctl
 	}
 	g := s.tmp(len(js) * c.rank)
 	out := s.tmp(len(js) * h)
-	if s.err == nil {
-		s.fail(s.dev.Ink2Control(ctl, g, out, h, c.rank, norms, s.hp.NormEps))
+	if s.err != nil {
+		return out
 	}
+	if c.half != nil {
+		ok, err := s.dev.(ink2BF16Controls).Ink2ControlBF16(weights(&c.half.down, &c.half.gain, &c.half.forget), g, out, h, c.rank, norms, s.hp.NormEps)
+		if err != nil || ok {
+			s.fail(err)
+			return out
+		}
+	}
+	s.fail(s.dev.Ink2Control(weights(&c.down, &c.gain, &c.forget), g, out, h, c.rank, norms, s.hp.NormEps))
 	return out
 }
 
@@ -834,7 +898,11 @@ func (s *inkling2Resident) moeConv(l *ink2Layer, x ink2Ref, slot int, resid ink2
 
 // forward enqueues one token's forward from the uploaded input row through the
 // argmax; it issues no host fence unless host routing is required.
-func (s *inkling2Resident) forward() {
+func (s *inkling2Resident) forward() { s.forwardTo(s.argIdx, ink2Ref{}) }
+
+// forwardTo is forward with the argmax written to arg and, when logits is set,
+// the logits too instead of to the arena.
+func (s *inkling2Resident) forwardTo(arg, logits ink2Ref) {
 	hp := s.hp
 	s.off = 0
 	clear(s.q8)
@@ -871,16 +939,18 @@ func (s *inkling2Resident) forward() {
 		cur = s.layer(il, il, cur, &blocks, nil, nil)
 	}
 	x := s.mixNorm(with(blocks, cur), s.outResQ, 1, []ink2Ref{s.outNorm})
-	logits := s.mv(s.output, x)
+	if logits.T.Buf() == nil {
+		logits = s.tmp(s.output.rows)
+	}
+	s.mvInto(s.output, x, logits)
 	s.stepLogits = logits
 	if s.err == nil {
-		s.fail(s.dev.Ink2SoftcapArgmax(logits, hp.VocabUnpadded, hp.FinalLogitSoftcap, s.argIdx))
+		s.fail(s.dev.Ink2SoftcapArgmax(logits, hp.VocabUnpadded, hp.FinalLogitSoftcap, arg))
 	}
 }
 
 // step consumes one token at the next position and returns the greedy next token.
 func (s *inkling2Resident) step(token int) (int, error) {
-	hp := s.hp
 	if s.report && s.decN == 0 && s.warm {
 		// the window opens one eager token in, so lazily sized scratch is excluded
 		if err := compute.MetalInkling2ProfileReset(); err != nil {
@@ -894,10 +964,10 @@ func (s *inkling2Resident) step(token int) (int, error) {
 	if s.pos >= s.ctx {
 		return 0, fmt.Errorf("inkling2 resident: position %d exceeds the %d-token global cache", s.pos, s.ctx)
 	}
-	row := make([]float32, hp.Hidden+4)
-	s.w.TokEmbd.Row(token, row[:hp.Hidden])
-	row[hp.Hidden] = math.Float32frombits(uint32(int32(s.pos)))
-	s.fail(s.dev.Ink2Write(s.in, row))
+	if next, ok, err := s.pipeStep(token); ok {
+		return next, err
+	}
+	s.embedHost(token)
 	switch {
 	case s.graphReady:
 		s.fail(s.dev.Ink2GraphLaunch())
@@ -928,7 +998,22 @@ func (s *inkling2Resident) step(token int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	return s.finishStep(int(got[0])), nil
+}
+
+// embedHost uploads the token's embedding row and the position.
+func (s *inkling2Resident) embedHost(token int) {
+	hp := s.hp
+	row := make([]float32, hp.Hidden+4)
+	s.w.TokEmbd.Row(token, row[:hp.Hidden])
+	row[hp.Hidden] = math.Float32frombits(uint32(int32(s.pos)))
+	s.fail(s.dev.Ink2Write(s.in, row))
+}
+
+// finishStep advances past the step that returned next.
+func (s *inkling2Resident) finishStep(next int) int {
 	s.pos++
+	s.pipeExpect(next)
 	if s.decN != 0 {
 		s.decN = max(s.decN, 0) + 1
 		s.decS1, _ = compute.MetalInkling2Stats()
@@ -938,7 +1023,7 @@ func (s *inkling2Resident) step(token int) (int, error) {
 		// token boundary for the backend's profile and transient bookkeeping
 		r.Recycle()
 	}
-	return int(got[0]), nil
+	return next
 }
 
 // lastLogits reads back the softcapped logits of the last step or prefill.
@@ -961,6 +1046,6 @@ func inkling2ResidentGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []i
 	return out, st, err
 }
 
-func (s *inkling2Resident) isLocalSlot(slot int) bool {
+func (s *inkling2Resident) localAt(slot int) bool {
 	return s.hp.LocalLayer[inkling2SlotLayer(s.hp, slot)]
 }

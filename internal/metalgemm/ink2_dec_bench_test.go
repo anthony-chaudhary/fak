@@ -135,7 +135,7 @@ func TestInk2DecOpsMicrobench(t *testing.T) {
 		norms        []Ink2Ref
 		gate, act    Ink2Ref
 		g            Ink2Ref
-		ctl          Ink2Controls
+		ctl, half    Ink2Controls
 	}
 	ss := make([]site, sites)
 	for i := range ss {
@@ -153,7 +153,12 @@ func TestInk2DecOpsMicrobench(t *testing.T) {
 			s.ctl.Down = append(s.ctl.Down, put(rank*2*n, 0.02))
 			s.ctl.Gain = append(s.ctl.Gain, put(n*rank, 0.1))
 			s.ctl.Forget = append(s.ctl.Forget, put(n*rank, 0.1))
+			// Any bits time alike, so the packed arm reads a pattern.
+			s.half.Down = append(s.half.Down, put(rank*n, 0.02))
+			s.half.Gain = append(s.half.Gain, put(n*rank/2, 0.1))
+			s.half.Forget = append(s.half.Forget, put(n*rank/2, 0.1))
 		}
+		s.half.Cur, s.half.Msg = s.ctl.Cur, s.ctl.Msg
 	}
 	sub := func(c Ink2Controls, lo, hi int) Ink2Controls {
 		return Ink2Controls{Cur: c.Cur[lo:hi], Msg: c.Msg[lo:hi], Down: c.Down[lo:hi], Gain: c.Gain[lo:hi], Forget: c.Forget[lo:hi]}
@@ -197,6 +202,31 @@ func TestInk2DecOpsMicrobench(t *testing.T) {
 		cases = append(cases, ink2OpsBenchCase{name: fmt.Sprintf("control nj=%d norm", nj), sites: sites, arms: legacyArms(func(i int) error {
 			return d.Control(sub(ss[i].ctl, 0, nj), ss[i].g, ss[i].out, n, rank, ss[i].norms[:nj], 1e-5)
 		})})
+		for _, at := range []int{sites, 1} {
+			cases = append(cases, ink2OpsBenchCase{name: fmt.Sprintf("ctrlmix control nj=%d norm sites=%d", nj, at), sites: at, arms: []ink2OpsBenchArm{
+				{"f32", func(i int) error {
+					ink2OpsLegacy = ink2DecLegacyOps{}
+					return d.Control(sub(ss[i].ctl, 0, nj), ss[i].g, ss[i].out, n, rank, ss[i].norms[:nj], 1e-5)
+				}},
+				{"bf16", func(i int) error {
+					ink2OpsLegacy = ink2DecLegacyOps{}
+					_, err := d.ControlBF16(sub(ss[i].half, 0, nj), ss[i].g, ss[i].out, n, rank, ss[i].norms[:nj], 1e-5)
+					return err
+				}}}})
+		}
+	}
+	for _, c := range []struct{ states, nq int }{{2, 1}, {5, 1}, {9, 1}, {16, 1}, {5, 3}, {12, 4}} {
+		mix := func(ops ink2DecLegacyOps) func(i int) error {
+			return func(i int) error {
+				ink2OpsLegacy = ops
+				return d.Mix(ss[i].states[:c.states], ss[i].queries, c.nq, ss[i].norms[:c.nq], 1e-5, ss[i].out, n)
+			}
+		}
+		// One site chains every launch on its output: the latency the forward waits on.
+		for _, at := range []int{sites, 1} {
+			cases = append(cases, ink2OpsBenchCase{name: fmt.Sprintf("ctrlmix mix s=%d nq=%d sites=%d", c.states, c.nq, at), sites: at,
+				arms: []ink2OpsBenchArm{{"any", mix(ink2DecLegacyOps{ctrlmix: true})}, {"fixed", mix(ink2DecLegacyOps{})}}})
+		}
 	}
 	// The controller's kernels one at a time, nj=3.
 	ctrlPart := func(name string, apply bool) func(i int) error {

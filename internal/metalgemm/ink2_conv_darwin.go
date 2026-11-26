@@ -103,12 +103,19 @@ func (d *Ink2Device) QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2
 			return fmt.Errorf("%w: qkv post conv of kernel %d", ErrInk2Shape, kn)
 		}
 	}
-	pipe, err := d.PipelinePrecise(ink2ConvSource, "ink2_qkv_post")
+	source := ink2ConvSource
+	if !ink2TinyFuseLegacy && p.HeadDim == ink2QKVNamedHeadDim && p.RelLen == ink2QKVNamedRelLen && cv != nil && kn == ink2QKVNamedTaps {
+		source = ink2QKVNamedSource
+	}
+	pipe, err := d.PipelinePrecise(source, "ink2_qkv_post")
 	if err != nil {
 		return err
 	}
 	// Each head reduces across one SIMD group, so that is the threadgroup.
 	lanes := pipe.ThreadWidth()
+	if source == ink2QKVNamedSource && lanes != ink2QKVNamedLanes {
+		return fmt.Errorf("metalgemm: inkling2 qkv post built for SIMD groups of %d threads runs on %d", ink2QKVNamedLanes, lanes)
+	}
 	if lanes < 1 || lanes > pipe.MaxThreads() {
 		return fmt.Errorf("metalgemm: inkling2 qkv post: SIMD groups of %d threads in threadgroups of at most %d", lanes, pipe.MaxThreads())
 	}

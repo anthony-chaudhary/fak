@@ -19,7 +19,7 @@ func ink2DecTestArms[T any](t *testing.T, encode func() error, read func() T) (l
 	for _, arm := range []struct {
 		ops ink2DecLegacyOps
 		dst *T
-	}{{ink2DecLegacyOps{}, &lean}, {ink2DecLegacyOps{mix: true, ctrl: true, rms: true, route: true}, &legacy}} {
+	}{{ink2DecLegacyOps{}, &lean}, {ink2DecLegacyOps{mix: true, ctrl: true, rms: true, route: true, ctrlmix: true}, &legacy}} {
 		ink2OpsLegacy = arm.ops
 		if err := encode(); err != nil {
 			t.Fatal(err)
@@ -36,6 +36,7 @@ func TestInk2DecLegacyEnvNamesTheOpFamilies(t *testing.T) {
 		" Route , ctrl":       {ctrl: true, route: true},
 		"gemv,scalar,rms,mix": {mix: true, rms: true},
 		"mix,ctrl,route,rms":  {mix: true, ctrl: true, rms: true, route: true},
+		"ctrlmix":             {ctrlmix: true},
 	} {
 		if got := parseInk2OpsLegacy(in); got != want {
 			t.Errorf("parseInk2OpsLegacy(%q) = %+v, want %+v", in, got, want)
@@ -277,5 +278,137 @@ func TestInk2LeanRouteRowsMatchLegacyBitForBit(t *testing.T) {
 			t.Fatalf("%s: ids %v, legacy %v", what, lean.ids, legacy.ids)
 		}
 		ink2OpsTestSame(t, what+" weights", lean.wts, legacy.wts)
+	}
+}
+
+// fak-test:runtime integration est=2s lane=default
+func TestInk2LeanMixFixedStatesMatchesAnyStateCountBitForBit(t *testing.T) {
+	d := ink2TestDevice(t)
+	rng := rand.New(rand.NewSource(35))
+	const n, eps = 2304, 1e-5
+	saved := ink2OpsLegacy
+	t.Cleanup(func() { ink2OpsLegacy = saved })
+	for ns := 1; ns <= ink2OpsMaxStates; ns++ {
+		for _, nq := range []int{1, 3, 4} {
+			refs := make([]Ink2Ref, ns)
+			for i := range refs {
+				refs[i] = ink2OpsTestPut(t, d, i%3, ink2OpsTestRand(rng, n, math.Pow(10, float64(i%5-2))))
+			}
+			qr := ink2OpsTestPut(t, d, 1, ink2OpsTestRand(rng, nq*n, 1.5))
+			norms := make([]Ink2Ref, nq)
+			for q := range norms {
+				norms[q] = ink2OpsTestPut(t, d, q, ink2OpsTestRand(rng, n, 1))
+			}
+			out := ink2TestAlloc(t, d, nq*n)
+			var got [2][]float32
+			for arm, ops := range []ink2DecLegacyOps{{}, {ctrlmix: true}} {
+				ink2OpsLegacy = ops
+				if err := d.Mix(refs, qr, nq, norms, eps, out, n); err != nil {
+					t.Fatal(err)
+				}
+				got[arm] = ink2OpsTestRead(t, d, out, nq*n)
+			}
+			ink2OpsTestSame(t, fmt.Sprintf("mix %d states x %d queries", ns, nq), got[0], got[1])
+		}
+	}
+}
+
+// ink2TestBF16 rounds v to the nearest bfloat16 by truncation, which is all
+// the packed controller needs: exactly representable values.
+func ink2TestBF16(v []float32) []float32 {
+	for i, x := range v {
+		v[i] = math.Float32frombits(math.Float32bits(x) &^ 0xffff)
+	}
+	return v
+}
+
+// fak-test:runtime integration est=2s lane=default
+func TestInk2BF16ControlMatchesFloatControlBitForBit(t *testing.T) {
+	d := ink2TestDevice(t)
+	rng := rand.New(rand.NewSource(36))
+	saved := ink2OpsLegacy
+	t.Cleanup(func() { ink2OpsLegacy = saved })
+	var drift ink2OpsTestDrift
+	for _, c := range []struct{ nj, n, rank int }{{1, 2304, 64}, {3, 2304, 64}, {4, 1021, 16}, {2, 3072, 48}, {3, 777, 32}, {2, 4096, 96}, {1, 9, 128}} {
+		what := fmt.Sprintf("bf16 control %d of width %d, rank %d", c.nj, c.n, c.rank)
+		var f32, half Ink2Controls
+		type host struct{ cur, msg, down, gain, forget, norm []float32 }
+		hosts, norms := make([]host, c.nj), make([]Ink2Ref, c.nj)
+		const eps = 1e-5
+		ink2OpsLegacy = ink2DecLegacyOps{}
+		pack := func(r Ink2Ref, count int) Ink2Ref {
+			words, ok, err := d.PackBF16(r, count)
+			if err != nil || !ok {
+				t.Fatalf("%s: pack ok=%v err=%v", what, ok, err)
+			}
+			return ink2OpsTestPut(t, d, 1, words)
+		}
+		for j := range hosts {
+			h := &hosts[j]
+			h.cur, h.msg = ink2OpsTestRand(rng, c.n, 2), ink2OpsTestRand(rng, c.n, 0.5)
+			h.down = ink2TestBF16(ink2OpsTestRand(rng, c.rank*2*c.n, 1/math.Sqrt(float64(2*c.n))))
+			h.gain = ink2TestBF16(ink2OpsTestRand(rng, c.n*c.rank, 1/math.Sqrt(float64(c.rank))))
+			h.forget = ink2TestBF16(ink2OpsTestRand(rng, c.n*c.rank, 1/math.Sqrt(float64(c.rank))))
+			h.norm = ink2OpsTestRand(rng, c.n, 1)
+			cur, msg := ink2OpsTestPut(t, d, j, h.cur), ink2OpsTestPut(t, d, 3, h.msg)
+			down, gain, forget := ink2OpsTestPut(t, d, 1, h.down), ink2OpsTestPut(t, d, 2, h.gain), ink2OpsTestPut(t, d, 5, h.forget)
+			f32.Cur, f32.Msg = append(f32.Cur, cur), append(f32.Msg, msg)
+			f32.Down, f32.Gain, f32.Forget = append(f32.Down, down), append(f32.Gain, gain), append(f32.Forget, forget)
+			half.Cur, half.Msg = f32.Cur, f32.Msg
+			half.Down = append(half.Down, pack(down, c.rank*2*c.n))
+			half.Gain = append(half.Gain, pack(gain, c.n*c.rank))
+			half.Forget = append(half.Forget, pack(forget, c.n*c.rank))
+			norms[j] = ink2OpsTestPut(t, d, 6, h.norm)
+		}
+		g, out := ink2TestAlloc(t, d, c.nj*c.rank+1).At(1), ink2TestAlloc(t, d, c.nj*c.n+3).At(3)
+		ok, err := d.ControlBF16(half, g, out, c.n, c.rank, norms, eps)
+		if err != nil || !ok {
+			t.Fatalf("%s: ok=%v err=%v", what, ok, err)
+		}
+		got := ink2OpsTestRead(t, d, out, c.nj*c.n)
+		lean, legacy := ink2DecTestArms(t,
+			func() error { return d.Control(f32, g, out, c.n, c.rank, norms, eps) },
+			func() []float32 { return ink2OpsTestRead(t, d, out, c.nj*c.n) })
+		ink2OpsTestSame(t, what+" vs float lean", got, lean)
+		ink2OpsTestSame(t, what+" vs first kernels", got, legacy)
+		for j, h := range hosts {
+			want, mag := ink2OpsTestHostControl(h.cur, h.msg, h.down, h.gain, h.forget, c.rank)
+			want, mag = ink2OpsTestHostNorm(want, mag, h.norm, eps)
+			drift.parity(t, fmt.Sprintf("%s controller %d", what, j), got[j*c.n:(j+1)*c.n], want, mag)
+		}
+	}
+	drift.report(t)
+}
+
+// fak-test:runtime integration est=1s lane=default
+func TestInk2PackBF16RefusesInexactValuesAndTheOffSwitch(t *testing.T) {
+	d := ink2TestDevice(t)
+	saved := ink2OpsLegacy
+	t.Cleanup(func() { ink2OpsLegacy = saved })
+	ink2OpsLegacy = ink2DecLegacyOps{}
+	vals := []float32{1, -2.5, 0, float32(math.Inf(-1)), 3.140625}
+	r := ink2OpsTestPut(t, d, 1, vals)
+	words, ok, err := d.PackBF16(r, len(vals))
+	if err != nil || !ok || len(words) != 3 {
+		t.Fatalf("pack exact: %d words ok=%v err=%v", len(words), ok, err)
+	}
+	for i, x := range vals {
+		b := math.Float32bits(words[i/2]) >> (16 * (i % 2)) & 0xffff
+		if b<<16 != math.Float32bits(x) {
+			t.Fatalf("value %d packs to %#x, want %#x", i, b, math.Float32bits(x)>>16)
+		}
+	}
+	if err := d.Write(r.At(2), []float32{1.0000001}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := d.PackBF16(r, len(vals)); err != nil || ok {
+		t.Fatalf("pack of an inexact value: ok=%v err=%v", ok, err)
+	}
+	ink2OpsLegacy = ink2DecLegacyOps{ctrlmix: true}
+	if _, ok, _ := d.PackBF16(r, 2); ok {
+		t.Fatal("pack under ctrlmix")
+	}
+	if ok, _ := d.ControlBF16(Ink2Controls{}, r, r, 2304, 64, nil, 1e-5); ok {
+		t.Fatal("bf16 control under ctrlmix")
 	}
 }
