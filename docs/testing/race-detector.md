@@ -62,7 +62,8 @@ test -race` cannot build an instrumented binary.
 > **The one-command path:** [`tools/race_test.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/race_test.sh)
 > wraps the run with a **cgo preflight** — it proves a C compiler is present and
 > forces `CGO_ENABLED=1` *before* building, then delegates to `fak/test.sh` with
-> the CI-matching flags (`-race -count=1 -timeout=25m ./...`). If cgo is missing
+> the flags (`-race -count=1 -timeout=25m ./...`; the 25m bound is local only, see
+> [CI](#ci-the-durable-witness) for the unit bound). If cgo is missing
 > it refuses with a clear message (exit `2`) instead of silently building a
 > race-*blind* binary and a false green. Use `tools/race_test.sh --check` to run
 > only the preflight. The manual `go test -race` forms below are equivalent on a
@@ -101,18 +102,38 @@ Windows checkout.
 ### CI (the durable witness)
 
 The `race-detector` job in `.github/workflows/ci.yml` runs on `ubuntu-latest`,
-which ships `gcc` and defaults `CGO_ENABLED=1`. It runs `go test -race -count=1
--timeout=25m ./...` — `-count=1` forces a real, uncached run so a green check is
+which ships `gcc` and defaults `CGO_ENABLED=1`. Each matrix unit runs
+`go test -race -count=1 -timeout=12m` on its own packages or `-run` buckets, inside a
+15-minute job bound. `-count=1` forces a real, uncached run so a green check is
 a fresh test execution on that source rather than a cached test-result hit.
+
+**The matrix is generated, not hand-tuned.** `cmd/cifastshard plan` prices each unit
+from `.github/race-package-weights.json`: a whole-package shard pays its package
+test seconds plus one per-unit compile charge; a split package's bucket pays its
+share of the test seconds plus one per-bucket compile charge (warm measured per
+package where at least five warm samples exist, cold measured otherwise). The
+committed command is
+
+```sh
+go run ./cmd/cifastshard plan -weights .github/race-package-weights.json \
+  -unit-budget 660 -parallel 1 -overhead 100 -bucket-skew 1.3 -auto-split \
+  -max-parallel 12 -shards 28 -matrix
+```
+
+`TestCommittedRacePlanFitsBudget` fails when the matrix or the `RACE_SPLIT_PACKAGES`
+env drifts from that output. `TestCommittedRaceUnitsFitTwelveMinuteTestBound` proves
+the slowest predicted unit plus a 120 s tail fits the 15-minute job, which is what
+makes `-timeout=12m` honest. The race build cache is restored from the immutable
+`go.mod`-hash key and only the shard-1 unit saves it on trunk pushes.
 Its terminal result and logs are still needed to establish completion.
 `CGO_ENABLED` is set explicitly in the job so it fails loudly if it ever lands on
 a cgo-less image rather than silently building a race-blind binary.
 
-> **Why `-timeout=25m`.** ThreadSanitizer adds ~5-10x CPU overhead, which pushes
-> compute-bound packages (notably `internal/turnbench`'s grid/sweep tests) past
-> the default 10m per-package binary timeout. The longer timeout only grants
-> wall-clock — it does not change which tests run or relax any assertion. Use the
-> same `-timeout` when running `-race` locally.
+> **Why the timeouts differ.** ThreadSanitizer adds ~5-10x CPU overhead, which pushes
+> compute-bound packages past the default 10m per-package binary timeout. CI grants
+> 12m per unit, inside its 15m job bound, because the planner proves each unit fits.
+> Local runs keep 25m. A longer timeout only grants wall-clock; it does not change
+> which tests run or relax any assertion.
 
 ## Maintaining the race requirement
 

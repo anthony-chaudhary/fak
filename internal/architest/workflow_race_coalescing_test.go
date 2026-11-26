@@ -23,6 +23,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -568,6 +569,8 @@ type ghEvent struct {
 	intent    any
 	inputSHA  any
 	shard     string
+	split     string
+	bucket    string
 }
 
 func (e ghEvent) ctx() map[string]any {
@@ -595,8 +598,16 @@ func (e ghEvent) ctx() map[string]any {
 		}
 		ctx["inputs"] = inputs
 	}
-	if e.shard != "" {
-		ctx["matrix"] = map[string]any{"shard": e.shard}
+	if e.shard != "" || e.split != "" {
+		matrix := map[string]any{}
+		if e.shard != "" {
+			matrix["shard"] = e.shard
+		}
+		if e.split != "" {
+			matrix["split"] = e.split
+			matrix["bucket"] = e.bucket
+		}
+		ctx["matrix"] = matrix
 	}
 	return ctx
 }
@@ -618,6 +629,38 @@ func resolveContract(t *testing.T, c concurrencyContract, ev ghEvent) (string, b
 type enqueued struct {
 	group string
 	run   *ghRun
+}
+
+// raceMatrixEntry is one include of the race-detector matrix: a whole-package
+// shard, or one bucket of a split package.
+type raceMatrixEntry struct {
+	shard, split, bucket string
+}
+
+var (
+	raceShardEntryRE = regexp.MustCompile(`(?m)^\s*- \{ shard: (\d+), shards: \d+ \}\s*$`)
+	raceSplitEntryRE = regexp.MustCompile(`(?m)^\s*- \{ split: (\./\S+), bucket: (\d+), buckets: \d+ \}\s*$`)
+)
+
+// raceMatrix reads the race-detector matrix from the workflow text, so the
+// fixture's burst size and unit names follow the committed plan.
+func raceMatrix(t *testing.T, ciText string) []raceMatrixEntry {
+	t.Helper()
+	block, err := jobBlock(ciText, "race-detector")
+	if err != nil {
+		t.Fatalf("race-detector job block: %v", err)
+	}
+	var out []raceMatrixEntry
+	for _, m := range raceShardEntryRE.FindAllStringSubmatch(block, -1) {
+		out = append(out, raceMatrixEntry{shard: m[1]})
+	}
+	for _, m := range raceSplitEntryRE.FindAllStringSubmatch(block, -1) {
+		out = append(out, raceMatrixEntry{split: m[1], bucket: m[2]})
+	}
+	if len(out) < 3 {
+		t.Fatalf("race-detector matrix has %d entries; the coalescing fixture needs at least 3", len(out))
+	}
+	return out
 }
 
 // --- the fixture ----------------------------------------------------------
@@ -642,6 +685,18 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ci.yml top-level concurrency: %v", err)
 	}
+	matrix := raceMatrix(t, ciText)
+	burst := len(matrix)
+	raceShard := ""
+	for _, e := range matrix {
+		if e.shard != "" {
+			raceShard = e.shard
+			break
+		}
+	}
+	if raceShard == "" {
+		t.Fatal("race-detector matrix has no whole-package shard entry")
+	}
 	raceJob, err := extractConcurrency(ciText, "race-detector")
 	if err != nil {
 		t.Fatalf("ci.yml race-detector concurrency: %v", err)
@@ -663,7 +718,7 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 	t.Run("trunk pushes share one per-ref group with cancel-in-progress off", func(t *testing.T) {
 		sim := newGHConcurrency()
 		var enq []enqueued
-		for i := 0; i < 10; i++ {
+		for i := 0; i < burst; i++ {
 			ev := ghEvent{
 				workflow: "CI", eventName: "push", ref: "refs/heads/main",
 				sha: fmt.Sprintf("sha%02d", i), runID: fmt.Sprintf("%d", i),
@@ -701,10 +756,10 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 	t.Run("ordinary-main race coalesces to one running plus one pending", func(t *testing.T) {
 		sim := newGHConcurrency()
 		var enq []enqueued
-		for i := 0; i < 10; i++ {
+		for i := 0; i < burst; i++ {
 			ev := ghEvent{
 				workflow: "CI", eventName: "push", ref: "refs/heads/main",
-				sha: fmt.Sprintf("sha%02d", i), runID: fmt.Sprintf("%d", i), shard: "cli-a",
+				sha: fmt.Sprintf("sha%02d", i), runID: fmt.Sprintf("%d", i), shard: raceShard,
 			}
 			group, cancel := resolveContract(t, raceJob, ev)
 			r := &ghRun{name: ev.sha}
@@ -732,8 +787,8 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 		if running != 1 || pending != 1 {
 			t.Fatalf("ordinary-main race must admit exactly one running plus one pending run; got running=%d pending=%d cancelled=%d", running, pending, cancelled)
 		}
-		if cancelled != 8 {
-			t.Fatalf("the eight superseded ordinary-main race runs must be cancelled; got %d", cancelled)
+		if cancelled != burst-2 {
+			t.Fatalf("the %d superseded ordinary-main race runs must be cancelled; got %d", burst-2, cancelled)
 		}
 		done := sim.drain(enq[0].group)
 		if len(done) != 2 {
@@ -745,15 +800,76 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 		}
 	})
 
+	t.Run("split bucket races coalesce per bucket and never onto a shard group", func(t *testing.T) {
+		var splits []raceMatrixEntry
+		for _, e := range matrix {
+			if e.split != "" {
+				splits = append(splits, e)
+			}
+		}
+		if len(splits) < 2 {
+			t.Fatalf("the split fixture needs two split buckets; the matrix has %d", len(splits))
+		}
+		sim := newGHConcurrency()
+		var runs []*ghRun
+		var firstGroup string
+		for i := 0; i < burst; i++ {
+			ev := ghEvent{
+				workflow: "CI", eventName: "push", ref: "refs/heads/main",
+				sha: fmt.Sprintf("sha%02d", i), runID: fmt.Sprintf("%d", i),
+				split: splits[0].split, bucket: splits[0].bucket,
+			}
+			group, cancel := resolveContract(t, raceJob, ev)
+			if i == 0 {
+				firstGroup = group
+			} else if group != firstGroup {
+				t.Fatalf("pushes to one split bucket must share a group; %q != %q", group, firstGroup)
+			}
+			r := &ghRun{name: ev.sha}
+			sim.enqueue(group, cancel, r)
+			runs = append(runs, r)
+		}
+		var running, pending int
+		for _, r := range runs {
+			switch r.status {
+			case "running":
+				running++
+			case "pending":
+				pending++
+			}
+		}
+		if running != 1 || pending != 1 {
+			t.Fatalf("split bucket must coalesce to one running plus one pending; got running=%d pending=%d", running, pending)
+		}
+		otherGroup, otherCancel := resolveContract(t, raceJob, ghEvent{
+			workflow: "CI", eventName: "push", ref: "refs/heads/main", sha: "other", runID: "other",
+			split: splits[1].split, bucket: splits[1].bucket,
+		})
+		if otherGroup == firstGroup {
+			t.Fatalf("a different split bucket must not share group %q", otherGroup)
+		}
+		shardGroup, _ := resolveContract(t, raceJob, ghEvent{
+			workflow: "CI", eventName: "push", ref: "refs/heads/main", sha: "s", runID: "s", shard: raceShard,
+		})
+		if shardGroup == firstGroup {
+			t.Fatalf("split bucket group must differ from the shard group %q", shardGroup)
+		}
+		orun := &ghRun{name: "other"}
+		sim.enqueue(otherGroup, otherCancel, orun)
+		if orun.status != "running" {
+			t.Fatalf("another split bucket's race run must start independently; got %s", orun.status)
+		}
+	})
+
 	t.Run("PR race jobs cannot cancel another PR", func(t *testing.T) {
 		sim := newGHConcurrency()
 		pr1 := ghEvent{
 			workflow: "CI", eventName: "pull_request", ref: "refs/pull/1/merge",
-			sha: "pr1sha", runID: "1", prNumber: float64(1), shard: "cli-a",
+			sha: "pr1sha", runID: "1", prNumber: float64(1), shard: raceShard,
 		}
 		pr2 := ghEvent{
 			workflow: "CI", eventName: "pull_request", ref: "refs/pull/2/merge",
-			sha: "pr2sha", runID: "2", prNumber: float64(2), shard: "cli-a",
+			sha: "pr2sha", runID: "2", prNumber: float64(2), shard: raceShard,
 		}
 		g1, c1 := resolveContract(t, raceJob, pr1)
 		g2, c2 := resolveContract(t, raceJob, pr2)
@@ -795,7 +911,7 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 		if rr.status != "running" {
 			t.Fatalf("the pinned release-intent run must start; got %s", rr.status)
 		}
-		for i := 0; i < 10; i++ {
+		for i := 0; i < burst; i++ {
 			ev := ghEvent{
 				workflow: "ci-fast", eventName: "push", ref: "refs/heads/main",
 				sha: fmt.Sprintf("sha%02d", i), runID: fmt.Sprintf("%d", i),
@@ -807,7 +923,7 @@ func TestRaceConcurrencyCoalescesOrdinaryMainAndIsolatesPRs(t *testing.T) {
 			sim.enqueue(g, c, &ghRun{name: ev.sha})
 		}
 		if rr.status != "running" {
-			t.Fatalf("the pinned release-intent run must survive ten later main pushes; got %s", rr.status)
+			t.Fatalf("the pinned release-intent run must survive %d later main pushes; got %s", burst, rr.status)
 		}
 		// The pinned group is keyed by the candidate SHA, so a different
 		// candidate is a different group and cannot coalesce onto it.

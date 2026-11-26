@@ -2,7 +2,8 @@
 //
 //	cifastshard partition -weights F -shards N -index I [-exclude-file X] < go-list-output
 //	cifastshard buckets -buckets K -index I < go-test-list-output
-//	cifastshard weights [-default S] [-overhead S] < go-test-log
+//	cifastshard weights [-default S] [-overhead S] [-partial P,...] < go-test-log
+//	cifastshard plan -weights F -shards N|-min-shards [-unit-budget S] [-parallel P] [-overhead S] [-split P=K,...] < go-list-output
 //
 // partition prints shard I's packages: every package from stdin lands in exactly
 // one of N shards by a deterministic greedy fill on committed per-package
@@ -10,6 +11,8 @@
 // buckets prints bucket I's top-level test names for one package too slow to
 // share a shard; the buckets split the package's listed tests disjointly.
 // weights turns a `go test` log (gh run view --log works) into the weights file.
+// plan prices each unit of a split (overhead + max(sum/p, heaviest package)) and
+// reports the violations, so a matrix can be checked before it is committed.
 //
 // The workflow's evidence check never trusts this program: it re-proves from the
 // per-job receipts that every package and every split test ran exactly once.
@@ -30,7 +33,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: cifastshard partition|buckets|weights [flags]")
+		fmt.Fprintln(os.Stderr, "usage: cifastshard partition|buckets|weights|plan [flags]")
 		os.Exit(2)
 	}
 	var err error
@@ -41,6 +44,8 @@ func main() {
 		err = runBuckets(os.Args[2:], os.Stdin, os.Stdout)
 	case "weights":
 		err = runWeights(os.Args[2:], os.Stdin, os.Stdout)
+	case "plan":
+		err = runPlan(os.Args[2:], os.Stdin, os.Stdout)
 	default:
 		err = fmt.Errorf("unknown subcommand %q", os.Args[1])
 	}
@@ -59,6 +64,13 @@ type Weights struct {
 	Default  float64            `json:"default_seconds"`
 	Overhead float64            `json:"per_package_overhead_seconds"`
 	Packages map[string]float64 `json:"packages"`
+	// CompileDefault is the test-binary compile and link charge of a split
+	// package with no measured entry in CompilePackages. CompileShard is the
+	// charge of one multi-package shard unit. Both are zero when a gate does
+	// not measure compile separately (ci-fast).
+	CompileDefault  float64            `json:"compile_default_seconds"`
+	CompileShard    float64            `json:"compile_shard_seconds"`
+	CompilePackages map[string]float64 `json:"compile_packages"`
 }
 
 const weightsSchema = "fak.ci-fast-package-weights/v1"
@@ -143,7 +155,9 @@ func ShardLoads(shards [][]string, w Weights) []float64 {
 	return out
 }
 
-var testName = regexp.MustCompile(`^(Test|Benchmark|Example|Fuzz)[A-Za-z0-9_]*$`)
+// Benchmark names are excluded: `go test` runs them only under -bench, so a
+// bucket of them would select nothing in the test run.
+var testName = regexp.MustCompile(`^(Test|Example|Fuzz)[A-Za-z0-9_]*$`)
 
 // Buckets splits a package's top-level test names into k disjoint buckets:
 // name i of the sorted distinct list goes to bucket i mod k.
@@ -253,9 +267,11 @@ func runBuckets(args []string, in io.Reader, out io.Writer) error {
 	return nil
 }
 
-var resultLine = regexp.MustCompile(`(?:^|\s)ok\s+(\S+)\s+([0-9]+(?:\.[0-9]+)?)s(?:\s|$)`)
+var resultLine = regexp.MustCompile(`(?:^|\s)(?:ok|FAIL)\s+(\S+)\s+([0-9]+(?:\.[0-9]+)?)s(?:\s|$)`)
 
-// ParseWeights reads `ok <pkg> <secs>s` lines; cached results carry no timing.
+// ParseWeights reads `ok|FAIL <pkg> <secs>s` lines. Cached results carry no
+// timing. A package that appears on several lines keeps its largest time: a
+// repeated line is a retry or a re-run, and the planner must not undercount it.
 func ParseWeights(r io.Reader) (map[string]float64, error) {
 	out := map[string]float64{}
 	sc := bufio.NewScanner(r)
@@ -269,7 +285,10 @@ func ParseWeights(r io.Reader) (map[string]float64, error) {
 		if _, err := fmt.Sscan(m[2], &s); err != nil {
 			return nil, err
 		}
-		out[m[1]] = math.Round(s*10) / 10
+		s = math.Round(s*10) / 10
+		if prev, ok := out[m[1]]; !ok || s > prev {
+			out[m[1]] = s
+		}
 	}
 	return out, sc.Err()
 }
@@ -279,12 +298,20 @@ func runWeights(args []string, in io.Reader, out io.Writer) error {
 	def := fs.Float64("default", 1, "seconds charged to a package with no recorded time")
 	overhead := fs.Float64("overhead", 2, "compile/link/vet seconds charged to every package")
 	source := fs.String("source", "", "where the timings came from")
+	partial := fs.String("partial", "", "comma-separated packages whose lines are -run bucket partials, not whole-package times")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	pkgs, err := ParseWeights(in)
 	if err != nil {
 		return err
+	}
+	// A bucket job's `ok <pkg>` line times only its slice of the package; it
+	// must not be recorded as the whole package's weight.
+	for _, p := range strings.Split(*partial, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			delete(pkgs, p)
+		}
 	}
 	if len(pkgs) == 0 {
 		return fmt.Errorf("no `ok <pkg> <secs>s` lines on stdin")
