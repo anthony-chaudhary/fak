@@ -245,7 +245,7 @@ func TestInk2PConvMatchesSerialConvAndHost(t *testing.T) {
 	}{
 		{n: 300, heads: 1, kn: 4, T: 1}, {n: 96, heads: 8, kn: 4, T: 2, dyn: true}, {n: 257, heads: 1, kn: 2, T: 9, resid: true},
 		{n: 64, heads: 4, kn: 8, T: 7, dyn: true, resid: true}, {n: 1024, heads: 8, kn: 4, T: 64, dyn: true},
-		{n: 2304, heads: 1, kn: 4, T: 3, resid: true},
+		{n: 2304, heads: 1, kn: 4, T: 3, resid: true}, {n: 512, heads: 4, kn: 4, T: 300, dyn: true, resid: true},
 	} {
 		what := fmt.Sprintf("%d channels, %d heads, kernel %d, %d rows, dyn %v, resid %v", c.n, c.heads, c.kn, c.T, c.dyn, c.resid)
 		past := c.kn - 1
@@ -286,6 +286,14 @@ func TestInk2PConvMatchesSerialConvAndHost(t *testing.T) {
 		ink2ConvTestSame(t, what, got, ink2ConvTestRead(t, d, serial, c.T*c.n))
 		gotHist := ink2ConvTestRead(t, d, histBatched, c.n*past)
 		ink2ConvTestSame(t, what+": history", gotHist, ink2ConvTestRead(t, d, histSerial, c.n*past))
+		if c.T >= past {
+			histRows, rows := ink2ConvTestPut(t, d, 5*past, hist), ink2TestAlloc(t, d, c.T*c.n)
+			if err := d.PConvRows(xr, wr, dynRef, histRows, rows, residRef, c.n, c.heads, c.kn, norm, c.T); err != nil {
+				t.Fatalf("%s: rows: %v", what, err)
+			}
+			ink2ConvTestSame(t, what+": rows", ink2ConvTestRead(t, d, rows, c.T*c.n), got)
+			ink2ConvTestSame(t, what+": rows history", ink2ConvTestRead(t, d, histRows, c.n*past), gotHist)
+		}
 
 		hostHist := append([]float32(nil), hist...)
 		for tok := range c.T {
@@ -671,38 +679,46 @@ func TestInk2PBucketIsAStableSortByExpert(t *testing.T) {
 		{1003, 512, func(int) int32 { return int32(rng.Intn(512)) }},
 		// most experts unused, and long runs of one
 		{250, 64, func(i int) int32 { return int32(60 - i%3*30) }},
+		// more pairs than one staged tile of the one-launch sort
+		{9000, 384, func(int) int32 { return int32(rng.Intn(384)) }},
 	} {
-		what := fmt.Sprintf("%d pairs over %d experts", c.npairs, c.nexp)
-		ids := make([]int32, c.npairs)
-		for i := range ids {
-			ids[i] = c.pick(i)
-		}
-		idr := ink2OpsTestPut(t, d, 3, ink2PTestInts(ids))
-		// One scratch region with a guard word on every side of the three tables.
-		scratch := ink2TestAlloc(t, d, 2*c.nexp+c.npairs+5)
-		guard := float32(math.Float32frombits(0xdeadbeef))
-		fill := make([]float32, 2*c.nexp+c.npairs+5)
-		for i := range fill {
-			fill[i] = guard
-		}
-		if err := d.Write(scratch, fill); err != nil {
-			t.Fatal(err)
-		}
-		counts, offsets, order := scratch.At(1), scratch.At(c.nexp+2), scratch.At(2*c.nexp+4)
-		if err := d.PBucket(idr, counts, offsets, order, c.npairs, c.nexp); err != nil {
-			t.Fatalf("%s: %v", what, err)
-		}
-		got, err := d.ReadInts(scratch, len(fill))
-		if err != nil {
-			t.Fatal(err)
-		}
-		wantCounts, wantOffsets, wantOrder := ink2PTestBucket(ids, c.nexp)
-		ink2PTestSameInts(t, what+": counts", got[1:], wantCounts)
-		ink2PTestSameInts(t, what+": offsets", got[c.nexp+2:], wantOffsets)
-		ink2PTestSameInts(t, what+": order", got[2*c.nexp+4:], wantOrder)
-		for _, g := range []int{0, c.nexp + 1, 2*c.nexp + 3, 2*c.nexp + 4 + c.npairs} {
-			if uint32(got[g]) != 0xdeadbeef {
-				t.Fatalf("%s: guard word %d overwritten with %#x", what, g, uint32(got[g]))
+		for _, sorted := range []bool{false, true} {
+			what := fmt.Sprintf("%d pairs over %d experts (one launch %v)", c.npairs, c.nexp, sorted)
+			ids := make([]int32, c.npairs)
+			for i := range ids {
+				ids[i] = c.pick(i)
+			}
+			idr := ink2OpsTestPut(t, d, 3, ink2PTestInts(ids))
+			// One scratch region with a guard word on every side of the three tables.
+			scratch := ink2TestAlloc(t, d, 2*c.nexp+c.npairs+5)
+			guard := float32(math.Float32frombits(0xdeadbeef))
+			fill := make([]float32, 2*c.nexp+c.npairs+5)
+			for i := range fill {
+				fill[i] = guard
+			}
+			if err := d.Write(scratch, fill); err != nil {
+				t.Fatal(err)
+			}
+			counts, offsets, order := scratch.At(1), scratch.At(c.nexp+2), scratch.At(2*c.nexp+4)
+			if sorted {
+				if err := d.PBucketSort(idr, counts, offsets, order, c.npairs, c.nexp); err != nil {
+					t.Fatalf("%s: %v", what, err)
+				}
+			} else if err := d.PBucket(idr, counts, offsets, order, c.npairs, c.nexp); err != nil {
+				t.Fatalf("%s: %v", what, err)
+			}
+			got, err := d.ReadInts(scratch, len(fill))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantCounts, wantOffsets, wantOrder := ink2PTestBucket(ids, c.nexp)
+			ink2PTestSameInts(t, what+": counts", got[1:], wantCounts)
+			ink2PTestSameInts(t, what+": offsets", got[c.nexp+2:], wantOffsets)
+			ink2PTestSameInts(t, what+": order", got[2*c.nexp+4:], wantOrder)
+			for _, g := range []int{0, c.nexp + 1, 2*c.nexp + 3, 2*c.nexp + 4 + c.npairs} {
+				if uint32(got[g]) != 0xdeadbeef {
+					t.Fatalf("%s: guard word %d overwritten with %#x", what, g, uint32(got[g]))
+				}
 			}
 		}
 	}
@@ -874,4 +890,60 @@ func TestInk2PEncodesWithoutSubmitting(t *testing.T) {
 			t.Fatalf("out[%d] = %v", i, v)
 		}
 	}
+}
+
+// fak-test:runtime integration est=2s lane=default
+func TestInk2PCtrlTilesMatchControlAndHost(t *testing.T) {
+	d := ink2TestDevice(t)
+	rng := rand.New(rand.NewSource(95))
+	worst := 0.0
+	for _, c := range []struct{ n, rank, T int }{{256, 64, 40}, {2304, 64, 33}, {384, 128, 70}, {2304, 64, 512}} {
+		what := fmt.Sprintf("width %d, rank %d, %d rows", c.n, c.rank, c.T)
+		cur, msg := ink2OpsTestRand(rng, c.T*c.n, 2), ink2OpsTestRand(rng, c.T*c.n, .5)
+		down := ink2OpsTestRand(rng, c.rank*2*c.n, 1/math.Sqrt(float64(2*c.n)))
+		gain := ink2OpsTestRand(rng, c.n*c.rank, 1/math.Sqrt(float64(c.rank)))
+		forget := ink2OpsTestRand(rng, c.n*c.rank, 1/math.Sqrt(float64(c.rank)))
+		cr, mr, dr := ink2OpsTestPut(t, d, 4, cur), ink2OpsTestPut(t, d, 8, msg), ink2OpsTestPut(t, d, 0, down)
+		gr, fr := ink2OpsTestPut(t, d, 4, gain), ink2OpsTestPut(t, d, 0, forget)
+		g, out := ink2TestAlloc(t, d, c.T*c.rank), ink2TestAlloc(t, d, c.T*c.n)
+		wantG, want := ink2TestAlloc(t, d, c.T*c.rank), ink2TestAlloc(t, d, c.T*c.n)
+		part := ink2TestAlloc(t, d, CtrlDownSplitScratch(c.n, c.rank, c.T))
+		if ok, err := d.PCtrlDownSplit(cr, mr, dr, g, part, c.n, c.rank, c.T); err != nil || !ok {
+			t.Fatalf("%s: ok %v, %v", what, ok, err)
+		}
+		if ok, err := d.PCtrlApplyTile(cr, mr, g, gr, fr, out, c.n, c.rank, c.T); err != nil || !ok {
+			t.Fatalf("%s: ok %v, %v", what, ok, err)
+		}
+		if err := d.PCtrlDown([]Ink2Ref{cr}, []Ink2Ref{mr}, []Ink2Ref{dr}, []Ink2Ref{wantG}, c.n, c.rank, c.T); err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		if err := d.PCtrlApply([]Ink2Ref{cr}, []Ink2Ref{mr}, []Ink2Ref{wantG}, []Ink2Ref{gr}, []Ink2Ref{fr}, []Ink2Ref{want}, c.n, c.rank, c.T); err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		gotG, wg := ink2OpsTestRead(t, d, g, c.T*c.rank), ink2OpsTestRead(t, d, wantG, c.T*c.rank)
+		got, w := ink2OpsTestRead(t, d, out, c.T*c.n), ink2OpsTestRead(t, d, want, c.T*c.n)
+		for tok := range c.T {
+			where := fmt.Sprintf("%s: row %d", what, tok)
+			ink2PGemmClose(t, where+" g", gotG[tok*c.rank:][:c.rank], wg[tok*c.rank:][:c.rank])
+			ink2PGemmClose(t, where, got[tok*c.n:][:c.n], w[tok*c.n:][:c.n])
+			if tok%7 != 0 {
+				continue
+			}
+			host, mag := ink2OpsTestHostControl(cur[tok*c.n:][:c.n], msg[tok*c.n:][:c.n], down, gain, forget, c.rank)
+			for i, h := range host {
+				bound := 1e-5*mag[i] + 1e-6
+				d := math.Abs(float64(got[tok*c.n+i]) - float64(h))
+				worst = max(worst, d/bound)
+				if d > 2*bound {
+					t.Fatalf("%s vs host[%d] = %v, want %v (magnitude %v)", where, i, got[tok*c.n+i], h, mag[i])
+				}
+			}
+		}
+	}
+	// a misaligned operand is declined, not misread
+	if ok, err := d.PCtrlApplyTile(ink2TestAlloc(t, d, 64*64), ink2TestAlloc(t, d, 64*64), ink2TestAlloc(t, d, 65*64).At(1),
+		ink2TestAlloc(t, d, 64*64), ink2TestAlloc(t, d, 64*64), ink2TestAlloc(t, d, 64*64), 64, 64, 64); ok || err != nil {
+		t.Fatalf("misaligned controller tile: ok %v, %v", ok, err)
+	}
+	t.Logf("worst drift is %.3g of the decode bound", worst)
 }

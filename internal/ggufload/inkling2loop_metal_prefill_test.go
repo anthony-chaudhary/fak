@@ -49,7 +49,9 @@ func inkling2MetalPrefillPrompt(t *testing.T, tok *tokenizer.Tokenizer, n int) [
 // The batched prefill leaves the caches and conv histories the per-token
 // resident path does: the greedy continuation of a prompt that spans a chunk
 // boundary is the same on both. FAK_INKLING2_PREFILL_TOKENS overrides the
-// prompt length.
+// prompt length; FAK_INKLING2_PREFILL_SKIP_PERTOKEN=1 drops the slow per-token
+// arm of the long prompt and checks three batched passes agree with each other,
+// so long-prompt throughput is cheap to measure.
 // fak-test:runtime slow est=180s
 func TestInkling2MetalBatchedPrefillMatchesPerToken(t *testing.T) {
 	path := os.Getenv("FAK_INKLING2_TEST_GGUF")
@@ -78,9 +80,14 @@ func TestInkling2MetalBatchedPrefillMatchesPerToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompt := inkling2MetalPrefillPrompt(t, tok, tokens)
+	skipPerToken := os.Getenv("FAK_INKLING2_PREFILL_SKIP_PERTOKEN") == "1"
 	const n = 16
 
-	lease, err := gpulease.Acquire(gpulease.Options{Timeout: 8 * time.Minute, Logf: t.Logf})
+	wait := 8 * time.Minute
+	if d, err := time.ParseDuration(os.Getenv("FAK_GPU_WAIT_BOUND")); err == nil && d > 0 {
+		wait = d
+	}
+	lease, err := gpulease.Acquire(gpulease.Options{Timeout: wait, Logf: t.Logf})
 	if errors.Is(err, gpulease.ErrTimeout) {
 		t.Skipf("NOT RUN: %v", err)
 	}
@@ -100,7 +107,7 @@ func TestInkling2MetalBatchedPrefillMatchesPerToken(t *testing.T) {
 	hp := m.HP
 	t.Logf("%d layers (%d cache slots), hidden %d, %d experts of width %d (%d routed), window %d, chunk %d",
 		hp.Layers, hp.Layers+(hp.Passes-1)*(hp.CoreEnd-hp.CoreStart), hp.Hidden, hp.Experts, hp.ExpertWidth, hp.ExpertsUsed,
-		hp.SlidingWindow, inkling2PrefillChunk)
+		hp.SlidingWindow, inkling2PrefillChunkWanted(os.LookupEnv))
 	run := func(arm, batched string, prompt []int) []int {
 		t.Helper()
 		t.Setenv("FAK_INKLING2_BATCHED_PREFILL", batched)
@@ -141,14 +148,29 @@ func TestInkling2MetalBatchedPrefillMatchesPerToken(t *testing.T) {
 	}
 	// A short run of each arm compiles its kernels and faults the weights in.
 	short := inkling2MetalPrefillPrompt(t, tok, 48)
+	if os.Getenv("FAK_INKLING2_PREFILL_BATCHED_ONLY") == "1" {
+		// throughput only: the per-token reference of a long prompt takes minutes
+		run("batched warm-up", "1", short)
+		for pass := range 2 {
+			run(fmt.Sprintf("batched pass %d", pass), "1", prompt)
+		}
+		t.Skip("FAK_INKLING2_PREFILL_BATCHED_ONLY=1 times the batched prefill without the per-token comparison")
+	}
 	if a, b := run("per-token warm-up", "0", short), run("batched warm-up", "1", short); !slices.Equal(a, b) {
 		t.Fatalf("48-token prompt: batched prefill decoded %v, per-token %v", b, a)
 	}
-	want := run("per-token", "0", prompt)
-	for pass := range 2 {
+	ref, first, last := "per-token", 0, 2
+	var want []int
+	if skipPerToken {
+		ref, first, last = "batched pass 0", 1, 3
+		want = run(ref, "1", prompt)
+	} else {
+		want = run(ref, "0", prompt)
+	}
+	for pass := first; pass < last; pass++ {
 		if got := run(fmt.Sprintf("batched pass %d", pass), "1", prompt); !slices.Equal(got, want) {
 			text, _ := tok.Decode(got)
-			t.Fatalf("batched prefill decoded %v (%q), per-token %v", got, text, want)
+			t.Fatalf("batched prefill decoded %v (%q), %s %v", got, text, ref, want)
 		}
 	}
 	text, _ := tok.Decode(want)

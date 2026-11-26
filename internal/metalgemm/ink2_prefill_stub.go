@@ -53,3 +53,17 @@ func (*Ink2Device) PFlashAttend(q, r, sinks, relBias, kcache, vcache, out Ink2Re
 	p Ink2AttnParams, extent, window, cap, pos0, T int) (bool, error) {
 	return false, ErrMetalUnavailable
 }
+func (*Ink2Device) PBucketSort(ids, counts, offsets, order Ink2Ref, npairs, nexp int) error {
+	return ErrMetalUnavailable
+}
+func (*Ink2Device) PConvRows(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn int, norm float32, T int) error {
+	return ErrMetalUnavailable
+}
+func CtrlTiles(n, rank int) bool              { return false }
+func CtrlDownSplitScratch(n, rank, T int) int { return 0 }
+func (*Ink2Device) PCtrlDownSplit(cur, msg, down, g, part Ink2Ref, n, rank, T int) (bool, error) {
+	return false, ErrMetalUnavailable
+}
+func (*Ink2Device) PCtrlApplyTile(cur, msg, g, gain, forget, out Ink2Ref, n, rank, T int) (bool, error) {
+	return false, ErrMetalUnavailable
+}

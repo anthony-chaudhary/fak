@@ -210,6 +210,15 @@ func (c *metalBackend) Ink2PCtrlDown(cur, msg, w, g Ink2Ref, n, rank, T int) err
 		return ink2MetalErr("prefill ctrl down", err)
 	}
 	return ink2MetalErr("prefill ctrl down", ink2PProfiled(d, fmt.Sprintf("ctrl down/r%d", rank), func() error {
+		if ink2MetalGemmOn && T >= ink2MetalGemmMinRows && metalgemm.CtrlTiles(n, rank) {
+			part, err := metalInk2Ctrl.get(d, metalgemm.CtrlDownSplitScratch(n, rank, T))
+			if err != nil {
+				return err
+			}
+			if ok, err := d.PCtrlDownSplit(r[0], r[1], r[2], r[3], part, n, rank, T); err != nil || ok {
+				return err
+			}
+		}
 		if ink2MetalGemmOn && T >= ink2MetalGemmMinRows && metalgemm.CtrlGEMMTiles(n, rank) {
 			xs, err := metalInk2Ctrl.get(d, 2*T*n)
 			if err != nil {
@@ -229,6 +238,11 @@ func (c *metalBackend) Ink2PCtrlApply(cur, msg, g, gainW, forgetW, out Ink2Ref, 
 		return ink2MetalErr("prefill ctrl apply", err)
 	}
 	return ink2MetalErr("prefill ctrl apply", ink2PProfiled(d, fmt.Sprintf("ctrl apply/r%d", rank), func() error {
+		if ink2MetalGemmOn && T >= ink2MetalGemmMinRows && metalgemm.CtrlTiles(n, rank) {
+			if ok, err := d.PCtrlApplyTile(r[0], r[1], r[2], r[3], r[4], r[5], n, rank, T); err != nil || ok {
+				return err
+			}
+		}
 		if ink2MetalGemmOn && T >= ink2MetalGemmMinRows && metalgemm.CtrlGEMMTiles(n, rank) {
 			gs, err := metalInk2Ctrl.get(d, 2*T*n)
 			if err != nil {
@@ -247,7 +261,12 @@ func (c *metalBackend) Ink2PConv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, 
 	if err != nil {
 		return ink2MetalErr("prefill conv", err)
 	}
-	return ink2MetalErr("prefill conv", ink2PProfiled(d, "conv", func() error { return d.PConv(r[0], r[1], r[2], r[3], r[4], r[5], n, heads, kn, norm, T) }))
+	return ink2MetalErr("prefill conv", ink2PProfiled(d, "conv", func() error {
+		if ink2MetalGemmOn && T >= ink2MetalGemmMinRows {
+			return d.PConvRows(r[0], r[1], r[2], r[3], r[4], r[5], n, heads, kn, norm, T)
+		}
+		return d.PConv(r[0], r[1], r[2], r[3], r[4], r[5], n, heads, kn, norm, T)
+	}))
 }
 
 func (c *metalBackend) Ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
@@ -342,7 +361,12 @@ func (c *metalBackend) ink2PGrouped(op string, stack Tensor, expertRows, nexp in
 		return true, ink2MetalErr(op, err)
 	}
 	if !bucketed {
-		if err := ink2PProfiled(d, "bucket", func() error { return d.PBucket(r[0], r[4], r[5], r[6], npairs, nexp) }); err != nil {
+		if err := ink2PProfiled(d, "bucket", func() error {
+			if ink2MetalGemmOn && npairs >= ink2MetalGemmMinPairs {
+				return d.PBucketSort(r[0], r[4], r[5], r[6], npairs, nexp)
+			}
+			return d.PBucket(r[0], r[4], r[5], r[6], npairs, nexp)
+		}); err != nil {
 			return true, ink2MetalErr(op, err)
 		}
 	}

@@ -627,3 +627,142 @@ func (d *Ink2Device) PExpertGrouped(w Ink2Weight, ids, order, x Ink2Ref, xDiv, x
 		Ink2Const(ink2PackedGroup{uint32(npairs), uint32(xDiv), uint32(xStride), uint32(btoi(scale.Valid()))}))
 	return d.Dispatch(p, [3]int{(w.Rows + 4*ink2PrefillRowsR - 1) / (4 * ink2PrefillRowsR), (npairs + ink2PrefillGroupTile - 1) / ink2PrefillGroupTile, 1}, [3]int{128, 1, 1}, args...)
 }
+
+// PBucketSort is PBucket in one launch of a threadgroup per expert, which
+// reads the ids a constant number of times instead of once per later pair:
+// the same counts, offsets and order.
+func (d *Ink2Device) PBucketSort(ids, counts, offsets, order Ink2Ref, npairs, nexp int) error {
+	if !ids.Valid() || !counts.Valid() || !offsets.Valid() || !order.Valid() || npairs < 1 || npairs > math.MaxInt32 ||
+		nexp < 1 || nexp > ink2OpsMaxExperts {
+		return fmt.Errorf("%w: bucket of %d pairs over %d experts", ErrInk2Shape, npairs, nexp)
+	}
+	p, err := d.prefillKernel("ink2p_bucket_sort", true)
+	if err != nil {
+		return err
+	}
+	return d.Dispatch(p, [3]int{nexp, 1, 1}, [3]int{ink2OpsThreads, 1, 1}, ids.Span(npairs), counts.Span(nexp), offsets.Span(nexp+1),
+		order.Span(npairs), Ink2Const(ink2PBucketShape{uint32(npairs), uint32(nexp), uint32(ink2OpsThreads)}))
+}
+
+// PConvRows is PConv on a thread per (channel, token) rather than a thread
+// per channel walking the chunk: the same outputs and history, for a chunk of
+// at least kn-1 tokens.
+func (d *Ink2Device) PConvRows(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn int, norm float32, T int) error {
+	if !x.Valid() || !w.Valid() || !hist.Valid() || !out.Valid() || n < 1 || kn < 2 || kn > ink2PrefillMaxKernel || heads < 1 ||
+		T < kn-1 || T > math.MaxInt32/n || n > math.MaxInt32/kn || (dyn.Valid() && n%heads != 0) ||
+		ink2OpsOverlap(x, T*n, out, T*n) || ink2OpsOverlap(resid, T*n, out, T*n) || ink2OpsOverlap(hist, n*(kn-1), out, T*n) {
+		return fmt.Errorf("%w: prefill conv rows of %d rows of %d channels, %d heads, kernel %d", ErrInk2Shape, T, n, heads, kn)
+	}
+	rows, err := d.prefillKernel("ink2p_conv_rows", false)
+	if err != nil {
+		return err
+	}
+	tail, err := d.prefillKernel("ink2p_conv_hist", false)
+	if err != nil {
+		return err
+	}
+	perHead, taps := n, 0
+	if dyn.Valid() {
+		perHead, taps = n/heads, T*heads*kn
+	}
+	shape := Ink2Const(ink2PConvShape{n: uint32(n), perHead: uint32(perHead), kn: uint32(kn), tokens: uint32(T),
+		dynamic: uint32(btoi(dyn.Valid())), residual: uint32(btoi(resid.Valid())), norm: norm})
+	if err := d.DispatchThreads(rows, [3]int{n, T, 1}, [3]int{min(n, ink2OpsThreads, rows.MaxThreads()), 1, 1},
+		x.Span(T*n), w.Span(n*kn), dyn.Span(taps), hist.Span(n*(kn-1)), out.Span(T*n), resid.Span(T*n), shape); err != nil {
+		return err
+	}
+	return d.DispatchThreads(tail, [3]int{n, kn - 1, 1}, [3]int{min(n, ink2OpsThreads, tail.MaxThreads()), 1, 1},
+		x.Span(T*n), hist.Span(n*(kn-1)), shape)
+}
+
+type ink2PCtrlSplitShape struct{ n, rank, tokens, slices, slice uint32 }
+
+// The controller tiles of ink2p_ctrl_down_split and ink2p_ctrl_apply_tile.
+const (
+	ink2CtrlBM, ink2CtrlBN, ink2CtrlBK = 32, 64, 32
+	ink2CtrlThreads                    = 128
+)
+
+// CtrlTiles reports whether PCtrlDownSplit and PCtrlApplyTile take a
+// controller of width n and rank.
+func CtrlTiles(n, rank int) bool {
+	return n%ink2CtrlBN == 0 && rank%ink2CtrlBN == 0
+}
+
+// ink2CtrlSlices is the slices PCtrlDownSplit cuts the 2n inputs into: as many
+// as keep a slice a whole number of K steps, up to 8.
+func ink2CtrlSlices(n int) int {
+	for _, s := range []int{8, 4} {
+		if 2*n%(s*ink2CtrlBK) == 0 {
+			return s
+		}
+	}
+	return 2
+}
+
+// CtrlDownSplitScratch is the floats PCtrlDownSplit's scratch takes.
+func CtrlDownSplitScratch(n, rank, T int) int { return ink2CtrlSlices(n) * T * (rank + 1) }
+
+func ink2CtrlAligned(refs ...Ink2Ref) bool {
+	for _, r := range refs {
+		if !r.Valid() || r.Off%4 != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// PCtrlDownSplit is PCtrlDown of one controller as a tiled product split
+// across its inputs, partial sums in part (CtrlDownSplitScratch floats); the
+// sums run in another order. ok is false (nothing encoded) for a shape it does
+// not tile.
+func (d *Ink2Device) PCtrlDownSplit(cur, msg, down, g, part Ink2Ref, n, rank, T int) (bool, error) {
+	if err := ink2PCtrlCheck("ctrl down", n, rank, T, []Ink2Ref{cur}, []Ink2Ref{msg}, []Ink2Ref{down}, []Ink2Ref{g}, []Ink2Ref{part}); err != nil {
+		return false, err
+	}
+	if !CtrlTiles(n, rank) || !ink2CtrlAligned(cur, msg, down) {
+		return false, nil
+	}
+	split, err := d.prefillKernel("ink2p_ctrl_down_split", false)
+	if err != nil {
+		return false, err
+	}
+	sum, err := d.prefillKernel("ink2p_ctrl_down_sum", false)
+	if err != nil {
+		return false, err
+	}
+	if split.ThreadWidth() != 32 || split.MaxThreads() < ink2CtrlThreads {
+		return false, fmt.Errorf("metalgemm: inkling2 controller tiles need 32-wide SIMD groups of %d threads", ink2CtrlThreads)
+	}
+	slices := ink2CtrlSlices(n)
+	shape := Ink2Const(ink2PCtrlSplitShape{uint32(n), uint32(rank), uint32(T), uint32(slices), uint32(2 * n / slices)})
+	parts := part.Span(CtrlDownSplitScratch(n, rank, T))
+	if err := d.Dispatch(split, [3]int{rank / ink2CtrlBN, (T + ink2CtrlBM - 1) / ink2CtrlBM, slices}, [3]int{ink2CtrlThreads, 1, 1},
+		cur.Span(T*n), msg.Span(T*n), down.Span(rank*2*n), parts, shape); err != nil {
+		return true, err
+	}
+	return true, d.DispatchThreads(sum, [3]int{rank, T, 1}, [3]int{min(rank, sum.MaxThreads()), 1, 1}, parts, g.Span(T*rank), shape)
+}
+
+// PCtrlApplyTile is PCtrlApply of one controller with both products and the
+// gate in one tiled launch; the sums run in another order. ok is false
+// (nothing encoded) for a shape it does not tile.
+func (d *Ink2Device) PCtrlApplyTile(cur, msg, g, gain, forget, out Ink2Ref, n, rank, T int) (bool, error) {
+	if err := ink2PCtrlCheck("ctrl apply", n, rank, T, []Ink2Ref{cur}, []Ink2Ref{msg}, []Ink2Ref{g}, []Ink2Ref{gain},
+		[]Ink2Ref{forget}, []Ink2Ref{out}); err != nil {
+		return false, err
+	}
+	if !CtrlTiles(n, rank) || !ink2CtrlAligned(g, gain, forget) {
+		return false, nil
+	}
+	p, err := d.prefillKernel("ink2p_ctrl_apply_tile", false)
+	if err != nil {
+		return false, err
+	}
+	if p.ThreadWidth() != 32 || p.MaxThreads() < ink2CtrlThreads {
+		return false, fmt.Errorf("metalgemm: inkling2 controller tiles need 32-wide SIMD groups of %d threads", ink2CtrlThreads)
+	}
+	return true, d.Dispatch(p, [3]int{n / ink2CtrlBN, (T + ink2CtrlBM - 1) / ink2CtrlBM, 1}, [3]int{ink2CtrlThreads, 1, 1},
+		cur.Span(T*n), msg.Span(T*n), g.Span(T*rank), gain.Span(n*rank), forget.Span(n*rank), out.Span(T*n),
+		Ink2Const(ink2PCtrlShape{uint32(n), uint32(rank), uint32(T)}))
+}

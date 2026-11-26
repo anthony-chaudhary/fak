@@ -546,3 +546,268 @@ kernel void ink2p_ctrl_gate(device const float *cur [[buffer(0)]],
     const float x = cur[o], f = tanh(forget[o]), t = tanh(gain[o]);
     out[o] = (x - f * x) + t * msg[o];
 }
+
+// PBucket of a chunk wider than any verify chunk in one launch, a threadgroup
+// per expert: each thread takes a contiguous strip of the pairs and counts the
+// ids equal to and below its expert, so a prefix over the threads places each
+// of the expert's pairs in pair order and the ids below it give its offset.
+// The sort is stable, so order is the one ink2p_bucket_fill writes.
+kernel void ink2p_bucket_sort(device const int *ids [[buffer(0)]],
+                              device int *counts [[buffer(1)]],
+                              device int *offsets [[buffer(2)]],
+                              device int *order [[buffer(3)]],
+                              constant Ink2PBucketShape &p [[buffer(4)]],
+                              uint e [[threadgroup_position_in_grid]],
+                              uint tid [[thread_index_in_threadgroup]],
+                              uint lane [[thread_index_in_simdgroup]],
+                              uint sg [[simdgroup_index_in_threadgroup]]) {
+    threadgroup uint eqPart[INK2_SG], ltPart[INK2_SG];
+    const uint strip = (p.npairs + INK2_TG - 1) / INK2_TG;
+    const uint lo = min(tid * strip, p.npairs), hi = min(lo + strip, p.npairs);
+    uint eq = 0, lt = 0;
+    for (uint i = lo; i < hi; i++) {
+        const uint id = uint(ids[i]);
+        eq += id == e ? 1 : 0;
+        lt += id < e ? 1 : 0;
+    }
+    const uint before = simd_prefix_exclusive_sum(eq);
+    const uint eqSum = simd_sum(eq), ltSum = simd_sum(lt);
+    if (lane == 0) {
+        eqPart[sg] = eqSum;
+        ltPart[sg] = ltSum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint base = 0, eqTotal = 0, ltTotal = 0;
+    for (uint g = 0; g < INK2_SG; g++) {
+        base += g < sg ? eqPart[g] : 0;
+        eqTotal += eqPart[g];
+        ltTotal += ltPart[g];
+    }
+    if (tid == 0) {
+        counts[e] = int(eqTotal);
+        offsets[e] = int(ltTotal);
+        if (e + 1 == p.nexp) offsets[p.nexp] = int(ltTotal + eqTotal);
+    }
+    uint at = ltTotal + base + before;
+    for (uint i = lo; i < hi && eq > 0; i++)
+        if (uint(ids[i]) == e) order[at++] = int(i);
+}
+
+// ink2p_conv with a thread per (channel, token) instead of a serial walk of
+// the chunk: token t reads its window of inputs, the chunk's or the history's,
+// and sums them in ink2p_conv's order, so each output is the same. The history
+// is left to ink2p_conv_hist, encoded after it.
+kernel void ink2p_conv_rows(device const float *x [[buffer(0)]],
+                            device const float *w [[buffer(1)]],
+                            device const float *dyn [[buffer(2)]],
+                            device const float *hist [[buffer(3)]],
+                            device float *out [[buffer(4)]],
+                            device const float *resid [[buffer(5)]],
+                            constant Ink2PConvShape &s [[buffer(6)]],
+                            uint2 at [[thread_position_in_grid]]) {
+    const uint c = at.x, tok = at.y;
+    if (c >= s.n || tok >= s.tokens) return;
+    const uint n = s.n, kn = s.kn, past = kn - 1;
+    device const float *hc = hist + ulong(c) * past;
+    device const float *wc = w + ulong(c) * kn;
+    // h[t] is input tok - past + t of the history followed by the chunk.
+    float h[INK2P_MAX_KN];
+    for (uint t = 0; t < past; t++) {
+        const uint j = tok + t;
+        h[t] = j < past ? hc[j] : x[ulong(j - past) * n + c];
+    }
+    const float xc = x[ulong(tok) * n + c];
+    float acc = 0.0f;
+    for (uint t = 0; t < past; t++) acc += h[t] * wc[t];
+    acc += xc * wc[past];
+    if (s.dynamic != 0) {
+        const uint dstride = (n / s.perHead) * kn;
+        device const float *dr = dyn + ulong(tok) * dstride + (c / s.perHead) * kn;
+        for (uint lag = 0; lag < kn; lag++) acc += dr[lag] * (lag > 0 ? h[past - lag] : xc);
+    }
+    float o = (xc + acc) * s.norm;
+    if (s.residual != 0) o = resid[ulong(tok) * n + c] + o;
+    out[ulong(tok) * n + c] = o;
+}
+
+// The history ink2p_conv leaves: the last kn-1 inputs of a chunk of at least
+// that many tokens, a thread per (channel, lag).
+kernel void ink2p_conv_hist(device const float *x [[buffer(0)]],
+                            device float *hist [[buffer(1)]],
+                            constant Ink2PConvShape &s [[buffer(2)]],
+                            uint2 at [[thread_position_in_grid]]) {
+    const uint past = s.kn - 1;
+    if (at.x >= s.n || at.y >= past) return;
+    hist[ulong(at.x) * past + at.y] = x[ulong(s.tokens - past + at.y) * s.n + at.x];
+}
+
+// The controller of a chunk wider than any verify chunk as two fused tiled
+// products of fp32 8x8 simdgroup matrices, a threadgroup of four SIMD groups
+// per 32 tokens by 64 outputs. The down projection has only rank outputs, so
+// it also splits its 2n inputs across threadgroups to fill the GPU; it folds
+// the inputs' RMS scales into the sum of the slices instead of normalizing
+// them first.
+#define INK2C_BM 32
+#define INK2C_BN 64
+#define INK2C_BK 32
+#define INK2C_PITCH (INK2C_BK + 4)
+#define INK2C_THREADS 128
+
+struct Ink2PCtrlSplitShape {
+    uint n, rank, tokens;
+    // slices of slice inputs each; the first half reads cur, the second msg
+    uint slices, slice;
+};
+
+// Accumulates the [32][64] tile of x . w^T over one INK2C_BK step; each SIMD
+// group owns 16 rows by 32 columns.
+inline void ink2c_mma(threadgroup const float *x, threadgroup const float *w, uint simd,
+                      thread simdgroup_float8x8 (&acc)[2][4]) {
+    const uint mr = (simd / 2) * 16, nr = (simd % 2) * 32;
+    for (uint k = 0; k < INK2C_BK; k += 8) {
+        simdgroup_float8x8 a[2], b[4];
+        for (uint i = 0; i < 2; i++) simdgroup_load(a[i], x + (mr + 8 * i) * INK2C_PITCH + k, INK2C_PITCH);
+        for (uint j = 0; j < 4; j++) simdgroup_load(b[j], w + (nr + 8 * j) * INK2C_PITCH + k, INK2C_PITCH, ulong2(0), true);
+        for (uint i = 0; i < 2; i++)
+            for (uint j = 0; j < 4; j++) simdgroup_multiply_accumulate(acc[i][j], a[i], b[j], acc[i][j]);
+    }
+}
+
+inline void ink2c_spill(threadgroup float *c, uint simd, thread simdgroup_float8x8 (&acc)[2][4]) {
+    const uint mr = (simd / 2) * 16, nr = (simd % 2) * 32;
+    for (uint i = 0; i < 2; i++)
+        for (uint j = 0; j < 4; j++) simdgroup_store(acc[i][j], c + (mr + 8 * i) * INK2C_BN + nr + 8 * j, INK2C_BN);
+}
+
+// Stages 8 floats of row tid/4 of a 32-row operand and 16 of row tid/2 of a
+// 64-row one.
+inline void ink2c_stage8(device const float *src, threadgroup float *dst, uint tid) {
+    device const float4 *s = (device const float4 *)src;
+    threadgroup float4 *d = (threadgroup float4 *)(dst + (tid / 4) * INK2C_PITCH + 8 * (tid % 4));
+    d[0] = s[0];
+    d[1] = s[1];
+}
+
+inline void ink2c_stage16(device const float *src, threadgroup float *dst, uint tid) {
+    device const float4 *s = (device const float4 *)src;
+    threadgroup float4 *d = (threadgroup float4 *)(dst + (tid / 2) * INK2C_PITCH + 16 * (tid % 2));
+    for (uint i = 0; i < 4; i++) d[i] = s[i];
+}
+
+// part[s][t][r] = Down[r, slice s] . [cur[t], msg[t]][slice s], and after
+// them ss[s][t], the sum of squares of that slice of the input row: group.x
+// a tile of 64 rank rows, group.y of 32 tokens, group.z the slice.
+kernel void ink2p_ctrl_down_split(device const float *cur [[buffer(0)]],
+                                  device const float *msg [[buffer(1)]],
+                                  device const float *down [[buffer(2)]],
+                                  device float *part [[buffer(3)]],
+                                  constant Ink2PCtrlSplitShape &p [[buffer(4)]],
+                                  uint3 group [[threadgroup_position_in_grid]],
+                                  uint tid [[thread_index_in_threadgroup]],
+                                  uint simd [[simdgroup_index_in_threadgroup]]) {
+    threadgroup float sh[(INK2C_BM + INK2C_BN) * INK2C_PITCH];
+    threadgroup float *xs = sh, *ws = sh + INK2C_BM * INK2C_PITCH;
+    const uint r0 = group.x * INK2C_BN, t0 = group.y * INK2C_BM, s = group.z, n = p.n;
+    const uint row = t0 + tid / 4, tok = min(row, p.tokens - 1);
+    simdgroup_float8x8 acc[2][4];
+    for (uint i = 0; i < 2; i++)
+        for (uint j = 0; j < 4; j++) acc[i][j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+    float ss = 0.0f;
+    device const float *wrow = down + ulong(r0 + tid / 2) * 2 * n + 16 * (tid % 2);
+    for (uint k = s * p.slice; k < (s + 1) * p.slice; k += INK2C_BK) {
+        device const float *src = (k < n ? cur + ulong(tok) * n + k : msg + ulong(tok) * n + (k - n)) + 8 * (tid % 4);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        ink2c_stage8(src, xs, tid);
+        ink2c_stage16(wrow + k, ws, tid);
+        const float4 a = ((device const float4 *)src)[0], b = ((device const float4 *)src)[1];
+        ss = fma(a.x, a.x, ss);
+        ss = fma(a.y, a.y, ss);
+        ss = fma(a.z, a.z, ss);
+        ss = fma(a.w, a.w, ss);
+        ss = fma(b.x, b.x, ss);
+        ss = fma(b.y, b.y, ss);
+        ss = fma(b.z, b.z, ss);
+        ss = fma(b.w, b.w, ss);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        ink2c_mma(xs, ws, simd, acc);
+    }
+    // The four threads of an input row are adjacent lanes of one SIMD group.
+    ss += simd_shuffle_xor(ss, 1);
+    ss += simd_shuffle_xor(ss, 2);
+    if (group.x == 0 && tid % 4 == 0 && row < p.tokens)
+        part[ulong(p.slices) * p.tokens * p.rank + ulong(s) * p.tokens + row] = ss;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    ink2c_spill(sh, simd, acc);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint e = tid; e < INK2C_BM * INK2C_BN; e += INK2C_THREADS) {
+        const uint t = t0 + e / INK2C_BN;
+        if (t < p.tokens) part[(ulong(s) * p.tokens + t) * p.rank + r0 + e % INK2C_BN] = sh[e];
+    }
+}
+
+// g[t][r] = rms-scale(cur[t]) * (the cur slices' products) + rms-scale(msg[t])
+// * (the msg slices'), the slices summed in order.
+kernel void ink2p_ctrl_down_sum(device const float *part [[buffer(0)]],
+                                device float *g [[buffer(1)]],
+                                constant Ink2PCtrlSplitShape &p [[buffer(2)]],
+                                uint2 at [[thread_position_in_grid]]) {
+    const uint r = at.x, t = at.y;
+    if (r >= p.rank || t >= p.tokens) return;
+    device const float *ss = part + ulong(p.slices) * p.tokens * p.rank;
+    const uint mid = p.slices / 2;
+    float sc = 0.0f, sm = 0.0f, dc = 0.0f, dm = 0.0f;
+    for (uint s = 0; s < mid; s++) {
+        sc += ss[ulong(s) * p.tokens + t];
+        sm += ss[ulong(s + mid) * p.tokens + t];
+        dc += part[(ulong(s) * p.tokens + t) * p.rank + r];
+        dm += part[(ulong(s + mid) * p.tokens + t) * p.rank + r];
+    }
+    g[ulong(t) * p.rank + r] = fma(ink2_inv_rms(sc, p.n, 1e-6f), dc, ink2_inv_rms(sm, p.n, 1e-6f) * dm);
+}
+
+// out[t][i] = cur - tanh(F[i,:].g[t])*cur + tanh(G[i,:].g[t])*msg with both
+// products in one tile: group.x 64 outputs, group.y 32 tokens.
+kernel void ink2p_ctrl_apply_tile(device const float *cur [[buffer(0)]],
+                                  device const float *msg [[buffer(1)]],
+                                  device const float *g [[buffer(2)]],
+                                  device const float *gain [[buffer(3)]],
+                                  device const float *forget [[buffer(4)]],
+                                  device float *out [[buffer(5)]],
+                                  constant Ink2PCtrlShape &p [[buffer(6)]],
+                                  uint2 group [[threadgroup_position_in_grid]],
+                                  uint tid [[thread_index_in_threadgroup]],
+                                  uint simd [[simdgroup_index_in_threadgroup]]) {
+    threadgroup float sh[(INK2C_BM + 2 * INK2C_BN) * INK2C_PITCH];
+    static_assert((INK2C_BM + 2 * INK2C_BN) * INK2C_PITCH >= 2 * INK2C_BM * INK2C_BN, "the output tiles reuse the operands");
+    threadgroup float *gs = sh, *gw = sh + INK2C_BM * INK2C_PITCH, *fw = gw + INK2C_BN * INK2C_PITCH;
+    const uint i0 = group.x * INK2C_BN, t0 = group.y * INK2C_BM, n = p.n, rank = p.rank;
+    const uint tok = min(t0 + tid / 4, p.tokens - 1);
+    simdgroup_float8x8 ga[2][4], fa[2][4];
+    for (uint i = 0; i < 2; i++)
+        for (uint j = 0; j < 4; j++) {
+            ga[i][j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+            fa[i][j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+        }
+    const ulong wo = ulong(i0 + tid / 2) * rank + 16 * (tid % 2);
+    for (uint k = 0; k < rank; k += INK2C_BK) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        ink2c_stage8(g + ulong(tok) * rank + k + 8 * (tid % 4), gs, tid);
+        ink2c_stage16(gain + wo + k, gw, tid);
+        ink2c_stage16(forget + wo + k, fw, tid);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        ink2c_mma(gs, gw, simd, ga);
+        ink2c_mma(gs, fw, simd, fa);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    threadgroup float *cg = sh, *cf = sh + INK2C_BM * INK2C_BN;
+    ink2c_spill(cg, simd, ga);
+    ink2c_spill(cf, simd, fa);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint e = tid; e < INK2C_BM * INK2C_BN; e += INK2C_THREADS) {
+        const uint t = t0 + e / INK2C_BN;
+        if (t >= p.tokens) continue;
+        const ulong o = ulong(t) * n + i0 + e % INK2C_BN;
+        const float x = cur[o], f = tanh(cf[e]), a = tanh(cg[e]);
+        out[o] = (x - f * x) + a * msg[o];
+    }
+}
