@@ -129,3 +129,24 @@ func TestGuardLauncherFailureLeavesTypedTerminalRegistration(t *testing.T) {
 		t.Fatalf("rows=%+v err=%v", rows, readErr)
 	}
 }
+
+// A guard child launched without an explicit RegistryPath must not register into the
+// descriptor store, even when that store already holds descriptor-schema rows.
+func TestGuardChildRegistrationFallbackSplitsFromDescriptorStore(t *testing.T) {
+	descriptor := filepath.Join(t.TempDir(), "sessions.jsonl")
+	t.Setenv("FAK_CHILD_REGISTRY", "")
+	t.Setenv("FAK_SESSION_REGISTRY", descriptor)
+	if err := os.WriteFile(descriptor, []byte("{\"version\":\"fak.session-descriptors.v1\",\"descriptors\":[]}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := guardChildRegistryPath(), descriptor+".children"; got != want {
+		t.Fatalf("guardChildRegistryPath() = %q, want %q", got, want)
+	}
+	meta := guardChildSpawnMetadata{AgentRunID: "run", ToolCallID: "guard-child:run", Backend: "codex", PolicyDigest: "sha256:test", Envelope: toolprocgate.CapabilityEnvelope{Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn}}}
+	if _, err := prepareGuardChildRegistration(meta, toolprocgate.SpawnGrant{}); err != nil {
+		t.Fatalf("prepareGuardChildRegistration() error = %v", err)
+	}
+	if body, err := os.ReadFile(descriptor); err != nil || !strings.HasPrefix(string(body), "{\"version\":\"fak.session-descriptors.v1\"") {
+		t.Fatalf("descriptor store changed: err=%v body=%q", err, body)
+	}
+}

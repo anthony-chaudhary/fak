@@ -24,7 +24,7 @@ func prepareGuardChildRegistration(meta guardChildSpawnMetadata, grant toolprocg
 	env := envMapFromGrant(grant.Env)
 	path := strings.TrimSpace(meta.RegistryPath)
 	if path == "" {
-		path = sessionregistry.DefaultPath()
+		path = guardChildRegistryPath()
 	}
 	attempt := firstGuardEnv(env, "FAK_CHILD_ATTEMPT_ID")
 	if attempt == "" {

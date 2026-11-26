@@ -742,6 +742,20 @@ func maybeCaptureGuardChildHarnessTerminalRestoreForPlan(plan guardLaunchPlan) g
 	return noopGuardChildTerminalRestore{}
 }
 
+// guardChildRegistryPath is the child-registration lineage ledger. It must never be the
+// descriptor store: when FAK_SESSION_REGISTRY names the descriptor file, the lineage ledger
+// sits beside it under a ".children" suffix, so the two schemas never share one path.
+func guardChildRegistryPath() string {
+	if p := strings.TrimSpace(os.Getenv("FAK_CHILD_REGISTRY")); p != "" {
+		return p
+	}
+	p := sessionregistry.DefaultPath()
+	if strings.TrimSpace(os.Getenv("FAK_SESSION_REGISTRY")) != "" {
+		p += ".children"
+	}
+	return p
+}
+
 func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt policy.Runtime, launchPlan guardLaunchPlan) guardChildSpawnMetadata {
 	agentRunID = strings.TrimSpace(agentRunID)
 	if agentRunID == "" {
@@ -757,20 +771,13 @@ func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt pol
 			env.HeartbeatEveryMS = r.HeartbeatEveryMS
 		}
 	}
-	registryPath := strings.TrimSpace(os.Getenv("FAK_CHILD_REGISTRY"))
-	if registryPath == "" {
-		registryPath = sessionregistry.DefaultPath()
-		if strings.TrimSpace(os.Getenv("FAK_SESSION_REGISTRY")) != "" {
-			registryPath += ".children"
-		}
-	}
 	return guardChildSpawnMetadata{
 		AgentRunID:   agentRunID,
 		ToolCallID:   "guard-child:" + agentRunID,
 		PolicyDigest: strings.TrimSpace(policyDigest),
 		Backend:      strings.TrimSpace(backend),
 		Envelope:     env,
-		RegistryPath: registryPath,
+		RegistryPath: guardChildRegistryPath(),
 		LaunchPlan:   launchPlan,
 	}
 }
