@@ -399,3 +399,55 @@ func TestInkling2StreamForcedToolChoiceBuffers(t *testing.T) {
 		t.Fatalf("stream %q, Complete %q", capture.joined(), want.Message.Content)
 	}
 }
+
+// A turn held off the content stream reports activity at once and then every
+// inkling2HeldActivityEvery tokens, so the server can keep the connection warm
+// while a tool call decodes.
+func TestInkling2StreamHeldTurnReportsActivity(t *testing.T) {
+	call := inkling2RoleModel + "Bash" + inkling2InvokeToolJSON + `{"name":"Bash","args":{"command":"ls"}}` + inkling2EndMessage + Inkling2EndOfTurnMarker
+	for _, forced := range []bool{false, true} {
+		ids := inkling2StreamIDs(t, call, false)
+		var mu sync.Mutex
+		held := 0
+		ctx := WithStreamHeldActivity(context.Background(), func() { mu.Lock(); held++; mu.Unlock() })
+		var opts []SampleOpt
+		if forced {
+			opts = append(opts, WithToolChoice(json.RawMessage(`"required"`)))
+		}
+		capture := newInkling2StreamCapture()
+		comp, err := inkling2StreamPlanner(t, &inkling2StreamGen{ids: ids}).CompleteStream(ctx, capture.sink, inkling2StreamUser, inkling2StreamTools(), opts...)
+		if err != nil {
+			t.Errorf("forced=%v: %v", forced, err)
+			continue
+		}
+		if len(comp.Message.ToolCalls) != 1 || capture.joined() != "" {
+			t.Errorf("forced=%v: completion %+v, stream %q", forced, comp.Message, capture.joined())
+			continue
+		}
+		mu.Lock()
+		got := held
+		mu.Unlock()
+		if want := 1 + comp.Usage.CompletionTokens/inkling2HeldActivityEvery; got != want {
+			t.Errorf("forced=%v: %d held activity reports for %d decoded tokens, want %d", forced, got, comp.Usage.CompletionTokens, want)
+		}
+	}
+}
+
+// Once content streams, held tokens between content tokens report nothing: the
+// content keeps the stream warm, and each report would take a queued event slot.
+func TestInkling2StreamInterleavedHeldTokensReportNoActivity(t *testing.T) {
+	// A newline is held as a possible start of the stop "\n#" until the next letter.
+	turn := inkling2RoleModel + inkling2ContentText + strings.Repeat("a\n", 200) + "end" + inkling2EndMessage + Inkling2EndOfTurnMarker
+	ids := inkling2StreamIDs(t, turn, false)
+	held := 0
+	ctx := WithStreamHeldActivity(context.Background(), func() { held++ })
+	capture := newInkling2StreamCapture()
+	comp, err := inkling2StreamPlanner(t, &inkling2StreamGen{ids: ids}).CompleteStream(ctx, capture.sink, inkling2StreamUser, nil, WithStop([]string{"\n#"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the header pair before the first content byte reports.
+	if held != 1 || capture.joined() != comp.Message.Content {
+		t.Fatalf("held %d (want 1), stream %q vs content %q", held, capture.joined(), comp.Message.Content)
+	}
+}

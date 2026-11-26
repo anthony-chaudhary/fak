@@ -109,8 +109,8 @@ type inkling2StopScanner struct {
 	text    []byte
 	err     error
 	stopped bool
-	// release, when set, receives each run of output no later stop can cut, in
-	// order, and returns false to end generation.
+	// release, when set, receives once per token the new run of output no later
+	// stop can cut (possibly empty), in order, and returns false to end generation.
 	release  func(raw []byte) bool
 	released int
 }
@@ -164,7 +164,7 @@ func (s *inkling2StopScanner) releaseSafe() bool {
 		}
 	}
 	if end <= s.released {
-		return true
+		return s.release(nil)
 	}
 	raw := s.text[s.released:end]
 	s.released = end
@@ -196,14 +196,21 @@ func (p *Inkling2LoopPlanner) StreamingSupported() bool { return true }
 // the client before adjudication. The returned Completion is the one Complete
 // builds, and the deltas concatenate to its content. A forced tool choice may
 // rewrite content, so that turn is delivered once decoded. Text streamed before
-// a decode error stays delivered; the error follows it.
+// a decode error stays delivered; the error follows it. Tokens that stream no
+// content report held activity so the caller can keep the stream warm: the first
+// one before any content, then one per inkling2HeldActivityEvery in a row.
 func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	sp := applySampleOpts(opts...)
 	if sink == nil {
 		return p.complete(ctx, messages, tools, sp, nil)
 	}
+	held := newInkling2HeldActivity(streamHeldActivity(ctx))
 	if inKernelEffectiveToolName(sp.ToolChoice, tools) != "" {
-		comp, err := p.complete(ctx, messages, tools, sp, nil)
+		var release func([]byte) bool
+		if held != nil {
+			release = func([]byte) bool { held.token(false); return true }
+		}
+		comp, err := p.complete(ctx, messages, tools, sp, release)
 		if err != nil || comp == nil || comp.Message.Content == "" {
 			return comp, err
 		}
@@ -218,7 +225,11 @@ func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSin
 	pump := startInkling2StreamPump(sink, cancel)
 	defer pump.stop()
 	comp, err := p.complete(streamCtx, messages, tools, sp, func(raw []byte) bool {
-		return pump.put(projector.feed(raw))
+		delta := projector.feed(raw)
+		if held != nil {
+			held.token(delta != "")
+		}
+		return pump.put(delta)
 	})
 	if sinkErr := pump.stop(); sinkErr != nil {
 		return nil, sinkErr
@@ -291,4 +302,33 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 		comp.Usage.PromptTokensDetails = &UsageTokenDetails{CachedTokens: res.CachedPromptTokens}
 	}
 	return normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages), nil
+}
+
+// inkling2HeldActivityEvery bounds held reports on a long held span. Each report
+// takes a slot in the caller's bounded event queue, so a report per held token
+// would halve its room for content when held and content tokens alternate.
+const inkling2HeldActivityEvery = 32
+
+type inkling2HeldActivity struct {
+	report   func()
+	streamed bool
+	run      int
+}
+
+func newInkling2HeldActivity(report func()) *inkling2HeldActivity {
+	if report == nil {
+		return nil
+	}
+	return &inkling2HeldActivity{report: report}
+}
+
+func (h *inkling2HeldActivity) token(content bool) {
+	if content {
+		h.streamed, h.run = true, 0
+		return
+	}
+	h.run++
+	if (!h.streamed && h.run == 1) || h.run%inkling2HeldActivityEvery == 0 {
+		h.report()
+	}
 }
