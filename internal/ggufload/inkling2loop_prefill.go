@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // inkling2PrefillChunk is the token count of one batched prefill forward. Local
@@ -76,15 +77,25 @@ func (p *ink2Prefill) hold(n int) ink2Ref { return p.take(p.keep, &p.keepOff, p.
 
 // prefillArenas sizes the two prefill arenas for chunks of T tokens.
 func (s *inkling2Resident) prefillArenas(T int) (keep, scr int) {
-	hp := s.hp
-	visits := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
-	keep = (visits + 2) * (T*hp.Hidden + 64)
-	kvDim := hp.KVHeads * hp.HeadDim
-	k := hp.ExpertsUsed
+	return inkling2PrefillArenaFloats(s.hp, T, s.maxPadK())
+}
+
+// maxPadK is the widest padded expert row across the session's layers.
+func (s *inkling2Resident) maxPadK() int {
 	padK := 0
 	for i := range s.layers {
 		padK = max(padK, s.layers[i].down.padK, s.layers[i].gateUp.padK)
 	}
+	return padK
+}
+
+// inkling2PrefillArenaFloats is the prefill arena sizing as a function of the shape,
+// so the device-memory fit can size the arenas before any session exists.
+func inkling2PrefillArenaFloats(hp model.Inkling2LoopHParams, T, padK int) (keep, scr int) {
+	visits := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
+	keep = (visits + 2) * (T*hp.Hidden + 64)
+	kvDim := hp.KVHeads * hp.HeadDim
+	k := hp.ExpertsUsed
 	perTok := 4*4*hp.Hidden + // msgs
 		3*hp.Hidden*3 + // mix, control, rms inputs
 		hp.Heads*hp.HeadDim*3 + hp.Heads*hp.RelLength + hp.Heads + 4*kvDim + 2*hp.KVHeads*hp.ConvKernel +

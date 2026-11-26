@@ -18,23 +18,24 @@ import (
 // slots keep a sliding-window ring. FAK_INKLING2_CTX raises it for agentic serving,
 // paying device memory on every global slot, so the bench default stays small. A
 // build carries at most one resident device family, so the bound is that family's.
-var inkling2ResidentCtx = inkling2ResidentCtxFrom(os.LookupEnv, Inkling2ResidentCtxMax(inkling2ResidentBackend))
+var inkling2ResidentCtx = inkling2ResidentCtxFrom(os.LookupEnv)
 
 // The resident context bounds, exported so admission can price a session before
-// the driver exists.
+// the driver exists. The requested ctx is fitted against device free memory when the
+// session is built, and refused rather than clamped when it does not fit.
 const (
 	Inkling2ResidentCtxEnv     = "FAK_INKLING2_CTX"
 	Inkling2ResidentCtxDefault = 4096
 	Inkling2ResidentCtxMin     = 512
-	// Bounded by device memory, not the prefill attend: a span too long for the
-	// shared-memory score row takes the global-memory one. On a 16 GiB card the
-	// global slots of a larger context exhaust VRAM, the allocator's managed-memory
-	// fallback takes over, and prefill faults.
+	// The ceiling used only when device free memory is unknown, where the global-slot
+	// KV cannot be sized: a larger cache would spill into the allocator's managed-memory
+	// fallback, where prefill faults. With free memory known, the fit alone bounds CUDA.
 	Inkling2ResidentCtxMaxCUDA = 24576
-	// Unified memory admits more; the Metal attends keep score rows in device
-	// memory and tile prefill scores under a fixed budget, so span is not bounded
-	// by threadgroup memory. Admission still prices every session against the host.
+	// Metal prefill scores tile under a fixed budget, a shape limit the memory fit does
+	// not model, so a request above it is refused.
 	Inkling2ResidentCtxMaxMetal = 32768
+	// inkling2ResidentCtxParseMax only bounds the parsed integer so garbage cannot overflow.
+	inkling2ResidentCtxParseMax = 1 << 20
 	// Inkling2ResidentArenaFloats bounds the per-token scratch arena. Every
 	// intermediate of a token takes the next arena slot, so a token's device
 	// addresses repeat exactly on the next token and a captured graph stays valid.
@@ -52,7 +53,9 @@ func Inkling2ResidentCtxMax(backend string) int {
 	return Inkling2ResidentCtxMaxCUDA
 }
 
-func inkling2ResidentCtxFrom(lookup func(string) (string, bool), ctxMax int) int {
+// inkling2ResidentCtxFrom parses FAK_INKLING2_CTX. An unset, unparseable or sub-floor value
+// takes the default; a larger one is returned unclamped for the fit or the hard bound to refuse.
+func inkling2ResidentCtxFrom(lookup func(string) (string, bool)) int {
 	v, ok := lookup(Inkling2ResidentCtxEnv)
 	if !ok {
 		return Inkling2ResidentCtxDefault
@@ -61,7 +64,7 @@ func inkling2ResidentCtxFrom(lookup func(string) (string, bool), ctxMax int) int
 	if err != nil || n < Inkling2ResidentCtxMin {
 		return Inkling2ResidentCtxDefault
 	}
-	return min(n, ctxMax)
+	return min(n, inkling2ResidentCtxParseMax)
 }
 
 type ink2Ref = compute.Ink2Ref
@@ -283,7 +286,7 @@ func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Res
 	case inkling2ResidentCtxAutoSet(os.LookupEnv):
 		ctx = inkling2ResidentCtxAuto
 	}
-	if limit := Inkling2ResidentCtxMax(be.Name()); ctx > limit {
+	if limit := inkling2ResidentHardMax(be.Name()); limit > 0 && ctx > limit {
 		return nil, fmt.Errorf("inkling2 resident: %d-token context exceeds the %d-token bound of backend %s", ctx, limit, be.Name())
 	}
 	return newInkling2ResidentSized(m, be, ctx, inkling2ArenaFloats)
@@ -351,6 +354,19 @@ func inkling2FitResidentCtx(free, reserve, perPos int64) int {
 // all-VRAM context measured to load and decode on a 16 GiB RTX 5080.
 const inkling2AutoCtxCeiling = 16384
 
+// Inkling2AutoCtxCeiling is the single source the Metal admission in cmd/fak applies, so
+// the two device paths size the default identically.
+const Inkling2AutoCtxCeiling = inkling2AutoCtxCeiling
+
+// inkling2ResidentHardMax is the largest explicit context a backend takes outright, before
+// the memory fit. Zero means the fit alone bounds the request.
+func inkling2ResidentHardMax(backend string) int {
+	if backend == "metal" {
+		return Inkling2ResidentCtxMaxMetal
+	}
+	return 0
+}
+
 // inkling2ResolveAutoCtx sizes the global cache from the device memory free now,
 // after the weights bound. A backend that cannot report free memory keeps the
 // fixed default rather than guess.
@@ -407,6 +423,75 @@ func newInkling2ResidentSized(m *Inkling2LoopModel, be compute.Backend, ctx, are
 		s, err = newInkling2ResidentRing(m, be, ctx, arenaFloats, inkling2PrefillChunkBase, wanted)
 	}
 	return s, err
+}
+
+// inkling2ResidentKVBytes is the device memory newInkling2ResidentRing allocates for
+// the slot K and V caches, the conv histories and the shared score row at ctx tokens.
+// It walks the same caps the build uses, so the two cannot drift.
+func inkling2ResidentKVBytes(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int) int64 {
+	if ctx <= 0 {
+		return 0
+	}
+	kvDim := hp.KVHeads * hp.HeadDim
+	channels := 2*kvDim + 2*hp.Hidden
+	var elems int64
+	maxCap := hp.SlidingWindow
+	for _, c := range inkling2ResidentCaps(hp, ctx, batched, chunk) {
+		maxCap = max(maxCap, c)
+		elems += 2*int64(c)*int64(kvDim) + int64(channels)*int64(hp.ConvKernel-1)
+	}
+	elems += 2 * int64(hp.Heads) * int64(maxCap)
+	return elems * 4 // every cache element is float32
+}
+
+// inkling2ResidentFixedBytes is the device memory every session allocates whatever its
+// ctx: the input row and the per-token scratch arena and argmax index.
+func inkling2ResidentFixedBytes(hp model.Inkling2LoopHParams, arenaFloats int) int64 {
+	return 4 * int64(hp.Hidden+4+arenaFloats+4)
+}
+
+// inkling2ResidentOtherBytes is the non-KV device memory of a session: the fixed
+// buffers plus, when wideChunk > 0, the wide prefill arenas and the chunk input.
+func inkling2ResidentOtherBytes(hp model.Inkling2LoopHParams, arenaFloats, wideChunk, padK int) int64 {
+	other := inkling2ResidentFixedBytes(hp, arenaFloats)
+	if wideChunk > 0 {
+		keep, scr := inkling2PrefillArenaFloats(hp, wideChunk, padK)
+		other += 4 * int64(keep+scr+wideChunk*hp.Hidden)
+	}
+	return other
+}
+
+// inkling2ResidentTotalBytes is every device allocation a resident session makes at
+// ctx tokens: the KV caches and the non-KV buffers of inkling2ResidentOtherBytes.
+func inkling2ResidentTotalBytes(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk, arenaFloats, wideChunk, padK int) int64 {
+	return inkling2ResidentKVBytes(hp, ctx, batched, chunk) + inkling2ResidentOtherBytes(hp, arenaFloats, wideChunk, padK)
+}
+
+// inkling2FitResidentKV returns the resident KV bytes at ctx after checking the KV plus
+// other against the device free memory left at build time. The weights are already on
+// the device, so free is what the session may take minus the weight headroom rule.
+// Unknown free falls back to the per-backend Inkling2ResidentCtxMax ceiling.
+func inkling2FitResidentKV(be compute.Backend, hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, other int64) (int64, error) {
+	_, free, known := compute.DeviceMemoryInfo(be)
+	if !known || free == compute.FreeUnknown || free < 0 {
+		free = compute.FreeUnknown
+	}
+	return inkling2KVFit(hp, ctx, batched, chunk, other, free)
+}
+
+// inkling2MaxResidentCtx is the largest ctx in [0, ceil] whose KV fits budget bytes,
+// 0 when none does. KV is monotone in ctx, so bisection finds the exact bound.
+func inkling2MaxResidentCtx(hp model.Inkling2LoopHParams, batched bool, chunk, ceil int, budget int64) int {
+	lo, hi := 0, ceil
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		if inkling2ResidentKVBytes(hp, mid, batched, chunk) <= budget {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
 }
 
 // newInkling2ResidentRing builds the resident with local rings and prefill arenas for
@@ -491,6 +576,23 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 	if !wide {
 		s.chunkMax = min(s.chunkMax, inkling2PrefillChunkBase)
 	}
+	kvBytes := int64(0)
+	if ctx > 0 {
+		wideChunk := 0
+		if wide {
+			wideChunk = s.chunkMax
+		}
+		other := inkling2ResidentOtherBytes(hp, arenaFloats, wideChunk, s.maxPadK())
+		var err error
+		if kvBytes, err = inkling2FitResidentKV(be, hp, ctx, s.batched, s.chunkMax, other); err != nil {
+			s.close()
+			if wide {
+				// the wide arenas may be what pushed the fit over; the base build may fit
+				return nil, inkling2DeviceRefused{err}
+			}
+			return nil, err
+		}
+	}
 	s.kc, s.vc, s.hist = make([]ink2Ref, slots), make([]ink2Ref, slots), make([]ink2Ref, slots)
 	s.caps = inkling2ResidentCaps(hp, ctx, s.batched, s.chunkMax)
 	s.baseCaps = inkling2ResidentCaps(hp, ctx, s.batched, inkling2PrefillChunkBase)
@@ -527,6 +629,7 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 		}
 		return nil, err
 	}
+	noteInkling2KVBytes(m, ctx, kvBytes)
 	return s, nil
 }
 

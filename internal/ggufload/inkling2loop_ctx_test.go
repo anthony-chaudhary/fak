@@ -6,25 +6,26 @@ func TestInkling2ResidentCtxFromEnv(t *testing.T) {
 	cases := []struct {
 		name string
 		env  map[string]string
-		max  int
 		want int
 	}{
-		{"unset keeps bench default", nil, Inkling2ResidentCtxMaxCUDA, 4096},
-		{"agentic size", map[string]string{"FAK_INKLING2_CTX": "16384"}, Inkling2ResidentCtxMaxCUDA, 16384},
-		{"whitespace tolerated", map[string]string{"FAK_INKLING2_CTX": " 8192 "}, Inkling2ResidentCtxMaxCUDA, 8192},
-		{"garbage falls back", map[string]string{"FAK_INKLING2_CTX": "big"}, Inkling2ResidentCtxMaxCUDA, 4096},
-		{"below floor falls back", map[string]string{"FAK_INKLING2_CTX": "64"}, Inkling2ResidentCtxMaxCUDA, 4096},
-		{"floor kept", map[string]string{"FAK_INKLING2_CTX": "512"}, Inkling2ResidentCtxMaxCUDA, 512},
-		{"cuda clamps far above", map[string]string{"FAK_INKLING2_CTX": "1000000"}, Inkling2ResidentCtxMaxCUDA, 24576},
-		{"cuda clamps 32768", map[string]string{"FAK_INKLING2_CTX": "32768"}, Inkling2ResidentCtxMaxCUDA, 24576},
-		{"cuda keeps its bound", map[string]string{"FAK_INKLING2_CTX": "24576"}, Inkling2ResidentCtxMaxCUDA, 24576},
-		{"metal takes 32768", map[string]string{"FAK_INKLING2_CTX": "32768"}, Inkling2ResidentCtxMaxMetal, 32768},
-		{"metal clamps far above", map[string]string{"FAK_INKLING2_CTX": "65536"}, Inkling2ResidentCtxMaxMetal, 32768},
-		{"metal between bounds", map[string]string{"FAK_INKLING2_CTX": "28672"}, Inkling2ResidentCtxMaxMetal, 28672},
+		{"unset keeps bench default", nil, 4096},
+		{"agentic size", map[string]string{"FAK_INKLING2_CTX": "16384"}, 16384},
+		{"whitespace tolerated", map[string]string{"FAK_INKLING2_CTX": " 8192 "}, 8192},
+		{"garbage falls back", map[string]string{"FAK_INKLING2_CTX": "big"}, 4096},
+		{"below floor falls back", map[string]string{"FAK_INKLING2_CTX": "64"}, 4096},
+		{"explicit floor is kept", map[string]string{"FAK_INKLING2_CTX": "512"}, 512},
+		{"between fallback ceilings", map[string]string{"FAK_INKLING2_CTX": "28672"}, 28672},
+		{"64K reaches device admission", map[string]string{"FAK_INKLING2_CTX": "65536"}, 65536},
+		{"128K reaches device admission", map[string]string{"FAK_INKLING2_CTX": "131072"}, 131072},
+		{"above parse ceiling clamps", map[string]string{"FAK_INKLING2_CTX": "2000000"}, 1 << 20},
+		// past the 24576 unknown-free ceiling the request reaches the KV fit check
+		{"large request reaches the fit check", map[string]string{"FAK_INKLING2_CTX": "32768"}, 32768},
+		{"past the shared-memory score row", map[string]string{"FAK_INKLING2_CTX": "24576"}, 24576},
+		{"former shared-memory bound", map[string]string{"FAK_INKLING2_CTX": "23552"}, 23552},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := inkling2ResidentCtxFrom(func(k string) (string, bool) { v, ok := c.env[k]; return v, ok }, c.max)
+			got := inkling2ResidentCtxFrom(func(k string) (string, bool) { v, ok := c.env[k]; return v, ok })
 			if got != c.want {
 				t.Fatalf("got %d want %d", got, c.want)
 			}

@@ -186,7 +186,9 @@ func inkling2ResidentCtx(v string, set bool) int {
 	if err != nil || n < inkling2ResidentCtxMin {
 		return inkling2ResidentCtxDefault
 	}
-	return min(n, inkling2ResidentCtxMax)
+	// No clamp here: an over-fit explicit context is refused by the driver's KV fit with a
+	// structured reason instead of being shrunk silently.
+	return n
 }
 
 // inkling2ResidentShape is the part of the hyperparameters that sizes a

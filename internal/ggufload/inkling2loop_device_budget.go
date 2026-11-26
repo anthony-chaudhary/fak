@@ -43,6 +43,10 @@ type Inkling2DevicePlacement struct {
 	RAMBudgetBytes              int64
 	RAMAvailableBytes           int64
 	RAMNeededForAllExpertsBytes int64
+
+	// KVBytes is the resident KV cache of the last session built on this binding,
+	// 0 until one is built. It is device memory beside VRAMBytes, not part of it.
+	KVBytes int64
 }
 
 // FullyResident reports whether every expert stack is on the device.
@@ -55,6 +59,9 @@ func (p Inkling2DevicePlacement) String() string {
 	tail := "no NVMe streaming"
 	if p.NVMeBytes > 0 {
 		tail = fmt.Sprintf("+%.0f GiB RAM would remove NVMe streaming", math.Ceil(inkling2GiB(p.RAMNeededForAllExpertsBytes)))
+	}
+	if p.KVBytes > 0 {
+		tail += fmt.Sprintf("; kv cache %.2f GiB", inkling2GiB(p.KVBytes))
 	}
 	return fmt.Sprintf("inkling2 placement: vram %.1f GiB (dense+hot, %d expert layers), ram %.1f GiB (%d layers), nvme %.1f GiB (%d layers); %s",
 		inkling2GiB(p.VRAMBytes()), p.ResidentLayers, inkling2GiB(p.RAMBytes), p.RAMLayers, inkling2GiB(p.NVMeBytes), p.NVMeLayers, tail)
@@ -73,6 +80,12 @@ func (e *Inkling2DenseOverBudgetError) Error() string {
 		e.DenseBytes, e.BudgetBytes, inkling2VRAMBudgetEnv)
 }
 
+// inkling2DeviceHeadroom is the share of a free reading held back from weights and
+// KV alike.
+func inkling2DeviceHeadroom(free int64) int64 {
+	return min(free*inkling2VRAMHeadroomPct/100, inkling2VRAMHeadroomCap)
+}
+
 // inkling2DeviceBudget is the byte budget for weight uploads: the env override
 // when set, else free device memory minus headroom, else -1 (unbounded) for a
 // backend that cannot report free memory, which keeps the upload-everything
@@ -89,7 +102,69 @@ func inkling2DeviceBudget(be compute.Backend, lookup func(string) (string, bool)
 	if !known || free == compute.FreeUnknown || free < 0 {
 		return -1, nil
 	}
-	return free - min(free*inkling2VRAMHeadroomPct/100, inkling2VRAMHeadroomCap), nil
+	return free - inkling2DeviceHeadroom(free), nil
+}
+
+// Inkling2KVOverBudgetError refuses a resident session whose device allocations cannot
+// fit the memory left after the weights. Experts stay resident, so a smaller context
+// is the only lever; MaxCtx is the largest context that fits (0 when none does).
+type Inkling2KVOverBudgetError struct {
+	Ctx, MaxCtx          int
+	NeedBytes, FreeBytes int64
+}
+
+func (e *Inkling2KVOverBudgetError) Error() string {
+	free := "unknown"
+	if e.FreeBytes != compute.FreeUnknown {
+		free = fmt.Sprintf("%d bytes", e.FreeBytes)
+	}
+	return fmt.Sprintf("inkling2: %d-token resident session needs %d bytes but free device memory is %s; the largest context that fits is %d (lower FAK_INKLING2_CTX)",
+		e.Ctx, e.NeedBytes, free, e.MaxCtx)
+}
+
+// inkling2KVFit returns the KV bytes at ctx after checking KV plus other, the non-KV
+// device allocations of the session, against free (compute.FreeUnknown when the device
+// reports none). Unknown free refuses any ctx above the backend ceiling, naming that
+// ceiling, rather than clamping silently. A known free refuses any ctx whose total
+// exceeds free minus headroom, and MaxCtx is 0 when even the smallest accepted context
+// would not fit. Speculative draft caches and verify state are allocated after the
+// build and are not counted in other.
+func inkling2KVFit(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, other, free int64) (int64, error) {
+	kv := inkling2ResidentKVBytes(hp, ctx, batched, chunk)
+	need := kv + other
+	if free == compute.FreeUnknown {
+		ceiling := Inkling2ResidentCtxMax(inkling2ResidentBackend)
+		if ctx <= ceiling {
+			return kv, nil
+		}
+		return kv, &Inkling2KVOverBudgetError{Ctx: ctx, MaxCtx: ceiling, NeedBytes: need, FreeBytes: free}
+	}
+	budget := free - inkling2DeviceHeadroom(free)
+	if need <= budget {
+		return kv, nil
+	}
+	maxCtx := 0
+	if left := budget - other; left >= 0 {
+		maxCtx = inkling2MaxResidentCtx(hp, batched, chunk, ctx-1, left)
+	}
+	if maxCtx < Inkling2ResidentCtxMin {
+		maxCtx = 0
+	}
+	return kv, &Inkling2KVOverBudgetError{Ctx: ctx, MaxCtx: maxCtx, NeedBytes: need, FreeBytes: free}
+}
+
+// noteInkling2KVBytes records the KV bytes of a session built at ctx on its device
+// placement. A ctx 0 cohort binding holds no KV and must not overwrite the resident
+// session's figure.
+func noteInkling2KVBytes(m *Inkling2LoopModel, ctx int, kv int64) {
+	if ctx <= 0 {
+		return
+	}
+	if s, ok := m.closer.(*inkling2DeviceSet); ok {
+		s.mu.Lock()
+		s.placement.KVBytes = kv
+		s.mu.Unlock()
+	}
 }
 
 // inkling2DeviceBytes estimates the device footprint of one uploaded matrix.
@@ -210,6 +285,8 @@ func Inkling2DevicePlacementOf(m *Inkling2LoopModel) (Inkling2DevicePlacement, b
 	if !ok {
 		return Inkling2DevicePlacement{}, false
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.placement, true
 }
 

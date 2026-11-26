@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/memgate"
 )
 
@@ -37,8 +38,8 @@ func TestInkling2AdmittedCtxPricedWithinFree(t *testing.T) {
 		if ctx == 0 {
 			continue
 		}
-		if ctx%256 != 0 || ctx > inkling2ResidentCtxMax {
-			t.Fatalf("free %d: ctx %d is off the 256 step or above the %d cap", free, ctx, inkling2ResidentCtxMax)
+		if ctx%256 != 0 || ctx > ggufload.Inkling2AutoCtxCeiling {
+			t.Fatalf("free %d: ctx %d is off the 256 step or above the 16384 auto ceiling", free, ctx)
 		}
 		if priced := inkling2ResidentSessionBytes(s, ctx); priced > free {
 			t.Fatalf("free %d: ctx %d prices %d bytes, above free", free, ctx, priced)

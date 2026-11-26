@@ -108,7 +108,7 @@ func TestRunInkling2ResidentCtx(t *testing.T) {
 		want int
 	}{
 		{"", false, 4096}, {"8192", true, 8192}, {" 512 ", true, 512}, {"511", true, 4096},
-		{"many", true, 4096}, {"23552", true, 23552}, {"24576", true, 24576}, {"32768", true, 32768}, {"100000", true, 32768},
+		{"many", true, 4096}, {"23552", true, 23552}, {"24576", true, 24576}, {"32768", true, 32768}, {"100000", true, 100000},
 	} {
 		if got := inkling2ResidentCtx(tc.v, tc.set); got != tc.want {
 			t.Errorf("ctx(%q, %v) = %d, want %d", tc.v, tc.set, got, tc.want)

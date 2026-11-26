@@ -2704,7 +2704,7 @@ StepDecision (superstream.StepDecision) is the pure verdict DecideStep produces 
 
 ### Inkling2ResidentCtxEnv (FAK_INKLING2_CTX)
 
-Inkling2ResidentCtxEnv names FAK_INKLING2_CTX, the environment knob that sets the global-slot KV capacity of a resident Inkling-2 device session, clamped to the build backend's resident bound (32768 on Metal, 24576 on CUDA) and floored at 512.
+Inkling2ResidentCtxEnv names FAK_INKLING2_CTX, the environment knob that sets the global-slot KV capacity of a resident Inkling-2 device session, refused, not clamped, when the device-memory KV fit (or the 32768 Metal hard bound) does not admit it, and floored at 512.
 
 **Distinct from:** The requested token capacity of one resident Inkling-2 session before it exists - not context-window (the model's fixed trained limit) and not FixedContextTokens (macfit's per-model planning constant); admission prices this value against device memory.
 

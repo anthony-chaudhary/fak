@@ -81,5 +81,5 @@ func inkling2AdmittedCtx(s inkling2ResidentShape, free int64) int {
 		HeadDim:    s.HeadDim,
 		LocalLayer: s.Local,
 	}
-	return ggufload.Inkling2ResidentFitCtx(hp, free)
+	return min(ggufload.Inkling2ResidentFitCtx(hp, free), ggufload.Inkling2AutoCtxCeiling)
 }
