@@ -552,12 +552,18 @@ func TestNativeSchedulerUnifiedKVManager(t *testing.T) {
 			t.Fatalf("after first grant Used/Free = %d/%d, want 3/%d", m.Used(), m.Free(), cap-3)
 		}
 
-		b, _, err := m.Acquire("lane-b", 5, NativeKVLayoutV1)
+		bNeed := cap - len(a)
+		b, _, err := m.Acquire("lane-b", bNeed, NativeKVLayoutV1)
 		if err != nil {
-			t.Fatalf("Acquire(lane-b, 5): %v", err)
+			t.Fatalf("Acquire(lane-b, %d): %v", bNeed, err)
 		}
-		if !reflect.DeepEqual(b, []int{3, 4, 5, 6, 7}) {
-			t.Fatalf("Acquire(lane-b, 5) = %v, want [3 4 5 6 7]", b)
+		if len(b) != bNeed {
+			t.Fatalf("Acquire(lane-b, %d) granted %d blocks", bNeed, len(b))
+		}
+		for i, id := range b {
+			if id != len(a)+i {
+				t.Fatalf("Acquire(lane-b) = %v, want the ascending blocks after lane-a's %v", b, a)
+			}
 		}
 		if m.Used() != cap || m.Free() != 0 {
 			t.Fatalf("pool full Used/Free = %d/%d, want %d/0", m.Used(), m.Free(), cap)

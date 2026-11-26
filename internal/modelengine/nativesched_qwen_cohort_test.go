@@ -650,7 +650,7 @@ func TestNativeSchedulerBoundedDecodeCohorts(t *testing.T) {
 			if !reflect.DeepEqual(boundedQwenWidths(b), wantWidths) || b.scalarCalls != 0 {
 				t.Fatalf("replayed after partial progress: widths=%v scalar=%d", boundedQwenWidths(b), b.scalarCalls)
 			}
-			if len(s.elastic.lanes) != 7 || s.elastic.snapshot().CachedReleases != 2 {
+			if len(s.elastic.lanes) != len(lanes)-len(owners) || s.elastic.snapshot().CachedReleases != 2 {
 				t.Fatal("abnormal cleanup stranded an elastic reservation")
 			}
 		})

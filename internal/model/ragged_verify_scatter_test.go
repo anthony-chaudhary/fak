@@ -133,9 +133,15 @@ func TestRaggedVerifyScatter(t *testing.T) {
 		if want := []int{0, 0, 0, 2, 2, 3, 4, 4}; !reflect.DeepEqual(rows, want) {
 			t.Fatalf("TokenRows = %v, want %v", rows, want)
 		}
-		exact, err := pack.TokenRows(6)
-		if err != nil || !reflect.DeepEqual(exact, []int{0, 0, 0, 2, 2, 3}) {
+		exact, err := pack.TokenRows(pack.Tokens())
+		if err != nil || len(exact) != pack.Tokens() {
 			t.Fatalf("TokenRows with no padding = %v, %v", exact, err)
+		}
+		for token := range exact {
+			owner, ok := pack.Owner(token)
+			if !ok || exact[token] != owner.Request {
+				t.Fatalf("TokenRows[%d] = %d, want owner request of %+v (ok %v)", token, exact[token], owner, ok)
+			}
 		}
 		if _, err := pack.TokenRows(5); !errors.Is(err, ErrRaggedVerifyScatter) {
 			t.Fatalf("TokenRows with too few slots admitted: %v", err)

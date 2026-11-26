@@ -19,6 +19,7 @@ func TestNativeSchedulerQueueReleasesDiscardedPointers(t *testing.T) {
 	for _, queue := range []string{"waiting", "preempted", "running"} {
 		t.Run(queue, func(t *testing.T) {
 			retired := newCanceled()
+			promptLen, logitsLen := len(retired.prompt), len(retired.logits)
 			backing := []*schedLane{retired}
 			s := &NativeScheduler{}
 			switch queue {
@@ -48,7 +49,7 @@ func TestNativeSchedulerQueueReleasesDiscardedPointers(t *testing.T) {
 			if backing[0] != nil {
 				t.Fatal("queue backing array retains retired lane and its request buffers")
 			}
-			if len(retired.prompt) != 32 || len(retired.logits) != 32 {
+			if len(retired.prompt) != promptLen || len(retired.logits) != logitsLen {
 				t.Fatal("caller-owned lane buffers were mutated instead of releasing container references")
 			}
 		})

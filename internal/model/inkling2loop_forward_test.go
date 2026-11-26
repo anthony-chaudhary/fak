@@ -182,12 +182,13 @@ func TestInkling2LoopHostTinyForwardIsDeterministicAndUsesEveryPassSlot(t *testi
 			t.Fatalf("slots = %d, want 10", h.Slots())
 		}
 		var out [][]float32
-		for _, tok := range []int{1, 4, 2, 7, 3} {
+		toks := []int{1, 4, 2, 7, 3}
+		for _, tok := range toks {
 			out = append(out, append([]float32(nil), h.Step(tok)...))
 		}
 		for s := range h.keys {
-			if len(h.keys[s]) != 5 {
-				t.Fatalf("slot %d holds %d keys, want 5", s, len(h.keys[s]))
+			if len(h.keys[s]) != len(toks) {
+				t.Fatalf("slot %d holds %d keys, want one per decoded token (%d)", s, len(h.keys[s]), len(toks))
 			}
 		}
 		return out

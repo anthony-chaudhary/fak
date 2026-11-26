@@ -1,6 +1,7 @@
 package modelreg
 
 import (
+	"crypto/sha1"
 	"strings"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestInkling2CatalogAliasesResolveToPinnedGGUF(t *testing.T) {
 		if parsed != ref {
 			t.Fatalf("Resolve(%q) = %+v, want %+v", alias, parsed, ref)
 		}
-		if len(parsed.Revision) != 40 || strings.Trim(parsed.Revision, "0123456789abcdef") != "" {
+		if !isFullGitCommitSHA(parsed.Revision) {
 			t.Fatalf("Resolve(%q) revision %q is not a full commit sha", alias, parsed.Revision)
 		}
 	}
@@ -48,4 +49,10 @@ func TestInkling2CatalogAliasesAreNotCoding(t *testing.T) {
 			t.Fatalf("%s flagged as a coding alias", alias)
 		}
 	}
+}
+
+// isFullGitCommitSHA reports whether rev is a complete lowercase-hex commit id,
+// the pin form every catalog revision must take.
+func isFullGitCommitSHA(rev string) bool {
+	return len(rev) == sha1.Size*2 && strings.Trim(rev, "0123456789abcdef") == ""
 }

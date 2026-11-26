@@ -84,7 +84,7 @@ func TestQwen35PrefillRopeRowsExact(t *testing.T) {
 					t.Fatal("a later layer rebuilt the row")
 				}
 			}
-			if len(r.table.cos) != 5 || len(r.table.sin) != 5 {
+			if len(r.table.cos) != r.rows || len(r.table.sin) != r.rows {
 				t.Fatal("table included the cached prefix")
 			}
 			other := &qwen35PrefillRopeRows{base: base, rows: 5}
