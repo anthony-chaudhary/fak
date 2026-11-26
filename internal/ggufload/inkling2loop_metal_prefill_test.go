@@ -197,3 +197,93 @@ func TestInkling2MetalBatchedPrefillMatchesPerToken(t *testing.T) {
 	text, _ := tok.Decode(want)
 	t.Logf("continuation: %q", text)
 }
+
+// A closed resident session gives its device memory back: sessions that each
+// prefill and decode on one model leave the device's allocated size where the
+// first closed session left it, so a server's wide-chunk admission does not
+// shrink with every request. FAK_INKLING2_PREFILL_TOKENS overrides the prompt.
+// fak-test:runtime slow est=240s
+func TestInkling2MetalResidentSessionsReleaseDevice(t *testing.T) {
+	path := os.Getenv("FAK_INKLING2_TEST_GGUF")
+	if path == "" {
+		t.Skip("set FAK_INKLING2_TEST_GGUF to run on Apple GPU")
+	}
+	tokens := 1200
+	if v := os.Getenv("FAK_INKLING2_PREFILL_TOKENS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 32 {
+			t.Fatalf("bad FAK_INKLING2_PREFILL_TOKENS %q", v)
+		}
+		tokens = n
+	}
+	f, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	table, ok := f.GGMLTokenizer()
+	if !ok {
+		t.Fatal("checkpoint has no embedded BPE tokenizer")
+	}
+	tok, err := tokenizer.FromGGML(table.Tokens, table.Merges, table.TokenTypes, table.Pre)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := inkling2MetalPrefillPrompt(t, tok, tokens)
+	wait := 8 * time.Minute
+	if d, err := time.ParseDuration(os.Getenv("FAK_GPU_WAIT_BOUND")); err == nil && d > 0 {
+		wait = d
+	}
+	lease, err := gpulease.Acquire(gpulease.Options{Timeout: wait, Logf: t.Logf})
+	if errors.Is(err, gpulease.ErrTimeout) {
+		t.Skipf("NOT RUN: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+
+	m, be, err := OpenInkling2LoopMetalDevice(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if !inkling2ResidentEligible(m, be) {
+		t.Fatal("the mapped checkpoint does not run on the resident device forward")
+	}
+	mib := func() float64 { return float64(compute.DarwinWorkingSetLimits().CurrentAllocatedSize) / (1 << 20) }
+	t.Logf("model open: %.0f MiB allocated", mib())
+	const sessions = 5
+	closed := make([]float64, 0, sessions)
+	for i := range sessions {
+		s, err := NewInkling2LoopSession(m, be)
+		if err != nil {
+			t.Fatalf("session %d: %v", i, err)
+		}
+		chunk := 0
+		if rs, ok := s.(*inkling2ResidentSession); ok {
+			chunk = rs.s.chunkMax
+		}
+		bound := mib()
+		next, err := s.Prefill(context.Background(), prompt)
+		if err != nil {
+			t.Fatalf("session %d: %v", i, err)
+		}
+		for range 4 {
+			if next, err = s.Step(next); err != nil {
+				t.Fatalf("session %d: %v", i, err)
+			}
+		}
+		used := mib()
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		closed = append(closed, mib())
+		t.Logf("session %d: chunk %d; %.0f MiB bound, %.0f MiB after prefill and decode, %.0f MiB after close",
+			i, chunk, bound, used, closed[i])
+	}
+	// The first session may leave process-lifetime scratch behind; later ones
+	// must not add to it.
+	if grew := closed[sessions-1] - closed[0]; grew > 64 {
+		t.Fatalf("closed sessions kept %.0f MiB on the device: %v MiB after each close", grew, closed)
+	}
+}

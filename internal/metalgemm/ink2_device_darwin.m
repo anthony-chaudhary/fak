@@ -120,9 +120,13 @@ void mg_ink2_release(void *buffer) {
 }
 
 void *mg_ink2_span(void *buffer, size_t *bytes) {
-    id<MTLBuffer> b = (__bridge id<MTLBuffer>)buffer;
-    *bytes = b.length;
-    return b.contents;
+    // Called from Go threads with no pool: an autoreleased reference here would
+    // pin the buffer, and its device memory, past Free.
+    @autoreleasepool {
+        id<MTLBuffer> b = (__bridge id<MTLBuffer>)buffer;
+        *bytes = b.length;
+        return b.contents;
+    }
 }
 
 static int ink2_fail(MGInk2Device *d, NSString *reason) {
