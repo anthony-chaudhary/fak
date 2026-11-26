@@ -52,15 +52,9 @@ func surfaceViolation(facts []ToolFacts) (bool, string) {
 // the facts, so it cannot pad the surface.
 func kernelSurfaceFacts() []ToolFacts {
 	facts := FromKernel()
-	denied := map[string]bool{}
-	for _, t := range adjudicator.Default.DeniedTools() {
-		denied[t] = true
-	}
-	if len(denied) > 0 {
-		for i := range facts {
-			if denied[facts[i].Name] {
-				facts[i].PolicyDenied = true
-			}
+	for i := range facts {
+		if adjudicator.Default.IsNameDenied(facts[i].Name) {
+			facts[i].PolicyDenied = true
 		}
 	}
 	return facts

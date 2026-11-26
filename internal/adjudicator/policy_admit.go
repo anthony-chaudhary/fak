@@ -121,6 +121,14 @@ func lookupDeny(deny map[string]abi.ReasonCode, advisory map[abi.ReasonCode]bool
 	return bestR, found
 }
 
+// HasNameDeny reports whether this policy carries an explicit name-level Deny for
+// tool under the same case folding Adjudicate applies, so routing that resolves
+// wire names against the raw policy agrees with the adjudicator on what is denied.
+func (p Policy) HasNameDeny(tool string) bool {
+	_, ok := lookupDeny(p.Deny, p.AdvisoryReasons, strings.ToLower(tool))
+	return ok
+}
+
 // NeverAdmits reports whether the floor can NEVER produce an Allow for this tool
 // NAME, for ANY argument value — the pure, args-independent question the inbound
 // tool-def compactor (promptmmu) asks before it may safely drop a tool DEFINITION.

@@ -57,8 +57,8 @@ func LintFacts() []toollint.ToolFacts {
 	// hazard is precisely "denied AND served by the vDSO before the Deny folds". A
 	// denied tool that is on no fast path (the common, safe case, e.g. delete_account)
 	// stays out of the facts rather than padding the surface with an inert entry.
-	for _, name := range adjudicator.Default.DeniedTools() {
-		if f := byName[name]; f != nil {
+	for name, f := range byName {
+		if adjudicator.Default.IsNameDenied(name) {
 			f.PolicyDenied = true
 		}
 	}

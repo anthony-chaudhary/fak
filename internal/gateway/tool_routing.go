@@ -808,10 +808,8 @@ func isToolRecognized(candidate string, pol *policy.Runtime) bool {
 	if pol.Adjudicator.Allow != nil && pol.Adjudicator.Allow[candidate] {
 		return true
 	}
-	if pol.Adjudicator.Deny != nil {
-		if _, ok := pol.Adjudicator.Deny[candidate]; ok {
-			return true
-		}
+	if pol.Adjudicator.HasNameDeny(candidate) {
+		return true
 	}
 	for _, pre := range pol.Adjudicator.AllowPrefix {
 		if strings.HasPrefix(candidate, pre) {

@@ -160,6 +160,13 @@ func (a *Adjudicator) DeniedTools() []string {
 	return out
 }
 
+// IsNameDenied reports whether the installed policy refuses tool by name, folding
+// case the way Adjudicate does. DeniedTools returns folded keys, so a consumer that
+// matches a registered (possibly mixed-case) name against them misses the deny.
+func (a *Adjudicator) IsNameDenied(tool string) bool {
+	return a.state.Load().policy.HasNameDeny(tool)
+}
+
 // indexArgPredicates groups arg predicates by their Tool, preserving slice order
 // within each tool (so first-violation-wins is unchanged). Returns nil for the
 // empty set (the common case), preserving Adjudicate's len()==0 fast path. Built
