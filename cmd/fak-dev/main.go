@@ -41,6 +41,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunBackend(stdout, stderr, argv[1:])
 	case "boundary":
 		return devcmd.RunBoundary(stdout, stderr, argv[1:])
+	case "gocache-trim":
+		return devcmd.RunGoCacheTrim(stdout, stderr, argv[1:])
 	case "ci-preflight":
 		return devcmd.RunCIPreflight(stdout, stderr, argv[1:])
 	case "checkpoint":
@@ -238,6 +240,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  orient [env] --paths GLOB             show repository conventions and live ownership")
 	fmt.Fprintln(w, "  backend scaffold NAME --lane LANE     generate a repository compute backend")
 	fmt.Fprintln(w, "  boundary [--json] [--workspace DIR]   lint repository demo/package boundaries")
+	fmt.Fprintln(w, "  gocache-trim <cache-dir> <ceiling-bytes> bound a Go build cache by removing least-recently-used files")
 	fmt.Fprintln(w, "  ci-preflight [--ref R] [flags]        check committed repository tip in isolation")
 	fmt.Fprintln(w, "  checkpoint [flags]                    append a developer progress milestone")
 	fmt.Fprintln(w, "  build [--profile P] [--out F] [--receipt F] [--json]  build fak and record phase timings; 'build batch setup|plan|status' manages an optional source-bound data record (advisory, no execution)")

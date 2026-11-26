@@ -1750,6 +1750,36 @@ jobs:
           cp internal/rsiloop/testdata/main-kpi-baseline.jsonl "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
           go run ./cmd/rsiloop -mode track -repo . -baseline-ref HEAD -journal "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
 
+      # Bounded before the save: the GOCACHE grows with every commit that adds packages, and an
+      # unbounded save is what filled the repository's 10 GB cache cap. Trunk pushes only, and
+      # only after the job is green. The ceiling is 1.5x the cache a fresh build, vet and test
+      # compile of this tree measured (3775336016 bytes), so a normal run never trims. Above it
+      # the least-recently-used files are removed and the newest entries kept; the cache is
+      # never wiped, so the warm entries survive.
+      - name: bound Go build cache to the pinned ceiling (trunk push, green job only)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
+        run: go run ./cmd/fak-dev gocache-trim "$(go env GOCACHE)" "$GO_BUILD_CACHE_CEILING_BYTES"
+
+      # Measures the cache the save step will actually store, after the trim above, so it
+      # fails only when trimming could not bring the cache under the ceiling.
+      - name: go build cache size gate (fails above the pinned ceiling)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GO_BUILD_CACHE_CEILING_BYTES: "5663004024"
+        run: |
+          set -euo pipefail
+          cache="$(go env GOCACHE)"
+          size=$(du -sb "$cache" | cut -f1)
+          echo "go build cache to save: $size bytes (ceiling $GO_BUILD_CACHE_CEILING_BYTES)"
+          if (( size > GO_BUILD_CACHE_CEILING_BYTES )); then
+            echo "::error::go build cache is $size bytes, above the $GO_BUILD_CACHE_CEILING_BYTES-byte ceiling after trimming; not saving it"
+            exit 1
+          fi
+
       # Saved last, after every build and test step, so the entry holds the compiled
       # cache this job produced rather than the restored copy. Default success() gating:
       # a red job does not save, since its partial cache would be reused under the same key.
