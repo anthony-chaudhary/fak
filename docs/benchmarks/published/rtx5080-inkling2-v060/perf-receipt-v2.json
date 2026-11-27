@@ -1,0 +1,72 @@
+{
+  "schema": "fak.perf-receipt/2",
+  "kind": "release-witness",
+  "ticket": "inkling2-oss-next-01-release-v060",
+  "step": "Wave-2 RTX 5080 (sm_120) Inkling-2-Mini-UD-Q3_K_XL release witness (C1-C4 <= 16K)",
+  "date": "2026-11-27",
+  "evidence_class": "HW-WITNESSED",
+  "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, CUDA 13.5 runtime]",
+  "node": "NVIDIA GeForce RTX 5080 16 GB (sm_120)",
+  "models": {
+    "gguf_mainline": "Inkling-2-Mini-UD-Q3_K_XL.gguf"
+  },
+  "engines": {
+    "fak": "fak serve --engine inkernel --backend cuda (Wave-2 >= be228d79ef, sm_120f)",
+    "llama_stock": "llama.cpp 0e4e925 (-ngl 99 -np 4 -c 16384 -fa on --no-warmup)",
+    "realugbun": "realugbun/llama.cpp fork (-ngl 99 -np 4 -c 16384 -fa on --no-warmup)",
+    "oracle": "llama.cpp CPU greedy token lists embedded in internal/ggufload"
+  },
+  "workload": "Single-stream decode bench (capitals 19+127), spec decode oracle (f32 KV), 16K f16 batched prefill KL (165 positions), and HTTP C1-C4 <= 16K concurrency sweep (p512_d128, p2048_d256)",
+  "results": {
+    "in_process_decode_bench": {
+      "plain_decode_tok_s": 122.34,
+      "prefill_tok_s": 602.04,
+      "kv_dtype": "f16",
+      "auto_ctx": 29184,
+      "fnv64": "d51b043b08677ea1"
+    },
+    "spec_oracle_f32": {
+      "perfect_depth_4_tok_s": 294.28,
+      "perfect_depth_6_tok_s": 326.21,
+      "perfect_depth_8_tok_s": 307.74,
+      "neartie_pass": ["capitals", "fibonacci", "chat-template"],
+      "neartie_fail": ["passphrase-recall-1946 (step 25, 150311 vs 150816, margin 0.3601 nats)"]
+    },
+    "batched_prefill_kl_16k_f16": {
+      "positions": 165,
+      "mean_kl_nats": 0.002912,
+      "max_kl_nats": 0.083805,
+      "same_top_1": "164/165 (99.39%)",
+      "attend_tree_mean_kl_nats": 0.002389,
+      "forced_oracle_32_steps": "32/32 top-1 match (llama-gap 0.000)"
+    },
+    "http_sweep_c1_c4_16k": {
+      "C1_p512_d128": {
+        "fak": {"ttft_ms": 274.35, "stream_decode_tok_s": 102.45, "agg_e2e_tok_s": 84.54},
+        "llama_stock": {"ttft_ms": 311.37, "stream_decode_tok_s": 111.94, "agg_e2e_tok_s": 88.51},
+        "realugbun": {"ttft_ms": 267.81, "stream_decode_tok_s": 118.63, "agg_e2e_tok_s": 95.62}
+      },
+      "C1_p2048_d256": {
+        "fak": {"ttft_ms": 638.20, "stream_decode_tok_s": 93.23, "agg_e2e_tok_s": 75.89},
+        "llama_stock": {"ttft_ms": 1171.01, "stream_decode_tok_s": 107.88, "agg_e2e_tok_s": 72.42},
+        "realugbun": {"ttft_ms": 723.77, "stream_decode_tok_s": 116.03, "agg_e2e_tok_s": 87.61}
+      },
+      "C2_p512_d128": {
+        "fak": {"ttft_ms": 351.33, "stream_decode_tok_s": 72.09, "agg_post_first_tok_s": 144.17, "agg_e2e_tok_s": 121.16},
+        "llama_stock": {"ttft_ms": 559.93, "stream_decode_tok_s": 95.45, "agg_post_first_tok_s": 190.88, "agg_e2e_tok_s": 135.42},
+        "realugbun": {"ttft_ms": 530.63, "stream_decode_tok_s": 97.48, "agg_post_first_tok_s": 194.93, "agg_e2e_tok_s": 139.58}
+      },
+      "C4_p512_d128": {
+        "fak": {"ttft_ms": 598.89, "stream_decode_tok_s": 52.17, "agg_post_first_tok_s": 208.66, "agg_e2e_tok_s": 168.76},
+        "llama_stock": {"ttft_ms": 1019.52, "stream_decode_tok_s": 70.10, "agg_post_first_tok_s": 243.59, "agg_e2e_tok_s": 180.81},
+        "realugbun": {"ttft_ms": 981.30, "stream_decode_tok_s": 60.91, "agg_post_first_tok_s": 243.59, "agg_e2e_tok_s": 166.93}
+      },
+      "C4_p2048_d256": {
+        "fak": {"ttft_ms": 2017.61, "stream_decode_tok_s": 43.72, "agg_post_first_tok_s": 174.88, "agg_e2e_tok_s": 130.44},
+        "llama_stock": {"ttft_ms": 4683.83, "stream_decode_tok_s": 61.72, "agg_post_first_tok_s": 231.57, "agg_e2e_tok_s": 115.69},
+        "realugbun": {"ttft_ms": 3718.34, "stream_decode_tok_s": 55.30, "agg_post_first_tok_s": 212.25, "agg_e2e_tok_s": 122.47}
+      }
+    }
+  },
+  "verdict": "supported_within_envelope_c1_c4_16k"
+}
