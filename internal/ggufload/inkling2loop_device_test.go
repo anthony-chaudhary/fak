@@ -235,3 +235,51 @@ func TestInkling2BatchStreamScalarParityC2C4C8(t *testing.T) {
 		}
 	}
 }
+
+type fakeInk2CloseDevice struct {
+	fakeInk2GraphCohort
+	resets int
+}
+
+func (d *fakeInk2CloseDevice) Ink2GraphReset() { d.resets++ }
+
+// fak-test:runtime fast est=1ms
+func TestInkling2ResidentFailedClosePreservesLiveOwnerGraph(t *testing.T) {
+	devBackend := &fakeInk2CloseDevice{fakeInk2GraphCohort: *newFakeInk2GraphCohort()}
+	dev := inkling2DeviceFor(devBackend)
+	dev.Reset()
+	resetsBefore := devBackend.resets
+
+	owner := &inkling2ResidentSession{s: &inkling2Resident{dev: devBackend, be: devBackend}, devOwner: dev}
+	owner.own()
+	owner.s.graph, owner.s.graphReady, owner.s.warm = true, true, true
+
+	// A failed second-slot build has not claimed the device or captured graphs, so
+	// closing it must not destroy the live owner's captured CUDA graph exec.
+	failed := &inkling2Resident{dev: devBackend, be: devBackend}
+	failed.close()
+	if devBackend.resets != resetsBefore {
+		t.Fatalf("failed unowned close called Ink2GraphReset %d time(s), want 0", devBackend.resets-resetsBefore)
+	}
+	if dev.Owner() != owner.s || !owner.s.graphReady {
+		t.Fatalf("owner=%v graphReady=%v after failed close, want intact owner", dev.Owner(), owner.s.graphReady)
+	}
+
+	// Once a session claims and closes, Reset clears both the graph and owner atomically.
+	second := &inkling2ResidentSession{s: &inkling2Resident{dev: devBackend, be: devBackend}, devOwner: dev}
+	second.own()
+	second.s.close()
+	if devBackend.resets != resetsBefore+1 {
+		t.Fatalf("claimed close reset count = %d, want %d", devBackend.resets-resetsBefore, 1)
+	}
+	if dev.Owner() != nil {
+		t.Fatalf("dev.Owner() after claimed close = %v, want nil", dev.Owner())
+	}
+	if !owner.s.graphReady {
+		t.Fatal("owner.s.graphReady should still be true before reclaim")
+	}
+	owner.own()
+	if owner.s.graphReady || owner.s.warm {
+		t.Fatalf("owner did not drop stale captures after reclaim: ready=%v warm=%v", owner.s.graphReady, owner.s.warm)
+	}
+}

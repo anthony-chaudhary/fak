@@ -454,8 +454,11 @@ func (b *inkling2Batch) begin(C, ctx int) error {
 		maxCap = max(maxCap, c)
 	}
 	b.scoreStride = 2 * hp.Heads * maxCap
-	// a captured step bakes the previous cohort's width and strides
-	s.dev.Ink2GraphReset()
+	// a captured step bakes the previous cohort's width and strides; reset through
+	// the per-device owner so any prior owner drops its stale capture flags too.
+	if s.dev != nil {
+		inkling2DeviceFor(s.dev).Reset()
+	}
 	b.graphReady, b.warm = false, false
 	b.graph = inkling2BatchGraph() && inkling2DefaultOn(s.be, "FAK_INKLING2_GRAPH", os.LookupEnv)
 	if n := C * b.histStride; n > 0 {

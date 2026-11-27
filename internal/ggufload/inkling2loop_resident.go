@@ -1062,6 +1062,21 @@ func inkling2SlotLayer(hp model.Inkling2LoopHParams, slot int) int {
 	return hp.CoreStart + (slot-hp.Layers)%core
 }
 
+func (s *inkling2Resident) hasAnyCapture() bool {
+	if s.graphReady || s.verifyReady || s.keepReady {
+		return true
+	}
+	for i := range s.tailReady {
+		if s.tailReady[i] || s.tailKeepReady[i] {
+			return true
+		}
+	}
+	if d, ok := s.draft.(*ink2DeviceDraft); ok && d != nil && d.ready {
+		return true
+	}
+	return false
+}
+
 func (s *inkling2Resident) close() {
 	s.pipeDrain()
 	if s.report && s.decN > 0 {
@@ -1071,7 +1086,11 @@ func (s *inkling2Resident) close() {
 		}
 	}
 	if s.dev != nil {
-		s.dev.Ink2GraphReset()
+		dev := inkling2DeviceFor(s.dev)
+		cur := dev.Owner()
+		if cur == nil || inkling2SameOwner(cur, s) || s.hasAnyCapture() || s.warm || s.verifyWarm {
+			dev.Reset()
+		}
 	}
 	for _, t := range s.owned {
 		s.be.Free(t)
