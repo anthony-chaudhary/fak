@@ -29,6 +29,8 @@ type Engine struct {
 	// selfCost reads this process's cumulative CPU time. Injectable so a test can
 	// drive the accounting deterministically instead of racing a real clock.
 	selfCost SelfCostFunc
+	// hostSampler reads point-in-time host pressure once per tick (#14475).
+	hostSampler HostSampler
 	// lastSelfCost is the previous tick's reading, used to derive per-tick CPU.
 	lastSelfCost     time.Duration
 	haveLastSelfCost bool
@@ -61,15 +63,16 @@ func NewEngineWithHostReach(repoRoot string, cfg Config, host HostReach) (*Engin
 	}
 
 	e := &Engine{
-		RepoRoot:   repoRoot,
-		Config:     cfg,
-		Ledger:     led,
-		Storage:    NewStorageManager(repoRoot, cfg),
-		Process:    NewProcessManager(cfg),
-		Workspace:  NewWorkspaceManager(repoRoot),
-		LoadLedger: loadLed,
-		selfCost:   DefaultSelfCost,
-		clock:      time.Now,
+		RepoRoot:    repoRoot,
+		Config:      cfg,
+		Ledger:      led,
+		Storage:     NewStorageManager(repoRoot, cfg),
+		Process:     NewProcessManager(cfg),
+		Workspace:   NewWorkspaceManager(repoRoot),
+		LoadLedger:  loadLed,
+		selfCost:    DefaultSelfCost,
+		hostSampler: HarnessHostSampler{},
+		clock:       time.Now,
 	}
 	e.Storage.GoCacheRoot = host.GoCacheRoot
 	e.Storage.TempRoots = host.TempRoots
@@ -91,6 +94,14 @@ func (e *Engine) SetSelfCostFunc(fn SelfCostFunc) {
 	e.selfCost = fn
 	e.lastSelfCost = 0
 	e.haveLastSelfCost = false
+}
+
+// SetHostSampler installs an injectable host-load sampler (tests, or hosts with
+// custom pressure readers). Passing nil yields UNKNOWN host samples.
+func (e *Engine) SetHostSampler(s HostSampler) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.hostSampler = s
 }
 
 // SetClock installs an injectable clock.
@@ -135,10 +146,18 @@ func (e *Engine) selfCPUDelta() (time.Duration, bool) {
 	return delta, true
 }
 
+func (e *Engine) sampleHost() *HostLoad {
+	if e.hostSampler == nil {
+		return &HostLoad{State: HostSampleUnknown}
+	}
+	sample, err := e.hostSampler.SampleHost()
+	return classifyHostSample(sample, err)
+}
+
 // recordLoadCycle appends exactly one fak-ops-load/1 row per tick. A failure to
 // account is returned to the caller but never aborts the maintenance the tick
 // already performed.
-func (e *Engine) recordLoadCycle(started, finished time.Time, phases []PhaseLoad, mutations int, failed bool) error {
+func (e *Engine) recordLoadCycle(started, finished time.Time, phases []PhaseLoad, mutations int, failed bool, host *HostLoad) error {
 	e.loadTick++
 	verdict := LoadIdle
 	switch {
@@ -158,6 +177,7 @@ func (e *Engine) recordLoadCycle(started, finished time.Time, phases []PhaseLoad
 		Phases:    phases,
 		Verdict:   verdict,
 		Mutations: mutations,
+		Host:      host,
 	}
 	if haveCPU {
 		cycle.HaveCPU = true
@@ -185,6 +205,7 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 
 	started := e.now()
 	now := started
+	host := e.sampleHost()
 
 	mutations := 0
 	failed := false
@@ -294,7 +315,7 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 		e.lastStorageTick = now
 	}
 
-	return e.recordLoadCycle(started, e.now(), phases, mutations, failed)
+	return e.recordLoadCycle(started, e.now(), phases, mutations, failed, host)
 }
 
 // phaseWall records how long a considered phase took on this tick.
