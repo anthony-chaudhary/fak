@@ -76,6 +76,90 @@ type Candidate interface {
 // Correct checks a candidate result against the reference result.
 type Correct func(got, reference []float32) error
 
+// DefaultRoundingAlpha is the rounding-step error-ratio threshold (alpha = 8)
+// adapted from magnitudedev/magnitude (comparison.rs:6, precision.rs:31).
+const DefaultRoundingAlpha = 8.0
+
+// RoundingCellWidth returns the rounding-cell width w_T(d) for the activation
+// dtype at value d, and reports whether dtype requires bit-exact equality.
+func RoundingCellWidth(dtype string, d float64) (width float64, bitExact bool) {
+	switch dtype {
+	case "bool", "packed", "i8", "i16", "i32", "i64", "int8", "int16", "int32", "int64",
+		"u8", "u16", "u32", "u64", "uint8", "uint16", "uint32", "uint64":
+		return 0, true
+	case "f64", "fp64", "float64":
+		return floatMantissaStep(d, 52, -1022), false
+	case "f32", "fp32", "float32", "":
+		return floatMantissaStep(d, 23, -126), false
+	case "f16", "fp16", "float16":
+		return floatMantissaStep(d, 10, -14), false
+	case "bf16", "bfloat16":
+		return floatMantissaStep(d, 7, -126), false
+	case "f8_e4m3", "fp8_e4m3", "e4m3":
+		return floatMantissaStep(d, 3, -6), false
+	case "f8_e5m2", "fp8_e5m2", "e5m2":
+		return floatMantissaStep(d, 2, -14), false
+	default:
+		return 0, true
+	}
+}
+
+func floatMantissaStep(v float64, mantissaBits, minNormalExp int) float64 {
+	av := math.Abs(v)
+	minNormal := math.Ldexp(1, minNormalExp)
+	if av < minNormal {
+		return math.Ldexp(1, minNormalExp-mantissaBits)
+	}
+	_, exp := math.Frexp(av) // av in [0.5, 1) * 2^exp, so unbiased exp is exp-1
+	return math.Ldexp(1, (exp-1)-mantissaBits)
+}
+
+// RoundingStepCorrect returns a Correct check enforcing
+// sqrt(sum((c-d)^2) / sum(w_T(d)^2/12)) <= alpha for floating activation
+// dtypes, and bit-exact equality for integer, bool, packed, and non-finite values.
+func RoundingStepCorrect(dtype string, alpha float64) Correct {
+	if alpha <= 0 {
+		alpha = DefaultRoundingAlpha
+	}
+	return func(got, reference []float32) error {
+		if len(got) != len(reference) {
+			return fmt.Errorf("length mismatch: got %d, want %d", len(got), len(reference))
+		}
+		var errPower, stepPower float64
+		for i := range reference {
+			c := float64(got[i])
+			d := float64(reference[i])
+			if math.IsNaN(c) || math.IsInf(c, 0) || math.IsNaN(d) || math.IsInf(d, 0) {
+				if math.Float32bits(got[i]) != math.Float32bits(reference[i]) {
+					return fmt.Errorf("non-finite bit mismatch at %d: got %g, want %g", i, c, d)
+				}
+				continue
+			}
+			w, exact := RoundingCellWidth(dtype, d)
+			if exact {
+				if math.Float32bits(got[i]) != math.Float32bits(reference[i]) {
+					return fmt.Errorf("bit-exact mismatch at %d (%s): got %g, want %g", i, dtype, c, d)
+				}
+				continue
+			}
+			diff := c - d
+			errPower += diff * diff
+			stepPower += (w * w) / 12.0
+		}
+		if stepPower == 0 {
+			if errPower != 0 {
+				return fmt.Errorf("exact error power %g > 0", errPower)
+			}
+			return nil
+		}
+		ratio := math.Sqrt(errPower / stepPower)
+		if ratio > alpha {
+			return fmt.Errorf("rounding-step error ratio %.4g > alpha %.4g", ratio, alpha)
+		}
+		return nil
+	}
+}
+
 // Measure times one candidate invocation in the declared timer domain. Hardware
 // implementations may use device events rather than host wall time.
 type Measure func(context.Context, Candidate, Profile) (time.Duration, error)
@@ -213,7 +297,7 @@ func (m Manifest) Digest() (string, error) {
 // With Policy.SignTestAlpha set, a lower median only nominates a challenger: it
 // replaces the fallback when it also leads a paired sign test against it.
 func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, reference Candidate, correct Correct, measure Measure, policy Policy) (Manifest, Report, error) {
-	if len(profiles) == 0 || len(candidates) == 0 || reference == nil || correct == nil || measure == nil {
+	if len(profiles) == 0 || len(candidates) == 0 || reference == nil || measure == nil {
 		return Manifest{}, Report{}, errors.New("computetune: incomplete tuning inputs")
 	}
 	if policy.Warmup < 0 || policy.Repeats <= 0 || policy.Statistic != "median" || policy.TimerDomain == "" || policy.FallbackCandidate == "" || policy.SelectionOverhead < 0 || !(policy.SignTestAlpha >= 0 && policy.SignTestAlpha < 1) {
@@ -239,6 +323,10 @@ func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 		if err := profile.validate(); err != nil {
 			return Manifest{}, Report{}, err
 		}
+		profileCorrect := correct
+		if profileCorrect == nil {
+			profileCorrect = RoundingStepCorrect(profile.DType, DefaultRoundingAlpha)
+		}
 		want, err := reference.Run(ctx, profile)
 		if err != nil {
 			return Manifest{}, Report{}, fmt.Errorf("computetune: reference: %w", err)
@@ -252,7 +340,7 @@ func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 				pr.Candidates = append(pr.Candidates, cr)
 				continue
 			}
-			if err := correct(got, want); err != nil {
+			if err := profileCorrect(got, want); err != nil {
 				cr.RefusalReason = "incorrect result: " + err.Error()
 				pr.Candidates = append(pr.Candidates, cr)
 				continue
