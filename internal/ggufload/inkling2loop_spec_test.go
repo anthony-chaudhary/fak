@@ -595,3 +595,53 @@ func TestInkling2SpecVerifyOverflowCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestInkling2Spec128kNVFP4DSparkVRAMBudget(t *testing.T) {
+	mini := inkling2MiniKVShape()
+	mini.Hidden = 2304
+	mini.ExpertsUsed = 8
+	mini.ExpertWidth = 768
+
+	const (
+		ctx128k             = 131072
+		chunk               = 128
+		dsparkQ8WeightBytes = 278 << 20 // ~278 MiB Q8_0 DSpark draft weights
+		outputVocabRows     = 151936
+		shortlist           = 32
+	)
+
+	// 1. Bounded DSpark ring sizing prevents 128k OOM and k_ink2d_attend smem overflow.
+	if got := inkling2DraftFRNNCap(ctx128k, chunk); got != 1024 {
+		t.Fatalf("inkling2DraftFRNNCap(128k, 128) = %d, want 1024 (saves >1.1 GiB vs unbounded ctx)", got)
+	}
+	if cap, win := inkling2DraftLayerRing(ctx128k, chunk, 1024, true); cap != 1152 || win != 1024 {
+		t.Fatalf("local draft ring(128k, 128, 1024) = (%d, %d), want (1152, 1024)", cap, win)
+	}
+	if cap, win := inkling2DraftLayerRing(ctx128k, chunk, 1024, false); cap != 4224 || win != 4096 {
+		t.Fatalf("global draft ring(128k, 128, 1024) = (%d, %d), want (4224, 4096)", cap, win)
+	}
+
+	// 2. Total post-weight VRAM budget at 128k NVFP4 + 278 MiB Q8 DSpark draft fits
+	// within RTX 5080 (15.92 GiB) ~2.45 GiB free after 24/24 all-resident weights.
+	draftHP := model.Inkling2DSparkHParams{
+		Hidden: 2304, Layers: 2, Heads: 16, KVHeads: 8, HeadDim: 128,
+		Intermediate: 6144, Block: 8, MarkovRank: 256, SlidingWindow: 1024,
+		VocabUnpadded: outputVocabRows, Taps: 4, LocalLayer: []bool{true, false},
+	}
+	targetNVFP4KV := inkling2ResidentKVBytesFor(mini, ctx128k, true, chunk, Inkling2KVNVFP4)
+	targetOther := inkling2ResidentOtherBytes(mini, inkling2ArenaFloats, chunk, 0)
+	draftState := inkling2DSparkStateBytes(draftHP, ctx128k, chunk, outputVocabRows, shortlist)
+	draftTotal := dsparkQ8WeightBytes + draftState
+	totalPostWeights := targetNVFP4KV + targetOther + draftTotal
+
+	const rtx5080FreeAfterWeights = int64(245) * (1 << 30) / 100 // 2.45 GiB
+	t.Logf("128k NVFP4 + DSpark budget: target_kv=%.3f GiB, target_other=%.3f GiB, dspark_weights=%.3f GiB, dspark_state=%.3f GiB, total_post_weights=%.3f GiB (free=%.2f GiB)",
+		float64(targetNVFP4KV)/(1<<30), float64(targetOther)/(1<<30),
+		float64(dsparkQ8WeightBytes)/(1<<30), float64(draftState)/(1<<30),
+		float64(totalPostWeights)/(1<<30), float64(rtx5080FreeAfterWeights)/(1<<30))
+
+	if totalPostWeights > rtx5080FreeAfterWeights {
+		t.Fatalf("128k NVFP4 + DSpark post-weights %.3f GiB exceeds RTX 5080 2.45 GiB free after 24/24 weights",
+			float64(totalPostWeights)/(1<<30))
+	}
+}

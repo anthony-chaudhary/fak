@@ -13,10 +13,69 @@ import (
 // inkling2DraftSlot is the device graph slot of the draft block forward.
 const inkling2DraftSlot = 3
 
+// inkling2DraftMaxGlobalCtx bounds a global DSpark draft layer's context ring so
+// 128k target sessions neither exhaust 16 GiB VRAM nor exceed k_ink2d_attend's
+// dynamic shared-memory opt-in ceiling. Draft proposals are always verified by
+// the full-context target, so bounding the draft's context ring never affects
+// target output exactness.
+const inkling2DraftMaxGlobalCtx = 4096
+
+// inkling2DraftLayerRing returns the ring capacity and attention window for a
+// DSpark draft layer in a session with target context ctx and prefill chunk size.
+func inkling2DraftLayerRing(ctx, chunk, slidingWindow int, local bool) (cap, window int) {
+	if ctx <= 0 {
+		return 0, 0
+	}
+	pad := max(chunk, inkling2SpecMaxDraft+1)
+	if local && slidingWindow > 0 {
+		return min(ctx, slidingWindow+pad), slidingWindow
+	}
+	if ctx <= inkling2DraftMaxGlobalCtx {
+		return ctx, 0
+	}
+	return min(ctx, inkling2DraftMaxGlobalCtx+pad), inkling2DraftMaxGlobalCtx
+}
+
+// inkling2DraftFRNNCap returns the ring capacity for DSpark's Markov fRNN feature
+// ring, which Ink2DMarkovIn only ever reads at (*posDev - 1) % cap. Keeping it
+// bounded saves >1.1 GiB at 128k context while preserving full prefill/verify safety.
+func inkling2DraftFRNNCap(ctx, chunk int) int {
+	if ctx <= 0 {
+		return 0
+	}
+	return min(ctx, max(max(chunk, inkling2SpecMaxDraft+1)+2, 1024))
+}
+
+// inkling2DSparkStateBytes returns the device bytes allocated by attachDraft for
+// DSpark's KV context rings, Markov fRNN ring, and working/scratch buffers
+// (excluding Q8_0 draft weights, which are ~278 MiB for Inkling-2-Mini).
+func inkling2DSparkStateBytes(hp model.Inkling2DSparkHParams, ctx, chunk, outputRows, shortlist int) int64 {
+	H := hp.Hidden
+	kvDim := hp.KVHeads * hp.HeadDim
+	qDim := hp.Heads * hp.HeadDim
+	B := hp.Block
+	var floats int64
+	for l := 0; l < hp.Layers; l++ {
+		local := l < len(hp.LocalLayer) && hp.LocalLayer[l]
+		cap, _ := inkling2DraftLayerRing(ctx, chunk, hp.SlidingWindow, local)
+		floats += 2 * int64(cap) * int64(kvDim)
+	}
+	if shortlist > 0 {
+		frnnCap := inkling2DraftFRNNCap(ctx, chunk)
+		floats += int64(frnnCap)*int64(H) + int64(hp.MarkovRank) + 4 +
+			int64(B-1)*int64(shortlist)*(1+128)
+	}
+	scrFloats := 4*B*H + 2*B*qDim + 2*B*kvDim + 3*B*hp.Intermediate + 3*hp.MarkovRank +
+		2*(2*hp.MarkovRank+2*H) + B*H + 64*24 + 6*B*(hp.Intermediate/4+hp.Intermediate/32+64)
+	floats += int64(B*H + 4 + 4*B + (B-1)*outputRows + scrFloats)
+	return 4 * floats
+}
+
 type ink2DLayer struct {
 	inNorm, postNorm, dfNorm, qNorm, kNorm, kNormCtx ink2Ref
 	wq, wk, wv, wo, wkCtx, wvCtx, gate, up, down     ink2Mat
-	kc, vc                                           ink2Ref // context rings [inkling2ResidentCtx][kvDim]
+	kc, vc                                           ink2Ref // context rings [cap][kvDim]
+	cap, window                                      int
 	alpha                                            []float32
 }
 
@@ -45,6 +104,7 @@ type ink2DeviceDraft struct {
 	shortlist, steps               int
 	minMargin                      float32
 	w1, anchor, frnn               ink2Ref
+	frnnCap                        int
 	rnnProj, hiddenOut             ink2Mat
 	rnnBias, hiddenOutBias, mkNorm ink2Ref
 	mkAlpha                        []float32
@@ -122,13 +182,16 @@ func (s *inkling2Resident) attachDraft(dm *Inkling2DSparkModel) (*ink2DeviceDraf
 	kvDim := hp.KVHeads * hp.HeadDim
 	for l := range w.Layers {
 		lw := &w.Layers[l]
+		local := l < len(hp.LocalLayer) && hp.LocalLayer[l]
+		lcap, lwin := inkling2DraftLayerRing(s.ctx, s.chunkMax, hp.SlidingWindow, local)
 		d.layers = append(d.layers, ink2DLayer{
 			inNorm: s.upload(lw.InputNorm), postNorm: s.upload(lw.PostAttnNorm), dfNorm: s.upload(lw.DFlareNorm),
 			qNorm: s.upload(lw.QNorm), kNorm: s.upload(lw.KNorm), kNormCtx: s.upload(lw.KNormCtx),
 			wq: s.q8Mat(lw.Wq), wk: s.q8Mat(lw.Wk), wv: s.q8Mat(lw.Wv), wo: s.q8Mat(lw.Wo),
 			wkCtx: s.q8Mat(lw.WkCtx), wvCtx: s.q8Mat(lw.WvCtx),
 			gate: s.q8Mat(lw.Gate), up: s.q8Mat(lw.Up), down: s.q8Mat(lw.Down),
-			kc: s.alloc(s.ctx * kvDim), vc: s.alloc(s.ctx * kvDim),
+			kc: s.alloc(lcap * kvDim), vc: s.alloc(lcap * kvDim),
+			cap: lcap, window: lwin,
 			alpha: inkling2SoftmaxF32(w.FuseWeight[l]),
 		})
 	}
@@ -148,7 +211,8 @@ func (s *inkling2Resident) attachDraft(dm *Inkling2DSparkModel) (*ink2DeviceDraf
 		}
 		d.w1 = s.upload(packed)
 		d.anchor = s.alloc(4)
-		d.frnn = s.alloc(s.ctx * H)
+		d.frnnCap = inkling2DraftFRNNCap(s.ctx, s.chunkMax)
+		d.frnn = s.alloc(d.frnnCap * H)
 		d.rnnProj, d.hiddenOut = s.q8Mat(w.RnnProj), s.q8Mat(w.HiddenOut)
 		d.rnnBias, d.hiddenOutBias, d.mkNorm = s.upload(w.RnnBias), s.upload(w.HiddenOutBias), s.upload(w.MarkovNorm)
 		d.mkAlpha = inkling2SoftmaxF32(w.FuseWeight[hp.Layers])
@@ -213,17 +277,17 @@ func (d *ink2DeviceDraft) commitTaps(p *ink2Prefill, taps []ink2Ref) {
 			s.fail(p.pd.Ink2PMatMul(L.wvCtx.t, ctx, v, p.T))
 		}
 		if s.err == nil {
-			s.fail(d.dd.Ink2DQK(k, L.kNormCtx, L.kc, s.verifyPos, p.T, hp.KVHeads, hp.HeadDim, d.s.ctx, true, hp.NormEps, hp.RopeTheta))
+			s.fail(d.dd.Ink2DQK(k, L.kNormCtx, L.kc, s.verifyPos, p.T, hp.KVHeads, hp.HeadDim, L.cap, true, hp.NormEps, hp.RopeTheta))
 		}
 		if s.err == nil {
-			s.fail(d.dd.Ink2DRingStore(v, L.vc, s.verifyPos, p.T, kvDim, d.s.ctx))
+			s.fail(d.dd.Ink2DRingStore(v, L.vc, s.verifyPos, p.T, kvDim, L.cap))
 		}
 	}
 	if d.shortlist > 0 && s.err == nil {
 		f := p.tmp(p.T * hp.Hidden)
 		s.fail(d.dd.Ink2DFuse(taps, d.mkAlpha, d.mkNorm, f, p.T, hp.Hidden, hp.NormEps))
 		if s.err == nil {
-			s.fail(d.dd.Ink2DRingStore(f, d.frnn, s.verifyPos, p.T, hp.Hidden, d.s.ctx))
+			s.fail(d.dd.Ink2DRingStore(f, d.frnn, s.verifyPos, p.T, hp.Hidden, d.frnnCap))
 		}
 	}
 }
@@ -297,12 +361,8 @@ func (d *ink2DeviceDraft) forward() {
 		q, k, v := qkv[0], qkv[1], qkv[2]
 		run(d.dd.Ink2DQK(q, L.qNorm, q, d.pos, B, hp.Heads, hp.HeadDim, 0, false, hp.NormEps, hp.RopeTheta))
 		run(d.dd.Ink2DQK(k, L.kNorm, k, d.pos, B, hp.KVHeads, hp.HeadDim, 0, false, hp.NormEps, hp.RopeTheta))
-		window := 0
-		if hp.LocalLayer[l] {
-			window = hp.SlidingWindow
-		}
 		o := d.tmp(B * qDim)
-		run(d.dd.Ink2DAttend(q, k, v, L.kc, L.vc, o, d.pos, B, hp.Heads, hp.KVHeads, hp.HeadDim, window, d.s.ctx))
+		run(d.dd.Ink2DAttend(q, k, v, L.kc, L.vc, o, d.pos, B, hp.Heads, hp.KVHeads, hp.HeadDim, L.window, L.cap))
 		run(s.dev.Ink2Add(res, mm(L.wo, o, B), res, B*H))
 		h := d.tmp(B * H)
 		run(s.dev.Ink2RMS(res, L.postNorm, h, B, H, hp.NormEps))
@@ -333,7 +393,7 @@ func (d *ink2DeviceDraft) forward() {
 	in := d.tmp(2*r + 2*H)
 	raw, latent := d.tmp(3*r), d.tmp(r)
 	for i := 0; i < d.steps; i++ {
-		run(d.dd.Ink2DMarkovIn(d.state, d.w1, d.anchor, d.idx, i, at(hid, (i+1)*H), d.frnn, d.pos, d.s.ctx, r, H, in))
+		run(d.dd.Ink2DMarkovIn(d.state, d.w1, d.anchor, d.idx, i, at(hid, (i+1)*H), d.frnn, d.pos, d.frnnCap, r, H, in))
 		run(pd.Ink2PMatMul(d.rnnProj.t, in, raw, 1))
 		run(d.dd.Ink2DMarkovGate(raw, d.rnnBias, d.state, latent, r, i))
 		z := d.tmp(H)
