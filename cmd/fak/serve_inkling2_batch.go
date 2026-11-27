@@ -349,6 +349,17 @@ type inkling2LoopBatchEngine struct {
 	lastCohortWidth     atomic.Int64
 	lastChunkSize       atomic.Int64
 	cohortAutotuneStats func() ggufload.Inkling2CohortAutotuneStats
+	specActive          bool
+	scalarOpen          inkling2LoopSessionOpener
+	scalarClose         func() error
+	scalarDropSlots     func() error
+	cohortsClose        func()
+	life                sync.Mutex
+	closed              bool
+	quit                chan struct{}
+	done                chan struct{}
+	closeOnce           sync.Once
+	closeErr            error
 }
 
 // Inkling2AutotuneStats captures live cohort/autotune counters from an
@@ -426,6 +437,7 @@ func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.I
 	e.split = cohorts.Split
 	e.fitsMultiRow = cohorts.FitsMultiRow
 	e.cohortAutotuneStats = cohorts.AutotuneStats
+	e.cohortsClose = cohorts.Close
 	if on, _ := cohorts.UsePrefixStore(lookup); on {
 		e.loneCohort = true
 		e.prefixStats = cohorts.PrefixStats
@@ -441,6 +453,8 @@ func newInkling2LoopBatchEngineWith(scalar inkling2ScalarGenerate, batch inkling
 	return &inkling2LoopBatchEngine{
 		admission: adm, contextTokens: contextTokens,
 		queue:                 make(chan *inkling2QueuedRequest, adm.max),
+		quit:                  make(chan struct{}),
+		done:                  make(chan struct{}),
 		scalarGenerate:        scalar,
 		batchGenerate:         batch,
 		initialDecodeHeadroom: ggufload.Inkling2InitialDecodeHeadroomDefault,
@@ -470,10 +484,19 @@ func (e *inkling2LoopBatchEngine) enqueue(ctx context.Context, prompt []int, max
 	if err := ctx.Err(); err != nil {
 		return agent.Inkling2LoopGeneration{}, err
 	}
+	e.life.Lock()
+	closed := e.closed
+	quit := e.quit
+	e.life.Unlock()
+	if closed {
+		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
+	}
 	r := &inkling2QueuedRequest{entered: e.admission.clock.Now(), ctx: ctx, prompt: append([]int(nil), prompt...), maxNew: maxNew, stops: stops,
 		sample: sample, sink: &inkling2RowSink{emit: emit}, done: make(chan inkling2QueuedResult, 1)}
 	select {
 	case e.queue <- r:
+	case <-quit:
+		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
 	case <-ctx.Done():
 		return agent.Inkling2LoopGeneration{}, ctx.Err()
 	}
@@ -496,7 +519,18 @@ func (e *inkling2LoopBatchEngine) enqueue(ctx context.Context, prompt []int, max
 // run serves cohorts in arrival order. A request a running cohort could not fit is
 // the next cohort's first row, ahead of anything still queued.
 func (e *inkling2LoopBatchEngine) run() {
+	defer func() {
+		e.drainOnClose()
+		if e.done != nil {
+			close(e.done)
+		}
+	}()
 	for {
+		select {
+		case <-e.quit:
+			return
+		default:
+		}
 		var first *inkling2QueuedRequest
 		switch {
 		case e.pending != nil:
@@ -506,14 +540,47 @@ func (e *inkling2LoopBatchEngine) run() {
 			first = e.deferred[0]
 			e.deferred = e.deferred[1:]
 		default:
-			r, ok := <-e.queue
-			if !ok {
+			select {
+			case <-e.quit:
 				return
+			case r, ok := <-e.queue:
+				if !ok {
+					return
+				}
+				first = r
 			}
-			first = r
 		}
 		if group := e.admission.collect(first, e.queue); len(group) > 0 {
 			e.execute(group)
+		}
+	}
+}
+
+func (e *inkling2LoopBatchEngine) drainOnClose() {
+	failQueued := func(r *inkling2QueuedRequest) {
+		if r == nil {
+			return
+		}
+		select {
+		case r.done <- inkling2QueuedResult{err: errInkling2LoopEngineClosed}:
+		default:
+		}
+	}
+	failQueued(e.pending)
+	e.pending = nil
+	for _, r := range e.deferred {
+		failQueued(r)
+	}
+	e.deferred = nil
+	for {
+		select {
+		case r, ok := <-e.queue:
+			if !ok {
+				return
+			}
+			failQueued(r)
+		default:
+			return
 		}
 	}
 }
@@ -558,11 +625,19 @@ func (e *inkling2LoopBatchEngine) execute(group []*inkling2QueuedRequest) {
 		return
 	}
 	if len(greedy) == 1 && e.shouldRunScalarLone(greedy[0]) {
-		if e.loneCohort && e.fitsMultiRow != nil {
+		if e.loneCohort && !e.specActive && e.fitsMultiRow != nil {
 			e.c1LongCtxFallbacks.Add(1)
 		}
 		e.runScalar(greedy[0])
 		return
+	}
+	if e.specActive && e.scalarDropSlots != nil {
+		if err := e.scalarDropSlots(); err != nil {
+			for _, r := range greedy {
+				r.done <- inkling2QueuedResult{err: err}
+			}
+			return
+		}
 	}
 	for _, g := range e.splitGroup(greedy) {
 		e.runGroup(g, &owned)
@@ -570,7 +645,7 @@ func (e *inkling2LoopBatchEngine) execute(group []*inkling2QueuedRequest) {
 }
 
 func (e *inkling2LoopBatchEngine) shouldRunScalarLone(r *inkling2QueuedRequest) bool {
-	if !e.loneCohort {
+	if !e.loneCohort || e.specActive {
 		return true
 	}
 	if e.fitsMultiRow != nil {
@@ -710,7 +785,7 @@ func (e *inkling2LoopBatchEngine) splitGroup(group []*inkling2QueuedRequest) [][
 // instead of failing its rows.
 func (e *inkling2LoopBatchEngine) runGroup(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) {
 	if len(group) == 1 && e.shouldRunScalarLone(group[0]) {
-		if e.loneCohort && e.fitsMultiRow != nil {
+		if e.loneCohort && !e.specActive && e.fitsMultiRow != nil {
 			e.c1LongCtxFallbacks.Add(1)
 		}
 		e.runScalar(group[0])
@@ -832,6 +907,14 @@ func (e *inkling2LoopBatchEngine) admitQueued(c *inkling2Cohort, maxPositions in
 // It reports false, answering nothing, when the batch was refused device memory before
 // any row ran: the caller serves those rows on narrower cohorts.
 func (e *inkling2LoopBatchEngine) runBatch(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) bool {
+	if e.scalarDropSlots != nil {
+		if err := e.scalarDropSlots(); err != nil {
+			for _, r := range group {
+				r.done <- inkling2QueuedResult{err: err}
+			}
+			return true
+		}
+	}
 	e.lastCohortWidth.Store(int64(len(group)))
 	c := &inkling2Cohort{width: len(group), rows: append([]*inkling2QueuedRequest(nil), group...), owned: owned, answered: make([]bool, len(group))}
 	reqs := make([]ggufload.Inkling2LoopBatchRequest, len(group))
@@ -866,4 +949,31 @@ func (e *inkling2LoopBatchEngine) runBatch(group []*inkling2QueuedRequest, owned
 		r.done <- inkling2QueuedResult{err: err}
 	}
 	return true
+}
+
+// Close finishes in-flight cohort work, stops the run worker, and releases
+// cohort and underlying scalar resources once cleanly on shutdown.
+func (e *inkling2LoopBatchEngine) Close() error {
+	if e == nil {
+		return nil
+	}
+	e.closeOnce.Do(func() {
+		e.life.Lock()
+		e.closed = true
+		quit, done := e.quit, e.done
+		e.life.Unlock()
+		if quit != nil {
+			close(quit)
+		}
+		if done != nil {
+			<-done
+		}
+		if e.cohortsClose != nil {
+			e.cohortsClose()
+		}
+		if e.scalarClose != nil {
+			e.closeErr = e.scalarClose()
+		}
+	})
+	return e.closeErr
 }

@@ -39,10 +39,22 @@ func inkling2TailSlots(T int) (verify, commit int) {
 // intBits carries an int32 through a float32 device word.
 func intBits(v int) float32 { return math.Float32frombits(uint32(int32(v))) }
 
+func inkling2Lookup(lookup func(string) (string, bool), key string) (string, bool) {
+	if lookup == nil {
+		return os.LookupEnv(key)
+	}
+	return lookup(key)
+}
+
 // inkling2SpecDepth is the drafted-token count of a speculative step from
 // FAK_INKLING2_SPEC (unset = the default depth 4; 0 = plain decode; 1 = depth 4).
 func inkling2SpecDepth() int {
-	v := os.Getenv("FAK_INKLING2_SPEC")
+	return inkling2SpecDepthFrom(os.LookupEnv)
+}
+
+func inkling2SpecDepthFrom(lookup func(string) (string, bool)) int {
+	v, _ := inkling2Lookup(lookup, "FAK_INKLING2_SPEC")
+	v = strings.TrimSpace(v)
 	if v == "" {
 		return 4
 	}
@@ -88,7 +100,7 @@ var inkling2SpecKVDisableOnce sync.Once
 // inkling2SpecExplicit reports whether FAK_INKLING2_SPEC was explicitly set to a
 // non-empty value in the environment.
 func inkling2SpecExplicit(lookup func(string) (string, bool)) bool {
-	v, set := lookup("FAK_INKLING2_SPEC")
+	v, set := inkling2Lookup(lookup, "FAK_INKLING2_SPEC")
 	return set && strings.TrimSpace(v) != ""
 }
 
@@ -125,7 +137,7 @@ func inkling2BackendSupportsSpecKV(be compute.Backend, dtype Inkling2KVDType) bo
 // auto-disable because the session uses a non-fp32 global KV dtype that the backend's
 // verify ops do not support and the operator did not explicitly request FAK_INKLING2_SPEC.
 func inkling2SpecAutoDisabledForKV(be compute.Backend, lookup func(string) (string, bool)) bool {
-	if inkling2SpecExplicit(lookup) {
+	if be == nil || inkling2SpecExplicit(lookup) {
 		return false
 	}
 	effDType := Inkling2KVF32
@@ -551,4 +563,140 @@ func inkling2VerifyGrouped() bool { return os.Getenv("FAK_INKLING2_VERIFY_GROUPE
 func inkling2VerifyMMA(be compute.Backend) bool {
 	m, ok := be.(interface{ Ink2VerifyMMA() bool })
 	return ok && m.Ink2VerifyMMA()
+}
+
+// Inkling2ServeSpec holds a model-lifetime speculative decoding configuration and
+// shared neural draft weights (DSpark or DFlash2) for fak serve, so cached slots
+// open with forSpec and reuse one loaded draft model across requests.
+type Inkling2ServeSpec struct {
+	label   string
+	depth   int
+	kind    string
+	m       *Inkling2LoopModel
+	be      compute.Backend
+	dspark  *Inkling2DSparkModel
+	dflash2 *Inkling2DFlash2Model
+}
+
+// Active reports whether greedy decode in fak serve uses speculative verification.
+func (s *Inkling2ServeSpec) Active() bool {
+	return s != nil && s.depth > 0 && s.m != nil && s.be != nil
+}
+
+// Depth is the resolved max draft length per verify step (0 when inactive).
+func (s *Inkling2ServeSpec) Depth() int {
+	if s == nil {
+		return 0
+	}
+	return s.depth
+}
+
+// DraftKind is the resolved draft source ("lookup", "dspark", "dflash2") or "".
+func (s *Inkling2ServeSpec) DraftKind() string {
+	if !s.Active() {
+		return ""
+	}
+	return s.kind
+}
+
+// Label formats the startup status summary ("spec=off" or "spec=<draft> depth=<n>").
+func (s *Inkling2ServeSpec) Label() string {
+	if s == nil || s.label == "" {
+		return "spec=off"
+	}
+	return s.label
+}
+
+// Close releases any shared neural draft model owned by the serve spec config.
+func (s *Inkling2ServeSpec) Close() error {
+	if s == nil {
+		return nil
+	}
+	var errs []error
+	if s.dspark != nil {
+		errs = append(errs, s.dspark.Close())
+		s.dspark = nil
+	}
+	if s.dflash2 != nil {
+		errs = append(errs, s.dflash2.Close())
+		s.dflash2 = nil
+	}
+	return errors.Join(errs...)
+}
+
+// OpenInkling2ServeSpec resolves speculative decode configuration from lookup
+// and eagerly opens any shared DSpark or DFlash2 weights once for fak serve.
+func OpenInkling2ServeSpec(m *Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (*Inkling2ServeSpec, error) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	depth := inkling2SpecDepthForFrom(m, lookup)
+	if depth == 0 || m == nil || !inkling2SpecCapable(be) {
+		return &Inkling2ServeSpec{label: "spec=off", m: m, be: be}, nil
+	}
+	if inkling2SpecAutoDisabledForKV(be, lookup) {
+		inkling2SpecWarnKVDisable()
+		return &Inkling2ServeSpec{label: "spec=off", m: m, be: be}, nil
+	}
+	if kvRaw, set := inkling2Lookup(lookup, "FAK_INKLING2_KV"); set && strings.TrimSpace(kvRaw) != "" {
+		dtype, err := Inkling2KVDTypeFrom(lookup)
+		if err != nil {
+			return nil, err
+		}
+		eff := inkling2ResidentKVDType(be, dtype)
+		if !inkling2BackendSupportsSpecKV(be, eff) {
+			return nil, fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode on backend %s; set FAK_INKLING2_SPEC=0 or unset FAK_INKLING2_KV", eff, be.Name())
+		}
+	}
+	kind, err := inkling2SpecDraftKindForFrom(m, lookup)
+	if err != nil {
+		return nil, err
+	}
+	mtpDir, _ := inkling2Lookup(lookup, "FAK_INKLING2_MTP_DIR")
+	mtpDir = strings.TrimSpace(mtpDir)
+	dflashDir := inkling2DFlash2DirFor(m, be)
+	resolved := inkling2ResolveSpecDraft(kind, mtpDir, dflashDir)
+	spec := &Inkling2ServeSpec{depth: depth, kind: resolved, m: m, be: be}
+	switch resolved {
+	case inkling2DraftLookup:
+	case inkling2DraftDSpark:
+		if mtpDir == "" {
+			return nil, fmt.Errorf("inkling2 spec: the dspark draft needs FAK_INKLING2_MTP_DIR")
+		}
+		dm, err := OpenInkling2DSpark(mtpDir, m)
+		if err != nil {
+			return nil, err
+		}
+		spec.dspark = dm
+		spec.depth = min(depth, dm.HP.Block-1)
+	case inkling2DraftDFlash:
+		if dflashDir == "" {
+			return nil, fmt.Errorf("inkling2 spec: the dflash2 draft needs %s beside the GGUF and a backend with DFlash2 ops", Inkling2DFlash2DirName)
+		}
+		dm, err := OpenInkling2DFlash2(dflashDir)
+		if err != nil {
+			return nil, err
+		}
+		spec.dflash2 = dm
+		spec.depth = min(depth, dm.Config.DFlash.Block-1)
+	default:
+		return nil, fmt.Errorf("inkling2 spec: the %s draft has no device drafter in this host loop; use lookup, dspark or dflash2", resolved)
+	}
+	if spec.depth <= 0 {
+		_ = spec.Close()
+		return &Inkling2ServeSpec{label: "spec=off", m: m, be: be}, nil
+	}
+	spec.label = fmt.Sprintf("spec=%s depth=%d", spec.kind, spec.depth)
+	return spec, nil
+}
+
+// OpenSession opens a prefix-cacheable resident session configured for spec when active.
+func (s *Inkling2ServeSpec) OpenSession() (Inkling2LoopSession, error) {
+	if s == nil || s.m == nil {
+		return nil, fmt.Errorf("inkling2 spec: nil session model")
+	}
+	if !s.Active() {
+		return NewInkling2LoopSession(s.m, s.be)
+	}
+	return newInkling2LoopSpecResidentSession(s.m, s.be, s.depth, s.kind, s.dspark, s.dflash2)
 }

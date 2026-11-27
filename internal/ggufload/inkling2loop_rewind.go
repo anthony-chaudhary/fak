@@ -37,6 +37,12 @@ func (s *inkling2HostSession) Reset() error {
 	return nil
 }
 
+// ink2DraftRewind records one draft layer's saved ring span in ink2Rewind.
+type ink2DraftRewind struct {
+	lo, hi int
+	k, v   ink2Ref
+}
+
 // ink2Rewind is a resident session's checkpoint. Global slots never wrap, so their
 // rows below pos survive later tokens untouched. A local ring keeps its last window
 // too until a later token lands on it, so only the window rows that horizon more
@@ -53,10 +59,12 @@ type ink2Rewind struct {
 	histFill ink2Ref // -0.0 fill: x + -0.0 == x bit for bit, so an add is an exact copy
 	base     []compute.Tensor
 
-	rows    int       // per-slot capacity of k and v, in cache rows
-	k, v    []ink2Ref // per slot, set for local slots only
-	rowFill ink2Ref   // -0.0 fill covering a row copy
-	grown   []compute.Tensor
+	rows      int               // per-slot capacity of k and v, in cache rows
+	k, v      []ink2Ref         // per slot, set for local slots only
+	draftRows int               // per-draft-layer capacity of draft[i].k/v, in cache rows
+	draft     []ink2DraftRewind // per draft layer ring save
+	rowFill   ink2Ref           // -0.0 fill covering a row copy
+	grown     []compute.Tensor
 }
 
 // ink2Span is one contiguous run of ring rows: ring row index, offset into the

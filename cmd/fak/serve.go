@@ -1282,10 +1282,13 @@ func cmdServe(argv []string) {
 	if rt.chatBackend != nil {
 		mtpBackendName = rt.chatBackend.Name()
 	}
-	fakmodel.SetRetainMTP(serveRetainMTPForModel(*sf.speculative, rt.useMetal, mtpBackendName, serveMTPPeekModelType(*sf.ggufPath), serveMTPEnvForced(os.Getenv)))
-	if ok, reason := serveMTPBackendReplayStatus(*sf.speculative, rt.useMetal, rt.chatBackend); !ok {
-		rt.addStartupMessage(newServeStartupMessage("speculative", "mtp-backend-capability", "warning", reason))
-		fmt.Fprintf(os.Stderr, "fak serve: WARNING: %s\n", reason)
+	modelType := serveMTPPeekModelType(*sf.ggufPath)
+	fakmodel.SetRetainMTP(serveRetainMTPForModel(*sf.speculative, rt.useMetal, mtpBackendName, modelType, serveMTPEnvForced(os.Getenv)))
+	if serveMTPArchConsumes(modelType) {
+		if ok, reason := serveMTPBackendReplayStatus(*sf.speculative, rt.useMetal, rt.chatBackend); !ok {
+			rt.addStartupMessage(newServeStartupMessage("speculative", "mtp-backend-capability", "warning", reason))
+			fmt.Fprintf(os.Stderr, "fak serve: WARNING: %s\n", reason)
+		}
 	}
 	defer rt.closeEPGroup()
 	if *sf.dryAdmit {

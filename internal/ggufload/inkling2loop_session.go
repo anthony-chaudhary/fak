@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -53,6 +54,21 @@ type Inkling2LoopRewinder interface {
 type Inkling2LoopSnapshotter interface {
 	SnapshotState(boundary model.Inkling2SnapshotBoundary, horizon int, modelIdentity string) (*model.Inkling2StateSnapshot, error)
 	RestoreState(snap *model.Inkling2StateSnapshot) error
+}
+
+// Inkling2LoopSpecSession extends Inkling2LoopSession with batched speculative
+// verification and drafting for greedy decoding in fak serve.
+type Inkling2LoopSpecSession interface {
+	Inkling2LoopSession
+	SpecMaxDraft() int
+	SpecPlainUsesVerify() bool
+	SpecStart(prompt []int) error
+	SpecWarm(next int) error
+	SpecDraft(history []int, k int) []int
+	SpecVerify(tokens []int) ([]int, error)
+	SpecCommitVerify(T, keep int) error
+	SpecObserve(fed []int, keep int) error
+	SpecObserveCost(width int, took time.Duration)
 }
 
 // NewInkling2LoopSession opens a session on the resident device forward when the
@@ -146,9 +162,14 @@ func inkling2Argmax(logits []float32) int {
 }
 
 type inkling2ResidentSession struct {
-	s        *inkling2Resident
-	ck       *ink2Rewind
-	devOwner *Inkling2Device
+	s           *inkling2Resident
+	ck          *ink2Rewind
+	devOwner    *Inkling2Device
+	specDepth   int
+	specDrafter inkling2Drafter
+	specLookup  bool
+	specCosts   inkling2CostObserver
+	specCleanup func()
 }
 
 // inkling2GraphOwner mirrors the default device's resident graph owner atomic
@@ -246,14 +267,24 @@ func (r *inkling2ResidentSession) LastLogits() ([]float32, error) {
 }
 
 func (r *inkling2ResidentSession) Close() error {
+	if r == nil || r.s == nil {
+		return nil
+	}
 	if r.ck != nil {
 		r.freeGroup(&r.ck.grown)
 		r.freeGroup(&r.ck.base)
 		r.ck = nil
 	}
+	if r.specCleanup != nil {
+		r.specCleanup()
+		r.specCleanup = nil
+	}
 	dev := r.device()
+	be := r.s.be
 	r.s.close()
+	r.s = nil
 	dev.Reset()
+	inkling2TrimIdle(be)
 	return nil
 }
 
@@ -267,11 +298,7 @@ func (s *inkling2Resident) checkpointable() error {
 }
 
 func (s *inkling2Resident) rewindable() error {
-	// every rewind entry reads or replaces the state a speculative forward changed
 	s.settle()
-	if s.draft != nil || s.specMax > 0 {
-		return fmt.Errorf("inkling2 resident: speculative state cannot be checkpointed")
-	}
 	return s.err
 }
 
@@ -365,36 +392,53 @@ func (r *inkling2ResidentSession) baseBuffers() (*ink2Rewind, error) {
 	return ck, nil
 }
 
-// growRows makes every local slot's side buffers hold at least rows cache rows.
-func (r *inkling2ResidentSession) growRows(ck *ink2Rewind, rows int) error {
-	if rows <= ck.rows {
+// growRows makes every local slot's and attached draft layer's side buffers hold
+// at least rows and draftRows cache rows.
+func (r *inkling2ResidentSession) growRows(ck *ink2Rewind, rows, draftRows int, draftSlots []ink2DraftLayerSlot) error {
+	if rows <= ck.rows && draftRows <= ck.draftRows && len(ck.draft) == len(draftSlots) {
 		return nil
 	}
 	s := r.s
 	r.freeGroup(&ck.grown)
 	ck.rows, ck.k, ck.v = 0, make([]ink2Ref, len(s.hist)), make([]ink2Ref, len(s.hist))
+	ck.draftRows, ck.draft = 0, make([]ink2DraftRewind, len(draftSlots))
 	maxWords := 0
 	var err error
-	for slot := 0; slot < len(s.hist) && err == nil; slot++ {
-		words := s.checkpointRowWords(slot)
-		if words == 0 {
-			continue
-		}
-		maxWords = max(maxWords, words)
-		if ck.k[slot], err = r.allocInto(&ck.grown, rows*words); err == nil {
-			ck.v[slot], err = r.allocInto(&ck.grown, rows*words)
+	if rows > 0 {
+		for slot := 0; slot < len(s.hist) && err == nil; slot++ {
+			words := s.checkpointRowWords(slot)
+			if words == 0 {
+				continue
+			}
+			maxWords = max(maxWords, rows*words)
+			if ck.k[slot], err = r.allocInto(&ck.grown, rows*words); err == nil {
+				ck.v[slot], err = r.allocInto(&ck.grown, rows*words)
+			}
 		}
 	}
-	if err == nil {
+	for i, ds := range draftSlots {
+		if err != nil {
+			break
+		}
+		if draftRows <= 0 || ds.words <= 0 {
+			continue
+		}
+		maxWords = max(maxWords, draftRows*ds.words)
+		if ck.draft[i].k, err = r.allocInto(&ck.grown, draftRows*ds.words); err == nil {
+			ck.draft[i].v, err = r.allocInto(&ck.grown, draftRows*ds.words)
+		}
+	}
+	if err == nil && maxWords > 0 {
 		var g []compute.Tensor
-		ck.rowFill, g, err = r.negZeroFill(rows * maxWords)
+		ck.rowFill, g, err = r.negZeroFill(maxWords)
 		ck.grown = append(ck.grown, g...)
 	}
 	if err != nil {
 		r.freeGroup(&ck.grown)
+		ck.draft = nil
 		return fmt.Errorf("%w: %v", ErrInkling2CheckpointUnavailable, err)
 	}
-	ck.rows = rows
+	ck.rows, ck.draftRows = rows, draftRows
 	return nil
 }
 
@@ -432,7 +476,19 @@ func (r *inkling2ResidentSession) Checkpoint(horizon int) error {
 			ck.lo, ck.hi = min(ck.lo, lo), max(ck.hi, hi)
 		}
 	}
-	if err := r.growRows(ck, ck.hi-ck.lo); err != nil {
+	draftSlots := s.draftLayerSlots()
+	var draftLo, draftHi []int
+	draftRows := 0
+	if len(draftSlots) > 0 {
+		draftLo = make([]int, len(draftSlots))
+		draftHi = make([]int, len(draftSlots))
+		for i, ds := range draftSlots {
+			lo, hi := inkling2SavedSpan(s.pos, ds.window, ds.cap, ck.horizon)
+			draftLo[i], draftHi[i] = lo, hi
+			draftRows = max(draftRows, hi-lo)
+		}
+	}
+	if err := r.growRows(ck, ck.hi-ck.lo, draftRows, draftSlots); err != nil {
 		return err
 	}
 	hf := s.histFloats()
@@ -445,6 +501,13 @@ func (r *inkling2ResidentSession) Checkpoint(horizon int) error {
 		for _, sp := range inkling2RingSpans(ck.lo, ck.hi, s.caps[slot]) {
 			r.copyDev(at(ck.k[slot], sp.off*words), at(s.kc[slot], sp.ring*words), ck.rowFill, sp.n*words)
 			r.copyDev(at(ck.v[slot], sp.off*words), at(s.vc[slot], sp.ring*words), ck.rowFill, sp.n*words)
+		}
+	}
+	for i, ds := range draftSlots {
+		ck.draft[i].lo, ck.draft[i].hi = draftLo[i], draftHi[i]
+		for _, sp := range inkling2RingSpans(draftLo[i], draftHi[i], ds.cap) {
+			r.copyDev(at(ck.draft[i].k, sp.off*ds.words), at(ds.kc, sp.ring*ds.words), ck.rowFill, sp.n*ds.words)
+			r.copyDev(at(ck.draft[i].v, sp.off*ds.words), at(ds.vc, sp.ring*ds.words), ck.rowFill, sp.n*ds.words)
 		}
 	}
 	ck.valid = s.err == nil
@@ -473,6 +536,16 @@ func (r *inkling2ResidentSession) Restore() error {
 		for _, sp := range inkling2RingSpans(ck.lo, ck.hi, s.caps[slot]) {
 			r.copyDev(at(s.kc[slot], sp.ring*words), at(ck.k[slot], sp.off*words), ck.rowFill, sp.n*words)
 			r.copyDev(at(s.vc[slot], sp.ring*words), at(ck.v[slot], sp.off*words), ck.rowFill, sp.n*words)
+		}
+	}
+	for i, ds := range s.draftLayerSlots() {
+		if i >= len(ck.draft) {
+			break
+		}
+		dr := ck.draft[i]
+		for _, sp := range inkling2RingSpans(dr.lo, dr.hi, ds.cap) {
+			r.copyDev(at(ds.kc, sp.ring*ds.words), at(dr.k, sp.off*ds.words), ck.rowFill, sp.n*ds.words)
+			r.copyDev(at(ds.vc, sp.ring*ds.words), at(dr.v, sp.off*ds.words), ck.rowFill, sp.n*ds.words)
 		}
 	}
 	if s.err != nil {
@@ -704,4 +777,172 @@ func (r *inkling2ResidentSession) RestoreState(snap *model.Inkling2StateSnapshot
 	}
 	s.pos = snap.Pos
 	return s.err
+}
+
+type ink2DraftLayerSlot struct {
+	kc, vc      ink2Ref
+	cap, window int
+	words       int
+}
+
+func (s *inkling2Resident) draftLayerSlots() []ink2DraftLayerSlot {
+	switch d := s.draft.(type) {
+	case *ink2DeviceDraft:
+		if d == nil {
+			return nil
+		}
+		words := d.hp.KVHeads * d.hp.HeadDim
+		slots := make([]ink2DraftLayerSlot, len(d.layers))
+		for i, l := range d.layers {
+			w := l.window
+			if w <= 0 {
+				w = l.cap
+			}
+			slots[i] = ink2DraftLayerSlot{kc: l.kc, vc: l.vc, cap: l.cap, window: w, words: words}
+		}
+		return slots
+	case *ink2DFlash2Draft:
+		if d == nil {
+			return nil
+		}
+		words := d.cfg.KVHeads * d.cfg.HeadDim
+		slots := make([]ink2DraftLayerSlot, len(d.layers))
+		for i, l := range d.layers {
+			slots[i] = ink2DraftLayerSlot{kc: l.kc, vc: l.vc, cap: inkling2DFlash2Ring, window: inkling2DFlash2Ring, words: words}
+		}
+		return slots
+	default:
+		return nil
+	}
+}
+
+func newInkling2LoopSpecResidentSession(m *Inkling2LoopModel, be compute.Backend, depth int, kind string, ds *Inkling2DSparkModel, df *Inkling2DFlash2Model) (Inkling2LoopSession, error) {
+	s, err := newInkling2ResidentWithSpec(m, be, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.enableSpec(depth); err != nil {
+		s.close()
+		return nil, err
+	}
+	r := &inkling2ResidentSession{s: s, specDepth: depth}
+	switch kind {
+	case inkling2DraftLookup:
+		d := newInkling2LookupDrafter(nil)
+		r.specLookup = true
+		r.specDrafter = d
+		r.specCosts = d
+	case inkling2DraftDSpark:
+		d, err := s.attachDraft(ds)
+		if err != nil {
+			s.close()
+			return nil, err
+		}
+		d.steps = depth
+		r.specDrafter = inkling2DSparkDrafter{d}
+	case inkling2DraftDFlash:
+		d, err := s.attachDFlash2(df)
+		if err != nil {
+			if d != nil {
+				d.close()
+			}
+			s.close()
+			return nil, err
+		}
+		r.specDrafter = inkling2DFlash2Drafter{d}
+		r.specCleanup = d.close
+	default:
+		s.close()
+		return nil, fmt.Errorf("inkling2 spec: unsupported draft kind %q", kind)
+	}
+	return r, nil
+}
+
+func (r *inkling2ResidentSession) SpecMaxDraft() int {
+	if r == nil || r.s == nil || r.s.specMax <= 1 {
+		return 0
+	}
+	return r.specDepth
+}
+
+func (r *inkling2ResidentSession) SpecPlainUsesVerify() bool {
+	return r != nil && r.s != nil && inkling2VerifyMMA(r.s.be)
+}
+
+func (r *inkling2ResidentSession) SpecStart(prompt []int) error {
+	if r == nil || r.s == nil || r.specDepth <= 0 {
+		return nil
+	}
+	r.own()
+	if r.specLookup {
+		d := newInkling2LookupDrafter(prompt)
+		r.specDrafter = d
+		r.specCosts = d
+	} else if df, ok := r.specDrafter.(inkling2DFlash2Drafter); ok && df.d != nil {
+		df.d.width = nil
+		df.d.run2.drafted = time.Time{}
+	}
+	if r.specDrafter == nil {
+		return nil
+	}
+	return r.specDrafter.Observe(r.s, prompt, len(prompt))
+}
+
+func (r *inkling2ResidentSession) SpecWarm(next int) error {
+	if r == nil || r.s == nil || !r.s.graph || r.s.verifyWarm || r.specDepth <= 0 {
+		return nil
+	}
+	ctx := r.s.ctx
+	if ctx <= 0 {
+		ctx = inkling2ResidentCtx
+	}
+	if r.s.pos+r.specDepth+1 > ctx {
+		return nil
+	}
+	r.own()
+	warm := make([]int, r.specDepth+1)
+	for i := range warm {
+		warm[i] = next
+	}
+	if _, err := r.s.verify(warm); err != nil {
+		return err
+	}
+	return r.s.commitVerify(len(warm), 0)
+}
+
+func (r *inkling2ResidentSession) SpecDraft(history []int, k int) []int {
+	if r == nil || r.s == nil || r.specDrafter == nil || k <= 0 {
+		return nil
+	}
+	r.own()
+	return r.specDrafter.Draft(history, min(k, r.specDepth))
+}
+
+func (r *inkling2ResidentSession) SpecVerify(tokens []int) ([]int, error) {
+	if r == nil || r.s == nil {
+		return nil, fmt.Errorf("inkling2_loop: closed session")
+	}
+	r.own()
+	return r.s.verify(tokens)
+}
+
+func (r *inkling2ResidentSession) SpecCommitVerify(T, keep int) error {
+	if r == nil || r.s == nil {
+		return fmt.Errorf("inkling2_loop: closed session")
+	}
+	r.own()
+	return r.s.commitVerify(T, keep)
+}
+
+func (r *inkling2ResidentSession) SpecObserve(fed []int, keep int) error {
+	if r == nil || r.s == nil || r.specDrafter == nil {
+		return nil
+	}
+	return r.specDrafter.Observe(r.s, fed, keep)
+}
+
+func (r *inkling2ResidentSession) SpecObserveCost(width int, took time.Duration) {
+	if r != nil && r.specCosts != nil {
+		r.specCosts.ObserveCost(width, took)
+	}
 }

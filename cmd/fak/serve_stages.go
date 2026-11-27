@@ -94,6 +94,8 @@ type serveRuntime struct {
 	inkling2MaxPromptTokens int
 	// inkling2ServeStatus supplies the solved Inkling-2 envelope and autotune counters to /v1/serve/status and /metrics.
 	inkling2ServeStatus func() gateway.ServeStatusSnapshot
+	// inkling2SpecDecode records the active Inkling-2 decode banner for startup diagnostics.
+	inkling2SpecDecode string
 
 	apiKey              string
 	engineCacheAdminKey string
@@ -767,7 +769,7 @@ func resolveServeNativeContextDirectory(dir string, requested int) (serveNativeC
 // is closed by cmdServe's deferred closeEPGroup.
 func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	if rt.loadInkling2LoopModel(sf) {
-		rt.addStartupMessage(inkling2ExplicitSpecDiagnostic(os.LookupEnv))
+		rt.addStartupMessage(inkling2ExplicitSpecDiagnosticFor(rt.inkling2SpecDecode, os.LookupEnv))
 		return
 	}
 	startupResidency := serveStartupResidency(*sf.ggufPath)

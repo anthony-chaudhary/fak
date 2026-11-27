@@ -84,6 +84,9 @@ func Inkling2KVDTypeFromPrecision(p kvcache.Precision) (Inkling2KVDType, error) 
 // Inkling2KVDTypeFrom parses the public resident-KV selector. The serving layer
 // uses the same typed result to disable unsupported prefix reuse modes.
 func Inkling2KVDTypeFrom(lookup func(string) (string, bool)) (Inkling2KVDType, error) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
 	v, ok := lookup("FAK_INKLING2_KV")
 	if !ok {
 		v = ""

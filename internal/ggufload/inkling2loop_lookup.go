@@ -203,7 +203,12 @@ func (d *inkling2LookupDrafter) ObserveCost(width int, took time.Duration) {
 // inkling2SpecDraftKind is the draft source from FAK_INKLING2_SPEC_DRAFT
 // (lookup, dspark, dflash2 or auto; unset is auto).
 func inkling2SpecDraftKind() (string, error) {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKLING2_SPEC_DRAFT")))
+	return inkling2SpecDraftKindFrom(os.LookupEnv)
+}
+
+func inkling2SpecDraftKindFrom(lookup func(string) (string, bool)) (string, error) {
+	raw, _ := inkling2Lookup(lookup, "FAK_INKLING2_SPEC_DRAFT")
+	v := strings.ToLower(strings.TrimSpace(raw))
 	switch v {
 	case "":
 		return inkling2DraftAuto, nil
@@ -237,7 +242,7 @@ func inkling2ResolveSpecDraft(kind, mtpDir, dflashDir string) string {
 // inkling2DFlash2DirFor is the DFlash2 checkpoint beside m's GGUF when be can
 // run it, else "".
 func inkling2DFlash2DirFor(m *Inkling2LoopModel, be compute.Backend) string {
-	if _, ok := be.(compute.Inkling2DFlash2Device); !ok || m.path == "" {
+	if _, ok := be.(compute.Inkling2DFlash2Device); !ok || m == nil || m.path == "" {
 		return ""
 	}
 	dir, err := Inkling2DFlash2AdjacentDir(m.path)

@@ -114,15 +114,16 @@ func inkling2PrefixReuseModeFrom(lookup func(string) (string, bool)) (inkling2Pr
 var errInkling2LoopEngineClosed = errors.New("inkling2_loop engine: closed")
 
 type inkling2LoopRequest struct {
-	ctx    context.Context
-	prompt []int
-	maxNew int
-	stops  map[int]bool
-	sample func([]float32) (int, error)
-	emit   func(int) bool
-	res    agent.Inkling2LoopGeneration
-	err    error
-	done   chan struct{}
+	ctx      context.Context
+	prompt   []int
+	maxNew   int
+	stops    map[int]bool
+	sample   func([]float32) (int, error)
+	emit     func(int) bool
+	dropOnly bool
+	res      agent.Inkling2LoopGeneration
+	err      error
+	done     chan struct{}
 	// received is the engine Generate entry, not HTTP receipt, so first_emit
 	// includes engine queue wait; the span ends when the first emit callback returns.
 	received time.Time
@@ -156,6 +157,8 @@ type inkling2LoopEngine struct {
 	cur      *inkling2PrefixSlot // the slot the request in flight runs on
 	clock    uint64
 	closeErr error
+	// closeSpec releases any shared speculative draft weights owned by the engine.
+	closeSpec func() error
 }
 
 var (
@@ -240,7 +243,11 @@ func (e *inkling2LoopEngine) Close() error {
 	quit, done := e.quit, e.done
 	e.life.Unlock()
 	if quit == nil {
-		return nil
+		if e.closeSpec != nil {
+			e.closeErr = e.closeSpec()
+			e.closeSpec = nil
+		}
+		return e.closeErr
 	}
 	close(quit)
 	<-done
@@ -258,7 +265,12 @@ func (e *inkling2LoopEngine) run() {
 		case fn := <-e.ctrl:
 			fn()
 		case <-e.quit:
-			e.closeErr = e.dropAllSlots()
+			err := e.dropAllSlots()
+			if e.closeSpec != nil {
+				err = errors.Join(err, e.closeSpec())
+				e.closeSpec = nil
+			}
+			e.closeErr = err
 			return
 		}
 	}
@@ -269,6 +281,10 @@ func (e *inkling2LoopEngine) run() {
 // longer applies, so an unrecovered panic would end the whole serve.
 func (e *inkling2LoopEngine) serveRecovering(r *inkling2LoopRequest) {
 	defer close(r.done)
+	if r.dropOnly {
+		r.err = e.dropAllSlots()
+		return
+	}
 	defer func() {
 		if p := recover(); p != nil {
 			_ = e.dropCurrent()
@@ -276,6 +292,34 @@ func (e *inkling2LoopEngine) serveRecovering(r *inkling2LoopRequest) {
 		}
 	}()
 	r.res, r.err = e.serve(r)
+}
+
+// dropCachedSlots closes any resident scalar prefix slots on the engine's locked OS
+// worker thread so a subsequent concurrent cohort or sampled fallback starts with clean
+// device memory and graph slots without racing the scalar thread.
+func (e *inkling2LoopEngine) dropCachedSlots() error {
+	if e == nil {
+		return nil
+	}
+	e.life.Lock()
+	if e.closed || e.reqs == nil {
+		e.life.Unlock()
+		return nil
+	}
+	reqs, quit := e.reqs, e.quit
+	e.life.Unlock()
+	req := &inkling2LoopRequest{dropOnly: true, done: make(chan struct{})}
+	select {
+	case reqs <- req:
+	case <-quit:
+		return nil
+	}
+	select {
+	case <-req.done:
+		return req.err
+	case <-quit:
+		return nil
+	}
 }
 
 // acquire positions a slot's session for prompt and reports how many leading prompt
@@ -480,6 +524,18 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 			fmt.Fprintln(os.Stderr, "fak serve: inkling2_loop: non-greedy sampling requested on greedy-only session; falling back to greedy")
 		}
 	}
+	sp, useSpec := s.(ggufload.Inkling2LoopSpecSession)
+	useSpec = useSpec && r.sample == nil && sp.SpecMaxDraft() > 0
+	if useSpec {
+		if err = sp.SpecStart(prompt); err != nil {
+			return res, err
+		}
+		if r.maxNew >= sp.SpecMaxDraft()+2 {
+			if err = sp.SpecWarm(next); err != nil {
+				return res, err
+			}
+		}
+	}
 	res.PrefillSeconds = time.Since(start).Seconds()
 	res.CachedPromptTokens, res.Width = reused, 1
 	if r, ok := s.(interface{ Reused() int }); ok {
@@ -487,6 +543,12 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	}
 	start = time.Now()
 	defer func() { res.DecodeSeconds = time.Since(start).Seconds() }()
+	if useSpec {
+		if fault, err = inkling2ServeSpecDecode(r, s, sp, next, &res); err != nil {
+			return res, err
+		}
+		return res, nil
+	}
 	for res.Generated < r.maxNew {
 		if cerr := r.ctx.Err(); cerr != nil {
 			fault = false
@@ -537,6 +599,98 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	return res, nil
 }
 
+// inkling2ServeSpecDecode runs greedy speculative decode on a session that
+// exposes batched verify/draft hooks, preserving stops, emit abort, maxNew, and
+// checkpoint horizon bounds (k <= rem-1 keeps s.pos <= ck.pos+maxNew).
+func inkling2ServeSpecDecode(r *inkling2LoopRequest, s ggufload.Inkling2LoopSession, sp ggufload.Inkling2LoopSpecSession, next int, res *agent.Inkling2LoopGeneration) (bool, error) {
+	specHist := make([]int, 0, min(r.maxNew, 256))
+	depth := sp.SpecMaxDraft()
+	plainVerify := sp.SpecPlainUsesVerify()
+	for res.Generated < r.maxNew {
+		if r.stops[next] {
+			res.Stopped = true
+			return false, nil
+		}
+		res.Generated++
+		if !r.emit(next) {
+			res.Stopped = true
+			return false, nil
+		}
+		// Stamped after emit returns: first_byte_sent is the callback's return, not the socket write.
+		if res.Generated == 1 && !r.received.IsZero() {
+			res.FirstEmitSeconds = time.Since(r.received).Seconds()
+		}
+		if res.Generated == r.maxNew {
+			return false, nil
+		}
+		if cerr := r.ctx.Err(); cerr != nil {
+			return false, cerr
+		}
+		specHist = append(specHist, next)
+		rem := r.maxNew - res.Generated
+		k := min(depth, rem-1)
+		var props []int
+		if k > 0 {
+			props = sp.SpecDraft(specHist, k)
+			if len(props) > k {
+				props = props[:k]
+			}
+		}
+		if props == nil && !plainVerify {
+			prev := next
+			t0 := time.Now()
+			var err error
+			if next, err = s.Step(next); err != nil {
+				return true, err
+			}
+			sp.SpecObserveCost(1, time.Since(t0))
+			if err = sp.SpecObserve([]int{prev}, 1); err != nil {
+				return true, err
+			}
+			continue
+		}
+		fed := make([]int, 1+len(props))
+		fed[0] = next
+		copy(fed[1:], props)
+		t0 := time.Now()
+		g, err := sp.SpecVerify(fed)
+		if err != nil {
+			return true, err
+		}
+		if len(g) < len(fed) {
+			return true, fmt.Errorf("inkling2 spec: verify returned %d tokens for %d fed", len(g), len(fed))
+		}
+		a := 0
+		for a < len(props) && props[a] == g[a] {
+			a++
+		}
+		if err = sp.SpecCommitVerify(len(fed), a+1); err != nil {
+			return true, err
+		}
+		sp.SpecObserveCost(len(fed), time.Since(t0))
+		if err = sp.SpecObserve(fed, a+1); err != nil {
+			return true, err
+		}
+		for _, tok := range props[:a] {
+			if r.stops[tok] {
+				res.Stopped = true
+				return false, nil
+			}
+			res.Generated++
+			if !r.emit(tok) {
+				res.Stopped = true
+				return false, nil
+			}
+			if res.Generated == r.maxNew {
+				return false, nil
+			}
+			specHist = append(specHist, tok)
+		}
+		next = g[a]
+	}
+	return false, nil
+}
+
 func inkling2HasPrefix(s, prefix []int) bool {
 	if len(prefix) > len(s) {
 		return false
@@ -579,9 +733,22 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 }
 
 func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be compute.Backend, contextTokens int, lookup func(string) (string, bool)) (agent.Inkling2LoopGenerator, string, error) {
-	scalar := newInkling2LoopEngine(m, be)
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	spec, err := ggufload.OpenInkling2ServeSpec(m, be, lookup)
+	if err != nil {
+		return nil, "", err
+	}
+	scalar := newInkling2LoopEngineFrom(spec.OpenSession)
+	scalar.closeSpec = spec.Close
+	specSuffix := ""
+	if spec.Active() {
+		specSuffix = "; " + spec.Label()
+	}
 	mode, err := inkling2PrefixReuseModeFrom(lookup)
 	if err != nil {
+		_ = scalar.Close()
 		return nil, "", err
 	}
 	scalar.prefixReuse = mode
@@ -597,23 +764,30 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 		lookup = inkling2CUDAPrefillDefaults(lookup)
 	}
 	if !inkling2ServeBatchEnabled(lookup) {
-		return scalar, "greedy decode" + inkling2PrefixSlotsNote(scalar), nil
+		return scalar, "greedy decode" + specSuffix + inkling2PrefixSlotsNote(scalar), nil
 	}
 	adm, err := inkling2AdmissionFromEnv(lookup)
 	if err != nil {
+		_ = scalar.Close()
 		return nil, "", err
 	}
 	if !batchEligible {
 		if v, ok := lookup("FAK_INKLING2_SERVE_BATCH"); ok && strings.TrimSpace(v) != "" {
-			return scalar, "greedy decode; FAK_INKLING2_SERVE_BATCH ignored: load is not batch eligible" + inkling2PrefixSlotsNote(scalar), nil
+			return scalar, "greedy decode" + specSuffix + "; FAK_INKLING2_SERVE_BATCH ignored: load is not batch eligible" + inkling2PrefixSlotsNote(scalar), nil
 		}
-		return scalar, "greedy decode" + inkling2PrefixSlotsNote(scalar), nil
+		return scalar, "greedy decode" + specSuffix + inkling2PrefixSlotsNote(scalar), nil
 	}
 	prefix, err := inkling2BatchPrefixNote(be, lookup)
 	if err != nil {
+		_ = scalar.Close()
 		return nil, "", err
 	}
-	ignored := inkling2ScalarBehindCohorts(scalar)
+	var ignored string
+	if spec.Active() {
+		ignored = inkling2PrefixSlotsNote(scalar)
+	} else {
+		ignored = inkling2ScalarBehindCohorts(scalar)
+	}
 	if cudaPrefill {
 		kv, _ := lookup("FAK_INKLING2_BATCH_KV")
 		if strings.TrimSpace(kv) == "" {
@@ -624,12 +798,18 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 	}
 	batchEng := newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, contextTokens, lookup)
 	batchEng.scalarGenerateLogits = scalar.GenerateLogits
+	batchEng.scalarOpen = scalar.open
+	batchEng.scalarClose = scalar.Close
 	batchEng.ledger = scalar.prefixState().ledger
 	batchEng.evictIdleSlots = scalar.evictIdleSlotsForCohort
 	batchEng.shedIdleSlots = scalar.ShedIdleSlots
 	batchEng.slotMemoryStatus = scalar.SlotMemoryStatus
+	batchEng.specActive = spec.Active()
+	if spec.Active() {
+		batchEng.scalarDropSlots = scalar.dropCachedSlots
+	}
 	return batchEng,
-		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", adm.max, adm.gap, adm.maxWait, prefix, ignored), nil
+		fmt.Sprintf("greedy decode%s; cohorts up to %d, admission gap=%s wait=%s%s%s", specSuffix, adm.max, adm.gap, adm.maxWait, prefix, ignored), nil
 }
 
 // newServeInkling2LoopPlanner binds an engine to the chat surface with a config
@@ -774,7 +954,6 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 	requestedCtx, fitAuto, envLookup := resolveServeInkling2ContextFlags(sf, os.LookupEnv)
 	contextTokens := ggufload.Inkling2LoopResidentContext
 	var (
-		engine    *inkling2LoopEngine
 		gen       agent.Inkling2LoopGenerator
 		decode    string
 		closer    func() error
@@ -798,7 +977,6 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		if requestedCtx > 0 || fitAuto {
 			ggufload.Inkling2ResidentCtxPin(contextTokens)
 		}
-		engine = newInkling2LoopEngine(m, be)
 		if gen, decode, err = newServeInkling2GeneratorWithContext(m, be, contextTokens, serveInkling2ResidentLookup(envLookup, sz)); err != nil {
 			ggufload.Inkling2ResidentCtxPin(0)
 			_ = m.Close()
@@ -895,18 +1073,28 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 	if metal {
 		// The first prefill compiles the target graph and pages the weights in,
 		// which outlasts a request's first-token window; pay it before readiness.
-		tWarm := time.Now()
-		// no request ctx exists yet; an interrupt still ends the process at once
-		if err := warmInkling2Session(context.Background(), engine.open, tok); err != nil {
-			_ = closeModel()
-			fmt.Fprintln(os.Stderr, "fak serve: inkling2 Metal warm-up:", err)
-			os.Exit(2)
+		var warmOpen inkling2LoopSessionOpener
+		switch g := gen.(type) {
+		case *inkling2LoopEngine:
+			warmOpen = g.open
+		case *inkling2LoopBatchEngine:
+			warmOpen = g.scalarOpen
 		}
-		placement += fmt.Sprintf("; warm-up %.1fs", time.Since(tWarm).Seconds())
-		loadDur = time.Since(tLoad)
+		if warmOpen != nil {
+			tWarm := time.Now()
+			// no request ctx exists yet; an interrupt still ends the process at once
+			if err := warmInkling2Session(context.Background(), warmOpen, tok); err != nil {
+				_ = closeModel()
+				fmt.Fprintln(os.Stderr, "fak serve: inkling2 Metal warm-up:", err)
+				os.Exit(2)
+			}
+			placement += fmt.Sprintf("; warm-up %.1fs", time.Since(tWarm).Seconds())
+			loadDur = time.Since(tLoad)
+		}
 	}
 	rt.inkling2Planner, rt.inkling2Close, rt.inkling2Metal, rt.inkling2MaxPromptTokens = planner, closeModel, metal, contextTokens
 	rt.inkling2ServeStatus = newInkling2ServeStatusProvider(*sf.model, solvedEnv, gen)
+	rt.inkling2SpecDecode = decode
 	rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "model-load", Dur: loadDur})
 	rt.addStartupMessage(newServeStartupMessage("serve", "inkling2-loop", "info",
 		fmt.Sprintf("%s; context=%d model=%q (%s)", placement, contextTokens, *sf.model, decode)))

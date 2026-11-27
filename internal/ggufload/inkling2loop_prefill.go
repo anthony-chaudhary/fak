@@ -1063,6 +1063,7 @@ func (s *inkling2Resident) ensurePrefillArenas(T int) {
 		// captured verify graphs address the arenas being replaced
 		s.dropCaptures()
 		s.release(s.prefillKeep, s.prefillScr, s.prefillIn)
+		inkling2TrimIdle(s.be)
 	}
 	keep, scr := s.prefillArenas(T)
 	s.prefillKeep, s.prefillScr = s.alloc(keep), s.alloc(scr)
