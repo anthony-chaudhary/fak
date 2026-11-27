@@ -66,6 +66,11 @@ type auditParseState struct {
 	terminalFailureClasses       map[string]int
 	terminalStallSeconds         int64
 	terminalStallDurationBuckets map[string]int
+	assistantTurnIndex           int
+	assistantTurnByID            map[string]int
+	seenCycleKeys                map[string]struct{}
+	degenerateCyclesCount        int
+	degenerateCycles             []AuditDegenerateCycle
 }
 
 type auditCodexRawTokens struct {
@@ -179,6 +184,8 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	}
 	sort.Strings(state.row.Models)
 	state.row.RepeatedFailures = state.repeatedFailuresAccumulated + auditRepeatedFailureCount(state.failureCounts)
+	state.row.DegenerateCycles = state.degenerateCyclesCount
+	state.row.DegenerateCycleExemplars = state.degenerateCycles
 	state.row.BuildIdentities = make([]AuditBuildIdentity, 0, len(state.buildIdentities))
 	for identity := range state.buildIdentities {
 		state.row.BuildIdentities = append(state.row.BuildIdentities, identity)
@@ -245,6 +252,9 @@ func parseClaudeAuditRecord(record map[string]any, line int, rel string, state *
 			parseClaudeAuditUsage(usage, message, line, rel, state, refusals)
 		}
 		state.mutationHypothesis = auditMutationHypothesis(message["content"])
+		reasoningText, contentText := extractClaudeAssistantChannels(message["content"])
+		mid, _ := message["id"].(string)
+		observeAuditAssistantTurnWithID(strings.TrimSpace(mid), reasoningText, contentText, state)
 		parseClaudeToolCalls(message["content"], line, state)
 		return
 	}
@@ -416,6 +426,14 @@ func parseCodexAuditRecord(record map[string]any, line int, rel string, state *a
 			parseCodexAuditUsage(payload, line, rel, state, refusals)
 		case "task_complete":
 			parseCodexTaskComplete(payload, record, line, rel, state)
+		case "agent_reasoning":
+			if text, ok := payload["text"].(string); ok {
+				observeCodexAssistantText(text, "", state)
+			}
+		case "agent_message":
+			if msg, ok := payload["message"].(string); ok {
+				observeCodexAssistantText("", msg, state)
+			}
 		}
 	case "response_item":
 		parseCodexResponseItem(payload, line, rel, state, refusals)
@@ -645,7 +663,69 @@ func parseCodexResponseItem(payload map[string]any, line int, rel string, state 
 			return
 		}
 		auditRecordToolFailure(state, call, payload["output"], line)
+	case "reasoning":
+		if text := extractCodexItemText(payload["summary"], payload["content"]); text != "" {
+			observeCodexAssistantText(text, "", state)
+		}
+	case "message":
+		if role, _ := payload["role"].(string); role == "assistant" {
+			if text := extractCodexItemText(payload["content"]); text != "" {
+				observeCodexAssistantText("", text, state)
+			}
+		}
 	}
+}
+
+func observeCodexAssistantText(reasoning, content string, state *auditParseState) {
+	if state.seenCycleKeys == nil {
+		state.seenCycleKeys = map[string]struct{}{}
+	}
+	if strings.TrimSpace(reasoning) != "" {
+		key := "codex:" + reasoning
+		if _, seen := state.seenCycleKeys[key]; seen {
+			reasoning = ""
+		} else {
+			state.seenCycleKeys[key] = struct{}{}
+		}
+	}
+	if strings.TrimSpace(content) != "" {
+		key := "codex:" + content
+		if _, seen := state.seenCycleKeys[key]; seen {
+			content = ""
+		} else {
+			state.seenCycleKeys[key] = struct{}{}
+		}
+	}
+	observeAuditAssistantTurn(reasoning, content, state)
+}
+
+func extractCodexItemText(fields ...any) string {
+	var buf strings.Builder
+	for _, raw := range fields {
+		switch v := raw.(type) {
+		case string:
+			if strings.TrimSpace(v) != "" {
+				if buf.Len() > 0 {
+					buf.WriteByte('\n')
+				}
+				buf.WriteString(v)
+			}
+		case []any:
+			for _, elem := range v {
+				m, _ := elem.(map[string]any)
+				if m == nil {
+					continue
+				}
+				if s, ok := m["text"].(string); ok && strings.TrimSpace(s) != "" {
+					if buf.Len() > 0 {
+						buf.WriteByte('\n')
+					}
+					buf.WriteString(s)
+				}
+			}
+		}
+	}
+	return buf.String()
 }
 
 func auditRecordToolFailure(state *auditParseState, call auditToolCall, output any, line int) {
@@ -985,6 +1065,8 @@ func parsePiAuditRecord(record map[string]any, line int, rel string, state *audi
 				parsePiAuditUsage(usage, record["id"], line, rel, state, refusals)
 			}
 			state.mutationHypothesis = auditMutationHypothesis(message["content"])
+			reasoningText, contentText := extractClaudeAssistantChannels(message["content"])
+			observeAuditAssistantTurn(reasoningText, contentText, state)
 			parsePiToolCalls(message["content"], record["id"], line, state)
 		case "toolResult":
 			parsePiToolResult(message, line, state)

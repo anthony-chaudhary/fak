@@ -16,9 +16,12 @@ func parseAntigravityAuditRecord(record map[string]any, line int, rel string, st
 		if model, ok := record["model"].(string); ok && model != "" {
 			state.models[model] = struct{}{}
 		}
-		if content, ok := record["content"].(string); ok && strings.TrimSpace(content) != "" {
+		thinking, _ := record["thinking"].(string)
+		content, _ := record["content"].(string)
+		if strings.TrimSpace(content) != "" {
 			state.mutationHypothesis = auditNormalizedHead(content, 200)
 		}
+		observeAuditAssistantTurn(thinking, content, state)
 		parseAntigravityAuditUsage(record, line, rel, state, refusals)
 		parseAntigravityToolCalls(record["tool_calls"], state)
 	case "CHECKPOINT":

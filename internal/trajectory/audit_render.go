@@ -28,6 +28,9 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	fmt.Fprintf(&out, "- Input:output ratio: %s; cache-create burden: %s.\n", auditFloat(summary.InputOutputRatio, 3), auditPercent(summary.PromptWriteFraction))
 	fmt.Fprintf(&out, "- Repeated failures: %d/%d sessions (%s per session); expected bounded wait_agent timeouts: %d; mutation churn: %d; hook p95: %s ms.\n",
 		summary.RepeatedFailures, summary.Transcripts, auditFloat(summary.RepeatedFailuresPerSession, 4), summary.ExpectedWaitTimeouts, summary.MutationChurn, auditInt(summary.HookP95MS))
+	if summary.DegenerateCycles > 0 {
+		fmt.Fprintf(&out, "- Degenerate repetition cycles: %d.\n", summary.DegenerateCycles)
+	}
 	fmt.Fprintf(&out, "- Repeated-failure semantics: `%s`; normalization: `%s`.\n", summary.RepeatedFailureSemantics, summary.RepeatedFailureNormalization)
 	fmt.Fprintf(&out, "- Distinct transcripts: %d; duplicate fragments: %d; empty-usage files: %d.\n", summary.DistinctTranscripts, summary.DuplicateFragments, summary.EmptyUsageFiles)
 	fmt.Fprintf(&out, "- Tool errors: %d/%d (%s); top-10 token concentration: %s.\n", summary.ToolErrors, summary.ToolCalls, auditPercent(summary.ToolErrorFraction), auditPercent(summary.TopTenTokenFraction))

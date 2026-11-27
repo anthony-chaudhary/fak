@@ -16,6 +16,7 @@ func canonicalAuditTranscripts(raw []AuditTranscriptRow) ([]AuditTranscriptRow, 
 			copy := row
 			copy.SourcePaths = []string{row.SourcePath}
 			copy.ToolResults = append([]AuditToolResultRow(nil), row.ToolResults...)
+			copy.DegenerateCycleExemplars = append([]AuditDegenerateCycle(nil), row.DegenerateCycleExemplars...)
 			copy.usageByID = cloneAuditUsage(row.usageByID)
 			copy.failureCounts = cloneAuditFailureCounts(row.failureCounts)
 			copy.fragmentDigests = map[string]struct{}{}
@@ -73,6 +74,12 @@ func canonicalAuditTranscripts(raw []AuditTranscriptRow) ([]AuditTranscriptRow, 
 		}
 		rollup.ExpectedWaitTimeouts += row.ExpectedWaitTimeouts
 		rollup.MutationChurn += row.MutationChurn
+		rollup.DegenerateCycles += row.DegenerateCycles
+		for _, ex := range row.DegenerateCycleExemplars {
+			if len(rollup.DegenerateCycleExemplars) < degenerateCycleMaxExemplars {
+				rollup.DegenerateCycleExemplars = append(rollup.DegenerateCycleExemplars, ex)
+			}
+		}
 		rollup.TerminalFailures += row.TerminalFailures
 		if row.TerminalStallSeconds > rollup.TerminalStallSeconds {
 			rollup.TerminalStallSeconds = row.TerminalStallSeconds
