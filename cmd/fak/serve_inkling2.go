@@ -118,6 +118,7 @@ type inkling2LoopRequest struct {
 	maxNew int
 	stops  map[int]bool
 	sample func([]float32) (int, error)
+	draft  agent.Inkling2LoopDrafter
 	emit   func(int) bool
 	res    agent.Inkling2LoopGeneration
 	err    error
@@ -159,6 +160,7 @@ type inkling2LoopEngine struct {
 var (
 	_ agent.Inkling2LoopGenerator      = (*inkling2LoopEngine)(nil)
 	_ agent.Inkling2LoopLogitGenerator = (*inkling2LoopEngine)(nil)
+	_ agent.Inkling2LoopDraftGenerator = (*inkling2LoopEngine)(nil)
 )
 
 // SerializesGPUAccess lets the planner hand concurrent turns to the worker, which
@@ -197,16 +199,22 @@ func (e *inkling2LoopEngine) worker() (reqs chan *inkling2LoopRequest, quit chan
 // Generate hands the request to the worker and waits for it; a caller whose ctx
 // ends while queued returns without touching the session.
 func (e *inkling2LoopEngine) Generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
-	return e.generate(ctx, prompt, maxNew, stops, nil, emit)
+	return e.generate(ctx, prompt, maxNew, stops, nil, nil, emit)
 }
 
 // GenerateLogits runs non-greedy host-side sampling using the session's LastLogits
 // on each prefill and decode step.
 func (e *inkling2LoopEngine) GenerateLogits(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func([]float32) (int, error), emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
-	return e.generate(ctx, prompt, maxNew, stops, sample, emit)
+	return e.generate(ctx, prompt, maxNew, stops, sample, nil, emit)
 }
 
-func (e *inkling2LoopEngine) generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func([]float32) (int, error), emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
+// GenerateDraft runs greedy or sampled decode accelerated by deterministic
+// forced-token jump-forward spans committed via batched Prefill.
+func (e *inkling2LoopEngine) GenerateDraft(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func([]float32) (int, error), draft agent.Inkling2LoopDrafter, emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
+	return e.generate(ctx, prompt, maxNew, stops, sample, draft, emit)
+}
+
+func (e *inkling2LoopEngine) generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func([]float32) (int, error), draft agent.Inkling2LoopDrafter, emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
 	if err := ctx.Err(); err != nil {
 		return agent.Inkling2LoopGeneration{}, err
 	}
@@ -214,7 +222,7 @@ func (e *inkling2LoopEngine) generate(ctx context.Context, prompt []int, maxNew 
 	if !ok {
 		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
 	}
-	r := &inkling2LoopRequest{ctx: ctx, prompt: prompt, maxNew: maxNew, stops: stops, sample: sample, emit: emit, done: make(chan struct{}), received: time.Now()}
+	r := &inkling2LoopRequest{ctx: ctx, prompt: prompt, maxNew: maxNew, stops: stops, sample: sample, draft: draft, emit: emit, done: make(chan struct{}), received: time.Now()}
 	select {
 	case reqs <- r:
 	case <-ctx.Done():
@@ -405,22 +413,33 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 			return res, err
 		}
 	}
-	next, err := s.Prefill(r.ctx, prompt[last:])
+	var initPlanned []int
+	var initTailStop bool
+	if r.draft != nil {
+		initPlanned, initTailStop = sliceForcedTokens(r.draft.NextForced(0, false), r.maxNew, r.stops)
+	}
+	needFirstPred := len(initPlanned) < r.maxNew && !initTailStop
+	prefillBatch := prompt[last:]
+	if needFirstPred && len(initPlanned) > 0 {
+		prefillBatch = make([]int, len(prompt[last:])+len(initPlanned))
+		copy(prefillBatch, prompt[last:])
+		copy(prefillBatch[len(prompt[last:]):], initPlanned)
+	}
+	next, err := s.Prefill(r.ctx, prefillBatch)
 	if err != nil {
 		return res, err
 	}
 	ls, hasLogits := s.(ggufload.Inkling2LoopLogitSession)
-	if r.sample != nil {
-		if hasLogits {
-			logits, lerr := ls.LastLogits()
-			if lerr != nil {
-				return res, lerr
-			}
-			if next, err = r.sample(logits); err != nil {
-				return res, err
-			}
-		} else {
-			fmt.Fprintln(os.Stderr, "fak serve: inkling2_loop: non-greedy sampling requested on greedy-only session; falling back to greedy")
+	if r.sample != nil && !hasLogits {
+		fmt.Fprintln(os.Stderr, "fak serve: inkling2_loop: non-greedy sampling requested on greedy-only session; falling back to greedy")
+	}
+	if needFirstPred && r.sample != nil && hasLogits {
+		logits, lerr := ls.LastLogits()
+		if lerr != nil {
+			return res, lerr
+		}
+		if next, err = r.sample(logits); err != nil {
+			return res, err
 		}
 	}
 	res.PrefillSeconds = time.Since(start).Seconds()
@@ -430,7 +449,15 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	}
 	start = time.Now()
 	defer func() { res.DecodeSeconds = time.Since(start).Seconds() }()
-	for res.Generated < r.maxNew {
+	if len(initPlanned) > 0 {
+		_, emitStopped := emitForcedTokens(r, &res, initPlanned)
+		if emitStopped || initTailStop {
+			res.Stopped = true
+		}
+	} else if initTailStop {
+		res.Stopped = true
+	}
+	for !res.Stopped && res.Generated < r.maxNew {
 		if r.stops[next] {
 			res.Stopped = true
 			break
@@ -451,8 +478,40 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 			fault = false
 			return res, cerr
 		}
-		if next, err = s.Step(next); err != nil {
-			return res, err
+		var forced []int
+		if r.draft != nil {
+			forced = r.draft.NextForced(next, true)
+		}
+		if len(forced) > 0 {
+			planned, tailStop := sliceForcedTokens(forced, r.maxNew-res.Generated, r.stops)
+			emitted, emitStopped := emitForcedTokens(r, &res, planned)
+			if emitStopped || tailStop {
+				res.Stopped = true
+				break
+			}
+			if res.Generated == r.maxNew {
+				break
+			}
+			if cerr := r.ctx.Err(); cerr != nil {
+				fault = false
+				return res, cerr
+			}
+			if len(emitted) == 0 {
+				if next, err = s.Step(next); err != nil {
+					return res, err
+				}
+			} else {
+				batch := make([]int, 1+len(emitted))
+				batch[0] = next
+				copy(batch[1:], emitted)
+				if next, err = s.Prefill(r.ctx, batch); err != nil {
+					return res, err
+				}
+			}
+		} else {
+			if next, err = s.Step(next); err != nil {
+				return res, err
+			}
 		}
 		if r.sample != nil && hasLogits {
 			logits, lerr := ls.LastLogits()
@@ -466,6 +525,39 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	}
 	fault = false
 	return res, nil
+}
+
+// sliceForcedTokens bounds forced tokens to limit and stops before any stop ID.
+func sliceForcedTokens(forced []int, limit int, stops map[int]bool) (planned []int, tailStop bool) {
+	if limit <= 0 || len(forced) == 0 {
+		return nil, false
+	}
+	for i, id := range forced {
+		if stops[id] {
+			return forced[:i], true
+		}
+		if i+1 == limit {
+			return forced[:i+1], false
+		}
+	}
+	return forced, false
+}
+
+// emitForcedTokens emits planned tokens through r.emit while updating res
+// generation counters identically to the standard decode loop.
+func emitForcedTokens(r *inkling2LoopRequest, res *agent.Inkling2LoopGeneration, planned []int) (emitted []int, stopped bool) {
+	emitted = make([]int, 0, len(planned))
+	for _, id := range planned {
+		res.Generated++
+		if !r.emit(id) {
+			return emitted, true
+		}
+		if res.Generated == 1 && !r.received.IsZero() {
+			res.FirstEmitSeconds = time.Since(r.received).Seconds()
+		}
+		emitted = append(emitted, id)
+	}
+	return emitted, false
 }
 
 func inkling2HasPrefix(s, prefix []int) bool {
@@ -554,6 +646,7 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 	}
 	batchEng := newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, contextTokens, lookup)
 	batchEng.scalarGenerateLogits = scalar.GenerateLogits
+	batchEng.scalarGenerateDraft = scalar.GenerateDraft
 	batchEng.ledger = scalar.prefixState().ledger
 	batchEng.evictIdleSlots = scalar.evictIdleSlotsForCohort
 	return batchEng,

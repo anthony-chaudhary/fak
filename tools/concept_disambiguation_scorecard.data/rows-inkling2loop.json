@@ -11,7 +11,8 @@
         "loopconstraint",
         "looppark",
         "loopobserve",
-        "inkling2-serve-is-loop"
+        "inkling2-serve-is-loop",
+        "inkling2loop-drafter"
       ],
       "aliases": [
         "inkling2_loop"
@@ -142,7 +143,8 @@
       "definition": "Consume prompt token IDs in causal order, update the host attention and convolution state, and return logits at the final prompt position.",
       "distinction": "The prompt operation can batch independent projections across several token positions. A decode step consumes one sampled token.",
       "distinct_from": [
-        "inkling2loop-step"
+        "inkling2loop-step",
+        "inkling2loop-draft-generator"
       ],
       "aliases": [],
       "grounding": "Inkling2LoopPrefill",
@@ -203,6 +205,46 @@
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "inkling2loop-model-family",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkling2loop-drafter",
+      "canonical": "Inkling2LoopDrafter",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Per-turn Inkling-2 decode interface supplying deterministic forced-tool continuation token IDs from toolgrammar.ForcedDraft.",
+      "distinction": "Supplies deterministic continuation tokens from a grammar state, unlike Inkling2LoopPrefill (KV batch execution) or OpenInkling2Loop (weight loading).",
+      "distinct_from": [
+        "inkling2loop-model-family",
+        "inkling2loop-draft-generator"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopDrafter",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkling2loop-draft-generator",
+      "canonical": "Inkling2LoopDraftGenerator",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Optional capability interface on an Inkling-2 loop engine running greedy or sampled decode with an Inkling2LoopDrafter through batched Prefill.",
+      "distinction": "Engine execution seam accepting Inkling2LoopDrafter alongside sampling hooks, unlike Inkling2LoopDrafter itself or OpenInkling2Loop (weight loading).",
+      "distinct_from": [
+        "inkling2loop-drafter",
+        "inkling2loop-prefill"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2LoopDraftGenerator",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
       "verdict": "crystal",
       "gaps": []
     }
