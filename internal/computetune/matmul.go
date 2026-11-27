@@ -39,3 +39,27 @@ func (c MatMulImplementation) Run(_ context.Context, profile Profile) ([]float32
 	defer c.Backend.Free(output)
 	return c.Backend.Read(output), nil
 }
+
+// RunScaled executes the GEMM with the activations multiplied by scale; the
+// (possibly quantized) weights are used as-is.
+func (c MatMulImplementation) RunScaled(_ context.Context, profile Profile, scale float64) ([]float32, error) {
+	if profile.Operation != OpMatMul {
+		return nil, errors.New("computetune: candidate only supports matmul")
+	}
+	if c.Backend == nil || c.Inputs == nil {
+		return nil, errors.New("computetune: incomplete matmul candidate")
+	}
+	weight, input, err := c.Inputs(profile)
+	if err != nil {
+		return nil, err
+	}
+	vals := c.Backend.Read(input)
+	scaled := make([]float32, len(vals))
+	for i, v := range vals {
+		scaled[i] = v * float32(scale)
+	}
+	in := compute.NewF32(c.Backend, input.Shape, scaled)
+	output := c.Backend.MatMul(weight, in)
+	defer c.Backend.Free(output)
+	return c.Backend.Read(output), nil
+}

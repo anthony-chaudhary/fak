@@ -93,6 +93,11 @@ type Policy struct {
 	// the error rate of the whole selection for one profile: it is split evenly
 	// over the challengers compared. Zero keeps median-only selection.
 	SignTestAlpha float64 `json:"sign_test_alpha,omitempty"`
+	// InputScales lists activation multipliers (e.g. 1, 0.01, -1) every candidate
+	// must match the reference at before timing. Empty keeps today's behavior.
+	InputScales []float64 `json:"input_scales,omitempty"`
+	// RaggedVariants also checks M-1, N-1, K-1 and a clamp(1,3) shape before timing.
+	RaggedVariants bool `json:"ragged_variants,omitempty"`
 }
 
 // SignTestResult is the receipt of one paired comparison against the fallback.
@@ -110,12 +115,14 @@ type SignTestResult struct {
 
 // CandidateResult preserves failures instead of silently removing them.
 type CandidateResult struct {
-	CandidateID   string          `json:"candidate_id"`
-	Correct       bool            `json:"correct"`
-	RefusalReason string          `json:"refusal_reason,omitempty"`
-	Samples       []time.Duration `json:"samples,omitempty"`
-	Statistic     time.Duration   `json:"statistic,omitempty"`
-	SignTest      *SignTestResult `json:"sign_test,omitempty"`
+	CandidateID   string `json:"candidate_id"`
+	Correct       bool   `json:"correct"`
+	RefusalReason string `json:"refusal_reason,omitempty"`
+	// VariantsUnchecked marks a candidate that could not run the requested scaled variants.
+	VariantsUnchecked bool            `json:"variants_unchecked,omitempty"`
+	Samples           []time.Duration `json:"samples,omitempty"`
+	Statistic         time.Duration   `json:"statistic,omitempty"`
+	SignTest          *SignTestResult `json:"sign_test,omitempty"`
 }
 
 // ProfileResult is the inspectable tuning receipt for one profile.
@@ -256,6 +263,13 @@ func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 				cr.RefusalReason = "incorrect result: " + err.Error()
 				pr.Candidates = append(pr.Candidates, cr)
 				continue
+			}
+			if reason, unchecked := checkVariants(ctx, profile, candidate, reference, correct, policy); reason != "" {
+				cr.RefusalReason = reason
+				pr.Candidates = append(pr.Candidates, cr)
+				continue
+			} else {
+				cr.VariantsUnchecked = unchecked
 			}
 			cr.Correct = true
 			failed := false
