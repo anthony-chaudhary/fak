@@ -52,15 +52,20 @@ const (
 	LoadError LoadVerdict = "ERROR"
 	// LoadSkipped means the tick skipped all phases under an active pause.
 	LoadSkipped LoadVerdict = "SKIPPED"
+	// LoadPressureRelief means only pressure-relief phases ran while
+	// deferrable phases were skipped under pressure (#14478).
+	LoadPressureRelief LoadVerdict = "PRESSURE_RELIEF"
 	// LoadPressureReliefOnly means deferrable junkwork was skipped under
 	// pressure while pressure-relief phases ran (#14477).
 	LoadPressureReliefOnly LoadVerdict = "PRESSURE_RELIEF_ONLY"
+	// LoadUnknown means the host sample was unreadable (#14478).
+	LoadUnknown LoadVerdict = "UNKNOWN"
 )
 
 // ValidLoadVerdict reports whether v is a member of the closed verdict vocabulary.
 func ValidLoadVerdict(v LoadVerdict) bool {
 	switch v {
-	case LoadProductive, LoadIdle, LoadError, LoadSkipped, LoadPressureReliefOnly:
+	case LoadProductive, LoadIdle, LoadError, LoadSkipped, LoadPressureRelief, LoadPressureReliefOnly, LoadUnknown:
 		return true
 	}
 	return false
