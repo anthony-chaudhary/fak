@@ -16,7 +16,7 @@ campaign receipts; worker scratch lives under `_scratch/goals/GOAL-maya-strat-hw
 | node | status | note |
 | --- | --- | --- |
 | raider-fak | **DONE** | DS4.1 ABBA complete (11 cells), lease released ~19:45Z, Xid count unchanged (12→12); see [RESULTS.md](RESULTS.md) §c–e, [raider-fak/RECEIPT.json](raider-fak/RECEIPT.json) |
-| aegis-fak | **DONE (partial)** | Flash-Next Q2_0 ABBA-lite complete 2026-10-31T03:34–~04:20Z: strata 30.55 tok/s @ctx2048 warm = 3.6x same-day llama.cpp `--cpu-moe` baseline; maya ABSENT-IN-WINDOW (CYBER-FROST download 9.8%, resumed detached PID 31936); see [RESULTS.md](RESULTS.md) §g, [aegis-fak/RECEIPT.json](aegis-fak/RECEIPT.json) |
+| rtx5080-host | **DONE (partial)** | Flash-Next Q2_0 ABBA-lite complete 2026-10-31T03:34–~04:20Z: strata 30.55 tok/s @ctx2048 warm = 3.6x same-day llama.cpp `--cpu-moe` baseline; maya ABSENT-IN-WINDOW (CYBER-FROST download 9.8%, resumed detached PID 31936); see [RESULTS.md](RESULTS.md) §g, [rtx5080-host/RECEIPT.json](rtx5080-host/RECEIPT.json) |
 
 Original target model (Qwen3.8-27B-UD-Q2_K_XL, dense `qwen35`) is not servable by
 either pinned engine — hard architecture refusals in committed code at both pins
@@ -28,11 +28,11 @@ paths; local llama.cpp baseline receipts exist).
 
 ### Engines
 
-| engine | repo @ sha | version | raider-fak binary (sha256) | aegis-fak binary (sha256) |
+| engine | repo @ sha | version | raider-fak binary (sha256) | rtx5080-host binary (sha256) |
 | --- | --- | --- | --- | --- |
 | maya | `mw00/project-maya` @ `376b4b87402bc992af7b4a8dec089ef7cba7801c` | v1.1.39 | `/home/fak/oss-engines/maya-376b4b87/build/maya-ds4` `af05d0398b948cfa13691eaccb9d0385d0e316d41c69cf57a1ae39b0e7200e9a` (plain `build/maya` also built: `f6eab89d15475312e224b46d279843a1c70220f4e6d5db319b9dc0a608220774`) | `/home/fak/oss-engines/maya-376b4b87/build/maya` `5bf812e64cf4266a74cc5f28c23dfabd6ae0208a7103f840c799b3671c746b91` |
 | strata | `Niko1221/Strata` @ `46c152a1310f77cd2f0ce2c7cd213962df14fe83` | 0.1.53 | `/home/fak/oss-engines/strata-46c152a1/build/strata` `f5d10380f777c45dfdbae65e7cbf927e1501b055d6bc763f114b00925dfc5e7e`; plus `build/strata-dsv41` (built `-DSTRATA_BUILD_DSV41=ON`) `0eb3f21e07dc4b507a5e49dc62782698109f4953028909eb4b2714ab718591bf` | `/home/fak/oss-engines/strata-46c152a1/build/strata` `7a1a910f1499180084b145ca851b8eed6c2f6be1a3fef6653f5296f5e3b5680c` |
-| llama.cpp b11870 (baseline, DO-NOT-TOUCH tree) | build `b11870` (74bca395) | 1.12.x | `/home/fak/oss-engines/llama.cpp-b11870/build-cuda/bin/llama-server` `8453c97a0243d3feceea0340110b846c9516cd82f34ef16f553d668476080310` (re-verified preflight 2026-10-30T17:44Z) | same pinned binary `8453c97a…80310` (see `docs/benchmarks/aegis-5080-20261030/RESULTS.md` envelope) |
+| llama.cpp b11870 (baseline, DO-NOT-TOUCH tree) | build `b11870` (74bca395) | 1.12.x | `/home/fak/oss-engines/llama.cpp-b11870/build-cuda/bin/llama-server` `8453c97a0243d3feceea0340110b846c9516cd82f34ef16f553d668476080310` (re-verified preflight 2026-10-30T17:44Z) | same pinned binary `8453c97a…80310` (see `docs/benchmarks/rtx5080-5080-20261030/RESULTS.md` envelope) |
 
 Both OSS engines pin their ggml source at llama.cpp commit
 `3cf03257f219afbe7334045ff7c6a06ac68c627d` (fetched to
@@ -63,7 +63,7 @@ columns) — identical weights to the llama.cpp L-cells.
 
 ## Nodes
 
-| item | raider-fak | aegis-fak |
+| item | raider-fak | rtx5080-host |
 | --- | --- | --- |
 | boot_id | `d1026348-79cd-485e-a9b5-c8f5da69e578` | `31fc7046-7671-4813-8d33-7856b915dd9d` |
 | GPU | RTX 5090 Laptop GPU, 24,463 MiB, sm_120 | RTX 5080, 16,303 MiB, sm_120 |
@@ -77,12 +77,12 @@ columns) — identical weights to the llama.cpp L-cells.
 | file | content |
 | --- | --- |
 | `README.md` | this index |
-| `RESULTS.md` | TL;DR winner table, scope & pins, full 11-cell ABBA table, baseline anomaly attribution, config-space ablations, arch-refusal data points, aegis Flash-Next Q2_0 section (§g), cross-engine verdict |
+| `RESULTS.md` | TL;DR winner table, scope & pins, full 11-cell ABBA table, baseline anomaly attribution, config-space ablations, arch-refusal data points, rtx5080-host Flash-Next Q2_0 section (§g), cross-engine verdict |
 | `raider-fak/RECEIPT.json` | schema `fak.maya-strat.run-receipt/1`: verdict, lease trail, binaries, model oids, oracle prompt, all 11 cell objects verbatim, typed failures |
-| `aegis-fak/` | `RECEIPT.json` — HW-WITNESSED receipt: Q2_0 artifact sha pins, 4 cells (L1/L2/S1/S2), 4 typed failures incl. both OOM deviations, lease/service trail, host-stability incident note |
+| `rtx5080-host/` | `RECEIPT.json` — HW-WITNESSED receipt: Q2_0 artifact sha pins, 4 cells (L1/L2/S1/S2), 4 typed failures incl. both OOM deviations, lease/service trail, host-stability incident note |
 | `docs/lessons/perf-hillclimb/lessons.jsonl` | two appended entries: PHL-165 (arch-gate preflight), PHL-166 (baseline regime shift) |
 
 Related prior receipts: `docs/benchmarks/raider-5090/ds41-gsq-iq2xxs-20261028/`
 (historical llama.cpp arms 712.7 / 1160.1 / 1055.6 / 1014.5 tok/s @ 2026-10-29T04:42Z
-and the 1.05 tok/s rerun @ 2026-10-29T20:25Z), `docs/benchmarks/aegis-5080-20261030/RESULTS.md`
-(today's aegis llama.cpp b11870 C1 numbers, cross-context only).
+and the 1.05 tok/s rerun @ 2026-10-29T20:25Z), `docs/benchmarks/rtx5080-5080-20261030/RESULTS.md`
+(today's rtx5080-host llama.cpp b11870 C1 numbers, cross-context only).

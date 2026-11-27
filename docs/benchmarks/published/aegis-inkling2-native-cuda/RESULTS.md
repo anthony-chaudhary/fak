@@ -1,11 +1,11 @@
 ---
-title: "Campaign record: fak-native Inkling-2-Mini: token-identical to llama.cpp, first CUDA decode on Aegis RTX 5080"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-inkling2-native-cuda (2026-11-22): fak-native Inkling-2-Mini: token-identical to llama.cpp, first CUDA decode on Aegis RTX 5080."
+title: "Campaign record: fak-native Inkling-2-Mini: token-identical to llama.cpp, first CUDA decode on RTX 5080 host RTX 5080"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-inkling2-native-cuda (2026-11-22): fak-native Inkling-2-Mini: token-identical to llama.cpp, first CUDA decode on RTX 5080 host RTX 5080."
 ---
 
-# RESULTS — fak-native Inkling-2-Mini: token-identical to llama.cpp, first CUDA decode on Aegis RTX 5080 (2026-11-22)
+# RESULTS — fak-native Inkling-2-Mini: token-identical to llama.cpp, first CUDA decode on RTX 5080 host RTX 5080 (2026-11-22)
 
-**[HW-WITNESSED]** aegis-fak (RTX 5080 16 GB, sm_120, driver 615.78.08, CUDA 13.4).
+**[HW-WITNESSED]** rtx5080-host (RTX 5080 16 GB, sm_120, driver 615.78.08, CUDA 13.4).
 Measure leases `hwl-21a815ec860c796e` (window 1) and `hwl-6eb995ebd7704248` (window 2). Both
 leases were released. `fak-llama-qwen27b.service` was stopped for each window, restarted after it,
 and confirmed `active` with `/health` ok.
@@ -16,12 +16,12 @@ Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Logs a
 fak now runs Thinking Machines Inkling-2-Mini (`inkling2_loop`) natively, both as a host reference
 and fully resident on CUDA. Each path reproduces llama.cpp `ad50351f5` greedy output **token for
 token**: 2 prompts × 32 tokens, 64 of 64. The first CUDA decode measures **6.32 tok/s**, against
-**80.4 tok/s** for llama.cpp on the same card and GGUF ([OSS baseline](../aegis-inkling2-mini-oss-baseline-20261122/RESULTS.md)), which is 0.079x.
+**80.4 tok/s** for llama.cpp on the same card and GGUF ([OSS baseline](../rtx5080-host-inkling2-mini-oss-baseline-20261122/RESULTS.md)), which is 0.079x.
 That gap is expected for a first correct cut: every GEMV still runs as its own launch, Read and sync.
 
 | arm | engine @ rev | weights | placement | parity vs oracle | decode tok/s | state |
 | --- | --- | --- | --- | --- | --- | --- |
-| H | fak host reference, fak `88dde7a2e8` | UD-Q3_K_XL mainline GGUF | aegis CPU, f32 | 64/64 tokens | ~1.4 incl. prefill | MEASURED |
+| H | fak host reference, fak `88dde7a2e8` | UD-Q3_K_XL mainline GGUF | rtx5080-host CPU, f32 | 64/64 tokens | ~1.4 incl. prefill | MEASURED |
 | C | fak CUDA, fak `d09931ed93` | same | all on GPU, 12.35 GiB in 298 allocations | 64/64 tokens | **6.32** (6.32, 6.32; 127 steps) | MEASURED |
 | L1 | llama.cpp `ad50351f5` (baseline) | same | all on GPU | n/a (it is the oracle's engine) | 80.4 | from the baseline receipt |
 

@@ -5,8 +5,8 @@
  "step": "Bit-identical rescheduled NVFP4 expert GEMV (k_ink2_expert_nvfp4_v2) for the resident Inkling-2 CUDA decode",
  "date": "2026-11-24",
  "evidence_class": "HW-WITNESSED",
- "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, aegis2-fak, driver 620.73.04, CUDA 13.5 runtime]",
- "node": "aegis2-fak, measure lease hwl-67270ec41ba02d50 (released); builds on aegis CPU under share lease hwl-6e7d2003d0a9d855 (released)",
+ "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, rtx5080-host-2, driver 620.73.04, CUDA 13.5 runtime]",
+ "node": "rtx5080-host-2, measure lease hwl-67270ec41ba02d50 (released); builds on rtx5080-host CPU under share lease hwl-6e7d2003d0a9d855 (released)",
  "models": {
   "gguf_mainline": "/var/lib/fak/models/inkling2/gguf-mainline/Inkling-2-Mini-UD-Q3_K_XL.gguf (13631779296 bytes)"
  },

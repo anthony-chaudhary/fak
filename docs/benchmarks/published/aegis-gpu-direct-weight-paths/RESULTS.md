@@ -1,11 +1,11 @@
 ---
-title: "Campaign record: Host-to-GPU weight paths on the aegis RTX 5080, for Inkling-2-Mini expert offload"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-gpu-direct-weight-paths (2026-11-24): Host-to-GPU weight paths on the aegis RTX 5080, for Inkling-2-Mini expert offload."
+title: "Campaign record: Host-to-GPU weight paths on the rtx5080-host RTX 5080, for Inkling-2-Mini expert offload"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-gpu-direct-weight-paths (2026-11-24): Host-to-GPU weight paths on the rtx5080-host RTX 5080, for Inkling-2-Mini expert offload."
 ---
 
-# Host-to-GPU weight paths on the aegis RTX 5080, for Inkling-2-Mini expert offload (2026-11-24)
+# Host-to-GPU weight paths on the rtx5080-host RTX 5080, for Inkling-2-Mini expert offload (2026-11-24)
 
-Status: `[HW-WITNESSED]` on `aegis-fak`. Microbenchmark only. No engine change and no end-to-end decode run.
+Status: `[HW-WITNESSED]` on `rtx5080-host`. Microbenchmark only. No engine change and no end-to-end decode run.
 
 **Question.** Inkling-2-Mini UD-Q4_K_M (16.61 GB) does not fit in 16 GB of VRAM. UD-Q3_K_XL (13.63 GB) fits and
 decodes at 119.9 tok/s. If some experts live in host RAM, which path gets their bytes into a kernel fastest, and what

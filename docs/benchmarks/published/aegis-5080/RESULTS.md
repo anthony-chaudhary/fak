@@ -1,11 +1,11 @@
 ---
-title: "Campaign record: Aegis RTX 5080 Qwen3.8-27B llama.cpp overnight sweep"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-5080 (2026-10-30): Aegis RTX 5080 Qwen3.8-27B llama.cpp overnight sweep."
+title: "Campaign record: RTX 5080 host RTX 5080 Qwen3.8-27B llama.cpp overnight sweep"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-5080 (2026-10-30): RTX 5080 host RTX 5080 Qwen3.8-27B llama.cpp overnight sweep."
 ---
 
-# RESULTS — Aegis RTX 5080 Qwen3.8-27B llama.cpp overnight sweep (2026-10-30)
+# RESULTS — RTX 5080 host RTX 5080 Qwen3.8-27B llama.cpp overnight sweep (2026-10-30)
 
-**[HW-WITNESSED]** — physical `aegis-fak` (MSI Aegis ZS2 desktop), boot
+**[HW-WITNESSED]** — physical `rtx5080-host` (RTX 5080 desktop desktop), boot
 `31fc7046-7671-4813-8d33-7856b915dd9d` (unchanged through the window), GPU UUID
 `GPU-3e9fda0a-061a-6eb7-26c3-541bf8489090` (RTX 5080, 16303 MiB, sm_120).
 
@@ -19,7 +19,7 @@ description: "Campaign record, not a general claim: read the page's status and e
 | driver / power | NVIDIA 615.78.08; **native 360 W only** (no caps; readback 360.0 W in [340,380] band on every op) |
 | host | Arch Linux 7.2.11-arch1-1, 30 GB RAM, 1.9 TB NVMe, 1 GbE enp5s0 |
 | producer | `fak-run fak-raider-bench` at committed HEAD (host-row commits 937fdec2c8 + 9d0d595250); payload_sha256 `e690fed59605334407ef1e3923afc6634805bcc345326c3bf9aea08fe136250a` on all ok ops |
-| lease trail | measure `hwl-ab3dc5d0417c6a5e` (owned-rtx5080-aegis, epoch 125, holder `pi.aegis-5080-night-bench`) for all probe/cell ops; maintain `hwl-43b9e563350c6f4e` (epoch 124) for the service-stop window; both released at close |
+| lease trail | measure `hwl-ab3dc5d0417c6a5e` (owned-rtx5080, epoch 125, holder `pi.rtx5080-host-5080-night-bench`) for all probe/cell ops; maintain `hwl-43b9e563350c6f4e` (epoch 124) for the service-stop window; both released at close |
 | workload | warm-prefix shared deterministic prompt per cell, decode-dominated, max-tokens 64, prompt target ctx−512; server argv `-m MODEL -a Qwen3.8-27B -c <ctx×np> -ngl 99 -np <np> -b 512 -ub 128 -cb --port 18080`; 300 s inter-cell cooldown |
 
 ## Headline numbers
@@ -56,7 +56,7 @@ once the first request pays cold prefill.
 | tier | measured | method / label | replaces ESTIMATED fit-spine rate |
 | --- | --- | --- | --- |
 | NVMe seq-read | **4.0 GB/s** (3.987/4.013/3.997 over 3 cold passes; warm page-cache 38.4 GB/s contrast) | dd bs=1M over the 9.83 GB gguf, drop_caches before each pass, HW-WITNESSED | SSD expert-stream estimate |
-| DRAM | **WEAK**: python triad 0.42 GB/s (loop-bound); tmpfs single-stream read proxy 18.9 GiB/s | no C compiler on aegis (gcc/cc/clang absent) ⇒ documented WEAK fallback | DRAM spill estimate |
+| DRAM | **WEAK**: python triad 0.42 GB/s (loop-bound); tmpfs single-stream read proxy 18.9 GiB/s | no C compiler on rtx5080-host (gcc/cc/clang absent) ⇒ documented WEAK fallback | DRAM spill estimate |
 | GPU baseline | 16.16 W idle / 360.00 W limit / 180 MHz idle / 33 °C | nvidia-smi, HW-WITNESSED | envelope pin |
 
 Receipt: `receipts/tier-bandwidth.json`.
@@ -126,7 +126,7 @@ the 360 W native limit; max temp 69 °C; SM means 2480–2650 MHz.
 1. **Probe attempt 1 refused `startup_failed` (11:38Z, retained receipt replaced by
    the ok rerun)**: payload pins `LD_LIBRARY_PATH=<build-cuda>/bin`, but the CUDA
    runtime libs (`libcudart.so.13`, `libcublas.so.13`, `libcublasLt.so.13`) were
-   staged under `<build-cuda>/lib-ext/` on aegis ⇒ server exited at load. Fixed by
+   staged under `<build-cuda>/lib-ext/` on rtx5080-host ⇒ server exited at load. Fixed by
    node-side symlinks `bin/<lib> -> ../lib-ext/<lib>` (pinned binaries and tool
    unchanged; ldd clean afterwards). Labeled `node-staging-symlink-fix-20261030`.
 2. **Service stop was manual**: `fak.service` (Qwen2.5-Coder-3B native serve,
@@ -155,7 +155,7 @@ the 360 W native limit; max temp 69 °C; SM means 2480–2650 MHz.
   power ⇒ 63.9 tps C1@2048 vs raider 22.2 tps C1@2048 (150 W cap), 279.2 tps peak
   vs 144.6 tps.
 - **First 5080 numbers on this envelope**: zero prior baseline; absolute deltas only.
-- DRAM tier rate is WEAK-labeled (no C toolchain on aegis); NVMe rate is
+- DRAM tier rate is WEAK-labeled (no C toolchain on rtx5080-host); NVMe rate is
   HW-WITNESSED cold-cache.
 - All receipts are self-contained: tool commit ref + payload_sha256, model/engine/
   loadgen digests, boot-id, GPU UUID, UTC timestamps, admitted lease records.
@@ -166,5 +166,5 @@ the 360 W native limit; max temp 69 °C; SM means 2480–2650 MHz.
   `per_layer_token_embd.weight` + 13 `deepseek41.*` KVs vs b11870); needs corrected
   export or qualified alternate engine version — see
   [`ds41-attempt-1/ATTEMPT-RECEIPT.md`](ds41-attempt-1/ATTEMPT-RECEIPT.md).
-- DRAM STREAM with a real C toolchain (install gcc on aegis, re-run tier receipt).
+- DRAM STREAM with a real C toolchain (install gcc on rtx5080-host, re-run tier receipt).
 - `fak.service` state at close: see CAMPAIGN-LOG final entry.

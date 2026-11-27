@@ -1,9 +1,9 @@
 ---
-title: "Campaign record: Inkling-2-Mini resident CUDA decode: fused small-op climb on aegis2 RTX 5080"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis2-inkling2-fused-climb (2026-11-24): Inkling-2-Mini resident CUDA decode: fused small-op climb on aegis2 RTX 5080."
+title: "Campaign record: Inkling-2-Mini resident CUDA decode: fused small-op climb on rtx5080-host-2 RTX 5080"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-2-inkling2-fused-climb (2026-11-24): Inkling-2-Mini resident CUDA decode: fused small-op climb on rtx5080-host-2 RTX 5080."
 ---
 
-# Inkling-2-Mini resident CUDA decode: fused small-op climb on aegis2 RTX 5080 (2026-11-24)
+# Inkling-2-Mini resident CUDA decode: fused small-op climb on rtx5080-host-2 RTX 5080 (2026-11-24)
 
 Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw logs are under [`receipts/`](receipts/).
 
@@ -18,9 +18,9 @@ Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw lo
 | 4 SITU/gate | realugbun-5 | SITU at 64-thread blocks (all SMs), MoE combine folded into the FFN post conv, attention gate folded into the `wo` quantization | 98.57/98.57 → **100.37/100.37** (+1.8%) | 9.96 |
 | 5 CONV | realugbun-2 | k and v short convs run inside `k_ink2_qkv_post` (v staged in its cache row, then RMS in place) | 100.37/100.38 → **101.56/101.56** (+1.2%) | 9.85 |
 
-Net on aegis2: 85.2 → 101.6 tok/s (+19.1%, 11.73 → 9.85 ms/token). Bar: realugbun/llama.cpp fork 119.28 tok/s (8.38 ms/token) on aegis.
+Net on rtx5080-host-2: 85.2 → 101.6 tok/s (+19.1%, 11.73 → 9.85 ms/token). Bar: realugbun/llama.cpp fork 119.28 tok/s (8.38 ms/token) on rtx5080-host.
 
-The aegis2 base reads 85.2 tok/s where aegis read 82.55 for a8030e394b; same card model and GGUF, different box and driver/runtime (CUDA 13.5 runtime here). Compare steps within this receipt, not across boxes.
+The rtx5080-host-2 base reads 85.2 tok/s where rtx5080-host read 82.55 for a8030e394b; same card model and GGUF, different box and driver/runtime (CUDA 13.5 runtime here). Compare steps within this receipt, not across boxes.
 
 ## Landed
 
@@ -64,12 +64,12 @@ Finding: the slow small kernels were float64 transcendentals issued by one lane 
 
 ## Host state
 
-- aegis2 `ds41-serve` (transient, a peer's DS4.1 fak serve using 4 GB VRAM and 25 GB RAM) was stopped at 04:31Z because the Inkling resident load OOMed beside it. Recreate with `receipts/ds41-serve.recreate.sh` (captured from `systemctl cat`).
+- rtx5080-host-2 `ds41-serve` (transient, a peer's DS4.1 fak serve using 4 GB VRAM and 25 GB RAM) was stopped at 04:31Z because the Inkling resident load OOMed beside it. Recreate with `receipts/ds41-serve.recreate.sh` (captured from `systemctl cat`).
 - One accidental unleased start of the base oracle binary at ~05:16Z was killed within seconds (load phase only, no measurement).
 
 ## Recipe
 
-Build on aegis (CPU only, go + /opt/cuda 13.4 + gcc), run on aegis2: `receipts/build.sh <tree>`, `receipts/ship.sh <tree> <name>`, then on aegis2 `receipts/oracle.sh <name>`, `receipts/abba.sh <out> <A> <B>`, `receipts/profile.sh <name>`. The aegis2 binary links `/opt/cuda/targets/x86_64-linux/lib/libcudart.so.13` and `libcublas*.so.13`.
+Build on rtx5080-host (CPU only, go + /opt/cuda 13.4 + gcc), run on rtx5080-host-2: `receipts/build.sh <tree>`, `receipts/ship.sh <tree> <name>`, then on rtx5080-host-2 `receipts/oracle.sh <name>`, `receipts/abba.sh <out> <A> <B>`, `receipts/profile.sh <name>`. The rtx5080-host-2 binary links `/opt/cuda/targets/x86_64-linux/lib/libcudart.so.13` and `libcublas*.so.13`.
 
 ## Step 6 (not landed): post convs deferred into the next mix, 2026-11-24
 

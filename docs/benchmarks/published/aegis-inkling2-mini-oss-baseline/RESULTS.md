@@ -1,11 +1,11 @@
 ---
-title: "Campaign record: Inkling-2-Mini OSS engine baseline on Aegis RTX 5080 16 GB"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-inkling2-mini-oss-baseline (2026-11-22): Inkling-2-Mini OSS engine baseline on Aegis RTX 5080 16 GB."
+title: "Campaign record: Inkling-2-Mini OSS engine baseline on RTX 5080 host RTX 5080 16 GB"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-inkling2-mini-oss-baseline (2026-11-22): Inkling-2-Mini OSS engine baseline on RTX 5080 host RTX 5080 16 GB."
 ---
 
-# RESULTS — Inkling-2-Mini OSS engine baseline on Aegis RTX 5080 16 GB (2026-11-22)
+# RESULTS — Inkling-2-Mini OSS engine baseline on RTX 5080 host RTX 5080 16 GB (2026-11-22)
 
-**[HW-WITNESSED]** aegis-fak (RTX 5080 16 GB, sm_120, driver 615.78.08, kernel 7.2.11-arch1-1),
+**[HW-WITNESSED]** rtx5080-host (RTX 5080 16 GB, sm_120, driver 615.78.08, kernel 7.2.11-arch1-1),
 measure lease `hwl-66dbb68b85999389` (released). Eight short exclusive windows (11:34Z–12:21Z),
 each engine alone on the GPU with process-group teardown and a GPU-clean check between stages.
 The serving unit `fak-llama-qwen27b.service` was already down when the window opened. A peer's
@@ -16,7 +16,7 @@ server-log tails are in [`receipts/windows.txt`](receipts/windows.txt). The harn
 is [`receipts/harness.txt`](receipts/harness.txt); the local engine patches are in
 [`receipts/offload-wiring.patch`](receipts/offload-wiring.patch).
 
-Checkpoints are pinned by sha256, verified on the workstation and again on Aegis ([`receipts/sha256.txt`](receipts/sha256.txt); lease and serving-unit restore in [`receipts/lease.txt`](receipts/lease.txt); engine root-cause lines in [`receipts/engine-root-causes.txt`](receipts/engine-root-causes.txt)):
+Checkpoints are pinned by sha256, verified on the workstation and again on RTX 5080 host ([`receipts/sha256.txt`](receipts/sha256.txt); lease and serving-unit restore in [`receipts/lease.txt`](receipts/lease.txt); engine root-cause lines in [`receipts/engine-root-causes.txt`](receipts/engine-root-causes.txt)):
 Inkling-2-Mini@b85c3cfa `65e60f51…`, TML-d24-varloop-research@657b53ba `79e60b65…`, and Unsloth
 UD-Q3_K_XL in its `Mainline_Support` layout `e2d03e8c…` (root layout `f72f396d…`).
 
@@ -112,7 +112,7 @@ all run under three exclusive measure leases, all released. The holder for all t
 | `hwl-8961bd50ee2d2523` | u |
 
 The grant and release events are in the windows receipt. `fak-llama-qwen27b.service` was stopped
-for each window and confirmed active afterwards. Ticket: `inkling2-prefill-quality-aegis-20261122`.
+for each window and confirmed active afterwards. Ticket: `inkling2-prefill-quality-rtx5080-host-20261122`.
 
 Receipts:
 - Every prefill, llama-bench and analysis JSON is a row of [`receipts/addendum-probes.jsonl`](receipts/addendum-probes.jsonl).

@@ -1,4 +1,4 @@
-# Launch kit: fak with Inkling-2-Mini (2026-11-24)
+# Launch kit: fak with Inkling-2-Mini (2026-11-24, refreshed for v0.59.0)
 
 This is the current launch copy. It replaces the older drafts in this directory
 ([show-hn.md](show-hn.md), [x-thread.md](x-thread.md),
@@ -16,10 +16,10 @@ RTX 5080, fak decodes at 118.1 tok/s in its in-process decode bench, against
 llama-bench, ABBA x2), and level with the realugbun llama.cpp fork at 119.9
 against 119.5 in a separate window.
 
-The second beat is opt-in speculative decode: 171.5 tok/s at depth 2 and 180.9
-at depth 4, against 119.7 plain on the same receipt (1.43x and 1.51x). It is off
-by default and not bit-exact on every prompt, so it is never the headline. Per
-prompt, plain-to-speculative speedups run from 1.09x to 1.35x.
+The second beat is opt-in CUDA speculative decode: 171.5 tok/s at depth 2 and
+180.9 at depth 4, against 119.7 plain on the same receipt (1.43x and 1.51x). On
+CUDA it is off by default and not bit-exact on every prompt, so it is never the
+headline. Per prompt, plain-to-speculative speedups run from 1.09x to 1.35x.
 
 Speed is the hook, not the pitch. The decode result answers the usual objection
 to the guard ("your engine is slow"). Against the fork it is parity, not a lead,
@@ -32,12 +32,11 @@ the default (`27355b23dd6`).
 
 Three facts go in every post:
 
-- Inkling-2-Mini ships in tag v0.58.0 (commit `d928c421584`, a Pre-release with
-  16 assets). `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`
-  installs it. GitHub's Latest release, which `install.sh` resolves, is still
-  v0.56.0, so the installer delivers v0.56.0 until v0.58.0 is promoted; pin it
-  with `FAK_VERSION=0.58.0`. The release has no CUDA binary, so the RTX 5080
-  numbers still need a clone and `make cuda-build-sm120`.
+- Inkling-2-Mini ships in `v0.59.0` (the current GitHub release, with Apple
+  Silicon Metal and Linux amd64 Vulkan archives). Both `install.sh` and
+  `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` install it. The
+  release has no CUDA binary, so the RTX 5080 numbers still need a clone and
+  `make cuda-build-sm120` (or the CUDA Docker image).
 - The comparison rates are in-process decode benches. The one number measured
   through the user command is `fak run` decode (116.5 tok/s, mean of two runs).
   There is no served-endpoint rate.
@@ -46,10 +45,11 @@ Three facts go in every post:
 
 ### Install
 
-CPU, and Metal on Apple Silicon. Needs Go 1.26 or later:
+CPU, and Metal on Apple Silicon. Needs Go 1.26 or later (or use the `v0.59.0`
+release archive via `install.sh`; see [INSTALL.md](../../INSTALL.md)):
 
 ```sh
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest   # v0.58.0
+go install github.com/anthony-chaudhary/fak/cmd/fak@latest   # v0.59.0
 fak run inkling-2-mini         # short name for the pinned inkling2-mini GGUF
 fak run <path>/Inkling-2-Mini-UD-Q3_K_XL.gguf   # or a local file
 ```
@@ -59,12 +59,10 @@ https://github.com/anthony-chaudhary/fak.git`, then `go build -o fak ./cmd/fak`
 (`fak.exe` on Windows).
 
 The short names `inkling` and `inkling-2-mini` chain to the `inkling2-mini`
-catalog entry (commit `4e47f88205`, an ancestor of v0.58.0), so all three name
-the same pinned GGUF. That commit adds the names and nothing else; it does not
-say what `fak run` downloads on first use.
-
-The release installer resolves GitHub's Latest release, which is still v0.56.0
-(it predates Inkling). To get Inkling from the installer, set `FAK_VERSION=0.58.0`.
+catalog entry (commit `4e47f88205`, an ancestor of `v0.59.0`), so all three name
+the same pinned GGUF. On Apple Silicon, `v0.59.0` runs Inkling-2-Mini on fak's
+pure `internal/metalgemm` resident Metal path (with speculative decode on by
+default via the auto draft); the earlier vendored Splash port has been retired.
 
 CUDA (the RTX 5080 numbers). The CUDA backend compiles only under
 `-tags cuda` with cgo, linked against kernels built by nvcc
@@ -77,9 +75,8 @@ make cuda-build-sm120   # RTX 50-series such as the 5080; the default arch is sm
 ```
 
 The 118.1 and 119.9 tok/s numbers are the in-process decode bench, which runs
-as a `-tags cuda` test binary. The exact commands, with `--arch sm_120` for the
-RTX 5080, are under "Reproduce" in
-[the resident-decode receipt](../benchmarks/receipts/inkling2-cuda-resident-rtx5080-20261124/RESULTS.md).
+as a `-tags cuda` test binary. The resident-decode campaign record is in
+[the resident-decode receipt](../benchmarks/published/aegis-inkling2-resident-cuda/RESULTS.md).
 
 Fresh-user path, measured on one RTX 5080 from a clean home directory: the
 documented from-source CUDA build (clone, `make cuda-build-sm120`, link) took
@@ -107,20 +104,21 @@ Show HN: fak: Inkling-2-Mini at 118.1 tok/s vs stock llama.cpp 81.0 on one 5080
 > box, to fork level at 119.9. In one window on one card (ABBA x2, same file),
 > fak's in-process bench decoded at 118.1 tok/s and llama-bench on stock
 > llama.cpp at 81.0, so 1.46x. In a separate window the realugbun llama.cpp fork
-> got 119.5 against our 119.9: parity with the fork, not a win. Opt-in
+> got 119.5 against our 119.9: parity with the fork, not a win. Opt-in CUDA
 > speculative decode reaches 171.5 tok/s at depth 2 and 180.9 at depth 4, against
-> 119.7 plain on the same receipt (1.43x and 1.51x). It is off by default and not
-> bit-exact on every prompt. Prefill is a matched win: with batched prefill on by
-> default, the pp512 prompt rate over HTTP is 3880.4 tok/s against the fork's
-> 3092.2 on the same card in the same window (1.25x; prompt rate, not end-to-end
-> latency; measured at `97ccb4a7d9`, before W4A4 grouped prefill became the default). Where we lose: decode at 1946 tokens
-> of depth, 89.0 against the fork's 113.8. Batch-of-one is a loss too (65.3
-> against 119.9 single-stream). The batched path wins at width: 783.7 tok/s
-> aggregate across 24 streams (opt-in f16 KV, single run). These are in-process
-> benches, not served rates. Through the user command, a fresh from-source CUDA
-> build took 507 s, and `fak run` gave a first token in about 13.1 s (model load
-> included) and 116.5 tok/s decode. Inkling ships in tag v0.58.0: `go install
-> github.com/anthony-chaudhary/fak/cmd/fak@latest` installs it, and
+> 119.7 plain on the same receipt (1.43x and 1.51x). On CUDA it is off by default
+> and not bit-exact on every prompt. Prefill is a matched win: with batched
+> prefill on by default, the pp512 prompt rate over HTTP is 3880.4 tok/s against
+> the fork's 3092.2 on the same card in the same window (1.25x; prompt rate, not
+> end-to-end latency; measured at `97ccb4a7d9`, before W4A4 grouped prefill
+> became the default). Where we lose: decode at 1946 tokens of depth, 89.0
+> against the fork's 113.8. Batch-of-one is a loss too (65.3 against 119.9
+> single-stream). The batched path wins at width: 783.7 tok/s aggregate across
+> 24 streams (opt-in f16 KV, single run). These are in-process benches, not
+> served rates. Through the user command, a fresh from-source CUDA build took
+> 507 s, and `fak run` gave a first token in about 13.1 s (model load included)
+> and 116.5 tok/s decode. Inkling ships in `v0.59.0`: `install.sh` or
+> `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` installs it, and
 > `fak run inkling-2-mini` gives the CPU and Apple Silicon Metal path. The
 > release has no CUDA binary, so the CUDA numbers need a clone and the `-tags
 > cuda` build (`make cuda-build`, or `make cuda-build-sm120` for RTX 50-series,
@@ -135,28 +133,28 @@ Inkling-2-Mini on a 16 GB 5080: 118.1 tok/s decode in fak vs 81.0 in stock llama
 **Body:**
 
 > Same card and GGUF. In a separate window the realugbun fork got 119.5
-> against our 119.9, so that one is parity. Opt-in speculative decode reaches
-> 171.5 tok/s at depth 2 and 180.9 at depth 4, against 119.7 plain on the same
-> receipt (1.43x and 1.51x). It is off by default because it is not bit-exact on
-> every prompt; per-prompt speedups run from 1.09x to 1.35x. From a fresh clone,
-> the CUDA build took 507 s, and `fak run` gave a first token in about 13.1 s
-> (model load included) and 116.5 tok/s decode, measured through the command
-> rather than the bench. Prefill over HTTP beats the fork on the same card in
-> the same window: pp512 prompt rate 3880.4 against 3092.2 tok/s (1.25x, prompt
-> rate only; measured at `97ccb4a7d9`, before W4A4 grouped prefill became the
-> default). Where we lose: decode at 1946 tokens of depth (89.0
-> against 113.8); batch-of-one (65.3 against 119.9 single-stream, 0.54x); and the
-> opt-in PDL flag, which is slower on this card (110.7 against 117.2, 0.94x), so it
-> stays off. The batched path wins at width: 783.7 tok/s aggregate across 24
-> streams (opt-in f16 KV, single run), which is not a per-stream rate. Context
-> depth: at 8192 tokens the measured ms/token went from 21.47 to 13.30 (1.61x); at
-> 19 tokens it is within noise (8.63 against 8.55). The comparison numbers are
-> in-process benches; none is a served rate. Inkling ships in tag v0.58.0:
-> `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` for CPU and Metal
-> (GitHub's Latest is still v0.56.0, so `install.sh` needs `FAK_VERSION=0.58.0`);
-> the 5080 numbers need a clone and the `-tags cuda` build (docs/cuda-dev.md). fak's actual job is guarding the tool calls of the coding
-> agent you point at it; the engine work is so that the local model is not the
-> slow part.
+> against our 119.9, so that one is parity. Opt-in CUDA speculative decode
+> reaches 171.5 tok/s at depth 2 and 180.9 at depth 4, against 119.7 plain on
+> the same receipt (1.43x and 1.51x). On CUDA it is off by default because it is
+> not bit-exact on every prompt; per-prompt speedups run from 1.09x to 1.35x.
+> From a fresh clone, the CUDA build took 507 s, and `fak run` gave a first
+> token in about 13.1 s (model load included) and 116.5 tok/s decode, measured
+> through the command rather than the bench. Prefill over HTTP beats the fork on
+> the same card in the same window: pp512 prompt rate 3880.4 against 3092.2
+> tok/s (1.25x, prompt rate only; measured at `97ccb4a7d9`, before W4A4 grouped
+> prefill became the default). Where we lose: decode at 1946 tokens of depth
+> (89.0 against 113.8); batch-of-one (65.3 against 119.9 single-stream, 0.54x);
+> and the opt-in PDL flag, which is slower on this card (110.7 against 117.2,
+> 0.94x), so it stays off. The batched path wins at width: 783.7 tok/s aggregate
+> across 24 streams (opt-in f16 KV, single run), which is not a per-stream rate.
+> Context depth: at 8192 tokens the measured ms/token went from 21.47 to 13.30
+> (1.61x); at 19 tokens it is within noise (8.63 against 8.55). The comparison
+> numbers are in-process benches; none is a served rate. Inkling ships in
+> `v0.59.0`: `install.sh` or
+> `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` for CPU and Metal;
+> the 5080 numbers need a clone and the `-tags cuda` build (docs/cuda-dev.md).
+> fak's actual job is guarding the tool calls of the coding agent you point at
+> it; the engine work is so that the local model is not the slow part.
 
 Attach the charts: [decode comparison](assets/inkling2-decode-comparison.svg),
 [decode climb](assets/inkling2-decode-climb.svg),
@@ -171,9 +169,9 @@ Attach the charts: [decode comparison](assets/inkling2-decode-comparison.svg),
    ABBA x2). Not a served rate. Receipts linked.
 2. Against the realugbun llama.cpp fork it is parity, not a lead: 119.9 vs
    119.5, measured in a separate window.
-3. Second beat: opt-in speculative decode reaches 171.5 tok/s at depth 2 and
-   180.9 at depth 4, against 119.7 plain (1.43x and 1.51x). Not bit-exact on
-   every prompt, off by default.
+3. Second beat: opt-in CUDA speculative decode reaches 171.5 tok/s at depth 2
+   and 180.9 at depth 4, against 119.7 plain (1.43x and 1.51x). Not bit-exact on
+   every prompt, off by default on CUDA.
    [chart: [inkling2-decode-climb.svg](assets/inkling2-decode-climb.svg)]
 4. Prefill is a matched win: pp512 prompt rate over HTTP 3880.4 vs the fork's
    3092.2, same card and window (1.25x; measured at 97ccb4a7d9). Where we lose:
@@ -186,55 +184,55 @@ Attach the charts: [decode comparison](assets/inkling2-decode-comparison.svg),
    [chart: [inkling2-batched-serving.svg](assets/inkling2-batched-serving.svg)]
 6. Fresh user, through `fak run` rather than the bench: from-source CUDA build
    507 s, first token about 13.1 s, 116.5 tok/s decode.
-7. M3 Pro Metal: 40.3 tok/s, level with Splash at 37.5 (1.07x on the short
-   cell). One of its five cells is not explained by its receipt, so we do not
-   claim that cell.
+7. Apple Silicon Metal: `v0.59.0` runs Inkling-2-Mini on pure
+   `internal/metalgemm` resident Metal (pure resident receipts pending; the
+   earlier 2026-11-24 M3 Pro record used the retired vendored Splash port and is
+   not claimed as pure fak-native Metal).
 8. `fak claude` / `fak opencode` / `fak pi`: same agent, every tool call
-   checked. Inkling ships in v0.58.0: `go install ...@latest`. CUDA is a clone
-   and the `-tags cuda` build (docs/cuda-dev.md).
+   checked. Inkling ships in `v0.59.0`: `install.sh` or `go install ...@latest`.
+   CUDA is a clone and the `-tags cuda` build (docs/cuda-dev.md).
 
 ## fak versus alternatives
 
 | Alternative | Where fak is better | Where fak loses today |
 |---|---|---|
 | llama.cpp (stock and fork) | Stock decode on Inkling-2-Mini, same window on one RTX 5080: fak in-process bench 118.1 vs llama-bench 81.0 tok/s (1.46x). Prefill over HTTP beats the fork in a matched window: pp512 prompt rate 3880.4 vs 3092.2 tok/s (1.25x; measured at 97ccb4a7d9). Guard and router built in. | Ties the fork on decode, does not beat it (119.9 vs 119.5). Trails the fork at 1946 tokens of depth (89.0 vs 113.8). |
-| Ollama, LM Studio | Fork-level decode on this model. Tool-call guard. No opaque model store. | They install in one click; fak needs v0.58.0 (`go install ...@latest`) or a clone for Inkling, and `install.sh` delivers v0.56.0 until v0.58.0 is Latest. No Vulkan or AMD backend. |
+| Ollama, LM Studio | Fork-level decode on this model. Tool-call guard. No opaque model store. | They install in one click; fak ships Metal and Vulkan archives in `v0.59.0`, while CUDA still needs a `-tags cuda` source build or the CUDA container. |
 | vLLM, SGLang | Runs Inkling-2-Mini on one 16 GB card. | Not a matched comparison. They are built for multi-GPU serving; fak has no measured served rate on this model, so there is no matched number to cite either way. |
 | LiteLLM, Portkey | Wraps the agent harness, not only the endpoint; failover headers are readable. | They lead on per-key limits and PII handling. Call it parity. |
 | Cloud-only harnesses | Local by default, binds 127.0.0.1; the router can still reach a cloud model. | Local model quality: Qwen3.8-27B leads the dev-work target match (44 vs 28–34 of 240 scored items in a 300-item set). |
 
 Other losses to state plainly: the CUDA backend is a separate `-tags cuda`
 build that needs a CUDA toolkit (Metal is in the default cgo build on Apple
-Silicon), v0.58.0 has no CUDA asset in its release, GitHub's Latest release
-(and so `install.sh`) is still v0.56.0 until v0.58.0 is promoted, the from-source CUDA build took
-507 s on a fresh clone, opt-in PDL is slower on sm_120 (110.7 against 117.2
-tok/s, 0.94x), and speculative decode with PDL is slower too (137.1 against
-146.9, 0.93x), so PDL stays off by default.
+Silicon and in the `v0.59.0` macOS release archive), `v0.59.0` has no prebuilt
+CUDA binary asset (only the CUDA container or a from-source build), the
+from-source CUDA build took 507 s on a fresh clone, opt-in PDL is slower on
+sm_120 (110.7 against 117.2 tok/s, 0.94x), and speculative decode with PDL is
+slower too (137.1 against 146.9, 0.93x), so PDL stays off by default.
 
 ## Safe claims
 
 | Say | Say with caveat |
 |---|---|
 | fak in-process bench 118.1 vs llama-bench 81.0 tok/s, 1.46x stock llama.cpp in one window (ABBA x2) | 119.9 vs 119.5, parity with the realugbun fork (separate window) |
-| Opt-in speculative decode: 171.5 tok/s at depth 2, 180.9 at depth 4, against 119.7 plain (1.43x, 1.51x) | Opt-in, off by default; not bit-exact on every prompt (capitals prompt); per-prompt speedups 1.09x to 1.35x |
+| Opt-in CUDA speculative decode: 171.5 tok/s at depth 2, 180.9 at depth 4, against 119.7 plain (1.43x, 1.51x) | Opt-in, off by default on CUDA; not bit-exact on every prompt (capitals prompt); per-prompt speedups 1.09x to 1.35x |
 | `fak run` first token about 13.1 s, 116.5 tok/s decode | First token includes model load; file was page-cached, not disk-cold |
 | Batched aggregate 783.7 tok/s across 24 streams | Aggregate across streams, not a per-stream rate; opt-in f16 KV; single run |
 | Cohort prefill 137.7 to 372.1 tok/s (2.70x) end to end, 16 HTTP streams | Chat prompts, not the 19-token OSS prompts; the OSS reference is 352.36 aggregate |
 | Context depth: 8192-token ms/token 21.47 to 13.30 (1.61x) | Short context (19 tokens) is within noise (8.63 against 8.55) |
 | Prefill: pp512 prompt rate over HTTP 3880.4 vs the realugbun fork's 3092.2 tok/s (1.25x) | Same card and window; prompt rate, not end-to-end latency; one window; measured at 97ccb4a7d9, before W4A4 grouped prefill became the default; the answer check abstained at the 32-token cap for every engine |
 | In-process batched prefill pp512 4598.2 tok/s, on by default | In-process bench, not an HTTP rate; one window; measured at 97ccb4a7d9, before W4A4 grouped prefill became the default |
-| M3 Pro 40.3 tok/s, level with Splash 37.5 | Parity, not a win; across its five cells the ratio runs 0.97x to 1.48x, and the 1.48x cell is not explained by its receipt and is not claimed |
-| `go install ...@latest` (v0.58.0), or a clone of `main` | Inkling-2-Mini is in v0.58.0, a Pre-release; GitHub Latest and `install.sh` still deliver v0.56.0; CUDA is a clone build |
-| 35-task suite: 89.5% vs 87.6% (model quality, both served by llama.cpp) | Not indexed (receipt held privately); a model-quality score, not a fak engine rate |
+| Historical M3 Pro Metal (retired vendored Splash port): 40.3 tok/s vs Splash 37.5 | **Historical only, retracted as a pure fak-native Metal claim**; the vendored Splash port is retired and pure `internal/metalgemm` resident receipts are pending |
+| `install.sh` or `go install ...@latest` (`v0.59.0`), or a clone of `main` | Inkling-2-Mini ships in `v0.59.0` for CPU, Metal, and Linux Vulkan; CUDA needs a clone build (`-tags cuda`) or the CUDA container |
 | The guard refuses with fixed reason codes | "Default-deny" only when naming strict mode; the shipped default allows unlisted tools |
 
 Do not say: "faster than llama.cpp", "fastest Inkling runtime", "bit-identical"
 without qualification, any served-endpoint rate or served time to first token,
-any speculative figure as the default speed, a per-stream rate for an aggregate
-row, or that `inkling` or `inkling-2-mini` names a different build from
-`inkling2-mini`: both short names chain to the same pinned GGUF on `main`
-(commit `4e47f88205`). The earlier 151.7 tok/s speculative figure is superseded
-by the depth 2 row above and is not quoted.
+any CUDA speculative figure as the default speed, the retired vendored Splash
+M3 Pro figure as a pure `internal/metalgemm` fak-native Metal claim, a
+per-stream rate for an aggregate row, or that `inkling` or `inkling-2-mini`
+names a different build from `inkling2-mini`: both short names chain to the same
+pinned GGUF on `main` (commit `4e47f88205`). The earlier 151.7 tok/s speculative figure is superseded by the depth 2 row above and is not quoted.
 
 ## Receipts
 
@@ -244,12 +242,12 @@ Ancestry check, run 2026-11-25 before this revision:
 git fetch origin
 git merge-base --is-ancestor b64405de760e2f13a62594ff8d029f4599fcdeb4 origin/main   # exit 0
 git merge-base --is-ancestor cc6dca0b47a9c6a6c9166fb94efd819b1f380ee1 origin/main   # exit 0
-git merge-base --is-ancestor b64405de760e2f13a62594ff8d029f4599fcdeb4 v0.58.0       # exit 0
-git merge-base --is-ancestor cc6dca0b47a9c6a6c9166fb94efd819b1f380ee1 v0.58.0       # exit 0
+git merge-base --is-ancestor b64405de760e2f13a62594ff8d029f4599fcdeb4 v0.59.0       # exit 0
+git merge-base --is-ancestor cc6dca0b47a9c6a6c9166fb94efd819b1f380ee1 v0.59.0       # exit 0
 ```
 
-Both builds are also ancestors of tag v0.58.0 (`d928c421584`), the release that
-`go install ...@latest` installs.
+Both builds are ancestors of `origin/main` and of tag `v0.59.0` (`2fb2f300a3e`),
+the current release installed by `install.sh` and `go install ...@latest`.
 
 Result: `b64405de76` (the build that measured 119.9) and `cc6dca0b47` (the
 build that measured 118.1 and the fresh-user run) are ancestors of public
@@ -289,16 +287,15 @@ share. A row that says "receipt held privately, not indexed" is not gated.
 | OSS llama-server, C16 aggregate end to end (reference, 19-token raw prompts) | 352.36 tok/s | RTX 5080 16 GB sm_120 | upstream llama-server 33aeb17 | no commit (external) | OSS reference in the campaign record | `hl:oss.c16.e2e_tok_s` |
 | Context depth, 8192-token prompt, ms/token before and after (tiled large-cap attend) | 21.47 to 13.30 ms/token (1.61x) | RTX 5080 16 GB sm_120 | ABBAAB n=3 per arm, 128 output tokens | after: yes (`bb247124cc`) | context cliff campaign record | `hl:ctx.p8192_d16416.before_ms_tok`, `hl:ctx.p8192_d16416.after_ms_tok` |
 | Context depth, 19-token prompt, ms/token before and after (within noise) | 8.63 to 8.55 ms/token | RTX 5080 16 GB sm_120 | ABBAAB n=3 per arm, 128 output tokens | after: yes (`bb247124cc`) | context cliff campaign record | `hl:ctx.p19_d16416.before_ms_tok`, `hl:ctx.p19_d16416.after_ms_tok` |
-| M3 Pro Metal decode vs Splash 1.7.2, short cells (capitals, fibonacci at 32 tokens) | 40.3 vs 37.5 tok/s (1.07x); 55.5 vs 54.9 (1.01x); 47.8 vs 46.5 (1.03x) | M3 Pro 36 GB | paired decode, two runs per arm | yes (`1f31533f2`) | [m3pro-inkling2-mini-metal/RESULTS.md](../benchmarks/published/m3pro-inkling2-mini-metal/RESULTS.md) | `hl:metal.m3pro.capitals32.fak_tok_s`, `hl:metal.m3pro.capitals32.splash_tok_s`, `hl:metal.m3pro.fibonacci32.fak_tok_s`, `hl:metal.m3pro.capitals128.fak_tok_s` |
-| M3 Pro Metal decode, 128-token fibonacci cell (a loss) | 63.6 vs 65.2 tok/s (0.97x) | M3 Pro 36 GB | paired decode, two runs per arm | yes (`1f31533f2`) | same record | `hl:metal.m3pro.fibonacci128.fak_tok_s`, `hl:metal.m3pro.fibonacci128.splash_tok_s` |
-| M3 Pro Metal decode, 128-token p128/32 cell (1.48x, not explained by the receipt; not claimed) | 177.1 vs 119.6 tok/s (1.48x) | M3 Pro 36 GB | paired decode, two runs per arm | yes (`1f31533f2`) | same record; the receipt does not explain the cell, so it is checked before any claim | `hl:metal.m3pro.p128_32.fak_tok_s`, `hl:metal.m3pro.p128_32.splash_tok_s` |
+| Historical M3 Pro Metal (retired vendored Splash port) decode vs Splash 1.7.2, short cells | 40.3 vs 37.5 tok/s (1.07x); 55.5 vs 54.9 (1.01x); 47.8 vs 46.5 (1.03x) | M3 Pro 36 GB | paired decode, two runs per arm | yes (`1f31533f2`, retired) | [m3pro-inkling2-mini-metal/RESULTS.md](../benchmarks/published/m3pro-inkling2-mini-metal/RESULTS.md) (historical; not pure `internal/metalgemm`) | `hl:metal.m3pro.capitals32.fak_tok_s`, `hl:metal.m3pro.capitals32.splash_tok_s`, `hl:metal.m3pro.fibonacci32.fak_tok_s`, `hl:metal.m3pro.capitals128.fak_tok_s` |
+| Historical M3 Pro Metal (retired vendored Splash port) decode, 128-token fibonacci cell (a loss) | 63.6 vs 65.2 tok/s (0.97x) | M3 Pro 36 GB | paired decode, two runs per arm | yes (`1f31533f2`, retired) | same historical record | `hl:metal.m3pro.fibonacci128.fak_tok_s`, `hl:metal.m3pro.fibonacci128.splash_tok_s` |
+| Historical M3 Pro Metal (retired vendored Splash port) decode, 128-token p128/32 cell (not claimed) | 177.1 vs 119.6 tok/s (1.48x) | M3 Pro 36 GB | paired decode, two runs per arm | yes (`1f31533f2`, retired) | same historical record; not claimed | `hl:metal.m3pro.p128_32.fak_tok_s`, `hl:metal.m3pro.p128_32.splash_tok_s` |
 | Tokenizer parity with Hugging Face | 46/46 corpus lines | CPU | 1 corpus pass | not indexed | receipt held privately, not indexed | receipt held privately, not indexed |
 | Dev-work target match, Qwen3.8-27B vs the other models compared (model quality, not a fak engine rate) | 44 vs 28–34 of 240 scored items (300-item set) | all models served by llama.cpp at 4-bit | see receipt | n/a (model quality) | receipt held privately, not indexed | receipt held privately, not indexed |
-| 35-task suite (model quality, not a fak engine rate) | 89.5% vs 87.6% | both models served by llama.cpp | 35 tasks x 3 reps | n/a (model quality) | receipt held privately, not indexed | receipt held privately, not indexed |
 
 Charts: [decode comparison](assets/inkling2-decode-comparison.svg),
 [decode climb](assets/inkling2-decode-climb.svg),
-[batched serving](assets/inkling2-batched-serving.svg),
+[batched serving](assets/inkling2-batched-serving.svg), and
 [context depth](assets/inkling2-context-depth.svg).
 
 ## How these numbers stay current

@@ -5,16 +5,16 @@
  "step": "Resident CUDA decode of Inkling-2-Mini (inkling2_loop): device small ops, device top-8 routing, expert-indexed GEMVs, capture-once graph replay",
  "date": "2026-11-23",
  "evidence_class": "HW-WITNESSED",
- "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, aegis-fak, driver 615.78.08, CUDA 13.4]",
- "node": "aegis-fak, measure leases hwl-b58c572763365edc (climb + ABBA) and hwl-d90d11767f4a808b (4-case oracle), both released; fak-llama-qwen27b.service restored active, /health ok after each",
+ "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, rtx5080-host, driver 615.78.08, CUDA 13.4]",
+ "node": "rtx5080-host, measure leases hwl-b58c572763365edc (climb + ABBA) and hwl-d90d11767f4a808b (4-case oracle), both released; fak-llama-qwen27b.service restored active, /health ok after each",
  "models": {
   "gguf_mainline": "unsloth/Inkling-2-Mini-GGUF Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file sha256 e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639"
  },
  "engines": {
-  "baseline_fak": "public fak d09931ed93 (host-driven per-matrix device MatVec), aegis ~/inkling2-cuda-build-c/_bin/ggufload.test",
-  "candidate_fak": "public fak lane ticket-inkling2-cuda-decode-resident-20261122 commit 60b536f89f on base 185fc7d56b, aegis ~/inkling2-cuda-build-d/_bin/ggufload.step6.test; libfakcuda sm_120 SASS",
+  "baseline_fak": "public fak d09931ed93 (host-driven per-matrix device MatVec), rtx5080-host ~/inkling2-cuda-build-c/_bin/ggufload.test",
+  "candidate_fak": "public fak lane ticket-inkling2-cuda-decode-resident-20261122 commit 60b536f89f on base 185fc7d56b, rtx5080-host ~/inkling2-cuda-build-d/_bin/ggufload.step6.test; libfakcuda sm_120 SASS",
   "oracle": "llama.cpp ad50351f5 llama-server CPU backend, greedy top_k 1 (test data internal/ggufload/inkling2loop_test.go)",
-  "reference_engine": "llama.cpp ad50351f5 all-on-GPU, docs/benchmarks/aegis-inkling2-mini-oss-baseline-20261122/perf-receipt-v2.json"
+  "reference_engine": "llama.cpp ad50351f5 all-on-GPU, docs/benchmarks/rtx5080-inkling2-mini-oss-baseline-20261122/perf-receipt-v2.json"
  },
  "workload": "C1 greedy; bench: capitals prompt (19 tok) then 128 tokens, decode = 127 steps after the first, prefill excluded; parity: capitals and fibonacci x 32 tokens (the task acceptance), plus chat-template x 32 and passphrase-recall-1946 x 32 from origin e4de7e2213",
  "argv": [

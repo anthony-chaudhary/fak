@@ -1,11 +1,11 @@
 ---
-title: "Campaign record: Aegis RTX 5080 Qwen3.8-27B: latest llama.cpp + MTP hill climb"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-qwen38-mtp-hillclimb (2026-11-20): Aegis RTX 5080 Qwen3.8-27B: latest llama.cpp + MTP hill climb."
+title: "Campaign record: RTX 5080 host RTX 5080 Qwen3.8-27B: latest llama.cpp + MTP hill climb"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-qwen38-mtp-hillclimb (2026-11-20): RTX 5080 host RTX 5080 Qwen3.8-27B: latest llama.cpp + MTP hill climb."
 ---
 
-# RESULTS — Aegis RTX 5080 Qwen3.8-27B: latest llama.cpp + MTP hill climb (2026-11-20)
+# RESULTS — RTX 5080 host RTX 5080 Qwen3.8-27B: latest llama.cpp + MTP hill climb (2026-11-20)
 
-**[HW-WITNESSED]** aegis-fak (RTX 5080 16 GB, sm_120, driver 615.78.08), measure lease
+**[HW-WITNESSED]** rtx5080-host (RTX 5080 16 GB, sm_120, driver 615.78.08), measure lease
 `hwl-ec045f3e07e983b1` (released). Five short exclusive windows (23:35Z–00:04Z); the serving
 unit `fak-llama-qwen27b.service` was stopped per window and restored by an EXIT trap.
 Machine-readable: [`perf-receipt-v2.json`](perf-receipt-v2.json), per-request rows
@@ -46,17 +46,17 @@ the GPU, which caps context at **192k** (196608) on 16 GB. The router pin and `o
 
 ## Promotion (open)
 
-Staged unit: `aegis:/etc/fak/fak-llama-qwen27b.service.mtp192k-candidate` (29b52d39 build,
+Staged unit: `rtx5080-host:/etc/fak/fak-llama-qwen27b.service.mtp192k-candidate` (29b52d39 build,
 `-c 196608 ... --spec-type draft-mtp --spec-draft-n-max 2`). Applying it requires lowering the
-advertised context 262144→196608 in one change, in three places: the router pin (`backends[aegis].engine.slot_context_tokens`,
+advertised context 262144→196608 in one change, in three places: the router pin (`backends[rtx5080-host].engine.slot_context_tokens`,
 `routes[*].context_window`; the pin needs elevation), `opencode.json` `limit.context` for
-`aegis/qwen3.8-27b` + `qwen/qwen3.8-27b`, and the operator overlay. Otherwise requests between 192k and 262k
+`rtx5080-host/qwen3.8-27b` + `qwen/qwen3.8-27b`, and the operator overlay. Otherwise requests between 192k and 262k
 fail at the server instead of compacting.
 
 ## Context: r/LocalLLM "RTX 5080 PC vs GB10 workstation" (operator-supplied)
 
 The post's 5080 ran Qwen3.8-Flash-Next IQ3_S (83.6 GB) through Strata with MTP4 and a hybrid GPU/RAM
-placement, reporting 40–67 tok/s decode. Aegis holds the Strata source and a 63 GB Flash-Next Q2_0, but has only
+placement, reporting 40–67 tok/s decode. RTX 5080 host holds the Strata source and a 63 GB Flash-Next Q2_0, but has only
 30 GB RAM + 16 GB VRAM, so that configuration would page from NVMe. It is not reproducible here without more RAM.
 The post's dense 8B row (130 tok/s at 512 input tokens) agrees with the bandwidth-bound picture.
 

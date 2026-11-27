@@ -1,13 +1,13 @@
 ---
 title: "Campaign record: D41-HW-20261028-0310 - four-witness re-run after relative-contract witness fix (receipt v2)"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-5080-d41hw (2026-10-31): D41-HW-20261028-0310 - four-witness re-run after relative-contract witness fix (receipt v2)."
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-5080-d41hw (2026-10-31): D41-HW-20261028-0310 - four-witness re-run after relative-contract witness fix (receipt v2)."
 ---
 
 # D41-HW-20261028-0310 - four-witness re-run after relative-contract witness fix (receipt v2)
 
 **Tested tree:** parent `6600f3d1c0a906912f7c656d0f611f187af2b462` + single-file patch (sha256 `d035512c8584b0c43bde51b1b3bc5921570ca21d069ed65f12eca43553b16765`), landed as `df410106a54075e9557446aa33bfb4fd7ebf2caa`.
 
-## Result: 4/4 PASS on aegis-fak (RTX 5080, sm_120)
+## Result: 4/4 PASS on rtx5080-host (RTX 5080, sm_120)
 
 | n | test | result | json sha256 |
 |---|------|--------|-------------|

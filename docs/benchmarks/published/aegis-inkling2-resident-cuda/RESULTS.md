@@ -1,9 +1,9 @@
 ---
-title: "Campaign record: Inkling-2-Mini resident CUDA decode on aegis RTX 5080"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-inkling2-resident-cuda (2026-11-23): Inkling-2-Mini resident CUDA decode on aegis RTX 5080."
+title: "Campaign record: Inkling-2-Mini resident CUDA decode on rtx5080-host RTX 5080"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-inkling2-resident-cuda (2026-11-23): Inkling-2-Mini resident CUDA decode on rtx5080-host RTX 5080."
 ---
 
-# Inkling-2-Mini resident CUDA decode on aegis RTX 5080 (2026-11-23)
+# Inkling-2-Mini resident CUDA decode on rtx5080-host RTX 5080 (2026-11-23)
 
 Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw logs are under [`receipts/`](receipts/).
 

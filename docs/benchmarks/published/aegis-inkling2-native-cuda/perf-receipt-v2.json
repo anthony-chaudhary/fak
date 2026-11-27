@@ -5,8 +5,8 @@
  "step": "First fak-native CUDA decode of Inkling-2-Mini (inkling2_loop), token-identical to llama.cpp ad50351f5",
  "date": "2026-11-22",
  "evidence_class": "HW-WITNESSED",
- "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, aegis-fak, driver 615.78.08, CUDA 13.4]",
- "node": "aegis-fak, measure leases hwl-21a815ec860c796e (window 1, OOM) and hwl-6eb995ebd7704248 (window 2), both released; fak-llama-qwen27b.service restored active, /health ok",
+ "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, rtx5080-host, driver 615.78.08, CUDA 13.4]",
+ "node": "rtx5080-host, measure leases hwl-21a815ec860c796e (window 1, OOM) and hwl-6eb995ebd7704248 (window 2), both released; fak-llama-qwen27b.service restored active, /health ok",
  "models": {
   "gguf_mainline": "unsloth/Inkling-2-Mini-GGUF Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file sha256 e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639"
  },
@@ -28,7 +28,7 @@
   "baseline": {
    "engine": "llama.cpp ad50351f5 all-on-GPU",
    "decode_tok_s": 80.4,
-   "source": "docs/benchmarks/aegis-inkling2-mini-oss-baseline-20261122/perf-receipt-v2.json"
+   "source": "docs/benchmarks/rtx5080-inkling2-mini-oss-baseline-20261122/perf-receipt-v2.json"
   },
   "candidate": {
    "engine": "fak-native CUDA d09931ed93",

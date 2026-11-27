@@ -1,11 +1,11 @@
 ---
-title: "Campaign record: Inkling-2-Mini DSpark speculative decode on the fak-native CUDA resident path (aegis, 2026-11-24)"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-inkling2-spec-decode (2026-11-24): Inkling-2-Mini DSpark speculative decode on the fak-native CUDA resident path (aegis, 2026-11-24)."
+title: "Campaign record: Inkling-2-Mini DSpark speculative decode on the fak-native CUDA resident path (rtx5080-host, 2026-11-24)"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-inkling2-spec-decode (2026-11-24): Inkling-2-Mini DSpark speculative decode on the fak-native CUDA resident path (rtx5080-host, 2026-11-24)."
 ---
 
-# Inkling-2-Mini DSpark speculative decode on the fak-native CUDA resident path (aegis, 2026-11-24)
+# Inkling-2-Mini DSpark speculative decode on the fak-native CUDA resident path (rtx5080-host, 2026-11-24)
 
-**[HW-WITNESSED]** aegis-fak RTX 5080 16 GB (sm_120), measure lease hwl-c12d55d420e0ea06. Every window stopped `fak-llama-qwen27b.service` and restored it by exit trap (`restore.txt`: `active`). Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw logs: [`receipts/`](receipts/).
+**[HW-WITNESSED]** rtx5080-host RTX 5080 16 GB (sm_120), measure lease hwl-c12d55d420e0ea06. Every window stopped `fak-llama-qwen27b.service` and restored it by exit trap (`restore.txt`: `active`). Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw logs: [`receipts/`](receipts/).
 
 Landed public fak `2730bebdff` (ticket inkling2-spec-decode-20261124). Opt-in: `FAK_INKLING2_SPEC=<depth>` plus `FAK_INKLING2_MTP_DIR=<HF snapshot with mtp.safetensors>`; unset keeps plain decode unchanged.
 

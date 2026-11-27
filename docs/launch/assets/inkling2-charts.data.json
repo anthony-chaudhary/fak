@@ -5,8 +5,6 @@
   "allowed_numbers": [
     {"token": "2.0", "reason": "license name Apache-2.0 in the model description; not a measurement"},
     {"token": "1.26", "reason": "Go toolchain version the build needs; not a measurement"},
-    {"token": "89.5", "reason": "35-task model-quality suite score; a model-quality receipt, not a fak engine row"},
-    {"token": "87.6", "reason": "35-task model-quality suite score; a model-quality receipt, not a fak engine row"},
     {"token": "1", "reason": "receipt-row count (one build, one run); not a measurement"},
     {"token": "2", "reason": "receipt-row count or speculative depth label; not a measurement"},
     {"token": "3", "reason": "receipt-row count (repeats, reps) or prompt label; not a measurement"},

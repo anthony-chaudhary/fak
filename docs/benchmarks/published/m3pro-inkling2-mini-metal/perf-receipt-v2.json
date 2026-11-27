@@ -2,7 +2,7 @@
   "schema": "fak.perf-receipt/2",
   "kind": "candidate",
   "ticket": "inkling2-m3-qualification-final-20261124",
-  "step": "Qualify native Inkling 2 Metal target verification against Splash on one Apple M3 Pro",
+  "step": "Historical qualification of the retired vendored Splash Metal port for Inkling 2 against Splash 1.7.2 on one Apple M3 Pro (NOT pure internal/metalgemm fak-native Metal)",
   "date": "2026-11-24",
   "evidence_class": "HW-WITNESSED",
   "hw_label": "[HW-WITNESSED Apple M3 Pro, 18 GPU cores, 36 GiB unified memory, macOS 27.0.1 arm64]",
@@ -13,7 +13,7 @@
     "target_sha256": "e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639",
     "draft": {
       "revision": "incoai/Inkling-2-Mini-DFlash2@4f9088ea66c21f2b99ed657d1941c306b03e84d2",
-      "source_host": "aegis-fak",
+      "source_host": "lan-storage",
       "local_path": "~/models/inkling2/Inkling-2-Mini-DFlash2/model.safetensors",
       "bytes": 989975616,
       "sha256_local_and_source": "217980ab00d116693fa5946df7bbfd967caf5fac1f529afd541fbd470ddb54ee",
@@ -28,7 +28,7 @@
       "upstream_revision": "2afc7337aacc044722fa95e4cb3da75c281a19a8"
     },
     "candidate": {
-      "name": "Fak native Metal",
+      "name": "Fak retired vendored Splash Metal port (historical)",
       "revision": "1f31533f2ccba844c2f03d176bfbb98772913754",
       "tree": "dde566bc86e93dad5aeb41a08b07bba4f07cf746",
       "measured_binary_sha256": "f2f364878dd37d0aac7d20bcd208f5f22929a6c733c0b81c504a7f056c028f2a",
@@ -63,7 +63,7 @@
       "ms_per_token": 21.51080585192706
     },
     "candidate": {
-      "engine": "Fak native Metal / DFlash2",
+      "engine": "Fak retired vendored Splash Metal port / DFlash2 (historical)",
       "decode_tok_s": [
         47.022111870417426,
         44.5063035337786,

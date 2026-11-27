@@ -1,14 +1,14 @@
 ---
-title: "Campaign record: MOE-CM-HW-20261031-1856Z — hardware witness of the published col-major MoE GEMM tile-mapping defect on aegis-fak"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-moe-colmajor (2026-10-31): MOE-CM-HW-20261031-1856Z — hardware witness of the published col-major MoE GEMM tile-mapping defect on aegis-fak."
+title: "Campaign record: MOE-CM-HW-20261031-1856Z — hardware witness of the published col-major MoE GEMM tile-mapping defect on rtx5080-host"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-moe-colmajor (2026-10-31): MOE-CM-HW-20261031-1856Z — hardware witness of the published col-major MoE GEMM tile-mapping defect on rtx5080-host."
 ---
 
-# MOE-CM-HW-20261031-1856Z — hardware witness of the published col-major MoE GEMM tile-mapping defect on aegis-fak (2026-10-31)
+# MOE-CM-HW-20261031-1856Z — hardware witness of the published col-major MoE GEMM tile-mapping defect on rtx5080-host (2026-10-31)
 
-Ticket `moe-colmajor-hw-witness-20261031` (lane `nvidia-test-leasing`). Node: **aegis-fak**,
+Ticket `moe-colmajor-hw-witness-20261031` (lane `nvidia-test-leasing`). Node: **rtx5080-host**,
 RTX 5080 16 GiB, UUID `GPU-3e9fda0a-061a-6eb7-26c3-541bf8489090`, sm_120 (CC 12.0),
 driver `615.78.08`, Arch Linux, CUDA toolkit 13.4 at `/opt/cuda`. Share lease
-`hwl-4d3ce83e299a4a4a` (`owned-rtx5080-aegis`, epoch 120). Pre-existing consumer
+`hwl-4d3ce83e299a4a4a` (`owned-rtx5080`, epoch 120). Pre-existing consumer
 `/usr/local/bin/fak` serving service (~3.2 GiB) untouched throughout; raider-fak not
 attempted. Concurrency 1 on the GPU for all experiment launches; inter-test cooldowns.
 Machine-readable pins: [manifest.json](manifest.json); raw streams in [raw/](raw/)
@@ -29,7 +29,7 @@ all three sizes. Moment-in-time perf data for the blog's two techniques collecte
 
 Pinned source: `github.com/meta-pytorch/applied-ai @ 2391954b19988bd76cf3c2ea84c1ce74b68d568b`,
 subtree `kernels/triton/inference/col_major_moe_gemm`. Transferred verbatim to
-`aegis-fak:~/moe-cm/20261031T1856Z/` and sha256-verified remote-vs-local:
+`rtx5080-host:~/moe-cm/20261031T1856Z/` and sha256-verified remote-vs-local:
 
 | file | sha256 |
 | --- | --- |
@@ -126,7 +126,7 @@ correctness is not.
 
 ## Teardown
 
-- Owned experiment processes killed on aegis-fak (`pgrep -af "[m]oe-cm-venv"` → none
+- Owned experiment processes killed on rtx5080-host (`pgrep -af "[m]oe-cm-venv"` → none
   remaining; no foreign processes touched).
 - VRAM readback post-teardown: **used 3234 MiB / free 12692 MiB** — identical to the
   pre-run baseline (0 % drift, within the ±2 % gate); util 0 %, 36 °C, 16.4 W idle;

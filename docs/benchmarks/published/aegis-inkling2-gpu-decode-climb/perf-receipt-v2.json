@@ -5,8 +5,8 @@
  "step": "Inkling-2-Mini host-driven CUDA decode: batched/packed GEMV round trips, fused situ MoE, warp-per-row NVFP4 W4A16 decode GEMV",
  "date": "2026-11-23",
  "evidence_class": "HW-WITNESSED",
- "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, aegis-fak, driver 615.78.08, CUDA 13.4]",
- "node": "aegis-fak, measure leases hwl-db29d1047e61108b (W1), hwl-eb1bb6daf71c82e5 (W2 profile-on), hwl-ad92c0782de91cfd (W3), all released; fak-llama-qwen27b.service stopped and restored active each window; W4 rebase window hwl-aa0381a78a5dbbcc released",
+ "hw_label": "[HW-WITNESSED sm_120 RTX 5080 16 GB, rtx5080-host, driver 615.78.08, CUDA 13.4]",
+ "node": "rtx5080-host, measure leases hwl-db29d1047e61108b (W1), hwl-eb1bb6daf71c82e5 (W2 profile-on), hwl-ad92c0782de91cfd (W3), all released; fak-llama-qwen27b.service stopped and restored active each window; W4 rebase window hwl-aa0381a78a5dbbcc released",
  "models": {
   "gguf_mainline": "unsloth/Inkling-2-Mini-GGUF Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file sha256 e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639"
  },

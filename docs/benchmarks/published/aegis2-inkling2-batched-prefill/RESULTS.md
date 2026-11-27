@@ -1,9 +1,9 @@
 ---
-title: "Campaign record: Inkling-2-Mini batched CUDA prefill on aegis2 RTX 5080"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis2-inkling2-batched-prefill (2026-11-24): Inkling-2-Mini batched CUDA prefill on aegis2 RTX 5080."
+title: "Campaign record: Inkling-2-Mini batched CUDA prefill on rtx5080-host-2 RTX 5080"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-2-inkling2-batched-prefill (2026-11-24): Inkling-2-Mini batched CUDA prefill on rtx5080-host-2 RTX 5080."
 ---
 
-# Inkling-2-Mini batched CUDA prefill on aegis2 RTX 5080 (2026-11-24)
+# Inkling-2-Mini batched CUDA prefill on rtx5080-host-2 RTX 5080 (2026-11-24)
 
 Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw logs are under [`receipts/`](receipts/).
 
@@ -19,7 +19,7 @@ Prefill tok/s, ABBA (A B B A), profile off, same binary, arm chosen by `FAK_INKL
 
 - Landed: public fak 66bcd27c6e. It was measured as lane commit 4fd9c8bab0 rebased on 6a0e1f1fcc; the land replayed it onto ad095f8aa3. The per-token arm already carries the sibling decode climbs, about 118 tok/s decode.
 - A and B pick the same next token at every length.
-- For reference, llama.cpp upstream pp512 is 2360 tok/s and the realugbun fork 5106 tok/s on the same card (docs/benchmarks/aegis-inkling2-realugbun-fork-ab-20261122). The batched path is at 37% of upstream pp512.
+- For reference, llama.cpp upstream pp512 is 2360 tok/s and the realugbun fork 5106 tok/s on the same card (docs/benchmarks/rtx5080-inkling2-realugbun-fork-ab-20261122). The batched path is at 37% of upstream pp512.
 - The flag is default **off** (`FAK_INKLING2_BATCHED_PREFILL=1` enables it). The per-token step stays the default and is the fallback.
 
 ## Parity

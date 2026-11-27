@@ -1,13 +1,13 @@
 ---
-title: "Campaign record: how the realugbun/llama.cpp Inkling 2 speedup divides among its changes, Aegis RTX 5080"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-inkling2-realugbun-fusion-ablation (2026-11-22): how the realugbun/llama.cpp Inkling 2 speedup divides among its changes, Aegis RTX 5080."
+title: "Campaign record: how the realugbun/llama.cpp Inkling 2 speedup divides among its changes, RTX 5080 host RTX 5080"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-inkling2-realugbun-fusion-ablation (2026-11-22): how the realugbun/llama.cpp Inkling 2 speedup divides among its changes, RTX 5080 host RTX 5080."
 ---
 
-# RESULTS — how the realugbun/llama.cpp Inkling 2 speedup divides among its changes, Aegis RTX 5080 (2026-11-22)
+# RESULTS — how the realugbun/llama.cpp Inkling 2 speedup divides among its changes, RTX 5080 host RTX 5080 (2026-11-22)
 
 **[HW-WITNESSED]** upstream fork only. No fak engine ran and this is not a fak performance claim.
 Study: [STUDY-realugbun-llama-cpp-2026-11-22](../../research/STUDY-realugbun-llama-cpp-2026-11-22.md), section "Addendum: measured split of the gain".
-Parent receipt (the compound A/B this divides): [aegis-inkling2-realugbun-fork-ab-20261122](../aegis-inkling2-realugbun-fork-ab-20261122/RESULTS.md).
+Parent receipt (the compound A/B this divides): inkling2-realugbun-fork-ab (RTX 5080 host).
 
 ## Verdict
 
@@ -141,11 +141,11 @@ Decode tok/s at depth 0, one value per run of three repetitions:
 
 ## Envelope
 
-- Node: aegis-fak, RTX 5080 16 GB, sm_120, driver 615.78.08, kernel 7.2.11-arch1-1, CUDA 13.4 nvcc, GCC 16.2.1, CMake 4.4.5.
-- Lease: `hwl-37937785843f1b39`, class `owned-rtx5080-aegis`, kind measure, holder `claude-realugbun-ablation-20261122`, granted 2026-11-23T03:36:45Z, released 03:52:31Z. Two windows ran under it: 03:37:54Z to 03:43:50Z and 03:45:57Z to 03:51:33Z.
+- Node: rtx5080-host, RTX 5080 16 GB, sm_120, driver 615.78.08, kernel 7.2.11-arch1-1, CUDA 13.4 nvcc, GCC 16.2.1, CMake 4.4.5.
+- Lease: `hwl-37937785843f1b39`, class `owned-rtx5080`, kind measure, holder `claude-realugbun-ablation-20261122`, granted 2026-11-23T03:36:45Z, released 03:52:31Z. Two windows ran under it: 03:37:54Z to 03:43:50Z and 03:45:57Z to 03:51:33Z.
 - Base: `ggml-org/llama.cpp` `e50c254a22c590c9d2a60db86690d48d42497e2b`, existing build, untouched.
 - Fork, original: `realugbun/llama.cpp` `2eb2530ec4da95453e8ea7d68f937da174dfe799`, existing build, untouched.
-- Fork, patched: a scratch copy of the fork tree at `~/oss-engines/llama.cpp-realugbun-2eb2530e-ablate-src` on Aegis, same commit plus the switch below, built with the same flags. It stays on the node.
+- Fork, patched: a scratch copy of the fork tree at `~/oss-engines/llama.cpp-realugbun-2eb2530e-ablate-src` on RTX 5080 host, same commit plus the switch below, built with the same flags. It stays on the node.
 - Model: Unsloth `Inkling-2-Mini-UD-Q3_K_XL`, `Mainline_Support` layout, sha256 `e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639`, all layers on the GPU.
 - Serving: `fak-llama-qwen27b.service` was `active` before each window, stopped by the window script and restarted by it. It was `active` with `/health` ok and 15,110 MiB loaded before the lease was released. A peer lease (`hwl-55bd485da2a77b73`) was granted 32 seconds after the release and stopped the unit again for its own window.
 

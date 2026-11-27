@@ -1,9 +1,9 @@
 ---
-title: "Campaign record: Inkling-2-Mini NVFP4 W4A4 CUDA prefill on an RTX 5080 (aegis, 2026-11-25)"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-inkling2-prefill-nvfp4-w4a4 (2026-11-25): Inkling-2-Mini prefill with 4-bit expert weights and activations against the fastest llama.cpp fork on one RTX 5080."
+title: "Campaign record: Inkling-2-Mini NVFP4 W4A4 CUDA prefill on an RTX 5080 (rtx5080-host, 2026-11-25)"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-inkling2-prefill-nvfp4-w4a4 (2026-11-25): Inkling-2-Mini prefill with 4-bit expert weights and activations against the fastest llama.cpp fork on one RTX 5080."
 ---
 
-# Inkling-2-Mini NVFP4 W4A4 CUDA prefill on an RTX 5080 (aegis, 2026-11-25)
+# Inkling-2-Mini NVFP4 W4A4 CUDA prefill on an RTX 5080 (rtx5080-host, 2026-11-25)
 
 **[HW-WITNESSED]** One RTX 5080 16 GB (sm_120), CUDA build with `--arch sm_120f`.
 Model `Inkling-2-Mini-UD-Q3_K_XL.gguf` (sha256 `e2d03e8c…273639`), the same file for

@@ -1,9 +1,9 @@
 ---
-title: "Campaign record: Inkling-2-Mini NVFP4 expert GEMV climb on aegis2 RTX 5080"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis2-inkling2-expert-gemv-climb (2026-11-24): Inkling-2-Mini NVFP4 expert GEMV climb on aegis2 RTX 5080."
+title: "Campaign record: Inkling-2-Mini NVFP4 expert GEMV climb on rtx5080-host-2 RTX 5080"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-2-inkling2-expert-gemv-climb (2026-11-24): Inkling-2-Mini NVFP4 expert GEMV climb on rtx5080-host-2 RTX 5080."
 ---
 
-# Inkling-2-Mini NVFP4 expert GEMV climb on aegis2 RTX 5080 (2026-11-24)
+# Inkling-2-Mini NVFP4 expert GEMV climb on rtx5080-host-2 RTX 5080 (2026-11-24)
 
 Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw logs are under [`receipts/`](receipts/).
 
@@ -22,7 +22,7 @@ Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw lo
   - The microbench found 0 of 1.18M outputs differing for each of 10 variants and 64 expert-id sets.
 - Greedy oracle (`TestInkling2CUDAOracleGreedyMatchesLlamaCpp`):
   - capitals, fibonacci and chat-template: 32/32 tokens each, identical to llama.cpp.
-  - passphrase-recall-1946 diverges at decode token 10 on **both** A and B, with the same token stream (153536 vs llama.cpp 150409). This is the pre-existing red documented in docs/benchmarks/aegis-inkling2-resident-cuda-20261123. It is not a regression: the kernel is bit-exact.
+  - passphrase-recall-1946 diverges at decode token 10 on **both** A and B, with the same token stream (153536 vs llama.cpp 150409). This is the pre-existing red documented in docs/benchmarks/rtx5080-inkling2-resident-cuda-20261123. It is not a regression: the kernel is bit-exact.
 
 ## What changed (public fak)
 
@@ -34,7 +34,7 @@ Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw lo
   - The staged BF16 activation is swizzled per 16-value block, so the float4 reads hit distinct bank groups.
 - Opt-out: `FAK_INKLING2_NVFP4_GEMV=0` keeps `k_ink2_expert_nvfp4`.
 
-## Microbench (isolated, live aegis2, 64 experts ≈ 190 MB > 64 MB L2)
+## Microbench (isolated, live rtx5080-host-2, 64 experts ≈ 190 MB > 64 MB L2)
 
 `receipts/mb.cu`, the variants in `receipts/mb-variants.txt`, and ABBA inside each binary at 2000 calls per arm.
 
@@ -56,8 +56,8 @@ Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw lo
 
 ## Protocol
 
-- Hardware: aegis2-fak, RTX 5080 16 GB, driver 620.73.04, CUDA 13.5 runtime. Measure lease hwl-67270ec41ba02d50, released.
-- Builds: on aegis (CPU only, share lease hwl-6e7d2003d0a9d855, released) from a `git archive` of a4e0af4066 (A) and A plus the lane files (B), with `fak-dev build-cuda build --arch sm_120` and `go test -c -tags cuda`. The test binaries were copied to aegis2.
+- Hardware: rtx5080-host-2, RTX 5080 16 GB, driver 620.73.04, CUDA 13.5 runtime. Measure lease hwl-67270ec41ba02d50, released.
+- Builds: on rtx5080-host (CPU only, share lease hwl-6e7d2003d0a9d855, released) from a `git archive` of a4e0af4066 (A) and A plus the lane files (B), with `fak-dev build-cuda build --arch sm_120` and `go test -c -tags cuda`. The test binaries were copied to rtx5080-host-2.
 - `receipts/run_e2e.sh`: unit test, oracle, ABBA (A B B A), then a separate profile-on run per arm (`FAK_INKLING2_GRAPH=0 FAK_CUDA_TIMESTAMP_PROFILE=1`).
 - The sibling fused-mix lane (28bb2c14a1) landed on origin during this climb. A is the pre-fusion base, so B's +4.75% is this change alone.
 
@@ -102,7 +102,7 @@ Per call on the shipped variant: IQ3_XXS gate_up 99.1 → ~28 us (164 → ~575 G
 - IQ4_NL and Q3_K experts (5 calls, 0.16 ms/token) still use `k_ink2_expert_iq`; the IQ4_NL path already converts through `signed char`.
 - `fcuda_iq_dot8` in `iq_gemv.cuh` has the same `I2F.U64`. Every dense IQ2_XS/IQ2_S/IQ3_XXS/IQ3_S GEMV in the tree pays it. The same exact fix applies there, owned by that file's lane.
 
-Protocol: A and B are `git archive` exports built on aegis CPU (`fak-dev build-cuda build --arch sm_120`, `go test -c -tags cuda`), then run on aegis2 under measure lease hwl-7512996769725f81 (released) with `receipts-iq/run_e2e_iq.sh`. The microbench used lease hwl-504ed6157a7948ec (released).
+Protocol: A and B are `git archive` exports built on rtx5080-host CPU (`fak-dev build-cuda build --arch sm_120`, `go test -c -tags cuda`), then run on rtx5080-host-2 under measure lease hwl-7512996769725f81 (released) with `receipts-iq/run_e2e_iq.sh`. The microbench used lease hwl-504ed6157a7948ec (released).
 
 ## Step 3 (2026-11-24): IQ4_NL / Q3_K experts (ticket inkling2-expert-iq4nl-q3k-20261124, landed public 2ba9ae6fce)
 
@@ -139,7 +139,7 @@ Receipts: [`receipts-iq4nl-dense/`](receipts-iq4nl-dense/).
 | IQ3_XXS | 42.4 → 16.4 µs (2.59x) | 110.4 → 31.1 µs (3.55x) |
 | IQ3_S | 43.4 → 17.0 µs (2.55x) | 110.6 → 31.6 µs (3.51x) |
 
-- Device tests pass on aegis2 for the patched tree: `TestCUDAIQ2SIQ3XXSIQ3SGemvMatchesRef` plus the IQ2_XXS, IQ2_XS, IQ1_M and IQ4_NL DeviceParity tests (`unit-C-dense.txt`). The IQ source-contract, lane-simulation and RawIQ tests pass on the host.
+- Device tests pass on rtx5080-host-2 for the patched tree: `TestCUDAIQ2SIQ3XXSIQ3SGemvMatchesRef` plus the IQ2_XXS, IQ2_XS, IQ1_M and IQ4_NL DeviceParity tests (`unit-C-dense.txt`). The IQ source-contract, lane-simulation and RawIQ tests pass on the host.
 - These parity tests use a tolerance. The bit-exact witness is the microbench.
 - Which models it affects:
   - Any GGUF whose dense (non-expert) tensors are IQ2_XXS/IQ2_XS/IQ2_S/IQ3_XXS/IQ3_S and that runs through the CUDA MatMul/BatchedMatMul IQ path. This is the low-bit unsloth UD-IQ / UD-Q2_K_XL style mixes.
@@ -147,8 +147,8 @@ Receipts: [`receipts-iq4nl-dense/`](receipts-iq4nl-dense/).
   - The Inkling-2 resident path is unaffected: its dense weights are Q8_0/Q4_K/Q5_K/Q6_K per the profiles. So no Inkling ABBA was run for this step.
 
 Protocol:
-- A, B (IQ4_NL) and C (dense) are `git archive` exports built on aegis CPU under a share lease.
-- They ran on aegis2 under measure leases hwl-f5947f24131d1b55 (microbench) and hwl-697df65c947fd64d (`run_e2e_kq.sh`). Both are released.
+- A, B (IQ4_NL) and C (dense) are `git archive` exports built on rtx5080-host CPU under a share lease.
+- They ran on rtx5080-host-2 under measure leases hwl-f5947f24131d1b55 (microbench) and hwl-697df65c947fd64d (`run_e2e_kq.sh`). Both are released.
 
 ## Step 5 (2026-11-24): `k_ink2_attend` split over key chunks (ticket inkling2-attend-splitkv-20261124, landed public b64405de76)
 
@@ -161,7 +161,7 @@ Receipts: [`receipts-attend/`](receipts-attend/).
 | prefill of the 1946-token prompt | 23.97 s | 19.86 s |
 
 - Outputs are bit-identical:
-  - `TestCUDAInk2AttendSplitMatchesReference` passes on aegis2. It covers local and global slots at pos 0, 82, 2000 and 5000 (the wrapped ring).
+  - `TestCUDAInk2AttendSplitMatchesReference` passes on rtx5080-host-2. It covers local and global slots at pos 0, 82, 2000 and 5000 (the wrapped ring).
   - The microbench found 0 differing outputs in every case.
   - Oracle token streams are identical on all four A/B runs. capitals, fibonacci and chat-template pass; passphrase still diverges at token 10 (pre-existing).
 - What the reference was bound by:

@@ -1,9 +1,9 @@
 ---
-title: "Campaign record: Inkling-2-Mini host-driven CUDA decode climb on aegis RTX 5080"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-inkling2-gpu-decode-climb (2026-11-23): Inkling-2-Mini host-driven CUDA decode climb on aegis RTX 5080."
+title: "Campaign record: Inkling-2-Mini host-driven CUDA decode climb on rtx5080-host RTX 5080"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-inkling2-gpu-decode-climb (2026-11-23): Inkling-2-Mini host-driven CUDA decode climb on rtx5080-host RTX 5080."
 ---
 
-# Inkling-2-Mini host-driven CUDA decode climb on aegis RTX 5080 (2026-11-23)
+# Inkling-2-Mini host-driven CUDA decode climb on rtx5080-host RTX 5080 (2026-11-23)
 
 Ticket `inkling2-gpu-decode-climb-20261122`. Public fak 03a73bb075.
 
@@ -85,7 +85,7 @@ path. This lane was rebased onto it, and W4 re-measured the
 
 ## Method
 
-- **Node.** aegis-fak RTX 5080 16 GB sm_120, driver 615.78.08 (`receipts/window-w*.log`).
+- **Node.** rtx5080-host RTX 5080 16 GB sm_120, driver 615.78.08 (`receipts/window-w*.log`).
   - Measure leases: hwl-db29d1047e61108b (W1), hwl-eb1bb6daf71c82e5 (W2),
     hwl-ad92c0782de91cfd (W3) and hwl-aa0381a78a5dbbcc (W4), each released.
   - The W1 release initially failed (`--holder` missing) and was redone by hand.
@@ -98,7 +98,7 @@ path. This lane was rebased onto it, and W4 re-measured the
   - Profile-ON rows come from separate runs (W2, W3 row 10) and never from
     the token-time arms.
 - **Model.** Inkling-2-Mini-UD-Q3_K_XL.gguf mainline, sha256 e2d03e8c92ac...
-  (see aegis-inkling2-native-cuda-20261122).
+  (see rtx5080-host-inkling2-native-cuda-20261122).
 
 ## Next
 

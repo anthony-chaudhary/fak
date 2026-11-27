@@ -1,13 +1,13 @@
 ---
-title: "Campaign record: Inkling-2-Mini fak-native CUDA decode: cross-box check on aegis"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-inkling2-crossbox-hitl (2026-11-24): Inkling-2-Mini fak-native CUDA decode: cross-box check on aegis."
+title: "Campaign record: Inkling-2-Mini fak-native CUDA decode: cross-box check on rtx5080-host"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-inkling2-crossbox-hitl (2026-11-24): Inkling-2-Mini fak-native CUDA decode: cross-box check on rtx5080-host."
 ---
 
-# Inkling-2-Mini fak-native CUDA decode: cross-box check on aegis (2026-11-24)
+# Inkling-2-Mini fak-native CUDA decode: cross-box check on rtx5080-host (2026-11-24)
 
-**[HW-WITNESSED]** aegis-fak RTX 5080 16 GB (sm_120). Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw logs are under [`receipts/`](receipts/).
+**[HW-WITNESSED]** rtx5080-host RTX 5080 16 GB (sm_120). Machine-readable receipt: [`perf-receipt-v2.json`](perf-receipt-v2.json). Raw logs are under [`receipts/`](receipts/).
 
-The kernel changes were climbed and measured on aegis2. This run repeats the end-to-end check on the other box (aegis), against the trunk that contains all of them.
+The kernel changes were climbed and measured on rtx5080-host-2. This run repeats the end-to-end check on the other box (rtx5080-host), against the trunk that contains all of them.
 
 ## Result
 
@@ -33,11 +33,11 @@ The passphrase-recall-1946 failure was already there before these changes. It ha
 
 ## What the trunk contains
 
-These are public fak commits since a8030e394b, with the queue row each one closes. Per-step ABBA numbers on aegis2 are in their own receipts.
+These are public fak commits since a8030e394b, with the queue row each one closes. Per-step ABBA numbers on rtx5080-host-2 are in their own receipts.
 
 - 28bb2c14a1, realugbun-3: MIX cluster with the following RMS folded in.
-- 1d7f1dcf92, realugbun-1, realugbun-5, realugbun-2, plus a fak-native change that quantizes each activation to Q8 once instead of again for each consumer. The land merged these four steps into one commit. Receipt: [aegis2-inkling2-fused-climb-20261124](../aegis2-inkling2-fused-climb-20261124/RESULTS.md), 85.2 -> 101.6 tok/s on aegis2.
-- 6eba862214, strata-8: the NVFP4 expert GEMV runs as a single wave and is bit-identical to before. Receipt: [aegis2-inkling2-expert-gemv-climb-20261124](../aegis2-inkling2-expert-gemv-climb-20261124/RESULTS.md), 85.2 -> 89.3 tok/s on aegis2.
+- 1d7f1dcf92, realugbun-1, realugbun-5, realugbun-2, plus a fak-native change that quantizes each activation to Q8 once instead of again for each consumer. The land merged these four steps into one commit. Receipt: inkling2-fused-climb (RTX 5080 host 2), 85.2 -> 101.6 tok/s on rtx5080-host-2.
+- 6eba862214, strata-8: the NVFP4 expert GEMV runs as a single wave and is bit-identical to before. Receipt: inkling2-expert-gemv-climb (RTX 5080 host 2), 85.2 -> 89.3 tok/s on rtx5080-host-2.
 - Host-side and wiring rows that do not change token time:
   - 1dcd99f9fb and 6426d2ddb5 (realugbun-6)
   - 1b891b9a09 and 141375fed2 (strata-15)
@@ -56,7 +56,7 @@ These are public fak commits since a8030e394b, with the queue row each one close
 
 ## Next binding kernels
 
-Taken from the aegis2 profiles in the receipts linked above.
+Taken from the rtx5080-host-2 profiles in the receipts linked above.
 
 1. The IQ expert GEMVs (IQ3_XXS, IQ2_S, IQ3_S, IQ2_XS) cost about 1.43 ms per token. A shared-memory lookup-table and wide-load variant is in progress.
 2. 96 post-conv launches per token are still separate kernels.

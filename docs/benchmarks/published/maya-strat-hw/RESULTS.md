@@ -8,7 +8,7 @@ description: "Campaign record, not a general claim: read the page's status and e
 Goal `GOAL-maya-strat-hw-config-sweep`. Measured cells below are **[HW-WITNESSED]**
 on named nodes with argv + binary-sha + model-oid pins (full cell objects:
 [raider-fak/RECEIPT.json](raider-fak/RECEIPT.json),
-[aegis-fak/RECEIPT.json](aegis-fak/RECEIPT.json)); pins and node envelopes:
+[rtx5080-host/RECEIPT.json](rtx5080-host/RECEIPT.json)); pins and node envelopes:
 [README.md](README.md). Oracle prompt every cell:
 `What color is the sky on a clear day? Answer in one sentence.` (greedy, temp 0, top_p 1).
 
@@ -38,9 +38,9 @@ See [the LAN evidence inventory](../LAN-INFERENCE-EVIDENCE.md) for owed coverage
 | **strata-dsv41 0.1.53** (@46c152a1) | DS4.1-Flash GSQ-RCO IQ2_XXS | raider-fak | BASE defaults (`--pack <ds41 pack> --max-context 512 --tp 1 --threads on --vision off`, warm cache) | **28.91 @ctx512** (10.46 @ctx2048) | **≈36x** vs 0.803 (same-day pinned T0) | [HW-WITNESSED] GREEN-BASELINE-STRATA |
 | **maya-ds4 1.1.39** (@376b4b87) | DS4.1-Flash GSQ-RCO IQ2_XXS | raider-fak | BASE defaults, warm page cache (M5 control; first request pays ~18 GB pre-read) | **12.7 @ctx512** (3.6 @ctx2048) | ≈15.8x vs 0.803 | [HW-WITNESSED] GREEN-BASELINE-MAYA-WARM-CONTROL |
 | llama.cpp b11870 (baseline) | DS4.1-Flash GSQ-RCO IQ2_XXS | raider-fak | pinned T0 (`-ngl 40 --n-cpu-moe 36`) | 0.803 @ctx512 / 0.56 @ctx2048 | 1.0x (same-day baseline; historical-collapse claim withdrawn, §d) | [HW-WITNESSED] measured cell; interpretation corrected |
-| **strata 0.1.53** (@46c152a1) | Qwen3.8-Flash-Next GSQ-RCO Q2_0 | aegis-fak | `--expert-cache auto --mmap-experts --prefill auto --kv int8 --greedy`, warm page cache (S2) | **30.55 @ctx2048** (12.37 @ctx512 cold) | **≈3.6x** vs same-day llama.cpp b11870 `--cpu-moe` (8.556 @ctx2048) | [HW-WITNESSED] GREEN-BASELINE-STRATA |
-| llama.cpp b11870 (baseline) | Qwen3.8-Flash-Next GSQ-RCO Q2_0 | aegis-fak | `-ngl 9999 --cpu-moe --lazy-mode auto --flash-attn auto -np 1 --batch-size 2` (pinned full-offload OOMs at load — 35.6 GB > 16 GB card; minimal deviation `--cpu-moe`, typed OOM_LOAD_LLAMA_PINNED_ARGV) | 8.812 @ctx512 warm / 8.556 @ctx2048 cold | 1.0x (baseline) | [HW-WITNESSED] OK-DEVIATION-DOCUMENTED |
-| maya v1.1.39 (@376b4b87) | CYBER-FROST-3.8-PS (its documented Qwen path) | aegis-fak | — | — | — | ABSENT-IN-WINDOW: CYBER-FROST download 9.8% at window close, resumed detached (PID 31936); binary staged + sha-verified, unused (§g) |
+| **strata 0.1.53** (@46c152a1) | Qwen3.8-Flash-Next GSQ-RCO Q2_0 | rtx5080-host | `--expert-cache auto --mmap-experts --prefill auto --kv int8 --greedy`, warm page cache (S2) | **30.55 @ctx2048** (12.37 @ctx512 cold) | **≈3.6x** vs same-day llama.cpp b11870 `--cpu-moe` (8.556 @ctx2048) | [HW-WITNESSED] GREEN-BASELINE-STRATA |
+| llama.cpp b11870 (baseline) | Qwen3.8-Flash-Next GSQ-RCO Q2_0 | rtx5080-host | `-ngl 9999 --cpu-moe --lazy-mode auto --flash-attn auto -np 1 --batch-size 2` (pinned full-offload OOMs at load — 35.6 GB > 16 GB card; minimal deviation `--cpu-moe`, typed OOM_LOAD_LLAMA_PINNED_ARGV) | 8.812 @ctx512 warm / 8.556 @ctx2048 cold | 1.0x (baseline) | [HW-WITNESSED] OK-DEVIATION-DOCUMENTED |
+| maya v1.1.39 (@376b4b87) | CYBER-FROST-3.8-PS (its documented Qwen path) | rtx5080-host | — | — | — | ABSENT-IN-WINDOW: CYBER-FROST download 9.8% at window close, resumed detached (PID 31936); binary staged + sha-verified, unused (§g) |
 
 ## b) Scope & pins
 
@@ -129,14 +129,14 @@ The originally pinned target model `Qwen3.8-27B-UD-Q2_K_XL.gguf`
 pins** — hard code gates, witnessed verbatim on both nodes (typed failures in
 [raider-fak/RECEIPT.json](raider-fak/RECEIPT.json)):
 
-- **Maya** (`tools/iq_pack.py --gguf <file>` smoke, raider + aegis):
+- **Maya** (`tools/iq_pack.py --gguf <file>` smoke, raider + rtx5080-host):
   `general.architecture is 'qwen35'; the packer knows qwen4exp and glm5-next and glm5next`
   — code gate `include/strata/artifact/gguf_reader.hpp:500@376b4b87` requires
   `general.architecture == "qwen4exp"`; no fallback loader. Control with the
   fallback Q4_K_M file (same arch) gave the identical rejection → arch-based, not
   quant-based.
 - **Strata** (documented import path `python3 strata.py models import <gguf> --plan`,
-  aegis):
+  rtx5080-host):
   `this model type is not supported by the Strata engine (add it as a Custom model API with llama-server instead); this is not a model size Strata knows.`
   — code gate `include/strata/artifact/model_family.hpp:21-23@46c152a1` accepts
   only `{qwen4exp, qwen35moe}`.
@@ -149,7 +149,7 @@ kernel: missing AVX512F …"). In the sweep, `strata-dsv41` (built
 AVX512F-absent host — the AVX-512 gate binds the canonical-pack CPU pool path, not
 the DS4.1 build.
 
-## g) Aegis — Flash-Next Q2_0 (the qwen4exp home turf both OSS engines accept)
+## g) RTX 5080 host — Flash-Next Q2_0 (the qwen4exp home turf both OSS engines accept)
 
 Campaign 2026-10-31T03:34–~04:20Z under measure lease `hwl-b79c191a981ccf24`
 (first acquire `hwl-f4d6752f699840e6`; fak.service stopped via maintain
@@ -158,7 +158,7 @@ Campaign 2026-10-31T03:34–~04:20Z under measure lease `hwl-b79c191a981ccf24`
 10 MiB after every kill. Artifact: ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF
 @ ed59f920, Q2_0 (66.4 GB, Apache-2.0) — all three files sha-verified against
 the `src/strata/setup.py:370-373` pins. Full cell objects:
-[aegis-fak/RECEIPT.json](aegis-fak/RECEIPT.json).
+[rtx5080-host/RECEIPT.json](rtx5080-host/RECEIPT.json).
 
 | cell | engine | argv-delta | ctx/maxtok | decode tps | TTFT ms | VRAM MiB | verdict |
 | --- | --- | --- | --- | ---: | ---: | --- | --- |
@@ -183,7 +183,7 @@ Typed deviations (verbatim errors in the receipt):
   Answer wording differs ("blue" vs "typically blue") — expected across
   quant/kernel paths, both coherent one-sentence answers.
 
-Reading: strata wins steady-state single-stream decode on aegis —
+Reading: strata wins steady-state single-stream decode on rtx5080-host —
 **30.55 tok/s @ctx2048 warm = 3.6x the same-day llama.cpp baseline** (8.556),
 with different prompt rendering and cache states; C1 only is measured. The mmap-experts +
 expert-cache-auto regime parks ~9.1 GiB of the hottest experts in VRAM and
@@ -192,7 +192,7 @@ documented mmap A/B behavior. Recommended winning config for strata ×
 Flash-Next Q2_0 on this node: `--expert-cache auto --mmap-experts --prefill
 auto --kv int8`, warm page cache.
 
-Maya × aegis: **ABSENT-IN-WINDOW**. Maya's documented Qwen path is
+Maya × rtx5080-host: **ABSENT-IN-WINDOW**. Maya's documented Qwen path is
 CYBER-FROST-3.8-PS (112.5 GB, Qwen Community License 1.0); its download reached
 9.8% (~10 MB/s) by window close and was resumed detached (PID 31936,
 cf.done/cf.failed markers) for a future campaign. Raw Q2_0 through Maya is
@@ -200,7 +200,7 @@ UNPROVEN (arch gate, §f) and was not attempted.
 
 Incident note (host stability): the OOM attempt took systemd-journald/networkd
 down via watchdog and hung the sshd banner ~6 min; boot id unchanged (no
-reboot); a watchdog covered all subsequent runs (zero events). Treat aegis as
+reboot); a watchdog covered all subsequent runs (zero events). Treat rtx5080-host as
 OOM-sensitive at 30 GB RAM + 1 GB swap: no pinned arenas ≥ host RAM without
 `--mmap-experts` or equivalent.
 
@@ -208,10 +208,10 @@ OOM-sensitive at 30 GB RAM + 1 GB swap: no pinned arenas ≥ host RAM without
 
 Strata records the highest short-request rates in these retained cells:
 DS4.1 Flash on Raider, 28.91 tok/s versus same-day llama.cpp 0.803 and Maya
-warm BASE 12.7; Flash-Next Q2_0 on Aegis, 30.55 versus llama.cpp 8.556 tok/s.
+warm BASE 12.7; Flash-Next Q2_0 on RTX 5080 host, 30.55 versus llama.cpp 8.556 tok/s.
 These are descriptive ratios (about 36x, 2.3x and 3.6x). They use different
 entrypoints, timing sources and cache conditions; prompt rendering also differs
-on Aegis. Label them `UNMATCHED(timer/cache/entrypoint)` and do not promote them
+on RTX 5080 host. Label them `UNMATCHED(timer/cache/entrypoint)` and do not promote them
 into matched performance qualification, actual long-context results or scaling.
 
 Retain Strata as a candidate for the next matched measurement. Its reported
@@ -226,13 +226,13 @@ through each engine's supported entrypoint before that decision.
 
 - [HW-WITNESSED]: every verdict-ok cell above (argv + binary sha256 + model oid pins
   in [raider-fak/RECEIPT.json](raider-fak/RECEIPT.json) and
-  [aegis-fak/RECEIPT.json](aegis-fak/RECEIPT.json)); historical TTFT/load observations carry their own committed receipts, while
+  [rtx5080-host/RECEIPT.json](rtx5080-host/RECEIPT.json)); historical TTFT/load observations carry their own committed receipts, while
   arithmetic-corrected decode rates are explicitly not new hardware measurements.
-- ESTIMATE: none outstanding — the aegis tiering figures that were planning
+- ESTIMATE: none outstanding — the rtx5080-host tiering figures that were planning
   estimates in the probe are now witnessed (§g: mmap-experts path green, default-
   arena OOM witnessed); probe planning numbers are superseded.
 - UPSTREAM-REPORTED: any engine-doc performance claims not re-measured here (none used
   as a denominator in this document).
 - No invented numbers: every figure traces to `raider-sweep-cells.json`,
-  `raider-sweep.md`, `raider-build.md`, `aegis-build.md`, `aegis-sweep-cells.json`,
-  `aegis-sweep.md`, `flashnext-probe.md`, or the cited historical receipts.
+  `raider-sweep.md`, `raider-build.md`, `rtx5080-build.md`, `rtx5080-sweep-cells.json`,
+  `rtx5080-sweep.md`, `flashnext-probe.md`, or the cited historical receipts.

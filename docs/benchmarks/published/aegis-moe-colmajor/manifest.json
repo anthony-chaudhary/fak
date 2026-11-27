@@ -7,8 +7,8 @@
   "utc_start": "2026-10-31T18:56Z",
   "utc_end": "2026-10-31T19:22Z",
   "target": {
-    "node": "aegis-fak",
-    "sku": "MSI Aegis ZS2 desktop, RTX 5080 16 GiB",
+    "node": "rtx5080-host",
+    "sku": "RTX 5080 desktop desktop, RTX 5080 16 GiB",
     "gpu_uuid": "GPU-3e9fda0a-061a-6eb7-26c3-541bf8489090",
     "compute_capability": "12.0 (sm_120)",
     "driver": "615.78.08",
@@ -20,7 +20,7 @@
   },
   "lease": {
     "id": "hwl-4d3ce83e299a4a4a",
-    "class": "owned-rtx5080-aegis",
+    "class": "owned-rtx5080",
     "kind": "share",
     "holder": "01a19349-04d3-755d-bd27-41cc54431ffa",
     "epoch": 120,
@@ -49,7 +49,7 @@
     "torch": "2.15.0+cu132",
     "triton": "3.9.0",
     "cuda_runtime": "13.2",
-    "venv": "~/moe-cm-venv on aegis-fak",
+    "venv": "~/moe-cm-venv on rtx5080-host",
     "seed": 1234,
     "geometry": {"E": 8, "K": 4096, "N": 14336, "topk": 1, "dtype": "float16"},
     "input_scale": 8.0,

@@ -1,13 +1,13 @@
 ---
-title: "Campaign record: realugbun/llama.cpp fork vs its upstream base, Inkling-2-Mini on Aegis RTX 5080"
-description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak aegis-inkling2-realugbun-fork-ab (2026-11-22): realugbun/llama.cpp fork vs its upstream base, Inkling-2-Mini on Aegis RTX 5080."
+title: "Campaign record: realugbun/llama.cpp fork vs its upstream base, Inkling-2-Mini on RTX 5080 host RTX 5080"
+description: "Campaign record, not a general claim: read the page's status and envelope before quoting it. fak rtx5080-host-inkling2-realugbun-fork-ab (2026-11-22): realugbun/llama.cpp fork vs its upstream base, Inkling-2-Mini on RTX 5080 host RTX 5080."
 ---
 
-# RESULTS — realugbun/llama.cpp fork vs its upstream base, Inkling-2-Mini on Aegis RTX 5080 (2026-11-22)
+# RESULTS — realugbun/llama.cpp fork vs its upstream base, Inkling-2-Mini on RTX 5080 host RTX 5080 (2026-11-22)
 
 **[HW-WITNESSED]** upstream reproduction only. No fak engine ran and this is not a fak performance claim.
 Study: [STUDY-realugbun-llama-cpp-2026-11-22](../../research/STUDY-realugbun-llama-cpp-2026-11-22.md).
-Prior baseline on the same node and file: [aegis-inkling2-mini-oss-baseline-20261122](../aegis-inkling2-mini-oss-baseline-20261122/RESULTS.md).
+Prior baseline on the same node and file: inkling2-mini-oss-baseline (RTX 5080 host).
 
 ## Verdict
 
@@ -23,8 +23,8 @@ Values are tokens per second, the mean of the two ABBA runs per arm. Each run is
 
 ## Envelope
 
-- Node: aegis-fak, RTX 5080 16 GB, sm_120, driver 615.78.08, kernel 7.2.11-arch1-1, CUDA 13.4 nvcc, GCC 16.2.1, CMake 4.4.5.
-- Lease: `hwl-ab8fb540831414e9`, class `owned-rtx5080-aegis`, kind measure, holder `claude-study-realugbun-20261122`, granted 18:41:05Z, released 18:54:36Z (transcribed from `fak-sync nvlease history` into `receipts/digests.txt`). Three windows ran under it, about 4 minutes of GPU time in total.
+- Node: rtx5080-host, RTX 5080 16 GB, sm_120, driver 615.78.08, kernel 7.2.11-arch1-1, CUDA 13.4 nvcc, GCC 16.2.1, CMake 4.4.5.
+- Lease: `hwl-ab8fb540831414e9`, class `owned-rtx5080`, kind measure, holder `claude-study-realugbun-20261122`, granted 18:41:05Z, released 18:54:36Z (transcribed from `fak-sync nvlease history` into `receipts/digests.txt`). Three windows ran under it, about 4 minutes of GPU time in total.
 - Arm A (base): `ggml-org/llama.cpp` `e50c254a22c590c9d2a60db86690d48d42497e2b`, the fork point.
 - Arm B (fork): `realugbun/llama.cpp` `2eb2530ec4da95453e8ea7d68f937da174dfe799`.
 - Build, both arms, as issued: `cmake -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120a-real -DLLAMA_CURL=OFF`. The build log confirms Release and `120a-real`; it does not echo the command line. Binary digests are in `receipts/digests.txt`.
