@@ -1,0 +1,80 @@
+{
+  "schema": "fak-benchmark-receipt/1",
+  "slug": "rtx5080-inkling2-v060",
+  "observed_date": "2026-11-26",
+  "timestamp_utc": "2026-11-27T01:40:08Z",
+  "evidence_class": "HW-WITNESSED",
+  "hardware": {
+    "gpu": "NVIDIA RTX 5080 16 GB",
+    "arch": "sm_120",
+    "vram_gib": 16
+  },
+  "model": {
+    "name": "Inkling-2-Mini-UD-Q3_K_XL",
+    "format": "GGUF"
+  },
+  "fak_commit": "be228d79ef682026940ac362ae5cc8e909e91a2c",
+  "envelope": "CUDA RTX 5080 16 GB (sm_120), Inkling-2-Mini UD-Q3_K_XL, C1-C4, context <=16K, kv=f16",
+  "plain_decode_inprocess": {
+    "test": "TestInkling2CUDADecodeBench",
+    "kv": "f16",
+    "auto_context_tokens": 29184,
+    "prompt_tokens": 19,
+    "prefill_ms": 31.56,
+    "prefill_tok_s": 602.04,
+    "decode_steps": 127,
+    "decode_tok_s": 122.34,
+    "fnv64": "d51b043b08677ea1"
+  },
+  "http_served_c1_c4_16k": {
+    "fak_vram_mib": 13244,
+    "llama_stock_vram_mib": 15178,
+    "realugbun_vram_mib": 15108,
+    "cells": {
+      "C1_p512_d128": {
+        "fak": {"median_ttft_ms": 274.35, "median_stream_decode_tok_s": 102.45, "median_agg_e2e_tok_s": 84.54},
+        "llama_stock": {"median_ttft_ms": 311.37, "median_stream_decode_tok_s": 111.94, "median_agg_e2e_tok_s": 88.51},
+        "realugbun": {"median_ttft_ms": 267.81, "median_stream_decode_tok_s": 118.63, "median_agg_e2e_tok_s": 95.62}
+      },
+      "C1_p2048_d256": {
+        "fak": {"median_ttft_ms": 638.20, "median_stream_decode_tok_s": 93.23, "median_agg_e2e_tok_s": 75.89},
+        "llama_stock": {"median_ttft_ms": 1171.01, "median_stream_decode_tok_s": 107.88, "median_agg_e2e_tok_s": 72.42},
+        "realugbun": {"median_ttft_ms": 723.77, "median_stream_decode_tok_s": 116.03, "median_agg_e2e_tok_s": 87.61}
+      },
+      "C2_p512_d128": {
+        "fak": {"median_ttft_ms": 351.33, "median_stream_decode_tok_s": 72.09, "median_agg_e2e_tok_s": 121.16},
+        "llama_stock": {"median_ttft_ms": 559.93, "median_stream_decode_tok_s": 95.45, "median_agg_e2e_tok_s": 135.42},
+        "realugbun": {"median_ttft_ms": 530.63, "median_stream_decode_tok_s": 97.48, "median_agg_e2e_tok_s": 139.58}
+      },
+      "C4_p512_d128": {
+        "fak": {"median_ttft_ms": 598.89, "median_stream_decode_tok_s": 52.17, "median_agg_e2e_tok_s": 168.76},
+        "llama_stock": {"median_ttft_ms": 1019.52, "median_stream_decode_tok_s": 70.10, "median_agg_e2e_tok_s": 180.81},
+        "realugbun": {"median_ttft_ms": 981.30, "median_stream_decode_tok_s": 60.91, "median_agg_e2e_tok_s": 166.93}
+      },
+      "C4_p2048_d256": {
+        "fak": {"median_ttft_ms": 2017.61, "median_stream_decode_tok_s": 43.72, "median_agg_e2e_tok_s": 130.44},
+        "llama_stock": {"median_ttft_ms": 4683.83, "median_stream_decode_tok_s": 61.72, "median_agg_e2e_tok_s": 115.69},
+        "realugbun": {"median_ttft_ms": 3718.34, "median_stream_decode_tok_s": 55.30, "median_agg_e2e_tok_s": 122.47}
+      }
+    }
+  },
+  "prefill_kl_16k_f16": {
+    "positions": 165,
+    "mean_kl": 0.002912,
+    "max_kl": 0.083805,
+    "same_top": "164/165",
+    "forced_oracle_passphrase_1946": "32/32"
+  },
+  "spec_decode_optin_f32": {
+    "default_on": false,
+    "depth_4_tok_s": 294.28,
+    "depth_6_tok_s": 326.21,
+    "depth_8_tok_s": 307.74,
+    "near_tie_oracle_pass": "3/4 (passphrase-recall-1946 diverges at token 25)"
+  },
+  "coding_eval_5task": {
+    "checks_passed_tasks": "4/5",
+    "context_cap_tokens": 19456,
+    "note": "All 5 tasks eventually hit the 19456-token f16 global KV cap on 16 GiB; supported envelope is fenced to <=16K."
+  }
+}
