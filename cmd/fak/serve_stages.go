@@ -765,6 +765,7 @@ func resolveServeNativeContextDirectory(dir string, requested int) (serveNativeC
 // is closed by cmdServe's deferred closeEPGroup.
 func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	if rt.loadInkling2LoopModel(sf) {
+		rt.addStartupMessage(inkling2ExplicitSpecDiagnostic(os.LookupEnv))
 		return
 	}
 	startupResidency := serveStartupResidency(*sf.ggufPath)
