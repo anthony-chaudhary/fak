@@ -80,6 +80,10 @@ type Correct func(got, reference []float32) error
 // implementations may use device events rather than host wall time.
 type Measure func(context.Context, Candidate, Profile) (time.Duration, error)
 
+// AuditedMeasure is a Measure that also returns the output of the timed run, so
+// Tune can check every timed sample against the reference.
+type AuditedMeasure func(context.Context, Candidate, Profile) (time.Duration, []float32, error)
+
 // Policy makes the amortization and timing contract explicit.
 type Policy struct {
 	Warmup            int           `json:"warmup"`
@@ -119,10 +123,14 @@ type CandidateResult struct {
 	Correct       bool   `json:"correct"`
 	RefusalReason string `json:"refusal_reason,omitempty"`
 	// VariantsUnchecked marks a candidate that could not run the requested scaled variants.
-	VariantsUnchecked bool            `json:"variants_unchecked,omitempty"`
-	Samples           []time.Duration `json:"samples,omitempty"`
-	Statistic         time.Duration   `json:"statistic,omitempty"`
-	SignTest          *SignTestResult `json:"sign_test,omitempty"`
+	VariantsUnchecked bool `json:"variants_unchecked,omitempty"`
+	// TimingAudit is "audited" when every timed output was checked, else "unaudited".
+	TimingAudit string `json:"timing_audit,omitempty"`
+	// PostTimingCheck is "passed" or "failed" for the re-run after timing.
+	PostTimingCheck string          `json:"post_timing_check,omitempty"`
+	Samples         []time.Duration `json:"samples,omitempty"`
+	Statistic       time.Duration   `json:"statistic,omitempty"`
+	SignTest        *SignTestResult `json:"sign_test,omitempty"`
 }
 
 // ProfileResult is the inspectable tuning receipt for one profile.
@@ -220,7 +228,34 @@ func (m Manifest) Digest() (string, error) {
 // With Policy.SignTestAlpha set, a lower median only nominates a challenger: it
 // replaces the fallback when it also leads a paired sign test against it.
 func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, reference Candidate, correct Correct, measure Measure, policy Policy) (Manifest, Report, error) {
-	if len(profiles) == 0 || len(candidates) == 0 || reference == nil || correct == nil || measure == nil {
+	return tune(ctx, profiles, candidates, reference, correct, measure, nil, policy)
+}
+
+// TuneAudited is Tune with every timed sample's output checked against the
+// reference: a candidate whose timed output mismatches is refused with a
+// "timed output mismatch" reason and cannot win.
+func TuneAudited(ctx context.Context, profiles []Profile, candidates []Candidate, reference Candidate, correct Correct, measure AuditedMeasure, policy Policy) (Manifest, Report, error) {
+	if measure == nil {
+		return Manifest{}, Report{}, errors.New("computetune: incomplete tuning inputs")
+	}
+	return tune(ctx, profiles, candidates, reference, correct, nil, measure, policy)
+}
+
+// timedMismatchError marks an audited timed sample whose output failed correct.
+type timedMismatchError struct{ err error }
+
+func (e timedMismatchError) Error() string { return e.err.Error() }
+
+func timedReason(stage string, err error) string {
+	var m timedMismatchError
+	if errors.As(err, &m) {
+		return "timed output mismatch: " + err.Error()
+	}
+	return stage + ": " + err.Error()
+}
+
+func tune(ctx context.Context, profiles []Profile, candidates []Candidate, reference Candidate, correct Correct, plain Measure, audited AuditedMeasure, policy Policy) (Manifest, Report, error) {
+	if len(profiles) == 0 || len(candidates) == 0 || reference == nil || correct == nil || (plain == nil && audited == nil) {
 		return Manifest{}, Report{}, errors.New("computetune: incomplete tuning inputs")
 	}
 	if policy.Warmup < 0 || policy.Repeats <= 0 || policy.Statistic != "median" || policy.TimerDomain == "" || policy.FallbackCandidate == "" || policy.SelectionOverhead < 0 || !(policy.SignTestAlpha >= 0 && policy.SignTestAlpha < 1) {
@@ -250,6 +285,19 @@ func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 		if err != nil {
 			return Manifest{}, Report{}, fmt.Errorf("computetune: reference: %w", err)
 		}
+		measure := plain
+		if audited != nil {
+			measure = func(ctx context.Context, c Candidate, p Profile) (time.Duration, error) {
+				d, out, err := audited(ctx, c, p)
+				if err != nil {
+					return 0, err
+				}
+				if cerr := correct(out, want); cerr != nil {
+					return 0, timedMismatchError{cerr}
+				}
+				return d, nil
+			}
+		}
 		pr := ProfileResult{Profile: profile}
 		for _, candidate := range candidates {
 			cr := CandidateResult{CandidateID: candidate.ID()}
@@ -272,10 +320,14 @@ func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 				cr.VariantsUnchecked = unchecked
 			}
 			cr.Correct = true
+			cr.TimingAudit = "unaudited"
+			if audited != nil {
+				cr.TimingAudit = "audited"
+			}
 			failed := false
 			for i := 0; i < policy.Warmup; i++ {
 				if _, err := measure(ctx, candidate, profile); err != nil {
-					cr.RefusalReason = "warmup: " + err.Error()
+					cr.RefusalReason = timedReason("warmup", err)
 					cr.Correct = false
 					failed = true
 					break
@@ -287,12 +339,25 @@ func Tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 					if err == nil {
 						err = errors.New("non-positive duration")
 					}
-					cr.RefusalReason = "timing: " + err.Error()
+					cr.RefusalReason = timedReason("timing", err)
 					cr.Correct = false
 					failed = true
 					break
 				}
 				cr.Samples = append(cr.Samples, d)
+			}
+			if !failed {
+				cr.PostTimingCheck = "passed"
+				post, err := candidate.Run(ctx, profile)
+				if err == nil {
+					err = correct(post, want)
+				}
+				if err != nil {
+					cr.PostTimingCheck = "failed"
+					cr.RefusalReason = "post-timing parity: " + err.Error()
+					cr.Correct = false
+					failed = true
+				}
 			}
 			if !failed {
 				cr.Statistic = median(cr.Samples)
@@ -448,7 +513,7 @@ func admitBySignTest(ctx context.Context, measure Measure, byID map[string]Candi
 		}
 		r.SignTest = &res
 		if challengerErr != nil {
-			r.RefusalReason = "sign test timing: " + challengerErr.Error()
+			r.RefusalReason = timedReason("sign test timing", challengerErr)
 			r.Correct = false
 			r.Statistic = 0
 			continue

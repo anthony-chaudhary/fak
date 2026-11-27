@@ -368,3 +368,65 @@ func TestTuneRecordsExecutionAndTimingFailuresUnderSignTest(t *testing.T) {
 		}
 	})
 }
+
+func TestTuneRefusesCandidateStaleAfterTiming(t *testing.T) {
+	ref := fakeCandidate{id: "reference", result: func(p Profile) ([]float32, error) { return []float32{float32(p.M)}, nil }}
+	timed := false
+	stale := fakeCandidate{id: "stale", result: func(p Profile) ([]float32, error) {
+		if timed {
+			return []float32{-1}, nil
+		}
+		return []float32{float32(p.M)}, nil
+	}}
+	fallback := fakeCandidate{id: "fallback", result: ref.result}
+	measure := func(_ context.Context, c Candidate, _ Profile) (time.Duration, error) {
+		if c.ID() == "stale" {
+			timed = true
+			return time.Microsecond, nil
+		}
+		return 10 * time.Microsecond, nil
+	}
+	policy := Policy{Warmup: 1, Repeats: 3, Statistic: "median", TimerDomain: "host-monotonic", FallbackCandidate: "fallback"}
+	manifest, report, err := Tune(context.Background(), []Profile{profile(1, 1, 1)}, []Candidate{fallback, stale}, ref, exact, measure, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := manifest.Lookup(profile(1, 1, 1)); got != "fallback" {
+		t.Fatalf("selected %q", got)
+	}
+	r := resultByID(report.Profiles[0].Candidates, "stale")
+	if r.Correct || r.PostTimingCheck != "failed" || !strings.HasPrefix(r.RefusalReason, "post-timing parity") || r.TimingAudit != "unaudited" {
+		t.Fatalf("stale result: %+v", r)
+	}
+}
+
+func TestTuneRefusesTimedOutputDrift(t *testing.T) {
+	ref := fakeCandidate{id: "reference", result: func(p Profile) ([]float32, error) { return []float32{float32(p.M)}, nil }}
+	fallback := fakeCandidate{id: "fallback", result: ref.result}
+	honest := fakeCandidate{id: "honest", result: ref.result}
+	drift := fakeCandidate{id: "drift", result: ref.result}
+	measure := func(_ context.Context, c Candidate, p Profile) (time.Duration, []float32, error) {
+		switch c.ID() {
+		case "drift":
+			return time.Microsecond, []float32{-1}, nil
+		case "honest":
+			return 5 * time.Microsecond, []float32{float32(p.M)}, nil
+		}
+		return 10 * time.Microsecond, []float32{float32(p.M)}, nil
+	}
+	policy := Policy{Warmup: 1, Repeats: 3, Statistic: "median", TimerDomain: "host-monotonic", FallbackCandidate: "fallback"}
+	manifest, report, err := TuneAudited(context.Background(), []Profile{profile(1, 1, 1)}, []Candidate{fallback, honest, drift}, ref, exact, measure, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := manifest.Lookup(profile(1, 1, 1)); got != "honest" {
+		t.Fatalf("selected %q", got)
+	}
+	r := resultByID(report.Profiles[0].Candidates, "drift")
+	if r.Correct || !strings.HasPrefix(r.RefusalReason, "timed output mismatch") {
+		t.Fatalf("drift result: %+v", r)
+	}
+	if h := resultByID(report.Profiles[0].Candidates, "honest"); h.TimingAudit != "audited" {
+		t.Fatalf("honest: %+v", h)
+	}
+}
