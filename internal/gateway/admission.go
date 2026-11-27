@@ -206,6 +206,9 @@ type SeqRequest struct {
 	// PromptTokens is the prefill share of Tokens, charged against PrefillTokenBudget.
 	// ≤0 charges all of Tokens.
 	PromptTokens int
+	// ContextTier optionally pins the request to a named KV tier ("master", "worker", "micro").
+	// When empty and a TierPool is attached, it is auto-classified via TierPool.Classify(Tokens).
+	ContextTier string
 }
 
 // DefaultTenantTokenBucket is the sliding-window bucket granularity a
@@ -462,6 +465,9 @@ type AdmissionController struct {
 	reservationObs     []ReservationObservation
 	reservationTracked map[string]trackedReservation
 	reservationGen     uint64
+	tierPool           *kvbudget.TierPool
+	tierLeases         map[string]kvbudget.TierLease
+	leaseToTrace       map[uint64]string
 }
 
 // reservationKey builds the (trace, prefix) identity the reservation readback is keyed on.

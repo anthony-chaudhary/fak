@@ -1728,6 +1728,50 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/capacity/tiers:
+    get:
+      tags: [fak-native]
+      summary: Read live multi-level KV tier capacity and fan-out recommendations
+      description: |
+        Returns the live L1/L2/L3 KV tier pool snapshot, including per-tier
+        guaranteed floors, elastic borrow headroom, and recommended agentic
+        fan-out. Returns `{"enabled": false}` with 200 OK when no tier pool is
+        configured.
+      responses:
+        '200':
+          description: Live tier pool snapshot or disabled indicator.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  total_tokens: { type: integer }
+                  free_tokens: { type: integer }
+                  tiers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        level: { type: integer }
+                        max_context: { type: integer }
+                        min_slots: { type: integer }
+                        active_slots: { type: integer }
+                        available_now: { type: integer }
+                        elastic_available: { type: integer }
+                        preemptible: { type: boolean }
+                  recommended_fanout:
+                    type: object
+                    properties:
+                      master_max_ctx: { type: integer }
+                      worker_slots: { type: integer }
+                      worker_max_ctx: { type: integer }
+                      micro_slots: { type: integer }
+                      micro_max_ctx: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/sessions:
     get:
       tags: [fak-native]

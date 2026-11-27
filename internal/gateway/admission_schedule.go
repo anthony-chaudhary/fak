@@ -309,6 +309,7 @@ func (c *AdmissionController) completeLocked(traceID string) bool {
 		return false
 	}
 	delete(c.running, traceID)
+	c.releaseTierLeaseLocked(traceID)
 	c.tokens -= req.Tokens
 	if c.tokens < 0 {
 		c.tokens = 0

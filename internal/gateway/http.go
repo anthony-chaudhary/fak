@@ -213,6 +213,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		// (fak-request-phases/1 JSONL) joined to perf rows by request_id.
 		{"/v1/fak/perf/phases", s.handleFakPerfPhases},
 		{"/v1/fak/fleet", s.handleFakFleet},
+		{"/v1/fak/capacity/tiers", s.handleFakCapacityTiers},
 		// /v1/fak/tasks is the read-only process task-manager snapshot. Inert (404)
 		// unless a host installs a provider via SetTasksSnapshotProvider and the
 		// operator enables it; the snapshot carries accounting only, no payload bytes.
