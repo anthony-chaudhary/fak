@@ -140,27 +140,17 @@ func inkling2KVFit(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk in
 
 // inkling2KVFitDtype is inkling2KVFit with the global-slot caches f16 when half.
 func inkling2KVFitDtype(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, half bool, other, free int64) (int64, error) {
-	kv := inkling2ResidentKVBytesDtype(hp, ctx, batched, chunk, half)
-	need := kv + other
-	if free == compute.FreeUnknown {
-		ceiling := Inkling2ResidentCtxMax(inkling2ResidentBackend)
-		if ctx <= ceiling {
-			return kv, nil
-		}
-		return kv, &Inkling2KVOverBudgetError{Ctx: ctx, MaxCtx: ceiling, NeedBytes: need, FreeBytes: free}
+	dtype := Inkling2KVF32
+	if half {
+		dtype = Inkling2KVF16
 	}
-	budget := free - inkling2DeviceHeadroom(free)
-	if need <= budget {
-		return kv, nil
-	}
-	maxCtx := 0
-	if left := budget - other; left >= 0 {
-		maxCtx = inkling2MaxResidentCtxDtype(hp, batched, chunk, half, ctx-1, left)
-	}
-	if maxCtx < Inkling2ResidentCtxMin {
-		maxCtx = 0
-	}
-	return kv, &Inkling2KVOverBudgetError{Ctx: ctx, MaxCtx: maxCtx, NeedBytes: need, FreeBytes: free}
+	return inkling2KVFitForDtype(hp, ctx, batched, chunk, dtype, other, free)
+}
+
+// inkling2KVFitForDtype is inkling2KVFit sized for dtype's global-slot caches
+// (f32, f16, fp8, or nvfp4), refusing with Inkling2KVOverBudgetError when ctx does not fit.
+func inkling2KVFitForDtype(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, dtype Inkling2KVDType, other, free int64) (int64, error) {
+	return inkling2KVFitFor(hp, ctx, batched, chunk, dtype, other, free)
 }
 
 // noteInkling2KVBytes records the KV bytes of a session built at ctx on its device

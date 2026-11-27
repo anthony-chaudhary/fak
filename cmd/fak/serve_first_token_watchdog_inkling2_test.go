@@ -63,3 +63,18 @@ func TestEnsureServeInkling2WriteTimeout(t *testing.T) {
 		t.Fatalf("FAK_HTTP_WRITE_TIMEOUT_S = %q, an operator value must not change", got)
 	}
 }
+
+func TestInkling2CUDADeadlineScaling(t *testing.T) {
+	t.Setenv("FAK_STREAM_STALL_TIMEOUT_S", "")
+	t.Setenv("FAK_HTTP_WRITE_TIMEOUT_S", "")
+	empty := ""
+	cuda := &serveBackendAutoSentinel{name: "cuda"}
+	rt := &serveRuntime{chatBackend: cuda, inkling2Planner: &agent.MockPlanner{}, inkling2MaxPromptTokens: 131072}
+	if got := rt.resolveServeFirstTokenWatchdog(&serveFlags{baseURL: &empty}); got != 524*time.Second {
+		t.Fatalf("CUDA 128k first-token watchdog = %s, want 524s", got)
+	}
+	rt.ensureServeInkling2WriteTimeout()
+	if got := os.Getenv("FAK_HTTP_WRITE_TIMEOUT_S"); got != "0" {
+		t.Fatalf("CUDA write deadline = %q, want 0", got)
+	}
+}

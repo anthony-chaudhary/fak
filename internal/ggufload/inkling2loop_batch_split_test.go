@@ -188,11 +188,11 @@ func TestInkling2CohortsShrinkAfterWideCohort(t *testing.T) {
 
 	run(Inkling2LoopMaxBatch, 100) // 16 x 128
 	wide := d.live
-	allocs := d.allocs
+	cached := bt.b
 	run(Inkling2LoopMaxBatch, 100)
 	run(Inkling2LoopMaxBatch-1, 100)
-	if d.allocs != allocs {
-		t.Fatalf("a cohort near the cached shape allocated again: %d -> %d allocs", allocs, d.allocs)
+	if bt.b != cached || d.live != wide {
+		t.Fatalf("a cohort near the cached shape rebuilt state: state %p->%p, live %d->%d", cached, bt.b, wide, d.live)
 	}
 
 	run(Inkling2LoopMaxBatch/2, 10) // 8 x 64

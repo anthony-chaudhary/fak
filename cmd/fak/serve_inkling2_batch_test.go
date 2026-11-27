@@ -787,6 +787,7 @@ func TestInkling2BatchNonFittingRequestHeldAsNextCohortFirst(t *testing.T) {
 		}
 		return make([]ggufload.Inkling2LoopBatchResult, len(reqs)), nil
 	})
+	e.holBackfillMax = 0
 	errA := generateAsync(e, []int{5}, 1, new([]int))
 	errB := generateAsync(e, []int{6}, 1, new([]int))
 	// the cohort sets errX and errY before it answers A and B, so they are read after
@@ -899,5 +900,125 @@ func TestInkling2BatchHighContextEngine(t *testing.T) {
 			t.Fatalf("ctx=%d past boundary accepted", ctxTokens)
 		}
 		close(e.queue)
+	}
+}
+
+// TestInkling2LongCtxScalarFallbackAndCohortResume verifies that a request whose
+// required context exceeds the multi-row (C>=2) cohort budget routes directly to
+// runScalar (releasing cached cohort arenas even when loneCohort is true), and that
+// subsequent short bursts automatically resume C>=2 cohorts.
+func TestInkling2LongCtxScalarFallbackAndCohortResume(t *testing.T) {
+	adm := inkling2Admission{gap: 5 * time.Millisecond, maxWait: 10 * time.Millisecond, max: 4, clock: inkling2RealClock{}}
+	var scalarCalls, batchCalls, arenaReleases int
+	var batchWidths []int
+	e := newInkling2LoopBatchEngineWith(
+		func(_ context.Context, prompt []int, _ int, _ map[int]bool, emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
+			scalarCalls++
+			emit(7)
+			return agent.Inkling2LoopGeneration{Generated: 1}, nil
+		},
+		func(reqs []ggufload.Inkling2LoopBatchRequest) ([]ggufload.Inkling2LoopBatchResult, error) {
+			batchCalls++
+			batchWidths = append(batchWidths, len(reqs))
+			out := make([]ggufload.Inkling2LoopBatchResult, len(reqs))
+			for i, r := range reqs {
+				r.Emit(9)
+				out[i].Generated = 1
+			}
+			return out, nil
+		},
+		adm, 131072)
+	e.loneCohort = true
+	e.arenasCached = true
+	e.releaseArenas = func() { arenaReleases++ }
+	e.fitsMultiRow = func(positions int) bool { return positions <= 16384 }
+	go e.run()
+	defer close(e.queue)
+
+	// 1) Long-context (65536) request exceeds multi-row budget -> routed directly to runScalar, releasing arenas.
+	gen, err := e.Generate(context.Background(), make([]int, 65000), 536, nil, func(int) bool { return true })
+	if err != nil || gen.Width != 1 || scalarCalls != 1 || batchCalls != 0 || arenaReleases != 1 {
+		t.Fatalf("long-ctx request: gen=%+v err=%v scalar=%d batch=%d releases=%d", gen, err, scalarCalls, batchCalls, arenaReleases)
+	}
+
+	// 2) Subsequent 2-request short burst automatically resumes C>=2 cohort batching.
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	widths := make([]int, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			g, gerr := e.Generate(context.Background(), make([]int, 512), 64, nil, func(int) bool { return true })
+			errs[idx] = gerr
+			widths[idx] = g.Width
+		}(i)
+	}
+	wg.Wait()
+	for i := 0; i < 2; i++ {
+		if errs[i] != nil || widths[i] != 2 {
+			t.Fatalf("short burst row %d: width=%d err=%v, want width=2", i, widths[i], errs[i])
+		}
+	}
+	if batchCalls != 1 || len(batchWidths) != 1 || batchWidths[0] != 2 {
+		t.Fatalf("short burst did not resume C=2 cohort: batchCalls=%d widths=%v", batchCalls, batchWidths)
+	}
+}
+
+// TestInkling2AdmitHoLBoundedBackfill verifies that admitQueued allows up to K
+// (default 2, configurable via FAK_INKLING2_HOL_BACKFILL_MAX, 0 disables) short
+// requests to backfill finished slots while an oversized e.pending waits, then
+// drains for e.pending.
+func TestInkling2AdmitHoLBoundedBackfill(t *testing.T) {
+	mkReq := func(promptLen, maxNew int) *inkling2QueuedRequest {
+		return &inkling2QueuedRequest{
+			ctx: context.Background(), prompt: make([]int, promptLen), maxNew: maxNew,
+			sink: &inkling2RowSink{emit: func(int) bool { return true }}, done: make(chan inkling2QueuedResult, 1),
+		}
+	}
+
+	// Default K=2: oversized request sets e.pending, then 2 short requests backfill, 3rd is held for drain.
+	adm := inkling2Admission{gap: time.Millisecond, maxWait: time.Millisecond, max: 8, clock: inkling2RealClock{}}
+	e := newInkling2LoopBatchEngineWith(nil, nil, adm, 65536)
+	e.initialDecodeHeadroom = 0
+	if got := inkling2HoLBackfillMax(func(string) (string, bool) { return "", false }); got != 2 {
+		t.Fatalf("default HoL backfill max = %d, want 2", got)
+	}
+	if got := inkling2HoLBackfillMax(func(k string) (string, bool) { return "0", true }); got != 0 {
+		t.Fatalf("explicit 0 HoL backfill max = %d, want 0", got)
+	}
+	if got := inkling2HoLBackfillMax(func(k string) (string, bool) { return "4", true }); got != 4 {
+		t.Fatalf("explicit 4 HoL backfill max = %d, want 4", got)
+	}
+
+	var owned []*inkling2QueuedRequest
+	c := &inkling2Cohort{width: 2, owned: &owned}
+	big := mkReq(1000, 10)
+	s1, s2, s3 := mkReq(10, 4), mkReq(10, 4), mkReq(10, 4)
+	e.queue <- big
+	e.queue <- s1
+	e.queue <- s2
+	e.queue <- s3
+
+	if _, ok := e.admitQueued(c, 100); !ok || e.pending != big || c.holBackfills != 1 {
+		t.Fatalf("1st backfill failed: ok=%v pending=%v backfills=%d", ok, e.pending == big, c.holBackfills)
+	}
+	if _, ok := e.admitQueued(c, 100); !ok || c.holBackfills != 2 {
+		t.Fatalf("2nd backfill failed: ok=%v backfills=%d", ok, c.holBackfills)
+	}
+	// 3rd short request must NOT backfill once K=2 is reached; cohort drains for big.
+	if _, ok := e.admitQueued(c, 100); ok {
+		t.Fatal("3rd short request backfilled past K=2 limit")
+	}
+
+	// K=0 disables backfill immediately when big sets e.pending.
+	e0 := newInkling2LoopBatchEngineWith(nil, nil, adm, 65536)
+	e0.initialDecodeHeadroom = 0
+	e0.holBackfillMax = 0
+	c0 := &inkling2Cohort{width: 2, owned: &owned}
+	e0.queue <- big
+	e0.queue <- s1
+	if _, ok := e0.admitQueued(c0, 100); ok || e0.pending != big || c0.holBackfills != 0 {
+		t.Fatalf("K=0 admitted backfill: ok=%v pending=%v backfills=%d", ok, e0.pending == big, c0.holBackfills)
 	}
 }

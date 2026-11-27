@@ -83,6 +83,18 @@ func inkling2CUDAPrefillW4A4Active(be compute.Backend, lookup func(string) (stri
 	return ok && w4.Ink2PNVFP4W4A4Available()
 }
 
+// inkling2CUDAPrefillKernelLabel reports whether native W4A4 NVFP4 prefill is active
+// or whether prefill falls back to Q8/dense kernels.
+func inkling2CUDAPrefillKernelLabel(be compute.Backend, lookup func(string) (string, bool)) string {
+	if lookup != nil && inkling2EnvOptOut(lookup, "FAK_INKLING2_PREFILL_NVFP4_W4A4") {
+		return "q8/dense prefill"
+	}
+	if w4a4, ok := be.(interface{ Ink2PNVFP4W4A4Available() bool }); ok && w4a4.Ink2PNVFP4W4A4Available() {
+		return "w4a4 nvfp4 prefill"
+	}
+	return "q8/dense prefill"
+}
+
 func inkling2CUDAPrefillDefaults(lookup func(string) (string, bool)) func(string) (string, bool) {
 	return func(key string) (string, bool) {
 		if value, set := lookup(key); set {
@@ -292,11 +304,20 @@ type inkling2LoopBatchEngine struct {
 	// pending is the first queued request a running cohort could not fit: it is the
 	// next cohort's first row. Only the run worker touches it.
 	pending *inkling2QueuedRequest
+	// deferred holds non-fitting requests seen behind pending during bounded HoL
+	// backfill, preserving arrival order. Only the run worker touches it.
+	deferred []*inkling2QueuedRequest
+	// holBackfillMax bounds how many short requests may backfill finished slots while
+	// an oversized pending request waits (default 2; 0 disables).
+	holBackfillMax int
 	// admittedRows counts requests that joined a running cohort.
 	admittedRows atomic.Uint64
 	// split partitions a cohort by each row's len(prompt)+maxNew into sub-cohorts that
 	// fit device memory; nil runs every collected group as one cohort.
 	split func(positions []int) ([][]int, error)
+	// fitsMultiRow reports whether a single request needing positions tokens fits a C>=2
+	// cohort at chunk>=128; when false, it routes directly to runScalar.
+	fitsMultiRow func(positions int) bool
 	// splitGroups counts cohorts split for memory, up front or after a refusal.
 	splitGroups atomic.Uint64
 	// releaseArenas frees the cached cohort arenas, keeping the weight binding, so
@@ -325,6 +346,26 @@ var (
 	_ agent.Inkling2LoopLogitGenerator = (*inkling2LoopBatchEngine)(nil)
 )
 
+const (
+	inkling2HoLBackfillMaxDefault = 2
+	inkling2HoLBackfillMaxEnv     = "FAK_INKLING2_HOL_BACKFILL_MAX"
+)
+
+func inkling2HoLBackfillMax(lookup func(string) (string, bool)) int {
+	if lookup == nil {
+		return inkling2HoLBackfillMaxDefault
+	}
+	v, ok := lookup(inkling2HoLBackfillMaxEnv)
+	if !ok || strings.TrimSpace(v) == "" {
+		return inkling2HoLBackfillMaxDefault
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return inkling2HoLBackfillMaxDefault
+	}
+	return n
+}
+
 // newInkling2LoopBatchEngine keeps one cohort state for the engine's life: the run
 // worker is its only user.
 func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.Inkling2LoopModel, backend compute.Backend, adm inkling2Admission, contextTokens int, lookup func(string) (string, bool)) *inkling2LoopBatchEngine {
@@ -335,12 +376,14 @@ func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.I
 	cohorts.SetMaxContext(contextTokens)
 	e := newInkling2LoopBatchEngineWith(scalar, cohorts.Generate, adm, contextTokens)
 	e.initialDecodeHeadroom = ggufload.Inkling2InitialDecodeHeadroom(lookup)
+	e.holBackfillMax = inkling2HoLBackfillMax(lookup)
 	_, capBytes := inkling2PrefixCacheFromEnv(lookup)
 	e.ledger = newInkling2ByteLedger(capBytes)
 	e.releaseArenas = cohorts.ReleaseArenas
 	e.cohortArenaBytes = cohorts.ArenaBytes
 	e.batchAdmitting = cohorts.GenerateAdmitting
 	e.split = cohorts.Split
+	e.fitsMultiRow = cohorts.FitsMultiRow
 	if on, _ := cohorts.UsePrefixStore(lookup); on {
 		e.loneCohort = true
 		e.prefixStats = cohorts.PrefixStats
@@ -359,6 +402,7 @@ func newInkling2LoopBatchEngineWith(scalar inkling2ScalarGenerate, batch inkling
 		scalarGenerate:        scalar,
 		batchGenerate:         batch,
 		initialDecodeHeadroom: ggufload.Inkling2InitialDecodeHeadroomDefault,
+		holBackfillMax:        inkling2HoLBackfillMaxDefault,
 	}
 }
 
@@ -411,9 +455,15 @@ func (e *inkling2LoopBatchEngine) enqueue(ctx context.Context, prompt []int, max
 // the next cohort's first row, ahead of anything still queued.
 func (e *inkling2LoopBatchEngine) run() {
 	for {
-		first := e.pending
-		e.pending = nil
-		if first == nil {
+		var first *inkling2QueuedRequest
+		switch {
+		case e.pending != nil:
+			first = e.pending
+			e.pending = nil
+		case len(e.deferred) > 0:
+			first = e.deferred[0]
+			e.deferred = e.deferred[1:]
+		default:
 			r, ok := <-e.queue
 			if !ok {
 				return
@@ -465,13 +515,24 @@ func (e *inkling2LoopBatchEngine) execute(group []*inkling2QueuedRequest) {
 	if len(greedy) == 0 {
 		return
 	}
-	if len(greedy) == 1 && !e.loneCohort {
+	if len(greedy) == 1 && e.shouldRunScalarLone(greedy[0]) {
 		e.runScalar(greedy[0])
 		return
 	}
 	for _, g := range e.splitGroup(greedy) {
 		e.runGroup(g, &owned)
 	}
+}
+
+func (e *inkling2LoopBatchEngine) shouldRunScalarLone(r *inkling2QueuedRequest) bool {
+	if !e.loneCohort {
+		return true
+	}
+	if e.fitsMultiRow != nil {
+		pos := ggufload.Inkling2InitialReservePositions(len(r.prompt), r.maxNew, e.initialDecodeHeadroom)
+		return !e.fitsMultiRow(pos)
+	}
+	return false
 }
 
 // runScalar serves one row on the serialized engine, beside the weight binding only.
@@ -562,7 +623,7 @@ func (e *inkling2LoopBatchEngine) splitGroup(group []*inkling2QueuedRequest) [][
 // the same way, so memory pressure narrows a cohort down to the serialized engine
 // instead of failing its rows.
 func (e *inkling2LoopBatchEngine) runGroup(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) {
-	if len(group) == 1 && !e.loneCohort {
+	if len(group) == 1 && e.shouldRunScalarLone(group[0]) {
 		e.runScalar(group[0])
 		return
 	}
@@ -607,10 +668,11 @@ func inkling2BatchRowResult(br ggufload.Inkling2LoopBatchResult, width int) inkl
 // admitted rows, answered marks those already completed, and owned is the worker's
 // list of every row it must answer if the run panics.
 type inkling2Cohort struct {
-	width    int
-	rows     []*inkling2QueuedRequest
-	owned    *[]*inkling2QueuedRequest
-	answered []bool
+	width        int
+	rows         []*inkling2QueuedRequest
+	owned        *[]*inkling2QueuedRequest
+	answered     []bool
+	holBackfills int
 }
 
 // request wraps row i of the cohort for the batch: its Done answers the caller the
@@ -636,10 +698,11 @@ func (c *inkling2Cohort) admit(r *inkling2QueuedRequest) ggufload.Inkling2LoopBa
 }
 
 // admitQueued is the admission callback of a running cohort. It takes the next live
-// queued request if it fits maxPositions. One that does not fit is held as pending and
-// nothing behind it is admitted, so a large request is not starved by small ones.
+// queued request if it fits maxPositions. One that does not fit is held as pending;
+// up to e.holBackfillMax short requests behind pending may backfill finished slots
+// before the cohort drains for pending.
 func (e *inkling2LoopBatchEngine) admitQueued(c *inkling2Cohort, maxPositions int) (ggufload.Inkling2LoopBatchRequest, bool) {
-	for e.pending == nil {
+	for e.pending == nil || c.holBackfills < e.holBackfillMax {
 		var r *inkling2QueuedRequest
 		var ok bool
 		select {
@@ -654,8 +717,18 @@ func (e *inkling2LoopBatchEngine) admitQueued(c *inkling2Cohort, maxPositions in
 			continue
 		}
 		if r.sample != nil || ggufload.Inkling2InitialReservePositions(len(r.prompt), r.maxNew, e.initialDecodeHeadroom)-1 > maxPositions {
-			e.pending = r
+			if e.pending == nil {
+				e.pending = r
+				if c.holBackfills >= e.holBackfillMax {
+					return ggufload.Inkling2LoopBatchRequest{}, false
+				}
+				continue
+			}
+			e.deferred = append(e.deferred, r)
 			return ggufload.Inkling2LoopBatchRequest{}, false
+		}
+		if e.pending != nil {
+			c.holBackfills++
 		}
 		e.admittedRows.Add(1)
 		return c.admit(r), true

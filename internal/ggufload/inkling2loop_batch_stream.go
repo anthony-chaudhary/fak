@@ -279,7 +279,7 @@ func (bt *Inkling2LoopCohorts) ArenaBytes() int64 {
 	if bt.b == nil {
 		return 0
 	}
-	return bt.b.need
+	return bt.b.arenaBytes()
 }
 
 func NewInkling2LoopCohorts(m *Inkling2LoopModel, be compute.Backend) *Inkling2LoopCohorts {
@@ -326,7 +326,8 @@ func inkling2ServePerPosBytes(hp model.Inkling2LoopHParams, half bool) int64 {
 // an explicit requested > 0 is returned (clamped to the backend hard max if any);
 // an explicit FAK_INKLING2_CTX returns inkling2ResidentCtxFrom(lookup); otherwise
 // free device memory is probed and fitted up to Inkling2AutoCtxCeiling (raised to
-// 32768 on f16-KV-capable backends with >= 8 GiB free).
+// Inkling2ResidentCtxFitMax=262144 on f16-KV-capable backends with >= 8 GiB free,
+// bounded by any backend hard max such as Metal's 32768).
 func Inkling2ResolveServeContext(m *Inkling2LoopModel, be compute.Backend, requested int, lookup func(string) (string, bool)) int {
 	if requested > 0 {
 		if be != nil {
@@ -373,7 +374,7 @@ func Inkling2ResolveServeContext(m *Inkling2LoopModel, be compute.Backend, reque
 	var fit int
 	if halfCapable {
 		if free >= 8<<30 {
-			ceiling = 32768
+			ceiling = Inkling2ResidentCtxFitMax
 		}
 		if hard := inkling2ResidentHardMax(be.Name()); hard > 0 && ceiling > hard {
 			ceiling = hard
@@ -517,7 +518,7 @@ func (bt *Inkling2LoopCohorts) Split(positions []int) ([][]int, error) {
 		return [][]int{all}, nil
 	}
 	if bt.b != nil {
-		free += bt.b.need
+		free += bt.b.arenaBytes()
 	}
 	maxCtx := bt.maxContext()
 	ctxOf := func(n int) int {
@@ -565,6 +566,40 @@ func (bt *Inkling2LoopCohorts) Split(positions []int) ([][]int, error) {
 		group = []int{i}
 	}
 	return append(groups, group), nil
+}
+
+// FitsMultiRow reports whether a request needing positions tokens fits in a C>=2
+// cohort at any chunk in inkling2BatchChunkLadder (down to chunk=128). When false,
+// the request exceeds the multi-row cohort budget and should run on the C=1 scalar lane.
+func (bt *Inkling2LoopCohorts) FitsMultiRow(positions int) bool {
+	if !inkling2BatchAdmitOn(bt.env()) {
+		return true
+	}
+	if err := bt.bind(); err != nil {
+		return true
+	}
+	inkling2TrimIdle(bt.be)
+	_, free, known := inkling2DeviceFree(bt.be)
+	if !known || free < 0 {
+		return true
+	}
+	if bt.b != nil {
+		free += bt.b.arenaBytes()
+	}
+	maxCtx := bt.maxContext()
+	ctx := (positions + inkling2BatchCtxAlign - 1) / inkling2BatchCtxAlign * inkling2BatchCtxAlign
+	ctx = max(1, min(maxCtx, ctx))
+	baseChunk := inkling2CohortChunk(bt.s.chunkWanted, 0)
+	for _, chunk := range inkling2BatchChunkLadder(baseChunk) {
+		sh, err := bt.s.batchShapeChunkLimit(2, ctx, chunk, maxCtx)
+		if err != nil {
+			continue
+		}
+		if sh.need+inkling2BatchHeadroom <= free {
+			return true
+		}
+	}
+	return false
 }
 
 // Inkling2LoopBatchGenerate runs one cohort on a state built for it and freed after.
@@ -772,6 +807,9 @@ func (bt *Inkling2LoopCohorts) runCohortRound(reqs []Inkling2LoopBatchRequest, h
 			}
 		}
 		if active == 0 {
+			if !b.keepPrefill {
+				b.releasePrefillArenas()
+			}
 			break
 		}
 		if prefilling {
@@ -779,6 +817,9 @@ func (bt *Inkling2LoopCohorts) runCohortRound(reqs []Inkling2LoopBatchRequest, h
 				break
 			}
 			continue
+		}
+		if !b.keepPrefill {
+			b.releasePrefillArenas()
 		}
 		for i := range lanes {
 			lane := &lanes[i]

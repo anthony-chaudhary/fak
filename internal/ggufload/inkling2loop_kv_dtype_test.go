@@ -852,3 +852,87 @@ func TestInkling2AutoFP8KVBelow24KFit(t *testing.T) {
 		t.Fatalf("highFree unset KV = (%v, autoHalf=%v, err=%v), want (f16, true, nil)", dtype, autoHalf, err)
 	}
 }
+
+func TestInkling2KVFitForDtype262144AndByteCounts(t *testing.T) {
+	hp := inkling2MiniKVShape()
+	const ctx128k = 131072
+	const ctx256k = 262144
+
+	// Verify byte counts across all 4 dtypes strictly decrease with compression:
+	// f32 > f16 > fp8 > nvfp4 at 128k and 256k.
+	bF32 := inkling2ResidentKVBytesFor(hp, ctx128k, false, 0, Inkling2KVF32)
+	bF16 := inkling2ResidentKVBytesFor(hp, ctx128k, false, 0, Inkling2KVF16)
+	bFP8 := inkling2ResidentKVBytesFor(hp, ctx128k, false, 0, Inkling2KVFP8)
+	bNVFP4 := inkling2ResidentKVBytesFor(hp, ctx128k, false, 0, Inkling2KVNVFP4)
+	if !(bF32 > bF16 && bF16 > bFP8 && bFP8 > bNVFP4 && bNVFP4 > 0) {
+		t.Fatalf("128k byte ordering invalid: f32=%d f16=%d fp8=%d nvfp4=%d", bF32, bF16, bFP8, bNVFP4)
+	}
+
+	other := inkling2MiniOther(hp)
+	// 128k f16 needs ~4.1 GiB KV; 6 GiB free fits f16/fp8/nvfp4 at 128k, refuses f32 with structured error.
+	free6G := int64(6) << 30
+	if _, err := inkling2KVFitForDtype(hp, ctx128k, false, 0, Inkling2KVF32, other, free6G); err == nil {
+		t.Fatal("128k f32 admitted on 6 GiB free")
+	} else {
+		var over *Inkling2KVOverBudgetError
+		if !errors.As(err, &over) || over.Ctx != ctx128k || over.MaxCtx >= ctx128k || over.MaxCtx <= 0 || over.FreeBytes != free6G {
+			t.Fatalf("unexpected 128k f32 refusal: %#v", err)
+		}
+	}
+	for _, dtype := range []Inkling2KVDType{Inkling2KVF16, Inkling2KVFP8, Inkling2KVNVFP4} {
+		kv, err := inkling2KVFitForDtype(hp, ctx128k, false, 0, dtype, other, free6G)
+		if err != nil || kv <= 0 {
+			t.Fatalf("128k %s refused on 6 GiB free: kv=%d err=%v", dtype, kv, err)
+		}
+	}
+
+	// 256k f16 needs ~8.1 GiB KV; 12 GiB free fits 256k f16/fp8/nvfp4, while 6 GiB free refuses 256k f16.
+	free12G := int64(12) << 30
+	if kv, err := inkling2KVFitForDtype(hp, ctx256k, false, 0, Inkling2KVF16, other, free12G); err != nil || kv <= 0 {
+		t.Fatalf("256k f16 refused on 12 GiB free: kv=%d err=%v", kv, err)
+	}
+	if _, err := inkling2KVFitForDtype(hp, ctx256k, false, 0, Inkling2KVF16, other, free6G); err == nil {
+		t.Fatal("256k f16 admitted on 6 GiB free")
+	} else {
+		var over *Inkling2KVOverBudgetError
+		if !errors.As(err, &over) || over.Ctx != ctx256k || over.MaxCtx >= ctx256k || over.MaxCtx < ctx128k {
+			t.Fatalf("unexpected 256k f16 refusal: %#v", err)
+		}
+	}
+
+	// Auto-fit ceiling scales up to 262144 for compressed KV when free VRAM is ample.
+	if got := inkling2AutoCtxMax("cuda", true); got != Inkling2ResidentCtxFitMax {
+		t.Fatalf("inkling2AutoCtxMax(cuda, true) = %d, want %d", got, Inkling2ResidentCtxFitMax)
+	}
+	if got := inkling2AutoCtxMax("metal", true); got != Inkling2ResidentCtxMaxMetal {
+		t.Fatalf("inkling2AutoCtxMax(metal, true) = %d, want %d", got, Inkling2ResidentCtxMaxMetal)
+	}
+}
+
+func TestInkling2HalfKVAutoSelectForLongCtx(t *testing.T) {
+	defer func(v bool) { inkling2KVHalfRequested = v }(inkling2KVHalfRequested)
+	inkling2KVHalfRequested = false
+
+	hp := inkling2MiniKVShape()
+	m := &Inkling2LoopModel{HP: hp}
+	unset := func(string) (string, bool) { return "", false }
+
+	// 12 GiB free: f32 fits < 256k, f16 fits 256k; unset FAK_INKLING2_KV auto-selects Inkling2KVF16.
+	free12G := int64(12) << 30
+	be := fakeInk2AutoFP8Backend{fakeInk2OverflowBackend: &fakeInk2OverflowBackend{fakeInk2Budget: newFakeInk2Budget(free12G)}, free: free12G}
+	dtype, autoHalf, err := inkling2ResidentKVDTypeForMode(m, be, unset, false)
+	if err != nil || dtype != Inkling2KVF16 || !autoHalf {
+		t.Fatalf("unset FAK_INKLING2_KV on 12 GiB half-capable = (%v, auto=%v, err=%v), want (f16, true, nil)", dtype, autoHalf, err)
+	}
+	// Explicit FAK_INKLING2_KV=f32 is honored.
+	f32Env := func(k string) (string, bool) {
+		if k == "FAK_INKLING2_KV" {
+			return "f32", true
+		}
+		return "", false
+	}
+	dtype, autoHalf, err = inkling2ResidentKVDTypeForMode(m, be, f32Env, false)
+	if err != nil || dtype != Inkling2KVF32 || autoHalf {
+		t.Fatalf("explicit FAK_INKLING2_KV=f32 = (%v, auto=%v, err=%v), want (f32, false, nil)", dtype, autoHalf, err)
+	}
+}

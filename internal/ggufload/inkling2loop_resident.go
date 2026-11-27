@@ -34,6 +34,9 @@ const (
 	// Metal prefill scores tile under a fixed budget, a shape limit the memory fit does
 	// not model, so a request above it is refused.
 	Inkling2ResidentCtxMaxMetal = 32768
+	// Inkling2ResidentCtxFitMax is the upper bound for VRAM-fit-planned context when
+	// device free memory is known and global KV uses a compressed dtype (f16/fp8/nvfp4).
+	Inkling2ResidentCtxFitMax = 262144
 	// inkling2ResidentCtxParseMax only bounds the parsed integer so garbage cannot overflow.
 	inkling2ResidentCtxParseMax = 1 << 20
 	// Inkling2ResidentArenaFloats bounds the per-token scratch arena. Every
@@ -458,13 +461,13 @@ func inkling2FitResidentCtxExact(hp model.Inkling2LoopHParams, free, reserve int
 }
 
 // inkling2AutoCtxMax is the upper bound for auto-derived resident context on backend.
-// FP32 keeps the 16384 ceiling; FP16 global KV halves the per-position footprint so
-// the fit planner may scale up to 32768 (still bounded by the backend's hard max and
-// exact free-VRAM budget).
+// FP32 keeps the 16384 ceiling; compressed global KV (f16/fp8/nvfp4) allows the fit
+// planner to scale up to Inkling2ResidentCtxFitMax (262144), still bounded by the
+// backend's hard max and exact free-VRAM budget.
 func inkling2AutoCtxMax(backend string, half bool) int {
 	ceil := inkling2AutoCtxCeiling
 	if half {
-		ceil = 32768
+		ceil = Inkling2ResidentCtxFitMax
 	}
 	if hard := inkling2ResidentHardMax(backend); hard > 0 && ceil > hard {
 		ceil = hard

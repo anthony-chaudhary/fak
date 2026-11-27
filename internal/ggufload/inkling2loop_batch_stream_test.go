@@ -210,10 +210,15 @@ func TestInkling2ResolveServeContext(t *testing.T) {
 	if got := Inkling2ResolveServeContext(m, half16G, 0, unset); got != 16384 {
 		t.Fatalf("auto 16GiB f16 backend = %d, want 16384", got)
 	}
-	// Auto on 24-32 GiB-class GPU (>= 8 GiB free) with f16-capable backend -> 32768.
+	// Auto on 24-32 GiB-class GPU (>= 8 GiB free) with f16-capable backend scales via fit planner up to 262144.
 	half32G := fakeInk2HalfMemBackend{fakeInk2MemBackend: fakeInk2MemBackend{name: "cuda", total: 32 << 30, free: 12 << 30, known: true}}
-	if got := Inkling2ResolveServeContext(m, half32G, 0, unset); got != 32768 {
-		t.Fatalf("auto 32GiB f16 backend = %d, want 32768", got)
+	if got := Inkling2ResolveServeContext(m, half32G, 0, unset); got < 65536 || got > Inkling2ResidentCtxFitMax {
+		t.Fatalf("auto 32GiB f16 backend = %d, want in [65536, %d]", got, Inkling2ResidentCtxFitMax)
+	}
+	// Auto on 80 GiB-class GPU with f16-capable backend advertises up to 262144.
+	half80G := fakeInk2HalfMemBackend{fakeInk2MemBackend: fakeInk2MemBackend{name: "cuda", total: 80 << 30, free: 64 << 30, known: true}}
+	if got := Inkling2ResolveServeContext(m, half80G, 0, unset); got != Inkling2ResidentCtxFitMax {
+		t.Fatalf("auto 80GiB f16 backend = %d, want %d", got, Inkling2ResidentCtxFitMax)
 	}
 	// Explicit f32, seqops=0, or batch=0 disables auto-f16 sizing and keeps 16384 ceiling.
 	for _, tc := range []struct {
