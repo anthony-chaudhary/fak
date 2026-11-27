@@ -151,12 +151,18 @@ func (p *InKernelPlanner) RadixLocalSSD() InKernelRadixLocalSSD {
 // at zero) cannot grow the volume past the configured budget.
 type localSSDSnapshotStore struct {
 	disk   *l3kv.DiskStore
+	async  *l3kv.AsyncStore
 	maxB   int64
 	maxEnt int
 }
 
 func newLocalSSDSnapshotStore(disk *l3kv.DiskStore, budget int64) *localSSDSnapshotStore {
-	return &localSSDSnapshotStore{disk: disk, maxB: budget, maxEnt: inKernelRadixLocalSSDMaxEntries}
+	return &localSSDSnapshotStore{
+		disk:   disk,
+		async:  l3kv.NewAsyncStore(disk),
+		maxB:   budget,
+		maxEnt: inKernelRadixLocalSSDMaxEntries,
+	}
 }
 
 func (s *localSSDSnapshotStore) Put(ctx context.Context, key string, value []byte) error {
@@ -173,4 +179,28 @@ func (s *localSSDSnapshotStore) Get(ctx context.Context, key string) ([]byte, bo
 	return s.disk.Get(ctx, key)
 }
 
+func (s *localSSDSnapshotStore) Touch(ctx context.Context, keys []string) error {
+	return s.disk.Touch(ctx, keys)
+}
+
+func (s *localSSDSnapshotStore) Delete(ctx context.Context, keys []string) error {
+	return s.disk.Delete(ctx, keys)
+}
+
+func (s *localSSDSnapshotStore) GetAsync(ctx context.Context, key string, onComplete func([]byte, bool, error)) {
+	if s.async != nil {
+		s.async.GetAsync(ctx, key, onComplete)
+		return
+	}
+	go func() {
+		b, ok, err := s.disk.Get(ctx, key)
+		if onComplete != nil {
+			onComplete(b, ok, err)
+		}
+	}()
+}
+
 var _ radixkv.SnapshotStore = (*localSSDSnapshotStore)(nil)
+var _ radixkv.SnapshotToucher = (*localSSDSnapshotStore)(nil)
+var _ radixkv.SnapshotDeleter = (*localSSDSnapshotStore)(nil)
+var _ radixkv.SnapshotAsyncGetter = (*localSSDSnapshotStore)(nil)

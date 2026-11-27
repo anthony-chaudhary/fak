@@ -2,8 +2,13 @@ package l3kv
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 )
+
+// ErrAsyncJobStale is returned to a GetAsync callback when a Reset() invalidated
+// the job before its store read completed.
+var ErrAsyncJobStale = errors.New("l3kv: async job invalidated by reset")
 
 // AsyncJob is a tagged background KV store or transfer task.
 type AsyncJob struct {
@@ -243,6 +248,32 @@ func (s *AsyncStore) PutAsync(ctx context.Context, key string, payload []byte, o
 				onComplete(err)
 			}
 		})
+	}()
+	return job
+}
+
+// GetAsync dispatches a background Get operation to the underlying Store.
+// If the job is invalidated by Reset() before completion, onComplete receives
+// ErrAsyncJobStale instead of stale bytes.
+func (s *AsyncStore) GetAsync(ctx context.Context, key string, onComplete func(payload []byte, found bool, err error)) AsyncJob {
+	job := s.wm.Dispatch(key, nil)
+	go func() {
+		var (
+			payload []byte
+			found   bool
+			err     error
+		)
+		if s.store != nil {
+			payload, found, err = s.store.Get(ctx, key)
+		}
+		committed := s.wm.Complete(job, func(AsyncJob) {
+			if onComplete != nil {
+				onComplete(payload, found, err)
+			}
+		})
+		if !committed && onComplete != nil {
+			onComplete(nil, false, ErrAsyncJobStale)
+		}
 	}()
 	return job
 }
