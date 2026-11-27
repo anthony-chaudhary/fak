@@ -10,16 +10,17 @@ coding agent through fak’s gateway to allow reads while blocking writes.
 
 [![fak benchmark sweep: Inkling-2-Mini decode and prefill on an RTX 5080 and decode on an M3 Pro, then two kernel checks, and where fak still trails](visuals/61-hero-benchmark-sweep.png)](docs/benchmarks/README.md)
 
-On one RTX 5080, fak’s own engine decodes Inkling-2-Mini at 119.9 tok/s,
-level with the fastest llama.cpp fork at 119.5. That is parity, not a lead:
-fak’s number comes from its in-process bench and the fork’s from `llama-bench`.
-Prefill is where fak pulls ahead: with 4-bit expert weights and activations
-(NVFP4 W4A4, the default on an `sm_120f` build from `main`), it reads a
-512-token prompt at 5861 tok/s against 3012 for the fork, 1.95x. That is the
-server’s prompt rate; fak’s first visible token still arrives later than the
-fork’s. At 1,946 tokens of context fak still trails the fork on decode, 89.0 vs
-113.8 tok/s. The [benchmark index](docs/benchmarks/README.md) links the
-receipts and the other comparisons.
+On one RTX 5080 16 GB, fak’s own CUDA engine decodes Inkling-2-Mini at
+122.34 tok/s in-process (`kv=f16`, auto context 29,184). Over HTTP at 16K context
+(`C4_p2048_d256`), fak reaches 2,017.61 ms median time to first token (TTFT) and
+130.44 tok/s aggregate end-to-end throughput, ahead of the `realugbun/llama.cpp`
+fork (3,718.34 ms / 122.47 tok/s) and stock `llama.cpp` (4,683.83 ms / 115.69 tok/s),
+while single-stream served decode still trails `realugbun` (102.45 vs 118.63 tok/s
+at `C1_p512_d128`). Prefill uses 4-bit expert weights and activations (NVFP4 W4A4,
+default on an `sm_120f` build from `main`) and reads a 512-token prompt at 5,861 tok/s
+against 3,012 for the fork. The [benchmark index](docs/benchmarks/README.md) links the
+[Wave-2 RTX 5080 receipt](docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md)
+and the other comparisons.
 
 A matched HTTP test on one RTX 5080 measured aggregate prefill for uncached
 512-token prompts with one output token per request. Fak revision `e7ad0c8dee5`,
@@ -61,7 +62,7 @@ On Apple Silicon, `fak up` probes unified memory, picks a model tier, and
 opens a chat prompt:
 
 ```sh
-fak up
+fak up   # -> opens a local chat prompt
 ```
 
 On Windows x64 and Linux x64, `fak up` is not available (it is the Apple

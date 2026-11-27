@@ -1,6 +1,6 @@
 {
   "schema": "fak-hardware-latest/1",
-  "as_of": "2026-11-24",
+  "as_of": "2026-11-26",
   "platforms": {
     "Mac": {
       "observed": "2026-11-24",
@@ -13,9 +13,9 @@
       "row": "| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](STRIX-HALO-DEEPSEEK-V41-FLASH.md) |"
     },
     "NVIDIA": {
-      "observed": "2026-11-24",
-      "detail": "docs/benchmarks/published/aegis-inkling2-fork-parity/RESULTS.md",
-      "row": "| NVIDIA | Inkling-2-Mini UD-Q3_K_XL on an RTX 5080 16 GB (sm_120): fak-native resident CUDA decode reached 119.9 tok/s single-stream on the default path, about 1.48x upstream llama.cpp tg128 (81.0 on the same card and GGUF) and level with the fastest llama.cpp fork measured (119.5 in the same window); opt-in speculative decode (`FAK_INKLING2_SPEC=2`) reached 151.7 tok/s, +26.6% over plain decode in the same window; greedy output matches the llama.cpp oracle on 3 of 4 cases; observed 2026-11-24. | HW-witnessed ABBA, in-process decode bench, not a served-endpoint rate. Speculative decode is off by default because its batched verify is not bit-exact to the per-token step. The fourth oracle case diverges at a known near-tie, and at 1,946 tokens of context plain decode still trails the fork (89.0 vs 113.8 tok/s). [Plain decode receipt](published/aegis-inkling2-fork-parity/RESULTS.md), [spec decode receipt](published/aegis-inkling2-spec-decode/RESULTS.md) |"
+      "observed": "2026-11-26",
+      "detail": "docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md",
+      "row": "| NVIDIA | Inkling-2-Mini UD-Q3_K_XL on an RTX 5080 16 GB (sm_120): fak-native resident CUDA plain decode reached 122.34 tok/s (`kv=f16`, auto context 29,184); served HTTP `C4_p2048_d256` at 16K context reached 2,017.61 ms median TTFT and 130.44 agg e2e tok/s vs realugbun/llama.cpp (3,718.34 ms / 122.47) and stock llama.cpp (4,683.83 ms / 115.69); 16K `f16` prefill KL mean 0.002912 (164/165 same-top, 32/32 forced oracle exact); non-greedy sampling (`eb68a8cf8a`) seed-42 byte-identical and `temp=0` stream 336.37 tok/s; observed 2026-11-26. | HW-witnessed on RTX 5080 16 GB (`C1–C4 <=16K`). `fak` leads on TTFT across `C1_p2048` and `C2`/`C4` and on `C4_p2048_d256` agg e2e, while trailing on per-stream HTTP decode tok/s; opt-in `f32` spec oracle reaches 294–326 tok/s (off by default); >16K `f16` hits the 19,456-token global KV cap. [Wave-2 RTX 5080 receipt](published/rtx5080-inkling2-v060/RESULTS.md) |"
     }
   }
 }
