@@ -44,7 +44,7 @@ build Vulkan from source for older distributions.
 CPU reference archives remain available for `linux/amd64`, `linux/arm64`,
 `darwin/amd64`, `darwin/arm64`, and `windows/amd64`.
 
-The [v0.59.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.59.0)
+The [v0.60.0 release](https://github.com/anthony-chaudhary/fak/releases/tag/v0.60.0)
 includes the Apple Silicon Metal and Linux amd64 Vulkan archives, a checksum
 alongside each download, and the aggregate `SHA256SUMS`.
 A packaged backend still needs qualification on the actual model and GPU.
@@ -108,7 +108,7 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 Then confirm:
 
 ```sh
-fak version          # prints the installed version, e.g. 0.59.0
+fak version          # prints the installed version, e.g. 0.60.0
 ```
 
 What you'll see: a single version line on stdout (the release you just installed). If
@@ -254,7 +254,7 @@ Containers must bind `0.0.0.0`, not loopback — the default `CMD` already does
 (`serve --addr 0.0.0.0:8080`). Stamp a specific version into the binary at build time:
 
 ```sh
-docker build --build-arg APP_VERSION=0.59.0 -t fak:0.59.0 .
+docker build --build-arg APP_VERSION=0.60.0 -t fak:0.60.0 .
 ```
 
 Override the entrypoint command to run `fak agent`, `fak policy`, etc. instead of the
@@ -381,7 +381,7 @@ the `...@latest` pseudo-path resolves directly — no clone needed. You can equa
 prebuilt-binary download (sections 1 and 2 above) or the build-from-source fallback.
 
 The Go module proxy and GitHub's Latest release both serve v0.59.0, which
-includes Inkling-2-Mini. Use `@v0.59.0` with Go or set `FAK_VERSION=0.59.0`
+includes Inkling-2-Mini. Use `@v0.60.0` with Go or set `FAK_VERSION=0.60.0`
 with the prebuilt installer to pin that version. For CUDA, use the
 `ghcr.io/anthony-chaudhary/fak:0.59.0-cuda` image or follow the
 [source build instructions](#build-from-source).
