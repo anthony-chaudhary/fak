@@ -168,6 +168,7 @@ type inkling2Resident struct {
 
 	warm                               bool // one eager token has run since the last batched prefill
 	batched                            bool
+	prefillFP8                         bool
 	prefillKeep, prefillScr, prefillIn ink2Ref
 	prefillCap                         int
 	// chunkMax is the widest prefill forward the local rings of this session hold and
@@ -563,7 +564,7 @@ func inkling2AutoFitCtxFor(m *Inkling2LoopModel, be compute.Backend, free int64,
 	if batched && m.HP.Hidden > 0 {
 		prefillChunk = max(chunk, inkling2PrefillChunkBase)
 	}
-	other := inkling2ResidentOtherBytes(m.HP, inkling2ArenaFloats, prefillChunk, 0)
+	other := inkling2ResidentOtherBytesFor(m.HP, inkling2ArenaFloats, prefillChunk, 0, inkling2PrefillFP8Enabled(be, lookup))
 	budget := free - inkling2DeviceHeadroom(free)
 	left := budget - other
 	ceil := inkling2AutoCtxMax(be.Name(), dtype != Inkling2KVF32)
@@ -669,14 +670,38 @@ func inkling2ResidentFixedBytes(hp model.Inkling2LoopHParams, arenaFloats int) i
 	return 4 * int64(hp.Hidden+4+arenaFloats+4)
 }
 
+// inkling2PrefillFP8Enabled reports whether batched prefill arenas use FP8 E4M3FN
+// quantization on be. Explicit FAK_INKLING2_PREFILL_FP8=0 disables it; unset or 1
+// enables it when be implements Inkling2PrefillFP8ArenaDevice and is ready.
+func inkling2PrefillFP8Enabled(be compute.Backend, lookup func(string) (string, bool)) bool {
+	if be == nil {
+		return false
+	}
+	if lookup != nil {
+		if v, ok := lookup("FAK_INKLING2_PREFILL_FP8"); ok {
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "0", "false", "f32", "off":
+				return false
+			}
+		}
+	}
+	fp8Dev, ok := be.(compute.Inkling2PrefillFP8ArenaDevice)
+	return ok && fp8Dev.Ink2PFP8ArenaReady() == nil
+}
+
 // inkling2ResidentOtherBytes is the non-KV device memory of a session: the fixed
 // buffers plus, when prefillChunk > 0, the prefill arenas (base or wide) and the
 // chunk input.
 func inkling2ResidentOtherBytes(hp model.Inkling2LoopHParams, arenaFloats, prefillChunk, padK int) int64 {
+	return inkling2ResidentOtherBytesFor(hp, arenaFloats, prefillChunk, padK, false)
+}
+
+// inkling2ResidentOtherBytesFor is inkling2ResidentOtherBytes with explicit FP8
+// prefill arena selection.
+func inkling2ResidentOtherBytesFor(hp model.Inkling2LoopHParams, arenaFloats, prefillChunk, padK int, prefillFP8 bool) int64 {
 	other := inkling2ResidentFixedBytes(hp, arenaFloats)
 	if prefillChunk > 0 {
-		keep, scr := inkling2PrefillArenaFloats(hp, prefillChunk, padK)
-		other += 4 * int64(keep+scr+prefillChunk*hp.Hidden)
+		other += inkling2PrefillArenaTotalBytes(hp, prefillChunk, padK, prefillFP8)
 	}
 	return other
 }
@@ -786,6 +811,7 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 		return nil, kvErr
 	}
 	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats, chunkMax: ring, chunkWanted: wanted}
+	s.prefillFP8 = inkling2PrefillFP8Enabled(be, os.LookupEnv)
 	s.report = metalgemm.Ink2ReportRequested(os.Getenv(metalgemm.Ink2ProfileEnv))
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
 	s.batched = hasPrefill && (inkling2BatchedPrefill() || forSpec || inkling2SpecDepthFor(m) > 0)

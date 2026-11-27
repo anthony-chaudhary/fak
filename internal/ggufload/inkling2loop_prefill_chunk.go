@@ -94,6 +94,17 @@ func Inkling2MetalPrefillChunkForBudget(lookup func(string) (string, bool), fits
 	return inkling2PrefillChunkBase
 }
 
+// Inkling2PrefillChunkForBudget selects the largest prefill chunk in {512, 256, 128, 64}
+// whose prefill arena footprint (F32 or FP8) fits inside freeBytes.
+func Inkling2PrefillChunkForBudget(hp model.Inkling2LoopHParams, freeBytes int64, fp8 bool) int {
+	for _, c := range []int{512, 256, 128, 64} {
+		if inkling2PrefillArenaTotalBytes(hp, c, hp.ExpertWidth, fp8) <= freeBytes {
+			return c
+		}
+	}
+	return 64
+}
+
 // inkling2PrefillChunkWantedOn is inkling2PrefillChunkWanted on backend be: an unset
 // setting on Metal asks for inkling2PrefillChunkMetal, still subject to admission.
 func inkling2PrefillChunkWantedOn(be any, lookup func(string) (string, bool)) int {

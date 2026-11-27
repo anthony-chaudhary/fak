@@ -175,3 +175,14 @@ type Inkling2DraftDevice interface {
 	// of base[c] + head[c].(z+zb), head the resident Q5_K LM head.
 	Ink2DMarkovPick(head Tensor, base, cand Ink2Ref, M int, z, zb, idx Ink2Ref, step int) error
 }
+
+// Inkling2PrefillFP8ArenaDevice is an optional prefill capability that stores
+// transient keep/scr activation buffers in per-row scaled FP8 E4M3FN instead of FP32,
+// reducing prefill arena VRAM by ~4x while keeping residual accumulation and norms in FP32.
+type Inkling2PrefillFP8ArenaDevice interface {
+	Ink2PFP8ArenaReady() error
+	// Ink2PQuantizeFP8 quantizes [rows, cols] FP32 src into E4M3FN codes and FP32 per-row scales.
+	Ink2PQuantizeFP8(src, codes, scales Ink2Ref, rows, cols int) error
+	// Ink2PDequantFP8 dequantizes [rows, cols] E4M3FN codes and FP32 per-row scales into FP32 dst.
+	Ink2PDequantFP8(codes, scales, dst Ink2Ref, rows, cols int) error
+}

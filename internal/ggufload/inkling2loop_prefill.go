@@ -45,6 +45,9 @@ type ink2Prefill struct {
 	keepFloats int
 	scrFloats  int
 	grouped    bool
+	fp8Arena   compute.Inkling2PrefillFP8ArenaDevice
+	keepScales map[int]ink2Ref
+	keepCols   map[int]int
 	// verify is a speculative verify chunk: convs log their inputs for a later
 	// commit and the head runs on every row.
 	verify bool
@@ -81,9 +84,102 @@ func (p *ink2Prefill) take(base ink2Ref, off *int, limit, n int, what string) in
 func (p *ink2Prefill) tmp(n int) ink2Ref  { return p.take(p.scr, &p.scrOff, p.scrFloats, n, "scratch") }
 func (p *ink2Prefill) hold(n int) ink2Ref { return p.take(p.keep, &p.keepOff, p.keepFloats, n, "keep") }
 
+// quantizeKeep stores an FP32 [rows, cols] activation into the keep arena as
+// per-row scaled FP8 E4M3FN codes + FP32 scales, returning the codes ref.
+func (p *ink2Prefill) quantizeKeep(src ink2Ref, rows, cols int) ink2Ref {
+	if p.fp8Arena == nil || p.verify {
+		return src
+	}
+	codeFloats := (rows*cols + 3) / 4
+	codes := p.hold(codeFloats)
+	scales := p.hold(rows)
+	if p.keepScales == nil {
+		p.keepScales = map[int]ink2Ref{}
+		p.keepCols = map[int]int{}
+	}
+	p.keepScales[codes.Off] = scales
+	p.keepCols[codes.Off] = cols
+	if p.s.err == nil {
+		p.fail(p.fp8Arena.Ink2PQuantizeFP8(src, codes, scales, rows, cols))
+	}
+	return codes
+}
+
+// readKeep dequantizes a keep-arena FP8 ref into an FP32 scratch buffer when
+// FP8 prefill arenas are active; otherwise it returns r unchanged.
+func (p *ink2Prefill) readKeep(r ink2Ref) ink2Ref {
+	if p.fp8Arena == nil || p.verify || r.T.Buf() != p.keep.T.Buf() {
+		return r
+	}
+	scales, ok := p.keepScales[r.Off]
+	if !ok {
+		return r
+	}
+	cols := p.keepCols[r.Off]
+	dst := p.tmp(p.T * cols)
+	if p.s.err == nil {
+		p.fail(p.fp8Arena.Ink2PDequantFP8(r, scales, dst, p.T, cols))
+	}
+	return dst
+}
+
+// readKeepSlice dequantizes any FP8 keep-arena refs in states to FP32 scratch.
+func (p *ink2Prefill) readKeepSlice(states []ink2Ref) []ink2Ref {
+	if p.fp8Arena == nil || p.verify {
+		return states
+	}
+	out := make([]ink2Ref, len(states))
+	for i, st := range states {
+		out[i] = p.readKeep(st)
+	}
+	return out
+}
+
 // prefillArenas sizes the two prefill arenas for chunks of T tokens.
 func (s *inkling2Resident) prefillArenas(T int) (keep, scr int) {
+	if s.prefillFP8 {
+		return inkling2PrefillArenaFP8Floats(s.hp, T, s.maxPadK())
+	}
 	return inkling2PrefillArenaFloats(s.hp, T, s.maxPadK())
+}
+
+// inkling2PrefillArenaFP8Bytes returns the byte sizes of the keep and scr prefill
+// arenas when activations are stored as per-row scaled FP8 E4M3FN (1 byte/elem +
+// 4 bytes/row scale), keeping int32/routing metadata in 4-byte elements.
+func inkling2PrefillArenaFP8Bytes(hp model.Inkling2LoopHParams, T, padK int) (keepBytes, scrBytes int64) {
+	visits := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
+	keepElems := int64(visits+2) * (int64(T)*int64(hp.Hidden) + 64)
+	keepRows := int64(visits+2) * int64(T)
+	keepBytes = compute.Ink2FP8ArenaBytes(keepElems, keepRows) + int64(visits+2)*512
+
+	_, scrF32 := inkling2PrefillArenaFloats(hp, T, padK)
+	scrMetaFloats := int64(T)*(int64(3*hp.ExpertsUsed)+256) + 64*64 + int64(compute.Ink2PGroupScratch(T*hp.ExpertsUsed, 256)) + 64
+	scrActElems := max(int64(0), int64(scrF32)-scrMetaFloats)
+	scrRows := int64(T) * (32 + int64(8*hp.ExpertsUsed))
+	scrBytes = compute.Ink2FP8ArenaBytes(scrActElems, scrRows) + ((scrMetaFloats*4 + 63) &^ 63)
+	return keepBytes, scrBytes
+}
+
+// inkling2PrefillArenaFP8Floats returns the float32-equivalent allocation counts
+// for the FP8 E4M3FN keep and scr prefill arenas.
+func inkling2PrefillArenaFP8Floats(hp model.Inkling2LoopHParams, T, padK int) (keep, scr int) {
+	kb, sb := inkling2PrefillArenaFP8Bytes(hp, T, padK)
+	return int((kb + 3) / 4), int((sb + 3) / 4)
+}
+
+// inkling2PrefillArenaBytesFor returns the keep and scr arena byte sizes for F32 or FP8.
+func inkling2PrefillArenaBytesFor(hp model.Inkling2LoopHParams, T, padK int, fp8 bool) (keepBytes, scrBytes int64) {
+	if fp8 {
+		return inkling2PrefillArenaFP8Bytes(hp, T, padK)
+	}
+	keep, scr := inkling2PrefillArenaFloats(hp, T, padK)
+	return 4 * int64(keep), 4 * int64(scr)
+}
+
+// inkling2PrefillArenaTotalBytes returns total prefill device bytes (keep + scr + prefillIn).
+func inkling2PrefillArenaTotalBytes(hp model.Inkling2LoopHParams, T, padK int, fp8 bool) int64 {
+	kb, sb := inkling2PrefillArenaBytesFor(hp, T, padK, fp8)
+	return kb + sb + 4*int64(T)*int64(hp.Hidden)
 }
 
 // maxPadK is the widest padded expert row across the session's layers.
@@ -129,6 +225,9 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 	T := inkling2PrefillChunkFor(len(prompt), s.chunkMax)
 	startPos := s.pos
 	p := &ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts()}
+	if s.prefillFP8 {
+		p.fp8Arena, _ = s.be.(compute.Inkling2PrefillFP8ArenaDevice)
+	}
 	if s.kvHalf {
 		// inkling2ResidentKVDType has already checked these ops exist on this backend
 		p.half, _ = s.be.(compute.Inkling2PrefillHalfKV)
@@ -157,6 +256,8 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 		s.fail(s.dev.Ink2Write(s.prefillIn, rows[:n*hp.Hidden]))
 		p.T, p.pos0 = n, s.pos
 		p.keepOff, p.scrOff = 0, 0
+		clear(p.keepScales)
+		clear(p.keepCols)
 		if s.draft != nil {
 			s.fail(s.dev.Ink2Write(s.verifyPos, []float32{intBits(s.pos)}))
 		}
@@ -370,6 +471,7 @@ func (p *ink2Prefill) rmsInto(x, w, y ink2Ref, n int, eps float32) {
 // mixNorm is mix with query q RMS-normalized by norms[q] (norms nil: no norm). A
 // verify chunk runs both in one cluster launch per token row.
 func (p *ink2Prefill) mixNorm(states []ink2Ref, queries ink2Ref, nq int, norms []ink2Ref) []ink2Ref {
+	states = p.readKeepSlice(states)
 	s := p.s
 	h := s.hp.Hidden
 	if (p.verify || p.fewRows) && s.err == nil {
@@ -476,7 +578,10 @@ func (p *ink2Prefill) conv(slot int, x, weight, dyn, resid ink2Ref, n, heads, of
 		norm = float32(1 / math.Sqrt(float64(2*kn+1)))
 	}
 	var out ink2Ref
-	if keep {
+	keepFP8 := keep && p.fp8Arena != nil && !p.verify
+	if keepFP8 {
+		out = p.tmp(p.T * n)
+	} else if keep {
 		out = p.hold(p.T * n)
 	} else {
 		out = p.tmp(p.T * n)
@@ -489,6 +594,9 @@ func (p *ink2Prefill) conv(slot int, x, weight, dyn, resid ink2Ref, n, heads, of
 			n, max(heads, 1), kn, norm, p.T))
 	} else if s.err == nil {
 		p.fail(p.pd.Ink2PConv(x, weight, dyn, at(s.hist[slot], offset*(kn-1)), out, resid, n, max(heads, 1), kn, norm, p.T))
+	}
+	if keepFP8 {
+		return p.quantizeKeep(out, p.T, n)
 	}
 	return out
 }
@@ -520,6 +628,8 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	local := hp.LocalLayer[ip]
 	h := hp.Hidden
 	kvDim := hp.KVHeads * hp.HeadDim
+	curKeep := cur
+	cur = p.readKeep(cur)
 	inpSA := cur
 
 	in := [3]ink2Ref{cur, cur, cur}
@@ -648,7 +758,7 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	}
 	o := p.mmGated(l.wo, attn, gate, hp.Heads*hp.HeadDim)
 	if ip%hp.AttnResBlock == 0 {
-		*blocks = append(*blocks, inpSA)
+		*blocks = append(*blocks, curKeep)
 		cur = p.conv(slot, o, l.attnPostConv, ink2Ref{}, ink2Ref{}, h, 0, 2*kvDim, false)
 	} else {
 		cur = p.conv(slot, o, l.attnPostConv, ink2Ref{}, inpSA, h, 0, 2*kvDim, false)
@@ -769,6 +879,14 @@ func (p *ink2Prefill) moeRows(l *ink2Layer, x ink2Ref) (ink2Ref, ink2Ref) {
 	default:
 		p.fail(p.pd.Ink2PSitu(gu, act, npairs, width, padK, float64(hp.SituBeta), float64(hp.SituLinearBeta)))
 	}
+	if p.fp8Arena != nil && !p.verify && s.err == nil && padK > 0 {
+		actCodes := p.tmp((npairs*padK + 3) / 4)
+		actScales := p.tmp(npairs)
+		p.fail(p.fp8Arena.Ink2PQuantizeFP8(act, actCodes, actScales, npairs, padK))
+		actFP32 := p.tmp(npairs * padK)
+		p.fail(p.fp8Arena.Ink2PDequantFP8(actCodes, actScales, actFP32, npairs, padK))
+		act = actFP32
+	}
 	down := p.tmp(npairs * hp.Hidden)
 	switch {
 	case pairwise && p.verifyExperts(&l.down, ids, act, 1, padK, down, hp.Hidden, npairs):
@@ -814,12 +932,19 @@ func (p *ink2Prefill) forward(last bool) {
 	s := p.s
 	hp := s.hp
 	h := hp.Hidden
-	cur := p.hold(p.T * h)
 	in := p.in
 	if in.T.Buf() == nil {
 		in = s.prefillIn
 	}
-	p.rmsInto(in, s.tokNorm, cur, h, hp.NormEps)
+	var cur ink2Ref
+	if p.fp8Arena != nil && !p.verify {
+		tmpCur := p.tmp(p.T * h)
+		p.rmsInto(in, s.tokNorm, tmpCur, h, hp.NormEps)
+		cur = p.quantizeKeep(tmpCur, p.T, h)
+	} else {
+		cur = p.hold(p.T * h)
+		p.rmsInto(in, s.tokNorm, cur, h, hp.NormEps)
+	}
 	// visit resets the layer scratch and, with a draft attached, keeps the visit's
 	// input when it is a draft tap
 	var taps []ink2Ref
@@ -890,7 +1015,19 @@ func (p *ink2Prefill) forward(last bool) {
 	}
 	p.scrOff = 0
 	// the head runs on the last token only: every state viewed at its last row
-	lastRow := func(r ink2Ref) ink2Ref { return at(r, (p.T-1)*h) }
+	lastRow := func(r ink2Ref) ink2Ref {
+		if p.fp8Arena != nil && r.T.Buf() == p.keep.T.Buf() {
+			if scales, ok := p.keepScales[r.Off]; ok && h%4 == 0 {
+				dst := p.tmp(h)
+				if s.err == nil {
+					p.fail(p.fp8Arena.Ink2PDequantFP8(at(r, (p.T-1)*h/4), at(scales, p.T-1), dst, 1, h))
+				}
+				return dst
+			}
+			return at(p.readKeep(r), (p.T-1)*h)
+		}
+		return at(r, (p.T-1)*h)
+	}
 	states := make([]ink2Ref, 0, len(blocks)+1)
 	for _, b := range blocks {
 		states = append(states, lastRow(b))
