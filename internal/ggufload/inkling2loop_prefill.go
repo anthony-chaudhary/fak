@@ -167,6 +167,9 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 		s.pos += n
 		s.prefillWidest = max(s.prefillWidest, n)
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	got, err := s.dev.Ink2ReadInts(s.argIdx, 1)
 	if err != nil {
 		return 0, err

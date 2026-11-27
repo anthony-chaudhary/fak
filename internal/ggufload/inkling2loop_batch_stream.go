@@ -104,7 +104,16 @@ func Inkling2LoopSessionDecode(ctx context.Context, s Inkling2LoopSession, promp
 	}
 	start = time.Now()
 	defer func() { st.Decode = time.Since(start) }()
-	for turn.Accept(next) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return st, err
+		}
+		if !turn.Accept(next) {
+			if err := ctx.Err(); err != nil {
+				return st, err
+			}
+			break
+		}
 		if err := ctx.Err(); err != nil {
 			return st, err
 		}
@@ -229,7 +238,7 @@ func (lane *inkling2BatchLane) accept(token int, now time.Time) {
 	lane.sinkTime += time.Since(t0)
 	lane.last = token
 	if !more {
-		lane.finish(time.Now(), nil)
+		lane.finish(time.Now(), lane.req.Context.Err())
 	}
 }
 
@@ -703,6 +712,10 @@ func (bt *Inkling2LoopCohorts) runCohortRound(reqs []Inkling2LoopBatchRequest, h
 	mixed := b.prefillT > 0 && longCap > 0
 	keep, first := prefillHooks(lanes)
 	for i := range lanes {
+		if err := lanes[i].req.Context.Err(); err != nil {
+			lanes[i].finish(time.Now(), err)
+			continue
+		}
 		if fatal == nil {
 			fatal = b.restoreLane(i, &lanes[i])
 		}
@@ -723,6 +736,10 @@ func (bt *Inkling2LoopCohorts) runCohortRound(reqs []Inkling2LoopBatchRequest, h
 		for i := range lanes {
 			lane := &lanes[i]
 			if lane.done || b.pos[i] < b.ctx {
+				continue
+			}
+			if err := lane.req.Context.Err(); err != nil {
+				lane.finish(time.Now(), err)
 				continue
 			}
 			now := time.Now()
@@ -1125,6 +1142,12 @@ func admitLanes(b *inkling2Batch, lanes []inkling2BatchLane, results []Inkling2L
 		}
 		if req.Done == nil {
 			continue
+		}
+		if req.Context != nil {
+			if err := req.Context.Err(); err != nil {
+				req.Done(Inkling2LoopBatchResult{Err: err})
+				continue
+			}
 		}
 		if err := inkling2AdmitCheckFor(req, b.ctx, headroom, maxCtx); err != nil {
 			req.Done(Inkling2LoopBatchResult{Err: err})

@@ -198,6 +198,9 @@ func (r *inkling2ResidentSession) Prefill(ctx context.Context, prompt []int) (in
 	if len(prompt) == 0 {
 		return 0, fmt.Errorf("inkling2_loop: empty prompt")
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	r.own()
 	r.s.settle()
 	if r.s.batched {

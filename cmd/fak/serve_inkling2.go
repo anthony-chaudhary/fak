@@ -393,6 +393,9 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 		if _, err = s.Prefill(r.ctx, prompt[reused:last]); err != nil {
 			return res, err
 		}
+		if cerr := r.ctx.Err(); cerr != nil {
+			return res, cerr
+		}
 	}
 	if rw != nil {
 		// the last prompt token and up to maxNew-1 decode steps run past it
@@ -408,6 +411,10 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	next, err := s.Prefill(r.ctx, prompt[last:])
 	if err != nil {
 		return res, err
+	}
+	if cerr := r.ctx.Err(); cerr != nil {
+		fault = false
+		return res, cerr
 	}
 	ls, hasLogits := s.(ggufload.Inkling2LoopLogitSession)
 	if r.sample != nil {
@@ -431,12 +438,20 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	start = time.Now()
 	defer func() { res.DecodeSeconds = time.Since(start).Seconds() }()
 	for res.Generated < r.maxNew {
+		if cerr := r.ctx.Err(); cerr != nil {
+			fault = false
+			return res, cerr
+		}
 		if r.stops[next] {
 			res.Stopped = true
 			break
 		}
 		res.Generated++
 		if !r.emit(next) {
+			if cerr := r.ctx.Err(); cerr != nil {
+				fault = false
+				return res, cerr
+			}
 			res.Stopped = true
 			break
 		}
@@ -453,6 +468,10 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 		}
 		if next, err = s.Step(next); err != nil {
 			return res, err
+		}
+		if cerr := r.ctx.Err(); cerr != nil {
+			fault = false
+			return res, cerr
 		}
 		if r.sample != nil && hasLogits {
 			logits, lerr := ls.LastLogits()

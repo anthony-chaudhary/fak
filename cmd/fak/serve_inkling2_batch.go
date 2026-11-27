@@ -578,6 +578,12 @@ func (e *inkling2LoopBatchEngine) shouldRunScalarLone(r *inkling2QueuedRequest) 
 
 // runScalar serves one row on the serialized engine, beside the weight binding only.
 func (e *inkling2LoopBatchEngine) runScalar(r *inkling2QueuedRequest) {
+	if r.ctx != nil {
+		if err := r.ctx.Err(); err != nil {
+			r.done <- inkling2QueuedResult{err: err}
+			return
+		}
+	}
 	e.scalarGroups.Add(1)
 	e.lastCohortWidth.Store(1)
 	if e.arenasCached && e.releaseArenas != nil {

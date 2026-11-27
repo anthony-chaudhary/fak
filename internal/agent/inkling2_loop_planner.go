@@ -259,6 +259,7 @@ func (b *inkling2CycleBreaker) push(id int) bool {
 // output. A new match must end inside the newest piece, so only the last
 // longest-stop bytes before it need searching.
 type inkling2StopScanner struct {
+	ctx     context.Context
 	decode  func(ids []int) (string, error)
 	stops   []string
 	longest int
@@ -281,6 +282,9 @@ func newInkling2StopScanner(decode func(ids []int) (string, error), stops []stri
 
 // push records id and reports whether generation should continue.
 func (s *inkling2StopScanner) push(id int) bool {
+	if s.ctx != nil && s.ctx.Err() != nil {
+		return false
+	}
 	if s.err != nil {
 		return true
 	}
@@ -381,7 +385,13 @@ func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSin
 	if inKernelEffectiveToolName(sp.ToolChoice, tools) != "" {
 		var release func([]byte) bool
 		if held != nil {
-			release = func([]byte) bool { held.token(false); return true }
+			release = func([]byte) bool {
+				if ctx.Err() != nil {
+					return false
+				}
+				held.token(false)
+				return ctx.Err() == nil
+			}
 		}
 		comp, err := p.complete(ctx, messages, tools, sp, release)
 		if err != nil || comp == nil || comp.Message.Content == "" {
@@ -402,6 +412,9 @@ func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSin
 	pump := startInkling2StreamPump(sink, reasoningSink, cancel)
 	defer pump.stop()
 	comp, err := p.complete(streamCtx, messages, tools, sp, func(raw []byte) bool {
+		if streamCtx.Err() != nil {
+			return false
+		}
 		content, reasoning := projector.feed(raw)
 		if held != nil {
 			held.token(content != "" || (reasoningSink != nil && reasoning != ""))
@@ -410,7 +423,7 @@ func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSin
 		if reasoningSink != nil {
 			live = pump.put(reasoning, true) && live
 		}
-		return live
+		return live && streamCtx.Err() == nil
 	})
 	if sinkErr := pump.stop(); sinkErr != nil {
 		return nil, sinkErr
@@ -446,6 +459,9 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 	if err := validateNativeSamplingParams(sp); err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	offered := offeredToolsFor(ctx, tools)
 	ids, err := p.tok.Encode(inKernelRenderPrompt(messages, tools, p.cfg, sp))
 	if err != nil {
@@ -466,6 +482,7 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 	}
 
 	scan := newInkling2StopScanner(p.tok.Decode, sp.Stop)
+	scan.ctx = ctx
 	scan.release = release
 	var cycle inkling2CycleBreaker
 	emit := func(id int) bool {
@@ -481,6 +498,9 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 			return nil, err
 		}
 		return nil, NewLocalForwardError("Inkling-2 generation", err, classifiedDeviceOOM(err))
+	}
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, cerr
 	}
 	text, err := scan.finish()
 	if err != nil {
