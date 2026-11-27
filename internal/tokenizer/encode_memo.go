@@ -29,6 +29,11 @@ type EncodeWork struct {
 // These are not heap bounds: map overhead and normal output storage are additional.
 // It relies on Tokenizer's existing immutable-after-construction contract.
 type EncodeMemo struct {
+	// Shared, when non-nil, is a content-addressed cache consulted after this
+	// memo's own previous generation and fed by every encoded ordinary run, so
+	// separate conversations reuse each other's run encodings. Set before use.
+	Shared *SegmentCache
+
 	mu        sync.Mutex
 	tokenizer *Tokenizer
 	previous  map[string]encodedRun
@@ -72,7 +77,7 @@ func (m *EncodeMemo) encode(t *Tokenizer, text string, publish bool) ([]int, Enc
 		}
 		return ids, EncodeWork{}, err
 	}
-	run := &encodeRunMemo{next: make(map[string]encodedRun)}
+	run := &encodeRunMemo{next: make(map[string]encodedRun), shared: m.Shared, tok: t}
 	if m.tokenizer == t {
 		run.previous = m.previous
 	}
@@ -90,6 +95,8 @@ type encodeRunMemo struct {
 	previous map[string]encodedRun
 	next     map[string]encodedRun
 	work     EncodeWork
+	shared   *SegmentCache
+	tok      *Tokenizer
 }
 
 func (m *encodeRunMemo) lookup(text string) ([]int, bool) {
@@ -101,6 +108,11 @@ func (m *encodeRunMemo) lookup(text string) ([]int, bool) {
 		entry, ok = m.previous[text]
 	}
 	if !ok {
+		if ids, hit := m.shared.get(m.tok, text); hit {
+			entry, ok = encodedRun{text: text, ids: ids}, true
+		}
+	}
+	if !ok {
 		m.work.OrdinaryBytesEncoded += len(text)
 		return nil, false
 	}
@@ -110,7 +122,11 @@ func (m *encodeRunMemo) lookup(text string) ([]int, bool) {
 }
 
 func (m *encodeRunMemo) remember(text string, ids []int) {
-	if m == nil || !m.canRetain(text, len(ids)) {
+	if m == nil {
+		return
+	}
+	m.shared.put(m.tok, text, ids)
+	if !m.canRetain(text, len(ids)) {
 		return
 	}
 	// Clone the run, not its backing full prompt. Returned result IDs must never
