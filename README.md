@@ -58,16 +58,17 @@ Hardware-witnessed on one 16 GB RTX 5080 (Inkling-2-Mini 26B hybrid MoE ·
 [Install fak for your platform](INSTALL.md#local-model-setup), then open a
 terminal.
 
-On Apple Silicon, `fak up` probes unified memory, picks a model tier, and
-opens a chat prompt:
+On macOS, Linux, and Windows, `fak up` probes system memory, picks a fitting
+model tier, auto-selects the available accelerator (Metal on Apple Silicon,
+CUDA or Vulkan on Linux/Windows, or CPU), serves an OpenAI-compatible API on
+`127.0.0.1:8080`, and opens a chat prompt:
 
 ```sh
 fak up   # -> opens a local chat prompt
 ```
 
-On Windows x64 and Linux x64, `fak up` is not available (it is the Apple
-Silicon provisioner). Run the small SmolLM2 model in-kernel instead. The first
-run downloads it:
+To try a small model with a single command instead, run SmolLM2 in-kernel. The
+first run downloads it:
 
 ```sh
 fak run smollm2 "What input breaks def first(xs): return xs[0]? Write a test that catches it."

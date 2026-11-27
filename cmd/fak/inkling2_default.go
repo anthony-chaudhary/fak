@@ -105,13 +105,38 @@ func (p *turnkeyInkling2Planner) Complete(ctx context.Context, messages []agent.
 
 func (p *turnkeyInkling2Planner) ContextWindow() int { return p.window }
 
-// openTurnkeyInkling2 loads an Inkling-2 GGUF for `fak up`, refusing whenever
-// the serving gate does.
-func openTurnkeyInkling2(path, name string) (agent.Planner, func(), error) {
+func resolveTurnkeyInkling2Backend(goos, backendName string, resolveErr error) (string, error) {
+	if goos != "darwin" {
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		if backendName == "cuda" && fakmodel.RefuseInkling2LoopBackend("cuda") == nil {
+			return "cuda", nil
+		}
+	}
 	if err := turnkeyInkling2Servable(); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+// openTurnkeyInkling2 loads an Inkling-2 GGUF for `fak up`, admitting CUDA on
+// Linux/Windows when available and refusing via the Metal gate on darwin.
+func openTurnkeyInkling2(path, name string) (agent.Planner, func(), error) {
+	resolvedName := ""
+	var resolveErr error
+	if runtime.GOOS != "darwin" {
+		be, err := resolveServeChatBackend("")
+		resolveErr = err
+		if be != nil {
+			resolvedName = be.Name()
+		}
+	}
+	backend, err := resolveTurnkeyInkling2Backend(runtime.GOOS, resolvedName, resolveErr)
+	if err != nil {
 		return nil, nil, err
 	}
-	planner, release, err := openInkling2Run(path, name, "", false, nativeControlConfig{})
+	planner, release, err := openInkling2Run(path, name, backend, false, nativeControlConfig{})
 	if err != nil {
 		return nil, nil, err
 	}

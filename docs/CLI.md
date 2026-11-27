@@ -10,7 +10,7 @@ verb index, and `fak <verb> --help` for any verb.
 
 | Verb | What it does |
 |---|---|
-| `fak up` | Apple Silicon provisioner: picks a model tier for your memory, serves it on `127.0.0.1:8080`, opens a chat prompt. |
+| `fak up` | Turnkey local model provisioner (macOS, Linux, Windows): picks a model tier for your memory, auto-selects CUDA/Vulkan/Metal/CPU, serves it on `127.0.0.1:8080`, opens a chat prompt. |
 | `fak run <model> [prompt]` | Runs an in-kernel model: a chat REPL, or one-shot with a prompt. Also replays recorded traces with `--trace`. |
 | `fak chat` | Minimal chat client against a running `fak serve` gateway. |
 | `fak serve` | The OpenAI-compatible model gateway, with a live dashboard at `http://127.0.0.1:8080/`. |
@@ -32,7 +32,7 @@ fak up [--model <tier>] [--context <tokens>] [--addr 127.0.0.1:8080] [--headless
 - `--model <tier>` overrides the auto-selected tier (for example `27B` or `70B`).
 - `--headless` runs the server in the foreground without the chat REPL.
 - `--dry-run` prints the plan without starting anything. `--json` emits the plan as JSON.
-- `--memory-gib <gib>` overrides the detected unified memory.
+- `--memory-gib <gib>` overrides the detected system memory.
 - `--kv-precision f32|q8_0` picks the KV cache tier. `q8_0` fits about twice the context.
 
 `fak up status`, `fak up off`, and `fak up on` manage the macOS launch agent.

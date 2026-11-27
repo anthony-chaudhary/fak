@@ -858,7 +858,7 @@ func TestUpInKernelModelExecution(t *testing.T) {
 		t.Fatal("choice content is empty")
 	}
 	// Assert content is real generated in-kernel text, NOT the canned mock response
-	if strings.Contains(choice.Message.Content, "Turnkey") && strings.Contains(choice.Message.Content, "Probed unified RAM") {
+	if strings.Contains(choice.Message.Content, "Turnkey") && (strings.Contains(choice.Message.Content, "Probed system RAM") || strings.Contains(choice.Message.Content, "Probed unified RAM")) {
 		t.Fatalf("response returned canned mock text instead of in-kernel completion: %q", choice.Message.Content)
 	}
 	// Assert non-zero token usage

@@ -220,11 +220,12 @@ Clients can pass the key via `Authorization: Bearer <token>` or Anthropic's `x-a
 fak up
 ```
 
-On Apple Silicon, `fak up` picks the model tier for your unified memory and
-downloads it on the first run. At `you>`, ask a coding question. Leave the
-terminal open to use its chat completions endpoint at
-`http://127.0.0.1:8080/v1`. On Windows and Linux, `fak up` is not available;
-use `fak run smollm2` from the [quick start](README.md#try-fak).
+On macOS, Linux, and Windows, `fak up` picks a model tier for your system
+memory, auto-selects the available accelerator (Metal on Apple Silicon, CUDA
+or Vulkan on Linux/Windows, or CPU), and downloads the model on the first run.
+At `you>`, ask a coding question. Leave the terminal open to use its chat
+completions endpoint at `http://127.0.0.1:8080/v1`. For a lightweight one-shot
+alternative, use `fak run smollm2` from the [quick start](README.md#try-fak).
 
 Apple Silicon has [hardware evidence for serving this model](docs/_witnesses/issue-9587-nativeadmission/).
 Fresh installs and the first reply from each release build are tracked in

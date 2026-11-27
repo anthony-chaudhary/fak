@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 )
 
 // metalStampLine renders the one-line CPU/Metal truth stamp for startup surfaces.
@@ -101,5 +102,19 @@ func printTurnkeyBackendStamp(w io.Writer, d serveMetalDecision, res metalReside
 		fmt.Fprintf(w, "fak up: in-kernel chat forward: CPU (%s) — Metal skipped because no usable Metal device is available on this host.\n", stamp)
 	default:
 		fmt.Fprintf(w, "fak up: in-kernel chat forward: CPU (%s)\n", stamp)
+	}
+}
+
+// printTurnkeyComputeBackendStamp emits the one-line compute-backend stamp for
+// non-Metal turnkey runs (CUDA, Vulkan, or CPU on Linux/Windows). Empty or
+// "metal" prints nothing because Metal is stamped by printTurnkeyBackendStamp.
+func printTurnkeyComputeBackendStamp(w io.Writer, backendName string) {
+	switch strings.ToLower(strings.TrimSpace(backendName)) {
+	case "cuda":
+		fmt.Fprintln(w, "fak up: in-kernel chat forward: CUDA GPU (backend=cuda)")
+	case "vulkan":
+		fmt.Fprintln(w, "fak up: in-kernel chat forward: Vulkan GPU (backend=vulkan)")
+	case "cpu":
+		fmt.Fprintln(w, "fak up: in-kernel chat forward: CPU (backend=cpu)")
 	}
 }

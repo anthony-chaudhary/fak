@@ -38,8 +38,8 @@ import (
 func printUpHelp(w io.Writer) {
 	fmt.Fprintln(w, "Usage: fak up [flags]")
 	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Turnkey zero-configuration Apple Silicon model provisioner and interactive server.")
-	fmt.Fprintln(w, "Probes unified memory via macfit, auto-selects optimal model tier and context,")
+	fmt.Fprintln(w, "Turnkey zero-configuration local model provisioner and interactive server.")
+	fmt.Fprintln(w, "Probes host memory, auto-selects optimal model tier and context, picks CUDA/Vulkan/Metal/CPU automatically,")
 	fmt.Fprintln(w, "launches local OpenAI-compatible server on :8080, and opens an interactive chat REPL.")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Flags:")
@@ -70,7 +70,7 @@ func upHelpFlagLines() []string {
 		"headless":         "--headless                  run server in foreground without interactive REPL",
 		"dry-run":          "--dry-run                   validate topology or profile hardware without running",
 		"json":             "--json                      emit plan in JSON format",
-		"memory-gib":       "--memory-gib <gib>          override detected unified memory in GiB",
+		"memory-gib":       "--memory-gib <gib>          override detected system memory in GiB",
 		"model":            "--model <tier>              override auto-selected model tier (e.g. 7B, 27B, 70B)",
 		"context":          "--context <tokens>          override auto-selected context budget tokens",
 		"kv-precision":     "--kv-precision <prec>       KV cache storage tier: f32 (default, exact) or q8_0 (~2x more context)",
@@ -130,7 +130,7 @@ func isServeDelegation(argv []string) bool {
 // cmdUp is the product entry point for the unified deployable runtime and turnkey provisioner.
 // When --lock or --bundle is supplied, it boots the all-in-one orchestrator.
 // When raw serve-specific flags are passed, it delegates directly to serve.
-// Otherwise, it runs the turnkey Apple Silicon model provisioner and interactive server.
+// Otherwise, it runs the turnkey local model provisioner and interactive server.
 func cmdUp(argv []string) {
 	if isUpServiceVerb(argv) {
 		cmdUpService(argv)
@@ -364,7 +364,7 @@ func registerUpFlags(fs *flag.FlagSet) upFlagSet {
 		headless:        fs.Bool("headless", false, "run server only without interactive REPL"),
 		dryRun:          fs.Bool("dry-run", false, "profile hardware and print execution plan without running"),
 		asJSON:          fs.Bool("json", false, "emit plan in JSON format"),
-		memoryGiB:       fs.Float64("memory-gib", 0, "override detected unified memory in GiB"),
+		memoryGiB:       fs.Float64("memory-gib", 0, "override detected system memory in GiB"),
 		modelOverride:   fs.String("model", "", "override auto-selected model tier (e.g. 7B, 27B, 70B)"),
 		contextOverride: fs.Uint64("context", 0, "override auto-selected context budget tokens"),
 		kvPrecision:     fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION."),
@@ -483,8 +483,8 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 			_ = enc.Encode(plan)
 			return
 		}
-		fmt.Fprintln(stdout, "fak up — Apple Silicon Turnkey Execution Plan")
-		fmt.Fprintf(stdout, "Unified Memory : %.1f GiB\n", float64(plan.MemoryBytes)/float64(macfit.GiB))
+		fmt.Fprintln(stdout, "fak up — Turnkey Execution Plan")
+		fmt.Fprintf(stdout, "System Memory  : %.1f GiB\n", float64(plan.MemoryBytes)/float64(macfit.GiB))
 		fmt.Fprintf(stdout, "Model Tier     : %s (%s, quant: %s)\n", plan.Tier.Name, plan.Tier.ModelID, plan.Tier.QuantTier)
 		if resolvedURI != "" {
 			fmt.Fprintf(stdout, "Resolved URI   : %s\n", resolvedURI)
@@ -535,6 +535,9 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	server.armHostMemoryBudget(maxRSSCeiling)
 	printTurnkeyReady(stdout, ver, server.Addr(), plan)
 	printTurnkeyBackendStamp(stdout, server.metalDecision, metalResidencyStampFrom(server.liveResidencyReport()))
+	if server.native != nil && server.metalDecision == (serveMetalDecision{}) {
+		printTurnkeyComputeBackendStamp(stdout, server.native.Startup.BackendName)
+	}
 	if *gpuIdleExit > 0 {
 		fmt.Fprintf(stdout, "  • GPU idle-exit:             stops after %s idle so a queued GPU peer can run (#13135)\n", *gpuIdleExit)
 	}
@@ -974,11 +977,15 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 					return nil, err
 				}
 				nativeModelPath = ref
-				metalDecision := serveMetalDecision{live: native.Startup.MetalLive}
-				if !metalDecision.live && native.Startup.MetalCompiled {
-					metalDecision.skippedBecause = skipReasonNoDevice
-				} else if !metalDecision.live {
-					metalDecision.skippedBecause = skipReasonNotCompiled
+				metalDecision := native.Startup.MetalDecision
+				if metalDecision == (serveMetalDecision{}) && runtime.GOOS == "darwin" &&
+					(native.Startup.BackendName == "" || native.Startup.BackendName == "cpu") {
+					metalDecision = serveMetalDecision{live: native.Startup.MetalLive}
+					if !metalDecision.live && native.Startup.MetalCompiled {
+						metalDecision.skippedBecause = skipReasonNoDevice
+					} else if !metalDecision.live {
+						metalDecision.skippedBecause = skipReasonNotCompiled
+					}
 				}
 				capturedMetalDecision = metalDecision
 				planner = native.Planner
@@ -1270,10 +1277,10 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 
 		chatWord := metalStampChatWord(s.metalDecision.live)
 		if lastUserContent != "" {
-			answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon (%s). Probed unified RAM with %.1f%% headroom. Processed: %s",
+			answer.Content = fmt.Sprintf("Turnkey %s completion locally (%s). Probed system RAM with %.1f%% headroom. Processed: %s",
 				s.plan.Tier.Name, chatWord, s.plan.HeadroomRatio*100, lastUserContent)
 		} else {
-			answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon via %s. Ready to assist.", s.plan.Tier.Name, chatWord)
+			answer.Content = fmt.Sprintf("Turnkey %s completion locally via %s. Ready to assist.", s.plan.Tier.Name, chatWord)
 		}
 
 		compTokens = len(strings.Fields(answer.Content))

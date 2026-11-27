@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -35,6 +36,8 @@ type turnkeyNativeResources struct {
 }
 
 type turnkeyNativeStartup struct {
+	BackendName         string                   `json:"backend_name,omitempty"`
+	MetalDecision       serveMetalDecision       `json:"-"`
 	MetalLive           bool                     `json:"metal_live"`
 	MetalCompiled       bool                     `json:"metal_compiled"`
 	HostTotalBefore     int64                    `json:"host_total_before_bytes,omitempty"`
@@ -320,8 +323,18 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 	if deps.metalResidency != nil {
 		startup.MetalLiveQ6Weights, startup.MetalLiveQ8Weights = deps.metalResidency()
 	}
+	if runtime.GOOS == "darwin" && (backend == nil || backend.Name() == "" || backend.Name() == "cpu") {
+		startup.MetalDecision = metalDecision
+	}
 	startup.MetalLive = metalDecision.live
 	startup.MetalCompiled = metalgemm.Compiled()
+	if backend != nil && backend.Name() != "" {
+		startup.BackendName = backend.Name()
+	} else if metalDecision.live {
+		startup.BackendName = "metal"
+	} else {
+		startup.BackendName = "cpu"
+	}
 	tok, ok := deps.loadTokenizer(modelPath)
 	if !ok || tok == nil {
 		_ = model.CloseWeights()

@@ -932,7 +932,7 @@ func captureUpContractStdio(t *testing.T, fn func()) (string, string) {
 // words anywhere else stay turnkey. --help keeps both routes side-effect free,
 // so a regression cannot boot a model from this test.
 func TestUpServiceContractCmdUpPeelsServiceVerbsBeforeTurnkey(t *testing.T) {
-	const turnkeyBanner = "Turnkey zero-configuration Apple Silicon model provisioner"
+	const turnkeyBanner = "Turnkey zero-configuration local model provisioner"
 	for _, tc := range []struct {
 		argv    []string
 		service string // "" = must stay on the turnkey path

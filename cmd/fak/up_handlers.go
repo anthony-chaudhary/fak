@@ -211,7 +211,7 @@ func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request
 			finishReason = comp.FinishReason
 		}
 	} else {
-		answer.Content = fmt.Sprintf("Turnkey %s completion on Apple Silicon. Processed: %s", s.plan.Tier.Name, prompt)
+		answer.Content = fmt.Sprintf("Turnkey %s completion locally. Processed: %s", s.plan.Tier.Name, prompt)
 	}
 	if usage.CompletionTokens == 0 && answer.Content != "" {
 		usage.CompletionTokens = len(strings.Fields(answer.Content))
