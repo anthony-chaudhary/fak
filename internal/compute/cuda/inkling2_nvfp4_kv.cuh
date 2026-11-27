@@ -32,6 +32,16 @@ static constexpr float kInk2NVFP4MaxBlockAbsmax = 6.0f * 448.0f; // 2688.0f (E4M
 static constexpr float kInk2NVFP4MinAbsmax = 1e-30f;
 
 // 16-lane half-warp max reduction (lanes 0..15 and 16..31 stay strictly disjoint).
+// 16-point orthonormal Walsh-Hadamard transform (H_16 / 4) across a half-warp (lanes 0..15 / 16..31).
+static __device__ __forceinline__ float ink2_fwht16_elem(float v, int lane) {
+#pragma unroll
+  for (int s = 1; s < 16; s <<= 1) {
+    const float o = __shfl_xor_sync(0xffffffffu, v, s);
+    v = (lane & s) ? (o - v) : (v + o);
+  }
+  return __fmul_rn(v, 0.25f);
+}
+
 static __device__ __forceinline__ float ink2_halfwarp_max(float v) {
   v = fmaxf(v, __shfl_xor_sync(0xffffffffu, v, 8));
   v = fmaxf(v, __shfl_xor_sync(0xffffffffu, v, 4));

@@ -146,6 +146,43 @@ func TestInkling2CUDAKVNVFP4KLGate(t *testing.T) {
 	})
 }
 
+// fak-test:runtime integration est=120s lane=optin
+//
+// TestInkling2CUDAKVF16KLGate verifies full-vocab KL(P_fp32 || P_f16) on teacher-forced
+// continuations for Inkling-2-Mini global FP16 KV caches against the FP32 reference.
+func TestInkling2CUDAKVF16KLGate(t *testing.T) {
+	runInkling2CUDAKVKLGate(t, inkling2KVKLConfig{
+		candKV:     "f16",
+		wantDType:  Inkling2KVF16,
+		jsonPrefix: "inkling2_kv_f16_kl_json",
+		defaultMax: 0.0015,
+		checkReady: func(t *testing.T, be compute.Backend) {},
+	})
+}
+
+// fak-test:runtime integration est=120s lane=optin
+//
+// TestInkling2CUDAKVAsymKLGate verifies full-vocab KL(P_fp32 || P_fp8k_nvfp4v) on teacher-forced
+// continuations for Inkling-2-Mini global asymmetric (INT8 K blk16, FWHT16+NVFP4 V blk16) KV caches.
+func TestInkling2CUDAKVAsymKLGate(t *testing.T) {
+	runInkling2CUDAKVKLGate(t, inkling2KVKLConfig{
+		candKV:     "fp8k_nvfp4v",
+		wantDType:  Inkling2KVAsym,
+		jsonPrefix: "inkling2_kv_asym_kl_json",
+		defaultMax: 0.0015,
+		checkReady: func(t *testing.T, be compute.Backend) {
+			t.Helper()
+			asymDev, ok := be.(compute.Inkling2AsymKVDevice)
+			if !ok {
+				t.Fatalf("cuda backend %s does not implement compute.Inkling2AsymKVDevice", be.Name())
+			}
+			if err := asymDev.Ink2PAsymKVReady(); err != nil {
+				t.Fatalf("cuda asym KV ops not ready: %v", err)
+			}
+		},
+	})
+}
+
 func runInkling2CUDAKVKLGate(t *testing.T, cfg inkling2KVKLConfig) {
 	t.Helper()
 	if strings.TrimSpace(os.Getenv("FAK_INKLING2_KV_KL_TEST")) != "1" {

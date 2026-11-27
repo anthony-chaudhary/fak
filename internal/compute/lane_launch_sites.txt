@@ -34,10 +34,10 @@ internal/compute/cuda/graph_quant_workspace.cuh	k_q8_quant_act	32	32	literal	qgr
 internal/compute/cuda/graph_quant_workspace.cuh	mul_mat_vec_q<1>	block	128	resolved-chain	grid	0
 internal/compute/cuda/graph_quant_workspace.cuh	quantize_q8_1	256	256	literal	qgrid	0
 internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_exp	256	256	literal	g1	0
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out<true, T, kVNVFP4>	othreads	0	runtime	g3	osmem
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tiled<T, kVNVFP4>	othreads	0	runtime	g3	0
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<true, T, kVNVFP4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	osmem
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree_tiled<T, kVNVFP4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out<true, T, kVNVFP4, AsymK8V4>	othreads	0	runtime	g3	osmem
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tiled<T, kVNVFP4, AsymK8V4>	othreads	0	runtime	g3	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<true, T, kVNVFP4, AsymK8V4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	osmem
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree_tiled<T, kVNVFP4, AsymK8V4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	0
 internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_scores<T, NVFP4, AsymK8V4>	INK2_ATS_WARPS * 32	256	resolved-chain	g1	0
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_attend	128	128	literal	grid	smem
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_fuse	256	256	literal	rows	0

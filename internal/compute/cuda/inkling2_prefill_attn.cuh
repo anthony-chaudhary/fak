@@ -82,6 +82,18 @@ __device__ __forceinline__ uint2 fp8x4_to_h2x2(uint32_t w, float sc) {
   const uint32_t hi = ink2_e4m3fn_decode2_scaled_h2((uint16_t)(w >> 16), sc);
   return make_uint2(lo, hi);
 }
+__device__ __forceinline__ uint2 int8x4_to_h2x2(uint32_t w, float sc) {
+  const __half2 lo = __floats2half2_rn((float)(int8_t)(w & 0xffu) * sc, (float)(int8_t)((w >> 8) & 0xffu) * sc);
+  const __half2 hi = __floats2half2_rn((float)(int8_t)((w >> 16) & 0xffu) * sc, (float)(int8_t)(w >> 24) * sc);
+  return make_uint2(*reinterpret_cast<const uint32_t *>(&lo), *reinterpret_cast<const uint32_t *>(&hi));
+}
+__device__ __forceinline__ void tile16_int8(__half *dst, uint4 x, float sc) {
+  uint2 *d = reinterpret_cast<uint2 *>(dst);
+  d[0] = int8x4_to_h2x2(x.x, sc);
+  d[1] = int8x4_to_h2x2(x.y, sc);
+  d[2] = int8x4_to_h2x2(x.z, sc);
+  d[3] = int8x4_to_h2x2(x.w, sc);
+}
 __device__ __forceinline__ void tile16_fp8(__half *dst, uint4 x, float sc) {
   uint2 *d = reinterpret_cast<uint2 *>(dst);
   d[0] = fp8x4_to_h2x2(x.x, sc);
@@ -239,7 +251,7 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
         const int p = kb + row;
         if (p <= kend) {
           const size_t soff = (size_t)(p % cap) * (size_t)(kvHeads * kBlksPerHead) + (size_t)kvh * kBlksPerHead + blk;
-          sKS4[row][blk] = ink2_e4m3fn_decode(__ldg(reinterpret_cast<const uint8_t *>(kscale) + soff));
+          sKS4[row][blk] = AsymK8V4 ? __fmul_rn(ink2_e4m3fn_decode(__ldg(reinterpret_cast<const uint8_t *>(kscale) + soff)), 1.0f / 127.0f) : ink2_e4m3fn_decode(__ldg(reinterpret_cast<const uint8_t *>(kscale) + soff));
           sVS4[row][blk] = ink2_e4m3fn_decode(__ldg(reinterpret_cast<const uint8_t *>(vscale) + soff));
         } else {
           sKS4[row][blk] = 0.f;
@@ -265,7 +277,7 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
       for (int idx = threadIdx.x; idx < KT * kKCPR; idx += 32 * NW) {
         const int row = idx / kKCPR, chunk = idx % kKCPR, c4 = chunk * CW;
         if constexpr (AsymK8V4) {
-          tile16_fp8(sK + row * kKS + c4, *reinterpret_cast<const uint4 *>(stg + row * kKRowElem + c4), sKS4[row][chunk]);
+          tile16_int8(sK + row * kKS + c4, *reinterpret_cast<const uint4 *>(stg + row * kKRowElem + c4), sKS4[row][chunk]);
         } else if constexpr (NVFP4) {
           const int blk0 = chunk * 2;
           tile16_nvfp4(sK + row * kKS + chunk * 32, *reinterpret_cast<const uint4 *>(stg + row * kKRowElem + c4),
@@ -303,7 +315,7 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
         kv = __ldg(reinterpret_cast<const V16 *>(kcache + off));
       }
       if constexpr (AsymK8V4) {
-        tile16_fp8(sK + row * kKS + c4, kv, sKS4[row][chunk]);
+        tile16_int8(sK + row * kKS + c4, kv, sKS4[row][chunk]);
       } else if constexpr (NVFP4) {
         const int blk0 = chunk * 2;
         tile16_nvfp4(sK + row * kKS + chunk * 32, kv, sKS4[row][blk0], sKS4[row][blk0 + 1]);
@@ -463,6 +475,27 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
   const float iA = 1.f / (lA + __expf(-mA)), iB = 1.f / (lB + __expf(-mB));
   float *oA = out + ((size_t)ta * heads + h) * kHD + 2 * qd;
   float *oB = out + ((size_t)tb * heads + h) * kHD + 2 * qd;
+  if constexpr (AsymK8V4) {
+    auto fwht16_pf = [&](float &a0, float &a1, float &b0, float &b1) {
+      float s0 = a0 + a1, s1 = a0 - a1;
+      float t0 = b0 + b1, t1 = b0 - b1;
+      auto shf = [&](float v, int m) {
+        const float ov = __shfl_xor_sync(0xffffffffu, v, m);
+        return (qd & m) ? (ov - v) : (v + ov);
+      };
+      s0 = shf(s0, 1); s1 = shf(s1, 1); t0 = shf(t0, 1); t1 = shf(t1, 1);
+      s0 = shf(s0, 2); s1 = shf(s1, 2); t0 = shf(t0, 2); t1 = shf(t1, 2);
+      a0 = (s0 + t0) * 0.25f;
+      a1 = (s1 + t1) * 0.25f;
+      b0 = (s0 - t0) * 0.25f;
+      b1 = (s1 - t1) * 0.25f;
+    };
+#pragma unroll
+    for (int dp = 0; dp < 8; ++dp) {
+      fwht16_pf(o[2 * dp][0], o[2 * dp][1], o[2 * dp + 1][0], o[2 * dp + 1][1]);
+      fwht16_pf(o[2 * dp][2], o[2 * dp][3], o[2 * dp + 1][2], o[2 * dp + 1][3]);
+    }
+  }
 #pragma unroll
   for (int i = 0; i < 16; ++i) {
     if (va) *reinterpret_cast<float2 *>(oA + i * 8) = make_float2(o[i][0] * iA, o[i][1] * iA);

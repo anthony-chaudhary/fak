@@ -917,6 +917,7 @@ static __device__ __forceinline__ void ink2_put_k_nvfp4(uint8_t *dst, uint8_t *s
 }
 
 // ink2_put_v_nvfp4: same fp32 conv + RMS norm as ink2_put_v, then block-16 E2M1 + E4M3FN scales.
+template <bool FwhtV = false>
 static __device__ __forceinline__ void ink2_put_v_nvfp4(uint8_t *dst, uint8_t *scaleDst, int *overflow, const float *v,
                                                         const Ink2KVConv &cv, int h, int headDim, int kvHeads,
                                                         float eps) {
@@ -944,6 +945,10 @@ static __device__ __forceinline__ void ink2_put_v_nvfp4(uint8_t *dst, uint8_t *s
   for (int u = 0; u < INK2_KV_REGS; ++u) {
     const int i = 32 * u + lane;
     if (i < headDim) x[u] = __fmul_rn(x[u], s);
+  }
+  if constexpr (FwhtV) {
+#pragma unroll
+    for (int u = 0; u < INK2_KV_REGS; ++u) x[u] = ink2_fwht16_elem(x[u], lane);
   }
   ink2_store_nvfp4_head(dst, scaleDst, overflow, x, headDim, badS);
 }
@@ -980,15 +985,18 @@ static __device__ __forceinline__ void ink2_store_fp8_blk16_head(uint8_t *dst, u
     uint8_t scCode = 0u;
     float inv = 0.f;
     if (amax16 >= kInk2FP8MinAbsmax) {
-      scCode = ink2_e4m3fn_encode(__fmul_rn(amax16, 1.0f / kInk2FP8Max));
+      scCode = ink2_e4m3fn_ceil_encode(amax16);
       if (scCode != 0u) {
         const float sc = ink2_e4m3fn_decode(scCode);
-        if (sc > 0.f && isfinite(sc)) inv = __fdiv_rn(1.0f, sc);
+        if (sc > 0.f && isfinite(sc)) inv = __fdiv_rn(127.0f, sc);
         else scCode = 0u;
       }
     }
     if (sub == 0) scaleDst[b] = scCode;
-    dst[b * 16 + sub] = ink2_e4m3fn_encode(__fmul_rn(val, inv));
+    int q = __float2int_rn(__fmul_rn(val, inv));
+    if (q > 127) q = 127;
+    if (q < -127) q = -127;
+    dst[b * 16 + sub] = (uint8_t)(int8_t)q;
   }
 }
 
@@ -1094,7 +1102,7 @@ __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float 
   const int h = b - heads - kvHeads;
   if constexpr (NVFP4 || AsymK8V4) {
     const int hBytes = headDim >> 1, hBlks = headDim >> 4;
-    ink2_put_v_nvfp4(vcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
+    ink2_put_v_nvfp4<AsymK8V4>(vcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
                      (uint8_t *)vscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow, v, cv, h,
                      headDim, kvHeads, eps);
   } else if constexpr (sizeof(T) == 1) {
@@ -1153,8 +1161,8 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
       const uint8_t *kr = (const uint8_t *)kcache + slotIdx * kvDim + (size_t)kvh * headDim;
       const uint8_t *ks = (const uint8_t *)kscale + slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks;
       for (int i = lane; i < headDim; i += 32) {
-        const float kv = ink2_e4m3fn_decode(kr[i]);
-        const float bsc = ink2_e4m3fn_decode(ks[i >> 4]);
+        const float kv = (float)(int8_t)kr[i];
+        const float bsc = __fmul_rn(ink2_e4m3fn_decode(ks[i >> 4]), 1.0f / 127.0f);
         d = fmaf(qh[i], __fmul_rn(kv, bsc), d);
       }
     } else if constexpr (NVFP4) {
@@ -1241,6 +1249,7 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
   if (threadIdx.x < headDim) {
     float acc = 0.f;
     for (int gg = 0; gg < groups; ++gg) acc += gacc[gg][threadIdx.x];
+    if constexpr (AsymK8V4) acc = ink2_fwht16_elem(acc, threadIdx.x & 31);
     out[(size_t)h * headDim + threadIdx.x] = acc;
   }
 }

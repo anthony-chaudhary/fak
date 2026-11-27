@@ -342,7 +342,7 @@ __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float
   if constexpr (NVFP4 || AsymK8V4) {
     const Ink2KVConv off = {};
     const int hBytes = headDim >> 1, hBlks = headDim >> 4;
-    ink2_put_v_nvfp4(vcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
+    ink2_put_v_nvfp4<AsymK8V4>(vcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
                      (uint8_t *)vscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow,
                      v + (size_t)tok * kvDim, off, h, headDim, kvHeads, eps);
   } else if constexpr (sizeof(T) == 1) {

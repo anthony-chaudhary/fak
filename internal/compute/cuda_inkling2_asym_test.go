@@ -32,11 +32,28 @@ func ink2AsymFP8DequantToF32(codesWords, scaleWords []float32, capTok, kvHeads, 
 			for d := 0; d < headDim; d++ {
 				cb := codeBytes[(p*kvHeads+h)*headDim+d]
 				sb := scaleBytes[(p*kvHeads+h)*hBlks+d/16]
-				out[(p*kvHeads+h)*headDim+d] = ink2NVFP4DecodeE4M3FN(cb) * ink2NVFP4DecodeE4M3FN(sb)
+				out[(p*kvHeads+h)*headDim+d] = float32(int8(cb)) * (ink2NVFP4DecodeE4M3FN(sb) / 127.0)
 			}
 		}
 	}
 	return out
+}
+
+func ink2AsymFWHT16InPlace(x []float32) {
+	for base := 0; base+16 <= len(x); base += 16 {
+		b := x[base : base+16]
+		for step := 1; step < 16; step <<= 1 {
+			for i := 0; i < 16; i += 2 * step {
+				for j := 0; j < step; j++ {
+					u, v := b[i+j], b[i+j+step]
+					b[i+j], b[i+j+step] = u+v, u-v
+				}
+			}
+		}
+		for i := 0; i < 16; i++ {
+			b[i] *= 0.25
+		}
+	}
 }
 
 func ink2AsymCosine(a, b []float32) float64 {
@@ -171,6 +188,7 @@ func TestCUDAInk2AsymmetricKV(t *testing.T) {
 		}
 		kDeq := ink2AsymFP8DequantToF32(kcWords, ksWords, capTok, p.KVHeads, p.HeadDim)
 		vDeq := ink2NVFP4DequantToF32(vcWords, vsWords, capTok, p.KVHeads, p.HeadDim)
+		ink2AsymFWHT16InPlace(vDeq)
 		write(kcDeq, kDeq)
 		write(vcDeq, vDeq)
 
@@ -253,7 +271,9 @@ func TestCUDAInk2AsymmetricKV(t *testing.T) {
 			t.Fatal(err)
 		}
 		write(kcDeq, ink2AsymFP8DequantToF32(kcWords, ksWords, capTok, p.KVHeads, p.HeadDim))
-		write(vcDeq, ink2NVFP4DequantToF32(vcWords, vsWords, capTok, p.KVHeads, p.HeadDim))
+		vDeq := ink2NVFP4DequantToF32(vcWords, vsWords, capTok, p.KVHeads, p.HeadDim)
+		ink2AsymFWHT16InPlace(vDeq)
+		write(vcDeq, vDeq)
 
 		if err := cb.Ink2PAttend(Ink2At(qP, 0), Ink2At(rP, 0), Ink2At(sinksP, 0), Ink2At(relBias, 0),
 			Ink2At(kcDeq, 0), Ink2At(vcDeq, 0), Ink2At(outPRef, 0), p, extent, 0, capTok, 0, T); err != nil {
@@ -354,6 +374,50 @@ func TestCUDAInk2AsymmetricKV(t *testing.T) {
 		}
 		if flags[0] == 0 {
 			t.Fatalf("k_scale_overflow: expected overflow != 0, got 0")
+		}
+	})
+
+	t.Run("SmallMagnitudeNoUnderflow", func(t *testing.T) {
+		// Regression test: previously e4m3fn(amax16/448) underflowed to 0 for amax16 < 0.4375.
+		kSmall := make([]float32, kvDim)
+		vSmall := make([]float32, kvDim)
+		for i := range kSmall {
+			switch (i / 16) % 3 {
+			case 0:
+				kSmall[i] = 0.05 * float32((i%16)+1) / 16.0
+			case 1:
+				kSmall[i] = -0.20 * float32((i%16)+1) / 16.0
+			default:
+				kSmall[i] = 0.40 * float32((i%16)+1) / 16.0
+			}
+			vSmall[i] = kSmall[i]
+		}
+		write(ovf, []float32{0})
+		write(kStep, kSmall)
+		write(vStep, vSmall)
+		write(meta, []float32{math.Float32frombits(0)})
+		if err := cb.Ink2QKVPostAsym(Ink2At(qStep, 0), Ink2At(rStep, 0), Ink2At(kStep, 0), Ink2At(vStep, 0),
+			Ink2At(qclip, 0), Ink2At(rclip, 0), Ink2At(kcAsym, 0), Ink2At(vcAsym, 0), Ink2At(ksAsym, 0), Ink2At(vsAsym, 0),
+			Ink2At(ovf, 0), Ink2At(meta, 0), p, capTok, nil); err != nil {
+			t.Fatalf("Ink2QKVPostAsym small: %v", err)
+		}
+		kcWords, err := cb.Ink2Read(Ink2At(kcAsym, 0), Ink2FP8KVCodeFloats(capTok, p.KVHeads, p.HeadDim))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ksWords, err := cb.Ink2Read(Ink2At(ksAsym, 0), Ink2NVFP4KVScaleFloats(capTok, p.KVHeads, p.HeadDim))
+		if err != nil {
+			t.Fatal(err)
+		}
+		kDeq := ink2AsymFP8DequantToF32(kcWords, ksWords, capTok, p.KVHeads, p.HeadDim)
+		var maxAbs float32
+		for _, v := range kDeq[:kvDim] {
+			if a := float32(math.Abs(float64(v))); a > maxAbs {
+				maxAbs = a
+			}
+		}
+		if maxAbs == 0 {
+			t.Fatalf("small-magnitude K block (amax <= 0.40) underflowed to zero")
 		}
 	})
 }
