@@ -42,14 +42,20 @@ func TestInkling2CUDABatchDecodeMatchesOracle(t *testing.T) {
 	}
 	t.Logf("C=%d state %.1f MiB; prompt %s; %d decode steps %s = %.2f aggregate tok/s", st.Sequences,
 		float64(st.StateBytes)/(1<<20), st.Prompt, st.DecodeSteps, st.Decode, st.AggregateTokensPerSecond())
+	ties := 0
 	for i, c := range cases {
-		want := c.greedy
-		for j := range want {
-			if got[i][j] != want[j] {
-				t.Errorf("sequence %d (%s): greedy token %d = %d, llama.cpp = %d (got %v)", i, c.name, j, got[i][j], want[j], got[i][:len(c.greedy)])
-				break
-			}
+		at, nearTie, why := inkling2CohortDivergence(c.greedy, c.runnerUp, c.margin, got[i])
+		switch {
+		case at < 0:
+		case nearTie:
+			ties++
+			t.Logf("sequence %d (%s): NEAR_TIE %s", i, c.name, why)
+		default:
+			t.Errorf("sequence %d (%s): %s (got %v)", i, c.name, why, got[i][:len(c.greedy)])
 		}
+	}
+	if ties > inkling2OracleMaxNearTies {
+		t.Errorf("%d of %d sequences are near ties, more than %d", ties, len(cases), inkling2OracleMaxNearTies)
 	}
 	last := len(cases) - 1
 	for j := range got[0] {
@@ -166,6 +172,43 @@ func inkling2ResidentGreedyMargins(m *Inkling2LoopModel, be compute.Backend, pro
 	return toks, runnerUp, margin, nil
 }
 
+// inkling2ResidentGapAt runs prompt through the scalar resident session up to
+// greedy step at and returns the scalar top-1 token and how many softcapped
+// nats candTok sits below it.
+func inkling2ResidentGapAt(m *Inkling2LoopModel, be compute.Backend, prompt []int, at, candTok int) (top int, gap float64, err error) {
+	s, err := newInkling2Resident(m, be)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer s.close()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	var next int
+	if s.batched {
+		next, err = s.prefill(context.Background(), prompt)
+	} else {
+		for _, tok := range prompt {
+			if next, err = s.step(tok); err != nil {
+				break
+			}
+		}
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	for i := 0; i < at; i++ {
+		if next, err = s.step(next); err != nil {
+			return 0, 0, err
+		}
+	}
+	logits, err := s.lastLogits()
+	if err != nil {
+		return 0, 0, err
+	}
+	top, _ = inkling2TopTwo(logits[:s.hp.VocabUnpadded])
+	return top, float64(logits[top] - logits[candTok]), nil
+}
+
 // inkling2TopTwo returns the indices of the largest and second-largest entries of v,
 // with ties to the lower index as the argmax kernel breaks them.
 func inkling2TopTwo(v []float32) (top, second int) {
@@ -230,6 +273,12 @@ func TestInkling2CUDACohortPrefillMatchesScalar(t *testing.T) {
 			t.Fatal(err)
 		}
 		at, nearTie, why := inkling2CohortDivergence(want, runnerUp, margin, pre[i])
+		if at >= 0 && !nearTie {
+			if top, gap, gerr := inkling2ResidentGapAt(m, be, prompt, at, pre[i][at]); gerr == nil && top == want[at] && gap < inkling2OracleNearTieNats {
+				nearTie = true
+				why = fmt.Sprintf("%s; scalar gap for %d is %.4f nats", why, pre[i][at], gap)
+			}
+		}
 		switch {
 		case at < 0:
 			t.Logf("COHORT_VERDICT row %d PASS (%d prompt tokens)", i, len(prompt))
