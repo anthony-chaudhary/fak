@@ -276,7 +276,8 @@ __global__ void __launch_bounds__(INK2_ATS_TREE_GROUPS * 32)
 
 // Past the staging limit in the exact mode: the denominator is a block-parallel sum over
 // the live keys, one fp32 reciprocal per head, and the weights are staged a tile at a
-// time. It matches the staged form to rounding, not bit for bit.
+// time. It matches the staged form to rounding, not bit for bit, and scales strictly
+// with live key count n rather than cap.
 template <class T>
 __global__ void __launch_bounds__(INK2_ATT_THREADS)
     k_ink2_attend_out_tiled(const double *scores, const T *vcache, const float *r, float *out, const float *meta,
@@ -321,22 +322,23 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
     __syncthreads();
     for (int j = threadIdx.x; j < tn; j += blockDim.x) wsh[j] = __fmul_rn((float)sc[t0 + j], inv);
     __syncthreads();
-    if (!active) continue;
-    const int kt = first + t0;
-    int j = g;
-    for (; j + (INK2_ATS_UNROLL - 1) * groups < tn; j += INK2_ATS_UNROLL * groups) {
-      float vv[INK2_ATS_UNROLL];
+    if (active) {
+      const int kt = first + t0;
+      int j = g;
+      for (; j + (INK2_ATS_UNROLL - 1) * groups < tn; j += INK2_ATS_UNROLL * groups) {
+        float vv[INK2_ATS_UNROLL];
 #pragma unroll
-      for (int u = 0; u < INK2_ATS_UNROLL; ++u) {
-        const size_t slotIdx = (size_t)((kt + j + u * groups) % cap);
-        vv[u] = ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh);
+        for (int u = 0; u < INK2_ATS_UNROLL; ++u) {
+          const size_t slotIdx = (size_t)((kt + j + u * groups) % cap);
+          vv[u] = ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh);
+        }
+#pragma unroll
+        for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(wsh[j + u * groups], vv[u], acc);
       }
-#pragma unroll
-      for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(wsh[j + u * groups], vv[u], acc);
-    }
-    for (; j < tn; j += groups) {
-      const size_t slotIdx = (size_t)((kt + j) % cap);
-      acc = fmaf(wsh[j], ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh), acc);
+      for (; j < tn; j += groups) {
+        const size_t slotIdx = (size_t)((kt + j) % cap);
+        acc = fmaf(wsh[j], ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh), acc);
+      }
     }
   }
   if (active) gacc[g][lane] = acc;
@@ -344,6 +346,80 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
   if (threadIdx.x < 32 && dd < headDim) {
     float a = 0.f;
     for (int gg = 0; gg < groups; ++gg) a += gacc[gg][threadIdx.x];
+    out[(size_t)h * headDim + dd] = a;
+  }
+}
+
+// Past the staging limit in the tree mode (>24576 cap): same fixed INK2_ATS_TILE
+// shared-memory weight staging and single fp32 reciprocal as k_ink2_attend_out_tiled,
+// keeping the tree mode's 16 key groups and avoiding unstaged global fp64 divides.
+template <class T>
+__global__ void __launch_bounds__(INK2_ATS_TREE_GROUPS * 32)
+    k_ink2_attend_out_tree_tiled(const double *scores, const T *vcache, const float *r, float *out, const float *meta,
+                                 int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq,
+                                 const float *vscale = nullptr) {
+  ink2_pdl_enter();
+  const int h = blockIdx.x, seq = blockIdx.z;
+  scores = ink2_row(scores, sq.scores, seq);
+  vcache = ink2_row(vcache, sq.vc, seq);
+  r = ink2_row(r, sq.r, seq);
+  out = ink2_row(out, sq.out, seq);
+  meta = ink2_row(meta, sq.meta, seq);
+  const int kvh = h / (heads / kvHeads);
+  const int kvDim = kvHeads * headDim;
+  int first;
+  const int n = ink2_ats_keys(meta, window, cap, &first);
+  const double *sc = scores + (size_t)h * cap;
+  __shared__ double wpart[INK2_ATS_TREE_GROUPS];
+  __shared__ float sinv;
+  const int lane = threadIdx.x & 31, g = threadIdx.x >> 5;
+  double part = 0.0;
+  for (int j = threadIdx.x; j < n; j += blockDim.x) part += sc[j];
+  for (int o = 16; o > 0; o >>= 1) part += __shfl_xor_sync(0xffffffff, part, o);
+  if (lane == 0) wpart[g] = part;
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    double denom = exp(-*(const double *)(r + (size_t)h * relLen));
+    for (int w = 0; w < INK2_ATS_TREE_GROUPS; ++w) denom += wpart[w];
+    sinv = (float)(1.0 / denom);
+  }
+  __syncthreads();
+  const float inv = sinv;
+  const int dd = blockIdx.y * 32 + lane;
+  const T *vbase = vcache + (size_t)kvh * headDim + dd;
+  __shared__ float wsh[INK2_ATS_TILE];
+  __shared__ float gacc[INK2_ATS_TREE_GROUPS][32];
+  float acc = 0.f;
+  const int groups = INK2_ATS_TREE_GROUPS;
+  for (int t0 = 0; t0 < n; t0 += INK2_ATS_TILE) {
+    const int tn = min(INK2_ATS_TILE, n - t0);
+    __syncthreads();
+    for (int j = threadIdx.x; j < tn; j += blockDim.x) wsh[j] = __fmul_rn((float)sc[t0 + j], inv);
+    __syncthreads();
+    if (dd < headDim) {
+      const int kt = first + t0;
+      int j = g;
+      for (; j + (INK2_ATS_UNROLL - 1) * groups < tn; j += INK2_ATS_UNROLL * groups) {
+        float vv[INK2_ATS_UNROLL];
+#pragma unroll
+        for (int u = 0; u < INK2_ATS_UNROLL; ++u) {
+          const size_t slotIdx = (size_t)((kt + j + u * groups) % cap);
+          vv[u] = ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh);
+        }
+#pragma unroll
+        for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(wsh[j + u * groups], vv[u], acc);
+      }
+      for (; j < tn; j += groups) {
+        const size_t slotIdx = (size_t)((kt + j) % cap);
+        acc = fmaf(wsh[j], ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh), acc);
+      }
+    }
+  }
+  gacc[g][lane] = acc;
+  __syncthreads();
+  if (threadIdx.x < 32 && dd < headDim) {
+    float a = 0.f;
+    for (int gg = 0; gg < INK2_ATS_TREE_GROUPS; ++gg) a += gacc[gg][threadIdx.x];
     out[(size_t)h * headDim + dd] = a;
   }
 }
@@ -432,8 +508,9 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
       FCUDA_TS("k_ink2_attend_out_tree", g3, k_ink2_attend_out_tree<true, T><<<g3, INK2_ATS_TREE_GROUPS * 32, osmem, g_stream>>>(
                                                  scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq, vscale));
     } else {
-      FCUDA_TS("k_ink2_attend_out_tree", g3, k_ink2_attend_out_tree<false, T><<<g3, INK2_ATS_TREE_GROUPS * 32, 0, g_stream>>>(
-                                                 scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq, vscale));
+      FCUDA_TS("k_ink2_attend_out_tree_tiled", g3,
+               k_ink2_attend_out_tree_tiled<T><<<g3, INK2_ATS_TREE_GROUPS * 32, 0, g_stream>>>(
+                   scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq, vscale));
     }
   } else if (staged) {
     FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<true, T><<<g3, othreads, osmem, g_stream>>>(

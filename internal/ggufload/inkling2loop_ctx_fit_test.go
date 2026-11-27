@@ -121,3 +121,46 @@ func TestInkling2FitLeavesWidestPrefillArena(t *testing.T) {
 		}
 	}
 }
+
+// TestInkling2FitResidentCtxExactReservesLocalRingsAndPrefill verifies that auto-fit
+// accounts for local sliding-window rings, conv histories, and base-chunk prefill
+// arenas (~644 MiB on Mini), so a 16 GiB RTX 5080 (~2.5 GiB free) never derives
+// 20480-22528 in FP32 and OOMs on the 419 MiB prefill scratch, while FP16 doubles
+// the fitted context cleanly within the same VRAM budget.
+func TestInkling2FitResidentCtxExactReservesLocalRingsAndPrefill(t *testing.T) {
+	hp := inkling2MiniKVShape()
+	const free = int64(2560) << 20 // 2.5 GiB free after weights on a 16 GiB RTX 5080
+	keep, scr := inkling2PrefillArenaFloats(hp, inkling2PrefillChunkBase, 0)
+	prefillBytes := 4 * int64(keep+scr+inkling2PrefillChunkBase*hp.Hidden)
+	reserve := inkling2ResidentReserve(free) + prefillBytes
+	other := inkling2ResidentOtherBytes(hp, inkling2ArenaFloats, inkling2PrefillChunkBase, 0)
+
+	// FP32 auto-fit must be > 4096, < 20480 (no OOM), and accepted by inkling2KVFitDtype with prefill arenas.
+	ctxF32 := inkling2FitResidentCtxExact(hp, free, reserve, true, inkling2PrefillChunkBase, false, inkling2AutoCtxMax("cuda", false))
+	if ctxF32 <= Inkling2ResidentCtxDefault || ctxF32 >= 20480 {
+		t.Fatalf("FP32 auto ctx on 2.5 GiB free = %d, want in (%d, 20480)", ctxF32, Inkling2ResidentCtxDefault)
+	}
+	if _, err := inkling2KVFitDtype(hp, ctxF32, true, inkling2PrefillChunkBase, false, other, free); err != nil {
+		t.Fatalf("FP32 auto ctx %d fails KV+prefill fit check: %v", ctxF32, err)
+	}
+	// FP32 at 20480 must be refused once base-chunk prefill arenas are included in other.
+	if _, err := inkling2KVFitDtype(hp, 20480, true, inkling2PrefillChunkBase, false, other, free); err == nil {
+		t.Fatal("FP32 ctx 20480 admitted on 2.5 GiB free despite prefill scratch arenas")
+	}
+
+	// FP16 auto-fit on the same 2.5 GiB free fits ~2x the FP32 context and passes the exact fit check.
+	ctxF16 := inkling2FitResidentCtxExact(hp, free, reserve, true, inkling2PrefillChunkBase, true, inkling2AutoCtxMax("cuda", true))
+	if ctxF16 < ctxF32*18/10 {
+		t.Fatalf("FP16 auto ctx %d is not ~2x FP32 auto ctx %d", ctxF16, ctxF32)
+	}
+	if _, err := inkling2KVFitDtype(hp, ctxF16, true, inkling2PrefillChunkBase, true, other, free); err != nil {
+		t.Fatalf("FP16 auto ctx %d fails KV+prefill fit check: %v", ctxF16, err)
+	}
+
+	// Exported Inkling2ResidentFitCtx with full geometry must match the exact fit and never exceed free.
+	if got := Inkling2ResidentFitCtx(hp, free); got <= Inkling2ResidentCtxDefault {
+		t.Fatalf("Inkling2ResidentFitCtx(Mini, 2.5 GiB) = %d, want > %d", got, Inkling2ResidentCtxDefault)
+	} else if _, err := inkling2KVFitDtype(hp, got, true, inkling2PrefillChunkBase, false, other, free); err != nil {
+		t.Fatalf("Inkling2ResidentFitCtx %d exceeds KV+prefill budget: %v", got, err)
+	}
+}

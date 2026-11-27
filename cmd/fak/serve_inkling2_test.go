@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -710,4 +711,89 @@ func TestInkling2PrefillTimerIncludesSlotAcquire(t *testing.T) {
 	if res.PrefillSeconds < acquireWait.Seconds() {
 		t.Fatalf("PrefillSeconds = %.3f, want at least the %.3fs slot acquire wait", res.PrefillSeconds, acquireWait.Seconds())
 	}
+}
+
+type inkling2ServeMemBackend struct {
+	compute.Backend
+	name  string
+	total int64
+	free  int64
+}
+
+func (b inkling2ServeMemBackend) Name() string       { return b.name }
+func (b inkling2ServeMemBackend) Caps() compute.Caps { return compute.Caps{CapacityProbe: true} }
+func (b inkling2ServeMemBackend) DeviceMemory() (int64, int64, bool) {
+	return b.total, b.free, true
+}
+
+func TestResolveServeInkling2ContextFlags(t *testing.T) {
+	local := make([]bool, 24)
+	for i := range local {
+		local[i] = i%4 != 3
+	}
+	m := &ggufload.Inkling2LoopModel{
+		HP: fakmodel.Inkling2LoopHParams{
+			Layers: 24, CoreStart: 6, CoreEnd: 18, Passes: 3,
+			Hidden: 2048, Heads: 24, KVHeads: 8, HeadDim: 128,
+			SlidingWindow: 1024, ConvKernel: 4, LocalLayer: local,
+		},
+	}
+	cuda16G := inkling2ServeMemBackend{name: "cuda", total: 16 << 30, free: 2560 << 20}
+	ambient := func(k string) (string, bool) {
+		if k == ggufload.Inkling2ResidentCtxEnv {
+			return "8192", true
+		}
+		return "", false
+	}
+	unset := func(string) (string, bool) { return "", false }
+
+	t.Run("native-context-tokens overrides env", func(t *testing.T) {
+		nctx, fit := 16384, "off"
+		req, fitAuto, lk := resolveServeInkling2ContextFlags(&serveFlags{nativeContextTokens: &nctx, fit: &fit}, ambient)
+		if req != 16384 || fitAuto {
+			t.Fatalf("req=%d fitAuto=%v, want 16384 false", req, fitAuto)
+		}
+		if v, ok := lk(ggufload.Inkling2ResidentCtxEnv); !ok || v != "16384" {
+			t.Fatalf("lookup FAK_INKLING2_CTX = %q (%v), want 16384", v, ok)
+		}
+		if got := ggufload.Inkling2ResolveServeCtx(m, cuda16G, req, lk); got != 16384 {
+			t.Fatalf("resolved ctx = %d, want 16384", got)
+		}
+	})
+
+	t.Run("fit auto clears ambient env and resolves above 4096", func(t *testing.T) {
+		nctx, fit := 0, "auto"
+		req, fitAuto, lk := resolveServeInkling2ContextFlags(&serveFlags{nativeContextTokens: &nctx, fit: &fit}, ambient)
+		if req != 0 || !fitAuto {
+			t.Fatalf("req=%d fitAuto=%v, want 0 true", req, fitAuto)
+		}
+		if v, ok := lk(ggufload.Inkling2ResidentCtxEnv); ok || v != "" {
+			t.Fatalf("fit auto kept ambient FAK_INKLING2_CTX = %q (%v)", v, ok)
+		}
+		if got := ggufload.Inkling2ResolveServeCtx(m, cuda16G, req, lk); got <= ggufload.Inkling2ResidentCtxDefault {
+			t.Fatalf("fit auto resolved ctx = %d, want > %d", got, ggufload.Inkling2ResidentCtxDefault)
+		}
+	})
+
+	t.Run("fit auto honors explicit native-context-tokens pin", func(t *testing.T) {
+		nctx, fit := 12288, "auto"
+		req, fitAuto, lk := resolveServeInkling2ContextFlags(&serveFlags{nativeContextTokens: &nctx, fit: &fit}, ambient)
+		if req != 12288 || !fitAuto {
+			t.Fatalf("req=%d fitAuto=%v, want 12288 true", req, fitAuto)
+		}
+		if got := ggufload.Inkling2ResolveServeCtx(m, cuda16G, req, lk); got != 12288 {
+			t.Fatalf("pinned fit auto ctx = %d, want 12288", got)
+		}
+	})
+
+	t.Run("default unset resolves above 4096 on 16 GiB CUDA", func(t *testing.T) {
+		nctx, fit := 0, "off"
+		req, fitAuto, lk := resolveServeInkling2ContextFlags(&serveFlags{nativeContextTokens: &nctx, fit: &fit}, unset)
+		if req != 0 || fitAuto {
+			t.Fatalf("req=%d fitAuto=%v, want 0 false", req, fitAuto)
+		}
+		if got := ggufload.Inkling2ResolveServeCtx(m, cuda16G, req, lk); got <= ggufload.Inkling2ResidentCtxDefault {
+			t.Fatalf("default auto ctx = %d, want > %d", got, ggufload.Inkling2ResidentCtxDefault)
+		}
+	})
 }

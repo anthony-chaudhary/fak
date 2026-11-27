@@ -321,7 +321,15 @@ func Inkling2ResidentCtxAuto(lookup func(string) (string, bool)) bool {
 
 // Inkling2ResidentFitCtx is the largest resident global context hp fits in free bytes
 // after the reserve the device budget keeps, or 0 when even the floor does not fit.
+// When hp carries real SlidingWindow and Hidden geometry, local sliding-window rings,
+// conv histories, and base-chunk prefill arenas are included so the derived context
+// never OOMs on the first batched prefill.
 func Inkling2ResidentFitCtx(hp model.Inkling2LoopHParams, free int64) int {
+	if hp.SlidingWindow > 0 && hp.Hidden > 0 {
+		keep, scr := inkling2PrefillArenaFloats(hp, inkling2PrefillChunkBase, 0)
+		prefill := 4 * int64(keep+scr+inkling2PrefillChunkBase*hp.Hidden)
+		return inkling2FitResidentCtxExact(hp, free, inkling2ResidentReserve(free)+prefill, true, inkling2PrefillChunkBase, false, Inkling2ResidentCtxMax(inkling2ResidentBackend))
+	}
 	return inkling2FitResidentCtx(free, inkling2ResidentReserve(free), inkling2ResidentPerPosBytes(hp))
 }
 
@@ -411,6 +419,38 @@ func inkling2ResidentHardMax(backend string) int {
 	return 0
 }
 
+// inkling2FitResidentCtxExact is the largest global context in 256-position steps
+// whose full KV footprint (global slots at the active dtype, local sliding-window rings,
+// conv histories, and score rows) fits in free minus reserve, clamped to ceiling.
+// It returns 0 when even Inkling2ResidentCtxMin does not fit.
+func inkling2FitResidentCtxExact(hp model.Inkling2LoopHParams, free, reserve int64, batched bool, chunk int, half bool, ceiling int) int {
+	budget := free - reserve
+	if budget <= 0 || ceiling < Inkling2ResidentCtxMin {
+		return 0
+	}
+	n := inkling2MaxResidentCtxDtype(hp, batched, chunk, half, ceiling, budget)
+	n = n / 256 * 256
+	if n < Inkling2ResidentCtxMin {
+		return 0
+	}
+	return n
+}
+
+// inkling2AutoCtxMax is the upper bound for auto-derived resident context on backend.
+// FP32 keeps the 16384 ceiling; FP16 global KV halves the per-position footprint so
+// the fit planner may scale up to 32768 (still bounded by the backend's hard max and
+// exact free-VRAM budget).
+func inkling2AutoCtxMax(backend string, half bool) int {
+	ceil := inkling2AutoCtxCeiling
+	if half {
+		ceil = 32768
+	}
+	if hard := inkling2ResidentHardMax(backend); hard > 0 && ceil > hard {
+		ceil = hard
+	}
+	return ceil
+}
+
 // inkling2ResolveAutoCtx sizes the global cache from the device memory free now,
 // after the weights bound. A backend that cannot report free memory keeps the
 // fixed default rather than guess.
@@ -434,9 +474,10 @@ func inkling2ResolveAutoCtxFor(be compute.Backend, hp model.Inkling2LoopHParams,
 	perPos := inkling2ResidentPerPosBytesFor(hp, dtype)
 	budget := free - inkling2DeviceHeadroom(free)
 	left := budget - other
+	ceil := inkling2AutoCtxMax(be.Name(), dtype != Inkling2KVF32)
 	ctx := 0
 	if left > 0 {
-		ctx = inkling2MaxResidentCtxFor(hp, batched, chunk, dtype, inkling2AutoCtxCeiling, left)
+		ctx = inkling2MaxResidentCtxFor(hp, batched, chunk, dtype, ceil, left)
 		ctx = ctx / 256 * 256
 	}
 	if ctx < Inkling2ResidentCtxMin {
@@ -446,6 +487,54 @@ func inkling2ResolveAutoCtxFor(be compute.Backend, hp model.Inkling2LoopHParams,
 	fmt.Fprintf(os.Stderr, "inkling2 resident: context %d (auto: %.2f GiB free after weights, %d bytes per position, kv=%s)\n",
 		ctx, float64(free)/(1<<30), perPos, dtype)
 	return ctx, nil
+}
+
+// Inkling2ResolveServeCtx resolves the serving context window for m on be:
+// an explicit requested > 0 is returned (clamped to the backend hard max if any);
+// an explicit FAK_INKLING2_CTX returns that parsed value; otherwise free device
+// memory is probed and fitted with inkling2FitResidentCtxExact (reserving headroom,
+// per-token arena, local sliding-window rings, conv histories, and prefill arenas)
+// at the active KV dtype (auto-FP16 when supported and spec decode is off).
+func Inkling2ResolveServeCtx(m *Inkling2LoopModel, be compute.Backend, requested int, lookup func(string) (string, bool)) int {
+	if requested > 0 {
+		if be != nil {
+			if hard := inkling2ResidentHardMax(be.Name()); hard > 0 && requested > hard {
+				return hard
+			}
+		}
+		return requested
+	}
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	if !inkling2ResidentCtxAutoSet(lookup) {
+		return inkling2ResidentCtxFrom(lookup)
+	}
+	if m == nil || be == nil {
+		return Inkling2LoopResidentContext
+	}
+	_, free, known := compute.DeviceMemoryInfo(be)
+	if !known || free == compute.FreeUnknown || free <= 0 {
+		return Inkling2LoopResidentContext
+	}
+	half, err := inkling2ResidentHalfKVFor(m, be, lookup)
+	if err != nil {
+		half = false
+	}
+	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
+	batched := hasPrefill && (inkling2BatchedPrefill() || inkling2SpecDepthFor(m) > 0)
+	chunk := inkling2PrefillChunkWantedOn(be, lookup)
+	var prefillBytes int64
+	if batched && m.HP.Hidden > 0 {
+		keep, scr := inkling2PrefillArenaFloats(m.HP, chunk, 0)
+		prefillBytes = 4 * int64(keep+scr+chunk*m.HP.Hidden)
+	}
+	ceil := inkling2AutoCtxMax(be.Name(), half)
+	fit := inkling2FitResidentCtxExact(m.HP, free, inkling2ResidentReserve(free)+prefillBytes, batched, chunk, half, ceil)
+	if fit <= 0 {
+		return Inkling2LoopResidentContext
+	}
+	return max(Inkling2LoopResidentContext, fit)
 }
 
 // prefillWidestBytes is the device memory of the prefill arenas at the widest chunk the
@@ -647,19 +736,17 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 		return nil, fmt.Errorf("inkling2 resident: backend %s has no inkling2 device ops", be.Name())
 	}
 	hp, w := m.HP, m.Weights
-	reqKV, kvErr := Inkling2KVDTypeFrom(os.LookupEnv)
-	if kvErr != nil {
+	if _, kvErr := Inkling2KVDTypeFrom(os.LookupEnv); kvErr != nil {
 		return nil, kvErr
-	}
-	if reqKV == Inkling2KVF32 && inkling2KVHalfRequested {
-		if _, set := os.LookupEnv("FAK_INKLING2_KV"); !set {
-			reqKV = Inkling2KVF16
-		}
 	}
 	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats, chunkMax: ring, chunkWanted: wanted}
 	s.report = metalgemm.Ink2ReportRequested(os.Getenv(metalgemm.Ink2ProfileEnv))
 	if ctx != 0 {
-		switch inkling2ResidentKVDType(be, reqKV) {
+		dtype, err := inkling2ResidentKVDTypeFor(m, be, os.LookupEnv)
+		if err != nil {
+			return nil, err
+		}
+		switch dtype {
 		case Inkling2KVFP8:
 			s.kvFP8 = true
 			s.fp8Dev, _ = be.(compute.Inkling2FP8KVDevice)
@@ -715,10 +802,10 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 	if ctx == inkling2ResidentCtxAuto {
 		autoChunk := 0
 		if s.batched && !s.hostRouting {
-			autoChunk = s.chunkMax
+			autoChunk = max(s.chunkMax, inkling2PrefillChunkBase)
 		}
 		autoOther := inkling2ResidentOtherBytes(hp, arenaFloats, autoChunk, s.maxPadK())
-		resolved, err := inkling2ResolveAutoCtxFor(be, hp, s.batched, s.chunkMax, autoOther, s.kvDType())
+		resolved, err := inkling2ResolveAutoCtxFor(be, hp, s.batched, autoChunk, autoOther, s.kvDType())
 		if err != nil {
 			s.close()
 			return nil, err

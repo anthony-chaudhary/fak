@@ -119,14 +119,71 @@ func inkling2ResidentKVDType(be compute.Backend, req Inkling2KVDType) Inkling2KV
 	}
 }
 
+// inkling2BackendSupportsHalfKV reports whether be exposes ready f16 decode and
+// prefill KV ops. When warn is true, a missing capability is logged once.
+func inkling2BackendSupportsHalfKV(be compute.Backend, warn bool) bool {
+	if be == nil {
+		return false
+	}
+	if err := inkling2BackendHalfKVErr(be); err != nil {
+		if warn {
+			inkling2KVHalfFallback(err.Error())
+		}
+		return false
+	}
+	return true
+}
+
 // inkling2ResidentHalfKV reports whether a session on be keeps its global-slot caches
-// f16. A request the backend cannot serve falls back to fp32, logged once: the decode
-// ops, the f16 prefill ops, and their readiness must all be present.
+// f16 when FAK_INKLING2_KV=f16 was explicitly requested. A request the backend cannot
+// serve falls back to fp32, logged once.
 func inkling2ResidentHalfKV(be compute.Backend) bool {
 	if !inkling2KVHalfRequested {
 		return false
 	}
-	return inkling2ResidentKVDType(be, Inkling2KVF16) == Inkling2KVF16
+	return inkling2BackendSupportsHalfKV(be, true)
+}
+
+// inkling2ResidentKVDTypeFor decides the effective global-slot KV dtype for m on be.
+// Explicit FAK_INKLING2_KV (fp8/e4m3/e4m3fn, f16/fp16, or f32/fp32) always wins (with
+// capability fallbacks logged once). When unset or blank, f16 defaults on when the
+// backend provides ready f16 decode and prefill ops and speculative decode is not
+// active (verify/draft ops read fp32 caches).
+func inkling2ResidentKVDTypeFor(m *Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (Inkling2KVDType, error) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	v, ok := lookup("FAK_INKLING2_KV")
+	if !ok {
+		v = ""
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "fp8", "e4m3", "e4m3fn":
+		return inkling2ResidentKVDType(be, Inkling2KVFP8), nil
+	case "f16", "fp16":
+		return inkling2ResidentKVDType(be, Inkling2KVF16), nil
+	case "f32", "fp32":
+		return Inkling2KVF32, nil
+	case "":
+		if inkling2KVHalfRequested {
+			return inkling2ResidentKVDType(be, Inkling2KVF16), nil
+		}
+		if inkling2SpecDepthFor(m) > 0 {
+			return Inkling2KVF32, nil
+		}
+		if inkling2BackendSupportsHalfKV(be, false) {
+			return Inkling2KVF16, nil
+		}
+		return Inkling2KVF32, nil
+	}
+	return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, or fp8", v)
+}
+
+// inkling2ResidentHalfKVFor reports whether a resident session for m on be stores its
+// global-slot K and V caches as f16.
+func inkling2ResidentHalfKVFor(m *Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (bool, error) {
+	dtype, err := inkling2ResidentKVDTypeFor(m, be, lookup)
+	return dtype == Inkling2KVF16, err
 }
 
 func inkling2KVHalfFallback(reason string) {

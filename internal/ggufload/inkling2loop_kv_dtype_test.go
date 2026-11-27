@@ -3,6 +3,7 @@ package ggufload
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -501,4 +502,77 @@ func TestInkling2ResidentAutoCtxSelectsHalfKV(t *testing.T) {
 			t.Fatal("cohort binding (ctx=0) set kvHalf=true")
 		}
 	})
+}
+
+type inkling2FullHalfBackend struct {
+	compute.Backend
+	readyErr error
+}
+
+func (inkling2FullHalfBackend) Name() string { return "cuda" }
+func (inkling2FullHalfBackend) Ink2QKVPostHalf(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, *compute.Ink2KVConv) error {
+	return nil
+}
+func (inkling2FullHalfBackend) Ink2AttendHalf(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int, int) error {
+	return nil
+}
+func (b inkling2FullHalfBackend) Ink2PHalfKVReady() error { return b.readyErr }
+func (inkling2FullHalfBackend) Ink2PQKVPostHalf(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int, int) error {
+	return nil
+}
+func (inkling2FullHalfBackend) Ink2PAttendHalf(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int, int, int, int) error {
+	return nil
+}
+
+var (
+	_ compute.Inkling2HalfKVDevice  = inkling2FullHalfBackend{}
+	_ compute.Inkling2PrefillHalfKV = inkling2FullHalfBackend{}
+)
+
+func TestInkling2ResidentHalfKVForAutoDefaultAndSpecCoordination(t *testing.T) {
+	if prev, ok := os.LookupEnv("FAK_INKLING2_SPEC"); ok {
+		t.Cleanup(func() { _ = os.Setenv("FAK_INKLING2_SPEC", prev) })
+		_ = os.Unsetenv("FAK_INKLING2_SPEC")
+	}
+	ready := inkling2FullHalfBackend{}
+	notReady := inkling2FullHalfBackend{readyErr: errors.New("no f16 kernels")}
+	noSpec := &Inkling2LoopModel{}
+	withSpec := &Inkling2LoopModel{SpecDefault: Inkling2SpecDefault{Depth: 4, Draft: "auto"}}
+	env := func(v string, set bool) func(string) (string, bool) {
+		return func(k string) (string, bool) {
+			if k == "FAK_INKLING2_KV" {
+				return v, set
+			}
+			return "", false
+		}
+	}
+	cases := []struct {
+		name    string
+		m       *Inkling2LoopModel
+		be      compute.Backend
+		v       string
+		set     bool
+		want    bool
+		refused bool
+	}{
+		{"unset auto-enables f16 on capable backend without spec", noSpec, ready, "", false, true, false},
+		{"unset stays f32 when spec decode is active", withSpec, ready, "", false, false, false},
+		{"unset stays f32 when backend f16 prefill not ready", noSpec, notReady, "", false, false, false},
+		{"unset stays f32 when backend has no f16 ops", noSpec, inkling2NoHalfBackend{}, "", false, false, false},
+		{"explicit f32 overrides auto default", noSpec, ready, "f32", true, false, false},
+		{"explicit f16 enables f16 even with spec model", withSpec, ready, "f16", true, true, false},
+		{"explicit f16 falls back to f32 without ops", noSpec, inkling2NoHalfBackend{}, "f16", true, false, false},
+		{"unknown value refused", noSpec, ready, "bf16", true, false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := inkling2ResidentHalfKVFor(c.m, c.be, env(c.v, c.set))
+			if (err != nil) != c.refused {
+				t.Fatalf("err = %v, refused want %v", err, c.refused)
+			}
+			if got != c.want {
+				t.Fatalf("half = %v, want %v", got, c.want)
+			}
+		})
+	}
 }
