@@ -54,6 +54,24 @@ type opsStatusReport struct {
 	RecentEvents  int    `json:"recent_events"`
 	LastEventTime string `json:"last_event_time,omitempty"`
 	Status        string `json:"status"`
+
+	// Load-accounting surface (#14481), from the fak-ops-load/1 ledger and the
+	// fak-ops-load-pause/1 record.
+	Liveness            ops.Liveness  `json:"liveness"`
+	LastTickAt          string        `json:"last_tick_at,omitempty"`
+	LastTickAgeSeconds  int64         `json:"last_tick_age_seconds"`
+	SelfCPUSharePercent *float64      `json:"self_cpu_share_percent"`
+	Ticks24h            int           `json:"ticks_24h"`
+	Productive24h       int           `json:"productive_24h"`
+	Idle24h             int           `json:"idle_24h"`
+	Skipped24h          int           `json:"skipped_24h"`
+	Host                *ops.HostLoad `json:"host,omitempty"`
+	Paused              bool          `json:"paused"`
+	PauseReasonClass    string        `json:"pause_reason_class,omitempty"`
+	PausedSince         string        `json:"paused_since,omitempty"`
+	ResumeBy            string        `json:"resume_by,omitempty"`
+	DutyCapPercent      float64       `json:"duty_cap_percent"`
+	ReactivePauseOn     bool          `json:"reactive_pause_enabled"`
 }
 
 func runOpsStatus(stdout, stderr io.Writer, root string, cfg ops.Config, args []string) int {
@@ -83,6 +101,28 @@ func runOpsStatus(stdout, stderr io.Writer, root string, cfg ops.Config, args []
 		status = "warning"
 	}
 
+	var loadCycles []ops.LoadCycle
+	if ll, err := ops.OpenLoadLedger(ops.DefaultLoadLedgerPath(root)); err == nil {
+		loadCycles, _ = ll.Read()
+	}
+	sum := ops.SummarizeLoad(loadCycles, time.Now(), 24*time.Hour, ops.DefaultLivenessStaleAfter)
+	var pause ops.PauseState
+	if ps, err := ops.OpenPauseStore(ops.DefaultPauseStatePath(root)); err == nil {
+		pause = ps.ReadFailSafe()
+	}
+
+	// healthy means ticking and measured: a quiet tree with no mutations is
+	// healthy only while the loop is demonstrably alive.
+	switch {
+	case status != "healthy":
+	case sum.Liveness == ops.LivenessNeverTicked:
+		status = "unknown"
+	case sum.Liveness == ops.LivenessStale:
+		status = "stale"
+	case pause.Paused:
+		status = "paused"
+	}
+
 	rep := opsStatusReport{
 		FreeDiskBytes: freeBytes,
 		WarningFree:   warning,
@@ -90,12 +130,46 @@ func runOpsStatus(stdout, stderr io.Writer, root string, cfg ops.Config, args []
 		RecentEvents:  len(events),
 		LastEventTime: lastTime,
 		Status:        status,
+
+		Liveness:           sum.Liveness,
+		LastTickAgeSeconds: sum.LastTickAgeSeconds,
+		Ticks24h:           sum.Ticks,
+		Productive24h:      sum.Productive,
+		Idle24h:            sum.Idle,
+		Skipped24h:         sum.Skipped,
+		Host:               sum.Host,
+		Paused:             pause.Paused,
+		DutyCapPercent:     ops.DefaultMaxDutyPercent,
+		ReactivePauseOn:    cfg.ReactivePauseEnabled,
+	}
+	if !sum.LastTickAt.IsZero() {
+		rep.LastTickAt = sum.LastTickAt.Format(time.RFC3339)
+	}
+	if sum.ShareMeasured {
+		v := sum.SelfCPUSharePercent
+		rep.SelfCPUSharePercent = &v
+	}
+	if pause.Paused {
+		rep.PauseReasonClass = string(pause.ReasonClass)
+		rep.PausedSince = pause.PausedAt.Format(time.RFC3339)
+		if rb := pause.ResumeBy(); !rb.IsZero() {
+			rep.ResumeBy = rb.Format(time.RFC3339)
+		}
 	}
 
 	if *asJSON {
 		_ = json.NewEncoder(stdout).Encode(rep)
 	} else {
-		fmt.Fprintf(stdout, "fak ops: status=%s recent_events_24h=%d last_event=%s free_disk=%d\n", rep.Status, rep.RecentEvents, rep.LastEventTime, rep.FreeDiskBytes)
+		share := "unmeasured"
+		if rep.SelfCPUSharePercent != nil {
+			share = fmt.Sprintf("%.2f%%", *rep.SelfCPUSharePercent)
+		}
+		pausedTxt := "no"
+		if rep.Paused {
+			pausedTxt = fmt.Sprintf("yes(%s since=%s resume_by=%s)", rep.PauseReasonClass, rep.PausedSince, rep.ResumeBy)
+		}
+		fmt.Fprintf(stdout, "fak ops: status=%s liveness=%s last_tick_age=%ds self_cpu_share=%s (cap %.1f%%) ticks_24h=%d productive=%d idle=%d skipped=%d paused=%s reactive_pause=%v recent_events_24h=%d last_event=%s free_disk=%d\n",
+			rep.Status, rep.Liveness, rep.LastTickAgeSeconds, share, rep.DutyCapPercent, rep.Ticks24h, rep.Productive24h, rep.Idle24h, rep.Skipped24h, pausedTxt, rep.ReactivePauseOn, rep.RecentEvents, rep.LastEventTime, rep.FreeDiskBytes)
 	}
 	return 0
 }

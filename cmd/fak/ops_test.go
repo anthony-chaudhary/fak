@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ops"
 )
@@ -31,7 +32,7 @@ func TestOpsCLIStatusAndSweep(t *testing.T) {
 	if rep.FreeDiskBytes == 0 {
 		t.Errorf("expected non-zero FreeDiskBytes, got 0")
 	}
-	if rep.Status != "healthy" && rep.Status != "warning" && rep.Status != "refuse" {
+	if rep.Status != "healthy" && rep.Status != "warning" && rep.Status != "refuse" && rep.Status != "unknown" && rep.Status != "stale" && rep.Status != "paused" {
 		t.Errorf("expected valid status string, got %q", rep.Status)
 	}
 
@@ -111,8 +112,9 @@ func TestOpsCLIStatusWatermarkTransitions(t *testing.T) {
 		}
 	}
 
-	// 3. Trigger "healthy": both thresholds 0
+	// 3. Trigger "healthy": both thresholds 0 and a live tick (#14481: no ticks is not healthy)
 	{
+		seedLoadRows(t, root, ops.LoadCycle{Tick: 1, Started: time.Now().Add(-2 * time.Second), Finished: time.Now().Add(-time.Second), WallMS: 1000, Verdict: ops.LoadIdle})
 		var out, errb bytes.Buffer
 		cfg := ops.DefaultConfig()
 		cfg.WarningFreeBytes = 0
