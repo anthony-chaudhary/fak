@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,16 +10,151 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // A checkpoint keeps only what the next horizon tokens would overwrite and relies
 // on its own session's earlier cache rows, so one session holds one conversation's
 // prefix: each prefix-cache slot is a whole resident session.
 const (
-	inkling2PrefixSlotsMax        = 8
-	inkling2PrefixCacheMiBDefault = 4096
+	inkling2PrefixSlotsMax          = 8
+	inkling2PrefixCacheMiBDefault   = 4096
+	inkling2CheckpointFormatVersion = "inkling2-scalar-ckpt-v1"
 )
+
+// inkling2PrefixMaterialization identifies the model file, tokenizer, RoPE/context
+// configuration, and checkpoint format under which a scalar prefix slot was computed.
+type inkling2PrefixMaterialization struct {
+	ModelFile         string
+	TokenizerID       string
+	PositionConfig    string
+	CheckpointVersion string
+}
+
+// inkling2PrefixMatchKey is the exact-equality key required for scalar prefix reuse:
+// the materialization binding plus the per-request tenant salt. Empty TenantSalt is
+// the one shared namespace, never a wildcard.
+type inkling2PrefixMatchKey struct {
+	ModelFile         string
+	TokenizerID       string
+	PositionConfig    string
+	CheckpointVersion string
+	TenantSalt        string
+}
+
+func (m inkling2PrefixMaterialization) withSalt(salt string) inkling2PrefixMatchKey {
+	ver := m.CheckpointVersion
+	if ver == "" {
+		ver = inkling2CheckpointFormatVersion
+	}
+	return inkling2PrefixMatchKey{
+		ModelFile:         m.ModelFile,
+		TokenizerID:       m.TokenizerID,
+		PositionConfig:    m.PositionConfig,
+		CheckpointVersion: ver,
+		TenantSalt:        salt,
+	}
+}
+
+func inkling2ModelFileIdentity(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return fmt.Sprintf("%s|size=%d|mtime=%d", path, info.Size(), info.ModTime().UnixNano())
+	}
+	return path
+}
+
+func inkling2PositionConfig(m *ggufload.Inkling2LoopModel, contextTokens int, kvDtype string) string {
+	if m == nil {
+		return fmt.Sprintf("ctx=%d;kv=%s", contextTokens, kvDtype)
+	}
+	hp := m.HP
+	return fmt.Sprintf("arch=%s;ctx=%d;kv=%s;L=%d;H=%d;heads=%d;kvh=%d;hd=%d;sw=%d;rl=%d;re=%d;passes=%d;lsf=%g;lsa=%g;sb=%g;slb=%g",
+		m.Arch, contextTokens, kvDtype,
+		hp.Layers, hp.Hidden, hp.Heads, hp.KVHeads, hp.HeadDim,
+		hp.SlidingWindow, hp.RelLength, hp.RelExtent, hp.Passes,
+		hp.LogScaleFloor, hp.LogScaleAlpha, hp.SituBeta, hp.SituLinearBeta)
+}
+
+func inkling2TokenizerIdentity(tok *tokenizer.Tokenizer) string {
+	if tok == nil {
+		return ""
+	}
+	return tok.Identity()
+}
+
+type inkling2TenantSaltCtxKey struct{}
+type inkling2ConversationCtxKey struct{}
+
+type inkling2ConversationHint struct {
+	key    string
+	pinned bool
+}
+
+// withInkling2TenantSalt attaches an explicit tenant salt to ctx for scalar
+// prefix-slot isolation. Empty salt names the one shared namespace.
+func withInkling2TenantSalt(ctx context.Context, salt string) context.Context {
+	return context.WithValue(ctx, inkling2TenantSaltCtxKey{}, strings.TrimSpace(salt))
+}
+
+// inkling2TenantSaltFromContext reads the tenant salt from request context.
+// Explicit Inkling-2 salt takes precedence; otherwise it falls back to the
+// authenticated gateway prefix-cache identity (tenant/agent/epoch). Empty means
+// the one shared namespace; it is a key value, never a wildcard.
+func inkling2TenantSaltFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(inkling2TenantSaltCtxKey{}).(string); ok {
+		return v
+	}
+	if id, ok := agent.PrefixCacheIdentityFromContext(ctx); ok {
+		if id.Agent == "" && id.Epoch == "" {
+			return id.Tenant
+		}
+		return id.Tenant + "\x00" + id.Agent + "\x00" + id.Epoch
+	}
+	return ""
+}
+
+// withInkling2ConversationKey attaches a conversation key (and optional pin) to ctx.
+// The conversation key is used for victim choice and pinning only — never to select
+// a slot or bypass exact-prefix + match-key verification.
+func withInkling2ConversationKey(ctx context.Context, convKey string, pinned bool) context.Context {
+	return context.WithValue(ctx, inkling2ConversationCtxKey{}, inkling2ConversationHint{
+		key:    strings.TrimSpace(convKey),
+		pinned: pinned,
+	})
+}
+
+func inkling2ConversationFromContext(ctx context.Context) inkling2ConversationHint {
+	if ctx == nil {
+		return inkling2ConversationHint{}
+	}
+	h, _ := ctx.Value(inkling2ConversationCtxKey{}).(inkling2ConversationHint)
+	return h
+}
+
+func (e *inkling2LoopEngine) setPrefixMaterialization(mat inkling2PrefixMaterialization) {
+	if mat.CheckpointVersion == "" {
+		mat.CheckpointVersion = inkling2CheckpointFormatVersion
+	}
+	e.life.Lock()
+	e.materialization = mat
+	e.life.Unlock()
+}
+
+func (e *inkling2LoopEngine) matchKeyFor(ctx context.Context) inkling2PrefixMatchKey {
+	e.life.Lock()
+	mat := e.materialization
+	e.life.Unlock()
+	return mat.withSalt(inkling2TenantSaltFromContext(ctx))
+}
 
 // inkling2PrefixCacheFromEnv reads FAK_INKLING2_PREFIX_SLOTS (resident sessions,
 // default 1) and FAK_INKLING2_PREFIX_CACHE_MIB (what more than one slot may hold
@@ -263,15 +399,29 @@ type inkling2PrefixSlot struct {
 	sess    ggufload.Inkling2LoopSession
 	hasCkpt bool
 	ckpt    []int
+	key     inkling2PrefixMatchKey
+	convKey string // victim choice / pinning only; never used for prefix selection
+	pinned  bool   // pinning hint for victim choice / trim only
 	used    uint64 // engine clock at the slot's last request
 }
 
-// prefixHit is the slot whose checkpoint is the longest proper prefix of prompt.
-func (e *inkling2LoopEngine) prefixHit(prompt []int) *inkling2PrefixSlot {
+// prefixHit returns the slot whose checkpoint is the longest proper prefix of
+// prompt under an equal match key (materialization + tenant salt). Ties go to
+// the most recently used slot. A key mismatch or missing checkpoint version
+// fails closed (returns nil).
+func (e *inkling2LoopEngine) prefixHit(prompt []int, want inkling2PrefixMatchKey) *inkling2PrefixSlot {
 	var best *inkling2PrefixSlot
-	for _, sl := range e.cache {
-		if sl.hasCkpt && len(sl.ckpt) < len(prompt) && (best == nil || len(sl.ckpt) > len(best.ckpt)) && inkling2HasPrefix(prompt, sl.ckpt) {
-			best = sl
+	if want.CheckpointVersion != "" {
+		for _, sl := range e.cache {
+			if !sl.hasCkpt || sl.key != want || len(sl.ckpt) >= len(prompt) {
+				continue
+			}
+			if best != nil && (len(sl.ckpt) < len(best.ckpt) || (len(sl.ckpt) == len(best.ckpt) && sl.used <= best.used)) {
+				continue
+			}
+			if inkling2HasPrefix(prompt, sl.ckpt) {
+				best = sl
+			}
 		}
 	}
 	st := e.prefixState()
@@ -332,35 +482,65 @@ func (e *inkling2LoopEngine) prefixCanGrow() bool {
 }
 
 // prefixVictim is the slot a miss runs on when the cache cannot grow: one holding
-// no checkpoint, else the least recently used.
-func (e *inkling2LoopEngine) prefixVictim() *inkling2PrefixSlot {
-	var lru *inkling2PrefixSlot
+// no checkpoint, else the least recently used unpinned slot belonging to convKey
+// (if non-empty), else the least recently used unpinned slot, falling back to the
+// least recently used pinned slot so capacity never deadlocks.
+func (e *inkling2LoopEngine) prefixVictim(convKey string) *inkling2PrefixSlot {
+	var sameConv, unpinned, pinned *inkling2PrefixSlot
 	for _, sl := range e.cache {
 		if !sl.hasCkpt {
 			return sl
 		}
-		if lru == nil || sl.used < lru.used {
-			lru = sl
+		if sl.pinned {
+			if pinned == nil || sl.used < pinned.used {
+				pinned = sl
+			}
+			continue
+		}
+		if convKey != "" && sl.convKey == convKey && (sameConv == nil || sl.used < sameConv.used) {
+			sameConv = sl
+		}
+		if unpinned == nil || sl.used < unpinned.used {
+			unpinned = sl
 		}
 	}
-	return lru
+	if sameConv != nil {
+		return sameConv
+	}
+	if unpinned != nil {
+		return unpinned
+	}
+	return pinned
 }
 
 // prefixTrim closes least recently used slots, never the current one, while more
 // than one slot pushes the unified ledger past the cap; a session grows after it
 // opens (lazy prefill arenas, checkpoint rows), so the admission projection alone
-// is not enough.
+// is not enough. Unpinned slots are evicted before pinned slots.
 func (e *inkling2LoopEngine) prefixTrim() {
 	st := e.prefixState()
 	for len(e.cache) > 1 {
 		if held, _, ok := e.prefixMeter(); ok && held <= e.capBytes {
 			break
 		}
-		var lru *inkling2PrefixSlot
+		var unpinned, pinned *inkling2PrefixSlot
 		for _, sl := range e.cache {
-			if sl != e.cur && (lru == nil || sl.used < lru.used) {
-				lru = sl
+			if sl == e.cur {
+				continue
 			}
+			if sl.pinned {
+				if pinned == nil || sl.used < pinned.used {
+					pinned = sl
+				}
+				continue
+			}
+			if unpinned == nil || sl.used < unpinned.used {
+				unpinned = sl
+			}
+		}
+		lru := unpinned
+		if lru == nil {
+			lru = pinned
 		}
 		if lru == nil {
 			break

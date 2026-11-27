@@ -143,11 +143,12 @@ type inkling2LoopEngine struct {
 	slots    int
 	capBytes int64
 
-	life   sync.Mutex
-	closed bool
-	reqs   chan *inkling2LoopRequest
-	quit   chan struct{}
-	done   chan struct{}
+	life            sync.Mutex
+	materialization inkling2PrefixMaterialization
+	closed          bool
+	reqs            chan *inkling2LoopRequest
+	quit            chan struct{}
+	done            chan struct{}
 
 	// owned by the worker goroutine
 	cache    []*inkling2PrefixSlot
@@ -276,14 +277,18 @@ func (e *inkling2LoopEngine) serveRecovering(r *inkling2LoopRequest) {
 
 // acquire positions a slot's session for prompt and reports how many leading prompt
 // tokens its cache already holds; rw is nil when the request runs without reuse. A
-// hit is the slot whose checkpoint is the longest proper prefix of prompt; a miss
-// runs on a new slot while the cache may grow, else on the slot victim picks.
-func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused int, err error) {
+// hit is the slot whose checkpoint is the longest proper prefix of prompt under an
+// equal match key (materialization + tenant salt); a miss runs on a new slot while
+// the cache may grow, else on the slot victim picks.
+func (e *inkling2LoopEngine) acquire(ctx context.Context, prompt []int) (rw inkling2Rewinder, reused int, err error) {
 	e.cur = nil
 	e.clock++
+	want := e.matchKeyFor(ctx)
+	conv := inkling2ConversationFromContext(ctx)
 	if !e.prefixReuse.disabled() {
-		if sl := e.prefixHit(prompt); sl != nil {
+		if sl := e.prefixHit(prompt, want); sl != nil {
 			e.cur, sl.used, sl.hasCkpt = sl, e.clock, false
+			sl.key, sl.convKey, sl.pinned = want, conv.key, conv.pinned
 			rw := sl.sess.(inkling2Rewinder)
 			switch err := rw.Restore(); {
 			case err == nil:
@@ -293,7 +298,7 @@ func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused 
 			case !errors.Is(err, ggufload.ErrInkling2NoCheckpoint):
 				return nil, 0, err
 			}
-			return e.resetCurrent(prompt, rw)
+			return e.resetCurrent(ctx, prompt, rw)
 		}
 	}
 	var sl *inkling2PrefixSlot
@@ -312,10 +317,11 @@ func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused 
 		}
 	}
 	if !fresh {
-		sl = e.prefixVictim()
+		sl = e.prefixVictim(conv.key)
 		sl.hasCkpt = false
 	}
 	e.cur, sl.used = sl, e.clock
+	sl.key, sl.convKey, sl.pinned = want, conv.key, conv.pinned
 	if e.prefixReuse.disabled() {
 		return nil, 0, nil
 	}
@@ -326,16 +332,16 @@ func (e *inkling2LoopEngine) acquire(prompt []int) (rw inkling2Rewinder, reused 
 	case fresh:
 		return rw, 0, nil
 	}
-	return e.resetCurrent(prompt, rw)
+	return e.resetCurrent(ctx, prompt, rw)
 }
 
 // resetCurrent rewinds the current slot's session to position 0.
-func (e *inkling2LoopEngine) resetCurrent(prompt []int, rw inkling2Rewinder) (inkling2Rewinder, int, error) {
+func (e *inkling2LoopEngine) resetCurrent(ctx context.Context, prompt []int, rw inkling2Rewinder) (inkling2Rewinder, int, error) {
 	err := rw.Reset()
 	if errors.Is(err, ggufload.ErrInkling2CheckpointUnavailable) {
 		// a fresh session starts at position 0 without the reset's zero fill
 		if err = e.dropCurrent(); err == nil {
-			return e.acquire(prompt)
+			return e.acquire(ctx, prompt)
 		}
 	}
 	if err != nil {
@@ -358,7 +364,7 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 		return res, errors.New("inkling2_loop engine: empty prompt")
 	}
 	start := time.Now()
-	rw, reused, err := e.acquire(prompt)
+	rw, reused, err := e.acquire(r.ctx, prompt)
 	if err != nil {
 		_ = e.dropCurrent()
 		return res, err
@@ -488,6 +494,11 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 	}
 	scalar.prefixReuse = mode
 	scalar.slots, scalar.capBytes = inkling2PrefixCacheFromEnv(lookup)
+	kvDtype, _ := ggufload.Inkling2KVDTypeFrom(lookup)
+	scalar.setPrefixMaterialization(inkling2PrefixMaterialization{
+		PositionConfig:    inkling2PositionConfig(m, contextTokens, fmt.Sprint(kvDtype)),
+		CheckpointVersion: inkling2CheckpointFormatVersion,
+	})
 	batchEligible := ggufload.Inkling2LoopBatchEligible(m, be)
 	cudaPrefill := batchEligible && inkling2CUDAPrefillReady(be, lookup)
 	if cudaPrefill {
@@ -765,6 +776,14 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		_ = closeModel()
 		fmt.Fprintln(os.Stderr, "fak serve: inkling2_loop needs the GGUF's embedded tokenizer or --tokenizer")
 		os.Exit(2)
+	}
+	if scalar, ok := gen.(*inkling2LoopEngine); ok {
+		scalar.life.Lock()
+		mat := scalar.materialization
+		scalar.life.Unlock()
+		mat.ModelFile = inkling2ModelFileIdentity(path)
+		mat.TokenizerID = inkling2TokenizerIdentity(tok)
+		scalar.setPrefixMaterialization(mat)
 	}
 	if *sf.model == "mock" || *sf.model == "" {
 		*sf.model = serveInkling2LoopDefaultModelID

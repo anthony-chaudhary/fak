@@ -517,3 +517,256 @@ func TestInkling2PrefixSlotsOffBehindCohorts(t *testing.T) {
 		t.Fatalf("default one slot note %q, want none", note)
 	}
 }
+
+func TestInkling2PrefixHitMatchKeyTable(t *testing.T) {
+	baseKey := inkling2PrefixMatchKey{
+		ModelFile:         "/models/inkling2-small.gguf|size=1024|mtime=100",
+		TokenizerID:       "tok-sha256-aaa",
+		PositionConfig:    "arch=inkling2_loop;ctx=131072;kv=fp16",
+		CheckpointVersion: inkling2CheckpointFormatVersion,
+		TenantSalt:        "tenant-a",
+	}
+	withKey := func(fn func(*inkling2PrefixMatchKey)) inkling2PrefixMatchKey {
+		k := baseKey
+		fn(&k)
+		return k
+	}
+	slot := func(ckpt []int, key inkling2PrefixMatchKey, convKey string, used uint64) *inkling2PrefixSlot {
+		return &inkling2PrefixSlot{
+			hasCkpt: true,
+			ckpt:    ckpt,
+			key:     key,
+			convKey: convKey,
+			used:    used,
+		}
+	}
+
+	tests := []struct {
+		name      string
+		slots     []*inkling2PrefixSlot
+		prompt    []int
+		wantKey   inkling2PrefixMatchKey
+		wantIndex int // -1 means miss
+	}{
+		{
+			name:      "salt mismatch misses",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, baseKey, "conv-1", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   withKey(func(k *inkling2PrefixMatchKey) { k.TenantSalt = "tenant-b" }),
+			wantIndex: -1,
+		},
+		{
+			name:      "empty shared namespace does not match salted slot",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, baseKey, "conv-1", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   withKey(func(k *inkling2PrefixMatchKey) { k.TenantSalt = "" }),
+			wantIndex: -1,
+		},
+		{
+			name:      "salted request does not match empty shared namespace slot",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, withKey(func(k *inkling2PrefixMatchKey) { k.TenantSalt = "" }), "conv-1", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   baseKey,
+			wantIndex: -1,
+		},
+		{
+			name:      "empty shared namespace matches empty shared namespace",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, withKey(func(k *inkling2PrefixMatchKey) { k.TenantSalt = "" }), "conv-1", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   withKey(func(k *inkling2PrefixMatchKey) { k.TenantSalt = "" }),
+			wantIndex: 0,
+		},
+		{
+			name:      "same prefix with different conversation keys still hits",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, baseKey, "conv-alpha", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   baseKey,
+			wantIndex: 0,
+		},
+		{
+			name:      "model file mismatch fails closed",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, baseKey, "conv-1", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   withKey(func(k *inkling2PrefixMatchKey) { k.ModelFile = "/models/inkling2-other.gguf" }),
+			wantIndex: -1,
+		},
+		{
+			name:      "tokenizer id mismatch fails closed",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, baseKey, "conv-1", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   withKey(func(k *inkling2PrefixMatchKey) { k.TokenizerID = "tok-sha256-bbb" }),
+			wantIndex: -1,
+		},
+		{
+			name:      "rope and context config mismatch fails closed",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, baseKey, "conv-1", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   withKey(func(k *inkling2PrefixMatchKey) { k.PositionConfig = "arch=inkling2_loop;ctx=65536;kv=fp16" }),
+			wantIndex: -1,
+		},
+		{
+			name:      "checkpoint version mismatch fails closed",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, baseKey, "conv-1", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   withKey(func(k *inkling2PrefixMatchKey) { k.CheckpointVersion = "inkling2-scalar-ckpt-v2" }),
+			wantIndex: -1,
+		},
+		{
+			name:      "empty checkpoint version fails closed",
+			slots:     []*inkling2PrefixSlot{slot([]int{1, 2, 3}, withKey(func(k *inkling2PrefixMatchKey) { k.CheckpointVersion = "" }), "conv-1", 10)},
+			prompt:    []int{1, 2, 3, 4},
+			wantKey:   withKey(func(k *inkling2PrefixMatchKey) { k.CheckpointVersion = "" }),
+			wantIndex: -1,
+		},
+		{
+			name: "longest proper prefix wins and exact length is skipped",
+			slots: []*inkling2PrefixSlot{
+				slot([]int{1, 2}, baseKey, "conv-1", 50),
+				slot([]int{1, 2, 3, 4, 5}, baseKey, "conv-2", 10),
+				slot([]int{1, 2, 3, 4, 5, 6}, baseKey, "conv-3", 99), // equal length, not a proper prefix
+			},
+			prompt:    []int{1, 2, 3, 4, 5, 6},
+			wantKey:   baseKey,
+			wantIndex: 1,
+		},
+		{
+			name: "ties go to most recently used slot when newer is later",
+			slots: []*inkling2PrefixSlot{
+				slot([]int{1, 2, 3, 4}, baseKey, "conv-old", 10),
+				slot([]int{1, 2, 3, 4}, baseKey, "conv-new", 25),
+			},
+			prompt:    []int{1, 2, 3, 4, 5},
+			wantKey:   baseKey,
+			wantIndex: 1,
+		},
+		{
+			name: "ties go to most recently used slot when newer is earlier",
+			slots: []*inkling2PrefixSlot{
+				slot([]int{1, 2, 3, 4}, baseKey, "conv-new", 25),
+				slot([]int{1, 2, 3, 4}, baseKey, "conv-old", 10),
+			},
+			prompt:    []int{1, 2, 3, 4, 5},
+			wantKey:   baseKey,
+			wantIndex: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := &inkling2LoopEngine{cache: tc.slots}
+			got := eng.prefixHit(tc.prompt, tc.wantKey)
+			if tc.wantIndex < 0 {
+				if got != nil {
+					t.Fatalf("prefixHit() matched slot %+v, want nil (fail closed)", got)
+				}
+				return
+			}
+			want := tc.slots[tc.wantIndex]
+			if got != want {
+				t.Fatalf("prefixHit() = %p (used=%d len=%d), want slot %d %p (used=%d len=%d)",
+					got, slotUsed(got), slotLen(got), tc.wantIndex, want, want.used, len(want.ckpt))
+			}
+		})
+	}
+}
+
+func slotUsed(sl *inkling2PrefixSlot) uint64 {
+	if sl == nil {
+		return 0
+	}
+	return sl.used
+}
+
+func slotLen(sl *inkling2PrefixSlot) int {
+	if sl == nil {
+		return -1
+	}
+	return len(sl.ckpt)
+}
+
+func TestInkling2PrefixMatchKeyEndToEndAndConversationVictim(t *testing.T) {
+	eng, opened := inkling2SlotEngine([]int{'a', 'b'}, 2, 1<<40, 0)
+	defer eng.Close()
+	mat := inkling2PrefixMaterialization{
+		ModelFile:         "/models/inkling2.gguf|size=100|mtime=1",
+		TokenizerID:       "tok-v1",
+		PositionConfig:    "ctx=131072;kv=fp16",
+		CheckpointVersion: inkling2CheckpointFormatVersion,
+	}
+	eng.setPrefixMaterialization(mat)
+
+	genWith := func(ctx context.Context, prompt []int) agent.Inkling2LoopGeneration {
+		t.Helper()
+		res, err := eng.Generate(ctx, prompt, 1, nil, func(int) bool { return true })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+
+	basePrompt := []int{'s', 'y', 's', '1'}
+	extPrompt := inkling2Extend(basePrompt, 'x')
+
+	// Seed slot under tenant-a with conv-1.
+	ctxA1 := withInkling2ConversationKey(agent.WithPrefixCacheIdentity(context.Background(), "tenant-a", ""), "conv-1", false)
+	if res := genWith(ctxA1, basePrompt); res.CachedPromptTokens != 0 {
+		t.Fatalf("cold tenant-a cached %d, want 0", res.CachedPromptTokens)
+	}
+
+	// Different conversation key under same tenant-a + same exact prefix MUST hit.
+	ctxA2 := withInkling2ConversationKey(agent.WithPrefixCacheIdentity(context.Background(), "tenant-a", ""), "conv-2", false)
+	if res := genWith(ctxA2, extPrompt); res.CachedPromptTokens != len(basePrompt)-1 {
+		t.Fatalf("same tenant different conv cached %d, want %d", res.CachedPromptTokens, len(basePrompt)-1)
+	}
+
+	// Different tenant salt (tenant-b) with same conversation key and same prefix MUST miss.
+	ctxB := withInkling2ConversationKey(agent.WithPrefixCacheIdentity(context.Background(), "tenant-b", ""), "conv-2", false)
+	if res := genWith(ctxB, inkling2Extend(extPrompt, 'y')); res.CachedPromptTokens != 0 {
+		t.Fatalf("different tenant same conv cached %d, want 0 (fail closed)", res.CachedPromptTokens)
+	}
+
+	// Empty shared namespace MUST miss against tenant-a / tenant-b slots.
+	if res := genWith(context.Background(), inkling2Extend(extPrompt, 'z')); res.CachedPromptTokens != 0 {
+		t.Fatalf("empty shared namespace cached %d against salted slots, want 0", res.CachedPromptTokens)
+	}
+
+	// Materialization change (e.g. tokenizer/RoPE reload) MUST fail closed.
+	mat2 := mat
+	mat2.PositionConfig = "ctx=65536;kv=fp16"
+	eng.setPrefixMaterialization(mat2)
+	if res := genWith(ctxA2, inkling2Extend(extPrompt, 'm')); res.CachedPromptTokens != 0 {
+		t.Fatalf("materialization mismatch cached %d, want 0 (fail closed)", res.CachedPromptTokens)
+	}
+	if len(*opened) != 2 {
+		t.Fatalf("opened %d sessions, want 2 bounded by slot cap", len(*opened))
+	}
+
+	// Conversation pinning protects a pinned slot from victim selection on a miss.
+	engPin, _ := inkling2SlotEngine([]int{'a', 'b'}, 2, 1<<40, 0)
+	defer engPin.Close()
+	engPin.setPrefixMaterialization(mat)
+	pA := []int{'A', '1', '2'}
+	pB := []int{'B', '1', '2'}
+	pC := []int{'C', '1', '2'}
+	ctxPinA := withInkling2ConversationKey(withInkling2TenantSalt(context.Background(), "t1"), "conv-A", true)
+	ctxUnpinB := withInkling2ConversationKey(withInkling2TenantSalt(context.Background(), "t1"), "conv-B", false)
+	ctxUnpinC := withInkling2ConversationKey(withInkling2TenantSalt(context.Background(), "t1"), "conv-C", false)
+
+	if _, err := engPin.Generate(ctxPinA, pA, 1, nil, func(int) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engPin.Generate(ctxUnpinB, pB, 1, nil, func(int) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	// conv-A is older (LRU) than conv-B, but pinned: conv-C miss must evict conv-B, keeping conv-A warm.
+	if _, err := engPin.Generate(ctxUnpinC, pC, 1, nil, func(int) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	resA, err := engPin.Generate(ctxPinA, inkling2Extend(pA, '3'), 1, nil, func(int) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resA.CachedPromptTokens != len(pA)-1 {
+		t.Fatalf("pinned conv-A cached %d after conv-C miss, want %d", resA.CachedPromptTokens, len(pA)-1)
+	}
+}
