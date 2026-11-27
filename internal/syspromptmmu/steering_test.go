@@ -149,6 +149,25 @@ func TestSteeringTextUsesPositiveSignalFirstFrame(t *testing.T) {
 	}
 }
 
+func TestSteeringTextDirectsHumanAttentionFormatting(t *testing.T) {
+	for level := 1; level <= 3; level++ {
+		text, ok := steeringText(level)
+		if !ok {
+			t.Fatalf("steeringText(%d) missing", level)
+		}
+		lower := strings.ToLower(text)
+		for _, want := range []string{"blank lines", "bullets"} {
+			if !strings.Contains(lower, want) {
+				t.Errorf("steeringText(%d) = %q, want scannable formatting cue %q", level, text, want)
+			}
+		}
+	}
+	def, ok := steeringText(2)
+	if !ok || !strings.Contains(strings.ToLower(def), "human attention") {
+		t.Errorf("steeringText(2) = %q, want human-attention ordering cue", def)
+	}
+}
+
 func TestSignalFirstSkillMatchesNativeProfile(t *testing.T) {
 	path := filepath.Join("..", "..", ".claude", "skills", "signal-first", "SKILL.md")
 	body, err := os.ReadFile(path)

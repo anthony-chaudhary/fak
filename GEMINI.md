@@ -45,5 +45,15 @@ When operating as or delegating to Gemini 3.8 Flash, observe these behavioral fe
 - **Sanitize nested tool schemas & preserve thought signatures**: Gemini API rejects `$schema`, `additionalProperties`, and naked array parameters lacking `items`. Recursively backfill `items` and preserve `thoughtSignature` tokens across multi-turn function calls.
 - Full analysis & evaluation data: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
 
+## Human-attention-aware response formatting
+
+Shape every human-facing response for fast, low-friction scanning:
+
+- **Lead with the verdict or decision**: Put the outcome, blocker, or next action on the first line.
+- **Separate sections with blank lines**: Break distinct topics, steps, and status groups with line breaks; keep prose paragraphs to 1–2 short lines.
+- **Use scannable bullet points**: Group parallel facts, edits, or options into concise bullets with one claim and inline evidence per line.
+- **Prioritize human attention**: Surface choices, tradeoffs, and risks up front; keep background detail behind file links or brief summaries.
+- **Close on the next checkable step**: End operator-facing turns with a bullet carrying the next concrete command or decision (matching `AGENTS.md` / `headlesslint.ScanClosing`).
+
 To run the Gemini CLI behind the kernel (governed tool calls via MCP / an
 OpenAI-compatible gateway), follow [`docs/integrations/gemini-cli.md`](docs/integrations/gemini-cli.md).
