@@ -140,22 +140,43 @@ inline void ink2g_k_loop(device const uchar *raw, constant PackedShape &shape, d
 static_assert(INK2G_R_GM * INK2G_R_GN * 32 == INK2G_THREADS, "four SIMD groups");
 static_assert(INK2G_G_GM * INK2G_G_GN * 32 == INK2G_THREADS, "four SIMD groups");
 
+// One tile of the dense rows GEMM: activation rows from t0 by BN weight rows from n0.
+template <typename D, typename TW, uint GM, uint GN, uint SM, uint SN>
+inline void ink2g_rows_tile(device const uchar *raw, constant PackedShape &shape, device const float *x, device float *y,
+                            constant PackedRows &batch, uint n0, uint t0, threadgroup float *tg, uint tid, uint simd) {
+    constexpr uint XR = GM * SM * 8 * INK2G_BK / 4 / INK2G_THREADS;
+    size_t xo[XR];
+    for (uint r = 0; r < XR; r++)
+        xo[r] = size_t(min(t0 + (tid + INK2G_THREADS * r) / (INK2G_BK / 4), batch.tokens - 1)) * batch.xStride;
+    ink2g_k_loop<D, TW, GM, GN, SM, SN>(raw, shape, x, xo, 0, n0, batch.tokens - t0, tg, tid, simd,
+        [&](uint m, uint c, float v) {
+            const uint t = t0 + m, n = n0 + c;
+            if (t < batch.tokens && n < shape.rows) y[size_t(t) * batch.yStride + n] = v;
+        });
+}
+
+// When the default 4 x 1 tile has at most 16 live rows (tail tiles of a prompt
+// chunk), split the four SIMD groups 2 x 2 so all four stay active and half the
+// activation slab is loaded, summing each element in the same order.
+#if INK2G_R_GM == 4 && INK2G_R_GN == 1 && INK2G_R_SM == 1 && (INK2G_R_SN % 2) == 0
+#define INK2G_ROWS_DISPATCH(TYPE, TW, n0, t0) \
+    if (batch.tokens - (t0) <= 16) \
+        ink2g_rows_tile<Ink2GDec_##TYPE, TW, 2, 2, 1, INK2G_R_SN / 2>(raw, shape, x, y, batch, n0, t0, tg, tid, simd); \
+    else \
+        ink2g_rows_tile<Ink2GDec_##TYPE, TW, INK2G_R_GM, INK2G_R_GN, INK2G_R_SM, INK2G_R_SN>(raw, shape, x, y, batch, n0, t0, tg, tid, simd);
+#else
+#define INK2G_ROWS_DISPATCH(TYPE, TW, n0, t0) \
+    ink2g_rows_tile<Ink2GDec_##TYPE, TW, INK2G_R_GM, INK2G_R_GN, INK2G_R_SM, INK2G_R_SN>(raw, shape, x, y, batch, n0, t0, tg, tid, simd);
+#endif
+
 // Y[t][n] = W[n,:] . X[t,:]: group.x a tile of INK2G_R_BN weight rows,
 // group.y of INK2G_R_BM activation rows. Rows past either end repeat the last
 // one unwritten.
 #define GEMM_ROWS_KERNEL(TYPE, TW) \
 kernel void gemm_rows_##TYPE(GEMM_ROWS_ARGS) { \
-    constexpr uint BM = INK2G_R_BM, BN = INK2G_R_BN, XR = BM * INK2G_BK / 4 / INK2G_THREADS; \
     threadgroup float tg[INK2G_TG_FLOATS(INK2G_R_BM, INK2G_R_BN, TW)]; \
-    const uint n0 = group.x * BN, t0 = group.y * BM; \
-    size_t xo[XR]; \
-    for (uint r = 0; r < XR; r++) \
-        xo[r] = size_t(min(t0 + (tid + INK2G_THREADS * r) / (INK2G_BK / 4), batch.tokens - 1)) * batch.xStride; \
-    ink2g_k_loop<Ink2GDec_##TYPE, TW, INK2G_R_GM, INK2G_R_GN, INK2G_R_SM, INK2G_R_SN>(raw, shape, x, xo, 0, n0, batch.tokens - t0, tg, tid, simd, \
-        [&](uint m, uint c, float v) { \
-            const uint t = t0 + m, n = n0 + c; \
-            if (t < batch.tokens && n < shape.rows) y[size_t(t) * batch.yStride + n] = v; \
-        }); \
+    const uint n0 = group.x * INK2G_R_BN, t0 = group.y * INK2G_R_BM; \
+    INK2G_ROWS_DISPATCH(TYPE, TW, n0, t0) \
 }
 
 #define GEMM_GROUPED_ARGS \
@@ -191,6 +212,29 @@ inline bool ink2g_grouped_find(device const int *offsets, uint nexp, uint gy, th
     return false;
 }
 
+// Thread 0 locates group.y's expert run and broadcasts it through tg[0..3]
+// before ink2g_k_loop's opening barrier, avoiding 128x redundant scans of offsets.
+template <uint BM>
+inline bool ink2g_grouped_find_tg(device const int *offsets, uint nexp, uint gy,
+                                  threadgroup float *tg, uint tid,
+                                  thread uint &e, thread uint &first, thread uint &count) {
+    threadgroup uint *u = (threadgroup uint *)tg;
+    if (tid == 0) {
+        uint e0 = 0, f0 = 0, c0 = 0;
+        const bool ok = ink2g_grouped_find<BM>(offsets, nexp, gy, e0, f0, c0);
+        u[0] = ok ? 1u : 0u;
+        u[1] = e0;
+        u[2] = f0;
+        u[3] = c0;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (u[0] == 0u) return false;
+    e = u[1];
+    first = u[2];
+    count = u[3];
+    return true;
+}
+
 // One tile of the expert-grouped GEMM: count (at most BM) pairs of expert e
 // from order[first], by BN weight rows from n0.
 template <typename D, typename TW, uint GM, uint GN, uint SM, uint SN>
@@ -208,6 +252,20 @@ inline void ink2g_grouped_tile(device const uchar *raw, constant PackedShape &sh
         });
 }
 
+// Adaptive 2 x 2 / 4 x 1 split for every expert-grouped dtype (not only nvfp4):
+// short runs (<= 16 pairs, including every tail tile) keep all four SIMD groups
+// busy and halve activation loads while summing each element in the same order.
+#if INK2G_G_GM == 4 && INK2G_G_GN == 1 && INK2G_G_SM == 1 && (INK2G_G_SN % 2) == 0
+#define INK2G_GROUPED_DISPATCH(TYPE, TW, e, first, count, n0) \
+    if ((count) <= 16) \
+        ink2g_grouped_tile<Ink2GDec_##TYPE, TW, 2, 2, 1, INK2G_G_SN / 2>(raw, shape, x, y, order, escale, grp, e, first, count, n0, tg, tid, simd); \
+    else \
+        ink2g_grouped_tile<Ink2GDec_##TYPE, TW, INK2G_G_GM, INK2G_G_GN, INK2G_G_SM, INK2G_G_SN>(raw, shape, x, y, order, escale, grp, e, first, count, n0, tg, tid, simd);
+#else
+#define INK2G_GROUPED_DISPATCH(TYPE, TW, e, first, count, n0) \
+    ink2g_grouped_tile<Ink2GDec_##TYPE, TW, INK2G_G_GM, INK2G_G_GN, INK2G_G_SM, INK2G_G_SN>(raw, shape, x, y, order, escale, grp, e, first, count, n0, tg, tid, simd);
+#endif
+
 // The expert-grouped GEMM over the routed pairs PBucket sorted: group.y is
 // one INK2G_G_BM-pair tile of one expert's run in order (offsets[e]..[e+1]),
 // numbered across experts in expert order; the grid's bound of
@@ -217,9 +275,8 @@ inline void ink2g_grouped_tile(device const uchar *raw, constant PackedShape &sh
 kernel void gemm_grouped_##TYPE(GEMM_GROUPED_ARGS) { \
     threadgroup float tg[INK2G_TG_FLOATS(INK2G_G_BM, INK2G_G_BN, TW)]; \
     uint e, first, count; \
-    if (!ink2g_grouped_find<INK2G_G_BM>(offsets, nexp, group.y, e, first, count)) return; \
-    ink2g_grouped_tile<Ink2GDec_##TYPE, TW, INK2G_G_GM, INK2G_G_GN, INK2G_G_SM, INK2G_G_SN>(raw, shape, x, y, order, escale, grp, \
-        e, first, count, group.x * INK2G_G_BN, tg, tid, simd); \
+    if (!ink2g_grouped_find_tg<INK2G_G_BM>(offsets, nexp, group.y, tg, tid, e, first, count)) return; \
+    INK2G_GROUPED_DISPATCH(TYPE, TW, e, first, count, group.x * INK2G_G_BN) \
 }
 
 #define INK2G_PACKED(TYPE, BLOCK, TW) INK2G_DECODE_PACKED(TYPE, BLOCK) GEMM_ROWS_KERNEL(TYPE, TW) GEMM_GROUPED_KERNEL(TYPE, TW)
@@ -271,7 +328,7 @@ struct Ink2GDec_nvfp4h {
 kernel void gemm_grouped_adapt_nvfp4(GEMM_GROUPED_ARGS) {
     threadgroup float tg[INK2G_TG_FLOATS(32, 128, half)];
     uint e, first, count;
-    if (!ink2g_grouped_find<32>(offsets, nexp, group.y, e, first, count)) return;
+    if (!ink2g_grouped_find_tg<32>(offsets, nexp, group.y, tg, tid, e, first, count)) return;
     if (count <= 16)
         ink2g_grouped_tile<Ink2GDec_nvfp4h, half, 2, 2, 1, 8>(raw, shape, x, y, order, escale, grp, e, first, count, group.x * 128, tg, tid, simd);
     else
