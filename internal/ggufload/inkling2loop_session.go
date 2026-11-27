@@ -200,12 +200,10 @@ func (r *inkling2ResidentSession) Close() error {
 
 func (r *inkling2ResidentSession) Pos() int { return r.s.pos }
 
-// checkpointable is rewindable plus the global-cache copies a checkpoint makes, which
-// read f16 caches in float32 element strides and so refuse FAK_INKLING2_KV=f16.
+// checkpointable settles state shared by FP32 and FP16 sessions. Global cache rows
+// stay in their resident allocation across a rewind; only local FP32 ring rows that
+// the horizon can overwrite are copied into checkpoint side buffers.
 func (s *inkling2Resident) checkpointable() error {
-	if s.kvHalf {
-		return fmt.Errorf("inkling2 resident: f16 global KV (FAK_INKLING2_KV=f16) cannot be checkpointed")
-	}
 	return s.rewindable()
 }
 
@@ -268,6 +266,17 @@ func (r *inkling2ResidentSession) negZeroFill(n int) (ink2Ref, []compute.Tensor,
 	return ref, g, err
 }
 
+// checkpointRowWords is the 32-bit storage width of one cache row copied by a
+// scalar checkpoint. Global rows return zero because they never wrap and stay in
+// place. kvHalfSlot is global-only, so every copied local row is FP32; copyDev's
+// exact x + -0 operation must never be used for packed half words.
+func (s *inkling2Resident) checkpointRowWords(slot int) int {
+	if !s.localAt(slot) {
+		return 0
+	}
+	return s.hp.KVHeads * s.hp.HeadDim
+}
+
 // baseBuffers allocates the conv history copies and fills once per session.
 func (r *inkling2ResidentSession) baseBuffers() (*ink2Rewind, error) {
 	if r.ck != nil {
@@ -302,21 +311,23 @@ func (r *inkling2ResidentSession) growRows(ck *ink2Rewind, rows int) error {
 		return nil
 	}
 	s := r.s
-	kvDim := s.hp.KVHeads * s.hp.HeadDim
 	r.freeGroup(&ck.grown)
 	ck.rows, ck.k, ck.v = 0, make([]ink2Ref, len(s.hist)), make([]ink2Ref, len(s.hist))
+	maxWords := 0
 	var err error
 	for slot := 0; slot < len(s.hist) && err == nil; slot++ {
-		if !s.localAt(slot) {
+		words := s.checkpointRowWords(slot)
+		if words == 0 {
 			continue
 		}
-		if ck.k[slot], err = r.allocInto(&ck.grown, rows*kvDim); err == nil {
-			ck.v[slot], err = r.allocInto(&ck.grown, rows*kvDim)
+		maxWords = max(maxWords, words)
+		if ck.k[slot], err = r.allocInto(&ck.grown, rows*words); err == nil {
+			ck.v[slot], err = r.allocInto(&ck.grown, rows*words)
 		}
 	}
 	if err == nil {
 		var g []compute.Tensor
-		ck.rowFill, g, err = r.negZeroFill(rows * kvDim)
+		ck.rowFill, g, err = r.negZeroFill(rows * maxWords)
 		ck.grown = append(ck.grown, g...)
 	}
 	if err != nil {
@@ -364,16 +375,16 @@ func (r *inkling2ResidentSession) Checkpoint(horizon int) error {
 	if err := r.growRows(ck, ck.hi-ck.lo); err != nil {
 		return err
 	}
-	kvDim := s.hp.KVHeads * s.hp.HeadDim
 	hf := s.histFloats()
 	for slot := range s.hist {
 		r.copyDev(ck.hist[slot], s.hist[slot], ck.histFill, hf)
-		if !s.localAt(slot) {
+		words := s.checkpointRowWords(slot)
+		if words == 0 {
 			continue
 		}
 		for _, sp := range inkling2RingSpans(ck.lo, ck.hi, s.caps[slot]) {
-			r.copyDev(at(ck.k[slot], sp.off*kvDim), at(s.kc[slot], sp.ring*kvDim), ck.rowFill, sp.n*kvDim)
-			r.copyDev(at(ck.v[slot], sp.off*kvDim), at(s.vc[slot], sp.ring*kvDim), ck.rowFill, sp.n*kvDim)
+			r.copyDev(at(ck.k[slot], sp.off*words), at(s.kc[slot], sp.ring*words), ck.rowFill, sp.n*words)
+			r.copyDev(at(ck.v[slot], sp.off*words), at(s.vc[slot], sp.ring*words), ck.rowFill, sp.n*words)
 		}
 	}
 	ck.valid = s.err == nil
@@ -392,16 +403,16 @@ func (r *inkling2ResidentSession) Restore() error {
 		}
 		return ErrInkling2NoCheckpoint
 	}
-	kvDim := s.hp.KVHeads * s.hp.HeadDim
 	hf := s.histFloats()
 	for slot := range s.hist {
 		r.copyDev(s.hist[slot], ck.hist[slot], ck.histFill, hf)
-		if !s.localAt(slot) {
+		words := s.checkpointRowWords(slot)
+		if words == 0 {
 			continue
 		}
 		for _, sp := range inkling2RingSpans(ck.lo, ck.hi, s.caps[slot]) {
-			r.copyDev(at(s.kc[slot], sp.ring*kvDim), at(ck.k[slot], sp.off*kvDim), ck.rowFill, sp.n*kvDim)
-			r.copyDev(at(s.vc[slot], sp.ring*kvDim), at(ck.v[slot], sp.off*kvDim), ck.rowFill, sp.n*kvDim)
+			r.copyDev(at(s.kc[slot], sp.ring*words), at(ck.k[slot], sp.off*words), ck.rowFill, sp.n*words)
+			r.copyDev(at(s.vc[slot], sp.ring*words), at(ck.v[slot], sp.off*words), ck.rowFill, sp.n*words)
 		}
 	}
 	if s.err != nil {

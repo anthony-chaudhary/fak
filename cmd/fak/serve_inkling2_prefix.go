@@ -158,9 +158,6 @@ func (e *inkling2LoopEngine) prefixSlotCount() int { return len(e.cache) }
 
 // inkling2PrefixSlotsNote names a slot count above the default for the startup message.
 func inkling2PrefixSlotsNote(e *inkling2LoopEngine) string {
-	if e.prefixReuse == inkling2PrefixReuseOffF16 {
-		return "; prefix reuse disabled for FAK_INKLING2_KV=f16"
-	}
 	if e.prefixReuse.disabled() || e.slots <= 1 {
 		return ""
 	}

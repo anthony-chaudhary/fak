@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
@@ -338,10 +341,10 @@ func TestInkling2ServeGeneratorReadsPrefixSlotsFromLookup(t *testing.T) {
 	}
 }
 
-// F16 global caches cannot use the scalar checkpoint copies. The ordinary serve
-// generator therefore runs each request in one fresh session even when the operator
-// left reuse at its on-by-default value and configured a large multi-slot budget.
-func TestInkling2ServeGeneratorF16DisablesPrefixReuseAndSnapshotBudget(t *testing.T) {
+// F16 prefix reuse is admitted by the session's checkpoint capability. The global
+// half-KV rows stay in place, so a growing turn reuses one session without opening a
+// second full-window allocation.
+func TestInkling2ServeGeneratorF16ReusesCapableCheckpoint(t *testing.T) {
 	lookup := func(k string) (string, bool) {
 		switch k {
 		case "FAK_INKLING2_KV":
@@ -360,26 +363,99 @@ func TestInkling2ServeGeneratorF16DisablesPrefixReuseAndSnapshotBudget(t *testin
 	if err != nil || !ok {
 		t.Fatalf("gen=%T err=%v, want serialized engine", gen, err)
 	}
-	if eng.prefixReuse != inkling2PrefixReuseOffF16 || !strings.Contains(msg, "prefix reuse disabled") {
-		t.Fatalf("mode=%v startup=%q, want typed f16 no-reuse truth", eng.prefixReuse, msg)
+	if eng.prefixReuse != inkling2PrefixReuseOn || strings.Contains(msg, "prefix reuse disabled") {
+		t.Fatalf("mode=%v startup=%q, want enabled f16 prefix reuse", eng.prefixReuse, msg)
 	}
 	var opened []*inkling2FakeSession
 	eng.open = inkling2FakeOpener([]int{'x', 'y'}, false, &opened)
 	defer eng.Close()
-	inkling2Gen(t, eng, []int{'a', 'b'}, 1)
-	inkling2Gen(t, eng, []int{'a', 'b', 'c'}, 1)
-	if len(opened) != 2 || !opened[0].closed || !opened[1].closed {
-		t.Fatalf("opened=%d closed=%v/%v, want one closed session per request", len(opened), len(opened) > 0 && opened[0].closed, len(opened) > 1 && opened[1].closed)
+	prompt := []int{'a', 'b'}
+	inkling2Gen(t, eng, prompt, 1)
+	res, _ := inkling2Gen(t, eng, inkling2Extend(prompt, 'c'), 1)
+	if eng.prefixReuse != inkling2PrefixReuseOn || len(opened) != 1 || opened[0].closed || res.CachedPromptTokens != len(prompt)-1 {
+		t.Fatalf("mode=%v opened=%d closed=%v cached=%d, want one reused f16 session", eng.prefixReuse, len(opened), len(opened) > 0 && opened[0].closed, res.CachedPromptTokens)
 	}
-	for i, s := range opened {
-		for _, call := range s.calls {
-			if call == "checkpoint" || call == "restore" {
-				t.Fatalf("session %d calls %v, f16 must not allocate or restore a checkpoint", i, s.calls)
-			}
+	if held, slots := eng.prefixHeldBytes(), eng.prefixSlotCount(); held == 0 || slots != 1 {
+		t.Fatalf("post-request prefix budget holds %d bytes in %d slots, want one metered session", held, slots)
+	}
+}
+
+func TestInkling2ServeGeneratorF16CheckpointUnavailableResetsAndRetries(t *testing.T) {
+	eng, opened := inkling2FakeEngine([]int{'x', 'y'})
+	defer eng.Close()
+	realOpen := eng.open
+	eng.open = func() (ggufload.Inkling2LoopSession, error) {
+		session, err := realOpen()
+		if err == nil {
+			session.(*inkling2FakeSession).ckErr = ggufload.ErrInkling2CheckpointUnavailable
 		}
+		return session, err
 	}
-	if held, slots := eng.prefixHeldBytes(), eng.prefixSlotCount(); held != 0 || slots != 0 {
-		t.Fatalf("post-request prefix budget holds %d bytes in %d slots, want 0/0", held, slots)
+	inkling2Gen(t, eng, []int{'A', 'a'}, 1)
+	session := (*opened)[0]
+	session.ckErr = nil
+	unrelated := []int{'B', 'b'}
+	cold, _ := inkling2Gen(t, eng, unrelated, 1)
+	if cold.CachedPromptTokens != 0 || !slices.Equal(session.prompt, unrelated) {
+		t.Fatalf("after unavailable checkpoint: cached=%d prompt=%v", cold.CachedPromptTokens, session.prompt)
+	}
+	warm, _ := inkling2Gen(t, eng, inkling2Extend(unrelated, 'c'), 1)
+	if warm.CachedPromptTokens != len(unrelated)-1 || len(*opened) != 1 {
+		t.Fatalf("after retry: cached=%d sessions=%d", warm.CachedPromptTokens, len(*opened))
+	}
+}
+
+func TestInkling2ScalarPrefixNear128KToolTurnKeepsStableRenderedBoundary(t *testing.T) {
+	tok := inkling2FakeTokenizer(t)
+	turn := `<|message_model|><|content_thinking|>inspect first<|end_message|>` +
+		`<|message_model|>read<|content_invoke_tool_json|>{"name":"read","args":{"path":"main.go"}}<|end_message|>` +
+		`<|content_model_end_sampling|>`
+	canned, err := tok.Encode(turn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var opened []*inkling2FakeSession
+	eng := &inkling2LoopEngine{prefixReuse: inkling2PrefixReuseOn, slots: 2, capBytes: 1 << 40,
+		open: inkling2FakeOpener(canned, false, &opened)}
+	defer eng.Close()
+	planner, err := newServeInkling2LoopPlanner(eng, tok, "inkling2", 131072)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := []agent.ToolDef{{Type: "function", Function: agent.ToolDefFunction{Name: "read", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)}}}
+	messages := []agent.Message{{Role: agent.RoleUser, Content: strings.Repeat("x", 126000)}}
+	first, err := planner.Complete(context.Background(), messages, tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opened) != 1 || len(first.Message.ToolCalls) != 1 {
+		t.Fatalf("opened=%d completion=%+v, want one session and one tool call", len(opened), first.Message)
+	}
+	session := opened[0]
+	firstPrompt := append([]int(nil), session.prompt...)
+	prefills := len(session.prefills)
+	messages = append(messages, first.Message, agent.Message{Role: agent.RoleTool, ToolCallID: first.Message.ToolCalls[0].ID, Content: "package main"})
+	second, err := planner.Complete(context.Background(), messages, tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPrompt := append([]int(nil), session.prompt...)
+	cached := 0
+	if second.Usage.PromptTokensDetails != nil {
+		cached = second.Usage.PromptTokensDetails.CachedTokens
+	}
+	if len(firstPrompt) < 120000 || len(secondPrompt) >= 131072 || cached != len(firstPrompt)-1 || !slices.Equal(firstPrompt[:cached], secondPrompt[:cached]) {
+		t.Fatalf("first=%d second=%d cached=%d, want near-128K exact n-1 rendered prefix", len(firstPrompt), len(secondPrompt), cached)
+	}
+	var suffix []int
+	for _, p := range session.prefills[prefills:] {
+		suffix = append(suffix, p...)
+	}
+	if !slices.Equal(session.prompt, secondPrompt) || !slices.Equal(suffix, secondPrompt[cached:]) {
+		t.Fatalf("restored token identity or suffix prefill mismatch: prompt=%d suffix=%d want=%d", len(session.prompt), len(suffix), len(secondPrompt)-cached)
+	}
+	if second.Usage.PromptTokens != len(secondPrompt) || second.Usage.TotalTokens != second.Usage.PromptTokens+second.Usage.CompletionTokens || len(opened) != 1 {
+		t.Fatalf("usage=%+v opened=%d, want exact full-prompt accounting on one session", second.Usage, len(opened))
 	}
 }
 

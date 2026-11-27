@@ -146,10 +146,10 @@ func TestInkling2KVHalfSlotKeepsLocalRingsFP32(t *testing.T) {
 	}
 }
 
-func TestInkling2ResidentF16KVRefusesCheckpointAndSpec(t *testing.T) {
+func TestInkling2ResidentF16KVAllowsCheckpointButRefusesSpec(t *testing.T) {
 	s := &inkling2Resident{kvHalf: true}
-	if err := s.checkpointable(); err == nil {
-		t.Fatal("f16 session accepted a checkpoint, whose copies read fp32 strides")
+	if err := s.checkpointable(); err != nil {
+		t.Fatalf("f16 session refused an in-place global-KV checkpoint: %v", err)
 	}
 	if err := s.enableSpec(4); err == nil {
 		t.Fatal("f16 session enabled speculative decode, whose verify and draft ops read fp32 caches")

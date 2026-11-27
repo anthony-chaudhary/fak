@@ -131,7 +131,17 @@ func TestInkling2CUDAPrefixAppendParity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return s.(*inkling2ResidentSession)
+		r := s.(*inkling2ResidentSession)
+		wantHalf, err := inkling2KVHalfFrom(os.LookupEnv)
+		if err != nil {
+			r.Close()
+			t.Fatal(err)
+		}
+		if r.s.kvHalf != wantHalf {
+			r.Close()
+			t.Fatalf("resident half KV = %v, want requested %v", r.s.kvHalf, wantHalf)
+		}
+		return r
 	}
 	run := func(name string, body func(r *inkling2ResidentSession) int) ink2AppendArm {
 		r := open()

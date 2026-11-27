@@ -96,7 +96,6 @@ type inkling2PrefixReuseMode uint8
 const (
 	inkling2PrefixReuseOn inkling2PrefixReuseMode = iota
 	inkling2PrefixReuseOff
-	inkling2PrefixReuseOffF16
 	inkling2PrefixReuseOffCohort
 )
 
@@ -106,12 +105,9 @@ func inkling2PrefixReuseModeFrom(lookup func(string) (string, bool)) (inkling2Pr
 	if !inkling2PrefixReuseFrom(lookup) {
 		return inkling2PrefixReuseOff, nil
 	}
-	dtype, err := ggufload.Inkling2KVDTypeFrom(lookup)
+	_, err := ggufload.Inkling2KVDTypeFrom(lookup)
 	if err != nil {
 		return inkling2PrefixReuseOff, err
-	}
-	if dtype == ggufload.Inkling2KVF16 {
-		return inkling2PrefixReuseOffF16, nil
 	}
 	return inkling2PrefixReuseOn, nil
 }
