@@ -76,14 +76,18 @@ func commitBuildCheckPackages(changedPaths []string) []string {
 	return pkgs
 }
 
-func commitValidationSourcePath(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".go", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm", ".h", ".hh", ".hpp", ".hxx",
+func commitValidationSourcePath(p string) bool {
+	slash := strings.TrimPrefix(path.Clean(filepath.ToSlash(strings.TrimSpace(p))), "./")
+	switch strings.ToLower(path.Ext(slash)) {
+	case ".go", ".c", ".cc", ".cpp", ".cxx", ".cu", ".cuh", ".m", ".mm", ".h", ".hh", ".hpp", ".hxx",
 		".f", ".for", ".f90", ".f95", ".f03", ".f08", ".s", ".sx", ".swig", ".swigcxx", ".syso":
 		return true
-	default:
-		return false
 	}
+	switch slash {
+	case "AGENTS.md", "THIRD_PARTY_NOTICES.md", "NOTICE.md":
+		return true
+	}
+	return strings.HasPrefix(slash, "third_party/") && path.Base(slash) == "NOTICE" && slash != "third_party/NOTICE"
 }
 
 // extractUndefinedSymbol scans compiler output for the first `undefined: <symbol>` occurrence and
