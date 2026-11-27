@@ -541,11 +541,19 @@ func (c *cudaBackend) Ink2VRows(w Tensor, x, y Ink2Ref, rows int) (bool, error) 
 			C.int(w.Shape[1]), C.int(rows)))
 	}
 	if w.Dtype == Q6_K {
-		return true, ink2Status("verify q6k rows", C.fcuda_ink2v_q6k_rows((*C.uchar)(wb.ptr), c.ink2F(x), c.ink2F(y), C.int(w.Shape[0]),
-			C.int(w.Shape[1]), C.int(rows)))
+		rc := C.fcuda_ink2v_q6k_rows((*C.uchar)(wb.ptr), c.ink2F(x), c.ink2F(y), C.int(w.Shape[0]),
+			C.int(w.Shape[1]), C.int(rows))
+		if rc == -1 {
+			return false, nil
+		}
+		return true, ink2Status("verify q6k rows", rc)
 	}
-	return true, ink2Status("verify q5k rows", C.fcuda_ink2v_q5k_rows((*C.uchar)(wb.ptr), c.ink2F(x), c.ink2F(y), C.int(w.Shape[0]),
-		C.int(w.Shape[1]), C.int(rows)))
+	rc := C.fcuda_ink2v_q5k_rows((*C.uchar)(wb.ptr), c.ink2F(x), c.ink2F(y), C.int(w.Shape[0]),
+		C.int(w.Shape[1]), C.int(rows))
+	if rc == -1 {
+		return false, nil
+	}
+	return true, ink2Status("verify q5k rows", rc)
 }
 
 func (c *cudaBackend) Ink2VRepeatRows(x, out Ink2Ref, n, rows, k int) error {

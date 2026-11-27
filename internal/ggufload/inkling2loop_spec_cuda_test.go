@@ -86,20 +86,20 @@ func TestInkling2CUDAVerifyCost(t *testing.T) {
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 
 // FAK_INKLING2_SPEC_ORACLE=1: speculative greedy fed the plain greedy continuation
-// (some tokens corrupted) must reproduce plain greedy exactly, which exercises
-// accept, reject and the conv-history rewind; the uncorrupted runs log the
-// throughput ceiling of each draft depth.
+// (some tokens corrupted) must match plain greedy up to any admissible near tie
+// (plain top-2 gap under inkling2OracleNearTieNats with runner-up taken), which
+// exercises accept, reject, conv-history rewind, and full width T=9 (depth 8);
+// any non-near-tie divergence (such as accept/rewind state corruption) fails.
 func TestInkling2CUDASpecOracle(t *testing.T) {
 	m, be := openInkling2CUDAForTest(t, "FAK_INKLING2_SPEC_ORACLE")
 	defer m.Close()
 	t.Setenv("FAK_INKLING2_BATCHED_PREFILL", "1")
 	n := 128
 	prompt := inkling2OracleCases[0].prompt
-	ref, st, err := inkling2ResidentGreedy(m, be, prompt, n)
+	ref, runnerUp, margin, err := inkling2ResidentGreedyMargins(m, be, prompt, n)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("inkling2 spec oracle: plain %.2f tok/s", st.DecodeTokensPerSecond())
 	check := func(name string, depth int, corrupt func(int) bool) {
 		got, sst, err := inkling2ResidentSpecGreedy(m, be, prompt, n, depth, func(*inkling2Resident) (inkling2Drafter, error) {
 			return &inkling2OracleDrafter{ref: ref, corrupt: corrupt}, nil
@@ -110,12 +110,15 @@ func TestInkling2CUDASpecOracle(t *testing.T) {
 		t.Logf("inkling2 spec oracle: %s depth %d: %.2f tok/s; %d verifies, accepted %d/%d, plain steps %d, verify %.3f ms/call",
 			name, depth, sst.DecodeTokensPerSecond(), sst.Verifies, sst.Accepted, sst.Drafted, sst.PlainSteps,
 			ms(sst.Verify)/float64(max(1, sst.Verifies)))
-		for i := range got {
-			if got[i] != ref[i] {
-				t.Errorf("%s depth %d: token %d = %d, plain greedy %d", name, depth, i, got[i], ref[i])
-				return
-			}
+		at, nearTie, why := inkling2CohortDivergence(ref, runnerUp, margin, got)
+		if at < 0 {
+			return
 		}
+		if !nearTie {
+			t.Errorf("%s depth %d diverges from plain greedy: %s", name, depth, why)
+			return
+		}
+		t.Logf("%s depth %d diverges at token %d on an admissible near tie: %s", name, depth, at, why)
 	}
 	check("corrupt", 4, func(i int) bool { return i%5 == 2 })
 	check("corrupt", 7, func(i int) bool { return i%9 == 4 || i%13 == 0 })

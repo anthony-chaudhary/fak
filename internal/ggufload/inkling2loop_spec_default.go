@@ -35,9 +35,9 @@ func inkling2SpecCapable(be compute.Backend) bool {
 }
 
 // inkling2SpecDepthFor is inkling2SpecDepth with m's default standing in for an
-// unset FAK_INKLING2_SPEC.
+// unset or blank FAK_INKLING2_SPEC.
 func inkling2SpecDepthFor(m *Inkling2LoopModel) int {
-	if _, set := os.LookupEnv("FAK_INKLING2_SPEC"); set || m == nil {
+	if inkling2SpecExplicit(os.LookupEnv) || m == nil {
 		return inkling2SpecDepth()
 	}
 	return min(max(m.SpecDefault.Depth, 0), inkling2SpecMaxDraft)
@@ -56,7 +56,7 @@ func inkling2SpecDraftKindFor(m *Inkling2LoopModel) (string, error) {
 // "spec=off" or "spec=<draft> depth=<n>". Sampled decode never speculates.
 func Inkling2SpecLabel(m *Inkling2LoopModel, be compute.Backend) string {
 	depth := inkling2SpecDepthFor(m)
-	if depth == 0 || !inkling2SpecCapable(be) {
+	if depth == 0 || !inkling2SpecCapable(be) || inkling2SpecAutoDisabledForKV(be, os.LookupEnv) {
 		return "spec=off"
 	}
 	kind, err := inkling2SpecDraftKindFor(m)

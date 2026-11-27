@@ -471,8 +471,16 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
                               int heads, int kvHeads, int headDim, int relLen, int extent, int window, int cap,
                               float scale, const Ink2Seq &sq, int C, const float *kscale = nullptr,
                               const float *vscale = nullptr) {
-  if (!ink2_ats_enabled() || headDim / 2 < INK2_ATS_CHUNKS || (headDim & 31) != 0 || relLen < 2 || (relLen & 1) != 0 ||
-      ((uintptr_t)r & 7) != 0 || ((uintptr_t)out & 7) != 0 || (sq.r & 1) != 0 || (sq.out & 1) != 0)
+  // Size chunk count to the layer's maximum live key span: local sliding-window
+  // layers (window=128) and small/medium global caches (cap<=4096) keep 8 chunks
+  // (192 blocks at 24 heads) so short/windowed decode does not pay 4x block launch
+  // overhead across 47 visits; deep global caches (cap>4096) widen to 16 chunks.
+  const int maxKeys = (window > 0 && window < cap) ? window : cap;
+  int chunks = maxKeys > 4096 ? 16 : 8;
+  if (chunks > INK2_ATS_CHUNKS) chunks = INK2_ATS_CHUNKS;
+  if (!ink2_ats_enabled() || headDim / 2 < chunks || chunks < 1 || (headDim & 31) != 0 || relLen < 2 ||
+      (relLen & 1) != 0 || ((uintptr_t)r & 7) != 0 || ((uintptr_t)out & 7) != 0 || (sq.r & 1) != 0 ||
+      (sq.out & 1) != 0)
     return false;
   // the opt-in is per kernel and per staging footprint: exact stages exps and weights,
   // the tree only weights
@@ -496,12 +504,12 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
     }
   }
   if (!staged) osmem = 0;
-  const dim3 g1(heads, INK2_ATS_CHUNKS, C), g3(heads, headDim / 32, C);
+  const dim3 g1(heads, chunks, C), g3(heads, headDim / 32, C);
   FCUDA_TS("k_ink2_attend_scores", g1, k_ink2_attend_scores<T><<<g1, INK2_ATS_WARPS * 32, 0, g_stream>>>(
                                            q, r, sinks, relBias, kcache, scores, out, meta, heads, kvHeads, headDim,
                                            relLen, extent, window, cap, scale, sq, kscale));
   FCUDA_TS("k_ink2_attend_exp", g1, k_ink2_attend_exp<<<g1, 256, 0, g_stream>>>(scores, out, (float *)r, meta, headDim,
-                                                                                  relLen, window, cap, INK2_ATS_CHUNKS, sq));
+                                                                                  relLen, window, cap, chunks, sq));
   const int othreads = (INK2_ATT_THREADS / headDim) * 32;
   if (!exact) {
     if (staged) {

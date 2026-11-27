@@ -104,6 +104,20 @@ __global__ void k_ink2v_q5k_rows(const unsigned char *W, const float *X, float *
 // room for fewer blocks on an SM, so each block carries twice the warps.
 static int ink2v_rows_threads(int rows) { return rows >= 4 ? 512 : 256; }
 
+// Maximum dynamic shared memory the current device allows for fn, or 0 on query error.
+static size_t ink2v_max_dyn_smem(const void *fn) {
+  int dev = 0, optin = 0;
+  cudaFuncAttributes fa;
+  if (cudaGetDevice(&dev) != cudaSuccess ||
+      cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, dev) != cudaSuccess ||
+      cudaFuncGetAttributes(&fa, fn) != cudaSuccess) {
+    (void)cudaGetLastError();
+    return 0;
+  }
+  const long long lim = (long long)optin - (long long)fa.sharedSizeBytes;
+  return lim > 0 ? (size_t)lim : 0;
+}
+
 template <int R>
 static int ink2v_q5k_rows_launch(const unsigned char *W, const float *X, float *Y, int out, int in) {
   const size_t smem = (size_t)R * in * sizeof(float);
@@ -125,8 +139,7 @@ static int ink2v_q5k_rows_launch(const unsigned char *W, const float *X, float *
   return ink2_last_error();
 }
 
-extern "C" int fcuda_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows) {
-  if (in % 256 != 0) return (int)cudaErrorInvalidValue;
+static int ink2v_q5k_rows_dispatch(const unsigned char *W, const float *X, float *Y, int out, int in, int rows) {
   switch (rows) {
   case 1: return ink2v_q5k_rows_launch<1>(W, X, Y, out, in);
   case 2: return ink2v_q5k_rows_launch<2>(W, X, Y, out, in);
@@ -139,6 +152,25 @@ extern "C" int fcuda_ink2v_q5k_rows(const unsigned char *W, const float *X, floa
   case 9: return ink2v_q5k_rows_launch<9>(W, X, Y, out, in);
   }
   return (int)cudaErrorInvalidValue;
+}
+
+extern "C" int fcuda_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows) {
+  if (in % 256 != 0 || rows < 1 || rows > INK2V_MAX_ROWS) return (int)cudaErrorInvalidValue;
+  const size_t rowBytes = (size_t)in * sizeof(float);
+  if ((size_t)rows * rowBytes + INK2_SMEM_STATIC_ALLOWANCE > 48 * 1024) {
+    const size_t maxSmem = ink2v_max_dyn_smem((const void *)k_ink2v_q5k_rows<1, false>);
+    if (maxSmem > 0 && (size_t)rows * rowBytes > maxSmem) {
+      const int chunk = (int)(maxSmem / rowBytes);
+      if (chunk < 1) return -1;
+      for (int r0 = 0; r0 < rows; r0 += chunk) {
+        const int nt = rows - r0 < chunk ? rows - r0 : chunk;
+        const int rc = ink2v_q5k_rows_dispatch(W, X + (size_t)r0 * in, Y + (size_t)r0 * out, out, in, nt);
+        if (rc) return rc;
+      }
+      return 0;
+    }
+  }
+  return ink2v_q5k_rows_dispatch(W, X, Y, out, in, rows);
 }
 
 // out[t*k + j] = x[t] for every row t and routed slot j: each (token, slot) pair gets
@@ -522,8 +554,7 @@ static int ink2v_q6k_rows_launch(const unsigned char *W, const float *X, float *
   return ink2_last_error();
 }
 
-extern "C" int fcuda_ink2v_q6k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows) {
-  if (in % 256 != 0) return (int)cudaErrorInvalidValue;
+static int ink2v_q6k_rows_dispatch(const unsigned char *W, const float *X, float *Y, int out, int in, int rows) {
   switch (rows) {
   case 1: return ink2v_q6k_rows_launch<1>(W, X, Y, out, in);
   case 2: return ink2v_q6k_rows_launch<2>(W, X, Y, out, in);
@@ -536,4 +567,23 @@ extern "C" int fcuda_ink2v_q6k_rows(const unsigned char *W, const float *X, floa
   case 9: return ink2v_q6k_rows_launch<9>(W, X, Y, out, in);
   }
   return (int)cudaErrorInvalidValue;
+}
+
+extern "C" int fcuda_ink2v_q6k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows) {
+  if (in % 256 != 0 || rows < 1 || rows > INK2V_MAX_ROWS) return (int)cudaErrorInvalidValue;
+  const size_t rowBytes = (size_t)in * sizeof(float);
+  if ((size_t)rows * rowBytes + INK2_SMEM_STATIC_ALLOWANCE > 48 * 1024) {
+    const size_t maxSmem = ink2v_max_dyn_smem((const void *)k_ink2v_q6k_rows<1>);
+    if (maxSmem > 0 && (size_t)rows * rowBytes > maxSmem) {
+      const int chunk = (int)(maxSmem / rowBytes);
+      if (chunk < 1) return -1;
+      for (int r0 = 0; r0 < rows; r0 += chunk) {
+        const int nt = rows - r0 < chunk ? rows - r0 : chunk;
+        const int rc = ink2v_q6k_rows_dispatch(W, X + (size_t)r0 * in, Y + (size_t)r0 * out, out, in, nt);
+        if (rc) return rc;
+      }
+      return 0;
+    }
+  }
+  return ink2v_q6k_rows_dispatch(W, X, Y, out, in, rows);
 }

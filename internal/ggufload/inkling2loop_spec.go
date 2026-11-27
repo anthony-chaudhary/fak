@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -80,11 +83,41 @@ type Inkling2SpecStats struct {
 	Draft, Verify                           time.Duration
 }
 
+var inkling2SpecKVDisableOnce sync.Once
+
+// inkling2SpecExplicit reports whether FAK_INKLING2_SPEC was explicitly set to a
+// non-empty value in the environment.
+func inkling2SpecExplicit(lookup func(string) (string, bool)) bool {
+	v, set := lookup("FAK_INKLING2_SPEC")
+	return set && strings.TrimSpace(v) != ""
+}
+
+// inkling2SpecAutoDisabledForKV reports whether default-on speculative decode must
+// auto-disable because the session uses non-fp32 global KV caches (whose verify/draft ops
+// only read fp32) and the operator did not explicitly request FAK_INKLING2_SPEC.
+func inkling2SpecAutoDisabledForKV(be compute.Backend, lookup func(string) (string, bool)) bool {
+	if inkling2SpecExplicit(lookup) {
+		return false
+	}
+	if lookup != nil {
+		if dtype, err := Inkling2KVDTypeFrom(lookup); err == nil && dtype != Inkling2KVF32 {
+			return inkling2ResidentKVDType(be, dtype) != Inkling2KVF32
+		}
+	}
+	return inkling2ResidentHalfKV(be)
+}
+
+func inkling2SpecWarnKVDisable() {
+	inkling2SpecKVDisableOnce.Do(func() {
+		log.Printf("inkling2 spec: auto-disabling default speculative decode because FAK_INKLING2_KV=f16 uses half-precision global KV caches; set FAK_INKLING2_SPEC=0 to silence")
+	})
+}
+
 // enableSpec allocates the verify chunk state for up to depth drafted tokens.
 func (s *inkling2Resident) enableSpec(depth int) error {
 	if s.kvHalf || s.kvFP8 {
 		// the verify and draft ops read fp32 caches only
-		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode; unset FAK_INKLING2_SPEC or FAK_INKLING2_KV", s.kvDType())
+		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode; set FAK_INKLING2_SPEC=0 or unset FAK_INKLING2_KV", s.kvDType())
 	}
 	if _, ok := s.be.(compute.Inkling2VerifyDevice); !ok || !s.batched {
 		return fmt.Errorf("inkling2 spec: backend %s has no batched verify ops", s.be.Name())
@@ -115,8 +148,12 @@ func (s *inkling2Resident) verify(tokens []int) ([]int, error) {
 	if T < 1 || T > s.specMax {
 		return nil, fmt.Errorf("inkling2 spec: verify of %d tokens, max %d", T, s.specMax)
 	}
-	if s.pos+T > s.ctx {
-		return nil, fmt.Errorf("inkling2 spec: %d tokens at %d exceed the %d-token global cache", T, s.pos, s.ctx)
+	ctx := s.ctx
+	if ctx <= 0 {
+		ctx = inkling2ResidentCtx
+	}
+	if s.pos+T > ctx {
+		return nil, fmt.Errorf("inkling2 spec: %d tokens at %d exceed the %d-token global cache", T, s.pos, ctx)
 	}
 	pd := s.be.(compute.Inkling2PrefillDevice)
 	vd := s.be.(compute.Inkling2VerifyDevice)
@@ -389,6 +426,11 @@ func inkling2SpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, 
 
 // inkling2SpecGreedyUntil is inkling2SpecGreedy stopping at eos.
 func inkling2SpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth, eos int) ([]int, Inkling2LoopGreedyStats, error) {
+	if inkling2SpecAutoDisabledForKV(be, os.LookupEnv) {
+		inkling2SpecWarnKVDisable()
+		inkling2LastSpec = Inkling2SpecStats{}
+		return inkling2ResidentGreedyUntil(m, be, prompt, n, eos)
+	}
 	kind, err := inkling2SpecDraftKindFor(m)
 	if err != nil {
 		return nil, Inkling2LoopGreedyStats{}, err
