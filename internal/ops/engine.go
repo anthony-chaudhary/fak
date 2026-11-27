@@ -22,6 +22,9 @@ type Engine struct {
 	// LoadLedger accounts every tick's own cost (#14474). It is the surface that
 	// makes a healthy-but-quiet daemon distinguishable from a dead one.
 	LoadLedger *LoadLedger
+	// PauseStore persists the durable fak-ops-load-pause/1 state (#14476).
+	PauseStore *PauseStore
+	pause      PauseState
 
 	lastStorageTick time.Time
 	lastQuickTick   time.Time
@@ -62,6 +65,11 @@ func NewEngineWithHostReach(repoRoot string, cfg Config, host HostReach) (*Engin
 		return nil, err
 	}
 
+	pauseStore, err := OpenPauseStore(DefaultPauseStatePath(repoRoot))
+	if err != nil {
+		return nil, err
+	}
+
 	e := &Engine{
 		RepoRoot:    repoRoot,
 		Config:      cfg,
@@ -70,6 +78,8 @@ func NewEngineWithHostReach(repoRoot string, cfg Config, host HostReach) (*Engin
 		Process:     NewProcessManager(cfg),
 		Workspace:   NewWorkspaceManager(repoRoot),
 		LoadLedger:  loadLed,
+		PauseStore:  pauseStore,
+		pause:       pauseStore.ReadFailSafe(),
 		selfCost:    DefaultSelfCost,
 		hostSampler: HarnessHostSampler{},
 		clock:       time.Now,
@@ -118,6 +128,86 @@ func (e *Engine) now() time.Time {
 		return e.clock()
 	}
 	return time.Now()
+}
+
+// Paused reports whether the engine is currently in a durable pause state.
+func (e *Engine) Paused() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.pause.Paused
+}
+
+// PauseState returns a copy of the engine's current durable pause record.
+func (e *Engine) PauseState() PauseState {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.pause
+}
+
+// Pause transitions the engine into a durable paused state and writes the
+// fak-ops-load-pause/1 record once on transition.
+func (e *Engine) Pause(reason PauseReasonClass, detail string, cond ReactivateCondition) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	next := PauseState{
+		Schema:         PauseSchemaV1,
+		Paused:         true,
+		ReasonClass:    reason,
+		ReasonDetail:   detail,
+		PausedAt:       e.now().UTC(),
+		PausedTicks:    0,
+		ReactivateWhen: cond,
+	}
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	if e.PauseStore != nil {
+		if err := e.PauseStore.Write(next); err != nil {
+			return err
+		}
+	}
+	e.pause = next
+	return nil
+}
+
+// Resume exits the durable paused state, preserving transition history, and
+// writes the fak-ops-load-pause/1 record once on transition.
+func (e *Engine) Resume() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if !e.pause.Paused {
+		return nil
+	}
+	next := e.pause
+	next.Schema = PauseSchemaV1
+	next.Paused = false
+	if e.PauseStore != nil {
+		if err := e.PauseStore.Write(next); err != nil {
+			return err
+		}
+	}
+	e.pause = next
+	return nil
+}
+
+// RecordProbe updates the last probe timestamp and result on the pause record.
+func (e *Engine) RecordProbe(result string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	next := e.pause
+	next.Schema = PauseSchemaV1
+	next.LastProbeAt = e.now().UTC()
+	next.LastProbeResult = result
+	if e.PauseStore != nil {
+		if err := e.PauseStore.Write(next); err != nil {
+			return err
+		}
+	}
+	e.pause = next
+	return nil
 }
 
 // selfCPUDelta returns the CPU time consumed since the previous tick. ok is
@@ -206,6 +296,19 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 	started := e.now()
 	now := started
 	host := e.sampleHost()
+
+	if e.pause.Paused {
+		// Update skipped-tick count in memory only; never rewrite the durable
+		// pause file on every skipped tick (#14476).
+		e.pause.PausedTicks++
+		phases := []PhaseLoad{
+			{Phase: "locks_worktrees", Ran: false},
+			{Phase: "process_runaways", Ran: false},
+			{Phase: "asset_sync", Ran: false},
+			{Phase: "storage_reclaim", Ran: false},
+		}
+		return e.recordLoadCycle(started, e.now(), phases, 0, false, host)
+	}
 
 	mutations := 0
 	failed := false
