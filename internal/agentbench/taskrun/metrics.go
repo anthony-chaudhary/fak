@@ -16,17 +16,19 @@ const identicalRunThreshold = 3
 // ToolCallMetrics reduces one trial's emitted tool calls. Validity is nil when
 // the trial emitted no tool calls, because 1 - 0/0 is not a measurement.
 type ToolCallMetrics struct {
-	Measured        bool     `json:"measured"`
-	Total           int      `json:"tool_calls_total"`
-	Invalid         int      `json:"tool_calls_invalid"`
-	InvalidJSON     int      `json:"tool_calls_invalid_json"`
-	UnknownTool     int      `json:"tool_calls_unknown_tool"`
-	SchemaInvalid   int      `json:"tool_calls_schema_invalid"`
-	Validity        *float64 `json:"tool_call_validity"`
-	MaxIdenticalRun int      `json:"max_identical_consecutive_calls"`
-	Repeating       bool     `json:"repeat_loop"`
-	TurnCapHit      bool     `json:"turn_cap_hit"`
-	Loop            bool     `json:"loop"`
+	Measured         bool     `json:"measured"`
+	Total            int      `json:"tool_calls_total"`
+	Invalid          int      `json:"tool_calls_invalid"`
+	InvalidJSON      int      `json:"tool_calls_invalid_json"`
+	UnknownTool      int      `json:"tool_calls_unknown_tool"`
+	SchemaInvalid    int      `json:"tool_calls_schema_invalid"`
+	Validity         *float64 `json:"tool_call_validity"`
+	MaxIdenticalRun  int      `json:"max_identical_consecutive_calls"`
+	Repeating        bool     `json:"repeat_loop"`
+	MaxSameCallCount int      `json:"max_same_call_count,omitempty"`
+	CyclicRepeat     bool     `json:"cyclic_repeat,omitempty"`
+	TurnCapHit       bool     `json:"turn_cap_hit"`
+	Loop             bool     `json:"loop"`
 }
 
 // TrialSummary folds per-trial outcomes. Rates are nil when their denominator is
@@ -41,6 +43,8 @@ type TrialSummary struct {
 	ToolCallValidity *float64 `json:"tool_call_validity"`
 	Loops            int      `json:"loops"`
 	StuckRate        *float64 `json:"loop_rate"`
+	CyclicRepeats    int      `json:"cyclic_repeats,omitempty"`
+	CyclicRepeatRate *float64 `json:"cyclic_repeat_rate,omitempty"`
 }
 
 const (
@@ -56,6 +60,7 @@ func reduceToolCalls(turns []PlannerTurn, catalog []agent.ToolDef, turnCap int) 
 		schemas[def.Function.Name] = def.Function.Parameters
 	}
 	m := ToolCallMetrics{Measured: true}
+	counts := map[string]int{}
 	run, last := 0, ""
 	for _, turn := range turns {
 		for _, call := range turn.ToolCalls {
@@ -69,6 +74,10 @@ func reduceToolCalls(turns []PlannerTurn, catalog []agent.ToolDef, turnCap int) 
 				m.SchemaInvalid++
 			}
 			key := call.Function.Name + "\x00" + canonicalArgs(call.Function.Arguments)
+			counts[key]++
+			if counts[key] > m.MaxSameCallCount {
+				m.MaxSameCallCount = counts[key]
+			}
 			if run > 0 && key == last {
 				run++
 			} else {
@@ -84,6 +93,7 @@ func reduceToolCalls(turns []PlannerTurn, catalog []agent.ToolDef, turnCap int) 
 		m.Validity = ratio(m.Total-m.Invalid, m.Total)
 	}
 	m.Repeating = m.MaxIdenticalRun >= identicalRunThreshold
+	m.CyclicRepeat = m.MaxSameCallCount >= identicalRunThreshold
 	m.TurnCapHit = turnCap > 0 && len(turns) >= turnCap && len(turns[len(turns)-1].ToolCalls) > 0
 	m.Loop = m.Repeating || m.TurnCapHit
 	return m
@@ -104,10 +114,14 @@ func SummarizeTrials(tasks []TaskReceipt) TrialSummary {
 		if task.ToolCalls.Loop {
 			a.Loops++
 		}
+		if task.ToolCalls.CyclicRepeat {
+			a.CyclicRepeats++
+		}
 	}
 	a.AcceptRate = ratio(a.Accepted, a.Trials)
 	a.ToolCallValidity = ratio(a.ToolCallsTotal-a.ToolCallsInvalid, a.ToolCallsTotal)
 	a.StuckRate = ratio(a.Loops, a.MeasuredTrials)
+	a.CyclicRepeatRate = ratio(a.CyclicRepeats, a.MeasuredTrials)
 	return a
 }
 

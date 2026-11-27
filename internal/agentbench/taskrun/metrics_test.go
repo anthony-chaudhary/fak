@@ -42,7 +42,7 @@ func TestReduceToolCallsClassifiesInvalidCalls(t *testing.T) {
 		[]agent.ToolCall{metricsCall("Read", `{"file_path":"b.go","limit":2.5}`), metricsCall("Bash", `{"command":"ls"}`)},
 	)
 	got := reduceToolCalls(turns, metricsCatalog(), 12)
-	want := ToolCallMetrics{Measured: true, Total: 8, Invalid: 6, InvalidJSON: 1, UnknownTool: 1, SchemaInvalid: 4, MaxIdenticalRun: 1}
+	want := ToolCallMetrics{Measured: true, Total: 8, Invalid: 6, InvalidJSON: 1, UnknownTool: 1, SchemaInvalid: 4, MaxIdenticalRun: 1, MaxSameCallCount: 1}
 	if got.Validity == nil || *got.Validity != 0.25 {
 		t.Fatalf("validity = %v, want 0.25", floatOrNil(got.Validity))
 	}
@@ -107,7 +107,34 @@ func TestAggregateTrials(t *testing.T) {
 		t.Fatalf("rates accept=%v validity=%v loop=%v", floatOrNil(got.AcceptRate), floatOrNil(got.ToolCallValidity), floatOrNil(got.StuckRate))
 	}
 	empty := SummarizeTrials(nil)
-	if empty.AcceptRate != nil || empty.ToolCallValidity != nil || empty.StuckRate != nil {
+	if empty.AcceptRate != nil || empty.ToolCallValidity != nil || empty.StuckRate != nil || empty.CyclicRepeatRate != nil {
 		t.Fatalf("empty aggregate rates must be nil: %+v", empty)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestReduceToolCallsCyclicRepeat(t *testing.T) {
+	read := func(args string) agent.ToolCall { return metricsCall("Read", args) }
+	bash := func(args string) agent.ToolCall { return metricsCall("Bash", args) }
+	turns := metricsTurns(
+		[]agent.ToolCall{read(`{"file_path":"a.go"}`)},
+		[]agent.ToolCall{bash(`{"command":"go test"}`)},
+		[]agent.ToolCall{read(`{"file_path":"a.go"}`)},
+		[]agent.ToolCall{bash(`{"command":"go test"}`)},
+		[]agent.ToolCall{read(`{"file_path":"a.go"}`)},
+	)
+	got := reduceToolCalls(turns, metricsCatalog(), 12)
+	if got.MaxIdenticalRun != 1 || got.Repeating {
+		t.Fatalf("expected non-consecutive cycle not to trigger consecutive repeat_loop: %+v", got)
+	}
+	if got.MaxSameCallCount != 3 || !got.CyclicRepeat {
+		t.Fatalf("expected MaxSameCallCount=3 and CyclicRepeat=true: %+v", got)
+	}
+	summary := SummarizeTrials([]TaskReceipt{
+		{Accepted: false, ToolCalls: got},
+		{Accepted: true, ToolCalls: ToolCallMetrics{Measured: true, Total: 2}},
+	})
+	if summary.CyclicRepeats != 1 || floatOrNil(summary.CyclicRepeatRate) != 0.5 {
+		t.Fatalf("expected CyclicRepeats=1 and CyclicRepeatRate=0.5, got %+v", summary)
 	}
 }

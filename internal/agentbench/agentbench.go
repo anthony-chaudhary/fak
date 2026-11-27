@@ -333,6 +333,9 @@ func RunCLI(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	if len(args) > 0 && args[0] == "tasks" {
 		return runTasksCLI(ctx, stdout, stderr, args[1:])
 	}
+	if len(args) > 0 && args[0] == "gate" {
+		return runGateCLI(stdout, stderr, args[1:])
+	}
 	if handled, code := runChildCLI(ctx, stdout, stderr, args); handled {
 		return code
 	}
