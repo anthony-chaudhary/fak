@@ -26,6 +26,8 @@ const (
 	PauseReasonProbePending      PauseReasonClass = "PROBE_PENDING"
 	PauseReasonOperatorRequested PauseReasonClass = "OPERATOR_REQUESTED"
 	PauseReasonUnknownHostState  PauseReasonClass = "UNKNOWN_HOST_STATE"
+	PauseReasonMaxPauseReached   PauseReasonClass = "MAX_PAUSE_REACHED"
+	PauseReasonConditionCleared  PauseReasonClass = "CONDITION_CLEARED"
 )
 
 // ValidPauseReasonClass reports whether r is a member of the closed pause reason vocabulary.
@@ -36,7 +38,9 @@ func ValidPauseReasonClass(r PauseReasonClass) bool {
 		PauseReasonIdleNoWork,
 		PauseReasonProbePending,
 		PauseReasonOperatorRequested,
-		PauseReasonUnknownHostState:
+		PauseReasonUnknownHostState,
+		PauseReasonMaxPauseReached,
+		PauseReasonConditionCleared:
 		return true
 	}
 	return false
@@ -60,15 +64,19 @@ func (c ReactivateCondition) IsEmpty() bool {
 
 // PauseState is the durable fak-ops-load-pause/1 record persisted next to the ops ledger.
 type PauseState struct {
-	Schema          string              `json:"schema"`
-	Paused          bool                `json:"paused"`
-	ReasonClass     PauseReasonClass    `json:"reason_class,omitempty"`
-	ReasonDetail    string              `json:"reason_detail,omitempty"`
-	PausedAt        time.Time           `json:"paused_at,omitempty"`
-	PausedTicks     uint64              `json:"paused_ticks"`
-	ReactivateWhen  ReactivateCondition `json:"reactivate_when,omitempty"`
-	LastProbeAt     time.Time           `json:"last_probe_at,omitempty"`
-	LastProbeResult string              `json:"last_probe_result,omitempty"`
+	Schema                  string              `json:"schema"`
+	Paused                  bool                `json:"paused"`
+	ReasonClass             PauseReasonClass    `json:"reason_class,omitempty"`
+	ReasonDetail            string              `json:"reason_detail,omitempty"`
+	PausedAt                time.Time           `json:"paused_at,omitempty"`
+	PausedTicks             uint64              `json:"paused_ticks"`
+	ReactivateWhen          ReactivateCondition `json:"reactivate_when,omitempty"`
+	LastProbeAt             time.Time           `json:"last_probe_at,omitempty"`
+	LastProbeResult         string              `json:"last_probe_result,omitempty"`
+	ProbeAttempts           uint64              `json:"probe_attempts,omitempty"`
+	ConsecutiveClearSamples int                 `json:"consecutive_clear_samples,omitempty"`
+	ResumedAt               time.Time           `json:"resumed_at,omitempty"`
+	ResumeReasonClass       PauseReasonClass    `json:"resume_reason_class,omitempty"`
 }
 
 // Validate enforces the fak-ops-load-pause/1 schema and closed reason vocabulary.

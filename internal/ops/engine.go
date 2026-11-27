@@ -198,12 +198,20 @@ func (e *Engine) Resume() error {
 }
 
 func (e *Engine) resumeLocked() error {
+	return e.resumeWithReasonLocked("")
+}
+
+func (e *Engine) resumeWithReasonLocked(reason PauseReasonClass) error {
 	if !e.pause.Paused {
 		return nil
 	}
 	next := e.pause
 	next.Schema = PauseSchemaV1
 	next.Paused = false
+	next.ResumedAt = e.now().UTC()
+	if reason != "" {
+		next.ResumeReasonClass = reason
+	}
 	if e.PauseStore != nil {
 		if err := e.PauseStore.Write(next); err != nil {
 			return err
@@ -325,13 +333,34 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 
 	started := e.now()
 	now := started
-	host := e.sampleHost()
 
 	gate := e.pauseGate
 	if gate == nil {
 		gate = DefaultPauseEvaluator{}
 	}
-	decision := gate.Decide(LoadCycle{Started: started, Host: host}, e.pause, e.Config)
+
+	_, _, maxPause, maxSkips := effectivePauseThresholds(e.Config)
+	policy := DefaultReactivationPolicy()
+	policy.MaxPause = maxPause
+	policy.Now = started
+
+	var host *HostLoad
+	var decision PauseDirective
+	if e.pause.Paused && !ShouldProbe(started, e.pause, policy) && !deadlineReached(started, e.pause, maxPause, maxSkips) {
+		decision = PauseDirective{
+			JunkworkAction: ActionSkip,
+			ReliefAction:   ActionRunPressureReliefOnly,
+			ReasonClass:    e.pause.ReasonClass,
+			TriggerValue:   "probe_deferred",
+		}
+	} else {
+		host = e.sampleHost()
+		decision = gate.Decide(LoadCycle{Started: started, Host: host}, e.pause, e.Config)
+		if e.pause.Paused && !decision.ShouldResume {
+			nextProbeState, _, _ := ApplyProbeSample(e.pause, started, host, policy)
+			e.pause = nextProbeState
+		}
+	}
 
 	if decision.ShouldPause && !e.pause.Paused {
 		_, resumeRatio, maxPause, _ := effectivePauseThresholds(e.Config)
@@ -340,7 +369,7 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 			MaxPause:           maxPause.String(),
 		})
 	} else if decision.ShouldResume && e.pause.Paused {
-		_ = e.resumeLocked()
+		_ = e.resumeWithReasonLocked(decision.ReasonClass)
 	} else if e.pause.Paused && decision.JunkworkAction == ActionSkip {
 		// Update skipped-tick count in memory only; never rewrite the durable
 		// pause file on every skipped tick (#14476).

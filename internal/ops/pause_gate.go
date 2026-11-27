@@ -86,10 +86,14 @@ func (DefaultPauseEvaluator) Decide(cycle LoadCycle, pauseState PauseState, cfg 
 
 	if pauseState.Paused {
 		if deadlineReached(cycle.Started, pauseState, maxPause, maxSkips) {
+			reason := pauseState.ReasonClass
+			if maxPauseWallReached(cycle.Started, pauseState, maxPause) {
+				reason = PauseReasonMaxPauseReached
+			}
 			return PauseDirective{
 				JunkworkAction: ActionRun,
 				ReliefAction:   ActionRun,
-				ReasonClass:    pauseState.ReasonClass,
+				ReasonClass:    reason,
 				TriggerValue:   "deadline_reached",
 				ShouldResume:   true,
 				DeadlineHit:    true,
@@ -197,18 +201,14 @@ func hostPressureRatio(h *HostLoad) (float64, bool) {
 	return float64(used) / float64(h.TotalRAMBytes), true
 }
 
+func maxPauseWallReached(now time.Time, pauseState PauseState, cfgMaxPause time.Duration) bool {
+	maxPause := effectiveMaxPause(pauseState, ReactivationPolicy{MaxPause: cfgMaxPause})
+	return maxPause > 0 && !pauseState.PausedAt.IsZero() && !now.IsZero() && !now.Before(pauseState.PausedAt.Add(maxPause))
+}
+
 func deadlineReached(now time.Time, pauseState PauseState, cfgMaxPause time.Duration, maxSkips int) bool {
 	if maxSkips > 0 && pauseState.PausedTicks >= uint64(maxSkips) {
 		return true
 	}
-	maxPause := cfgMaxPause
-	if pauseState.ReactivateWhen.MaxPause != "" {
-		if parsed, err := time.ParseDuration(pauseState.ReactivateWhen.MaxPause); err == nil && parsed > 0 {
-			maxPause = parsed
-		}
-	}
-	if maxPause > 0 && !pauseState.PausedAt.IsZero() && !now.IsZero() && now.Sub(pauseState.PausedAt) >= maxPause {
-		return true
-	}
-	return false
+	return maxPauseWallReached(now, pauseState, cfgMaxPause)
 }
