@@ -1023,3 +1023,92 @@ func (s *NativeScheduler) closeLaneSession(sess *model.Session) {
 	}
 	sess.Close()
 }
+
+// Adapted from NVIDIA/TensorRT-LLM ContextChunkingPolicy
+// (cpp/include/tensorrt_llm/executor/types.h:222-233@b96ba434e8a05e2ab52d2082bd8d70b1d844739b,
+// Apache-2.0); concept only, no upstream code copied.
+
+// nativeChunkPolicy selects how one iteration's prefill token budget is split
+// across waiting contexts.
+type nativeChunkPolicy string
+
+const (
+	// nativeChunkFCFS finishes the first waiting context before the next (the
+	// default; byte-identical to the historical greedy draw).
+	nativeChunkFCFS nativeChunkPolicy = "fcfs"
+	// nativeChunkEqualProgress round-robins waiting contexts one quantum at a
+	// time until the budget binds, bounding worst-case TTFT under contention.
+	nativeChunkEqualProgress nativeChunkPolicy = "equal_progress"
+	// nativeChunkForce funds each context a fixed unit per iteration.
+	nativeChunkForce nativeChunkPolicy = "force_chunk"
+)
+
+// parseNativeChunkPolicy maps the FAK_NATIVE_CHUNK_POLICY value; empty or
+// unknown values keep the FCFS default.
+func parseNativeChunkPolicy(v string) nativeChunkPolicy {
+	switch nativeChunkPolicy(v) {
+	case nativeChunkEqualProgress, nativeChunkForce:
+		return nativeChunkPolicy(v)
+	}
+	return nativeChunkFCFS
+}
+
+func nativeChunkPolicyFromEnv() nativeChunkPolicy {
+	return parseNativeChunkPolicy(os.Getenv("FAK_NATIVE_CHUNK_POLICY"))
+}
+
+// nativeChunkAllocate splits budget across contexts whose unfinished prompt
+// lengths are remains, returning one chunk per context (0 = waits). turn rotates
+// the round-robin start so equal_progress is fair across iterations. unit is the
+// equal_progress quantum / force_chunk size; it defaults to
+// nativeQwenPrefillMinChunkTokens. The sum of chunks never exceeds budget and no
+// chunk exceeds its remain.
+func nativeChunkAllocate(policy nativeChunkPolicy, remains []int, budget, unit int, turn uint64) []int {
+	out := make([]int, len(remains))
+	if budget <= 0 || len(remains) == 0 {
+		return out
+	}
+	if unit <= 0 {
+		unit = nativeQwenPrefillMinChunkTokens
+	}
+	switch policy {
+	case nativeChunkEqualProgress:
+		n := len(remains)
+		start := int(turn % uint64(n))
+		for budget > 0 {
+			progressed := false
+			for k := 0; k < n && budget > 0; k++ {
+				i := (start + k) % n
+				give := min(unit, remains[i]-out[i], budget)
+				if give <= 0 {
+					continue
+				}
+				out[i] += give
+				budget -= give
+				progressed = true
+			}
+			if !progressed {
+				break
+			}
+		}
+	case nativeChunkForce:
+		for i, r := range remains {
+			give := min(unit, r, budget)
+			if give <= 0 {
+				continue
+			}
+			out[i] = give
+			budget -= give
+		}
+	default:
+		for i, r := range remains {
+			give := min(r, budget)
+			if give <= 0 {
+				continue
+			}
+			out[i] = give
+			budget -= give
+		}
+	}
+	return out
+}

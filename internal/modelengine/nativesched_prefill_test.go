@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -1708,4 +1709,48 @@ func driveAligned(t *testing.T, m *model.Model, deterministic, alignOn bool, pro
 	}
 	nativeSchedulerEndManualDrain(s)
 	return chunks, out, finalLogits
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestNativeChunkPolicyEqualProgress(t *testing.T) {
+	remains := []int{200, 200}
+	// (b) fcfs default reproduces the greedy baseline: first context drains the
+	// budget and the second starves.
+	if got := nativeChunkAllocate(nativeChunkFCFS, remains, 64, 0, 0); !slices.Equal(got, []int{64, 0}) {
+		t.Fatalf("fcfs = %v, want [64 0]", got)
+	}
+	if parseNativeChunkPolicy("") != nativeChunkFCFS || parseNativeChunkPolicy("bogus") != nativeChunkFCFS {
+		t.Fatal("unset/unknown policy must keep fcfs")
+	}
+	if parseNativeChunkPolicy("equal_progress") != nativeChunkEqualProgress || parseNativeChunkPolicy("force_chunk") != nativeChunkForce {
+		t.Fatal("known policies must parse")
+	}
+	// (a) equal_progress: both long prompts progress every iteration, and the
+	// extra quantum alternates with the turn instead of starving the second.
+	var sum [2]int
+	for turn := uint64(0); turn < 4; turn++ {
+		got := nativeChunkAllocate(nativeChunkEqualProgress, remains, 48, 16, turn)
+		if got[0] == 0 || got[1] == 0 {
+			t.Fatalf("turn %d equal_progress starved a context: %v", turn, got)
+		}
+		if got[0]+got[1] != 48 {
+			t.Fatalf("turn %d did not spend the budget: %v", turn, got)
+		}
+		sum[0] += got[0]
+		sum[1] += got[1]
+	}
+	if sum[0] != sum[1] {
+		t.Fatalf("equal_progress unfair over 4 turns: %v", sum)
+	}
+	// Short remainders are capped and leftover budget flows to the other context.
+	if got := nativeChunkAllocate(nativeChunkEqualProgress, []int{8, 200}, 64, 16, 0); !slices.Equal(got, []int{8, 56}) {
+		t.Fatalf("capped equal_progress = %v, want [8 56]", got)
+	}
+	// (c) force_chunk respects the fixed unit.
+	if got := nativeChunkAllocate(nativeChunkForce, remains, 64, 24, 0); !slices.Equal(got, []int{24, 24}) {
+		t.Fatalf("force_chunk = %v, want [24 24]", got)
+	}
+	if got := nativeChunkAllocate(nativeChunkForce, remains, 30, 24, 0); !slices.Equal(got, []int{24, 6}) {
+		t.Fatalf("force_chunk budget bind = %v, want [24 6]", got)
+	}
 }
