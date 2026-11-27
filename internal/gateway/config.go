@@ -543,6 +543,9 @@ type Config struct {
 	// (the dedicated inkling2_loop forward). It wins over InKernelModel and is
 	// ignored when a proxy upstream is configured.
 	NativeChatPlanner agent.Planner
+	// ServeStatusProvider supplies the live Inkling-2 serving envelope and
+	// autotune counters for GET /v1/serve/status and /metrics.
+	ServeStatusProvider func() ServeStatusSnapshot
 	// Tokenizer is the BPE tokenizer the in-kernel chat planner encodes ChatML with.
 	Tokenizer *tokenizer.Tokenizer
 	// InKernelQ4K flags the preloaded model as resident-Q4_K so the chat decode runs

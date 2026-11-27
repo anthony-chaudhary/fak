@@ -706,6 +706,7 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		decode    string
 		closer    func() error
 		placement string
+		solvedEnv ggufload.Inkling2ServeEnvelope
 	)
 	tLoad := time.Now()
 	switch {
@@ -753,6 +754,7 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		}
 		capmatrix.RegisterCheckpointTrainedLoops(served, m.HP.Passes)
 		env := ggufload.ResolveInkling2ServeEnvelopeFor(m, rt.chatBackend, requestedCtx, envLookup)
+		solvedEnv = env
 		contextTokens = env.MaxCtx
 		if fitAuto {
 			fmt.Fprintf(os.Stderr, "fak serve --fit auto (inkling2_loop): resolved context=%d\n", contextTokens)
@@ -781,9 +783,9 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			}
 			return errors.Join(cerr, m.Close())
 		}
-		placement = fmt.Sprintf("%s looped forward on %s: layers=%d hidden=%d passes=%d; %s; envelope(maxCtx=%d chunk=%d/%d C=%d kv=%s c1>%d)",
+		placement = fmt.Sprintf("%s looped forward on %s: layers=%d hidden=%d passes=%d; %s; envelope(max_ctx=%d kv_dtype=%s default_chunk=%d min_chunk=%d target_concurrency=%d long_ctx_c1_threshold=%d)",
 			m.Arch, rt.chatBackend.Name(), m.HP.Layers, m.HP.Hidden, m.HP.Passes, l.Placement,
-			env.MaxCtx, env.DefaultChunk, env.MinChunk, env.TargetConcurrency, env.KVDtype, env.LongCtxC1Threshold)
+			env.MaxCtx, env.KVDtype, env.DefaultChunk, env.MinChunk, env.TargetConcurrency, env.LongCtxC1Threshold)
 	}
 	loadDur := time.Since(tLoad)
 	// teardown is reachable from both the admission release and serve shutdown
@@ -831,8 +833,33 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		loadDur = time.Since(tLoad)
 	}
 	rt.inkling2Planner, rt.inkling2Close, rt.inkling2Metal, rt.inkling2MaxPromptTokens = planner, closeModel, metal, contextTokens
+	rt.inkling2ServeStatus = newInkling2ServeStatusProvider(*sf.model, solvedEnv, gen)
 	rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "model-load", Dur: loadDur})
 	rt.addStartupMessage(newServeStartupMessage("serve", "inkling2-loop", "info",
 		fmt.Sprintf("%s; context=%d model=%q (%s)", placement, contextTokens, *sf.model, decode)))
 	return true
+}
+
+func newInkling2ServeStatusProvider(modelID string, env ggufload.Inkling2ServeEnvelope, gen agent.Inkling2LoopGenerator) func() gateway.ServeStatusSnapshot {
+	batchEng, _ := gen.(*inkling2LoopBatchEngine)
+	return func() gateway.ServeStatusSnapshot {
+		snap := gateway.ServeStatusSnapshot{
+			Schema:             "fak.serve.status.v1",
+			Model:              modelID,
+			MaxCtx:             env.MaxCtx,
+			KVDtype:            env.KVDtype.String(),
+			DefaultChunk:       env.DefaultChunk,
+			MinChunk:           env.MinChunk,
+			TargetConcurrency:  env.TargetConcurrency,
+			LongCtxC1Threshold: env.LongCtxC1Threshold,
+		}
+		if batchEng != nil {
+			stats := batchEng.AutotuneStats()
+			snap.ChunkStepdownsTotal = stats.ChunkStepdownsTotal
+			snap.C1LongCtxFallbacksTotal = stats.C1LongCtxFallbacksTotal
+			snap.LastCohortWidth = stats.LastCohortWidth
+			snap.LastChunkSize = stats.LastChunkSize
+		}
+		return snap
+	}
 }

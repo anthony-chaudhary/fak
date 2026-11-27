@@ -380,6 +380,7 @@ func New(cfg Config) (*Server, error) {
 		steerSession:                 cfg.SteerSession,
 		listSessions:                 cfg.ListSessions,
 		trajctlMetrics:               cfg.TrajctlMetrics,
+		serveStatusProvider:          cfg.ServeStatusProvider,
 		decideSession:                cfg.DecideSession,
 		stopGate:                     cfg.StopGate,
 		debitSession:                 cfg.DebitSession,

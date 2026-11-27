@@ -328,6 +328,7 @@ func (s *Server) renderMetrics() string {
 	}
 	s.writeTurnCostMetrics(&b)
 	m.writeVCacheMetrics(&b)
+	s.writeInkling2AutotuneMetrics(&b)
 	m.writeVCacheWarmthMetrics(&b)
 	m.writeVCacheWarmthDemotionMetrics(&b)
 	m.writeVCacheGovernorMetrics(&b)

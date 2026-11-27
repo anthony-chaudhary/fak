@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -254,6 +255,28 @@ type Inkling2LoopCohorts struct {
 	wideCooldown int
 	// store is the cross-request prefix store; host memory, so it outlives Close
 	store *inkling2PrefixStore
+	// autotune observability counters
+	chunkStepdownsTotal atomic.Uint64
+	lastChunkSize       atomic.Int64
+}
+
+// Inkling2CohortAutotuneStats reports live chunk step-down and last-chunk
+// telemetry from an Inkling2LoopCohorts instance.
+type Inkling2CohortAutotuneStats struct {
+	ChunkStepdownsTotal uint64
+	LastChunkSize       int64
+}
+
+// AutotuneStats returns a snapshot of the cohort chunk step-down counter and
+// most recently selected prefill chunk size.
+func (bt *Inkling2LoopCohorts) AutotuneStats() Inkling2CohortAutotuneStats {
+	if bt == nil {
+		return Inkling2CohortAutotuneStats{}
+	}
+	return Inkling2CohortAutotuneStats{
+		ChunkStepdownsTotal: bt.chunkStepdownsTotal.Load(),
+		LastChunkSize:       bt.lastChunkSize.Load(),
+	}
 }
 
 func (bt *Inkling2LoopCohorts) env() func(string) (string, bool) {
@@ -413,6 +436,11 @@ func (bt *Inkling2LoopCohorts) acquireFor(C, ctx, longest int) (*inkling2Batch, 
 	}
 	if bt.reuses(C, ctx) && want <= bt.b.capT {
 		bt.b.usePrefill(want)
+		chunkSize := bt.b.prefillT
+		if chunkSize <= 0 {
+			chunkSize = bt.b.capT
+		}
+		bt.lastChunkSize.Store(int64(chunkSize))
 		return bt.b, bt.b.begin(C, ctx)
 	}
 	if bt.b != nil {
@@ -424,7 +452,13 @@ func (bt *Inkling2LoopCohorts) acquireFor(C, ctx, longest int) (*inkling2Batch, 
 	}
 	if b.capT < want {
 		bt.wideCooldown = inkling2PrefillReprobeEvery
+		bt.chunkStepdownsTotal.Add(1)
 	}
+	chunkSize := b.prefillT
+	if chunkSize <= 0 {
+		chunkSize = b.capT
+	}
+	bt.lastChunkSize.Store(int64(chunkSize))
 	bt.b = b
 	return b, nil
 }

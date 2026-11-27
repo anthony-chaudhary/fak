@@ -92,6 +92,8 @@ type serveRuntime struct {
 	inkling2Metal bool
 	// inkling2MaxPromptTokens is that model's served window, which bounds the longest prefill.
 	inkling2MaxPromptTokens int
+	// inkling2ServeStatus supplies the solved Inkling-2 envelope and autotune counters to /v1/serve/status and /metrics.
+	inkling2ServeStatus func() gateway.ServeStatusSnapshot
 
 	apiKey              string
 	engineCacheAdminKey string
