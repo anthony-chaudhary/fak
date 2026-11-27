@@ -334,6 +334,12 @@ func inkling2ResidentCtxAutoSet(lookup func(string) (string, bool)) bool {
 // its f32 K and V rows in every global slot, plus the attention score row, which
 // grows with the global context.
 func inkling2ResidentPerPosBytes(hp model.Inkling2LoopHParams) int64 {
+	return inkling2ResidentPerPosBytesDtype(hp, false)
+}
+
+// inkling2ResidentPerPosBytesDtype is inkling2ResidentPerPosBytes with half selecting
+// f16 for the global-slot K and V caches; the attention score row stays float32.
+func inkling2ResidentPerPosBytesDtype(hp model.Inkling2LoopHParams, half bool) int64 {
 	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
 	var global int64
 	for slot := 0; slot < slots; slot++ {
@@ -341,8 +347,12 @@ func inkling2ResidentPerPosBytes(hp model.Inkling2LoopHParams) int64 {
 			global++
 		}
 	}
+	elemBytes := int64(4)
+	if half {
+		elemBytes = 2
+	}
 	kvDim := int64(hp.KVHeads * hp.HeadDim)
-	return global*2*4*kvDim + 2*4*int64(hp.Heads)
+	return global*2*elemBytes*kvDim + 2*4*int64(hp.Heads)
 }
 
 // inkling2FitResidentCtx is the largest global context whose cache and score rows fit
@@ -377,13 +387,13 @@ func inkling2ResidentHardMax(backend string) int {
 // inkling2ResolveAutoCtx sizes the global cache from the device memory free now,
 // after the weights bound. A backend that cannot report free memory keeps the
 // fixed default rather than guess.
-func inkling2ResolveAutoCtx(be compute.Backend, hp model.Inkling2LoopHParams, prefill int64) (int, error) {
+func inkling2ResolveAutoCtx(be compute.Backend, hp model.Inkling2LoopHParams, prefill int64, half bool) (int, error) {
 	_, free, known := compute.DeviceMemoryInfo(be)
 	if !known || free == compute.FreeUnknown || free < 0 {
 		fmt.Fprintf(os.Stderr, "inkling2 resident: device free memory unknown, context %d (default)\n", Inkling2ResidentCtxDefault)
 		return Inkling2ResidentCtxDefault, nil
 	}
-	perPos := inkling2ResidentPerPosBytes(hp)
+	perPos := inkling2ResidentPerPosBytesDtype(hp, half)
 	ctx := min(inkling2FitResidentCtx(free, inkling2ResidentReserve(free)+prefill, perPos), inkling2AutoCtxCeiling)
 	if ctx == 0 {
 		return 0, fmt.Errorf("inkling2 resident: %d free bytes after weights hold no %d-token global cache at %d bytes per position; set %s to a smaller context",
@@ -538,7 +548,6 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 	}
 	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats, chunkMax: ring, chunkWanted: wanted}
 	s.report = metalgemm.Ink2ReportRequested(os.Getenv(metalgemm.Ink2ProfileEnv))
-	s.kvHalf = ctx > 0 && inkling2ResidentHalfKV(be)
 	s.halfDev, _ = be.(compute.Inkling2HalfKVDevice)
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
 	s.batched = hasPrefill && (inkling2BatchedPrefill() || inkling2SpecDepthFor(m) > 0)
@@ -577,8 +586,9 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 		s.packCtrl(c, hp.Hidden)
 	}
 
+	halfKV := ctx != 0 && inkling2ResidentHalfKV(be)
 	if ctx == inkling2ResidentCtxAuto {
-		resolved, err := inkling2ResolveAutoCtx(be, hp, s.prefillWidestBytes())
+		resolved, err := inkling2ResolveAutoCtx(be, hp, s.prefillWidestBytes(), halfKV)
 		if err != nil {
 			s.close()
 			return nil, err
@@ -586,6 +596,7 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 		ctx = resolved
 	}
 	s.ctx = ctx
+	s.kvHalf = ctx > 0 && halfKV
 	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
 	kvDim := hp.KVHeads * hp.HeadDim
 	channels := 2*kvDim + 2*hp.Hidden

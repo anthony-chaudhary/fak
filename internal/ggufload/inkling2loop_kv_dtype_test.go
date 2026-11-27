@@ -161,3 +161,98 @@ func TestInkling2KVHalfFromRefusesUnknownSelectorValue(t *testing.T) {
 		t.Fatal("unknown FAK_INKLING2_KV accepted")
 	}
 }
+
+// fakeInk2HalfBudget is a resident test backend that supports both f16 decode and f16
+// prefill KV ops so newInkling2ResidentRing exercises the real kvHalf selection path.
+type fakeInk2HalfBudget struct {
+	*fakeInk2Budget
+	fakeInk2HalfPrefill
+}
+
+func (fakeInk2HalfBudget) Ink2QKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache, meta compute.Ink2Ref, p compute.Ink2AttnParams, cap int, cv *compute.Ink2KVConv) error {
+	return nil
+}
+
+func (fakeInk2HalfBudget) Ink2AttendHalf(q, r, sinks, relBias, kcache, vcache, scores, out, meta compute.Ink2Ref, p compute.Ink2AttnParams, extent, window, cap int) error {
+	return nil
+}
+
+func TestInkling2ResidentPerPosBytesDtypeAccountsForF16(t *testing.T) {
+	hp := inkling2MiniKVShape()
+	f32 := inkling2ResidentPerPosBytesDtype(hp, false)
+	f16 := inkling2ResidentPerPosBytesDtype(hp, true)
+	if f32 != inkling2ResidentPerPosBytes(hp) {
+		t.Fatalf("f32 perPos = %d, want inkling2ResidentPerPosBytes %d", f32, inkling2ResidentPerPosBytes(hp))
+	}
+	wantF16 := int64(8)*2*1024*2 + 2*24*4
+	if f16 != wantF16 {
+		t.Fatalf("f16 perPos = %d, want %d", f16, wantF16)
+	}
+	if f32-f16 != int64(8)*2*1024*2 {
+		t.Fatalf("f32-f16 delta = %d, want half of global KV (%d)", f32-f16, int64(8)*2*1024*2)
+	}
+
+	be := &fakeInk2HalfBudget{fakeInk2Budget: newFakeInk2Budget(512 << 20)}
+	ctxF32, err := inkling2ResolveAutoCtx(be, hp, 0, false)
+	if err != nil {
+		t.Fatalf("resolve auto ctx f32: %v", err)
+	}
+	ctxF16, err := inkling2ResolveAutoCtx(be, hp, 0, true)
+	if err != nil {
+		t.Fatalf("resolve auto ctx f16: %v", err)
+	}
+	if ctxF16 <= ctxF32 || ctxF16*10 < ctxF32*19 {
+		t.Fatalf("auto ctx f16=%d, f32=%d; want f16 roughly double f32 under constrained memory", ctxF16, ctxF32)
+	}
+}
+
+func TestInkling2ResidentAutoCtxSelectsHalfKV(t *testing.T) {
+	defer func(v bool) { inkling2KVHalfRequested = v }(inkling2KVHalfRequested)
+	inkling2KVHalfRequested = true
+	m := fakeInk2RingModel()
+
+	t.Run("known free memory enables kvHalf", func(t *testing.T) {
+		be := &fakeInk2HalfBudget{fakeInk2Budget: newFakeInk2Budget(1 << 30)}
+		s, err := newInkling2ResidentRing(m, be, inkling2ResidentCtxAuto, fakeInk2RingArena, inkling2PrefillChunkBase, inkling2PrefillChunkBase)
+		if err != nil {
+			t.Fatalf("newInkling2ResidentRing(auto, known free): %v", err)
+		}
+		defer s.close()
+		if s.ctx <= 0 {
+			t.Fatalf("resolved auto ctx = %d, want > 0", s.ctx)
+		}
+		if !s.kvHalf {
+			t.Fatal("auto-context session with FAK_INKLING2_KV=f16 selected fp32 caches (kvHalf=false)")
+		}
+	})
+
+	t.Run("unknown free memory fallback enables kvHalf", func(t *testing.T) {
+		be := &fakeInk2HalfBudget{fakeInk2Budget: newFakeInk2Budget(0)}
+		s, err := newInkling2ResidentRing(m, be, inkling2ResidentCtxAuto, fakeInk2RingArena, inkling2PrefillChunkBase, inkling2PrefillChunkBase)
+		if err != nil {
+			t.Fatalf("newInkling2ResidentRing(auto, unknown free): %v", err)
+		}
+		defer s.close()
+		if s.ctx != Inkling2ResidentCtxDefault {
+			t.Fatalf("unknown-free auto ctx = %d, want default %d", s.ctx, Inkling2ResidentCtxDefault)
+		}
+		if !s.kvHalf {
+			t.Fatal("unknown-free auto-context fallback selected fp32 caches (kvHalf=false)")
+		}
+	})
+
+	t.Run("cohort binding ctx 0 keeps kvHalf false", func(t *testing.T) {
+		be := &fakeInk2HalfBudget{fakeInk2Budget: newFakeInk2Budget(1 << 30)}
+		s, err := newInkling2ResidentRing(m, be, 0, fakeInk2RingArena, inkling2PrefillChunkBase, inkling2PrefillChunkBase)
+		if err != nil {
+			t.Fatalf("newInkling2ResidentRing(ctx=0): %v", err)
+		}
+		defer s.close()
+		if s.ctx != 0 {
+			t.Fatalf("cohort binding ctx = %d, want 0", s.ctx)
+		}
+		if s.kvHalf {
+			t.Fatal("cohort binding (ctx=0) set kvHalf=true")
+		}
+	})
+}
