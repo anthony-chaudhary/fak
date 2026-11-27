@@ -102,6 +102,40 @@ class ReleaseNextTest(unittest.TestCase):
         self.assertIn("Crucial bug fix.", rendered)
         self.assertIn("Migration required: run db upgrade.", rendered)
 
+    def test_curated_release_highlight_survives_render_and_sync(self) -> None:
+        curated = "Users can now resume interrupted local-agent runs without losing context."
+        template_hint = "<!-- Add short bullets about what changed for people using Fak. -->"
+        sample_md = (
+            "# fak vNext (targeting v0.49.0): Work in Progress\n\n"
+            "## Release highlights\n\n"
+            f"- {curated}\n"
+            f"{template_hint}\n\n"
+            "## Upgrade and breaking changes\n\n"
+            "- No manual migration required unless specified above.\n"
+        )
+
+        sections = self.mod.parse_existing_draft(sample_md)
+        self.assertEqual(sections["Release highlights"], [curated])
+
+        state = {
+            "projected_version": "0.49.0",
+            "projected_level": "minor",
+            "base_tag": "v0.48.0",
+            "commits": [],
+        }
+        rendered = self.mod.render_next_draft(state, existing_sections=sections)
+        self.assertIn(f"- {curated}", rendered)
+        self.assertNotIn(template_hint, rendered)
+
+        draft_rel = "docs/releases/NEXT.md"
+        draft_file = self.tmp / draft_rel
+        draft_file.parent.mkdir(parents=True, exist_ok=True)
+        draft_file.write_text(rendered, encoding="utf-8")
+        self.mod.sync_next(self.tmp, draft_rel=draft_rel)
+        synced = draft_file.read_text(encoding="utf-8")
+        self.assertIn(f"- {curated}", synced)
+        self.assertNotIn(template_hint, synced)
+
     def test_sync_next_and_inspect_state(self) -> None:
         draft_rel = "docs/releases/NEXT.md"
         draft_file = self.tmp / draft_rel

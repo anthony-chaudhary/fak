@@ -4,6 +4,12 @@ description: "Use the existing release cadence workflow through the native front
 ---
 # On-demand releases
 
+Before a release, add short bullets to **Release highlights** in
+[`docs/releases/NEXT.md`](releases/NEXT.md). Write for an engineer who is new
+to Fak. Say what changed, who will notice, and what they need to do. Put
+required steps under **Upgrade and breaking changes**. The release puts these
+sections up front and keeps the full change list available for reference.
+
 Use the existing release cadence workflow through the native front door:
 
 ```bash

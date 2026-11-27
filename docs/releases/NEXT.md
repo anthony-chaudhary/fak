@@ -7,6 +7,10 @@ It is updated as commits land so that release notes are maintained proactively r
 - **Base release tag:** `v0.59.0`
 - **Commits in flight:** 0
 
+## Release highlights
+
+<!-- Add short bullets about what changed for people using Fak. -->
+
 ## What changed
 
 - *(No new user-visible features landed yet)*

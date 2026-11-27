@@ -268,12 +268,15 @@ class ReleaseCutTest(unittest.TestCase):
         argv = json.loads((root / "decider-argv.json").read_text(encoding="utf-8"))
         self.assertIn("--require-ci-green", argv)
 
-    def test_date_is_passed_to_release_bump_in_plan_and_execute(self) -> None:
+    def test_plan_and_cut_keep_curated_notes_and_reset_next_draft(self) -> None:
         rc = load()
         root = self.tmp / "dateprop"
         root.mkdir()
         self._git(root, "init", "-b", "master")
         self._write(root / "VERSION", "0.1.0\n")
+        highlight = "Fak tries another server if the first one is busy."
+        next_path = root / "docs/releases/NEXT.md"
+        self._write(next_path, f"## Release highlights\n\n- {highlight}\n")
         tools = root / "tools"
         tools.mkdir()
         self._write(tools / "release_context.py", (
@@ -298,7 +301,7 @@ class ReleaseCutTest(unittest.TestCase):
             "import json\n"
             "print(json.dumps({'ok': True}))\n"
         ))
-        self._git(root, "add", "VERSION", "tools")
+        self._git(root, "add", "VERSION", "tools", "docs/releases/NEXT.md")
         self._git(root, "commit", "-m", "seed release helpers")
 
         plan = rc.build_plan(
@@ -314,6 +317,8 @@ class ReleaseCutTest(unittest.TestCase):
             limit_commits=20,
         )
         self.assertTrue(plan["ok"], plan)
+        self.assertIn(highlight, plan["notes_preview"])
+        self.assertTrue(plan["notes_preview"].startswith("# fak v0.2.0\n"))
 
         result = rc.execute_plan(
             root,
@@ -326,6 +331,12 @@ class ReleaseCutTest(unittest.TestCase):
             lock_already_held=True,
         )
         self.assertTrue(result["ok"], result)
+        published_draft = self._git(root, "show", "HEAD:docs/releases/v0.2.0.md")
+        self.assertEqual(published_draft, plan["notes_preview"].strip())
+        reset_draft = self._git(root, "show", "HEAD:docs/releases/NEXT.md")
+        self.assertIn("## Release highlights", reset_draft)
+        self.assertIn("`v0.2.0`", reset_draft)
+        self.assertNotIn(highlight, reset_draft)
         bump_argv = [
             json.loads(line)
             for line in (self.tmp / "bump-argv.jsonl").read_text(encoding="utf-8").splitlines()
@@ -657,6 +668,8 @@ class ReleaseCutTest(unittest.TestCase):
         rc = load()
         next_md = (
             "# fak vNext: Work in Progress\n\n"
+            "## Release highlights\n\n"
+            "- Fak tries another server if the first one is busy.\n\n"
             "## Upgrade and breaking changes\n\n"
             "- Migration required: run `fak upgrade --migrate-db`\n"
         )
@@ -664,8 +677,25 @@ class ReleaseCutTest(unittest.TestCase):
         notes = rc.render_notes("0.47.0", date="2026-09-04", level="minor", themes=["core"],
                                 headline="minor update", commits=commits, next_content=next_md)
         self.assertIn("Migration required: run `fak upgrade --migrate-db`", notes)
-        self.assertIn("## Upgrade", notes)
         self.assertIn("## Release facts", notes)
+        self.assertLess(notes.index("Fak tries another server"), notes.index("## Upgrade"))
+        self.assertLess(notes.index("## Upgrade"), notes.index("<details>"))
+        self.assertLess(notes.index("<details>"), notes.index("New capability."))
+
+    def test_render_notes_keeps_raw_change_titles_out_of_unwritten_summary(self) -> None:
+        rc = load()
+        notes = rc.render_notes(
+            "0.60.0", date="2026-11-26", level="minor", themes=["ctxmmu"], headline=None,
+            commits=[{"subject": "fix(ctxmmu): repair KV slot GC"}],
+            next_content="## Release highlights\n\n<!-- Add short bullets here. -->\n",
+        )
+        summary, details = notes.split("<details>", 1)
+        self.assertTrue(summary.startswith("# fak v0.60.0\n"))
+        self.assertIn("This release includes bug fixes.", summary)
+        self.assertIn("Check the change list below", summary)
+        self.assertNotIn("No manual migration is required", summary)
+        self.assertNotIn("KV slot GC", summary)
+        self.assertIn("Repair KV slot GC.", details)
 
     def test_live_cli_dry_run_no_mutation(self) -> None:
         proc = subprocess.run(

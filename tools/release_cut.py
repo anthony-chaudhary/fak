@@ -475,47 +475,53 @@ def extract_upgrade_notes(text: str) -> list[str]:
 
 
 def render_notes(version: str, *, date: str, level: str, themes: list[str],
-                 headline: str, commits: list[dict], next_content: str | None = None) -> str:
+                 headline: str | None, commits: list[dict], next_content: str | None = None) -> str:
+    from release_next import RELEASE_HIGHLIGHTS, parse_existing_draft
+
     del date, level, themes
     feat_commits = [c for c in commits if _public_kind(str(c.get("subject", ""))) == "feat"]
     fix_commits = [c for c in commits if _public_kind(str(c.get("subject", ""))) == "fix"]
     other_commits = [c for c in commits if _public_kind(str(c.get("subject", ""))) not in {"feat", "fix"}]
 
     sections = [
-        ("What changed", _process_section_commits(feat_commits)),
-        ("Reliability and correctness", _process_section_commits(fix_commits)),
-        ("Engineering quality and evidence", _process_section_commits(other_commits)),
+        ("What changed", "new features", _process_section_commits(feat_commits)),
+        ("Reliability and correctness", "bug fixes", _process_section_commits(fix_commits)),
+        ("Engineering quality and evidence", "maintenance updates", _process_section_commits(other_commits)),
     ]
-    def _count_changes(items: list[str]) -> int:
-        return sum(1 for it in items if it.startswith("- "))
-
-    summary = ", ".join(
-        f"{_count_changes(items)} {heading.lower()} change{'s' if _count_changes(items) != 1 else ''}"
-        for heading, items in sections if _count_changes(items) > 0
-    )
-    title = ascii_clean(headline).strip()
-    lines = [f"# fak v{version}: {title}", "",
-             f"This release contains {len(commits)} commits: {summary}. "
-             "The sections below are grouped by operator impact, with the complete source history retained for auditability.", ""]
-    for heading, items in sections:
-        if not items:
-            continue
-        lines.extend([f"## {heading}", ""])
-        for item in items:
-            lines.append(item)
+    sections = [section for section in sections if section[2]]
+    title = f"# fak v{version}"
+    if headline:
+        title += f": {ascii_clean(headline).strip()}"
+    lines = [title, ""]
+    highlights = parse_existing_draft(next_content or "").get(RELEASE_HIGHLIGHTS, [])
+    if highlights:
+        lines.extend([f"## {RELEASE_HIGHLIGHTS}", ""])
+        lines.extend(f"- {item}" for item in highlights)
         lines.append("")
+    elif sections:
+        change_types = [label for _, label, _ in sections]
+        changes = change_types[0]
+        if len(change_types) > 1:
+            changes = ", ".join(change_types[:-1]) + " and " + change_types[-1]
+        lines.extend([f"This release includes {changes}. Open the change list below for details.", ""])
     custom_upgrades = extract_upgrade_notes(next_content) if next_content else []
     lines.extend(["## Upgrade", ""])
     if custom_upgrades:
         for it in custom_upgrades:
             lines.append(f"- {it}")
         lines.append("")
-    else:
-        lines.extend(["No manual migration is required unless a change above says otherwise. Install or update with:", ""])
+    elif sections:
+        lines.extend(["Check the change list below for anything that affects your setup.", ""])
     lines.extend([
+        "Run this command to install or update Fak.", "",
         "```bash", "go install github.com/anthony-chaudhary/fak/cmd/fak@latest", "```", "",
         "## Release facts", "", f"- Version: `{version}`", f"- Commit count: {len(commits)}", "",
     ])
+    if sections:
+        lines.extend(["<details>", "<summary>Full change list</summary>", ""])
+        for heading, _, items in sections:
+            lines.extend([f"## {heading}", "", *items, ""])
+        lines.extend(["</details>", ""])
     return "\n".join(lines)
 
 
@@ -781,7 +787,7 @@ def build_plan(root: Path, *, version: str | None, level: str | None,
         date=date,
         level=cut_level,
         themes=cut_themes,
-        headline=cut_headline,
+        headline=headline,
         commits=context.get("commits_since_tag") or [],
         next_content=next_content,
     )
@@ -885,25 +891,13 @@ def execute_plan(root: Path, plan: dict, *, includes: list[str], overwrite_notes
 
         next_draft_path = root / "docs/releases/NEXT.md"
         if next_draft_path.is_file():
-            from release_next import next_version_from_base, semver_tuple
+            from release_next import next_version_from_base, render_next_draft, semver_tuple
             curr_base = semver_tuple(plan["version"]) or (0, 0, 0)
-            following_ver = next_version_from_base(curr_base, "minor")
-            next_reset_text = (
-                f"# fak vNext (targeting v{following_ver}): Work in Progress\n\n"
-                f"This document tracks in-flight work on `main` targeting the upcoming `v{following_ver}` release.\n"
-                f"It is updated as commits land so that release notes are maintained proactively rather than scrambled at cut time.\n\n"
-                f"- **Projected version:** `{following_ver}` (`minor` bump)\n"
-                f"- **Base release tag:** `v{plan['version']}`\n"
-                f"- **Commits in flight:** 0\n\n"
-                f"## What changed\n\n"
-                f"- *(No new user-visible features landed yet)*\n\n"
-                f"## Reliability and correctness\n\n"
-                f"- *(No bug fixes landed yet)*\n\n"
-                f"## Engineering quality and evidence\n\n"
-                f"- *(No maintenance/quality commits landed yet)*\n\n"
-                f"## Upgrade and breaking changes\n\n"
-                f"- No manual migration required unless specified above.\n"
-            )
+            next_reset_text = render_next_draft({
+                "projected_version": next_version_from_base(curr_base, "minor"),
+                "projected_level": "minor",
+                "base_tag": f"v{plan['version']}",
+            })
             next_draft_path.write_text(next_reset_text, encoding="utf-8", newline="\n")
 
         code, out = run(["git", "add", "--", *paths], cwd=root)

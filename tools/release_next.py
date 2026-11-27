@@ -31,6 +31,7 @@ install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fak-release-next/1"
 DEFAULT_DRAFT_PATH = "docs/releases/NEXT.md"
+RELEASE_HIGHLIGHTS = "Release highlights"
 SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 VERSION_SUBJECT_RE = re.compile(r"^v\d+\.\d+\.\d+:")
 NEXT_SYNC_SUBJECT_RE = re.compile(r"^(?:docs\(release\):\s*)?sync\s+NEXT\.md", re.IGNORECASE)
@@ -269,6 +270,7 @@ def inspect_next_state(root: Path, draft_rel: str = DEFAULT_DRAFT_PATH, limit: i
 def parse_existing_draft(text: str) -> dict[str, list[str]]:
     """Extract existing sections from NEXT.md to preserve human annotations."""
     sections: dict[str, list[str]] = {
+        RELEASE_HIGHLIGHTS: [],
         "What changed": [],
         "Reliability and correctness": [],
         "Engineering quality and evidence": [],
@@ -509,8 +511,6 @@ def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | Non
         f"- **Base release tag:** `{base_tag}`",
         f"- **Commits in flight:** {len(commits)}",
         "",
-        "## What changed",
-        "",
     ]
     def append_section_lines(items: list[str], placeholder: str) -> None:
         if items:
@@ -525,6 +525,15 @@ def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | Non
             lines.append(f"- {placeholder}")
         lines.append("")
 
+    lines.extend([f"## {RELEASE_HIGHLIGHTS}", ""])
+    highlights = existing_sections.get(RELEASE_HIGHLIGHTS, []) if existing_sections else []
+    if highlights:
+        for item in highlights:
+            lines.append(f"- {item}")
+    else:
+        lines.append("<!-- Add short bullets about what changed for people using Fak. -->")
+
+    lines.extend(["", "## What changed", ""])
     append_section_lines(feat_items, "*(No new user-visible features landed yet)*")
 
     lines.extend(["## Reliability and correctness", ""])

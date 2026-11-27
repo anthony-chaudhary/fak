@@ -484,6 +484,16 @@ version bump, release notes, signed commit/tag, push, GitHub release, and rollba
 Never hand-edit version constants, tag partially, force-push, or publish from a dirty/diverged
 tree. Release history and channel contract: [`docs/releases/`](docs/releases/) and [`docs/releases-channel.md`](docs/releases-channel.md).
 
+Write release notes for an engineer who is new to Fak. Start with what changed,
+who will notice, and any steps they need to take. Use short sentences and familiar
+words. Explain necessary acronyms and Fak-specific terms. For example, write
+“Fak tries another server if the first one is busy.” Use commit titles as source
+material. Review the draft before tagging and put commit links or test details
+after the summary. Keep exact commands, version numbers, and support limits where
+readers need them. For automatic releases, add those bullets under
+`## Release highlights` in [`docs/releases/NEXT.md`](docs/releases/NEXT.md).
+Put required upgrade steps under `## Upgrade and breaking changes`.
+
 Choose the planning primitive by work shape:
 
 - **Phased deliverable:** finite ordered phases with observable completion. Keep
