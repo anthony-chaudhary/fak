@@ -21,16 +21,18 @@ fork’s. At 1,946 tokens of context fak still trails the fork on decode, 89.0 v
 113.8 tok/s. The [benchmark index](docs/benchmarks/README.md) links the
 receipts and the other comparisons.
 
-With the opt-in CUDA profile below, a matched HTTP test on one RTX 5080
-measured aggregate prefill for uncached 512-token prompts with one output token
-per request. Fak revision `e7ad0c8dee5` led the realugbun llama.cpp fork, the
+A matched HTTP test on one RTX 5080 measured aggregate prefill for uncached
+512-token prompts with one output token per request. Fak revision `e7ad0c8dee5`,
+run with the fixed benchmark profile, led the realugbun llama.cpp fork, the
 faster of the two OSS builds tested, in both halves of the ABBA run.
+
+![Aggregate prompt throughput for Fak and the realugbun fork at 2, 4, and 8 concurrent requests on an RTX 5080. The table below gives the measured rates.](visuals/inkling2-cuda-prefill.svg)
 
 | Concurrent requests | Fak prompt tok/s | Fork prompt tok/s | Smaller half-run speedup |
 | ---: | ---: | ---: | ---: |
-| 2 | 6,038 | 3,337 | 1.802× |
-| 4 | 6,038 | 3,538 | 1.675× |
-| 8 | 6,034 | 3,649 | 1.633× |
+| 2 | 6,037.586 | 3,337.363 | 1.802× |
+| 4 | 6,038.160 | 3,537.808 | 1.675× |
+| 8 | 6,033.886 | 3,648.577 | 1.633× |
 
 The rates are pooled medians. The one-token fixture yielded no visible first
 token, so this run measured prompt throughput and left visible latency unmeasured.
@@ -75,21 +77,23 @@ installer downloads the prebuilt Metal archive on Apple Silicon. Smaller Macs an
 platforms get smaller model tiers instead. The [Mac guide](docs/fak/mac-local-models.md#inkling-2-mini-the-first-run-default)
 has the requirements and the server commands.
 
-On an `sm_120f` CUDA build with NVFP4 W4A4, load the opt-in
-[concurrent-prefill profile](examples/inkling2-cuda-prefill.env.example) from
-the checkout root. It sets a 640-token context, f16 cohort KV, a 25 ms batch
-gap, and a 75 ms batch wait. Use the path to your GGUF file.
+Inkling-2-Mini uses concurrent prefill by default when the CUDA backend supports
+native NVFP4 W4A4 and f16 sequence and cohort operations. The admission policy
+uses a 25 ms batch gap and a 75 ms batch wait across eligible devices. f16 uses
+half the KV bytes of fp32. The server sizes context and checks fit against
+available device memory, so capacity and throughput vary by device and workload.
+The collection window can add latency to an isolated request.
+Use the path to your GGUF file.
 
 ```sh
-(
-  set -ae
-  . ./examples/inkling2-cuda-prefill.env.example
-  set +a
-  fak serve --engine inkernel --backend cuda \
-    --gguf /path/to/Inkling-2-Mini-UD-Q3_K_XL.gguf \
-    --session-state off --session-registry off --addr 127.0.0.1:8080
-)
+fak serve --engine inkernel --backend cuda \
+  --gguf /path/to/Inkling-2-Mini-UD-Q3_K_XL.gguf \
+  --addr 127.0.0.1:8080
 ```
+
+Set `FAK_INKLING2_SERVE_BATCH=0` to disable batching. To reproduce the fixed
+640-token benchmark context and its settings, use the
+[benchmark environment example](examples/inkling2-cuda-prefill.env.example).
 
 For the commands and their main flags, see the [CLI reference](docs/CLI.md).
 

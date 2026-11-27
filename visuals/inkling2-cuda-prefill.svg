@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 356" role="img" aria-labelledby="title desc">
+  <title id="title">Inkling-2-Mini concurrent prefill on one RTX 5080</title>
+  <desc id="desc">Pooled median prompt tokens per second, starting at zero. At 2 concurrent requests, Fak reaches 6,037.586 and the realugbun llama.cpp fork reaches 3,337.363. At 4, Fak reaches 6,038.160 and the fork reaches 3,537.808. At 8, Fak reaches 6,033.886 and the fork reaches 3,648.577. HTTP, 512 uncached prompt tokens and one output token per request.</desc>
+  <defs>
+    <pattern id="fork" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="8" height="8" fill="#dbe5ee"/>
+      <path d="M0 0V8" stroke="#687d90" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect x="1" y="1" width="718" height="354" rx="12" fill="#f5f8fa" stroke="#c9d4de"/>
+  <g fill="#152a3a" font-family="system-ui, sans-serif">
+    <text x="26" y="36" font-size="22" font-weight="700">Inkling-2-Mini concurrent prefill</text>
+    <text x="26" y="60" font-size="14">RTX 5080 · 512 uncached prompt tokens per request</text>
+    <rect x="128" y="76" width="16" height="12" rx="2" fill="#005b63"/>
+    <text x="151" y="87" font-size="13">Fak</text>
+    <rect x="200" y="76" width="16" height="12" rx="2" fill="url(#fork)" stroke="#687d90"/>
+    <text x="223" y="87" font-size="13">realugbun llama.cpp</text>
+    <text x="26" y="111" font-size="12" font-weight="600">Concurrent</text>
+    <text x="26" y="126" font-size="12" font-weight="600">requests</text>
+    <g stroke="#d3dce4" stroke-width="1">
+      <path d="M128 107V293M205 107V293M282 107V293M359 107V293M436 107V293M513 107V293M590 107V293"/>
+    </g>
+    <g font-size="14" font-weight="700">
+      <text x="94" y="147">2</text>
+      <text x="94" y="211">4</text>
+      <text x="94" y="275">8</text>
+    </g>
+    <g fill="#005b63">
+      <rect x="128" y="116" width="464.894" height="20" rx="2"/>
+      <rect x="128" y="180" width="464.938" height="20" rx="2"/>
+      <rect x="128" y="244" width="464.609" height="20" rx="2"/>
+    </g>
+    <g fill="url(#fork)" stroke="#687d90">
+      <rect x="128" y="140" width="256.977" height="20" rx="2"/>
+      <rect x="128" y="204" width="272.411" height="20" rx="2"/>
+      <rect x="128" y="268" width="280.940" height="20" rx="2"/>
+    </g>
+    <g font-size="13" font-weight="600" font-variant-numeric="tabular-nums">
+      <text x="602" y="131">6,037.586</text>
+      <text x="395" y="155">3,337.363</text>
+      <text x="602" y="195">6,038.160</text>
+      <text x="410" y="219">3,537.808</text>
+      <text x="602" y="259">6,033.886</text>
+      <text x="419" y="283">3,648.577</text>
+    </g>
+    <path d="M128 107V293H590" fill="none" stroke="#627689"/>
+    <g font-size="12" text-anchor="middle">
+      <text x="128" y="310">0</text>
+      <text x="205" y="310">1,000</text>
+      <text x="282" y="310">2,000</text>
+      <text x="359" y="310">3,000</text>
+      <text x="436" y="310">4,000</text>
+      <text x="513" y="310">5,000</text>
+      <text x="590" y="310">6,000</text>
+      <text x="359" y="334" font-size="13" font-weight="600">Prompt tokens per second</text>
+    </g>
+  </g>
+</svg>

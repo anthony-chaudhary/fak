@@ -139,6 +139,40 @@ func TestInkling2CohortPrefillRunsOnHalfKVWhenOptedIn(t *testing.T) {
 	}
 }
 
+func TestInkling2CohortLookupSelectsHalfKVForPlanAndRun(t *testing.T) {
+	t.Setenv("FAK_INKLING2_BATCH_KV", "f32")
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL_KV", "off")
+	t.Setenv("FAK_INKLING2_BATCH_SEQOPS", "0")
+	t.Setenv("FAK_INKLING2_BATCH_ADMIT", "1")
+	settings := map[string]string{
+		"FAK_INKLING2_BATCH_KV":          "f16",
+		"FAK_INKLING2_COHORT_PREFILL_KV": "f16",
+		"FAK_INKLING2_BATCH_SEQOPS":      "1",
+	}
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohortsWithLookup(fakeInk2CohortModel(), fakeInk2HalfCohort{fakeInk2Cohort: d}, func(key string) (string, bool) {
+		v, ok := settings[key]
+		return v, ok
+	})
+	defer bt.Close()
+
+	prompts := [][]int{{3, 4, 5}, {7}, {9, 10}}
+	const maxNew = 3
+	ink2SplitBudget(t, bt, d, len(prompts), inkling2BatchCtxAlign)
+	groups, err := bt.Split(ink2SplitPositions(prompts, maxNew))
+	if err != nil || len(groups) != 1 || len(groups[0]) != len(prompts) {
+		t.Fatalf("split = %v, err = %v, want one full-width cohort", groups, err)
+	}
+	shape, err := bt.s.batchShape(len(prompts), inkling2BatchCtxAlign)
+	if err != nil || !shape.kvHalf || shape.half == nil || shape.seq == nil || shape.prefillT == 0 {
+		t.Fatalf("planned shape = %+v, err = %v, want f16 cohort prefill with sequence ops", shape, err)
+	}
+	ink2SplitRun(t, bt, prompts, groups[0], maxNew, make([][]int, len(prompts)))
+	if b := bt.b; !b.kvHalf || b.half == nil || b.seq == nil || b.prefillT != shape.prefillT || b.need != shape.need || d.heads == 0 {
+		t.Fatalf("allocated cohort does not match the f16 plan or ran without cohort prefill")
+	}
+}
+
 // On f16 caches the shared-prefix row copy moves one row of cap*kvDim halves, which is
 // cap*kvDim/2 floats, and leaves every other row alone.
 func TestInkling2BatchCopyRowStateHalfKV(t *testing.T) {

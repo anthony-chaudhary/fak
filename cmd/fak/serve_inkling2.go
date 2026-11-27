@@ -438,9 +438,7 @@ func inkling2HasPrefix(s, prefix []int) bool {
 	return true
 }
 
-// newServeInkling2Generator picks the serialized engine, or with
-// FAK_INKLING2_SERVE_BATCH=1 on a batch-eligible load the cohort engine, and names
-// the choice for the startup message.
+// newServeInkling2Generator selects the serving engine and names it at startup.
 func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (agent.Inkling2LoopGenerator, string, error) {
 	scalar := newInkling2LoopEngine(m, be)
 	mode, err := inkling2PrefixReuseModeFrom(lookup)
@@ -449,6 +447,11 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 	}
 	scalar.prefixReuse = mode
 	scalar.slots, scalar.capBytes = inkling2PrefixCacheFromEnv(lookup)
+	batchEligible := ggufload.Inkling2LoopBatchEligible(m, be)
+	cudaPrefill := batchEligible && inkling2CUDAPrefillReady(be, lookup)
+	if cudaPrefill {
+		lookup = inkling2CUDAPrefillDefaults(lookup)
+	}
 	if !inkling2ServeBatchEnabled(lookup) {
 		return scalar, "greedy decode" + inkling2PrefixSlotsNote(scalar), nil
 	}
@@ -456,7 +459,7 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 	if err != nil {
 		return nil, "", err
 	}
-	if !ggufload.Inkling2LoopBatchEligible(m, be) {
+	if !batchEligible {
 		return scalar, "greedy decode; FAK_INKLING2_SERVE_BATCH ignored: load is not batch eligible" + inkling2PrefixSlotsNote(scalar), nil
 	}
 	prefix, err := inkling2BatchPrefixNote(be, lookup)
@@ -464,6 +467,13 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 		return nil, "", err
 	}
 	ignored := inkling2ScalarBehindCohorts(scalar)
+	if cudaPrefill {
+		kv, _ := lookup("FAK_INKLING2_BATCH_KV")
+		if strings.TrimSpace(kv) == "" {
+			kv = "f32"
+		}
+		ignored += fmt.Sprintf("; CUDA concurrent prefill policy, batch KV=%s", kv)
+	}
 	return newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, lookup),
 		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", adm.max, adm.gap, adm.maxWait, prefix, ignored), nil
 }

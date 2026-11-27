@@ -311,9 +311,9 @@ func initCUDAInk2PNVFP4W4A4() {
 	}
 }
 
-// ink2pNVFP4W4A4Available reports whether the loaded CUDA image carries the native
+// Ink2PNVFP4W4A4Available reports whether the loaded CUDA image carries the native
 // SM120 NVFP4 W4A4 grouped kernel that Ink2PExpertGrouped selects unless opted out.
-func (c *cudaBackend) ink2pNVFP4W4A4Available() bool {
+func (c *cudaBackend) Ink2PNVFP4W4A4Available() bool {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	return C.fcuda_ink2p_nvfp4_w4a4_available() == 1

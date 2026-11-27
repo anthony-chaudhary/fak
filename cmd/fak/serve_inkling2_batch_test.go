@@ -10,8 +10,66 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
+
+type testInkling2CUDA struct {
+	compute.Backend
+	compute.Inkling2BatchDevice
+	compute.Inkling2PrefillHalfKV
+	w4a4    bool
+	halfErr error
+}
+
+func (c testInkling2CUDA) Ink2PHalfKVReady() error       { return c.halfErr }
+func (c testInkling2CUDA) Ink2PNVFP4W4A4Available() bool { return c.w4a4 }
+
+// fak-test:runtime fast est=1ms
+func TestInkling2CUDAPrefillDefaults(t *testing.T) {
+	none := inkling2EnvLookup(nil)
+	device := testInkling2CUDA{w4a4: true}
+	if !inkling2CUDAPrefillReady(device, none) ||
+		inkling2CUDAPrefillReady(nil, none) ||
+		inkling2CUDAPrefillReady(testInkling2CUDA{}, none) ||
+		inkling2CUDAPrefillReady(testInkling2CUDA{w4a4: true, halfErr: errors.New("half unavailable")}, none) {
+		t.Fatal("CUDA defaults must require native W4A4 and working half KV")
+	}
+	for key, value := range map[string]string{
+		"FAK_INKLING2_SERVE_BATCH": "0", "FAK_INKLING2_BATCHED_PREFILL": "0",
+		"FAK_INKLING2_COHORT_PREFILL": "0", "FAK_INKLING2_BATCH_SEQOPS": "0",
+		"FAK_INKLING2_PREFILL_NVFP4_W4A4": "0", "FAK_INKLING2_COHORT_PREFILL_KV": "off",
+	} {
+		if inkling2CUDAPrefillReady(device, inkling2EnvLookup(map[string]string{key: value})) {
+			t.Fatalf("overrode %s=%s", key, value)
+		}
+	}
+	lookup := inkling2CUDAPrefillDefaults(none)
+	admission, err := inkling2AdmissionFromEnv(lookup)
+	if err != nil || !inkling2ServeBatchEnabled(lookup) || admission.gap != 25*time.Millisecond ||
+		admission.maxWait != 75*time.Millisecond {
+		t.Fatalf("unexpected CUDA defaults: %+v, %v", admission, err)
+	}
+	for _, key := range []string{"FAK_INKLING2_BATCH_KV", "FAK_INKLING2_COHORT_PREFILL_KV"} {
+		if value, _ := lookup(key); value != "f16" {
+			t.Fatalf("%s=%s, want f16", key, value)
+		}
+	}
+	if _, set := lookup("FAK_INKLING2_CTX"); set {
+		t.Fatal("CUDA defaults set a context cap")
+	}
+	lookup = inkling2CUDAPrefillDefaults(inkling2EnvLookup(map[string]string{
+		"FAK_INKLING2_BATCH_GAP": "8ms", "FAK_INKLING2_BATCH_WAIT": "40ms",
+		"FAK_INKLING2_BATCH_KV": "f32", "FAK_INKLING2_CTX": "16384",
+	}))
+	admission, err = inkling2AdmissionFromEnv(lookup)
+	kv, _ := lookup("FAK_INKLING2_BATCH_KV")
+	ctx, _ := lookup("FAK_INKLING2_CTX")
+	if err != nil || admission.gap != 8*time.Millisecond || admission.maxWait != 40*time.Millisecond ||
+		kv != "f32" || ctx != "16384" {
+		t.Fatalf("explicit CUDA settings changed: %+v, KV %s, context %s, %v", admission, kv, ctx, err)
+	}
+}
 
 // fakeInkling2Clock advances only when told; every armed timer is reported on armed
 // so a test knows collect is blocked before it moves time or sends.

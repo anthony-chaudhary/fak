@@ -20,7 +20,7 @@ import (
 // block, so a wrong A/B/SFA/SFB lane mapping changes values outright.
 func TestCUDAInk2PExpertNVFP4W4A4MatchesReference(t *testing.T) {
 	cb := cudaNVFP4OrSkip(t)
-	if !cb.ink2pNVFP4W4A4Available() {
+	if !cb.Ink2PNVFP4W4A4Available() {
 		if os.Getenv(cudaNVFP4RequireEnv) == "1" {
 			t.Fatal("loaded CUDA image has no native NVFP4 W4A4 kernels; build with --arch sm_120f")
 		}

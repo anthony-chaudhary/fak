@@ -27,10 +27,58 @@ const (
 	inkling2BatchDurationMax    = 100 * time.Millisecond
 )
 
-// inkling2ServeBatchEnabled gates the cohort engine; unset keeps serialized serving.
+// inkling2ServeBatchEnabled reads the explicit or backend-selected serving mode.
 func inkling2ServeBatchEnabled(lookup func(string) (string, bool)) bool {
 	v, _ := lookup("FAK_INKLING2_SERVE_BATCH")
 	return v == "1"
+}
+
+func inkling2CUDAPrefillReady(be compute.Backend, lookup func(string) (string, bool)) bool {
+	cuda, ok := be.(interface {
+		compute.Inkling2BatchDevice
+		compute.Inkling2PrefillHalfKV
+		Ink2PNVFP4W4A4Available() bool
+	})
+	if !ok {
+		return false
+	}
+	for _, key := range []string{
+		"FAK_INKLING2_SERVE_BATCH", "FAK_INKLING2_BATCHED_PREFILL",
+		"FAK_INKLING2_COHORT_PREFILL", "FAK_INKLING2_BATCH_SEQOPS",
+		"FAK_INKLING2_PREFILL_NVFP4_W4A4",
+	} {
+		if value, _ := lookup(key); value == "0" {
+			return false
+		}
+	}
+	if value, set := lookup("FAK_INKLING2_COHORT_PREFILL_KV"); set {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "f16", "fp16":
+		default:
+			return false
+		}
+	}
+	return cuda.Ink2PHalfKVReady() == nil && cuda.Ink2PNVFP4W4A4Available()
+}
+
+func inkling2CUDAPrefillDefaults(lookup func(string) (string, bool)) func(string) (string, bool) {
+	return func(key string) (string, bool) {
+		if value, set := lookup(key); set {
+			return value, true
+		}
+		switch key {
+		case "FAK_INKLING2_SERVE_BATCH":
+			return "1", true
+		case "FAK_INKLING2_BATCH_KV", "FAK_INKLING2_COHORT_PREFILL_KV":
+			return "f16", true
+		case "FAK_INKLING2_BATCH_GAP":
+			return "25ms", true
+		case "FAK_INKLING2_BATCH_WAIT":
+			return "75ms", true
+		default:
+			return "", false
+		}
+	}
 }
 
 func inkling2BatchDurationEnv(lookup func(string) (string, bool), name string, def time.Duration) (time.Duration, error) {
@@ -244,7 +292,7 @@ var _ agent.Inkling2LoopGenerator = (*inkling2LoopBatchEngine)(nil)
 // newInkling2LoopBatchEngine keeps one cohort state for the engine's life: the run
 // worker is its only user.
 func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.Inkling2LoopModel, backend compute.Backend, adm inkling2Admission, lookup func(string) (string, bool)) *inkling2LoopBatchEngine {
-	cohorts := ggufload.NewInkling2LoopCohorts(model, backend)
+	cohorts := ggufload.NewInkling2LoopCohortsWithLookup(model, backend, lookup)
 	e := newInkling2LoopBatchEngineWith(scalar, cohorts.Generate, adm, ggufload.Inkling2LoopResidentContext)
 	e.releaseArenas = cohorts.ReleaseArenas
 	e.batchAdmitting = cohorts.GenerateAdmitting

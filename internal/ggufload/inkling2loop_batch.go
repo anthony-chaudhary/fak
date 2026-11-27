@@ -244,8 +244,12 @@ func (s *inkling2Resident) batchShapeChunk(C, ctx, chunk int) (inkling2BatchShap
 		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: context %d outside 1..%d", ctx, limit)
 	}
 	be := s.be
-	sh := inkling2BatchShape{seq: inkling2BatchSeqOps(be, os.LookupEnv)}
-	kvHalf, err := inkling2BatchKVHalf(os.LookupEnv)
+	lookup := s.batchLookup
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	sh := inkling2BatchShape{seq: inkling2BatchSeqOps(be, lookup)}
+	kvHalf, err := inkling2BatchKVHalf(lookup)
 	if err != nil {
 		return inkling2BatchShape{}, err
 	}
@@ -255,7 +259,7 @@ func (s *inkling2Resident) batchShapeChunk(C, ctx, chunk int) (inkling2BatchShap
 	}
 	sh.kvHalf = kvHalf
 	hp := s.hp
-	on, half, err := inkling2CohortPrefillKV(be, kvHalf, os.LookupEnv)
+	on, half, err := inkling2CohortPrefillKV(be, kvHalf, lookup)
 	if err != nil {
 		return inkling2BatchShape{}, err
 	}

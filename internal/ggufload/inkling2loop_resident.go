@@ -123,6 +123,8 @@ type inkling2Resident struct {
 	layers []ink2Layer
 	ctrls  []ink2Ctrl
 
+	batchLookup func(string) (string, bool)
+
 	tokNorm, outNorm, outResQ ink2Ref
 	output                    ink2Mat
 

@@ -193,10 +193,11 @@ func (lane *inkling2BatchLane) accept(token int, now time.Time) {
 // narrower or shorter cohort after a wide one gives the surplus back. It is not safe
 // for concurrent use.
 type Inkling2LoopCohorts struct {
-	m  *Inkling2LoopModel
-	be compute.Backend
-	s  *inkling2Resident
-	b  *inkling2Batch
+	m      *Inkling2LoopModel
+	be     compute.Backend
+	s      *inkling2Resident
+	b      *inkling2Batch
+	lookup func(string) (string, bool)
 	// wideCooldown is how many more wide-wanting cohorts run at the base chunk before
 	// a refused wide chunk is tried again
 	wideCooldown int
@@ -205,7 +206,13 @@ type Inkling2LoopCohorts struct {
 }
 
 func NewInkling2LoopCohorts(m *Inkling2LoopModel, be compute.Backend) *Inkling2LoopCohorts {
-	return &Inkling2LoopCohorts{m: m, be: be}
+	return NewInkling2LoopCohortsWithLookup(m, be, os.LookupEnv)
+}
+
+// NewInkling2LoopCohortsWithLookup resolves the sequence and KV settings for
+// both cohort admission and execution. A nil lookup uses the process environment.
+func NewInkling2LoopCohortsWithLookup(m *Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) *Inkling2LoopCohorts {
+	return &Inkling2LoopCohorts{m: m, be: be, lookup: lookup}
 }
 
 // Close frees the cached state; a later Generate builds it again.
@@ -243,6 +250,7 @@ func (bt *Inkling2LoopCohorts) bind() error {
 	if err != nil {
 		return err
 	}
+	s.batchLookup = bt.lookup
 	bt.s = s
 	return nil
 }
