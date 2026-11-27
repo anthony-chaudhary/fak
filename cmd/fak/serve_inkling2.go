@@ -480,6 +480,29 @@ func inkling2HasPrefix(s, prefix []int) bool {
 	return true
 }
 
+// serveInkling2EnvelopeLookup supplies solved envelope defaults for unset
+// prefill-chunk and batch-row keys while preserving every explicit override.
+func serveInkling2EnvelopeLookup(lookup func(string) (string, bool), env ggufload.Inkling2ServeEnvelope) func(string) (string, bool) {
+	return func(key string) (string, bool) {
+		if lookup != nil {
+			if v, ok := lookup(key); ok && strings.TrimSpace(v) != "" {
+				return v, true
+			}
+		}
+		switch key {
+		case "FAK_INKLING2_PREFILL_CHUNK":
+			if env.DefaultChunk > 0 {
+				return strconv.Itoa(env.DefaultChunk), true
+			}
+		case "FAK_INKLING2_SERVE_BATCH_ROWS":
+			if env.TargetConcurrency > 0 {
+				return strconv.Itoa(env.TargetConcurrency), true
+			}
+		}
+		return "", false
+	}
+}
+
 // newServeInkling2Generator selects the serving engine and names it at startup:
 // the cohort engine on a batch-eligible load when enabled, or the serialized engine.
 func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (agent.Inkling2LoopGenerator, string, error) {
@@ -527,10 +550,7 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 		if strings.TrimSpace(kv) == "" {
 			kv = "f32"
 		}
-		prefillMode := "Q8/dense prefill"
-		if inkling2CUDAPrefillW4A4Active(be, lookup) {
-			prefillMode = "NVFP4 W4A4 prefill"
-		}
+		prefillMode := inkling2CUDAPrefillKernelLabel(be, lookup)
 		ignored += fmt.Sprintf("; CUDA concurrent prefill policy (%s), batch KV=%s", prefillMode, kv)
 	}
 	batchEng := newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, contextTokens, lookup)
@@ -732,7 +752,8 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			served = serveInkling2LoopDefaultModelID
 		}
 		capmatrix.RegisterCheckpointTrainedLoops(served, m.HP.Passes)
-		contextTokens = ggufload.Inkling2ResolveServeCtx(m, rt.chatBackend, requestedCtx, envLookup)
+		env := ggufload.ResolveInkling2ServeEnvelopeFor(m, rt.chatBackend, requestedCtx, envLookup)
+		contextTokens = env.MaxCtx
 		if fitAuto {
 			fmt.Fprintf(os.Stderr, "fak serve --fit auto (inkling2_loop): resolved context=%d\n", contextTokens)
 		}
@@ -744,7 +765,8 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		default:
 			ggufload.Inkling2ResidentCtxPin(0)
 		}
-		if gen, decode, err = newServeInkling2GeneratorWithContext(m, rt.chatBackend, contextTokens, envLookup); err != nil {
+		genLookup := serveInkling2EnvelopeLookup(envLookup, env)
+		if gen, decode, err = newServeInkling2GeneratorWithContext(m, rt.chatBackend, contextTokens, genLookup); err != nil {
 			ggufload.Inkling2ResidentCtxPin(0)
 			_ = m.Close()
 			fmt.Fprintln(os.Stderr, "fak serve:", err)
@@ -759,8 +781,9 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			}
 			return errors.Join(cerr, m.Close())
 		}
-		placement = fmt.Sprintf("%s looped forward on %s: layers=%d hidden=%d passes=%d; %s",
-			m.Arch, rt.chatBackend.Name(), m.HP.Layers, m.HP.Hidden, m.HP.Passes, l.Placement)
+		placement = fmt.Sprintf("%s looped forward on %s: layers=%d hidden=%d passes=%d; %s; envelope(maxCtx=%d chunk=%d/%d C=%d kv=%s c1>%d)",
+			m.Arch, rt.chatBackend.Name(), m.HP.Layers, m.HP.Hidden, m.HP.Passes, l.Placement,
+			env.MaxCtx, env.DefaultChunk, env.MinChunk, env.TargetConcurrency, env.KVDtype, env.LongCtxC1Threshold)
 	}
 	loadDur := time.Since(tLoad)
 	// teardown is reachable from both the admission release and serve shutdown

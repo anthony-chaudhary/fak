@@ -322,75 +322,10 @@ func inkling2ServePerPosBytes(hp model.Inkling2LoopHParams, half bool) int64 {
 	return global*2*elemBytes*kvDim + 2*4*int64(hp.Heads)
 }
 
-// Inkling2ResolveServeContext resolves the serving context limit for m on be:
-// an explicit requested > 0 is returned (clamped to the backend hard max if any);
-// an explicit FAK_INKLING2_CTX returns inkling2ResidentCtxFrom(lookup); otherwise
-// free device memory is probed and fitted up to Inkling2AutoCtxCeiling (raised to
-// Inkling2ResidentCtxFitMax=262144 on f16-KV-capable backends with >= 8 GiB free,
-// bounded by any backend hard max such as Metal's 32768).
+// Inkling2ResolveServeContext resolves the serving context limit for m on be via
+// ResolveInkling2ServeEnvelopeFor.
 func Inkling2ResolveServeContext(m *Inkling2LoopModel, be compute.Backend, requested int, lookup func(string) (string, bool)) int {
-	if requested > 0 {
-		if be != nil {
-			if hard := inkling2ResidentHardMax(be.Name()); hard > 0 && requested > hard {
-				return hard
-			}
-		}
-		return requested
-	}
-	if lookup == nil {
-		lookup = os.LookupEnv
-	}
-	if !inkling2ResidentCtxAutoSet(lookup) {
-		return inkling2ResidentCtxFrom(lookup)
-	}
-	if m == nil || be == nil {
-		return Inkling2LoopResidentContext
-	}
-	_, free, known := compute.DeviceMemoryInfo(be)
-	if !known || free <= 0 {
-		return Inkling2LoopResidentContext
-	}
-	ceiling := Inkling2AutoCtxCeiling
-	batchEnabled := true
-	if v, ok := lookup("FAK_INKLING2_SERVE_BATCH"); ok {
-		switch strings.ToLower(strings.TrimSpace(v)) {
-		case "0", "false", "off":
-			batchEnabled = false
-		}
-	}
-	halfCapable := false
-	if batchEnabled {
-		seq := inkling2BatchSeqOps(be, lookup)
-		if half, err := inkling2BatchKVHalfFor(be, seq, lookup); err == nil && half {
-			halfCapable = true
-		}
-	} else if dtype, err := Inkling2KVDTypeFrom(lookup); err == nil && dtype == Inkling2KVF16 {
-		if _, ok := be.(compute.Inkling2HalfKVDevice); ok {
-			if half, ok := be.(compute.Inkling2PrefillHalfKV); ok && half.Ink2PHalfKVReady() == nil {
-				halfCapable = true
-			}
-		}
-	}
-	var fit int
-	if halfCapable {
-		if free >= 8<<30 {
-			ceiling = Inkling2ResidentCtxFitMax
-		}
-		if hard := inkling2ResidentHardMax(be.Name()); hard > 0 && ceiling > hard {
-			ceiling = hard
-		}
-		perPos := inkling2ServePerPosBytes(m.HP, true)
-		reserve := inkling2ResidentReserve(free)
-		if perPos > 0 && free-reserve >= perPos*Inkling2ResidentCtxMin {
-			fit = int((free-reserve)/perPos) / 256 * 256
-		}
-	} else {
-		fit = Inkling2ResidentFitCtx(m.HP, free)
-	}
-	if fit <= 0 {
-		return Inkling2LoopResidentContext
-	}
-	return max(Inkling2LoopResidentContext, min(fit, ceiling))
+	return ResolveInkling2ServeEnvelopeFor(m, be, requested, lookup).MaxCtx
 }
 
 // Close frees the cached state; a later Generate builds it again.
