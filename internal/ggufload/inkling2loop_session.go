@@ -1,7 +1,9 @@
 package ggufload
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sync/atomic"
@@ -44,6 +46,13 @@ type Inkling2LoopRewinder interface {
 	Checkpoint(horizon int) error
 	Restore() error
 	Reset() error
+}
+
+// Inkling2LoopSnapshotter is an optional interface implemented by sessions that
+// can capture and restore a portable Inkling2StateSnapshot at a snapshot boundary.
+type Inkling2LoopSnapshotter interface {
+	SnapshotState(boundary model.Inkling2SnapshotBoundary, horizon int, modelIdentity string) (*model.Inkling2StateSnapshot, error)
+	RestoreState(snap *model.Inkling2StateSnapshot) error
 }
 
 // NewInkling2LoopSession opens a session on the resident device forward when the
@@ -496,4 +505,203 @@ func (r *inkling2ResidentSession) Reset() error {
 	}
 	s.pos = 0
 	return nil
+}
+
+func (s *inkling2HostSession) SnapshotState(boundary model.Inkling2SnapshotBoundary, horizon int, modelIdentity string) (*model.Inkling2StateSnapshot, error) {
+	return s.h.StateSnapshot(boundary, horizon, modelIdentity)
+}
+
+func (s *inkling2HostSession) RestoreState(snap *model.Inkling2StateSnapshot) error {
+	if err := s.h.RestoreStateSnapshot(snap); err != nil {
+		return err
+	}
+	s.ck = nil
+	s.lastLogits = nil
+	return nil
+}
+
+func (r *inkling2ResidentSession) SnapshotState(boundary model.Inkling2SnapshotBoundary, horizon int, modelIdentity string) (*model.Inkling2StateSnapshot, error) {
+	s := r.s
+	if err := s.rewindable(); err != nil {
+		return nil, err
+	}
+	if err := boundary.Validate(s.pos); err != nil {
+		return nil, err
+	}
+	if s.kvHalf || s.kvFP8 || s.kvNVFP4 {
+		return nil, fmt.Errorf("inkling2 resident: quantized global KV (%s) cannot be snapshotted to host F32", s.kvDType())
+	}
+	hf := s.histFloats()
+	kvDim := s.hp.KVHeads * s.hp.HeadDim
+	snap := &model.Inkling2StateSnapshot{
+		ModelIdentity: modelIdentity,
+		HP:            s.hp,
+		Pos:           s.pos,
+		Boundary:      boundary,
+		Horizon:       max(horizon, 0),
+		Conv:          make([][]float32, len(s.hist)),
+	}
+	for slot := range s.hist {
+		convBuf, err := s.dev.Ink2Read(s.hist[slot], hf)
+		if err != nil {
+			return nil, err
+		}
+		snap.Conv[slot] = append([]float32(nil), convBuf...)
+
+		if !s.localAt(slot) {
+			gs := model.Inkling2SlotKVSnapshot{
+				Slot:      slot,
+				Positions: make([]int, s.pos),
+				K:         make([][]float32, s.pos),
+				V:         make([][]float32, s.pos),
+			}
+			if s.pos > 0 {
+				kAll, err := s.dev.Ink2Read(s.kc[slot], s.pos*kvDim)
+				if err != nil {
+					return nil, err
+				}
+				vAll, err := s.dev.Ink2Read(s.vc[slot], s.pos*kvDim)
+				if err != nil {
+					return nil, err
+				}
+				kCopy := append([]float32(nil), kAll...)
+				vCopy := append([]float32(nil), vAll...)
+				for p := 0; p < s.pos; p++ {
+					gs.Positions[p] = p
+					gs.K[p] = kCopy[p*kvDim : (p+1)*kvDim]
+					gs.V[p] = vCopy[p*kvDim : (p+1)*kvDim]
+				}
+			}
+			snap.GlobalSlots = append(snap.GlobalSlots, gs)
+			continue
+		}
+
+		lo := max(0, s.pos-s.hp.SlidingWindow)
+		hi := s.pos
+		rows := hi - lo
+		ls := model.Inkling2RingKVSnapshot{
+			Slot:      slot,
+			Cap:       s.caps[slot],
+			Lo:        lo,
+			Hi:        hi,
+			Positions: make([]int, rows),
+			K:         make([][]float32, rows),
+			V:         make([][]float32, rows),
+		}
+		for p := lo; p < hi; p++ {
+			ls.Positions[p-lo] = p
+		}
+		kRing := make([]float32, rows*kvDim)
+		vRing := make([]float32, rows*kvDim)
+		for _, sp := range inkling2RingSpans(lo, hi, s.caps[slot]) {
+			kSpan, err := s.dev.Ink2Read(at(s.kc[slot], sp.ring*kvDim), sp.n*kvDim)
+			if err != nil {
+				return nil, err
+			}
+			copy(kRing[sp.off*kvDim:(sp.off+sp.n)*kvDim], kSpan)
+			vSpan, err := s.dev.Ink2Read(at(s.vc[slot], sp.ring*kvDim), sp.n*kvDim)
+			if err != nil {
+				return nil, err
+			}
+			copy(vRing[sp.off*kvDim:(sp.off+sp.n)*kvDim], vSpan)
+		}
+		for i := 0; i < rows; i++ {
+			ls.K[i] = kRing[i*kvDim : (i+1)*kvDim]
+			ls.V[i] = vRing[i*kvDim : (i+1)*kvDim]
+		}
+		snap.LocalRingSlots = append(snap.LocalRingSlots, ls)
+	}
+	return snap, nil
+}
+
+func (r *inkling2ResidentSession) RestoreState(snap *model.Inkling2StateSnapshot) error {
+	s := r.s
+	if err := s.rewindable(); err != nil {
+		return err
+	}
+	if err := snap.Validate(); err != nil {
+		return err
+	}
+	if s.kvHalf || s.kvFP8 || s.kvNVFP4 {
+		return fmt.Errorf("inkling2 resident: quantized global KV (%s) cannot restore host F32 snapshot", s.kvDType())
+	}
+	if snap.Pos > s.ctx {
+		return fmt.Errorf("inkling2 resident: snapshot pos=%d exceeds ctx=%d", snap.Pos, s.ctx)
+	}
+	wantHP, err := json.Marshal(s.hp)
+	if err != nil {
+		return err
+	}
+	gotHP, err := json.Marshal(snap.HP)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(wantHP, gotHP) {
+		return fmt.Errorf("%w: resident hparams mismatch", model.ErrInkling2StateSnapshotScope)
+	}
+	if len(snap.Conv) != len(s.hist) {
+		return fmt.Errorf("%w: conv slots=%d, want %d", model.ErrInkling2StateSnapshotScope, len(snap.Conv), len(s.hist))
+	}
+	r.own()
+	if err := r.Reset(); err != nil {
+		return err
+	}
+	kvDim := s.hp.KVHeads * s.hp.HeadDim
+	for slot, c := range snap.Conv {
+		if len(c) != s.histFloats() {
+			return fmt.Errorf("%w: conv slot %d len=%d, want %d", model.ErrInkling2StateSnapshotInvalid, slot, len(c), s.histFloats())
+		}
+		if err := s.dev.Ink2Write(s.hist[slot], c); err != nil {
+			return err
+		}
+	}
+	for _, gs := range snap.GlobalSlots {
+		if gs.Slot < 0 || gs.Slot >= len(s.kc) || s.localAt(gs.Slot) {
+			return fmt.Errorf("%w: invalid global slot %d", model.ErrInkling2StateSnapshotInvalid, gs.Slot)
+		}
+		if len(gs.K) > 0 {
+			kFlat := make([]float32, len(gs.K)*kvDim)
+			vFlat := make([]float32, len(gs.V)*kvDim)
+			for i := range gs.K {
+				copy(kFlat[i*kvDim:(i+1)*kvDim], gs.K[i])
+				copy(vFlat[i*kvDim:(i+1)*kvDim], gs.V[i])
+			}
+			if err := s.dev.Ink2Write(s.kc[gs.Slot], kFlat); err != nil {
+				return err
+			}
+			if err := s.dev.Ink2Write(s.vc[gs.Slot], vFlat); err != nil {
+				return err
+			}
+		}
+	}
+	for _, ls := range snap.LocalRingSlots {
+		if ls.Slot < 0 || ls.Slot >= len(s.kc) || !s.localAt(ls.Slot) {
+			return fmt.Errorf("%w: invalid local slot %d", model.ErrInkling2StateSnapshotInvalid, ls.Slot)
+		}
+		rows := ls.Hi - ls.Lo
+		if rows != len(ls.K) || rows != len(ls.V) {
+			return fmt.Errorf("%w: local slot %d row count mismatch", model.ErrInkling2StateSnapshotInvalid, ls.Slot)
+		}
+		if rows > 0 {
+			kFlat := make([]float32, rows*kvDim)
+			vFlat := make([]float32, rows*kvDim)
+			for i := 0; i < rows; i++ {
+				copy(kFlat[i*kvDim:(i+1)*kvDim], ls.K[i])
+				copy(vFlat[i*kvDim:(i+1)*kvDim], ls.V[i])
+			}
+			for _, sp := range inkling2RingSpans(ls.Lo, ls.Hi, s.caps[ls.Slot]) {
+				if err := s.dev.Ink2Write(at(s.kc[ls.Slot], sp.ring*kvDim), kFlat[sp.off*kvDim:(sp.off+sp.n)*kvDim]); err != nil {
+					return err
+				}
+				if err := s.dev.Ink2Write(at(s.vc[ls.Slot], sp.ring*kvDim), vFlat[sp.off*kvDim:(sp.off+sp.n)*kvDim]); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if r.ck != nil {
+		r.ck.valid = false
+	}
+	s.pos = snap.Pos
+	return s.err
 }

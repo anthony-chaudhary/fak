@@ -56,15 +56,40 @@ func (h *HostPrefixSnapshot) MarshalBinary() ([]byte, error) {
 		return nil, payload.err
 	}
 	body := payload.Bytes()
+	return marshalSnapshotEnvelope(hostPrefixSnapshotMagic, hostPrefixSnapshotVersion, body), nil
+}
+
+func marshalSnapshotEnvelope(magic string, version uint16, body []byte) []byte {
 	sum := sha256.Sum256(body)
-	out := make([]byte, 0, hostPrefixSnapshotHeader+len(body))
-	out = append(out, hostPrefixSnapshotMagic...)
-	var version [2]byte
-	binary.BigEndian.PutUint16(version[:], hostPrefixSnapshotVersion)
-	out = append(out, version[:]...)
+	out := make([]byte, 0, len(magic)+2+sha256.Size+len(body))
+	out = append(out, magic...)
+	var ver [2]byte
+	binary.BigEndian.PutUint16(ver[:], version)
+	out = append(out, ver[:]...)
 	out = append(out, sum[:]...)
 	out = append(out, body...)
-	return out, nil
+	return out
+}
+
+func unmarshalSnapshotEnvelope(data []byte, magic string, wantVersion uint16) ([]byte, error) {
+	headerLen := len(magic) + 2 + sha256.Size
+	if len(data) < headerLen {
+		return nil, fmt.Errorf("%w: truncated header", ErrHostPrefixSnapshotIntegrity)
+	}
+	if string(data[:len(magic)]) != magic {
+		return nil, fmt.Errorf("%w: unknown magic", ErrHostPrefixSnapshotIntegrity)
+	}
+	versionAt := len(magic)
+	if version := binary.BigEndian.Uint16(data[versionAt : versionAt+2]); version != wantVersion {
+		return nil, fmt.Errorf("%w %d (this build reads v%d)", ErrHostPrefixSnapshotVersion, version, wantVersion)
+	}
+	wantSum := data[versionAt+2 : headerLen]
+	body := data[headerLen:]
+	gotSum := sha256.Sum256(body)
+	if !bytes.Equal(wantSum, gotSum[:]) {
+		return nil, ErrHostPrefixSnapshotIntegrity
+	}
+	return body, nil
 }
 
 // DecodeHostPrefixSnapshot verifies and decodes a host image for expected, then
@@ -74,21 +99,9 @@ func DecodeHostPrefixSnapshot(data []byte, backend compute.Backend, expected Con
 	if backend == nil {
 		return nil, errors.New("model: cannot decode host prefix snapshot without a backend")
 	}
-	if len(data) < hostPrefixSnapshotHeader {
-		return nil, fmt.Errorf("%w: truncated header", ErrHostPrefixSnapshotIntegrity)
-	}
-	if string(data[:len(hostPrefixSnapshotMagic)]) != hostPrefixSnapshotMagic {
-		return nil, fmt.Errorf("%w: unknown magic", ErrHostPrefixSnapshotIntegrity)
-	}
-	versionAt := len(hostPrefixSnapshotMagic)
-	if version := binary.BigEndian.Uint16(data[versionAt : versionAt+2]); version != hostPrefixSnapshotVersion {
-		return nil, fmt.Errorf("%w %d (this build reads v%d)", ErrHostPrefixSnapshotVersion, version, hostPrefixSnapshotVersion)
-	}
-	wantSum := data[versionAt+2 : hostPrefixSnapshotHeader]
-	body := data[hostPrefixSnapshotHeader:]
-	gotSum := sha256.Sum256(body)
-	if !bytes.Equal(wantSum, gotSum[:]) {
-		return nil, ErrHostPrefixSnapshotIntegrity
+	body, err := unmarshalSnapshotEnvelope(data, hostPrefixSnapshotMagic, hostPrefixSnapshotVersion)
+	if err != nil {
+		return nil, err
 	}
 
 	d := snapshotDecoder{data: body}

@@ -286,11 +286,16 @@ func (e *inkling2LoopEngine) serveRecovering(r *inkling2LoopRequest) {
 func (e *inkling2LoopEngine) acquire(ctx context.Context, prompt []int) (rw inkling2Rewinder, reused int, err error) {
 	e.cur = nil
 	e.clock++
+	st := e.prefixState()
+	now := st.nowTime()
+	e.parkIdleSlots()
 	want := e.matchKeyFor(ctx)
 	conv := inkling2ConversationFromContext(ctx)
 	if !e.prefixReuse.disabled() {
-		if sl := e.prefixHit(prompt, want); sl != nil {
-			e.cur, sl.used, sl.hasCkpt = sl, e.clock, false
+		sl := e.prefixHit(prompt, want)
+		parked, parkedIdx := e.parkedHit(prompt, want)
+		if sl != nil && (parked == nil || len(sl.ckpt) >= len(parked.ckpt)) {
+			e.cur, sl.used, sl.lastUsedTime, sl.hasCkpt = sl, e.clock, now, false
 			sl.key, sl.convKey, sl.pinned = want, conv.key, conv.pinned
 			rw := sl.sess.(inkling2Rewinder)
 			switch err := rw.Restore(); {
@@ -302,6 +307,45 @@ func (e *inkling2LoopEngine) acquire(ctx context.Context, prompt []int) (rw inkl
 				return nil, 0, err
 			}
 			return e.resetCurrent(ctx, prompt, rw)
+		}
+		if parked != nil {
+			p := e.takeParked(parkedIdx)
+			var target *inkling2PrefixSlot
+			if e.prefixCanGrow() {
+				if s, oerr := e.open(); oerr == nil {
+					target = &inkling2PrefixSlot{sess: s}
+					e.cache = append(e.cache, target)
+				}
+			}
+			if target == nil {
+				if v := e.prefixVictim(conv.key); v != nil {
+					e.parkSlot(v)
+					v.hasCkpt = false
+					target = v
+				} else {
+					s, oerr := e.open()
+					if oerr != nil {
+						return nil, 0, oerr
+					}
+					target = &inkling2PrefixSlot{sess: s}
+					e.cache = append(e.cache, target)
+				}
+			}
+			e.cur, target.used, target.lastUsedTime = target, e.clock, now
+			target.key, target.convKey, target.pinned = want, conv.key, conv.pinned
+			if rerr := e.restoreParkedIntoSlot(target, p, want); rerr == nil {
+				st.hits++
+				st.parkRestores++
+				st.lastHitTime = now
+				return target.sess.(inkling2Rewinder), len(p.ckpt), nil
+			} else {
+				st.parkRestoreFallbacks++
+				fmt.Fprintf(st.writer(), "inkling2.prefix parked restore failed (%v); falling back to cold prefill\n", rerr)
+				if rw, ok := target.sess.(inkling2Rewinder); ok {
+					return e.resetCurrent(ctx, prompt, rw)
+				}
+				return nil, 0, nil
+			}
 		}
 	}
 	var sl *inkling2PrefixSlot
@@ -321,9 +365,10 @@ func (e *inkling2LoopEngine) acquire(ctx context.Context, prompt []int) (rw inkl
 	}
 	if !fresh {
 		sl = e.prefixVictim(conv.key)
+		e.parkSlot(sl)
 		sl.hasCkpt = false
 	}
-	e.cur, sl.used = sl, e.clock
+	e.cur, sl.used, sl.lastUsedTime = sl, e.clock, now
 	sl.key, sl.convKey, sl.pinned = want, conv.key, conv.pinned
 	if e.prefixReuse.disabled() {
 		return nil, 0, nil
@@ -406,6 +451,7 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 		switch err = rw.Checkpoint(max(r.maxNew, 1)); {
 		case err == nil:
 			sl.ckpt, sl.hasCkpt = append(sl.ckpt[:0], prompt[:n-1]...), true
+			sl.boundary = fakmodel.Inkling2SnapshotBoundary{Kind: fakmodel.Inkling2SnapshotBoundaryTurnEnd, Pos: len(sl.ckpt)}
 		case errors.Is(err, ggufload.ErrInkling2CheckpointUnavailable):
 			err = nil
 		default:

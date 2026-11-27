@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func inkling2Extend(prompt []int, more ...int) []int {
@@ -900,5 +902,237 @@ func TestInkling2ShedIdleSlotsFreesLRUUnpinnedNeverPinned(t *testing.T) {
 	status := eng.SlotMemoryStatus()
 	if status.Slots != 1 || status.PinnedCount != 1 || status.HeldBytes != bytesA || status.IdleBytes != 0 {
 		t.Fatalf("final status = %+v, want Slots=1 PinnedCount=1 HeldBytes=%d IdleBytes=0", status, bytesA)
+	}
+}
+
+// inkling2SnapshotFakeSession wraps inkling2FakeSession with deterministic
+// host-snapshottable KV/conv state so park -> marshal -> unmarshal -> restore
+// produces the exact same next greedy token as an unparked run.
+type inkling2SnapshotFakeSession struct {
+	*inkling2FakeSession
+	restoreErr error
+}
+
+func (s *inkling2SnapshotFakeSession) nextFromPrompt() int {
+	sum := 0
+	for i, tok := range s.prompt {
+		sum = (sum*31 + tok + i + 1) % len(s.canned)
+	}
+	return s.canned[sum]
+}
+
+func (s *inkling2SnapshotFakeSession) Prefill(_ context.Context, prompt []int) (int, error) {
+	defer s.enter()()
+	s.prompt = append(s.prompt, prompt...)
+	s.prefills = append(s.prefills, append([]int(nil), prompt...))
+	s.pos += len(prompt)
+	s.i, s.fed = 0, nil
+	return s.nextFromPrompt(), nil
+}
+
+func (s *inkling2SnapshotFakeSession) Step(token int) (int, error) {
+	defer s.enter()()
+	if s.stepErr != nil {
+		return 0, s.stepErr
+	}
+	s.fed = append(s.fed, token)
+	s.pos++
+	s.i++
+	idx := (s.i + len(s.prompt)) % len(s.canned)
+	return s.canned[idx], nil
+}
+
+func (s *inkling2SnapshotFakeSession) SnapshotState(boundary model.Inkling2SnapshotBoundary, horizon int, modelIdentity string) (*model.Inkling2StateSnapshot, error) {
+	if err := boundary.Validate(s.pos); err != nil {
+		return nil, err
+	}
+	kv := make([][]float32, s.pos)
+	pos := make([]int, s.pos)
+	for i := 0; i < s.pos; i++ {
+		pos[i] = i
+		tok := float32(0)
+		if i < len(s.prompt) {
+			tok = float32(s.prompt[i])
+		}
+		kv[i] = []float32{tok, float32(i + 1)}
+	}
+	return &model.Inkling2StateSnapshot{
+		ModelIdentity: modelIdentity,
+		Pos:           s.pos,
+		Boundary:      boundary,
+		Horizon:       horizon,
+		Prompt:        append([]int(nil), s.prompt...),
+		Conv:          [][]float32{{float32(s.pos), float32(len(s.prompt))}},
+		GlobalSlots: []model.Inkling2SlotKVSnapshot{{
+			Slot:      0,
+			Positions: pos,
+			K:         kv,
+			V:         kv,
+		}},
+		LocalRingSlots: []model.Inkling2RingKVSnapshot{{
+			Slot:      1,
+			Cap:       4,
+			Lo:        max(0, s.pos-4),
+			Hi:        s.pos,
+			Positions: pos[max(0, s.pos-4):],
+			K:         kv[max(0, s.pos-4):],
+			V:         kv[max(0, s.pos-4):],
+		}},
+	}, nil
+}
+
+func (s *inkling2SnapshotFakeSession) RestoreState(snap *model.Inkling2StateSnapshot) error {
+	if s.restoreErr != nil {
+		return s.restoreErr
+	}
+	if err := snap.Validate(); err != nil {
+		return err
+	}
+	s.pos = snap.Pos
+	s.prompt = append([]int(nil), snap.Prompt...)
+	s.hasCk = false
+	return nil
+}
+
+// fak-test:runtime fast est=5ms
+func TestInkling2ParkAndVerifiedRestoreMatchesUnparked(t *testing.T) {
+	canned := []int{'k', 'l', 'm', 'n', 'o', 'p'}
+	var opened []*inkling2SnapshotFakeSession
+	newEng := func(slots int) *inkling2LoopEngine {
+		return &inkling2LoopEngine{
+			slots:    slots,
+			capBytes: 1 << 20,
+			open: func() (ggufload.Inkling2LoopSession, error) {
+				s := &inkling2SnapshotFakeSession{inkling2FakeSession: &inkling2FakeSession{canned: canned, held: 100}}
+				opened = append(opened, s)
+				return s, nil
+			},
+		}
+	}
+
+	// Reference unparked engine (2 slots, no idle park).
+	unparkedEng := newEng(2)
+	defer unparkedEng.Close()
+	a1 := []int{'A', '1', '2', '3'}
+	a2 := inkling2Extend(a1, '4', '5')
+	inkling2Gen(t, unparkedEng, a1, 2)
+	wantRes, wantToks := inkling2Gen(t, unparkedEng, a2, 2)
+
+	// Parked engine: advance clock past 10m idle default, park to host RAM, then restore.
+	opened = nil
+	parkedEng := newEng(2)
+	defer parkedEng.Close()
+	st := parkedEng.prefixState()
+	now := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	st.now = func() time.Time { return now }
+
+	inkling2Gen(t, parkedEng, a1, 2)
+	if len(opened) != 1 || opened[0].closed {
+		t.Fatalf("expected 1 open resident session")
+	}
+
+	// Advance 11 minutes (> 10m default) and park idle slots.
+	now = now.Add(11 * time.Minute)
+	if n := parkedEng.ParkIdleSlots(); n != 1 {
+		t.Fatalf("ParkIdleSlots() = %d, want 1", n)
+	}
+	if !opened[0].closed || parkedEng.prefixSlotCount() != 0 {
+		t.Fatalf("parked device session not freed: closed=%v slots=%d", opened[0].closed, parkedEng.prefixSlotCount())
+	}
+	if len(st.parked) != 1 || st.parks != 1 {
+		t.Fatalf("parked count=%d parks=%d, want 1/1", len(st.parked), st.parks)
+	}
+
+	gotRes, gotToks := inkling2Gen(t, parkedEng, a2, 2)
+	if gotRes.CachedPromptTokens != wantRes.CachedPromptTokens {
+		t.Fatalf("restored CachedPromptTokens = %d, want %d", gotRes.CachedPromptTokens, wantRes.CachedPromptTokens)
+	}
+	if !slices.Equal(gotToks, wantToks) {
+		t.Fatalf("restored greedy tokens = %v, want %v (unparked)", gotToks, wantToks)
+	}
+	if st.parkRestores != 1 {
+		t.Fatalf("parkRestores = %d, want 1", st.parkRestores)
+	}
+}
+
+// fak-test:runtime fast est=5ms
+func TestInkling2ParkDiscardCapAndFallbackOnFailure(t *testing.T) {
+	canned := []int{'x', 'y', 'z'}
+	var traceBuf bytes.Buffer
+	var nextRestoreErr error
+	eng := &inkling2LoopEngine{
+		slots:    1,
+		capBytes: 1 << 20,
+		open: func() (ggufload.Inkling2LoopSession, error) {
+			return &inkling2SnapshotFakeSession{
+				inkling2FakeSession: &inkling2FakeSession{canned: canned, held: 100},
+				restoreErr:          nextRestoreErr,
+			}, nil
+		},
+	}
+	defer eng.Close()
+	st := eng.prefixState()
+	st.traceOut = &traceBuf
+	now := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	st.now = func() time.Time { return now }
+
+	// Verify defaults: 10m idle, 2h discard, explicit host cap > 0.
+	if st.parkIdleAfter != 10*time.Minute || st.parkDiscardAfter != 2*time.Hour || st.hostCapBytes <= 0 {
+		t.Fatalf("unexpected defaults: idle=%v discard=%v hostCap=%d", st.parkIdleAfter, st.parkDiscardAfter, st.hostCapBytes)
+	}
+
+	// 1. LRU pressure with 1 slot parks A1 to host RAM when B1 arrives.
+	a1 := []int{'A', '1', '2'}
+	b1 := []int{'B', '1', '2'}
+	inkling2Gen(t, eng, a1, 1)
+	inkling2Gen(t, eng, b1, 1)
+	if len(st.parked) != 1 {
+		t.Fatalf("expected A1 parked on LRU pressure, got %d parked", len(st.parked))
+	}
+
+	// 2. Corrupt parked wire bytes -> verified restore fails, logs why, falls back to cold prefill.
+	st.parked[0].wire[len(st.parked[0].wire)-1] ^= 0xff
+	res, got := inkling2Gen(t, eng, inkling2Extend(a1, '3'), 1)
+	if res.CachedPromptTokens != 0 || len(got) != 1 {
+		t.Fatalf("corrupt parked restore: cached=%d got=%v, want cold prefill fallback", res.CachedPromptTokens, got)
+	}
+	if st.parkRestoreFallbacks != 1 || !strings.Contains(traceBuf.String(), "falling back to cold prefill") {
+		t.Fatalf("expected fallback count=1 and logged reason, got count=%d log=%q", st.parkRestoreFallbacks, traceBuf.String())
+	}
+
+	// 3. 2h discard default expires parked snapshots (B1 parked at 09:00 is discarded at 11:00:01).
+	now = now.Add(2*time.Hour + time.Second)
+	resExpired, _ := inkling2Gen(t, eng, inkling2Extend(b1, '3'), 1)
+	if resExpired.CachedPromptTokens != 0 {
+		t.Fatalf("expired parked slot: cached=%d, want 0", resExpired.CachedPromptTokens)
+	}
+	// Advance another 2h+1s without new requests and prune: all parked snapshots expire.
+	now = now.Add(2*time.Hour + time.Second)
+	eng.runOnWorker(func() { eng.pruneParkedSlots(now) })
+	if len(st.parked) != 0 || st.hostBytes != 0 {
+		t.Fatalf("after 2h discard: parked=%d hostBytes=%d, want 0/0", len(st.parked), st.hostBytes)
+	}
+
+	// 4. Explicit host-RAM cap evicts LRU parked snapshots to stay within budget.
+	engCap := &inkling2LoopEngine{
+		slots:    1,
+		capBytes: 1 << 20,
+		open: func() (ggufload.Inkling2LoopSession, error) {
+			return &inkling2SnapshotFakeSession{inkling2FakeSession: &inkling2FakeSession{canned: canned, held: 100}}, nil
+		},
+	}
+	defer engCap.Close()
+	stCap := engCap.prefixState()
+	stCap.now = func() time.Time { return now }
+	inkling2Gen(t, engCap, []int{'C', '1', '2'}, 1)
+	inkling2Gen(t, engCap, []int{'D', '1', '2'}, 1)
+	if len(stCap.parked) != 1 || stCap.hostBytes <= 0 {
+		t.Fatalf("expected 1 parked snapshot, got %d (%d bytes)", len(stCap.parked), stCap.hostBytes)
+	}
+	// Cap host RAM at exact size of 1 snapshot; parking a second evicts the oldest.
+	stCap.hostCapBytes = stCap.hostBytes
+	inkling2Gen(t, engCap, []int{'E', '1', '2'}, 1)
+	if len(stCap.parked) != 1 || stCap.hostBytes > stCap.hostCapBytes {
+		t.Fatalf("host-RAM cap violated: parked=%d hostBytes=%d cap=%d", len(stCap.parked), stCap.hostBytes, stCap.hostCapBytes)
 	}
 }

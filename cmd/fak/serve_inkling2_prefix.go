@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -20,9 +21,12 @@ import (
 // on its own session's earlier cache rows, so one session holds one conversation's
 // prefix: each prefix-cache slot is a whole resident session.
 const (
-	inkling2PrefixSlotsMax          = 8
-	inkling2PrefixCacheMiBDefault   = 4096
-	inkling2CheckpointFormatVersion = "inkling2-scalar-ckpt-v1"
+	inkling2PrefixSlotsMax            = 8
+	inkling2PrefixCacheMiBDefault     = 4096
+	inkling2HostSnapshotCapMiBDefault = 4096
+	inkling2ParkIdleDefault           = 10 * time.Minute
+	inkling2ParkDiscardDefault        = 2 * time.Hour
+	inkling2CheckpointFormatVersion   = "inkling2-scalar-ckpt-v1"
 )
 
 // inkling2PrefixMaterialization identifies the model file, tokenizer, RoPE/context
@@ -322,18 +326,38 @@ type Inkling2SlotMemoryStatus struct {
 // inkling2PrefixState holds per-engine ledger and trace state outside the
 // inkling2LoopEngine struct definition in serve_inkling2.go.
 type inkling2PrefixState struct {
-	ledger          *inkling2ByteLedger
-	slotKeys        map[*inkling2PrefixSlot]string
-	nextSlotID      uint64
-	hits            uint64
-	misses          uint64
-	evictions       uint64
-	lastHitTime     time.Time
-	now             func() time.Time
-	effectiveSlots  int
-	effectiveLogged bool
-	trace           bool
-	traceOut        io.Writer
+	ledger               *inkling2ByteLedger
+	slotKeys             map[*inkling2PrefixSlot]string
+	nextSlotID           uint64
+	hits                 uint64
+	misses               uint64
+	evictions            uint64
+	lastHitTime          time.Time
+	now                  func() time.Time
+	effectiveSlots       int
+	effectiveLogged      bool
+	trace                bool
+	traceOut             io.Writer
+	parked               []*inkling2ParkedSlot
+	hostCapBytes         int64
+	hostBytes            int64
+	parkIdleAfter        time.Duration
+	parkDiscardAfter     time.Duration
+	parks                uint64
+	parkRestores         uint64
+	parkRestoreFallbacks uint64
+}
+
+type inkling2ParkedSlot struct {
+	wire     []byte
+	ckpt     []int
+	key      inkling2PrefixMatchKey
+	convKey  string
+	pinned   bool
+	parkedAt time.Time
+	lastUsed time.Time
+	used     uint64
+	boundary model.Inkling2SnapshotBoundary
 }
 
 func (st *inkling2PrefixState) nowTime() time.Time {
@@ -354,11 +378,14 @@ func (e *inkling2LoopEngine) prefixState() *inkling2PrefixState {
 		return st
 	}
 	st := &inkling2PrefixState{
-		ledger:         newInkling2ByteLedger(e.capBytes),
-		slotKeys:       make(map[*inkling2PrefixSlot]string),
-		effectiveSlots: max(e.slots, 1),
-		trace:          os.Getenv("FAK_INKLING2_TRACE") == "1",
-		traceOut:       os.Stderr,
+		ledger:           newInkling2ByteLedger(e.capBytes),
+		slotKeys:         make(map[*inkling2PrefixSlot]string),
+		effectiveSlots:   max(e.slots, 1),
+		trace:            os.Getenv("FAK_INKLING2_TRACE") == "1",
+		traceOut:         os.Stderr,
+		hostCapBytes:     int64(inkling2HostSnapshotCapMiBDefault) << 20,
+		parkIdleAfter:    inkling2ParkIdleDefault,
+		parkDiscardAfter: inkling2ParkDiscardDefault,
 	}
 	actual, _ := inkling2PrefixStates.LoadOrStore(e, st)
 	return actual.(*inkling2PrefixState)
@@ -417,13 +444,15 @@ func inkling2PrefixEffectiveNote(configured int, capBytes, slotBytes int64) stri
 
 // inkling2PrefixSlot is one resident session and the prompt its checkpoint covers.
 type inkling2PrefixSlot struct {
-	sess    ggufload.Inkling2LoopSession
-	hasCkpt bool
-	ckpt    []int
-	key     inkling2PrefixMatchKey
-	convKey string // victim choice / pinning only; never used for prefix selection
-	pinned  bool   // pinning hint for victim choice / trim only
-	used    uint64 // engine clock at the slot's last request
+	sess         ggufload.Inkling2LoopSession
+	hasCkpt      bool
+	ckpt         []int
+	boundary     model.Inkling2SnapshotBoundary
+	key          inkling2PrefixMatchKey
+	convKey      string    // victim choice / pinning only; never used for prefix selection
+	pinned       bool      // pinning hint for victim choice / trim only
+	used         uint64    // engine clock at the slot's last request
+	lastUsedTime time.Time // wall clock at the slot's last request
 }
 
 // prefixHit returns the slot whose checkpoint is the longest proper prefix of
@@ -568,8 +597,10 @@ func (e *inkling2LoopEngine) prefixTrim() {
 			break
 		}
 		st.evictions++
+		_ = e.parkSlot(lru)
 		_ = e.dropSlot(lru)
 	}
+	e.parkIdleSlots()
 	// Sync final post-trim state for single-slot and trace accounting.
 	_, _, _ = e.prefixMeter()
 	if st.trace {
@@ -674,6 +705,7 @@ func (e *inkling2LoopEngine) ShedIdleSlots(needBytes int64) int64 {
 			}
 			b := slotTrackedBytes(lru)
 			st.evictions++
+			_ = e.parkSlot(lru)
 			_ = e.dropSlot(lru)
 			freed += b
 		}
@@ -698,6 +730,7 @@ func (e *inkling2LoopEngine) evictIdleSlotsForCohort(needBytes int64) int {
 			}
 			st.evictions++
 			evicted++
+			_ = e.parkSlot(lru)
 			_ = e.dropSlot(lru)
 		}
 	})
@@ -780,4 +813,215 @@ func inkling2BatchPrefixNote(be any, lookup func(string) (string, bool)) (string
 		return "", err
 	}
 	return fmt.Sprintf("; batch prefix cache=%dMiB (lone requests run as one-row cohorts)", mib), nil
+}
+
+// pruneParkedSlots discards parked host snapshots older than parkDiscardAfter (2h default)
+// and evicts LRU parked slots to keep hostBytes within hostCapBytes.
+func (e *inkling2LoopEngine) pruneParkedSlots(now time.Time) {
+	st := e.prefixState()
+	if st.parkDiscardAfter > 0 {
+		kept := st.parked[:0]
+		for _, p := range st.parked {
+			if now.Sub(p.parkedAt) >= st.parkDiscardAfter {
+				st.hostBytes -= int64(len(p.wire))
+				continue
+			}
+			kept = append(kept, p)
+		}
+		st.parked = kept
+	}
+	for st.hostCapBytes >= 0 && st.hostBytes > st.hostCapBytes && len(st.parked) > 0 {
+		victimIdx := -1
+		for i, p := range st.parked {
+			if !p.pinned && (victimIdx < 0 || p.used < st.parked[victimIdx].used) {
+				victimIdx = i
+			}
+		}
+		if victimIdx < 0 {
+			for i, p := range st.parked {
+				if victimIdx < 0 || p.used < st.parked[victimIdx].used {
+					victimIdx = i
+				}
+			}
+		}
+		if victimIdx < 0 {
+			break
+		}
+		st.hostBytes -= int64(len(st.parked[victimIdx].wire))
+		st.parked = append(st.parked[:victimIdx], st.parked[victimIdx+1:]...)
+	}
+}
+
+// parkSlot captures sl's boundary state into host RAM under hostCapBytes.
+// It returns true if a host snapshot was stored. The caller remains responsible
+// for closing/dropping or resetting sl.
+func (e *inkling2LoopEngine) parkSlot(sl *inkling2PrefixSlot) bool {
+	if sl == nil || !sl.hasCkpt || len(sl.ckpt) == 0 || e.prefixReuse.disabled() {
+		return false
+	}
+	snapper, ok := sl.sess.(ggufload.Inkling2LoopSnapshotter)
+	if !ok {
+		return false
+	}
+	if rw, ok := sl.sess.(inkling2Rewinder); ok && rw.Pos() != len(sl.ckpt) {
+		if err := rw.Restore(); err != nil || rw.Pos() != len(sl.ckpt) {
+			return false
+		}
+	}
+	boundary := sl.boundary
+	if boundary.Kind == "" {
+		boundary = model.Inkling2SnapshotBoundary{
+			Kind: model.Inkling2SnapshotBoundaryTurnEnd,
+			Pos:  len(sl.ckpt),
+		}
+	}
+	snap, err := snapper.SnapshotState(boundary, max(len(sl.ckpt), 1), sl.key.ModelFile)
+	if err != nil {
+		return false
+	}
+	snap.Prompt = append([]int(nil), sl.ckpt...)
+	wire, err := snap.MarshalBinary()
+	if err != nil {
+		return false
+	}
+	st := e.prefixState()
+	now := st.nowTime()
+	e.pruneParkedSlots(now)
+	if st.hostCapBytes <= 0 || int64(len(wire)) > st.hostCapBytes {
+		return false
+	}
+	for st.hostBytes+int64(len(wire)) > st.hostCapBytes && len(st.parked) > 0 {
+		victimIdx := -1
+		for i, p := range st.parked {
+			if !p.pinned && (victimIdx < 0 || p.used < st.parked[victimIdx].used) {
+				victimIdx = i
+			}
+		}
+		if victimIdx < 0 {
+			for i, p := range st.parked {
+				if victimIdx < 0 || p.used < st.parked[victimIdx].used {
+					victimIdx = i
+				}
+			}
+		}
+		if victimIdx < 0 {
+			break
+		}
+		st.hostBytes -= int64(len(st.parked[victimIdx].wire))
+		st.parked = append(st.parked[:victimIdx], st.parked[victimIdx+1:]...)
+	}
+	if st.hostBytes+int64(len(wire)) > st.hostCapBytes {
+		return false
+	}
+	st.parked = append(st.parked, &inkling2ParkedSlot{
+		wire:     wire,
+		ckpt:     append([]int(nil), sl.ckpt...),
+		key:      sl.key,
+		convKey:  sl.convKey,
+		pinned:   sl.pinned,
+		parkedAt: now,
+		lastUsed: sl.lastUsedTime,
+		used:     sl.used,
+		boundary: boundary,
+	})
+	st.hostBytes += int64(len(wire))
+	st.parks++
+	return true
+}
+
+// parkIdleSlots parks any idle resident slot whose lastUsedTime has exceeded
+// parkIdleAfter (10m default) to host RAM and frees its device session.
+func (e *inkling2LoopEngine) parkIdleSlots() int {
+	st := e.prefixState()
+	now := st.nowTime()
+	e.pruneParkedSlots(now)
+	if st.parkIdleAfter <= 0 {
+		return 0
+	}
+	var toPark []*inkling2PrefixSlot
+	for _, sl := range e.cache {
+		if sl == e.cur || sl.lastUsedTime.IsZero() {
+			continue
+		}
+		if now.Sub(sl.lastUsedTime) >= st.parkIdleAfter {
+			toPark = append(toPark, sl)
+		}
+	}
+	parked := 0
+	for _, sl := range toPark {
+		if e.parkSlot(sl) {
+			parked++
+			_ = e.dropSlot(sl)
+		}
+	}
+	return parked
+}
+
+// ParkIdleSlots parks any idle resident slots that have exceeded the idle timeout
+// into host RAM and frees their device sessions.
+func (e *inkling2LoopEngine) ParkIdleSlots() int {
+	n := 0
+	e.runOnWorker(func() {
+		n = e.parkIdleSlots()
+	})
+	return n
+}
+
+func (e *inkling2LoopEngine) parkedHit(prompt []int, want inkling2PrefixMatchKey) (*inkling2ParkedSlot, int) {
+	st := e.prefixState()
+	e.pruneParkedSlots(st.nowTime())
+	if want.CheckpointVersion == "" {
+		return nil, -1
+	}
+	bestIdx := -1
+	for i, p := range st.parked {
+		if p.key != want || len(p.ckpt) >= len(prompt) {
+			continue
+		}
+		if bestIdx >= 0 && (len(p.ckpt) < len(st.parked[bestIdx].ckpt) || (len(p.ckpt) == len(st.parked[bestIdx].ckpt) && p.used <= st.parked[bestIdx].used)) {
+			continue
+		}
+		if inkling2HasPrefix(prompt, p.ckpt) {
+			bestIdx = i
+		}
+	}
+	if bestIdx < 0 {
+		return nil, -1
+	}
+	return st.parked[bestIdx], bestIdx
+}
+
+func (e *inkling2LoopEngine) takeParked(idx int) *inkling2ParkedSlot {
+	st := e.prefixState()
+	p := st.parked[idx]
+	st.hostBytes -= int64(len(p.wire))
+	st.parked = append(st.parked[:idx], st.parked[idx+1:]...)
+	return p
+}
+
+func (e *inkling2LoopEngine) restoreParkedIntoSlot(sl *inkling2PrefixSlot, p *inkling2ParkedSlot, want inkling2PrefixMatchKey) error {
+	if sl == nil || p == nil {
+		return errors.New("missing slot or parked state")
+	}
+	snap, err := model.DecodeInkling2StateSnapshot(p.wire, want.ModelFile, nil)
+	if err != nil {
+		return err
+	}
+	snapper, ok := sl.sess.(ggufload.Inkling2LoopSnapshotter)
+	if !ok {
+		return errors.New("session does not implement Inkling2LoopSnapshotter")
+	}
+	if err := snapper.RestoreState(snap); err != nil {
+		return err
+	}
+	rw, ok := sl.sess.(inkling2Rewinder)
+	if !ok {
+		return errors.New("session does not implement inkling2Rewinder")
+	}
+	if rw.Pos() != len(p.ckpt) {
+		return fmt.Errorf("restored pos=%d, want %d", rw.Pos(), len(p.ckpt))
+	}
+	sl.ckpt = append(sl.ckpt[:0], p.ckpt...)
+	sl.boundary = p.boundary
+	return nil
 }
