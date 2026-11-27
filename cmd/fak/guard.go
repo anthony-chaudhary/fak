@@ -690,13 +690,14 @@ func cmdManageCommand(commandName string, argv []string) {
 	//     bound-but-broken gateway. nil/false in the proxy path leaves gateway.New
 	//     byte-for-byte the pre-existing behavior.
 	var (
-		inKernelModel *fakmodel.Model
-		inKernelTok   *tokenizer.Tokenizer
-		inKernelQ4K   bool
-		chatBackend   compute.Backend
-		useMetal      bool
-		loadProfile   *gateway.ModelLoadProfile
-		loadPhase     gateway.StartupPhase
+		inKernelModel       *fakmodel.Model
+		inKernelTok         *tokenizer.Tokenizer
+		inKernelQ4K         bool
+		chatBackend         compute.Backend
+		useMetal            bool
+		resolvedSpeculative = *speculativeMode
+		loadProfile         *gateway.ModelLoadProfile
+		loadPhase           gateway.StartupPhase
 	)
 	if localModel {
 		// Alias (`qwen2.5:7b`) → target ref, then an hf:// URI → a locally cached file.
@@ -741,6 +742,12 @@ func cmdManageCommand(commandName string, argv []string) {
 		}
 		if err := applyNativeControls(chatBackend, guardNativeConfig); err != nil {
 			fmt.Fprintln(os.Stderr, "fak guard:", err)
+			os.Exit(2)
+		}
+		var serr error
+		resolvedSpeculative, _, serr = configureGuardSpeculativeMTP(*speculativeMode, useMetal, chatBackend, *ggufPath, os.Getenv, os.Stderr)
+		if serr != nil {
+			fmt.Fprintln(os.Stderr, "fak guard:", serr)
 			os.Exit(2)
 		}
 		load := func() {
@@ -942,7 +949,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		LocalModelID:          localAlias,
 		Backend:               chatBackend,
 		Metal:                 useMetal,
-		SpeculativeMode:       *speculativeMode,
+		SpeculativeMode:       resolvedSpeculative,
 		PinUpstreamCredential: pinUpstream,
 		RequireKey:            requireKey,
 		// The read-scoped twin of RequireKey (#5400): accepted ONLY on the observability
@@ -1499,4 +1506,27 @@ func cmdManageCommand(commandName string, argv []string) {
 		return
 	}
 	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, sessionStartInstall.StatePath, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
+}
+
+// configureGuardSpeculativeMTP resolves the --speculative selector for `fak guard --gguf`,
+// wires model.SetRetainMTP before the weight load, and emits an honest warning when a
+// resident non-Metal backend lacks Qwen35SequencePrefixReplayPath.
+func configureGuardSpeculativeMTP(flagValue string, metal bool, be compute.Backend, ggufPath string, getenv func(string) string, warnOut io.Writer) (string, bool, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	resolved, err := resolveSpeculativeMode(flagValue, getenv)
+	if err != nil {
+		return "", false, err
+	}
+	backendName := ""
+	if be != nil {
+		backendName = be.Name()
+	}
+	retain := serveRetainMTPForModel(resolved, metal, backendName, serveMTPPeekModelType(ggufPath), serveMTPEnvForced(getenv))
+	fakmodel.SetRetainMTP(retain)
+	if ok, reason := serveMTPBackendReplayStatus(resolved, metal, be); !ok && warnOut != nil {
+		fmt.Fprintf(warnOut, "fak guard: WARNING: %s\n", reason)
+	}
+	return resolved, retain, nil
 }

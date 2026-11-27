@@ -555,6 +555,23 @@ func serveRetainMTPHead(resolvedMode string, metal bool, backendName string) boo
 	return metal || name == "vulkan" || name == "cuda"
 }
 
+// serveMTPBackendReplayStatus checks whether a resident non-Metal backend selected
+// under --speculative mtp advertises Qwen35SequencePrefixReplayPath. When it does not
+// (for example, a CUDA backend without prefix replay), callers emit an honest warning
+// so MTP is never silently dead.
+func serveMTPBackendReplayStatus(resolvedMode string, metal bool, be compute.Backend) (bool, string) {
+	if resolvedMode != serveSpeculativeMTP || metal || be == nil {
+		return true, ""
+	}
+	if !serveRetainMTPHead(resolvedMode, false, be.Name()) {
+		return true, ""
+	}
+	if replay, ok := be.(compute.Qwen35SequencePrefixReplayBackend); ok && replay.Qwen35SequencePrefixReplayPath() == compute.Qwen35SequencePrefixReplayPath {
+		return true, ""
+	}
+	return false, fmt.Sprintf("backend %q lacks %s; MTP speculative decoding is inactive and will fall back to ordinary decode", be.Name(), compute.Qwen35SequencePrefixReplayPath)
+}
+
 // resolveSpeculativeMode resolves the effective structural speculative-decode selector
 // for `fak serve`. The FAK_SPECULATIVE / SPECULATIVE operator overrides win over the
 // --speculative flag (FAK_SPECULATIVE first), mirroring the gateway's historical env-OR
@@ -1266,6 +1283,10 @@ func cmdServe(argv []string) {
 		mtpBackendName = rt.chatBackend.Name()
 	}
 	fakmodel.SetRetainMTP(serveRetainMTPForModel(*sf.speculative, rt.useMetal, mtpBackendName, serveMTPPeekModelType(*sf.ggufPath), serveMTPEnvForced(os.Getenv)))
+	if ok, reason := serveMTPBackendReplayStatus(*sf.speculative, rt.useMetal, rt.chatBackend); !ok {
+		rt.addStartupMessage(newServeStartupMessage("speculative", "mtp-backend-capability", "warning", reason))
+		fmt.Fprintf(os.Stderr, "fak serve: WARNING: %s\n", reason)
+	}
 	defer rt.closeEPGroup()
 	if *sf.dryAdmit {
 		if err := rt.runServeDryAdmit(sf, os.Stdout); err != nil {
