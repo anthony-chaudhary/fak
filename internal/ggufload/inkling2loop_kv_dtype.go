@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/kvcache"
 )
 
 // ErrInkling2FP8ScaleOverflow is returned when an FP8 E4M3FN global KV write detects
@@ -50,6 +51,36 @@ func (d Inkling2KVDType) String() string {
 	}
 }
 
+// ToKVCachePrecision maps Inkling2KVDType to the shared kvcache.Precision.
+func (d Inkling2KVDType) ToKVCachePrecision() kvcache.Precision {
+	switch d {
+	case Inkling2KVF16:
+		return kvcache.PrecisionFP16
+	case Inkling2KVFP8:
+		return kvcache.PrecisionFP8
+	case Inkling2KVNVFP4:
+		return kvcache.PrecisionNVFP4
+	default:
+		return kvcache.PrecisionFP32
+	}
+}
+
+// Inkling2KVDTypeFromPrecision converts a shared kvcache.Precision to Inkling2KVDType.
+func Inkling2KVDTypeFromPrecision(p kvcache.Precision) (Inkling2KVDType, error) {
+	switch p {
+	case kvcache.PrecisionNVFP4:
+		return Inkling2KVNVFP4, nil
+	case kvcache.PrecisionFP8:
+		return Inkling2KVFP8, nil
+	case kvcache.PrecisionFP16:
+		return Inkling2KVF16, nil
+	case kvcache.PrecisionFP32, "":
+		return Inkling2KVF32, nil
+	default:
+		return Inkling2KVF32, fmt.Errorf("inkling2 resident: unsupported kvcache precision %q", p)
+	}
+}
+
 // Inkling2KVDTypeFrom parses the public resident-KV selector. The serving layer
 // uses the same typed result to disable unsupported prefix reuse modes.
 func Inkling2KVDTypeFrom(lookup func(string) (string, bool)) (Inkling2KVDType, error) {
@@ -57,17 +88,15 @@ func Inkling2KVDTypeFrom(lookup func(string) (string, bool)) (Inkling2KVDType, e
 	if !ok {
 		v = ""
 	}
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "nvfp4", "fp4", "e2m1":
-		return Inkling2KVNVFP4, nil
-	case "fp8", "e4m3", "e4m3fn":
-		return Inkling2KVFP8, nil
-	case "f16", "fp16":
-		return Inkling2KVF16, nil
-	case "", "f32", "fp32":
-		return Inkling2KVF32, nil
+	p, err := kvcache.ParsePrecision(v)
+	if err != nil {
+		return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, fp8, or nvfp4", v)
 	}
-	return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, fp8, or nvfp4", v)
+	dt, err := Inkling2KVDTypeFromPrecision(p)
+	if err != nil {
+		return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, fp8, or nvfp4", v)
+	}
+	return dt, nil
 }
 
 // inkling2KVHalfFrom parses FAK_INKLING2_KV: f16/fp16 selects f16 global-slot caches,

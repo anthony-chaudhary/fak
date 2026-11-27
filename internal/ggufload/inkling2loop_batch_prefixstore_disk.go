@@ -9,6 +9,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+
+	"github.com/anthony-chaudhary/fak/internal/kvcache"
 )
 
 const (
@@ -121,6 +123,78 @@ func encodeInk2DiskCkpt(tokens []int, loopSlots int, ck *ink2RowCkpt) ([]byte, e
 	sum := sha256.Sum256(buf[ink2DiskHeaderSize:])
 	copy(buf[16:48], sum[:])
 	return buf, nil
+}
+
+// encodeInk2SnapshotBytes serializes an Inkling-2 row checkpoint into the shared
+// versioned kvcache.Snapshot wire format.
+func encodeInk2SnapshotBytes(tokens []int, loopSlots, kvHeads, headDim int, ck *ink2RowCkpt) ([]byte, error) {
+	if ck == nil || len(tokens) != ck.pos || ck.pos < 0 || loopSlots <= 0 {
+		return nil, errInk2DiskCorrupt
+	}
+	prec := kvcache.PrecisionFP32
+	if ck.half {
+		prec = kvcache.PrecisionFP16
+	}
+	layers := make([]kvcache.SnapshotLayer, len(ck.slots))
+	for i, sl := range ck.slots {
+		layers[i] = kvcache.SnapshotLayer{
+			Index:  sl.lo,
+			KCodes: kvcache.Float32sToBytes(sl.k),
+			VCodes: kvcache.Float32sToBytes(sl.v),
+			Extra:  kvcache.Float32sToBytes(sl.hist),
+		}
+	}
+	return kvcache.EncodeSnapshot(&kvcache.Snapshot{
+		Layout: kvcache.LayoutDesc{
+			Arch:      "inkling2",
+			Precision: prec,
+			Layers:    len(ck.slots),
+			KVHeads:   kvHeads,
+			HeadDim:   headDim,
+			Capacity:  ck.posFloats,
+			Layout:    kvcache.LayoutContiguous,
+		},
+		Tokens: append([]int(nil), tokens...),
+		Layers: layers,
+	})
+}
+
+// decodeInk2SnapshotBytes restores an Inkling-2 row checkpoint from the shared
+// kvcache.Snapshot wire format.
+func decodeInk2SnapshotBytes(data []byte, expectedLoopSlots int) ([]int, *ink2RowCkpt, error) {
+	var exp *kvcache.LayoutDesc
+	if expectedLoopSlots > 0 {
+		exp = &kvcache.LayoutDesc{Arch: "inkling2", Layers: expectedLoopSlots}
+	}
+	snap, err := kvcache.DecodeSnapshot(data, exp)
+	if err != nil {
+		if errors.Is(err, kvcache.ErrSnapshotIncompatible) {
+			return nil, nil, errInk2DiskLoopSlots
+		}
+		return nil, nil, errInk2DiskCorrupt
+	}
+	slots := make([]ink2SlotCkpt, len(snap.Layers))
+	for i, l := range snap.Layers {
+		k, err := kvcache.BytesToFloat32s(l.KCodes)
+		if err != nil {
+			return nil, nil, errInk2DiskCorrupt
+		}
+		v, err := kvcache.BytesToFloat32s(l.VCodes)
+		if err != nil {
+			return nil, nil, errInk2DiskCorrupt
+		}
+		hist, err := kvcache.BytesToFloat32s(l.Extra)
+		if err != nil {
+			return nil, nil, errInk2DiskCorrupt
+		}
+		slots[i] = ink2SlotCkpt{lo: l.Index, k: k, v: v, hist: hist}
+	}
+	return snap.Tokens, &ink2RowCkpt{
+		pos:       len(snap.Tokens),
+		half:      snap.Layout.Precision == kvcache.PrecisionFP16,
+		posFloats: snap.Layout.Capacity,
+		slots:     slots,
+	}, nil
 }
 
 func decodeInk2DiskCkpt(data []byte, expectedLoopSlots int) ([]int, *ink2RowCkpt, error) {

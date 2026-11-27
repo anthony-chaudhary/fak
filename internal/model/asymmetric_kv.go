@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/kvcache"
 )
 
 // asymmetric_kv.go — Asymmetric K/V bit allocation codec and memory budgeting for KV caches (#10731).
@@ -48,7 +50,47 @@ const (
 
 	// KVPrecisionQ4_0 indicates 4-bit group-32 affine quantization with per-group f32 scale/min.
 	KVPrecisionQ4_0 KVPrecision = "q4_0"
+
+	// KVPrecisionNVFP4 indicates block-16 OCP E2M1 codes with E4M3FN per-block scales.
+	KVPrecisionNVFP4 KVPrecision = "nvfp4"
 )
+
+// ToKVCachePrecision maps model.KVPrecision to the shared kvcache.Precision descriptor.
+func (p KVPrecision) ToKVCachePrecision() kvcache.Precision {
+	switch p {
+	case KVPrecisionFP32:
+		return kvcache.PrecisionFP32
+	case KVPrecisionFP16:
+		return kvcache.PrecisionFP16
+	case KVPrecisionBF16:
+		return kvcache.PrecisionBF16
+	case KVPrecisionQ8_0:
+		return kvcache.PrecisionQ8_0
+	case KVPrecisionQ4_0:
+		return kvcache.PrecisionQ4_0
+	case KVPrecisionNVFP4:
+		return kvcache.PrecisionNVFP4
+	default:
+		return kvcache.PrecisionFP32
+	}
+}
+
+// KVCacheLayoutDesc builds a model-agnostic kvcache.LayoutDesc from cfg and prec.
+func KVCacheLayoutDesc(cfg Config, prec KVPrecision, capacity int) kvcache.LayoutDesc {
+	arch := cfg.ModelType
+	if arch == "" && len(cfg.Architectures) > 0 {
+		arch = cfg.Architectures[0]
+	}
+	return kvcache.LayoutDesc{
+		Arch:      arch,
+		Precision: prec.ToKVCachePrecision(),
+		Layers:    cfg.NumLayers,
+		KVHeads:   cfg.NumKVHeads,
+		HeadDim:   cfg.HeadDim,
+		Capacity:  capacity,
+		Layout:    kvcache.LayoutContiguous,
+	}
+}
 
 // ParseKVPrecision parses a case-insensitive string into a recognized KVPrecision.
 func ParseKVPrecision(s string) (KVPrecision, error) {
@@ -64,8 +106,10 @@ func ParseKVPrecision(s string) (KVPrecision, error) {
 		return KVPrecisionQ8_0, nil
 	case "q4_0", "q4", "4":
 		return KVPrecisionQ4_0, nil
+	case "nvfp4", "fp4", "e2m1":
+		return KVPrecisionNVFP4, nil
 	default:
-		return "", fmt.Errorf("unknown KV precision %q (must be fp32, fp16, bf16, q8_0, or q4_0)", s)
+		return "", fmt.Errorf("unknown KV precision %q (must be fp32, fp16, bf16, q8_0, q4_0, or nvfp4)", s)
 	}
 }
 
@@ -93,6 +137,8 @@ func KVVectorBytes(dim int, prec KVPrecision) int64 {
 		// 0.5 bytes per code (packed 2 per byte) + 8 bytes (f32 scale + f32 min) per group
 		payloadBytes := int64((dim + 1) / 2)
 		return payloadBytes + groups*8
+	case KVPrecisionNVFP4:
+		return kvcache.VectorBytes(dim, kvcache.PrecisionNVFP4)
 	default:
 		// Default to FP32 if unrecognised
 		return int64(dim) * 4
