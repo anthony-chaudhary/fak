@@ -120,7 +120,7 @@ func (s *inkling2Resident) enableSpec(depth int) error {
 			return err
 		}
 	}
-	if s.kvHalf || s.kvFP8 {
+	if s.kvHalf || s.kvFP8 || s.kvNVFP4 {
 		// the verify and draft ops read fp32 caches only
 		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode; set FAK_INKLING2_SPEC=0 or unset FAK_INKLING2_KV", s.kvDType())
 	}

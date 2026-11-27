@@ -281,14 +281,14 @@ extern "C" int fcuda_ink2p_conv_pair_log(const float *const *x, const float *con
 }
 
 // k_ink2_qkv_post over a chunk: blockIdx.y is the token, at position pos0 + t. T is the
-// cache element (float, __half, or uint8_t E4M3FN); f16/fp8 appends run the fp32 ops of
-// the float append in the same order and quantize only the stored value.
-template <class T>
+// cache element (float, __half, or uint8_t E4M3FN/NVFP4); f16/fp8/nvfp4 appends run the
+// fp32 ops of the float append in the same order and quantize only the stored value.
+template <class T, bool NVFP4 = false>
 __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
                                  const float *rclip, T *kcache, T *vcache, int heads, int kvHeads,
                                  int headDim, int relLen, float qkClip, float relClip, float eps, int global,
                                  float alpha, float floorTok, int cap, int pos0, const int *posDev,
-                                 float *kscale = nullptr, float *vscale = nullptr, int *overflow = nullptr) {
+                                 void *kscale = nullptr, void *vscale = nullptr, int *overflow = nullptr) {
   const int lane = threadIdx.x & 31;
   const int b = blockIdx.x, tok = blockIdx.y;
   const int pos = (posDev ? *posDev : pos0) + tok;
@@ -309,10 +309,16 @@ __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float
   }
   if (b < heads + kvHeads) {
     const int h = b - heads;
-    if constexpr (sizeof(T) == 1) {
+    if constexpr (NVFP4) {
       const Ink2KVConv off = {};
-      ink2_put_k_fp8(kcache + (size_t)idx * kvDim + (size_t)h * headDim, kscale + (size_t)idx * kvHeads + h, overflow,
-                     k + (size_t)tok * kvDim, off, h, headDim, kvHeads, qkClip);
+      const int hBytes = headDim >> 1, hBlks = headDim >> 4;
+      ink2_put_k_nvfp4(kcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
+                       (uint8_t *)kscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow,
+                       k + (size_t)tok * kvDim, off, h, headDim, kvHeads, qkClip);
+    } else if constexpr (sizeof(T) == 1) {
+      const Ink2KVConv off = {};
+      ink2_put_k_fp8(kcache + (size_t)idx * kvDim + (size_t)h * headDim, (float *)kscale + (size_t)idx * kvHeads + h,
+                     overflow, k + (size_t)tok * kvDim, off, h, headDim, kvHeads, qkClip);
     } else if constexpr (sizeof(T) == 2) {
       const Ink2KVConv off = {};
       ink2_put_k(kcache + (size_t)idx * kvDim + (size_t)h * headDim, k + (size_t)tok * kvDim, off, h, headDim, kvHeads,
@@ -327,10 +333,16 @@ __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float
     return;
   }
   const int h = b - heads - kvHeads;
-  if constexpr (sizeof(T) == 1) {
+  if constexpr (NVFP4) {
     const Ink2KVConv off = {};
-    ink2_put_v_fp8(vcache + (size_t)idx * kvDim + (size_t)h * headDim, vscale + (size_t)idx * kvHeads + h, overflow,
-                   v + (size_t)tok * kvDim, off, h, headDim, kvHeads, eps);
+    const int hBytes = headDim >> 1, hBlks = headDim >> 4;
+    ink2_put_v_nvfp4(vcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
+                     (uint8_t *)vscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow,
+                     v + (size_t)tok * kvDim, off, h, headDim, kvHeads, eps);
+  } else if constexpr (sizeof(T) == 1) {
+    const Ink2KVConv off = {};
+    ink2_put_v_fp8(vcache + (size_t)idx * kvDim + (size_t)h * headDim, (float *)vscale + (size_t)idx * kvHeads + h,
+                   overflow, v + (size_t)tok * kvDim, off, h, headDim, kvHeads, eps);
   } else if constexpr (sizeof(T) == 2) {
     const Ink2KVConv off = {};
     ink2_put_v(vcache + (size_t)idx * kvDim + (size_t)h * headDim, v + (size_t)tok * kvDim, off, h, headDim, kvHeads,
@@ -1002,6 +1014,22 @@ extern "C" int fcuda_ink2p_qkv_post_fp8(float *q, float *r, const float *k, cons
   FCUDA_TS("k_ink2p_qkv_post", grid, k_ink2p_qkv_post<uint8_t><<<grid, 32, 0, g_stream>>>(
       q, r, k, v, qclip, rclip, kcache, vcache, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global, alpha,
       floorTok, cap, pos0, nullptr, kscale, vscale, overflow));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_qkv_post into block-16 packed E2M1 caches with E4M3FN block scales.
+extern "C" int fcuda_ink2p_qkv_post_nvfp4(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                          const float *rclip, uint8_t *kcache, uint8_t *vcache, uint8_t *kscale,
+                                          uint8_t *vscale, int *overflow, int heads, int kvHeads, int headDim,
+                                          int relLen, float qkClip, float relClip, float eps, int global, float alpha,
+                                          float floorTok, int cap, int pos0, int T) {
+  if (headDim < 16 || (headDim & 15) != 0 || headDim > 32 * INK2_KV_REGS || kvHeads < 1 || heads < 1 || cap < 1 ||
+      T < 1)
+    return (int)cudaErrorInvalidValue;
+  const dim3 grid(heads + 2 * kvHeads, T);
+  FCUDA_TS("k_ink2p_qkv_post", grid, (k_ink2p_qkv_post<uint8_t, true><<<grid, 32, 0, g_stream>>>(
+      q, r, k, v, qclip, rclip, kcache, vcache, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global, alpha,
+      floorTok, cap, pos0, nullptr, kscale, vscale, overflow)));
   return ink2_last_error();
 }
 

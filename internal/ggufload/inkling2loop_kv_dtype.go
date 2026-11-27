@@ -16,6 +16,11 @@ import (
 // no longer possible (mid-session decode or append after pos 0).
 var ErrInkling2FP8ScaleOverflow = errors.New("inkling2 resident: fp8 global KV scale overflow")
 
+// ErrInkling2NVFP4ScaleOverflow is returned when an NVFP4 global KV write detects
+// a non-finite value or block-scale overflow at a position where an in-place retry
+// to a higher-precision KV dtype is no longer possible.
+var ErrInkling2NVFP4ScaleOverflow = errors.New("inkling2 resident: nvfp4 global KV scale overflow")
+
 // inkling2KVHalfRequested is FAK_INKLING2_KV=f16, read once at process start for
 // legacy callers/tests. newInkling2ResidentRing reads FAK_INKLING2_KV dynamically
 // through Inkling2KVDTypeFrom(os.LookupEnv) so tests can switch dtypes in-process.
@@ -28,6 +33,7 @@ const (
 	Inkling2KVF32 Inkling2KVDType = iota
 	Inkling2KVF16
 	Inkling2KVFP8
+	Inkling2KVNVFP4
 )
 
 // String returns the canonical FAK_INKLING2_KV selector token for d.
@@ -37,6 +43,8 @@ func (d Inkling2KVDType) String() string {
 		return "f16"
 	case Inkling2KVFP8:
 		return "fp8"
+	case Inkling2KVNVFP4:
+		return "nvfp4"
 	default:
 		return "f32"
 	}
@@ -50,6 +58,8 @@ func Inkling2KVDTypeFrom(lookup func(string) (string, bool)) (Inkling2KVDType, e
 		v = ""
 	}
 	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "nvfp4", "fp4", "e2m1":
+		return Inkling2KVNVFP4, nil
 	case "fp8", "e4m3", "e4m3fn":
 		return Inkling2KVFP8, nil
 	case "f16", "fp16":
@@ -57,7 +67,7 @@ func Inkling2KVDTypeFrom(lookup func(string) (string, bool)) (Inkling2KVDType, e
 	case "", "f32", "fp32":
 		return Inkling2KVF32, nil
 	}
-	return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, or fp8", v)
+	return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, fp8, or nvfp4", v)
 }
 
 // inkling2KVHalfFrom parses FAK_INKLING2_KV: f16/fp16 selects f16 global-slot caches,
@@ -68,9 +78,11 @@ func inkling2KVHalfFrom(lookup func(string) (string, bool)) (bool, error) {
 }
 
 var (
-	inkling2KVHalfFallbackOnce        sync.Once
-	inkling2KVFP8FallbackOnce         sync.Once
-	inkling2KVFP8OverflowFallbackOnce sync.Once
+	inkling2KVHalfFallbackOnce          sync.Once
+	inkling2KVFP8FallbackOnce           sync.Once
+	inkling2KVFP8OverflowFallbackOnce   sync.Once
+	inkling2KVNVFP4FallbackOnce         sync.Once
+	inkling2KVNVFP4OverflowFallbackOnce sync.Once
 )
 
 func inkling2BackendHalfKVErr(be compute.Backend) error {
@@ -92,11 +104,33 @@ func inkling2BackendFP8KVErr(be compute.Backend) error {
 	return fd.Ink2PFP8KVReady()
 }
 
+func inkling2BackendNVFP4KVErr(be compute.Backend) error {
+	nd, ok := be.(compute.Inkling2NVFP4KVDevice)
+	if !ok {
+		return fmt.Errorf("backend %s has no nvfp4 KV ops", be.Name())
+	}
+	return nd.Ink2PNVFP4KVReady()
+}
+
 // inkling2ResidentKVDType resolves the effective global-slot KV dtype on be for a
-// requested dtype. Unsupported fp8 falls back to f16 when available, else fp32;
-// unsupported f16 falls back to fp32. Each fallback is logged once.
+// requested dtype. Unsupported nvfp4 falls back to fp8 -> f16 -> fp32; unsupported
+// fp8 falls back to f16 -> fp32; unsupported f16 falls back to fp32. Each fallback
+// is logged once.
 func inkling2ResidentKVDType(be compute.Backend, req Inkling2KVDType) Inkling2KVDType {
 	switch req {
+	case Inkling2KVNVFP4:
+		if err := inkling2BackendNVFP4KVErr(be); err == nil {
+			return Inkling2KVNVFP4
+		} else if fp8Err := inkling2BackendFP8KVErr(be); fp8Err == nil {
+			inkling2KVNVFP4Fallback("fp8", err.Error())
+			return Inkling2KVFP8
+		} else if halfErr := inkling2BackendHalfKVErr(be); halfErr == nil {
+			inkling2KVNVFP4Fallback("f16", err.Error())
+			return Inkling2KVF16
+		} else {
+			inkling2KVNVFP4Fallback("fp32", err.Error())
+			return Inkling2KVF32
+		}
 	case Inkling2KVFP8:
 		if err := inkling2BackendFP8KVErr(be); err == nil {
 			return Inkling2KVFP8
@@ -166,6 +200,8 @@ func inkling2ResidentKVDTypeForMode(m *Inkling2LoopModel, be compute.Backend, lo
 		v = ""
 	}
 	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "nvfp4", "fp4", "e2m1":
+		return inkling2ResidentKVDType(be, Inkling2KVNVFP4), false, nil
 	case "fp8", "e4m3", "e4m3fn":
 		return inkling2ResidentKVDType(be, Inkling2KVFP8), false, nil
 	case "f16", "fp16":
@@ -184,7 +220,7 @@ func inkling2ResidentKVDTypeForMode(m *Inkling2LoopModel, be compute.Backend, lo
 		}
 		return Inkling2KVF32, false, nil
 	}
-	return Inkling2KVF32, false, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, or fp8", v)
+	return Inkling2KVF32, false, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, fp8, or nvfp4", v)
 }
 
 // inkling2ResidentHalfKVFor reports whether a resident session for m on be stores its
@@ -209,5 +245,17 @@ func inkling2KVFP8Fallback(target, reason string) {
 func inkling2KVFP8OverflowLog() {
 	inkling2KVFP8OverflowFallbackOnce.Do(func() {
 		log.Printf("inkling2 resident: fp8 global KV scale overflow detected; falling back to f16 caches")
+	})
+}
+
+func inkling2KVNVFP4Fallback(target, reason string) {
+	inkling2KVNVFP4FallbackOnce.Do(func() {
+		log.Printf("inkling2 resident: FAK_INKLING2_KV=nvfp4 falls back to %s caches: %s", target, reason)
+	})
+}
+
+func inkling2KVNVFP4OverflowLog(target string) {
+	inkling2KVNVFP4OverflowFallbackOnce.Do(func() {
+		log.Printf("inkling2 resident: nvfp4 global KV scale overflow detected; falling back to %s caches", target)
 	})
 }

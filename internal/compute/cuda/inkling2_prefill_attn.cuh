@@ -90,12 +90,29 @@ __device__ __forceinline__ void tile16_fp8(__half *dst, uint4 x, float sc) {
   d[3] = fp8x4_to_h2x2(x.w, sc);
 }
 
+// Decode 4 packed E2M1 bytes (8 elements of one block) scaled by sc into 4 __half2s (8 __halfs).
+__device__ __forceinline__ uint4 nvfp4x8_to_h2x4(uint32_t w, float sc) {
+  return make_uint4(ink2_e2m1x2_decode_scaled_h2((uint8_t)(w & 0xffu), sc),
+                    ink2_e2m1x2_decode_scaled_h2((uint8_t)((w >> 8) & 0xffu), sc),
+                    ink2_e2m1x2_decode_scaled_h2((uint8_t)((w >> 16) & 0xffu), sc),
+                    ink2_e2m1x2_decode_scaled_h2((uint8_t)(w >> 24), sc));
+}
+
+// Unpack 16 packed E2M1 bytes (32 elements = 2 consecutive blocks of 16) into 32 __halfs.
+__device__ __forceinline__ void tile16_nvfp4(__half *dst, uint4 x, float sc0, float sc1) {
+  uint4 *d = reinterpret_cast<uint4 *>(dst);
+  d[0] = nvfp4x8_to_h2x4(x.x, sc0);
+  d[1] = nvfp4x8_to_h2x4(x.y, sc0);
+  d[2] = nvfp4x8_to_h2x4(x.z, sc1);
+  d[3] = nvfp4x8_to_h2x4(x.w, sc1);
+}
+
 template <class E> struct Chunk16;
 template <> struct Chunk16<float> { using V = float4; };
 template <> struct Chunk16<__half> { using V = uint4; };
 template <> struct Chunk16<uint8_t> { using V = uint4; };
 
-template <int QW, int KT, int REL, int PIPE, class E = float>
+template <int QW, int KT, int REL, int PIPE, class E = float, bool NVFP4 = false>
 __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *__restrict__ q,
                                                                   const float *__restrict__ r,
                                                                   const float *__restrict__ sinks,
@@ -105,11 +122,13 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
                                                                   float *__restrict__ out, int heads, int kvHeads,
                                                                   int extent, int window, int cap, float scale,
                                                                   int pos0, int T,
-                                                                  const float *__restrict__ kscale = nullptr,
-                                                                  const float *__restrict__ vscale = nullptr) {
+                                                                  const void *__restrict__ kscale = nullptr,
+                                                                  const void *__restrict__ vscale = nullptr) {
   constexpr int NW = kG * QW, NT = KT / 8, QT = 16 * QW;
   using V16 = typename Chunk16<E>::V;
-  constexpr int CW = 16 / (int)sizeof(E), CPR = kHD / CW; // elements per 16-byte chunk, chunks per row
+  constexpr int kRowElem = NVFP4 ? (kHD / 2) : kHD;
+  constexpr int CW = 16 / (int)sizeof(E), CPR = kRowElem / CW; // stored elements per 16B chunk, chunks per row
+  constexpr int kBlksPerHead = kHD / 16; // 8
   extern __shared__ __align__(16) unsigned char smraw[];
   __half *sK = reinterpret_cast<__half *>(smraw);
   __half *sV = sK + KT * kKS;
@@ -117,12 +136,14 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
   float *sRS = reinterpret_cast<float *>(sV + KT * kKS) + (threadIdx.x >> 5) * 16 * RS;
   E *stg = reinterpret_cast<E *>(reinterpret_cast<float *>(sV + KT * kKS) + AttnSmem<QW, KT, REL, PIPE, E>::rsFloats);
   __shared__ float sKS[KT], sVS[KT];
+  __shared__ float sKS4[NVFP4 ? KT : 1][NVFP4 ? kBlksPerHead : 1];
+  __shared__ float sVS4[NVFP4 ? KT : 1][NVFP4 ? kBlksPerHead : 1];
   const int kvh = blockIdx.x;
   const int tile = gridDim.y - 1 - blockIdx.y; // heaviest (latest) query tiles launch first
   const int warp = threadIdx.x >> 5, lane = threadIdx.x & 31, g = lane >> 2, qd = lane & 3;
   const int h = kvh * kG + warp / QW;
   const int t0 = tile * QT + (warp % QW) * 16;
-  const int kvDim = kvHeads * kHD;
+  const int kvDim = kvHeads * kRowElem;
   const int blo = pos0 + tile * QT, bhi = pos0 + min(tile * QT + QT, T) - 1;
   const int kstart = blo + 1 - nkeys(blo, window, cap), kend = bhi;
   const bool wact = t0 < T;
@@ -183,9 +204,9 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
     for (int idx = threadIdx.x; idx < KT * CPR; idx += 32 * NW) {
       const int row = idx / CPR, c4 = (idx % CPR) * CW;
       const int p = kb + row;
-      E *dk = stg + row * kHD + c4, *dv = dk + KT * kHD;
+      E *dk = stg + row * kRowElem + c4, *dv = dk + KT * kRowElem;
       if (p <= kend) {
-        const size_t off = (size_t)(p % cap) * kvDim + (size_t)kvh * kHD + c4;
+        const size_t off = (size_t)(p % cap) * kvDim + (size_t)kvh * kRowElem + c4;
         cp16(dk, kcache + off);
         cp16(dv, vcache + off);
       } else {
@@ -198,13 +219,27 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
   if constexpr (PIPE) issue(kstart);
 
   for (int kb = kstart; kb <= kend; kb += KT) {
-    if constexpr (sizeof(E) == 1) {
+    if constexpr (NVFP4) {
+      if (threadIdx.x < KT * kBlksPerHead) {
+        const int row = threadIdx.x / kBlksPerHead;
+        const int blk = threadIdx.x % kBlksPerHead;
+        const int p = kb + row;
+        if (p <= kend) {
+          const size_t soff = (size_t)(p % cap) * (size_t)(kvHeads * kBlksPerHead) + (size_t)kvh * kBlksPerHead + blk;
+          sKS4[row][blk] = ink2_e4m3fn_decode(__ldg(reinterpret_cast<const uint8_t *>(kscale) + soff));
+          sVS4[row][blk] = ink2_e4m3fn_decode(__ldg(reinterpret_cast<const uint8_t *>(vscale) + soff));
+        } else {
+          sKS4[row][blk] = 0.f;
+          sVS4[row][blk] = 0.f;
+        }
+      }
+    } else if constexpr (sizeof(E) == 1) {
       if (threadIdx.x < KT) {
         const int p = kb + threadIdx.x;
         if (p <= kend) {
           const size_t soff = (size_t)(p % cap) * (size_t)kvHeads + (size_t)kvh;
-          sKS[threadIdx.x] = __ldg(kscale + soff);
-          sVS[threadIdx.x] = __ldg(vscale + soff);
+          sKS[threadIdx.x] = __ldg(reinterpret_cast<const float *>(kscale) + soff);
+          sVS[threadIdx.x] = __ldg(reinterpret_cast<const float *>(vscale) + soff);
         } else {
           sKS[threadIdx.x] = 0.f;
           sVS[threadIdx.x] = 0.f;
@@ -215,13 +250,21 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
       asm volatile("cp.async.wait_all;" ::);
       __syncthreads();
       for (int idx = threadIdx.x; idx < KT * CPR; idx += 32 * NW) {
-        const int row = idx / CPR, c4 = (idx % CPR) * CW;
-        if constexpr (sizeof(E) == 1) {
-          tile16_fp8(sK + row * kKS + c4, *reinterpret_cast<const uint4 *>(stg + row * kHD + c4), sKS[row]);
-          tile16_fp8(sV + row * kKS + c4, *reinterpret_cast<const uint4 *>(stg + KT * kHD + row * kHD + c4), sVS[row]);
+        const int row = idx / CPR, chunk = idx % CPR, c4 = chunk * CW;
+        if constexpr (NVFP4) {
+          const int blk0 = chunk * 2;
+          tile16_nvfp4(sK + row * kKS + chunk * 32, *reinterpret_cast<const uint4 *>(stg + row * kRowElem + c4),
+                       sKS4[row][blk0], sKS4[row][blk0 + 1]);
+          tile16_nvfp4(sV + row * kKS + chunk * 32,
+                       *reinterpret_cast<const uint4 *>(stg + KT * kRowElem + row * kRowElem + c4),
+                       sVS4[row][blk0], sVS4[row][blk0 + 1]);
+        } else if constexpr (sizeof(E) == 1) {
+          tile16_fp8(sK + row * kKS + c4, *reinterpret_cast<const uint4 *>(stg + row * kRowElem + c4), sKS[row]);
+          tile16_fp8(sV + row * kKS + c4, *reinterpret_cast<const uint4 *>(stg + KT * kRowElem + row * kRowElem + c4),
+                     sVS[row]);
         } else {
-          tile16(sK + row * kKS + c4, *reinterpret_cast<const V16 *>(stg + row * kHD + c4));
-          tile16(sV + row * kKS + c4, *reinterpret_cast<const V16 *>(stg + KT * kHD + row * kHD + c4));
+          tile16(sK + row * kKS + c4, *reinterpret_cast<const V16 *>(stg + row * kRowElem + c4));
+          tile16(sV + row * kKS + c4, *reinterpret_cast<const V16 *>(stg + KT * kRowElem + row * kRowElem + c4));
         }
       }
       __syncthreads();
@@ -229,15 +272,19 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
     } else {
     __syncthreads();
     for (int idx = threadIdx.x; idx < KT * CPR; idx += 32 * NW) {
-      const int row = idx / CPR, c4 = (idx % CPR) * CW;
+      const int row = idx / CPR, chunk = idx % CPR, c4 = chunk * CW;
       const int p = kb + row;
       V16 kv = {}, vv = {};
       if (p <= kend) {
-        const size_t off = (size_t)(p % cap) * kvDim + (size_t)kvh * kHD + c4;
+        const size_t off = (size_t)(p % cap) * kvDim + (size_t)kvh * kRowElem + c4;
         kv = __ldg(reinterpret_cast<const V16 *>(kcache + off));
         vv = __ldg(reinterpret_cast<const V16 *>(vcache + off));
       }
-      if constexpr (sizeof(E) == 1) {
+      if constexpr (NVFP4) {
+        const int blk0 = chunk * 2;
+        tile16_nvfp4(sK + row * kKS + chunk * 32, kv, sKS4[row][blk0], sKS4[row][blk0 + 1]);
+        tile16_nvfp4(sV + row * kKS + chunk * 32, vv, sVS4[row][blk0], sVS4[row][blk0 + 1]);
+      } else if constexpr (sizeof(E) == 1) {
         tile16_fp8(sK + row * kKS + c4, kv, sKS[row]);
         tile16_fp8(sV + row * kKS + c4, vv, sVS[row]);
       } else {
@@ -385,22 +432,22 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
   }
 }
 
-template <int QW, int KT, int REL, int PIPE, class E = float>
+template <int QW, int KT, int REL, int PIPE, class E = float, bool NVFP4 = false>
 static int ink2p_attend_v2_launch(const float *q, const float *r, const float *sinks, const float *relBias,
                                   const E *kcache, const E *vcache, float *out, int heads, int kvHeads,
                                   int extent, int window, int cap, float scale, int pos0, int T,
-                                  const float *kscale = nullptr, const float *vscale = nullptr) {
+                                  const void *kscale = nullptr, const void *vscale = nullptr) {
   const dim3 grid(kvHeads, (T + 16 * QW - 1) / (16 * QW));
   constexpr size_t smem = AttnSmem<QW, KT, REL, PIPE, E>::bytes;
   if (smem > 48 * 1024) {
-    const cudaError_t e = cudaFuncSetAttribute((const void *)k_ink2p_attend_v2<QW, KT, REL, PIPE, E>,
+    const cudaError_t e = cudaFuncSetAttribute((const void *)k_ink2p_attend_v2<QW, KT, REL, PIPE, E, NVFP4>,
                                                cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
     if (e) return (int)e;
   }
   FCUDA_TS("k_ink2p_attend_v2", grid,
-           k_ink2p_attend_v2<QW, KT, REL, PIPE, E><<<grid, 32 * kG * QW, smem, g_stream>>>(
+           (k_ink2p_attend_v2<QW, KT, REL, PIPE, E, NVFP4><<<grid, 32 * kG * QW, smem, g_stream>>>(
                q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, extent, window, cap, scale, pos0, T, kscale,
-               vscale));
+               vscale)));
   return ink2_last_error();
 }
 
@@ -439,7 +486,21 @@ extern "C" int fcuda_ink2p_attend_v2_fp8(const float *q, const float *r, const f
   if (headDim != ink2pa::kHD || relLen != ink2pa::kRL || kvHeads < 1 || heads != ink2pa::kG * kvHeads || T < 1 ||
       cap < 1)
     return (int)cudaErrorInvalidValue;
-  return ink2pa::ink2p_attend_v2_launch<2, 16, 1, 1, uint8_t>(q, r, sinks, relBias, kcache, vcache, out, heads,
-                                                              kvHeads, extent, window, cap, scale, pos0, T, kscale,
-                                                              vscale);
+  return ink2pa::ink2p_attend_v2_launch<2, 16, 1, 1, uint8_t, false>(q, r, sinks, relBias, kcache, vcache, out, heads,
+                                                                     kvHeads, extent, window, cap, scale, pos0, T,
+                                                                     kscale, vscale);
+}
+
+// fcuda_ink2p_attend_v2 over block-16 packed E2M1 caches with E4M3FN block scales.
+// Dequantizes tiles into __half smem for mma16816 with FP32 accumulate.
+extern "C" int fcuda_ink2p_attend_v2_nvfp4(const float *q, const float *r, const float *sinks, const float *relBias,
+                                           const uint8_t *kcache, const uint8_t *vcache, const uint8_t *kscale,
+                                           const uint8_t *vscale, float *out, int heads, int kvHeads, int headDim,
+                                           int relLen, int extent, int window, int cap, float scale, int pos0, int T) {
+  if (headDim != ink2pa::kHD || relLen != ink2pa::kRL || kvHeads < 1 || heads != ink2pa::kG * kvHeads || T < 1 ||
+      cap < 1)
+    return (int)cudaErrorInvalidValue;
+  return ink2pa::ink2p_attend_v2_launch<2, 16, 1, 1, uint8_t, true>(q, r, sinks, relBias, kcache, vcache, out, heads,
+                                                                    kvHeads, extent, window, cap, scale, pos0, T,
+                                                                    kscale, vscale);
 }

@@ -141,3 +141,44 @@ type Inkling2FP8KVDevice interface {
 	// Ink2PAttendFP8 is Ink2PAttend reading E4M3FN kcache/vcache with F32 kscale/vscale for T tokens starting at pos0.
 	Ink2PAttendFP8(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error
 }
+
+// Ink2NVFP4KVCodeFloats returns the float32 element count to pass to Ink2Alloc
+// for one NVFP4 packed E2M1 K or V cache of capacity cap (cap * kvHeads * (headDim/2) bytes).
+func Ink2NVFP4KVCodeFloats(cap, kvHeads, headDim int) int {
+	return (cap*kvHeads*(headDim/2) + 3) / 4
+}
+
+// Ink2NVFP4KVScaleFloats returns the float32 element count to pass to Ink2Alloc
+// for one per-16-element E4M3FN block-scale buffer of capacity cap (cap * kvHeads * (headDim/16) bytes).
+func Ink2NVFP4KVScaleFloats(cap, kvHeads, headDim int) int {
+	return (cap*kvHeads*(headDim/16) + 3) / 4
+}
+
+// Inkling2NVFP4KVDevice is the decode and prefill QKV post and attend over
+// block-16 NVFP4 (E2M1 codes + E4M3FN block scales) global-slot caches;
+// local SWA rings stay fp32. Requires headDim % 16 == 0.
+//
+// Buffer layout per global slot:
+//   - kcache, vcache: uint8 packed E2M1 codes laid out [cap][kvHeads][headDim/2]
+//     (low nibble = even dim 2*i, high nibble = odd dim 2*i+1), allocated with
+//     Ink2Alloc(Ink2NVFP4KVCodeFloats(cap, kvHeads, headDim)).
+//   - kscale, vscale: uint8 OCP E4M3FN per-16-element block scales laid out
+//     [cap][kvHeads][headDim/16], allocated with
+//     Ink2Alloc(Ink2NVFP4KVScaleFloats(cap, kvHeads, headDim)).
+//     Dequant(pos, kvh, d) = decode_e2m1(nibble[pos, kvh, d]) * decode_e4m3fn(scale[pos, kvh, d/16]).
+//   - overflow (optional; zero Ink2Ref disables): 1-int32 device flag allocated
+//     with Ink2Alloc(1); set to non-zero via atomicOr if any K/V element is
+//     non-finite or any block scale exceeds E4M3FN max (amax16/6.0 > 448.0).
+type Inkling2NVFP4KVDevice interface {
+	// Ink2PNVFP4KVReady reports why the nvfp4 prefill ops cannot run in this process, before any is called.
+	Ink2PNVFP4KVReady() error
+	// Ink2QKVPostNVFP4 is Ink2QKVPost writing block-16 E2M1 codes to kcache/vcache
+	// and E4M3FN block scales to kscale/vscale.
+	Ink2QKVPostNVFP4(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error
+	// Ink2AttendNVFP4 is Ink2Attend reading block-16 E2M1 kcache/vcache with E4M3FN kscale/vscale.
+	Ink2AttendNVFP4(q, r, sinks, relBias, kcache, vcache, kscale, vscale, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error
+	// Ink2PQKVPostNVFP4 is Ink2PQKVPost writing block-16 E2M1 codes and E4M3FN scales for T tokens starting at pos0.
+	Ink2PQKVPostNVFP4(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error
+	// Ink2PAttendNVFP4 is Ink2PAttend reading block-16 E2M1 kcache/vcache with E4M3FN scales for T tokens starting at pos0.
+	Ink2PAttendNVFP4(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error
+}

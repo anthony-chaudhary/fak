@@ -46,6 +46,7 @@ func TestInkling2KVDTypeFromMatchesResidentAliases(t *testing.T) {
 		{"", Inkling2KVF32}, {"f32", Inkling2KVF32}, {"FP32", Inkling2KVF32},
 		{"f16", Inkling2KVF16}, {" FP16 ", Inkling2KVF16},
 		{"fp8", Inkling2KVFP8}, {" E4M3 ", Inkling2KVFP8}, {"e4m3fn", Inkling2KVFP8},
+		{"nvfp4", Inkling2KVNVFP4}, {" FP4 ", Inkling2KVNVFP4}, {"e2m1", Inkling2KVNVFP4},
 	} {
 		got, err := Inkling2KVDTypeFrom(func(string) (string, bool) { return c.value, c.value != "" })
 		if err != nil || got != c.want {
@@ -634,5 +635,130 @@ func TestInkling2AutoHalfKVYieldsToEnableSpec(t *testing.T) {
 	explicit := &inkling2Resident{kvHalf: true, kvAutoHalf: false}
 	if err := explicit.enableSpec(4); err == nil {
 		t.Fatal("explicit f16 KV allowed enableSpec")
+	}
+}
+
+func TestInkling2ResidentKVBytesNVFP4Fits128kAllResidentOnRTX5080(t *testing.T) {
+	hp := inkling2MiniKVShape()
+	// 8 global slots, each K+V = 2*(512 B E2M1 codes + 64 B block-16 E4M3FN scales) = 1152 B/tok
+	perGlobalToken := int64(8) * 1152
+	if perGlobalToken != 9216 {
+		t.Fatalf("global nvfp4 KV per token = %d bytes, want 9216", perGlobalToken)
+	}
+	delta := inkling2ResidentKVBytesFor(hp, 23553, false, 0, Inkling2KVNVFP4) - inkling2ResidentKVBytesFor(hp, 23552, false, 0, Inkling2KVNVFP4)
+	if want := perGlobalToken + 2*24*4; delta != want {
+		t.Fatalf("marginal nvfp4 bytes per token = %d, want %d (9216 global + 192 scores)", delta, want)
+	}
+	if got := inkling2ResidentPerPosBytesFor(hp, Inkling2KVNVFP4); got != delta {
+		t.Fatalf("perPos nvfp4 = %d, want %d", got, delta)
+	}
+	if Inkling2KVNVFP4.String() != "nvfp4" {
+		t.Fatalf("Inkling2KVNVFP4.String() = %q, want nvfp4", Inkling2KVNVFP4.String())
+	}
+
+	mini := hp
+	mini.Hidden = 2304
+	mini.ExpertsUsed = 8
+	mini.ExpertWidth = 768
+	const chunk = 128
+	other := inkling2ResidentOtherBytes(mini, inkling2ArenaFloats, chunk, 0)
+	for _, ctx := range []int{32768, 65536, 131072} {
+		fp8KV := inkling2ResidentKVBytesFor(mini, ctx, true, chunk, Inkling2KVFP8)
+		nvfp4KV := inkling2ResidentKVBytesFor(mini, ctx, true, chunk, Inkling2KVNVFP4)
+		// NVFP4 saves (2112 - 1152) = 960 B/tok per global slot vs FP8 across 8 global slots = 7680 B/tok.
+		if saved := fp8KV - nvfp4KV; saved != int64(8)*960*int64(ctx) {
+			t.Fatalf("ctx %d: fp8-nvfp4 saved %d bytes, want %d", ctx, saved, int64(8)*960*int64(ctx))
+		}
+		t.Logf("ctx=%d nvfp4_kv=%.3fGiB other_t128=%.3fGiB nvfp4_total=%.3fGiB (vs fp8_total=%.3fGiB)",
+			ctx,
+			float64(nvfp4KV)/(1<<30), float64(other)/(1<<30),
+			float64(nvfp4KV+other)/(1<<30), float64(fp8KV+other)/(1<<30))
+	}
+
+	// RTX 5080 (15.92 GiB) with all 24/24 expert layers resident has ~2.45 GiB free after weights.
+	const rtx5080FreeAfterWeights = int64(245) * (1 << 30) / 100
+	if _, err := inkling2KVFitFor(mini, 131072, true, chunk, Inkling2KVNVFP4, other, rtx5080FreeAfterWeights); err != nil {
+		t.Fatalf("128k NVFP4 (chunk=%d) did not fit 24/24 all-resident within RTX 5080 2.45 GiB post-weights free VRAM: %v", chunk, err)
+	}
+	if _, err := inkling2KVFitFor(mini, 131072, true, chunk, Inkling2KVFP8, other, rtx5080FreeAfterWeights); err == nil {
+		t.Fatal("128k FP8 unexpectedly fit within RTX 5080 2.45 GiB post-weights free VRAM without mapping experts")
+	}
+}
+
+func TestInkling2KVNVFP4SlotSpecCheckpointAndFallbackHierarchy(t *testing.T) {
+	hp := inkling2MiniKVShape()
+	s := &inkling2Resident{hp: hp, kvNVFP4: true}
+	global := 0
+	for slot := range inkling2ResidentCaps(hp, 1, false, 0) {
+		want := !hp.LocalLayer[inkling2SlotLayer(hp, slot)]
+		if got := s.kvNVFP4Slot(slot); got != want {
+			t.Fatalf("slot %d nvfp4 = %v, want %v", slot, got, want)
+		}
+		if want {
+			global++
+		}
+	}
+	if global != 8 {
+		t.Fatalf("global nvfp4 slots = %d, want 8", global)
+	}
+	if err := s.checkpointable(); err != nil {
+		t.Fatalf("nvfp4 session refused in-place global-KV checkpoint: %v", err)
+	}
+	if err := s.enableSpec(4); err == nil {
+		t.Fatal("nvfp4 session enabled speculative decode")
+	}
+
+	// Capability fallback hierarchy: nvfp4 -> fp8 -> f16 -> f32.
+	fp8Cap := &fakeInk2OverflowBackend{fakeInk2Budget: newFakeInk2Budget(1 << 30)}
+	if got := inkling2ResidentKVDType(fp8Cap, Inkling2KVNVFP4); got != Inkling2KVFP8 {
+		t.Fatalf("nvfp4 on fp8-capable backend = %v, want fp8 fallback", got)
+	}
+	if got := inkling2ResidentKVDType(fakeInk2HalfOnlyBackend{}, Inkling2KVNVFP4); got != Inkling2KVF16 {
+		t.Fatalf("nvfp4 on half-only backend = %v, want f16 fallback", got)
+	}
+	if got := inkling2ResidentKVDType(inkling2NoHalfBackend{}, Inkling2KVNVFP4); got != Inkling2KVF32 {
+		t.Fatalf("nvfp4 on f32-only backend = %v, want f32 fallback", got)
+	}
+}
+
+func TestInkling2NVFP4ScaleOverflowFallbackToHigher(t *testing.T) {
+	hp := model.Inkling2LoopHParams{
+		Hidden: 64, Layers: 2, Heads: 4, KVHeads: 2, HeadDim: 16,
+		SlidingWindow: 16, ConvKernel: 4, Passes: 1,
+		LocalLayer: []bool{true, false},
+	}
+	// Backend supports FP8 + F16 (not NVFP4 fallback target), so NVFP4 overflow falls back to FP8.
+	be := &fakeInk2OverflowBackend{fakeInk2Budget: newFakeInk2Budget(1 << 30), overflowFlag: 1}
+	s := &inkling2Resident{
+		hp: hp, be: be, dev: be,
+		kvNVFP4: true,
+		caps:    []int{16, 64},
+		kc:      make([]ink2Ref, 2), vc: make([]ink2Ref, 2),
+		ks: make([]ink2Ref, 2), vs: make([]ink2Ref, 2),
+		hist: make([]ink2Ref, 2),
+		pos:  32,
+	}
+	s.kc[0], s.vc[0] = s.alloc(16*32), s.alloc(16*32)
+	s.kc[1], s.vc[1] = s.alloc(compute.Ink2NVFP4KVCodeFloats(64, 2, 16)), s.alloc(compute.Ink2NVFP4KVCodeFloats(64, 2, 16))
+	s.ks[1], s.vs[1] = s.alloc(compute.Ink2NVFP4KVScaleFloats(64, 2, 16)), s.alloc(compute.Ink2NVFP4KVScaleFloats(64, 2, 16))
+	s.hist[0], s.hist[1] = s.alloc(s.histFloats()), s.alloc(s.histFloats())
+	s.kvOverflow = s.alloc(1)
+
+	overflow, err := s.checkKVOverflow()
+	if err != nil || !overflow {
+		t.Fatalf("checkKVOverflow = (%v, %v), want (true, nil)", overflow, err)
+	}
+	if err := s.fallbackNVFP4ToHigher(); err != nil {
+		t.Fatalf("fallbackNVFP4ToHigher: %v", err)
+	}
+	if s.kvNVFP4 || !s.kvFP8 || s.kvDType() != Inkling2KVFP8 {
+		t.Fatalf("post-fallback dtype = %v (nvfp4=%v fp8=%v), want fp8", s.kvDType(), s.kvNVFP4, s.kvFP8)
+	}
+	if s.pos != 0 {
+		t.Fatalf("post-fallback pos = %d, want 0", s.pos)
+	}
+	s.close()
+	if be.live != 0 || be.frees != be.allocs {
+		t.Fatalf("after close: live=%d frees=%d allocs=%d", be.live, be.frees, be.allocs)
 	}
 }

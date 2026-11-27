@@ -675,6 +675,7 @@ static __device__ __forceinline__ float ink2_kv_f(float x) { return x; }
 static __device__ __forceinline__ float ink2_kv_f(__half x) { return __half2float(x); }
 
 #include "inkling2_fp8.cuh"
+#include "inkling2_nvfp4_kv.cuh"
 
 // ink2_put_k_fp8: same fp32 conv + L2 clip as ink2_put_k, then per-(token, kvHead)
 // absmax scale + OCP E4M3FN RNE encode. Sets *overflow |= 1 on any non-finite value.
@@ -837,17 +838,127 @@ static __device__ __forceinline__ void ink2_put_v_fp8(uint8_t *dst, float *scale
   }
 }
 
+// Block-16 NVFP4 quantize of one head already normalized/clipped in registers x[u]
+// where lane owns element i = 32*u + lane (half-warp 0 = block 2*u, half-warp 1 = block 2*u+1).
+static __device__ __forceinline__ void ink2_store_nvfp4_head(uint8_t *dst, uint8_t *scaleDst, int *overflow,
+                                                             const float (&x)[INK2_KV_REGS], int headDim, int badPre) {
+  const int lane = threadIdx.x & 31;
+  const int sub = lane & 15;
+  const int nblocks = headDim >> 4;
+#pragma unroll
+  for (int u = 0; u < INK2_KV_REGS; ++u) {
+    const int i = 32 * u + lane;
+    const int b = 2 * u + (lane >> 4);
+    if (b >= nblocks) break;
+    const float val = i < headDim ? x[u] : 0.f;
+    const int badElem = badPre || !isfinite(val);
+    const float amax16 = ink2_halfwarp_max(badElem ? 0.f : fabsf(val));
+    const int badBlk = badElem || !isfinite(amax16) || (amax16 > kInk2NVFP4MaxBlockAbsmax);
+    const unsigned mask = (lane < 16) ? 0x0000ffffu : 0xffff0000u;
+    const int anyBad = __any_sync(mask, badBlk != 0);
+    if (anyBad) {
+      if (sub == 0) {
+        if (overflow) atomicOr(overflow, 1);
+        scaleDst[b] = 0u;
+      }
+      if ((sub & 1) == 0) dst[b * 8 + (sub >> 1)] = 0u;
+      continue;
+    }
+    uint8_t scCode = 0u;
+    float inv = 0.f;
+    if (amax16 >= kInk2NVFP4MinAbsmax) {
+      scCode = ink2_e4m3fn_encode(__fmul_rn(amax16, 1.0f / kInk2NVFP4Max));
+      if (scCode != 0u) {
+        const float sc = ink2_e4m3fn_decode(scCode);
+        if (sc > 0.f && isfinite(sc)) inv = __fdiv_rn(1.0f, sc);
+        else scCode = 0u;
+      }
+    }
+    if (sub == 0) scaleDst[b] = scCode;
+    const float qv = __fmul_rn(val, inv);
+    const float hi = __shfl_down_sync(mask, qv, 1);
+    if ((sub & 1) == 0) dst[b * 8 + (sub >> 1)] = ink2_e2m1x2_encode(qv, hi);
+  }
+}
+
+// ink2_put_k_nvfp4: same fp32 conv + L2 clip as ink2_put_k, then block-16 E2M1 + E4M3FN scales.
+static __device__ __forceinline__ void ink2_put_k_nvfp4(uint8_t *dst, uint8_t *scaleDst, int *overflow, const float *k,
+                                                        const Ink2KVConv &cv, int h, int headDim, int kvHeads,
+                                                        float qkClip) {
+  const int lane = threadIdx.x & 31;
+  const int kvDim = kvHeads * headDim;
+  float x[INK2_KV_REGS];
+  float ss = 0.f;
+#pragma unroll
+  for (int u = 0; u < INK2_KV_REGS; ++u) {
+    const int i = 32 * u + lane;
+    if (i < headDim) {
+      const int c = h * headDim + i;
+      const float val =
+          cv.on ? ink2_conv_chan(k[c], c, cv.w[0], cv.dyn[0], cv.hist[0], kvDim, kvHeads, cv.kn, cv.norm[0]) : k[c];
+      x[u] = val;
+      ss = fmaf(val, val, ss);
+    } else {
+      x[u] = 0.f;
+    }
+  }
+  ss = ink2_warp_sum(ss);
+  const float norm = __fadd_rn((float)sqrt((double)ss), 1e-6f);
+  float f = __fdiv_rn(qkClip, norm);
+  if (f > 1.f) f = 1.f;
+  if (f < 0.f) f = 0.f;
+  const int badF = !isfinite(f);
+#pragma unroll
+  for (int u = 0; u < INK2_KV_REGS; ++u) {
+    const int i = 32 * u + lane;
+    if (i < headDim) x[u] = __fmul_rn(x[u], f);
+  }
+  ink2_store_nvfp4_head(dst, scaleDst, overflow, x, headDim, badF);
+}
+
+// ink2_put_v_nvfp4: same fp32 conv + RMS norm as ink2_put_v, then block-16 E2M1 + E4M3FN scales.
+static __device__ __forceinline__ void ink2_put_v_nvfp4(uint8_t *dst, uint8_t *scaleDst, int *overflow, const float *v,
+                                                        const Ink2KVConv &cv, int h, int headDim, int kvHeads,
+                                                        float eps) {
+  const int lane = threadIdx.x & 31;
+  const int kvDim = kvHeads * headDim;
+  float x[INK2_KV_REGS];
+  double ss = 0;
+#pragma unroll
+  for (int u = 0; u < INK2_KV_REGS; ++u) {
+    const int i = 32 * u + lane;
+    if (i < headDim) {
+      const int c = h * headDim + i;
+      const float val =
+          cv.on ? ink2_conv_chan(v[c], c, cv.w[1], cv.dyn[1], cv.hist[1], kvDim, kvHeads, cv.kn, cv.norm[1]) : v[c];
+      x[u] = val;
+      ss += (double)val * (double)val;
+    } else {
+      x[u] = 0.f;
+    }
+  }
+  for (int d = 16; d > 0; d >>= 1) ss += __shfl_xor_sync(0xffffffff, ss, d);
+  const float s = (float)(1.0 / sqrt(ss / (double)headDim + (double)eps));
+  const int badS = !isfinite(s);
+#pragma unroll
+  for (int u = 0; u < INK2_KV_REGS; ++u) {
+    const int i = 32 * u + lane;
+    if (i < headDim) x[u] = __fmul_rn(x[u], s);
+  }
+  ink2_store_nvfp4_head(dst, scaleDst, overflow, x, headDim, badS);
+}
+
 // Post-projection attention prep for one layer visit: per-head q/r clips, k clip, v RMS,
 // the global log-scale tau on q and r, and the append of k/v into the slot cache at the
 // current position (ring index for local slots). Blocks: [0,heads) q+r heads, then
 // kvHeads k heads, then kvHeads v heads; one warp per head. blockIdx.y is the sequence.
-// T is the cache element (float, __half, or uint8_t E4M3FN); cache strides are in elements.
-template <class T>
+// T is the cache element (float, __half, or uint8_t E4M3FN/NVFP4); cache strides are in elements.
+template <class T, bool NVFP4 = false>
 __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
                                 const float *rclip, T *kcache, T *vcache, const float *meta,
                                 int heads, int kvHeads, int headDim, int relLen, float qkClip, float relClip,
                                 float eps, int global, float alpha, float floorTok, int cap, Ink2KVConv cv0,
-                                Ink2Seq sq, float *kscale = nullptr, float *vscale = nullptr,
+                                Ink2Seq sq, void *kscale = nullptr, void *vscale = nullptr,
                                 int *overflow = nullptr) {
   ink2_pdl_enter();
   const int lane = threadIdx.x & 31;
@@ -883,18 +994,28 @@ __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float 
   const int kvDim = kvHeads * headDim;
   if (b < heads + kvHeads) {
     const int h = b - heads;
-    if constexpr (sizeof(T) == 1) {
-      ink2_put_k_fp8(kcache + (size_t)idx * kvDim + (size_t)h * headDim, kscale + (size_t)idx * kvHeads + h, overflow,
-                     k, cv, h, headDim, kvHeads, qkClip);
+    if constexpr (NVFP4) {
+      const int hBytes = headDim >> 1, hBlks = headDim >> 4;
+      ink2_put_k_nvfp4(kcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
+                       (uint8_t *)kscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow, k, cv, h,
+                       headDim, kvHeads, qkClip);
+    } else if constexpr (sizeof(T) == 1) {
+      ink2_put_k_fp8(kcache + (size_t)idx * kvDim + (size_t)h * headDim, (float *)kscale + (size_t)idx * kvHeads + h,
+                     overflow, k, cv, h, headDim, kvHeads, qkClip);
     } else {
       ink2_put_k(kcache + (size_t)idx * kvDim + (size_t)h * headDim, k, cv, h, headDim, kvHeads, qkClip);
     }
     return;
   }
   const int h = b - heads - kvHeads;
-  if constexpr (sizeof(T) == 1) {
-    ink2_put_v_fp8(vcache + (size_t)idx * kvDim + (size_t)h * headDim, vscale + (size_t)idx * kvHeads + h, overflow, v,
-                   cv, h, headDim, kvHeads, eps);
+  if constexpr (NVFP4) {
+    const int hBytes = headDim >> 1, hBlks = headDim >> 4;
+    ink2_put_v_nvfp4(vcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
+                     (uint8_t *)vscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow, v, cv, h,
+                     headDim, kvHeads, eps);
+  } else if constexpr (sizeof(T) == 1) {
+    ink2_put_v_fp8(vcache + (size_t)idx * kvDim + (size_t)h * headDim, (float *)vscale + (size_t)idx * kvHeads + h,
+                   overflow, v, cv, h, headDim, kvHeads, eps);
   } else {
     ink2_put_v(vcache + (size_t)idx * kvDim + (size_t)h * headDim, v, cv, h, headDim, kvHeads, eps);
   }
@@ -906,12 +1027,12 @@ __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float 
 // denominator serially in key order, the output thread-per-dim in key order.
 #define INK2_ATT_THREADS 512
 #define INK2_ATT_GROUPS 4
-template <class T>
+template <class T, bool NVFP4 = false>
 __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q, const float *r, const float *sinks, const float *relBias,
                               const T *kcache, const T *vcache, double *scores, float *out,
                               const float *meta, int heads, int kvHeads, int headDim, int relLen,
                               int extent, int window, int cap, float scale, Ink2Seq sq,
-                              const float *kscale = nullptr, const float *vscale = nullptr) {
+                              const void *kscale = nullptr, const void *vscale = nullptr) {
   ink2_pdl_enter();
   const int h = blockIdx.x;
   // blockIdx.y is the sequence, each with its own scores rows
@@ -942,9 +1063,22 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
     const int p = first + j;
     const int dist = pos - p;
     const size_t slotIdx = (size_t)(p % cap);
-    const T *kr = kcache + slotIdx * kvDim + (size_t)kvh * headDim;
     float d = 0.f;
-    for (int i = lane; i < headDim; i += 32) d = fmaf(qh[i], ink2_kv_f(kr[i]), d);
+    if constexpr (NVFP4) {
+      const int hBytes = headDim >> 1, hBlks = headDim >> 4;
+      const uint8_t *kr = (const uint8_t *)kcache + slotIdx * (size_t)(kvHeads * hBytes) + (size_t)kvh * hBytes;
+      const uint8_t *ks = (const uint8_t *)kscale + slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks;
+      for (int bi = lane; bi < hBytes; bi += 32) {
+        const float2 kv = ink2_e2m1x2_decode_f2(kr[bi]);
+        const float bsc = ink2_e4m3fn_decode(ks[bi >> 3]);
+        const int d0 = bi << 1;
+        d = fmaf(qh[d0], __fmul_rn(kv.x, bsc), d);
+        d = fmaf(qh[d0 + 1], __fmul_rn(kv.y, bsc), d);
+      }
+    } else {
+      const T *kr = kcache + slotIdx * kvDim + (size_t)kvh * headDim;
+      for (int i = lane; i < headDim; i += 32) d = fmaf(qh[i], ink2_kv_f(kr[i]), d);
+    }
     float rd = 0.f;
     if (dist < extent) {
       const float *rb = relBias + (size_t)dist * relLen;
@@ -954,7 +1088,8 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
       d += __shfl_xor_sync(0xffffffff, d, o);
       rd += __shfl_xor_sync(0xffffffff, rd, o);
     }
-    if constexpr (sizeof(T) == 1) d = __fmul_rn(d, kscale[slotIdx * (size_t)kvHeads + (size_t)kvh]);
+    if constexpr (!NVFP4 && sizeof(T) == 1)
+      d = __fmul_rn(d, ((const float *)kscale)[slotIdx * (size_t)kvHeads + (size_t)kvh]);
     float bias = -sinks[h];
     if (dist < extent) bias = __fadd_rn(bias, rd);
     const double s = (double)__fadd_rn(__fmul_rn(d, scale), bias);
@@ -994,8 +1129,18 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
     for (int j = g; j < n; j += groups) {
       const float w = wsh[j];
       const size_t slotIdx = (size_t)((first + j) % cap);
-      const T *vr = vcache + slotIdx * kvDim + (size_t)kvh * headDim;
-      acc = fmaf(w, ink2_kv_val(vr[dd], vscale, slotIdx, kvHeads, kvh), acc);
+      float vval;
+      if constexpr (NVFP4) {
+        const int hBytes = headDim >> 1, hBlks = headDim >> 4;
+        const uint8_t packed = ((const uint8_t *)vcache)[slotIdx * (size_t)(kvHeads * hBytes) + (size_t)kvh * hBytes + (dd >> 1)];
+        const uint8_t scb = ((const uint8_t *)vscale)[slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks + (dd >> 4)];
+        const float2 vv = ink2_e2m1x2_decode_f2(packed);
+        vval = __fmul_rn((dd & 1) ? vv.y : vv.x, ink2_e4m3fn_decode(scb));
+      } else {
+        const T *vr = vcache + slotIdx * kvDim + (size_t)kvh * headDim;
+        vval = ink2_kv_val(vr[dd], (const float *)vscale, slotIdx, kvHeads, kvh);
+      }
+      acc = fmaf(w, vval, acc);
     }
     gacc[g][dd] = acc;
   }
@@ -1677,6 +1822,35 @@ extern "C" int fcuda_ink2_qkv_post_fp8(float *q, float *r, const float *k, const
   return ink2_last_error();
 }
 
+// fcuda_ink2_qkv_post_nvfp4 writes block-16 packed E2M1 codes and E4M3FN block scales.
+extern "C" int fcuda_ink2_qkv_post_nvfp4(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                         const float *rclip, uint8_t *kcache, uint8_t *vcache, uint8_t *kscale,
+                                         uint8_t *vscale, int *overflow, const float *meta, int heads, int kvHeads,
+                                         int headDim, int relLen, float qkClip, float relClip, float eps, int global,
+                                         float alpha, float floorTok, int cap, const float *const *conv, float kNorm,
+                                         float vNorm, int kn) {
+  if (headDim < 16 || (headDim & 15) != 0 || headDim > 32 * INK2_KV_REGS || kvHeads < 1 || heads < 1 || cap < 1)
+    return (int)cudaErrorInvalidValue;
+  Ink2KVConv cv = {};
+  if (conv) {
+    cv.w[0] = conv[0];
+    cv.w[1] = conv[1];
+    cv.dyn[0] = conv[2];
+    cv.dyn[1] = conv[3];
+    cv.hist[0] = (float *)conv[4];
+    cv.hist[1] = (float *)conv[5];
+    cv.norm[0] = kNorm;
+    cv.norm[1] = vNorm;
+    cv.kn = kn;
+    cv.on = 1;
+  }
+  const dim3 blocks(heads + 2 * kvHeads, 1);
+  FCUDA_TS("k_ink2_qkv_post", blocks, (k_ink2_qkv_post<uint8_t, true><<<blocks, 32, 0, g_stream>>>(
+      q, r, k, v, qclip, rclip, kcache, vcache, meta, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global,
+      alpha, floorTok, cap, cv, Ink2Seq{}, kscale, vscale, overflow)));
+  return ink2_last_error();
+}
+
 // The 48 KiB default bounds static plus dynamic shared memory, so the opt-in starts
 // below 48 KiB of dynamic bytes by the static allowance (the attend kernels carry ~5.5 KiB).
 #define INK2_SMEM_STATIC_ALLOWANCE (8 * 1024)
@@ -1694,27 +1868,27 @@ extern "C" int fcuda_ink2_attend(const float *q, const float *r, const float *si
 // scores holds st's scores stride (floats) per sequence, so sequences never share it.
 // The split/reference choice is made once for every row by the same rule a single
 // sequence applies, and the two are bit-identical anyway.
-template <class T>
+template <class T, bool NVFP4 = false>
 static int ink2_attend_seq(const float *q, const float *r, const float *sinks, const float *relBias, const T *kcache,
                            const T *vcache, double *scores, float *out, const float *meta, int heads, int kvHeads,
                            int headDim, int relLen, int extent, int window, int cap, float scale, const Ink2Seq &sq,
-                           int C, const float *kscale = nullptr, const float *vscale = nullptr) {
-  if (ink2_attend_split(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen, extent,
-                        window, cap, scale, sq, C, kscale, vscale))
+                           int C, const void *kscale = nullptr, const void *vscale = nullptr) {
+  if (ink2_attend_split<T, NVFP4>(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim,
+                                  relLen, extent, window, cap, scale, sq, C, kscale, vscale))
     return ink2_last_error();
   const size_t smem = (size_t)cap * sizeof(float);
   if (smem + INK2_SMEM_STATIC_ALLOWANCE > 48 * 1024) {
     const cudaError_t oe =
-        cudaFuncSetAttribute(k_ink2_attend<T>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
+        cudaFuncSetAttribute(k_ink2_attend<T, NVFP4>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
     if (oe != cudaSuccess) {
       cudaGetLastError();
       return (int)oe;
     }
   }
   const dim3 g(heads, C);
-  FCUDA_TS("k_ink2_attend", g, k_ink2_attend<T><<<g, INK2_ATT_THREADS, smem, g_stream>>>(
+  FCUDA_TS("k_ink2_attend", g, (k_ink2_attend<T, NVFP4><<<g, INK2_ATT_THREADS, smem, g_stream>>>(
       q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen, extent, window, cap,
-      scale, sq, kscale, vscale));
+      scale, sq, kscale, vscale)));
   return ink2_last_error();
 }
 
@@ -1743,8 +1917,21 @@ extern "C" int fcuda_ink2_attend_fp8(const float *q, const float *r, const float
   if (headDim < 1 || headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS || kvHeads < 1 || heads < 1 ||
       cap < 1)
     return (int)cudaErrorInvalidValue;
-  return ink2_attend_seq(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen,
-                         extent, window, cap, scale, Ink2Seq{}, 1, kscale, vscale);
+  return ink2_attend_seq<uint8_t, false>(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads,
+                                         headDim, relLen, extent, window, cap, scale, Ink2Seq{}, 1, kscale, vscale);
+}
+
+// fcuda_ink2_attend_nvfp4 attends over block-16 packed E2M1 kcache/vcache with E4M3FN scales.
+extern "C" int fcuda_ink2_attend_nvfp4(const float *q, const float *r, const float *sinks, const float *relBias,
+                                       const uint8_t *kcache, const uint8_t *vcache, const uint8_t *kscale,
+                                       const uint8_t *vscale, double *scores, float *out, const float *meta, int heads,
+                                       int kvHeads, int headDim, int relLen, int extent, int window, int cap,
+                                       float scale) {
+  if (headDim < 16 || (headDim & 15) != 0 || headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS ||
+      kvHeads < 1 || heads < 1 || cap < 1)
+    return (int)cudaErrorInvalidValue;
+  return ink2_attend_seq<uint8_t, true>(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads,
+                                        headDim, relLen, extent, window, cap, scale, Ink2Seq{}, 1, kscale, vscale);
 }
 
 extern "C" int fcuda_ink2_sigmoid_mul(float *x, const float *gate, int n) {

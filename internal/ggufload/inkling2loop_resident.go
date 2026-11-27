@@ -143,13 +143,17 @@ type inkling2Resident struct {
 	// kvHalf stores the global-slot K and V caches as f16 (FAK_INKLING2_KV=f16 or auto);
 	// kvAutoHalf marks auto-selected f16 (unset FAK_INKLING2_KV) so enableSpec can safely
 	// yield back to fp32. halfDev is the decode op set that reads them. kvFP8 stores them
-	// as OCP E4M3FN codes with per-(token, kvHead) f32 scales (FAK_INKLING2_KV=fp8) and an
-	// overflow flag. Local sliding-window rings always stay fp32.
+	// as OCP E4M3FN codes with per-(token, kvHead) f32 scales (FAK_INKLING2_KV=fp8).
+	// kvNVFP4 stores them as block-16 packed E2M1 codes with per-16-element E4M3FN scales
+	// (FAK_INKLING2_KV=nvfp4). Both share ks/vs scale refs and kvOverflow. Local
+	// sliding-window rings always stay fp32.
 	kvHalf     bool
 	kvAutoHalf bool
 	halfDev    compute.Inkling2HalfKVDevice
 	kvFP8      bool
 	fp8Dev     compute.Inkling2FP8KVDevice
+	kvNVFP4    bool
+	nvfp4Dev   compute.Inkling2NVFP4KVDevice
 	ks, vs     []ink2Ref
 	kvOverflow ink2Ref
 
@@ -357,10 +361,15 @@ func inkling2ResidentCtxAutoSet(lookup func(string) (string, bool)) bool {
 }
 
 // inkling2GlobalKVSlotBytes is the device bytes of one global slot's K and V caches
-// (plus per-(token, kvHead) f32 scales for FP8) at cap positions.
+// (plus per-(token, kvHead) f32 scales for FP8, or per-16-element E4M3FN scales for
+// NVFP4) at cap positions.
 func inkling2GlobalKVSlotBytes(hp model.Inkling2LoopHParams, cap int, dtype Inkling2KVDType) int64 {
 	kvDim := int64(hp.KVHeads * hp.HeadDim)
 	switch dtype {
+	case Inkling2KVNVFP4:
+		codeBytes := int64(compute.Ink2NVFP4KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)) * 4
+		scaleBytes := int64(compute.Ink2NVFP4KVScaleFloats(cap, hp.KVHeads, hp.HeadDim)) * 4
+		return 2 * (codeBytes + scaleBytes)
 	case Inkling2KVFP8:
 		codeBytes := int64(compute.Ink2FP8KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)) * 4
 		scaleBytes := int64(compute.Ink2FP8KVScaleFloats(cap, hp.KVHeads)) * 4
@@ -773,6 +782,9 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 			return nil, err
 		}
 		switch dtype {
+		case Inkling2KVNVFP4:
+			s.kvNVFP4 = true
+			s.nvfp4Dev, _ = be.(compute.Inkling2NVFP4KVDevice)
 		case Inkling2KVFP8:
 			s.kvFP8 = true
 			s.fp8Dev, _ = be.(compute.Inkling2FP8KVDevice)
@@ -884,12 +896,18 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 	for slot, cap := range s.caps {
 		maxCap = max(maxCap, cap)
 		if ctx > 0 {
-			if s.kvFP8Slot(slot) {
+			switch {
+			case s.kvNVFP4Slot(slot):
+				codeFloats := compute.Ink2NVFP4KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)
+				scaleFloats := compute.Ink2NVFP4KVScaleFloats(cap, hp.KVHeads, hp.HeadDim)
+				s.kc[slot], s.vc[slot] = s.alloc(codeFloats), s.alloc(codeFloats)
+				s.ks[slot], s.vs[slot] = s.alloc(scaleFloats), s.alloc(scaleFloats)
+			case s.kvFP8Slot(slot):
 				codeFloats := compute.Ink2FP8KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)
 				scaleFloats := compute.Ink2FP8KVScaleFloats(cap, hp.KVHeads)
 				s.kc[slot], s.vc[slot] = s.alloc(codeFloats), s.alloc(codeFloats)
 				s.ks[slot], s.vs[slot] = s.alloc(scaleFloats), s.alloc(scaleFloats)
-			} else {
+			default:
 				kvFloats := inkling2BatchKVFloats(cap*kvDim, s.kvHalfSlot(slot))
 				s.kc[slot], s.vc[slot] = s.alloc(kvFloats), s.alloc(kvFloats)
 			}
@@ -898,7 +916,7 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 	}
 	if ctx > 0 {
 		s.scores = s.alloc(2 * hp.Heads * maxCap)
-		if s.kvFP8 {
+		if s.kvFP8 || s.kvNVFP4 {
 			s.kvOverflow = s.alloc(1)
 		}
 	}
@@ -1227,6 +1245,8 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	cap := s.caps[slot]
 	if s.err == nil {
 		switch {
+		case s.kvNVFP4Slot(slot):
+			s.fail(s.nvfp4Dev.Ink2QKVPostNVFP4(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.kvOverflow, meta, p, cap, cv))
 		case s.kvFP8Slot(slot):
 			s.fail(s.fp8Dev.Ink2QKVPostFP8(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.kvOverflow, meta, p, cap, cv))
 		case s.kvHalfSlot(slot):
@@ -1242,6 +1262,8 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	attn := s.tmp(hp.Heads * hp.HeadDim)
 	if s.err == nil {
 		switch {
+		case s.kvNVFP4Slot(slot):
+			s.fail(s.nvfp4Dev.Ink2AttendNVFP4(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.scores, attn, meta, p, extent, window, cap))
 		case s.kvFP8Slot(slot):
 			s.fail(s.fp8Dev.Ink2AttendFP8(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.scores, attn, meta, p, extent, window, cap))
 		case s.kvHalfSlot(slot):
@@ -1442,9 +1464,12 @@ func (s *inkling2Resident) step(token int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if overflow, oerr := s.checkFP8Overflow(); oerr != nil {
+	if overflow, oerr := s.checkKVOverflow(); oerr != nil {
 		return 0, oerr
 	} else if overflow {
+		if s.kvNVFP4 {
+			return 0, ErrInkling2NVFP4ScaleOverflow
+		}
 		return 0, ErrInkling2FP8ScaleOverflow
 	}
 	return s.finishStep(int(got[0])), nil
@@ -1515,9 +1540,17 @@ func (s *inkling2Resident) kvFP8Slot(slot int) bool {
 	return s.kvFP8 && !s.localAt(slot)
 }
 
+// kvNVFP4Slot reports whether slot's K and V caches are block-16 packed E2M1 with
+// per-16-element E4M3FN scales: the global slots of an nvfp4 session. Local rings stay fp32.
+func (s *inkling2Resident) kvNVFP4Slot(slot int) bool {
+	return s.kvNVFP4 && !s.localAt(slot)
+}
+
 // kvDType returns the active global-slot KV dtype of the session.
 func (s *inkling2Resident) kvDType() Inkling2KVDType {
 	switch {
+	case s.kvNVFP4:
+		return Inkling2KVNVFP4
 	case s.kvFP8:
 		return Inkling2KVFP8
 	case s.kvHalf:
@@ -1529,7 +1562,15 @@ func (s *inkling2Resident) kvDType() Inkling2KVDType {
 
 // checkFP8Overflow reads the device overflow flag when the session uses FP8 global KV.
 func (s *inkling2Resident) checkFP8Overflow() (bool, error) {
-	if !s.kvFP8 || s.kvOverflow.T.Buf() == nil {
+	if !s.kvFP8 {
+		return false, nil
+	}
+	return s.checkKVOverflow()
+}
+
+// checkKVOverflow reads the device overflow flag when the session uses FP8 or NVFP4 global KV.
+func (s *inkling2Resident) checkKVOverflow() (bool, error) {
+	if (!s.kvFP8 && !s.kvNVFP4) || s.kvOverflow.T.Buf() == nil {
 		return false, nil
 	}
 	flag, err := s.dev.Ink2ReadInts(s.kvOverflow, 1)
@@ -1537,6 +1578,60 @@ func (s *inkling2Resident) checkFP8Overflow() (bool, error) {
 		return false, err
 	}
 	return len(flag) > 0 && flag[0] != 0, nil
+}
+
+// fallbackNVFP4ToHigher releases the NVFP4 global-slot buffers and reallocates global
+// slots as FP8 (when available) or FP16, clearing conv histories and resetting position
+// to 0 so a cold prefill that hit NVFP4 scale overflow can re-run cleanly.
+func (s *inkling2Resident) fallbackNVFP4ToHigher() error {
+	useFP8 := inkling2BackendFP8KVErr(s.be) == nil
+	if !useFP8 {
+		if err := inkling2BackendHalfKVErr(s.be); err != nil {
+			return fmt.Errorf("%w: no fp8 or f16 fallback available (%v)", ErrInkling2NVFP4ScaleOverflow, err)
+		}
+	}
+	target := "f16"
+	if useFP8 {
+		target = "fp8"
+	}
+	inkling2KVNVFP4OverflowLog(target)
+	s.dropCaptures()
+	hp := s.hp
+	kvDim := hp.KVHeads * hp.HeadDim
+	for slot, cap := range s.caps {
+		if !s.kvNVFP4Slot(slot) {
+			continue
+		}
+		s.release(s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot])
+		s.ks[slot], s.vs[slot] = ink2Ref{}, ink2Ref{}
+		if useFP8 {
+			codeFloats := compute.Ink2FP8KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)
+			scaleFloats := compute.Ink2FP8KVScaleFloats(cap, hp.KVHeads)
+			s.kc[slot], s.vc[slot] = s.alloc(codeFloats), s.alloc(codeFloats)
+			s.ks[slot], s.vs[slot] = s.alloc(scaleFloats), s.alloc(scaleFloats)
+		} else {
+			kvFloats := inkling2BatchKVFloats(cap*kvDim, true)
+			s.kc[slot], s.vc[slot] = s.alloc(kvFloats), s.alloc(kvFloats)
+		}
+	}
+	s.release(s.kvOverflow)
+	s.kvOverflow = ink2Ref{}
+	s.kvNVFP4 = false
+	s.nvfp4Dev = nil
+	if useFP8 {
+		s.kvFP8 = true
+		s.fp8Dev, _ = s.be.(compute.Inkling2FP8KVDevice)
+		s.kvOverflow = s.alloc(1)
+	} else {
+		s.kvHalf = true
+		s.halfDev, _ = s.be.(compute.Inkling2HalfKVDevice)
+	}
+	zero := make([]float32, s.histFloats())
+	for slot := range s.hist {
+		s.fail(s.dev.Ink2Write(s.hist[slot], zero))
+	}
+	s.pos = 0
+	return s.err
 }
 
 // fallbackFP8ToFP16 releases the FP8 global-slot buffers, allocates FP16 global-slot

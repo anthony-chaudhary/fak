@@ -48,6 +48,14 @@ type inkling2KVKLSummary struct {
 	PerPrompt          []inkling2KVKLPromptSummary `json:"per_prompt"`
 }
 
+type inkling2KVKLConfig struct {
+	candKV     string
+	wantDType  Inkling2KVDType
+	jsonPrefix string
+	defaultMax float64
+	checkReady func(t *testing.T, be compute.Backend)
+}
+
 // inkling2PairedBootstrapCI computes the two-sided 95% percentile bootstrap confidence
 // interval [lo, hi] for the mean of paired per-token KL observations using a fixed seed.
 func inkling2PairedBootstrapCI(samples []float64, resamples int, seed int64) (lo, hi float64) {
@@ -89,19 +97,64 @@ func inkling2PairedBootstrapCI(samples []float64, resamples int, seed int64) (lo
 //   - FAK_INKLING2_KL_CTX=C      (optional session ctx & deep prompt depth, e.g. 4096/8192/32768)
 //   - FAK_INKLING2_KL_MAX=T      (optional 95% CI upper bound threshold in nats, default 0.0015)
 func TestInkling2CUDAKVFP8KLGate(t *testing.T) {
+	runInkling2CUDAKVKLGate(t, inkling2KVKLConfig{
+		candKV:     "fp8",
+		wantDType:  Inkling2KVFP8,
+		jsonPrefix: "inkling2_kv_fp8_kl_json",
+		defaultMax: 0.0015,
+		checkReady: func(t *testing.T, be compute.Backend) {
+			t.Helper()
+			fp8Dev, ok := be.(compute.Inkling2FP8KVDevice)
+			if !ok {
+				t.Fatalf("cuda backend %s does not implement compute.Inkling2FP8KVDevice", be.Name())
+			}
+			if err := fp8Dev.Ink2PFP8KVReady(); err != nil {
+				t.Fatalf("cuda FP8 KV ops not ready: %v", err)
+			}
+		},
+	})
+}
+
+// fak-test:runtime integration est=120s lane=optin
+//
+// TestInkling2CUDAKVNVFP4KLGate verifies full-vocab KL(P_fp32 || P_nvfp4) on teacher-forced
+// continuations for Inkling-2-Mini global block-16 NVFP4 E4M3-scaled KV caches against the
+// FP32 reference.
+//
+// Environment controls:
+//   - FAK_INKLING2_KV_KL_TEST=1  (required to run)
+//   - FAK_INKLING2_GGUF=<path>   (required GGUF model path)
+//   - FAK_INKLING2_KL_TOKENS=N   (optional measured positions per prompt, default 64)
+//   - FAK_INKLING2_KL_CTX=C      (optional session ctx & deep prompt depth, e.g. 4096/8192/32768)
+//   - FAK_INKLING2_KL_MAX=T      (optional 95% CI upper bound threshold in nats, default 0.0015)
+func TestInkling2CUDAKVNVFP4KLGate(t *testing.T) {
+	runInkling2CUDAKVKLGate(t, inkling2KVKLConfig{
+		candKV:     "nvfp4",
+		wantDType:  Inkling2KVNVFP4,
+		jsonPrefix: "inkling2_kv_nvfp4_kl_json",
+		defaultMax: 0.0015,
+		checkReady: func(t *testing.T, be compute.Backend) {
+			t.Helper()
+			nvfp4Dev, ok := be.(compute.Inkling2NVFP4KVDevice)
+			if !ok {
+				t.Fatalf("cuda backend %s does not implement compute.Inkling2NVFP4KVDevice", be.Name())
+			}
+			if err := nvfp4Dev.Ink2PNVFP4KVReady(); err != nil {
+				t.Fatalf("cuda NVFP4 KV ops not ready: %v", err)
+			}
+		},
+	})
+}
+
+func runInkling2CUDAKVKLGate(t *testing.T, cfg inkling2KVKLConfig) {
+	t.Helper()
 	if strings.TrimSpace(os.Getenv("FAK_INKLING2_KV_KL_TEST")) != "1" {
 		t.Skip("FAK_INKLING2_KV_KL_TEST!=1")
 	}
 	m, be := openInkling2CUDAForTest(t, "FAK_INKLING2_KV_KL_TEST")
 	defer m.Close()
 
-	fp8Dev, ok := be.(compute.Inkling2FP8KVDevice)
-	if !ok {
-		t.Fatalf("cuda backend %s does not implement compute.Inkling2FP8KVDevice", be.Name())
-	}
-	if err := fp8Dev.Ink2PFP8KVReady(); err != nil {
-		t.Fatalf("cuda FP8 KV ops not ready: %v", err)
-	}
+	cfg.checkReady(t, be)
 
 	tokens := 64
 	if raw := strings.TrimSpace(os.Getenv("FAK_INKLING2_KL_TOKENS")); raw != "" {
@@ -121,7 +174,7 @@ func TestInkling2CUDAKVFP8KLGate(t *testing.T) {
 		klCtx = v
 	}
 
-	maxKL := 0.0015
+	maxKL := cfg.defaultMax
 	if raw := strings.TrimSpace(os.Getenv("FAK_INKLING2_KL_MAX")); raw != "" {
 		v, err := strconv.ParseFloat(raw, 64)
 		if err != nil || v <= 0 || math.IsNaN(v) || math.IsInf(v, 0) {
@@ -217,9 +270,9 @@ func TestInkling2CUDAKVFP8KLGate(t *testing.T) {
 	for _, p := range prompts {
 		// 1. Reference pass: FP32 global KV, capture greedy continuation + full-vocab log-probs.
 		ref := openArm("f32")
-		if ref.kvHalf || ref.kvFP8 {
+		if got := ref.kvDType(); got != Inkling2KVF32 {
 			ref.close()
-			t.Fatalf("reference session did not activate FP32 global KV (kvHalf=%v kvFP8=%v)", ref.kvHalf, ref.kvFP8)
+			t.Fatalf("reference session did not activate FP32 global KV (got %v)", got)
 		}
 		if reportedCtx == 0 {
 			for slot, c := range ref.caps {
@@ -246,11 +299,11 @@ func TestInkling2CUDAKVFP8KLGate(t *testing.T) {
 		ref.close()
 		inkling2TrimIdle(be)
 
-		// 2. Candidate pass: FP8 E4M3 global KV on exact same teacher-forced trajectory.
-		cand := openArm("fp8")
-		if !cand.kvFP8 {
+		// 2. Candidate pass on exact same teacher-forced trajectory.
+		cand := openArm(cfg.candKV)
+		if got := cand.kvDType(); got != cfg.wantDType {
 			cand.close()
-			t.Fatalf("candidate session did not activate FP8 global KV (kvHalf=%v kvFP8=%v)", cand.kvHalf, cand.kvFP8)
+			t.Fatalf("candidate session did not activate %s global KV (got %v)", cfg.candKV, got)
 		}
 		cand.batched = refBatched
 		_ = feedPrompt(cand, p.tokens)
@@ -285,13 +338,13 @@ func TestInkling2CUDAKVFP8KLGate(t *testing.T) {
 		for i, tok := range forced {
 			if _, err := cand.step(tok); err != nil {
 				cand.close()
-				t.Fatalf("cand fp8 step %d (%s): %v", i+1, p.name, err)
+				t.Fatalf("cand %s step %d (%s): %v", cfg.candKV, i+1, p.name, err)
 			}
 			recordPos(i + 1)
 		}
-		if !cand.kvFP8 {
+		if got := cand.kvDType(); got != cfg.wantDType {
 			cand.close()
-			t.Fatalf("candidate session fell back out of FP8 global KV during %s (kvHalf=%v kvFP8=%v)", p.name, cand.kvHalf, cand.kvFP8)
+			t.Fatalf("candidate session fell back out of %s global KV during %s (got %v)", cfg.candKV, p.name, got)
 		}
 		cand.close()
 		inkling2TrimIdle(be)
@@ -305,8 +358,8 @@ func TestInkling2CUDAKVFP8KLGate(t *testing.T) {
 			MaxKL:        pMax,
 			GreedyMatch:  pAgree,
 		})
-		t.Logf("inkling2 kv fp8 KL: %s pp%d pos=%d mean=%.6f max=%.6f greedy_match=%d/%d (%.2f%%)",
-			p.name, len(p.tokens), len(refLogProbs), pMean, pMax, pAgree, len(refLogProbs),
+		t.Logf("inkling2 kv %s KL: %s pp%d pos=%d mean=%.6f max=%.6f greedy_match=%d/%d (%.2f%%)",
+			cfg.candKV, p.name, len(p.tokens), len(refLogProbs), pMean, pMax, pAgree, len(refLogProbs),
 			100*float64(pAgree)/float64(len(refLogProbs)))
 	}
 
@@ -325,7 +378,7 @@ func TestInkling2CUDAKVFP8KLGate(t *testing.T) {
 	summary := inkling2KVKLSummary{
 		Model:              filepath.Base(os.Getenv("FAK_INKLING2_GGUF")),
 		RefKV:              "f32",
-		CandKV:             "fp8",
+		CandKV:             cfg.candKV,
 		Ctx:                reportedCtx,
 		Prompts:            len(prompts),
 		Positions:          len(allKL),
@@ -345,10 +398,10 @@ func TestInkling2CUDAKVFP8KLGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal KL summary: %v", err)
 	}
-	t.Logf("inkling2_kv_fp8_kl_json=%s", string(jb))
+	t.Logf("%s=%s", cfg.jsonPrefix, string(jb))
 
 	if !pass {
-		t.Fatalf("FP8 global KV KL gate FAILED: 95%% bootstrap CI upper bound %.6f >= threshold %.6f (mean=%.6f max=%.6f greedy_match=%d/%d)",
-			ciHi, maxKL, meanKL, totalMaxKL, totalAgree, len(allKL))
+		t.Fatalf("%s global KV KL gate FAILED: 95%% bootstrap CI upper bound %.6f >= threshold %.6f (mean=%.6f max=%.6f greedy_match=%d/%d)",
+			strings.ToUpper(cfg.candKV), ciHi, maxKL, meanKL, totalMaxKL, totalAgree, len(allKL))
 	}
 }
