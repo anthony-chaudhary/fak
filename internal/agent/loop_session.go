@@ -207,6 +207,7 @@ type runConfig struct {
 	// the loop is byte-for-byte the historical loop.
 	spawnPlace            *SpawnPlacementPolicy
 	spec                  *abi.Speculator
+	nextTurnPrime         *NextTurnPrimeRunner
 	contextPlanner        *SessionPlanner
 	contextBaselineOutput int
 	toolTerminalWake      *ToolTerminalWakeQueue
@@ -634,6 +635,13 @@ func WithRouteAccounts(r *modelroute.Roster) RunOption {
 // the option unconditionally.
 func WithRoutePrincipal(principal string) RunOption {
 	return func(c *runConfig) { c.principal = principal }
+}
+
+// WithNextTurnPrime wires a bounded next-turn KV prime runner (fak-private#3728): when a
+// turn ends with tool_calls the runner primes the next-turn prefix over PrimeCacheState.
+// nil (the default) leaves the loop unchanged.
+func WithNextTurnPrime(r *NextTurnPrimeRunner) RunOption {
+	return func(c *runConfig) { c.nextTurnPrime = r }
 }
 
 // WithSpeculator wires the SEAM-4 predicted-next-path engine (#809) into RunArm so the

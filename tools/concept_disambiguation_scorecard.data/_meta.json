@@ -1577,6 +1577,11 @@
           "category": "incidental",
           "reason": "Pinned upstream vLLM source-file stem cited for provenance, not the name of a new FAK cache abstraction.",
           "token": "fused_qknorm_rope_cache_kernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "InKernelPlanner.PrimeCacheState method from CW-03 (#13351) is the production cache-populate entrypoint; reused by next-turn KV prime (#3728) without introducing a new cache tier.",
+          "token": "PrimeCacheState"
         }
       ],
       "exclude": [
@@ -1661,6 +1666,7 @@
         "OpCacheLoad",
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
+        "PrimeCacheState",
         "ProviderCacheWriteTokens",
         "ProviderCalibration",
         "Qwen38DefaultAlias",

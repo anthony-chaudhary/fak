@@ -776,6 +776,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 	if r.cfg != nil && r.cfg.explicitEmptyCatalog() {
 		return true, ErrToolCatalogClosed
 	}
+	r.cfg.primeNextTurn(ctx, r.messages, r.tools)
 	// Resolve a suspended speculation against the first authoritative call in this turn.
 	r.speculation.resolve(ctx, authoritativeCall(asst.ToolCalls[0]), r.metrics)
 	if intent := r.toolIntent(); intent != nil {
