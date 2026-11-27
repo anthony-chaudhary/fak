@@ -1764,7 +1764,7 @@ Licensed under the Apache License, Version 2.0 (upstream LICENSE); the upstream 
 
 ## FlashInfer
 
-Portions of this product are adapted from FlashInfer: https://github.com/flashinfer-ai/flashinfer (pinned at revision 866c80d0c70a90624b4c2056d12d1543d709609e, 61bc8b6dd7049a44d614b2a0cd4a036cb3c46ad0). Changes were made.
+Portions of this product are adapted from FlashInfer: https://github.com/flashinfer-ai/flashinfer (pinned at revision 866c80d0c70a90624b4c2056d12d1543d709609e, 61bc8b6dd7049a44d614b2a0cd4a036cb3c46ad0, 48903c68b22d8ef52d6294b5af8f2855928ec355). Changes were made.
 
 Copyright (c) 2026 FlashInfer contributors, SPDX-License-Identifier: Apache-2.0.
 
