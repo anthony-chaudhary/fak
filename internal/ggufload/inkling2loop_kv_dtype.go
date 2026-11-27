@@ -188,6 +188,25 @@ func inkling2ResidentKVDTypeFor(m *Inkling2LoopModel, be compute.Backend, lookup
 	return dtype, err
 }
 
+// inkling2AutoFP8MinF16Ctx is the minimum f16 auto-fit context before unset
+// FAK_INKLING2_KV automatically selects fp8 global KV caches (when supported
+// and speculative decode is inactive) to preserve 24K+ contexts on 16 GiB GPUs.
+const inkling2AutoFP8MinF16Ctx = 24576
+
+func inkling2ShouldAutoFP8KV(m *Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) bool {
+	if m == nil || be == nil || m.HP.Layers == 0 {
+		return false
+	}
+	if err := inkling2BackendFP8KVErr(be); err != nil {
+		return false
+	}
+	_, free, known := compute.DeviceMemoryInfo(be)
+	if !known || free == compute.FreeUnknown || free <= 0 {
+		return false
+	}
+	return inkling2AutoFitCtxFor(m, be, free, lookup, Inkling2KVF16) < inkling2AutoFP8MinF16Ctx
+}
+
 // inkling2ResidentKVDTypeForMode is inkling2ResidentKVDTypeFor with forSpec indicating
 // that the caller will enable speculative decode on the session, and autoHalf reporting
 // whether f16 was auto-selected (unset FAK_INKLING2_KV) rather than explicitly requested.
@@ -216,6 +235,9 @@ func inkling2ResidentKVDTypeForMode(m *Inkling2LoopModel, be compute.Backend, lo
 			return Inkling2KVF32, false, nil
 		}
 		if inkling2BackendSupportsHalfKV(be, false) {
+			if inkling2ShouldAutoFP8KV(m, be, lookup) {
+				return Inkling2KVFP8, false, nil
+			}
 			return Inkling2KVF16, true, nil
 		}
 		return Inkling2KVF32, false, nil

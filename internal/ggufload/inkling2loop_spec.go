@@ -115,7 +115,7 @@ func inkling2SpecWarnKVDisable() {
 
 // enableSpec allocates the verify chunk state for up to depth drafted tokens.
 func (s *inkling2Resident) enableSpec(depth int) error {
-	if s.kvHalf && s.kvAutoHalf && s.pos == 0 {
+	if (s.kvHalf || s.kvFP8) && s.kvAutoHalf && s.pos == 0 {
 		if err := s.downgradeAutoHalfToFP32(); err != nil {
 			return err
 		}

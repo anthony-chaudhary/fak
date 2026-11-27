@@ -762,3 +762,93 @@ func TestInkling2NVFP4ScaleOverflowFallbackToHigher(t *testing.T) {
 		t.Fatalf("after close: live=%d frees=%d allocs=%d", be.live, be.frees, be.allocs)
 	}
 }
+
+type fakeInk2AutoFP8Backend struct {
+	*fakeInk2OverflowBackend
+	free int64
+}
+
+func (b fakeInk2AutoFP8Backend) Name() string { return "cuda" }
+func (b fakeInk2AutoFP8Backend) Caps() compute.Caps {
+	return compute.Caps{CapacityProbe: true}
+}
+func (b fakeInk2AutoFP8Backend) DeviceMemory() (total, free int64, known bool) {
+	return 16 << 30, b.free, true
+}
+
+func TestInkling2AutoFP8KVBelow24KFit(t *testing.T) {
+	if prev, ok := os.LookupEnv("FAK_INKLING2_SPEC"); ok {
+		t.Cleanup(func() { _ = os.Setenv("FAK_INKLING2_SPEC", prev) })
+		_ = os.Unsetenv("FAK_INKLING2_SPEC")
+	}
+	if prev, ok := os.LookupEnv("FAK_INKLING2_KV"); ok {
+		t.Cleanup(func() { _ = os.Setenv("FAK_INKLING2_KV", prev) })
+		_ = os.Unsetenv("FAK_INKLING2_KV")
+	}
+	defer func(v bool) { inkling2KVHalfRequested = v }(inkling2KVHalfRequested)
+	inkling2KVHalfRequested = false
+
+	hp := inkling2MiniKVShape()
+	hp.Hidden = 2304
+	hp.ExpertsUsed = 8
+	hp.ExpertWidth = 768
+	m := &Inkling2LoopModel{HP: hp}
+	unset := func(string) (string, bool) { return "", false }
+
+	// Low free VRAM (1.5 GiB) -> f16 auto-fit falls below 24576 tokens -> auto-selects fp8.
+	lowFree := int64(1536 << 20)
+	lowBe := fakeInk2AutoFP8Backend{fakeInk2OverflowBackend: &fakeInk2OverflowBackend{fakeInk2Budget: newFakeInk2Budget(lowFree)}, free: lowFree}
+	if f16Fit := inkling2AutoFitCtxFor(m, lowBe, lowFree, unset, Inkling2KVF16); f16Fit >= inkling2AutoFP8MinF16Ctx {
+		t.Fatalf("test setup error: lowFree f16 fit = %d, want < %d", f16Fit, inkling2AutoFP8MinF16Ctx)
+	}
+	dtype, autoHalf, err := inkling2ResidentKVDTypeForMode(m, lowBe, unset, false)
+	if err != nil || dtype != Inkling2KVFP8 || autoHalf {
+		t.Fatalf("lowFree unset KV = (%v, autoHalf=%v, err=%v), want (fp8, false, nil)", dtype, autoHalf, err)
+	}
+
+	// Explicit f32/f16/fp8 overrides stay exact even when f16 auto-fit < 24576.
+	for _, tc := range []struct {
+		val  string
+		want Inkling2KVDType
+	}{
+		{"f32", Inkling2KVF32},
+		{"f16", Inkling2KVF16},
+		{"fp8", Inkling2KVFP8},
+	} {
+		lk := func(k string) (string, bool) {
+			if k == "FAK_INKLING2_KV" {
+				return tc.val, true
+			}
+			return "", false
+		}
+		got, gotAuto, gotErr := inkling2ResidentKVDTypeForMode(m, lowBe, lk, false)
+		if gotErr != nil || got != tc.want || gotAuto {
+			t.Fatalf("explicit FAK_INKLING2_KV=%s = (%v, autoHalf=%v, err=%v), want (%v, false, nil)", tc.val, got, gotAuto, gotErr, tc.want)
+		}
+	}
+
+	// Active spec decode (forSpec=true or m.SpecDefault.Depth > 0 or FAK_INKLING2_SPEC=4) never enables fp8.
+	if got, _, err := inkling2ResidentKVDTypeForMode(m, lowBe, unset, true); err != nil || got != Inkling2KVF32 {
+		t.Fatalf("forSpec=true unset KV = (%v, %v), want (f32, nil)", got, err)
+	}
+	specModel := &Inkling2LoopModel{HP: hp, SpecDefault: Inkling2SpecDefault{Depth: 4}}
+	if got, _, err := inkling2ResidentKVDTypeForMode(specModel, lowBe, unset, false); err != nil || got != Inkling2KVF32 {
+		t.Fatalf("SpecDefault.Depth=4 unset KV = (%v, %v), want (f32, nil)", got, err)
+	}
+	t.Setenv("FAK_INKLING2_SPEC", "4")
+	if got, _, err := inkling2ResidentKVDTypeForMode(m, lowBe, unset, false); err != nil || got != Inkling2KVF32 {
+		t.Fatalf("FAK_INKLING2_SPEC=4 unset KV = (%v, %v), want (f32, nil)", got, err)
+	}
+	_ = os.Unsetenv("FAK_INKLING2_SPEC")
+
+	// Ample free VRAM (4 GiB) -> f16 auto-fit >= 24576 -> stays f16 (autoHalf=true).
+	highFree := int64(4 << 30)
+	highBe := fakeInk2AutoFP8Backend{fakeInk2OverflowBackend: &fakeInk2OverflowBackend{fakeInk2Budget: newFakeInk2Budget(highFree)}, free: highFree}
+	if f16Fit := inkling2AutoFitCtxFor(m, highBe, highFree, unset, Inkling2KVF16); f16Fit < inkling2AutoFP8MinF16Ctx {
+		t.Fatalf("test setup error: highFree f16 fit = %d, want >= %d", f16Fit, inkling2AutoFP8MinF16Ctx)
+	}
+	dtype, autoHalf, err = inkling2ResidentKVDTypeForMode(m, highBe, unset, false)
+	if err != nil || dtype != Inkling2KVF16 || !autoHalf {
+		t.Fatalf("highFree unset KV = (%v, autoHalf=%v, err=%v), want (f16, true, nil)", dtype, autoHalf, err)
+	}
+}
