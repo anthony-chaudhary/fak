@@ -537,12 +537,12 @@ func TestInkling2LoopPlannerSamplerDefaultsPenaltiesAndCycleBreaker(t *testing.T
 		if comp.FinishReason != "stop" {
 			t.Fatalf("FinishReason = %q, want %q", comp.FinishReason, "stop")
 		}
-		if comp.Usage.CompletionTokens > period*inkling2CycleMinRepeats {
+		if comp.Usage.CompletionTokens > period*tokenCycleMinRepeats {
 			t.Fatalf("generated %d tokens, want <= %d (<= %d repetitions of period %d)",
-				comp.Usage.CompletionTokens, period*inkling2CycleMinRepeats, inkling2CycleMinRepeats, period)
+				comp.Usage.CompletionTokens, period*tokenCycleMinRepeats, tokenCycleMinRepeats, period)
 		}
-		if comp.Usage.CompletionTokens != period*inkling2CycleMinRepeats {
-			t.Fatalf("generated %d tokens, want exact break at %d", comp.Usage.CompletionTokens, period*inkling2CycleMinRepeats)
+		if comp.Usage.CompletionTokens != period*tokenCycleMinRepeats {
+			t.Fatalf("generated %d tokens, want exact break at %d", comp.Usage.CompletionTokens, period*tokenCycleMinRepeats)
 		}
 	})
 }

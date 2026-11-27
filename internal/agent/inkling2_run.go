@@ -147,12 +147,13 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 	if maxTokens < 1 || maxTokens > math.MaxInt-len(ids) {
 		return nil, fmt.Errorf("Inkling 2: invalid token limit %d", maxTokens)
 	}
-	temp, topP, topK := inkling2Param(sp.Temperature, 0), inkling2Param(sp.TopP, 0), inkling2Param(sp.TopK, 0)
+	temp, topP, useSampler := inkling2ResolveSampleParams(sp)
+	topK := inkling2Param(sp.TopK, 0)
 	freq, pres := inkling2Param(sp.FrequencyPenalty, 0), inkling2Param(sp.PresencePenalty, 0)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if p.device != nil && temp == 0 && freq == 0 && pres == 0 {
+	if p.device != nil && !useSampler {
 		return p.deviceGreedy(sp, ids, maxTokens)
 	}
 	h, err := model.NewInkling2LoopHost(p.model.HP, p.model.Weights)
@@ -171,6 +172,9 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 		// token boundary instead of holding a whole batched prefill.
 		prefillPrompt = func() (logits []float32, err error) {
 			for i, id := range ids {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if logits, err = ggufload.Inkling2LoopPrefillToken(h, id, i == len(ids)-1); err != nil {
 					return nil, err
 				}
@@ -199,7 +203,9 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 		seed = *sp.Seed
 	}
 	rng := rand.New(rand.NewSource(seed))
+	bias := model.LogitBias(sp.LogitBias)
 	var ws samplerWorkspace
+	var cycle tokenCycleBreaker
 	var generated []int
 	steps, sampled := 0, 0
 	reason := "length"
@@ -207,7 +213,7 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		id := sampleLogitsWithPenaltyWS(logits, temp, topP, topK, nil, freq, pres, counts, rng, &ws)
+		id := sampleLogitsWithPenaltyWS(logits, temp, topP, topK, bias, freq, pres, counts, rng, &ws)
 		if ws.nonFinite {
 			return nil, ErrNonFiniteLogits
 		}
@@ -217,6 +223,10 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 			break
 		}
 		generated = append(generated, id)
+		if cycle.push(id) {
+			reason = "stop"
+			break
+		}
 		if sampled == maxTokens {
 			break
 		}
@@ -252,5 +262,16 @@ func (p *inkling2RunPlanner) result(sp SampleParams, generated []int, prompt, sa
 		return nil, err
 	}
 	t := NewTimings(prompt, 0, steps, prefill.Seconds(), decode.Seconds())
-	return &Completion{Model: p.name, Message: msg, FinishReason: reason, Usage: Usage{PromptTokens: prompt, CompletionTokens: sampled, TotalTokens: prompt + sampled}, Timings: t}, nil
+	return &Completion{
+		Model:        p.name,
+		Message:      msg,
+		FinishReason: reason,
+		Usage: Usage{
+			PromptTokens:            prompt,
+			CompletionTokens:        sampled,
+			TotalTokens:             prompt + sampled,
+			CompletionTokensDetails: nativeReasoningTokenDetails(p.tok, msg.ReasoningContent, sampled),
+		},
+		Timings: t,
+	}, nil
 }

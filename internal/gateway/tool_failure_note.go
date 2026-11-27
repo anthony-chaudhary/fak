@@ -25,10 +25,14 @@ type toolFailureNote struct {
 // paired assistant tool call by ToolCallID, so quoted transcripts cannot trigger
 // a recovery note.
 func toolFailureNotes(messages []agent.Message) []toolFailureNote {
-	callByID := toolCallsByID(messages)
-	gitGhShellSucceeded := hasSuccessfulGitGhShellCall(messages, callByID)
+	gitGhShellSucceeded := hasSuccessfulGitGhShellCall(messages)
+	callByID := map[string]toolCallFailureContext{}
 	out := make([]toolFailureNote, 0, 1)
 	for _, m := range messages {
+		if m.Role == agent.RoleAssistant {
+			recordAssistantToolCalls(callByID, m)
+			continue
+		}
 		if m.Role != agent.RoleTool {
 			continue
 		}
@@ -102,21 +106,14 @@ type toolCallFailureContext struct {
 	Command string
 }
 
-func toolCallsByID(messages []agent.Message) map[string]toolCallFailureContext {
-	calls := map[string]toolCallFailureContext{}
-	for _, m := range messages {
-		if m.Role != agent.RoleAssistant {
+func recordAssistantToolCalls(calls map[string]toolCallFailureContext, m agent.Message) {
+	for _, tc := range m.ToolCalls {
+		if tc.ID == "" {
 			continue
 		}
-		for _, tc := range m.ToolCalls {
-			if tc.ID == "" {
-				continue
-			}
-			command, _ := toolCallCommand(tc.Function.Arguments)
-			calls[tc.ID] = toolCallFailureContext{Tool: tc.Function.Name, Command: command}
-		}
+		command, _ := toolCallCommand(tc.Function.Arguments)
+		calls[tc.ID] = toolCallFailureContext{Tool: tc.Function.Name, Command: command}
 	}
-	return calls
 }
 
 func toolCallCommand(args string) (string, bool) {
@@ -137,8 +134,13 @@ func toolCallCommand(args string) (string, bool) {
 	return "", false
 }
 
-func hasSuccessfulGitGhShellCall(messages []agent.Message, callByID map[string]toolCallFailureContext) bool {
+func hasSuccessfulGitGhShellCall(messages []agent.Message) bool {
+	callByID := map[string]toolCallFailureContext{}
 	for _, m := range messages {
+		if m.Role == agent.RoleAssistant {
+			recordAssistantToolCalls(callByID, m)
+			continue
+		}
 		if m.Role != agent.RoleTool || m.ToolCallID == "" {
 			continue
 		}

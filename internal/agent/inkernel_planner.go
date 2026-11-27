@@ -2155,12 +2155,17 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 			requestStarted = time.Now()
 		}
 		temp := p.temp
-		if sp.Temperature != nil {
-			temp = *sp.Temperature
-		}
 		// An omitted top_p keeps the full softmax draw; an explicit 0 keeps only the
 		// most probable token instead of meaning "no nucleus".
 		topP := nativeTopP(sp.TopP)
+		if sp.Temperature != nil {
+			temp = *sp.Temperature
+		} else if sp.InheritUpstreamTemperature && temp == 0 && p.m.Cfg.IsInkling2Loop() {
+			temp = Inkling2DefaultTemperature
+			if sp.TopP == nil {
+				topP = Inkling2DefaultTopP
+			}
+		}
 		// Per-request top-k; 0 (the zero value, and any value <=0) disables truncation so
 		// an omitted top_k keeps the full distribution, identical to the pre-seam path.
 		topK := 0
@@ -2263,6 +2268,7 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 			}
 		}
 		scanner := newIncrementalStopScanner(maxStop, sp.Stop)
+		var cycle tokenCycleBreaker
 		// structuredContentStart is the byte offset just past a structured
 		// response's close trigger; reasoning before it never reaches the stream.
 		structuredContentStart := -1
@@ -2278,6 +2284,9 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 				if sp.DecodeTokenObserver != nil && visible {
 					sp.DecodeTokenObserver(piece, "")
 				}
+				if !sp.NativeInferenceReceipt && cycle.push(next) {
+					return true
+				}
 				if !visible {
 					// Stop strings apply to the response, never to hidden reasoning.
 					return false
@@ -2291,6 +2300,8 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 						return true
 					}
 				}
+			} else if !sp.NativeInferenceReceipt && cycle.push(next) {
+				return true
 			}
 			return false
 		}
@@ -2416,6 +2427,7 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 					sb.Reset()
 					structuredContentStart = -1
 					scanner.reset()
+					cycle.reset()
 					if thinking != nil {
 						thinking.reset()
 					}
@@ -2449,8 +2461,11 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 			// finishReason is honest about WHY decode ended: "stop" when a token-ID stop or a
 			// per-request Stop sequence fired, "length" when maxNew was the only limit hit.
 			finishReason := "length"
-			if stopped {
+			if stopped || cycle.broken {
 				finishReason = "stop"
+			}
+			if cycle.broken {
+				log.Printf("inkernel planner: intra-turn token cycle broken (model=%s, period=%d, repeats=%d, generated=%d)", p.modelID, cycle.period, tokenCycleMinRepeats, gen)
 			}
 
 			// Witness line (mirrors cmd/fakchat): real per-turn prefill/decode tok/s through the
@@ -2563,10 +2578,16 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 				Message:       Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
 				FinishReason:  finishReason,
 				ProviderCache: &compReuseEntry,
-				Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
-				VulkanMTP:     genRes.vulkanMTP,
-				Timings:       NewTimings(promptTok, matched, gen, prefillS, decodeS),
-				NativeDecode:  newNativeDecodeSummary(genRes),
+				Usage: Usage{
+					PromptTokens:            promptTok,
+					CompletionTokens:        gen,
+					TotalTokens:             promptTok + gen,
+					PromptTokensDetails:     &UsageTokenDetails{CachedTokens: matched},
+					CompletionTokensDetails: nativeReasoningTokenDetails(p.tok, reasoning, gen),
+				},
+				VulkanMTP:    genRes.vulkanMTP,
+				Timings:      NewTimings(promptTok, matched, gen, prefillS, decodeS),
+				NativeDecode: newNativeDecodeSummary(genRes),
 			}
 			if p.dflash2 != nil {
 				// This diagnostic host draft path has no qualified performance counter

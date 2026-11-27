@@ -27,12 +27,6 @@ const (
 	Inkling2DefaultTopP        = 1.0
 )
 
-const (
-	inkling2CycleMinPeriod  = 8
-	inkling2CycleMaxPeriod  = 64
-	inkling2CycleMinRepeats = 4
-)
-
 // Inkling2LoopGeneration is what one Inkling2LoopGenerator.Generate call did.
 type Inkling2LoopGeneration struct {
 	Generated int
@@ -211,45 +205,6 @@ func newInkling2LoopSampler(sp SampleParams, temp, topP float64) func(logits []f
 		}
 		return tok, nil
 	}
-}
-
-// inkling2CycleBreaker tracks recent emitted token IDs and halts generation when
-// any suffix of length [inkling2CycleMinPeriod, inkling2CycleMaxPeriod] repeats
-// at least inkling2CycleMinRepeats consecutive times.
-type inkling2CycleBreaker struct {
-	recent []int
-	broken bool
-	period int
-}
-
-func (b *inkling2CycleBreaker) push(id int) bool {
-	const maxWindow = inkling2CycleMaxPeriod * inkling2CycleMinRepeats
-	b.recent = append(b.recent, id)
-	if len(b.recent) > 2*maxWindow {
-		copy(b.recent, b.recent[len(b.recent)-maxWindow:])
-		b.recent = b.recent[:maxWindow]
-	}
-	n := len(b.recent)
-	maxPeriod := min(inkling2CycleMaxPeriod, n/inkling2CycleMinRepeats)
-	for period := inkling2CycleMinPeriod; period <= maxPeriod; period++ {
-		if b.recent[n-1] != b.recent[n-1-period] {
-			continue
-		}
-		base := n - period*inkling2CycleMinRepeats
-		match := true
-		for i := period*(inkling2CycleMinRepeats-1) - 1; i >= 0; i-- {
-			if b.recent[base+i] != b.recent[base+i+period] {
-				match = false
-				break
-			}
-		}
-		if match {
-			b.broken = true
-			b.period = period
-			return true
-		}
-	}
-	return false
 }
 
 // inkling2StopScanner watches generated ids for the first token at which the
@@ -484,7 +439,7 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 	scan := newInkling2StopScanner(p.tok.Decode, sp.Stop)
 	scan.ctx = ctx
 	scan.release = release
-	var cycle inkling2CycleBreaker
+	var cycle tokenCycleBreaker
 	emit := func(id int) bool {
 		if !scan.push(id) {
 			return false
@@ -512,7 +467,7 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 		finish = "stop"
 	}
 	if cycle.broken {
-		log.Printf("inkling2_loop planner: intra-turn token cycle broken (period=%d, repeats=%d, generated=%d)", cycle.period, inkling2CycleMinRepeats, res.Generated)
+		log.Printf("inkling2_loop planner: intra-turn token cycle broken (period=%d, repeats=%d, generated=%d)", cycle.period, tokenCycleMinRepeats, res.Generated)
 	}
 	if finish == "length" && content == "" && reasoning != "" {
 		log.Printf("inkling2_loop planner: max_tokens (%d) exhausted inside hidden reasoning (effort=%s); visible content is empty", maxNew, inkling2Effort(sp))
@@ -521,8 +476,13 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 		Model:        p.modelID,
 		Message:      Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
 		FinishReason: finish,
-		Usage:        Usage{PromptTokens: len(ids), CompletionTokens: res.Generated, TotalTokens: len(ids) + res.Generated},
-		Timings:      inkling2LoopTimings(len(ids), res),
+		Usage: Usage{
+			PromptTokens:            len(ids),
+			CompletionTokens:        res.Generated,
+			TotalTokens:             len(ids) + res.Generated,
+			CompletionTokensDetails: nativeReasoningTokenDetails(p.tok, reasoning, res.Generated),
+		},
+		Timings: inkling2LoopTimings(len(ids), res),
 	}
 	if res.CachedPromptTokens > 0 {
 		comp.Usage.PromptTokensDetails = &UsageTokenDetails{CachedTokens: res.CachedPromptTokens}

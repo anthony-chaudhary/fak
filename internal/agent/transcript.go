@@ -45,19 +45,24 @@ func quarantineOutboundMessages(messages []Message, pagingSuppressed string) ([]
 		trailingCtx = ctxmmu.WithOversizePagingSuppressed(ctx, ctxmmu.PagingSuppressedTrailingResult)
 	}
 	lastAssistant := -1
-	callNames := map[string]string{}
 	for i, m := range out {
-		if m.Role != RoleAssistant {
-			continue
-		}
-		lastAssistant = i
-		for _, tc := range m.ToolCalls {
-			if tc.ID != "" && tc.Function.Name != "" {
-				callNames[tc.ID] = tc.Function.Name
-			}
+		if m.Role == RoleAssistant {
+			lastAssistant = i
 		}
 	}
+	// Track assistant tool calls progressively so each tool result resolves its
+	// ToolCallID against the nearest preceding assistant call, never overwritten
+	// by a later turn reusing the same ID (e.g. call_text_0).
+	callNames := map[string]string{}
 	for i := range out {
+		if out[i].Role == RoleAssistant {
+			for _, tc := range out[i].ToolCalls {
+				if tc.ID != "" && tc.Function.Name != "" {
+					callNames[tc.ID] = tc.Function.Name
+				}
+			}
+			continue
+		}
 		if out[i].Role != RoleTool {
 			continue
 		}

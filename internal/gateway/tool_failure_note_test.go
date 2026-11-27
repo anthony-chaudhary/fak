@@ -160,3 +160,41 @@ func TestToolFailureNoteOnceDedup(t *testing.T) {
 		t.Fatal("different trace should emit independently")
 	}
 }
+
+// fak-test:runtime fast est=1s lane=default
+func TestToolFailureNotesPreservesEarlierCallWhenToolCallIDReused(t *testing.T) {
+	messages := []agent.Message{
+		{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{{
+				ID: "call_text_0", Type: "function",
+				Function: agent.Func{Name: "Bash", Arguments: `{"command":"git status"}`},
+			}},
+		},
+		{
+			Role:       agent.RoleTool,
+			ToolCallID: "call_text_0",
+			Content:    "Exit code 143\nCommand timed out after 2m 0s",
+		},
+		{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{{
+				ID: "call_text_0", Type: "function",
+				Function: agent.Func{Name: "Read", Arguments: `{"file_path":"README.md"}`},
+			}},
+		},
+		{
+			Role:       agent.RoleTool,
+			ToolCallID: "call_text_0",
+			Content:    "# readme",
+		},
+	}
+
+	notes := toolFailureNotes(messages)
+	if len(notes) != 1 {
+		t.Fatalf("notes = %d, want 1 (reused call_text_0 must not clobber earlier Bash failure): %+v", len(notes), notes)
+	}
+	if notes[0].Command != "git status" {
+		t.Fatalf("command = %q, want git status", notes[0].Command)
+	}
+}
