@@ -6,27 +6,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"net/url"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
-	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/deploymanifest"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/l3kv"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
-	"github.com/anthony-chaudhary/fak/internal/modelengine"
-	"github.com/anthony-chaudhary/fak/internal/modelroute"
-	"github.com/anthony-chaudhary/fak/internal/ratelimit"
 	"github.com/anthony-chaudhary/fak/pkg/deploykit/coherence"
 )
 
@@ -55,107 +46,6 @@ func (f *repeatedStringFlag) Values() []string {
 	out := make([]string, len(*f))
 	copy(out, *f)
 	return out
-}
-
-// debugStatsSink returns the per-turn debug sink for `--debug-stats` (#793): a stderr
-// line-writer when on, nil (the no-op default) when off. The gateway emits one compact,
-// payload-free line per served turn through it.
-func debugStatsSink(on bool) func(string, ...any) {
-	if !on {
-		return nil
-	}
-	return func(format string, args ...any) {
-		fmt.Fprintf(os.Stderr, format+"\n", args...)
-	}
-}
-
-// streamProgressTimeoutOff is the gateway.Config/HTTPPlanner encoding for "no
-// content-progress deadline at all": a NEGATIVE duration, which
-// agent.(*HTTPPlanner).streamProgressWindow resolves to a disabled window. It is deliberately
-// NOT the zero value — on that field zero means "unconfigured, take
-// agent.DefaultStreamProgressTimeout", so the operator's off switch cannot be passed through
-// as-is and has to be translated here.
-const streamProgressTimeoutOff = -1 * time.Second
-
-// serveStreamProgressTimeout maps --stream-progress-timeout onto that encoding.
-//
-// The flag spells "off" as 0 because that is what every other serve knob with an off switch
-// spells it as (--ctx-view-budget 0, --compact-history-budget 0, --elide-result-bytes 0,
-// --assume-session-turns 0, --metrics-snapshot 0): an operator who wants no deadline types a
-// zero, never a negative duration. The flag DEFAULTS to agent.DefaultStreamProgressTimeout
-// rather than 0, so a zero here is always something the operator typed — the ambiguity the
-// raw config field has (where 0 is the unconfigured state) does not exist at the front door.
-// Every other value rides through verbatim for streamProgressWindow to band-check.
-func serveStreamProgressTimeout(d time.Duration) time.Duration {
-	if d <= 0 {
-		return streamProgressTimeoutOff
-	}
-	return d
-}
-
-func configureServeToolEngines() {
-	// Serve exposes fak_read over MCP even when it is not running the demo agent loop.
-	// Register only the confined read miss engine; agent.Configure would also install
-	// the demo tool policy and is intentionally not part of serve startup.
-	agent.RegisterReadEngine("")
-}
-
-// resolveTenantAdmission reads the --tenant-* flags into the three per-tenant gate
-// policies (#14453). All-zero input yields all-disabled policies — the historical inert
-// path. A negative value fails loud: a typo must not silently disable a fairness gate.
-func resolveTenantAdmission(sf *serveFlags) (rate gateway.RateBucketPolicy, inflight gateway.InflightPolicy, tokens gateway.TokenRatePolicy, err error) {
-	if *sf.tenantRateRPS < 0 || *sf.tenantRateBurst < 0 {
-		return rate, inflight, tokens, errors.New("--tenant-rate-rps and --tenant-rate-burst accept 0 (off) or positive values")
-	}
-	if *sf.tenantMaxInflight < 0 {
-		return rate, inflight, tokens, errors.New("--tenant-max-inflight accepts 0 (off) or a positive value")
-	}
-	if *sf.tenantTokenWindowTokens < 0 {
-		return rate, inflight, tokens, errors.New("--tenant-token-window-tokens accepts 0 (off) or a positive value")
-	}
-	if *sf.tenantTokenWindow <= 0 {
-		return rate, inflight, tokens, errors.New("--tenant-token-window must be a positive duration")
-	}
-	rate = gateway.RateBucketPolicy{
-		RequestsPerSecond: int64(*sf.tenantRateRPS),
-		RequestBurst:      int64(*sf.tenantRateBurst),
-	}
-	inflight = gateway.InflightPolicy{PerPrincipal: *sf.tenantMaxInflight}
-	tokens = gateway.TokenRatePolicy{
-		Caps:   ratelimit.TokenCaps{MaxTotalTokens: int64(*sf.tenantTokenWindowTokens)},
-		Window: *sf.tenantTokenWindow,
-	}
-	return rate, inflight, tokens, nil
-}
-
-// installTenantAdmissionGates wires the armed per-tenant admission gates onto the Server
-// (#14453): the request-rate bucket, the in-flight caps, and the token allotment book —
-// the same order beginServedAdmission consults them. All-off leaves every gate nil and
-// the served request path byte-for-byte historical; each armed gate gets one startup
-// message naming its budget.
-func installTenantAdmissionGates(sf *serveFlags, srv *gateway.Server) ([]gateway.StartupMessage, error) {
-	rate, inflight, tokens, err := resolveTenantAdmission(sf)
-	if err != nil {
-		return nil, err
-	}
-	var msgs []gateway.StartupMessage
-	if rate.RequestsPerSecond > 0 {
-		srv.SetRequestRateGate(gateway.NewRequestRateGate(rate))
-		burst := rate.RequestBurst
-		if burst <= 0 {
-			burst = rate.RequestsPerSecond
-		}
-		msgs = append(msgs, gateway.StartupMessage{Source: "serve", Kind: "tenant-admission", Level: "info", Text: fmt.Sprintf("tenant admission: request-rate gate armed (%d req/s per tenant, burst %d)", rate.RequestsPerSecond, burst)})
-	}
-	if inflight.PerPrincipal > 0 {
-		srv.SetInflightGate(gateway.NewInflightGate(inflight))
-		msgs = append(msgs, gateway.StartupMessage{Source: "serve", Kind: "tenant-admission", Level: "info", Text: fmt.Sprintf("tenant admission: in-flight gate armed (%d concurrent requests per tenant)", inflight.PerPrincipal)})
-	}
-	if tokens.Caps.MaxTotalTokens > 0 {
-		srv.SetPrincipalTokenRates(gateway.NewPrincipalTokenRates(tokens, 0))
-		msgs = append(msgs, gateway.StartupMessage{Source: "serve", Kind: "tenant-admission", Level: "info", Text: fmt.Sprintf("tenant admission: token window gate armed (%d tokens per tenant per %s)", tokens.Caps.MaxTotalTokens, tokens.Window)})
-	}
-	return msgs, nil
 }
 
 // serveFlags holds the parsed `fak serve` flag values, one field per flag in
@@ -331,6 +221,29 @@ type serveFlags struct {
 	tenantTokenWindow            *time.Duration
 	fs                           *flag.FlagSet
 	explicit                     map[string]bool
+}
+
+func (sf *serveFlags) effectiveAdmissionTokenBudget() int {
+	if sf == nil || sf.nativeAdmissionTokenBudget == nil {
+		return 0
+	}
+	if *sf.nativeAdmissionTokenBudget > 0 {
+		return *sf.nativeAdmissionTokenBudget
+	}
+	return 0
+}
+
+func (sf *serveFlags) effectiveMaxTotalTokens() int {
+	if sf == nil {
+		return 0
+	}
+	if sf.maxTotalTokens != nil && *sf.maxTotalTokens > 0 {
+		return *sf.maxTotalTokens
+	}
+	if sf.maxBatchPrefillTokens != nil && *sf.maxBatchPrefillTokens > 0 {
+		return *sf.maxBatchPrefillTokens
+	}
+	return 0
 }
 
 // newServeFlagSet defines the full `fak serve` flag surface and returns the set
@@ -522,356 +435,6 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.fleetBusInterval = fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live instance flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
 	sf.keepAwake = fs.String("keep-awake", KeepAwakeOff, "prevent OS sleep during execution: off|while-active|always (default off)")
 	return fs, sf
-}
-
-// ErrSpeculativeModeUnknown marks a --speculative selector (or its FAK_SPECULATIVE /
-// SPECULATIVE override) that names a mode outside the closed admission set. It is the
-// startup refusal for a misspelled structural selector: such a value must never boot a
-// server whose fast decode route is silently unselected.
-var ErrSpeculativeModeUnknown = errors.New("unknown speculative mode")
-
-// The closed structural speculative-decode selector values admitted by `fak serve`:
-// the historical mtp/ngram routes plus the DFlash2 sidecar route; "" disables.
-const (
-	serveSpeculativeMTP     = "mtp"
-	serveSpeculativeNGram   = "ngram"
-	serveSpeculativeDFlash2 = "dflash2"
-)
-
-// serveSpeculativeOptOutTokens are the explicit opt-out spellings. They normalize to
-// the disabled selector "" so every downstream route sees the same off state.
-var serveSpeculativeOptOutTokens = map[string]bool{
-	"off": true, "none": true, "false": true, "disabled": true, "0": true,
-}
-
-// serveRetainMTPHead reports whether the in-kernel load must keep the MTP head tensors.
-// Only the resolved mtp route on a backend that consumes the head (Metal, or resident
-// Vulkan/CUDA) keeps it; other routes load the head-free layout.
-func serveRetainMTPHead(resolvedMode string, metal bool, backendName string) bool {
-	if resolvedMode != serveSpeculativeMTP {
-		return false
-	}
-	name := strings.ToLower(strings.TrimSpace(backendName))
-	return metal || name == "vulkan" || name == "cuda"
-}
-
-// serveMTPBackendReplayStatus checks whether a resident non-Metal backend selected
-// under --speculative mtp advertises Qwen35SequencePrefixReplayPath. When it does not
-// (for example, a CUDA backend without prefix replay), callers emit an honest warning
-// so MTP is never silently dead.
-func serveMTPBackendReplayStatus(resolvedMode string, metal bool, be compute.Backend) (bool, string) {
-	if resolvedMode != serveSpeculativeMTP || metal || be == nil {
-		return true, ""
-	}
-	if !serveRetainMTPHead(resolvedMode, false, be.Name()) {
-		return true, ""
-	}
-	if replay, ok := be.(compute.Qwen35SequencePrefixReplayBackend); ok && replay.Qwen35SequencePrefixReplayPath() == compute.Qwen35SequencePrefixReplayPath {
-		return true, ""
-	}
-	return false, fmt.Sprintf("backend %q lacks %s; MTP speculative decoding is inactive and will fall back to ordinary decode", be.Name(), compute.Qwen35SequencePrefixReplayPath)
-}
-
-// resolveSpeculativeMode resolves the effective structural speculative-decode selector
-// for `fak serve`. The FAK_SPECULATIVE / SPECULATIVE operator overrides win over the
-// --speculative flag (FAK_SPECULATIVE first), mirroring the gateway's historical env-OR
-// precedence; normalization (lowercase, trim) matches the gateway's own comparison so an
-// admitted value reaches every downstream route byte-for-byte. An opt-out token resolves
-// to "" (disabled). The winner must land in the closed admission set
-// {mtp, ngram, dflash2, empty}; anything else fails startup with
-// ErrSpeculativeModeUnknown before any weight load. An admitted value is returned
-// verbatim for buildGateway to thread into gateway.Config.SpeculativeMode — including
-// "dflash2". The CLI separately refuses that route before acquisition until its
-// authenticated target owner is wired; gateway/library owner support is unchanged.
-func resolveSpeculativeMode(flagValue string, getenv func(string) string) (string, error) {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	effective := strings.ToLower(strings.TrimSpace(flagValue))
-	for _, name := range []string{"FAK_SPECULATIVE", "SPECULATIVE"} {
-		if v := strings.ToLower(strings.TrimSpace(getenv(name))); v != "" {
-			effective = v
-			break
-		}
-	}
-	if serveSpeculativeOptOutTokens[effective] {
-		return "", nil
-	}
-	switch effective {
-	case "", serveSpeculativeMTP, serveSpeculativeNGram, serveSpeculativeDFlash2:
-		return effective, nil
-	default:
-		return "", fmt.Errorf("%w: %q (admitted: mtp, ngram, dflash2, empty; opt-out: off)", ErrSpeculativeModeUnknown, effective)
-	}
-}
-
-// resolveServeToolGuard maps the --guard flag + FAK_GUARD env onto the gateway
-// ToolGuard posture. The DEFAULT is raw pass-through (off): the router is an
-// inference pipe with zero interception processing unless the operator arms the
-// guard. An explicitly passed --guard wins over the env; an explicit
-// FAK_GUARD wins over the flag default; an unparsable FAK_GUARD fails loud
-// (a misconfigured security boundary never silently resolves).
-func resolveServeToolGuard(guard bool, explicit map[string]bool, getenv func(string) string) (string, error) {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	if explicit != nil && explicit["guard"] {
-		if guard {
-			return gateway.ToolGuardOn, nil
-		}
-		return gateway.ToolGuardOff, nil
-	}
-	if raw := strings.TrimSpace(getenv("FAK_GUARD")); raw != "" {
-		mode, err := gateway.ParseToolGuardMode(raw)
-		if err != nil {
-			return "", fmt.Errorf("FAK_GUARD: %v", err)
-		}
-		return mode, nil
-	}
-	return gateway.ToolGuardOff, nil
-}
-
-// resolveServeCtxPaging maps the --ctx-paging flag + FAK_CTX_PAGING env onto the
-// gateway CtxPaging posture. The DEFAULT is off: the serving router does not page
-// tool results into {"_paged":true} restore stubs (the 2026-11-10 hosting-
-// simplification flip). An explicitly passed --ctx-paging wins over the env; an
-// explicit FAK_CTX_PAGING wins over the flag default; an unparsable value fails
-// loud (a context rewriter never silently resolves).
-func resolveServeCtxPaging(paging string, explicit map[string]bool, getenv func(string) string) (string, error) {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	if explicit != nil && explicit["ctx-paging"] {
-		return gateway.ParseCtxPagingMode(paging)
-	}
-	if raw := strings.TrimSpace(getenv("FAK_CTX_PAGING")); raw != "" {
-		mode, err := gateway.ParseCtxPagingMode(raw)
-		if err != nil {
-			return "", fmt.Errorf("FAK_CTX_PAGING: %v", err)
-		}
-		return mode, nil
-	}
-	return gateway.DefaultServeCtxPaging, nil
-}
-
-// resolveServeChatToolResultElide maps the --chat-elide flag + FAK_CHAT_ELIDE env
-// onto the gateway ChatToolResultElide posture. The DEFAULT is off: the serving
-// router does not rewrite old tool results and does not auto-advertise the
-// restore tool (the same hosting-simplification flip). Precedence matches the
-// tool guard: explicit flag > explicit env > the off default; unparsable fails loud.
-func resolveServeChatToolResultElide(elide bool, explicit map[string]bool, getenv func(string) string) (string, error) {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	if explicit != nil && explicit["chat-elide"] {
-		if elide {
-			return gateway.ChatToolResultElideOn, nil
-		}
-		return gateway.ChatToolResultElideOff, nil
-	}
-	if raw := strings.TrimSpace(getenv("FAK_CHAT_ELIDE")); raw != "" {
-		mode, err := gateway.ParseChatToolResultElideMode(raw)
-		if err != nil {
-			return "", fmt.Errorf("FAK_CHAT_ELIDE: %v", err)
-		}
-		return mode, nil
-	}
-	return gateway.DefaultServeChatToolResultElide, nil
-}
-
-// serveDFlash2SidecarDecision resolves the per-load DFlash2 sidecar retention
-// for a structural selector: only a dflash2-resolved load with a resident
-// in-kernel model AND an operator-pinned FAK_DFLASH2_SIDECAR path retains the
-// artifact. Every other combination leaves the route unretained — the
-// gateway's fail-loud target-owner validation keeps governing admission, and
-// no sidecar is opened for a load that will not draft.
-func serveDFlash2SidecarDecision(resolvedMode string, inKernelLoaded bool, getenv func(string) string) (string, bool) {
-	if resolvedMode != serveSpeculativeDFlash2 || !inKernelLoaded {
-		return "", false
-	}
-	path := strings.TrimSpace(getenv("FAK_DFLASH2_SIDECAR"))
-	if path == "" {
-		return "", false
-	}
-	return filepath.Clean(path), true
-}
-
-// ErrServeRoleUnknown marks a --role value outside the closed native P/D role
-// admission set. A misspelled role must refuse startup before any weight load
-// rather than silently boot an ordinary combined serve that ignores the split.
-var ErrServeRoleUnknown = errors.New("unknown serve role")
-
-// ErrServeRoleMismatch marks a role admission surface invoked on the wrong role
-// host: a prefill host admits prompts only, a decode host admits imported
-// sequences only. The asymmetry is the contract — a host that answered both
-// would be a combined serve wearing a role flag.
-var ErrServeRoleMismatch = errors.New("serve role mismatch")
-
-// ErrServeRoleRequiresModel marks a native P/D role host without the in-kernel
-// model: role serving is defined over resident weights, so without them there
-// is nothing to split into prefill and decode work.
-var ErrServeRoleRequiresModel = errors.New("serve role requires the in-kernel model")
-
-// resolveServePDRole resolves the --role selector against the closed admission
-// set {prefill, decode, empty}: empty keeps the ordinary combined serve. The
-// normalization (lowercase, trim) matches resolveSpeculativeMode so an admitted
-// value reaches the role host byte-for-byte.
-func resolveServePDRole(flagValue string) (modelengine.NativePDRole, error) {
-	effective := strings.ToLower(strings.TrimSpace(flagValue))
-	switch effective {
-	case "":
-		return modelengine.NativePDRole(""), nil
-	case string(modelengine.NativePDRolePrefill):
-		return modelengine.NativePDRolePrefill, nil
-	case string(modelengine.NativePDRoleDecode):
-		return modelengine.NativePDRoleDecode, nil
-	default:
-		return "", fmt.Errorf("%w: %q (admitted: prefill, decode, empty)", ErrServeRoleUnknown, effective)
-	}
-}
-
-// servePDRoleDefaultDecodeWorkers is the decode half of a role host's pool when
-// --role decode routes imported sequences. Two workers let round-robin admission
-// queue one import while an earlier lane is still decoding.
-const servePDRoleDefaultDecodeWorkers = 2
-
-// servePDRoleHost is the per-host native P/D role runtime: a NativePDCluster
-// exposed through exactly one role admission surface. Keeping the two surfaces
-// behind role checks is what makes --role meaningful — a prefill host never
-// admits imported decode work, and a decode host never runs prompt prefill.
-type servePDRoleHost struct {
-	role    modelengine.NativePDRole
-	cluster *modelengine.NativePDCluster
-
-	mu     sync.Mutex
-	rr     int
-	closed bool
-}
-
-// newServePDRoleHost builds a role host over the in-kernel model. The guards are
-// fail-loud by design: an unknown role or a missing model must refuse the host
-// instead of constructing a cluster that silently serves the wrong shape.
-func newServePDRoleHost(role modelengine.NativePDRole, m *fakmodel.Model, decodeWorkers int) (*servePDRoleHost, error) {
-	switch role {
-	case modelengine.NativePDRolePrefill, modelengine.NativePDRoleDecode:
-	default:
-		return nil, fmt.Errorf("%w: %q (admitted: prefill, decode)", ErrServeRoleUnknown, role)
-	}
-	if m == nil {
-		return nil, fmt.Errorf("serve P/D role host: %w", ErrServeRoleRequiresModel)
-	}
-	if decodeWorkers < 1 {
-		return nil, fmt.Errorf("serve P/D role host: decode workers must be >= 1, got %d", decodeWorkers)
-	}
-	return &servePDRoleHost{role: role, cluster: modelengine.NewNativePDCluster(m, decodeWorkers)}, nil
-}
-
-func (h *servePDRoleHost) Role() modelengine.NativePDRole { return h.role }
-
-// Cluster returns the underlying cluster; it satisfies
-// gateway.NativePDMetricsProvider via Metrics(), which is the seam the serve
-// entrypoint wires onto per-role /metrics.
-func (h *servePDRoleHost) Cluster() *modelengine.NativePDCluster { return h.cluster }
-
-// AdmitPrefill is the prefill role surface: prompt prefill plus KV transfer
-// through the cluster's Admit. A decode host answers with ErrServeRoleMismatch
-// so misrouted work fails at the caller instead of silently re-prefilling.
-func (h *servePDRoleHost) AdmitPrefill(ctx context.Context, req modelengine.NativePDRequest) (modelengine.NativePDAdmission, error) {
-	if h == nil || h.role != modelengine.NativePDRolePrefill {
-		return modelengine.NativePDAdmission{}, fmt.Errorf("%w: AdmitPrefill requires the prefill role", ErrServeRoleMismatch)
-	}
-	return h.cluster.Admit(ctx, req)
-}
-
-// AdmitImported is the decode role surface: sequences whose prompt KV was built
-// elsewhere enter a decode worker's scheduler without re-prefill. Round-robin
-// over the decode pool spreads imports; the mutex keeps the counter race-free
-// under concurrent admissions.
-func (h *servePDRoleHost) AdmitImported(ctx context.Context, call *abi.ToolCall, seq modelengine.ImportedSequence) (abi.EngineRequest, error) {
-	if h == nil || h.role != modelengine.NativePDRoleDecode {
-		return nil, fmt.Errorf("%w: AdmitImported requires the decode role", ErrServeRoleMismatch)
-	}
-	workers := h.cluster.DecodeWorkers()
-	if len(workers) == 0 {
-		return nil, errors.New("serve P/D role host: no decode workers")
-	}
-	h.mu.Lock()
-	w := workers[h.rr%len(workers)]
-	h.rr++
-	h.mu.Unlock()
-	return w.Scheduler().AdmitImported(ctx, call, seq)
-}
-
-// Close is idempotent and nil-safe: serve teardown paths may run it alongside
-// deferred cleanup without coordinating, and a double close must not re-close
-// live scheduler state underneath an in-flight admission.
-func (h *servePDRoleHost) Close() {
-	if h == nil {
-		return
-	}
-	h.mu.Lock()
-	if h.closed {
-		h.mu.Unlock()
-		return
-	}
-	h.closed = true
-	h.mu.Unlock()
-	h.cluster.Close()
-}
-
-func (sf *serveFlags) effectiveAdmissionTokenBudget() int {
-	if sf == nil || sf.nativeAdmissionTokenBudget == nil {
-		return 0
-	}
-	if *sf.nativeAdmissionTokenBudget > 0 {
-		return *sf.nativeAdmissionTokenBudget
-	}
-	return 0
-}
-
-func (sf *serveFlags) effectiveMaxTotalTokens() int {
-	if sf == nil {
-		return 0
-	}
-	if sf.maxTotalTokens != nil && *sf.maxTotalTokens > 0 {
-		return *sf.maxTotalTokens
-	}
-	if sf.maxBatchPrefillTokens != nil && *sf.maxBatchPrefillTokens > 0 {
-		return *sf.maxBatchPrefillTokens
-	}
-	return 0
-}
-
-func serveNativePlannerConfigWithContext(sf *serveFlags, resolvedContextTokens int) agent.InKernelPlannerConfig {
-	cfg := serveNativePlannerConfig(sf)
-	cfg.ContextTokens = resolvedContextTokens
-	// Spend part of the resolved window on a compaction shed-line. Without this the
-	// native path never shrinks: ApplyPromptShrink short-circuits on a zero budget
-	// and an over-window transcript is refused with HTTP 400 context_length_exceeded
-	// instead of being compacted and served. An explicit operator budget still wins.
-	if cfg.CompactHistoryBudget <= 0 {
-		cfg.CompactHistoryBudget = agent.DeriveCompactHistoryBudget(resolvedContextTokens, 0)
-	}
-	return cfg
-}
-
-func validateServeMaxTotalTokens(sf *serveFlags, admissionTokenBudget int) error {
-	maxTokens := sf.effectiveMaxTotalTokens()
-	if maxTokens > 0 && admissionTokenBudget > 0 && maxTokens > admissionTokenBudget {
-		return fmt.Errorf("max_total_tokens (%d) exceeds admission token budget (%d); decrease --max-batch-prefill-tokens or --max-total-tokens", maxTokens, admissionTokenBudget)
-	}
-	return nil
-}
-
-func effectiveServeConfigWithQwen38Runtime(sf *serveFlags, m deploymanifest.Manifest, hasManifest bool, explicit map[string]bool) effectiveServeConfigReport {
-	report := effectiveServeConfig(sf, m, hasManifest, explicit)
-	source := "built-in"
-	if explicit["qwen38-runtime"] {
-		source = "flag"
-	}
-	report.Values["qwen38_runtime"] = effectiveConfigValue{Value: *sf.qwen38Runtime, Source: source}
-	report.Values["qwen38_runtime_identity"] = effectiveConfigValue{Value: qwen38RuntimeIdentity(*sf.qwen38Runtime), Source: source}
-	return report
 }
 
 func cmdServe(argv []string) {
@@ -1423,9 +986,6 @@ func cmdServe(argv []string) {
 	exitCode = rt.run(sf)
 }
 
-// serveExit is os.Exit, injectable so tests can observe a nonzero serve exit.
-var serveExit = os.Exit
-
 // resolveServeEngine selects the appropriate engine ID. If --engine was not explicitly
 // passed by the operator, and in-kernel weights are configured or loaded (e.g. --gguf is set
 // or in-kernel model weights are resident), it automatically defaults sf.engineID to "inkernel"
@@ -1440,159 +1000,4 @@ func resolveServeEngine(sf *serveFlags, explicit map[string]bool, inKernelLoaded
 	if (sf.ggufPath != nil && *sf.ggufPath != "") || inKernelLoaded {
 		*sf.engineID = "inkernel"
 	}
-}
-
-// isServeVulkan reports whether the shared native selector resolved a usable
-// Vulkan backend. Proxy modes remain lease-free because they delegate model
-// residency. Keeping admission on the same resolver prevents automatic or
-// FAK_BACKEND-selected Vulkan from loading local weights without its GPU lease.
-func isServeVulkan(sf *serveFlags) bool {
-	if sf == nil || sf.backendName == nil {
-		return false
-	}
-	if sf.baseURL != nil && *sf.baseURL != "" {
-		return false
-	}
-	backend, err := resolveServeChatBackend(*sf.backendName)
-	return err == nil && backend != nil && backend.Name() == "vulkan"
-}
-
-// warnIfNotFakWorkspace emits a loud stderr advisory when the serve cwd is not inside a
-// fak workspace (no dos.toml found walking upward). It never blocks startup — the caller
-// serves regardless. This is the #3094 mis-binding guard: fak serve's dojo corpus,
-// devindex, and session-state planes all resolve against the workspace root, which
-// defaults to cwd; launched from a sibling repo they silently bind the wrong tree.
-func warnIfNotFakWorkspace(stderr io.Writer) {
-	if _, err := branchrole.FindRoot(""); err == nil {
-		return // inside a fak workspace (dos.toml found) — nothing to warn about.
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		wd = "(unknown cwd)"
-	}
-	// A warning rather than a refusal, which is exactly why it needs the same shape
-	// as a bail: nothing stops, so an operator who skims this line serves a
-	// silently mis-bound tree for the rest of the session.
-	writeConfigBail(stderr, configBail{
-		Verb:    "fak serve",
-		Reason:  bailNotAWorkspace,
-		Summary: "WARNING — this is not a fak workspace; the dojo corpus, devindex, and session-state planes will bind THIS cwd, not a fak repo",
-		Knobs: []bailKnob{
-			bailCWD(wd, "no dos.toml found walking upward").want("a directory inside your fak checkout"),
-		},
-		// Nothing stops here, so the fix has to stay INLINE — a warning that makes
-		// you run a second command to learn the remedy is one you scroll past.
-		Check: "git rev-parse --show-toplevel   # the repo this cwd actually resolves to\n          launch fak serve from a fak checkout, or set the MCP server entry's \"cwd\" to your fak workspace root",
-	})
-}
-
-const deferToolsDisabledWarning = "fak serve: WARNING: --defer-tools=false is set; advertising the full tool registry carries significant token overhead (~5,500+ tokens / ~22KB per turn) and increases per-turn latency. Consider keeping --defer-tools=true (the default) with progressive disclosure."
-
-func warnIfDeferToolsDisabled(stderr io.Writer, deferTools bool) {
-	if !deferTools {
-		fmt.Fprintln(stderr, deferToolsDisabledWarning)
-	}
-}
-
-// serveKeyPrincipals resolves the repeated `--key-principal PRINCIPAL=ENV_VAR` specs into
-// the gateway.Config.KeyPrincipals map (#5332), reporting a refusal on stderr rather than
-// returning it — the same (value, ok) shape resolveRequiredKey uses, so both auth flags
-// fail closed identically. ok=false means the caller MUST NOT boot: a gateway serving with
-// a keyset the operator believes is armed, but which never resolved, does not merely lose
-// attribution — with no keyset matched, principalFor falls through to the CALLER-supplied
-// X-Fak-Principal header, and that value is what the account allowlist adjudicates. So a
-// half-resolved keyset is a tenant-isolation hole, not a cosmetic one.
-//
-// No specs is not a failure: it returns a nil map, which gateway.New turns into a nil
-// keyset, leaving the --require-key-env single-bearer path byte-for-byte unchanged.
-func serveKeyPrincipals(specs []string, lookupEnv func(string) string, stderr io.Writer) (map[string]string, bool) {
-	keyPrincipals, err := gateway.ParseKeyPrincipals(specs, lookupEnv)
-	if err != nil {
-		// The summary keeps the original sentence intact, X-Fak-Principal clause and
-		// all: it is what says WHY this fails closed rather than warning, and the
-		// block is meant to add a next step, never to cost the reason.
-		writeConfigBail(stderr, configBail{
-			Verb:    "fak serve",
-			Reason:  bailKeyPrincipalUnresolved,
-			Summary: fmt.Sprintf("--key-principal %v — refusing to start a gateway whose tenant keyset did not fully resolve (an unresolved binding leaves that tenant attributed by the caller-supplied X-Fak-Principal header instead of by its key)", err),
-			Knobs: []bailKnob{
-				bailFlag("key-principal", strings.Join(specs, " ")).want("PRINCIPAL=ENV_VAR per tenant, each naming a set, distinct env var"),
-			},
-		})
-		return nil, false
-	}
-	return keyPrincipals, true
-}
-
-func loadServeRouteFile[T any](flagName, path, want string, load func(string) (T, error)) *T {
-	loaded, err := load(path)
-	if err != nil {
-		writeConfigBail(os.Stderr, configBail{
-			Verb: "fak serve", Reason: bailRouteManifestInvalid,
-			Summary: fmt.Sprintf("--%s did not load: %v", flagName, err),
-			Knobs:   []bailKnob{bailFlag(flagName, path), bailFile(path, "did not load").want(want)},
-			Bind:    []string{"path=" + path},
-		})
-		os.Exit(1)
-	}
-	return &loaded
-}
-
-// hostPortOf extracts the host:port from a base URL, dropping any path suffix
-// (a --base-url carries a /v1 path that must not participate in the comparison).
-// An empty or unparseable URL yields "".
-func hostPortOf(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	host := u.Hostname()
-	if host == "" {
-		return ""
-	}
-	port := u.Port()
-	if port == "" {
-		return host
-	}
-	return host + ":" + port
-}
-
-// checkReplicaBindingConsistency refuses a reused node-global roster whose loopback
-// account binding disagrees with this process's --base-url. The H200 half-node witness:
-// a replica gateway launched with the CORRECT --base-url (this replica's engine port)
-// but a REUSED --route-accounts roster whose local-engine binding pointed at the OTHER
-// replica's port. The roster, not the --base-url flag, is authoritative for the request
-// plan, so every request returned 200 from the other replica while this replica's GPUs
-// served nothing — and the facade stayed healthy, so the defect was invisible.
-//
-// SCOPING IS LOAD-BEARING: the check applies only to LOOPBACK accounts. A literal
-// "every account base_url equals --base-url" would refuse legitimate mixed rosters
-// (one local engine + remote openai/bedrock accounts); the witness defect is
-// specifically a loopback account pointing at the wrong local engine. The comparison
-// is host:port only, so a /v1 path suffix on either side does not false-positive.
-//
-// Returns nil when there is no proxy target (baseURL == "") or no roster (roster == nil)
-// — the pre-#2528 behavior, byte-identical.
-func checkReplicaBindingConsistency(baseURL string, roster *modelroute.Roster) error {
-	if baseURL == "" || roster == nil {
-		return nil
-	}
-	want := hostPortOf(baseURL)
-	if want == "" {
-		return nil
-	}
-	for _, acctURL := range roster.LoopbackBaseURLs() {
-		got := hostPortOf(acctURL)
-		if got == "" {
-			continue
-		}
-		if got != want {
-			return fmt.Errorf("%s: loopback account binding %s (host:port %s) disagrees with --base-url %s (host:port %s) — the roster, not the flag, is authoritative for the request plan, so every request would forward to the other replica while this one's GPUs serve nothing",
-				bailReplicaBindingMismatch, acctURL, got, baseURL, want)
-		}
-	}
-	return nil
 }
