@@ -70,7 +70,7 @@ func TestRunInkling2ExplicitPackedMetal(t *testing.T) {
 }
 
 func TestRunInkling2MetalTargetSelector(t *testing.T) {
-	const removed = "removed from public fak; the vendored Splash comparison build lives in fak-private (cmd/fak-splash-serve)"
+	const removed = "removed; unset it or set resident or native"
 	for _, tc := range []struct {
 		selector string
 		resident bool

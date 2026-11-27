@@ -26,18 +26,18 @@ func TestServeInkling2MetalSelectorAdmitsResident(t *testing.T) {
 	if err != nil || kind != inkling2MetalResident {
 		t.Fatalf("resident: kind=%v err=%v, want the resident path", kind, err)
 	}
-	for _, selector := range []string{"", "vendored"} {
-		if kind, err := serveInkling2MetalSelected(path, selector); err != nil || kind != inkling2MetalVendored {
-			t.Fatalf("%q: kind=%v err=%v, want the vendored path unchanged", selector, kind, err)
-		}
+	if kind, err := serveInkling2MetalSelected(path, ""); err != nil || kind != inkling2MetalResident {
+		t.Fatalf("unset: kind=%v err=%v, want the resident path", kind, err)
+	}
+	if _, err := serveInkling2MetalSelected(path, "vendored"); err == nil || !strings.Contains(err.Error(), "removed") {
+		t.Fatalf("vendored: err=%v, want removed refusal", err)
 	}
 	t.Setenv(inkling2MetalTargetEnv, "resident")
 	routed, kind, err := serveInkling2MetalPathOf(path, nil, true)
 	if !routed || kind != inkling2MetalResident || err != nil {
 		t.Fatalf("route: routed=%v kind=%v err=%v", routed, kind, err)
 	}
-	// a header-only GGUF has no shape, so the resident sizing, not the vendored
-	// estimate, refuses it
+	// a header-only GGUF has no shape, so the resident sizing refuses it
 	if plan, err := serveInkling2MetalWeights(path, nil, true); plan != nil || err == nil || !strings.Contains(err.Error(), "lacks") {
 		t.Fatalf("resident weights = %v, %v, want the resident shape refusal", plan, err)
 	}
@@ -128,7 +128,7 @@ func TestServeInkling2ResidentCtxRefusesUnpricedContext(t *testing.T) {
 
 func TestServeInkling2ResidentPlacementLabel(t *testing.T) {
 	got := inkling2ServeResidentPlacement(serveInkling2LoopArch, 24, 2048, 3, inkling2ServeResidentSizing{Slots: 2, Rows: 4})
-	if !strings.Contains(got, "target="+inkling2MetalTargetResidentLabel) || strings.Contains(got, inkling2MetalTargetVendoredLabel) ||
+	if !strings.Contains(got, "target="+inkling2MetalTargetResidentLabel) ||
 		!strings.Contains(got, "prefix slots admitted=2") || !strings.Contains(got, "cohort rows admitted=4") {
 		t.Fatalf("placement %q does not name the resident path honestly", got)
 	}

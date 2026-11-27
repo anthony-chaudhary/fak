@@ -118,8 +118,6 @@ const (
 	inkling2MetalTargetEnv           = "FAK_INKLING_METAL_TARGET"
 	inkling2MetalTargetNativeLabel   = "fak-metalgemm"
 	inkling2MetalTargetResidentLabel = "fak-metal-resident"
-	// Only serve still binds the vendored target, under this label.
-	inkling2MetalTargetVendoredLabel = "vendored-splash"
 )
 
 type inkling2MetalPath int
@@ -127,8 +125,6 @@ type inkling2MetalPath int
 const (
 	inkling2MetalNative inkling2MetalPath = iota
 	inkling2MetalResident
-	// inkling2MetalVendored is reachable only through inkling2MetalServeSelect.
-	inkling2MetalVendored
 )
 
 // inkling2MetalSelect picks between fak's device-resident forward and its
@@ -143,7 +139,7 @@ func inkling2MetalSelect(selector string, residentAvailable bool) (inkling2Metal
 		}
 		return inkling2MetalNative, nil
 	case "vendored":
-		return 0, fmt.Errorf("Inkling 2: %s=vendored was removed from public fak; the vendored Splash comparison build lives in fak-private (cmd/fak-splash-serve); unset it or set resident or native", inkling2MetalTargetEnv)
+		return 0, fmt.Errorf("Inkling 2: %s=vendored was removed; unset it or set resident or native", inkling2MetalTargetEnv)
 	case "native":
 		return inkling2MetalNative, nil
 	case "resident":
@@ -153,17 +149,6 @@ func inkling2MetalSelect(selector string, residentAvailable bool) (inkling2Metal
 		return inkling2MetalResident, nil
 	}
 	return 0, fmt.Errorf("Inkling 2: unknown %s=%q (want resident or native)", inkling2MetalTargetEnv, selector)
-}
-
-// inkling2MetalServeSelect keeps serve's selector meaning while serve still
-// binds the vendored target by default: unset and vendored select it there, and
-// every other value is judged like run's.
-func inkling2MetalServeSelect(selector string) (inkling2MetalPath, error) {
-	switch strings.ToLower(strings.TrimSpace(selector)) {
-	case "", "vendored":
-		return inkling2MetalVendored, nil
-	}
-	return inkling2MetalSelect(selector, inkling2MetalResidentAvailable)
 }
 
 // The resident driver's sizing; admission has to price the session before the

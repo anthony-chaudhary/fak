@@ -1,20 +1,20 @@
 # Retiring the vendored Inkling Metal runtime
 
-**Audience:** maintainers deciding what runs Inkling-2-Mini on an Apple GPU. The native path is described in [`inkling-metal-runtime.md`](inkling-metal-runtime.md); this page records why the vendored runtime left public fak and what it is still measured against.
+**Audience:** maintainers deciding what runs Inkling-2-Mini on an Apple GPU. The native path is described in [`inkling-metal-runtime.md`](inkling-metal-runtime.md); this page records why the vendored runtime was removed from fak and the last comparison numbers recorded before retirement.
 
-Status: removal lands in the fak run and fak serve lanes; until then trunk may still accept the vendored selector.
+Status: retired and removed from both `fak run` and `fak serve`.
 
 ## Decision
 
-Public fak ships one Inkling-2 Metal path: fak's own resident device (`compute.Inkling2Device` over `internal/metalgemm`). The vendored Splash runtime (`incoai/splash`, Apache-2.0) is no longer built, linked or selectable here. It moves to fak-private as a comparison bar, built there as `cmd/fak-splash-serve`, an OpenAI-compatible server that the native `fak serve` is benchmarked against.
+fak ships one Inkling-2 Metal path: fak's own resident device (`compute.Inkling2Device` over `internal/metalgemm`). The vendored Splash runtime (`incoai/splash`, Apache-2.0) is no longer built, linked or selectable here.
 
-Labels stay honest in both directions: no public path reports native work under a vendored name, and the comparison build never labels itself fak, native or resident.
+Labels stay honest: no path reports native work under a vendored name.
 
 ## What was retired
 
-- `FAK_INKLING_METAL_TARGET=vendored` is refused with a message pointing to the fak-private comparison build.
-- With the variable unset, the target is `resident` (the host-driven `native` forward remains as the fallback where the resident device is not linked).
-- The vendored trees, their Go binding and the provenance pin leave this repo. The Splash entry in [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) stays, because fak's own `ink2_*.metal` kernels and `internal/kvmmu` still adapt Splash techniques.
+- `FAK_INKLING_METAL_TARGET=vendored` is refused in both `fak run` and `fak serve`.
+- With the variable unset, `fak serve` and `fak run` default to `resident` (in `fak run`, the host-driven `native` forward remains as the fallback where the resident device is not linked).
+- The vendored trees, their Go binding and the provenance pin have been removed from this repo. The Splash entry in [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) stays, because fak's own `ink2_*.metal` kernels and `internal/kvmmu` still adapt Splash techniques.
 
 ## Comparison receipts
 
@@ -43,4 +43,4 @@ Cold prefill under serve: resident 224 tok/s, vendored 465 tok/s.
 
 ## The tradeoff
 
-The default flip skipped the stage-1 parity gate this page used to set (native at or above vendored on decode and prefill before it becomes the default). Resident leads on non-speculative serve decode, but it still trails vendored on prefill (about 224 vs 465 tok/s under serve) and on speculative decode (vendored DFlash2 at 42.5 tok/s). Native clarity was chosen over the gate; those two gaps are the open work, and the fak-private comparison build is how they are measured.
+The default flip skipped the stage-1 parity gate this page used to set (native at or above vendored on decode and prefill before it becomes the default). Resident leads on non-speculative serve decode, but it still trails the retired vendored baseline on prefill (about 224 vs 465 tok/s under serve) and on speculative decode (vendored DFlash2 at 42.5 tok/s). Native clarity was chosen over the gate; those two gaps remain the open optimization work.

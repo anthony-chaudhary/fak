@@ -181,8 +181,7 @@ func serveInkling2ResidentSizingOf(path string, lookup func(string) (string, boo
 	return inkling2ServeResidentSizing{Ctx: ctx, Slots: slots, Rows: rows, PerSlot: perSlot, Cohort: cohort, Plan: plan}, nil
 }
 
-// inkling2ServeResidentPlacement names the resident path in the startup message,
-// never under the vendored target's label.
+// inkling2ServeResidentPlacement names the resident path in the startup message.
 func inkling2ServeResidentPlacement(arch string, layers, hidden, passes int, sz inkling2ServeResidentSizing) string {
 	out := fmt.Sprintf("%s on metal target=%s: layers=%d hidden=%d passes=%d; prefix slots admitted=%d",
 		arch, inkling2MetalTargetResidentLabel, layers, hidden, passes, sz.Slots)

@@ -559,7 +559,6 @@
     "github.com/anthony-chaudhary/fak/internal/idempotency": 0.3,
     "github.com/anthony-chaudhary/fak/internal/ifc": 0.0,
     "github.com/anthony-chaudhary/fak/internal/inferencetopology": 0.1,
-    "github.com/anthony-chaudhary/fak/internal/inklingmetal": 0.0,
     "github.com/anthony-chaudhary/fak/internal/interspersedflags": 0.0,
     "github.com/anthony-chaudhary/fak/internal/intlist": 0.0,
     "github.com/anthony-chaudhary/fak/internal/issuecentrality": 0.0,

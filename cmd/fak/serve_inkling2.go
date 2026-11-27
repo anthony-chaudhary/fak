@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"runtime"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
-	"github.com/anthony-chaudhary/fak/internal/inklingmetal"
 	"github.com/anthony-chaudhary/fak/internal/localadmission"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -504,24 +502,6 @@ func (e *inkling2MetalServeRefusal) Error() string {
 
 func (e *inkling2MetalServeRefusal) Unwrap() error { return e.Err }
 
-// serveAdmitInkling2Metal decides whether the native Metal target can serve the
-// checkpoint. available is inklingmetal.Available(): false on a build without
-// darwin/arm64 cgo and on a host without a supported Apple GPU.
-func serveAdmitInkling2Metal(path, arch string, shards int, available bool) error {
-	switch {
-	case !available:
-		return &inkling2MetalServeRefusal{Path: path, Err: inklingmetal.ErrUnavailable,
-			Reason: inklingmetal.ErrUnavailable.Error() + "; build on darwin/arm64 with cgo enabled"}
-	case shards > 1:
-		return &inkling2MetalServeRefusal{Path: path,
-			Reason: fmt.Sprintf("the Metal path binds a single-file GGUF and this one is split into %d shards", shards)}
-	case arch != serveInkling2LoopArch:
-		return &inkling2MetalServeRefusal{Path: path,
-			Reason: fmt.Sprintf("the native Metal target runs %s checkpoints, not %s", serveInkling2LoopArch, arch)}
-	}
-	return nil
-}
-
 // serveInkling2MetalRoute reports whether path is an inkling2-family GGUF the
 // Metal session forward was selected for, with its admission verdict.
 func serveInkling2MetalRoute(path string, backend compute.Backend, metal bool) (bool, error) {
@@ -538,188 +518,23 @@ func serveInkling2MetalPathOf(path string, backend compute.Backend, metal bool) 
 	if err != nil {
 		return true, kind, err
 	}
-	arch, err := serveInkling2Arch(path)
-	if err != nil {
-		return true, kind, err
-	}
 	shards := len(serveInkling2ShardSet(path))
-	if kind == inkling2MetalResident {
-		return true, kind, serveAdmitInkling2Resident(path, shards)
-	}
-	return true, kind, serveAdmitInkling2Metal(path, arch, shards, inklingmetal.Available())
+	return true, kind, serveAdmitInkling2Resident(path, shards)
 }
 
-// serveInkling2MetalWeights is the admission plan of the selected Metal path at
-// the served context, or nil off the Metal route: the target-only vendored model
-// with one session, or the resident weights with every prefix slot the engine may hold.
+// serveInkling2MetalWeights is the admission plan of the resident Metal path at
+// the served context, or nil off the Metal route: the resident weights with
+// every prefix slot the engine may hold.
 func serveInkling2MetalWeights(path string, backend compute.Backend, metal bool) (*localadmission.MemoryPlan, error) {
-	routed, kind, err := serveInkling2MetalPathOf(path, backend, metal)
+	routed, _, err := serveInkling2MetalPathOf(path, backend, metal)
 	if !routed || err != nil {
 		return nil, err
 	}
-	if kind == inkling2MetalResident {
-		sz, err := serveInkling2ResidentSizingOf(path, os.LookupEnv)
-		if err != nil {
-			return nil, err
-		}
-		return &sz.Plan, nil
-	}
-	planned, err := inklingmetal.EstimateWithDraft(path, "", ggufload.Inkling2LoopResidentContext)
+	sz, err := serveInkling2ResidentSizingOf(path, os.LookupEnv)
 	if err != nil {
 		return nil, err
 	}
-	if planned.Bytes() > math.MaxInt64 {
-		return nil, &inkling2MetalServeRefusal{Path: path, Reason: "the Metal plan exceeds the address space"}
-	}
-	plan := localadmission.MemoryPlan{SteadyBytes: int64(planned.Bytes())}
-	plan.StartupPeakBytes, _ = metalServeStartupPeakBytes(serveLoadArmResidentQ4K, plan.SteadyBytes, 0, false)
-	return &plan, nil
-}
-
-// inkling2MetalTarget is the part of a native session one greedy stream drives.
-type inkling2MetalTarget interface {
-	PrefillID(ids []int32) (int32, error)
-	BeginBlockIDs(ids []int32) ([]int32, error)
-	Commit(keep int) error
-	Close() error
-}
-
-// inkling2MetalSession adapts a native target session to the per-request
-// Prefill/Step contract, one target submission per token.
-type inkling2MetalSession struct{ s inkling2MetalTarget }
-
-var _ ggufload.Inkling2LoopSession = inkling2MetalSession{}
-
-func inkling2MetalToken(id int) (int32, error) {
-	if id < 0 || id >= inklingmetal.Vocabulary {
-		return 0, fmt.Errorf("Inkling 2: token %d outside vocabulary", id)
-	}
-	return int32(id), nil
-}
-
-func inkling2MetalIDs(prompt []int) ([]int32, error) {
-	if len(prompt) == 0 {
-		return nil, fmt.Errorf("inkling2_loop: empty prompt")
-	}
-	ids := make([]int32, len(prompt))
-	for i, id := range prompt {
-		var err error
-		if ids[i], err = inkling2MetalToken(id); err != nil {
-			return nil, err
-		}
-	}
-	return ids, nil
-}
-
-func (m inkling2MetalSession) Prefill(ctx context.Context, prompt []int) (int, error) {
-	ids, err := inkling2MetalIDs(prompt)
-	if err != nil {
-		return 0, err
-	}
-	// the native prefill is one submission and cannot be interrupted once begun
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-	next, err := m.s.PrefillID(ids)
-	return int(next), err
-}
-
-func (m inkling2MetalSession) Step(token int) (int, error) {
-	id, err := inkling2MetalToken(token)
-	if err != nil {
-		return 0, err
-	}
-	next, err := m.s.BeginBlockIDs([]int32{id})
-	if err != nil {
-		return 0, err
-	}
-	if len(next) != 1 {
-		return 0, fmt.Errorf("Inkling 2: Metal target returned %d rows for one token", len(next))
-	}
-	return int(next[0]), m.s.Commit(1)
-}
-
-func (m inkling2MetalSession) Close() error { return m.s.Close() }
-
-// inkling2MetalScope keys the native prefix cache entries this server writes.
-const inkling2MetalScope = "fak-serve-inkling2"
-
-// inkling2MetalPromptSession opens its native session on the first Prefill, the
-// only call that carries the whole prompt, so the native session can keep the
-// leading prefill chunks the model's idle session still holds for that prompt.
-// Only the whole prompt reaches Prefill in serve, which keeps that contract.
-type inkling2MetalPromptSession struct {
-	capacity int
-	open     func(capacity int, ids []int32) (inkling2MetalTarget, error)
-	s        inkling2MetalSession
-	reused   int
-}
-
-func (p *inkling2MetalPromptSession) Prefill(ctx context.Context, prompt []int) (int, error) {
-	if p.s.s == nil {
-		ids, err := inkling2MetalIDs(prompt)
-		if err != nil {
-			return 0, err
-		}
-		t, err := p.open(p.capacity, ids)
-		if err != nil {
-			return 0, err
-		}
-		p.s = inkling2MetalSession{s: t}
-		if r, ok := t.(interface{ Reused() int }); ok {
-			p.reused = r.Reused()
-		}
-	}
-	return p.s.Prefill(ctx, prompt)
-}
-
-func (p *inkling2MetalPromptSession) Step(token int) (int, error) {
-	if p.s.s == nil {
-		return 0, fmt.Errorf("inkling2_loop: step before prefill")
-	}
-	return p.s.Step(token)
-}
-
-func (p *inkling2MetalPromptSession) Close() error {
-	if p.s.s == nil {
-		return nil
-	}
-	return p.s.Close()
-}
-
-// Reused is how many leading prompt tokens the native session held when it opened.
-func (p *inkling2MetalPromptSession) Reused() int { return p.reused }
-
-// inkling2MetalOpener opens native sessions for one resident model. With reuse
-// on, NewSessionFor resumes the model's idle session when it shares leading
-// prefill chunks with the prompt; otherwise every session starts at position 0.
-func inkling2MetalOpener(m *inklingmetal.Model, reuse bool) func(int, []int32) (inkling2MetalTarget, error) {
-	return func(capacity int, ids []int32) (inkling2MetalTarget, error) {
-		var (
-			s   *inklingmetal.Session
-			err error
-		)
-		if reuse {
-			s, err = m.NewSessionFor(capacity, inkling2MetalScope, ids)
-		} else {
-			s, err = m.NewSession(capacity)
-		}
-		if err != nil {
-			return nil, err
-		}
-		return s, nil
-	}
-}
-
-// newInkling2MetalEngine decodes on the resident native target. Each request
-// opens a session sized for the whole served context on the model's one idle
-// session, and with FAK_INKLING2_PREFIX_REUSE on it keeps the chunks the
-// previous prompt shares with it.
-func newInkling2MetalEngine(m *inklingmetal.Model, contextTokens int) *inkling2LoopEngine {
-	open := inkling2MetalOpener(m, inkling2PrefixReuseEnabled())
-	return newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
-		return &inkling2MetalPromptSession{capacity: contextTokens, open: open}, nil
-	})
+	return &sz.Plan, nil
 }
 
 // warmInkling2Session runs one throwaway prefill of a turn opener on a session
@@ -760,7 +575,7 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		fmt.Fprintln(os.Stderr, "fak serve:", err)
 		os.Exit(2)
 	}
-	metal, kind, err := serveInkling2MetalPathOf(path, rt.chatBackend, rt.useMetal)
+	metal, _, err := serveInkling2MetalPathOf(path, rt.chatBackend, rt.useMetal)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -773,10 +588,9 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		closer    func() error
 		placement string
 	)
-	resident := metal && kind == inkling2MetalResident
 	tLoad := time.Now()
 	switch {
-	case resident:
+	case metal:
 		sz, err := serveInkling2ResidentSizingOf(path, os.LookupEnv)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "fak serve:", err)
@@ -802,16 +616,6 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			return errors.Join(cerr, m.Close())
 		}
 		placement = inkling2ServeResidentPlacement(m.Arch, m.HP.Layers, m.HP.Hidden, m.HP.Passes, sz)
-	case metal:
-		target, err := inklingmetal.OpenWithDraft(path, "")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "fak serve: inkling2 Metal load:", err)
-			os.Exit(2)
-		}
-		engine = newInkling2MetalEngine(target, contextTokens)
-		closer = func() error { return errors.Join(engine.Close(), target.Close()) }
-		gen, decode = engine, "greedy decode"
-		placement = fmt.Sprintf("%s on metal target=%s: one resident model, single-stream decode", serveInkling2LoopArch, inkling2MetalTargetVendoredLabel)
 	default:
 		l, err := loadServeInkling2(path, rt.chatBackend, os.Stderr)
 		if err != nil {

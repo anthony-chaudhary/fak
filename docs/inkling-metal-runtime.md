@@ -8,7 +8,7 @@
 
 - On an Apple GPU, public fak runs Inkling-2-Mini only on its own Metal code: the resident device (`compute.Inkling2Device` implemented over `internal/metalgemm`), with the host-driven Metal forward (`ggufload.OpenInkling2LoopMetal`) as the fallback where the resident device is not linked.
 - The resident session and prefill drivers are the same backend-neutral host code in `internal/ggufload` that the CUDA path runs; the backend only supplies the device interfaces (section 2).
-- An earlier vendored C++/Metal runtime from `incoai/splash` (Apache-2.0) is no longer in this repo. Why it left, what replaced it as the bar, and the last recorded comparison numbers are in [`inkling-metal-vendored-retirement.md`](inkling-metal-vendored-retirement.md). Its layer map, the techniques it used and the vendored-versus-fak subsystem tables live with the comparison build in fak-private. Techniques fak adapted from it carry a provenance comment in the adapting file and are covered by the Splash entry in [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
+- An earlier vendored C++/Metal runtime from `incoai/splash` (Apache-2.0) has been removed from this repo. Why it left, what replaced it, and the last recorded comparison numbers are in [`inkling-metal-vendored-retirement.md`](inkling-metal-vendored-retirement.md). Techniques fak adapted from it carry a provenance comment in the adapting file and are covered by the Splash entry in [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
 
 ## 1. The CUDA Inkling path, for contrast
 

@@ -82,7 +82,6 @@ var tier = map[string]int{
 	"agenticbench":           3, // #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"agentxbench":            3, // AgentX benchmark runner, request lifecycle phase decomposition, and interactivity metrics (#8774, #8775); stdlib-only.
 	"mtpbench":               3, // Qwen3.8 native MTP physical benchmark runner; composes ggufload/model and metalgemm (tier 2).
-	"inklingmetal":           1, // Inkling-2 Metal runner cgo bridge and its portable stub; imports no internal packages.
 	"ailuminate":             1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":           1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":           1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.

@@ -409,8 +409,8 @@ func BuildCommittedTargetContext(ctx context.Context, root, target string) (bool
 // docs/, examples/, experiments/ and tools/ mix root-module packages with
 // nested modules and data, so their package directories are listed one by one.
 // visuals/ and the rest of docs/ hold no root-module Go source, so they are
-// skipped. third_party/ stays whole because cgo reaches inklingmetal's runtime
-// headers through ${SRCDIR}.
+// skipped. third_party/ stays whole because cgo reaches vendored headers
+// through ${SRCDIR}.
 var buildSnapshotPrefixes = []string{
 	"go.mod",
 	"go.sum",

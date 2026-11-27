@@ -6,21 +6,18 @@ import (
 	"context"
 	"os"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/ggufload"
-	"github.com/anthony-chaudhary/fak/internal/inklingmetal"
 )
 
 // TestInkling2MetalServePrefixReuse runs a growing multi-turn conversation, then a
 // branch that shares only part of the earlier prompt, through a reuse-on engine and
-// a reuse-off engine on one resident model. Every turn must emit the same tokens,
+// a reuse-off engine on one resident Metal model. Every turn must emit the same tokens,
 // and the reuse-on turns after the first must report cached prompt tokens.
 func TestInkling2MetalServePrefixReuse(t *testing.T) {
 	path := os.Getenv("FAK_INKLING2_TEST_GGUF")
 	if path == "" {
 		t.Skip("set FAK_INKLING2_TEST_GGUF to an Inkling-2-Mini GGUF")
 	}
-	m, err := inklingmetal.OpenWithDraft(path, "")
+	m, be, err := openInkling2MetalResident(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +43,7 @@ func TestInkling2MetalServePrefixReuse(t *testing.T) {
 
 	run := func(reuse string) ([][]int, []int) {
 		t.Setenv("FAK_INKLING2_PREFIX_REUSE", reuse)
-		eng := newInkling2MetalEngine(m, ggufload.Inkling2LoopResidentContext)
+		eng := newInkling2LoopEngine(m, be)
 		defer eng.Close()
 		var outs [][]int
 		var cached []int
