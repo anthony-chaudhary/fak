@@ -28,6 +28,7 @@ type inkling2PrefixStore struct {
 	held      int64
 	tick      uint64
 	entries   []*ink2PrefixEntry
+	disk      *ink2PrefixDisk
 	stats     Inkling2PrefixStoreStats
 }
 
@@ -45,16 +46,30 @@ type Inkling2PrefixStoreStats struct {
 	Saves, Evictions uint64
 	Entries          int
 	HeldBytes        int64
+	DiskSpills       uint64
+	DiskHits         uint64
+	DiskEvictions    uint64
+	DiskErrors       uint64
+	DiskEntries      int
+	DiskHeldBytes    int64
 }
 
-// inkling2PrefixMinDefault is the shortest prefix worth a checkpoint: below it the
-// copy costs about what the prefill it saves does.
-const inkling2PrefixMinDefault = 64
+const (
+	// inkling2PrefixMinDefault is the shortest prefix worth a checkpoint: below it the
+	// copy costs about what the prefill it saves does.
+	inkling2PrefixMinDefault = 64
+
+	// inkling2PrefixDiskMiBDefault is the default disk spillover cap (16 GiB) when
+	// FAK_INKLING2_BATCH_PREFIX_DISK_DIR is set without FAK_INKLING2_BATCH_PREFIX_DISK_MIB.
+	inkling2PrefixDiskMiBDefault = 16384
+)
 
 // inkling2PrefixStoreFromEnv reads FAK_INKLING2_BATCH_PREFIX_CACHE_MIB, the host
-// memory the cross-request prefix store may hold (unset or 0 keeps it off), and
-// FAK_INKLING2_BATCH_PREFIX_MIN, the shortest prefix it checkpoints. A malformed value
-// is an error, so an operator who set the knob is never silently served without it.
+// memory the cross-request prefix store may hold (unset or 0 keeps it off),
+// FAK_INKLING2_BATCH_PREFIX_MIN, the shortest prefix it checkpoints, and the opt-in
+// disk spillover knobs FAK_INKLING2_BATCH_PREFIX_DISK_DIR and
+// FAK_INKLING2_BATCH_PREFIX_DISK_MIB. A malformed value is an error, so an operator
+// who set the knob is never silently served without it.
 func inkling2PrefixStoreFromEnv(lookup func(string) (string, bool)) (*inkling2PrefixStore, error) {
 	v, _ := lookup("FAK_INKLING2_BATCH_PREFIX_CACHE_MIB")
 	v = strings.TrimSpace(v)
@@ -73,7 +88,21 @@ func inkling2PrefixStoreFromEnv(lookup func(string) (string, bool)) (*inkling2Pr
 		}
 		least = n
 	}
-	return &inkling2PrefixStore{capBytes: int64(mib) << 20, minTokens: least}, nil
+	diskDir, _ := lookup("FAK_INKLING2_BATCH_PREFIX_DISK_DIR")
+	diskDir = strings.TrimSpace(diskDir)
+	diskMiB := inkling2PrefixDiskMiBDefault
+	if dm, ok := lookup("FAK_INKLING2_BATCH_PREFIX_DISK_MIB"); ok && strings.TrimSpace(dm) != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(dm))
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("FAK_INKLING2_BATCH_PREFIX_DISK_MIB=%q is not a positive MiB count", strings.TrimSpace(dm))
+		}
+		diskMiB = n
+	}
+	st := &inkling2PrefixStore{capBytes: int64(mib) << 20, minTokens: least}
+	if diskDir != "" {
+		st.disk = newInkling2PrefixDisk(diskDir, int64(diskMiB)<<20)
+	}
+	return st, nil
 }
 
 // Inkling2BatchPrefixCacheMiB reports the host MiB FAK_INKLING2_BATCH_PREFIX_CACHE_MIB
@@ -168,6 +197,15 @@ func (st *inkling2PrefixStore) lookup(prompt []int) *ink2PrefixEntry {
 			best = e
 		}
 	}
+	if st.disk != nil {
+		minLen := 0
+		if best != nil {
+			minLen = len(best.tokens)
+		}
+		if reloaded := st.lookupDiskLongerThan(prompt, minLen); reloaded != nil {
+			return reloaded
+		}
+	}
 	if best != nil {
 		st.tick++
 		best.used = st.tick
@@ -194,6 +232,11 @@ func (st *inkling2PrefixStore) branch(prompt []int, from int, peers [][]int, sel
 	for _, e := range st.entries {
 		common(e.tokens)
 	}
+	if st.disk != nil {
+		for _, e := range st.disk.entries {
+			common(e.tokens)
+		}
+	}
 	for i, p := range peers {
 		if i != self {
 			common(p)
@@ -205,6 +248,13 @@ func (st *inkling2PrefixStore) branch(prompt []int, from int, peers [][]int, sel
 	for _, e := range st.entries {
 		if len(e.tokens) == k && inkling2HasPrefix(prompt, e.tokens) {
 			return 0
+		}
+	}
+	if st.disk != nil {
+		for _, e := range st.disk.entries {
+			if len(e.tokens) == k && inkling2HasPrefix(prompt, e.tokens) {
+				return 0
+			}
 		}
 	}
 	return k
@@ -232,10 +282,17 @@ func (st *inkling2PrefixStore) put(tokens []int, ck *ink2RowCkpt) {
 			break
 		}
 	}
+	if st.disk != nil {
+		st.disk.removeExact(tokens)
+	}
 	st.tick++
 	st.entries = append(st.entries, &ink2PrefixEntry{tokens: append([]int(nil), tokens...), ck: ck, bytes: bytes, used: st.tick})
 	st.held += bytes
 	st.stats.Saves++
+	st.evictRAMToCap()
+}
+
+func (st *inkling2PrefixStore) evictRAMToCap() {
 	for st.held > st.capBytes && len(st.entries) > 0 {
 		lru := 0
 		for i, e := range st.entries {
@@ -243,14 +300,21 @@ func (st *inkling2PrefixStore) put(tokens []int, ck *ink2RowCkpt) {
 				lru = i
 			}
 		}
-		st.held -= st.entries[lru].bytes
+		victim := st.entries[lru]
+		st.held -= victim.bytes
 		st.entries = append(st.entries[:lru], st.entries[lru+1:]...)
 		st.stats.Evictions++
+		if st.disk != nil {
+			st.spillToDisk(victim)
+		}
 	}
 }
 
 func (st *inkling2PrefixStore) snapshot() Inkling2PrefixStoreStats {
 	s := st.stats
 	s.Entries, s.HeldBytes = len(st.entries), st.held
+	if st.disk != nil {
+		s.DiskEntries, s.DiskHeldBytes = len(st.disk.entries), st.disk.heldBytes
+	}
 	return s
 }
