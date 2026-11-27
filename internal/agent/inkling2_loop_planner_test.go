@@ -446,3 +446,103 @@ func TestInkling2LoopPlannerSampling(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=1s lane=default
+func TestInkling2LoopPlannerSamplerDefaultsPenaltiesAndCycleBreaker(t *testing.T) {
+	msgs := []Message{{Role: RoleUser, Content: "hello"}}
+
+	steps := make([][]float32, 16)
+	for i := range steps {
+		steps[i] = ink2LogitRow(map[int]float32{'A': 2.0, 'B': 1.9, 'C': 1.8, 'D': 1.7})
+	}
+
+	t.Run("omitted client temperature defaults to non-greedy GenerateLogits temp=1.0", func(t *testing.T) {
+		gen := &inkling2FakeLogitGen{steps: steps}
+		p := inkling2StreamPlanner(t, gen)
+		comp, err := p.Complete(t.Context(), msgs, nil, WithClientTemperature(nil), WithSeed(ink2Ptr(int64(42))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gen.logitCalls != 1 || gen.greedyCalls != 0 {
+			t.Fatalf("calls greedy=%d logit=%d, want 0/1", gen.greedyCalls, gen.logitCalls)
+		}
+		if comp.Message.Content == strings.Repeat("A", len(steps)) {
+			t.Fatalf("expected non-greedy output at default temp=1.0, got all argmax %q", comp.Message.Content)
+		}
+	})
+
+	t.Run("temp=0 with presence_penalty routes to GenerateLogits and applies penalty", func(t *testing.T) {
+		gen := &inkling2FakeLogitGen{steps: steps[:4]}
+		p := inkling2StreamPlanner(t, gen)
+		comp, err := p.Complete(t.Context(), msgs, nil,
+			WithTemperature(ink2Ptr(0.0)),
+			WithPresencePenalty(ink2Ptr(1.5)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gen.logitCalls != 1 || gen.greedyCalls != 0 {
+			t.Fatalf("calls greedy=%d logit=%d, want 0/1", gen.greedyCalls, gen.logitCalls)
+		}
+		// Step 0 picks A (2.0), step 1 penalizes A to 0.5 so picks B (1.9), then C (1.8), then D (1.7).
+		if comp.Message.Content != "ABCD" {
+			t.Fatalf("temp=0 + presence_penalty content = %q, want %q", comp.Message.Content, "ABCD")
+		}
+	})
+
+	t.Run("temp=0 with frequency_penalty or logit_bias routes to GenerateLogits", func(t *testing.T) {
+		gen := &inkling2FakeLogitGen{steps: steps[:3]}
+		p := inkling2StreamPlanner(t, gen)
+		c1, err := p.Complete(t.Context(), msgs, nil,
+			WithTemperature(ink2Ptr(0.0)),
+			WithFrequencyPenalty(ink2Ptr(1.0)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c1.Message.Content != "ABC" {
+			t.Fatalf("temp=0 + frequency_penalty content = %q, want %q", c1.Message.Content, "ABC")
+		}
+		c2, err := p.Complete(t.Context(), msgs, nil,
+			WithTemperature(ink2Ptr(0.0)),
+			WithLogitBias(map[int]float64{'A': -10.0}),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c2.Message.Content != "BBB" {
+			t.Fatalf("temp=0 + logit_bias content = %q, want %q", c2.Message.Content, "BBB")
+		}
+		if gen.logitCalls != 2 || gen.greedyCalls != 0 {
+			t.Fatalf("calls greedy=%d logit=%d, want 0/2", gen.greedyCalls, gen.logitCalls)
+		}
+	})
+
+	t.Run("synthetic 20-token repeating cycle halts within <= 4 repetitions", func(t *testing.T) {
+		const period = 20
+		cycle := make([]int, period)
+		for i := range cycle {
+			cycle[i] = 'A' + i
+		}
+		var repeated []int
+		for rep := 0; rep < 20; rep++ {
+			repeated = append(repeated, cycle...)
+		}
+		gen := &inkling2StreamGen{ids: repeated}
+		p := inkling2StreamPlanner(t, gen)
+		comp, err := p.Complete(t.Context(), msgs, nil, WithMaxTokens(len(repeated)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if comp.FinishReason != "stop" {
+			t.Fatalf("FinishReason = %q, want %q", comp.FinishReason, "stop")
+		}
+		if comp.Usage.CompletionTokens > period*inkling2CycleMinRepeats {
+			t.Fatalf("generated %d tokens, want <= %d (<= %d repetitions of period %d)",
+				comp.Usage.CompletionTokens, period*inkling2CycleMinRepeats, inkling2CycleMinRepeats, period)
+		}
+		if comp.Usage.CompletionTokens != period*inkling2CycleMinRepeats {
+			t.Fatalf("generated %d tokens, want exact break at %d", comp.Usage.CompletionTokens, period*inkling2CycleMinRepeats)
+		}
+	})
+}
