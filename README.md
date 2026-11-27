@@ -37,6 +37,21 @@ faster of the two OSS builds tested, in both halves of the ABBA run.
 The rates are pooled medians. The one-token fixture yielded no visible first
 token, so this run measured prompt throughput and left visible latency unmeasured.
 
+On Blackwell consumer GPUs (`sm_120`), fak ships native NVFP4 (E2M1 with
+block-16 E4M3 scales) and FP8 global attention scratchpads (KV cache) in one
+zero-Python Go+CUDA binary. Datacenter Python stacks such as SGLang/FlashInfer
+and vLLM already ship FP4 KV. Local consumer runtimes like `llama.cpp` (#26989)
+and Ollama still use integer `q4_0`/`iq4_nl` KV.
+
+Hardware-witnessed on one 16 GB RTX 5080 (Inkling-2-Mini 26B hybrid MoE ·
+`UD-Q3_K_XL` · `ctx=131,072` · 121k uncached tokens · rev `eb68a8cf8a` · opt-in
+`FAK_INKLING2_KV=nvfp4`):
+
+- All 24/24 expert layers stay resident in 16 GB VRAM (0 GiB CPU/PCIe spill vs 12/24 layers spilled on FP16).
+- 128k prefill rises 4.21× (283 to 1,190 tok/s) and end-to-end wall time drops 4.10× (451s to 110s).
+- Decode rises +21.7% (13.9 to 16.9 tok/s) with exact 128k needle retrieval and 4/4 `llama.cpp` greedy oracle pass.
+- Both `nvfp4` and `fp8` KV stay opt-in while stricter needle-retrieval KL gating is in progress.
+
 ## Try fak
 
 [Install fak for your platform](INSTALL.md#local-model-setup), then open a
@@ -87,6 +102,16 @@ Use the path to your GGUF file.
 
 ```sh
 fak serve --engine inkernel --backend cuda \
+  --gguf /path/to/Inkling-2-Mini-UD-Q3_K_XL.gguf \
+  --addr 127.0.0.1:8080
+```
+
+For 128k all-resident context on a 16 GB Blackwell (`sm_120`) GPU, opt into
+NVFP4 (or `fp8`) global KV cache:
+
+```sh
+FAK_INKLING2_CTX=131072 FAK_INKLING2_KV=nvfp4 \
+  fak serve --engine inkernel --backend cuda \
   --gguf /path/to/Inkling-2-Mini-UD-Q3_K_XL.gguf \
   --addr 127.0.0.1:8080
 ```
