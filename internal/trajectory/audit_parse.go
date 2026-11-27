@@ -42,6 +42,7 @@ type auditParseState struct {
 	hookDurations                []int64
 	repeatedFailuresAccumulated  int
 	claudeUsageByID              map[string]AuditTokens
+	antigravityPendingCalls      []auditToolCall
 	codexPrimaryMetaSeen         bool
 	codexRawTotal                *auditCodexRawTokens
 	codexCompleted               AuditTokens
@@ -81,11 +82,19 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	}
 	defer file.Close()
 
+	transcriptID := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if source == AuditSourceAntigravity {
+		// Path shape: <uuid>/.system_generated/logs/transcript.jsonl
+		convDir := filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(path))))
+		if convDir != "" && convDir != "." && convDir != ".." && convDir != string(filepath.Separator) {
+			transcriptID = convDir
+		}
+	}
 	state := auditParseState{
 		distribution: newAuditDistribution(),
 		row: AuditTranscriptRow{
 			Schema: AuditSchema, Kind: "session", Source: source,
-			TranscriptID: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), SourcePath: rel,
+			TranscriptID: transcriptID, SourcePath: rel,
 		},
 		models:          map[string]struct{}{},
 		calls:           map[string]auditToolCall{},
@@ -138,6 +147,8 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 			parseCodexAuditRecord(record, lineNumber, rel, &state, &refusals)
 		case AuditSourcePi:
 			parsePiAuditRecord(record, lineNumber, rel, &state, &refusals)
+		case AuditSourceAntigravity:
+			parseAntigravityAuditRecord(record, lineNumber, rel, &state, &refusals)
 		}
 		if len(refusals) > before {
 			denominator.RefusedRecords += len(refusals) - before

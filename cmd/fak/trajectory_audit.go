@@ -108,6 +108,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	codexRoot := flags.String("codex-root", "", "override Codex sessions root")
 	opencodeRoot := flags.String("opencode-root", "", "override the opencode storage root")
 	piRoot := flags.String("pi-root", "", "include Pi session JSONL transcripts under this root")
+	antigravityRoot := flags.String("antigravity-root", "", "include Antigravity brain transcript.jsonl files under this root")
 	snapshotOut := flags.String("snapshot-out", "", "capture selected private inputs into a new replayable snapshot directory")
 	snapshot := flags.String("snapshot", "", "verify and replay a private audit snapshot without reading live roots")
 	snapshotUsageLedger := flags.String("snapshot-usage-ledger", "", "append privacy-safe capture/replay outcomes to this explicit JSONL file")
@@ -179,7 +180,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 		return finish(trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot-out and --snapshot are mutually exclusive"), "refused", "SNAPSHOT_FLAGS_INCOMPATIBLE")
 	}
 	if strings.TrimSpace(*snapshot) != "" {
-		for _, name := range []string{"since", "user-contains", "claude-root", "codex-root", "opencode-root", "pi-root", "baseline"} {
+		for _, name := range []string{"since", "user-contains", "claude-root", "codex-root", "opencode-root", "pi-root", "antigravity-root", "baseline"} {
 			if explicit[name] {
 				return finish(trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot rejects live selection flag --"+name), "refused", "SNAPSHOT_FLAGS_INCOMPATIBLE")
 			}
@@ -225,6 +226,13 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 			Name:      trajectory.AuditSourcePi,
 			Root:      *piRoot,
 			RootLabel: "pi/sessions",
+		})
+	}
+	if strings.TrimSpace(*antigravityRoot) != "" {
+		sources = append(sources, trajectory.AuditSource{
+			Name:      trajectory.AuditSourceAntigravity,
+			Root:      *antigravityRoot,
+			RootLabel: "antigravity/brain",
 		})
 	}
 	var baseline *trajectory.AuditSummaryRow

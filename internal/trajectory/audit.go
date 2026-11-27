@@ -28,10 +28,11 @@ const (
 const AuditSchema = "fak-trajectory-audit/1"
 
 const (
-	AuditSourceClaude   = "claude"
-	AuditSourceCodex    = "codex"
-	AuditSourceOpencode = "opencode"
-	AuditSourcePi       = "pi"
+	AuditSourceClaude      = "claude"
+	AuditSourceCodex       = "codex"
+	AuditSourceOpencode    = "opencode"
+	AuditSourcePi          = "pi"
+	AuditSourceAntigravity = "antigravity"
 )
 
 // AuditSource is one supported harness transcript root. RootLabel is safe to
@@ -737,6 +738,8 @@ func doAuditSource(ctx context.Context, source AuditSource, opts AuditOptions, f
 		return res, nil
 	case AuditSourcePi:
 		res.denominator.TokenSemantics = "per-assistant-turn usage buckets are disjoint (input excludes cacheRead/cacheWrite); duplicate message ids are counted once"
+	case AuditSourceAntigravity:
+		res.denominator.TokenSemantics = "antigravity_per_step_disjoint_input_cache_read_output"
 	default:
 		return res, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
 	}
@@ -774,6 +777,12 @@ func doAuditSource(ctx context.Context, source AuditSource, opts AuditOptions, f
 			return ctx.Err()
 		}
 		if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".jsonl") {
+			if source.Name == AuditSourceAntigravity {
+				slashed := filepath.ToSlash(path)
+				if !strings.HasSuffix(slashed, "/.system_generated/logs/transcript.jsonl") {
+					return nil
+				}
+			}
 			files = append(files, path)
 			walkCount++
 			if walkCount%100 == 0 && flight != nil {
@@ -930,6 +939,10 @@ func auditUserText(record map[string]any) string {
 				return ""
 			}
 			return text
+		}
+	case "USER_INPUT": // Antigravity transcript row.
+		if src, _ := record["source"].(string); src == "USER_EXPLICIT" {
+			return auditText(record["content"])
 		}
 	}
 	return ""

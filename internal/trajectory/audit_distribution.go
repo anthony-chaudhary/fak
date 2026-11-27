@@ -56,6 +56,7 @@ type auditDistribution struct {
 	pendingResults map[string][]auditToolResult
 	storage        map[string]*AuditStorageRow
 	exemplars      *auditUnknownExemplarReservoir
+	antigravityPending []string
 }
 
 type auditResultCall struct {
@@ -129,7 +130,11 @@ func (d *auditDistribution) observe(source string, line []byte) {
 	if source == "claude" || source == AuditSourcePi {
 		payload = root["message"]
 	}
-	d.observeToolResult(source, typ, payload)
+	if source == AuditSourceAntigravity {
+		d.observeAntigravityToolResult(typ, root)
+	} else {
+		d.observeToolResult(source, typ, payload)
+	}
 	persistedSource := auditUnknownSourceLabel(source)
 	for _, event := range classifyDistributionEvents(source, typ, payload, root) {
 		subtype := event.subtype
@@ -161,7 +166,7 @@ func (d *auditDistribution) observe(source string, line []byte) {
 
 func auditUnknownSourceLabel(source string) string {
 	switch source {
-	case AuditSourceClaude, AuditSourceCodex, AuditSourcePi:
+	case AuditSourceClaude, AuditSourceCodex, AuditSourcePi, AuditSourceAntigravity:
 		return source
 	default:
 		return "source/" + auditUnknownDiscriminatorSuffix([]string{"source\x00" + source})
@@ -743,6 +748,9 @@ func classifyDistributionEvents(source, typ string, payload json.RawMessage, roo
 	}
 	if source == AuditSourcePi {
 		return classifyPiDistributionEvents(typ, payload, root)
+	}
+	if source == AuditSourceAntigravity {
+		return classifyAntigravityDistributionEvents(typ, root)
 	}
 	if typ == "user" || typ == "assistant" {
 		base := "assistant_message"

@@ -416,6 +416,81 @@
         {"path": "$.timestamp", "types": ["string"]},
         {"path": "$.type", "types": ["string"]}
       ]
+    },
+    {
+      "source": "antigravity",
+      "event_type": "CHECKPOINT",
+      "builds": [{"harness": "antigravity"}],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.cache_read_tokens", "types": ["number"]},
+        {"path": "$.content", "types": ["string"]},
+        {"path": "$.created_at", "types": ["string"]},
+        {"path": "$.input_tokens", "types": ["number"]},
+        {"path": "$.output_tokens", "types": ["number"]},
+        {"path": "$.source", "types": ["string"]},
+        {"path": "$.status", "types": ["string"]},
+        {"path": "$.step_index", "types": ["number"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "antigravity",
+      "event_type": "GENERIC",
+      "builds": [{"harness": "antigravity"}],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.created_at", "types": ["string"]},
+        {"path": "$.source", "types": ["string"]},
+        {"path": "$.status", "types": ["string"]},
+        {"path": "$.step_index", "types": ["number"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "antigravity",
+      "event_type": "PLANNER_RESPONSE",
+      "builds": [{"harness": "antigravity"}],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.cache_read_tokens", "types": ["number"]},
+        {"path": "$.created_at", "types": ["string"]},
+        {"path": "$.input_tokens", "types": ["number"]},
+        {"path": "$.model", "types": ["string"]},
+        {"path": "$.output_tokens", "types": ["number"]},
+        {"path": "$.source", "types": ["string"]},
+        {"path": "$.status", "types": ["string"]},
+        {"path": "$.step_index", "types": ["number"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "antigravity",
+      "event_type": "SYSTEM_MESSAGE",
+      "builds": [{"harness": "antigravity"}],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.content", "types": ["string"]},
+        {"path": "$.created_at", "types": ["string"]},
+        {"path": "$.source", "types": ["string"]},
+        {"path": "$.status", "types": ["string"]},
+        {"path": "$.step_index", "types": ["number"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "antigravity",
+      "event_type": "USER_INPUT",
+      "builds": [{"harness": "antigravity"}],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.content", "types": ["string"]},
+        {"path": "$.created_at", "types": ["string"]},
+        {"path": "$.source", "types": ["string"]},
+        {"path": "$.status", "types": ["string"]},
+        {"path": "$.step_index", "types": ["number"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
     }
   ]
 }
