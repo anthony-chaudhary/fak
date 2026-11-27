@@ -1126,6 +1126,16 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	stats.L3RestoreNanos = st.L3RestoreNanos
 	stats.L3StageFaults = st.L3StageFaults
 	stats.L3RestoreFaults = st.L3RestoreFaults
+	stats.LocalL3Enabled = st.LocalL3Enabled
+	stats.LocalL3BudgetBytes = st.LocalL3BudgetBytes
+	stats.LocalL3ReferencedBytes = st.LocalL3ReferencedBytes
+	stats.LocalL3Hits = st.LocalL3Hits
+	stats.LocalL3Misses = st.LocalL3Misses
+	stats.LocalL3Faults = st.LocalL3Faults
+	stats.LocalL3HitTokens = st.LocalL3HitTokens
+	stats.LocalL3StageBytes = st.LocalL3StageBytes
+	stats.LocalL3RestoreBytes = st.LocalL3RestoreBytes
+	stats.LocalL3Evictions = st.LocalL3Evictions
 	return stats
 }
 

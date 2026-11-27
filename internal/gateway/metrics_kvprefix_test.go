@@ -627,3 +627,58 @@ func TestRequestMemoryAggregateMetricsAndDebugVars(t *testing.T) {
 		t.Fatalf("debug request_memory_tokens = %+v, want prompt/max_new/planned rows", vars.Metrics.RequestMemoryTokens)
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestMetricsRenderExportsLocalSSDTierCounters(t *testing.T) {
+	srv := newTestServer(t)
+	srv.metrics = newGatewayMetrics(time.Now().Add(-10 * time.Second))
+	srv.planner = kvMemoryStatsPlanner{stats: agent.KVMemoryStats{
+		Enabled:                true,
+		Backend:                "radixkv",
+		MemoryClass:            "kv_cache",
+		Scope:                  "host",
+		DType:                  "f32",
+		LocalL3Enabled:         true,
+		LocalL3BudgetBytes:     8192,
+		LocalL3ReferencedBytes: 4096,
+		LocalL3Hits:            7,
+		LocalL3Misses:          2,
+		LocalL3Faults:          1,
+		LocalL3HitTokens:       128,
+		LocalL3StageBytes:      4096,
+		LocalL3RestoreBytes:    2048,
+		LocalL3Evictions:       3,
+	}}
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_gateway_kv_prefix_tier_resident_bytes{backend="radixkv",tier="local_ssd_l3",scope="local_ssd"} 4096`,
+		`fak_gateway_kv_prefix_tier_capacity_bytes{backend="radixkv",tier="local_ssd_l3"} 8192`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="local_ssd_l3",outcome="hit"} 7`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="local_ssd_l3",outcome="miss"} 2`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="local_ssd_l3",outcome="fault"} 1`,
+		`fak_gateway_kv_prefix_tier_hit_tokens_total{backend="radixkv",tier="local_ssd_l3"} 128`,
+		`fak_gateway_kv_prefix_tier_transfer_bytes_total{backend="radixkv",tier="local_ssd_l3",direction="stage"} 4096`,
+		`fak_gateway_kv_prefix_tier_transfer_bytes_total{backend="radixkv",tier="local_ssd_l3",direction="restore"} 2048`,
+		`fak_gateway_kv_prefix_tier_evictions_total{backend="radixkv",tier="local_ssd_l3"} 3`,
+		`fak_gateway_kv_prefix_tier_retention_seconds{backend="radixkv",tier="local_ssd_l3"} `,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("local-SSD metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+
+	// Verify derived retention_seconds = capacity / write_rate is positive (~20s).
+	const retPrefix = `fak_gateway_kv_prefix_tier_retention_seconds{backend="radixkv",tier="local_ssd_l3"} `
+	idx := strings.Index(text, retPrefix)
+	if idx < 0 {
+		t.Fatal("missing retention_seconds line")
+	}
+	line := text[idx+len(retPrefix):]
+	if nl := strings.IndexByte(line, '\n'); nl >= 0 {
+		line = line[:nl]
+	}
+	if line == "0" || strings.HasPrefix(line, "-") {
+		t.Fatalf("retention_seconds=%q, want positive capacity/write_rate", line)
+	}
+}

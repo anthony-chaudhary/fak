@@ -64,6 +64,8 @@ type Stats struct {
 	LocalL3HitTokens           int                         `json:"local_l3_hit_tokens"`
 	LocalL3StageBytes          int64                       `json:"local_l3_stage_bytes"`
 	LocalL3RestoreBytes        int64                       `json:"local_l3_restore_bytes"`
+	LocalL3Evictions           int                         `json:"local_l3_evictions"`
+	LocalL3Parked              int                         `json:"local_l3_parked"`
 	Leaves                     int                         // leaf nodes
 	MaxDepthTokens             int                         // longest cached prefix
 	Evictions                  int                         // LRU leaf evictions performed
@@ -194,6 +196,8 @@ func (t *Tree) Stats() Stats {
 		LocalL3HitTokens:           t.l3LocalHitTokens,
 		LocalL3StageBytes:          t.l3LocalStageBytes,
 		LocalL3RestoreBytes:        t.l3LocalRestoreBytes,
+		LocalL3Evictions:           t.l3LocalEvictions,
+		LocalL3Parked:              t.l3LocalParked,
 		L3Enabled:                  t.RemoteSnapshotEnabled(),
 		L3Transfers:                t.RemoteSnapshotTransfers(),
 		L3ReferencedBytes:          t.remoteSnapshotBytes,

@@ -1098,26 +1098,39 @@ func (s *Server) writeKVMemoryMetricsWithStats(b *strings.Builder, st agent.KVMe
 	fmt.Fprintf(b, "fak_gateway_kv_memory_evictions_total{%s,kind=\"policy\"} %d\n", labels, st.PolicyEvictions)
 	writeHelpType(b, "fak_gateway_kv_memory_splits_total", "Radix KV prefix-cache edge splits performed to expose reusable mid-edge prefixes.", "counter")
 	fmt.Fprintf(b, "fak_gateway_kv_memory_splits_total{%s} %d\n", labels, st.Splits)
-	if st.L2HostCapacityBytes > 0 || st.L3Enabled {
+	if st.L2HostCapacityBytes > 0 || st.L3Enabled || st.LocalL3Enabled {
 		tierLabels := fmt.Sprintf("backend=\"%s\"", promQuote(backend))
 		writeHelpType(b, "fak_gateway_kv_prefix_tier_resident_bytes", "Physical complete-prefix payload bytes owned by the native in-kernel cache, split by source tier and memory scope. Provider/proxy counters never enter this family.", "gauge")
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_resident_bytes{%s,tier=\"device_l1\",scope=\"device\"} %d\n", tierLabels, st.L1DeviceResidentBytes)
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_resident_bytes{%s,tier=\"device_l1\",scope=\"host_metadata\"} %d\n", tierLabels, st.L1HostResidentBytes)
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_resident_bytes{%s,tier=\"host_dram_l2\",scope=\"host\"} %d\n", tierLabels, st.L2HostResidentBytes)
+		if st.LocalL3Enabled {
+			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_resident_bytes{%s,tier=\"local_ssd_l3\",scope=\"local_ssd\"} %d\n", tierLabels, st.LocalL3ReferencedBytes)
+		}
 		if st.L3Enabled {
 			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_resident_bytes{%s,tier=\"remote_http_l3\",scope=\"remote_referenced\"} %d\n", tierLabels, st.L3ReferencedBytes)
 		}
-		if st.L2HostCapacityBytes > 0 {
+		if st.L2HostCapacityBytes > 0 || st.LocalL3Enabled {
 			writeHelpType(b, "fak_gateway_kv_prefix_tier_capacity_bytes", "Configured physical capacity for a native complete-prefix tier.", "gauge")
-			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_capacity_bytes{%s,tier=\"host_dram_l2\"} %d\n", tierLabels, st.L2HostCapacityBytes)
+			if st.L2HostCapacityBytes > 0 {
+				fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_capacity_bytes{%s,tier=\"host_dram_l2\"} %d\n", tierLabels, st.L2HostCapacityBytes)
+			}
+			if st.LocalL3Enabled {
+				fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_capacity_bytes{%s,tier=\"local_ssd_l3\"} %d\n", tierLabels, st.LocalL3BudgetBytes)
+			}
 		}
-		writeHelpType(b, "fak_gateway_kv_prefix_tier_lookups_total", "Native complete-prefix lookup outcomes by physical source tier, consulted in device L1, host DRAM L2, remote HTTP L3 order.", "counter")
+		writeHelpType(b, "fak_gateway_kv_prefix_tier_lookups_total", "Native complete-prefix lookup outcomes by physical source tier, consulted in device L1, host DRAM L2, local SSD L3, remote HTTP L3 order.", "counter")
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"device_l1\",outcome=\"hit\"} %d\n", tierLabels, st.L1Hits)
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"device_l1\",outcome=\"miss\"} %d\n", tierLabels, st.L1Misses)
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"device_l1\",outcome=\"fault\"} %d\n", tierLabels, st.L1Faults)
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"host_dram_l2\",outcome=\"hit\"} %d\n", tierLabels, st.L2Hits)
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"host_dram_l2\",outcome=\"miss\"} %d\n", tierLabels, st.L2Misses)
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"host_dram_l2\",outcome=\"fault\"} %d\n", tierLabels, st.L2Faults)
+		if st.LocalL3Enabled {
+			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"local_ssd_l3\",outcome=\"hit\"} %d\n", tierLabels, st.LocalL3Hits)
+			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"local_ssd_l3\",outcome=\"miss\"} %d\n", tierLabels, st.LocalL3Misses)
+			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"local_ssd_l3\",outcome=\"fault\"} %d\n", tierLabels, st.LocalL3Faults)
+		}
 		if st.L3Enabled {
 			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"remote_http_l3\",outcome=\"hit\"} %d\n", tierLabels, st.L3Hits)
 			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"remote_http_l3\",outcome=\"miss\"} %d\n", tierLabels, st.L3Misses)
@@ -1126,12 +1139,19 @@ func (s *Server) writeKVMemoryMetricsWithStats(b *strings.Builder, st agent.KVMe
 		writeHelpType(b, "fak_gateway_kv_prefix_tier_hit_tokens_total", "Prefix tokens restored from each native physical source tier.", "counter")
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_hit_tokens_total{%s,tier=\"device_l1\"} %d\n", tierLabels, st.L1HitTokens)
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_hit_tokens_total{%s,tier=\"host_dram_l2\"} %d\n", tierLabels, st.L2HitTokens)
+		if st.LocalL3Enabled {
+			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_hit_tokens_total{%s,tier=\"local_ssd_l3\"} %d\n", tierLabels, st.LocalL3HitTokens)
+		}
 		if st.L3Enabled {
 			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_hit_tokens_total{%s,tier=\"remote_http_l3\"} %d\n", tierLabels, st.L3HitTokens)
 		}
 		writeHelpType(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total", "Payload bytes transferred while staging or restoring native complete-prefix snapshots, split by physical tier and direction.", "counter")
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total{%s,tier=\"host_dram_l2\",direction=\"stage\"} %d\n", tierLabels, st.L2StageBytes)
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total{%s,tier=\"host_dram_l2\",direction=\"restore\"} %d\n", tierLabels, st.L2RestoreBytes)
+		if st.LocalL3Enabled {
+			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total{%s,tier=\"local_ssd_l3\",direction=\"stage\"} %d\n", tierLabels, st.LocalL3StageBytes)
+			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total{%s,tier=\"local_ssd_l3\",direction=\"restore\"} %d\n", tierLabels, st.LocalL3RestoreBytes)
+		}
 		if st.L3Enabled {
 			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total{%s,tier=\"remote_http_l3\",direction=\"stage\"} %d\n", tierLabels, st.L3StageBytes)
 			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total{%s,tier=\"remote_http_l3\",direction=\"restore\"} %d\n", tierLabels, st.L3RestoreBytes)
@@ -1142,8 +1162,20 @@ func (s *Server) writeKVMemoryMetricsWithStats(b *strings.Builder, st agent.KVMe
 			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_faults_total{%s,tier=\"remote_http_l3\",direction=\"stage\"} %d\n", tierLabels, st.L3StageFaults)
 			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_faults_total{%s,tier=\"remote_http_l3\",direction=\"restore\"} %d\n", tierLabels, st.L3RestoreFaults)
 		}
-		writeHelpType(b, "fak_gateway_kv_prefix_tier_evictions_total", "Complete host-DRAM prefix images evicted from the bounded native L2.", "counter")
+		writeHelpType(b, "fak_gateway_kv_prefix_tier_evictions_total", "Complete prefix images evicted from bounded native cache tiers.", "counter")
 		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_evictions_total{%s,tier=\"host_dram_l2\"} %d\n", tierLabels, st.L2Evictions)
+		if st.LocalL3Enabled {
+			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_evictions_total{%s,tier=\"local_ssd_l3\"} %d\n", tierLabels, st.LocalL3Evictions)
+			retentionSec := 0.0
+			if s.metrics != nil && !s.metrics.start.IsZero() && st.LocalL3BudgetBytes > 0 && st.LocalL3StageBytes > 0 {
+				if elapsed := time.Since(s.metrics.start).Seconds(); elapsed > 0 {
+					writeRateBps := float64(st.LocalL3StageBytes) / elapsed
+					retentionSec = float64(st.LocalL3BudgetBytes) / writeRateBps
+				}
+			}
+			writeHelpType(b, "fak_gateway_kv_prefix_tier_retention_seconds", "Derived prefix retention horizon (tier capacity divided by observed stage write rate in bytes/sec).", "gauge")
+			fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_retention_seconds{%s,tier=\"local_ssd_l3\"} %s\n", tierLabels, promFloat(retentionSec))
+		}
 	}
 }
 

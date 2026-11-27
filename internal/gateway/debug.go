@@ -426,56 +426,66 @@ type debugMemoryFitVars struct {
 }
 
 type debugKVMemoryVars struct {
-	Enabled               bool    `json:"enabled"`
-	Backend               string  `json:"backend"`
-	MemoryClass           string  `json:"memory_class"`
-	Scope                 string  `json:"scope"`
-	DType                 string  `json:"dtype,omitempty"`
-	BytesPerToken         int64   `json:"bytes_per_token"`
-	ResidentTokens        int     `json:"resident_tokens,omitempty"`
-	ResidentBytes         int64   `json:"resident_bytes,omitempty"`
-	CapacityKnown         bool    `json:"capacity_known"`
-	CapacityFreeKnown     bool    `json:"capacity_free_known"`
-	CapacityTotalBytes    int64   `json:"capacity_total_bytes,omitempty"`
-	CapacityFreeBytes     int64   `json:"capacity_free_bytes,omitempty"`
-	HeadroomRatio         float64 `json:"headroom_ratio,omitempty"`
-	FitBudgetBytes        int64   `json:"fit_budget_bytes,omitempty"`
-	FitMarginBytes        int64   `json:"fit_margin_bytes,omitempty"`
-	BudgetTokens          int     `json:"budget_tokens,omitempty"`
-	LRUTokens             int     `json:"lru_tokens,omitempty"`
-	MaxDepthTokens        int     `json:"max_depth_tokens,omitempty"`
-	Nodes                 int     `json:"nodes,omitempty"`
-	Leaves                int     `json:"leaves,omitempty"`
-	Evictions             int     `json:"evictions,omitempty"`
-	PolicyEvictions       int     `json:"policy_evictions,omitempty"`
-	Splits                int     `json:"splits,omitempty"`
-	L1DeviceResidentBytes int64   `json:"l1_device_resident_bytes,omitempty"`
-	L1HostResidentBytes   int64   `json:"l1_host_resident_bytes,omitempty"`
-	L2HostResidentBytes   int64   `json:"l2_host_resident_bytes,omitempty"`
-	L2HostCapacityBytes   int64   `json:"l2_host_capacity_bytes,omitempty"`
-	L1Hits                int     `json:"l1_hits,omitempty"`
-	L1Misses              int     `json:"l1_misses,omitempty"`
-	L1Faults              int     `json:"l1_faults,omitempty"`
-	L1HitTokens           int     `json:"l1_hit_tokens,omitempty"`
-	L2Hits                int     `json:"l2_hits,omitempty"`
-	L2Misses              int     `json:"l2_misses,omitempty"`
-	L2Faults              int     `json:"l2_faults,omitempty"`
-	L2HitTokens           int     `json:"l2_hit_tokens,omitempty"`
-	L2StageBytes          int64   `json:"l2_stage_bytes,omitempty"`
-	L2RestoreBytes        int64   `json:"l2_restore_bytes,omitempty"`
-	L2Evictions           int     `json:"l2_evictions,omitempty"`
-	L3Enabled             bool    `json:"l3_enabled"`
-	L3ReferencedBytes     int64   `json:"l3_referenced_bytes,omitempty"`
-	L3Hits                int     `json:"l3_hits,omitempty"`
-	L3Misses              int     `json:"l3_misses,omitempty"`
-	L3Faults              int     `json:"l3_faults,omitempty"`
-	L3HitTokens           int     `json:"l3_hit_tokens,omitempty"`
-	L3StageBytes          int64   `json:"l3_stage_bytes,omitempty"`
-	L3RestoreBytes        int64   `json:"l3_restore_bytes,omitempty"`
-	L3StageNanos          int64   `json:"l3_stage_nanos,omitempty"`
-	L3RestoreNanos        int64   `json:"l3_restore_nanos,omitempty"`
-	L3StageFaults         int     `json:"l3_stage_faults,omitempty"`
-	L3RestoreFaults       int     `json:"l3_restore_faults,omitempty"`
+	Enabled                bool    `json:"enabled"`
+	Backend                string  `json:"backend"`
+	MemoryClass            string  `json:"memory_class"`
+	Scope                  string  `json:"scope"`
+	DType                  string  `json:"dtype,omitempty"`
+	BytesPerToken          int64   `json:"bytes_per_token"`
+	ResidentTokens         int     `json:"resident_tokens,omitempty"`
+	ResidentBytes          int64   `json:"resident_bytes,omitempty"`
+	CapacityKnown          bool    `json:"capacity_known"`
+	CapacityFreeKnown      bool    `json:"capacity_free_known"`
+	CapacityTotalBytes     int64   `json:"capacity_total_bytes,omitempty"`
+	CapacityFreeBytes      int64   `json:"capacity_free_bytes,omitempty"`
+	HeadroomRatio          float64 `json:"headroom_ratio,omitempty"`
+	FitBudgetBytes         int64   `json:"fit_budget_bytes,omitempty"`
+	FitMarginBytes         int64   `json:"fit_margin_bytes,omitempty"`
+	BudgetTokens           int     `json:"budget_tokens,omitempty"`
+	LRUTokens              int     `json:"lru_tokens,omitempty"`
+	MaxDepthTokens         int     `json:"max_depth_tokens,omitempty"`
+	Nodes                  int     `json:"nodes,omitempty"`
+	Leaves                 int     `json:"leaves,omitempty"`
+	Evictions              int     `json:"evictions,omitempty"`
+	PolicyEvictions        int     `json:"policy_evictions,omitempty"`
+	Splits                 int     `json:"splits,omitempty"`
+	L1DeviceResidentBytes  int64   `json:"l1_device_resident_bytes,omitempty"`
+	L1HostResidentBytes    int64   `json:"l1_host_resident_bytes,omitempty"`
+	L2HostResidentBytes    int64   `json:"l2_host_resident_bytes,omitempty"`
+	L2HostCapacityBytes    int64   `json:"l2_host_capacity_bytes,omitempty"`
+	L1Hits                 int     `json:"l1_hits,omitempty"`
+	L1Misses               int     `json:"l1_misses,omitempty"`
+	L1Faults               int     `json:"l1_faults,omitempty"`
+	L1HitTokens            int     `json:"l1_hit_tokens,omitempty"`
+	L2Hits                 int     `json:"l2_hits,omitempty"`
+	L2Misses               int     `json:"l2_misses,omitempty"`
+	L2Faults               int     `json:"l2_faults,omitempty"`
+	L2HitTokens            int     `json:"l2_hit_tokens,omitempty"`
+	L2StageBytes           int64   `json:"l2_stage_bytes,omitempty"`
+	L2RestoreBytes         int64   `json:"l2_restore_bytes,omitempty"`
+	L2Evictions            int     `json:"l2_evictions,omitempty"`
+	L3Enabled              bool    `json:"l3_enabled"`
+	L3ReferencedBytes      int64   `json:"l3_referenced_bytes,omitempty"`
+	L3Hits                 int     `json:"l3_hits,omitempty"`
+	L3Misses               int     `json:"l3_misses,omitempty"`
+	L3Faults               int     `json:"l3_faults,omitempty"`
+	L3HitTokens            int     `json:"l3_hit_tokens,omitempty"`
+	L3StageBytes           int64   `json:"l3_stage_bytes,omitempty"`
+	L3RestoreBytes         int64   `json:"l3_restore_bytes,omitempty"`
+	L3StageNanos           int64   `json:"l3_stage_nanos,omitempty"`
+	L3RestoreNanos         int64   `json:"l3_restore_nanos,omitempty"`
+	L3StageFaults          int     `json:"l3_stage_faults,omitempty"`
+	L3RestoreFaults        int     `json:"l3_restore_faults,omitempty"`
+	LocalL3Enabled         bool    `json:"local_l3_enabled"`
+	LocalL3BudgetBytes     int64   `json:"local_l3_budget_bytes,omitempty"`
+	LocalL3ReferencedBytes int64   `json:"local_l3_referenced_bytes,omitempty"`
+	LocalL3Hits            int     `json:"local_l3_hits,omitempty"`
+	LocalL3Misses          int     `json:"local_l3_misses,omitempty"`
+	LocalL3Faults          int     `json:"local_l3_faults,omitempty"`
+	LocalL3HitTokens       int     `json:"local_l3_hit_tokens,omitempty"`
+	LocalL3StageBytes      int64   `json:"local_l3_stage_bytes,omitempty"`
+	LocalL3RestoreBytes    int64   `json:"local_l3_restore_bytes,omitempty"`
+	LocalL3Evictions       int     `json:"local_l3_evictions,omitempty"`
 }
 
 // debugMoEResidencyVars is the activated-expert residency block. Ring-derived rates are
@@ -1441,56 +1451,66 @@ func debugKVMemory(p agent.Planner) *debugKVMemoryVars {
 	backend := defaultBackendLabel(st.Backend)
 	dtype := modelLoadDType(st.DType)
 	return &debugKVMemoryVars{
-		Enabled:               st.Enabled,
-		Backend:               backend,
-		MemoryClass:           class,
-		Scope:                 scope,
-		DType:                 dtype,
-		BytesPerToken:         st.BytesPerToken,
-		ResidentTokens:        st.ResidentTokens,
-		ResidentBytes:         st.ResidentBytes,
-		CapacityKnown:         st.CapacityKnown,
-		CapacityFreeKnown:     st.CapacityKnown && st.CapacityFreeKnown,
-		CapacityTotalBytes:    st.CapacityTotalBytes,
-		CapacityFreeBytes:     st.CapacityFreeBytes,
-		HeadroomRatio:         st.HeadroomRatio,
-		FitBudgetBytes:        st.FitBudgetBytes,
-		FitMarginBytes:        st.FitMarginBytes,
-		BudgetTokens:          st.BudgetTokens,
-		LRUTokens:             st.LRUTokens,
-		MaxDepthTokens:        st.MaxDepthTokens,
-		Nodes:                 st.Nodes,
-		Leaves:                st.Leaves,
-		Evictions:             st.Evictions,
-		PolicyEvictions:       st.PolicyEvictions,
-		Splits:                st.Splits,
-		L1DeviceResidentBytes: st.L1DeviceResidentBytes,
-		L1HostResidentBytes:   st.L1HostResidentBytes,
-		L2HostResidentBytes:   st.L2HostResidentBytes,
-		L2HostCapacityBytes:   st.L2HostCapacityBytes,
-		L1Hits:                st.L1Hits,
-		L1Misses:              st.L1Misses,
-		L1Faults:              st.L1Faults,
-		L1HitTokens:           st.L1HitTokens,
-		L2Hits:                st.L2Hits,
-		L2Misses:              st.L2Misses,
-		L2Faults:              st.L2Faults,
-		L2HitTokens:           st.L2HitTokens,
-		L2StageBytes:          st.L2StageBytes,
-		L2RestoreBytes:        st.L2RestoreBytes,
-		L2Evictions:           st.L2Evictions,
-		L3Enabled:             st.L3Enabled,
-		L3ReferencedBytes:     st.L3ReferencedBytes,
-		L3Hits:                st.L3Hits,
-		L3Misses:              st.L3Misses,
-		L3Faults:              st.L3Faults,
-		L3HitTokens:           st.L3HitTokens,
-		L3StageBytes:          st.L3StageBytes,
-		L3RestoreBytes:        st.L3RestoreBytes,
-		L3StageNanos:          st.L3StageNanos,
-		L3RestoreNanos:        st.L3RestoreNanos,
-		L3StageFaults:         st.L3StageFaults,
-		L3RestoreFaults:       st.L3RestoreFaults,
+		Enabled:                st.Enabled,
+		Backend:                backend,
+		MemoryClass:            class,
+		Scope:                  scope,
+		DType:                  dtype,
+		BytesPerToken:          st.BytesPerToken,
+		ResidentTokens:         st.ResidentTokens,
+		ResidentBytes:          st.ResidentBytes,
+		CapacityKnown:          st.CapacityKnown,
+		CapacityFreeKnown:      st.CapacityKnown && st.CapacityFreeKnown,
+		CapacityTotalBytes:     st.CapacityTotalBytes,
+		CapacityFreeBytes:      st.CapacityFreeBytes,
+		HeadroomRatio:          st.HeadroomRatio,
+		FitBudgetBytes:         st.FitBudgetBytes,
+		FitMarginBytes:         st.FitMarginBytes,
+		BudgetTokens:           st.BudgetTokens,
+		LRUTokens:              st.LRUTokens,
+		MaxDepthTokens:         st.MaxDepthTokens,
+		Nodes:                  st.Nodes,
+		Leaves:                 st.Leaves,
+		Evictions:              st.Evictions,
+		PolicyEvictions:        st.PolicyEvictions,
+		Splits:                 st.Splits,
+		L1DeviceResidentBytes:  st.L1DeviceResidentBytes,
+		L1HostResidentBytes:    st.L1HostResidentBytes,
+		L2HostResidentBytes:    st.L2HostResidentBytes,
+		L2HostCapacityBytes:    st.L2HostCapacityBytes,
+		L1Hits:                 st.L1Hits,
+		L1Misses:               st.L1Misses,
+		L1Faults:               st.L1Faults,
+		L1HitTokens:            st.L1HitTokens,
+		L2Hits:                 st.L2Hits,
+		L2Misses:               st.L2Misses,
+		L2Faults:               st.L2Faults,
+		L2HitTokens:            st.L2HitTokens,
+		L2StageBytes:           st.L2StageBytes,
+		L2RestoreBytes:         st.L2RestoreBytes,
+		L2Evictions:            st.L2Evictions,
+		L3Enabled:              st.L3Enabled,
+		L3ReferencedBytes:      st.L3ReferencedBytes,
+		L3Hits:                 st.L3Hits,
+		L3Misses:               st.L3Misses,
+		L3Faults:               st.L3Faults,
+		L3HitTokens:            st.L3HitTokens,
+		L3StageBytes:           st.L3StageBytes,
+		L3RestoreBytes:         st.L3RestoreBytes,
+		L3StageNanos:           st.L3StageNanos,
+		L3RestoreNanos:         st.L3RestoreNanos,
+		L3StageFaults:          st.L3StageFaults,
+		L3RestoreFaults:        st.L3RestoreFaults,
+		LocalL3Enabled:         st.LocalL3Enabled,
+		LocalL3BudgetBytes:     st.LocalL3BudgetBytes,
+		LocalL3ReferencedBytes: st.LocalL3ReferencedBytes,
+		LocalL3Hits:            st.LocalL3Hits,
+		LocalL3Misses:          st.LocalL3Misses,
+		LocalL3Faults:          st.LocalL3Faults,
+		LocalL3HitTokens:       st.LocalL3HitTokens,
+		LocalL3StageBytes:      st.LocalL3StageBytes,
+		LocalL3RestoreBytes:    st.LocalL3RestoreBytes,
+		LocalL3Evictions:       st.LocalL3Evictions,
 	}
 }
 

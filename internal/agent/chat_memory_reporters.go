@@ -37,33 +37,43 @@ type KVMemoryStats struct {
 	// radix path. Proxy planners never implement this reporter, and a tree with
 	// no physical host L2 leaves the capacity at zero so observers do not infer
 	// an offload tier from ordinary provider counters.
-	L1DeviceResidentBytes int64
-	L1HostResidentBytes   int64
-	L2HostResidentBytes   int64
-	L2HostCapacityBytes   int64
-	L1Hits                int
-	L1Misses              int
-	L1Faults              int
-	L1HitTokens           int
-	L2Hits                int
-	L2Misses              int
-	L2Faults              int
-	L2HitTokens           int
-	L2StageBytes          int64
-	L2RestoreBytes        int64
-	L2Evictions           int
-	L3Enabled             bool
-	L3ReferencedBytes     int64
-	L3Hits                int
-	L3Misses              int
-	L3Faults              int
-	L3HitTokens           int
-	L3StageBytes          int64
-	L3RestoreBytes        int64
-	L3StageNanos          int64
-	L3RestoreNanos        int64
-	L3StageFaults         int
-	L3RestoreFaults       int
+	L1DeviceResidentBytes  int64
+	L1HostResidentBytes    int64
+	L2HostResidentBytes    int64
+	L2HostCapacityBytes    int64
+	L1Hits                 int
+	L1Misses               int
+	L1Faults               int
+	L1HitTokens            int
+	L2Hits                 int
+	L2Misses               int
+	L2Faults               int
+	L2HitTokens            int
+	L2StageBytes           int64
+	L2RestoreBytes         int64
+	L2Evictions            int
+	L3Enabled              bool
+	L3ReferencedBytes      int64
+	L3Hits                 int
+	L3Misses               int
+	L3Faults               int
+	L3HitTokens            int
+	L3StageBytes           int64
+	L3RestoreBytes         int64
+	L3StageNanos           int64
+	L3RestoreNanos         int64
+	L3StageFaults          int
+	L3RestoreFaults        int
+	LocalL3Enabled         bool
+	LocalL3BudgetBytes     int64
+	LocalL3ReferencedBytes int64
+	LocalL3Hits            int
+	LocalL3Misses          int
+	LocalL3Faults          int
+	LocalL3HitTokens       int
+	LocalL3StageBytes      int64
+	LocalL3RestoreBytes    int64
+	LocalL3Evictions       int
 }
 
 // KVMemoryReporter is the optional interface a local planner implements when it
