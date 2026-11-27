@@ -23,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/toolproc"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
@@ -320,6 +321,10 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 			_ = controlIngress.Close()
 		}
 		return nil, err
+	}
+	if sf.toolprocReuseRoot != nil && strings.TrimSpace(*sf.toolprocReuseRoot) != "" {
+		coalesce := sf.toolprocReuseQueries != nil && *sf.toolprocReuseQueries
+		srv.SetToolprocReuse(toolproc.ArmedConfig{CoalesceQueries: coalesce}, toolproc.FileDigest(*sf.toolprocReuseRoot))
 	}
 	if native, ok := abi.Engine(*sf.engineID).(*modelengine.Engine); ok {
 		srv.SetKVPreemptor(native.KVPreemptionMetricWriter())
