@@ -15,8 +15,9 @@ description: "Scrubbed HW-WITNESSED RTX 5080 (sm_120) receipt for fak v0.60.0: 1
 |---|---|---|
 | Plain decode (`TestInkling2CUDADecodeBench`) | `kv=f16`, auto ctx `29,184` | **122.34 tok/s** decode (127 steps), **602.04 tok/s** prefill (19 tok), `fnv64 d51b043b08677ea1` |
 | Attend split (`TestCUDAInk2AttendSplit*`) | `sm_120` reference parity | **3/3 PASS** (`0.33s` / `0.58s` / `0.75s`) |
-| Speculative oracle (`TestInkling2CUDASpecOracle`) | `kv=f32` | **294.28 tok/s** (depth 4, 102/102), **326.21 tok/s** (depth 6, 109/109), **307.74 tok/s** (depth 8, 113/113) |
-| Spec near-tie oracle (`TestInkling2CUDASpecNearTieOracle`) | `kv=f32`, depth 4 | **3/4 PASS** (`capitals` 294.25 tok/s, `fibonacci` 294.02 tok/s, `chat-template` near-tie 0.0349 nats); `passphrase-recall-1946` diverges at step 25 (`0.3601 nats < 0.50`) |
+| Speculative oracle (`TestInkling2CUDASpecOracle`) | `kv=f32` (`deaebd6e43d4`) | **10/10 PASS** (`18.79s`); **294.28 tok/s** (depth 4), **326.21 tok/s** (depth 6), **307.74 tok/s** (depth 8) |
+| Spec near-tie oracle (`TestInkling2CUDASpecNearTieOracle`) | `kv=f32`, depth 4 (`deaebd6e43d4`) | **4/4 PASS** (`12.75s`: `fibonacci` & `chat-template` 128/128 exact; `capitals` near-tie `0.0041 nats`; `passphrase-recall-1946` near-tie `0.0908 nats`) |
+| `f32` batch/cohort parity (`TestInkling2CUDABatchDecodeMatchesOracle` / `CohortPrefillMatchesScalar`) | `kv=f32`, `C=4` / `C=8` (`deaebd6e43d4`) | **PASS** — `C=4` **224.95 tok/s** (`3.42s`), `C=8` **309.50 tok/s** (`7.33s`; 7/8 exact, row 3 near-tie `0.0211 nats`) |
 
 ## 2. 16K `f16` Batched Prefill KL Parity
 

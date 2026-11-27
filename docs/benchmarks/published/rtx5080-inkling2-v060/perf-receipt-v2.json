@@ -29,8 +29,10 @@
       "perfect_depth_4_tok_s": 294.28,
       "perfect_depth_6_tok_s": 326.21,
       "perfect_depth_8_tok_s": 307.74,
-      "neartie_pass": ["capitals", "fibonacci", "chat-template"],
-      "neartie_fail": ["passphrase-recall-1946 (step 25, 150311 vs 150816, margin 0.3601 nats)"]
+      "neartie_oracle_commit": "deaebd6e43d4",
+      "neartie_pass": ["capitals (near-tie 0.0041 nats)", "fibonacci (128/128)", "passphrase-recall-1946 (near-tie 0.0908 nats)", "chat-template (128/128)"],
+      "batch_decode_c4_f32_tok_s": 224.95,
+      "cohort_prefill_c8_f32_tok_s": 309.50
     },
     "batched_prefill_kl_16k_f16": {
       "positions": 165,
