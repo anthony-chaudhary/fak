@@ -115,6 +115,11 @@ func inkling2SpecWarnKVDisable() {
 
 // enableSpec allocates the verify chunk state for up to depth drafted tokens.
 func (s *inkling2Resident) enableSpec(depth int) error {
+	if s.kvHalf && s.kvAutoHalf && s.pos == 0 {
+		if err := s.downgradeAutoHalfToFP32(); err != nil {
+			return err
+		}
+	}
 	if s.kvHalf || s.kvFP8 {
 		// the verify and draft ops read fp32 caches only
 		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode; set FAK_INKLING2_SPEC=0 or unset FAK_INKLING2_KV", s.kvDType())
@@ -275,7 +280,7 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 func inkling2ResidentSpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth, eos int,
 	mk func(*inkling2Resident) (inkling2Drafter, error)) ([]int, Inkling2SpecStats, error) {
 	var st Inkling2SpecStats
-	s, err := newInkling2Resident(m, be)
+	s, err := newInkling2ResidentWithSpec(m, be, depth > 0)
 	if err != nil {
 		return nil, st, err
 	}

@@ -797,3 +797,13 @@ func TestResolveServeInkling2ContextFlags(t *testing.T) {
 		}
 	})
 }
+
+func TestServeFitAutoSkipsGenericAdmissionForInkling2GGUF(t *testing.T) {
+	path := writeInkling2HeaderGGUF(t, serveInkling2LoopArch)
+	fit := "auto"
+	sf := &serveFlags{ggufPath: &path, fit: &fit}
+	// runServeFitAutoLive must return cleanly for inkling2_loop GGUFs instead of
+	// running generic resident-Q4K weight admission (which crashes on missing
+	// inkling2_loop.attention.head_count).
+	runServeFitAutoLive(sf)
+}

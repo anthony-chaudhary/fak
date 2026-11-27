@@ -228,6 +228,11 @@ func runServeFitAutoLive(sf *serveFlags) {
 		})
 		os.Exit(2)
 	}
+	if serveIsInkling2GGUF(*sf.ggufPath) {
+		// Inkling-2 looped GGUFs use their own header schema and auto-fit context
+		// against post-weight free device memory inside loadInkling2LoopModel.
+		return
+	}
 	be, err := resolveServeChatBackend(*sf.backendName)
 	if err != nil {
 		writeBackendUnavailableBail(os.Stderr, "fak serve", *sf.backendName)

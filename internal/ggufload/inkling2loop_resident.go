@@ -140,11 +140,13 @@ type inkling2Resident struct {
 	pos               int
 	err               error
 
-	// kvHalf stores the global-slot K and V caches as f16 (FAK_INKLING2_KV=f16); halfDev
-	// is the decode op set that reads them. kvFP8 stores them as OCP E4M3FN codes with
-	// per-(token, kvHead) f32 scales (FAK_INKLING2_KV=fp8) and an overflow flag. Local
-	// sliding-window rings always stay fp32.
+	// kvHalf stores the global-slot K and V caches as f16 (FAK_INKLING2_KV=f16 or auto);
+	// kvAutoHalf marks auto-selected f16 (unset FAK_INKLING2_KV) so enableSpec can safely
+	// yield back to fp32. halfDev is the decode op set that reads them. kvFP8 stores them
+	// as OCP E4M3FN codes with per-(token, kvHead) f32 scales (FAK_INKLING2_KV=fp8) and an
+	// overflow flag. Local sliding-window rings always stay fp32.
 	kvHalf     bool
+	kvAutoHalf bool
 	halfDev    compute.Inkling2HalfKVDevice
 	kvFP8      bool
 	fp8Dev     compute.Inkling2FP8KVDevice
@@ -292,18 +294,28 @@ func concatRows(rows [][]float32) []float32 {
 }
 
 func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Resident, error) {
+	return newInkling2ResidentWithSpec(m, be, false)
+}
+
+func newInkling2ResidentWithSpec(m *Inkling2LoopModel, be compute.Backend, forSpec bool) (*inkling2Resident, error) {
 	ctx := inkling2ResidentCtx
 	switch {
 	case inkling2ResidentCtxPinned > 0:
 		ctx = inkling2ResidentCtxPinned
+	case inkling2ResidentCtxPinned == inkling2ResidentCtxAuto:
+		ctx = inkling2ResidentCtxAuto
 	case inkling2ResidentCtxAutoSet(os.LookupEnv):
 		ctx = inkling2ResidentCtxAuto
 	}
 	if limit := inkling2ResidentHardMax(be.Name()); limit > 0 && ctx > limit {
 		return nil, fmt.Errorf("inkling2 resident: %d-token context exceeds the %d-token bound of backend %s", ctx, limit, be.Name())
 	}
-	return newInkling2ResidentSized(m, be, ctx, inkling2ArenaFloats)
+	return newInkling2ResidentSizedFor(m, be, ctx, inkling2ArenaFloats, forSpec)
 }
+
+// Inkling2ResidentCtxAutoMode pins the next resident session to derive its global
+// context from live post-weight free device memory even if FAK_INKLING2_CTX is set.
+const Inkling2ResidentCtxAutoMode = inkling2ResidentCtxAuto
 
 // inkling2ResidentCtxPinned is a context a caller already admitted, which the next
 // resident session builds exactly, instead of sizing it again.
@@ -517,21 +529,27 @@ func Inkling2ResolveServeCtx(m *Inkling2LoopModel, be compute.Backend, requested
 	if !known || free == compute.FreeUnknown || free <= 0 {
 		return Inkling2LoopResidentContext
 	}
-	half, err := inkling2ResidentHalfKVFor(m, be, lookup)
+	dtype, err := inkling2ResidentKVDTypeFor(m, be, lookup)
 	if err != nil {
-		half = false
+		dtype = Inkling2KVF32
 	}
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
 	batched := hasPrefill && (inkling2BatchedPrefill() || inkling2SpecDepthFor(m) > 0)
 	chunk := inkling2PrefillChunkWantedOn(be, lookup)
-	var prefillBytes int64
+	prefillChunk := 0
 	if batched && m.HP.Hidden > 0 {
-		keep, scr := inkling2PrefillArenaFloats(m.HP, chunk, 0)
-		prefillBytes = 4 * int64(keep+scr+chunk*m.HP.Hidden)
+		prefillChunk = max(chunk, inkling2PrefillChunkBase)
 	}
-	ceil := inkling2AutoCtxMax(be.Name(), half)
-	fit := inkling2FitResidentCtxExact(m.HP, free, inkling2ResidentReserve(free)+prefillBytes, batched, chunk, half, ceil)
-	if fit <= 0 {
+	other := inkling2ResidentOtherBytes(m.HP, inkling2ArenaFloats, prefillChunk, 0)
+	budget := free - inkling2DeviceHeadroom(free)
+	left := budget - other
+	ceil := inkling2AutoCtxMax(be.Name(), dtype != Inkling2KVF32)
+	fit := 0
+	if left > 0 {
+		fit = inkling2MaxResidentCtxFor(m.HP, batched, prefillChunk, dtype, ceil, left)
+		fit = fit / 256 * 256
+	}
+	if fit < Inkling2ResidentCtxMin {
 		return Inkling2LoopResidentContext
 	}
 	return max(Inkling2LoopResidentContext, fit)
@@ -558,19 +576,23 @@ func inkling2ResidentReserve(free int64) int64 {
 // and an arenaFloats per-token arena. ctx 0 allocates no slot caches, histories or
 // scores (caps still hold the local ring sizes) for a caller that owns its own state.
 func newInkling2ResidentSized(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats int) (*inkling2Resident, error) {
+	return newInkling2ResidentSizedFor(m, be, ctx, arenaFloats, false)
+}
+
+func newInkling2ResidentSizedFor(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats int, forSpec bool) (*inkling2Resident, error) {
 	wanted := inkling2PrefillChunkWantedOn(be, os.LookupEnv)
 	// a cohort binding (ctx 0) holds no per-sequence state: each cohort sizes its own
 	ring := inkling2PrefillChunkBase
 	if ctx != 0 && !inkling2ScalarWideHeld(wanted) {
 		ring = wanted
 	}
-	s, err := newInkling2ResidentRing(m, be, ctx, arenaFloats, ring, wanted)
+	s, err := newInkling2ResidentRingFor(m, be, ctx, arenaFloats, ring, wanted, forSpec)
 	if err != nil && ring > inkling2PrefillChunkBase && inkling2ChunkRefusal(err) {
 		// the refused build freed everything it took, so the base build starts from
 		// the memory a session that never opted in would have had
 		inkling2ScalarWideRefused(err, ring)
 		inkling2TrimIdle(be)
-		s, err = newInkling2ResidentRing(m, be, ctx, arenaFloats, inkling2PrefillChunkBase, wanted)
+		s, err = newInkling2ResidentRingFor(m, be, ctx, arenaFloats, inkling2PrefillChunkBase, wanted, forSpec)
 	}
 	return s, err
 }
@@ -731,6 +753,10 @@ func inkling2MaxResidentCtxFor(hp model.Inkling2LoopHParams, batched bool, chunk
 // newInkling2ResidentRing builds the resident with local rings and prefill arenas for
 // a forward of ring tokens; wanted is the chunk its cohorts may use.
 func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats, ring, wanted int) (*inkling2Resident, error) {
+	return newInkling2ResidentRingFor(m, be, ctx, arenaFloats, ring, wanted, false)
+}
+
+func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats, ring, wanted int, forSpec bool) (*inkling2Resident, error) {
 	dev, ok := be.(compute.Inkling2Device)
 	if !ok {
 		return nil, fmt.Errorf("inkling2 resident: backend %s has no inkling2 device ops", be.Name())
@@ -742,7 +768,7 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats, chunkMax: ring, chunkWanted: wanted}
 	s.report = metalgemm.Ink2ReportRequested(os.Getenv(metalgemm.Ink2ProfileEnv))
 	if ctx != 0 {
-		dtype, err := inkling2ResidentKVDTypeFor(m, be, os.LookupEnv)
+		dtype, autoHalf, err := inkling2ResidentKVDTypeForMode(m, be, os.LookupEnv, forSpec)
 		if err != nil {
 			return nil, err
 		}
@@ -752,11 +778,12 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 			s.fp8Dev, _ = be.(compute.Inkling2FP8KVDevice)
 		case Inkling2KVF16:
 			s.kvHalf = true
+			s.kvAutoHalf = autoHalf
 			s.halfDev, _ = be.(compute.Inkling2HalfKVDevice)
 		}
 	}
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
-	s.batched = hasPrefill && (inkling2BatchedPrefill() || inkling2SpecDepthFor(m) > 0)
+	s.batched = hasPrefill && (inkling2BatchedPrefill() || forSpec || inkling2SpecDepthFor(m) > 0)
 	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
 	s.output = s.mat(w.Output)
 	s.layers = make([]ink2Layer, hp.Layers)
@@ -1542,5 +1569,33 @@ func (s *inkling2Resident) fallbackFP8ToFP16() error {
 		s.fail(s.dev.Ink2Write(s.hist[slot], zero))
 	}
 	s.pos = 0
+	return s.err
+}
+
+// downgradeAutoHalfToFP32 reallocates auto-selected f16 global-slot KV caches to fp32
+// at position 0 so speculative decode (whose verify/draft ops read fp32 caches) can
+// run without failing when FAK_INKLING2_KV was left unset.
+func (s *inkling2Resident) downgradeAutoHalfToFP32() error {
+	if !s.kvHalf || !s.kvAutoHalf {
+		return nil
+	}
+	if s.pos != 0 {
+		return fmt.Errorf("inkling2 resident: cannot switch auto-f16 KV to fp32 at position %d", s.pos)
+	}
+	s.dropCaptures()
+	kvDim := s.hp.KVHeads * s.hp.HeadDim
+	for slot, cap := range s.caps {
+		if !s.kvHalfSlot(slot) {
+			continue
+		}
+		if slot < len(s.kc) && slot < len(s.vc) {
+			s.release(s.kc[slot], s.vc[slot])
+			kvFloats := inkling2BatchKVFloats(cap*kvDim, false)
+			s.kc[slot], s.vc[slot] = s.alloc(kvFloats), s.alloc(kvFloats)
+		}
+	}
+	s.kvHalf = false
+	s.kvAutoHalf = false
+	s.halfDev = nil
 	return s.err
 }

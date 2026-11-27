@@ -150,6 +150,14 @@ func inkling2ResidentHalfKV(be compute.Backend) bool {
 // backend provides ready f16 decode and prefill ops and speculative decode is not
 // active (verify/draft ops read fp32 caches).
 func inkling2ResidentKVDTypeFor(m *Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (Inkling2KVDType, error) {
+	dtype, _, err := inkling2ResidentKVDTypeForMode(m, be, lookup, false)
+	return dtype, err
+}
+
+// inkling2ResidentKVDTypeForMode is inkling2ResidentKVDTypeFor with forSpec indicating
+// that the caller will enable speculative decode on the session, and autoHalf reporting
+// whether f16 was auto-selected (unset FAK_INKLING2_KV) rather than explicitly requested.
+func inkling2ResidentKVDTypeForMode(m *Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool), forSpec bool) (Inkling2KVDType, bool, error) {
 	if lookup == nil {
 		lookup = os.LookupEnv
 	}
@@ -159,24 +167,24 @@ func inkling2ResidentKVDTypeFor(m *Inkling2LoopModel, be compute.Backend, lookup
 	}
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "fp8", "e4m3", "e4m3fn":
-		return inkling2ResidentKVDType(be, Inkling2KVFP8), nil
+		return inkling2ResidentKVDType(be, Inkling2KVFP8), false, nil
 	case "f16", "fp16":
-		return inkling2ResidentKVDType(be, Inkling2KVF16), nil
+		return inkling2ResidentKVDType(be, Inkling2KVF16), false, nil
 	case "f32", "fp32":
-		return Inkling2KVF32, nil
+		return Inkling2KVF32, false, nil
 	case "":
 		if inkling2KVHalfRequested {
-			return inkling2ResidentKVDType(be, Inkling2KVF16), nil
+			return inkling2ResidentKVDType(be, Inkling2KVF16), false, nil
 		}
-		if inkling2SpecDepthFor(m) > 0 {
-			return Inkling2KVF32, nil
+		if forSpec || inkling2SpecDepthFor(m) > 0 {
+			return Inkling2KVF32, false, nil
 		}
 		if inkling2BackendSupportsHalfKV(be, false) {
-			return Inkling2KVF16, nil
+			return Inkling2KVF16, true, nil
 		}
-		return Inkling2KVF32, nil
+		return Inkling2KVF32, false, nil
 	}
-	return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, or fp8", v)
+	return Inkling2KVF32, false, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, or fp8", v)
 }
 
 // inkling2ResidentHalfKVFor reports whether a resident session for m on be stores its

@@ -682,8 +682,13 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 		if fitAuto {
 			fmt.Fprintf(os.Stderr, "fak serve --fit auto (inkling2_loop): resolved context=%d\n", contextTokens)
 		}
-		if contextTokens > 0 {
+		switch {
+		case requestedCtx > 0:
 			ggufload.Inkling2ResidentCtxPin(contextTokens)
+		case fitAuto:
+			ggufload.Inkling2ResidentCtxPin(ggufload.Inkling2ResidentCtxAutoMode)
+		default:
+			ggufload.Inkling2ResidentCtxPin(0)
 		}
 		if gen, decode, err = newServeInkling2GeneratorWithContext(m, rt.chatBackend, contextTokens, envLookup); err != nil {
 			ggufload.Inkling2ResidentCtxPin(0)

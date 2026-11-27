@@ -164,3 +164,27 @@ func TestInkling2FitResidentCtxExactReservesLocalRingsAndPrefill(t *testing.T) {
 		t.Fatalf("Inkling2ResidentFitCtx %d exceeds KV+prefill budget: %v", got, err)
 	}
 }
+
+// TestInkling2ResolveServeCtxFitsRTX5080FreeVRAM is the regression for aegis3 16 GiB
+// RTX 5080 (2,611,609,600 B free after weights): Inkling2ResolveServeCtx must never
+// return 32768 when only <=29295 fits with prefill arenas, and the returned context
+// must pass inkling2KVFitFor without OOM.
+func TestInkling2ResolveServeCtxFitsRTX5080FreeVRAM(t *testing.T) {
+	hp := inkling2MiniKVShape()
+	hp.Hidden = 2304
+	hp.ExpertsUsed = 8
+	hp.ExpertWidth = 768
+	const aegis3Free = int64(2611609600)
+	be := &fakeInk2HalfBudget{fakeInk2Budget: newFakeInk2Budget(aegis3Free)}
+	m := &Inkling2LoopModel{HP: hp}
+	unset := func(string) (string, bool) { return "", false }
+
+	got := Inkling2ResolveServeCtx(m, be, 0, unset)
+	if got <= Inkling2ResidentCtxDefault || got >= 32768 {
+		t.Fatalf("Inkling2ResolveServeCtx(2.61 GB free) = %d, want in (%d, 32768)", got, Inkling2ResidentCtxDefault)
+	}
+	other := inkling2ResidentOtherBytes(hp, inkling2ArenaFloats, inkling2PrefillChunkBase, 0)
+	if _, err := inkling2KVFitFor(hp, got, true, inkling2PrefillChunkBase, Inkling2KVF16, other, aegis3Free); err != nil {
+		t.Fatalf("Inkling2ResolveServeCtx %d exceeds KV+prefill budget on 2.61 GB free: %v", got, err)
+	}
+}

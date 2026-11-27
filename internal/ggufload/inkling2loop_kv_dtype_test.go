@@ -576,3 +576,63 @@ func TestInkling2ResidentHalfKVForAutoDefaultAndSpecCoordination(t *testing.T) {
 		})
 	}
 }
+
+func TestInkling2AutoHalfKVYieldsToEnableSpec(t *testing.T) {
+	if prev, ok := os.LookupEnv("FAK_INKLING2_SPEC"); ok {
+		t.Cleanup(func() { _ = os.Setenv("FAK_INKLING2_SPEC", prev) })
+		_ = os.Unsetenv("FAK_INKLING2_SPEC")
+	}
+	if prev, ok := os.LookupEnv("FAK_INKLING2_KV"); ok {
+		t.Cleanup(func() { _ = os.Setenv("FAK_INKLING2_KV", prev) })
+		_ = os.Unsetenv("FAK_INKLING2_KV")
+	}
+	defer func(v bool) { inkling2KVHalfRequested = v }(inkling2KVHalfRequested)
+	inkling2KVHalfRequested = false
+
+	ready := inkling2FullHalfBackend{}
+	noSpec := &Inkling2LoopModel{}
+	unset := func(string) (string, bool) { return "", false }
+
+	// 1. forSpec=true with unset FAK_INKLING2_KV stays on fp32 (never auto-selects f16).
+	dtype, autoHalf, err := inkling2ResidentKVDTypeForMode(noSpec, ready, unset, true)
+	if err != nil || dtype != Inkling2KVF32 || autoHalf {
+		t.Fatalf("forSpec=true unset KV = (%v, autoHalf=%v, err=%v), want (f32, false, nil)", dtype, autoHalf, err)
+	}
+
+	// 2. forSpec=false with unset FAK_INKLING2_KV marks autoHalf=true; enableSpec at pos 0
+	// yields back to fp32 rather than failing with FAK_INKLING2_KV=f16 refusal.
+	dtype, autoHalf, err = inkling2ResidentKVDTypeForMode(noSpec, ready, unset, false)
+	if err != nil || dtype != Inkling2KVF16 || !autoHalf {
+		t.Fatalf("forSpec=false unset KV = (%v, autoHalf=%v, err=%v), want (f16, true, nil)", dtype, autoHalf, err)
+	}
+	hp := model.Inkling2LoopHParams{
+		Hidden: 64, Layers: 2, Heads: 4, KVHeads: 2, HeadDim: 16,
+		SlidingWindow: 16, ConvKernel: 4, Passes: 1,
+		LocalLayer: []bool{true, false},
+	}
+	be := &fakeInk2HalfBudget{fakeInk2Budget: newFakeInk2Budget(1 << 30)}
+	s := &inkling2Resident{
+		hp: hp, be: be, dev: be,
+		kvHalf: true, kvAutoHalf: true, halfDev: be,
+		caps: []int{16, 64},
+		kc:   make([]ink2Ref, 2), vc: make([]ink2Ref, 2),
+	}
+	s.kc[0], s.vc[0] = s.alloc(16*32), s.alloc(16*32)
+	s.kc[1], s.vc[1] = s.alloc(inkling2BatchKVFloats(64*32, true)), s.alloc(inkling2BatchKVFloats(64*32, true))
+	if err := s.downgradeAutoHalfToFP32(); err != nil {
+		t.Fatalf("downgradeAutoHalfToFP32: %v", err)
+	}
+	if s.kvHalf || s.kvAutoHalf || s.kvDType() != Inkling2KVF32 {
+		t.Fatalf("post-downgrade dtype = %v (kvHalf=%v auto=%v), want f32", s.kvDType(), s.kvHalf, s.kvAutoHalf)
+	}
+	s.close()
+	if be.live != 0 || be.frees != be.allocs {
+		t.Fatalf("after close: live=%d frees=%d allocs=%d", be.live, be.frees, be.allocs)
+	}
+
+	// 3. Explicit FAK_INKLING2_KV=f16 (autoHalf=false) still refuses enableSpec.
+	explicit := &inkling2Resident{kvHalf: true, kvAutoHalf: false}
+	if err := explicit.enableSpec(4); err == nil {
+		t.Fatal("explicit f16 KV allowed enableSpec")
+	}
+}

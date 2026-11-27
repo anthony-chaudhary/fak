@@ -18,7 +18,7 @@ func TestInkling2CUDAVerifyCost(t *testing.T) {
 	m, be := openInkling2CUDAForTest(t, "FAK_INKLING2_VERIFY_COST")
 	defer m.Close()
 	t.Setenv("FAK_INKLING2_BATCHED_PREFILL", "1")
-	s, err := newInkling2Resident(m, be)
+	s, err := newInkling2ResidentWithSpec(m, be, true)
 	if err != nil {
 		t.Fatal(err)
 	}
