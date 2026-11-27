@@ -2284,7 +2284,7 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 				if sp.DecodeTokenObserver != nil && visible {
 					sp.DecodeTokenObserver(piece, "")
 				}
-				if !sp.NativeInferenceReceipt && cycle.push(next) {
+				if !sp.NativeInferenceReceipt && structured == nil && cycle.push(next) {
 					return true
 				}
 				if !visible {
@@ -2300,7 +2300,7 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 						return true
 					}
 				}
-			} else if !sp.NativeInferenceReceipt && cycle.push(next) {
+			} else if !sp.NativeInferenceReceipt && structured == nil && cycle.push(next) {
 				return true
 			}
 			return false
