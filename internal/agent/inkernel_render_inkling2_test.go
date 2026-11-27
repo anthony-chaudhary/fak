@@ -178,7 +178,9 @@ func TestInkling2SplitOutput(t *testing.T) {
 		t.Fatalf("lifted = %+v", m)
 	}
 	if m.ToolCalls[0].Function.Name != "Bash" || m.ToolCalls[0].Function.Arguments != `{"command":"ls"}` ||
-		m.ToolCalls[1].Function.Name != "Read" || m.ToolCalls[1].ID != "call_text_1" {
+		!strings.HasPrefix(m.ToolCalls[0].ID, "call_text_") ||
+		m.ToolCalls[1].Function.Name != "Read" || !strings.HasPrefix(m.ToolCalls[1].ID, "call_text_") ||
+		m.ToolCalls[0].ID == m.ToolCalls[1].ID {
 		t.Fatalf("calls = %+v", m.ToolCalls)
 	}
 
@@ -275,5 +277,97 @@ func TestInkling2StopIDsEndOfTurnNotEndMessage(t *testing.T) {
 	}
 	if other := StopIDs(tok, model.Config{EOSTokenID: 200}); !other[200] || other[201] {
 		t.Fatalf("non-Inkling stops = %v, want config EOS only", other)
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestInkling2RenderMultiTurnReusedToolCallIDPreservesPrefix(t *testing.T) {
+	tools := []ToolDef{
+		{Type: "function", Function: ToolDefFunction{
+			Name:        "shell",
+			Description: "Run a shell command",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}}}`),
+		}},
+		{Type: "function", Function: ToolDefFunction{
+			Name:        "read_file",
+			Description: "Read a file",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`),
+		}},
+	}
+	turns := []struct {
+		tool   string
+		args   string
+		result string
+	}{
+		{tool: "shell", args: `{"command":"echo 1"}`, result: "1"},
+		{tool: "shell", args: `{"command":"echo 2"}`, result: "2"},
+		{tool: "shell", args: `{"command":"echo 3"}`, result: "3"},
+		{tool: "read_file", args: `{"path":"go.mod"}`, result: "module fak"},
+		{tool: "shell", args: `{"command":"echo 5"}`, result: "5"},
+	}
+
+	messages := []Message{
+		{Role: RoleSystem, Content: "You are a helpful agent."},
+		{Role: RoleUser, Content: "Inspect the repo."},
+	}
+	var rendered []string
+	for i, turn := range turns {
+		messages = append(messages,
+			Message{
+				Role: RoleAssistant,
+				ToolCalls: []ToolCall{{
+					ID:       "call_text_0",
+					Type:     "function",
+					Function: Func{Name: turn.tool, Arguments: turn.args},
+				}},
+			},
+			Message{
+				Role:       RoleTool,
+				ToolCallID: "call_text_0",
+				Content:    turn.result,
+			},
+		)
+		prompt := renderInkling2Chat(messages, tools, SampleParams{})
+		if strings.Contains(prompt, "shellshell") {
+			t.Fatalf("turn %d concatenated tool name across turns: %q", i+1, prompt)
+		}
+		wantHeader := inkling2RoleTool + turn.tool + inkling2ContentText + turn.result + inkling2EndMessage
+		if !strings.Contains(prompt, wantHeader) {
+			t.Fatalf("turn %d missing exact tool-result header %q in:\n%s", i+1, wantHeader, prompt)
+		}
+		for prevIdx := 0; prevIdx <= i; prevIdx++ {
+			prev := turns[prevIdx]
+			prevHeader := inkling2RoleTool + prev.tool + inkling2ContentText + prev.result + inkling2EndMessage
+			if !strings.Contains(prompt, prevHeader) {
+				t.Fatalf("turn %d corrupted earlier turn %d header; want %q in:\n%s", i+1, prevIdx+1, prevHeader, prompt)
+			}
+		}
+		if len(rendered) > 0 {
+			prevPrompt := rendered[len(rendered)-1]
+			if !strings.HasPrefix(prompt, prevPrompt) || len(prompt) <= len(prevPrompt) {
+				t.Fatalf("turn %d prompt is not a strict byte-for-byte extension of turn %d\nprev (%d bytes): %q\ncurr (%d bytes): %q",
+					i+1, i, len(prevPrompt), prevPrompt, len(prompt), prompt)
+			}
+		}
+		rendered = append(rendered, prompt)
+	}
+
+	// Emitted text-lifted tool-call IDs must also be unique across turns.
+	offered := NewOfferedTools(tools)
+	seenIDs := make(map[string]bool, len(turns))
+	for i := range turns {
+		raw := `<|message_model|>shell<|content_invoke_tool_json|>{"name":"shell","args":{"command":"ls"}}<|end_message|>`
+		lifted := LiftTextToolCalls(Message{Role: RoleAssistant, Content: raw}, offered)
+		if len(lifted.ToolCalls) != 1 {
+			t.Fatalf("turn %d lifted %d calls, want 1", i+1, len(lifted.ToolCalls))
+		}
+		id := lifted.ToolCalls[0].ID
+		if !strings.HasPrefix(id, "call_text_") {
+			t.Fatalf("turn %d lifted ID = %q, want call_text_ prefix", i+1, id)
+		}
+		if seenIDs[id] {
+			t.Fatalf("turn %d reused lifted tool-call ID %q", i+1, id)
+		}
+		seenIDs[id] = true
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/strictjson"
@@ -187,6 +188,12 @@ func liftTextToolCallsObserved(m Message, offered OfferedTools) (Message, bool) 
 	return m, rejected
 }
 
+var textToolCallSeq atomic.Uint64
+
+func nextTextToolCallID() string {
+	return fmt.Sprintf("call_text_%d", textToolCallSeq.Add(1))
+}
+
 func liftTextToolCallsWithDialect(m Message, offered OfferedTools) (Message, bool, string) {
 	if len(m.ToolCalls) > 0 || m.Content == "" {
 		return m, false, ""
@@ -231,7 +238,7 @@ func liftTextToolCallsWithDialect(m Message, offered OfferedTools) (Message, boo
 	for _, block := range selected {
 		stripped.WriteString(content[last:block.start])
 		last = block.end
-		block.call.ID = fmt.Sprintf("call_text_%d", len(calls))
+		block.call.ID = nextTextToolCallID()
 		calls = append(calls, block.call)
 	}
 	stripped.WriteString(content[last:])

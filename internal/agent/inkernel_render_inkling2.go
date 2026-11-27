@@ -121,7 +121,7 @@ func renderInkling2Chat(messages []Message, tools []ToolDef, sp SampleParams) st
 	}
 	effort := inkling2RoleSystem + inkling2ContentText + "Thinking effort level: " + inkling2Effort(sp) + inkling2EndMessage
 	effortEmitted := false
-	for _, m := range messages {
+	for idx, m := range messages {
 		rtok, ok := inkling2RoleToken[m.Role]
 		if !ok {
 			// The template raises on an unknown role; a user turn keeps the text visible.
@@ -135,7 +135,7 @@ func renderInkling2Chat(messages []Message, tools []ToolDef, sp SampleParams) st
 		case m.Role == RoleTool && m.Name != "":
 			rtok += m.Name
 		case m.Role == RoleTool && m.ToolCallID != "":
-			rtok += inkling2ToolNameFor(messages, m.ToolCallID)
+			rtok += inkling2ToolNameFor(messages, idx, m.ToolCallID)
 		case m.Role == RoleAssistant && m.Name != "":
 			rtok += m.Name
 		}
@@ -165,21 +165,28 @@ func renderInkling2Chat(messages []Message, tools []ToolDef, sp SampleParams) st
 	return b.String()
 }
 
-// inkling2ToolNameFor resolves a tool result's header name the way the template
-// does: every earlier assistant call with that id appends its name.
-func inkling2ToolNameFor(messages []Message, id string) string {
-	var name string
-	for _, prev := range messages {
+// inkling2ToolNameFor resolves a tool result's header name by searching
+// backward from idx-1 down to 0 for the nearest preceding assistant tool call
+// matching id. Returning on the first match prevents cross-turn concatenation
+// when a client or fallback reuses tool-call IDs, keeping earlier turns'
+// rendered bytes invariant for KV prefix-cache reuse.
+func inkling2ToolNameFor(messages []Message, idx int, id string) string {
+	if idx > len(messages) {
+		idx = len(messages)
+	}
+	for i := idx - 1; i >= 0; i-- {
+		prev := messages[i]
 		if prev.Role != RoleAssistant {
 			continue
 		}
-		for _, tc := range prev.ToolCalls {
+		for j := len(prev.ToolCalls) - 1; j >= 0; j-- {
+			tc := prev.ToolCalls[j]
 			if tc.ID == id && tc.Function.Name != "" {
-				name += tc.Function.Name
+				return tc.Function.Name
 			}
 		}
 	}
-	return name
+	return ""
 }
 
 func inkling2WriteToolCall(b *strings.Builder, fn Func) {

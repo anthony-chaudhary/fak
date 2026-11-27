@@ -1709,7 +1709,7 @@ func TestHTTPPlannerLiftsTextToolCallsBeforeReturn(t *testing.T) {
 		t.Fatalf("tool calls = %d, want 1: %+v", got, comp.Message.ToolCalls)
 	}
 	tc := comp.Message.ToolCalls[0]
-	if tc.ID != "call_text_0" || tc.Type != "function" || tc.Function.Name != "lookup" {
+	if !strings.HasPrefix(tc.ID, "call_text_") || tc.Type != "function" || tc.Function.Name != "lookup" {
 		t.Fatalf("bad lifted call: %+v", tc)
 	}
 	if tc.Function.Arguments != `{"city":"SFO"}` {

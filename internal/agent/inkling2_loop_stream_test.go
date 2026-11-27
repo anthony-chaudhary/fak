@@ -280,8 +280,21 @@ func TestInkling2StreamConcatenationMatchesComplete(t *testing.T) {
 			if capture.joined() != want.Message.Content {
 				t.Errorf("%s spell=%v: stream %q, Complete content %q", c.name, spell, capture.joined(), want.Message.Content)
 			}
-			wantJSON, _ := json.Marshal(want)
-			gotJSON, _ := json.Marshal(got)
+			normWant := *want
+			normGot := *got
+			if len(normWant.Message.ToolCalls) == len(normGot.Message.ToolCalls) {
+				normWant.Message.ToolCalls = append([]ToolCall(nil), normWant.Message.ToolCalls...)
+				normGot.Message.ToolCalls = append([]ToolCall(nil), normGot.Message.ToolCalls...)
+				for i := range normWant.Message.ToolCalls {
+					if strings.HasPrefix(normWant.Message.ToolCalls[i].ID, "call_text_") &&
+						strings.HasPrefix(normGot.Message.ToolCalls[i].ID, "call_text_") {
+						normWant.Message.ToolCalls[i].ID = "call_text_<norm>"
+						normGot.Message.ToolCalls[i].ID = "call_text_<norm>"
+					}
+				}
+			}
+			wantJSON, _ := json.Marshal(&normWant)
+			gotJSON, _ := json.Marshal(&normGot)
 			if string(wantJSON) != string(gotJSON) {
 				t.Errorf("%s spell=%v: stream completion %s, Complete %s", c.name, spell, gotJSON, wantJSON)
 			}

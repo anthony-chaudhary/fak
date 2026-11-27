@@ -65,7 +65,20 @@ func TestLiftTextToolCallsObserver(t *testing.T) {
 			if !reflect.DeepEqual(events, want) {
 				t.Fatalf("observations = %v, want %v", events, want)
 			}
-			if without := LiftTextToolCalls(input, plain); !reflect.DeepEqual(got, without) || !reflect.DeepEqual(events, want) {
+			without := LiftTextToolCalls(input, plain)
+			normGot, normWithout := got, without
+			if len(normGot.ToolCalls) == len(normWithout.ToolCalls) {
+				normGot.ToolCalls = append([]ToolCall(nil), normGot.ToolCalls...)
+				normWithout.ToolCalls = append([]ToolCall(nil), normWithout.ToolCalls...)
+				for i := range normGot.ToolCalls {
+					if strings.HasPrefix(normGot.ToolCalls[i].ID, "call_text_") &&
+						strings.HasPrefix(normWithout.ToolCalls[i].ID, "call_text_") {
+						normGot.ToolCalls[i].ID = "call_text_<norm>"
+						normWithout.ToolCalls[i].ID = "call_text_<norm>"
+					}
+				}
+			}
+			if !reflect.DeepEqual(normGot, normWithout) || !reflect.DeepEqual(events, want) {
 				t.Fatal("observer changed output or mutated the original options")
 			}
 		})

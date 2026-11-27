@@ -1192,21 +1192,24 @@ func TestChatProxyLiftsTextToolCallsBeforeAdjudication(t *testing.T) {
 	if got := len(msg.ToolCalls); got != 2 {
 		t.Fatalf("surviving tool calls = %d, want 2: %+v", got, msg.ToolCalls)
 	}
+	var allowID, repairedID string
 	var sawAllow, sawRepaired bool
 	for _, tc := range msg.ToolCalls {
 		switch tc.Function.Name {
 		case "allow_text":
-			sawAllow = tc.ID == "call_text_0" && tc.Function.Arguments == `{"x":1}`
+			allowID = tc.ID
+			sawAllow = strings.HasPrefix(tc.ID, "call_text_") && tc.Function.Arguments == `{"x":1}`
 		case "transform_text":
-			sawRepaired = tc.ID == "call_text_2" && tc.Function.Arguments == `{"redacted":true}`
+			repairedID = tc.ID
+			sawRepaired = strings.HasPrefix(tc.ID, "call_text_") && tc.Function.Arguments == `{"redacted":true}`
 		case "deny_text":
 			t.Fatal("denied text-form tool call reached the client")
 		default:
 			t.Fatalf("unexpected tool call survived: %+v", tc)
 		}
 	}
-	if !sawAllow || !sawRepaired {
-		t.Fatalf("allow=%v repaired=%v calls=%+v", sawAllow, sawRepaired, msg.ToolCalls)
+	if !sawAllow || !sawRepaired || allowID == repairedID {
+		t.Fatalf("allow=%v repaired=%v allowID=%q repairedID=%q calls=%+v", sawAllow, sawRepaired, allowID, repairedID, msg.ToolCalls)
 	}
 	if resp.Fak == nil || len(resp.Fak.Adjudications) != 3 {
 		t.Fatalf("fak adjudications = %+v, want 3", resp.Fak)
