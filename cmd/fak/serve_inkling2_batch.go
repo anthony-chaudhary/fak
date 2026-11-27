@@ -339,6 +339,43 @@ type inkling2LoopBatchEngine struct {
 	cohortArenaBytes func() int64
 	// initialDecodeHeadroom caps the upfront per-row decode KV reservation; 0 reserves full maxNew.
 	initialDecodeHeadroom int
+	// autotune observability counters
+	chunkStepdowns      atomic.Uint64
+	c1LongCtxFallbacks  atomic.Uint64
+	lastCohortWidth     atomic.Int64
+	lastChunkSize       atomic.Int64
+	cohortAutotuneStats func() ggufload.Inkling2CohortAutotuneStats
+}
+
+// Inkling2AutotuneStats captures live cohort/autotune counters from an
+// inkling2LoopBatchEngine.
+type Inkling2AutotuneStats struct {
+	ChunkStepdownsTotal     uint64
+	C1LongCtxFallbacksTotal uint64
+	LastCohortWidth         int64
+	LastChunkSize           int64
+}
+
+// AutotuneStats returns a snapshot of the batch engine's autotune counters.
+func (e *inkling2LoopBatchEngine) AutotuneStats() Inkling2AutotuneStats {
+	if e == nil {
+		return Inkling2AutotuneStats{}
+	}
+	stepdowns := e.chunkStepdowns.Load()
+	lastChunk := e.lastChunkSize.Load()
+	if e.cohortAutotuneStats != nil {
+		cs := e.cohortAutotuneStats()
+		stepdowns += cs.ChunkStepdownsTotal
+		if cs.LastChunkSize > 0 {
+			lastChunk = cs.LastChunkSize
+		}
+	}
+	return Inkling2AutotuneStats{
+		ChunkStepdownsTotal:     stepdowns,
+		C1LongCtxFallbacksTotal: e.c1LongCtxFallbacks.Load(),
+		LastCohortWidth:         e.lastCohortWidth.Load(),
+		LastChunkSize:           lastChunk,
+	}
 }
 
 var (
@@ -384,6 +421,7 @@ func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.I
 	e.batchAdmitting = cohorts.GenerateAdmitting
 	e.split = cohorts.Split
 	e.fitsMultiRow = cohorts.FitsMultiRow
+	e.cohortAutotuneStats = cohorts.AutotuneStats
 	if on, _ := cohorts.UsePrefixStore(lookup); on {
 		e.loneCohort = true
 		e.prefixStats = cohorts.PrefixStats
@@ -516,6 +554,9 @@ func (e *inkling2LoopBatchEngine) execute(group []*inkling2QueuedRequest) {
 		return
 	}
 	if len(greedy) == 1 && e.shouldRunScalarLone(greedy[0]) {
+		if e.loneCohort && e.fitsMultiRow != nil {
+			e.c1LongCtxFallbacks.Add(1)
+		}
 		e.runScalar(greedy[0])
 		return
 	}
@@ -538,6 +579,7 @@ func (e *inkling2LoopBatchEngine) shouldRunScalarLone(r *inkling2QueuedRequest) 
 // runScalar serves one row on the serialized engine, beside the weight binding only.
 func (e *inkling2LoopBatchEngine) runScalar(r *inkling2QueuedRequest) {
 	e.scalarGroups.Add(1)
+	e.lastCohortWidth.Store(1)
 	if e.arenasCached && e.releaseArenas != nil {
 		e.releaseArenas()
 	}
@@ -624,6 +666,9 @@ func (e *inkling2LoopBatchEngine) splitGroup(group []*inkling2QueuedRequest) [][
 // instead of failing its rows.
 func (e *inkling2LoopBatchEngine) runGroup(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) {
 	if len(group) == 1 && e.shouldRunScalarLone(group[0]) {
+		if e.loneCohort && e.fitsMultiRow != nil {
+			e.c1LongCtxFallbacks.Add(1)
+		}
 		e.runScalar(group[0])
 		return
 	}
@@ -640,6 +685,7 @@ func (e *inkling2LoopBatchEngine) runGroup(group []*inkling2QueuedRequest, owned
 	}
 	if len(group) == 1 {
 		// a one-row cohort refused device memory still fits the serialized engine
+		e.c1LongCtxFallbacks.Add(1)
 		e.runScalar(group[0])
 		return
 	}
@@ -742,6 +788,7 @@ func (e *inkling2LoopBatchEngine) admitQueued(c *inkling2Cohort, maxPositions in
 // It reports false, answering nothing, when the batch was refused device memory before
 // any row ran: the caller serves those rows on narrower cohorts.
 func (e *inkling2LoopBatchEngine) runBatch(group []*inkling2QueuedRequest, owned *[]*inkling2QueuedRequest) bool {
+	e.lastCohortWidth.Store(int64(len(group)))
 	c := &inkling2Cohort{width: len(group), rows: append([]*inkling2QueuedRequest(nil), group...), owned: owned, answered: make([]bool, len(group))}
 	reqs := make([]ggufload.Inkling2LoopBatchRequest, len(group))
 	for i, r := range group {

@@ -102,6 +102,7 @@ var specPathFor = map[string]string{
 	// /metrics renders (serving_props.go).
 	"/props":             "/props",
 	"/slots":             "/slots",
+	"/v1/serve/status":   "/v1/serve/status",
 	"/debug/vars":        "/debug/vars",
 	"/debug/guard-audit": "/debug/guard-audit",
 }

@@ -425,6 +425,7 @@ type Server struct {
 	// stamped as trusted Meta["lane"] on every served tool call. Empty = unset.
 	sessionLane                string
 	featureCatalog             atomic.Pointer[FeatureCatalog]
+	serveStatusProvider        func() ServeStatusSnapshot
 	responsesContinuationOnce  sync.Once
 	responsesContinuations     *responsesContinuationStore
 	remoteMaintenanceMu        sync.RWMutex

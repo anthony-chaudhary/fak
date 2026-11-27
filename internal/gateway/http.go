@@ -276,6 +276,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		// reading a 404 as "no engine here".
 		{"/props", s.handleProps},
 		{"/slots", s.handleSlots},
+		{"/v1/serve/status", s.handleServeStatus},
 		{"/debug/vars", s.handleDebugVars},
 		{"/debug/guard-audit", handleGuardAuditDebug},
 	}
@@ -738,7 +739,7 @@ func readScopedPath(r *http.Request) bool {
 		// same class of information: counts, ratios, and build labels. They join
 		// /metrics here so the read-scoped floor cannot drift — an engine that
 		// admits /metrics must admit the introspection that explains it.
-		"/props", "/slots":
+		"/props", "/slots", "/v1/serve/status":
 		return true
 	}
 	return false

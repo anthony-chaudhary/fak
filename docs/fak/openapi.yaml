@@ -3031,6 +3031,25 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/serve/status:
+    get:
+      tags: [Operational]
+      summary: Live Inkling-2 serving envelope and autotune telemetry
+      description: >-
+        Returns the solved Inkling-2 serving envelope (`max_ctx`, `kv_dtype`,
+        `default_chunk`, `min_chunk`, `target_concurrency`, `long_ctx_c1_threshold`)
+        and live cohort/autotune counters (`chunk_stepdowns_total`,
+        `c1_long_ctx_fallbacks_total`, `last_cohort_width`, `last_chunk_size`).
+      responses:
+        '200':
+          description: Live serve status snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /props:
     get:
       tags: [Operational]

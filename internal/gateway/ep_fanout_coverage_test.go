@@ -290,6 +290,7 @@ var epFanoutExemptRoutes = map[string]string{
 	// are no follower ranks to keep in step.
 	"/props":             epExemptNoDecode,
 	"/slots":             epExemptNoDecode,
+	"/v1/serve/status":   epExemptNoDecode,
 	"/debug/vars":        epExemptNoDecode,
 	"/debug/guard-audit": epExemptNoDecode,
 }
