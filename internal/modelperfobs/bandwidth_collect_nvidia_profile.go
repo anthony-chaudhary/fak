@@ -29,7 +29,22 @@ type NVIDIAProfileOptions struct {
 	CaptureEndedAt    time.Time
 	TheoreticalGBS    *float64
 	MeasuredDeviceGBS *float64
+	// ExpectedLaunches, when positive, refuses a capture with fewer launches
+	// (graph-hidden kernels or a missed NVTX range). Zero disables the check.
+	ExpectedLaunches int
 }
+
+// ErrNVIDIAProfileUnderCovered marks a capture that covers fewer kernel launches than expected.
+var ErrNVIDIAProfileUnderCovered = errors.New("Nsight Compute capture under-covers expected launches")
+
+// NVIDIAProfileUnderCoveredError carries the observed and expected launch counts.
+type NVIDIAProfileUnderCoveredError struct{ Observed, Expected int }
+
+func (e *NVIDIAProfileUnderCoveredError) Error() string {
+	return fmt.Sprintf("%v: observed %d of %d launches; kernels may be hidden by CUDA graph capture or a missed NVTX range: disable graph capture (NO_GRAPH) or check the NVTX range", ErrNVIDIAProfileUnderCovered, e.Observed, e.Expected)
+}
+
+func (e *NVIDIAProfileUnderCoveredError) Unwrap() error { return ErrNVIDIAProfileUnderCovered }
 
 // NVIDIAProfileReceipt keeps the profiler evidence separate from the derived
 // bandwidth sample. In particular, EngineEvidence makes explicit that raw NCU
@@ -47,6 +62,7 @@ type NVIDIAProfileReceipt struct {
 	ProcessID                 string   `json:"process_id"`
 	Process                   string   `json:"process"`
 	LaunchCount               int      `json:"launch_count"`
+	TimingDomain              string   `json:"timing_domain"`
 	CumulativeReadBytes       *uint64  `json:"cumulative_read_bytes,omitempty"`
 	CumulativeWriteBytes      *uint64  `json:"cumulative_write_bytes,omitempty"`
 	CumulativeDurationNS      *float64 `json:"cumulative_duration_ns,omitempty"`
@@ -254,6 +270,9 @@ func parseNVIDIAProfileCSV(r io.Reader, o NVIDIAProfileOptions) (NVIDIAProfileRe
 	if len(launches) == 0 {
 		return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, errors.New("Nsight Compute CSV contains no required bandwidth metrics")
 	}
+	if o.ExpectedLaunches > 0 && len(launches) < o.ExpectedLaunches {
+		return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, &NVIDIAProfileUnderCoveredError{Observed: len(launches), Expected: o.ExpectedLaunches}
+	}
 	totals, err := sumNVIDIAProfileEntries(launches)
 	if err != nil {
 		return NVIDIAProfileReceipt{}, LiveBandwidth{}, false, err
@@ -317,6 +336,7 @@ func buildNVIDIAProfileReceipt(o NVIDIAProfileOptions, launchCount int, processI
 		ProcessID:                 processID,
 		Process:                   processName,
 		LaunchCount:               launchCount,
+		TimingDomain:              "ncu_replay",
 		AggregationScope:          "sum-cumulative-bytes-over-sum-profiled-kernel-active-nanoseconds",
 		CaptureStartedAt:          o.CaptureStartedAt.UTC().Format(time.RFC3339Nano),
 		CaptureEndedAt:            o.CaptureEndedAt.UTC().Format(time.RFC3339Nano),

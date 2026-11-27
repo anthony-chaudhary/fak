@@ -1,6 +1,7 @@
 package modelperfobs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -140,5 +141,42 @@ func TestImportNVIDIAProfileRejectsPartialAndMixedDeviceCaptures(t *testing.T) {
 "1","7","fak","GPU-0","gpu__time_duration.sum","ns","10"`
 	if _, err := ImportNVIDIAProfile(strings.NewReader(mixed), o); err == nil || !strings.Contains(err.Error(), "mixed-device") {
 		t.Fatalf("mixed capture error=%v", err)
+	}
+}
+
+func TestImportNVIDIAProfileUnderCoveredLaunches(t *testing.T) {
+	o := nvidiaProfileTestOptions()
+	o.ExpectedLaunches = 3
+	f, err := os.Open("testdata/nvidia-hbm-ncu.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	_, err = ImportNVIDIAProfile(f, o)
+	var uc *NVIDIAProfileUnderCoveredError
+	if !errors.As(err, &uc) || !errors.Is(err, ErrNVIDIAProfileUnderCovered) {
+		t.Fatalf("want typed under-covered refusal, got %v", err)
+	}
+	if uc.Observed != 2 || uc.Expected != 3 || !strings.Contains(err.Error(), "NO_GRAPH") {
+		t.Fatalf("refusal=%+v msg=%v", uc, err)
+	}
+}
+
+func TestImportNVIDIAProfileTimingDomain(t *testing.T) {
+	for _, expected := range []int{0, 2} {
+		o := nvidiaProfileTestOptions()
+		o.ExpectedLaunches = expected
+		f, err := os.Open("testdata/nvidia-hbm-ncu.csv")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ImportNVIDIAProfile(f, o)
+		f.Close()
+		if err != nil {
+			t.Fatalf("expected=%d: %v", expected, err)
+		}
+		if got.ProfileReceipt.TimingDomain != "ncu_replay" {
+			t.Fatalf("timing domain=%q", got.ProfileReceipt.TimingDomain)
+		}
 	}
 }
