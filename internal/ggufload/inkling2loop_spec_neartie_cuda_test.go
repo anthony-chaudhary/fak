@@ -17,6 +17,8 @@ func TestInkling2CUDASpecNearTieOracle(t *testing.T) {
 	m, be := openInkling2CUDAForTest(t, "FAK_INKLING2_SPEC_ORACLE")
 	defer m.Close()
 	t.Setenv("FAK_INKLING2_BATCHED_PREFILL", "1")
+	// Spec decode downgrades auto-f16 KV to f32; pin f32 so the plain scalar reference matches.
+	t.Setenv("FAK_INKLING2_KV", "f32")
 	const n, depth = 128, 4
 	for _, c := range inkling2OracleCases {
 		t.Run(c.name, func(t *testing.T) {
