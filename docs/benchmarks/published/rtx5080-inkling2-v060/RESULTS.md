@@ -40,7 +40,15 @@ description: "Scrubbed HW-WITNESSED RTX 5080 (sm_120) receipt for fak v0.60.0: 1
 - **Where `fak` leads:** At `C4_p2048_d256`, `fak` cuts median TTFT by **1.84×** vs `realugbun` (`2,017.61` vs `3,718.34 ms`) and **2.32×** vs `llama-stock` (`4,683.83 ms`), while leading aggregate E2E throughput (`130.44` vs `122.47` and `115.69 tok/s`).
 - **Where `fak` trails:** Single-stream served decode (`C1_p512_d128` `102.45` vs `118.63 tok/s`; `C1_p2048_d256` `93.23` vs `116.03 tok/s`) and `C2` aggregate E2E (`121.16` vs `139.58 tok/s`) still trail `realugbun`.
 
-## 4. Honest Fences
+## 4. Non-Greedy Sampling & Greedy Fast-Path (`eb68a8cf8a`)
+
+Live RTX 5080 (`sm_120f`) HTTP witness (`fak serve --engine inkernel --backend cuda`, `0` HTTP 500s across all 6 requests):
+
+- **Seed determinism (`temp=0.7, top_p=0.9, seed=42` ×2):** HTTP 200, byte-identical (`sha256:ed3bb8d3f37c...`, 221 tokens).
+- **Seed diversity (`seed=42` / `99` / `1234`):** 3 distinct outputs (`221` / `219` / `241` tokens).
+- **Greedy fast-path (`temp=0`):** HTTP 200, **336.37 tok/s** stream decode (`109.05 tok/s` e2e including `1.774s` TTFT/setup, 283 tokens).
+
+## 5. Honest Fences
 
 - **16K `f16` KV ceiling on 16 GB GPUs:** In a 5-task `fak-deveval-outcome` smoke at `19,456` `f16` KV positions, 4/5 tasks passed their local checks before hitting `exceeds the 19456-token global cache` (`HTTP 500`); `> 16K` coding workloads require `fp8` KV auto-selection.
 - **Speculative decode:** Off by default on `f16` KV; `passphrase-recall-1946` has one known near-tie divergence at step 25 (`0.3601 nats`).

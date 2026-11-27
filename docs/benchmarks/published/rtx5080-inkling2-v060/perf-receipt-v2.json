@@ -66,6 +66,14 @@
         "llama_stock": {"ttft_ms": 4683.83, "stream_decode_tok_s": 61.72, "agg_post_first_tok_s": 231.57, "agg_e2e_tok_s": 115.69},
         "realugbun": {"ttft_ms": 3718.34, "stream_decode_tok_s": 55.30, "agg_post_first_tok_s": 212.25, "agg_e2e_tok_s": 122.47}
       }
+    },
+    "sampling_hw_witness_eb68a8cf8a": {
+      "seed42_byte_identical": true,
+      "seed42_sha256": "ed3bb8d3f37cda8babd224314e33725aa9c41f9d2137fba9de539d5b1f670a8b",
+      "distinct_outputs_across_seeds": 3,
+      "greedy_stream_decode_tok_s": 336.37,
+      "greedy_e2e_tok_s": 109.05,
+      "zero_http_500": true
     }
   },
   "verdict": "supported_within_envelope_c1_c4_16k"
