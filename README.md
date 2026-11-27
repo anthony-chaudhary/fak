@@ -76,10 +76,10 @@ fak run smollm2 "What input breaks def first(xs): return xs[0]? Write a test tha
 Look for a test that passes an empty list and checks for `IndexError`.
 
 On an M3 or later Mac with 24 GB of memory or more and macOS 26.4 or later,
-fak v0.59.0 can also run Inkling-2-Mini on the GPU by name:
+fak v0.60.0 can also run Inkling-2-Mini on the GPU by name:
 
 ```sh
-go install github.com/anthony-chaudhary/fak/cmd/fak@v0.59.0
+go install github.com/anthony-chaudhary/fak/cmd/fak@v0.60.0
 fak run inkling2-mini
 ```
 
@@ -132,4 +132,4 @@ For the version history, see [CHANGELOG.md](CHANGELOG.md).
 
 [Apache-2.0 license](LICENSE)
 
-<!-- readme-verified: 2026-11-26 vs VERSION 0.59.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-11-25 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
+<!-- readme-verified: 2026-11-27 vs VERSION 0.60.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-11-25 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
