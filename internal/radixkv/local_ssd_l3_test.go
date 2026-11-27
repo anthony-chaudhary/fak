@@ -11,12 +11,27 @@ import (
 // ssdSpillCountingStore records how many spills reached the byte owner.
 type ssdSpillCountingStore struct {
 	memorySnapshotStore
-	puts int
+	puts    int
+	touches [][]string
+	deletes [][]string
 }
 
 func (s *ssdSpillCountingStore) Put(ctx context.Context, key string, payload []byte) error {
 	s.puts++
 	return s.memorySnapshotStore.Put(ctx, key, payload)
+}
+
+func (s *ssdSpillCountingStore) Touch(_ context.Context, keys []string) error {
+	s.touches = append(s.touches, append([]string(nil), keys...))
+	return nil
+}
+
+func (s *ssdSpillCountingStore) Delete(_ context.Context, keys []string) error {
+	s.deletes = append(s.deletes, append([]string(nil), keys...))
+	for _, k := range keys {
+		delete(s.data, k)
+	}
+	return nil
 }
 
 // localSSDFixture builds a tree whose host L2 fits exactly one prefix image, stages
@@ -172,5 +187,256 @@ func TestConfigureLocalSSDSnapshotStoreRefusesNonPositiveBudget(t *testing.T) {
 	}
 	if tree.LocalSSDSnapshotEnabled() {
 		t.Fatal("tier armed after refused configuration")
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestUpperTierHitTouchesSSDCopy(t *testing.T) {
+	store := &ssdSpillCountingStore{}
+	tree, m, be, idsA := localSSDFixture(t, func(tree *Tree, m *model.Model, be compute.Backend) {
+		if err := tree.ConfigureLocalSSDSnapshotStore(store, "synthetic-ssd-test", be, m.Cfg, 1<<30); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// Re-insert A into L1 while its ssdSnapshot ref is still attached, then hit L1.
+	nA, _ := tree.Lookup(idsA)
+	if nA == nil || nA.ssdSnapshot == nil {
+		tree.Done(nA)
+		t.Fatal("expected A to retain ssdSnapshot ref")
+	}
+	wantDigest := nA.ssdSnapshot.digest
+	tree.Done(nA)
+
+	// Stage a longer extension of A into L1 while A retains its ssdSnapshot ref, then hit L1.
+	idsLong := append(append([]int(nil), idsA...), 15, 17)
+	tree.maxSnapshotBytes = 1 << 30
+	sess, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.Prefill(idsLong)
+	snap, err := sess.PrefixSnapshot()
+	sess.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nA, _ = tree.Lookup(idsA)
+	leaf, err := tree.InsertSnapshot(nA, []int{15, 17}, snap, nil)
+	tree.Done(nA)
+	if err != nil {
+		snap.Close()
+		t.Fatal(err)
+	}
+	tree.Done(leaf)
+
+	n, recovered, matched, tier, err := tree.LookupSnapshotTieredContext(context.Background(), idsLong)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tree.Done(n)
+	if recovered == nil || matched != len(idsLong) || tier != SnapshotTierDeviceL1 {
+		t.Fatalf("expected L1 hit, got tier=%q matched=%d", tier, matched)
+	}
+	recovered.Close()
+
+	if len(store.touches) != 1 || len(store.touches[0]) != 1 || store.touches[0][0] != wantDigest {
+		t.Fatalf("upper-tier hit touches=%v, want [[%s]]", store.touches, wantDigest)
+	}
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestLocalSSDSpillEvictsColdestToLowWatermark(t *testing.T) {
+	store := &ssdSpillCountingStore{}
+	m := model.NewSynthetic(remoteL3TestConfig())
+	be := &deviceCapsBackend{Backend: compute.Default()}
+	tree := NewWithTierBudgetsAndEvictionPolicy(0, 0, 1<<30, EvictionLRU)
+
+	idsA := []int{3, 7, 11, 13}
+	idsB := []int{5, 9, 2, 4}
+	idsC := []int{6, 8, 10, 12}
+	idsD := []int{14, 15, 16, 17}
+
+	// Arm with large budget first to measure one spilled envelope's size.
+	if err := tree.ConfigureLocalSSDSnapshotStore(store, "synthetic-ssd-test", be, m.Cfg, 1<<30); err != nil {
+		t.Fatal(err)
+	}
+
+	stageAndDropL1 := func(ids []int) {
+		t.Helper()
+		d := insertRemoteL3Snapshot(t, tree, m, be, ids)
+		if got := tree.StageSnapshotToHost(d); got.Outcome != SnapshotTransferOK {
+			t.Fatalf("stage %v to host: %+v", ids, got)
+		}
+		if tree.EvictHotSnapshot(d) != len(ids) {
+			t.Fatalf("evict hot %v", ids)
+		}
+	}
+
+	// Stage A to L2, then shrink L2 to 1 entry so each subsequent stage spills the L2 victim to SSD.
+	stageAndDropL1(idsA)
+	tree.maxHostSnapshotBytes = tree.hostSnapshotBytes
+
+	stageAndDropL1(idsB) // spills A to SSD
+	entryBytes := tree.LocalSSDReferencedBytes()
+	if entryBytes <= 0 {
+		t.Fatalf("entryBytes=%d, want >0", entryBytes)
+	}
+	// Budget = 3 entries: A, B, C fit; spilling D exceeds high watermark and must evict down to <= 80% (<=2 entries).
+	tree.localSSDBudget = entryBytes * 3
+
+	stageAndDropL1(idsC) // spills B to SSD
+	// Touch A via an SSD restore so B becomes the coldest SSD entry.
+	nA, snapA, _, tierA, err := tree.LookupSnapshotTieredContext(context.Background(), idsA)
+	if err != nil || snapA == nil || tierA != SnapshotTierLocalL3 {
+		t.Fatalf("restore A before spill: snap=%v tier=%q err=%v", snapA, tierA, err)
+	}
+	snapA.Close()
+	tree.Done(nA)
+
+	// Stage D into L2 -> spills C to SSD (now A, B, C = 3*entryBytes == budget).
+	stageAndDropL1(idsD)
+	if tree.LocalSSDReferencedBytes() != entryBytes*3 {
+		t.Fatalf("SSD bytes before overflow=%d, want %d", tree.LocalSSDReferencedBytes(), entryBytes*3)
+	}
+
+	// One more entry E forces D out of L2 -> SSD overflow! Should evict coldest (B) down to low watermark, NOT drop D.
+	idsE := []int{1, 2, 3, 4}
+	stageAndDropL1(idsE)
+
+	if tree.LocalSSDReferencedBytes() > tree.localSSDBudget {
+		t.Fatalf("SSD bytes=%d exceeds budget=%d", tree.LocalSSDReferencedBytes(), tree.localSSDBudget)
+	}
+	if len(store.deletes) == 0 {
+		t.Fatal("expected coldest SSD entry to be deleted from store on watermark eviction")
+	}
+
+	// D (incoming spill) must be restorable from SSD (not dropped).
+	nD, snapD, _, tierD, err := tree.LookupSnapshotTieredContext(context.Background(), idsD)
+	if err != nil || snapD == nil || tierD != SnapshotTierLocalL3 {
+		t.Fatalf("incoming spill D lookup: snap=%v tier=%q err=%v, want LocalL3 hit", snapD, tierD, err)
+	}
+	snapD.Close()
+	tree.Done(nD)
+
+	// A (touched) must survive; B (coldest) must be evicted.
+	nA2, snapA2, _, tierA2, err := tree.LookupSnapshotTieredContext(context.Background(), idsA)
+	if err != nil || snapA2 == nil || tierA2 != SnapshotTierLocalL3 {
+		t.Fatalf("touched A lookup: snap=%v tier=%q err=%v, want LocalL3 hit", snapA2, tierA2, err)
+	}
+	snapA2.Close()
+	tree.Done(nA2)
+
+	nB, snapB, _, tierB, err := tree.LookupSnapshotTieredContext(context.Background(), idsB)
+	if err != nil || snapB != nil || tierB != SnapshotTierMiss {
+		t.Fatalf("coldest B lookup: snap=%v tier=%q err=%v, want miss after eviction", snapB, tierB, err)
+	}
+	tree.Done(nB)
+}
+
+type gatedSSDStore struct {
+	ssdSpillCountingStore
+	gate    chan struct{}
+	failGet error
+}
+
+func (s *gatedSSDStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	if s.gate != nil {
+		select {
+		case <-s.gate:
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		}
+	}
+	if s.failGet != nil {
+		return nil, false, s.failGet
+	}
+	return s.ssdSpillCountingStore.Get(ctx, key)
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestLocalSSDRestoreParksRequestAndReadmits(t *testing.T) {
+	store := &gatedSSDStore{gate: make(chan struct{})}
+	tree, m, be, idsA := localSSDFixture(t, func(tree *Tree, m *model.Model, be compute.Backend) {
+		if err := tree.ConfigureLocalSSDSnapshotStore(store, "synthetic-ssd-test", be, m.Cfg, 1<<30); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// 1. Park request for A while disk Get is blocked on store.gate.
+	job, parked, err := tree.ParkLocalSSDRestore(context.Background(), idsA)
+	if err != nil || !parked || job == nil {
+		t.Fatalf("ParkLocalSSDRestore parked=%v job=%v err=%v", parked, job, err)
+	}
+	if job.State() != LocalSSDRestoreParked {
+		t.Fatalf("initial state=%v, want LocalSSDRestoreParked", job.State())
+	}
+	if got := tree.Stats().ProtectedTokens; got == 0 {
+		t.Fatalf("ProtectedTokens=%d while parked, want >0 (node leased)", got)
+	}
+
+	// While A is parked, another request (B) can still be scheduled on the tree.
+	idsB := []int{5, 9, 2, 4}
+	nB, snapB, _, tierB, err := tree.LookupSnapshotTieredContext(context.Background(), idsB)
+	if err != nil || snapB == nil || tierB != SnapshotTierDeviceL1 {
+		t.Fatalf("concurrent B lookup while A parked: snap=%v tier=%q err=%v", snapB, tierB, err)
+	}
+	snapB.Close()
+	tree.Done(nB)
+
+	// 2. Unblock disk read and re-admit A.
+	close(store.gate)
+	<-job.Done()
+	if job.State() != LocalSSDRestoreReady {
+		t.Fatalf("completed state=%v, want LocalSSDRestoreReady", job.State())
+	}
+	nA, snapA, matchedA, tierA, err := job.Readmit()
+	if err != nil || snapA == nil || matchedA != len(idsA) || tierA != SnapshotTierLocalL3 {
+		t.Fatalf("Readmit: snap=%v matched=%d tier=%q err=%v", snapA, matchedA, tierA, err)
+	}
+	restored, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		snapA.Close()
+		tree.Done(nA)
+		t.Fatal(err)
+	}
+	if err := snapA.Restore(restored); err != nil {
+		restored.Close()
+		snapA.Close()
+		tree.Done(nA)
+		t.Fatal(err)
+	}
+	snapA.Close()
+	tree.Done(nA)
+
+	fresh, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		restored.Close()
+		t.Fatal(err)
+	}
+	fresh.Prefill(idsA)
+	if diff := maxAbsDiff(restored.Step(17), fresh.Step(17)); diff != 0 {
+		restored.Close()
+		fresh.Close()
+		t.Fatalf("parked-restore continuation drift=%g", diff)
+	}
+	restored.Close()
+	fresh.Close()
+	if got := tree.Stats().ProtectedTokens; got != 0 {
+		t.Fatalf("ProtectedTokens=%d after Done, want 0", got)
+	}
+
+	// 3. Failed load rewinds the tree lease cleanly.
+	store.failGet = context.DeadlineExceeded
+	job2, parked2, err := tree.ParkLocalSSDRestore(context.Background(), idsA)
+	if err != nil || !parked2 || job2 == nil {
+		t.Fatalf("ParkLocalSSDRestore (fail) parked=%v err=%v", parked2, err)
+	}
+	<-job2.Done()
+	n2, snap2, _, _, err2 := job2.Readmit()
+	if err2 == nil || snap2 != nil || n2 != nil {
+		t.Fatalf("failed Readmit got n=%v snap=%v err=%v, want error + nil", n2, snap2, err2)
+	}
+	if got := tree.Stats().ProtectedTokens; got != 0 {
+		t.Fatalf("ProtectedTokens=%d after failed-load rewind, want 0", got)
 	}
 }

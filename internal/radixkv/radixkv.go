@@ -344,6 +344,8 @@ type Tree struct {
 	l3LocalHitTokens      int
 	l3LocalStageBytes     int64
 	l3LocalRestoreBytes   int64
+	l3LocalEvictions      int
+	l3LocalParked         int
 	l3Hits                int
 	l3Misses              int
 	l3Faults              int
@@ -840,6 +842,7 @@ func (t *Tree) lookupSnapshotTieredContext(ctx context.Context, tokens []int, lo
 		}
 		t.l1Hits++
 		t.l1HitTokens += candidate.plen
+		t.touchLocalSSDAncestors(ctx, candidate)
 		return n, snap, candidate.plen, SnapshotTierDeviceL1, nil
 	}
 	t.l1Misses++
@@ -858,6 +861,7 @@ func (t *Tree) lookupSnapshotTieredContext(ctx context.Context, tokens []int, lo
 		t.l2Hits++
 		t.l2HitTokens += candidate.plen
 		t.l2RestoreBytes += candidate.hostSnapshot.TransferBytes()
+		t.touchLocalSSDAncestors(ctx, candidate)
 		return n, snap, candidate.plen, SnapshotTierHostL2, nil
 	}
 	if t.HostL2Enabled() {
