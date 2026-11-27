@@ -147,6 +147,7 @@ type inkling2LoopEngine struct {
 	materialization inkling2PrefixMaterialization
 	closed          bool
 	reqs            chan *inkling2LoopRequest
+	ctrl            chan func()
 	quit            chan struct{}
 	done            chan struct{}
 
@@ -189,7 +190,7 @@ func (e *inkling2LoopEngine) worker() (reqs chan *inkling2LoopRequest, quit chan
 		return nil, nil, false
 	}
 	if e.reqs == nil {
-		e.reqs, e.quit, e.done = make(chan *inkling2LoopRequest), make(chan struct{}), make(chan struct{})
+		e.reqs, e.ctrl, e.quit, e.done = make(chan *inkling2LoopRequest), make(chan func()), make(chan struct{}), make(chan struct{})
 		go e.run()
 	}
 	return e.reqs, e.quit, true
@@ -254,6 +255,8 @@ func (e *inkling2LoopEngine) run() {
 		select {
 		case r := <-e.reqs:
 			e.serveRecovering(r)
+		case fn := <-e.ctrl:
+			fn()
 		case <-e.quit:
 			e.closeErr = e.dropAllSlots()
 			return
@@ -380,6 +383,7 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 			}
 		default:
 			e.prefixTrim()
+			e.cur = nil
 		}
 	}()
 	sl := e.cur
@@ -574,6 +578,10 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 	}
 	batchEng := newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, contextTokens, lookup)
 	batchEng.scalarGenerateLogits = scalar.GenerateLogits
+	batchEng.ledger = scalar.prefixState().ledger
+	batchEng.evictIdleSlots = scalar.evictIdleSlotsForCohort
+	batchEng.shedIdleSlots = scalar.ShedIdleSlots
+	batchEng.slotMemoryStatus = scalar.SlotMemoryStatus
 	return batchEng,
 		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", adm.max, adm.gap, adm.maxWait, prefix, ignored), nil
 }

@@ -335,6 +335,10 @@ type inkling2LoopBatchEngine struct {
 	ledger *inkling2ByteLedger
 	// evictIdleSlots sheds unpinned scalar slots in LRU order before cohort admission.
 	evictIdleSlots func(needBytes int64) int
+	// shedIdleSlots sheds at least needBytes from unpinned scalar slots in LRU order.
+	shedIdleSlots func(needBytes int64) int64
+	// slotMemoryStatus reports the unified memory-decider status payload.
+	slotMemoryStatus func() Inkling2SlotMemoryStatus
 	// cohortArenaBytes reports bytes currently held by cached cohort arenas.
 	cohortArenaBytes func() int64
 	// initialDecodeHeadroom caps the upfront per-row decode KV reservation; 0 reserves full maxNew.
@@ -609,11 +613,45 @@ func (e *inkling2LoopBatchEngine) runScalar(r *inkling2QueuedRequest) {
 	r.done <- inkling2QueuedResult{gen: gen, err: err}
 }
 
+// SlotMemoryStatus returns the unified memory-decider status payload.
+func (e *inkling2LoopBatchEngine) SlotMemoryStatus() Inkling2SlotMemoryStatus {
+	if e == nil {
+		return Inkling2SlotMemoryStatus{}
+	}
+	if e.slotMemoryStatus != nil {
+		return e.slotMemoryStatus()
+	}
+	if e.ledger != nil {
+		return Inkling2SlotMemoryStatus{HeldBytes: e.ledger.Snapshot().Total}
+	}
+	return Inkling2SlotMemoryStatus{}
+}
+
+// ShedIdleSlots frees at least needBytes from idle, unpinned scalar slots in
+// LRU order and returns the bytes freed.
+func (e *inkling2LoopBatchEngine) ShedIdleSlots(needBytes int64) int64 {
+	if e == nil || e.shedIdleSlots == nil {
+		return 0
+	}
+	return e.shedIdleSlots(needBytes)
+}
+
 // admitCohortMemory enforces the TICKET-02 admission order on cohort arrival:
 // 1) evict unpinned scalar slots in LRU order, 2) release cached arenas if
 // the watermark is still tight, 3) let the cohort allocate and run.
 func (e *inkling2LoopBatchEngine) admitCohortMemory(needBytes int64) {
-	if e.evictIdleSlots != nil {
+	if e.shedIdleSlots != nil {
+		shedNeed := needBytes
+		if e.ledger != nil {
+			snap := e.ledger.Snapshot()
+			if snap.Cap > 0 {
+				shedNeed = max(snap.Total+needBytes-snap.Cap, 0)
+			}
+		}
+		if shedNeed > 0 {
+			e.shedIdleSlots(shedNeed)
+		}
+	} else if e.evictIdleSlots != nil {
 		e.evictIdleSlots(needBytes)
 	}
 	if e.arenasCached && e.releaseArenas != nil && e.ledger != nil && !e.ledger.Fits(needBytes) {

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -307,6 +308,17 @@ func (l *inkling2ByteLedger) Snapshot() inkling2LedgerSnapshot {
 	return snap
 }
 
+// Inkling2SlotMemoryStatus is the unified memory-decider status payload
+// reported for Inkling-2 serving: resident slot counts, ledger-backed held
+// bytes, sheddable idle bytes, pinned slot count, and last prefix hit time.
+type Inkling2SlotMemoryStatus struct {
+	Slots       int       `json:"slots"`
+	HeldBytes   int64     `json:"held_bytes"`
+	IdleBytes   int64     `json:"idle_bytes"`
+	PinnedCount int       `json:"pinned_count"`
+	LastHitTime time.Time `json:"last_hit_time,omitempty"`
+}
+
 // inkling2PrefixState holds per-engine ledger and trace state outside the
 // inkling2LoopEngine struct definition in serve_inkling2.go.
 type inkling2PrefixState struct {
@@ -316,10 +328,19 @@ type inkling2PrefixState struct {
 	hits            uint64
 	misses          uint64
 	evictions       uint64
+	lastHitTime     time.Time
+	now             func() time.Time
 	effectiveSlots  int
 	effectiveLogged bool
 	trace           bool
 	traceOut        io.Writer
+}
+
+func (st *inkling2PrefixState) nowTime() time.Time {
+	if st != nil && st.now != nil {
+		return st.now()
+	}
+	return time.Now()
 }
 
 var inkling2PrefixStates sync.Map // *inkling2LoopEngine -> *inkling2PrefixState
@@ -427,6 +448,7 @@ func (e *inkling2LoopEngine) prefixHit(prompt []int, want inkling2PrefixMatchKey
 	st := e.prefixState()
 	if best != nil {
 		st.hits++
+		st.lastHitTime = st.nowTime()
 	} else {
 		st.misses++
 	}
@@ -558,29 +580,127 @@ func (e *inkling2LoopEngine) prefixTrim() {
 	}
 }
 
+func (e *inkling2LoopEngine) runOnWorker(fn func()) bool {
+	if e == nil {
+		return false
+	}
+	e.life.Lock()
+	if e.closed {
+		e.life.Unlock()
+		return false
+	}
+	ctrl, quit := e.ctrl, e.quit
+	if ctrl == nil {
+		defer e.life.Unlock()
+		fn()
+		return true
+	}
+	e.life.Unlock()
+	done := make(chan struct{})
+	wrapped := func() {
+		defer close(done)
+		fn()
+	}
+	select {
+	case ctrl <- wrapped:
+		<-done
+		return true
+	case <-quit:
+		return false
+	}
+}
+
+func (e *inkling2LoopEngine) lruUnpinnedIdleSlot() *inkling2PrefixSlot {
+	var lru *inkling2PrefixSlot
+	for _, sl := range e.cache {
+		if sl != e.cur && !sl.pinned && (lru == nil || sl.used < lru.used) {
+			lru = sl
+		}
+	}
+	return lru
+}
+
+func slotTrackedBytes(sl *inkling2PrefixSlot) int64 {
+	if sl == nil {
+		return 0
+	}
+	if m, ok := sl.sess.(inkling2HeldBytes); ok {
+		return max(m.HeldBytes(), 0)
+	}
+	return 0
+}
+
+// SlotMemoryStatus returns a point-in-time snapshot of resident slots, ledger
+// held bytes, sheddable idle bytes, pinned slot count, and last prefix hit time.
+func (e *inkling2LoopEngine) SlotMemoryStatus() Inkling2SlotMemoryStatus {
+	var status Inkling2SlotMemoryStatus
+	e.runOnWorker(func() {
+		st := e.prefixState()
+		_, _, _ = e.prefixMeter()
+		snap := st.ledger.Snapshot()
+		status = Inkling2SlotMemoryStatus{
+			Slots:       len(e.cache),
+			HeldBytes:   snap.Total,
+			LastHitTime: st.lastHitTime,
+		}
+		for _, sl := range e.cache {
+			if sl.pinned {
+				status.PinnedCount++
+				continue
+			}
+			if sl != e.cur {
+				status.IdleBytes += slotTrackedBytes(sl)
+			}
+		}
+	})
+	return status
+}
+
+// ShedIdleSlots frees at least needBytes from idle, unpinned scalar slots in
+// LRU order, returning the total bytes freed. Pinned and in-flight slots are
+// never touched.
+func (e *inkling2LoopEngine) ShedIdleSlots(needBytes int64) int64 {
+	if needBytes <= 0 {
+		return 0
+	}
+	var freed int64
+	e.runOnWorker(func() {
+		st := e.prefixState()
+		_, _, _ = e.prefixMeter()
+		for freed < needBytes {
+			lru := e.lruUnpinnedIdleSlot()
+			if lru == nil {
+				break
+			}
+			b := slotTrackedBytes(lru)
+			st.evictions++
+			_ = e.dropSlot(lru)
+			freed += b
+		}
+	})
+	return freed
+}
+
 // evictIdleSlotsForCohort evicts unpinned (not currently in-flight) scalar slots
 // in LRU order until adding needBytes fits under the unified ledger watermark
 // (or no unpinned slots remain). Used on cohort arrival before releasing arenas.
 func (e *inkling2LoopEngine) evictIdleSlotsForCohort(needBytes int64) int {
-	st := e.prefixState()
 	evicted := 0
-	for len(e.cache) > 0 {
-		if _, _, ok := e.prefixMeter(); ok && st.ledger.Fits(needBytes) {
-			break
-		}
-		var lru *inkling2PrefixSlot
-		for _, sl := range e.cache {
-			if sl != e.cur && (lru == nil || sl.used < lru.used) {
-				lru = sl
+	e.runOnWorker(func() {
+		st := e.prefixState()
+		for len(e.cache) > 0 {
+			if _, _, ok := e.prefixMeter(); ok && st.ledger.Fits(needBytes) {
+				break
 			}
+			lru := e.lruUnpinnedIdleSlot()
+			if lru == nil {
+				break
+			}
+			st.evictions++
+			evicted++
+			_ = e.dropSlot(lru)
 		}
-		if lru == nil {
-			break
-		}
-		st.evictions++
-		evicted++
-		_ = e.dropSlot(lru)
-	}
+	})
 	return evicted
 }
 

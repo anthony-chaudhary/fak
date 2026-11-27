@@ -770,3 +770,135 @@ func TestInkling2PrefixMatchKeyEndToEndAndConversationVictim(t *testing.T) {
 		t.Fatalf("pinned conv-A cached %d after conv-C miss, want %d", resA.CachedPromptTokens, len(pA)-1)
 	}
 }
+
+// fak-test:runtime fast est=1ms
+func TestInkling2SlotMemoryStatusMatchesLedgerTotals(t *testing.T) {
+	const slotBytes = int64(120)
+	eng, opened := inkling2SlotEngine([]int{'a', 'b', 'c'}, 4, 1<<20, slotBytes)
+	defer eng.Close()
+
+	st := eng.prefixState()
+	hitAt := time.Date(2026, 11, 27, 8, 0, 0, 0, time.UTC)
+	st.now = func() time.Time { return hitAt }
+
+	ctxPin := withInkling2ConversationKey(context.Background(), "conv-pin", true)
+	ctxUnpin := withInkling2ConversationKey(context.Background(), "conv-unpin", false)
+
+	pPin := []int{'P', '1', '2'}
+	pUnpin := []int{'U', '1', '2'}
+	if _, err := eng.Generate(ctxPin, pPin, 1, nil, func(int) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Generate(ctxUnpin, pUnpin, 1, nil, func(int) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+
+	// Before any prefix hit, LastHitTime must be zero.
+	pinBytes := (*opened)[0].HeldBytes()
+	unpinBytes := (*opened)[1].HeldBytes()
+	got := eng.SlotMemoryStatus()
+	snap := st.ledger.Snapshot()
+	if got.Slots != 2 || got.PinnedCount != 1 {
+		t.Fatalf("status Slots=%d PinnedCount=%d, want 2 and 1", got.Slots, got.PinnedCount)
+	}
+	if got.HeldBytes != snap.Total || got.HeldBytes != pinBytes+unpinBytes {
+		t.Fatalf("status HeldBytes=%d, ledger Total=%d, want %d", got.HeldBytes, snap.Total, pinBytes+unpinBytes)
+	}
+	if got.IdleBytes != unpinBytes {
+		t.Fatalf("status IdleBytes=%d, want %d (unpinned idle slot only)", got.IdleBytes, unpinBytes)
+	}
+	if !got.LastHitTime.IsZero() {
+		t.Fatalf("status LastHitTime=%v before any hit, want zero", got.LastHitTime)
+	}
+
+	// Trigger a prefix hit on the unpinned slot and add cohort_arena bytes to the shared ledger.
+	res, _ := inkling2Gen(t, eng, inkling2Extend(pUnpin, '3'), 1)
+	if res.CachedPromptTokens != len(pUnpin)-1 {
+		t.Fatalf("expected prefix hit on unpinned slot, cached=%d", res.CachedPromptTokens)
+	}
+	unpinBytes = (*opened)[1].HeldBytes()
+	st.ledger.Set("cohort_arena", inkling2LedgerCohortArena, 80)
+
+	batch := &inkling2LoopBatchEngine{
+		ledger:           st.ledger,
+		slotMemoryStatus: eng.SlotMemoryStatus,
+		shedIdleSlots:    eng.ShedIdleSlots,
+	}
+	got = batch.SlotMemoryStatus()
+	snap = st.ledger.Snapshot()
+	if got.HeldBytes != snap.Total || got.HeldBytes != pinBytes+unpinBytes+80 {
+		t.Fatalf("batch status HeldBytes=%d, ledger Total=%d, want %d", got.HeldBytes, snap.Total, pinBytes+unpinBytes+80)
+	}
+	if got.IdleBytes != unpinBytes {
+		t.Fatalf("batch status IdleBytes=%d, want %d", got.IdleBytes, unpinBytes)
+	}
+	if !got.LastHitTime.Equal(hitAt) {
+		t.Fatalf("status LastHitTime=%v, want %v", got.LastHitTime, hitAt)
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestInkling2ShedIdleSlotsFreesLRUUnpinnedNeverPinned(t *testing.T) {
+	const slotBytes = int64(100)
+	eng, opened := inkling2SlotEngine([]int{'a', 'b'}, 4, 350, slotBytes)
+	defer eng.Close()
+
+	ctxPin := withInkling2ConversationKey(context.Background(), "conv-pin", true)
+	ctxB := withInkling2ConversationKey(context.Background(), "conv-B", false)
+	ctxC := withInkling2ConversationKey(context.Background(), "conv-C", false)
+
+	// Open in order: A (pinned, LRU), B (unpinned, older), C (unpinned, newest).
+	if _, err := eng.Generate(ctxPin, []int{'A', '1', '2'}, 1, nil, func(int) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Generate(ctxB, []int{'B', '1', '2'}, 1, nil, func(int) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Generate(ctxC, []int{'C', '1', '2'}, 1, nil, func(int) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	if len(*opened) != 3 {
+		t.Fatalf("opened %d sessions, want 3", len(*opened))
+	}
+	bytesA := (*opened)[0].HeldBytes()
+	bytesB := (*opened)[1].HeldBytes()
+	bytesC := (*opened)[2].HeldBytes()
+
+	// Shedding 100 bytes must evict B (LRU unpinned), leaving A (pinned) and C (MRU unpinned).
+	freed := eng.ShedIdleSlots(100)
+	if freed != bytesB {
+		t.Fatalf("ShedIdleSlots(100) = %d, want %d", freed, bytesB)
+	}
+	if (*opened)[0].closed || !(*opened)[1].closed || (*opened)[2].closed {
+		t.Fatalf("closed states after 100B shed = [%v %v %v], want [false true false]",
+			(*opened)[0].closed, (*opened)[1].closed, (*opened)[2].closed)
+	}
+	st := eng.prefixState()
+	if snap := st.ledger.Snapshot(); snap.Total != bytesA+bytesC {
+		t.Fatalf("ledger total after first shed = %d, want %d", snap.Total, bytesA+bytesC)
+	}
+
+	// Cohort admission wired to ShedIdleSlots requesting 250 bytes (total > cap 350)
+	// must shed C and never touch pinned A, even though bytesA+250 > 350.
+	batch := &inkling2LoopBatchEngine{
+		ledger:        st.ledger,
+		shedIdleSlots: eng.ShedIdleSlots,
+	}
+	batch.admitCohortMemory(250)
+	if (*opened)[0].closed || !(*opened)[2].closed {
+		t.Fatalf("closed states after cohort admission = [%v %v], want [false true]",
+			(*opened)[0].closed, (*opened)[2].closed)
+	}
+
+	// Requesting more bytes than remain must return 0 and never touch pinned A.
+	if extra := batch.ShedIdleSlots(500); extra != 0 {
+		t.Fatalf("ShedIdleSlots(500) with only pinned slot = %d, want 0", extra)
+	}
+	if (*opened)[0].closed {
+		t.Fatal("pinned slot was evicted by ShedIdleSlots")
+	}
+	status := eng.SlotMemoryStatus()
+	if status.Slots != 1 || status.PinnedCount != 1 || status.HeldBytes != bytesA || status.IdleBytes != 0 {
+		t.Fatalf("final status = %+v, want Slots=1 PinnedCount=1 HeldBytes=%d IdleBytes=0", status, bytesA)
+	}
+}
