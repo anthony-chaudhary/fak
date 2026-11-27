@@ -807,3 +807,84 @@ func TestServeFitAutoSkipsGenericAdmissionForInkling2GGUF(t *testing.T) {
 	// inkling2_loop.attention.head_count).
 	runServeFitAutoLive(sf)
 }
+
+type inkling2FakeLogitSession struct {
+	inkling2FakeSession
+	logits [][]float32
+	idx    int
+}
+
+func (s *inkling2FakeLogitSession) LastLogits() ([]float32, error) {
+	if s.idx >= len(s.logits) {
+		return s.logits[len(s.logits)-1], nil
+	}
+	out := s.logits[s.idx]
+	s.idx++
+	return out, nil
+}
+
+func TestInkling2LoopEngineGenerateLogitsSamplesFromSession(t *testing.T) {
+	// Greedy canned tokens are [10, 11, 12], while logits put token 2 as the
+	// runner-up; a custom sampler picking argmin or runner-up must override greedy.
+	open := func() (ggufload.Inkling2LoopSession, error) {
+		return &inkling2FakeLogitSession{
+			inkling2FakeSession: inkling2FakeSession{canned: []int{10, 11, 12}},
+			logits: [][]float32{
+				{0.1, 1.0, 0.9}, // greedy=1, runner-up=2
+				{0.1, 0.2, 1.0}, // greedy=2, runner-up=1
+				{1.0, 0.8, 0.1}, // greedy=0, runner-up=1
+			},
+		}, nil
+	}
+	eng := &inkling2LoopEngine{open: open}
+	defer eng.Close()
+
+	// Sampler picks the runner-up token from logits (never the greedy canned token).
+	runnerUp := func(logits []float32) (int, error) {
+		best, second := 0, 1
+		if logits[second] > logits[best] {
+			best, second = second, best
+		}
+		for i := 2; i < len(logits); i++ {
+			if logits[i] > logits[best] {
+				second, best = best, i
+			} else if logits[i] > logits[second] {
+				second = i
+			}
+		}
+		return second, nil
+	}
+
+	var got []int
+	res, err := eng.GenerateLogits(context.Background(), []int{1, 2, 3}, 3, nil, runnerUp, func(id int) bool {
+		got = append(got, id)
+		return true
+	})
+	if err != nil {
+		t.Fatalf("GenerateLogits: %v", err)
+	}
+	if res.Generated != 3 || len(got) != 3 || got[0] != 2 || got[1] != 1 || got[2] != 1 {
+		t.Fatalf("sampled tokens = %v (res=%+v), want [2 1 1]", got, res)
+	}
+
+	// Verify batch engine routes GenerateLogits through scalarGenerateLogits.
+	eng2 := &inkling2LoopEngine{open: open}
+	defer eng2.Close()
+	batchEng := newInkling2LoopBatchEngineWith(eng2.Generate, nil, testInkling2Admission(inkling2RealClock{}), 64)
+	batchEng.scalarGenerateLogits = eng2.GenerateLogits
+	batchEng.loneCohort = true
+	go batchEng.run()
+	defer close(batchEng.queue)
+
+	var batchGot []int
+	bres, err := batchEng.GenerateLogits(context.Background(), []int{1, 2, 3}, 3, nil, runnerUp, func(id int) bool {
+		batchGot = append(batchGot, id)
+		return true
+	})
+	if err != nil {
+		t.Fatalf("batch GenerateLogits: %v", err)
+	}
+	if bres.Generated != 3 || len(batchGot) != 3 || batchGot[0] != 2 || batchGot[1] != 1 || batchGot[2] != 1 {
+		t.Fatalf("batch sampled tokens = %v (res=%+v), want [2 1 1]", batchGot, bres)
+	}
+}

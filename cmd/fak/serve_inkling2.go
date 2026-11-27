@@ -118,6 +118,7 @@ type inkling2LoopRequest struct {
 	prompt []int
 	maxNew int
 	stops  map[int]bool
+	sample func([]float32) (int, error)
 	emit   func(int) bool
 	res    agent.Inkling2LoopGeneration
 	err    error
@@ -155,7 +156,10 @@ type inkling2LoopEngine struct {
 	closeErr error
 }
 
-var _ agent.Inkling2LoopGenerator = (*inkling2LoopEngine)(nil)
+var (
+	_ agent.Inkling2LoopGenerator      = (*inkling2LoopEngine)(nil)
+	_ agent.Inkling2LoopLogitGenerator = (*inkling2LoopEngine)(nil)
+)
 
 // SerializesGPUAccess lets the planner hand concurrent turns to the worker, which
 // queues them, so a caller that gives up while queued returns at once.
@@ -193,6 +197,16 @@ func (e *inkling2LoopEngine) worker() (reqs chan *inkling2LoopRequest, quit chan
 // Generate hands the request to the worker and waits for it; a caller whose ctx
 // ends while queued returns without touching the session.
 func (e *inkling2LoopEngine) Generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
+	return e.generate(ctx, prompt, maxNew, stops, nil, emit)
+}
+
+// GenerateLogits runs non-greedy host-side sampling using the session's LastLogits
+// on each prefill and decode step.
+func (e *inkling2LoopEngine) GenerateLogits(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func([]float32) (int, error), emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
+	return e.generate(ctx, prompt, maxNew, stops, sample, emit)
+}
+
+func (e *inkling2LoopEngine) generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func([]float32) (int, error), emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
 	if err := ctx.Err(); err != nil {
 		return agent.Inkling2LoopGeneration{}, err
 	}
@@ -200,7 +214,7 @@ func (e *inkling2LoopEngine) Generate(ctx context.Context, prompt []int, maxNew 
 	if !ok {
 		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
 	}
-	r := &inkling2LoopRequest{ctx: ctx, prompt: prompt, maxNew: maxNew, stops: stops, emit: emit, done: make(chan struct{}), received: time.Now()}
+	r := &inkling2LoopRequest{ctx: ctx, prompt: prompt, maxNew: maxNew, stops: stops, sample: sample, emit: emit, done: make(chan struct{}), received: time.Now()}
 	select {
 	case reqs <- r:
 	case <-ctx.Done():
@@ -389,6 +403,20 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	if err != nil {
 		return res, err
 	}
+	ls, hasLogits := s.(ggufload.Inkling2LoopLogitSession)
+	if r.sample != nil {
+		if hasLogits {
+			logits, lerr := ls.LastLogits()
+			if lerr != nil {
+				return res, lerr
+			}
+			if next, err = r.sample(logits); err != nil {
+				return res, err
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "fak serve: inkling2_loop: non-greedy sampling requested on greedy-only session; falling back to greedy")
+		}
+	}
 	res.PrefillSeconds = time.Since(start).Seconds()
 	res.CachedPromptTokens, res.Width = reused, 1
 	if r, ok := s.(interface{ Reused() int }); ok {
@@ -419,6 +447,15 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 		}
 		if next, err = s.Step(next); err != nil {
 			return res, err
+		}
+		if r.sample != nil && hasLogits {
+			logits, lerr := ls.LastLogits()
+			if lerr != nil {
+				return res, lerr
+			}
+			if next, err = r.sample(logits); err != nil {
+				return res, err
+			}
 		}
 	}
 	fault = false
@@ -481,7 +518,9 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 		}
 		ignored += fmt.Sprintf("; CUDA concurrent prefill policy, batch KV=%s", kv)
 	}
-	return newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, contextTokens, lookup),
+	batchEng := newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, contextTokens, lookup)
+	batchEng.scalarGenerateLogits = scalar.GenerateLogits
+	return batchEng,
 		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", adm.max, adm.gap, adm.maxWait, prefix, ignored), nil
 }
 

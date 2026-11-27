@@ -27,6 +27,13 @@ type Inkling2LoopSession interface {
 	Close() error
 }
 
+// Inkling2LoopLogitSession is an optional interface implemented by sessions
+// that expose the softcapped logits from the most recent Prefill or Step call
+// for host-side non-greedy sampling.
+type Inkling2LoopLogitSession interface {
+	LastLogits() ([]float32, error)
+}
+
 // Inkling2LoopRewinder is implemented by sessions that can keep their cache across
 // requests. Prefill may be called repeatedly to append; Pos advances by the tokens
 // consumed. Restore returns to exactly the state saved by the last Checkpoint and
@@ -53,10 +60,11 @@ func NewInkling2LoopSession(m *Inkling2LoopModel, be compute.Backend) (Inkling2L
 }
 
 type inkling2HostSession struct {
-	h       *model.Inkling2LoopHost
-	metal   bool
-	recycle func()
-	ck      *model.Inkling2LoopHostState
+	h          *model.Inkling2LoopHost
+	metal      bool
+	recycle    func()
+	ck         *model.Inkling2LoopHostState
+	lastLogits []float32
 }
 
 func newInkling2HostSession(m *Inkling2LoopModel, be compute.Backend) (*inkling2HostSession, error) {
@@ -82,6 +90,7 @@ func (s *inkling2HostSession) Prefill(ctx context.Context, prompt []int) (int, e
 		if logits, err = Inkling2LoopPrefill(ctx, s.h, prompt); err != nil {
 			return 0, err
 		}
+		s.lastLogits = logits
 		return inkling2Argmax(logits), nil
 	}
 	for i, t := range prompt {
@@ -93,6 +102,7 @@ func (s *inkling2HostSession) Prefill(ctx context.Context, prompt []int) (int, e
 		}
 		s.recycle()
 	}
+	s.lastLogits = logits
 	return inkling2Argmax(logits), nil
 }
 
@@ -102,7 +112,15 @@ func (s *inkling2HostSession) Step(token int) (int, error) {
 		return 0, err
 	}
 	s.recycle()
+	s.lastLogits = logits
 	return inkling2Argmax(logits), nil
+}
+
+func (s *inkling2HostSession) LastLogits() ([]float32, error) {
+	if len(s.lastLogits) == 0 {
+		return nil, fmt.Errorf("inkling2_loop: no logits available before Prefill or Step")
+	}
+	return s.lastLogits, nil
 }
 
 func (s *inkling2HostSession) Close() error { return nil }
@@ -205,6 +223,14 @@ func (r *inkling2ResidentSession) Prefill(ctx context.Context, prompt []int) (in
 func (r *inkling2ResidentSession) Step(token int) (int, error) {
 	r.own()
 	return r.s.step(token)
+}
+
+func (r *inkling2ResidentSession) LastLogits() ([]float32, error) {
+	if r.s == nil {
+		return nil, fmt.Errorf("inkling2_loop: closed session")
+	}
+	r.own()
+	return r.s.lastLogits()
 }
 
 func (r *inkling2ResidentSession) Close() error {

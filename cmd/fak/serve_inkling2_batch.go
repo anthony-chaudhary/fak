@@ -213,6 +213,7 @@ type inkling2QueuedRequest struct {
 	prompt  []int
 	maxNew  int
 	stops   map[int]bool
+	sample  func([]float32) (int, error)
 	sink    *inkling2RowSink
 	done    chan inkling2QueuedResult
 }
@@ -244,6 +245,7 @@ type inkling2QueuedResult struct {
 }
 
 type inkling2ScalarGenerate func(context.Context, []int, int, map[int]bool, func(int) bool) (agent.Inkling2LoopGeneration, error)
+type inkling2ScalarGenerateLogits func(context.Context, []int, int, map[int]bool, func([]float32) (int, error), func(int) bool) (agent.Inkling2LoopGeneration, error)
 type inkling2BatchGenerate func([]ggufload.Inkling2LoopBatchRequest) ([]ggufload.Inkling2LoopBatchResult, error)
 
 // inkling2BatchAdmitting runs a cohort that takes queued requests into the slots of
@@ -254,14 +256,15 @@ type inkling2BatchAdmitting func([]ggufload.Inkling2LoopBatchRequest, func(int) 
 // inkling2LoopBatchEngine owns the only GPU executor: a lone admission runs the
 // scalar engine, a wider cohort shares one row-batched greedy forward.
 type inkling2LoopBatchEngine struct {
-	admission      inkling2Admission
-	contextTokens  int
-	queue          chan *inkling2QueuedRequest
-	peak           atomic.Int32
-	scalarGroups   atomic.Uint64
-	batchGroups    atomic.Uint64
-	scalarGenerate inkling2ScalarGenerate
-	batchGenerate  inkling2BatchGenerate
+	admission            inkling2Admission
+	contextTokens        int
+	queue                chan *inkling2QueuedRequest
+	peak                 atomic.Int32
+	scalarGroups         atomic.Uint64
+	batchGroups          atomic.Uint64
+	scalarGenerate       inkling2ScalarGenerate
+	scalarGenerateLogits inkling2ScalarGenerateLogits
+	batchGenerate        inkling2BatchGenerate
 	// batchAdmitting, when set, runs cohorts with admission instead of batchGenerate.
 	batchAdmitting inkling2BatchAdmitting
 	// pending is the first queued request a running cohort could not fit: it is the
@@ -293,7 +296,10 @@ type inkling2LoopBatchEngine struct {
 	cohortArenaBytes func() int64
 }
 
-var _ agent.Inkling2LoopGenerator = (*inkling2LoopBatchEngine)(nil)
+var (
+	_ agent.Inkling2LoopGenerator      = (*inkling2LoopBatchEngine)(nil)
+	_ agent.Inkling2LoopLogitGenerator = (*inkling2LoopBatchEngine)(nil)
+)
 
 // newInkling2LoopBatchEngine keeps one cohort state for the engine's life: the run
 // worker is its only user.
@@ -334,6 +340,17 @@ func newInkling2LoopBatchEngineWith(scalar inkling2ScalarGenerate, batch inkling
 func (*inkling2LoopBatchEngine) SerializesGPUAccess() bool { return true }
 
 func (e *inkling2LoopBatchEngine) Generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
+	return e.enqueue(ctx, prompt, maxNew, stops, nil, emit)
+}
+
+// GenerateLogits serves non-greedy sampled turns through the serialized scalar
+// logit path so sampling parameters (temperature, top_p, seed, penalties) are
+// honored without racing the greedy cohort executor.
+func (e *inkling2LoopBatchEngine) GenerateLogits(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func([]float32) (int, error), emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
+	return e.enqueue(ctx, prompt, maxNew, stops, sample, emit)
+}
+
+func (e *inkling2LoopBatchEngine) enqueue(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func([]float32) (int, error), emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
 	if ctx == nil || len(prompt) == 0 || maxNew <= 0 || emit == nil || len(prompt)+maxNew-1 > e.contextTokens {
 		return agent.Inkling2LoopGeneration{}, fmt.Errorf("inkling2 batch queue: invalid request")
 	}
@@ -341,7 +358,7 @@ func (e *inkling2LoopBatchEngine) Generate(ctx context.Context, prompt []int, ma
 		return agent.Inkling2LoopGeneration{}, err
 	}
 	r := &inkling2QueuedRequest{entered: e.admission.clock.Now(), ctx: ctx, prompt: append([]int(nil), prompt...), maxNew: maxNew, stops: stops,
-		sink: &inkling2RowSink{emit: emit}, done: make(chan inkling2QueuedResult, 1)}
+		sample: sample, sink: &inkling2RowSink{emit: emit}, done: make(chan inkling2QueuedResult, 1)}
 	select {
 	case e.queue <- r:
 	case <-ctx.Done():
@@ -408,11 +425,24 @@ func (e *inkling2LoopBatchEngine) execute(group []*inkling2QueuedRequest) {
 		}
 		fmt.Fprintf(os.Stderr, "inkling2.admission width=%d queue_wait_ns=%v\n", len(group), waits)
 	}
-	if len(group) == 1 && !e.loneCohort {
-		e.runScalar(group[0])
+	// Non-greedy sampled turns run on the serialized scalar logit path; greedy
+	// turns continue through the row-batched cohort path.
+	var greedy []*inkling2QueuedRequest
+	for _, r := range group {
+		if r.sample != nil {
+			e.runScalar(r)
+			continue
+		}
+		greedy = append(greedy, r)
+	}
+	if len(greedy) == 0 {
 		return
 	}
-	for _, g := range e.splitGroup(group) {
+	if len(greedy) == 1 && !e.loneCohort {
+		e.runScalar(greedy[0])
+		return
+	}
+	for _, g := range e.splitGroup(greedy) {
 		e.runGroup(g, &owned)
 	}
 }
@@ -427,7 +457,18 @@ func (e *inkling2LoopBatchEngine) runScalar(r *inkling2QueuedRequest) {
 	if e.ledger != nil {
 		e.ledger.Delete("cohort_arena")
 	}
-	gen, err := e.scalarGenerate(r.ctx, r.prompt, r.maxNew, r.stops, r.sink.send)
+	var (
+		gen agent.Inkling2LoopGeneration
+		err error
+	)
+	if r.sample != nil && e.scalarGenerateLogits != nil {
+		gen, err = e.scalarGenerateLogits(r.ctx, r.prompt, r.maxNew, r.stops, r.sample, r.sink.send)
+	} else {
+		if r.sample != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: inkling2_loop batch: non-greedy sampling requested without logit generator; falling back to greedy")
+		}
+		gen, err = e.scalarGenerate(r.ctx, r.prompt, r.maxNew, r.stops, r.sink.send)
+	}
 	gen.Width = 1
 	r.done <- inkling2QueuedResult{gen: gen, err: err}
 }
@@ -585,7 +626,7 @@ func (e *inkling2LoopBatchEngine) admitQueued(c *inkling2Cohort, maxPositions in
 		if !inkling2RowLive(r) {
 			continue
 		}
-		if len(r.prompt)+r.maxNew-1 > maxPositions {
+		if r.sample != nil || len(r.prompt)+r.maxNew-1 > maxPositions {
 			e.pending = r
 			return ggufload.Inkling2LoopBatchRequest{}, false
 		}
