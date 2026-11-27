@@ -49,7 +49,17 @@ Live RTX 5080 (`sm_120f`) HTTP witness (`fak serve --engine inkernel --backend c
 - **Seed diversity (`seed=42` / `99` / `1234`):** 3 distinct outputs (`221` / `219` / `241` tokens).
 - **Greedy fast-path (`temp=0`):** HTTP 200, **336.37 tok/s** stream decode (`109.05 tok/s` e2e including `1.774s` TTFT/setup, 283 tokens).
 
-## 5. Honest Fences
+## 5. 32K `fp8` Auto-KV & 14-Task `fak-deveval-outcome` (`9b6b0b2173`)
+
+- **32K `fp8` KL parity:** `TestInkling2CUDABatchedPrefillKL` (`context=32768`, `kv=fp8`) PASS — mean KL **0.004225 nats** (`<= 0.01`), `same-top=84/85`; `TestInkling2CUDAPrefillOracleForced` (`capitals`, `32768`) PASS (`32/32`, `llama-gap=0.000`).
+- **14-task `fak-deveval-outcome` (`bare fak serve`):** **0** HTTP 500s, **0** `exceeds global cache` errors, **0** failed model requests across `152` steps (`152` sessions auto-selected `kv=fp8` at `context=32768`), **69.6 tok/s** decode, **4,784.4 tok/s** prefill; `pass@1 = 4/14` (`17/28` checkpoints; all `14/14` hit the `30m` `stop=deadline` due to `6h48m17s` Windows host `go test` tool time vs `10m29s` model time).
+
+## 6. Scalar + Cohort Slot Coexistence (`761d14fcdc` / `705bacdef1`)
+
+- **CUDA coexistence (`TestInkling2CUDAScalarCohortCoexistence`):** PASS (`4.81s`), byte-equal greedy output across interleaved scalar prefix-reuse + cohort runs and clean `Inkling2Device.Reset()` handoffs.
+- **Tight-cap `slots=2` HTTP smoke (`FAK_INKLING2_PREFIX_SLOTS=2`, `2200 MiB` cap):** `CTX=8192` **3/3 HTTP 200, 0 OOM** (`effective_slots=2` -> `1`, `slot=987MiB`); `CTX=16384` **3/3 HTTP 200, 0 OOM** (`effective_slots=1`, `slot=1244MiB`).
+
+## 7. Honest Fences
 
 - **16K `f16` KV ceiling on 16 GB GPUs:** In a 5-task `fak-deveval-outcome` smoke at `19,456` `f16` KV positions, 4/5 tasks passed their local checks before hitting `exceeds the 19456-token global cache` (`HTTP 500`); `> 16K` coding workloads require `fp8` KV auto-selection.
 - **Speculative decode:** Off by default on `f16` KV; `passphrase-recall-1946` has one known near-tie divergence at step 25 (`0.3601 nats`).

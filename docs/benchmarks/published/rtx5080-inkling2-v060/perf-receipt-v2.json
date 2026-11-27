@@ -76,6 +76,22 @@
       "greedy_stream_decode_tok_s": 336.37,
       "greedy_e2e_tok_s": 109.05,
       "zero_http_500": true
+    },
+    "fp8_kv_32k_and_deveval14_9b6b0b2173": {
+      "kl_32k_fp8_mean_nats": 0.004225,
+      "kl_32k_fp8_same_top": "84/85",
+      "forced_oracle_32k_capitals": "32/32 (llama-gap 0.000)",
+      "deveval14_http_500s": 0,
+      "deveval14_cache_exceeded_errors": 0,
+      "deveval14_steps": 152,
+      "deveval14_decode_tok_s": 69.6,
+      "deveval14_prefill_tok_s": 4784.4,
+      "deveval14_pass_at_1": "4/14 (17/28 checkpoints; 14/14 hit 30m tool-time deadline)"
+    },
+    "slot_cohorts_unblock_761d14fcdc": {
+      "cuda_coexistence_test": "TestInkling2CUDAScalarCohortCoexistence PASS (4.81s, byte-equal greedy, clean Reset)",
+      "tight_cap_slots2_8k": "3/3 HTTP 200, 0 OOM (effective_slots=2 -> 1, slot=987MiB)",
+      "tight_cap_slots2_16k": "3/3 HTTP 200, 0 OOM (effective_slots=1, slot=1244MiB)"
     }
   },
   "verdict": "supported_within_envelope_c1_c4_16k"
