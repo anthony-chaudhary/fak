@@ -346,6 +346,13 @@ var registry = []Bench{
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{
+		Name: "tb4-gutcheck", Kind: KindVerb, Need: NeedDataset, Level: LevelServing,
+		Summary: "Paired-arm gut-check quality benchmark (tb4-gutcheck-v1): 12 coding, reasoning, and tool-call tasks with hard token and time budgets to detect serving-route quality drift.",
+		Run:     "fak tb4-gutcheck run --arm both",
+		Flags:   []string{"--arm  -  benchmark arm (fak, opencode, both)", "--dataset  -  gut-check suite manifest JSON (default testdata/tb4bench/gutcheck_suite.json)", "--max-cost-usd  -  hard per-pass cost cap", "--out  -  output directory for paired-arm receipts"},
+		Doc:     "BENCHMARK-AUTHORITY.md",
+	},
+	{
 		Name: "tb4bench", Kind: KindVerb, Need: NeedNone, Level: LevelE2E,
 		Summary: "Terminal-Bench 4 all-in-one vs OpenCode regression benchmark: evaluates task solve rate, prompt-token reduction, and vDSO acceleration.",
 		Run:     "fak bench tb4 run --arm both --mock --dataset testdata/tb4bench/synthetic_suite.json",

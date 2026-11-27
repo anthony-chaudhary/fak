@@ -1,0 +1,234 @@
+{
+  "benchmark": "terminal-bench-4",
+  "version": "tb4-gutcheck-v1",
+  "tasks": [
+    {
+      "task_id": "tb4-gutcheck-01-coding-go-edgecase",
+      "category": "debug",
+      "prompt": "Fix the off-by-one slice bounds bug in calc.go so empty and single-element inputs do not panic, and verify all Go unit tests pass.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "go mod init gutcheck/calc",
+      "verification_oracle": "#!/bin/bash\ngo test ./...\n",
+      "verification_oracle_hash": "sha256:cac41deb716c21de9cb28b02110c42668a7da1d51b8a9eaf32a15019f091637d",
+      "timeout_seconds": 45,
+      "budget_turns": 5,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "coding",
+        "max_prompt_tokens": "4096",
+        "max_output_tokens": "1024",
+        "max_total_tokens": "5120",
+        "hard_time_budget_seconds": "45"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-02-coding-py-refactor",
+      "category": "refactor",
+      "prompt": "Extract the duplicated CSV splitting logic in parser.py into a top-level parse_row(line) helper while preserving existing output formatting.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "touch parser.py",
+      "verification_oracle": "#!/bin/bash\npython3 -c 'import parser; assert hasattr(parser, \"parse_row\")'\n",
+      "verification_oracle_hash": "sha256:11a62336de6bfc99ddb57becd7a0de95357cd86f0d6948916e8607ca1691e45f",
+      "timeout_seconds": 45,
+      "budget_turns": 5,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "coding",
+        "max_prompt_tokens": "4096",
+        "max_output_tokens": "1024",
+        "max_total_tokens": "5120",
+        "hard_time_budget_seconds": "45"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-03-coding-unit-test",
+      "category": "test",
+      "prompt": "Add table-driven unit tests in math_test.go covering zero, negative, and boundary integer inputs for TestMath.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "go mod init gutcheck/mathpkg",
+      "verification_oracle": "#!/bin/bash\ngo test -v -run TestMath ./...\n",
+      "verification_oracle_hash": "sha256:64af2eedbc0688ed3c73c854eec7dfecec9e843956db7c65113a8e8618840bb9",
+      "timeout_seconds": 45,
+      "budget_turns": 5,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "coding",
+        "max_prompt_tokens": "4096",
+        "max_output_tokens": "1024",
+        "max_total_tokens": "5120",
+        "hard_time_budget_seconds": "45"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-04-coding-build-makefile",
+      "category": "build",
+      "prompt": "Fix the Makefile build target so make build compiles a deterministic executable at bin/app.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "mkdir -p bin && touch Makefile",
+      "verification_oracle": "#!/bin/bash\nmake build && test -x bin/app\n",
+      "verification_oracle_hash": "sha256:10ff4b322dc049f87f7b7f46021320b1b61b4e3186910043b7e830ade2649958",
+      "timeout_seconds": 40,
+      "budget_turns": 5,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "coding",
+        "max_prompt_tokens": "3584",
+        "max_output_tokens": "1024",
+        "max_total_tokens": "4608",
+        "hard_time_budget_seconds": "40"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-05-reasoning-concurrency-race",
+      "category": "debug",
+      "prompt": "Diagnose and eliminate the concurrent map read/write data race in cache.go using proper synchronization so go test -race passes cleanly.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "go mod init gutcheck/cache",
+      "verification_oracle": "#!/bin/bash\ngo test -race ./...\n",
+      "verification_oracle_hash": "sha256:9f0530941bca65be96b837bb61f2bbf9f1dbefefcbfacf095a87b95f9fe9c8d2",
+      "timeout_seconds": 60,
+      "budget_turns": 6,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "reasoning",
+        "max_prompt_tokens": "6144",
+        "max_output_tokens": "1536",
+        "max_total_tokens": "7680",
+        "hard_time_budget_seconds": "60"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-06-reasoning-algo-invariants",
+      "category": "test",
+      "prompt": "Fix the binary search loop termination invariant in search.py so duplicate keys return the leftmost insertion index and all unittest checks pass.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "touch search.py test_search.py",
+      "verification_oracle": "#!/bin/bash\npython3 -m unittest discover -s . -p 'test_*.py'\n",
+      "verification_oracle_hash": "sha256:46fecbb96bec7e1c0323ff4c00240e15d1d75ed71cc41a90b0f35ffbf92f589c",
+      "timeout_seconds": 50,
+      "budget_turns": 6,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "reasoning",
+        "max_prompt_tokens": "5120",
+        "max_output_tokens": "1536",
+        "max_total_tokens": "6656",
+        "hard_time_budget_seconds": "50"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-07-reasoning-git-bisect",
+      "category": "git",
+      "prompt": "Trace the git commit history to identify the exact commit that introduced the regression and write its commit hash to culprit.txt.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "git init",
+      "verification_oracle": "#!/bin/bash\ntest -s culprit.txt && git rev-parse --verify $(cat culprit.txt)\n",
+      "verification_oracle_hash": "sha256:451cd14a7a0a41bb60836fff02fb5afbeb6507a488dbb8a02259029215f25e6e",
+      "timeout_seconds": 60,
+      "budget_turns": 6,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "reasoning",
+        "max_prompt_tokens": "5120",
+        "max_output_tokens": "1024",
+        "max_total_tokens": "6144",
+        "hard_time_budget_seconds": "60"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-08-reasoning-security-policy",
+      "category": "security",
+      "prompt": "Update policy.json to enforce default-deny on shell execution tools while preserving explicit allow rules for read_file.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "echo '{}' > policy.json",
+      "verification_oracle": "#!/bin/bash\ngrep -q '\"deny\"' policy.json && grep -q '\"read_file\"' policy.json\n",
+      "verification_oracle_hash": "sha256:427501ace06d2c6e6bec2989ffc83b00d3b525d6171183c354e7f5f4eef433e3",
+      "timeout_seconds": 45,
+      "budget_turns": 5,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "reasoning",
+        "max_prompt_tokens": "4096",
+        "max_output_tokens": "1024",
+        "max_total_tokens": "5120",
+        "hard_time_budget_seconds": "45"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-09-toolcall-log-pipeline",
+      "category": "sysadmin",
+      "prompt": "Filter events.log for HTTP 5xx error entries and write the sorted unique request paths to errors.txt.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "echo '500 /api/v1/checkout' > events.log",
+      "verification_oracle": "#!/bin/bash\ntest -f errors.txt && grep -q '/api/v1/checkout' errors.txt\n",
+      "verification_oracle_hash": "sha256:26ca459070085d99a76c0551506532ef408b0d75f4e8d3a4e18e57f0c4a4c270",
+      "timeout_seconds": 40,
+      "budget_turns": 5,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "tool-call",
+        "max_prompt_tokens": "3584",
+        "max_output_tokens": "1024",
+        "max_total_tokens": "4608",
+        "hard_time_budget_seconds": "40"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-10-toolcall-json-schema",
+      "category": "refactor",
+      "prompt": "Convert camelCase keys in config.json (such as maxRetries) to snake_case (max_retries) while keeping valid JSON formatting.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "echo '{\"maxRetries\": 3}' > config.json",
+      "verification_oracle": "#!/bin/bash\npython3 -c 'import json; d=json.load(open(\"config.json\")); assert \"max_retries\" in d'\n",
+      "verification_oracle_hash": "sha256:4108704cf0fb3580b90b7413f1b1de919415cec15a7f2ce57a604542b6168299",
+      "timeout_seconds": 40,
+      "budget_turns": 5,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "tool-call",
+        "max_prompt_tokens": "3584",
+        "max_output_tokens": "1024",
+        "max_total_tokens": "4608",
+        "hard_time_budget_seconds": "40"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-11-toolcall-git-conflict",
+      "category": "git",
+      "prompt": "Resolve the git merge conflict markers in VERSION by selecting the newer release tag and removing all conflict markers.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "printf '<<<<<<< HEAD\n1.0.0\n=======\n1.1.0\n>>>>>>> release\n' > VERSION",
+      "verification_oracle": "#!/bin/bash\n! grep -q '<<<<<<<' VERSION && test -s VERSION\n",
+      "verification_oracle_hash": "sha256:fd0b7a1a6d8b620a7cb5f1fa7f7f2ba87c5d66fc78bf12bdab55c39cfb015b82",
+      "timeout_seconds": 45,
+      "budget_turns": 5,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "tool-call",
+        "max_prompt_tokens": "4096",
+        "max_output_tokens": "1024",
+        "max_total_tokens": "5120",
+        "hard_time_budget_seconds": "45"
+      }
+    },
+    {
+      "task_id": "tb4-gutcheck-12-toolcall-env-audit",
+      "category": "security",
+      "prompt": "Scrub the hardcoded credential value from .env.example and replace it with an empty placeholder while retaining the API_KEY entry.",
+      "environment_image_digest": "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "setup_command": "echo 'API_KEY=HARDCODED_SECRET_VALUE' > .env.example",
+      "verification_oracle": "#!/bin/bash\n! grep -q 'HARDCODED_SECRET_VALUE' .env.example && grep -q 'API_KEY=' .env.example\n",
+      "verification_oracle_hash": "sha256:92d148dc078499397bc01634ad9541a26647cc02ea5898b6d43d3a10ba548afe",
+      "timeout_seconds": 35,
+      "budget_turns": 4,
+      "metadata": {
+        "suite": "tb4-gutcheck-v1",
+        "task_class": "tool-call",
+        "max_prompt_tokens": "3072",
+        "max_output_tokens": "768",
+        "max_total_tokens": "3840",
+        "hard_time_budget_seconds": "35"
+      }
+    }
+  ]
+}
