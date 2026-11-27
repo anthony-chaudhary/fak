@@ -96,6 +96,8 @@ DEFAULTS = {
     "min_abs": 1.0,         # absolute drop (tok/s) floor — absorbs tiny-number noise
     "max_issues": 5,        # hard cap on issues filed per run (anti-storm)
     "issue_scan_limit": 800,  # open bench-signal issues fetched for the dedup index
+    "max_age_days": 30,     # fail closed if pinned baseline is older than this (0 disables)
+    "max_catalog_age_days": 90,  # fail closed if latest catalog run is older than this (0 disables)
 }
 
 
@@ -158,6 +160,103 @@ def current_by_key(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
                 "timestamp": ts, "run_id": run.get("run_id"),
             }
     return out
+
+
+def _parse_date(raw: str) -> dt.date | None:
+    """Parse YYYY-MM-DD or YYYYMMDD(T...) into a date; None if unparseable."""
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s)
+    if m:
+        try:
+            return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    m = re.match(r"^(\d{4})(\d{2})(\d{2})", s)
+    if m:
+        try:
+            return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    return None
+
+
+def check_baseline_health(
+    current: dict[str, dict[str, Any]],
+    baseline: dict[str, Any],
+    *,
+    today: str,
+    max_age_days: int = DEFAULTS["max_age_days"],
+    max_catalog_age_days: int = DEFAULTS["max_catalog_age_days"],
+    allow_extra_keys: set[str] | None = None,
+) -> list[str]:
+    """Fail-closed validation of baseline/catalog key alignment and freshness.
+
+    Returns a list of explicit failure diagnostics (empty = healthy):
+      - missing_from_catalog: pinned baseline key no longer present in catalog
+      - missing_from_baseline: measured catalog key not pinned (outside allowlist)
+      - baseline_stale / baseline_date_invalid: pinned date missing or older than max_age_days
+      - catalog_stale: latest measured catalog timestamp older than max_catalog_age_days
+    """
+    failures: list[str] = []
+    pins_raw = baseline.get("baselines")
+    pins = pins_raw if isinstance(pins_raw, dict) else {}
+    allow = set(allow_extra_keys or ())
+
+    pinned_keys = {
+        k for k, v in pins.items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
+    }
+    current_keys = set(current.keys())
+
+    if not pinned_keys:
+        failures.append("baseline_empty: baseline has no valid positive benchmark keys")
+
+    missing_from_catalog = sorted(pinned_keys - current_keys)
+    if missing_from_catalog:
+        failures.append(
+            "missing_from_catalog: baseline key(s) absent from current catalog: "
+            + ", ".join(missing_from_catalog)
+        )
+
+    missing_from_baseline = sorted((current_keys - pinned_keys) - allow)
+    if missing_from_baseline:
+        failures.append(
+            "missing_from_baseline: current catalog key(s) absent from pinned baseline: "
+            + ", ".join(missing_from_baseline)
+        )
+
+    today_date = _parse_date(today)
+    if today_date is not None and max_age_days > 0:
+        pinned_raw = str(baseline.get("pinned") or "").strip()
+        pinned_date = _parse_date(pinned_raw)
+        if pinned_date is None:
+            failures.append(
+                f"baseline_date_invalid: baseline 'pinned' date missing or invalid ({pinned_raw!r})"
+            )
+        else:
+            age_days = (today_date - pinned_date).days
+            if age_days > max_age_days:
+                failures.append(
+                    f"baseline_stale: baseline pinned {pinned_date.isoformat()} is "
+                    f"{age_days} day(s) old (max_age_days={max_age_days})"
+                )
+
+    if today_date is not None and max_catalog_age_days > 0 and current:
+        dates = [d for d in (_parse_date(v.get("timestamp", "")) for v in current.values()) if d is not None]
+        if not dates:
+            failures.append("catalog_date_invalid: no parseable timestamps in measured catalog runs")
+        else:
+            newest = max(dates)
+            cat_age = (today_date - newest).days
+            if cat_age > max_catalog_age_days:
+                failures.append(
+                    f"catalog_stale: newest catalog run {newest.isoformat()} is "
+                    f"{cat_age} day(s) old (max_catalog_age_days={max_catalog_age_days})"
+                )
+
+    return failures
 
 
 def regressions(current: dict[str, dict[str, Any]], baseline: dict[str, Any], *,
@@ -490,6 +589,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-issues", type=int,
                     help=f"hard cap on issues filed, worst-drop-first "
                          f"(default {DEFAULTS['max_issues']}).")
+    ap.add_argument("--max-age-days", type=int,
+                    help=f"fail closed if pinned baseline is older than N days "
+                         f"(default {DEFAULTS['max_age_days']}; 0 disables).")
+    ap.add_argument("--max-catalog-age-days", type=int,
+                    help=f"fail closed if newest catalog run is older than N days "
+                         f"(default {DEFAULTS['max_catalog_age_days']}; 0 disables).")
+    ap.add_argument("--allow-unpinned-key", action="append", default=[],
+                    help="explicitly allow a measured catalog key to be absent from the baseline (repeatable).")
     ap.add_argument("--pin", action="store_true",
                     help="re-floor the baseline from the current catalog and exit.")
     ap.add_argument("--live", action="store_true",
@@ -504,6 +611,13 @@ def main(argv: list[str] | None = None) -> int:
     min_drop_pct = args.min_drop_pct if args.min_drop_pct is not None else DEFAULTS["min_drop_pct"]
     min_abs = args.min_abs if args.min_abs is not None else DEFAULTS["min_abs"]
     max_issues = args.max_issues if args.max_issues is not None else DEFAULTS["max_issues"]
+    max_age_days = args.max_age_days if args.max_age_days is not None else DEFAULTS["max_age_days"]
+    max_catalog_age_days = (
+        args.max_catalog_age_days
+        if args.max_catalog_age_days is not None
+        else DEFAULTS["max_catalog_age_days"]
+    )
+    allow_extra_keys = set(args.allow_unpinned_key or [])
 
     try:
         catalog = load_json_file(catalog_path)
@@ -525,17 +639,48 @@ def main(argv: list[str] | None = None) -> int:
     try:
         baseline = load_json_file(baseline_path)
     except FileNotFoundError:
-        print(f"bench-signal {today} — no pinned baseline at {baseline_path}; "
-              f"run `python {BASELINE_PATH and 'tools/bench_signal.py'} --pin` first. "
-              f"Nothing to signal.", file=sys.stderr if args.json else sys.stdout)
+        msg = (f"FAIL: no pinned baseline at {baseline_path}; "
+               f"run `python tools/bench_signal.py --pin` first.")
         if args.json:
-            print(json.dumps({"schema": SCHEMA, "date": today, "mode": "dry-run",
-                              "note": "no pinned baseline", "planned": []}, indent=2))
-        return 0
+            print(json.dumps({
+                "schema": SCHEMA, "date": today, "mode": "live" if args.live else "dry-run",
+                "ok": False, "verdict": "FAIL", "failures": [msg], "planned": [],
+            }, indent=2))
+        else:
+            print(msg, file=sys.stderr)
+        return 1
     except (OSError, ValueError, RuntimeError) as e:
         print(f"refuse: could not load the pinned baseline {baseline_path}: {e}",
               file=sys.stderr)
         return 2
+
+    health_failures = check_baseline_health(
+        current,
+        baseline,
+        today=today,
+        max_age_days=max_age_days,
+        max_catalog_age_days=max_catalog_age_days,
+        allow_extra_keys=allow_extra_keys,
+    )
+    if health_failures:
+        if args.json:
+            print(json.dumps({
+                "schema": SCHEMA,
+                "date": today,
+                "mode": "live" if args.live else "dry-run",
+                "ok": False,
+                "verdict": "FAIL",
+                "baseline_commit": baseline.get("commit", ""),
+                "baseline_pinned": baseline.get("pinned", ""),
+                "failures": health_failures,
+                "planned": [],
+            }, indent=2, ensure_ascii=False))
+        else:
+            print(f"FAIL: bench-signal baseline/catalog health check failed ({len(health_failures)}):",
+                  file=sys.stderr)
+            for f in health_failures:
+                print(f"  - {f}", file=sys.stderr)
+        return 1
 
     regs = regressions(current, baseline, min_drop_pct=min_drop_pct, min_abs=min_abs)
 

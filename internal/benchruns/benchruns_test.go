@@ -122,3 +122,64 @@ func writeJSON(t *testing.T, path string, v any) {
 		t.Fatal(err)
 	}
 }
+
+// fak-test:runtime fast est=1s lane=default
+func TestRenderCompareComparabilityGuards(t *testing.T) {
+	makeDetail := func(id, machine, model, quant string, batch int, baseTPS, peakTPS float64) Detail {
+		return Detail{
+			Entry: Run{
+				"run_id":     id,
+				"machine_id": machine,
+				"model":      model,
+				"precision":  quant,
+				"timestamp":  "2026-11-26T00:00:00Z",
+			},
+			Results: map[string]any{
+				"batch": map[string]any{
+					"baseline": map[string]any{"tok_per_sec": baseTPS},
+					"peak": map[string]any{
+						"batch":               batch,
+						"agg_tok_per_sec":     peakTPS,
+						"speedup_vs_baseline": peakTPS / baseTPS,
+					},
+				},
+			},
+		}
+	}
+
+	base := makeDetail("r1", "box-a", "qwen3.8-27b", "Q4_K_M", 8, 10.0, 100.0)
+	same := makeDetail("r2", "box-a", "qwen3.8-27b", "q4_k_m", 8, 12.0, 150.0)
+	if mismatches, err := CheckComparable(base, same); err != nil || len(mismatches) != 0 {
+		t.Fatalf("comparable runs rejected: mismatches=%+v err=%v", mismatches, err)
+	}
+	okOut := RenderCompare(base, same)
+	if strings.Contains(okOut, "NON-COMPARABLE") || !strings.Contains(okOut, "1.50x") {
+		t.Fatalf("comparable RenderCompare should emit ratio 1.50x:\n%s", okOut)
+	}
+
+	cases := []struct {
+		name  string
+		other Detail
+		field string
+	}{
+		{"machine_mismatch", makeDetail("r2", "box-b", "qwen3.8-27b", "Q4_K_M", 8, 12.0, 150.0), "machine_id"},
+		{"model_mismatch", makeDetail("r2", "box-a", "smollm2-135m", "Q4_K_M", 8, 12.0, 150.0), "model"},
+		{"quant_mismatch", makeDetail("r2", "box-a", "qwen3.8-27b", "Q8_0", 8, 12.0, 150.0), "quant"},
+		{"batch_mismatch", makeDetail("r2", "box-a", "qwen3.8-27b", "Q4_K_M", 16, 12.0, 150.0), "batch"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mismatches, err := CheckComparable(base, tc.other)
+			if err == nil || len(mismatches) == 0 || mismatches[0].Field != tc.field {
+				t.Fatalf("CheckComparable(%s) = (%+v, %v), want mismatch on %s", tc.name, mismatches, err, tc.field)
+			}
+			out := RenderCompare(base, tc.other)
+			if !strings.Contains(out, "NON-COMPARABLE") || !strings.Contains(out, "ratios withheld") {
+				t.Fatalf("RenderCompare(%s) missing refusal banner:\n%s", tc.name, out)
+			}
+			if strings.Contains(out, "1.50x") || !strings.Contains(out, "N/A") {
+				t.Fatalf("RenderCompare(%s) must withhold numeric ratio and show N/A:\n%s", tc.name, out)
+			}
+		})
+	}
+}

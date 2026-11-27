@@ -49,6 +49,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -100,6 +102,74 @@ def grade_letter(score: int) -> str:
     return "F"
 
 
+def _strip_go_comments_and_strings(src: str) -> str:
+    """Strip Go line/block comments and string/raw-string literals so structural
+    symbol checks cannot be spoofed by comments or flag help text."""
+    pattern = re.compile(
+        r'//[^\n]*|/\*[\s\S]*?\*/|`[^`]*`|"(?:\\.|[^"\\])*"',
+        re.MULTILINE,
+    )
+    return pattern.sub(" ", src)
+
+
+def extract_tunable_symbol(tunable_src: str) -> str:
+    """Extract the tunable const name from internal/rsiloop/tunable.go."""
+    m = re.search(r'const\s+TunableConstName\s*=\s*"([A-Za-z_][A-Za-z0-9_]*)"', tunable_src)
+    if m:
+        return m.group(1)
+    code = _strip_go_comments_and_strings(tunable_src)
+    m = re.search(r'\bconst\s+([A-Z][A-Za-z0-9_]*)\s*=', code)
+    if m:
+        return m.group(1)
+    return "DefaultCacheSize"
+
+
+def find_tunable_production_callers(root: Path, tunable_symbol: str) -> list[str]:
+    """Return sorted repo-relative paths of non-test production Go files outside
+    internal/rsiloop and cmd/kpiprobe that import internal/rsiloop and reference
+    the tuned symbol in code (not comments/strings)."""
+    callers: list[str] = []
+    import_re = re.compile(
+        r'(?:(?P<alias>[A-Za-z_][A-Za-z0-9_]*)\s+)?"[^"]*/internal/rsiloop"'
+    )
+    for top in ("cmd", "internal", "pkg"):
+        base = root / top
+        if not base.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            rel_dir = Path(dirpath).relative_to(root).as_posix()
+            # Prune non-production / excluded subtrees before descending.
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in ("testdata", "vendor", ".git")
+                and not (rel_dir == "internal" and d == "rsiloop")
+                and not (rel_dir == "cmd" and d == "kpiprobe")
+            ]
+            for fn in filenames:
+                if not fn.endswith(".go") or fn.endswith("_test.go"):
+                    continue
+                p = Path(dirpath) / fn
+                try:
+                    raw = p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if "internal/rsiloop" not in raw or tunable_symbol not in raw:
+                    continue
+                m = import_re.search(raw)
+                if not m:
+                    continue
+                alias = m.group("alias")
+                if not alias or alias == "import":
+                    alias = "rsiloop"
+                if alias == "_":
+                    continue
+                code = _strip_go_comments_and_strings(raw)
+                sym_re = re.compile(rf'\b{re.escape(alias)}\.{re.escape(tunable_symbol)}\b')
+                if sym_re.search(code):
+                    callers.append(p.relative_to(root).as_posix())
+    return sorted(callers)
+
+
 # ---------------------------------------------------------------------------
 # Evidence context: read the engine's source ONCE; criteria are pure over it.
 # ---------------------------------------------------------------------------
@@ -108,21 +178,28 @@ def load_context(root: Path) -> dict[str, Any]:
     rsiloop = read_text(root, "internal/rsiloop/rsiloop.go")
     shipgate = read_text(root, "internal/shipgate/shipgate.go")
     kpi = read_text(root, "internal/rsiloop/kpi.go")
+    tunable = read_text(root, "internal/rsiloop/tunable.go")
     worktree = read_text(root, "internal/rsiloop/worktree.go")
     rulesynth = read_text(root, "internal/rsiloop/rulesynth.go")
     cmd_rsiloop = read_text(root, "cmd/rsiloop/main.go")
+    cmd_rsiloop_code = _strip_go_comments_and_strings(cmd_rsiloop)
     rsiloop_test = read_text(root, "internal/rsiloop/rsiloop_test.go")
+    tunable_symbol = extract_tunable_symbol(tunable)
+    tunable_production_callers = find_tunable_production_callers(root, tunable_symbol)
     # how many DISTINCT Harness constructors does the loop's command actually
-    # instantiate? That is the count of REAL, loop-driven subsystems (not just
-    # harness sketches that exist as files).
+    # instantiate in code (not comments)? That is the count of loop-driven
+    # subsystems (not just harness sketches that exist as files).
     driven = []
     for ctor in ("NewWorktreeHarness", "NewRuleSynthHarness"):
-        if ctor in cmd_rsiloop:
+        if re.search(rf'\b{ctor}\s*\(', cmd_rsiloop_code):
             driven.append(ctor)
     return {
         "rsiloop": rsiloop,
         "shipgate": shipgate,
         "kpi": kpi,
+        "tunable": tunable,
+        "tunable_symbol": tunable_symbol,
+        "tunable_production_callers": tunable_production_callers,
         "worktree": worktree,
         "rulesynth": rulesynth,
         "cmd_rsiloop": cmd_rsiloop,
@@ -233,6 +310,17 @@ def usefulness_criteria() -> list[Criterion]:
                 "cmd/rsiloop -mode track appends a JSONL journal point"),
         },
         {
+            "key": "production_target_wired", "hard": True, "weight": 3,
+            "label": "tuned target has non-test production callers outside internal/rsiloop & cmd/kpiprobe",
+            "check": lambda c: (
+                len(c["tunable_production_callers"]) >= 1,
+                (f"rsiloop.{c['tunable_symbol']} referenced in {len(c['tunable_production_callers'])} "
+                 f"production file(s): {', '.join(c['tunable_production_callers'][:3])}")
+                if c["tunable_production_callers"]
+                else (f"0 non-test production callers of rsiloop.{c['tunable_symbol']} "
+                      "outside internal/rsiloop & cmd/kpiprobe (toy/unwired target)")),
+        },
+        {
             "key": "multi_real_subsystem", "hard": True, "weight": 2,
             "label": ">=2 REAL subsystems wired into the loop (not a single tunable)",
             "check": lambda c: (
@@ -300,7 +388,7 @@ def usefulness_level(u: dict[str, bool]) -> int:
         level = 2
     if level == 2 and u.get("journal_capability"):
         level = 3
-    if level == 3 and u.get("multi_real_subsystem"):
+    if level == 3 and u.get("multi_real_subsystem") and u.get("production_target_wired"):
         level = 4
     if level == 4 and u.get("ratchet_enforced_in_ci") and u.get("regression_gate_in_ci"):
         level = 5

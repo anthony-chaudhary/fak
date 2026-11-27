@@ -216,6 +216,101 @@ def test_rendered_body_routes_to_tools_lane():
     assert routed["confidence"] == "path-confirmed"
 
 
+# --- fail-closed baseline/catalog health (#14518) ---------------------------
+def test_health_fails_on_missing_and_unpinned_keys():
+    runs = [_run("m1", "x", "q8", 30.0, "20261125T000000Z")]
+    cur = bs.current_by_key(runs)
+    key = list(cur)[0]
+    # Baseline missing current key + has an extra stale key absent from catalog
+    base = {
+        "schema": bs.BASELINE_SCHEMA,
+        "commit": "abc1234",
+        "pinned": "2026-11-26",
+        "baselines": {"m2/old-bench-q8": 25.0},
+    }
+    failures = bs.check_baseline_health(cur, base, today="2026-11-27", max_age_days=30)
+    assert any("missing_from_catalog" in f and "m2/old-bench-q8" in f for f in failures), failures
+    assert any("missing_from_baseline" in f and key in f for f in failures), failures
+
+    # Explicitly allowlisting the extra key clears missing_from_baseline only
+    failures2 = bs.check_baseline_health(
+        cur, base, today="2026-11-27", max_age_days=30, allow_extra_keys={key}
+    )
+    assert not any("missing_from_baseline" in f for f in failures2), failures2
+    assert any("missing_from_catalog" in f for f in failures2), failures2
+
+
+def test_health_fails_on_stale_baseline_and_stale_catalog():
+    runs = [_run("m1", "x", "q8", 30.0, "20260601T000000Z")]
+    cur = bs.current_by_key(runs)
+    key = list(cur)[0]
+    base = {
+        "schema": bs.BASELINE_SCHEMA,
+        "commit": "abc1234",
+        "pinned": "2026-06-27",
+        "baselines": {key: 30.0},
+    }
+    failures = bs.check_baseline_health(
+        cur, base, today="2026-11-27", max_age_days=30, max_catalog_age_days=90
+    )
+    assert any("baseline_stale" in f for f in failures), failures
+    assert any("catalog_stale" in f for f in failures), failures
+
+
+def test_health_passes_when_keys_match_and_fresh():
+    runs = [_run("m1", "x", "q8", 30.0, "20261120T000000Z")]
+    cur = bs.current_by_key(runs)
+    key = list(cur)[0]
+    base = {
+        "schema": bs.BASELINE_SCHEMA,
+        "commit": "abc1234",
+        "pinned": "2026-11-25",
+        "baselines": {key: 30.0},
+    }
+    failures = bs.check_baseline_health(
+        cur, base, today="2026-11-27", max_age_days=30, max_catalog_age_days=90
+    )
+    assert failures == [], failures
+
+
+def test_main_exits_nonzero_on_missing_or_stale_baseline():
+    import json
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        cat_path = root / "catalog.json"
+        base_path = root / "baseline.json"
+        cat_path.write_text(json.dumps({
+            "runs": [_run("m1", "x", "q8", 30.0, "20261120T000000Z")],
+        }), encoding="utf-8")
+        # Missing baseline file -> non-zero exit (1)
+        rc_missing = bs.main(["--catalog", str(cat_path), "--baseline", str(base_path), "--json"])
+        assert rc_missing == 1, f"expected exit 1 on missing baseline, got {rc_missing}"
+
+        # Stale baseline with wrong key -> non-zero exit (1)
+        base_path.write_text(json.dumps({
+            "schema": bs.BASELINE_SCHEMA,
+            "commit": "old",
+            "pinned": "2025-01-01",
+            "baselines": {"m1/renamed-bench": 30.0},
+        }), encoding="utf-8")
+        rc_stale = bs.main(["--catalog", str(cat_path), "--baseline", str(base_path), "--json"])
+        assert rc_stale == 1, f"expected exit 1 on stale/mismatched baseline, got {rc_stale}"
+
+
+import unittest
+
+
+class BenchSignalTestCase(unittest.TestCase):
+    def test_all_bench_signal_checks(self):
+        for name, fn in sorted(globals().items()):
+            if name.startswith("test_") and callable(fn):
+                with self.subTest(name=name):
+                    fn()
+
+
 def _run_all() -> int:
     fns = [v for k, v in sorted(globals().items())
            if k.startswith("test_") and callable(v)]

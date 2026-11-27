@@ -147,16 +147,82 @@ func RenderShow(d Detail) string {
 	return b.String()
 }
 
+// ComparabilityMismatch records one axis on which two benchmark runs differ
+// and therefore cannot have head-to-head throughput ratios computed.
+type ComparabilityMismatch struct {
+	Field string `json:"field"`
+	Run1  string `json:"run1"`
+	Run2  string `json:"run2"`
+}
+
+func runQuant(d Detail) string {
+	if q := strings.TrimSpace(stringField(d.Entry, "quant")); q != "" {
+		return q
+	}
+	return strings.TrimSpace(stringField(d.Entry, "precision"))
+}
+
+func runBatch(d Detail) string {
+	if b, ok := d.Results["batch"].(map[string]any); ok {
+		if peak, ok := b["peak"].(map[string]any); ok {
+			if s := anyOr(peak["batch"], ""); s != "" {
+				return s
+			}
+		}
+	}
+	if d.Manifest != nil {
+		if cfg, ok := d.Manifest["config"].(map[string]any); ok && cfg["batch_sizes"] != nil {
+			return fmt.Sprint(cfg["batch_sizes"])
+		}
+	}
+	return ""
+}
+
+// CheckComparable enforces that two runs match on (machine_id, model, quant, batch)
+// before rendering throughput ratios.
+func CheckComparable(a, b Detail) ([]ComparabilityMismatch, error) {
+	checks := []struct {
+		field string
+		v1    string
+		v2    string
+	}{
+		{"machine_id", strings.TrimSpace(stringField(a.Entry, "machine_id")), strings.TrimSpace(stringField(b.Entry, "machine_id"))},
+		{"model", strings.TrimSpace(stringField(a.Entry, "model")), strings.TrimSpace(stringField(b.Entry, "model"))},
+		{"quant", runQuant(a), runQuant(b)},
+		{"batch", runBatch(a), runBatch(b)},
+	}
+	var mismatches []ComparabilityMismatch
+	var parts []string
+	for _, c := range checks {
+		if !strings.EqualFold(c.v1, c.v2) {
+			mismatches = append(mismatches, ComparabilityMismatch{Field: c.field, Run1: c.v1, Run2: c.v2})
+			parts = append(parts, fmt.Sprintf("%s (%q vs %q)", c.field, c.v1, c.v2))
+		}
+	}
+	if len(mismatches) > 0 {
+		return mismatches, fmt.Errorf("runs not comparable: %s", strings.Join(parts, ", "))
+	}
+	return nil, nil
+}
+
 func RenderCompare(a, b Detail) string {
 	var out bytes.Buffer
 	fmt.Fprintln(&out, "=== Benchmark Run Comparison ===")
 	fmt.Fprintln(&out)
 	fmt.Fprintf(&out, "Run 1: %s\n", stringField(a.Entry, "run_id"))
 	fmt.Fprintf(&out, "  Machine: %s\n", stringField(a.Entry, "machine_id"))
+	fmt.Fprintf(&out, "  Model: %s\n", fieldOr(a.Entry, "model", "?"))
+	fmt.Fprintf(&out, "  Quant: %s\n", fieldOr(Run{"q": runQuant(a)}, "q", "?"))
 	fmt.Fprintf(&out, "  Timestamp: %s\n\n", fieldOr(a.Entry, "timestamp", "?"))
 	fmt.Fprintf(&out, "Run 2: %s\n", stringField(b.Entry, "run_id"))
 	fmt.Fprintf(&out, "  Machine: %s\n", stringField(b.Entry, "machine_id"))
+	fmt.Fprintf(&out, "  Model: %s\n", fieldOr(b.Entry, "model", "?"))
+	fmt.Fprintf(&out, "  Quant: %s\n", fieldOr(Run{"q": runQuant(b)}, "q", "?"))
 	fmt.Fprintf(&out, "  Timestamp: %s\n\n", fieldOr(b.Entry, "timestamp", "?"))
+	_, compErr := CheckComparable(a, b)
+	if compErr != nil {
+		fmt.Fprintf(&out, "NON-COMPARABLE (%v): ratios withheld\n\n", compErr)
+	}
 	b1, ok1 := a.Results["batch"].(map[string]any)
 	b2, ok2 := b.Results["batch"].(map[string]any)
 	if ok1 && ok2 {
@@ -167,8 +233,13 @@ func RenderCompare(a, b Detail) string {
 		fmt.Fprintln(&out, "Batch Decode Comparison:")
 		fmt.Fprintf(&out, "  %-25s %15s %15s %10s\n", "Metric", "Run 1", "Run 2", "Ratio")
 		fmt.Fprintln(&out, strings.Repeat("-", 65))
-		printRatio(&out, "Baseline (B=1) tok/s", floatAny(base1["tok_per_sec"]), floatAny(base2["tok_per_sec"]))
-		printRatio(&out, "Peak tok/s", floatAny(peak1["agg_tok_per_sec"]), floatAny(peak2["agg_tok_per_sec"]))
+		if compErr == nil {
+			printRatio(&out, "Baseline (B=1) tok/s", floatAny(base1["tok_per_sec"]), floatAny(base2["tok_per_sec"]))
+			printRatio(&out, "Peak tok/s", floatAny(peak1["agg_tok_per_sec"]), floatAny(peak2["agg_tok_per_sec"]))
+		} else {
+			printNoRatio(&out, "Baseline (B=1) tok/s", floatAny(base1["tok_per_sec"]), floatAny(base2["tok_per_sec"]))
+			printNoRatio(&out, "Peak tok/s", floatAny(peak1["agg_tok_per_sec"]), floatAny(peak2["agg_tok_per_sec"]))
+		}
 		fmt.Fprintf(&out, "  %-25s %15s %15s -\n", "Peak batch size", anyOr(peak1["batch"], "0"), anyOr(peak2["batch"], "0"))
 		fmt.Fprintf(&out, "  %-25s %14.2fx %14.2fx -\n", "Speedup vs baseline", floatAny(peak1["speedup_vs_baseline"]), floatAny(peak2["speedup_vs_baseline"]))
 	}
@@ -354,4 +425,8 @@ func printRatio(b *bytes.Buffer, label string, a, c float64) {
 		ratio = c / a
 	}
 	fmt.Fprintf(b, "  %-25s %15.1f %15.1f %9.2fx\n", label, a, c, ratio)
+}
+
+func printNoRatio(b *bytes.Buffer, label string, a, c float64) {
+	fmt.Fprintf(b, "  %-25s %15.1f %15.1f %10s\n", label, a, c, "N/A")
 }

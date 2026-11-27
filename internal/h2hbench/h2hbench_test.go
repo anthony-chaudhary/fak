@@ -386,3 +386,77 @@ func TestSequentialRowsStayLegacyShaped(t *testing.T) {
 		t.Fatalf("sequential report has concurrency cells: %+v", rep.ConcurrencyCells)
 	}
 }
+
+// fak-test:runtime fast est=1s lane=default
+func TestCompareMarksLowSampleCountInconclusive(t *testing.T) {
+	cells := []Cell{
+		{Arm: "fak", Role: RoleFak, Scenario: ScenarioDecode, Size: 256, N: 1, DecodeP50: 5},
+		{Arm: "llama", Role: RoleBaseline, Scenario: ScenarioDecode, Size: 256, N: 1, DecodeP50: 50},
+		{Arm: "fak", Role: RoleFak, Scenario: ScenarioCold, Size: 512, N: 2, TTFTP50: 2000},
+		{Arm: "llama", Role: RoleBaseline, Scenario: ScenarioCold, Size: 512, N: 5, TTFTP50: 500},
+	}
+	losses, wins, inc, _ := compareCellsDetailed(cells)
+	if len(losses) != 0 || len(wins) != 0 {
+		t.Fatalf("N < %d must never emit win/loss: losses=%+v wins=%+v", MinSampleCount, losses, wins)
+	}
+	if len(inc) != 2 {
+		t.Fatalf("inconclusive = %+v, want 2", inc)
+	}
+	for _, item := range inc {
+		if !strings.Contains(item.Reason, "INCONCLUSIVE") {
+			t.Fatalf("expected INCONCLUSIVE reason, got %+v", item)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestCompareMarksOverlappingCIsInconclusive(t *testing.T) {
+	// High variance causes 95% CIs to overlap even though medians differ by >5%.
+	mk := func(arm, role string, vals []float64) []Row {
+		var out []Row
+		for i, v := range vals {
+			out = append(out, Row{
+				Schema: Schema, RunID: "ci", Arm: arm, Role: role,
+				Scenario: ScenarioDecode, Size: 128, Pos: i % 2, OK: true,
+				DecodeTPS: v,
+			})
+		}
+		return out
+	}
+	rows := append(
+		mk("fak", RoleFak, []float64{10, 20, 40}),
+		mk("llama", RoleBaseline, []float64{15, 25, 35})...,
+	)
+	rep := Summarize(rows)
+	if len(rep.Losses) != 0 || len(rep.Wins) != 0 {
+		t.Fatalf("overlapping CIs must not produce win/loss: losses=%+v wins=%+v", rep.Losses, rep.Wins)
+	}
+	if len(rep.Inconclusive) != 1 || !strings.Contains(rep.Inconclusive[0].Reason, "INCONCLUSIVE") {
+		t.Fatalf("expected 1 overlapping-CI inconclusive entry, got %+v", rep.Inconclusive)
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestRelGapUsesRivalDenominatorAndHandlesNonPositive(t *testing.T) {
+	// lowerBetter: (fak - rival) / rival
+	if got := relGap(1200, 1000, true); got < 0.1999 || got > 0.2001 {
+		t.Fatalf("relGap(1200, 1000, lowerBetter) = %v, want 0.20", got)
+	}
+	// higherBetter: (rival - fak) / rival
+	if got := relGap(20, 10, false); got < -1.0001 || got > -0.9999 {
+		t.Fatalf("relGap(20, 10, higherBetter) = %v, want -1.0", got)
+	}
+	// rival <= 0 handled safely without NaN/Inf
+	if got := relGap(10, 0, true); got != 1 {
+		t.Fatalf("relGap(10, 0, lowerBetter) = %v, want 1", got)
+	}
+	if got := relGap(0.98, 0, false); got != -1 {
+		t.Fatalf("relGap(0.98, 0, higherBetter) = %v, want -1", got)
+	}
+	if got := relGap(0, 0, false); got != 0 {
+		t.Fatalf("relGap(0, 0, higherBetter) = %v, want 0", got)
+	}
+	if got := relGap(10, -5, false); got != -1 {
+		t.Fatalf("relGap(10, -5, higherBetter) = %v, want -1", got)
+	}
+}

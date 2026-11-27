@@ -58,6 +58,11 @@ const (
 	// lossTolerance is the relative gap below which a cell is a tie, not a loss.
 	lossTolerance = 0.05
 
+	// MinSampleCount is the minimum number of uncontended samples required on
+	// each side before Compare emits a win or loss verdict. Below this floor,
+	// comparisons are marked INCONCLUSIVE.
+	MinSampleCount = 3
+
 	// WarmTurns is the multiturn cell Size that pools every turn from 2 on.
 	// Per-turn cells carry an order bias (whichever arm runs second in a
 	// back-to-back pair is measured ~400 ms slower on llama-server, strix3),
@@ -775,6 +780,15 @@ type Cell struct {
 	DecodeDropped int     `json:"decode_dropped,omitempty"`
 	DecodeP50     float64 `json:"decode_tps_p50"`
 	CacheRatio    float64 `json:"cache_ratio_mean"`
+	// 95% confidence interval bounds computed from uncontended samples when N >= MinSampleCount.
+	TTFTCI95Low     float64 `json:"ttft_ci95_low,omitempty"`
+	TTFTCI95High    float64 `json:"ttft_ci95_high,omitempty"`
+	PrefillCI95Low  float64 `json:"prefill_ci95_low,omitempty"`
+	PrefillCI95High float64 `json:"prefill_ci95_high,omitempty"`
+	DecodeCI95Low   float64 `json:"decode_ci95_low,omitempty"`
+	DecodeCI95High  float64 `json:"decode_ci95_high,omitempty"`
+	CacheCI95Low    float64 `json:"cache_ci95_low,omitempty"`
+	CacheCI95High   float64 `json:"cache_ci95_high,omitempty"`
 }
 
 // Loss is one cell where a fak arm trails the best rival by more than lossTolerance.
@@ -787,8 +801,24 @@ type Loss struct {
 	FakValue             float64 `json:"fak_value"`
 	Rival                string  `json:"rival"`
 	RivalVal             float64 `json:"rival_value"`
-	// Gap is how far fak trails, as a fraction: 0.25 = fak is 25% worse.
+	// Gap is how far fak trails, as a fraction of the rival value: 0.25 = fak is 25% worse.
 	Gap float64 `json:"gap"`
+}
+
+// Inconclusive records a fak-vs-rival comparison withheld from wins/losses
+// because sample count is below MinSampleCount or confidence intervals overlap.
+type Inconclusive struct {
+	RequestedSpeculation string  `json:"requested_speculation,omitempty"`
+	Scenario             string  `json:"scenario"`
+	Size                 int     `json:"size"`
+	Metric               string  `json:"metric"`
+	FakArm               string  `json:"fak_arm"`
+	FakN                 int     `json:"fak_n"`
+	FakValue             float64 `json:"fak_value"`
+	Rival                string  `json:"rival"`
+	RivalN               int     `json:"rival_n"`
+	RivalVal             float64 `json:"rival_value"`
+	Reason               string  `json:"reason"`
 }
 
 // ConcCell folds one (concurrency, scenario, size) group of a concurrent run:
@@ -823,13 +853,63 @@ type Report struct {
 	Rows   int    `json:"rows"`
 	Cells  []Cell `json:"cells"`
 	// ConcurrencyCells is non-empty only when the run used Concurrency > 1.
-	ConcurrencyCells []ConcCell `json:"concurrency_cells,omitempty"`
-	Losses           []Loss     `json:"losses"`
-	Wins             []Loss     `json:"wins"` // same shape; Gap is how far fak leads
+	ConcurrencyCells []ConcCell     `json:"concurrency_cells,omitempty"`
+	Losses           []Loss         `json:"losses"`
+	Wins             []Loss         `json:"wins"` // same shape; Gap is how far fak leads
+	Inconclusive     []Inconclusive `json:"inconclusive,omitempty"`
 	// SpanRefusals names each fak-vs-rival comparison withheld because the two
 	// sides timed different declared spans. Legacy cells with no declared span
 	// stay comparable.
 	SpanRefusals []string `json:"span_refusals,omitempty"`
+}
+
+// tCrit95 returns the two-sided 95% Student-t critical value for df = n - 1.
+func tCrit95(n int) float64 {
+	// Table for df = 2..29 (n = 3..30), then z = 1.96 for n > 30.
+	table := map[int]float64{
+		2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
+		8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160,
+		14: 2.145, 15: 2.131, 16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093,
+		20: 2.086, 21: 2.080, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.060,
+		26: 2.056, 27: 2.052, 28: 2.048, 29: 2.045,
+	}
+	df := n - 1
+	if df < 2 {
+		return 0
+	}
+	if t, ok := table[df]; ok {
+		return t
+	}
+	return 1.96
+}
+
+// ci95 computes the 95% Student-t confidence interval for xs when len(xs) >= MinSampleCount.
+func ci95(xs []float64) (low, high float64) {
+	n := len(xs)
+	if n < MinSampleCount {
+		return 0, 0
+	}
+	var sum float64
+	for _, x := range xs {
+		sum += x
+	}
+	mean := sum / float64(n)
+	var ss float64
+	for _, x := range xs {
+		d := x - mean
+		ss += d * d
+	}
+	sd := math.Sqrt(ss / float64(n-1))
+	margin := tCrit95(n) * sd / math.Sqrt(float64(n))
+	return mean - margin, mean + margin
+}
+
+func flattenByPos(byPos map[int][]float64) []float64 {
+	var out []float64
+	for _, xs := range byPos {
+		out = append(out, xs...)
+	}
+	return out
 }
 
 func quantile(xs []float64, q float64) float64 {
@@ -872,7 +952,7 @@ func Summarize(rows []Row) Report {
 	}
 	type acc struct {
 		cell                     Cell
-		ttft, prompts            []float64
+		ttft, prompts, caches    []float64
 		ttftP, prefillP, decodeP map[int][]float64 // by Pos
 		cache                    float64
 		prefillSpan              string // clock of the prefill samples; "mixed" when they disagree
@@ -924,6 +1004,7 @@ func Summarize(rows []Row) Report {
 					a.cell.DecodeDropped++
 				}
 				a.cache += r.CacheRatio
+				a.caches = append(a.caches, r.CacheRatio)
 			}
 		}
 	}
@@ -953,9 +1034,13 @@ func Summarize(rows []Row) Report {
 		if c.N > 0 {
 			c.CacheRatio = a.cache / float64(c.N)
 		}
+		c.TTFTCI95Low, c.TTFTCI95High = ci95(a.ttft)
+		c.PrefillCI95Low, c.PrefillCI95High = ci95(flattenByPos(a.prefillP))
+		c.DecodeCI95Low, c.DecodeCI95High = ci95(flattenByPos(a.decodeP))
+		c.CacheCI95Low, c.CacheCI95High = ci95(a.caches)
 		rep.Cells = append(rep.Cells, c)
 	}
-	rep.Losses, rep.Wins, rep.SpanRefusals = compareCells(rep.Cells)
+	rep.Losses, rep.Wins, rep.Inconclusive, rep.SpanRefusals = compareCellsDetailed(rep.Cells)
 	rep.ConcurrencyCells = foldConcurrency(rows)
 	return rep
 }
@@ -1079,6 +1164,11 @@ func sameClock(fakSpan, rivalSpan string) error {
 }
 
 func compareCells(cells []Cell) (losses, wins []Loss, refusals []string) {
+	losses, wins, _, refusals = compareCellsDetailed(cells)
+	return losses, wins, refusals
+}
+
+func compareCellsDetailed(cells []Cell) (losses, wins []Loss, inconclusive []Inconclusive, refusals []string) {
 	losses, wins = []Loss{}, []Loss{}
 	type sk struct {
 		scenario, speculation string
@@ -1096,6 +1186,7 @@ func compareCells(cells []Cell) (losses, wins []Loss, refusals []string) {
 	type metric struct {
 		name        string
 		get         func(Cell) float64
+		ci          func(Cell) (float64, float64)
 		lowerBetter bool
 		span        func(Cell) string // nil when the metric has no declared clock
 	}
@@ -1103,14 +1194,22 @@ func compareCells(cells []Cell) (losses, wins []Loss, refusals []string) {
 		var ms []metric
 		switch k.scenario {
 		case ScenarioCold:
-			ms = []metric{{"ttft_ms_p50", func(c Cell) float64 { return c.TTFTP50 }, true, nil}, {"prefill_tps_p50", func(c Cell) float64 { return c.PrefillP50 }, false, func(c Cell) string { return c.PrefillSpan }}}
+			ms = []metric{
+				{"ttft_ms_p50", func(c Cell) float64 { return c.TTFTP50 }, func(c Cell) (float64, float64) { return c.TTFTCI95Low, c.TTFTCI95High }, true, nil},
+				{"prefill_tps_p50", func(c Cell) float64 { return c.PrefillP50 }, func(c Cell) (float64, float64) { return c.PrefillCI95Low, c.PrefillCI95High }, false, func(c Cell) string { return c.PrefillSpan }},
+			}
 		case ScenarioDecode:
-			ms = []metric{{"decode_tps_p50", func(c Cell) float64 { return c.DecodeP50 }, false, func(c Cell) string { return c.DecodeSpan }}}
+			ms = []metric{
+				{"decode_tps_p50", func(c Cell) float64 { return c.DecodeP50 }, func(c Cell) (float64, float64) { return c.DecodeCI95Low, c.DecodeCI95High }, false, func(c Cell) string { return c.DecodeSpan }},
+			}
 		case ScenarioMultiTurn:
 			if k.size != WarmTurns {
 				continue
 			}
-			ms = []metric{{"ttft_ms_p50", func(c Cell) float64 { return c.TTFTP50 }, true, nil}, {"cache_ratio_mean", func(c Cell) float64 { return c.CacheRatio }, false, nil}}
+			ms = []metric{
+				{"ttft_ms_p50", func(c Cell) float64 { return c.TTFTP50 }, func(c Cell) (float64, float64) { return c.TTFTCI95Low, c.TTFTCI95High }, true, nil},
+				{"cache_ratio_mean", func(c Cell) float64 { return c.CacheRatio }, func(c Cell) (float64, float64) { return c.CacheCI95Low, c.CacheCI95High }, false, nil},
+			}
 		}
 		for _, m := range ms {
 			var best *Cell
@@ -1139,6 +1238,28 @@ func compareCells(cells []Cell) (losses, wins []Loss, refusals []string) {
 						continue
 					}
 				}
+				if c.N < MinSampleCount || best.N < MinSampleCount {
+					inconclusive = append(inconclusive, Inconclusive{
+						RequestedSpeculation: k.speculation, Scenario: k.scenario, Size: k.size, Metric: m.name,
+						FakArm: c.Arm, FakN: c.N, FakValue: fv, Rival: best.Arm, RivalN: best.N, RivalVal: bv,
+						Reason: fmt.Sprintf("INCONCLUSIVE: insufficient samples (fak n=%d, rival n=%d; need >= %d)", c.N, best.N, MinSampleCount),
+					})
+					continue
+				}
+				if m.ci != nil {
+					fl, fh := m.ci(c)
+					rl, rh := m.ci(*best)
+					hasFakCI := fl != 0 || fh != 0
+					hasRivalCI := rl != 0 || rh != 0
+					if hasFakCI && hasRivalCI && fl <= rh && rl <= fh {
+						inconclusive = append(inconclusive, Inconclusive{
+							RequestedSpeculation: k.speculation, Scenario: k.scenario, Size: k.size, Metric: m.name,
+							FakArm: c.Arm, FakN: c.N, FakValue: fv, Rival: best.Arm, RivalN: best.N, RivalVal: bv,
+							Reason: fmt.Sprintf("INCONCLUSIVE: overlapping 95%% CIs (fak [%.2f, %.2f], rival [%.2f, %.2f])", fl, fh, rl, rh),
+						})
+						continue
+					}
+				}
 				gap := relGap(fv, bv, m.lowerBetter)
 				l := Loss{RequestedSpeculation: k.speculation, Scenario: k.scenario, Size: k.size, Metric: m.name, FakArm: c.Arm, FakValue: fv, Rival: best.Arm, RivalVal: bv}
 				switch {
@@ -1154,7 +1275,7 @@ func compareCells(cells []Cell) (losses, wins []Loss, refusals []string) {
 	}
 	sort.SliceStable(losses, func(i, j int) bool { return losses[i].Gap > losses[j].Gap })
 	sort.SliceStable(wins, func(i, j int) bool { return wins[i].Gap > wins[j].Gap })
-	return losses, wins, refusals
+	return losses, wins, inconclusive, refusals
 }
 
 func better(a, b float64, lowerBetter bool) bool {
@@ -1164,20 +1285,26 @@ func better(a, b float64, lowerBetter bool) bool {
 	return a > b
 }
 
-// relGap is how much worse fak is than the rival, as a fraction of the better
-// value; negative means fak is ahead.
+// relGap is how much worse fak is than the rival, as a fraction of the rival
+// value; negative means fak is ahead. Handles rival <= 0 safely without
+// dividing by zero.
 func relGap(fak, rival float64, lowerBetter bool) float64 {
 	if lowerBetter {
 		if fak <= 0 {
 			return 0
 		}
-		return (fak - rival) / math.Max(fak, rival)
+		if rival <= 0 {
+			return 1
+		}
+		return (fak - rival) / rival
 	}
-	den := math.Max(fak, rival)
-	if den <= 0 {
+	if rival <= 0 {
+		if fak > 0 {
+			return -1
+		}
 		return 0
 	}
-	return (rival - fak) / den
+	return (rival - fak) / rival
 }
 
 // ReadLedger loads every row from a JSONL ledger, skipping malformed lines.
@@ -1237,6 +1364,12 @@ func Render(w io.Writer, rep Report) {
 		fmt.Fprintln(w, "where fak leads:")
 		for _, l := range rep.Wins {
 			fmt.Fprintf(w, "  %-9s size=%-6s %-16s %s=%.2f vs %s=%.2f  (fak %.0f%% ahead)\n", l.Scenario, sizeLabel(l.Scenario, l.Size), l.Metric+requestedModeLabel(l.RequestedSpeculation), l.FakArm, l.FakValue, l.Rival, l.RivalVal, 100*l.Gap)
+		}
+	}
+	if len(rep.Inconclusive) > 0 {
+		fmt.Fprintln(w, "inconclusive:")
+		for _, inc := range rep.Inconclusive {
+			fmt.Fprintf(w, "  %-9s size=%-6s %-16s %s=%.2f(n=%d) vs %s=%.2f(n=%d)  (%s)\n", inc.Scenario, sizeLabel(inc.Scenario, inc.Size), inc.Metric+requestedModeLabel(inc.RequestedSpeculation), inc.FakArm, inc.FakValue, inc.FakN, inc.Rival, inc.RivalVal, inc.RivalN, inc.Reason)
 		}
 	}
 }

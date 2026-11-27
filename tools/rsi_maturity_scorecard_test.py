@@ -63,9 +63,14 @@ class LevelLadderTest(unittest.TestCase):
         top = {
             "kept_gains_proven": True, "real_demo_gain": True,
             "journal_capability": True, "multi_real_subsystem": True,
+            "production_target_wired": True,
             "ratchet_enforced_in_ci": True, "regression_gate_in_ci": True,
         }
         self.assertEqual(sc.usefulness_level(top), 5)
+        # Without production_target_wired, usefulness caps at level 3.
+        no_prod = dict(top)
+        no_prod["production_target_wired"] = False
+        self.assertEqual(sc.usefulness_level(no_prod), 3)
 
 
 class SyntheticEvidenceTest(unittest.TestCase):
@@ -76,7 +81,8 @@ class SyntheticEvidenceTest(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
 
-    def _mature_repo(self, root: Path, *, second_subsystem=False, ci_ratchet=False):
+    def _mature_repo(self, root: Path, *, second_subsystem=False, ci_ratchet=False,
+                     prod_caller=False):
         self._write(root, "internal/rsiloop/rsiloop.go",
                     "type Harness interface { BaselineMetric() float64; "
                     "Candidates() []int; Measure(c int) M }\nBaselineRefName string\n")
@@ -86,6 +92,8 @@ class SyntheticEvidenceTest(unittest.TestCase):
                     "{ nonKeeps int }\nfunc ApplyInWorktree(){}\n")
         self._write(root, "internal/rsiloop/kpi.go",
                     "// monotone by construction\nfunc HitRate() {}\n")
+        self._write(root, "internal/rsiloop/tunable.go",
+                    'package rsiloop\nconst DefaultCacheSize = 4\nconst TunableConstName = "DefaultCacheSize"\n')
         self._write(root, "internal/rsiloop/worktree.go",
                     "func NewWorktreeHarness(){ /* worktree add */ }\nrev-parse\n")
         self._write(root, "internal/rsiloop/rulesynth.go", "func NewRuleSynthHarness(){}\n")
@@ -93,10 +101,14 @@ class SyntheticEvidenceTest(unittest.TestCase):
         if second_subsystem:
             cmd += "NewRuleSynthHarness()\n"
         self._write(root, "cmd/rsiloop/main.go", cmd)
-        self._write(root, "cmd/kpiprobe/main.go", "package main\n")
+        self._write(root, "cmd/kpiprobe/main.go",
+                    'package main\nimport "github.com/anthony-chaudhary/fak/internal/rsiloop"\nvar _ = rsiloop.DefaultCacheSize\n')
         self._write(root, "internal/rsiloop/rsiloop_test.go", "Keep\nRevert\n")
         self._write(root, "docs/proofs/shipgate.md", "# proof\n")
         self._write(root, "docs/rsi-loop.md", "# rsi\n")
+        if prod_caller:
+            self._write(root, "internal/gateway/cache.go",
+                        'package gateway\nimport "github.com/anthony-chaudhary/fak/internal/rsiloop"\nfunc Cap() int { return rsiloop.DefaultCacheSize }\n')
         wf = "run: go run ./cmd/kpiprobe\n"
         if ci_ratchet:
             wf = ("run: python tools/scorecard_control_pane.py --check\n"
@@ -112,15 +124,34 @@ class SyntheticEvidenceTest(unittest.TestCase):
             hard_fail = [r for r in (p["maturity"] + p["usefulness"])
                          if r["hard"] and not r["passed"]]
             self.assertEqual(p["corpus"]["rsi_debt"], len(hard_fail))
-            # demo repo: 1 subsystem, no CI ratchet, no regression gate -> 3 gaps
-            self.assertEqual(p["corpus"]["rsi_debt"], 3)
+            # demo repo: 1 subsystem, no prod caller, no CI ratchet, no regression gate -> 4 gaps
+            self.assertEqual(p["corpus"]["rsi_debt"], 4)
             self.assertEqual(p["corpus"]["maturity_score"], 100)
+
+    def test_toy_target_without_prod_callers_cannot_pass_grade_a(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._mature_repo(root, second_subsystem=True, ci_ratchet=True, prod_caller=False)
+            # Add a test file and a different package's DefaultCacheSize and a comment — none count.
+            self._write(root, "internal/gateway/cache_test.go",
+                        'package gateway\nimport "github.com/anthony-chaudhary/fak/internal/rsiloop"\nvar _ = rsiloop.DefaultCacheSize\n')
+            self._write(root, "internal/vdso/vdso.go",
+                        'package vdso\nconst DefaultCacheSize = 1024\n')
+            self._write(root, "internal/gateway/comment_only.go",
+                        'package gateway\nimport "github.com/anthony-chaudhary/fak/internal/rsiloop"\n// rsiloop.DefaultCacheSize\n')
+            p = sc.build_payload(root)
+            self.assertFalse(p["ok"])
+            self.assertGreaterEqual(p["corpus"]["rsi_debt"], 1)
+            self.assertNotEqual(p["corpus"]["usefulness_grade"], "A")
+            u = {r["key"]: r["passed"] for r in p["usefulness"]}
+            self.assertFalse(u["production_target_wired"])
 
     def test_closing_gaps_drops_debt_to_zero(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            self._mature_repo(root, second_subsystem=True, ci_ratchet=True)
+            self._mature_repo(root, second_subsystem=True, ci_ratchet=True, prod_caller=True)
             p = sc.build_payload(root)
             self.assertEqual(p["corpus"]["rsi_debt"], 0)
             self.assertTrue(p["ok"])
