@@ -141,9 +141,15 @@ type inkling2Resident struct {
 	err               error
 
 	// kvHalf stores the global-slot K and V caches as f16 (FAK_INKLING2_KV=f16); halfDev
-	// is the decode op set that reads them. The local rings always stay fp32.
-	kvHalf  bool
-	halfDev compute.Inkling2HalfKVDevice
+	// is the decode op set that reads them. kvFP8 stores them as OCP E4M3FN codes with
+	// per-(token, kvHead) f32 scales (FAK_INKLING2_KV=fp8) and an overflow flag. Local
+	// sliding-window rings always stay fp32.
+	kvHalf     bool
+	halfDev    compute.Inkling2HalfKVDevice
+	kvFP8      bool
+	fp8Dev     compute.Inkling2FP8KVDevice
+	ks, vs     []ink2Ref
+	kvOverflow ink2Ref
 
 	q8 map[int]ink2Ref // arena offset of an activation -> its Q8_0 codes this token
 
@@ -330,16 +336,42 @@ func inkling2ResidentCtxAutoSet(lookup func(string) (string, bool)) bool {
 	return !ok || strings.TrimSpace(v) == ""
 }
 
+// inkling2GlobalKVSlotBytes is the device bytes of one global slot's K and V caches
+// (plus per-(token, kvHead) f32 scales for FP8) at cap positions.
+func inkling2GlobalKVSlotBytes(hp model.Inkling2LoopHParams, cap int, dtype Inkling2KVDType) int64 {
+	kvDim := int64(hp.KVHeads * hp.HeadDim)
+	switch dtype {
+	case Inkling2KVFP8:
+		codeBytes := int64(compute.Ink2FP8KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)) * 4
+		scaleBytes := int64(compute.Ink2FP8KVScaleFloats(cap, hp.KVHeads)) * 4
+		return 2 * (codeBytes + scaleBytes)
+	case Inkling2KVF16:
+		return 2 * int64(cap) * kvDim * 2
+	default:
+		return 2 * int64(cap) * kvDim * 4
+	}
+}
+
 // inkling2ResidentPerPosBytes is the device cost of one global-slot cache position:
 // its f32 K and V rows in every global slot, plus the attention score row, which
 // grows with the global context.
 func inkling2ResidentPerPosBytes(hp model.Inkling2LoopHParams) int64 {
-	return inkling2ResidentPerPosBytesDtype(hp, false)
+	return inkling2ResidentPerPosBytesFor(hp, Inkling2KVF32)
 }
 
 // inkling2ResidentPerPosBytesDtype is inkling2ResidentPerPosBytes with half selecting
 // f16 for the global-slot K and V caches; the attention score row stays float32.
 func inkling2ResidentPerPosBytesDtype(hp model.Inkling2LoopHParams, half bool) int64 {
+	dtype := Inkling2KVF32
+	if half {
+		dtype = Inkling2KVF16
+	}
+	return inkling2ResidentPerPosBytesFor(hp, dtype)
+}
+
+// inkling2ResidentPerPosBytesFor is inkling2ResidentPerPosBytes sized for dtype's
+// global-slot caches; the shared score row stays float32.
+func inkling2ResidentPerPosBytesFor(hp model.Inkling2LoopHParams, dtype Inkling2KVDType) int64 {
 	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
 	var global int64
 	for slot := 0; slot < slots; slot++ {
@@ -347,12 +379,7 @@ func inkling2ResidentPerPosBytesDtype(hp model.Inkling2LoopHParams, half bool) i
 			global++
 		}
 	}
-	elemBytes := int64(4)
-	if half {
-		elemBytes = 2
-	}
-	kvDim := int64(hp.KVHeads * hp.HeadDim)
-	return global*2*elemBytes*kvDim + 2*4*int64(hp.Heads)
+	return global*inkling2GlobalKVSlotBytes(hp, 1, dtype) + 2*4*int64(hp.Heads)
 }
 
 // inkling2FitResidentCtx is the largest global context whose cache and score rows fit
@@ -388,19 +415,36 @@ func inkling2ResidentHardMax(backend string) int {
 // after the weights bound. A backend that cannot report free memory keeps the
 // fixed default rather than guess.
 func inkling2ResolveAutoCtx(be compute.Backend, hp model.Inkling2LoopHParams, prefill int64, half bool) (int, error) {
+	dtype := Inkling2KVF32
+	if half {
+		dtype = Inkling2KVF16
+	}
+	return inkling2ResolveAutoCtxFor(be, hp, false, 0, inkling2ResidentFixedBytes(hp, inkling2ArenaFloats)+prefill, dtype)
+}
+
+// inkling2ResolveAutoCtxFor sizes the global cache from free device memory using the
+// exact KV + other fit formula so the resolved auto context always passes
+// inkling2FitResidentKVFor.
+func inkling2ResolveAutoCtxFor(be compute.Backend, hp model.Inkling2LoopHParams, batched bool, chunk int, other int64, dtype Inkling2KVDType) (int, error) {
 	_, free, known := compute.DeviceMemoryInfo(be)
 	if !known || free == compute.FreeUnknown || free < 0 {
 		fmt.Fprintf(os.Stderr, "inkling2 resident: device free memory unknown, context %d (default)\n", Inkling2ResidentCtxDefault)
 		return Inkling2ResidentCtxDefault, nil
 	}
-	perPos := inkling2ResidentPerPosBytesDtype(hp, half)
-	ctx := min(inkling2FitResidentCtx(free, inkling2ResidentReserve(free)+prefill, perPos), inkling2AutoCtxCeiling)
-	if ctx == 0 {
+	perPos := inkling2ResidentPerPosBytesFor(hp, dtype)
+	budget := free - inkling2DeviceHeadroom(free)
+	left := budget - other
+	ctx := 0
+	if left > 0 {
+		ctx = inkling2MaxResidentCtxFor(hp, batched, chunk, dtype, inkling2AutoCtxCeiling, left)
+		ctx = ctx / 256 * 256
+	}
+	if ctx < Inkling2ResidentCtxMin {
 		return 0, fmt.Errorf("inkling2 resident: %d free bytes after weights hold no %d-token global cache at %d bytes per position; set %s to a smaller context",
 			free, Inkling2ResidentCtxMin, perPos, "FAK_INKLING2_CTX")
 	}
-	fmt.Fprintf(os.Stderr, "inkling2 resident: context %d (auto: %.2f GiB free after weights, %d bytes per position)\n",
-		ctx, float64(free)/(1<<30), perPos)
+	fmt.Fprintf(os.Stderr, "inkling2 resident: context %d (auto: %.2f GiB free after weights, %d bytes per position, kv=%s)\n",
+		ctx, float64(free)/(1<<30), perPos, dtype)
 	return ctx, nil
 }
 
@@ -452,6 +496,17 @@ func inkling2ResidentKVBytes(hp model.Inkling2LoopHParams, ctx int, batched bool
 // inkling2ResidentKVBytesDtype is inkling2ResidentKVBytes with half selecting f16 for the
 // global-slot caches; the local rings, conv histories and scores stay float32.
 func inkling2ResidentKVBytesDtype(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, half bool) int64 {
+	dtype := Inkling2KVF32
+	if half {
+		dtype = Inkling2KVF16
+	}
+	return inkling2ResidentKVBytesFor(hp, ctx, batched, chunk, dtype)
+}
+
+// inkling2ResidentKVBytesFor is inkling2ResidentKVBytes sized for dtype on the global
+// slots (f32, f16, or fp8 with per-(token, kvHead) f32 scales); the local SWA rings,
+// conv histories, and shared score row stay float32.
+func inkling2ResidentKVBytesFor(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, dtype Inkling2KVDType) int64 {
 	if ctx <= 0 {
 		return 0
 	}
@@ -461,11 +516,12 @@ func inkling2ResidentKVBytesDtype(hp model.Inkling2LoopHParams, ctx int, batched
 	maxCap := hp.SlidingWindow
 	for slot, c := range inkling2ResidentCaps(hp, ctx, batched, chunk) {
 		maxCap = max(maxCap, c)
-		elemBytes := int64(4)
-		if half && !inkling2SlotIsLocal(hp, slot) {
-			elemBytes = 2
+		histBytes := int64(channels) * int64(hp.ConvKernel-1) * 4
+		if inkling2SlotIsLocal(hp, slot) {
+			bytes += 2*int64(c)*int64(kvDim)*4 + histBytes
+		} else {
+			bytes += inkling2GlobalKVSlotBytes(hp, c, dtype) + histBytes
 		}
-		bytes += 2*int64(c)*int64(kvDim)*elemBytes + int64(channels)*int64(hp.ConvKernel-1)*4
 	}
 	bytes += 2 * int64(hp.Heads) * int64(maxCap) * 4
 	return bytes
@@ -483,20 +539,26 @@ func inkling2ResidentFixedBytes(hp model.Inkling2LoopHParams, arenaFloats int) i
 }
 
 // inkling2ResidentOtherBytes is the non-KV device memory of a session: the fixed
-// buffers plus, when wideChunk > 0, the wide prefill arenas and the chunk input.
-func inkling2ResidentOtherBytes(hp model.Inkling2LoopHParams, arenaFloats, wideChunk, padK int) int64 {
+// buffers plus, when prefillChunk > 0, the prefill arenas (base or wide) and the
+// chunk input.
+func inkling2ResidentOtherBytes(hp model.Inkling2LoopHParams, arenaFloats, prefillChunk, padK int) int64 {
 	other := inkling2ResidentFixedBytes(hp, arenaFloats)
-	if wideChunk > 0 {
-		keep, scr := inkling2PrefillArenaFloats(hp, wideChunk, padK)
-		other += 4 * int64(keep+scr+wideChunk*hp.Hidden)
+	if prefillChunk > 0 {
+		keep, scr := inkling2PrefillArenaFloats(hp, prefillChunk, padK)
+		other += 4 * int64(keep+scr+prefillChunk*hp.Hidden)
 	}
 	return other
 }
 
 // inkling2ResidentTotalBytes is every device allocation a resident session makes at
 // ctx tokens: the KV caches and the non-KV buffers of inkling2ResidentOtherBytes.
-func inkling2ResidentTotalBytes(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk, arenaFloats, wideChunk, padK int) int64 {
-	return inkling2ResidentKVBytes(hp, ctx, batched, chunk) + inkling2ResidentOtherBytes(hp, arenaFloats, wideChunk, padK)
+func inkling2ResidentTotalBytes(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk, arenaFloats, prefillChunk, padK int) int64 {
+	return inkling2ResidentTotalBytesFor(hp, ctx, batched, chunk, Inkling2KVF32, arenaFloats, prefillChunk, padK)
+}
+
+// inkling2ResidentTotalBytesFor is inkling2ResidentTotalBytes sized for dtype's global KV.
+func inkling2ResidentTotalBytesFor(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, dtype Inkling2KVDType, arenaFloats, prefillChunk, padK int) int64 {
+	return inkling2ResidentKVBytesFor(hp, ctx, batched, chunk, dtype) + inkling2ResidentOtherBytes(hp, arenaFloats, prefillChunk, padK)
 }
 
 // inkling2FitResidentKV returns the resident KV bytes at ctx after checking the KV plus
@@ -509,11 +571,45 @@ func inkling2FitResidentKV(be compute.Backend, hp model.Inkling2LoopHParams, ctx
 
 // inkling2FitResidentKVDtype is inkling2FitResidentKV sized for half's global-slot caches.
 func inkling2FitResidentKVDtype(be compute.Backend, hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, half bool, other int64) (int64, error) {
+	dtype := Inkling2KVF32
+	if half {
+		dtype = Inkling2KVF16
+	}
+	return inkling2FitResidentKVFor(be, hp, ctx, batched, chunk, dtype, other)
+}
+
+// inkling2FitResidentKVFor is inkling2FitResidentKV sized for dtype's global-slot caches.
+func inkling2FitResidentKVFor(be compute.Backend, hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, dtype Inkling2KVDType, other int64) (int64, error) {
 	_, free, known := compute.DeviceMemoryInfo(be)
 	if !known || free == compute.FreeUnknown || free < 0 {
 		free = compute.FreeUnknown
 	}
-	return inkling2KVFitDtype(hp, ctx, batched, chunk, half, other, free)
+	return inkling2KVFitFor(hp, ctx, batched, chunk, dtype, other, free)
+}
+
+// inkling2KVFitFor is inkling2KVFit sized for dtype's global-slot caches.
+func inkling2KVFitFor(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk int, dtype Inkling2KVDType, other, free int64) (int64, error) {
+	kv := inkling2ResidentKVBytesFor(hp, ctx, batched, chunk, dtype)
+	need := kv + other
+	if free == compute.FreeUnknown {
+		ceiling := Inkling2ResidentCtxMax(inkling2ResidentBackend)
+		if ctx <= ceiling {
+			return kv, nil
+		}
+		return kv, &Inkling2KVOverBudgetError{Ctx: ctx, MaxCtx: ceiling, NeedBytes: need, FreeBytes: free}
+	}
+	budget := free - inkling2DeviceHeadroom(free)
+	if need <= budget {
+		return kv, nil
+	}
+	maxCtx := 0
+	if left := budget - other; left >= 0 {
+		maxCtx = inkling2MaxResidentCtxFor(hp, batched, chunk, dtype, ctx-1, left)
+	}
+	if maxCtx < Inkling2ResidentCtxMin {
+		maxCtx = 0
+	}
+	return kv, &Inkling2KVOverBudgetError{Ctx: ctx, MaxCtx: maxCtx, NeedBytes: need, FreeBytes: free}
 }
 
 // inkling2MaxResidentCtx is the largest ctx in [0, ceil] whose KV fits budget bytes,
@@ -523,10 +619,18 @@ func inkling2MaxResidentCtx(hp model.Inkling2LoopHParams, batched bool, chunk, c
 }
 
 func inkling2MaxResidentCtxDtype(hp model.Inkling2LoopHParams, batched bool, chunk int, half bool, ceil int, budget int64) int {
+	dtype := Inkling2KVF32
+	if half {
+		dtype = Inkling2KVF16
+	}
+	return inkling2MaxResidentCtxFor(hp, batched, chunk, dtype, ceil, budget)
+}
+
+func inkling2MaxResidentCtxFor(hp model.Inkling2LoopHParams, batched bool, chunk int, dtype Inkling2KVDType, ceil int, budget int64) int {
 	lo, hi := 0, ceil
 	for lo < hi {
 		mid := lo + (hi-lo+1)/2
-		if inkling2ResidentKVBytesDtype(hp, mid, batched, chunk, half) <= budget {
+		if inkling2ResidentKVBytesFor(hp, mid, batched, chunk, dtype) <= budget {
 			lo = mid
 		} else {
 			hi = mid - 1
@@ -543,12 +647,27 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 		return nil, fmt.Errorf("inkling2 resident: backend %s has no inkling2 device ops", be.Name())
 	}
 	hp, w := m.HP, m.Weights
-	if inkling2KVHalfErr != nil {
-		return nil, inkling2KVHalfErr
+	reqKV, kvErr := Inkling2KVDTypeFrom(os.LookupEnv)
+	if kvErr != nil {
+		return nil, kvErr
+	}
+	if reqKV == Inkling2KVF32 && inkling2KVHalfRequested {
+		if _, set := os.LookupEnv("FAK_INKLING2_KV"); !set {
+			reqKV = Inkling2KVF16
+		}
 	}
 	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats, chunkMax: ring, chunkWanted: wanted}
 	s.report = metalgemm.Ink2ReportRequested(os.Getenv(metalgemm.Ink2ProfileEnv))
-	s.halfDev, _ = be.(compute.Inkling2HalfKVDevice)
+	if ctx != 0 {
+		switch inkling2ResidentKVDType(be, reqKV) {
+		case Inkling2KVFP8:
+			s.kvFP8 = true
+			s.fp8Dev, _ = be.(compute.Inkling2FP8KVDevice)
+		case Inkling2KVF16:
+			s.kvHalf = true
+			s.halfDev, _ = be.(compute.Inkling2HalfKVDevice)
+		}
+	}
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
 	s.batched = hasPrefill && (inkling2BatchedPrefill() || inkling2SpecDepthFor(m) > 0)
 	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
@@ -586,20 +705,6 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 		s.packCtrl(c, hp.Hidden)
 	}
 
-	halfKV := ctx != 0 && inkling2ResidentHalfKV(be)
-	if ctx == inkling2ResidentCtxAuto {
-		resolved, err := inkling2ResolveAutoCtx(be, hp, s.prefillWidestBytes(), halfKV)
-		if err != nil {
-			s.close()
-			return nil, err
-		}
-		ctx = resolved
-	}
-	s.ctx = ctx
-	s.kvHalf = ctx > 0 && halfKV
-	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
-	kvDim := hp.KVHeads * hp.HeadDim
-	channels := 2*kvDim + 2*hp.Hidden
 	for i := range s.layers {
 		for _, e := range []ink2Experts{s.layers[i].gateUp, s.layers[i].down} {
 			if !inkling2IndexedExpert(e.stack.Dtype) {
@@ -607,6 +712,23 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 			}
 		}
 	}
+	if ctx == inkling2ResidentCtxAuto {
+		autoChunk := 0
+		if s.batched && !s.hostRouting {
+			autoChunk = s.chunkMax
+		}
+		autoOther := inkling2ResidentOtherBytes(hp, arenaFloats, autoChunk, s.maxPadK())
+		resolved, err := inkling2ResolveAutoCtxFor(be, hp, s.batched, s.chunkMax, autoOther, s.kvDType())
+		if err != nil {
+			s.close()
+			return nil, err
+		}
+		ctx = resolved
+	}
+	s.ctx = ctx
+	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
+	kvDim := hp.KVHeads * hp.HeadDim
+	channels := 2*kvDim + 2*hp.Hidden
 	// a ring is addressed by its capacity, so it cannot be widened once the session
 	// holds positions: the wide chunk is decided, admitted and allocated here
 	wide := s.chunkMax > inkling2PrefillChunkBase && ctx > 0 && s.batched && !s.hostRouting
@@ -625,13 +747,13 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 	}
 	kvBytes := int64(0)
 	if ctx > 0 {
-		wideChunk := 0
-		if wide {
-			wideChunk = s.chunkMax
+		prefillChunk := 0
+		if s.batched && !s.hostRouting {
+			prefillChunk = s.chunkMax
 		}
-		other := inkling2ResidentOtherBytes(hp, arenaFloats, wideChunk, s.maxPadK())
+		other := inkling2ResidentOtherBytes(hp, arenaFloats, prefillChunk, s.maxPadK())
 		var err error
-		if kvBytes, err = inkling2FitResidentKVDtype(be, hp, ctx, s.batched, s.chunkMax, s.kvHalf, other); err != nil {
+		if kvBytes, err = inkling2FitResidentKVFor(be, hp, ctx, s.batched, s.chunkMax, s.kvDType(), other); err != nil {
 			s.close()
 			if wide {
 				// the wide arenas may be what pushed the fit over; the base build may fit
@@ -641,19 +763,30 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 		}
 	}
 	s.kc, s.vc, s.hist = make([]ink2Ref, slots), make([]ink2Ref, slots), make([]ink2Ref, slots)
+	s.ks, s.vs = make([]ink2Ref, slots), make([]ink2Ref, slots)
 	s.caps = inkling2ResidentCaps(hp, ctx, s.batched, s.chunkMax)
 	s.baseCaps = inkling2ResidentCaps(hp, ctx, s.batched, inkling2PrefillChunkBase)
 	maxCap := hp.SlidingWindow
 	for slot, cap := range s.caps {
 		maxCap = max(maxCap, cap)
 		if ctx > 0 {
-			kvFloats := inkling2BatchKVFloats(cap*kvDim, s.kvHalfSlot(slot))
-			s.kc[slot], s.vc[slot] = s.alloc(kvFloats), s.alloc(kvFloats)
+			if s.kvFP8Slot(slot) {
+				codeFloats := compute.Ink2FP8KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)
+				scaleFloats := compute.Ink2FP8KVScaleFloats(cap, hp.KVHeads)
+				s.kc[slot], s.vc[slot] = s.alloc(codeFloats), s.alloc(codeFloats)
+				s.ks[slot], s.vs[slot] = s.alloc(scaleFloats), s.alloc(scaleFloats)
+			} else {
+				kvFloats := inkling2BatchKVFloats(cap*kvDim, s.kvHalfSlot(slot))
+				s.kc[slot], s.vc[slot] = s.alloc(kvFloats), s.alloc(kvFloats)
+			}
 			s.hist[slot] = s.alloc(channels * (hp.ConvKernel - 1))
 		}
 	}
 	if ctx > 0 {
 		s.scores = s.alloc(2 * hp.Heads * maxCap)
+		if s.kvFP8 {
+			s.kvOverflow = s.alloc(1)
+		}
 	}
 	if wide {
 		// allocated once at the full width, so no later prompt regrows the arenas and
@@ -978,12 +1111,15 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	}
 	meta := at(s.in, h)
 	cap := s.caps[slot]
-	qkvPost, attendOp := s.dev.Ink2QKVPost, s.dev.Ink2Attend
-	if s.kvHalfSlot(slot) {
-		qkvPost, attendOp = s.halfDev.Ink2QKVPostHalf, s.halfDev.Ink2AttendHalf
-	}
 	if s.err == nil {
-		s.fail(qkvPost(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], meta, p, cap, cv))
+		switch {
+		case s.kvFP8Slot(slot):
+			s.fail(s.fp8Dev.Ink2QKVPostFP8(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.kvOverflow, meta, p, cap, cv))
+		case s.kvHalfSlot(slot):
+			s.fail(s.halfDev.Ink2QKVPostHalf(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], meta, p, cap, cv))
+		default:
+			s.fail(s.dev.Ink2QKVPost(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], meta, p, cap, cv))
+		}
 	}
 	extent, window := hp.RelExtent, 0
 	if local {
@@ -991,7 +1127,14 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	}
 	attn := s.tmp(hp.Heads * hp.HeadDim)
 	if s.err == nil {
-		s.fail(attendOp(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.scores, attn, meta, p, extent, window, cap))
+		switch {
+		case s.kvFP8Slot(slot):
+			s.fail(s.fp8Dev.Ink2AttendFP8(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.scores, attn, meta, p, extent, window, cap))
+		case s.kvHalfSlot(slot):
+			s.fail(s.halfDev.Ink2AttendHalf(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.scores, attn, meta, p, extent, window, cap))
+		default:
+			s.fail(s.dev.Ink2Attend(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.scores, attn, meta, p, extent, window, cap))
+		}
 	}
 	gate := s.mv(l.gate, in[0])
 	o := s.mvGated(l.wo, attn, gate, hp.Heads*hp.HeadDim)
@@ -1185,6 +1328,11 @@ func (s *inkling2Resident) step(token int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if overflow, oerr := s.checkFP8Overflow(); oerr != nil {
+		return 0, oerr
+	} else if overflow {
+		return 0, ErrInkling2FP8ScaleOverflow
+	}
 	return s.finishStep(int(got[0])), nil
 }
 
@@ -1245,4 +1393,67 @@ func (s *inkling2Resident) localAt(slot int) bool {
 // session. Local rings stay fp32 whatever the session stores.
 func (s *inkling2Resident) kvHalfSlot(slot int) bool {
 	return s.kvHalf && !s.localAt(slot)
+}
+
+// kvFP8Slot reports whether slot's K and V caches are OCP E4M3FN with per-(token, kvHead)
+// f32 scales: the global slots of an fp8 session. Local rings always stay fp32.
+func (s *inkling2Resident) kvFP8Slot(slot int) bool {
+	return s.kvFP8 && !s.localAt(slot)
+}
+
+// kvDType returns the active global-slot KV dtype of the session.
+func (s *inkling2Resident) kvDType() Inkling2KVDType {
+	switch {
+	case s.kvFP8:
+		return Inkling2KVFP8
+	case s.kvHalf:
+		return Inkling2KVF16
+	default:
+		return Inkling2KVF32
+	}
+}
+
+// checkFP8Overflow reads the device overflow flag when the session uses FP8 global KV.
+func (s *inkling2Resident) checkFP8Overflow() (bool, error) {
+	if !s.kvFP8 || s.kvOverflow.T.Buf() == nil {
+		return false, nil
+	}
+	flag, err := s.dev.Ink2ReadInts(s.kvOverflow, 1)
+	if err != nil {
+		return false, err
+	}
+	return len(flag) > 0 && flag[0] != 0, nil
+}
+
+// fallbackFP8ToFP16 releases the FP8 global-slot buffers, allocates FP16 global-slot
+// caches in their place, clears conv histories, and resets position to 0 so a cold
+// prefill that hit FP8 scale overflow can re-run cleanly in FP16.
+func (s *inkling2Resident) fallbackFP8ToFP16() error {
+	if err := inkling2BackendHalfKVErr(s.be); err != nil {
+		return fmt.Errorf("%w: no f16 fallback available (%v)", ErrInkling2FP8ScaleOverflow, err)
+	}
+	inkling2KVFP8OverflowLog()
+	s.dropCaptures()
+	kvDim := s.hp.KVHeads * s.hp.HeadDim
+	for slot, cap := range s.caps {
+		if !s.kvFP8Slot(slot) {
+			continue
+		}
+		s.release(s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot])
+		s.ks[slot], s.vs[slot] = ink2Ref{}, ink2Ref{}
+		kvFloats := inkling2BatchKVFloats(cap*kvDim, true)
+		s.kc[slot], s.vc[slot] = s.alloc(kvFloats), s.alloc(kvFloats)
+	}
+	s.release(s.kvOverflow)
+	s.kvOverflow = ink2Ref{}
+	s.kvFP8 = false
+	s.fp8Dev = nil
+	s.kvHalf = true
+	s.halfDev, _ = s.be.(compute.Inkling2HalfKVDevice)
+	zero := make([]float32, s.histFloats())
+	for slot := range s.hist {
+		s.fail(s.dev.Ink2Write(s.hist[slot], zero))
+	}
+	s.pos = 0
+	return s.err
 }

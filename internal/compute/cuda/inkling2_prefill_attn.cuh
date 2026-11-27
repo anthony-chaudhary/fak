@@ -71,15 +71,29 @@ __device__ __forceinline__ void cp16(void *dst, const void *src) {
   asm volatile("cp.async.cg.shared.global [%0], [%1], 16;" ::"r"(a), "l"(src));
 }
 
-// Stores one 16-byte chunk of a K or V row (4 floats or 8 halves) into an fp16 smem tile.
+// Stores one 16-byte chunk of a K or V row (4 floats, 8 halves, or 16 E4M3FN bytes) into an fp16 smem tile.
 __device__ __forceinline__ void tile16(__half *dst, float4 x) {
   *reinterpret_cast<uint2 *>(dst) = make_uint2(h2(x.x, x.y), h2(x.z, x.w));
 }
 __device__ __forceinline__ void tile16(__half *dst, uint4 x) { *reinterpret_cast<uint4 *>(dst) = x; }
 
+__device__ __forceinline__ uint2 fp8x4_to_h2x2(uint32_t w, float sc) {
+  const uint32_t lo = ink2_e4m3fn_decode2_scaled_h2((uint16_t)(w & 0xffffu), sc);
+  const uint32_t hi = ink2_e4m3fn_decode2_scaled_h2((uint16_t)(w >> 16), sc);
+  return make_uint2(lo, hi);
+}
+__device__ __forceinline__ void tile16_fp8(__half *dst, uint4 x, float sc) {
+  uint2 *d = reinterpret_cast<uint2 *>(dst);
+  d[0] = fp8x4_to_h2x2(x.x, sc);
+  d[1] = fp8x4_to_h2x2(x.y, sc);
+  d[2] = fp8x4_to_h2x2(x.z, sc);
+  d[3] = fp8x4_to_h2x2(x.w, sc);
+}
+
 template <class E> struct Chunk16;
 template <> struct Chunk16<float> { using V = float4; };
 template <> struct Chunk16<__half> { using V = uint4; };
+template <> struct Chunk16<uint8_t> { using V = uint4; };
 
 template <int QW, int KT, int REL, int PIPE, class E = float>
 __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *__restrict__ q,
@@ -90,7 +104,9 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
                                                                   const E *__restrict__ vcache,
                                                                   float *__restrict__ out, int heads, int kvHeads,
                                                                   int extent, int window, int cap, float scale,
-                                                                  int pos0, int T) {
+                                                                  int pos0, int T,
+                                                                  const float *__restrict__ kscale = nullptr,
+                                                                  const float *__restrict__ vscale = nullptr) {
   constexpr int NW = kG * QW, NT = KT / 8, QT = 16 * QW;
   using V16 = typename Chunk16<E>::V;
   constexpr int CW = 16 / (int)sizeof(E), CPR = kHD / CW; // elements per 16-byte chunk, chunks per row
@@ -100,6 +116,7 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
   constexpr int RS = AttnSmem<QW, KT, REL, PIPE, E>::kRS;
   float *sRS = reinterpret_cast<float *>(sV + KT * kKS) + (threadIdx.x >> 5) * 16 * RS;
   E *stg = reinterpret_cast<E *>(reinterpret_cast<float *>(sV + KT * kKS) + AttnSmem<QW, KT, REL, PIPE, E>::rsFloats);
+  __shared__ float sKS[KT], sVS[KT];
   const int kvh = blockIdx.x;
   const int tile = gridDim.y - 1 - blockIdx.y; // heaviest (latest) query tiles launch first
   const int warp = threadIdx.x >> 5, lane = threadIdx.x & 31, g = lane >> 2, qd = lane & 3;
@@ -181,13 +198,31 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
   if constexpr (PIPE) issue(kstart);
 
   for (int kb = kstart; kb <= kend; kb += KT) {
+    if constexpr (sizeof(E) == 1) {
+      if (threadIdx.x < KT) {
+        const int p = kb + threadIdx.x;
+        if (p <= kend) {
+          const size_t soff = (size_t)(p % cap) * (size_t)kvHeads + (size_t)kvh;
+          sKS[threadIdx.x] = __ldg(kscale + soff);
+          sVS[threadIdx.x] = __ldg(vscale + soff);
+        } else {
+          sKS[threadIdx.x] = 0.f;
+          sVS[threadIdx.x] = 0.f;
+        }
+      }
+    }
     if constexpr (PIPE) {
       asm volatile("cp.async.wait_all;" ::);
       __syncthreads();
       for (int idx = threadIdx.x; idx < KT * CPR; idx += 32 * NW) {
         const int row = idx / CPR, c4 = (idx % CPR) * CW;
-        tile16(sK + row * kKS + c4, *reinterpret_cast<const V16 *>(stg + row * kHD + c4));
-        tile16(sV + row * kKS + c4, *reinterpret_cast<const V16 *>(stg + KT * kHD + row * kHD + c4));
+        if constexpr (sizeof(E) == 1) {
+          tile16_fp8(sK + row * kKS + c4, *reinterpret_cast<const uint4 *>(stg + row * kHD + c4), sKS[row]);
+          tile16_fp8(sV + row * kKS + c4, *reinterpret_cast<const uint4 *>(stg + KT * kHD + row * kHD + c4), sVS[row]);
+        } else {
+          tile16(sK + row * kKS + c4, *reinterpret_cast<const V16 *>(stg + row * kHD + c4));
+          tile16(sV + row * kKS + c4, *reinterpret_cast<const V16 *>(stg + KT * kHD + row * kHD + c4));
+        }
       }
       __syncthreads();
       if (kb + KT <= kend) issue(kb + KT);
@@ -202,8 +237,13 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
         kv = __ldg(reinterpret_cast<const V16 *>(kcache + off));
         vv = __ldg(reinterpret_cast<const V16 *>(vcache + off));
       }
-      tile16(sK + row * kKS + c4, kv);
-      tile16(sV + row * kKS + c4, vv);
+      if constexpr (sizeof(E) == 1) {
+        tile16_fp8(sK + row * kKS + c4, kv, sKS[row]);
+        tile16_fp8(sV + row * kKS + c4, vv, sVS[row]);
+      } else {
+        tile16(sK + row * kKS + c4, kv);
+        tile16(sV + row * kKS + c4, vv);
+      }
     }
     __syncthreads();
     }
@@ -348,7 +388,8 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
 template <int QW, int KT, int REL, int PIPE, class E = float>
 static int ink2p_attend_v2_launch(const float *q, const float *r, const float *sinks, const float *relBias,
                                   const E *kcache, const E *vcache, float *out, int heads, int kvHeads,
-                                  int extent, int window, int cap, float scale, int pos0, int T) {
+                                  int extent, int window, int cap, float scale, int pos0, int T,
+                                  const float *kscale = nullptr, const float *vscale = nullptr) {
   const dim3 grid(kvHeads, (T + 16 * QW - 1) / (16 * QW));
   constexpr size_t smem = AttnSmem<QW, KT, REL, PIPE, E>::bytes;
   if (smem > 48 * 1024) {
@@ -358,7 +399,8 @@ static int ink2p_attend_v2_launch(const float *q, const float *r, const float *s
   }
   FCUDA_TS("k_ink2p_attend_v2", grid,
            k_ink2p_attend_v2<QW, KT, REL, PIPE, E><<<grid, 32 * kG * QW, smem, g_stream>>>(
-               q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, extent, window, cap, scale, pos0, T));
+               q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, extent, window, cap, scale, pos0, T, kscale,
+               vscale));
   return ink2_last_error();
 }
 
@@ -386,4 +428,18 @@ extern "C" int fcuda_ink2p_attend_v2_h(const float *q, const float *r, const flo
   return ink2pa::ink2p_attend_v2_launch<2, 16, 1, 1, __half>(q, r, sinks, relBias, (const __half *)kcache,
                                                             (const __half *)vcache, out, heads, kvHeads, extent,
                                                             window, cap, scale, pos0, T);
+}
+
+// fcuda_ink2p_attend_v2 over OCP E4M3FN caches with per-(token, kvHead) F32 scales.
+// Dequantizes tiles into __half smem for mma16816 with FP32 accumulate.
+extern "C" int fcuda_ink2p_attend_v2_fp8(const float *q, const float *r, const float *sinks, const float *relBias,
+                                         const uint8_t *kcache, const uint8_t *vcache, const float *kscale,
+                                         const float *vscale, float *out, int heads, int kvHeads, int headDim,
+                                         int relLen, int extent, int window, int cap, float scale, int pos0, int T) {
+  if (headDim != ink2pa::kHD || relLen != ink2pa::kRL || kvHeads < 1 || heads != ink2pa::kG * kvHeads || T < 1 ||
+      cap < 1)
+    return (int)cudaErrorInvalidValue;
+  return ink2pa::ink2p_attend_v2_launch<2, 16, 1, 1, uint8_t>(q, r, sinks, relBias, kcache, vcache, out, heads,
+                                                              kvHeads, extent, window, cap, scale, pos0, T, kscale,
+                                                              vscale);
 }

@@ -82,7 +82,12 @@ func (rt *serveRuntime) resolveServeFirstTokenWatchdog(sf *serveFlags) time.Dura
 		window, source = agent.CPUBackendFirstTokenWatchdogTimeout, agent.FirstTokenWatchdogSourceProxyUpstream
 	}
 	if w := rt.inkling2PrefillWindow(); source == agent.FirstTokenWatchdogSourceDefault && w > window {
-		window, source = w, agent.FirstTokenWatchdogSourceMetalContext
+		window = w
+		if rt.inkling2Metal {
+			source = agent.FirstTokenWatchdogSourceMetalContext
+		} else {
+			source = firstTokenWatchdogSourceCUDAContext
+		}
 	}
 	rt.addStartupMessage(newServeStartupMessage("serve", "first-token-watchdog", "info",
 		fmt.Sprintf("buffered first-token watchdog window %s (source: %s)", window, source)))
@@ -94,14 +99,40 @@ func (rt *serveRuntime) resolveServeFirstTokenWatchdog(sf *serveFlags) time.Dura
 // can drop to 512 rows, so a 32k prompt needs minutes before its first token.
 const inkling2MetalPrefillFloorTokPerS = 100
 
-// inkling2PrefillWindow is how long a cold prompt filling the served Metal
-// Inkling-2 context may take to its first token at the floor rate, or zero when
-// no Metal Inkling-2 model is served or the default window already covers it.
+// inkling2CUDAPrefillFloorTokPerS is a pessimistic Inkling-2 CUDA prefill rate
+// for long contexts (64k-128k) where cold expert layers may spill over PCIe
+// (~281 tok/s measured at 128k on RTX 5080), so a cold 64k-128k prompt needs
+// several minutes before its first token while short contexts fit in 60s.
+const inkling2CUDAPrefillFloorTokPerS = 250
+
+// firstTokenWatchdogSourceCUDAContext names the startup-message source when a
+// CUDA Inkling-2 serve scales its first-token window for long-context prefill.
+const firstTokenWatchdogSourceCUDAContext agent.FirstTokenWatchdogSource = "cuda-context default"
+
+// servesInkling2CUDA reports whether the runtime serves an Inkling-2 model on
+// the CUDA backend (non-Metal with a resolved CUDA compute backend).
+func (rt *serveRuntime) servesInkling2CUDA() bool {
+	return rt != nil && !rt.inkling2Metal && rt.chatBackend != nil && strings.EqualFold(rt.chatBackend.Name(), "cuda")
+}
+
+// inkling2PrefillWindow is how long a cold prompt filling the served Metal or
+// CUDA Inkling-2 context may take to its first token at the backend floor rate,
+// or zero when no Metal/CUDA Inkling-2 model is served or the default window
+// already covers it.
 func (rt *serveRuntime) inkling2PrefillWindow() time.Duration {
-	if rt == nil || !rt.inkling2Metal || rt.inkling2MaxPromptTokens <= 0 {
+	if rt == nil || rt.inkling2MaxPromptTokens <= 0 {
 		return 0
 	}
-	w := time.Duration(rt.inkling2MaxPromptTokens/inkling2MetalPrefillFloorTokPerS) * time.Second
+	var floorTokPerS int
+	switch {
+	case rt.inkling2Metal:
+		floorTokPerS = inkling2MetalPrefillFloorTokPerS
+	case rt.servesInkling2CUDA():
+		floorTokPerS = inkling2CUDAPrefillFloorTokPerS
+	default:
+		return 0
+	}
+	w := time.Duration(rt.inkling2MaxPromptTokens/floorTokPerS) * time.Second
 	if w <= inkling2ServeIdleDefault {
 		return 0
 	}

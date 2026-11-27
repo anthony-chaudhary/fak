@@ -1013,6 +1013,27 @@ int fcuda_ink2_attend_seq(const float *q, const float *r, const float *sinks, co
     const float *kcache, const float *vcache, double *scores, float *out, const float *meta,
     int heads, int kvHeads, int headDim, int relLen, int extent, int window, int cap, float scale,
     int kvHalf, const long long *st, int C);
+/* OCP FP8 E4M3FN global KV cache ops: kcache/vcache hold uint8_t E4M3FN codes
+ * [cap][kvHeads][headDim], kscale/vscale hold float32 per-(token, kvHead) scales
+ * [cap][kvHeads], overflow (optional, may be NULL) is a 1-int device flag set via
+ * atomicOr(1) on non-finite element or scale overflow. */
+int fcuda_ink2_qkv_post_fp8(float *q, float *r, const float *k, const float *v, const float *qclip,
+    const float *rclip, uint8_t *kcache, uint8_t *vcache, float *kscale, float *vscale, int *overflow,
+    const float *meta, int heads, int kvHeads, int headDim, int relLen, float qkClip, float relClip,
+    float eps, int global, float alpha, float floorTok, int cap, const float *const *conv,
+    float kNorm, float vNorm, int kn);
+int fcuda_ink2_attend_fp8(const float *q, const float *r, const float *sinks, const float *relBias,
+    const uint8_t *kcache, const uint8_t *vcache, const float *kscale, const float *vscale,
+    double *scores, float *out, const float *meta, int heads, int kvHeads, int headDim, int relLen,
+    int extent, int window, int cap, float scale);
+int fcuda_ink2p_qkv_post_fp8(float *q, float *r, const float *k, const float *v, const float *qclip,
+    const float *rclip, uint8_t *kcache, uint8_t *vcache, float *kscale, float *vscale, int *overflow,
+    int heads, int kvHeads, int headDim, int relLen, float qkClip, float relClip, float eps, int global,
+    float alpha, float floorTok, int cap, int pos0, int T);
+int fcuda_ink2p_attend_v2_fp8(const float *q, const float *r, const float *sinks, const float *relBias,
+    const uint8_t *kcache, const uint8_t *vcache, const float *kscale, const float *vscale, float *out,
+    int heads, int kvHeads, int headDim, int relLen, int extent, int window, int cap, float scale,
+    int pos0, int T);
 int fcuda_ink2_conv_seq(const float *x, const float *w, float *hist, float *out, const float *resid,
     int n, int kn, float norm, const long long *st, int C);
 int fcuda_ink2_softcap_argmax_seq(float *logits, int n, long long ld, float cap, int *outIdx, int C);

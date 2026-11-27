@@ -357,7 +357,71 @@ func (c *cudaBackend) ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, o
 		C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap), C.float(p.Scale), ink2Bool(true), (*C.longlong)(nil), C.int(1)))
 }
 
-var _ Inkling2HalfKVDevice = (*cudaBackend)(nil)
+var (
+	_ Inkling2HalfKVDevice = (*cudaBackend)(nil)
+	_ Inkling2FP8KVDevice  = (*cudaBackend)(nil)
+)
+
+// Ink2PFP8KVReady refuses FAK_INKLING2_PREFILL_OLD=attn: the fp8 caches have only the
+// tensor-core attend, and the float kernel it selects cannot read them.
+func (c *cudaBackend) Ink2PFP8KVReady() error {
+	if !ink2PrefillFast("attn") {
+		return fmt.Errorf("cuda inkling2 prefill attend: fp8 caches need the tensor-core attend, but FAK_INKLING2_PREFILL_OLD selects the float kernel")
+	}
+	return nil
+}
+
+func (c *cudaBackend) Ink2QKVPostFP8(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	var conv **C.float
+	var kNorm, vNorm C.float
+	var kn C.int
+	if cv != nil {
+		ptrs := (*[6]*C.float)(C.malloc(C.size_t(6 * unsafe.Sizeof(uintptr(0)))))
+		defer C.free(unsafe.Pointer(ptrs))
+		ptrs[0], ptrs[1], ptrs[2] = c.ink2F(cv.KW), c.ink2F(cv.VW), c.ink2F(cv.KDyn)
+		ptrs[3], ptrs[4], ptrs[5] = c.ink2F(cv.VDyn), c.ink2F(cv.KHist), c.ink2F(cv.VHist)
+		conv = (**C.float)(unsafe.Pointer(ptrs))
+		kNorm, vNorm, kn = C.float(cv.KNorm), C.float(cv.VNorm), C.int(cv.Kn)
+	}
+	return ink2Status("qkv post fp8", C.fcuda_ink2_qkv_post_fp8(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v),
+		c.ink2F(qclip), c.ink2F(rclip), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)),
+		c.ink2F(kscale), c.ink2F(vscale), c.ink2I(overflow), c.ink2F(meta), C.int(p.Heads), C.int(p.KVHeads),
+		C.int(p.HeadDim), C.int(p.RelLen), C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps), ink2Bool(p.Global),
+		C.float(p.Alpha), C.float(p.Floor), C.int(cap), conv, kNorm, vNorm, kn))
+}
+
+func (c *cudaBackend) Ink2AttendFP8(q, r, sinks, relBias, kcache, vcache, kscale, vscale, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("attend fp8", C.fcuda_ink2_attend_fp8(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias),
+		(*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)), c.ink2F(kscale), c.ink2F(vscale),
+		(*C.double)(c.ink2Ptr(scores)), c.ink2F(out), c.ink2F(meta), C.int(p.Heads), C.int(p.KVHeads),
+		C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap), C.float(p.Scale)))
+}
+
+func (c *cudaBackend) Ink2PQKVPostFP8(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("prefill qkv post fp8", C.fcuda_ink2p_qkv_post_fp8(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v),
+		c.ink2F(qclip), c.ink2F(rclip), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)),
+		c.ink2F(kscale), c.ink2F(vscale), c.ink2I(overflow), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim),
+		C.int(p.RelLen), C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps), ink2Bool(p.Global),
+		C.float(p.Alpha), C.float(p.Floor), C.int(cap), C.int(pos0), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PAttendFP8(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error {
+	if err := c.Ink2PFP8KVReady(); err != nil {
+		return err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("prefill attend fp8", C.fcuda_ink2p_attend_v2_fp8(c.ink2F(q), c.ink2F(r), c.ink2F(sinks),
+		c.ink2F(relBias), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)), c.ink2F(kscale),
+		c.ink2F(vscale), c.ink2F(out), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen),
+		C.int(extent), C.int(window), C.int(cap), C.float(p.Scale), C.int(pos0), C.int(T)))
+}
 
 func (c *cudaBackend) Ink2SigmoidMul(x, gate Ink2Ref, n int) error {
 	cudaMu.Lock()

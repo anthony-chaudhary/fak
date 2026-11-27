@@ -103,3 +103,70 @@ func TestServeSourceWiresFirstTokenWatchdogIntoGatewayNew(t *testing.T) {
 		t.Fatal("serve.go's gateway.New(gateway.Config{...}) literal must set FirstTokenWatchdog; without it the backend-aware resolver is unreachable")
 	}
 }
+
+// fak-test:runtime fast est=1s lane=default
+// TestResolveServeFirstTokenWatchdogInkling2CUDAContext verifies that long-context
+// CUDA Inkling-2 serves scale the buffered first-token watchdog window instead of
+// aborting cold 64k-128k prefills at the 60s default, while short contexts and
+// explicit FAK_STREAM_STALL_TIMEOUT_S overrides keep their existing behavior.
+func TestResolveServeFirstTokenWatchdogInkling2CUDAContext(t *testing.T) {
+	t.Setenv("FAK_STREAM_STALL_TIMEOUT_S", "")
+	empty := ""
+	cuda := &serveBackendAutoSentinel{name: "cuda"}
+	tests := []struct {
+		name       string
+		rt         *serveRuntime
+		wantWindow time.Duration
+		wantSource agent.FirstTokenWatchdogSource
+	}{
+		{
+			name:       "cuda 128k scales window",
+			rt:         &serveRuntime{chatBackend: cuda, inkling2MaxPromptTokens: 131072},
+			wantWindow: 524 * time.Second,
+			wantSource: firstTokenWatchdogSourceCUDAContext,
+		},
+		{
+			name:       "cuda 64k scales window",
+			rt:         &serveRuntime{chatBackend: cuda, inkling2MaxPromptTokens: 65536},
+			wantWindow: 262 * time.Second,
+			wantSource: firstTokenWatchdogSourceCUDAContext,
+		},
+		{
+			name:       "cuda 256k caps at cpu ceiling",
+			rt:         &serveRuntime{chatBackend: cuda, inkling2MaxPromptTokens: 262144},
+			wantWindow: agent.CPUBackendFirstTokenWatchdogTimeout,
+			wantSource: firstTokenWatchdogSourceCUDAContext,
+		},
+		{
+			name:       "cuda 8k keeps default",
+			rt:         &serveRuntime{chatBackend: cuda, inkling2MaxPromptTokens: 8192},
+			wantWindow: 60 * time.Second,
+			wantSource: agent.FirstTokenWatchdogSourceDefault,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.rt.resolveServeFirstTokenWatchdog(&serveFlags{baseURL: &empty}); got != tt.wantWindow {
+				t.Fatalf("window = %s, want %s", got, tt.wantWindow)
+			}
+			if len(tt.rt.startupMessages) != 1 {
+				t.Fatalf("startup messages = %+v, want exactly one", tt.rt.startupMessages)
+			}
+			msg := tt.rt.startupMessages[0]
+			if !strings.Contains(msg.Text, tt.wantWindow.String()) || !strings.Contains(msg.Text, "source: "+string(tt.wantSource)+")") {
+				t.Fatalf("startup message = %+v, want window %s and source %q", msg, tt.wantWindow, tt.wantSource)
+			}
+		})
+	}
+
+	t.Run("env override wins on cuda 128k", func(t *testing.T) {
+		t.Setenv("FAK_STREAM_STALL_TIMEOUT_S", "90")
+		rt := &serveRuntime{chatBackend: cuda, inkling2MaxPromptTokens: 131072}
+		if got := rt.resolveServeFirstTokenWatchdog(&serveFlags{baseURL: &empty}); got != 90*time.Second {
+			t.Fatalf("window = %s, want 1m30s override", got)
+		}
+		if msg := rt.startupMessages[0]; !strings.Contains(msg.Text, "source: env)") {
+			t.Fatalf("startup message = %+v, want source env", msg)
+		}
+	})
+}

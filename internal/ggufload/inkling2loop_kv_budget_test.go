@@ -249,10 +249,15 @@ func (b *fitFreeBackend) DeviceMemory() (total, free int64, known bool) {
 }
 
 // ringFitNeeds is the device bytes a resident session of the ring model needs at the
-// base chunk and at the wide one: KV plus the non-KV buffers. padK is 0 because the
-// fake expert stacks carry no padded rows.
+// base chunk and at the wide one: KV plus the non-KV buffers (including base prefill
+// arenas whenever batched prefill is active). padK is 0 because the fake expert stacks
+// carry no padded rows.
 func ringFitNeeds(m *Inkling2LoopModel, ctx int, batched bool) (base, wide int64) {
-	base = inkling2ResidentTotalBytes(m.HP, ctx, batched, inkling2PrefillChunkBase, fakeInk2RingArena, 0, 0)
+	basePrefill := 0
+	if batched {
+		basePrefill = inkling2PrefillChunkBase
+	}
+	base = inkling2ResidentTotalBytes(m.HP, ctx, batched, inkling2PrefillChunkBase, fakeInk2RingArena, basePrefill, 0)
 	wide = inkling2ResidentTotalBytes(m.HP, ctx, batched, 1024, fakeInk2RingArena, 1024, 0)
 	return base, wide
 }

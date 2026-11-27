@@ -102,3 +102,42 @@ type Inkling2HalfKVDevice interface {
 	// Ink2AttendHalf is Ink2Attend over f16 kcache and vcache.
 	Ink2AttendHalf(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error
 }
+
+// Ink2FP8KVCodeFloats returns the float32 element count to pass to Ink2Alloc
+// for one FP8 E4M3FN K or V cache of capacity cap (cap * kvHeads * headDim bytes).
+func Ink2FP8KVCodeFloats(cap, kvHeads, headDim int) int {
+	return (cap*kvHeads*headDim + 3) / 4
+}
+
+// Ink2FP8KVScaleFloats returns the float32 element count to pass to Ink2Alloc
+// for one per-(token, kvHead) F32 scale buffer of capacity cap (cap * kvHeads floats).
+func Ink2FP8KVScaleFloats(cap, kvHeads int) int {
+	return cap * kvHeads
+}
+
+// Inkling2FP8KVDevice is the decode and prefill QKV post and attend over
+// per-(token, kvHead) OCP FP8 E4M3FN global-slot caches with F32 absmax scales;
+// local SWA rings stay fp32.
+//
+// Buffer layout per global slot:
+//   - kcache, vcache: uint8 E4M3FN codes laid out [cap][kvHeads][headDim],
+//     allocated with Ink2Alloc(Ink2FP8KVCodeFloats(cap, kvHeads, headDim)).
+//   - kscale, vscale: float32 per-(token, kvHead) scales laid out [cap][kvHeads],
+//     allocated with Ink2Alloc(Ink2FP8KVScaleFloats(cap, kvHeads)).
+//     Dequant(pos, kvh, d) = decode_e4m3fn(code[pos, kvh, d]) * scale[pos, kvh].
+//   - overflow (optional; zero Ink2Ref disables): 1-int32 device flag allocated
+//     with Ink2Alloc(1); set to non-zero via atomicOr if any K/V element is
+//     non-finite or overflows FP8 scale range.
+type Inkling2FP8KVDevice interface {
+	// Ink2PFP8KVReady reports why the fp8 prefill ops cannot run in this process, before any is called.
+	Ink2PFP8KVReady() error
+	// Ink2QKVPostFP8 is Ink2QKVPost writing per-(token, kvHead) E4M3FN codes to kcache/vcache
+	// and F32 scales to kscale/vscale.
+	Ink2QKVPostFP8(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error
+	// Ink2AttendFP8 is Ink2Attend reading E4M3FN kcache/vcache with F32 kscale/vscale.
+	Ink2AttendFP8(q, r, sinks, relBias, kcache, vcache, kscale, vscale, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error
+	// Ink2PQKVPostFP8 is Ink2PQKVPost writing per-(token, kvHead) E4M3FN codes and F32 scales for T tokens starting at pos0.
+	Ink2PQKVPostFP8(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error
+	// Ink2PAttendFP8 is Ink2PAttend reading E4M3FN kcache/vcache with F32 kscale/vscale for T tokens starting at pos0.
+	Ink2PAttendFP8(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error
+}

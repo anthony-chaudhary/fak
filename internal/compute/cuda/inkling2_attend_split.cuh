@@ -42,7 +42,8 @@ template <class T>
 __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
     k_ink2_attend_scores(const float *q, const float *r, const float *sinks, const float *relBias,
                          const T *kcache, double *scores, float *out, const float *meta, int heads, int kvHeads,
-                         int headDim, int relLen, int extent, int window, int cap, float scale, Ink2Seq sq) {
+                         int headDim, int relLen, int extent, int window, int cap, float scale, Ink2Seq sq,
+                         const float *kscale = nullptr) {
   ink2_pdl_enter();
   const int h = blockIdx.x, c = blockIdx.y, seq = blockIdx.z;
   q = ink2_row(q, sq.q, seq);
@@ -67,7 +68,8 @@ __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
   for (int j = j0 + warp; j < j1; j += INK2_ATS_WARPS) {
     const int p = first + j;
     const int dist = pos - p;
-    const T *kr = kcache + (size_t)(p % cap) * kvDim + (size_t)kvh * headDim;
+    const size_t slotIdx = (size_t)(p % cap);
+    const T *kr = kcache + slotIdx * kvDim + (size_t)kvh * headDim;
     float d = 0.f;
     for (int i = lane; i < headDim; i += 32) d = fmaf(qh[i], ink2_kv_f(kr[i]), d);
     float rd = 0.f;
@@ -79,6 +81,7 @@ __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
       d += __shfl_xor_sync(0xffffffff, d, o);
       rd += __shfl_xor_sync(0xffffffff, rd, o);
     }
+    if constexpr (sizeof(T) == 1) d = __fmul_rn(d, kscale[slotIdx * (size_t)kvHeads + (size_t)kvh]);
     float bias = -sinks[h];
     if (dist < extent) bias = __fadd_rn(bias, rd);
     const double s = (double)__fadd_rn(__fmul_rn(d, scale), bias);
@@ -123,7 +126,8 @@ __global__ void __launch_bounds__(256)
 template <bool STAGED, class T>
 __global__ void __launch_bounds__(INK2_ATT_THREADS)
     k_ink2_attend_out(const double *scores, const T *vcache, const float *r, float *out, const float *meta,
-                      int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq) {
+                      int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq,
+                      const float *vscale = nullptr) {
   ink2_pdl_enter();
   const int h = blockIdx.x, seq = blockIdx.z;
   scores = ink2_row(scores, sq.scores, seq);
@@ -168,11 +172,17 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
     for (; j + (INK2_ATS_UNROLL - 1) * groups < n; j += INK2_ATS_UNROLL * groups) {
       float vv[INK2_ATS_UNROLL];
 #pragma unroll
-      for (int u = 0; u < INK2_ATS_UNROLL; ++u) vv[u] = ink2_kv_f(vbase[(size_t)((first + j + u * groups) % cap) * kvDim]);
+      for (int u = 0; u < INK2_ATS_UNROLL; ++u) {
+        const size_t slotIdx = (size_t)((first + j + u * groups) % cap);
+        vv[u] = ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh);
+      }
 #pragma unroll
       for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(INK2_ATS_W(j + u * groups), vv[u], acc);
     }
-    for (; j < n; j += groups) acc = fmaf(INK2_ATS_W(j), ink2_kv_f(vbase[(size_t)((first + j) % cap) * kvDim]), acc);
+    for (; j < n; j += groups) {
+      const size_t slotIdx = (size_t)((first + j) % cap);
+      acc = fmaf(INK2_ATS_W(j), ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh), acc);
+    }
     gacc[g][threadIdx.x & 31] = acc;
   }
   __syncthreads();
@@ -191,7 +201,8 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
 template <bool STAGED, class T>
 __global__ void __launch_bounds__(INK2_ATS_TREE_GROUPS * 32)
     k_ink2_attend_out_tree(const double *scores, const T *vcache, const float *r, float *out, const float *meta,
-                           int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq) {
+                           int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq,
+                           const float *vscale = nullptr) {
   ink2_pdl_enter();
   const int h = blockIdx.x, seq = blockIdx.z;
   scores = ink2_row(scores, sq.scores, seq);
@@ -235,11 +246,17 @@ __global__ void __launch_bounds__(INK2_ATS_TREE_GROUPS * 32)
     for (; j + (INK2_ATS_UNROLL - 1) * groups < n; j += INK2_ATS_UNROLL * groups) {
       float vv[INK2_ATS_UNROLL];
 #pragma unroll
-      for (int u = 0; u < INK2_ATS_UNROLL; ++u) vv[u] = ink2_kv_f(vbase[(size_t)((first + j + u * groups) % cap) * kvDim]);
+      for (int u = 0; u < INK2_ATS_UNROLL; ++u) {
+        const size_t slotIdx = (size_t)((first + j + u * groups) % cap);
+        vv[u] = ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh);
+      }
 #pragma unroll
       for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(INK2_ATS_TW(j + u * groups), vv[u], acc);
     }
-    for (; j < n; j += groups) acc = fmaf(INK2_ATS_TW(j), ink2_kv_f(vbase[(size_t)((first + j) % cap) * kvDim]), acc);
+    for (; j < n; j += groups) {
+      const size_t slotIdx = (size_t)((first + j) % cap);
+      acc = fmaf(INK2_ATS_TW(j), ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh), acc);
+    }
   }
 #undef INK2_ATS_TW
   gacc[g][lane] = acc;
@@ -263,7 +280,8 @@ __global__ void __launch_bounds__(INK2_ATS_TREE_GROUPS * 32)
 template <class T>
 __global__ void __launch_bounds__(INK2_ATT_THREADS)
     k_ink2_attend_out_tiled(const double *scores, const T *vcache, const float *r, float *out, const float *meta,
-                            int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq) {
+                            int heads, int kvHeads, int headDim, int relLen, int window, int cap, Ink2Seq sq,
+                            const float *vscale = nullptr) {
   ink2_pdl_enter();
   const int h = blockIdx.x, seq = blockIdx.z;
   scores = ink2_row(scores, sq.scores, seq);
@@ -309,12 +327,17 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
     for (; j + (INK2_ATS_UNROLL - 1) * groups < tn; j += INK2_ATS_UNROLL * groups) {
       float vv[INK2_ATS_UNROLL];
 #pragma unroll
-      for (int u = 0; u < INK2_ATS_UNROLL; ++u)
-        vv[u] = ink2_kv_f(vbase[(size_t)((kt + j + u * groups) % cap) * kvDim]);
+      for (int u = 0; u < INK2_ATS_UNROLL; ++u) {
+        const size_t slotIdx = (size_t)((kt + j + u * groups) % cap);
+        vv[u] = ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh);
+      }
 #pragma unroll
       for (int u = 0; u < INK2_ATS_UNROLL; ++u) acc = fmaf(wsh[j + u * groups], vv[u], acc);
     }
-    for (; j < tn; j += groups) acc = fmaf(wsh[j], ink2_kv_f(vbase[(size_t)((kt + j) % cap) * kvDim]), acc);
+    for (; j < tn; j += groups) {
+      const size_t slotIdx = (size_t)((kt + j) % cap);
+      acc = fmaf(wsh[j], ink2_kv_val(vbase[slotIdx * kvDim], vscale, slotIdx, kvHeads, kvh), acc);
+    }
   }
   if (active) gacc[g][lane] = acc;
   __syncthreads();
@@ -370,7 +393,8 @@ template <class T>
 static bool ink2_attend_split(const float *q, const float *r, const float *sinks, const float *relBias,
                               const T *kcache, const T *vcache, double *scores, float *out, const float *meta,
                               int heads, int kvHeads, int headDim, int relLen, int extent, int window, int cap,
-                              float scale, const Ink2Seq &sq, int C) {
+                              float scale, const Ink2Seq &sq, int C, const float *kscale = nullptr,
+                              const float *vscale = nullptr) {
   if (!ink2_ats_enabled() || headDim / 2 < INK2_ATS_CHUNKS || (headDim & 31) != 0 || relLen < 2 || (relLen & 1) != 0 ||
       ((uintptr_t)r & 7) != 0 || ((uintptr_t)out & 7) != 0 || (sq.r & 1) != 0 || (sq.out & 1) != 0)
     return false;
@@ -399,25 +423,25 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
   const dim3 g1(heads, INK2_ATS_CHUNKS, C), g3(heads, headDim / 32, C);
   FCUDA_TS("k_ink2_attend_scores", g1, k_ink2_attend_scores<T><<<g1, INK2_ATS_WARPS * 32, 0, g_stream>>>(
                                            q, r, sinks, relBias, kcache, scores, out, meta, heads, kvHeads, headDim,
-                                           relLen, extent, window, cap, scale, sq));
+                                           relLen, extent, window, cap, scale, sq, kscale));
   FCUDA_TS("k_ink2_attend_exp", g1, k_ink2_attend_exp<<<g1, 256, 0, g_stream>>>(scores, out, (float *)r, meta, headDim,
                                                                                   relLen, window, cap, INK2_ATS_CHUNKS, sq));
   const int othreads = (INK2_ATT_THREADS / headDim) * 32;
   if (!exact) {
     if (staged) {
       FCUDA_TS("k_ink2_attend_out_tree", g3, k_ink2_attend_out_tree<true, T><<<g3, INK2_ATS_TREE_GROUPS * 32, osmem, g_stream>>>(
-                                                 scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq));
+                                                 scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq, vscale));
     } else {
       FCUDA_TS("k_ink2_attend_out_tree", g3, k_ink2_attend_out_tree<false, T><<<g3, INK2_ATS_TREE_GROUPS * 32, 0, g_stream>>>(
-                                                 scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq));
+                                                 scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq, vscale));
     }
   } else if (staged) {
     FCUDA_TS("k_ink2_attend_out", g3, k_ink2_attend_out<true, T><<<g3, othreads, osmem, g_stream>>>(
-                                          scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq));
+                                          scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq, vscale));
   } else {
     FCUDA_TS("k_ink2_attend_out_tiled", g3, k_ink2_attend_out_tiled<T><<<g3, othreads, 0, g_stream>>>(
                                                 scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
-                                                cap, sq));
+                                                cap, sq, vscale));
   }
   return true;
 }

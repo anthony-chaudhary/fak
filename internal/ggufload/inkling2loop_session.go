@@ -200,7 +200,7 @@ func (r *inkling2ResidentSession) Close() error {
 
 func (r *inkling2ResidentSession) Pos() int { return r.s.pos }
 
-// checkpointable settles state shared by FP32 and FP16 sessions. Global cache rows
+// checkpointable settles state shared by FP32, FP16, and FP8 sessions. Global cache rows
 // stay in their resident allocation across a rewind; only local FP32 ring rows that
 // the horizon can overwrite are copied into checkpoint side buffers.
 func (s *inkling2Resident) checkpointable() error {
@@ -268,8 +268,8 @@ func (r *inkling2ResidentSession) negZeroFill(n int) (ink2Ref, []compute.Tensor,
 
 // checkpointRowWords is the 32-bit storage width of one cache row copied by a
 // scalar checkpoint. Global rows return zero because they never wrap and stay in
-// place. kvHalfSlot is global-only, so every copied local row is FP32; copyDev's
-// exact x + -0 operation must never be used for packed half words.
+// place. kvHalfSlot and kvFP8Slot are global-only, so every copied local row is FP32;
+// copyDev's exact x + -0 operation must never be used for packed half or fp8 words.
 func (s *inkling2Resident) checkpointRowWords(slot int) int {
 	if !s.localAt(slot) {
 		return 0

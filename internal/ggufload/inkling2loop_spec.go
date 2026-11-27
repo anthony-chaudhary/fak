@@ -82,9 +82,9 @@ type Inkling2SpecStats struct {
 
 // enableSpec allocates the verify chunk state for up to depth drafted tokens.
 func (s *inkling2Resident) enableSpec(depth int) error {
-	if s.kvHalf {
+	if s.kvHalf || s.kvFP8 {
 		// the verify and draft ops read fp32 caches only
-		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=f16 has no speculative decode; unset FAK_INKLING2_SPEC or FAK_INKLING2_KV")
+		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode; unset FAK_INKLING2_SPEC or FAK_INKLING2_KV", s.kvDType())
 	}
 	if _, ok := s.be.(compute.Inkling2VerifyDevice); !ok || !s.batched {
 		return fmt.Errorf("inkling2 spec: backend %s has no batched verify ops", s.be.Name())
@@ -115,8 +115,8 @@ func (s *inkling2Resident) verify(tokens []int) ([]int, error) {
 	if T < 1 || T > s.specMax {
 		return nil, fmt.Errorf("inkling2 spec: verify of %d tokens, max %d", T, s.specMax)
 	}
-	if s.pos+T > inkling2ResidentCtx {
-		return nil, fmt.Errorf("inkling2 spec: %d tokens at %d exceed the %d-token global cache", T, s.pos, inkling2ResidentCtx)
+	if s.pos+T > s.ctx {
+		return nil, fmt.Errorf("inkling2 spec: %d tokens at %d exceed the %d-token global cache", T, s.pos, s.ctx)
 	}
 	pd := s.be.(compute.Inkling2PrefillDevice)
 	vd := s.be.(compute.Inkling2VerifyDevice)

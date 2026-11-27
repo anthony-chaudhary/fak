@@ -281,13 +281,14 @@ extern "C" int fcuda_ink2p_conv_pair_log(const float *const *x, const float *con
 }
 
 // k_ink2_qkv_post over a chunk: blockIdx.y is the token, at position pos0 + t. T is the
-// cache element; an f16 append runs the fp32 ops of the float append in the same order
-// and narrows only the stored value, so the attend's fp16 tiles match the fp32 cache's.
+// cache element (float, __half, or uint8_t E4M3FN); f16/fp8 appends run the fp32 ops of
+// the float append in the same order and quantize only the stored value.
 template <class T>
 __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
                                  const float *rclip, T *kcache, T *vcache, int heads, int kvHeads,
                                  int headDim, int relLen, float qkClip, float relClip, float eps, int global,
-                                 float alpha, float floorTok, int cap, int pos0, const int *posDev) {
+                                 float alpha, float floorTok, int cap, int pos0, const int *posDev,
+                                 float *kscale = nullptr, float *vscale = nullptr, int *overflow = nullptr) {
   const int lane = threadIdx.x & 31;
   const int b = blockIdx.x, tok = blockIdx.y;
   const int pos = (posDev ? *posDev : pos0) + tok;
@@ -308,7 +309,11 @@ __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float
   }
   if (b < heads + kvHeads) {
     const int h = b - heads;
-    if constexpr (sizeof(T) == 2) {
+    if constexpr (sizeof(T) == 1) {
+      const Ink2KVConv off = {};
+      ink2_put_k_fp8(kcache + (size_t)idx * kvDim + (size_t)h * headDim, kscale + (size_t)idx * kvHeads + h, overflow,
+                     k + (size_t)tok * kvDim, off, h, headDim, kvHeads, qkClip);
+    } else if constexpr (sizeof(T) == 2) {
       const Ink2KVConv off = {};
       ink2_put_k(kcache + (size_t)idx * kvDim + (size_t)h * headDim, k + (size_t)tok * kvDim, off, h, headDim, kvHeads,
                  qkClip);
@@ -322,7 +327,11 @@ __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float
     return;
   }
   const int h = b - heads - kvHeads;
-  if constexpr (sizeof(T) == 2) {
+  if constexpr (sizeof(T) == 1) {
+    const Ink2KVConv off = {};
+    ink2_put_v_fp8(vcache + (size_t)idx * kvDim + (size_t)h * headDim, vscale + (size_t)idx * kvHeads + h, overflow,
+                   v + (size_t)tok * kvDim, off, h, headDim, kvHeads, eps);
+  } else if constexpr (sizeof(T) == 2) {
     const Ink2KVConv off = {};
     ink2_put_v(vcache + (size_t)idx * kvDim + (size_t)h * headDim, v + (size_t)tok * kvDim, off, h, headDim, kvHeads,
                eps);
@@ -978,6 +987,21 @@ extern "C" int fcuda_ink2p_qkv_post_h(float *q, float *r, const float *k, const 
   FCUDA_TS("k_ink2p_qkv_post", grid, k_ink2p_qkv_post<__half><<<grid, 32, 0, g_stream>>>(
       q, r, k, v, qclip, rclip, (__half *)kcache, (__half *)vcache, heads, kvHeads, headDim, relLen, qkClip, relClip,
       eps, global, alpha, floorTok, cap, pos0, nullptr));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_qkv_post into OCP E4M3FN caches with per-(token, kvHead) F32 scales.
+extern "C" int fcuda_ink2p_qkv_post_fp8(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                        const float *rclip, uint8_t *kcache, uint8_t *vcache, float *kscale,
+                                        float *vscale, int *overflow, int heads, int kvHeads, int headDim, int relLen,
+                                        float qkClip, float relClip, float eps, int global, float alpha, float floorTok,
+                                        int cap, int pos0, int T) {
+  if (headDim < 1 || headDim > 32 * INK2_KV_REGS || kvHeads < 1 || heads < 1 || cap < 1 || T < 1)
+    return (int)cudaErrorInvalidValue;
+  const dim3 grid(heads + 2 * kvHeads, T);
+  FCUDA_TS("k_ink2p_qkv_post", grid, k_ink2p_qkv_post<uint8_t><<<grid, 32, 0, g_stream>>>(
+      q, r, k, v, qclip, rclip, kcache, vcache, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global, alpha,
+      floorTok, cap, pos0, nullptr, kscale, vscale, overflow));
   return ink2_last_error();
 }
 

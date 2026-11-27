@@ -36,6 +36,7 @@ type ink2Prefill struct {
 	s          *inkling2Resident
 	pd         compute.Inkling2PrefillDevice
 	half       compute.Inkling2PrefillHalfKV // set when s stores f16 global caches
+	fp8        compute.Inkling2FP8KVDevice   // set when s stores fp8 global caches
 	T, pos0    int
 	keep, scr  ink2Ref
 	keepOff    int
@@ -122,10 +123,14 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 		return 0, fmt.Errorf("inkling2 prefill: %d tokens exceed the %d-token global cache", s.pos+len(prompt), s.ctx)
 	}
 	T := inkling2PrefillChunkFor(len(prompt), s.chunkMax)
+	startPos := s.pos
 	p := &ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts()}
 	if s.kvHalf {
-		// inkling2ResidentHalfKV has already checked these ops exist on this backend
+		// inkling2ResidentKVDType has already checked these ops exist on this backend
 		p.half, _ = s.be.(compute.Inkling2PrefillHalfKV)
+	}
+	if s.kvFP8 {
+		p.fp8 = s.fp8Dev
 	}
 	s.ensurePrefillArenas(T)
 	p.keepFloats, p.scrFloats = s.prefillArenas(s.prefillCap)
@@ -158,6 +163,17 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 	got, err := s.dev.Ink2ReadInts(s.argIdx, 1)
 	if err != nil {
 		return 0, err
+	}
+	if overflow, oerr := s.checkFP8Overflow(); oerr != nil {
+		return 0, oerr
+	} else if overflow {
+		if startPos == 0 {
+			if ferr := s.fallbackFP8ToFP16(); ferr != nil {
+				return 0, ferr
+			}
+			return s.prefill(ctx, prompt)
+		}
+		return 0, ErrInkling2FP8ScaleOverflow
 	}
 	if r, ok := s.be.(interface{ Recycle() }); ok {
 		r.Recycle()
@@ -570,6 +586,8 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	}
 	if s.err == nil && p.verify {
 		p.fail(p.vd.Ink2PQKVPostDev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.verifyPos, ap, cap, p.T))
+	} else if s.err == nil && p.cohort == nil && s.kvFP8Slot(slot) {
+		p.fail(p.fp8.Ink2PQKVPostFP8(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.kvOverflow, ap, cap, p.pos0, p.T))
 	} else if s.err == nil && p.cohort == nil && s.kvHalfSlot(slot) {
 		p.fail(p.half.Ink2PQKVPostHalf(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], ap, cap, p.pos0, p.T))
 	} else if s.err == nil && p.cohort == nil {
@@ -580,6 +598,8 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		p.cohort.attend(p, slot, l, q, r, k, v, sinks, attn, ap, extent, window)
 	} else if s.err == nil && p.verify {
 		p.fail(p.vd.Ink2PAttendDev(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, s.verifyPos, ap, extent, window, cap, p.T))
+	} else if s.err == nil && s.kvFP8Slot(slot) {
+		p.fail(p.fp8.Ink2PAttendFP8(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], attn, ap, extent, window, cap, p.pos0, p.T))
 	} else if s.err == nil && s.kvHalfSlot(slot) {
 		p.fail(p.half.Ink2PAttendHalf(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, ap, extent, window, cap, p.pos0, p.T))
 	} else if s.err == nil {
