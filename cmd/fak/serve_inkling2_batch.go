@@ -285,6 +285,12 @@ type inkling2LoopBatchEngine struct {
 	loneCohort bool
 	// prefixStats reads the prefix store's counters for the trace; nil when it is off
 	prefixStats func() ggufload.Inkling2PrefixStoreStats
+	// ledger is the unified byte ledger shared across slots, cohort arenas, and prefix store.
+	ledger *inkling2ByteLedger
+	// evictIdleSlots sheds unpinned scalar slots in LRU order before cohort admission.
+	evictIdleSlots func(needBytes int64) int
+	// cohortArenaBytes reports bytes currently held by cached cohort arenas.
+	cohortArenaBytes func() int64
 }
 
 var _ agent.Inkling2LoopGenerator = (*inkling2LoopBatchEngine)(nil)
@@ -298,7 +304,10 @@ func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.I
 	cohorts := ggufload.NewInkling2LoopCohortsWithLookup(model, backend, lookup)
 	cohorts.SetMaxContext(contextTokens)
 	e := newInkling2LoopBatchEngineWith(scalar, cohorts.Generate, adm, contextTokens)
+	_, capBytes := inkling2PrefixCacheFromEnv(lookup)
+	e.ledger = newInkling2ByteLedger(capBytes)
 	e.releaseArenas = cohorts.ReleaseArenas
+	e.cohortArenaBytes = cohorts.ArenaBytes
 	e.batchAdmitting = cohorts.GenerateAdmitting
 	e.split = cohorts.Split
 	if on, _ := cohorts.UsePrefixStore(lookup); on {
@@ -415,9 +424,40 @@ func (e *inkling2LoopBatchEngine) runScalar(r *inkling2QueuedRequest) {
 		e.releaseArenas()
 	}
 	e.arenasCached = false
+	if e.ledger != nil {
+		e.ledger.Delete("cohort_arena")
+	}
 	gen, err := e.scalarGenerate(r.ctx, r.prompt, r.maxNew, r.stops, r.sink.send)
 	gen.Width = 1
 	r.done <- inkling2QueuedResult{gen: gen, err: err}
+}
+
+// admitCohortMemory enforces the TICKET-02 admission order on cohort arrival:
+// 1) evict unpinned scalar slots in LRU order, 2) release cached arenas if
+// the watermark is still tight, 3) let the cohort allocate and run.
+func (e *inkling2LoopBatchEngine) admitCohortMemory(needBytes int64) {
+	if e.evictIdleSlots != nil {
+		e.evictIdleSlots(needBytes)
+	}
+	if e.arenasCached && e.releaseArenas != nil && e.ledger != nil && !e.ledger.Fits(needBytes) {
+		e.releaseArenas()
+		e.arenasCached = false
+		e.ledger.Delete("cohort_arena")
+	}
+}
+
+// syncCohortLedger updates the unified byte ledger with the current cohort
+// arena and cross-request prefix store footprints.
+func (e *inkling2LoopBatchEngine) syncCohortLedger() {
+	if e.ledger == nil {
+		return
+	}
+	if e.cohortArenaBytes != nil {
+		e.ledger.Set("cohort_arena", inkling2LedgerCohortArena, e.cohortArenaBytes())
+	}
+	if e.prefixStats != nil {
+		e.ledger.Set("prefix_store", inkling2LedgerPrefixStore, e.prefixStats().HeldBytes)
+	}
 }
 
 // splitGroup partitions a collected cohort into the sub-cohorts split plans, in plan
@@ -459,8 +499,10 @@ func (e *inkling2LoopBatchEngine) runGroup(group []*inkling2QueuedRequest, owned
 		return
 	}
 	e.batchGroups.Add(1)
+	e.admitCohortMemory(0)
 	e.arenasCached = true
 	ran := e.runBatch(group, owned)
+	e.syncCohortLedger()
 	if e.trace && e.prefixStats != nil {
 		fmt.Fprintf(os.Stderr, "inkling2.prefix width=%d store=%+v\n", len(group), e.prefixStats())
 	}

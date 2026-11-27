@@ -203,11 +203,39 @@ type Inkling2LoopCohorts struct {
 	// maxCtx overrides Inkling2LoopResidentContext when > 0, allowing cohorts to
 	// serve high-context requests (8k, 16k, 32k+).
 	maxCtx int
+	// devOwner is the per-device graph owner; nil resolves via inkling2DeviceFor.
+	devOwner *Inkling2Device
 	// wideCooldown is how many more wide-wanting cohorts run at the base chunk before
 	// a refused wide chunk is tried again
 	wideCooldown int
 	// store is the cross-request prefix store; host memory, so it outlives Close
 	store *inkling2PrefixStore
+}
+
+func (bt *Inkling2LoopCohorts) env() func(string) (string, bool) {
+	if bt.lookup != nil {
+		return bt.lookup
+	}
+	return os.LookupEnv
+}
+
+func (bt *Inkling2LoopCohorts) device() *Inkling2Device {
+	if bt.devOwner != nil {
+		return bt.devOwner
+	}
+	if bt.s != nil && bt.s.dev != nil {
+		return inkling2DeviceFor(bt.s.dev)
+	}
+	return defaultInkling2Device
+}
+
+// ArenaBytes reports the device memory currently held by the cached cohort
+// arenas, or 0 when no arenas are allocated.
+func (bt *Inkling2LoopCohorts) ArenaBytes() int64 {
+	if bt.b == nil {
+		return 0
+	}
+	return bt.b.need
 }
 
 func NewInkling2LoopCohorts(m *Inkling2LoopModel, be compute.Backend) *Inkling2LoopCohorts {
@@ -322,6 +350,9 @@ func Inkling2ResolveServeContext(m *Inkling2LoopModel, be compute.Backend, reque
 
 // Close frees the cached state; a later Generate builds it again.
 func (bt *Inkling2LoopCohorts) Close() {
+	if bt.b != nil || bt.s != nil {
+		bt.device().Reset()
+	}
 	if bt.b != nil {
 		bt.b.release()
 		bt.b = nil
@@ -339,10 +370,9 @@ func (bt *Inkling2LoopCohorts) ReleaseArenas() {
 	if bt.b == nil {
 		return
 	}
-	// a captured step graph addresses the arenas being freed
-	if bt.s != nil && bt.s.dev != nil {
-		bt.s.dev.Ink2GraphReset()
-	}
+	// a captured step graph addresses the arenas being freed; reset through the
+	// per-device owner so both the graph execs and owner token are cleared.
+	bt.device().Reset()
 	bt.b.release()
 	bt.b = nil
 }
@@ -431,7 +461,7 @@ func (bt *Inkling2LoopCohorts) Split(positions []int) ([][]int, error) {
 	for i := range all {
 		all[i] = i
 	}
-	if len(positions) < 2 || !inkling2BatchAdmitOn(os.LookupEnv) {
+	if len(positions) < 2 || !inkling2BatchAdmitOn(bt.env()) {
 		return [][]int{all}, nil
 	}
 	if err := bt.bind(); err != nil {
@@ -559,6 +589,7 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 		clean = errors.As(err, &refused)
 		return nil, err
 	}
+	bt.device().Claim(bt)
 
 	b.store = bt.store
 	started := time.Now()
@@ -568,7 +599,7 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 		lanes[i] = newInkling2BatchLane(req, started)
 		lanes[i].origin = i
 	}
-	longCap := inkling2CohortLongPrefillCap(os.LookupEnv)
+	longCap := inkling2CohortLongPrefillCap(bt.env())
 	mixed := b.prefillT > 0 && longCap > 0
 	keep, first := prefillHooks(lanes)
 	for i := range lanes {
@@ -779,10 +810,10 @@ func prefillMixedStep(b *inkling2Batch, lanes []inkling2BatchLane, longCap int,
 		return errors.New("inkling2 batch: no room in a prefill chunk for a prompt token")
 	}
 	// a mixed chunk runs prefill kernels between captured steps, which may grow scratch
-	// a captured step still addresses, so the graph is captured again after it
+	// a captured step still addresses, so reset through the device owner and warm again.
 	if b.graphReady {
-		b.s.dev.Ink2GraphReset()
-		b.graphReady = false
+		inkling2DeviceFor(b.s.dev).Reset()
+		b.graphReady, b.warm = false, false
 	}
 	segs := inkling2MixedPrefillPlan(lens, cursor, decoding, b.prefillT, longCap)
 	toks := make([][]int, len(segs))

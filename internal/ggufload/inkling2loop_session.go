@@ -119,20 +119,31 @@ func inkling2Argmax(logits []float32) int {
 }
 
 type inkling2ResidentSession struct {
-	s  *inkling2Resident
-	ck *ink2Rewind
+	s        *inkling2Resident
+	ck       *ink2Rewind
+	devOwner *Inkling2Device
 }
 
-// inkling2GraphOwner is the resident session whose captures the device's
-// process-wide graph execs hold: a capture on one session replaces another's, and
-// closing any session destroys them all.
+// inkling2GraphOwner mirrors the default device's resident graph owner atomic
+// for backward compatibility with existing graph-owner tests; all ownership
+// transitions go through Inkling2Device.
 var inkling2GraphOwner atomic.Pointer[inkling2Resident]
 
-// own makes r the graph owner before it runs. A session taking ownership from
-// another recaptures after one eager token instead of replaying an exec bound to
-// the other session's buffers.
+func (r *inkling2ResidentSession) device() *Inkling2Device {
+	if r.devOwner != nil {
+		return r.devOwner
+	}
+	if r.s != nil && r.s.dev != nil {
+		return inkling2DeviceFor(r.s.dev)
+	}
+	return defaultInkling2Device
+}
+
+// own ensures r is the current graph owner on its device before it runs. A
+// session taking ownership from another session, from a cohort, or after a
+// reset drops its local capture flags and recaptures after one eager token.
 func (r *inkling2ResidentSession) own() {
-	if inkling2GraphOwner.Swap(r.s) == r.s {
+	if !r.device().Claim(r.s) {
 		return
 	}
 	r.s.dropCaptures()
@@ -146,6 +157,15 @@ func (r *inkling2ResidentSession) HeldBytes() int64 {
 		n += inkling2TensorBytes(r.ck.base) + inkling2TensorBytes(r.ck.grown)
 	}
 	return n
+}
+
+// PrefillArenaBytes is the subset of HeldBytes currently allocated for lazy
+// batched-prefill arenas (keep, scratch, and input staging).
+func (r *inkling2ResidentSession) PrefillArenaBytes() int64 {
+	if r.s == nil || r.s.prefillCap == 0 {
+		return 0
+	}
+	return inkling2TensorBytes([]compute.Tensor{r.s.prefillKeep.T, r.s.prefillScr.T, r.s.prefillIn.T})
 }
 
 func inkling2TensorBytes(ts []compute.Tensor) int64 {
@@ -193,8 +213,9 @@ func (r *inkling2ResidentSession) Close() error {
 		r.freeGroup(&r.ck.base)
 		r.ck = nil
 	}
+	dev := r.device()
 	r.s.close()
-	inkling2GraphOwner.Store(nil)
+	dev.Reset()
 	return nil
 }
 
