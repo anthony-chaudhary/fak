@@ -92,19 +92,52 @@ func inkling2SpecExplicit(lookup func(string) (string, bool)) bool {
 	return set && strings.TrimSpace(v) != ""
 }
 
+// inkling2BackendSupportsSpecKV reports whether be supports speculative verify
+// over the given global-slot KV dtype (including Ready() checks).
+func inkling2BackendSupportsSpecKV(be compute.Backend, dtype Inkling2KVDType) bool {
+	if be == nil {
+		return false
+	}
+	switch dtype {
+	case Inkling2KVF32:
+		return true
+	case Inkling2KVF16:
+		if _, ok := be.(compute.Inkling2VerifyHalfKVDevice); !ok {
+			return false
+		}
+		return inkling2BackendHalfKVErr(be) == nil
+	case Inkling2KVFP8:
+		if _, ok := be.(compute.Inkling2VerifyFP8KVDevice); !ok {
+			return false
+		}
+		return inkling2BackendFP8KVErr(be) == nil
+	case Inkling2KVNVFP4:
+		if _, ok := be.(compute.Inkling2VerifyNVFP4KVDevice); !ok {
+			return false
+		}
+		return inkling2BackendNVFP4KVErr(be) == nil
+	default:
+		return false
+	}
+}
+
 // inkling2SpecAutoDisabledForKV reports whether default-on speculative decode must
-// auto-disable because the session uses non-fp32 global KV caches (whose verify/draft ops
-// only read fp32) and the operator did not explicitly request FAK_INKLING2_SPEC.
+// auto-disable because the session uses a non-fp32 global KV dtype that the backend's
+// verify ops do not support and the operator did not explicitly request FAK_INKLING2_SPEC.
 func inkling2SpecAutoDisabledForKV(be compute.Backend, lookup func(string) (string, bool)) bool {
 	if inkling2SpecExplicit(lookup) {
 		return false
 	}
+	effDType := Inkling2KVF32
 	if lookup != nil {
 		if dtype, err := Inkling2KVDTypeFrom(lookup); err == nil && dtype != Inkling2KVF32 {
-			return inkling2ResidentKVDType(be, dtype) != Inkling2KVF32
+			effDType = inkling2ResidentKVDType(be, dtype)
 		}
 	}
-	return inkling2ResidentHalfKV(be)
+	if effDType == Inkling2KVF32 && inkling2ResidentHalfKV(be) {
+		effDType = Inkling2KVF16
+	}
+	return !inkling2BackendSupportsSpecKV(be, effDType)
 }
 
 func inkling2SpecWarnKVDisable() {
@@ -115,14 +148,17 @@ func inkling2SpecWarnKVDisable() {
 
 // enableSpec allocates the verify chunk state for up to depth drafted tokens.
 func (s *inkling2Resident) enableSpec(depth int) error {
-	if (s.kvHalf || s.kvFP8) && s.kvAutoHalf && s.pos == 0 {
+	if (s.kvHalf || s.kvFP8) && s.kvAutoHalf && s.pos == 0 && !inkling2BackendSupportsSpecKV(s.be, s.kvDType()) {
 		if err := s.downgradeAutoHalfToFP32(); err != nil {
 			return err
 		}
 	}
-	if s.kvHalf || s.kvFP8 || s.kvNVFP4 {
-		// the verify and draft ops read fp32 caches only
-		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode; set FAK_INKLING2_SPEC=0 or unset FAK_INKLING2_KV", s.kvDType())
+	if !inkling2BackendSupportsSpecKV(s.be, s.kvDType()) {
+		beName := "<nil>"
+		if s.be != nil {
+			beName = s.be.Name()
+		}
+		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode on backend %s; set FAK_INKLING2_SPEC=0 or unset FAK_INKLING2_KV", s.kvDType(), beName)
 	}
 	if _, ok := s.be.(compute.Inkling2VerifyDevice); !ok || !s.batched {
 		return fmt.Errorf("inkling2 spec: backend %s has no batched verify ops", s.be.Name())
@@ -162,6 +198,9 @@ func (s *inkling2Resident) verify(tokens []int) ([]int, error) {
 	}
 	pd := s.be.(compute.Inkling2PrefillDevice)
 	vd := s.be.(compute.Inkling2VerifyDevice)
+	vhalf, _ := s.be.(compute.Inkling2VerifyHalfKVDevice)
+	vfp8, _ := s.be.(compute.Inkling2VerifyFP8KVDevice)
+	vnvfp4, _ := s.be.(compute.Inkling2VerifyNVFP4KVDevice)
 	rows := make([]float32, T*hp.Hidden)
 	for i, tok := range tokens {
 		s.w.TokEmbd.Row(tok, rows[i*hp.Hidden:(i+1)*hp.Hidden])
@@ -171,7 +210,7 @@ func (s *inkling2Resident) verify(tokens []int) ([]int, error) {
 	build := func() {
 		// at verify widths the decode expert GEMV over the T*k pairs beats the
 		// tensor-core grouped GEMM (11.4 vs 17.5 ms at T=1 on an RTX 5080)
-		p := &ink2Prefill{s: s, pd: pd, vd: vd, grouped: inkling2VerifyGrouped(), verify: true}
+		p := &ink2Prefill{s: s, pd: pd, vd: vd, vhalf: vhalf, vfp8: vfp8, vnvfp4: vnvfp4, grouped: inkling2VerifyGrouped(), verify: true}
 		p.keepFloats, p.scrFloats = s.prefillArenas(s.prefillCap)
 		p.keep, p.scr = s.prefillKeep, s.prefillScr
 		p.T, p.pos0 = T, s.pos
@@ -214,6 +253,14 @@ func (s *inkling2Resident) verify(tokens []int) ([]int, error) {
 	got, err := s.dev.Ink2ReadInts(s.verifyIdx, 4*T)
 	if err != nil {
 		return nil, err
+	}
+	if overflow, oerr := s.checkKVOverflow(); oerr != nil {
+		return nil, oerr
+	} else if overflow {
+		if s.kvNVFP4 {
+			return nil, ErrInkling2NVFP4ScaleOverflow
+		}
+		return nil, ErrInkling2FP8ScaleOverflow
 	}
 	out := make([]int, T)
 	for t := range out {

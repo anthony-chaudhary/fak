@@ -49,6 +49,9 @@ type ink2Prefill struct {
 	// commit and the head runs on every row.
 	verify bool
 	vd     compute.Inkling2VerifyDevice
+	vhalf  compute.Inkling2VerifyHalfKVDevice
+	vfp8   compute.Inkling2VerifyFP8KVDevice
+	vnvfp4 compute.Inkling2VerifyNVFP4KVDevice
 	// rows, when set, pins 2..127-row Q8_0 matmuls to the row-tile panel GEMM
 	rows compute.Inkling2BatchMemory
 	// fewRows runs dense matmuls, mixes and experts on vd's few-row kernels as a
@@ -598,7 +601,16 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 		extent, window = hp.SlidingWindow, hp.SlidingWindow
 	}
 	if s.err == nil && p.verify {
-		p.fail(p.vd.Ink2PQKVPostDev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.verifyPos, ap, cap, p.T))
+		switch {
+		case s.kvNVFP4Slot(slot):
+			p.fail(p.vnvfp4.Ink2PQKVPostNVFP4Dev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.kvOverflow, s.verifyPos, ap, cap, p.T))
+		case s.kvFP8Slot(slot):
+			p.fail(p.vfp8.Ink2PQKVPostFP8Dev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.kvOverflow, s.verifyPos, ap, cap, p.T))
+		case s.kvHalfSlot(slot):
+			p.fail(p.vhalf.Ink2PQKVPostHalfDev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.verifyPos, ap, cap, p.T))
+		default:
+			p.fail(p.vd.Ink2PQKVPostDev(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.verifyPos, ap, cap, p.T))
+		}
 	} else if s.err == nil && p.cohort == nil && s.kvNVFP4Slot(slot) {
 		p.fail(p.nvfp4.Ink2PQKVPostNVFP4(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.kvOverflow, ap, cap, p.pos0, p.T))
 	} else if s.err == nil && p.cohort == nil && s.kvFP8Slot(slot) {
@@ -612,7 +624,16 @@ func (p *ink2Prefill) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, msgs [
 	if s.err == nil && p.cohort != nil {
 		p.cohort.attend(p, slot, l, q, r, k, v, sinks, attn, ap, extent, window)
 	} else if s.err == nil && p.verify {
-		p.fail(p.vd.Ink2PAttendDev(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, s.verifyPos, ap, extent, window, cap, p.T))
+		switch {
+		case s.kvNVFP4Slot(slot):
+			p.fail(p.vnvfp4.Ink2PAttendNVFP4Dev(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], attn, s.verifyPos, ap, extent, window, cap, p.T))
+		case s.kvFP8Slot(slot):
+			p.fail(p.vfp8.Ink2PAttendFP8Dev(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], attn, s.verifyPos, ap, extent, window, cap, p.T))
+		case s.kvHalfSlot(slot):
+			p.fail(p.vhalf.Ink2PAttendHalfDev(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, s.verifyPos, ap, extent, window, cap, p.T))
+		default:
+			p.fail(p.vd.Ink2PAttendDev(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], attn, s.verifyPos, ap, extent, window, cap, p.T))
+		}
 	} else if s.err == nil && s.kvNVFP4Slot(slot) {
 		p.fail(p.nvfp4.Ink2PAttendNVFP4(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], attn, ap, extent, window, cap, p.pos0, p.T))
 	} else if s.err == nil && s.kvFP8Slot(slot) {

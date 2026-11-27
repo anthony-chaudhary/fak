@@ -358,9 +358,12 @@ func (c *cudaBackend) ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, o
 }
 
 var (
-	_ Inkling2HalfKVDevice  = (*cudaBackend)(nil)
-	_ Inkling2FP8KVDevice   = (*cudaBackend)(nil)
-	_ Inkling2NVFP4KVDevice = (*cudaBackend)(nil)
+	_ Inkling2HalfKVDevice        = (*cudaBackend)(nil)
+	_ Inkling2FP8KVDevice         = (*cudaBackend)(nil)
+	_ Inkling2NVFP4KVDevice       = (*cudaBackend)(nil)
+	_ Inkling2VerifyHalfKVDevice  = (*cudaBackend)(nil)
+	_ Inkling2VerifyFP8KVDevice   = (*cudaBackend)(nil)
+	_ Inkling2VerifyNVFP4KVDevice = (*cudaBackend)(nil)
 )
 
 // Ink2PFP8KVReady refuses FAK_INKLING2_PREFILL_OLD=attn: the fp8 caches have only the
@@ -484,6 +487,81 @@ func (c *cudaBackend) Ink2PAttendNVFP4(q, r, sinks, relBias, kcache, vcache, ksc
 		(*C.uint8_t)(c.ink2Ptr(kscale)), (*C.uint8_t)(c.ink2Ptr(vscale)), c.ink2F(out), C.int(p.Heads),
 		C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap),
 		C.float(p.Scale), C.int(pos0), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PQKVPostHalfDev(q, r, k, v, qclip, rclip, kcache, vcache, posDev Ink2Ref, p Ink2AttnParams, cap, T int) error {
+	if err := c.Ink2PHalfKVReady(); err != nil {
+		return err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify qkv post f16", C.fcuda_ink2p_qkv_post_h_dev(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v),
+		c.ink2F(qclip), c.ink2F(rclip), unsafe.Pointer(c.ink2F(kcache)), unsafe.Pointer(c.ink2F(vcache)),
+		C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.float(p.QKClip), C.float(p.RelClip),
+		C.float(p.Eps), ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor), C.int(cap), c.ink2I(posDev), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PAttendHalfDev(q, r, sinks, relBias, kcache, vcache, out, posDev Ink2Ref, p Ink2AttnParams, extent, window, cap, T int) error {
+	if err := c.Ink2PHalfKVReady(); err != nil {
+		return err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify attend f16", C.fcuda_ink2p_attend_v2_h_dev(c.ink2F(q), c.ink2F(r), c.ink2F(sinks),
+		c.ink2F(relBias), unsafe.Pointer(c.ink2F(kcache)), unsafe.Pointer(c.ink2F(vcache)), c.ink2F(out),
+		C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window),
+		C.int(cap), C.float(p.Scale), c.ink2I(posDev), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PQKVPostFP8Dev(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow, posDev Ink2Ref, p Ink2AttnParams, cap, T int) error {
+	if err := c.Ink2PFP8KVReady(); err != nil {
+		return err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify qkv post fp8", C.fcuda_ink2p_qkv_post_fp8_dev(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v),
+		c.ink2F(qclip), c.ink2F(rclip), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)),
+		c.ink2F(kscale), c.ink2F(vscale), c.ink2I(overflow), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim),
+		C.int(p.RelLen), C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps), ink2Bool(p.Global),
+		C.float(p.Alpha), C.float(p.Floor), C.int(cap), c.ink2I(posDev), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PAttendFP8Dev(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out, posDev Ink2Ref, p Ink2AttnParams, extent, window, cap, T int) error {
+	if err := c.Ink2PFP8KVReady(); err != nil {
+		return err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify attend fp8", C.fcuda_ink2p_attend_v2_fp8_dev(c.ink2F(q), c.ink2F(r), c.ink2F(sinks),
+		c.ink2F(relBias), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)), c.ink2F(kscale),
+		c.ink2F(vscale), c.ink2F(out), C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen),
+		C.int(extent), C.int(window), C.int(cap), C.float(p.Scale), c.ink2I(posDev), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PQKVPostNVFP4Dev(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow, posDev Ink2Ref, p Ink2AttnParams, cap, T int) error {
+	if err := c.Ink2PNVFP4KVReady(); err != nil {
+		return err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify qkv post nvfp4", C.fcuda_ink2p_qkv_post_nvfp4_dev(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v),
+		c.ink2F(qclip), c.ink2F(rclip), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)),
+		(*C.uint8_t)(c.ink2Ptr(kscale)), (*C.uint8_t)(c.ink2Ptr(vscale)), c.ink2I(overflow), C.int(p.Heads),
+		C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps),
+		ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor), C.int(cap), c.ink2I(posDev), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PAttendNVFP4Dev(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out, posDev Ink2Ref, p Ink2AttnParams, extent, window, cap, T int) error {
+	if err := c.Ink2PNVFP4KVReady(); err != nil {
+		return err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("verify attend nvfp4", C.fcuda_ink2p_attend_v2_nvfp4_dev(c.ink2F(q), c.ink2F(r), c.ink2F(sinks),
+		c.ink2F(relBias), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)),
+		(*C.uint8_t)(c.ink2Ptr(kscale)), (*C.uint8_t)(c.ink2Ptr(vscale)), c.ink2F(out), C.int(p.Heads),
+		C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap),
+		C.float(p.Scale), c.ink2I(posDev), C.int(T)))
 }
 
 func (c *cudaBackend) Ink2SigmoidMul(x, gate Ink2Ref, n int) error {

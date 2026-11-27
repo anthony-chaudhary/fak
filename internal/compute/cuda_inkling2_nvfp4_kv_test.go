@@ -3,6 +3,7 @@
 package compute
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -515,5 +516,175 @@ func TestCUDAInk2NVFP4KVZeroAndOverflow(t *testing.T) {
 	}
 	if flags[0] == 0 {
 		t.Fatal("non-finite V element in prefill did not set overflow flag")
+	}
+}
+
+// fak-test:runtime fast est=5s lane=default
+func TestCUDAInk2NVFP4KVVerifyDevAndGraph(t *testing.T) {
+	cb := cudaNVFP4OrSkip(t)
+	if err := cb.Ink2PNVFP4KVReady(); err != nil {
+		t.Fatalf("Ink2PNVFP4KVReady: %v", err)
+	}
+
+	p := Ink2AttnParams{
+		Heads: 24, KVHeads: 8, HeadDim: 128, RelLen: 16,
+		QKClip: 3, RelClip: 2, Eps: 1e-6,
+		Global: true, Alpha: 0.1, Floor: 64,
+		Scale: float32(1 / math.Sqrt(128)),
+	}
+	kvDim := p.KVHeads * p.HeadDim
+	const (
+		capTok    = 256
+		extent    = 256
+		T         = 4
+		graphSlot = 20
+	)
+	r := rand.New(rand.NewSource(20261130))
+	alloc := func(n int) Tensor {
+		tt, err := cb.Ink2Alloc(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { cb.Free(tt) })
+		return tt
+	}
+	write := func(tt Tensor, v []float32) {
+		if err := cb.Ink2Write(Ink2At(tt, 0), v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	randVec := func(n int, sd, mean float64) []float32 {
+		v := make([]float32, n)
+		for i := range v {
+			v[i] = float32(mean + sd*r.NormFloat64())
+		}
+		return v
+	}
+
+	qclip, rclip := alloc(p.Heads*p.HeadDim), alloc(p.Heads*p.RelLen)
+	relBias := alloc(extent * p.RelLen)
+	write(qclip, randVec(p.Heads*p.HeadDim, 0.1, 1))
+	write(rclip, randVec(p.Heads*p.RelLen, 0.1, 1))
+	write(relBias, randVec(extent*p.RelLen, 0.1, 0))
+
+	kcRef := alloc(Ink2NVFP4KVCodeFloats(capTok, p.KVHeads, p.HeadDim))
+	vcRef := alloc(Ink2NVFP4KVCodeFloats(capTok, p.KVHeads, p.HeadDim))
+	ksRef := alloc(Ink2NVFP4KVScaleFloats(capTok, p.KVHeads, p.HeadDim))
+	vsRef := alloc(Ink2NVFP4KVScaleFloats(capTok, p.KVHeads, p.HeadDim))
+	ovfRef := alloc(1)
+
+	kcDev := alloc(Ink2NVFP4KVCodeFloats(capTok, p.KVHeads, p.HeadDim))
+	vcDev := alloc(Ink2NVFP4KVCodeFloats(capTok, p.KVHeads, p.HeadDim))
+	ksDev := alloc(Ink2NVFP4KVScaleFloats(capTok, p.KVHeads, p.HeadDim))
+	vsDev := alloc(Ink2NVFP4KVScaleFloats(capTok, p.KVHeads, p.HeadDim))
+	ovfDev := alloc(1)
+
+	posDev := alloc(1)
+	qv := randVec(T*p.Heads*p.HeadDim, 1.0, 0)
+	rv := randVec(T*p.Heads*p.RelLen, 1.0, 0)
+	kv := randVec(T*kvDim, 0.5, 0)
+	vv := randVec(T*kvDim, 1.0, 0)
+	sv := randVec(T*p.Heads, 0.5, 0)
+
+	qRef, rRef := alloc(len(qv)), alloc(len(rv))
+	qDev, rDev := alloc(len(qv)), alloc(len(rv))
+	kBuf, vBuf, sBuf := alloc(len(kv)), alloc(len(vv)), alloc(len(sv))
+	oRef, oDev := alloc(len(qv)), alloc(len(qv))
+
+	write(kBuf, kv)
+	write(vBuf, vv)
+	write(sBuf, sv)
+
+	checkMatch := func(label string) {
+		t.Helper()
+		want, err := cb.Ink2Read(Ink2At(oRef, 0), len(qv))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := cb.Ink2Read(Ink2At(oDev, 0), len(qv))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cos, maxErr := ink2FP8CosineAndMaxErr(want, got)
+		if cos < 0.999999 || maxErr > 1e-5 {
+			t.Fatalf("%s mismatch vs non-dev: cosine=%.8f max_abs_err=%.8f", label, cos, maxErr)
+		}
+	}
+
+	// 1. Eager warmup at pos0=0 (also configures smem attribute before capture).
+	write(qRef, qv)
+	write(rRef, rv)
+	write(qDev, qv)
+	write(rDev, rv)
+	write(posDev, []float32{math.Float32frombits(0)})
+	if err := cb.Ink2PQKVPostNVFP4(Ink2At(qRef, 0), Ink2At(rRef, 0), Ink2At(kBuf, 0), Ink2At(vBuf, 0),
+		Ink2At(qclip, 0), Ink2At(rclip, 0), Ink2At(kcRef, 0), Ink2At(vcRef, 0), Ink2At(ksRef, 0), Ink2At(vsRef, 0),
+		Ink2At(ovfRef, 0), p, capTok, 0, T); err != nil {
+		t.Fatalf("eager Ink2PQKVPostNVFP4: %v", err)
+	}
+	if err := cb.Ink2PAttendNVFP4(Ink2At(qRef, 0), Ink2At(rRef, 0), Ink2At(sBuf, 0), Ink2At(relBias, 0),
+		Ink2At(kcRef, 0), Ink2At(vcRef, 0), Ink2At(ksRef, 0), Ink2At(vsRef, 0), Ink2At(oRef, 0),
+		p, extent, 0, capTok, 0, T); err != nil {
+		t.Fatalf("eager Ink2PAttendNVFP4: %v", err)
+	}
+	if err := cb.Ink2PQKVPostNVFP4Dev(Ink2At(qDev, 0), Ink2At(rDev, 0), Ink2At(kBuf, 0), Ink2At(vBuf, 0),
+		Ink2At(qclip, 0), Ink2At(rclip, 0), Ink2At(kcDev, 0), Ink2At(vcDev, 0), Ink2At(ksDev, 0), Ink2At(vsDev, 0),
+		Ink2At(ovfDev, 0), Ink2At(posDev, 0), p, capTok, T); err != nil {
+		t.Fatalf("eager Ink2PQKVPostNVFP4Dev: %v", err)
+	}
+	if err := cb.Ink2PAttendNVFP4Dev(Ink2At(qDev, 0), Ink2At(rDev, 0), Ink2At(sBuf, 0), Ink2At(relBias, 0),
+		Ink2At(kcDev, 0), Ink2At(vcDev, 0), Ink2At(ksDev, 0), Ink2At(vsDev, 0), Ink2At(oDev, 0),
+		Ink2At(posDev, 0), p, extent, 0, capTok, T); err != nil {
+		t.Fatalf("eager Ink2PAttendNVFP4Dev: %v", err)
+	}
+	checkMatch("eager pos0=0")
+
+	// 2. Capture CUDA graph for Dev ops and replay at multiple *posDev positions.
+	if err := cb.Ink2GraphBegin(); err != nil {
+		t.Fatalf("Ink2GraphBegin: %v", err)
+	}
+	if err := cb.Ink2PQKVPostNVFP4Dev(Ink2At(qDev, 0), Ink2At(rDev, 0), Ink2At(kBuf, 0), Ink2At(vBuf, 0),
+		Ink2At(qclip, 0), Ink2At(rclip, 0), Ink2At(kcDev, 0), Ink2At(vcDev, 0), Ink2At(ksDev, 0), Ink2At(vsDev, 0),
+		Ink2At(ovfDev, 0), Ink2At(posDev, 0), p, capTok, T); err != nil {
+		t.Fatalf("capture Ink2PQKVPostNVFP4Dev: %v", err)
+	}
+	if err := cb.Ink2PAttendNVFP4Dev(Ink2At(qDev, 0), Ink2At(rDev, 0), Ink2At(sBuf, 0), Ink2At(relBias, 0),
+		Ink2At(kcDev, 0), Ink2At(vcDev, 0), Ink2At(ksDev, 0), Ink2At(vsDev, 0), Ink2At(oDev, 0),
+		Ink2At(posDev, 0), p, extent, 0, capTok, T); err != nil {
+		t.Fatalf("capture Ink2PAttendNVFP4Dev: %v", err)
+	}
+	if err := cb.Ink2GraphEndSlot(graphSlot); err != nil {
+		t.Fatalf("Ink2GraphEndSlot: %v", err)
+	}
+
+	for _, pos0 := range []int{T, 2 * T} {
+		qv = randVec(T*p.Heads*p.HeadDim, 1.0, 0)
+		rv = randVec(T*p.Heads*p.RelLen, 1.0, 0)
+		kv = randVec(T*kvDim, 0.5, 0)
+		vv = randVec(T*kvDim, 1.0, 0)
+		sv = randVec(T*p.Heads, 0.5, 0)
+		write(qRef, qv)
+		write(rRef, rv)
+		write(qDev, qv)
+		write(rDev, rv)
+		write(kBuf, kv)
+		write(vBuf, vv)
+		write(sBuf, sv)
+		write(posDev, []float32{math.Float32frombits(uint32(int32(pos0)))})
+
+		if err := cb.Ink2PQKVPostNVFP4(Ink2At(qRef, 0), Ink2At(rRef, 0), Ink2At(kBuf, 0), Ink2At(vBuf, 0),
+			Ink2At(qclip, 0), Ink2At(rclip, 0), Ink2At(kcRef, 0), Ink2At(vcRef, 0), Ink2At(ksRef, 0), Ink2At(vsRef, 0),
+			Ink2At(ovfRef, 0), p, capTok, pos0, T); err != nil {
+			t.Fatalf("ref pos0=%d Ink2PQKVPostNVFP4: %v", pos0, err)
+		}
+		if err := cb.Ink2PAttendNVFP4(Ink2At(qRef, 0), Ink2At(rRef, 0), Ink2At(sBuf, 0), Ink2At(relBias, 0),
+			Ink2At(kcRef, 0), Ink2At(vcRef, 0), Ink2At(ksRef, 0), Ink2At(vsRef, 0), Ink2At(oRef, 0),
+			p, extent, 0, capTok, pos0, T); err != nil {
+			t.Fatalf("ref pos0=%d Ink2PAttendNVFP4: %v", pos0, err)
+		}
+		if err := cb.Ink2GraphLaunchSlot(graphSlot); err != nil {
+			t.Fatalf("graph launch pos0=%d: %v", pos0, err)
+		}
+		checkMatch(fmt.Sprintf("graph pos0=%d", pos0))
 	}
 }

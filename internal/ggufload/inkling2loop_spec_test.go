@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -253,5 +254,344 @@ func TestInkling2SpecKVHalfAutoDisableAndExplicitRefusal(t *testing.T) {
 	err := s.enableSpec(4)
 	if err == nil || !strings.Contains(err.Error(), "FAK_INKLING2_SPEC=0") {
 		t.Fatalf("enableSpec on kvHalf err = %v, want error naming FAK_INKLING2_SPEC=0", err)
+	}
+}
+
+type fakeVerifyAllKVBackend struct {
+	fakeHalfSpecBackend
+	compute.Inkling2FP8KVDevice
+	compute.Inkling2NVFP4KVDevice
+	compute.Inkling2VerifyHalfKVDevice
+	compute.Inkling2VerifyFP8KVDevice
+	compute.Inkling2VerifyNVFP4KVDevice
+	halfReadyErr  error
+	fp8ReadyErr   error
+	nvfp4ReadyErr error
+}
+
+func (f fakeVerifyAllKVBackend) Name() string             { return "fake-verify-all-kv" }
+func (f fakeVerifyAllKVBackend) Ink2PHalfKVReady() error  { return f.halfReadyErr }
+func (f fakeVerifyAllKVBackend) Ink2PFP8KVReady() error   { return f.fp8ReadyErr }
+func (f fakeVerifyAllKVBackend) Ink2PNVFP4KVReady() error { return f.nvfp4ReadyErr }
+func (fakeVerifyAllKVBackend) Ink2Alloc(n int) (compute.Tensor, error) {
+	return compute.Tensor{Shape: []int{n}}, nil
+}
+
+type fakeFP8NoVerifyBackend struct {
+	specCapableBackend
+	compute.Inkling2FP8KVDevice
+}
+
+func (fakeFP8NoVerifyBackend) Name() string           { return "fake-fp8-no-verify" }
+func (fakeFP8NoVerifyBackend) Ink2PFP8KVReady() error { return nil }
+
+type fakeNVFP4NoVerifyBackend struct {
+	specCapableBackend
+	compute.Inkling2NVFP4KVDevice
+}
+
+func (fakeNVFP4NoVerifyBackend) Name() string             { return "fake-nvfp4-no-verify" }
+func (fakeNVFP4NoVerifyBackend) Ink2PNVFP4KVReady() error { return nil }
+
+func TestInkling2SpecKVVerifySupportAndAutoDisable(t *testing.T) {
+	unset := func(string) (string, bool) { return "", false }
+	kvEnv := func(v string) func(string) (string, bool) {
+		return func(k string) (string, bool) {
+			if k == "FAK_INKLING2_KV" {
+				return v, true
+			}
+			return "", false
+		}
+	}
+
+	all := fakeVerifyAllKVBackend{}
+	for _, dtype := range []Inkling2KVDType{Inkling2KVF32, Inkling2KVF16, Inkling2KVFP8, Inkling2KVNVFP4} {
+		if !inkling2BackendSupportsSpecKV(all, dtype) {
+			t.Fatalf("inkling2BackendSupportsSpecKV(all, %s) = false, want true", dtype)
+		}
+	}
+	if inkling2SpecAutoDisabledForKV(all, kvEnv("f16")) {
+		t.Fatal("f16 with VerifyHalfKVDevice should not auto-disable spec")
+	}
+	if inkling2SpecAutoDisabledForKV(all, kvEnv("fp8")) {
+		t.Fatal("fp8 with VerifyFP8KVDevice should not auto-disable spec")
+	}
+	if inkling2SpecAutoDisabledForKV(all, kvEnv("nvfp4")) {
+		t.Fatal("nvfp4 with VerifyNVFP4KVDevice should not auto-disable spec")
+	}
+
+	// Without Inkling2Verify*KVDevice, non-fp32 KV auto-disables spec and enableSpec refuses.
+	fp8Only := fakeFP8NoVerifyBackend{}
+	if inkling2BackendSupportsSpecKV(fp8Only, Inkling2KVFP8) {
+		t.Fatal("fp8 without VerifyFP8KVDevice unexpectedly supported")
+	}
+	if !inkling2SpecAutoDisabledForKV(fp8Only, kvEnv("fp8")) {
+		t.Fatal("fp8 without VerifyFP8KVDevice did not auto-disable spec")
+	}
+	nvfp4Only := fakeNVFP4NoVerifyBackend{}
+	if inkling2BackendSupportsSpecKV(nvfp4Only, Inkling2KVNVFP4) {
+		t.Fatal("nvfp4 without VerifyNVFP4KVDevice unexpectedly supported")
+	}
+	if !inkling2SpecAutoDisabledForKV(nvfp4Only, kvEnv("nvfp4")) {
+		t.Fatal("nvfp4 without VerifyNVFP4KVDevice did not auto-disable spec")
+	}
+
+	// Ready() failure disables spec KV support.
+	notReady := fakeVerifyAllKVBackend{
+		halfReadyErr:  errors.ErrUnsupported,
+		fp8ReadyErr:   errors.ErrUnsupported,
+		nvfp4ReadyErr: errors.ErrUnsupported,
+	}
+	for _, dtype := range []Inkling2KVDType{Inkling2KVF16, Inkling2KVFP8, Inkling2KVNVFP4} {
+		if inkling2BackendSupportsSpecKV(notReady, dtype) {
+			t.Fatalf("notReady backend should not support %s", dtype)
+		}
+	}
+
+	// enableSpec keeps kvAutoHalf when VerifyHalfKVDevice is present, and refuses when missing.
+	sOK := &inkling2Resident{
+		be:         all,
+		dev:        all,
+		batched:    true,
+		kvHalf:     true,
+		kvAutoHalf: true,
+		hp:         model.Inkling2LoopHParams{ConvKernel: 4, Hidden: 8, KVHeads: 2, HeadDim: 4},
+		output:     ink2Mat{rows: 16},
+	}
+	if err := sOK.enableSpec(2); err != nil {
+		t.Fatalf("enableSpec with VerifyHalfKVDevice: %v", err)
+	}
+	if !sOK.kvHalf {
+		t.Fatal("enableSpec downgraded kvAutoHalf even though VerifyHalfKVDevice is supported")
+	}
+	_ = unset
+}
+
+type fakeVerifyDispatchBackend struct {
+	compute.Backend
+	compute.Inkling2Device
+	compute.Inkling2PrefillDevice
+	compute.Inkling2VerifyDevice
+	compute.Inkling2VerifyHalfKVDevice
+	compute.Inkling2VerifyFP8KVDevice
+	compute.Inkling2VerifyNVFP4KVDevice
+	calls        []string
+	verifyIdx    compute.Ink2Ref
+	overflowRef  compute.Ink2Ref
+	overflowFlag int32
+}
+
+func (*fakeVerifyDispatchBackend) Name() string             { return "fake-verify-dispatch" }
+func (*fakeVerifyDispatchBackend) Ink2PHalfKVReady() error  { return nil }
+func (*fakeVerifyDispatchBackend) Ink2PFP8KVReady() error   { return nil }
+func (*fakeVerifyDispatchBackend) Ink2PNVFP4KVReady() error { return nil }
+func (*fakeVerifyDispatchBackend) Ink2Alloc(n int) (compute.Tensor, error) {
+	return compute.Tensor{Shape: []int{n}}, nil
+}
+func (*fakeVerifyDispatchBackend) Ink2Write(compute.Ink2Ref, []float32) error { return nil }
+func (f *fakeVerifyDispatchBackend) Ink2ReadInts(r compute.Ink2Ref, n int) ([]int32, error) {
+	if r.T.Buf() != nil && r.T.Buf() == f.overflowRef.T.Buf() && r.Off == f.overflowRef.Off {
+		return []int32{f.overflowFlag}, nil
+	}
+	return make([]int32, n), nil
+}
+func (*fakeVerifyDispatchBackend) Ink2GraphBegin() error         { return errors.ErrUnsupported }
+func (*fakeVerifyDispatchBackend) Ink2GraphEndSlot(int) error    { return nil }
+func (*fakeVerifyDispatchBackend) Ink2GraphLaunchSlot(int) error { return nil }
+func (*fakeVerifyDispatchBackend) Ink2PMix([]compute.Ink2Ref, compute.Ink2Ref, int, compute.Ink2Ref, int, int) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2PRMS(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, int, int, float32) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2RMS(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, int, int, float32) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2Route(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, int, int, float32) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2Combine(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, int, int) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2Situ(compute.Ink2Ref, compute.Ink2Ref, int, int, int, float64, float64) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2SigmoidMul(compute.Ink2Ref, compute.Ink2Ref, int) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2VMix([]compute.Ink2Ref, compute.Ink2Ref, int, []compute.Ink2Ref, float32, compute.Ink2Ref, int, int) (bool, error) {
+	return true, nil
+}
+func (*fakeVerifyDispatchBackend) Ink2SoftcapArgmax(compute.Ink2Ref, int, float32, compute.Ink2Ref) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2ExpertMatVec(compute.Tensor, int, compute.Ink2Ref, compute.Ink2Ref, int, compute.Ink2Ref, int, compute.Ink2Ref, *compute.Ink2Situ) (bool, error) {
+	return true, nil
+}
+func (*fakeVerifyDispatchBackend) Ink2PMatMul(compute.Tensor, compute.Ink2Ref, compute.Ink2Ref, int) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2VRows(compute.Tensor, compute.Ink2Ref, compute.Ink2Ref, int) (bool, error) {
+	return false, nil
+}
+func (*fakeVerifyDispatchBackend) Ink2VQ8Rows(compute.Tensor, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, int, bool) (bool, error) {
+	return false, nil
+}
+func (*fakeVerifyDispatchBackend) Ink2VQ8Segs([]compute.Tensor, []compute.Ink2Ref, []compute.Ink2Ref, compute.Ink2Ref, int) (bool, error) {
+	return false, nil
+}
+func (*fakeVerifyDispatchBackend) Ink2PConv(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, int, int, int, float32, int) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2PConvLog(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, int, int, int, float32, int) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2PConvPairLog([]compute.Ink2Ref, []compute.Ink2Ref, []compute.Ink2Ref, []compute.Ink2Ref, []compute.Ink2Ref, []compute.Ink2Ref, []float32, int, int, int, int) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2PRoute(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, int, int, float32, int) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2PSitu(compute.Ink2Ref, compute.Ink2Ref, int, int, int, float64, float64) error {
+	return nil
+}
+func (*fakeVerifyDispatchBackend) Ink2PExpertGrouped(compute.Tensor, int, int, compute.Ink2Ref, compute.Ink2Ref, int, int, compute.Ink2Ref, int, compute.Ink2Ref, compute.Ink2Ref, bool) (bool, error) {
+	return true, nil
+}
+func (*fakeVerifyDispatchBackend) Ink2PCombineConvLog(compute.Ink2Ref, compute.Ink2Ref, int, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, int, int, float32, int) error {
+	return nil
+}
+func (f *fakeVerifyDispatchBackend) Ink2PQKVPostDev(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int) error {
+	f.calls = append(f.calls, "post_f32")
+	return nil
+}
+func (f *fakeVerifyDispatchBackend) Ink2PAttendDev(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int, int, int) error {
+	f.calls = append(f.calls, "attend_f32")
+	return nil
+}
+func (f *fakeVerifyDispatchBackend) Ink2PQKVPostHalfDev(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int) error {
+	f.calls = append(f.calls, "post_f16")
+	return nil
+}
+func (f *fakeVerifyDispatchBackend) Ink2PAttendHalfDev(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int, int, int) error {
+	f.calls = append(f.calls, "attend_f16")
+	return nil
+}
+func (f *fakeVerifyDispatchBackend) Ink2PQKVPostFP8Dev(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int) error {
+	f.calls = append(f.calls, "post_fp8")
+	return nil
+}
+func (f *fakeVerifyDispatchBackend) Ink2PAttendFP8Dev(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int, int, int) error {
+	f.calls = append(f.calls, "attend_fp8")
+	return nil
+}
+func (f *fakeVerifyDispatchBackend) Ink2PQKVPostNVFP4Dev(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int) error {
+	f.calls = append(f.calls, "post_nvfp4")
+	return nil
+}
+func (f *fakeVerifyDispatchBackend) Ink2PAttendNVFP4Dev(compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2Ref, compute.Ink2AttnParams, int, int, int, int) error {
+	f.calls = append(f.calls, "attend_nvfp4")
+	return nil
+}
+
+func TestInkling2SpecVerifyGlobalVsLocalDispatch(t *testing.T) {
+	cases := []struct {
+		name      string
+		kvHalf    bool
+		kvFP8     bool
+		kvNVFP4   bool
+		wantLocal []string
+		wantGlob  []string
+	}{
+		{"f32", false, false, false, []string{"post_f32", "attend_f32"}, []string{"post_f32", "attend_f32"}},
+		{"f16", true, false, false, []string{"post_f32", "attend_f32"}, []string{"post_f16", "attend_f16"}},
+		{"fp8", false, true, false, []string{"post_f32", "attend_f32"}, []string{"post_fp8", "attend_fp8"}},
+		{"nvfp4", false, false, true, []string{"post_f32", "attend_f32"}, []string{"post_nvfp4", "attend_nvfp4"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeVerifyDispatchBackend{}
+			s := &inkling2Resident{
+				be:      f,
+				dev:     f,
+				kvHalf:  tc.kvHalf,
+				kvFP8:   tc.kvFP8,
+				kvNVFP4: tc.kvNVFP4,
+				hp: model.Inkling2LoopHParams{
+					Hidden: 8, Heads: 2, KVHeads: 1, HeadDim: 4, RelLength: 4, Layers: 2,
+					ConvKernel: 2, Experts: 2, ExpertsUsed: 1, ExpertWidth: 4,
+					AttnResBlock: 1, LocalLayer: []bool{true, false},
+				},
+				layers: []ink2Layer{
+					{gateUp: ink2Experts{stack: compute.Tensor{Shape: []int{16, 8}}}, down: ink2Experts{stack: compute.Tensor{Shape: []int{16, 8}}}},
+					{gateUp: ink2Experts{stack: compute.Tensor{Shape: []int{16, 8}}}, down: ink2Experts{stack: compute.Tensor{Shape: []int{16, 8}}}},
+				},
+				caps:    []int{16, 16},
+				kc:      make([]ink2Ref, 2),
+				vc:      make([]ink2Ref, 2),
+				ks:      make([]ink2Ref, 2),
+				vs:      make([]ink2Ref, 2),
+				hist:    make([]ink2Ref, 2),
+				convLog: make([]ink2Ref, 2),
+			}
+			p := &ink2Prefill{
+				s: s, pd: f, vd: f, vhalf: f, vfp8: f, vnvfp4: f,
+				T: 2, verify: true, grouped: true,
+				scrFloats: 1 << 16, keepFloats: 1 << 16,
+			}
+			var blocks []ink2Ref
+			p.layer(0, 0, ink2Ref{}, &blocks, nil, nil)
+			if len(f.calls) != 2 || f.calls[0] != tc.wantLocal[0] || f.calls[1] != tc.wantLocal[1] {
+				t.Fatalf("local slot calls = %v, want %v", f.calls, tc.wantLocal)
+			}
+			f.calls = nil
+			p.scrOff = 0
+			p.layer(1, 1, ink2Ref{}, &blocks, nil, nil)
+			if len(f.calls) != 2 || f.calls[0] != tc.wantGlob[0] || f.calls[1] != tc.wantGlob[1] {
+				t.Fatalf("global slot calls = %v, want %v", f.calls, tc.wantGlob)
+			}
+		})
+	}
+}
+
+type fakeVerifyEmbedding struct{}
+
+func (fakeVerifyEmbedding) Row(_ int, dst []float32) {
+	clear(dst)
+}
+
+func TestInkling2SpecVerifyOverflowCheck(t *testing.T) {
+	ovfTensor := compute.NewF32(compute.Default(), []int{1}, []float32{0})
+	ovfRef := compute.Ink2At(ovfTensor, 0)
+
+	for _, tc := range []struct {
+		name    string
+		kvNVFP4 bool
+		kvFP8   bool
+		wantErr error
+	}{
+		{"nvfp4", true, false, ErrInkling2NVFP4ScaleOverflow},
+		{"fp8", false, true, ErrInkling2FP8ScaleOverflow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeVerifyDispatchBackend{overflowRef: ovfRef, overflowFlag: 1}
+			s := &inkling2Resident{
+				be:          f,
+				dev:         f,
+				kvNVFP4:     tc.kvNVFP4,
+				kvFP8:       tc.kvFP8,
+				kvOverflow:  ovfRef,
+				specMax:     2,
+				ctx:         64,
+				hp:          model.Inkling2LoopHParams{Hidden: 4},
+				w:           &model.Inkling2LoopWeights{TokEmbd: fakeVerifyEmbedding{}},
+				verifyWarm:  true,
+				verifyReady: true, // takes Ink2GraphLaunchSlot (no-op) so verify() reaches Ink2ReadInts + checkKVOverflow
+			}
+			_, err := s.verify([]int{0})
+			if err != tc.wantErr {
+				t.Fatalf("verify overflow err = %v, want %v", err, tc.wantErr)
+			}
+		})
 	}
 }

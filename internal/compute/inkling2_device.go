@@ -182,3 +182,21 @@ type Inkling2NVFP4KVDevice interface {
 	// Ink2PAttendNVFP4 is Ink2PAttend reading block-16 E2M1 kcache/vcache with E4M3FN scales for T tokens starting at pos0.
 	Ink2PAttendNVFP4(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error
 }
+
+// Inkling2VerifyHalfKVDevice is the device-position verify QKV post and attend over f16 global-slot caches.
+type Inkling2VerifyHalfKVDevice interface {
+	Ink2PQKVPostHalfDev(q, r, k, v, qclip, rclip, kcache, vcache, posDev Ink2Ref, p Ink2AttnParams, cap, T int) error
+	Ink2PAttendHalfDev(q, r, sinks, relBias, kcache, vcache, out, posDev Ink2Ref, p Ink2AttnParams, extent, window, cap, T int) error
+}
+
+// Inkling2VerifyFP8KVDevice is the device-position verify QKV post and attend over E4M3FN global-slot caches.
+type Inkling2VerifyFP8KVDevice interface {
+	Ink2PQKVPostFP8Dev(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow, posDev Ink2Ref, p Ink2AttnParams, cap, T int) error
+	Ink2PAttendFP8Dev(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out, posDev Ink2Ref, p Ink2AttnParams, extent, window, cap, T int) error
+}
+
+// Inkling2VerifyNVFP4KVDevice is the device-position verify QKV post and attend over block-16 NVFP4 global-slot caches.
+type Inkling2VerifyNVFP4KVDevice interface {
+	Ink2PQKVPostNVFP4Dev(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow, posDev Ink2Ref, p Ink2AttnParams, cap, T int) error
+	Ink2PAttendNVFP4Dev(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out, posDev Ink2Ref, p Ink2AttnParams, extent, window, cap, T int) error
+}

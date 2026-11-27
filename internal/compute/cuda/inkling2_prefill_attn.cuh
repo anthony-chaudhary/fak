@@ -121,9 +121,11 @@ __global__ void __launch_bounds__(32 * kG * QW) k_ink2p_attend_v2(const float *_
                                                                   const E *__restrict__ vcache,
                                                                   float *__restrict__ out, int heads, int kvHeads,
                                                                   int extent, int window, int cap, float scale,
-                                                                  int pos0, int T,
+                                                                  int pos0_arg, int T,
                                                                   const void *__restrict__ kscale = nullptr,
-                                                                  const void *__restrict__ vscale = nullptr) {
+                                                                  const void *__restrict__ vscale = nullptr,
+                                                                  const int *__restrict__ posDev = nullptr) {
+  const int pos0 = posDev ? *posDev : pos0_arg;
   constexpr int NW = kG * QW, NT = KT / 8, QT = 16 * QW;
   using V16 = typename Chunk16<E>::V;
   constexpr int kRowElem = NVFP4 ? (kHD / 2) : kHD;
@@ -436,18 +438,21 @@ template <int QW, int KT, int REL, int PIPE, class E = float, bool NVFP4 = false
 static int ink2p_attend_v2_launch(const float *q, const float *r, const float *sinks, const float *relBias,
                                   const E *kcache, const E *vcache, float *out, int heads, int kvHeads,
                                   int extent, int window, int cap, float scale, int pos0, int T,
-                                  const void *kscale = nullptr, const void *vscale = nullptr) {
+                                  const void *kscale = nullptr, const void *vscale = nullptr,
+                                  const int *posDev = nullptr) {
   const dim3 grid(kvHeads, (T + 16 * QW - 1) / (16 * QW));
   constexpr size_t smem = AttnSmem<QW, KT, REL, PIPE, E>::bytes;
-  if (smem > 48 * 1024) {
+  static bool smem_configured = false;
+  if (smem > 48 * 1024 && !smem_configured) {
     const cudaError_t e = cudaFuncSetAttribute((const void *)k_ink2p_attend_v2<QW, KT, REL, PIPE, E, NVFP4>,
                                                cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
     if (e) return (int)e;
+    smem_configured = true;
   }
   FCUDA_TS("k_ink2p_attend_v2", grid,
            (k_ink2p_attend_v2<QW, KT, REL, PIPE, E, NVFP4><<<grid, 32 * kG * QW, smem, g_stream>>>(
                q, r, sinks, relBias, kcache, vcache, out, heads, kvHeads, extent, window, cap, scale, pos0, T, kscale,
-               vscale)));
+               vscale, posDev)));
   return ink2_last_error();
 }
 
@@ -503,4 +508,42 @@ extern "C" int fcuda_ink2p_attend_v2_nvfp4(const float *q, const float *r, const
   return ink2pa::ink2p_attend_v2_launch<2, 16, 1, 1, uint8_t, true>(q, r, sinks, relBias, kcache, vcache, out, heads,
                                                                     kvHeads, extent, window, cap, scale, pos0, T,
                                                                     kscale, vscale);
+}
+
+// Device-position variants of fcuda_ink2p_attend_v2_{h,fp8,nvfp4} for CUDA-graph-capturable verify.
+extern "C" int fcuda_ink2p_attend_v2_h_dev(const float *q, const float *r, const float *sinks, const float *relBias,
+                                           const void *kcache, const void *vcache, float *out, int heads, int kvHeads,
+                                           int headDim, int relLen, int extent, int window, int cap, float scale,
+                                           const int *posDev, int T) {
+  if (headDim != ink2pa::kHD || relLen != ink2pa::kRL || kvHeads < 1 || heads != ink2pa::kG * kvHeads || T < 1)
+    return (int)cudaErrorInvalidValue;
+  return ink2pa::ink2p_attend_v2_launch<2, 16, 1, 1, __half>(q, r, sinks, relBias, (const __half *)kcache,
+                                                            (const __half *)vcache, out, heads, kvHeads, extent,
+                                                            window, cap, scale, 0, T, nullptr, nullptr, posDev);
+}
+
+extern "C" int fcuda_ink2p_attend_v2_fp8_dev(const float *q, const float *r, const float *sinks, const float *relBias,
+                                             const uint8_t *kcache, const uint8_t *vcache, const float *kscale,
+                                             const float *vscale, float *out, int heads, int kvHeads, int headDim,
+                                             int relLen, int extent, int window, int cap, float scale,
+                                             const int *posDev, int T) {
+  if (headDim != ink2pa::kHD || relLen != ink2pa::kRL || kvHeads < 1 || heads != ink2pa::kG * kvHeads || T < 1 ||
+      cap < 1)
+    return (int)cudaErrorInvalidValue;
+  return ink2pa::ink2p_attend_v2_launch<2, 16, 1, 1, uint8_t, false>(q, r, sinks, relBias, kcache, vcache, out, heads,
+                                                                     kvHeads, extent, window, cap, scale, 0, T,
+                                                                     kscale, vscale, posDev);
+}
+
+extern "C" int fcuda_ink2p_attend_v2_nvfp4_dev(const float *q, const float *r, const float *sinks,
+                                               const float *relBias, const uint8_t *kcache, const uint8_t *vcache,
+                                               const uint8_t *kscale, const uint8_t *vscale, float *out, int heads,
+                                               int kvHeads, int headDim, int relLen, int extent, int window, int cap,
+                                               float scale, const int *posDev, int T) {
+  if (headDim != ink2pa::kHD || relLen != ink2pa::kRL || kvHeads < 1 || heads != ink2pa::kG * kvHeads || T < 1 ||
+      cap < 1)
+    return (int)cudaErrorInvalidValue;
+  return ink2pa::ink2p_attend_v2_launch<2, 16, 1, 1, uint8_t, true>(q, r, sinks, relBias, kcache, vcache, out, heads,
+                                                                    kvHeads, extent, window, cap, scale, 0, T,
+                                                                    kscale, vscale, posDev);
 }

@@ -1047,6 +1047,50 @@ extern "C" int fcuda_ink2p_qkv_post_dev(float *q, float *r, const float *k, cons
   return ink2_last_error();
 }
 
+// fcuda_ink2p_qkv_post_h_dev is fcuda_ink2p_qkv_post_dev into f16 caches.
+extern "C" int fcuda_ink2p_qkv_post_h_dev(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                          const float *rclip, void *kcache, void *vcache, int heads, int kvHeads,
+                                          int headDim, int relLen, float qkClip, float relClip, float eps, int global,
+                                          float alpha, float floorTok, int cap, const int *posDev, int T) {
+  if (headDim > 32 * INK2_KV_REGS) return (int)cudaErrorInvalidValue;
+  const dim3 grid(heads + 2 * kvHeads, T);
+  FCUDA_TS("k_ink2p_qkv_post", grid, k_ink2p_qkv_post<__half><<<grid, 32, 0, g_stream>>>(
+      q, r, k, v, qclip, rclip, (__half *)kcache, (__half *)vcache, heads, kvHeads, headDim, relLen, qkClip, relClip,
+      eps, global, alpha, floorTok, cap, 0, posDev));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_qkv_post_fp8_dev is fcuda_ink2p_qkv_post_dev into OCP E4M3FN caches with per-(token, kvHead) F32 scales.
+extern "C" int fcuda_ink2p_qkv_post_fp8_dev(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                            const float *rclip, uint8_t *kcache, uint8_t *vcache, float *kscale,
+                                            float *vscale, int *overflow, int heads, int kvHeads, int headDim,
+                                            int relLen, float qkClip, float relClip, float eps, int global,
+                                            float alpha, float floorTok, int cap, const int *posDev, int T) {
+  if (headDim < 1 || headDim > 32 * INK2_KV_REGS || kvHeads < 1 || heads < 1 || cap < 1 || T < 1)
+    return (int)cudaErrorInvalidValue;
+  const dim3 grid(heads + 2 * kvHeads, T);
+  FCUDA_TS("k_ink2p_qkv_post", grid, k_ink2p_qkv_post<uint8_t><<<grid, 32, 0, g_stream>>>(
+      q, r, k, v, qclip, rclip, kcache, vcache, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global, alpha,
+      floorTok, cap, 0, posDev, kscale, vscale, overflow));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_qkv_post_nvfp4_dev is fcuda_ink2p_qkv_post_dev into block-16 packed E2M1 caches with E4M3FN block scales.
+extern "C" int fcuda_ink2p_qkv_post_nvfp4_dev(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                              const float *rclip, uint8_t *kcache, uint8_t *vcache, uint8_t *kscale,
+                                              uint8_t *vscale, int *overflow, int heads, int kvHeads, int headDim,
+                                              int relLen, float qkClip, float relClip, float eps, int global,
+                                              float alpha, float floorTok, int cap, const int *posDev, int T) {
+  if (headDim < 16 || (headDim & 15) != 0 || headDim > 32 * INK2_KV_REGS || kvHeads < 1 || heads < 1 || cap < 1 ||
+      T < 1)
+    return (int)cudaErrorInvalidValue;
+  const dim3 grid(heads + 2 * kvHeads, T);
+  FCUDA_TS("k_ink2p_qkv_post", grid, (k_ink2p_qkv_post<uint8_t, true><<<grid, 32, 0, g_stream>>>(
+      q, r, k, v, qclip, rclip, kcache, vcache, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global, alpha,
+      floorTok, cap, 0, posDev, kscale, vscale, overflow)));
+  return ink2_last_error();
+}
+
 static float *g_ink2p_att_scratch = nullptr;
 static size_t g_ink2p_att_scratch_cap = 0;            // floats
 static size_t g_ink2p_att_budget = (size_t)64 << 20;  // bytes per global-path token tile
