@@ -34,6 +34,8 @@ type Engine struct {
 	selfCost SelfCostFunc
 	// hostSampler reads point-in-time host pressure once per tick (#14475).
 	hostSampler HostSampler
+	// pauseGate decides per-tick whether deferrable junkwork should skip (#14477).
+	pauseGate PauseEvaluator
 	// lastSelfCost is the previous tick's reading, used to derive per-tick CPU.
 	lastSelfCost     time.Duration
 	haveLastSelfCost bool
@@ -82,6 +84,7 @@ func NewEngineWithHostReach(repoRoot string, cfg Config, host HostReach) (*Engin
 		pause:       pauseStore.ReadFailSafe(),
 		selfCost:    DefaultSelfCost,
 		hostSampler: HarnessHostSampler{},
+		pauseGate:   DefaultPauseEvaluator{},
 		clock:       time.Now,
 	}
 	e.Storage.GoCacheRoot = host.GoCacheRoot
@@ -112,6 +115,18 @@ func (e *Engine) SetHostSampler(s HostSampler) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.hostSampler = s
+}
+
+// SetPauseEvaluator installs an injectable pause-gate evaluator (tests, or custom rules).
+// Passing nil restores DefaultPauseEvaluator{}.
+func (e *Engine) SetPauseEvaluator(g PauseEvaluator) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if g == nil {
+		e.pauseGate = DefaultPauseEvaluator{}
+		return
+	}
+	e.pauseGate = g
 }
 
 // SetClock installs an injectable clock.
@@ -149,7 +164,10 @@ func (e *Engine) PauseState() PauseState {
 func (e *Engine) Pause(reason PauseReasonClass, detail string, cond ReactivateCondition) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.pauseLocked(reason, detail, cond)
+}
 
+func (e *Engine) pauseLocked(reason PauseReasonClass, detail string, cond ReactivateCondition) error {
 	next := PauseState{
 		Schema:         PauseSchemaV1,
 		Paused:         true,
@@ -176,7 +194,10 @@ func (e *Engine) Pause(reason PauseReasonClass, detail string, cond ReactivateCo
 func (e *Engine) Resume() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.resumeLocked()
+}
 
+func (e *Engine) resumeLocked() error {
 	if !e.pause.Paused {
 		return nil
 	}
@@ -247,7 +268,7 @@ func (e *Engine) sampleHost() *HostLoad {
 // recordLoadCycle appends exactly one fak-ops-load/1 row per tick. A failure to
 // account is returned to the caller but never aborts the maintenance the tick
 // already performed.
-func (e *Engine) recordLoadCycle(started, finished time.Time, phases []PhaseLoad, mutations int, failed bool, host *HostLoad) error {
+func (e *Engine) recordLoadCycle(started, finished time.Time, phases []PhaseLoad, mutations int, failed bool, host *HostLoad, decision PauseDirective, junkworkSkipped bool) error {
 	e.loadTick++
 	verdict := LoadIdle
 	switch {
@@ -255,19 +276,28 @@ func (e *Engine) recordLoadCycle(started, finished time.Time, phases []PhaseLoad
 		verdict = LoadError
 	case mutations > 0:
 		verdict = LoadProductive
+	case junkworkSkipped:
+		if anyReliefRan(phases) {
+			verdict = LoadPressureReliefOnly
+		} else {
+			verdict = LoadSkipped
+		}
 	}
 
 	cpu, haveCPU := e.selfCPUDelta()
 	cycle := LoadCycle{
-		Schema:    LoadSchemaV1,
-		Tick:      e.loadTick,
-		Started:   started.UTC(),
-		Finished:  finished.UTC(),
-		WallMS:    finished.Sub(started).Milliseconds(),
-		Phases:    phases,
-		Verdict:   verdict,
-		Mutations: mutations,
-		Host:      host,
+		Schema:       LoadSchemaV1,
+		Tick:         e.loadTick,
+		Started:      started.UTC(),
+		Finished:     finished.UTC(),
+		WallMS:       finished.Sub(started).Milliseconds(),
+		Phases:       phases,
+		Mutations:    mutations,
+		Verdict:      verdict,
+		PauseAction:  string(decision.JunkworkAction),
+		ReasonClass:  decision.ReasonClass,
+		TriggerValue: decision.TriggerValue,
+		Host:         host,
 	}
 	if haveCPU {
 		cycle.HaveCPU = true
@@ -297,33 +327,44 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 	now := started
 	host := e.sampleHost()
 
-	if e.pause.Paused {
+	gate := e.pauseGate
+	if gate == nil {
+		gate = DefaultPauseEvaluator{}
+	}
+	decision := gate.Decide(LoadCycle{Started: started, Host: host}, e.pause, e.Config)
+
+	if decision.ShouldPause && !e.pause.Paused {
+		_, resumeRatio, maxPause, _ := effectivePauseThresholds(e.Config)
+		_ = e.pauseLocked(decision.ReasonClass, decision.TriggerValue, ReactivateCondition{
+			PressureRatioBelow: resumeRatio,
+			MaxPause:           maxPause.String(),
+		})
+	} else if decision.ShouldResume && e.pause.Paused {
+		_ = e.resumeLocked()
+	} else if e.pause.Paused && decision.JunkworkAction == ActionSkip {
 		// Update skipped-tick count in memory only; never rewrite the durable
 		// pause file on every skipped tick (#14476).
 		e.pause.PausedTicks++
-		phases := []PhaseLoad{
-			{Phase: "locks_worktrees", Ran: false},
-			{Phase: "process_runaways", Ran: false},
-			{Phase: "asset_sync", Ran: false},
-			{Phase: "storage_reclaim", Ran: false},
-		}
-		return e.recordLoadCycle(started, e.now(), phases, 0, false, host)
 	}
+
+	reliefAction := decision.ForPhase(PhasePressureRelief)
+	junkworkAction := decision.ForPhase(PhaseDeferrable)
+	junkworkSkipped := junkworkAction == ActionSkip
 
 	mutations := 0
 	failed := false
 	// phases records every maintenance phase this tick CONSIDERED, including one
-	// that was not due. "The expensive tier was skipped" is itself a load fact.
-	var phases []PhaseLoad
-
-	// 1. Quick checks: Locks & Worktrees (every 60s or forceAll)
+	// that was not due or was gated. "The expensive tier was skipped" is itself
+	// a load fact. Each phase declares its class at its call site (#14477).
 	quickDue := forceAll || now.Sub(e.lastQuickTick) >= 60*time.Second
-	phases = append(phases,
-		PhaseLoad{Phase: "locks_worktrees", Ran: quickDue},
-		PhaseLoad{Phase: "process_runaways", Ran: quickDue},
-		PhaseLoad{Phase: "asset_sync", Ran: quickDue},
-		PhaseLoad{Phase: "storage_reclaim", Ran: forceAll || now.Sub(e.lastStorageTick) >= 15*time.Minute},
-	)
+	storageDue := forceAll || now.Sub(e.lastStorageTick) >= 15*time.Minute
+	assetDue := quickDue && junkworkAction == ActionRun
+	phases := []PhaseLoad{
+		{Phase: "locks_worktrees", Ran: quickDue, PhaseAction: string(reliefAction)},
+		{Phase: "process_runaways", Ran: quickDue, PhaseAction: string(reliefAction)},
+		{Phase: "asset_sync", Ran: assetDue, Deferrable: true, PhaseAction: string(junkworkAction)},
+		{Phase: "storage_reclaim", Ran: storageDue, PhaseAction: string(reliefAction)},
+	}
 	if quickDue {
 		start := time.Now()
 		healRes, healErr := e.Workspace.SweepLocksAndWorktrees(ctx, false)
@@ -372,29 +413,32 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 			})
 		}
 
-		// Background asset synchronization for portable skill adapters (#11156, #11158)
-		startAsset := time.Now()
-		assetReceipt, synced, assetErr := projectassets.EnsureSync(e.RepoRoot)
-		durAsset := time.Since(startAsset).Milliseconds()
-		phaseWall(&phases, "asset_sync", durAsset)
-		if assetErr != nil {
-			failed = true
-		}
-		if assetErr == nil && synced {
-			mutations++
-			phaseMutated(&phases, "asset_sync", durAsset)
-			_ = e.Ledger.Record(Event{
-				ActionType: ActionAssetSync,
-				Details:    fmt.Sprintf("synchronized portable skill adapters for opencode and codex workers (%d skills)", len(assetReceipt.Harnesses["opencode"].Canonical)),
-				DurationMS: durAsset,
-			})
+		// Background asset synchronization for portable skill adapters (#11156, #11158).
+		// Declared deferrable at its call site (#14477): skipped under host pressure.
+		if assetDue {
+			startAsset := time.Now()
+			assetReceipt, synced, assetErr := projectassets.EnsureSync(e.RepoRoot)
+			durAsset := time.Since(startAsset).Milliseconds()
+			phaseWall(&phases, "asset_sync", durAsset)
+			if assetErr != nil {
+				failed = true
+			}
+			if assetErr == nil && synced {
+				mutations++
+				phaseMutated(&phases, "asset_sync", durAsset)
+				_ = e.Ledger.Record(Event{
+					ActionType: ActionAssetSync,
+					Details:    fmt.Sprintf("synchronized portable skill adapters for opencode and codex workers (%d skills)", len(assetReceipt.Harnesses["opencode"].Canonical)),
+					DurationMS: durAsset,
+				})
+			}
 		}
 
 		e.lastQuickTick = now
 	}
 
 	// 2. Storage & Cache Lifecycle (every 15m or forceAll)
-	if forceAll || now.Sub(e.lastStorageTick) >= 15*time.Minute {
+	if storageDue {
 		start := time.Now()
 		reclaimRes, reclaimErr := e.Storage.ReclaimCascade(ctx, false)
 		dur := time.Since(start).Milliseconds()
@@ -418,7 +462,16 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 		e.lastStorageTick = now
 	}
 
-	return e.recordLoadCycle(started, e.now(), phases, mutations, failed, host)
+	return e.recordLoadCycle(started, e.now(), phases, mutations, failed, host, decision, junkworkSkipped)
+}
+
+func anyReliefRan(phases []PhaseLoad) bool {
+	for _, p := range phases {
+		if !p.Deferrable && p.Ran {
+			return true
+		}
+	}
+	return false
 }
 
 // phaseWall records how long a considered phase took on this tick.

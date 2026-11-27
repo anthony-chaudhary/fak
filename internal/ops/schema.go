@@ -48,20 +48,33 @@ type Config struct {
 	MaxThreads        int           `json:"max_threads"`
 	CPUPinWindow      time.Duration `json:"cpu_pin_window"`
 	OrphanReapEnabled bool          `json:"orphan_reap_enabled"`
+	// ReactivePauseEnabled is opt-in and default-off (#14477): measuring host
+	// load is always on, while pausing deferrable junkwork under pressure must
+	// be explicitly enabled.
+	ReactivePauseEnabled bool          `json:"reactive_pause_enabled"`
+	PressurePauseRatio   float64       `json:"pressure_pause_ratio,omitempty"`
+	PressureResumeRatio  float64       `json:"pressure_resume_ratio,omitempty"`
+	MaxPauseDuration     time.Duration `json:"max_pause_duration,omitempty"`
+	MaxConsecutiveSkips  int           `json:"max_consecutive_skips,omitempty"`
 }
 
 // DefaultConfig returns standard operations defaults.
 func DefaultConfig() Config {
 	return Config{
-		WarningFreeBytes:  4 * 1024 * 1024 * 1024,  // 4 GB
-		RefuseFreeBytes:   2 * 1024 * 1024 * 1024,  // 2 GB
-		GoCacheHighBytes:  32 * 1024 * 1024 * 1024, // 32 GB
-		GoCacheLowBytes:   24 * 1024 * 1024 * 1024, // 24 GB
-		GoCacheMinAge:     7 * 24 * time.Hour,      // 7 days
-		ScratchTTL:        24 * time.Hour,          // 24 hours
-		MaxThreads:        2000,
-		CPUPinWindow:      15 * time.Second,
-		OrphanReapEnabled: true,
+		WarningFreeBytes:     4 * 1024 * 1024 * 1024,  // 4 GB
+		RefuseFreeBytes:      2 * 1024 * 1024 * 1024,  // 2 GB
+		GoCacheHighBytes:     32 * 1024 * 1024 * 1024, // 32 GB
+		GoCacheLowBytes:      24 * 1024 * 1024 * 1024, // 24 GB
+		GoCacheMinAge:        7 * 24 * time.Hour,      // 7 days
+		ScratchTTL:           24 * time.Hour,          // 24 hours
+		MaxThreads:           2000,
+		CPUPinWindow:         15 * time.Second,
+		OrphanReapEnabled:    true,
+		ReactivePauseEnabled: false,
+		PressurePauseRatio:   0.85,
+		PressureResumeRatio:  0.75,
+		MaxPauseDuration:     30 * time.Minute,
+		MaxConsecutiveSkips:  10,
 	}
 }
 

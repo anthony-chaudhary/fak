@@ -50,12 +50,17 @@ const (
 	LoadIdle LoadVerdict = "IDLE"
 	// LoadError means a phase was considered and failed.
 	LoadError LoadVerdict = "ERROR"
+	// LoadSkipped means the tick skipped all phases under an active pause.
+	LoadSkipped LoadVerdict = "SKIPPED"
+	// LoadPressureReliefOnly means deferrable junkwork was skipped under
+	// pressure while pressure-relief phases ran (#14477).
+	LoadPressureReliefOnly LoadVerdict = "PRESSURE_RELIEF_ONLY"
 )
 
 // ValidLoadVerdict reports whether v is a member of the closed verdict vocabulary.
 func ValidLoadVerdict(v LoadVerdict) bool {
 	switch v {
-	case LoadProductive, LoadIdle, LoadError:
+	case LoadProductive, LoadIdle, LoadError, LoadSkipped, LoadPressureReliefOnly:
 		return true
 	}
 	return false
@@ -68,10 +73,12 @@ func ValidLoadVerdict(v LoadVerdict) bool {
 // operator has to be able to see. Ran therefore means "this tick considered the
 // phase", and Mutated is the separate question of whether it did anything.
 type PhaseLoad struct {
-	Phase   string `json:"phase"`
-	Ran     bool   `json:"ran"`
-	WallMS  int64  `json:"wall_ms"`
-	Mutated bool   `json:"mutated"`
+	Phase       string `json:"phase"`
+	Ran         bool   `json:"ran"`
+	WallMS      int64  `json:"wall_ms"`
+	Mutated     bool   `json:"mutated"`
+	Deferrable  bool   `json:"deferrable,omitempty"`
+	PhaseAction string `json:"phase_action,omitempty"`
 	// Skipped is each host-reaching step the phase declined because the engine
 	// was not granted that reach, so a confined tick is visible, not silent.
 	Skipped []ScopeSkip `json:"skipped,omitempty"`
@@ -90,12 +97,15 @@ type LoadCycle struct {
 	HaveCPU    bool    `json:"have_cpu"`
 	// SelfCPUMillis is the CPU time the tick itself consumed. Zero with
 	// HaveCPU=false means "unmeasured", never "free".
-	SelfCPUMillis int64       `json:"self_cpu_ms"`
-	HaveSelfCPU   bool        `json:"have_self_cpu"`
-	Phases        []PhaseLoad `json:"phases"`
-	Mutations     int         `json:"mutations"`
-	Verdict       LoadVerdict `json:"verdict"`
-	Host          *HostLoad   `json:"host,omitempty"`
+	SelfCPUMillis int64            `json:"self_cpu_ms"`
+	HaveSelfCPU   bool             `json:"have_self_cpu"`
+	Phases        []PhaseLoad      `json:"phases"`
+	Mutations     int              `json:"mutations"`
+	Verdict       LoadVerdict      `json:"verdict"`
+	PauseAction   string           `json:"pause_action,omitempty"`
+	ReasonClass   PauseReasonClass `json:"reason_class,omitempty"`
+	TriggerValue  string           `json:"trigger_value,omitempty"`
+	Host          *HostLoad        `json:"host,omitempty"`
 }
 
 // HostSampleState is the closed three-way availability state for a host
