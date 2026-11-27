@@ -110,3 +110,57 @@ func TestInkling2LoopGenericConfigClassifiesAsRefusal(t *testing.T) {
 		}
 	}
 }
+
+func TestInkling2LoopVarloopPassesAndDSparkTapGuard(t *testing.T) {
+	varloopCfg, err := LoadInkling2LoopConfig(inkling2VarloopConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Load-time override 1..5 is accepted on varloop checkpoints.
+	for _, n := range []int{1, 2, 3, 4, 5} {
+		loaded, err := varloopCfg.WithLoadPasses(n)
+		if err != nil {
+			t.Fatalf("WithLoadPasses(%d) failed: %v", n, err)
+		}
+		if loaded.Loop.NumPasses != n {
+			t.Fatalf("WithLoadPasses(%d) got %d", n, loaded.Loop.NumPasses)
+		}
+	}
+	if _, err := varloopCfg.WithLoadPasses(0); err == nil {
+		t.Fatal("WithLoadPasses(0) should fail")
+	}
+
+	// Per-request passes <= loaded (5) are accepted; > loaded are refused.
+	loaded5, err := varloopCfg.WithLoadPasses(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req2, err := loaded5.WithRequestPasses(2)
+	if err != nil || req2.Loop.NumPasses != 2 {
+		t.Fatalf("WithRequestPasses(2) = %+v, %v", req2.Loop, err)
+	}
+	var pe *Inkling2LoopPassesError
+	if _, err := loaded5.WithRequestPasses(6); !errors.As(err, &pe) || pe.Requested != 6 || pe.Max != 5 {
+		t.Fatalf("WithRequestPasses(6) = %v, want Inkling2LoopPassesError(6, 5)", err)
+	}
+
+	// DSpark tap guard: passes=3 (48 visits) fits [5,23,41,48], passes=1 (24 visits) does not.
+	if err := varloopCfg.DSparkTapAllowed(3); err != nil {
+		t.Fatalf("DSparkTapAllowed(3) unexpected error: %v", err)
+	}
+	if err := varloopCfg.DSparkTapAllowed(1); err == nil {
+		t.Fatal("DSparkTapAllowed(1) should refuse when MTP taps exceed 24 visits")
+	}
+
+	// Non-varloop checkpoint refuses load-time or per-request pass changes.
+	fixedCfg, err := LoadInkling2LoopConfig(inkling2MiniConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixedCfg.WithLoadPasses(2); err == nil {
+		t.Fatal("non-varloop WithLoadPasses(2) should fail")
+	}
+	if _, err := fixedCfg.WithRequestPasses(2); err == nil {
+		t.Fatal("non-varloop WithRequestPasses(2) should fail")
+	}
+}

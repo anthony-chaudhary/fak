@@ -173,8 +173,14 @@ func (c Inkling2LoopConfig) Validate() error {
 		return fmt.Errorf("inkling2_loop config: require 128 routed/top-8/no-shared MoE with 1152 expert width")
 	}
 	l := c.Loop
-	if l.CoreStart != 6 || l.CoreEnd != 18 || l.NumPasses != 3 || l.GateRank != 64 {
-		return fmt.Errorf("inkling2_loop config: loop_config %+v, want core [6,18) x3 passes, gate rank 64", l)
+	if l.CoreStart != 6 || l.CoreEnd != 18 || l.GateRank != 64 {
+		return fmt.Errorf("inkling2_loop config: loop_config %+v, want core [6,18), gate rank 64", l)
+	}
+	if !l.IsVarloop && l.NumPasses != 3 {
+		return fmt.Errorf("inkling2_loop config: loop_config %+v, want 3 passes on fixed checkpoint", l)
+	}
+	if l.IsVarloop && l.NumPasses < 1 {
+		return fmt.Errorf("inkling2_loop config: loop_config %+v, want num_passes >= 1 on varloop checkpoint", l)
 	}
 	if l.CoreStart%c.LayersPerAttnResBlock != 0 || l.CoreEnd%c.LayersPerAttnResBlock != 0 {
 		return fmt.Errorf("inkling2_loop config: loop core [%d,%d) is not block aligned", l.CoreStart, l.CoreEnd)
@@ -182,7 +188,7 @@ func (c Inkling2LoopConfig) Validate() error {
 	if c.MTP.NumHiddenLayers != 3 || c.MTP.BlockSize != 8 {
 		return fmt.Errorf("inkling2_loop config: require 3-layer block-8 MTP draft head")
 	}
-	if n := len(c.MTP.TargetLayerIDs); n == 0 || c.MTP.TargetLayerIDs[n-1] != c.LayerVisits() {
+	if n := len(c.MTP.TargetLayerIDs); n == 0 || (!l.IsVarloop && c.MTP.TargetLayerIDs[n-1] != c.LayerVisits()) {
 		return fmt.Errorf("inkling2_loop config: MTP target_layer_ids %v must end at the %d-visit output", c.MTP.TargetLayerIDs, c.LayerVisits())
 	}
 	if c.QuantMethod != "modelopt" || c.QuantAlgo != "NVFP4" {
@@ -206,6 +212,53 @@ func inkling2LoopExpectedLocalLayers(layers, block int) []int {
 func (c Inkling2LoopConfig) LayerVisits() int {
 	core := c.Loop.CoreEnd - c.Loop.CoreStart
 	return c.NumHiddenLayers - core + core*c.Loop.NumPasses
+}
+
+// WithLoadPasses returns a copy of c with a load-time loop_num_passes override
+// for varloop checkpoints (1..N). Non-varloop checkpoints reject any override
+// other than their fixed pass count.
+func (c Inkling2LoopConfig) WithLoadPasses(passes int) (Inkling2LoopConfig, error) {
+	if passes < 1 {
+		return c, &Inkling2LoopPassesError{Requested: passes, Max: c.Loop.NumPasses}
+	}
+	if !c.Loop.IsVarloop && passes != c.Loop.NumPasses {
+		return c, &Inkling2LoopPassesError{Requested: passes, Max: c.Loop.NumPasses}
+	}
+	c.Loop.NumPasses = passes
+	return c, c.Validate()
+}
+
+// WithRequestPasses validates a per-request loop_num_passes (0 keeps loaded,
+// otherwise 1..c.Loop.NumPasses on varloop checkpoints) and returns the
+// effective config.
+func (c Inkling2LoopConfig) WithRequestPasses(requested int) (Inkling2LoopConfig, error) {
+	if requested == 0 {
+		return c, nil
+	}
+	if !c.Loop.IsVarloop && requested != c.Loop.NumPasses {
+		return c, &Inkling2LoopPassesError{Requested: requested, Max: c.Loop.NumPasses}
+	}
+	if requested < 1 || requested > c.Loop.NumPasses {
+		return c, &Inkling2LoopPassesError{Requested: requested, Max: c.Loop.NumPasses}
+	}
+	c.Loop.NumPasses = requested
+	return c, nil
+}
+
+// DSparkTapAllowed reports whether the checkpoint's MTP DSpark tap layers fit
+// within the layer visits of a request running with passes.
+func (c Inkling2LoopConfig) DSparkTapAllowed(passes int) error {
+	reqCfg, err := c.WithRequestPasses(passes)
+	if err != nil {
+		return err
+	}
+	visits := reqCfg.LayerVisits()
+	for _, tap := range reqCfg.MTP.TargetLayerIDs {
+		if tap < 0 || tap > visits {
+			return fmt.Errorf("inkling2_loop: dspark tap layer %d exceeds %d visits at %d passes", tap, visits, reqCfg.Loop.NumPasses)
+		}
+	}
+	return nil
 }
 
 // IsLooped reports whether stored layer runs once per pass.
