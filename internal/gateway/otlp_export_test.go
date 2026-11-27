@@ -255,3 +255,42 @@ func TestOTLPExportGenAINeverPostsContentAttributes(t *testing.T) {
 		t.Fatalf("attrs=%v", attrs)
 	}
 }
+
+func TestOTLPExportOpenInferenceAttrs(t *testing.T) {
+	span := genAIBaseSpan()
+	span.OpenInference = &OpenInferenceSpan{Kind: OpenInferenceKindLLM, ModelName: "qwen3.8", PromptTokens: 10, CompletionTokens: 5}
+	attrs := otlpGenAIStringAttrs(t, exportGenAIOnce(t, span))
+	want := map[string]string{
+		"http.request.method": "POST", "http.route": "/v1/chat/completions", "http.response.status_code": "int:200",
+		"openinference.span.kind": "LLM", "llm.model_name": "qwen3.8",
+		"llm.token_count.prompt": "int:10", "llm.token_count.completion": "int:5", "llm.token_count.total": "int:15",
+	}
+	if !reflect.DeepEqual(attrs, want) {
+		t.Fatalf("attrs=%v want %v", attrs, want)
+	}
+	bad := genAIBaseSpan()
+	bad.OpenInference = &OpenInferenceSpan{Kind: "BOGUS", ModelName: "m"}
+	if got := otlpGenAIStringAttrs(t, exportGenAIOnce(t, bad)); len(got) != 3 {
+		t.Fatalf("unknown kind must emit nothing: %v", got)
+	}
+}
+
+func TestOTLPExportToolCallAttrs(t *testing.T) {
+	span := genAIBaseSpan()
+	span.OpenInference = &OpenInferenceSpan{Kind: OpenInferenceKindTool, ToolName: "Flights", ToolCallID: "call_9", ToolCallArguments: `{"q":"x"}`, ToolCallResult: "ok"}
+	attrs := otlpGenAIStringAttrs(t, exportGenAIOnce(t, span))
+	if attrs["tool.name"] != "Flights" || attrs["tool.call.id"] != "call_9" || attrs["openinference.span.kind"] != "TOOL" {
+		t.Fatalf("attrs=%v", attrs)
+	}
+	if _, ok := attrs["tool.call.arguments"]; ok {
+		t.Fatalf("content exported without opt-in: %v", attrs)
+	}
+	if _, ok := attrs["tool.call.result"]; ok {
+		t.Fatalf("content exported without opt-in: %v", attrs)
+	}
+	span.OpenInference.IncludeContent = true
+	attrs = otlpGenAIStringAttrs(t, exportGenAIOnce(t, span))
+	if attrs["tool.call.arguments"] != `{"q":"x"}` || attrs["tool.call.result"] != "ok" {
+		t.Fatalf("opt-in content missing: %v", attrs)
+	}
+}

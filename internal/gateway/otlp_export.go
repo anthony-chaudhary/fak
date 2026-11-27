@@ -21,7 +21,83 @@ type otlpSpan struct {
 	Status                                             int
 	Start, End                                         time.Time
 	GenAI                                              *stepspan.GenAISpan `json:",omitempty"`
+	OpenInference                                      *OpenInferenceSpan  `json:",omitempty"`
 }
+
+// OpenInferenceSpecVersion pins the attribute vocabulary adapted from
+// arize-ai/openinference (Apache-2.0); no Phoenix code is vendored.
+const OpenInferenceSpecVersion = "openinference@11b283cbf57b21a27ccb67f2d1d2c2b548f04b4f"
+
+// OpenInference span kinds.
+const (
+	OpenInferenceKindLLM       = "LLM"
+	OpenInferenceKindAgent     = "AGENT"
+	OpenInferenceKindTool      = "TOOL"
+	OpenInferenceKindChain     = "CHAIN"
+	OpenInferenceKindRetriever = "RETRIEVER"
+	OpenInferenceKindEvaluator = "EVALUATOR"
+)
+
+// OpenInferenceSpan is co-emitted alongside gen_ai.* on the OTLP export so one
+// attribute map renders in Phoenix and Langfuse. Tool arguments/results are
+// content: they are exported only when IncludeContent is true (default off).
+type OpenInferenceSpan struct {
+	Kind              string
+	ModelName         string
+	PromptTokens      int
+	CompletionTokens  int
+	TotalTokens       int
+	ToolName          string
+	ToolCallID        string
+	ToolCallArguments string
+	ToolCallResult    string
+	IncludeContent    bool
+}
+
+func validOpenInferenceKind(k string) bool {
+	switch k {
+	case OpenInferenceKindLLM, OpenInferenceKindAgent, OpenInferenceKindTool,
+		OpenInferenceKindChain, OpenInferenceKindRetriever, OpenInferenceKindEvaluator:
+		return true
+	}
+	return false
+}
+
+// attrs returns the OpenInference attributes; an unknown or empty kind yields none.
+func (o *OpenInferenceSpan) attrs() []any {
+	if o == nil || !validOpenInferenceKind(o.Kind) {
+		return nil
+	}
+	out := []any{otlpAttr("openinference.span.kind", o.Kind)}
+	if o.ModelName != "" {
+		out = append(out, otlpAttr("llm.model_name", o.ModelName))
+	}
+	if o.PromptTokens > 0 || o.CompletionTokens > 0 || o.TotalTokens > 0 {
+		total := o.TotalTokens
+		if total == 0 {
+			total = o.PromptTokens + o.CompletionTokens
+		}
+		out = append(out, otlpIntAttr("llm.token_count.prompt", o.PromptTokens),
+			otlpIntAttr("llm.token_count.completion", o.CompletionTokens),
+			otlpIntAttr("llm.token_count.total", total))
+	}
+	if o.ToolName != "" {
+		out = append(out, otlpAttr("tool.name", o.ToolName))
+	}
+	if o.ToolCallID != "" {
+		out = append(out, otlpAttr("tool.call.id", o.ToolCallID))
+	}
+	if o.IncludeContent {
+		if o.ToolCallArguments != "" {
+			out = append(out, otlpAttr("tool.call.arguments", o.ToolCallArguments))
+		}
+		if o.ToolCallResult != "" {
+			out = append(out, otlpAttr("tool.call.result", o.ToolCallResult))
+		}
+	}
+	return out
+}
+
 type otlpExporter struct {
 	privacy                                     privacy.Policy
 	endpoint                                    string
@@ -108,6 +184,7 @@ func (e *otlpExporter) export(s otlpSpan) error {
 			}
 		}
 	}
+	attrs = append(attrs, s.OpenInference.attrs()...)
 	payload := map[string]any{"resourceSpans": []any{map[string]any{"resource": map[string]any{"attributes": []any{map[string]any{"key": "service.name", "value": map[string]any{"stringValue": "fak-gateway"}}}}, "scopeSpans": []any{map[string]any{"scope": map[string]any{"name": "github.com/anthony-chaudhary/fak/internal/gateway"}, "spans": []any{map[string]any{"traceId": s.TraceID, "spanId": s.SpanID, "parentSpanId": s.ParentSpanID, "name": name, "kind": 2, "startTimeUnixNano": fmt.Sprint(s.Start.UnixNano()), "endTimeUnixNano": fmt.Sprint(s.End.UnixNano()), "attributes": attrs, "status": map[string]any{"code": map[bool]int{true: 2, false: 1}[s.Status >= 500]}}}}}}}}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, e.endpoint, bytes.NewReader(body))
