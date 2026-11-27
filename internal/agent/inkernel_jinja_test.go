@@ -249,10 +249,14 @@ func TestNativeChatTemplateConstructionBinding(t *testing.T) {
 	}
 	link := filepath.Join(filepath.Dir(path), "link.jinja")
 	if err = os.Symlink(path, link); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = LoadNativeChatTemplateFile(link, digest, "model"); !errors.Is(err, ErrNativeChatTemplate) {
-		t.Fatal("symlink selection accepted")
+		// The host may lack symlink-creation privilege (Windows without Developer Mode /
+		// SeCreateSymbolicLinkPrivilege). Only the symlink-rejection case is untestable
+		// without a real link; the remaining bindings below do not depend on it.
+		t.Logf("symlink selection case unwitnessed: symlink creation not permitted: %v", err)
+	} else {
+		if _, err = LoadNativeChatTemplateFile(link, digest, "model"); !errors.Is(err, ErrNativeChatTemplate) {
+			t.Fatal("symlink selection accepted")
+		}
 	}
 	if _, err = LoadNativeChatTemplateFile(path, digest, ""); !errors.Is(err, ErrNativeChatTemplate) {
 		t.Fatal("partial explicit file selection accepted")
