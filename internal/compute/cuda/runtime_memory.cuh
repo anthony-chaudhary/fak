@@ -552,8 +552,49 @@ extern "C" void fcuda_graph_prewarm(int extra) {
   if (g_pool_bytes > g_pool_peak_bytes) g_pool_peak_bytes = g_pool_bytes;
 }
 
+extern "C" void fcuda_pool_trim_to_watermark(size_t watermark_bytes) {
+  if (v41_candidates_stream_uncertain()) return;
+  if (!fcuda_pool_may_release()) return;
+  while (g_pool_bytes > watermark_bytes) {
+    auto victim = g_pool.end();
+    unsigned long long oldest = ~0ULL;
+    for (auto it = g_pool.begin(); it != g_pool.end(); ++it) {
+      if (it->second.empty()) continue;
+      unsigned long long tick = g_pool_touch[it->first];
+      if (tick < oldest) { oldest = tick; victim = it; }
+    }
+    if (victim == g_pool.end()) return;
+    size_t bytes = victim->first;
+    auto &bucket = victim->second;
+    while (!bucket.empty() && g_pool_bytes > watermark_bytes) {
+      void *p = bucket.front();
+      cudaError_t status = cudaFree(p);
+      if (status != cudaSuccess) {
+        g_cuda_cleanup_status = (int)status;
+        CK(status);
+        return;
+      }
+      fak_alloc_untrack(p);
+      bucket.erase(bucket.begin());
+      g_pool_bytes -= bytes;
+      ++g_pool_evictions;
+    }
+    if (bucket.empty()) {
+      g_pool_touch.erase(bytes);
+      g_pool.erase(victim);
+    }
+  }
+}
+
+extern "C" int fcuda_pool_trim_to_watermark_checked(size_t watermark_bytes) {
+  fcuda_pool_trim_to_watermark(watermark_bytes);
+  if (g_cuda_cleanup_status != 0) return g_cuda_cleanup_status;
+  return v41_candidates_stream_uncertain() ? (int)cudaErrorNotReady : 0;
+}
+
 extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
   if (v41_candidates_stream_uncertain()) return;
+  if (g_capture_open) return;
   for (auto it = g_pool.begin(); it != g_pool.end(); ) {
     if (it->first > max_keep_bytes) {
       auto &bucket = it->second;
@@ -568,12 +609,16 @@ extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
         fak_alloc_untrack(p);
         bucket.pop_back();
         g_pool_bytes -= it->first;
+        ++g_pool_evictions;
       }
       g_pool_touch.erase(it->first);
       it = g_pool.erase(it);
     } else {
       ++it;
     }
+  }
+  if (max_keep_bytes > 0) {
+    fcuda_pool_trim_to_watermark(g_pool_cap_bytes);
   }
 }
 extern "C" int fcuda_trim_pool_large_checked(size_t max_keep_bytes) {
