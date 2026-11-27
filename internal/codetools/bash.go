@@ -74,6 +74,9 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	if !t.exactCommandsOnly && t.focusedCommands && !(focusedCommandAllowed(a.Command) || t.exactCommandAllowed(a.Command)) {
 		return refuse(CodeCommandDeny, "command is outside the focused coding allowlist").JSON(), true
 	}
+	if !t.exactCommandsOnly && !t.focusedCommands && deniedGitInspectionFlag(a.Command) {
+		return refuse(CodeCommandDeny, "Git inspection uses an explicitly denied option").JSON(), true
+	}
 	if r := a.Validate(); r != nil {
 		return r.JSON(), true
 	}
@@ -467,6 +470,29 @@ func goToolchainArgsAllowed(args []string) bool {
 }
 
 var deniedGitFlags = []string{"output", "ext-diff", "textconv", "no-index", "orderfile"}
+
+func deniedGitInspectionFlag(command string) bool {
+	for _, part := range splitCommandPipeline(command) {
+		if part.isOp {
+			continue
+		}
+		tokens := tokenizeCommand(part.text)
+		if len(tokens) < 3 || (!strings.EqualFold(tokens[0].val, "git") && !strings.EqualFold(tokens[0].val, "git.exe")) {
+			continue
+		}
+		switch tokens[1].val {
+		case "diff", "log", "status":
+			args := make([]string, 0, len(tokens)-2)
+			for _, token := range tokens[2:] {
+				args = append(args, token.val)
+			}
+			if hasDeniedGitFlag(args) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // Git accepts unambiguous long-option prefixes, so --outp=C:/x writes a file
 // just as --output does; the three-rune floor keeps --no-color and friends legal.

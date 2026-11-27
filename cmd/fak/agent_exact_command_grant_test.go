@@ -135,13 +135,16 @@ func TestAgentDefaultOpenBashPreservesKernelDenial(t *testing.T) {
 	const blocked = "rm -rf blocked-test-fixture"
 	results := runAgentBashCommandGrants(t,
 		[]string{"--bash-policy", "default_open", "--allow-bash-command", blocked},
-		"go env GOPATH 2>&1", blocked,
+		"go env GOPATH 2>&1", blocked, "git diff --output=result.txt",
 	)
 	if !strings.Contains(results[0], `"exit_code":0`) {
 		t.Fatalf("default-open Bash refused harmless test-output redirection: %s", results[0])
 	}
 	if !strings.Contains(results[1], "POLICY_BLOCK") {
 		t.Fatalf("kernel did not deny the prohibited command with an exact grant: %s", results[1])
+	}
+	if !strings.Contains(results[2], string(codetools.CodeCommandDeny)) {
+		t.Fatalf("default-open Bash admitted an explicitly denied Git option: %s", results[2])
 	}
 }
 
