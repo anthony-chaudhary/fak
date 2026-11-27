@@ -1076,3 +1076,34 @@ func TestInkling2MetalPrefillChunkForBudget(t *testing.T) {
 		t.Fatalf("explicit auto: got %d, want 1024", got)
 	}
 }
+
+// fak-test:runtime fast est=2ms
+func TestInkling2PrefillChunkCUDADefaultByVRAM(t *testing.T) {
+	unset := func(string) (string, bool) { return "", false }
+	set := func(v string) func(string) (string, bool) { return func(string) (string, bool) { return v, true } }
+	const GiB = int64(1) << 30
+
+	cases := []struct {
+		name   string
+		be     any
+		lookup func(string) (string, bool)
+		want   int
+	}{
+		{"cuda unknown free", fakeInk2MemBackend{name: "cuda", free: compute.FreeUnknown, known: false}, unset, 512},
+		{"cuda 12GiB free", fakeInk2MemBackend{name: "cuda", total: 16 * GiB, free: 12 * GiB, known: true}, unset, 512},
+		{"cuda 16GiB free", fakeInk2MemBackend{name: "cuda", total: 16 * GiB, free: 16 * GiB, known: true}, unset, 512},
+		{"cuda just below 24GiB", fakeInk2MemBackend{name: "cuda", total: 24 * GiB, free: 24*GiB - 1, known: true}, unset, 512},
+		{"cuda 24GiB free", fakeInk2MemBackend{name: "cuda", total: 32 * GiB, free: 24 * GiB, known: true}, unset, 2048},
+		{"cuda 77GiB free (96GB)", fakeInk2MemBackend{name: "cuda", total: 96 * GiB, free: 77 * GiB, known: true}, unset, 2048},
+		{"cuda 77GiB whitespace env", fakeInk2MemBackend{name: "cuda", total: 96 * GiB, free: 77 * GiB, known: true}, set("  "), 2048},
+		{"cuda 77GiB explicit 512", fakeInk2MemBackend{name: "cuda", total: 96 * GiB, free: 77 * GiB, known: true}, set("512"), 512},
+		{"cuda 77GiB explicit auto", fakeInk2MemBackend{name: "cuda", total: 96 * GiB, free: 77 * GiB, known: true}, set("auto"), 1024},
+		{"cuda 12GiB explicit 2048", fakeInk2MemBackend{name: "cuda", total: 16 * GiB, free: 12 * GiB, known: true}, set("2048"), 2048},
+		{"non-cuda 77GiB stays 512", fakeInk2MemBackend{name: "vulkan", total: 96 * GiB, free: 77 * GiB, known: true}, unset, 512},
+	}
+	for _, tc := range cases {
+		if got := inkling2PrefillChunkWantedOn(tc.be, tc.lookup); got != tc.want {
+			t.Errorf("%s: got %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}

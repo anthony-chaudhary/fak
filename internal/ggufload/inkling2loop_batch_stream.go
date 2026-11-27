@@ -17,7 +17,7 @@ import (
 )
 
 // Inkling2LoopMaxBatch is the widest cohort one row-batched forward serves.
-const Inkling2LoopMaxBatch = 16
+const Inkling2LoopMaxBatch = 64
 
 // inkling2BatchCtxAlign rounds a cohort's KV capacity so cohorts of similar length
 // share arena sizes.

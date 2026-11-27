@@ -445,6 +445,247 @@ __global__ void __launch_bounds__(INK2_ATS_TREE_GROUPS * 32)
   }
 }
 
+// FlashDecoding Split-K v4 (GQA-grouped + vectorized FP16 loads, headDim == 128):
+// - Dispatches ONLY on deep global caches (maxKeys > 8192) when
+//   FAK_INKLING2_ATTEND_FLASH=1, so short/local SWA layers keep their exact
+//   bit-identical staged path.
+// - Grid is (kvHeads=8, splits=S, C): each block loads K and V ONCE per key and
+//   updates all GQA Q-heads (heads/kvHeads = 3) in registers -> 3x less KV DRAM traffic.
+// - FP16 K/V loads use 64-bit uint2 (4 halfs/lane, 100% coalesced 256B/warp).
+#define INK2_FLASH_WARPS 4
+#define INK2_FLASH_MAX_SPLITS 96
+
+template <class T, bool NVFP4 = false, int GQA = 3>
+__global__ void __launch_bounds__(INK2_FLASH_WARPS * 32)
+    k_ink2_attend_flash_gqa_split(const float *q, const float *r, const float *sinks, const float *relBias,
+                                  const T *kcache, const T *vcache, float *scratch, const float *meta, int heads,
+                                  int kvHeads, int headDim, int relLen, int extent, int window, int cap, float scale,
+                                  int splits, Ink2Seq sq, const void *kscale = nullptr, const void *vscale = nullptr) {
+  ink2_pdl_enter();
+  const int kvh = blockIdx.x, sp = blockIdx.y, seq = blockIdx.z;
+  q = ink2_row(q, sq.q, seq);
+  r = ink2_row(r, sq.r, seq);
+  sinks = ink2_row(sinks, sq.sinks, seq);
+  kcache = ink2_row(kcache, sq.kc, seq);
+  vcache = ink2_row(vcache, sq.vc, seq);
+  scratch = (float *)ink2_row((double *)scratch, sq.scores, seq);
+  meta = ink2_row(meta, sq.meta, seq);
+
+  const int kvDim = kvHeads * headDim;
+  int first;
+  const int n = ink2_ats_keys(meta, window, cap, &first);
+  const int pos = first + n - 1;
+  const int per = (n + splits - 1) / splits;
+  const int j0 = sp * per;
+  const int j1 = min(n, j0 + per);
+
+  const int lane = threadIdx.x & 31;
+  const int warp = threadIdx.x >> 5;
+  const int h0 = kvh * GQA;
+
+  // Each lane handles 4 contiguous dims: d0 = lane*4 .. lane*4+3 (128 dims total).
+  const int d0 = lane << 2;
+  float q0[GQA], q1[GQA], q2[GQA], q3[GQA];
+  float acc0[GQA], acc1[GQA], acc2[GQA], acc3[GQA];
+  float m[GQA], l[GQA], sinkVal[GQA];
+#pragma unroll
+  for (int g = 0; g < GQA; ++g) {
+    const float4 qv = *(const float4 *)(q + (size_t)(h0 + g) * headDim + d0);
+    q0[g] = qv.x; q1[g] = qv.y; q2[g] = qv.z; q3[g] = qv.w;
+    acc0[g] = 0.f; acc1[g] = 0.f; acc2[g] = 0.f; acc3[g] = 0.f;
+    m[g] = -INFINITY;
+    l[g] = 0.f;
+    sinkVal[g] = -sinks[h0 + g];
+  }
+
+  int slot = (j0 + warp < j1) ? ((first + j0 + warp) % cap) : 0;
+  for (int j = j0 + warp; j < j1; j += INK2_FLASH_WARPS) {
+    const int dist = pos - (first + j);
+    const size_t slotIdx = (size_t)slot;
+    slot += INK2_FLASH_WARPS; if (slot >= cap) slot -= cap;
+
+    // Load K ONCE for all GQA heads in this group.
+    float k0, k1, k2, k3;
+    if constexpr (NVFP4) {
+      const int hBytes = headDim >> 1, hBlks = headDim >> 4;
+      const uint8_t *kr = (const uint8_t *)kcache + slotIdx * (size_t)(kvHeads * hBytes) + (size_t)kvh * hBytes;
+      const uint8_t *ks = (const uint8_t *)kscale + slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks;
+      const float bsc = ink2_e4m3fn_decode(ks[d0 >> 4]);
+      const float2 p0 = ink2_e2m1x2_decode_f2(kr[d0 >> 1]);
+      const float2 p1 = ink2_e2m1x2_decode_f2(kr[(d0 >> 1) + 1]);
+      k0 = __fmul_rn(p0.x, bsc); k1 = __fmul_rn(p0.y, bsc);
+      k2 = __fmul_rn(p1.x, bsc); k3 = __fmul_rn(p1.y, bsc);
+    } else if constexpr (sizeof(T) == 2) {
+      const uint2 raw = *(const uint2 *)(kcache + slotIdx * kvDim + (size_t)kvh * headDim + d0);
+      const __half2 h2a = *reinterpret_cast<const __half2 *>(&raw.x);
+      const __half2 h2b = *reinterpret_cast<const __half2 *>(&raw.y);
+      const float2 fa = __half22float2(h2a);
+      const float2 fb = __half22float2(h2b);
+      k0 = fa.x; k1 = fa.y; k2 = fb.x; k3 = fb.y;
+    } else if constexpr (sizeof(T) == 1) {
+      const uint32_t raw = *(const uint32_t *)(kcache + slotIdx * kvDim + (size_t)kvh * headDim + d0);
+      const float ksc = ((const float *)kscale)[slotIdx * (size_t)kvHeads + (size_t)kvh];
+      k0 = ink2_kv_f((T)(raw & 0xff)) * ksc;
+      k1 = ink2_kv_f((T)((raw >> 8) & 0xff)) * ksc;
+      k2 = ink2_kv_f((T)((raw >> 16) & 0xff)) * ksc;
+      k3 = ink2_kv_f((T)((raw >> 24) & 0xff)) * ksc;
+    } else {
+      const float4 fv = *(const float4 *)(kcache + slotIdx * kvDim + (size_t)kvh * headDim + d0);
+      k0 = fv.x; k1 = fv.y; k2 = fv.z; k3 = fv.w;
+    }
+
+    float dot[GQA];
+#pragma unroll
+    for (int g = 0; g < GQA; ++g) {
+      dot[g] = fmaf(q0[g], k0, fmaf(q1[g], k1, fmaf(q2[g], k2, q3[g] * k3)));
+    }
+    float rd[GQA];
+#pragma unroll
+    for (int g = 0; g < GQA; ++g) rd[g] = 0.f;
+    if (dist < extent) {
+      const float *rb = relBias + (size_t)dist * relLen;
+      for (int i = lane; i < relLen; i += 32) {
+        const float rbv = rb[i];
+#pragma unroll
+        for (int g = 0; g < GQA; ++g) {
+          rd[g] = fmaf(rbv, r[(size_t)(h0 + g) * relLen + i], rd[g]);
+        }
+      }
+    }
+#pragma unroll
+    for (int o = 16; o > 0; o >>= 1) {
+#pragma unroll
+      for (int g = 0; g < GQA; ++g) {
+        dot[g] += __shfl_xor_sync(0xffffffff, dot[g], o);
+        if (dist < extent) rd[g] += __shfl_xor_sync(0xffffffff, rd[g], o);
+      }
+    }
+
+    // Load V ONCE for all GQA heads in this group.
+    float v0, v1, v2, v3;
+    if constexpr (NVFP4) {
+      const int hBytes = headDim >> 1, hBlks = headDim >> 4;
+      const uint8_t *vr = (const uint8_t *)vcache + slotIdx * (size_t)(kvHeads * hBytes) + (size_t)kvh * hBytes;
+      const uint8_t *vs = (const uint8_t *)vscale + slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks;
+      const float bsc = ink2_e4m3fn_decode(vs[d0 >> 4]);
+      const float2 p0 = ink2_e2m1x2_decode_f2(vr[d0 >> 1]);
+      const float2 p1 = ink2_e2m1x2_decode_f2(vr[(d0 >> 1) + 1]);
+      v0 = __fmul_rn(p0.x, bsc); v1 = __fmul_rn(p0.y, bsc);
+      v2 = __fmul_rn(p1.x, bsc); v3 = __fmul_rn(p1.y, bsc);
+    } else if constexpr (sizeof(T) == 2) {
+      const uint2 raw = *(const uint2 *)(vcache + slotIdx * kvDim + (size_t)kvh * headDim + d0);
+      const __half2 h2a = *reinterpret_cast<const __half2 *>(&raw.x);
+      const __half2 h2b = *reinterpret_cast<const __half2 *>(&raw.y);
+      const float2 fa = __half22float2(h2a);
+      const float2 fb = __half22float2(h2b);
+      v0 = fa.x; v1 = fa.y; v2 = fb.x; v3 = fb.y;
+    } else if constexpr (sizeof(T) == 1) {
+      const uint32_t raw = *(const uint32_t *)(vcache + slotIdx * kvDim + (size_t)kvh * headDim + d0);
+      const float vsc = ((const float *)vscale)[slotIdx * (size_t)kvHeads + (size_t)kvh];
+      v0 = ink2_kv_f((T)(raw & 0xff)) * vsc;
+      v1 = ink2_kv_f((T)((raw >> 8) & 0xff)) * vsc;
+      v2 = ink2_kv_f((T)((raw >> 16) & 0xff)) * vsc;
+      v3 = ink2_kv_f((T)((raw >> 24) & 0xff)) * vsc;
+    } else {
+      const float4 fv = *(const float4 *)(vcache + slotIdx * kvDim + (size_t)kvh * headDim + d0);
+      v0 = fv.x; v1 = fv.y; v2 = fv.z; v3 = fv.w;
+    }
+
+#pragma unroll
+    for (int g = 0; g < GQA; ++g) {
+      float bias = sinkVal[g];
+      if (dist < extent) bias += rd[g];
+      const float sc = dot[g] * scale + bias;
+      const float mNew = fmaxf(m[g], sc);
+      const float alpha = (m[g] == -INFINITY) ? 0.f : __expf(m[g] - mNew);
+      const float w = __expf(sc - mNew);
+      l[g] = l[g] * alpha + w;
+      m[g] = mNew;
+      acc0[g] = fmaf(w, v0, acc0[g] * alpha);
+      acc1[g] = fmaf(w, v1, acc1[g] * alpha);
+      acc2[g] = fmaf(w, v2, acc2[g] * alpha);
+      acc3[g] = fmaf(w, v3, acc3[g] * alpha);
+    }
+  }
+
+  __shared__ float sm[INK2_FLASH_WARPS];
+  __shared__ float sl[INK2_FLASH_WARPS];
+  __shared__ float sacc[INK2_FLASH_WARPS][128];
+  const int dd = threadIdx.x; // 0..127
+
+#pragma unroll
+  for (int g = 0; g < GQA; ++g) {
+    if (lane == 0) {
+      sm[warp] = m[g];
+      sl[warp] = l[g];
+    }
+    sacc[warp][d0] = acc0[g];
+    sacc[warp][d0 + 1] = acc1[g];
+    sacc[warp][d0 + 2] = acc2[g];
+    sacc[warp][d0 + 3] = acc3[g];
+    __syncthreads();
+
+    float *dst = scratch + (size_t)(h0 + g) * (size_t)cap * 2 + (size_t)sp * 130;
+    float bm = -INFINITY;
+    for (int w = 0; w < INK2_FLASH_WARPS; ++w) bm = fmaxf(bm, sm[w]);
+    float bl = 0.f;
+    float ba = 0.f;
+    if (bm > -INFINITY) {
+      for (int w = 0; w < INK2_FLASH_WARPS; ++w) {
+        if (sm[w] > -INFINITY) {
+          const float fw = expf(sm[w] - bm);
+          bl += sl[w] * fw;
+          ba = fmaf(sacc[w][dd], fw, ba);
+        }
+      }
+    }
+    if (dd == 0) {
+      dst[0] = bm;
+      dst[1] = bl;
+    }
+    dst[2 + dd] = ba;
+    __syncthreads();
+  }
+}
+
+__global__ void __launch_bounds__(128)
+    k_ink2_attend_flash_combine(const float *scratch, float *out, int heads, int headDim, int cap, int splits,
+                                Ink2Seq sq) {
+  ink2_pdl_enter();
+  const int h = blockIdx.x, seq = blockIdx.z;
+  scratch = (const float *)ink2_row((const double *)scratch, sq.scores, seq);
+  out = ink2_row(out, sq.out, seq);
+  const float *base = scratch + (size_t)h * (size_t)cap * 2;
+  const int dd = threadIdx.x;
+
+  float M = 0.f;
+  for (int s = 0; s < splits; ++s) {
+    const float ms = base[(size_t)s * 130];
+    if (ms > M) M = ms;
+  }
+  float L = expf(-M);
+  float acc = 0.f;
+  for (int s = 0; s < splits; ++s) {
+    const float ms = base[(size_t)s * 130];
+    if (ms > -INFINITY) {
+      const float ls = base[(size_t)s * 130 + 1];
+      const float fw = expf(ms - M);
+      L += ls * fw;
+      acc = fmaf(base[(size_t)s * 130 + 2 + dd], fw, acc);
+    }
+  }
+  out[(size_t)h * headDim + dd] = acc / L;
+}
+
+static int g_ink2_ats_flash = -1;
+static bool ink2_ats_flash(void) {
+  if (g_ink2_ats_flash < 0) {
+    const char *v = getenv("FAK_INKLING2_ATTEND_FLASH");
+    g_ink2_ats_flash = (v && v[0] == '1' && v[1] == 0) ? 1 : 0;
+  }
+  return g_ink2_ats_flash == 1;
+}
+
 static int g_ink2_ats_exact = -1;
 
 static bool ink2_ats_exact(void) {
@@ -525,6 +766,20 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
     }
   }
   if (!staged) osmem = 0;
+  if (ink2_ats_flash() && headDim == 128 && maxKeys > 8192 && heads == kvHeads * 3 &&
+      (size_t)cap * 2 >= (size_t)INK2_FLASH_MAX_SPLITS * 130) {
+    int splits = maxKeys >= 131072 ? 96 : (maxKeys >= 32768 ? 64 : 32);
+    if (splits > INK2_FLASH_MAX_SPLITS) splits = INK2_FLASH_MAX_SPLITS;
+    const dim3 gf(kvHeads, splits, C), gc(heads, 1, C);
+    FCUDA_TS("k_ink2_attend_flash_gqa_split", gf,
+             (k_ink2_attend_flash_gqa_split<T, NVFP4, 3><<<gf, INK2_FLASH_WARPS * 32, 0, g_stream>>>(
+                 q, r, sinks, relBias, kcache, vcache, (float *)scores, meta, heads, kvHeads, headDim, relLen,
+                 extent, window, cap, scale, splits, sq, kscale, vscale)));
+    FCUDA_TS("k_ink2_attend_flash_combine", gc,
+             (k_ink2_attend_flash_combine<<<gc, 128, 0, g_stream>>>((const float *)scores, out, heads, headDim, cap,
+                                                                    splits, sq)));
+    return true;
+  }
   const dim3 g1(heads, chunks, C), g3(heads, headDim / 32, C);
   FCUDA_TS("k_ink2_attend_scores", g1, (k_ink2_attend_scores<T, NVFP4><<<g1, INK2_ATS_WARPS * 32, 0, g_stream>>>(
                                            q, r, sinks, relBias, kcache, scores, out, meta, heads, kvHeads, headDim,

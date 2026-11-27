@@ -541,9 +541,9 @@ extern "C" int fcuda_ink2p_dense_mmq(const void *W, const float *S, const float 
 // fcuda_ink2p_gemm_f32_v2 has the signature of fcuda_ink2p_gemm_f32 (W [rows][cols], X [T][cols], Y [T][rows]).
 extern "C" int fcuda_ink2p_gemm_f32_v2(const float *W, const float *X, float *Y, int rows, int cols, int T) {
   if (!W || !X || !Y || rows <= 0 || cols <= 0 || T <= 0) return (int)cudaErrorInvalidValue;
-  // Narrow projections (sink, conv proj) have too few output tiles to fill the SMs; the warp-per-dot kernel
-  // spreads them over T instead.
-  if (rows < 64) return fcuda_ink2p_gemm_f32(W, X, Y, rows, cols, T);
+  // Narrow projections (sink, conv proj) and small-T batches have too few output tiles to fill
+  // the SMs; the warp-per-dot kernel spreads them over rows x T instead.
+  if (rows < 64 || (rows < 512 && T <= 64)) return fcuda_ink2p_gemm_f32(W, X, Y, rows, cols, T);
   if (rows < 512) {
     const dim3 grid((rows + 31) / 32, (T + 31) / 32);
     FCUDA_TS("k_ink2d_f32", grid, ink2d::k_ink2d_f32<32><<<grid, 256, 0, g_stream>>>(W, X, Y, rows, cols, T));

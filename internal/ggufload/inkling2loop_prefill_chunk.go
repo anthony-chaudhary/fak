@@ -13,8 +13,8 @@ import (
 )
 
 // inkling2PrefillChunkEnv opts into another batched prefill forward width. Unset keeps
-// the 512-token chunk and every buffer size that goes with it, except on Metal, whose
-// unset default is inkling2PrefillChunkMetal. "1024" (or any multiple
+// the 512-token chunk and every buffer size that goes with it, except on Metal and
+// high-VRAM CUDA (>= 24 GiB free), whose unset default is 2048. "1024" (or any multiple
 // of 16 in [64, 2048]) sets the width, and "auto" selects 1024.
 //
 // A wide setting costs memory at bind, long prompt or not: a scalar session widens
@@ -105,11 +105,36 @@ func Inkling2PrefillChunkForBudget(hp model.Inkling2LoopHParams, freeBytes int64
 	return 64
 }
 
+// inkling2PrefillChunkCUDAHighVRAMFree is the minimum free VRAM (24 GiB) for CUDA
+// sessions to auto-select inkling2PrefillChunkCUDAHighVRAM when
+// FAK_INKLING2_PREFILL_CHUNK is unset; <=16 GiB cards keep the 512-token base chunk
+// so they never OOM.
+const (
+	inkling2PrefillChunkCUDAHighVRAMFree int64 = 24 << 30
+	inkling2PrefillChunkCUDAHighVRAM           = 2048
+)
+
+// inkling2CUDAPrefillChunkDefault returns the unset-env prefill chunk for a CUDA
+// device reporting (free, known) VRAM bytes.
+func inkling2CUDAPrefillChunkDefault(free int64, known bool) int {
+	if known && free >= inkling2PrefillChunkCUDAHighVRAMFree {
+		return inkling2PrefillChunkCUDAHighVRAM
+	}
+	return inkling2PrefillChunkBase
+}
+
 // inkling2PrefillChunkWantedOn is inkling2PrefillChunkWanted on backend be: an unset
-// setting on Metal asks for inkling2PrefillChunkMetal, still subject to admission.
+// setting asks for 2048 on Metal and on high-VRAM CUDA (>= 24 GiB free), still subject
+// to admission.
 func inkling2PrefillChunkWantedOn(be any, lookup func(string) (string, bool)) int {
-	if v, set := lookup(inkling2PrefillChunkEnv); (!set || strings.TrimSpace(v) == "") && inkling2OnMetal(be) {
-		return inkling2PrefillChunkMetal
+	if v, set := lookup(inkling2PrefillChunkEnv); !set || strings.TrimSpace(v) == "" {
+		if inkling2OnMetal(be) {
+			return inkling2PrefillChunkMetal
+		}
+		if inkling2OnCUDA(be) {
+			_, free, known := inkling2DeviceFree(be)
+			return inkling2CUDAPrefillChunkDefault(free, known)
+		}
 	}
 	return inkling2PrefillChunkWanted(lookup)
 }
@@ -117,6 +142,11 @@ func inkling2PrefillChunkWantedOn(be any, lookup func(string) (string, bool)) in
 func inkling2OnMetal(be any) bool {
 	n, ok := be.(interface{ Name() string })
 	return ok && n.Name() == "metal"
+}
+
+func inkling2OnCUDA(be any) bool {
+	n, ok := be.(interface{ Name() string })
+	return ok && n.Name() == "cuda"
 }
 
 // inkling2MetalWorkingSet is swapped by tests that run without a Metal device.

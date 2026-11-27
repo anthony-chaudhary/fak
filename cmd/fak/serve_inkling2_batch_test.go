@@ -178,6 +178,8 @@ func TestInkling2BatchAdmissionCoalescesSpreadArrivalsIntoOneCohort(t *testing.T
 		sent = append(sent, r)
 		queue <- r
 	}
+	clk.waitArmed(t)
+	clk.advance(inkling2BatchGapDefault)
 	requireInkling2Cohort(t, <-got, sent)
 }
 
@@ -201,9 +203,9 @@ func requireInkling2Cohort(t *testing.T, got, sent []*inkling2QueuedRequest) {
 
 func TestInkling2BatchAdmissionGathersAlreadyQueuedWithoutWaiting(t *testing.T) {
 	clk := newFakeInkling2Clock()
-	queue := make(chan *inkling2QueuedRequest, 16)
+	queue := make(chan *inkling2QueuedRequest, ggufload.Inkling2LoopMaxBatch)
 	var sent []*inkling2QueuedRequest
-	for i := 0; i < 15; i++ {
+	for i := 0; i < ggufload.Inkling2LoopMaxBatch-1; i++ {
 		r := &inkling2QueuedRequest{}
 		sent = append(sent, r)
 		queue <- r
@@ -374,7 +376,7 @@ func TestInkling2BatchAdmissionEnv(t *testing.T) {
 		return func(k string) (string, bool) { v, ok := kv[k]; return v, ok }
 	}
 	a, err := inkling2AdmissionFromEnv(env(nil))
-	if err != nil || a.gap != 4*time.Millisecond || a.maxWait != 25*time.Millisecond || a.max != 16 {
+	if err != nil || a.gap != 4*time.Millisecond || a.maxWait != 25*time.Millisecond || a.max != ggufload.Inkling2LoopMaxBatch {
 		t.Fatalf("defaults = %+v err=%v", a, err)
 	}
 	a, err = inkling2AdmissionFromEnv(env(map[string]string{"FAK_INKLING2_BATCH_GAP": "8ms", "FAK_INKLING2_BATCH_WAIT": "100ms"}))

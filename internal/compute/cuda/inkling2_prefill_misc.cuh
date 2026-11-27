@@ -248,9 +248,11 @@ extern "C" int fcuda_ink2p_ctrl_down_v2(const float *cur, const float *msg, cons
   if (n % INK2M_CD_KC != 0 || rank % INK2M_CD_RK != 0 || ((uintptr_t)cur & 15) || ((uintptr_t)msg & 15) ||
       ((uintptr_t)W & 15))
     return fcuda_ink2p_ctrl_down(cur, msg, W, g, n, rank, T);
+  const dim3 grid((T + INK2M_CD_TOK - 1) / INK2M_CD_TOK, rank / INK2M_CD_RK, 1);
+  // Small-T batches produce too few 16x32 tiles to fill the SMs; fcuda_ink2p_ctrl_down launches rank x T blocks.
+  if ((size_t)grid.x * grid.y < 16) return fcuda_ink2p_ctrl_down(cur, msg, W, g, n, rank, T);
   Ink2PCtrlSet cs = {};
   cs.cur[0] = cur; cs.msg[0] = msg; cs.down[0] = W; cs.g = g;
-  const dim3 grid((T + INK2M_CD_TOK - 1) / INK2M_CD_TOK, rank / INK2M_CD_RK, 1);
   FCUDA_TS("k_ink2m_ctrl_down", grid, k_ink2m_ctrl_down<<<grid, 256, 0, g_stream>>>(cs, n, rank, T));
   return ink2_last_error();
 }

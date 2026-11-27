@@ -69,11 +69,12 @@ func splitTestCheck(t *testing.T, rows []*inkling2QueuedRequest, got [][]int) {
 // A cohort refused device memory before any row ran is halved until its halves fit,
 // and every row is served once with its own tokens instead of failing.
 func TestInkling2BatchEngineHalvesRefusedCohortAndServesEveryRow(t *testing.T) {
-	e, widths, scalar := splitTestEngine(t, 4)
-	rows, got := splitTestRows(ggufload.Inkling2LoopMaxBatch)
+	w := ggufload.Inkling2LoopMaxBatch
+	e, widths, scalar := splitTestEngine(t, w/4)
+	rows, got := splitTestRows(w)
 	e.execute(rows)
 	splitTestCheck(t, rows, got)
-	if want := []int{16, 8, 4, 4, 8, 4, 4}; !reflect.DeepEqual(*widths, want) {
+	if want := []int{w, w / 2, w / 4, w / 4, w / 2, w / 4, w / 4}; !reflect.DeepEqual(*widths, want) {
 		t.Fatalf("batch widths %v, want %v", *widths, want)
 	}
 	if *scalar != 0 || e.splitGroups.Load() != 3 {
