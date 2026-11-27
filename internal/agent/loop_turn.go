@@ -627,9 +627,23 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	r.metrics.FinalAnswer = asst.Content
 	r.metrics.FinalFinishReason = comp.FinishReason
 	r.metrics.FinalAnswerTruncated = comp.FinishReason == "length"
+	// On non-booking tasks (e.g. coding workspaces where book_flight is not offered),
+	// a clean, non-truncated, non-surrender final answer completes the task.
+	if !r.hasTool(toolBook) && comp.FinishReason != "length" && !stopgate.IsSurrenderNote(asst.Content) && strings.TrimSpace(asst.Content) != "" {
+		r.metrics.TaskCompleted = true
+	}
 	r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 	r.finalizeFak()
 	return Message{}, armTurnStop, nil
+}
+
+func (r *armRunner) hasTool(name string) bool {
+	for _, t := range r.tools {
+		if t.Function.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // truncatedToolCall handles a turn whose tool call ran out of output budget. The first

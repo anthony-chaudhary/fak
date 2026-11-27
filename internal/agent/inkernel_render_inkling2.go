@@ -96,9 +96,21 @@ func inkling2ChatRequest(messages []Message, tools []ToolDef, sp SampleParams) (
 	return messages, tools
 }
 
+// inkling2PrefillsAnswerHeader reports whether renderInkling2Chat should append
+// the assistant text-block header directly after the prompt. When a caller
+// explicitly asks for reasoning_effort="none" and no tools are offered,
+// prefilling <|message_model|><|content_text|> keeps the model from opening a
+// hidden <|content_thinking|> block and burning max_tokens before any visible
+// answer is emitted. When tools are offered, the header is left open so the
+// model can still emit <|message_model|><tool><|content_invoke_tool_json|>.
+func inkling2PrefillsAnswerHeader(tools []ToolDef, sp SampleParams) bool {
+	return strings.EqualFold(strings.TrimSpace(sp.ReasoningEffort), "none") && len(tools) == 0
+}
+
 // renderInkling2Chat is a port of the Inkling-2 GGUF tokenizer.chat_template.
 // The template has no generation prompt: the model writes its own
-// <|message_model|> header, so the prompt ends on the last closed block.
+// <|message_model|> header, so the prompt ends on the last closed block, except
+// when effort=none with no tools prefills the visible answer header.
 func renderInkling2Chat(messages []Message, tools []ToolDef, sp SampleParams) string {
 	messages, tools = inkling2ChatRequest(messages, tools, sp)
 	var b strings.Builder
@@ -146,6 +158,9 @@ func renderInkling2Chat(messages []Message, tools []ToolDef, sp SampleParams) st
 	}
 	if !effortEmitted {
 		b.WriteString(effort)
+	}
+	if inkling2PrefillsAnswerHeader(tools, sp) {
+		b.WriteString(inkling2RoleModel + inkling2ContentText)
 	}
 	return b.String()
 }

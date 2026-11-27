@@ -103,6 +103,29 @@ func TestInkling2RenderEffortPreamble(t *testing.T) {
 	}
 }
 
+func TestInkling2RenderEffortNonePrefillsAnswerHeaderOnlyWithoutTools(t *testing.T) {
+	msgs := []Message{{Role: RoleUser, Content: "hi"}}
+	// Explicit effort=none with no tools prefills <|message_model|><|content_text|>
+	// so the model cannot spend max_tokens inside a hidden thinking block.
+	noTools := renderInkling2Chat(msgs, nil, SampleParams{ReasoningEffort: "none"})
+	wantNoTools := `<|message_system|><|content_text|>Thinking effort level: 0<|end_message|>` +
+		`<|message_user|><|content_text|>hi<|end_message|>` +
+		`<|message_model|><|content_text|>`
+	if noTools != wantNoTools {
+		t.Fatalf("effort=none no-tools render = %q, want %q", noTools, wantNoTools)
+	}
+	// Explicit effort=none WITH tools leaves the header open for tool calls.
+	withTools := renderInkling2Chat(msgs, inkling2TestTools(), SampleParams{ReasoningEffort: "none"})
+	if strings.HasSuffix(withTools, `<|message_model|><|content_text|>`) {
+		t.Fatalf("effort=none with tools must not prefill text header: %q", withTools)
+	}
+	// Unset effort keeps the historical template ending on <|end_message|>.
+	unset := renderInkling2Chat(msgs, nil, SampleParams{})
+	if strings.HasSuffix(unset, `<|message_model|><|content_text|>`) {
+		t.Fatalf("unset effort must not prefill text header: %q", unset)
+	}
+}
+
 func TestInkling2RenderToolNamesAndEscaping(t *testing.T) {
 	tools := []ToolDef{{Function: ToolDefFunction{Name: "Note", Description: "a<b & \"ü\"\n", Parameters: json.RawMessage(`{}`)}}}
 	messages := []Message{

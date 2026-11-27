@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"math/rand"
+	randv2 "math/rand/v2"
 	"strings"
 	"sync"
 
@@ -55,6 +58,16 @@ type Inkling2LoopGenerator interface {
 	Generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(id int) bool) (Inkling2LoopGeneration, error)
 }
 
+// Inkling2LoopLogitGenerator is an optional interface implemented by generators
+// that expose per-step logits for host-side sampling. When a request specifies
+// temperature > 0 and the generator implements this interface, Inkling2LoopPlanner
+// samples tokens using temperature, top_p, top_k, min_p, logit_bias, repetition
+// penalties, and seed via the shared in-kernel sampler. When temperature <= 0 (or
+// omitted), Inkling2LoopPlanner keeps the greedy fast path through Generate.
+type Inkling2LoopLogitGenerator interface {
+	GenerateLogits(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func(logits []float32) (int, error), emit func(id int) bool) (Inkling2LoopGeneration, error)
+}
+
 // inkling2LoopGPUOwner is implemented by a generator whose own executor serializes
 // every GPU call; the planner admits concurrent turns to such a generator so they
 // can share a cohort.
@@ -93,13 +106,75 @@ func NewInkling2LoopPlanner(gen Inkling2LoopGenerator, tok *tokenizer.Tokenizer,
 	return &Inkling2LoopPlanner{gen: gen, tok: tok, cfg: cfg, modelID: modelID, stops: stops, contextTokens: contextTokens}, nil
 }
 
-func (p *Inkling2LoopPlanner) generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, emit func(int) bool) (Inkling2LoopGeneration, error) {
+func (p *Inkling2LoopPlanner) generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sp SampleParams, emit func(int) bool) (Inkling2LoopGeneration, error) {
+	if sp.Temperature != nil && *sp.Temperature > 0 {
+		if lg, ok := p.gen.(Inkling2LoopLogitGenerator); ok {
+			sampler := newInkling2LoopSampler(sp)
+			if owner, ok := p.gen.(inkling2LoopGPUOwner); ok && owner.SerializesGPUAccess() {
+				return lg.GenerateLogits(ctx, prompt, maxNew, stops, sampler, emit)
+			}
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			return lg.GenerateLogits(ctx, prompt, maxNew, stops, sampler, emit)
+		}
+	}
 	if owner, ok := p.gen.(inkling2LoopGPUOwner); ok && owner.SerializesGPUAccess() {
 		return p.gen.Generate(ctx, prompt, maxNew, stops, emit)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.gen.Generate(ctx, prompt, maxNew, stops, emit)
+}
+
+// newInkling2LoopSampler builds a per-request stateful sampler closure backed by the
+// shared in-kernel sampler (temperature, top_p, top_k, min_p, logit_bias, repetition
+// penalties, and deterministic seed). The closure owns its reusable workspace and
+// per-token count histogram so repeated token steps avoid allocations.
+func newInkling2LoopSampler(sp SampleParams) func(logits []float32) (int, error) {
+	temp := *sp.Temperature
+	topP := nativeTopP(sp.TopP)
+	topK := 0
+	if sp.TopK != nil && *sp.TopK > 0 {
+		topK = *sp.TopK
+	}
+	minP := 0.0
+	if sp.MinP != nil && *sp.MinP > 0 {
+		minP = *sp.MinP
+	}
+	freqPen, presPen := 0.0, 0.0
+	if sp.FrequencyPenalty != nil {
+		freqPen = *sp.FrequencyPenalty
+	}
+	if sp.PresencePenalty != nil {
+		presPen = *sp.PresencePenalty
+	}
+	bias := model.LogitBias(sp.LogitBias)
+	seed := int64(randv2.Uint64())
+	if sp.Seed != nil {
+		seed = *sp.Seed
+	}
+	rng := rand.New(rand.NewSource(seed))
+	ws := &samplerWorkspace{}
+	trackCounts := freqPen != 0 || presPen != 0
+	var counts []int32
+	return func(logits []float32) (int, error) {
+		if len(logits) == 0 {
+			return 0, ErrNonFiniteLogits
+		}
+		tok := sampleLogitsWithPenaltyCoreWS(logits, temp, topP, topK, minP, bias, freqPen, presPen, counts, rng, 0, false, ws)
+		if ws.nonFinite {
+			return 0, ErrNonFiniteLogits
+		}
+		if trackCounts {
+			if tok >= len(counts) {
+				grown := make([]int32, len(logits))
+				copy(grown, counts)
+				counts = grown
+			}
+			counts[tok]++
+		}
+		return tok, nil
+	}
 }
 
 // inkling2StopScanner watches generated ids for the first token at which the
@@ -230,6 +305,9 @@ func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSin
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	projector := newInkling2ContentStream(len(offeredToolsFor(ctx, tools).names) > 0)
+	if inkling2PrefillsAnswerHeader(tools, sp) {
+		projector.state = inkling2StreamText
+	}
 	reasoningSink := streamReasoningSink(ctx)
 	pump := startInkling2StreamPump(sink, reasoningSink, cancel)
 	defer pump.stop()
@@ -265,14 +343,19 @@ func (p *Inkling2LoopPlanner) CompleteStream(ctx context.Context, sink StreamSin
 	return comp, nil
 }
 
-// Complete decodes greedily; the device forward selects the argmax on device, so
-// temperature, top_p and top_k do not apply.
+// Complete decodes one turn. When temperature <= 0 (or omitted), it takes the
+// greedy fast path through Inkling2LoopGenerator.Generate; when temperature > 0
+// and the generator implements Inkling2LoopLogitGenerator, it samples logits with
+// temperature, top_p, top_k, min_p, logit_bias, repetition penalties, and seed.
 func (p *Inkling2LoopPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	return p.complete(ctx, messages, tools, applySampleOpts(opts...), nil)
 }
 
 // complete is Complete with release receiving each run of raw output no stop can cut.
 func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams, release func(raw []byte) bool) (*Completion, error) {
+	if err := validateNativeSamplingParams(sp); err != nil {
+		return nil, err
+	}
 	offered := offeredToolsFor(ctx, tools)
 	ids, err := p.tok.Encode(inKernelRenderPrompt(messages, tools, p.cfg, sp))
 	if err != nil {
@@ -294,10 +377,10 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 
 	scan := newInkling2StopScanner(p.tok.Decode, sp.Stop)
 	scan.release = release
-	res, err := p.generate(ctx, ids, maxNew, p.stops, scan.push)
+	res, err := p.generate(ctx, ids, maxNew, p.stops, sp, scan.push)
 	if err != nil {
 		var stage *model.BackendForwardOperationError
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || IsLocalForwardError(err) || errors.As(err, &stage) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrNonFiniteLogits) || IsLocalForwardError(err) || errors.As(err, &stage) {
 			return nil, err
 		}
 		return nil, NewLocalForwardError("Inkling-2 generation", err, classifiedDeviceOOM(err))
@@ -310,6 +393,9 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 	finish := "length"
 	if res.Stopped {
 		finish = "stop"
+	}
+	if finish == "length" && content == "" && reasoning != "" {
+		log.Printf("inkling2_loop planner: max_tokens (%d) exhausted inside hidden reasoning (effort=%s); visible content is empty", maxNew, inkling2Effort(sp))
 	}
 	comp := &Completion{
 		Model:        p.modelID,

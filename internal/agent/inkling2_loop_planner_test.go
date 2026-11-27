@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -230,4 +231,218 @@ func TestInkling2PlannerStopStraddlesTokenBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+// inkling2FakeLogitGen implements both Inkling2LoopGenerator (greedy) and
+// Inkling2LoopLogitGenerator (logit sampling) for deterministic sampling tests.
+type inkling2FakeLogitGen struct {
+	steps       [][]float32
+	greedyCalls int
+	logitCalls  int
+}
+
+func (g *inkling2FakeLogitGen) Generate(_ context.Context, _ []int, maxNew int, stops map[int]bool, emit func(int) bool) (Inkling2LoopGeneration, error) {
+	g.greedyCalls++
+	var res Inkling2LoopGeneration
+	for _, row := range g.steps {
+		if res.Generated >= maxNew {
+			return res, nil
+		}
+		best := 0
+		for i, v := range row {
+			if v > row[best] {
+				best = i
+			}
+		}
+		if stops[best] {
+			res.Stopped = true
+			return res, nil
+		}
+		res.Generated++
+		if !emit(best) {
+			res.Stopped = true
+			return res, nil
+		}
+	}
+	res.Stopped = true
+	return res, nil
+}
+
+func (g *inkling2FakeLogitGen) GenerateLogits(_ context.Context, _ []int, maxNew int, stops map[int]bool, sample func([]float32) (int, error), emit func(int) bool) (Inkling2LoopGeneration, error) {
+	g.logitCalls++
+	var res Inkling2LoopGeneration
+	for _, row := range g.steps {
+		if res.Generated >= maxNew {
+			return res, nil
+		}
+		id, err := sample(row)
+		if err != nil {
+			return res, err
+		}
+		if stops[id] {
+			res.Stopped = true
+			return res, nil
+		}
+		res.Generated++
+		if !emit(id) {
+			res.Stopped = true
+			return res, nil
+		}
+	}
+	res.Stopped = true
+	return res, nil
+}
+
+func ink2Ptr[T any](v T) *T { return &v }
+
+// ink2LogitRow builds a vocab-sized logit row with -100 everywhere except the
+// explicitly supplied token IDs.
+func ink2LogitRow(entries map[int]float32) []float32 {
+	row := make([]float32, 210)
+	for i := range row {
+		row[i] = -100
+	}
+	for id, val := range entries {
+		row[id] = val
+	}
+	return row
+}
+
+func TestInkling2LoopPlannerSampling(t *testing.T) {
+	msgs := []Message{{Role: RoleUser, Content: "hello"}}
+
+	// 12 identical steps where 'A' is slightly ahead of 'B', 'C', 'D'.
+	steps := make([][]float32, 12)
+	for i := range steps {
+		steps[i] = ink2LogitRow(map[int]float32{'A': 2.0, 'B': 1.9, 'C': 1.8, 'D': 1.7})
+	}
+
+	t.Run("greedy fast path when temperature omitted or <= 0", func(t *testing.T) {
+		gen := &inkling2FakeLogitGen{steps: steps}
+		p := inkling2StreamPlanner(t, gen)
+		c1, err := p.Complete(t.Context(), msgs, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c2, err := p.Complete(t.Context(), msgs, nil, WithTemperature(ink2Ptr(0.0)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gen.greedyCalls != 2 || gen.logitCalls != 0 {
+			t.Fatalf("calls greedy=%d logit=%d, want 2/0", gen.greedyCalls, gen.logitCalls)
+		}
+		want := strings.Repeat("A", 12)
+		if c1.Message.Content != want || c2.Message.Content != want {
+			t.Fatalf("greedy content = %q / %q, want %q", c1.Message.Content, c2.Message.Content, want)
+		}
+	})
+
+	t.Run("seeded sampling is deterministic and non-greedy", func(t *testing.T) {
+		gen := &inkling2FakeLogitGen{steps: steps}
+		p := inkling2StreamPlanner(t, gen)
+		c1, err := p.Complete(t.Context(), msgs, nil, WithTemperature(ink2Ptr(1.5)), WithSeed(ink2Ptr(int64(42))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c2, err := p.Complete(t.Context(), msgs, nil, WithTemperature(ink2Ptr(1.5)), WithSeed(ink2Ptr(int64(42))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c3, err := p.Complete(t.Context(), msgs, nil, WithTemperature(ink2Ptr(1.5)), WithSeed(ink2Ptr(int64(99))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gen.logitCalls != 3 || gen.greedyCalls != 0 {
+			t.Fatalf("calls greedy=%d logit=%d, want 0/3", gen.greedyCalls, gen.logitCalls)
+		}
+		if c1.Message.Content != c2.Message.Content {
+			t.Fatalf("same seed diverged: %q vs %q", c1.Message.Content, c2.Message.Content)
+		}
+		if c1.Message.Content == strings.Repeat("A", 12) {
+			t.Fatalf("expected non-greedy tokens at temp=1.5, got all argmax %q", c1.Message.Content)
+		}
+		if c1.Message.Content == c3.Message.Content {
+			t.Fatalf("different seeds produced identical output %q", c1.Message.Content)
+		}
+	})
+
+	t.Run("top_k restricts candidate set", func(t *testing.T) {
+		gen := &inkling2FakeLogitGen{steps: steps}
+		p := inkling2StreamPlanner(t, gen)
+		// top_k=1 must always pick argmax (A).
+		c1, err := p.Complete(t.Context(), msgs, nil, WithTemperature(ink2Ptr(2.0)), WithTopK(ink2Ptr(1)), WithSeed(ink2Ptr(int64(7))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c1.Message.Content != strings.Repeat("A", 12) {
+			t.Fatalf("top_k=1 content = %q, want all A", c1.Message.Content)
+		}
+		// top_k=2 must only ever emit A or B (never C or D).
+		c2, err := p.Complete(t.Context(), msgs, nil, WithTemperature(ink2Ptr(2.0)), WithTopK(ink2Ptr(2)), WithSeed(ink2Ptr(int64(7))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.ContainsAny(c2.Message.Content, "CD") {
+			t.Fatalf("top_k=2 emitted excluded token in %q", c2.Message.Content)
+		}
+	})
+
+	t.Run("top_p restricts nucleus", func(t *testing.T) {
+		// Dominant token A has ~99% mass; top_p=0.5 keeps only A.
+		sharp := make([][]float32, 8)
+		for i := range sharp {
+			sharp[i] = ink2LogitRow(map[int]float32{'A': 6.0, 'B': 0.0, 'C': 0.0, 'D': 0.0})
+		}
+		gen := &inkling2FakeLogitGen{steps: sharp}
+		p := inkling2StreamPlanner(t, gen)
+		c, err := p.Complete(t.Context(), msgs, nil, WithTemperature(ink2Ptr(1.0)), WithTopP(ink2Ptr(0.5)), WithSeed(ink2Ptr(int64(13))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Message.Content != strings.Repeat("A", 8) {
+			t.Fatalf("top_p=0.5 content = %q, want all A", c.Message.Content)
+		}
+	})
+
+	t.Run("non-finite logits return ErrNonFiniteLogits", func(t *testing.T) {
+		gen := &inkling2FakeLogitGen{steps: [][]float32{ink2LogitRow(map[int]float32{'A': float32(math.NaN()), 'B': 1.0})}}
+		p := inkling2StreamPlanner(t, gen)
+		_, err := p.Complete(t.Context(), msgs, nil, WithTemperature(ink2Ptr(0.8)), WithSeed(ink2Ptr(int64(1))))
+		if !errors.Is(err, ErrNonFiniteLogits) {
+			t.Fatalf("err = %v, want ErrNonFiniteLogits", err)
+		}
+	})
+
+	t.Run("CompleteStream wires sampling and streams effort=none prefilled text", func(t *testing.T) {
+		gen := &inkling2FakeLogitGen{steps: steps[:6]}
+		p := inkling2StreamPlanner(t, gen)
+		var chunks []string
+		comp, err := p.CompleteStream(t.Context(), func(delta string) error {
+			chunks = append(chunks, delta)
+			return nil
+		}, msgs, nil, WithTemperature(ink2Ptr(1.5)), WithSeed(ink2Ptr(int64(42))), WithReasoningEffort("none"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gen.logitCalls != 1 {
+			t.Fatalf("logitCalls = %d, want 1", gen.logitCalls)
+		}
+		if got := strings.Join(chunks, ""); got != comp.Message.Content {
+			t.Fatalf("streamed %q != final %q", got, comp.Message.Content)
+		}
+	})
+
+	t.Run("max_tokens exhausted inside hidden reasoning reports length and empty content", func(t *testing.T) {
+		// Emit <|message_model|><|content_thinking|>AAAA with max_tokens=6 (no end_message).
+		// In inkling2StreamTokenizer: 201=<|message_model|>, 205=<|content_thinking|>, 'A'=65.
+		gen := &inkling2StreamGen{ids: []int{201, 205, 'A', 'A', 'A', 'A'}}
+		p := inkling2StreamPlanner(t, gen)
+		comp, err := p.Complete(t.Context(), msgs, nil, WithMaxTokens(6))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if comp.FinishReason != "length" || comp.Message.Content != "" || comp.Message.ReasoningContent != "AAAA" {
+			t.Fatalf("comp = %+v, want length/empty content/reasoning=AAAA", comp)
+		}
+	})
 }
