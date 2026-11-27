@@ -93,6 +93,84 @@ fak: loaded capability floor from examples/customer-support-readonly-policy.json
 What this proves: the policy is not a blanket block. It preserves the useful
 read/search path while denying dangerous writes.
 
+## Inkling-2-Mini reproducer (CLI-only)
+
+Reproduce Inkling-2-Mini locally with the `fak` CLI alone — no Go test binaries
+and no lab-specific file paths. The `inkling2-mini` alias fetches and
+SHA-256-verifies `Inkling-2-Mini-UD-Q3_K_XL.gguf` (~13.6 GB) into your local
+model cache on first run.
+
+### 1. One-shot check (`fak run`)
+
+```sh
+fak run inkling2-mini --max-tokens 256 "What is 2 + 2? Reply with the number only."
+```
+
+On an Apple Silicon Mac (24 GB+ unified memory), `fak run inkling2-mini` runs
+on Metal directly. On an NVIDIA Blackwell host (RTX 50-series), install or
+build with `sm_120f` so native NVFP4 W4A4 prefill is compiled in (see
+[INSTALL.md](../INSTALL.md#nvidia-cuda-from-source)):
+
+```sh
+# Linux NVIDIA without Docker (auto-selects sm_120f on CC 12.0/12.1):
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh -s -- --variant cuda
+```
+
+### 2. Serve over OpenAI-compatible HTTP (`fak serve`)
+
+Start the server against the verified alias (or replace `inkling2-mini` with
+your local GGUF path):
+
+```sh
+# Apple Silicon Metal:
+fak serve --gguf inkling2-mini --addr 127.0.0.1:8080
+
+# NVIDIA CUDA (sm_120f build with NVFP4 W4A4 default prefill):
+fak serve --engine inkernel --backend cuda --gguf inkling2-mini --addr 127.0.0.1:8080
+```
+
+To reproduce the RTX 5080 concurrent-prefill profile from a checkout root, load
+[`examples/inkling2-cuda-prefill.env.example`](../examples/inkling2-cuda-prefill.env.example)
+before starting `fak serve`:
+
+```sh
+(
+  set -ae
+  . ./examples/inkling2-cuda-prefill.env.example
+  set +a
+  fak serve --engine inkernel --backend cuda \
+    --gguf inkling2-mini \
+    --session-state off --session-registry off --addr 127.0.0.1:8080
+)
+```
+
+### 3. Measure prompt and decode rates (`fak bench`)
+
+With `fak serve` listening on `127.0.0.1:8080`, run the built-in HTTP benchmark
+against it:
+
+```sh
+fak bench h2h run \
+  --arm fak=http://127.0.0.1:8080/v1 \
+  --model inkling2-mini \
+  --cold 512 --decode 256 --turns 0 --reps 3 \
+  --speculative server-default \
+  --ledger off
+```
+
+To compare against a second local OpenAI-compatible server (for example
+`llama-server` on port `8091` serving the same GGUF), add another `--arm`:
+
+```sh
+fak bench h2h run \
+  --arm fak=http://127.0.0.1:8080/v1 \
+  --arm llama=http://127.0.0.1:8091/v1 \
+  --model inkling2-mini \
+  --cold 512 --decode 256 --turns 0 --reps 3 \
+  --speculative server-default \
+  --ledger off
+```
+
 ## Fixture requests
 
 The packet is an evaluation fixture rather than a production benchmark. To propose a scrubbed or synthetic boundary failure, use the [agent-tool boundary fixture issue form](https://github.com/anthony-chaudhary/fak/blob/main/.github/ISSUE_TEMPLATE/agent-tool-boundary-fixture.yml). For a framework or host adapter, use the [adapter fixture issue form](https://github.com/anthony-chaudhary/fak/blob/main/.github/ISSUE_TEMPLATE/framework-adapter-fixture.yml).

@@ -244,7 +244,7 @@ func TestGPUFirstInstaller(t *testing.T) {
 				}
 				for _, want := range []string{
 					"clone --depth 1 --branch main https://github.com/anthony-chaudhary/fak.git",
-					"go run ./cmd/fak-dev build-cuda build --arch sm_120 --cuda-home " + cudaHome,
+					"go run ./cmd/fak-dev build-cuda build --arch sm_120f --cuda-home " + cudaHome,
 					"go build -tags cuda -o",
 					"-Wl,-rpath," + cudaLib,
 				} {

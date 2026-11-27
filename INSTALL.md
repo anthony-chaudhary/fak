@@ -231,6 +231,13 @@ docker run --rm --gpus all ghcr.io/anthony-chaudhary/fak:cuda-latest version
 
 Then run `serve` with a supported model mounted into the container. A version
 check confirms installation; it does not qualify inference on physical hardware.
+`Dockerfile.cuda` compiles `sm_120f` for Blackwell consumer GPUs (RTX 50-series)
+so native NVFP4 W4A4 prefill is active out of the box rather than falling back to
+int8. To build a single-arch local image for an RTX 50-series card:
+
+```sh
+docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_120f -t fak:cuda .
+```
 
 The root [`Dockerfile`](Dockerfile) builds the secondary CPU reference/governance
 image (`CGO_ENABLED=0`, distroless). For a gateway in front of another engine:
@@ -345,16 +352,21 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 It needs `git`, Go 1.26+, `g++`, the NVIDIA driver (`nvidia-smi`) and the CUDA
 toolkit (`nvcc`). It finds the toolkit from `CUDA_HOME`, the `nvcc` on `PATH`,
 `/usr/local/cuda` or `/opt/cuda` (Arch), reads the GPU arch from `nvidia-smi`
-(override with `FAK_CUDA_ARCH=sm_120`), keeps the checkout in `~/.cache/fak/src`
-(`FAK_SRC_DIR`), builds `main` (`FAK_REF`, or `FAK_VERSION` for a release tag),
-and embeds the toolkit library dir as the binary's rpath so `fak` runs without
-`LD_LIBRARY_PATH`. The manual equivalent, with `CUDA_HOME=/opt/cuda`:
+— automatically selecting `sm_120f` on Blackwell consumer / SM12x cards (CC
+12.0/12.1, RTX 50-series) so native NVFP4 W4A4 prefill compiles in instead of
+silently falling back to int8 (requires CUDA 12.9+; override with
+`FAK_CUDA_ARCH=sm_120a` on CUDA 12.8, or `FAK_CUDA_ARCH=sm_120f` explicitly) —
+keeps the checkout in `~/.cache/fak/src` (`FAK_SRC_DIR`), builds `main`
+(`FAK_REF`, or `FAK_VERSION` for a release tag), and embeds the toolkit library
+dir as the binary's rpath so `fak` runs without `LD_LIBRARY_PATH`. The manual
+equivalent on an RTX 50-series host with `CUDA_HOME=/opt/cuda` (or
+`make cuda-build-sm120f` inside the checkout):
 
 ```sh
 git clone --depth 1 https://github.com/anthony-chaudhary/fak.git && cd fak
 lib="$CUDA_HOME/targets/x86_64-linux/lib"   # or $CUDA_HOME/lib64
 export CGO_ENABLED=1 LIBRARY_PATH="$lib" CGO_LDFLAGS="-L$lib -Wl,-rpath,$lib"
-go run ./cmd/fak-dev build-cuda build --arch sm_120 --cuda-home "$CUDA_HOME"
+go run ./cmd/fak-dev build-cuda build --arch sm_120f --cuda-home "$CUDA_HOME"
 go build -tags cuda -o ~/.local/bin/fak ./cmd/fak
 fak backends   # lists cuda when the driver sees the GPU
 ```

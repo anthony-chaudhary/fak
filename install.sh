@@ -28,7 +28,8 @@
 #   FAK_PREFER_DIRECT bypass Homebrew on macOS and force direct binary download (default: 0)
 #   CUDA_HOME         CUDA toolkit root for --variant cuda (default: from nvcc on
 #                     PATH, else /usr/local/cuda or /opt/cuda)
-#   FAK_CUDA_ARCH     GPU arch for --variant cuda, e.g. sm_120 (default: nvidia-smi)
+#   FAK_CUDA_ARCH     GPU arch for --variant cuda, e.g. sm_120f (default: nvidia-smi;
+#                     CC 12.0/12.1 auto-selects sm_120f for native NVFP4 W4A4)
 #   FAK_SRC_DIR       source checkout for --variant cuda (default: ~/.cache/fak/src)
 #   FAK_REF           git ref for --variant cuda (default: v$FAK_VERSION, else main)
 #   PUBLISH_REPO      owner/repo every published URL derives from — clone,
@@ -118,11 +119,15 @@ detect_cuda_home() {
 }
 
 # sm_XY from FAK_CUDA_ARCH or the first GPU's compute capability.
+# Blackwell consumer / SM12x (12.0 RTX 50-series, 12.1 DGX Spark) maps to
+# sm_120f so native NVFP4 W4A4 prefill compiles in instead of falling back to
+# int8 silently (requires CUDA 12.9+; set FAK_CUDA_ARCH=sm_120a on CUDA 12.8).
 detect_cuda_arch() {
   if [ -n "${FAK_CUDA_ARCH:-}" ]; then printf '%s\n' "$FAK_CUDA_ARCH"; return 0; fi
   cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' .\r')"
   case "$cap" in
     ''|*[!0-9]*) return 1 ;;
+    120|121) printf 'sm_120f\n' ;;
     *) printf 'sm_%s\n' "$cap" ;;
   esac
 }
@@ -136,7 +141,7 @@ install_cuda_from_source() {
   done
   have c++ || have g++ || err "--variant cuda needs a C++ compiler (g++) on PATH"
   cuda_home="$(detect_cuda_home)" || err "CUDA toolkit not found — install it (nvcc) and set CUDA_HOME, e.g. CUDA_HOME=/opt/cuda"
-  cuda_arch="$(detect_cuda_arch)" || err "could not read the GPU compute capability from nvidia-smi — set FAK_CUDA_ARCH, e.g. FAK_CUDA_ARCH=sm_120"
+  cuda_arch="$(detect_cuda_arch)" || err "could not read the GPU compute capability from nvidia-smi — set FAK_CUDA_ARCH, e.g. FAK_CUDA_ARCH=sm_120f"
   cuda_lib=""
   for c in "${cuda_home}"/targets/*-linux/lib "${cuda_home}/lib64" "${cuda_home}/lib"; do
     [ -d "$c" ] && { cuda_lib="$c"; break; }

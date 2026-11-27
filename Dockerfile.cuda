@@ -13,9 +13,12 @@
 #
 # Compute-capability floor: with --build-arg CUDA_ARCH unset the builder compiles
 # internal/compute's CUDA kernels for EVERY arch in the authoritative
-# internal/compute/cuda_arch.txt (plus a compute_<last> PTX floor); passing
-# CUDA_ARCH narrows the build to that one arch, validated against that file:
-#   docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_120 -t fak:cuda .
+# internal/compute/cuda_arch.txt — emitting sm_120f for Blackwell consumer
+# (RTX 50-series / SM12x) so native NVFP4 W4A4 prefill is compiled in instead of
+# silently falling back to int8 — plus a compute_<last> PTX floor. Passing
+# CUDA_ARCH narrows the build to that one arch (accepting sm_90+ 'a' and
+# sm_100+ 'f' suffixes whose base arch is in cuda_arch.txt):
+#   docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_120f -t fak:cuda .
 #
 # CUDA 12.9 (the first toolkit that emits sm_103 for B300) is pinned to match the toolchain internal/compute/setup_cuda_wsl.sh
 # and .github/workflows/cuda-build.yml already build and test against, so the
@@ -43,16 +46,33 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 
 WORKDIR /src
 COPY . .
-RUN test -z "${CUDA_ARCH}" || grep -Fxq "${CUDA_ARCH}" internal/compute/cuda_arch.txt || (echo unsupported CUDA_ARCH ${CUDA_ARCH}; cat internal/compute/cuda_arch.txt; exit 2)
+RUN if [ -n "${CUDA_ARCH}" ]; then \
+      base="${CUDA_ARCH%[af]}"; suffix="${CUDA_ARCH#"$base"}"; cc="${base#sm_}"; \
+      if ! grep -Fxq "${base}" internal/compute/cuda_arch.txt \
+         || { [ "${suffix}" = "a" ] && [ "${cc}" -lt 90 ]; } \
+         || { [ "${suffix}" = "f" ] && [ "${cc}" -lt 100 ]; }; then \
+        echo "unsupported CUDA_ARCH ${CUDA_ARCH} (base must be in cuda_arch.txt; a requires sm_90+, f requires sm_100+)"; \
+        cat internal/compute/cuda_arch.txt; exit 2; \
+      fi; \
+    fi
 
 # Compile the kernels with the build-cuda legacy driver's exact flags (same nvcc invocation the CI
 # nvcc job runs), then cgo-link the version-stamped -tags cuda binary against the
-# resident archive + this image's cudart/cublas libs.
+# resident archive + this image's cudart/cublas libs. In the fat build, emit sm_120f
+# for Blackwell consumer (SM12x) so RTX 50-series GPUs run native NVFP4 W4A4 prefill
+# while keeping the compute_120 PTX floor for forward JIT compatibility.
 RUN cd internal/compute \
     && if [ -n "${CUDA_ARCH}" ]; then \
          cc="${CUDA_ARCH#sm_}"; gencode="-gencode arch=compute_${cc},code=${CUDA_ARCH}"; \
        else \
-         gencode=""; while read -r arch; do cc="${arch#sm_}"; gencode="$gencode -gencode arch=compute_${cc},code=${arch}"; done < cuda_arch.txt; \
+         gencode=""; while read -r arch; do \
+           cc="${arch#sm_}"; \
+           if [ "${arch}" = "sm_120" ]; then \
+             gencode="$gencode -gencode arch=compute_120f,code=sm_120f"; \
+           else \
+             gencode="$gencode -gencode arch=compute_${cc},code=${arch}"; \
+           fi; \
+         done < cuda_arch.txt; \
          gencode="$gencode -gencode arch=compute_${cc},code=compute_${cc}"; \
        fi \
     && nvcc -O3 -std=c++17 $gencode -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o \

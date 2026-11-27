@@ -102,7 +102,7 @@ For build requirements, platform verification and other model sizes, see the
 
 For the version history, see [CHANGELOG.md](CHANGELOG.md).
 
-[Connect your coding agent](docs/integrations/README.md) · [Hardware benchmarks](docs/benchmarks/README.md) · [How fak compares with llama.cpp](docs/native-inference-goal.md) · [Documentation](docs/index.md)
+[Connect your coding agent](docs/integrations/README.md) · [Hardware benchmarks](docs/benchmarks/README.md) · [Reproduce locally](docs/repro-packet.md#inkling-2-mini-reproducer-cli-only) · [How fak compares with llama.cpp](docs/native-inference-goal.md) · [Documentation](docs/index.md)
 
 [Apache-2.0 license](LICENSE)
 

@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration test-airgap smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test smoke-exec smoke performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests metal-check cuda-check cuda-build cuda-build-sm90 cuda-test cuda-accept-model cuda-accept cuda-occupancy
+.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration test-airgap smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test smoke-exec smoke performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests metal-check cuda-check cuda-build cuda-build-sm90 cuda-build-sm100 cuda-build-sm103 cuda-build-sm120 cuda-build-sm120f cuda-build-sm120a cuda-test cuda-accept-model cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 SMOKE_BUILD_BUDGET ?= 2m
@@ -704,6 +704,15 @@ cuda-build-sm103:
 
 cuda-build-sm120:
 	$(CUDA_BUILD) build --arch=sm_120 $(CUDA_BUILD_FLAGS)
+
+# Blackwell consumer / SM12x (RTX 50-series, DGX Spark) family-specific build:
+# enables native NVFP4 W4A4 prefill kernels (CUDA 12.9+); plain sm_120 silently
+# falls back to int8 prefill. Use cuda-build-sm120a on CUDA 12.8.
+cuda-build-sm120f:
+	$(CUDA_BUILD) build --arch=sm_120f $(CUDA_BUILD_FLAGS)
+
+cuda-build-sm120a:
+	$(CUDA_BUILD) build --arch=sm_120a $(CUDA_BUILD_FLAGS)
 
 cuda-test:
 	$(CUDA_BUILD) test $(CUDA_BUILD_FLAGS)
