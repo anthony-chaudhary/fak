@@ -165,6 +165,7 @@ type serveFlags struct {
 	embeddingPooling             *string
 	embeddingsBackend            *string
 	topologyShadowInput          *string
+	roleGraphDryRun              *string
 	workspaceAdmission           *string
 	workspaceAdmissionPermissive *bool
 	guard                        *bool
@@ -372,6 +373,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.armAdmitWait = fs.Duration("arm-admit-wait", defaultArmAdmitWait, "how long a proxied request queues at a saturated research arm before the 429 refusal (0 = legacy immediate refusal)")
 	sf.baseURL = fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
 	sf.topologyShadowInput = fs.String("topology-shadow-input", "", "bounded supplied topology observations for SHADOW-only decisions on the existing replica fleet; no live collector, routing change or capacity action")
+	sf.roleGraphDryRun = fs.String(serveRoleGraphDryRunFlag, "", "compile a supplied P/D role-graph JSON fixture in dry-run mode (stage/KV-group assignments and bounded capacity reservations) and exit BEFORE any model load, KV transfer, engine start, or listener bind")
 	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1. Each replica's identity defaults to a stable endpoint-derived id (replica-<digest>) so the same upstream keeps its metric/residency labels regardless of flag order or a dropped peer; pass name=URL to pin an operator-chosen id.")
 	sf.model = fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
 	sf.mock = fs.Bool("mock", false, "run with deterministic offline mock planner (scripted responses, no model execution)")
@@ -1082,6 +1084,12 @@ func cmdServe(argv []string) {
 	// route is unavailable. Policy validation also precedes alias/HF acquisition.
 	if *sf.policyCheck {
 		runServePolicyCheck(*sf.policyPath)
+		return
+	}
+	if handled, err := runServeRoleGraphDryRunIfRequested(sf, os.Stdout, os.Stderr); handled {
+		if err != nil {
+			os.Exit(2)
+		}
 		return
 	}
 	if err := validateServeDFlash2Startup(resolvedSpeculative, os.Getenv); err != nil {
