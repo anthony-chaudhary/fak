@@ -1498,7 +1498,7 @@ SOFTWARE.
 
 ## DeepGEMM
 
-Portions of this product are adapted from DeepGEMM: https://github.com/deepseek-ai/DeepGEMM (pinned at revision 1fc9c66975ee322d628b3288534ca0e9ce12a64d). Changes were made.
+Portions of this product are adapted from DeepGEMM: https://github.com/deepseek-ai/DeepGEMM (pinned at revision 1fc9c66975ee322d628b3288534ca0e9ce12a64d, 5081f8513af57e61696de4f4f04b0e707ffb503e). Changes were made.
 
 ```text
 MIT License
