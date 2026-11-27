@@ -117,7 +117,9 @@ def render_panel(out: list, p: dict, px: int, py: int) -> None:
 
     bars = p["bars"]
     y_max = float(p["y_max"])
-    total_bw = len(bars) * BAR_W + (len(bars) - 1) * BAR_GAP
+    bar_w = 50 if len(bars) >= 3 else BAR_W
+    bar_gap = 18 if len(bars) >= 3 else BAR_GAP
+    total_bw = len(bars) * bar_w + (len(bars) - 1) * bar_gap
     bx0 = px + (PC_W - total_bw) // 2
 
     # baseline rule
@@ -125,7 +127,7 @@ def render_panel(out: list, p: dict, px: int, py: int) -> None:
 
     for j, b in enumerate(bars):
         subj = bool(b.get("subject"))
-        bx = bx0 + j * (BAR_W + BAR_GAP)
+        bx = bx0 + j * (bar_w + bar_gap)
         v = float(b["v"])
         bh = max(0.0, (v / y_max) * PLOT_H)
         bt = baseline - bh
@@ -136,29 +138,33 @@ def render_panel(out: list, p: dict, px: int, py: int) -> None:
             fill, stroke = GREY_BAR, GREY_STROKE
 
         if bh >= 2:
-            out.append(f'  <rect x="{bx}" y="{bt:.1f}" width="{BAR_W}" height="{bh:.1f}" rx="5" fill="{fill}" stroke="{stroke}" stroke-width="1"/>')
+            out.append(f'  <rect x="{bx}" y="{bt:.1f}" width="{bar_w}" height="{bh:.1f}" rx="5" fill="{fill}" stroke="{stroke}" stroke-width="1"/>')
         else:
             # zero/near-zero capability bar — a faint stub on the baseline
-            out.append(f'  <rect x="{bx}" y="{baseline - 3}" width="{BAR_W}" height="3" rx="1.5" fill="{GREY_BAR}"/>')
+            out.append(f'  <rect x="{bx}" y="{baseline - 3}" width="{bar_w}" height="3" rx="1.5" fill="{GREY_BAR}"/>')
 
         # value label above the bar
         vy = (bt - 10) if bh >= 2 else (baseline - 12)
         vcls = "val" if subj else "valm"
-        out.append(f'  <text x="{bx + BAR_W // 2}" y="{vy:.1f}" class="{vcls}" text-anchor="middle">{esc(b["label"])}</text>')
+        out.append(f'  <text x="{bx + bar_w // 2}" y="{vy:.1f}" class="{vcls}" text-anchor="middle">{esc(b["label"])}</text>')
 
         # monogram badge — on the bar if tall enough, else at the baseline
         by = (bt + 16) if bh >= 26 else (baseline - 16)
         btxt = ("#ffffff" if (subj and bh >= 26) else MUTED)
         bg = (fill if (subj and bh >= 26) else "#ffffff")
         bstroke = stroke if (subj and bh >= 26) else "#c2ccd6"
-        cxb = bx + BAR_W // 2
+        cxb = bx + bar_w // 2
         out.append(f'  <rect x="{cxb - 9}" y="{by - 12:.1f}" width="18" height="18" rx="5" fill="{bg}" stroke="{bstroke}" stroke-width="1.1"/>')
         out.append(f'  <text x="{cxb}" y="{by + 1:.1f}" class="bdg" text-anchor="middle" style="fill:{btxt};">{esc(b["badge"])}</text>')
         # who label under the baseline
         out.append(f'  <text x="{cxb}" y="{baseline + 15}" class="who" text-anchor="middle">{esc(b["who"])}</text>')
 
-    # optional log-multiplier tag floating in the panel
-    if p.get("log_multiplier"):
+    # optional multiplier / callout tag floating in the panel
+    if p.get("callout"):
+        callout_x = (px + 18) if p.get("lower_is_better") else (px + PC_W - 16)
+        callout_anchor = "start" if p.get("lower_is_better") else "end"
+        out.append(f'  <text x="{callout_x}" y="{py + 20}" class="lmul" text-anchor="{callout_anchor}">{esc(p["callout"])}</text>')
+    elif p.get("log_multiplier"):
         out.append(f'  <text x="{px + PC_W - 16}" y="{py + 20}" class="lmul" text-anchor="end">{esc(p["log_multiplier"])} faster</text>')
 
     # name pill (pillar-coloured outline)

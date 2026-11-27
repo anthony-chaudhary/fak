@@ -1,6 +1,6 @@
 # fak brand assets
 
-The fak mark is an **aperture** — an open ring at the center of a four-point spark.
+The fak mark is an **aperture** — an open ring surrounded by eight faceted blades.
 It reads as a lens/shutter (the kernel *sees* every tool call) and as a compass/star
 (one command in front of the agent you already use). The open center is the point:
 fak wraps your agent without replacing it.
@@ -11,11 +11,11 @@ fak wraps your agent without replacing it.
 |------|-----|
 | `fak-mark.svg` | Primary mark, gradient. Transparent bg. |
 | `fak-mark-white.svg` | Mark, solid white — dark or photographic backgrounds. |
-| `fak-mark-mono.svg` | Mark, solid ink (`#0b1220`) — light backgrounds, print, stamps. |
+| `fak-mark-mono.svg` | Mark, solid ink (`#0f172a`) — light backgrounds, print, stamps. |
 | `fak-icon-badge.svg` | App/store icon — gradient mark on an ink rounded square. |
 | `fak-favicon.svg` | Simplified mark (4 blades, wide-open ring) — stays legible ≤16px. |
 | `fak-logo.svg` | Horizontal lockup, white wordmark — **for dark backgrounds**. |
-| `fak-logo-ink.svg` | Horizontal lockup, ink — **for light backgrounds**. |
+| `fak-logo-ink.svg` | Horizontal lockup, deep gradient mark + ink wordmark — **for light backgrounds**. |
 | `fak-mark-512.png` `fak-icon-512.png` `favicon-32.png` `favicon-16.png` | Raster exports (transparent). |
 
 Prefer the SVGs everywhere they render; the PNGs are for contexts that can't take SVG.
@@ -31,11 +31,12 @@ Prefer the SVGs everywhere they render; the PNGs are for contexts that can't tak
 
 | Token | Hex | Role |
 |-------|-----|------|
-| Ink | `#0b1220` | Backgrounds, mono mark, wordmark on light |
-| Cyan | `#22d3ee` | Gradient start (lower-left) |
-| Sky | `#38bdf8` | Gradient mid |
-| Azure | `#5b9dff` | Gradient end (upper-right) |
-| White | `#ffffff` | Wordmark on dark, mark on photos |
+| Ink | `#0f172a` | Wordmark on light, mono mark |
+| Deep Ink | `#0b1220` | App icon badge background |
+| Emerald | `#10b981` | Gradient start (lower-left) |
+| Cyan | `#22d3ee` | Gradient mid |
+| Sky | `#38bdf8` | Gradient end (upper-right) |
+| White | `#f8fafc` | Wordmark on dark |
 
 Gradient runs lower-left → upper-right across the mark. On backgrounds where the
 gradient can't breathe (favicons under ~24px, single-color print, embroidery),

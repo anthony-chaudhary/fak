@@ -47,16 +47,18 @@ def test_every_panel_and_headline_figure_renders():
         assert p["name"] in svg
         for b in p["bars"]:
             assert b["label"] in svg, f"missing bar label {b['label']!r}"
-    for fig in ["118.1 tok/s", "81.0", "119.9 tok/s", "119.5", "171.5 tok/s", "119.7",
-                "40.3", "37.5", "23.4", "5861 tok/s", "3012", "max|Δ|=0", "2.4 µs", "6.9 ms", "2,849×",
-                "89.0 tok/s", "113.8 tok/s"]:
+    for fig in ["1,190 tok/s", "283", "4.21× faster", "5,861 tok/s", "3,012", "2,145",
+                "2.02 s", "3.72 s", "4.68 s", "1.84× faster",
+                "6,038 tok/s", "3,337", "2.4 µs", "6.9 ms", "2,849×",
+                "max|Δ|=0", "130.4 tok/s", "122.5", "115.7",
+                "93.2 tok/s", "116.0 tok/s"]:
         assert fig in svg, f"missing headline figure {fig!r}"
 
 
 def test_desc_names_the_figures_shown():
     svg = _svg()
     assert DATA["desc"].split(".")[0] in svg
-    for fig in ["118.1", "81.0", "171.5", "5861", "3012", "40.3", "2,849x", "89.0", "113.8"]:
+    for fig in ["1,190", "283", "5,861", "3,012", "2.02 s", "3.72 s", "6,038", "3,337", "2,849x", "130.4", "93.2", "116.0"]:
         assert fig in DATA["desc"]
 
 
@@ -66,7 +68,7 @@ def test_inference_panels_compare_against_another_engine():
             continue
         refs = [b for b in p["bars"] if not b.get("subject")]
         assert refs, p["name"]
-        if p["name"] == "Speculative decode":
+        if p["name"] == "128k all-resident prefill":
             assert all(b["who"].startswith("fak") for b in p["bars"])  # opt-in vs default
             continue
         assert all(not b["who"].startswith("fak") for b in refs), p["name"]

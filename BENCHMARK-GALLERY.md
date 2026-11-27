@@ -23,7 +23,7 @@ regenerating any hero SVG.
 | 55 | Benchmark breadth card | model "stats card" (Anthropic / MLPerf) | the three pillars + the honest single-stream fence, on one card |
 | 59 | Capability matrix | the model-vs-model comparison table | fak spans the whole boundary; the serving stacks span one band of it |
 | 60 | Turn-tax curves | the attention-efficiency 3-panel chart | re-prefill cost is linear; resident, addressable KV is not |
-| 61 | Benchmark sweep (README hero) | the per-benchmark bar grid | Inkling-2-Mini inference on RTX 5080 and M3 Pro, then two kernel checks, fak vs the engine to beat; the last panel is where fak trails |
+| 61 | Benchmark sweep (README hero) | the per-benchmark bar grid | Inkling-2-Mini on RTX 5080 and kernel checks, sorted from strongest wins to the single-stream fence |
 
 ---
 
@@ -74,25 +74,24 @@ stack (the `~60×` vs naive is mentioned only as the thing we *don't* lead with)
 
 ## 61 · Benchmark sweep
 
-fak's analog of the per-benchmark bar grid, and the README hero: eight panels, each a
+fak's analog of the per-benchmark bar grid, and the README hero: eight panels,
+sorted from strongest verified wins to the honest single-stream fence, each a
 grouped bar chart with **fak in the bright accent** against one honest reference.
-Five Inkling-2-Mini inference panels come first. On an RTX 5080: decode against stock
-llama.cpp (118.1 vs 81.0 tok/s, same window), the fastest llama.cpp fork (119.9 vs 119.5,
-parity), opt-in speculative decode at depth 2 (171.5 vs 119.7 plain), and NVFP4 W4A4
-prefill against the same fork on a 512-token prompt (5861 vs 3012 tok/s, 1.95x; server
-prompt rate on an `sm_120f` build, while fak's first visible token is still slower). On an
-M3 Pro, for the 32-token capitals prompt: decode against Splash 1.7.2 (40.3 vs 37.5, with
-the fastest llama.cpp fork at 23.4). Across natural prompts the Mac result is a parity
-band, 97.5–107.4% of Splash's decode rate, and the 128-token Fibonacci cell trails
-Splash, 63.6 vs 65.2. Two model-independent kernel panels follow:
-bit-exact cache invalidation after an external write, and a guard decision that costs
-2.4 µs in-process against 6.9 ms for a spawned hook (2,849×). The final panel is the
-fence and **inverts** the accent: at 1,946 tokens of context the llama.cpp fork owns the
-tall bar (113.8 tok/s) and fak shows its lower 89.0.
-The RTX 5080 stock-llama.cpp and speculative-decode figures come from
-[the Inkling-2 launch notes](docs/launch/inkling2-launch-2026-11-24.md), whose raw logs are
-held privately. The rest have campaign records in
-[docs/benchmarks/published/](docs/benchmarks/published/), and the kernel panels cite
+On an RTX 5080 16 GB (`sm_120f`, Inkling-2-Mini `UD-Q3_K_XL`): opt-in 128k
+all-resident prefill with `nvfp4` KV (1,190 vs 283 tok/s on `fp16` KV, 4.21×),
+NVFP4 W4A4 `pp512` prefill (5,861 vs 3,012 fork and 2,145 stock llama.cpp),
+served `C4_p2048_d256` median TTFT (2.02 s vs 3.72 s fork and 4.68 s stock,
+1.84× faster), and concurrent HTTP `pp512` prefill (6,038 vs 3,337 tok/s fork at
+`C=2`, flat through `C=8`). Two model-independent kernel panels follow: a guard
+decision that costs 2.4 µs in-process against 6.9 ms for a spawned hook
+(2,849×), and bit-exact cache invalidation after an external write (`max|Δ|=0`).
+Then served `C4_p2048_d256` aggregate E2E throughput (130.4 vs 122.5 fork and
+115.7 stock). The final panel is the fence and **inverts** the accent: at
+`C1_p2048_d256` single-stream served decode, the fork owns the tall bar
+(116.0 tok/s) and fak shows its lower 93.2.
+The figures come from [the Wave-2 RTX 5080 receipt](docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md),
+[the NVFP4 W4A4 prefill receipt](docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4/RESULTS.md),
+[docs/benchmarks/README.md](docs/benchmarks/README.md), and
 [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
 ![fak benchmark sweep grid](visuals/61-hero-benchmark-sweep.png)

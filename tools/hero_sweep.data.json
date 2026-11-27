@@ -1,15 +1,15 @@
 {
-  "_about": "SOURCE OF TRUTH for the fak BENCHMARK SWEEP grid (visuals/61-hero-benchmark-sweep.svg), rendered by tools/hero_sweep_gen.py. fak's analog of the GLM-5.2 'LLM Performance Evaluation' 2x4 bar-grid: one small grouped-bar panel per benchmark, value labels on top, a badge on each bar, the benchmark name in a pill below, the subject (fak) bar in the bright accent. Honesty rules: every fak figure traces to fak/BENCHMARK-AUTHORITY.md by commit and is the bright bar; each panel compares fak against ONE named, honest reference (a tuned-SOTA baseline, a deterministic ceiling, the optimal, the spawned-hook, or — for capability panels — a field that does not ship it), never a fabricated competitor number. The final panel is the SINGLE-STREAM fence and INVERTS the accent: llama.cpp owns the bright/tall bar, fak shows its honest lower number. Panels lead with Inkling-2-Mini decode and prefill from the public receipts (docs/launch/inkling2-launch-2026-11-24.md, docs/benchmarks/published/), then model-independent kernel axes. Edit this file, then run `python tools/hero_sweep_gen.py`.",
+  "_about": "SOURCE OF TRUTH for the fak BENCHMARK SWEEP grid (visuals/61-hero-benchmark-sweep.svg), rendered by tools/hero_sweep_gen.py. Sorted most important / best to worst, ending with the honest single-stream fence. Edit this file, then run `python tools/hero_sweep_gen.py`.",
   "meta": {
     "title": "fak — the agent kernel, the benchmark sweep",
-    "as_of": "2026-11-25",
+    "as_of": "2026-11-26",
     "out_svg": "visuals/61-hero-benchmark-sweep.svg",
     "authority": "fak/BENCHMARK-AUTHORITY.md",
-    "receipts": "docs/launch/inkling2-launch-2026-11-24.md; docs/benchmarks/published/aegis-inkling2-fork-parity; docs/benchmarks/published/aegis-inkling2-spec-decode; docs/benchmarks/published/m3pro-inkling2-mini-metal; docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4"
+    "receipts": "docs/benchmarks/published/rtx5080-inkling2-v060; docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4; docs/benchmarks/README.md; BENCHMARK-AUTHORITY.md"
   },
-  "kicker": "BENCHMARK SWEEP · INKLING-2-MINI ON RTX 5080 AND M3 PRO · 2026-11-25",
-  "title": "fak by the benchmarks — Inkling-2-Mini, then the kernel",
-  "subtitle": "Five inference axes for Inkling-2-Mini UD-Q3_K_XL on one RTX 5080 16 GB and one 36 GB M3 Pro, each fak figure (green) against the engine it has to beat on the same card and file, then two kernel axes measured without a model; the last panel is the fence where fak still trails.",
+  "kicker": "BENCHMARK SWEEP · INKLING-2-MINI ON RTX 5080 & KERNEL · 2026-11-26",
+  "title": "fak by the benchmarks — strongest wins to honest fence",
+  "subtitle": "Inkling-2-Mini UD-Q3_K_XL on one RTX 5080 16 GB (sm_120) plus model-independent kernel checks, sorted from largest verified leads to the single-stream fence where fak still trails.",
   "legend": [
     {
       "label": "fak (the subject)",
@@ -22,103 +22,32 @@
   ],
   "panels": [
     {
-      "name": "Decode vs stock llama.cpp",
+      "name": "128k all-resident prefill",
       "pillar": "INFERENCE",
-      "foot": "RTX 5080 · same window · 1.46× · launch notes",
-      "commit": "cc6dca0b47",
-      "y_max": 136,
+      "foot": "RTX 5080 16 GB · 4.21× · 0 spill · opt-in NVFP4 KV",
+      "commit": "eb68a8cf8a",
+      "callout": "4.21× faster",
+      "y_max": 1360,
       "bars": [
         {
-          "who": "fak",
+          "who": "fak NVFP4 KV",
           "badge": "f",
-          "v": 118.1,
-          "label": "118.1 tok/s",
+          "v": 1190.0,
+          "label": "1,190 tok/s",
           "subject": true
         },
         {
-          "who": "llama.cpp",
-          "badge": "L",
-          "v": 81.0,
-          "label": "81.0"
-        }
-      ]
-    },
-    {
-      "name": "Decode vs fastest fork",
-      "pillar": "INFERENCE",
-      "foot": "RTX 5080 · parity · fork via llama-bench",
-      "commit": "b64405de76",
-      "y_max": 136,
-      "bars": [
-        {
-          "who": "fak",
-          "badge": "f",
-          "v": 119.9,
-          "label": "119.9 tok/s",
-          "subject": true
-        },
-        {
-          "who": "llama.cpp fork",
-          "badge": "F",
-          "v": 119.5,
-          "label": "119.5"
-        }
-      ]
-    },
-    {
-      "name": "Speculative decode",
-      "pillar": "INFERENCE",
-      "foot": "RTX 5080 · opt-in, depth 2 · 1.43×",
-      "commit": "67bb976926a",
-      "y_max": 195,
-      "bars": [
-        {
-          "who": "fak spec",
-          "badge": "f",
-          "v": 171.5,
-          "label": "171.5 tok/s",
-          "subject": true
-        },
-        {
-          "who": "fak plain",
+          "who": "fak FP16 KV",
           "badge": "·",
-          "v": 119.7,
-          "label": "119.7"
+          "v": 283.0,
+          "label": "283"
         }
       ]
     },
     {
-      "name": "Mac decode",
+      "name": "NVFP4 W4A4 prefill",
       "pillar": "INFERENCE",
-      "foot": "M3 Pro · capitals; natural prompts 97.5–107.4%",
-      "commit": "1f31533f2",
-      "y_max": 46,
-      "bars": [
-        {
-          "who": "fak",
-          "badge": "f",
-          "v": 40.3,
-          "label": "40.3",
-          "subject": true
-        },
-        {
-          "who": "Splash",
-          "badge": "S",
-          "v": 37.5,
-          "label": "37.5"
-        },
-        {
-          "who": "llama.cpp fork",
-          "badge": "F",
-          "v": 23.4,
-          "label": "23.4"
-        }
-      ]
-    },
-    {
-      "name": "Prefill vs fastest fork",
-      "pillar": "INFERENCE",
-      "foot": "RTX 5080 · W4A4 · pp512 prompt rate · 1.95×",
+      "foot": "RTX 5080 · pp512 · 1.95× fork · 2.73× stock",
       "commit": "d3317d16fc",
       "y_max": 6700,
       "bars": [
@@ -126,37 +55,72 @@
           "who": "fak",
           "badge": "f",
           "v": 5861.0,
-          "label": "5861 tok/s",
+          "label": "5,861 tok/s",
+          "subject": true
+        },
+        {
+          "who": "fork",
+          "badge": "F",
+          "v": 3012.4,
+          "label": "3,012"
+        },
+        {
+          "who": "llama.cpp",
+          "badge": "L",
+          "v": 2144.6,
+          "label": "2,145"
+        }
+      ]
+    },
+    {
+      "name": "Served TTFT (C4, 2k)",
+      "pillar": "SERVING",
+      "foot": "RTX 5080 · lower is better · 2.32× vs stock",
+      "commit": "7ba76a1caf",
+      "lower_is_better": true,
+      "callout": "1.84× faster",
+      "y_max": 5.4,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 2.02,
+          "label": "2.02 s",
+          "subject": true
+        },
+        {
+          "who": "fork",
+          "badge": "F",
+          "v": 3.72,
+          "label": "3.72 s"
+        },
+        {
+          "who": "llama.cpp",
+          "badge": "L",
+          "v": 4.68,
+          "label": "4.68 s"
+        }
+      ]
+    },
+    {
+      "name": "Concurrent HTTP prefill",
+      "pillar": "SERVING",
+      "foot": "RTX 5080 · C=2 matched ABBA · 1.80× (flat to C=8)",
+      "commit": "e7ad0c8dee5",
+      "y_max": 6900,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 6038.0,
+          "label": "6,038 tok/s",
           "subject": true
         },
         {
           "who": "llama.cpp fork",
           "badge": "F",
-          "v": 3012.4,
-          "label": "3012"
-        }
-      ]
-    },
-    {
-      "name": "Invalidation on external write",
-      "pillar": "CORRECTNESS",
-      "foot": "bit-exact vs a clean run",
-      "commit": "0fc39aa",
-      "y_max": 1.0,
-      "capability": true,
-      "bars": [
-        {
-          "who": "fak",
-          "badge": "f",
-          "v": 1.0,
-          "label": "max|Δ|=0",
-          "subject": true
-        },
-        {
-          "who": "field",
-          "badge": "—",
-          "v": 0.0,
-          "label": "—"
+          "v": 3337.0,
+          "label": "3,337"
         }
       ]
     },
@@ -184,29 +148,80 @@
       ]
     },
     {
-      "name": "Decode at 1,946 tokens",
+      "name": "Invalidation on external write",
+      "pillar": "CORRECTNESS",
+      "foot": "bit-exact vs a clean run",
+      "commit": "0fc39aa",
+      "y_max": 1.0,
+      "capability": true,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 1.0,
+          "label": "max|Δ|=0",
+          "subject": true
+        },
+        {
+          "who": "field",
+          "badge": "—",
+          "v": 0.0,
+          "label": "—"
+        }
+      ]
+    },
+    {
+      "name": "Served C4 E2E (2k)",
+      "pillar": "SERVING",
+      "foot": "RTX 5080 · 1.07× fork · 1.13× stock · plain 122.3",
+      "commit": "7ba76a1caf",
+      "y_max": 150,
+      "bars": [
+        {
+          "who": "fak",
+          "badge": "f",
+          "v": 130.4,
+          "label": "130.4 tok/s",
+          "subject": true
+        },
+        {
+          "who": "fork",
+          "badge": "F",
+          "v": 122.5,
+          "label": "122.5"
+        },
+        {
+          "who": "llama.cpp",
+          "badge": "L",
+          "v": 115.7,
+          "label": "115.7"
+        }
+      ]
+    },
+    {
+      "name": "Served C1 decode (2k)",
       "pillar": "FENCE",
       "foot": "fak trails here — the fork leads",
-      "commit": "b64405de76",
-      "y_max": 128,
+      "commit": "7ba76a1caf",
+      "y_max": 134,
       "fence": true,
       "bars": [
         {
           "who": "fak",
           "badge": "f",
-          "v": 89.0,
-          "label": "89.0 tok/s"
+          "v": 93.2,
+          "label": "93.2 tok/s"
         },
         {
           "who": "llama.cpp fork",
           "badge": "F",
-          "v": 113.8,
-          "label": "113.8 tok/s",
+          "v": 116.0,
+          "label": "116.0 tok/s",
           "subject": true
         }
       ]
     }
   ],
-  "footer": "Same GGUF per comparison. RTX 5080 decode: fak in-process bench (ABBA) vs llama-bench, so small gaps read as parity; spec decode opt-in. Prefill: server prompt rate, sm_120f build from main; fak's first visible token is still slower. M3 Pro vs Splash 1.7.2; 128-token Fibonacci trails, 63.6 vs 65.2. Kernel: BENCHMARK-AUTHORITY.md.",
-  "desc": "An eight-panel benchmark sweep. Inkling-2-Mini on an RTX 5080: decode 118.1 vs 81.0 tok/s for stock llama.cpp in the same window, 119.9 vs 119.5 for the fastest llama.cpp fork (parity), opt-in speculative decode at depth 2 171.5 vs 119.7 plain, and NVFP4 W4A4 prefill 5861 vs 3012 tok/s for the fork on a 512-token prompt (1.95x, prompt rate only). On an M3 Pro, 32-token capitals prompt: decode 40.3 vs 37.5 for Splash and 23.4 for the fastest llama.cpp fork. Kernel: cache invalidation on an external write is bit-exact (max|delta|=0); an in-process guard decision costs 2.4 us against 6.9 ms for a spawned hook, 2,849x. Fence: at 1,946 tokens of context fak decodes 89.0 vs 113.8 tok/s for the fork."
+  "footer": "Same GGUF per comparison (Wave-2 RTX 5080 sm_120f receipts; plain in-process decode 122.34 tok/s). 128k NVFP4 KV is opt-in (FAK_INKLING2_KV=nvfp4). M3 Pro native Metal receipts pending publication. Kernel: BENCHMARK-AUTHORITY.md.",
+  "desc": "An eight-panel benchmark sweep sorted from strongest leads to the honest fence. Inkling-2-Mini on an RTX 5080 16 GB: opt-in 128k all-resident prefill 1,190 vs 283 tok/s FP16 KV (4.21x); NVFP4 W4A4 pp512 prefill 5,861 vs 3,012 fork and 2,145 stock llama.cpp; served C4 2k TTFT 2.02 s vs 3.72 s fork and 4.68 s stock (1.84x faster); concurrent HTTP prefill 6,038 vs 3,337 tok/s fork; guard decision 2.4 us vs 6.9 ms spawned hook (2,849x); bit-exact external-write invalidation (max|delta|=0); served C4 2k E2E 130.4 vs 122.5 fork and 115.7 stock; fence: served C1 2k decode 93.2 vs 116.0 tok/s for the fork."
 }

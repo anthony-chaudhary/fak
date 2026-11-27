@@ -8,7 +8,7 @@ fak is a local coding runtime.
 Run a model on your own computer and keep your prompts local. Connect your
 coding agent through fak’s gateway to allow reads while blocking writes.
 
-[![fak benchmark sweep: Inkling-2-Mini decode and prefill on an RTX 5080 and decode on an M3 Pro, then two kernel checks, and where fak still trails](visuals/61-hero-benchmark-sweep.png)](docs/benchmarks/README.md)
+[![fak benchmark sweep: Inkling-2-Mini on RTX 5080 and kernel checks, sorted from strongest wins to the single-stream fence](visuals/61-hero-benchmark-sweep.png)](docs/benchmarks/README.md)
 
 On one RTX 5080 16 GB, fak’s own CUDA engine decodes Inkling-2-Mini at
 122.34 tok/s in-process (`kv=f16`, auto context 29,184). Over HTTP at 16K context
