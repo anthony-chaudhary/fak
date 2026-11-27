@@ -357,8 +357,8 @@ func TestServeInkling2ResidentUnifiedMemorySizing24GBAnd36GB(t *testing.T) {
 
 	// Explicit FAK_INKLING2_KV=f32 must price higher than f16 at the same chunk.
 	sz24F32, err := serveInkling2ResidentSizingOf(path, inkling2EnvLookup(map[string]string{
-		inkling2ResidentCtxEnv:      "16384",
-		"FAK_INKLING2_KV":           "f32",
+		inkling2ResidentCtxEnv:       "16384",
+		"FAK_INKLING2_KV":            "f32",
 		"FAK_INKLING2_PREFILL_CHUNK": strconv.Itoa(sz24.Chunk),
 	}))
 	if err != nil {

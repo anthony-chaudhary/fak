@@ -524,11 +524,11 @@ func newFakeInk2GraphCohort() *fakeInk2GraphCohort {
 	return &fakeInk2GraphCohort{fakeInk2Cohort: newFakeInk2Cohort()}
 }
 
-func (g *fakeInk2GraphCohort) TrimLarge(int)           { g.trims++ }
-func (g *fakeInk2GraphCohort) Ink2GraphBegin() error   { g.graphBegins++; return nil }
-func (g *fakeInk2GraphCohort) Ink2GraphEnd() error     { g.graphEnds++; return nil }
-func (g *fakeInk2GraphCohort) Ink2GraphLaunch() error  { g.graphLaunches++; return nil }
-func (g *fakeInk2GraphCohort) Ink2GraphReset()         { g.graphResets++ }
+func (g *fakeInk2GraphCohort) TrimLarge(int)          { g.trims++ }
+func (g *fakeInk2GraphCohort) Ink2GraphBegin() error  { g.graphBegins++; return nil }
+func (g *fakeInk2GraphCohort) Ink2GraphEnd() error    { g.graphEnds++; return nil }
+func (g *fakeInk2GraphCohort) Ink2GraphLaunch() error { g.graphLaunches++; return nil }
+func (g *fakeInk2GraphCohort) Ink2GraphReset()        { g.graphResets++ }
 
 func TestInkling2BatchDecodeArenasSizedAtC(t *testing.T) {
 	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
