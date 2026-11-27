@@ -48,26 +48,44 @@ func codexServiceTierCatalog(rows []map[string]string) []codexServiceTier {
 	return catalog
 }
 
-func modelCatalogRow(id, owner string, contextWindow int) map[string]any {
+func modelCatalogRow(id, owner string, contextWindow int, kvDtype string) map[string]any {
 	row := map[string]any{"id": id, "object": "model", "owned_by": owner}
 	if contextWindow > 0 {
 		row["context_length"] = contextWindow
 		row["context_window"] = contextWindow
 	}
+	if kv := strings.TrimSpace(kvDtype); kv != "" {
+		row["kv_dtype"] = kv
+	}
 	return row
 }
 
-// catalogContextWindow is the window a catalog row advertises: the in-kernel model's
-// own window, else the proxied upstream's discovered per-request window, else 0 (omit).
+// catalogContextWindow is the window a catalog row advertises: the native
+// planner's own window, else the live serve-status envelope's max_ctx, else
+// the proxied upstream's discovered per-request window, else 0 (omit).
 func (s *Server) catalogContextWindow(model string, planner agent.Planner) int {
 	if w := inKernelContextWindow(planner); w > 0 {
 		return w
 	}
+	if snap, ok := s.serveStatusSnapshot(); ok && snap.MaxCtx > 0 {
+		return snap.MaxCtx
+	}
 	return s.upstreamWindowFor(model)
 }
 
+func (s *Server) catalogKVDtype() string {
+	if snap, ok := s.serveStatusSnapshot(); ok {
+		return strings.TrimSpace(snap.KVDtype)
+	}
+	return ""
+}
+
+type contextWindowPlanner interface {
+	ContextWindow() int
+}
+
 func inKernelContextWindow(planner agent.Planner) int {
-	p, ok := planner.(*agent.InKernelPlanner)
+	p, ok := planner.(contextWindowPlanner)
 	if !ok || p == nil {
 		return 0
 	}
@@ -75,12 +93,12 @@ func inKernelContextWindow(planner agent.Planner) int {
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	data := []map[string]any{modelCatalogRow(s.model, "fak", s.catalogContextWindow(s.model, s.planner))}
+	data := []map[string]any{modelCatalogRow(s.model, "fak", s.catalogContextWindow(s.model, s.planner), s.catalogKVDtype())}
 	// Dual mode (local model alongside the API upstream): advertise the in-kernel
 	// model's id too, so an OpenAI-wire client can DISCOVER the local side instead of
 	// needing out-of-band knowledge of the alias.
 	if d, ok := s.planner.(*DualPlanner); ok {
-		data = append(data, modelCatalogRow(d.LocalModelID(), "fak", inKernelContextWindow(d.Local())))
+		data = append(data, modelCatalogRow(d.LocalModelID(), "fak", inKernelContextWindow(d.Local()), ""))
 	}
 	if s.roster != nil {
 		seen := make(map[string]struct{}, len(data)+len(s.roster.Bindings))
@@ -96,7 +114,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			seen[id] = struct{}{}
-			data = append(data, modelCatalogRow(id, "fak-route-accounts", s.upstreamWindowFor(id)))
+			data = append(data, modelCatalogRow(id, "fak-route-accounts", s.upstreamWindowFor(id), ""))
 		}
 		// Roster declaration order is not an API contract. Stable ordering also makes
 		// equivalent roster files advertise byte-identical catalogs. No-roster output

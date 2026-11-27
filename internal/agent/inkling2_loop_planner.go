@@ -270,6 +270,21 @@ func (s *inkling2StopScanner) finish() (string, error) {
 
 func (p *Inkling2LoopPlanner) Model() string { return p.modelID }
 
+// ContextWindow returns the served token window configured for this planner,
+// or 0 when unbounded/unknown.
+func (p *Inkling2LoopPlanner) ContextWindow() int {
+	if p == nil {
+		return 0
+	}
+	if p.contextTokens > 0 {
+		return p.contextTokens
+	}
+	if p.cfg.MaxPositionEmbeddings > 0 {
+		return p.cfg.MaxPositionEmbeddings
+	}
+	return 0
+}
+
 func (p *Inkling2LoopPlanner) StreamingSupported() bool { return true }
 
 // CompleteStream streams content while the turn decodes: each delta is text that
