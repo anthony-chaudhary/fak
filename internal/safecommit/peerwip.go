@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	posixpath "path"
 	"reflect"
 	"sort"
 	"strconv"
@@ -122,7 +123,8 @@ type PathAttributionResult struct {
 	EffectivePaths  []string                  `json:"effective_paths,omitempty"`
 	ReconciledPaths []ReconciledPathOwnership `json:"reconciled_paths,omitempty"`
 	// MalformedPeerRefs names refs/fak/wip entries skipped because they do not
-	// point at a checkpoint commit; they carry no ownership evidence.
+	// point at a checkpoint commit or are corrupt mass-deletion partial-checkout
+	// artifacts; they carry no ownership evidence.
 	MalformedPeerRefs []string `json:"malformed_peer_refs,omitempty"`
 }
 
@@ -458,13 +460,14 @@ type gitPeerOwnerInfo struct {
 }
 
 type peerWIPCheckpoint struct {
-	peer, oid   string
-	scope       []string
-	stamp       wipref.Stamp
-	stampValid  bool
-	represented bool
-	parkScope   []string
-	selfPark    bool
+	peer, oid      string
+	scope          []string
+	stamp          wipref.Stamp
+	stampValid     bool
+	hasStampMarker bool
+	represented    bool
+	parkScope      []string
+	selfPark       bool
 }
 
 // A ref at a blob/tree (git emits an empty contents:size for those) or a tag
@@ -541,7 +544,8 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		}
 		checkpoints = append(checkpoints, peerWIPCheckpoint{
 			peer: peer, oid: oid, scope: stamp.Scope, stamp: stamp, stampValid: stampValid,
-			parkScope: nativeSelfParkScope(peer, oid, msg, selfSession),
+			hasStampMarker: peerWIPHasStampMarker(msg),
+			parkScope:      nativeSelfParkScope(peer, oid, msg, selfSession),
 		})
 		if !seen[oid] {
 			seen[oid] = true
@@ -552,6 +556,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		return nil, nil, fmt.Errorf("safecommit: incomplete peer WIP snapshot")
 	}
 	deltas := make(map[string]map[string]bool)
+	deltaStatuses := make(map[string]map[string]string)
 	if len(objects) == 0 {
 		return make(map[string]gitPeerOwnerInfo), malformed, ctx.Err()
 	}
@@ -566,6 +571,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		return nil, nil, fmt.Errorf("safecommit: invalid peer WIP batch terminator")
 	}
 	deltas[root] = make(map[string]bool)
+	deltaStatuses[root] = make(map[string]string)
 	filtered := objects[:0]
 	for _, oid := range objects {
 		if oid != root {
@@ -619,6 +625,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 				}
 				current = token
 				deltas[current] = make(map[string]bool)
+				deltaStatuses[current] = make(map[string]string)
 				continue
 			}
 			// With rename detection disabled, every raw record has exactly one path.
@@ -632,6 +639,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 			}
 			raw = rest
 			deltas[current][path] = true
+			deltaStatuses[current][path] = fields[4]
 		}
 		if !terminated {
 			return nil, nil, fmt.Errorf("safecommit: truncated peer WIP batch")
@@ -642,6 +650,58 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 			}
 		}
 	}
+	// Mass-deletion partial-checkout filter: when a refs/fak/wip/* commit matches
+	// a target path via status D, inspect its diff-tree summary. Corrupt partial-
+	// checkout / sparse-checkout artifacts are classified as malformed/ignored
+	// rather than poisoning PEER_WIP_COLLISION.
+	diffSummaries := make(map[string]peerWIPDiffSummary)
+	diffSummaryOK := make(map[string]bool)
+	ignoredMassDeletion := make(map[string]map[string]bool)
+	reportedMassDeletionRef := make(map[string]bool)
+	for i := range checkpoints {
+		checkpoint := &checkpoints[i]
+		oid := checkpoint.oid
+		statuses := deltaStatuses[oid]
+		if len(statuses) == 0 {
+			continue
+		}
+		hasDeletionMatch := false
+		for _, tp := range targetPaths {
+			if statuses[tp] == "D" {
+				hasDeletionMatch = true
+				break
+			}
+		}
+		if !hasDeletionMatch {
+			continue
+		}
+		summary, checked := diffSummaries[oid]
+		ok := diffSummaryOK[oid]
+		if !checked {
+			summary, ok = peerWIPInspectDiffSummary(ctx, run, dir, oid)
+			diffSummaries[oid] = summary
+			diffSummaryOK[oid] = ok
+		}
+		if !ok {
+			continue
+		}
+		ignoredAny := false
+		for _, tp := range targetPaths {
+			if statuses[tp] == "D" && isMassDeletionPartialCheckout(summary, tp) {
+				if ignoredMassDeletion[oid] == nil {
+					ignoredMassDeletion[oid] = make(map[string]bool)
+				}
+				ignoredMassDeletion[oid][tp] = true
+				ignoredAny = true
+			}
+		}
+		if ignoredAny && !reportedMassDeletionRef[checkpoint.peer] {
+			reportedMassDeletionRef[checkpoint.peer] = true
+			malformed = append(malformed, fmt.Sprintf("refs/fak/wip/%s (mass-deletion partial-checkout %s: %d deletions, %d non-deletions)",
+				checkpoint.peer, oid, summary.deletions, summary.nonDeletions))
+		}
+	}
+
 	// A checkpoint whose complete exact payload is represented by one later
 	// ancestor of the pinned HEAD is historical evidence, not live ownership.
 	// Only inspect checkpoints that would otherwise own one of the requested
@@ -650,7 +710,8 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 	headPinned := false
 	for i := range checkpoints {
 		checkpoint := &checkpoints[i]
-		if !peerWIPCheckpointRelevant(*checkpoint, deltas[checkpoint.oid], targetPaths) || (len(checkpoint.parkScope) == 0 && !peerWIPStampEligible(*checkpoint)) {
+		representedEligible := peerWIPStampEligible(*checkpoint) || peerWIPUnstampedTicketEligible(*checkpoint)
+		if !peerWIPCheckpointRelevant(*checkpoint, deltas[checkpoint.oid], ignoredMassDeletion[checkpoint.oid], targetPaths) || (len(checkpoint.parkScope) == 0 && !representedEligible) {
 			continue
 		}
 		if !headPinned {
@@ -664,7 +725,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 			if len(checkpoint.parkScope) != 0 {
 				checkpoint.selfPark = peerWIPNativeParkProven(ctx, run, dir, *checkpoint, head)
 			}
-			if !checkpoint.selfPark && peerWIPStampEligible(*checkpoint) {
+			if !checkpoint.selfPark && representedEligible {
 				checkpoint.represented = peerWIPCheckpointRepresented(ctx, run, dir, *checkpoint, head)
 			}
 		}
@@ -679,6 +740,9 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		for _, path := range targetPaths {
 			if err := ctx.Err(); err != nil {
 				return nil, nil, err
+			}
+			if ignoredMassDeletion[checkpoint.oid][path] {
+				continue
 			}
 			inScope := gitgate.CoveredByAnyTree(path, checkpoint.scope)
 			if !inScope && !deltas[checkpoint.oid][path] {
@@ -872,13 +936,85 @@ func peerWIPStampJSONKeysValid(payload string) bool {
 	return err == nil && tok == json.Delim('}') && dec.InputOffset() == int64(len(payload))
 }
 
-func peerWIPCheckpointRelevant(checkpoint peerWIPCheckpoint, delta map[string]bool, targetPaths []string) bool {
+func peerWIPHasStampMarker(msg string) bool {
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), peerWIPStampPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+type peerWIPDiffSummary struct {
+	deletions    int
+	nonDeletions int
+	nonDDirs     map[string]bool
+}
+
+func peerWIPInspectDiffSummary(ctx context.Context, run Runner, dir, oid string) (peerWIPDiffSummary, bool) {
+	out, err := runPeerWIPLookup(ctx, run, dir,
+		"diff-tree", "--no-commit-id", "--name-status", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "-r", oid)
+	if err != nil || out == "" || !strings.HasSuffix(out, "\x00") {
+		return peerWIPDiffSummary{}, false
+	}
+	summary := peerWIPDiffSummary{nonDDirs: make(map[string]bool)}
+	for out != "" {
+		status, rest, ok := strings.Cut(out, "\x00")
+		if !ok || status == "" {
+			return peerWIPDiffSummary{}, false
+		}
+		out = rest
+		p, rest, ok := strings.Cut(out, "\x00")
+		if !ok || p == "" {
+			return peerWIPDiffSummary{}, false
+		}
+		out = rest
+		if status == "D" {
+			summary.deletions++
+		} else {
+			summary.nonDeletions++
+			summary.nonDDirs[posixpath.Dir(p)] = true
+		}
+	}
+	return summary, true
+}
+
+func isMassDeletionPartialCheckout(summary peerWIPDiffSummary, targetPath string) bool {
+	if summary.deletions >= 100 && summary.deletions > 10*summary.nonDeletions {
+		return true
+	}
+	if summary.deletions > 500 && !summary.nonDDirs[posixpath.Dir(targetPath)] {
+		return true
+	}
+	return false
+}
+
+func peerWIPCheckpointRelevant(checkpoint peerWIPCheckpoint, delta map[string]bool, ignored map[string]bool, targetPaths []string) bool {
 	for _, path := range targetPaths {
+		if ignored[path] {
+			continue
+		}
 		if gitgate.CoveredByAnyTree(path, checkpoint.scope) || delta[path] {
 			return true
 		}
 	}
 	return false
+}
+
+func peerWIPUnstampedTicketEligible(checkpoint peerWIPCheckpoint) bool {
+	return strings.HasPrefix(checkpoint.peer, "ticket-") && !checkpoint.hasStampMarker && peerWIPObjectID(checkpoint.oid)
+}
+
+func peerWIPTreeEntriesMatch(got, want map[string]peerWIPTreeEntry) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for p, entry := range want {
+		if got[p] != entry {
+			return false
+		}
+	}
+	return true
 }
 
 func peerWIPStampEligible(checkpoint peerWIPCheckpoint) bool {
@@ -903,37 +1039,67 @@ func peerWIPStampEligible(checkpoint peerWIPCheckpoint) bool {
 // returns false on every unsupported shape, malformed result, lookup failure, or
 // candidate-budget exhaustion so ownership is never cleared on partial evidence.
 func peerWIPCheckpointRepresented(ctx context.Context, run Runner, dir string, checkpoint peerWIPCheckpoint, head string) bool {
+	stamped := peerWIPStampEligible(checkpoint)
+	unstampedTicket := !stamped && peerWIPUnstampedTicketEligible(checkpoint)
+	if !stamped && !unstampedTicket {
+		return false
+	}
+
 	parents, err := runPeerWIPLookup(ctx, run, dir, "rev-list", "--parents", "--max-count=1", checkpoint.oid, "--")
 	if err != nil {
 		return false
 	}
 	parentFields := strings.Fields(parents)
-	if len(parentFields) != 2 || parentFields[0] != checkpoint.oid || parentFields[1] != checkpoint.stamp.StartSHA {
+	if len(parentFields) != 2 || parentFields[0] != checkpoint.oid || !peerWIPObjectID(parentFields[1]) {
 		return false
 	}
 	base := parentFields[1]
-
-	delta, ok := peerWIPCompleteDelta(ctx, run, dir, base, checkpoint.oid)
-	if !ok || len(delta) != len(checkpoint.stamp.Scope) {
+	if stamped && base != checkpoint.stamp.StartSHA {
 		return false
 	}
-	want, ok := peerWIPExactTreeEntries(ctx, run, dir, checkpoint.oid, checkpoint.stamp.Scope)
-	if !ok || len(want) != len(checkpoint.stamp.Scope) {
+
+	delta, ok := peerWIPCompleteDelta(ctx, run, dir, base, checkpoint.oid)
+	if !ok || len(delta) == 0 {
+		return false
+	}
+	var scope []string
+	if stamped {
+		if len(delta) != len(checkpoint.stamp.Scope) {
+			return false
+		}
+		scope = checkpoint.stamp.Scope
+	} else {
+		scope = make([]string, 0, len(delta))
+		for p := range delta {
+			scope = append(scope, p)
+		}
+		sort.Strings(scope)
+	}
+	want, ok := peerWIPExactTreeEntries(ctx, run, dir, checkpoint.oid, scope)
+	if !ok || len(want) != len(scope) {
 		return false
 	}
 	introducedOID, introducedPath := "", ""
-	for _, path := range checkpoint.stamp.Scope {
-		d, deltaOK := delta[path]
-		entry, treeOK := want[path]
+	for _, p := range scope {
+		d, deltaOK := delta[p]
+		entry, treeOK := want[p]
 		if !deltaOK || !treeOK || d.new != entry {
 			return false
 		}
 		if introducedOID == "" && d.oldOID != entry.oid {
-			introducedOID, introducedPath = entry.oid, path
+			introducedOID, introducedPath = entry.oid, p
 		}
 	}
 	if introducedOID == "" {
 		return false
+	}
+
+	// For unstamped ticket-* checkpoints, direct blob/tree-entry equivalence against
+	// HEAD proves the checkpoint is already landed even across squashed/rebased landings.
+	if unstampedTicket {
+		if gotHead, ok := peerWIPExactTreeEntries(ctx, run, dir, head, scope); ok && peerWIPTreeEntriesMatch(gotHead, want) {
+			return true
+		}
 	}
 
 	args := []string{
@@ -972,17 +1138,11 @@ func peerWIPCheckpointRepresented(ctx context.Context, run Runner, dir string, c
 		if !headAncestor {
 			continue
 		}
-		got, ok := peerWIPExactTreeEntries(ctx, run, dir, candidate, checkpoint.stamp.Scope)
+		got, ok := peerWIPExactTreeEntries(ctx, run, dir, candidate, scope)
 		if !ok {
 			return false
 		}
-		match := len(got) == len(want)
-		for path, entry := range want {
-			if got[path] != entry {
-				match = false
-			}
-		}
-		if match {
+		if peerWIPTreeEntriesMatch(got, want) {
 			matches++
 		}
 	}
