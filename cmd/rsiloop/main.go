@@ -54,7 +54,8 @@ func main() {
 	harness := flag.String("harness", "worktree", "which REAL subsystem the loop drives: "+
 		"worktree (rewrite DefaultCacheSize, measured in an isolated worktree) | "+
 		"rulesynth (synthesize an adjudicator deny-rule from the frozen near-miss corpus) | "+
-		"sessionobs (drive the session->outcome S0 loop-index score as the RSI objective)")
+		"sessionobs (drive the session->outcome S0 loop-index score as the RSI objective) | "+
+		"verifyeff (drive the verification effectiveness index across multi-axis snapshots)")
 	dosObserve := flag.Bool("dos-observe", false, "also emit a `dos improve --observe` "+
 		"receipt of each keep/revert verdict to the DOS audit journal (record-only "+
 		"telemetry; never re-gates the loop; no-op when dos is absent) — #588")
@@ -151,8 +152,12 @@ func selectHarness(kind, repo, baselineRef, candidates, probePkg, suitePkgs stri
 		// reverts, while the closed session->outcome->consuming-loop state keeps only
 		// after the S0 loop-index strictly rises to 100.
 		return rsiloop.NewSessionObsDemoHarness(), nil
+	case "verifyeff":
+		// Deterministic verification effectiveness witness: scores multi-axis
+		// verification signals into VEI and drives REVERT -> KEEP -> KEEP.
+		return rsiloop.NewVerifyEffHarness(), nil
 	default:
-		return rsiloop.Harness{}, fmt.Errorf("unknown -harness %q (want worktree|rulesynth|sessionobs)", kind)
+		return rsiloop.Harness{}, fmt.Errorf("unknown -harness %q (want worktree|rulesynth|sessionobs|verifyeff)", kind)
 	}
 }
 
