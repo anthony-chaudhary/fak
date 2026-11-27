@@ -146,25 +146,42 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 			pass = append(pass, tc)
 			continue
 		}
-		// Force-fresh escape hatch: a re-proposed read carrying the advertised _fak_fresh
-		// marker skips the cache probe and passes through to the client to actually run.
-		// Sound: this only ever turns a would-be served hit into a normal tool_use —
-		// byte-identical to a cache MISS, the already-tested fall-through. It can never
-		// create an effect or relax a gate; it only declines the optimization. The model
-		// reaches for this when the served age (below) says the cached read is too stale.
-		//
-		// It sits above BOTH probes so the affordance the served line advertises beats
-		// the toolproc reuse cache as well as the vDSO one. Hoisting it past the
-		// read-only name gate is behavior-preserving: a marker-carrying call that is not
-		// vDSO-eligible takes the same `pass` fall-through that gate would have given it.
-		if callRequestsFresh(tc.Function.Arguments) {
+		// Force-fresh / model cache-control directives (#_fak_fresh, _fak_max_age_ms, _fak_reuse_only):
+		// - _fak_fresh: true (or _fak_max_age_ms: 0) bypasses the cache probe and runs fresh.
+		// - _fak_max_age_ms: N rejects any cached hit older than N ms.
+		// - _fak_reuse_only: true serves from cache if available and fresh, or skips live execution on miss.
+		forceFresh, maxAgeMS, hasMaxAge, reuseOnly, probeArgs := parseModelCacheControl(tc.Function.Arguments)
+		if forceFresh {
+			if probeArgs != tc.Function.Arguments {
+				tc.Function.Arguments = probeArgs
+			}
 			pass = append(pass, tc)
 			continue
+		}
+		missOrFallback := func() {
+			if reuseOnly {
+				served = append(served, fmt.Sprintf("[fak] %s (cache miss; _fak_reuse_only=true — skipped fresh execution; re-call without _fak_reuse_only to run fresh)", tool))
+				adjs = append(adjs, ToolAdjudication{
+					ToolCallID: tc.ID,
+					Tool:       tool,
+					ArgsDigest: argsDigest,
+					Admitted:   true,
+					Verdict:    WireVerdict{Kind: "ALLOW", Reason: "CACHE_MISS_SKIPPED", By: "model-cache-control"},
+				})
+				return
+			}
+			if probeArgs != tc.Function.Arguments {
+				tc.Function.Arguments = probeArgs
+			}
+			pass = append(pass, tc)
 		}
 		// Child creation must reach ordinary adjudication, including its depth
 		// cap, even when a namespace looks read-only or reuse sees read-shaped
 		// arguments. Non-spawn reads such as list_agents remain cache-eligible.
 		if s.subagentSpawnOperation(tool) {
+			if probeArgs != tc.Function.Arguments {
+				tc.Function.Arguments = probeArgs
+			}
 			pass = append(pass, tc)
 			continue
 		}
@@ -180,13 +197,13 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		// content digest witnessed RIGHT NOW, whereas a vDSO tier-2 hit may be stale by
 		// up to its max-age ceiling. Unarmed — the default — reuseServe is one lock-free
 		// map probe and a nil check, so the pre-#5119 path stays byte-identical.
-		if body, meta, ok := s.reuseServe(ctx, tool, tc.Function.Arguments); ok {
+		if body, meta, ok := s.reuseServe(ctx, tool, probeArgs); ok && !hitExceedsModelMaxAge(meta, maxAgeMS, hasMaxAge) {
 			if serve, refusal := s.admitServedHit(ctx, tc, argsDigest, reqTrace); !serve {
 				if refusal != nil {
 					dropped++
 					adjs = append(adjs, *refusal)
 				} else {
-					pass = append(pass, tc)
+					missOrFallback()
 				}
 				continue
 			}
@@ -262,12 +279,12 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		// gate buildCall uses to stamp readOnlyHint+idempotentHint). A write-shaped tool
 		// is never probed; vdso.Lookup's own destructive gate is the backstop.
 		if !readOnlyPrefix(tool) {
-			pass = append(pass, tc)
+			missOrFallback()
 			continue
 		}
-		c2, err := s.buildCall(ctx, tool, tc.Function.Arguments, true, "", reqTrace)
+		c2, err := s.buildCall(ctx, tool, probeArgs, true, "", reqTrace)
 		if err != nil {
-			pass = append(pass, tc)
+			missOrFallback()
 			continue
 		}
 		// Probe the SAME registered fast paths the kernel consults in Submit
@@ -277,18 +294,13 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		res, ok, proofReceipt := fastPathLookupReceipt(ctx, c2)
 		proofSource := proofReceipt.Matches(res)
 		if !ok || res == nil {
-			pass = append(pass, tc) // miss -> normal adjudication path, unchanged
+			missOrFallback() // miss -> normal adjudication path (or skip if _fak_reuse_only)
 			continue
 		}
-		// Operator TTL ceiling (#1349): if this tool has a configured max-age and the
-		// tier-2 hit is OLDER than it, decline the inline serve and let the call run fresh.
-		// This is the deterministic counterpart to the model-driven _fak_fresh above — the
-		// operator sets a hard per-tool freshness bound; the model judges per-call. Sound
-		// for the same reason: it only ever turns a would-be served hit into a normal
-		// tool_use, byte-identical to a cache MISS (the already-tested fall-through). It is
-		// the first ENFORCED consumer of abi.ConsistencyBoundedStale's staleness bound.
-		if s.servedHitOverMaxAge(tool, res.Meta) {
-			pass = append(pass, tc)
+		// Operator TTL ceiling (#1349) + model max-age directive (_fak_max_age_ms):
+		// if either ceiling is exceeded, decline the inline serve.
+		if s.servedHitOverMaxAge(tool, res.Meta) || hitExceedsModelMaxAge(res.Meta, maxAgeMS, hasMaxAge) {
+			missOrFallback()
 			continue
 		}
 		body := resolveBytes(ctx, res.Payload)
@@ -296,7 +308,7 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		// trip the screen, drop the served hit and let the call go through normal
 		// adjudication instead (fail-safe: behave as a miss).
 		if _, held := ctxmmu.ScreenBytes(body); held {
-			pass = append(pass, tc)
+			missOrFallback()
 			continue
 		}
 		if serve, refusal := s.admitServedHit(ctx, tc, argsDigest, reqTrace); !serve {
@@ -304,7 +316,7 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 				dropped++
 				adjs = append(adjs, *refusal)
 			} else {
-				pass = append(pass, tc)
+				missOrFallback()
 			}
 			continue
 		}
@@ -344,8 +356,11 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 // admitServedHit folds this server's current adjudicator chain over a call a
 // cache seam is about to answer inline: cached bytes were admitted under some
 // earlier policy or another server's chain, so they prove nothing about this
-// call now. Only a plain ALLOW serves. A refusal is returned for the caller to
-// record as dropped; a TRANSFORM or build error returns (false, nil) so the call
+// call now. Plain ALLOW serves, and transparent dispatch-shape redirects
+// (monitor/*_to_fak_*, emitted only after the floor already allowed the call)
+// also serve because no backend engine dispatch occurs on a local hit. A refusal
+// is returned for the caller to record as dropped; any other TRANSFORM (secret
+// redaction, command sidestep) or build error returns (false, nil) so the call
 // takes the ordinary adjudicateProposed path, which owns repaired arguments and
 // MALFORMED handling.
 func (s *Server) admitServedHit(ctx context.Context, tc agent.ToolCall, argsDigest, reqTrace string) (bool, *ToolAdjudication) {
@@ -361,16 +376,42 @@ func (s *Server) admitServedHit(ctx context.Context, tc agent.ToolCall, argsDige
 	case "ALLOW":
 		return true, nil
 	case "TRANSFORM":
+		if isDispatchRedirectTransform(wv) {
+			return true, nil
+		}
 		return false, nil
 	default:
 		return false, &ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: false, Verdict: wv}
 	}
 }
 
+// isDispatchRedirectTransform reports whether a TRANSFORM verdict is solely a
+// host->fak_* dispatch redirect emitted after the floor already allowed the call.
+func isDispatchRedirectTransform(wv WireVerdict) bool {
+	by := wv.By
+	if kby := wv.Detail["kernel_by"]; kby != "" {
+		by = kby
+	}
+	switch by {
+	case "monitor/read_to_fak_read", "monitor/grep_to_fak_grep", "monitor/glob_to_fak_glob":
+		return true
+	}
+	switch wv.Detail["autorepair"] {
+	case "read_to_fak_read", "grep_to_fak_grep", "glob_to_fak_glob":
+		return true
+	default:
+		return false
+	}
+}
+
 // fakFreshMarker is the reserved arg key the served-cache line tells the model to set
 // to force a fresh read. It is namespaced under "_fak_" so it cannot collide with a real
 // tool argument (no real tool defines a leading-underscore _fak_-prefixed param).
-const fakFreshMarker = "_fak_fresh"
+const (
+	fakFreshMarker     = "_fak_fresh"
+	fakMaxAgeMSMarker  = "_fak_max_age_ms"
+	fakReuseOnlyMarker = "_fak_reuse_only"
+)
 
 // servedToolLine renders one vDSO-served tool result as an assistant-text line — the
 // only wire-valid surface for a locally-served answer (a tool_result block is a
@@ -467,6 +508,67 @@ func callRequestsFresh(args string) bool {
 	}
 	var b bool
 	return json.Unmarshal(raw, &b) == nil && b
+}
+
+// parseModelCacheControl parses the reserved _fak_* cache-control directives from a
+// proposed tool call's JSON arguments, returning the parsed directives and strippedArgs
+// (with _fak_max_age_ms and _fak_reuse_only removed when present; _fak_fresh is
+// preserved for existing caller compatibility).
+func parseModelCacheControl(args string) (forceFresh bool, maxAgeMS int64, hasMaxAge bool, reuseOnly bool, strippedArgs string) {
+	if !strings.Contains(args, fakFreshMarker) && !strings.Contains(args, fakMaxAgeMSMarker) && !strings.Contains(args, fakReuseOnlyMarker) {
+		return false, 0, false, false, args
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(args), &m); err != nil || m == nil {
+		return false, 0, false, false, args
+	}
+	if raw, ok := m[fakFreshMarker]; ok {
+		var b bool
+		if json.Unmarshal(raw, &b) == nil && b {
+			forceFresh = true
+		}
+	}
+	rawMaxAge, hadMaxAgeKey := m[fakMaxAgeMSMarker]
+	if hadMaxAgeKey && strings.TrimSpace(string(rawMaxAge)) != "null" {
+		var v int64
+		if json.Unmarshal(rawMaxAge, &v) == nil && v >= 0 {
+			maxAgeMS = v
+			hasMaxAge = true
+			if v == 0 {
+				forceFresh = true
+			}
+		}
+	}
+	rawReuseOnly, hadReuseOnlyKey := m[fakReuseOnlyMarker]
+	if hadReuseOnlyKey {
+		var b bool
+		if json.Unmarshal(rawReuseOnly, &b) == nil && b {
+			reuseOnly = true
+		}
+	}
+	strippedArgs = args
+	if hadMaxAgeKey || hadReuseOnlyKey {
+		delete(m, fakMaxAgeMSMarker)
+		delete(m, fakReuseOnlyMarker)
+		if b, err := json.Marshal(m); err == nil {
+			strippedArgs = string(b)
+		}
+	}
+	return forceFresh, maxAgeMS, hasMaxAge, reuseOnly, strippedArgs
+}
+
+// hitExceedsModelMaxAge reports whether a served cache hit's age_ms strictly exceeds the
+// model-requested maxAgeMS bound. Hits without a valid non-negative age_ms (e.g.
+// digest-verified immutable reads) pass unless maxAgeMS == 0 already forced fresh.
+func hitExceedsModelMaxAge(meta map[string]string, maxAgeMS int64, hasMaxAge bool) bool {
+	if !hasMaxAge || meta == nil {
+		return false
+	}
+	ms, err := strconv.ParseInt(meta["age_ms"], 10, 64)
+	if err != nil || ms < 0 {
+		return false
+	}
+	return ms > maxAgeMS
 }
 
 // livelockObservationOf builds the livelock observation for one adjudicated tool

@@ -143,13 +143,20 @@ func resultCarriesArtifactWitness(content string) bool {
 	return fullHashPat.MatchString(lc)
 }
 
+// isCleanResultAdmission reports whether a result-side WireVerdict passed without blocking
+// or rewriting the payload. Both ALLOW and clean DEFER (e.g. from non-blocking admitters
+// like toolprocgate or ifc-stamp) qualify; QUARANTINE/TRANSFORM/DENY/RESIDUAL do not.
+func isCleanResultAdmission(kind string) bool {
+	return kind == "ALLOW" || kind == "DEFER"
+}
+
 // subagentDoneVerdict decides whether a subagent's terminal result must be folded TAINTED
 // rather than clean. It returns the demoted verdict and true only when ALL hold: the base
-// admission was a clean ALLOW (a QUARANTINE/DENY already held it, nothing to demote), the
+// admission was a clean ALLOW or DEFER (a QUARANTINE/DENY already held it, nothing to demote), the
 // tool is a subagent-spawn shape, the result CLAIMS ship/create/fix, and the result
 // carries NO artifact witness. Otherwise it returns the base verdict unchanged and false.
 func subagentDoneVerdict(tool, content string, base WireVerdict) (WireVerdict, bool) {
-	if base.Kind != "ALLOW" {
+	if !isCleanResultAdmission(base.Kind) {
 		return base, false
 	}
 	if !subagentSpawnTool(tool) {

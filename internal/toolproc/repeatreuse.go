@@ -117,6 +117,24 @@ func (c *ReuseStore) Admit(rec CallRecord) Receipt {
 	}
 }
 
+// observe records an external completed read or mutable query into the reuse
+// store without advancing hit/miss tallies. Called by ArmedCache.Offer so
+// results deposited from prior turns (or session resume) are immediately
+// servable on the next matching call.
+func (c *ReuseStore) observe(nc NormalCall, rec CallRecord) {
+	switch nc.Class {
+	case CmdImmutableRead:
+		if nc.Path == "" {
+			return
+		}
+		c.reads[nc.Path] = readState{digest: nc.Digest, size: rec.OutputBytes}
+	case CmdMutableQuery:
+		if prev, ok := c.queries[nc.Identity]; !ok || rec.AtMS >= prev.atMS {
+			c.queries[nc.Identity] = queryState{atMS: rec.AtMS, size: rec.OutputBytes}
+		}
+	}
+}
+
 // admitRead serves an immutable read from the digest-keyed cache, invalidating the
 // stale entry when a mutation changes the digest.
 func (c *ReuseStore) admitRead(nc NormalCall, rec CallRecord) Receipt {

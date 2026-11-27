@@ -169,6 +169,16 @@ func (a *ArmedCache) Offer(rec CallRecord, body []byte) bool {
 	if n > a.cfg.MaxEntryBytes {
 		return false
 	}
+	if nc.Class == CmdImmutableRead && nc.Path != "" {
+		if prev, ok := a.store.reads[nc.Path]; ok && prev.digest != nc.Digest {
+			a.evict(readIdentity(nc.Path, prev.digest))
+		}
+	}
+	obs := rec
+	if obs.OutputBytes <= 0 {
+		obs.OutputBytes = n
+	}
+	a.store.observe(nc, obs)
 	a.evict(nc.Identity) // replace any prior copy under this identity
 	for a.curBytes+n > a.cfg.MaxBytes && len(a.order) > 0 {
 		a.evict(a.order[0])

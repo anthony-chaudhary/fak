@@ -375,3 +375,50 @@ func TestToolprocReuseHonorsForceFresh(t *testing.T) {
 		t.Fatal("a call carrying _fak_fresh must bypass the toolproc reuse cache")
 	}
 }
+
+type stubResultAdmitter struct {
+	verdict abi.Verdict
+}
+
+func (s stubResultAdmitter) Caps() []abi.Capability { return nil }
+
+func (s stubResultAdmitter) Admit(context.Context, *abi.ToolCall, *abi.Result) abi.Verdict {
+	return s.verdict
+}
+
+// TestToolprocReuseAdmitsCleanDeferAndBlocksQuarantine verifies that non-blocking
+// DEFER result admissions (e.g. toolprocgate / ifc-stamp in production) still warm the
+// toolproc reuse cache, while QUARANTINE admissions never become servable bytes.
+func TestToolprocReuseAdmitsCleanDeferAndBlocksQuarantine(t *testing.T) {
+	ctx := WithPrincipal(context.Background(), "tenantReuse")
+
+	t.Run("clean DEFER admits reuseOffer", func(t *testing.T) {
+		dir, name := writeReuseFile(t, "skill.md", "body\n")
+		srv := newToolprocReuseServer(t, dir, toolproc.ArmedConfig{})
+		abi.RegisterResultAdmitter(20, stubResultAdmitter{
+			verdict: abi.Verdict{Kind: abi.VerdictDefer, By: "toolprocgate"},
+		})
+		args := `{"file_path":"` + name + `"}`
+		if served, _ := reuseTurn(t, srv, ctx, "tr-defer", "d1", "Read", args, `{"content":"body"}`); served {
+			t.Fatal("turn 1 should execute fresh and deposit result")
+		}
+		if served, _ := reuseTurn(t, srv, ctx, "tr-defer", "d2", "Read", args, `{"content":"body"}`); !served {
+			t.Fatal("turn 2 should serve inline after clean DEFER admission")
+		}
+	})
+
+	t.Run("QUARANTINE never admits reuseOffer", func(t *testing.T) {
+		dir, name := writeReuseFile(t, "skill.md", "body\n")
+		srv := newToolprocReuseServer(t, dir, toolproc.ArmedConfig{})
+		abi.RegisterResultAdmitter(20, stubResultAdmitter{
+			verdict: abi.Verdict{Kind: abi.VerdictQuarantine, Reason: abi.ReasonPromptInjection, By: "test-quarantine"},
+		})
+		args := `{"file_path":"` + name + `"}`
+		if served, _ := reuseTurn(t, srv, ctx, "tr-q", "q1", "Read", args, `{"content":"body"}`); served {
+			t.Fatal("turn 1 should execute fresh")
+		}
+		if served, _ := reuseTurn(t, srv, ctx, "tr-q", "q2", "Read", args, `{"content":"body"}`); served {
+			t.Fatal("quarantined result must never warm the toolproc reuse cache")
+		}
+	})
+}

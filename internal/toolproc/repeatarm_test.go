@@ -142,3 +142,30 @@ func TestArmedCacheBudgetEvictsOldestAndCapsEntries(t *testing.T) {
 		t.Errorf("the newest body must survive eviction, got %+v", kept)
 	}
 }
+
+// TestArmedCacheOfferWithoutPriorAdmitServesNextAdmit verifies that Offer seeds
+// the underlying ReuseStore when a completed read is deposited directly (e.g.
+// inbound tool_result history on a fresh gateway), and eagerly evicts an older
+// digest when a newer Offer supersedes it.
+func TestArmedCacheOfferWithoutPriorAdmitServesNextAdmit(t *testing.T) {
+	a := NewArmedCache(ArmedConfig{})
+	bodyV1 := []byte("v1 skill")
+	if !a.Offer(CallRecord{Tool: "Read", Raw: `Read "C:/x/SKILL.md"`, Digest: "d1"}, bodyV1) {
+		t.Fatal("direct Offer must retain immutable read")
+	}
+	hit := a.Admit(CallRecord{Tool: "Read", Raw: `Read "C:/x/SKILL.md"`, Digest: "d1"})
+	if !hit.BodyServed || !bytes.Equal(hit.Body, bodyV1) {
+		t.Fatalf("first Admit after direct Offer must byte-serve, got %+v", hit)
+	}
+	bodyV2 := []byte("v2 skill updated")
+	if !a.Offer(CallRecord{Tool: "Read", Raw: `Read "C:/x/SKILL.md"`, Digest: "d2"}, bodyV2) {
+		t.Fatal("superseding Offer must retain updated read")
+	}
+	if a.RetainedBytes() != int64(len(bodyV2)) {
+		t.Fatalf("superseding Offer must evict prior digest bytes: got %d, want %d", a.RetainedBytes(), len(bodyV2))
+	}
+	hitV2 := a.Admit(CallRecord{Tool: "Read", Raw: `Read "C:/x/SKILL.md"`, Digest: "d2"})
+	if !hitV2.BodyServed || !bytes.Equal(hitV2.Body, bodyV2) {
+		t.Fatalf("Admit for updated digest must byte-serve v2, got %+v", hitV2)
+	}
+}

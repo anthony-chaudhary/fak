@@ -289,33 +289,34 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			// Subagent-boundary witness (#2438): a child terminal result whose prose CLAIMS
 			// ship/create/fix but carries no artifact witness (commit SHA / file hash) is
 			// folded RESIDUAL, not clean — the loop-body-witness discipline
-			// (ReasonLoopBodyUnwitnessed) at the subagent fold. Only a plain ALLOW is demoted;
+			// (ReasonLoopBodyUnwitnessed) at the subagent fold. Only a clean ALLOW/DEFER is demoted;
 			// the content is still forwarded (the parent sees it) but the admission records it
-			// visibly unverified. Placed before the vDSO fill (ALLOW-only) so a demoted, unbacked
+			// visibly unverified. Placed before the vDSO fill (clean-admit-only) so a demoted, unbacked
 			// claim can never warm the cache either.
 			if demoted, ok := subagentDoneVerdict(tool, messages[i].Content, wv); ok {
 				wv = demoted
 			}
-			// Warm the vDSO from this ADMITTED result (opt-in, default off): only a plain
-			// Allow (never QUARANTINE/TRANSFORM/DENY), paired to its originating read-only
-			// call, fills (tool,args)->result so a later identical read is served inline.
+			// Warm the vDSO from this ADMITTED result (opt-in, default off): only a clean
+			// non-blocking admit (ALLOW or clean DEFER — never QUARANTINE/TRANSFORM/DENY/RESIDUAL),
+			// paired to its originating read-only call, fills (tool,args)->result so a later
+			// identical read is served inline.
 			// All the soundness/security guards live in fillVDSOFromResult.
 			if messages[i].RefutesWitness != "" {
 				s.revokeVDSOWitness(messages[i].RefutesWitness)
 			}
-			if s.vdsoProxyFill && wv.Kind == "ALLOW" {
+			if s.vdsoProxyFill && isCleanResultAdmission(wv.Kind) {
 				if orig, ok := callByID[messages[i].ToolCallID]; ok {
 					s.fillVDSOFromResult(ctx, orig, messages[i].Content, messages[i].Witness, traceID)
 				}
 			}
 			// Deposit the SAME admitted result into the toolproc reuse cache (#5119),
 			// the other half of the loop whose serve side sits in
-			// adjudicateProposedServed. Same ALLOW-only gate as the vDSO fill above —
+			// adjudicateProposedServed. Same clean-admit-only gate as the vDSO fill above —
 			// a quarantined or transformed result never becomes servable bytes — but
 			// carried on its own opt-in (SetToolprocReuse), because the two probes key
 			// on different things: the vDSO on the tool NAME, this on the command
 			// CONTENT. Unarmed, this is one lock-free map probe.
-			if wv.Kind == "ALLOW" {
+			if isCleanResultAdmission(wv.Kind) {
 				if orig, ok := callByID[messages[i].ToolCallID]; ok {
 					s.reuseOffer(orig.Function.Name, orig.Function.Arguments, messages[i].Content)
 				}
