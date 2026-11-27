@@ -28,20 +28,43 @@ func (c testInkling2CUDA) Ink2PNVFP4W4A4Available() bool { return c.w4a4 }
 // fak-test:runtime fast est=1ms
 func TestInkling2CUDAPrefillDefaults(t *testing.T) {
 	none := inkling2EnvLookup(nil)
-	device := testInkling2CUDA{w4a4: true}
-	if !inkling2CUDAPrefillReady(device, none) ||
+	deviceW4 := testInkling2CUDA{w4a4: true}
+	deviceNoW4 := testInkling2CUDA{w4a4: false}
+	if !inkling2CUDAPrefillReady(deviceW4, none) ||
+		!inkling2CUDAPrefillReady(deviceNoW4, none) ||
 		inkling2CUDAPrefillReady(nil, none) ||
-		inkling2CUDAPrefillReady(testInkling2CUDA{}, none) ||
-		inkling2CUDAPrefillReady(testInkling2CUDA{w4a4: true, halfErr: errors.New("half unavailable")}, none) {
-		t.Fatal("CUDA defaults must require native W4A4 and working half KV")
+		inkling2CUDAPrefillReady(testInkling2CUDA{w4a4: true, halfErr: errors.New("half unavailable")}, none) ||
+		inkling2CUDAPrefillReady(testInkling2CUDA{w4a4: false, halfErr: errors.New("half unavailable")}, none) {
+		t.Fatal("CUDA cohort defaults must require working half KV and activate regardless of W4A4 availability")
 	}
-	for key, value := range map[string]string{
-		"FAK_INKLING2_SERVE_BATCH": "0", "FAK_INKLING2_BATCHED_PREFILL": "0",
-		"FAK_INKLING2_COHORT_PREFILL": "0", "FAK_INKLING2_BATCH_SEQOPS": "0",
-		"FAK_INKLING2_PREFILL_NVFP4_W4A4": "0", "FAK_INKLING2_COHORT_PREFILL_KV": "off",
+	if !inkling2CUDAPrefillW4A4Active(deviceW4, none) {
+		t.Fatal("W4A4 label must report active when W4A4 is available and not opted out")
+	}
+	if inkling2CUDAPrefillW4A4Active(deviceNoW4, none) {
+		t.Fatal("W4A4 label must report inactive when W4A4 is unavailable")
+	}
+	// Disabling W4A4 prefill keeps cohort concurrency enabled and only clears the W4A4 label.
+	noW4Env := inkling2EnvLookup(map[string]string{"FAK_INKLING2_PREFILL_NVFP4_W4A4": "0"})
+	if !inkling2CUDAPrefillReady(deviceW4, noW4Env) {
+		t.Fatal("FAK_INKLING2_PREFILL_NVFP4_W4A4=0 must not disable cohort concurrency")
+	}
+	if inkling2CUDAPrefillW4A4Active(deviceW4, noW4Env) {
+		t.Fatal("FAK_INKLING2_PREFILL_NVFP4_W4A4=0 must report W4A4 inactive")
+	}
+	for _, tc := range []struct{ key, value string }{
+		{"FAK_INKLING2_SERVE_BATCH", "0"},
+		{"FAK_INKLING2_SERVE_BATCH", "false"},
+		{"FAK_INKLING2_SERVE_BATCH", "off"},
+		{"FAK_INKLING2_BATCHED_PREFILL", "0"},
+		{"FAK_INKLING2_COHORT_PREFILL", "0"},
+		{"FAK_INKLING2_BATCH_SEQOPS", "0"},
+		{"FAK_INKLING2_COHORT_PREFILL_KV", "off"},
 	} {
-		if inkling2CUDAPrefillReady(device, inkling2EnvLookup(map[string]string{key: value})) {
-			t.Fatalf("overrode %s=%s", key, value)
+		if inkling2CUDAPrefillReady(deviceW4, inkling2EnvLookup(map[string]string{tc.key: tc.value})) {
+			t.Fatalf("overrode %s=%s", tc.key, tc.value)
+		}
+		if inkling2CUDAPrefillReady(deviceNoW4, inkling2EnvLookup(map[string]string{tc.key: tc.value})) {
+			t.Fatalf("overrode %s=%s on non-W4A4 device", tc.key, tc.value)
 		}
 	}
 	lookup := inkling2CUDAPrefillDefaults(none)

@@ -516,7 +516,11 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 		if strings.TrimSpace(kv) == "" {
 			kv = "f32"
 		}
-		ignored += fmt.Sprintf("; CUDA concurrent prefill policy, batch KV=%s", kv)
+		prefillMode := "Q8/dense prefill"
+		if inkling2CUDAPrefillW4A4Active(be, lookup) {
+			prefillMode = "NVFP4 W4A4 prefill"
+		}
+		ignored += fmt.Sprintf("; CUDA concurrent prefill policy (%s), batch KV=%s", prefillMode, kv)
 	}
 	batchEng := newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, contextTokens, lookup)
 	batchEng.scalarGenerateLogits = scalar.GenerateLogits

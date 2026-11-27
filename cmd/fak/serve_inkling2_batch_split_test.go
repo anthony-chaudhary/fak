@@ -141,3 +141,33 @@ func TestInkling2BatchEngineNonMemoryFailureStillFailsRows(t *testing.T) {
 		t.Fatalf("a non-memory failure was split %d times", e.splitGroups.Load())
 	}
 }
+
+// fak-test:runtime fast est=1ms
+func TestInkling2BatchEngineSplitUsesInitialDecodeHeadroom(t *testing.T) {
+	e, _, _ := splitTestEngine(t, ggufload.Inkling2LoopMaxBatch)
+	var seen [][]int
+	e.split = func(positions []int) ([][]int, error) {
+		seen = append(seen, append([]int(nil), positions...))
+		all := make([]int, len(positions))
+		for i := range all {
+			all[i] = i
+		}
+		return [][]int{all}, nil
+	}
+	rows, _ := splitTestRows(4)
+	for _, r := range rows {
+		r.prompt = make([]int, 512)
+		r.prompt[0] = 1
+		r.maxNew = 8192
+	}
+	e.execute(rows)
+	if len(seen) != 1 {
+		t.Fatalf("split called %d times, want 1", len(seen))
+	}
+	wantPos := 512 + ggufload.Inkling2InitialDecodeHeadroomDefault
+	for i, pos := range seen[0] {
+		if pos != wantPos {
+			t.Fatalf("row %d split position=%d, want %d (decoupled from 8192)", i, pos, wantPos)
+		}
+	}
+}

@@ -33,11 +33,24 @@ func inkling2ServeBatchEnabled(lookup func(string) (string, bool)) bool {
 	return v == "1"
 }
 
+func inkling2EnvOptOut(lookup func(string) (string, bool), key string) bool {
+	v, ok := lookup(key)
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "0", "false", "off":
+		return true
+	}
+	return false
+}
+
+// inkling2CUDAPrefillReady reports whether be can run CUDA cohort batching out of
+// the box (batch device + ready f16 KV prefill, independent of sm_120f W4A4).
 func inkling2CUDAPrefillReady(be compute.Backend, lookup func(string) (string, bool)) bool {
 	cuda, ok := be.(interface {
 		compute.Inkling2BatchDevice
 		compute.Inkling2PrefillHalfKV
-		Ink2PNVFP4W4A4Available() bool
 	})
 	if !ok {
 		return false
@@ -45,9 +58,8 @@ func inkling2CUDAPrefillReady(be compute.Backend, lookup func(string) (string, b
 	for _, key := range []string{
 		"FAK_INKLING2_SERVE_BATCH", "FAK_INKLING2_BATCHED_PREFILL",
 		"FAK_INKLING2_COHORT_PREFILL", "FAK_INKLING2_BATCH_SEQOPS",
-		"FAK_INKLING2_PREFILL_NVFP4_W4A4",
 	} {
-		if value, _ := lookup(key); value == "0" {
+		if inkling2EnvOptOut(lookup, key) {
 			return false
 		}
 	}
@@ -58,7 +70,17 @@ func inkling2CUDAPrefillReady(be compute.Backend, lookup func(string) (string, b
 			return false
 		}
 	}
-	return cuda.Ink2PHalfKVReady() == nil && cuda.Ink2PNVFP4W4A4Available()
+	return cuda.Ink2PHalfKVReady() == nil
+}
+
+// inkling2CUDAPrefillW4A4Active reports whether sm_120f NVFP4 W4A4 prefill is
+// active for startup reporting; its absence does not disable cohort concurrency.
+func inkling2CUDAPrefillW4A4Active(be compute.Backend, lookup func(string) (string, bool)) bool {
+	if inkling2EnvOptOut(lookup, "FAK_INKLING2_PREFILL_NVFP4_W4A4") {
+		return false
+	}
+	w4, ok := be.(interface{ Ink2PNVFP4W4A4Available() bool })
+	return ok && w4.Ink2PNVFP4W4A4Available()
 }
 
 func inkling2CUDAPrefillDefaults(lookup func(string) (string, bool)) func(string) (string, bool) {
@@ -294,6 +316,8 @@ type inkling2LoopBatchEngine struct {
 	evictIdleSlots func(needBytes int64) int
 	// cohortArenaBytes reports bytes currently held by cached cohort arenas.
 	cohortArenaBytes func() int64
+	// initialDecodeHeadroom caps the upfront per-row decode KV reservation; 0 reserves full maxNew.
+	initialDecodeHeadroom int
 }
 
 var (
@@ -310,6 +334,7 @@ func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.I
 	cohorts := ggufload.NewInkling2LoopCohortsWithLookup(model, backend, lookup)
 	cohorts.SetMaxContext(contextTokens)
 	e := newInkling2LoopBatchEngineWith(scalar, cohorts.Generate, adm, contextTokens)
+	e.initialDecodeHeadroom = ggufload.Inkling2InitialDecodeHeadroom(lookup)
 	_, capBytes := inkling2PrefixCacheFromEnv(lookup)
 	e.ledger = newInkling2ByteLedger(capBytes)
 	e.releaseArenas = cohorts.ReleaseArenas
@@ -330,8 +355,10 @@ func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.I
 func newInkling2LoopBatchEngineWith(scalar inkling2ScalarGenerate, batch inkling2BatchGenerate, adm inkling2Admission, contextTokens int) *inkling2LoopBatchEngine {
 	return &inkling2LoopBatchEngine{
 		admission: adm, contextTokens: contextTokens,
-		queue:          make(chan *inkling2QueuedRequest, adm.max),
-		scalarGenerate: scalar, batchGenerate: batch,
+		queue:                 make(chan *inkling2QueuedRequest, adm.max),
+		scalarGenerate:        scalar,
+		batchGenerate:         batch,
+		initialDecodeHeadroom: ggufload.Inkling2InitialDecodeHeadroomDefault,
 	}
 }
 
@@ -509,7 +536,7 @@ func (e *inkling2LoopBatchEngine) splitGroup(group []*inkling2QueuedRequest) [][
 	}
 	positions := make([]int, len(group))
 	for i, r := range group {
-		positions[i] = len(r.prompt) + r.maxNew
+		positions[i] = ggufload.Inkling2InitialReservePositions(len(r.prompt), r.maxNew, e.initialDecodeHeadroom)
 	}
 	plan, err := e.split(positions)
 	if err != nil || len(plan) <= 1 {
@@ -626,7 +653,7 @@ func (e *inkling2LoopBatchEngine) admitQueued(c *inkling2Cohort, maxPositions in
 		if !inkling2RowLive(r) {
 			continue
 		}
-		if r.sample != nil || len(r.prompt)+r.maxNew-1 > maxPositions {
+		if r.sample != nil || ggufload.Inkling2InitialReservePositions(len(r.prompt), r.maxNew, e.initialDecodeHeadroom)-1 > maxPositions {
 			e.pending = r
 			return ggufload.Inkling2LoopBatchRequest{}, false
 		}

@@ -256,3 +256,99 @@ func TestInkling2PrefixStoreAutoHalfKVWithPrefillOff(t *testing.T) {
 		t.Fatalf("prefix store must be usable under auto-f16 + auto f16 cohort prefill: %v", err)
 	}
 }
+
+// A row whose hard MaxTokens exceeds initialDecodeHeadroom (e.g. 8192) and that
+// genuinely decodes past the initial cohort KV capacity (b.ctx) is cleanly
+// continued after the cohort drains and produces bit-identical greedy output.
+// fak-test:runtime fast est=20ms
+func TestInkling2CohortsGrowOverflowCompletesBitIdentical(t *testing.T) {
+	t.Setenv("FAK_INKLING2_BATCH_ADMIT", "0")
+	t.Setenv(Inkling2InitialDecodeHeadroomEnv, "64")
+
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	bt.SetMaxContext(2048)
+
+	// 4 rows: rows 0, 2, 3 stop early (10 tokens); row 1 genuinely generates 180 tokens
+	// (past initial headroom 64 and initial cohort ctx 128).
+	const (
+		promptLen = 32
+		maxBudget = 1024
+		shortWant = 10
+		longWant  = 180
+	)
+	prompts := make([][]int, 4)
+	for i := range prompts {
+		prompts[i] = make([]int, promptLen)
+		for j := range prompts[i] {
+			prompts[i][j] = (i+1)*10000 + j
+		}
+	}
+	got := make([][]int, 4)
+	doneCalls := make([]int, 4)
+	doneRes := make([]Inkling2LoopBatchResult, 4)
+	reqs := make([]Inkling2LoopBatchRequest, 4)
+	for i := range reqs {
+		row := i
+		wantN := shortWant
+		if row == 1 {
+			wantN = longWant
+		}
+		stopTok := prompts[row][promptLen-1] + wantN + 1
+		reqs[row] = Inkling2LoopBatchRequest{
+			Prompt:    prompts[row],
+			MaxTokens: maxBudget,
+			Stop:      func(tok int) bool { return tok == stopTok },
+			Emit: func(tok int) bool {
+				got[row] = append(got[row], tok)
+				return true
+			},
+			Done: func(r Inkling2LoopBatchResult) {
+				doneCalls[row]++
+				doneRes[row] = r
+			},
+		}
+	}
+
+	// Verify initial cohort ctx is 128 (align64(32 + 64) = 128), not 1088.
+	initCtx, err := inkling2BatchCohortCtxFor(reqs, bt.maxContext(), 64)
+	if err != nil || initCtx != 128 {
+		t.Fatalf("initial cohort ctx=%d err=%v, want 128", initCtx, err)
+	}
+
+	results, err := bt.Generate(reqs)
+	if err != nil {
+		t.Fatalf("Generate with overflow row: %v", err)
+	}
+
+	// Compare every row against the scalar reference session for bit-identical greedy output.
+	for i := range reqs {
+		wantN := shortWant
+		if i == 1 {
+			wantN = longWant
+		}
+		stopTok := prompts[i][promptLen-1] + wantN + 1
+		var want []int
+		turn := Inkling2LoopTurn{
+			MaxTokens: maxBudget,
+			Stop:      func(tok int) bool { return tok == stopTok },
+			Emit:      func(tok int) bool { want = append(want, tok); return true },
+		}
+		if _, err := Inkling2LoopSessionDecode(context.Background(), fakeInk2Session{}, prompts[i], &turn); err != nil {
+			t.Fatalf("scalar ref row %d: %v", i, err)
+		}
+		if !reflect.DeepEqual(got[i], want) {
+			t.Fatalf("row %d: emitted len=%d, want len=%d (first mismatch)", i, len(got[i]), len(want))
+		}
+		if doneCalls[i] != 1 {
+			t.Fatalf("row %d: Done called %d times, want 1", i, doneCalls[i])
+		}
+		if results[i].Err != nil || results[i].Generated != wantN || !results[i].Stopped {
+			t.Fatalf("row %d: result=%+v, want Generated=%d Stopped=true Err=nil", i, results[i], wantN)
+		}
+		if doneRes[i].Generated != results[i].Generated || doneRes[i].Stopped != results[i].Stopped || doneRes[i].Err != nil {
+			t.Fatalf("row %d: Done result=%+v != returned result=%+v", i, doneRes[i], results[i])
+		}
+	}
+}

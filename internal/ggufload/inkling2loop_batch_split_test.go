@@ -269,3 +269,70 @@ func TestInkling2CohortsSplitStepDownHighContextFits2534MiB(t *testing.T) {
 		t.Fatalf("C=2@16384 split into %v under 2534 MiB free, want 1 group of 2", groups2)
 	}
 }
+
+// fak-test:runtime fast est=2ms
+func TestInkling2CohortsSplitDynamicDecodeHeadroom2534MiB(t *testing.T) {
+	t.Setenv("FAK_INKLING2_BATCH_KV", "")
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL_KV", "")
+	t.Setenv("FAK_INKLING2_BATCH_ADMIT", "1")
+	t.Setenv(Inkling2InitialDecodeHeadroomEnv, "")
+
+	local := make([]bool, 24)
+	for i := range local {
+		local[i] = i%4 != 3
+	}
+	hp := model.Inkling2LoopHParams{
+		Layers: 24, CoreStart: 6, CoreEnd: 18, Passes: 3,
+		Hidden: 2304, Heads: 16, KVHeads: 8, HeadDim: 128,
+		RelLength: 64, SlidingWindow: 128, ConvKernel: 4,
+		ExpertsUsed: 8, ExpertWidth: 768,
+		LocalLayer: local,
+	}
+	const freeBytes = int64(2534) << 20
+	d := newFakeInk2Cohort()
+	d.capFloats = int(freeBytes / 4)
+	be := fakeInk2HalfCohort{fakeInk2Cohort: d}
+	bt := &Inkling2LoopCohorts{
+		be: be,
+		s: &inkling2Resident{
+			hp:          hp,
+			be:          be,
+			dev:         be,
+			chunkWanted: inkling2PrefillChunkBase,
+			baseCaps:    inkling2ResidentCaps(hp, 0, true, inkling2PrefillChunkBase),
+			output:      ink2Mat{rows: 131072, cols: hp.Hidden},
+		},
+	}
+	bt.SetMaxContext(16384)
+
+	reqs := make([]Inkling2LoopBatchRequest, 4)
+	positions := make([]int, 4)
+	headroom := Inkling2InitialDecodeHeadroom(bt.env())
+	for i := range reqs {
+		reqs[i] = Inkling2LoopBatchRequest{Prompt: make([]int, 512), MaxTokens: 8192}
+		positions[i] = Inkling2InitialReservePositions(len(reqs[i].Prompt), reqs[i].MaxTokens, headroom)
+	}
+	ctx, err := inkling2BatchCohortCtxFor(reqs, bt.maxContext(), headroom)
+	if err != nil {
+		t.Fatalf("inkling2BatchCohortCtxFor: %v", err)
+	}
+	if ctx != 1024 {
+		t.Fatalf("4x512-tok MaxTokens=8192 reserved ctx=%d, want 1024", ctx)
+	}
+	groups, err := bt.Split(positions)
+	if err != nil {
+		t.Fatalf("Split: %v", err)
+	}
+	if len(groups) != 1 || len(groups[0]) != 4 {
+		t.Fatalf("4x512-tok MaxTokens=8192 split into %v under 2534 MiB free, want 1 group of 4", groups)
+	}
+
+	// Fallback FAK_INKLING2_INITIAL_DECODE_HEADROOM=0 restores full upfront reservation.
+	fullCtx, err := inkling2BatchCohortCtxFor(reqs, bt.maxContext(), 0)
+	if err != nil {
+		t.Fatalf("full upfront ctx: %v", err)
+	}
+	if fullCtx != 8704 {
+		t.Fatalf("headroom=0 reserved ctx=%d, want 8704", fullCtx)
+	}
+}

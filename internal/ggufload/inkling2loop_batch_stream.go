@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,45 @@ const Inkling2LoopMaxBatch = 16
 // inkling2BatchCtxAlign rounds a cohort's KV capacity so cohorts of similar length
 // share arena sizes.
 const inkling2BatchCtxAlign = 64
+
+// Inkling2InitialDecodeHeadroomEnv overrides the initial per-row decode KV
+// reservation headroom (tokens above len(prompt)); 0 disables decoupling and
+// reserves full len(prompt)+MaxTokens upfront.
+const (
+	Inkling2InitialDecodeHeadroomEnv     = "FAK_INKLING2_INITIAL_DECODE_HEADROOM"
+	Inkling2InitialDecodeHeadroomDefault = 512
+)
+
+// Inkling2InitialDecodeHeadroom reads FAK_INKLING2_INITIAL_DECODE_HEADROOM.
+// Unset or empty defaults to Inkling2InitialDecodeHeadroomDefault; 0 (or negative)
+// disables decoupling and restores full upfront len(prompt)+MaxTokens sizing.
+func Inkling2InitialDecodeHeadroom(lookup func(string) (string, bool)) int {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	v, ok := lookup(Inkling2InitialDecodeHeadroomEnv)
+	if !ok || strings.TrimSpace(v) == "" {
+		return Inkling2InitialDecodeHeadroomDefault
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return Inkling2InitialDecodeHeadroomDefault
+	}
+	if n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// Inkling2InitialReservePositions returns the initial KV position reservation for a
+// row with promptLen prompt tokens and hard cap maxTokens under headroom.
+// When headroom <= 0 or maxTokens <= headroom, it returns promptLen + maxTokens.
+func Inkling2InitialReservePositions(promptLen, maxTokens, headroom int) int {
+	if headroom <= 0 || maxTokens <= headroom {
+		return promptLen + maxTokens
+	}
+	return promptLen + headroom
+}
 
 // Inkling2LoopTurn is the per-token contract of one greedy turn, shared by the
 // single-sequence and the row-batched decode so both count the same tokens: a stop
@@ -109,16 +149,20 @@ func Inkling2LoopBatchEligible(m *Inkling2LoopModel, be compute.Backend) bool {
 }
 
 // inkling2BatchCohortCtx sizes every row's global-slot KV to the cohort's longest
-// row instead of the resident context: fp32 KV at the resident context times 16
-// rows does not fit a 16 GB card. Every row steps until the cohort drains, so the
-// longest prompt+budget bounds every row's position.
+// initial reservation instead of the resident context: fp32 KV at the resident
+// context times 16 rows does not fit a 16 GB card, and omitted/inflated max_tokens
+// (e.g. 8192) should not over-reserve KV for short replies.
 func inkling2BatchCohortCtx(reqs []Inkling2LoopBatchRequest, resident int) (int, error) {
+	return inkling2BatchCohortCtxFor(reqs, resident, Inkling2InitialDecodeHeadroom(os.LookupEnv))
+}
+
+func inkling2BatchCohortCtxFor(reqs []Inkling2LoopBatchRequest, resident, headroom int) (int, error) {
 	need := 0
 	for i, r := range reqs {
-		n := len(r.Prompt) + r.MaxTokens
-		if n-1 > resident {
-			return 0, fmt.Errorf("inkling2 batch stream: lane %d needs %d positions, past the %d-token context", i, n-1, resident)
+		if len(r.Prompt)+r.MaxTokens-1 > resident {
+			return 0, fmt.Errorf("inkling2 batch stream: lane %d needs %d positions, past the %d-token context", i, len(r.Prompt)+r.MaxTokens-1, resident)
 		}
+		n := Inkling2InitialReservePositions(len(r.Prompt), r.MaxTokens, headroom)
 		need = max(need, n)
 	}
 	ctx := (need + inkling2BatchCtxAlign - 1) / inkling2BatchCtxAlign * inkling2BatchCtxAlign
@@ -547,6 +591,40 @@ func (bt *Inkling2LoopCohorts) Generate(reqs []Inkling2LoopBatchRequest) ([]Inkl
 // is checked here as well, and a request past it is answered through its Done with an
 // error rather than admitted. A joined row restarts at position 0 on a cleared history,
 // and attention reads no position its row has not written.
+// inkling2OverflowLane records a row that filled the cohort's initial KV capacity
+// (b.ctx) while still below its hard MaxTokens cap. It is resumed after the current
+// cohort drains using its original prompt plus already-emitted tokens as prefix so
+// greedy output stays bit-identical without double-buffering GPU KV arenas.
+type inkling2OverflowLane struct {
+	origin   int
+	req      Inkling2LoopBatchRequest
+	prompt   []int
+	remMax   int
+	genSoFar int
+	restored int
+	prefill  time.Duration
+	decode   time.Duration
+}
+
+func (ov inkling2OverflowLane) finishErr(results []Inkling2LoopBatchResult, err error) {
+	res := Inkling2LoopBatchResult{
+		Err:       err,
+		Generated: ov.genSoFar,
+		Restored:  ov.restored,
+		Stats: Inkling2LoopGreedyStats{
+			Prefill:     ov.prefill,
+			Decode:      ov.decode,
+			DecodeSteps: max(0, ov.genSoFar-1),
+		},
+	}
+	if ov.req.Done != nil {
+		ov.req.Done(res)
+	}
+	if ov.origin >= 0 && ov.origin < len(results) {
+		results[ov.origin] = res
+	}
+}
+
 func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest, admit func(maxPositions int) (Inkling2LoopBatchRequest, bool)) (_ []Inkling2LoopBatchResult, fatal error) {
 	// with the prefix store on a lone request runs as a one-row cohort, so it reads and
 	// feeds the store
@@ -562,9 +640,27 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 			return nil, fmt.Errorf("inkling2 batch stream: invalid lane %d", i)
 		}
 	}
-	ctx, err := inkling2BatchCohortCtx(reqs, bt.maxContext())
+	headroom := Inkling2InitialDecodeHeadroom(bt.env())
+	results, overflow, fatal := bt.runCohortRound(reqs, headroom, admit)
+	if fatal != nil {
+		for _, ov := range overflow {
+			ov.finishErr(results, fatal)
+		}
+		return results, fatal
+	}
+	if len(overflow) > 0 {
+		if err := bt.continueOverflow(overflow, results, headroom); err != nil {
+			return results, err
+		}
+	}
+	return results, nil
+}
+
+func (bt *Inkling2LoopCohorts) runCohortRound(reqs []Inkling2LoopBatchRequest, headroom int, admit func(maxPositions int) (Inkling2LoopBatchRequest, bool)) (_ []Inkling2LoopBatchResult, overflow []inkling2OverflowLane, fatal error) {
+	maxCtx := bt.maxContext()
+	ctx, err := inkling2BatchCohortCtxFor(reqs, maxCtx, headroom)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// a captured step graph is bound to the capturing thread
 	runtime.LockOSThread()
@@ -587,7 +683,7 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 		// for the narrower cohorts the caller retries with
 		var refused *Inkling2BatchMemoryError
 		clean = errors.As(err, &refused)
-		return nil, err
+		return nil, nil, err
 	}
 	bt.device().Claim(bt)
 
@@ -618,12 +714,44 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 	}
 	tokens := make([]int, len(lanes))
 	for step := 0; fatal == nil; {
+		// Evict any live lane that has filled the cohort's initial KV capacity so it
+		// can resume cleanly in a follow-up cohort without failing the request.
+		for i := range lanes {
+			lane := &lanes[i]
+			if lane.done || b.pos[i] < b.ctx {
+				continue
+			}
+			now := time.Now()
+			prefillDur := lane.result.Stats.Prefill
+			var decodeDur time.Duration
+			if lane.decodeStart.IsZero() {
+				prefillDur = now.Sub(lane.started)
+			} else {
+				decodeDur = now.Sub(lane.decodeStart) - lane.sinkTime
+			}
+			contPrompt := make([]int, 0, len(lane.req.Prompt)+len(lane.gen))
+			contPrompt = append(contPrompt, lane.req.Prompt...)
+			contPrompt = append(contPrompt, lane.gen...)
+			overflow = append(overflow, inkling2OverflowLane{
+				origin:   lane.origin,
+				req:      lane.req,
+				prompt:   contPrompt,
+				remMax:   lane.req.MaxTokens - lane.turn.Generated,
+				genSoFar: lane.turn.Generated,
+				restored: lane.cached,
+				prefill:  prefillDur,
+				decode:   decodeDur,
+			})
+			lane.done = true
+			lane.saved = true
+			lane.origin = -1
+		}
 		// a finished row is checkpointed before it is parked or handed to an admitted request
 		if fatal = b.saveFinished(lanes); fatal != nil {
 			break
 		}
 		if mixed && admit != nil {
-			if fatal = admitLanes(b, lanes, results, admit); fatal != nil {
+			if fatal = admitLanes(b, lanes, results, admit, headroom, maxCtx); fatal != nil {
 				break
 			}
 		}
@@ -690,7 +818,134 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 		}
 	}
 	clean = fatal == nil
-	return results, fatal
+	return results, overflow, fatal
+}
+
+// continueOverflow resumes rows that exceeded their initial cohort KV reservation,
+// stepping headroom up (4x per round up to full maxContext) and splitting/narrowing
+// cohorts down to C=1 if device memory is tight.
+func (bt *Inkling2LoopCohorts) continueOverflow(overflow []inkling2OverflowLane, results []Inkling2LoopBatchResult, prevHeadroom int) error {
+	headroom := prevHeadroom
+	maxCtx := bt.maxContext()
+	for len(overflow) > 0 {
+		if headroom <= 0 || headroom*4 >= maxCtx {
+			headroom = 0
+		} else {
+			headroom *= 4
+		}
+		var live []inkling2OverflowLane
+		for _, ov := range overflow {
+			if ov.req.Context != nil {
+				if err := ov.req.Context.Err(); err != nil {
+					ov.finishErr(results, err)
+					continue
+				}
+			}
+			live = append(live, ov)
+		}
+		if len(live) == 0 {
+			return nil
+		}
+		var nextOverflow []inkling2OverflowLane
+		groups := [][]int{make([]int, len(live))}
+		for i := range live {
+			groups[0][i] = i
+		}
+		if len(live) >= 2 {
+			positions := make([]int, len(live))
+			for i, ov := range live {
+				positions[i] = Inkling2InitialReservePositions(len(ov.prompt), ov.remMax, headroom)
+			}
+			if plan, err := bt.Split(positions); err == nil && len(plan) > 0 {
+				groups = plan
+			}
+		}
+		for _, g := range groups {
+			sub := make([]inkling2OverflowLane, len(g))
+			for k, idx := range g {
+				sub[k] = live[idx]
+			}
+			more, err := bt.runOverflowSubGroup(sub, headroom, results)
+			if err != nil {
+				return err
+			}
+			nextOverflow = append(nextOverflow, more...)
+		}
+		overflow = nextOverflow
+	}
+	return nil
+}
+
+func (bt *Inkling2LoopCohorts) runOverflowSubGroup(sub []inkling2OverflowLane, headroom int, results []Inkling2LoopBatchResult) ([]inkling2OverflowLane, error) {
+	reqs := make([]Inkling2LoopBatchRequest, len(sub))
+	for i, ov := range sub {
+		reqs[i] = Inkling2LoopBatchRequest{
+			Context:   ov.req.Context,
+			Prompt:    ov.prompt,
+			MaxTokens: ov.remMax,
+			Stop:      ov.req.Stop,
+			Emit:      ov.req.Emit,
+		}
+	}
+	subResults, subOverflow, err := bt.runCohortRound(reqs, headroom, nil)
+	var refused *Inkling2BatchMemoryError
+	if errors.As(err, &refused) && len(sub) > 1 {
+		half := len(sub) / 2
+		moreL, errL := bt.runOverflowSubGroup(sub[:half], headroom, results)
+		if errL != nil {
+			return nil, errL
+		}
+		moreR, errR := bt.runOverflowSubGroup(sub[half:], headroom, results)
+		if errR != nil {
+			return nil, errR
+		}
+		return append(moreL, moreR...), nil
+	}
+	if err != nil {
+		for _, ov := range sub {
+			ov.finishErr(results, err)
+		}
+		return nil, err
+	}
+	overflowByIdx := make(map[int]inkling2OverflowLane, len(subOverflow))
+	for _, nov := range subOverflow {
+		overflowByIdx[nov.origin] = nov
+	}
+	var nextOverflow []inkling2OverflowLane
+	for i, ov := range sub {
+		if nov, ok := overflowByIdx[i]; ok {
+			nextOverflow = append(nextOverflow, inkling2OverflowLane{
+				origin:   ov.origin,
+				req:      ov.req,
+				prompt:   nov.prompt,
+				remMax:   nov.remMax,
+				genSoFar: ov.genSoFar + nov.genSoFar,
+				restored: ov.restored,
+				prefill:  ov.prefill + nov.prefill,
+				decode:   ov.decode + nov.decode,
+			})
+			continue
+		}
+		r := subResults[i]
+		merged := Inkling2LoopBatchResult{
+			Generated: ov.genSoFar + r.Generated,
+			Stopped:   r.Stopped,
+			Err:       r.Err,
+			Restored:  ov.restored,
+			Stats: Inkling2LoopGreedyStats{
+				Prefill:     ov.prefill + r.Stats.Prefill,
+				Decode:      ov.decode + r.Stats.Decode,
+				DecodeSteps: max(0, ov.genSoFar+r.Generated-1),
+			},
+		}
+		if ov.req.Done != nil {
+			ov.req.Done(merged)
+		}
+		if ov.origin >= 0 && ov.origin < len(results) {
+			results[ov.origin] = merged
+		}
+	}
+	return nextOverflow, nil
 }
 
 // prefillLanes prefills every lane's prompt and hands each live lane its first greedy
@@ -849,7 +1104,7 @@ func finishLive(lanes []inkling2BatchLane, err error) {
 // refusal. A request that does not fit is answered with its error and never joins. A
 // request with no Done is dropped, since nothing could hear its result.
 func admitLanes(b *inkling2Batch, lanes []inkling2BatchLane, results []Inkling2LoopBatchResult,
-	admit func(int) (Inkling2LoopBatchRequest, bool)) error {
+	admit func(int) (Inkling2LoopBatchRequest, bool), headroom, maxCtx int) error {
 	for i := range lanes {
 		if !lanes[i].done {
 			continue
@@ -861,7 +1116,7 @@ func admitLanes(b *inkling2Batch, lanes []inkling2BatchLane, results []Inkling2L
 		if req.Done == nil {
 			continue
 		}
-		if err := inkling2AdmitCheck(req, b.ctx); err != nil {
+		if err := inkling2AdmitCheckFor(req, b.ctx, headroom, maxCtx); err != nil {
 			req.Done(Inkling2LoopBatchResult{Err: err})
 			continue
 		}
@@ -882,11 +1137,17 @@ func admitLanes(b *inkling2Batch, lanes []inkling2BatchLane, results []Inkling2L
 
 // inkling2AdmitCheck validates an admitted request as Generate validates its cohort.
 func inkling2AdmitCheck(req Inkling2LoopBatchRequest, maxPositions int) error {
+	return inkling2AdmitCheckFor(req, maxPositions, Inkling2InitialDecodeHeadroom(os.LookupEnv), 0)
+}
+
+func inkling2AdmitCheckFor(req Inkling2LoopBatchRequest, maxPositions, headroom, maxCtx int) error {
 	switch {
 	case len(req.Prompt) == 0 || req.MaxTokens <= 0 || req.Emit == nil:
 		return errors.New("inkling2 batch stream: invalid admitted request")
-	case len(req.Prompt)+req.MaxTokens-1 > maxPositions:
-		return fmt.Errorf("inkling2 batch stream: admitted request needs %d positions, past the %d-token cohort", len(req.Prompt)+req.MaxTokens-1, maxPositions)
+	case maxCtx > 0 && len(req.Prompt)+req.MaxTokens-1 > maxCtx:
+		return fmt.Errorf("inkling2 batch stream: admitted request needs %d positions, past the %d-token context", len(req.Prompt)+req.MaxTokens-1, maxCtx)
+	case Inkling2InitialReservePositions(len(req.Prompt), req.MaxTokens, headroom)-1 > maxPositions:
+		return fmt.Errorf("inkling2 batch stream: admitted request needs %d positions, past the %d-token cohort", Inkling2InitialReservePositions(len(req.Prompt), req.MaxTokens, headroom)-1, maxPositions)
 	}
 	return nil
 }
