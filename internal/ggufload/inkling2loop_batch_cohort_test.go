@@ -477,6 +477,7 @@ func TestInkling2CohortPrefillSkipsCancelledRows(t *testing.T) {
 // remaining prompt is not packed into later chunks.
 func TestInkling2CohortPrefillDropsRowCancelledMidPrefill(t *testing.T) {
 	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "0")
 	const long = 3 * inkling2PrefillChunk
 	d := newFakeInk2Cohort()
 	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
@@ -816,7 +817,7 @@ func TestInkling2CohortMixedPrefillLongRowFirstShortRowNotStarved(t *testing.T) 
 // long row first token precedes the short row second: today order.
 func TestInkling2CohortLongPrefillWaitsWithoutCap(t *testing.T) {
 	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
-	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "0")
 	d := newFakeInk2Cohort()
 	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
 	defer bt.Close()
@@ -1074,7 +1075,7 @@ func TestInkling2CohortNeverAdmitsRequestPastCohortContext(t *testing.T) {
 // With the cap unset the cohort never calls admit, and the rows run as they did before.
 func TestInkling2CohortKnobOffNeverCallsAdmit(t *testing.T) {
 	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
-	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "0")
 	d := newFakeInk2Cohort()
 	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
 	defer bt.Close()
@@ -1228,6 +1229,7 @@ func runFakeInk2Shared(t *testing.T, knob string, prompts [][]int, maxNew int, c
 // that prefix once: P + the suffixes instead of every row's whole prompt.
 func TestInkling2CohortSharedPrefixPrefillsPrefixOnce(t *testing.T) {
 	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "0")
 	const P = inkling2PrefillChunk + 88
 	suffixes := []int{5, 1, 40, 700}
 	prompts := make([][]int, len(suffixes))
@@ -1259,6 +1261,7 @@ func TestInkling2CohortSharedPrefixPrefillsPrefixOnce(t *testing.T) {
 // checked by TestInkling2BatchCopyRowStateCopiesOnlyTargetRow.
 func TestInkling2CohortSharedPrefixMatchesKnobOff(t *testing.T) {
 	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "0")
 	shared := fakeInk2SharedPrompt(700, 0, 0)
 	cases := []struct {
 		name          string
@@ -1304,6 +1307,7 @@ func TestInkling2CohortSharedPrefixMatchesKnobOff(t *testing.T) {
 // chunks are today's planner's, no state is read back, and "0" equals unset.
 func TestInkling2CohortSharedPrefixKnobOffKeepsCallSequence(t *testing.T) {
 	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "0")
 	prompts := [][]int{fakeInk2SharedPrompt(600, 5, 0), fakeInk2SharedPrompt(600, 50, 1), fakeInk2SharedPrompt(600, 1, 2)}
 	unset := runFakeInk2Shared(t, "", prompts, 3, nil, -1)
 	zero := runFakeInk2Shared(t, "0", prompts, 3, nil, -1)

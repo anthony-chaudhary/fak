@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // ink2SplitPrompts returns n prompts of the given lengths, each row's tokens distinct.
@@ -46,13 +48,14 @@ func ink2SplitPositions(prompts [][]int, maxNew int) []int {
 	return pos
 }
 
-// ink2SplitBudget caps d so a C x ctx state fits beside what is live now, and no more.
+// ink2SplitBudget caps d so a C x ctx state fits at the smallest step-down chunk beside
+// what is live now, and no wider cohort fits even after chunk step-down.
 func ink2SplitBudget(t *testing.T, bt *Inkling2LoopCohorts, d *fakeInk2Cohort, C, ctx int) {
 	t.Helper()
 	if err := bt.bind(); err != nil {
 		t.Fatal(err)
 	}
-	sh, err := bt.s.batchShape(C, ctx)
+	sh, err := bt.s.batchShapeChunk(C, ctx, 128)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,5 +210,62 @@ func TestInkling2CohortsShrinkAfterWideCohort(t *testing.T) {
 	bt.Close()
 	if d.live != 0 || d.frees != d.allocs {
 		t.Fatalf("after Close: %d floats live, %d frees of %d allocs", d.live, d.frees, d.allocs)
+	}
+}
+
+// Under 2,534 MiB free VRAM (a 16 GiB GPU with Inkling-2-Mini weights resident),
+// f16 KV + chunk step-down (512 -> 256 -> 128) keeps C=4@8192 and C=2@16384 together
+// as single cohorts instead of splitting down to C=1.
+func TestInkling2CohortsSplitStepDownHighContextFits2534MiB(t *testing.T) {
+	t.Setenv("FAK_INKLING2_BATCH_KV", "")
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL_KV", "")
+	t.Setenv("FAK_INKLING2_BATCH_ADMIT", "1")
+
+	// Inkling-2-Mini topology: 24 layers, core 6..18, 3 passes => 48 slots (12 global, 36 local).
+	local := make([]bool, 24)
+	for i := range local {
+		local[i] = i%4 != 3 // 6 global layers -> 12 global slots across 3 passes
+	}
+	hp := model.Inkling2LoopHParams{
+		Layers: 24, CoreStart: 6, CoreEnd: 18, Passes: 3,
+		Hidden: 2304, Heads: 16, KVHeads: 8, HeadDim: 128,
+		RelLength: 64, SlidingWindow: 128, ConvKernel: 4,
+		ExpertsUsed: 8, ExpertWidth: 768,
+		LocalLayer: local,
+	}
+	const freeBytes = int64(2534) << 20
+	d := newFakeInk2Cohort()
+	d.capFloats = int(freeBytes / 4)
+	be := fakeInk2HalfCohort{fakeInk2Cohort: d}
+
+	bt := &Inkling2LoopCohorts{
+		be: be,
+		s: &inkling2Resident{
+			hp:          hp,
+			be:          be,
+			dev:         be,
+			chunkWanted: inkling2PrefillChunkBase,
+			baseCaps:    inkling2ResidentCaps(hp, 0, true, inkling2PrefillChunkBase),
+			output:      ink2Mat{rows: 131072, cols: hp.Hidden},
+		},
+	}
+	bt.SetMaxContext(16384)
+
+	// Verify C=4@8192 fits as one cohort via step-down.
+	groups4, err := bt.Split([]int{8192, 8192, 8192, 8192})
+	if err != nil {
+		t.Fatalf("Split C=4@8192: %v", err)
+	}
+	if len(groups4) != 1 || len(groups4[0]) != 4 {
+		t.Fatalf("C=4@8192 split into %v under 2534 MiB free, want 1 group of 4", groups4)
+	}
+
+	// Verify C=2@16384 fits as one cohort via step-down.
+	groups2, err := bt.Split([]int{16384, 16384})
+	if err != nil {
+		t.Fatalf("Split C=2@16384: %v", err)
+	}
+	if len(groups2) != 1 || len(groups2[0]) != 2 {
+		t.Fatalf("C=2@16384 split into %v under 2534 MiB free, want 1 group of 2", groups2)
 	}
 }

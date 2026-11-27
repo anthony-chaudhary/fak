@@ -167,5 +167,68 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "context-ctx-inkling2autoctxceiling",
+      "canonical": "Inkling2AutoCtxCeiling",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Inkling2AutoCtxCeiling is the default 16384-token auto-context ceiling for resident Inkling-2 device sessions when FAK_INKLING2_CTX is unset, shared by CUDA and Metal admission.",
+      "distinction": "The default auto-sized context cap for 16 GiB devices - not Inkling2ResidentCtxMax (the explicit backend hard ceiling) and not Inkling2ResidentFitCtx (the live free-memory fit calculation).",
+      "distinct_from": [
+        "context-ctx-inkling2residentctxmax",
+        "context-ctx-inkling2residentfitctx",
+        "context-ctx-inkling2residentctxenv"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2AutoCtxCeiling",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "context-ctx-inkling2residentctxpin",
+      "canonical": "Inkling2ResidentCtxPin",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Inkling2ResidentCtxPin fixes the global KV cache context of the next resident Inkling-2 session to a caller-admitted token count instead of re-deriving it from free memory.",
+      "distinction": "The process-level context pin set by fak serve for already-admitted sessions - not Inkling2ResidentCtxEnv (the FAK_INKLING2_CTX env var) and not Inkling2AutoCtxCeiling (the default auto-fit ceiling).",
+      "distinct_from": [
+        "context-ctx-inkling2residentctxenv",
+        "context-ctx-inkling2autoctxceiling",
+        "context-ctx-inkling2residentctxmax"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2ResidentCtxPin",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "context-ctx-inkling2residentfitctx",
+      "canonical": "Inkling2ResidentFitCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Inkling2ResidentFitCtx computes the largest resident Inkling-2 global context that fits in a given free-memory byte count after device headroom reserve, in 256-token steps.",
+      "distinction": "The pure free-VRAM-to-context fit calculator - not Inkling2AutoCtxCeiling (the default ceiling applied to auto-fit) and not Inkling2ResidentCtxMax (the backend hard bound).",
+      "distinct_from": [
+        "context-ctx-inkling2autoctxceiling",
+        "context-ctx-inkling2residentctxmax",
+        "context-ctx-inkling2residentctxenv"
+      ],
+      "aliases": [],
+      "grounding": "Inkling2ResidentFitCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

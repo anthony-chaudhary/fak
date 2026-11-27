@@ -203,8 +203,17 @@ func TestServeInkling2ResidentPlanPricesCohort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if batched.SteadyBytes-scalar.SteadyBytes != cohort || batched.StartupPeakBytes <= scalar.StartupPeakBytes {
-		t.Fatalf("cohort not priced: scalar=%+v batched=%+v", scalar, batched)
+	// scalar and cohort engines are serialized, so steady bytes take max(slots*perSlot, cohort)
+	if batched.SteadyBytes != weights.SteadyBytes+cohort || batched.StartupPeakBytes <= scalar.StartupPeakBytes {
+		t.Fatalf("cohort not priced as max(slots*perSlot, cohort): scalar=%+v batched=%+v", scalar, batched)
+	}
+	// when slots*perSlot exceeds cohort, steady bytes stay at weights + slots*perSlot
+	smallerCohort, err := inkling2ServeResidentPlan(weights, perSlot, 2, 256<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if smallerCohort.SteadyBytes != scalar.SteadyBytes {
+		t.Fatalf("smaller cohort double-priced: scalar=%+v smallerCohort=%+v", scalar, smallerCohort)
 	}
 	if got := inkling2ServeResidentCohortBytes(100, 200, inkling2EnvLookup(map[string]string{"FAK_INKLING2_BATCH_PREFIX_CACHE_MIB": "64"})); got != 300+64<<20 {
 		t.Fatalf("cohort bytes with a prefix store = %d", got)

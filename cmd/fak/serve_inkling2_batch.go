@@ -291,9 +291,13 @@ var _ agent.Inkling2LoopGenerator = (*inkling2LoopBatchEngine)(nil)
 
 // newInkling2LoopBatchEngine keeps one cohort state for the engine's life: the run
 // worker is its only user.
-func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.Inkling2LoopModel, backend compute.Backend, adm inkling2Admission, lookup func(string) (string, bool)) *inkling2LoopBatchEngine {
+func newInkling2LoopBatchEngine(scalar inkling2ScalarGenerate, model *ggufload.Inkling2LoopModel, backend compute.Backend, adm inkling2Admission, contextTokens int, lookup func(string) (string, bool)) *inkling2LoopBatchEngine {
+	if contextTokens <= 0 {
+		contextTokens = ggufload.Inkling2LoopResidentContext
+	}
 	cohorts := ggufload.NewInkling2LoopCohortsWithLookup(model, backend, lookup)
-	e := newInkling2LoopBatchEngineWith(scalar, cohorts.Generate, adm, ggufload.Inkling2LoopResidentContext)
+	cohorts.SetMaxContext(contextTokens)
+	e := newInkling2LoopBatchEngineWith(scalar, cohorts.Generate, adm, contextTokens)
 	e.releaseArenas = cohorts.ReleaseArenas
 	e.batchAdmitting = cohorts.GenerateAdmitting
 	e.split = cohorts.Split
@@ -539,7 +543,7 @@ func (e *inkling2LoopBatchEngine) admitQueued(c *inkling2Cohort, maxPositions in
 		if !inkling2RowLive(r) {
 			continue
 		}
-		if len(r.prompt)+r.maxNew > maxPositions {
+		if len(r.prompt)+r.maxNew-1 > maxPositions {
 			e.pending = r
 			return ggufload.Inkling2LoopBatchRequest{}, false
 		}

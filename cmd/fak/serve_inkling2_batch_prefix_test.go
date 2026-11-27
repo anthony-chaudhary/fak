@@ -101,12 +101,10 @@ func TestInkling2BatchPrefixNote(t *testing.T) {
 		t.Fatal("a malformed size must refuse at startup")
 	}
 	// the store restores rows mid-prompt, which lockstep prompt feeding cannot do
-	for _, more := range [][]string{
-		{"FAK_INKLING2_COHORT_PREFILL", "0"},
-		{"FAK_INKLING2_BATCH_KV", "f16"},
-	} {
-		if _, err := inkling2BatchPrefixNote(nil, env("2048", more...)); err == nil || !strings.Contains(err.Error(), "needs cohort prefill") {
-			t.Errorf("%v: err %v, want a startup refusal: the store would be inert and lone requests lockstep", more, err)
-		}
+	if _, err := inkling2BatchPrefixNote(nil, env("2048", "FAK_INKLING2_COHORT_PREFILL", "0")); err == nil || !strings.Contains(err.Error(), "needs cohort prefill") {
+		t.Errorf("cohort prefill off: err %v, want a startup refusal: the store would be inert and lone requests lockstep", err)
+	}
+	if _, err := inkling2BatchPrefixNote(nil, env("2048", "FAK_INKLING2_BATCH_KV", "f16")); err == nil {
+		t.Errorf("f16 batch KV on nil backend: err nil, want a startup refusal")
 	}
 }

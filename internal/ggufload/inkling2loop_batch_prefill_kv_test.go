@@ -37,8 +37,11 @@ func TestInkling2CohortPrefillKVGate(t *testing.T) {
 		{"fp32 ignores the f16 opt-in", map[string]string{"FAK_INKLING2_COHORT_PREFILL_KV": "f16"}, false, struct{}{}, true, false},
 		{"fp32 ignores any knob value", map[string]string{"FAK_INKLING2_COHORT_PREFILL_KV": "bf16"}, false, struct{}{}, true, false},
 		{"fp32 lockstep knob", map[string]string{"FAK_INKLING2_COHORT_PREFILL": "0"}, false, struct{}{}, false, false},
-		{"f16 without opt-in stays lockstep", nil, true, fakeInk2HalfPrefill{}, false, false},
+		{"f16 unset auto-enables on ready backend", nil, true, fakeInk2HalfPrefill{}, true, true},
+		{"f16 unset falls back to lockstep on incapable backend", nil, true, struct{}{}, false, false},
+		{"f16 unset falls back to lockstep when not ready", nil, true, fakeInk2HalfPrefill{notReady: errors.New("not ready")}, false, false},
 		{"f16 explicit off", map[string]string{"FAK_INKLING2_COHORT_PREFILL_KV": "off"}, true, fakeInk2HalfPrefill{}, false, false},
+		{"f16 explicit zero", map[string]string{"FAK_INKLING2_COHORT_PREFILL_KV": "0"}, true, fakeInk2HalfPrefill{}, false, false},
 		{"f16 opt-in", map[string]string{"FAK_INKLING2_COHORT_PREFILL_KV": "f16"}, true, fakeInk2HalfPrefill{}, true, true},
 		{"f16 opt-in any case", map[string]string{"FAK_INKLING2_COHORT_PREFILL_KV": " FP16 "}, true, fakeInk2HalfPrefill{}, true, true},
 		{"lockstep knob wins over opt-in", map[string]string{"FAK_INKLING2_COHORT_PREFILL": "0", "FAK_INKLING2_COHORT_PREFILL_KV": "f16"}, true, fakeInk2HalfPrefill{}, false, false},
@@ -103,14 +106,15 @@ func (d fakeInk2HalfCohort) Ink2BSoftcapArgmax(logits compute.Ink2Ref, n, ld int
 	return nil
 }
 
-// With f16 batch caches, FAK_INKLING2_COHORT_PREFILL_KV=f16 keeps the cohort prefill
-// (only it runs single-row output heads) instead of lockstep prompt feeding, and the
-// tokens are the lockstep ones.
+// On a backend with sequence-batched ops and ready f16 prefill ops, unset env vars
+// auto-enable both f16 batch KV and f16 cohort prefill; explicit "off" falls back to
+// lockstep prompts, and explicit "f32" forces fp32 KV.
 func TestInkling2CohortPrefillRunsOnHalfKVWhenOptedIn(t *testing.T) {
-	t.Setenv("FAK_INKLING2_BATCH_KV", "f16")
 	t.Setenv("FAK_INKLING2_BATCH_ADMIT", "0")
-	run := func(optIn string) ([][]int, int, *inkling2Batch) {
-		t.Setenv("FAK_INKLING2_COHORT_PREFILL_KV", optIn)
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "0")
+	run := func(batchKV, prefillKV string) ([][]int, int, *inkling2Batch) {
+		t.Setenv("FAK_INKLING2_BATCH_KV", batchKV)
+		t.Setenv("FAK_INKLING2_COHORT_PREFILL_KV", prefillKV)
 		d := newFakeInk2Cohort()
 		bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), fakeInk2HalfCohort{fakeInk2Cohort: d})
 		defer bt.Close()
@@ -122,20 +126,28 @@ func TestInkling2CohortPrefillRunsOnHalfKVWhenOptedIn(t *testing.T) {
 			reqs = append(reqs, Inkling2LoopBatchRequest{Prompt: pr, MaxTokens: 3, Emit: func(tok int) bool { got[i] = append(got[i], tok); return true }})
 		}
 		if _, err := bt.Generate(reqs); err != nil {
-			t.Fatalf("FAK_INKLING2_COHORT_PREFILL_KV=%q: %v", optIn, err)
+			t.Fatalf("BATCH_KV=%q PREFILL_KV=%q: %v", batchKV, prefillKV, err)
 		}
 		return got, d.heads, bt.b
 	}
-	lock, lockHeads, lb := run("")
-	pre, preHeads, pb := run("f16")
-	if lockHeads != 0 || lb == nil || lb.prefillT != 0 || lb.half != nil {
-		t.Fatalf("f16 caches without the opt-in: %d prefill heads, state %+v; want lockstep prompts", lockHeads, lb)
+	auto, autoHeads, ab := run("", "")
+	if autoHeads == 0 || ab == nil || ab.prefillT == 0 || ab.half == nil || !ab.kvHalf {
+		t.Fatalf("auto default on capable backend: %d prefill heads, state %+v; want f16 KV + f16 cohort prefill", autoHeads, ab)
 	}
+	lock, lockHeads, lb := run("f16", "off")
+	if lockHeads != 0 || lb == nil || lb.prefillT != 0 || lb.half != nil || !lb.kvHalf {
+		t.Fatalf("f16 caches with PREFILL_KV=off: %d prefill heads, state %+v; want lockstep prompts on f16 KV", lockHeads, lb)
+	}
+	pre, preHeads, pb := run("f16", "f16")
 	if preHeads == 0 || pb == nil || pb.prefillT == 0 || pb.half == nil || !pb.kvHalf {
-		t.Fatalf("f16 caches with the opt-in: %d prefill heads; want the cohort prefill on f16 caches", preHeads)
+		t.Fatalf("f16 caches with explicit f16: %d prefill heads; want cohort prefill on f16 caches", preHeads)
 	}
-	if !reflect.DeepEqual(pre, lock) {
-		t.Fatalf("f16 cohort prefill tokens %v, lockstep %v", pre, lock)
+	f32, f32Heads, fb := run("f32", "")
+	if f32Heads == 0 || fb == nil || fb.prefillT == 0 || fb.half != nil || fb.kvHalf {
+		t.Fatalf("explicit f32 override: %d prefill heads, kvHalf=%v half=%v; want fp32 KV + fp32 cohort prefill", f32Heads, fb.kvHalf, fb.half != nil)
+	}
+	if !reflect.DeepEqual(auto, lock) || !reflect.DeepEqual(pre, lock) || !reflect.DeepEqual(f32, lock) {
+		t.Fatalf("tokens diverged: auto=%v pre=%v f32=%v lock=%v", auto, pre, f32, lock)
 	}
 }
 
@@ -158,14 +170,17 @@ func TestInkling2CohortLookupSelectsHalfKVForPlanAndRun(t *testing.T) {
 
 	prompts := [][]int{{3, 4, 5}, {7}, {9, 10}}
 	const maxNew = 3
-	ink2SplitBudget(t, bt, d, len(prompts), inkling2BatchCtxAlign)
-	groups, err := bt.Split(ink2SplitPositions(prompts, maxNew))
-	if err != nil || len(groups) != 1 || len(groups[0]) != len(prompts) {
-		t.Fatalf("split = %v, err = %v, want one full-width cohort", groups, err)
+	if err := bt.bind(); err != nil {
+		t.Fatal(err)
 	}
 	shape, err := bt.s.batchShape(len(prompts), inkling2BatchCtxAlign)
 	if err != nil || !shape.kvHalf || shape.half == nil || shape.seq == nil || shape.prefillT == 0 {
 		t.Fatalf("planned shape = %+v, err = %v, want f16 cohort prefill with sequence ops", shape, err)
+	}
+	d.capFloats = d.live + int((shape.need+inkling2BatchHeadroom+3)/4)
+	groups, err := bt.Split(ink2SplitPositions(prompts, maxNew))
+	if err != nil || len(groups) != 1 || len(groups[0]) != len(prompts) {
+		t.Fatalf("split = %v, err = %v, want one full-width cohort", groups, err)
 	}
 	ink2SplitRun(t, bt, prompts, groups[0], maxNew, make([][]int, len(prompts)))
 	if b := bt.b; !b.kvHalf || b.half == nil || b.seq == nil || b.prefillT != shape.prefillT || b.need != shape.need || d.heads == 0 {

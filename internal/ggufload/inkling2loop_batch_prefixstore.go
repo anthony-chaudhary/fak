@@ -93,7 +93,13 @@ func Inkling2BatchPrefixCacheMiB(be any, lookup func(string) (string, bool)) (in
 }
 
 func inkling2PrefixStoreUsable(be any, lookup func(string) (string, bool)) error {
-	half, err := inkling2BatchKVHalf(lookup)
+	var half bool
+	var err error
+	if be == nil {
+		half, err = inkling2BatchKVHalf(lookup)
+	} else {
+		half, err = inkling2BatchKVHalfFor(be, inkling2BatchSeqOps(be, lookup), lookup)
+	}
 	if err != nil {
 		return err
 	}

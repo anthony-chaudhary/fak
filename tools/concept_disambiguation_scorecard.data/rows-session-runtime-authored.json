@@ -80,5 +80,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "session-runtime-inkling2slotlayer",
+      "canonical": "inkling2SlotLayer",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "inkling2SlotLayer maps a looped Inkling-2 KV cache slot index (across prelude, repeated core passes, and epilogue) back to its underlying physical transformer layer index.",
+      "distinction": "The slot-to-layer index mapper for Inkling-2's looped KV cache - not NativeSessionLifecycle (the scheduler session origin enum) and not inkling2PrefixCacheFromEnv (the serve prefix-slot pool).",
+      "distinct_from": [
+        "nativesessionlifecycle"
+      ],
+      "aliases": [],
+      "grounding": "inkling2SlotLayer",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

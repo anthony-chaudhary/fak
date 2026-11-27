@@ -27,7 +27,7 @@ func inkling2KVArm(t *testing.T, arm string) {
 	case "f16lock":
 		t.Setenv("FAK_INKLING2_BATCH_KV", "f16")
 		t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
-		t.Setenv("FAK_INKLING2_COHORT_PREFILL_KV", "")
+		t.Setenv("FAK_INKLING2_COHORT_PREFILL_KV", "off")
 	default:
 		t.Fatalf("unknown cache arm %q", arm)
 	}

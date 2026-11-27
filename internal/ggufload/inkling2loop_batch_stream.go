@@ -7,9 +7,11 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // Inkling2LoopMaxBatch is the widest cohort one row-batched forward serves.
@@ -198,6 +200,9 @@ type Inkling2LoopCohorts struct {
 	s      *inkling2Resident
 	b      *inkling2Batch
 	lookup func(string) (string, bool)
+	// maxCtx overrides Inkling2LoopResidentContext when > 0, allowing cohorts to
+	// serve high-context requests (8k, 16k, 32k+).
+	maxCtx int
 	// wideCooldown is how many more wide-wanting cohorts run at the base chunk before
 	// a refused wide chunk is tried again
 	wideCooldown int
@@ -213,6 +218,106 @@ func NewInkling2LoopCohorts(m *Inkling2LoopModel, be compute.Backend) *Inkling2L
 // both cohort admission and execution. A nil lookup uses the process environment.
 func NewInkling2LoopCohortsWithLookup(m *Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) *Inkling2LoopCohorts {
 	return &Inkling2LoopCohorts{m: m, be: be, lookup: lookup}
+}
+
+// SetMaxContext raises or sets the per-row context limit for cohorts on bt. A value
+// <= 0 reverts to Inkling2LoopResidentContext.
+func (bt *Inkling2LoopCohorts) SetMaxContext(ctx int) { bt.maxCtx = ctx }
+
+// maxContext returns the cohort's per-row context limit.
+func (bt *Inkling2LoopCohorts) maxContext() int {
+	if bt.maxCtx > 0 {
+		return bt.maxCtx
+	}
+	return Inkling2LoopResidentContext
+}
+
+// inkling2ServePerPosBytes is the per-position global-slot KV plus score bytes for
+// serving context auto-sizing, using 2 bytes/element when half is true.
+func inkling2ServePerPosBytes(hp model.Inkling2LoopHParams, half bool) int64 {
+	slots := hp.Layers + (hp.Passes-1)*(hp.CoreEnd-hp.CoreStart)
+	var global int64
+	for slot := 0; slot < slots; slot++ {
+		if !hp.LocalLayer[inkling2SlotLayer(hp, slot)] {
+			global++
+		}
+	}
+	elemBytes := int64(4)
+	if half {
+		elemBytes = 2
+	}
+	kvDim := int64(hp.KVHeads * hp.HeadDim)
+	return global*2*elemBytes*kvDim + 2*4*int64(hp.Heads)
+}
+
+// Inkling2ResolveServeContext resolves the serving context limit for m on be:
+// an explicit requested > 0 is returned (clamped to the backend hard max if any);
+// an explicit FAK_INKLING2_CTX returns inkling2ResidentCtxFrom(lookup); otherwise
+// free device memory is probed and fitted up to Inkling2AutoCtxCeiling (raised to
+// 32768 on f16-KV-capable backends with >= 8 GiB free).
+func Inkling2ResolveServeContext(m *Inkling2LoopModel, be compute.Backend, requested int, lookup func(string) (string, bool)) int {
+	if requested > 0 {
+		if be != nil {
+			if hard := inkling2ResidentHardMax(be.Name()); hard > 0 && requested > hard {
+				return hard
+			}
+		}
+		return requested
+	}
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	if !inkling2ResidentCtxAutoSet(lookup) {
+		return inkling2ResidentCtxFrom(lookup)
+	}
+	if m == nil || be == nil {
+		return Inkling2LoopResidentContext
+	}
+	_, free, known := compute.DeviceMemoryInfo(be)
+	if !known || free <= 0 {
+		return Inkling2LoopResidentContext
+	}
+	ceiling := Inkling2AutoCtxCeiling
+	batchEnabled := true
+	if v, ok := lookup("FAK_INKLING2_SERVE_BATCH"); ok {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "0", "false", "off":
+			batchEnabled = false
+		}
+	}
+	halfCapable := false
+	if batchEnabled {
+		seq := inkling2BatchSeqOps(be, lookup)
+		if half, err := inkling2BatchKVHalfFor(be, seq, lookup); err == nil && half {
+			halfCapable = true
+		}
+	} else if dtype, err := Inkling2KVDTypeFrom(lookup); err == nil && dtype == Inkling2KVF16 {
+		if _, ok := be.(compute.Inkling2HalfKVDevice); ok {
+			if half, ok := be.(compute.Inkling2PrefillHalfKV); ok && half.Ink2PHalfKVReady() == nil {
+				halfCapable = true
+			}
+		}
+	}
+	var fit int
+	if halfCapable {
+		if free >= 8<<30 {
+			ceiling = 32768
+		}
+		if hard := inkling2ResidentHardMax(be.Name()); hard > 0 && ceiling > hard {
+			ceiling = hard
+		}
+		perPos := inkling2ServePerPosBytes(m.HP, true)
+		reserve := inkling2ResidentReserve(free)
+		if perPos > 0 && free-reserve >= perPos*Inkling2ResidentCtxMin {
+			fit = int((free-reserve)/perPos) / 256 * 256
+		}
+	} else {
+		fit = Inkling2ResidentFitCtx(m.HP, free)
+	}
+	if fit <= 0 {
+		return Inkling2LoopResidentContext
+	}
+	return max(Inkling2LoopResidentContext, min(fit, ceiling))
 }
 
 // Close frees the cached state; a later Generate builds it again.
@@ -287,9 +392,14 @@ func (bt *Inkling2LoopCohorts) acquireFor(C, ctx, longest int) (*inkling2Batch, 
 		return nil, err
 	}
 	want := inkling2CohortChunk(bt.s.chunkWanted, longest)
-	if want > inkling2PrefillChunkBase && bt.wideCooldown > 0 {
-		bt.wideCooldown--
-		want = inkling2PrefillChunkBase
+	if bt.wideCooldown > 0 {
+		if bt.b != nil && want > bt.b.capT {
+			bt.wideCooldown--
+			want = bt.b.capT
+		} else if want > inkling2PrefillChunkBase {
+			bt.wideCooldown--
+			want = inkling2PrefillChunkBase
+		}
 	}
 	if bt.reuses(C, ctx) && want <= bt.b.capT {
 		bt.b.usePrefill(want)
@@ -298,7 +408,7 @@ func (bt *Inkling2LoopCohorts) acquireFor(C, ctx, longest int) (*inkling2Batch, 
 	if bt.b != nil {
 		bt.ReleaseArenas()
 	}
-	b, err := newInkling2BatchState(bt.s, C, ctx, want)
+	b, err := newInkling2BatchStateLimit(bt.s, C, ctx, want, bt.maxContext())
 	if err != nil {
 		return nil, err
 	}
@@ -335,20 +445,30 @@ func (bt *Inkling2LoopCohorts) Split(positions []int) ([][]int, error) {
 	if bt.b != nil {
 		free += bt.b.need
 	}
+	maxCtx := bt.maxContext()
 	ctxOf := func(n int) int {
 		ctx := (n + inkling2BatchCtxAlign - 1) / inkling2BatchCtxAlign * inkling2BatchCtxAlign
-		return max(1, min(Inkling2LoopResidentContext, ctx))
+		return max(1, min(maxCtx, ctx))
 	}
 	// groups run in plan order, so the cached state is there to reuse only until a
 	// planned group that does not reuse it has its acquire replace it
 	cached := true
+	baseChunk := inkling2CohortChunk(bt.s.chunkWanted, 0)
 	fits := func(C, longest int) bool {
 		ctx := ctxOf(longest)
-		sh, err := bt.s.batchShape(C, ctx)
-		if err != nil {
-			return false
+		if cached && bt.reuses(C, ctx) {
+			return true
 		}
-		return (cached && bt.reuses(C, ctx)) || sh.need+inkling2BatchHeadroom <= free
+		for _, chunk := range inkling2BatchChunkLadder(baseChunk) {
+			sh, err := bt.s.batchShapeChunkLimit(C, ctx, chunk, maxCtx)
+			if err != nil {
+				return false
+			}
+			if sh.need+inkling2BatchHeadroom <= free {
+				return true
+			}
+		}
+		return false
 	}
 	longest := 0
 	for _, n := range positions {
@@ -412,7 +532,7 @@ func (bt *Inkling2LoopCohorts) GenerateAdmitting(reqs []Inkling2LoopBatchRequest
 			return nil, fmt.Errorf("inkling2 batch stream: invalid lane %d", i)
 		}
 	}
-	ctx, err := inkling2BatchCohortCtx(reqs, Inkling2LoopResidentContext)
+	ctx, err := inkling2BatchCohortCtx(reqs, bt.maxContext())
 	if err != nil {
 		return nil, err
 	}
@@ -734,8 +854,8 @@ func inkling2AdmitCheck(req Inkling2LoopBatchRequest, maxPositions int) error {
 	switch {
 	case len(req.Prompt) == 0 || req.MaxTokens <= 0 || req.Emit == nil:
 		return errors.New("inkling2 batch stream: invalid admitted request")
-	case len(req.Prompt)+req.MaxTokens > maxPositions:
-		return fmt.Errorf("inkling2 batch stream: admitted request needs %d positions, past the %d-token cohort", len(req.Prompt)+req.MaxTokens, maxPositions)
+	case len(req.Prompt)+req.MaxTokens-1 > maxPositions:
+		return fmt.Errorf("inkling2 batch stream: admitted request needs %d positions, past the %d-token cohort", len(req.Prompt)+req.MaxTokens-1, maxPositions)
 	}
 	return nil
 }

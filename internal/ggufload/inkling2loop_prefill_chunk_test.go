@@ -886,6 +886,7 @@ func TestInkling2PrefillChunkWideCohortDropsCancelledRow(t *testing.T) {
 	const long = 3 * 1024
 	t.Setenv(inkling2PrefillChunkEnv, "1024")
 	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "0")
 	d := newFakeInk2Budget(1 << 30)
 	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
 	defer bt.Close()

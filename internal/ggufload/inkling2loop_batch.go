@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"runtime"
@@ -116,25 +117,57 @@ func newInkling2BatchResident(m *Inkling2LoopModel, be compute.Backend) (*inklin
 	return s, nil
 }
 
+// inkling2BatchChunkLadder returns the sequence of prefill chunk widths to try for a
+// cohort wanting want tokens, stepping down through powers of two under VRAM pressure
+// down to 128 tokens so multi-sequence high-context cohorts stay together instead of
+// splitting down to C=1.
+func inkling2BatchChunkLadder(want int) []int {
+	ladder := []int{want}
+	for _, rung := range []int{1024, inkling2PrefillChunkBase, 256, 128} {
+		if rung < want {
+			ladder = append(ladder, rung)
+		}
+	}
+	return ladder
+}
+
 // newInkling2BatchState allocates the arenas of a C-sequence, ctx-position batch on
 // the binding s and readies it for a cohort of that shape; begin re-readies it for
 // any cohort no wider and no longer.
 //
-// want is the cohort prefill chunk the state is sized for. A wide want the device or
-// the admission refuses is rebuilt at the base chunk, whose rings and arenas are the
-// smaller ones; the returned state then reports capT below want.
+// want is the cohort prefill chunk the state is sized for. A chunk the device or the
+// admission refuses steps down through smaller power-of-two chunks (1024 -> 512 ->
+// 256 -> 128), whose rings and arenas are smaller; the returned state then reports
+// capT below want.
 func newInkling2BatchState(s *inkling2Resident, C, ctx, want int) (*inkling2Batch, error) {
-	b, err := newInkling2BatchChunk(s, C, ctx, want)
-	if err != nil && want > inkling2PrefillChunkBase && inkling2ChunkRefusal(err) {
-		logInkling2PrefillFallback(err, want)
-		return newInkling2BatchChunk(s, C, ctx, inkling2PrefillChunkBase)
+	return newInkling2BatchStateLimit(s, C, ctx, want, 0)
+}
+
+func newInkling2BatchStateLimit(s *inkling2Resident, C, ctx, want, limit int) (*inkling2Batch, error) {
+	var lastErr error
+	for i, chunk := range inkling2BatchChunkLadder(want) {
+		b, err := newInkling2BatchChunkLimit(s, C, ctx, chunk, limit)
+		if err == nil {
+			if i > 0 {
+				log.Printf("inkling2 prefill: chunk %d refused (%v); using %d", want, lastErr, chunk)
+			}
+			return b, nil
+		}
+		lastErr = err
+		if !inkling2ChunkRefusal(err) {
+			return nil, err
+		}
 	}
-	return b, err
+	return nil, lastErr
 }
 
 // newInkling2BatchChunk builds the state with a cohort prefill chunk of chunk tokens.
 func newInkling2BatchChunk(s *inkling2Resident, C, ctx, chunk int) (*inkling2Batch, error) {
-	sh, err := s.batchShapeChunk(C, ctx, chunk)
+	return newInkling2BatchChunkLimit(s, C, ctx, chunk, 0)
+}
+
+func newInkling2BatchChunkLimit(s *inkling2Resident, C, ctx, chunk, limit int) (*inkling2Batch, error) {
+	sh, err := s.batchShapeChunkLimit(C, ctx, chunk, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -230,13 +263,21 @@ func (s *inkling2Resident) batchShape(C, ctx int) (inkling2BatchShape, error) {
 }
 
 // batchShapeChunk is the plan at a cohort prefill chunk of chunk tokens (capped at the
-// state's C*ctx tokens), its rings widened from the base capacities by that chunk alone.
+// state's C*ctx tokens), its rings sized for that chunk alone.
 func (s *inkling2Resident) batchShapeChunk(C, ctx, chunk int) (inkling2BatchShape, error) {
+	return s.batchShapeChunkLimit(C, ctx, chunk, 0)
+}
+
+// batchShapeChunkLimit is batchShapeChunk with an explicit context upper bound when
+// limit > 0, allowing cohorts to run at high contexts above Inkling2LoopResidentContext.
+func (s *inkling2Resident) batchShapeChunkLimit(C, ctx, chunk, limit int) (inkling2BatchShape, error) {
 	if C < 1 {
 		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: %d sequences", C)
 	}
-	limit := s.ctx
-	if limit == 0 {
+	if limit <= 0 {
+		limit = s.ctx
+	}
+	if limit <= 0 {
 		// a cohort binding holds no global cache, so each cohort is bounded by the resident context
 		limit = Inkling2LoopResidentContext
 	}
@@ -249,13 +290,9 @@ func (s *inkling2Resident) batchShapeChunk(C, ctx, chunk int) (inkling2BatchShap
 		lookup = os.LookupEnv
 	}
 	sh := inkling2BatchShape{seq: inkling2BatchSeqOps(be, lookup)}
-	kvHalf, err := inkling2BatchKVHalf(lookup)
+	kvHalf, err := inkling2BatchKVHalfFor(be, sh.seq, lookup)
 	if err != nil {
 		return inkling2BatchShape{}, err
-	}
-	if kvHalf && sh.seq == nil {
-		// the per-sequence fallback addresses cache rows by float offsets
-		return inkling2BatchShape{}, fmt.Errorf("inkling2 batch: FAK_INKLING2_BATCH_KV=f16 needs the sequence-batched device ops")
 	}
 	sh.kvHalf = kvHalf
 	hp := s.hp
@@ -476,14 +513,40 @@ func inkling2BatchAdmit(C int, need, free int64, known bool) error {
 	return &Inkling2BatchMemoryError{Sequences: C, Need: need, Free: free}
 }
 
-// inkling2BatchKVHalf reports whether FAK_INKLING2_BATCH_KV stores the batch caches as
-// f16 ("f16"/"fp16") rather than the default fp32 (unset, "f32"/"fp32").
+// inkling2BatchKVHalf reports whether FAK_INKLING2_BATCH_KV explicitly requests f16
+// ("f16"/"fp16") rather than fp32 (unset, "f32"/"fp32").
 func inkling2BatchKVHalf(lookup func(string) (string, bool)) (bool, error) {
 	v, _ := lookup("FAK_INKLING2_BATCH_KV")
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "f16", "fp16":
 		return true, nil
 	case "", "f32", "fp32":
+		return false, nil
+	}
+	return false, fmt.Errorf("inkling2 batch: FAK_INKLING2_BATCH_KV=%q is not f32 or f16", v)
+}
+
+// inkling2BatchKVHalfFor decides whether a batch on be stores its KV caches as f16.
+// Explicit FAK_INKLING2_BATCH_KV=f16/fp16 or f32/fp32 always wins (f16 requires seq).
+// When unset or blank, f16 defaults on when seq is non-nil and be provides ready f16
+// cohort prefill ops.
+func inkling2BatchKVHalfFor(be any, seq compute.Inkling2BatchDevice, lookup func(string) (string, bool)) (bool, error) {
+	v, _ := lookup("FAK_INKLING2_BATCH_KV")
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "f16", "fp16":
+		if seq == nil {
+			// the per-sequence fallback addresses cache rows by float offsets
+			return false, fmt.Errorf("inkling2 batch: FAK_INKLING2_BATCH_KV=f16 needs the sequence-batched device ops")
+		}
+		return true, nil
+	case "f32", "fp32":
+		return false, nil
+	case "":
+		if seq != nil {
+			if half, ok := be.(compute.Inkling2PrefillHalfKV); ok && half.Ink2PHalfKVReady() == nil {
+				return true, nil
+			}
+		}
 		return false, nil
 	}
 	return false, fmt.Errorf("inkling2 batch: FAK_INKLING2_BATCH_KV=%q is not f32 or f16", v)
@@ -558,8 +621,9 @@ func inkling2LocalRing(hp model.Inkling2LoopHParams, slot int) bool {
 }
 
 // inkling2BatchCaps is the cache capacity of every slot: ctx for a global slot, the
-// resident's ring size for a local one, widened to window+chunk so a prefill chunk of
-// chunk tokens never evicts a key an earlier query of the same chunk attends to.
+// resident's ring size for a local one, sized to window+chunk when cohort prefill is
+// active so a prefill chunk of chunk tokens never evicts a key an earlier query of the
+// same chunk attends to (and shrinking cleanly when chunk steps down below 512).
 func inkling2BatchCaps(hp model.Inkling2LoopHParams, local []int, ctx, chunk int) []int {
 	caps := make([]int, len(local))
 	for slot := range caps {
@@ -567,7 +631,7 @@ func inkling2BatchCaps(hp model.Inkling2LoopHParams, local []int, ctx, chunk int
 		if inkling2LocalRing(hp, slot) {
 			ring := local[slot]
 			if chunk > 0 {
-				ring = max(ring, hp.SlidingWindow+chunk)
+				ring = hp.SlidingWindow + chunk
 			}
 			// a batch never passes position ctx-1, so a ring past ctx is never addressed
 			caps[slot] = min(ring, ctx)

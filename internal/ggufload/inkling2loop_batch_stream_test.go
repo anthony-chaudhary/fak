@@ -6,6 +6,9 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func TestInkling2LoopBatchStreamCohortCtx(t *testing.T) {
@@ -86,5 +89,170 @@ func TestInkling2LoopBatchStreamRefusesBadCohort(t *testing.T) {
 	}
 	if Inkling2LoopBatchEligible(nil, nil) {
 		t.Fatal("nil model is not batch eligible")
+	}
+}
+
+func TestInkling2AdmitCheckBoundary(t *testing.T) {
+	emit := func(int) bool { return true }
+	// len(Prompt) + MaxTokens - 1 == maxPositions must be accepted (matches Generate).
+	if err := inkling2AdmitCheck(Inkling2LoopBatchRequest{Prompt: make([]int, 100), MaxTokens: 29, Emit: emit}, 128); err != nil {
+		t.Fatalf("exact boundary 100+29-1 == 128 refused: %v", err)
+	}
+	// One token past the boundary must be refused.
+	if err := inkling2AdmitCheck(Inkling2LoopBatchRequest{Prompt: make([]int, 100), MaxTokens: 30, Emit: emit}, 128); err == nil {
+		t.Fatal("100+30-1 == 129 > 128 must be refused")
+	}
+	// Invalid request fields still refused.
+	if err := inkling2AdmitCheck(Inkling2LoopBatchRequest{Prompt: nil, MaxTokens: 1, Emit: emit}, 128); err == nil {
+		t.Fatal("empty prompt must be refused")
+	}
+	if err := inkling2AdmitCheck(Inkling2LoopBatchRequest{Prompt: []int{1}, MaxTokens: 0, Emit: emit}, 128); err == nil {
+		t.Fatal("zero MaxTokens must be refused")
+	}
+	if err := inkling2AdmitCheck(Inkling2LoopBatchRequest{Prompt: []int{1}, MaxTokens: 1, Emit: nil}, 128); err == nil {
+		t.Fatal("nil Emit must be refused")
+	}
+}
+
+func TestInkling2CohortsSetMaxContext(t *testing.T) {
+	t.Setenv("FAK_INKLING2_BATCH_ADMIT", "0")
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+
+	if got := bt.maxContext(); got != Inkling2LoopResidentContext {
+		t.Fatalf("default maxContext = %d, want %d", got, Inkling2LoopResidentContext)
+	}
+	bt.SetMaxContext(16384)
+	if got := bt.maxContext(); got != 16384 {
+		t.Fatalf("after SetMaxContext(16384): %d", got)
+	}
+	reqs := []Inkling2LoopBatchRequest{
+		{Prompt: make([]int, 8192), MaxTokens: 2, Emit: func(int) bool { return true }},
+		{Prompt: make([]int, 16), MaxTokens: 2, Emit: func(int) bool { return true }},
+	}
+	if _, err := bt.Generate(reqs); err != nil {
+		t.Fatalf("Generate at 8192 with SetMaxContext(16384): %v", err)
+	}
+	if bt.b == nil || bt.b.ctx < 8192 {
+		t.Fatalf("cohort ctx = %v, want >= 8192", bt.b)
+	}
+	bt.SetMaxContext(32768)
+	if got := bt.maxContext(); got != 32768 {
+		t.Fatalf("after SetMaxContext(32768): %d", got)
+	}
+	bt.SetMaxContext(0)
+	if got := bt.maxContext(); got != Inkling2LoopResidentContext {
+		t.Fatalf("after SetMaxContext(0): %d, want %d", got, Inkling2LoopResidentContext)
+	}
+}
+
+type fakeInk2MemBackend struct {
+	compute.Backend
+	name  string
+	total int64
+	free  int64
+	known bool
+}
+
+func (b fakeInk2MemBackend) Name() string       { return b.name }
+func (b fakeInk2MemBackend) Caps() compute.Caps { return compute.Caps{CapacityProbe: b.known} }
+func (b fakeInk2MemBackend) DeviceMemory() (int64, int64, bool) {
+	return b.total, b.free, b.known
+}
+
+type fakeInk2HalfMemBackend struct {
+	fakeInk2MemBackend
+	fakeInk2SeqOps
+	fakeInk2HalfPrefill
+}
+
+func TestInkling2ResolveServeContext(t *testing.T) {
+	local := make([]bool, 24)
+	for i := range local {
+		local[i] = i%4 != 3
+	}
+	m := &Inkling2LoopModel{
+		HP: model.Inkling2LoopHParams{
+			Layers: 24, CoreStart: 6, CoreEnd: 18, Passes: 3,
+			Hidden: 2304, Heads: 16, KVHeads: 8, HeadDim: 128,
+			LocalLayer: local,
+		},
+	}
+	unset := func(string) (string, bool) { return "", false }
+	explicitEnv := func(k string) (string, bool) {
+		if k == Inkling2ResidentCtxEnv {
+			return "8192", true
+		}
+		return "", false
+	}
+
+	// Explicit requested > 0 returns requested (clamped to Metal hard max on metal).
+	cuda := fakeInk2MemBackend{name: "cuda", total: 16 << 30, free: 4 << 30, known: true}
+	metal := fakeInk2MemBackend{name: "metal", total: 64 << 30, free: 32 << 30, known: true}
+	if got := Inkling2ResolveServeContext(m, cuda, 16384, unset); got != 16384 {
+		t.Fatalf("requested 16384 on cuda = %d, want 16384", got)
+	}
+	if got := Inkling2ResolveServeContext(m, metal, 65536, unset); got != Inkling2ResidentCtxMaxMetal {
+		t.Fatalf("requested 65536 on metal = %d, want %d", got, Inkling2ResidentCtxMaxMetal)
+	}
+	// Explicit FAK_INKLING2_CTX returns the parsed value from lookup.
+	if got := Inkling2ResolveServeContext(m, cuda, 0, explicitEnv); got != 8192 {
+		t.Fatalf("explicit env FAK_INKLING2_CTX=8192 = %d, want 8192", got)
+	}
+	// Unknown free memory returns Inkling2LoopResidentContext.
+	unknown := fakeInk2MemBackend{name: "cuda", free: compute.FreeUnknown, known: false}
+	if got := Inkling2ResolveServeContext(m, unknown, 0, unset); got != Inkling2LoopResidentContext {
+		t.Fatalf("unknown free = %d, want %d", got, Inkling2LoopResidentContext)
+	}
+	// Auto on 16 GiB-class GPU (~2.5 GiB free) with f16-capable backend -> 16384.
+	half16G := fakeInk2HalfMemBackend{fakeInk2MemBackend: fakeInk2MemBackend{name: "cuda", total: 16 << 30, free: 2534 << 20, known: true}}
+	if got := Inkling2ResolveServeContext(m, half16G, 0, unset); got != 16384 {
+		t.Fatalf("auto 16GiB f16 backend = %d, want 16384", got)
+	}
+	// Auto on 24-32 GiB-class GPU (>= 8 GiB free) with f16-capable backend -> 32768.
+	half32G := fakeInk2HalfMemBackend{fakeInk2MemBackend: fakeInk2MemBackend{name: "cuda", total: 32 << 30, free: 12 << 30, known: true}}
+	if got := Inkling2ResolveServeContext(m, half32G, 0, unset); got != 32768 {
+		t.Fatalf("auto 32GiB f16 backend = %d, want 32768", got)
+	}
+	// Explicit f32, seqops=0, or batch=0 disables auto-f16 sizing and keeps 16384 ceiling.
+	for _, tc := range []struct {
+		name string
+		k, v string
+	}{
+		{"BATCH_KV=f32", "FAK_INKLING2_BATCH_KV", "f32"},
+		{"BATCH_SEQOPS=0", "FAK_INKLING2_BATCH_SEQOPS", "0"},
+		{"SERVE_BATCH=0", "FAK_INKLING2_SERVE_BATCH", "0"},
+		{"SERVE_BATCH=off", "FAK_INKLING2_SERVE_BATCH", "off"},
+	} {
+		env := func(k string) (string, bool) {
+			if k == tc.k {
+				return tc.v, true
+			}
+			return "", false
+		}
+		if got := Inkling2ResolveServeContext(m, half32G, 0, env); got != Inkling2AutoCtxCeiling {
+			t.Fatalf("%s on 32GiB = %d, want %d", tc.name, got, Inkling2AutoCtxCeiling)
+		}
+	}
+	// Auto on non-f16 backend with >= 8 GiB free stays at Inkling2AutoCtxCeiling (16384).
+	f32Big := fakeInk2MemBackend{name: "cuda", total: 32 << 30, free: 12 << 30, known: true}
+	if got := Inkling2ResolveServeContext(m, f32Big, 0, unset); got != Inkling2AutoCtxCeiling {
+		t.Fatalf("auto 32GiB f32 backend = %d, want %d", got, Inkling2AutoCtxCeiling)
+	}
+}
+
+func TestInkling2PrefixStoreAutoHalfKVWithPrefillOff(t *testing.T) {
+	be := fakeInk2HalfCohort{fakeInk2Cohort: newFakeInk2Cohort()}
+	env := func(kv map[string]string) func(string) (string, bool) {
+		return func(k string) (string, bool) { v, ok := kv[k]; return v, ok }
+	}
+	// Auto-f16 + explicit COHORT_PREFILL_KV=off disables cohort prefill, so prefix store must be refused.
+	if err := inkling2PrefixStoreUsable(be, env(map[string]string{"FAK_INKLING2_COHORT_PREFILL_KV": "off"})); err == nil {
+		t.Fatal("prefix store must be refused under auto-f16 with FAK_INKLING2_COHORT_PREFILL_KV=off")
+	}
+	// Auto-f16 with default (unset) COHORT_PREFILL_KV auto-enables f16 cohort prefill, so prefix store is usable.
+	if err := inkling2PrefixStoreUsable(be, env(nil)); err != nil {
+		t.Fatalf("prefix store must be usable under auto-f16 + auto f16 cohort prefill: %v", err)
 	}
 }

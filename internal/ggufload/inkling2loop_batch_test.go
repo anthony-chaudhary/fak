@@ -373,3 +373,139 @@ func TestInkling2BatchStateRefusesHalfKVWithoutSeqOps(t *testing.T) {
 		t.Fatal("refused f16 cohort cached a state")
 	}
 }
+
+func TestInkling2BatchKVHalfForAutoDefault(t *testing.T) {
+	env := func(v string, set bool) func(string) (string, bool) {
+		return func(string) (string, bool) { return v, set }
+	}
+	ready := fakeInk2HalfPrefill{}
+	notReady := fakeInk2HalfPrefill{notReady: errors.New("no f16")}
+	seq := fakeInk2SeqOps{}
+
+	// Unset/blank auto-enables f16 when seq != nil and backend has ready f16 prefill.
+	for _, tc := range []struct {
+		name string
+		be   any
+		seq  compute.Inkling2BatchDevice
+		v    string
+		set  bool
+		want bool
+	}{
+		{"unset capable backend defaults f16", ready, seq, "", false, true},
+		{"blank capable backend defaults f16", ready, seq, "  ", true, true},
+		{"explicit f32 overrides capable backend", ready, seq, "f32", true, false},
+		{"explicit fp32 overrides capable backend", ready, seq, "FP32", true, false},
+		{"explicit f16 on seq-only backend", struct{}{}, seq, "f16", true, true},
+		{"unset without seq stays f32", ready, nil, "", false, false},
+		{"unset without half prefill stays f32", struct{}{}, seq, "", false, false},
+		{"unset when half prefill not ready stays f32", notReady, seq, "", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := inkling2BatchKVHalfFor(tc.be, tc.seq, env(tc.v, tc.set))
+			if err != nil || got != tc.want {
+				t.Fatalf("got (%v, %v), want (%v, nil)", got, err, tc.want)
+			}
+		})
+	}
+	if _, err := inkling2BatchKVHalfFor(ready, nil, env("f16", true)); err == nil || !strings.Contains(err.Error(), "FAK_INKLING2_BATCH_KV") {
+		t.Fatalf("explicit f16 without seq must error, got %v", err)
+	}
+}
+
+func TestInkling2BatchChunkStepDown(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_INKLING2_BATCH_ADMIT", "1")
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	if err := bt.bind(); err != nil {
+		t.Fatal(err)
+	}
+	sh512, err := bt.s.batchShapeChunk(2, 512, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh256, err := bt.s.batchShapeChunk(2, 512, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh128, err := bt.s.batchShapeChunk(2, 512, 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !(sh512.need > sh256.need && sh256.need > sh128.need) {
+		t.Fatalf("expected strictly shrinking need: 512=%d 256=%d 128=%d", sh512.need, sh256.need, sh128.need)
+	}
+	// Cap VRAM so 512 fails but 256 fits.
+	d.capFloats = d.live + int((sh256.need+inkling2BatchHeadroom+3)/4)
+	b256, err := newInkling2BatchState(bt.s, 2, 512, 512)
+	if err != nil {
+		t.Fatalf("step-down 512->256 failed: %v", err)
+	}
+	if b256.capT != 256 || b256.prefillT != 256 {
+		t.Fatalf("got capT=%d prefillT=%d, want 256", b256.capT, b256.prefillT)
+	}
+	b256.release()
+
+	// Cap VRAM so 512 and 256 fail, but 128 fits.
+	d.capFloats = d.live + int((sh128.need+inkling2BatchHeadroom+3)/4)
+	b128, err := newInkling2BatchState(bt.s, 2, 512, 512)
+	if err != nil {
+		t.Fatalf("step-down 512->128 failed: %v", err)
+	}
+	if b128.capT != 128 || b128.prefillT != 128 {
+		t.Fatalf("got capT=%d prefillT=%d, want 128", b128.capT, b128.prefillT)
+	}
+	b128.release()
+
+	// Local ring caps also shrink cleanly at chunk=256 and chunk=128.
+	hp := model.Inkling2LoopHParams{Layers: 4, CoreStart: 1, CoreEnd: 3, Passes: 2, SlidingWindow: 128,
+		LocalLayer: []bool{true, false, true, false}}
+	base := inkling2ResidentCaps(hp, 0, true, 512)
+	if got := inkling2BatchCaps(hp, base, 4096, 256); got[0] != 384 || got[1] != 4096 {
+		t.Fatalf("chunk=256 caps = %v, want local=384 global=4096", got)
+	}
+	if got := inkling2BatchCaps(hp, base, 4096, 128); got[0] != 256 || got[1] != 4096 {
+		t.Fatalf("chunk=128 caps = %v, want local=256 global=4096", got)
+	}
+}
+
+// Back-to-back cohorts after a 512 -> 256 chunk step-down reuse the cached 256-chunk
+// arenas during cooldown instead of discarding and reallocating on every cohort.
+func TestInkling2BatchChunkStepDownReusesArena(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_INKLING2_BATCH_ADMIT", "1")
+	d := newFakeInk2Cohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+	if err := bt.bind(); err != nil {
+		t.Fatal(err)
+	}
+	sh256, err := bt.s.batchShapeChunk(2, 512, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fit 256-chunk arenas, refuse 512-chunk arenas.
+	d.capFloats = d.live + int((sh256.need+inkling2BatchHeadroom+3)/4)
+
+	run := func() {
+		t.Helper()
+		reqs := []Inkling2LoopBatchRequest{
+			{Prompt: make([]int, 300), MaxTokens: 2, Emit: func(int) bool { return true }},
+			{Prompt: make([]int, 300), MaxTokens: 2, Emit: func(int) bool { return true }},
+		}
+		if _, err := bt.Generate(reqs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run()
+	if bt.b == nil || bt.b.capT != 256 {
+		t.Fatalf("first cohort capT = %v, want 256", bt.b)
+	}
+	allocsAfterFirst := d.allocs
+	run()
+	run()
+	if d.allocs != allocsAfterFirst {
+		t.Fatalf("stepped-down 256-chunk arena reallocated on reuse: allocs %d -> %d", allocsAfterFirst, d.allocs)
+	}
+}

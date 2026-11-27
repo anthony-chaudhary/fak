@@ -810,3 +810,71 @@ func TestInkling2BatchPanicAnswersAdmittedRows(t *testing.T) {
 		t.Error("row C answered without an error after the cohort panicked")
 	}
 }
+
+// admitQueued admits a request whose len(prompt)+maxNew-1 equals maxPositions
+// (matching Generate's context bound) and holds one that exceeds it by 1.
+func TestInkling2BatchAdmitQueuedBoundary(t *testing.T) {
+	const maxPositions = 8
+	e := newInkling2LoopBatchEngineWith(nil, nil, testInkling2Admission(inkling2RealClock{}), maxPositions)
+	var owned []*inkling2QueuedRequest
+	c := &inkling2Cohort{width: 2, owned: &owned}
+
+	// exact boundary: 7 prompt + 2 maxNew - 1 == 8 -> fits
+	exact := &inkling2QueuedRequest{ctx: context.Background(), prompt: make([]int, 7), maxNew: 2,
+		sink: &inkling2RowSink{emit: func(int) bool { return true }}, done: make(chan inkling2QueuedResult, 1)}
+	e.queue <- exact
+	if _, ok := e.admitQueued(c, maxPositions); !ok {
+		t.Fatal("request with len(prompt)+maxNew-1 == maxPositions was refused")
+	}
+	if e.pending != nil {
+		t.Fatal("fitting boundary request was held as pending")
+	}
+
+	// one over boundary: 7 prompt + 3 maxNew - 1 == 9 > 8 -> held as pending
+	over := &inkling2QueuedRequest{ctx: context.Background(), prompt: make([]int, 7), maxNew: 3,
+		sink: &inkling2RowSink{emit: func(int) bool { return true }}, done: make(chan inkling2QueuedResult, 1)}
+	e.queue <- over
+	if _, ok := e.admitQueued(c, maxPositions); ok {
+		t.Fatal("request with len(prompt)+maxNew-1 > maxPositions was admitted")
+	}
+	if e.pending != over {
+		t.Fatal("oversized request was not held as pending")
+	}
+}
+
+// High-context batch engines accept requests up to len(prompt)+maxNew-1 == contextTokens
+// and reject requests one token past it.
+func TestInkling2BatchHighContextEngine(t *testing.T) {
+	for _, ctxTokens := range []int{16384, 32768} {
+		adm := inkling2Admission{gap: time.Millisecond, maxWait: time.Millisecond, max: 2, clock: inkling2RealClock{}}
+		e := newInkling2LoopBatchEngineWith(
+			func(_ context.Context, _ []int, _ int, _ map[int]bool, emit func(int) bool) (agent.Inkling2LoopGeneration, error) {
+				emit(42)
+				return agent.Inkling2LoopGeneration{Generated: 1}, nil
+			},
+			func(reqs []ggufload.Inkling2LoopBatchRequest) ([]ggufload.Inkling2LoopBatchResult, error) {
+				out := make([]ggufload.Inkling2LoopBatchResult, len(reqs))
+				for i, r := range reqs {
+					r.Emit(42)
+					out[i].Generated = 1
+				}
+				return out, nil
+			},
+			adm, ctxTokens)
+		go e.run()
+
+		prompt := make([]int, ctxTokens-4)
+		// exact boundary: (ctxTokens-4) + 5 - 1 == ctxTokens -> accepted
+		gen, err := e.Generate(context.Background(), prompt, 5, nil, func(int) bool { return true })
+		if err != nil || gen.Generated != 1 {
+			close(e.queue)
+			t.Fatalf("ctx=%d exact boundary: gen=%+v err=%v", ctxTokens, gen, err)
+		}
+		// one past boundary: (ctxTokens-4) + 6 - 1 == ctxTokens+1 -> rejected
+		if _, err := e.Generate(context.Background(), prompt, 6, nil, func(int) bool { return true }); err == nil {
+			close(e.queue)
+			t.Fatalf("ctx=%d past boundary accepted", ctxTokens)
+		}
+		close(e.queue)
+	}
+}

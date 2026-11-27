@@ -440,6 +440,10 @@ func inkling2HasPrefix(s, prefix []int) bool {
 
 // newServeInkling2Generator selects the serving engine and names it at startup.
 func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) (agent.Inkling2LoopGenerator, string, error) {
+	return newServeInkling2GeneratorWithContext(m, be, ggufload.Inkling2LoopResidentContext, lookup)
+}
+
+func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be compute.Backend, contextTokens int, lookup func(string) (string, bool)) (agent.Inkling2LoopGenerator, string, error) {
 	scalar := newInkling2LoopEngine(m, be)
 	mode, err := inkling2PrefixReuseModeFrom(lookup)
 	if err != nil {
@@ -474,7 +478,7 @@ func newServeInkling2Generator(m *ggufload.Inkling2LoopModel, be compute.Backend
 		}
 		ignored += fmt.Sprintf("; CUDA concurrent prefill policy, batch KV=%s", kv)
 	}
-	return newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, lookup),
+	return newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, contextTokens, lookup),
 		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", adm.max, adm.gap, adm.maxWait, prefix, ignored), nil
 }
 
@@ -784,7 +788,8 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			os.Exit(2)
 		}
 		engine = newInkling2LoopEngine(m, be)
-		if gen, decode, err = newServeInkling2Generator(m, be, serveInkling2ResidentLookup(os.LookupEnv, sz)); err != nil {
+		contextTokens = sz.Ctx
+		if gen, decode, err = newServeInkling2GeneratorWithContext(m, be, contextTokens, serveInkling2ResidentLookup(os.LookupEnv, sz)); err != nil {
 			_ = m.Close()
 			fmt.Fprintln(os.Stderr, "fak serve:", err)
 			os.Exit(2)
@@ -796,7 +801,6 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			}
 			return errors.Join(cerr, m.Close())
 		}
-		contextTokens = sz.Ctx
 		placement = inkling2ServeResidentPlacement(m.Arch, m.HP.Layers, m.HP.Hidden, m.HP.Passes, sz)
 	case metal:
 		target, err := inklingmetal.OpenWithDraft(path, "")
@@ -820,13 +824,23 @@ func (rt *serveRuntime) loadInkling2LoopModel(sf *serveFlags) bool {
 			served = serveInkling2LoopDefaultModelID
 		}
 		capmatrix.RegisterCheckpointTrainedLoops(served, m.HP.Passes)
-		if gen, decode, err = newServeInkling2Generator(m, rt.chatBackend, os.LookupEnv); err != nil {
+		requestedCtx := 0
+		if sf.nativeContextTokens != nil {
+			requestedCtx = *sf.nativeContextTokens
+		}
+		contextTokens = ggufload.Inkling2ResolveServeContext(m, rt.chatBackend, requestedCtx, os.LookupEnv)
+		if contextTokens > 0 {
+			ggufload.Inkling2ResidentCtxPin(contextTokens)
+		}
+		if gen, decode, err = newServeInkling2GeneratorWithContext(m, rt.chatBackend, contextTokens, os.LookupEnv); err != nil {
+			ggufload.Inkling2ResidentCtxPin(0)
 			_ = m.Close()
 			fmt.Fprintln(os.Stderr, "fak serve:", err)
 			os.Exit(2)
 		}
 		// the engine's resident session is freed before the weights it reads
 		closer = func() error {
+			ggufload.Inkling2ResidentCtxPin(0)
 			var cerr error
 			if c, ok := gen.(io.Closer); ok {
 				cerr = c.Close()

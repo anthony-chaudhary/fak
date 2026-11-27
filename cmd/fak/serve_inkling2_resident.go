@@ -64,13 +64,18 @@ func inkling2ServeResidentSlots(lookup func(string) (string, bool), perSlot int6
 	return int(max(1, min(int64(slots), capBytes/perSlot)))
 }
 
-// inkling2ServeResidentPlan prices weights plus slots resident sessions of
-// perSlot bytes each plus cohort bytes for the cohort engine, zero without it.
+// inkling2ServeResidentPlan prices weights plus the larger of the scalar prefix
+// slots and cohort state, since scalar and cohort engines are serialized on the
+// single GPU worker and runScalar releases cohort arenas first.
 func inkling2ServeResidentPlan(weights localadmission.MemoryPlan, perSlot int64, slots int, cohort int64) (localadmission.MemoryPlan, error) {
-	if perSlot < 0 || slots < 1 || cohort < 0 || perSlot > (math.MaxInt64-weights.SteadyBytes-cohort)/int64(slots) {
+	if perSlot < 0 || slots < 1 || cohort < 0 || perSlot > (math.MaxInt64-weights.SteadyBytes)/int64(slots) || cohort > math.MaxInt64-weights.SteadyBytes {
 		return localadmission.MemoryPlan{}, fmt.Errorf("Inkling 2: resident serve plan overflow")
 	}
-	plan := localadmission.MemoryPlan{SteadyBytes: weights.SteadyBytes + int64(slots)*perSlot + cohort}
+	extra := int64(slots) * perSlot
+	if cohort > extra {
+		extra = cohort
+	}
+	plan := localadmission.MemoryPlan{SteadyBytes: weights.SteadyBytes + extra}
 	plan.StartupPeakBytes, _ = metalServeStartupPeakBytes(serveLoadArmResidentQ4K, plan.SteadyBytes, 0, false)
 	return plan, nil
 }

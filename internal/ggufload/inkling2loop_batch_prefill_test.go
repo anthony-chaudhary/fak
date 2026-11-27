@@ -123,7 +123,7 @@ func TestInkling2MixedPrefillPlanSingleRowMatchesPromptPacking(t *testing.T) {
 	}
 }
 
-// Only a positive integer in the native long-prefill knob turns the mixed chunks on.
+// Unset/empty defaults to 512 (continuous admission on); "0", negative, or unparsable disables it.
 func TestInkling2CohortLongPrefillCapParsesKnob(t *testing.T) {
 	const name = "FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD"
 	for _, tc := range []struct {
@@ -132,8 +132,9 @@ func TestInkling2CohortLongPrefillCapParsesKnob(t *testing.T) {
 		v    string
 		want int
 	}{
-		{"unset", false, "", 0},
-		{"empty", true, "", 0},
+		{"unset", false, "", 512},
+		{"empty", true, "", 512},
+		{"blank", true, "   ", 512},
 		{"zero", true, "0", 0},
 		{"negative", true, "-5", 0},
 		{"unparsable", true, "abc", 0},
@@ -166,6 +167,7 @@ func TestInkling2CohortPrefillMatchesLockstepAndScalar(t *testing.T) {
 	run := func(prefill string) ([][]int, []Inkling2LoopBatchResult, int) {
 		t.Helper()
 		t.Setenv("FAK_INKLING2_COHORT_PREFILL", prefill)
+		t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "0")
 		d := newFakeInk2Cohort()
 		bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
 		defer bt.Close()

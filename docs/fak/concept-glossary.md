@@ -2739,3 +2739,31 @@ Inkling2ResidentCtxMax(backend) is the largest global-slot KV context a resident
 loadInkling2LoopModel is fak serve's loader stage for an inkling2-family GGUF: it claims the load for the dedicated looped forward (CUDA free-VRAM bound or the native resident Metal target), refuses a backend without that forward, and hands the native chat planner to the gateway.
 
 **Distinct from:** The serve-side load stage that claims an inkling2_loop GGUF - not inkling2loop-model (the in-memory looped model it produces) and not loop-inkling2-loopconfig (the per-model loop depth config it reads).
+
+
+### Inkling2AutoCtxCeiling
+
+Inkling2AutoCtxCeiling is the default 16384-token auto-context ceiling for resident Inkling-2 device sessions when FAK_INKLING2_CTX is unset, shared by CUDA and Metal admission.
+
+**Distinct from:** The default auto-sized context cap for 16 GiB devices - not Inkling2ResidentCtxMax (the explicit backend hard ceiling) and not Inkling2ResidentFitCtx (the live free-memory fit calculation).
+
+
+### Inkling2ResidentCtxPin
+
+Inkling2ResidentCtxPin fixes the global KV cache context of the next resident Inkling-2 session to a caller-admitted token count instead of re-deriving it from free memory.
+
+**Distinct from:** The process-level context pin set by fak serve for already-admitted sessions - not Inkling2ResidentCtxEnv (the FAK_INKLING2_CTX env var) and not Inkling2AutoCtxCeiling (the default auto-fit ceiling).
+
+
+### Inkling2ResidentFitCtx
+
+Inkling2ResidentFitCtx computes the largest resident Inkling-2 global context that fits in a given free-memory byte count after device headroom reserve, in 256-token steps.
+
+**Distinct from:** The pure free-VRAM-to-context fit calculator - not Inkling2AutoCtxCeiling (the default ceiling applied to auto-fit) and not Inkling2ResidentCtxMax (the backend hard bound).
+
+
+### inkling2SlotLayer
+
+inkling2SlotLayer maps a looped Inkling-2 KV cache slot index (across prelude, repeated core passes, and epilogue) back to its underlying physical transformer layer index.
+
+**Distinct from:** The slot-to-layer index mapper for Inkling-2's looped KV cache - not NativeSessionLifecycle (the scheduler session origin enum) and not inkling2PrefixCacheFromEnv (the serve prefix-slot pool).

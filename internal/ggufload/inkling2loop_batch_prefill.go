@@ -18,9 +18,9 @@ func inkling2CohortPrefill(lookup func(string) (string, bool)) bool {
 
 // inkling2CohortPrefillKV decides whether a cohort with kvHalf caches runs cohort
 // prefill, and with which f16 append and attend. fp32 caches follow
-// FAK_INKLING2_COHORT_PREFILL alone. f16 caches feed prompts lockstep unless
-// FAK_INKLING2_COHORT_PREFILL_KV=f16 opts in, which needs a backend with the f16
-// prefill ops; an opt-in that cannot be honoured is an error, not a silent lockstep.
+// FAK_INKLING2_COHORT_PREFILL alone. With f16 caches, unset/blank auto-enables f16
+// cohort prefill whenever be provides ready f16 prefill ops; explicit "off"/"0"
+// disables it, and explicit "f16"/"fp16" errors if the backend lacks ready f16 ops.
 func inkling2CohortPrefillKV(be any, kvHalf bool, lookup func(string) (string, bool)) (bool, compute.Inkling2PrefillHalfKV, error) {
 	if !inkling2CohortPrefill(lookup) {
 		return false, nil, nil
@@ -30,7 +30,12 @@ func inkling2CohortPrefillKV(be any, kvHalf bool, lookup func(string) (string, b
 	}
 	v, _ := lookup("FAK_INKLING2_COHORT_PREFILL_KV")
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "", "off", "0":
+	case "off", "0":
+		return false, nil, nil
+	case "":
+		if half, ok := be.(compute.Inkling2PrefillHalfKV); ok && half.Ink2PHalfKVReady() == nil {
+			return true, half, nil
+		}
 		return false, nil, nil
 	case "f16", "fp16":
 	default:
@@ -364,17 +369,21 @@ func inkling2CohortSharedPrefixMin(lookup func(string) (string, bool)) int {
 	return n
 }
 
+// inkling2CohortLongPrefillDefault is the default mixed-chunk prompt token cap when
+// FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD is unset or blank, enabling continuous
+// admission and interleaving decode tokens alongside long prefills by default.
+const inkling2CohortLongPrefillDefault = 512
+
 // inkling2CohortLongPrefillCap reads FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD, the knob
-// of the native scheduler's long-prefill token threshold, so the cohort
-// gives a row whose prompt has ended its decode tokens in the chunks of a long prompt
-// still prefilling, and caps that prompt's share of each such chunk. Unset, empty,
-// zero, negative and unparsable all mean off. It stays off by default until a device
-// receipt exists: a mixed chunk decodes through the prefill kernels, which differ
-// numerically from the step kernels on device.
+// of the native scheduler's long-prefill token threshold, so the cohort gives a row
+// whose prompt has ended its decode tokens in the chunks of a long prompt still
+// prefilling, and caps that prompt's share of each such chunk. Unset or blank defaults
+// to inkling2CohortLongPrefillDefault (512); explicit "0", negative, or unparsable
+// disables it.
 func inkling2CohortLongPrefillCap(lookup func(string) (string, bool)) int {
 	v, ok := lookup("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD")
-	if !ok {
-		return 0
+	if !ok || strings.TrimSpace(v) == "" {
+		return inkling2CohortLongPrefillDefault
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(v))
 	if err != nil || n < 0 {
