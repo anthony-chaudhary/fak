@@ -1,0 +1,64 @@
+{
+  "schema": "fak.benchmark.sampling-witness.v1",
+  "date": "2026-11-26",
+  "evidence_class": "HW-WITNESSED",
+  "commit": "eb68a8cf8a",
+  "includes_commit": "b99003d25f",
+  "gpu": "NVIDIA GeForce RTX 5080 (16 GiB, sm_120f)",
+  "model": "Inkling-2-Mini-UD-Q3_K_XL",
+  "command": "./fak serve --engine inkernel --backend cuda --gguf <model> --model Inkling-2-Mini-UD-Q3_K_XL --session-state off --session-registry off",
+  "same_seed_42_identical": true,
+  "distinct_seed_outputs": 3,
+  "greedy_warm_tps": 121.05,
+  "greedy_meas_tps": 121.74,
+  "greedy_decode_tps": 121.74,
+  "http_500_count": 0,
+  "pass": true,
+  "runs": {
+    "seed_42_run1": {
+      "status": 200,
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "seed": 42,
+      "completion_tokens": 128,
+      "predicted_per_second": 100.83,
+      "content_prefix": "Here are 5 creative names for a pet turtle:\n\n1"
+    },
+    "seed_42_run2": {
+      "status": 200,
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "seed": 42,
+      "completion_tokens": 128,
+      "predicted_per_second": 102.29,
+      "content_prefix": "Here are 5 creative names for a pet turtle:\n\n1"
+    },
+    "seed_99": {
+      "status": 200,
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "seed": 99,
+      "completion_tokens": 110,
+      "predicted_per_second": 100.77,
+      "content_prefix": "1. Mossback  \n2. Pebble  \n3. Willow  \n4. Splashy  \n5. Echo"
+    },
+    "seed_1234": {
+      "status": 200,
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "seed": 1234,
+      "completion_tokens": 128,
+      "content_prefix": "1. Mossback  \n2. Pebble  \n3. Cloyster  \n4. Mudwhiskers"
+    },
+    "greedy_warm": {
+      "status": 200,
+      "temperature": 0.0,
+      "predicted_per_second": 121.05
+    },
+    "greedy_meas": {
+      "status": 200,
+      "temperature": 0.0,
+      "predicted_per_second": 121.74
+    }
+  }
+}
