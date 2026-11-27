@@ -1102,6 +1102,23 @@ var admittedPostFreeze = []string{
 	// Relocates to: a typed Inkling-2 speculative-decode config.
 	"FAK_INKLING2_VERIFY_MMA_EXPERTS",
 	"FAK_INK2VM_SCALAR_MAX",
+
+	// SIXTEENTH OCCURRENCE (release-unblock): two serve-path reads shipped while the ratchet
+	// was red and unwatched again (FAK_HTTP_WRITE_TIMEOUT_S 361 trunk advances ago in
+	// 0bd78970ab; FAK_INKLING2_TRACE 21 trunk advances ago in 27052153f5). Admitted by name
+	// on the same terms, not absorbed into baseline.go; the #2862 relocation debt stands.
+
+	// cmd/fak/serve_first_token_watchdog.go — FAK_HTTP_WRITE_TIMEOUT_S is checked before
+	// lifting the HTTP write deadline to "0" for an Inkling-2 serve when unset, preserving an
+	// operator-set timeout. A serve HTTP timeout setting, not a credential.
+	// Relocates to: a typed HTTP write-timeout field on the serve/gateway config.
+	"FAK_HTTP_WRITE_TIMEOUT_S",
+
+	// cmd/fak/serve_inkling2_prefix.go — FAK_INKLING2_TRACE=1 enables stderr trace logging
+	// for Inkling-2 prefix-slot scheduling and byte-ledger events. A diagnostic toggle, not a
+	// credential.
+	// Relocates to: a typed Inkling-2 serve observability config.
+	"FAK_INKLING2_TRACE",
 }
 
 // helperReadCorroboration declares that an admitted name is still read at runtime through
@@ -1117,4 +1134,5 @@ type helperReadCorroboration struct {
 
 var helperReadCorroborations = []helperReadCorroboration{
 	{name: "FAK_INKLING2_BATCH_ADMIT", file: "internal/ggufload/inkling2loop_batch.go", helper: "lookup"},
+	{name: "FAK_INKLING2_PREFIX_REUSE", file: "cmd/fak/serve_inkling2.go", helper: "lookup"},
 }

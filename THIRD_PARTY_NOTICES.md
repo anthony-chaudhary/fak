@@ -2864,7 +2864,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## realugbun/llama.cpp
 
-Portions of this product are adapted from realugbun/llama.cpp: https://github.com/realugbun/llama.cpp (pinned at revision 2eb2530ec4; the single-pass `MIX` kernel from `ggml/src/ggml-cuda/inkling2.cu:931-1073` and the `CTRL_DOWN`/`CTRL_OUT` kernels from `ggml/src/ggml-cuda/inkling2.cu:1443-1679`, adapted in `internal/compute/cuda/inkling2_loop.cuh`). Changes were made.
+Portions of this product are adapted from realugbun/llama.cpp: https://github.com/realugbun/llama.cpp (pinned at revision 2eb2530ec4). Changes were made.
 
 ```text
 MIT License

@@ -281,8 +281,7 @@ just a code change and a "looks fixed". Pick the witness the bug actually has:
   `scripts/dogfood-claude.sh --probe`, `tools/recent_feature_dogfood.py`) or a loopback integration test
   (`make test-integration`, `*integration*test.go`) against a temporary workspace before claiming
   completion. A green unit test that only asserts mocks or verifies syntax without executing the
-  real path is unproven and must not be declared done. Shift left: prove execution early during
-  development, never deferring validation to post-merge or scheduled nightly runs.
+  real path is unproven and must not be declared done.
 - **Hardware / Performance / Acceleration**: a physical silicon execution witness (`fak hil`,
   `make mac-perf`, or on-device GPU receipt) — never an in-memory mock or analytical simulation alone.
   Hardware-in-the-loop (HIL) testing must run **100x more frequently in micro-doses** (sub-second physical
@@ -482,17 +481,7 @@ a refusal, lease, or gate. Taxonomy and routing:
 Use `/release` for the full release path. It enforces a clean synchronized `main`, full CI,
 version bump, release notes, signed commit/tag, push, GitHub release, and rollback guidance.
 Never hand-edit version constants, tag partially, force-push, or publish from a dirty/diverged
-tree. Release history and channel contract: [`docs/releases/`](docs/releases/) and [`docs/releases-channel.md`](docs/releases-channel.md).
-
-Write release notes for an engineer who is new to Fak. Start with what changed,
-who will notice, and any steps they need to take. Use short sentences and familiar
-words. Explain necessary acronyms and Fak-specific terms. For example, write
-“Fak tries another server if the first one is busy.” Use commit titles as source
-material. Review the draft before tagging and put commit links or test details
-after the summary. Keep exact commands, version numbers, and support limits where
-readers need them. For automatic releases, add those bullets under
-`## Release highlights` in [`docs/releases/NEXT.md`](docs/releases/NEXT.md).
-Put required upgrade steps under `## Upgrade and breaking changes`.
+tree. Release history, channel contract, and plain-English release-highlight rules: [`docs/releases/`](docs/releases/), [`docs/releases-channel.md`](docs/releases-channel.md), [`docs/releases/NEXT.md`](docs/releases/NEXT.md), and [`docs/on-demand-releases.md`](docs/on-demand-releases.md).
 
 Choose the planning primitive by work shape:
 

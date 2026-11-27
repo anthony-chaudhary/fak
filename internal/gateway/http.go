@@ -733,13 +733,13 @@ func requestFromLAN(r *http.Request) bool {
 // surface here widens both at once, which is the intent.
 func readScopedPath(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/v1/fak/features/proof", "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/observation/engine", "/v1/fak/perf/recent", "/v1/fak/perf/phases", "/v1/fak/arms", "/v1/fak/arms/traffic",
+	case "/v1/fak/features/proof", "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/observation/engine", "/v1/fak/perf/recent", "/v1/fak/perf/phases", "/v1/fak/arms", "/v1/fak/arms/traffic", "/v1/serve/status",
 		// /props and /slots are the llama-server-shaped engine introspection
 		// pair, served from the same live state as /metrics and carrying the
 		// same class of information: counts, ratios, and build labels. They join
 		// /metrics here so the read-scoped floor cannot drift — an engine that
 		// admits /metrics must admit the introspection that explains it.
-		"/props", "/slots", "/v1/serve/status":
+		"/props", "/slots":
 		return true
 	}
 	return false
