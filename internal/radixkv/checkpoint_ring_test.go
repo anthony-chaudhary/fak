@@ -299,3 +299,64 @@ func TestCheckpointRingLaneRegression(t *testing.T) {
 		t.Fatalf("Advance backwards = %v, want ErrLaneRegression", err)
 	}
 }
+
+// TestCheckpointRingBranchAndRestoreLatest verifies O(checkpoint) branching into a
+// new lane without mutating the source lane, and RestoreLatest for undo/retry.
+func TestCheckpointRingBranchAndRestoreLatest(t *testing.T) {
+	_, kvPool := makeTestPool(t, 64, 16)
+	alloc := kvPool.Allocator()
+	ring := radixkv.NewCheckpointRing(alloc, 4, 16)
+
+	blkA, err := alloc.Allocate()
+	if err != nil {
+		t.Fatalf("Allocate A: %v", err)
+	}
+	blkB, err := alloc.Allocate()
+	if err != nil {
+		t.Fatalf("Allocate B: %v", err)
+	}
+
+	if err := ring.Advance("src", 16, []int{blkA.ID}); err != nil {
+		t.Fatalf("Advance src 16: %v", err)
+	}
+	idA, err := ring.Save("src")
+	if err != nil {
+		t.Fatalf("Save src 16: %v", err)
+	}
+	if err := ring.Advance("src", 32, []int{blkA.ID, blkB.ID}); err != nil {
+		t.Fatalf("Advance src 32: %v", err)
+	}
+
+	// Same-lane or unknown-id branch must fail closed.
+	if _, err := ring.Branch("src", "src", idA); err != radixkv.ErrCheckpointBranchSameLane {
+		t.Fatalf("Branch same lane = %v, want ErrCheckpointBranchSameLane", err)
+	}
+	if _, err := ring.Branch("src", "dst", idA+99); err != radixkv.ErrCheckpointUnknown {
+		t.Fatalf("Branch unknown id = %v, want ErrCheckpointUnknown", err)
+	}
+
+	// Branch dst from src@16: src remains at 32, dst starts at 16 sharing blkA.
+	pos, err := ring.Branch("src", "dst", idA)
+	if err != nil || pos != 16 {
+		t.Fatalf("Branch = (%d, %v), want (16, nil)", pos, err)
+	}
+	if srcPos, ok := ring.TokenPosition("src"); !ok || srcPos != 32 {
+		t.Fatalf("src TokenPosition = (%d, %v), want (32, true)", srcPos, ok)
+	}
+	if dstPos, ok := ring.TokenPosition("dst"); !ok || dstPos != 16 {
+		t.Fatalf("dst TokenPosition = (%d, %v), want (16, true)", dstPos, ok)
+	}
+	// blkA refcount: 1 (alloc) + 1 (src lane) + 1 (idA checkpoint) + 1 (dst lane) = 4.
+	if ref := blkA.RefCount(); ref != 4 {
+		t.Fatalf("blkA RefCount after Branch = %d, want 4", ref)
+	}
+
+	// RestoreLatest on src rolls back src from 32 to 16 (blkB released back to 1).
+	restoredID, restoredPos, err := ring.RestoreLatest("src")
+	if err != nil || restoredID != idA || restoredPos != 16 {
+		t.Fatalf("RestoreLatest = (%v, %d, %v), want (%v, 16, nil)", restoredID, restoredPos, err, idA)
+	}
+	if ref := blkB.RefCount(); ref != 1 {
+		t.Fatalf("blkB RefCount after RestoreLatest = %d, want 1", ref)
+	}
+}
