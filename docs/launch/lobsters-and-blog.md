@@ -195,4 +195,4 @@ Remaining numbers, all ledger-traced: cos=1.000000 / final-logits max|Δ|≈4.4e
 
 Relevant files: `C:\work\fak\CLAIMS.md`, `C:\work\fak\BENCHMARK-AUTHORITY.md`, `C:\work\fak\docs\webbench-real-measurements-summary.md`, `C:\work\fak\cmd\deletioncert\main.go`, `C:\work\fak\cmd\fak\main.go`.
 
-<!-- Freshness review 2026-08-24: commands, links, channel constraints, and product claims rechecked against the current repository; publish only after a final live channel-rule check. -->
+<!-- Freshness review 2026-11-27: commands, links, channel constraints, and product claims rechecked against current release v0.59.0 (vNext targeting v0.60.0); publish only after a final live channel-rule check. -->
