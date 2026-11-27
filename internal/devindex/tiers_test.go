@@ -115,6 +115,8 @@ func TestVerbTiersNameOnlyLiveVerbs(t *testing.T) {
 // its separate study-* forge/classify/link operators remain development commands.
 // 29 (was 28): `up` is the released first-run entry. Mock/offline output is not
 // onboarding evidence, so the front door points at the real serving path.
+// 30 (was 29): `mcp` promoted — cold agents and external harness adopters need
+// first-class config/install/status/doctor/uninstall without internal dev tooling.
 func TestCurrentDispatchedVerbTiersStayClassified(t *testing.T) {
 	for _, name := range []string{"architecture", "catchup", "codex-resume", "component", "config", "decode-anatomy", "fanout", "harness", "progress", "quantbench", "stale-work", "test-quality", "windows-setup", "work-delivery"} {
 		if got, ok := TierOf(name); !ok || got != TierDev {
@@ -127,7 +129,7 @@ func TestCurrentDispatchedVerbTiersStayClassified(t *testing.T) {
 }
 
 func TestFrontdoorTierStaysSmall(t *testing.T) {
-	const ceiling = 29
+	const ceiling = 30
 	var front []string
 	for key, tier := range verbTiers {
 		if tier == TierFrontdoor {

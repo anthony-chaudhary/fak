@@ -425,6 +425,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 	case "init":
 		// Emit a minimal, valid fak.toml deployment manifest (#3421).
 		cmdInit(args)
+	case "mcp":
+		cmdMCP(args)
 	case "workflow":
 		cmdWorkflow(args)
 	case "fanout":

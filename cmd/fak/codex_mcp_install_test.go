@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/policy"
 )
 
 // ---- pure config-patching logic --------------------------------------------
@@ -646,5 +648,36 @@ func TestCodexMCPInstallLiveInitialize(t *testing.T) {
 	st := classifyCodexMCPStatus(config, "fak", 30*time.Second, true)
 	if !st.OK || st.Probe != "ok" {
 		t.Fatalf("live status: state=%q ok=%v probe=%q detail=%q", st.State, st.OK, st.Probe, st.Detail)
+	}
+}
+
+func TestCodexMCPInstallStandaloneDefaultPolicy(t *testing.T) {
+	t.Chdir(t.TempDir())
+	home := t.TempDir()
+	config := filepath.Join(home, "config.toml")
+	fakeBin := filepath.Join(t.TempDir(), "fak-stub"+exeSuffix())
+	if err := os.WriteFile(fakeBin, []byte("stub-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb strings.Builder
+	code := runCodexMCPInstall(&out, &errb, []string{"--config", config, "--source", fakeBin, "--skip-verify", "--json"})
+	if code != 0 {
+		t.Fatalf("standalone install exit=%d\nstdout=%s\nstderr=%s", code, out.String(), errb.String())
+	}
+	man, err := readCodexMCPManifest(config)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	rawPolicy, err := os.ReadFile(man.PolicyPath)
+	if err != nil {
+		t.Fatalf("read installed policy %s: %v", man.PolicyPath, err)
+	}
+	manifest, err := policy.ParseManifest(rawPolicy)
+	if err != nil {
+		t.Fatalf("ParseManifest failed on embedded default policy %s: %v", string(rawPolicy), err)
+	}
+	if _, err := manifest.ToRuntime(); err != nil {
+		t.Fatalf("ToRuntime failed on embedded default policy %s: %v", string(rawPolicy), err)
 	}
 }

@@ -222,6 +222,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "managedocs", Synopsis: "audit documentation sets against budget limits and check retained occurrences across repository docs", Tier: "dev"},
 	{Name: "marketing", Synopsis: "the marketing Slack surface", Tier: "dev"},
 	{Name: "maturity", Synopsis: "the feature-lifecycle maturity ladder report", Tier: "dev"},
+	{Name: "mcp", Synopsis: "auto-configure, inspect, and verify fak as an MCP server for agent harnesses", Tier: "frontdoor"},
 	{Name: "mcp-filter-proof", Synopsis: "prove MCP tool filtering with an offline contract or a model-driven live A/B", Tier: "dev"},
 	{Name: "memgate", Synopsis: "host-memory admission gate: snapshot free RAM, admit/deny a --require-gb load, --wait to poll until it frees", Tier: "dev"},
 	{Name: "memory", Synopsis: "the memory-operation algebra: author a render/clean/compact/dream Op pipeline (drivers/explain/run)", Tier: "dev"},

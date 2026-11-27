@@ -322,6 +322,7 @@ var verbManifest = []Verb{
 	{Name: "managedocs", Synopsis: "audit documentation sets against budget limits and check retained occurrences across repository docs", Lane: "cmd"},
 	{Name: "marketing", Synopsis: "the marketing Slack surface", Lane: "cmd"},
 	{Name: "maturity", Synopsis: "the feature-lifecycle maturity ladder report", Lane: "cmd"},
+	{Name: "mcp", Synopsis: "auto-configure, inspect, and verify fak as an MCP server for agent harnesses", Lane: "cmd"},
 	{Name: "mcp-filter-proof", Synopsis: "prove MCP tool filtering with an offline contract or a model-driven live A/B", Lane: "cmd"},
 	{Name: "memgate", Synopsis: "host-memory admission gate: snapshot free RAM, admit/deny a --require-gb load, --wait to poll until it frees", Lane: "cmd"},
 	{Name: "memory", Synopsis: "the memory-operation algebra: author a render/clean/compact/dream Op pipeline (drivers/explain/run)", Lane: "cmd"},

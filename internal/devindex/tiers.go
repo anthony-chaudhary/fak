@@ -73,6 +73,7 @@ var verbTiers = map[string]VerbTier{
 	"help":         TierFrontdoor,
 	"info":         TierFrontdoor,
 	"ls":           TierFrontdoor,
+	"mcp":          TierFrontdoor,
 	"model":        TierFrontdoor,
 	"policy":       TierFrontdoor,
 	"preflight":    TierFrontdoor,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -202,7 +203,7 @@ func TestOverviewVerbsAdoptVerbFlagUsage(t *testing.T) {
 	src := all.String()
 	exempt := map[string]bool{
 		"version": true, "help": true, "ps": true, "up": true,
-		"audit": true, "egress": true, "model": true, "signal": true, "codex": true, "manage": true,
+		"audit": true, "egress": true, "mcp": true, "model": true, "signal": true, "codex": true, "manage": true,
 		"progress": true, "ultracode": true, "build": true, "self-update": true,
 	}
 	for _, g := range overviewGroups {
@@ -311,5 +312,79 @@ func TestSelfHelpResolvesToSelfUpdate(t *testing.T) {
 		if !strings.Contains(got, "flags: fak self-update -h") {
 			t.Fatalf("printVerbHelp(%q) missing 'flags: fak self-update -h':\n%s", tok, got)
 		}
+	}
+}
+
+func TestHelpJSONOverviewAndVerb(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var out, errb bytes.Buffer
+	if code := runHelp(&out, &errb, []string{"--json"}); code != 0 {
+		t.Fatalf("runHelp --json exit=%d stderr=%s", code, errb.String())
+	}
+	if strings.Contains(out.String(), `\u003c`) {
+		t.Fatalf("help --json HTML-escaped angle brackets:\n%s", out.String())
+	}
+	var ov map[string]any
+	if err := json.Unmarshal(out.Bytes(), &ov); err != nil {
+		t.Fatalf("unmarshal help --json: %v\n%s", err, out.String())
+	}
+	if ov["schema"] != "fak.help/1" {
+		t.Fatalf("schema = %v, want fak.help/1", ov["schema"])
+	}
+	qs, _ := ov["quick_start"].([]any)
+	hasLaunchPosture := false
+	for _, item := range qs {
+		s, _ := item.(string)
+		if s == "fak doctor --json" {
+			t.Fatalf("quick_start must not include blocking stdin-reading 'fak doctor --json'")
+		}
+		if s == "fak doctor launch-posture --json" {
+			hasLaunchPosture = true
+		}
+	}
+	if !hasLaunchPosture {
+		t.Fatalf("quick_start missing 'fak doctor launch-posture --json': %+v", qs)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runHelp(&out, &errb, []string{"--verbs", "--json"}); code != 0 {
+		t.Fatalf("runHelp --verbs --json exit=%d stderr=%s", code, errb.String())
+	}
+	var verbsPayload struct {
+		Schema string `json:"schema"`
+		Verbs  []struct {
+			Name string `json:"name"`
+		} `json:"verbs"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &verbsPayload); err != nil {
+		t.Fatalf("unmarshal help --verbs --json: %v\n%s", err, out.String())
+	}
+	if verbsPayload.Schema != "fak.help.verbs/1" || len(verbsPayload.Verbs) == 0 {
+		t.Fatalf("unexpected verbs payload: %+v", verbsPayload.Schema)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runHelp(&out, &errb, []string{"mcp", "--json"}); code != 0 {
+		t.Fatalf("runHelp mcp --json exit=%d stderr=%s", code, errb.String())
+	}
+	var verbPayload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &verbPayload); err != nil {
+		t.Fatalf("unmarshal help mcp --json: %v\n%s", err, out.String())
+	}
+	if verbPayload["verb"] != "mcp" || !strings.Contains(verbPayload["help"].(string), "fak mcp") {
+		t.Fatalf("unexpected help mcp --json payload: %+v", verbPayload)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runHelp(&out, &errb, []string{"definitely-not-a-verb", "--json"}); code != 2 {
+		t.Fatalf("unknown verb --json exit=%d, want 2", code)
+	}
+	var errPayload map[string]any
+	if err := json.Unmarshal(errb.Bytes(), &errPayload); err != nil || errPayload["ok"] != false {
+		t.Fatalf("expected structured error JSON on stderr, got: %s", errb.String())
 	}
 }

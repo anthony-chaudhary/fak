@@ -19,6 +19,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -79,6 +80,7 @@ var overviewGroups = []struct {
 	}},
 	{"models + housekeeping", []overviewEntry{
 		{"model", "resolve / cache an hf:// model ('fak pull' / 'fak ls' aliases)"},
+		{"mcp", "configure, inspect, and verify the fak MCP server for coding agents"},
 		{"self-update", "converge a built-from-source fak binary on origin/main"},
 		{"help", "this overview; 'help <verb>' for depth, 'help --all' for the catalog"},
 	}},
@@ -96,54 +98,250 @@ func usageCompact(w io.Writer) {
 		}
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "repository-development tooling is in the separate 'fak-dev' executable.")
+	fmt.Fprintln(w, "repo-dev tools: 'fak-dev'. Agent MCP setup: 'fak mcp install'. JSON: 'fak help --json'.")
 	fmt.Fprintln(w, "'fak help --verbs' lists the generated verb index; 'fak help --all' is the deep wall;")
 	fmt.Fprintln(w, "'fak help <verb>' explains one in depth; 'fak <verb> -h' lists its flags.")
 }
 
-// cmdHelp implements `fak help [verb | --all | --full]` (also reached via
-// `fak -h` / `fak --help`). Requested help goes to stdout; only the error path
-// (an unknown verb argument) writes stderr and exits 2.
+// cmdHelp implements `fak help [verb | --all | --full | --verbs] [--json]`
+// (also reached via `fak -h` / `fak --help` and `fak --json`).
+// Requested help goes to stdout; only the error path writes stderr and exits 2.
 func cmdHelp(args []string) {
-	if len(args) == 0 {
-		usageCompact(os.Stdout)
-		return
+	if code := runHelp(os.Stdout, os.Stderr, args); code != 0 {
+		os.Exit(code)
 	}
-	switch args[0] {
+}
+
+func runHelp(stdout, stderr io.Writer, args []string) int {
+	asJSON := false
+	pos := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--json" || a == "-json" {
+			asJSON = true
+			continue
+		}
+		pos = append(pos, a)
+	}
+	if len(pos) == 0 {
+		if asJSON {
+			writeHelpOverviewJSON(stdout)
+			return 0
+		}
+		usageCompact(stdout)
+		return 0
+	}
+	switch pos[0] {
+	case "-h", "--help", "help":
+		if asJSON {
+			writeHelpOverviewJSON(stdout)
+			return 0
+		}
+		usageCompact(stdout)
+		return 0
 	case "--verbs", "verbs":
-		usageVerbs(os.Stdout)
+		if asJSON {
+			writeHelpVerbsJSON(stdout)
+			return 0
+		}
+		usageVerbs(stdout)
+		return 0
 	case "--all", "-a", "all":
-		usageAllVerbs(os.Stdout)
+		if asJSON {
+			var buf bytes.Buffer
+			usageAllVerbs(&buf)
+			writeJSONOut(stdout, map[string]any{
+				"schema":         "fak.help.all/1",
+				"version":        appversion.Current(),
+				"workspace_mode": detectWorkspaceMode(),
+				"text":           buf.String(),
+			})
+			return 0
+		}
+		usageAllVerbs(stdout)
+		return 0
 	case "--full", "full":
-		usageWall(os.Stdout)
+		if asJSON {
+			var buf bytes.Buffer
+			usageWall(&buf)
+			writeJSONOut(stdout, map[string]any{
+				"schema":         "fak.help.full/1",
+				"version":        appversion.Current(),
+				"workspace_mode": detectWorkspaceMode(),
+				"text":           buf.String(),
+			})
+			return 0
+		}
+		usageWall(stdout)
+		return 0
 	default:
-		if strings.EqualFold(args[0], "up") {
-			usageUp(os.Stdout)
-			return
-		}
-		if strings.EqualFold(args[0], "serve") {
-			topic := ""
-			if len(args) > 1 {
-				topic = strings.ToLower(args[1])
+		tok := pos[0]
+		if strings.EqualFold(tok, "up") {
+			var buf bytes.Buffer
+			usageUp(&buf)
+			if asJSON {
+				writeHelpVerbJSON(stdout, "up", tok, "up", buf.String())
+			} else {
+				fmt.Fprint(stdout, buf.String())
 			}
+			return 0
+		}
+		if strings.EqualFold(tok, "serve") {
+			topic := ""
+			if len(pos) > 1 {
+				topic = strings.ToLower(pos[1])
+			}
+			var buf bytes.Buffer
 			fs, _ := newServeFlagSet()
-			printServeHelp(os.Stdout, fs, topic)
-			return
+			printServeHelp(&buf, fs, topic)
+			if asJSON {
+				writeHelpVerbJSON(stdout, "serve", tok, "serve", buf.String())
+			} else {
+				fmt.Fprint(stdout, buf.String())
+			}
+			return 0
 		}
-		tok := args[0]
-		if strings.EqualFold(tok, "self") {
-			tok = "self-update"
+		canonical := tok
+		if strings.EqualFold(canonical, "self") {
+			canonical = "self-update"
 		}
-		if printVerbHelp(os.Stdout, tok) {
-			return
+		var buf bytes.Buffer
+		if printVerbHelp(&buf, canonical) {
+			if asJSON {
+				flagTok := strings.ToLower(strings.TrimSpace(canonical))
+				if flagTok == "m" || flagTok == "guard" {
+					flagTok = "manage"
+				}
+				writeHelpVerbJSON(stdout, strings.ToLower(strings.TrimSpace(canonical)), tok, flagTok, buf.String())
+			} else {
+				fmt.Fprint(stdout, buf.String())
+			}
+			return 0
 		}
-		fmt.Fprintf(os.Stderr, "fak help: no verb %q\n", args[0])
-		if s := suggestVerb(args[0]); s != "" {
-			fmt.Fprintf(os.Stderr, "  did you mean 'fak help %s'?\n", s)
+		s := suggestVerb(tok)
+		if asJSON {
+			payload := map[string]any{
+				"ok":    false,
+				"verb":  tok,
+				"error": fmt.Sprintf("fak help: no verb %q", tok),
+			}
+			if s != "" {
+				payload["suggestion"] = s
+				payload["suggested_command"] = "fak help " + s
+			}
+			writeJSONOut(stderr, payload)
+			return 2
 		}
-		fmt.Fprintln(os.Stderr, "  'fak help --all' lists every verb.")
-		os.Exit(2)
+		fmt.Fprintf(stderr, "fak help: no verb %q\n", tok)
+		if s != "" {
+			fmt.Fprintf(stderr, "  did you mean 'fak help %s'?\n", s)
+		}
+		fmt.Fprintln(stderr, "  'fak help --all' lists every verb.")
+		return 2
 	}
+}
+
+func writeHelpOverviewJSON(w io.Writer) {
+	type jsonEntry struct {
+		Name  string `json:"name"`
+		Blurb string `json:"blurb"`
+	}
+	type jsonGroup struct {
+		Title   string      `json:"title"`
+		Entries []jsonEntry `json:"entries"`
+	}
+	groups := make([]jsonGroup, 0, len(overviewGroups))
+	for _, g := range overviewGroups {
+		entries := make([]jsonEntry, 0, len(g.entries))
+		for _, e := range g.entries {
+			entries = append(entries, jsonEntry{Name: e.name, Blurb: e.blurb})
+		}
+		groups = append(groups, jsonGroup{Title: g.title, Entries: entries})
+	}
+	writeJSONOut(w, map[string]any{
+		"schema":         "fak.help/1",
+		"version":        appversion.Current(),
+		"workspace_mode": detectWorkspaceMode(),
+		"quick_start": []string{
+			"fak mcp config --json",
+			"fak mcp install --client auto --json",
+			"fak mcp doctor --json",
+			"fak serve --stdio",
+			"fak preflight --policy <policy.json> --tool <name> --args '{}'",
+			"fak doctor launch-posture --json",
+		},
+		"mcp": map[string]any{
+			"config":    "fak mcp config --client auto --json",
+			"install":   "fak mcp install --client auto --json",
+			"status":    "fak mcp status --json",
+			"doctor":    "fak mcp doctor --json",
+			"uninstall": "fak mcp uninstall --json",
+			"stdio":     "fak serve --stdio",
+			"clients":   []string{"auto", "project", "claude", "cursor", "opencode", "codex"},
+		},
+		"groups": groups,
+		"discovery": map[string]string{
+			"verbs": "fak help --verbs --json",
+			"verb":  "fak help <verb> --json",
+			"flags": "fak <verb> -h",
+			"all":   "fak help --all",
+			"dev":   "fak-dev help",
+		},
+	})
+}
+
+func writeHelpVerbsJSON(w io.Writer) {
+	type jsonVerb struct {
+		Name     string   `json:"name"`
+		Aliases  []string `json:"aliases,omitempty"`
+		Tier     string   `json:"tier,omitempty"`
+		Synopsis string   `json:"synopsis"`
+	}
+	verbs := make([]jsonVerb, 0, len(generatedVerbIndex))
+	for _, v := range generatedVerbIndex {
+		verbs = append(verbs, jsonVerb{
+			Name:     v.Name,
+			Aliases:  v.Aliases,
+			Tier:     v.Tier,
+			Synopsis: v.Synopsis,
+		})
+	}
+	writeJSONOut(w, map[string]any{
+		"schema":         "fak.help.verbs/1",
+		"version":        appversion.Current(),
+		"workspace_mode": detectWorkspaceMode(),
+		"count":          len(verbs),
+		"verbs":          verbs,
+	})
+}
+
+func writeHelpVerbJSON(w io.Writer, canonical, requested, flagTok, body string) {
+	synopsis := ""
+	for _, v := range generatedVerbIndex {
+		if strings.EqualFold(v.Name, canonical) {
+			synopsis = v.Synopsis
+			break
+		}
+	}
+	if synopsis == "" {
+		for _, g := range overviewGroups {
+			for _, e := range g.entries {
+				if strings.EqualFold(e.name, canonical) {
+					synopsis = e.blurb
+					break
+				}
+			}
+		}
+	}
+	writeJSONOut(w, map[string]any{
+		"schema":         "fak.help.verb/1",
+		"version":        appversion.Current(),
+		"workspace_mode": detectWorkspaceMode(),
+		"verb":           canonical,
+		"requested":      requested,
+		"synopsis":       synopsis,
+		"flags_cmd":      "fak " + flagTok + " -h",
+		"help":           strings.TrimSpace(body),
+	})
 }
 
 // usageAllVerbs prints runtime fak's complete usage wall. The development command

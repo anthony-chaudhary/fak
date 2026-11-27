@@ -48,6 +48,13 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 		recordUsage(*verb, *argv, 2, start)
 		os.Exit(2)
 	}
+	if os.Args[1] == "--json" || os.Args[1] == "-json" {
+		code := runHelp(os.Stdout, os.Stderr, []string{"--json"})
+		*verb = "help"
+		*argv = []string{"--json"}
+		recordUsage(*verb, *argv, code, start)
+		os.Exit(code)
+	}
 	if code, handled := runExactDevHandoff(os.Stdin, os.Stdout, os.Stderr, os.Args[1], os.Args[2:]); handled {
 		recordUsage(*verb, *argv, code, start)
 		os.Exit(code)

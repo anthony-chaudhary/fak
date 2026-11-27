@@ -178,13 +178,27 @@ func runCodexMCPInstall(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	policyPath := strings.TrimSpace(*policy)
+	var policyBytes []byte
+	var err error
 	if policyPath == "" {
-		policyPath = filepath.Join(repoRoot(), "examples", "dev-agent-policy.json")
+		if wm := detectWorkspaceMode(); wm.HasDevPolicy {
+			policyPath = filepath.Join(wm.RepoRoot, "examples", "dev-agent-policy.json")
+			if abs, absErr := filepath.Abs(policyPath); absErr == nil {
+				policyPath = abs
+			}
+			policyBytes, err = os.ReadFile(policyPath)
+		} else {
+			// Standalone / external binary execution without examples/dev-agent-policy.json:
+			// materialize a minimal default_open fak-policy/v1 manifest instead of failing.
+			policyPath = "(embedded-default)"
+			policyBytes = []byte("{\n  \"version\": \"fak-policy/v1\",\n  \"posture\": \"default_open\"\n}\n")
+		}
+	} else {
+		if abs, absErr := filepath.Abs(policyPath); absErr == nil {
+			policyPath = abs
+		}
+		policyBytes, err = os.ReadFile(policyPath)
 	}
-	if abs, err := filepath.Abs(policyPath); err == nil {
-		policyPath = abs
-	}
-	policyBytes, err := os.ReadFile(policyPath)
 	if err != nil {
 		return codexMCPFail(stderr, asJSON, "install", "POLICY_UNREADABLE", fmt.Sprintf("policy unreadable: %v", err))
 	}

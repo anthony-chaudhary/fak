@@ -914,6 +914,11 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  'fak score conflation --json' == the old 'fak conflation-scorecard --json';
                  the legacy verbs stay as thin aliases)
   fak version   [modules [--json] [--stamp] [--scores F.json]]  (binary version; per-module version report)
+  fak mcp       <config|install|status|doctor|uninstall> [--client auto|project|claude|cursor|opencode|codex] [--json]
+                 auto-configure, inspect, and verify fak as an MCP server without hand-editing JSON/TOML.
+                 config: emit snippet (or --json); install: safely merge only the fak entry (--dry-run, --force, --portable);
+                 status: inspect configured entry & binary resolution; doctor: live stdio JSON-RPC initialize check;
+                 uninstall: remove only the fak entry cleanly. Outside a fak repo, --policy is omitted so stdio defaults to default_open.
   fak completion [bash|zsh|fish]  (generate shell completion scripts for bash, zsh, or fish)
 
 every tool call crosses one in-process syscall boundary: vDSO -> adjudicate ->
