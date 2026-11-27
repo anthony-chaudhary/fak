@@ -54,7 +54,13 @@ func (*Ink2Device) CombineConv(down, wts Ink2Ref, k int, w, hist, out, resid Ink
 func (*Ink2Device) QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
 	return ErrMetalUnavailable
 }
+func (*Ink2Device) QKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	return ErrMetalUnavailable
+}
 func (*Ink2Device) Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	return ErrMetalUnavailable
+}
+func (*Ink2Device) AttendHalf(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
 	return ErrMetalUnavailable
 }
 func (*Ink2Device) SigmoidMul(x, gate Ink2Ref, n int) error { return ErrMetalUnavailable }

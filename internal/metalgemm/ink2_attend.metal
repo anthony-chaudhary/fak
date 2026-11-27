@@ -31,18 +31,33 @@ static inline float4 ink2_att_load(const device float *p, uint have) {
     return v;
 }
 
+#ifdef INK2_ATT_HALF
+typedef half ink2_kv_t;
+static inline float4 ink2_att_load_kv(const device half *p, uint have) {
+    if (have >= 4) return float4(*(const device packed_half4 *)p);
+    float4 v = float4(0.0f);
+    for (uint i = 0; i < have; ++i) v[i] = float(p[i]);
+    return v;
+}
+#else
+typedef float ink2_kv_t;
+static inline float4 ink2_att_load_kv(const device float *p, uint have) {
+    return ink2_att_load(p, have);
+}
+#endif
+
 #ifdef INK2_ATT_NAMED
 // Key j's score before the SIMD sum: this lane's share of q.k, scaled, plus
 // its share of the relative bias within extent.
-static inline float ink2_att_part(thread const float4 *qreg, const device float *kcache, const device float *rel_bias,
+static inline float ink2_att_part(thread const float4 *qreg, const device ink2_kv_t *kcache, const device float *rel_bias,
                                   const device float *rh, constant Ink2AttendShape &s, uint base, uint n, uint j,
                                   uint kvh, uint hd, uint quads, uint lane) {
     uint row = base + j;
     row -= row >= s.cap ? s.cap : 0u;
-    const device float *kr = kcache + row * s.kv_dim + kvh * hd;
+    const device ink2_kv_t *kr = kcache + row * s.kv_dim + kvh * hd;
     float d = 0.0f;
     for (uint t = 0, c = lane; c < quads; ++t, c += s.width)
-        d += dot(qreg[t], ink2_att_load(kr + 4u * c, hd - 4u * c));
+        d += dot(qreg[t], ink2_att_load_kv(kr + 4u * c, hd - 4u * c));
     d *= s.scale;
     const uint dist = n - 1u - j;
     if (dist < s.extent) {
@@ -60,8 +75,8 @@ kernel void ink2_attend(device const float *q [[buffer(0)]],
                         device const float *r [[buffer(1)]],
                         device const float *sinks [[buffer(2)]],
                         device const float *rel_bias [[buffer(3)]],
-                        device const float *kcache [[buffer(4)]],
-                        device const float *vcache [[buffer(5)]],
+                        device const ink2_kv_t *kcache [[buffer(4)]],
+                        device const ink2_kv_t *vcache [[buffer(5)]],
                         device float *scores [[buffer(6)]],
                         device float *out [[buffer(7)]],
                         device const int *meta [[buffer(8)]],
@@ -126,10 +141,10 @@ kernel void ink2_attend(device const float *q [[buffer(0)]],
     for (uint j = simd; j < n; j += simds) {
         uint row = base + j;
         row -= row >= s.cap ? s.cap : 0u;
-        const device float *kr = kcache + row * s.kv_dim + kvh * hd;
+        const device ink2_kv_t *kr = kcache + row * s.kv_dim + kvh * hd;
         float d = 0.0f;
         for (uint t = 0, c = lane; c < quads; ++t, c += s.width)
-            d += dot(qreg[t], ink2_att_load(kr + 4u * c, hd - 4u * c));
+            d += dot(qreg[t], ink2_att_load_kv(kr + 4u * c, hd - 4u * c));
         d *= s.scale;
         const uint dist = n - 1u - j;
         if (dist < s.extent) {
@@ -165,7 +180,7 @@ kernel void ink2_attend(device const float *q [[buffer(0)]],
     const uint c = tid % quads;
     const uint have = hd - 4u * c;
     if (tid < groups * quads) {
-        const device float *vb = vcache + kvh * hd + 4u * c;
+        const device ink2_kv_t *vb = vcache + kvh * hd + 4u * c;
         float4 acc = float4(0.0f);
 #ifdef INK2_ATT_NAMED
         uint j = tid / quads;
@@ -176,8 +191,8 @@ kernel void ink2_attend(device const float *q [[buffer(0)]],
             r2 -= r2 >= s.cap ? s.cap : 0u;
             r3 -= r3 >= s.cap ? s.cap : 0u;
             const float w0 = sc[j], w1 = sc[j + groups], w2 = sc[j + 2u * groups], w3 = sc[j + 3u * groups];
-            const float4 v0 = ink2_att_load(vb + r0 * s.kv_dim, have), v1 = ink2_att_load(vb + r1 * s.kv_dim, have);
-            const float4 v2 = ink2_att_load(vb + r2 * s.kv_dim, have), v3 = ink2_att_load(vb + r3 * s.kv_dim, have);
+            const float4 v0 = ink2_att_load_kv(vb + r0 * s.kv_dim, have), v1 = ink2_att_load_kv(vb + r1 * s.kv_dim, have);
+            const float4 v2 = ink2_att_load_kv(vb + r2 * s.kv_dim, have), v3 = ink2_att_load_kv(vb + r3 * s.kv_dim, have);
             acc += w0 * v0;
             acc += w1 * v1;
             acc += w2 * v2;
@@ -186,13 +201,13 @@ kernel void ink2_attend(device const float *q [[buffer(0)]],
         for (; j < n; j += groups) {
             uint row = base + j;
             row -= row >= s.cap ? s.cap : 0u;
-            acc += sc[j] * ink2_att_load(vb + row * s.kv_dim, have);
+            acc += sc[j] * ink2_att_load_kv(vb + row * s.kv_dim, have);
         }
 #else
         for (uint j = tid / quads; j < n; j += groups) {
             uint row = base + j;
             row -= row >= s.cap ? s.cap : 0u;
-            acc += sc[j] * ink2_att_load(vb + row * s.kv_dim, have);
+            acc += sc[j] * ink2_att_load_kv(vb + row * s.kv_dim, have);
         }
 #endif
         gacc[tid] = acc;

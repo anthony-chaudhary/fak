@@ -22,7 +22,14 @@ func (*Ink2Device) PConv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn int, 
 func (*Ink2Device) PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
 	return ErrMetalUnavailable
 }
+func (*Ink2Device) PQKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
+	return ErrMetalUnavailable
+}
 func (*Ink2Device) PAttend(q, r, sinks, relBias, kcache, vcache, scores Ink2Ref, scoreFloats int, out Ink2Ref,
+	p Ink2AttnParams, extent, window, cap, pos0, T int) error {
+	return ErrMetalUnavailable
+}
+func (*Ink2Device) PAttendHalf(q, r, sinks, relBias, kcache, vcache, scores Ink2Ref, scoreFloats int, out Ink2Ref,
 	p Ink2AttnParams, extent, window, cap, pos0, T int) error {
 	return ErrMetalUnavailable
 }

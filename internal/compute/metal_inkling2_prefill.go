@@ -12,7 +12,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
-var _ Inkling2PrefillDevice = (*metalBackend)(nil)
+var (
+	_ Inkling2PrefillDevice = (*metalBackend)(nil)
+	_ Inkling2PrefillHalfKV = (*metalBackend)(nil)
+)
 
 // The tiled GEMM and attention kernels sum in another order than the decode
 // ops, so they take only chunks wider than any speculative verify chunk: a
@@ -269,12 +272,27 @@ func (c *metalBackend) Ink2PConv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, 
 	}))
 }
 
+func (c *metalBackend) Ink2PHalfKVReady() error { return nil }
+
 func (c *metalBackend) Ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
+	return c.ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache, p, cap, pos0, T, false)
+}
+
+func (c *metalBackend) Ink2PQKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
+	return c.ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache, p, cap, pos0, T, true)
+}
+
+func (c *metalBackend) ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int, kvHalf bool) error {
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, o, err := ink2MetalBind(q, r, k, v, qclip, rclip, kcache, vcache)
 	if err != nil {
 		return ink2MetalErr("prefill qkv post", err)
+	}
+	if kvHalf {
+		return ink2MetalErr("prefill qkv post f16", ink2PProfiled(d, "qkv post f16", func() error {
+			return d.PQKVPostHalf(o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], metalgemm.Ink2AttnParams(p), cap, pos0, T)
+		}))
 	}
 	return ink2MetalErr("prefill qkv post", ink2PProfiled(d, "qkv post", func() error {
 		return d.PQKVPost(o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], metalgemm.Ink2AttnParams(p), cap, pos0, T)
@@ -282,6 +300,14 @@ func (c *metalBackend) Ink2PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink
 }
 
 func (c *metalBackend) Ink2PAttend(q, r, sinks, relBias, kcache, vcache, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error {
+	return c.ink2PAttend(q, r, sinks, relBias, kcache, vcache, out, p, extent, window, cap, pos0, T, false)
+}
+
+func (c *metalBackend) Ink2PAttendHalf(q, r, sinks, relBias, kcache, vcache, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error {
+	return c.ink2PAttend(q, r, sinks, relBias, kcache, vcache, out, p, extent, window, cap, pos0, T, true)
+}
+
+func (c *metalBackend) ink2PAttend(q, r, sinks, relBias, kcache, vcache, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int, kvHalf bool) error {
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, o, err := ink2MetalBind(q, r, sinks, relBias, kcache, vcache, out)
@@ -291,8 +317,12 @@ func (c *metalBackend) Ink2PAttend(q, r, sinks, relBias, kcache, vcache, out Ink
 	if window < 0 || cap < 1 || pos0 < 0 {
 		return fmt.Errorf("metal inkling2 prefill attend: window %d, cap %d, position %d", window, cap, pos0)
 	}
-	return ink2MetalErr("prefill attend", ink2PProfiled(d, fmt.Sprintf("attend/w%d", window), func() error {
-		if ink2MetalGemmOn && T >= ink2MetalGemmMinRows {
+	label := fmt.Sprintf("attend/w%d", window)
+	if kvHalf {
+		label += "/f16"
+	}
+	return ink2MetalErr("prefill attend", ink2PProfiled(d, label, func() error {
+		if !kvHalf && ink2MetalGemmOn && T >= ink2MetalGemmMinRows {
 			ok, err := d.PFlashAttend(o[0], o[1], o[2], o[3], o[4], o[5], o[6], metalgemm.Ink2AttnParams(p), extent, window, cap, pos0, T)
 			if err != nil || ok {
 				return err
@@ -301,6 +331,9 @@ func (c *metalBackend) Ink2PAttend(q, r, sinks, relBias, kcache, vcache, out Ink
 		scores, floats, err := ink2MetalScores(d, p.Heads, metalgemm.PAttendSpan(window, cap, pos0, T), T)
 		if err != nil {
 			return err
+		}
+		if kvHalf {
+			return d.PAttendHalf(o[0], o[1], o[2], o[3], o[4], o[5], scores, floats, o[6], metalgemm.Ink2AttnParams(p), extent, window, cap, pos0, T)
 		}
 		return d.PAttend(o[0], o[1], o[2], o[3], o[4], o[5], scores, floats, o[6], metalgemm.Ink2AttnParams(p), extent, window, cap, pos0, T)
 	}))

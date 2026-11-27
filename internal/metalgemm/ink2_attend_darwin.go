@@ -31,6 +31,15 @@ type ink2AttendShape struct {
 // int32, so the keys are the last min(pos+1, window, cap) positions (window 0
 // is unbounded). scores is scratch: its first heads*cap floats are used.
 func (d *Ink2Device) Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	return d.attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta, p, extent, window, cap, false)
+}
+
+// AttendHalf is Attend over f16 kcache and vcache (two half elements per float).
+func (d *Ink2Device) AttendHalf(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	return d.attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta, p, extent, window, cap, true)
+}
+
+func (d *Ink2Device) attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int, kvHalf bool) error {
 	if p.Heads < 1 || p.KVHeads < 1 || p.Heads%p.KVHeads != 0 || p.HeadDim < 1 || p.HeadDim > math.MaxInt32/p.Heads || p.RelLen < 0 ||
 		extent < 0 || window < 0 || cap < 1 || p.RelLen > math.MaxInt32 || extent > math.MaxInt32 || window > math.MaxInt32 {
 		return fmt.Errorf("%w: attend of %d heads over %d kv heads of %d dims, %d rel states, extent %d, window %d, cap %d",
@@ -54,6 +63,9 @@ func (d *Ink2Device) Attend(q, r, sinks, relBias, kcache, vcache, scores, out, m
 	if ink2TinyFuseLegacy {
 		source = ink2AttendSource
 	}
+	if kvHalf {
+		source = "#define INK2_ATT_HALF 1\n" + source
+	}
 	pipe, err := d.PipelinePrecise(source, "ink2_attend")
 	if err != nil {
 		return err
@@ -70,6 +82,10 @@ func (d *Ink2Device) Attend(q, r, sinks, relBias, kcache, vcache, scores, out, m
 	if extent > 0 {
 		rSpan, relSpan = r.Span(p.Heads*p.RelLen), relBias.Span(extent*p.RelLen)
 	}
+	kvFloats := cap * kvDim
+	if kvHalf {
+		kvFloats = (kvFloats + 1) / 2
+	}
 	shape := ink2AttendShape{
 		heads: uint32(p.Heads), perKV: uint32(p.Heads / p.KVHeads), headDim: uint32(p.HeadDim), relLen: uint32(p.RelLen),
 		kvDim: uint32(kvDim), extent: uint32(extent), window: uint32(window), cap: uint32(cap),
@@ -77,6 +93,6 @@ func (d *Ink2Device) Attend(q, r, sinks, relBias, kcache, vcache, scores, out, m
 	}
 	return d.Dispatch(pipe, [3]int{p.Heads, 1, 1}, [3]int{threads, 1, 1},
 		q.Span(p.Heads*p.HeadDim), rSpan, sinks.Span(p.Heads), relSpan,
-		kcache.Span(cap*kvDim), vcache.Span(cap*kvDim), scores.Span(p.Heads*cap), out.Span(p.Heads*p.HeadDim),
+		kcache.Span(kvFloats), vcache.Span(kvFloats), scores.Span(p.Heads*cap), out.Span(p.Heads*p.HeadDim),
 		meta.Span(1), Ink2Const(shape))
 }

@@ -188,15 +188,21 @@ func TestInkling2PrefillChunkUnsetMatchesTrunk(t *testing.T) {
 		}
 		prefillT := min(512, tc.C*tc.ctx)
 		caps := inkling2BatchCaps(hp, local, tc.ctx, prefillT)
-		keep, scr := bt.s.prefillArenas(max(tc.C, prefillT))
-		scr += tc.C*bt.s.output.rows + 64
-		need := inkling2BatchBytes(hp, caps, tc.C, keep, scr, false)
-		if b.prefillT != prefillT || !reflect.DeepEqual(b.caps, caps) || b.need != need {
-			t.Fatalf("cohort %+v: chunk %d caps %v need %d, trunk has chunk %d caps %v need %d",
-				tc, b.prefillT, b.caps, b.need, prefillT, caps, need)
+		decKeep, decScr := bt.s.prefillArenas(tc.C)
+		decScr += tc.C*bt.s.output.rows + 64
+		decodeNeed := inkling2BatchBytes(hp, caps, tc.C, decKeep, decScr, false)
+		need := decodeNeed
+		if prefillT > tc.C {
+			pKeep, pScr := bt.s.prefillArenas(prefillT)
+			pScr += tc.C*bt.s.output.rows + 64
+			need += 4 * (int64(pKeep) + int64(pScr))
 		}
-		if got := 4 * int64(d.live-bound); got != ink2CohortStateBytes(need, tc.C, prefillT, hp.Hidden) {
-			t.Fatalf("cohort %+v: state allocated %d bytes, admitted %d", tc, got, need)
+		if b.prefillT != prefillT || !reflect.DeepEqual(b.caps, caps) || b.need != need || b.decodeNeed != decodeNeed {
+			t.Fatalf("cohort %+v: chunk %d caps %v need %d decodeNeed %d, trunk has chunk %d caps %v need %d decodeNeed %d",
+				tc, b.prefillT, b.caps, b.need, b.decodeNeed, prefillT, caps, need, decodeNeed)
+		}
+		if got := 4 * int64(d.live-bound); got != ink2CohortStateBytes(decodeNeed, tc.C, prefillT, hp.Hidden) {
+			t.Fatalf("cohort %+v: state allocated %d bytes, decodeNeed %d", tc, got, decodeNeed)
 		}
 	}
 	// a cohort the cached state covers without much surplus reuses it
@@ -209,9 +215,16 @@ func TestInkling2PrefillChunkUnsetMatchesTrunk(t *testing.T) {
 		// the chunk and the admitted bytes stay those of the state's own shape
 		prefillT := min(512, held.capC*held.capCtx)
 		caps := inkling2BatchCaps(hp, local, tc.ctx, prefillT)
-		keep, scr := bt.s.prefillArenas(max(held.capC, prefillT))
-		scr += held.capC*bt.s.output.rows + 64
-		need := inkling2BatchBytes(hp, inkling2BatchCaps(hp, local, held.capCtx, prefillT), held.capC, keep, scr, false)
+		decKeep, decScr := bt.s.prefillArenas(held.capC)
+		decScr += held.capC*bt.s.output.rows + 64
+		heldCaps := inkling2BatchCaps(hp, local, held.capCtx, prefillT)
+		decodeNeed := inkling2BatchBytes(hp, heldCaps, held.capC, decKeep, decScr, false)
+		need := decodeNeed
+		if prefillT > held.capC {
+			pKeep, pScr := bt.s.prefillArenas(prefillT)
+			pScr += held.capC*bt.s.output.rows + 64
+			need += 4 * (int64(pKeep) + int64(pScr))
+		}
 		if b != held || d.allocs != allocs || b.prefillT != prefillT || !reflect.DeepEqual(b.caps, caps) || b.need != need {
 			t.Fatalf("reused cohort %+v: chunk %d caps %v need %d allocs %d -> %d, trunk has chunk %d caps %v need %d",
 				tc, b.prefillT, b.caps, b.need, allocs, d.allocs, prefillT, caps, need)
@@ -375,8 +388,8 @@ func TestInkling2PrefillChunkCohortRingsFollowTheCohort(t *testing.T) {
 		if long.prefillT != 1024 || !reflect.DeepEqual(long.caps, wantCaps) || long.caps[0] != fakeInk2RingWindow+1024 {
 			t.Fatalf("chunk=%s long cohort: chunk %d caps %v, want 1024 and %v", chunk, long.prefillT, long.caps, wantCaps)
 		}
-		if held := 4 * int64(d.live-bindingFloats(d, bt)); long.need <= baseNeed || held != ink2CohortStateBytes(long.need, C, 1024, hp.Hidden) {
-			t.Fatalf("chunk=%s long cohort admitted %d bytes for %d allocated (base %d)", chunk, long.need, held, baseNeed)
+		if held := 4 * int64(d.live-bindingFloats(d, bt)); long.need <= baseNeed || held != ink2CohortStateBytes(long.decodeNeed, C, 1024, hp.Hidden) {
+			t.Fatalf("chunk=%s long cohort admitted %d bytes (decode %d) for %d allocated (base %d)", chunk, long.need, long.decodeNeed, held, baseNeed)
 		}
 		allocs := d.allocs
 		again, err := bt.acquireFor(C, ctx, 40)
@@ -468,16 +481,21 @@ func TestInkling2PrefillChunkCohortRefusalShrinksToBase(t *testing.T) {
 		d := newFakeInk2Budget(fits)
 		if admit == "0" {
 			// with admission off the refusal comes from the device, mid-allocation
-			d.capBytes = 4*int64(binding) + (baseNeed+wideNeed)/2
+			btProbe := NewInkling2LoopCohorts(m, newFakeInk2Budget(1<<30))
+			_ = btProbe.bind()
+			shBase, _ := btProbe.s.batchShapeChunkLimit(C, ctx, 512, 0)
+			shWide, _ := btProbe.s.batchShapeChunkLimit(C, ctx, 1024, 0)
+			btProbe.Close()
+			d.capBytes = 4*int64(binding) + (shBase.decodeNeed+shWide.decodeNeed)/2
 		}
 		bt := NewInkling2LoopCohorts(m, d)
 		b, err := bt.acquireFor(C, ctx, 1300)
 		if err != nil {
 			t.Fatalf("admit=%s: a cohort the base chunk holds was refused: %v", admit, err)
 		}
-		if b.capT != 512 || b.prefillT != 512 || b.need != baseNeed || 4*int64(d.live-binding) != ink2CohortStateBytes(baseNeed, C, 512, hidden) {
-			t.Fatalf("admit=%s: fallback state chunk %d need %d holds %d bytes, want the base %d",
-				admit, b.prefillT, b.need, 4*(d.live-binding), baseNeed)
+		if b.capT != 512 || b.prefillT != 512 || b.need != baseNeed || 4*int64(d.live-binding) != ink2CohortStateBytes(b.decodeNeed, C, 512, hidden) {
+			t.Fatalf("admit=%s: fallback state chunk %d need %d decodeNeed %d holds %d bytes, want base need %d",
+				admit, b.prefillT, b.need, b.decodeNeed, 4*(d.live-binding), baseNeed)
 		}
 		if (admit == "0") != (d.refusals > 0) {
 			t.Fatalf("admit=%s: %d device refusals", admit, d.refusals)
@@ -1029,5 +1047,32 @@ func TestInkling2PrefillChunkScalarAdmissionHalvesTowardBase(t *testing.T) {
 	}
 	if ink2LogLines(logged) != 0 {
 		t.Fatalf("an admitted narrower chunk logged %q", logged)
+	}
+}
+
+func TestInkling2MetalPrefillChunkForBudget(t *testing.T) {
+	unset := func(string) (string, bool) { return "", false }
+	set := func(v string) func(string) (string, bool) { return func(string) (string, bool) { return v, true } }
+
+	if got := Inkling2MetalPrefillChunkForBudget(unset, func(c int) bool { return true }); got != 2048 {
+		t.Fatalf("ample budget: got %d, want 2048", got)
+	}
+	if got := Inkling2MetalPrefillChunkForBudget(unset, func(c int) bool { return c <= 1024 }); got != 1024 {
+		t.Fatalf("1024-only budget: got %d, want 1024", got)
+	}
+	if got := Inkling2MetalPrefillChunkForBudget(unset, func(c int) bool { return c <= 512 }); got != 512 {
+		t.Fatalf("512-only budget: got %d, want 512", got)
+	}
+	if got := Inkling2MetalPrefillChunkForBudget(unset, func(c int) bool { return false }); got != 512 {
+		t.Fatalf("over-budget floor: got %d, want 512", got)
+	}
+	if got := Inkling2MetalPrefillChunkForBudget(set("2048"), func(c int) bool { return false }); got != 2048 {
+		t.Fatalf("explicit 2048: got %d, want 2048", got)
+	}
+	if got := Inkling2MetalPrefillChunkForBudget(set("512"), func(c int) bool { return true }); got != 512 {
+		t.Fatalf("explicit 512: got %d, want 512", got)
+	}
+	if got := Inkling2MetalPrefillChunkForBudget(set("auto"), func(c int) bool { return false }); got != 1024 {
+		t.Fatalf("explicit auto: got %d, want 1024", got)
 	}
 }

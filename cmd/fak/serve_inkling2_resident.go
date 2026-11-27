@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/localadmission"
 )
@@ -82,11 +83,11 @@ func inkling2ServeResidentPlan(weights localadmission.MemoryPlan, perSlot int64,
 
 // inkling2ServeResidentSizing is what serve admits for the resident path: the
 // served context, the prefix slots the engine may hold, the cohort rows it may
-// run (zero without cohorts), and their memory plan.
+// run (zero without cohorts), the admitted prefill chunk, and their memory plan.
 type inkling2ServeResidentSizing struct {
-	Ctx, Slots, Rows int
-	PerSlot, Cohort  int64
-	Plan             localadmission.MemoryPlan
+	Ctx, Slots, Rows, Chunk int
+	PerSlot, Cohort         int64
+	Plan                    localadmission.MemoryPlan
 }
 
 // serveInkling2ResidentCtx is the driver's FAK_INKLING2_CTX, refused where the
@@ -131,8 +132,21 @@ func inkling2ServeResidentCohortBytes(binding, state int64, lookup func(string) 
 	return total
 }
 
+func serveInkling2ResidentBudgetBytes() int64 {
+	if lim := compute.DarwinWorkingSetLimits(); lim.RecommendedMaxWorkingSet > 0 {
+		return int64(lim.RecommendedMaxWorkingSet)
+	}
+	if mem, err := serveReadMemory(); err == nil && mem.TotalBytes > 0 {
+		return int64(float64(mem.TotalBytes) * inkling2ResidentDeviceShare)
+	}
+	return 0
+}
+
 func serveInkling2ResidentSizingOf(path string, lookup func(string) (string, bool)) (inkling2ServeResidentSizing, error) {
 	var sz inkling2ServeResidentSizing
+	if lookup == nil {
+		lookup = func(string) (string, bool) { return "", false }
+	}
 	ctx, err := serveInkling2ResidentCtx(lookup)
 	if err != nil {
 		return sz, err
@@ -141,6 +155,14 @@ func serveInkling2ResidentSizingOf(path string, lookup func(string) (string, boo
 	if err != nil {
 		return sz, err
 	}
+	kvDType, err := ggufload.Inkling2KVDTypeFrom(lookup)
+	if err != nil {
+		return sz, err
+	}
+	// Metal supports Inkling2HalfKVDevice + Inkling2PrefillHalfKV, so unset
+	// FAK_INKLING2_KV defaults to f16; only explicit f32/fp32 keeps f32.
+	kvVal, kvSet := lookup("FAK_INKLING2_KV")
+	kvHalf := kvDType != ggufload.Inkling2KVF32 || !kvSet || strings.TrimSpace(kvVal) == ""
 	arch, err := serveInkling2Arch(path)
 	if err != nil {
 		return sz, err
@@ -153,32 +175,43 @@ func serveInkling2ResidentSizingOf(path string, lookup func(string) (string, boo
 	if err != nil {
 		return sz, err
 	}
-	one, err := inkling2RunResidentMemory(path, f, arch, ctx)
-	if err != nil {
-		return sz, err
-	}
 	shape, err := inkling2ResidentShapeOf(f, arch)
 	if err != nil {
 		return sz, err
 	}
-	perSlot := one.SteadyBytes - weights.SteadyBytes
-	var cohort int64
-	if rows > 0 {
-		state, err := ggufload.Inkling2MetalCohortStateBytes(f, rows, ctx)
+	planFor := func(chunk int) (inkling2ServeResidentSizing, error) {
+		one, err := inkling2RunResidentMemoryFor(path, f, arch, ctx, kvHalf, chunk)
 		if err != nil {
-			return sz, err
+			return inkling2ServeResidentSizing{}, err
 		}
-		cohort = inkling2ServeResidentCohortBytes(perSlot-inkling2ResidentSessionBytes(shape, ctx), state, lookup)
+		perSlot := one.SteadyBytes - weights.SteadyBytes
+		var cohort int64
+		if rows > 0 {
+			state, err := ggufload.Inkling2MetalCohortStateBytesFor(f, rows, ctx, chunk, kvHalf, lookup)
+			if err != nil {
+				return inkling2ServeResidentSizing{}, err
+			}
+			cohort = inkling2ServeResidentCohortBytes(perSlot-inkling2ResidentSessionBytesFor(shape, ctx, kvHalf, chunk), state, lookup)
+		}
+		if inkling2PrefixReuseFrom(lookup) {
+			perSlot += inkling2ResidentCheckpointBytes(shape)
+		}
+		slots := inkling2ServeResidentSlots(lookup, perSlot)
+		plan, err := inkling2ServeResidentPlan(weights, perSlot, slots, cohort)
+		if err != nil {
+			return inkling2ServeResidentSizing{}, err
+		}
+		return inkling2ServeResidentSizing{Ctx: ctx, Slots: slots, Rows: rows, Chunk: chunk, PerSlot: perSlot, Cohort: cohort, Plan: plan}, nil
 	}
-	if inkling2PrefixReuseFrom(lookup) {
-		perSlot += inkling2ResidentCheckpointBytes(shape)
-	}
-	slots := inkling2ServeResidentSlots(lookup, perSlot)
-	plan, err := inkling2ServeResidentPlan(weights, perSlot, slots, cohort)
-	if err != nil {
-		return sz, err
-	}
-	return inkling2ServeResidentSizing{Ctx: ctx, Slots: slots, Rows: rows, PerSlot: perSlot, Cohort: cohort, Plan: plan}, nil
+	budget := serveInkling2ResidentBudgetBytes()
+	chunk := ggufload.Inkling2MetalPrefillChunkForBudget(lookup, func(c int) bool {
+		if budget <= 0 {
+			return true
+		}
+		cand, err := planFor(c)
+		return err == nil && cand.Plan.SteadyBytes <= budget
+	})
+	return planFor(chunk)
 }
 
 // inkling2ServeResidentPlacement names the resident path in the startup message.
@@ -196,13 +229,17 @@ func inkling2ServeResidentPlacement(arch string, layers, hidden, passes int, sz 
 // than its price when it opens and the cap meter alone could admit more, and the
 // cohort width, since the cohort engine would otherwise run its widest.
 func serveInkling2ResidentLookup(lookup func(string) (string, bool), sz inkling2ServeResidentSizing) func(string) (string, bool) {
-	slots, rows := strconv.Itoa(sz.Slots), strconv.Itoa(sz.Rows)
+	slots, rows, chunk := strconv.Itoa(sz.Slots), strconv.Itoa(sz.Rows), strconv.Itoa(sz.Chunk)
 	return func(key string) (string, bool) {
 		switch {
 		case key == "FAK_INKLING2_PREFIX_SLOTS":
 			return slots, true
 		case key == inkling2ServeBatchRowsEnv && sz.Rows > 0:
 			return rows, true
+		case key == "FAK_INKLING2_PREFILL_CHUNK" && sz.Chunk > 0:
+			if v, ok := lookup(key); !ok || strings.TrimSpace(v) == "" {
+				return chunk, true
+			}
 		}
 		return lookup(key)
 	}

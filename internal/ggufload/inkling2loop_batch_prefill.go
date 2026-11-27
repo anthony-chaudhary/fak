@@ -286,6 +286,9 @@ func (b *inkling2Batch) prefill(prompts [][]int, keep func(row int) bool, first 
 		}
 	}
 	b.endPrefill(cursor)
+	if !b.keepPrefill {
+		b.releasePrefillArenas()
+	}
 	return nil
 }
 
@@ -293,6 +296,9 @@ func (b *inkling2Batch) prefill(prompts [][]int, keep func(row int) bool, first 
 // the segment's offset in the chunk, and the forward writes each segment into its own
 // row. first is called with the greedy token of every segment that ends its row.
 func (b *inkling2Batch) prefillChunk(segs []ink2PrefillSeg, toks [][]int, first func(row, token int)) error {
+	if err := b.ensurePrefillArenas(); err != nil {
+		return err
+	}
 	s := b.s
 	h := s.hp.Hidden
 	n := 0
@@ -306,8 +312,12 @@ func (b *inkling2Batch) prefillChunk(segs []ink2PrefillSeg, toks [][]int, first 
 		}
 	}
 	s.fail(s.dev.Ink2Write(b.in, rows))
+	keep, scr, keepFloats, scrFloats := b.p.keep, b.p.scr, b.p.keepFloats, b.p.scrFloats
+	if b.prefillT > b.capC {
+		keep, scr, keepFloats, scrFloats = b.prefillKeep, b.prefillScr, b.prefillKeepFloats, b.prefillScrFloats
+	}
 	p := &ink2Prefill{s: s, pd: b.p.pd, grouped: inkling2GroupedExperts(), in: b.in,
-		keep: b.p.keep, scr: b.p.scr, keepFloats: b.p.keepFloats, scrFloats: b.p.scrFloats}
+		keep: keep, scr: scr, keepFloats: keepFloats, scrFloats: scrFloats}
 	p.T = n
 	p.cohort = &ink2PrefillRows{b: b, segs: segs}
 	p.forward(false)

@@ -228,6 +228,13 @@ func inkling2ResidentShapeOf(f *ggufload.File, arch string) (inkling2ResidentSha
 // convolution history per layer visit, the attention score row, the token
 // input, the per-token arena and the argmax index.
 func inkling2ResidentSessionBytes(s inkling2ResidentShape, ctx int) int64 {
+	return inkling2ResidentSessionBytesFor(s, ctx, false, 0)
+}
+
+// inkling2ResidentSessionBytesFor is inkling2ResidentSessionBytes sized for
+// f16 global-slot KV caches (when kvHalf is true) and local-ring widening for
+// prefill chunks of chunk tokens.
+func inkling2ResidentSessionBytesFor(s inkling2ResidentShape, ctx int, kvHalf bool, chunk int) int64 {
 	var total int64
 	alloc := func(floats int) {
 		b := 4 * int64(floats)
@@ -244,12 +251,22 @@ func inkling2ResidentSessionBytes(s inkling2ResidentShape, ctx int) int64 {
 			layer = s.CoreStart + (slot-layers)%core
 		}
 		cap := ctx
+		kvFloats := 0
 		if s.Local[layer] {
 			cap = s.SlidingWindow
+			if chunk > 0 {
+				cap += chunk
+			}
+			kvFloats = cap * kvDim
+		} else {
+			kvFloats = cap * kvDim
+			if kvHalf {
+				kvFloats = (kvFloats + 1) / 2
+			}
 		}
 		maxCap = max(maxCap, cap)
-		alloc(cap * kvDim)
-		alloc(cap * kvDim)
+		alloc(kvFloats)
+		alloc(kvFloats)
 		alloc(channels * (s.ConvKernel - 1))
 	}
 	alloc(2 * s.Heads * maxCap)
@@ -263,6 +280,12 @@ func inkling2ResidentSessionBytes(s inkling2ResidentShape, ctx int) int64 {
 // holds on the device: the session buffers and an F32 copy of each loop
 // controller projection, which that path uploads instead of reading in place.
 func inkling2RunResidentMemory(path string, f *ggufload.File, arch string, ctx int) (localadmission.MemoryPlan, error) {
+	return inkling2RunResidentMemoryFor(path, f, arch, ctx, false, 0)
+}
+
+// inkling2RunResidentMemoryFor is inkling2RunResidentMemory sized for f16
+// global-slot KV caches (when kvHalf is true) and prefill chunk arenas.
+func inkling2RunResidentMemoryFor(path string, f *ggufload.File, arch string, ctx int, kvHalf bool, chunk int) (localadmission.MemoryPlan, error) {
 	plan, err := inkling2RunMetalMemory(path, f)
 	if err != nil {
 		return plan, err
@@ -271,7 +294,14 @@ func inkling2RunResidentMemory(path string, f *ggufload.File, arch string, ctx i
 	if err != nil {
 		return localadmission.MemoryPlan{}, err
 	}
-	extra := inkling2ResidentSessionBytes(shape, ctx)
+	extra := inkling2ResidentSessionBytesFor(shape, ctx, kvHalf, chunk)
+	if chunk > 0 {
+		arenaBytes, err := ggufload.Inkling2PrefillArenaBytes(f, chunk)
+		if err != nil {
+			return localadmission.MemoryPlan{}, err
+		}
+		extra += arenaBytes
+	}
 	for _, t := range f.Tensors {
 		if !inkling2RunControllerWeight(t.Name) {
 			continue

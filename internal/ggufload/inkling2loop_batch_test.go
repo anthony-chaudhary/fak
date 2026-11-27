@@ -502,10 +502,188 @@ func TestInkling2BatchChunkStepDownReusesArena(t *testing.T) {
 	if bt.b == nil || bt.b.capT != 256 {
 		t.Fatalf("first cohort capT = %v, want 256", bt.b)
 	}
-	allocsAfterFirst := d.allocs
+	held, liveAfterFirst := bt.b, d.live
 	run()
 	run()
-	if d.allocs != allocsAfterFirst {
-		t.Fatalf("stepped-down 256-chunk arena reallocated on reuse: allocs %d -> %d", allocsAfterFirst, d.allocs)
+	if bt.b != held || bt.b.capT != 256 || d.live != liveAfterFirst {
+		t.Fatalf("stepped-down 256-chunk decode arena reallocated on reuse: reused=%v capT=%d live %d -> %d",
+			bt.b == held, bt.b.capT, liveAfterFirst, d.live)
+	}
+}
+
+type fakeInk2GraphCohort struct {
+	*fakeInk2Cohort
+	trims         int
+	graphBegins   int
+	graphEnds     int
+	graphLaunches int
+	graphResets   int
+}
+
+func newFakeInk2GraphCohort() *fakeInk2GraphCohort {
+	return &fakeInk2GraphCohort{fakeInk2Cohort: newFakeInk2Cohort()}
+}
+
+func (g *fakeInk2GraphCohort) TrimLarge(int)           { g.trims++ }
+func (g *fakeInk2GraphCohort) Ink2GraphBegin() error   { g.graphBegins++; return nil }
+func (g *fakeInk2GraphCohort) Ink2GraphEnd() error     { g.graphEnds++; return nil }
+func (g *fakeInk2GraphCohort) Ink2GraphLaunch() error  { g.graphLaunches++; return nil }
+func (g *fakeInk2GraphCohort) Ink2GraphReset()         { g.graphResets++ }
+
+func TestInkling2BatchDecodeArenasSizedAtC(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_INKLING2_BATCH_ADMIT", "1")
+	d := newFakeInk2GraphCohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+
+	b, err := bt.acquireFor(2, 512, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantKeep, wantScr := bt.s.prefillArenas(2)
+	wantScr += 2*bt.s.output.rows + 64
+	if b.p.keepFloats != wantKeep || b.p.scrFloats != wantScr {
+		t.Fatalf("decode arenas = (%d, %d), want T=C (%d, %d)", b.p.keepFloats, b.p.scrFloats, wantKeep, wantScr)
+	}
+	if len(b.prefillOwned) != 0 {
+		t.Fatalf("prefill arenas allocated before prefill: %d", len(b.prefillOwned))
+	}
+	if b.decodeNeed >= b.need {
+		t.Fatalf("expected decodeNeed (%d) < peak need (%d) when prefillT=%d > C=%d", b.decodeNeed, b.need, b.prefillT, b.C)
+	}
+	if got := bt.ArenaBytes(); got != b.decodeNeed {
+		t.Fatalf("ArenaBytes before prefill = %d, want decodeNeed %d", got, b.decodeNeed)
+	}
+
+	// Split credits steady-state bt.b.arenaBytes() (decodeNeed), not peak b.need, while
+	// still enforcing peak <= free - headroom for the next cohort.
+	sh, err := bt.s.batchShapeChunk(2, 512, 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cap device so free + decodeNeed fits sh.need + headroom, but free + decodeNeed - 1 does not.
+	// Since b.need > b.decodeNeed, crediting b.need instead of b.decodeNeed would falsely pass.
+	d.capFloats = d.live - int((b.decodeNeed+3)/4) + int((sh.need+inkling2BatchHeadroom+3)/4) - 1
+	groups, err := bt.Split([]int{300, 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Over-budget at C=2 forces Split into 1-row groups.
+	if len(groups) != 2 {
+		t.Fatalf("Split with steady-state credit = %v, want 2 single-row groups when peak exceeds free", groups)
+	}
+}
+
+func TestInkling2BatchPrefillArenasReleasedAfterPrefill(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		longCap string
+	}{
+		{name: "non-mixed", longCap: "0"},
+		{name: "mixed", longCap: "64"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+			t.Setenv("FAK_INKLING2_BATCH_ADMIT", "1")
+			t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", tc.longCap)
+			d := newFakeInk2GraphCohort()
+			bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+			defer bt.Close()
+
+			reqs := []Inkling2LoopBatchRequest{
+				{Prompt: make([]int, 160), MaxTokens: 4, Emit: func(int) bool { return true }},
+				{Prompt: make([]int, 160), MaxTokens: 4, Emit: func(int) bool { return true }},
+			}
+			peakObserved := false
+			var peakBytes int64
+			d.onWrite = func(dst compute.Ink2Ref) {
+				if bt.b != nil && len(bt.b.prefillOwned) > 0 {
+					peakObserved = true
+					peakBytes = bt.ArenaBytes()
+				}
+			}
+			res, err := bt.Generate(reqs)
+			d.onWrite = nil
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, r := range res {
+				if r.Err != nil || r.Generated != 4 {
+					t.Fatalf("row %d: %+v", i, r)
+				}
+			}
+			if !peakObserved || peakBytes <= bt.b.decodeNeed {
+				t.Fatalf("prefill arenas never observed active during prefill (observed=%v peak=%d decode=%d)",
+					peakObserved, peakBytes, bt.b.decodeNeed)
+			}
+			if len(bt.b.prefillOwned) != 0 {
+				t.Fatalf("prefill arenas still held after decode: %d", len(bt.b.prefillOwned))
+			}
+			if bt.ArenaBytes() != bt.b.decodeNeed {
+				t.Fatalf("ArenaBytes after decode = %d, want decodeNeed %d", bt.ArenaBytes(), bt.b.decodeNeed)
+			}
+			if d.trims == 0 {
+				t.Fatal("expected inkling2TrimIdle to call TrimLarge after releasing prefill arenas")
+			}
+		})
+	}
+}
+
+func TestInkling2BatchKeepPrefillArenasFallback(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_INKLING2_KEEP_PREFILL_ARENAS", "1")
+	d := newFakeInk2GraphCohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+
+	reqs := []Inkling2LoopBatchRequest{
+		{Prompt: make([]int, 160), MaxTokens: 4, Emit: func(int) bool { return true }},
+		{Prompt: make([]int, 160), MaxTokens: 4, Emit: func(int) bool { return true }},
+	}
+	if _, err := bt.Generate(reqs); err != nil {
+		t.Fatal(err)
+	}
+	if len(bt.b.prefillOwned) != 2 {
+		t.Fatalf("FAK_INKLING2_KEEP_PREFILL_ARENAS=1: prefillOwned = %d, want 2", len(bt.b.prefillOwned))
+	}
+	if bt.ArenaBytes() <= bt.b.decodeNeed {
+		t.Fatalf("FAK_INKLING2_KEEP_PREFILL_ARENAS=1: ArenaBytes = %d, want > decodeNeed %d", bt.ArenaBytes(), bt.b.decodeNeed)
+	}
+}
+
+func TestInkling2BatchGraphStabilityAcrossPureDecode(t *testing.T) {
+	t.Setenv("FAK_INKLING2_COHORT_PREFILL", "1")
+	t.Setenv("FAK_INKLING2_GRAPH", "1")
+	t.Setenv("FAK_INKLING2_BATCH_GRAPH", "1")
+	t.Setenv("FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD", "64")
+	d := newFakeInk2GraphCohort()
+	bt := NewInkling2LoopCohorts(fakeInk2CohortModel(), d)
+	defer bt.Close()
+
+	// Prompt 100 tokens, MaxTokens 6 -> 1st token from prefill, then 5 pure-decode steps:
+	// step 0 warms, step 1 captures + launches, steps 2..4 replay via Ink2GraphLaunch.
+	reqs := []Inkling2LoopBatchRequest{
+		{Prompt: make([]int, 100), MaxTokens: 6, Emit: func(int) bool { return true }},
+		{Prompt: make([]int, 100), MaxTokens: 6, Emit: func(int) bool { return true }},
+	}
+	if _, err := bt.Generate(reqs); err != nil {
+		t.Fatal(err)
+	}
+	if !bt.b.graphReady {
+		t.Fatal("expected graphReady=true after multi-step pure decode")
+	}
+	if d.graphBegins != 1 || d.graphEnds != 1 {
+		t.Fatalf("graph captures = (%d begins, %d ends), want (1, 1)", d.graphBegins, d.graphEnds)
+	}
+	if d.graphLaunches < 4 {
+		t.Fatalf("graphLaunches = %d, want >= 4 across pure-decode steps", d.graphLaunches)
+	}
+	if len(bt.b.prefillOwned) != 0 {
+		t.Fatalf("prefill arenas still held after pure decode: %d", len(bt.b.prefillOwned))
+	}
+	// begin() resets once; releasing prefill arenas must not reset the captured graph.
+	if d.graphResets != 1 {
+		t.Fatalf("graphResets = %d, want 1 (only from begin)", d.graphResets)
 	}
 }

@@ -65,6 +65,12 @@ struct Ink2QKVShape {
     float qkClip, relClip, eps, alpha, floorTok, kNorm, vNorm;
 };
 
+#ifdef INK2_QKV_HALF
+typedef half ink2_qkv_kv_t;
+#else
+typedef float ink2_qkv_kv_t;
+#endif
+
 // Shrinks x (scaled per channel first when scaled) to an L2 norm of at most
 // thr, then multiplies by gain. Each lane owns every lanes-th element.
 static inline void ink2_clip(device float *x, device const float *scale, bool scaled, float thr, uint n, uint lane,
@@ -118,6 +124,16 @@ static inline void ink2_clip_regs(thread float *v, uint per, device float *x, de
     }
 }
 
+static inline void ink2_clip_regs_kv(thread float *v, uint per, device ink2_qkv_kv_t *x, float thr, uint lane) {
+    float ss = 0.0f;
+    for (uint t = 0; t < per; t++) ss = fma(v[t], v[t], ss);
+    ss = simd_sum(ss);
+    float f = thr / (sqrt(ss) + 1e-6f);
+    if (f > 1.0f) f = 1.0f;
+    if (f < 0.0f) f = 0.0f;
+    for (uint t = 0; t < per; t++) x[lane + t * INK2_QKV_LANES] = ink2_qkv_kv_t(v[t] * f);
+}
+
 // ink2_conv_chan of four taps for INK2_QKV_PER channels c0 + t * INK2_QKV_LANES.
 static inline void ink2_conv4_regs(thread float *xs, uint c0, device const float *w, device const float *dyn,
                                    bool dynamic, device float *hist, float norm) {
@@ -156,8 +172,8 @@ kernel void ink2_qkv_post(device float *q [[buffer(0)]],
                           device const float *v [[buffer(3)]],
                           device const float *qclip [[buffer(4)]],
                           device const float *rclip [[buffer(5)]],
-                          device float *kcache [[buffer(6)]],
-                          device float *vcache [[buffer(7)]],
+                          device ink2_qkv_kv_t *kcache [[buffer(6)]],
+                          device ink2_qkv_kv_t *vcache [[buffer(7)]],
                           device const int *meta [[buffer(8)]],
                           device const float *kw [[buffer(9)]],
                           device const float *vw [[buffer(10)]],
@@ -206,15 +222,15 @@ kernel void ink2_qkv_post(device float *q [[buffer(0)]],
         else ink2_conv4_regs(xs, first + lane, vw, vdyn, s.vDynamic != 0, vhist, s.vNorm);
     }
     if (isK) {
-        ink2_clip_regs(xs, INK2_QKV_PER, kcache + row + first, kcache, false, s.qkClip, lane, 1.0f, false);
+        ink2_clip_regs_kv(xs, INK2_QKV_PER, kcache + row + first, s.qkClip, lane);
         return;
     }
     float ss = 0.0f;
     for (uint t = 0; t < INK2_QKV_PER; t++) ss = fma(xs[t], xs[t], ss);
     ss = simd_sum(ss);
     const float scale = 1.0f / sqrt(ss / float(INK2_QKV_HD) + s.eps);
-    device float *dst = vcache + row + first;
-    for (uint t = 0; t < INK2_QKV_PER; t++) dst[lane + t * INK2_QKV_LANES] = xs[t] * scale;
+    device ink2_qkv_kv_t *dst = vcache + row + first;
+    for (uint t = 0; t < INK2_QKV_PER; t++) dst[lane + t * INK2_QKV_LANES] = ink2_qkv_kv_t(xs[t] * scale);
 }
 #else
 // Post-projection attention prep of one layer visit: per-head q and r clips
@@ -229,8 +245,8 @@ kernel void ink2_qkv_post(device float *q [[buffer(0)]],
                           device const float *v [[buffer(3)]],
                           device const float *qclip [[buffer(4)]],
                           device const float *rclip [[buffer(5)]],
-                          device float *kcache [[buffer(6)]],
-                          device float *vcache [[buffer(7)]],
+                          device ink2_qkv_kv_t *kcache [[buffer(6)]],
+                          device ink2_qkv_kv_t *vcache [[buffer(7)]],
                           device const int *meta [[buffer(8)]],
                           device const float *kw [[buffer(9)]],
                           device const float *vw [[buffer(10)]],
@@ -253,6 +269,42 @@ kernel void ink2_qkv_post(device float *q [[buffer(0)]],
         return;
     }
     const ulong row = ulong(pos % s.cap) * kvDim;
+#ifdef INK2_QKV_HALF
+    threadgroup float tmp[512];
+    if (b < s.heads + s.kvHeads) {
+        const uint first = (b - s.heads) * s.headDim;
+        device half *dst = kcache + row + first;
+        float ss = 0.0f;
+        for (uint i = lane; i < s.headDim; i += s.lanes) {
+            const uint c = first + i;
+            const float x = s.conv != 0
+                                ? ink2_conv_chan(k[c], c, kw, kdyn, s.kDynamic != 0, khist, s.headDim, s.kn, s.kNorm)
+                                : k[c];
+            tmp[i] = x;
+            ss = fma(x, x, ss);
+        }
+        ss = simd_sum(ss);
+        float f = s.qkClip / (sqrt(ss) + 1e-6f);
+        if (f > 1.0f) f = 1.0f;
+        if (f < 0.0f) f = 0.0f;
+        for (uint i = lane; i < s.headDim; i += s.lanes) dst[i] = half(tmp[i] * f);
+        return;
+    }
+    const uint first = (b - s.heads - s.kvHeads) * s.headDim;
+    device half *dst = vcache + row + first;
+    float ss = 0.0f;
+    for (uint i = lane; i < s.headDim; i += s.lanes) {
+        const uint c = first + i;
+        const float x = s.conv != 0
+                            ? ink2_conv_chan(v[c], c, vw, vdyn, s.vDynamic != 0, vhist, s.headDim, s.kn, s.vNorm)
+                            : v[c];
+        tmp[i] = x;
+        ss = fma(x, x, ss);
+    }
+    ss = simd_sum(ss);
+    const float scale = 1.0f / sqrt(ss / float(s.headDim) + s.eps);
+    for (uint i = lane; i < s.headDim; i += s.lanes) dst[i] = half(tmp[i] * scale);
+#else
     if (b < s.heads + s.kvHeads) {
         const uint first = (b - s.heads) * s.headDim;
         device float *dst = kcache + row + first;
@@ -280,5 +332,6 @@ kernel void ink2_qkv_post(device float *q [[buffer(0)]],
     ss = simd_sum(ss);
     const float scale = 1.0f / sqrt(ss / float(s.headDim) + s.eps);
     for (uint i = lane; i < s.headDim; i += s.lanes) dst[i] *= scale;
+#endif
 }
 #endif

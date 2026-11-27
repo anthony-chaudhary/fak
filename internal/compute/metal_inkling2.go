@@ -9,7 +9,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
-var _ Inkling2Device = (*metalBackend)(nil)
+var (
+	_ Inkling2Device       = (*metalBackend)(nil)
+	_ Inkling2HalfKVDevice = (*metalBackend)(nil)
+)
 
 var metalInk2 struct {
 	once      sync.Once
@@ -468,6 +471,14 @@ func (c *metalBackend) Ink2CombineConv(down, wts Ink2Ref, k int, w, hist, out, r
 }
 
 func (c *metalBackend) Ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	return c.ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta, p, cap, cv, false)
+}
+
+func (c *metalBackend) Ink2QKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	return c.ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta, p, cap, cv, true)
+}
+
+func (c *metalBackend) ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv, kvHalf bool) error {
 	ink2MetalScope("Ink2QKVPost")
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -484,16 +495,30 @@ func (c *metalBackend) Ink2QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, met
 		mcv = &metalgemm.Ink2KVConv{KW: t[0], VW: t[1], KDyn: t[2], VDyn: t[3], KHist: t[4], VHist: t[5],
 			Kn: cv.Kn, KNorm: cv.KNorm, VNorm: cv.VNorm}
 	}
+	if kvHalf {
+		return ink2MetalErr("qkv post f16", d.QKVPostHalf(o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], metalgemm.Ink2AttnParams(p), cap, mcv))
+	}
 	return ink2MetalErr("qkv post", d.QKVPost(o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], metalgemm.Ink2AttnParams(p), cap, mcv))
 }
 
 func (c *metalBackend) Ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	return c.ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta, p, extent, window, cap, false)
+}
+
+func (c *metalBackend) Ink2AttendHalf(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	return c.ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta, p, extent, window, cap, true)
+}
+
+func (c *metalBackend) ink2Attend(q, r, sinks, relBias, kcache, vcache, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int, kvHalf bool) error {
 	ink2MetalScope("Ink2Attend")
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	d, o, err := ink2MetalBind(q, r, sinks, relBias, kcache, vcache, scores, out, meta)
 	if err != nil {
 		return ink2MetalErr("attend", err)
+	}
+	if kvHalf {
+		return ink2MetalErr("attend f16", d.AttendHalf(o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], metalgemm.Ink2AttnParams(p), extent, window, cap))
 	}
 	return ink2MetalErr("attend", d.Attend(o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], metalgemm.Ink2AttnParams(p), extent, window, cap))
 }

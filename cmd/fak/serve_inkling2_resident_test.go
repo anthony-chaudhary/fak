@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/localadmission"
+	"github.com/anthony-chaudhary/fak/internal/memgate"
 )
 
 func inkling2EnvLookup(env map[string]string) func(string) (string, bool) {
@@ -220,5 +225,168 @@ func TestServeInkling2ResidentPlanPricesCohort(t *testing.T) {
 	}
 	if got := inkling2ServeResidentCohortBytes(100, 200, inkling2EnvLookup(nil)); got != 300 {
 		t.Fatalf("cohort bytes = %d", got)
+	}
+}
+
+func writeInkling2ResidentSizingGGUF(t *testing.T, totalBytes int64) string {
+	t.Helper()
+	var b bytes.Buffer
+	w := func(v any) { _ = binary.Write(&b, binary.LittleEndian, v) }
+	str := func(s string) { w(uint64(len(s))); b.WriteString(s) }
+	kvStr := func(k, v string) { str(k); w(uint32(8)); str(v) }
+	kvU32 := func(k string, v uint32) { str(k); w(uint32(4)); w(v) }
+	kvF32 := func(k string, v float32) { str(k); w(uint32(6)); w(v) }
+	kvBoolArr := func(k string, vs []bool) {
+		str(k)
+		w(uint32(9)) // GGUF_TYPE_ARRAY
+		w(uint32(7)) // GGUF_TYPE_BOOL
+		w(uint64(len(vs)))
+		for _, x := range vs {
+			if x {
+				b.WriteByte(1)
+			} else {
+				b.WriteByte(0)
+			}
+		}
+	}
+
+	const arch = serveInkling2LoopArch
+	p := arch + "."
+	// 24 layers, 20 local + 4 global, core [4,20) x 2 passes = 40 slots total.
+	local := make([]bool, 24)
+	for i := range local {
+		local[i] = i%6 != 5
+	}
+
+	b.WriteString("GGUF")
+	w(uint32(3))  // version
+	w(uint64(1))  // tensor count: output.weight
+	w(uint64(15)) // kv count
+	kvStr("general.architecture", arch)
+	kvU32(p+"block_count", 24)
+	kvU32(p+"embedding_length", 3072)
+	kvU32(p+"vocab_size_unpadded", 32000)
+	kvU32(p+"feed_forward_length", 4096)
+	kvU32(p+"expert_count", 128)
+	kvU32(p+"expert_used_count", 4)
+	kvU32(p+"expert_feed_forward_length", 768)
+	kvU32(p+"attention.head_count", 32)
+	kvU32(p+"attention.head_count_kv", 4)
+	kvU32(p+"attention.key_length", 128)
+	kvU32(p+"attention.sliding_window", 1024)
+	kvU32(p+"attention.relative_length", 16)
+	kvU32(p+"attention.relative_extent", 64)
+	kvU32(p+"shortconv.l_cache", 4)
+	kvU32(p+"attn_res.block_size", 4)
+	kvU32(p+"loop.start", 4)
+	kvU32(p+"loop.end", 20)
+	kvU32(p+"loop.count", 2)
+	kvU32(p+"loop.gate_rank", 128)
+	kvU32(p+"attention.log_scale_floor", 256)
+	kvF32(p+"attention.layer_norm_rms_epsilon", 1e-6)
+	kvF32(p+"attention.qk_clip", 10.0)
+	kvF32(p+"attention.relative_clip", 10.0)
+	kvF32(p+"attention.log_scale_alpha", 0.1)
+	kvF32(p+"activation.situ_beta", 1.0)
+	kvF32(p+"activation.situ_linear_beta", 0.5)
+	kvBoolArr(p+"attention.sliding_window_pattern", local)
+	// Fix kv count to 28.
+	raw := b.Bytes()
+	binary.LittleEndian.PutUint64(raw[16:24], 28)
+
+	// Tensor info: output.weight [3072, 32000] F32 at offset 0.
+	str("output.weight")
+	w(uint32(2))
+	w(uint64(3072))
+	w(uint64(32000))
+	w(uint32(0)) // GGML_TYPE_F32
+	w(uint64(0))
+
+	path := filepath.Join(t.TempDir(), "inkling2_sizing.gguf")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(b.Bytes()); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if totalBytes > int64(b.Len()) {
+		if err := f.Truncate(totalBytes); err != nil {
+			_ = f.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestServeInkling2ResidentUnifiedMemorySizing24GBAnd36GB(t *testing.T) {
+	// ~15 GiB weights file so 24 GB (18 GiB GPU share) has ~3 GiB headroom
+	// and 36 GB (27 GiB GPU share) has ~12 GiB headroom.
+	path := writeInkling2ResidentSizingGGUF(t, 15<<30)
+	origRead := serveReadMemory
+	t.Cleanup(func() { serveReadMemory = origRead })
+
+	// 24 GB Mac: 18 GiB GPU share. 16k context with default f16 KV must step
+	// down prefill chunk from 2048 and admit cleanly within 18 GiB.
+	serveReadMemory = func() (memgate.Memory, error) {
+		return memgate.Memory{TotalBytes: 24 << 30, AvailableBytes: 20 << 30}, nil
+	}
+	sz24, err := serveInkling2ResidentSizingOf(path, inkling2EnvLookup(map[string]string{
+		inkling2ResidentCtxEnv: "16384",
+	}))
+	if err != nil {
+		t.Fatalf("24 GB sizing err: %v", err)
+	}
+	if sz24.Ctx != 16384 {
+		t.Fatalf("24 GB ctx = %d, want 16384", sz24.Ctx)
+	}
+	if sz24.Chunk >= 2048 || (sz24.Chunk != 1024 && sz24.Chunk != 512) {
+		t.Fatalf("24 GB chunk = %d, want stepped-down 1024 or 512", sz24.Chunk)
+	}
+	if sz24.Plan.SteadyBytes > 18<<30 {
+		t.Fatalf("24 GB steady bytes = %d (> 18 GiB GPU share)", sz24.Plan.SteadyBytes)
+	}
+	look24 := serveInkling2ResidentLookup(inkling2EnvLookup(nil), sz24)
+	if v, ok := look24("FAK_INKLING2_PREFILL_CHUNK"); !ok || v != strconv.Itoa(sz24.Chunk) {
+		t.Fatalf("lookup chunk = %q (%v), want %d", v, ok, sz24.Chunk)
+	}
+
+	// Explicit FAK_INKLING2_KV=f32 must price higher than f16 at the same chunk.
+	sz24F32, err := serveInkling2ResidentSizingOf(path, inkling2EnvLookup(map[string]string{
+		inkling2ResidentCtxEnv:      "16384",
+		"FAK_INKLING2_KV":           "f32",
+		"FAK_INKLING2_PREFILL_CHUNK": strconv.Itoa(sz24.Chunk),
+	}))
+	if err != nil {
+		t.Fatalf("24 GB f32 sizing err: %v", err)
+	}
+	if sz24F32.Chunk != sz24.Chunk {
+		t.Fatalf("explicit chunk %d not honored: got %d", sz24.Chunk, sz24F32.Chunk)
+	}
+	if sz24F32.Plan.SteadyBytes <= sz24.Plan.SteadyBytes {
+		t.Fatalf("f32 steady %d <= f16 steady %d", sz24F32.Plan.SteadyBytes, sz24.Plan.SteadyBytes)
+	}
+
+	// 36 GB Mac: 27 GiB GPU share. 16k and 32k contexts admit at full chunk=2048.
+	serveReadMemory = func() (memgate.Memory, error) {
+		return memgate.Memory{TotalBytes: 36 << 30, AvailableBytes: 32 << 30}, nil
+	}
+	for _, ctx := range []string{"16384", "32768"} {
+		sz36, err := serveInkling2ResidentSizingOf(path, inkling2EnvLookup(map[string]string{
+			inkling2ResidentCtxEnv: ctx,
+		}))
+		if err != nil {
+			t.Fatalf("36 GB ctx=%s sizing err: %v", ctx, err)
+		}
+		if sz36.Chunk != 2048 {
+			t.Fatalf("36 GB ctx=%s chunk = %d, want 2048", ctx, sz36.Chunk)
+		}
+		if sz36.Plan.SteadyBytes > 27<<30 {
+			t.Fatalf("36 GB ctx=%s steady bytes = %d (> 27 GiB GPU share)", ctx, sz36.Plan.SteadyBytes)
+		}
 	}
 }

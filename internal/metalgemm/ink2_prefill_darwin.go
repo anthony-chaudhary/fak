@@ -422,6 +422,16 @@ func (d *Ink2Device) PConv(x, w, dyn, hist, out, resid Ink2Ref, n, heads, kn int
 // QKVPost of each row without its folded convs, appending k and v into the
 // cache rows of those positions. T must not exceed cap.
 func (d *Ink2Device) PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
+	return d.pQKVPost(q, r, k, v, qclip, rclip, kcache, vcache, p, cap, pos0, T, false)
+}
+
+// PQKVPostHalf is PQKVPost writing half elements into kcache and vcache (two half
+// elements per float).
+func (d *Ink2Device) PQKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
+	return d.pQKVPost(q, r, k, v, qclip, rclip, kcache, vcache, p, cap, pos0, T, true)
+}
+
+func (d *Ink2Device) pQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, p Ink2AttnParams, cap, pos0, T int, kvHalf bool) error {
 	const limit = math.MaxInt32
 	if p.Heads < 1 || p.KVHeads < 1 || p.HeadDim < 1 || p.RelLen < 0 || cap < 1 || cap > limit || T < 1 || T > cap ||
 		pos0 < 0 || pos0 > limit-T || p.Heads > limit/p.HeadDim/T || p.Heads > limit/max(p.RelLen, 1)/T ||
@@ -439,7 +449,13 @@ func (d *Ink2Device) PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, 
 	if p.RelLen == 0 {
 		r, rclip = Ink2Ref{}, Ink2Ref{}
 	}
-	pipe, err := d.prefillKernel("ink2p_qkv_post", false)
+	var pipe Ink2Pipeline
+	var err error
+	if kvHalf {
+		pipe, err = d.PipelinePrecise("#define INK2_PQKV_HALF 1\n"+ink2PrefillSource, "ink2p_qkv_post")
+	} else {
+		pipe, err = d.prefillKernel("ink2p_qkv_post", false)
+	}
 	if err != nil {
 		return err
 	}
@@ -449,9 +465,13 @@ func (d *Ink2Device) PQKVPost(q, r, k, v, qclip, rclip, kcache, vcache Ink2Ref, 
 		return fmt.Errorf("metalgemm: inkling2 prefill qkv post: SIMD groups of %d threads in threadgroups of at most %d", lanes, pipe.MaxThreads())
 	}
 	kvDim := p.KVHeads * p.HeadDim
+	kvFloats := cap * kvDim
+	if kvHalf {
+		kvFloats = (kvFloats + 1) / 2
+	}
 	return d.Dispatch(pipe, [3]int{p.Heads + 2*p.KVHeads, T, 1}, [3]int{lanes, 1, 1},
 		q.Span(T*p.Heads*p.HeadDim), r.Span(T*p.Heads*p.RelLen), k.Span(T*kvDim), v.Span(T*kvDim),
-		qclip.Span(p.Heads*p.HeadDim), rclip.Span(p.Heads*p.RelLen), kcache.Span(cap*kvDim), vcache.Span(cap*kvDim),
+		qclip.Span(p.Heads*p.HeadDim), rclip.Span(p.Heads*p.RelLen), kcache.Span(kvFloats), vcache.Span(kvFloats),
 		Ink2Const(ink2PQKVShape{
 			heads: uint32(p.Heads), kvHeads: uint32(p.KVHeads), headDim: uint32(p.HeadDim), relLen: uint32(p.RelLen),
 			cap: uint32(cap), lanes: uint32(lanes), global: uint32(btoi(p.Global)), pos0: uint32(pos0),
@@ -477,6 +497,17 @@ func PAttendSpan(window, cap, pos0, T int) int {
 // fit them.
 func (d *Ink2Device) PAttend(q, r, sinks, relBias, kcache, vcache, scores Ink2Ref, scoreFloats int, out Ink2Ref,
 	p Ink2AttnParams, extent, window, cap, pos0, T int) error {
+	return d.pAttend(q, r, sinks, relBias, kcache, vcache, scores, scoreFloats, out, p, extent, window, cap, pos0, T, false)
+}
+
+// PAttendHalf is PAttend over f16 kcache and vcache (two half elements per float).
+func (d *Ink2Device) PAttendHalf(q, r, sinks, relBias, kcache, vcache, scores Ink2Ref, scoreFloats int, out Ink2Ref,
+	p Ink2AttnParams, extent, window, cap, pos0, T int) error {
+	return d.pAttend(q, r, sinks, relBias, kcache, vcache, scores, scoreFloats, out, p, extent, window, cap, pos0, T, true)
+}
+
+func (d *Ink2Device) pAttend(q, r, sinks, relBias, kcache, vcache, scores Ink2Ref, scoreFloats int, out Ink2Ref,
+	p Ink2AttnParams, extent, window, cap, pos0, T int, kvHalf bool) error {
 	const limit = math.MaxInt32
 	if p.Heads < 1 || p.KVHeads < 1 || p.Heads%p.KVHeads != 0 || p.HeadDim < 1 || p.RelLen < 0 || extent < 0 || window < 0 ||
 		cap < 1 || T < 1 || pos0 < 0 || pos0 > limit-T || p.Heads > limit/p.HeadDim/T || extent > limit || window > limit {
@@ -501,7 +532,11 @@ func (d *Ink2Device) PAttend(q, r, sinks, relBias, kcache, vcache, scores Ink2Re
 	if perLaunch < 1 {
 		return fmt.Errorf("%w: prefill attend scores scratch of %d floats for %d heads of %d keys", ErrInk2Shape, scoreFloats, p.Heads, span)
 	}
-	pipe, err := d.PipelinePrecise(ink2PrefillAttendSource, "ink2p_attend")
+	source := ink2PrefillAttendSource
+	if kvHalf {
+		source = "#define INK2_ATT_HALF 1\n" + source
+	}
+	pipe, err := d.PipelinePrecise(source, "ink2p_attend")
 	if err != nil {
 		return err
 	}
@@ -517,6 +552,10 @@ func (d *Ink2Device) PAttend(q, r, sinks, relBias, kcache, vcache, scores Ink2Re
 	if extent > 0 {
 		rSpan, relSpan = r.Span(T*p.Heads*p.RelLen), relBias.Span(extent*p.RelLen)
 	}
+	kvFloats := cap * kvDim
+	if kvHalf {
+		kvFloats = (kvFloats + 1) / 2
+	}
 	shape := ink2PAttendShape{
 		heads: uint32(p.Heads), perKV: uint32(p.Heads / p.KVHeads), headDim: uint32(p.HeadDim), relLen: uint32(p.RelLen),
 		kvDim: uint32(kvDim), extent: uint32(extent), window: uint32(window), cap: uint32(cap),
@@ -528,7 +567,7 @@ func (d *Ink2Device) PAttend(q, r, sinks, relBias, kcache, vcache, scores Ink2Re
 		shape.tok0 = uint32(tok0)
 		if err := d.Dispatch(pipe, [3]int{p.Heads, rows, 1}, [3]int{threads, 1, 1},
 			q.Span(T*p.Heads*p.HeadDim), rSpan, sinks.Span(T*p.Heads), relSpan,
-			kcache.Span(cap*kvDim), vcache.Span(cap*kvDim), scores.Span(rows*p.Heads*span), out.Span(T*p.Heads*p.HeadDim),
+			kcache.Span(kvFloats), vcache.Span(kvFloats), scores.Span(rows*p.Heads*span), out.Span(T*p.Heads*p.HeadDim),
 			Ink2Const(shape)); err != nil {
 			return err
 		}

@@ -72,6 +72,28 @@ func inkling2PrefillChunkWanted(lookup func(string) (string, bool)) int {
 // expert's grouped GEMM a handful of rows, so the wider chunk pays for its arenas.
 const inkling2PrefillChunkMetal = 2048
 
+// inkling2MetalPrefillChunkSteps is the step-down ladder for Metal resident
+// prefill chunk selection when unified-memory headroom is tight.
+var inkling2MetalPrefillChunkSteps = []int{inkling2PrefillChunkMetal, inkling2PrefillChunkWide, inkling2PrefillChunkBase}
+
+// Inkling2MetalPrefillChunkForBudget selects the Metal resident prefill chunk.
+// An explicit FAK_INKLING2_PREFILL_CHUNK setting always wins. Otherwise it steps
+// down 2048 -> 1024 -> 512 until fits(chunk) reports true (or 512 if none fits).
+func Inkling2MetalPrefillChunkForBudget(lookup func(string) (string, bool), fits func(chunk int) bool) int {
+	if v, set := lookup(inkling2PrefillChunkEnv); set && strings.TrimSpace(v) != "" {
+		return inkling2PrefillChunkWanted(lookup)
+	}
+	if fits == nil {
+		return inkling2PrefillChunkMetal
+	}
+	for _, c := range inkling2MetalPrefillChunkSteps {
+		if fits(c) {
+			return c
+		}
+	}
+	return inkling2PrefillChunkBase
+}
+
 // inkling2PrefillChunkWantedOn is inkling2PrefillChunkWanted on backend be: an unset
 // setting on Metal asks for inkling2PrefillChunkMetal, still subject to admission.
 func inkling2PrefillChunkWantedOn(be any, lookup func(string) (string, bool)) int {

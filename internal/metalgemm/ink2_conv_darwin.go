@@ -76,6 +76,16 @@ func (d *Ink2Device) conv(x, wts Ink2Ref, slots int, w, dyn, hist, out, resid In
 // ([cap][kvHeads*headDim]), pos being the int32 at meta. cv first runs the k
 // and v short convs on the raw projections, each over its own history.
 func (d *Ink2Device) QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	return d.qkvPost(q, r, k, v, qclip, rclip, kcache, vcache, meta, p, cap, cv, false)
+}
+
+// QKVPostHalf is QKVPost writing half elements into kcache and vcache (two half
+// elements per float).
+func (d *Ink2Device) QKVPostHalf(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	return d.qkvPost(q, r, k, v, qclip, rclip, kcache, vcache, meta, p, cap, cv, true)
+}
+
+func (d *Ink2Device) qkvPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv, kvHalf bool) error {
 	const limit = math.MaxInt32
 	if p.Heads < 1 || p.KVHeads < 1 || p.HeadDim < 1 || p.RelLen < 0 || cap < 1 || cap > limit ||
 		p.Heads > limit/p.HeadDim || p.Heads > limit/max(p.RelLen, 1) || p.KVHeads > limit/p.HeadDim || p.Heads > limit-2*p.KVHeads {
@@ -107,21 +117,28 @@ func (d *Ink2Device) QKVPost(q, r, k, v, qclip, rclip, kcache, vcache, meta Ink2
 	if !ink2TinyFuseLegacy && p.HeadDim == ink2QKVNamedHeadDim && p.RelLen == ink2QKVNamedRelLen && cv != nil && kn == ink2QKVNamedTaps {
 		source = ink2QKVNamedSource
 	}
+	if kvHalf {
+		source = "#define INK2_QKV_HALF 1\n" + source
+	}
 	pipe, err := d.PipelinePrecise(source, "ink2_qkv_post")
 	if err != nil {
 		return err
 	}
 	// Each head reduces across one SIMD group, so that is the threadgroup.
 	lanes := pipe.ThreadWidth()
-	if source == ink2QKVNamedSource && lanes != ink2QKVNamedLanes {
+	if (source == ink2QKVNamedSource || source == "#define INK2_QKV_HALF 1\n"+ink2QKVNamedSource) && lanes != ink2QKVNamedLanes {
 		return fmt.Errorf("metalgemm: inkling2 qkv post built for SIMD groups of %d threads runs on %d", ink2QKVNamedLanes, lanes)
 	}
 	if lanes < 1 || lanes > pipe.MaxThreads() {
 		return fmt.Errorf("metalgemm: inkling2 qkv post: SIMD groups of %d threads in threadgroups of at most %d", lanes, pipe.MaxThreads())
 	}
+	kvFloats := cap * kvDim
+	if kvHalf {
+		kvFloats = (kvFloats + 1) / 2
+	}
 	return d.Dispatch(pipe, [3]int{p.Heads + 2*p.KVHeads, 1, 1}, [3]int{lanes, 1, 1},
 		q.Span(p.Heads*p.HeadDim), r.Span(p.Heads*p.RelLen), k.Span(kvDim), v.Span(kvDim),
-		qclip.Span(p.Heads*p.HeadDim), rclip.Span(p.Heads*p.RelLen), kcache.Span(cap*kvDim), vcache.Span(cap*kvDim), meta.Span(1),
+		qclip.Span(p.Heads*p.HeadDim), rclip.Span(p.Heads*p.RelLen), kcache.Span(kvFloats), vcache.Span(kvFloats), meta.Span(1),
 		c.KW.Span(kvDim*kn), c.VW.Span(kvDim*kn), c.KDyn.Span(p.KVHeads*kn), c.VDyn.Span(p.KVHeads*kn),
 		c.KHist.Span(kvDim*(kn-1)), c.VHist.Span(kvDim*(kn-1)),
 		Ink2Const(ink2QKVShape{

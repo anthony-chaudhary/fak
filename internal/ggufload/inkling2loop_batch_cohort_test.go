@@ -265,14 +265,15 @@ func TestInkling2LoopBatchCohortsReuseStateAcrossCohorts(t *testing.T) {
 		}
 	}
 	run(Inkling2LoopMaxBatch, 70, 2) // past one 64-position block: 16 x 128
-	allocs, live := d.allocs, d.live
+	held, allocs, frees, live := bt.b, d.allocs, d.frees, d.live
 	for round := 0; round < 4; round++ {
 		run(Inkling2LoopMaxBatch, 70, 2)
 		run(Inkling2LoopMaxBatch-1, 80, 4)
 		run(Inkling2LoopMaxBatch, 100, 8)
 	}
-	if d.allocs != allocs || d.live != live {
-		t.Fatalf("cohorts near the cached shape allocated again: allocs %d -> %d, live floats %d -> %d", allocs, d.allocs, live, d.live)
+	if bt.b != held || d.live != live || (d.allocs-allocs) != (d.frees-frees) {
+		t.Fatalf("cohorts near the cached shape did not reuse decode state cleanly: reused=%v allocs %d->%d frees %d->%d live %d->%d",
+			bt.b == held, allocs, d.allocs, frees, d.frees, live, d.live)
 	}
 	bt.Close()
 	if d.live != 0 || d.frees != d.allocs {

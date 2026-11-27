@@ -64,7 +64,15 @@ type inkling2Batch struct {
 	// capC and capCtx are the shape the arenas were sized for; owned are the arenas
 	owned        []compute.Tensor
 	capC, capCtx int
-	err          error
+	// prefillKeep and prefillScr are transient prefill-chunk arenas allocated when
+	// prefillT > capC and released once all active lanes enter pure decode.
+	prefillKeep, prefillScr             ink2Ref
+	prefillKeepFloats, prefillScrFloats int
+	prefillArenaT                       int
+	prefillOwned                        []compute.Tensor
+	keepPrefill                         bool
+	decodeNeed                          int64
+	err                                 error
 }
 
 // inkling2BatchGraph reports whether the batched step is captured and replayed as a
@@ -175,8 +183,13 @@ func newInkling2BatchChunkLimit(s *inkling2Resident, C, ctx, chunk, limit int) (
 	pd := be.(compute.Inkling2PrefillDevice)
 	hp := s.hp
 	kvHalf, keep, scr, caps, rowsT := sh.kvHalf, sh.keep, sh.scr, sh.caps, sh.rowsT
+	lookup := s.batchLookup
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
 	b := &inkling2Batch{s: s, capC: C, capCtx: ctx, seq: sh.seq, kvHalf: kvHalf, mem: inkling2BatchMem(be),
-		prefillT: sh.prefillT, need: sh.need, capT: chunk, capPrefillT: sh.prefillT, half: sh.half}
+		prefillT: sh.prefillT, need: sh.need, decodeNeed: sh.decodeNeed, capT: chunk, capPrefillT: sh.prefillT,
+		half: sh.half, keepPrefill: inkling2KeepPrefillArenas(lookup)}
 	b.p = ink2Prefill{s: s, pd: pd, T: C}
 	if b.mem != nil && inkling2BatchQ8RowTile(os.LookupEnv) {
 		b.p.rows = b.mem
@@ -224,12 +237,9 @@ func newInkling2BatchChunkLimit(s *inkling2Resident, C, ctx, chunk, limit int) (
 	return b, nil
 }
 
-// alloc takes n zeroed floats of batch state, device-only when the backend can refuse
-// rather than spill to managed memory.
-func (b *inkling2Batch) alloc(n int) ink2Ref {
-	if b.err != nil {
-		return ink2Ref{}
-	}
+// allocTensor allocates n zeroed floats on the device, refusing rather than spilling
+// to managed memory when the backend supports strict device-only allocation.
+func (b *inkling2Batch) allocTensor(n int) (compute.Tensor, error) {
 	var t compute.Tensor
 	var err error
 	if b.mem != nil {
@@ -238,11 +248,85 @@ func (b *inkling2Batch) alloc(n int) ink2Ref {
 		t, err = b.s.dev.Ink2Alloc(n)
 	}
 	if err != nil {
-		b.err = &Inkling2BatchMemoryError{Sequences: b.capC, Need: b.need, Free: compute.FreeUnknown, Alloc: err}
+		return compute.Tensor{}, &Inkling2BatchMemoryError{Sequences: b.capC, Need: b.need, Free: compute.FreeUnknown, Alloc: err}
+	}
+	return t, nil
+}
+
+// alloc takes n zeroed floats of batch state, device-only when the backend can refuse
+// rather than spill to managed memory.
+func (b *inkling2Batch) alloc(n int) ink2Ref {
+	if b.err != nil {
+		return ink2Ref{}
+	}
+	t, err := b.allocTensor(n)
+	if err != nil {
+		b.err = err
 		return ink2Ref{}
 	}
 	b.owned = append(b.owned, t)
 	return compute.Ink2At(t, 0)
+}
+
+// inkling2KeepPrefillArenas reports whether transient prefill arenas stay pinned
+// across pure decode (FAK_INKLING2_KEEP_PREFILL_ARENAS=1).
+func inkling2KeepPrefillArenas(lookup func(string) (string, bool)) bool {
+	v, ok := lookup("FAK_INKLING2_KEEP_PREFILL_ARENAS")
+	return ok && strings.TrimSpace(v) == "1"
+}
+
+// ensurePrefillArenas allocates transient prefill-chunk arenas when prefillT > capC.
+// When prefillT <= capC, the decode-lifetime arenas already cover the chunk.
+func (b *inkling2Batch) ensurePrefillArenas() error {
+	if b.prefillT <= b.capC {
+		return nil
+	}
+	if len(b.prefillOwned) > 0 && b.prefillArenaT >= b.prefillT {
+		return nil
+	}
+	if len(b.prefillOwned) > 0 {
+		b.releasePrefillArenas()
+	}
+	keep, scr := b.s.prefillArenas(b.prefillT)
+	scr += b.capC*b.s.output.rows + 64
+	pk, err := b.allocTensor(keep)
+	if err != nil {
+		return err
+	}
+	ps, err := b.allocTensor(scr)
+	if err != nil {
+		b.s.be.Free(pk)
+		inkling2TrimIdle(b.s.be)
+		return err
+	}
+	b.prefillOwned = []compute.Tensor{pk, ps}
+	b.prefillKeep, b.prefillScr = compute.Ink2At(pk, 0), compute.Ink2At(ps, 0)
+	b.prefillKeepFloats, b.prefillScrFloats = keep, scr
+	b.prefillArenaT = b.prefillT
+	return nil
+}
+
+// releasePrefillArenas frees the transient prefill-chunk arenas and returns large
+// idle blocks to the driver without invalidating b.graphReady.
+func (b *inkling2Batch) releasePrefillArenas() {
+	if len(b.prefillOwned) == 0 {
+		return
+	}
+	for _, t := range b.prefillOwned {
+		b.s.be.Free(t)
+	}
+	b.prefillOwned = nil
+	b.prefillKeep, b.prefillScr = ink2Ref{}, ink2Ref{}
+	b.prefillKeepFloats, b.prefillScrFloats, b.prefillArenaT = 0, 0, 0
+	inkling2TrimIdle(b.s.be)
+}
+
+// arenaBytes reports the device memory currently held by the batch arenas.
+func (b *inkling2Batch) arenaBytes() int64 {
+	if len(b.prefillOwned) > 0 {
+		return b.decodeNeed + 4*(int64(b.prefillKeepFloats)+int64(b.prefillScrFloats))
+	}
+	return b.decodeNeed
 }
 
 // inkling2BatchShape is the buffer plan of a C-sequence, ctx-position batch, computed
@@ -253,7 +337,10 @@ type inkling2BatchShape struct {
 	half            compute.Inkling2PrefillHalfKV
 	prefillT, rowsT int
 	keep, scr       int
+	prefillKeep     int
+	prefillScr      int
 	caps            []int
+	decodeNeed      int64
 	need            int64
 }
 
@@ -304,16 +391,23 @@ func (s *inkling2Resident) batchShapeChunkLimit(C, ctx, chunk, limit int) (inkli
 		sh.half = half
 		sh.prefillT = min(chunk, C*ctx)
 	}
-	// the prefill chunks and the decode steps run one after the other on one arena pair
+	// Decode-lifetime arenas are sized at T=C so pure-decode graph captures stay small
+	// and never reference the transient prefill-chunk arenas.
 	sh.rowsT = max(C, sh.prefillT)
-	sh.keep, sh.scr = s.prefillArenas(sh.rowsT)
+	sh.keep, sh.scr = s.prefillArenas(C)
 	sh.scr += C*s.output.rows + 64
 	// a narrower cohort begun later may take the few-row path, so size for the widest one that can
 	if few := min(C, inkling2BatchFewRowsMost(os.LookupEnv)); few > 0 && inkling2BatchFewRows(be, few, os.LookupEnv) != nil {
 		sh.scr += inkling2BatchFewRowsScratch(hp, few)
 	}
 	sh.caps = inkling2BatchCaps(hp, s.baseCaps, ctx, sh.prefillT)
-	sh.need = inkling2BatchBytes(hp, sh.caps, C, sh.keep, sh.scr, kvHalf)
+	sh.decodeNeed = inkling2BatchBytes(hp, sh.caps, C, sh.keep, sh.scr, kvHalf)
+	sh.need = sh.decodeNeed
+	if sh.prefillT > C {
+		sh.prefillKeep, sh.prefillScr = s.prefillArenas(sh.prefillT)
+		sh.prefillScr += C*s.output.rows + 64
+		sh.need += 4 * (int64(sh.prefillKeep) + int64(sh.prefillScr))
+	}
 	return sh, nil
 }
 
@@ -339,6 +433,11 @@ func (b *inkling2Batch) begin(C, ctx int) error {
 	}
 	s := b.s
 	hp := s.hp
+	lookup := s.batchLookup
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	b.keepPrefill = inkling2KeepPrefillArenas(lookup)
 	b.C, b.ctx, b.pos = C, ctx, make([]int, C)
 	b.sharedMin = inkling2CohortSharedPrefixMin(os.LookupEnv)
 	b.p.T = C
@@ -387,6 +486,12 @@ func (b *inkling2Batch) resetRow(row int) error {
 // release frees the batch arenas and keeps the weight binding; the freed blocks go
 // back to the driver so the next state's admission probe sees them free.
 func (b *inkling2Batch) release() {
+	for _, t := range b.prefillOwned {
+		b.s.be.Free(t)
+	}
+	b.prefillOwned = nil
+	b.prefillKeep, b.prefillScr = ink2Ref{}, ink2Ref{}
+	b.prefillKeepFloats, b.prefillScrFloats, b.prefillArenaT = 0, 0, 0
 	for _, t := range b.owned {
 		b.s.be.Free(t)
 	}

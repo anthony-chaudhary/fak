@@ -312,6 +312,12 @@ static inline void ink2_clip(device float *x, device const float *scale, bool sc
     }
 }
 
+#ifdef INK2_PQKV_HALF
+typedef half ink2p_kv_t;
+#else
+typedef float ink2p_kv_t;
+#endif
+
 // Post-projection attention prep, a threadgroup (one SIMD group of lanes
 // threads) per (head block, token): blocks [0, heads) clip q and r in place,
 // then kvHeads clip k into the cache row of position pos0+t, then kvHeads
@@ -323,8 +329,8 @@ kernel void ink2p_qkv_post(device float *q [[buffer(0)]],
                            device const float *v [[buffer(3)]],
                            device const float *qclip [[buffer(4)]],
                            device const float *rclip [[buffer(5)]],
-                           device float *kcache [[buffer(6)]],
-                           device float *vcache [[buffer(7)]],
+                           device ink2p_kv_t *kcache [[buffer(6)]],
+                           device ink2p_kv_t *vcache [[buffer(7)]],
                            constant Ink2PQKVShape &s [[buffer(8)]],
                            uint2 group [[threadgroup_position_in_grid]],
                            uint lane [[thread_index_in_threadgroup]]) {
@@ -343,15 +349,35 @@ kernel void ink2p_qkv_post(device float *q [[buffer(0)]],
     const ulong row = ulong(pos % s.cap) * kvDim;
     if (b < s.heads + s.kvHeads) {
         const uint first = (b - s.heads) * s.headDim;
-        device float *dst = kcache + row + first;
+        device ink2p_kv_t *dst = kcache + row + first;
         device const float *src = k + ulong(tok) * kvDim + first;
+#ifdef INK2_PQKV_HALF
+        float ss = 0.0f;
+        for (uint i = lane; i < s.headDim; i += s.lanes) ss = fma(src[i], src[i], ss);
+        ss = simd_sum(ss);
+        float f = s.qkClip / (sqrt(ss) + 1e-6f);
+        if (f > 1.0f) f = 1.0f;
+        if (f < 0.0f) f = 0.0f;
+        for (uint i = lane; i < s.headDim; i += s.lanes) dst[i] = half(src[i] * f);
+#else
         for (uint i = lane; i < s.headDim; i += s.lanes) dst[i] = src[i];
         ink2_clip(dst, kcache, false, s.qkClip, s.headDim, lane, s.lanes, 1.0f, false);
+#endif
         return;
     }
     const uint first = (b - s.heads - s.kvHeads) * s.headDim;
-    device float *dst = vcache + row + first;
+    device ink2p_kv_t *dst = vcache + row + first;
     device const float *src = v + ulong(tok) * kvDim + first;
+#ifdef INK2_PQKV_HALF
+    float ss = 0.0f;
+    for (uint i = lane; i < s.headDim; i += s.lanes) {
+        const float x = src[i];
+        ss = fma(x, x, ss);
+    }
+    ss = simd_sum(ss);
+    const float scale = 1.0f / sqrt(ss / float(s.headDim) + s.eps);
+    for (uint i = lane; i < s.headDim; i += s.lanes) dst[i] = half(src[i] * scale);
+#else
     // The unnormalized value is staged in the cache row: a lane holds more
     // than one element across the reduction.
     float ss = 0.0f;
@@ -363,6 +389,7 @@ kernel void ink2p_qkv_post(device float *q [[buffer(0)]],
     ss = simd_sum(ss);
     const float scale = 1.0f / sqrt(ss / float(s.headDim) + s.eps);
     for (uint i = lane; i < s.headDim; i += s.lanes) dst[i] *= scale;
+#endif
 }
 
 struct Ink2PRouteShape {

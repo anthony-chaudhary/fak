@@ -30,6 +30,21 @@ static inline float4 ink2_att_load(const device float *p, uint have) {
     return v;
 }
 
+#ifdef INK2_ATT_HALF
+typedef half ink2_kv_t;
+static inline float4 ink2_att_load_kv(const device half *p, uint have) {
+    if (have >= 4) return float4(*(const device packed_half4 *)p);
+    float4 v = float4(0.0f);
+    for (uint i = 0; i < have; ++i) v[i] = float(p[i]);
+    return v;
+}
+#else
+typedef float ink2_kv_t;
+static inline float4 ink2_att_load_kv(const device float *p, uint have) {
+    return ink2_att_load(p, have);
+}
+#endif
+
 // Attention of every query of a chunk, a threadgroup per (query head, token):
 // ink2_attend with the query at pos0+t and a scores row per (token, head) of
 // this launch. Every query sees the keys of its own and earlier positions,
@@ -38,8 +53,8 @@ kernel void ink2p_attend(device const float *q [[buffer(0)]],
                          device const float *r [[buffer(1)]],
                          device const float *sinks [[buffer(2)]],
                          device const float *rel_bias [[buffer(3)]],
-                         device const float *kcache [[buffer(4)]],
-                         device const float *vcache [[buffer(5)]],
+                         device const ink2_kv_t *kcache [[buffer(4)]],
+                         device const ink2_kv_t *vcache [[buffer(5)]],
                          device float *scores [[buffer(6)]],
                          device float *out [[buffer(7)]],
                          constant Ink2PAttendShape &s [[buffer(8)]],
@@ -78,10 +93,10 @@ kernel void ink2p_attend(device const float *q [[buffer(0)]],
     for (uint j = simd; j < n; j += simds) {
         uint row = base + j;
         row -= row >= s.cap ? s.cap : 0u;
-        const device float *kr = kcache + row * s.kv_dim + kvh * hd;
+        const device ink2_kv_t *kr = kcache + row * s.kv_dim + kvh * hd;
         float d = 0.0f;
         for (uint t = 0, c = lane; c < quads; ++t, c += s.width)
-            d += dot(qreg[t], ink2_att_load(kr + 4u * c, hd - 4u * c));
+            d += dot(qreg[t], ink2_att_load_kv(kr + 4u * c, hd - 4u * c));
         d *= s.scale;
         const uint dist = n - 1u - j;
         if (dist < s.extent) {
@@ -116,12 +131,12 @@ kernel void ink2p_attend(device const float *q [[buffer(0)]],
     const uint c = tid % quads;
     const uint have = hd - 4u * c;
     if (tid < groups * quads) {
-        const device float *vb = vcache + kvh * hd + 4u * c;
+        const device ink2_kv_t *vb = vcache + kvh * hd + 4u * c;
         float4 acc = float4(0.0f);
         for (uint j = tid / quads; j < n; j += groups) {
             uint row = base + j;
             row -= row >= s.cap ? s.cap : 0u;
-            acc += sc[j] * ink2_att_load(vb + row * s.kv_dim, have);
+            acc += sc[j] * ink2_att_load_kv(vb + row * s.kv_dim, have);
         }
         gacc[tid] = acc;
     }
