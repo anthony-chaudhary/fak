@@ -25,7 +25,7 @@ const (
 	cavemanPromptsSHA      = "773e557f9187363c44e7e5aae2d27268720bcd8772865e119825078b06da93d7"
 	cavemanSkillSHA        = "daf9cec496ebd039809d8236f99f17fa1b4beaadf8ce4e2d532d0da51d70afce"
 	cavemanRunSHA          = "530a387918418713e64ded97794f41a1ffe6a01e833a69d2cb447bf4640facce"
-	cavemanNativeMediumSHA = "c7cbbff08f461ab50a843cbe0c075fbb4e33f8d9d26cee1401062bb0758013fd"
+	cavemanNativeMediumSHA = "c8142afbb1e1c33337fcc579ede5a4671d5e5231b59f5526137e803f43c207be"
 )
 
 type CavemanOptions struct {
