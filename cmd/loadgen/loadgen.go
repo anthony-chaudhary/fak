@@ -185,7 +185,7 @@ type clientInFlight struct {
 	peak        int
 	prefillHeld int
 	prefillPeak int
-	sem         chan struct{} // prefill permits; nil disables the prefill tier
+	prefill     *DynamicConcurrencyLimit // prefill permits; nil disables the prefill tier
 }
 
 // newClientInFlight builds a two-tier tracker for one sweep point. prefillCap is
@@ -195,7 +195,11 @@ func newClientInFlight(sessionCap, prefillCap int) *clientInFlight {
 	if prefillCap <= 0 || prefillCap > sessionCap {
 		prefillCap = sessionCap
 	}
-	return &clientInFlight{sem: make(chan struct{}, prefillCap)}
+	if prefillCap < 0 {
+		prefillCap = 0
+	}
+	lim, _ := NewDynamicConcurrencyLimit(prefillCap)
+	return &clientInFlight{prefill: lim}
 }
 
 func (f *clientInFlight) begin() {
@@ -223,12 +227,10 @@ func (f *clientInFlight) peakValue() int {
 // It reports whether a slot was acquired; with the tier disabled it acquires
 // nothing and reports true so callers keep one uniform release path.
 func (f *clientInFlight) beginPrefill(ctx context.Context) bool {
-	if f.sem == nil {
+	if f.prefill == nil {
 		return true
 	}
-	select {
-	case f.sem <- struct{}{}:
-	case <-ctx.Done():
+	if !f.prefill.Acquire(ctx) {
 		return false
 	}
 	f.mu.Lock()
@@ -244,13 +246,22 @@ func (f *clientInFlight) beginPrefill(ctx context.Context) bool {
 // it exactly once per acquired slot, including every failure path, so a failed
 // request cannot strand the permit and starve later requests.
 func (f *clientInFlight) endPrefill() {
-	if f.sem == nil {
+	if f.prefill == nil {
 		return
 	}
 	f.mu.Lock()
 	f.prefillHeld--
 	f.mu.Unlock()
-	<-f.sem
+	_ = f.prefill.Release()
+}
+
+// setPrefillLimit updates the prefill-tier concurrency ceiling at runtime,
+// draining excess in-flight prefill slots via debt tracking when lowered.
+func (f *clientInFlight) setPrefillLimit(limit int) error {
+	if f.prefill == nil {
+		return nil
+	}
+	return f.prefill.SetLimit(limit)
 }
 
 func (f *clientInFlight) prefillPeakValue() int {
