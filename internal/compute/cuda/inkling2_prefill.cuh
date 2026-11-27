@@ -283,7 +283,7 @@ extern "C" int fcuda_ink2p_conv_pair_log(const float *const *x, const float *con
 // k_ink2_qkv_post over a chunk: blockIdx.y is the token, at position pos0 + t. T is the
 // cache element (float, __half, or uint8_t E4M3FN/NVFP4); f16/fp8/nvfp4 appends run the
 // fp32 ops of the float append in the same order and quantize only the stored value.
-template <class T, bool NVFP4 = false>
+template <class T, bool NVFP4 = false, bool AsymK8V4 = false>
 __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
                                  const float *rclip, T *kcache, T *vcache, int heads, int kvHeads,
                                  int headDim, int relLen, float qkClip, float relClip, float eps, int global,
@@ -309,7 +309,13 @@ __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float
   }
   if (b < heads + kvHeads) {
     const int h = b - heads;
-    if constexpr (NVFP4) {
+    if constexpr (AsymK8V4) {
+      const Ink2KVConv off = {};
+      const int hBlks = headDim >> 4;
+      ink2_put_k_fp8_blk16(kcache + (size_t)idx * kvDim + (size_t)h * headDim,
+                           (uint8_t *)kscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow,
+                           k + (size_t)tok * kvDim, off, h, headDim, kvHeads, qkClip);
+    } else if constexpr (NVFP4) {
       const Ink2KVConv off = {};
       const int hBytes = headDim >> 1, hBlks = headDim >> 4;
       ink2_put_k_nvfp4(kcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
@@ -333,7 +339,7 @@ __global__ void k_ink2p_qkv_post(float *q, float *r, const float *k, const float
     return;
   }
   const int h = b - heads - kvHeads;
-  if constexpr (NVFP4) {
+  if constexpr (NVFP4 || AsymK8V4) {
     const Ink2KVConv off = {};
     const int hBytes = headDim >> 1, hBlks = headDim >> 4;
     ink2_put_v_nvfp4(vcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
@@ -1028,6 +1034,22 @@ extern "C" int fcuda_ink2p_qkv_post_nvfp4(float *q, float *r, const float *k, co
     return (int)cudaErrorInvalidValue;
   const dim3 grid(heads + 2 * kvHeads, T);
   FCUDA_TS("k_ink2p_qkv_post", grid, (k_ink2p_qkv_post<uint8_t, true><<<grid, 32, 0, g_stream>>>(
+      q, r, k, v, qclip, rclip, kcache, vcache, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global, alpha,
+      floorTok, cap, pos0, nullptr, kscale, vscale, overflow)));
+  return ink2_last_error();
+}
+
+// fcuda_ink2p_qkv_post_asym writes block-16 FP8 K + block-16 NVFP4 V with E4M3FN block scales.
+extern "C" int fcuda_ink2p_qkv_post_asym(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                         const float *rclip, uint8_t *kcache, uint8_t *vcache, uint8_t *kscale,
+                                         uint8_t *vscale, int *overflow, int heads, int kvHeads, int headDim,
+                                         int relLen, float qkClip, float relClip, float eps, int global, float alpha,
+                                         float floorTok, int cap, int pos0, int T) {
+  if (headDim < 16 || (headDim & 15) != 0 || headDim > 32 * INK2_KV_REGS || kvHeads < 1 || heads < 1 || cap < 1 ||
+      T < 1)
+    return (int)cudaErrorInvalidValue;
+  const dim3 grid(heads + 2 * kvHeads, T);
+  FCUDA_TS("k_ink2p_qkv_post", grid, (k_ink2p_qkv_post<uint8_t, false, true><<<grid, 32, 0, g_stream>>>(
       q, r, k, v, qclip, rclip, kcache, vcache, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global, alpha,
       floorTok, cap, pos0, nullptr, kscale, vscale, overflow)));
   return ink2_last_error();

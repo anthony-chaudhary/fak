@@ -182,3 +182,14 @@ type Inkling2NVFP4KVDevice interface {
 	// Ink2PAttendNVFP4 is Ink2PAttend reading block-16 E2M1 kcache/vcache with E4M3FN scales for T tokens starting at pos0.
 	Ink2PAttendNVFP4(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error
 }
+
+// Inkling2AsymKVDevice is the decode and prefill QKV post and attend over
+// asymmetric global-slot caches (K = block-16 FP8 E4M3FN with E4M3FN block scales,
+// V = block-16 NVFP4 E2M1 with E4M3FN block scales); local SWA rings stay fp32.
+type Inkling2AsymKVDevice interface {
+	Ink2PAsymKVReady() error
+	Ink2QKVPostAsym(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error
+	Ink2AttendAsym(q, r, sinks, relBias, kcache, vcache, kscale, vscale, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error
+	Ink2PQKVPostAsym(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error
+	Ink2PAttendAsym(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error
+}

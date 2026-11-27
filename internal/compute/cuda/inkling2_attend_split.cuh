@@ -38,7 +38,7 @@ static __device__ __forceinline__ int ink2_ats_keys(const float *meta, int windo
   return n;
 }
 
-template <class T, bool NVFP4 = false>
+template <class T, bool NVFP4 = false, bool AsymK8V4 = false>
 __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
     k_ink2_attend_scores(const float *q, const float *r, const float *sinks, const float *relBias,
                          const T *kcache, double *scores, float *out, const float *meta, int heads, int kvHeads,
@@ -70,7 +70,16 @@ __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
     const int dist = pos - p;
     const size_t slotIdx = (size_t)(p % cap);
     float d = 0.f;
-    if constexpr (NVFP4) {
+    if constexpr (AsymK8V4) {
+      const int hBlks = headDim >> 4;
+      const uint8_t *kr = (const uint8_t *)kcache + slotIdx * kvDim + (size_t)kvh * headDim;
+      const uint8_t *ks = (const uint8_t *)kscale + slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks;
+      for (int i = lane; i < headDim; i += 32) {
+        const float kv = ink2_e4m3fn_decode(kr[i]);
+        const float bsc = ink2_e4m3fn_decode(ks[i >> 4]);
+        d = fmaf(qh[i], __fmul_rn(kv, bsc), d);
+      }
+    } else if constexpr (NVFP4) {
       const int hBytes = headDim >> 1, hBlks = headDim >> 4;
       const uint8_t *kr = (const uint8_t *)kcache + slotIdx * (size_t)(kvHeads * hBytes) + (size_t)kvh * hBytes;
       const uint8_t *ks = (const uint8_t *)kscale + slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks;
@@ -94,7 +103,7 @@ __global__ void __launch_bounds__(INK2_ATS_WARPS * 32)
       d += __shfl_xor_sync(0xffffffff, d, o);
       rd += __shfl_xor_sync(0xffffffff, rd, o);
     }
-    if constexpr (!NVFP4 && sizeof(T) == 1)
+    if constexpr (!NVFP4 && !AsymK8V4 && sizeof(T) == 1)
       d = __fmul_rn(d, ((const float *)kscale)[slotIdx * (size_t)kvHeads + (size_t)kvh]);
     float bias = -sinks[h];
     if (dist < extent) bias = __fadd_rn(bias, rd);
@@ -486,12 +495,13 @@ extern "C" int fcuda_ink2_attend_split_select(int mode) {
 // sequence of sq; every sequence's r and out rows must keep that alignment. T is the
 // cache element; each instantiation keeps its own shared-memory opt-in state, as the
 // attribute is per kernel.
-template <class T, bool NVFP4 = false>
+template <class T, bool NVFP4 = false, bool AsymK8V4 = false>
 static bool ink2_attend_split(const float *q, const float *r, const float *sinks, const float *relBias,
                               const T *kcache, const T *vcache, double *scores, float *out, const float *meta,
                               int heads, int kvHeads, int headDim, int relLen, int extent, int window, int cap,
                               float scale, const Ink2Seq &sq, int C, const void *kscale = nullptr,
                               const void *vscale = nullptr) {
+  constexpr bool kVNVFP4 = NVFP4 || AsymK8V4;
   // Size chunk count to the layer's maximum live key span: local sliding-window
   // layers (window=128) and small/medium global caches (cap<=4096) keep 8 chunks
   // (192 blocks at 24 heads) so short/windowed decode does not pay 4x block launch
@@ -513,8 +523,8 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
   if (osmem > optin[k]) {
     const cudaError_t e =
         refused[k] != 0 && osmem >= refused[k] ? cudaErrorInvalidValue
-        : exact ? cudaFuncSetAttribute(k_ink2_attend_out<true, T, NVFP4>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)osmem)
-                : cudaFuncSetAttribute(k_ink2_attend_out_tree<true, T, NVFP4>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+        : exact ? cudaFuncSetAttribute(k_ink2_attend_out<true, T, kVNVFP4>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)osmem)
+                : cudaFuncSetAttribute(k_ink2_attend_out_tree<true, T, kVNVFP4>, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                        (int)osmem);
     if (e != cudaSuccess) {
       cudaGetLastError();
@@ -526,7 +536,7 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
   }
   if (!staged) osmem = 0;
   const dim3 g1(heads, chunks, C), g3(heads, headDim / 32, C);
-  FCUDA_TS("k_ink2_attend_scores", g1, (k_ink2_attend_scores<T, NVFP4><<<g1, INK2_ATS_WARPS * 32, 0, g_stream>>>(
+  FCUDA_TS("k_ink2_attend_scores", g1, (k_ink2_attend_scores<T, NVFP4, AsymK8V4><<<g1, INK2_ATS_WARPS * 32, 0, g_stream>>>(
                                            q, r, sinks, relBias, kcache, scores, out, meta, heads, kvHeads, headDim,
                                            relLen, extent, window, cap, scale, sq, kscale)));
   FCUDA_TS("k_ink2_attend_exp", g1, k_ink2_attend_exp<<<g1, 256, 0, g_stream>>>(scores, out, (float *)r, meta, headDim,
@@ -534,18 +544,18 @@ static bool ink2_attend_split(const float *q, const float *r, const float *sinks
   const int othreads = (INK2_ATT_THREADS / headDim) * 32;
   if (!exact) {
     if (staged) {
-      FCUDA_TS("k_ink2_attend_out_tree", g3, (k_ink2_attend_out_tree<true, T, NVFP4><<<g3, INK2_ATS_TREE_GROUPS * 32, osmem, g_stream>>>(
+      FCUDA_TS("k_ink2_attend_out_tree", g3, (k_ink2_attend_out_tree<true, T, kVNVFP4><<<g3, INK2_ATS_TREE_GROUPS * 32, osmem, g_stream>>>(
                                                  scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq, vscale)));
     } else {
       FCUDA_TS("k_ink2_attend_out_tree_tiled", g3,
-               (k_ink2_attend_out_tree_tiled<T, NVFP4><<<g3, INK2_ATS_TREE_GROUPS * 32, 0, g_stream>>>(
+               (k_ink2_attend_out_tree_tiled<T, kVNVFP4><<<g3, INK2_ATS_TREE_GROUPS * 32, 0, g_stream>>>(
                    scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq, vscale)));
     }
   } else if (staged) {
-    FCUDA_TS("k_ink2_attend_out", g3, (k_ink2_attend_out<true, T, NVFP4><<<g3, othreads, osmem, g_stream>>>(
+    FCUDA_TS("k_ink2_attend_out", g3, (k_ink2_attend_out<true, T, kVNVFP4><<<g3, othreads, osmem, g_stream>>>(
                                           scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window, cap, sq, vscale)));
   } else {
-    FCUDA_TS("k_ink2_attend_out_tiled", g3, (k_ink2_attend_out_tiled<T, NVFP4><<<g3, othreads, 0, g_stream>>>(
+    FCUDA_TS("k_ink2_attend_out_tiled", g3, (k_ink2_attend_out_tiled<T, kVNVFP4><<<g3, othreads, 0, g_stream>>>(
                                                 scores, vcache, r, out, meta, heads, kvHeads, headDim, relLen, window,
                                                 cap, sq, vscale)));
   }

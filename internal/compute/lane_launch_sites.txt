@@ -34,11 +34,11 @@ internal/compute/cuda/graph_quant_workspace.cuh	k_q8_quant_act	32	32	literal	qgr
 internal/compute/cuda/graph_quant_workspace.cuh	mul_mat_vec_q<1>	block	128	resolved-chain	grid	0
 internal/compute/cuda/graph_quant_workspace.cuh	quantize_q8_1	256	256	literal	qgrid	0
 internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_exp	256	256	literal	g1	0
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out<true, T, NVFP4>	othreads	0	runtime	g3	osmem
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tiled<T, NVFP4>	othreads	0	runtime	g3	0
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<true, T, NVFP4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	osmem
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree_tiled<T, NVFP4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	0
-internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_scores<T, NVFP4>	INK2_ATS_WARPS * 32	256	resolved-chain	g1	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out<true, T, kVNVFP4>	othreads	0	runtime	g3	osmem
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tiled<T, kVNVFP4>	othreads	0	runtime	g3	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<true, T, kVNVFP4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	osmem
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree_tiled<T, kVNVFP4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_scores<T, NVFP4, AsymK8V4>	INK2_ATS_WARPS * 32	256	resolved-chain	g1	0
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_attend	128	128	literal	grid	smem
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_fuse	256	256	literal	rows	0
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_qk	dim	0	runtime	grid	0
@@ -55,7 +55,7 @@ internal/compute/cuda/inkling2_expert_gemv.cuh	k_ink2_expert_nvfp4_v2<KB, INK2_N
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_add	256	256	literal	(n + 255) / 256	0
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_argkey_index	1	1	literal	1	0
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_argkey_index	C	0	runtime	1	0
-internal/compute/cuda/inkling2_loop.cuh	k_ink2_attend<T, NVFP4>	INK2_ATT_THREADS	512	resolved-chain	g	smem
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_attend<T, NVFP4, AsymK8V4>	INK2_ATT_THREADS	512	resolved-chain	g	smem
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_conv	256	256	literal	(n + 255) / 256	0
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_conv	256	256	literal	g	0
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_ctrl_apply64	INK2_CTRL_APPLY_WARPS * 32	128	resolved-chain	ag	0
@@ -80,6 +80,7 @@ internal/compute/cuda/inkling2_loop.cuh	k_ink2_q8_gemv<4>	INK2_Q8_WARPS * 32	256
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_q8_quant_gated	32	32	literal	nblk	0
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_qkv_post<__half>	32	32	literal	blocks	0
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_qkv_post<float>	32	32	literal	blocks	0
+internal/compute/cuda/inkling2_loop.cuh	k_ink2_qkv_post<uint8_t, false, true>	32	32	literal	blocks	0
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_qkv_post<uint8_t, true>	32	32	literal	blocks	0
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_qkv_post<uint8_t>	32	32	literal	blocks	0
 internal/compute/cuda/inkling2_loop.cuh	k_ink2_rms_multi	1024	1024	literal	nj	0
@@ -114,11 +115,12 @@ internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<3>	INK2_MIX_THREADS	1024	
 internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_mix<4>	INK2_MIX_THREADS	1024	resolved-chain	T	0
 internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_qkv_post<__half>	32	32	literal	grid	0
 internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_qkv_post<float>	32	32	literal	grid	0
+internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_qkv_post<uint8_t, false, true>	32	32	literal	grid	0
 internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_qkv_post<uint8_t, true>	32	32	literal	grid	0
 internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_qkv_post<uint8_t>	32	32	literal	grid	0
 internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_route	32	32	literal	T	0
 internal/compute/cuda/inkling2_prefill.cuh	k_ink2p_scatter_pairs	256	256	literal	grid	0
-internal/compute/cuda/inkling2_prefill_attn.cuh	k_ink2p_attend_v2<QW, KT, REL, PIPE, E, NVFP4>	32 * kG * QW	0	template	grid	smem
+internal/compute/cuda/inkling2_prefill_attn.cuh	k_ink2p_attend_v2<QW, KT, REL, PIPE, E, NVFP4, AsymK8V4>	32 * kG * QW	0	template	grid	smem
 internal/compute/cuda/inkling2_prefill_dense.cuh	ink2d::k_ink2d_f32<32>	256	256	literal	grid	0
 internal/compute/cuda/inkling2_prefill_dense.cuh	ink2d::k_ink2d_f32<64>	256	256	literal	grid	0
 internal/compute/cuda/inkling2_prefill_dense.cuh	k_ink2d_mmq<F, BM>	kThreads	256	resolved-chain	grid	0
