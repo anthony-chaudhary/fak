@@ -130,8 +130,8 @@ var Catalog = map[string]string{
 	// Standard turnkey tier aliases from macfit:
 	"qwen3.8-70b-q4_k_m": qwen70BTierURI,
 	"qwen3.8-27b-q4_k_m": "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
-	"qwen3.8-7b-q4_k_m":  "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-	"qwen3.8-3b-q4_k_m":  "hf://bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
+	"qwen3.8-7b-q4_k_m":  qwen7BTierURI,
+	"qwen3.8-3b-q4_k_m":  qwen3BTierURI,
 	// Ornith 1.0 — DeepReinforce's MIT-licensed Qwen3.5-family agentic-coding models
 	// (released 2026-06-25, HF org deepreinforce-ai; the collection is exactly 7 public
 	// repos — 9B/35B/397B + GGUF/FP8 siblings, NO 31B). Bare "ornith" and "ornith:9b-gguf"
@@ -174,6 +174,14 @@ const inklingMiniURI = "hf://unsloth/Inkling-2-Mini-GGUF@8078d149286eec719379541
 // for the >=64 GiB turnkey tier.
 const qwen70BTierURI = "hf://bartowski/Qwen2.5-72B-Instruct-GGUF@d43fd973131bce821f41e2df3c78c6fe15c5627a/Qwen2.5-72B-Instruct-Q4_K_M.gguf"
 
+// qwen7BTierURI is the pinned, anonymously downloadable Qwen3.8-9B Q4_K_M artifact
+// for the 7B turnkey tier.
+const qwen7BTierURI = "hf://empero-ai/Qwen3.8-9B-Distill-GGUF@760121cd70bb4c36b2b5ec58eb765e0df5987efe/Qwen3.8-9B-Q4_K_M.gguf"
+
+// qwen3BTierURI is the pinned, anonymously downloadable Qwen3.8-4B Q4_K_M artifact
+// for the 3B turnkey tier and DefaultLocalCodingAlias.
+const qwen3BTierURI = "hf://empero-ai/Qwen3.8-4B-Distill-GGUF@391fc7d103e3942a408def3e4f51c2f85d464417/Qwen3.8-4B-Q4_K_M.gguf"
+
 // ArtifactPin is the content a fetched file must have. The Hub revision names
 // the bytes; the sha256 proves they are the bytes fak was measured against.
 type ArtifactPin struct {
@@ -189,6 +197,14 @@ var artifactPins = map[string]ArtifactPin{
 	qwen70BTierURI: {
 		SHA256: "e4c8fad16946be8cf0bbf67eb8f4e18fc7415a5a6d2854b4cda453edb4082545",
 		Bytes:  47415715488,
+	},
+	qwen7BTierURI: {
+		SHA256: "df13d66021cef676f82be74053220fd75af6bf2a6a7fb77f5222ab9e50744a7a",
+		Bytes:  5780090176,
+	},
+	qwen3BTierURI: {
+		SHA256: "dec96e8cf2e11b613bb46513dec485377f9ca5a351e71712ee0e244f287c6790",
+		Bytes:  2783446304,
 	},
 }
 
@@ -341,21 +357,21 @@ var codingAliases = map[string]bool{
 	"qwen38:70b-fp8":      true,
 	"qwen3.8-70b-q4_k_m":  true,
 	"qwen3.8-27b-q4_k_m":  true,
+	"qwen3.8-7b-q4_k_m":   true,
 	"qwen3.8-3b-q4_k_m":   true,
 }
 
 // DefaultLocalCodingAlias is the model `fak guard --local`/`--gguf` picks when the user
 // names no model — the smallest curated coding alias that still RELIABLY tool-calls, so
 // the one-command local-coding path (epic #1056) works with zero knowledge of aliases or
-// quant names. It resolves to Qwen2.5-Coder-3B-Instruct Q4_K_M, a single ~1.93 GB GGUF:
-// the 1.5B floor tool-calls but drops/garbles multi-call turns more often, and the 7B is
-// a heavier download than a "just works" default should pull. Callers must resolve this
-// through a Registry so a user registry.json override of the same alias still wins.
+// quant names. It resolves to Qwen3.8-4B Q4_K_M, a single ~2.59 GiB GGUF. Callers must
+// resolve this through a Registry so a user registry.json override of the same alias
+// still wins.
 // DefaultAlias is the exact first-class model for serving demos and local runs.
 // The smaller DefaultLocalCodingAlias remains available for memory-constrained hosts.
 const DefaultAlias = "qwen38:27b"
 
-const DefaultLocalCodingAlias = "qwen2.5-coder:3b"
+const DefaultLocalCodingAlias = "qwen3.8-3b-q4_k_m"
 
 // DefaultRef returns the immutable catalog target behind DefaultAlias.
 func DefaultRef() string { return Catalog[DefaultAlias] }

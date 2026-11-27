@@ -473,6 +473,54 @@ func TestModelReg70BAlias(t *testing.T) {
 	}
 }
 
+// TestSmallTurnkeyTiersAreQwen38OrNewer pins #14510: the 3B and 7B turnkey tier
+// aliases and DefaultLocalCodingAlias must resolve to pinned, immutable Qwen3.8+
+// artifacts (never Qwen2.5).
+func TestSmallTurnkeyTiersAreQwen38OrNewer(t *testing.T) {
+	withCacheRoot(t)
+	for _, alias := range []string{"qwen3.8-3b-q4_k_m", "qwen3.8-7b-q4_k_m"} {
+		t.Run(alias, func(t *testing.T) {
+			got, expanded := Resolve(alias)
+			if !expanded {
+				t.Fatalf("Resolve(%q) did not expand", alias)
+			}
+			if strings.Contains(strings.ToLower(got), "qwen2.5") {
+				t.Fatalf("Resolve(%q) = %q, must not point to Qwen2.5", alias, got)
+			}
+			if !strings.Contains(got, "Qwen3.8") {
+				t.Fatalf("Resolve(%q) = %q, want Qwen3.8-or-newer artifact", alias, got)
+			}
+			if !IsCoding(alias) {
+				t.Fatalf("IsCoding(%q) = false, want true", alias)
+			}
+			ref, err := hfhub.ParseURI(got)
+			if err != nil {
+				t.Fatalf("ParseURI(%q): %v", got, err)
+			}
+			if len(ref.Revision) != 40 {
+				t.Fatalf("Resolve(%q) revision = %q, want 40-char immutable commit SHA", alias, ref.Revision)
+			}
+			pin, ok := PinnedArtifact(got)
+			if !ok || pin.SHA256 == "" || pin.Bytes <= 0 {
+				t.Fatalf("PinnedArtifact(%q) = (%+v, %v), want valid sha256+size pin", got, pin, ok)
+			}
+		})
+	}
+
+	t.Run("default_local_coding_alias", func(t *testing.T) {
+		if strings.Contains(strings.ToLower(DefaultLocalCodingAlias), "qwen2.5") {
+			t.Fatalf("DefaultLocalCodingAlias = %q, must not be Qwen2.5", DefaultLocalCodingAlias)
+		}
+		got, expanded := Resolve(DefaultLocalCodingAlias)
+		if !expanded || strings.Contains(strings.ToLower(got), "qwen2.5") {
+			t.Fatalf("Resolve(DefaultLocalCodingAlias %q) = (%q, %v), must expand to non-Qwen2.5 target", DefaultLocalCodingAlias, got, expanded)
+		}
+		if !IsCoding(DefaultLocalCodingAlias) {
+			t.Fatalf("IsCoding(DefaultLocalCodingAlias %q) = false, want true", DefaultLocalCodingAlias)
+		}
+	})
+}
+
 // TestResolveFollowsAliasChainAndRejectsCycle pins alias → alias resolution: a 3-hop
 // chain reaches the concrete model, single-hop aliases are unchanged, and a cycle or an
 // over-long chain is refused with a typed sentinel before it is ever stored.
