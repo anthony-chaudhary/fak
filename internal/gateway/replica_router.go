@@ -253,6 +253,15 @@ func (r *ReplicaDispatch) WithPickPolicy(p PickPolicy) *ReplicaDispatch {
 	return r
 }
 
+// WithCacheAwareRouting is the explicit, default-off option that wires the existing
+// CacheAwarePolicy (and its dual abs+rel SkewThreshold guard) into live replica
+// selection (ADAPT of sgl-router cache_aware.rs). It is a thin constructor over
+// WithPickPolicy: no second picker. A zero skew takes DefaultSkewThreshold(). When the
+// policy declines or the prefix carries no residency, pick() keeps the HRW rendezvous.
+func (r *ReplicaDispatch) WithCacheAwareRouting(skew SkewThreshold) *ReplicaDispatch {
+	return r.WithPickPolicy(NewCacheAwarePolicy(NewPrefixResidencyIndex(8), skew))
+}
+
 // servedOutputObserver is the optional capability a PickPolicy may carry: the
 // dispatch feeds it each successfully-served turn's output volume so the policy
 // can learn per-replica capacity from traffic (CapacityAwarePolicy does). A
