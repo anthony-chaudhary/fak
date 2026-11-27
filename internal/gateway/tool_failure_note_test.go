@@ -160,3 +160,42 @@ func TestToolFailureNoteOnceDedup(t *testing.T) {
 		t.Fatal("different trace should emit independently")
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestToolFailureNotesNearestPrecedingLookup(t *testing.T) {
+	t.Parallel()
+	messages := []agent.Message{
+		{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{{
+				ID: "dup_id", Type: "function",
+				Function: agent.Func{Name: "Bash", Arguments: `{"command":"git status"}`},
+			}},
+		},
+		{
+			Role:       agent.RoleTool,
+			ToolCallID: "dup_id",
+			Content:    "Exit code 143\nCommand timed out after 2m 0s",
+		},
+		{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{{
+				ID: "dup_id", Type: "function",
+				Function: agent.Func{Name: "Read", Arguments: `{"file_path":"go.mod"}`},
+			}},
+		},
+		{
+			Role:       agent.RoleTool,
+			ToolCallID: "dup_id",
+			Content:    "module github.com/anthony-chaudhary/fak",
+		},
+	}
+
+	notes := toolFailureNotes(messages)
+	if len(notes) != 1 {
+		t.Fatalf("notes = %d, want 1: %+v", len(notes), notes)
+	}
+	if notes[0].Command != "git status" {
+		t.Fatalf("command = %q, want git status", notes[0].Command)
+	}
+}

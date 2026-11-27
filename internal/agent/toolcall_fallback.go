@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/strictjson"
@@ -704,9 +705,11 @@ func normalizeToolCallFields(m *Message) {
 	}
 }
 
-func nextGeneratedToolCallID(index int, used map[string]bool) string {
-	for i := index; ; i++ {
-		id := fmt.Sprintf("call_fak_%d", i)
+var generatedToolCallIDSeq atomic.Uint64
+
+func nextGeneratedToolCallID(_ int, used map[string]bool) string {
+	for {
+		id := fmt.Sprintf("call_fak_%d", generatedToolCallIDSeq.Add(1))
 		if !used[id] {
 			return id
 		}

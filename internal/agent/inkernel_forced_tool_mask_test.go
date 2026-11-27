@@ -107,8 +107,7 @@ func TestInKernelForcedToolChoiceUnsupportedSchemaFallsBack(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := ToolCall{ID: "call_forced_0", Type: "function", Function: Func{Name: "record_probe", Arguments: `{"probe":"alpha"}`}}
-			if len(comp.Message.ToolCalls) != 1 || comp.Message.ToolCalls[0] != want || comp.FinishReason != "tool_calls" {
+			if len(comp.Message.ToolCalls) != 1 || !strings.HasPrefix(comp.Message.ToolCalls[0].ID, "call_forced_") || comp.Message.ToolCalls[0].Type != "function" || comp.Message.ToolCalls[0].Function != (Func{Name: "record_probe", Arguments: `{"probe":"alpha"}`}) || comp.FinishReason != "tool_calls" {
 				t.Fatalf("unsupported schema left today's forced-tool path: %+v", comp)
 			}
 		})
@@ -151,7 +150,7 @@ func TestInKernelForcedToolChoiceUnsupportedSchemaFallsBack(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := `{"probe":"alpha"}`; len(comp.Message.ToolCalls) != 1 || comp.Message.ToolCalls[0].ID != "call_forced_0" || comp.Message.ToolCalls[0].Function.Arguments != want {
+		if want := `{"probe":"alpha"}`; len(comp.Message.ToolCalls) != 1 || !strings.HasPrefix(comp.Message.ToolCalls[0].ID, "call_forced_") || comp.Message.ToolCalls[0].Function.Arguments != want {
 			t.Fatalf("unarmable reasoning left today's forced-tool path: %+v", comp)
 		}
 	})

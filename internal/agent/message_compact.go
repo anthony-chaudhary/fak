@@ -220,7 +220,6 @@ func ElideStaleReadMessages(messages []Message, stash func(id, excerpt string, b
 		return messages
 	}
 	out := append([]Message(nil), messages...)
-	readPath := make(map[string]string)
 	lastEdit := make(map[string]int)
 	for i, msg := range messages {
 		for _, call := range msg.ToolCalls {
@@ -229,8 +228,6 @@ func ElideStaleReadMessages(messages []Message, stash func(id, excerpt string, b
 				continue
 			}
 			switch strings.ToLower(call.Function.Name) {
-			case "read":
-				readPath[call.ID] = path
 			case "edit", "write", "multiedit", "notebookedit":
 				lastEdit[strings.ToLower(filepath.Clean(path))] = i
 			}
@@ -239,17 +236,41 @@ func ElideStaleReadMessages(messages []Message, stash func(id, excerpt string, b
 			path := decodedToolPath(msg.FunctionCall.Arguments)
 			if path != "" {
 				switch strings.ToLower(msg.FunctionCall.Name) {
-				case "read":
-					readPath[msg.ToolCallID] = path
 				case "edit", "write", "multiedit", "notebookedit":
 					lastEdit[strings.ToLower(filepath.Clean(path))] = i
 				}
 			}
 		}
 	}
+	readPath := make(map[string]string)
 	limit := len(messages) - defaultStaleProtectTail
 	for i := 0; i < limit; i++ {
 		msg := messages[i]
+		if msg.Role == RoleAssistant || len(msg.ToolCalls) > 0 || msg.FunctionCall != nil {
+			for _, call := range msg.ToolCalls {
+				if call.ID == "" {
+					continue
+				}
+				if strings.ToLower(call.Function.Name) == "read" {
+					if path := decodedToolPath(call.Function.Arguments); path != "" {
+						readPath[call.ID] = path
+						continue
+					}
+				}
+				delete(readPath, call.ID)
+			}
+			if msg.FunctionCall != nil && msg.ToolCallID != "" {
+				if strings.ToLower(msg.FunctionCall.Name) == "read" {
+					if path := decodedToolPath(msg.FunctionCall.Arguments); path != "" {
+						readPath[msg.ToolCallID] = path
+					} else {
+						delete(readPath, msg.ToolCallID)
+					}
+				} else {
+					delete(readPath, msg.ToolCallID)
+				}
+			}
+		}
 		if (msg.Role != RoleTool && msg.Role != "tool") || msg.ToolCallID == "" || msg.Content == "" {
 			continue
 		}

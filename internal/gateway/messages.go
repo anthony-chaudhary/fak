@@ -923,7 +923,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	}
 	opts := []agent.SampleOpt{
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
-		agent.WithTemperature(temp),
+		agent.WithClientTemperature(temp),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(req.StopSequences),
 	}

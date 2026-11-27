@@ -311,7 +311,7 @@ func (s *Server) plannerSampleOpts(req *agent.AnthropicMessagesRequest, sessionT
 	}
 	opts := []agent.SampleOpt{
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
-		agent.WithTemperature(temp),
+		agent.WithClientTemperature(temp),
 		agent.WithTopP(req.TopP),
 		agent.WithTopK(req.TopK),
 		agent.WithStop(req.StopSequences),

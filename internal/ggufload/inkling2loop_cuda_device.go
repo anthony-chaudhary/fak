@@ -554,13 +554,21 @@ func Inkling2LoopGreedyTimed(m *Inkling2LoopModel, be compute.Backend, prompt []
 // emits eos, which is not returned; a negative eos decodes all n tokens.
 // DecodeSteps then counts the forward that produced eos.
 func Inkling2LoopGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, eos int) ([]int, Inkling2LoopGreedyStats, error) {
+	return Inkling2LoopGreedyUntilContext(context.Background(), m, be, prompt, n, eos)
+}
+
+// Inkling2LoopGreedyUntilContext is Inkling2LoopGreedyUntil with cancellation support.
+func Inkling2LoopGreedyUntilContext(ctx context.Context, m *Inkling2LoopModel, be compute.Backend, prompt []int, n, eos int) ([]int, Inkling2LoopGreedyStats, error) {
 	var st Inkling2LoopGreedyStats
+	if err := ctx.Err(); err != nil {
+		return nil, st, err
+	}
 	if len(prompt) == 0 {
 		return nil, st, fmt.Errorf("inkling2_loop: empty prompt")
 	}
 	if inkling2ResidentEligible(m, be) {
 		if depth := inkling2SpecDepthFor(m); depth > 0 {
-			return inkling2SpecGreedyUntil(m, be, prompt, n, depth, eos)
+			return inkling2SpecGreedyUntilContext(ctx, m, be, prompt, n, depth, eos)
 		}
 		return inkling2ResidentGreedyUntil(m, be, prompt, n, eos)
 	}
@@ -568,15 +576,23 @@ func Inkling2LoopGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []
 	if err != nil {
 		return nil, st, err
 	}
-	return inkling2GreedyStepsUntil(s, prompt, n, eos)
+	return inkling2GreedyStepsUntilContext(ctx, s, prompt, n, eos)
 }
 
 // inkling2GreedyStepsUntil decodes up to n greedy tokens from a fresh session, the
 // first from prefill, stopping before eos.
 func inkling2GreedyStepsUntil(s Inkling2LoopSession, prompt []int, n, eos int) ([]int, Inkling2LoopGreedyStats, error) {
+	return inkling2GreedyStepsUntilContext(context.Background(), s, prompt, n, eos)
+}
+
+// inkling2GreedyStepsUntilContext is inkling2GreedyStepsUntil with cancellation support.
+func inkling2GreedyStepsUntilContext(ctx context.Context, s Inkling2LoopSession, prompt []int, n, eos int) ([]int, Inkling2LoopGreedyStats, error) {
 	var st Inkling2LoopGreedyStats
+	if err := ctx.Err(); err != nil {
+		return nil, st, err
+	}
 	start := time.Now()
-	next, err := s.Prefill(context.Background(), prompt)
+	next, err := s.Prefill(ctx, prompt)
 	if err != nil {
 		return nil, st, err
 	}
@@ -587,6 +603,9 @@ func inkling2GreedyStepsUntil(s Inkling2LoopSession, prompt []int, n, eos int) (
 		out = append(out, next)
 		if len(out) == n {
 			break
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, st, err
 		}
 		if next, err = s.Step(next); err != nil {
 			return nil, st, err

@@ -534,6 +534,16 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 // Publish the final context and named error on every unwind before Complete's
 // existing deadline defer runs. That defer observes both mutable variables;
 // normal-return assignments alone would lose their state on panic or Goexit.
+func resolveInKernelTemperature(plannerTemp float64, sp SampleParams) float64 {
+	if sp.Temperature != nil {
+		return *sp.Temperature
+	}
+	if plannerTemp == 0 && sp.InheritUpstreamTemperature {
+		return defaultInheritedTemperature
+	}
+	return plannerTemp
+}
+
 func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams, offered OfferedTools, callerCtx *context.Context, callerErr *error, opts ...SampleOpt) (comp *Completion, err error) {
 	defer func() { *callerCtx, *callerErr = ctx, err }()
 
@@ -616,10 +626,7 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 			}
 			requestStarted = time.Now()
 		}
-		temp := p.temp
-		if sp.Temperature != nil {
-			temp = *sp.Temperature
-		}
+		temp := resolveInKernelTemperature(p.temp, sp)
 		// An omitted top_p keeps the full softmax draw; an explicit 0 keeps only the
 		// most probable token instead of meaning "no nucleus".
 		topP := nativeTopP(sp.TopP)
@@ -1030,6 +1037,7 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 				Timings:       NewTimings(promptTok, matched, gen, prefillS, decodeS),
 				NativeDecode:  newNativeDecodeSummary(genRes),
 			}
+			populateReasoningTokensUsage(comp, p.tok)
 			if p.dflash2 != nil {
 				// This diagnostic host draft path has no qualified performance counter
 				// mapping. Do not publish ordinary serial TPS or invented proposal counts.

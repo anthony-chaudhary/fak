@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **106** (clarity 9 + coverage 97) |
-| **Crystal-clear concepts (and climbing)** | **1750** crystal of 4228 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4304 / 4401** (97.8% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **119** (clarity 9 + coverage 110) |
+| **Crystal-clear concepts (and climbing)** | **1759** crystal of 4237 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4314 / 4424** (97.5% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **3** of 322 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **97** of 5583 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **97** of 5591 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 93.6/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 93.4/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4228 concepts - score 93.6/100 (grade A) - disambiguation-debt 106
+concept-disambiguation chart - 4237 concepts - score 93.4/100 (grade A) - disambiguation-debt 119
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1750
+  * crystal       ####################........ 1759
   o defined       ############################ 2478
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -40,8 +40,8 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        ******************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 102 crystal)
-  cache            *******************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (421 concept(s); 175 crystal)
-  context-ctx      ***************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (316 concept(s); 111 crystal)
+  cache            **********************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (424 concept(s); 178 crystal)
+  context-ctx      *******************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (320 concept(s); 115 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ****************************************ooooooooooooooooooooooooo (65 concept(s); 40 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -49,7 +49,7 @@ clarity mix by family (each cell = one concept):
   gateway-engine   **************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (278 concept(s); 98 crystal)
   guard-gate       ****************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (520 concept(s); 232 crystal)
   layout           *************************************oooooooooooooooooooooooo (61 concept(s); 37 crystal)
-  loop             *********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (138 concept(s); 81 crystal)
+  loop             ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (140 concept(s); 83 crystal)
   plan             **************************************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (597 concept(s); 254 crystal)
   policy-capability ****************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (267 concept(s); 136 crystal)
   pool             ****************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (111 concept(s); 40 crystal)
@@ -62,19 +62,19 @@ clarity mix by family (each cell = one concept):
   witness-proof    *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (220 concept(s); 91 crystal)
 
 coverage by family (positioned / discovered):
-  context-ctx      ##########################.. 345/365
-  plan             ###########################. 667/680
-  session-runtime  ###########################. 393/404
-  cache            ###########################. 471/481
+  context-ctx      ##########################.. 349/372
+  plan             ###########################. 667/681
+  session-runtime  ###########################. 393/407
+  cache            ###########################. 474/484
+  guard-gate       ############################ 584/592
+  loop             ###########################. 155/163
   attention        ###########################. 244/251
-  guard-gate       ############################ 584/591
   gateway-engine   ###########################. 327/333
-  loop             ###########################. 151/156
   pool             ###########################. 117/122
-  support-maturity ###########################. 146/150
+  support-maturity ###########################. 146/151
+  policy-capability ############################ 294/297
   render-materialize ############################ 257/260
-  policy-capability ############################ 294/296
-  witness-proof    ############################ 207/209
+  witness-proof    ############################ 207/210
   decision         ############################ 69/70
   evict            ############################ 97/98
   score-debt       ############################ 141/142
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.8%  (4304/4401 confusable tokens positioned)
+namespace coverage  [###############################.] 97.5%  (4314/4424 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 319
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      #........................... 3
   pairs separated   [################################] 319/322
 
-name index: 5583 lookup name(s) -> 4228 concept(s), 97 ambiguous
+name index: 5591 lookup name(s) -> 4237 concept(s), 97 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **319 / 322** (319 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **3** |
 | Entangled concepts (own twin undrawn) | 6 |
-| Boundaries drawn (mutual / total) | 3738 / 8128 |
+| Boundaries drawn (mutual / total) | 3748 / 8149 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5583 over 4228 concepts |
+| Lookup names indexed | 5591 over 4237 concepts |
 | Lookup names landing on several concepts | 97 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4228 |
+| Concepts carrying a contrast set | 4237 |
 
 ## The concepts (best verdict first)
 
@@ -248,6 +248,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **readExpertPageCache** - The #1302 page-cache-aware expert read: reads one expert's stride through a mapped region, serving a warm fault zero-copy and issuing an aligned device ReadAt only on a cold fault. |
 | * | crystal | config | cache | **inkling2PrefixCacheFromEnv (FAK_INKLING2_PREFIX_SLOTS, FAK_INKLING2_PREFIX_CACHE_MIB)** - inkling2PrefixCacheFromEnv reads FAK_INKLING2_PREFIX_SLOTS (how many resident Inkling-2 device sessions fak serve keeps warm for prefix reuse, default 1, capped at 8) and FAK_INKLING2_PREFIX_CACHE_MIB (the device bytes more than one slot may hold together, default 4096). |
 | * | crystal | config | cache | **Inkling2BatchPrefixCacheMiB (FAK_INKLING2_BATCH_PREFIX_CACHE_MIB)** - Inkling2BatchPrefixCacheMiB reports the host MiB FAK_INKLING2_BATCH_PREFIX_CACHE_MIB gives the Inkling-2 batch cohort cross-request prefix store and whether that turns it on, refusing a malformed value or a store cohorts could never use because cohort prefill is off. |
+| * | crystal | symbol | cache | **ensureWindowsGoCacheDir** - Selects and creates the Go build-cache directory for a bounded Windows command. The ordinary per-user cache is preferred, with a fallback directory under the coding workspace. |
+| * | crystal | symbol | cache | **enforceGoCacheEnv** - Replaces GOCACHE in a bounded Go child environment with the directory selected by the native agent. |
+| * | crystal | symbol | cache | **GoCacheDir** - The resolved Go build cache directory supplied to gitdaily.Options for cache maintenance. An empty option disables that lifecycle. |
 | * | crystal | cli-verb | cache | **cachesweep (stale-cache reaping verb)** - internal/cachesweep (the package) and `fak cachesweep` (the verb) reap stale or orphaned cache artifacts the dispatcher and session layers leave behind, bounded by a lane-aware scan so a sweep never touches a live session's working set. |
 | * | crystal | subsystem | cache | **dispatchcache (per-lane dispatch result cache)** - internal/dispatchcache is the per-lane dispatch result cache that memoizes a dispatch tick's issue-to-worker routing decisions so a re-tick does not recompute the full pairwise scan, backed by a bounded queue and a backlog. |
 | * | crystal | config | cache | **CacheTTL5m (default ephemeral cache tier)** - gateway.CacheTTL5m ("5m") is the const pinning the default ephemeral provider cache tier - the 5-minute TTL window a prefix lives at when the managed-cache posture is OFF or auto-unupgraded, mirrored by the ablate package and the warm-resume scale-to-zero path. |
@@ -425,8 +428,12 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **parallelQuantLoadContextBudget (ggufload hierarchical quant load)** - The internal/ggufload WeightSource method that runs the production hierarchical, cancellable quantized tensor load: an outer tensor fan-out with a per-tensor inner worker budget, applying each computed tensor serially under the caller's context. |
 | * | crystal | symbol | context-ctx | **QuantModelQ4KProfileOptionsContext (cancellable Q4_K model build)** - The internal/ggufload WeightSource entry point that builds a Q4_K quantized model from a GGUF under a caller context, a load profile, and functional load options such as streamed experts; the context-aware form the plain QuantModelQ4K wrappers delegate to. |
 | * | crystal | symbol | context-ctx | **nativeStructuredConstraintFromContext** - nativeStructuredConstraintFromContext retrieves the request-local native JSON-schema decoder constraint stored in a Go context.Context so reused and direct decode paths apply the same token mask. |
-| * | crystal | config | context-ctx | **Inkling2ResidentCtxEnv (FAK_INKLING2_CTX)** - Inkling2ResidentCtxEnv names FAK_INKLING2_CTX, the environment knob that sets the global-slot KV capacity of a resident Inkling-2 device session, clamped to the build backend's resident bound (32768 on Metal, 24576 on CUDA) and floored at 512. |
+| * | crystal | config | context-ctx | **Inkling2ResidentCtxEnv (FAK_INKLING2_CTX)** - Inkling2ResidentCtxEnv names FAK_INKLING2_CTX, the environment knob that sets the global-slot KV capacity of a resident Inkling-2 device session, refused, not clamped, when the device-memory KV fit (or the 32768 Metal hard bound) does not admit it, and floored at 512. |
 | * | crystal | symbol | context-ctx | **Inkling2ResidentCtxMax** - Inkling2ResidentCtxMax(backend) is the largest global-slot KV context a resident Inkling-2 device session takes on the named backend: 32768 on Metal, 24576 on every other backend (the CUDA bound). |
+| * | crystal | symbol | context-ctx | **Inkling2AutoCtxCeiling** - Inkling2AutoCtxCeiling is the default 16384-token auto-context ceiling for resident Inkling-2 device sessions when FAK_INKLING2_CTX is unset, shared by CUDA and Metal admission. |
+| * | crystal | symbol | context-ctx | **Inkling2ResidentCtxPin** - Inkling2ResidentCtxPin fixes the global KV cache context of the next resident Inkling-2 session to a caller-admitted token count instead of re-deriving it from free memory. |
+| * | crystal | symbol | context-ctx | **Inkling2ResidentFitCtx** - Inkling2ResidentFitCtx computes the largest resident Inkling-2 global context that fits in a given free-memory byte count after device headroom reserve, in 256-token steps. |
+| * | crystal | symbol | context-ctx | **MaxResidentCtx** - MaxResidentCtx is the hard upper-bound resident global KV context on ModelMemoryBudget consumed by the model-agnostic ServeEnvelope solver, clamping resolved context tokens below backend capacity limits. |
 | * | crystal | symbol | context-ctx | **ContextEpoch** - ContextEpoch is the span during which one initially rendered System Context stays the immutable baseline for a session's provider cache. The gateway holds a bounded per-session store of that baseline, and every turn reconciles against it; the epoch ends, bumping a baseline sequence number, when the session compacts, the session identity moves, or an incompatible transition invalidates the rendering. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextual** - `contextual` is the context-ctx symbol declared or used at `cmd/fak/harness_preview.go:21` as `currentDomain := fs.String("current-domain", "", "last admitted contextual domain")`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextid** - `ContextID` is the context-ctx symbol declared or used at `cmd/microcontextdemo/effect_batch.go:22` as `ContextID string `json:"context_id"``. This row positions that concrete implementation surface, not merely the family label. |
@@ -1014,6 +1021,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | loop | **Inkling2LoopPrefill** - Consume prompt token IDs in causal order, update the host attention and convolution state, and return logits at the final prompt position. |
 | * | crystal | symbol | loop | **Inkling2LoopStep** - Advance one Inkling 2 token through the host forward and return next-token logits or a packed-backend execution error. |
 | * | crystal | symbol | loop | **OpenInkling2Loop** - Open a GGUF file, validate the Inkling 2 model geometry and bind host-accessible weights for a native forward pass. |
+| * | crystal | symbol | loop | **Inkling2LoopDrafter** - Per-turn Inkling-2 decode interface supplying deterministic forced-tool continuation token IDs from toolgrammar.ForcedDraft. |
+| * | crystal | symbol | loop | **Inkling2LoopDraftGenerator** - Optional capability interface on an Inkling-2 loop engine running greedy or sampled decode with an Inkling2LoopDrafter through batched Prefill. |
 | * | crystal | symbol | loop | **promptPanelRefusalArchQ8TokenLoop (target integration semantics)** - Prompt-panel refusal enumeration recorded when q8PrefillNeedsTokenLoop(cfg) is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed. |
 | * | crystal | symbol | loop | **ArchQ8TokenLoop (target integration semantics)** - Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchQ8TokenLoop counter; counts calls attributed to that first-matching prompt-panel refusal axis. |
 | * | crystal | symbol | loop | **loop implementation surface for resolvedcodexloophome** - `resolvedCodexLoopHome` is the loop symbol declared or used at `cmd/fak/orchestration.go:184` as `home, err := resolvedCodexLoopHome(codexHome)`. This row positions that concrete implementation surface, not merely the family label. |
@@ -1653,6 +1662,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **NativeSessionRestored (readmitted-session lifecycle)** - NativeSessionRestored is the NativeSessionLifecycle value assigned when the scheduler rebuilds a model session during swap readmission and imports the preserved KV state. |
 | * | crystal | symbol | session-runtime | **CandidateKind** - The closed promotion-candidate taxonomy a scratchpad artifact is classified into: unfinished-spine, blocked, discovered-edge-case, deferred-caveat, next-checkable-step. A CandidateKind is the deterministic Classify verdict over one parked artifact's filename/leading block. |
 | * | crystal | symbol | session-runtime | **MCP session bearer (guard launch capability)** - The per-launch random credential written into the guarded child's MCP HTTP config and hash-validated by the gateway to prove that an MCP request came from that launched child; it grants no workspace lease ownership. |
+| * | crystal | symbol | session-runtime | **inkling2SlotLayer** - inkling2SlotLayer maps a looped Inkling-2 KV cache slot index (across prelude, repeated core passes, and epilogue) back to its underlying physical transformer layer index. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessiondiag** - `sessiondiag` is the session-runtime symbol declared or used at `cmd/fak/resume_watchdog_candidates.go:12` as `"github.com/anthony-chaudhary/fak/internal/sessiondiag"`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for validsession** - `ValidSession` is the session-runtime symbol declared or used at `cmd/fak/wip.go:376` as `if !wipref.ValidSession(sess) {`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionresume** - `SessionResume` is the session-runtime symbol declared or used at `internal/executionroute/compat.go:295` as `dec.Action = SessionResume`. This row positions that concrete implementation surface, not merely the family label. |
@@ -4514,8 +4524,8 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 40 | 3 | 3 confusable pair(s) with no line drawn |
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 34 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4390/8128 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4228 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4401/8149 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4237 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -4524,25 +4534,25 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `alias_resolved` | 100 | 0 | every alias resolves in the tree (token or wire key) |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5583 lookup name(s) resolves - 97 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5591 lookup name(s) resolves - 97 land on several concepts, all separated |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| context-ctx | 345 | 365 | 20 |
-| plan | 667 | 680 | 13 |
-| session-runtime | 393 | 404 | 11 |
-| cache | 471 | 481 | 10 |
+| context-ctx | 349 | 372 | 23 |
+| plan | 667 | 681 | 14 |
+| session-runtime | 393 | 407 | 14 |
+| cache | 474 | 484 | 10 |
+| guard-gate | 584 | 592 | 8 |
+| loop | 155 | 163 | 8 |
 | attention | 244 | 251 | 7 |
-| guard-gate | 584 | 591 | 7 |
 | gateway-engine | 327 | 333 | 6 |
-| loop | 151 | 156 | 5 |
 | pool | 117 | 122 | 5 |
-| support-maturity | 146 | 150 | 4 |
+| support-maturity | 146 | 151 | 5 |
+| policy-capability | 294 | 297 | 3 |
 | render-materialize | 257 | 260 | 3 |
-| policy-capability | 294 | 296 | 2 |
-| witness-proof | 207 | 209 | 2 |
+| witness-proof | 207 | 210 | 3 |
 | decision | 69 | 70 | 1 |
 | evict | 97 | 98 | 1 |
 | score-debt | 141 | 142 | 1 |

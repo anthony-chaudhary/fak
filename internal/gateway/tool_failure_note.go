@@ -25,10 +25,9 @@ type toolFailureNote struct {
 // paired assistant tool call by ToolCallID, so quoted transcripts cannot trigger
 // a recovery note.
 func toolFailureNotes(messages []agent.Message) []toolFailureNote {
-	callByID := toolCallsByID(messages)
-	gitGhShellSucceeded := hasSuccessfulGitGhShellCall(messages, callByID)
+	gitGhShellSucceeded := hasSuccessfulGitGhShellCall(messages)
 	out := make([]toolFailureNote, 0, 1)
-	for _, m := range messages {
+	for i, m := range messages {
 		if m.Role != agent.RoleTool {
 			continue
 		}
@@ -36,7 +35,7 @@ func toolFailureNotes(messages []agent.Message) []toolFailureNote {
 		if !ok || spec.Token != auditreason.ToolFailureHangShellMismatch {
 			continue
 		}
-		call, ok := callByID[m.ToolCallID]
+		call, ok := nearestPrecedingToolCall(messages, i, m.ToolCallID)
 		if !ok {
 			continue
 		}
@@ -102,21 +101,23 @@ type toolCallFailureContext struct {
 	Command string
 }
 
-func toolCallsByID(messages []agent.Message) map[string]toolCallFailureContext {
-	calls := map[string]toolCallFailureContext{}
-	for _, m := range messages {
+func nearestPrecedingToolCall(messages []agent.Message, before int, id string) (toolCallFailureContext, bool) {
+	if id == "" {
+		return toolCallFailureContext{}, false
+	}
+	for j := before - 1; j >= 0; j-- {
+		m := messages[j]
 		if m.Role != agent.RoleAssistant {
 			continue
 		}
 		for _, tc := range m.ToolCalls {
-			if tc.ID == "" {
-				continue
+			if tc.ID == id {
+				command, _ := toolCallCommand(tc.Function.Arguments)
+				return toolCallFailureContext{Tool: tc.Function.Name, Command: command}, true
 			}
-			command, _ := toolCallCommand(tc.Function.Arguments)
-			calls[tc.ID] = toolCallFailureContext{Tool: tc.Function.Name, Command: command}
 		}
 	}
-	return calls
+	return toolCallFailureContext{}, false
 }
 
 func toolCallCommand(args string) (string, bool) {
@@ -137,12 +138,12 @@ func toolCallCommand(args string) (string, bool) {
 	return "", false
 }
 
-func hasSuccessfulGitGhShellCall(messages []agent.Message, callByID map[string]toolCallFailureContext) bool {
-	for _, m := range messages {
+func hasSuccessfulGitGhShellCall(messages []agent.Message) bool {
+	for i, m := range messages {
 		if m.Role != agent.RoleTool || m.ToolCallID == "" {
 			continue
 		}
-		call, ok := callByID[m.ToolCallID]
+		call, ok := nearestPrecedingToolCall(messages, i, m.ToolCallID)
 		if !ok {
 			continue
 		}

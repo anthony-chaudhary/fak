@@ -427,6 +427,7 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 		Usage:        Usage{PromptTokens: len(ids), CompletionTokens: res.Generated, TotalTokens: len(ids) + res.Generated},
 		Timings:      inkling2LoopTimings(len(ids), res),
 	}
+	populateReasoningTokensUsage(comp, p.tok)
 	if res.CachedPromptTokens > 0 {
 		comp.Usage.PromptTokensDetails = &UsageTokenDetails{CachedTokens: res.CachedPromptTokens}
 	}

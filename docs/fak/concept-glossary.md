@@ -2781,3 +2781,10 @@ Per-turn Inkling-2 decode interface supplying deterministic forced-tool continua
 Optional capability interface on an Inkling-2 loop engine running greedy or sampled decode with an Inkling2LoopDrafter through batched Prefill.
 
 **Distinct from:** Engine execution seam accepting Inkling2LoopDrafter alongside sampling hooks, unlike Inkling2LoopDrafter itself or OpenInkling2Loop (weight loading).
+
+
+### MaxResidentCtx
+
+MaxResidentCtx is the hard upper-bound resident global KV context on ModelMemoryBudget consumed by the model-agnostic ServeEnvelope solver, clamping resolved context tokens below backend capacity limits.
+
+**Distinct from:** The model-agnostic backend hard resident context ceiling in ModelMemoryBudget - not Inkling2AutoCtxCeiling (the default auto-fit cap) and not Inkling2ResidentFitCtx (the live free-VRAM fit calculation).

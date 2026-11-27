@@ -13314,6 +13314,21 @@
           "category": "incidental",
           "reason": "P/D q4k arm's context-budget parameter spelling (cmd/fak/serve_pd.go loadServePDQ4KModelPlaced); the context-token-budget concept is already positioned in the context-ctx family, no new concept",
           "token": "ctxtokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Explicit caller-requested context field on ServeOverrides (promoted from internal/ggufload ServeOverrides); carries CLI/request context override rather than defining a new context abstraction.",
+          "token": "RequestedCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment override context field on ServeOverrides (promoted from internal/ggufload ServeOverrides); carries parsed env context override rather than defining a new context abstraction.",
+          "token": "envCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Lower-bound context constraint field on ServeEnvelopeConstraints (promoted from internal/ggufload); constrains the existing ServeEnvelope solver rather than introducing a new context concept.",
+          "token": "MinCtx"
         }
       ],
       "exclude": [
@@ -13359,6 +13374,7 @@
         "MaxContextTokensForBudget",
         "MechanismStaleContext",
         "MetricFactRecall",
+        "MinCtx",
         "NativeCompactionObservation",
         "NewContextLayerMemo",
         "PackedContextSource",
@@ -13368,6 +13384,7 @@
         "RenderIncrementalContext",
         "RenderInvariantPrefix",
         "ReplaceIncrementalContext",
+        "RequestedCtx",
         "RestoreCalls",
         "RetainedContextBytes",
         "RuntimeContextChanged",
@@ -13439,6 +13456,7 @@
         "ctxtokens",
         "dflash2ContextKV",
         "engramLookAheadContext",
+        "envCtx",
         "fabric_context",
         "fak_fleet_repo_pulse_context_tokens_saved_total",
         "fak_gateway_compaction_thrash_sessions_total",

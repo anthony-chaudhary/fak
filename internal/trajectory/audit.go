@@ -178,6 +178,8 @@ type AuditTranscriptRow struct {
 	TerminalFailureClasses       map[string]int                `json:"terminal_failure_classes,omitempty"`
 	TerminalStallSeconds         int64                         `json:"terminal_stall_seconds,omitempty"`
 	TerminalStallDurationBuckets map[string]int                `json:"terminal_stall_duration_buckets,omitempty"`
+	DegenerateCycles             int                           `json:"degenerate_cycles"`
+	DegenerateCycleExemplars     []AuditDegenerateCycle        `json:"degenerate_cycle_exemplars,omitempty"`
 	usageByID                    map[string]AuditTokens
 	failureCounts                map[string]int
 	schemaShapes                 map[string]auditShapeSet
@@ -222,6 +224,7 @@ type AuditSummaryRow struct {
 	RepeatedFailuresPerSession          *float64                      `json:"repeated_failures_per_session"`
 	RepeatedFailureSemantics            string                        `json:"repeated_failure_semantics"`
 	RepeatedFailureNormalization        string                        `json:"repeated_failure_normalization"`
+	DegenerateCycles                    int                           `json:"degenerate_cycles"`
 	ExpectedWaitTimeouts                int                           `json:"expected_wait_timeouts"`
 	MutationChurn                       int                           `json:"mutation_churn"`
 	HookP95MS                           *int64                        `json:"hook_p95_ms"`
@@ -558,6 +561,7 @@ func (t AuditTranscriptRow) clone() AuditTranscriptRow {
 		}
 	}
 	c.MutationChurnEvents = append([]QwenMutationChurn(nil), t.MutationChurnEvents...)
+	c.DegenerateCycleExemplars = append([]AuditDegenerateCycle(nil), t.DegenerateCycleExemplars...)
 	c.SourcePaths = append([]string(nil), t.SourcePaths...)
 	if t.TerminalFailureClasses != nil {
 		c.TerminalFailureClasses = make(map[string]int, len(t.TerminalFailureClasses))
@@ -864,6 +868,7 @@ func doAuditSource(ctx context.Context, source AuditSource, opts AuditOptions, f
 		if parseErr != nil {
 			return res, parseErr
 		}
+		row.DegenerateCycles, row.DegenerateCycleExemplars = scanAuditFileDegenerateCycles(source.Name, path)
 		res.denominator.FilesScanned++
 		transcripts = append(transcripts, row)
 		refusals = append(refusals, fileRefusals...)
@@ -1007,6 +1012,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 	for _, transcript := range transcripts {
 		summary.Tokens.add(transcript.Tokens)
 		summary.RepeatedFailures += transcript.RepeatedFailures
+		summary.DegenerateCycles += transcript.DegenerateCycles
 		summary.ExpectedWaitTimeouts += transcript.ExpectedWaitTimeouts
 		summary.MutationChurn += transcript.MutationChurn
 		summary.ToolCalls += transcript.ToolCalls

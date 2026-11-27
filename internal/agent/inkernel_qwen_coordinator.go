@@ -395,27 +395,31 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) (fi
 		}
 		beforePanels, beforeMACs := iteration.sharedPanels, iteration.sharedMACs
 		stepStart := time.Now()
+		stepCtx := context.Background()
+		if len(iteration.lanes) == 1 && iteration.lanes[0] != nil && iteration.lanes[0].ctx != nil {
+			stepCtx = iteration.lanes[0].ctx
+		}
 		switch {
 		case !health.enabled():
 			// Policy disabled (margin 0): the historical all-batched step loop,
 			// no calibration step, probes or degradation.
-			iteration.step(context.Background())
+			iteration.step(stepCtx)
 		case !healthCalibrated:
 			// Seed the per-token floor from one real serial step.
-			iteration.stepSerial(context.Background())
+			iteration.stepSerial(stepCtx)
 			health.observeSerial(time.Since(stepStart), iteration.forwarded)
 			healthCalibrated = true
 		case health.useSerial():
-			iteration.stepSerial(context.Background())
+			iteration.stepSerial(stepCtx)
 			health.observeSerial(time.Since(stepStart), iteration.forwarded)
 		case health.probeDue():
 			// Periodic serial probe: refresh the floor so a backlog-inflated
 			// seed cannot permanently excuse a collapsing batched path.
-			iteration.stepSerial(context.Background())
+			iteration.stepSerial(stepCtx)
 			health.observeSerial(time.Since(stepStart), iteration.forwarded)
 			health.sinceProbe = 0
 		default:
-			iteration.step(context.Background())
+			iteration.step(stepCtx)
 			if iteration.serialSteps == 0 {
 				// Only a truly batched forward is guarded: a scalar fallback
 				// already ran serially, and its timing must neither pollute the

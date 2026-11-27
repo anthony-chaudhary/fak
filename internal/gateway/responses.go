@@ -422,7 +422,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	sampleOpts := []agent.SampleOpt{
 		agent.WithModel(reqModel),
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxOutputTokens)),
-		agent.WithTemperature(req.Temperature),
+		agent.WithClientTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithResponseFormat(responseFormat),
 	}

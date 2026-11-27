@@ -420,3 +420,50 @@ func TestInKernelPlannerPromptShrinkSampleOpts(t *testing.T) {
 		t.Fatalf("messages were not compacted: got %d, want < %d", len(shrunkMsgs2), len(messages))
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestElideStaleReadMessagesNearestPrecedingLookup(t *testing.T) {
+	t.Parallel()
+	bigA := strings.Repeat("contents of a.go\n", 10)
+	bigB := strings.Repeat("contents of b.go\n", 10)
+	bigBash := strings.Repeat("bash output line\n", 10)
+	messages := []Message{
+		{
+			Role:      RoleAssistant,
+			ToolCalls: []ToolCall{{ID: "dup_1", Type: "function", Function: Func{Name: "Read", Arguments: `{"file_path":"a.go"}`}}},
+		},
+		{Role: RoleTool, ToolCallID: "dup_1", Content: bigA},
+		{
+			Role:      RoleAssistant,
+			ToolCalls: []ToolCall{{ID: "dup_1", Type: "function", Function: Func{Name: "Read", Arguments: `{"file_path":"b.go"}`}}},
+		},
+		{Role: RoleTool, ToolCallID: "dup_1", Content: bigB},
+		{
+			Role:      RoleAssistant,
+			ToolCalls: []ToolCall{{ID: "dup_1", Type: "function", Function: Func{Name: "Bash", Arguments: `{"command":"ls"}`}}},
+		},
+		{Role: RoleTool, ToolCallID: "dup_1", Content: bigBash},
+		{
+			Role:      RoleAssistant,
+			ToolCalls: []ToolCall{{ID: "edit_a", Type: "function", Function: Func{Name: "Edit", Arguments: `{"file_path":"a.go","old":"x","new":"y"}`}}},
+		},
+		{Role: RoleTool, ToolCallID: "edit_a", Content: "ok"},
+		{Role: RoleUser, Content: "Tail 1"},
+		{Role: RoleAssistant, Content: "Tail 2"},
+		{Role: RoleUser, Content: "Tail 3"},
+		{Role: RoleAssistant, Content: "Tail 4"},
+		{Role: RoleUser, Content: "Tail 5"},
+		{Role: RoleAssistant, Content: "Tail 6"},
+	}
+
+	out := ElideStaleReadMessages(messages, nil)
+	if out[1].Content == bigA || !strings.Contains(out[1].Content, "superseded") {
+		t.Fatalf("turn 1 Read(a.go) should have been elided, got: %q", out[1].Content)
+	}
+	if out[3].Content != bigB {
+		t.Fatalf("turn 2 Read(b.go) should NOT have been elided, got: %q", out[3].Content)
+	}
+	if out[5].Content != bigBash {
+		t.Fatalf("turn 3 Bash(ls) reusing dup_1 should NOT have been elided, got: %q", out[5].Content)
+	}
+}

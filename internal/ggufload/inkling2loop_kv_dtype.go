@@ -27,31 +27,15 @@ var ErrInkling2NVFP4ScaleOverflow = errors.New("inkling2 resident: nvfp4 global 
 var inkling2KVHalfRequested, inkling2KVHalfErr = inkling2KVHalfFrom(os.LookupEnv)
 
 // Inkling2KVDType is the resident global-cache dtype selected by FAK_INKLING2_KV.
-type Inkling2KVDType uint8
+type Inkling2KVDType = ServeKVDType
 
 const (
-	Inkling2KVF32 Inkling2KVDType = iota
-	Inkling2KVF16
-	Inkling2KVFP8
-	Inkling2KVNVFP4
-	Inkling2KVAsym
+	Inkling2KVF32   = ServeKVF32
+	Inkling2KVF16   = ServeKVF16
+	Inkling2KVFP8   = ServeKVFP8
+	Inkling2KVNVFP4 = ServeKVNVFP4
+	Inkling2KVAsym  = ServeKVAsym
 )
-
-// String returns the canonical FAK_INKLING2_KV selector token for d.
-func (d Inkling2KVDType) String() string {
-	switch d {
-	case Inkling2KVF16:
-		return "f16"
-	case Inkling2KVFP8:
-		return "fp8"
-	case Inkling2KVNVFP4:
-		return "nvfp4"
-	case Inkling2KVAsym:
-		return "fp8k_nvfp4v"
-	default:
-		return "f32"
-	}
-}
 
 // Inkling2KVDTypeFrom parses the public resident-KV selector. The serving layer
 // uses the same typed result to disable unsupported prefix reuse modes.
@@ -60,19 +44,11 @@ func Inkling2KVDTypeFrom(lookup func(string) (string, bool)) (Inkling2KVDType, e
 	if !ok {
 		v = ""
 	}
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "fp8k_nvfp4v", "k8v4":
-		return Inkling2KVAsym, nil
-	case "nvfp4", "fp4", "e2m1":
-		return Inkling2KVNVFP4, nil
-	case "fp8", "e4m3", "e4m3fn":
-		return Inkling2KVFP8, nil
-	case "f16", "fp16":
-		return Inkling2KVF16, nil
-	case "", "f32", "fp32":
-		return Inkling2KVF32, nil
+	dt, err := ParseServeKVDType(v)
+	if err != nil {
+		return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, fp8, nvfp4, or fp8k_nvfp4v", v)
 	}
-	return Inkling2KVF32, fmt.Errorf("inkling2 resident: FAK_INKLING2_KV=%q is not f32, f16, fp8, nvfp4, or fp8k_nvfp4v", v)
+	return dt, nil
 }
 
 // inkling2KVHalfFrom parses FAK_INKLING2_KV: f16/fp16 selects f16 global-slot caches,
