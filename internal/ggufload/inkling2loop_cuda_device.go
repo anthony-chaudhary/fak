@@ -634,10 +634,14 @@ func inkling2BackendSM(be compute.Backend) int {
 
 // inkling2DefaultOn resolves an Inkling-2 on/off switch through the per-arch
 // default table, so a value the user set wins and each arch default cites its
-// run. Only an explicit "0" turns the switch off: an arch with no row, or one
-// whose kill switch is set, keeps the built-in on.
+// run. An explicit "0" or an active arch kill switch (e.g. FAK_SM120_DEFAULTS=0)
+// turns the switch off; an arch with no table row keeps the built-in on.
 func inkling2DefaultOn(be compute.Backend, env string, lookup func(string) (string, bool)) bool {
-	return compute.ResolveArchDefault(inkling2BackendSM(be), env, lookup).Value != "0"
+	r := compute.ResolveArchDefault(inkling2BackendSM(be), env, lookup)
+	if r.Source == compute.ArchDefaultFromKilled {
+		return false
+	}
+	return r.Value != "0"
 }
 
 // inkling2ResidentEligible routes a device-bound model on a backend with the

@@ -295,8 +295,21 @@ func TestInkling2DefaultOnKeepsBuiltInThroughArchTable(t *testing.T) {
 		return func(k string) (string, bool) { v, ok := env[k]; return v, ok }
 	}
 	for _, env := range []string{"FAK_INKLING2_RESIDENT", "FAK_INKLING2_GRAPH"} {
-		for _, be := range []compute.Backend{sm120, sm89, vk, nil} {
-			// Unset, the sm_120 table row, or a killed table all stay on, as before.
+		// sm_120 has an arch-default table: unset and explicit on stay on,
+		// FAK_SM120_DEFAULTS=0 (ArchDefaultFromKilled) disables it, and an
+		// explicit per-switch user override wins over the kill switch.
+		for _, e := range []map[string]string{nil, {env: "1"}, {env: ""}, {"FAK_SM120_DEFAULTS": "0", env: "1"}} {
+			if !inkling2DefaultOn(sm120, env, lookup(e)) {
+				t.Fatalf("%s on %v with %v: want on", env, sm120, e)
+			}
+		}
+		for _, e := range []map[string]string{{"FAK_SM120_DEFAULTS": "0"}, {env: "0"}} {
+			if inkling2DefaultOn(sm120, env, lookup(e)) {
+				t.Fatalf("%s on %v with %v: want off", env, sm120, e)
+			}
+		}
+		// Arches without a table row keep the built-in on unless explicitly disabled.
+		for _, be := range []compute.Backend{sm89, vk, nil} {
 			for _, e := range []map[string]string{nil, {"FAK_SM120_DEFAULTS": "0"}, {env: "1"}, {env: ""}} {
 				if !inkling2DefaultOn(be, env, lookup(e)) {
 					t.Fatalf("%s on %v with %v: want on", env, be, e)
