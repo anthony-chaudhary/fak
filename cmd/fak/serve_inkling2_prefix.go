@@ -637,19 +637,6 @@ func inkling2PrefixSlotsNote(e *inkling2LoopEngine) string {
 	return fmt.Sprintf("; prefix slots=%d cap=%dMiB", e.slots, e.capBytes>>20)
 }
 
-// inkling2ScalarBehindCohorts runs every lone request the cohort engine routes to
-// scalar on a fresh session and names the slots that ignores. Kept slots would be
-// unsafe there: a cohort captures into and resets the same process-wide graph exec
-// without taking the resident graph owner, so a kept session could replay a
-// cohort's exec, and nothing frees the slots before a cohort sizes its arenas.
-func inkling2ScalarBehindCohorts(scalar *inkling2LoopEngine) string {
-	scalar.prefixReuse = inkling2PrefixReuseOffCohort
-	if scalar.slots <= 1 {
-		return ""
-	}
-	return fmt.Sprintf("; FAK_INKLING2_PREFIX_SLOTS=%d ignored: lone requests run on a fresh session beside cohorts", scalar.slots)
-}
-
 // inkling2BatchPrefixNote names the cohorts' cross-request prefix store for the
 // startup message, and refuses at startup a FAK_INKLING2_BATCH_PREFIX_CACHE_MIB that is
 // malformed or that the cohorts on be could not use, rather than serving without the

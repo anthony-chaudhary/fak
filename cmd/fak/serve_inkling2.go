@@ -95,7 +95,6 @@ type inkling2PrefixReuseMode uint8
 const (
 	inkling2PrefixReuseOn inkling2PrefixReuseMode = iota
 	inkling2PrefixReuseOff
-	inkling2PrefixReuseOffCohort
 )
 
 func (m inkling2PrefixReuseMode) disabled() bool { return m != inkling2PrefixReuseOn }
@@ -380,6 +379,7 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 			}
 		default:
 			e.prefixTrim()
+			e.cur = nil
 		}
 	}()
 	sl := e.cur
@@ -544,19 +544,20 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 	if err != nil {
 		return nil, "", err
 	}
-	ignored := inkling2ScalarBehindCohorts(scalar)
+	suffix := inkling2PrefixSlotsNote(scalar)
 	if cudaPrefill {
 		kv, _ := lookup("FAK_INKLING2_BATCH_KV")
 		if strings.TrimSpace(kv) == "" {
 			kv = "f32"
 		}
-		prefillMode := inkling2CUDAPrefillKernelLabel(be, lookup)
-		ignored += fmt.Sprintf("; CUDA concurrent prefill policy (%s), batch KV=%s", prefillMode, kv)
+		suffix += fmt.Sprintf("; CUDA concurrent prefill policy (%s), batch KV=%s", inkling2CUDAPrefillKernelLabel(be, lookup), kv)
 	}
 	batchEng := newInkling2LoopBatchEngine(scalar.Generate, m, be, adm, contextTokens, lookup)
 	batchEng.scalarGenerateLogits = scalar.GenerateLogits
+	batchEng.ledger = scalar.prefixState().ledger
+	batchEng.evictIdleSlots = scalar.evictIdleSlotsForCohort
 	return batchEng,
-		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", adm.max, adm.gap, adm.maxWait, prefix, ignored), nil
+		fmt.Sprintf("greedy decode; cohorts up to %d, admission gap=%s wait=%s%s%s", adm.max, adm.gap, adm.maxWait, prefix, suffix), nil
 }
 
 // newServeInkling2LoopPlanner binds an engine to the chat surface with a config
