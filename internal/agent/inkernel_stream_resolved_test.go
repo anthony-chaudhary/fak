@@ -40,7 +40,7 @@ func TestStreamResolvedSampleControlsAndObserverOrder(t *testing.T) {
 
 // fak-test:runtime fast est=100ms lane=default
 func TestCompleteStreamResolvedAdapterSourceGuard(t *testing.T) {
-	data, err := os.ReadFile("inkernel_planner.go")
+	data, err := os.ReadFile("inkernel_planner_stream.go")
 	if err != nil {
 		t.Fatal(err)
 	}
