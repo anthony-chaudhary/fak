@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -406,5 +407,49 @@ func TestUnsupportedVersionIsFault(t *testing.T) {
 	}
 	if !errors.Is(err, errUnsupportedVersion) {
 		t.Fatalf("Get err = %v, want errUnsupportedVersion", err)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestDiskStoreTouchRenewsPruneOrder(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := NewDiskStore(dir)
+	if err != nil {
+		t.Fatalf("NewDiskStore: %v", err)
+	}
+	digestB := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	digestMissing := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+	if err := store.Put(ctx, digestA, spanBytes(64)); err != nil {
+		t.Fatalf("Put A: %v", err)
+	}
+	if err := store.Put(ctx, digestB, spanBytes(64)); err != nil {
+		t.Fatalf("Put B: %v", err)
+	}
+	oldA := time.Now().Add(-2 * time.Hour)
+	oldB := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, digestA), oldA, oldA); err != nil {
+		t.Fatalf("Chtimes A: %v", err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, digestB), oldB, oldB); err != nil {
+		t.Fatalf("Chtimes B: %v", err)
+	}
+
+	if err := store.Touch(ctx, []string{digestMissing, digestA}); err != nil {
+		t.Fatalf("Touch: %v", err)
+	}
+	if err := store.Touch(ctx, []string{"../escape"}); err == nil {
+		t.Fatal("Touch accepted invalid key, want error")
+	}
+
+	if err := store.Prune(1, 0, ""); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if _, foundA, err := store.Get(ctx, digestA); err != nil || !foundA {
+		t.Fatalf("touched digestA found=%v err=%v, want kept after prune", foundA, err)
+	}
+	if _, foundB, err := store.Get(ctx, digestB); err != nil || foundB {
+		t.Fatalf("untouched digestB found=%v err=%v, want pruned first", foundB, err)
 	}
 }

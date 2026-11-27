@@ -84,8 +84,9 @@ var (
 // internal/blobfs uses — an interrupted write leaves only a temp file, never a half
 // record under a valid key.
 type DiskStore struct {
-	dir string
-	mu  sync.Mutex
+	dir         string
+	mu          sync.Mutex
+	lastModNano int64
 }
 
 type diskStore = DiskStore
@@ -144,7 +145,85 @@ func (s *diskStore) Put(ctx context.Context, key string, payload []byte) error {
 	buf = append(buf, ver[:]...)
 	buf = append(buf, sum[:]...)
 	buf = append(buf, payload...)
-	return atomicWrite(s.path(key), buf)
+	if err := atomicWrite(s.path(key), buf); err != nil {
+		return err
+	}
+	if now := time.Now().UnixNano(); now > s.lastModNano {
+		s.lastModNano = now
+	}
+	return nil
+}
+
+// Touch renews the recency (modification time) of each valid, present record in
+// keys without reading or rewriting payload bytes, so PruneContext keeps hot
+// entries ahead of cold ones. Missing keys are ignored as benign misses.
+func (s *DiskStore) Touch(ctx context.Context, keys []string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s == nil {
+		return fmt.Errorf("l3kv: touch nil disk store")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	nowNano := time.Now().UnixNano()
+	if nowNano <= s.lastModNano {
+		nowNano = s.lastModNano + 1000
+	}
+	for _, key := range keys {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !validKey(key) {
+			return fmt.Errorf("l3kv: invalid span key %q", key)
+		}
+		ts := time.Unix(0, nowNano)
+		if err := os.Chtimes(s.path(key), ts, ts); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("l3kv: touch record %s: %w", key, err)
+		}
+		s.lastModNano = nowNano
+		nowNano += 1000
+	}
+	return nil
+}
+
+// Delete removes each valid record in keys from disk. Missing keys are ignored.
+func (s *DiskStore) Delete(ctx context.Context, keys []string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s == nil {
+		return fmt.Errorf("l3kv: delete nil disk store")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, key := range keys {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !validKey(key) {
+			return fmt.Errorf("l3kv: invalid span key %q", key)
+		}
+		if err := os.Remove(s.path(key)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("l3kv: delete record %s: %w", key, err)
+		}
+	}
+	return nil
 }
 
 func (s *diskStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
