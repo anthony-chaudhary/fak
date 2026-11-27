@@ -1,6 +1,9 @@
 package compute
 
-import "strconv"
+import (
+	"slices"
+	"strconv"
+)
 
 // cuda_arch_coverage.go — the always-compiled, hardware-independent half of the CUDA (NVIDIA)
 // backend's arch-admission logic (issue #4184). Before any kernel runs, a CUDA build must answer
@@ -210,4 +213,78 @@ func SelectCUDADecodeProgram(major, minor int, dt Dtype) CUDADecodeProgram {
 		return p
 	}
 	return cudaGenericDecodeProgram
+}
+
+// ---- Attention backend priority list ----------------------------------------------
+//
+// ADAPT of the xformers/MSLK fmha dispatch idea (facebookresearch/xformers,
+// xformers/ops/fmha/dispatch.py @b5410d3bb4bf6929aba3324676b05e826a4d2886, BSD-3-Clause):
+// an ORDERED list of candidate attention backends, each declaring its support envelope over
+// (compute capability, dtype, mask shape, sequence regime). The walk returns the first eligible
+// entry and falls through to the generic path when nothing covers the combination. Only the
+// principle is ported: no upstream code, no new attention kernels, no speed claim. Every entry
+// names an already-shipped stage; selecting one changes which existing program is planned.
+
+// CUDAAttentionMask is the attention mask shape a backend entry may support.
+type CUDAAttentionMask uint8
+
+const (
+	CUDAMaskCausal CUDAAttentionMask = iota
+	CUDAMaskFull
+	CUDAMaskSliding
+)
+
+// CUDAAttentionRegime is the sequence regime of the call.
+type CUDAAttentionRegime uint8
+
+const (
+	CUDARegimeDecode CUDAAttentionRegime = iota
+	CUDARegimePrefill
+)
+
+// CUDAAttentionBackend is one priority-list entry with its declared support envelope. An empty
+// Masks or Regimes slice means "any".
+type CUDAAttentionBackend struct {
+	Name     string
+	Arches   []cudaCC
+	DTypes   []Dtype
+	Masks    []CUDAAttentionMask
+	Regimes  []CUDAAttentionRegime
+	Generic  bool
+	priority int
+}
+
+func (b CUDAAttentionBackend) supports(cc cudaCC, dt Dtype, m CUDAAttentionMask, r CUDAAttentionRegime) bool {
+	if b.Generic {
+		return true
+	}
+	return slices.Contains(b.Arches, cc) && slices.Contains(b.DTypes, dt) &&
+		(len(b.Masks) == 0 || slices.Contains(b.Masks, m)) &&
+		(len(b.Regimes) == 0 || slices.Contains(b.Regimes, r))
+}
+
+// cudaAttentionPriority is the ordered candidate list: the first eligible entry wins, so a
+// narrow specialized entry precedes the broader one that also covers it. Blackwell parts have no
+// specialized entry by construction and keep the generic path.
+var cudaAttentionPriority = []CUDAAttentionBackend{
+	{Name: "attn/sm90-fp8-decode-causal", Arches: []cudaCC{{9, 0}}, DTypes: []Dtype{FP8},
+		Masks: []CUDAAttentionMask{CUDAMaskCausal}, Regimes: []CUDAAttentionRegime{CUDARegimeDecode}},
+	{Name: "attn/sm89-fp8-decode-causal", Arches: []cudaCC{{8, 9}}, DTypes: []Dtype{FP8},
+		Masks: []CUDAAttentionMask{CUDAMaskCausal}, Regimes: []CUDAAttentionRegime{CUDARegimeDecode}},
+	{Name: "attn/ada-hopper-fp8-decode-any-mask", Arches: []cudaCC{{8, 9}, {9, 0}}, DTypes: []Dtype{FP8},
+		Regimes: []CUDAAttentionRegime{CUDARegimeDecode}},
+	{Name: "attn/generic-flat", Generic: true},
+}
+
+// SelectCUDAAttentionBackend walks cudaAttentionPriority in order and returns the first backend
+// whose declared envelope covers the call, else the generic entry. Deterministic, GPU-free.
+func SelectCUDAAttentionBackend(major, minor int, dt Dtype, mask CUDAAttentionMask, regime CUDAAttentionRegime) CUDAAttentionBackend {
+	cc := cudaCC{major, minor}
+	for i, b := range cudaAttentionPriority {
+		if b.supports(cc, dt, mask, regime) {
+			b.priority = i
+			return b
+		}
+	}
+	return cudaAttentionPriority[len(cudaAttentionPriority)-1]
 }

@@ -181,3 +181,41 @@ func TestCudaArchDecodeProgramSelect(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCudaArchDispatchPriority(t *testing.T) {
+	t.Parallel()
+	// Covered arch+dtype+mask selects the highest-priority eligible backend.
+	if got := SelectCUDAAttentionBackend(9, 0, FP8, CUDAMaskCausal, CUDARegimeDecode); got.Name != "attn/sm90-fp8-decode-causal" || got.priority != 0 {
+		t.Fatalf("sm90 fp8 causal decode = %+v, want the narrow sm90 entry at priority 0", got)
+	}
+	// A call only the broader entry covers falls through the narrow ones to it.
+	if got := SelectCUDAAttentionBackend(9, 0, FP8, CUDAMaskFull, CUDARegimeDecode); got.Name != "attn/ada-hopper-fp8-decode-any-mask" {
+		t.Fatalf("sm90 fp8 full-mask decode = %q, want the broader entry", got.Name)
+	}
+	// Uncovered combinations fall back explicitly to the generic path.
+	for _, c := range []struct {
+		major, minor int
+		dt           Dtype
+		mask         CUDAAttentionMask
+		regime       CUDAAttentionRegime
+	}{
+		{10, 0, FP8, CUDAMaskCausal, CUDARegimeDecode}, // Blackwell: no specialized entry
+		{9, 0, F16, CUDAMaskCausal, CUDARegimeDecode},  // dtype uncovered
+		{9, 0, FP8, CUDAMaskCausal, CUDARegimePrefill}, // regime uncovered
+		{8, 0, FP8, CUDAMaskCausal, CUDARegimeDecode},  // Ampere: no FP8 lane
+	} {
+		if got := SelectCUDAAttentionBackend(c.major, c.minor, c.dt, c.mask, c.regime); !got.Generic || got.Name != "attn/generic-flat" {
+			t.Fatalf("uncovered %+v = %+v, want the generic fallback", c, got)
+		}
+	}
+	// Priority order is deterministic and the generic entry is last.
+	for i := 0; i < 3; i++ {
+		if got := SelectCUDAAttentionBackend(8, 9, FP8, CUDAMaskCausal, CUDARegimeDecode); got.Name != "attn/sm89-fp8-decode-causal" {
+			t.Fatalf("run %d: sm89 = %q", i, got.Name)
+		}
+	}
+	if last := cudaAttentionPriority[len(cudaAttentionPriority)-1]; !last.Generic {
+		t.Fatalf("last priority entry %q is not the generic fallback", last.Name)
+	}
+}
