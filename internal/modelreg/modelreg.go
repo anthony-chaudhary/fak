@@ -118,15 +118,17 @@ var Catalog = map[string]string{
 	"qwen38:27b-fp8":      "hf://Qwen/Qwen3.8-27B-FP8",
 	"qwen38:27b-q2k":      "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
 	"qwen38:27b-ud-q2kxl": "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
-	// Qwen3.8-70B is a high-capacity dense hybrid model for >=64GB unified memory tiers.
-	// Q4_K_M is the canonical quantized artifact for the Apple Silicon Mac provisioner (fak up).
-	"qwen38:70b":        "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
-	"qwen38:70b-q4":     "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
-	"qwen38:70b-q4_k_m": "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
-	"qwen38:70b-q4km":   "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
+	// 70B >=64GB unified memory tier: Qwen3.8-70B-GGUF is not anonymously accessible on
+	// Hugging Face (returns HTTP 401), so route the 70B turnkey aliases to the pinned,
+	// anonymously downloadable Qwen2.5-72B-Instruct Q4_K_M artifact (consistent with the
+	// 7B and 3B turnkey tier aliases below).
+	"qwen38:70b":        qwen70BTierURI,
+	"qwen38:70b-q4":     qwen70BTierURI,
+	"qwen38:70b-q4_k_m": qwen70BTierURI,
+	"qwen38:70b-q4km":   qwen70BTierURI,
 	"qwen38:70b-fp8":    "hf://Qwen/Qwen3.8-70B-FP8",
 	// Standard turnkey tier aliases from macfit:
-	"qwen3.8-70b-q4_k_m": "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
+	"qwen3.8-70b-q4_k_m": qwen70BTierURI,
 	"qwen3.8-27b-q4_k_m": "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
 	"qwen3.8-7b-q4_k_m":  "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
 	"qwen3.8-3b-q4_k_m":  "hf://bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
@@ -168,6 +170,10 @@ var Catalog = map[string]string{
 // keyed by it, so a move to another revision or file must come with a new digest.
 const inklingMiniURI = "hf://unsloth/Inkling-2-Mini-GGUF@8078d149286eec7193795413b9e0643da6d11fa1/Mainline_Support/Inkling-2-Mini-UD-Q3_K_XL.gguf_file"
 
+// qwen70BTierURI is the pinned, anonymously downloadable 70B-class Q4_K_M artifact
+// for the >=64 GiB turnkey tier.
+const qwen70BTierURI = "hf://bartowski/Qwen2.5-72B-Instruct-GGUF@d43fd973131bce821f41e2df3c78c6fe15c5627a/Qwen2.5-72B-Instruct-Q4_K_M.gguf"
+
 // ArtifactPin is the content a fetched file must have. The Hub revision names
 // the bytes; the sha256 proves they are the bytes fak was measured against.
 type ArtifactPin struct {
@@ -179,6 +185,10 @@ var artifactPins = map[string]ArtifactPin{
 	inklingMiniURI: {
 		SHA256: "e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639",
 		Bytes:  13631779296,
+	},
+	qwen70BTierURI: {
+		SHA256: "e4c8fad16946be8cf0bbf67eb8f4e18fc7415a5a6d2854b4cda453edb4082545",
+		Bytes:  47415715488,
 	},
 }
 

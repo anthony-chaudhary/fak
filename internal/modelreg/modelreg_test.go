@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
@@ -332,10 +333,10 @@ func TestEmbeddedQwen38Aliases(t *testing.T) {
 		"qwen38:27b-fp8":      "hf://Qwen/Qwen3.8-27B-FP8",
 		"qwen38:27b-q2k":      "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
 		"qwen38:27b-ud-q2kxl": "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
-		"qwen38:70b":          "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
-		"qwen38:70b-q4":       "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
-		"qwen38:70b-q4_k_m":   "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
-		"qwen38:70b-q4km":     "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf",
+		"qwen38:70b":          qwen70BTierURI,
+		"qwen38:70b-q4":       qwen70BTierURI,
+		"qwen38:70b-q4_k_m":   qwen70BTierURI,
+		"qwen38:70b-q4km":     qwen70BTierURI,
 		"qwen38:70b-fp8":      "hf://Qwen/Qwen3.8-70B-FP8",
 	}
 	for alias, target := range want {
@@ -403,9 +404,9 @@ func TestFindLocalModelDiscoversModelInDefaultDirs(t *testing.T) {
 
 func TestModelReg70BAlias(t *testing.T) {
 	withCacheRoot(t)
-	const want70B = "hf://unsloth/Qwen3.8-70B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-70B-Q4_K_M.gguf"
+	const want70B = "hf://bartowski/Qwen2.5-72B-Instruct-GGUF@d43fd973131bce821f41e2df3c78c6fe15c5627a/Qwen2.5-72B-Instruct-Q4_K_M.gguf"
 
-	aliases := []string{"qwen38:70b", "qwen38:70b-q4_k_m"}
+	aliases := []string{"qwen38:70b", "qwen38:70b-q4_k_m", "qwen3.8-70b-q4_k_m"}
 	for _, alias := range aliases {
 		t.Run("catalog_"+alias, func(t *testing.T) {
 			got, exists := Catalog[alias]
@@ -430,6 +431,33 @@ func TestModelReg70BAlias(t *testing.T) {
 			}
 		})
 	}
+
+	// Regression: >=64 GiB auto-tier selection must resolve to a pinned immutable
+	// public artifact, never the anonymous-inaccessible unsloth/Qwen3.8-70B-GGUF.
+	t.Run("64GiB_tier_pinned_immutable", func(t *testing.T) {
+		tier := macfit.SelectModelTier(64 * macfit.GiB)
+		got, expanded := Resolve(tier.ModelID)
+		if !expanded {
+			t.Fatalf("Resolve(%q) did not expand", tier.ModelID)
+		}
+		if strings.Contains(got, "unsloth/Qwen3.8-70B-GGUF") {
+			t.Fatalf("64 GiB tier resolved to anonymous-inaccessible %q", got)
+		}
+		ref, err := hfhub.ParseURI(got)
+		if err != nil {
+			t.Fatalf("ParseURI(%q): %v", got, err)
+		}
+		if len(ref.Revision) != 40 {
+			t.Fatalf("70B tier revision = %q, want 40-char immutable commit SHA", ref.Revision)
+		}
+		pin, ok := PinnedArtifact(got)
+		if !ok {
+			t.Fatalf("PinnedArtifact(%q) missing, want sha256+size pin", got)
+		}
+		if pin.SHA256 != "e4c8fad16946be8cf0bbf67eb8f4e18fc7415a5a6d2854b4cda453edb4082545" || pin.Bytes != 47415715488 {
+			t.Fatalf("PinnedArtifact(%q) = %+v, want sha256 e4c8...2545 and 47415715488 bytes", got, pin)
+		}
+	})
 
 	// Verify all standard tiers from macfit resolve to valid hf:// URIs in modelreg.
 	for _, tier := range macfit.StandardTiers {
