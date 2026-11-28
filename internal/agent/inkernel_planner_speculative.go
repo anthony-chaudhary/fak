@@ -1419,6 +1419,9 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	}
 	p.metalMTPMu.Lock()
 	defer p.metalMTPMu.Unlock()
+	if err = ctx.Err(); err != nil {
+		return inKernelGenerateResult{}, err
+	}
 	nonDecode := nativeperf.BeginNonDecodeWork()
 	defer nonDecode.End()
 

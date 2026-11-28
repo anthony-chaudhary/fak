@@ -321,3 +321,202 @@ func TestServeInkling2ForcedDraftReducesStepsAndPreservesParity(t *testing.T) {
 		t.Fatalf("unexpected stop token in prefill: %v", truncSess.prefills[0])
 	}
 }
+
+type inkling2ForcedVerifyMockSession struct {
+	*inkling2PromptAwareSession
+	forcedSpanCommits [][]int
+}
+
+func (s *inkling2ForcedVerifyMockSession) CommitForcedSpan(_ context.Context, prevToken int, forced []int) (int, bool, error) {
+	span := make([]int, 1+len(forced))
+	span[0] = prevToken
+	copy(span[1:], forced)
+	s.forcedSpanCommits = append(s.forcedSpanCommits, span)
+	s.appendTokens(span)
+	s.lastNext = s.predictNext()
+	return s.lastNext, true, nil
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestServeInkling2ForcedDraftUsesForcedVerifySession(t *testing.T) {
+	tok := inkling2ServeForcedDraftTokenizer(t)
+	stopID, _ := tok.SpecialID(agent.Inkling2EndOfTurnMarker)
+	tools := []agent.ToolDef{{
+		Type: "function",
+		Function: agent.ToolDefFunction{
+			Name:       "read_file",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`),
+		},
+	}}
+	choice := json.RawMessage(`{"type":"function","function":{"name":"read_file"}}`)
+	const targetText = `{"name":"read_file","arguments":{"path":"go.mod"}}`
+
+	var baseSess *inkling2PromptAwareSession
+	baseEng := newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
+		baseSess = &inkling2PromptAwareSession{
+			inkling2ForcedCountingSession: &inkling2ForcedCountingSession{
+				tok:        tok,
+				targetText: targetText,
+				stopID:     stopID,
+				vocabSize:  tok.Vocab(),
+			},
+			initialPromptLen: 1 << 30,
+		}
+		return baseSess, nil
+	})
+	defer baseEng.Close()
+	type plainGenOnly struct{ agent.Inkling2LoopGenerator }
+	plainPlanner, err := newServeInkling2LoopPlanner(plainGenOnly{baseEng}, tok, "inkling2-mini", 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := []agent.Message{{Role: agent.RoleUser, Content: "read go.mod"}}
+	baseComp, err := plainPlanner.Complete(context.Background(), msgs, tools, agent.WithToolChoice(choice), agent.WithReasoningEffort(agent.EffortTierNone), agent.WithMaxTokens(128))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var fvSess *inkling2ForcedVerifyMockSession
+	fvEng := newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
+		fvSess = &inkling2ForcedVerifyMockSession{
+			inkling2PromptAwareSession: &inkling2PromptAwareSession{
+				inkling2ForcedCountingSession: &inkling2ForcedCountingSession{
+					tok:        tok,
+					targetText: targetText,
+					stopID:     stopID,
+					vocabSize:  tok.Vocab(),
+				},
+				initialPromptLen: baseComp.Usage.PromptTokens,
+			},
+		}
+		return fvSess, nil
+	})
+	defer fvEng.Close()
+	fvPlanner, err := newServeInkling2LoopPlanner(fvEng, tok, "inkling2-mini", 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fvComp, err := fvPlanner.Complete(context.Background(), msgs, tools, agent.WithToolChoice(choice), agent.WithReasoningEffort(agent.EffortTierNone), agent.WithMaxTokens(128))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fvComp.Message.ToolCalls) != 1 || fvComp.Message.ToolCalls[0].Function != baseComp.Message.ToolCalls[0].Function {
+		t.Fatalf("ForcedVerify tool call mismatch: got %+v, want %+v", fvComp.Message.ToolCalls, baseComp.Message.ToolCalls)
+	}
+	if len(fvSess.forcedSpanCommits) == 0 {
+		t.Fatal("expected serve() to call CommitForcedSpan on Inkling2LoopForcedVerifySession")
+	}
+	if len(fvSess.prefills) != 1 {
+		t.Fatalf("expected only initial Prefill (1 call) when CommitForcedSpan handles mid-decode forced spans, got %d prefills", len(fvSess.prefills))
+	}
+}
+
+type inkling2MaskedLogitBiasSession struct {
+	*inkling2ForcedVerifyMockSession
+	poisonID int
+	validID  int
+}
+
+func (s *inkling2MaskedLogitBiasSession) LastLogits() ([]float32, error) {
+	logits, err := s.inkling2ForcedVerifyMockSession.LastLogits()
+	if err != nil {
+		return nil, err
+	}
+	if s.lastNext == s.validID && s.poisonID >= 0 && s.poisonID < len(logits) {
+		// Force an invalid grammar token above the valid token unless MaskLogits masks it.
+		logits[s.poisonID] = 100
+		logits[s.validID] = 50
+	}
+	return logits, nil
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestServeInkling2ForcedDraftAppliesMaskLogitsAtBranchingPositions(t *testing.T) {
+	tok := inkling2ServeForcedDraftTokenizer(t)
+	stopID, _ := tok.SpecialID(agent.Inkling2EndOfTurnMarker)
+	tools := []agent.ToolDef{{
+		Type: "function",
+		Function: agent.ToolDefFunction{
+			Name:       "read_file",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"count":{"type":"integer"}},"required":["path","count"],"additionalProperties":false}`),
+		},
+	}}
+	choice := json.RawMessage(`{"type":"function","function":{"name":"read_file"}}`)
+	const targetText = `{"name":"read_file","arguments":{"path":"go.mod","count":7}}`
+
+	digitIDs, err := tok.Encode("7")
+	if err != nil || len(digitIDs) != 1 {
+		t.Fatalf("encode 7: ids=%v err=%v", digitIDs, err)
+	}
+	quoteIDs, err := tok.Encode(`"`)
+	if err != nil || len(quoteIDs) != 1 {
+		t.Fatalf("encode quote: ids=%v err=%v", quoteIDs, err)
+	}
+
+	msgs := []agent.Message{{Role: agent.RoleUser, Content: "read go.mod"}}
+	baseEng := newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
+		return &inkling2PromptAwareSession{
+			inkling2ForcedCountingSession: &inkling2ForcedCountingSession{
+				tok:        tok,
+				targetText: targetText,
+				stopID:     stopID,
+				vocabSize:  tok.Vocab(),
+			},
+			initialPromptLen: 1 << 30,
+		}, nil
+	})
+	type plainGenOnly struct{ agent.Inkling2LoopGenerator }
+	basePlanner, err := newServeInkling2LoopPlanner(plainGenOnly{baseEng}, tok, "inkling2-mini", 4096)
+	if err != nil {
+		baseEng.Close()
+		t.Fatal(err)
+	}
+	baseComp, err := basePlanner.Complete(context.Background(), msgs, tools, agent.WithToolChoice(choice), agent.WithReasoningEffort(agent.EffortTierNone), agent.WithMaxTokens(128))
+	baseEng.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptTokens := baseComp.Usage.PromptTokens
+
+	for _, temp := range []float64{0, 0.7} {
+		var sess *inkling2MaskedLogitBiasSession
+		eng := newInkling2LoopEngineFrom(func() (ggufload.Inkling2LoopSession, error) {
+			sess = &inkling2MaskedLogitBiasSession{
+				inkling2ForcedVerifyMockSession: &inkling2ForcedVerifyMockSession{
+					inkling2PromptAwareSession: &inkling2PromptAwareSession{
+						inkling2ForcedCountingSession: &inkling2ForcedCountingSession{
+							tok:        tok,
+							targetText: targetText,
+							stopID:     stopID,
+							vocabSize:  tok.Vocab(),
+						},
+						initialPromptLen: promptTokens,
+					},
+				},
+				poisonID: quoteIDs[0],
+				validID:  digitIDs[0],
+			}
+			return sess, nil
+		})
+		planner, err := newServeInkling2LoopPlanner(eng, tok, "inkling2-mini", 4096)
+		if err != nil {
+			eng.Close()
+			t.Fatal(err)
+		}
+		tVal := temp
+		comp, err := planner.Complete(context.Background(), msgs, tools, agent.WithToolChoice(choice), agent.WithReasoningEffort(agent.EffortTierNone), agent.WithTemperature(&tVal), agent.WithMaxTokens(128))
+		eng.Close()
+		if err != nil {
+			t.Fatalf("temp=%g Complete: %v", temp, err)
+		}
+		if len(comp.Message.ToolCalls) != 1 || comp.Message.ToolCalls[0].Function.Name != "read_file" {
+			t.Fatalf("temp=%g missing read_file tool call: %+v", temp, comp.Message.ToolCalls)
+		}
+		if comp.Message.ToolCalls[0].Function.Arguments != `{"path":"go.mod","count":7}` {
+			t.Fatalf("temp=%g args = %q, want %q", temp, comp.Message.ToolCalls[0].Function.Arguments, `{"path":"go.mod","count":7}`)
+		}
+		if len(sess.forcedSpanCommits) == 0 {
+			t.Fatalf("temp=%g expected CommitForcedSpan to be invoked", temp)
+		}
+	}
+}

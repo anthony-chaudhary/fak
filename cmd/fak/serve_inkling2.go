@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"runtime"
 	"strconv"
@@ -158,7 +159,8 @@ type inkling2LoopEngine struct {
 	clock    uint64
 	closeErr error
 	// closeSpec releases any shared speculative draft weights owned by the engine.
-	closeSpec func() error
+	closeSpec      func() error
+	prefixHitWatch inkling2PrefixHitWatch
 }
 
 var (
@@ -235,6 +237,11 @@ func (e *inkling2LoopEngine) generate(ctx context.Context, prompt []int, maxNew 
 		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
 	}
 	<-r.done
+	if r.err == nil {
+		if alert := e.prefixHitWatch.observe(len(prompt), r.res.CachedPromptTokens, !e.prefixReuse.disabled()); alert != "" {
+			log.Printf("fak serve: %s", alert)
+		}
+	}
 	return r.res, r.err
 }
 
@@ -533,12 +540,12 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 	if r.sample != nil && !hasLogits {
 		fmt.Fprintln(os.Stderr, "fak serve: inkling2_loop: non-greedy sampling requested on greedy-only session; falling back to greedy")
 	}
-	if needFirstPred && r.sample != nil && hasLogits {
-		logits, lerr := ls.LastLogits()
-		if lerr != nil {
-			return res, lerr
-		}
-		if next, err = r.sample(logits); err != nil {
+	var maskFn func([]float32)
+	if masker, ok := r.draft.(interface{ MaskLogits([]float32) }); ok {
+		maskFn = masker.MaskLogits
+	}
+	if needFirstPred && hasLogits && (r.sample != nil || maskFn != nil) {
+		if next, err = selectInkling2NextToken(ls, r.sample, maskFn); err != nil {
 			return res, err
 		}
 	}
@@ -626,6 +633,10 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 				if next, err = s.Step(next); err != nil {
 					return res, err
 				}
+			} else if fv, ok := s.(ggufload.Inkling2LoopForcedVerifySession); ok {
+				if next, _, err = fv.CommitForcedSpan(r.ctx, next, emitted); err != nil {
+					return res, err
+				}
 			} else {
 				batch := make([]int, 1+len(emitted))
 				batch[0] = next
@@ -643,12 +654,8 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 			fault = false
 			return res, cerr
 		}
-		if r.sample != nil && hasLogits {
-			logits, lerr := ls.LastLogits()
-			if lerr != nil {
-				return res, lerr
-			}
-			if next, err = r.sample(logits); err != nil {
+		if hasLogits && (r.sample != nil || maskFn != nil) {
+			if next, err = selectInkling2NextToken(ls, r.sample, maskFn); err != nil {
 				return res, err
 			}
 		}
@@ -749,6 +756,25 @@ func inkling2ServeSpecDecode(r *inkling2LoopRequest, s ggufload.Inkling2LoopSess
 	return false, nil
 }
 
+// selectInkling2NextToken reads the session's last logits, optionally applies
+// grammar masking, and picks the next token via sample or greedy argmax.
+func selectInkling2NextToken(ls ggufload.Inkling2LoopLogitSession, sample func([]float32) (int, error), mask func([]float32)) (int, error) {
+	logits, err := ls.LastLogits()
+	if err != nil {
+		return 0, err
+	}
+	if len(logits) == 0 {
+		return 0, fmt.Errorf("inkling2_loop: empty logits")
+	}
+	if mask != nil {
+		mask(logits)
+	}
+	if sample != nil {
+		return sample(logits)
+	}
+	return fakmodel.ArgmaxF32(logits), nil
+}
+
 // sliceForcedTokens bounds forced tokens to limit and stops before any stop ID.
 func sliceForcedTokens(forced []int, limit int, stops map[int]bool) (planned []int, tailStop bool) {
 	if limit <= 0 || len(forced) == 0 {
@@ -842,6 +868,14 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 		_ = scalar.Close()
 		return nil, "", err
 	}
+	batchEligible := ggufload.Inkling2LoopBatchEligible(m, be)
+	cudaPrefill := batchEligible && inkling2CUDAPrefillReady(be, lookup)
+	if cudaPrefill {
+		lookup = inkling2CUDAPrefillDefaults(lookup)
+	}
+	for _, w := range inkling2ConfigSanityWarnings(lookup, batchEligible && inkling2ServeBatchEnabled(lookup), mode) {
+		log.Printf("fak serve: %s", w)
+	}
 	scalar.prefixReuse = mode
 	scalar.slots, scalar.capBytes = inkling2PrefixCacheFromEnv(lookup)
 	kvDtype, _ := ggufload.Inkling2KVDTypeFrom(lookup)
@@ -849,11 +883,6 @@ func newServeInkling2GeneratorWithContext(m *ggufload.Inkling2LoopModel, be comp
 		PositionConfig:    inkling2PositionConfig(m, contextTokens, fmt.Sprint(kvDtype)),
 		CheckpointVersion: inkling2CheckpointFormatVersion,
 	})
-	batchEligible := ggufload.Inkling2LoopBatchEligible(m, be)
-	cudaPrefill := batchEligible && inkling2CUDAPrefillReady(be, lookup)
-	if cudaPrefill {
-		lookup = inkling2CUDAPrefillDefaults(lookup)
-	}
 	if !inkling2ServeBatchEnabled(lookup) {
 		return scalar, "greedy decode" + specSuffix + inkling2PrefixSlotsNote(scalar), nil
 	}
