@@ -629,11 +629,12 @@ type Inkling2ServeSpec struct {
 	be      compute.Backend
 	dspark  *Inkling2DSparkModel
 	dflash2 *Inkling2DFlash2Model
+	closed  bool
 }
 
 // Active reports whether greedy decode in fak serve uses speculative verification.
 func (s *Inkling2ServeSpec) Active() bool {
-	return s != nil && s.depth > 0 && s.m != nil && s.be != nil
+	return s != nil && !s.closed && s.depth > 0 && s.m != nil && s.be != nil
 }
 
 // Depth is the resolved max draft length per verify step (0 when inactive).
@@ -665,6 +666,7 @@ func (s *Inkling2ServeSpec) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.closed = true
 	var errs []error
 	if s.dspark != nil {
 		errs = append(errs, s.dspark.Close())
@@ -747,6 +749,9 @@ func OpenInkling2ServeSpec(m *Inkling2LoopModel, be compute.Backend, lookup func
 func (s *Inkling2ServeSpec) OpenSession() (Inkling2LoopSession, error) {
 	if s == nil || s.m == nil {
 		return nil, fmt.Errorf("inkling2 spec: nil session model")
+	}
+	if s.closed {
+		return nil, fmt.Errorf("inkling2 spec: closed")
 	}
 	if !s.Active() {
 		return NewInkling2LoopSession(s.m, s.be)

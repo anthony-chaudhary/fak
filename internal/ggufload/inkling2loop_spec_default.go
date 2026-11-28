@@ -69,6 +69,9 @@ func Inkling2SpecLabel(m *Inkling2LoopModel, be compute.Backend) string {
 
 // Inkling2SpecLabelFor is Inkling2SpecLabel evaluated against lookup.
 func Inkling2SpecLabelFor(m *Inkling2LoopModel, be compute.Backend, lookup func(string) (string, bool)) string {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
 	depth := inkling2SpecDepthForFrom(m, lookup)
 	if depth == 0 || !inkling2SpecCapable(be) || inkling2SpecAutoDisabledForKV(be, lookup) {
 		return "spec=off"

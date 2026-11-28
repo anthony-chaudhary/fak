@@ -92,8 +92,14 @@ func TestInkling2ServeSpecPlanResolveAndErrors(t *testing.T) {
 		t.Fatalf("nil-lookup OpenInkling2ServeSpec err = %v", err)
 	}
 	_ = spec.Close()
-	if !spec.Active() || spec.Depth() != 4 || spec.DraftKind() != inkling2DraftLookup {
-		t.Fatalf("nil-lookup spec = active:%v depth:%d kind:%q, want active depth=4 lookup", spec.Active(), spec.Depth(), spec.DraftKind())
+	if spec.Active() {
+		t.Fatal("spec.Active() = true after Close, want false")
+	}
+	if _, err := spec.OpenSession(); err == nil {
+		t.Fatal("spec.OpenSession() after Close succeeded, want error")
+	}
+	if !strings.Contains(spec.Label(), "spec=lookup depth=4") || spec.Depth() != 4 {
+		t.Fatalf("nil-lookup spec = depth:%d label:%q", spec.Depth(), spec.Label())
 	}
 	var nilSpec *Inkling2ServeSpec
 	if _, err := nilSpec.OpenSession(); err == nil {
@@ -105,6 +111,11 @@ func TestInkling2ServeSpecPlanResolveAndErrors(t *testing.T) {
 	}
 	if label := Inkling2SpecLabelFor(nil, fakeDFlashDev{}, nil); label != "spec=lookup depth=4" {
 		t.Fatalf("Inkling2SpecLabelFor(nil, fakeDFlashDev, nil) = %q, want spec=lookup depth=4", label)
+	}
+	t.Setenv("FAK_INKLING2_SPEC", "")
+	t.Setenv("FAK_INKLING2_KV", "nvfp4")
+	if label := Inkling2SpecLabelFor(m, fakeNVFP4NoVerifyBackend{}, nil); label != "spec=off" {
+		t.Fatalf("Inkling2SpecLabelFor(m, fakeNVFP4NoVerifyBackend, nil) with nvfp4 env = %q, want spec=off", label)
 	}
 }
 

@@ -372,6 +372,7 @@ type inkling2LoopBatchEngine struct {
 	closed              bool
 	quit                chan struct{}
 	done                chan struct{}
+	senders             sync.WaitGroup
 	closeOnce           sync.Once
 	closeErr            error
 }
@@ -551,20 +552,27 @@ func (e *inkling2LoopBatchEngine) enqueue(ctx context.Context, prompt []int, max
 		return agent.Inkling2LoopGeneration{}, err
 	}
 	e.life.Lock()
-	closed := e.closed
-	quit := e.quit
-	e.life.Unlock()
-	if closed {
+	if e.closed {
+		e.life.Unlock()
 		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
 	}
+	quit := e.quit
+	e.senders.Add(1)
+	e.life.Unlock()
 	r := &inkling2QueuedRequest{entered: e.admission.clock.Now(), ctx: ctx, prompt: append([]int(nil), prompt...), maxNew: maxNew, stops: stops,
 		sample: sample, draft: draft, sink: &inkling2RowSink{emit: emit}, done: make(chan inkling2QueuedResult, 1)}
+	queued := false
 	select {
 	case e.queue <- r:
+		queued = true
 	case <-quit:
-		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
 	case <-ctx.Done():
+		e.senders.Done()
 		return agent.Inkling2LoopGeneration{}, ctx.Err()
+	}
+	e.senders.Done()
+	if !queued {
+		return agent.Inkling2LoopGeneration{}, errInkling2LoopEngineClosed
 	}
 	select {
 	case result := <-r.done:
@@ -591,7 +599,6 @@ func (e *inkling2LoopBatchEngine) enqueue(ctx context.Context, prompt []int, max
 // the next cohort's first row, ahead of anything still queued.
 func (e *inkling2LoopBatchEngine) run() {
 	defer func() {
-		e.drainOnClose()
 		if e.done != nil {
 			close(e.done)
 		}
@@ -643,6 +650,9 @@ func (e *inkling2LoopBatchEngine) drainOnClose() {
 		failQueued(r)
 	}
 	e.deferred = nil
+	if e.queue == nil {
+		return
+	}
 	for {
 		select {
 		case r, ok := <-e.queue:
@@ -1046,9 +1056,11 @@ func (e *inkling2LoopBatchEngine) Close() error {
 		if quit != nil {
 			close(quit)
 		}
+		e.senders.Wait()
 		if done != nil {
 			<-done
 		}
+		e.drainOnClose()
 		if e.cohortsClose != nil {
 			e.cohortsClose()
 		}

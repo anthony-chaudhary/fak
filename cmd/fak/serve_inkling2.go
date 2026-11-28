@@ -668,16 +668,25 @@ func (e *inkling2LoopEngine) serve(r *inkling2LoopRequest) (res agent.Inkling2Lo
 // exposes batched verify/draft hooks, preserving stops, emit abort, maxNew, and
 // checkpoint horizon bounds (k <= rem-1 keeps s.pos <= ck.pos+maxNew).
 func inkling2ServeSpecDecode(r *inkling2LoopRequest, s ggufload.Inkling2LoopSession, sp ggufload.Inkling2LoopSpecSession, next int, res *agent.Inkling2LoopGeneration) (bool, error) {
+	if r.maxNew <= 0 {
+		return false, nil
+	}
 	specHist := make([]int, 0, min(r.maxNew, 256))
 	depth := sp.SpecMaxDraft()
 	plainVerify := sp.SpecPlainUsesVerify()
 	for res.Generated < r.maxNew {
+		if cerr := r.ctx.Err(); cerr != nil {
+			return false, cerr
+		}
 		if r.stops[next] {
 			res.Stopped = true
 			return false, nil
 		}
 		res.Generated++
 		if !r.emit(next) {
+			if cerr := r.ctx.Err(); cerr != nil {
+				return false, cerr
+			}
 			res.Stopped = true
 			return false, nil
 		}
@@ -743,6 +752,9 @@ func inkling2ServeSpecDecode(r *inkling2LoopRequest, s ggufload.Inkling2LoopSess
 			}
 			res.Generated++
 			if !r.emit(tok) {
+				if cerr := r.ctx.Err(); cerr != nil {
+					return false, cerr
+				}
 				res.Stopped = true
 				return false, nil
 			}
