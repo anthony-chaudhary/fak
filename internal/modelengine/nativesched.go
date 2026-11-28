@@ -403,6 +403,34 @@ type NativeScheduler struct {
 	executedSteps        int
 	prefillCapacityBound bool
 
+	// Deferred KV block frees fence (vLLM deferred_frees, Apache-2.0):
+	// blocks touched by an in-flight step enter deferredFreeFIFO keyed by
+	// fenceSeq and are released in reverse-within-entry order once
+	// processedStepSeq >= fenceSeq (or flushed on Close). Disabled by default
+	// so historical synchronous tests preserve immediate release.
+	deferredFreesEnabled bool
+	launchedStepSeq      uint64
+	processedStepSeq     uint64
+	deferredFreeFIFO     []deferredFreeEntry
+	deferredFreeStats    DeferredFreeStats
+
+	// Async output-placeholder scheduling (vLLM AsyncScheduler, Apache-2.0):
+	// opt-in double-buffered staging that overlaps step N+1 forward with
+	// step N host-side sampling/publication, tracking -1 placeholders until
+	// outputs resolve, trimming stop-truncated tails, and retiring both steps
+	// cleanly on Close.
+	asyncScheduling           bool
+	asyncStages               [2]asyncStepStage
+	asyncPubActive            bool
+	asyncPubCurrent           *asyncStepStage
+	asyncPubPending           *asyncStepStage
+	asyncPubDone              chan struct{}
+	asyncSlotCh               chan struct{}
+	asyncStepsOverlapped      uint64
+	asyncPlaceholdersStaged   uint64
+	asyncPlaceholdersResolved uint64
+	asyncStopTruncations      uint64
+
 	closeSession       func(*model.Session)
 	observeNativeEvent func(nativeSchedulerEvent)
 	beforeModelExecute func(nativeSchedulerEventKind, *schedLane)
@@ -1320,6 +1348,17 @@ func (s *NativeScheduler) Close() {
 	for _, ln := range s.preempted {
 		ln.cancel() // a swapped/recompute-held lane is aborted too
 	}
+	if s.asyncPubPending != nil {
+		for _, e := range s.asyncPubPending.entries {
+			if e != nil {
+				e.truncated = true
+			}
+		}
+	}
+	if !s.asyncPubActive {
+		s.flushDeferredFreesLocked()
+	}
+	s.notifyAsyncSlotLocked()
 	s.mu.Unlock()
 	s.signal()
 }
@@ -1330,7 +1369,16 @@ func (s *NativeScheduler) CloseAndWait(ctx context.Context) error {
 	s.Close()
 	s.mu.Lock()
 	runStarted := s.runStarted
+	pubActive := s.asyncPubActive
+	pubDone := s.asyncPubDone
 	s.mu.Unlock()
+	if pubActive && pubDone != nil {
+		select {
+		case <-pubDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	if !runStarted {
 		return nil
 	}
@@ -1400,6 +1448,11 @@ func (s *NativeScheduler) canMaterializeLaneLocked(candidate *schedLane) nativeA
 		seen[ln] = struct{}{}
 		stateReservations++
 		blocks := s.laneKVBlocksLocked(ln)
+		if ln.numOutputPlaceholders > 0 {
+			if withPlaceholders := s.laneKVBlocksWithPlaceholdersLocked(ln); withPlaceholders > blocks {
+				blocks = withPlaceholders
+			}
+		}
 		if ln.materializing || ln.sess == nil || (ln.packedPrefill && ln.state == schedLanePrefilling) {
 			// Selected empty/partial packed owners retain their full prompt reservation
 			// until DECODE; resident bytes alone undercount unfinished growth.

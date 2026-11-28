@@ -116,6 +116,7 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) (queueWaits []time.Du
 // slices (appended by Admit) and the closed flag are mutex-guarded.
 func (s *NativeScheduler) run() {
 	defer close(s.stopped)
+	defer s.retireAsyncOnRunExit()
 	for {
 		s.mu.Lock()
 		donorOwnsWork := s.drainDonation && s.blockedDrains > 0
@@ -202,6 +203,7 @@ func (s *NativeScheduler) drainWithDonation(tokens <-chan abi.EngineToken) {
 // to draining its bounded token channel before executing another iteration.
 func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool) {
 	s.mu.Lock()
+	s.drainDeferredFreesLocked()
 	// 1. Drop finished/cancelled lanes from the running set, freeing their slots.
 	live := s.lanes[:0]
 	for _, ln := range s.lanes {
@@ -478,6 +480,15 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 				s.stepOnce(active, iteration)
 			}
 		}
+	} else if s.asyncScheduling && prefill == nil && (solo != nil || len(active) > 0) {
+		lanes := active
+		if solo != nil {
+			lanes = []*schedLane{solo}
+		}
+		if !s.stepAsyncDecode(lanes, iteration, s.fwd.Load()) {
+			return false, !donated, closed
+		}
+		s.recorder.ObserveCohort(len(lanes))
 	} else if solo != nil {
 		s.recorder.ObserveCohort(1)
 		if donated {
@@ -518,9 +529,11 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 // A token sampled from logits produced by forward N is retained until the next
 // scheduler boundary owns its forward, then retired exactly once.
 type nativeDeferredToken struct {
-	id        int
-	done      bool
-	accounted bool
+	id          int
+	done        bool
+	accounted   bool
+	placeholder bool
+	stepSeq     uint64
 }
 
 func (ln *schedLane) stageDeferredToken() bool {
@@ -657,39 +670,48 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 		}
 	}
 	for {
-		next, forward := ln.deferredForForward()
-		if !forward {
-			ln.retireDeferredToken(iteration)
+		if !s.stepSoloOne(ln, iteration) {
 			return
 		}
-		sess := s.takeDecodeSession(ln)
-		if sess == nil {
-			return
-		}
-		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
-		decodeStarted := s.now()
-		// Load the live forward generation once, BEFORE the forward call, so
-		// this whole step runs on one generation (in-flight continuity).
-		gen := s.fwd.Load()
-		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
-			return gen.Impl.Step(sess, next)
-		})
-		elapsed := s.now().Sub(decodeStarted)
-		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, elapsed)
-		s.recorder.ObserveDecodeStep(enginestep.PathSerial, 1, elapsed)
-		if !s.publishDecodeSession(ln, sess, logits) {
-			return
-		}
-		if !ln.retireDeferredToken(iteration) || !ln.stageDeferredToken() {
-			return
-		}
-		s.noteStepSkipDrafts(iteration, false, []*schedLane{ln})
 		select {
 		case <-s.wake:
 			return
 		default:
 		}
 	}
+}
+
+func (s *NativeScheduler) stepSoloOne(ln *schedLane, iteration uint64) bool {
+	next, forward := ln.deferredForForward()
+	if !forward {
+		ln.retireDeferredToken(iteration)
+		return false
+	}
+	stepSeq := s.beginStepSeq()
+	defer s.completeStepPublication(stepSeq)
+	sess := s.takeDecodeSession(ln)
+	if sess == nil {
+		return false
+	}
+	s.beforeModelExecution(nativeSchedulerEventDecode, ln)
+	decodeStarted := s.now()
+	// Load the live forward generation once, BEFORE the forward call, so
+	// this whole step runs on one generation (in-flight continuity).
+	gen := s.fwd.Load()
+	logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
+		return gen.Impl.Step(sess, next)
+	})
+	elapsed := s.now().Sub(decodeStarted)
+	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, elapsed)
+	s.recorder.ObserveDecodeStep(enginestep.PathSerial, 1, elapsed)
+	if !s.publishDecodeSession(ln, sess, logits) {
+		return false
+	}
+	if !ln.retireDeferredToken(iteration) || !ln.stageDeferredToken() {
+		return false
+	}
+	s.noteStepSkipDrafts(iteration, false, []*schedLane{ln})
+	return true
 }
 
 // stepOnce stages a token per active lane, advances it through the selected model
@@ -816,6 +838,8 @@ func (s *NativeScheduler) retireDecodeBorrow(ln *schedLane, sess *model.Session)
 }
 
 func (s *NativeScheduler) stepDecodeCohort(lanes []*schedLane, ids []int, iteration uint64, gen ForwardGen) {
+	stepSeq := s.beginStepSeq()
+	defer s.completeStepPublication(stepSeq)
 	execLanes := make([]*schedLane, 0, len(lanes))
 	execIDs := make([]int, 0, len(lanes))
 	seqs := make([]*model.Session, 0, len(lanes))
@@ -973,7 +997,9 @@ func (s *NativeScheduler) takeDecodeSession(ln *schedLane) *model.Session {
 	}
 	if ln.deferredToken != nil && !ln.deferredToken.accounted {
 		ln.deferredToken.accounted = true
-		ln.emitted++
+		if !ln.deferredToken.placeholder {
+			ln.emitted++
+		}
 	}
 	return ln.takeSessionForModelLocked()
 }
@@ -1165,6 +1191,17 @@ type schedLane struct {
 	materializing bool
 	deferredToken *nativeDeferredToken
 
+	numOutputPlaceholders     int
+	asyncStageTokens          []int
+	asyncInFlightEntry        *asyncLaneStage
+	asyncPendingFinish        bool
+	asyncPendingRes           *abi.Result
+	asyncPendingErr           error
+	asyncPendingTruncate      int
+	asyncPendingFinalToken    int
+	asyncHasPendingFinalToken bool
+	asyncStopTruncated        bool
+
 	tokens chan abi.EngineToken
 	done   chan struct{}
 
@@ -1227,7 +1264,7 @@ func (ln *schedLane) finish(res *abi.Result, err error) {
 		// Every retirement phase runs even when an earlier backend callback
 		// panics or Goexits. Detach handles before handing them to callbacks.
 		if ln.sched != nil {
-			defer ln.sched.elastic.laneFinished(ln)
+			defer ln.sched.finishLaneElasticBlocksLocked(ln)
 			if descriptor != nil && ln.sched.preemption.GPUDirectSwapper != nil {
 				defer ln.sched.preemption.GPUDirectSwapper.FreeDescriptor(descriptor)
 			}
