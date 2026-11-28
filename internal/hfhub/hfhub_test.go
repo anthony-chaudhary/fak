@@ -752,3 +752,312 @@ func gitBlobSHA1Fixture(b []byte) string {
 	h.Write(b)
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestHFHubAuthScope(t *testing.T) {
+	const secret = "hf_ExampleGatedToken0001"
+	const wrongSecret = "hf_ExampleOtherToken0002"
+
+	t.Run("same_origin_header_scoping", func(t *testing.T) {
+		c := &Client{BaseURL: "https://huggingface.co", Token: secret}
+		for _, own := range []string{
+			"https://huggingface.co/api/models/Org/Name",
+			"https://HUGGINGFACE.CO:443/Org/Name/resolve/main/config.json",
+		} {
+			req, err := http.NewRequest(http.MethodGet, own, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer stale")
+			c.authorize(req)
+			if got := req.Header.Get("Authorization"); got != "Bearer "+secret {
+				t.Fatalf("authorize(%q) = %q, want Bearer token", own, got)
+			}
+		}
+		for _, other := range []string{
+			"https://cdn-lfs.huggingface.co/x",
+			"https://huggingface.co.example.com/x",
+			"http://huggingface.co/x",
+			"https://huggingface.co:8443/x",
+			"https://example.com/huggingface.co",
+		} {
+			req, err := http.NewRequest(http.MethodGet, other, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer stale")
+			c.authorize(req)
+			if got := req.Header.Get("Authorization"); got != "" {
+				t.Fatalf("authorize(%q) leaked Authorization=%q", other, got)
+			}
+		}
+	})
+
+	t.Run("fetchuri_same_origin_vs_cdn_redirect", func(t *testing.T) {
+		payload := []byte("gated-weights-payload")
+		sum := sha256.Sum256(payload)
+		wantSHA := hex.EncodeToString(sum[:])
+
+		var cdnHits, cdnAuthLeaks, hubAuthHits atomic.Int32
+		cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cdnHits.Add(1)
+			if r.Header.Get("Authorization") != "" {
+				cdnAuthLeaks.Add(1)
+				http.Error(w, "leaked auth", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("X-Linked-Etag", `"`+wantSHA+`"`)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(payload)
+		}))
+		defer cdn.Close()
+
+		var hub *httptest.Server
+		hub = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer "+secret {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			hubAuthHits.Add(1)
+			switch r.URL.Path {
+			case "/api/models/Org/Gated/revision/main":
+				_, _ = w.Write([]byte(`{"siblings":[{"rfilename":"model.gguf"}]}`))
+			case "/Org/Gated/resolve/main/model.gguf":
+				http.Redirect(w, r, "/moved/model.gguf", http.StatusFound)
+			case "/moved/model.gguf":
+				http.Redirect(w, r, cdn.URL+"/blob/model.gguf", http.StatusFound)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer hub.Close()
+
+		c := &Client{BaseURL: hub.URL, HTTP: hub.Client(), Token: secret, CacheDir: t.TempDir()}
+		gotPath, err := c.FetchURI(context.Background(), "hf://Org/Gated", nil)
+		if err != nil {
+			t.Fatalf("FetchURI failed: %v", err)
+		}
+		gotBytes, err := os.ReadFile(gotPath)
+		if err != nil || !bytes.Equal(gotBytes, payload) {
+			t.Fatalf("cached bytes mismatch: err=%v len=%d", err, len(gotBytes))
+		}
+		if cdnAuthLeaks.Load() != 0 {
+			t.Fatalf("CDN received %d Authorization headers", cdnAuthLeaks.Load())
+		}
+		if cdnHits.Load() < 1 || hubAuthHits.Load() < 3 {
+			t.Fatalf("unexpected hit counts: hubAuth=%d cdn=%d", hubAuthHits.Load(), cdnHits.Load())
+		}
+	})
+
+	t.Run("redirect_credential_reflection_and_denied_and_loop", func(t *testing.T) {
+		var collectHits atomic.Int32
+		doubleEncoded := strings.ReplaceAll(secret, "h", "%2568")
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/reflect-raw":
+				http.Redirect(w, r, "/collect?tok="+secret, http.StatusFound)
+			case "/reflect-nested":
+				http.Redirect(w, r, "/collect?tok="+doubleEncoded, http.StatusFound)
+			case "/reflect-prefix":
+				http.Redirect(w, r, "/collect?tok=hf_E", http.StatusFound)
+			case "/collect":
+				collectHits.Add(1)
+				w.WriteHeader(http.StatusOK)
+			case "/loop":
+				http.Redirect(w, r, "/loop", http.StatusFound)
+			case "/api/models/Org/Private/revision/main":
+				http.Error(w, "denied", http.StatusForbidden)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer srv.Close()
+
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), Token: wrongSecret, CacheDir: t.TempDir()}
+		c.Token = secret
+		for _, p := range []string{"/reflect-raw", "/reflect-nested", "/reflect-prefix"} {
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+p, nil)
+			_, err := c.doAuthRequest(context.Background(), req)
+			if !errors.Is(err, ErrCredentialRedirect) {
+				t.Fatalf("GET %s err = %v, want ErrCredentialRedirect", p, err)
+			}
+		}
+		if collectHits.Load() != 0 {
+			t.Fatalf("reflected redirect target was requested %d times", collectHits.Load())
+		}
+
+		loopReq, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/loop", nil)
+		if _, err := c.doAuthRequest(context.Background(), loopReq); !errors.Is(err, ErrTooManyRedirects) {
+			t.Fatalf("loop err = %v, want ErrTooManyRedirects", err)
+		}
+
+		if _, err := c.FetchURI(context.Background(), "hf://Org/Private", nil); !errors.Is(err, ErrHubDenied) {
+			t.Fatalf("private repo err = %v, want ErrHubDenied", err)
+		}
+	})
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestHFHubBodyGuard(t *testing.T) {
+	const secret = "hf_BodyGuardSecret0001"
+
+	t.Run("streaming_chunk_boundary_and_percent_encoded", func(t *testing.T) {
+		encoded := strings.ReplaceAll(secret, "B", "%2542")
+		for _, tc := range []struct {
+			name    string
+			payload []byte
+		}{
+			{name: "raw_split", payload: []byte("prefix-bytes-" + secret + "-suffix")},
+			{name: "nested_encoded", payload: []byte("prefix-" + encoded + "-suffix")},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var gets atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodHead {
+						w.WriteHeader(http.StatusOK)
+						return
+					}
+					gets.Add(1)
+					fl, _ := w.(http.Flusher)
+					w.WriteHeader(http.StatusOK)
+					mid := len(tc.payload) / 2
+					_, _ = w.Write(tc.payload[:mid])
+					if fl != nil {
+						fl.Flush()
+					}
+					_, _ = w.Write(tc.payload[mid:])
+				}))
+				defer srv.Close()
+
+				c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), Token: secret, CacheDir: t.TempDir(), retryBackoff: time.Millisecond}
+				ref := Ref{Repo: "Org/Leak", Revision: "main", File: "model.bin"}
+				dst := c.CachePath(ref)
+				_, err := c.Download(context.Background(), ref, nil)
+				if !errors.Is(err, ErrCredentialBody) {
+					t.Fatalf("Download err = %v, want ErrCredentialBody", err)
+				}
+				if gets.Load() != 1 {
+					t.Fatalf("GETs = %d, want 1 (must not retry on ErrCredentialBody)", gets.Load())
+				}
+				if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+					t.Fatalf("destination published despite credential body: %v", statErr)
+				}
+				if _, statErr := os.Stat(dst + partSuffix); !os.IsNotExist(statErr) {
+					t.Fatalf(".part not removed after ErrCredentialBody: %v", statErr)
+				}
+			})
+		}
+	})
+
+	t.Run("resume_part_and_incomplete_scans", func(t *testing.T) {
+		full := []byte("clean-prefix-and-clean-suffix")
+		sum := sha256.Sum256(full)
+		wantSHA := hex.EncodeToString(sum[:])
+
+		for _, suffix := range []string{partSuffix, ".incomplete"} {
+			t.Run("poisoned_"+suffix, func(t *testing.T) {
+				var gets atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodHead {
+						w.Header().Set("X-Linked-Etag", `"`+wantSHA+`"`)
+						w.WriteHeader(http.StatusOK)
+						return
+					}
+					gets.Add(1)
+					w.WriteHeader(http.StatusOK)
+				}))
+				defer srv.Close()
+
+				c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), Token: secret, CacheDir: t.TempDir(), retryBackoff: time.Millisecond}
+				ref := Ref{Repo: "Org/ResumeLeak", Revision: "main", File: "weights.bin"}
+				dst := c.CachePath(ref)
+				if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				poisonPath := dst + suffix
+				if suffix != partSuffix {
+					if err := os.WriteFile(dst+partSuffix, []byte("clean-prefix"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.WriteFile(poisonPath, []byte("poison-"+secret), 0o600); err != nil {
+					t.Fatal(err)
+				}
+
+				_, err := c.Download(context.Background(), ref, nil)
+				if !errors.Is(err, ErrCredentialBody) {
+					t.Fatalf("Download err = %v, want ErrCredentialBody", err)
+				}
+				if gets.Load() != 0 {
+					t.Fatalf("GETs = %d, want 0 (poisoned partial must abort before GET)", gets.Load())
+				}
+				if _, statErr := os.Stat(poisonPath); !os.IsNotExist(statErr) {
+					t.Fatalf("poisoned %s still exists: %v", poisonPath, statErr)
+				}
+			})
+		}
+	})
+
+	t.Run("split_across_resume_boundary_and_benign_tail", func(t *testing.T) {
+		splitPrefix := []byte("safe-head-" + secret[:10])
+		splitSuffix := []byte(secret[10:] + "-tail")
+		combined := append(append([]byte{}, splitPrefix...), splitSuffix...)
+		sum := sha256.Sum256(combined)
+		wantSHA := hex.EncodeToString(sum[:])
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				w.Header().Set("X-Linked-Etag", `"`+wantSHA+`"`)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(splitSuffix)
+		}))
+		defer srv.Close()
+
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), Token: secret, CacheDir: t.TempDir(), retryBackoff: time.Millisecond}
+		ref := Ref{Repo: "Org/SplitResume", Revision: "main", File: "split.bin"}
+		dst := c.CachePath(ref)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst+partSuffix, splitPrefix, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := c.Download(context.Background(), ref, nil)
+		if !errors.Is(err, ErrCredentialBody) {
+			t.Fatalf("split-resume Download err = %v, want ErrCredentialBody", err)
+		}
+		if _, statErr := os.Stat(dst + partSuffix); !os.IsNotExist(statErr) {
+			t.Fatalf(".part not removed on split-resume ErrCredentialBody: %v", statErr)
+		}
+
+		// Benign partial encoding at EOF must succeed and preserve all bytes.
+		benign := []byte("weights-data-ending-with-%2")
+		bsum := sha256.Sum256(benign)
+		bwant := hex.EncodeToString(bsum[:])
+		bsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				w.Header().Set("X-Linked-Etag", `"`+bwant+`"`)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(benign)
+		}))
+		defer bsrv.Close()
+
+		bc := &Client{BaseURL: bsrv.URL, HTTP: bsrv.Client(), Token: secret, CacheDir: t.TempDir()}
+		bref := Ref{Repo: "Org/Benign", Revision: "main", File: "benign.bin"}
+		gotPath, err := bc.Download(context.Background(), bref, nil)
+		if err != nil {
+			t.Fatalf("benign Download err = %v", err)
+		}
+		got, err := os.ReadFile(gotPath)
+		if err != nil || !bytes.Equal(got, benign) {
+			t.Fatalf("benign bytes = %q, err=%v", got, err)
+		}
+	})
+}

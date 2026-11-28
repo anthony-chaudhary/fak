@@ -79,6 +79,11 @@ func (c *Client) downloadFile(ctx context.Context, url, dst, want string, progre
 		}
 		retryable := false
 		switch {
+		case errors.Is(lastErr, ErrCredentialBody):
+			os.Remove(part)
+			return lastErr
+		case errors.Is(lastErr, ErrCredentialRedirect), errors.Is(lastErr, ErrHubDenied):
+			return lastErr
 		case errors.Is(lastErr, ErrDigestMismatch):
 			os.Remove(part)
 			if !mismatchRestarted {
@@ -115,6 +120,9 @@ func (c *Client) downloadFile(ctx context.Context, url, dst, want string, progre
 // publishes it to dst. It returns nil on success, a wrapped ErrDigestMismatch
 // when verification fails, or a transport/status error otherwise.
 func (c *Client) attemptTransfer(ctx context.Context, url, part, dst string, want *string, progress io.Writer) error {
+	if err := scanResumePartials(c.Token, part); err != nil {
+		return err
+	}
 	offset := int64(0)
 	if *want != "" {
 		if fi, err := os.Stat(part); err == nil && fi.Size() > 0 {
@@ -125,12 +133,11 @@ func (c *Client) attemptTransfer(ctx context.Context, url, part, dst string, wan
 	if err != nil {
 		return err
 	}
-	c.authorize(req)
 	if offset > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	}
 	logf(progress, "GET %s", url)
-	resp, err := c.httpClient().Do(req)
+	resp, err := c.doAuthRequest(ctx, req)
 	if err != nil {
 		return fmt.Errorf("hfhub: download: %w", err)
 	}
@@ -174,21 +181,30 @@ func (c *Client) attemptTransfer(ctx context.Context, url, part, dst string, wan
 		return err
 	}
 	hasher := sha256.New()
-	if resumed {
-		// Feed the retained prefix into the same digest the suffix will fill,
-		// so the final sum covers the whole object.
-		if _, err := io.CopyN(hasher, f, offset); err != nil {
-			f.Close()
-			return fmt.Errorf("hfhub: rehash retained partial: %w", err)
+	var n int64
+	var copyErr error
+	if extractSecret(c.Token) == "" {
+		if resumed {
+			// Feed the retained prefix into the same digest the suffix will fill,
+			// so the final sum covers the whole object.
+			if _, err := io.CopyN(hasher, f, offset); err != nil {
+				f.Close()
+				return fmt.Errorf("hfhub: rehash retained partial: %w", err)
+			}
+			if _, err := f.Seek(0, io.SeekEnd); err != nil {
+				f.Close()
+				return err
+			}
 		}
-		if _, err := f.Seek(0, io.SeekEnd); err != nil {
-			f.Close()
-			return err
-		}
+		n, copyErr = io.Copy(io.MultiWriter(f, hasher), resp.Body)
+	} else {
+		n, copyErr = streamGuardedBody(f, hasher, resp.Body, c.Token, offset, resumed)
 	}
-	n, copyErr := io.Copy(io.MultiWriter(f, hasher), resp.Body)
 	closeErr := f.Close()
 	if copyErr != nil || closeErr != nil {
+		if errors.Is(copyErr, ErrCredentialBody) {
+			return copyErr
+		}
 		return errors.Join(fmt.Errorf("hfhub: download: %w", copyErr), closeErr)
 	}
 
