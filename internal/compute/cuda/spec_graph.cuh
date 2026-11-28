@@ -162,6 +162,175 @@ __global__ void k_spec_verify_combine(
   }
 }
 
+// Strata-10 batch-invariant speculative verification constants (MIT Niko1221/Strata@c6f6427d9de9).
+// Multi-segment split-K verify alters float32 reduction order vs single-token M=1 decode.
+// Within the verify batch/context budget, pinning split partitions to single-token decode (1)
+// eliminates verify/decode greedy divergence and allows exact bitwise recompute verification.
+#define SPEC_VERIFY_INVARIANT_KEY_BUDGET 2048
+#define SPEC_VERIFY_INVARIANT_MAX_M 16
+
+static int spec_verify_single_token_split_count(int kvLen, int qLen) {
+  (void)kvLen;
+  (void)qLen;
+  return fak_attention_single_token_split_count(kvLen, 0, 1, 1);
+}
+
+static bool spec_verify_wants_batch_invariant(int qLen, int kvLen) {
+  const char *v = getenv("FAK_CUDA_SPEC_VERIFY_BATCH_INVARIANT");
+  if (!v || v[0] != '1' || v[1] != '\0') return false;
+  return qLen > 0 && qLen <= SPEC_VERIFY_INVARIANT_MAX_M &&
+         kvLen > 0 && kvLen <= SPEC_VERIFY_INVARIANT_KEY_BUDGET;
+}
+
+__global__ void k_spec_verify_attention_batch_invariant(
+    const float *Q, const float *K, const float *V, float *Out,
+    int qLen, int kvLen, int nH, int nHkv, int hd, float scale) {
+  int qi = blockIdx.x;
+  int h = blockIdx.y;
+  int tid = threadIdx.x;
+  if (qi >= qLen || h >= nH) return;
+
+  int grp = nH / nHkv;
+  int kvh = h / grp;
+  int w = nHkv * hd;
+  int prefix = kvLen - qLen;
+  int nPos = prefix + qi + 1;
+
+  const float *qh = Q + ((size_t)qi * nH + h) * hd;
+  extern __shared__ float smem[];
+  float *qs = smem;
+  float *red = smem + hd;
+  for (int d = tid; d < hd; d += FLASH_THREADS) qs[d] = qh[d];
+  __syncthreads();
+
+  float m = -INFINITY;
+  float l = 0.f;
+  float acc[FLASH_ACC_MAX];
+#pragma unroll
+  for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
+
+  // Single-partition linear pass identical to k_flash_attention<false> (M=1).
+  for (int j = 0; j < nPos; j++) {
+    const float *kj = K + (size_t)j * w + (size_t)kvh * hd;
+    float partial = 0.f;
+    for (int d = tid; d < hd; d += FLASH_THREADS) partial += qs[d] * kj[d];
+    red[tid] = partial;
+    __syncthreads();
+    for (int s = FLASH_THREADS / 2; s > 0; s >>= 1) {
+      if (tid < s) red[tid] += red[tid + s];
+      __syncthreads();
+    }
+    float sc = red[0] * scale;
+    __syncthreads();
+
+    float mNew = fmaxf(m, sc);
+    float corr = expf(m - mNew);
+    float p = expf(sc - mNew);
+    l = l * corr + p;
+
+    const float *vj = V + (size_t)j * w + (size_t)kvh * hd;
+    int k = 0;
+    for (int d = tid; d < hd; d += FLASH_THREADS, k++) acc[k] = acc[k] * corr + p * vj[d];
+    m = mNew;
+  }
+
+  float invL = l > 0.f ? 1.f / l : 0.f;
+  int k = 0;
+  for (int d = tid; d < hd; d += FLASH_THREADS, k++) {
+    Out[((size_t)qi * nH + h) * hd + d] = acc[k] * invL;
+  }
+}
+
+__global__ void k_spec_verify_bitwise_check(
+    const float *verifyOut, const float *singleOut, int nElems,
+    int *mismatchCount, int *firstMismatchIdx) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= nElems) return;
+  if (__float_as_uint(verifyOut[i]) != __float_as_uint(singleOut[i])) {
+    atomicAdd(mismatchCount, 1);
+    atomicMin(firstMismatchIdx, i);
+  }
+}
+
+extern "C" int fcuda_spec_verify_attention_batch_invariant_f32(
+    const float *dQ, const float *dK, const float *dV, float *dOut,
+    int qLen, int kvLen, int nH, int nKV, int hd, float scale) {
+  if (!dQ || !dK || !dV || !dOut) return -1;
+  if (qLen <= 0 || kvLen <= 0 || kvLen < qLen) return -1;
+  if (nH <= 0 || nKV <= 0 || (nH % nKV) != 0) return -1;
+  if (hd <= 0 || hd > FLASH_ACC_MAX * FLASH_THREADS) return -1;
+  if (scale <= 0.f || !isfinite(scale)) {
+    scale = 1.0f / sqrtf((float)hd);
+  }
+  if (spec_verify_single_token_split_count(kvLen, qLen) != 1) return -1;
+
+  dim3 grid_inv(qLen, nH);
+  size_t shmem_inv = ((size_t)hd + FLASH_THREADS) * sizeof(float);
+  FCUDA_TS("k_spec_verify_attention_batch_invariant", grid_inv,
+           k_spec_verify_attention_batch_invariant<<<grid_inv, FLASH_THREADS, shmem_inv, g_stream>>>(
+               dQ, dK, dV, dOut, qLen, kvLen, nH, nKV, hd, scale));
+  cudaError_t err = cudaGetLastError();
+  return (err == cudaSuccess) ? 0 : (int)err;
+}
+
+extern "C" int fcuda_spec_verify_recompute_check_f32(
+    const float *dQ, const float *dK, const float *dV, const float *dVerifyOut,
+    int qLen, int kvLen, int nH, int nKV, int hd, float scale, int *outFirstMismatch) {
+  if (!dQ || !dK || !dV || !dVerifyOut) return -1;
+  if (qLen <= 0 || kvLen <= 0 || kvLen < qLen) return -1;
+  if (nH <= 0 || nKV <= 0 || (nH % nKV) != 0) return -1;
+  if (hd <= 0 || hd > FLASH_ACC_MAX * FLASH_THREADS) return -1;
+  if (scale <= 0.f || !isfinite(scale)) {
+    scale = 1.0f / sqrtf((float)hd);
+  }
+
+  int nElems = qLen * nH * hd;
+  float *dSingle = (float *)fcuda_malloc(sizeof(float) * (size_t)nElems);
+  int *dMismatch = (int *)fcuda_malloc(sizeof(int));
+  int *dFirst = (int *)fcuda_malloc(sizeof(int));
+  if (!dSingle || !dMismatch || !dFirst) {
+    fcuda_free(dSingle);
+    fcuda_free(dMismatch);
+    fcuda_free(dFirst);
+    return -2;
+  }
+
+  int prefix = kvLen - qLen;
+  int rowStride = nH * hd;
+  for (int qi = 0; qi < qLen; qi++) {
+    fcuda_flash_attention_f32(
+        dQ + (size_t)qi * rowStride, dK, dV, dSingle + (size_t)qi * rowStride,
+        prefix + qi + 1, kvLen, nH, nKV, hd, scale);
+  }
+
+  int zero = 0;
+  int initFirst = nElems;
+  fcuda_ts_untimed_transfer();
+  CK(cudaMemcpy(dMismatch, &zero, sizeof(int), cudaMemcpyHostToDevice));
+  fcuda_ts_untimed_transfer();
+  CK(cudaMemcpy(dFirst, &initFirst, sizeof(int), cudaMemcpyHostToDevice));
+
+  int blocks = (nElems + 255) / 256;
+  FCUDA_TS("k_spec_verify_bitwise_check", blocks,
+           k_spec_verify_bitwise_check<<<blocks, 256, 0, g_stream>>>(
+               dVerifyOut, dSingle, nElems, dMismatch, dFirst));
+
+  int hMismatch = 0;
+  int hFirst = nElems;
+  fcuda_ts_untimed_transfer();
+  CK(cudaMemcpy(&hMismatch, dMismatch, sizeof(int), cudaMemcpyDeviceToHost));
+  fcuda_ts_untimed_transfer();
+  CK(cudaMemcpy(&hFirst, dFirst, sizeof(int), cudaMemcpyDeviceToHost));
+
+  fcuda_free(dSingle);
+  fcuda_free(dMismatch);
+  fcuda_free(dFirst);
+  if (outFirstMismatch) {
+    *outFirstMismatch = (hMismatch > 0) ? hFirst : -1;
+  }
+  return hMismatch;
+}
+
 extern "C" int fcuda_spec_verify_attention_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int qLen, int kvLen, int nH, int nKV, int hd, float scale) {
@@ -171,6 +340,10 @@ extern "C" int fcuda_spec_verify_attention_f32(
   if (hd <= 0 || hd > FLASH_ACC_MAX * FLASH_THREADS) return -1;
   if (scale <= 0.f || !isfinite(scale)) {
     scale = 1.0f / sqrtf((float)hd);
+  }
+  if (spec_verify_wants_batch_invariant(qLen, kvLen)) {
+    return fcuda_spec_verify_attention_batch_invariant_f32(
+        dQ, dK, dV, dOut, qLen, kvLen, nH, nKV, hd, scale);
   }
 
   size_t partial_elements = (size_t)qLen * nH * NUM_SEGMENTS * hd;
@@ -275,34 +448,38 @@ extern "C" void fcuda_dsa_sparse_attend_f32(const float *dQ, const float *dSelK,
   FCUDA_TS("k_dsa_sparse_attend", nH, k_dsa_sparse_attend<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dSelK, dSelV, dOut, nSel, nH, kd, vd, scale));
 }
 
+#include "indexer_k_quant_vllm.cuh"
+
 // ---- GLM-MoE-DSA learned-indexer score + top-k selection ---------------------------
 // The LAST GLM-5.2 compute that was host-resident even after the dense projections and the
 // sparse-attention compute moved to the kernel: the learned indexer that picks WHICH keys a query
 // attends. For each cached key k (position k, valid iff k<=queryPos) and the one query, score(k) =
-// Σ_h weights[h]·relu(scale·dot(indexQ_h, indexK_k)). The per-head dot is accumulated in DOUBLE so
-// the device score equals the host f64 score bit-closely — the indexer drives a DISCRETE top-k, so
-// it must be reduction-FAITHFUL (selection-stable), not just cosine-close like the f32 GEMM lanes. A
-// single flipped selection would diverge the forward far past any cosine floor, so f64 here is what
-// lets the device attend the SAME keys the host would and keeps the downstream witness argmax-exact.
+// Σ_h weights[h]·relu(scale·dot(indexQ_h, indexK_k)). Keys are stored quantized as per-row symmetric
+// INT8 (scale = amax/127) and dequantized inside k_dsa_index_score before f64 accumulation so
+// the device score stays selection-faithful to the quantize-once host mirror.
 //
-// k_dsa_index_score: one block per key, blockDim threads stride the (head,dim) work; the per-key
-// score lands in dScores[k]. Masked keys (k>queryPos) get -inf so the top-k never picks them.
-__global__ void k_dsa_index_score(const float *indexQ, const float *indexK, const float *weights,
+// k_dsa_index_score: one block per key, blockDim threads stride the (head,dim) work; dequantizes
+// each INT8 key coordinate on the fly with kScale = indexKScales[k], and stores dScores[k].
+__global__ void k_dsa_index_score(const float *indexQ, const int8_t *indexKQ,
+                                  const float *indexKScales, const float *weights,
                                   double *dScores, int nKeys, int nH, int indexDim, int queryPos,
                                   float scale) {
   int k = blockIdx.x;
   if (k >= nKeys) return;
   if (k > queryPos) { if (threadIdx.x == 0) dScores[k] = -1e300; return; }
-  const float *key = indexK + (size_t)k * indexDim;
+  const int8_t *keyQ = indexKQ + (size_t)k * indexDim;
+  const float kScale = indexKScales[k];
   __shared__ double red[256];
   double acc = 0.0;
   // Each thread sums a slice of the (head,dim) grid: head h, dim d, contributing
-  //   weights[h]·relu(scale·Σ_d q·k) — but relu is per-HEAD, so accumulate per-head dots first.
-  // With nH and indexDim both small, one thread owns whole heads (stride blockDim over heads).
+  //   weights[h]·relu(scale·Σ_d q·dequant(kq)) — relu is per-HEAD, so accumulate per-head dots first.
   for (int h = threadIdx.x; h < nH; h += blockDim.x) {
     const float *qh = indexQ + (size_t)h * indexDim;
     double hd = 0.0;
-    for (int d = 0; d < indexDim; d++) hd += (double)qh[d] * (double)key[d];
+    for (int d = 0; d < indexDim; d++) {
+      float kd = fak_vllm_indexer::indexer_k_dequant_i8_val(keyQ[d], kScale);
+      hd += (double)qh[d] * (double)kd;
+    }
     double hs = hd * (double)scale;
     if (hs < 0.0) hs = 0.0;
     acc += (double)weights[h] * hs;
@@ -464,19 +641,47 @@ __global__ void k_dsa_index_topk(const double *dScores, int nKeys, int queryPos,
 // pathological device OOM) — so the caller keeps the host f64 selection. There is no nKeys cap: the
 // radix select streams the scores from global memory and its shared state is bounded (256 counters +
 // scalars), so deep-context windows stay on-device instead of falling back to the host loop.
-extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIndexK,
-                                          const float *dWeights, int nKeys, int nH,
-                                          int indexDim, int queryPos, int topK, float scale,
-                                          int *outIdx) {
+// Quantize-on-insert host entry point for the paged INT8 DSA indexer key cache (vLLM
+// indexer_k_quant_and_cache): quantizes [tokens, indexDim] FP32 rows once and writes per-row
+// INT8 codes + FP32 scales into paged [num_blocks, 16, indexDim] / [num_blocks, 16] arenas.
+extern "C" int fcuda_dsa_index_quant_and_cache_i8(
+    const float *dIndexK, int8_t *dKCache, float *dScaleCache,
+    const int *blocks, int num_map_blocks, int num_cache_blocks,
+    int first_offset, int tokens, int indexDim) {
+  if (!dIndexK || !dKCache || !dScaleCache || !blocks) return -1;
+  if (num_map_blocks <= 0 || num_map_blocks > fak_vllm_pa::kWriteMaxPages) return -1;
+  fak_vllm_pa::PagedKVWriteMap pages{};
+  pages.first_offset = first_offset;
+  for (int i = 0; i < num_map_blocks; i++) pages.blocks[i] = blocks[i];
+  if (!fak_vllm_indexer::indexer_k_write_map_valid(
+          pages, num_map_blocks, num_cache_blocks, tokens, indexDim)) {
+    return -1;
+  }
+  FCUDA_TS("k_dsa_index_quant_cache", tokens,
+           k_dsa_index_quant_cache<<<tokens, 128, 0, g_stream>>>(
+               dIndexK, dKCache, dScaleCache, pages, tokens, indexDim,
+               fak_vllm_indexer::kIndexBlockSize));
+  cudaError_t err = cudaGetLastError();
+  return (err == cudaSuccess) ? 0 : (int)err;
+}
+
+// Scores pre-quantized INT8 indexer keys directly via k_dsa_index_score (f32 dequant -> f64 dot
+// accumulation) and selects topK positions using the existing persistent radix/bitonic kernel.
+extern "C" int fcuda_dsa_index_select_quant_i8(const float *dIndexQ, const int8_t *dIndexKQ,
+                                               const float *dIndexKScales, const float *dWeights,
+                                               int nKeys, int nH, int indexDim, int queryPos,
+                                               int topK, float scale, int *outIdx) {
+  if (!dIndexQ || !dIndexKQ || !dIndexKScales || !dWeights || !outIdx) return -1;
   if (nKeys <= 0 || topK <= 0) return 0;
   int nValid = (queryPos + 1 < nKeys) ? queryPos + 1 : nKeys;
   if (nValid <= 0) return 0;
   int threads = 256;
   double *dScores = (double *)fcuda_malloc(sizeof(double) * (size_t)nKeys);
-  if (!dScores) return -1; // pathological: no score scratch -> host keeps the f64 loop
-  FCUDA_TS("k_dsa_index_score", nKeys, k_dsa_index_score<<<nKeys, threads, 0, g_stream>>>(dIndexQ, dIndexK, dWeights,
-                                                     dScores, nKeys, nH, indexDim,
-                                                     queryPos, scale));
+  if (!dScores) return -1;
+  FCUDA_TS("k_dsa_index_score", nKeys,
+           k_dsa_index_score<<<nKeys, threads, 0, g_stream>>>(
+               dIndexQ, dIndexKQ, dIndexKScales, dWeights, dScores, nKeys, nH,
+               indexDim, queryPos, scale));
   int want = topK < nValid ? topK : nValid;
   int pSize = 1;
   while (pSize < want) pSize <<= 1;
@@ -488,9 +693,11 @@ extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIn
     fcuda_free(dSelV);
     fcuda_free(dSelP);
     fcuda_free(dCount);
-    return -1; // decline sentinel retained for genuinely pathological sizes (allocation failure)
+    return -1;
   }
-  FCUDA_TS("k_dsa_index_topk", 1, k_dsa_index_topk<<<1, threads, 0, g_stream>>>(dScores, nKeys, queryPos, topK, dSelV, dSelP, dCount));
+  FCUDA_TS("k_dsa_index_topk", 1,
+           k_dsa_index_topk<<<1, threads, 0, g_stream>>>(
+               dScores, nKeys, queryPos, topK, dSelV, dSelP, dCount));
   int hCount = 0;
   fcuda_ts_untimed_transfer();
   CK(cudaMemcpy(&hCount, dCount, sizeof(int), cudaMemcpyDeviceToHost));
@@ -500,11 +707,35 @@ extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIn
     fcuda_ts_untimed_transfer();
     CK(cudaMemcpy(outIdx, dSelP, sizeof(int) * (size_t)hCount, cudaMemcpyDeviceToHost));
   }
-  g_host_bytes += sizeof(int) * (size_t)(hCount + 1); // only the index list crosses host-ward
+  g_host_bytes += sizeof(int) * (size_t)(hCount + 1);
   fcuda_free(dScores);
   fcuda_free(dSelV);
   fcuda_free(dSelP);
   fcuda_free(dCount);
+  return hCount;
+}
+
+extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIndexK,
+                                          const float *dWeights, int nKeys, int nH,
+                                          int indexDim, int queryPos, int topK, float scale,
+                                          int *outIdx) {
+  if (nKeys <= 0 || topK <= 0) return 0;
+  int nValid = (queryPos + 1 < nKeys) ? queryPos + 1 : nKeys;
+  if (nValid <= 0) return 0;
+  int8_t *dKQ = (int8_t *)fcuda_malloc(sizeof(int8_t) * (size_t)nKeys * (size_t)indexDim);
+  float *dKScales = (float *)fcuda_malloc(sizeof(float) * (size_t)nKeys);
+  if (!dKQ || !dKScales) {
+    fcuda_free(dKQ);
+    fcuda_free(dKScales);
+    return -1; // decline sentinel retained for genuinely pathological sizes (allocation failure)
+  }
+  FCUDA_TS("k_dsa_index_quant_rows", nKeys,
+           k_dsa_index_quant_rows<<<nKeys, 128, 0, g_stream>>>(
+               dIndexK, dKQ, dKScales, nKeys, indexDim));
+  int hCount = fcuda_dsa_index_select_quant_i8(
+      dIndexQ, dKQ, dKScales, dWeights, nKeys, nH, indexDim, queryPos, topK, scale, outIdx);
+  fcuda_free(dKQ);
+  fcuda_free(dKScales);
   return hCount;
 }
 

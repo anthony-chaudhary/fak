@@ -704,3 +704,15 @@ extern "C" int fak_qwen35_sequence_sync(void) {
   sequence_split_note_failed_fence(completed);
   return completed == cudaSuccess ? 0 : 60000 + (int)completed;
 }
+
+// Single-token decode partition contract (Strata-10 batch-invariance borrow):
+// fcuda_flash_attention_f32 executes M=1 causal attention with a single linear K/V partition
+// over [0, nPos) when generic split-KV is inactive. Speculative verification uses this query
+// to pin its split count identically to M=1 decode rather than varying splits with batch M.
+extern "C" int fak_attention_single_token_split_count(int nPos, int hd, int nH, int nKV) {
+  (void)nPos;
+  (void)hd;
+  (void)nH;
+  (void)nKV;
+  return 1;
+}

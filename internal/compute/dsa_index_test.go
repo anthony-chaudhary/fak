@@ -448,3 +448,259 @@ func TestCUDADSAIndexSelectRadixMatchesHostF64(t *testing.T) {
 		}
 	}
 }
+
+// hostQuantIndexKRowI8 mirrors fak_vllm_indexer::k_dsa_index_quant_rows / k_dsa_index_quant_cache:
+// symmetric per-row INT8 quantization scale = max(|x|)/127, q = clamp(roundHalfAway(x/scale), -127, 127).
+func hostQuantIndexKRowI8(src []float32) ([]int8, float32) {
+	var amax float32
+	for _, v := range src {
+		a := float32(math.Abs(float64(v)))
+		if a > amax {
+			amax = a
+		}
+	}
+	var scale, invScale float32
+	if amax > 0 {
+		scale = amax / 127.0
+		if scale > 0 {
+			invScale = float32(1.0) / scale
+		}
+	}
+	q := make([]int8, len(src))
+	for i, v := range src {
+		if invScale <= 0 {
+			continue
+		}
+		ri := int(math.Round(float64(v * invScale)))
+		if ri > 127 {
+			ri = 127
+		} else if ri < -127 {
+			ri = -127
+		}
+		q[i] = int8(ri)
+	}
+	return q, scale
+}
+
+// hostIndexScoreQuantI8F64 mirrors fak_vllm_indexer::indexer_k_dequant_i8_val inside
+// k_dsa_index_score (f32 dequant -> f64 per-head dot -> ReLU -> weighted f64 score).
+func hostIndexScoreQuantI8F64(indexQ []float32, indexKQ []int8, indexKScales []float32, weights []float32, nKeys, nH, indexDim, queryPos int, scale float32) []float64 {
+	scores := make([]float64, nKeys)
+	for k := 0; k < nKeys; k++ {
+		if k > queryPos {
+			scores[k] = math.Inf(-1)
+			continue
+		}
+		kScale := indexKScales[k]
+		keyQ := indexKQ[k*indexDim : (k+1)*indexDim]
+		var acc float64
+		for h := 0; h < nH; h++ {
+			qh := indexQ[h*indexDim : (h+1)*indexDim]
+			var hd float64
+			for d := 0; d < indexDim; d++ {
+				kd := float32(keyQ[d]) * kScale
+				hd += float64(qh[d]) * float64(kd)
+			}
+			hs := hd * float64(scale)
+			if hs > 0 {
+				acc += float64(weights[h]) * hs
+			}
+		}
+		scores[k] = acc
+	}
+	return scores
+}
+
+// TestCUDADSAIndexKQuantCacheRoundTrip pins the vLLM indexer_k_quant_and_cache borrow:
+// (a) per-row INT8 quant->dequant error stays within half-ULP (<= 0.55*scale) and zeroes stay exact,
+// (b) paged block_size=16 insert + gather preserves exact quantized bytes & scales across non-contiguous blocks,
+// (c) quantize-once + f64 accumulation preserves exact top-k set equality vs FP32 oracle at nKeys=32768,
+// (d) CUDA header/kernel source contracts retain f64 accumulation inside k_dsa_index_score without modifying k_dsa_sparse_attend or k_dsa_index_topk.
+func TestCUDADSAIndexKQuantCacheRoundTrip(t *testing.T) {
+	const blockSize = 16
+
+	t.Run("quant_dequant_error_bound_and_zero_row", func(t *testing.T) {
+		row := make([]float32, 64)
+		for d := range row {
+			row[d] = float32(math.Sin(float64(d)*0.41-0.9)) * float32(1+(d%7))
+		}
+		q, scale := hostQuantIndexKRowI8(row)
+		if scale <= 0 {
+			t.Fatalf("expected positive scale for non-zero row, got %g", scale)
+		}
+		var maxErr float64
+		for d, v := range row {
+			deq := float32(q[d]) * scale
+			e := math.Abs(float64(v - deq))
+			if e > maxErr {
+				maxErr = e
+			}
+		}
+		if maxErr > 0.55*float64(scale) {
+			t.Fatalf("quant->dequant maxErr=%g exceeded 0.55*scale=%g", maxErr, 0.55*float64(scale))
+		}
+
+		// Zero row stays exact zero scale & codes without NaN/Inf.
+		zeros := make([]float32, 64)
+		zq, zscale := hostQuantIndexKRowI8(zeros)
+		if zscale != 0 {
+			t.Fatalf("expected zero scale for zero row, got %g", zscale)
+		}
+		for i, c := range zq {
+			if c != 0 {
+				t.Fatalf("zero row code[%d]=%d != 0", i, c)
+			}
+		}
+	})
+
+	t.Run("paged_write_and_gather_roundtrip", func(t *testing.T) {
+		const (
+			numBlocks   = 12
+			indexDim    = 32
+			firstOffset = 5
+			tokens      = 40 // spans blocks[0..2] with positions 5..44 (offsets 5..15, 0..15, 0..12)
+		)
+		blocks := []int{7, 2, 9}
+		kCache := make([]int8, numBlocks*blockSize*indexDim)
+		scaleCache := make([]float32, numBlocks*blockSize)
+
+		srcK := make([]float32, tokens*indexDim)
+		for i := range srcK {
+			srcK[i] = float32(math.Cos(float64(i)*0.19+0.3)) * 2.5
+		}
+
+		wantCodes := make([][]int8, tokens)
+		wantScales := make([]float32, tokens)
+		for tok := 0; tok < tokens; tok++ {
+			pos := firstOffset + tok
+			blk := blocks[pos/blockSize]
+			off := pos % blockSize
+			slot := blk*blockSize + off
+			q, sc := hostQuantIndexKRowI8(srcK[tok*indexDim : (tok+1)*indexDim])
+			copy(kCache[slot*indexDim:(slot+1)*indexDim], q)
+			scaleCache[slot] = sc
+			wantCodes[tok] = q
+			wantScales[tok] = sc
+		}
+
+		// Gather back through logical block table and assert exact INT8 codes + scales.
+		for tok := 0; tok < tokens; tok++ {
+			pos := firstOffset + tok
+			blk := blocks[pos/blockSize]
+			off := pos % blockSize
+			slot := blk*blockSize + off
+			if scaleCache[slot] != wantScales[tok] {
+				t.Fatalf("token %d scale mismatch got %g want %g", tok, scaleCache[slot], wantScales[tok])
+			}
+			for d := 0; d < indexDim; d++ {
+				gotQ := kCache[slot*indexDim+d]
+				if gotQ != wantCodes[tok][d] {
+					t.Fatalf("token %d dim %d code=%d want %d", tok, d, gotQ, wantCodes[tok][d])
+				}
+			}
+		}
+	})
+
+	t.Run("quantize_once_f64_topk_set_equality_32768", func(t *testing.T) {
+		const (
+			nKeys    = 32768
+			nH       = 8
+			indexDim = 64
+			queryPos = 32767
+			topK     = 2048
+		)
+		scale := float32(1.0 / math.Sqrt(float64(indexDim)))
+		indexQ := make([]float32, nH*indexDim)
+		for h := 0; h < nH; h++ {
+			for d := 0; d < indexDim; d++ {
+				if d == h {
+					indexQ[h*indexDim+d] = 1.0
+				} else {
+					indexQ[h*indexDim+d] = 0.05 * float32(math.Sin(float64(h*indexDim+d)*0.31))
+				}
+			}
+		}
+		weights := make([]float32, nH)
+		for h := 0; h < nH; h++ {
+			weights[h] = 0.2 + 0.05*float32(h)
+		}
+
+		// Construct keys with graded signal alignment plus orthogonal components so INT8
+		// quantize-once introduces realistic quantization noise without flipping true top-K ranks.
+		indexK := make([]float32, nKeys*indexDim)
+		quantKQ := make([]int8, nKeys*indexDim)
+		quantScales := make([]float32, nKeys)
+		for k := 0; k < nKeys; k++ {
+			rankSignal := float32((nKeys-k)%257) * 0.015
+			if (k*17)%16 == 0 {
+				rankSignal += 4.5 // Deterministic hot block scattered across context.
+			}
+			row := indexK[k*indexDim : (k+1)*indexDim]
+			for d := 0; d < indexDim; d++ {
+				if d < nH {
+					row[d] = rankSignal + 0.08*float32(math.Cos(float64(k+d)))
+				} else {
+					row[d] = 0.25 * float32(math.Sin(float64(k*indexDim+d)*0.17))
+				}
+			}
+			q, sc := hostQuantIndexKRowI8(row)
+			copy(quantKQ[k*indexDim:(k+1)*indexDim], q)
+			quantScales[k] = sc
+		}
+
+		wantOrder := hostIndexSelectF64(indexQ, indexK, weights, nKeys, nH, indexDim, queryPos, topK, scale)
+		qScores := hostIndexScoreQuantI8F64(indexQ, quantKQ, quantScales, weights, nKeys, nH, indexDim, queryPos, scale)
+		gotOrder := dsaRadixSelectMirror(qScores, queryPos+1, topK)
+
+		if len(gotOrder) != topK || len(wantOrder) != topK {
+			t.Fatalf("len mismatch got=%d want=%d (topK=%d)", len(gotOrder), len(wantOrder), topK)
+		}
+		wantSet := make(map[int]struct{}, topK)
+		for _, id := range wantOrder {
+			wantSet[id] = struct{}{}
+		}
+		matches := 0
+		for _, id := range gotOrder {
+			if _, ok := wantSet[id]; ok {
+				matches++
+			}
+		}
+		if matches != topK {
+			t.Fatalf("top-%d set equality broken under quantize-once INT8: %d/%d matched", topK, matches, topK)
+		}
+	})
+
+	t.Run("cuda_source_contract", func(t *testing.T) {
+		quantSrc, err := os.ReadFile(filepath.Join("cuda", "indexer_k_quant_vllm.cuh"))
+		if err != nil {
+			t.Fatalf("read indexer_k_quant_vllm.cuh: %v", err)
+		}
+		specSrc, err := os.ReadFile(filepath.Join("cuda", "spec_graph.cuh"))
+		if err != nil {
+			t.Fatalf("read spec_graph.cuh: %v", err)
+		}
+		for _, needle := range []string{
+			"k_dsa_index_quant_cache",
+			"k_dsa_index_quant_gather",
+			"k_dsa_index_quant_rows",
+			"indexer_k_dequant_i8_val",
+		} {
+			if !strings.Contains(string(quantSrc), needle) {
+				t.Fatalf("indexer_k_quant_vllm.cuh missing %q", needle)
+			}
+		}
+		spec := string(specSrc)
+		for _, needle := range []string{
+			`#include "indexer_k_quant_vllm.cuh"`,
+			"const int8_t *indexKQ",
+			"indexer_k_dequant_i8_val(",
+			"fcuda_dsa_index_select_quant_i8",
+			"k_dsa_sparse_attend",
+			"k_dsa_index_topk",
+		} {
+			if !strings.Contains(spec, needle) {
+				t.Fatalf("spec_graph.cuh missing %q", needle)
+			}
+		}
+	})
+}

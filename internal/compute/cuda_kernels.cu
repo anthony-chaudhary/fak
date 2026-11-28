@@ -263,6 +263,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/attention_generic.cuh"
 #include "cuda/attention.cuh"
 #include "cuda/paged_attention_vllm.cuh"
+#include "prefill_paged.cu"
 #include "cuda/kv_precision.cuh"
 #include "cuda/spec_graph.cuh"
 #ifdef FAK_CUDA_CAPTURE_ONCE_QUALIFICATION

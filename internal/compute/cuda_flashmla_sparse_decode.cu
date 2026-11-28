@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include <climits>
 #include <cmath>
+#include <cstring>
 #ifndef FLASH_MLA_IS_BUILD_ON_CUDA
 #define FLASH_MLA_IS_BUILD_ON_CUDA
 #endif
@@ -122,5 +123,42 @@ extern "C" int fak_flashmla_decode_workspace_query(int topk,int extra_topk,int i
     int parts=prop.multiProcessorCount;if(parts<=0 || parts>160)return -2;
     *sizes={(size_t)parts*sizeof(DecodingSchedMeta),2*sizeof(int),
             (size_t)(parts+1)*64*sizeof(float),(size_t)(parts+1)*32768*sizeof(float),parts};
+    return 0;
+}
+
+// Strata-10 batch-invariance & recompute check helpers (MIT Niko1221/Strata@c6f6427d9de9):
+// Pin split-KV partition selection strictly to the single-token decode split count (1) when
+// batch_invariant is active or key count fits the decode-invariant budget (<= 2048).
+static constexpr int kStrataBatchInvariantKeyBudget = 2048;
+
+extern "C" int fak_flashmla_batch_invariant_split_count(int topk, int extra_topk,
+    int parts, int batch_invariant) {
+    if (topk <= 0 || extra_topk < 0) return -1;
+    int total_keys = topk + extra_topk;
+    if (batch_invariant != 0 || total_keys <= 640 || total_keys <= kStrataBatchInvariantKeyBudget) {
+        (void)parts;
+        return 1;
+    }
+    return parts > 0 ? parts : 1;
+}
+
+// Recompute check mode: verifies verify-pass BF16 output and FP32 LSE match M=1 decode
+// bit-for-bit; returns 0 on exact bitwise identity, (1 + mismatch_idx) on first mismatch.
+extern "C" int fak_flashmla_decode_recompute_check(
+    const uint16_t *verify_out_bf16, const uint16_t *single_out_bf16,
+    const float *verify_lse, const float *single_lse, int elems, int heads) {
+    if (!verify_out_bf16 || !single_out_bf16 || elems < 0 || heads < 0) return -1;
+    for (int i = 0; i < elems; ++i) {
+        if (verify_out_bf16[i] != single_out_bf16[i]) return 1 + i;
+    }
+    if (heads > 0) {
+        if (!verify_lse || !single_lse) return -1;
+        for (int h = 0; h < heads; ++h) {
+            uint32_t vb = 0, sb = 0;
+            std::memcpy(&vb, &verify_lse[h], sizeof(vb));
+            std::memcpy(&sb, &single_lse[h], sizeof(sb));
+            if (vb != sb) return 1 + elems + h;
+        }
+    }
     return 0;
 }
