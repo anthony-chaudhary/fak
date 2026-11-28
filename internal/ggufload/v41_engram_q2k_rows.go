@@ -192,59 +192,87 @@ func openV41EngramK(ws *WeightSource, decoderLayer int, typ TensorType) (*V41Eng
 
 	name := fmt.Sprintf("blk.%d.%s", decoderLayer, v41EngramEmbdSuffix)
 	info, ok := ws.Tensor(name)
+	combined := false
+	tensorLabel := name
+	if !ok {
+		if cInfo, cOK := ws.Tensor(v41CombinedEngramTensor); cOK {
+			info, ok = cInfo, true
+			combined = true
+			tensorLabel = v41CombinedEngramTensor
+		}
+	}
 	if !ok {
 		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: name, Detail: "missing tensor"}
 	}
 	if info.Type != typ {
 		if info.Type == v41EngramRawI8Type {
-			return nil, &V41EngramQ2KError{Kind: V41EngramQ2KTensorType, Tensor: name, Type: info.Type,
+			return nil, &V41EngramQ2KError{Kind: V41EngramQ2KTensorType, Tensor: tensorLabel, Type: info.Type,
 				Detail: "raw-I8 row264 table: use V41EngramGGUFOpen instead"}
 		}
-		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KTensorType, Tensor: name, Type: info.Type,
+		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KTensorType, Tensor: tensorLabel, Type: info.Type,
 			Detail: fmt.Sprintf("unsupported Engram tensor type %s (want %s %d)", info.Type, typ, typ)}
 	}
 	if len(info.Dims) != 2 || info.Dims[0] != uint64(qkK) {
-		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: name, Type: info.Type,
+		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: tensorLabel, Type: info.Type,
 			Detail: fmt.Sprintf("dims %v, want [%d rows]", info.Dims, qkK)}
 	}
 
-	// Prefer the declared row count; fall back to the tensor's own dims[1] for the
-	// vcruz dialect that omits engram.rows entirely (idx >= len(NumEmbeddings)).
-	// A declared entry that is present must be positive AND agree with dims[1]:
-	// a non-positive declared count is malformed metadata (a named refusal), and a
-	// positive-but-disagreeing count is a named mismatch. Only a fully-absent
-	// array falls back to dims[1].
-	// Check before narrowing or multiplying: binding also addresses the decoded
-	// f32 extent with int64 offsets, even though hashing reads encoded bytes.
 	if info.Dims[1] > uint64(math.MaxInt) || info.Dims[1] > uint64(math.MaxInt64/v41EngramQ2KRowBytes) {
-		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: name, Type: info.Type,
+		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: tensorLabel, Type: info.Type,
 			Detail: "row count or decoded extent is not representable"}
 	}
 	tensorRows := int(info.Dims[1])
 	rows := tensorRows
-	if idx < len(eng.NumEmbeddings) {
+	rowBase := 0
+	totalRows := tensorRows
+	if combined {
+		layerRows, rErr := v41CombinedLayerRowCounts(eng)
+		if rErr != nil {
+			return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: tensorLabel, Type: info.Type, Detail: rErr.Error()}
+		}
+		var sumAll int
+		for l, count := range layerRows {
+			if count <= 0 || sumAll > math.MaxInt-count {
+				return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: tensorLabel, Type: info.Type,
+					Detail: fmt.Sprintf("layer %d row count %d out of range", l, count)}
+			}
+			if l < idx {
+				rowBase += count
+			}
+			if l == idx {
+				rows = count
+			}
+			sumAll += count
+		}
+		totalRows = sumAll
+		if totalRows != tensorRows {
+			return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: tensorLabel, Type: info.Type,
+				Detail: fmt.Sprintf("declared combined rows %d disagree with tensor dims[1] %d", totalRows, tensorRows)}
+		}
+	} else if idx < len(eng.NumEmbeddings) {
 		rows = eng.NumEmbeddings[idx]
 		if rows <= 0 {
-			return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: name, Type: info.Type,
+			return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: tensorLabel, Type: info.Type,
 				Detail: fmt.Sprintf("declared rows %d for layer %d is non-positive (want > 0 agreeing with tensor dims[1] %d)", rows, decoderLayer, tensorRows)}
 		}
 		if rows != tensorRows {
-			return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: name, Type: info.Type,
+			return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: tensorLabel, Type: info.Type,
 				Detail: fmt.Sprintf("declared rows %d disagree with tensor dims[1] %d", rows, tensorRows)}
 		}
+		totalRows = rows
 	}
 	if rows <= 0 {
-		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: name, Type: info.Type,
+		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: tensorLabel, Type: info.Type,
 			Detail: fmt.Sprintf("layer %d resolves %d rows", decoderLayer, rows)}
 	}
 
 	r, size, err := ws.tensorReader(info)
 	if err != nil {
-		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KRead, Tensor: name, Err: err}
+		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KRead, Tensor: tensorLabel, Err: err}
 	}
 	payload, err := tensorPayloadBytes(info)
 	if err != nil {
-		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: name, Type: info.Type, Err: err}
+		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Tensor: tensorLabel, Type: info.Type, Err: err}
 	}
 	stride := blockQ2KBytes
 	if typ == TensorQ4_K {
@@ -252,17 +280,45 @@ func openV41EngramK(ws *WeightSource, decoderLayer int, typ TensorType) (*V41Eng
 	} else if typ == TensorIQ4_NL {
 		stride = qkK / qkIQ4NL * blockIQ4NLBytes
 	}
-	// The geometry check bounds both the encoded and decoded int64 extents.
+	totalExtent := int64(totalRows) * int64(stride)
+	if payload != uint64(totalExtent) {
+		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KExtent, Tensor: tensorLabel, Type: info.Type,
+			Detail: fmt.Sprintf("payload %d bytes is inconsistent with %d rows * %d bytes/row = %d", payload, totalRows, stride, totalExtent)}
+	}
+	layerOff := info.FileOffset + int64(rowBase)*int64(stride)
 	extent := int64(rows) * int64(stride)
-	if payload != uint64(extent) {
-		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KExtent, Tensor: name, Type: info.Type,
-			Detail: fmt.Sprintf("payload %d bytes is inconsistent with %d rows * %d bytes/row = %d", payload, rows, stride, extent)}
+	if info.FileOffset < 0 || info.FileOffset > math.MaxInt64-totalExtent || info.FileOffset+totalExtent > size ||
+		layerOff < info.FileOffset || extent < 0 || layerOff > math.MaxInt64-extent || layerOff+extent > size {
+		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KExtent, Tensor: tensorLabel, Type: info.Type,
+			Detail: fmt.Sprintf("extent offset=%d size=%d overruns its shard (%d bytes)", info.FileOffset, totalExtent, size)}
 	}
-	if info.FileOffset < 0 || info.FileOffset > math.MaxInt64-extent || info.FileOffset+extent > size {
-		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KExtent, Tensor: name, Type: info.Type,
-			Detail: fmt.Sprintf("extent offset=%d size=%d overruns its shard (%d bytes)", info.FileOffset, extent, size)}
+	return &V41EngramKSource{r: r, tableRows: rows, payloadOff: layerOff, q4K: typ == TensorQ4_K, iq4NL: typ == TensorIQ4_NL}, nil
+}
+
+func v41CombinedLayerRowCounts(eng *DeepSeek41Engram) ([]int, error) {
+	nLayers := len(eng.LayerIDs)
+	if nLayers == 0 {
+		return nil, fmt.Errorf("missing engram layers")
 	}
-	return &V41EngramKSource{r: r, tableRows: rows, payloadOff: info.FileOffset, q4K: typ == TensorQ4_K, iq4NL: typ == TensorIQ4_NL}, nil
+	if len(eng.NumEmbeddings) == nLayers {
+		return eng.NumEmbeddings, nil
+	}
+	if eng.MaxNgramSize < 2 || eng.NHeads <= 0 {
+		return nil, fmt.Errorf("combined table needs ngram >= 2 and heads > 0")
+	}
+	wantCols := (eng.MaxNgramSize - 1) * eng.NHeads
+	if len(eng.Primes) != nLayers*wantCols {
+		return nil, fmt.Errorf("combined table primes %d != %d*%d", len(eng.Primes), nLayers, wantCols)
+	}
+	out := make([]int, nLayers)
+	for l := 0; l < nLayers; l++ {
+		sum := 0
+		for c := 0; c < wantCols; c++ {
+			sum += eng.Primes[l*wantCols+c]
+		}
+		out[l] = sum
+	}
+	return out, nil
 }
 
 // RowBytes returns the DEQUANTIZED f32 width of one Engram row (qkK*4 = 1024).

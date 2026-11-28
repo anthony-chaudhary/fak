@@ -338,6 +338,9 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 		// forward when rotating the long-context layers.
 		return "model.rope_freqs.weight", true
 	}
+	if archIsDeepSeek41(arch) && name == v41CombinedEngramTensor {
+		return deepseek41EngramPrefix + v41CombinedEngramTensor, true
+	}
 	if archIsQwen4Exp(arch) {
 		if g, ok := qwen4ExpGlobalTensorNames[name]; ok {
 			return g, true
