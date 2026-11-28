@@ -575,6 +575,10 @@ type SampleParams struct {
 	// RawPrompt asks a native planner to encode the request text without a chat
 	// template (the legacy /v1/completions wire). Only DeepSeek V4.1 honors it.
 	RawPrompt bool
+	// MaxAttempts overrides the planner's per-call retry attempt cap when > 0
+	// (disabling the multi-hour default retry backoff budget so multi-candidate
+	// gateway failover can hand off on the first transient upstream status).
+	MaxAttempts int
 }
 
 // Planner is the seam both the live HTTP client and the offline mock satisfy. One
@@ -1076,6 +1080,12 @@ func (p *HTTPPlanner) completeOnce(ctx context.Context, messages []Message, tool
 	turnStart := time.Now()
 	maxAttempts, deadline, budgetOn := retryBounds(turnStart)
 	_, attemptsPinned := plannerMaxAttemptsPinned()
+	if call != nil && call.maxAttempts > 0 {
+		maxAttempts = call.maxAttempts
+		attemptsPinned = true
+		budgetOn = false
+		deadline = time.Time{}
+	}
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	// A 401 on the pinned/rotating subscription path is recoverable ONCE: the on-disk
 	// OAuth token may have rotated (or been briefly torn) between resolve and send, so we
