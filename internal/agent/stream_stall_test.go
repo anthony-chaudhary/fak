@@ -251,3 +251,142 @@ func TestStreamStallTimeoutClamp(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=1s
+func TestAgentComputeProgressStallWatchdogSurvivesPastHorizon(t *testing.T) {
+	pr, pw := io.Pipe()
+	hb := NewComputeProgressHeartbeat()
+
+	const idleWindow = 80 * time.Millisecond
+	const progressWindow = 120 * time.Millisecond
+	const totalPrefill = 260 * time.Millisecond // >3x idle, >2x progress
+
+	wd := NewComputeProgressWatchdog(pr, idleWindow, progressWindow, hb)
+	defer func() { _ = wd.Close() }()
+
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			_ = pw.Close()
+		}
+	})
+
+	go func() {
+		defer close(done)
+		deadline := time.Now().Add(totalPrefill)
+		for time.Now().Before(deadline) {
+			hb.Tick()
+			time.Sleep(20 * time.Millisecond)
+		}
+		_, _ = io.WriteString(pw, "chunk-after-prefill")
+		_ = pw.Close()
+	}()
+
+	got, err := io.ReadAll(wd)
+	if err != nil {
+		t.Fatalf("stream with advancing compute ticks failed past horizon: %v", err)
+	}
+	if string(got) != "chunk-after-prefill" {
+		t.Fatalf("got payload %q, want %q", string(got), "chunk-after-prefill")
+	}
+	if hb.Seq() < 3 {
+		t.Fatalf("expected compute heartbeat sequence >= 3, got %d", hb.Seq())
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestAgentComputeProgressStallWatchdogZeroTicksFails(t *testing.T) {
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
+
+	hb := NewComputeProgressHeartbeat()
+	wd := NewComputeProgressWatchdog(pr, 60*time.Millisecond, 120*time.Millisecond, hb)
+	defer func() { _ = wd.Close() }()
+
+	buf := make([]byte, 32)
+	_, err := wd.Read(buf)
+	if !errors.Is(err, ErrUpstreamStalled) {
+		t.Fatalf("expected ErrUpstreamStalled with zero compute ticks, got %v", err)
+	}
+	var stalled *UpstreamStalledError
+	if !errors.As(err, &stalled) {
+		t.Fatalf("expected *UpstreamStalledError, got %T (%v)", err, err)
+	}
+	if stalled.Kind != stallKindIdle {
+		t.Fatalf("stalled.Kind = %q, want %q", stalled.Kind, stallKindIdle)
+	}
+	if stalled.Unwrap() != ErrUpstreamStalled {
+		t.Fatalf("stalled.Unwrap() = %v, want %v", stalled.Unwrap(), ErrUpstreamStalled)
+	}
+	if !strings.Contains(stalled.Error(), "upstream stalled") {
+		t.Fatalf("unexpected error string: %q", stalled.Error())
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestAgentComputeProgressStallWatchdogFreezeAfterHorizonFails(t *testing.T) {
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
+
+	hb := NewComputeProgressHeartbeat()
+	const idleWindow = 70 * time.Millisecond
+	const progressWindow = 100 * time.Millisecond
+	wd := NewComputeProgressWatchdog(pr, idleWindow, progressWindow, hb)
+	defer func() { _ = wd.Close() }()
+
+	stopTicks := make(chan struct{})
+	go func() {
+		deadline := time.Now().Add(180 * time.Millisecond) // past >2x idle horizon
+		for time.Now().Before(deadline) {
+			hb.Tick()
+			time.Sleep(18 * time.Millisecond)
+		}
+		close(stopTicks)
+	}()
+
+	start := time.Now()
+	buf := make([]byte, 32)
+	_, err := wd.Read(buf)
+	elapsed := time.Since(start)
+	<-stopTicks
+
+	if !errors.Is(err, ErrUpstreamStalled) {
+		t.Fatalf("expected ErrUpstreamStalled after ticks freeze, got %v", err)
+	}
+	if elapsed < 180*time.Millisecond {
+		t.Fatalf("watchdog tripped too early at %s while ticks were advancing", elapsed)
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestAgentComputeProgressStallWatchdogVocabularyAndContext(t *testing.T) {
+	hb := NewComputeProgressHeartbeat()
+	ctx := WithComputeProgressHeartbeat(context.Background(), hb)
+	if got := computeProgressHeartbeatFromContext(ctx); got != hb {
+		t.Fatalf("computeProgressHeartbeatFromContext mismatch")
+	}
+	if got := computeProgressHeartbeatFromContext(context.Background()); got != nil {
+		t.Fatalf("expected nil heartbeat on bare context, got %v", got)
+	}
+
+	cases := []struct {
+		kind string
+		want string
+	}{
+		{"", "idle"},
+		{stallKindNoProgress, "no content progress"},
+		{stallKindMaxDuration, "max-duration"},
+		{stallKindFirstToken, "first-token"},
+	}
+	for _, tc := range cases {
+		e := &UpstreamStalledError{Idle: time.Second, Kind: tc.kind, Err: ErrUpstreamStalled}
+		if !errors.Is(e, ErrUpstreamStalled) {
+			t.Fatalf("kind %q lost ErrUpstreamStalled unwrap", tc.kind)
+		}
+		if !strings.Contains(e.Error(), tc.want) {
+			t.Fatalf("kind %q Error() = %q missing %q", tc.kind, e.Error(), tc.want)
+		}
+	}
+}

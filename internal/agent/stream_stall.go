@@ -35,6 +35,7 @@ package agent
 // UpstreamStalledError the gateway logs says whether the socket died or the turn wedged.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +44,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -261,11 +263,93 @@ type stallReader struct {
 	softFired          bool
 	onSoftStall        func(SoftProgressStall)
 
-	mu      sync.Mutex
-	tripped bool   // a timer fired and closed rc — the next Read error is a stall
-	kind    string // which deadline fired: stallKindIdle, stallKindNoProgress, or stallKindMaxDuration
-	closed  bool   // rc has been closed (by Close or a timer) — close exactly once
-	sawByte bool   // the upstream delivered at least one body byte; before that, prefill is still running
+	// computeHB optionally decouples stall checks from wall-clock elapsed time by tracking
+	// owner-side compute forward ticks (prefill/decode steps). When nil, behavior is
+	// byte-for-byte identical to wall-clock/byte timers.
+	computeHB          *ComputeProgressHeartbeat
+	lastIdleComputeSeq uint64
+	lastProgComputeSeq uint64
+
+	mu            sync.Mutex
+	tripped       bool          // a timer fired and closed rc — the next Read error is a stall
+	kind          string        // which deadline fired: stallKindIdle, stallKindNoProgress, or stallKindMaxDuration
+	trippedWindow time.Duration // effective window that tripped (for diagnostic reporting)
+	closed        bool          // rc has been closed (by Close or a timer) — close exactly once
+	sawByte       bool          // the upstream delivered at least one body byte; before that, prefill is still running
+}
+
+// ComputeProgressHeartbeat tracks owner-side compute forward progress (such as
+// prefill/decode steps or forward layer ticks) independently of wire bytes or
+// elapsed wall-clock time. A watchdog attached to this heartbeat stalls only
+// after a full window with zero compute forward ticks.
+type ComputeProgressHeartbeat struct {
+	seq      atomic.Uint64
+	lastNano atomic.Int64
+}
+
+// NewComputeProgressHeartbeat creates a heartbeat anchored at the current time.
+func NewComputeProgressHeartbeat() *ComputeProgressHeartbeat {
+	hb := &ComputeProgressHeartbeat{}
+	hb.lastNano.Store(time.Now().UnixNano())
+	return hb
+}
+
+// Tick records one forward compute step and refreshes the heartbeat timestamp.
+func (h *ComputeProgressHeartbeat) Tick() {
+	if h == nil {
+		return
+	}
+	now := time.Now().UnixNano()
+	for {
+		prev := h.lastNano.Load()
+		target := now
+		if target < prev {
+			target = prev
+		}
+		if h.lastNano.CompareAndSwap(prev, target) {
+			break
+		}
+	}
+	h.seq.Add(1)
+}
+
+// Seq returns the monotonic count of recorded compute forward ticks.
+func (h *ComputeProgressHeartbeat) Seq() uint64 {
+	if h == nil {
+		return 0
+	}
+	return h.seq.Load()
+}
+
+// LastTickAt returns the timestamp of the most recent Tick (or creation time if none).
+func (h *ComputeProgressHeartbeat) LastTickAt() time.Time {
+	if h == nil {
+		return time.Time{}
+	}
+	ns := h.lastNano.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
+}
+
+type computeProgressHeartbeatKey struct{}
+
+// WithComputeProgressHeartbeat attaches hb to ctx so streaming wrappers can
+// decouple stall detection from elapsed wall time while compute ticks advance.
+func WithComputeProgressHeartbeat(ctx context.Context, hb *ComputeProgressHeartbeat) context.Context {
+	if ctx == nil || hb == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, computeProgressHeartbeatKey{}, hb)
+}
+
+func computeProgressHeartbeatFromContext(ctx context.Context) *ComputeProgressHeartbeat {
+	if ctx == nil {
+		return nil
+	}
+	hb, _ := ctx.Value(computeProgressHeartbeatKey{}).(*ComputeProgressHeartbeat)
+	return hb
 }
 
 // newStallReader wraps rc with an idle (inter-byte) deadline of window, a content
@@ -276,41 +360,102 @@ type stallReader struct {
 // progress deadline is by construction the outer, more forgiving one, and letting it
 // undercut the byte deadline would only mislabel a plain dead socket.
 func newStallReader(rc io.ReadCloser, window, progressWindow, maxDurationWindow time.Duration) *stallReader {
+	return newStallReaderWithHeartbeat(rc, window, progressWindow, maxDurationWindow, nil)
+}
+
+func newStallReaderWithHeartbeat(rc io.ReadCloser, window, progressWindow, maxDurationWindow time.Duration, hb *ComputeProgressHeartbeat) *stallReader {
 	if progressWindow > 0 && progressWindow < window {
 		progressWindow = window
 	}
-	s := &stallReader{rc: rc, window: window, progressWindow: progressWindow, maxDurationWindow: maxDurationWindow}
+	s := &stallReader{
+		rc:                 rc,
+		window:             window,
+		progressWindow:     progressWindow,
+		maxDurationWindow:  maxDurationWindow,
+		computeHB:          hb,
+		lastIdleComputeSeq: hb.Seq(),
+		lastProgComputeSeq: hb.Seq(),
+	}
 	if window > 0 {
 		// Create the timer already stopped; Read arms it per call. AfterFunc has no
 		// channel to drain, so Stop/Reset alone manage its lifecycle cleanly.
-		s.timer = time.AfterFunc(window, func() { s.trip(stallKindIdle) })
+		s.timer = time.AfterFunc(window, func() { s.onDeadline(stallKindIdle) })
 		s.timer.Stop()
 	}
 	if progressWindow > 0 {
 		// Armed immediately and left running: the turn has made no progress yet, and the
 		// clock on "no content since the stream opened" starts when the stream opens.
-		s.progressTimer = time.AfterFunc(progressWindow, func() { s.trip(stallKindNoProgress) })
+		s.progressTimer = time.AfterFunc(progressWindow, func() { s.onDeadline(stallKindNoProgress) })
 	}
 	if maxDurationWindow > 0 {
 		// Armed once at stream open, never re-armed. This is the absolute budget ceiling.
-		s.maxDurationTimer = time.AfterFunc(maxDurationWindow, func() { s.trip(stallKindMaxDuration) })
+		s.maxDurationTimer = time.AfterFunc(maxDurationWindow, func() { s.onDeadline(stallKindMaxDuration) })
 	}
 	return s
 }
 
-// trip is the timer callback for all three deadlines: the named window elapsed, so either
-// the upstream is silent (idle), it is warm but not advancing the turn (no-progress), or
-// the stream outlived its absolute max-duration budget (max-duration). Close the body to
-// unblock the parked Read and record which deadline fired. Whichever timer arrives first
-// wins; the others find the reader already closed and return.
-func (s *stallReader) trip(kind string) {
+// onDeadline handles timer expiration for idle, content-progress, and max-duration
+// deadlines. When a ComputeProgressHeartbeat is attached to idle/progress checks and
+// ticks have advanced within the last window, it re-arms the timer for the remaining
+// budget rather than closing rc — stalling only on zero compute progress.
+func (s *stallReader) onDeadline(kind string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return
 	}
+	window := s.windowForKindLocked(kind)
+	if s.computeHB != nil && kind != stallKindMaxDuration && window > 0 {
+		curSeq := s.computeHB.Seq()
+		lastTick := s.computeHB.LastTickAt()
+		sinceTick := time.Since(lastTick)
+		var prevSeq *uint64
+		var timer *time.Timer
+		switch kind {
+		case stallKindIdle:
+			prevSeq = &s.lastIdleComputeSeq
+			timer = s.timer
+		case stallKindNoProgress:
+			prevSeq = &s.lastProgComputeSeq
+			timer = s.progressTimer
+		}
+		if prevSeq != nil && timer != nil && curSeq > *prevSeq && sinceTick < window {
+			*prevSeq = curSeq
+			remaining := window - sinceTick
+			if remaining > 0 {
+				timer.Reset(remaining)
+				return
+			}
+		}
+	}
+	s.tripLocked(kind, window)
+}
+
+func (s *stallReader) windowForKindLocked(kind string) time.Duration {
+	switch kind {
+	case stallKindNoProgress:
+		return s.progressWindow
+	case stallKindMaxDuration:
+		return s.maxDurationWindow
+	default:
+		return s.idleWindowLocked()
+	}
+}
+
+// trip is the timer callback for direct callers: record the stall kind and close rc.
+func (s *stallReader) trip(kind string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tripLocked(kind, s.windowForKindLocked(kind))
+}
+
+func (s *stallReader) tripLocked(kind string, window time.Duration) {
+	if s.closed {
+		return
+	}
 	s.tripped = true
 	s.kind = kind
+	s.trippedWindow = window
 	s.closed = true
 	_ = s.rc.Close()
 }
@@ -428,8 +573,14 @@ func (s *stallReader) Read(p []byte) (int, error) {
 	if s.timer != nil {
 		s.mu.Lock()
 		window := s.idleWindowLocked()
+		if s.computeHB != nil {
+			s.lastIdleComputeSeq = s.computeHB.Seq()
+		}
+		closed := s.closed
 		s.mu.Unlock()
-		s.timer.Reset(window)
+		if !closed {
+			s.timer.Reset(window)
+		}
 	}
 	n, err := s.rc.Read(p)
 	if s.timer != nil {
@@ -450,6 +601,12 @@ func (s *stallReader) Read(p []byte) (int, error) {
 // Close stops all deadlines and closes the wrapped body, idempotently — an explicit defer
 // and any timer callback may reach it, so the underlying body is closed exactly once.
 func (s *stallReader) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
 	if s.timer != nil {
 		s.timer.Stop()
 	}
@@ -462,13 +619,60 @@ func (s *stallReader) Close() error {
 	if s.softProgressTimer != nil {
 		s.softProgressTimer.Stop()
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
+	return s.rc.Close()
+}
+
+// ComputeProgressWatchdog wraps an io.ReadCloser with stall detection whose
+// idle and content-progress deadlines track a ComputeProgressHeartbeat rather
+// than wall-clock duration alone. Advancing compute ticks keep the stream
+// open past the wall-clock/idle horizon; zero compute progress for a full
+// window fails with *UpstreamStalledError wrapping ErrUpstreamStalled.
+type ComputeProgressWatchdog struct {
+	reader *stallReader
+}
+
+// NewComputeProgressWatchdog wraps rc with idle and progress stall windows
+// gated on hb. Passing nil hb uses pure wire-idle/content-progress timers.
+func NewComputeProgressWatchdog(rc io.ReadCloser, stallWindow, progressWindow time.Duration, hb *ComputeProgressHeartbeat) *ComputeProgressWatchdog {
+	return &ComputeProgressWatchdog{
+		reader: newStallReaderWithHeartbeat(rc, stallWindow, progressWindow, 0, hb),
+	}
+}
+
+// Read reads from the watched stream, preserving ErrUpstreamStalled and
+// *UpstreamStalledError failure semantics if a watchdog deadline trips.
+func (w *ComputeProgressWatchdog) Read(p []byte) (int, error) {
+	n, err := w.reader.Read(p)
+	if err != nil && errors.Is(err, ErrUpstreamStalled) {
+		w.reader.mu.Lock()
+		kind := w.reader.kind
+		idle := w.reader.trippedWindow
+		if idle <= 0 {
+			idle = w.reader.windowForKindLocked(kind)
+		}
+		w.reader.mu.Unlock()
+		return n, &UpstreamStalledError{
+			Idle: idle,
+			Kind: kind,
+			Err:  ErrUpstreamStalled,
+		}
+	}
+	return n, err
+}
+
+// NoteProgress records a wire turn-advancing frame on the underlying reader.
+func (w *ComputeProgressWatchdog) NoteProgress() {
+	if w != nil && w.reader != nil {
+		w.reader.noteProgress()
+	}
+}
+
+// Close stops all watchdog timers and closes the underlying stream.
+func (w *ComputeProgressWatchdog) Close() error {
+	if w == nil || w.reader == nil {
 		return nil
 	}
-	s.closed = true
-	return s.rc.Close()
+	return w.reader.Close()
 }
 
 // streamStallTimeout is the inter-byte idle deadline applied to a streamed upstream read,
