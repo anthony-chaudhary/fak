@@ -258,3 +258,66 @@ func BenchmarkCUDAQwen35ResidualNormEnqueue(b *testing.B) {
 		}
 	}
 }
+
+// ADAPT of modular/modular (Apache-2.0 WITH LLVM-exception),
+// max/kernels/src/nn/gated_residual_rms_norm.mojo:264 @88ab8913af6b9298fe914e0f20d87a49e4172d0d:
+// closed host oracle pinning the serial 4-step gated residual RMSNorm boundary,
+// alpha/beta identities, and temperature T scaling.
+func gatedResidualRMSNormRef(residual, branch, postW, nextPreW []float32, gate, temp, eps float64) (nextPre []float32, alpha, beta float64) {
+	n := len(residual)
+	scaled := make([]float64, n)
+	var sumSq float64
+	for i := 0; i < n; i++ {
+		scaled[i] = float64(branch[i]) * (1.0 + float64(postW[i]))
+		sumSq += scaled[i] * scaled[i]
+	}
+	invRMS := 1.0 / math.Sqrt(sumSq/float64(n)+eps)
+	normed := make([]float64, n)
+	for i := 0; i < n; i++ {
+		normed[i] = scaled[i] * invRMS
+	}
+	sig := func(x float64) float64 { return 1.0 / (1.0 + math.Exp(-x)) }
+	beta = sig(gate / temp)
+	alpha = math.Sqrt(math.Max(0, sig(-gate/temp)*(1.0+beta)))
+	mixed := make([]float64, n)
+	var mixSq float64
+	for i := 0; i < n; i++ {
+		mixed[i] = alpha*float64(residual[i]) + beta*normed[i]
+		mixSq += mixed[i] * mixed[i]
+	}
+	mixInvRMS := 1.0 / math.Sqrt(mixSq/float64(n)+eps)
+	nextPre = make([]float32, n)
+	for i := 0; i < n; i++ {
+		nextPre[i] = float32(mixed[i] * mixInvRMS * float64(nextPreW[i]))
+	}
+	return nextPre, alpha, beta
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestGatedResidualRMSNormOracle(t *testing.T) {
+	t.Parallel()
+	residual := []float32{1.0, -2.0, 0.5, 3.0}
+	branch := []float32{0.5, 1.0, -1.5, 2.0}
+	postW := []float32{0.1, -0.2, 0.0, 0.3}
+	nextPreW := []float32{1.0, 1.5, 0.8, 1.2}
+	const eps = 1e-6
+
+	out0, alpha0, beta0 := gatedResidualRMSNormRef(residual, branch, postW, nextPreW, 0, 1.0, eps)
+	if math.Abs(beta0-0.5) > 1e-12 || math.Abs(alpha0-math.Sqrt(0.75)) > 1e-12 {
+		t.Fatalf("gate=0 identities: alpha=%v beta=%v", alpha0, beta0)
+	}
+	if len(out0) != len(residual) {
+		t.Fatalf("len=%d, want %d", len(out0), len(residual))
+	}
+
+	outA, aA, bA := gatedResidualRMSNormRef(residual, branch, postW, nextPreW, 1.5, 2.0, eps)
+	outB, aB, bB := gatedResidualRMSNormRef(residual, branch, postW, nextPreW, 3.0, 4.0, eps)
+	if math.Abs(aA-aB) > 1e-12 || math.Abs(bA-bB) > 1e-12 {
+		t.Fatalf("T scaling broke alpha/beta: (%v,%v) vs (%v,%v)", aA, bA, aB, bB)
+	}
+	for i := range outA {
+		if outA[i] != outB[i] {
+			t.Fatalf("T scaling idx %d: %v != %v", i, outA[i], outB[i])
+		}
+	}
+}
