@@ -11,6 +11,10 @@ rows: its `as_of`, exact row text, observed date, and indexed receipt path must 
 the same change. History and envelope-specific results remain on the benchmark index pages.
 The standard CI and `make scorecard-ratchet` gates run the real freshness audit, so receipt
 publication cannot leave the front page silently stale.
+`tools/hero_sweep.data.json`, `visuals/61-hero-benchmark-sweep.{svg,png}`, and `README.md` are
+likewise bound to `hardware-latest.json` by `hero_sweep_sync` in `tools/readme_freshness_audit.py`:
+when a new material record (`>= 5%` or fence flip) beats a hero panel, run `fak readme record`
+(followed by `python tools/hero_sweep_gen.py` and `bash visuals/render-hero-pngs.sh`).
 
 ## Current Qwen performance
 

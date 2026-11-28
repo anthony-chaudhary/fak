@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -33,6 +34,8 @@ func runReadme(stdout, stderr io.Writer, args []string) int {
 		return runReadmePreviewNext(stdout, stderr, args[1:])
 	case "publish":
 		return runReadmePublish(stdout, stderr, args[1:])
+	case "record":
+		return runReadmeRecord(stdout, stderr, args[1:])
 	case "init-fragment":
 		return runReadmeInitFragment(stdout, stderr, args[1:])
 	case "help", "-h", "--help":
@@ -52,6 +55,7 @@ func printReadmeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  lint-staged     Validate all candidate fragments in directory")
 	fmt.Fprintln(w, "  preview-next    Preview README synthesis with staged fragments applied")
 	fmt.Fprintln(w, "  publish         Publish staged fragments to README.md and archives")
+	fmt.Fprintln(w, "  record          Update hero sweep, README, and hardware manifest on a beaten record")
 	fmt.Fprintln(w, "  init-fragment   Initialize a clean candidate fragment template")
 	fmt.Fprintln(w, "  help            Show this help message")
 	fmt.Fprintln(w, "")
@@ -560,5 +564,136 @@ func runReadmeInitFragment(stdout, stderr io.Writer, args []string) int {
 	}
 
 	fmt.Fprintf(stdout, "Created fragment template: %s\n", outPath)
+	return 0
+}
+
+func runReadmeRecord(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("readme record", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var repoFlag string
+	var panel string
+	var value float64
+	var label string
+	var commit string
+	var receipt string
+	var dateStr string
+	var foot string
+	var callout string
+	var desc string
+	var minDeltaPct float64
+	var readmeOld string
+	var readmeNew string
+	var platform string
+	var hardwareRow string
+	var renderSVG bool
+	var allowNonMaterial bool
+	var dryRun bool
+	var jsonOut bool
+
+	fs.StringVar(&repoFlag, "repo", "", "Repository root path (default: auto-detect)")
+	fs.StringVar(&panel, "panel", "", "Target panel name in tools/hero_sweep.data.json (required)")
+	fs.Float64Var(&value, "value", 0, "New measured benchmark value (required, > 0)")
+	fs.StringVar(&label, "label", "", "Explicit bar label (default: preserve unit from prior label)")
+	fs.StringVar(&commit, "commit", "", "Short or full commit SHA witnessing the record (required)")
+	fs.StringVar(&receipt, "receipt", "", "Repo-relative path to committed receipt (required)")
+	fs.StringVar(&dateStr, "date", "", "Observation date YYYY-MM-DD (default: today UTC)")
+	fs.StringVar(&foot, "foot", "", "Updated panel footnote")
+	fs.StringVar(&callout, "callout", "", "Updated panel callout")
+	fs.StringVar(&desc, "desc", "", "Updated hero sweep accessibility description")
+	fs.Float64Var(&minDeltaPct, "min-delta-pct", readmenext.DefaultMinDeltaPct, "Minimum improvement percentage to count as material")
+	fs.StringVar(&readmeOld, "readme-old", "", "Exact README.md text to replace alongside hero update")
+	fs.StringVar(&readmeNew, "readme-new", "", "Replacement README.md text")
+	fs.StringVar(&platform, "platform", "", "Optional hardware-latest platform (Mac, AMD, NVIDIA)")
+	fs.StringVar(&hardwareRow, "hardware-row", "", "Optional markdown row for docs/benchmarks/README.md and hardware-latest.json")
+	fs.BoolVar(&renderSVG, "render-svg", true, "Regenerate visuals/61-hero-benchmark-sweep.svg via tools/hero_sweep_gen.py")
+	fs.BoolVar(&allowNonMaterial, "allow-non-material", false, "Apply update even if improvement is below --min-delta-pct")
+	fs.BoolVar(&dryRun, "dry-run", false, "Evaluate and preview without writing files")
+	fs.BoolVar(&jsonOut, "json", false, "Output JSON result")
+
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	repoRoot, _ := resolveRepoAndDir(repoFlag, "")
+	if dateStr == "" {
+		dateStr = time.Now().UTC().Format("2006-01-02")
+	}
+
+	cand := readmenext.HeroRecordInput{
+		Panel:            panel,
+		Value:            value,
+		Label:            label,
+		Commit:           commit,
+		ReceiptPath:      receipt,
+		Date:             dateStr,
+		Foot:             foot,
+		Callout:          callout,
+		Desc:             desc,
+		MinDeltaPct:      minDeltaPct,
+		ReadmeOld:        readmeOld,
+		ReadmeNew:        readmeNew,
+		Platform:         platform,
+		HardwareRow:      hardwareRow,
+		AllowNonMaterial: allowNonMaterial,
+	}
+
+	outcome, err := readmenext.ApplyRecordUpdate(repoRoot, cand, dryRun)
+	if err != nil {
+		if jsonOut {
+			b, _ := json.MarshalIndent(map[string]any{"success": false, "error": err.Error()}, "", "  ")
+			fmt.Fprintln(stdout, string(b))
+		} else {
+			fmt.Fprintf(stderr, "readme record failed: %v\n", err)
+		}
+		return 1
+	}
+
+	if !dryRun && !outcome.Skipped && renderSVG {
+		genScript := filepath.Join(repoRoot, "tools", "hero_sweep_gen.py")
+		if _, statErr := os.Stat(genScript); statErr == nil {
+			pyBin := "python"
+			if _, lookErr := exec.LookPath(pyBin); lookErr != nil {
+				pyBin = "python3"
+			}
+			cmd := exec.Command(pyBin, genScript)
+			cmd.Dir = repoRoot
+			if outBytes, runErr := cmd.CombinedOutput(); runErr != nil {
+				if jsonOut {
+					b, _ := json.MarshalIndent(map[string]any{
+						"success": false,
+						"error":   fmt.Sprintf("hero_sweep_gen.py failed: %v (%s)", runErr, strings.TrimSpace(string(outBytes))),
+					}, "", "  ")
+					fmt.Fprintln(stdout, string(b))
+				} else {
+					fmt.Fprintf(stderr, "hero_sweep_gen.py failed: %v\n%s\n", runErr, string(outBytes))
+				}
+				return 1
+			}
+			outcome.UpdatedFiles = append(outcome.UpdatedFiles, readmenext.DefaultHeroSweepSVGPath)
+		}
+	}
+
+	if jsonOut {
+		b, _ := json.MarshalIndent(outcome, "", "  ")
+		fmt.Fprintln(stdout, string(b))
+		return 0
+	}
+
+	if outcome.Skipped {
+		fmt.Fprintf(stdout, "[SKIPPED] %s: %s (prior=%.4g, new=%.4g, delta=%.2f%%)\n",
+			outcome.Panel, outcome.SkipReason, outcome.PriorValue, outcome.NewValue, outcome.DeltaPct)
+		return 0
+	}
+
+	mode := "[SUCCESS]"
+	if dryRun {
+		mode = "[DRY-RUN]"
+	}
+	fmt.Fprintf(stdout, "%s %s: %.4g -> %.4g (delta=%.2f%%, flipped_fence=%v)\n",
+		mode, outcome.Panel, outcome.PriorValue, outcome.NewValue, outcome.DeltaPct, outcome.FlippedFence)
+	for _, f := range outcome.UpdatedFiles {
+		fmt.Fprintf(stdout, "  file: %s\n", f)
+	}
 	return 0
 }

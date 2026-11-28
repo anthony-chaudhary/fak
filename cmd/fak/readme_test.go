@@ -652,3 +652,116 @@ func TestReadme_VerbRouting(t *testing.T) {
 		t.Errorf("expected exitCode 0, got %d", exitCode)
 	}
 }
+
+func TestRunReadmeRecord(t *testing.T) {
+	repoRoot := t.TempDir()
+	for _, sub := range []string{"tools", "visuals", "docs/benchmarks/published/rtx5080-next"} {
+		if err := os.MkdirAll(filepath.Join(repoRoot, sub), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	receiptRel := "docs/benchmarks/published/rtx5080-next/RESULTS.md"
+	if err := os.WriteFile(filepath.Join(repoRoot, receiptRel), []byte("# Receipt\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	sweepJSON := `{
+  "meta": {
+    "title": "fak sweep",
+    "as_of": "2026-11-26",
+    "out_svg": "visuals/61-hero-benchmark-sweep.svg",
+    "authority": "fak/BENCHMARK-AUTHORITY.md",
+    "receipts": "docs/benchmarks/README.md"
+  },
+  "kicker": "BENCHMARK SWEEP · 2026-11-26",
+  "title": "fak",
+  "subtitle": "sub",
+  "legend": [],
+  "panels": [
+    {
+      "name": "NVFP4 W4A4 prefill",
+      "pillar": "INFERENCE",
+      "foot": "RTX 5080",
+      "commit": "d3317d16fc",
+      "y_max": 6700,
+      "bars": [
+        {"who": "fak", "badge": "f", "v": 5861, "label": "5,861 tok/s", "subject": true},
+        {"who": "fork", "badge": "F", "v": 3012.4, "label": "3,012"}
+      ]
+    }
+  ],
+  "footer": "footer",
+  "desc": "NVFP4 W4A4 pp512 prefill 5,861 tok/s vs 3,012."
+}`
+	if err := os.WriteFile(filepath.Join(repoRoot, readmenext.DefaultHeroSweepDataPath), []byte(sweepJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, readmenext.DefaultReadmePath), []byte("# fak\n\n<!-- readme-verified: 2026-11-26 vs VERSION 0.60.0 -->\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	// 1. Dry-run JSON
+	code := runReadmeRecord(&stdout, &stderr, []string{
+		"--repo", repoRoot,
+		"--panel", "NVFP4 W4A4 prefill",
+		"--value", "6500",
+		"--commit", "abc1234",
+		"--receipt", receiptRel,
+		"--date", "2026-11-28",
+		"--dry-run", "--json",
+	})
+	if code != 0 {
+		t.Fatalf("dry-run failed (%d): %s", code, stderr.String())
+	}
+	var dryOut readmenext.RecordOutcome
+	if err := json.Unmarshal(stdout.Bytes(), &dryOut); err != nil {
+		t.Fatalf("unmarshal dry-run: %v", err)
+	}
+	if !dryOut.Material || dryOut.Skipped {
+		t.Fatalf("unexpected dry-run outcome: %+v", dryOut)
+	}
+
+	// 2. Non-material skip
+	stdout.Reset()
+	stderr.Reset()
+	code = runReadmeRecord(&stdout, &stderr, []string{
+		"--repo", repoRoot,
+		"--panel", "NVFP4 W4A4 prefill",
+		"--value", "5900",
+		"--commit", "abc1234",
+		"--receipt", receiptRel,
+		"--date", "2026-11-28",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("non-material skip failed (%d): %s", code, stderr.String())
+	}
+	var skipOut readmenext.RecordOutcome
+	if err := json.Unmarshal(stdout.Bytes(), &skipOut); err != nil {
+		t.Fatalf("unmarshal skip: %v", err)
+	}
+	if !skipOut.Skipped || skipOut.Material {
+		t.Fatalf("expected skipped=true, material=false: %+v", skipOut)
+	}
+
+	// 3. Apply with --render-svg=false
+	stdout.Reset()
+	stderr.Reset()
+	code = runReadmeRecord(&stdout, &stderr, []string{
+		"--repo", repoRoot,
+		"--panel", "NVFP4 W4A4 prefill",
+		"--value", "6500",
+		"--commit", "abc1234",
+		"--receipt", receiptRel,
+		"--date", "2026-11-28",
+		"--render-svg=false",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("apply failed (%d): %s", code, stderr.String())
+	}
+	readmeBytes, _ := os.ReadFile(filepath.Join(repoRoot, readmenext.DefaultReadmePath))
+	if !strings.Contains(string(readmeBytes), "2026-11-28") {
+		t.Fatalf("expected README stamp updated to 2026-11-28, got: %s", string(readmeBytes))
+	}
+}

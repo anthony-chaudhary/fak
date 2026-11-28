@@ -50,7 +50,7 @@ dos commit_audit <commit-hash>
 **Note:** `dos_commit_audit` does NOT verify correctness — only that the claim isn't empty.
 Run tests for correctness (`go test ./...` or workload-specific).
 
-### Phase 3: Document in Authority
+### Phase 3: Document in Authority & Sync README Hero
 
 Update `BENCHMARK-AUTHORITY.md` with:
 
@@ -58,6 +58,15 @@ Update `BENCHMARK-AUTHORITY.md` with:
 | Claim | Number | Model | Baseline | Commit | Artifact |
 |---|---|---|---|---|---|
 | **Result name** | **X.X×** | Model Y | Baseline Z | `<hash>` | `path/to/artifact.json` |
+```
+
+When a committed result materially beats a tracked hero record (`>= 5%` improvement or flips a fence), update `tools/hero_sweep.data.json`, `README.md`, and `docs/benchmarks/hardware-latest.json` together:
+
+```bash
+fak readme record --panel "<panel>" --value <num> --commit <sha> --receipt <path>
+python tools/hero_sweep_gen.py
+bash visuals/render-hero-pngs.sh
+python tools/readme_freshness_audit.py
 ```
 
 ### Phase 4: Ship with Stamp
@@ -91,6 +100,7 @@ Before a benchmark claim is "shipped," verify:
 - [ ] **Measurement Status block** is present in the benchmark doc
 - [ ] **Reproduction command** documented
 - [ ] **Tombstoned outdated claims** if replacing old numbers
+- [ ] **README Hero Update Gate** (`hero_sweep_sync`): if a material record (`>= 5%` or fence flip) was beaten, `fak readme record`, `python tools/hero_sweep_gen.py`, `bash visuals/render-hero-pngs.sh`, and `python tools/readme_freshness_audit.py` ran green
 
 **No benchmark is shipped until all boxes are checked.**
 

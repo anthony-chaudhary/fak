@@ -112,6 +112,9 @@ BENCHMARK_INDEX_REL = "docs/benchmarks/README.md"
 HARDWARE_LATEST_REL = "docs/benchmarks/hardware-latest.json"
 HARDWARE_LATEST_SCHEMA = "fak-hardware-latest/1"
 HARDWARE_PLATFORMS = {"Mac", "AMD", "NVIDIA"}
+HERO_SWEEP_DATA_REL = "tools/hero_sweep.data.json"
+HERO_SWEEP_SVG_REL = "visuals/61-hero-benchmark-sweep.svg"
+HERO_SWEEP_PNG_REL = "visuals/61-hero-benchmark-sweep.png"
 # The binary's real dispatch table — the source of truth for which `fak <verb>`
 # commands actually exist. Parsed live (never a hand-list) so the lcd_onramp
 # anti-gaming cross-check stays correct as verbs are added/renamed.
@@ -176,6 +179,7 @@ WEIGHTS: dict[str, float] = {
     "naive_baseline": 1.0,
     "headline_authority": 0.75,
     "freshness_stamp": 0.75,
+    "hero_sweep_sync": 1.0,
     "showcase_sync": 1.0,
     "jargon_density": 0.5,
     # substance
@@ -617,6 +621,81 @@ def check_hardware_front_page(readme: str, hardware_latest: str, root: Path, *,
                 "items": failures + extra_rows + [update_hint]}
     return {"check": "hardware_front_page", "status": "OK",
             "detail": f"README routes to a manifest-backed benchmark view dated {as_of} with only Mac, AMD, NVIDIA",
+            "items": []}
+
+
+def check_hero_sweep_sync(readme: str, hardware_latest: str,
+                          hero_sweep_data: str | None,
+                          root: Path) -> dict[str, Any]:
+    """Bind the README hero sweep visual and README stamp to hardware-latest.json."""
+    if hero_sweep_data is None:
+        return {"check": "hero_sweep_sync", "status": "OK",
+                "detail": "abstained: no hero sweep dataset supplied",
+                "items": []}
+
+    failures: list[str] = []
+    update_hint = f"run `fak readme record` or update {HERO_SWEEP_DATA_REL} and {README_REL}"
+
+    try:
+        sweep = json.loads(hero_sweep_data)
+    except (json.JSONDecodeError, TypeError) as exc:
+        return {"check": "hero_sweep_sync", "status": "FAIL",
+                "detail": f"malformed {HERO_SWEEP_DATA_REL}: {exc}; {update_hint}",
+                "items": [HERO_SWEEP_DATA_REL, update_hint]}
+    if not isinstance(sweep, dict):
+        return {"check": "hero_sweep_sync", "status": "FAIL",
+                "detail": f"{HERO_SWEEP_DATA_REL} must be a JSON object; {update_hint}",
+                "items": [HERO_SWEEP_DATA_REL, update_hint]}
+
+    meta = sweep.get("meta") if isinstance(sweep.get("meta"), dict) else {}
+    hero_as_of_raw = meta.get("as_of")
+    hero_as_of: _dt.date | None = None
+    try:
+        hero_as_of = _dt.date.fromisoformat(hero_as_of_raw)
+    except (TypeError, ValueError):
+        failures.append(f"{HERO_SWEEP_DATA_REL} meta.as_of must be an ISO date")
+
+    if HERO_SWEEP_PNG_REL not in readme and HERO_SWEEP_SVG_REL not in readme:
+        failures.append(f"{README_REL} must embed {HERO_SWEEP_PNG_REL} (or {HERO_SWEEP_SVG_REL})")
+
+    for asset_rel in (HERO_SWEEP_SVG_REL, HERO_SWEEP_PNG_REL):
+        if not (root / asset_rel).is_file():
+            failures.append(f"missing hero asset on disk: {asset_rel}")
+
+    if hardware_latest:
+        try:
+            manifest = json.loads(hardware_latest)
+        except (json.JSONDecodeError, TypeError):
+            manifest = None
+        if isinstance(manifest, dict) and isinstance(manifest.get("as_of"), str):
+            try:
+                hw_as_of = _dt.date.fromisoformat(manifest["as_of"])
+            except ValueError:
+                hw_as_of = None
+            if hero_as_of is not None and hw_as_of is not None and hero_as_of < hw_as_of:
+                failures.append(
+                    f"hero sweep as_of {hero_as_of.isoformat()} lags {HARDWARE_LATEST_REL} "
+                    f"as_of {hw_as_of.isoformat()} (update via `fak readme record`)"
+                )
+
+    stamp_match = _STAMP_RE.search(readme)
+    if stamp_match and hero_as_of is not None:
+        try:
+            readme_date = _dt.date.fromisoformat(stamp_match.group(1))
+        except ValueError:
+            readme_date = None
+        if readme_date is not None and readme_date < hero_as_of:
+            failures.append(
+                f"README readme-verified date {readme_date.isoformat()} lags hero sweep "
+                f"as_of {hero_as_of.isoformat()} (sync README.md and re-stamp)"
+            )
+
+    if failures:
+        return {"check": "hero_sweep_sync", "status": "FAIL",
+                "detail": "hero sweep drift: " + "; ".join(failures) + f"; {update_hint}",
+                "items": failures + [update_hint]}
+    return {"check": "hero_sweep_sync", "status": "OK",
+            "detail": f"hero sweep dated {hero_as_of.isoformat() if hero_as_of else 'unknown'} is synced with hardware-latest and README",
             "items": []}
 
 
@@ -1470,6 +1549,7 @@ def fak_dispatch_verbs(root: Path) -> set[str] | None:
 
 def run_checks(readme: str, version: str, authority: str, root: Path, *,
                hardware_latest: str = "",
+               hero_sweep_data: str | None = None,
                today: _dt.date, max_age_days: int,
                dispatch: set[str] | None = None,
                showcase: str | None = None,
@@ -1484,6 +1564,7 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
         check_headline_authority(readme, authority),
         check_freshness_stamp(readme, today=today, max_age_days=max_age_days),
         check_hardware_front_page(readme, hardware_latest, root, today=today, max_age_days=max_age_days),
+        check_hero_sweep_sync(readme, hardware_latest, hero_sweep_data, root),
         check_qwen_result_docs(qwen_index, qwen_latest),
         check_showcase_sync(readme, showcase, version=version,
                             dataset_versions=dataset_versions, dispatch=dispatch),
@@ -1522,12 +1603,14 @@ def collect(workspace: Path, *, today: _dt.date | None = None,
     qwen_index = _safe_read(root / QWEN_INDEX_REL)
     qwen_latest = _safe_read(root / QWEN_LATEST_REL)
     hardware_latest = _safe_read(root / HARDWARE_LATEST_REL)
+    hero_sweep_data = _safe_read(root / HERO_SWEEP_DATA_REL) or None
     dispatch = fak_dispatch_verbs(root)
     # None (not "") when the second front door is absent, so check_showcase_sync can
     # tell "no page to read" (abstain) apart from "an empty page" (a real defect).
     showcase = _safe_read(root / SHOWCASE_REL) or None
     checks = run_checks(readme, version, authority, root,
-                        today=today, max_age_days=max_age_days, hardware_latest=hardware_latest, dispatch=dispatch,
+                        today=today, max_age_days=max_age_days, hardware_latest=hardware_latest,
+                        hero_sweep_data=hero_sweep_data, dispatch=dispatch,
                         showcase=showcase,
                         dataset_versions=bench_dataset_versions(root),
                         qwen_index=qwen_index, qwen_latest=qwen_latest)

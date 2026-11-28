@@ -959,6 +959,65 @@ def test_live_showcase_sync_reads_the_real_homepage() -> None:
     assert c["status"] == "OK", c
 
 
+def _write_hero_assets(root: Path, *, svg: bool = True, png: bool = True) -> None:
+    (root / "visuals").mkdir(parents=True, exist_ok=True)
+    if svg:
+        (root / rfa.HERO_SWEEP_SVG_REL).write_text("<svg/>", encoding="utf-8")
+    if png:
+        (root / rfa.HERO_SWEEP_PNG_REL).write_bytes(b"png")
+
+
+def test_hero_sweep_sync_ok_when_synced(tmp_path: Path) -> None:
+    _write_hero_assets(tmp_path)
+    readme = (
+        f"[![sweep]({rfa.HERO_SWEEP_PNG_REL})](docs/benchmarks/README.md)\n"
+        "<!-- readme-verified: 2026-11-27 vs VERSION 0.60.0 -->\n"
+    )
+    hw = json.dumps({"schema": rfa.HARDWARE_LATEST_SCHEMA, "as_of": "2026-11-26"})
+    hero = json.dumps({"meta": {"as_of": "2026-11-26"}})
+    c = rfa.check_hero_sweep_sync(readme, hw, hero, tmp_path)
+    assert c["status"] == "OK", c
+
+
+def test_hero_sweep_sync_abstains_when_none(tmp_path: Path) -> None:
+    c = rfa.check_hero_sweep_sync("# fak\n", "", None, tmp_path)
+    assert c["status"] == "OK", c
+
+
+def test_hero_sweep_sync_fails_when_hardware_newer_than_hero(tmp_path: Path) -> None:
+    _write_hero_assets(tmp_path)
+    readme = (
+        f"[![sweep]({rfa.HERO_SWEEP_PNG_REL})](docs/benchmarks/README.md)\n"
+        "<!-- readme-verified: 2026-11-28 vs VERSION 0.60.0 -->\n"
+    )
+    hw = json.dumps({"schema": rfa.HARDWARE_LATEST_SCHEMA, "as_of": "2026-11-28"})
+    hero = json.dumps({"meta": {"as_of": "2026-11-26"}})
+    c = rfa.check_hero_sweep_sync(readme, hw, hero, tmp_path)
+    assert c["status"] == "FAIL" and "fak readme record" in c["detail"], c
+
+
+def test_hero_sweep_sync_fails_when_hero_newer_than_readme_stamp(tmp_path: Path) -> None:
+    _write_hero_assets(tmp_path)
+    readme = (
+        f"[![sweep]({rfa.HERO_SWEEP_PNG_REL})](docs/benchmarks/README.md)\n"
+        "<!-- readme-verified: 2026-11-25 vs VERSION 0.60.0 -->\n"
+    )
+    hw = json.dumps({"schema": rfa.HARDWARE_LATEST_SCHEMA, "as_of": "2026-11-26"})
+    hero = json.dumps({"meta": {"as_of": "2026-11-27"}})
+    c = rfa.check_hero_sweep_sync(readme, hw, hero, tmp_path)
+    assert c["status"] == "FAIL" and "readme-verified" in c["detail"], c
+
+
+def test_hero_sweep_sync_fails_when_embed_or_asset_missing(tmp_path: Path) -> None:
+    _write_hero_assets(tmp_path, png=False)
+    readme = "# fak\n<!-- readme-verified: 2026-11-27 vs VERSION 0.60.0 -->\n"
+    hero = json.dumps({"meta": {"as_of": "2026-11-26"}})
+    c = rfa.check_hero_sweep_sync(readme, "", hero, tmp_path)
+    assert c["status"] == "FAIL"
+    assert any("must embed" in item for item in c["items"]), c
+    assert any("missing hero asset" in item for item in c["items"]), c
+
+
 # --- self-contained runner (mirrors memory_recall_audit_test.py) -----------
 
 def main() -> int:

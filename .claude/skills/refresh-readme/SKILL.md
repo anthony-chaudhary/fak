@@ -111,6 +111,7 @@ It checks, and exits non-zero on any **FAIL**:
 | `headline_authority` | a bolded multiplier not mirrored in `BENCHMARK-AUTHORITY` | WARN |
 | `freshness_stamp` | the `readme-verified` marker absent or older than 14d | WARN |
 | `hardware_front_page` | README does not link `docs/benchmarks/README.md`, or that page's rows drift from the hardware manifest/receipts | **FAIL** |
+| `hero_sweep_sync` | `tools/hero_sweep.data.json` lags `hardware-latest.json`, `README.md` lags `hero_sweep.data.json`, or `61-hero-benchmark-sweep.{svg,png}` is missing/unlinked | **FAIL** |
 | `lcd_onramp` | the front page lacks the local-model setup links, published platform envelope, or a real `fak up` startup (with an optional documented model selector); also refuses the retired offline-demo route | **FAIL** |
 | `jargon_density` | first-screen expert terms with no plain gloss nearby (law 2) | advisory |
 | `front_page_focus` | the page busts the line/section budget or restates the lead ≥3× (the size law) | debt |
