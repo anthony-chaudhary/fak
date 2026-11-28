@@ -1,6 +1,8 @@
 package ctxmmu
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -732,4 +734,31 @@ func (c *TieredPromptCache) Clear() {
 	c.systemLRU = make([]string, 0)
 	c.totalTokens = 0
 	c.totalBytes = 0
+}
+
+// SurrogateImageTokenIds returns a copy of tokens for use as a CACHE KEY ONLY, in which
+// each contiguous run of padID tokens (one image) is replaced by high-bit surrogate ids
+// derived from the SHA-256 of that image's raw bytes (consumed in order from images).
+// Distinct images therefore produce distinct keys and identical bytes the same key,
+// instead of every image sharing the pad id. The caller keeps feeding the original
+// tokens to the forward pass; the input slice is never modified. Runs beyond
+// len(images) are left as-is. Clean-room, inspired by mtplx multimodal surrogate hashing.
+func SurrogateImageTokenIds(tokens []int, padID int, images [][]byte) []int {
+	out := make([]int, len(tokens))
+	copy(out, tokens)
+	img := 0
+	for i := 0; i < len(out); {
+		if out[i] != padID || img >= len(images) {
+			i++
+			continue
+		}
+		sum := sha256.Sum256(images[img])
+		img++
+		for off := 0; i < len(out) && tokens[i] == padID; off++ {
+			h := binary.BigEndian.Uint64(sum[:8]) + uint64(off)*0x9e3779b97f4a7c15
+			out[i] = int(h&0x3fffffffffffffff | 1<<62)
+			i++
+		}
+	}
+	return out
 }

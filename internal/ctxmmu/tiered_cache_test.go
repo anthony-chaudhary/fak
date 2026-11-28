@@ -347,3 +347,38 @@ func TestTieredPromptCache_Concurrent(t *testing.T) {
 		t.Errorf("expected entries in cache after concurrent runs, got %d", stats.TotalEntries)
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestCtxmmuSurrogateImageTokenIds(t *testing.T) {
+	t.Parallel()
+	const pad = 9
+	prompt := []int{1, pad, pad, pad, 2}
+	imgA, imgA2, imgB := []byte("image-A"), []byte("image-A"), []byte("image-B")
+
+	ka := SurrogateImageTokenIds(prompt, pad, [][]byte{imgA})
+	ka2 := SurrogateImageTokenIds(prompt, pad, [][]byte{imgA2})
+	kb := SurrogateImageTokenIds(prompt, pad, [][]byte{imgB})
+	if !reflect.DeepEqual(ka, ka2) {
+		t.Fatalf("identical bytes must give the same key: %v vs %v", ka, ka2)
+	}
+	if reflect.DeepEqual(ka, kb) {
+		t.Fatalf("distinct images must give distinct keys: %v", ka)
+	}
+	if !reflect.DeepEqual(prompt, []int{1, pad, pad, pad, 2}) {
+		t.Fatalf("forward-pass tokens were modified: %v", prompt)
+	}
+	if ka[0] != 1 || ka[4] != 2 || ka[1] == pad {
+		t.Fatalf("only pad run must be replaced: %v", ka)
+	}
+
+	c := NewTieredPromptCache(TieredCacheConfig{MaxTokens: 1000})
+	if _, err := c.Put(RoleUser, ka, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.Get(ka2); !ok {
+		t.Fatal("same image must hit the cache")
+	}
+	if _, ok := c.Get(kb); ok {
+		t.Fatal("distinct image must miss the cache")
+	}
+}
