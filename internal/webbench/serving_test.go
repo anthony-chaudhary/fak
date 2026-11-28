@@ -302,3 +302,164 @@ func TestValidateParityClaimRequiresMeasuredArtifact(t *testing.T) {
 		t.Fatalf("non-parity claim should not require artifact: %v", err)
 	}
 }
+
+// fak-test:justify why=contract when=changed:internal/webbench/**
+// fak-test:runtime fast est=100ms lane=default
+func TestMeasureSSERequestReasoningAndNonSSESemantics(t *testing.T) {
+	t.Run("sse_reasoning_and_content", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":null}}]}\n\n")
+			flusher.Flush()
+			time.Sleep(2 * time.Millisecond)
+			// Both reasoning and reasoning_content on the same frame must not double-count.
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning\":\"think\",\"reasoning_content\":\"think\"}}]}\n\n")
+			flusher.Flush()
+			time.Sleep(1 * time.Millisecond)
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\" more\"}}]}\n\n")
+			flusher.Flush()
+			time.Sleep(1 * time.Millisecond)
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ans\"}}]}\n\n")
+			flusher.Flush()
+			time.Sleep(1 * time.Millisecond)
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"!\"}}]}\n\n")
+			flusher.Flush()
+			fmt.Fprint(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":16,\"completion_tokens\":4,\"total_tokens\":20,\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		}))
+		defer srv.Close()
+
+		s := MeasureSSERequest(context.Background(), srv.Client(), ServingTrackConfig{BaseURL: srv.URL + "/v1"}, "qwen3.8", ServingRequest{
+			ID: "r-reason", Messages: []ChatMessage{{Role: "user", Content: "hi"}}, MaxOutputTokens: 16,
+		}, 2*time.Second)
+		if s.Status != "ok" || s.StreamMode != "sse" {
+			t.Fatalf("sample status/mode = %+v", s)
+		}
+		if s.OutputEvents != 4 || s.ReasoningEvents != 2 || s.OutputTokenEstimate != 4 {
+			t.Fatalf("events=%d reasoning_events=%d estimate=%d, want 4/2/4", s.OutputEvents, s.ReasoningEvents, s.OutputTokenEstimate)
+		}
+		if s.OutputTokensExact == nil || *s.OutputTokensExact != 4 || s.OutputTokenCountBasis != "usage.completion_tokens" {
+			t.Fatalf("exact tokens = %v basis=%q", s.OutputTokensExact, s.OutputTokenCountBasis)
+		}
+		if s.Usage == nil || s.Usage.ReasoningTokens == nil || *s.Usage.ReasoningTokens != 2 {
+			t.Fatalf("usage.reasoning_tokens = %+v, want 2", s.Usage)
+		}
+		if s.TTFTMillis == nil || *s.TTFTMillis <= 0 || len(s.ITLMillis) != 3 || s.TPOTMillis == nil || *s.TPOTMillis <= 0 {
+			t.Fatalf("sse timings = ttft:%v itl:%v tpot:%v", s.TTFTMillis, s.ITLMillis, s.TPOTMillis)
+		}
+	})
+
+	t.Run("sse_reasoning_only_without_usage", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			time.Sleep(2 * time.Millisecond)
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning\":\"step1\"}}]}\n\n")
+			flusher.Flush()
+			time.Sleep(1 * time.Millisecond)
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"step2\"}}]}\n\n")
+			flusher.Flush()
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		}))
+		defer srv.Close()
+
+		s := MeasureSSERequest(context.Background(), srv.Client(), ServingTrackConfig{BaseURL: srv.URL + "/v1"}, "qwen3.8", ServingRequest{
+			ID: "r-reason-only", Messages: []ChatMessage{{Role: "user", Content: "hi"}}, MaxOutputTokens: 8,
+		}, 2*time.Second)
+		if s.Status != "ok" || s.OutputEvents != 2 || s.ReasoningEvents != 2 || s.OutputTokenEstimate != 2 || s.OutputTokenCountBasis != "stream_content_events" {
+			t.Fatalf("reasoning-only stream sample = %+v", s)
+		}
+		if s.TTFTMillis == nil || *s.TTFTMillis <= 0 || len(s.ITLMillis) != 1 || s.TPOTMillis == nil || *s.TPOTMillis <= 0 {
+			t.Fatalf("reasoning-only timings = %+v", s)
+		}
+	})
+
+	t.Run("sse_stream_error_fails_closed", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+			fmt.Fprint(w, "data: {\"error\":{\"message\":\"engine overloaded\"}}\n\n")
+		}))
+		defer srv.Close()
+
+		s := MeasureSSERequest(context.Background(), srv.Client(), ServingTrackConfig{BaseURL: srv.URL + "/v1"}, "qwen3.8", ServingRequest{
+			ID: "r-err", Messages: []ChatMessage{{Role: "user", Content: "hi"}}, MaxOutputTokens: 8,
+		}, time.Second)
+		if s.Status != "fail" || s.ErrorClass != "stream_error" || s.Error != "engine overloaded" {
+			t.Fatalf("stream error sample = %+v, want fail/stream_error", s)
+		}
+	})
+
+	t.Run("non_sse_fails_closed_on_stream_timings_and_accounts_reasoning", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(2 * time.Millisecond)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","reasoning_content":"thinking step ","content":"answer"}}]}`)
+		}))
+		defer srv.Close()
+
+		s := MeasureSSERequest(context.Background(), srv.Client(), ServingTrackConfig{BaseURL: srv.URL + "/v1"}, "qwen3.8", ServingRequest{
+			ID: "r-non-sse", Messages: []ChatMessage{{Role: "user", Content: "hi"}}, MaxOutputTokens: 8,
+		}, 2*time.Second)
+		if s.Status != "ok" || s.StreamMode != "non_sse" {
+			t.Fatalf("non_sse status/mode = %+v", s)
+		}
+		if s.TTFTMillis != nil || s.ITLMillis != nil || s.TPOTMillis != nil || s.OutputEvents != 0 || s.ReasoningEvents != 0 {
+			t.Fatalf("non_sse leaked stream timings/events: %+v", s)
+		}
+		wantEst := EstimateTokens("thinking step answer")
+		if s.OutputTokenEstimate != wantEst || s.OutputTokenCountBasis != "estimated_content_tokens" || s.EndToEndMillis <= 0 {
+			t.Fatalf("non_sse accounting = est:%d (want %d) basis:%q e2e:%v", s.OutputTokenEstimate, wantEst, s.OutputTokenCountBasis, s.EndToEndMillis)
+		}
+	})
+
+	t.Run("non_sse_fold_strips_synthetic_stream_metrics_and_refuses_ttft_tpot_slo", func(t *testing.T) {
+		bogusTTFT, bogusTPOT := 10.0, 5.0
+		stats := FoldServingSamplesWithSLOs([]ServingSample{{
+			ID: "non-sse", Status: "ok", StreamMode: "non_sse",
+			TTFTMillis: &bogusTTFT, ITLMillis: []float64{4.0}, TPOTMillis: &bogusTPOT,
+			EndToEndMillis: 50, OutputTokenEstimate: 4,
+		}}, 1.0, ServingSLOs{TTFT: time.Second, TPOT: time.Second, EndToEnd: time.Second})
+		if stats.TTFTMillis.Status != "not_measured" || stats.ITLMillis.Status != "not_measured" || stats.TPOTMillis.Status != "not_measured" {
+			t.Fatalf("non_sse fold accepted synthetic stream timings: %+v", stats)
+		}
+		if stats.GoodputRPS.Status != "measured" || stats.GoodputRPS.Value == nil || *stats.GoodputRPS.Value != 0 {
+			t.Fatalf("non_sse sample passed TTFT/TPOT SLO: %+v", stats.GoodputRPS)
+		}
+	})
+}
+
+// fak-test:justify why=contract when=changed:internal/webbench/**
+// fak-test:runtime fast est=5ms lane=default
+func TestObservedTrackWallSecondsFloorAndSkippedContract(t *testing.T) {
+	if got := observedTrackWallSeconds(0, []ServingSample{{Status: "ok"}}); got <= 0 {
+		t.Fatalf("executed wire sample with 0s duration got wall=%v, want > 0", got)
+	}
+	if got := observedTrackWallSeconds(0, []ServingSample{{Status: "fail", HTTPStatus: http.StatusServiceUnavailable}}); got <= 0 {
+		t.Fatalf("HTTP error wire sample with 0s duration got wall=%v, want > 0", got)
+	}
+	if got := observedTrackWallSeconds(0, []ServingSample{{Status: "fail", ErrorClass: "cancelled"}}); got != 0 {
+		t.Fatalf("cancelled non-wire sample got wall=%v, want 0", got)
+	}
+	if got := observedTrackWallSeconds(0, nil); got != 0 {
+		t.Fatalf("empty skipped samples got wall=%v, want 0", got)
+	}
+	if got := observedTrackWallSeconds(25*time.Millisecond, nil); got != 0.025 {
+		t.Fatalf("positive elapsed got wall=%v, want 0.025", got)
+	}
+
+	wall := observedTrackWallSeconds(0, []ServingSample{{Status: "ok"}})
+	sample := ServingSample{Status: "ok", EndToEndMillis: 0, OutputTokensExact: intPtr(2), OutputTokenEstimate: 2}
+	measured := FoldServingSamples([]ServingSample{sample}, wall, time.Second)
+	if measured.WallSeconds == nil || *measured.WallSeconds <= 0 {
+		t.Fatalf("WallSeconds = %v, want positive", measured.WallSeconds)
+	}
+	if measured.ThroughputTokensS.Status != "measured" || measured.GoodputRPS.Status != "measured" || measured.GoodputTokensS.Status != "measured" {
+		t.Fatalf("wire-executed floor failed to keep metrics measured: %+v", measured)
+	}
+	unmeasured := FoldServingSamples([]ServingSample{sample}, 0, time.Second)
+	if unmeasured.WallSeconds != nil || unmeasured.ThroughputTokensS.Status != "not_measured" || unmeasured.GoodputTokensS.Status != "not_measured" {
+		t.Fatalf("wallSeconds=0 contract violated: %+v", unmeasured)
+	}
+}

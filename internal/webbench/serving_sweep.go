@@ -302,10 +302,11 @@ func measureServingSweepTrack(ctx context.Context, cfg ServingSweepConfig, track
 	}
 	start := time.Now()
 	samples, observedMaxInFlight, dispatchQPS := runSamplesAtRate(ctx, cfg.Client, trackCfg, model, cfg.Workload, concurrency, cfg.Timeout, cfg.requestQPS)
+	wallSeconds := observedTrackWallSeconds(time.Since(start), samples)
 	result.dispatchQPS = dispatchQPS
 	result.Samples = samples
 	result.Status = "measured"
-	result.Stats = FoldServingSamples(samples, time.Since(start).Seconds(), cfg.GoodputSLO)
+	result.Stats = FoldServingSamples(samples, wallSeconds, cfg.GoodputSLO)
 	setServingOverlapEvidence(&result.Stats, observedMaxInFlight)
 	if cfg.CapacitySearch == nil {
 		result.Stats.PrefixCacheHitRate = FetchPrefixCacheHitRate(ctx, cfg.Client, trackCfg.MetricsURL)

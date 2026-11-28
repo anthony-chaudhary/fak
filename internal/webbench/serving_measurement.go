@@ -49,11 +49,11 @@ func setServingExactEvidence(stats *ServingStats, samples []ServingSample, wallS
 	}
 	stats.GoodputTokensS = notMeasuredScalar("usage.completion_tokens/s", "exact SLO-qualified output tokens were not measured")
 	if servingFinitePositive(wallSeconds) {
-		stats.WallSeconds = floatPtr(wallSeconds)
+		stats.WallSeconds = positiveFloatPtr(wallSeconds)
 	}
 	if slo > 0 {
 		sloSeconds := slo.Seconds()
-		stats.GoodputSLOSeconds = floatPtr(sloSeconds)
+		stats.GoodputSLOSeconds = positiveFloatPtr(sloSeconds)
 	}
 
 	okCount := 0

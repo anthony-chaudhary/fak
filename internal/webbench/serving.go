@@ -247,6 +247,7 @@ type ServingUsage struct {
 	CompletionTokens *int `json:"completion_tokens"`
 	TotalTokens      *int `json:"total_tokens"`
 	CachedTokens     *int `json:"cached_tokens"`
+	ReasoningTokens  *int `json:"reasoning_tokens,omitempty"`
 }
 
 type ServingSample struct {
@@ -261,6 +262,7 @@ type ServingSample struct {
 	TPOTMillis            *float64      `json:"tpot_ms,omitempty"`
 	EndToEndMillis        float64       `json:"end_to_end_ms"`
 	OutputEvents          int           `json:"output_events"`
+	ReasoningEvents       int           `json:"reasoning_events,omitempty"`
 	OutputTokenEstimate   int           `json:"output_token_estimate"`
 	OutputTokensExact     *int          `json:"output_tokens_exact,omitempty"`
 	OutputTokenCountBasis string        `json:"output_token_count_basis,omitempty"`
@@ -413,13 +415,37 @@ func measureTrack(ctx context.Context, cfg ServingParityConfig, tc ServingTrackC
 
 	start := time.Now()
 	samples, observedMaxInFlight := runSamples(ctx, cfg.Client, tc, model, cfg.Workload, cfg.Concurrency, cfg.Timeout)
-	wall := time.Since(start)
+	wallSeconds := observedTrackWallSeconds(time.Since(start), samples)
 	res.Samples = samples
 	res.Status = "measured"
-	res.Stats = FoldServingSamples(samples, wall.Seconds(), cfg.SLO)
+	res.Stats = FoldServingSamples(samples, wallSeconds, cfg.SLO)
 	setServingOverlapEvidence(&res.Stats, observedMaxInFlight)
 	res.Stats.PrefixCacheHitRate = FetchPrefixCacheHitRate(ctx, cfg.Client, tc.MetricsURL)
 	return res, nil
+}
+
+func observedTrackWallSeconds(elapsed time.Duration, samples []ServingSample) float64 {
+	if elapsed > 0 {
+		return elapsed.Seconds()
+	}
+	for _, sample := range samples {
+		if sampleExecutedOnWire(sample) {
+			return time.Nanosecond.Seconds()
+		}
+	}
+	return 0
+}
+
+func sampleExecutedOnWire(s ServingSample) bool {
+	if s.Status == "ok" || s.HTTPStatus != 0 {
+		return true
+	}
+	switch s.ErrorClass {
+	case "transport", "timeout", "http_status", "stream_read", "stream_error", "api_error":
+		return true
+	default:
+		return false
+	}
 }
 
 func emptyServingStats(reason string) ServingStats {
@@ -581,12 +607,27 @@ func measureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 
 	ct := strings.ToLower(resp.Header.Get("Content-Type"))
 	if !strings.Contains(ct, "text/event-stream") {
-		b, _ := io.ReadAll(resp.Body)
+		b, readErr := io.ReadAll(resp.Body)
 		sample.StreamMode = "non_sse"
 		sample.EndToEndMillis = millis(time.Since(start))
-		sample.Status = "ok"
-		content, exactTokens, usage := completionContentAndUsage(b)
+		sample.TTFTMillis = nil
+		sample.ITLMillis = nil
+		sample.TPOTMillis = nil
+		sample.OutputEvents = 0
+		sample.ReasoningEvents = 0
+		if readErr != nil {
+			sample.Error = readErr.Error()
+			sample.ErrorClass = "stream_read"
+			return sample
+		}
+		content, exactTokens, usage, wireErr := completionContentAndUsage(b)
 		sample.Usage = usage
+		if wireErr != "" {
+			sample.Error = wireErr
+			sample.ErrorClass = "api_error"
+			return sample
+		}
+		sample.Status = "ok"
 		if exactTokens != nil {
 			sample.OutputTokensExact = exactTokens
 			sample.OutputTokenEstimate = *exactTokens
@@ -619,6 +660,12 @@ func measureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		if !ok {
 			continue
 		}
+		if chunk.StreamError != "" {
+			sample.EndToEndMillis = millis(time.Since(start))
+			sample.Error = chunk.StreamError
+			sample.ErrorClass = "stream_error"
+			return sample
+		}
 		if chunk.OutputTokens != nil {
 			sample.OutputTokensExact = chunk.OutputTokens
 		}
@@ -638,6 +685,9 @@ func measureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		}
 		last = now
 		sample.OutputEvents++
+		if chunk.HasReasoning {
+			sample.ReasoningEvents++
+		}
 		content.WriteString(chunk.Content)
 	}
 	if err := sc.Err(); err != nil {
@@ -659,7 +709,11 @@ func measureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 		sample.OutputTokenCountBasis = "estimated_content_tokens"
 	}
 	if sample.OutputEvents > 1 && !first.IsZero() {
-		tpot := millis(end.Sub(first)) / float64(sample.OutputEvents-1)
+		divisor := float64(sample.OutputEvents - 1)
+		if sample.OutputTokensExact != nil && *sample.OutputTokensExact > 1 && *sample.OutputTokensExact >= sample.OutputEvents {
+			divisor = float64(*sample.OutputTokensExact - 1)
+		}
+		tpot := (float64(end.Sub(first)) / float64(time.Millisecond)) / divisor
 		sample.TPOTMillis = floatPtr(tpot)
 	}
 	sample.Status = "ok"
@@ -669,8 +723,10 @@ func measureSSERequest(ctx context.Context, client *http.Client, tc ServingTrack
 type servingStreamChunk struct {
 	Content      string
 	HasContent   bool
+	HasReasoning bool
 	OutputTokens *int
 	Usage        *ServingUsage
+	StreamError  string
 }
 
 type servingUsageWire struct {
@@ -685,6 +741,12 @@ type servingUsageWire struct {
 	InputTokensDetails *struct {
 		CachedTokens *int `json:"cached_tokens"`
 	} `json:"input_tokens_details"`
+	CompletionTokensDetails *struct {
+		ReasoningTokens *int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+	OutputTokensDetails *struct {
+		ReasoningTokens *int `json:"reasoning_tokens"`
+	} `json:"output_tokens_details"`
 }
 
 func (u *servingUsageWire) observed() *ServingUsage {
@@ -697,11 +759,18 @@ func (u *servingUsageWire) observed() *ServingUsage {
 	} else if u.InputTokensDetails != nil && u.InputTokensDetails.CachedTokens != nil {
 		cached = intPtr(*u.InputTokensDetails.CachedTokens)
 	}
+	reasoning := (*int)(nil)
+	if u.CompletionTokensDetails != nil && u.CompletionTokensDetails.ReasoningTokens != nil {
+		reasoning = intPtr(*u.CompletionTokensDetails.ReasoningTokens)
+	} else if u.OutputTokensDetails != nil && u.OutputTokensDetails.ReasoningTokens != nil {
+		reasoning = intPtr(*u.OutputTokensDetails.ReasoningTokens)
+	}
 	return &ServingUsage{
 		PromptTokens:     usageTokenCount(u.PromptTokens, u.InputTokens),
 		CompletionTokens: usageTokenCount(u.CompletionTokens, u.OutputTokens),
 		TotalTokens:      copyTokenCount(u.TotalTokens),
 		CachedTokens:     cached,
+		ReasoningTokens:  reasoning,
 	}
 }
 
@@ -709,14 +778,20 @@ func streamChunk(data string) (servingStreamChunk, bool) {
 	var chunk struct {
 		Choices []struct {
 			Delta struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
 			} `json:"delta"`
 			Text string `json:"text"`
 		} `json:"choices"`
 		Usage *servingUsageWire `json:"usage"`
+		Error json.RawMessage   `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return servingStreamChunk{Content: data, HasContent: true}, true
+	}
+	if errMsg := extractServingWireError(chunk.Error); errMsg != "" {
+		return servingStreamChunk{StreamError: errMsg}, true
 	}
 	usage := chunk.Usage.observed()
 	out := servingStreamChunk{Usage: usage}
@@ -724,9 +799,14 @@ func streamChunk(data string) (servingStreamChunk, bool) {
 		out.OutputTokens = copyTokenCount(usage.CompletionTokens)
 	}
 	for _, ch := range chunk.Choices {
-		if ch.Delta.Content != "" {
-			out.Content = ch.Delta.Content
+		reasoning := ch.Delta.ReasoningContent
+		if reasoning == "" {
+			reasoning = ch.Delta.Reasoning
+		}
+		if ch.Delta.Content != "" || reasoning != "" {
+			out.Content = reasoning + ch.Delta.Content
 			out.HasContent = true
+			out.HasReasoning = reasoning != ""
 			return out, true
 		}
 		if ch.Text != "" {
@@ -738,29 +818,54 @@ func streamChunk(data string) (servingStreamChunk, bool) {
 	return out, out.OutputTokens != nil || out.Usage != nil
 }
 
-func completionContentAndUsage(data []byte) (string, *int, *ServingUsage) {
+func completionContentAndUsage(data []byte) (string, *int, *ServingUsage, string) {
 	var doc struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
 			} `json:"message"`
 			Text string `json:"text"`
 		} `json:"choices"`
 		Usage *servingUsageWire `json:"usage"`
+		Error json.RawMessage   `json:"error"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return string(data), nil, nil
+		return string(data), nil, nil, ""
+	}
+	if errMsg := extractServingWireError(doc.Error); errMsg != "" {
+		return "", nil, nil, errMsg
 	}
 	var b strings.Builder
 	for _, ch := range doc.Choices {
+		if ch.Message.ReasoningContent != "" {
+			b.WriteString(ch.Message.ReasoningContent)
+		} else if ch.Message.Reasoning != "" {
+			b.WriteString(ch.Message.Reasoning)
+		}
 		b.WriteString(ch.Message.Content)
 		b.WriteString(ch.Text)
 	}
 	usage := doc.Usage.observed()
 	if usage == nil {
-		return b.String(), nil, nil
+		return b.String(), nil, nil, ""
 	}
-	return b.String(), copyTokenCount(usage.CompletionTokens), usage
+	return b.String(), copyTokenCount(usage.CompletionTokens), usage, ""
+}
+
+func extractServingWireError(raw json.RawMessage) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte(`""`)) || bytes.Equal(trimmed, []byte("false")) {
+		return ""
+	}
+	var obj struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(trimmed, &obj); err == nil && strings.TrimSpace(obj.Message) != "" {
+		return strings.TrimSpace(obj.Message)
+	}
+	return string(trimmed)
 }
 
 func usageTokenCount(completionTokens, outputTokens *int) *int {
@@ -823,10 +928,10 @@ func servingJointWithin(sample ServingSample, slo ServingSLOs) bool {
 	if slo.EndToEnd > 0 && !servingWithinSLO(sample.EndToEndMillis, slo.EndToEnd) {
 		return false
 	}
-	if slo.TTFT > 0 && !servingMetricWithin(sample.TTFTMillis, slo.TTFT) {
+	if slo.TTFT > 0 && (sample.StreamMode == "non_sse" || !servingMetricWithin(sample.TTFTMillis, slo.TTFT)) {
 		return false
 	}
-	if slo.TPOT > 0 && !servingMetricWithin(sample.TPOTMillis, slo.TPOT) {
+	if slo.TPOT > 0 && (sample.StreamMode == "non_sse" || !servingMetricWithin(sample.TPOTMillis, slo.TPOT)) {
 		return false
 	}
 	return true
@@ -872,12 +977,14 @@ func foldServingSamples(samples []ServingSample, wallSeconds float64, within fun
 			if within(s) {
 				good++
 			}
-			if s.TTFTMillis != nil {
-				ttft = append(ttft, *s.TTFTMillis)
-			}
-			itl = append(itl, s.ITLMillis...)
-			if s.TPOTMillis != nil {
-				tpot = append(tpot, *s.TPOTMillis)
+			if s.StreamMode != "non_sse" {
+				if s.TTFTMillis != nil {
+					ttft = append(ttft, *s.TTFTMillis)
+				}
+				itl = append(itl, s.ITLMillis...)
+				if s.TPOTMillis != nil {
+					tpot = append(tpot, *s.TPOTMillis)
+				}
 			}
 			tokens += s.OutputTokenEstimate
 			tokenBases[servingSampleTokenBasis(s)]++
@@ -1158,6 +1265,14 @@ func notMeasuredScalar(unit, reason string) ScalarMetric {
 
 func floatPtr(v float64) *float64 {
 	x := round(v)
+	return &x
+}
+
+func positiveFloatPtr(v float64) *float64 {
+	x := round(v)
+	if x <= 0 && v > 0 {
+		x = v
+	}
 	return &x
 }
 
