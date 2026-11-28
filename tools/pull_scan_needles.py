@@ -272,8 +272,8 @@ def main(argv: list[str] | None = None) -> int:
         return dump(private_root)
     if not os.path.isdir(private_root):
         print("ERROR: authorized private companion not found\n"
-              f"  pass --from <private-repo-root>; on a box without the private "
-              f"repo, audit-tree stays shape-only (degraded but honest).",
+              "  pass --from <private-repo-root>; on a box without the private "
+              "repo, audit-tree stays shape-only (degraded but honest).",
               file=sys.stderr)
         return 2
     return pull(private_root, public_root)

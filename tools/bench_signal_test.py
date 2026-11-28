@@ -10,6 +10,8 @@ Dual-runnable (the repo runs the suite pytest-free in CI):
 """
 from __future__ import annotations
 
+import unittest
+
 import bench_signal as bs
 
 
@@ -298,9 +300,6 @@ def test_main_exits_nonzero_on_missing_or_stale_baseline():
         }), encoding="utf-8")
         rc_stale = bs.main(["--catalog", str(cat_path), "--baseline", str(base_path), "--json"])
         assert rc_stale == 1, f"expected exit 1 on stale/mismatched baseline, got {rc_stale}"
-
-
-import unittest
 
 
 class BenchSignalTestCase(unittest.TestCase):

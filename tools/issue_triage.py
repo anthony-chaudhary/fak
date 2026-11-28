@@ -69,11 +69,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-_TOOLS_DIR = str(Path(__file__).resolve().parent)
-if _TOOLS_DIR not in sys.path:
-    sys.path.insert(0, _TOOLS_DIR)
-from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
+
+def _init_subprocess_defaults() -> None:
+    tools_dir = str(Path(__file__).resolve().parent)
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    from dispatch_worker import install_no_window_subprocess_defaults
+
+    install_no_window_subprocess_defaults(subprocess)
+
+
+_init_subprocess_defaults()
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")

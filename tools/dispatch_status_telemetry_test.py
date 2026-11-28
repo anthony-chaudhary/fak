@@ -1,0 +1,1691 @@
+#!/usr/bin/env python3
+"""Tests for tools/dispatch_status_telemetry.py (split from dispatch_status_test.py)."""
+from __future__ import annotations
+
+import importlib
+import importlib.util
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+_TEST_DIR = Path(__file__).resolve().parent
+ROOT = _TEST_DIR.parent
+_SHARED_CACHE: list[object] = []
+
+
+def _shared():
+    if not _SHARED_CACHE:
+        spec = importlib.util.spec_from_file_location(
+            "dispatch_status_test_helpers", _TEST_DIR / "dispatch_status_test.py"
+        )
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SHARED_CACHE.append(mod)
+    return _SHARED_CACHE[0]
+
+
+def load():
+    return _shared().load()
+
+
+def build(*args, **kwargs):
+    return _shared().build(*args, **kwargs)
+
+
+class DispatchStatusTelemetryModuleTest(unittest.TestCase):
+    def test_direct_module_import_exports(self) -> None:
+        tools_dir = str(_TEST_DIR)
+        if tools_dir not in sys.path:
+            sys.path.insert(0, tools_dir)
+        mod = importlib.import_module("dispatch_status_telemetry")
+        self.assertEqual(mod.WATCH_DECISION_SCHEMA, "fleet-watch-decision/1")
+        ships = mod.parse_ships_per_worker(["plain commit without trailer"])
+        self.assertEqual(ships["attributed_ships"], 1)
+        self.assertEqual(ships["unknown"], 1)
+
+
+class SilentWorkersFoldTest(unittest.TestCase):
+    """build_payload folds the injected silent list into payload['workers'] and a reason."""
+
+    def test_silent_workers_fold_and_reason(self) -> None:
+        mod = load()
+        silent = [{"issue": 465, "stamp": "20260621-232003",
+                   "log": "resolve-465-20260621-232003.log", "pid": 39688}]
+        p = build(mod, silent=silent)
+        self.assertEqual(p["workers"]["silent_count"], 1)
+        self.assertEqual(p["workers"]["silent"], silent)
+        self.assertTrue(any("exited producing nothing" in r for r in p["reasons"]))
+
+    def test_no_silent_workers_emits_no_reason(self) -> None:
+        mod = load()
+        p = build(mod, silent=[])
+        self.assertEqual(p["workers"]["silent_count"], 0)
+        self.assertFalse(any("producing nothing" in r for r in p["reasons"]))
+
+    def test_silent_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass silent -> defaults to None -> []
+        self.assertEqual(p["workers"]["silent_count"], 0)
+
+
+class SilentWorkersScanTest(unittest.TestCase):
+    """silent_workers() classification — hermetic: a tmp runs-dir + injected alive set."""
+
+    def _mk(self, runs: Path, issue: int, stamp: str, *, size: int, pid: int,
+            sidecar_mtime: float | None = None) -> None:
+        import os
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_bytes(b"x" * size)
+        pid_file = runs / f"resolve-{issue}-{stamp}.pid"
+        pid_file.write_text(str(pid), encoding="utf-8")
+        if sidecar_mtime is not None:
+            os.utime(pid_file, (sidecar_mtime, sidecar_mtime))
+
+    def test_zero_byte_dead_pid_is_silent(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 465, "20260621-232003", size=0, pid=39688)
+            out = mod.silent_workers(runs, alive=set())  # nothing alive
+            self.assertEqual([w["issue"] for w in out], [465])
+            self.assertEqual(out[0]["pid"], 39688)
+
+    def test_zero_byte_live_pid_is_excluded(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 465, "20260621-232003", size=0, pid=39688)
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "cmdline": "claude -p resolve GitHub issue #465",
+                        }
+            out = mod.silent_workers(runs, alive={39688}, probe=probe)  # still running
+            self.assertEqual(out, [])
+
+    def test_zero_byte_reused_pid_is_silent(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            self._mk(runs, 465, "20260621-232003", size=0, pid=39688,
+                     sidecar_mtime=now)
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "create_time": now + 60 * 60,
+                            "cmdline": "chrome.exe --type=renderer",
+                        }
+            out = mod.silent_workers(runs, alive={39688}, probe=probe)
+            self.assertEqual([w["issue"] for w in out], [465])
+
+    def test_non_empty_log_is_excluded(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 464, "20260621-232247", size=2366, pid=18796)
+            out = mod.silent_workers(runs, alive=set())
+            self.assertEqual(out, [])
+
+    def test_missing_runs_dir_is_empty(self) -> None:
+        mod = load()
+        out = mod.silent_workers(Path("does-not-exist-xyz"), alive=set())
+        self.assertEqual(out, [])
+
+    def test_no_liveness_oracle_reports_nothing(self) -> None:
+        # alive=None with psutil unavailable must NOT false-positive a silent worker
+        # (we cannot prove the pid dead, so we report nothing rather than a false alarm).
+        mod = load()
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_psutil(name, *a, **k):
+            if name == "psutil":
+                raise ImportError("psutil disabled for this test")
+            return real_import(name, *a, **k)
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 465, "20260621-232003", size=0, pid=39688)
+            builtins.__import__ = no_psutil
+            try:
+                out = mod.silent_workers(runs)  # alive=None -> tries psutil -> ImportError
+            finally:
+                builtins.__import__ = real_import
+            self.assertEqual(out, [])
+
+    def test_newest_first_ordering(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 465, "20260621-225432", size=0, pid=36580)
+            self._mk(runs, 465, "20260621-232003", size=0, pid=39688)
+            out = mod.silent_workers(runs, alive=set())
+            self.assertEqual([w["stamp"] for w in out],
+                             ["20260621-232003", "20260621-225432"])
+
+    def test_banner_only_stub_dead_pid_is_silent(self) -> None:
+        # A detached opencode worker that prints `> build · <model>` and exits is a
+        # 122-byte banner-only stub: below the real-turn floor, so it produced
+        # nothing even though size != 0 (the #1276 blind spot).
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1207, "20260629-165930", size=122, pid=16752)
+            out = mod.silent_workers(runs, alive=set())  # nothing alive
+            self.assertEqual([w["issue"] for w in out], [1207])
+            self.assertEqual(out[0]["kind"], "stub")
+            self.assertEqual(out[0]["size"], 122)
+
+    def test_banner_only_stub_live_pid_is_excluded(self) -> None:
+        # A sub-floor log over a LIVE pid is still-running, not silent — the same
+        # dead-pid guard that protects a claude worker streaming nothing until the end.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1207, "20260629-165930", size=122, pid=16752)
+            out = mod.silent_workers(runs, alive={16752},
+                                     probe=lambda pid: {"alive": True,
+                                                        "cmdline": "opencode run resolve GitHub issue #1207"})
+            self.assertEqual(out, [])
+
+    def test_at_floor_is_silent_over_floor_is_not(self) -> None:
+        # Boundary: exactly _STUB_LOG_MAX_BYTES is still a stub; one byte over is output.
+        mod = load()
+        floor = mod._STUB_LOG_MAX_BYTES
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1, "20260629-100000", size=floor, pid=111)
+            self._mk(runs, 2, "20260629-100001", size=floor + 1, pid=222)
+            out = mod.silent_workers(runs, alive=set())
+            self.assertEqual([w["issue"] for w in out], [1])
+
+    def test_stub_floor_matches_canonical(self) -> None:
+        # Drift pin: the status-card floor must equal the dispatcher's classifier floor
+        # so the two surfaces agree on what "produced a real turn" means.
+        mod = load()
+        spec = importlib.util.spec_from_file_location(
+            "issue_resolve_dispatch", ROOT / "tools" / "issue_resolve_dispatch.py")
+        ird = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ird)
+        self.assertEqual(mod._STUB_LOG_MAX_BYTES, ird._STUB_LOG_MAX_BYTES)
+
+
+class RouteHealthFoldTest(unittest.TestCase):
+    """route_health_status() (#3035) — hermetic latest-per-route fold over a tmp
+    route-health.jsonl: last probe age, typed failure class, cooldown remaining,
+    and the exact recheck command; a failing route is suppressed without touching
+    its healthy sibling on the same provider."""
+
+    _RECHECK = ("fak dispatch route-health probe --base-url https://nim.example/v1 "
+                "--model deepseek-chat --provider nim")
+
+    def _write(self, runs: Path, rows: list[dict], *, tail: str = "") -> None:
+        runs.mkdir(parents=True, exist_ok=True)
+        (runs / "route-health.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows) + tail, encoding="utf-8")
+
+    def test_missing_ledger_is_empty_fold(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            out = mod.route_health_status(Path(d) / "no-such-runs")
+        self.assertEqual(out, {"probed": 0, "suppressed": 0, "routes": []})
+
+    def test_suppresses_only_failing_route_and_carries_recheck(self) -> None:
+        mod = load()
+        now = 1_700_000_000
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write(runs, [
+                # stale healthy row for the failing route: the later timeout row wins
+                {"route": "nim/seat1/deepseek-chat", "class": "healthy",
+                 "probed_at_unix": now - 600, "recheck": self._RECHECK},
+                {"route": "nim/seat1/deepseek-chat", "class": "timeout",
+                 "probed_at_unix": now - 120, "cooldown_until_unix": now + 480,
+                 "recheck": self._RECHECK},
+                {"route": "nim/seat1/kimi-k2", "class": "healthy",
+                 "probed_at_unix": now - 60,
+                 "recheck": "fak dispatch route-health probe --base-url "
+                            "https://nim.example/v1 --model kimi-k2 --provider nim"},
+            ])
+            out = mod.route_health_status(runs, now_ts=now)
+        self.assertEqual(out["probed"], 2)
+        self.assertEqual(out["suppressed"], 1)
+        rows = {r["route"]: r for r in out["routes"]}
+        bad = rows["nim/seat1/deepseek-chat"]
+        self.assertTrue(bad["suppressed"])
+        self.assertEqual(bad["class"], "timeout")
+        self.assertEqual(bad["probe_age_secs"], 120)
+        self.assertEqual(bad["cooldown_remaining_secs"], 480)
+        self.assertEqual(bad["recheck"], self._RECHECK)
+        sibling = rows["nim/seat1/kimi-k2"]
+        self.assertFalse(sibling["suppressed"])
+        self.assertEqual(sibling["class"], "healthy")
+
+    def test_elapsed_cooldown_and_corrupt_row_do_not_suppress(self) -> None:
+        mod = load()
+        now = 1_700_000_000
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write(runs, [
+                {"route": "nim/seat1/deepseek-chat", "class": "rate_limited",
+                 "probed_at_unix": now - 3600, "cooldown_until_unix": now - 60,
+                 "recheck": self._RECHECK},
+            ], tail="{not json}\n")
+            out = mod.route_health_status(runs, now_ts=now)
+        self.assertEqual(out["probed"], 1)
+        self.assertEqual(out["suppressed"], 0)
+        self.assertFalse(out["routes"][0]["suppressed"])
+
+    def test_payload_threading_and_render_line(self) -> None:
+        mod = load()
+        rh = {"probed": 2, "suppressed": 1, "routes": [
+            {"route": "nim/seat1/deepseek-chat", "class": "timeout",
+             "probe_age_secs": 120, "suppressed": True,
+             "cooldown_remaining_secs": 480, "recheck": self._RECHECK},
+            {"route": "nim/seat1/kimi-k2", "class": "healthy",
+             "probe_age_secs": 60, "suppressed": False,
+             "cooldown_remaining_secs": 0, "recheck": ""},
+        ]}
+        p = build(mod, route_health=rh)
+        self.assertEqual(p["route_health"], rh)
+        text = mod.render(p)
+        self.assertIn("routes    : 2 probed, 1 suppressed", text)
+        self.assertIn("nim/seat1/deepseek-chat=timeout", text)
+        self.assertIn("cooldown=480s left", text)
+        self.assertIn("recheck   : " + self._RECHECK, text)
+
+    def test_no_probes_emits_no_render_line(self) -> None:
+        mod = load()
+        p = build(mod, route_health={"probed": 0, "suppressed": 0, "routes": []})
+        self.assertNotIn("routes    :", mod.render(p))
+
+
+class BackendStubRateScanTest(unittest.TestCase):
+    """backend_stub_rates() is a content sweep, not a backend-health sidecar read."""
+
+    def _mk(self, runs: Path, issue: int, stamp: str, *, size: int, pid: int,
+            backend: str, mtime: float) -> None:
+        import os
+
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_bytes(b"x" * size)
+        (runs / f"resolve-{issue}-{stamp}.pid").write_text(str(pid), encoding="utf-8")
+        (runs / f"resolve-{issue}-{stamp}.backend").write_text(backend, encoding="utf-8")
+        os.utime(log, (mtime, mtime))
+
+    def test_majority_stub_backend_is_flagged_without_health_sidecar(self) -> None:
+        mod = load()
+        now = 2_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # 8/9 opencode attempts are banner-only stubs, and no
+            # backend-health-opencode.json sidecar exists. This is the #1276 blind
+            # spot: absence of the sidecar must not render as proof of health.
+            for i in range(8):
+                self._mk(runs, 1200 + i, f"20260629-1659{i:02d}",
+                         size=122, pid=16_000 + i, backend="opencode",
+                         mtime=now - i)
+            self._mk(runs, 1299, "20260629-170000", size=2048, pid=17_000,
+                     backend="opencode", mtime=now - 20)
+            self._mk(runs, 1300, "20260629-170001", size=2048, pid=18_000,
+                     backend="claude", mtime=now - 30)
+
+            out = mod.backend_stub_rates(runs, now_ts=now, alive=set())
+            by_product = {r["product"]: r for r in out}
+            self.assertFalse((runs / "backend-health-opencode.json").exists())
+            self.assertEqual(by_product["opencode"]["total"], 9)
+            self.assertEqual(by_product["opencode"]["stub"], 8)
+            self.assertEqual(by_product["opencode"]["productive"], 1)
+            self.assertTrue(by_product["opencode"]["majority_stub"])
+            self.assertFalse(by_product["claude"]["majority_stub"])
+
+    def test_live_stub_log_is_not_counted_as_backend_evidence_yet(self) -> None:
+        mod = load()
+        now = 2_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1207, "20260629-165930", size=122, pid=16752,
+                     backend="opencode", mtime=now)
+            out = mod.backend_stub_rates(
+                runs, now_ts=now, alive={16752},
+                probe=lambda pid: {"alive": True,
+                                   "cmdline": "opencode run resolve GitHub issue #1207"})
+            self.assertEqual(out, [])
+
+
+class BackendHookFailureScanTest(unittest.TestCase):
+    """backend_hook_failures() makes a fully-unhooked backend visible (#1277)."""
+
+    def _mk(self, runs: Path, issue: int, stamp: str, *, backend: str,
+            text: str, mtime: float) -> None:
+        import os
+
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_text(text, encoding="utf-8")
+        log.with_suffix(".backend").write_text(backend, encoding="utf-8")
+        os.utime(log, (mtime, mtime))
+
+    def test_all_recent_sessions_with_hook_failures_are_flagged(self) -> None:
+        mod = load()
+        now = 2_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(
+                runs, 65, "20260629-115413", backend="codex", mtime=now - 10,
+                text="hook: SessionStart Failed\nhook: PreToolUse Failed\n")
+            self._mk(
+                runs, 1176, "20260629-043016", backend="codex", mtime=now - 20,
+                text="hook: UserPromptSubmit Failed\n")
+            self._mk(
+                runs, 1207, "20260629-173104", backend="opencode", mtime=now - 30,
+                text="> build - glm\n")
+
+            rows = mod.backend_hook_failures(runs, now_ts=now)
+            by_product = {row["product"]: row for row in rows}
+
+            self.assertEqual(by_product["codex"]["sessions"], 2)
+            self.assertEqual(by_product["codex"]["sessions_with_hook_failures"], 2)
+            self.assertEqual(by_product["codex"]["hook_failures"], 3)
+            self.assertEqual(by_product["codex"]["failure_session_rate"], 1.0)
+            self.assertTrue(by_product["codex"]["all_sessions_unhooked"])
+            self.assertEqual(by_product["opencode"]["failure_session_rate"], 0.0)
+            self.assertFalse(by_product["opencode"]["all_sessions_unhooked"])
+
+
+class HookHealthPayloadTest(unittest.TestCase):
+    def test_unhooked_backend_reaches_payload_reason_and_render(self) -> None:
+        mod = load()
+        hook_failures = [{
+            "product": "codex",
+            "lookback_min": 90,
+            "sessions": 3,
+            "sessions_with_hook_failures": 3,
+            "failure_session_rate": 1.0,
+            "hook_failures": 195,
+            "evidence_logs": ["resolve-65-20260629-115413.log"],
+            "all_sessions_unhooked": True,
+        }]
+
+        p = build(mod, hook_failures=hook_failures)
+
+        self.assertEqual(p["hook_health"]["unhooked_count"], 1)
+        self.assertEqual(p["hook_health"]["by_backend"], hook_failures)
+        self.assertTrue(any("guard hook layer UNBOUND" in r for r in p["reasons"]))
+        self.assertIn("hooks", mod.render(p))
+        self.assertIn("codex=195 fail/3 sess (100%)", mod.render(p))
+
+
+class SeatInventoryPayloadTest(unittest.TestCase):
+    """#1799: build_payload threads the seat inventory (fleet_accounts.seat_pool
+    output) straight through to the JSON payload and surfaces a summary reason line,
+    covering all four operator-facing states: available / busy / cooling /
+    unavailable-with-reason."""
+
+    def _pool(self) -> dict:
+        return {
+            "schema": "fleet-seat-pool/1",
+            "product": "claude",
+            "total_seats": 4,
+            "free_seats": 1,
+            "leased_seats": 1,
+            "blocked_seats": 2,
+            "by_dispatch_state": {"available": 1, "busy": 1, "cooling": 1, "unavailable": 1},
+            "depleted": False,
+            "double_booked": [],
+            "unbound_leases": [],
+            "seats": [
+                {"seat": "dir:.claude-free1", "tag": "free1", "account": ".claude-free1",
+                 "product": "claude", "model_tier": 1, "available": True,
+                 "state": "free", "dispatch_state": "available", "hold_reason": "",
+                 "workers": []},
+                {"seat": "dir:.claude-busy1", "tag": "busy1", "account": ".claude-busy1",
+                 "product": "claude", "model_tier": 1, "available": True,
+                 "state": "leased", "dispatch_state": "busy",
+                 "hold_reason": "leased to w1", "workers": ["w1"]},
+                {"seat": "dir:.claude-cool1", "tag": "cool1", "account": ".claude-cool1",
+                 "product": "claude", "model_tier": 1, "available": False,
+                 "state": "blocked", "dispatch_state": "cooling",
+                 "hold_reason": "cooldown_until=9pm", "workers": []},
+                {"seat": "dir:.claude-auth1", "tag": "auth1", "account": ".claude-auth1",
+                 "product": "claude", "model_tier": 1, "available": False,
+                 "state": "blocked", "dispatch_state": "unavailable",
+                 "hold_reason": "auth_failed", "workers": []},
+            ],
+        }
+
+    def test_seat_inventory_flows_into_payload_json(self) -> None:
+        mod = load()
+        p = build(mod, seat_inventory=self._pool())
+        self.assertEqual(p["seat_inventory"]["total_seats"], 4)
+        by_state = p["seat_inventory"]["by_dispatch_state"]
+        self.assertEqual(by_state, {"available": 1, "busy": 1, "cooling": 1, "unavailable": 1})
+        states = {s["tag"]: s["dispatch_state"] for s in p["seat_inventory"]["seats"]}
+        self.assertEqual(states, {"free1": "available", "busy1": "busy",
+                                  "cool1": "cooling", "auth1": "unavailable"})
+        # unavailable/cooling seats carry a SPECIFIC reason, never the bare word
+        reasons_by_tag = {s["tag"]: s["hold_reason"] for s in p["seat_inventory"]["seats"]}
+        self.assertEqual(reasons_by_tag["cool1"], "cooldown_until=9pm")
+        self.assertEqual(reasons_by_tag["auth1"], "auth_failed")
+        self.assertNotIn("unavailable", reasons_by_tag["cool1"])
+        self.assertNotEqual(reasons_by_tag["auth1"], "unavailable")
+
+    def test_seat_inventory_summary_reason_line(self) -> None:
+        mod = load()
+        p = build(mod, seat_inventory=self._pool())
+        self.assertTrue(any(
+            "seat inventory" in r and "available=1" in r and "busy=1" in r
+            and "cooling=1" in r and "unavailable=1" in r
+            for r in p["reasons"]))
+
+    def test_unattributed_live_from_preflight_is_visible_in_summary(self) -> None:
+        mod = load()
+        inv = mod.annotate_seat_inventory_from_preflight(
+            self._pool(), {"seat": {"unattributed_live": 2}})
+        self.assertEqual(inv["free_seats"], 0)
+        self.assertEqual(inv["leased_seats"], 3)
+        self.assertTrue(inv["depleted"])
+        line = mod._seat_inventory_summary_line(inv)
+        self.assertIn("slots free=0 leased=3", line)
+        self.assertIn("unattributed_live=2", line)
+
+    def test_auth_failed_seat_is_actionable_and_excluded_from_capacity(self) -> None:
+        mod = load()
+        p = build(mod, seat_inventory=self._pool())
+        self.assertEqual(p["seat_inventory"]["free_seats"], 1)
+        self.assertTrue(any(
+            "auth_failed=1 [auth1]" in r and "next action: run `fak accounts status`" in r
+            for r in p["reasons"]))
+
+        rendered = mod.render(p)
+        self.assertIn("auth_failed=1 [auth1]", rendered)
+        self.assertIn("next action: run `fak accounts status`", rendered)
+
+        slack = mod.slack_text(p)
+        self.assertIn("*dispatch scheduler:* `READY_TO_GROW` (ACTION)", slack)
+        self.assertIn("action: auth_failed=1 [auth1]", slack)
+
+    def test_double_booked_seat_is_actionable(self) -> None:
+        mod = load()
+        pool = self._pool()
+        pool["double_booked"] = [{
+            "seat": "dir:opencode",
+            "tag": "default",
+            "workers": ["resolve-1", "resolve-2"],
+            "session_cap": 1,
+        }]
+        p = build(mod, seat_inventory=pool)
+        self.assertTrue(any(
+            "double_booked=1 [default:2/1]" in r
+            and "reap a dead/stale worker" in r
+            for r in p["reasons"]))
+
+        rendered = mod.render(p)
+        self.assertIn("double_booked=1 [default:2/1]", rendered)
+
+        slack = mod.slack_text(p)
+        self.assertIn("*dispatch scheduler:* `READY_TO_GROW` (ACTION)", slack)
+        self.assertIn("double_booked=1 [default:2/1]", slack)
+
+    def test_seat_inventory_error_degrades_gracefully(self) -> None:
+        mod = load()
+        p = build(mod, seat_inventory={"_error": "boom"})
+        self.assertTrue(p["ok"])  # informational fold only — never flips ok
+        self.assertTrue(any("seat inventory unavailable: boom" in r for r in p["reasons"]))
+
+    def test_seat_inventory_defaults_to_empty_dict_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)
+        self.assertEqual(p["seat_inventory"], {})
+
+
+class GuardCoverageScanTest(unittest.TestCase):
+    """guard_coverage() folds the per-session .dispatch-runs/guard-audit/*.jsonl
+    decision journals into a coverage + decision-mix rollup — hermetic over a tmp dir."""
+
+    def _journal(self, audit_dir: Path, name: str, rows: list[str],
+                 *, mtime: float | None = None) -> None:
+        import os
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        jp = audit_dir / name
+        jp.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+        if mtime is not None:
+            os.utime(jp, (mtime, mtime))
+
+    def test_missing_dir_is_zeroed_and_marked_absent(self) -> None:
+        mod = load()
+        out = mod.guard_coverage(Path("does-not-exist-xyz"))
+        self.assertFalse(out["dir_present"])
+        self.assertEqual(out["sessions"], 0)
+        self.assertEqual(out["rows"], 0)
+
+    def test_counts_sessions_rows_and_decision_mix(self) -> None:
+        mod = load()
+        now = 3_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            audit = Path(d) / mod.GUARD_AUDIT_DIRNAME
+            # Session A: an allow (DECIDE), a deny, a quarantine.
+            self._journal(audit, "gateway-claude-1-aaaa.jsonl", [
+                '{"seq":1,"kind":"DECIDE","verdict":"ALLOW"}',
+                '{"seq":2,"kind":"DENY","verdict":"DENY"}',
+                '{"seq":3,"kind":"QUARANTINE"}',
+            ], mtime=now)
+            # Session B: a result-deny + a vDSO hit (recent).
+            self._journal(audit, "recall-claude-2-bbbb.jsonl", [
+                '{"seq":1,"kind":"RESULT_DENY"}',
+                '{"seq":2,"kind":"VDSO_HIT"}',
+            ], mtime=now)
+            # Session C: empty (booted under guard, no adjudicated call) and OLD.
+            self._journal(audit, "docs-claude-3-cccc.jsonl", [],
+                          mtime=now - 10 * 24 * 3600)
+            out = mod.guard_coverage(Path(d), now_ts=now)
+        self.assertTrue(out["dir_present"])
+        self.assertEqual(out["sessions"], 3)
+        self.assertEqual(out["rows"], 5)
+        self.assertEqual(out["empty_sessions"], 1)
+        self.assertEqual(out["denied"], 2)        # DENY + RESULT_DENY
+        self.assertEqual(out["quarantined"], 1)
+        self.assertEqual(out["by_kind"]["DECIDE"], 1)
+        self.assertEqual(out["by_kind"]["VDSO_HIT"], 1)
+        # Only A and B fall in the recent window; C is 10 days old.
+        self.assertEqual(out["recent_sessions"], 2)
+        self.assertEqual(out["recent_rows"], 5)
+        self.assertIn("gateway-claude-1-aaaa.jsonl", out["evidence"])
+
+    def test_malformed_line_is_bucketed_not_crashing(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            audit = Path(d) / mod.GUARD_AUDIT_DIRNAME
+            self._journal(audit, "x-claude-9-dddd.jsonl",
+                          ['{"kind":"DECIDE"}', 'not json at all'])
+            out = mod.guard_coverage(Path(d))
+        self.assertEqual(out["rows"], 2)
+        self.assertEqual(out["by_kind"].get("MALFORMED"), 1)
+
+    def test_repeated_allow_none_rows_do_not_become_livelock_candidates(self) -> None:
+        mod = load()
+        now = 3_000_000.0
+        allow = ('{"kind":"DECIDE","verdict":"ALLOW","tool":"Read","reason":"NONE",'
+                 '"args_digest":"allowdigest"}')
+        quarantine = ('{"kind":"QUARANTINE","verdict":"QUARANTINE","tool":"tool_result",'
+                      '"reason":"SECRET_EXFIL","args_digest":"quardigest"}')
+        with tempfile.TemporaryDirectory() as d:
+            audit = Path(d) / mod.GUARD_AUDIT_DIRNAME
+            self._journal(audit, "loop-claude-1-aaaa.jsonl",
+                          [allow, allow, allow] + [quarantine] * 10,
+                          mtime=now)
+            out = mod.guard_coverage(Path(d), now_ts=now)
+        candidates = out["livelock_candidates"]
+        self.assertFalse(any(c["tool"] == "Read" for c in candidates))
+        self.assertTrue(any(c["tool"] == "tool_result" and c["count"] == 10
+                            for c in candidates))
+
+    def test_non_candidate_rows_break_livelock_run_length(self) -> None:
+        mod = load()
+        now = 3_000_000.0
+        allow = ('{"kind":"DECIDE","verdict":"ALLOW","tool":"Read","reason":"NONE",'
+                 '"args_digest":"allowdigest"}')
+        quarantine = ('{"kind":"QUARANTINE","verdict":"QUARANTINE","tool":"tool_result",'
+                      '"reason":"SECRET_EXFIL","args_digest":"quardigest"}')
+        with tempfile.TemporaryDirectory() as d:
+            audit = Path(d) / mod.GUARD_AUDIT_DIRNAME
+            rows = []
+            for _ in range(10):
+                rows.extend([quarantine, allow])
+            self._journal(audit, "loop-claude-1-aaaa.jsonl", rows, mtime=now)
+            out = mod.guard_coverage(Path(d), now_ts=now)
+        candidates = out["livelock_candidates"]
+        top = next(c for c in candidates if c["tool"] == "tool_result")
+        self.assertEqual(top["count"], 10)
+        self.assertEqual(top["longest_run"], 1)
+
+
+class GuardEmptyCauseSplitTest(unittest.TestCase):
+    """`empty=N` on the guard card is split by a CLOSED cause vocabulary (#5862 dc-2).
+
+    An empty guard session used to be one opaque number, so an operator could not tell a
+    fleet parked behind a provider wall (benign — the supervisor resumes the same
+    command) from one silently failing to spawn. Hermetic over a tmp .dispatch-runs."""
+
+    def _corpus(self, d: Path, *, journal: str, rows: list[str],
+                log_tail: str | None = None, at: float = 3_000_000.0) -> None:
+        import os
+        audit = d / load().GUARD_AUDIT_DIRNAME
+        audit.mkdir(parents=True, exist_ok=True)
+        jp = audit / journal
+        jp.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+        os.utime(jp, (at, at))
+        if log_tail is not None:
+            lp = d / "resolve-1-20260807-000000.log"
+            # Name the journal in the log the way the guard's banner does — that string
+            # IS the join key.
+            lp.write_text(f"  audit log  : {jp}\n{log_tail}\n", encoding="utf-8")
+            os.utime(lp, (at, at))
+
+    def test_park_on_a_provider_wall_is_named_not_opaque(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="model-claude-1-aaaa.jsonl", rows=[],
+                         log_tail=("fak guard: goal parked outside active context budget "
+                                   "until 1786402799; reason=LONG_RETRY_AFTER\n"
+                                   "── guard · audit ──\n"))
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_sessions"], 1)
+        self.assertEqual(out["empty_by_cause"],
+                         {mod._GUARD_EMPTY_PROVIDER_QUOTA_WALL: 1})
+
+    def test_child_that_never_launched_is_split_from_the_park(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            # A partial epilogue is present, as it is on the real spawn failures: the
+            # spawn marker must still win, or the fleet's only "did not launch" signal
+            # is booked as a clean exit.
+            self._corpus(Path(d), journal="tools-claude-2-bbbb.jsonl", rows=[],
+                         log_tail=("── guard · audit ──\n"
+                                   'fak guard: could not run "claude": snapshot generated '
+                                   "child config: The system cannot find the path specified.\n"))
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_SPAWN_FAILED: 1})
+
+    def test_interactive_journal_is_not_counted_as_a_dispatch_spawn(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            # guardDefaultAuditPath's name: an attended `fak guard`, which consumed no
+            # dispatch slot, no account rotation and no spawn.
+            self._corpus(Path(d), journal="interactive-4242-16daf1ca84d5.jsonl", rows=[])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_INTERACTIVE: 1})
+
+    def test_terminal_witness_row_is_not_a_decision_and_names_the_cause(self) -> None:
+        """The regression #5862's own producer fix would otherwise cause.
+
+        ae47d2911d makes a parked teardown write a CHILD_EXIT row. Counting that row as
+        a decision would drop the session out of `empty` entirely — the number would
+        deflate while explaining nothing. It must stay counted AND carry its reason."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="session-claude-3-cccc.jsonl", rows=[
+                '{"seq":1,"kind":"CHILD_EXIT","reason":"CLEAN_EXIT","exit_code":0}',
+            ])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["rows"], 1)
+        self.assertEqual(out["zero_row_sessions"], 0)   # the file is NOT empty ...
+        self.assertEqual(out["empty_sessions"], 1)      # ... but it adjudicated nothing
+        self.assertEqual(out["empty_by_cause"], {"clean_exit": 1})
+
+    def test_a_real_decision_is_never_counted_empty(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="docs-claude-4-dddd.jsonl", rows=[
+                '{"seq":1,"kind":"DECIDE","verdict":"ALLOW"}',
+                '{"seq":2,"kind":"CHILD_EXIT","reason":"CLEAN_EXIT"}',
+            ])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_sessions"], 0)
+        self.assertEqual(out["empty_by_cause"], {})
+
+    def test_unrecognised_witness_reason_falls_through_to_better_evidence(self) -> None:
+        """"unknown" is the last resort, never a shortcut.
+
+        Older CHILD_CRASH rows predate the Reason field; stamping them "unknown" throws
+        away the name/log evidence that still explains them."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="interactive-99-16daf1ca84d5.jsonl", rows=[
+                '{"seq":1,"kind":"CHILD_CRASH"}',
+            ])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_INTERACTIVE: 1})
+
+    def test_no_joinable_log_is_missing_artifact_not_a_fabricated_cause(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="repair-claude-5-eeee.jsonl", rows=[])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_MISSING_LOG: 1})
+
+    def test_log_outside_the_mtime_window_is_not_joined(self) -> None:
+        """The join is bounded, so the card cannot become a full-corpus scan."""
+        mod = load()
+        import os
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="model-claude-6-ffff.jsonl", rows=[],
+                         log_tail="reason=LONG_RETRY_AFTER\n")
+            lp = Path(d) / "resolve-1-20260807-000000.log"
+            far = 3_000_000.0 + mod._GUARD_EMPTY_LOG_WINDOW_S * 3
+            os.utime(lp, (far, far))
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_MISSING_LOG: 1})
+
+    def test_causes_are_rendered_on_every_guard_surface(self) -> None:
+        mod = load()
+        bit = mod._guard_empty_cause_bit(
+            {"empty_by_cause": {mod._GUARD_EMPTY_PROVIDER_QUOTA_WALL: 25,
+                                mod._GUARD_EMPTY_INTERACTIVE: 21}})
+        self.assertIn("provider_quota_wall=25", bit)
+        self.assertIn("interactive_not_dispatch=21", bit)
+        # A fleet with nothing to explain grows no all-zero bucket list.
+        self.assertEqual(mod._guard_empty_cause_bit({"empty_by_cause": {}}), "")
+
+    def test_cause_vocabulary_does_not_drift_from_the_go_side(self) -> None:
+        """The closed vocabulary is a literal COPY of Go constants (Python cannot import
+        Go). Parse those constants back OUT of the Go source so a rename on either side
+        fails CI instead of silently producing a cause the other half cannot name.
+
+        This matters concretely: internal/dispatchconservation folds any reason outside
+        its registered set to "unknown", so a cause string invented only here would
+        vanish on the Go side rather than error."""
+        mod = load()
+        root = Path(__file__).resolve().parents[1]
+        cons = (root / "internal" / "dispatchconservation" / "conservation.go")
+        crash = (root / "internal" / "journal" / "crash.go")
+        if not cons.is_file() or not crash.is_file():
+            self.skipTest("Go sources absent")
+        cons_src = cons.read_text(encoding="utf-8", errors="replace")
+        crash_src = crash.read_text(encoding="utf-8", errors="replace")
+        # 1. Every log-derived cause is a dispatchconservation Reason* constant AND is
+        #    registered in noCommitReasons (an unregistered one folds to "unknown").
+        for cause in (mod._GUARD_EMPTY_PROVIDER_QUOTA_WALL,
+                      mod._GUARD_EMPTY_SPAWN_FAILED,
+                      mod._GUARD_EMPTY_DIED_BEFORE_EPILOGUE,
+                      mod._GUARD_EMPTY_CLEAN_EXIT_NO_COMMIT,
+                      mod._GUARD_EMPTY_MISSING_LOG,
+                      mod._GUARD_EMPTY_UNKNOWN):
+            self.assertIn(f'"{cause}"', cons_src,
+                          f"{cause} is not a reason internal/dispatchconservation knows")
+        # 2. Every marker literal is byte-identical to the Go one it copies.
+        for marker in (mod._GUARD_PARK_MARKER, mod._GUARD_SPAWN_FAILED_MARKER,
+                       mod._GUARD_EPILOGUE_MARKER):
+            self.assertIn(f'"{marker}"', cons_src,
+                          f"marker {marker!r} drifted from conservation.go")
+        # 3. Every witness reason is a Crash* constant in internal/journal/crash.go
+        #    (compared upper-cased: the journal stamps them upper, the card renders
+        #    them lower).
+        for reason in mod._GUARD_EMPTY_WITNESS_REASONS:
+            if reason == "crash_restart_exhausted":
+                continue  # cmd/fak/guard_crash_restart.go, checked below
+            self.assertIn(f'"{reason.upper()}"', crash_src,
+                          f"witness reason {reason} is not in the journal's closed set")
+        restart = (root / "cmd" / "fak" / "guard_crash_restart.go")
+        if restart.is_file():
+            self.assertIn('"CRASH_RESTART_EXHAUSTED"',
+                          restart.read_text(encoding="utf-8", errors="replace"))
+        # 4. The terminal kinds are the journal's own Kind constants.
+        for kind in mod._GUARD_TERMINAL_KINDS:
+            self.assertIn(f'"{kind}"', crash_src)
+
+
+class GuardCoverageFoldTest(unittest.TestCase):
+    """build_payload + render surface the guard rollup (payload section, reason, card)."""
+
+    def _guard(self, **over) -> dict:
+        g = {"dir_present": True, "sessions": 2, "recent_sessions": 2,
+             "empty_sessions": 0, "rows": 5, "recent_rows": 5,
+             "by_kind": {"DECIDE": 3, "DENY": 1, "QUARANTINE": 1},
+             "denied": 1, "quarantined": 1, "lookback_min": 90,
+             "evidence": ["gateway-claude-1-aaaa.jsonl"]}
+        g.update(over)
+        return g
+
+    def test_guard_section_and_reason_when_decisions_present(self) -> None:
+        mod = load()
+        p = build(mod, guard=self._guard())
+        self.assertEqual(p["guard"]["sessions"], 2)
+        self.assertTrue(any("fak guard witnessed 5 kernel decision" in r for r in p["reasons"]))
+        self.assertIn("guard", mod.render(p))
+        self.assertIn("DENY=1", mod.render(p))
+
+    def test_child_crashes_are_rendered_when_present(self) -> None:
+        mod = load()
+        p = build(mod, guard=self._guard(
+            by_kind={"DECIDE": 3, "DENY": 1, "QUARANTINE": 1, "CHILD_CRASH": 2},
+        ))
+        self.assertTrue(any("2 child crashes" in r for r in p["reasons"]))
+        self.assertIn("CRASH=2", mod.render(p))
+
+    def test_livelock_candidate_is_rendered_when_present(self) -> None:
+        mod = load()
+        p = build(mod, guard=self._guard(livelock_candidates=[{
+            "file": "loop-claude-1-aaaa.jsonl",
+            "tool": "Read",
+            "reason": "NONE",
+            "digest": "allowdigest",
+            "count": 3,
+            "longest_run": 3,
+        }]))
+        self.assertTrue(any("loop candidate:" in r for r in p["reasons"]))
+        self.assertIn("loop=Read/NONE x3 run=3", mod.render(p))
+
+    def test_empty_sessions_reason_when_no_decisions(self) -> None:
+        mod = load()
+        p = build(mod, guard=self._guard(rows=0, recent_rows=0, empty_sessions=2,
+                                         by_kind={}, denied=0, quarantined=0))
+        self.assertTrue(any("recorded 0 decisions" in r for r in p["reasons"]))
+
+    def test_guard_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass guard -> defaults to None -> {}
+        self.assertEqual(p["guard"], {})
+        self.assertFalse(any("fak guard witnessed" in r for r in p["reasons"]))
+
+
+class LowYieldLanesScanTest(unittest.TestCase):
+    """low_yield_lanes() binds turns-spent to ancestry-closes per lane (#2062) —
+    hermetic: a tmp runs-dir of resolve logs + an injected closes_counter (no git)."""
+
+    NOW = 2_000_000.0
+
+    def _mk(self, runs: Path, issue: int, stamp: str, *, lane: str, turns: int,
+            mtime: float, tree: list[str] | None = None) -> None:
+        import json as _json
+        import os
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        lines = [f"# fak-spawn {stamp} issue={issue} lane={lane} backend=claude"]
+        lines += [f"fak-turn trace=guard ok prov={i}k tok" for i in range(turns)]
+        log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.utime(log, (mtime, mtime))
+        if tree is not None:
+            (runs / f"resolve-{issue}-{stamp}.lease-tree.json").write_text(
+                _json.dumps(tree), encoding="utf-8")
+
+    def test_high_turn_zero_close_lane_is_low_yield(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2062, "20260704-120000", lane="tools", turns=44,
+                     mtime=self.NOW - 60, tree=["tools/**"])
+            out = mod.low_yield_lanes(
+                runs, closes_counter=lambda lane, tree: 0, now_ts=self.NOW)
+        self.assertEqual(out["low_yield_count"], 1)
+        row = out["lanes"][0]
+        self.assertEqual(row["lane"], "tools")
+        self.assertEqual(row["turns"], 44)
+        self.assertEqual(row["sessions"], 1)
+        self.assertEqual(row["closes"], 0)
+        self.assertTrue(row["tree_known"])
+        self.assertEqual(row["verdict"], "LOW_YIELD")
+        self.assertEqual(row["tree"], ["tools"])  # normalized pathspec
+
+    def test_lane_with_a_close_is_ok(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2100, "20260704-120500", lane="docs", turns=60,
+                     mtime=self.NOW - 60, tree=["docs/**"])
+            out = mod.low_yield_lanes(
+                runs, closes_counter=lambda lane, tree: 3, now_ts=self.NOW)
+        self.assertEqual(out["low_yield_count"], 0)
+        self.assertEqual(out["lanes"][0]["verdict"], "OK")
+        self.assertEqual(out["lanes"][0]["closes"], 3)
+
+    def test_below_floor_lane_never_flags_and_skips_the_git_join(self) -> None:
+        mod = load()
+        calls: list[str] = []
+
+        def counter(lane, tree):
+            calls.append(lane)
+            return 0
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2200, "20260704-121000", lane="model", turns=10,
+                     mtime=self.NOW - 60, tree=["internal/model/**"])
+            out = mod.low_yield_lanes(runs, closes_counter=counter, now_ts=self.NOW)
+        self.assertEqual(out["low_yield_count"], 0)
+        self.assertEqual(out["lanes"][0]["verdict"], "OK")
+        self.assertIsNone(out["lanes"][0]["closes"])
+        self.assertEqual(calls, [])  # a below-floor lane never pays the git join
+
+    def test_candidate_without_known_tree_is_not_flagged(self) -> None:
+        # High turns but no lease-tree sidecar and no lane_trees entry: we cannot
+        # join to the lane's tree, so we never fabricate a LOW_YIELD verdict.
+        mod = load()
+        calls: list[str] = []
+
+        def counter(lane, tree):
+            calls.append(lane)
+            return 0
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2300, "20260704-121500", lane="mystery", turns=80,
+                     mtime=self.NOW - 60)  # no tree sidecar
+            out = mod.low_yield_lanes(runs, closes_counter=counter, now_ts=self.NOW)
+        row = out["lanes"][0]
+        self.assertEqual(row["turns"], 80)
+        self.assertFalse(row["tree_known"])
+        self.assertEqual(row["verdict"], "OK")
+        self.assertIsNone(row["closes"])
+        self.assertEqual(calls, [])
+
+    def test_lane_trees_map_overrides_sidecar_for_the_join(self) -> None:
+        mod = load()
+        seen: list[tuple[str, tuple]] = []
+
+        def counter(lane, tree):
+            seen.append((lane, tuple(tree)))
+            return 0
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # No sidecar; the router's lane→tree map supplies the tree.
+            self._mk(runs, 2400, "20260704-122000", lane="bench", turns=50,
+                     mtime=self.NOW - 60)
+            out = mod.low_yield_lanes(
+                runs, closes_counter=counter,
+                lane_trees={"bench": ["internal/bench/**"]}, now_ts=self.NOW)
+        self.assertEqual(out["lanes"][0]["verdict"], "LOW_YIELD")
+        self.assertEqual(out["lanes"][0]["tree"], ["internal/bench"])
+        self.assertEqual(seen, [("bench", ("internal/bench",))])
+
+    def test_sessions_aggregate_turns_across_the_window(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2500, "20260704-120000", lane="tools", turns=25,
+                     mtime=self.NOW - 120, tree=["tools/**"])
+            self._mk(runs, 2501, "20260704-121000", lane="tools", turns=20,
+                     mtime=self.NOW - 60, tree=["tools/**"])
+            out = mod.low_yield_lanes(
+                runs, closes_counter=lambda lane, tree: 0, now_ts=self.NOW)
+        row = out["lanes"][0]
+        self.assertEqual(row["sessions"], 2)
+        self.assertEqual(row["turns"], 45)            # 25 + 20 >= floor
+        self.assertEqual(row["max_session_turns"], 25)
+        self.assertEqual(row["verdict"], "LOW_YIELD")
+
+    def test_stale_logs_outside_the_window_are_ignored(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 2600, "20260701-120000", lane="tools", turns=90,
+                     mtime=self.NOW - 10 * 3600, tree=["tools/**"])  # 10h old
+            out = mod.low_yield_lanes(
+                runs, closes_counter=lambda lane, tree: 0, now_ts=self.NOW,
+                lookback_min=180)
+        self.assertEqual(out["lanes"], [])
+        self.assertEqual(out["low_yield_count"], 0)
+
+    def test_missing_runs_dir_is_empty(self) -> None:
+        mod = load()
+        out = mod.low_yield_lanes(
+            Path("does-not-exist-xyz"), closes_counter=lambda lane, tree: 0)
+        self.assertEqual(out["lanes"], [])
+        self.assertEqual(out["low_yield_count"], 0)
+        self.assertEqual(out["schema"], mod._LOW_YIELD_SCHEMA)
+
+    def test_turn_count_reads_fak_turn_lines(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "resolve-1-20260704-120000.log"
+            log.write_text(
+                "# fak-spawn header lane=tools\n"
+                "fak-turn trace=guard cold prov=0 tok\n"
+                "some tool output that is not a turn\n"
+                "fak-turn trace=guard ok prov=5k tok\n",
+                encoding="utf-8")
+            self.assertEqual(mod._log_turn_count(log), 2)
+
+
+class LowYieldFoldTest(unittest.TestCase):
+    """build_payload folds the injected low_yield rollup into payload + a reason,
+    and render/render_md/slack surface a flagged lane — never flipping ok (#2062)."""
+
+    def _low_yield(self, **over) -> dict:
+        ly = {
+            "schema": "fleet-low-yield-lanes/1",
+            "turns_floor": 40,
+            "lookback_min": 180,
+            "low_yield_count": 1,
+            "lanes": [
+                {"lane": "tools", "sessions": 2, "turns": 118, "max_session_turns": 74,
+                 "closes": 0, "tree": ["tools"], "tree_known": True,
+                 "verdict": "LOW_YIELD",
+                 "evidence_logs": ["resolve-2062-20260704-120000.log"]},
+                {"lane": "docs", "sessions": 1, "turns": 60, "max_session_turns": 60,
+                 "closes": 4, "tree": ["docs"], "tree_known": True, "verdict": "OK",
+                 "evidence_logs": ["resolve-2100-20260704-121000.log"]},
+            ],
+        }
+        ly.update(over)
+        return ly
+
+    def test_flagged_lane_reaches_payload_reason_and_render(self) -> None:
+        mod = load()
+        p = build(mod, low_yield=self._low_yield())
+        self.assertTrue(p["ok"])  # informational only — never flips ok
+        self.assertEqual(p["low_yield"]["low_yield_count"], 1)
+        self.assertTrue(any("low-yield lane" in r and "#2062" in r for r in p["reasons"]))
+        rendered = mod.render(p)
+        self.assertIn("low-yield :", rendered)
+        self.assertIn("tools=118t/2s/0c", rendered)
+
+    def test_flagged_lane_is_a_slack_action(self) -> None:
+        mod = load()
+        p = build(mod, low_yield=self._low_yield())
+        buckets = mod._dispatch_slack_buckets(p)
+        self.assertTrue(any("lane tools low-yield" in r and "re-scope or exclude" in r
+                            for r in buckets["action"]))
+        self.assertEqual(mod._dispatch_headline_state(p), "ACTION")
+
+    def test_no_flagged_lane_emits_no_reason(self) -> None:
+        mod = load()
+        p = build(mod, low_yield=self._low_yield(
+            low_yield_count=0,
+            lanes=[{"lane": "docs", "sessions": 1, "turns": 60, "closes": 4,
+                    "tree": ["docs"], "tree_known": True, "verdict": "OK",
+                    "max_session_turns": 60, "evidence_logs": []}]))
+        self.assertFalse(any("low-yield lane" in r for r in p["reasons"]))
+        self.assertNotIn("low-yield :", mod.render(p))
+
+    def test_low_yield_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass low_yield -> defaults to None -> {}
+        self.assertEqual(p["low_yield"], {})
+        self.assertFalse(any("low-yield lane" in r for r in p["reasons"]))
+
+    def test_md_low_yield_section_lists_flagged_lane(self) -> None:
+        mod = load()
+        md = mod.render_md(build(mod, low_yield=self._low_yield()), date="2026-07-04")
+        self.assertIn("## Low-yield lanes (turns spent vs ancestry closes)", md)
+        self.assertIn("| tools | 2 | 118 | 74 | 0 | **LOW_YIELD** |", md)
+        self.assertIn("| docs | 1 | 60 | 60 | 4 | ok |", md)
+
+
+class ShipsPerWorkerFoldTest(unittest.TestCase):
+    """parse_ships_per_worker/ships_per_worker fold the best-effort (fak-worker <id>)
+    trailer into per-worker ship counts (#2065) — pure over commit records, and the
+    impure fold uses an injectable git runner so it stays hermetic."""
+
+    def _rec(self, subject: str, body: str = "") -> str:
+        return subject + "\n" + body
+
+    def test_counts_and_sorts_per_worker(self) -> None:
+        mod = load()
+        recs = [
+            self._rec("feat(x): a (fak tools)", "Fixes #1\n(fak-worker acct3)"),
+            self._rec("fix(y): b (fak tools)", "Fixes #2\n(fak-worker acct3)"),
+            self._rec("feat(z): c (fak gateway)", "Closes #3\n(fak-worker acct7)"),
+        ]
+        out = mod.parse_ships_per_worker(recs)
+        self.assertEqual(out["attributed_ships"], 3)
+        self.assertEqual(out["worker_count"], 2)
+        self.assertEqual(out["unknown"], 0)
+        # richest worker first, then lexicographic
+        self.assertEqual(out["workers"][0], {"worker": "acct3", "ships": 2})
+        self.assertEqual(out["workers"][1], {"worker": "acct7", "ships": 1})
+
+    def test_zero_trailer_commit_is_unknown(self) -> None:
+        mod = load()
+        recs = [
+            self._rec("feat(x): a (fak tools)", "Fixes #1\n(fak-worker acct3)"),
+            self._rec("chore(y): no trailer here", "Fixes #2"),  # matched-but-unparseable
+        ]
+        out = mod.parse_ships_per_worker(recs)
+        self.assertEqual(out["attributed_ships"], 2)
+        self.assertEqual(out["unknown"], 1)
+        self.assertEqual(out["worker_count"], 1)
+        self.assertIn({"worker": "acct3", "ships": 1}, out["workers"])
+
+    def test_empty_records_yield_empty_fold(self) -> None:
+        mod = load()
+        out = mod.parse_ships_per_worker([])
+        self.assertEqual(out["attributed_ships"], 0)
+        self.assertEqual(out["workers"], [])
+        self.assertEqual(out["schema"], mod._SHIPS_PER_WORKER_SCHEMA)
+
+    def test_impure_fold_uses_injected_runner(self) -> None:
+        mod = load()
+        recs = [self._rec("feat: a (fak tools)", "Fixes #1\n(fak-worker acct-a)")]
+        out = mod.ships_per_worker(ROOT, now_ts=0.0, runner=lambda root, since: recs)
+        self.assertEqual(out["attributed_ships"], 1)
+        self.assertEqual(out["workers"], [{"worker": "acct-a", "ships": 1}])
+        self.assertNotIn("unavailable", out)
+
+    def test_git_unavailable_fails_open(self) -> None:
+        mod = load()
+        out = mod.ships_per_worker(ROOT, now_ts=0.0, runner=lambda root, since: None)
+        self.assertTrue(out.get("unavailable"))
+        self.assertEqual(out["attributed_ships"], 0)
+
+
+class CommitDroughtTest(unittest.TestCase):
+    """The loop-level drought witness: zero fleet-attributed commits over the
+    window is ``dry``; git-unavailable fails open (no false drought); and the
+    Slack render surfaces the alarm only once the caller derives ``droughty``
+    (``dry`` AND armed)."""
+
+    def test_zero_commits_is_dry(self) -> None:
+        mod = load()
+        out = mod.commit_drought(ROOT, now_ts=0.0, runner=lambda root, since: [])
+        self.assertTrue(out["dry"])
+        self.assertEqual(out["commit_count"], 0)
+        self.assertNotIn("unavailable", out)
+
+    def test_commits_present_not_dry(self) -> None:
+        mod = load()
+        recs = ["feat: a\n(fak-worker acct-a)", "fix: b\n(fak-worker acct-b)"]
+        out = mod.commit_drought(ROOT, now_ts=0.0, runner=lambda root, since: recs)
+        self.assertFalse(out["dry"])
+        self.assertEqual(out["commit_count"], 2)
+
+    def test_git_unavailable_fails_open(self) -> None:
+        mod = load()
+        out = mod.commit_drought(ROOT, now_ts=0.0, runner=lambda root, since: None)
+        self.assertTrue(out.get("unavailable"))
+        self.assertNotIn("dry", out)  # caller ANDs dry with armed; no dry -> no alarm
+
+    def test_slack_surfaces_drought_alarm(self) -> None:
+        mod = load()
+        txt = mod.render_slack({"commit_drought": {"droughty": True, "hours": 3.0}})
+        self.assertIn("drought", txt.lower())
+
+    def test_slack_no_alarm_when_not_droughty(self) -> None:
+        mod = load()
+        txt = mod.render_slack(
+            {"commit_drought": {"dry": True, "droughty": False, "hours": 3.0},
+             "ok": True})
+        self.assertNotIn("drought", txt.lower())
+
+
+class ShipsPerWorkerPayloadTest(unittest.TestCase):
+    """build_payload folds the injected ships-per-worker rollup into payload + a reason,
+    and render/render_md surface it — never flipping ok (#2065)."""
+
+    def _ships(self, **over) -> dict:
+        s = {
+            "schema": "fleet-ships-per-worker/1",
+            "attributed_ships": 3,
+            "worker_count": 2,
+            "unknown": 1,
+            "lookback_min": 1440,
+            "workers": [{"worker": "acct3", "ships": 2}, {"worker": "acct7", "ships": 1}],
+            "note": "best-effort agent-emitted (fak-worker) trailer — attribution aid, not a witness",
+        }
+        s.update(over)
+        return s
+
+    def test_ships_reach_payload_reason_and_render(self) -> None:
+        mod = load()
+        p = build(mod, ships=self._ships())
+        self.assertTrue(p["ok"])  # informational only — never flips ok
+        self.assertEqual(p["ships_per_worker"]["attributed_ships"], 3)
+        self.assertTrue(any("attributed to" in r and "#2065" in r for r in p["reasons"]))
+        rendered = mod.render(p)
+        self.assertIn("ships/wkr :", rendered)
+        self.assertIn("acct3=2", rendered)
+        self.assertIn("unattributed", rendered)
+
+    def test_no_ships_emits_no_reason(self) -> None:
+        mod = load()
+        p = build(mod, ships=self._ships(attributed_ships=0, worker_count=0,
+                                         unknown=0, workers=[]))
+        self.assertFalse(any("(fak-worker) trailer" in r for r in p["reasons"]))
+        self.assertNotIn("ships/wkr :", mod.render(p))
+
+    def test_ships_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass ships -> defaults to None -> {}
+        self.assertEqual(p["ships_per_worker"], {})
+
+    def test_md_ships_section_lists_workers(self) -> None:
+        mod = load()
+        md = mod.render_md(build(mod, ships=self._ships()), date="2026-07-04")
+        self.assertIn("## Ships per worker (best-effort attribution)", md)
+        self.assertIn("| `acct3` | 2 |", md)
+        self.assertIn("| _unattributed_ | 1 |", md)
+
+
+def _prow(utc: str, *, open_now: int, loop_total: int, closed_now: int = 0,
+          audit_error=None) -> dict:
+    return {"schema": "fleet-issue-resolve-progress/1", "utc": utc,
+            "open_now": open_now, "closed_by_loop_total": loop_total,
+            "closed_now": closed_now, "audit_error": audit_error}
+
+
+class WatchDecisionTest(unittest.TestCase):
+    """#2642: the trailing-window watch digest that explains WHY the monitor
+    (intentionally) takes no action, reproducing the ef59064f OUTPACED shape."""
+
+    def _now(self, mod, utc: str) -> float:
+        return mod._iso_epoch(utc)
+
+    def test_ef59064f_shape_is_outpaced_not_stalled(self) -> None:
+        # closures keep advancing (772 -> 791) while the backlog rises (700 -> 764)
+        # over the 6h watch: arrivals outpace service, NOT a stalled dispatcher.
+        mod = load()
+        rows = [
+            _prow("2026-07-06T18:15:00Z", open_now=700, loop_total=772, closed_now=0),
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-06T22:00:00Z", open_now=752, loop_total=787, closed_now=7),
+            _prow("2026-07-07T00:15:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:15:00Z"),
+                                window_hours=6.0)
+        self.assertEqual(wd["verdict"], "OUTPACED")
+        self.assertNotEqual(wd["verdict"], "STALLED")
+        self.assertFalse(wd["action_needed"])  # informational — never hand-launch
+        c = wd["cited"]
+        self.assertEqual(c["open_now_start"], 700)
+        self.assertEqual(c["open_now_end"], 764)
+        self.assertEqual(c["closed_by_loop_total_start"], 772)
+        self.assertEqual(c["closed_by_loop_total_end"], 791)
+        self.assertEqual(c["closed_now_sum"], 19)
+        self.assertEqual(wd["audit_status"], "clean")
+        self.assertIn("outpace", wd["why"])
+
+    def test_stalled_when_backlog_persists_without_closes(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=500, loop_total=772, closed_now=0),
+            _prow("2026-07-07T00:00:00Z", open_now=540, loop_total=772, closed_now=0),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["verdict"], "STALLED")
+        self.assertTrue(wd["action_needed"])
+
+    def test_draining_when_backlog_falls_while_closing(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=540, loop_total=772, closed_now=5),
+            _prow("2026-07-07T00:00:00Z", open_now=500, loop_total=790, closed_now=6),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["verdict"], "DRAINING")
+        self.assertFalse(wd["action_needed"])
+
+    def test_healthy_idle_when_backlog_drained(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=0, loop_total=800, closed_now=0),
+            _prow("2026-07-07T00:00:00Z", open_now=0, loop_total=800, closed_now=0),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["verdict"], "HEALTHY_IDLE")
+        self.assertFalse(wd["action_needed"])
+
+    def test_insufficient_data_with_one_row(self) -> None:
+        mod = load()
+        rows = [_prow("2026-07-07T00:00:00Z", open_now=500, loop_total=772)]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["verdict"], "INSUFFICIENT_DATA")
+        self.assertFalse(wd["action_needed"])
+
+    def test_rows_outside_window_are_excluded(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T10:00:00Z", open_now=999, loop_total=700, closed_now=0),
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"),
+                                window_hours=6.0)
+        self.assertEqual(wd["rows_in_window"], 2)  # the 14h-old row is dropped
+        self.assertEqual(wd["cited"]["open_now_start"], 730)
+
+    def test_audit_error_surfaces_in_status(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4,
+                  audit_error="gh 502"),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"))
+        self.assertEqual(wd["audit_status"], "error: gh 502")
+
+    def test_sched_task_red_without_recovery_is_unresolved(self) -> None:
+        mod = load()
+        wd = mod.watch_decision(
+            [], now_ts=self._now(mod, "2026-07-07T00:00:00Z"),
+            sched_task={"installed": True, "status": "Ready", "last_result": 1})
+        self.assertEqual(wd["scheduled_task"]["classification"], "unresolved_unknown")
+
+    def test_sched_task_red_with_recovery_is_self_healing(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod._classify_sched_task(
+                {"installed": True, "last_result": 1, "recovered": True}),
+            "self_healing")
+        self.assertEqual(
+            mod._classify_sched_task({"installed": True, "status": "Ready"}), "clean")
+
+    def test_follow_ups_are_listed_and_deduped(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        wd = mod.watch_decision(rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z"),
+                                follow_ups=[2636, 2634, 2635, 2636])
+        self.assertEqual(wd["follow_ups"], [2634, 2635, 2636])
+
+    def test_payload_carries_watch_and_renders(self) -> None:
+        mod = load()
+        watch = mod.watch_decision(
+            [_prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+             _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4)],
+            now_ts=self._now(mod, "2026-07-07T00:00:00Z"), window_hours=6.0,
+            follow_ups=[2634])
+        p = build(mod, watch=watch)
+        self.assertEqual(p["watch_decision"]["verdict"], "OUTPACED")
+        rendered = mod.render(p)
+        self.assertIn("watch     :", rendered)
+        self.assertIn("OUTPACED", rendered)
+        self.assertIn("#2634", rendered)
+        md = mod.render_md(p, date="2026-07-07")
+        self.assertIn("## Watch decision (why no action)", md)
+        self.assertIn("intentionally no action", md)
+        self.assertIn("#2634", md)
+
+    def test_watch_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass watch -> defaults to None -> {}
+        self.assertEqual(p["watch_decision"], {})
+        self.assertNotIn("watch     :", mod.render(p))
+
+    def test_parse_watchdog_query_extracts_status_and_last_result(self) -> None:
+        # verbose `schtasks /Query /V /FO LIST` shape: a red LastTaskResult must be
+        # captured so the live digest can answer the issue's question 2.
+        mod = load()
+        out = "\r\n".join([
+            "Folder: \\", "HostName:      HOST", "TaskName:      \\fak-watchdog",
+            "Status:        Ready", "Last Run Time: 7/7/2026 1:00:00 AM",
+            "Last Result:   267009", "Author:        HOST\\op",
+        ])
+        got = mod._parse_watchdog_query(out)
+        self.assertEqual(got["status"], "Ready")
+        self.assertEqual(got["last_result"], 267009)
+
+    def test_parse_watchdog_query_green_and_absent_fields(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod._parse_watchdog_query("Status: Running\nLast Result: 0\n"),
+            {"status": "Running", "last_result": 0})
+        # no Last Result line (e.g. non-verbose output) -> None, not a raise
+        self.assertEqual(
+            mod._parse_watchdog_query("Status: Ready\n"),
+            {"status": "Ready", "last_result": None})
+
+    def test_sched_recovered_true_when_closures_advance(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        self.assertTrue(mod._sched_recovered(
+            rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z")))
+
+    def test_sched_recovered_false_when_loop_flat(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=0),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=780, closed_now=0),
+        ]
+        self.assertFalse(mod._sched_recovered(
+            rows, now_ts=self._now(mod, "2026-07-07T00:00:00Z")))
+
+    def test_live_red_result_with_recovery_classifies_self_healing(self) -> None:
+        # end-to-end live-wiring shape (what collect() now feeds watch_decision): a
+        # red LastTaskResult whose loop kept closing => self_healing, not a
+        # malfunction — the distinction that was dead code in the live path before.
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=8),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=791, closed_now=4),
+        ]
+        now = self._now(mod, "2026-07-07T00:00:00Z")
+        recovered = mod._sched_recovered(rows, now_ts=now)
+        wd = mod.watch_decision(rows, now_ts=now, sched_task={
+            "installed": True, "status": "Ready",
+            "last_result": 267009, "recovered": recovered})
+        self.assertEqual(wd["scheduled_task"]["classification"], "self_healing")
+
+    def test_live_red_result_without_recovery_stays_unresolved(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T20:00:00Z", open_now=730, loop_total=780, closed_now=0),
+            _prow("2026-07-07T00:00:00Z", open_now=764, loop_total=780, closed_now=0),
+        ]
+        now = self._now(mod, "2026-07-07T00:00:00Z")
+        wd = mod.watch_decision(rows, now_ts=now, sched_task={
+            "installed": True, "status": "Ready", "last_result": 267009,
+            "recovered": mod._sched_recovered(rows, now_ts=now)})
+        self.assertEqual(
+            wd["scheduled_task"]["classification"], "unresolved_unknown")
+
+
+class BacklogRateTest(unittest.TestCase):
+    """#2634: the numeric arrival-vs-service fold that tells 'outpaced' (healthy
+    but supply-bound) apart from 'stalled' (a malfunction), with a BACKLOG_OUTPACED
+    flag over K consecutive windows and a synthetic-progress.jsonl fixture."""
+
+    NOW = "2026-07-07T00:00:00Z"
+
+    def _now(self, mod) -> float:
+        return mod._iso_epoch(self.NOW)
+
+    def _outpaced_rows(self) -> list[dict]:
+        # Witness-shaped: closes climb continuously (717 -> 797) while the backlog
+        # also climbs (700 -> 772) across four consecutive 6h windows.
+        return [
+            _prow("2026-07-06T00:00:00Z", open_now=700, loop_total=717),
+            _prow("2026-07-06T06:00:00Z", open_now=740, loop_total=740),
+            _prow("2026-07-06T12:00:00Z", open_now=760, loop_total=774),
+            _prow("2026-07-06T18:00:00Z", open_now=770, loop_total=790),
+            _prow("2026-07-07T00:00:00Z", open_now=772, loop_total=797),
+        ]
+
+    def test_outpaced_sets_backlog_outpaced_over_k_windows(self) -> None:
+        mod = load()
+        br = mod.backlog_rates(self._outpaced_rows(), now_ts=self._now(mod),
+                               window_hours=6.0, windows=4, k_consecutive=2)
+        self.assertEqual(br["schema"], "fleet-backlog-rate/1")
+        self.assertEqual(br["verdict"], "OUTPACED")
+        self.assertTrue(br["backlog_outpaced"])
+        self.assertGreaterEqual(br["consecutive_outpaced_windows"], 2)
+        self.assertEqual(br["window_hours"], 6.0)
+        self.assertEqual(len(br["per_window"]), 4)
+        self.assertTrue(all(w["outpaced"] for w in br["per_window"]))
+        # arrival must exceed service — that is the whole point of the fold.
+        self.assertGreater(br["arrival_rate_per_hour"], br["service_rate_per_hour"])
+        self.assertGreater(br["service_rate_per_hour"], 0)  # working, not stalled
+        self.assertEqual(br["span_hours"], 24.0)
+        self.assertIn("BACKLOG_OUTPACED", br["why"])
+
+    def test_draining_backlog_is_not_outpaced(self) -> None:
+        mod = load()
+        rows = [
+            _prow("2026-07-06T12:00:00Z", open_now=800, loop_total=700),
+            _prow("2026-07-06T18:00:00Z", open_now=780, loop_total=720),
+            _prow("2026-07-07T00:00:00Z", open_now=760, loop_total=740),
+        ]
+        br = mod.backlog_rates(rows, now_ts=self._now(mod))
+        self.assertEqual(br["verdict"], "DRAINING")
+        self.assertFalse(br["backlog_outpaced"])
+        self.assertLess(br["arrival_rate_per_hour"], br["service_rate_per_hour"])
+
+    def test_stalled_backlog_is_not_outpaced(self) -> None:
+        # closes flat (790) while the backlog rises: STALLED, never BACKLOG_OUTPACED
+        # (service == 0 is what separates a malfunction from a supply/demand trend).
+        mod = load()
+        rows = [
+            _prow("2026-07-06T12:00:00Z", open_now=700, loop_total=790),
+            _prow("2026-07-06T18:00:00Z", open_now=730, loop_total=790),
+            _prow("2026-07-07T00:00:00Z", open_now=760, loop_total=790),
+        ]
+        br = mod.backlog_rates(rows, now_ts=self._now(mod))
+        self.assertEqual(br["verdict"], "STALLED")
+        self.assertFalse(br["backlog_outpaced"])
+        self.assertEqual(br["service_rate_per_hour"], 0.0)
+
+    def test_insufficient_data_with_one_row(self) -> None:
+        mod = load()
+        rows = [_prow(self.NOW, open_now=500, loop_total=772)]
+        br = mod.backlog_rates(rows, now_ts=self._now(mod))
+        self.assertEqual(br["verdict"], "INSUFFICIENT_DATA")
+        self.assertFalse(br["backlog_outpaced"])
+        self.assertIsNone(br["arrival_rate_per_hour"])
+
+    def test_fixture_on_synthetic_progress_jsonl(self) -> None:
+        # The Done-condition witness: pin the fold end-to-end on a synthetic
+        # .dispatch-runs/progress.jsonl read back through read_dispatch_progress.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir()
+            (runs / mod.PROGRESS_LOG).write_text(
+                "\n".join(json.dumps(r) for r in self._outpaced_rows()) + "\n",
+                encoding="utf-8")
+            records = mod.read_dispatch_progress(root)
+            self.assertEqual(len(records), 5)
+            br = mod.backlog_rates(records, now_ts=self._now(mod),
+                                   window_hours=6.0, windows=4, k_consecutive=2)
+        self.assertTrue(br["backlog_outpaced"])
+        self.assertEqual(br["verdict"], "OUTPACED")
+
+    def test_payload_carries_backlog_rate_and_renders(self) -> None:
+        mod = load()
+        br = mod.backlog_rates(self._outpaced_rows(), now_ts=self._now(mod),
+                               window_hours=6.0, windows=4, k_consecutive=2)
+        p = build(mod, backlog_rate=br)
+        self.assertEqual(p["backlog_rate"]["verdict"], "OUTPACED")
+        self.assertTrue(p["backlog_rate"]["backlog_outpaced"])
+        self.assertTrue(any("backlog OUTPACED" in r and "#2634" in r
+                            for r in p["reasons"]))
+        rendered = mod.render(p)
+        self.assertIn("supply    :", rendered)
+        self.assertIn("BACKLOG_OUTPACED", rendered)
+
+    def test_backlog_rate_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass backlog_rate -> None -> {}
+        self.assertEqual(p["backlog_rate"], {})
+        self.assertNotIn("supply    :", mod.render(p))
+
+
+class SpawnFailedCauseBreakdownTest(unittest.TestCase):
+    """spawn_failed_cause_breakdown folds the silent/stub early-exit population into a
+    per-cause SPAWN_FAILED mix with evidence rows (#2635) — hermetic tmp runs-dir."""
+
+    HEADER = "# fak-spawn 20260710-010203 issue={n} lane=cmd backend=claude argv0=claude.exe\n"
+
+    def _mk(self, runs: Path, issue: int, stamp: str, tail_body: str) -> None:
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_text(self.HEADER.format(n=issue) + tail_body, encoding="utf-8")
+        (runs / f"resolve-{issue}-{stamp}.pid").write_text("39000", encoding="utf-8")
+
+    def test_mix_and_evidence_over_dead_stub_logs(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1515, "20260703-010101",
+                     "You've hit your weekly limit · resets 4am (America/Los_Angeles)\n")
+            self._mk(runs, 2382, "20260703-020202",
+                     "Missing environment variable: `ANTHROPIC_API_KEY`\n")
+            self._mk(runs, 2401, "20260703-030303", "")  # header-only -> exec_race
+            # A productive worker (over the stub floor) is a spawn but NOT a failure.
+            big = runs / "resolve-999-20260703-040404.log"
+            big.write_text("x" * 4000, encoding="utf-8")
+            (runs / "resolve-999-20260703-040404.pid").write_text("39001", encoding="utf-8")
+
+            out = mod.spawn_failed_cause_breakdown(runs, alive=set())  # nothing alive
+
+            self.assertEqual(out["schema"], "fak.spawn-failed-cause-breakdown.v1")
+            self.assertEqual(out["spawns"], 4)          # all four resolve logs
+            self.assertEqual(out["spawn_failed"], 3)    # the three stub early-exits
+            self.assertEqual(out["by_cause"]["weekly_limit"]["count"], 1)
+            self.assertEqual(out["by_cause"]["stale_cred"]["count"], 1)
+            self.assertEqual(out["by_cause"]["exec_race"]["count"], 1)
+            self.assertEqual(out["by_cause"]["child_crash"]["count"], 0)
+            # per-event evidence rows carry the classified cause
+            ev = out["by_cause"]["weekly_limit"]["evidence"][0]
+            self.assertEqual(ev["issue"], 1515)
+            self.assertEqual(ev["cause"], "weekly_limit")
+            self.assertIn("spawn-failed cause breakdown", mod.render_spawn_causes(out))
+
+    def test_empty_runs_dir_is_fail_open(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            out = mod.spawn_failed_cause_breakdown(Path(d), alive=set())
+            self.assertEqual(out["spawns"], 0)
+            self.assertEqual(out["spawn_failed"], 0)
+            self.assertEqual(out["rate"], 0.0)
+
+
+class WaveSpawnFailedTelemetryTest(unittest.TestCase):
+    """#6492: the WAVE path's launch failures must be countable too.
+
+    The #2635 fold only ever enumerated `resolve-<issue>-<stamp>.log` — so a wave whose
+    four children all died on launch reported a 0% SPAWN_FAILED rate while the fleet was
+    launching nothing. Wave dispatch logs now count as spawns, and the terminal
+    `.spawn-failed.json` record each dead wave child leaves behind counts as a failure
+    with its classified cause."""
+
+    def _wave_log(self, runs: Path, lane: str, stamp: str, body: str = "") -> Path:
+        log = runs / f"dispatch-{lane}-{stamp}.log"
+        log.write_text(body, encoding="utf-8")
+        return log
+
+    def _failed(self, runs: Path, lane: str, stamp: str, cause: str,
+                returncode: int = 1) -> None:
+        log = self._wave_log(runs, lane, stamp)
+        (runs / f"dispatch-{lane}-{stamp}.spawn-failed.json").write_text(json.dumps({
+            "verdict": "SPAWN_FAILED", "cause": cause, "lane": lane,
+            "seat": "acct-0", "pid": 4242, "log": str(log), "returncode": returncode,
+            "log_bytes": 0, "silent": True, "tail": "", "stamp": stamp,
+        }), encoding="utf-8")
+
+    def test_dead_wave_children_are_counted_not_invisible(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._failed(runs, "tools", "20260811-010101", "exec_race")
+            self._failed(runs, "docs", "20260811-010102", "weekly_limit")
+            # a surviving wave worker: a spawn, but NOT a failure
+            self._wave_log(runs, "model", "20260811-010103", "x" * 4000)
+
+            out = mod.spawn_failed_cause_breakdown(runs, alive=set())
+
+            self.assertEqual(out["spawns"], 3)        # wave logs now count as spawns
+            self.assertEqual(out["spawn_failed"], 2)  # was: 0 — wave deaths were unseen
+            self.assertEqual(out["by_cause"]["exec_race"]["count"], 1)
+            self.assertEqual(out["by_cause"]["weekly_limit"]["count"], 1)
+            ev = out["by_cause"]["exec_race"]["evidence"][0]
+            self.assertEqual(ev["lane"], "tools")
+            self.assertEqual(ev["returncode"], 1)
+            self.assertEqual(ev["source"], "wave_spawn_failed_record")
+            self.assertIn("spawn-failed cause breakdown", mod.render_spawn_causes(out))
+
+    def test_a_malformed_record_is_skipped_not_fatal(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._wave_log(runs, "tools", "20260811-020201")
+            (runs / "dispatch-tools-20260811-020201.spawn-failed.json").write_text(
+                "{ not json", encoding="utf-8")
+            out = mod.spawn_failed_cause_breakdown(runs, alive=set())
+            self.assertEqual(out["spawns"], 1)
+            self.assertEqual(out["spawn_failed"], 0)  # fail-open: no phantom failure
+
+    def test_a_record_older_than_the_lookback_is_out_of_window(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._failed(runs, "tools", "20260101-030301", "exec_race")
+            fresh = mod.spawn_failed_cause_breakdown(runs, alive=set(), lookback_min=60)
+            self.assertEqual(fresh["spawn_failed"], 1)
+            # same record, read a day later: outside the lookback, so out of the rate
+            stale = mod.spawn_failed_cause_breakdown(
+                runs, alive=set(), lookback_min=60,
+                now_ts=os.stat(runs / "dispatch-tools-20260101-030301.log").st_mtime + 86400)
+            self.assertEqual(stale["spawn_failed"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

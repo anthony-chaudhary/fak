@@ -55,7 +55,7 @@ def extract_panels(panels_list):
 def audit_dashboard(path, default_vars=None):
     if default_vars is None:
         default_vars = {}
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         d = json.load(fp=f)
     uid = d.get("uid", "")
     title = d.get("title", "")
@@ -107,7 +107,6 @@ def audit_dashboard(path, default_vars=None):
 
 def main():
     dashboards = sorted(glob.glob("tools/grafana/dashboards/*.json"))
-    summary = {}
     total_queries = 0
     total_errors = 0
     total_no_data = 0

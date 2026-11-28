@@ -481,6 +481,159 @@ def test_schema_and_weights_sum_to_one():
     assert set(obs.KPI_WEIGHTS) == set(obs.KPI_GROUP)
 
 
+def test_extract_family_declarations_header_and_prom_headers():
+    # internal/usagelog/usage_metrics.go style header(...) +
+    # cmd/fak/fleet_metrics_cli.go style # HELP / # TYPE writer literals.
+    sample = '''
+header("fak_cli_invocations_total", "count")
+b.WriteString("# HELP fak_cli_usage_log_readable Log readable gauge\\n")
+b.WriteString("# TYPE fak_cli_usage_log_readable gauge\\n")
+const mcpHelp = "fak_capabilities "
+'''
+    decls = obs.extract_family_decls(sample)
+    assert "fak_cli_invocations_total" in decls
+    assert "fak_cli_usage_log_readable" in decls
+    assert "fak_capabilities" not in decls
+    assert "fak_cli_invocations_total" in obs.extract_family_literals(sample)
+
+
+def test_extract_table_driven_families_three_field_struct():
+    # Three-field []struct{ name, help string; pick ... } with writeHelpType (metrics_render.go)
+    # and package-const-first table entry (enginestep.go), plus negative phantom helper.
+    sample = '''
+func writeRegimeLatencyHistograms(b *strings.Builder, stats Stats) {
+    families := []struct {
+        name string
+        help string
+        pick func(Stats) []uint64
+    }{
+        {"fak_regime_ttft_seconds", "TTFT", nil},
+        {name: "fak_regime_tpot_seconds", help: "TPOT", pick: nil},
+    }
+    for _, fam := range families {
+        writeHelpType(b, fam.name, fam.help, "histogram")
+    }
+}
+
+func emitEngineStepPositions(w io.Writer) {
+    for _, family := range []struct {
+        name string
+        help string
+        ptr  *uint64
+    }{
+        {MetricSpecPos, "Spec pos", nil},
+    } {
+        helpType(w, family.name, family.help, "counter")
+    }
+}
+
+func deadTableNoEmitter() {
+    rows := []struct {
+        name string
+        help string
+        extra int
+    }{
+        {"fak_bogus_regime_metric", "Never written", 0},
+    }
+    _ = rows
+}
+'''
+    consts = {"MetricSpecPos": "fak_engine_spec_pos"}
+    got = obs.extract_table_driven_families(sample, consts)
+    assert "fak_regime_ttft_seconds" in got
+    assert "fak_regime_tpot_seconds" in got
+    assert "fak_engine_spec_pos" in got
+    assert "fak_bogus_regime_metric" not in got
+
+
+def test_extract_const_emitted_families_positive_and_negative():
+    sample = '''
+package metrics
+
+const (
+    MetricStageSeconds = "fak_engine_stage_seconds"
+    TrustViolationMetricName = "fak_trust_violations_total"
+    unusedMCPTool = "fak_syscall"
+)
+
+func writeMetrics(b *strings.Builder, w io.Writer) {
+    helpType(w, MetricStageSeconds, "Stage seconds", "histogram")
+    fmt.Fprintf(w, "%s{stage=\\"a\\"} 1\\n", MetricStageCount)
+    fam := OpenMetricFamily{Name: TrustViolationMetricName, Help: "violations"}
+    _ = fam
+    b.WriteString(TrustViolationMetricName)
+    b.WriteString("{reason=\\"bad\\"}")
+    writeString(w, MetricPlannerSteps+" 1\\n")
+}
+'''
+    pkg_consts = {
+        "MetricStageCount": "fak_engine_stage_count",
+        "MetricPlannerSteps": "fak_planner_steps_total",
+    }
+    lits = obs.extract_family_literals(sample, pkg_consts)
+    assert "fak_engine_stage_seconds" in lits
+    assert "fak_engine_stage_count" in lits
+    assert "fak_trust_violations_total" in lits
+    assert "fak_planner_steps_total" in lits
+    assert "fak_syscall" not in lits
+
+
+def test_external_fak_ops_and_promql_quoted_strings():
+    assert obs.is_external_metric("fak_ops_workers_total") is True
+    assert obs.is_external_metric("fak_router_requests_total") is False
+    assert obs.is_external_metric("fak_tool_invocations_total") is False
+
+    dash = '{"panels": [{"targets": [{"expr": "up{job=\\"fak_ops_workers\\"}"}]}]}'
+    assert "fak_ops_workers" not in obs.extract_family_tokens(obs.dashboard_expr_text(dash))
+
+    alerts = 'groups:\n  - name: fak_health\n    rules:\n      - expr: rate(fak_router_requests_total{job="fak_ops"}[5m]) > 0\n'
+    tokens = obs.extract_family_tokens(obs.alert_expr_text(alerts))
+    assert tokens == {"fak_router_requests_total"}
+    res = obs.kpi_reference_integrity("alert_integrity", {"alerts.yml": tokens}, {"fak_gateway_up"}, "alert")
+    assert len(res["defects"]) == 1
+    assert "fak_router_requests_total" in res["defects"][0]
+
+
+def test_c_extern_symbols_and_go_build_tags_doc_exclusion():
+    header = '''
+// extern "C" void fak_comment_phantom(void);
+/* extern "C" { void fak_block_comment_phantom(void); } */
+extern "C" int fak_v41_pool_input(void* p);
+extern "C" {
+    int fak_flashmla_prefill_kernel_info(void);
+    void fak_qwen35_attention_postprocess_capability(int x);
+}
+'''
+    c_syms = obs.extract_c_extern_symbols(header)
+    assert c_syms == {
+        "fak_v41_pool_input",
+        "fak_flashmla_prefill_kernel_info",
+        "fak_qwen35_attention_postprocess_capability",
+    }
+
+    go_src = '''//go:build fak_qattn_q8_packed_qualification
+// +build fak_legacy_pack_tag
+// regular comment mentioning fak_not_a_tag
+
+package model
+
+//go:build fak_after_package_bogus
+'''
+    tags = obs.extract_go_build_tags(go_src)
+    assert tags == {"fak_qattn_q8_packed_qualification", "fak_legacy_pack_tag"}
+
+    alerts_yml = "groups:\n  - name: fak_ops_availability\n"
+    prom_yml = "scrape_configs:\n  - job_name: fak_ops_workers\n"
+    assert obs.extract_alert_group_names(alerts_yml) == {"fak_ops_availability"}
+    assert obs.extract_prom_job_names(prom_yml) == {"fak_ops_workers"}
+
+    nonmetric = c_syms | tags | {"fak_ops_availability", "fak_ops_workers"}
+    doc_tokens = {"fak_v41_pool_input", "fak_qattn_q8_packed_qualification", "fak_bogus_metric"} - nonmetric
+    drift = obs.kpi_reference_integrity("doc_metric_drift", {"glossary.md": doc_tokens}, {"fak_gateway_up"}, "doc")
+    assert len(drift["defects"]) == 1
+    assert "fak_bogus_metric" in drift["defects"][0]
+
+
 # --- live smoke (tolerant: only asserts shape, not specific numbers) --------
 
 def test_live_collect_shape():

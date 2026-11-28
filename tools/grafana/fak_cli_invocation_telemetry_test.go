@@ -10,13 +10,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/testenv/repotest"
 )
 
-// fakCLITelemetryPath is the hand-authored CLI/dev-tool invocation-telemetry
-// board (uid fak-cli-invocation-telemetry). No generator owns this artifact, so
-// this test is its contract: it pins the board to the TWO scrape jobs whose
-// exporters actually emit the families it queries — fak_fleet (:9098) for the
-// public fak_cli_* runtime plane and fak_ops (:9101) for the private fak_tool_*
-// developer plane — and guards against the board silently querying an exporter
-// that never emits the family (a panel that renders empty while looking healthy).
+// fakCLITelemetryPath is the hand-authored CLI invocation-telemetry board
+// (uid fak-cli-invocation-telemetry). No generator owns this artifact, so this
+// test is its contract: it pins the board to the fak_fleet exporter (:9098)
+// that actually emits fak_cli_* families from the shared usage journal and
+// guards against querying unemitted families (such as phantom fak_tool_*
+// metrics) or an exporter that never emits the family (a panel that renders
+// empty while looking healthy).
 const fakCLITelemetryPath = "dashboards/fak-cli-invocation-telemetry.json"
 
 type fakCLIPanel struct {
@@ -54,8 +54,8 @@ func loadFakCLITelemetry(t *testing.T) fakCLIDashboard {
 
 // TestFakCLITelemetryDashboardContract pins the board identity and the scrape
 // job every family must select. fak_cli_* is emitted ONLY by the fak_fleet
-// exporter and fak_tool_* ONLY by the fak_ops exporter; a panel that queried the
-// generic fak_gateway job (or the wrong one) would read "No data" forever.
+// exporter; a panel that queried the generic fak_gateway job or an unemitted
+// fak_tool_* family would read "No data" forever.
 func TestFakCLITelemetryDashboardContract(t *testing.T) {
 	d := loadFakCLITelemetry(t)
 
@@ -66,12 +66,16 @@ func TestFakCLITelemetryDashboardContract(t *testing.T) {
 		t.Error("dashboard must carry a title")
 	}
 
-	var sawCLI, sawTool, sawFleetJob, sawOpsJob bool
+	var sawCLI, sawFleetJob bool
 	for _, p := range d.Panels {
 		for _, tgt := range p.Targets {
 			expr := strings.TrimSpace(tgt.Expr)
 			if expr == "" {
 				continue
+			}
+			if strings.Contains(expr, "fak_tool_") {
+				t.Errorf("panel %d %q queries unemitted phantom family fak_tool_* (expr: %s)",
+					p.ID, p.Title, expr)
 			}
 			if strings.Contains(expr, "fak_cli_") {
 				sawCLI = true
@@ -80,31 +84,21 @@ func TestFakCLITelemetryDashboardContract(t *testing.T) {
 						p.ID, p.Title, "fak_fleet", expr)
 				}
 			}
-			if strings.Contains(expr, "fak_tool_") {
-				sawTool = true
-				if !strings.Contains(expr, `job="fak_ops"`) {
-					t.Errorf("panel %d %q queries fak_tool_* without selecting job=%q (expr: %s)",
-						p.ID, p.Title, "fak_ops", expr)
-				}
-			}
 			if strings.Contains(expr, `job="fak_fleet"`) {
 				sawFleetJob = true
 			}
-			if strings.Contains(expr, `job="fak_ops"`) {
-				sawOpsJob = true
-			}
 		}
 	}
-	if !sawCLI || !sawTool {
-		t.Errorf("%s must query both fak_cli_* (runtime) and fak_tool_* (developer) families", fakCLITelemetryPath)
+	if !sawCLI {
+		t.Errorf("%s must query fak_cli_* telemetry families", fakCLITelemetryPath)
 	}
-	if !sawFleetJob || !sawOpsJob {
-		t.Errorf("%s must select the fak_fleet and fak_ops scrape jobs", fakCLITelemetryPath)
+	if !sawFleetJob {
+		t.Errorf("%s must select the fak_fleet scrape job", fakCLITelemetryPath)
 	}
 }
 
 // TestFakCLITelemetryHonestyPanels pins the operator-facing honesty contract:
-// the readability gauges and truncation gauge must be present and explained, so
+// the readability gauge and truncation gauge must be present and explained, so
 // an operator can tell an empty journal (honest zero) from an unreadable one,
 // and a truncated panel from a complete one.
 func TestFakCLITelemetryHonestyPanels(t *testing.T) {
@@ -125,8 +119,6 @@ func TestFakCLITelemetryHonestyPanels(t *testing.T) {
 	for _, want := range []string{
 		"fak_cli_usage_log_readable",
 		"fak_cli_usage_series_truncated",
-		"fak_tool_usage_log_readable",
-		"fak_tool_usage_series_truncated",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("%s must expose the %s honesty gauge", fakCLITelemetryPath, want)

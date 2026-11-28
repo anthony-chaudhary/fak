@@ -106,13 +106,21 @@ LOG_EMIT_TOKENS = ("s.logf(", ".logf(", "logf(")
 COVERAGE_SAMPLE = 30        # cap on listed soft coverage signals
 DRIFT_SAMPLE = 40           # cap on listed drift defects per KPI render
 
-# The fak gateway binary is the source of truth for the `fak_` namespace only.
+# The fak gateway binary is the source of truth for the public `fak_` namespace.
 # `fleet_` is a separate Python exporter (tools/fleet_bottleneck.py) with its own
-# source; grading its families against the Go source would be a false positive.
+# source; `fak_ops_*` is emitted by the private companion ops exporters
+# (`fak-ops-dashboard` and `fak-sync ops throughput-metrics` in `fak-private`) and
+# cross-checked by `internal/grafanacontract/ops_alerts_contract_test.go`. Grading
+# either external exporter's families against the public Go binary would be a
+# false positive. `fak_router_*` and `fak_tool_*` are intentionally NOT listed
+# here (the router board moved to `fak-private`), so any `fak_router_*` or
+# `fak_tool_*` reference in a public dashboard/alert/doc still fails as phantom.
 METRIC_PREFIX = "fak_"
+EXTERNAL_METRIC_PREFIXES = ("fak_ops_",)
 
 # Go source roots that define what the binary emits (production code only).
 SOURCE_DIRS = ("internal/",)
+C_EXTS = (".c", ".cc", ".cpp", ".cu", ".cuh", ".h", ".hpp", ".m", ".mm")
 
 # Operator-facing metric-documentation surface: the docs whose job is to tell an
 # operator WHICH metric to scrape / query. A `fak_*` token here that the binary
@@ -131,6 +139,7 @@ DOC_SURFACE_EXTRA = ("tools/grafana/README.md",)
 # Dashboards + alerts: the Grafana surfaces that read the metrics.
 DASHBOARD_GLOB_DIR = "tools/grafana/dashboards"
 ALERTS_REL = "tools/grafana/prometheus-alerts.yml"
+PROMETHEUS_REL = "tools/grafana/prometheus.yml"
 
 # Proofs corpus: the verifiability surface.
 PROOFS_DIR = "docs/proofs"
@@ -161,21 +170,51 @@ KPI_GROUP: dict[str, str] = {
     "ship_integrity": "verifiability",
 }
 
-# A metric family is DECLARED as the first string arg of a writer helper: a free
-# HELP/TYPE function (`help("fak_x", ...)`, `writeCounter(b, "fak_x", ...)`,
-# `writeHelpType(&b, "fak_x", ...)`), OR a Prometheus text-exposition writer method
-# (`w.gauge("fak_x", ...)`, `w.counter("fak_x", ...)` — the form the cmd/fak
-# roll-up exporters use). A family may also be written as a raw exposition literal
-# where the name is immediately followed by `{` (labels) or a space (value). All
-# are emitted-metric signals; an MCP tool name (`case "fak_syscall":`) or a struct
-# field (`"fak_native": v`) matches NONE, so the source of truth stays clean. The
-# optional first arg is the exposition buffer the helper writes into — a Go
-# identifier passed by value (`b,`) or by pointer (`&b,`); both forms are emitted.
+# A metric family is DECLARED as the first string arg (or constant ident) of a
+# writer helper: a free/closure HELP/TYPE function (`help("fak_x", ...)`,
+# `helpType(w, MetricX, ...)`, `header("fak_x", ...)`, `gauge("fak_x", ...)`,
+# `writeCounter(b, "fak_x", ...)`, `writeHelpType(&b, "fak_x", ...)`), OR a
+# Prometheus text-exposition writer method (`w.gauge("fak_x", ...)`,
+# `w.counter(...)`). It may also be declared as a `# HELP fak_x` / `# TYPE fak_x`
+# header string literal, via an `OpenMetricFamily{Name: ...}` struct literal, or
+# as a raw exposition literal where the name is immediately followed by `{`
+# (labels) or a space (value). All are emitted-metric signals; an MCP tool name
+# (`case "fak_syscall":`) or a struct field (`"fak_native": v`) matches NONE, so
+# the source of truth stays clean.
+_WRITER_FN_PREFIX = (
+    r'(?:\b(?:help[A-Za-z]*|header|gauge|counter|histogram|write[A-Za-z]*)'
+    r'|\.(?:gauge|counter|histogram))'
+)
 _METRIC_DECL_RE = re.compile(
-    r'(?:\b(?:help|write[A-Za-z]*)|\.(?:gauge|counter))\('
-    r'\s*(?:&?[A-Za-z_]\w*\s*,\s*)?"(' + METRIC_PREFIX + r'[a-z0-9_]+)"')
+    _WRITER_FN_PREFIX + r'\(\s*(?:&?[A-Za-z_]\w*\s*,\s*)?"('
+    + METRIC_PREFIX + r'[a-z0-9_]+)"'
+)
+_PROM_HEADER_DECL_RE = re.compile(
+    r'"#\s*(?:HELP|TYPE)\s+(' + METRIC_PREFIX + r'[a-z0-9_]+)\b'
+)
 _METRIC_EXPO_RE = re.compile(r'"(' + METRIC_PREFIX + r'[a-z0-9_]+)(?:\{| )')
+_STRING_CONST_RE = re.compile(
+    r'\b([A-Za-z_]\w*)(?:\s+string)?\s*:?=\s*"('
+    + METRIC_PREFIX + r'[a-z0-9_]*[a-z0-9])"'
+)
+_CONST_WRITER_CALL_RE = re.compile(
+    _WRITER_FN_PREFIX + r'\(\s*(?:&?[A-Za-z_]\w*\s*,\s*)?([A-Za-z_]\w+)\s*[,\)]'
+)
+_OPEN_METRIC_FAMILY_RE = re.compile(
+    r'\bOpenMetricFamily\s*\{[^}]*\bName\s*:\s*(?:"('
+    + METRIC_PREFIX + r'[a-z0-9_]+)"|([A-Za-z_]\w+))'
+)
+_FPRINTF_FAMILY_RE = re.compile(
+    r'\bFprintf\(\s*[^,]+,\s*"%s(?:\{| )(?:[^"\\]|\\.)*"\s*,\s*([A-Za-z_]\w+)\b'
+)
+_WRITESTRING_EXPO_RE = re.compile(
+    r'\b(?:WriteString|writeString)\(\s*(?:[^,]+,\s*)?([A-Za-z_]\w+)\s*\+\s*"(?:\{| )'
+)
+_WRITESTRING_BRACE_RE = re.compile(
+    r'\.WriteString\(\s*([A-Za-z_]\w+)\s*\)\s*;?\s*\n\s*[A-Za-z_]\w*\.WriteString\(\s*"\{'
+)
 _FAK_FAMILY_TOKEN_RE = re.compile(r'\b(' + METRIC_PREFIX + r'[a-z0-9_]+)\b')
+_PROMQL_QUOTED_RE = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'')
 # A metric family whose name is BUILT at runtime from a `fak_*` prefix constant:
 #   const p = "fak_sched_preempt_"; writeNativeCounter(b, p+"total", …)
 # The full family literal never appears, so resolve each `fak_*`-prefix constant,
@@ -195,19 +234,22 @@ _PREFIX_CONST_RE = re.compile(
 # recognition scoped to a function that actually passes the table field to an
 # exposition writer; arbitrary struct rows and quoted fak_* strings remain
 # non-metric identifiers.
-_GO_FUNC_RE = re.compile(
-    r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(([^\n]*)\)\s*\{\s*$",
+_GO_FUNC_HEADER_RE = re.compile(
+    r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(",
     re.MULTILINE,
 )
 _TABLE_WRITER_RE = re.compile(
-    r'\.(?:gauge|counter)\(\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*,')
+    _WRITER_FN_PREFIX + r'\(\s*(?:&?[A-Za-z_]\w*\s*,\s*)?([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*,'
+)
 _PREFIX_TABLE_WRITER_RE = re.compile(
     r'\.(?:gauge|counter)\(\s*([A-Za-z_]\w*)\s*\+\s*'
     r'([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*,')
 _TABLE_FIRST_STRING_RE = re.compile(
     r'\{\s*"([a-z0-9_]+)"\s*,\s*"')
 _TABLE_FIRST_FAMILY_RE = re.compile(
-    r'\{\s*"(' + METRIC_PREFIX + r'[a-z0-9_]+)"\s*,\s*"')
+    r'\{\s*(?:name\s*:\s*)?"(' + METRIC_PREFIX + r'[a-z0-9_]+)"\s*,\s*(?:[A-Za-z_]\w*\s*:\s*)?"')
+_TABLE_FIRST_IDENT_RE = re.compile(
+    r'\{\s*(?:name\s*:\s*)?([A-Za-z_]\w*)\s*,\s*(?:[A-Za-z_]\w*\s*:\s*)?"')
 # Every quoted "fak_..." literal in Go source, metric or not (the closing quote is
 # NOT required, so a struct tag `json:"fak_share_pct,omitempty"` still yields
 # `fak_share_pct`). Subtracting the emitted-metric set leaves the NON-metric
@@ -281,6 +323,67 @@ def is_metric_shaped(token: str) -> bool:
     return len(parts) >= 2 and all(p for p in parts)
 
 
+def is_external_metric(token: str) -> bool:
+    """True for fak_* families emitted by a separate companion/external exporter
+    (not the public fak Go binary), e.g. fak_ops_* in fak-private."""
+    return token.startswith(EXTERNAL_METRIC_PREFIXES)
+
+
+def strip_promql_strings(text: str) -> str:
+    """Drop quoted PromQL label values/regex matchers (e.g. job="fak_ops_workers")
+    so they are never misread as metric family names."""
+    return _PROMQL_QUOTED_RE.sub('""', text)
+
+
+def _iter_go_funcs(go_text: str) -> list[tuple[str, str, int, int]]:
+    """Yield (func_name, params_text, body_start, body_end) for top-level Go funcs.
+
+    Scans balanced parentheses so return tuples and func(...) parameters do not
+    truncate params_text or merge a value-returning function into its predecessor.
+    """
+    headers: list[tuple[str, str, int, int]] = []
+    for m in _GO_FUNC_HEADER_RE.finditer(go_text):
+        pos = m.end() - 1  # opening '(' of parameter list
+        depth = 0
+        close_pos = -1
+        line_end = go_text.find("\n", pos)
+        if line_end == -1:
+            line_end = len(go_text)
+        for j in range(pos, len(go_text)):
+            ch = go_text[j]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    close_pos = j
+                    break
+            elif ch == "\n" and depth == 0:
+                break
+        if close_pos == -1:
+            continue
+        brace_line_end = go_text.find("\n", close_pos)
+        if brace_line_end == -1:
+            brace_line_end = len(go_text)
+        tail = go_text[close_pos + 1:brace_line_end]
+        brace_off = tail.find("{")
+        if brace_off == -1:
+            continue
+        params_text = go_text[pos + 1:close_pos]
+        headers.append((m.group(1), params_text, m.start(), close_pos + 1 + brace_off + 1))
+
+    out: list[tuple[str, str, int, int]] = []
+    for i, (name, params_text, _hstart, body_start) in enumerate(headers):
+        body_end = headers[i + 1][2] if i + 1 < len(headers) else len(go_text)
+        out.append((name, params_text, body_start, body_end))
+    return out
+
+
+def extract_string_constants(go_text: str) -> dict[str, str]:
+    """Resolve Go string const/var bindings whose value is a fak_* family literal."""
+    return {m.group(1): m.group(2) for m in _STRING_CONST_RE.finditer(go_text)}
+
+
 def extract_prefixed_families(go_text: str) -> set[str]:
     """Families built from a `fak_*` prefix constant: `const p = "fak_x_"; …
     write…(b, p+"suffix", …)`, where the full family name never appears as one
@@ -295,26 +398,30 @@ def extract_prefixed_families(go_text: str) -> set[str]:
     return out
 
 
-def extract_table_driven_families(go_text: str) -> set[str]:
+def extract_table_driven_families(go_text: str,
+                                  consts: dict[str, str] | None = None) -> set[str]:
     """Families emitted through a table field rather than a literal writer arg.
 
-    Recognizes both ``w.gauge(fam.name, ...)`` with full-family rows and a tiered
-    helper that writes ``w.gauge(prefix+fam.suffix, ...)`` after callers pass
-    literal ``fak_*_`` prefixes. Function scoping is load-bearing: a quoted
-    ``fak_*`` tool name or an unrelated struct table never becomes an emitter
-    merely because it shares a file with metrics code.
+    Recognizes ``w.gauge(fam.name, ...)``, ``writeHelpType(b, fam.name, ...)``,
+    ``helpType(w, family.name, ...)`` with full-family or constant-named rows,
+    and tiered helpers that write ``w.gauge(prefix+fam.suffix, ...)`` after
+    callers pass literal ``fak_*_`` prefixes. Function scoping is load-bearing:
+    a quoted ``fak_*`` tool name or an unrelated struct table never becomes an
+    emitter merely because it shares a file with metrics code.
     """
     out: set[str] = set()
-    funcs = list(_GO_FUNC_RE.finditer(go_text))
-    for i, match in enumerate(funcs):
-        name, params_text = match.group(1), match.group(2)
-        end = funcs[i + 1].start() if i + 1 < len(funcs) else len(go_text)
-        body = go_text[match.end():end]
+    resolved_consts = consts or {}
+    for name, params_text, body_start, body_end in _iter_go_funcs(go_text):
+        body = go_text[body_start:body_end]
 
-        # A writer consuming ``fam.name`` proves that full fak_* literals in the
-        # first field of this function's table are emitted family declarations.
+        # A writer consuming ``fam.name`` proves that full fak_* literals (or
+        # resolved metric constants) in the first field of this function's table
+        # are emitted family declarations.
         if _TABLE_WRITER_RE.search(body):
             out.update(_TABLE_FIRST_FAMILY_RE.findall(body))
+            for ident in _TABLE_FIRST_IDENT_RE.findall(body):
+                if ident in resolved_consts:
+                    out.add(resolved_consts[ident])
 
         for prefix_ident, _row_ident, _field_ident in _PREFIX_TABLE_WRITER_RE.findall(body):
             params = [part.strip().split()[0] for part in params_text.split(",")]
@@ -343,23 +450,57 @@ def extract_table_driven_families(go_text: str) -> set[str]:
     return out
 
 
-def extract_family_decls(go_text: str) -> set[str]:
-    """Families DECLARED via a writer helper (`help`/`write*`/`.gauge`/`.counter`)
-    or built from a `fak_*` prefix constant. Excludes the raw space/brace
-    exposition-literal form, which is a reliable metric signal only in the
-    internal/ gateway source — in cmd/fak an MCP tool-name string in help prose
-    (`"fak_capabilities "`) can share that shape without being a metric."""
+def extract_const_emitted_families(go_text: str,
+                                   consts: dict[str, str] | None = None,
+                                   *, include_expo: bool = True) -> set[str]:
+    """Families whose name comes from a Go constant or an OpenMetricFamily literal
+    passed to an emitter (e.g. ``helpType(w, MetricPhaseSeconds, ...)`` or
+    ``OpenMetricFamily{Name: TrustViolationMetricName, ...}``)."""
+    resolved = dict(consts or {})
+    out: set[str] = set()
+    for ident in _CONST_WRITER_CALL_RE.findall(go_text):
+        if ident in resolved:
+            out.add(resolved[ident])
+    for lit, ident in _OPEN_METRIC_FAMILY_RE.findall(go_text):
+        if lit:
+            out.add(lit)
+        elif ident and ident in resolved:
+            out.add(resolved[ident])
+    if include_expo:
+        for pat in (_FPRINTF_FAMILY_RE, _WRITESTRING_EXPO_RE, _WRITESTRING_BRACE_RE):
+            for ident in pat.findall(go_text):
+                if ident in resolved:
+                    out.add(resolved[ident])
+    return out
+
+
+def extract_family_decls(go_text: str,
+                         pkg_consts: dict[str, str] | None = None) -> set[str]:
+    """Families DECLARED via a writer helper (`help`/`helpType`/`header`/`write*`/
+    `.gauge`/`.counter`), `# HELP`/`# TYPE` headers, `OpenMetricFamily`, or built
+    from a `fak_*` prefix constant. Excludes the raw space/brace exposition-literal
+    form, which is reliable only in internal/ (in cmd/fak an MCP tool-name string
+    in help prose can share that shape)."""
+    consts = dict(pkg_consts or {})
+    consts.update(extract_string_constants(go_text))
     return (set(_METRIC_DECL_RE.findall(go_text))
+            | set(_PROM_HEADER_DECL_RE.findall(go_text))
             | extract_prefixed_families(go_text)
-            | extract_table_driven_families(go_text))
+            | extract_table_driven_families(go_text, consts)
+            | extract_const_emitted_families(go_text, consts, include_expo=False))
 
 
-def extract_family_literals(go_text: str) -> set[str]:
+def extract_family_literals(go_text: str,
+                            pkg_consts: dict[str, str] | None = None) -> set[str]:
     """The internal/ emitted-metric source of truth: every DECLARED family plus the
-    raw exposition literals (`"fak_x{"` / `"fak_x "`) the gateway writes directly.
-    Excludes MCP tool names and struct-field literals that share the `fak_`
-    prefix."""
-    return extract_family_decls(go_text) | set(_METRIC_EXPO_RE.findall(go_text))
+    raw exposition literals (`"fak_x{"` / `"fak_x "`) and constant exposition writes
+    the gateway/engine writes directly. Excludes MCP tool names and struct-field
+    literals that share the `fak_` prefix."""
+    consts = dict(pkg_consts or {})
+    consts.update(extract_string_constants(go_text))
+    return (extract_family_decls(go_text, consts)
+            | set(_METRIC_EXPO_RE.findall(go_text))
+            | extract_const_emitted_families(go_text, consts, include_expo=True))
 
 
 def extract_family_tokens(text: str) -> set[str]:
@@ -369,12 +510,64 @@ def extract_family_tokens(text: str) -> set[str]:
     return {t for t in _FAK_FAMILY_TOKEN_RE.findall(text) if is_metric_shaped(t)}
 
 
+def extract_c_extern_symbols(c_text: str) -> set[str]:
+    """C/CUDA ABI symbol names exported via `extern "C"` (single declarations or
+    `extern "C" { ... }` blocks). Stripping C/C++ comments first prevents arbitrary
+    comment text from entering the exclusion set."""
+    clean = re.sub(r"//[^\n]*|/\*[\s\S]*?\*/", " ", c_text)
+    out: set[str] = set()
+    # 1. Single-declaration: extern "C" [ret...] fak_symbol(
+    for m in re.finditer(
+        r'\bextern\s+"C"\s+(?!\{)[^{};]*?\b(' + METRIC_PREFIX + r'[a-z0-9_]+)\s*\(',
+        clean,
+    ):
+        out.add(m.group(1))
+    # 2. Block form: extern "C" { ... }
+    for m in re.finditer(r'\bextern\s+"C"\s*\{', clean):
+        depth = 1
+        i = m.end()
+        while i < len(clean) and depth > 0:
+            if clean[i] == "{":
+                depth += 1
+            elif clean[i] == "}":
+                depth -= 1
+            i += 1
+        block = clean[m.end():i - 1 if depth == 0 else len(clean)]
+        out.update(re.findall(r'\b(' + METRIC_PREFIX + r'[a-z0-9_]+)\s*\(', block))
+    return out
+
+
+def extract_go_build_tags(go_text: str) -> set[str]:
+    """Go build-tag tokens (`//go:build ...` and `// +build ...`) before `package`."""
+    out: set[str] = set()
+    for ln in go_text.splitlines():
+        s = ln.strip()
+        if s.startswith("package "):
+            break
+        if s.startswith("//go:build") or s.startswith("// +build"):
+            out.update(_FAK_FAMILY_TOKEN_RE.findall(s))
+    return out
+
+
+def extract_alert_group_names(yaml_text: str) -> set[str]:
+    """Alert rule-group names (`- name: fak_*`) from Prometheus alert rules YAML."""
+    return set(re.findall(r"^\s*-\s+name:\s*(" + METRIC_PREFIX + r"[a-z0-9_]+)\s*$",
+                          yaml_text, re.MULTILINE))
+
+
+def extract_prom_job_names(yaml_text: str) -> set[str]:
+    """Scrape job names (`job_name: fak_*`) from prometheus.yml."""
+    return set(re.findall(r"""^\s*-?\s*job_name:\s*["']?(""" + METRIC_PREFIX + r"""[a-z0-9_]+)["']?\s*$""",
+                          yaml_text, re.MULTILINE))
+
+
 def dashboard_expr_text(json_text: str) -> str:
     """Concatenate every PromQL ``expr`` string in a Grafana dashboard JSON, so a
     reference is read from a panel QUERY — not a panel title, a legend, or a
     template-variable regex (which legitimately carries a ``fak_*`` wildcard stem).
-    Falls back to the raw text if the JSON does not parse (the shape filter still
-    guards against wildcard-stem false positives)."""
+    Quoted label strings inside PromQL are stripped so label matchers like
+    ``job="fak_ops_workers"`` are not misread as metric names. Falls back to raw
+    text if the JSON does not parse (still stripped only when valid JSON)."""
     try:
         obj = json.loads(json_text)
     except (json.JSONDecodeError, ValueError):
@@ -385,7 +578,7 @@ def dashboard_expr_text(json_text: str) -> str:
         if isinstance(node, dict):
             for k, v in node.items():
                 if k == "expr" and isinstance(v, str):
-                    exprs.append(v)
+                    exprs.append(strip_promql_strings(v))
                 else:
                     walk(v)
         elif isinstance(node, list):
@@ -397,15 +590,15 @@ def dashboard_expr_text(json_text: str) -> str:
 
 
 def alert_expr_text(yaml_text: str) -> str:
-    """The text after every ``expr:`` key in a Prometheus alert-rules YAML, so a
-    reference is read from a rule EXPRESSION — not a group ``- name:`` (which is a
-    rule-group label that often mirrors a metric prefix) or a prose ``description:``
-    (where a metric name is mentioned, not queried)."""
+    """The text after every ``expr:`` key in a Prometheus alert-rules YAML, with
+    quoted PromQL string literals stripped so a reference is read from a rule
+    EXPRESSION's metric names — not a group ``- name:``, a label matcher value
+    like ``job="fak_ops_workers"``, or a prose ``description:``."""
     out: list[str] = []
     for ln in yaml_text.split("\n"):
-        m = re.match(r"\s*expr:\s*(.*)$", ln)
+        m = re.match(r"\s*(?:-\s+)?expr:\s*(.*)$", ln)
         if m:
-            out.append(m.group(1))
+            out.append(strip_promql_strings(m.group(1)))
     return "\n".join(out)
 
 
@@ -709,6 +902,20 @@ def _safe_read(path: Path) -> str:
         return ""
 
 
+def _safe_read_go_header(path: Path) -> str:
+    """Read only lines up to `package ` so //go:build scanning avoids full-file I/O."""
+    try:
+        head: list[str] = []
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for ln in fh:
+                head.append(ln)
+                if ln.lstrip().startswith("package "):
+                    break
+        return "".join(head)
+    except OSError:
+        return ""
+
+
 def _dos_review(root: Path, rev_range: str) -> dict[str, Any]:
     try:
         p = subprocess.run(["dos", "review", rev_range, "--json"], cwd=str(root),
@@ -742,9 +949,17 @@ def gather(root: Path, *, run_dos: bool = True,
     emitted: set[str] = set()
     all_fak_literals: set[str] = set()
     gateway_go_text_parts: list[str] = []
+    go_texts: dict[str, str] = {}
+    pkg_consts: dict[str, dict[str, str]] = {}
     for f in go_src:
         text = _safe_read(root / f)
-        emitted |= extract_family_literals(text)
+        go_texts[f] = text
+        pkg_dir = Path(f).parent.as_posix()
+        pkg_consts.setdefault(pkg_dir, {}).update(extract_string_constants(text))
+    for f in go_src:
+        text = go_texts[f]
+        pkg_dir = Path(f).parent.as_posix()
+        emitted |= extract_family_literals(text, pkg_consts.get(pkg_dir))
         all_fak_literals |= set(_FAK_ANY_LITERAL_RE.findall(text))
         if f.startswith("internal/gateway/"):
             gateway_go_text_parts.append(text)
@@ -754,21 +969,45 @@ def gather(root: Path, *, run_dos: bool = True,
     # DECLARED through exposition writer methods (`w.gauge("fak_...", …)`), never as
     # internal/-style raw exposition literals, so scan them with the DECL/prefix
     # extractor only — NOT the space/brace EXPO form, which in cmd/fak would misread
-    # MCP tool-name help strings (`"fak_capabilities "`) as emitted metrics. Without
-    # this, every panel in the roll-up dashboard read as a phantom (SOURCE_DIRS only
-    # scanned internal/), and a doc citing an emitted `fak_cachevalue_*` family
-    # tripped drift.
+    # MCP tool-name help strings (`"fak_capabilities "`) as emitted metrics.
     cmd_src = [f for f in tracked
                if f.startswith("cmd/fak/") and f.endswith(".go")
                and not f.endswith("_test.go")]
+    cmd_consts: dict[str, str] = {}
+    cmd_texts: dict[str, str] = {}
     for f in cmd_src:
         text = _safe_read(root / f)
-        emitted |= extract_family_decls(text)
+        cmd_texts[f] = text
+        cmd_consts.update(extract_string_constants(text))
+    for f in cmd_src:
+        text = cmd_texts[f]
+        emitted |= extract_family_decls(text, cmd_consts)
         all_fak_literals |= set(_FAK_ANY_LITERAL_RE.findall(text))
     gateway_text = "\n".join(gateway_go_text_parts)
-    # NON-metric fak_ identifiers (MCP tool names, route ids) a doc may reference
-    # without it being a phantom metric — excluded from doc drift.
-    nonmetric_fak = all_fak_literals - emitted
+
+    # NON-metric fak_ identifiers a doc/alert may reference without it being a
+    # phantom metric: Go non-metric string literals (MCP tool names, JSON struct
+    # tags, route ids), extern "C" C/CUDA ABI symbol names, //go:build tag
+    # tokens, and Grafana alert-group / scrape-job identifiers.
+    c_extern_syms: set[str] = set()
+    for f in tracked:
+        if f.startswith(("internal/", "cmd/")) and f.endswith(C_EXTS):
+            c_extern_syms |= extract_c_extern_symbols(_safe_read(root / f))
+    go_build_tags: set[str] = set()
+    for f in tracked:
+        if not f.endswith(".go"):
+            continue
+        cached = go_texts.get(f) or cmd_texts.get(f)
+        go_build_tags |= extract_go_build_tags(
+            cached if cached is not None else _safe_read_go_header(root / f)
+        )
+    infra_names: set[str] = set()
+    alerts_text = _safe_read(root / ALERTS_REL) if (root / ALERTS_REL).exists() else ""
+    if alerts_text:
+        infra_names |= extract_alert_group_names(alerts_text)
+    if (root / PROMETHEUS_REL).exists():
+        infra_names |= extract_prom_job_names(_safe_read(root / PROMETHEUS_REL))
+    nonmetric_fak = (all_fak_literals - emitted) | c_extern_syms | go_build_tags | infra_names
 
     # --- correlation: dashboard / alert / doc reference integrity ---
     dash_dir = root / DASHBOARD_GLOB_DIR
@@ -776,17 +1015,25 @@ def gather(root: Path, *, run_dos: bool = True,
     if dash_dir.exists():
         for p in sorted(dash_dir.glob("*.json")):
             rel = p.relative_to(root).as_posix()
-            dash_refs[rel] = extract_family_tokens(dashboard_expr_text(_safe_read(p)))
+            dash_refs[rel] = {
+                t for t in extract_family_tokens(dashboard_expr_text(_safe_read(p)))
+                if not is_external_metric(t)
+            }
     alert_refs: dict[str, set[str]] = {}
-    if (root / ALERTS_REL).exists():
-        alert_refs[ALERTS_REL] = extract_family_tokens(
-            alert_expr_text(_safe_read(root / ALERTS_REL)))
+    if alerts_text:
+        alert_refs[ALERTS_REL] = {
+            t for t in extract_family_tokens(alert_expr_text(alerts_text))
+            if not is_external_metric(t)
+        }
     doc_refs: dict[str, set[str]] = {}
     for f in tracked:
         if not _is_metric_doc(f):
             continue
         text = _safe_read(root / f)
-        toks = extract_family_tokens(text) - nonmetric_fak
+        toks = {
+            t for t in (extract_family_tokens(text) - nonmetric_fak)
+            if not is_external_metric(t)
+        }
         if toks:
             doc_refs[f] = toks
 

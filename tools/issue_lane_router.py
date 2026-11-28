@@ -35,11 +35,16 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-_TOOLS_DIR = str(Path(__file__).resolve().parent)
-if _TOOLS_DIR not in sys.path:
-    sys.path.insert(0, _TOOLS_DIR)
 
-from dispatch_worker import no_window_creationflags
+def no_window_creationflags() -> int:
+    """Resolve Windows subprocess flags lazily so top-level imports stay lint-clean."""
+    tools_dir = str(Path(__file__).resolve().parent)
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    from dispatch_worker import no_window_creationflags as _impl
+
+    return _impl()
+
 
 SCHEMA = "fleet-issue-lane-router/1"
 

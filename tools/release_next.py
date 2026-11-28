@@ -16,18 +16,23 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 TOOLS_DIR = Path(__file__).resolve().parent
-if str(TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(TOOLS_DIR))
-from dispatch_worker import install_no_window_subprocess_defaults
 
-install_no_window_subprocess_defaults(subprocess)
+
+def _init_subprocess_defaults() -> None:
+    if str(TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(TOOLS_DIR))
+    from dispatch_worker import install_no_window_subprocess_defaults
+
+    install_no_window_subprocess_defaults(subprocess)
+
+
+_init_subprocess_defaults()
 
 SCHEMA = "fak-release-next/1"
 DEFAULT_DRAFT_PATH = "docs/releases/NEXT.md"
@@ -178,7 +183,6 @@ def compute_projected_level(commits: list[dict]) -> str:
     """Determine semver bump level: major, minor, or patch."""
     has_breaking = False
     has_feat = False
-    has_fix = False
     for c in commits:
         subj = c.get("subject", "")
         body = c.get("body", "")
@@ -192,8 +196,6 @@ def compute_projected_level(commits: list[dict]) -> str:
         k = m.group("type").lower()
         if k == "feat":
             has_feat = True
-        elif k == "fix":
-            has_fix = True
     if has_breaking:
         return "major"
     if has_feat:
