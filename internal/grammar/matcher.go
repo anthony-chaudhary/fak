@@ -62,3 +62,45 @@ func (m *Matcher) AdvanceByAccepted(tokens []int) error {
 	m.history = candidate
 	return nil
 }
+
+// FindJumpForwardTokens returns the grammar's forced continuation from the
+// matcher's current position without mutating matcher state: the longest run of
+// tokens (capped at maxTokens when maxTokens > 0) at which the compiled mask
+// admits exactly one token. A caller appends those tokens to its output and
+// prefills them together with the next sampled token instead of paying one
+// autoregressive step each. The scan stops at the first position that admits
+// more than one token, at a complete envelope (the lone admissible token is EOS,
+// which is never reported as a forced token), and at an off-path or unconstrained
+// position. vocabSize is the logit-vector width the mask is evaluated over.
+// Adapted from the behavior of XGrammar's GrammarMatcher.find_jump_forward_tokens
+// (Apache-2.0; behavioral anchor only, no source copied).
+func (m *Matcher) FindJumpForwardTokens(vocabSize, maxTokens int) []int {
+	if m == nil || m.mask == nil || vocabSize <= 0 {
+		return nil
+	}
+	scratch := append([]int(nil), m.history...)
+	var forced []int
+	logits := make([]float32, vocabSize)
+	for maxTokens <= 0 || len(forced) < maxTokens {
+		for i := range logits {
+			logits[i] = 0
+		}
+		m.mask.MaskLogits(scratch, logits)
+		only, n := -1, 0
+		for id, v := range logits {
+			if !math.IsInf(float64(v), -1) {
+				only = id
+				n++
+				if n > 1 {
+					break
+				}
+			}
+		}
+		if n != 1 || only == m.mask.eos {
+			break
+		}
+		forced = append(forced, only)
+		scratch = append(scratch, only)
+	}
+	return forced
+}
