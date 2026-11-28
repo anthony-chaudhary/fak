@@ -732,3 +732,56 @@ func TestNativeSchedulerLonePrefillChunkCap(t *testing.T) {
 		t.Fatal("no prefill, or guard disabled, must not hold")
 	}
 }
+
+// fak-test:runtime fast est=1ms
+func TestNativeSchedulerExplicitOffloadPrefetch(t *testing.T) {
+	t.Parallel()
+	def := &NativeScheduler{}
+	if def.prefetchAfterWarmup(true) || def.prefetchAfterWarmup(false) {
+		t.Fatal("default config must never prefetch")
+	}
+	s := &NativeScheduler{}
+	s.SetExplicitOffload(true)
+	if s.prefetchAfterWarmup(false) {
+		t.Fatal("explicit offload must wait for warmup to finish")
+	}
+	if !s.prefetchAfterWarmup(true) {
+		t.Fatal("explicit offload must prefetch after warmup")
+	}
+	s.SetExplicitOffload(false)
+	if s.prefetchAfterWarmup(true) {
+		t.Fatal("clearing the flag must stop prefetch")
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestNativeSchedulerMetricsEndpoint(t *testing.T) {
+	t.Parallel()
+	if got := (&NativeScheduler{}).MetricsSnapshot(); got != (NativeSchedulerMetrics{}) {
+		t.Fatalf("empty scheduler must report zeros, got %+v", got)
+	}
+	s := &NativeScheduler{
+		waiting:   []*schedLane{{}},
+		lanes:     []*schedLane{{}},
+		preempted: []*schedLane{{}},
+	}
+	want := NativeSchedulerMetrics{Waiting: 1, Running: 1, QueueDepth: 2}
+	if got := s.MetricsSnapshot(); got != want {
+		t.Fatalf("snapshot = %+v, want %+v", got, want)
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestNativeSchedulerLoraCacheKeying(t *testing.T) {
+	t.Parallel()
+	prompt := []int{1, 22, 3}
+	if nativePrefixCacheKey(1, prompt) != nativePrefixCacheKey(1, []int{1, 22, 3}) {
+		t.Fatal("same bytes under the same adapter must hit")
+	}
+	if nativePrefixCacheKey(1, prompt) == nativePrefixCacheKey(2, prompt) {
+		t.Fatal("same bytes under different adapters must miss")
+	}
+	if nativePrefixCacheKey(1, []int{1, 2, 23}) == nativePrefixCacheKey(1, []int{12, 2, 3}) {
+		t.Fatal("token boundaries must not alias")
+	}
+}

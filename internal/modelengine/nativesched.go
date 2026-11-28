@@ -1,6 +1,6 @@
 package modelengine
 
-// nativesched.go — native continuous batching for the in-kernel engine lifecycle.
+// nativesched.go â€” native continuous batching for the in-kernel engine lifecycle.
 //
 // NativeScheduler admits many requests, then a SINGLE scheduler loop advances all live
 // non-Q4_K lanes with one model.BatchSession StepBatch call per iteration: the shared
@@ -261,9 +261,11 @@ type NativeScheduler struct {
 	// Rust-frontend queue bounds, PR #3339); 0 disables a bound, the pre-bound
 	// behaviour. Set through SetQueueBounds; read under mu.
 	maxQueuedReqs, maxQueuedTokens int
+	// explicitOffload gates model prefetch; set only from explicit config.
+	explicitOffload bool
 	// maxRunning caps the running set; 0 = unbounded (every admitted lane runs at once,
 	// the pre-queue behaviour). A positive cap is the BARE structural admission knob the
-	// issue scopes ("the bare admit/evict loop and queues it sits on") — NOT a priority/
+	// issue scopes ("the bare admit/evict loop and queues it sits on") â€” NOT a priority/
 	// fairness/KV-budget policy, which is the sibling issue's job.
 	maxRunning       int
 	maxTokensPerStep int
@@ -361,7 +363,7 @@ type NativeScheduler struct {
 	specAdmissionPadSlots uint64
 
 	// sessionDecorator decorates every lane session this scheduler mints (fresh
-	// and restored) before use — e.g. binding the device backend a P/D decode
+	// and restored) before use â€” e.g. binding the device backend a P/D decode
 	// role resolved. Set once before the first Admit; nil keeps the historical
 	// session shape byte-for-byte.
 	sessionDecorator func(*model.Session)
@@ -559,7 +561,7 @@ func (s *NativeScheduler) Qwen35MetalStateIdentityReceipts() []model.Qwen35Metal
 	return out
 }
 
-// MaxObservedRunning reports the peak running-set size the loop reached — the witness
+// MaxObservedRunning reports the peak running-set size the loop reached â€” the witness
 // that a maxRunning cap actually gated admission (peak == cap), or that an uncapped
 // scheduler co-batched every lane (peak == #admitted). Safe to read after draining.
 func (s *NativeScheduler) MaxObservedRunning() int {
@@ -795,7 +797,7 @@ func (s *NativeScheduler) laneDraftsUnusedLocked(ln *schedLane, prefillPhase boo
 		// prompt tail, so the step sampled nothing. A lane that transitioned
 		// to DECODE (final chunk, or a full prefix-cache hit that consumed
 		// the whole prompt without a forward) keeps its draft opportunity in
-		// the decode phase and reports not-unused here — conservative, never
+		// the decode phase and reports not-unused here â€” conservative, never
 		// a missed skip.
 		return ln.state == schedLanePrefilling, SkipDraftsPrefillChunk
 	}
@@ -808,7 +810,7 @@ func (s *NativeScheduler) laneDraftsUnusedLocked(ln *schedLane, prefillPhase boo
 // completed model execution over its scheduled lane set. prefillPhase marks
 // an execution that carried only prefill chunks; otherwise it is a decode
 // step. The verdict is the AND over scheduled lanes of
-// laneDraftsUnusedLocked — vLLM proposes K=0 drafts only when the predicate
+// laneDraftsUnusedLocked â€” vLLM proposes K=0 drafts only when the predicate
 // holds for EVERY scheduled request (scheduler.py:1528-1530 per-request OR
 // into drafts_needed, :1693 skip_drafts=not drafts_needed @ae065918).
 // Caller must not hold s.mu; the observer, when set, is invoked outside it.
@@ -978,7 +980,7 @@ func (s *NativeScheduler) AdmitTokenIDs(ctx context.Context, name string, prompt
 
 // ValidateBatchSequences checks a caller-composed decode batch against the
 // scheduler's active set BEFORE dispatch: every sequence id must belong to a
-// non-terminal lane this scheduler admitted — running (lanes), waiting, or
+// non-terminal lane this scheduler admitted â€” running (lanes), waiting, or
 // preempted. The first unknown sequence in input order is refused with a
 // BatchSequenceError, and no slot, queue, counter, or session state changes on
 // refusal. Known sequences pass in their given order; the check reorders
@@ -1341,8 +1343,8 @@ func (s *NativeScheduler) Complete(ctx context.Context, c *abi.ToolCall) (*abi.R
 }
 
 // Close aborts every outstanding request and stops the scheduler. It cancels each
-// live lane's context so the run loop unblocks — even a lane wedged on an undrained
-// send — and exits once the lanes retire, so a non-draining consumer can no longer
+// live lane's context so the run loop unblocks â€” even a lane wedged on an undrained
+// send â€” and exits once the lanes retire, so a non-draining consumer can no longer
 // leak the loop. Idempotent. A host that wants in-flight requests to FINISH rather
 // than abort must drain them before calling Close.
 func (s *NativeScheduler) Close() {
@@ -1771,4 +1773,64 @@ func holdDecodePromotion(enabled bool, running []*schedLane) bool {
 		lone = ln
 	}
 	return lone != nil && lone.prefillChunkTokens <= 0
+}
+
+// SetExplicitOffload records that layerwise offload was explicitly requested
+// by config (SGLang explicit-DiT-offload prefetch gate, PR #3331). The flag is
+// threaded from config once and is never touched by warmup, so it persists
+// across it. The default (false) keeps prefetch off.
+func (s *NativeScheduler) SetExplicitOffload(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.explicitOffload = on
+}
+
+// prefetchAfterWarmup reports whether model prefetch applies: only when
+// offload was explicitly requested and compile warmup has finished. Warmup
+// itself is unchanged; it only supplies warmedUp.
+func (s *NativeScheduler) prefetchAfterWarmup(warmedUp bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.explicitOffload && warmedUp
+}
+
+// NativeSchedulerMetrics is the counter snapshot the gateway serves on its
+// existing metrics endpoint (SGLang scheduler /metrics exposure, #43942). It
+// adds no HTTP server; the gateway renders these three numbers.
+type NativeSchedulerMetrics struct {
+	Waiting    int // lanes admitted but not yet running
+	Running    int // lanes in the running set
+	QueueDepth int // waiting plus preempted lanes
+}
+
+// MetricsSnapshot returns the current queue and run counts under one lock so
+// the three numbers are mutually consistent and a scrape never blocks decode
+// longer than that critical section.
+func (s *NativeScheduler) MetricsSnapshot() NativeSchedulerMetrics {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return NativeSchedulerMetrics{
+		Waiting:    len(s.waiting),
+		Running:    len(s.lanes),
+		QueueDepth: len(s.waiting) + len(s.preempted),
+	}
+}
+
+// nativePrefixKey is a prefix-cache key that carries the LoRA adapter
+// generation it was built under (llama.cpp per-entry LoRA settings tracking,
+// PR #3324), so identical prompt bytes under different adapters never hit.
+type nativePrefixKey struct {
+	AdapterGen uint64
+	Prompt     string
+}
+
+func nativePrefixCacheKey(adapterGen uint64, prompt []int) nativePrefixKey {
+	var b strings.Builder
+	for i, tok := range prompt {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.Itoa(tok))
+	}
+	return nativePrefixKey{AdapterGen: adapterGen, Prompt: b.String()}
 }
