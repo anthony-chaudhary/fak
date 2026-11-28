@@ -3024,4 +3024,40 @@ SPDX-License-Identifier: Apache-2.0
 
 ---
 
-Portions of this product are conceptually informed by NVIDIA/RULER (https://github.com/NVIDIA/RULER, pinned at revision db43f92ff6, Apache-2.0, in `internal/ctxmmu/ruler_tasks.go`). Changes were made; no upstream code was copied.
+Portions of this product are conceptually informed by NVIDIA/RULER (https://github.com/NVIDIA/RULER, pinned at revision db43f92ff6, Apache-2.0). Changes were made; no upstream code was copied.
+
+## casper-hansen/AutoAWQ_kernels
+
+Portions of this product are adapted from casper-hansen/AutoAWQ_kernels: https://github.com/casper-hansen/AutoAWQ_kernels (pinned at revision c7b0e88c327694c715b0a758d9ce8fd414a1fa21). Changes were made.
+
+Copyright (c) 2023 Casper Hansen (AutoAWQ_kernels authors)
+SPDX-License-Identifier: MIT
+
+```text
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## IST-DASLab/marlin
+
+Portions of this product are adapted from IST-DASLab/marlin: https://github.com/IST-DASLab/marlin (pinned at revision 1f25790bdd49fba53106164a24666dade68d7c90). Changes were made.
+
+Copyright 2024 IST-DASLab
+SPDX-License-Identifier: Apache-2.0
