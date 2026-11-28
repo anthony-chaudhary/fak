@@ -178,3 +178,47 @@ func TestFusedRoPESplitStoreFailClosed(t *testing.T) {
 		t.Fatal("expected error on page table overflow")
 	}
 }
+
+// fak-test:runtime fast est=5ms
+func TestCPURefRoPEUsesExplicitFloat32ProductsScaleGateContract(t *testing.T) {
+	t.Parallel()
+	const qh, kvh, hd, page = 2, 1, 4, 4
+	stride := (qh + 2*kvh) * hd
+	packed := make([]float32, 2*stride)
+	for i := range packed {
+		packed[i] = float32(i%7) - 3
+	}
+	pos, table := []int{0, 1}, []int32{0}
+	run := func(qs, vs float32) (q, k, v []float32) {
+		q = make([]float32, 2*qh*hd)
+		k, v = make([]float32, page*kvh*hd), make([]float32, page*kvh*hd)
+		if _, err := ExecuteFusedRoPESplitStoreScaled(packed, pos, table, page, qh, kvh, hd, 10000, qs, vs, q, k, v); err != nil {
+			t.Fatal(err)
+		}
+		return q, k, v
+	}
+	q1, k1, v1 := run(1, 1)
+	q2, k2, v2 := run(2, 0.5)
+	for i := range q1 {
+		if math.Abs(float64(q2[i]-2*q1[i])) > 1e-5 {
+			t.Fatalf("q_scale 2 must double Q: q2[%d]=%v q1=%v", i, q2[i], q1[i])
+		}
+	}
+	for i := range v1 {
+		if math.Abs(float64(v2[i]-0.5*v1[i])) > 1e-6 {
+			t.Fatalf("value_scale 0.5 must halve stored V: v2[%d]=%v v1=%v", i, v2[i], v1[i])
+		}
+	}
+	for i := range k1 {
+		if k1[i] != k2[i] {
+			t.Fatalf("K must be unaffected by q/value scales at %d", i)
+		}
+	}
+	out, err := HeadNormGate([]float32{3, 4}, []float32{0, 0}, 0)
+	if err != nil || math.Abs(float64(out[0])-0.5*3/math.Sqrt(12.5)) > 1e-5 || math.Abs(float64(out[1])-0.5*4/math.Sqrt(12.5)) > 1e-5 {
+		t.Fatalf("zero gate halves the normed head: %v %v", out, err)
+	}
+	if _, err := HeadNormGate([]float32{1}, nil, 0); err == nil {
+		t.Fatal("length mismatch must be refused")
+	}
+}

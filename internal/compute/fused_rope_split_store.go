@@ -144,3 +144,57 @@ func ExecuteFusedRoPESplitStore(
 
 	return receipt, nil
 }
+
+// Adapted from modular/modular 88ab8913af max/kernels/src/nn/head_rms_norm_rope.mojo:273
+// (Apache-2.0 WITH LLVM-exception): the scale and gate contract of the
+// per-head RMSNorm+RoPE+paged-store launch, on the host path.
+
+// ExecuteFusedRoPESplitStoreScaled is ExecuteFusedRoPESplitStore with q_scale
+// applied to Q and value_scale applied to V in the same pass. Q is scaled
+// before RoPE and V before the store; both are linear so the result equals
+// scaling after, and scale 1 reproduces the unscaled kernel exactly.
+func ExecuteFusedRoPESplitStoreScaled(
+	packedQKV []float32,
+	positions []int,
+	pageTable []int32,
+	pageSize, numQHeads, numKVHeads, headDim int,
+	theta float64,
+	qScale, valueScale float32,
+	outQ, pagedK, pagedV []float32,
+) (FusedRoPESplitStoreReceipt, error) {
+	stride := (numQHeads + 2*numKVHeads) * headDim
+	if qScale == 1 && valueScale == 1 || stride <= 0 || len(packedQKV)%stride != 0 {
+		return ExecuteFusedRoPESplitStore(packedQKV, positions, pageTable, pageSize, numQHeads, numKVHeads, headDim, theta, outQ, pagedK, pagedV)
+	}
+	scaled := append([]float32(nil), packedQKV...)
+	qWidth, kvWidth := numQHeads*headDim, numKVHeads*headDim
+	for t := 0; t < len(scaled)/stride; t++ {
+		base := t * stride
+		for i := 0; i < qWidth; i++ {
+			scaled[base+i] *= qScale
+		}
+		for i := 0; i < kvWidth; i++ {
+			scaled[base+qWidth+kvWidth+i] *= valueScale
+		}
+	}
+	return ExecuteFusedRoPESplitStore(scaled, positions, pageTable, pageSize, numQHeads, numKVHeads, headDim, theta, outQ, pagedK, pagedV)
+}
+
+// HeadNormGate returns rms_norm(x) * sigmoid(gate): the per-head output gate
+// the Qwen3.5 attention output gate maps to. x and gate must be equal length.
+func HeadNormGate(x, gate []float32, eps float32) ([]float32, error) {
+	if len(x) == 0 || len(x) != len(gate) {
+		return nil, fmt.Errorf("HeadNormGate: x length %d and gate length %d must match and be nonzero", len(x), len(gate))
+	}
+	var ss float64
+	for _, v := range x {
+		ss += float64(v) * float64(v)
+	}
+	inv := float32(1 / math.Sqrt(ss/float64(len(x))+float64(eps)))
+	out := make([]float32, len(x))
+	for i, v := range x {
+		sig := float32(1 / (1 + math.Exp(-float64(gate[i]))))
+		out[i] = v * inv * sig
+	}
+	return out, nil
+}
