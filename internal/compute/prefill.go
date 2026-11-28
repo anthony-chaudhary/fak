@@ -89,10 +89,28 @@ type PrefillGeometry struct {
 // understated; for float dtypes it is the dense element size.
 func (g PrefillGeometry) weightBytes(out, in int) int64 {
 	o, i := int64(out), int64(in)
+	if o <= 0 || i <= 0 {
+		return 0
+	}
 	switch g.WeightDtype {
 	case Q8_0:
 		nblk := int64((in + q8Block - 1) / q8Block)
 		return o*i + o*nblk*4 // codes (1B each) + per-block scales (4B each)
+	case Q4_K:
+		nblk := int64((in + q4kSuper - 1) / q4kSuper)
+		return o * nblk * q4kSuperBlock // 144 bytes per 256-element super-block
+	case Q5_K:
+		nblk := int64((in + q4kSuper - 1) / q4kSuper)
+		return o * nblk * 176 // 176 bytes per 256-element super-block
+	case Q6_K:
+		nblk := int64((in + q4kSuper - 1) / q4kSuper)
+		return o * nblk * 210 // 210 bytes per 256-element super-block
+	case FP8:
+		return o * i // 1-byte E4M3/E5M2 codes
+	case NVFP4:
+		nblk := int64((in + NVFP4BlockSize - 1) / NVFP4BlockSize)
+		// Packed E2M1 nibbles (ceil(in/2) per row) + 1B E4M3FN scale per 16 K + 4B global scale.
+		return o*int64((in+1)/2) + o*nblk + 4
 	default:
 		return o * i * int64(g.WeightDtype.Bytes())
 	}

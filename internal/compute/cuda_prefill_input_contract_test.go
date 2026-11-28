@@ -672,7 +672,7 @@ func TestCUDAPrefillOwnedInputRouteContract(t *testing.T) {
 	if host["prefillHostProjections"] != 1 || host["Upload"] != 0 || host["BatchedMatMul"] != 0 || host["Read"] != 0 {
 		t.Fatal("host input escaped owned projection route")
 	}
-	if device["Upload"] != 3 || device["BatchedMatMul"] != 3 || device["Read"] != 3 {
+	if device["Upload"] != 3 || device["BatchedMatMul"] != 3 || device["Read"] != 0 {
 		t.Fatal("device input route changed")
 	}
 }

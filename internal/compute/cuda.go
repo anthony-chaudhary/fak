@@ -1423,7 +1423,8 @@ func (c *cudaBackend) TreeVerifyAttention(q, k, v, out *Tensor, maskRows []uint3
 	return nil
 }
 
-// PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on CUDA GPU (#11036).
+// PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on CUDA GPU (#11036),
+// keeping Q/K/V, RoPE, KV append, causal attention, and optional Wo projection device-resident without per-token host round-trips.
 func (c *cudaBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, error) {
 	P, _, err := validatePrefillBatchArgs(&args)
 	if err != nil {
@@ -1433,14 +1434,16 @@ func (c *cudaBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, e
 	nH := args.NumHeads
 	nKV := args.NumKVHeads
 	hd := args.HeadDim
+	grp := nH / nKV
 	qOut := nH * hd
 	kvOut := nKV * hd
 	startPos := args.StartPos
 
-	// Ensure inputs are resident device tensors
+	// Ensure inputs are resident device tensors.
 	xDev := args.X
 	hostX, isHostX := c.Host(xDev)
 	var qf, kf, vf []float32
+	var qTen, kTen, vTen Tensor
 	if isHostX {
 		qf, kf, vf, err = c.prefillHostProjections(xDev, hostX, args.Wq, args.Wk, args.Wv, P)
 		if err != nil {
@@ -1459,58 +1462,73 @@ func (c *cudaBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, e
 		if _, isHost := c.Host(wvDev); isHost {
 			wvDev = c.Upload(wvDev, F32)
 		}
-		qTen := c.BatchedMatMul(wqDev, xDev, P)
-		kTen := c.BatchedMatMul(wkDev, xDev, P)
-		vTen := c.BatchedMatMul(wvDev, xDev, P)
-		qf, kf, vf = c.Read(qTen), c.Read(kTen), c.Read(vTen)
+		qTen = c.BatchedMatMul(wqDev, xDev, P)
+		kTen = c.BatchedMatMul(wkDev, xDev, P)
+		vTen = c.BatchedMatMul(wvDev, xDev, P)
 	}
 
-	kRawAll := append([]float32(nil), kf...)
-	qRoped := make([]float32, len(qf))
-	kRoped := make([]float32, len(kf))
-	for t := 0; t < P; t++ {
-		pos := startPos + t
-		qRow := c.Upload(NewF32(Default(), []int{qOut}, qf[t*qOut:(t+1)*qOut]), F32)
-		qR := c.RoPE(qRow, pos, nH, hd, args.RopeTheta)
-		copy(qRoped[t*qOut:(t+1)*qOut], c.Read(qR))
+	kvPrec, isPagedKV, canResidentKV := inspectCUDAPrefillKV(args.KV)
+	major, minor, archOK := parseCUDATierMajorMinor(c.Tier())
+	if !archOK {
+		major, minor = 8, 0
+	}
+	attnBackend := SelectCUDAAttentionKernel(major, minor, CUDARegimePrefill, CUDAAttentionOptions{
+		HeadDim:     hd,
+		Tokens:      P,
+		KVPrecision: kvPrec,
+		Paged:       isPagedKV,
+	})
 
-		kRow := c.Upload(NewF32(Default(), []int{kvOut}, kf[t*kvOut:(t+1)*kvOut]), F32)
-		kR := c.RoPE(kRow, pos, nKV, hd, args.RopeTheta)
-		copy(kRoped[t*kvOut:(t+1)*kvOut], c.Read(kR))
+	if qTen.buf == nil {
+		qTen, kTen, vTen = c.uploadPrefillQKVPanels(qf, kf, vf, P, qOut, kvOut)
 	}
 
-	if args.KV != nil {
-		for t := 0; t < P; t++ {
-			pos := startPos + t
-			rawRow := kRawAll[t*kvOut : (t+1)*kvOut]
-			ropeRowSlice := kRoped[t*kvOut : (t+1)*kvOut]
-			vRow := vf[t*kvOut : (t+1)*kvOut]
+	// GPU-resident RoPE panel for Q and K across [0..P).
+	qRopedDev := c.PromptPanelRoPE(qTen, P, startPos, nH, hd, args.RopeTheta)
+	kRopedDev := c.PromptPanelRoPE(kTen, P, startPos, nKV, hd, args.RopeTheta)
 
-			rawTen := c.Upload(NewF32(Default(), []int{kvOut}, rawRow), F32)
-			ropeTen := c.Upload(NewF32(Default(), []int{kvOut}, ropeRowSlice), F32)
-			vRowTen := c.Upload(NewF32(Default(), []int{kvOut}, vRow), F32)
-
-			args.KV.AppendKV(args.Layer, rawTen, ropeTen, vRowTen, pos)
+	var ctxDev Tensor
+	if attnBackend.GPUResident() && canResidentKV {
+		if args.KV != nil {
+			c.PromptPanelAppendKV(args.KV, args.Layer, kTen, kRopedDev, vTen, startPos, P)
+			ctxDev = c.PromptPanelAttention(qRopedDev, args.KV, args.Layer, P, startPos, grp, args.Scale)
+		} else {
+			ctxDev, err = c.promptPanelAttentionDirect(qRopedDev, kRopedDev, vTen, P, nH, nKV, hd, args.Scale)
+			if err != nil {
+				return PrefillBatchResult{}, err
+			}
+		}
+	} else {
+		// Fallback for non-panel or non-F32 KV stores when device panel append does not apply.
+		kRawAll := c.Read(kTen)
+		kRoped := c.Read(kRopedDev)
+		vfHost := c.Read(vTen)
+		if args.KV != nil {
+			for t := 0; t < P; t++ {
+				pos := startPos + t
+				rawTen := c.Upload(NewF32(Default(), []int{kvOut}, kRawAll[t*kvOut:(t+1)*kvOut]), F32)
+				ropeTen := c.Upload(NewF32(Default(), []int{kvOut}, kRoped[t*kvOut:(t+1)*kvOut]), F32)
+				vRowTen := c.Upload(NewF32(Default(), []int{kvOut}, vfHost[t*kvOut:(t+1)*kvOut]), F32)
+				args.KV.AppendKV(args.Layer, rawTen, ropeTen, vRowTen, pos)
+			}
+			if _, ok := args.KV.(*cudaKV); ok && attnBackend.GPUResident() {
+				ctxDev = c.PromptPanelAttention(qRopedDev, args.KV, args.Layer, P, startPos, grp, args.Scale)
+			} else if _, ok := args.KV.(*cudaPagedKV); ok && attnBackend.GPUResident() {
+				ctxDev = c.PromptPanelAttention(qRopedDev, args.KV, args.Layer, P, startPos, grp, args.Scale)
+			} else {
+				qRoped := c.Read(qRopedDev)
+				allK := c.Read(args.KV.KeysView(args.Layer))
+				allV := c.Read(args.KV.ValuesView(args.Layer))
+				totalPositions := len(allK) / kvOut
+				context := prefillBatchCausalAttention(qRoped, allK, allV, P, startPos, totalPositions, nH, nKV, hd, args.Scale)
+				ctxDev = c.Upload(NewF32(Default(), []int{P, qOut}, context), F32)
+			}
+		} else {
+			qRoped := c.Read(qRopedDev)
+			context := prefillBatchCausalAttention(qRoped, kRoped, vfHost, P, 0, P, nH, nKV, hd, args.Scale)
+			ctxDev = c.Upload(NewF32(Default(), []int{P, qOut}, context), F32)
 		}
 	}
-
-	var allK, allV []float32
-	var totalPositions int
-	strideKV := kvOut
-
-	if args.KV != nil {
-		allK = c.Read(args.KV.KeysView(args.Layer))
-		allV = c.Read(args.KV.ValuesView(args.Layer))
-		totalPositions = len(allK) / strideKV
-	} else {
-		allK = kRoped
-		allV = vf
-		totalPositions = P
-		startPos = 0
-	}
-
-	context := prefillBatchCausalAttention(qRoped, allK, allV, P, startPos, totalPositions, nH, nKV, hd, args.Scale)
-	ctxDev := c.Upload(NewF32(Default(), []int{P, qOut}, context), F32)
 
 	var outTen Tensor
 	if args.Wo.buf != nil {
@@ -1528,4 +1546,45 @@ func (c *cudaBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, e
 		Context: ctxDev,
 		Tokens:  P,
 	}, nil
+}
+
+func inspectCUDAPrefillKV(kv KVStore) (prec KVPrecision, paged bool, panelSupported bool) {
+	if kv == nil {
+		return KVPrecisionF32, false, true
+	}
+	switch s := kv.(type) {
+	case *cudaKV:
+		p := s.cfg.Precision
+		return p, false, p == 0 || p == KVPrecisionF32
+	case *cudaPagedKV:
+		p := s.cfg.Precision
+		return p, true, p == 0 || p == KVPrecisionF32
+	default:
+		return KVPrecisionF32, false, false
+	}
+}
+
+func (c *cudaBackend) uploadPrefillQKVPanels(qf, kf, vf []float32, P, qOut, kvOut int) (Tensor, Tensor, Tensor) {
+	qTen := c.Upload(NewF32(Default(), []int{P, qOut}, qf), F32)
+	kTen := c.Upload(NewF32(Default(), []int{P, kvOut}, kf), F32)
+	vTen := c.Upload(NewF32(Default(), []int{P, kvOut}, vf), F32)
+	return qTen, kTen, vTen
+}
+
+func (c *cudaBackend) promptPanelAttentionDirect(q, k, v Tensor, tokens, nH, nKV, hd int, scale float32) (Tensor, error) {
+	qOut := nH * hd
+	elems := tokens * qOut
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if err := AdmitDevice(c, "prefill-panel-attention"); err != nil {
+		return Tensor{}, err
+	}
+	b := c.dallocClass(elems*4, MemoryActivation, "prefill-panel-attention")
+	out := makeTensor(c, F32, RowMajor, []int{tokens, qOut}, nil, b)
+	status := int(C.fcuda_causal_attention_panel_f32(c.cf(q), c.cf(k), c.cf(v), c.cf(out), C.int(tokens), 0, C.int(nH), C.int(nKV), C.int(hd), C.float(scale)))
+	if status != 0 {
+		c.cudaFreeStorageLocked(out)
+		return Tensor{}, &CUDAOpError{Op: "Attention", Site: "prefill-panel-attention", Code: status, Msg: "causal panel attention failed"}
+	}
+	return out, nil
 }

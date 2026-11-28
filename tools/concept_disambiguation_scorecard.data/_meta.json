@@ -1592,6 +1592,16 @@
           "category": "incidental",
           "reason": "Continuous-batcher accessor field reporting queued admission KV-cache footprint on a 1-8 GPU node in internal/engine; metrics gauge for existing KV cache, not a distinct cache tier.",
           "token": "QueuedKVCacheBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Numeric byte count field for aggregate KV cache memory across GPUs in MidMarketPrefillPlan; sizing metric, not a cache subsystem.",
+          "token": "KVCacheBytesTotal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Numeric byte count field for per-GPU sharded KV cache memory in MidMarketPrefillPlan; sizing metric, not a cache subsystem.",
+          "token": "KVCacheBytesPerGPU"
         }
       ],
       "exclude": [
@@ -1666,6 +1676,8 @@
         "KCache",
         "KRawCache",
         "KVCacheBytesAsymmetric",
+        "KVCacheBytesPerGPU",
+        "KVCacheBytesTotal",
         "KVCacheHostSwapBytes",
         "ManagedProviderCache",
         "MaxCacheLoadWorkers",
@@ -2429,6 +2441,116 @@
           "category": "incidental",
           "reason": "Pre-existing V4.1 shared-attention filename cited in internal/sotamatrix/sotamatrix.go; not a separate attention mechanism.",
           "token": "cuda_v41_shared_attention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Backend label field inside internal/compute/conversion_ledger.go measurement records; instrumentation label, not a separate attention algorithm.",
+          "token": "AttentionBackend"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable holding selected CUDAAttentionKernel inside internal/compute/cuda.go PrefillBatch; call-site local, not a separate attention concept.",
+          "token": "attnBackend"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper method on CUDABackend running causal panel attention without persistent KVStore; internal helper, not a separate attention model.",
+          "token": "promptPanelAttentionDirect"
+        },
+        {
+          "category": "incidental",
+          "reason": "Sentinel enum value indicating no supported CUDA attention kernel below sm_80; selector enum value, not a separate attention concept.",
+          "token": "CUDAAttentionUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum variant selecting the generic tiled CUDA attention launcher; selector enum value, not a separate attention concept.",
+          "token": "CUDAAttentionScalarGeneric"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum variant selecting fused online-softmax decode flash attention kernel; selector enum value, not a separate attention concept.",
+          "token": "CUDAAttentionFlashDecode"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum variant selecting GPU-resident causal prefill panel kernel; selector enum value, not a separate attention concept.",
+          "token": "CUDAAttentionFlashPrefillPanel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum variant selecting MMA hd=256 prefill panel kernel; selector enum value, not a separate attention concept.",
+          "token": "CUDAAttentionMMA256Prefill"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum variant selecting SM120/Blackwell FP8 paged prefill path; selector enum value, not a separate attention concept.",
+          "token": "CUDAAttentionPagedFP8Prefill"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum variant selecting narrowed-KV typed attention kernel; selector enum value, not a separate attention concept.",
+          "token": "CUDAAttentionTypedKV"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unknown-enum formatting prefix in CUDAAttentionKernel.String(); debug format string, not a separate attention concept.",
+          "token": "cuda_attn_kernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method on ResidentPrefillHooks invoking device-resident causal panel attention; hook interface method, not a new attention algorithm.",
+          "token": "AttentionPanelDevice"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selection struct field on ResidentPrefillReport and MidMarketPrefillPlan; metadata field, not a separate attention mechanism.",
+          "token": "AttentionSelection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable holding resolved CUDAAttentionSelection in SizePrefillMidMarket; local variable, not a separate attention concept.",
+          "token": "attnSel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Parameter bundle passed to SelectCUDAAttentionKernel in internal/compute/cuda_attention_select.go; call-site option struct, not a new attention model.",
+          "token": "CUDAAttentionOptions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Decision struct returned by ResolveCUDAAttentionSelection/SelectCUDAAttentionKernel in internal/compute; dispatch receipt, not a distinct attention layer.",
+          "token": "CUDAAttentionSelection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Batched-prompt prefill attention entry point on internal/compute backends for Q4_K/Blackwell panels; execution helper for causal attention, not a separate attention definition.",
+          "token": "PromptPanelAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure host oracle resolving CUDA attention kernel choice and fallback reason in internal/compute; dispatch helper, not a distinct attention algorithm.",
+          "token": "ResolveCUDAAttentionSelection"
+        },
+        {
+          "category": "incidental",
+          "reason": "CGO FFI binding name for F32 batched causal prompt-panel attention in internal/compute/cuda.go; native FFI symbol, not a separate user-facing attention concept.",
+          "token": "fcuda_causal_attention_panel_f32"
+        },
+        {
+          "category": "incidental",
+          "reason": "CGO FFI binding name for single-head FlashAttention F32 CUDA kernel in internal/compute/cuda.go; native FFI symbol, not a separate user-facing attention concept.",
+          "token": "fcuda_flash_attention_f32"
+        },
+        {
+          "category": "incidental",
+          "reason": "Backend dispatch helper choosing CUDA attention path from hardware/head_dim caps in internal/compute; routing function, not a separate attention concept.",
+          "token": "SelectCUDAAttentionKernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal compute enumeration naming the dispatched CUDA attention kernel variant in internal/compute/cuda_attention_select.go; selector enum, not a separate attention abstraction.",
+          "token": "CUDAAttentionKernel"
         }
       ],
       "exclude": [
@@ -2437,17 +2559,39 @@
       ],
       "id": "attention",
       "ignore": [
+        "AttentionBackend",
+        "AttentionPanelDevice",
+        "AttentionSelection",
+        "attnBackend",
+        "attnSel",
         "BuildTreeAttentionMask",
+        "cuda_attn_kernel",
+        "CUDAAttentionFlashDecode",
+        "CUDAAttentionFlashPrefillPanel",
+        "CUDAAttentionKernel",
+        "CUDAAttentionMMA256Prefill",
+        "CUDAAttentionOptions",
+        "CUDAAttentionPagedFP8Prefill",
+        "CUDAAttentionScalarGeneric",
+        "CUDAAttentionSelection",
+        "CUDAAttentionTypedKV",
+        "CUDAAttentionUnsupported",
         "EnableV41SharedAttention",
         "EstimatedAttention",
         "EstimatedAttentionSeconds",
         "ExecutionPrefillAttention",
         "FAK_CUDA_QWEN35_ATTN_POSTPROCESS",
         "FAK_QATTN_Q8_PACKED",
+        "fcuda_causal_attention_panel_f32",
+        "fcuda_flash_attention_f32",
         "FCUDA_KV_FP8_PHASE_ATTENTION",
         "MetalFallbackPrefillAttentionCPU",
         "PrefillAttentionSupported",
         "PrefillAttentionTiming",
+        "PromptPanelAttention",
+        "promptPanelAttentionDirect",
+        "ResolveCUDAAttentionSelection",
+        "SelectCUDAAttentionKernel",
         "TreeAttentionMask",
         "ValidateTreeAttentionMask",
         "attentionContinuation",
@@ -7847,6 +7991,11 @@
           "category": "incidental",
           "reason": "Continuous-batcher counter of slots that yielded after decoding in internal/engine; scheduler accounting counter, not a new slot type.",
           "token": "YieldedSlots"
+        },
+        {
+          "category": "incidental",
+          "reason": "Measurement ledger struct tracking prefill conversion benchmarks in internal/compute/conversion_ledger.go; telemetry helper, not a serving session.",
+          "token": "ConversionSession"
         }
       ],
       "exclude": [
@@ -7866,6 +8015,7 @@
         "BytesPerSession",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
+        "ConversionSession",
         "CorrelationSession",
         "CoveredSessions",
         "DefaultMaxSlots",
@@ -10559,6 +10709,31 @@
           "category": "incidental",
           "reason": "Pinned upstream CUDA source-file stem cited for provenance; it is not a FAK gateway, inference engine or routing layer.",
           "token": "fused_qknorm_rope_cache_kernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local baseline kernel string inside internal/compute/conversion_ledger.go; helper variable, not an engine abstraction.",
+          "token": "beforeKernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local boolean flag indicating native kernel check result in internal/compute/conversion_ledger.go; local check variable, not an engine concept.",
+          "token": "kernelOK"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal compute enumeration naming dispatched CUDA attention kernel variant in internal/compute/cuda_attention_select.go; selector enum, not an engine abstraction.",
+          "token": "CUDAAttentionKernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unknown-enum formatting prefix in CUDAAttentionKernel.String(); debug format string, not a gateway/engine concept.",
+          "token": "cuda_attn_kernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selector function choosing CUDA attention kernel variant from SM arch and geometry options; internal helper, not a separate engine.",
+          "token": "SelectCUDAAttentionKernel"
         }
       ],
       "exclude": [
@@ -10570,6 +10745,9 @@
         "AffinityGatewayConfig",
         "AffinitySelection",
         "BaselineEngineCalls",
+        "beforeKernel",
+        "cuda_attn_kernel",
+        "CUDAAttentionKernel",
         "DeniedEngineCalls",
         "EngineAfter",
         "EngineBash",
@@ -10592,6 +10770,7 @@
         "InKernelKVPrefixPressureSource",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelID",
+        "kernelOK",
         "KernelProfile",
         "KernelProfileRegistered",
         "KernelRevision",
@@ -10612,6 +10791,7 @@
         "RegisterEngines",
         "RegisterKernelProfileReader",
         "RemotePlacement",
+        "SelectCUDAAttentionKernel",
         "SessionAffinityGateway",
         "SetDirectorEngine",
         "SpeculativeEngine",
@@ -13389,6 +13569,11 @@
           "category": "incidental",
           "reason": "Lower-bound context constraint field on ServeEnvelopeConstraints (promoted from internal/ggufload); constrains the existing ServeEnvelope solver rather than introducing a new context concept.",
           "token": "MinCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local CUDA execution-context helper parameter inside internal/compute kernel launch paths; device-stream receiver variable, not a context-window or KV-context concept.",
+          "token": "ctxDev"
         }
       ],
       "exclude": [
@@ -13416,6 +13601,7 @@
         "ContextTokenSeconds",
         "ContextTokensSaved",
         "ContextualID",
+        "ctxDev",
         "DuplicateContextKeyError",
         "EmptyIncrementalContext",
         "ExecuteModelContext",
@@ -15416,6 +15602,21 @@
           "category": "false-positive",
           "reason": "Fixed redacted syntax-refusal reason where no supported atom or rule-name begins, not a product support level.",
           "token": "unsupported_or_missing_atom"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local capability predicate for GPU-resident prefill panel support in internal/compute/cuda.go; boolean check, not a maturity tier.",
+          "token": "panelSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Sentinel enum value indicating below-sm_80 hardware fallback in cuda_attention_select.go; selector enum value, not a support tier.",
+          "token": "CUDAAttentionUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean hardware capability field on CUDAAttentionSelection for sm_89+ FP8 KV support; capability flag, not a maturity tier.",
+          "token": "SupportsFP8KV"
         }
       ],
       "exclude": [
@@ -15448,6 +15649,7 @@
         "CoveragePartial",
         "CoverageSkipped",
         "CoverageUnavailable",
+        "CUDAAttentionUnsupported",
         "DecodeInterleaveUnsupported",
         "DefaultSetupParityPairs",
         "DefaultSetupParityReport",
@@ -15489,6 +15691,7 @@
         "NativeDecodeTraceSupported",
         "NonCacheParity",
         "OutcomeSupported",
+        "panelSupported",
         "PARTIAL_COVERAGE",
         "PROFILE_UNSUPPORTED_HARNESS",
         "ParityAhead",
@@ -15555,6 +15758,7 @@
         "SupportPartial",
         "SupportedFeatures",
         "SupportsBorrowedExpertUploads",
+        "SupportsFP8KV",
         "SupportsRoutedExpertKQuant",
         "SupportsV41DSparkMeanRange",
         "SupportsV41DeferredStatus",
@@ -18447,6 +18651,16 @@
           "category": "incidental",
           "reason": "Bounded 1-8 GPU single-node tensor/pipeline/replica placement struct returned inside internal/engine; topology output carrier, not a meta-planning workflow.",
           "token": "SingleNodePlacementPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Analytic speedup ratio helper in internal/compute/conversion_ledger.go; numeric summary field, not an execution plan.",
+          "token": "CandidateGPUSpeedup"
+        },
+        {
+          "category": "incidental",
+          "reason": "Memory sizing and roofline report struct returned by SizePrefillMidMarket for 1-8 GPU nodes; sizing struct, not an execution plan.",
+          "token": "MidMarketPrefillPlan"
         }
       ],
       "exclude": [
@@ -18477,6 +18691,7 @@
         "CandidateArm",
         "CandidateDecodeMicroseconds",
         "CandidateEnvironmentSHA",
+        "CandidateGPUSpeedup",
         "CandidateMeanTokensPerS",
         "CandidateOutputNMSE",
         "CandidatePassed",
@@ -18514,6 +18729,7 @@
         "KVPrefixPressuredCandidates",
         "KindCandidate",
         "ListPlanSchema",
+        "MidMarketPrefillPlan",
         "MSIXPlan",
         "MaintenanceSeconds",
         "MatMulCandidate",

@@ -32,27 +32,16 @@ func (c *cudaBackend) Ink2PMatMul(w Tensor, x, y Ink2Ref, T int) error {
 	wb := c.cudaBufForSubmit(w)
 	xp, yp := c.ink2F(x), c.ink2F(y)
 	P := C.int(T)
-	// Prompt panels run the int8 tensor-core GEMM; it declines (cudaErrorInvalidValue, nothing enqueued)
+	// Prompt panels run the int8 tensor-core MMQ GEMM; it declines (cudaErrorInvalidValue, nothing enqueued)
 	// on shapes it does not cover, which then take the legacy launcher below.
-	if T >= 16 && ink2PrefillFast("dense") {
-		kind, scales := C.int(0), (*C.float)(nil)
-		switch w.Dtype {
-		case Q8_0:
-			if w.Quant != nil && w.Quant.Block == 32 {
-				kind, scales = 8, (*C.float)(wb.scales)
-			}
-		case Q5_K:
-			kind = 5
-		case Q6_K:
-			kind = 6
-		default:
-			// Every other dtype has no MMQ kernel and takes the launchers below.
+	if kind, ok := Ink2PDenseMMQKind(w.Dtype, w.Quant, T, out, in, ink2PrefillFast("dense")); ok {
+		var scales *C.float
+		if w.Dtype == Q8_0 {
+			scales = (*C.float)(wb.scales)
 		}
-		if kind != 0 {
-			rc := C.fcuda_ink2p_dense_mmq(wb.ptr, scales, xp, yp, C.int(out), C.int(in), P, kind)
-			if rc != 1 {
-				return ink2Status("prefill matmul mmq", rc)
-			}
+		rc := C.fcuda_ink2p_dense_mmq(wb.ptr, scales, xp, yp, C.int(out), C.int(in), P, C.int(kind))
+		if rc != 1 {
+			return ink2Status("prefill matmul mmq", rc)
 		}
 	}
 	switch w.Dtype {
