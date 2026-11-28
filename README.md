@@ -84,7 +84,7 @@ Set `FAK_INKLING2_SERVE_BATCH=0` to disable batching. To reproduce the fixed
 
 ## Benchmarks
 
-[![fak benchmark sweep: Inkling-2-Mini on RTX 5080 and kernel checks, sorted from strongest wins to the single-stream fence](visuals/61-hero-benchmark-sweep.png)](docs/benchmarks/README.md)
+![fak benchmark sweep: Inkling-2-Mini on RTX 5080 and kernel checks, sorted from strongest wins to the single-stream fence](visuals/61-hero-benchmark-sweep.png)
 
 On one RTX 5080 16 GB, `fak`’s own CUDA engine decodes Inkling-2-Mini at
 122.34 tok/s in-process (`kv=f16`, auto context 29,184). Over HTTP at 16K context
