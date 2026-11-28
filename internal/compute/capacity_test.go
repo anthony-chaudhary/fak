@@ -1,11 +1,12 @@
 package compute
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
 
-// capDevice is a fakeDevice that ALSO reports its capacity — the test stand-in for a real
+// capDevice is a fakeDevice that ALSO reports its capacity â€” the test stand-in for a real
 // device backend (cuda/metal/vulkan) implementing the DeviceCapacity capability. It embeds
 // fakeDevice for the full Backend surface and overrides only Caps (to advertise the probe)
 // and adds DeviceMemory.
@@ -31,7 +32,7 @@ func (c capDevice) HostMemory() (int64, int64, bool) {
 	return c.hostTotal, c.hostFree, c.hostKnown
 }
 
-// halfAdvertised implements DeviceMemory but does NOT set Caps().CapacityProbe — it must be
+// halfAdvertised implements DeviceMemory but does NOT set Caps().CapacityProbe â€” it must be
 // treated as non-reporting (the two-part discovery idiom: cap AND interface, never one).
 type halfAdvertised struct {
 	fakeDevice
@@ -41,7 +42,7 @@ func (halfAdvertised) DeviceMemory() (int64, int64, bool) { return 24 << 30, 24 
 
 func TestDeviceMemoryInfoUnknownForPlainBackends(t *testing.T) {
 	// The CPU reference and a plain device that does not implement DeviceCapacity both
-	// report unknown — the portable-floor contract.
+	// report unknown â€” the portable-floor contract.
 	for _, b := range []Backend{cpu(), fakeDevice{}} {
 		total, free, known := DeviceMemoryInfo(b)
 		if known {
@@ -58,7 +59,7 @@ func TestDeviceMemoryInfoUnknownForPlainBackends(t *testing.T) {
 
 func TestCapacityProbeCapGatesTheAssertion(t *testing.T) {
 	// A backend that implements DeviceMemory but forgets the Caps().CapacityProbe flag is
-	// NOT trusted to report — it half-advertised, so it reads as unknown (fail-open).
+	// NOT trusted to report â€” it half-advertised, so it reads as unknown (fail-open).
 	if _, _, known := DeviceMemoryInfo(halfAdvertised{}); known {
 		t.Fatal("a backend that omits Caps().CapacityProbe must read as unknown")
 	}
@@ -71,7 +72,7 @@ func TestExpertParallelLargestBandExperts(t *testing.T) {
 	cases := []struct{ experts, ranks, want int }{
 		{160, 1, 160}, // ranks=1: one band owns every expert
 		{160, 8, 20},  // even split
-		{160, 3, 54},  // ceil(160/3)=54 — the BUSIEST band, not the average (53.3)
+		{160, 3, 54},  // ceil(160/3)=54 â€” the BUSIEST band, not the average (53.3)
 		{8, 8, 1},
 		{8, 16, 1}, // ranks clamped to numExperts (a rank with no experts is invalid)
 		{8, 0, 8},  // ranks<1 clamps to 1
@@ -98,7 +99,7 @@ func TestExpertParallelPerRankWeightBytes(t *testing.T) {
 		t.Fatalf("ranks=8 per-rank=%d, want %d (replicated + experts/8)", got, want8)
 	}
 	// Monotone non-increasing in ranks, never below the replicated floor (experts shard, the
-	// replicated set does not) — the property the EP capacity argument rests on.
+	// replicated set does not) â€” the property the EP capacity argument rests on.
 	prev := int64(1) << 62
 	for _, r := range []int{1, 2, 4, 8, 16, 160} {
 		got := ExpertParallelPerRankWeightBytes(replicated, experts, E, r)
@@ -114,7 +115,7 @@ func TestExpertParallelPerRankWeightBytes(t *testing.T) {
 
 // TestExpertParallelPerRankPlanFitsGate is the motivating case: a GLM-5.2-scale MoE on 80 GiB
 // cards. EP-4 OOMs a card (per-card shard exceeds 80 GiB); EP-8 fits. The plan + the existing
-// RefuseMemoryPlanIfTooBig turn that into a typed pre-load refusal instead of a minutes-in OOM —
+// RefuseMemoryPlanIfTooBig turn that into a typed pre-load refusal instead of a minutes-in OOM â€”
 // and fail OPEN on cpu-ref (unknown capacity), never blocking the portable floor.
 func TestExpertParallelPerRankPlanFitsGate(t *testing.T) {
 	const replicated = int64(10) << 30 // 10 GiB replicated
@@ -128,7 +129,7 @@ func TestExpertParallelPerRankPlanFitsGate(t *testing.T) {
 		t.Fatalf("EP-4 on an 80 GiB card: verdict=%s, want too_big", v)
 	}
 	if err := RefuseMemoryPlanIfTooBig(card, plan4, 0); err == nil {
-		t.Fatal("EP-4 per-card shard exceeds the card — RefuseMemoryPlanIfTooBig should refuse before load")
+		t.Fatal("EP-4 per-card shard exceeds the card â€” RefuseMemoryPlanIfTooBig should refuse before load")
 	}
 
 	// EP-8: 10 + 424*20/160 = 10 + 53 = 63 GiB/card -> fits.
@@ -203,7 +204,7 @@ func TestHostSystemMemoryProbeIsSaneWhenAvailable(t *testing.T) {
 }
 
 func TestFitsOnDeviceFailsOpenOnUnknown(t *testing.T) {
-	// A non-reporting backend must NEVER return FitTooBig — capacity is unknown, so the
+	// A non-reporting backend must NEVER return FitTooBig â€” capacity is unknown, so the
 	// caller proceeds. This is the contract that keeps the capability strictly additive.
 	for _, want := range []int64{1, 1 << 40, 1 << 50} {
 		if v, _ := FitsOnDevice(cpu(), want, 0); v != FitUnknown {
@@ -234,7 +235,7 @@ func TestFitVerdictString(t *testing.T) {
 
 // RefuseIfTooBig is the load-time admission decision the model loaders call with a pre-load
 // footprint estimate (issue #709; capacity-bridge Plank 5). It MUST fail open on every verdict
-// except FitTooBig, so wiring it in never blocks a path that worked before — including the
+// except FitTooBig, so wiring it in never blocks a path that worked before â€” including the
 // cpu-ref floor (unknown capacity) and a model that fits.
 
 func TestRefuseIfTooBigFailsOpen(t *testing.T) {
@@ -253,7 +254,7 @@ func TestRefuseIfTooBigFailsOpen(t *testing.T) {
 
 func TestRefuseIfTooBigReturnsTypedSizingError(t *testing.T) {
 	// FitTooBig: a capacity-reporting backend that KNOWS the request exceeds its ceiling yields
-	// a *FitError carrying the sizing — the answerable form of the would-be OOM panic.
+	// a *FitError carrying the sizing â€” the answerable form of the would-be OOM panic.
 	dev := capDevice{total: 24 << 30, free: 1 << 30, known: true} // 1 GiB free
 	err := RefuseIfTooBig(dev, 8<<30, 0)                          // 8 GiB into 1 GiB -> FitTooBig
 	if err == nil {
@@ -480,7 +481,7 @@ func TestDeviceAllocErrorCarriesMemoryClass(t *testing.T) {
 	}
 }
 
-// ceilingDevice is a capDevice that ALSO reports a stable device-local ceiling — the
+// ceilingDevice is a capDevice that ALSO reports a stable device-local ceiling â€” the
 // test stand-in for the Vulkan backend, whose device-local heap capacity is distinct
 // from the volatile VK_EXT_memory_budget free reading (fak#13186).
 type ceilingDevice struct {
@@ -497,7 +498,7 @@ func TestDeviceCeilingInfo(t *testing.T) {
 		t.Fatalf("DeviceCeilingInfo = (%d, %v), want the stable ceiling (84 GiB, true)", ceiling, ok)
 	}
 	// A backend that reports a volatile reading but no stable ceiling (a plain capDevice)
-	// reads as unknown so the caller keeps its fallback — fail-open preserved.
+	// reads as unknown so the caller keeps its fallback â€” fail-open preserved.
 	if ceiling, ok := DeviceCeilingInfo(capDevice{total: 24 << 30, free: 20 << 30, known: true}); ok || ceiling != 0 {
 		t.Fatalf("capDevice without DeviceLocalCeiling = (%d, %v), want (0, false)", ceiling, ok)
 	}
@@ -620,7 +621,7 @@ func TestQwen35RuntimeExtraMemory(t *testing.T) {
 		t.Fatalf("policy none host bytes = %d, want unslacked %d", exactHost, want)
 	}
 
-	// 7. Fail closed on missing/unknown inputs — never a silently cheap zero-byte plan.
+	// 7. Fail closed on missing/unknown inputs â€” never a silently cheap zero-byte plan.
 	for name, cfg := range map[string]Qwen35RuntimeExtraConfig{
 		"missing hidden":     {PlannedTokens: planned, PanelTokens: panel, Policy: RuntimeExtraPolicyNone},
 		"missing planned":    {HiddenWidth: hidden, PanelTokens: panel, Policy: RuntimeExtraPolicyNone},
@@ -646,5 +647,34 @@ func TestQwen35RuntimeExtraMemory(t *testing.T) {
 	}
 	if _, err := EstimateQwen35RuntimeExtraMemoryPlan(over); err == nil {
 		t.Fatal("overflowing panel: want typed capacity-unknown error, got nil")
+	}
+}
+
+// fak-test:runtime fast est=5ms
+func TestComputeAutotuneWorkerPool(t *testing.T) {
+	t.Parallel()
+	cands := []AutotuneCandidate{{ID: "a", Cost: 9}, {ID: "b", Cost: 3}, {ID: "c", Cost: 3}, {ID: "d", Cost: 7}, {ID: "bad"}}
+	eval := func(c AutotuneCandidate) (int64, error) {
+		if c.ID == "bad" {
+			return 0, strconv.ErrSyntax
+		}
+		return c.Cost, nil
+	}
+	serial, ok := SelectAutotuneWinner(cands, 1, eval)
+	if !ok || serial.ID != "b" {
+		t.Fatalf("serial winner = %+v ok=%v, want b (lowest cost, lowest index on tie)", serial, ok)
+	}
+	for _, workers := range []int{2, 4, 64} {
+		for rep := 0; rep < 20; rep++ {
+			if got, _ := SelectAutotuneWinner(cands, workers, eval); got != serial {
+				t.Fatalf("workers=%d picked %+v, serial picked %+v", workers, got, serial)
+			}
+		}
+	}
+	if _, ok := SelectAutotuneWinner(nil, 4, eval); ok {
+		t.Fatal("no candidates must report ok=false")
+	}
+	if _, ok := SelectAutotuneWinner(cands[4:], 4, eval); ok {
+		t.Fatal("all-failing candidates must report ok=false")
 	}
 }

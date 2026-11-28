@@ -1282,3 +1282,52 @@ func (e *DeviceAllocError) DemandClass() MemoryClass {
 	}
 	return e.Class
 }
+
+// AutotuneCandidate is one kernel candidate evaluated by the tuning path.
+type AutotuneCandidate struct {
+	ID   string
+	Cost int64 // lower wins
+}
+
+// SelectAutotuneWinner evaluates candidates with a bounded pool of workers
+// (FlashInfer parallel autotune compile pool, PR #3322 - principle only) and
+// returns the lowest-cost candidate, ties broken by lowest index. Candidates
+// whose eval fails are skipped; ok is false when none succeeds. Selection is
+// independent of workers and scheduling, so workers=1 (serial) and workers=N
+// pick the same winner. The selection metric is the eval result, unchanged.
+func SelectAutotuneWinner(cands []AutotuneCandidate, workers int, eval func(AutotuneCandidate) (int64, error)) (winner AutotuneCandidate, ok bool) {
+	if len(cands) == 0 {
+		return AutotuneCandidate{}, false
+	}
+	workers = min(max(workers, 1), len(cands))
+	costs := make([]int64, len(cands))
+	valid := make([]bool, len(cands))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if c, err := eval(cands[i]); err == nil {
+					costs[i], valid[i] = c, true
+				}
+			}
+		}()
+	}
+	for i := range cands {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	best := -1
+	for i := range cands {
+		if valid[i] && (best < 0 || costs[i] < costs[best]) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return AutotuneCandidate{}, false
+	}
+	return cands[best], true
+}
