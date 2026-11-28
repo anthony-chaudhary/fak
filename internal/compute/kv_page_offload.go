@@ -499,3 +499,57 @@ func (o *KVPageOffloader) Config() KVOffloadConfig {
 	defer o.mu.RUnlock()
 	return o.cfg
 }
+
+// ADAPT of modular/modular (Apache-2.0 WITH LLVM-exception),
+// rust_kv/kv-tier-connector/src/copy_engine.rs:111 spans and :87 check_row
+// @88ab8913af6b9298fe914e0f20d87a49e4172d0d: host rows and disk slots are padded to
+// whole 4 KiB while device blocks stride by their own bytes. A PaddedRowUnit separates
+// the host stride from the device stride, so a copy moves only the unit's bytes and the
+// padding goes to disk, never to the device. Span math and validation only; copy
+// execution stays GPU-gated.
+
+// PaddedRowUnitSpan is one device unit's slice of a padded host row.
+type PaddedRowUnitSpan struct {
+	Unit       int
+	HostOffset int // byte offset inside the padded host row
+	DevOffset  int // byte offset inside the device stream
+	Len        int // bytes copied: the unit's own bytes, never the padding
+}
+
+// PaddedRowLayout validates and describes one padded row.
+type PaddedRowLayout struct {
+	Units      int // devices per replica
+	UnitBytes  int // each device block's own byte length
+	HostStride int // padded host row size (whole 4 KiB)
+	Replicated bool
+}
+
+// PaddedRowPad rounds n up to whole 4 KiB.
+func PaddedRowPad(n int) int { return (n + 4095) &^ 4095 }
+
+// PaddedRowSpans returns per-unit spans after checking the row, mirroring check_row:
+// logical bytes must fit the stride, and the stride must be whole 4 KiB. A replicated
+// leaf copies through unit 0 only and fans out on the device side.
+func PaddedRowSpans(l PaddedRowLayout) ([]PaddedRowUnitSpan, error) {
+	if l.Units <= 0 || l.UnitBytes <= 0 || l.HostStride <= 0 {
+		return nil, fmt.Errorf("compute: padded row needs positive units, unit bytes and stride")
+	}
+	if l.HostStride%4096 != 0 {
+		return nil, fmt.Errorf("compute: host stride %d is not a whole number of 4 KiB", l.HostStride)
+	}
+	logical := l.UnitBytes
+	if !l.Replicated {
+		logical = l.UnitBytes * l.Units
+	}
+	if logical > l.HostStride {
+		return nil, fmt.Errorf("compute: logical row %d exceeds host stride %d", logical, l.HostStride)
+	}
+	if l.Replicated {
+		return []PaddedRowUnitSpan{{Unit: 0, HostOffset: 0, DevOffset: 0, Len: l.UnitBytes}}, nil
+	}
+	spans := make([]PaddedRowUnitSpan, l.Units)
+	for u := range spans {
+		spans[u] = PaddedRowUnitSpan{Unit: u, HostOffset: u * l.UnitBytes, DevOffset: u * l.UnitBytes, Len: l.UnitBytes}
+	}
+	return spans, nil
+}
