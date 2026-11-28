@@ -855,3 +855,41 @@ func BenchmarkStore_AllocateEvict(b *testing.B) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestSelectedPageDecodeReadSet(t *testing.T) {
+	store, err := kv.New(kv.DefaultConfig())
+	if err != nil {
+		t.Fatalf("kv.New: %v", err)
+	}
+	defer store.Close()
+
+	keys := make([]kv.CacheKey, 5)
+	for i := range keys {
+		keys[i] = kv.CacheKey{
+			SessionID:   "quest-readset",
+			Turn:        0,
+			Layer:       0,
+			TokenOffset: i * 16,
+			NumTokens:   16,
+		}
+		if _, err := store.Put(keys[i], []byte{byte('a' + i), byte('0' + i)}); err != nil {
+			t.Fatalf("Put(%d): %v", i, err)
+		}
+	}
+	store.ResetStats()
+
+	pages, stats, err := store.ReadSelectedPages(keys, []int{1, 4})
+	if err != nil {
+		t.Fatalf("ReadSelectedPages: %v", err)
+	}
+	if len(pages) != 2 || pages[0].Data[0] != 'b' || pages[1].Data[0] != 'e' {
+		t.Fatalf("unexpected selected pages: %+v", pages)
+	}
+	if stats.TotalPages != 5 || stats.SelectedPages != 2 || stats.PagesRead != 2 || stats.BytesRead != 4 {
+		t.Fatalf("unexpected read-set stats: %+v", stats)
+	}
+	if gotGets := store.Stats().Gets; gotGets != 2 {
+		t.Fatalf("KVStore Gets = %d, want 2 (only selected pages)", gotGets)
+	}
+}

@@ -1205,3 +1205,38 @@ func (s *KVStore) Close() error {
 	s.freeIDs = nil
 	return err
 }
+
+// DecodeReadStats reports the read-set shrink achieved when decode attention
+// fetches only the Quest-selected pages rather than all cached pages (quest-4).
+type DecodeReadStats struct {
+	TotalPages    int
+	SelectedPages int
+	PagesRead     int
+	BytesRead     int64
+}
+
+// ReadSelectedPages reads ONLY the subset of pageKeys named by selectedIndices,
+// never touching unselected pages, and returns the fetched pages plus stats.
+func (s *KVStore) ReadSelectedPages(pageKeys []CacheKey, selectedIndices []int) ([]*Page, DecodeReadStats, error) {
+	stats := DecodeReadStats{
+		TotalPages:    len(pageKeys),
+		SelectedPages: len(selectedIndices),
+	}
+	if len(selectedIndices) == 0 {
+		return nil, stats, nil
+	}
+	out := make([]*Page, 0, len(selectedIndices))
+	for _, idx := range selectedIndices {
+		if idx < 0 || idx >= len(pageKeys) {
+			return nil, stats, fmt.Errorf("%w: selected page index %d out of [0,%d)", ErrPageNotFound, idx, len(pageKeys))
+		}
+		page, err := s.Get(pageKeys[idx])
+		if err != nil {
+			return nil, stats, err
+		}
+		stats.PagesRead++
+		stats.BytesRead += int64(page.BytesUsed)
+		out = append(out, page)
+	}
+	return out, stats, nil
+}
