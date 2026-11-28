@@ -1617,6 +1617,31 @@
           "category": "incidental",
           "reason": "JSON struct tag on turnkeyNativeStartup.RadixReason in cmd/fak/up_native.go; startup telemetry tag, not a separate cache abstraction.",
           "token": "radix_kv_cache_reason"
+        },
+        {
+          "category": "incidental",
+          "reason": "Context helper passing cache-populate option inside internal/agent/inkernel_decode.go; plumbing helper, not a cache subsystem.",
+          "token": "inKernelCachePopulateFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported context key used to propagate cache-populate flag inside internal/agent/inkernel_decode_cacheprime.go; wiring key, not a cache layer.",
+          "token": "inKernelCachePopulateKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported context option wrapper enabling in-kernel cache prime inside internal/agent/inkernel_decode_cacheprime.go; context helper, not a cache type.",
+          "token": "withInKernelCachePopulate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Struct encapsulating canonical prefix cache identity fingerprint for InKernelPlanner (internal/agent/inkernel_planner_config.go); cache key wrapper, not a cache subsystem.",
+          "token": "PrefixCacheIdentity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized state snapshot string/bytes produced by prime cache helpers in internal/agent/inkernel_planner_config.go; snapshot value, not a cache subsystem.",
+          "token": "primeCacheStateSerialized"
         }
       ],
       "exclude": [
@@ -1681,6 +1706,8 @@
         "GoCacheHighBytes",
         "GoCacheLowBytes",
         "GoCacheMinAge",
+        "inKernelCachePopulateFromContext",
+        "inKernelCachePopulateKey",
         "INVALID_CACHE_EVIDENCE",
         "InitialCacheTokens",
         "InputCached",
@@ -1704,7 +1731,9 @@
         "OpCacheLoad",
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
+        "PrefixCacheIdentity",
         "PrimeCacheState",
+        "primeCacheStateSerialized",
         "ProviderCacheWriteTokens",
         "ProviderCalibration",
         "QueuedKVCacheBytes",
@@ -1997,7 +2026,8 @@
         "usercachedir",
         "v41EngramLookAheadCacheMetadata",
         "vcache-signals",
-        "vcachecalibration"
+        "vcachecalibration",
+        "withInKernelCachePopulate"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -8014,6 +8044,61 @@
           "category": "incidental",
           "reason": "Measurement ledger struct tracking prefill conversion benchmarks in internal/compute/conversion_ledger.go; telemetry helper, not a serving session.",
           "token": "ConversionSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Helper registering active radix leaf pointer on session manager in internal/agent/inkernel_planner_config.go; internal callback, not a separate runtime.",
+          "token": "registerActiveSessionLeafForContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed session identifier passed to radix-session tracking methods on InKernelPlanner (internal/agent/inkernel_planner_config.go); identifier type, not a runtime subsystem.",
+          "token": "RadixSessionID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Cleanup method releasing radix session refs on InKernelPlanner (internal/agent/inkernel_planner_config.go); lifecycle method, not a separate runtime.",
+          "token": "ReleaseRadixSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generation counter incremented when reopening or resetting a radix session in internal/agent/inkernel_planner_config.go; monotonic guard, not a runtime.",
+          "token": "RadixSessionGen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Helper method opening/reusing session-scoped radix tracking entry on InKernelPlanner (internal/agent/inkernel_planner_config.go); method, not a runtime.",
+          "token": "OpenRadixSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method binding active radix leaf pointer for a session turn on InKernelPlanner (internal/agent/inkernel_planner_config.go); method, not a runtime.",
+          "token": "RegisterRadixSessionLeaf"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal helper computing namespace prefix while planner mutex is held (internal/agent/inkernel_planner_config.go); string key builder, not a runtime.",
+          "token": "sessionNamespaceLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic sentinel indicator marking closed radix session state in internal/agent/inkernel_planner_config.go; boolean/sentinel field, not a runtime.",
+          "token": "RadixSessionClosed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method executing session-bound NextTurnPrime into radix KV store on InKernelPlanner (internal/agent/inkernel_planner_config.go); operation method, not a runtime.",
+          "token": "PrimeRadixSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method priming tokenized message history for a radix session on InKernelPlanner (internal/agent/inkernel_planner_config.go); operation method, not a runtime.",
+          "token": "PrimeRadixSessionMessages"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method marking a failed session turn quarantined so poisoned KV is excluded (internal/agent/inkernel_planner_config.go); lifecycle guard method, not a runtime.",
+          "token": "QuarantineSessionTurn"
         }
       ],
       "exclude": [
@@ -8072,18 +8157,28 @@
         "NewSessionAffinityGateway",
         "NewSessionRow",
         "ObservedSessions",
+        "OpenRadixSession",
         "OutcomeEvidence",
         "OutcomeSession",
         "PrefillingSlots",
+        "PrimeRadixSession",
+        "PrimeRadixSessionMessages",
         "PROVIDER_SESSION_CLEAR",
         "ProviderSessionBoundarySchema",
         "ProviderSessionID",
         "PublishSessionDiscovery",
+        "QuarantineSessionTurn",
+        "RadixSessionClosed",
+        "RadixSessionGen",
+        "RadixSessionID",
         "ReapMalformedSessionRefs",
         "ReasonProviderSessionClear",
         "ReasonSessionLive",
         "RecordSessionTerminalOutput",
+        "registerActiveSessionLeafForContext",
         "RegisteredObserved",
+        "RegisterRadixSessionLeaf",
+        "ReleaseRadixSession",
         "ResolveSessionEffect",
         "RestoreSessionClientState",
         "RestoreSessionClientStateWithDependency",
@@ -8143,6 +8238,7 @@
         "SessionMoveRestored",
         "SessionMoveSafePointRequested",
         "SessionMoveTransition",
+        "sessionNamespaceLocked",
         "SessionObjective",
         "SessionOpen",
         "SessionOutcome",
@@ -10762,6 +10858,31 @@
           "category": "incidental",
           "reason": "Local variable receiving resolved MTP engine name on non-Metal backends in cmd/fak/up_native.go; call-site local, not a separate engine concept.",
           "token": "nonMetalEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Context helper passing cache-populate option inside internal/agent/inkernel_decode.go; call helper, not an engine type.",
+          "token": "inKernelCachePopulateFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported context key used in internal/agent/inkernel_decode_cacheprime.go; wiring key, not an engine abstraction.",
+          "token": "inKernelCachePopulateKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported context option wrapper inside internal/agent/inkernel_decode_cacheprime.go; context helper, not an engine abstraction.",
+          "token": "withInKernelCachePopulate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported auxiliary state struct attached weakly to InKernelPlanner (internal/agent/inkernel_planner_config.go); internal side-table, not an engine type.",
+          "token": "inKernelPlannerExtras"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal constructor associating inKernelPlannerExtras with an InKernelPlanner via weak map (internal/agent/inkernel_planner_config.go); wiring helper, not an engine.",
+          "token": "bindInKernelPlannerExtras"
         }
       ],
       "exclude": [
@@ -10774,6 +10895,7 @@
         "AffinitySelection",
         "BaselineEngineCalls",
         "beforeKernel",
+        "bindInKernelPlannerExtras",
         "cuda_attn_kernel",
         "CUDAAttentionKernel",
         "DeniedEngineCalls",
@@ -10795,7 +10917,10 @@
         "FAK_INKERNEL_RADIX_HOST_L2_BYTES",
         "GatewaySeat",
         "GetDirectorEngine",
+        "inKernelCachePopulateFromContext",
+        "inKernelCachePopulateKey",
         "InKernelKVPrefixPressureSource",
+        "inKernelPlannerExtras",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelID",
         "kernelOK",
@@ -10960,6 +11085,7 @@
         "vulkankerneltiming",
         "vulkankerneltimingfrom",
         "webSearchEngine",
+        "withInKernelCachePopulate",
         "writeEngine",
         "InflightGate",
         "RequestRateGate",
@@ -13669,6 +13795,36 @@
           "category": "incidental",
           "reason": "Field on upFittedLoadResult and ServeFitCommitResult reporting post-shrink context window in cmd/fak/up_native.go; receipt field, not a new context model.",
           "token": "EffectiveCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Context helper extracting cache-populate option from context in internal/agent/inkernel_decode.go; Go context accessor, not model context.",
+          "token": "inKernelCachePopulateFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Helper binding active radix leaf registration onto request context in internal/agent/inkernel_planner_config.go; Go context wiring, not model context.",
+          "token": "registerActiveSessionLeafForContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Context-aware wrapper triggering prefix warm handoff inside internal/agent/inkernel_prefix_lookup.go; Go context wrapper, not a model context policy.",
+          "token": "demandWarmHandoffWithContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable holding prefix continuation/incremental context window state inside internal/agent/inkernel_planner_config.go; local struct, not a model context policy.",
+          "token": "incrementalCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method evicting corrupted/poisoned turn prefix ranges by context in internal/agent/inkernel_planner_config.go; invalidation method, not a model context policy.",
+          "token": "EvictPoisonedContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal helper removing poisoned request/prefix IDs in internal/agent/inkernel_planner_config.go; cleanup helper, not a context abstraction.",
+          "token": "evictPoisonedIDsContext"
         }
       ],
       "exclude": [
@@ -13701,11 +13857,14 @@
         "ctxDev",
         "ctxTok",
         "DefaultCtx",
+        "demandWarmHandoffWithContext",
         "DuplicateContextKeyError",
         "effCtx",
         "effectiveContextTokens",
         "EffectiveCtx",
         "EmptyIncrementalContext",
+        "EvictPoisonedContext",
+        "evictPoisonedIDsContext",
         "ExecuteModelContext",
         "ExtractCompactionSummary",
         "FAK_COMPACTION_THRASH_STOP",
@@ -13714,7 +13873,9 @@
         "HardMaxCtx",
         "IncrementalContext",
         "IncrementalContextGeneration",
+        "incrementalCtx",
         "InitializeIncrementalContext",
+        "inKernelCachePopulateFromContext",
         "IsCopiedContext",
         "lastCtx",
         "LockContext",
@@ -13733,6 +13894,7 @@
         "PlanContextLayers",
         "ReconcileIncrementalContext",
         "ReconcileIncrementalContextNow",
+        "registerActiveSessionLeafForContext",
         "RenderIncrementalContext",
         "RenderInvariantPrefix",
         "ReplaceIncrementalContext",
@@ -16246,6 +16408,26 @@
           "category": "incidental",
           "reason": "Unexported implementation constant sharing the admitted 3-percent available-memory boundary for issue #13537 between the existing BuildEvictionPressure and IsEvictionRisk helpers. It introduces no separate eviction mechanism, public policy API, or kernel pressure enum; the classifier and its percentage-versus-enum distinction remain the concept.",
           "token": "evictionAvailablePercentFloor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Audit receipt struct returned when evicting quarantined session tokens in internal/agent/inkernel_planner_config.go; telemetry record, not an eviction algorithm.",
+          "token": "QuarantineEvictionReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method evicting corrupted/poisoned turn prefix ranges by context in internal/agent/inkernel_planner_config.go; invalidation helper on existing radix store.",
+          "token": "EvictPoisonedContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal helper removing poisoned request/prefix IDs in internal/agent/inkernel_planner_config.go; cleanup helper on existing radix cache.",
+          "token": "evictPoisonedIDsContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method evicting stale fingerprint offset index entries in internal/agent/inkernel_planner_config.go; cleanup method on FingerprintIndex, not an eviction policy.",
+          "token": "EvictFingerprintOffset"
         }
       ],
       "id": "evict",
@@ -16255,6 +16437,7 @@
         "CompactReasonPinEvictRefused",
         "CounterCacheEvictions",
         "EvictDigest",
+        "EvictFingerprintOffset",
         "EvictHostSnapshot",
         "EvictHotKVPrefix",
         "EvictHotSnapshot",
@@ -16264,6 +16447,8 @@
         "EvictionPolicyLRU",
         "EvictionPriority",
         "EvictionsPerHit",
+        "EvictPoisonedContext",
+        "evictPoisonedIDsContext",
         "KVDigestEvictor",
         "KVEvictionCostHazard",
         "L2Evictions",
@@ -16271,6 +16456,7 @@
         "LocksEvicted",
         "NewWithTierBudgetsAndEvictionPolicy",
         "PickEvictionVictimHazard",
+        "QuarantineEvictionReceipt",
         "ReasonPinEvictRefused",
         "TransitionPressureEvict",
         "cache_evictions",
@@ -18780,6 +18966,31 @@
           "category": "incidental",
           "reason": "Local variable holding computed model memory plan byte budget in cmd/fak/up_auto_accel.go; local numeric variable, not an execution plan.",
           "token": "planMemoryBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Multi-turn reuse composition builder method/helper on InKernelPlanner in internal/agent/inkernel_planner_config.go; planner helper, not a standalone execution plan.",
+          "token": "ComposeReusePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported auxiliary state struct attached weakly to InKernelPlanner (internal/agent/inkernel_planner_config.go); internal side-table, not a scheduling plan.",
+          "token": "inKernelPlannerExtras"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal constructor binding auxiliary radix/fingerprint maps to InKernelPlanner (internal/agent/inkernel_planner_config.go); helper, not a plan abstraction.",
+          "token": "bindInKernelPlannerExtras"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local accessor variable pointing to inKernelPlannerExtras in internal/agent/inkernel_planner_config.go; local variable, not a planning abstraction.",
+          "token": "plannerExtras"
+        },
+        {
+          "category": "incidental",
+          "reason": "Helper combining fingerprint lookup and prefix reuse plan construction in internal/agent/inkernel_planner_config.go; internal helper, not a standalone plan.",
+          "token": "ComposeFingerprintReusePlan"
         }
       ],
       "exclude": [
@@ -18805,6 +19016,7 @@
         "ApplyListPlan",
         "BaselineDecodeMicroseconds",
         "BaselineTaskAccuracy",
+        "bindInKernelPlannerExtras",
         "BuildStrixCandidate",
         "BuildSweepPlan",
         "CandidateArm",
@@ -18823,6 +19035,8 @@
         "Candidates",
         "CheckGoCachePlan",
         "CleanupCandidate",
+        "ComposeFingerprintReusePlan",
+        "ComposeReusePlan",
         "ContextLayerPlan",
         "ControlPlaneOwner",
         "DecodeInterleavePlan",
@@ -18844,6 +19058,7 @@
         "GroupedPlan",
         "HeldCandidates",
         "ImportCandidate",
+        "inKernelPlannerExtras",
         "KVPrefixPressureCandidate",
         "KVPrefixPressuredCandidates",
         "KindCandidate",
@@ -18874,6 +19089,7 @@
         "PlanLogEntry",
         "planMemoryBytes",
         "PlanMSIX",
+        "plannerExtras",
         "PlanPayload",
         "PlanReconciliation",
         "PlanRemoteDrain",

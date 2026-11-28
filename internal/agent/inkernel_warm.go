@@ -632,17 +632,21 @@ type WarmHandoffReceipt struct {
 //   - A claim whose token prefix does not cover this request's prompt is an identity
 //     mismatch: the request must never adopt state it did not ask for.
 //   - A prime/populate turn is never a demand: it owns its own claim and must not consume
-//     it, so the handoff is a no-op when p.cachePopulate is set.
+//     it, so the handoff is a no-op when p.cachePopulate or ctx populate is set.
 //
 // The matched prefix is the claim's token length; the caller still performs its own
 // suffix prefill for ids[matched:]. Releasing the claim does NOT evict the prefix — it
 // returns it to normal demand residency, exactly as StartupCache.Release documents.
 func (p *InKernelPlanner) demandWarmHandoff(ids []int) WarmHandoffReceipt {
+	return p.demandWarmHandoffWithContext(nil, ids)
+}
+
+func (p *InKernelPlanner) demandWarmHandoffWithContext(ctx context.Context, ids []int) WarmHandoffReceipt {
 	if p == nil || len(ids) == 0 {
 		return WarmHandoffReceipt{Reason: "unsupported"}
 	}
 	// A populate purpose owns its own startup claim; it must not consume it as demand.
-	if p.cachePopulate {
+	if p.cachePopulate || inKernelCachePopulateFromContext(ctx) {
 		return WarmHandoffReceipt{Reason: "populate"}
 	}
 	p.mu.Lock()

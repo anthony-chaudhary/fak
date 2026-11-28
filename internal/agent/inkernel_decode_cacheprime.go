@@ -62,10 +62,30 @@ func (r CachePrimeReceipt) Usable() bool {
 	return r.Admitted && r.Reason == cachePrimeReasonAdmitted && r.Tokens > 0
 }
 
+type inKernelCachePopulateKey struct{}
+
+// withInKernelCachePopulate marks ctx as an internal CW-03 cache-POPULATE request so
+// generateReusedContextWithBias and demandWarmHandoff observe populate semantics per-request
+// without racing on shared planner state across concurrent CPU turns.
+func withInKernelCachePopulate(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, inKernelCachePopulateKey{}, true)
+}
+
+func inKernelCachePopulateFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(inKernelCachePopulateKey{}).(bool)
+	return v
+}
+
 // primeCacheStateOnce runs one populate through the production path with the decode lane
-// suppressed. It sets the request-local purpose, calls the same method the served path
-// calls, and clears the purpose before returning (including on error), so the flag can
-// never leak into an ordinary turn.
+// suppressed. It attaches the request-local populate purpose to ctx, calls the same method
+// the served path calls, and leaves shared planner state untouched so concurrent ordinary
+// turns on the same planner can never observe the populate flag.
 //
 // The returned int is the RESIDENT prefix length AFTER admission, read back from the
 // same cache the next demand turn will consult (p.cachedPrefixLen). The generate
@@ -77,8 +97,7 @@ func (p *InKernelPlanner) primeCacheStateOnce(ctx context.Context, ids []int) (i
 }
 
 func (p *InKernelPlanner) primeCacheStateMeasured(ctx context.Context, ids []int) (resident, reused int, err error) {
-	p.cachePopulate = true
-	defer func() { p.cachePopulate = false }()
+	ctx = withInKernelCachePopulate(ctx)
 	_, _, _, reused, _, _, _, _, err = p.generateReusedContextWithBias(
 		ctx, ids, 0, 0, 0, 0, nil, 0, 0, map[int]bool{}, nil)
 	if err != nil {

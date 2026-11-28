@@ -170,9 +170,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// CW-03 (#13351): when this run is a cache-POPULATE, the caller has asked only
 	// for the production lookup -> suffix prefill -> full-state admission to happen.
 	// The purpose exits at the step-4 seam below, BEFORE the decode lane is built, so
-	// a prime can never sample, emit, run a tool or bill demand usage. The flag is a
-	// request-local purpose: it is read once here and never mutates the served path.
-	cachePopulate := p.cachePopulate
+	// a prime can never sample, emit, run a tool or bill demand usage. Read from both
+	// ctx (race-free concurrent PrimeCacheState) and legacy p.cachePopulate (test hook).
+	cachePopulate := p.cachePopulate || inKernelCachePopulateFromContext(ctx)
 	reuse := visionPrefill == nil && p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
 	// admit gates every prefix-cache ADMISSION (checkpoint, full prompt, continuation) while
 	// lookup keeps using reuse: a turn the host-memory arm admitted without room for its

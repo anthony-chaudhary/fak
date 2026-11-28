@@ -52,7 +52,7 @@ func (p *InKernelPlanner) lookupOwnedNativePrefix(ctx context.Context, ids []int
 				// tree) and releases the startup claim, so the first real request owns
 				// the continuation instead of re-prefilling it. A mismatch/expiry is a
 				// truthful miss: the ordinary cold path below runs unchanged.
-				if hand := p.demandWarmHandoff(ids); hand.HandedOff && hand.MatchedTokens > m {
+				if hand := p.demandWarmHandoffWithContext(ctx, ids); hand.HandedOff && hand.MatchedTokens > m {
 					if hKV, hLogits, hMatched, _, hErr := p.scopedTree.Lookup(owner, ids); hErr == nil && hKV != nil {
 						matchedKV, cachedLogits, m = hKV, hLogits, hMatched
 					}

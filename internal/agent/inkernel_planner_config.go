@@ -1,11 +1,16 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"weak"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -96,6 +101,27 @@ type InKernelPlannerConfig struct {
 	// registry is the no-op identity). Enabling it is a construction-time seam;
 	// sources are installed with SetIncrementalContext.
 	IncrementalContext bool
+	// NextTurnPrimeEnabled wires a bounded NextTurnPrimeRunner at construction so
+	// multi-turn loops (WithNextTurnPrime) materialize the next-turn prefix during
+	// tool execution. False keeps the runner nil.
+	NextTurnPrimeEnabled bool
+	// NextTurnPrimeConfig tunes the wired NextTurnPrimeRunner when
+	// NextTurnPrimeEnabled is true. Zero fields select DefaultNextTurnPrimeConcurrency
+	// and DefaultNextTurnPrimeTimeout.
+	NextTurnPrimeConfig NextTurnPrimeConfig
+	// RadixSessionID, when non-empty, opens a session-scoped radix ref lifecycle on
+	// construction so prefixes covered by this session resist LRU/budget eviction until
+	// ReleaseRadixSession or Close.
+	RadixSessionID string
+	// EnableFingerprintIndex initializes a rolling-hash FingerprintIndex on the
+	// planner for any-offset ReuseCandidate discovery across edited/shifted turns.
+	EnableFingerprintIndex bool
+	// FingerprintChunkSize sets the token chunk width for the FingerprintIndex when
+	// EnableFingerprintIndex is true; zero resolves to radixkv.DefaultFingerprintChunkSize.
+	FingerprintChunkSize int
+	// KVSpanEvict enables the model-side KV-MMU span quarantine/elision bridge (#579)
+	// on CPU planners (backend == nil) alongside FAK_INKERNEL_KVMMU=on.
+	KVSpanEvict bool
 }
 
 // NewInKernelPlannerWithConfig is the explicit configuration constructor for native planning.
@@ -198,12 +224,16 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		p.scopedTree = radixkv.WrapScopedWithLocker(p.tree, &p.mu)
 		p.pagedPrefix = inKernelPagedPrefixLedgerFor(m, backend, p.tree)
 	}
-	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in, the same
-	// default-off / fail-open posture as the ctxplan seam (FAK_CTXPLAN_SEAM). It runs over a
-	// CPU model.Session, so like the radix tree it does not engage a device backend.
+	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in via
+	// cfg.KVSpanEvict or FAK_INKERNEL_KVMMU, the same default-off / fail-open posture as
+	// the ctxplan seam (FAK_CTXPLAN_SEAM). It runs over a CPU model.Session, so like the
+	// radix tree it does not engage a device backend.
+	p.kvSpanEvict = cfg.KVSpanEvict && backend == nil
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_KVMMU"))) {
 	case "on", "1", "true", "yes":
 		p.kvSpanEvict = backend == nil
+	case "off", "0", "false", "no":
+		p.kvSpanEvict = false
 	}
 	// Continuous-batch decode wiring (#401, L2; turnkey fan-out #1590). The
 	// constructor may opt in structurally via cfg.BatchDecode (the turnkey
@@ -218,6 +248,40 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		case "on", "1", "true", "yes":
 			p.batchDecode = true
 		}
+	}
+	primeCfg := cfg.NextTurnPrimeConfig
+	if cfg.NextTurnPrimeEnabled {
+		primeCfg = resolveNextTurnPrimeConfig(primeCfg)
+	}
+	fpChunkSize := cfg.FingerprintChunkSize
+	if cfg.EnableFingerprintIndex && fpChunkSize <= 0 {
+		fpChunkSize = radixkv.DefaultFingerprintChunkSize
+	}
+	radixSessionID := strings.TrimSpace(cfg.RadixSessionID)
+	ext := &inKernelPlannerExtras{
+		hasExplicitConfig:      true,
+		radixBudgetTokens:      cfg.RadixBudgetTokens,
+		nextTurnPrimeEnabled:   cfg.NextTurnPrimeEnabled,
+		nextTurnPrimeConfig:    primeCfg,
+		radixSessionID:         radixSessionID,
+		sessions:               map[string]uint64{},
+		enableFingerprintIndex: cfg.EnableFingerprintIndex,
+		fingerprintChunkSize:   fpChunkSize,
+	}
+	if cfg.EnableFingerprintIndex {
+		ext.fpIndex = radixkv.NewFingerprintIndex(fpChunkSize)
+	}
+	bindInKernelPlannerExtras(p, ext)
+	if cfg.NextTurnPrimeEnabled {
+		ext.nextTurnPrime = newWeakNextTurnPrimeRunner(p, primeCfg)
+	}
+	if radixSessionID != "" && p.tree != nil {
+		p.mu.Lock()
+		gen := p.tree.OpenSession(radixSessionID)
+		p.mu.Unlock()
+		ext.mu.Lock()
+		ext.sessions[radixSessionID] = gen
+		ext.mu.Unlock()
 	}
 	return p
 }
@@ -237,9 +301,41 @@ func inKernelSeedFromEnv() (int64, bool) {
 // It is a readback seam for gateway/operator reachability receipts; changing the returned
 // value cannot mutate a running planner.
 func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
+	if p == nil {
+		return InKernelPlannerConfig{}
+	}
 	var cpuBytes int64
+	var fallbackBudgetTokens int
+	p.mu.Lock()
 	if p.tree != nil {
 		cpuBytes = p.tree.CPUCacheByteBudget()
+		fallbackBudgetTokens = p.tree.Stats().MaxTokens
+	}
+	p.mu.Unlock()
+
+	p.ctxMu.Lock()
+	incrementalCtx := p.incrementalContext != nil
+	p.ctxMu.Unlock()
+
+	radixBudgetTokens := fallbackBudgetTokens
+	var (
+		nextTurnPrimeEnabled   bool
+		nextTurnPrimeConfig    NextTurnPrimeConfig
+		radixSessionID         string
+		enableFingerprintIndex bool
+		fingerprintChunkSize   int
+	)
+	if ext := p.getExtras(); ext != nil {
+		ext.mu.Lock()
+		if ext.hasExplicitConfig {
+			radixBudgetTokens = ext.radixBudgetTokens
+		}
+		nextTurnPrimeEnabled = ext.nextTurnPrimeEnabled
+		nextTurnPrimeConfig = ext.nextTurnPrimeConfig
+		radixSessionID = ext.radixSessionID
+		enableFingerprintIndex = ext.enableFingerprintIndex
+		fingerprintChunkSize = ext.fingerprintChunkSize
+		ext.mu.Unlock()
 	}
 	return InKernelPlannerConfig{
 		WarmDiskModelIdentity:     p.warmDiskModelIdentity,
@@ -259,6 +355,15 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 		CompactHistoryBudget:      p.compactHistoryBudget,
 		ElideStaleReads:           p.elideStaleReads,
 		DeferColdTools:            p.deferColdTools,
+		RadixBudgetTokens:         radixBudgetTokens,
+		BatchDecode:               p.batchDecode,
+		IncrementalContext:        incrementalCtx,
+		NextTurnPrimeEnabled:      nextTurnPrimeEnabled,
+		NextTurnPrimeConfig:       nextTurnPrimeConfig,
+		RadixSessionID:            radixSessionID,
+		EnableFingerprintIndex:    enableFingerprintIndex,
+		FingerprintChunkSize:      fingerprintChunkSize,
+		KVSpanEvict:               p.kvSpanEvict,
 	}
 }
 
@@ -543,4 +648,747 @@ func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {
 	default:
 		return radixkv.EvictionLRU
 	}
+}
+
+// ErrFingerprintIndexDisabled reports that a fingerprint-index mutation or query was
+// requested on a planner constructed without EnableFingerprintIndex.
+var ErrFingerprintIndexDisabled = errors.New("agent: fingerprint index is not enabled on this planner")
+
+// QuarantineEvictionReceipt reports the result of a coordinated quarantine across the
+// radix prefix tree (unscoped and scoped namespaces) and the model-side KV-MMU span bridge.
+type QuarantineEvictionReceipt struct {
+	RadixTokensFreed   int
+	SpanPositionsFreed int
+	RepositionExact    bool
+}
+
+type inKernelPlannerExtras struct {
+	mu                     sync.Mutex
+	primeMu                sync.Mutex
+	hasExplicitConfig      bool
+	radixBudgetTokens      int
+	nextTurnPrimeEnabled   bool
+	nextTurnPrimeConfig    NextTurnPrimeConfig
+	nextTurnPrime          *NextTurnPrimeRunner
+	radixSessionID         string
+	sessions               map[string]uint64
+	enableFingerprintIndex bool
+	fingerprintChunkSize   int
+	fpIndex                *radixkv.FingerprintIndex
+}
+
+func (e *inKernelPlannerExtras) closeRunnerOnly() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	runner := e.nextTurnPrime
+	e.nextTurnPrime = nil
+	clear(e.sessions)
+	e.mu.Unlock()
+	if runner != nil {
+		runner.Close()
+	}
+}
+
+var plannerExtras sync.Map // map[weak.Pointer[InKernelPlanner]]*inKernelPlannerExtras
+
+func resolveNextTurnPrimeConfig(cfg NextTurnPrimeConfig) NextTurnPrimeConfig {
+	if cfg.MaxConcurrent <= 0 {
+		cfg.MaxConcurrent = DefaultNextTurnPrimeConcurrency
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = DefaultNextTurnPrimeTimeout
+	}
+	return cfg
+}
+
+func bindInKernelPlannerExtras(p *InKernelPlanner, ext *inKernelPlannerExtras) {
+	if p == nil || ext == nil {
+		return
+	}
+	key := weak.Make(p)
+	plannerExtras.Store(key, ext)
+	runtime.AddCleanup(p, func(k weak.Pointer[InKernelPlanner]) {
+		if v, ok := plannerExtras.LoadAndDelete(k); ok {
+			if e, ok := v.(*inKernelPlannerExtras); ok {
+				e.closeRunnerOnly()
+			}
+		}
+	}, key)
+}
+
+func (p *InKernelPlanner) getExtras() *inKernelPlannerExtras {
+	if p == nil {
+		return nil
+	}
+	v, ok := plannerExtras.Load(weak.Make(p))
+	if !ok {
+		return nil
+	}
+	ext, _ := v.(*inKernelPlannerExtras)
+	return ext
+}
+
+func (p *InKernelPlanner) getOrCreateExtras() *inKernelPlannerExtras {
+	if p == nil {
+		return nil
+	}
+	key := weak.Make(p)
+	if v, ok := plannerExtras.Load(key); ok {
+		if ext, ok := v.(*inKernelPlannerExtras); ok {
+			return ext
+		}
+	}
+	fresh := &inKernelPlannerExtras{
+		sessions: map[string]uint64{},
+	}
+	actual, loaded := plannerExtras.LoadOrStore(key, fresh)
+	if !loaded {
+		runtime.AddCleanup(p, func(k weak.Pointer[InKernelPlanner]) {
+			if v, ok := plannerExtras.LoadAndDelete(k); ok {
+				if e, ok := v.(*inKernelPlannerExtras); ok {
+					e.closeRunnerOnly()
+				}
+			}
+		}, key)
+	}
+	ext, _ := actual.(*inKernelPlannerExtras)
+	return ext
+}
+
+// Close cancels and waits for any wired NextTurnPrimeRunner, releases every active
+// planner-tracked radix session, and releases startup warm state. Nil-safe and idempotent.
+func (p *InKernelPlanner) Close() {
+	if p == nil {
+		return
+	}
+	var runner *NextTurnPrimeRunner
+	var sids []string
+	if ext := p.getExtras(); ext != nil {
+		ext.mu.Lock()
+		runner = ext.nextTurnPrime
+		ext.nextTurnPrime = nil
+		for sid := range ext.sessions {
+			sids = append(sids, sid)
+		}
+		clear(ext.sessions)
+		ext.mu.Unlock()
+	}
+	if runner != nil {
+		runner.Close()
+	}
+	if p.tree != nil && len(sids) > 0 {
+		p.mu.Lock()
+		for _, sid := range sids {
+			p.tree.ReleaseSession(sid)
+		}
+		p.mu.Unlock()
+	}
+	p.ReleaseStartupWarm()
+}
+
+// NextTurnPrimeRunner returns the construction-wired bounded next-turn prime runner,
+// or nil when NextTurnPrimeEnabled was false or the planner has been closed.
+func (p *InKernelPlanner) NextTurnPrimeRunner() *NextTurnPrimeRunner {
+	ext := p.getExtras()
+	if ext == nil {
+		return nil
+	}
+	ext.mu.Lock()
+	defer ext.mu.Unlock()
+	return ext.nextTurnPrime
+}
+
+// NextTurnPrimeStats returns the counters for the wired NextTurnPrimeRunner, or zero
+// when disabled or closed.
+func (p *InKernelPlanner) NextTurnPrimeStats() NextTurnPrimeStats {
+	return p.NextTurnPrimeRunner().Stats()
+}
+
+// TriggerNextTurnPrime schedules a bounded next-turn KV prime when NextTurnPrimeRunner
+// is wired on this planner.
+func (p *InKernelPlanner) TriggerNextTurnPrime(ctx context.Context, messages []Message, tools []ToolDef) bool {
+	r := p.NextTurnPrimeRunner()
+	if r == nil {
+		return false
+	}
+	return r.Trigger(ctx, messages, tools)
+}
+
+// WaitNextTurnPrime blocks until any in-flight primes on the wired runner complete.
+func (p *InKernelPlanner) WaitNextTurnPrime() {
+	if r := p.NextTurnPrimeRunner(); r != nil {
+		r.wait()
+	}
+}
+
+// NextTurnPrimeRunOptions returns WithNextTurnPrime when a runner is active on p.
+func (p *InKernelPlanner) NextTurnPrimeRunOptions() []RunOption {
+	if r := p.NextTurnPrimeRunner(); r != nil {
+		return []RunOption{WithNextTurnPrime(r)}
+	}
+	return nil
+}
+
+// RadixSessionID returns the construction-configured radix session ID, if any.
+func (p *InKernelPlanner) RadixSessionID() string {
+	ext := p.getExtras()
+	if ext == nil {
+		return ""
+	}
+	ext.mu.Lock()
+	defer ext.mu.Unlock()
+	return ext.radixSessionID
+}
+
+// RadixSessionGen returns the currently tracked generation for sid, if open.
+func (p *InKernelPlanner) RadixSessionGen(sid string) (uint64, bool) {
+	sid = strings.TrimSpace(sid)
+	ext := p.getExtras()
+	if ext == nil || sid == "" {
+		return 0, false
+	}
+	ext.mu.Lock()
+	defer ext.mu.Unlock()
+	gen, ok := ext.sessions[sid]
+	return gen, ok && gen != 0
+}
+
+// OpenRadixSession opens or restarts session sid on the planner's radix tree under p.mu
+// and tracks its active generation for Close cleanup.
+func (p *InKernelPlanner) OpenRadixSession(sid string) uint64 {
+	sid = strings.TrimSpace(sid)
+	if p == nil || p.tree == nil || sid == "" {
+		return 0
+	}
+	ext := p.getOrCreateExtras()
+	p.mu.Lock()
+	gen := p.tree.OpenSession(sid)
+	ext.mu.Lock()
+	ext.sessions[sid] = gen
+	ext.mu.Unlock()
+	p.mu.Unlock()
+	return gen
+}
+
+// RegisterRadixSessionLeaf attaches session coverage along the cached prefix of tokens
+// in the unscoped root or the matching scoped namespace for ctx (p.scopedTree).
+func (p *InKernelPlanner) RegisterRadixSessionLeaf(ctx context.Context, sid string, gen uint64, tokens []int) int {
+	sid = strings.TrimSpace(sid)
+	if p == nil || p.tree == nil || sid == "" || gen == 0 || len(tokens) == 0 {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ns := p.sessionNamespaceLocked(ctx, tokens)
+	return p.tree.RegisterSessionLeaf(ns, sid, gen, tokens)
+}
+
+// ReleaseRadixSession releases sid's radix ref coverage and tombstones sid so late
+// registrations are ignored.
+func (p *InKernelPlanner) ReleaseRadixSession(sid string) bool {
+	sid = strings.TrimSpace(sid)
+	if p == nil || p.tree == nil || sid == "" {
+		return false
+	}
+	ext := p.getExtras()
+	p.mu.Lock()
+	p.tree.ReleaseSession(sid)
+	if ext != nil {
+		ext.mu.Lock()
+		delete(ext.sessions, sid)
+		ext.mu.Unlock()
+	}
+	p.mu.Unlock()
+	return true
+}
+
+// RadixSessionClosed reports whether sid is in the closed-session tombstone.
+func (p *InKernelPlanner) RadixSessionClosed(sid string) bool {
+	sid = strings.TrimSpace(sid)
+	if p == nil || p.tree == nil || sid == "" {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.tree.SessionClosed(sid)
+}
+
+// SessionImmuneNodes returns the number of radix nodes currently protected by active sessions.
+func (p *InKernelPlanner) SessionImmuneNodes() int {
+	if p == nil || p.tree == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.tree.SessionImmuneNodes()
+}
+
+// CachedPrefixLen reports the longest cached token prefix visible for ctx (checking
+// p.scopedTree when ctx carries PrefixCacheIdentity, else the unscoped tree).
+func (p *InKernelPlanner) CachedPrefixLen(ctx context.Context, ids []int) int {
+	if p == nil || p.tree == nil || len(ids) == 0 {
+		return 0
+	}
+	if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+		matched, err := p.scopedTree.MatchLen(owner, ids)
+		if err != nil {
+			return 0
+		}
+		return matched
+	}
+	return p.cachedPrefixLen(ids)
+}
+
+func scopedTreeNamespace(scope radixkv.ShareScope, owner radixkv.CacheIdentity) (string, bool) {
+	tenant := strings.TrimSpace(owner.Tenant)
+	agent := strings.TrimSpace(owner.Agent)
+	epoch := ""
+	if scope != radixkv.ScopeFleet {
+		epoch = strings.TrimSpace(owner.Epoch)
+	}
+	segment := ""
+	if epoch != "" {
+		segment = "/epoch/" + epoch
+	}
+	switch scope {
+	case radixkv.ScopeAgent:
+		if tenant == "" || agent == "" {
+			return "", false
+		}
+		return "private/tenant/" + tenant + "/agent/" + agent + segment, true
+	case radixkv.ScopeTenant:
+		if tenant == "" {
+			return "", false
+		}
+		return "private/tenant/" + tenant + segment, true
+	case radixkv.ScopeFleet:
+		return "shared/fleet", true
+	default:
+		return "", false
+	}
+}
+
+func (p *InKernelPlanner) sessionNamespaceLocked(ctx context.Context, tokens []int) string {
+	if p == nil || p.tree == nil {
+		return ""
+	}
+	owner, scoped := prefixCacheIdentityFromContext(ctx)
+	if !scoped || p.scopedTree == nil {
+		return ""
+	}
+	bestNS := ""
+	bestMatched := 0
+	for _, scope := range []radixkv.ShareScope{radixkv.ScopeAgent, radixkv.ScopeTenant, radixkv.ScopeFleet} {
+		ns, ok := scopedTreeNamespace(scope, owner)
+		if !ok {
+			continue
+		}
+		if m := p.tree.MatchLenNS(ns, tokens); m > bestMatched {
+			bestMatched = m
+			bestNS = ns
+		}
+	}
+	if bestMatched == 0 {
+		if ns, ok := scopedTreeNamespace(radixkv.ScopeTenant, owner); ok {
+			return ns
+		}
+	}
+	return bestNS
+}
+
+func (p *InKernelPlanner) primeCacheStateSerialized(ctx context.Context, ids []int) (CachePrimeReceipt, error) {
+	if p == nil {
+		return CachePrimeReceipt{Reason: cachePrimeReasonUnsupported}, ErrCachePrimeUnsupported
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return CachePrimeReceipt{Reason: cachePrimeReasonCold}, err
+	}
+	if p.requiresDeviceSerialization() {
+		if err := p.devMu.LockContext(ctx); err != nil {
+			return CachePrimeReceipt{Reason: cachePrimeReasonCold}, err
+		}
+		defer p.devMu.Unlock()
+	}
+	ext := p.getOrCreateExtras()
+	ext.primeMu.Lock()
+	defer ext.primeMu.Unlock()
+
+	rec, err := p.PrimeCacheState(ctx, ids)
+	if err != nil {
+		return rec, err
+	}
+	if !rec.Usable() {
+		if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil && len(ids) > 0 {
+			if restored, _, ok := p.warmRestoreReadback(owner, ids); ok && restored >= len(ids) {
+				rec.Admitted = true
+				rec.Reason = cachePrimeReasonAdmitted
+				rec.Tokens = restored
+			}
+		}
+	}
+	return rec, nil
+}
+
+type pendingPrimeScope struct {
+	owner     radixkv.CacheIdentity
+	scoped    bool
+	ambiguous bool
+}
+
+// weakNextTurnPrefixCover avoids retaining a strong *InKernelPlanner cycle in plannerExtras
+// while resolving resident-prefix coverage for both unscoped and scoped (PrefixCacheIdentity)
+// triggers emitted by NextTurnPrimeRunner.
+type weakNextTurnPrefixCover struct {
+	wp      weak.Pointer[InKernelPlanner]
+	mu      sync.Mutex
+	pending map[uint64][]pendingPrimeScope
+}
+
+func hashPrimeTokenIDs(ids []int) uint64 {
+	const (
+		offset64 = 14695981039346656037
+		prime64  = 1099511628211
+	)
+	var h uint64 = offset64
+	for _, id := range ids {
+		x := uint64(id)
+		for shift := 0; shift < 64; shift += 8 {
+			h ^= uint64(byte(x >> shift))
+			h *= prime64
+		}
+	}
+	return h
+}
+
+func (c *weakNextTurnPrefixCover) recordScope(ctx context.Context, ids []int) {
+	if len(ids) == 0 {
+		return
+	}
+	owner, scoped := prefixCacheIdentityFromContext(ctx)
+	h := hashPrimeTokenIDs(ids)
+	c.mu.Lock()
+	if c.pending == nil {
+		c.pending = make(map[uint64][]pendingPrimeScope)
+	}
+	c.pending[h] = append(c.pending[h], pendingPrimeScope{owner: owner, scoped: scoped})
+	c.mu.Unlock()
+}
+
+func (c *weakNextTurnPrefixCover) popConsistentScope(ids []int) (owner radixkv.CacheIdentity, scoped bool, ambiguous bool) {
+	if len(ids) == 0 {
+		return radixkv.CacheIdentity{}, false, false
+	}
+	h := hashPrimeTokenIDs(ids)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entries := c.pending[h]
+	if len(entries) == 0 {
+		return radixkv.CacheIdentity{}, false, false
+	}
+	first := entries[0]
+	ambiguous = first.ambiguous
+	for _, e := range entries[1:] {
+		if e.ambiguous || e.scoped != first.scoped || (first.scoped && e.owner != first.owner) {
+			ambiguous = true
+			break
+		}
+	}
+	if ambiguous {
+		for i := range entries {
+			entries[i].ambiguous = true
+		}
+	}
+	if len(entries) == 1 {
+		delete(c.pending, h)
+	} else {
+		c.pending[h] = entries[1:]
+	}
+	return first.owner, first.scoped, ambiguous
+}
+
+func (c *weakNextTurnPrefixCover) cachedPrefixLen(ids []int) int {
+	p := c.wp.Value()
+	if p == nil || len(ids) == 0 {
+		return 0
+	}
+	owner, scoped, ambiguous := c.popConsistentScope(ids)
+	if ambiguous {
+		// Conflicting scopes triggered identical tokens simultaneously; skip shortcut so
+		// primeForNextTurnRunner checks the exact ctx scope without false SkippedCovered.
+		return 0
+	}
+	if scoped && p.scopedTree != nil {
+		restored, _, ok := p.warmRestoreReadback(owner, ids)
+		if !ok {
+			return 0
+		}
+		return restored
+	}
+	return p.cachedPrefixLen(ids)
+}
+
+func newWeakNextTurnPrimeRunner(p *InKernelPlanner, cfg NextTurnPrimeConfig) *NextTurnPrimeRunner {
+	if p == nil {
+		return nil
+	}
+	wp := weak.Make(p)
+	cover := &weakNextTurnPrefixCover{wp: wp}
+	prime := func(ctx context.Context, ids []int) (bool, error) {
+		pl := wp.Value()
+		if pl == nil {
+			return false, context.Canceled
+		}
+		return pl.primeForNextTurnRunner(ctx, ids)
+	}
+	enc := func(ctx context.Context, msgs []Message, tools []ToolDef) ([]int, error) {
+		pl := wp.Value()
+		if pl == nil {
+			return nil, context.Canceled
+		}
+		e, err := pl.EncodePrompt(ctx, msgs, tools)
+		if err != nil {
+			return nil, err
+		}
+		cover.recordScope(ctx, e.TokenIDs)
+		return e.TokenIDs, nil
+	}
+	return newNextTurnPrimeRunner(prime, cover, enc, cfg)
+}
+
+func (p *InKernelPlanner) registerActiveSessionLeafForContext(ctx context.Context, ids []int) {
+	ext := p.getExtras()
+	if ext == nil || p.tree == nil || len(ids) == 0 {
+		return
+	}
+	ext.mu.Lock()
+	sid := ext.radixSessionID
+	gen := ext.sessions[sid]
+	ext.mu.Unlock()
+	if sid == "" || gen == 0 {
+		return
+	}
+	p.mu.Lock()
+	ns := p.sessionNamespaceLocked(ctx, ids)
+	_ = p.tree.RegisterSessionLeaf(ns, sid, gen, ids)
+	p.mu.Unlock()
+}
+
+func (p *InKernelPlanner) primeForNextTurnRunner(ctx context.Context, ids []int) (bool, error) {
+	if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil && len(ids) > 0 {
+		if restored, _, ok := p.warmRestoreReadback(owner, ids); ok && restored >= len(ids) {
+			p.registerActiveSessionLeafForContext(ctx, ids)
+			return true, nil
+		}
+	}
+	rec, err := p.primeCacheStateSerialized(ctx, ids)
+	if err != nil || !rec.Usable() {
+		return false, err
+	}
+	p.registerActiveSessionLeafForContext(ctx, ids)
+	return true, nil
+}
+
+// PrimePrefixState serializes device/prime execution (including p.devMu when required)
+// and materializes the KV state for ids without decoding any tokens.
+func (p *InKernelPlanner) PrimePrefixState(ctx context.Context, tokens []int) (CachePrimeReceipt, error) {
+	return p.primeCacheStateSerialized(ctx, tokens)
+}
+
+// PrimeRadixSession primes tokens into the cache (acquiring p.devMu when required) and
+// covers the admitted prefix under session sid/gen so it resists eviction until released.
+func (p *InKernelPlanner) PrimeRadixSession(ctx context.Context, sid string, gen uint64, tokens []int) (CachePrimeReceipt, int, error) {
+	rec, err := p.primeCacheStateSerialized(ctx, tokens)
+	if err != nil || !rec.Usable() {
+		return rec, 0, err
+	}
+	sid = strings.TrimSpace(sid)
+	if sid == "" || gen == 0 {
+		return rec, 0, nil
+	}
+	return rec, p.RegisterRadixSessionLeaf(ctx, sid, gen, tokens), nil
+}
+
+// PrimeRadixSessionMessages renders/encodes messages+tools through EncodePrompt and primes
+// + covers the resulting token prefix under session sid/gen.
+func (p *InKernelPlanner) PrimeRadixSessionMessages(ctx context.Context, sid string, gen uint64, messages []Message, tools []ToolDef, opts ...SampleOpt) (CachePrimeReceipt, int, error) {
+	if p == nil {
+		return CachePrimeReceipt{Reason: cachePrimeReasonUnsupported}, 0, ErrCachePrimeUnsupported
+	}
+	enc, err := p.EncodePrompt(ctx, messages, tools, opts...)
+	if err != nil {
+		return CachePrimeReceipt{Reason: cachePrimeReasonCold}, 0, err
+	}
+	return p.PrimeRadixSession(ctx, sid, gen, enc.TokenIDs)
+}
+
+// EvictPoisonedContext drops the cached prefix along messages[:throughIdx+1] in both the
+// unscoped radix root and any private scoped namespaces (agent/tenant) visible to ctx.
+func (p *InKernelPlanner) EvictPoisonedContext(ctx context.Context, messages []Message, throughIdx int, tools []ToolDef) int {
+	if p == nil || p.tree == nil || p.tok == nil || throughIdx < 0 || throughIdx >= len(messages) {
+		return 0
+	}
+	ids, err := p.tok.Encode(renderTranscriptTools(messages[:throughIdx+1], tools))
+	if err != nil || len(ids) == 0 {
+		return 0
+	}
+	return p.evictPoisonedIDsContext(ctx, ids)
+}
+
+func (p *InKernelPlanner) evictPoisonedIDsContext(ctx context.Context, ids []int) int {
+	if p == nil || p.tree == nil || len(ids) == 0 {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	freed := p.tree.EvictPrefix(ids)
+	if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
+		for _, scope := range []radixkv.ShareScope{radixkv.ScopeAgent, radixkv.ScopeTenant} {
+			if ns, ok := scopedTreeNamespace(scope, owner); ok {
+				freed += p.tree.EvictPrefixNS(ns, ids)
+			}
+		}
+	}
+	return freed
+}
+
+// QuarantineSessionTurn evicts a poisoned branch from the radix cache (across unscoped and
+// scoped namespaces, overriding session ref immunity on the poisoned branch while sparing
+// immune benign ancestors/siblings) and invokes EvictKVSpan when enabled.
+func (p *InKernelPlanner) QuarantineSessionTurn(ctx context.Context, messages []Message, throughIdx int, tools []ToolDef) QuarantineEvictionReceipt {
+	if p == nil {
+		return QuarantineEvictionReceipt{}
+	}
+	radixFreed := p.EvictPoisonedContext(ctx, messages, throughIdx, tools)
+	if p.requiresDeviceSerialization() {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := p.devMu.LockContext(ctx); err != nil {
+			return QuarantineEvictionReceipt{RadixTokensFreed: radixFreed}
+		}
+		defer p.devMu.Unlock()
+	}
+	spanFreed, exact := p.EvictKVSpan(messages, throughIdx, tools)
+	return QuarantineEvictionReceipt{
+		RadixTokensFreed:   radixFreed,
+		SpanPositionsFreed: spanFreed,
+		RepositionExact:    exact,
+	}
+}
+
+// FingerprintIndexEnabled reports whether a rolling-hash FingerprintIndex is initialized.
+func (p *InKernelPlanner) FingerprintIndexEnabled() bool {
+	ext := p.getExtras()
+	if ext == nil {
+		return false
+	}
+	ext.mu.Lock()
+	defer ext.mu.Unlock()
+	return ext.fpIndex != nil
+}
+
+// FingerprintIndexLen returns the number of registered fingerprint chunks.
+func (p *InKernelPlanner) FingerprintIndexLen() int {
+	ext := p.getExtras()
+	if ext == nil {
+		return 0
+	}
+	ext.mu.Lock()
+	defer ext.mu.Unlock()
+	if ext.fpIndex == nil {
+		return 0
+	}
+	return ext.fpIndex.Len()
+}
+
+func intsToInt32Checked(tokens []int) ([]int32, error) {
+	out := make([]int32, len(tokens))
+	for i, tok := range tokens {
+		if tok < math.MinInt32 || tok > math.MaxInt32 {
+			return nil, fmt.Errorf("agent: token id %d at index %d overflows int32", tok, i)
+		}
+		out[i] = int32(tok)
+	}
+	return out, nil
+}
+
+// RegisterFingerprintTokens hashes and registers full chunks of tokens at srcOffset.
+func (p *InKernelPlanner) RegisterFingerprintTokens(tokens []int, srcOffset int) (int, error) {
+	ext := p.getExtras()
+	if ext == nil {
+		return 0, ErrFingerprintIndexDisabled
+	}
+	tok32, err := intsToInt32Checked(tokens)
+	if err != nil {
+		return 0, err
+	}
+	ext.mu.Lock()
+	defer ext.mu.Unlock()
+	if ext.fpIndex == nil {
+		return 0, ErrFingerprintIndexDisabled
+	}
+	return ext.fpIndex.Register(tok32, srcOffset)
+}
+
+// RegisterFingerprintPrompt encodes messages+tools via EncodePrompt and registers its chunks.
+func (p *InKernelPlanner) RegisterFingerprintPrompt(ctx context.Context, messages []Message, tools []ToolDef, srcOffset int, opts ...SampleOpt) (int, error) {
+	if p == nil {
+		return 0, ErrFingerprintIndexDisabled
+	}
+	enc, err := p.EncodePrompt(ctx, messages, tools, opts...)
+	if err != nil {
+		return 0, err
+	}
+	return p.RegisterFingerprintTokens(enc.TokenIDs, srcOffset)
+}
+
+// EvictFingerprintOffset removes all fingerprint chunks registered under srcOffset.
+func (p *InKernelPlanner) EvictFingerprintOffset(srcOffset int) int {
+	ext := p.getExtras()
+	if ext == nil {
+		return 0
+	}
+	ext.mu.Lock()
+	defer ext.mu.Unlock()
+	if ext.fpIndex == nil {
+		return 0
+	}
+	return ext.fpIndex.Evict(srcOffset)
+}
+
+// MatchFingerprintReuse returns any-offset ReuseCandidate spans matching tokens.
+func (p *InKernelPlanner) MatchFingerprintReuse(tokens []int) []radixkv.ReuseCandidate {
+	ext := p.getExtras()
+	if ext == nil || len(tokens) == 0 {
+		return nil
+	}
+	tok32, err := intsToInt32Checked(tokens)
+	if err != nil {
+		return nil
+	}
+	ext.mu.Lock()
+	defer ext.mu.Unlock()
+	if ext.fpIndex == nil {
+		return nil
+	}
+	return ext.fpIndex.Match(tok32)
+}
+
+// ComposeFingerprintReusePlan combines the planner's live radix prefix match with
+// FingerprintIndex ReuseCandidate matches into a non-overlapping radixkv.ReusePlan.
+func (p *InKernelPlanner) ComposeFingerprintReusePlan(ctx context.Context, tokens []int, costModel radixkv.CostModel) (*radixkv.ReusePlan, error) {
+	if p == nil {
+		return nil, ErrFingerprintIndexDisabled
+	}
+	prefixLen := p.CachedPrefixLen(ctx, tokens)
+	if prefixLen > len(tokens) {
+		prefixLen = len(tokens)
+	}
+	cands := p.MatchFingerprintReuse(tokens)
+	return radixkv.ComposeReusePlan(len(tokens), prefixLen, cands, costModel)
 }
