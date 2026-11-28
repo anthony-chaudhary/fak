@@ -34,13 +34,35 @@ func (cb *ContinuousBatcher) PrefixCacheLen() int {
 
 // Submit enqueues a subagent request into an available slot or waiting queue.
 func (cb *ContinuousBatcher) Submit(req *SubagentRequest) (string, error) {
-	return cb.submit(req, nil)
+	return cb.submitWithOptions(req, nil, -1)
+}
+
+// TryAdmit atomically admits req into an empty slot only when slot capacity and
+// MaxKVCacheBytes allow immediate execution; otherwise it fails closed without
+// queueing into waitingQueue or mutating batcher counters.
+func (cb *ContinuousBatcher) TryAdmit(req *SubagentRequest) (string, error) {
+	return cb.submitWithOptions(req, nil, 0)
+}
+
+// SubmitBounded behaves like TryAdmit when capacity is available immediately, and
+// otherwise queues req only while len(waitingQueue) < maxWaiting and active+queued
+// KV reservations stay within MaxKVCacheBytes. A request whose own KV demand
+// exceeds MaxKVCacheBytes is refused immediately with ErrBatcherKVOverBudget.
+func (cb *ContinuousBatcher) SubmitBounded(req *SubagentRequest, maxWaiting int) (string, error) {
+	if maxWaiting < 0 {
+		maxWaiting = 0
+	}
+	return cb.submitWithOptions(req, nil, maxWaiting)
 }
 
 // submit lets the owning driver reserve IDs until their handles are drained.
 // A non-nil reserved set also retires an accepted ID's old completed lookup;
 // public Submit keeps its standalone historical-lookup behavior.
 func (cb *ContinuousBatcher) submit(req *SubagentRequest, reserved map[string]struct{}) (string, error) {
+	return cb.submitWithOptions(req, reserved, -1)
+}
+
+func (cb *ContinuousBatcher) submitWithOptions(req *SubagentRequest, reserved map[string]struct{}, maxWaiting int) (string, error) {
 	if req == nil {
 		return "", ErrNilRequest
 	}
@@ -60,28 +82,75 @@ func (cb *ContinuousBatcher) submit(req *SubagentRequest, reserved map[string]st
 	}
 
 	sessionID := req.SessionID
+	if sessionID != "" {
+		if _, exists := reserved[sessionID]; exists {
+			return "", ErrSessionAlreadyExists
+		}
+		if slot, exists := cb.sessionMap[sessionID]; exists && slot.State != SlotStateFinished {
+			return "", ErrSessionAlreadyExists
+		}
+		for _, q := range cb.waitingQueue {
+			if q.SessionID == sessionID {
+				return "", ErrSessionAlreadyExists
+			}
+		}
+	}
+
+	// Look for an available empty slot.
+	emptyIdx := -1
+	for i, slot := range cb.slots {
+		if slot.State == SlotStateEmpty {
+			emptyIdx = i
+			break
+		}
+	}
+
+	reqBytes := cb.RequiredKVCacheBytes(req)
+	kvFitsImmediate := cb.cfg.MaxKVCacheBytes <= 0 || cb.currentKVCacheBytesLocked()+reqBytes <= cb.cfg.MaxKVCacheBytes
+	canAdmit := emptyIdx != -1 && len(cb.waitingQueue) == 0 && kvFitsImmediate
+
+	if !canAdmit && maxWaiting >= 0 {
+		if cb.cfg.MaxKVCacheBytes > 0 && reqBytes > cb.cfg.MaxKVCacheBytes {
+			return "", ErrBatcherKVOverBudget
+		}
+		if maxWaiting == 0 {
+			if !kvFitsImmediate {
+				return "", ErrBatcherKVOverBudget
+			}
+			return "", ErrBatcherSlotsFull
+		}
+		if len(cb.waitingQueue) >= maxWaiting {
+			return "", ErrBatcherSlotsFull
+		}
+		if cb.cfg.MaxKVCacheBytes > 0 && cb.currentKVCacheBytesLocked()+cb.queuedKVCacheBytesLocked()+reqBytes > cb.cfg.MaxKVCacheBytes {
+			return "", ErrBatcherKVOverBudget
+		}
+	}
+
 	if sessionID == "" {
 		for {
 			id := atomic.AddUint64(&cb.seqCounter, 1)
 			sessionID = fmt.Sprintf("subagent-%d", id)
-			if _, exists := reserved[sessionID]; !exists {
+			if _, exists := reserved[sessionID]; exists {
+				continue
+			}
+			if slot, exists := cb.sessionMap[sessionID]; exists && slot.State != SlotStateFinished {
+				continue
+			}
+			dupQueue := false
+			for _, q := range cb.waitingQueue {
+				if q.SessionID == sessionID {
+					dupQueue = true
+					break
+				}
+			}
+			if !dupQueue {
 				break
 			}
 		}
 		req.SessionID = sessionID
 	}
-	if _, exists := reserved[sessionID]; exists {
-		return "", ErrSessionAlreadyExists
-	}
 
-	if slot, exists := cb.sessionMap[sessionID]; exists && slot.State != SlotStateFinished {
-		return "", ErrSessionAlreadyExists
-	}
-	for _, q := range cb.waitingQueue {
-		if q.SessionID == sessionID {
-			return "", ErrSessionAlreadyExists
-		}
-	}
 	if reserved != nil {
 		// All rejection checks have passed. A queued replacement must not
 		// resolve to its predecessor's closed slot while awaiting promotion.
@@ -95,19 +164,6 @@ func (cb *ContinuousBatcher) submit(req *SubagentRequest, reserved map[string]st
 	// even for requests that wait behind capacity.
 	cb.uidSeq++
 	req.SubmissionSeq = cb.uidSeq
-
-	// Look for an available empty slot
-	emptyIdx := -1
-	for i, slot := range cb.slots {
-		if slot.State == SlotStateEmpty {
-			emptyIdx = i
-			break
-		}
-	}
-
-	reqBytes := cb.RequiredKVCacheBytes(req)
-	canAdmit := emptyIdx != -1 && len(cb.waitingQueue) == 0 &&
-		(cb.cfg.MaxKVCacheBytes <= 0 || cb.currentKVCacheBytesLocked()+reqBytes <= cb.cfg.MaxKVCacheBytes)
 
 	if canAdmit {
 		cb.initSlot(emptyIdx, req)
@@ -314,6 +370,51 @@ func (cb *ContinuousBatcher) currentKVCacheBytesLocked() int64 {
 		}
 	}
 	return total
+}
+
+func (cb *ContinuousBatcher) queuedKVCacheBytesLocked() int64 {
+	var total int64
+	for _, q := range cb.waitingQueue {
+		total += cb.RequiredKVCacheBytes(q)
+	}
+	return total
+}
+
+// LoadSnapshot returns a point-in-time view of slot occupancy, waiting queue,
+// and KV cache reservations for fail-closed admission and multi-replica routing.
+func (cb *ContinuousBatcher) LoadSnapshot() BatcherLoadSnapshot {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	snap := BatcherLoadSnapshot{
+		MaxSlots:        len(cb.slots),
+		WaitingCount:    len(cb.waitingQueue),
+		MaxKVCacheBytes: cb.cfg.MaxKVCacheBytes,
+	}
+	for _, s := range cb.slots {
+		s.mu.Lock()
+		st := s.State
+		kv := s.KVCacheBytes
+		s.mu.Unlock()
+		switch st {
+		case SlotStateEmpty:
+			snap.EmptySlots++
+		case SlotStateActiveDecode:
+			snap.ActiveSlots++
+			snap.CurrentKVCacheBytes += kv
+		case SlotStatePrefilling:
+			snap.PrefillingSlots++
+			snap.CurrentKVCacheBytes += kv
+		case SlotStateYieldedIO:
+			snap.YieldedSlots++
+			snap.CurrentKVCacheBytes += kv
+		case SlotStateFinished:
+			// Finished slots awaiting retirement hold no live reservation.
+		default:
+		}
+	}
+	snap.QueuedKVCacheBytes = cb.queuedKVCacheBytesLocked()
+	return snap
 }
 
 func (cb *ContinuousBatcher) tryPromoteWaitingLocked() []string {

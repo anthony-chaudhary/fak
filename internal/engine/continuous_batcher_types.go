@@ -69,7 +69,23 @@ var (
 	ErrSessionAlreadyExists = errors.New("continuous_batcher: session already exists")
 	ErrSlotNotActive        = errors.New("continuous_batcher: slot is not in active decode state")
 	ErrSlotNotYielded       = errors.New("continuous_batcher: slot is not in yielded IO state")
+	ErrBatcherSlotsFull     = errors.New("continuous_batcher: no empty slot available")
+	ErrBatcherKVOverBudget  = errors.New("continuous_batcher: KV cache budget exceeded")
 )
+
+// BatcherLoadSnapshot captures a point-in-time view of slot occupancy, queued
+// work, and KV cache reservations for fail-closed admission and multi-replica routing.
+type BatcherLoadSnapshot struct {
+	MaxSlots            int
+	EmptySlots          int
+	ActiveSlots         int
+	PrefillingSlots     int
+	YieldedSlots        int
+	WaitingCount        int
+	CurrentKVCacheBytes int64
+	QueuedKVCacheBytes  int64
+	MaxKVCacheBytes     int64
+}
 
 // SubagentRequest defines the parameters for an asynchronous subagent stream.
 type SubagentRequest struct {

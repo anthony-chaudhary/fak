@@ -1582,6 +1582,16 @@
           "category": "incidental",
           "reason": "InKernelPlanner.PrimeCacheState method from CW-03 (#13351) is the production cache-populate entrypoint; reused by next-turn KV prime (#3728) without introducing a new cache tier.",
           "token": "PrimeCacheState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Continuous-batcher accessor field reporting active resident KV-cache footprint on a 1-8 GPU node in internal/engine; metrics gauge for existing KV cache, not a distinct cache tier.",
+          "token": "CurrentKVCacheBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Continuous-batcher accessor field reporting queued admission KV-cache footprint on a 1-8 GPU node in internal/engine; metrics gauge for existing KV cache, not a distinct cache tier.",
+          "token": "QueuedKVCacheBytes"
         }
       ],
       "exclude": [
@@ -1628,6 +1638,7 @@
         "CodeKVCache",
         "CounterCacheEvictions",
         "CounterPrefixCacheHits",
+        "CurrentKVCacheBytes",
         "DDRCache",
         "DeadlineCacheCredit",
         "DefaultCacheBytes",
@@ -1669,6 +1680,7 @@
         "PrimeCacheState",
         "ProviderCacheWriteTokens",
         "ProviderCalibration",
+        "QueuedKVCacheBytes",
         "Qwen38DefaultAlias",
         "Qwen38DefaultRef",
         "Qwen38ModeReport",
@@ -7799,6 +7811,36 @@
           "category": "incidental",
           "reason": "Typed #12100 readiness audit code for unbounded, missing, future-dated or overflow-prone heartbeat/TTL evidence; it reports unknown liveness and introduces no separate session-runtime primitive.",
           "token": "UNKNOWN_SESSION_EVIDENCE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Continuous-batcher slot capacity default constant inside internal/engine; numeric sizing limit for batcher admission slots, not a session-runtime type.",
+          "token": "DefaultMaxSlots"
+        },
+        {
+          "category": "incidental",
+          "reason": "Continuous-batcher capacity helper returning remaining unoccupied batcher slots in internal/engine; integer counter, not a session-runtime concept.",
+          "token": "EmptySlots"
+        },
+        {
+          "category": "incidental",
+          "reason": "Continuous-batcher admission sentinel error returned when all batcher slots are occupied in internal/engine; error value, not a separate slot concept.",
+          "token": "ErrBatcherSlotsFull"
+        },
+        {
+          "category": "incidental",
+          "reason": "Continuous-batcher lookup helper accessing a slot entry in internal/engine; accessor method, not a new runtime primitive.",
+          "token": "GetSlot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Continuous-batcher state accessor counting slots currently in prefill in internal/engine; counter, not a session-runtime abstraction.",
+          "token": "PrefillingSlots"
+        },
+        {
+          "category": "incidental",
+          "reason": "Continuous-batcher counter of slots that yielded after decoding in internal/engine; scheduler accounting counter, not a new slot type.",
+          "token": "YieldedSlots"
         }
       ],
       "exclude": [
@@ -7820,7 +7862,10 @@
         "ConfigureSessionMove",
         "CorrelationSession",
         "CoveredSessions",
+        "DefaultMaxSlots",
         "DiagnoseHistoryIndex",
+        "EmptySlots",
+        "ErrBatcherSlotsFull",
         "ErrSessionNotFound",
         "EvaluateLifecycleSession",
         "EventScheduler",
@@ -7831,6 +7876,7 @@
         "FleetSessionCard",
         "FleetSessions",
         "GatewaySeat",
+        "GetSlot",
         "HeldScheduleReport",
         "HeldScheduleReportSchema",
         "HistoryStatus",
@@ -7854,6 +7900,7 @@
         "ObservedSessions",
         "OutcomeEvidence",
         "OutcomeSession",
+        "PrefillingSlots",
         "PROVIDER_SESSION_CLEAR",
         "ProviderSessionBoundarySchema",
         "ProviderSessionID",
@@ -8244,7 +8291,8 @@
         "wipPeerCheckpointSessions",
         "witnessed_sufficiency_slot_released",
         "writeGuardCodexSessionBinding",
-        "writeSessionMoveJSON"
+        "writeSessionMoveJSON",
+        "YieldedSlots"
       ],
       "incidental_tokens": [],
       "known_tokens": [],
@@ -18382,6 +18430,11 @@
           "category": "incidental",
           "reason": "Unexported cmd/fak result struct bundling overlapped Inkling-2 cold-start CPU load planning output; local staging carrier, not a distinct planning concept.",
           "token": "planResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bounded 1-8 GPU single-node tensor/pipeline/replica placement struct returned inside internal/engine; topology output carrier, not a meta-planning workflow.",
+          "token": "SingleNodePlacementPlan"
         }
       ],
       "exclude": [
@@ -18502,6 +18555,7 @@
         "RoleCandidate",
         "RunCodeToolsSelfcheck",
         "SetupSeconds",
+        "SingleNodePlacementPlan",
         "SinkCandidate",
         "SinkCandidates",
         "SnapshotPressureCandidate",
@@ -19928,6 +19982,16 @@
           "category": "incidental",
           "reason": "Weight struct holding cross-pass controller projections for an Inkling-2 looped core layer; model weight container, not a separate loop concept.",
           "token": "Inkling2LoopControllerWeights"
+        },
+        {
+          "category": "incidental",
+          "reason": "Single-node topology placement block descriptor for repeated Transformer layers in internal/engine/single_node_topology.go; placement weight unit, not an execution loop.",
+          "token": "LoopedBlock"
+        },
+        {
+          "category": "incidental",
+          "reason": "Looped-layer tensor geometry descriptor referenced across internal/engine single-node topology and routing; model geometry carrier, not a loop controller.",
+          "token": "LoopedBlockShape"
         }
       ],
       "id": "loop",
@@ -19939,6 +20003,8 @@
         "FakMetaSuperloopNight100",
         "FleetScoutLoop",
         "Inkling2LoopControllerWeights",
+        "LoopedBlock",
+        "LoopedBlockShape",
         "LoopView",
         "LoopbackEndpoint",
         "LoopbackOnly",

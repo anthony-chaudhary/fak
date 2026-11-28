@@ -374,17 +374,30 @@ func (e *BatchingEngine) pumpAll() {
 // pumpRequest forwards one request's buffered slot tokens, finishing or cancelling
 // it when the slot terminal or the request ctx is done.
 func (e *BatchingEngine) pumpRequest(r *batcherRequest) {
+	pumpSlotTokens(e.ctx, r, e.cb.GetSlot, e.finishRequest, e.cancelRequest)
+}
+
+// pumpSlotTokens forwards one slot's buffered tokens into r.tokens until the slot
+// finishes, r.ctx cancels, or engineCtx cancels. Shared by BatchingEngine and
+// SingleNodeServingEngine so request pumping lives once.
+func pumpSlotTokens(
+	engineCtx context.Context,
+	r *batcherRequest,
+	getSlot func(string) (*Slot, bool),
+	onFinish func(*batcherRequest, *abi.Result),
+	onCancel func(*batcherRequest),
+) {
 	if r.finished() {
 		return
 	}
 	select {
 	case <-r.ctx.Done():
-		e.cancelRequest(r)
+		onCancel(r)
 		return
 	default:
 	}
 
-	slot, ok := e.cb.GetSlot(r.sessionID)
+	slot, ok := getSlot(r.sessionID)
 	if !ok {
 		return
 	}
@@ -393,24 +406,24 @@ func (e *BatchingEngine) pumpRequest(r *batcherRequest) {
 		select {
 		case tok, open := <-slot.Tokens():
 			if !open {
-				e.finishRequest(r, r.assemble())
+				onFinish(r, r.assemble())
 				return
 			}
 			r.gen = append(r.gen, tok)
 			select {
 			case r.tokens <- abi.EngineToken{ID: tok}:
 			case <-r.ctx.Done():
-				e.cancelRequest(r)
+				onCancel(r)
 				return
-			case <-e.ctx.Done():
+			case <-engineCtx.Done():
 				return
 			}
 		default:
 			select {
 			case <-slot.Done():
-				e.finishRequest(r, r.assemble())
+				onFinish(r, r.assemble())
 			case <-r.ctx.Done():
-				e.cancelRequest(r)
+				onCancel(r)
 			default:
 			}
 			return
