@@ -255,3 +255,27 @@ func writeBenchLoopFile(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestProgressStall(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	w := newPhaseProgressWatchdog("prefill", t0, 5*time.Second)
+	if w.Update("prefill", 0, t0.Add(3*time.Second)) {
+		t.Fatal("should not stall before timeout")
+	}
+	if !w.Update("prefill", 0, t0.Add(6*time.Second)) {
+		t.Fatal("should stall after timeout without progress")
+	}
+	if w.Update("decode", 0, t0.Add(6*time.Second)) {
+		t.Fatal("phase transition must reset stall timer")
+	}
+}
+
+func TestGrader(t *testing.T) {
+	cot, ans := splitThinkingAndAnswer("<think>expected is 99</think>\n 42 ")
+	if cot != "expected is 99" || ans != "42" {
+		t.Fatalf("split = (%q, %q)", cot, ans)
+	}
+	if !gradeExactMatch("<think>99</think>42", "42") || gradeExactMatch("<think>42</think>99", "42") {
+		t.Fatal("grader must evaluate final answer, not CoT")
+	}
+}

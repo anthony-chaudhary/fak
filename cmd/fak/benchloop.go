@@ -407,3 +407,45 @@ func (c benchStopChecker) CanStartNewSession(s benchStopState) bool {
 	}
 	return true
 }
+
+// ADAPT of ai-dynamo/aiperf (Apache-2.0, records_manager.py:550 @ab610add4e8876fca223197596c728e17365f381):
+// per-phase progress-stall watchdog.
+type phaseProgressWatchdog struct {
+	phase        string
+	progress     int64
+	lastAdvance  time.Time
+	stallTimeout time.Duration
+}
+
+func newPhaseProgressWatchdog(phase string, now time.Time, timeout time.Duration) *phaseProgressWatchdog {
+	return &phaseProgressWatchdog{phase: phase, lastAdvance: now, stallTimeout: timeout}
+}
+
+func (w *phaseProgressWatchdog) Update(phase string, progress int64, now time.Time) bool {
+	if phase != w.phase || progress > w.progress {
+		w.phase = phase
+		w.progress = progress
+		w.lastAdvance = now
+		return false
+	}
+	return now.Sub(w.lastAdvance) > w.stallTimeout
+}
+
+// INSPIRE-ONLY ai-dynamo/aiperf (Apache-2.0, accuracy/graders/base.py:15 @ab610add4e8876fca223197596c728e17365f381):
+// split CoT/thinking block from final answer and grade exact match on answer only.
+func splitThinkingAndAnswer(raw string) (thinking, answer string) {
+	const openTag, closeTag = "<think>", "</think>"
+	start := strings.Index(raw, openTag)
+	end := strings.Index(raw, closeTag)
+	if start >= 0 && end > start {
+		thinking = strings.TrimSpace(raw[start+len(openTag) : end])
+		answer = strings.TrimSpace(raw[end+len(closeTag):])
+		return thinking, answer
+	}
+	return "", strings.TrimSpace(raw)
+}
+
+func gradeExactMatch(raw, expected string) bool {
+	_, ans := splitThinkingAndAnswer(raw)
+	return ans == strings.TrimSpace(expected)
+}
