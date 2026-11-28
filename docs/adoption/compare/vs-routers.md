@@ -123,11 +123,12 @@ silently widen your data-egress surface. Details in
 
 This is a complement page, not a takedown, so the gaps belong on it:
 
-- **fak does not out-connect a gateway.** A mature router's breadth of providers, its
-  failover, load-balancing, key vaulting, and per-request cost routing are its whole job and
-  it does them well. fak is not trying to replace that layer, and its own multi-backend
-  dispatch (topology #3) is still marked stub in the [LiteLLM
-  doc](../../integrations/litellm.md).
+- **fak does not out-connect a gateway.** A mature router handles broad provider catalogs,
+  key vaulting, and per-request cost routing well, and fak does not replace that layer.
+  For local-plus-fallback deployments, `fak serve` ships `--route-accounts` with ordered
+  fallbacks, a per-account circuit breaker, and a fail-closed `local_only` residency floor.
+  Inspect live state at `GET /v1/router/status` (see
+  [local vs production gateways](../../local-vs-production-gateway.md)).
 - **The KV eviction win is local-only.** fak's addressable, bit-exact mid-run KV eviction
   is the in-kernel local-model path. When the model lives upstream behind a hosted router,
   there is no local KV prefix to evict, so that evictor is a no-op by design (a quarantined

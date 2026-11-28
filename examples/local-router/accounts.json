@@ -1,0 +1,49 @@
+{
+  "version": "fak-accounts/v1",
+  "accounts": [
+    {
+      "id": "local-gpu",
+      "kind": "local",
+      "base_url": "http://127.0.0.1:8080/v1"
+    },
+    {
+      "id": "openai",
+      "kind": "openai",
+      "cred_env": "OPENAI_API_KEY"
+    },
+    {
+      "id": "anthropic",
+      "kind": "anthropic",
+      "cred_env": "ANTHROPIC_API_KEY"
+    }
+  ],
+  "bindings": [
+    {
+      "model": "default",
+      "account": "local-gpu",
+      "fallbacks": [
+        {
+          "account": "openai",
+          "upstream_model": "gpt-4o-mini"
+        }
+      ]
+    },
+    {
+      "model": "private",
+      "account": "local-gpu",
+      "residency_floor": "local_only"
+    },
+    {
+      "model": "frontier",
+      "account": "anthropic",
+      "upstream_model": "claude-sonnet-4-20250514",
+      "fallbacks": [
+        {
+          "account": "openai",
+          "upstream_model": "gpt-4o"
+        }
+      ]
+    }
+  ],
+  "default": "local-gpu"
+}

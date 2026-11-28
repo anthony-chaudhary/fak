@@ -2,12 +2,16 @@ package computetune
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/computebuild"
 )
 
 type fakeCandidate struct {
@@ -429,4 +433,372 @@ func TestTuneRefusesTimedOutputDrift(t *testing.T) {
 	if h := resultByID(report.Profiles[0].Candidates, "honest"); h.TimingAudit != "audited" {
 		t.Fatalf("honest: %+v", h)
 	}
+}
+
+type fakeCompileStatsCandidate struct {
+	fakeCandidate
+	compileStats func(Profile) ([]KernelResourceStats, error)
+}
+
+func (c fakeCompileStatsCandidate) CompileStats(_ context.Context, p Profile) ([]KernelResourceStats, error) {
+	return c.compileStats(p)
+}
+
+type fakeReceiptCandidate struct {
+	fakeCandidate
+	receipt func(Profile) (*computebuild.CUDANativeBuildReceipt, error)
+}
+
+func (c fakeReceiptCandidate) CUDABuildReceipt(_ context.Context, p Profile) (*computebuild.CUDANativeBuildReceipt, error) {
+	return c.receipt(p)
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCompileStats(t *testing.T) {
+	const ptxasSample = "" +
+		"nvcc warning : diagnostic before kernel\r\n" +
+		"\r\n" +
+		"ptxas info    : 0 bytes gmem\r\n" +
+		"ptxas info    : 128 bytes gmem, 64 bytes cmem[4]\n" +
+		"ptxas info    : Compiling entry function '_Z14my_gemm_kernelPKfS0_Pfiii' for 'sm_89'\r\n" +
+		"ptxas info    : Function properties for _Z14my_gemm_kernelPKfS0_Pfiii\r\n" +
+		"    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads\r\n" +
+		"ptxas info    : Used 32 registers, 4096 bytes smem, 384 bytes cmem[0]\r\n" +
+		"ptxas info    : Compiling entry function 'flash_attn_kernel' for 'sm_120'\n" +
+		"ptxas info    : Function properties for _Z10helper_fnv\n" +
+		"    16 bytes stack frame, 4 bytes spill stores, 4 bytes spill loads\n" +
+		"ptxas info    : Function properties for flash_attn_kernel\n" +
+		"    64 bytes stack frame, 24 bytes spill stores, 48 bytes spill loads\n" +
+		"ptxas info    : Used 64 registers, 16384 bytes smem, 352 bytes cmem[0], 16 bytes cmem[2]\n" +
+		"ptxas info    : Compiling entry function 'cum_stack_kernel' for 'sm_90'\n" +
+		"ptxas info    : Used 48 registers, used 16 barriers, 128 cumulative stack size, 2048 bytes smem\n" +
+		"ptxas info    : Compiling entry function 'minimal_kernel' for 'sm_80'\n" +
+		"ptxas info    : Used 16 registers\n" +
+		"random host compiler note without ptxas data\n"
+
+	t.Run("ParsePTXASOutput toolkit variants and noise", func(t *testing.T) {
+		got := computebuild.ParsePTXASOutput(ptxasSample)
+		want := []computebuild.PTXASResourceStats{
+			{
+				KernelName:         "_Z14my_gemm_kernelPKfS0_Pfiii",
+				Arch:               "sm_89",
+				RegistersPerThread: 32,
+				SpillStoresBytes:   0,
+				SpillLoadsBytes:    0,
+				StaticSmemBytes:    4096,
+				StackFrameBytes:    0,
+				ConstantMemBytes:   384,
+			},
+			{
+				KernelName:         "flash_attn_kernel",
+				Arch:               "sm_120",
+				RegistersPerThread: 64,
+				SpillStoresBytes:   24,
+				SpillLoadsBytes:    48,
+				StaticSmemBytes:    16384,
+				StackFrameBytes:    64,
+				ConstantMemBytes:   368,
+			},
+			{
+				KernelName:         "cum_stack_kernel",
+				Arch:               "sm_90",
+				RegistersPerThread: 48,
+				StaticSmemBytes:    2048,
+				StackFrameBytes:    128,
+			},
+			{
+				KernelName:         "minimal_kernel",
+				Arch:               "sm_80",
+				RegistersPerThread: 16,
+			},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("ParsePTXASOutput mismatch:\ngot:  %+v\nwant: %+v", got, want)
+		}
+
+		for _, emptyOrNoise := range []string{
+			"",
+			"   \r\n\t\n",
+			"ptxas info    : 0 bytes gmem\nptxas info    : 128 bytes gmem, 64 bytes cmem[4]\n",
+			"cl : Command line warning D9025 : overriding '/O2'\n",
+		} {
+			if stats := computebuild.ParsePTXASOutput(emptyOrNoise); len(stats) != 0 {
+				t.Fatalf("expected no stats for %q, got %+v", emptyOrNoise, stats)
+			}
+		}
+
+		base := []string{"-O3", "-std=c++17"}
+		baseBefore := slices.Clone(base)
+		withVerbose := computebuild.PTXASVerboseFlags(base)
+		if !reflect.DeepEqual(base, baseBefore) {
+			t.Fatalf("PTXASVerboseFlags mutated input: %v", base)
+		}
+		if !slices.Contains(withVerbose, "-lineinfo") || !slices.Contains(withVerbose, "--ptxas-options=-v") {
+			t.Fatalf("missing verbose flags: %v", withVerbose)
+		}
+		already := []string{"-O3", "-lineinfo", "--ptxas-options=-v,--register-usage-level=10"}
+		if deduped := computebuild.PTXASVerboseFlags(already); !reflect.DeepEqual(deduped, already) {
+			t.Fatalf("PTXASVerboseFlags duplicated flags: got %v want %v", deduped, already)
+		}
+		if _, _, err := computebuild.CompileCUDAWithPTXASStats(context.Background(), nil, t.TempDir(), base, nil, nil, nil); err == nil {
+			t.Fatal("expected error for nil toolchain")
+		}
+	})
+
+	t.Run("receipt propagation preserves compatibility", func(t *testing.T) {
+		parsed := computebuild.ParsePTXASOutput(ptxasSample)
+		obj := computebuild.CUDAObjectBuildReceipt{
+			Source:              "cuda_kernels.cu",
+			Object:              "cuda_kernels.o",
+			Action:              "executed",
+			EffectiveFlags:      computebuild.PTXASVerboseFlags([]string{"-O3"}),
+			CompileStats:        parsed,
+			CompileStatsSummary: computebuild.SummarizePTXASStats(parsed),
+		}
+		native := computebuild.CUDANativeBuildReceipt{
+			Schema:       computebuild.CUDANativeBuildReceiptSchema,
+			Outcome:      "success",
+			Mode:         "cold",
+			Architecture: "sm_120",
+			Objects:      []computebuild.CUDAObjectBuildReceipt{obj},
+		}
+		native.AggregateCompileStats()
+
+		raw, err := json.Marshal(native)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var roundTrip computebuild.CUDANativeBuildReceipt
+		if err := json.Unmarshal(raw, &roundTrip); err != nil {
+			t.Fatal(err)
+		}
+		if len(roundTrip.CompileStats) != 4 || len(roundTrip.Objects) != 1 || len(roundTrip.Objects[0].CompileStats) != 4 {
+			t.Fatalf("compile stats lost in receipt round-trip: %+v", roundTrip)
+		}
+		if roundTrip.CompileStatsSummary == nil ||
+			roundTrip.CompileStatsSummary.RegistersPerThread != 64 ||
+			roundTrip.CompileStatsSummary.SpillStoresBytes != 24 ||
+			roundTrip.CompileStatsSummary.SpillLoadsBytes != 48 ||
+			roundTrip.CompileStatsSummary.StaticSmemBytes != 16384 ||
+			roundTrip.CompileStatsSummary.Arch != "" {
+			t.Fatalf("unexpected native summary: %+v", roundTrip.CompileStatsSummary)
+		}
+
+		// Empty compile stats omit compile_stats fields cleanly.
+		bare := computebuild.CUDANativeBuildReceipt{
+			Schema:  computebuild.CUDANativeBuildReceiptSchema,
+			Objects: []computebuild.CUDAObjectBuildReceipt{{Source: "cuda_kernels.cu", Action: "reused"}},
+		}
+		bare.AggregateCompileStats()
+		bareJSON, err := json.Marshal(bare)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(bareJSON), "compile_stats") {
+			t.Fatalf("empty compile stats leaked into JSON: %s", bareJSON)
+		}
+	})
+
+	t.Run("Tune surfaces CompileStats before measure and labels distinguish local spills from static smem", func(t *testing.T) {
+		p := profile(4, 8, 16)
+		var events []string
+		ref := fakeCandidate{
+			id: "reference",
+			result: func(Profile) ([]float32, error) {
+				return []float32{1, 2}, nil
+			},
+		}
+		fallback := fakeCompileStatsCandidate{
+			fakeCandidate: fakeCandidate{
+				id: "fallback",
+				result: func(Profile) ([]float32, error) {
+					events = append(events, "run:fallback")
+					return []float32{1, 2}, nil
+				},
+			},
+			compileStats: func(Profile) ([]KernelResourceStats, error) {
+				events = append(events, "compile_stats:fallback")
+				return []KernelResourceStats{{
+					KernelName:       "k_fallback",
+					Arch:             "sm_120",
+					Registers:        32,
+					SpillStoresBytes: 0,
+					SpillLoadsBytes:  0,
+					StaticSmemBytes:  4096,
+				}}, nil
+			},
+		}
+		fastSpilling := fakeReceiptCandidate{
+			fakeCandidate: fakeCandidate{
+				id: "fast-spilling",
+				result: func(Profile) ([]float32, error) {
+					events = append(events, "run:fast-spilling")
+					return []float32{1, 2}, nil
+				},
+			},
+			receipt: func(Profile) (*computebuild.CUDANativeBuildReceipt, error) {
+				events = append(events, "compile_stats:fast-spilling")
+				stats := computebuild.ParsePTXASOutput("" +
+					"ptxas info    : Compiling entry function 'k_fast' for 'sm_120'\n" +
+					"ptxas info    : Function properties for k_fast\n" +
+					"    64 bytes stack frame, 24 bytes spill stores, 48 bytes spill loads\n" +
+					"ptxas info    : Used 64 registers, 16384 bytes smem, 352 bytes cmem[0]\n")
+				r := &computebuild.CUDANativeBuildReceipt{
+					Schema: computebuild.CUDANativeBuildReceiptSchema,
+					Objects: []computebuild.CUDAObjectBuildReceipt{{
+						Source:       "k_fast.cu",
+						Action:       "executed",
+						CompileStats: stats,
+					}},
+				}
+				r.AggregateCompileStats()
+				return r, nil
+			},
+		}
+		wrongWithStats := fakeCompileStatsCandidate{
+			fakeCandidate: fakeCandidate{
+				id: "wrong-with-stats",
+				result: func(Profile) ([]float32, error) {
+					events = append(events, "run:wrong-with-stats")
+					return []float32{-99}, nil
+				},
+			},
+			compileStats: func(Profile) ([]KernelResourceStats, error) {
+				events = append(events, "compile_stats:wrong-with-stats")
+				return []KernelResourceStats{{
+					KernelName:       "k_wrong",
+					Arch:             "sm_120",
+					Registers:        72,
+					SpillStoresBytes: 128,
+					SpillLoadsBytes:  256,
+					StaticSmemBytes:  8192,
+				}}, nil
+			},
+		}
+		timeFailWithStats := fakeCompileStatsCandidate{
+			fakeCandidate: fakeCandidate{
+				id: "time-fail-with-stats",
+				result: func(Profile) ([]float32, error) {
+					events = append(events, "run:time-fail-with-stats")
+					return []float32{1, 2}, nil
+				},
+			},
+			compileStats: func(Profile) ([]KernelResourceStats, error) {
+				events = append(events, "compile_stats:time-fail-with-stats")
+				return []KernelResourceStats{{
+					KernelName:      "k_time_fail",
+					Arch:            "sm_120",
+					Registers:       40,
+					StaticSmemBytes: 1024,
+				}}, nil
+			},
+		}
+		compileErrCand := fakeCompileStatsCandidate{
+			fakeCandidate: fakeCandidate{
+				id: "compile-error",
+				result: func(Profile) ([]float32, error) {
+					events = append(events, "run:compile-error")
+					return []float32{1, 2}, nil
+				},
+			},
+			compileStats: func(Profile) ([]KernelResourceStats, error) {
+				events = append(events, "compile_stats:compile-error")
+				return nil, errors.New("nvcc ptxas failed")
+			},
+		}
+		plain := fakeCandidate{
+			id: "plain",
+			result: func(Profile) ([]float32, error) {
+				events = append(events, "run:plain")
+				return []float32{1, 2}, nil
+			},
+		}
+
+		measured := map[string]int{}
+		ctxStatsAtMeasure := map[string][]KernelResourceStats{}
+		measure := func(ctx context.Context, c Candidate, _ Profile) (time.Duration, error) {
+			events = append(events, "measure:"+c.ID())
+			measured[c.ID()]++
+			if stats, ok := CompileStatsFromContext(ctx); ok {
+				ctxStatsAtMeasure[c.ID()] = stats
+			}
+			switch c.ID() {
+			case "fast-spilling":
+				return 4 * time.Microsecond, nil
+			case "time-fail-with-stats":
+				return 0, errors.New("timer failed")
+			default:
+				return 10 * time.Microsecond, nil
+			}
+		}
+
+		candidates := []Candidate{fallback, fastSpilling, wrongWithStats, timeFailWithStats, compileErrCand, plain}
+		policy := Policy{Warmup: 1, Repeats: 2, Statistic: "median", TimerDomain: "device-event", FallbackCandidate: "fallback"}
+		manifest, report, err := Tune(context.Background(), []Profile{p}, candidates, ref, exact, measure, policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sel, _ := manifest.Lookup(p); sel != "fast-spilling" {
+			t.Fatalf("selected %q, want fast-spilling", sel)
+		}
+
+		// Compile stats were gathered before Run and Measure for every stats-carrying candidate.
+		for _, id := range []string{"fallback", "fast-spilling"} {
+			csIdx := slices.Index(events, "compile_stats:"+id)
+			runIdx := slices.Index(events, "run:"+id)
+			measIdx := slices.Index(events, "measure:"+id)
+			if csIdx < 0 || runIdx <= csIdx || measIdx <= runIdx {
+				t.Fatalf("unexpected ordering for %s in events=%v", id, events)
+			}
+			if len(ctxStatsAtMeasure[id]) != 1 {
+				t.Fatalf("measure did not receive pre-computed compile stats for %s", id)
+			}
+		}
+
+		// Failed validation and compile-error candidates never ran measure, yet validation failure kept CompileStats.
+		if measured["wrong-with-stats"] != 0 || measured["compile-error"] != 0 {
+			t.Fatalf("unvalidated candidates were timed: %v", measured)
+		}
+		res := report.Profiles[0].Candidates
+		wrongRes := resultByID(res, "wrong-with-stats")
+		if wrongRes == nil || wrongRes.Correct || len(wrongRes.CompileStats) != 1 || wrongRes.CompileStats[0].SpillStoresBytes != 128 || wrongRes.CompileStats[0].SpillLoadsBytes != 256 {
+			t.Fatalf("wrong candidate lost compile stats: %+v", wrongRes)
+		}
+		timeFailRes := resultByID(res, "time-fail-with-stats")
+		if timeFailRes == nil || timeFailRes.Correct || !strings.Contains(timeFailRes.RefusalReason, "warmup: timer failed") || len(timeFailRes.CompileStats) != 1 || timeFailRes.CompileStats[0].StaticSmemBytes != 1024 {
+			t.Fatalf("time-failed candidate lost compile stats: %+v", timeFailRes)
+		}
+		compileErrRes := resultByID(res, "compile-error")
+		if compileErrRes == nil || compileErrRes.Correct || !strings.Contains(compileErrRes.RefusalReason, "compile stats:") {
+			t.Fatalf("compile-error candidate missing refusal: %+v", compileErrRes)
+		}
+		if plainRes := resultByID(res, "plain"); plainRes == nil || !plainRes.Correct || len(plainRes.CompileStats) != 0 {
+			t.Fatalf("plain candidate unexpected compile stats: %+v", plainRes)
+		}
+
+		fastRes := resultByID(res, "fast-spilling")
+		if fastRes == nil || len(fastRes.CompileStats) != 1 {
+			t.Fatalf("fast-spilling missing compile stats: %+v", fastRes)
+		}
+		gotFast := fastRes.CompileStats[0]
+		if gotFast.Registers != 64 || gotFast.SpillStoresBytes != 24 || gotFast.SpillLoadsBytes != 48 || gotFast.StaticSmemBytes != 16384 || gotFast.StackFrameBytes != 64 || gotFast.ConstantMemBytes != 352 {
+			t.Fatalf("unexpected fast-spilling stats: %+v", gotFast)
+		}
+
+		reportJSON, err := json.Marshal(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rawReport := string(reportJSON)
+		for _, wantKey := range []string{`"local_spill_stores_bytes":24`, `"local_spill_loads_bytes":48`, `"static_smem_bytes":16384`} {
+			if !strings.Contains(rawReport, wantKey) {
+				t.Fatalf("report JSON missing %s: %s", wantKey, rawReport)
+			}
+		}
+		for _, forbidden := range []string{"shared_memory_spill", "shared-memory spill", "smem_spill"} {
+			if strings.Contains(strings.ToLower(rawReport), forbidden) {
+				t.Fatalf("report JSON mislabeled local-memory spills as %q: %s", forbidden, rawReport)
+			}
+		}
+	})
 }

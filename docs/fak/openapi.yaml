@@ -519,6 +519,29 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  /v1/router/status:
+    get:
+      tags: [fak-native]
+      summary: Snapshot configured routes, fallback chains, residency floors, and circuit state
+      description: |
+        Read-only snapshot (`fak-router-status/v1`) of every configured `modelroute.Roster`
+        binding, its ordered primary + fallback chain, residency floor, and live per-account
+        cooldown circuit state. Never returns secret credentials.
+      responses:
+        '200':
+          description: The router status snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema: { type: string, example: fak-router-status/v1 }
+                  routes:
+                    type: array
+                    items: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/models:
     get:
       tags: [OpenAI]

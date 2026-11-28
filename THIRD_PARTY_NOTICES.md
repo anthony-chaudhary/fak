@@ -2973,3 +2973,41 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Hugging Face Candle
+
+Portions of this product are adapted from Hugging Face Candle: https://github.com/huggingface/candle (pinned at revision cfcbd7186d13271843ce7eb41d25659bd0835850). Changes were made.
+
+SPDX-License-Identifier: Apache-2.0 OR MIT
+
+```text
+MIT License
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+---
+
+Portions of this product are conceptually informed by NVIDIA/OpenShell (https://github.com/NVIDIA/OpenShell, pinned at revision af8182f7b6, Apache-2.0, in `internal/sandbox/openshell_model.go`), NVIDIA/SkillSpector (https://github.com/NVIDIA/SkillSpector, pinned at revision e48d771a26, Apache-2.0, in `internal/policy/skillspector.go`), and NVIDIA/kvpress (https://github.com/NVIDIA/kvpress, pinned at revision 94951a5b90, Apache-2.0, in `internal/kvmmu/kvpress_study.go`). Changes were made; no upstream code was copied.

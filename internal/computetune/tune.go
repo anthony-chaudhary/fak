@@ -19,6 +19,8 @@ import (
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/computebuild"
 )
 
 // Schema is the version tag embedded in tuning manifests and reports.
@@ -71,6 +73,102 @@ func (p Profile) key() string {
 type Candidate interface {
 	ID() string
 	Run(context.Context, Profile) ([]float32, error)
+}
+
+// KernelResourceStats exposes static ptxas compile-time resource usage
+// (registers per thread, local-memory register spills, and static shared
+// memory) surfaced before any timed run. Pattern adapted in clean-room Go from
+// alibaba/atrex-kernel-agent (extract_nvidia_asm.py:93-107 at dc388550ab6b,
+// Apache-2.0).
+//
+// SpillStoresBytes and SpillLoadsBytes represent register spills to LOCAL memory
+// (never shared-memory spill bytes). StaticSmemBytes represents static shared
+// memory allocation only; dynamic shared memory is unknown at compile time.
+type KernelResourceStats struct {
+	KernelName       string `json:"kernel_name"`
+	Arch             string `json:"arch,omitempty"`
+	Registers        int    `json:"registers_per_thread"`
+	SpillStoresBytes int    `json:"local_spill_stores_bytes"` // Register spill stores to local memory.
+	SpillLoadsBytes  int    `json:"local_spill_loads_bytes"`  // Register spill loads from local memory.
+	StaticSmemBytes  int    `json:"static_smem_bytes"`        // Static shared memory only; excludes dynamic smem.
+	StackFrameBytes  int    `json:"stack_frame_bytes,omitempty"`
+	ConstantMemBytes int    `json:"constant_mem_bytes,omitempty"`
+}
+
+// CompileResourceStats aliases KernelResourceStats.
+type CompileResourceStats = KernelResourceStats
+
+// CompileStatsCandidate is an optional interface a Candidate may implement to
+// surface static compile-time ptxas resource pressure before any timed run.
+type CompileStatsCandidate interface {
+	Candidate
+	CompileStats(ctx context.Context, p Profile) ([]KernelResourceStats, error)
+}
+
+// CUDABuildReceiptCandidate is an optional interface a Candidate may implement
+// when it already carries a computebuild native CUDA build receipt.
+type CUDABuildReceiptCandidate interface {
+	Candidate
+	CUDABuildReceipt(ctx context.Context, p Profile) (*computebuild.CUDANativeBuildReceipt, error)
+}
+
+// KernelResourceStatsFromPTXAS converts parsed computebuild ptxas resource
+// records into computetune KernelResourceStats.
+func KernelResourceStatsFromPTXAS(stats []computebuild.PTXASResourceStats) []KernelResourceStats {
+	if len(stats) == 0 {
+		return nil
+	}
+	out := make([]KernelResourceStats, len(stats))
+	for i, s := range stats {
+		out[i] = KernelResourceStats{
+			KernelName:       s.KernelName,
+			Arch:             s.Arch,
+			Registers:        s.RegistersPerThread,
+			SpillStoresBytes: s.SpillStoresBytes,
+			SpillLoadsBytes:  s.SpillLoadsBytes,
+			StaticSmemBytes:  s.StaticSmemBytes,
+			StackFrameBytes:  s.StackFrameBytes,
+			ConstantMemBytes: s.ConstantMemBytes,
+		}
+	}
+	return out
+}
+
+// KernelResourceStatsFromReceipt extracts static compile stats from a
+// computebuild native CUDA build receipt, preferring aggregated stats and
+// falling back to per-object stats when finish has not aggregated them yet.
+func KernelResourceStatsFromReceipt(receipt computebuild.CUDANativeBuildReceipt) []KernelResourceStats {
+	if len(receipt.CompileStats) > 0 {
+		return KernelResourceStatsFromPTXAS(receipt.CompileStats)
+	}
+	var collected []computebuild.PTXASResourceStats
+	for _, obj := range receipt.Objects {
+		if len(obj.CompileStats) > 0 {
+			collected = append(collected, obj.CompileStats...)
+		}
+	}
+	return KernelResourceStatsFromPTXAS(collected)
+}
+
+func candidateCompileStats(ctx context.Context, candidate Candidate, profile Profile) ([]KernelResourceStats, error) {
+	if cs, ok := candidate.(CompileStatsCandidate); ok {
+		stats, err := cs.CompileStats(ctx, profile)
+		if err != nil {
+			return nil, err
+		}
+		return slices.Clone(stats), nil
+	}
+	if rc, ok := candidate.(CUDABuildReceiptCandidate); ok {
+		receipt, err := rc.CUDABuildReceipt(ctx, profile)
+		if err != nil {
+			return nil, err
+		}
+		if receipt == nil {
+			return nil, nil
+		}
+		return KernelResourceStatsFromReceipt(*receipt), nil
+	}
+	return nil, nil
 }
 
 // Correct checks a candidate result against the reference result.
@@ -211,10 +309,26 @@ type CandidateResult struct {
 	// TimingAudit is "audited" when every timed output was checked, else "unaudited".
 	TimingAudit string `json:"timing_audit,omitempty"`
 	// PostTimingCheck is "passed" or "failed" for the re-run after timing.
-	PostTimingCheck string          `json:"post_timing_check,omitempty"`
-	Samples         []time.Duration `json:"samples,omitempty"`
-	Statistic       time.Duration   `json:"statistic,omitempty"`
-	SignTest        *SignTestResult `json:"sign_test,omitempty"`
+	PostTimingCheck string                `json:"post_timing_check,omitempty"`
+	CompileStats    []KernelResourceStats `json:"compile_stats,omitempty"`
+	Samples         []time.Duration       `json:"samples,omitempty"`
+	Statistic       time.Duration         `json:"statistic,omitempty"`
+	SignTest        *SignTestResult       `json:"sign_test,omitempty"`
+}
+
+type compileStatsContextKey struct{}
+
+// CompileStatsFromContext returns any static compile stats attached to ctx
+// for a candidate prior to timed execution.
+func CompileStatsFromContext(ctx context.Context) ([]KernelResourceStats, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	stats, ok := ctx.Value(compileStatsContextKey{}).([]KernelResourceStats)
+	if !ok || len(stats) == 0 {
+		return nil, false
+	}
+	return slices.Clone(stats), true
 }
 
 // ProfileResult is the inspectable tuning receipt for one profile.
@@ -389,6 +503,13 @@ func tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 		pr := ProfileResult{Profile: profile}
 		for _, candidate := range candidates {
 			cr := CandidateResult{CandidateID: candidate.ID()}
+			compileStats, err := candidateCompileStats(ctx, candidate, profile)
+			if err != nil {
+				cr.RefusalReason = "compile stats: " + err.Error()
+				pr.Candidates = append(pr.Candidates, cr)
+				continue
+			}
+			cr.CompileStats = compileStats
 			got, err := candidate.Run(ctx, profile)
 			if err != nil {
 				cr.RefusalReason = "correctness execution: " + err.Error()
@@ -412,9 +533,13 @@ func tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 			if audited != nil {
 				cr.TimingAudit = "audited"
 			}
+			measureCtx := ctx
+			if len(cr.CompileStats) > 0 {
+				measureCtx = context.WithValue(ctx, compileStatsContextKey{}, slices.Clone(cr.CompileStats))
+			}
 			failed := false
 			for i := 0; i < policy.Warmup; i++ {
-				if _, err := measure(ctx, candidate, profile); err != nil {
+				if _, err := measure(measureCtx, candidate, profile); err != nil {
 					cr.RefusalReason = timedReason("warmup", err)
 					cr.Correct = false
 					failed = true
@@ -422,7 +547,7 @@ func tune(ctx context.Context, profiles []Profile, candidates []Candidate, refer
 				}
 			}
 			for i := 0; !failed && i < policy.Repeats; i++ {
-				d, err := measure(ctx, candidate, profile)
+				d, err := measure(measureCtx, candidate, profile)
 				if err != nil || d <= 0 {
 					if err == nil {
 						err = errors.New("non-positive duration")

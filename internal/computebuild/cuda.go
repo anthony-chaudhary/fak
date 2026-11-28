@@ -1,14 +1,18 @@
 package computebuild
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -302,6 +306,270 @@ func prepareCUDATokenomosStaging(cfg *CUDAConfig) error {
 	return nil
 }
 
+type cudaPTXASVerboseKey struct{}
+
+// WithPTXASVerbose controls whether CUDA kernel compilation adds
+// PTXASVerboseFlags (-lineinfo --ptxas-options=-v) and captures ptxas static
+// resource usage statistics into build receipts.
+func WithPTXASVerbose(ctx context.Context, enabled bool) context.Context {
+	return context.WithValue(ctx, cudaPTXASVerboseKey{}, enabled)
+}
+
+// PTXASVerboseFlags returns a copy of args with -lineinfo and
+// --ptxas-options=-v added if not already present, enabling ptxas per-kernel
+// resource usage output without changing optimization or cudaToolchainDigest.
+func PTXASVerboseFlags(args []string) []string {
+	out := append([]string(nil), args...)
+	if !hasNVCCLineInfoFlag(out) {
+		out = append(out, "-lineinfo")
+	}
+	if !hasPTXASVerboseFlags(out) {
+		out = append(out, "--ptxas-options=-v")
+	}
+	return out
+}
+
+func hasNVCCLineInfoFlag(args []string) bool {
+	return slices.Contains(args, "-lineinfo") || slices.Contains(args, "--lineinfo")
+}
+
+func hasPTXASVerboseFlags(args []string) bool {
+	for i, arg := range args {
+		switch {
+		case arg == "--ptxas-options=-v" || arg == "-Xptxas=-v" || arg == "-Xptxas,-v":
+			return true
+		case strings.HasPrefix(arg, "--ptxas-options="):
+			if ptxasOptionListHasVerbose(strings.TrimPrefix(arg, "--ptxas-options=")) {
+				return true
+			}
+		case strings.HasPrefix(arg, "-Xptxas="):
+			if ptxasOptionListHasVerbose(strings.TrimPrefix(arg, "-Xptxas=")) {
+				return true
+			}
+		case strings.HasPrefix(arg, "-Xptxas,"):
+			if ptxasOptionListHasVerbose(strings.TrimPrefix(arg, "-Xptxas,")) {
+				return true
+			}
+		case (arg == "-Xptxas" || arg == "--ptxas-options") && i+1 < len(args):
+			if ptxasOptionListHasVerbose(args[i+1]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ptxasOptionListHasVerbose(list string) bool {
+	for _, opt := range strings.Split(list, ",") {
+		opt = strings.TrimSpace(opt)
+		if opt == "-v" || opt == "--verbose" {
+			return true
+		}
+	}
+	return false
+}
+
+func cudaPTXASVerboseEnabled(ctx context.Context) bool {
+	if ctx != nil {
+		if enabled, ok := ctx.Value(cudaPTXASVerboseKey{}).(bool); ok {
+			return enabled
+		}
+	}
+	return true
+}
+
+func cudaPTXASVerboseFlags(ctx context.Context, args []string) []string {
+	if !cudaPTXASVerboseEnabled(ctx) {
+		return args
+	}
+	return PTXASVerboseFlags(args)
+}
+
+var (
+	ptxasEntryRe     = regexp.MustCompile(`Compiling entry function '([^']+)' for '([^']+)'`)
+	ptxasFuncPropRe  = regexp.MustCompile(`Function properties for (\S+)`)
+	ptxasRegistersRe = regexp.MustCompile(`(?i)\bused\s+(\d+)\s+registers?\b`)
+	ptxasStackRe     = regexp.MustCompile(`(?i)\b(\d+)\s+bytes?\s+stack\s+frame\b`)
+	ptxasCumStackRe  = regexp.MustCompile(`(?i)\b(\d+)\s+(?:bytes?\s+)?cumulative\s+stack\s+size\b`)
+	ptxasSpillStRe   = regexp.MustCompile(`(?i)\b(\d+)\s+bytes?\s+spill\s+stores?\b`)
+	ptxasSpillLdRe   = regexp.MustCompile(`(?i)\b(\d+)\s+bytes?\s+spill\s+loads?\b`)
+	ptxasSmemRe      = regexp.MustCompile(`(?i)\b(\d+)\s+bytes?\s+smem\b`)
+	ptxasCmemRe      = regexp.MustCompile(`(?i)\b(\d+)\s+bytes?\s+cmem(?:\[\d+\])?(?:\b|[\s,;]|$)`)
+)
+
+// ParsePTXASOutput parses nvcc/ptxas -v diagnostic output into per-kernel
+// static resource statistics across CUDA toolkit formatting variants.
+// Empty, module-level gmem, and non-ptxas diagnostic lines are ignored safely.
+func ParsePTXASOutput(output string) []PTXASResourceStats {
+	if strings.TrimSpace(output) == "" {
+		return nil
+	}
+	var results []PTXASResourceStats
+	var cur PTXASResourceStats
+	var hasCurrent, hasMetrics, hasRegisters, hasStackFrame, seenEntryProp, skipPropMetrics bool
+
+	flush := func() {
+		if hasCurrent && hasMetrics {
+			results = append(results, cur)
+		}
+		cur = PTXASResourceStats{}
+		hasCurrent = false
+		hasMetrics = false
+		hasRegisters = false
+		hasStackFrame = false
+		seenEntryProp = false
+		skipPropMetrics = false
+	}
+
+	for _, rawLine := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(rawLine, "\r"))
+		if line == "" {
+			continue
+		}
+		if m := ptxasEntryRe.FindStringSubmatch(line); len(m) == 3 {
+			flush()
+			cur = PTXASResourceStats{KernelName: m[1], Arch: m[2]}
+			hasCurrent = true
+			continue
+		}
+		if hasCurrent {
+			if m := ptxasFuncPropRe.FindStringSubmatch(line); len(m) == 2 {
+				if m[1] == cur.KernelName {
+					seenEntryProp = true
+					skipPropMetrics = false
+				} else if seenEntryProp || hasRegisters {
+					skipPropMetrics = true
+				} else {
+					skipPropMetrics = false
+				}
+				continue
+			}
+		}
+		if !hasCurrent {
+			if ptxasRegistersRe.MatchString(line) {
+				hasCurrent = true
+			} else {
+				continue
+			}
+		}
+		if m := ptxasRegistersRe.FindStringSubmatch(line); len(m) == 2 {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				cur.RegistersPerThread = n
+				hasRegisters = true
+				hasMetrics = true
+			}
+		}
+		if !skipPropMetrics {
+			if m := ptxasStackRe.FindStringSubmatch(line); len(m) == 2 {
+				if n, err := strconv.Atoi(m[1]); err == nil {
+					cur.StackFrameBytes = n
+					hasStackFrame = true
+					hasMetrics = true
+				}
+			}
+			if m := ptxasSpillStRe.FindStringSubmatch(line); len(m) == 2 {
+				if n, err := strconv.Atoi(m[1]); err == nil {
+					cur.SpillStoresBytes = n
+					hasMetrics = true
+				}
+			}
+			if m := ptxasSpillLdRe.FindStringSubmatch(line); len(m) == 2 {
+				if n, err := strconv.Atoi(m[1]); err == nil {
+					cur.SpillLoadsBytes = n
+					hasMetrics = true
+				}
+			}
+		}
+		if m := ptxasCumStackRe.FindStringSubmatch(line); len(m) == 2 {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				if !hasStackFrame {
+					cur.StackFrameBytes = n
+				}
+				hasMetrics = true
+			}
+		}
+		if m := ptxasSmemRe.FindStringSubmatch(line); len(m) == 2 {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				cur.StaticSmemBytes = n
+				hasMetrics = true
+			}
+		}
+		if !strings.Contains(strings.ToLower(line), "bytes gmem") {
+			for _, m := range ptxasCmemRe.FindAllStringSubmatch(line, -1) {
+				if len(m) == 2 {
+					if n, err := strconv.Atoi(m[1]); err == nil {
+						cur.ConstantMemBytes += n
+						hasMetrics = true
+					}
+				}
+			}
+		}
+	}
+	flush()
+	return results
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func compileCUDAObjectWithPTXAS(ctx context.Context, tc *Toolchain, dir, source, object string, args, env []string, receipt *CUDANativeBuildReceipt, stdout io.Writer) error {
+	var captured syncBuffer
+	out := io.Writer(&captured)
+	if stdout != nil {
+		out = io.MultiWriter(stdout, &captured)
+	}
+	err := compileCUDAObject(ctx, tc, dir, source, object, args, env, receipt, out)
+	if hasPTXASVerboseFlags(args) && receipt != nil && len(receipt.Objects) > 0 {
+		if stats := ParsePTXASOutput(captured.String()); len(stats) > 0 {
+			idx := len(receipt.Objects) - 1
+			receipt.Objects[idx].CompileStats = stats
+			receipt.Objects[idx].CompileStatsSummary = SummarizePTXASStats(stats)
+		}
+	}
+	return err
+}
+
+// CompileCUDAWithPTXASStats executes nvcc with args (augmenting with
+// PTXASVerboseFlags unless disabled via WithPTXASVerbose(ctx, false)),
+// capturing both stdout and stderr so ptxas -v resource statistics are parsed
+// even when nvcc writes them to stderr. It does not alter cudaToolchainDigest.
+func CompileCUDAWithPTXASStats(ctx context.Context, tc *Toolchain, dir string, args, env []string, stdout, stderr io.Writer) ([]PTXASResourceStats, string, error) {
+	if tc == nil || tc.NVCC == "" {
+		return nil, "", fmt.Errorf("nvcc not found — install CUDA Toolkit and set CUDA_PATH or CUDA_HOME")
+	}
+	compileArgs := cudaPTXASVerboseFlags(ctx, args)
+	var captured syncBuffer
+	outW := io.Writer(&captured)
+	if stdout != nil {
+		outW = io.MultiWriter(stdout, &captured)
+	}
+	errW := io.Writer(&captured)
+	if stderr != nil {
+		errW = io.MultiWriter(stderr, &captured)
+	}
+	err := RunCmd(ctx, tc.NVCC, compileArgs, dir, env, outW, errW)
+	raw := captured.String()
+	var stats []PTXASResourceStats
+	if hasPTXASVerboseFlags(compileArgs) {
+		stats = ParsePTXASOutput(raw)
+	}
+	return stats, raw, err
+}
+
 // CompileCUDAKernels compiles cuda_kernels.cu (and optional NCCL files) into object files.
 func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arch string, enableNCCL bool, stdout io.Writer) (objects []string, result error) {
 	pkgDir := filepath.Join(repoRoot, "internal", "compute")
@@ -431,9 +699,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs = cudaPTXASVerboseFlags(ctx, nvccArgs)
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		nvccArgs = append(nvccArgs, "-Xcompiler", "/MD", "-c", "cuda_kernels.cu", "-o", obj)
-		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_kernels.cu", obj, nvccArgs, env, receipt, stdout); err != nil {
+		if err := compileCUDAObjectWithPTXAS(ctx, tc, pkgDir, "cuda_kernels.cu", obj, nvccArgs, env, receipt, stdout); err != nil {
 			return nil, fmt.Errorf("nvcc compile cuda_kernels.cu: %w", err)
 		}
 		objs = append(objs, obj)
@@ -515,6 +784,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs = cudaPTXASVerboseFlags(ctx, nvccArgs)
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		if tc.CXX != "" {
 			nvccArgs = append(nvccArgs, "-ccbin", tc.CXX)
@@ -523,7 +793,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			nvccArgs = append(nvccArgs, "-I"+inc)
 		}
 		nvccArgs = append(nvccArgs, "-Xcompiler", "-fPIC", "-c", "cuda_kernels.cu", "-o", obj)
-		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_kernels.cu", obj, nvccArgs, env, receipt, stdout); err != nil {
+		if err := compileCUDAObjectWithPTXAS(ctx, tc, pkgDir, "cuda_kernels.cu", obj, nvccArgs, env, receipt, stdout); err != nil {
 			return nil, fmt.Errorf("nvcc compile cuda_kernels.cu: %w", err)
 		}
 		objs = append(objs, obj)
@@ -532,6 +802,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			for _, ncclFile := range []string{"cuda_nccl.cu", "cuda_nccl_pg.cu"} {
 				ncclObj := filepath.Join(pkgDir, strings.TrimSuffix(ncclFile, ".cu")+".o")
 				nArgs := []string{"-O3", "-std=c++17"}
+				nArgs = cudaPTXASVerboseFlags(ctx, nArgs)
 				nArgs = append(nArgs, gencodeArgs...)
 				if tc.CXX != "" {
 					nArgs = append(nArgs, "-ccbin", tc.CXX)
@@ -540,7 +811,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 					nArgs = append(nArgs, "-I"+inc)
 				}
 				nArgs = append(nArgs, "-Xcompiler", "-fPIC", "-c", ncclFile, "-o", ncclObj)
-				if err := compileCUDAObject(ctx, tc, pkgDir, ncclFile, ncclObj, nArgs, env, receipt, stdout); err != nil {
+				if err := compileCUDAObjectWithPTXAS(ctx, tc, pkgDir, ncclFile, ncclObj, nArgs, env, receipt, stdout); err != nil {
 					return nil, fmt.Errorf("nvcc compile %s: %w", ncclFile, err)
 				}
 				objs = append(objs, ncclObj)
@@ -550,7 +821,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 	if plan, ok := ctx.Value(cudaArchSpecificKey{}).(*cudaArchSpecificOptions); ok {
 		obj := filepath.Join(pkgDir, "cuda_sm10x_probe.o")
 		args := cudaArchSpecificCompileArgs(tc, plan, obj)
-		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_sm10x_probe.cu", obj, args, env, receipt, stdout); err != nil {
+		if err := compileCUDAObjectWithPTXAS(ctx, tc, pkgDir, "cuda_sm10x_probe.cu", obj, args, env, receipt, stdout); err != nil {
 			return nil, fmt.Errorf("nvcc arch-specific probe: %w", err)
 		}
 		objs = append(objs, obj)

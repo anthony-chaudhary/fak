@@ -215,6 +215,8 @@ type upstreamCall struct {
 	// turns an intermittent 401 into a self-healed turn. False everywhere else, so the
 	// static-key and passthrough paths are byte-for-byte unchanged.
 	authRefreshable bool
+	// maxAttempts, when > 0, caps streamConnect retries per call (from SampleParams.MaxAttempts).
+	maxAttempts int
 }
 
 // releaseSlot frees the soft llama-server slot pin, if any. Safe on a nil call.
@@ -694,6 +696,7 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 		cacheHint:         cacheHint,
 		responsesStreamed: forceResponsesStream,
 		authRefreshable:   authRefreshable,
+		maxAttempts:       sp.MaxAttempts,
 		slotRelease:       slotRelease,
 	}
 	call.bindSoftResidency(ctx, p, slotLease)
@@ -832,6 +835,12 @@ func (p *HTTPPlanner) streamingClient() *http.Client {
 func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*http.Response, []byte, error) {
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	_, attemptsPinned := plannerMaxAttemptsPinned()
+	if call != nil && call.maxAttempts > 0 {
+		maxAttempts = call.maxAttempts
+		attemptsPinned = true
+		budgetOn = false
+		deadline = time.Time{}
+	}
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	triedAuthRefresh := false
 	var fbState forbiddenRetryState // bounded transient-403 recovery arm (see retry.go), mirrors Complete

@@ -270,6 +270,7 @@ var epFanoutExemptRoutes = map[string]string{
 	// a real decode, but an owned multi-turn one.
 	"/v1/fak/agent/sessions": epExemptOwnedLoop,
 
+	"/v1/router/status":         epExemptNoDecode,
 	"/v1/models":                epExemptNoDecode,
 	"/v1/control/config":        epExemptNoDecode,
 	"/v1/fak/control/config":    epExemptNoDecode,

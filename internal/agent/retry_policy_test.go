@@ -437,3 +437,72 @@ func TestRetryWaitWithin_FloorsTinyWait(t *testing.T) {
 		t.Fatalf("retryWaitWithin near deadline = %s, want the small positive remainder (terminates cleanly)", got)
 	}
 }
+
+// Per-request SampleParams.MaxAttempts overrides the multi-hour default retry budget so
+// a gateway failover planner can try fallback candidates immediately on 429/503 without
+// mutating process-wide env vars or waiting through retry backoff.
+func TestComplete_SampleParamMaxAttemptsOverridesBudget(t *testing.T) {
+	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "")
+	t.Setenv("FAK_PLANNER_RETRY_BUDGET", "1m")
+	for _, code := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		var hits atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits.Add(1)
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(code)
+		}))
+		p := NewHTTPPlanner(srv.URL, "m", "")
+		start := time.Now()
+		_, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, func(sp *SampleParams) {
+			sp.MaxAttempts = 1
+		})
+		elapsed := time.Since(start)
+		srv.Close()
+		if err == nil {
+			t.Fatalf("status %d: expected error on single-attempt call, got nil", code)
+		}
+		var se *UpstreamStatusError
+		if !errors.As(err, &se) || se.Status != code {
+			t.Fatalf("status %d: err = %v, want *UpstreamStatusError{%d}", code, err, code)
+		}
+		if got := hits.Load(); got != 1 {
+			t.Fatalf("status %d: hits = %d, want 1", code, got)
+		}
+		if elapsed > 2*time.Second {
+			t.Fatalf("status %d: elapsed = %s, want fast fail without backoff sleep", code, elapsed)
+		}
+	}
+}
+
+func TestCompleteStream_SampleParamMaxAttemptsOverridesBudget(t *testing.T) {
+	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "")
+	t.Setenv("FAK_PLANNER_RETRY_BUDGET", "1m")
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := NewHTTPPlanner(srv.URL, "m", "")
+	start := time.Now()
+	_, err := p.CompleteStream(context.Background(), func(string) error { return nil },
+		[]Message{{Role: RoleUser, Content: "hi"}}, nil, func(sp *SampleParams) {
+			sp.MaxAttempts = 1
+		})
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected error on single-attempt streaming call, got nil")
+	}
+	var se *UpstreamStatusError
+	if !errors.As(err, &se) || se.Status != http.StatusServiceUnavailable {
+		t.Fatalf("err = %v, want *UpstreamStatusError{503}", err)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("hits = %d, want 1", got)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("elapsed = %s, want fast fail without backoff sleep", elapsed)
+	}
+}

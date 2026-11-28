@@ -601,3 +601,518 @@ extern "C" int fcuda_sampling_draw_f32(
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 70000 + (int)launch;
 }
+
+// ============================================================================
+// UNWIRED bit-plane certified LM-head argmax family.
+//
+// ADAPTED from magnitudedev/magnitude (Apache-2.0):
+//   inference/engine/kernels/kernels/readout.seismic:278@8d7dbcc1ba
+//   inference/engine/kernels/kernels/cuda/lib/projection/planes.cuh:64@814f72a
+//
+// Clean-room CUDA C++ expression of the top-bit-plane certified readout:
+//   1) compute activation summary statistics (sum, positive sum, negative sum, L1 norm);
+//   2) read ONLY the top `topBits` MSB bit-planes with shared-memory activation tile
+//      reuse (planes.cuh:64 staged-activation inner loop) and compute a guaranteed
+//      row interval [low_r, high_r] bounding the exact F32 dot product;
+//   3) certify the argmax margin (bestLow = max_r low_r) and collect ONLY rows with
+//      high_r > bestLow (or high_r == bestLow with r < bestLowIdx) as contenders;
+//   4) if zero other contenders remain, exit early with bestLowIdx (zero refinement);
+//      otherwise refine ONLY contending rows against exact F32 weights.
+//
+// Status: [SW-VERIFIED] source contract only — intentionally UNWIRED from
+// cuda_kernels.cu and cuda_backend.h (token_time: unmeasured / HW-qualification-pending).
+// ============================================================================
+#define BITPLANE_HEAD_THREADS 256
+#define BITPLANE_HEAD_TILE_K 256
+#define BITPLANE_STATUS_OK 0
+#define BITPLANE_STATUS_NON_FINITE 1
+
+struct BitplaneWorkspaceHeader {
+  double sumX;
+  double posSumX;
+  double negSumX;
+  double absSumX;
+  double maxAbsX;
+  int status;
+  int bestLowIdx;
+  int refineCount;
+  int reserved;
+};
+
+__device__ __forceinline__ double bitplane_block_sum_f64(double v, double* scratch) {
+  const unsigned mask = 0xffffffffu;
+  for (int off = 16; off > 0; off >>= 1) v += __shfl_down_sync(mask, v, off);
+  const int lane = threadIdx.x & 31;
+  const int wid = threadIdx.x >> 5;
+  if (lane == 0) scratch[wid] = v;
+  __syncthreads();
+  const int nw = BITPLANE_HEAD_THREADS / 32;
+  double total = (threadIdx.x < nw) ? scratch[threadIdx.x] : 0.0;
+  for (int off = 16; off > 0; off >>= 1) total += __shfl_down_sync(mask, total, off);
+  if (threadIdx.x == 0) scratch[0] = total;
+  __syncthreads();
+  return scratch[0];
+}
+
+__device__ __forceinline__ double bitplane_block_max_f64(double v, double* scratch) {
+  const unsigned mask = 0xffffffffu;
+  for (int off = 16; off > 0; off >>= 1) {
+    const double other = __shfl_down_sync(mask, v, off);
+    if (other > v) v = other;
+  }
+  const int lane = threadIdx.x & 31;
+  const int wid = threadIdx.x >> 5;
+  if (lane == 0) scratch[wid] = v;
+  __syncthreads();
+  const int nw = BITPLANE_HEAD_THREADS / 32;
+  double best = (threadIdx.x < nw) ? scratch[threadIdx.x] : 0.0;
+  for (int off = 16; off > 0; off >>= 1) {
+    const double other = __shfl_down_sync(mask, best, off);
+    if (other > best) best = other;
+  }
+  if (threadIdx.x == 0) scratch[0] = best;
+  __syncthreads();
+  return scratch[0];
+}
+
+__device__ __forceinline__ int bitplane_block_any_int(int flag, int* scratch) {
+  const unsigned mask = 0xffffffffu;
+  for (int off = 16; off > 0; off >>= 1) flag |= __shfl_down_sync(mask, flag, off);
+  const int lane = threadIdx.x & 31;
+  const int wid = threadIdx.x >> 5;
+  if (lane == 0) scratch[wid] = flag;
+  __syncthreads();
+  const int nw = BITPLANE_HEAD_THREADS / 32;
+  int any = (threadIdx.x < nw) ? scratch[threadIdx.x] : 0;
+  for (int off = 16; off > 0; off >>= 1) any |= __shfl_down_sync(mask, any, off);
+  if (threadIdx.x == 0) scratch[0] = any;
+  __syncthreads();
+  return scratch[0];
+}
+
+__device__ __forceinline__ double* bitplane_ws_bounds(void* ws) {
+  return reinterpret_cast<double*>(reinterpret_cast<char*>(ws) + 64);
+}
+
+__device__ __forceinline__ int* bitplane_ws_contenders(void* ws, int vocab) {
+  return reinterpret_cast<int*>(bitplane_ws_bounds(ws) + 2 * (size_t)vocab);
+}
+
+__device__ __forceinline__ float* bitplane_ws_scores(void* ws, int vocab) {
+  return reinterpret_cast<float*>(bitplane_ws_contenders(ws, vocab) + (size_t)vocab);
+}
+
+__global__ void __launch_bounds__(BITPLANE_HEAD_THREADS)
+    k_bitplane_x_stats(const float* __restrict__ x, int hiddenDim, void* __restrict__ ws) {
+  __shared__ double red[BITPLANE_HEAD_THREADS / 32];
+  __shared__ int badRed[BITPLANE_HEAD_THREADS / 32];
+  double sumLocal = 0.0, posLocal = 0.0, negLocal = 0.0, absLocal = 0.0, maxLocal = 0.0;
+  int bad = 0;
+  for (int k = threadIdx.x; k < hiddenDim; k += BITPLANE_HEAD_THREADS) {
+    const float xk = x[k];
+    if (sampling_nonfinite(xk)) {
+      bad = 1;
+      continue;
+    }
+    const double dx = (double)xk;
+    sumLocal += dx;
+    if (dx > 0.0) posLocal += dx;
+    else if (dx < 0.0) negLocal += dx;
+    const double ax = fabs(dx);
+    absLocal += ax;
+    if (ax > maxLocal) maxLocal = ax;
+  }
+  const int anyBad = bitplane_block_any_int(bad, badRed);
+  const double sumAll = bitplane_block_sum_f64(sumLocal, red);
+  const double posAll = bitplane_block_sum_f64(posLocal, red);
+  const double negAll = bitplane_block_sum_f64(negLocal, red);
+  const double absAll = bitplane_block_sum_f64(absLocal, red);
+  const double maxAll = bitplane_block_max_f64(maxLocal, red);
+  if (threadIdx.x == 0) {
+    BitplaneWorkspaceHeader* hdr = reinterpret_cast<BitplaneWorkspaceHeader*>(ws);
+    hdr->sumX = sumAll;
+    hdr->posSumX = posAll;
+    hdr->negSumX = negAll;
+    hdr->absSumX = absAll;
+    hdr->maxAbsX = maxAll;
+    hdr->status = anyBad ? BITPLANE_STATUS_NON_FINITE : BITPLANE_STATUS_OK;
+    hdr->bestLowIdx = 0;
+    hdr->refineCount = 0;
+    hdr->reserved = 0;
+  }
+}
+
+__global__ void __launch_bounds__(BITPLANE_HEAD_THREADS)
+    k_bitplane_bounds_stage(
+        const uint32_t* __restrict__ dPlanes,
+        const float* __restrict__ dRowMin,
+        const float* __restrict__ dRowScale,
+        const float* __restrict__ dRowEps,
+        const float* __restrict__ dRowMaxAbs,
+        const float* __restrict__ dX,
+        int vocab, int hiddenDim, int totalBits, int topBits,
+        void* __restrict__ ws) {
+  const BitplaneWorkspaceHeader* hdr = reinterpret_cast<const BitplaneWorkspaceHeader*>(ws);
+  if (hdr->status != BITPLANE_STATUS_OK) return;
+  const int row = blockIdx.x;
+  if (row >= vocab) return;
+
+  __shared__ double smemX[BITPLANE_HEAD_TILE_K];
+  __shared__ double red[BITPLANE_HEAD_THREADS / 32];
+
+  const int wordsPerRow = (hiddenDim + 31) / 32;
+  const int remBits = totalBits - topBits;
+  double topCodeDotLocal = 0.0;
+
+  // Staged activation reuse: each tile stages BITPLANE_HEAD_TILE_K elements of x
+  // into shared memory once and reuses them across all top bit-plane words.
+  for (int t0 = 0; t0 < hiddenDim; t0 += BITPLANE_HEAD_TILE_K) {
+    const int tileLen = min(BITPLANE_HEAD_TILE_K, hiddenDim - t0);
+    if (threadIdx.x < tileLen) {
+      smemX[threadIdx.x] = (double)dX[t0 + threadIdx.x];
+    }
+    __syncthreads();
+
+    if (threadIdx.x < tileLen) {
+      const int k = t0 + threadIdx.x;
+      const int wordIdx = k >> 5;
+      const int bitIdx = k & 31;
+      uint32_t topCode = 0u;
+      for (int p = 0; p < topBits; ++p) {
+        const size_t planeOffset = ((size_t)row * (size_t)totalBits + (size_t)p) * (size_t)wordsPerRow;
+        const uint32_t word = dPlanes[planeOffset + (size_t)wordIdx];
+        topCode = (topCode << 1) | ((word >> bitIdx) & 1u);
+      }
+      const uint32_t shiftedCode = topCode << remBits;
+      topCodeDotLocal += (double)shiftedCode * smemX[threadIdx.x];
+    }
+    __syncthreads();
+  }
+
+  const double topCodeDot = bitplane_block_sum_f64(topCodeDotLocal, red);
+  if (threadIdx.x != 0) return;
+
+  double* bounds = bitplane_ws_bounds(ws);
+  const float minF = dRowMin[row];
+  const float scaleF = dRowScale[row];
+  const float epsF = dRowEps[row];
+  const float maxAbsF = dRowMaxAbs[row];
+  if (sampling_nonfinite(minF) || sampling_nonfinite(scaleF) ||
+      sampling_nonfinite(epsF) || sampling_nonfinite(maxAbsF) ||
+      scaleF < 0.0f || epsF < 0.0f || maxAbsF < 0.0f) {
+    bounds[2 * (size_t)row] = -INFINITY;
+    bounds[2 * (size_t)row + 1] = INFINITY;
+    return;
+  }
+
+  const double maxAbsW = (double)maxAbsF;
+  if (maxAbsW * hdr->maxAbsX * (double)hiddenDim >= (double)FLT_MAX * 0.25) {
+    bounds[2 * (size_t)row] = -INFINITY;
+    bounds[2 * (size_t)row + 1] = INFINITY;
+    return;
+  }
+
+  const double minVal = (double)minF;
+  const double scale = (double)scaleF;
+  const double eps = (double)epsF;
+  const double baseDot = minVal * hdr->sumX + scale * topCodeDot;
+  const uint32_t tailMask = (remBits == 0) ? 0u : ((1u << remBits) - 1u);
+  const double tailMin = scale * (double)tailMask * hdr->negSumX;
+  const double tailMax = scale * (double)tailMask * hdr->posSumX;
+
+  const double n = (double)hiddenDim + 2.0;
+  const double u32 = ldexp(1.0, -24);
+  const double gamma32 = (n * u32 < 0.5) ? (n * u32) / (1.0 - n * u32) : 1.0;
+  const double f32Slack = gamma32 * maxAbsW * hdr->absSumX + n * ldexp(1.0, -149);
+  const uint32_t maxCode = (1u << totalBits) - 1u;
+  const double f64Slack = ((double)hiddenDim + 8.0) * ldexp(1.0, -52) *
+      ((fabs(minVal) + scale * (double)maxCode) * hdr->absSumX + 1.0);
+  const double pad = eps * hdr->absSumX + f32Slack + f64Slack;
+
+  bounds[2 * (size_t)row] = baseDot + tailMin - pad;
+  bounds[2 * (size_t)row + 1] = baseDot + tailMax + pad;
+}
+
+__global__ void __launch_bounds__(BITPLANE_HEAD_THREADS)
+    k_bitplane_certify_contenders(
+        int vocab, int* __restrict__ dTokenOut, int* __restrict__ dRefinedOut,
+        void* __restrict__ ws) {
+  BitplaneWorkspaceHeader* hdr = reinterpret_cast<BitplaneWorkspaceHeader*>(ws);
+  if (hdr->status != BITPLANE_STATUS_OK) {
+    if (threadIdx.x == 0) {
+      dTokenOut[0] = -1;
+      dRefinedOut[0] = 0;
+    }
+    return;
+  }
+  const double* bounds = bitplane_ws_bounds(ws);
+  int* contenders = bitplane_ws_contenders(ws, vocab);
+
+  __shared__ double sLow[BITPLANE_HEAD_THREADS];
+  __shared__ int sIdx[BITPLANE_HEAD_THREADS];
+  __shared__ int sScan[BITPLANE_HEAD_THREADS];
+  __shared__ int sBase;
+
+  double localLow = -INFINITY;
+  int localIdx = -1;
+  for (int r = threadIdx.x; r < vocab; r += BITPLANE_HEAD_THREADS) {
+    const double lo = bounds[2 * (size_t)r];
+    if (lo != lo) {
+      localLow = INFINITY;
+      localIdx = -2;
+      break;
+    }
+    if (localIdx == -1 || lo > localLow || (lo == localLow && r < localIdx)) {
+      localLow = lo;
+      localIdx = r;
+    }
+  }
+  sLow[threadIdx.x] = localLow;
+  sIdx[threadIdx.x] = localIdx;
+  __syncthreads();
+
+  for (int stride = BITPLANE_HEAD_THREADS / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      const int iA = sIdx[threadIdx.x];
+      const int iB = sIdx[threadIdx.x + stride];
+      const double lA = sLow[threadIdx.x];
+      const double lB = sLow[threadIdx.x + stride];
+      if (iB == -2 || (iA != -2 && iB >= 0 && (iA < 0 || lB > lA || (lB == lA && iB < iA)))) {
+        sLow[threadIdx.x] = lB;
+        sIdx[threadIdx.x] = iB;
+      }
+    }
+    __syncthreads();
+  }
+
+  const double bestLow = sLow[0];
+  const int bestLowIdx = sIdx[0];
+  if (bestLowIdx < 0) {
+    if (threadIdx.x == 0) {
+      hdr->status = BITPLANE_STATUS_NON_FINITE;
+      hdr->refineCount = 0;
+      dTokenOut[0] = -1;
+      dRefinedOut[0] = 0;
+    }
+    return;
+  }
+
+  if (threadIdx.x == 0) {
+    hdr->bestLowIdx = bestLowIdx;
+    sBase = 0;
+  }
+  __syncthreads();
+
+  for (int chunkStart = 0; chunkStart < vocab; chunkStart += BITPLANE_HEAD_THREADS) {
+    const int r = chunkStart + threadIdx.x;
+    const bool inRow = r < vocab;
+    const double hi = inRow ? bounds[2 * (size_t)r + 1] : -INFINITY;
+    const int keep = (inRow && r != bestLowIdx &&
+        (hi != hi || hi > bestLow || (hi == bestLow && r < bestLowIdx))) ? 1 : 0;
+    sScan[threadIdx.x] = keep;
+    __syncthreads();
+    for (int stride = 1; stride < BITPLANE_HEAD_THREADS; stride <<= 1) {
+      const int j = threadIdx.x - stride;
+      const int add = (j >= 0) ? sScan[j] : 0;
+      __syncthreads();
+      sScan[threadIdx.x] += add;
+      __syncthreads();
+    }
+    if (keep) {
+      const int excl = sScan[threadIdx.x] - 1;
+      contenders[sBase + excl] = r;
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) sBase += sScan[BITPLANE_HEAD_THREADS - 1];
+    __syncthreads();
+  }
+
+  if (threadIdx.x == 0) {
+    const int otherCount = sBase;
+    if (otherCount == 0) {
+      hdr->refineCount = 0;
+      dTokenOut[0] = bestLowIdx;
+      dRefinedOut[0] = 0;
+    } else {
+      contenders[otherCount] = bestLowIdx;
+      hdr->refineCount = otherCount + 1;
+      dRefinedOut[0] = otherCount + 1;
+    }
+  }
+}
+
+__global__ void __launch_bounds__(BITPLANE_HEAD_THREADS)
+    k_bitplane_refine_contenders(
+        const float* __restrict__ dWeightsF32, const float* __restrict__ dX,
+        int vocab, int hiddenDim, void* __restrict__ ws) {
+  const BitplaneWorkspaceHeader* hdr = reinterpret_cast<const BitplaneWorkspaceHeader*>(ws);
+  if (hdr->status != BITPLANE_STATUS_OK || hdr->refineCount <= 0) return;
+
+  const int* contenders = bitplane_ws_contenders(ws, vocab);
+  float* scores = bitplane_ws_scores(ws, vocab);
+  __shared__ float sSum[BITPLANE_HEAD_THREADS];
+  __shared__ int sBad[BITPLANE_HEAD_THREADS / 32];
+
+  for (int c = blockIdx.x; c < hdr->refineCount; c += gridDim.x) {
+    const int row = contenders[c];
+    const float* wRow = dWeightsF32 + (size_t)row * (size_t)hiddenDim;
+    float localSum = 0.0f;
+    int bad = 0;
+    for (int k = threadIdx.x; k < hiddenDim; k += BITPLANE_HEAD_THREADS) {
+      const float wk = wRow[k];
+      if (sampling_nonfinite(wk)) {
+        bad = 1;
+      } else {
+        localSum += wk * dX[k];
+      }
+    }
+    const int anyBad = bitplane_block_any_int(bad, sBad);
+    sSum[threadIdx.x] = localSum;
+    __syncthreads();
+    for (int stride = BITPLANE_HEAD_THREADS / 2; stride > 0; stride >>= 1) {
+      if (threadIdx.x < stride) sSum[threadIdx.x] += sSum[threadIdx.x + stride];
+      __syncthreads();
+    }
+    if (threadIdx.x == 0) {
+      scores[c] = anyBad ? NAN : sSum[0];
+    }
+    __syncthreads();
+  }
+}
+
+__global__ void __launch_bounds__(BITPLANE_HEAD_THREADS)
+    k_bitplane_pick_winner(
+        int vocab, int* __restrict__ dTokenOut, int* __restrict__ dRefinedOut,
+        void* __restrict__ ws) {
+  BitplaneWorkspaceHeader* hdr = reinterpret_cast<BitplaneWorkspaceHeader*>(ws);
+  if (hdr->status != BITPLANE_STATUS_OK || hdr->refineCount <= 0) return;
+
+  const int count = hdr->refineCount;
+  const int* contenders = bitplane_ws_contenders(ws, vocab);
+  const float* scores = bitplane_ws_scores(ws, vocab);
+
+  __shared__ float sVal[BITPLANE_HEAD_THREADS];
+  __shared__ int sRow[BITPLANE_HEAD_THREADS];
+  __shared__ int sBad[BITPLANE_HEAD_THREADS / 32];
+
+  float bestVal = -INFINITY;
+  int bestRow = -1;
+  int bad = 0;
+  for (int c = threadIdx.x; c < count; c += BITPLANE_HEAD_THREADS) {
+    const float sc = scores[c];
+    const int row = contenders[c];
+    if (sampling_nonfinite(sc)) {
+      bad = 1;
+      continue;
+    }
+    if (bestRow < 0 || sc > bestVal || (sc == bestVal && row < bestRow)) {
+      bestVal = sc;
+      bestRow = row;
+    }
+  }
+  const int anyBad = bitplane_block_any_int(bad, sBad);
+  sVal[threadIdx.x] = bestVal;
+  sRow[threadIdx.x] = bestRow;
+  __syncthreads();
+
+  for (int stride = BITPLANE_HEAD_THREADS / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      const int rA = sRow[threadIdx.x];
+      const int rB = sRow[threadIdx.x + stride];
+      const float vA = sVal[threadIdx.x];
+      const float vB = sVal[threadIdx.x + stride];
+      if (rB >= 0 && (rA < 0 || vB > vA || (vB == vA && rB < rA))) {
+        sVal[threadIdx.x] = vB;
+        sRow[threadIdx.x] = rB;
+      }
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    if (anyBad || sRow[0] < 0) {
+      hdr->status = BITPLANE_STATUS_NON_FINITE;
+      dTokenOut[0] = -1;
+      dRefinedOut[0] = count;
+    } else {
+      dTokenOut[0] = sRow[0];
+      dRefinedOut[0] = count;
+    }
+  }
+}
+
+extern "C" size_t fcuda_bitplane_certified_argmax_workspace_bytes(int vocab) {
+  const size_t perRow = 2 * sizeof(double) + sizeof(int) + sizeof(float);
+  if (vocab <= 0 || (size_t)vocab > (SIZE_MAX - 64) / perRow) return 0;
+  return 64 + (size_t)vocab * perRow;
+}
+
+extern "C" int fcuda_bitplane_certified_argmax(
+    const uint32_t* dPlanes, const float* dRowMin, const float* dRowScale,
+    const float* dRowEps, const float* dRowMaxAbs, const float* dWeightsF32,
+    const float* dX, void* dWorkspace, size_t workspaceBytes,
+    int* dTokenOut, int* dRefinedOut,
+    int vocab, int hiddenDim, int totalBits, int topBits) {
+  if (!dPlanes || !dRowMin || !dRowScale || !dRowEps || !dRowMaxAbs ||
+      !dWeightsF32 || !dX || !dWorkspace || !dTokenOut || !dRefinedOut ||
+      vocab <= 0 || hiddenDim <= 0 || totalBits <= 0 || totalBits > 16 ||
+      topBits <= 0 || topBits > totalBits || hiddenDim > INT_MAX / vocab ||
+      ((uintptr_t)dWorkspace % alignof(double)) != 0) {
+    return -1;
+  }
+  const size_t needed = fcuda_bitplane_certified_argmax_workspace_bytes(vocab);
+  if (needed == 0 || workspaceBytes < needed) return -1;
+
+  cudaGetLastError();
+
+  const float* pX = dX;
+  int pHidden = hiddenDim;
+  void* pWs = dWorkspace;
+  void* argsStats[] = {&pX, &pHidden, &pWs};
+  cudaError_t launch = cudaSuccess;
+  FCUDA_TS("k_bitplane_x_stats", dim3(1),
+           launch = cudaLaunchKernel((const void*)k_bitplane_x_stats,
+                                     dim3(1), dim3(BITPLANE_HEAD_THREADS),
+                                     argsStats, 0, g_stream));
+  if (launch != cudaSuccess) return 70000 + (int)launch;
+
+  const uint32_t* pPlanes = dPlanes;
+  const float* pMin = dRowMin;
+  const float* pScale = dRowScale;
+  const float* pEps = dRowEps;
+  const float* pMaxAbs = dRowMaxAbs;
+  int pVocab = vocab;
+  int pTotalBits = totalBits;
+  int pTopBits = topBits;
+  void* argsBounds[] = {&pPlanes, &pMin, &pScale, &pEps, &pMaxAbs, &pX,
+                        &pVocab, &pHidden, &pTotalBits, &pTopBits, &pWs};
+  FCUDA_TS("k_bitplane_bounds_stage", dim3(vocab),
+           launch = cudaLaunchKernel((const void*)k_bitplane_bounds_stage,
+                                     dim3(vocab), dim3(BITPLANE_HEAD_THREADS),
+                                     argsBounds, 0, g_stream));
+  if (launch != cudaSuccess) return 70000 + (int)launch;
+
+  int* pTok = dTokenOut;
+  int* pRef = dRefinedOut;
+  void* argsCert[] = {&pVocab, &pTok, &pRef, &pWs};
+  FCUDA_TS("k_bitplane_certify_contenders", dim3(1),
+           launch = cudaLaunchKernel((const void*)k_bitplane_certify_contenders,
+                                     dim3(1), dim3(BITPLANE_HEAD_THREADS),
+                                     argsCert, 0, g_stream));
+  if (launch != cudaSuccess) return 70000 + (int)launch;
+
+  const float* pW = dWeightsF32;
+  const int refineBlocks = vocab < 256 ? vocab : 256;
+  void* argsRefine[] = {&pW, &pX, &pVocab, &pHidden, &pWs};
+  FCUDA_TS("k_bitplane_refine_contenders", dim3(refineBlocks),
+           launch = cudaLaunchKernel((const void*)k_bitplane_refine_contenders,
+                                     dim3(refineBlocks), dim3(BITPLANE_HEAD_THREADS),
+                                     argsRefine, 0, g_stream));
+  if (launch != cudaSuccess) return 70000 + (int)launch;
+
+  void* argsPick[] = {&pVocab, &pTok, &pRef, &pWs};
+  FCUDA_TS("k_bitplane_pick_winner", dim3(1),
+           launch = cudaLaunchKernel((const void*)k_bitplane_pick_winner,
+                                     dim3(1), dim3(BITPLANE_HEAD_THREADS),
+                                     argsPick, 0, g_stream));
+  return launch == cudaSuccess ? 0 : 70000 + (int)launch;
+}

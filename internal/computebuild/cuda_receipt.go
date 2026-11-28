@@ -26,18 +26,75 @@ func CUDANativeReceiptPath(root, computeReceipt string) string {
 	return strings.TrimSuffix(computeReceipt, filepath.Ext(computeReceipt)) + ".native.json"
 }
 
+// PTXASResourceStats records static per-kernel code-generation resource usage
+// reported by nvcc/ptxas (-lineinfo --ptxas-options=-v) before any timed run.
+//
+// SpillStoresBytes and SpillLoadsBytes measure register spills to LOCAL memory
+// (never shared-memory spill bytes). StaticSmemBytes measures compile-time
+// static shared memory allocation only; dynamic shared memory is invisible at
+// compile time.
+type PTXASResourceStats struct {
+	KernelName         string `json:"kernel_name"`
+	Arch               string `json:"arch,omitempty"`
+	RegistersPerThread int    `json:"registers_per_thread"`
+	SpillStoresBytes   int    `json:"local_spill_stores_bytes"` // Register spill stores to local memory.
+	SpillLoadsBytes    int    `json:"local_spill_loads_bytes"`  // Register spill loads from local memory.
+	StaticSmemBytes    int    `json:"static_smem_bytes"`        // Static shared memory only; excludes dynamic smem.
+	StackFrameBytes    int    `json:"stack_frame_bytes,omitempty"`
+	ConstantMemBytes   int    `json:"constant_mem_bytes,omitempty"`
+}
+
+// KernelCompileStats aliases PTXASResourceStats for compile-receipt consumers.
+type KernelCompileStats = PTXASResourceStats
+
+// SummarizePTXASStats folds per-kernel ptxas stats into a single summary entry.
+// Resource ceilings (RegistersPerThread, StaticSmemBytes, StackFrameBytes,
+// ConstantMemBytes) take the maximum across kernels; local-memory spill traffic
+// (SpillStoresBytes, SpillLoadsBytes) is summed. Returns nil when stats is empty.
+func SummarizePTXASStats(stats []PTXASResourceStats) *PTXASResourceStats {
+	if len(stats) == 0 {
+		return nil
+	}
+	summary := PTXASResourceStats{
+		KernelName: "summary",
+		Arch:       stats[0].Arch,
+	}
+	for _, s := range stats {
+		if s.Arch != summary.Arch {
+			summary.Arch = ""
+		}
+		if s.RegistersPerThread > summary.RegistersPerThread {
+			summary.RegistersPerThread = s.RegistersPerThread
+		}
+		summary.SpillStoresBytes += s.SpillStoresBytes
+		summary.SpillLoadsBytes += s.SpillLoadsBytes
+		if s.StaticSmemBytes > summary.StaticSmemBytes {
+			summary.StaticSmemBytes = s.StaticSmemBytes
+		}
+		if s.StackFrameBytes > summary.StackFrameBytes {
+			summary.StackFrameBytes = s.StackFrameBytes
+		}
+		if s.ConstantMemBytes > summary.ConstantMemBytes {
+			summary.ConstantMemBytes = s.ConstantMemBytes
+		}
+	}
+	return &summary
+}
+
 type CUDAObjectBuildReceipt struct {
-	Source              string   `json:"source"`
-	Object              string   `json:"object"`
-	Action              string   `json:"action"`
-	MissReason          string   `json:"miss_reason,omitempty"`
-	InputSHA256         string   `json:"input_sha256,omitempty"`
-	SourceClosureSHA256 string   `json:"source_closure_sha256,omitempty"`
-	OutputSHA256        string   `json:"output_sha256,omitempty"`
-	EffectiveFlags      []string `json:"effective_flags"`
-	DependencyScanMS    int64    `json:"dependency_scan_ms"`
-	ToolchainIdentityMS int64    `json:"toolchain_identity_ms"`
-	CompileMS           int64    `json:"compile_ms"`
+	Source              string               `json:"source"`
+	Object              string               `json:"object"`
+	Action              string               `json:"action"`
+	MissReason          string               `json:"miss_reason,omitempty"`
+	InputSHA256         string               `json:"input_sha256,omitempty"`
+	SourceClosureSHA256 string               `json:"source_closure_sha256,omitempty"`
+	OutputSHA256        string               `json:"output_sha256,omitempty"`
+	EffectiveFlags      []string             `json:"effective_flags"`
+	DependencyScanMS    int64                `json:"dependency_scan_ms"`
+	ToolchainIdentityMS int64                `json:"toolchain_identity_ms"`
+	CompileMS           int64                `json:"compile_ms"`
+	CompileStats        []PTXASResourceStats `json:"compile_stats,omitempty"`
+	CompileStatsSummary *PTXASResourceStats  `json:"compile_stats_summary,omitempty"`
 }
 
 // CUDANativeBuildReceipt records native build work; it makes no hardware claim.
@@ -67,6 +124,8 @@ type CUDANativeBuildReceipt struct {
 	Executed                      int                      `json:"executed"`
 	Reused                        int                      `json:"reused"`
 	Objects                       []CUDAObjectBuildReceipt `json:"objects"`
+	CompileStats                  []PTXASResourceStats     `json:"compile_stats,omitempty"`
+	CompileStatsSummary           *PTXASResourceStats      `json:"compile_stats_summary,omitempty"`
 
 	V41EngramIQ4NLQualification bool `json:"v41_engram_iq4nl_qualification,omitempty"` // Build selection, not hardware qualification.
 
@@ -143,6 +202,26 @@ func newCUDANativeReceipt(ctx context.Context, root, arch string, nccl bool) *CU
 	return r
 }
 
+// AggregateCompileStats collects per-object CompileStats onto the native build
+// receipt and refreshes CompileStatsSummary when compile stats are present.
+func (r *CUDANativeBuildReceipt) AggregateCompileStats() {
+	if r == nil {
+		return
+	}
+	var aggregated []PTXASResourceStats
+	for _, object := range r.Objects {
+		if len(object.CompileStats) > 0 {
+			aggregated = append(aggregated, object.CompileStats...)
+		}
+	}
+	if len(aggregated) > 0 {
+		r.CompileStats = aggregated
+	}
+	if len(r.CompileStats) > 0 {
+		r.CompileStatsSummary = SummarizePTXASStats(r.CompileStats)
+	}
+}
+
 func (r *CUDANativeBuildReceipt) finish(root string, result error) error {
 	r.Outcome = "failed"
 	if result == nil {
@@ -157,6 +236,7 @@ func (r *CUDANativeBuildReceipt) finish(root string, result error) error {
 		}
 		inputs[object.Source] = object.SourceClosureSHA256
 	}
+	r.AggregateCompileStats()
 	r.SourceClosureSHA256 = cudaJSONDigest(inputs)
 	if len(inputs) == 0 {
 		r.SourceClosureSHA256 = ""

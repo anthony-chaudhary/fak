@@ -239,6 +239,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		// swap function via SetAccountRehomeFunc â€” fak guard does, on the pinned
 		// Claude-subscription path. See account_rehome.go.
 		{"/v1/fak/account/rehome", s.handleFakAccountRehome},
+		{"/v1/router/status", s.handleRouterStatus},
 		{"/v1/models", s.handleModels},
 		// Multi-node dev-server READ plane (#2297, epic #2254 plane 1): the
 		// coordinator clone's live lease view (the dos_arbitrate live_leases

@@ -1,0 +1,46 @@
+{
+  "version": "fak-route/v1",
+  "rules": [
+    {
+      "name": "private-local-only",
+      "match": {
+        "labels": {
+          "sensitivity": "tenant"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "private",
+            "role": "primary"
+          }
+        ],
+        "reason": "tenant/private traffic stays local_only"
+      }
+    },
+    {
+      "name": "hard-reasoning",
+      "match": {
+        "min_complexity": "high"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "frontier",
+            "role": "primary"
+          }
+        ],
+        "reason": "high complexity routes to frontier with openai fallback"
+      }
+    }
+  ],
+  "default": {
+    "members": [
+      {
+        "model": "default",
+        "role": "primary"
+      }
+    ],
+    "reason": "hybrid default: local-gpu primary with openai fallback"
+  }
+}

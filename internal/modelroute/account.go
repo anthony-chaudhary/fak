@@ -335,6 +335,13 @@ type Account struct {
 	AuthScheme string `json:"auth_scheme,omitempty"`
 }
 
+// FallbackTarget names an ordered fallback account (and optional upstream model
+// override) on a Binding when the primary account cannot serve a request.
+type FallbackTarget struct {
+	Account       string `json:"account"`
+	UpstreamModel string `json:"upstream_model,omitempty"`
+}
+
 // Binding maps ONE routed model id (a Plan member's Model, or a Plan's Scout) to the
 // account that serves it and the UpstreamModel wire name. The routed id is an
 // ABSTRACT tier label; UpstreamModel is the provider-specific id sent on the wire
@@ -342,12 +349,14 @@ type Account struct {
 // an ensemble can span accounts/providers — the "mix and match at any level" the goal
 // asks for.
 type Binding struct {
-	Model              string `json:"model"`
-	Account            string `json:"account"`
-	UpstreamModel      string `json:"upstream_model,omitempty"`
-	CompatibilityOnly  bool   `json:"compatibility_only,omitempty"`
-	DeprecatedAfterUTC string `json:"deprecated_after_utc,omitempty"`
-	DeprecatedAliasFor string `json:"deprecated_alias_for,omitempty"`
+	Model              string           `json:"model"`
+	Account            string           `json:"account"`
+	UpstreamModel      string           `json:"upstream_model,omitempty"`
+	Fallbacks          []FallbackTarget `json:"fallbacks,omitempty"`
+	ResidencyFloor     string           `json:"residency_floor,omitempty"` // "" | "any" | "local_only"
+	CompatibilityOnly  bool             `json:"compatibility_only,omitempty"`
+	DeprecatedAfterUTC string           `json:"deprecated_after_utc,omitempty"`
+	DeprecatedAliasFor string           `json:"deprecated_alias_for,omitempty"`
 }
 
 // Roster is the on-disk account-switcher manifest: the accounts a user brings and the
@@ -396,6 +405,9 @@ type Target struct {
 	// AuthScheme carries the account's credential-presentation override to the planner
 	// build, where it becomes agent.AnthropicAuthScheme. Empty => the adapter default.
 	AuthScheme string `json:"auth_scheme,omitempty"`
+	// ResidencyFloor propagates Binding.ResidencyFloor ("" | "any" | "local_only")
+	// to the resolved dispatch target.
+	ResidencyFloor string `json:"residency_floor,omitempty"`
 }
 
 // Admits reports whether the given tenant ISOLATION principal may dispatch through
@@ -502,34 +514,9 @@ func (r Roster) account(id string) (Account, bool) {
 	return Account{}, false
 }
 
-// Resolve binds a routed model id to its concrete Target: the id's explicit Binding
-// if any, else the Default account (the id is used as the upstream name); an id with
-// no binding and no default is a fail-loud error. Pure and deterministic — same
-// roster, same id, same target. Resolve assumes a validated roster (the dangling-ref
-// and locality invariants are enforced in Validate); it still returns an error for an
-// unbound id with no default and a binding to an account that does not exist.
-func (r Roster) Resolve(modelID string) (Target, error) {
-	acctID, upstream := "", modelID
-	bound := false
-	for _, b := range r.Bindings {
-		if b.Model == modelID {
-			acctID = b.Account
-			if b.UpstreamModel != "" {
-				upstream = b.UpstreamModel
-			}
-			bound = true
-			break
-		}
-	}
-	if !bound {
-		if r.Default == "" {
-			return Target{}, fmt.Errorf("modelroute: no binding for model %q and no default account", modelID)
-		}
-		acctID = r.Default
-	}
-	a, ok := r.account(acctID)
-	if !ok {
-		return Target{}, fmt.Errorf("modelroute: model %q binds to unknown account %q", modelID, acctID)
+func (r Roster) targetForAccount(modelID, upstream, residencyFloor string, a Account) Target {
+	if upstream == "" {
+		upstream = modelID
 	}
 	baseURL := a.BaseURL
 	if baseURL == "" {
@@ -551,7 +538,71 @@ func (r Roster) Resolve(modelID string) (Target, error) {
 		Principals:        a.Principals,
 		ManualOnly:        a.ManualOnly,
 		AuthScheme:        a.AuthScheme,
-	}, nil
+		ResidencyFloor:    residencyFloor,
+	}
+}
+
+func (r Roster) findBinding(modelID string) (Binding, bool) {
+	for _, b := range r.Bindings {
+		if b.Model == modelID {
+			return b, true
+		}
+	}
+	return Binding{}, false
+}
+
+// Resolve binds a routed model id to its concrete Target: the id's explicit Binding
+// if any, else the Default account (the id is used as the upstream name); an id with
+// no binding and no default is a fail-loud error. Pure and deterministic — same
+// roster, same id, same target. Resolve assumes a validated roster (the dangling-ref
+// and locality invariants are enforced in Validate); it still returns an error for an
+// unbound id with no default and a binding to an account that does not exist.
+func (r Roster) Resolve(modelID string) (Target, error) {
+	acctID, upstream, residencyFloor := "", modelID, ""
+	if b, bound := r.findBinding(modelID); bound {
+		acctID = b.Account
+		if b.UpstreamModel != "" {
+			upstream = b.UpstreamModel
+		}
+		residencyFloor = b.ResidencyFloor
+	} else {
+		if r.Default == "" {
+			return Target{}, fmt.Errorf("modelroute: no binding for model %q and no default account", modelID)
+		}
+		acctID = r.Default
+	}
+	a, ok := r.account(acctID)
+	if !ok {
+		return Target{}, fmt.Errorf("modelroute: model %q binds to unknown account %q", modelID, acctID)
+	}
+	return r.targetForAccount(modelID, upstream, residencyFloor, a), nil
+}
+
+// ResolveChain resolves model to its ordered dispatch chain: the primary Target from
+// Resolve(model) followed by each FallbackTarget declared on the matching Binding.
+// If no fallbacks are declared (or model resolves via Default), it returns [primary].
+func (r *Roster) ResolveChain(model string) ([]Target, error) {
+	if r == nil {
+		return nil, fmt.Errorf("modelroute: nil roster")
+	}
+	primary, err := r.Resolve(model)
+	if err != nil {
+		return nil, err
+	}
+	b, bound := r.findBinding(model)
+	if !bound || len(b.Fallbacks) == 0 {
+		return []Target{primary}, nil
+	}
+	chain := make([]Target, 0, 1+len(b.Fallbacks))
+	chain = append(chain, primary)
+	for _, fb := range b.Fallbacks {
+		a, ok := r.account(fb.Account)
+		if !ok {
+			return nil, fmt.Errorf("modelroute: model %q fallback binds to unknown account %q", model, fb.Account)
+		}
+		chain = append(chain, r.targetForAccount(model, fb.UpstreamModel, b.ResidencyFloor, a))
+	}
+	return chain, nil
 }
 
 // LoopbackBaseURLs returns, for each account whose EFFECTIVE base URL points at the
@@ -737,6 +788,9 @@ func (r Roster) Validate() error {
 		if !seen[b.Account] {
 			return fmt.Errorf("modelroute: binding for model %q names unknown account %q", b.Model, b.Account)
 		}
+		if err := validateBindingResidencyAndFallbacks(r, b, seen); err != nil {
+			return err
+		}
 		if err := validateDeprecatedAliasBinding(b); err != nil {
 			return err
 		}
@@ -775,6 +829,47 @@ func safeRouteToken(what, tok string) error {
 	}
 	if strings.ContainsAny(tok, delims) {
 		return fmt.Errorf("modelroute: %s %q contains a route delimiter (:, /, space) — it must be a plain token", what, tok)
+	}
+	return nil
+}
+
+func validateBindingResidencyAndFallbacks(r Roster, b Binding, seen map[string]bool) error {
+	switch b.ResidencyFloor {
+	case "", "any", "local_only":
+	default:
+		return fmt.Errorf("modelroute: binding for model %q has unknown residency_floor %q (want \"\", \"any\", or \"local_only\")", b.Model, b.ResidencyFloor)
+	}
+	if b.ResidencyFloor == "local_only" {
+		primary, _ := r.account(b.Account)
+		if !primary.Zone().SelfHosted() {
+			return fmt.Errorf("modelroute: binding for model %q has residency_floor %q but primary account %q is in remote zone %q",
+				b.Model, b.ResidencyFloor, b.Account, primary.Zone())
+		}
+	}
+	chainSeen := make(map[string]bool, 1+len(b.Fallbacks))
+	chainSeen[b.Account] = true
+	for j, fb := range b.Fallbacks {
+		if fb.Account == "" {
+			return fmt.Errorf("modelroute: binding for model %q fallback %d has an empty account", b.Model, j)
+		}
+		if !seen[fb.Account] {
+			return fmt.Errorf("modelroute: binding for model %q fallback %d names unknown account %q", b.Model, j, fb.Account)
+		}
+		if chainSeen[fb.Account] {
+			return fmt.Errorf("modelroute: binding for model %q fallback %d duplicates account %q in chain", b.Model, j, fb.Account)
+		}
+		chainSeen[fb.Account] = true
+		if fb.UpstreamModel != "" && strings.ContainsAny(fb.UpstreamModel, ": \t") {
+			return fmt.Errorf("modelroute: binding for model %q fallback %d has an upstream_model %q containing a route delimiter (: or space)",
+				b.Model, j, fb.UpstreamModel)
+		}
+		if b.ResidencyFloor == "local_only" {
+			fba, _ := r.account(fb.Account)
+			if !fba.Zone().SelfHosted() {
+				return fmt.Errorf("modelroute: binding for model %q has residency_floor %q but fallback account %q is in remote zone %q",
+					b.Model, b.ResidencyFloor, fb.Account, fba.Zone())
+			}
+		}
 	}
 	return nil
 }
