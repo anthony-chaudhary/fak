@@ -108,6 +108,77 @@ func (cs *Wave32Conv1DState) StepWithBias(input []float32, weights []float32, bi
 	return out, nil
 }
 
+// Wave32ShortConvRing adapts modular/modular (Apache-2.0 WITH LLVM-exception),
+// max/python/max/nn/_graph_ops/state_space/short_conv_ring.py:28 @88ab8913af:
+// a position-indexed ring [slots, ringLen, channels] where ringLen = K-1 + maxRollback,
+// computing x + conv(x) with an explicit commit flag so verify runs read-only and
+// acceptance truncation survives without state re-derivation.
+type Wave32ShortConvRing struct {
+	Slots       int
+	KernelSize  int
+	MaxRollback int
+	RingLen     int
+	Channels    int
+	ring        [][][]float32
+}
+
+// NewWave32ShortConvRing allocates a position-indexed conv ring [slots, K-1+maxRollback, channels].
+func NewWave32ShortConvRing(slots, kernelSize, maxRollback, channels int) (*Wave32ShortConvRing, error) {
+	if slots <= 0 || kernelSize < 1 || maxRollback < 0 || channels < 0 {
+		return nil, fmt.Errorf("compute: invalid short conv ring geometry (%d,%d,%d,%d)", slots, kernelSize, maxRollback, channels)
+	}
+	ringLen := (kernelSize - 1) + maxRollback
+	ring := make([][][]float32, slots)
+	for s := 0; s < slots; s++ {
+		ring[s] = make([][]float32, ringLen)
+		for r := 0; r < ringLen; r++ {
+			ring[s][r] = make([]float32, channels)
+		}
+	}
+	return &Wave32ShortConvRing{
+		Slots:       slots,
+		KernelSize:  kernelSize,
+		MaxRollback: maxRollback,
+		RingLen:     ringLen,
+		Channels:    channels,
+		ring:        ring,
+	}, nil
+}
+
+// Step computes x + conv(x) at position pos for slot. When commit is true, x is
+// written into ring[slot][pos % RingLen]; when commit is false, ring state is unchanged.
+func (r *Wave32ShortConvRing) Step(slot, pos int, input, weights []float32, commit bool) ([]float32, error) {
+	if slot < 0 || slot >= r.Slots || pos < 0 {
+		return nil, fmt.Errorf("compute: invalid short conv ring slot=%d pos=%d", slot, pos)
+	}
+	if r.Channels == 0 {
+		if len(input) != 0 {
+			return nil, fmt.Errorf("compute: zero-width ring got %d inputs", len(input))
+		}
+		return []float32{}, nil
+	}
+	if len(input) != r.Channels || len(weights) != r.Channels*r.KernelSize {
+		return nil, fmt.Errorf("compute: short conv ring shape mismatch")
+	}
+	out := make([]float32, r.Channels)
+	for c := 0; c < r.Channels; c++ {
+		wBase := c * r.KernelSize
+		conv := weights[wBase+r.KernelSize-1] * input[c]
+		for j := 1; j < r.KernelSize; j++ {
+			histPos := pos - j
+			if histPos >= 0 && r.RingLen > 0 {
+				idx := histPos % r.RingLen
+				conv += weights[wBase+(r.KernelSize-1-j)] * r.ring[slot][idx][c]
+			}
+		}
+		out[c] = input[c] + conv
+	}
+	if commit && r.RingLen > 0 {
+		copy(r.ring[slot][pos%r.RingLen], input)
+	}
+	return out, nil
+}
+
 // ReferenceGDNStep computes a single token state transition using the mathematical
 // reference formulation for Qwen 3.8 GDN (Gated Delta Net).
 //
