@@ -300,6 +300,9 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/inkling2_prefill_nvfp4.cuh"
 #include "cuda/inkling2_prefill_attn.cuh"
 #include "cuda/inkling2_prefill_iq.cuh"
+#ifdef FAK_CUDA_FP8_GEMM_ALLREDUCE
+#include "cuda/fp8_gemm_allreduce.cuh"
+#endif
 #ifdef FAK_CUDA_ALPHA_MOE_FUSED
 #include "cuda/alpha_moe_fused.cuh"
 #endif
