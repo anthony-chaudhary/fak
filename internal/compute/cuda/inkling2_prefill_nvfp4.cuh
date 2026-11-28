@@ -98,7 +98,91 @@ __global__ void k_ink2p_nv2_quant(const int *offsets, const int *tiles, const in
 // streamed and decoded once per NTILE*INK2P_NV2_PAIRS pairs. Warp w owns rows
 // [w*16*MT, (w+1)*16*MT) against every n8 tile of the pairs; K advances BK columns per
 // cp.async stage.
-template <int MT, int WARPS, int STAGES, int BK, int NTILE, int PF>
+#include <unordered_set>
+
+static std::unordered_set<const void *> g_ink2p_nvfp4_slab_set;
+
+static bool ink2p_nvfp4_is_slab(const void *p) {
+  return !g_ink2p_nvfp4_slab_set.empty() && g_ink2p_nvfp4_slab_set.count(p) != 0;
+}
+
+static void ink2p_nvfp4_slab_evict(const void *p) {
+  if (!g_ink2p_nvfp4_slab_set.empty()) g_ink2p_nvfp4_slab_set.erase(p);
+}
+
+__global__ static void k_ink2p_nvfp4_repack_packed_slab128(
+    const uint4 *__restrict__ src, uint4 *__restrict__ dst, int batchE, int rows, int nk) {
+  const size_t total = (size_t)batchE * rows * nk * 4u;
+  const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= total) return;
+  const int col16 = (int)(idx % (size_t)(nk * 4));
+  const size_t er = idx / (size_t)(nk * 4);
+  const int row = (int)(er % (size_t)rows);
+  const int e = (int)(er / (size_t)rows);
+  const int slab = row >> 7, r = row & 127;
+  const int kc = col16 >> 2, c = col16 & 3;
+  const size_t slabOff = ((size_t)e * (rows >> 7) + slab) * nk + kc;
+  dst[slabOff * (128u * 4u) + (size_t)r * 4u + c] = src[idx];
+}
+
+__global__ static void k_ink2p_nvfp4_repack_scales_slab128(
+    const uint64_t *__restrict__ src, uint64_t *__restrict__ dst, int batchE, int rows, int nk) {
+  const size_t total = (size_t)batchE * rows * nk;
+  const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= total) return;
+  const int kc = (int)(idx % (size_t)nk);
+  const size_t er = idx / (size_t)nk;
+  const int row = (int)(er % (size_t)rows);
+  const int e = (int)(er / (size_t)rows);
+  const int slab = row >> 7, r = row & 127;
+  const size_t slabOff = ((size_t)e * (rows >> 7) + slab) * nk + kc;
+  dst[slabOff * 128u + r] = src[idx];
+}
+
+extern "C" int fcuda_ink2p_nvfp4_ensure_slab128(uint8_t *W, uint8_t *scales, int nexp, int rows, int in) {
+  if (!W || !scales || nexp <= 0 || rows <= 0 || in <= 0 || (rows & 127) != 0 || (in & 127) != 0) {
+    return (int)cudaErrorInvalidValue;
+  }
+  if (ink2p_nvfp4_is_slab(W)) return 0;
+  if (g_capture_open) return (int)cudaErrorStreamCaptureUnsupported;
+  const int nk = in >> 7;
+  const int batchCap = nexp < 8 ? nexp : 8;
+  const size_t pExpBytes = (size_t)rows * (size_t)(in >> 1);
+  const size_t sExpBytes = (size_t)rows * (size_t)(in >> 4);
+  uint8_t *tmpP = nullptr, *tmpS = nullptr;
+  cudaError_t ce = cudaMalloc(&tmpP, (size_t)batchCap * pExpBytes);
+  if (ce != cudaSuccess) return (int)ce;
+  ce = cudaMalloc(&tmpS, (size_t)batchCap * sExpBytes);
+  if (ce != cudaSuccess) {
+    cudaFree(tmpP);
+    return (int)ce;
+  }
+  for (int e0 = 0; e0 < nexp; e0 += batchCap) {
+    const int be = (nexp - e0 < batchCap) ? (nexp - e0) : batchCap;
+    uint8_t *wPtr = W + (size_t)e0 * pExpBytes;
+    uint8_t *sPtr = scales + (size_t)e0 * sExpBytes;
+    const size_t pTotal = (size_t)be * rows * nk * 4u;
+    const size_t sTotal = (size_t)be * rows * nk;
+    k_ink2p_nvfp4_repack_packed_slab128<<<(unsigned)((pTotal + 255) / 256), 256, 0, g_stream>>>(
+        (const uint4 *)wPtr, (uint4 *)tmpP, be, rows, nk);
+    k_ink2p_nvfp4_repack_scales_slab128<<<(unsigned)((sTotal + 255) / 256), 256, 0, g_stream>>>(
+        (const uint64_t *)sPtr, (uint64_t *)tmpS, be, rows, nk);
+    ce = cudaGetLastError();
+    if (ce != cudaSuccess) break;
+    ce = cudaMemcpyAsync(wPtr, tmpP, (size_t)be * pExpBytes, cudaMemcpyDeviceToDevice, g_stream);
+    if (ce != cudaSuccess) break;
+    ce = cudaMemcpyAsync(sPtr, tmpS, (size_t)be * sExpBytes, cudaMemcpyDeviceToDevice, g_stream);
+    if (ce != cudaSuccess) break;
+  }
+  if (ce == cudaSuccess) ce = cudaStreamSynchronize(g_stream);
+  cudaFree(tmpS);
+  cudaFree(tmpP);
+  if (ce != cudaSuccess) return (int)ce;
+  g_ink2p_nvfp4_slab_set.insert(W);
+  return 0;
+}
+
+template <int MT, int WARPS, int STAGES, int BK, int NTILE, int PF, bool SLAB = false>
 __global__ void __launch_bounds__(WARPS * 32) k_ink2p_expert_nvfp4_v2(
     const uint8_t *Packed, const uint8_t *Scales, const int *offsets, const int *order, const int *tiles,
     const int *ntiles, const int8_t *Q, const float *QS, int xDiv, float *Y, int rows, int in, const float *escale) {
@@ -128,13 +212,27 @@ __global__ void __launch_bounds__(WARPS * 32) k_ink2p_expert_nvfp4_v2(
   auto load = [&](int stage, int kc) {
     uint8_t *s = ink2p_nv2_smem + stage * STAGE;
     const int k0 = kc * BK;
-    for (int i = tid; i < BM * (BK / 32); i += T) {
-      const int r = i / (BK / 32), c = i % (BK / 32);
-      ink2p_nv2_cp16w<PF>(s + r * WS + c * 16, Packed + (wrow0 + r) * rowBytes + k0 / 2 + c * 16);
-    }
-    for (int i = tid; i < BM; i += T) {
-      if (KB == 8) ink2p_nv2_cp8(s + SW + i * KB, Scales + (wrow0 + i) * nb + k0 / 16);
-      else ink2p_nv2_cp4(s + SW + i * KB, Scales + (wrow0 + i) * nb + k0 / 16);
+    if (SLAB) {
+      const size_t slabOff = ((size_t)e * (rows / BM) + blockIdx.x) * nk + kc;
+      const uint8_t *pSlab = Packed + slabOff * (size_t)(BM * (BK / 2));
+      const uint8_t *sSlab = Scales + slabOff * (size_t)(BM * KB);
+      for (int i = tid; i < BM * (BK / 32); i += T) {
+        const int r = i / (BK / 32), c = i % (BK / 32);
+        ink2p_nv2_cp16w<PF>(s + r * WS + c * 16, pSlab + (size_t)i * 16);
+      }
+      for (int i = tid; i < BM; i += T) {
+        if (KB == 8) ink2p_nv2_cp8(s + SW + i * KB, sSlab + (size_t)i * 8);
+        else ink2p_nv2_cp4(s + SW + i * KB, sSlab + (size_t)i * 4);
+      }
+    } else {
+      for (int i = tid; i < BM * (BK / 32); i += T) {
+        const int r = i / (BK / 32), c = i % (BK / 32);
+        ink2p_nv2_cp16w<PF>(s + r * WS + c * 16, Packed + (wrow0 + r) * rowBytes + k0 / 2 + c * 16);
+      }
+      for (int i = tid; i < BM; i += T) {
+        if (KB == 8) ink2p_nv2_cp8(s + SW + i * KB, Scales + (wrow0 + i) * nb + k0 / 16);
+        else ink2p_nv2_cp4(s + SW + i * KB, Scales + (wrow0 + i) * nb + k0 / 16);
+      }
     }
     for (int i = tid; i < nta * 8 * (BK / 16); i += T) {
       const int c = i / (BK / 16), j = i % (BK / 16);
@@ -234,7 +332,19 @@ __global__ void __launch_bounds__(WARPS * 32) k_ink2p_expert_nvfp4_v2(
 static int8_t *g_ink2p_nv2_q = nullptr;
 static size_t g_ink2p_nv2_q_cap = 0;
 
-template <int MT, int WARPS, int STAGES, int BK = INK2P_NV2_BK, int NTILE = 1, int PF = 1>
+template <int MT, int WARPS, int STAGES, int BK, int NTILE, int PF, bool SLAB = false>
+static cudaError_t ink2p_nv2_prepare_smem() {
+  constexpr int BM = WARPS * 16 * MT, P = INK2P_NV2_PAIRS * NTILE;
+  constexpr int STAGE = BM * (BK / 2 + 16) + BM * (BK / 16) + P * (BK + 16) + (BK / 16) * P * 4;
+  static bool attr = false;
+  if (attr) return cudaSuccess;
+  const cudaError_t e = cudaFuncSetAttribute(k_ink2p_expert_nvfp4_v2<MT, WARPS, STAGES, BK, NTILE, PF, SLAB>,
+                                             cudaFuncAttributeMaxDynamicSharedMemorySize, STAGES * STAGE);
+  attr = e == cudaSuccess;
+  return e;
+}
+
+template <int MT, int WARPS, int STAGES, int BK = INK2P_NV2_BK, int NTILE = 1, int PF = 1, bool SLAB = false>
 static int ink2p_nv2_launch(const uint8_t *W, const uint8_t *scales, const int *offsets, const int *order,
                             const int *tiles, const int *ntiles, int maxTiles, const float *X, int xDiv, int xStride,
                             float *Y, int rows, int in, const float *escale) {
@@ -253,19 +363,14 @@ static int ink2p_nv2_launch(const uint8_t *W, const uint8_t *scales, const int *
   }
   int8_t *q = g_ink2p_nv2_q;
   float *qs = reinterpret_cast<float *>(q + qBytes);
-  static bool attr = false;
-  if (!attr) {
-    const cudaError_t e = cudaFuncSetAttribute(k_ink2p_expert_nvfp4_v2<MT, WARPS, STAGES, BK, NTILE, PF>,
-                                               cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM);
-    if (e != cudaSuccess) return (int)e;
-    attr = true;
-  }
+  const cudaError_t admitted = ink2p_nv2_prepare_smem<MT, WARPS, STAGES, BK, NTILE, PF, SLAB>();
+  if (admitted != cudaSuccess) return (int)admitted;
   const int qgrid = (int)((maxRows * in + 255) / 256 < 4096 ? (maxRows * in + 255) / 256 : 4096);
   FCUDA_TS("k_ink2p_nv2_quant", qgrid,
            k_ink2p_nv2_quant<16><<<qgrid, 256, 0, g_stream>>>(offsets, tiles, ntiles, X, xDiv, xStride, q, qs, in));
   const dim3 grid(rows / BM, maxTiles);
-  FCUDA_TS("k_ink2p_expert_nvfp4_v2", grid,
-           (k_ink2p_expert_nvfp4_v2<MT, WARPS, STAGES, BK, NTILE, PF><<<grid, WARPS * 32, SMEM, g_stream>>>(
+  FCUDA_TS(SLAB ? "k_ink2p_expert_nvfp4_v2_slab128" : (BM == 128 && BK == 128 ? "k_ink2p_expert_nvfp4_v2_bm128" : "k_ink2p_expert_nvfp4_v2"), grid,
+           (k_ink2p_expert_nvfp4_v2<MT, WARPS, STAGES, BK, NTILE, PF, SLAB><<<grid, WARPS * 32, SMEM, g_stream>>>(
                W, scales, offsets, order, tiles, ntiles, q, qs, xDiv, Y, rows, in, escale)));
   return (int)cudaGetLastError();
 }
@@ -850,6 +955,13 @@ extern "C" int fcuda_ink2p_expert_nvfp4_v2(const uint8_t *W, const uint8_t *scal
                                            const int *order, const int *tiles, const int *ntiles, int maxTiles,
                                            const float *X, int xDiv, int xStride, float *Y, int rows, int in,
                                            const float *escale) {
+  if (scales && in % 128 == 0 && rows % 128 == 0 && INK2P_NV2_PAIRS == INK2P_NV_PAIRS && ink2p_nvfp4_is_slab(W)) {
+    const cudaError_t admitted = ink2p_nv2_prepare_smem<1, 8, 2, 128, 1, 1, true>();
+    if (admitted == cudaSuccess)
+      return ink2p_nv2_launch<1, 8, 2, 128, 1, 1, true>(W, scales, offsets, order, tiles, ntiles, maxTiles, X, xDiv,
+                                                        xStride, Y, rows, in, escale);
+    return (int)admitted;
+  }
   if (scales && in % INK2P_NVF4_BK == 0 && rows % 256 == 0 && ink2p_nvf4_selected())
     return ink2p_nvf4_launch<2, 8, 2>(W, scales, offsets, order, tiles, ntiles, maxTiles, X, xDiv, xStride, Y, rows,
                                       in, escale);
@@ -857,6 +969,17 @@ extern "C" int fcuda_ink2p_expert_nvfp4_v2(const uint8_t *W, const uint8_t *scal
   if (!scales || in % BK != 0 || rows % (WARPS * 16 * MT) != 0 || INK2P_NV2_PAIRS != INK2P_NV_PAIRS)
     return fcuda_ink2p_expert_nvfp4(W, scales, offsets, order, tiles, ntiles, maxTiles, X, xDiv, xStride, Y, rows,
                                     in, escale);
+  static bool bm128_refused = false;
+  const char *bm128 = getenv("FAK_INKLING2_NVFP4_BM128");
+  if (!bm128_refused && in % 128 == 0 && bm128 && strcmp(bm128, "1") == 0) {
+    const cudaError_t admitted = ink2p_nv2_prepare_smem<1, 8, 2, 128, 1, 1, false>();
+    if (admitted == cudaSuccess)
+      return ink2p_nv2_launch<1, 8, 2, 128, 1, 1, false>(W, scales, offsets, order, tiles, ntiles, maxTiles, X, xDiv,
+                                                         xStride, Y, rows, in, escale);
+    if (admitted != cudaErrorInvalidValue && admitted != cudaErrorNotSupported) return (int)admitted;
+    cudaGetLastError();
+    bm128_refused = true;
+  }
   return ink2p_nv2_launch<MT, WARPS, STAGES, BK, NTILE, PF>(W, scales, offsets, order, tiles, ntiles, maxTiles, X,
                                                             xDiv, xStride, Y, rows, in, escale);
 }

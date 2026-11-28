@@ -290,6 +290,11 @@ func (c *cudaBackend) Ink2PExpertGrouped(stack Tensor, expertRows, nexp int, ids
 	}
 	tiles := int(C.fcuda_ink2p_max_tiles(C.int(npairs), C.int(nexp)))
 	if ink2PrefillFast("nvfp4") {
+		if expertRows%128 == 0 && in%128 == 0 && ink2NVFP4SlabEnabled() {
+			if rc := C.fcuda_ink2p_nvfp4_ensure_slab128((*C.uint8_t)(b.ptr), (*C.uint8_t)(scales), C.int(nexp), C.int(expertRows), C.int(in)); rc != 0 {
+				return true, ink2Status("prefill expert nvfp4 slab repack", rc)
+			}
+		}
 		return true, ink2Status("prefill expert nvfp4", C.fcuda_ink2p_expert_nvfp4_v2((*C.uint8_t)(b.ptr), (*C.uint8_t)(scales),
 			c.ink2I(offsets), c.ink2I(order), c.ink2I(tileList), c.ink2I(ntiles), C.int(tiles), c.ink2F(x), C.int(xDiv),
 			C.int(xStride), c.ink2F(y), C.int(expertRows), C.int(in), c.ink2F(scale)))
@@ -297,6 +302,14 @@ func (c *cudaBackend) Ink2PExpertGrouped(stack Tensor, expertRows, nexp int, ids
 	return true, ink2Status("prefill expert nvfp4", C.fcuda_ink2p_expert_nvfp4((*C.uint8_t)(b.ptr), (*C.uint8_t)(scales),
 		c.ink2I(offsets), c.ink2I(order), c.ink2I(tileList), c.ink2I(ntiles), C.int(tiles), c.ink2F(x), C.int(xDiv),
 		C.int(xStride), c.ink2F(y), C.int(expertRows), C.int(in), c.ink2F(scale)))
+}
+
+// CUDAInk2PNVFP4SlabEnv set to "1" opts NVFP4 grouped expert weights into the in-place
+// 128-row slab-major layout (0 extra VRAM) with bitwise-exact grouped and decode kernels.
+const CUDAInk2PNVFP4SlabEnv = "FAK_INKLING2_NVFP4_SLAB"
+
+func ink2NVFP4SlabEnabled() bool {
+	return os.Getenv(CUDAInk2PNVFP4SlabEnv) == "1"
 }
 
 // CUDAInk2PNVFP4W4A4Env set to "0" keeps NVFP4 grouped prefill on int8 activations;

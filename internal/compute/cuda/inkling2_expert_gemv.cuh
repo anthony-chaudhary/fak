@@ -32,7 +32,7 @@
 // Physical float4 slot of activation float4 j (0..3) of 16-value block b.
 static __device__ __forceinline__ int ink2_nv2_slot(int b, int j) { return b * 4 + ((j + (b >> 1)) & 3); }
 
-template <int KB, int R>
+template <int KB, int R, bool SLAB = false>
 __global__ void __launch_bounds__(INK2_NV2_WARPS * 32)
     k_ink2_expert_nvfp4_v2(const uint8_t *__restrict__ Packed, const uint8_t *__restrict__ Scales,
                            const int *ids, const float *X, int xStride, float *Y, int rows, int in,
@@ -56,10 +56,17 @@ __global__ void __launch_bounds__(INK2_NV2_WARPS * 32)
       const int b = lane + 32 * k;
 #pragma unroll
       for (int r = 0; r < R; ++r) {
-        const size_t row = ebase + (size_t)(base + r);
-        const bool ok = b < nb && base + r < rows;
-        pk[k][r] = ok ? __ldcs((const uint2 *)(Packed + row * prow + (size_t)b * 8)) : make_uint2(0u, 0u);
-        sb[k][r] = ok ? (uint32_t)__ldcs(Scales + row * (size_t)nb + b) : 0u;
+        const int localRow = base + r;
+        const bool ok = b < nb && localRow < rows;
+        if (SLAB) {
+          const size_t slabIdx = ((size_t)ids[slot] * (size_t)(rows >> 7) + (size_t)(localRow >> 7)) * (size_t)(nb >> 3) + (size_t)(b >> 3);
+          pk[k][r] = ok ? __ldcs((const uint2 *)(Packed + slabIdx * (128u * 64u) + (size_t)(localRow & 127) * 64u + (size_t)(b & 7) * 8u)) : make_uint2(0u, 0u);
+          sb[k][r] = ok ? (uint32_t)__ldcs(Scales + slabIdx * (128u * 8u) + (size_t)(localRow & 127) * 8u + (size_t)(b & 7)) : 0u;
+        } else {
+          const size_t row = ebase + (size_t)localRow;
+          pk[k][r] = ok ? __ldcs((const uint2 *)(Packed + row * prow + (size_t)b * 8)) : make_uint2(0u, 0u);
+          sb[k][r] = ok ? (uint32_t)__ldcs(Scales + row * (size_t)nb + b) : 0u;
+        }
       }
     }
   };
@@ -161,11 +168,18 @@ static bool ink2_expert_nvfp4_v2(const uint8_t *W, const uint8_t *scales, const 
   if (!ink2_nv2_enabled() || kb < 1 || kb > INK2_NV2_MAX_KB) return false;
   const dim3 grid(ink2_nv2_blocks_per_slot(rows, k), k);
   const size_t smem = (size_t)in * sizeof(float);
+  const bool slab = (rows % 128 == 0 && in % 128 == 0 && ink2p_nvfp4_is_slab(W));
 #define INK2_NV2_CASE(KB)                                                                                     \
   case KB:                                                                                                    \
-    FCUDA_TS("k_ink2_expert_nvfp4_v2", grid,                                                                  \
-             k_ink2_expert_nvfp4_v2<KB, INK2_NV2_ROWS><<<grid, INK2_NV2_WARPS * 32, smem, g_stream>>>(        \
-                 W, scales, ids, X, xStride, Y, rows, in, escale, situW, beta, lb));                          \
+    if (slab) {                                                                                               \
+      FCUDA_TS("k_ink2_expert_nvfp4_v2_slab", grid,                                                           \
+               (k_ink2_expert_nvfp4_v2<KB, INK2_NV2_ROWS, true><<<grid, INK2_NV2_WARPS * 32, smem, g_stream>>>( \
+                   W, scales, ids, X, xStride, Y, rows, in, escale, situW, beta, lb)));                       \
+    } else {                                                                                                  \
+      FCUDA_TS("k_ink2_expert_nvfp4_v2", grid,                                                                \
+               (k_ink2_expert_nvfp4_v2<KB, INK2_NV2_ROWS, false><<<grid, INK2_NV2_WARPS * 32, smem, g_stream>>>( \
+                   W, scales, ids, X, xStride, Y, rows, in, escale, situW, beta, lb)));                       \
+    }                                                                                                         \
     break;
   switch (kb) {
     INK2_NV2_CASE(1)

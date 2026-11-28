@@ -244,6 +244,8 @@ extern "C" void *fcuda_malloc_managed(size_t bytes) {
   return fcuda_malloc_managed_tagged(bytes, FAK_ALLOC_OTHER, FAK_ALLOC_SITE("fcuda_malloc_managed"));
 }
 static void q4_coeff_cache_evict(const void *q);
+static void ink2p_nvfp4_slab_evict(const void *p);
+static bool ink2p_nvfp4_is_slab(const void *p);
 
 extern "C" void fcuda_free(void *d) {
 #ifdef FAK_CUDA_V41_CHECKED_STREAM
@@ -311,6 +313,7 @@ extern "C" void fcuda_free(void *d) {
   }
 #endif
   q4_coeff_cache_evict(d);
+  ink2p_nvfp4_slab_evict(d);
   auto mit = g_managed_live.find(d);
   if (mit != g_managed_live.end()) {
     g_managed_live.erase(mit);
