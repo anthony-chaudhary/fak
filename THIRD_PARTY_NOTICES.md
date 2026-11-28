@@ -4,7 +4,7 @@ Each entry identifies an upstream project adapted into this product; changes wer
 
 ## vLLM
 
-Portions of this product are adapted from vLLM: https://github.com/vllm-project/vllm (pinned at revision e5196e2959a42908313510f55fa21f213a48802e, 5c8ae7c74aaa99d1f7fbeea942fd7282e3413810, f47792af7fba76eb8e8f6a564b35cfad316d39f2, b8b302cde434df8c9289a2b465406b47ebab1c2d (= tag v0.11.0), a20280f30e3169d33a7e21d1d117e9719bace00b, 85591000403fc3bc3b4d0303e3a97bedab007763, 261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64, d98498a4f97bfd89700829fd36df71bbab6437f5, e458ba99282ff683593e7ddbedf726d0c8612857, d009008cb5a060939b26535b419ccfeea09d1673, 518c624a1c731cfc6c73369ced6351cb03754ddf, e740badc2e3df13a5c2abfca04ed0ac917985c5f, 213e64562ba6e82ffce95774fa37fd294f3bc8ee, 31f84f6b957b5f5309f66130efc3c1df07d8a995, 9a56d4fec6b0a30a0a989f1cd06cd3c2f7325619, 3b364baef5cd731b5e1f14ff16387feb69d01f10, 3f34cac035724890e6ee5707a6649517b83d2d61, 05737d01eb8d74b52c8478c6885dfb603808f335, 56e993a68990cd3bb0719d5d91dab549ce0d5a79, 09109f96221c4a4d87235931980460529060fc94, 4593e73c85440e81a10565b4017a9ced421f2208). Changes were made.
+Portions of this product are adapted from vLLM: https://github.com/vllm-project/vllm. Changes were made.
 
 Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
 SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -218,7 +218,7 @@ Copyright (c) 2023, The vLLM team; Copyright (c) 2020-2023, NVIDIA CORPORATION.
 
 ## JigSawPT/llama.cpp
 
-Portions of this product are adapted from JigSawPT/llama.cpp: https://github.com/JigSawPT/llama.cpp (pinned at revision 8ce0968539b1a6795f3413c2783dfa5646b4688a). Changes were made.
+Portions of this product are adapted from JigSawPT/llama.cpp: https://github.com/JigSawPT/llama.cpp. Changes were made.
 
 ```text
 MIT License
@@ -246,7 +246,7 @@ SOFTWARE.
 
 ## TensorFold
 
-Portions of this product are adapted from TensorFold: https://github.com/ashhart/TensorFold (pinned at revision a6aa4782bf4ffe87ccee4a0a5cbf2efb2dd01cba, 9e8c368b0b4c2c7892a0c9f0f302d7c164016209). Changes were made.
+Portions of this product are adapted from TensorFold: https://github.com/ashhart/TensorFold. Changes were made.
 
 ```text
 TensorFold
@@ -465,7 +465,7 @@ THIRD_PARTY_NOTICES.md.
 
 ## tinyserve
 
-Portions of this product are adapted from tinyserve: https://github.com/e1n00r/tinyserve (pinned at revision 9277e683 (branch master)). Changes were made.
+Portions of this product are adapted from tinyserve: https://github.com/e1n00r/tinyserve. Changes were made.
 
 ```text
 MIT License
@@ -493,7 +493,7 @@ SOFTWARE.
 
 ## HybriMoE
 
-Portions of this product are adapted from HybriMoE: https://github.com/PKU-SEC-Lab/HybriMoE (pinned at revision 508a85b9a43dff37124370d8816e411e74827803). Changes were made.
+Portions of this product are adapted from HybriMoE: https://github.com/PKU-SEC-Lab/HybriMoE. Changes were made.
 
 ```text
                                  Apache License
@@ -701,7 +701,7 @@ Portions of this product are adapted from HybriMoE: https://github.com/PKU-SEC-L
 
 ## Mixtral-offloading
 
-Portions of this product are adapted from Mixtral-offloading: https://github.com/dvmazur/mixtral-offloading (pinned at revision ce545188b804238f0b23a59fc45e6a8f8b390c40). Changes were made.
+Portions of this product are adapted from Mixtral-offloading: https://github.com/dvmazur/mixtral-offloading. Changes were made.
 
 ```text
 MIT License
@@ -729,7 +729,7 @@ SOFTWARE.
 
 ## MoE-Infinity
 
-Portions of this product are adapted from MoE-Infinity: https://github.com/EfficientMoE/MoE-Infinity (pinned at revision 0f96d563db2dda5f1834bf667f6fcc44f45b2b9d). Changes were made.
+Portions of this product are adapted from MoE-Infinity: https://github.com/EfficientMoE/MoE-Infinity. Changes were made.
 
 ```text
                                  Apache License
@@ -937,7 +937,7 @@ Portions of this product are adapted from MoE-Infinity: https://github.com/Effic
 
 ## llama.cpp
 
-Portions of this product are adapted from llama.cpp: https://github.com/ggml-org/llama.cpp (pinned at revision 83078fec0db82d6b5a00d9599062c38c39145755, fd55cb98fe29d3df0054d3f3e6e6f15958ea72ab, f7c01c5226cac1de1052c17920ff38cdefea0ae6, 571d0d540df04f25298d0e159e520d9fc62ed121, ccdbe290533f68154ede46e0618622eebcb6c070, d6cf9acb25e6c657d6c6a4645ab7b69fce119995, 5e03a1ff450cae37a774684de55d14fb48b1f90b, dff60048744f99cb0af68d02be2314456b3269dc, f74e2fa6a31cc33ab4ee4ae516641cfe62df3924, 74bca3950054eed1795f525cb9cf06bfe796492d, 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd, 4c1004c49221b07c3b8108977e3d1991fc9f45cc, 0ec4027a2a0183de87c007069adddc06e665f7de, cd8427d018c07eefab6c110f7f115c31ec4c6157, 69ee2ecc0150ba7d1204a7f7393dfd651569db8c, 259d91709d60945911bedb9bcfb2957c6e153ea7, c4fb579695320929b6a453f4f3a56951bda332ee, 00f113eceb2758158582d56f98bf476b2fe3ed32). Changes were made.
+Portions of this product are adapted from llama.cpp: https://github.com/ggml-org/llama.cpp. Changes were made.
 
 ```text
 MIT License
@@ -965,7 +965,7 @@ SOFTWARE.
 
 ## vcruz305/llama.cpp
 
-Portions of this product are adapted from vcruz305/llama.cpp: https://github.com/vcruz305/llama.cpp (pinned at revision 5210c7c5ed61dddaee6ed476623abf4b63093d16). Changes were made.
+Portions of this product are adapted from vcruz305/llama.cpp: https://github.com/vcruz305/llama.cpp. Changes were made.
 
 ```text
 MIT License
@@ -993,7 +993,7 @@ SOFTWARE.
 
 ## antirez/ds4 (DwarfStar)
 
-Portions of this product are adapted from antirez/ds4 (DwarfStar): https://github.com/antirez/ds4 (pinned at revision 80ebbc396aee40eedc1d829222f3362d10fa4c6c, fc80bd695da76ee14bcb86820bf900a5cdfda806, b4e3faf5262b21db94ec309cf321640ff1eed460). Changes were made.
+Portions of this product are adapted from antirez/ds4 (DwarfStar): https://github.com/antirez/ds4. Changes were made.
 
 ```text
 MIT License
@@ -1022,7 +1022,7 @@ SOFTWARE.
 
 ## SGLang
 
-Portions of this product are adapted from SGLang: https://github.com/sgl-project/sglang (pinned at revision 45418d7dc648d0d71501b8b905a2499a40e9b971, 3f5b1bec8e00115bc8439b5b9a9da902822d2f82, ebeed893722150a29303d9eb9bd975abec4072a5, 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e, 8a0edcf799d06bdee8832356d382495e7fb50f22, 58484246d26523eaf1a7f16ab524deee288d2120, 32b7b66572d76bb5b7042e5792fee31d9de60286, 2fd45ed82fe07ec64ef7f4d2dbd9071b0eb01763, 0afb736d0aab96e3ab80b4c54a376213a1db67a6, 5481134403e01b46891e091ec63db42a36e6626f). Changes were made.
+Portions of this product are adapted from SGLang: https://github.com/sgl-project/sglang. Changes were made.
 
 ```text
                                  Apache License
@@ -1230,7 +1230,7 @@ Portions of this product are adapted from SGLang: https://github.com/sgl-project
 
 ## evolvemarketingitalia/ds4
 
-Portions of this product are adapted from evolvemarketingitalia/ds4: https://github.com/evolvemarketingitalia/ds4 (pinned at revision 5c3fde8e2cbcb7e1a4e81e1bca2db528e9b56c75). Changes were made.
+Portions of this product are adapted from evolvemarketingitalia/ds4: https://github.com/evolvemarketingitalia/ds4. Changes were made.
 
 ```text
 MIT License
@@ -1260,7 +1260,7 @@ SOFTWARE.
 
 ## freetoken-mlx
 
-Portions of this product are adapted from freetoken-mlx: https://github.com/stevezkw1998/freetoken-mlx (pinned at revision 2d5bd339ab599a36e663ef90a813fc0adc5ad0a9). Changes were made.
+Portions of this product are adapted from freetoken-mlx: https://github.com/stevezkw1998/freetoken-mlx. Changes were made.
 
 Copyright and attribution retained from the FreeToken/freetoken-mlx contributors.
 
@@ -1470,7 +1470,7 @@ Copyright and attribution retained from the FreeToken/freetoken-mlx contributors
 
 ## MLX-LM
 
-Portions of this product are adapted from MLX-LM: https://github.com/ml-explore/mlx-lm (pinned at revision 8d47a50482e27ad972e545f94f7ecb9e73a44635, 4e9a1de64e2d874f0742b10ded506e30e67270e0). Changes were made.
+Portions of this product are adapted from MLX-LM: https://github.com/ml-explore/mlx-lm. Changes were made.
 
 ```text
 MIT License
@@ -1498,7 +1498,7 @@ SOFTWARE.
 
 ## DeepGEMM
 
-Portions of this product are adapted from DeepGEMM: https://github.com/deepseek-ai/DeepGEMM (pinned at revision 1fc9c66975ee322d628b3288534ca0e9ce12a64d, 5081f8513af57e61696de4f4f04b0e707ffb503e). Changes were made.
+Portions of this product are adapted from DeepGEMM: https://github.com/deepseek-ai/DeepGEMM. Changes were made.
 
 ```text
 MIT License
@@ -1526,7 +1526,7 @@ SOFTWARE.
 
 ## TileKernels
 
-Portions of this product are adapted from TileKernels: https://github.com/deepseek-ai/TileKernels (pinned at revision c1cf914a82e6901c679445f872051ce44ac2cc63). Changes were made.
+Portions of this product are adapted from TileKernels: https://github.com/deepseek-ai/TileKernels. Changes were made.
 
 ```text
 MIT License
@@ -1554,7 +1554,7 @@ SOFTWARE.
 
 ## DeepInfer
 
-Portions of this product are adapted from DeepInfer: https://github.com/deepseek-ai/DeepInfer (pinned at revision 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01). Changes were made.
+Portions of this product are adapted from DeepInfer: https://github.com/deepseek-ai/DeepInfer. Changes were made.
 
 Licensed under the Apache License, Version 2.0 (upstream LICENSE); the upstream repository has no NOTICE file.
 
@@ -1764,7 +1764,7 @@ Licensed under the Apache License, Version 2.0 (upstream LICENSE); the upstream 
 
 ## FlashInfer
 
-Portions of this product are adapted from FlashInfer: https://github.com/flashinfer-ai/flashinfer (pinned at revision 866c80d0c70a90624b4c2056d12d1543d709609e, 61bc8b6dd7049a44d614b2a0cd4a036cb3c46ad0, 48903c68b22d8ef52d6294b5af8f2855928ec355). Changes were made.
+Portions of this product are adapted from FlashInfer: https://github.com/flashinfer-ai/flashinfer. Changes were made.
 
 Copyright (c) 2026 FlashInfer contributors, SPDX-License-Identifier: Apache-2.0.
 
@@ -1996,7 +1996,7 @@ Source: https://github.com/NVlabs/kda/tree/260927-kda-for-kda
 
 ## NVIDIA/CUDALibrarySamples
 
-Portions of this product are adapted from NVIDIA/CUDALibrarySamples: https://github.com/NVIDIA/CUDALibrarySamples (pinned at revision 9b347f161cce5cd2a51a0406b140f2a2d81df024). Changes were made.
+Portions of this product are adapted from NVIDIA/CUDALibrarySamples: https://github.com/NVIDIA/CUDALibrarySamples. Changes were made.
 
 SPDX-FileCopyrightText: Copyright (c) 2020 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -2207,7 +2207,7 @@ SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All 
 
 ## Strata
 
-Portions of this product are adapted from Strata: https://github.com/Niko1221/Strata (pinned at revision c62d5e3a15b40ea51c96aae9e8d36928965f53ab). Changes were made.
+Portions of this product are adapted from Strata: https://github.com/Niko1221/Strata. Changes were made.
 
 Copyright (c) 2026 Niko1221 and the Strata contributors.
 SPDX-License-Identifier: MIT
@@ -2238,7 +2238,7 @@ SOFTWARE.
 
 ## Project Maya
 
-Portions of this product are adapted from Project Maya: https://github.com/mw00/project-maya (pinned at revision 8d9a9b5d (release v1.1.17)). Changes were made.
+Portions of this product are adapted from Project Maya: https://github.com/mw00/project-maya. Changes were made.
 
 Copyright (c) 2026 Peasant Smith (mw00) and the Project Maya contributors, including needmorevram.
 
@@ -2288,7 +2288,7 @@ SOFTWARE.
 
 ## Mooncake
 
-Portions of this product are adapted from Mooncake: https://github.com/kvcache-ai/Mooncake (pinned at revision 2d41f1a62cf49cf464a8e2acee800708f34ee4af). Changes were made.
+Portions of this product are adapted from Mooncake: https://github.com/kvcache-ai/Mooncake. Changes were made.
 
 Copyright 2026 KVCache.AI. Licensed under the Apache License, Version 2.0.
 
@@ -2498,7 +2498,7 @@ Copyright 2026 KVCache.AI. Licensed under the Apache License, Version 2.0.
 
 ## Splash
 
-Techniques in this product's own source are adapted from Splash: https://github.com/incoai/splash, at revisions 2afc7337aacc044722fa95e4cb3da75c281a19a8 and 6c6002d42aabdddb9e31b96c9bba9041e2fba29f. Changes were made.
+Techniques in this product's own source are adapted from Splash: https://github.com/incoai/splash, at revisions  and . Changes were made.
 
 ```text
                                  Apache License
@@ -2706,7 +2706,7 @@ Techniques in this product's own source are adapted from Splash: https://github.
 
 ## opencode
 
-Portions of this product are adapted from opencode: https://github.com/anomalyco/opencode (pinned at revision 4eb29a64f0054672950acf789f2b09487ebfbb20). Changes were made.
+Portions of this product are adapted from opencode: https://github.com/anomalyco/opencode. Changes were made.
 
 ```text
 MIT License
@@ -2734,13 +2734,13 @@ SOFTWARE.
 
 ## Modular
 
-Portions of this product are adapted from Modular: https://github.com/modular/modular (pinned at revision 8d559749621418f39f31df7da998bcce884fa5b1, vendored tree rust_kv/kv-core near-verbatim under third_party/modular/rust_kv with per-file byte receipts in PINNED-SOURCE.json; fak-native Go port of the radix-prefix KV hit path). Changes were made.
+Portions of this product are adapted from Modular: https://github.com/modular/modular. Changes were made.
 
 SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception. Full license text ships at third_party/modular/rust_kv/LICENSE.
 
 ## OpenAI Codex
 
-Portions of this product are adapted from OpenAI Codex: https://github.com/openai/codex (pinned at revision 94d642d8b40e45e2e544770f0d1f28df9a717f06; the Unicode punctuation/odd-space comparison fallback from codex-rs/apply-patch/src/seek_sequence.rs, upstream one-based lines 78-108, ported as fak's Unicode-normalising seek-sequence fallback). Changes were made.
+Portions of this product are adapted from OpenAI Codex: https://github.com/openai/codex. Changes were made.
 
 Copyright 2025 OpenAI
 
@@ -2758,14 +2758,14 @@ limitations under the License.
 
 ## NVIDIA/go-dcgm
 
-Portions of this product are adapted from NVIDIA/go-dcgm: https://github.com/NVIDIA/go-dcgm (pinned at revision bc5d307bece3d373de882978c8503a1c8613e232; the DCGM_FI_DEV_* health and thermal field IDs and names from pkg/dcgm/const_fields.go, ported to Go telemetry). Changes were made.
+Portions of this product are adapted from NVIDIA/go-dcgm: https://github.com/NVIDIA/go-dcgm. Changes were made.
 
 Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 
 ## NVIDIA/go-nvml
 
-Portions of this product are adapted from NVIDIA/go-nvml: https://github.com/NVIDIA/go-nvml (pinned at revision f83235b8e2ea45c52a11a6ba5c7b8049813a1e6b; the NVML return-code vocabulary and device memory/utilization record shapes from pkg/nvml/const.go, pkg/nvml/return.go and pkg/nvml/types_gen.go, and the device getter method names from pkg/nvml/zz_generated.api.go, ported to Go without cgo). Changes were made.
+Portions of this product are adapted from NVIDIA/go-nvml: https://github.com/NVIDIA/go-nvml. Changes were made.
 
 Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
 Copyright 2024 NVIDIA CORPORATION
@@ -2773,7 +2773,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## NVIDIA/go-nvlib
 
-Portions of this product are adapted from NVIDIA/go-nvlib: https://github.com/NVIDIA/go-nvlib (pinned at revision d3f4ca82a973a3ea4f6dd30e7fca3fd5444972be; sysfs PCI discovery from pkg/nvpci/nvpci.go and MIG profile parsing from pkg/nvlib/device/mig_profile.go, ported to Go telemetry). Changes were made.
+Portions of this product are adapted from NVIDIA/go-nvlib: https://github.com/NVIDIA/go-nvlib. Changes were made.
 
 Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
@@ -2781,21 +2781,21 @@ SPDX-License-Identifier: Apache-2.0
 
 ## magnitude
 
-Portions of this product are adapted from magnitude: https://github.com/magnitudedev/magnitude (pinned at revision 8d7dbcc1baf4eb3ae7f1c3449dd463f3b375f576, 814f72abf533c96dbc21bc8b5c3b6ba38c156f64). Changes were made.
+Portions of this product are adapted from magnitude: https://github.com/magnitudedev/magnitude. Changes were made.
 
 Copyright 2026 Magnitude AI Inc.
 SPDX-License-Identifier: Apache-2.0
 
 ## kubernetes-sigs/agent-sandbox
 
-Portions of this product are adapted from kubernetes-sigs/agent-sandbox: https://github.com/kubernetes-sigs/agent-sandbox (pinned at revision 890de53a4dd18e35313173e6dc34d9559b1a9733). Changes were made.
+Portions of this product are adapted from kubernetes-sigs/agent-sandbox: https://github.com/kubernetes-sigs/agent-sandbox. Changes were made.
 
 Copyright 2025 The Kubernetes Authors.
 SPDX-License-Identifier: Apache-2.0
 
 ## DBOS Transact Golang
 
-Portions of this product are adapted from DBOS Transact Golang: https://github.com/dbos-inc/dbos-transact-golang (pinned at revision d516e2191d78673e2e5623a51164b0fec11e7cc9). Changes were made.
+Portions of this product are adapted from DBOS Transact Golang: https://github.com/dbos-inc/dbos-transact-golang. Changes were made.
 
 ```text
 MIT License
@@ -2823,48 +2823,48 @@ SOFTWARE.
 
 ## OpenSandbox
 
-Portions of this product are adapted from OpenSandbox: https://github.com/opensandbox-group/OpenSandbox (pinned at revision f72baeae3a7feb11a49cc42f48dba3e93a94600d). Changes were made.
+Portions of this product are adapted from OpenSandbox: https://github.com/opensandbox-group/OpenSandbox. Changes were made.
 
 SPDX-License-Identifier: Apache-2.0
 
 ## NVIDIA/TensorRT-LLM
 
-Portions of this product are adapted from NVIDIA/TensorRT-LLM: https://github.com/NVIDIA/TensorRT-LLM (pinned at revision 2f528b21d8b28ec56f4d4d8eace953dce8399138). Changes were made.
+Portions of this product are adapted from NVIDIA/TensorRT-LLM: https://github.com/NVIDIA/TensorRT-LLM. Changes were made.
 
 Copyright (c) 2011-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 
 ## AIPerf
 
-Portions of this product are adapted from AIPerf: https://github.com/ai-dynamo/aiperf (pinned at revision ab610add4e8876fca223197596c728e17365f381). Changes were made.
+Portions of this product are adapted from AIPerf: https://github.com/ai-dynamo/aiperf. Changes were made.
 
 Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 
 ## InferenceX
 
-Portions of this product are adapted from InferenceX: https://github.com/SemiAnalysisAI/InferenceX (pinned at revision ea9e4f6f2e3073d55fe6f1dcd33557b7fe67f608). Changes were made.
+Portions of this product are adapted from InferenceX: https://github.com/SemiAnalysisAI/InferenceX. Changes were made.
 
 Copyright 2025 SemiAnalysis LLC, Advanced Micro Devices, NVIDIA CORPORATION
 SPDX-License-Identifier: Apache-2.0
 
 ## DeepEval
 
-Portions of this product are adapted from DeepEval: https://github.com/confident-ai/deepeval (pinned at revision 696248fd7f8b4db1aa0d4f05cee22c3d2cc5857b). Changes were made.
+Portions of this product are adapted from DeepEval: https://github.com/confident-ai/deepeval. Changes were made.
 
 Copyright [2024] [Confident AI Inc.]
 SPDX-License-Identifier: Apache-2.0
 
 ## OpenTelemetry GenAI semantic conventions
 
-Portions of this product are adapted from the OpenTelemetry GenAI semantic conventions: https://github.com/open-telemetry/semantic-conventions-genai (pinned at revision e6658f14c9d9ea0760825f029cb82e7673f48fab). Changes were made.
+Portions of this product are adapted from the OpenTelemetry GenAI semantic conventions: https://github.com/open-telemetry/semantic-conventions-genai. Changes were made.
 
 Copyright The OpenTelemetry Authors
 SPDX-License-Identifier: Apache-2.0
 
 ## realugbun/llama.cpp
 
-Portions of this product are adapted from realugbun/llama.cpp: https://github.com/realugbun/llama.cpp (pinned at revision 2eb2530ec4). Changes were made.
+Portions of this product are adapted from realugbun/llama.cpp: https://github.com/realugbun/llama.cpp. Changes were made.
 
 ```text
 MIT License
@@ -2892,7 +2892,7 @@ SOFTWARE.
 
 ## DeepEP
 
-Portions of this product are adapted from DeepEP: https://github.com/deepseek-ai/DeepEP (pinned at revision f6aa38fe06cd4a0489e7730365d4e0114970a2f3). Changes were made.
+Portions of this product are adapted from DeepEP: https://github.com/deepseek-ai/DeepEP. Changes were made.
 
 ```text
 MIT License
@@ -2920,7 +2920,7 @@ SOFTWARE.
 
 ## AlexsJones/llmfit
 
-Portions of this product are adapted from AlexsJones/llmfit: https://github.com/AlexsJones/llmfit (pinned at revision 7f47fca32c27230ccfbb012994a0d0bff03bc283). Changes were made.
+Portions of this product are adapted from AlexsJones/llmfit: https://github.com/AlexsJones/llmfit. Changes were made.
 
 ```text
 MIT License
@@ -2948,7 +2948,7 @@ SOFTWARE.
 
 ## HazyResearch Megakernels
 
-Portions of this product are adapted from HazyResearch/Megakernels: https://github.com/HazyResearch/Megakernels (pinned at revision 7309cec801537b61fea3b50d7dfe454a6cde578e). Changes were made.
+Portions of this product are adapted from HazyResearch/Megakernels: https://github.com/HazyResearch/Megakernels. Changes were made.
 
 ```text
 MIT License
@@ -2976,7 +2976,7 @@ SOFTWARE.
 
 ## Hugging Face Candle
 
-Portions of this product are adapted from Hugging Face Candle: https://github.com/huggingface/candle (pinned at revision cfcbd7186d13271843ce7eb41d25659bd0835850). Changes were made.
+Portions of this product are adapted from Hugging Face Candle: https://github.com/huggingface/candle. Changes were made.
 
 SPDX-License-Identifier: Apache-2.0 OR MIT
 
@@ -3010,25 +3010,25 @@ DEALINGS IN THE SOFTWARE.
 
 ---
 
-Portions of this product are conceptually informed by NVIDIA/OpenShell (https://github.com/NVIDIA/OpenShell, pinned at revision af8182f7b6, Apache-2.0), NVIDIA/SkillSpector (https://github.com/NVIDIA/SkillSpector, pinned at revision e48d771a26, Apache-2.0), and NVIDIA/kvpress (https://github.com/NVIDIA/kvpress, pinned at revision 94951a5b90, Apache-2.0). Changes were made; no upstream code was copied.
+Portions of this product are conceptually informed by NVIDIA/OpenShell (https://github.com/NVIDIA/OpenShell, pinned, Apache-2.0), NVIDIA/SkillSpector (https://github.com/NVIDIA/SkillSpector, pinned, Apache-2.0), and NVIDIA/kvpress (https://github.com/NVIDIA/kvpress, pinned, Apache-2.0). Changes were made; no upstream code was copied.
 
 ---
 
-Portions of this product are adapted from sgl-project/sglang (https://github.com/sgl-project/sglang, pinned at revision 188cf7da66, Apache-2.0, `dsa_backend_mtp_precompute.py` and `kimi_k3.py`). Changes were made.
+Portions of this product are adapted from sgl-project/sglang (https://github.com/sgl-project/sglang, pinned, Apache-2.0, `dsa_backend_mtp_precompute.py` and `kimi_k3.py`). Changes were made.
 
 ## mtplx
 
-Clean-room design reference from youssofal/mtplx: https://github.com/youssofal/mtplx (pinned at revision 21be78b3f51820eecef020e5e4855c0715eaf9a5). Implemented independently without copying upstream code.
+Clean-room design reference from youssofal/mtplx: https://github.com/youssofal/mtplx. Implemented independently without copying upstream code.
 
 SPDX-License-Identifier: Apache-2.0
 
 ---
 
-Portions of this product are conceptually informed by NVIDIA/RULER (https://github.com/NVIDIA/RULER, pinned at revision db43f92ff6, Apache-2.0). Changes were made; no upstream code was copied.
+Portions of this product are conceptually informed by NVIDIA/RULER (https://github.com/NVIDIA/RULER, pinned, Apache-2.0). Changes were made; no upstream code was copied.
 
 ## casper-hansen/AutoAWQ_kernels
 
-Portions of this product are adapted from casper-hansen/AutoAWQ_kernels: https://github.com/casper-hansen/AutoAWQ_kernels (pinned at revision c7b0e88c327694c715b0a758d9ce8fd414a1fa21). Changes were made.
+Portions of this product are adapted from casper-hansen/AutoAWQ_kernels: https://github.com/casper-hansen/AutoAWQ_kernels. Changes were made.
 
 Copyright (c) 2023 Casper Hansen (AutoAWQ_kernels authors)
 SPDX-License-Identifier: MIT
@@ -3057,7 +3057,7 @@ SOFTWARE.
 
 ## IST-DASLab/marlin
 
-Portions of this product are adapted from IST-DASLab/marlin: https://github.com/IST-DASLab/marlin (pinned at revision 1f25790bdd49fba53106164a24666dade68d7c90). Changes were made.
+Portions of this product are adapted from IST-DASLab/marlin: https://github.com/IST-DASLab/marlin. Changes were made.
 
 Copyright 2024 IST-DASLab
 SPDX-License-Identifier: Apache-2.0
@@ -3065,7 +3065,7 @@ SPDX-License-Identifier: Apache-2.0
 ## tensorfish/squid5090
 
 - **Repository:** https://github.com/tensorfish/squid5090
-- **Revision:** e86da11a63c76550555e04d57b9f8aa3bf6b2a45
+- **Revision:** 
 - **License:** Apache License, Version 2.0
 - **Scope note:** Changes were made. Prefix checkpoint caching is adapted in Go; policy-excluded components from upstream are not used.
 
