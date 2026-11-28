@@ -323,3 +323,41 @@ func ResetPagedStoreForTest() {
 	defer defaultPagedStoreMu.Unlock()
 	defaultPagedStore = newDefaultPagedStore()
 }
+
+// PromptBoundaryKVLayout partitions a prompt's KV pages at the prompt boundary
+// into a compressed-past prefix/history span and a dense recent-window span,
+// applied once at the prompt boundary (SnapKV snapkv-3).
+type PromptBoundaryKVLayout struct {
+	CompressedPastIndices []int
+	DenseRecentIndices    []int
+	AppliedOnce           bool
+}
+
+// PlanPromptBoundaryCompressLayout splits totalPromptPages into compressed-past
+// pages [0 .. splitIdx) and dense recent-window pages [splitIdx .. totalPromptPages),
+// keeping at most recentWindowPages dense at the tail and never re-compressing
+// an already-applied layout.
+func PlanPromptBoundaryCompressLayout(totalPromptPages, recentWindowPages int, alreadyApplied bool) (PromptBoundaryKVLayout, error) {
+	if totalPromptPages < 0 || recentWindowPages <= 0 {
+		return PromptBoundaryKVLayout{}, errors.New("ctxmmu: invalid prompt boundary compress layout params")
+	}
+	if alreadyApplied {
+		return PromptBoundaryKVLayout{AppliedOnce: true}, nil
+	}
+	split := totalPromptPages - recentWindowPages
+	if split < 0 {
+		split = 0
+	}
+	layout := PromptBoundaryKVLayout{
+		CompressedPastIndices: make([]int, split),
+		DenseRecentIndices:    make([]int, totalPromptPages-split),
+		AppliedOnce:           true,
+	}
+	for i := 0; i < split; i++ {
+		layout.CompressedPastIndices[i] = i
+	}
+	for i := split; i < totalPromptPages; i++ {
+		layout.DenseRecentIndices[i-split] = i
+	}
+	return layout, nil
+}

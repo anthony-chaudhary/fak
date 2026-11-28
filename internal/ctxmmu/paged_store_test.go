@@ -389,3 +389,29 @@ func TestPagedStore_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestPromptBoundaryCompressLayout(t *testing.T) {
+	layout, err := ctxmmu.PlanPromptBoundaryCompressLayout(10, 4, false)
+	if err != nil {
+		t.Fatalf("PlanPromptBoundaryCompressLayout: %v", err)
+	}
+	if !layout.AppliedOnce || len(layout.CompressedPastIndices) != 6 || len(layout.DenseRecentIndices) != 4 {
+		t.Fatalf("unexpected layout: %+v", layout)
+	}
+	if layout.CompressedPastIndices[5] != 5 || layout.DenseRecentIndices[0] != 6 || layout.DenseRecentIndices[3] != 9 {
+		t.Fatalf("unexpected boundary split: %+v", layout)
+	}
+
+	// Idempotent: second call with alreadyApplied=true does not re-compress.
+	noop, err := ctxmmu.PlanPromptBoundaryCompressLayout(10, 4, true)
+	if err != nil || !noop.AppliedOnce || len(noop.CompressedPastIndices) != 0 || len(noop.DenseRecentIndices) != 0 {
+		t.Fatalf("expected no-op on alreadyApplied=true, got %+v, %v", noop, err)
+	}
+
+	// Short prompt <= recentWindowPages keeps all pages dense.
+	short, err := ctxmmu.PlanPromptBoundaryCompressLayout(3, 4, false)
+	if err != nil || len(short.CompressedPastIndices) != 0 || len(short.DenseRecentIndices) != 3 {
+		t.Fatalf("short prompt layout = %+v, %v", short, err)
+	}
+}
