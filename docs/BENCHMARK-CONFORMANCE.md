@@ -294,3 +294,13 @@ unless stated.
 In fak, `cmd/loadgen` applies the rule in `syntheticChatRequest` /
 `withIncludeUsage`; witness `TestIncludeUsageConformance`
 (`go test ./cmd/loadgen -run ^TestIncludeUsageConformance$ -count=1`).
+
+## Strict YAML: duplicate keys are rejected
+
+Benchmark configs are loaded strictly: a mapping key that appears twice in the same
+block is refused with its line and column, instead of the last value silently winning.
+Adapted from ai-dynamo/aiperf `src/aiperf/config/loader/core.py:36`
+(`ab610add4e8876fca223197596c728e17365f381`, Apache-2.0). The scanner is
+`strictYAMLCheck` in `cmd/fak/strict_yaml.go`; it covers the block-mapping subset these
+configs use and is not a general YAML parser. Witness:
+`go test ./cmd/fak -run TestStrictYAML -count=1`.
