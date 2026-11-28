@@ -103,7 +103,7 @@ func TestServeRouteReloadForcesSwapOnMtimeInvisibleEdit(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if w := armRouteHotReload(ctx, srv, path); w == nil {
+	if w := armRouteHotReload(ctx, srv, path, ""); w == nil {
 		t.Fatal("armRouteHotReload returned nil with a route manifest installed")
 	}
 
@@ -157,7 +157,7 @@ func TestServeRouteReloadRejectsMalformedManifestKeepingLastGood(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if w := armRouteHotReload(ctx, srv, path); w == nil {
+	if w := armRouteHotReload(ctx, srv, path, ""); w == nil {
 		t.Fatal("armRouteHotReload returned nil with a route manifest installed")
 	}
 	if err := os.WriteFile(path, []byte("this is not a valid manifest"), 0o600); err != nil {
@@ -188,7 +188,7 @@ func TestServeWithoutRouteManifestLeavesRouteReloadDisabled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if w := armRouteHotReload(ctx, srv, filepath.Join(t.TempDir(), "absent.json")); w != nil {
+	if w := armRouteHotReload(ctx, srv, filepath.Join(t.TempDir(), "absent.json"), ""); w != nil {
 		t.Fatal("armRouteHotReload armed a watcher with no route manifest installed")
 	}
 
@@ -197,5 +197,149 @@ func TestServeWithoutRouteManifestLeavesRouteReloadDisabled(t *testing.T) {
 
 	if status, _ := postRouteReload(t, ts.URL); status != http.StatusNotFound {
 		t.Fatalf("route reload with no manifest = %d, want 404", status)
+	}
+}
+
+func writeServeRouteAccounts(t *testing.T, path string, r modelroute.Roster) {
+	t.Helper()
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal roster: %v", err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatalf("write roster: %v", err)
+	}
+}
+
+func testRouteAccountsRoster(fallbackAccounts []string, residencyFloor string) modelroute.Roster {
+	fallbacks := make([]modelroute.FallbackTarget, 0, len(fallbackAccounts))
+	for _, acct := range fallbackAccounts {
+		fallbacks = append(fallbacks, modelroute.FallbackTarget{Account: acct})
+	}
+	return modelroute.Roster{
+		Version: modelroute.RosterVersion,
+		Accounts: []modelroute.Account{
+			{ID: "local-a", Kind: modelroute.KindLocal, BaseURL: "http://127.0.0.1:11434/v1"},
+			{ID: "local-b", Kind: modelroute.KindLocal, BaseURL: "http://127.0.0.1:11435/v1"},
+			{ID: "remote-c", Kind: modelroute.KindOpenAI, BaseURL: "https://api.example.com/v1", CredEnv: "OPENAI_API_KEY"},
+		},
+		Bindings: []modelroute.Binding{
+			{
+				Model:          "chat",
+				Account:        "local-a",
+				Fallbacks:      fallbacks,
+				ResidencyFloor: residencyFloor,
+			},
+		},
+	}
+}
+
+func TestServeRouteAccountsReloadSwapsFallbackAndResidencyFloor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	initial := testRouteAccountsRoster(nil, "any")
+	writeServeRouteAccounts(t, path, initial)
+
+	loaded, err := modelroute.LoadRoster(path)
+	if err != nil {
+		t.Fatalf("load roster: %v", err)
+	}
+	srv, err := gateway.New(gateway.Config{ExposeProfile: "headless", RouteAccounts: &loaded})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	defer srv.Close()
+
+	w := newRouteAccountsWatcher(path, srv, 0)
+
+	// Unchanged file is a no-op.
+	if ev := w.reload(); ev.Reloaded || ev.Err != nil {
+		t.Fatalf("unchanged reload = %+v, want no-op", ev)
+	}
+
+	// Edit fallback chain and residency_floor on disk, then trigger reload.
+	updated := testRouteAccountsRoster([]string{"local-b"}, "local_only")
+	writeServeRouteAccounts(t, path, updated)
+
+	ev := w.reload()
+	if ev.Err != nil || !ev.Reloaded || ev.Reloads != 1 || ev.Rejects != 0 {
+		t.Fatalf("valid reload = %+v, want Reloaded=true Reloads=1 Err=nil", ev)
+	}
+
+	chain, err := srv.RouteRoster().ResolveChain("chat")
+	if err != nil {
+		t.Fatalf("ResolveChain after reload: %v", err)
+	}
+	if len(chain) != 2 || chain[0].Account != "local-a" || chain[1].Account != "local-b" {
+		t.Fatalf("fallback chain after reload = %+v, want [local-a local-b]", chain)
+	}
+	if chain[0].ResidencyFloor != "local_only" {
+		t.Fatalf("residency_floor after reload = %q, want %q", chain[0].ResidencyFloor, "local_only")
+	}
+}
+
+func TestServeRouteAccountsReloadRejectsMalformedKeepingLastGood(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	initial := testRouteAccountsRoster([]string{"local-b"}, "any")
+	writeServeRouteAccounts(t, path, initial)
+
+	loaded, err := modelroute.LoadRoster(path)
+	if err != nil {
+		t.Fatalf("load roster: %v", err)
+	}
+	srv, err := gateway.New(gateway.Config{ExposeProfile: "headless", RouteAccounts: &loaded})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	defer srv.Close()
+
+	w := newRouteAccountsWatcher(path, srv, 0)
+
+	// Write malformed JSON.
+	if err := os.WriteFile(path, []byte("{not valid json"), 0o600); err != nil {
+		t.Fatalf("write malformed json: %v", err)
+	}
+	ev := w.reload()
+	if ev.Err == nil || ev.Reloaded || ev.Rejects != 1 || ev.Reloads != 0 {
+		t.Fatalf("malformed reload = %+v, want Err!=nil Reloaded=false Rejects=1", ev)
+	}
+
+	// Write semantically invalid roster (unknown residency_floor).
+	badFloor := testRouteAccountsRoster([]string{"local-b"}, "invalid_floor")
+	writeServeRouteAccounts(t, path, badFloor)
+	ev = w.reload()
+	if ev.Err == nil || ev.Reloaded || ev.Rejects != 2 {
+		t.Fatalf("invalid residency_floor reload = %+v, want Err!=nil Reloaded=false Rejects=2", ev)
+	}
+
+	// Write semantically invalid roster (local_only with remote fallback).
+	badRemote := testRouteAccountsRoster([]string{"remote-c"}, "local_only")
+	writeServeRouteAccounts(t, path, badRemote)
+	ev = w.reload()
+	if ev.Err == nil || ev.Reloaded || ev.Rejects != 3 {
+		t.Fatalf("local_only with remote fallback reload = %+v, want Err!=nil Reloaded=false Rejects=3", ev)
+	}
+
+	// Last-good roster must remain intact.
+	chain, err := srv.RouteRoster().ResolveChain("chat")
+	if err != nil {
+		t.Fatalf("ResolveChain after rejected reloads: %v", err)
+	}
+	if len(chain) != 2 || chain[0].Account != "local-a" || chain[1].Account != "local-b" || chain[0].ResidencyFloor != "any" {
+		t.Fatalf("last-good roster mutated after rejected reload: %+v", chain)
+	}
+
+	// Subsequent valid edit must recover cleanly.
+	recovered := testRouteAccountsRoster([]string{"local-b"}, "local_only")
+	writeServeRouteAccounts(t, path, recovered)
+	ev = w.reload()
+	if ev.Err != nil || !ev.Reloaded || ev.Reloads != 1 || ev.Rejects != 3 {
+		t.Fatalf("recovery reload = %+v, want Reloaded=true Reloads=1 Rejects=3", ev)
+	}
+	chain, err = srv.RouteRoster().ResolveChain("chat")
+	if err != nil {
+		t.Fatalf("ResolveChain after recovery: %v", err)
+	}
+	if len(chain) != 2 || chain[1].Account != "local-b" || chain[0].ResidencyFloor != "local_only" {
+		t.Fatalf("recovered roster = %+v, want [local-a local-b] with local_only", chain)
 	}
 }

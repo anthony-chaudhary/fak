@@ -1180,7 +1180,7 @@ func (rt *serveRuntime) run(sf *serveFlags) int {
 	// watcher behind POST /v1/fak/route/reload (#4003), so an edit the poll loop's
 	// size+mtime gate cannot see still has a production trigger — SIGHUP cannot be
 	// that trigger here, it terminates (see the drain above).
-	if watcher := armRouteHotReload(ctx, rt.srv, *sf.routeManifest); watcher != nil {
+	if watcher := armRouteHotReload(ctx, rt.srv, *sf.routeManifest, *sf.routeAccounts); watcher != nil {
 		// If --dojo is enabled, log the start of a live dojo episode.
 		if *sf.dojoMode {
 			if err := logDojoEpisodeStart("serve"); err != nil {

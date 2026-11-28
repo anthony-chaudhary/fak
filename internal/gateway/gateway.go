@@ -453,6 +453,9 @@ func New(cfg Config) (*Server, error) {
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}
 	s.installRichDashboardManager(cfg.RichDashboards)
+	if s.roster != nil {
+		s.rosterLive.Store(s.roster)
+	}
 
 	// Recover the fleet handle newProxyPlanner stashed on the replica router (issue
 	// fak-private#2417): install it as the Server's live membership so /metrics publishes
@@ -882,6 +885,31 @@ func (s *Server) SetRouteWatcher(w *modelroute.Watcher) { s.routeWatcher.Store(w
 // hot-reload is not configured for this deployment (the 404 predicate for the route
 // handler).
 func (s *Server) currentRouteWatcher() *modelroute.Watcher { return s.routeWatcher.Load() }
+
+// currentRoster returns the active model-account roster, preferring the atomic
+// rosterLive holder when populated and falling back to s.roster.
+func (s *Server) currentRoster() *modelroute.Roster {
+	if s == nil {
+		return nil
+	}
+	if r := s.rosterLive.Load(); r != nil {
+		return r
+	}
+	return s.roster
+}
+
+// RouteRoster returns the currently active model-account roster, or nil when no
+// --route-accounts roster is installed.
+func (s *Server) RouteRoster() *modelroute.Roster { return s.currentRoster() }
+
+// SwapRouteRoster atomically replaces the live model-account roster without
+// restarting the server. A nil roster is ignored (fail-closed).
+func (s *Server) SwapRouteRoster(r *modelroute.Roster) {
+	if s == nil || r == nil {
+		return
+	}
+	s.rosterLive.Store(r)
+}
 
 // MarkReady stamps the instant the gateway became able to serve requests, closing
 // the boot timeline (fak_gateway_time_to_ready_seconds / fak_gateway_ready_time_

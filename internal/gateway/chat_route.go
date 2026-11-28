@@ -44,7 +44,7 @@ func (s *Server) prepareChatEPFanout(w http.ResponseWriter, r *http.Request, rou
 		route == epRouteMessages || route == epRouteGeminiGenerateContent
 	// Other routes retain their prior release timing. Responses also needs its
 	// existing continuation restriction checked first.
-	if s.roster == nil && route != epRouteResponses && !deferForStopIngress {
+	if s.currentRoster() == nil && route != epRouteResponses && !deferForStopIngress {
 		wait, allowed := s.startEPFanoutFollowers(w, r, route)
 		return noop, wait, allowed
 	}
@@ -81,7 +81,7 @@ func (s *Server) prepareChatEPFanout(w http.ResponseWriter, r *http.Request, rou
 		wait, allowed = s.startEPFanoutFollowers(w, follower, route)
 		return allowed
 	}
-	if s.roster == nil && !deferForStopIngress {
+	if s.currentRoster() == nil && !deferForStopIngress {
 		if !release(r) {
 			return nil, nil, false
 		}
@@ -98,7 +98,7 @@ func chatRouteFromContext(ctx context.Context) *chatRouteBinding {
 // prepareChatRoute runs after decoding the requested model and authenticating
 // the caller, before either the buffered or streaming path can contact a model.
 func (s *Server) prepareChatRoute(w http.ResponseWriter, r *http.Request, model string) (*http.Request, bool) {
-	if s.roster == nil {
+	if s.currentRoster() == nil {
 		return r, true
 	}
 	start := time.Now()
@@ -188,11 +188,12 @@ func (s *Server) chatServingLocality(ctx context.Context, model string) servingL
 // resolver's default-account behavior must not reroute an unrostered chat model.
 // An explicit binding that fails admission or configuration never falls through.
 func (s *Server) bindChatRoute(ctx context.Context, requestedModel string) (*chatRouteBinding, error) {
-	if s == nil || s.roster == nil || requestedModel == "" {
+	roster := s.currentRoster()
+	if s == nil || roster == nil || requestedModel == "" {
 		return nil, nil
 	}
 	bound := false
-	for _, binding := range s.roster.Bindings {
+	for _, binding := range roster.Bindings {
 		if binding.Model == requestedModel {
 			bound = true
 			break
@@ -202,7 +203,7 @@ func (s *Server) bindChatRoute(ctx context.Context, requestedModel string) (*cha
 		return nil, nil
 	}
 	principal := principalFromContext(ctx)
-	chain, err := s.roster.ResolveChain(requestedModel)
+	chain, err := roster.ResolveChain(requestedModel)
 	if err != nil {
 		return nil, fmt.Errorf("gateway: chat route: %w", err)
 	}
