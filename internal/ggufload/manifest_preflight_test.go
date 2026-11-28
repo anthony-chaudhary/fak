@@ -324,3 +324,15 @@ func TestQwen35RecurrentLayersRefusesWrongLengthAndContradiction(t *testing.T) {
 		t.Fatalf("contradicting array: err %v, want refusal naming attention.recurrent_layers", err)
 	}
 }
+
+// fak-test:runtime fast est=10ms
+func TestBuildManifestPreflightConsumesArchVocabSize(t *testing.T) {
+	f := syntheticPreflightFile()
+	delete(f.Metadata, "llama.unconsumed_axis")
+	f.Metadata["llama.vocab_size"] = Value{Type: TypeUint32, Value: uint32(4)}
+
+	p := BuildManifestPreflight(ManifestPreflightInput{File: f})
+	if p.Keys.Unread != 0 || p.Counts[string(newmodel.RefusalKeyUnread)] != 0 {
+		t.Fatalf("preflight reported unread keys for llama.vocab_size: %+v (%v)", p.Keys, preflightTokens(p))
+	}
+}

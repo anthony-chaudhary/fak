@@ -174,3 +174,14 @@ func TestUpCrossPlatformMockServer(t *testing.T) {
 		t.Fatalf("mock chat response should be platform-neutral, got: %s", raw)
 	}
 }
+
+func TestUpCrossPlatformNonTierAliasOverride(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	runTurnkeyUp(strings.NewReader(""), &stdout, &stderr, []string{"--dry-run", "--model", "smollm2"})
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected dry-run stderr for --model smollm2: %s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "smollm2") {
+		t.Fatalf("dry-run output missing smollm2:\n%s", stdout.String())
+	}
+}

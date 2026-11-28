@@ -213,7 +213,10 @@ func (f *File) Config() (model.Config, error) {
 		ropeDim = int(v)
 	}
 	vocab := 0
-	if toks, ok := f.StringArray("tokenizer.ggml.tokens"); ok {
+	if v, ok := f.Uint64(p + "vocab_size"); ok && v > 0 {
+		vocab = int(v)
+	}
+	if toks, ok := f.StringArray("tokenizer.ggml.tokens"); ok && len(toks) > 0 {
 		vocab = len(toks)
 	}
 	eos := -1

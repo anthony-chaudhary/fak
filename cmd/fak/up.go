@@ -259,15 +259,19 @@ func runAllInOneUp(argv []string) {
 // plan's ENTIRE geometry is replaced with that tier's StandardTiers entry and
 // the KV bytes-per-token, context bucket, and headroom are recomputed for the
 // new geometry so no stale auto-selected-tier accounting survives. When the
-// override is not a known tier (a raw .gguf path, an hf:// URI, or an arbitrary
-// alias), only the ModelID/Name labels change, preserving the historical
-// passthrough behavior. An explicit --context override is applied by the caller
-// afterwards, so it still wins over the recomputed bucket.
+// override is not a known tier (e.g. "smollm2", a raw .gguf path, or an hf://
+// URI), the ModelID/Name labels change and the discarded auto-selected tier's
+// QuantTier and WeightBytes are cleared so validateTurnkeyArtifact does not
+// reject a valid operator-chosen alias against the old tier's budget. An
+// explicit --context override is applied by the caller afterwards, so it still
+// wins over the recomputed bucket.
 func applyTurnkeyModelOverride(plan *macfit.TurnkeyProfile, memoryBytes uint64, modelOverride string) error {
 	tier, ok := macfit.LookupModelTier(modelOverride)
 	if !ok {
 		plan.Tier.ModelID = modelOverride
 		plan.Tier.Name = modelOverride
+		plan.Tier.QuantTier = ""
+		plan.Tier.WeightBytes = 0
 		return nil
 	}
 
