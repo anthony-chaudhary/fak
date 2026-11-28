@@ -87,6 +87,7 @@ func (s *NativeScheduler) AdmitImported(ctx context.Context, c *abi.ToolCall, se
 	// serve role's device backend binds symmetrically across P/D roles.
 	s.mu.Lock()
 	decorator := s.sessionDecorator
+	overlap := s.overlapScheduling
 	s.mu.Unlock()
 	if decorator != nil {
 		decorator(seq.Session)
@@ -104,7 +105,7 @@ func (s *NativeScheduler) AdmitImported(ctx context.Context, c *abi.ToolCall, se
 		tok:       seq.Tokenizer,
 		q4k:       seq.Q4K,
 		genBudget: seq.GenBudget,
-		tokens:    newNativeRequestOutbox(),
+		tokens:    newNativeRequestOutboxForLane(overlap, seq.GenBudget),
 		done:      make(chan struct{}),
 	}
 

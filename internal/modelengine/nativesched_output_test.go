@@ -17,6 +17,7 @@ import (
 
 // fak-test:runtime medium est=3s lane=default
 func TestNativeOutputIsolation(t *testing.T) {
+	clearServeKnobEnv(t)
 	for _, imported := range []bool{false, true} {
 		name := "ordinary"
 		if imported {

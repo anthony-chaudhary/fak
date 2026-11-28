@@ -23,9 +23,16 @@ import "github.com/anthony-chaudhary/fak/internal/abi"
 // that abandons a selected stream may allow the remaining bounded model work
 // to complete instead of applying the historical delivery backpressure.
 func newNativeRequestOutbox() chan abi.EngineToken {
+	return newNativeRequestOutboxForLane(true, 0)
+}
+
+func newNativeRequestOutboxForLane(overlap bool, budget int) chan abi.EngineToken {
 	capacity := 1
-	if nativeOutputIsolationEnabled {
+	if overlap && nativeOutputIsolationEnabled {
 		capacity = genTokens
+		if budget > capacity {
+			capacity = budget
+		}
 	}
 	return make(chan abi.EngineToken, capacity)
 }

@@ -14,6 +14,7 @@ func clearServeKnobEnv(t *testing.T) {
 		"FAK_NATIVE_KV_MAX_BLOCKS", "FAK_NATIVE_KV_BLOCK_TOKENS", "FAK_NATIVE_KV_PREEMPT_MODE",
 		"FAK_NATIVE_KV_VICTIM_RULE", envNativeMaxTokensPerStep, envNativeDeterministic,
 		envNativeKVAutosize, envNativeKVElasticBlocks, envNativeLongPrefillTokenThreshold,
+		envNativeOverlapScheduling,
 	} {
 		t.Setenv(name, "")
 	}

@@ -389,6 +389,7 @@ type NativeScheduler struct {
 	// drain is waiting.
 	executor          sync.Mutex
 	drainDonation     bool
+	overlapScheduling bool
 	blockedDrains     int
 	donatedIterations uint64
 	iteration         uint64
@@ -889,16 +890,17 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 		prepare = defaultSchedPrepare
 	}
 	s := &NativeScheduler{
-		m:             m,
-		prepare:       prepare,
-		now:           time.Now,
-		wake:          make(chan struct{}, 1),
-		stopped:       make(chan struct{}),
-		drainDonation: true,
-		coupler:       NewDefaultWorkerCoupler(),
-		fwd:           NewForwardSlot(DefaultForwardImpl()),
-		closeSession:  func(sess *model.Session) { sess.Close() },
-		recorder:      enginestep.Default,
+		m:                 m,
+		prepare:           prepare,
+		now:               time.Now,
+		wake:              make(chan struct{}, 1),
+		stopped:           make(chan struct{}),
+		drainDonation:     true,
+		overlapScheduling: false,
+		coupler:           NewDefaultWorkerCoupler(),
+		fwd:               NewForwardSlot(DefaultForwardImpl()),
+		closeSession:      func(sess *model.Session) { sess.Close() },
+		recorder:          enginestep.Default,
 	}
 	if m != nil && (m.Q4KCount() > 0 || m.Q2Count() > 0) {
 		s.qwenPrefillCap = &residentQ4KPrefillCapability{model: m}
@@ -921,6 +923,29 @@ func (s *NativeScheduler) SetDrainDonation(enabled bool) {
 	s.drainDonation = enabled
 	s.mu.Unlock()
 	s.signal()
+}
+
+// SetOverlapScheduling controls deferred-token outbox isolation/buffering for
+// newly admitted lanes (sizing each lane's token outbox to its decode budget
+// rather than capacity 1 so delayed consumers do not stall concurrent batching
+// across single-node C=1..64 lanes). This is distinct from SetAsyncScheduling,
+// which enables the opt-in 1-step-lag double-buffered forward/publication
+// pipeline with -1 output placeholders. NewNativeScheduler starts false
+// (historical capacity-1 outbox), while Engine/applyNativeServeKnobs enables it
+// by default unless FAK_NATIVE_OVERLAP_SCHEDULING=0.
+func (s *NativeScheduler) SetOverlapScheduling(enabled bool) {
+	s.mu.Lock()
+	s.overlapScheduling = enabled
+	s.mu.Unlock()
+	s.signal()
+}
+
+// OverlapScheduling reports whether deferred-token outbox isolation/buffering
+// is enabled for newly admitted lanes.
+func (s *NativeScheduler) OverlapScheduling() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.overlapScheduling
 }
 
 // DrainDonationReceipt is the execution witness for await-caller donation. Each
@@ -1026,6 +1051,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		s.mu.Unlock()
 		return nil, errSchedClosed
 	}
+	overlap := s.overlapScheduling
 	s.mu.Unlock()
 
 	prompt := prep.prompt
@@ -1053,7 +1079,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		kvReuseHits: kvReuseHits,
 		kvPinned:    kvPinned,
 		kvPinUntil:  kvPinUntil,
-		tokens:      newNativeRequestOutbox(),
+		tokens:      newNativeRequestOutboxForLane(overlap, 0),
 		done:        make(chan struct{}),
 		hint:        hint,
 		priority:    priority,

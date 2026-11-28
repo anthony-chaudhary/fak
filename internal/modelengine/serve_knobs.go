@@ -14,11 +14,13 @@ import (
 // Serve knobs for landed scheduler ports that had no production caller
 // (fak-private#3630). Every knob is read once when the Engine builds its native
 // scheduler (the `fak serve` in-kernel path) and is OFF unless its env var holds an
-// explicit value, so an unset environment keeps today's scheduler byte-for-byte.
-// The one exception is the per-step token budget: when its env var is unset it is
-// default-armed from the model's declared context window (nativeTokenBudgetDefault);
-// an explicit value still wins verbatim, and an explicit 0 keeps the unlimited
-// behavior.
+// explicit value, with two defaults when unset:
+//   - envNativeMaxTokensPerStep: default-armed from the model's declared context
+//     window (nativeTokenBudgetDefault); an explicit value still wins verbatim,
+//     and an explicit 0 keeps the unlimited behavior.
+//   - envNativeOverlapScheduling: defaults to true (deferred-token outbox
+//     isolation/buffering via SetOverlapScheduling(true)) unless explicitly set to
+//     a falsey value such as 0/false/off.
 const (
 	envNativeMaxTokensPerStep = "FAK_NATIVE_MAX_TOKENS_PER_STEP"
 	envNativeDeterministic    = "FAK_NATIVE_DETERMINISTIC"
@@ -29,14 +31,21 @@ const (
 	// Shared with the Inkling-2 cohort: both read it as the per-step prompt-token
 	// cap on a long prefill while other requests compete for the step.
 	envNativeLongPrefillTokenThreshold = "FAK_NATIVE_LONG_PREFILL_TOKEN_THRESHOLD"
+	envNativeOverlapScheduling         = "FAK_NATIVE_OVERLAP_SCHEDULING"
 )
 
 func nativeEnvOn(name string) bool {
+	return nativeEnvBool(name, false)
+}
+
+func nativeEnvBool(name string, defaultVal bool) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
 	case "1", "on", "true", "yes", "enable", "enabled":
 		return true
-	default:
+	case "0", "off", "false", "no", "disable", "disabled":
 		return false
+	default:
+		return defaultVal
 	}
 }
 
@@ -107,10 +116,10 @@ func nativeTokenBudgetDefault(contextTokens int) int {
 }
 
 // applyNativeServeKnobs arms the env-selected scheduler ports on a freshly built
-// scheduler. Each setter runs only for an explicit opt-in value, except the
-// per-step token budget, which is default-armed from the model's declared context
-// window when its env var is unset (explicit values win verbatim, and an explicit
-// 0 keeps the unlimited behavior).
+// scheduler. Each setter runs only for an explicit opt-in value, except
+// envNativeMaxTokensPerStep (default-armed from the model's declared context
+// window when unset; explicit values win verbatim and 0 keeps unlimited behavior)
+// and envNativeOverlapScheduling (default true unless explicitly falsey, e.g. 0).
 func applyNativeServeKnobs(sched *NativeScheduler, blockTokens int) {
 	if sched == nil {
 		return
@@ -147,6 +156,7 @@ func applyNativeServeKnobs(sched *NativeScheduler, blockTokens int) {
 	if n := nativeEnvPositiveInt(envNativeSpecAdmissionPad); n > 0 {
 		sched.SetSpecAdmissionPad(n)
 	}
+	sched.SetOverlapScheduling(nativeEnvBool(envNativeOverlapScheduling, true))
 	applyNativeLongPrefillTokenThreshold(sched)
 }
 
