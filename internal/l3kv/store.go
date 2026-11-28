@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // Store is the durable residency tier a demoted KV span lands in. It is keyed by
@@ -228,6 +230,74 @@ func (s *DiskStore) Delete(ctx context.Context, keys []string) error {
 
 func (s *diskStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	return s.get(ctx, key, 0)
+}
+
+// ProbeDirectRead tests whether O_DIRECT / unbuffered reads succeed in s.dir,
+// returning direct=false when the filesystem or OS refuses direct I/O so callers
+// fall back to buffered reads cleanly.
+func (s *DiskStore) ProbeDirectRead() (direct bool, err error) {
+	if s == nil {
+		return false, fmt.Errorf("l3kv: probe nil disk store")
+	}
+	tmp, err := os.CreateTemp(s.dir, ".l3kv-direct-probe-*")
+	if err != nil {
+		return false, err
+	}
+	probePath := tmp.Name()
+	defer os.Remove(probePath)
+	buf := compute.NewAlignedBlockBuffer(compute.DirectIOAlignment)
+	_, werr := tmp.Write(buf.Bytes())
+	cerr := tmp.Close()
+	if werr != nil {
+		return false, werr
+	}
+	if cerr != nil {
+		return false, cerr
+	}
+	f, ok, oerr := compute.OpenDirectOrBuffered(probePath)
+	if oerr != nil {
+		return false, oerr
+	}
+	_ = f.Close()
+	return ok, nil
+}
+
+// readRecordWithBounce opens path with openFn (O_DIRECT probe + buffered fallback)
+// and reads using a DirectIOAlignment-aligned bounce buffer.
+func readRecordWithBounce(path string, openFn func(string) (*os.File, bool, error)) ([]byte, bool, error) {
+	if openFn == nil {
+		openFn = compute.OpenDirectOrBuffered
+	}
+	f, direct, err := openFn(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+
+	bounce := compute.NewAlignedBlockBuffer(compute.DirectIOAlignment)
+	var out bytes.Buffer
+	var off int64
+	for {
+		n, rerr := f.ReadAt(bounce.Bytes(), off)
+		if n > 0 {
+			out.Write(bounce.Bytes()[:n])
+			off += int64(n)
+		}
+		if rerr == io.EOF {
+			return out.Bytes(), direct, nil
+		}
+		if rerr != nil {
+			if direct {
+				// Direct read failed (e.g. unaligned size/EOF); fall back to buffered read.
+				b, berr := os.ReadFile(path)
+				return b, false, berr
+			}
+			return nil, false, rerr
+		}
+		if n == 0 {
+			return out.Bytes(), direct, nil
+		}
+	}
 }
 
 // GetBounded is Get with a hard payload allocation ceiling. It rejects an

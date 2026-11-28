@@ -276,6 +276,21 @@ func (d *DirectIOReader) Stream(chunkSize int, onChunk func(chunk []byte) error)
 	return StreamWeightsWithEviction(d.r, d.size, chunkSize, onChunk, d.evict)
 }
 
+// OpenDirectOrBuffered attempts to open name with O_DIRECT / unbuffered I/O
+// and falls back to standard buffered os.Open when direct I/O is unsupported or
+// refused. Returns direct=true only when the direct open succeeded.
+func OpenDirectOrBuffered(name string) (f *os.File, direct bool, err error) {
+	f, derr := openDirectIOFile(name)
+	if derr == nil {
+		return f, true, nil
+	}
+	if os.IsNotExist(derr) {
+		return nil, false, derr
+	}
+	f, err = os.Open(name)
+	return f, false, err
+}
+
 // StreamWeightsWithEviction streams weights from r of given size in chunkSize increments,
 // invoking onChunk for each block. When evict is true and r has an underlying file descriptor,
 // it aggressively drops file page cache entries immediately after each chunk is processed,
