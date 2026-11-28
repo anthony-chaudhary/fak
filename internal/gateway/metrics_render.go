@@ -353,6 +353,7 @@ func (s *Server) renderMetrics() string {
 	s.writeSpendGovernorMetrics(&b)     // #3273: control-plane spend-cap breaches by scope + action
 	m.harnessCoherence.writeHarnessCoherenceMetrics(&b)
 	m.writeRoutingMetrics(&b)            // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)
+	s.writeRouterMetrics(&b)             // local-router circuit cooldown, failover, and attempt counters
 	outputNegframeAudit.writeMetrics(&b) // #3567: negative-framing spans in model OUTPUT prose (sampled shadow, observe-only)
 	s.resumeProj.writeMetrics(&b)        // #941: resume projected-vs-observed residual (self-contained family)
 	s.observers.writeMetrics(&b)         // #2434: async result-observer lag + auto-disable (self-contained family)
@@ -384,6 +385,25 @@ func (s *Server) renderMetrics() string {
 	s.writeModelLoadMetrics(&b)
 	s.writeTelemetryAndAuditMetrics(&b)
 	return b.String()
+}
+
+func (s *Server) writeRouterMetrics(b *strings.Builder) {
+	snap := s.circuitTracker().snapshot()
+	writeHelpType(b, "fak_router_account_cooldown", "Whether a local-router upstream account is currently in circuit cooldown (1=cooldown, 0=healthy).", "gauge")
+	accounts := make([]string, 0, len(snap.accounts))
+	for id := range snap.accounts {
+		accounts = append(accounts, id)
+	}
+	sort.Strings(accounts)
+	for _, id := range accounts {
+		cooldown := 0
+		if snap.accounts[id].cooldownRemaining > 0 {
+			cooldown = 1
+		}
+		fmt.Fprintf(b, "fak_router_account_cooldown{account=\"%s\"} %d\n", promQuote(id), cooldown)
+	}
+	writeCounter(b, "fak_router_failover_total", "Total routed chat requests that failed over from a primary account to a fallback.", snap.totalFailovers)
+	writeCounter(b, "fak_router_attempts_total", "Total routed chat upstream attempts across all accounts.", snap.totalAttempts)
 }
 
 func (m *gatewayMetrics) writeNativeExecutionMetrics(b *strings.Builder) {

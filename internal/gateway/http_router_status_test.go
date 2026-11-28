@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,5 +140,116 @@ func TestRouterStatusAuthGateMatchesModels(t *testing.T) {
 	handler.ServeHTTP(authed, req)
 	if authed.Code != http.StatusOK {
 		t.Fatalf("authenticated status=%d, want 200; body=%s", authed.Code, authed.Body.String())
+	}
+}
+
+// fak-test:runtime fast est=20ms
+func TestMetricsRouterEmptySnapshot(t *testing.T) {
+	srv := newTestFailoverGateway(t, nil, nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /metrics = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"# TYPE fak_router_account_cooldown gauge",
+		"# TYPE fak_router_failover_total counter",
+		"fak_router_failover_total 0",
+		"# TYPE fak_router_attempts_total counter",
+		"fak_router_attempts_total 0",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics missing %q", want)
+		}
+	}
+}
+
+// fak-test:runtime fast est=50ms
+func TestMetricsRouterAfterFailover(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	tracker := newRouteCircuitTracker(30*time.Second, func() time.Time { return now })
+
+	primary := newOpenAIUpstreamMock(t, http.StatusServiceUnavailable, "", nil, nil)
+	fallback := newOpenAIUpstreamMock(t, http.StatusOK, "ok-from-fb", nil, nil)
+	t.Setenv("TEST_METRICS_FB_KEY", "sk-metrics")
+
+	roster := &modelroute.Roster{
+		Version: modelroute.RosterVersion,
+		Accounts: []modelroute.Account{
+			{ID: "local-gpu", Kind: modelroute.KindLocal, BaseURL: primary.URL + "/v1"},
+			{ID: "cloud-fb", Kind: modelroute.KindOpenAI, BaseURL: fallback.URL + "/v1", CredEnv: "TEST_METRICS_FB_KEY"},
+		},
+		Bindings: []modelroute.Binding{
+			{
+				Model:         "default",
+				Account:       "local-gpu",
+				UpstreamModel: "qwen-local",
+				Fallbacks:     []modelroute.FallbackTarget{{Account: "cloud-fb", UpstreamModel: "gpt-4o-mini"}},
+			},
+		},
+	}
+
+	srv := newTestFailoverGateway(t, roster, tracker)
+	handler := srv.Handler()
+
+	chatRec := postChatCompletion(t, handler, "default")
+	if chatRec.Code != http.StatusOK {
+		t.Fatalf("chat status=%d body=%s", chatRec.Code, chatRec.Body.String())
+	}
+
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("GET /metrics = %d, want 200", rec1.Code)
+	}
+	body1 := rec1.Body.String()
+	for _, want := range []string{
+		`fak_router_account_cooldown{account="cloud-fb"} 0`,
+		`fak_router_account_cooldown{account="local-gpu"} 1`,
+		"fak_router_failover_total 1",
+		"fak_router_attempts_total 2",
+	} {
+		if !strings.Contains(body1, want) {
+			t.Errorf("/metrics during cooldown missing %q", want)
+		}
+	}
+
+	// Advance clock past the 30s cooldown; cooldown gauge returns to 0.
+	now = now.Add(31 * time.Second)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("GET /metrics = %d, want 200", rec2.Code)
+	}
+	if !strings.Contains(rec2.Body.String(), `fak_router_account_cooldown{account="local-gpu"} 0`) {
+		t.Errorf("/metrics after cooldown expiry did not clear local-gpu cooldown")
+	}
+}
+
+// fak-test:runtime fast est=20ms
+func TestRouterStatusDashboardPanelRendered(t *testing.T) {
+	srv := newTestFailoverGateway(t, nil, nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:4567"
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="router-panel"`,
+		`Local router`,
+		`id="router-state"`,
+		`id="router-routes"`,
+		`id="router-attempts"`,
+		`id="router-failovers"`,
+		`id="router-list"`,
+		`fetch("/v1/router/status"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard HTML missing %q", want)
+		}
 	}
 }
