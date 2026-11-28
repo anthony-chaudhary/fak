@@ -71,6 +71,7 @@ HARD_JUNK = [
     re.compile(r"(^|/)Thumbs\.db$"),
     re.compile(r"\.(swp|swo)$"),
     re.compile(r"~$"),
+    re.compile(r"(^|/)\.(gopls|clangd|ccls(-cache)?|lsp|pylsp|rust-analyzer)(/|$)"),
 ]
 # Junk unless under a data dir or explicitly kept.
 SOFT_JUNK = [

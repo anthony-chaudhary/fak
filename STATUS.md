@@ -41,7 +41,7 @@ Fresh verification pass on 2026-06-18:
 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ci.ps1` | **PASS** — `go build`, `go vet`, `go test ./...`, and claims lint all green; claims lint found 54 tagged claim lines, 0 violations. |
 | `python -m pytest tools` | **PASS** — 289 Python/tooling tests passed. |
 | `go run ./cmd/fak bench --suite tau2-smoke --out report.json` | **PASS as a subsystem sentinel** — `gate_primary=pass`; in-process p50 2,427 ns; spawned-hook p50 6,913,458 ns (n=100); p50 speedup about 2,849x; vDSO hit-rate 0.500. It proves the adjudicator path is not accidentally paying a per-call process boundary; it does not prove production readiness. |
-| `python tools\fak_phase0_gate.py fak\experiments\fleet-nodes\phase0-local-uncapped --json` | **FAIL, correctly open** — no clean-node provenance and peak batched-decode speedup is 40.975x, below the 45x Phase 0 bar. |
+| Phase-0 clean-node gate check | **FAIL, correctly open** — no clean-node provenance and peak batched-decode speedup is 40.975x, below the 45x Phase 0 bar. |
 | `go run ./cmd/modelbench -backend cpu-ref -require-non-reference ...` | **FAIL, correctly closed** — `cpu-ref` is rejected as a reference backend for Phase 1. |
 | `go run ./cmd/paritybench ... --require-phase1` | **FAIL, correctly open** — missing live local-GPU 7-9B rung. |
 
@@ -119,7 +119,7 @@ never production gates (`report.json` `token_delta_pct`, `kpis.vdso_hit_rate`).
 > still cannot build there — it runs **uninstrumented** on that box only. It now
 > executes wherever cgo is available: the `race-detector` CI job (`ubuntu-latest`)
 > runs `go test -race -count=1 -timeout=25m ./...` on every push/PR, and it can be
-> run locally via WSL/Linux/macOS (see `../docs/testing/race-detector.md`). Under
+> run locally via WSL/Linux/macOS. Under
 > instrumentation the full suite is race-clean: **0 data races detected**.
 
 ## 4. DOS concepts used to build AND prove it
@@ -149,7 +149,7 @@ REFUTED unless their own evidence confirmed it. **Result: 7/7 CONFIRMED.**
 | C4 no `os/exec` on the hot path | **CONFIRMED** | kernel imports only `{context,errors,fmt,sync,sync/atomic}`; `os/exec` appears only in `bench`+`shipgate` (not the dispatch path); `TestNoOsExecOnHotPath` PASS |
 | C5 full suite green | **CONFIRMED** | `go build`/`go vet` clean; **200+ test functions all PASS** across 30 packages; `claims-lint: 0 violations` |
 | C6 vDSO soundness + invalidation | **CONFIRMED** | canonicalized keys (reordered args hit), `worldVer` bump invalidates stale reads, tier-2 hit == fresh call (`TestUnit38_Soundness…` PASS) |
-| C7 CLAIMS.md honesty ledger accurate | **CONFIRMED** | 142 `[SHIPPED]` claims have backing code+tests; 19 `[STUB]/[SIMULATED]` confirmed NOT on the critical path |
+| C7 CLAIMS.md honesty ledger accurate | **CONFIRMED** | 32 `[SHIPPED]` claims have backing code+tests; 3 `[SIMULATED]` and 0 `[STUB]` entries confirmed NOT on the critical path |
 
 The single caveat (C3): the in-suite fixture test exercises the injection + benign
 payloads explicitly and secrets via a separate test; the skeptic manually confirmed
@@ -176,7 +176,7 @@ confirmed it, which is why detection is reported as non-load-bearing.
 > witness / normgate — the kernel stops believing the model); a **gateway** (`fak serve`,
 > OpenAI + MCP); and a durable **session core-dump + debugger** (`recall` / `fak debug` —
 > a quarantine that survives the process boundary). The honest security finding the
-> substrate forced is in a private transcript-derived security benchmark:
+> substrate forced is in a transcript-derived security benchmark:
 > the architecture is sound (0 leaks after quarantine) but the *detector* it inherits is
 > ~100% evadable and FP-prone — so the load-bearing guarantee is the capability floor +
 > containment, not detection (which `normgate` improves but does not make a guarantee).

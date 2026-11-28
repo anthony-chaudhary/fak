@@ -80,6 +80,26 @@ ISSUE_URL_PATTERN = re.compile(r"github\.com/" + OWNER + r"/fleet/issues/\d+")
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 VERSION_MARKER = re.compile(r"readme-verified:[^\n]*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)")
+LLMS_VERSION_RE = re.compile(r"Version:\s*\*{0,2}v?([0-9]+\.[0-9]+\.[0-9]+)\*{0,2}")
+
+FRONTDOOR_LEAK_FILES = (
+    "README.md",
+    "START-HERE.md",
+    "GETTING-STARTED.md",
+    "INSTALL.md",
+    "llms.txt",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "STATUS.md",
+)
+
+FRONTDOOR_LEAK_PATTERNS = (
+    ("/var/lib/fak/", re.compile(r"/var/lib/fak/")),
+    ("AVOID-TESTING-ON-THIS-MACHINE", re.compile(r"AVOID-TESTING-ON-THIS-MACHINE")),
+    ("docs/_witnesses/", re.compile(r"docs/_witnesses/")),
+    ("internal/marketing/aeo.go", re.compile(r"internal/marketing/aeo\.go")),
+    ("private companion", re.compile(r"private companion", re.IGNORECASE)),
+)
 
 
 def repo_root(start: Path) -> Path:
@@ -271,10 +291,10 @@ def check_hooks_armed(root, tracked):
     val = subprocess.run(["git", "config", "--get", "core.hooksPath"],
                          cwd=root, capture_output=True, text=True,
                          creationflags=_win_creationflags()).stdout.strip()
-    if val != "tools/githooks":
+    if val not in (".githooks", "tools/githooks"):
         out.append(Finding("hooks-armed", "WARN",
                            f"core.hooksPath is '{val or '(unset)'}' — run tools/install_trunk_guard.py", ""))
-    if not (root / "tools/githooks/pre-commit").exists():
+    if not ((root / ".githooks/pre-commit").exists() or (root / "tools/githooks/pre-commit").exists()):
         out.append(Finding("hooks-armed", "FAIL",
                            "pre-commit leak hook is missing — the public secret-leak gate is gone",
                            "tools/githooks/pre-commit"))
@@ -333,7 +353,7 @@ def check_doc_placement(root, tracked):
                  "CODE_OF_CONDUCT.md", "CHANGELOG.md", "GOVERNANCE.md", "MAINTAINERS.md",
                  "ROADMAP.md", "AUTHORS.md", "NOTICE.md", "SUPPORT.md", "HISTORY.md"}
         def is_allowed_root_md(name):
-            return name in allow or (name.startswith("GOAL-") and name.endswith(".md"))
+            return name in allow
     out = []
     for f in sorted(tracked):
         if "/" not in f and f.endswith(".md") and not is_allowed_root_md(f):
@@ -396,8 +416,31 @@ def check_secret_shapes(root, tracked):
     return out
 
 
+def check_frontdoor_leaks(root, tracked):
+    out = []
+    version = read(root, "VERSION").strip()
+    for rel in FRONTDOOR_LEAK_FILES:
+        txt = read(root, rel)
+        if not txt:
+            continue
+        for i, line in enumerate(txt.splitlines(), 1):
+            for label, pat in FRONTDOOR_LEAK_PATTERNS:
+                if pat.search(line):
+                    out.append(Finding("frontdoor-leaks", "FAIL",
+                                       f"front-door doc leaks internal reference ({label})",
+                                       f"{rel}:{i}"))
+            if rel == "llms.txt" and version:
+                m = LLMS_VERSION_RE.search(line)
+                if m and m.group(1) != version:
+                    out.append(Finding("frontdoor-leaks", "FAIL",
+                                       f"llms.txt Version: {m.group(1)} lags VERSION {version}",
+                                       f"{rel}:{i}"))
+    return out
+
+
 CHECKS = {
     "frontdoor-present": check_frontdoor_present,
+    "frontdoor-leaks": check_frontdoor_leaks,
     "security-policy": check_security_policy,
     "version-drift": check_version_drift,
     "retired-pipeline": check_retired_pipeline,

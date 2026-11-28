@@ -28,12 +28,13 @@ def test_allowlisted_root_md_is_clean() -> None:
     assert cdp._violations(["README.md", "AGENTS.md", "CLAUDE.md"]) == []
 
 
-def test_goal_files_are_allowed() -> None:
-    assert cdp.is_allowed_root_md("GOAL.md")
-    assert cdp.is_allowed_root_md("GOAL-my-feature.md")
-    assert cdp.is_allowed_root_md("GOAL-1234.md")
+def test_goal_files_are_rejected() -> None:
+    assert not cdp.is_allowed_root_md("GOAL.md")
+    assert not cdp.is_allowed_root_md("GOAL-foo.md")
+    assert not cdp.is_allowed_root_md("GOAL-my-feature.md")
+    assert not cdp.is_allowed_root_md("GOAL-1234.md")
     assert not cdp.is_allowed_root_md("RANDOM-GOAL.md")
-    assert cdp._violations(["GOAL.md", "GOAL-my-feature.md", "GOAL-1234.md"]) == []
+    assert cdp._violations(["GOAL.md", "GOAL-foo.md"]) == ["GOAL-foo.md", "GOAL.md"]
 
 
 def test_nested_md_is_not_a_root_violation() -> None:

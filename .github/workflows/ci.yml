@@ -846,6 +846,12 @@ jobs:
           python tools/claude_config_home_guard_test.py
           python tools/claude_config_home_guard.py --check
 
+      - name: public-readiness frontdoor gates (frontdoor-present · version-drift · doc-placement · frontdoor-leaks)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/public_readiness_audit_test.py
+          python tools/public_readiness_audit.py --check frontdoor-present,version-drift,doc-placement,frontdoor-leaks
+
       - name: demo audit tool tests (registry · live-links · command refs · browser contract · smoke harnesses)
         working-directory: ${{ github.workspace }}
         run: |

@@ -110,6 +110,25 @@ PLUGIN_MANIFEST_PINS = [
     ".claude-plugin/marketplace.json",
 ]
 
+# Public front-door pages and installer script that carry a release version pin
+# outside VERSION / INSTALL.md / package manifests. Each file has its own strict
+# line-context regex so benchmark captions (e.g. `fak v0.30.0` in showcase.html's
+# `.ch-note`) and unrelated prose are never touched.
+FRONTDOOR_VERSION_PINS = ["llms.txt", "docs/showcase.html", "install.sh"]
+
+_FRONTDOOR_CTX_BY_FILE: dict[str, re.Pattern[str]] = {
+    "llms.txt": re.compile(r"\bVersion:\s*\*{0,2}v?\d+\.\d+\.\d+"),
+    "docs/showcase.html": re.compile(
+        r"(?:class=[\"'][^\"']*(?:pill|badge|release)[^\"']*[\"']|current[- ]release|release[- ]badge)[^>]*>[^<]*v?\d+\.\d+\.\d+",
+        re.IGNORECASE,
+    ),
+    "install.sh": re.compile(r"\bFAK_VERSION\b"),
+}
+_SHOWCASE_BENCHMARK_CAPTION_RE = re.compile(
+    r"class=[\"']ch-note[\"']|hero_benchmark\.data\.json",
+    re.IGNORECASE,
+)
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -202,12 +221,49 @@ def bump_dist_manifest(root: Path, rel: str, new: str, *, date, dry_run: bool) -
     return {"path": rel, "new": new, "changed": changed, "replaced": replaced, "ok": True}
 
 
+def bump_frontdoor_pin(root: Path, rel: str, new: str, *, dry_run: bool) -> dict:
+    """Bump the release version pin on strict context lines in a front-door file.
+
+    Uses per-file line-context regexes (`Version:` in `llms.txt`, current-release
+    badge in `docs/showcase.html` excluding benchmark captions, `FAK_VERSION` in
+    `install.sh`) so historical benchmark captions and prose are left alone.
+    """
+    ctx_re = _FRONTDOOR_CTX_BY_FILE.get(rel)
+    if ctx_re is None:
+        return {"path": rel, "ok": False, "reason": f"no frontdoor context rule for {rel}"}
+    path = root / rel
+    if not path.exists():
+        return {"path": rel, "ok": False, "reason": f"{rel} not found"}
+    replaced: list[str] = []
+    out_lines: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines(keepends=True):
+        if rel == "docs/showcase.html" and _SHOWCASE_BENCHMARK_CAPTION_RE.search(line):
+            out_lines.append(line)
+            continue
+        if not ctx_re.search(line):
+            out_lines.append(line)
+            continue
+
+        def _sub(m: "re.Match[str]") -> str:
+            if m.group("ver") == new:
+                return m.group(0)
+            replaced.append(f"{m.group('ver')}->{new}")
+            return f"{m.group('pre')}{new}"
+
+        out_lines.append(_PIN_SEMVER_RE.sub(_sub, line))
+    new_text = "".join(out_lines)
+    changed = new_text != path.read_text(encoding="utf-8")
+    if changed and not dry_run:
+        path.write_text(new_text, encoding="utf-8")
+    return {"path": rel, "new": new, "changed": changed, "replaced": replaced, "ok": True}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Bump fleet version-marker file(s).")
     ap.add_argument("version", help="New semver, e.g. 0.2.0 (no leading v)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--date", default=None, help="Release date YYYY-MM-DD (updates CITATION.cff date-released; omit to leave dates alone)")
-    ap.add_argument("--skip", action="append", default=[], choices=["version", "install_docs", "dist_manifests", "plugin_manifests"], help="Skip a target (repeatable)")
+    ap.add_argument("--skip", action="append", default=[], choices=["version", "install_docs", "dist_manifests", "plugin_manifests", "frontdoor_pins"], help="Skip a target (repeatable)")
     ap.add_argument("--owner", default=None, help="release-lock owner to gate on (default: session id)")
     ap.add_argument("--no-lock", action="store_true", help="bypass the single-writer release lock (solo/CI only)")
     args = ap.parse_args()
@@ -251,11 +307,16 @@ def main() -> int:
         files = [bump_dist_manifest(root, rel, new_version, date=None, dry_run=args.dry_run) for rel in PLUGIN_MANIFEST_PINS]
         return {"ok": all(f.get("ok", False) for f in files), "files": files}
 
+    def _frontdoor_pins() -> dict:
+        files = [bump_frontdoor_pin(root, rel, new_version, dry_run=args.dry_run) for rel in FRONTDOOR_VERSION_PINS]
+        return {"ok": all(f.get("ok", False) for f in files), "files": files}
+
     actions = {
         "version": lambda: bump_plain_file(root, "VERSION", new_version, dry_run=args.dry_run),
         "install_docs": _install_docs,
         "dist_manifests": _dist_manifests,
         "plugin_manifests": _plugin_manifests,
+        "frontdoor_pins": _frontdoor_pins,
     }
 
     report: dict = {"new_version": new_version, "dry_run": args.dry_run, "targets": {}}

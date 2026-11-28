@@ -150,9 +150,79 @@ def test_clean():
               "; ".join(f"{x.check}:{x.msg}" for x in deterministic))
 
 
+def test_doc_placement_no_goal_fallback():
+    print("doc-placement GOAL-*.md fallback:")
+    with tempfile.TemporaryDirectory() as tmp:
+        files = dict(CLEAN)
+        files["GOAL-internal.md"] = "# internal goal\n"
+        root = _make_repo(tmp, files)
+        f = mod.run(root, ["doc-placement"])
+        fails = [x for x in f if x.level == "FAIL" and x.where == "GOAL-internal.md"]
+        check("doc-placement rejects GOAL-*.md without check_doc_placement.py", bool(fails))
+        assert fails, "expected GOAL-internal.md to fail doc-placement"
+
+
+def test_hooks_armed_githooks_variants():
+    print("hooks-armed .githooks and tools/githooks:")
+    for hooks_dir in (".githooks", "tools/githooks"):
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {
+                f"{hooks_dir}/pre-commit": "#!/bin/sh\nexit 0\n",
+                "tools/scrub_public_copy.py": "# scanner\n",
+            }
+            root = _make_repo(tmp, files)
+            _git(str(root), "config", "core.hooksPath", hooks_dir)
+            f = mod.run(root, ["hooks-armed"])
+            check(f"hooks-armed clean for {hooks_dir}", not f, str([x.as_dict() for x in f]))
+            assert not f, f"expected no findings for {hooks_dir}, got {[x.as_dict() for x in f]}"
+
+
+def test_frontdoor_leaks():
+    print("frontdoor-leaks:")
+    with tempfile.TemporaryDirectory() as tmp:
+        files = dict(CLEAN)
+        files["GETTING-STARTED.md"] = (
+            "./fak run /var/lib/fak/models/m.gguf\n"
+            "see AVOID-TESTING-ON-THIS-MACHINE\n"
+            "see docs/_witnesses/issue-1/\n"
+        )
+        files["CONTRIBUTING.md"] = "sync with private companion repo\n"
+        files["llms.txt"] = (
+            "Version: **0.26.0**\n"
+            "source: internal/marketing/aeo.go\n"
+        )
+        root = _make_repo(tmp, files)
+        f = mod.run(root, ["frontdoor-leaks"])
+        msgs = "\n".join(x.msg for x in f if x.level == "FAIL")
+        expected = [
+            "/var/lib/fak/",
+            "AVOID-TESTING-ON-THIS-MACHINE",
+            "docs/_witnesses/",
+            "private companion",
+            "internal/marketing/aeo.go",
+            "llms.txt Version: 0.26.0 lags VERSION 0.30.0",
+        ]
+        for needle in expected:
+            check(f"frontdoor-leaks catches {needle}", needle in msgs, msgs)
+            assert needle in msgs, f"missing finding for {needle}: {msgs}"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        files = dict(CLEAN)
+        files["GETTING-STARTED.md"] = "# Getting Started\n"
+        files["STATUS.md"] = "# Status\n"
+        files["llms.txt"] = "Version: **0.30.0** ([VERSION](VERSION))\n"
+        root = _make_repo(tmp, files)
+        f = mod.run(root, ["frontdoor-leaks"])
+        check("frontdoor-leaks clean on sanitized frontdoor", not f, str([x.as_dict() for x in f]))
+        assert not f, f"expected clean frontdoor-leaks, got {[x.as_dict() for x in f]}"
+
+
 def main():
     test_dirty()
     test_clean()
+    test_doc_placement_no_goal_fallback()
+    test_hooks_armed_githooks_variants()
+    test_frontdoor_leaks()
     print()
     if failures:
         print(f"FAILED: {len(failures)} check(s): {', '.join(failures)}")

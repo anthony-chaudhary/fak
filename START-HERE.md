@@ -20,7 +20,7 @@ If you are new to fak, focus exclusively on these core documents. They cover eve
 | [`docs/repro-packet.md`](docs/repro-packet.md) | Deterministic offline reproducibility packet and policy checks. |
 | [`docs/fak/governed-agent-quickstart.md`](docs/fak/governed-agent-quickstart.md) | 10-minute quickstart to launch a governed agent offline. |
 | [`docs/fak/server-quickstart.md`](docs/fak/server-quickstart.md) | Stand up a shared OpenAI, Anthropic, or MCP gateway (`fak serve`). |
-| [`docs/fak/mac-local-models.md`](docs/fak/mac-local-models.md) | Run local models (Qwen3.8) on Apple Silicon Mac with Metal & interactive chat. |
+| [`docs/fak/mac-local-models.md`](docs/fak/mac-local-models.md) | Run local models (Inkling-2-Mini) on Apple Silicon Mac with Metal & interactive chat. |
 | [`docs/subagents-guide.md`](docs/subagents-guide.md) | Guide to running parallel subagents with zero cold start via `fak up`. |
 | [`docs/integrations/README.md`](docs/integrations/README.md) | Integration chooser for Claude Code, Codex, Cursor, and other harnesses. |
 | [`docs/integrations/claude.md`](docs/integrations/claude.md) | Default one-command proxy recipe (`fak guard -- claude`). |
@@ -38,7 +38,7 @@ If you are new to fak, focus exclusively on these core documents. They cover eve
 Test tool-call adjudication locally without a model or GPU:
 
 ```bash
-go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
+fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 ```
 
 **Expected output:**
@@ -59,7 +59,7 @@ Select the task you need to accomplish to find its primary guide and immediate n
 | Install fak on your local machine | [`GETTING-STARTED.md`](GETTING-STARTED.md) | Download a prebuilt binary or run `go install`, then verify your install. |
 | Protect an agent you already use | [`docs/integrations/README.md`](docs/integrations/README.md) | Pick your agent harness and launch it behind `fak guard`. |
 | Run a shared model gateway | [`docs/fak/server-quickstart.md`](docs/fak/server-quickstart.md) | Launch `fak serve` pointing to an upstream provider or Ollama. |
-| Run local models (Qwen3.8) on Apple Silicon Mac | [`docs/fak/mac-local-models.md`](docs/fak/mac-local-models.md) | Run `fak run qwen38` for interactive REPL or `fak serve --metal` for GPU server. |
+| Run local models (Inkling-2-Mini) on Apple Silicon Mac | [`docs/fak/mac-local-models.md`](docs/fak/mac-local-models.md) | Run `fak run inkling2-mini` for interactive REPL or `fak up` for the local server. |
 | Run concurrent subagents with zero cold start | [`docs/subagents-guide.md`](docs/subagents-guide.md) | Start `fak up` and launch parallel subagents with `fak opencode`, `claude`, or `codex`. |
 | Author custom tool allow/deny rules | [`POLICY.md`](POLICY.md) | Dump the built-in policy with `fak policy --dump` and customize it. |
 | Fix a command that failed or misbehaved | [`docs/adoption/troubleshooting-first-run.md`](docs/adoption/troubleshooting-first-run.md) | Match your symptom to its cause and apply the one-line fix. |

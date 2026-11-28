@@ -36,7 +36,7 @@ ALLOWED_ROOT_MD = {
     # entry points
     "README.md", "START-HERE.md", "INSTALL.md", "INDEX.md", "LEARNING-PATH.md",
     # contributor + agent contract
-    "CONTRIBUTING.md", "CLA.md", "AGENTS.md", "AGENT.md", "CLAUDE.md", "GEMINI.md", "GOAL.md",
+    "CONTRIBUTING.md", "CLA.md", "AGENTS.md", "AGENT.md", "CLAUDE.md", "GEMINI.md",
     # policy / security
     "SECURITY.md", "PUBLIC-SCRUB-POLICY.md",
     # public front-door docs: deliberately at the root because README.md and
@@ -61,7 +61,7 @@ NOTES_DIR = "docs/notes"
 
 
 def is_allowed_root_md(name: str) -> bool:
-    return name in ALLOWED_ROOT_MD or (name.startswith("GOAL-") and name.endswith(".md"))
+    return name in ALLOWED_ROOT_MD
 
 
 def _git(args: list[str], root: str) -> subprocess.CompletedProcess:

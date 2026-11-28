@@ -80,9 +80,7 @@ git fetch upstream && git merge upstream/main
 
 **Windows:** `go build` and `go vet` work natively. Running the *test suite* can hit
 Microsoft Defender Antivirus real-time ML detections that quarantine freshly compiled test
-binaries — that is an OS quirk, not a code failure (the 2026-08-25 audit for issue #8919
-supersedes the earlier Application-Control diagnosis — see
-[`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md)).
+binaries — that is an OS quirk, not a code failure.
 Run the tests under WSL if you need them; see the Windows note in
 [`GETTING-STARTED.md`](GETTING-STARTED.md).
 
@@ -161,9 +159,7 @@ integration, and network failures and verify the actual remote result.
    the package you touched are enough, and CI runs the full gate on the PR — see
    [What your PR needs to pass](#what-your-pr-needs-to-pass). On native Windows, run
    tests through `./test.ps1` under WSL because Microsoft Defender Antivirus real-time ML
-   quarantines newly compiled test executables (see
-   [`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md),
-   which supersedes the earlier Application-Control diagnosis). Build and vet remain native-safe.
+   quarantines newly compiled test executables. Build and vet remain native-safe.
 4. **Maintainers and in-repo agents only — direct-to-`main`.** After the explicit-path commit
    and before push, run `fak-dev ci-preflight` as the
    **required committed-tip gate** in a clean temporary checkout, independent of the

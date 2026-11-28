@@ -122,6 +122,69 @@ def test_bump_plugin_marketplace_bumps_both_version_pins(tmp_path: Path) -> None
     assert '"description": "fak 0.33.0 marketplace"' in out   # prose version untouched
 
 
+# --- bump_frontdoor_pin ----------------------------------------------------
+
+def test_bump_frontdoor_pin_llms_txt(tmp_path: Path) -> None:
+    (tmp_path / "llms.txt").write_text(
+        "- **Name:** `fak`; License: **Apache-2.0**. Version: **0.57.0** ([`VERSION`](VERSION) is authoritative).\n"
+        "- Historical note: shipped v0.30.0 earlier.\n",
+        encoding="utf-8",
+    )
+    res = rb.bump_frontdoor_pin(tmp_path, "llms.txt", "0.59.0", dry_run=False)
+    out = (tmp_path / "llms.txt").read_text(encoding="utf-8")
+    assert res["ok"] and res["changed"] and res["replaced"] == ["0.57.0->0.59.0"]
+    assert "Version: **0.59.0**" in out
+    assert "shipped v0.30.0 earlier." in out
+
+
+def test_bump_frontdoor_pin_showcase_html_skips_benchmark_caption(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "showcase.html").write_text(
+        '<div class="p-meta">\n'
+        '  <span class="pill">v0.57.0</span>\n'
+        '</div>\n'
+        '<p class="ch-note">Generated from <code>tools/hero_benchmark.data.json</code> · <code>fak v0.30.0</code> · single-stream decode.</p>\n',
+        encoding="utf-8",
+    )
+    res = rb.bump_frontdoor_pin(tmp_path, "docs/showcase.html", "0.59.0", dry_run=False)
+    out = (docs / "showcase.html").read_text(encoding="utf-8")
+    assert res["ok"] and res["changed"] and res["replaced"] == ["0.57.0->0.59.0"]
+    assert '<span class="pill">v0.59.0</span>' in out
+    assert 'fak v0.30.0' in out
+
+
+def test_bump_frontdoor_pin_install_sh(tmp_path: Path) -> None:
+    (tmp_path / "install.sh").write_text(
+        "#   FAK_VERSION       pin a version, e.g. 0.24.0 (default: latest release)\n"
+        "#   Other note: tested with 0.12.0 long ago.\n",
+        encoding="utf-8",
+    )
+    res = rb.bump_frontdoor_pin(tmp_path, "install.sh", "0.59.0", dry_run=False)
+    out = (tmp_path / "install.sh").read_text(encoding="utf-8")
+    assert res["ok"] and res["changed"] and res["replaced"] == ["0.24.0->0.59.0"]
+    assert "FAK_VERSION       pin a version, e.g. 0.59.0" in out
+    assert "tested with 0.12.0 long ago." in out
+
+
+def test_bump_frontdoor_pin_dry_run_and_idempotent(tmp_path: Path) -> None:
+    (tmp_path / "llms.txt").write_text("Version: **0.59.0**\n", encoding="utf-8")
+    res_idem = rb.bump_frontdoor_pin(tmp_path, "llms.txt", "0.59.0", dry_run=False)
+    assert res_idem["ok"] and res_idem["changed"] is False and res_idem["replaced"] == []
+
+    res_dry = rb.bump_frontdoor_pin(tmp_path, "llms.txt", "0.60.0", dry_run=True)
+    assert res_dry["ok"] and res_dry["changed"] is True
+    assert (tmp_path / "llms.txt").read_text(encoding="utf-8") == "Version: **0.59.0**\n"
+
+
+def test_bump_frontdoor_pin_missing_and_unknown(tmp_path: Path) -> None:
+    missing = rb.bump_frontdoor_pin(tmp_path, "install.sh", "0.59.0", dry_run=False)
+    assert missing["ok"] is False and "not found" in missing["reason"]
+
+    unknown = rb.bump_frontdoor_pin(tmp_path, "README.md", "0.59.0", dry_run=False)
+    assert unknown["ok"] is False and "no frontdoor context rule" in unknown["reason"]
+
+
 def _run_all() -> int:
     import tempfile
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

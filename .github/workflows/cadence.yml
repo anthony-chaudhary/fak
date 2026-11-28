@@ -58,6 +58,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+      issues: write
     env:
       GOTOOLCHAIN: auto
       # Slack token is a secret; channel id is a repo variable. Absent => the post
@@ -259,6 +260,30 @@ jobs:
       - name: Render project card
         if: always()
         run: go run ./cmd/fak project post --dry-run --report-json project-report.json > project-card.txt 2>&1 || true
+
+      - name: Front-door freshness & readiness
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          python tools/readme_freshness_audit.py --json > readme-freshness.json
+          readme_exit=$?
+          python tools/public_readiness_audit.py --check frontdoor-present,version-drift,doc-placement,frontdoor-leaks --json > public-readiness.json
+          readiness_exit=$?
+          set -e
+          echo "readme-freshness-exit=$readme_exit"
+          echo "public-readiness-exit=$readiness_exit"
+          if [ "$readme_exit" -ne 0 ] || [ "$readiness_exit" -ne 0 ]; then
+            go build -o "$RUNNER_TEMP/fak" ./cmd/fak
+            export FAK_BIN="$RUNNER_TEMP/fak"
+            if [ "$readme_exit" -ne 0 ] && [ -s readme-freshness.json ]; then
+              python tools/gate_signal.py --from readme-freshness.json --live
+            fi
+            if [ "$readiness_exit" -ne 0 ] && [ -s public-readiness.json ]; then
+              python tools/gate_signal.py --from public-readiness.json --live
+            fi
+          fi
 
       - name: Dry-run note
         if: >-

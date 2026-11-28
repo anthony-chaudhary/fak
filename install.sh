@@ -22,7 +22,7 @@
 #                     and no working docker is available.
 #
 # Knobs (environment):
-#   FAK_VERSION       pin a version, e.g. 0.24.0 (default: latest release; for
+#   FAK_VERSION       pin a version, e.g. 0.59.0 (default: latest release; for
 #                     --variant cuda, the source ref defaults to main)
 #   FAK_INSTALL_DIR   install target (default: /usr/local/bin, else ~/.local/bin)
 #   FAK_PREFER_DIRECT bypass Homebrew on macOS and force direct binary download (default: 0)
@@ -37,12 +37,12 @@
 #                     FAK_REPO is a back-compat alias)
 set -eu
 
-# --- variant selection (--variant auto|cpu|metal|vulkan) ------------------------------------
+# --- variant selection (--variant auto|cpu|metal|vulkan|cuda) -------------------------------
 VARIANT=auto
 while [ $# -gt 0 ]; do
   case "$1" in
     --variant)
-      [ $# -ge 2 ] || { printf 'install.sh: --variant requires an argument (auto|cpu|metal|vulkan)\n' >&2; exit 2; }
+      [ $# -ge 2 ] || { printf 'install.sh: --variant requires an argument (auto|cpu|metal|vulkan|cuda)\n' >&2; exit 2; }
       VARIANT="$2"; shift 2 ;;
     --variant=*) VARIANT="${1#--variant=}"; shift ;;
     -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print } /^set -eu$/ { exit }' "$0"; exit 0 ;;
@@ -195,7 +195,7 @@ esac
 # is now a published .tar.gz target, including linux/arm64 (Raspberry Pi / Jetson / arm64
 # gateway). Windows already errored in the OS case above (it ships a .zip, not this tarball).
 
-# GPU releases are the default. CPU is an explicit reference choice (#12801).
+# GPU releases are the default. CPU is an explicit reference choice.
 if [ "$VARIANT" = "auto" ]; then
   case "${GOOS}/${GOARCH}" in
     darwin/arm64) VARIANT=metal ;;

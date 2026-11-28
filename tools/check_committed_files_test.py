@@ -124,6 +124,23 @@ def test_root_coverage_refused_as_hard_junk() -> None:
     assert r is not None and "build artifact" in r.lower()
 
 
+def test_lsp_scratch_dotfiles_refused_as_hard_junk() -> None:
+    for p in (
+        ".gopls",
+        "sub/.gopls",
+        ".clangd",
+        ".clangd/index",
+        ".ccls",
+        ".ccls-cache",
+        ".ccls-cache/foo",
+        ".lsp",
+        ".pylsp",
+        ".rust-analyzer",
+    ):
+        r = cc._classify(p, ROOT, MAX)
+        assert r is not None and "build artifact" in r.lower(), (p, r)
+
+
 # --- oversized-blob cap: 25 MiB default + non-positive clamp ----------------
 
 def test_max_bytes_default_is_25_mib() -> None:
