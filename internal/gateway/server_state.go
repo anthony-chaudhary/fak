@@ -1114,7 +1114,9 @@ type Server struct {
 	// ("openai:acct/gpt-5.5") the residency PDP and the kernel dispatch read; nil leaves
 	// the plan member string as the route (the pre-#2528 path). It is a validated value
 	// (New() calls Validate), so Resolve's dangling-ref/locality invariants hold.
-	roster *modelroute.Roster
+	roster           *modelroute.Roster
+	routeCircuitOnce sync.Once
+	routeCircuit     *routeCircuitTracker
 	// llamaSlotAffinity is Config.LlamaSlotAffinity, kept so a per-route chat planner to a
 	// self-hosted (llama-server-capable) account opts into slot pinning like the boot planner.
 	llamaSlotAffinity bool

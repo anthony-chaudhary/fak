@@ -201,42 +201,93 @@ func (s *Server) bindChatRoute(ctx context.Context, requestedModel string) (*cha
 	if !bound {
 		return nil, nil
 	}
-	// Use the same principal admission as tool calls before reading credentials
-	// or constructing a transport. EngineRoute itself is not a transport address.
-	if _, err := s.resolveRoute(requestedModel, principalFromContext(ctx)); err != nil {
-		return nil, err
-	}
-	target, err := s.roster.Resolve(requestedModel)
+	principal := principalFromContext(ctx)
+	chain, err := s.roster.ResolveChain(requestedModel)
 	if err != nil {
 		return nil, fmt.Errorf("gateway: chat route: %w", err)
 	}
+	if len(chain) == 0 {
+		return nil, fmt.Errorf("gateway: chat route: no targets resolved for model %q", requestedModel)
+	}
+	primaryResidencyFloor := chain[0].ResidencyFloor
+	admitted := make([]modelroute.Target, 0, len(chain))
+	for _, target := range chain {
+		if target.Admits(principal) {
+			admitted = append(admitted, target)
+		}
+	}
+	if len(admitted) == 0 {
+		who := principal
+		if strings.TrimSpace(who) == "" {
+			who = "<unattributed>"
+		}
+		return nil, fmt.Errorf("gateway: route accounts: principal %s is not admitted to any account for routed model %q", who, requestedModel)
+	}
+	candidates := make([]failoverCandidate, 0, len(admitted))
+	for _, target := range admitted {
+		planner, locality, err := s.buildChatTargetPlanner(target)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, failoverCandidate{
+			target:   target,
+			planner:  planner,
+			locality: locality,
+		})
+	}
+	if len(candidates) == 1 {
+		if primaryResidencyFloor == "local_only" && !candidates[0].target.Zone().SelfHosted() {
+			return nil, fmt.Errorf("RESIDENCY_FAILOVER_DENIED: model %q has residency_floor=local_only; refusing non-self-hosted account %q",
+				requestedModel, candidates[0].target.Account)
+		}
+		return &chatRouteBinding{
+			RequestedModel: requestedModel,
+			Target:         candidates[0].target,
+			Planner:        candidates[0].planner,
+			Locality:       candidates[0].locality,
+		}, nil
+	}
+	return &chatRouteBinding{
+		RequestedModel: requestedModel,
+		Target:         candidates[0].target,
+		Planner: &failoverPlanner{
+			requestedModel: requestedModel,
+			residencyFloor: primaryResidencyFloor,
+			candidates:     candidates,
+			circuit:        s.circuitTracker(),
+		},
+		Locality: candidates[0].locality,
+	}, nil
+}
+
+func (s *Server) buildChatTargetPlanner(target modelroute.Target) (*agent.HTTPPlanner, servingLocality, error) {
 	provider := string(target.Kind)
 	switch target.Kind {
 	case modelroute.KindLocal, modelroute.KindFleet, modelroute.KindDeepSeek, modelroute.KindOpenRouter:
 		provider = string(agent.ProviderOpenAI)
 	case modelroute.KindOpenAI, modelroute.KindOpenAIResponses, modelroute.KindAnthropic, modelroute.KindGemini, modelroute.KindXAI, modelroute.KindRouter:
 	default:
-		return nil, fmt.Errorf("gateway: chat route: account %q has unsupported provider kind %q", target.Account, target.Kind)
+		return nil, localityVendor, fmt.Errorf("gateway: chat route: account %q has unsupported provider kind %q", target.Account, target.Kind)
 	}
 	if strings.TrimSpace(target.BaseURL) == "" {
-		return nil, fmt.Errorf("gateway: chat route: account %q has no upstream base URL", target.Account)
+		return nil, localityVendor, fmt.Errorf("gateway: chat route: account %q has no upstream base URL", target.Account)
 	}
 	authScheme, ok := agent.ParseAnthropicAuthScheme(target.AuthScheme)
 	if !ok {
-		return nil, fmt.Errorf("gateway: chat route: account %q has an invalid auth scheme", target.Account)
+		return nil, localityVendor, fmt.Errorf("gateway: chat route: account %q has an invalid auth scheme", target.Account)
 	}
 	credential := ""
 	if target.CredEnv != "" {
 		credential = os.Getenv(target.CredEnv)
 		if strings.TrimSpace(credential) == "" {
-			return nil, fmt.Errorf("gateway: chat route: account %q credential environment variable %q is unset or empty", target.Account, target.CredEnv)
+			return nil, localityVendor, fmt.Errorf("gateway: chat route: account %q credential environment variable %q is unset or empty", target.Account, target.CredEnv)
 		}
 	}
 	// Build independently of the boot planner: its dynamic credentials, account
 	// failover callbacks and extra authentication headers belong to another account.
 	planner, err := agent.NewProviderHTTPPlanner(provider, target.BaseURL, target.UpstreamModel, credential)
 	if err != nil {
-		return nil, fmt.Errorf("gateway: chat route: account %q: %w", target.Account, err)
+		return nil, localityVendor, fmt.Errorf("gateway: chat route: account %q: %w", target.Account, err)
 	}
 	planner.AnthropicAuthScheme = authScheme
 	locality := localityVendor
@@ -246,10 +297,5 @@ func (s *Server) bindChatRoute(ctx context.Context, requestedModel string) (*cha
 		planner.LlamaSoftSlot = s.llamaSoftSlot
 		planner.LlamaSoftSlotPolicy = s.llamaSoftPolicy
 	}
-	return &chatRouteBinding{
-		RequestedModel: requestedModel,
-		Target:         target,
-		Planner:        planner,
-		Locality:       locality,
-	}, nil
+	return planner, locality, nil
 }
