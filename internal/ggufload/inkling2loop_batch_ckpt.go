@@ -3,6 +3,8 @@ package ggufload
 import (
 	"errors"
 	"fmt"
+	"math"
+	"slices"
 )
 
 // ink2RowCkpt is one cohort row's state at pos, held on the host in position order
@@ -129,4 +131,90 @@ func (b *inkling2Batch) restoreRow(row int, ck *ink2RowCkpt) error {
 	}
 	b.pos[row] = ck.pos
 	return nil
+}
+
+// Clean-room INSPIRE-ONLY shared-expert overlay seam (rse-looper-2).
+
+var (
+	ErrOverlayImmutableTensor = errors.New("inkling2 overlay: cannot mutate immutable expert/vision/embed/lm_head tensor")
+	ErrOverlayDeltaExceeded   = errors.New("inkling2 overlay: relative Frobenius delta exceeds bound")
+)
+
+type Inkling2OverlayTensorRole string
+
+const (
+	OverlayRoleLoopControl  Inkling2OverlayTensorRole = "loop_control"
+	OverlayRoleAttention    Inkling2OverlayTensorRole = "attention"
+	OverlayRoleShortConv    Inkling2OverlayTensorRole = "short_conv"
+	OverlayRoleRouter       Inkling2OverlayTensorRole = "router"
+	OverlayRoleSharedExpert Inkling2OverlayTensorRole = "shared_expert"
+	OverlayRoleVision       Inkling2OverlayTensorRole = "vision"
+	OverlayRoleEmbed        Inkling2OverlayTensorRole = "embed"
+	OverlayRoleLMHead       Inkling2OverlayTensorRole = "lm_head"
+)
+
+// IsMutableOverlayRole reports whether a tensor role may be hot-swapped over
+// the shared resident expert pool.
+func IsMutableOverlayRole(role Inkling2OverlayTensorRole) bool {
+	switch role {
+	case OverlayRoleLoopControl, OverlayRoleAttention, OverlayRoleShortConv, OverlayRoleRouter:
+		return true
+	}
+	return false
+}
+
+// Inkling2OverlayTensor represents a base or overlay tensor slice for validation.
+type Inkling2OverlayTensor struct {
+	Name string
+	Role Inkling2OverlayTensorRole
+	Data []float32
+}
+
+// ValidateAndApplyOverlay verifies immutability of shared experts/vision/embed/lm_head
+// and bounded relative Frobenius delta before hot-swapping mutable tensors in place.
+func ValidateAndApplyOverlay(base, overlay []Inkling2OverlayTensor, maxRelFrobenius float64) (int, error) {
+	byName := make(map[string]int, len(base))
+	for i, t := range base {
+		byName[t.Name] = i
+	}
+	updates := make([]struct {
+		idx  int
+		data []float32
+	}, 0, len(overlay))
+
+	for _, ov := range overlay {
+		if !IsMutableOverlayRole(ov.Role) {
+			return 0, fmt.Errorf("%w: %s (%s)", ErrOverlayImmutableTensor, ov.Name, ov.Role)
+		}
+		idx, ok := byName[ov.Name]
+		if !ok {
+			return 0, fmt.Errorf("inkling2 overlay: unknown tensor %q", ov.Name)
+		}
+		bt := base[idx]
+		if !IsMutableOverlayRole(bt.Role) {
+			return 0, fmt.Errorf("%w: %s (%s)", ErrOverlayImmutableTensor, bt.Name, bt.Role)
+		}
+		if len(bt.Data) != len(ov.Data) {
+			return 0, fmt.Errorf("inkling2 overlay: %s length %d != %d", ov.Name, len(ov.Data), len(bt.Data))
+		}
+		var diffSq, baseSq float64
+		for i := range bt.Data {
+			d := float64(ov.Data[i]) - float64(bt.Data[i])
+			diffSq += d * d
+			baseSq += float64(bt.Data[i]) * float64(bt.Data[i])
+		}
+		rel := math.Sqrt(diffSq) / math.Max(math.Sqrt(baseSq), 1e-12)
+		if rel > maxRelFrobenius {
+			return 0, fmt.Errorf("%w: %s rel=%.4g > max=%.4g", ErrOverlayDeltaExceeded, ov.Name, rel, maxRelFrobenius)
+		}
+		updates = append(updates, struct {
+			idx  int
+			data []float32
+		}{idx: idx, data: slices.Clone(ov.Data)})
+	}
+
+	for _, u := range updates {
+		base[u.idx].Data = u.data
+	}
+	return len(updates), nil
 }
