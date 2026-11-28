@@ -55,6 +55,9 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "init" {
 		return runRouteInit(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "status" {
+		return runRouteStatus(stdout, stderr, argv[1:])
+	}
 	fs := flag.NewFlagSet("route", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	manifestPath := fs.String("manifest", "", "load the routing policy from a manifest (default: built-in DefaultManifest)")
