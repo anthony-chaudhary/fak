@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -136,9 +137,24 @@ func (p *ink2Prefill) readKeepSlice(states []ink2Ref) []ink2Ref {
 	return out
 }
 
+// inkling2PrefillArenaUseFP8 resolves FAK_INKLING2_PREFILL_ARENA=f32|fp8
+// over the session's base prefillFP8 setting.
+func inkling2PrefillArenaUseFP8(be compute.Backend, baseFP8 bool) bool {
+	if v, ok := os.LookupEnv("FAK_INKLING2_PREFILL_ARENA"); ok {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "f32", "0", "false", "off":
+			return false
+		case "fp8", "1", "true", "on":
+			fp8Dev, ok := be.(compute.Inkling2PrefillFP8ArenaDevice)
+			return ok && fp8Dev.Ink2PFP8ArenaReady() == nil
+		}
+	}
+	return baseFP8
+}
+
 // prefillArenas sizes the two prefill arenas for chunks of T tokens.
 func (s *inkling2Resident) prefillArenas(T int) (keep, scr int) {
-	if s.prefillFP8 {
+	if inkling2PrefillArenaUseFP8(s.be, s.prefillFP8) {
 		return inkling2PrefillArenaFP8Floats(s.hp, T, s.maxPadK())
 	}
 	return inkling2PrefillArenaFloats(s.hp, T, s.maxPadK())
@@ -226,7 +242,7 @@ func (s *inkling2Resident) prefill(ctx context.Context, prompt []int) (int, erro
 	T := inkling2PrefillChunkFor(len(prompt), s.chunkMax)
 	startPos := s.pos
 	p := &ink2Prefill{s: s, pd: pd, grouped: inkling2GroupedExperts()}
-	if s.prefillFP8 {
+	if inkling2PrefillArenaUseFP8(s.be, s.prefillFP8) {
 		p.fp8Arena, _ = s.be.(compute.Inkling2PrefillFP8ArenaDevice)
 	}
 	if s.kvHalf {

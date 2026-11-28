@@ -19,6 +19,7 @@ func inkling2MiniFullShape() model.Inkling2LoopHParams {
 	return hp
 }
 
+// fak-test:runtime fast est=200ms
 func TestInkling2PrefillArenaFP8Budget(t *testing.T) {
 	hp := inkling2MiniFullShape()
 	const T = 512
@@ -189,6 +190,7 @@ func (e fakeInk2DeterministicEmbed) Row(tok int, dst []float32) {
 	}
 }
 
+// fak-test:runtime fast est=200ms
 func TestInkling2PrefillArenaFP8(t *testing.T) {
 	const hidden = 16
 	const vocab = 8
@@ -219,30 +221,35 @@ func TestInkling2PrefillArenaFP8(t *testing.T) {
 
 	prompt := []int{1, 3, 5, 7, 2, 4, 6, 0}
 
-	runArm := func(fp8Env string) (int, []float32, int, int, int) {
+	runArm := func(fp8Env, arenaEnv string) (int, []float32, int, int, int) {
 		t.Setenv("FAK_INKLING2_PREFILL_FP8", fp8Env)
+		t.Setenv("FAK_INKLING2_PREFILL_ARENA", arenaEnv)
 		be := newFakeInk2FP8Prefill()
 		s, err := newInkling2ResidentRing(m, be, 64, 64, 64, 64)
 		if err != nil {
-			t.Fatalf("newInkling2ResidentRing(%s): %v", fp8Env, err)
+			t.Fatalf("newInkling2ResidentRing(fp8=%s, arena=%s): %v", fp8Env, arenaEnv, err)
 		}
 		defer s.close()
 		tok, err := s.prefill(context.Background(), prompt)
 		if err != nil {
-			t.Fatalf("prefill(%s): %v", fp8Env, err)
+			t.Fatalf("prefill(fp8=%s, arena=%s): %v", fp8Env, arenaEnv, err)
 		}
 		keepFloats, _ := s.prefillArenas(64)
 		return tok, be.lastLogits, be.quantCalls, be.dequantCalls, keepFloats
 	}
 
-	tokF32, logitsF32, qF32, dqF32, keepF32 := runArm("0")
-	tokFP8, logitsFP8, qFP8, dqFP8, keepFP8 := runArm("1")
+	tokF32, logitsF32, qF32, dqF32, keepF32 := runArm("0", "")
+	tokFP8, logitsFP8, qFP8, dqFP8, keepFP8 := runArm("1", "")
+	tokArenaF32, _, qArenaF32, dqArenaF32, keepArenaF32 := runArm("1", "f32")
+	tokArenaFP8, _, qArenaFP8, dqArenaFP8, keepArenaFP8 := runArm("0", "fp8")
 
-	if qF32 != 0 || dqF32 != 0 {
-		t.Fatalf("F32 arm ran FP8 ops: quant=%d dequant=%d", qF32, dqF32)
+	if qF32 != 0 || dqF32 != 0 || qArenaF32 != 0 || dqArenaF32 != 0 || keepArenaF32 != keepF32 || tokArenaF32 != tokF32 {
+		t.Fatalf("F32 arm ran FP8 ops or mismatched: q=(%d,%d) dq=(%d,%d) keep=(%d,%d) tok=(%d,%d)",
+			qF32, qArenaF32, dqF32, dqArenaF32, keepF32, keepArenaF32, tokF32, tokArenaF32)
 	}
-	if qFP8 == 0 || dqFP8 == 0 {
-		t.Fatalf("FP8 arm did not exercise FP8 quant/dequant ops: quant=%d dequant=%d", qFP8, dqFP8)
+	if qFP8 == 0 || dqFP8 == 0 || qArenaFP8 == 0 || dqArenaFP8 == 0 || keepArenaFP8 != keepFP8 || tokArenaFP8 != tokFP8 {
+		t.Fatalf("FP8 arm did not exercise FP8 ops or mismatched: q=(%d,%d) dq=(%d,%d) keep=(%d,%d) tok=(%d,%d)",
+			qFP8, qArenaFP8, dqFP8, dqArenaFP8, keepFP8, keepArenaFP8, tokFP8, tokArenaFP8)
 	}
 	if keepFP8 >= keepF32/2 {
 		t.Fatalf("FP8 keep floats %d not significantly smaller than F32 %d", keepFP8, keepF32)
