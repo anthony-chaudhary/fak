@@ -58,3 +58,14 @@ func writeBenchRunsJSON(t *testing.T, path string, v any) {
 		t.Fatal(err)
 	}
 }
+
+func TestCredentialRedaction(t *testing.T) {
+	in := []string{"--model", "qwen", "--api-key", "sk-secret-123", "--token=tok-abc", "OPENAI_API_KEY=sk-env"}
+	got := redactCredentialArgs(in)
+	if got[1] != "qwen" || got[3] != "[REDACTED]" || got[4] != "--token=[REDACTED]" || got[5] != "OPENAI_API_KEY=[REDACTED]" {
+		t.Fatalf("redacted = %v", got)
+	}
+	if in[3] != "sk-secret-123" {
+		t.Fatal("input slice mutated")
+	}
+}

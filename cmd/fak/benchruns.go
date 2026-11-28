@@ -563,3 +563,25 @@ func MonotonicSearch(candidates []int, feasible func(int) bool) MonotonicSearchR
 	res.Probed = probed
 	return res
 }
+
+// ADAPT of ai-dynamo/aiperf (Apache-2.0, local_executor.py:87 @ab610add4e8876fca223197596c728e17365f381):
+// credential redaction at the single plaintext-holding point.
+func redactCredentialArgs(args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	secretFlags := map[string]bool{"--api-key": true, "--token": true, "--secret": true}
+	for i := 0; i < len(out); i++ {
+		if secretFlags[out[i]] && i+1 < len(out) {
+			out[i+1] = "[REDACTED]"
+			i++
+			continue
+		}
+		for _, prefix := range []string{"--api-key=", "--token=", "--secret=", "OPENAI_API_KEY=", "HF_TOKEN="} {
+			if len(out[i]) >= len(prefix) && out[i][:len(prefix)] == prefix {
+				out[i] = prefix + "[REDACTED]"
+				break
+			}
+		}
+	}
+	return out
+}
