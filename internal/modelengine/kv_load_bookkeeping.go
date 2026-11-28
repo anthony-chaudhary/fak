@@ -272,3 +272,51 @@ func (b *KVLoadBookkeeper) VerifyConsistency() error {
 	b.poolTouches += int64(b.poolSize)
 	return nil
 }
+
+// KVLoadCertificate is a compact producer-published certificate (wandb/senpai
+// LLM-INFERENCE-OPTIMIZATION-SENPAI-GUIDE.md:242-263@5406c6195372, Apache-2.0):
+// the block-id bound and a layout descriptor a consumer reconstructs exactly
+// instead of re-walking the pool. A consumer that cannot verify it falls back.
+type KVLoadCertificate struct {
+	Blocks      int    `json:"blocks"`
+	MaxBlockID  int    `json:"max_block_id"`
+	LayoutDesc  string `json:"layout_desc"`
+	CostBytes   int    `json:"cost_bytes"`
+	Permutation []int  `json:"permutation,omitempty"`
+}
+
+// ErrKVLoadCertificateInvalid is the closed fail-closed refusal for a certificate
+// that does not reconstruct; callers fall back to the uncertified walk.
+var ErrKVLoadCertificateInvalid = errors.New("modelengine: kv load certificate does not reconstruct")
+
+// NewKVLoadCertificate prices and builds a certificate for blocks ids in order.
+func NewKVLoadCertificate(blockIDs []int, layoutDesc string) KVLoadCertificate {
+	maxID := -1
+	for _, id := range blockIDs {
+		if id > maxID {
+			maxID = id
+		}
+	}
+	perm := append([]int(nil), blockIDs...)
+	return KVLoadCertificate{
+		Blocks:      len(blockIDs),
+		MaxBlockID:  maxID,
+		LayoutDesc:  layoutDesc,
+		CostBytes:   8*len(perm) + len(layoutDesc) + 16,
+		Permutation: perm,
+	}
+}
+
+// Verify reconstructs the certificate against the actual block ids and layout:
+// count, bound, layout and exact permutation must all agree, otherwise it refuses.
+func (c KVLoadCertificate) Verify(blockIDs []int, layoutDesc string) error {
+	if c.Blocks != len(blockIDs) || c.LayoutDesc != layoutDesc || len(c.Permutation) != len(blockIDs) {
+		return fmt.Errorf("%w: shape mismatch", ErrKVLoadCertificateInvalid)
+	}
+	for i, id := range blockIDs {
+		if id > c.MaxBlockID || c.Permutation[i] != id {
+			return fmt.Errorf("%w: block %d id %d", ErrKVLoadCertificateInvalid, i, id)
+		}
+	}
+	return nil
+}
