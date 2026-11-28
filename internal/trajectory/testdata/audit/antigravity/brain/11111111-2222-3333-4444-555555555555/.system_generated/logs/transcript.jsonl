@@ -9,3 +9,4 @@
 {"step_index":8,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-26T20:00:08Z","model":"gemini-4-neon-medium","input_tokens":200,"cache_read_tokens":1900,"output_tokens":60,"content":"Applying second edit to foo.go","tool_calls":[{"name":"edit_file","args":{"Path":"c:\\work\\fak\\cmd\\fak\\foo.go"}}]}
 {"step_index":9,"source":"MODEL","type":"GENERIC","status":"DONE","created_at":"2026-11-26T20:00:09Z","content":"Edited c:\\work\\fak\\cmd\\fak\\foo.go"}
 {"step_index":10,"source":"SYSTEM","type":"CHECKPOINT","status":"DONE","created_at":"2026-11-26T20:00:10Z","input_tokens":100,"cache_read_tokens":2000,"output_tokens":40,"content":"# Resuming from a compaction\nSummary of work."}
+{"step_index":11,"source":"SYSTEM","type":"ERROR_MESSAGE","status":"DONE","error":"model output error: empty output","created_at":"2026-11-26T20:00:11Z"}

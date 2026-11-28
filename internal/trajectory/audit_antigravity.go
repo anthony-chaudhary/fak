@@ -50,6 +50,12 @@ func parseAntigravityAuditRecord(record map[string]any, line int, rel string, st
 		content, _ := record["content"].(string)
 		errText, _ := record["error"].(string)
 		status, _ := record["status"].(string)
+		if call.name == "run_command" && strings.Contains(content, "Tool is running as a background task") {
+			state.row.AntigravityBackgroundedCommands++
+		}
+		if n := strings.Count(content, "fak-run: STALE"); n > 0 {
+			state.row.AntigravityStaleBannerHits += n
+		}
 		isErr := strings.TrimSpace(errText) != "" ||
 			strings.EqualFold(status, "ERROR") ||
 			auditPiNonzeroExit.MatchString(content)
@@ -68,7 +74,7 @@ func parseAntigravityAuditRecord(record map[string]any, line int, rel string, st
 		if call.target == "" {
 			auditAppendMutationEvent(state, "", QwenMutationWitness)
 		}
-	case "USER_INPUT", "SYSTEM_MESSAGE":
+	case "USER_INPUT", "SYSTEM_MESSAGE", "ERROR_MESSAGE":
 		// Non-usage envelope; user prompt matching is handled by auditUserText.
 	}
 }
@@ -113,11 +119,51 @@ func parseAntigravityToolCalls(rawCalls any, state *auditParseState) {
 		call := auditToolCall{name: name, args: args, target: target}
 		state.antigravityPendingCalls = append(state.antigravityPendingCalls, call)
 		state.row.ToolCalls++
+		observeAntigravityToolCallOverhead(name, tc["args"], &state.row)
 		if target != "" {
 			state.mutationCounts[target]++
 			auditAppendMutationEvent(state, target, QwenMutationWrite)
 		}
 	}
+}
+
+func observeAntigravityToolCallOverhead(name string, rawArgs any, row *AuditTranscriptRow) {
+	argsMap, _ := rawArgs.(map[string]any)
+	if argsMap == nil {
+		return
+	}
+	switch name {
+	case "manage_task":
+		if action, _ := argsMap["Action"].(string); strings.EqualFold(strings.Trim(action, `"`), "status") {
+			row.AntigravityManageTaskStatusCalls++
+		}
+	case "read_file":
+		if pathVal, _ := argsMap["Path"].(string); isAntigravitySpillOutputPath(pathVal) {
+			row.AntigravitySpillOutputReads++
+		}
+	}
+}
+
+func isAntigravitySpillOutputPath(pathVal string) bool {
+	norm := strings.ToLower(strings.ReplaceAll(strings.Trim(pathVal, `"`), `\`, "/"))
+	return strings.Contains(norm, "/.system_generated/") && strings.HasSuffix(norm, "/output.txt")
+}
+
+func antigravityContainsSearchSegment(lowerCmd string) bool {
+	if strings.Contains(lowerCmd, "select-string") {
+		return true
+	}
+	for _, semi := range strings.Split(lowerCmd, ";") {
+		for _, andSeg := range strings.Split(semi, "&&") {
+			for _, seg := range strings.Split(andSeg, "||") {
+				trimmed := strings.TrimSpace(seg)
+				if strings.HasPrefix(trimmed, "rg ") || strings.HasPrefix(trimmed, "grep ") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func auditAntigravityBenignNegative(call auditToolCall, content string) bool {
@@ -130,7 +176,7 @@ func auditAntigravityBenignNegative(call auditToolCall, content string) bool {
 	}
 	cmdLine, _ := decoded["CommandLine"].(string)
 	lower := strings.ToLower(strings.TrimSpace(cmdLine))
-	if strings.Contains(lower, "select-string") || strings.HasPrefix(lower, "rg ") || strings.HasPrefix(lower, "grep ") {
+	if antigravityContainsSearchSegment(lower) {
 		if m := antigravityExitCodeRegex.FindStringSubmatch(content); len(m) == 2 && m[1] == "1" {
 			return true
 		}
@@ -182,6 +228,10 @@ func classifyAntigravityDistributionEvents(typ string, root map[string]json.RawM
 	case "SYSTEM_MESSAGE", "CHECKPOINT":
 		return []auditClassifiedEvent{
 			auditStorageEvent(typ, "explicit_storage_only", "known_antigravity_envelope"),
+		}
+	case "ERROR_MESSAGE":
+		return []auditClassifiedEvent{
+			auditStorageEvent(typ, "explicit_storage_only", "known_antigravity_error_message"),
 		}
 	default:
 		return []auditClassifiedEvent{

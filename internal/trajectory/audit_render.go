@@ -34,6 +34,10 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	fmt.Fprintf(&out, "- Repeated-failure semantics: `%s`; normalization: `%s`.\n", summary.RepeatedFailureSemantics, summary.RepeatedFailureNormalization)
 	fmt.Fprintf(&out, "- Distinct transcripts: %d; duplicate fragments: %d; empty-usage files: %d.\n", summary.DistinctTranscripts, summary.DuplicateFragments, summary.EmptyUsageFiles)
 	fmt.Fprintf(&out, "- Tool errors: %d/%d (%s); top-10 token concentration: %s.\n", summary.ToolErrors, summary.ToolCalls, auditPercent(summary.ToolErrorFraction), auditPercent(summary.TopTenTokenFraction))
+	if summary.AntigravityBackgroundedCommands > 0 || summary.AntigravityManageTaskStatusCalls > 0 || summary.AntigravityStaleBannerHits > 0 || summary.AntigravitySpillOutputReads > 0 {
+		fmt.Fprintf(&out, "- Antigravity overhead: backgrounded commands: %d; manage_task(status) polls: %d; fak-run STALE banners: %d; output.txt spill reads: %d.\n",
+			summary.AntigravityBackgroundedCommands, summary.AntigravityManageTaskStatusCalls, summary.AntigravityStaleBannerHits, summary.AntigravitySpillOutputReads)
+	}
 	fmt.Fprintf(&out, "- Payload distribution unit: `%s` — %s\n", summary.DistributionUnit, summary.DistributionProvenance)
 	writeAuditCodexCacheObservations(&out, result.Transcripts)
 	out.WriteString("\n## Transcript schema drift\n\n")

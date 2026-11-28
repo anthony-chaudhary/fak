@@ -436,6 +436,20 @@
     },
     {
       "source": "antigravity",
+      "event_type": "ERROR_MESSAGE",
+      "builds": [{"harness": "antigravity"}],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.created_at", "types": ["string"]},
+        {"path": "$.error", "types": ["string"]},
+        {"path": "$.source", "types": ["string"]},
+        {"path": "$.status", "types": ["string"]},
+        {"path": "$.step_index", "types": ["number"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "antigravity",
       "event_type": "GENERIC",
       "builds": [{"harness": "antigravity"}],
       "fields": [

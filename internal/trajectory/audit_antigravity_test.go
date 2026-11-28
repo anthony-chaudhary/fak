@@ -1,8 +1,10 @@
 package trajectory
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -96,5 +98,55 @@ func TestAuditAntigravityRefusesMalformedUsage(t *testing.T) {
 	}
 	if len(result.Refusals) != 1 || result.Refusals[0].Code != "antigravity_usage_input_invalid" {
 		t.Fatalf("refusals = %+v, want antigravity_usage_input_invalid", result.Refusals)
+	}
+}
+
+// fak-test:runtime fast est=50ms
+func TestAuditAntigravityOverheadAndChainedBenignNegative(t *testing.T) {
+	dir := t.TempDir()
+	logDir := filepath.Join(dir, "bbbbbbbb-cccc-dddd-eeee-ffffffffffff", ".system_generated", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Join([]string{
+		`{"step_index":0,"source":"SYSTEM","type":"ERROR_MESSAGE","status":"DONE","error":"API error (attempt 1): HTTP 429","created_at":"2026-11-27T06:43:42Z"}`,
+		`{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","model":"gemini-4-neon-medium","input_tokens":500,"output_tokens":50,"cache_read_tokens":1000,"tool_calls":[{"name":"run_command","args":{"CommandLine":"cd c:\\work\\fak; rg -n MissingSymbol internal/"}},{"name":"run_command","args":{"CommandLine":"go test ./internal/trajectory"}},{"name":"manage_task","args":{"Action":"status","TaskId":"t1"}},{"name":"read_file","args":{"Path":"C:\\Users\\USER\\.gemini\\antigravity\\brain\\id\\.system_generated\\steps\\9\\output.txt"}}]}`,
+		`{"step_index":2,"source":"MODEL","type":"GENERIC","status":"DONE","content":"Command exited with code 1."}`,
+		`{"step_index":3,"source":"MODEL","type":"GENERIC","status":"DONE","content":"fak-run: STALE fak-sync: slot abc is 2 commit(s) behind HEAD def\nTool is running as a background task with task id: t1"}`,
+		`{"step_index":4,"source":"MODEL","type":"GENERIC","status":"DONE","content":"Task status: running"}`,
+		`{"step_index":5,"source":"MODEL","type":"GENERIC","status":"DONE","content":"file contents"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(logDir, "transcript.jsonl"), []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceAntigravity, Root: dir, RootLabel: "antigravity/brain"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Refusals) != 0 {
+		t.Fatalf("unexpected refusals: %+v", result.Refusals)
+	}
+	for _, d := range result.SchemaDrift {
+		if d.Source == AuditSourceAntigravity && d.EventType == "ERROR_MESSAGE" {
+			t.Fatalf("unexpected ERROR_MESSAGE schema drift: %+v", d)
+		}
+	}
+	row := auditSession(t, result, AuditSourceAntigravity)
+	if row.ToolErrors != 0 || row.ToolErrorsBenignNegative != 1 {
+		t.Fatalf("errors=%d benign=%d, want 0/1 (chained rg exit 1 must be benign)", row.ToolErrors, row.ToolErrorsBenignNegative)
+	}
+	if row.AntigravityBackgroundedCommands != 1 || row.AntigravityManageTaskStatusCalls != 1 || row.AntigravityStaleBannerHits != 1 || row.AntigravitySpillOutputReads != 1 {
+		t.Fatalf("antigravity overhead = bg:%d mt:%d stale:%d spill:%d, want 1/1/1/1",
+			row.AntigravityBackgroundedCommands, row.AntigravityManageTaskStatusCalls, row.AntigravityStaleBannerHits, row.AntigravitySpillOutputReads)
+	}
+	if result.Summary.UnknownExemplars.Retained != 0 {
+		t.Fatalf("ERROR_MESSAGE must not produce unknown exemplars, got %+v", result.Summary.UnknownExemplars)
+	}
+	var md bytes.Buffer
+	if err := WriteAuditMarkdown(&md, result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(md.String(), "Antigravity overhead: backgrounded commands: 1; manage_task(status) polls: 1; fak-run STALE banners: 1; output.txt spill reads: 1.") {
+		t.Fatalf("markdown missing Antigravity overhead line:\n%s", md.String())
 	}
 }

@@ -149,42 +149,46 @@ type AuditDenominatorRow struct {
 
 // AuditTranscriptRow is one queryable, content-free transcript rollup.
 type AuditTranscriptRow struct {
-	Schema                       string                        `json:"schema"`
-	Kind                         string                        `json:"kind"`
-	Source                       string                        `json:"source"`
-	TranscriptID                 string                        `json:"session_id"`
-	SourcePath                   string                        `json:"source_path"`
-	Models                       []string                      `json:"models"`
-	BuildIdentities              []AuditBuildIdentity          `json:"build_identities"`
-	Tokens                       AuditTokens                   `json:"tokens"`
-	CodexCache                   *AuditCodexCacheObservation   `json:"codex_cache,omitempty"`
-	CompactionEvents             []AuditCompactionEvent        `json:"compaction_events,omitempty"`
-	ToolCalls                    int                           `json:"tool_calls"`
-	ToolErrors                   int                           `json:"tool_errors"`
-	ToolErrorsBenignNegative     int                           `json:"tool_errors_benign_negative"`
-	Distribution                 []AuditDistributionRow        `json:"distribution,omitempty"`
-	ToolDistribution             []AuditDistributionRow        `json:"tool_distribution,omitempty"`
-	ToolResults                  []AuditToolResultRow          `json:"tool_results,omitempty"`
-	StorageDistribution          []AuditStorageRow             `json:"storage_distribution,omitempty"`
-	UnknownExemplars             AuditUnknownExemplarReservoir `json:"unknown_exemplars"`
-	RepeatedFailures             int                           `json:"repeated_failures"`
-	ExpectedWaitTimeouts         int                           `json:"expected_wait_timeouts"`
-	MutationChurn                int                           `json:"mutation_churn"`
-	MutationChurnEvents          []QwenMutationChurn           `json:"mutation_churn_events,omitempty"`
-	HookP95MS                    *int64                        `json:"hook_p95_ms"`
-	UsageRecords                 int                           `json:"usage_records"`
-	SourcePaths                  []string                      `json:"source_paths,omitempty"`
-	TerminalFailures             int                           `json:"terminal_failures,omitempty"`
-	TerminalFailureClasses       map[string]int                `json:"terminal_failure_classes,omitempty"`
-	TerminalStallSeconds         int64                         `json:"terminal_stall_seconds,omitempty"`
-	TerminalStallDurationBuckets map[string]int                `json:"terminal_stall_duration_buckets,omitempty"`
-	DegenerateCycles             int                           `json:"degenerate_cycles"`
-	DegenerateCycleExemplars     []AuditDegenerateCycle        `json:"degenerate_cycle_exemplars,omitempty"`
-	usageByID                    map[string]AuditTokens
-	failureCounts                map[string]int
-	schemaShapes                 map[string]auditShapeSet
-	fragmentDigest               string
-	fragmentDigests              map[string]struct{}
+	Schema                           string                        `json:"schema"`
+	Kind                             string                        `json:"kind"`
+	Source                           string                        `json:"source"`
+	TranscriptID                     string                        `json:"session_id"`
+	SourcePath                       string                        `json:"source_path"`
+	Models                           []string                      `json:"models"`
+	BuildIdentities                  []AuditBuildIdentity          `json:"build_identities"`
+	Tokens                           AuditTokens                   `json:"tokens"`
+	CodexCache                       *AuditCodexCacheObservation   `json:"codex_cache,omitempty"`
+	CompactionEvents                 []AuditCompactionEvent        `json:"compaction_events,omitempty"`
+	ToolCalls                        int                           `json:"tool_calls"`
+	ToolErrors                       int                           `json:"tool_errors"`
+	ToolErrorsBenignNegative         int                           `json:"tool_errors_benign_negative"`
+	Distribution                     []AuditDistributionRow        `json:"distribution,omitempty"`
+	ToolDistribution                 []AuditDistributionRow        `json:"tool_distribution,omitempty"`
+	ToolResults                      []AuditToolResultRow          `json:"tool_results,omitempty"`
+	StorageDistribution              []AuditStorageRow             `json:"storage_distribution,omitempty"`
+	UnknownExemplars                 AuditUnknownExemplarReservoir `json:"unknown_exemplars"`
+	RepeatedFailures                 int                           `json:"repeated_failures"`
+	ExpectedWaitTimeouts             int                           `json:"expected_wait_timeouts"`
+	MutationChurn                    int                           `json:"mutation_churn"`
+	MutationChurnEvents              []QwenMutationChurn           `json:"mutation_churn_events,omitempty"`
+	HookP95MS                        *int64                        `json:"hook_p95_ms"`
+	UsageRecords                     int                           `json:"usage_records"`
+	SourcePaths                      []string                      `json:"source_paths,omitempty"`
+	TerminalFailures                 int                           `json:"terminal_failures,omitempty"`
+	TerminalFailureClasses           map[string]int                `json:"terminal_failure_classes,omitempty"`
+	TerminalStallSeconds             int64                         `json:"terminal_stall_seconds,omitempty"`
+	TerminalStallDurationBuckets     map[string]int                `json:"terminal_stall_duration_buckets,omitempty"`
+	DegenerateCycles                 int                           `json:"degenerate_cycles"`
+	DegenerateCycleExemplars         []AuditDegenerateCycle        `json:"degenerate_cycle_exemplars,omitempty"`
+	AntigravityBackgroundedCommands  int                           `json:"antigravity_backgrounded_commands,omitempty"`
+	AntigravityManageTaskStatusCalls int                           `json:"antigravity_manage_task_status_calls,omitempty"`
+	AntigravityStaleBannerHits       int                           `json:"antigravity_stale_banner_hits,omitempty"`
+	AntigravitySpillOutputReads      int                           `json:"antigravity_spill_output_reads,omitempty"`
+	usageByID                        map[string]AuditTokens
+	failureCounts                    map[string]int
+	schemaShapes                     map[string]auditShapeSet
+	fragmentDigest                   string
+	fragmentDigests                  map[string]struct{}
 }
 
 // AuditBottleneckRow ranks sessions by exact accounted tokens. DominantBucket
@@ -253,6 +257,10 @@ type AuditSummaryRow struct {
 	TerminalFailures                    int                           `json:"terminal_failures,omitempty"`
 	TerminalFailureClasses              map[string]int                `json:"terminal_failure_classes,omitempty"`
 	TerminalStallDurationBuckets        map[string]int                `json:"terminal_stall_duration_buckets,omitempty"`
+	AntigravityBackgroundedCommands     int                           `json:"antigravity_backgrounded_commands,omitempty"`
+	AntigravityManageTaskStatusCalls    int                           `json:"antigravity_manage_task_status_calls,omitempty"`
+	AntigravityStaleBannerHits          int                           `json:"antigravity_stale_banner_hits,omitempty"`
+	AntigravitySpillOutputReads         int                           `json:"antigravity_spill_output_reads,omitempty"`
 }
 
 // AuditDeltaRow compares one higher-is-worse metric with a prior summary.
@@ -1018,6 +1026,10 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 		summary.ToolErrors += transcript.ToolErrors
 		summary.ToolErrorsBenignNegative += transcript.ToolErrorsBenignNegative
 		summary.TerminalFailures += transcript.TerminalFailures
+		summary.AntigravityBackgroundedCommands += transcript.AntigravityBackgroundedCommands
+		summary.AntigravityManageTaskStatusCalls += transcript.AntigravityManageTaskStatusCalls
+		summary.AntigravityStaleBannerHits += transcript.AntigravityStaleBannerHits
+		summary.AntigravitySpillOutputReads += transcript.AntigravitySpillOutputReads
 		for k, v := range transcript.TerminalFailureClasses {
 			if summary.TerminalFailureClasses == nil {
 				summary.TerminalFailureClasses = map[string]int{}
