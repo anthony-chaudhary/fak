@@ -3021,3 +3021,7 @@ Portions of this product are adapted from sgl-project/sglang (https://github.com
 Clean-room design reference from youssofal/mtplx: https://github.com/youssofal/mtplx (pinned at revision 21be78b3f51820eecef020e5e4855c0715eaf9a5). Implemented independently without copying upstream code.
 
 SPDX-License-Identifier: Apache-2.0
+
+---
+
+Portions of this product are conceptually informed by NVIDIA/RULER (https://github.com/NVIDIA/RULER, pinned at revision db43f92ff6, Apache-2.0, in `internal/ctxmmu/ruler_tasks.go`). Changes were made; no upstream code was copied.
