@@ -450,7 +450,10 @@ func (c *cudaBackend) Ink2GraphLaunchSlot(slot int) error {
 	return ink2Status("graph launch slot", C.fcuda_ink2_graph_launch_slot(C.int(slot)))
 }
 
-var _ Inkling2DraftDevice = (*cudaBackend)(nil)
+var (
+	_ Inkling2DraftDevice    = (*cudaBackend)(nil)
+	_ Inkling2DraftFP8Device = (*cudaBackend)(nil)
+)
 
 func (c *cudaBackend) Ink2DFuse(taps []Ink2Ref, alpha []float32, w, out Ink2Ref, rows, n int, eps float32) error {
 	cudaMu.Lock()
@@ -489,6 +492,29 @@ func (c *cudaBackend) Ink2DAttend(q, kb, vb, kc, vc, out, posDev Ink2Ref, rows, 
 	defer cudaMu.Unlock()
 	return ink2Status("draft attend", C.fcuda_ink2d_attend(c.ink2F(q), c.ink2F(kb), c.ink2F(vb), c.ink2F(kc), c.ink2F(vc),
 		c.ink2F(out), C.int(rows), C.int(heads), C.int(kvHeads), C.int(dim), c.ink2I(posDev), C.int(window), C.int(cap)))
+}
+
+func (c *cudaBackend) Ink2DQKFP8(x, w, dst, sc, overflow, posDev Ink2Ref, rows, heads, dim, cap int, ring bool, eps float32, theta float64) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft qk fp8", C.fcuda_ink2d_qk_fp8(c.ink2F(x), c.ink2F(w), (*C.uint8_t)(c.ink2Ptr(dst)),
+		c.ink2F(sc), c.ink2I(overflow), C.int(rows), C.int(heads), C.int(dim), c.ink2I(posDev), C.int(cap),
+		ink2Bool(ring), C.float(eps), C.double(theta)))
+}
+
+func (c *cudaBackend) Ink2DRingStoreFP8(src, ring, sc, overflow, posDev Ink2Ref, rows, kvHeads, dim, cap int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft ring store fp8", C.fcuda_ink2d_ring_store_fp8(c.ink2F(src), (*C.uint8_t)(c.ink2Ptr(ring)),
+		c.ink2F(sc), c.ink2I(overflow), C.int(rows), C.int(kvHeads), C.int(dim), c.ink2I(posDev), C.int(cap)))
+}
+
+func (c *cudaBackend) Ink2DAttendFP8(q, kb, vb, kc, vc, ks, vs, out, posDev Ink2Ref, rows, heads, kvHeads, dim, window, cap int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("draft attend fp8", C.fcuda_ink2d_attend_fp8(c.ink2F(q), c.ink2F(kb), c.ink2F(vb),
+		(*C.uint8_t)(c.ink2Ptr(kc)), (*C.uint8_t)(c.ink2Ptr(vc)), c.ink2F(ks), c.ink2F(vs), c.ink2F(out),
+		C.int(rows), C.int(heads), C.int(kvHeads), C.int(dim), c.ink2I(posDev), C.int(window), C.int(cap)))
 }
 
 func (c *cudaBackend) Ink2DSiluMul(g, u, out Ink2Ref, n int) error {

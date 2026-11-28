@@ -47,6 +47,13 @@ int fcuda_ink2d_ring_store(const float *src, float *ring, int rows, int width, c
 int fcuda_ink2d_attend(const float *q, const float *kb, const float *vb, const float *kc, const float *vc, float *out,
     int rows, int heads, int kvHeads, int dim, const int *posDev, int window, int cap);
 int fcuda_ink2d_silu_mul(const float *g, const float *u, float *out, int n);
+int fcuda_ink2d_qk_fp8(const float *x, const float *w, uint8_t *dst, float *scale, int *overflow, int rows, int heads,
+    int dim, const int *posDev, int cap, int ring, float eps, double theta);
+int fcuda_ink2d_ring_store_fp8(const float *src, uint8_t *ring, float *scale, int *overflow, int rows, int kvHeads,
+    int dim, const int *posDev, int cap);
+int fcuda_ink2d_attend_fp8(const float *q, const float *kb, const float *vb, const uint8_t *kc, const uint8_t *vc,
+    const float *ks, const float *vs, float *out, int rows, int heads, int kvHeads, int dim, const int *posDev,
+    int window, int cap);
 int fcuda_ink2v_q5k_rows(const unsigned char *W, const float *X, float *Y, int out, int in, int rows);
 int fcuda_ink2p_ctrl_multi(const float *const *cur, const float *const *msg, const float *const *W,
     const float *const *gainW, const float *const *forgetW, float *const *g, float *const *out, int J, int n,

@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -9,6 +10,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+// ErrInkling2DSparkFP8Overflow is returned when DSpark FP8 context KV compression
+// observes non-finite values or scale overflow in device buffers.
+var ErrInkling2DSparkFP8Overflow = errors.New("inkling2 draft: fp8 kv overflow")
 
 // inkling2DraftSlot is the device graph slot of the draft block forward.
 const inkling2DraftSlot = 3
@@ -47,9 +52,15 @@ func inkling2DraftFRNNCap(ctx, chunk int) int {
 }
 
 // inkling2DSparkStateBytes returns the device bytes allocated by attachDraft for
-// DSpark's KV context rings, Markov fRNN ring, and working/scratch buffers
+// FP32 DSpark KV context rings, Markov fRNN ring, and working/scratch buffers
 // (excluding Q8_0 draft weights, which are ~278 MiB for Inkling-2-Mini).
 func inkling2DSparkStateBytes(hp model.Inkling2DSparkHParams, ctx, chunk, outputRows, shortlist int) int64 {
+	return inkling2DSparkStateBytesFor(hp, ctx, chunk, outputRows, shortlist, false)
+}
+
+// inkling2DSparkStateBytesFor returns the device bytes allocated by attachDraft
+// with FP32 (fp8KV=false) or OCP FP8 E4M3FN (fp8KV=true) DSpark context KV rings.
+func inkling2DSparkStateBytesFor(hp model.Inkling2DSparkHParams, ctx, chunk, outputRows, shortlist int, fp8KV bool) int64 {
 	H := hp.Hidden
 	kvDim := hp.KVHeads * hp.HeadDim
 	qDim := hp.Heads * hp.HeadDim
@@ -58,7 +69,16 @@ func inkling2DSparkStateBytes(hp model.Inkling2DSparkHParams, ctx, chunk, output
 	for l := 0; l < hp.Layers; l++ {
 		local := l < len(hp.LocalLayer) && hp.LocalLayer[l]
 		cap, _ := inkling2DraftLayerRing(ctx, chunk, hp.SlidingWindow, local)
-		floats += 2 * int64(cap) * int64(kvDim)
+		if fp8KV {
+			codeFloats := compute.Ink2FP8KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)
+			scaleFloats := compute.Ink2FP8KVScaleFloats(cap, hp.KVHeads)
+			floats += 2 * (int64(codeFloats) + int64(scaleFloats))
+		} else {
+			floats += 2 * int64(cap) * int64(kvDim)
+		}
+	}
+	if fp8KV {
+		floats++ // kvOverflow flag
 	}
 	if shortlist > 0 {
 		frnnCap := inkling2DraftFRNNCap(ctx, chunk)
@@ -74,7 +94,7 @@ func inkling2DSparkStateBytes(hp model.Inkling2DSparkHParams, ctx, chunk, output
 type ink2DLayer struct {
 	inNorm, postNorm, dfNorm, qNorm, kNorm, kNormCtx ink2Ref
 	wq, wk, wv, wo, wkCtx, wvCtx, gate, up, down     ink2Mat
-	kc, vc                                           ink2Ref // context rings [cap][kvDim]
+	kc, vc, ks, vs                                   ink2Ref // context rings [cap][kvDim] (or E4M3FN codes + F32 scales when fp8KV)
 	cap, window                                      int
 	alpha                                            []float32
 }
@@ -109,6 +129,9 @@ type ink2DeviceDraft struct {
 	rnnBias, hiddenOutBias, mkNorm ink2Ref
 	mkAlpha                        []float32
 	state, cand, candV, candI      ink2Ref
+	fp8dd                          compute.Inkling2DraftFP8Device
+	fp8KV                          bool
+	kvOverflow                     ink2Ref
 }
 
 // q8Mat uploads a host matrix requantized to Q8_0 (32-value blocks, absmax scale),
@@ -164,11 +187,24 @@ func inkling2SoftmaxF32(x []float32) []float32 {
 }
 
 // attachDraft binds dm on the session's device; every later target forward also
-// writes the draft context.
+// writes the draft context. Context rings default to FP8 E4M3FN when the backend
+// implements compute.Inkling2DraftFP8Device.
 func (s *inkling2Resident) attachDraft(dm *Inkling2DSparkModel) (*ink2DeviceDraft, error) {
+	_, hasFP8 := s.be.(compute.Inkling2DraftFP8Device)
+	return s.attachDraftFor(dm, hasFP8)
+}
+
+func (s *inkling2Resident) attachDraftFor(dm *Inkling2DSparkModel, fp8KV bool) (*ink2DeviceDraft, error) {
 	dd, ok := s.be.(compute.Inkling2DraftDevice)
 	if !ok {
 		return nil, fmt.Errorf("inkling2 draft: backend %s has no draft ops", s.be.Name())
+	}
+	var fp8dd compute.Inkling2DraftFP8Device
+	if fp8KV {
+		fp8dd, ok = s.be.(compute.Inkling2DraftFP8Device)
+		if !ok {
+			return nil, fmt.Errorf("inkling2 draft: backend %s has no fp8 draft ops", s.be.Name())
+		}
 	}
 	if !inkling2SpecCapable(s.be) {
 		return nil, fmt.Errorf("inkling2 draft: backend %s has no verify or prefill ops", s.be.Name())
@@ -177,20 +213,32 @@ func (s *inkling2Resident) attachDraft(dm *Inkling2DSparkModel) (*ink2DeviceDraf
 	if hp.Taps > 4 || hp.Hidden != s.hp.Hidden || hp.HeadDim > 256 {
 		return nil, fmt.Errorf("inkling2 draft: unsupported geometry %+v", hp)
 	}
-	d := &ink2DeviceDraft{s: s, dd: dd, hp: hp, w: w, visits: dm.TargetVisits, steps: hp.Block - 1, minMargin: inkling2SpecMinMargin}
+	d := &ink2DeviceDraft{s: s, dd: dd, fp8dd: fp8dd, fp8KV: fp8KV, hp: hp, w: w, visits: dm.TargetVisits, steps: hp.Block - 1, minMargin: inkling2SpecMinMargin}
+	if fp8KV {
+		d.kvOverflow = s.alloc(1)
+	}
 	H := hp.Hidden
 	kvDim := hp.KVHeads * hp.HeadDim
 	for l := range w.Layers {
 		lw := &w.Layers[l]
 		local := l < len(hp.LocalLayer) && hp.LocalLayer[l]
 		lcap, lwin := inkling2DraftLayerRing(s.ctx, s.chunkMax, hp.SlidingWindow, local)
+		var kc, vc, ks, vs ink2Ref
+		if fp8KV {
+			codeFloats := compute.Ink2FP8KVCodeFloats(lcap, hp.KVHeads, hp.HeadDim)
+			scaleFloats := compute.Ink2FP8KVScaleFloats(lcap, hp.KVHeads)
+			kc, vc = s.alloc(codeFloats), s.alloc(codeFloats)
+			ks, vs = s.alloc(scaleFloats), s.alloc(scaleFloats)
+		} else {
+			kc, vc = s.alloc(lcap*kvDim), s.alloc(lcap*kvDim)
+		}
 		d.layers = append(d.layers, ink2DLayer{
 			inNorm: s.upload(lw.InputNorm), postNorm: s.upload(lw.PostAttnNorm), dfNorm: s.upload(lw.DFlareNorm),
 			qNorm: s.upload(lw.QNorm), kNorm: s.upload(lw.KNorm), kNormCtx: s.upload(lw.KNormCtx),
 			wq: s.q8Mat(lw.Wq), wk: s.q8Mat(lw.Wk), wv: s.q8Mat(lw.Wv), wo: s.q8Mat(lw.Wo),
 			wkCtx: s.q8Mat(lw.WkCtx), wvCtx: s.q8Mat(lw.WvCtx),
 			gate: s.q8Mat(lw.Gate), up: s.q8Mat(lw.Up), down: s.q8Mat(lw.Down),
-			kc: s.alloc(lcap * kvDim), vc: s.alloc(lcap * kvDim),
+			kc: kc, vc: vc, ks: ks, vs: vs,
 			cap: lcap, window: lwin,
 			alpha: inkling2SoftmaxF32(w.FuseWeight[l]),
 		})
@@ -277,10 +325,18 @@ func (d *ink2DeviceDraft) commitTaps(p *ink2Prefill, taps []ink2Ref) {
 			s.fail(p.pd.Ink2PMatMul(L.wvCtx.t, ctx, v, p.T))
 		}
 		if s.err == nil {
-			s.fail(d.dd.Ink2DQK(k, L.kNormCtx, L.kc, s.verifyPos, p.T, hp.KVHeads, hp.HeadDim, L.cap, true, hp.NormEps, hp.RopeTheta))
+			if d.fp8KV {
+				s.fail(d.fp8dd.Ink2DQKFP8(k, L.kNormCtx, L.kc, L.ks, d.kvOverflow, s.verifyPos, p.T, hp.KVHeads, hp.HeadDim, L.cap, true, hp.NormEps, hp.RopeTheta))
+			} else {
+				s.fail(d.dd.Ink2DQK(k, L.kNormCtx, L.kc, s.verifyPos, p.T, hp.KVHeads, hp.HeadDim, L.cap, true, hp.NormEps, hp.RopeTheta))
+			}
 		}
 		if s.err == nil {
-			s.fail(d.dd.Ink2DRingStore(v, L.vc, s.verifyPos, p.T, kvDim, L.cap))
+			if d.fp8KV {
+				s.fail(d.fp8dd.Ink2DRingStoreFP8(v, L.vc, L.vs, d.kvOverflow, s.verifyPos, p.T, hp.KVHeads, hp.HeadDim, L.cap))
+			} else {
+				s.fail(d.dd.Ink2DRingStore(v, L.vc, s.verifyPos, p.T, kvDim, L.cap))
+			}
 		}
 	}
 	if d.shortlist > 0 && s.err == nil {
@@ -362,7 +418,11 @@ func (d *ink2DeviceDraft) forward() {
 		run(d.dd.Ink2DQK(q, L.qNorm, q, d.pos, B, hp.Heads, hp.HeadDim, 0, false, hp.NormEps, hp.RopeTheta))
 		run(d.dd.Ink2DQK(k, L.kNorm, k, d.pos, B, hp.KVHeads, hp.HeadDim, 0, false, hp.NormEps, hp.RopeTheta))
 		o := d.tmp(B * qDim)
-		run(d.dd.Ink2DAttend(q, k, v, L.kc, L.vc, o, d.pos, B, hp.Heads, hp.KVHeads, hp.HeadDim, L.window, L.cap))
+		if d.fp8KV {
+			run(d.fp8dd.Ink2DAttendFP8(q, k, v, L.kc, L.vc, L.ks, L.vs, o, d.pos, B, hp.Heads, hp.KVHeads, hp.HeadDim, L.window, L.cap))
+		} else {
+			run(d.dd.Ink2DAttend(q, k, v, L.kc, L.vc, o, d.pos, B, hp.Heads, hp.KVHeads, hp.HeadDim, L.window, L.cap))
+		}
 		run(s.dev.Ink2Add(res, mm(L.wo, o, B), res, B*H))
 		h := d.tmp(B * H)
 		run(s.dev.Ink2RMS(res, L.postNorm, h, B, H, hp.NormEps))
@@ -454,6 +514,11 @@ func (d *ink2DeviceDraft) propose(anchor, pos, k int) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
+	if ovf, err := d.checkKVOverflow(); err != nil {
+		return nil, err
+	} else if ovf {
+		return nil, ErrInkling2DSparkFP8Overflow
+	}
 	out := make([]int, 0, k)
 	for i := 0; i < k; i++ {
 		if d.shortlist > 0 && math.Float32frombits(uint32(got[4*i+1])) < d.minMargin {
@@ -462,6 +527,17 @@ func (d *ink2DeviceDraft) propose(anchor, pos, k int) ([]int, error) {
 		out = append(out, int(got[4*i]))
 	}
 	return out, nil
+}
+
+func (d *ink2DeviceDraft) checkKVOverflow() (bool, error) {
+	if !d.fp8KV || d.kvOverflow.T.Buf() == nil {
+		return false, nil
+	}
+	flag, err := d.s.dev.Ink2ReadInts(d.kvOverflow, 1)
+	if err != nil {
+		return false, err
+	}
+	return len(flag) > 0 && flag[0] != 0, nil
 }
 
 // inkling2DSparkDrafter adapts the device draft to the speculative loop.

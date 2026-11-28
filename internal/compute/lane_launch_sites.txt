@@ -40,9 +40,12 @@ internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<true, T, 
 internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree_tiled<T, kVNVFP4, AsymK8V4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	0
 internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_scores<T, NVFP4, AsymK8V4>	INK2_ATS_WARPS * 32	256	resolved-chain	g1	0
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_attend	128	128	literal	grid	smem
+internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_attend_fp8	128	128	literal	grid	smem
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_fuse	256	256	literal	rows	0
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_qk	dim	0	runtime	grid	0
+internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_qk_fp8	dim	0	runtime	grid	0
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_ring_store	256	256	literal	grid	0
+internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_ring_store_fp8	nt	0	runtime	grid	0
 internal/compute/cuda/inkling2_dspark.cuh	k_ink2d_silu_mul	256	256	literal	(n + 255) / 256	0
 internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_markov_gate	256	256	literal	(rank + 255) / 256	0
 internal/compute/cuda/inkling2_dspark_markov.cuh	k_ink2d_markov_in	256	256	literal	(n + 255) / 256	0

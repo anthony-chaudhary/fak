@@ -176,6 +176,23 @@ type Inkling2DraftDevice interface {
 	Ink2DMarkovPick(head Tensor, base, cand Ink2Ref, M int, z, zb, idx Ink2Ref, step int) error
 }
 
+// Inkling2DraftFP8Device provides optional per-(token, kvHead) OCP FP8 E4M3FN
+// context KV compression for DSpark speculative drafts. Context rings kc/vc hold
+// uint8 E4M3FN codes allocated via Ink2FP8KVCodeFloats(cap, kvHeads, dim) and
+// ks/vs hold float32 scales allocated via Ink2FP8KVScaleFloats(cap, kvHeads);
+// intra-block K/V remain float32.
+type Inkling2DraftFP8Device interface {
+	// Ink2DQKFP8 RMS-normalizes each head of x by w, rotates (neox RoPE, theta) at
+	// *posDev+row, and quantizes into uint8 E4M3FN codes dst and F32 scales sc.
+	Ink2DQKFP8(x, w, dst, sc, overflow, posDev Ink2Ref, rows, heads, dim, cap int, ring bool, eps float32, theta float64) error
+	// Ink2DRingStoreFP8 quantizes src row r (width kvHeads*dim) per (row, kvHead) and
+	// writes E4M3FN codes to ring and F32 scales to sc at slot (*posDev+r)%cap.
+	Ink2DRingStoreFP8(src, ring, sc, overflow, posDev Ink2Ref, rows, kvHeads, dim, cap int) error
+	// Ink2DAttendFP8 attends each block query row to FP8 E4M3FN context kc/vc with
+	// ks/vs scales before *posDev and to FP32 intra-block keys/values kb/vb.
+	Ink2DAttendFP8(q, kb, vb, kc, vc, ks, vs, out, posDev Ink2Ref, rows, heads, kvHeads, dim, window, cap int) error
+}
+
 // Inkling2PrefillFP8ArenaDevice is an optional prefill capability that stores
 // transient keep/scr activation buffers in per-row scaled FP8 E4M3FN instead of FP32,
 // reducing prefill arena VRAM by ~4x while keeping residual accumulation and norms in FP32.

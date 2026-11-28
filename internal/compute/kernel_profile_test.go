@@ -1236,7 +1236,7 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"k_ink2_moe_combine": true, "k_ink2p_combine": true, "k_situ_combine": true,
 	"k_ink2m_mix": true, "k_ink2m_situ4": true, "k_ink2m_situ1": true,
 	// Inkling-2 attention prep: clips, tau, RoPE and cache append fused in one row.
-	"k_ink2_qkv_post": true, "k_ink2p_qkv_post": true, "k_ink2d_qk": true,
+	"k_ink2_qkv_post": true, "k_ink2p_qkv_post": true, "k_ink2d_qk": true, "k_ink2d_qk_fp8": true,
 	// Inkling-2 elementwise glue, activation quantization and key-to-index publication.
 	"k_ink2_add": true, "k_ink2_sigmoid_mul": true, "k_ink2d_silu_mul": true, "k_ink2_expert_scale": true,
 	"k_ink2_q8_quant_gated": true, "k_ink2_argkey_index": true,
@@ -1246,7 +1246,7 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	// Inkling-2 pair bucketing, row gathers/scatters and ring stores.
 	"k_ink2p_bucket_count": true, "k_ink2p_bucket_scan": true, "k_ink2p_bucket_fill": true,
 	"k_ink2p_gather_pairs": true, "k_ink2p_scatter_pairs": true, "k_ink2v_repeat_rows": true,
-	"k_ink2d_ring_store": true,
+	"k_ink2d_ring_store": true, "k_ink2d_ring_store_fp8": true,
 	// Inkling-2 draft tap fusion, top-M shortlist selection and Markov state glue.
 	"k_ink2d_fuse": true, "k_ink2d_topm_slice": true, "k_ink2d_topm_merge": true,
 	"k_ink2d_markov_in": true, "k_ink2d_markov_gate": true,
