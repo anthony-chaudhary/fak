@@ -379,3 +379,58 @@ func StreamWeightsWithEviction(
 
 	return totalStreamed, nil
 }
+
+// ADAPT of modular/modular (Apache-2.0 WITH LLVM-exception),
+// rust_kv/kv-tier-connector/src/disk_tier.rs:1009 check_dio_align and :964 dio_align
+// @88ab8913af6b9298fe914e0f20d87a49e4172d0d: before trusting O_DIRECT, decide from the
+// kernel-reported direct-I/O alignments (statx STATX_DIOALIGN: memory and offset).
+// ext4/XFS serialize unaligned direct writes on the inode lock, and unaligned hole
+// punches zero edges through the page cache, so an alignment above the row padding is
+// refused. The decision table is pure; a live statx leg is Linux>=6.1 only.
+
+// DioAlignRowPadding is the host row padding the alignment must fit inside.
+const DioAlignRowPadding = 4096
+
+// DioAlignVerdict is the outcome of checking a reported alignment.
+type DioAlignVerdict int
+
+const (
+	// DioAlignAccept: direct I/O may be used.
+	DioAlignAccept DioAlignVerdict = iota
+	// DioAlignDeferToProbe: the filesystem reports nothing (pre-6.1 kernel); the real
+	// write+fsync+rename+read probe decides.
+	DioAlignDeferToProbe
+	// DioAlignRefuseNoDirect: offset alignment 0 means direct I/O is unsupported (tmpfs/overlay).
+	DioAlignRefuseNoDirect
+	// DioAlignRefuseTooCoarse: max(offset, mem) exceeds the row padding.
+	DioAlignRefuseTooCoarse
+)
+
+func (v DioAlignVerdict) String() string {
+	switch v {
+	case DioAlignAccept:
+		return "accept"
+	case DioAlignDeferToProbe:
+		return "defer-to-probe"
+	case DioAlignRefuseNoDirect:
+		return "refuse-no-direct"
+	case DioAlignRefuseTooCoarse:
+		return "refuse-too-coarse"
+	}
+	return "unknown"
+}
+
+// CheckDioAlign classifies a (memAlign, offsetAlign) pair. reported=false means the
+// filesystem did not report alignment at all.
+func CheckDioAlign(reported bool, memAlign, offsetAlign uint32) DioAlignVerdict {
+	if !reported {
+		return DioAlignDeferToProbe
+	}
+	if offsetAlign == 0 {
+		return DioAlignRefuseNoDirect
+	}
+	if max(offsetAlign, memAlign) > DioAlignRowPadding {
+		return DioAlignRefuseTooCoarse
+	}
+	return DioAlignAccept
+}
