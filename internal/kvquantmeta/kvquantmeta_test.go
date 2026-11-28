@@ -108,3 +108,35 @@ func TestConstantBlockDequantizesExactly(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestPreRoPEPerChannelDescriptor(t *testing.T) {
+	desc := PreRoPEPerChannelDescriptor("kvquant-pre-rope", "1", "warm", PrecisionINT4, 128)
+	sup := Support{
+		Schemes:    map[string][]string{"kvquant-pre-rope": {"1"}},
+		Precisions: []Precision{PrecisionINT4, PrecisionFP16},
+		Groupings:  []Grouping{GroupingPerChannel},
+		Transforms: []string{TransformPreRoPEPerChannel},
+	}
+	if res := Validate(desc, sup); !res.Supported {
+		t.Fatalf("PreRoPEPerChannelDescriptor failed validation: %+v", res)
+	}
+	if desc.Grouping != GroupingPerChannel || desc.Transform != TransformPreRoPEPerChannel {
+		t.Fatalf("unexpected axis/grouping: %+v", desc)
+	}
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestDenseSparseOutlierDescriptor(t *testing.T) {
+	base := PreRoPEPerChannelDescriptor("kvquant-ds", "1", "warm", PrecisionINT4, 128)
+	ds, err := NewDenseSparseOutlierDescriptor(base, 0.01, 128)
+	if err != nil {
+		t.Fatalf("NewDenseSparseOutlierDescriptor: %v", err)
+	}
+	if ds.MaxOutliersPerVec != 1 {
+		t.Fatalf("MaxOutliersPerVec = %d, want 1", ds.MaxOutliersPerVec)
+	}
+	if _, err := NewDenseSparseOutlierDescriptor(base, 0.5, 128); err == nil {
+		t.Fatal("expected error for outlier fraction cap > 0.25")
+	}
+}

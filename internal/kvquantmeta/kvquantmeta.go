@@ -208,3 +208,53 @@ func containsGrouping(values []Grouping, target Grouping) bool {
 	}
 	return false
 }
+
+// TransformPreRoPEPerChannel names the pre-RoPE, per-channel key-quantization
+// axis in the neutral scheme taxonomy (kvquant-1).
+const TransformPreRoPEPerChannel = "pre_rope_per_channel"
+
+// PreRoPEPerChannelDescriptor constructs a neutral KV-quant descriptor for
+// pre-RoPE, per-channel key quantization.
+func PreRoPEPerChannelDescriptor(id, version, tier string, keyPrecision Precision, groupSize int) Descriptor {
+	return Descriptor{
+		ID:             id,
+		Version:        version,
+		KeyPrecision:   keyPrecision,
+		ValuePrecision: PrecisionFP16,
+		Grouping:       GroupingPerChannel,
+		GroupSize:      groupSize,
+		Transform:      TransformPreRoPEPerChannel,
+		Tier:           tier,
+		Recoverability: RecoverableApproximate,
+	}
+}
+
+// DenseSparseDescriptor pairs a base Descriptor with a per-vector outlier
+// separation cap so outlier storage remains bounded for fixed-size allocation.
+type DenseSparseDescriptor struct {
+	Base               Descriptor `json:"base"`
+	OutlierFractionCap float64    `json:"outlier_fraction_cap"`
+	MaxOutliersPerVec  int        `json:"max_outliers_per_vec"`
+}
+
+// NewDenseSparseOutlierDescriptor validates outlier separation bounds and builds
+// a DenseSparseDescriptor for fixed-size allocation (kvquant-3).
+func NewDenseSparseOutlierDescriptor(base Descriptor, outlierFractionCap float64, vectorDim int) (DenseSparseDescriptor, error) {
+	if outlierFractionCap <= 0 || outlierFractionCap > 0.25 {
+		return DenseSparseDescriptor{}, fmt.Errorf("%w: outlier_fraction_cap %v out of (0, 0.25]", errInvalidOutlierCap, outlierFractionCap)
+	}
+	if vectorDim <= 0 {
+		return DenseSparseDescriptor{}, fmt.Errorf("%w: vectorDim %d must be > 0", errInvalidOutlierCap, vectorDim)
+	}
+	maxOutliers := int(float64(vectorDim) * outlierFractionCap)
+	if maxOutliers < 1 {
+		maxOutliers = 1
+	}
+	return DenseSparseDescriptor{
+		Base:               base,
+		OutlierFractionCap: outlierFractionCap,
+		MaxOutliersPerVec:  maxOutliers,
+	}, nil
+}
+
+var errInvalidOutlierCap = fmt.Errorf("%s", ReasonInvalidDescriptor)
