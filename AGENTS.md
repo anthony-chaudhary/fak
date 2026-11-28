@@ -1,523 +1,124 @@
-# AGENTS.md — orientation for coding agents
+# AGENTS.md: orientation for coding agents
 
-> **Not the human contributor guide.** This file is operating instructions for *automated*
-> contributors working inside the maintainers' shared checkout — trunk guards, lane leases,
-> commit trailers, and shared-tree rules that have no meaning outside it. If you are a human
-> evaluating or contributing to fak, read [`README.md`](README.md) for what fak is and
-> [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to contribute; nothing below is required of you.
+> Automated-contributor instructions for the shared checkout. Humans: read [`README.md`](README.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md); curated doc map: [`llms.txt`](llms.txt).
 
-> You are an autonomous agent working in this repo. This file is the machine-read entry
-> point (the [agents.md](https://agents.md) convention). It is intentionally
-> command-dense and free of philosophy. For the *why*, read [`README.md`](README.md);
-> for a curated doc map, read [`llms.txt`](llms.txt). Humans: see [`START-HERE.md`](START-HERE.md).
+## What this project is
 
-## Default scope when launched from this repo
+**fak** is an *agent kernel*: one Go binary that sits between an AI agent and its tools, handling every call before it runs to reuse shared setup, route calls, serve repeats locally, and shed old turns while provider caches survive. It is first a **performance gate** and, on the same checkpoint, a **security gate** using `default_open` (permissive default bounded by a structural safety floor; `fail_closed` is an explicit operator lever; see [`POLICY.md`](POLICY.md)).
 
-When an agent is launched with this `fak` repository as its working directory,
-default all broad or underspecified work requests to **FAK work in this
-repository**. Requests such as “finish local WIP,” “work the backlog,” or “run
-agents all night” mean inspect, prioritize, implement, test, and ship FAK work;
-they do not authorize a workspace-wide sweep of sibling repositories.
+### Default scope and priorities
 
-Use FAK's guarded headless-agent and worker mechanisms for parallel or unattended
-work, following the lane, lease, worktree, landing, and witness rules below.
-Only inspect or modify another repository when the operator explicitly names
-that repository or the FAK task itself has a concrete, evidenced cross-repo
-dependency. When tasks involve shared interfaces (`pkg/*`), cross-repo platform
-integration, or dual-repo goal/lease coordination, synchronization MUST encompass
-both `fak` and `fak-private` companion repositories to prevent interface skew (`go.work`)
-and lease/queue stalls (`refs/fak/locks/*`). If scope is ambiguous, stay in FAK.
-Under the **Companion-Aware Dev Harness**, local development in `fak` is first-class and automatically governed by companion tooling: when `fak-private` is present side-by-side (via `../fak-private`, `go.work`, or `FAK_PRIVATE_ROOT`), `fak` pre-commit hooks run 5-gate boundary checks (`cmd/fak-boundary`) and secret leak audits (`tools/scrub_public_copy.py`) by default, while `fak-dev gate`, `fak-dev provenance`, `fak-dev audit-leak`, and `fak-dev ticket` bridge directly to companion tools without requiring directory switches. Full architecture specification: [`docs/architecture/companion-dev-harness.md`](docs/architecture/companion-dev-harness.md).
+Default broad or underspecified requests in this checkout to **FAK work in `fak`**; touch sibling repositories only when named or required by a `pkg/*` or companion contract. Under the **Companion-Aware Dev Harness** ([`docs/architecture/companion-dev-harness.md`](docs/architecture/companion-dev-harness.md)), `fak` pre-commit hooks run 5-gate boundary checks (`cmd/fak-boundary` in companion `fak-private`) and leak audits (`tools/scrub_public_copy.py`), while `fak-dev gate|provenance|audit-leak|ticket` bridge to companion tooling.
 
-## Mandatory Automated Public OSS Placement for New Work
+All new core engine work (inference runtime in `cmd/fak/serve.go` and `internal/engine`, context MMU in `internal/ctxmmu`, compute HALs in `internal/compute/`, weight loaders in `internal/model/`, tool capability floors, `pkg/abi`, `pkg/fakclient`, `pkg/scorecard`) belongs in public `fak` by default; commercial policy and autonomous factory tooling stay in `fak-private`.
 
-All new core engine work belongs in this open-source repository (`fak`) by default:
-- **Core Engine in Public by Default:** Model inference runtime (`cmd/fak/serve.go`, `internal/engine`), context window MMU (`internal/ctxmmu`), compute acceleration HALs (Metal, ROCm, Vulkan, AVX-512 in `internal/compute/`), model weight loaders (GGUF, SafeTensors in `internal/model/`), tool capability floors, frozen ABIs (`pkg/abi`), and client SDKs (`pkg/fakclient`, `pkg/scorecard`) are open-source.
-- **Automated Default Action (Zero-Hesitation Mandate):** When any new work, feature, optimization, or bugfix in these domains is requested, agents and contributors must execute, test, and land it directly in `fak` automatically without waiting for explicit permission or defaulting to private repos.
-- **Boundary Invariant:** Core engine mechanisms commoditize hardware complements and drive developer adoption. Proprietary commercial policy (margin ledgers, credit settlement) and the autonomous software factory (dispatch queues, worktree flows, scorecards) belong in `fak-private`, but all engine primitives remain public.
+Prioritize work in four tiers:
+1. **fak all in one** (`fak up`): turnkey single-binary serving, harness, and durable memory.
+2. **fak serving only** (`fak serve`): inference runtime, disaggregated gateway, KV/MMU acceleration, batching.
+3. **fak harness only** (`fak guard`): standalone governance substrate, `default_open` structural floor, policy adjudication.
+4. **other**: peripheral utilities and off-spine tooling ([routing policy](docs/notes/AGENT-DELEGATION-AND-ROUTING-2026-11-11.md)).
 
-## Divide and conquer: Delegate real work; keep the coordinator context clean
+## Build, test, and first proof
 
-Use guarded headless agents or an equivalent isolated worker for every substantive
-unit of work. The primary agent is the coordinator: decompose the request, give each
-worker a bounded goal and distinct file set, preserve only decisions and compact
-evidence in the primary context, and independently witness worker results before
-landing or reporting them. Delegate investigation, implementation, tests, long command
-output, and independent review; do not pull their full transcripts into the coordinator.
+Module root requires Go 1.26+ (`GOTOOLCHAIN=auto`; install: `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`). Repo layout: `cmd/fak/` (CLI), `internal/` (`adjudicator`, `policy`, `vdso`, `engine`, `gateway`, `ctxmmu`, `model`), `examples/`, `docs/`, [`docs/private-comms-channel.md`](docs/private-comms-channel.md).
 
-- **Divide and conquer by default (10x subagent adoption)**: For substantive, multi-part, or complex tasks,
-  decompose them into atomic, single-concern units or parallel subagent packets. Launch 4–8 (up to 16
-  on multi-core hosts) specialized subagents (`task`: worker, researcher, explore, deep-reason, cross-validator,
-  issue-auditor, tester, reviewer, scout) concurrently across pairwise tree-disjoint lanes.
-- **Astra worker reservation:** Reserve `gpt-6-astra` subagents for highly pre-specified
-  formal-mathematical leaves ([routing policy](docs/notes/AGENT-DELEGATION-AND-ROUTING-2026-11-11.md)):
-  the packet states fixed definitions and assumptions, the exact proposition or derivation,
-  the required output form, and a deterministic witness. Send exploration, implementation,
-  testing, review, and general reasoning to another suitable worker model.
-- **3-Tier Parallel Pipeline**: Structure multi-agent work into three decoupled parallel cohorts:
-  1. *Parallel scoping and research*: Discovery via `researcher`, `explore`, and `scout` to isolate prior art, contracts, and relevant packages.
-  2. *Parallel implementation + reproduction tests*: Implementation via `worker` and `deep-reason` across disjoint lanes, authoring reproduction tests before fixes.
-  3. *Parallel adversarial verification and QA ticketing*: Adversarial verification via `cross-validator`, deterministic test execution via `tester`, and edge-case issue auto-ticketing via `issue-auditor`.
-- **Depth-0 Coordinator vs. Depth-1 Leaf Worker**:
-  - *Top-level coordinator (depth 0)*: Aggressively fans out parallel subagents across the 3-tier pipeline, arbitrates lane leases (`dos arbitrate`), and collects compact receipts.
-  - *Leaf worker (depth 1)*: Executes directly within assigned package boundaries (1–3 files, package-scoped tests). Leaf workers must NOT invoke nested `task` calls (preventing recursion depth exhaustion, #12028). Autonomous safe sync landing (`fak sync`, `fak commit --path`, `fak sync push`) is active by default working within each worker process upon test verification. Subagents and leaf workers are strictly banned from creating new PowerShell (`.ps1`) or shell (`.sh`, `.bat`) scripts; all automation, test helpers, and tooling MUST be native Go programs.
-- **Tree-disjoint boundaries**: Assign each worker a distinct, non-overlapping file set to avoid
-  concurrent collisions on the shared trunk.
-- **Isolate and witness**: Keep heavy command logs and raw transcripts in worker boundaries; pull
-  only compact decisions, diffs, and verification receipts into the coordinator.
+```bash
+go build -o fak ./cmd/fak
+./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
+./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
+```
 
-The primary agent may directly perform only lightweight coordination: inspect enough
-state to scope packets, launch and supervise workers, adjudicate conflicts, integrate
-witnessed results, and run the final completion audit. A trivial one-command answer or
-tiny edit may stay local when launching a worker would cost more than the work itself.
-Use FAK's managed launch, lane, lease, detached-worktree, landing, and witness surfaces;
-worker self-reports are not evidence, and delegation does not relax ownership of the
-final result.
+Full walkthrough: [`docs/repro-packet.md`](docs/repro-packet.md). Build profiles: [`docs/dev-tooling.md`](docs/dev-tooling.md#build-profiles). Common gates: `make build`, `make smoke`, `make test-fast`, `make mac-perf`, `make test-race`, `make test`, `make ci`. On this Windows host, run `./test.ps1` under WSL and follow [`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md).
 
-## Scope discipline for smaller models: subdivide or abstain
+Use isolated verbs on the permanently peer-dirty checkout (compile checks never write an in-tree binary):
+- `fak-dev ci-preflight`: verify committed trunk builds and is gofmt-clean.
+- `fak validate --mine <path>... [--smoke]`: build, vet, and test trunk plus your paths.
+- `fak-dev buildcheck [--vet] [--mine <file>]`: compile-check while hiding peer WIP (`--isolate=false` for literal tree).
+- `fak hooks pre-push`: verify push graph safety.
 
-Smaller or resource-constrained models (local 7B/14B checkpoints, fast/flash models,
-bounded worker subagents) are reliable when work stays tightly focused and strictly verified.
-When operating as or delegating to smaller models, enforce scoping safeguards:
+The workstation is the control point, not the compute boundary: dispatch genuine GPU, accelerator, or heavy-CPU work to a sanctioned fleet node in [`docs/fleet-compute-nodes.md`](docs/fleet-compute-nodes.md), or hand the operator the ready-to-run command sequence. `fak hwgate-lint` and `fak guard --hardware-gate enforce` enforce this redirect.
 
-1. **Subdivide into atomic units (S0/S1 leaves)**:
-   - Restrict each task or dispatch packet to a single observable deliverable and exactly one witness command.
-   - Limit the active write surface to 1–3 closely related files within a single package or lane.
-   - Decompose multi-step tasks into sequential, verified phases: write the reproduction test first, commit the minimal implementation, and verify the targeted package.
-   - Complete and witness one step before advancing; avoid broad multi-subsystem sweeps in one turn.
+## Delegate real work; keep the coordinator context clean
 
-2. **Abstain from high-difficulty aspects (scoped fail-to-abstain)**:
-   - Identify task aspects that demand deep architectural context or high-risk reasoning: concurrency invariants and lock ordering, frozen ABI modifications (`internal/abi`), low-level SIMD/CUDA kernel mechanics, cross-subsystem protocol migrations, and security policy gates.
-   - Scope abstention to the bounded high-difficulty aspect; keep momentum on the independent, safe, solvable sub-components (reproduction tests, diagnostic witnesses, non-gated packages, docs) rather than abandoning the prompt.
-   - Emit a structured `ABSTAIN` verdict with a typed refusal token and exact boundary for the escalated aspect, alongside landed partial evidence.
-   - Deliver the verified sub-component; escalate the isolated difficult aspect to a higher-capability model or human operator.
+Use guarded headless agents or an equivalent isolated worker for every substantive unit of work. The depth-0 coordinator decomposes requests into pairwise tree-disjoint lanes (researcher/explore/scout -> worker/deep-reason -> cross-validator/tester/issue-auditor), arbitrates leases (`dos arbitrate`), preserves only decisions and compact evidence, and independently witness worker results before landing or reporting. Depth-1 leaf workers stay within 1–3 files and package-scoped tests without nested `task` calls. Reserve `gpt-6-astra` for pre-specified formal-mathematical leaves ([routing policy](docs/notes/AGENT-DELEGATION-AND-ROUTING-2026-11-11.md)).
 
-3. **Guard against fast/flash model sharp edges (Gemini 3.8 Flash & peers)**:
-   - **Curb token inflation and verbosity**: 3.8 Flash can output 2×–4× more tokens than peers per task. Be extremely concise (<3 lines of CLI commentary), skip preambles/postambles, keep explanations minimal.
-   - **Resist over-scaffolding ("happy-go-lucky" sprawl)**: Flash models over-generate: unsolicited abstractions, multi-panel apps, broad refactors for simple requests. Confine diffs to the requested lines/files; add no unasked scaffolding.
-   - **Beware thinking effort tradeoffs**: Low effort yields quality regressions (spatial flaws, shallow verification); high effort burns budget. Never trust low-effort intuition on complex logic—verify with deterministic tools (`go test`, `go vet`, `fak validate`).
-   - **Break interactive tool loops while persisting toward the goal**: In tool loops, Flash models can confabulate success or repeat-failure cycles. Ground every claim in an observed tool receipt. When a call is denied or fails, stop repeating it; read the receipt, query `fak recover <TOKEN>` for structured recovery, and pivot to an alternate sanctioned route or a decomposed subtask. Adapt rather than repeat or abandon.
-   - **Prefer specialized file tools over shell scripting**: Flash models experience higher failure rates on complex CLI/terminal pipelines (TerminalBench regressions). Prefer structured tools (`Read`, `Edit`, `Glob`, `Grep`) over complex piped bash commands.
-   - **Anticipate safety false-positives**: Standard 3.8 Flash guardrails can trigger false refusals on legitimate security inspection, redaction, or policy code; frame technical security contexts neutrally or emit structured `ABSTAIN` rather than hallucinating workarounds.
-   - **Guard trailing model turns & nested tool schemas**: Gemini REST rejects a payload ending in a model turn (HTTP 400) and nested array params lacking `items`. Enforce turn alternation (auto-inject continuation), strip `$schema`/`additionalProperties`, and preserve `thoughtSignature` across replays. Full analysis: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
+Scope smaller or resource-constrained models to atomic S0/S1 leaves (1–3 files, one witness command). On high-difficulty subsystems (concurrency lock invariants, `internal/abi`, low-level SIMD/CUDA kernels, security gates), emit a structured `ABSTAIN` with the exact boundary while landing independent safe sub-components. Keep tests atomic and declare cost-shaped tests with `// fak-test:runtime <class> est=<duration> [lane=<lane>]`.
 
-4. **Calibrate test breadth (prevent reasoning model test over-engineering)**:
-   - Restrict test authoring to one atomic reproduction or regression test demonstrating the defect or behavior change; no sprawling suites when one witness suffices.
-   - Target only the explicit requirement or failure mode, not speculative permutations or redundant assertion variations.
-   - Keep execution deterministic, bounded, and fast-failing within the package (`go test -v ./internal/<pkg>` and `go vet ./internal/<pkg>`).
-   - **Declare the wall-clock a new test adds to its suite.** A cost-shaped test carries `// fak-test:runtime <class> est=<duration> [lane=<lane>]` (`class` is `fast | medium | slow | integration`; `lane` is `default | short | optin | race`); a package in no suite module is unreachable by any lane. The rule is why: `go test ./...` is bounded by the slowest test binary, not the sum over binaries, so one undeclared multi-minute test is what an agent actually waits on, and the companion `fak-testruntime` gate refuses a cost-shaped test with no marker. Prefer `t.Parallel()` or a non-default lane, and record a deliberate cost rather than hiding it. Full contract: the companion fak-private `platform/testruntime` gate.
+## Native inference and local-agent milestone
 
-## First local-agent product milestone
+**Useful local agents, accelerated automatically.** Read [`docs/local-agent-milestone.md`](docs/local-agent-milestone.md) before planning native performance, caching, or local UX work; name workflow, bottleneck, seam, device, expected default, witness, and missing evidence in worker packets.
 
-**Useful local agents, accelerated automatically.** The current public product
-milestone is practical, performant local agent work through the normal entry
-point: native inference, qualified speculative decoding enabled by default,
-legal agentic prefix/KV reuse, and supported device-resident/direct GPU paths.
-Read [the milestone and worker brief](docs/local-agent-milestone.md) before
-planning native performance, caching, local UX, or public positioning work.
+Keep native-inference and performance work **fak-native all the way**: fak owns kernels, memory, scheduling, cache, adaptation, and ops. `llama.cpp` is permitted only when explicitly selected for benchmarks, parity diagnosis, migration/interop, or borrowing; omit silent `auto` or recovery fallbacks to `llama.cpp`. Canonical rules and docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md).
 
-Make qualified acceleration automatic and observable. In worker packets name
-the workflow, bottleneck, entry-point seam, supported model/device, expected
-default, acceptance witness, and missing evidence. Prefer time to verified task
-completion over isolated token-rate peaks. Distinguish shipped defaults from
-opt-in code and hardware qualification; this is our first milestone to earn,
-not an established world-first claim.
-
-## Native inference performance invariant
-
-For any native-inference or performance task, keep model execution **fak-native all the
-way**. The product path is intended to beat llama.cpp in matched, quality-constrained
-envelopes while fak retains ownership of kernels, memory, scheduling, cache, adaptation,
-and operations. llama.cpp is allowed only when explicitly selected for benchmarks,
-parity/reference diagnosis, migration/interoperability, or ego-free borrowing. Never add
-an `auto`, recovery, or convenience path that silently changes native/performance work to
-llama.cpp. Before accepting evidence, ask whether the model executed inside fak and whether
-the receipt names that engine. Canonical definitions, matched-envelope rules, and the
-deterministic docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md).
 New native-performance work prefers Qwen3.8.
 Qwen3.6 is allowed only when the task states an explicit task-specific exception, such as regression, compatibility, historical comparison, or a hardware/artifact constraint.
 Preserve historical Qwen3.6 artifacts; do not rename or rewrite them as Qwen3.8 evidence.
 
-Default native-tuning discipline: identify each candidate by source, configuration, and
-workload. Re-measure the reference when objective or load changes make prior measurements
-incompatible; for SLO-only changes, reassess compatible historical measurements against the
-new SLO before deciding whether a rerun is needed. Enumerate the full configuration delta;
-prefer one-variable comparisons and justify inseparable bundles. Bundle evidence supports
-only the bundle, with individual attribution requiring separate evidence. Before an expensive
-run, obtain independent validity and budget review bound to that exact candidate and its
-objective, load, SLO, and planned cost. Candidate changes invalidate affected review and
-witnesses; retain unaffected evidence with its scope. Review preserves existing user
-authorization, budget limits, and security controls; it grants neither spend nor security authority.
-
-## What this project is
-
-**fak** is an *agent kernel*: one Go binary that sits between an AI agent and the tools
-it calls, and handles every tool call before it runs — reuse the shared setup, route each
-call to the right model, serve repeats locally, and shed old turns while the provider's
-cache survives. It is first a **performance gate** (do the shared setup work once, not
-every turn — cheaper, faster, longer-running sessions) and, on the very same checkpoint, a
-**security gate** (a default-deny capability floor the model can't talk past).
-
-## Default priorities (portfolio hierarchy)
-
-When prioritizing design, implementation, architecture, triage, or backlog work, the repository defaults to this four-tier hierarchy:
-
-1. **fak all in one (serving and harness + memory — the "one touch" thing)**:
-   The primary focus: a turnkey, single-binary runtime (`fak up`) that bundles model serving, the agent harness, and durable memory into a seamless "one touch" deployment. Everything required to run governed, cache-accelerated agentic workflows out of the box with zero glue code.
-2. **fak serving only**:
-   High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache/context MMU acceleration, continuous batching, and native model execution.
-3. **fak harness only**:
-   Standalone agent harness and governance substrate (`fak guard`), default-deny tool capability floor, policy adjudication, and interception over external frontier models and harnesses.
-4. **other things**:
-   Peripheral utilities, standalone integrations, off-spine tooling, and secondary stewardship tasks not directly advancing tiers 1–3 ([harness leaf](docs/notes/AGENT-HARNESS-DSH-RUNTIME-2026-11-11.md)).
-
-## Repo layout (where things live)
-
-| Path | What it is |
-|---|---|
-| `go.mod` · `cmd/` · `internal/` | **The Go module is the repository root** (the kernel + the `fak` CLI). |
-| `cmd/fak/` | The `fak` binary (every verb: `preflight`, `serve`, `agent`, `policy`, `bench`, …). |
-| `internal/` | Kernel subsystems: `adjudicator`, `policy`, `vdso`, `engine`, `gateway`, `ctxmmu`, `model`, … |
-| `examples/` | Policy manifests **and** runnable demos (`adjudication-demo/`, `agentdojo-redteam/`, `mcp/`). |
-| `docs/` | Explainers, integration guides (`docs/integrations/`), benchmark methodology, proofs. |
-| `docs/private-comms-channel.md` | **The private comms channel** (private control bridge to the lab GPU servers) — a public stub pointing to its home in the `fak-private` companion repo. Start here to reach the hardware. |
-
-## Build / test / run
-
-The Go module is the repository root and needs Go 1.26+ (`GOTOOLCHAIN=auto`). The dependency
-set is minimal and pinned: four golang.org/x modules in an 8-line `go.sum`; additions require
-the dependency-budget review — see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-```bash
-go build ./cmd/fak        # build ./fak (fak.exe on Windows)
-make build                # debuggable binary
-make smoke                # fast real-world binary smoke + dogfood test
-make test-fast            # build + vet + short tests + smoke
-make mac-perf             # Mac shift-left: Metal tok/s and prefill bench
-make test-race            # WSL race gate
-make test                 # full suite, including model witnesses
-make ci                   # build + vet + test + claims lint + smoke
-```
-
-Build profiles and their one flag-delta table: [`docs/dev-tooling.md`](docs/dev-tooling.md#build-profiles).
-Install: `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`.
-
-### Which shared-tree question are you asking?
-
-This checkout is permanently peer-dirty; raw in-place `go build ./...` or `go vet ./...` can
-mix your work with peers' WIP. Use the matching isolated verb:
-
-| Question | Command |
-|---|---|
-| Is committed trunk buildable and gofmt-clean? | `fak-dev ci-preflight` |
-| Does trunk plus only my paths pass build, vet, and affected tests? | `fak validate --mine <path>... [--smoke]` |
-| Does my change compile while hiding peer WIP? | `fak-dev buildcheck [--vet] [--mine <file>]` |
-| Does the literal working tree compile? | `fak-dev buildcheck --isolate=false --vet` |
-| Will my push break another worker's graph? | `fak hooks pre-push` |
-
-Compile verification must never write the in-tree binary: prefer `fak-dev buildcheck`; if the
-binary itself is broken, use a unique temp output. On this Windows box, Microsoft Defender
-Antivirus real-time ML has repeatedly quarantined transient native Go test executables; the
-August 25 audit for issue #8919 supersedes the earlier Application Control diagnosis. Run
-`./test.ps1` under WSL, use fleet nodes for real serves, and follow
-[`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md).
-Do not disable Defender or add broad exclusions.
-## The 60-second proof (no key, no model, no GPU — verified)
-
-This is the canonical first command. Run it before anything else:
-
-```bash
-go build -o fak ./cmd/fak
-./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK): refused by structure, no model in the loop
-./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW: not a blanket block
-```
-
-The first `go build` compiles the binary (~30–60s, plus a one-time Go-1.26 toolchain fetch);
-later runs are instant. Full walkthrough: [`docs/repro-packet.md`](docs/repro-packet.md).
-
-## The local machine is the control point, not the compute boundary
-
-That the *kernel proof* needs no GPU (above) is not license to stop when a task **genuinely**
-needs one. The workstation you run on plans, dispatches, and ledgers — it is the **control
-point**. It is **not** the compute boundary. When a task needs a CUDA/GPU device, a specific
-accelerator arch, DC-network reach, or heavy CPU, **dispatch it to a fleet node that has it**
-and report the real result.
-
-**Never end a turn with `not yet — no GPU on this host`** (or any "blocked for lack of local
-hardware") as a terminal answer. There is always a route: a sanctioned compute node, or — if its
-credential/bridge session is missing — the exact ready-to-run command sequence handed to the
-operator. Both count as "used the lab"; only `no local hardware` does not. The nodes and how to
-reach each are the SSOT in **[`docs/fleet-compute-nodes.md`](docs/fleet-compute-nodes.md)**
-(GCP `fak-realmodel` L4 for a live CUDA serve; the GPU server via `dgxbridge` for a device-GEMM
-witness; `da33` for DC/CPU; the nightrun pipeline for a nightly ledger).
-
-This is guard-enforced, not honor-system: `fak hwgate-lint` scans a final turn for the stop
-pattern and types each hit to a sanctioned-node redirect (the hardware-gate dual of
-`fak headless-lint`), and `fak guard`'s Stop hook blocks a headless stop that declares a
-local-hardware blocker as terminal (`--hardware-gate enforce`), feeding the redirect back so the
-agent dispatches instead of stopping. `fak guard-stops` tallies the pattern for the soak → promote read.
-
-## Proof by default (every issue fix ships its evidence)
-
-This kernel exists because a self-report is not a fact. Hold your own fixes to the same bar:
-**by default, an issue fix ships a captured proof artifact, matched to the failure class** — not
-just a code change and a "looks fixed". Pick the witness the bug actually has:
-
-- **TUI / visual** (a rendering, layout, or terminal-corruption bug — the kind you were sent a
-  *screenshot* of): the proof is a **captured render**. Write a render-witness test that captures
-  the bytes a surface emits and asserts the defect is gone — see
-  [`cmd/fak/watchdog_autoheal_test.go`](cmd/fak/watchdog_autoheal_test.go)
-  `TestWatchdogAutohealKeepsAgentPaneClean`, which captures the would-be agent pane and proves
-  **zero bytes** reach it. When a live on-screen UI is in the loop, also attach a **before/after
-  terminal screenshot** to the issue/PR (the same evidence the reporter gave you). A green unit
-  test that never renders the surface is not proof for a visual bug.
-- **Logic / behavior**: a test that **fails before the fix and passes after** — the repro is the
-  proof. Land it in the same commit as the fix.
-- **Runtime / CLI / Dogfood / Integration** (an executable verb, CLI command, gateway protocol
-  adapter, daemon hook, or multi-component flow): the proof is **meaningful execution of the real
-  path**, not an in-memory mock. Hermes' rule: "mocks hide integration bugs." Shift real-world smoke testing
-  earlier into the process: run `fak validate --mine <paths> --smoke` in your inner loop, run `make smoke`
-  (`smoke-exec` + `dogfood-test`) or `make test-fast` before commit, and enforce execution via dogfood (`make dogfood-test`,
-  `scripts/dogfood-claude.sh --probe`, `tools/recent_feature_dogfood.py`) or a loopback integration test
-  (`make test-integration`, `*integration*test.go`) against a temporary workspace before claiming
-  completion. A green unit test that only asserts mocks or verifies syntax without executing the
-  real path is unproven and must not be declared done.
-- **Hardware / Performance / Acceleration**: a physical silicon execution witness (`fak hil`,
-  `make mac-perf`, or on-device GPU receipt) — never an in-memory mock or analytical simulation alone.
-  Hardware-in-the-loop (HIL) testing must run **100x more frequently in micro-doses** (sub-second physical
-  probes via `fak hil`) rather than waiting for rare multi-hour benchmarks. Head-to-head reported
-  comparisons must be **real hardware reported comparisons**; software simulations (rooflines, trace models)
-  are strictly early indicators and search-space bounds, never final comparative claims or victory proofs.
-  Enforce an active bias towards physical hardware testing whenever an accelerator is present on the host or fleet.
-- **"Shipped / done" claims**: a witnessed commit (`dos verify`, the `(fak <leaf>)` trailer) — see
-  the witness rules below. A subject line is forgeable; the diff and the registry are not.
-
-The rule of thumb: reproduce the defect as a captured artifact *first*, then make that artifact
-clean. If you cannot capture it, you cannot prove you fixed it — say `not yet` with the missing
-witness instead of claiming a fix.
-
-**Evidence is not part of the product.** cmd/go refuses a root module over 500 MiB: keep proof
-artifacts small (a pointer over 5 MiB). `TestRootModuleZipBudget` meters it.
+For tuning, identify candidates by source, config, and workload; re-measure references on objective/load changes; prefer one-variable comparisons; obtain independent validity and budget review before expensive runs.
 
 ## Track work in GitHub before implementation
 
 Use a GitHub issue as the durable tracker for every substantive unit of work whenever
 reasonably possible. Before editing code or docs, changing configuration, or launching an
 implementation worker, search open and closed issues for duplicates, then claim the matching
-issue or create one that states the problem, intended outcome, and witness. Put the issue
-number in worker packets and keep discoveries, scope changes, and follow-ons reconciled there.
-
-Before spawning one fresh task per issue (including direct Codex `create_thread` waves,
-[harness leaf](docs/notes/AGENT-HARNESS-DSH-RUNTIME-2026-11-11.md)), normalize every dependency
-through the issue contract and run the repository's issue/dispatch admission surface. Newly authored work uses exactly three relations: `Start blocked by: #N`
-may prevent pickup only when no executable disjoint slice exists; `Coordinates with: #N` is
-non-blocking alignment; `Promotion requires: #N` gates closure or performance claims, not
-implementation. A broad `After:` list or a hand-written prompt saying all dependency fences are
-binding is not an admission contract. If an issue is triage-only, repair its scope and typed
-relations before spawning it; direct task packets must repeat the same typed pickup rule.
+issue or create one stating the problem, intended outcome, and witness. Normalize task dependencies with `Start blocked by: #N`, `Coordinates with: #N`, or `Promotion requires: #N`.
 
 Scoping, reproduction, and read-only triage may precede the issue when needed to write an
-honest ticket. Skip advance ticketing only when it would be unreasonable: the request needs no
-repository change, the change is truly trivial and tracking would cost more than the work, an
-urgent safety or outage response must start immediately, or GitHub is unavailable. For urgent
-or offline work, create or reconcile the issue as soon as the constraint clears and record why
-work began first. Do not use plans, TODOs, commit messages, or chat as substitutes when GitHub
-issue tracking is reasonably available.
+honest ticket. Skip advance ticketing only when it would be unreasonable (no repo change, trivial edit, urgent safety/outage, or GitHub unavailable); create or reconcile the issue as soon as the constraint clears. Do not use plans, TODOs, commit messages, or chat as substitutes when GitHub tracking is available.
 
-### Cross-repository issue quoting and qualification
+Qualify cross-repo issue references: bare `#<num>` means public `fak`; cite private issues as `fak-private#<num>` (`anthony-chaudhary/fak-private#<num>`).
 
-When referencing, quoting, or linking issue numbers across public and companion repositories:
-- **Public `fak` issues:** A bare `#<num>` in this repository strictly denotes a public issue in `anthony-chaudhary/fak` (or canonical `fak#<num>`).
-- **Private `fak-private` issues:** When public `fak` quotes or cites an issue number from the companion private repository (`fak-private`) — such as referencing an internal appeal, reproducer, incident, or boundary contract in commit messages, technical notes, test names, PRs, or code comments — it **MUST be explicitly qualified as `fak-private#<num>`** (or `anthony-chaudhary/fak-private#<num>`) so that its private origin is crystal clear.
-- **Prohibition on bare private numbers:** Never quote a `fak-private` issue with a bare `#<num>` or unqualified `issue #<num>` in public code, commit subjects/bodies, PRs, or documentation. A bare number in public `fak` falsely implies a public issue, triggers erroneous auto-closes on GitHub, and breaks automated issue-closure tracking.
+### Proof by default and spine-first workflow
 
-## New work defaults: spine first, then fan out
+Match the proof artifact to the failure class before claiming a fix:
+- **TUI / visual**: captured render-witness test (e.g. `cmd/fak/watchdog_autoheal_test.go` `TestWatchdogAutohealKeepsAgentPaneClean`) plus before/after screenshot for live UIs.
+- **Logic / behavior**: repro test that fails before the fix and passes after.
+- **Runtime / CLI / integration**: real path execution via `fak validate --mine <paths> --smoke`, `make smoke`, `make dogfood-test`, or `make test-integration`.
+- **Hardware / performance**: physical silicon witness (`fak hil`, `make mac-perf`, on-device GPU receipt); simulations are early indicators only.
+- **Shipped claims**: witnessed commit (`dos verify` + `(fak <leaf>)` trailer); keep proof artifacts under 5 MiB (`TestRootModuleZipBudget`).
 
-For every new unit, align with the default priority hierarchy (1: All-in-one [serving + harness + memory], 2: Serving only, 3: Harness only, 4: Other things) ([harness leaf](docs/notes/AGENT-HARNESS-DSH-RUNTIME-2026-11-11.md)), classify centrality (`Core`, `Enabling`, `Stewardship`, `Peripheral`), run
-all P1-P4 checks in [`docs/problems-we-solve.md`](docs/problems-we-solve.md), and state **For /
-Problem / Today / Better because / Witness** against the real next-best alternative. Then:
+For new work, check P1-P4 in [`docs/problems-we-solve.md`](docs/problems-we-solve.md), state **For / Problem / Today / Better because / Witness**, ship the smallest working end-to-end spine first (`gen/now` issue if it cannot ship), and fan out follow-ons with `fak-dev issue fanout --title T --leaf L --spine <sha|cmd|doc> --json` ([`docs/spine-first-defaults.md`](docs/spine-first-defaults.md)).
 
-1. Ship the smallest working end-to-end spine in the same session: applied implementation,
-   captured witness, operating-envelope proof, then optimization. Include the safety needed to
-   run it. If it cannot ship confidently, file that spine first as a `gen/now` issue with its
-   missing witness; never defer it silently.
-2. Once it ships, create the 3..50+ QA, dogfood, productization, observability, integration,
-   docs, and release follow-ons with
-   `fak-dev issue fanout --title T --leaf L --spine <sha|cmd|doc> --json` (or cohort-plan first).
+Promote reusable scratch via **scratchpad -> committed Go tool -> `fak` verb -> captured knowledge**; allocate and reap scratch with `fak tree-doctor` ([`docs/generated-output-defaults.md`](docs/generated-output-defaults.md)). Frame diagnostics around forward momentum and the next checkable lever.
 
-Full doctrine: [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md) and `/spine-fanout`.
+There is no blocked state: name the next action (spawn / queue / route around / wait / hand off), never a terminal block.
+Checked by `fak headless-lint --next-action`.
 At run end, dedupe and file every real leftover as an open issue; otherwise say nothing remains.
-
-Promote reusable successful scratch through **scratchpad → committed Go tool → `fak` verb →
-captured knowledge**. Promote when it solved a real recurring task, records a non-obvious fact,
-or beats the committed equivalent; keep only true probes disposable. New tooling is a Go leaf or
-nested Go sub-module, not another `tools/*.py` or shell/PowerShell script, and operational facts belong in the leaf doc or dated `docs/notes/`. Allocate
-and reap scratch through `fak tree-doctor`; see [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md).
-
 Close operator-facing turns with verdict-first bullets, one claim and inline evidence per line;
-make the final line the next checkable step. A one-line “nothing left; pushed X” is sufficient.
+make the final line the next checkable step.
 
-## Focus on "move forward" over "conclusions"
+Cite evidence as `module@rev` (`fak version modules`; [`docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md`](docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md)).
 
-Frame all diagnostics, performance measurements, benchmark reports, and investigation findings
-around **forward momentum rather than terminal conclusions**. When an approach underperforms,
-a benchmark trails baseline, or an experiment yields negative results, focus on forward action
-rather than passive, defeatist, or dead-end editorializing.
+## Hard rules and kernel recovery
 
-- **Action over self-judgment**: Treat unmet targets, performance gaps, or failed attempts as
-  empirical data that eliminates a variable and sharpens the search space, not as an editorial
-  verdict on the system. Maintain momentum by identifying the forward path.
-- **Formulate the next checkable lever**: Every diagnostic, bottleneck, or failed attempt must
-  yield a concrete, actionable forward step:
-  - *"Prefill amortized poorly at batch size 1; the next step to improve throughput is activating chunked prefill in `internal/compute`."*
-  - *"Sub-byte quantization introduced drift on layer 14; the next step to recover accuracy is keeping the attention projection in Q8_0."*
-  - *"Host-device transfers dominate turn latency; the next step to get better performance is pinning input buffers via the unified memory allocator."*
-- **Ground turn endings and handoffs in forward movement**: Keep summaries, issue updates, and
-  handoffs oriented toward actionable progress. Always conclude with the concrete next experiment,
-  test, or patch that advances the work.
-- There is no blocked state: name the next action (spawn / queue / route around / wait / hand off), never a terminal block.
-  Checked by `fak headless-lint --next-action`.
+1. **Trunk and worktrees**: Stay on `main`; off-trunk commits fail `OFF_TRUNK`. Use only detached worker worktrees via `fak worktree worker prepare|land|reap|list` ([`docs/managed-worker-worktrees.md`](docs/managed-worker-worktrees.md)); reap stale scratch worktrees with `tools/worktree_doctor.py`.
+2. **Sync, commit, and push unprompted**: Pre-flight sync with `fak sync check` / `fak sync apply` (`--ff-only`) / `fak sync reconcile` (check `.git/MERGE_HEAD` first; with `fak-private`, sync remotes, `go work sync`, and `fak-dev audit-leak --staged`). Commit one issue per commit by explicit path using `fak commit --path <p> -m "<subject> (fak <leaf>)"` or `fak sweep --apply` (automatic DCO sign-off via `-s`, Conventional-Commits subject, `(fak <leaf>)` trailer). Raw `git commit -s -m ... -- <paths>` is emergency-only when `fak` is unbuilt; avoid `git add -A` and force-pushes. Push green work via `fak sync push` or `fak commit --push`.
+3. **Shared-tree buildability and CI contracts**: Fence incomplete cross-file `.go` WIP with `//go:build wip_<feature>`; update CI/schema consumers atomically and verify with `fak-dev ci-preflight` ([`docs/ci/ci-spec-change-migration.md`](docs/ci/ci-spec-change-migration.md)).
+4. **Native Go tooling only**: Extend via `fak new-leaf` and native Go leaves/modules; adding `.ps1`, `.sh`, `.bat`, or `.cmd` scripts is refused by `FILE_ADMISSION` (except bare-metal bootstrap).
+5. **Claims, ABI, and boundaries**: Tag every `CLAIMS.md` row (`[SHIPPED]`, etc.), keep `internal/abi` frozen unless explicitly scoped, respect [`docs/repo-guard.md`](docs/repo-guard.md) (`OUT_OF_TREE_WRITE` external targets), keep private host/credential details in `fak-private`, avoid broad `find` on `/`, `~`, `/mnt`, `/proc`, and verify no dependent sessions are active before restarting an inference server.
 
-## Version everything: cite `module@rev`, not just a bare SHA
+### Kernel refusal recovery
 
-Every module carries a **derived** version — there are no hand-maintained per-module version
-files (×410 they would rot within hours on this shared trunk and spew merge noise). A module's
-`rev` is the count of trunk commits that touched it, rendered `r<rev>+g<shortsha>` (e.g.
-`internal/gateway r652+g1f75c56d`) — monotonic, conflict-free, and computed from history alone.
-Read the table with `fak version modules` (`--json` for machine form, `--scores S.json` to join a
-flat `{"module": score}` map); a nightrun / super-loop turn appends changed-module rows to the
-`fak-module-versions/1` ledger with `fak version modules --stamp` (stamping twice at the same HEAD
-is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@rev` over a bare SHA**
-— it says *which part moved and how far*, which a SHA alone does not. Full doctrine + e2e:
-[`docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md`](docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md).
-
-## Hard rules (enforced below the agent layer)
-
-- **Ship green work and sync safely by default.** Do more work by default: when implementing or fixing tasks yourself, do not stop at partial edits or ask conversational permission to test, sync, or push. Standard synchronization must follow the `fak sync check`, `fak sync apply`, and `fak sync push` workflow. Run the full lifecycle through to completion:
-  1. **Pre-flight safe sync & Companion Dev Harness**: Check and synchronize safely with `origin/main` (`fak sync check`, `fak sync reconcile --apply`, or `fak sync apply`) so local work is grounded on trunk. When a companion workspace exists (`fak-private`), perform dual-repo preflight checks: inspect dirty state across both checkouts, fetch remotes and coordination refs (`refs/fak/locks/*`) for both `fak` and `fak-private`, run `fak sync check`/`fak sync apply` in `fak` alongside fast-forward pull in `fak-private` (or `fak-sync repo`), reconcile `go work sync` to align module graphs across both trees, and verify boundary leak hygiene (`tools/scrub_public_copy.py --audit-staged` or `fak-dev audit-leak --staged`). Under the Companion Dev Harness:
-     - **Pre-commit hooks**: `.githooks/pre-commit` in `fak` automatically detect `fak-private` and enforce 5-gate boundary verification (`cmd/fak-boundary check --staged`) and secret leak audits before any commit lands.
-     - **Native companion dev bridge**: Use `fak-dev` bridge commands directly from `fak` without switching directories:
-       - `fak-dev gate [check|query|explain]` bridges to `cmd/fak-boundary`
-       - `fak-dev provenance [mint|audit|status]` bridges to `cmd/fak-sync provenance`
-       - `fak-dev audit-leak [--staged|--all]` bridges to `tools/scrub_public_copy.py`
-       - `fak-dev ticket [list|show|next]` bridges to companion `docs/tickets/`
-  2. **Atomic implementation & self-verification**: Decompose work into single-concern leaves, write/update tests, and verify on-device (`fak validate --mine <paths>`, `go test ./internal/<pkg>/...`).
-  3. **Stage-and-commit by explicit path**: All commits must be made via `fak commit --path` or `fak sweep --apply`. Lint the subject (`fak commit --preview`) and commit only your touched paths (`fak commit --path <p> -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`). A `COMMITTED_RED` refused only in its test step, and only because tests already fail on the landing base, may land with `--no-build-check` without asking (operator policy 2026-09-26). All six conditions and the receipts in `.claude/skills/commit-clean/SKILL.md`, section "Pre-existing red", must hold.
-  4. **Safe push unprompted**: Push verified commits via `fak sync push` or `fak commit --push`. `fak sync push` automatically retries transient non-fast-forward races (when a peer lands between fetch and push while HEAD already contains origin) and stops safely on genuine diverged states. Never wait for an operator prompt to push once the tree is green.
-  - **Safe merge & trunk convergence**:
-    - **Active `MERGE_HEAD` gate**: Check `.git/MERGE_HEAD` before any staging or landing. If an in-flight merge is active (`MERGE_IN_PROGRESS`), unstage local paths (`git restore --staged`) and wait; never abort, reset, or finish a peer's merge.
-    - **Fast-forward-only convergence**: Standard synchronization uses `fak sync apply` (`git merge --ff-only --no-autostash --no-overwrite-ignore`) to guarantee clean trunk convergence without accidental merge commits.
-    - **Structured divergence reconciliation**: When local and remote diverge, use `fak sync reconcile` to evaluate safe structured routes (`ROUTE_APPLY` for clean ff, `ROUTE_DISJOINT_INTEGRATE` for disjoint commit file-trees, `ROUTE_SUPERSET_MERGE` for textless `-s ours` verified merge, `ROUTE_HOLD_DIRTY_COLLISION` with path suspension via `fak wip park` / `--suspend-paths`, or `ROUTE_RECONCILE_PACKET` for overlapping conflicts).
-    - **No force-push or unverified merges**: Stay on `main`; never force-push, use `--autostash`, create a feature branch, escape a dirty/diverged tree into a worktree, or perform raw unverified 3-way merges on the shared trunk. On `PUSH_REJECTED`, reconcile and retry via `fak sync push`.
-- **Match scope to capability.** Constrain smaller models and workers to atomic S0/S1 leaf units with single-concern boundaries and one witness. When encountering high-difficulty aspects (concurrency, frozen ABI, complex kernel algorithms), practice scoped fail-to-abstain: land partial verified evidence and escalate only the isolated high-difficulty boundary with a structured ABSTAIN record rather than guessing or emitting speculative changes. Persist through recoverable hurdles using alternate sanctioned routes or waiting out transient locks rather than abandoning the task.
-- **Commit exactly one issue through explicit paths via `fak commit --path` or `fak sweep`.** All commits must be made via `fak commit --path` or `fak sweep --apply`. Lint with `fak commit --preview`, then stage-and-commit via `fak commit --path <p> ... -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`. `fak commit` provides automatic DCO sign-off (with `-s` accepted for compatibility) and verifies that no peer files were raced in (`PATHSPEC_RACE`). One issue lands in one commit and one leaf; do not split a green issue into patch commits or batch unrelated issues. WARNING: Raw git commits are strictly an emergency-only fallback, permitted ONLY when the `fak` binary is unbuilt (`git commit -s -m "<subject> (fak <leaf>)" -- <paths>`); never use `git add -A` or uncoordinated raw git commits on the shared trunk.
-- **Make the first subject final.** Sign off with DCO, use a Conventional-Commits subject, and include a recognized `(fak <leaf>)` trailer. A peer may push your commit before an amend, so preview the subject and paths first. Demo binaries use their `cmd/<dir>` name as the leaf.
-- **Preserve shared-tree buildability.** A tracked or untracked `.go` sibling enters every package build. Fence incomplete cross-file WIP with `//go:build wip_<feature>` until its symbols exist; validate only your explicit paths with `fak validate --mine`. Build verification never writes an in-tree binary.
-- **Migrate CI/CD contracts atomically.** Before changing workflow inputs, JSON schemas consumed by workflows, check/job names, secrets/env, runner labels, or artifact/cache names, search the whole tree for consumers and update them together. Include changed contract, migrated consumers, impact/cutover, and rollback in the commit body; prove committed tip with `fak-dev ci-preflight`. Checklist: [`docs/ci/ci-spec-change-migration.md`](docs/ci/ci-spec-change-migration.md).
-- **Use only the sanctioned detached worker worktree.** Drive isolated workers through `fak worktree worker prepare|land|reap|list`; all branch worktrees remain forbidden. Reap stale scratch worktrees with `tools/worktree_doctor.py`, which preserves live sessions. See [`docs/managed-worker-worktrees.md`](docs/managed-worker-worktrees.md) for the operator guide, portable defaults, and remote recovery runbook.
-- **Allocate and reap scratch explicitly.** Use `fak tree-doctor --scratch-dir <producer>` or `--scratch-path <producer>/<file>`, then `--reap-scratch <producer> --json`. Never use `git clean -Xdf` under `_scratch/`. Per-run prompts/transcripts belong in allocated scratch; `testdata/` is only for fixtures landed with a consuming test. Process reaping does not remove snapshots. Account for retained runs, release disposable data promptly, and use standard guarded cleanup once authorized ownership and consumer checks pass; an anticipated denial is not an observed refusal. See [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md#closing-a-run-without-leaving-scratch).
-- **Keep comments durable.** Explain non-obvious invariants, safety, concurrency, compatibility, or performance tradeoffs; do not narrate syntax. Preserve required exported-API, package, directive, generated, and legal comments.
-- **Keep claims and gains witnessed.** Every `CLAIMS.md` row needs its required tag. Report performance only from net-true end-to-end accounting, with quality and operating-envelope constraints; setup/recovery/verification overhead counts. Use the project claim and benchmark gates rather than hand-written “looks faster” prose.
-- **Extend through leaves and Go tooling.** Add capabilities with `fak new-leaf`; avoid editing the core registry directly. New durable tooling is a Go leaf or nested Go sub-module plus a `fak` verb, not another `tools/*.py`, `.ps1`, or `.sh` script; the Python and script gates permit maintenance of grandfathered scripts, not new ones.
-- **Strict Ban on PowerShell and Loose Scripts — Modular Native Go Programs Only.** Adding new PowerShell scripts (`.ps1`), Bash/POSIX shell scripts (`.sh`), batch files (`.bat`, `.cmd`), or loose glue scripts is **STRICTLY BANNED** across this repo and `fak-private`. An exception requires an extraordinary, super heavily justified reason (basically ~1 in the whole repo, such as initial bare-metal bootstrap before Go is installed). All new automation, dogfood runners, harnesses, test utilities, session orchestrators, diagnostic probes, and background tasks **MUST be implemented as native Go programs** (`cmd/*` binaries, Go leaves registered as `fak` CLI verbs, or quarantined sub-modules under `tools/<name>/go.mod`). Think modular, integrated, long-term value: Go programs provide static typing, `go test` coverage, compile-time safety, cross-platform execution (`GOOS=windows/linux/darwin`), and unified CLI ergonomics (`--json`, `--help`). Never create random scripts; the git pre-commit filter refuses un-grandfathered scripts (`FILE_ADMISSION`).
-- **Keep private control private.** GPU-server credentials, hostnames, SSH details, private paths, and raw internal logs stay in the private companion repo. Public evidence must be scrubbed and reproducible through [`docs/private-comms-channel.md`](docs/private-comms-channel.md).
-- **Respect Windows operational fences.** Never run broad `find /`, `find ~`, `find /mnt`, or `find /proc` from Git Bash. Route git and hang-sensitive commands through the guarded fak verbs. Treat low-utilization whole-machine stalls as kernel-path churn: stop launch storms, inspect process counts/handles, and use the committed diagnostics rather than adding retries.
-- **Make external writes explicit.** `OUT_OF_TREE_WRITE` records writes outside the repo. Use the operation’s declared external target and reversible preview/confirm path; never disguise an external mutation as repository scratch.
-- **Do not stop or restart a managed inference server during active sessions.** Before stopping, restarting, or reconfiguring any locally or remotely managed model inference endpoint or server, verify that all dependent sessions have completed or ownership has been explicitly handed off. Stopping an active upstream server strands dependent guarded sessions behind repeated 502 Bad Gateway errors.
-
-The detailed recovery for a refusal is intentionally paged: query the token below instead of carrying every failure cookbook in every agent context.
-
-### If the kernel refuses you (recover, don't fight it)
-
-A guard refusal is per-call runtime feedback; it is not a session stop or permission to abandon the task. A worker that treats a refusal as a prompt termination converts a recoverable hurdle into an unforced failure.
-
-A guard refusal names a token from the closed `[reasons.*]` vocabulary in
-[`dos.toml`](dos.toml). Run `dos man wedge <TOKEN> --explain` instead of carrying
-the full recovery cookbook in every agent context:
+A guard refusal names a token from [`dos.toml`](dos.toml); treat it as per-call feedback. Run `dos man wedge <TOKEN> --explain` instead of carrying the full recovery cookbook in every agent context:
 
 ```bash
 dos man wedge <TOKEN> --explain  # summary, category, fix, and references
-fak recover <TOKEN>              # concrete recovery plan when one exists
-fak recover --list               # list executable and manual-only plans
+fak recover <TOKEN>              # dry-run recovery plan (--execute to apply; --list for all)
 ```
 
-Recover by the named action; do not route around the guard:
-1. **Execute recovery**: Run `fak recover <TOKEN>` and apply the output. Manual plans name the required remediation.
-2. **Handle transient locks**: For concurrency blockers (`MERGE_IN_PROGRESS`, `COLLISION_RISK`, `LOCK_BUSY`), unstage local paths (`git restore --staged`), wait for quiescence or inspect `dos top`, checkpoint finished progress with `fak wip checkpoint` or `git tag hold/<lane>`, or pivot to an independent disjoint subtask.
-3. **Use sanctioned alternative routes**: When an operation is refused (such as `FILE_ADMISSION` on a script), use the sanctioned Go tool, leaf verb, or structured file tool instead of quitting.
-4. **Scope boundary blocks**: When an explicit policy or core-lock blocks a specific path (`POLICY_BLOCK`, `SELF_MODIFY`), land your safe, verified sub-components, record the structured refusal, and escalate the isolated boundary with checkable next steps.
+For transient locks (`MERGE_IN_PROGRESS`, `COLLISION_RISK`, `LOCK_BUSY`), run `git restore --staged`, inspect `dos top`, checkpoint with `fak wip checkpoint`, or pivot to a disjoint subtask. For `FILE_ADMISSION` or `POLICY_BLOCK`/`SELF_MODIFY`, use sanctioned Go tools or escalate the bounded path. Verify setup with `python tools/extend_preflight.py` and [`CONTRIBUTING.md`](CONTRIBUTING.md). File genuine wrong refusals or workflow catch-22s with `fak complain` ([`docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md`](docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md)).
 
-`fak recover` is a dry-run unless `--execute` is passed, and manual-only plans refuse execution
-rather than guessing. The token argument is case- and separator-insensitive.
+## Releasing, planning, and doc map
 
-Keep the common commit-lane rules available before a refusal: stay on `main`,
-commit only explicit paths via `fak commit --path` or `fak sweep`, never amend or force-push shared history, wait out a
-peer's `MERGE_HEAD`, and reconcile divergence in place with `fak sync apply`. The hard rules above are
-the preventive contract; the query surfaces are the token-specific recovery path.
+Use `/release` for full releases ([`docs/releases-channel.md`](docs/releases-channel.md), [`docs/on-demand-releases.md`](docs/on-demand-releases.md)); rollback runbook: [`docs/ROLLBACK.md`](docs/ROLLBACK.md). Keep phased deliverables accurate across product, evidence, and queue axes ([`docs/progress-state-defaults.md`](docs/progress-state-defaults.md), `fak plan-audit`), and update plans in the same commit as the work.
 
-Check setup failures with `python tools/extend_preflight.py`; the full contributor
-contract is [`CONTRIBUTING.md`](CONTRIBUTING.md). Recover first; a complaint never
-authorizes bypassing a refusal, lease, or gate. If a refusal is genuinely wrong,
-file its witnessed, deduplicated appeal with `fak complain --summary "…" --reason
-<TOKEN> --tool <Tool> --from-journal --args-digest <sha256:…> --workspace
-<blocked-root> --live`. When two enforced workflow obligations leave no compliant
-sequence after safe recovery is exhausted, file the exact command, output, attempted
-routes, and unblock condition with `fak complain --domain workflow --kind catch-22
---summary "…" --rationale-file <absolute-scrubbed-evidence> --workspace
-<blocked-root> --repo <owner/repo> --live`; use `completion-blocker` for a general
-completion blocker. Success requires a reported created or updated issue. If live
-filing cannot fetch GitHub, the command exits nonzero before any remote issue action,
-reports JSON mode `pending-local`, and retains a scrubbed stable-key receipt under
-`<blocked-root>/.fak/complaints/pending`. Inspect it without contacting GitHub with
-`fak complain --pending --workspace <blocked-root> --json`; do not claim remote
-success. When GitHub recovers, repeat the same stable complaint and `--live` command;
-a verified create/update removes its receipt. An unverified sync also exits nonzero
-and retains the receipt. The receipt is recovery evidence, never permission to bypass
-a refusal, lease, or gate. Taxonomy and routing:
-[`docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md`](docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md).
-
-## Releasing and planning
-
-Use `/release` for the full release path. It enforces a clean synchronized `main`, full CI,
-version bump, release notes, signed commit/tag, push, GitHub release, and rollback guidance.
-Never hand-edit version constants, tag partially, force-push, or publish from a dirty/diverged
-tree. Release history, channel contract, and plain-English release-highlight rules: [`docs/releases/`](docs/releases/), [`docs/releases-channel.md`](docs/releases-channel.md), [`docs/releases/NEXT.md`](docs/releases/NEXT.md), and [`docs/on-demand-releases.md`](docs/on-demand-releases.md).
-
-Choose the planning primitive by work shape:
-
-- **Phased deliverable:** finite ordered phases with observable completion. Keep
-  **Current state** accurate across the independent product, evidence, and queue axes in
-  [`docs/progress-state-defaults.md`](docs/progress-state-defaults.md), append dated facts to
-  **Execution log**, run `/phased-plan` each phase, and archive completed plans under
-  `docs/plans/completed/`. `fak plan-audit` catches drift.
-- **Ongoing program:** recurring unbounded work. Track health, cadence, and next movement rather
-  than percent complete, and archive under `docs/programs/completed/` only when retired.
-
-Plans are canonical state, not narration. A missing or failed performance receipt changes the
-evidence axis; it does not erase delivered scope or force the whole item into `HOLD`. Preserve
-historical `KEEP`/`REJECT`/`HOLD` decisions in the execution log, keep delivery credit separate
-from performance credit, and never weaken the applicable claim gate. Update plans in the same
-commit as the work; document scope changes explicitly. For parallel work, assign distinct file
-sets and integrate only after all workers finish. Audit before starting a new plan when
-active-plan load is high.
-## Where to go next
-
-| If you want to… | Read |
+| Need | Read |
 |---|---|
-| Every CLI verb + what's shipped | [`docs/cli-reference.md`](docs/cli-reference.md) |
-| Learn every concept in prerequisite order (a course, join at your level) | [`LEARNING-PATH.md`](LEARNING-PATH.md) |
-| Install / run tiers (offline → gateway → in-kernel model) | [`GETTING-STARTED.md`](GETTING-STARTED.md) |
-| Run local models on Mac (Qwen3.8 + Metal REPL/server) | [`docs/fak/mac-local-models.md`](docs/fak/mac-local-models.md) · `fak run qwen38` |
-| Put fak in front of *your* agent (Claude Code / Cursor / MCP) | [`docs/integrations/`](docs/integrations/) · [`fak/examples/mcp/`](examples/mcp/) |
-| Run hardware-gated work (no local GPU) — the sanctioned compute nodes | [`docs/fleet-compute-nodes.md`](docs/fleet-compute-nodes.md) · `fak hwgate-lint` |
-| The deployable capability floor (policy manifests) | [`fak/POLICY.md`](POLICY.md) · [`fak/examples/README.md`](examples/README.md) |
-| Extend the kernel (plug in → prove correct → prove faster) | [`fak/EXTENDING.md`](EXTENDING.md) · [`fak/ARCHITECTURE.md`](ARCHITECTURE.md) |
-| Optimize a kernel without re-inventing known art (check prior art first) | [`docs/sota/README.md`](docs/sota/README.md) · `fak sota <op>` |
-| Score agent-steer prose for negative framing (suggests positive reframes) | `fak score negframe --suggest` |
-| Every feature by subsystem, with honest status | [`docs/supported/features.md`](docs/supported/features.md) |
-| What's real vs simulated vs stub | [`fak/CLAIMS.md`](CLAIMS.md) · [`fak/STATUS.md`](STATUS.md) |
-| Every benchmark number (single source of truth) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) |
-| Roll back to a stable version (revert / downgrade / pin) | [`docs/ROLLBACK.md`](docs/ROLLBACK.md) |
-| A curated map of all the docs | [`llms.txt`](llms.txt) |
+| CLI reference & install tiers | [`docs/cli-reference.md`](docs/cli-reference.md) · [`GETTING-STARTED.md`](GETTING-STARTED.md) · [`LEARNING-PATH.md`](LEARNING-PATH.md) |
+| Mac local models & integrations | [`docs/fak/mac-local-models.md`](docs/fak/mac-local-models.md) · [`docs/integrations/`](docs/integrations/) · [`examples/mcp/`](examples/mcp/) |
+| Policy floor & extending kernel | [`POLICY.md`](POLICY.md) · [`examples/README.md`](examples/README.md) · [`EXTENDING.md`](EXTENDING.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md) |
+| SOTA prior art & prose scorer | [`docs/sota/README.md`](docs/sota/README.md) · `fak score negframe --suggest` |
+| Feature status, claims, benchmarks | [`docs/supported/features.md`](docs/supported/features.md) · [`CLAIMS.md`](CLAIMS.md) · [`STATUS.md`](STATUS.md) · [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) |
+| Full doc map & contributor contract | [`llms.txt`](llms.txt) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`docs/ROLLBACK.md`](docs/ROLLBACK.md) |
 
 License: [Apache-2.0](LICENSE).

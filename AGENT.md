@@ -1,49 +1,13 @@
 # AGENT.md — fak
 
-> **Not the human contributor guide.** This file is operating instructions for *automated*
-> contributors working inside the maintainers' shared checkout. Humans want
-> [`README.md`](README.md) for what fak is and [`CONTRIBUTING.md`](CONTRIBUTING.md) for how
-> to contribute; nothing on this page applies to you.
+> Single-file `AGENT.md` overlay for Amp and peer harnesses. Canonical rules, full build/test/run, and repo map live in [`AGENTS.md`](AGENTS.md); humans read [`README.md`](README.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-> Amp and other harnesses adopting the single-file `AGENT.md` convention auto-load this
-> file. OpenCode and Codex auto-load [`AGENTS.md`](AGENTS.md), which is the canonical,
-> fuller entry point — read that for the complete build/test/run, repo map, and rules. Doc map: [`llms.txt`](llms.txt). Contributor contract: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+**fak** is an agent kernel (Go module at repo root; MCP wired in `.mcp.json`) that adjudicates tool calls before execution.
 
-This repo is **fak**, an agent kernel: one Go binary that sits between an AI agent and the
-tools it calls and adjudicates every call before it runs — deny by structure, repair
-malformed calls, quarantine poisoned results. Its MCP server is wired in `.mcp.json`.
+## Quick commands & delta rules
 
-## Build / test / run
+- Build and proof: `go build -o fak ./cmd/fak`, `make test-fast` (or `./test.ps1` under WSL on Windows), `make ci`, and `./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"`.
+- Stay on `main` (use detached `fak worktree worker prepare|land|reap` only for worker isolation) and commit explicit paths via `fak commit --path <p> -m "<subject> (fak <leaf>)"` or `fak sweep --apply`.
+- Keep worker tasks atomic (1–3 files, single package, one witness), abstain on isolated high-difficulty boundaries, and close findings with the next checkable step.
 
-- `go build -o fak ./cmd/fak` — compile the binary.
-- `make test-fast` — the ~2s smoke gate; `make ci` — the full green gate (on native
-  Windows run the suite under WSL with `./test.ps1`).
-- `./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"`
-  — the no-key 60-second proof (returns DENY by structure).
-
-## Must-know rules (enforced below the agent layer)
-
-- Work directly on the trunk (`main`); never open a feature branch or worktree — the
-  trunk guard refuses off-trunk commits (`OFF_TRUNK`). The one sanctioned exception: a
-  **detached** per-worker worktree that lands on `main` via `fak worktree worker
-  prepare|land|reap` (build isolation, #1334) — detached and lane-serialized, it is not a
-  branch and never trips `OFF_TRUNK`. Feature branches and off-trunk commits stay forbidden.
-- Commit via `fak commit --path <p> -m "<subject> (fak <leaf>)"` (or `fak sweep --apply`);
-  DCO sign-off is automatic. Raw `git commit -s -m "<subject> (fak <leaf>)" -- <paths>` is
-  emergency-only when the `fak` binary is unbuilt; never `git add -A`.
-- Subdivide work, practice scoped fail-to-abstain, and persist through recoverable
-  blockers — smaller or worker models must keep tasks bounded to atomic S0/S1 leaf
-  units (1–3 files, single package, one witness), advance independent safe sub-components,
-  and persist through recoverable hurdles using alternate sanctioned routes or waiting out
-  transient locks rather than abandoning the prompt or stopping on recoverable failures.
-  Abstain with a structured reason strictly on isolated high-difficulty aspects
-  (concurrency, ABI, kernel/memory layout) instead of speculating.
-- Focus on "move forward" over "conclusions" — frame diagnostics, benchmark results, and
-  investigations around forward momentum rather than defeatist conclusions (e.g. rather than
-  *"X didn't work ... therefore we suck..."*, state *"the next step to get better performance is X"*).
-  Treat unmet targets as empirical data that eliminates a variable and always provide the next checkable step.
-- The Go module is the repository root — run `go` commands from the clone root.
-
-To run your harness's own model behind the kernel, pick your recipe under
-[`docs/integrations/`](docs/integrations/README.md) (Amp users: [`amp.md`](docs/integrations/amp.md);
-OpenCode users: [`opencode.md`](docs/integrations/opencode.md)).
+Recipes: [`docs/integrations/`](docs/integrations/README.md) ([Amp](docs/integrations/amp.md), [OpenCode](docs/integrations/opencode.md)) · Doc map: [`llms.txt`](llms.txt).

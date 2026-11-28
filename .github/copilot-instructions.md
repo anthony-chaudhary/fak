@@ -1,34 +1,10 @@
 # Copilot instructions
 
-The canonical agent instructions for this repo are in [`AGENTS.md`](../AGENTS.md) — read
-it first for build/test/run, the repo map, and the rules. Curated doc map:
-[`llms.txt`](../llms.txt). Contributor contract: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+Canonical agent rules, build/test/run, and repo map live in [`AGENTS.md`](../AGENTS.md); doc map: [`llms.txt`](../llms.txt); contributor contract: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
-Must-know rules (enforced below the agent layer):
+## Copilot delta rules
 
-- **Delegate substantive work and keep the coordinator context clean** — use guarded
-  headless agents or equivalent isolated workers for investigation, implementation, tests,
-  and review. Keep only decisions and compact witnessed evidence in the primary context;
-  independently verify worker effects before landing or reporting them. Direct work is for
-  lightweight coordination and truly trivial tasks. See [`AGENTS.md`](../AGENTS.md).
-- **Default is to ship** — when the tree is green (`make ci`), commit AND push unprompted;
-  decide from the work in front of you, you don't wait to be asked. The rules below gate
-  that default (stay on trunk, commit by path, never force-push); if a guard refuses
-  (`OFF_TRUNK`) or a peer's merge is mid-flight, reconcile in place or stop.
-- Work directly on the trunk (`main`); never open a feature branch or worktree — the
-  trunk guard refuses off-trunk commits (`OFF_TRUNK`). The one sanctioned exception: a
-  **detached** per-worker worktree that lands on `main` via `fak worktree worker
-  prepare|land|reap` (build isolation, #1334) — detached and lane-serialized, it is not a
-  branch and never trips `OFF_TRUNK`. Feature branches and off-trunk commits stay forbidden.
-- Commit via `fak commit --path <p> -m "<subject> (fak <leaf>)"` (or `fak sweep --apply`);
-  DCO sign-off is automatic. Raw `git commit -s -m "<subject> (fak <leaf>)" -- <paths>` is
-  emergency-only when the `fak` binary is unbuilt; never `git add -A`.
-- **Focus on "move forward" over "conclusions"** — frame diagnostics, benchmarks, and failed
-  attempts around actionable forward momentum. Rather than defeatist conclusions (*"X didn't work ...
-  therefore we suck..."*), always identify the concrete next action (*"the next step to get better
-  performance is X"*) and state the next checkable step.
-- Keep code comments succinct: omit comments that restate syntax or narrate each step. Preserve
-  comments that explain non-obvious rationale, invariants, safety, concurrency, compatibility, or
-  exported APIs; prefer clearer code and put durable tutorials in docs.
-- The Go module is the repository root — run `go` commands from the clone root
-  (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly).
+- **Delegate substantive work and keep the coordinator context clean**: use guarded headless agents or isolated workers for investigation, implementation, tests, and review; keep only decisions and compact witnessed evidence in the primary context, and verify worker effects independently.
+- **Ship green work unprompted**: when `make ci` is green, commit explicit paths via `fak commit --path <p> -m "<subject> (fak <leaf>)"` (or `fak sweep --apply`) and push via `fak sync push`.
+- Work directly on the trunk (`main`); use detached worker worktrees (`fak worktree worker prepare|land|reap`) only for build isolation, and keep `go` commands rooted at the repo clone.
+- Keep comments concise (invariants/rationale only, never syntax narration) and frame diagnostics around the next checkable step.

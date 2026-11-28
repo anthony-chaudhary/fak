@@ -83,11 +83,10 @@ Two reading rules for the table below:
 `AGENTS.md` now has a one-way byte floor, the same two-sided ratchet its siblings
 run (`floorgate.go`, `skillfootprint/descbudget.go`):
 
-- **Floor:** `DOC_BYTES	AGENTS.md	52709` in [`agents-md-floor.tsv`](agents-md-floor.tsv),
-  re-pinned 52427 → 52709 on 2026-11-13 (`git cat-file -s HEAD:AGENTS.md`): the
-  router-shape leaf pointers added to four sections (divide-and-conquer,
-  default-priorities, track-work-in-github, new-work-defaults) grew the file +282 B,
-  so the ceiling tracks the measurement in the same commit.
+- **Floor:** `DOC_BYTES	AGENTS.md	14063` in [`agents-md-floor.tsv`](agents-md-floor.tsv),
+  re-pinned 52709 → 14063 on 2026-11-28 (`git cat-file -s HEAD:AGENTS.md`): trimmed stale hardware,
+  repeated rules, and model-specific guidance into thin harness overlays while preserving all
+  gated invariants.
 - **Gate:** `internal/agentsindex/bytefloor.go`, enforced by
   `TestAgentsMDByteFloorAtHEAD` in every `go test ./...` run, which CI's
   `ci-fast` shards run.

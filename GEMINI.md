@@ -1,59 +1,25 @@
 # Gemini CLI context — fak
 
-> **Not the human contributor guide.** This file is operating instructions for *automated*
-> contributors working inside the maintainers' shared checkout. Humans want
-> [`README.md`](README.md) for what fak is and [`CONTRIBUTING.md`](CONTRIBUTING.md) for how
-> to contribute; nothing on this page applies to you.
+> Automated-contributor overlay for Gemini CLI. Read [`AGENTS.md`](AGENTS.md) first for canonical build/test/run, repo map, and rules. Humans: [`README.md`](README.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-The canonical agent instructions for this repo are in [`AGENTS.md`](AGENTS.md) — read it
-first for build/test/run, the repo map, and the rules. Curated doc map:
-[`llms.txt`](llms.txt). Contributor contract: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+**fak** is an agent kernel sitting between an AI agent and its tools (`default_open` bounded by a structural safety floor; MCP wired in `.mcp.json`).
 
-This repo is **fak**, an agent kernel: one Go binary that sits between an AI agent and the
-tools it calls and adjudicates every call before it runs — deny by structure, repair
-malformed calls, quarantine poisoned results. Its MCP server is wired in `.mcp.json`.
+## Core harness rules
 
-Must-know rules (enforced below the agent layer):
+- **Delegate substantive work and keep the coordinator context clean**: use guarded headless agents or isolated workers for investigation, implementation, tests, and review; retain only decisions and compact witnessed evidence in the primary context.
+- **Trunk, commits, and Go module**: stay on `main` (only detached worker worktrees via `fak worktree worker prepare|land|reap`), commit via `fak commit --path <p> -m "<subject> (fak <leaf>)"`, and run `go` commands from the repo root.
 
-- **Delegate substantive work and keep the coordinator context clean** — use guarded
-  headless agents or equivalent isolated workers for investigation, implementation, tests,
-  and review. Keep only decisions and compact witnessed evidence in the primary context;
-  independently verify worker effects before landing or reporting them. Direct work is for
-  lightweight coordination and truly trivial tasks. See [`AGENTS.md`](AGENTS.md).
-- Work directly on the trunk (`main`); never open a feature branch or worktree — the
-  trunk guard refuses off-trunk commits (`OFF_TRUNK`). The one sanctioned exception: a
-  **detached** per-worker worktree that lands on `main` via `fak worktree worker
-  prepare|land|reap` (build isolation, #1334) — detached and lane-serialized, it is not a
-  branch and never trips `OFF_TRUNK`. Feature branches and off-trunk commits stay forbidden.
-- Commit via `fak commit --path <p> -m "<subject> (fak <leaf>)"` (or `fak sweep --apply`);
-  DCO sign-off is automatic. Raw `git commit -s -m "<subject> (fak <leaf>)" -- <paths>` is
-  emergency-only when the `fak` binary is unbuilt; never `git add -A`.
-- The Go module is the repository root — run `go` commands from the clone root
-  (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly).
+## Operational sharp edges (Gemini 3.8 Flash & peers)
 
-## Operational sharp edges & model guidance (Gemini 3.8 Flash & peers)
+- **Token and diff economy**: keep CLI commentary under 3 lines, skip filler, and confine diffs to the requested lines without unasked scaffolding.
+- **Circuit-break tool loops**: on guard denial or failure, read the receipt and run `fak recover <TOKEN>` or pivot instead of repeating the call.
+- **External verification and discrete tools**: ground claims in observed `go test` / `fak validate` receipts; prefer structured file tools (`Read`, `Edit`, `Glob`, `Grep`) over complex shell pipelines.
+- **Scoped abstention**: emit `ABSTAIN` with diagnostic context on concurrency lock invariants, `internal/abi`, or low-level SIMD/CUDA mechanics.
+- **Wire & schema hygiene**: enforce turn alternation (auto-continue trailing model turns to avoid HTTP 400), strip `$schema` and `additionalProperties`, backfill `items` on array params, and preserve `thoughtSignature` tokens ([analysis](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md)).
 
-When operating as or delegating to Gemini 3.8 Flash, observe these behavioral fences:
+## Human-attention-aware response format
 
-- **Enforce strict token and diff economy**: 3.8 Flash tends toward verbosity and output inflation (~2×–4× output tokens vs peer models). Keep commentary brief (<3 lines in CLI mode), avoid conversational filler, and never introduce unasked scaffolding, multi-panel apps, or unsolicited helper files. Keep diffs strictly minimal.
-- **Circuit-break tool error loops**: If a command or tool call fails or is denied by a kernel guard, never immediately retry the same call. Read the error, change tack, or emit a structured refusal.
-- **Rely on external verification, not self-narration**: Never declare a task complete based on internal reasoning alone. Ground every claim in an observed tool execution receipt or test result (`go test`, `fak validate`).
-- **Focus on "move forward" over "conclusions"**: Frame findings, benchmark results, and diagnostics around forward momentum rather than terminal or defeatist conclusions (e.g. rather than *"X didn't work ... therefore we suck..."*, state *"the next step to get better performance is X"*). Treat unmet targets as empirical data that eliminates a variable and always provide the next checkable step.
-- **Prefer discrete file tools**: 3.8 Flash exhibits lower reliability on raw shell pipelines (TerminalBench regressions). Use structured tools (`Read`, `Edit`, `Glob`, `Grep`) over complex piped bash commands.
-- **Fail-to-abstain on high-difficulty subsystems**: Concurrency lock invariants, frozen ABI (`internal/abi`), and low-level SIMD/CUDA mechanics exceed safe Flash reasoning. Emit an `ABSTAIN` verdict with diagnostic context rather than guessing.
-- **Enforce turn alternation & wire trailing turn guards**: Gemini wire strictly rejects payloads ending with a model turn with HTTP 400 (`Requests ending with a model turn are not supported`). When a reasoning step finishes without text/tools or during history reload, ensure turn alternation via auto-continuation.
-- **Sanitize nested tool schemas & preserve thought signatures**: Gemini API rejects `$schema`, `additionalProperties`, and naked array parameters lacking `items`. Recursively backfill `items` and preserve `thoughtSignature` tokens across multi-turn function calls.
-- Full analysis & evaluation data: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
+- Lead with the verdict or decision on line 1, separate sections with blank lines, and keep paragraphs to 1–2 lines.
+- Use scannable bullets (one claim + inline evidence per line) and close with the next checkable command or decision.
 
-## Human-attention-aware response formatting
-
-Shape every human-facing response for fast, low-friction scanning:
-
-- **Lead with the verdict or decision**: Put the outcome, blocker, or next action on the first line.
-- **Separate sections with blank lines**: Break distinct topics, steps, and status groups with line breaks; keep prose paragraphs to 1–2 short lines.
-- **Use scannable bullet points**: Group parallel facts, edits, or options into concise bullets with one claim and inline evidence per line.
-- **Prioritize human attention**: Surface choices, tradeoffs, and risks up front; keep background detail behind file links or brief summaries.
-- **Close on the next checkable step**: End operator-facing turns with a bullet carrying the next concrete command or decision (matching `AGENTS.md` / `headlesslint.ScanClosing`).
-
-To run the Gemini CLI behind the kernel (governed tool calls via MCP / an
-OpenAI-compatible gateway), follow [`docs/integrations/gemini-cli.md`](docs/integrations/gemini-cli.md).
+Gemini CLI integration: [`docs/integrations/gemini-cli.md`](docs/integrations/gemini-cli.md) · Doc map: [`llms.txt`](llms.txt).
