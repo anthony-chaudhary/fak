@@ -732,6 +732,7 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 		}
 		if s.poolPrefix != witnessSnapshotPoolPrefix {
 			s.pruneGoneRegistrations()
+			trimPoolExcessPrefix(s.root, parent, s.git, s.poolName())
 		}
 		return true
 	}
@@ -799,9 +800,10 @@ func trimPoolExcessPrefixBounded(root, parent string, git GitRunner, prefix stri
 		return
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].mod.Before(dirs[j].mod) })
+	excess := len(dirs) - TopologyCandidatePoolCap
 	removed := 0
-	for _, d := range dirs[:len(dirs)-TopologyCandidatePoolCap] {
-		if budget >= 0 && removed >= budget {
+	for _, d := range dirs {
+		if removed >= excess || (budget >= 0 && removed >= budget) {
 			return
 		}
 		sidecar, ok := lockCandidateSidecar(d.path)
