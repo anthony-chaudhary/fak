@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-// Adapted from vLLM at e5196e2959a42908313510f55fa21f213a48802e (Apache-2.0).
 // License and notice: THIRD_PARTY_NOTICES.md ("vLLM").
 package gateway
 

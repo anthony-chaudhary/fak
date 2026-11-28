@@ -1,4 +1,3 @@
-// Package conflationscore is the Go port of tools/conflation_scorecard.py -- the
 // anti-conflation / provenance-honesty stick.
 //
 // The lesson it generalizes (from the compaction-metrics fix): every number or status a

@@ -340,8 +340,6 @@ func renderModelInfo(w io.Writer, r modelInfoReport) {
 
 // runModelInfo is `fak model info <ref>`: report a CACHED checkpoint's family,
 // format, context, weights and memory floor from local metadata only. Adapted
-// from TensorFold's info command (zig/src/cli/info.zig:15 @9e8c368b0b4c2c7892a0c9f0f302d7c164016209,
-// Apache-2.0): resolve the ref to a locally cached checkpoint, read its header,
 // report the axes, refuse an uncached ref with a pull hint, and refuse an
 // unregistered model type by naming the registry. No byte is downloaded and no
 // tensor payload is read; the floor is a lower bound, not a capacity claim.
@@ -426,7 +424,6 @@ func blockedModelMessage(arg, label string) (string, bool) {
 // capability gate: a ref whose declared model family is absent from the
 // compiled capability table (modelCapabilities) is refused before a single
 // byte is transferred. Adapted from TensorFold's pre-transfer gate
-// (zig/src/cli/pull.zig:69 @9e8c368b0b4c2c7892a0c9f0f302d7c164016209).
 var ErrUnknownModelType = errors.New("model type not supported by this build")
 
 // unknownModelTypeError carries the offending family token on the sentinel so

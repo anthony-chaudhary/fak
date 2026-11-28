@@ -18,7 +18,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
 
-// `fak fleet-accounts` — the native Go port of the READ-ONLY roster/resolve/probe +
 // status fold from tools/fleet_accounts.py. It answers "what is an account, and is it
 // offered right now?" across Claude Code, Codex, and opencode by:
 //   - DISCOVERING config dirs (<home>/.claude*, <home>/.codex*, <config_home>/opencode*),

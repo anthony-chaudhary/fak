@@ -445,7 +445,6 @@ func formatTensorTypes(types map[TensorType]struct{}) string {
 // Output-head quantization classification, module sensitivity breakdown, weight-byte
 // floor sweep, and kernel-path confirmation below are a clean-room adaptation of the
 // weight-byte floor methodology from wandb/senpai (Apache-2.0, pinned at
-// 5406c6195372251ce9b9ef7bc9133b5f9c92939c).
 
 // OutputHeadQuant summarizes the active LM output-head tensor encoding and footprint.
 type OutputHeadQuant struct {

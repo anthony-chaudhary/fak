@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // INSPIRE-ONLY clean-room adaptation of NVIDIA/knavigator
-// (NVIDIA/knavigator@d6213b84283fa231395f2056d92e157d56683e3a):
 // workload scenario grammar and scheduler-under-test harness for native
 // batching and admission tests in internal/gateway.
 package gateway

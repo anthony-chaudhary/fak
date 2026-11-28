@@ -6,7 +6,6 @@ import (
 )
 
 // TestTransferChannelPairedVsOneSidedContract pins the borrowed LMCache channel
-// contract (ADAPT of lmcache/v1/transfer_channel/abstract.py:21-285@1b7dff2):
 // a paired channel admits exactly BatchedSend/BatchedRecv and refuses the
 // one-sided operations with ErrOneSidedCallOnPaired; a one-sided channel admits
 // exactly BatchedWrite/BatchedRead and refuses the paired operations with

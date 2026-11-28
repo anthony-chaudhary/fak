@@ -47,7 +47,6 @@ def color(enabled):
             "b": "\033[36m", "d": "\033[2m", "x": "\033[0m"}
 
 
-# --- the steward kernel: a faithful port of steward.go's (violated, witness) rule ---
 #
 # Each invariant below decides ONLY whether its pattern matches the frozen probe. The
 # RAISE decision is the conjunction (pattern_match AND witness_present) — the witness is

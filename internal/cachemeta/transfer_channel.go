@@ -5,7 +5,6 @@ import "errors"
 // TransferChannel types the seam a KV transfer backend speaks for moving spans
 // between residency tiers. It ADAPTS LMCache's four-method transfer-channel
 // contract (LMCache/LMCache lmcache/v1/transfer_channel/abstract.py:21-285@
-// 1b7dff2cd83fc634326b5989eb71aa5f05b4f426, Apache-2.0; verdict ADAPT): the four
 // batched operations split by peer topology — BatchedSend/BatchedRecv are
 // PAIRED (the span only lands when both endpoints act) while BatchedWrite/
 // BatchedRead are ONE-SIDED (only the initiator acts against a store that

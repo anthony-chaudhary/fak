@@ -1248,9 +1248,6 @@ func TestOperationMetricsRefusalSubtypeBreakdown(t *testing.T) {
 }
 
 // TestTokenHistogramBucketsScaleToMaxTotalTokens pins the TGI-adapted auto-scaled token
-// bucket ladder (native ticket oss-port-gateway-token-histogram-buckets; source
-// huggingface/text-generation-inference router/src/server.rs:1948-1985 @ b4adbf2,
-// Apache-2.0, ADAPT): the closed contract is the bounded count, strict monotonicity, the
 // pinned edges at the 4K and 128K ceilings, the top edge landing exactly on the ceiling,
 // and the registered input/output histograms actually using that ladder.
 func TestTokenHistogramBucketsScaleToMaxTotalTokens(t *testing.T) {

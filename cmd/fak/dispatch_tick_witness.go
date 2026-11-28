@@ -1,7 +1,6 @@
 package main
 
 // Commit-time diff-witness binding for the dispatch tick (#1324 proposal #2), the Go
-// port of witness_exited_workers in tools/issue_resolve_dispatch.py. For every
 // resolve-<N>-<stamp>.log whose pid is provably DEAD and not yet witnessed (no
 // .witness sidecar), find the commit it landed for its issue (subject cites #N inside
 // the per-worker .basesha..HEAD window) and grade it through `dos commit-audit`: a

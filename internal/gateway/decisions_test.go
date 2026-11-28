@@ -1,9 +1,6 @@
 package gateway
 
 // decisions_test.go — the POST /v1/decisions closed contract (ticket
-// oss-port-tensorfold-decision-probabilities-20261103, adapted from
-// ashhart/TensorFold zig/src/server/decisions.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209,
-// Apache-2.0): a valid choice answers object="decisions" with A-Z labels whose
 // probabilities sum to 1 plus the per-label mass; a missing hook, a repeated or
 // empty id, a non-positive temperature, an unsupported prompt format, zero or
 // >26 options, and a non-finite logit each refuse with their typed code. The

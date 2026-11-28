@@ -82,7 +82,6 @@ type ServingMetricRow struct {
 	// Token counters retain independently witnessed presence, including zero. Native
 	// process-global cacheobs totals are not relabeled as worker/model counters here.
 	// Adapted from vLLM v1 metrics/loggers.py and stats.py at
-	// a20280f30e3169d33a7e21d1d117e9719bace00b (Apache-2.0).
 	// Copyright contributors to the vLLM project.
 	PrefixCacheQueries ServingGauge
 	PrefixCacheHits    ServingGauge

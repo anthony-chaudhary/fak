@@ -12,7 +12,6 @@ import (
 )
 
 // These compact fixtures were decoded by llama.cpp's actual dequantize_row_iq*
-// functions at revision 6fe74980162af0ed5e559870d5deccafaa034e7c. The raw blocks
 // are built deterministically below; the expected digest covers all 256 f32 output
 // bit patterns without checking in a 1 KiB golden vector per format.
 func TestIQ12Q2XLReferenceVectors(t *testing.T) {

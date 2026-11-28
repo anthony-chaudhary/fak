@@ -2,7 +2,6 @@ package main
 
 // resume_sweep_cli.go — `fak resume sweep`, the manifest-free discovery half of the
 // cross-account resume layer: find EVERY recently-crashed session across ALL local
-// ~/.claude* accounts and bucket each by the action it actually needs. Go port of
 // tools/resume_sweep.py (the shell half; the classification core is the pure
 // internal/resume/sweep leaf).
 //

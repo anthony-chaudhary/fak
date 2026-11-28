@@ -1,4 +1,3 @@
-// health.go — the Go port of tools/codex_turn_health.py (#5063): the Codex
 // turn/compaction health rollup, folded on the EXACT-turn_id lifecycle contract this
 // package already enforces instead of the script's boolean in_turn flag.
 //

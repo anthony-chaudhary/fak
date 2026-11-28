@@ -8,7 +8,6 @@ import (
 
 // TestToolDefStrictPreservedAndAutoWantsGrammar pins the adapted TensorFold
 // strict-tool grammar (zig/src/server/tool_grammar.zig
-// @9e8c368b0b4c2c7892a0c9f0f302d7c164016209): a bool function.strict survives
 // wire decode and tool-schema normalization, a string "true" does not mark, and
 // AutoWantsGrammar decides auto-grammar wants from the marks alone.
 // fak-test:runtime fast est=10ms

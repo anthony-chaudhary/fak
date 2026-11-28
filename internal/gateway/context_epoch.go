@@ -17,8 +17,6 @@ import (
 // fresh baseline. Without it a provider-side cache hit can return state the current
 // epoch already invalidated.
 //
-// Direct port from anomalyco/opencode @ 4eb29a64f0054672950acf789f2b09487ebfbb20
-// (MIT, Copyright (c) 2025 opencode):
 //
 //	packages/core/src/system-context/index.ts -> ContextEpochSource, RenderContextEpochBaseline,
 //	                                               ReconcileContextEpoch, ReplaceContextEpoch

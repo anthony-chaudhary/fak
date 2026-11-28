@@ -208,7 +208,6 @@ type readLifecycleIndex struct {
 //
 // The assistant-only metadata gate is adapted from Headroom's _build_tool_metadata
 // and _find_tool_call_msg_index in headroom/transforms/read_lifecycle.py at
-// 38074888ac871b8b44418066d66b6a37159978ed (Apache-2.0). Modified for Fak's raw JSON.
 // Headroom — Copyright 2025 Headroom Contributors.
 // This product includes software developed by the Headroom Contributors.
 func classifyReadLifecycle(elems []json.RawMessage) readLifecycleIndex {

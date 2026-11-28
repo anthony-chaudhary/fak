@@ -360,8 +360,6 @@ func validLowerHex(s string, size int) bool {
 }
 
 // These slugs adapt ALE's native run layout at
-// ale_run/orchestration/run_writer.py@75a3f866535946b67f9a57e4f158eb30ad50be8a
-// (Apache-2.0), so the preflight inspects the same key ALE will resume from.
 var aleSlugModelRE = regexp.MustCompile(`[^a-z0-9-]+`)
 var aleSlugAgentRE = regexp.MustCompile(`[^a-z0-9_]+`)
 

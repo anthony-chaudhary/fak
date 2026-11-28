@@ -1,8 +1,6 @@
 package beam
 
 // The bounded live/completed search and generated-length score are adapted from
-// vLLM 5c8ae7c74aaa99d1f7fbeea942fd7282e3413810,
-// vllm/entrypoints/generate/beam_search/{offline,utils}.py (Apache-2.0).
 // This portable implementation deliberately replays owned CPU sessions; it does
 // not use BatchDriver's indirection table or claim shared KV state.
 import (

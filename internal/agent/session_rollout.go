@@ -1,5 +1,4 @@
 // Adapted from openai/codex rollout record types (Apache-2.0),
-// codex-rs/core/src/rollout.rs@2c502d8b3d382dd609179164f31396d95deee55c.
 //
 // Component parser and round-trip converter for Codex-style rollout JSONL
 // session logs. Imported sessions remain read-only analysis artifacts: this

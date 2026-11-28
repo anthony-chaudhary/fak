@@ -1,11 +1,8 @@
 // Hash-id block cache for trace-replay prompt synthesis.
 //
-// ADAPT of the hash-id block path from ai-dynamo/aiperf
 // (PromptGenerator._build_token_sequence, sample_tokens_from_corpus,
 // reject_separator_only_blocks, and the per-(trace_id, hash_id) reseed),
 // pinned at
-// https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/dataset/generator/prompt.py
-// (commit ab610add4e8876fca223197596c728e17365f381, Apache-2.0). Re-expressed
 // in idiomatic Go over a plain token-ID corpus; no upstream code is copied.
 // Study note: fak-private docs/research/STUDY-aiperf-2026-11-09.md, candidate
 // aiperf-data-11.

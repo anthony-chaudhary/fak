@@ -74,7 +74,6 @@ type samplerWorkspace struct {
 // no finite logit. DeepInfer's fused sampler asserts the same condition before
 // sampling (Apache-2.0, deepseek-ai/DeepInfer
 // deepinfer/model_executor/layers/tilelang_ops/cuda/fused_sample.py at
-// 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
 var ErrNonFiniteLogits = errors.New("native sampler: logits contain NaN or +Inf, or no finite entry")
 
 func (w *samplerWorkspace) resize(vocab int) {
@@ -522,7 +521,6 @@ func (w *samplerWorkspace) nucleusTruncate(probs []float64, sum, topP float64) f
 // threshold isolates a small head or when the walk would continue past the head.
 // The threshold search adapts DeepInfer's sort-free top-p selection (Apache-2.0,
 // deepseek-ai/DeepInfer deepinfer/model_executor/layers/tilelang_ops/fused_sample.py
-// at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
 func (w *samplerWorkspace) nucleusTruncatePrefix(probs []float64, target float64) (float64, bool) {
 	var pmax float64
 	for _, p := range probs {
@@ -746,7 +744,6 @@ func topKRankSort(idx []int, probs []float64) {
 // returned. The caller owns the returned slice.
 //
 // Adapted from ashhart/TensorFold zig/src/core/lanes/sampling_selection.zig:7
-// @9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
 func topKRankOrder(probs []float64, k int) ([]int, error) {
 	if k <= 0 || len(probs) == 0 {
 		return nil, nil

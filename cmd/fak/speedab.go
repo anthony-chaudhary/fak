@@ -68,11 +68,8 @@ func cmdSpeedAB(argv []string) { os.Exit(runSpeedAB(os.Stdout, os.Stderr, argv))
 
 // Speed A/B recipes: named presets that compile to a canonical plan.
 //
-// ADAPT of the Search Recipe plugin contract from ai-dynamo/aiperf
 // (SearchRecipe, SearchRecipeContext, SearchRecipeOutput and its
 // exactly-one-branch validator, resolve_concurrency_bounds), pinned at
-// https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/search_recipes/_base.py
-// (commit ab610add4e8876fca223197596c728e17365f381, Apache-2.0). Re-expressed
 // in idiomatic Go against the speed A/B run shape; no upstream code is
 // copied. Study note: fak-private docs/research/STUDY-aiperf-2026-11-09.md,
 // candidate aiperf-ops-5.

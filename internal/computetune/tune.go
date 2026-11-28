@@ -5,7 +5,6 @@ package computetune
 
 // The paired sign test in this file is adapted from magnitudedev/magnitude,
 // inference/seismic/measure/src/statistics.rs at commit
-// 8d7dbcc1baf4eb3ae7f1c3449dd463f3b375f576 (Apache-2.0). Changes were made: it
 // is re-expressed in Go and bound to Tune's challenger-versus-fallback admission.
 
 import (
@@ -773,10 +772,6 @@ func DispatchMatMul(ctx context.Context, profile Profile, manifest Manifest, can
 	return out, chosen.ID(), err
 }
 
-// Sanitizer gate: clean-room Go port of the AKO4X sanitizer-skill routing (pattern
-// MIT, templates/skills/sanitizer/SKILL.md@ce030ebd855d) and the Atrex gateway
-// sanitizer choices (alibaba/atrex-kernel-agent gateway.py:2160@dc388550ab6b,
-// Apache-2.0). Software-verified parser + routing only; a physical compute-sanitizer
 // run needs a CUDA host and is a follow-up.
 
 // SanitizerTool is one member of the closed compute-sanitizer tool set. There is

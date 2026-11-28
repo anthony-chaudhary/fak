@@ -1,6 +1,5 @@
 // Adapted from dbos-inc/dbos-transact-golang, dbos/workflow.go (RunAsStep step
 // memoization and CancelWorkflow), pinned at
-// d516e2191d78673e2e5623a51164b0fec11e7cc9, MIT License, Copyright (c) 2024
 // DBOS, Inc. Reimplemented over an append-only JSONL file instead of a
 // Postgres system database.
 

@@ -80,7 +80,6 @@ type FreshProbe struct {
 
 // FreshProbeFromLedger returns the freshest active-probe verdict for account from the
 // account-probe ledger under regDir, IF it is within freshMin minutes of now — else
-// nil. It is the Go port of fleet_accounts._fresh_probe_from_ledger: the missing link
 // between the prober (account_probe writes OK/LIMIT/AUTH to probe_ledger.jsonl) and
 // the roster (runtime_status reads sessions.json). Consulting it lets a recent probe
 // override a carried block with one freshness gate so a stale OK cannot mask a real

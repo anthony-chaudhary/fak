@@ -103,7 +103,6 @@ except Exception:  # AgentDojo not installed (local unit-test / selfcheck path)
 
 
 # ---------------------------------------------------------------------------
-# Sink classification — a faithful port of internal/ifc/ifc.go Classify().
 # ORDER IS SECURITY-LOAD-BEARING (two red-team bypasses closed here):
 #   * an external DESTINATION in the args is egress REGARDLESS of tool name or
 #     SafeSink status (the safesink-launder bypass);

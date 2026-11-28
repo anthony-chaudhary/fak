@@ -30,7 +30,6 @@ const (
 	blockQ5KBytes  = 2 + 2 + kScaleSize + qkK/8 + qkK/2
 	blockQ6KBytes  = qkK/2 + qkK/4 + qkK/16 + 2
 	// The IQ1/IQ2 K-block layouts below are the canonical GGML layouts at
-	// llama.cpp revision 6fe74980162af0ed5e559870d5deccafaa034e7c.
 	blockIQ2XXSBytes = 2 + qkK/8*2
 	blockIQ2XSBytes  = 2 + qkK/8*2 + qkK/32
 	blockIQ2SBytes   = 2 + qkK/4 + qkK/32 + qkK/32

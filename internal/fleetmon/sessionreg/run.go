@@ -3,7 +3,6 @@
 // folds the account blockers they witness, decides which stopped sessions are safe to
 // resume (and on which account), and publishes the fleet registry (sessions.json,
 // resume_plan.json, decisions.log, transitions.log) the dispatch tick and the resume
-// watchdog consume. It is the Go port of tools/fleet_sessions.py and keeps that writer's
 // file formats byte-for-byte.
 package sessionreg
 

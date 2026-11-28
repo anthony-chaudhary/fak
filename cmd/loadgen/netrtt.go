@@ -1,7 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/network_latency/probe.py:127@ab610add4e8876fca223197596c728e17365f381
-// and src/aiperf/metrics/network_adjusted_analyzer.py:109@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): pre-flight unpooled TCP/RTT calibration probe
 // (DNS resolved once at construction, no TLS handshake even for https) plus
 // non-destructive network_adjusted_* latency computation clamped >= 0 with

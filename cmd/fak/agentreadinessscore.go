@@ -7,7 +7,6 @@ package main
 // mechanical defect into a friction-debt gate (lower = better, floor 0) and every real,
 // working affordance into the unbounded experience-frontier (higher = better).
 //
-// This is the Go port of the former tools/agent_readiness_scorecard.py; the surfaces
 // (default / --json / --markdown / --stamp / --compare) are preserved byte-for-byte in
 // behavior so the committed snapshot and the control-pane fold are unchanged.
 

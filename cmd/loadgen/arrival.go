@@ -1,10 +1,6 @@
 // Seeded arrival-pattern interval generators for request pacing.
 //
-// DIRECT-PORT of the interval generators from ai-dynamo/aiperf
 // (src/aiperf/timing/intervals.py), pinned at commit
-// ab610add4e8876fca223197596c728e17365f381 (aiperf v0.14.0):
-//
-//	https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/timing/intervals.py
 //
 // The upstream distributions are preserved exactly: Poisson uses exponential
 // inter-arrivals with mean 1/rate; Gamma uses shape=smoothness and

@@ -1,6 +1,5 @@
 // Integrated-device KV sizing. Ported from NVIDIA/TensorRT-LLM
 // tensorrt_llm/_torch/pyexecutor/_util.py::_mem_get_info_for_kv_sizing
-// (Apache-2.0, @a362600648d451d99a6692554d93bca0dc470149), wired into
 // configure_kv_cache_capacity upstream.
 //
 // On integrated (unified-memory) GPUs the CPU page cache — e.g. the one

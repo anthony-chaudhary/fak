@@ -1,6 +1,5 @@
 // Adapted from ai-dynamo/aiperf
 // src/aiperf/post_processors/strategies/genai_semconv.py:69
-// (@ab610add4e8876fca223197596c728e17365f381, Apache-2.0).
 // Pure-data, import-safe OTel GenAI semantic-convention metric mapping table
 // aligned with pkg/stepspan/genai_map.go without modifying span definitions.
 

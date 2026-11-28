@@ -3,7 +3,6 @@ package gateway
 import "errors"
 
 // INSPIRE of ai-dynamo/aiperf (Apache-2.0),
-// src/aiperf/server_metrics/discovery/kubernetes.py:39 @ab610add4e8876fca223197596c728e17365f381:
 // an ordered ladder for finding a server's Prometheus endpoint. Each rung is tried in
 // order; the first that yields an address wins, and an explicit operator choice always
 // outranks inferred ones. Policy and host oracle only: no cluster access, not wired in.

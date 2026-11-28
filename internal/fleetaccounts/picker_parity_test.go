@@ -13,7 +13,6 @@ import (
 
 // picker_parity_test.go — #3000's cross-surface drift gate.
 //
-// The account picker is transcribed TWICE on purpose: this package is the Go port of the
 // read-only roster/resolve fold in tools/fleet_accounts.py (see the package doc), and the
 // Python surface is still the live one for the launcher/watchdog tools that import it. So
 // "one implementation owns the lifecycle registry index, tombstone exclusion, and

@@ -68,7 +68,6 @@ func bonsaiRequestTools() []ToolDef {
 // leading system block folds the tool schema into a <tools>…</tools> advertisement plus
 // the <tool_call> emission instruction; the assistant turn is pre-seeded with the empty
 // <think>\n\n</think> block that mirrors apply_chat_template(enable_thinking=false).
-// The system block is a byte-faithful port of the tools branch shared by the upstream
 // Qwen3 and Qwen2.5-Coder chat templates (verified against Qwen/Qwen3-32B and
 // Qwen/Qwen2.5-Coder-7B-Instruct tokenizer_config.json renders via jinja2) — issue
 // #10600 closed the previously documented preamble/grammar divergence.

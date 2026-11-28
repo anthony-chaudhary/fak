@@ -1,5 +1,4 @@
 // Adapted from sgl-project/sglang (Apache-2.0) at commit
-// 0afb736d0aab96e3ab80b4c54a376213a1db67a6:
 // sgl-router/src/policies/scoring/prefix_cache.rs and
 // sgl-router/src/state/kv_events/tree.rs. This is an adaptation, not a copy:
 // storage tiers, data-parallel ranks, sharding, LRU node eviction, the fused

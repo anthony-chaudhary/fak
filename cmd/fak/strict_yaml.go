@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// ADAPT of ai-dynamo/aiperf (Apache-2.0), src/aiperf/config/loader/core.py:36
-// @ab610add4e8876fca223197596c728e17365f381: strict YAML loading that rejects a
 // duplicate mapping key with its line and column instead of letting the last one
 // silently win. This scanner handles the block-mapping subset benchmark configs use
 // (indentation-scoped `key: value` lines); it is not a general YAML parser.

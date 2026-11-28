@@ -2,7 +2,6 @@
 //
 // Adapted from wandb/senpai (Apache-2.0),
 // literature_and_guidance/LLM-INFERENCE-OPTIMIZATION-SENPAI-GUIDE.md:294-321,515-555
-// @5406c6195372251ce9b9ef7bc9133b5f9c92939c: expected accepted draft tokens are
 // the numerator, drafter cost plus roofline-priced verifier width are the
 // denominator, the best draft length is picked by priced throughput rather than
 // maximized, and acceptance is mocked before any drafter build. The idea is

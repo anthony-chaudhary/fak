@@ -4,9 +4,6 @@
 // Direct port from ai-dynamo/aiperf (Apache-2.0):
 //
 //	Source file:  src/aiperf/dataset/memory_map_utils.py
-//	URL (pinned): https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/dataset/memory_map_utils.py
-//	Revision:     ab610add4e8876fca223197596c728e17365f381
-//	License:      Apache-2.0
 //	Upstream copyright (retained verbatim):
 //	SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //	SPDX-License-Identifier: Apache-2.0

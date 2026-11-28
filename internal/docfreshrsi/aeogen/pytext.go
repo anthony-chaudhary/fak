@@ -1,6 +1,5 @@
 // Package aeogen generates the answer-engine documentation surfaces: llms-full.txt (the
 // one-fetch corpus inlined from llms.txt) and the JSON-LD structured-data blocks injected
-// into the docs site, FAQ, index page and llms.txt. It is the in-process port of
 // tools/gen_llms_full.py and tools/gen_structured_data.py and must stay byte-identical to
 // them, so the helpers here reproduce Python's text semantics (universal newlines,
 // Unicode whitespace, code-point lengths) rather than Go's defaults.

@@ -1,4 +1,3 @@
-// procguard.go wires `fak process-guard [scan|report]` — the native port of the
 // standalone operator/control-pane modes of tools/proc_resource_guard.py. It is a
 // thin CLI shell over internal/procguard: collect a process snapshot, classify it
 // (resource-level + the richer CPU-pin / orphan-sprawl modes), and emit either a

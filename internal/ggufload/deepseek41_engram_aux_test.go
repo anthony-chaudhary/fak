@@ -168,7 +168,6 @@ func TestDeepSeek41TensorEngramAuxExactArtifact(t *testing.T) {
 		t.Skip("requires bounded GSQ-RCO header/auxiliary capture; no model download")
 	}
 	// Captured from ISTA-DASLab/DeepSeek-V4.1-Flash-1017-GSQ-RCO-GGUF
-	// at 653a9874aa38c356233c5f3cc8c96b19a43b57eb: four directories, and only
 	// the first shard's 517952-byte integer region. No weight/table execution.
 	var f *File
 	for i, digest := range []string{

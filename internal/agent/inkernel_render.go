@@ -144,7 +144,6 @@ func inKernelUsesOrnithQwen35Template(cfg model.Config) bool {
 
 // ornithToolSpecPrefix/Suffix pin the text-only tool surface published in
 // deepreinforce-ai/Ornith-1.0-9B's chat_template.jinja at model revision
-// 4402d8dc236fe9e09d12aeed907a763b66a60533. The schemas between them remain
 // model/request-driven and declaration-ordered, preserving a deterministic radix prefix.
 const ornithToolSpecPrefix = "# Tools\n\nYou have access to the following functions:\n\n<tools>"
 
@@ -174,7 +173,6 @@ Reminder:
 - If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls
 </IMPORTANT>`
 
-// renderOrnithQwen35ChatMLTools is a faithful text-only Go port of Ornith's pinned
 // chat_template.jinja. The generic renderer remains the fallback for every other
 // family; this function is reached only through inKernelUsesOrnithQwen35Template.
 func renderOrnithQwen35ChatMLTools(messages []Message, tools []ToolDef, enableThinking bool) string {
@@ -375,7 +373,6 @@ func renderTranscript(messages []Message) string {
 }
 
 // toolSpecBlock renders the canonical Qwen tool-spec preamble for the folded system
-// block. It is a byte-faithful port of the tools branch of Qwen/Qwen2.5-Coder-7B-Instruct's
 // chat_template (tokenizer_config.json) — which Qwen3's template repeats verbatim — so the
 // prompt carries the exact tool grammar the checkpoint was trained on: the "# Tools" usage
 // preamble, the <tools>…</tools> signatures serialized the way the template's

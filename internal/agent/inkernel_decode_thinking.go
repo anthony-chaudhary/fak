@@ -7,7 +7,6 @@ type nativeThinkingConstraintContextKey struct{}
 // nativeThinkingConstraint is owned by one request, including its OOM retry. The
 // singleton choice at exhaustion adapts SGLang's strict reasoning mask and atomic
 // closing-token validation (Apache-2.0, SGLang Team, reasoner_grammar_backend.py at
-// b8ec544946f1c5b6e17a919a691b05c5b3e7af84); no upstream source is copied.
 type nativeThinkingConstraint struct {
 	budget      *ThinkBudget
 	limit       int

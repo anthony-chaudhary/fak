@@ -5,7 +5,6 @@
 //
 // Adapted from ai-dynamo/aiperf (DynamicConcurrencyLimit,
 // src/aiperf/timing/concurrency.py:41 @
-// ab610add4e8876fca223197596c728e17365f381, Apache-2.0); ADAPT disposition:
 // re-expressed in idiomatic Go with a mutex and closed-channel broadcast
 // wakeups; no upstream code is copied.
 //

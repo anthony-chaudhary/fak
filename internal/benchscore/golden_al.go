@@ -2,7 +2,6 @@
 // Golden acceptance-length gate adapted from SemiAnalysisAI/InferenceX
 // (Apache-2.0), inferencex-e2e/infx/bench/al_gate.py and
 // inferencex-e2e/infx/golden_al_distribution/README.md, revision
-// ea9e4f6f2e3073d55fe6f1dcd33557b7fe67f608. No Python source is copied.
 
 package benchscore
 

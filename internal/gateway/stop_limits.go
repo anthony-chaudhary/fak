@@ -6,7 +6,6 @@ import (
 )
 
 // Adapted from SGLang's sampling-parameter normalization at
-// ab9b2a173c18dc32614325319f631b016f543aad. Copyright 2023-2024 SGLang Team.
 // Licensed under the Apache License, Version 2.0
 // (https://www.apache.org/licenses/LICENSE-2.0). License and notices:
 // THIRD_PARTY_NOTICES.md ("SGLang"). The Go cardinality adaptation does not

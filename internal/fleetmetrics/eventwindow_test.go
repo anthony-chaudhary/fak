@@ -11,7 +11,6 @@ import (
 // XID counting (internal/pkg/collector/xid_collector.go:32,
 // internal/pkg/collector/expcollector.go, count-window config in
 // internal/pkg/appconfig/count_window.go) pinned at
-// 4e663a526c4624ad0e18ad816f09b7be2c5348a7.
 //
 // Every assertion below is a closed contract: an exact count, an exact code set,
 // or a sentinel error via errors.Is. No assertion depends on error prose.

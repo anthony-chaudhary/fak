@@ -32,7 +32,6 @@
 // `leaked_unswept` — either the witness sweep has not reached it yet or its
 // artifacts were pruned first. Coverage is reported, never assumed.
 //
-// This is the Go port of the retired tools/dispatch_conservation.py, moved to Go
 // under the pythongate de-Python ratchet (a NEW tool must be written in Go).
 package dispatchconservation
 

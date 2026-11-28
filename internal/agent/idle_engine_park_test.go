@@ -1,7 +1,6 @@
 package agent
 
 // Reproduction/regression pin for the idle-engine park lifecycle adapted from
-// ashhart/TensorFold zig/src/server/idle_unload.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209:
 // parks only at zero active; concurrent wakes coalesce into one reload; failed
 // opens stay parked and retryable; multi-rank GLM CUDA is refused. All engine
 // I/O is faked; no hardware or model is involved.

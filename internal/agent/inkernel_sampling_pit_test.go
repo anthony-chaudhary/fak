@@ -61,7 +61,6 @@ func referenceSamplingDistribution(logits []float32, temp, topP float64, topK in
 // Uniform(0,1). A Kolmogorov-Smirnov test at alpha=1e-5 rejects a sampler that
 // draws from the wrong distribution. Adapted from DeepInfer's randomized-PIT
 // sampler test (Apache-2.0, deepseek-ai/DeepInfer tests/models/test_sampler.py
-// at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
 //
 // fak-test:runtime fast est=2s lane=default
 func TestSamplerRandomizedPITIsUniform(t *testing.T) {

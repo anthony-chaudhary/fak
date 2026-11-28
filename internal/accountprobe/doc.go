@@ -2,7 +2,6 @@
 // that tools/account_probe.py writes — one JSON line per probe, append-ordered, with a
 // closed status vocabulary (OK / AUTH / ACCESS / CREDIT / LIMIT / APIERR / TRANSPORT).
 //
-// It is the Go port of account_probe's ledger-READ surface (probe_ledger_path,
 // last_probe_by_account, recent_probe_age_min): the piece the fleet roster needs to
 // fold a fresh active probe back over a stale carried block. The probe WRITER (the
 // subprocess that launches `claude -p "say pong"` and classifies the result) stays in

@@ -1,5 +1,4 @@
 // Command repoguard refuses a DESTRUCTIVE or out-of-tree write before it escapes
-// the repo — the Go port of tools/repo_guard.py, run as a single compiled binary
 // so the Claude Code PreToolUse hook fires WITHOUT spawning a Python interpreter
 // on every tool call (DIRECTION.md: the request path stays interpreter-free).
 //

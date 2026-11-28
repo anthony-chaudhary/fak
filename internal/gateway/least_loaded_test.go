@@ -8,7 +8,6 @@ import (
 // TestLeastLoaded* pins the ai-dynamo/aiperf sticky-router borrow landed in
 // this package (ADAPT — re-expressed in Go, no copied code; source:
 // src/aiperf/credit/sticky_router.py:389-391,550-581
-// @ab610add4e8876fca223197596c728e17365f381, Apache-2.0): the fleet load vector
 // kept as a bucket map so the minimum load is reachable in O(1) and a
 // least-loaded pick scans only the k-way tie. The closed contracts are exact
 // placements and minima against a brute-force reference — no error prose,

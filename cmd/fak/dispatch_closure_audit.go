@@ -1,6 +1,5 @@
 package main
 
-// dispatch_closure_audit.go — `fak dispatch closure-audit`, the native port of
 // the read/grade half of tools/issue_closure_audit.py (#1406). It binds commits
 // to issue numbers from commit text and grades each issue into one witness
 // bucket, re-reading the per-SHA `dos commit-audit` verdict for every resolving

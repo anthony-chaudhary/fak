@@ -1,5 +1,4 @@
 // Conceptual INSPIRE-ONLY seam derived from NVIDIA/RULER
-// (db43f92ff634bbce1c33d1fb15858aec4bba509a, Apache-2.0).
 // Synthetic task generators only; no model training or benchmark score claim.
 package ctxmmu
 

@@ -1,5 +1,4 @@
 // Adapted from ai-dynamo/aiperf, src/aiperf/kubernetes/jobset.py:110 (split_weighted_total,
-// _split_with_minimum) at ab610add4e8876fca223197596c728e17365f381. Apache-2.0; re-expressed as
 // one exact-integer largest-remainder split with per-bucket minimums and typed validation errors.
 
 package main
@@ -91,7 +90,6 @@ func SplitBudget(total int, weights, minimums []int) ([]int, error) {
 }
 
 // Inspired by ai-dynamo/aiperf, src/aiperf/kubernetes/jobset.py:162 at
-// ab610add4e8876fca223197596c728e17365f381 (Apache-2.0; idea only): fixed
 // pinned requests are carved out first, the remainder is split by weight, and
 // exhaustion names every term.
 

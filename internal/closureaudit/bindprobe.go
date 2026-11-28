@@ -96,7 +96,6 @@ func IssueIsDocsRung(title string) bool {
 }
 
 // ClaimKindBinds reports whether an audit's claim KIND can bind resolution of an
-// issue with this title (#2998) — the Go port of
 // issue_closure_audit.commit_binds_resolution, which this package had left on the
 // Python side. An UNKNOWN kind fails OPEN: the gate only demotes a KNOWN
 // doc/triage claim, it never slanders a witnessed commit whose kind we cannot read.

@@ -2,7 +2,6 @@ package gateway
 
 // request_rate_bucket_test.go — witness for the idiomatic Go re-expression of
 // TensorFold's per-principal request-rate token buckets (borrow-port part-out
-// oss-port-tensorfold-http-rate-admission-20261103, ADAPT verdict): refill math,
 // retry-after, cap refusal, and the beginServedAdmission wired refusal/refund matrix.
 // Software evidence only — no throughput or hardware claim.
 

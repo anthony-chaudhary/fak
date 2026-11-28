@@ -1,6 +1,5 @@
 package main
 
-// Hermetic tests for dispatch_parity_canary.go — the Go port of
 // tools/dispatch_parity_canary_test.py. The gate composes six rungs; rungs 1
 // (shipped) and 2 (witnessed) come from git + `dos commit-audit`, rungs 3-6 are
 // pure functions of the commit subject and the worker's git-command stream. Here

@@ -2,7 +2,6 @@
 //
 // Source: adapted from ai-dynamo/aiperf (Apache-2.0),
 // src/aiperf/metrics/types/inter_token_latency_metric.py @
-// ab610add4e8876fca223197596c728e17365f381; ADAPT verdict, re-expressed in idiomatic
 // Go, no code copied.
 //
 // Upstream formula: Inter Token Latency = (Request Latency - Time to First Token) /

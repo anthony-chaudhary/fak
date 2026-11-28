@@ -1,7 +1,6 @@
 package engine
 
 // continuous_batcher_wire_test.go — the independent test-author witnesses for the
-// oss-port-p0-batching-wire ticket. These probe the FROZEN contract
 // (scratch/DESIGN-batching-wire.md) and the abi.LifecycleEngine seam, NOT the
 // implementation's internals: M1 budgeted prefill-vs-decode selection, M2
 // decode-residency in stable submission order, and the production "batcher"

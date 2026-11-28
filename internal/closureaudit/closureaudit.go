@@ -1,4 +1,3 @@
-// Package closureaudit is a pure, stdlib-only port of the grader half of
 // tools/issue_closure_audit.py (#1406): it binds commits to issue numbers from
 // commit text (ClassifyRefs / RefsFromCommits), then grades each issue into
 // exactly one witness bucket (Grade / Build) using the per-SHA `dos

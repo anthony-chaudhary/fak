@@ -1,7 +1,6 @@
 package gateway
 
 // ADAPT/INSPIRE of ai-dynamo/aiperf (Apache-2.0),
-// src/aiperf/workers/worker.py:810 @ab610add4e8876fca223197596c728e17365f381:
 // dual-channel hot path. The dispatch side is receive-only; results return on a
 // separate send-only channel, so a slow consumer of results can never stall
 // dispatch. Component and host oracle only: not wired into a serve path.

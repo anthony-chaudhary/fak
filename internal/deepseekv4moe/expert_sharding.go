@@ -4,7 +4,6 @@
 // This file implements contiguous selection range-based expert sharding for memory-constrained
 // multi-node / multi-APU Tensor Parallelism (TP).
 //
-// Borrowed from wkljohn/ds4-strix-halo-tp-odinlink at 48e10779d4723e40a8949d0ba59c262d35379a03 (MIT):
 //   - the contiguous selection-range expert sharding map
 //   - the TP expert shard remap
 //

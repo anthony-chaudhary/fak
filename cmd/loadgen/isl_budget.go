@@ -1,7 +1,6 @@
 // ISL (input-sequence-length) budget compensation for composed workloads.
 //
 // NOTICE: ported from ai-dynamo/aiperf, src/aiperf/dataset/composer/base.py,
-// commit ab610add4e8876fca223197596c728e17365f381 (Apache-2.0). ADAPT
 // disposition: the budget accounting is re-expressed in idiomatic Go; no code
 // copied.
 //

@@ -1,7 +1,6 @@
 package agent
 
 // Bounded AST execution and marked-string composition adapted from llama.cpp
-// common/jinja/runtime.cpp and string.cpp at cd8427d018c07eefab6c110f7f115c31ec4c6157.
 // All mutable scopes/namespace values belong to one render; the program is immutable.
 
 import (

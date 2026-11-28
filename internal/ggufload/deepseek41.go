@@ -1,7 +1,6 @@
 package ggufload
 
 // DeepSeek V4.1 Engram metadata names in this file are adapted from antirez/ds4
-// at bd66c402070042bf0a79ad6ece8242de4c93680c (gguf-tools/deepseek41_metadata.py).
 //
 // MIT License
 // Copyright (c) 2026 The ds4.c authors
@@ -58,7 +57,6 @@ import (
 // TENSOR SUFFIXES: llama.cpp already ships a DeepSeek-V4 converter with
 // MODEL_ARCH.DEEPSEEK4 = "deepseek4", so the GGUF key/tensor spellings below are
 // firm, not guessed. Engram metadata follows antirez/ds4's MIT-licensed
-// deepseek41_metadata.py at bd66c402070042bf0a79ad6ece8242de4c93680c.
 
 // archIsDeepSeek41 reports whether arch is the canonical internal DeepSeek-V4.1
 // architecture. Callers must pass the canonicalGGUFArch-normalized string.

@@ -1,11 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// DIRECT-PORT of the incremental SSE event reader from ai-dynamo/aiperf
 // (AsyncSSEStreamReader.__aiter__), pinned at commit
-// ab610add4e8876fca223197596c728e17365f381 (aiperf v0.14.0):
 //
-//	https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/transports/sse_utils.py
 //
 // The upstream algorithm is preserved byte-for-byte in behavior: a consumed
 // offset instead of front-deletion (no O(remaining) memmove per message), a

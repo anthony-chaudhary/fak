@@ -159,7 +159,6 @@ func NewFleetCacheRouter(n, capPerInstance int) *FleetCacheRouter {
 // the least-loaded instance once it exceeds the bound. Adapted from
 // microsoft/vidur's TolerantStickyLOPUncachedGlobalScheduler (source:
 // vidur/scheduler/global_scheduler/tolerant_sticky_lop_uncached_global_scheduler.py
-// @abae7f63aa857300f5cdc6f5e0d27860cd24721b, MIT; re-expressed in Go, no copied
 // code). The slack only bites above one replica: with a single instance the home
 // IS the minimum, so the bound can never be exceeded. tolerance <= 0 falls back
 // to the rigid sticky router.
@@ -234,7 +233,6 @@ func (r *FleetCacheRouter) routeSlack(prefixKey string) (int, bool) {
 // from ai-dynamo/aiperf's sticky router, which keeps _workers_by_load (load ->
 // worker set) plus a cached _min_load for exactly this reason (source:
 // src/aiperf/credit/sticky_router.py:389-391,550-581
-// @ab610add4e8876fca223197596c728e17365f381, Apache-2.0; re-expressed in Go, no
 // copied code). Upstream's tie-break secondary tuple (active sessions, virtual
 // sent credits, last-sent timestamp) has no per-instance counterpart in fak's
 // fixed-fleet model, so the total order falls back to instance index — the

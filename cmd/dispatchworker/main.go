@@ -1,5 +1,4 @@
 // Command dispatchworker launches one DOS dispatch worker on a selected backend —
-// the Go port of tools/dispatch_worker.py, compiled to a single binary so the
 // supervisor (`dos loop --enact`, or the watchdog canary) spawns a worker WITHOUT
 // a Python interpreter (and without the bare-`python` token that ENOENTs on a
 // python3-only node — the #22 residual).

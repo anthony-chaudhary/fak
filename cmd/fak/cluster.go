@@ -291,7 +291,6 @@ func planFromWidths(widths []int) (model.TPPlan, error) {
 // --- Cluster admission planning ---
 //
 // ADAPT (not a verbatim port) of the converged-round admission math from
-// TensorFold @9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0; see
 // THIRD_PARTY_NOTICES.md, "TensorFold"): fitsAt compares each rank's need —
 // resident weights plus per-stream/per-token caches plus margin — against that
 // rank's GPU limit; maxStreams/maxContext binary-search the largest admitted

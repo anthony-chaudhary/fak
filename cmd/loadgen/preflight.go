@@ -1,5 +1,4 @@
 // Adapted from ai-dynamo/aiperf, src/aiperf/cli_runner/_preflight.py:31 at
-// ab610add4e8876fca223197596c728e17365f381. Apache-2.0; re-expressed as a Go
 // preflight gate with injectable probes so the checks stay hermetic in tests.
 
 package main

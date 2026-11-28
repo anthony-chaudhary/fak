@@ -107,7 +107,6 @@ func TestContextEpochStaleReplacementSeqIsIgnored(t *testing.T) {
 	source := epochConstSource("gateway/system", "sys")
 	first := store.Prepare(context.Background(), "sess-1", []ContextEpochSource{source}, 0, 5)
 	// replacementSeq <= the stored BaselineSeq must not turn the epoch over
-	// (port of context-epoch.ts:59).
 	second := store.Prepare(context.Background(), "sess-1", []ContextEpochSource{source}, 5, 9)
 	if second.Outcome != ContextEpochUnchanged || second.Turnover {
 		t.Fatalf("outcome=%d turnover=%v, want Unchanged/false", second.Outcome, second.Turnover)

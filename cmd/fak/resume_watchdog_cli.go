@@ -1,7 +1,6 @@
 package main
 
 // resume_watchdog_cli.go â€” `fak resume watchdog`, ONE TICK of the cross-account resume
-// layer for ALL autonomous Claude sessions on this host. Go port of
 // tools/fleet_resume_watchdog.py / .ps1 (the executing half; every decision it enforces
 // is an already-audited leaf):
 //

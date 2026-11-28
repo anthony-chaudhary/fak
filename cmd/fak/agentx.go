@@ -401,8 +401,6 @@ func speedupText(ratio float64) string {
 // NOTICE (attribution): the layered prefix allocator below is a direct port
 // of the layered KV-cache prefix model from ai-dynamo/aiperf, file
 // src/aiperf/dataset/agentic_code_gen/prefix_model.py at commit
-// ab610add4e8876fca223197596c728e17365f381 (ai-dynamo/aiperf@ab610add),
-// SPDX-License-Identifier: Apache-2.0, Copyright (c) 2025-2026 NVIDIA
 // CORPORATION & AFFILIATES. All rights reserved. Layer structure, constants,
 // and allocation logic are mirrored one-to-one; only the language changed.
 
@@ -677,8 +675,6 @@ func ceilDiv(a, b int) int {
 // The session synthesizer below is an idiomatic Go re-expression (no code
 // copied) of the session-synthesis reset semantics in:
 //
-//	ai-dynamo/aiperf @ ab610ad (ab610add4e8876fca223197596c728e17365f381),
-//	Apache-2.0 (NVIDIA CORPORATION & AFFILIATES, 2025-2026)
 //	  - src/aiperf/dataset/agentic_code_gen/session_synthesizer.py
 //	    (SessionSynthesizer per-session state machine; probabilistic reset)
 //	  - src/aiperf/dataset/agentic_code_gen/prefix_model.py
@@ -996,8 +992,6 @@ func (s *sessionSynthesizer) Reset() {
 // The tool-call delta merge below is an idiomatic Go re-expression (no code
 // copied) of the streaming tool-call delta assembly in:
 //
-//	ai-dynamo/aiperf @ ab610ad (ab610add4e8876fca223197596c728e17365f381),
-//	Apache-2.0 (NVIDIA CORPORATION & AFFILIATES, 2025-2026)
 //	  - src/aiperf/endpoints/openai_chat.py
 //	    (ChatEndpoint._merge_tool_call_delta and
 //	     ChatEndpoint._merge_legacy_function_call_delta: fold streaming
@@ -1136,7 +1130,6 @@ func (a *toolCallDeltaAccumulator) merged() []toolCallSlot {
 	return out
 }
 
-// ADAPT of ai-dynamo/aiperf (Apache-2.0, sticky_router.py:351 @ab610add4e8876fca223197596c728e17365f381):
 // two-strike stale-worker eviction tracker.
 type twoStrikeEvictionTracker struct {
 	strikes map[string]int
@@ -1168,7 +1161,6 @@ func (t *twoStrikeEvictionTracker) RecordHeartbeat(workerID string) {
 	}
 }
 
-// ADAPT of ai-dynamo/aiperf (Apache-2.0, plugins.py:848 @ab610add4e8876fca223197596c728e17365f381):
 // plugin conflict resolution (higher priority wins; on tie, external beats builtin).
 type pluginEntry struct {
 	Name     string
@@ -1202,7 +1194,6 @@ func resolvePluginConflict(entries []pluginEntry) (pluginEntry, bool) {
 	return best, true
 }
 
-// ADAPT of ai-dynamo/aiperf (Apache-2.0, generate_plugin_artifacts.py:175 @ab610add4e8876fca223197596c728e17365f381):
 // CI drift gate comparing declared manifest entries against generated typed registry entries.
 func validateGeneratedRegistryDrift(manifest, generated map[string]string) error {
 	for k, v := range manifest {

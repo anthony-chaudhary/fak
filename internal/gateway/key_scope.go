@@ -2,7 +2,6 @@ package gateway
 
 // key_scope.go — per-key auth scopes and exact method/route grants, adapted from
 // TensorFold's Apache-2.0 key-file scope auth at revision
-// 9e8c368b0b4c2c7892a0c9f0f302d7c164016209:
 //   - zig/src/server/auth.zig (the digest-matched key carries a COPIED label and
 //     its scopes; one key may not carry two scope sets; a refused key-file reload
 //     closes every file key while in-flight requests keep their copied scopes);

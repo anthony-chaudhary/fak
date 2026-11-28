@@ -1,7 +1,6 @@
 package ggufload
 
 // Tensor-carried Engram dialect adapted from Strata tools/dsv41/pack_gguf.py
-// (int_tensors_to_engram), revision 5e8a4cca7d690ac60ca37eb09e7d0e010099ad6d.
 // Unlike the packer, this adapter bounds reads, checks redundant declarations,
 // and retains FAK's published tokenizer and hash-layout admission.
 //

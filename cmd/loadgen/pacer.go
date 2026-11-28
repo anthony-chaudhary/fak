@@ -1,10 +1,6 @@
 // Absolute-deadline request pacing.
 //
-// INSPIRE-ONLY port of the high-resolution timer from ai-dynamo/aiperf
 // (src/aiperf/timing/high_res_timer.py), pinned at commit
-// ab610add4e8876fca223197596c728e17365f381 (aiperf v0.14.0):
-//
-//	https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/timing/high_res_timer.py
 //
 // Upstream arms a timerfd with CLOCK_MONOTONIC + TFD_TIMER_ABSTIME so every
 // wake-up targets an ABSOLUTE instant rather than a relative interval: a late

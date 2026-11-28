@@ -7,8 +7,6 @@ import (
 
 // NOTICE / attribution:
 //
-// This file is a direct port of the histogram quantile estimator from
-// ai-dynamo/aiperf, pinned at commit ab610add4e8876fca223197596c728e17365f381
 // (short: ab610ad), file src/aiperf/server_metrics/histogram_percentiles.py.
 //
 //   - Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -99,8 +97,6 @@ func HistQuantile(buckets []HistogramBucket, q float64) (value float64, ok bool)
 	return prometheusQuantile(q, sorted, total), true
 }
 
-// prometheusQuantile is a direct port of aiperf's _prometheus_quantile.
-//
 // The algorithm:
 //  1. Find the bucket where the quantile rank falls.
 //  2. Linearly interpolate within that bucket assuming a uniform distribution.

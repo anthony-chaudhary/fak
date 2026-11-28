@@ -2,8 +2,6 @@
 // multi-parameter benchmark campaigns: deciding the ORDER in which a
 // campaign's expanded combos execute so the serving process restarts as
 // rarely as possible. It is a clean-room conceptual adaptation of the pinned
-// Bench deployment-sweep study (parent borrow oss-port-bench-sweep-20261109,
-// upstream anthony-chaudhary/Benchmark@b60f2f05e, MIT-declared): the behavior
 // contracts were re-derived from the study note, and no upstream source was
 // copied.
 //

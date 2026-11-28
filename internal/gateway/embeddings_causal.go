@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-// llama.cpp pooled hidden-output contract: cd8427d018c07eefab6c110f7f115c31ec4c6157.
 // This adapter selects the bounded FAK CPU implementation, not a remote service.
 package gateway
 

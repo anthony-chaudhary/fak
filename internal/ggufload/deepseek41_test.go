@@ -150,7 +150,6 @@ func TestDeepSeek41GGUFConfigMapsMetadata(t *testing.T) {
 
 // TestDeepSeek41GGUFReadsDS4EngramMetadata is the fail-before/pass-after
 // converter fixture for #12918. Keys and element types match antirez/ds4
-// deepseek41_metadata.py:115-123 at bd66c402070042bf0a79ad6ece8242de4c93680c.
 func TestDeepSeek41GGUFReadsDS4EngramMetadata(t *testing.T) {
 	meta := ds41Meta("deepseek41")
 	for _, key := range []string{

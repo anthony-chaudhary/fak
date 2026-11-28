@@ -5,7 +5,6 @@ import "testing"
 // Tests for the aiperf-style ISL budget compensation port
 // (cmd/loadgen/isl_budget.go), derived from the upstream spec
 // (ai-dynamo/aiperf src/aiperf/dataset/composer/base.py @
-// ab610add4e8876fca223197596c728e17365f381, Apache-2.0; ADAPT disposition)
 // rather than from implementation internals.
 //
 // Upstream accounting (BaseDatasetComposer):

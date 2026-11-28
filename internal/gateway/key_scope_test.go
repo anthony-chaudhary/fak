@@ -2,7 +2,6 @@ package gateway
 
 // key_scope_test.go — per-key scope auth adapted from TensorFold
 // zig/src/server/auth.zig + zig/src/server/auth_scope.zig at
-// 9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0): exact method+route
 // grants (never suffix), conflicting-scope load refusal, and fail-closed
 // reload that closes every file key while in-flight requests keep their
 // copied scopes. This file holds both arms of the port:

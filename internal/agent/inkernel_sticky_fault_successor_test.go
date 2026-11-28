@@ -80,7 +80,6 @@ func TestInKernelCompleteSuccessorPlannerPreservesStickyDeviceFault(t *testing.T
 }
 
 // Test-only fixture copied verbatim (names scoped locally) from
-// internal/agent/zz_prefix_probe_test.go at 58ccf440bb467260b010157e8f1f9dd24feb4aaf.
 func stickySuccessorByteVocab() string {
 	// Reproduce GPT-2 byte->unicode (same table internal/tokenizer uses).
 	bs := []int{}
@@ -133,7 +132,6 @@ func stickySuccessorByteVocab() string {
 }
 
 // Test-only fixture copied verbatim (names scoped locally) from
-// internal/agent/zz_prefix_probe_test.go at 58ccf440bb467260b010157e8f1f9dd24feb4aaf.
 func stickySuccessorTokenizer(t *testing.T) *tokenizer.Tokenizer {
 	tk, err := tokenizer.ParseJSON([]byte(stickySuccessorByteVocab()))
 	if err != nil {
@@ -143,7 +141,6 @@ func stickySuccessorTokenizer(t *testing.T) *tokenizer.Tokenizer {
 }
 
 // Test-only fixture copied verbatim (names scoped locally) from
-// internal/agent/inkernel_planner_concurrency_test.go at 58ccf440bb467260b010157e8f1f9dd24feb4aaf.
 func stickySuccessorConfig() model.Config {
 	return model.Config{
 		HiddenSize:        32,

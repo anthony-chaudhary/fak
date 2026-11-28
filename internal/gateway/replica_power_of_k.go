@@ -1,9 +1,4 @@
 // Adapted from vllm-project/vllm vllm/v1/engine/core_client.py:1811-1872
-// (@e336407a3ddb204edf6cfdfdd002cb28b9715438, Apache-2.0) and
-// sgl-project/sglang sgl-router/src/policies/power_of_two.rs:82-182,
-// state/load_monitor/engine_ranking.rs:15-59, and
-// state/load_monitor/engine_reported_load.rs:297
-// (@9285994accb631f8e0b04ff47f620d01814aba21, Apache-2.0).
 // Reimplemented cleanly in Go against ReplicaDispatch's PickPolicy seam.
 
 package gateway

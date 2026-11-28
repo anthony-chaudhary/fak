@@ -4,7 +4,6 @@ package agentbench
 //
 // Schema adoption (MIT) from UKGovernmentBEIS/inspect_ai, pinned at
 // src/inspect_ai/log/_log.py:1;src/inspect_ai/log/_transcript.py:1 @
-// b9768e290af000efae66bcc272d9c8af6a710334. The JSON field names and
 // nesting below mirror the pinned Inspect EvalLog (version 2) shape:
 // the top-level log carries version/status/eval/plan/results/stats/
 // metadata/samples; each sample carries id/epoch/input/target/

@@ -315,7 +315,6 @@ func v41OracleScriptedLane(key uint64, base, maxNew int, logits []float32) (*dec
 
 // TestV41BatchCompositionInvariantAcrossNeighbors is the V4.1-specific
 // singleton-versus-batch composition oracle adapted from DeepInfer's
-// test_batch_invariant.py (oss-port-deepinfer-batch-invariance-oracle, leaf 1):
 // keyed-sampling lanes driven through the live V4.1 driver seam must emit token
 // streams identical to their singleton runs regardless of neighbor permutation or
 // early retirement, preserving the transactional no-replay rule. The dense

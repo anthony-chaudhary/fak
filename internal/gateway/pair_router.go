@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // INSPIRE-ONLY clean-room adaptation of NVIDIA/Personal-AI-Router
-// (NVIDIA/Personal-AI-Router@9ec17912787915f61717e57019e49802fc3b7da7):
 // device discovery, capability-aware target selection, and cross-device
 // inference distribution planning for the fak gateway router seam.
 package gateway

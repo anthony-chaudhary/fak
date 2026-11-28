@@ -4,7 +4,6 @@
 // Adapted from bentoml/llm-optimizer, src/llm_optimizer/performance.py
 // (SLOConstraint + parse_slo_constraints + the constraint check inside
 // estimate_performance_under_constraints), pinned at
-// 7be87d776e60a978516a2ae53e4a4ff745d04c20 (Apache-2.0). Re-expressed in
 // idiomatic Go; no upstream code is copied. Study note:
 // docs/research/STUDY-PRODUCTION-SCALING-ECON-2026-11-07.md, candidate
 // llm-optimizer-1.

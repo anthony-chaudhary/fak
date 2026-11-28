@@ -17,8 +17,6 @@ import (
 // inKernelDecodeShareMinPrompt), decode rounds pay the debt down, and a decode
 // share outside (0,1) — including 0 — keeps whole-prompt arrival ordering. The
 // optional row budget caps the rows a visit fills beside live decoders.
-// Source: ashhart/TensorFold zig/src/core/lane_host_fill.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// plus docs/api.md:236 (Apache-2.0, ADAPT; see THIRD_PARTY_NOTICES.md).
 //
 // fak-test:runtime fast est=100ms lane=default
 func TestDecodeShareDebtOwedAndZeroKeepsWholePromptOrder(t *testing.T) {

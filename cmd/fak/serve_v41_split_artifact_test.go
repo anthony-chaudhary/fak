@@ -48,7 +48,6 @@ func TestServeV41PackedMeasuredSevenShardInventory(t *testing.T) {
 	}
 	v41PackedTestEnv(t)
 	v41PackedDefaultFlag(t)
-	// Header census at 85e0ca215404b055b8675460edbd6a7d07208eb8. Payload geometry is
 	// deliberately miniature; these counts do not claim a runnable V4.1 model.
 	counts := [7][5]int{
 		{34, 4, 1, 30, 2}, {107, 18, 0, 102, 9}, {35, 6, 0, 32, 3},

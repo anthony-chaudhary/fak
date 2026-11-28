@@ -2,7 +2,6 @@ package main
 
 // Tests for the --mode hook flag (exec-form hooks run with no shell, so they
 // cannot prefix FAK_REPO_GUARD=...; the flag carries the posture instead) and a
-// verbatim parity port of the Python original's _selftest() case table
 // (tools/repo_guard.py) against the Go core.
 //
 // Precedence under test: env FAK_REPO_GUARD (trimmed, lower-cased) wins when

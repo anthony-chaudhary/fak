@@ -2,7 +2,6 @@ package gateway
 
 // inflight_admission.go — request-count INFLIGHT admission for the served path, ADAPTED
 // from TensorFold's opt-in model-request admission (Apache-2.0): ashhart/TensorFold
-// at 9e8c368b0b4c2c7892a0c9f0f302d7c164016209. License and notices:
 // THIRD_PARTY_NOTICES.md ("TensorFold").
 //
 // BORROWED CONTRACT, re-expressed in idiomatic Go (no upstream code copied):

@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf, src/aiperf/common/bootstrap.py:231
-// (_install_parent_death_signal) at ab610add4e8876fca223197596c728e17365f381.
-// Apache-2.0; re-expressed as a pure ppid verdict plus a per-OS arm step, so a
 // supervised `fak agentx` dies with its supervisor instead of orphaning.
 
 package main

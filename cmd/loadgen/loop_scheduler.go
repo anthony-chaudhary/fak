@@ -1,5 +1,4 @@
 // Adapted from ai-dynamo/aiperf, src/aiperf/common/loop_scheduler.py:38 at
-// ab610add4e8876fca223197596c728e17365f381. Apache-2.0; re-expressed with Go
 // timers: a scheduled job is pending until its deadline fires, then running
 // until it returns, and CancelAll disposes of both states atomically.
 

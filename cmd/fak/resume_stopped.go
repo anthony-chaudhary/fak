@@ -3,7 +3,6 @@ package main
 // resume_stopped.go — `fak resume stopped`, the stopped-session triage across all local
 // accounts: find the recently-STOPPED top-level Claude Code sessions and decide which are
 // safe to resume headlessly, which must wait (account throttled / auth-walled), and which
-// to leave alone (live / parked / done). Go port of tools/stopped_sessions.py (the shell
 // half; the classification/decision core is the pure internal/resume/stopped leaf).
 //
 //	fak resume stopped                  # human triage (default 10h window)

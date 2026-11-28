@@ -248,7 +248,6 @@ type keysetBinding struct {
 // as newKeyset). It refuses the WHOLE load — returning ErrConflictingKeyScopes
 // wrapped with context — when one key digest carries two different scope sets:
 // a restricted line cannot be shadowed by a full copy of the same key
-// (TensorFold auth.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209). The same
 // digest repeated with IDENTICAL scopes is key rotation and is deduped to one
 // entry. Half-specified bindings (empty key or principal) are dropped exactly
 // as newKeyset drops them. Returns nil, nil when no usable binding remains.

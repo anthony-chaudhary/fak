@@ -35,7 +35,6 @@ var identityNestedKeys = []string{"identity", "account_identity", "oauthAccount"
 // ageless row sorts last (least-fresh) exactly as in _throttle_matches_current_identity.
 const ageSentinel = 1e9
 
-// accountIdentityFrom is the Go port of fleet_accounts._account_identity_from: pull the
 // identity fields out of a throttle / registry / session / probe record, checking the
 // top-level dict and its nested identity blobs. First non-empty alias wins; values are
 // trimmed and lower-cased so a case/whitespace difference never reads as a mismatch. An
@@ -72,7 +71,6 @@ func accountIdentityFrom(info map[string]any) map[string]string {
 	return out
 }
 
-// identityMatch is the Go port of fleet_accounts._identity_match: decide equality on the
 // first identity key BOTH sides carry. The second return is the "decided" bit — false
 // mirrors Python's None (no shared key), telling the caller to fall through to the next
 // candidate rather than treat an undecidable pair as a mismatch.
@@ -86,7 +84,6 @@ func identityMatch(left, right map[string]string) (match bool, decided bool) {
 	return false, false
 }
 
-// currentConfigIdentity is the Go port of fleet_accounts._current_config_identity: read
 // WHO the seat's config dir is actually logged in as (oauthAccount in .claude.json) and
 // shape it through the same alias normalizer, so it compares cleanly against a throttle
 // stamp. An empty dir or a dir with no login yields nil, exactly like Python's empty-dict
@@ -103,7 +100,6 @@ func currentConfigIdentity(dir string) map[string]string {
 	})
 }
 
-// registryAccountIdentity is the Go port of fleet_accounts._registry_account_identity: the
 // identity stamped on the matching row of the registry's `accounts` list (nil when the
 // registry has no such row or the row carries no identity).
 func registryAccountIdentity(reg Registry, account string) map[string]string {
@@ -122,7 +118,6 @@ func sessionIdentity(s Session) map[string]string {
 	return accountIdentityFrom(s.raw)
 }
 
-// throttleMatchesCurrentIdentity is the Go port of
 // fleet_accounts._throttle_matches_current_identity. A carried throttle only holds a seat
 // closed while it belongs to the identity the dir is CURRENTLY logged in as: if the
 // throttle stamps an identity that provably differs from the seat's current identity — the

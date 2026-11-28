@@ -23,7 +23,6 @@ func casPeak(peak *atomic.Int64, v int64) {
 
 // fak-test:runtime fast est=1s
 // TestPrefillSlotRelease pins the two-tier concurrency contract adapted from
-// ai-dynamo/aiperf (src/aiperf/credit/issuer.py:311 @ ab610add4e8876fca223197596c728e17365f381):
 // a session slot per in-flight request plus a prefill slot released at TTFT,
 // released symmetrically on failure, and tied to the concurrency by default.
 func TestPrefillSlotRelease(t *testing.T) {

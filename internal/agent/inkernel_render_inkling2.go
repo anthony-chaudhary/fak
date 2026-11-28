@@ -107,7 +107,6 @@ func inkling2PrefillsAnswerHeader(tools []ToolDef, sp SampleParams) bool {
 	return strings.EqualFold(strings.TrimSpace(sp.ReasoningEffort), "none") && len(tools) == 0
 }
 
-// renderInkling2Chat is a port of the Inkling-2 GGUF tokenizer.chat_template.
 // The template has no generation prompt: the model writes its own
 // <|message_model|> header, so the prompt ends on the last closed block, except
 // when effort=none with no tools prefills the visible answer header.

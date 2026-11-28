@@ -3,8 +3,6 @@ package gateway
 // embedding_worker.go — model-worker-backed /v1/embeddings, ADAPTED from
 // TensorFold's embeddings reply contract (Apache-2.0): ashhart/TensorFold
 // zig/src/server/embeddings.zig:32 + embedding_request.zig
-// @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/embeddings.zig
 //
 // BORROWED CONTRACT, re-expressed in idiomatic Go (no upstream code copied):
 //   - a configured ENCODER WORKER is invoked only after capability and input

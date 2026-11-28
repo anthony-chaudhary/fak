@@ -1,9 +1,6 @@
 package agent
 
 // tool_output_bound_test.go — acceptance witness for the settle-time tool-output
-// bound (ticket oss-port-agent-tool-output-spill): an ADAPT of opencode's
-// settle-time result truncation (packages/core/src/tool/registry.ts@4eb29a64,
-// MIT) onto fak's existing internal/toolbound seam. The turn loop settles the
 // RoleTool message with the bounded head/tail preview plus the spill notice
 // while the full bytes live in the managed spill file. Driven end-to-end
 // through RunArm with a scripted planner and a routed big-result engine:

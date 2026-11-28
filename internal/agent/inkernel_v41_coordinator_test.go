@@ -1369,7 +1369,6 @@ func TestInKernelV41CoordinatorPostDecodePanic(t *testing.T) {
 
 // v41OracleReference replays one request's keyed target draws serially against
 // the scripted logits: the exact reference the coalesced route must reproduce
-// token-for-token (oss-port-deepinfer-batch-invariance-oracle, leaf 2). It
 // mirrors decodeOne's sampling call: keyed coin at absolute position base+step,
 // temperature 1, no truncation, zero penalties.
 func v41OracleReference(key uint64, base, maxNew int, logits []float32) []int {
@@ -1387,7 +1386,6 @@ func v41OracleReference(key uint64, base, maxNew int, logits []float32) []int {
 
 // TestV41CoalescedRoutePinsPerRequestOutput pins per-request output on the live
 // V4.1 coalesced route (DeepInfer test_batch_invariant.py adaptation,
-// oss-port-deepinfer-batch-invariance-oracle, leaf 2): requests admitted through
 // runV41DecodeCohort, including late-fill admissions via lifecycle.admit, complete
 // with receipts whose CohortID, participation-window deltas and cohort telemetry
 // match the episode, and every request's emitted tokens equal the scripted serial

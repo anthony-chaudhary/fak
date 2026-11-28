@@ -1,6 +1,4 @@
 // cluster_admission_test.go — pins the converged-round admission planner
-// ADAPTed from TensorFold zig/src/cluster/admission.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// (Apache-2.0; see THIRD_PARTY_NOTICES.md): the per-rank fitsAt budget check, the
 // monotone maxStreams/maxContext searches, the over-budget refusal sentinel, and
 // the 16-step chunkRows share bound. Closed contracts only: exact values and
 // errors.Is on the sentinel, never error prose.

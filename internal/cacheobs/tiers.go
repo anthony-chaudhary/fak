@@ -2,7 +2,6 @@ package cacheobs
 
 // tiers.go — the EXPLICIT-TIER axis of cache observation (#6422).
 //
-// Borrow (study-repo, LMCache @a976ce09dd98): `docs/design/usage_telemetry/l2_metrics.md:20-109`
 // specifies that L2 usage is reported as structured PER-TIER facts — request / hit / miss /
 // bytes / latency / backend dimensions — rather than inferred from aggregate cache traffic,
 // and `lmcache/usage_telemetry/l2_usage.py` keeps the L1 and L2 collection paths separate so

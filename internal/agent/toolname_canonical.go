@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// Tool-name canonicalization contract (port of the SGLang GLM function-call
-// fix, sgl-project/sglang PR #46053, Apache-2.0).
 //
 // Upstream, GLM-4.x/5 tool-call parsing produced different tool names on the
 // non-streaming path than on the streaming path because alias/prefix

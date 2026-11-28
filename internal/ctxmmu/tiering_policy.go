@@ -2,7 +2,6 @@
 // for ctxmmu's device→host KV tiering.
 //
 // Adapted from sgl-project/sglang (Apache-2.0), pinned at
-// 3c6a6c8068658b88e40bcaa5a0bf48b9a94ebdba:
 //   - python/sglang/srt/arg_groups/fields/memory.py (hicache_ratio, hicache_size,
 //     hicache_write_policy field definitions and defaults)
 //   - python/sglang/srt/arg_groups/hicache_hook.py (handle_hicache_ratio_default,

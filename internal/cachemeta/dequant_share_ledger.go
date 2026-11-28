@@ -9,7 +9,6 @@ import (
 // dequant-once-share, sgl-project/sglang PR #40421,
 // python/sglang/kernels/ops/attention/dsv4/dequant_k_cache.py +
 // python/sglang/srt/layers/attention/dsv4/sparse_prefill_utils.py
-// @06c60f412ac3618339e76a670c2b714f3697d18c).
 //
 // The upstream change: when KV crosses a prefill->decode boundary in compressed
 // (quantized) form under context parallelism, every CP chunk otherwise

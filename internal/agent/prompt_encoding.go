@@ -252,7 +252,6 @@ func inKernelPromptRendererID(cfg model.Config, sp SampleParams) string {
 const DeepSeekV411017GGUFTextProfile = "deepseek41-1017-q4km-gguf-text-v1"
 
 // Pins mrfakename/DeepSeek-V4.1-Flash-1017-GGUF at
-// 1df54e7d1b1e442051ad393ce871870a929f243e, ordered Q4_K_M shards 1..10.
 // The shard digest uses the loader receipt's path-independent canonical encoding.
 const (
 	deepSeekV411017ShardSetSHA256 = "a353ea6e868ab8b91325da4952bec73c52824ac6287dc87cbc1b15e5861ab8c2"

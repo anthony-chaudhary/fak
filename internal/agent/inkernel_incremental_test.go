@@ -1,7 +1,6 @@
 package agent
 
 // Adversarial tests for the frozen incremental-context contract (see
-// .fak/runs/oss-port-p0-incremental-context/scratch/CONTRACT.md). Written from the
 // specification only; the implementation file is intentionally not consulted.
 //
 // Every test function is named TestInKernel... so the acceptance witness
@@ -644,7 +643,6 @@ func TestInKernelConfigIncrementalContextOptIn(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Layer-memo tests (TICKET-06, oss-port-p0-incremental-context).
 //
 // These are the ticket's own witness: the incrementally assembled prompt must be
 // byte-identical to a full rebuild, and a change confined to one layer must

@@ -1,7 +1,6 @@
 package agent
 
 // Grammar/completion-token budget adapted from TensorFold's grammar_budget
-// feature flag at 9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0; see
 // THIRD_PARTY_NOTICES.md, "TensorFold"): when armed, every grammar mask keeps
 // the reply completable within the request's token ceiling by clearing the
 // bits of the tokens after which no reply completes within the remaining

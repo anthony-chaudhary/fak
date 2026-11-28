@@ -3,7 +3,6 @@ package cacheobs
 // capability.go — CAPABILITY PROBE + METRIC ALIAS TABLE for foreign-server scrapes.
 //
 // Borrow (study-repo, clean-room conceptual adaptation of
-// anthony-chaudhary/Benchmark @b60f2f05e23ec38ae4f50ca19717c2f615ed419a; MIT-declared with no
 // root LICENSE → ADAPT verdict, no source copied): §B.14 "capability detection over value
 // inference" — a metric-registry probe whose consumers gate on capability instead of guessing
 // from silent zeros (AIBrix-only fields read 0 on vanilla servers; hybrid builds leave

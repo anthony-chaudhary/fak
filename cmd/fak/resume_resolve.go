@@ -1,6 +1,5 @@
 package main
 
-// resume_resolve.go — `fak resume resolve <sid>`, the Go port of the interactive
 // resume-resolver (tools/resume_resolver.py). It decides which account
 // `claude --resume <sid>` should run under and re-homes the transcript onto a healthy
 // account when the owner is throttled, printing the CLAUDE_CONFIG_DIR to pin to.

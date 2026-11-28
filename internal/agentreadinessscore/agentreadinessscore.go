@@ -22,7 +22,6 @@
 //     and is tracked as a frontier + a trend, the deliberate mirror of the operator-heaviness
 //     gauge. You move it by ADDING a real affordance, never by gaming a substring.
 //
-// This is the Go port of the former tools/agent_readiness_scorecard.py. It is a faithful,
 // self-contained re-implementation (Idiom B, like internal/focusscore): the default / --json
 // / --markdown / --stamp / --compare surfaces are preserved so the committed snapshot and the
 // control-pane fold are unchanged. Deterministic + read-only: it reads the git-tracked tree

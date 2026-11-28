@@ -998,7 +998,6 @@ func (m *FleetMembership) markDispatchFailureWorkerLocked(id string, w *memberWo
 // so neither proves the replica broken.
 // Concepts: sglang sgl-router/src/health/circuit_breaker.rs@9285994a (Apache-2.0);
 // llm-d-inference-scheduler pkg/epp/framework/plugins/scheduling/filter/
-// endpointhealth/filter.go:46-53@329a52efb001905378a98b38435a69b4feab88c2 (Apache-2.0).
 func dispatchOutcomeNeutral(err error) bool {
 	var status *agent.UpstreamStatusError
 	if !errors.As(err, &status) {

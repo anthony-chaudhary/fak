@@ -2,8 +2,6 @@
 // a loaded engine at zero active requests, and on-demand wakes reload it, with
 // one lifetime mutex guarding every transition and engine read. Adapted from
 // ashhart/TensorFold zig/src/server/idle_unload.zig (Manager) and
-// idle_unload_policy.zig at 9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// (Apache-2.0): states resident/unloading/unloaded/loading/stopped in one
 // mutex; parks only at zero active; concurrent wakes coalesce into one reload;
 // failed opens stay parked and retryable; multi-rank GLM CUDA is refused
 // because closing the primary rank ends the followers. Re-expressed in

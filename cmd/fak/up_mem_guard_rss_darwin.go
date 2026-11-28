@@ -3,7 +3,6 @@
 package main
 
 // Adapted from carloslfu/slotstream, Sources/Slotstream/ProcessMemory.swift:52-69
-// at a855c49090330df88b2464814bcc003c8a7c5bfe (MIT).
 // Copyright (c) 2026 Carlos Galarza
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy

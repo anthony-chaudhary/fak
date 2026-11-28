@@ -4,7 +4,6 @@ package gateway
 //
 // The shape is adapted from Modular's TokenBudgetCollection
 // (max/python/max/serve/scheduler/batch_constructor/token_budget.py
-// @1c9fd2e03331f77d3a1034127cb3700b7fa43c02), but the fold deliberately
 // evaluates every independent budget and makes exhaustion dominate. That keeps
 // admission fail-closed and independent of the order in which budgets are
 // installed: a "reached" result from one axis can never hide an "exhausted"

@@ -1,5 +1,4 @@
 // worker.go — the backend-select + launch core of the DOS dispatch worker, a Go
-// port of tools/dispatch_worker.py.
 //
 // This is the indirection seam that lets a fleet run a MIXED worker fleet — some
 // Claude workers, some opencode workers — behind one launcher. The supervisor

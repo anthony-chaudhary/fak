@@ -1,5 +1,3 @@
-// ADAPT of guidance-ai/llguidance (crates/toktrie/src/lib.rs,
-// crates/parser/src/lib.rs at 2c281ce7598e, MIT License).
 // Clean-room Go re-expression of the compressed token-trie + byte-level Earley
 // parser state machine emitting per-step token allow-list masks for structured
 // output. No upstream Rust source is copied.

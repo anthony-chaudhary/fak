@@ -1131,7 +1131,6 @@ func (p *InKernelPlanner) admitWarmDiskSnapshot(scope radixkv.CacheIdentity, tok
 // Conversation-state staging bounds, adapted from TensorFold's
 // --learn-conversations store (zig/src/sessions/store.zig and docs/api.md,
 // "Conversations on disk", at revision
-// 9e8c368b0b4c2c7892a0c9f0f302d7c164016209): the engine stages an owned copy
 // between rounds under a byte permit and a job cap, an I/O thread writes and
 // fsyncs it, and a planned stop drains for 20 seconds before cancelling.
 const (

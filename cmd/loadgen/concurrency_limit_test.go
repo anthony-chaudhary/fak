@@ -74,7 +74,6 @@ func assertConcurrencyInvariants(t *testing.T, s ConcurrencyStats) {
 
 // fak-test:runtime fast est=1s
 // TestDebtDrain pins the dynamic concurrency limiter contract adapted from
-// ai-dynamo/aiperf (src/aiperf/timing/concurrency.py:41 @ ab610add4e8876fca223197596c728e17365f381):
 // limit decreases drain available slots first and record any remainder as debt
 // absorbed by subsequent releases or limit increases without violating the
 // non-negative semaphore or conservation invariants.

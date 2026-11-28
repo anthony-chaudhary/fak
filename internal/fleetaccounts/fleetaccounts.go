@@ -1,4 +1,3 @@
-// Package fleetaccounts is the Go port of the READ-ONLY roster/resolve/probe fold
 // from tools/fleet_accounts.py — the single source of truth for "what is an account,
 // and is it offered?" across the Claude Code, Codex, and opencode product families.
 //

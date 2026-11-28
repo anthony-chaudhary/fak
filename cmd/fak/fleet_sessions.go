@@ -1,6 +1,5 @@
 package main
 
-// `fak fleet sessions` — the cross-account stopped-session index (the in-process port of
 // tools/fleet_sessions.py, see internal/fleetmon/sessionreg):
 //
 //	fak fleet sessions [summary|json|registry|plan|resume] [--window H] [--max-age MIN]

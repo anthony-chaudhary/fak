@@ -741,9 +741,6 @@ func normalizeToolArguments(raw json.RawMessage) string {
 	return s
 }
 
-// Truncated-tool-call signal. Clean-room port of an output-limit robustness
-// principle studied in proxysoul/Empryo src/core/agents/stream-options.ts:131-176
-// @6329f0dd (BUSL-1.1; INSPIRE-ONLY — no upstream code copied): when a tool
 // call's arguments are cut off by the output budget and cannot be repaired,
 // feed back a synthetic "cut off — split the call" input instead of treating
 // the turn as a final answer, and treat length/content-filter finishes as

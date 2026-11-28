@@ -4,8 +4,6 @@ package gateway
 // surface. One validated option set in, one engine-scored softmax out.
 //
 // ADAPTED from TensorFold's /v1/decisions reply contract (ashhart/TensorFold,
-// zig/src/server/decisions.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209,
-// Apache-2.0): prompt_format_version=1 only, temperature strictly positive,
 // unique option ids, positional A-Z labels, logits supplied by an engine hook,
 // stable softmax plus per-label mass on the way out, and closed refusals for a
 // missing hook, duplicate ids, more than 26 options, and overflowed (non-finite)

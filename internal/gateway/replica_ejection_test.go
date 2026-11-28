@@ -191,7 +191,6 @@ func TestFleetMembershipFailOpenWhenEveryHolderUnhealthy(t *testing.T) {
 	}
 }
 
-// Leaf 1 witness (oss-port-llmd-replica-fail-open-ejection-20261105): the
 // escalating ejection state machine — N-1 consecutive failures do not eject, the
 // Nth ejects for the base window, repeats escalate one step up to the cap,
 // 500/504 responses never increment the failure streak, and an all-ejected pool
@@ -273,7 +272,6 @@ func TestReplicaEjectionEscalation(t *testing.T) {
 	}
 }
 
-// Leaf 2 witness (oss-port-llmd-replica-fail-open-ejection-20261105): the state
 // machine wired into the live fleet health loop — an ejected replica leaves
 // rotation for its window and returns when it expires, an all-ejected fleet keeps
 // returning replicas, and the flat unhealthyAfter hysteresis remains the fallback

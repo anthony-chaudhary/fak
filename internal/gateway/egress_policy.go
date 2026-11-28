@@ -1,5 +1,4 @@
 // Adapted from opensandbox-group/OpenSandbox specs/egress-api.yaml:1
-// (@f72baeae3a7feb11a49cc42f48dba3e93a94600d, Apache-2.0).
 // Clean-room Go policy evaluation and credential-vault placeholder substitution
 // at the gateway egress boundary; no proxy server or hosted runtime coupling.
 
@@ -48,7 +47,6 @@ type EgressPolicyConfig struct {
 	Rules         []EgressRule
 }
 
-// EgressDestination is the normalized host/IP and optional port of an outbound target.
 type EgressDestination struct {
 	Host string
 	IP   netip.Addr

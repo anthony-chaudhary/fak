@@ -226,11 +226,8 @@ tick always on via the Windows Task Scheduler (use cron elsewhere).
 
 // Stop conditions for a benchmark send loop.
 //
-// ADAPT of the stop-condition checker from ai-dynamo/aiperf
 // (StopCondition and its five subclasses, _STOP_CONDITION_CLASSES,
 // StopConditionChecker), pinned at
-// https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/timing/phase/stop_conditions.py
-// (commit ab610add4e8876fca223197596c728e17365f381, Apache-2.0). Re-expressed
 // in idiomatic Go as a closed table over value snapshots; no upstream code is
 // copied. Study note: fak-private docs/research/STUDY-aiperf-2026-11-09.md,
 // candidate aiperf-lifecycle-9.
@@ -408,7 +405,6 @@ func (c benchStopChecker) CanStartNewSession(s benchStopState) bool {
 	return true
 }
 
-// ADAPT of ai-dynamo/aiperf (Apache-2.0, records_manager.py:550 @ab610add4e8876fca223197596c728e17365f381):
 // per-phase progress-stall watchdog.
 type phaseProgressWatchdog struct {
 	phase        string
@@ -431,7 +427,6 @@ func (w *phaseProgressWatchdog) Update(phase string, progress int64, now time.Ti
 	return now.Sub(w.lastAdvance) > w.stallTimeout
 }
 
-// INSPIRE-ONLY ai-dynamo/aiperf (Apache-2.0, accuracy/graders/base.py:15 @ab610add4e8876fca223197596c728e17365f381):
 // split CoT/thinking block from final answer and grade exact match on answer only.
 func splitThinkingAndAnswer(raw string) (thinking, answer string) {
 	const openTag, closeTag = "<think>", "</think>"

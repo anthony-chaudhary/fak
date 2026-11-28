@@ -317,7 +317,6 @@ func TestSamplerMinPZeroAllocs(t *testing.T) {
 	}
 }
 
-// Adapted from DeepInfer randomized-PIT sampler test (Apache-2.0, deepseek-ai/DeepInfer tests/models/test_sampler.py at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
 // fak-test:runtime fast est=2s lane=default
 func TestSamplerMinPRandomizedPITIsUniform(t *testing.T) {
 	const (

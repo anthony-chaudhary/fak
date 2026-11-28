@@ -1,6 +1,5 @@
 package main
 
-// conceptdrift.go is the thin CLI shell over internal/conceptdrift (the port of
 // the retired tools/concept_drift_watcher.py pair): it resolves the workspace,
 // anchors the grandfathered scorecard script to the local repo root, and owns
 // the flag surface. The exit-code contract lives in the package: 0 clean /

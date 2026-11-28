@@ -1,6 +1,5 @@
 package agentreadinessscore
 
-// Golden-parity port of tools/agent_readiness_scorecard_test.py. Every case here mirrors a
 // deterministic Python test one-for-one — same inputs, same expected scores/defect-counts/
 // groups — so a divergence in the Go pure core reds the same way the Python reference would.
 // The two Python live sentinels that assert a ZERO-friction-debt tree are intentionally NOT

@@ -411,7 +411,6 @@ type nativeStructuredConstraintContextKey struct{}
 // reasoning span. Adapted from DeepInfer's structured-output matcher, which leaves
 // tokens unconstrained until a trigger ends reasoning and forces that trigger once
 // a bound fires (Apache-2.0, deepseek-ai/DeepInfer,
-// deepinfer/structure_output/matcher.py at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01);
 // no upstream source is copied. The trigger here is the reasoning-close token ID,
 // never its spelled-out text, and the bound is the native thinking budget.
 type nativeStructuredPhase int

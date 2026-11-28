@@ -5,7 +5,6 @@ package main
 // or MODELED, wall_clock MODELED) named by
 // docs/explainers/compounding-benefits-of-a-saved-call.md. It reads a turnbench
 // Report JSON (the artifact `fak turntax --out report.json` writes) and re-projects
-// its already-measured/already-computed fields, labeled per axis. The Go port of
 // tools/savings_vector.py; its selfcheck invariants are the anti-overclaim contract.
 
 import (

@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/metrics/theoretical_prefix_cache.py:24@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): theoretical infinite-cache prefix-hit accounting
 // from loader-stamped per-turn (hit_blocks, total_blocks) with clamping to
 // [0, total_blocks] and phase scoping, requiring zero runtime hash_ids or

@@ -28,9 +28,6 @@ const (
 // again. Refusing such a store event BEFORE it happens keeps the cache from
 // acquiring unreachable or unverifiable residency.
 //
-// Source: LMCache @ 1b7dff2cd83fc634326b5989eb71aa5f05b4f426,
-// lmcache/docs/design/integration/vllm/lazy_offload_policy/eviction_aware.md:30-70
-// (Apache-2.0). This is an attributed Go adaptation of the protocol rules; no
 // Python bytes are copied.
 //
 // The decision is deterministic and wall-clock free: it is a function of the

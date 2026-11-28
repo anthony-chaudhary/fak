@@ -12,7 +12,6 @@ import (
 )
 
 // runSwebenchSotaSnapshot is the CLI shell for `fak swebench sota-snapshot`. It
-// is the Go port of tools/swebench_sota_snapshot.py: extract the official
 // leaderboard JSON (from --html locally or a live --url fetch), fold the SOTA
 // snapshot, and write JSON (+ optional markdown). Exit codes: 0 ok, 1 write
 // failure, 2 usage / fetch / validation failure.

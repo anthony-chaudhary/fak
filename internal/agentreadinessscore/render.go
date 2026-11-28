@@ -181,7 +181,6 @@ func Render(p Payload) string {
 // Markdown returns the scorecard as the committed snapshot's Markdown body. The stamp (a date
 // string) rides an HTML process comment under the H1. The result ends with a trailing newline
 // so `fak score agent-readiness --markdown` (which Fprints it) matches the Python tool's
-// print(). It is a port of render_markdown; the former tool's self-references (the process
 // comment, the "re-derived by" prose, the Regenerate line) now name the Go tool that owns it.
 func Markdown(p Payload, stamp string) string {
 	c := p.Corpus

@@ -2,7 +2,6 @@
 // retired tools/concept_drift_watcher.py pair (NEW_PYTHON_TOOL ratchet).
 //
 // The concept-disambiguation scorecard (internal/conceptcatalog/scorecard, the Go
-// port of tools/concept_disambiguation_scorecard.py) computes coverage_debt against the
 // confusable-token universe it discovers in the tree. That number is a SNAPSHOT:
 // it says nothing about whether it has MOVED since the last time anyone looked.
 // And it moves - proven 2026-11-07/08, where merges re-opened debt 2 twice

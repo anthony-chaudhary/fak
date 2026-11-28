@@ -1,4 +1,3 @@
-// Adapted from ai-dynamo/aiperf, src/aiperf/endpoints/openai_chat.py:74 at ab610add4e8876fca223197596c728e17365f381. Apache-2.0; the
 // streaming-only stream_options.include_usage injection (format_payload / _ensure_include_usage)
 // re-expressed as a typed, non-clobbering default on loadgen's synthetic chat request.
 

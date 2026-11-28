@@ -1,17 +1,13 @@
 // Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Direct port of the memory-mapped dataset store from ai-dynamo/aiperf,
 // src/aiperf/dataset/memory_map_utils.py (MemoryMapDatasetBackingStore /
 // MemoryMapDatasetClient, PAYLOAD_BYTES path), pinned at
-// https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/dataset/memory_map_utils.py
-// (commit ab610add4e8876fca223197596c728e17365f381, Apache-2.0).
 //
 // Mechanism: a writer streams pre-encoded request payloads to dataset.dat as
 // they arrive (constant memory regardless of dataset size, insertion order
 // preserved) and finalizes a byte-offset index (index.dat) for O(1) lookups.
 // Readers open both files read-only and map the data file through the trunk
-// MappedRegion seam (prefault.go, a direct port of the same upstream source);
 // payload bytes are copied out of the shared read-only region verbatim, with
 // no deserialization. loadgen uses this to replay stored requests against an
 // endpoint instead of synthesizing prompts.

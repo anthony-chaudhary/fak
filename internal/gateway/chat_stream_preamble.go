@@ -50,7 +50,6 @@ package gateway
 //
 // Opt-in route-decision preamble (lemonade borrow, ADAPT verdict — re-expressed, no
 // copied code; source lemonade-sdk/lemonade src/cpp/server/route_decision_response.cpp
-// @bc8d99ccfee301742f1dd86a3f6ec406bb8a863d, Apache-2.0): streaming clients behind
 // proxies that drop custom headers cannot see which upstream and model served them,
 // because every routing fact this gateway publishes otherwise rides response HEADERS.
 // When FAK_GATEWAY_STREAM_ROUTE_PREAMBLE names the serve's chosen upstream, open()

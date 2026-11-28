@@ -18,7 +18,6 @@ package accounts
 // new seat and `fak accounts sync` re-projects the whole roster, keeping the defaults in ONE
 // place with no external step.
 //
-// The merge is a faithful port of csync's `deep_merge`: the defaults win for every leaf key
 // they name, dict values recurse, and every other key the account already has (theme,
 // effortLevel, …) is left untouched. The exceptions are the SEAT-OWNED keys handled in
 // seatSettingsDefaults — `model` (#3091) and `askUserQuestionTimeout` — where an already-set
@@ -200,7 +199,6 @@ func readSettings(path string) map[string]any {
 }
 
 // deepMergeJSON merges overlay into base and reports whether anything changed. It is a faithful
-// port of csync's deep_merge: overlay wins for every leaf key it names; when BOTH base[k] and
 // overlay[k] are maps it recurses (OR-ing the changed bit); any other overlay value replaces
 // the base value wholesale (including a map replacing a scalar, or the reverse — the two
 // map type-asserts fail, so it falls through to the replace path, exactly as the Python

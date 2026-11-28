@@ -1,10 +1,7 @@
 // Token-level prompt assembly and the BPE-stable terminator probe.
 //
-// ADAPT of the prompt-generation seam from ai-dynamo/aiperf
 // (PromptGenerator.generate_prompt / _decode_to_exact_len /
 // _determine_bpe_stable_terminator), pinned at
-// https://github.com/ai-dynamo/aiperf/blob/ab610add4e8876fca223197596c728e17365f381/src/aiperf/dataset/generator/prompt.py
-// (commit ab610add4e8876fca223197596c728e17365f381, Apache-2.0). Re-expressed
 // in idiomatic Go against a minimal Tokenizer interface; no upstream code is
 // copied. Study note: fak-private docs/research/STUDY-aiperf-2026-11-09.md,
 // candidate aiperf-data-6.

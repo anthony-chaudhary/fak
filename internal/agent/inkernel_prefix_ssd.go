@@ -28,8 +28,6 @@ import (
 //
 // Eviction-spill gating, checkpoint-slot RAM bounding, copy-before-release staging, and
 // 20 s planned-stop drain are adapted from TensorFold (ashhart/TensorFold,
-// zig/src/native/disk_spill.zig:6@9e8c368b0b4c2c7892a0c9f0f302d7c164016209 +
-// docs/api.md:677, Apache-2.0).
 const (
 	inKernelRadixLocalSSDBytesEnv                 = "FAK_INKERNEL_RADIX_SSD_BYTES"
 	inKernelRadixLocalSSDCheckpointSlotsEnv       = "FAK_INKERNEL_RADIX_SSD_CHECKPOINT_SLOTS"

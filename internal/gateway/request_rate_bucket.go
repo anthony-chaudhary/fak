@@ -3,8 +3,6 @@ package gateway
 // request_rate_bucket.go — per-principal REQUEST-RATE admission for the served path,
 // ADAPTED from TensorFold's opt-in model-request admission (Apache-2.0): ashhart/TensorFold
 // zig/src/server/request_admission.zig:111 Slot.replenish/available
-// @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/request_admission.zig
 //
 // BORROWED CONTRACT, re-expressed in idiomatic Go (no upstream code copied):
 //   - credit is INTEGER ns-tokens on a monotonic clock: one request is one second's

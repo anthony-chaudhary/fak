@@ -3,8 +3,6 @@
 // and the shared windowed collector in
 // internal/pkg/collector/expcollector.go, with its count-window configuration in
 // internal/pkg/appconfig/count_window.go, pinned at
-// 4e663a526c4624ad0e18ad816f09b7be2c5348a7:
-// https://github.com/NVIDIA/dcgm-exporter/blob/4e663a526c4624ad0e18ad816f09b7be2c5348a7/internal/pkg/collector/xid_collector.go
 //
 // The idea adapted here is the one the upstream window exists to fix: the
 // exporter samples a LAST-XID gauge, so a burst of the same code arrives as N

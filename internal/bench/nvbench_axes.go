@@ -1,7 +1,5 @@
 // Package bench — nvbench_axes.go
 //
-// INSPIRE-ONLY port of the NVIDIA/nvbench benchmark-harness shape (Apache-2.0,
-// pinned at NVIDIA/nvbench@41fc6a46358c4d2b202b7e714da7333d3b4cc498) into the
 // native kernel bench runner. Borrowed: the axis/cartesian sweep model (a
 // benchmark is a named set of axes, each a list of values; the sweep is the
 // ordered cartesian product), the warmup/stream measurement state machine

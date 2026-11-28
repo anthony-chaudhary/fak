@@ -1,7 +1,6 @@
 package engine
 
 // recurrent_prefix_test.go — independent TEST-AUTHOR witnesses for the
-// oss-port-p0-recurrent-prefix-reuse ticket. These probe the FROZEN exported
 // contract (RecurrentPrefixCache + the ContinuousBatcher wiring), NOT the
 // implementation's internals. Each case names the failure it would catch:
 //
@@ -437,7 +436,6 @@ func TestRecurrentPrefixBehavioralEquivalence(t *testing.T) {
 }
 
 // TestRecurrentExtendOnlyPrefixReuse is the ticket-named witness for
-// oss-port-p0-recurrent-prefix-reuse (carloslfu/slotstream@53028cf, MIT, ADAPT):
 // it pins the extend-only GDN recurrent prefix reuse closed contract in both
 // directions at the engine seam.
 //

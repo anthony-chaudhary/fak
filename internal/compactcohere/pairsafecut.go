@@ -1,9 +1,7 @@
 // Copyright 2026 The fak Authors
 // Licensed under the Apache License, Version 2.0.
 //
-// DIRECT-PORT of langchain-ai/langmem src/langmem/short_term/summarization.py
 // (_preprocess_messages tool-call pairing rule) at
-// 8620b986af5b0c7593e6b7fbece2998690d22d15 (MIT License, Copyright (c) 2025 LangChain).
 // Ported: when the summarized prefix ends on a tool call, its matching tool
 // results are pulled into the prefix so a call/result pair never splits.
 // fak adds: every call in the prefix is honored (not only the last item), the

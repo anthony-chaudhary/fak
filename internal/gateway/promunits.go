@@ -1,5 +1,4 @@
 // Adapted from ai-dynamo/aiperf src/aiperf/server_metrics/units.py:25
-// (@ab610add4e8876fca223197596c728e17365f381, Apache-2.0).
 // Reimplemented cleanly in Go as a Prometheus/OpenMetrics unit inference
 // priority chain with bounded LRU caching.
 

@@ -31,9 +31,6 @@ const (
 )
 
 // The transition rules mirror primary OSS practice without copying source:
-// Apache-2.0 vLLM at f49777ba62b4926d0f8c100ab06edb03c5c10098 keeps LATER
-// victims queued and publishes RUNNING only after swap_in succeeds; Apache-2.0
-// SGLang at 5ab97c4f441462f3d2adb1ffa954cc92518beece protects host state during
 // load-back and publishes device state only after transfer. License and
 // notices: THIRD_PARTY_NOTICES.md ("vLLM", "SGLang").
 type qwen38PagedSwapReceipt struct {

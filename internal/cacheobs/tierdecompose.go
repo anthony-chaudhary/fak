@@ -3,7 +3,6 @@ package cacheobs
 // tierdecompose.go — COUNTER-DELTA TIER DECOMPOSITION + LINEAGE STATUS VOCABULARY.
 //
 // Borrow (study-repo, clean-room conceptual adaptation of
-// anthony-chaudhary/Benchmark @b60f2f05e23ec38ae4f50ca19717c2f615ed419a; MIT-declared with no
 // root LICENSE → ADAPT verdict, no source copied): §B.1 "tier-token decomposition from
 // counter deltas" — L3 = Δprefetch; L2 = max(0, Δloadback − Δprefetch); L1 = Δcached − L2 −
 // L3; miss = Δprompt × (1 − hit_rate); when L2+L3 overshoots Δcached (transfers include

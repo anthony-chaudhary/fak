@@ -6,7 +6,6 @@ package main
 // concrete, re-derivable discoverability defect into an integer seo-debt (lower = better,
 // floor 0) driven toward zero.
 //
-// This is the Go port of the former tools/seo_aeo_scorecard.py; the surfaces
 // (default / --json / --markdown / --stamp / --compare / --scope) are preserved in behavior
 // so the private snapshot and the control-pane fold are unchanged. Read-only by construction.
 // (The python tool's --transfer/--rebaseline private-archive path is out of scope for the

@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// This file is the Go port of the upstream FrontierSWE reference scorer,
 // scripts/score_from_reward.py (the published oracle). It turns a trial's
 // reward.json into the leaderboard number in two steps, field-for-field with
 // the Python:
@@ -170,7 +169,6 @@ func rewardOrScore(r *Reward) float64 {
 // fp returns a pointer to f (for building *float64 returns inline).
 func fp(f float64) *float64 { return &f }
 
-// ExtractScore is the Go port of extract_score(reward_data, task). It returns
 // the correctness in [0,1] and an optional speedup (nil when the task/path
 // yields no speedup). A nil reward returns (0, nil), mirroring `if not
 // reward_data`. The SSIM threshold for revideo-perf-opt uses the library
@@ -452,7 +450,6 @@ func extractModularStack(reward *Reward, ss []Subscore, rawReward float64) (floa
 	return 0.0, nil
 }
 
-// GatedScore is the Go port of compute_gated_score(correctness, speedup, task).
 // It applies the category gate to produce the leaderboard number. An unknown
 // task name returns 0 (the Python raises KeyError; the Go port returns 0 so a
 // caller need not handle a panic — use CategoryOf to validate the task first).

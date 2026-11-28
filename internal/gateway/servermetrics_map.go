@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf src/aiperf/server_metrics/accumulator.py
-// (realtime_snapshot fallback chains) at ab610add4e8876fca223197596c728e17365f381,
-// Apache-2.0. Reimplemented in Go; not a transliteration.
 
 package gateway
 

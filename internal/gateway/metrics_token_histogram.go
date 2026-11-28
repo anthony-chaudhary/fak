@@ -16,7 +16,6 @@ const defaultTokenHistogramMax = 131072
 // tokenBuckets derives a strictly increasing histogram bucket ladder scaled to the
 // deployment's maximum token count. Adapted from TGI's auto-scaled token histograms
 // (huggingface/text-generation-inference router/src/server.rs:1948-1985 @
-// b4adbf2f6e2e721280bd0ea5f91d70f7d033f5ed, Apache-2.0; ADAPT verdict, no copied code):
 // instead of a fixed grid, edge i of 1..100 spans i/100 of the ceiling, so the top edge
 // lands exactly on maxTokens and each bucket covers ~1% of the range the deployment can
 // actually serve. Each edge is the correctly rounded value of maxTokens*i/100 (exact

@@ -10,7 +10,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheheadlines"
 )
 
-// `fak check-cache-headlines` - the Go port of the deleted
 // tools/check_cache_headlines.py: refuse a cache "win" headline that omits its
 // plane + provenance label (internal/cacheheadlines). `--audit-tree` scans the
 // tracked tree, `--audit-staged` the staged additions (pre-commit).

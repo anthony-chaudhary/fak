@@ -1,6 +1,5 @@
 // Adapted from ai-dynamo/aiperf, src/aiperf/orchestrator/aggregation/sweep.py:100
 // (identify_pareto_optimal, SweepAnalyzer._resolve_latency_key/_compute_pareto) at
-// ab610add4e8876fca223197596c728e17365f381. Apache-2.0; re-expressed as a
 // `fak bench-runs pareto` view over catalog records, reusing
 // perfledger.ParetoFrontier for the strict-dominance check upstream also uses.
 package main

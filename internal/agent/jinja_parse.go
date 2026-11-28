@@ -1,7 +1,6 @@
 package agent
 
 // Adapted from ggml-org/llama.cpp common/jinja lexer/parser at
-// cd8427d018c07eefab6c110f7f115c31ec4c6157 (MIT). See JINJA-LICENSE.txt.
 // This is a bounded chat-template language, not an embedded Python runtime.
 
 import (

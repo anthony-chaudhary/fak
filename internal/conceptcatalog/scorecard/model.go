@@ -1,5 +1,4 @@
 // Package scorecard is the in-process concept-disambiguation scorecard: the Go
-// port of tools/concept_disambiguation_scorecard.py. It folds the catalog rows
 // under the data directory against the tracked tree into the same payload,
 // terminal views and generated doc folder the Python tool emits, byte for byte.
 package scorecard

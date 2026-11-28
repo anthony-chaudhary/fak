@@ -711,8 +711,6 @@ func isToolResultFailure(isErr bool, verdict string, content string) bool {
 
 // dispatchToolCalls adjudicates and admits every tool call from one assistant turn.
 // armedToolOutputBound is the opt-in settle-time tool-output bound (ticket
-// oss-port-agent-tool-output-spill; ADAPT of opencode's settle-time result
-// truncation, packages/core/src/tool/registry.ts@4eb29a64, MIT, onto fak's
 // existing internal/toolbound seam). When armed, the RoleTool message the turn
 // loop settles carries the toolbound-bounded head/tail preview plus the
 // spill-file notice instead of the raw result, and the full bytes live in the

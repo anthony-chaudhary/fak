@@ -1,7 +1,5 @@
 // Socket defaults for the loadgen HTTP client.
 //
-// DIRECT-PORT of aiperf's SocketDefaults (src/aiperf/transports/http_defaults.py
-// @ ab610add4e8876fca223197596c728e17365f381, Apache-2.0) with its
 // _HTTPSettings values (src/aiperf/common/environment.py). Every operative
 // number below is the upstream default, named so it can be checked:
 //

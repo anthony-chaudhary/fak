@@ -11,7 +11,6 @@
 //	start              launch a command in a detached screen session, then run
 //	                   the same inspect path against the new session.
 //
-// The knowledge this exposes is the port of the legacy Benchmark Python SSH
 // transport (hardened argv, GNU-screen launch/log capture, crash-log tail, the
 // ServerLaunchEvent receipt) into internal/servelaunch. The verb is the point
 // of contact: when a remote server misbehaves and the only way in is ssh, this

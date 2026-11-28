@@ -276,7 +276,6 @@ func ornithTemplateTools() []ToolDef {
 
 // ornithQwen35ChatTemplateThinkingOffGolden is the byte-exact result of applying
 // deepreinforce-ai/Ornith-1.0-9B's published chat_template.jinja at immutable model
-// revision 4402d8dc236fe9e09d12aeed907a763b66a60533 to ornithTemplateMessages and
 // ornithTemplateTools with add_generation_prompt=true and enable_thinking=false.
 // It is deliberately checked in instead of generated: template drift must fail offline.
 const ornithQwen35ChatTemplateThinkingOffGolden = `<|im_start|>system

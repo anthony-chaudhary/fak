@@ -1,6 +1,5 @@
 package main
 
-// dispatch_parity_canary.go — `fak dispatch parity-canary`, the Go port of
 // tools/dispatch_parity_canary.py (#420): the typed gate that holds the opencode
 // worker population at 1 until glm-5.2 is *proven* to drive the dispatch loop the
 // way Claude does. It does NOT run a worker — it grades an ALREADY-shipped canary

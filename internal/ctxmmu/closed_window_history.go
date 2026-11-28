@@ -1,7 +1,6 @@
 package ctxmmu
 
 // Reverse history traversal adapted from SWE-agent's ClosedWindowHistoryProcessor,
-// sweagent/agent/history_processors.py@3ea751c087f32b16e039a2233dd6eefecef325d5.
 // Native renderer validation and byte-identical/tool-scoped keys are Fak-specific.
 //
 // MIT License

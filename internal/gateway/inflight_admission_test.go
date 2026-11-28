@@ -2,7 +2,6 @@ package gateway
 
 // inflight_admission_test.go — witness for the idiomatic Go re-expression of
 // TensorFold's opt-in in-flight request-count admission (borrow-port part-out
-// oss-port-tensorfold-http-inflight-admission-20261103, ADAPT verdict): caps,
 // exhaustion, release-once, and the beginServedAdmission refusal/release matrix.
 // Software evidence only — no throughput or hardware claim.
 

@@ -2,8 +2,6 @@ package gateway
 
 import "sync"
 
-// ADAPT of ai-dynamo/aiperf (Apache-2.0),
-// src/aiperf/zmq/streaming_push_client.py:75 @ab610add4e8876fca223197596c728e17365f381:
 // a non-blocking send over a bounded transport with an unbounded FIFO backlog that is
 // drained in order, so a full transport never blocks the caller and never reorders
 // messages. Component and host oracle only: not wired into a serve path.

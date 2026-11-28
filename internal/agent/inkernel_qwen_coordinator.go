@@ -23,8 +23,6 @@ var errInKernelQwenCohortAborted = errors.New("agent: Qwen cohort aborted; no re
 // beside live decoders; 0 means no cap. In this seam a row is one prepared
 // prompt-fill pass alongside the running lanes.
 //
-// Source: ashhart/TensorFold zig/src/core/lane_host_fill.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// plus docs/api.md:236 (Apache-2.0; idea adapted into idiomatic Go, no code
 // copied). See THIRD_PARTY_NOTICES.md.
 const inKernelDecodeShareMinPrompt = 0.01 // below it a step's debt is minutes of decoding, and is no share
 

@@ -1,5 +1,4 @@
 // Inspired by ai-dynamo/aiperf, src/aiperf/dataset/json_stream.py:1 at
-// ab610add4e8876fca223197596c728e17365f381 (Apache-2.0; idea only, no code
 // copied): dataset dumps are written as bounded JSON chunks rather than one
 // unbounded document.
 

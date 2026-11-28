@@ -17,8 +17,6 @@ package gateway
 //
 // Concepts (Apache-2.0, re-expressed, no code copied):
 //   llm-d-inference-scheduler pkg/epp/framework/plugins/filter/endpointhealth
-//   @329a52efb001905378a98b38435a69b4feab88c2 (escalating ejection; all-unhealthy keeps all)
-//   sglang sgl-router/src/health/circuit_breaker.rs@9285994accb631f8e0b04ff47f620d01814aba21
 //   (all breakers open fails open).
 // The durations are seeds for auto-tune, not values tuned for fak traffic.
 

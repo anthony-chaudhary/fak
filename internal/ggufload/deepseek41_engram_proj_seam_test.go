@@ -11,7 +11,6 @@ import (
 // forward.
 //
 // The reference Engram module (inference/model.py at
-// deepseek-ai/DeepSeek-V4.1-Flash@dba1be0a40aa45a94ad051997016db3960a90277)
 // carries a projection `self.wkv` plus two per-HC norm parameters `q_weight` and
 // `k_weight`. The converted GGUF spells those suffixes `engram_wkv` / `engram_q`
 // / `engram_k`.

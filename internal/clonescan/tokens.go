@@ -7,7 +7,6 @@
 // BEFORE writing it, instead of reading it as a grade afterward. See
 // docs/notes/DEDUP-EARLIER-AND-MORE-OFTEN-2026-07-03.md.
 //
-// The tokenizer here is a faithful port of the Python `go_tokens` so the early
 // query and the late scorecard share ONE definition of a clone: a normalized Go
 // token window that is whitespace/comment/line-break invariant and (optionally)
 // rename invariant. Keeping the two in lockstep is the point — driving the query's
@@ -82,7 +81,6 @@ type token struct {
 // identifiers collapse to "I" when normalizeIdents is true (a clone survives a
 // rename), else are kept verbatim; keywords, operators and punctuation are kept.
 //
-// It is a faithful port of code_slop_scorecard.py's go_tokens: best-effort and
 // forgiving — an unterminated literal or a stray byte is consumed without error,
 // since neither the scorecard nor the query may crash on odd input.
 func goTokens(text string, normalizeIdents bool) []token {

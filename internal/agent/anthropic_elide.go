@@ -494,7 +494,6 @@ func elideHeadTailWithRestore(s string, threshold int, restoreText string, trace
 // land inside a source line, so these are fragment lines, not complete source lines.
 // CRLF is one boundary; a trailing boundary does not add a phantom empty line.
 //
-// Adapted from SWE-agent at 3ea751c087f32b16e039a2233dd6eefecef325d5 (MIT),
 // replacing Python str.splitlines with a no-allocation Go scan of the omitted
 // fragment rather than the entire original output. Existing Fak
 // eligibility/cache guards are retained.

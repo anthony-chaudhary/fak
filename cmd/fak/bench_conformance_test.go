@@ -5,7 +5,6 @@
 // ported from ai-dynamo/aiperf@ab610ad (Apache-2.0), file
 // src/aiperf/common/scenario/base.py (ScenarioSpec, ScenarioViolation,
 // ScenarioOutcome, ScenarioLockError). Source pin:
-// ai-dynamo/aiperf@ab610ad (full SHA ab610add4e8876fca223197596c728e17365f381).
 // They are documented in docs/BENCHMARK-CONFORMANCE.md, section
 // "Scenario invariants (aiperf scenario/base)".
 

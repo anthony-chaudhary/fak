@@ -166,7 +166,6 @@ func (m *sseMeasure) feedSSELine(line string, now time.Time) {
 
 // clientInFlight tracks client-side HTTP operations in two tiers, adapting
 // aiperf's two-tier credit model (ai-dynamo/aiperf, src/aiperf/credit/issuer.py:311
-// @ ab610add4e8876fca223197596c728e17365f381, Apache-2.0):
 //
 //   - session tier: one slot per in-flight request, held from request start until
 //     the response body closes. Its cap is the sweep's concurrency level.
@@ -462,7 +461,6 @@ const defaultMaxCatchUp = 10 * time.Millisecond
 // pacer paces n issues against absolute deadlines with a bounded catch-up
 // window, porting aiperf's constant-rate loop mechanics (ai-dynamo/aiperf,
 // src/aiperf/timing/strategies/request_rate.py:234
-// @ ab610add4e8876fca223197596c728e17365f381, Apache-2.0):
 //
 //   - the schedule tracks cumulative absolute targets, so oversleeps never
 //     compound into drift;
@@ -489,8 +487,6 @@ type pacer struct {
 }
 
 // Schedule-adherence bounds, adapted from google-deepmind/gbench
-// (gbench/runners/stress.py:1330 @ d3e4283162d6c34353fa933284135d2a7ef3b9fe,
-// Apache-2.0): a paced point keeps its schedule only when at least 99% of the
 // planned requests were issued and the P99 issue lag behind the ideal schedule
 // stays within 150 ms. Re-anchoring keeps the rate going after a stall, but the
 // requests it delays still mean the server saw less load than the label says.

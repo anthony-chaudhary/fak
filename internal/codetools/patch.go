@@ -845,7 +845,6 @@ func hunkCandidatePositions(expectedIdx, fileIdx, fileLen, seqLen, fuzz int) []i
 //
 // Adapted from OpenAI Codex, codex-rs/apply-patch/src/seek_sequence.rs
 // (normalise + final fallback pass), pinned at
-// https://github.com/openai/codex/commit/94d642d8b40e45e2e544770f0d1f28df9a717f06.
 // Copyright 2025 OpenAI. Licensed under the Apache License, Version 2.0.
 func unicodeLinesMatch(a, b []string) bool {
 	if len(a) != len(b) {

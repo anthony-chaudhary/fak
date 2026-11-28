@@ -120,7 +120,6 @@ func readSummary(r io.Reader) (summaryInput, error) {
 }
 
 // Aggregation adapts DeepInfer's eval/common/passk.py and eval/score.py at
-// 553741557a57df44a46fb3ab72b6aafeaf945337 (Apache-2.0). The existing Fak
 // estimator is reused; repeated or out-of-range sample identities are refused
 // rather than hidden by the upstream last-write-wins merge.
 func summarizeRollouts(benchmark string, input summaryInput) (summaryReceipt, error) {

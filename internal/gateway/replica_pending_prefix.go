@@ -1,5 +1,4 @@
 // Adapted from sgl-project/sglang sgl-router/src/state/kv_events/pending.rs:1-60
-// and REFERENCE.md:94-128 (@9285994accb631f8e0b04ff47f620d01814aba21, Apache-2.0).
 // Reimplemented cleanly in Go to compose with CacheAwarePolicy and PrefixResidencyIndex.
 
 package gateway

@@ -13,7 +13,6 @@ import (
 
 // cmdCachedocNumbersAudit executes the doc-numbers audit CLI over operational cachevalue docs.
 //
-// Wired as the top-level `cachedoc-numbers-audit` case in main.go (the Go port of
 // the deleted tools/cachedoc_numbers_audit.py), classified TierDev in
 // internal/devindex/tiers.go with its manifest synopsis alongside.
 func cmdCachedocNumbersAudit(args []string) {

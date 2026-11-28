@@ -426,7 +426,6 @@ func positiveFinite(value float64) bool {
 // NOTICE: The monotonic search planner below is an Apache-2.0 licensed reuse
 // ported from NVIDIA's aiperf project.
 //
-//	Source:    ai-dynamo/aiperf @ ab610ad (ab610add4e8876fca223197596c728e17365f381)
 //	File:      src/aiperf/orchestrator/search_planner/monotonic.py
 //	License:   Apache-2.0 (SPDX-License-Identifier: Apache-2.0)
 //	Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -564,7 +563,6 @@ func MonotonicSearch(candidates []int, feasible func(int) bool) MonotonicSearchR
 	return res
 }
 
-// ADAPT of ai-dynamo/aiperf (Apache-2.0, local_executor.py:87 @ab610add4e8876fca223197596c728e17365f381):
 // credential redaction at the single plaintext-holding point.
 func redactCredentialArgs(args []string) []string {
 	out := make([]string, len(args))
