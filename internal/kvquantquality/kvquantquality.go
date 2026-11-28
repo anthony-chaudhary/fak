@@ -281,3 +281,56 @@ func distributions(a, b []float64) ([]float64, []float64, error) {
 	}
 	return p, q, nil
 }
+
+// SimQuantQualityProtocol captures simulated-quantization quality-evidence
+// metrics (calibrated simquant PPL & passkey vs FP16 baseline).
+type SimQuantQualityProtocol struct {
+	Calibrated       bool    `json:"calibrated"`
+	BaselineFP16PPL  float64 `json:"baseline_fp16_ppl"`
+	CandidatePPL     float64 `json:"candidate_ppl"`
+	BaselinePasskey  float64 `json:"baseline_passkey"`
+	CandidatePasskey float64 `json:"candidate_passkey"`
+	MaxPPLDelta      float64 `json:"max_ppl_delta"`
+	MaxPasskeyDrop   float64 `json:"max_passkey_drop"`
+}
+
+// SimQuantQualityVerdict reports the deterministic outcome of the simulated
+// quantization protocol against the FP16 baseline.
+type SimQuantQualityVerdict struct {
+	Outcome     Outcome    `json:"outcome"`
+	Reason      ReasonCode `json:"reason"`
+	PPLDelta    float64    `json:"ppl_delta"`
+	PasskeyDrop float64    `json:"passkey_drop"`
+}
+
+// EvaluateSimQuantProtocol validates calibration + finite bounds and checks
+// candidate PPL delta and passkey drop against the declared FP16 baseline.
+func EvaluateSimQuantProtocol(p SimQuantQualityProtocol) SimQuantQualityVerdict {
+	if !p.Calibrated {
+		return SimQuantQualityVerdict{Outcome: OutcomeDelegate, Reason: ReasonIncompletePin}
+	}
+	for _, v := range []float64{p.BaselineFP16PPL, p.CandidatePPL, p.BaselinePasskey, p.CandidatePasskey, p.MaxPPLDelta, p.MaxPasskeyDrop} {
+		if !finite(v) {
+			return SimQuantQualityVerdict{Outcome: OutcomeRefused, Reason: ReasonMalformedData}
+		}
+	}
+	if p.BaselineFP16PPL <= 0 || p.CandidatePPL <= 0 || p.MaxPPLDelta < 0 || p.MaxPasskeyDrop < 0 {
+		return SimQuantQualityVerdict{Outcome: OutcomeRefused, Reason: ReasonMalformedData}
+	}
+	pplDelta := p.CandidatePPL - p.BaselineFP16PPL
+	passkeyDrop := p.BaselinePasskey - p.CandidatePasskey
+	if pplDelta > p.MaxPPLDelta || passkeyDrop > p.MaxPasskeyDrop {
+		return SimQuantQualityVerdict{
+			Outcome:     OutcomeRefused,
+			Reason:      ReasonQualityBudgetExceeded,
+			PPLDelta:    pplDelta,
+			PasskeyDrop: passkeyDrop,
+		}
+	}
+	return SimQuantQualityVerdict{
+		Outcome:     OutcomeSupported,
+		Reason:      ReasonWithinBudget,
+		PPLDelta:    pplDelta,
+		PasskeyDrop: passkeyDrop,
+	}
+}

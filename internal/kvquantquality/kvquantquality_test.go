@@ -120,3 +120,37 @@ func validRequest() Request {
 		Budget:    Budget{MaxRowJSD: .01, MaxOutputJSD: .01, MaxTaskDrop: .01},
 	}
 }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestSimQuantQualityProtocol(t *testing.T) {
+	okV := EvaluateSimQuantProtocol(SimQuantQualityProtocol{
+		Calibrated:       true,
+		BaselineFP16PPL:  5.0,
+		CandidatePPL:     5.1,
+		BaselinePasskey:  1.0,
+		CandidatePasskey: 0.99,
+		MaxPPLDelta:      0.2,
+		MaxPasskeyDrop:   0.02,
+	})
+	if okV.Outcome != OutcomeSupported || okV.Reason != ReasonWithinBudget {
+		t.Fatalf("expected supported/within_budget, got %+v", okV)
+	}
+
+	failV := EvaluateSimQuantProtocol(SimQuantQualityProtocol{
+		Calibrated:       true,
+		BaselineFP16PPL:  5.0,
+		CandidatePPL:     5.5,
+		BaselinePasskey:  1.0,
+		CandidatePasskey: 0.95,
+		MaxPPLDelta:      0.2,
+		MaxPasskeyDrop:   0.02,
+	})
+	if failV.Outcome != OutcomeRefused || failV.Reason != ReasonQualityBudgetExceeded {
+		t.Fatalf("expected refused/quality_budget_exceeded, got %+v", failV)
+	}
+
+	uncal := EvaluateSimQuantProtocol(SimQuantQualityProtocol{Calibrated: false})
+	if uncal.Outcome != OutcomeDelegate {
+		t.Fatalf("expected delegate for uncalibrated protocol, got %+v", uncal)
+	}
+}
