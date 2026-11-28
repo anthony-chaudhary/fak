@@ -83,6 +83,17 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Cache Go build artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-release-cadence-gobuild-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-release-cadence-gobuild-
+
+      - name: Build fak binary
+        run: go build -o "$RUNNER_TEMP/fak" ./cmd/fak
+
       - name: Publish staleness
         # #1367: make the @latest-vs-HEAD publish lag a loud, MONITORED number on a
         # live loop. `fak release-staleness` computes commits + days behind the newest
@@ -99,7 +110,7 @@ jobs:
           export FAK_RELEASE_LATEST_TAG
           echo "GitHub Latest release: ${FAK_RELEASE_LATEST_TAG:-(unreadable)}"
           set +e
-          go run ./cmd/fak release-staleness --json --check > staleness.json
+          "$RUNNER_TEMP/fak" release-staleness --json --check > staleness.json
           code=$?
           set -e
           cat staleness.json
@@ -166,9 +177,8 @@ jobs:
               echo "escalation: informational — no action (auto-cut armed, or not very_stale)." ;;
             file-issue)
               echo "escalation: file/bump a deduped tracking issue via the shared gate-signal feeder."
-              # gate_signal's issue-contract check shells out to `fak`; build it once and
-              # point FAK_BIN at it so the --live filing path is fully functional here.
-              go build -o "$RUNNER_TEMP/fak" ./cmd/fak
+              # gate_signal's issue-contract check shells out to `fak`; reuse the binary
+              # built above so the --live filing path is fully functional here.
               export FAK_BIN="$RUNNER_TEMP/fak"
               python tools/gate_signal.py --from escalate-envelope.json --live ;;
             fail-tick)
@@ -183,7 +193,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          go run ./cmd/fak release status --json --require-ci-green --skip-gh --skip-cut-plan --limit-commits 50 > release-status.json
+          "$RUNNER_TEMP/fak" release status --json --require-ci-green --skip-gh --skip-cut-plan --limit-commits 50 > release-status.json
           cat release-status.json
           action="$(python -c 'import json; print(json.load(open("release-status.json"))["next_action"]["kind"])')"
           detail="$(python -c 'import json; print(json.load(open("release-status.json"))["next_action"]["detail"])')"

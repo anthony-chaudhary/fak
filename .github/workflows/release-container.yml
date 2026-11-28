@@ -81,6 +81,8 @@ jobs:
         with:
           context: .
           push: true
+          cache-from: type=gha,scope=cpu-image
+          cache-to: type=gha,mode=max,scope=cpu-image
           # Multi-arch manifest: linux/amd64 + linux/arm64, matching the
           # release-artifacts.yml binary matrix. The Dockerfile cross-compiles
           # arm64 natively (FROM --platform=$BUILDPLATFORM + GOARCH=$TARGETARCH),

@@ -37,13 +37,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check:
-    name: check for Dockerfile.cuda
+  cuda-image:
+    name: build + push ghcr CUDA image
     runs-on: ubuntu-latest
-    outputs:
-      exists: ${{ steps.check.outputs.exists }}
-      ref: ${{ steps.resolve.outputs.ref }}
-      version: ${{ steps.resolve.outputs.version }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
     steps:
       # Resolve the tag to build BEFORE checkout, so every event shape (tag push,
       # manual dispatch, weekly schedule) feeds one canonical `ref` forward:
@@ -93,6 +93,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.resolve.outputs.ref }}
+          fetch-depth: 0
 
       - name: Dockerfile.cuda presence
         id: check
@@ -106,26 +107,12 @@ jobs:
             echo "Dockerfile.cuda not present yet — skipping CUDA image publish (inert until it lands, see #2661)."
           fi
 
-  cuda-image:
-    name: build + push ghcr CUDA image
-    needs: check
-    if: needs.check.outputs.exists == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write # push to ghcr.io
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.check.outputs.ref }}
-          fetch-depth: 0
-
       - name: Resolve version + lowercase image ref
         id: meta
+        if: steps.check.outputs.exists == 'true'
         run: |
           set -euo pipefail
-          VERSION="${{ needs.check.outputs.version }}"
+          VERSION="${{ steps.resolve.outputs.version }}"
           # ghcr image paths must be lowercase; the owner login may carry uppercase.
           OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           IMAGE="ghcr.io/${OWNER}/fak"
@@ -134,8 +121,10 @@ jobs:
           echo "resolved ${IMAGE}:${VERSION}-cuda"
 
       - uses: docker/setup-buildx-action@v3
+        if: steps.check.outputs.exists == 'true'
 
       - name: Log in to ghcr.io
+        if: steps.check.outputs.exists == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -144,11 +133,14 @@ jobs:
 
       - name: Build and push CUDA image
         id: publish
+        if: steps.check.outputs.exists == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.cuda
           push: true
+          cache-from: type=gha,scope=cuda-image
+          cache-to: type=gha,mode=max,scope=cuda-image
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.version }}
           tags: |
@@ -159,6 +151,7 @@ jobs:
             io.modelcontextprotocol.server.name=io.github.anthony-chaudhary/fak
 
       - name: Verify the published versioned tag is fetchable from ghcr
+        if: steps.check.outputs.exists == 'true'
         run: |
           set -euo pipefail
           IMAGE="${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda"
@@ -174,6 +167,7 @@ jobs:
       # without `--gpus`. Name an unresolved load-time library up front; the
       # probes below would only report it as an empty version string.
       - name: Assert the CUDA binary loads without a GPU driver
+        if: steps.check.outputs.exists == 'true'
         env:
           IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
         run: |
@@ -185,6 +179,7 @@ jobs:
           echo "ok: every load-time library of the CUDA binary resolves inside the image"
 
       - name: Smoke — fak version inside the CUDA image
+        if: steps.check.outputs.exists == 'true'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
@@ -214,6 +209,7 @@ jobs:
       # What this cannot prove without a GPU: that kernels execute — that is the
       # `--gpus all` device lane (tools/cuda_acceptance.sh, windows-cuda.yml).
       - name: Assert CUDA build path is in the published image
+        if: steps.check.outputs.exists == 'true'
         env:
           IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-cuda
         run: |

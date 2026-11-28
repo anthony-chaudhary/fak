@@ -29,7 +29,7 @@ class ReleaseCadenceWorkflowTest(unittest.TestCase):
 
         self.assertIn("actions/setup-go@v5", text)
         self.assertIn("GOTOOLCHAIN: auto", text)
-        self.assertIn("go run ./cmd/fak release status", text)
+        self.assertIn('"$RUNNER_TEMP/fak" release status', text)
         self.assertIn("--skip-cut-plan", text)
         self.assertIn("python tools/release_decide.py", text)
         self.assertIn("--require-ci-green", text)

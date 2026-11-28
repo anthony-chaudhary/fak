@@ -36,27 +36,42 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/go-build
+          key: macos-release-gobuild-${{ github.sha }}
+          restore-keys: |
+            macos-release-gobuild-
+
       - name: Build darwin/arm64 and darwin/amd64 binaries
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
-          mkdir -p dist/amd64 dist/universal
+          mkdir -p dist/amd64 dist/arm64-metal dist/universal
 
           # No cgo-less darwin/arm64 build: scripts/build.sh refuses one (it would
           # link the Metal STUB and silently serve CPU, #12771/#12784). The Metal
           # arm64 build below is the only arm64 slice. amd64 stays CPU-only (job
           # CGO_ENABLED=0), the guard keys on arm64 only.
-          # Build amd64
-          GOOS=darwin GOARCH=amd64 OUT="dist/amd64/fak" VERSION="${VERSION}" sh scripts/build.sh
-
-          # Build darwin/arm64 with the Metal GPU backend. The per-command CGO_ENABLED=1
-          # overrides the job-level CGO_ENABLED=0; internal/compute/metal.go is gated on
-          # `darwin && arm64 && cgo` and compiles by default once cgo is on (no extra tag),
-          # linking Metal.framework + MetalPerformanceShaders.framework (witnessed locally
+          # Build darwin/amd64 and darwin/arm64-metal in parallel.
+          # The per-command CGO_ENABLED=1 overrides the job-level CGO_ENABLED=0;
+          # internal/compute/metal.go is gated on `darwin && arm64 && cgo` and
+          # compiles by default once cgo is on (no extra tag), linking
+          # Metal.framework + MetalPerformanceShaders.framework (witnessed locally
           # via `otool -L`). build.sh is CGO-agnostic (env passthrough) so no changes there.
-          mkdir -p dist/arm64-metal
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 OUT="dist/arm64-metal/fak" VERSION="${VERSION}" sh scripts/build.sh
+          GOOS=darwin GOARCH=amd64 OUT="dist/amd64/fak" VERSION="${VERSION}" sh scripts/build.sh &
+          pid_amd64=$!
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 OUT="dist/arm64-metal/fak" VERSION="${VERSION}" sh scripts/build.sh &
+          pid_arm64=$!
+
+          rc_amd64=0; wait "$pid_amd64" || rc_amd64=$?
+          rc_arm64=0; wait "$pid_arm64" || rc_arm64=$?
+          if [ "$rc_amd64" -ne 0 ] || [ "$rc_arm64" -ne 0 ]; then
+            echo "::error::macOS build failed (amd64=$rc_amd64, arm64-metal=$rc_arm64)"
+            exit 1
+          fi
 
           # Apple Silicon is the useful default slice: include the Metal-enabled
           # binary in the universal archive while retaining the CPU-only amd64

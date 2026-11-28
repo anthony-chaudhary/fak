@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Dockerfile — put `fak` in front of your model in production.
 #
 # Two stages. The builder compiles the pure-Go `cmd/fak` static (CGO_ENABLED=0), so
@@ -29,7 +30,7 @@ COPY . .
 # Build through the one canonical release recipe (scripts/build.sh, #3709); this
 # stage's ENV (CGO_ENABLED=0, GOTOOLCHAIN=auto, GOARCH=$TARGETARCH) passes through
 # to it unchanged — build.sh is toolchain-agnostic and overrides none of them.
-RUN OUT=/out/fak VERSION="${APP_VERSION}" sh scripts/build.sh
+RUN --mount=type=cache,target=/root/.cache/go-build OUT=/out/fak VERSION="${APP_VERSION}" sh scripts/build.sh
 
 # --- runtime -------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot

@@ -104,6 +104,14 @@ jobs:
           go-version-file: go.mod
           cache: false # zero external deps -> no go.sum to key a cache on
 
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.os == 'macOS' && '~/Library/Caches/go-build' || '~/.cache/go-build' }}
+          key: ${{ runner.os }}-${{ matrix.goos }}-${{ matrix.goarch }}-release-gobuild-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.goos }}-${{ matrix.goarch }}-release-gobuild-
+
       - name: Build, package, checksum
         env:
           GH_TOKEN: ${{ github.token }}
@@ -205,6 +213,20 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: Linux-linux-amd64-vulkan-release-gobuild-${{ github.sha }}
+          restore-keys: |
+            Linux-linux-amd64-vulkan-release-gobuild-
+
+      - name: Cache LunarG Vulkan SDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vulkansdk-1.4.350.0
+          key: lunarg-vulkan-sdk-1.4.350.0-b65f068ab36263559da49d7cacd7e7b9df23824ca8b68ccc522a2b06f5725df2
+
       - name: Install Vulkan build and software-device dependencies
         run: |
           sudo apt-get update
@@ -227,13 +249,16 @@ jobs:
           fi
           LVP_ICD="${LVP_ICDS[0]}"
 
-          curl --fail --location --retry 3 \
-            "https://sdk.lunarg.com/sdk/download/${SDK_VERSION}/linux/vulkan_sdk.tar.xz" \
-            --output "$SDK_ARCHIVE"
-          echo "${SDK_SHA256}  ${SDK_ARCHIVE}" | sha256sum --check --strict
           mkdir -p "$SDK_ROOT"
-          tar -xJf "$SDK_ARCHIVE" -C "$SDK_ROOT"
           mapfile -t PINNED_GLSLCS < <(find "$SDK_ROOT" -type f -path '*/x86_64/bin/glslc' -print | sort)
+          if [ "${#PINNED_GLSLCS[@]}" -eq 0 ] || [ ! -x "${PINNED_GLSLCS[0]}" ]; then
+            curl --fail --location --retry 3 \
+              "https://sdk.lunarg.com/sdk/download/${SDK_VERSION}/linux/vulkan_sdk.tar.xz" \
+              --output "$SDK_ARCHIVE"
+            echo "${SDK_SHA256}  ${SDK_ARCHIVE}" | sha256sum --check --strict
+            tar -xJf "$SDK_ARCHIVE" -C "$SDK_ROOT"
+            mapfile -t PINNED_GLSLCS < <(find "$SDK_ROOT" -type f -path '*/x86_64/bin/glslc' -print | sort)
+          fi
           if [ "${#PINNED_GLSLCS[@]}" -ne 1 ]; then
             echo "::error::expected exactly one pinned LunarG glslc, found ${#PINNED_GLSLCS[@]}"
             exit 1
@@ -351,6 +376,32 @@ jobs:
             echo "go mod download built the module zip: ${bytes} bytes compressed."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: verify go install resolves and runs the tag
+        id: verify_go_install
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          install_dir="$(mktemp -d)"
+          mod_cache="$(mktemp -d)"
+          build_cache="$(mktemp -d)"
+          env \
+            GOBIN="$install_dir" \
+            GOMODCACHE="$mod_cache" \
+            GOCACHE="$build_cache" \
+            GOPROXY=direct \
+            go install "github.com/anthony-chaudhary/fak/cmd/fak@${TAG}"
+          got="$("${install_dir}/fak" version 2>/dev/null | head -1 || true)"
+          echo "go install fak version -> ${got}"
+          case "$got" in
+            *"$VERSION"*) echo "ok: go install ...@${TAG} resolved, built, and reports ${VERSION}" ;;
+            *) echo "::error::go-installed fak version mismatch: got '$got', want '$VERSION'"; exit 1 ;;
+          esac
+          {
+            echo "## verify go install — ${TAG}"
+            echo "go install github.com/anthony-chaudhary/fak/cmd/fak@${TAG} resolved, built, and reported ${VERSION}."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   checksums:
     name: aggregate SHA256SUMS
     needs: [build, vulkan-build]
@@ -416,8 +467,8 @@ jobs:
             if [ "$fold_attempt" -eq "$fold_max" ]; then
               break
             fi
-            echo "required platform/GPU artifacts not up yet (attempt ${fold_attempt}/${fold_max}); waiting 30s for platform workflows..."
-            sleep 30
+            echo "required platform/GPU artifacts not up yet (attempt ${fold_attempt}/${fold_max}); waiting 10s for platform workflows..."
+            sleep 10
             fold_attempt=$((fold_attempt + 1))
           done
           if [ "$fold_ok" -ne 1 ]; then
@@ -488,7 +539,7 @@ jobs:
     # run the binary to assert it reports the tag's version. It runs the PUBLISHED
     # artifact (not the source tree) on purpose — that is what a consumer gets.
     name: verify published artifacts
-    needs: checksums
+    needs: [checksums, module-installable]
     # Run even when aggregation fails so this job can quarantine a release whose
     # required GPU artifact never arrived. Without always(), GitHub skips the job
     # and leaves the release page eligible for Latest despite the failed gate.
@@ -507,9 +558,14 @@ jobs:
       GOTOOLCHAIN: auto
     steps:
       - name: require complete artifact aggregation
-        if: ${{ needs.checksums.result != 'success' }}
+        if: ${{ needs.checksums.result != 'success' || needs.module-installable.result != 'success' }}
         run: |
-          echo "::error::artifact aggregation failed; required CPU/GPU release set is incomplete"
+          if [ "${{ needs.checksums.result }}" != "success" ]; then
+            echo "::error::artifact aggregation failed; required CPU/GPU release set is incomplete"
+          fi
+          if [ "${{ needs.module-installable.result }}" != "success" ]; then
+            echo "::error::module-installable failed; go install ...@TAG verification did not pass"
+          fi
           exit 1
 
       - uses: actions/checkout@v4
@@ -730,32 +786,6 @@ jobs:
       - name: verify nested modules and root dependency quarantine
         run: go test ./internal/dependencyquarantine
 
-      - name: verify go install resolves and runs the tag
-        id: verify_go_install
-        run: |
-          set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          VERSION="${TAG#v}"
-          install_dir="$(mktemp -d)"
-          mod_cache="$(mktemp -d)"
-          build_cache="$(mktemp -d)"
-          env \
-            GOBIN="$install_dir" \
-            GOMODCACHE="$mod_cache" \
-            GOCACHE="$build_cache" \
-            GOPROXY=direct \
-            go install "github.com/anthony-chaudhary/fak/cmd/fak@${TAG}"
-          got="$("${install_dir}/fak" version 2>/dev/null | head -1 || true)"
-          echo "go install fak version -> ${got}"
-          case "$got" in
-            *"$VERSION"*) echo "ok: go install ...@${TAG} resolved, built, and reports ${VERSION}" ;;
-            *) echo "::error::go-installed fak version mismatch: got '$got', want '$VERSION'"; exit 1 ;;
-          esac
-          {
-            echo "## verify go install — ${TAG}"
-            echo "go install github.com/anthony-chaudhary/fak/cmd/fak@${TAG} resolved, built, and reported ${VERSION}."
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Promote verified release to Latest
         # Symmetric with the quarantine step below: verification demotes a bad
         # release, so it must PROMOTE a good one. Without this the front door
@@ -838,6 +868,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: Linux-linux-amd64-release-gobuild-${{ github.sha }}
+          restore-keys: |
+            Linux-linux-amd64-release-gobuild-
 
       - name: render release card (dry-run)
         run: |

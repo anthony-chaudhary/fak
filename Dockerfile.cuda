@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Dockerfile.cuda — the in-kernel GPU-serving image (#2661).
 #
 # Companion to the default `Dockerfile` (which stays the lean, GPU-free distroless
@@ -45,7 +46,32 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 WORKDIR /src
-COPY . .
+# Copy only the CUDA kernel sources/headers before nvcc so Go, doc, or release-note
+# edits never invalidate the multi-arch nvcc layer.
+COPY internal/compute/cuda/ internal/compute/cuda/
+COPY internal/compute/cuda_arch.txt \
+     internal/compute/cuda_backend.h \
+     internal/compute/cuda_deepgemm_wkv.h \
+     internal/compute/cuda_flashmla_sparse_decode.h \
+     internal/compute/cuda_flashmla_sparse_decode_owner.cuh \
+     internal/compute/cuda_flashmla_sparse_decode_owner.h \
+     internal/compute/cuda_flashmla_sparse_prefill.h \
+     internal/compute/cuda_flashmla_sparse_prefill_bridge.cuh \
+     internal/compute/cuda_kernels.cu \
+     internal/compute/cuda_kv_precision.h \
+     internal/compute/cuda_mxfp8_cast.h \
+     internal/compute/cuda_v41_compressor_pool.cu \
+     internal/compute/cuda_v41_engram_gate.cu \
+     internal/compute/cuda_v41_indexer.cu \
+     internal/compute/cuda_v41_mhc.cu \
+     internal/compute/cuda_v41_routed_mmid.cu \
+     internal/compute/cuda_v41_routed_swiglu.cu \
+     internal/compute/cuda_v41_router.cu \
+     internal/compute/cuda_v41_shared_attention.cu \
+     internal/compute/prefill_paged.cu \
+     internal/compute/routed_expert_gemv.cu \
+     internal/compute/tree_attention.cu \
+     internal/compute/
 RUN if [ -n "${CUDA_ARCH}" ]; then \
       base="${CUDA_ARCH%[af]}"; suffix="${CUDA_ARCH#"$base"}"; cc="${base#sm_}"; \
       if ! grep -Fxq "${base}" internal/compute/cuda_arch.txt \
@@ -75,14 +101,15 @@ RUN cd internal/compute \
          done < cuda_arch.txt; \
          gencode="$gencode -gencode arch=compute_${cc},code=compute_${cc}"; \
        fi \
-    && nvcc -O3 -std=c++17 $gencode -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o \
+    && nvcc -O3 -std=c++17 --threads 0 $gencode -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o \
     && ar rcs libfakcuda.a cuda_kernels.o
+COPY . .
 ENV CGO_ENABLED=1 \
     CGO_CFLAGS="-I/usr/local/cuda/include" \
     CGO_LDFLAGS="-L/src/internal/compute -L/usr/local/cuda/lib64"
 # Build through the one canonical release recipe (scripts/build.sh, #3709) with the
 # cuda tag; this stage's ENV (CGO_ENABLED=1 + the cgo cuda flags above) passes through.
-RUN OUT=/out/fak VERSION="${APP_VERSION}" TAGS=cuda GOTOOLCHAIN=auto sh scripts/build.sh
+RUN --mount=type=cache,target=/root/.cache/go-build OUT=/out/fak VERSION="${APP_VERSION}" TAGS=cuda GOTOOLCHAIN=auto sh scripts/build.sh
 
 # --- runtime -------------------------------------------------------------------
 # -runtime (not -base): carries cudart/cublas so the binary's dynamic links resolve;

@@ -295,7 +295,8 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
 
     def test_announces_release_after_assets_land(self) -> None:
         self.assertIn("announce:", self.text)
-        self.assertIn("needs: checksums", self.text)
+        self.assertIn("needs: [checksums, module-installable]", self.text)
+        self.assertIn("needs: verify-release", self.text)
         self.assertIn("announce release to #releases", self.text)
         self.assertIn("FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}", self.text)
         # #releases folds onto the CI/CD reporting sink (C0BGQ411TCJ) by default, exactly

@@ -177,18 +177,17 @@ jobs:
         run: |
           go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "$GOMAXPROCS" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-fast-environment.json"
 
-      # Build/test cache: share the SAME content-addressed GOCACHE key as
-      # ci.yml's build-vet-test job (gobuild, non-race) so a warm cache skips
-      # unchanged packages. A restored entry is never wrong — a miss just
-      # rebuilds. Restore-only: ci.yml is the sole saver, and a multi-GiB
-      # post-job save here would sit on the verdict's critical path.
+      # Dedicated lean ci-fast cache: build-vet-fast only runs `go build ./...`,
+      # `go vet ./...`, and 4 architest tests, so its GOCACHE stays small, fresh
+      # on every commit, and fast to restore without pulling ci.yml's multi-GiB
+      # test cache.
       - name: cache Go build/test artifacts
-        uses: actions/cache/restore@v4
+        uses: actions/cache@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
+          key: ${{ runner.os }}-cifast-gobuild-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-
+            ${{ runner.os }}-cifast-gobuild-
 
       # No Go/network dependency: proves the release-artifacts post-publish
       # checksum verifier (#1369) still catches a corrupted asset, on every
@@ -339,16 +338,17 @@ jobs:
         run: |
           go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "$GOMAXPROCS" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-fast-environment.json"
 
-      # Restore-only: every shard starts from the shared gobuild GOCACHE key
-      # (ci.yml build-vet-test saves it). Shards never save, so N parallel jobs
-      # do not multiply the repository's cache footprint.
+      # Restore-only: every shard starts from the dedicated lean cifast-gobuild
+      # GOCACHE saved by build-vet-fast (never falling back to the bloated
+      # gobuild- cache). Shards never save, so N parallel jobs do not multiply
+      # the repository's cache footprint.
       - name: restore Go build/test cache
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod', 'go.sum') }}
+          key: ${{ runner.os }}-cifast-gobuild-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-gobuild-
+            ${{ runner.os }}-cifast-gobuild-
 
       - name: install pinned OpenAPI validator
         run: python -m pip install --quiet --disable-pip-version-check PyYAML==6.0.2 openapi-spec-validator==0.7.2
