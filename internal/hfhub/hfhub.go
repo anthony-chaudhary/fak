@@ -207,12 +207,6 @@ func (c *Client) httpClient() *http.Client {
 	return defaultHTTPClient
 }
 
-func (c *Client) authorize(req *http.Request) {
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-}
-
 type repoInfo struct {
 	Siblings []repoSibling `json:"siblings"`
 }
@@ -241,9 +235,8 @@ func (c *Client) ResolveRepoFile(ctx context.Context, r Ref, progress io.Writer)
 	if err != nil {
 		return Ref{}, err
 	}
-	c.authorize(req)
 	logf(progress, "GET %s", infoURL)
-	resp, err := c.httpClient().Do(req)
+	resp, err := c.doAuthRequest(ctx, req)
 	if err != nil {
 		return Ref{}, fmt.Errorf("hfhub: repo info %s@%s: %w", r.Repo, r.Revision, err)
 	}
@@ -514,8 +507,7 @@ func (c *Client) linkedSHA(ctx context.Context, url string) string {
 	if err != nil {
 		return ""
 	}
-	c.authorize(req)
-	resp, err := c.httpClient().Do(req)
+	resp, err := c.doAuthRequest(ctx, req)
 	if err != nil {
 		return ""
 	}
