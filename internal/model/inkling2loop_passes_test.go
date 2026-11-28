@@ -56,3 +56,24 @@ func TestInkling2LoopWithPassesSizesCacheAndMatchesABuildTimeCount(t *testing.T)
 		}
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestInkling2LoopWithPassesFixedPointReadout(t *testing.T) {
+	r := []float32{0, 0, 0}
+	r2 := []float32{0.6, 0.8, 0}
+	r4 := []float32{0.61, 0.80, 0}
+	fp, err := CheckFixedPointReadout(r, r2, r4, 0.05)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fp.Converged || fp.Drift2RTo4R > fp.DriftRTo2R {
+		t.Fatalf("expected fixed-point convergence, got %+v", fp)
+	}
+	diverging, err := CheckFixedPointReadout(r, r2, []float32{2.0, 2.0, 2.0}, 0.05)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diverging.Converged {
+		t.Fatalf("expected non-convergence, got %+v", diverging)
+	}
+}
