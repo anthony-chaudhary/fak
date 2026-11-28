@@ -92,16 +92,29 @@ func inkling2SpecExplicit(lookup func(string) (string, bool)) bool {
 	return set && strings.TrimSpace(v) != ""
 }
 
+// inkling2SpecLowBitKVDType reports whether dtype is a low-bit global KV mode
+// eligible for DSpark speculative decode verify and rollback.
+func inkling2SpecLowBitKVDType(dtype Inkling2KVDType) bool {
+	switch dtype {
+	case Inkling2KVFP8, Inkling2KVNVFP4, Inkling2KVAsym:
+		return true
+	default:
+		return false
+	}
+}
+
 // inkling2SpecAutoDisabledForKV reports whether default-on speculative decode must
-// auto-disable because the session uses non-fp32 global KV caches (whose verify/draft ops
-// only read fp32) and the operator did not explicitly request FAK_INKLING2_SPEC.
+// auto-disable because the session uses unsupported non-fp32 global KV caches (f16)
+// and the operator did not explicitly request FAK_INKLING2_SPEC. Low-bit global KV
+// modes (fp8, nvfp4, fp8k_nvfp4v) remain eligible when supported by the backend.
 func inkling2SpecAutoDisabledForKV(be compute.Backend, lookup func(string) (string, bool)) bool {
 	if inkling2SpecExplicit(lookup) {
 		return false
 	}
 	if lookup != nil {
 		if dtype, err := Inkling2KVDTypeFrom(lookup); err == nil && dtype != Inkling2KVF32 {
-			return inkling2ResidentKVDType(be, dtype) != Inkling2KVF32
+			eff := inkling2ResidentKVDType(be, dtype)
+			return eff != Inkling2KVF32 && !inkling2SpecLowBitKVDType(eff)
 		}
 	}
 	return inkling2ResidentHalfKV(be)
@@ -113,6 +126,22 @@ func inkling2SpecWarnKVDisable() {
 	})
 }
 
+// verifyGraphEligible reports whether CUDA graph capture/replay is eligible for
+// speculative verify and rollback on s's active global KV dtype.
+func (s *inkling2Resident) verifyGraphEligible() bool {
+	if s == nil || !s.graph || s.hostRouting {
+		return false
+	}
+	if _, ok := s.be.(compute.Inkling2VerifyDevice); !ok {
+		return false
+	}
+	dtype := s.kvDType()
+	if dtype == Inkling2KVF16 {
+		return false
+	}
+	return inkling2GraphEligible(s.be, s.hostRouting, dtype, os.LookupEnv)
+}
+
 // enableSpec allocates the verify chunk state for up to depth drafted tokens.
 func (s *inkling2Resident) enableSpec(depth int) error {
 	if (s.kvHalf || s.kvFP8) && s.kvAutoHalf && s.pos == 0 {
@@ -120,9 +149,12 @@ func (s *inkling2Resident) enableSpec(depth int) error {
 			return err
 		}
 	}
-	if s.kvHalf || s.kvFP8 || s.kvNVFP4 {
-		// the verify and draft ops read fp32 caches only
+	if s.kvHalf {
+		// f16 global KV has no speculative verify/draft ops; fp8/nvfp4/fp8k_nvfp4v are eligible
 		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode; set FAK_INKLING2_SPEC=0 or unset FAK_INKLING2_KV", s.kvDType())
+	}
+	if s.be == nil {
+		return fmt.Errorf("inkling2 spec: no backend attached for batched verify ops")
 	}
 	if _, ok := s.be.(compute.Inkling2VerifyDevice); !ok || !s.batched {
 		return fmt.Errorf("inkling2 spec: backend %s has no batched verify ops", s.be.Name())
@@ -189,7 +221,7 @@ func (s *inkling2Resident) verify(tokens []int) ([]int, error) {
 	switch {
 	case *ready:
 		s.fail(vd.Ink2GraphLaunchSlot(slot))
-	case s.graph && s.verifyWarm && *warm:
+	case s.verifyGraphEligible() && s.verifyWarm && *warm:
 		if err := s.dev.Ink2GraphBegin(); err != nil {
 			if errors.Is(err, errors.ErrUnsupported) {
 				// a device without capture verifies eagerly, as step decodes
@@ -242,7 +274,7 @@ func (s *inkling2Resident) commitVerify(T, keep int) error {
 			ready = &s.tailKeepReady[T]
 		}
 		s.fail(s.dev.Ink2Write(s.verifyKeep, []float32{intBits(keep)}))
-		if !*ready && s.graph {
+		if !*ready && s.verifyGraphEligible() {
 			if err := s.dev.Ink2GraphBegin(); err == nil {
 				for slot := range s.hist {
 					s.fail(vd.Ink2PConvCommitDev(s.hist[slot], s.convLog[slot], s.verifyKeep, channels, past, past+T))
@@ -313,7 +345,7 @@ func inkling2ResidentSpecGreedyUntilContext(ctx context.Context, m *Inkling2Loop
 	if err := d.Observe(s, prompt, len(prompt)); err != nil {
 		return nil, st, err
 	}
-	if s.graph {
+	if s.verifyGraphEligible() {
 		// one full-width verify grows every batched scratch before the decode graph
 		// is captured; keep 0 rewinds it. Shorter widths warm and capture on first use.
 		warm := make([]int, depth+1)
