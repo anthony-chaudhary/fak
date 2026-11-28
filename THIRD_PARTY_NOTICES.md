@@ -3007,3 +3007,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
+
+---
+
+Portions of this product are conceptually informed by NVIDIA/OpenShell (https://github.com/NVIDIA/OpenShell, pinned at revision af8182f7b6, Apache-2.0, in `internal/sandbox/openshell_model.go`), NVIDIA/SkillSpector (https://github.com/NVIDIA/SkillSpector, pinned at revision e48d771a26, Apache-2.0, in `internal/policy/skillspector.go`), and NVIDIA/kvpress (https://github.com/NVIDIA/kvpress, pinned at revision 94951a5b90, Apache-2.0, in `internal/kvmmu/kvpress_study.go`). Changes were made; no upstream code was copied.
