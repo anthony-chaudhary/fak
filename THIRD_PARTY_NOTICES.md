@@ -3061,3 +3061,19 @@ Portions of this product are adapted from IST-DASLab/marlin: https://github.com/
 
 Copyright 2024 IST-DASLab
 SPDX-License-Identifier: Apache-2.0
+
+## tensorfish/squid5090
+
+- **Repository:** https://github.com/tensorfish/squid5090
+- **Revision:** e86da11a63c76550555e04d57b9f8aa3bf6b2a45
+- **License:** Apache License, Version 2.0
+- **Scope note:** Changes were made. Prefix checkpoint caching is adapted in Go; policy-excluded components from upstream are not used.
+
+> Copyright (c) tensorfish/squid5090 contributors
+>
+> Upstream NOTICE attributions:
+> - `satellitedown/inkling-2-mini-abliterated-ingine` (Apache-2.0)
+> - `AtomicBot-ai/atomic-engine` (MIT)
+> - `sybil-solutions/inference-optimisation-skill`
+>
+> Licensed under the Apache License, Version 2.0 (the "License"); you may not use this work except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0

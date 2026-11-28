@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -203,6 +204,11 @@ type inkling2Resident struct {
 	decN         int
 	decT0, decT1 time.Time
 	decS0, decS1 metalgemm.Ink2Stats
+
+	// restoredLogits holds exact prompt-tail logits after a prefix checkpoint
+	// restore at restoredLogitsPos so LastLogits() stays exact before Step.
+	restoredLogits    []float32
+	restoredLogitsPos int
 }
 
 // ink2ContextDraft is a device draft whose context every target forward writes
@@ -1137,20 +1143,24 @@ func newInkling2ResidentRing(m *Inkling2LoopModel, be compute.Backend, ctx, aren
 }
 
 func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats, ring, wanted int, forSpec bool) (*inkling2Resident, error) {
+	return newInkling2ResidentRingForLookup(m, be, ctx, arenaFloats, ring, wanted, forSpec, os.LookupEnv)
+}
+
+func newInkling2ResidentRingForLookup(m *Inkling2LoopModel, be compute.Backend, ctx, arenaFloats, ring, wanted int, forSpec bool, lookup func(string) (string, bool)) (*inkling2Resident, error) {
 	dev, ok := be.(compute.Inkling2Device)
 	if !ok {
 		return nil, fmt.Errorf("inkling2 resident: backend %s has no inkling2 device ops", be.Name())
 	}
 	hp, w := m.HP, m.Weights
-	if _, kvErr := Inkling2KVDTypeFrom(os.LookupEnv); kvErr != nil {
+	if _, kvErr := Inkling2KVDTypeFrom(lookup); kvErr != nil {
 		return nil, kvErr
 	}
-	localKVDtype, localKVErr := inkling2LocalSWAKVDType(be, os.LookupEnv)
+	localKVDtype, localKVErr := inkling2LocalSWAKVDType(be, lookup)
 	if localKVErr != nil {
 		return nil, localKVErr
 	}
 	s := &inkling2Resident{hp: hp, w: w, be: be, dev: dev, localKVDtype: localKVDtype, q8: map[int]ink2Ref{}, arenaFloats: arenaFloats, chunkMax: ring, chunkWanted: wanted}
-	s.prefillFP8 = inkling2PrefillFP8Enabled(be, os.LookupEnv)
+	s.prefillFP8 = inkling2PrefillFP8Enabled(be, lookup)
 	s.report = metalgemm.Ink2ReportRequested(os.Getenv(metalgemm.Ink2ProfileEnv))
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
 	s.batched = hasPrefill && (inkling2BatchedPrefill() || forSpec || inkling2SpecDepthFor(m) > 0)
@@ -1167,7 +1177,7 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 		}
 	}
 	if ctx != 0 {
-		dtype, autoKV, err := inkling2ResidentKVDTypeForMode(m, be, os.LookupEnv, forSpec)
+		dtype, autoKV, err := inkling2ResidentKVDTypeForMode(m, be, lookup, forSpec)
 		if err != nil {
 			s.close()
 			return nil, err
@@ -1292,7 +1302,7 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 	s.arena = s.alloc(arenaFloats)
 	s.argIdx = s.alloc(4)
 	// Metal has no graph capture, so its session never warms widths for one
-	s.graph = inkling2GraphEligible(be, s.hostRouting, s.kvDType(), os.LookupEnv)
+	s.graph = inkling2GraphEligible(be, s.hostRouting, s.kvDType(), lookup)
 	s.batched = s.batched && !s.hostRouting
 	s.enablePipe(ctx)
 	s.makeResident(0, nil)
@@ -1879,6 +1889,9 @@ func (s *inkling2Resident) finishStep(next int) int {
 
 // lastLogits reads back the softcapped logits of the last step or prefill.
 func (s *inkling2Resident) lastLogits() ([]float32, error) {
+	if len(s.restoredLogits) > 0 && s.restoredLogitsPos == s.pos {
+		return append([]float32(nil), s.restoredLogits...), nil
+	}
 	return s.dev.Ink2Read(s.logits, s.hp.VocabUnpadded)
 }
 
@@ -2104,5 +2117,399 @@ func (s *inkling2Resident) downgradeAutoHalfToFP32() error {
 	if s.localKVDtype != Inkling2KVFP8 {
 		s.fp8Dev = nil
 	}
+	return s.err
+}
+
+func (s *inkling2Resident) kvSlotExpectedCounts(slot, pos int) (local bool, fullRing bool, lo, rowCodeWords, rowScaleWords, totalKCodes, totalVCodes, totalScales int) {
+	hp := s.hp
+	kvDim := hp.KVHeads * hp.HeadDim
+	cap := s.caps[slot]
+	if !s.localAt(slot) {
+		if pos <= 0 {
+			return false, false, 0, 0, 0, 0, 0, 0
+		}
+		switch {
+		case s.kvAsymSlot(slot):
+			return false, false, 0, 0, 0,
+				compute.Ink2FP8KVCodeFloats(pos, hp.KVHeads, hp.HeadDim),
+				compute.Ink2NVFP4KVCodeFloats(pos, hp.KVHeads, hp.HeadDim),
+				compute.Ink2NVFP4KVScaleFloats(pos, hp.KVHeads, hp.HeadDim)
+		case s.kvNVFP4Slot(slot):
+			c := compute.Ink2NVFP4KVCodeFloats(pos, hp.KVHeads, hp.HeadDim)
+			sc := compute.Ink2NVFP4KVScaleFloats(pos, hp.KVHeads, hp.HeadDim)
+			return false, false, 0, 0, 0, c, c, sc
+		case s.kvFP8Slot(slot):
+			c := compute.Ink2FP8KVCodeFloats(pos, hp.KVHeads, hp.HeadDim)
+			sc := compute.Ink2FP8KVScaleFloats(pos, hp.KVHeads)
+			return false, false, 0, 0, 0, c, c, sc
+		case s.kvHalfSlot(slot):
+			n := inkling2BatchKVFloats(pos*kvDim, true)
+			return false, false, 0, 0, 0, n, n, 0
+		default:
+			n := pos * kvDim
+			return false, false, 0, 0, 0, n, n, 0
+		}
+	}
+
+	lo = max(0, pos-hp.SlidingWindow)
+	rows := pos - lo
+	switch s.localKVDtype {
+	case Inkling2KVFP8:
+		rc := compute.Ink2FP8KVCodeFloats(1, hp.KVHeads, hp.HeadDim)
+		rs := compute.Ink2FP8KVScaleFloats(1, hp.KVHeads)
+		fc := compute.Ink2FP8KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)
+		fs := compute.Ink2FP8KVScaleFloats(cap, hp.KVHeads)
+		if rc*cap == fc && rs*cap == fs {
+			return true, false, lo, rc, rs, rows * rc, rows * rc, rows * rs
+		}
+		return true, true, lo, 0, 0, fc, fc, fs
+	case Inkling2KVF16:
+		if kvDim%2 == 0 {
+			rw := kvDim / 2
+			return true, false, lo, rw, 0, rows * rw, rows * rw, 0
+		}
+		fw := inkling2BatchKVFloats(cap*kvDim, true)
+		return true, true, lo, 0, 0, fw, fw, 0
+	default:
+		return true, false, lo, kvDim, 0, rows * kvDim, rows * kvDim, 0
+	}
+}
+
+// capturePrefixCheckpoint snapshots the resident device KV (global linear +
+// local sliding-window rings), short-conv rings, optional draft rings, and
+// tail logits into a bounded host-memory checkpoint without changing default
+// resident execution when unused.
+func (s *inkling2Resident) capturePrefixCheckpoint(prefixTokens []int, scope string) (*Inkling2ResidentPrefixCheckpoint, error) {
+	if s == nil || s.dev == nil {
+		return nil, fmt.Errorf("inkling2 prefix: nil resident device")
+	}
+	if err := s.rewindable(); err != nil {
+		return nil, err
+	}
+	hpJSON, err := json.Marshal(s.hp)
+	if err != nil {
+		return nil, err
+	}
+	pos := s.pos
+	hf := s.histFloats()
+	slots := make([]Inkling2PrefixSlotState, len(s.hist))
+	for slot := range s.hist {
+		convRaw, err := s.dev.Ink2Read(s.hist[slot], hf)
+		if err != nil {
+			return nil, err
+		}
+		local, fullRing, lo, rowCodeW, rowScaleW, kcN, vcN, scN := s.kvSlotExpectedCounts(slot, pos)
+		sc := Inkling2PrefixSlotState{
+			Local:    local,
+			FullRing: fullRing,
+			Lo:       lo,
+			Cap:      s.caps[slot],
+			Conv:     append([]float32(nil), convRaw...),
+		}
+		if !local {
+			if pos > 0 {
+				kRaw, err := s.dev.Ink2Read(s.kc[slot], kcN)
+				if err != nil {
+					return nil, err
+				}
+				vRaw, err := s.dev.Ink2Read(s.vc[slot], vcN)
+				if err != nil {
+					return nil, err
+				}
+				sc.K = append([]float32(nil), kRaw...)
+				sc.V = append([]float32(nil), vRaw...)
+				if scN > 0 {
+					ksRaw, err := s.dev.Ink2Read(s.ks[slot], scN)
+					if err != nil {
+						return nil, err
+					}
+					vsRaw, err := s.dev.Ink2Read(s.vs[slot], scN)
+					if err != nil {
+						return nil, err
+					}
+					sc.KS = append([]float32(nil), ksRaw...)
+					sc.VS = append([]float32(nil), vsRaw...)
+				}
+			}
+		} else if fullRing {
+			kRaw, err := s.dev.Ink2Read(s.kc[slot], kcN)
+			if err != nil {
+				return nil, err
+			}
+			vRaw, err := s.dev.Ink2Read(s.vc[slot], vcN)
+			if err != nil {
+				return nil, err
+			}
+			sc.K = append([]float32(nil), kRaw...)
+			sc.V = append([]float32(nil), vRaw...)
+			if scN > 0 {
+				ksRaw, err := s.dev.Ink2Read(s.ks[slot], scN)
+				if err != nil {
+					return nil, err
+				}
+				vsRaw, err := s.dev.Ink2Read(s.vs[slot], scN)
+				if err != nil {
+					return nil, err
+				}
+				sc.KS = append([]float32(nil), ksRaw...)
+				sc.VS = append([]float32(nil), vsRaw...)
+			}
+		} else if pos-lo > 0 {
+			if pos-lo > s.caps[slot] {
+				return nil, fmt.Errorf("inkling2 prefix: slot %d active span %d exceeds ring cap %d", slot, pos-lo, s.caps[slot])
+			}
+			sc.K = make([]float32, kcN)
+			sc.V = make([]float32, vcN)
+			if rowScaleW > 0 {
+				sc.KS = make([]float32, scN)
+				sc.VS = make([]float32, scN)
+			}
+			for _, sp := range inkling2RingSpans(lo, pos, s.caps[slot]) {
+				kSpan, err := s.dev.Ink2Read(at(s.kc[slot], sp.ring*rowCodeW), sp.n*rowCodeW)
+				if err != nil {
+					return nil, err
+				}
+				copy(sc.K[sp.off*rowCodeW:(sp.off+sp.n)*rowCodeW], kSpan)
+				vSpan, err := s.dev.Ink2Read(at(s.vc[slot], sp.ring*rowCodeW), sp.n*rowCodeW)
+				if err != nil {
+					return nil, err
+				}
+				copy(sc.V[sp.off*rowCodeW:(sp.off+sp.n)*rowCodeW], vSpan)
+				if rowScaleW > 0 {
+					ksSpan, err := s.dev.Ink2Read(at(s.ks[slot], sp.ring*rowScaleW), sp.n*rowScaleW)
+					if err != nil {
+						return nil, err
+					}
+					copy(sc.KS[sp.off*rowScaleW:(sp.off+sp.n)*rowScaleW], ksSpan)
+					vsSpan, err := s.dev.Ink2Read(at(s.vs[slot], sp.ring*rowScaleW), sp.n*rowScaleW)
+					if err != nil {
+						return nil, err
+					}
+					copy(sc.VS[sp.off*rowScaleW:(sp.off+sp.n)*rowScaleW], vsSpan)
+				}
+			}
+		}
+		slots[slot] = sc
+	}
+
+	draftMeta := s.draftLayerSlots()
+	draftSlots := make([]Inkling2PrefixDraftSlotState, len(draftMeta))
+	for i, ds := range draftMeta {
+		lo := max(0, pos-ds.window)
+		rows := pos - lo
+		if rows > ds.cap {
+			return nil, fmt.Errorf("inkling2 prefix: draft slot %d active span %d exceeds cap %d", i, rows, ds.cap)
+		}
+		dck := Inkling2PrefixDraftSlotState{
+			Lo:    lo,
+			Hi:    pos,
+			Cap:   ds.cap,
+			Words: ds.words,
+		}
+		if rows > 0 && ds.words > 0 {
+			dck.K = make([]float32, rows*ds.words)
+			dck.V = make([]float32, rows*ds.words)
+			for _, sp := range inkling2RingSpans(lo, pos, ds.cap) {
+				kSpan, err := s.dev.Ink2Read(at(ds.kc, sp.ring*ds.words), sp.n*ds.words)
+				if err != nil {
+					return nil, err
+				}
+				copy(dck.K[sp.off*ds.words:(sp.off+sp.n)*ds.words], kSpan)
+				vSpan, err := s.dev.Ink2Read(at(ds.vc, sp.ring*ds.words), sp.n*ds.words)
+				if err != nil {
+					return nil, err
+				}
+				copy(dck.V[sp.off*ds.words:(sp.off+sp.n)*ds.words], vSpan)
+			}
+		}
+		draftSlots[i] = dck
+	}
+
+	var lastLogits []float32
+	if len(s.restoredLogits) > 0 && s.restoredLogitsPos == pos {
+		lastLogits = append([]float32(nil), s.restoredLogits...)
+	} else if s.logits.T.Buf() != nil && s.hp.VocabUnpadded > 0 {
+		raw, err := s.dev.Ink2Read(s.logits, s.hp.VocabUnpadded)
+		if err != nil {
+			return nil, err
+		}
+		lastLogits = append([]float32(nil), raw...)
+	}
+
+	ck := &Inkling2ResidentPrefixCheckpoint{
+		Scope:        scope,
+		PrefixTokens: append([]int(nil), prefixTokens...),
+		HParamsJSON:  string(hpJSON),
+		Pos:          pos,
+		KVDType:      s.kvDType(),
+		LocalKVDType: s.localKVDtype,
+		Slots:        slots,
+		DraftSlots:   draftSlots,
+		LastLogits:   lastLogits,
+	}
+	ck.byteSize = ck.computeByteSize()
+	return ck, nil
+}
+
+// restorePrefixCheckpoint validates ck against s and restores global KV, local
+// SWA rings, short-conv histories, optional draft rings, and cached tail logits
+// atomically (without partial writes on validation errors).
+func (s *inkling2Resident) restorePrefixCheckpoint(ck *Inkling2ResidentPrefixCheckpoint) error {
+	if s == nil || s.dev == nil {
+		return fmt.Errorf("inkling2 prefix: nil resident device")
+	}
+	if ck == nil {
+		return ErrInkling2NoCheckpoint
+	}
+	if err := ck.validate(); err != nil {
+		return err
+	}
+	if err := s.rewindable(); err != nil {
+		return err
+	}
+	if ck.Pos > s.ctx {
+		return fmt.Errorf("inkling2 prefix: checkpoint pos=%d exceeds ctx=%d", ck.Pos, s.ctx)
+	}
+	if ck.KVDType != s.kvDType() || ck.LocalKVDType != s.localKVDtype {
+		return fmt.Errorf("inkling2 prefix: dtype mismatch checkpoint=(%s,%s) session=(%s,%s)",
+			ck.KVDType, ck.LocalKVDType, s.kvDType(), s.localKVDtype)
+	}
+	hpJSON, err := json.Marshal(s.hp)
+	if err != nil {
+		return err
+	}
+	if string(hpJSON) != ck.HParamsJSON {
+		return fmt.Errorf("%w: resident hparams mismatch", model.ErrInkling2StateSnapshotScope)
+	}
+	if len(ck.Slots) != len(s.hist) {
+		return fmt.Errorf("%w: slot count mismatch got %d want %d", model.ErrInkling2StateSnapshotScope, len(ck.Slots), len(s.hist))
+	}
+	draftMeta := s.draftLayerSlots()
+	if len(ck.DraftSlots) != len(draftMeta) {
+		return fmt.Errorf("%w: draft slot count mismatch got %d want %d", model.ErrInkling2StateSnapshotScope, len(ck.DraftSlots), len(draftMeta))
+	}
+
+	hf := s.histFloats()
+	for slot, sc := range ck.Slots {
+		if len(sc.Conv) != hf {
+			return fmt.Errorf("%w: slot %d conv len=%d want %d", model.ErrInkling2StateSnapshotInvalid, slot, len(sc.Conv), hf)
+		}
+		local, fullRing, lo, _, _, kcN, vcN, scN := s.kvSlotExpectedCounts(slot, ck.Pos)
+		if sc.Local != local || sc.FullRing != fullRing || sc.Lo != lo {
+			return fmt.Errorf("%w: slot %d layout mismatch (local=%v/%v full=%v/%v lo=%d/%d)",
+				model.ErrInkling2StateSnapshotInvalid, slot, sc.Local, local, sc.FullRing, fullRing, sc.Lo, lo)
+		}
+		if fullRing && sc.Cap != s.caps[slot] {
+			return fmt.Errorf("%w: slot %d full-ring cap mismatch %d vs %d",
+				model.ErrInkling2StateSnapshotInvalid, slot, sc.Cap, s.caps[slot])
+		}
+		if local && ck.Pos-sc.Lo > s.caps[slot] {
+			return fmt.Errorf("%w: slot %d span %d exceeds ring cap %d",
+				model.ErrInkling2StateSnapshotInvalid, slot, ck.Pos-sc.Lo, s.caps[slot])
+		}
+		if len(sc.K) != kcN || len(sc.V) != vcN || len(sc.KS) != scN || len(sc.VS) != scN {
+			return fmt.Errorf("%w: slot %d payload len mismatch k=%d/%d v=%d/%d ks=%d/%d vs=%d/%d",
+				model.ErrInkling2StateSnapshotInvalid, slot, len(sc.K), kcN, len(sc.V), vcN, len(sc.KS), scN, len(sc.VS), scN)
+		}
+	}
+	for i, dck := range ck.DraftSlots {
+		ds := draftMeta[i]
+		rows := dck.Hi - dck.Lo
+		if dck.Hi != ck.Pos || dck.Lo != max(0, ck.Pos-ds.window) || dck.Words != ds.words || rows > ds.cap {
+			return fmt.Errorf("%w: draft slot %d layout mismatch", model.ErrInkling2StateSnapshotInvalid, i)
+		}
+		if len(dck.K) != rows*ds.words || len(dck.V) != rows*ds.words {
+			return fmt.Errorf("%w: draft slot %d payload len mismatch", model.ErrInkling2StateSnapshotInvalid, i)
+		}
+	}
+
+	// Validation succeeded: apply device state writes cleanly.
+	for slot, sc := range ck.Slots {
+		if err := s.dev.Ink2Write(s.hist[slot], sc.Conv); err != nil {
+			return err
+		}
+		local, fullRing, _, rowCodeW, rowScaleW, _, _, _ := s.kvSlotExpectedCounts(slot, ck.Pos)
+		if !local {
+			if ck.Pos > 0 {
+				if err := s.dev.Ink2Write(s.kc[slot], sc.K); err != nil {
+					return err
+				}
+				if err := s.dev.Ink2Write(s.vc[slot], sc.V); err != nil {
+					return err
+				}
+				if len(sc.KS) > 0 {
+					if err := s.dev.Ink2Write(s.ks[slot], sc.KS); err != nil {
+						return err
+					}
+					if err := s.dev.Ink2Write(s.vs[slot], sc.VS); err != nil {
+						return err
+					}
+				}
+			}
+		} else if fullRing {
+			if err := s.dev.Ink2Write(s.kc[slot], sc.K); err != nil {
+				return err
+			}
+			if err := s.dev.Ink2Write(s.vc[slot], sc.V); err != nil {
+				return err
+			}
+			if len(sc.KS) > 0 {
+				if err := s.dev.Ink2Write(s.ks[slot], sc.KS); err != nil {
+					return err
+				}
+				if err := s.dev.Ink2Write(s.vs[slot], sc.VS); err != nil {
+					return err
+				}
+			}
+		} else if ck.Pos-sc.Lo > 0 {
+			for _, sp := range inkling2RingSpans(sc.Lo, ck.Pos, s.caps[slot]) {
+				if err := s.dev.Ink2Write(at(s.kc[slot], sp.ring*rowCodeW), sc.K[sp.off*rowCodeW:(sp.off+sp.n)*rowCodeW]); err != nil {
+					return err
+				}
+				if err := s.dev.Ink2Write(at(s.vc[slot], sp.ring*rowCodeW), sc.V[sp.off*rowCodeW:(sp.off+sp.n)*rowCodeW]); err != nil {
+					return err
+				}
+				if rowScaleW > 0 {
+					if err := s.dev.Ink2Write(at(s.ks[slot], sp.ring*rowScaleW), sc.KS[sp.off*rowScaleW:(sp.off+sp.n)*rowScaleW]); err != nil {
+						return err
+					}
+					if err := s.dev.Ink2Write(at(s.vs[slot], sp.ring*rowScaleW), sc.VS[sp.off*rowScaleW:(sp.off+sp.n)*rowScaleW]); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	for i, dck := range ck.DraftSlots {
+		ds := draftMeta[i]
+		if dck.Hi-dck.Lo > 0 && ds.words > 0 {
+			for _, sp := range inkling2RingSpans(dck.Lo, dck.Hi, ds.cap) {
+				if err := s.dev.Ink2Write(at(ds.kc, sp.ring*ds.words), dck.K[sp.off*ds.words:(sp.off+sp.n)*ds.words]); err != nil {
+					return err
+				}
+				if err := s.dev.Ink2Write(at(ds.vc, sp.ring*ds.words), dck.V[sp.off*ds.words:(sp.off+sp.n)*ds.words]); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if s.kvOverflow.T.Buf() != nil {
+		if err := s.dev.Ink2Write(s.kvOverflow, []float32{0}); err != nil {
+			return err
+		}
+	}
+	if len(ck.LastLogits) == s.hp.VocabUnpadded {
+		s.restoredLogits = append([]float32(nil), ck.LastLogits...)
+		s.restoredLogitsPos = ck.Pos
+		if s.logits.T.Buf() != nil {
+			if err := s.dev.Ink2Write(s.logits, ck.LastLogits); err != nil {
+				return err
+			}
+		}
+	} else {
+		s.restoredLogits = nil
+		s.restoredLogitsPos = -1
+	}
+	s.pos = ck.Pos
 	return s.err
 }

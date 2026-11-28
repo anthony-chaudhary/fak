@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
@@ -352,4 +353,341 @@ func validateArchiveEvidence(r LoopVariantRecord) error {
 		}
 	}
 	return nil
+}
+
+// RegimeMetrics records the witnessed baseline or candidate outcome on one
+// evaluation regime (for example short, medium, or long horizon).
+type RegimeMetrics struct {
+	Regime         string      `json:"regime"`
+	Score          float64     `json:"score"`
+	Completed      int         `json:"completed"`
+	RepetitionRate float64     `json:"repetition_rate"`
+	Evidence       DOSEvidence `json:"evidence,omitempty"`
+}
+
+// MultiRegimeSnapshot is an aligned set of per-regime outcomes for one build
+// or loop-policy candidate.
+type MultiRegimeSnapshot struct {
+	Ref        string          `json:"ref,omitempty"`
+	TruthClean bool            `json:"truth_clean"`
+	Regimes    []RegimeMetrics `json:"regimes"`
+}
+
+// AggregateScore returns the sum of regime scores.
+func (s MultiRegimeSnapshot) AggregateScore() float64 {
+	var sum float64
+	for _, r := range s.Regimes {
+		sum += r.Score
+	}
+	return sum
+}
+
+// TotalCompleted returns the sum of completed items across all regimes.
+func (s MultiRegimeSnapshot) TotalCompleted() int {
+	var total int
+	for _, r := range s.Regimes {
+		total += r.Completed
+	}
+	return total
+}
+
+// MaxRepetitionRate returns the worst (maximum) repetition rate across regimes.
+func (s MultiRegimeSnapshot) MaxRepetitionRate() float64 {
+	var worst float64
+	for _, r := range s.Regimes {
+		if r.RepetitionRate > worst {
+			worst = r.RepetitionRate
+		}
+	}
+	return worst
+}
+
+// MultiRegimeGatePolicy bounds multi-regime acceptance: no single regime may
+// regress past MaxPerRegimeDrop, worst repetition rate may not exceed
+// max(RepetitionCeiling, baselineMaxRepetition+MaxRepetitionIncrease), and an
+// aggregate score tie keeps only if completions increase by at least
+// MinTieBreakCompletions.
+type MultiRegimeGatePolicy struct {
+	MaxPerRegimeDrop         float64 `json:"max_per_regime_drop"`
+	RepetitionCeiling        float64 `json:"repetition_ceiling"`
+	MaxRepetitionIncrease    float64 `json:"max_repetition_increase"`
+	MinTieBreakCompletions   int     `json:"min_tie_break_completions"`
+	TieEpsilon               float64 `json:"tie_epsilon"`
+	RequireTruthClean        bool    `json:"require_truth_clean"`
+	RequireConfirmedEvidence bool    `json:"require_confirmed_evidence"`
+}
+
+// DefaultMultiRegimeGatePolicy returns the standard multi-regime acceptance
+// bounds inspired by multi-horizon RSI evaluation: <=2.0 per-regime drop,
+// repetition cap max(3.12, baseMaxRep+1.6), and +4 completions on exact score ties.
+func DefaultMultiRegimeGatePolicy() MultiRegimeGatePolicy {
+	return MultiRegimeGatePolicy{
+		MaxPerRegimeDrop:       2.0,
+		RepetitionCeiling:      3.12,
+		MaxRepetitionIncrease:  1.6,
+		MinTieBreakCompletions: 4,
+		TieEpsilon:             1e-9,
+		RequireTruthClean:      true,
+	}
+}
+
+// Validate checks that policy bounds are finite and non-negative.
+func (p MultiRegimeGatePolicy) Validate() error {
+	if math.IsNaN(p.MaxPerRegimeDrop) || math.IsInf(p.MaxPerRegimeDrop, 0) || p.MaxPerRegimeDrop < 0 {
+		return fmt.Errorf("multiregime gate: invalid max_per_regime_drop %v", p.MaxPerRegimeDrop)
+	}
+	if math.IsNaN(p.RepetitionCeiling) || math.IsInf(p.RepetitionCeiling, 0) || p.RepetitionCeiling < 0 {
+		return fmt.Errorf("multiregime gate: invalid repetition_ceiling %v", p.RepetitionCeiling)
+	}
+	if math.IsNaN(p.MaxRepetitionIncrease) || math.IsInf(p.MaxRepetitionIncrease, 0) || p.MaxRepetitionIncrease < 0 {
+		return fmt.Errorf("multiregime gate: invalid max_repetition_increase %v", p.MaxRepetitionIncrease)
+	}
+	if math.IsNaN(p.TieEpsilon) || math.IsInf(p.TieEpsilon, 0) || p.TieEpsilon < 0 {
+		return fmt.Errorf("multiregime gate: invalid tie_epsilon %v", p.TieEpsilon)
+	}
+	if p.MinTieBreakCompletions < 0 {
+		return fmt.Errorf("multiregime gate: invalid min_tie_break_completions %d", p.MinTieBreakCompletions)
+	}
+	return nil
+}
+
+// MultiRegimeGateDecision summarizes a multi-regime acceptance adjudication.
+type MultiRegimeGateDecision struct {
+	Decision            shipgate.Decision `json:"decision"`
+	Accepted            bool              `json:"accepted"`
+	TieBroken           bool              `json:"tie_broken"`
+	Reason              string            `json:"reason"`
+	BaseAggregateScore  float64           `json:"base_aggregate_score"`
+	CandAggregateScore  float64           `json:"cand_aggregate_score"`
+	AggregateScoreDelta float64           `json:"aggregate_score_delta"`
+	BaseTotalCompleted  int               `json:"base_total_completed"`
+	CandTotalCompleted  int               `json:"cand_total_completed"`
+	CompletionDelta     int               `json:"completion_delta"`
+	BaseMaxRepetition   float64           `json:"base_max_repetition"`
+	CandMaxRepetition   float64           `json:"cand_max_repetition"`
+	RepetitionLimit     float64           `json:"repetition_limit"`
+	WorstDropRegime     string            `json:"worst_drop_regime,omitempty"`
+	WorstDrop           float64           `json:"worst_drop"`
+}
+
+func validateMultiRegimePair(baseline, candidate MultiRegimeSnapshot) error {
+	if len(baseline.Regimes) == 0 {
+		return fmt.Errorf("multiregime gate: baseline has no regimes")
+	}
+	if len(baseline.Regimes) != len(candidate.Regimes) {
+		return fmt.Errorf("multiregime gate: regime count mismatch: baseline %d candidate %d",
+			len(baseline.Regimes), len(candidate.Regimes))
+	}
+	seen := make(map[string]struct{}, len(baseline.Regimes))
+	for i := range baseline.Regimes {
+		br, cr := baseline.Regimes[i], candidate.Regimes[i]
+		if br.Regime == "" {
+			return fmt.Errorf("multiregime gate: baseline regime %d has empty name", i)
+		}
+		if _, dup := seen[br.Regime]; dup {
+			return fmt.Errorf("multiregime gate: duplicate regime %q", br.Regime)
+		}
+		seen[br.Regime] = struct{}{}
+		if cr.Regime != br.Regime {
+			return fmt.Errorf("multiregime gate: regime mismatch at %d: baseline %q candidate %q",
+				i, br.Regime, cr.Regime)
+		}
+		if err := validateRegimeMetrics("baseline", br); err != nil {
+			return err
+		}
+		if err := validateRegimeMetrics("candidate", cr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRegimeMetrics(side string, r RegimeMetrics) error {
+	if math.IsNaN(r.Score) || math.IsInf(r.Score, 0) {
+		return fmt.Errorf("multiregime gate: %s regime %q has non-finite score %v", side, r.Regime, r.Score)
+	}
+	if math.IsNaN(r.RepetitionRate) || math.IsInf(r.RepetitionRate, 0) || r.RepetitionRate < 0 {
+		return fmt.Errorf("multiregime gate: %s regime %q has invalid repetition_rate %v", side, r.Regime, r.RepetitionRate)
+	}
+	if r.Completed < 0 {
+		return fmt.Errorf("multiregime gate: %s regime %q has negative completed %d", side, r.Regime, r.Completed)
+	}
+	return nil
+}
+
+// EvaluateMultiRegimeGate evaluates a candidate snapshot across all declared
+// regimes against baseline non-regression bounds.
+func EvaluateMultiRegimeGate(baseline, candidate MultiRegimeSnapshot, policy MultiRegimeGatePolicy) (MultiRegimeGateDecision, error) {
+	if err := policy.Validate(); err != nil {
+		return MultiRegimeGateDecision{}, err
+	}
+	if err := validateMultiRegimePair(baseline, candidate); err != nil {
+		return MultiRegimeGateDecision{}, err
+	}
+	baseAgg := baseline.AggregateScore()
+	candAgg := candidate.AggregateScore()
+	baseCompleted := baseline.TotalCompleted()
+	candCompleted := candidate.TotalCompleted()
+	baseMaxRep := baseline.MaxRepetitionRate()
+	candMaxRep := candidate.MaxRepetitionRate()
+	repLimit := math.Max(policy.RepetitionCeiling, baseMaxRep+policy.MaxRepetitionIncrease)
+
+	out := MultiRegimeGateDecision{
+		Decision:            shipgate.REVERT,
+		BaseAggregateScore:  baseAgg,
+		CandAggregateScore:  candAgg,
+		AggregateScoreDelta: candAgg - baseAgg,
+		BaseTotalCompleted:  baseCompleted,
+		CandTotalCompleted:  candCompleted,
+		CompletionDelta:     candCompleted - baseCompleted,
+		BaseMaxRepetition:   baseMaxRep,
+		CandMaxRepetition:   candMaxRep,
+		RepetitionLimit:     repLimit,
+	}
+
+	var worstDrop float64
+	var worstRegime string
+	for i := range baseline.Regimes {
+		drop := baseline.Regimes[i].Score - candidate.Regimes[i].Score
+		if drop > worstDrop {
+			worstDrop = drop
+			worstRegime = baseline.Regimes[i].Regime
+		}
+	}
+	out.WorstDrop = worstDrop
+	out.WorstDropRegime = worstRegime
+
+	if policy.RequireTruthClean && (!baseline.TruthClean || !candidate.TruthClean) {
+		out.Reason = "truth_dirty"
+		return out, nil
+	}
+	if policy.RequireConfirmedEvidence {
+		for _, r := range candidate.Regimes {
+			if r.Evidence.ID == "" || !r.Evidence.Confirmed {
+				out.Reason = fmt.Sprintf("unconfirmed_evidence:%s", r.Regime)
+				return out, nil
+			}
+		}
+	}
+	for i := range baseline.Regimes {
+		drop := baseline.Regimes[i].Score - candidate.Regimes[i].Score
+		if drop > policy.MaxPerRegimeDrop+policy.TieEpsilon {
+			out.Reason = fmt.Sprintf("regime_drop_floor:%s", baseline.Regimes[i].Regime)
+			return out, nil
+		}
+	}
+	if candMaxRep > repLimit+policy.TieEpsilon {
+		out.Reason = "repetition_ceiling"
+		return out, nil
+	}
+	switch {
+	case out.AggregateScoreDelta > policy.TieEpsilon:
+		out.Decision = shipgate.KEEP
+		out.Accepted = true
+		out.Reason = "aggregate_gain"
+	case out.AggregateScoreDelta >= -policy.TieEpsilon:
+		if out.CompletionDelta >= policy.MinTieBreakCompletions {
+			out.Decision = shipgate.KEEP
+			out.Accepted = true
+			out.TieBroken = true
+			out.Reason = "tie_break_completions"
+		} else {
+			out.Reason = "tie_break_completion_floor"
+		}
+	default:
+		out.Reason = "aggregate_regression"
+	}
+	return out, nil
+}
+
+// EvaluateMultiRegimeLoopVariant evaluates a multi-regime candidate and folds the
+// decision through shipgate.Evaluate into a LoopVariantRecord compatible with
+// LoopVariantArchive.
+func EvaluateMultiRegimeLoopVariant(v LoopVariant, baseline, candidate MultiRegimeSnapshot, policy MultiRegimeGatePolicy) (LoopVariantRecord, MultiRegimeGateDecision, error) {
+	if v.ID == "" {
+		return LoopVariantRecord{}, MultiRegimeGateDecision{}, fmt.Errorf("multiregime gate: loop variant has empty id")
+	}
+	gate, err := EvaluateMultiRegimeGate(baseline, candidate, policy)
+	if err != nil {
+		return LoopVariantRecord{}, MultiRegimeGateDecision{}, err
+	}
+
+	metric := "multi_regime_score"
+	beforeVal := gate.BaseAggregateScore
+	afterVal := gate.CandAggregateScore
+	if gate.TieBroken {
+		if gate.CandTotalCompleted > gate.BaseTotalCompleted {
+			metric = "multi_regime_completed_tiebreak"
+			beforeVal = float64(gate.BaseTotalCompleted)
+			afterVal = float64(gate.CandTotalCompleted)
+		} else {
+			metric = "multi_regime_gate_tiebreak"
+			beforeVal = 0
+			afterVal = 1
+		}
+	}
+
+	w := shipgate.Witness{
+		Metric:      metric,
+		Before:      beforeVal,
+		After:       afterVal,
+		LowerBetter: false,
+		SuiteGreen:  gate.Accepted,
+		TruthClean:  !policy.RequireTruthClean || (baseline.TruthClean && candidate.TruthClean),
+	}
+	decision, witness := shipgate.Evaluate(w)
+
+	evidence := make([]DOSEvidence, 0, len(baseline.Regimes)+len(candidate.Regimes))
+	for _, r := range baseline.Regimes {
+		if r.Evidence.ID != "" {
+			evidence = append(evidence, r.Evidence)
+		}
+	}
+	for _, r := range candidate.Regimes {
+		if r.Evidence.ID != "" {
+			evidence = append(evidence, r.Evidence)
+		}
+	}
+
+	beforeFold := SpecFold{
+		Points:      gate.BaseAggregateScore,
+		Passed:      gate.BaseTotalCompleted,
+		Tasks:       len(baseline.Regimes),
+		SpecGreen:   true,
+		TruthClean:  baseline.TruthClean,
+		EvidenceIDs: collectEvidenceIDs(baseline.Regimes),
+	}
+	afterFold := SpecFold{
+		Points:      gate.CandAggregateScore,
+		Passed:      gate.CandTotalCompleted,
+		Tasks:       len(candidate.Regimes),
+		SpecGreen:   gate.Accepted,
+		TruthClean:  candidate.TruthClean,
+		EvidenceIDs: collectEvidenceIDs(candidate.Regimes),
+	}
+	rec := LoopVariantRecord{
+		Schema:       LoopVariantArchiveSchema,
+		Variant:      v,
+		Decision:     decision.String(),
+		Kept:         witness.Kept(),
+		MetricName:   metric,
+		Before:       beforeFold,
+		After:        afterFold,
+		Score:        loopVariantScorecard(beforeFold, afterFold),
+		Witness:      witness,
+		DOSEvidence:  evidence,
+		BaselineRef:  baseline.Ref,
+		CandidateRef: candidate.Ref,
+	}
+	return rec, gate, nil
+}
+
+func collectEvidenceIDs(regimes []RegimeMetrics) []string {
+	ids := make([]string, 0, len(regimes))
+	for _, r := range regimes {
+		if r.Evidence.ID != "" {
+			ids = append(ids, r.Evidence.ID)
+		}
+	}
+	return ids
 }
