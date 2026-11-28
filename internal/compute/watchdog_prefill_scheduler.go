@@ -1287,6 +1287,16 @@ func (s *WatchdogPrefillScheduler) EnablePhysicalFeedback(c *PhysicalFeedbackPre
 	schedulerFeedbackControllers.Store(s, c)
 }
 
+// Close detaches any per-scheduler physical feedback controller registered for s.
+// It is nil-safe and idempotent.
+func (s *WatchdogPrefillScheduler) Close() error {
+	if s == nil {
+		return nil
+	}
+	schedulerFeedbackControllers.Delete(s)
+	return nil
+}
+
 // PhysicalFeedbackController returns the attached controller, or nil when pacing is analytical.
 func (s *WatchdogPrefillScheduler) PhysicalFeedbackController() *PhysicalFeedbackPrefillController {
 	if v, ok := schedulerFeedbackControllers.Load(s); ok {

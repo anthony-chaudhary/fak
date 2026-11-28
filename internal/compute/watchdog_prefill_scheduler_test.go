@@ -784,3 +784,36 @@ func TestPhysicalFeedbackPrefillChunkController(t *testing.T) {
 		t.Fatalf("expected controller detached after EnablePhysicalFeedback(nil)")
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestWatchdogPrefillSchedulerClose(t *testing.T) {
+	var nilSched *WatchdogPrefillScheduler
+	if err := nilSched.Close(); err != nil {
+		t.Fatalf("nil Close() = %v, want nil", err)
+	}
+
+	sched, err := NewDeepContextPrefillScheduler(ProfileSingleSequenceDeepContext)
+	if err != nil {
+		t.Fatalf("NewDeepContextPrefillScheduler: %v", err)
+	}
+	ctrl := NewPhysicalFeedbackPrefillController(64, 4096, DefaultMaxExecutionCeilingMs)
+	sched.EnablePhysicalFeedback(ctrl)
+	if _, ok := schedulerFeedbackControllers.Load(sched); !ok {
+		t.Fatalf("expected scheduler in schedulerFeedbackControllers after EnablePhysicalFeedback")
+	}
+
+	if err := sched.Close(); err != nil {
+		t.Fatalf("first Close() = %v, want nil", err)
+	}
+	if _, ok := schedulerFeedbackControllers.Load(sched); ok {
+		t.Fatalf("scheduler still present in schedulerFeedbackControllers after Close()")
+	}
+	if sched.PhysicalFeedbackController() != nil {
+		t.Fatalf("expected nil controller after Close()")
+	}
+
+	// Idempotent second Close().
+	if err := sched.Close(); err != nil {
+		t.Fatalf("second Close() = %v, want nil", err)
+	}
+}

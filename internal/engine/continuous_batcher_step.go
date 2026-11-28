@@ -375,7 +375,7 @@ func (cb *ContinuousBatcher) runDecodeArmLocked(snap *stepSnapshot) (*BatchStepR
 	var retiredIDs []string
 	for _, slot := range newlyFinished {
 		retiredIDs = append(retiredIDs, slot.SessionID)
-		cb.completedMap[slot.SessionID] = slot
+		cb.recordCompletedSlotLocked(slot.SessionID, slot)
 		delete(cb.sessionMap, slot.SessionID)
 
 		idx := slot.Index

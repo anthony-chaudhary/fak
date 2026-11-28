@@ -44,13 +44,19 @@ const frozenSystemInput = `You are serving a replay-only AgentBench diagnostic. 
 var errCanceled = errors.New("agentbench replay canceled")
 
 type options struct {
-	profile  string
-	repo     string
-	endpoint string
-	model    string
-	out      string
-	plan     bool
-	json     bool
+	profile                 string
+	repo                    string
+	endpoint                string
+	model                   string
+	out                     string
+	plan                    bool
+	json                    bool
+	duration                time.Duration
+	concurrency             int
+	burnInEpochs            int
+	burnInMaxGoroutineDelta int
+	burnInMaxHeapGrowth     int64
+	burnInMaxFDDelta        int
 }
 
 type rungPlan struct {
@@ -344,7 +350,11 @@ func RunCLI(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	if opts.profile != "quick" && opts.plan {
-		plan, planErr := profileplan.Build(profileplan.Options{Profile: opts.profile, PreferredConcurrency: 2})
+		conc := opts.concurrency
+		if conc == 0 {
+			conc = 2
+		}
+		plan, planErr := profileplan.Build(profileplan.Options{Profile: opts.profile, PreferredConcurrency: conc})
 		if planErr != nil {
 			fmt.Fprintf(stderr, "agentbench: plan: %v\n", planErr)
 			return 2
@@ -358,8 +368,11 @@ func RunCLI(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	if opts.profile == "normal" {
 		return runNormalCLICommand(ctx, stdout, stderr, opts)
 	}
+	if opts.profile == "burn-in" {
+		return runBurnInCLICommand(ctx, stdout, stderr, opts)
+	}
 	if opts.profile != "quick" {
-		fmt.Fprintf(stderr, "agentbench: UNSUPPORTED_INCOMPLETE profile %q; use --profile quick\n", opts.profile)
+		fmt.Fprintf(stderr, "agentbench: UNSUPPORTED_INCOMPLETE profile %q; use --profile quick, normal, or burn-in\n", opts.profile)
 		return 2
 	}
 	if err := ctx.Err(); err != nil {
@@ -425,16 +438,29 @@ func RunCLI(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 }
 
 func parseOptions(stderr io.Writer, args []string) (options, error) {
-	opts := options{profile: "normal", repo: "."}
+	opts := options{
+		profile:                 "normal",
+		repo:                    ".",
+		concurrency:             2,
+		burnInMaxGoroutineDelta: defaultBurnInMaxGoroutineDelta,
+		burnInMaxHeapGrowth:     defaultBurnInMaxHeapGrowthBytes,
+		burnInMaxFDDelta:        defaultBurnInMaxFDDelta,
+	}
 	flags := flag.NewFlagSet("bench agent", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.StringVar(&opts.profile, "profile", opts.profile, "replay profile (quick; normal is not yet supported)")
+	flags.StringVar(&opts.profile, "profile", opts.profile, "replay profile (quick, normal, burn-in)")
 	flags.StringVar(&opts.repo, "repo", opts.repo, "read-only source repository")
 	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible streaming endpoint")
 	flags.StringVar(&opts.model, "model", "", "explicit model identifier; otherwise require streamed identity")
 	flags.StringVar(&opts.out, "out", "", "artifact output directory outside the source repository")
 	flags.BoolVar(&opts.plan, "plan", false, "print the replay plan without dispatching")
 	flags.BoolVar(&opts.json, "json", false, "print machine-readable output")
+	flags.DurationVar(&opts.duration, "duration", opts.duration, "override burn-in duration for bounded runs (0 uses profile default)")
+	flags.IntVar(&opts.concurrency, "concurrency", opts.concurrency, "preferred concurrency for burn-in (1, 2, 4, or 8)")
+	flags.IntVar(&opts.burnInEpochs, "burnin-epochs", opts.burnInEpochs, "bounded epoch count for burn-in runs (0 uses profile default)")
+	flags.IntVar(&opts.burnInMaxGoroutineDelta, "burnin-max-goroutine-delta", opts.burnInMaxGoroutineDelta, "maximum allowed goroutine growth across burn-in epochs")
+	flags.Int64Var(&opts.burnInMaxHeapGrowth, "burnin-max-heap-growth-bytes", opts.burnInMaxHeapGrowth, "maximum allowed post-GC heap growth in bytes across burn-in epochs")
+	flags.IntVar(&opts.burnInMaxFDDelta, "burnin-max-fd-delta", opts.burnInMaxFDDelta, "maximum allowed open file descriptor growth on Linux across burn-in epochs")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}

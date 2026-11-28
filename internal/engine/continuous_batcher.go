@@ -7,14 +7,24 @@ import (
 	"time"
 )
 
+const defaultMaxCompletedSlots = 4096
+
+type completedSlotEntry struct {
+	sessionID     string
+	submissionSeq uint64
+}
+
 // ContinuousBatcher manages dynamic iteration-level continuous batching for subagent turn loops.
 type ContinuousBatcher struct {
-	mu           sync.Mutex
-	cfg          ContinuousBatcherConfig
-	slots        []*Slot
-	sessionMap   map[string]*Slot
-	completedMap map[string]*Slot
-	waitingQueue []*SubagentRequest
+	mu                sync.Mutex
+	cfg               ContinuousBatcherConfig
+	slots             []*Slot
+	sessionMap        map[string]*Slot
+	completedMap      map[string]*Slot
+	completedOrder    []completedSlotEntry
+	completedHead     int
+	maxCompletedSlots int
+	waitingQueue      []*SubagentRequest
 	iteration    uint64
 	totalTokens  int64
 	seqCounter   uint64
@@ -324,7 +334,7 @@ func (cb *ContinuousBatcher) Cancel(sessionID string) error {
 	slot.closeSessionLocked()
 	slot.mu.Unlock()
 
-	cb.completedMap[sessionID] = slot
+	cb.recordCompletedSlotLocked(sessionID, slot)
 	delete(cb.sessionMap, sessionID)
 
 	idx := slot.Index
@@ -364,7 +374,7 @@ func (cb *ContinuousBatcher) Close() error {
 			slot.closeSessionLocked()
 			slot.mu.Unlock()
 
-			cb.completedMap[sessionID] = slot
+			cb.recordCompletedSlotLocked(sessionID, slot)
 			delete(cb.sessionMap, sessionID)
 			cb.slots[i] = &Slot{Index: i, State: SlotStateEmpty}
 			continue
@@ -382,4 +392,59 @@ func (cb *ContinuousBatcher) Close() error {
 	}
 
 	return nil
+}
+
+func (cb *ContinuousBatcher) completedLimit() int {
+	if cb.maxCompletedSlots > 0 {
+		return cb.maxCompletedSlots
+	}
+	return defaultMaxCompletedSlots
+}
+
+// recordCompletedSlotLocked stores slot in completedMap and evicts the oldest
+// completed/cancelled entry once the map exceeds completedLimit().
+// Caller MUST hold cb.mu.
+func (cb *ContinuousBatcher) recordCompletedSlotLocked(sessionID string, slot *Slot) {
+	if sessionID == "" || slot == nil {
+		return
+	}
+	if prev, exists := cb.completedMap[sessionID]; exists && prev == slot {
+		return
+	}
+	cb.completedMap[sessionID] = slot
+	cb.completedOrder = append(cb.completedOrder, completedSlotEntry{
+		sessionID:     sessionID,
+		submissionSeq: slot.SubmissionSeq,
+	})
+
+	limit := cb.completedLimit()
+	for len(cb.completedMap) > limit && cb.completedHead < len(cb.completedOrder) {
+		oldest := cb.completedOrder[cb.completedHead]
+		cb.completedOrder[cb.completedHead] = completedSlotEntry{}
+		cb.completedHead++
+		if cur := cb.completedMap[oldest.sessionID]; cur != nil && cur.SubmissionSeq == oldest.submissionSeq {
+			delete(cb.completedMap, oldest.sessionID)
+		}
+	}
+
+	if cb.completedHead == len(cb.completedOrder) {
+		cb.completedOrder = cb.completedOrder[:0]
+		cb.completedHead = 0
+	} else if cb.completedHead >= limit || len(cb.completedOrder) > 2*limit {
+		cb.compactCompletedOrderLocked()
+	}
+}
+
+func (cb *ContinuousBatcher) compactCompletedOrderLocked() {
+	kept := cb.completedOrder[:0]
+	for _, entry := range cb.completedOrder[cb.completedHead:] {
+		if cur := cb.completedMap[entry.sessionID]; cur != nil && cur.SubmissionSeq == entry.submissionSeq {
+			kept = append(kept, entry)
+		}
+	}
+	for i := len(kept); i < len(cb.completedOrder); i++ {
+		cb.completedOrder[i] = completedSlotEntry{}
+	}
+	cb.completedOrder = kept
+	cb.completedHead = 0
 }
