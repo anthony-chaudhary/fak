@@ -46,6 +46,7 @@ __device__ __forceinline__ int8_t indexer_k_quant_i8_val(float val, float inv_sc
 __device__ __forceinline__ float indexer_k_dequant_i8_val(int8_t q, float scale) {
   return (float)q * scale;
 }
+#endif  // __CUDACC__
 
 }  // namespace fak_vllm_indexer
 
