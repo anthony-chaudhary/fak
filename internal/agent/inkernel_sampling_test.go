@@ -138,7 +138,7 @@ func TestInkernelSampleWorkspaceZeroAllocs(t *testing.T) {
 
 // TestInkernelSampleWorkspaceSeededParity proves the workspaced path draws the exact
 // same token as the historical per-call path for a fixed seed over every option
-// combination — the semantic contract the rewrite must not change.
+// combination â€” the semantic contract the rewrite must not change.
 func TestInkernelSampleWorkspaceSeededParity(t *testing.T) {
 	logits := samplingWitnessLogits(4096, 999)
 	for _, tc := range sampleOptionsCases() {
@@ -156,7 +156,7 @@ func TestInkernelSampleWorkspaceSeededParity(t *testing.T) {
 }
 
 // TestInkernelSampleWorkspaceGrowsAcrossVocabularies proves a workspace sized for a
-// narrow vocabulary keeps parity when a later, wider call reuses it — the served lane
+// narrow vocabulary keeps parity when a later, wider call reuses it â€” the served lane
 // holds one workspace for a session whose widest LM head may arrive after warm-up.
 func TestInkernelSampleWorkspaceGrowsAcrossVocabularies(t *testing.T) {
 	var ws samplerWorkspace
@@ -200,7 +200,7 @@ func BenchmarkInkernelSampleOneShot(b *testing.B) {
 }
 
 // rankedAll is the full-sort oracle: every position ordered by probability
-// descending, ties by ascending input position — the closed contract topKRankOrder
+// descending, ties by ascending input position â€” the closed contract topKRankOrder
 // must reproduce as a prefix.
 func rankedAll(probs []float64) []int {
 	idx := make([]int, len(probs))
@@ -366,4 +366,53 @@ func TestTopKBoundedSelectionOrder(t *testing.T) {
 			t.Fatalf("empty row: (%v, %v), want (nil, nil)", got, err)
 		}
 	})
+}
+
+// fak-test:runtime fast est=5ms lane=default
+//
+// TestTopKTruncateEquivalenceArgmaxPredicate pins the greedyArgmaxSuffices truth
+// table and that the temp>0, top_k==1 shortcut draws the identical token as the
+// full sampler. Not parallel: it toggles the package gate.
+func TestTopKTruncateEquivalenceArgmaxPredicate(t *testing.T) {
+	cases := []struct {
+		name                          string
+		topK                          int
+		constrained, procs, penalties bool
+		minNew                        int
+		scoring                       bool
+		want                          bool
+	}{
+		{"plain top_k=1", 1, false, false, false, 0, false, true},
+		{"top_k=2", 2, false, false, false, 0, false, false},
+		{"top_k off", 0, false, false, false, 0, false, false},
+		{"constrained", 1, true, false, false, 0, false, false},
+		{"processors", 1, false, true, false, 0, false, false},
+		{"penalties", 1, false, false, true, 0, false, false},
+		{"min_new_tokens", 1, false, false, false, 3, false, false},
+		{"scoring", 1, false, false, false, 0, true, false},
+	}
+	for _, c := range cases {
+		if got := greedyArgmaxSuffices(c.topK, c.constrained, c.procs, c.penalties, c.minNew, c.scoring); got != c.want {
+			t.Errorf("%s: predicate=%v want %v", c.name, got, c.want)
+		}
+	}
+
+	prev := samplerArgmaxPredicateEnabled
+	defer func() { samplerArgmaxPredicateEnabled = prev }()
+	r := rand.New(rand.NewSource(7))
+	for row := 0; row < 50; row++ {
+		logits := make([]float32, 257)
+		for i := range logits {
+			logits[i] = float32(r.NormFloat64() * 3)
+		}
+		for _, temp := range []float64{0.5, 1, 2} {
+			samplerArgmaxPredicateEnabled = false
+			off := sampleLogitsCoinWS(logits, temp, 0, 1, 0.37, &samplerWorkspace{})
+			samplerArgmaxPredicateEnabled = true
+			on := sampleLogitsCoinWS(logits, temp, 0, 1, 0.37, &samplerWorkspace{})
+			if on != off {
+				t.Fatalf("row %d temp %v: shortcut token %d != full sampler %d", row, temp, on, off)
+			}
+		}
+	}
 }

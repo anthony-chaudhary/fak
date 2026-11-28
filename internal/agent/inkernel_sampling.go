@@ -190,6 +190,20 @@ func sampleLogitsCoreWS(logits []float32, temp, topP float64, topK int, rng *ran
 	return sampleLogitsMinPCoreWS(logits, temp, topP, topK, 0, rng, coin, hasCoin, w)
 }
 
+// samplerArgmaxPredicateEnabled gates the greedy-argmax shortcut for temp>0 rows
+// whose top_k is 1. Default off: behavior is unchanged until a caller opts in.
+var samplerArgmaxPredicateEnabled = false
+
+// greedyArgmaxSuffices is the closed host predicate adapted from modular/modular
+// 88ab8913af sampling_logits_processor.py:66 (Apache-2.0 WITH LLVM-exception). It is
+// true only when constrained decoding is off, top_k==1, and no logits processor,
+// penalty, min_new_tokens floor, or logprob scoring is active. Then a plain argmax
+// over raw logits picks every token: temperature preserves argmax, top-k=1 keeps
+// only argmax, and min-p always retains the maximum.
+func greedyArgmaxSuffices(topK int, constrained, hasProcessors, hasPenalty bool, minNewTokens int, scoring bool) bool {
+	return topK == 1 && !constrained && !hasProcessors && !hasPenalty && minNewTokens <= 0 && !scoring
+}
+
 // sampleLogitsMinPCoreWS is the sampler core with a min-p cutoff. A positive minP
 // drops every token whose temperature-scaled probability is below minP times the
 // most probable token's; top-k and then top-p truncate the survivors. That is
@@ -201,7 +215,7 @@ func sampleLogitsCoreWS(logits []float32, temp, topP float64, topK int, rng *ran
 // is bit-identical to the path without it.
 func sampleLogitsMinPCoreWS(logits []float32, temp, topP float64, topK int, minP float64, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
 	nonFinite, finite := false, false
-	if temp <= 0 {
+	if temp <= 0 || (samplerArgmaxPredicateEnabled && topK == 1 && len(logits) > 1) {
 		best, bi := float32(-math.MaxFloat32), 0
 		for i, x := range logits {
 			if x != x || x > math.MaxFloat32 {
