@@ -90,7 +90,8 @@ type node struct {
 	// remoteSnapshot is a verified reference to a complete serialized
 	// HostPrefixSnapshot in the configured l3kv/blobhttp tier. It owns no local
 	// payload bytes and remains usable after both local physical copies are gone.
-	remoteSnapshot *remoteSnapshotRef
+	remoteSnapshot      *remoteSnapshotRef
+	recurrentCheckpoint bool
 	// ssdSnapshot is a verified reference to a complete serialized HostPrefixSnapshot
 	// demoted to the local-SSD overflow tier when host L2 pressure evicted it. Like a
 	// remote reference it owns no local payload bytes and keeps the record incarnation
@@ -348,6 +349,7 @@ type Tree struct {
 	l3LocalRestoreBytes   int64
 	l3LocalEvictions      int
 	l3LocalParked         int
+	recurrentInterval     int
 	l3Hits                int
 	l3Misses              int
 	l3Faults              int
@@ -800,6 +802,20 @@ func (t *Tree) InsertWithRetention(boundary *node, suffix []int, kv *model.KVCac
 func (t *Tree) LookupSnapshot(tokens []int) (*node, *model.PrefixSnapshot, int, error) {
 	n, snap, matched, _, err := t.LookupSnapshotTiered(tokens)
 	return n, snap, matched, err
+}
+
+// LookupSubBlockPrefix returns the longest prefix match aligned to subBlockSize
+// (smaller than a full KV block when subBlockSize > 0), allowing hash-granular
+// partial hits between full-block boundaries.
+func (t *Tree) LookupSubBlockPrefix(tokens []int, subBlockSize int) int {
+	n, matched := t.Lookup(tokens)
+	if n != nil {
+		t.Done(n)
+	}
+	if subBlockSize <= 1 {
+		return matched
+	}
+	return (matched / subBlockSize) * subBlockSize
 }
 
 // LookupSnapshotTiered is LookupSnapshot with truthful source-tier attribution.

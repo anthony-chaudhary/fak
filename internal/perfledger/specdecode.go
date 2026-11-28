@@ -27,7 +27,10 @@
 // sentinel ErrNoMetricValue instead.
 package perfledger
 
-import "errors"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // ErrNoMetricValue mirrors aiperf's NoMetricValue: the metric is undefined for
 // the given stats (zero verify steps, zero proposed draft tokens, or a zero
@@ -114,4 +117,86 @@ func OverallDraftAcceptanceRate(stats []SpecDecodeStats) (float64, error) {
 		return 0, ErrNoMetricValue
 	}
 	return float64(accepted) / float64(draft) * 100.0, nil
+}
+
+// specDecodeRawFields holds the JSON fields emitted by vLLM, TRT-LLM, and SGLang.
+type specDecodeRawFields struct {
+	NumAcceptedDraftTokens *int `json:"num_accepted_draft_tokens"`
+	NumDraftTokens         *int `json:"num_draft_tokens"`
+	NumSpecSteps           *int `json:"num_spec_steps"`
+}
+
+func (f *specDecodeRawFields) toStats() (SpecDecodeStats, bool) {
+	if f == nil || (f.NumAcceptedDraftTokens == nil && f.NumDraftTokens == nil && f.NumSpecSteps == nil) {
+		return SpecDecodeStats{}, false
+	}
+	var st SpecDecodeStats
+	if f.NumAcceptedDraftTokens != nil {
+		st.NumAcceptedDraftTokens = *f.NumAcceptedDraftTokens
+	}
+	if f.NumDraftTokens != nil {
+		st.NumDraftTokens = *f.NumDraftTokens
+	}
+	if f.NumSpecSteps != nil {
+		st.NumSpecSteps = *f.NumSpecSteps
+	}
+	return st, true
+}
+
+// CaptureSpecDecodeStats extracts per-request speculative-decoding stats from
+// a raw completion/chat JSON response across the three upstream engine placements
+// (aiperf base_endpoint.py):
+//   - vLLM root (`spec_decode` or root-level counters)
+//   - TRT-LLM per-choice (`choices[0].spec_decode`)
+//   - SGLang extension (`sglext.spec_decode` or `sglext`)
+//
+// When n > 1 (or len(choices) > 1), per-request capture is suppressed and
+// (SpecDecodeStats{}, false, nil) is returned.
+func CaptureSpecDecodeStats(raw []byte, n int) (SpecDecodeStats, bool, error) {
+	if n > 1 {
+		return SpecDecodeStats{}, false, nil
+	}
+	if len(raw) == 0 {
+		return SpecDecodeStats{}, false, nil
+	}
+	var payload struct {
+		specDecodeRawFields
+		SpecDecode *specDecodeRawFields `json:"spec_decode"`
+		SglExt     *struct {
+			specDecodeRawFields
+			SpecDecode *specDecodeRawFields `json:"spec_decode"`
+		} `json:"sglext"`
+		Choices []struct {
+			SpecDecode *specDecodeRawFields `json:"spec_decode"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return SpecDecodeStats{}, false, err
+	}
+	if len(payload.Choices) > 1 {
+		return SpecDecodeStats{}, false, nil
+	}
+	// 1. vLLM root placement (nested spec_decode or direct root fields)
+	if st, ok := payload.SpecDecode.toStats(); ok {
+		return st, true, nil
+	}
+	if st, ok := payload.specDecodeRawFields.toStats(); ok {
+		return st, true, nil
+	}
+	// 2. TRT-LLM per-choice placement
+	if len(payload.Choices) == 1 {
+		if st, ok := payload.Choices[0].SpecDecode.toStats(); ok {
+			return st, true, nil
+		}
+	}
+	// 3. SGLang sglext placement
+	if payload.SglExt != nil {
+		if st, ok := payload.SglExt.SpecDecode.toStats(); ok {
+			return st, true, nil
+		}
+		if st, ok := payload.SglExt.specDecodeRawFields.toStats(); ok {
+			return st, true, nil
+		}
+	}
+	return SpecDecodeStats{}, false, nil
 }

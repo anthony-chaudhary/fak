@@ -440,3 +440,62 @@ func TestLocalSSDRestoreParksRequestAndReadmits(t *testing.T) {
 		t.Fatalf("ProtectedTokens=%d after failed-load rewind, want 0", got)
 	}
 }
+
+// fak-test:runtime fast est=20ms lane=default
+func TestDemotionSkipsSupersededRecurrentCheckpoint(t *testing.T) {
+	store := &ssdSpillCountingStore{}
+	m := model.NewSynthetic(remoteL3TestConfig())
+	be := &deviceCapsBackend{Backend: compute.Default()}
+	tree := NewWithTierBudgetsAndEvictionPolicy(0, 0, 1<<30, EvictionLRU)
+	if err := tree.ConfigureLocalSSDSnapshotStore(store, "synthetic-ssd-test", be, m.Cfg, 1<<30); err != nil {
+		t.Fatal(err)
+	}
+	tree.ConfigureRecurrentRetention(8) // interval [0,8)
+
+	// Stage two recurrent checkpoints in the same interval [0,8):
+	// prefix1 (len 2) is superseded by prefix2 (len 4) on the same linear chain.
+	ids1 := []int{3, 7}
+	ids2 := []int{3, 7, 11, 13}
+	d1 := insertRemoteL3Snapshot(t, tree, m, be, ids1)
+	if got := tree.StageSnapshotToHost(d1); got.Outcome != SnapshotTransferOK {
+		t.Fatalf("stage 1: %+v", got)
+	}
+	tree.EvictHotSnapshot(d1)
+	n1, _ := tree.Lookup(ids1)
+	tree.MarkRecurrentCheckpoint(n1)
+	tree.Done(n1)
+
+	d2 := insertRemoteL3Snapshot(t, tree, m, be, ids2)
+	if got := tree.StageSnapshotToHost(d2); got.Outcome != SnapshotTransferOK {
+		t.Fatalf("stage 2: %+v", got)
+	}
+	tree.EvictHotSnapshot(d2)
+	n2, _ := tree.Lookup(ids2)
+	tree.MarkRecurrentCheckpoint(n2)
+	tree.Done(n2)
+
+	// Shrink L2 to current (n1+n2) size so staging a 3rd 4-token entry evicts n1 (superseded) and n2 (latest).
+	tree.maxHostSnapshotBytes = tree.hostSnapshotBytes
+	ids3 := []int{5, 9, 2, 4}
+	d3 := insertRemoteL3Snapshot(t, tree, m, be, ids3)
+	if got := tree.StageSnapshotToHost(d3); got.Outcome != SnapshotTransferOK {
+		t.Fatalf("stage 3: %+v", got)
+	}
+	tree.EvictHotSnapshot(d3)
+
+	// Superseded n1 must NOT have been spilled; only n2 should be on SSD (1 put, not 2).
+	if store.puts != 1 {
+		t.Fatalf("store.puts=%d, want 1 (superseded checkpoint n1 skipped)", store.puts)
+	}
+	nCheck, snapCheck, _, tierCheck, err := tree.LookupSnapshotTieredContext(context.Background(), ids1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree.Done(nCheck)
+	if snapCheck != nil || tierCheck == SnapshotTierLocalL3 {
+		if snapCheck != nil {
+			snapCheck.Close()
+		}
+		t.Fatalf("superseded checkpoint ids1 was spilled to SSD (tier=%q), want skipped", tierCheck)
+	}
+}

@@ -93,3 +93,41 @@ func LookupPartial(ctx context.Context, store Store, blocks []ManifestSpan) (ser
 	}
 	return servableRanges, invalidRanges, nil
 }
+
+// PartialHitSummary summarizes a hash-granular LookupPartial classification,
+// extending the hit horizon to the last interior servable unit and reporting
+// the narrowed recompute positions.
+type PartialHitSummary struct {
+	ServableRanges       []Range
+	InvalidRanges        []Range
+	PrefixMatched        int // contiguous servable positions starting at offset 0
+	LastInteriorMatchEnd int // end offset of the last servable unit (0 if none)
+	ServablePositions    int // sum of positions across all servable ranges
+	RecomputePositions   int // sum of positions across all invalid ranges
+}
+
+// LookupPartialGranular classifies sub-block-granular units and summarizes both
+// the contiguous prefix match and the last interior hash match so callers
+// recompute only the missing/invalid units.
+func LookupPartialGranular(ctx context.Context, store Store, units []ManifestSpan) (PartialHitSummary, error) {
+	servable, invalid, err := LookupPartial(ctx, store, units)
+	if err != nil {
+		return PartialHitSummary{}, err
+	}
+	var out PartialHitSummary
+	out.ServableRanges = servable
+	out.InvalidRanges = invalid
+	if len(servable) > 0 && servable[0].From == 0 {
+		out.PrefixMatched = servable[0].Positions
+	}
+	for _, r := range servable {
+		out.ServablePositions += r.Positions
+		if end := r.From + r.Positions; end > out.LastInteriorMatchEnd {
+			out.LastInteriorMatchEnd = end
+		}
+	}
+	for _, r := range invalid {
+		out.RecomputePositions += r.Positions
+	}
+	return out, nil
+}

@@ -41,6 +41,52 @@ func (t *Tree) Demotions() int {
 	return t.demotions
 }
 
+// ConfigureRecurrentRetention sets the interval (in tokens) used by the sparse
+// recurrent-state retention mask. When positive, superseded recurrent-state
+// checkpoints inside the same interval are skipped on spill unless they sit on
+// a reachable branch boundary.
+func (t *Tree) ConfigureRecurrentRetention(interval int) {
+	if t != nil {
+		t.recurrentInterval = interval
+	}
+}
+
+// MarkRecurrentCheckpoint marks n as holding a recurrent-state checkpoint.
+func (t *Tree) MarkRecurrentCheckpoint(n *node) {
+	if n != nil {
+		n.recurrentCheckpoint = true
+	}
+}
+
+// ShouldSpillRecurrentCheckpoint implements the sparse retention mask: keep at
+// most one recurrent-state checkpoint per interval plus reachable shared
+// boundaries, skipping superseded interior checkpoints on demotion.
+func ShouldSpillRecurrentCheckpoint(n *node, interval int, reachableBoundaries map[int]bool) bool {
+	if n == nil || !n.recurrentCheckpoint || interval <= 0 {
+		return true
+	}
+	if len(n.children) > 1 || (reachableBoundaries != nil && reachableBoundaries[n.plen]) {
+		return true // reachable shared boundary: retain
+	}
+	bucket := n.plen / interval
+	var hasNewerInBucket func(m *node) bool
+	hasNewerInBucket = func(m *node) bool {
+		for _, c := range m.children {
+			if c.plen/interval != bucket {
+				continue
+			}
+			if c.recurrentCheckpoint && (c.snapshot != nil || c.hostSnapshot != nil || c.ssdSnapshot != nil || c.remoteSnapshot != nil) {
+				return true
+			}
+			if hasNewerInBucket(c) {
+				return true
+			}
+		}
+		return false
+	}
+	return !hasNewerInBucket(n)
+}
+
 func (t *Tree) SetEvictionHaltPredicate(p EvictionHaltPredicate) {
 	t.haltPredicate = p
 }

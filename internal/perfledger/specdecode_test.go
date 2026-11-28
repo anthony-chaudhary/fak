@@ -135,3 +135,72 @@ func TestSpecDecode(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestSpecDecodeCapture(t *testing.T) {
+	want := SpecDecodeStats{NumAcceptedDraftTokens: 7, NumDraftTokens: 10, NumSpecSteps: 5}
+	cases := []struct {
+		name string
+		raw  string
+		n    int
+		ok   bool
+	}{
+		{
+			name: "vllm_root_object",
+			raw:  `{"id":"1","choices":[{"text":"hi"}],"spec_decode":{"num_accepted_draft_tokens":7,"num_draft_tokens":10,"num_spec_steps":5}}`,
+			n:    1,
+			ok:   true,
+		},
+		{
+			name: "vllm_root_flat",
+			raw:  `{"id":"1","choices":[{"text":"hi"}],"num_accepted_draft_tokens":7,"num_draft_tokens":10,"num_spec_steps":5}`,
+			n:    1,
+			ok:   true,
+		},
+		{
+			name: "trtllm_per_choice",
+			raw:  `{"id":"1","choices":[{"text":"hi","spec_decode":{"num_accepted_draft_tokens":7,"num_draft_tokens":10,"num_spec_steps":5}}]}`,
+			n:    1,
+			ok:   true,
+		},
+		{
+			name: "sglang_sglext",
+			raw:  `{"id":"1","choices":[{"text":"hi"}],"sglext":{"spec_decode":{"num_accepted_draft_tokens":7,"num_draft_tokens":10,"num_spec_steps":5}}}`,
+			n:    1,
+			ok:   true,
+		},
+		{
+			name: "suppressed_when_n_gt_1",
+			raw:  `{"id":"1","choices":[{"text":"hi"}],"spec_decode":{"num_accepted_draft_tokens":7,"num_draft_tokens":10,"num_spec_steps":5}}`,
+			n:    2,
+			ok:   false,
+		},
+		{
+			name: "suppressed_when_multiple_choices",
+			raw:  `{"id":"1","choices":[{"text":"a"},{"text":"b"}],"spec_decode":{"num_accepted_draft_tokens":7,"num_draft_tokens":10,"num_spec_steps":5}}`,
+			n:    1,
+			ok:   false,
+		},
+		{
+			name: "absent_fields",
+			raw:  `{"id":"1","choices":[{"text":"hi"}]}`,
+			n:    1,
+			ok:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok, err := CaptureSpecDecodeStats([]byte(tc.raw), tc.n)
+			if err != nil {
+				t.Fatalf("CaptureSpecDecodeStats err=%v", err)
+			}
+			if ok != tc.ok {
+				t.Fatalf("CaptureSpecDecodeStats ok=%v, want %v", ok, tc.ok)
+			}
+			if tc.ok && got != want {
+				t.Fatalf("CaptureSpecDecodeStats=%+v, want %+v", got, want)
+			}
+		})
+	}
+}
