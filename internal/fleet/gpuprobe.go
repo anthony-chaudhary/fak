@@ -146,3 +146,80 @@ func parseGPUUtilizationCSV(out string, busyThreshold int) (stats GPUStats, ok b
 	stats.UtilPct = int(math.Round(float64(sum) / float64(stats.Total)))
 	return stats, true
 }
+
+// Custom-plugin probe -> condition state machine adapted from
+// kubernetes/node-problem-detector (pkg/custompluginmonitor/plugin/plugin.go:226
+// @ 3593d9fa577e, Apache-2.0).
+
+const defaultPluginMaxOutputBytes = 4096
+
+// PluginRuleKind distinguishes temporary event-like rules from permanent node conditions.
+type PluginRuleKind string
+
+const (
+	PluginRuleTemporary PluginRuleKind = "temporary"
+	PluginRulePermanent PluginRuleKind = "permanent"
+)
+
+// PluginConditionRule defines how a custom probe exit code maps to a condition.
+type PluginConditionRule struct {
+	Condition      string         `json:"condition"`
+	Kind           PluginRuleKind `json:"kind"`
+	Reason         string         `json:"reason"`
+	MaxOutputBytes int            `json:"max_output_bytes,omitempty"`
+}
+
+// PluginConditionState holds the current condition status and message for change-based updates.
+type PluginConditionState struct {
+	Condition string `json:"condition"`
+	Active    bool   `json:"active"`
+	Message   string `json:"message"`
+}
+
+// PluginConditionTracker runs bounded custom plugin probes and emits updates only on change.
+type PluginConditionTracker struct {
+	mu     sync.Mutex
+	states map[string]PluginConditionState
+}
+
+func NewPluginConditionTracker() *PluginConditionTracker {
+	return &PluginConditionTracker{states: make(map[string]PluginConditionState)}
+}
+
+// RunCustomPluginProbe executes binary args via gpuProbeRunner, bounds output to
+// MaxOutputBytes, and updates the condition state machine (returning changed=true
+// only when active state or message changes).
+func (t *PluginConditionTracker) RunCustomPluginProbe(ctx context.Context, rule PluginConditionRule, binary string, args ...string) (state PluginConditionState, changed bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, gpuProbeTimeout)
+	defer cancel()
+	out, err := gpuProbeRunner(ctx, binary, args...)
+	maxBytes := rule.MaxOutputBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultPluginMaxOutputBytes
+	}
+	if len(out) > maxBytes {
+		out = out[:maxBytes]
+	}
+	msg := strings.TrimSpace(string(out))
+	active := err != nil
+	if active && msg == "" {
+		msg = err.Error()
+	}
+	next := PluginConditionState{Condition: rule.Condition, Active: active, Message: msg}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	prev, ok := t.states[rule.Condition]
+	if ok && prev.Active == next.Active && prev.Message == next.Message {
+		return prev, false
+	}
+	if rule.Kind == PluginRuleTemporary && !next.Active {
+		delete(t.states, rule.Condition)
+		return next, ok && prev.Active
+	}
+	t.states[rule.Condition] = next
+	return next, true
+}

@@ -96,4 +96,18 @@ func TestProbeGPUUtilizationStubsRunner(t *testing.T) {
 	if _, err := ProbeGPUUtilization(context.Background()); !errors.Is(err, ErrNoGPUSignal) {
 		t.Fatalf("unparseable output should wrap ErrNoGPUSignal, got %v", err)
 	}
+
+	// Custom-plugin probe -> condition state machine with bounded output & change-only updates.
+	tracker := NewPluginConditionTracker()
+	rule := PluginConditionRule{Condition: "GPUXidError", Kind: PluginRulePermanent, MaxOutputBytes: 16}
+	gpuProbeRunner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return []byte("XID 79 fallen off the bus"), errors.New("exit 1")
+	}
+	st, changed := tracker.RunCustomPluginProbe(context.Background(), rule, "gpu-check")
+	if !changed || !st.Active || len(st.Message) > 16 {
+		t.Fatalf("expected active bounded state change, got %+v changed=%v", st, changed)
+	}
+	if _, changedAgain := tracker.RunCustomPluginProbe(context.Background(), rule, "gpu-check"); changedAgain {
+		t.Fatal("identical probe message must not emit duplicate update")
+	}
 }
