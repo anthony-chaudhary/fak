@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -163,25 +164,63 @@ func serveInkling2ResidentSizingOf(path string, lookup func(string) (string, boo
 	// FAK_INKLING2_KV defaults to f16; only explicit f32/fp32 keeps f32.
 	kvVal, kvSet := lookup("FAK_INKLING2_KV")
 	kvHalf := kvDType != ggufload.Inkling2KVF32 || !kvSet || strings.TrimSpace(kvVal) == ""
-	arch, err := serveInkling2Arch(path)
-	if err != nil {
-		return sz, err
-	}
+	var (
+		arch   string
+		archEr error
+		budget int64
+		wg     sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		arch, archEr = serveInkling2Arch(path)
+	}()
+	go func() {
+		defer wg.Done()
+		budget = serveInkling2ResidentBudgetBytes()
+	}()
 	f, err := ggufload.Open(path)
+	wg.Wait()
+	if archEr != nil {
+		return sz, archEr
+	}
 	if err != nil {
 		return sz, err
 	}
-	weights, err := inkling2RunMetalMemory(path, f)
-	if err != nil {
-		return sz, err
+	var (
+		weights   localadmission.MemoryPlan
+		weightsEr error
+		shape     inkling2ResidentShape
+		shapeEr   error
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		weights, weightsEr = inkling2RunMetalMemory(path, f)
+	}()
+	go func() {
+		defer wg.Done()
+		shape, shapeEr = inkling2ResidentShapeOf(f, arch)
+	}()
+	wg.Wait()
+	if weightsEr != nil {
+		return sz, weightsEr
 	}
-	shape, err := inkling2ResidentShapeOf(f, arch)
-	if err != nil {
-		return sz, err
+	if shapeEr != nil {
+		return sz, shapeEr
 	}
+	type planResult struct {
+		sz  inkling2ServeResidentSizing
+		err error
+	}
+	plans := make(map[int]planResult, 4)
 	planFor := func(chunk int) (inkling2ServeResidentSizing, error) {
+		if cached, ok := plans[chunk]; ok {
+			return cached.sz, cached.err
+		}
 		one, err := inkling2RunResidentMemoryFor(path, f, arch, ctx, kvHalf, chunk)
 		if err != nil {
+			plans[chunk] = planResult{err: err}
 			return inkling2ServeResidentSizing{}, err
 		}
 		perSlot := one.SteadyBytes - weights.SteadyBytes
@@ -189,6 +228,7 @@ func serveInkling2ResidentSizingOf(path string, lookup func(string) (string, boo
 		if rows > 0 {
 			state, err := ggufload.Inkling2MetalCohortStateBytesFor(f, rows, ctx, chunk, kvHalf, lookup)
 			if err != nil {
+				plans[chunk] = planResult{err: err}
 				return inkling2ServeResidentSizing{}, err
 			}
 			cohort = inkling2ServeResidentCohortBytes(perSlot-inkling2ResidentSessionBytesFor(shape, ctx, kvHalf, chunk), state, lookup)
@@ -199,11 +239,13 @@ func serveInkling2ResidentSizingOf(path string, lookup func(string) (string, boo
 		slots := inkling2ServeResidentSlots(lookup, perSlot)
 		plan, err := inkling2ServeResidentPlan(weights, perSlot, slots, cohort)
 		if err != nil {
+			plans[chunk] = planResult{err: err}
 			return inkling2ServeResidentSizing{}, err
 		}
-		return inkling2ServeResidentSizing{Ctx: ctx, Slots: slots, Rows: rows, Chunk: chunk, PerSlot: perSlot, Cohort: cohort, Plan: plan}, nil
+		res := inkling2ServeResidentSizing{Ctx: ctx, Slots: slots, Rows: rows, Chunk: chunk, PerSlot: perSlot, Cohort: cohort, Plan: plan}
+		plans[chunk] = planResult{sz: res}
+		return res, nil
 	}
-	budget := serveInkling2ResidentBudgetBytes()
 	chunk := ggufload.Inkling2MetalPrefillChunkForBudget(lookup, func(c int) bool {
 		if budget <= 0 {
 			return true

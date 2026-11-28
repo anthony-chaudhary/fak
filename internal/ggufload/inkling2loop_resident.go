@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -260,31 +262,57 @@ func (s *inkling2Resident) uploadF32Mat(rows, cols int, data []float32) ink2Mat 
 	return ink2Mat{t: t, rows: rows, cols: cols}
 }
 
-// mat makes a device weight of m: resident tensors are used as bound, host-side
-// small dense matrices are widened to F32 and uploaded.
-func (s *inkling2Resident) mat(m model.Inkling2LoopMatrix) ink2Mat {
+type ink2PreparedMat struct {
+	device     *inkling2DeviceMatrix
+	rows, cols int
+	f32        []float32
+	err        error
+}
+
+func prepareInk2Mat(m model.Inkling2LoopMatrix) ink2PreparedMat {
 	switch v := m.(type) {
 	case nil:
-		return ink2Mat{}
+		return ink2PreparedMat{}
 	case *inkling2DeviceMatrix:
 		if v.padK != v.cols {
-			s.fail(fmt.Errorf("inkling2 resident: padded dense weight [%d %d] pad %d", v.rows, v.cols, v.padK))
+			return ink2PreparedMat{device: v, err: fmt.Errorf("inkling2 resident: padded dense weight [%d %d] pad %d", v.rows, v.cols, v.padK)}
 		}
-		return ink2Mat{t: v.w, rows: v.rows, cols: v.cols}
+		return ink2PreparedMat{device: v}
 	case *inkling2QuantMatrix:
 		f := make([]float32, v.rows*v.cols)
 		for r := 0; r < v.rows; r++ {
 			if err := inkling2DequantRow(v.typ, v.raw[r*v.rowBytes:(r+1)*v.rowBytes], f[r*v.cols:(r+1)*v.cols]); err != nil {
-				s.fail(err)
-				return ink2Mat{}
+				return ink2PreparedMat{err: err}
 			}
 		}
-		return s.uploadF32Mat(v.rows, v.cols, f)
+		return ink2PreparedMat{rows: v.rows, cols: v.cols, f32: f}
 	case *model.Inkling2LoopDenseMatrix:
-		return s.uploadF32Mat(v.R, v.C, v.Data)
+		return ink2PreparedMat{rows: v.R, cols: v.C, f32: v.Data}
 	}
-	s.fail(fmt.Errorf("inkling2 resident: matrix %T is not device-bindable", m))
+	return ink2PreparedMat{err: fmt.Errorf("inkling2 resident: matrix %T is not device-bindable", m)}
+}
+
+func (s *inkling2Resident) bindPreparedMat(p ink2PreparedMat) ink2Mat {
+	if p.err != nil {
+		s.fail(p.err)
+		if p.device != nil {
+			return ink2Mat{t: p.device.w, rows: p.device.rows, cols: p.device.cols}
+		}
+		return ink2Mat{}
+	}
+	if p.device != nil {
+		return ink2Mat{t: p.device.w, rows: p.device.rows, cols: p.device.cols}
+	}
+	if p.f32 != nil {
+		return s.uploadF32Mat(p.rows, p.cols, p.f32)
+	}
 	return ink2Mat{}
+}
+
+// mat makes a device weight of m: resident tensors are used as bound, host-side
+// small dense matrices are widened to F32 and uploaded.
+func (s *inkling2Resident) mat(m model.Inkling2LoopMatrix) ink2Mat {
+	return s.bindPreparedMat(prepareInk2Mat(m))
 }
 
 func (s *inkling2Resident) experts(e model.Inkling2LoopExperts, scale []float32) ink2Experts {
@@ -297,11 +325,190 @@ func (s *inkling2Resident) experts(e model.Inkling2LoopExperts, scale []float32)
 }
 
 func concatRows(rows [][]float32) []float32 {
-	var out []float32
+	if len(rows) == 0 {
+		return nil
+	}
+	total := 0
+	for _, r := range rows {
+		total += len(r)
+	}
+	if total == 0 {
+		return nil
+	}
+	out := make([]float32, 0, total)
 	for _, r := range rows {
 		out = append(out, r...)
 	}
 	return out
+}
+
+type ink2PreparedLayer struct {
+	wq, wk, wv, wo       ink2PreparedMat
+	gate, rel, sink      ink2PreparedMat
+	kconv, vconv, router ink2PreparedMat
+	resQRows             int
+	resQ                 []float32
+}
+
+func prepareInk2Layer(lw *model.Inkling2LoopLayerWeights) ink2PreparedLayer {
+	return ink2PreparedLayer{
+		wq:       prepareInk2Mat(lw.Wq),
+		wk:       prepareInk2Mat(lw.Wk),
+		wv:       prepareInk2Mat(lw.Wv),
+		wo:       prepareInk2Mat(lw.Wo),
+		gate:     prepareInk2Mat(lw.Gate),
+		rel:      prepareInk2Mat(lw.Rel),
+		sink:     prepareInk2Mat(lw.SinkProj),
+		kconv:    prepareInk2Mat(lw.KConvProj),
+		vconv:    prepareInk2Mat(lw.VConvProj),
+		router:   prepareInk2Mat(lw.Router),
+		resQRows: len(lw.AttnResQuery),
+		resQ:     concatRows(lw.AttnResQuery),
+	}
+}
+
+func (s *inkling2Resident) bindPreparedLayer(i int, lw *model.Inkling2LoopLayerWeights, p *ink2PreparedLayer) {
+	l := &s.layers[i]
+	l.wq, l.wk, l.wv, l.wo = s.bindPreparedMat(p.wq), s.bindPreparedMat(p.wk), s.bindPreparedMat(p.wv), s.bindPreparedMat(p.wo)
+	l.gate, l.rel, l.sink = s.bindPreparedMat(p.gate), s.bindPreparedMat(p.rel), s.bindPreparedMat(p.sink)
+	l.kconv, l.vconv, l.router = s.bindPreparedMat(p.kconv), s.bindPreparedMat(p.vconv), s.bindPreparedMat(p.router)
+	l.attnNorm, l.qNorm, l.kNorm, l.vNorm = s.upload(lw.AttnNorm), s.upload(lw.QInpNorm), s.upload(lw.KInpNorm), s.upload(lw.VInpNorm)
+	l.qclip, l.relBias, l.relClip = s.upload(lw.QClip), s.upload(lw.RelBias), s.upload(lw.RelClip)
+	l.kconvW, l.vconvW = s.upload(lw.KConv), s.upload(lw.VConv)
+	l.attnPostConv, l.ffnPostConv = s.upload(lw.AttnPostConv), s.upload(lw.FFNPostConv)
+	l.resQRows = p.resQRows
+	l.resQ = s.upload(p.resQ)
+	l.ffnResQ, l.ffnNorm, l.probsBias = s.upload(lw.FFNResQuery), s.upload(lw.FFNNorm), s.upload(lw.ExpProbsBias)
+	l.gateUp = s.experts(lw.GateUp, lw.GateUpScale)
+	l.down = s.experts(lw.Down, lw.DownScale)
+}
+
+type ink2PreparedCtrl struct {
+	msgQ   []float32
+	down   [4]ink2PreparedMat
+	rank   [4]int
+	gain   [4]ink2PreparedMat
+	forget [4]ink2PreparedMat
+}
+
+func prepareInk2Ctrl(cw *model.Inkling2LoopControllerWeights) ink2PreparedCtrl {
+	p := ink2PreparedCtrl{msgQ: concatRows(cw.MsgQuery[:])}
+	for j := 0; j < 4; j++ {
+		p.down[j] = prepareInk2Mat(cw.Down[j])
+		p.rank[j] = cw.Down[j].Rows()
+		p.gain[j] = prepareInk2Mat(cw.Gain[j])
+		p.forget[j] = prepareInk2Mat(cw.Forget[j])
+	}
+	return p
+}
+
+func (s *inkling2Resident) bindPreparedF32Ref(p ink2PreparedMat) ink2Ref {
+	d := s.bindPreparedMat(p)
+	if s.err == nil && d.t.Dtype != compute.F32 {
+		s.fail(fmt.Errorf("inkling2 resident: controller weight is %s, want F32", d.t.Dtype))
+	}
+	return d.ref()
+}
+
+func (s *inkling2Resident) bindPreparedCtrl(i int, p *ink2PreparedCtrl) {
+	c := &s.ctrls[i]
+	c.msgQ = s.upload(p.msgQ)
+	for j := 0; j < 4; j++ {
+		c.down[j] = s.bindPreparedF32Ref(p.down[j])
+		c.rank = p.rank[j]
+		c.gain[j] = s.bindPreparedF32Ref(p.gain[j])
+		c.forget[j] = s.bindPreparedF32Ref(p.forget[j])
+	}
+	s.packCtrl(c, s.hp.Hidden)
+}
+
+// uploadResidentWeights prepares host-side dequantized matrices and concatenated
+// query rows on CPU workers while overlapping device allocation/uploads in
+// deterministic layer and controller order on the calling goroutine.
+func (s *inkling2Resident) uploadResidentWeights(workers int) error {
+	w := s.w
+	if workers <= 0 {
+		workers = min(runtime.GOMAXPROCS(0), 4)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	outCh := make(chan ink2PreparedMat, 1)
+	go func() {
+		outCh <- prepareInk2Mat(w.Output)
+	}()
+	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
+	s.output = s.bindPreparedMat(<-outCh)
+	s.layers = make([]ink2Layer, s.hp.Layers)
+	s.ctrls = make([]ink2Ctrl, len(w.Controllers))
+
+	total := len(w.Layers) + len(w.Controllers)
+	if workers == 1 || total <= 1 {
+		for i := range w.Layers {
+			p := prepareInk2Layer(&w.Layers[i])
+			s.bindPreparedLayer(i, &w.Layers[i], &p)
+			if s.err != nil {
+				return fmt.Errorf("inkling2 resident: layer %d: %w", i, s.err)
+			}
+		}
+		for i := range w.Controllers {
+			p := prepareInk2Ctrl(&w.Controllers[i])
+			s.bindPreparedCtrl(i, &p)
+		}
+		return s.err
+	}
+
+	layerRes := make([]ink2PreparedLayer, len(w.Layers))
+	layerReady := make([]chan struct{}, len(w.Layers))
+	for i := range layerReady {
+		layerReady[i] = make(chan struct{})
+	}
+	ctrlRes := make([]ink2PreparedCtrl, len(w.Controllers))
+	ctrlReady := make([]chan struct{}, len(w.Controllers))
+	for i := range ctrlReady {
+		ctrlReady[i] = make(chan struct{})
+	}
+
+	var next atomic.Int64
+	var aborted atomic.Bool
+	var wg sync.WaitGroup
+	nWorkers := min(workers, total)
+	wg.Add(nWorkers)
+	for range nWorkers {
+		go func() {
+			defer wg.Done()
+			for !aborted.Load() {
+				k := int(next.Add(1)) - 1
+				if k >= total {
+					return
+				}
+				if k < len(w.Layers) {
+					layerRes[k] = prepareInk2Layer(&w.Layers[k])
+					close(layerReady[k])
+				} else {
+					ci := k - len(w.Layers)
+					ctrlRes[ci] = prepareInk2Ctrl(&w.Controllers[ci])
+					close(ctrlReady[ci])
+				}
+			}
+		}()
+	}
+
+	for i := range w.Layers {
+		<-layerReady[i]
+		s.bindPreparedLayer(i, &w.Layers[i], &layerRes[i])
+		if s.err != nil {
+			aborted.Store(true)
+			wg.Wait()
+			return fmt.Errorf("inkling2 resident: layer %d: %w", i, s.err)
+		}
+	}
+	for i := range w.Controllers {
+		<-ctrlReady[i]
+		s.bindPreparedCtrl(i, &ctrlRes[i])
+	}
+	wg.Wait()
+	return s.err
 }
 
 func newInkling2Resident(m *Inkling2LoopModel, be compute.Backend) (*inkling2Resident, error) {
@@ -947,39 +1154,9 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 	s.report = metalgemm.Ink2ReportRequested(os.Getenv(metalgemm.Ink2ProfileEnv))
 	_, hasPrefill := be.(compute.Inkling2PrefillDevice)
 	s.batched = hasPrefill && (inkling2BatchedPrefill() || forSpec || inkling2SpecDepthFor(m) > 0)
-	s.tokNorm, s.outNorm, s.outResQ = s.upload(w.TokNorm), s.upload(w.OutputNorm), s.upload(w.OutputResQuery)
-	s.output = s.mat(w.Output)
-	s.layers = make([]ink2Layer, hp.Layers)
-	for i := range w.Layers {
-		lw, l := &w.Layers[i], &s.layers[i]
-		l.wq, l.wk, l.wv, l.wo = s.mat(lw.Wq), s.mat(lw.Wk), s.mat(lw.Wv), s.mat(lw.Wo)
-		l.gate, l.rel, l.sink = s.mat(lw.Gate), s.mat(lw.Rel), s.mat(lw.SinkProj)
-		l.kconv, l.vconv, l.router = s.mat(lw.KConvProj), s.mat(lw.VConvProj), s.mat(lw.Router)
-		l.attnNorm, l.qNorm, l.kNorm, l.vNorm = s.upload(lw.AttnNorm), s.upload(lw.QInpNorm), s.upload(lw.KInpNorm), s.upload(lw.VInpNorm)
-		l.qclip, l.relBias, l.relClip = s.upload(lw.QClip), s.upload(lw.RelBias), s.upload(lw.RelClip)
-		l.kconvW, l.vconvW = s.upload(lw.KConv), s.upload(lw.VConv)
-		l.attnPostConv, l.ffnPostConv = s.upload(lw.AttnPostConv), s.upload(lw.FFNPostConv)
-		l.resQRows = len(lw.AttnResQuery)
-		l.resQ = s.upload(concatRows(lw.AttnResQuery))
-		l.ffnResQ, l.ffnNorm, l.probsBias = s.upload(lw.FFNResQuery), s.upload(lw.FFNNorm), s.upload(lw.ExpProbsBias)
-		l.gateUp = s.experts(lw.GateUp, lw.GateUpScale)
-		l.down = s.experts(lw.Down, lw.DownScale)
-		if s.err != nil {
-			s.close()
-			return nil, fmt.Errorf("inkling2 resident: layer %d: %w", i, s.err)
-		}
-	}
-	s.ctrls = make([]ink2Ctrl, len(w.Controllers))
-	for i := range w.Controllers {
-		cw, c := &w.Controllers[i], &s.ctrls[i]
-		c.msgQ = s.upload(concatRows(cw.MsgQuery[:]))
-		for j := 0; j < 4; j++ {
-			c.down[j] = s.f32Ref(cw.Down[j])
-			c.rank = cw.Down[j].Rows()
-			c.gain[j] = s.f32Ref(cw.Gain[j])
-			c.forget[j] = s.f32Ref(cw.Forget[j])
-		}
-		s.packCtrl(c, hp.Hidden)
+	if err := s.uploadResidentWeights(0); err != nil {
+		s.close()
+		return nil, err
 	}
 
 	for i := range s.layers {
@@ -1165,15 +1342,6 @@ func (s *inkling2Resident) packCtrl(c *ink2Ctrl, n int) {
 	}
 	s.owned = append(s.owned, made...)
 	c.half = &h
-}
-
-// f32Ref is a weight the controller kernel reads directly as dense F32 rows.
-func (s *inkling2Resident) f32Ref(m model.Inkling2LoopMatrix) ink2Ref {
-	d := s.mat(m)
-	if s.err == nil && d.t.Dtype != compute.F32 {
-		s.fail(fmt.Errorf("inkling2 resident: controller weight is %s, want F32", d.t.Dtype))
-	}
-	return d.ref()
 }
 
 func inkling2IndexedExpert(dt compute.Dtype) bool {

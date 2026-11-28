@@ -180,15 +180,22 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS)
   // the exps are staged in shared memory so the serial denominator waits on adds, not loads
   extern __shared__ double esh[];
   float *wsh = (float *)(esh + cap);
+  __shared__ double wpart[INK2_ATT_THREADS / 32];
   __shared__ double sdenom;
   if (STAGED) {
     for (int j = threadIdx.x; j < n; j += blockDim.x) esh[j] = sc[j];
     __syncthreads();
   }
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+  double part = 0.0;
+  for (int j = threadIdx.x; j < n; j += blockDim.x) part += STAGED ? esh[j] : sc[j];
+  for (int o = 16; o > 0; o >>= 1) part += __shfl_xor_sync(0xffffffff, part, o);
+  if (lane == 0) wpart[warp] = part;
+  __syncthreads();
   if (threadIdx.x == 0) {
     const double m = *(const double *)(r + (size_t)h * relLen);
     double denom = exp(-m);
-    for (int j = 0; j < n; ++j) denom += STAGED ? esh[j] : sc[j];
+    for (int w = 0; w < (int)(blockDim.x >> 5); ++w) denom += wpart[w];
     sdenom = denom;
   }
   __syncthreads();

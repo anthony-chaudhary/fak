@@ -18377,6 +18377,11 @@
           "category": "incidental",
           "reason": "ReuseCandidate is the radixkv span input consumed by ComposeReusePlan and produced by the fingerprint matcher; it feeds the reuse-plan concept already positioned in the plan family, not a second plan.",
           "token": "reusecandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported cmd/fak result struct bundling overlapped Inkling-2 cold-start CPU load planning output; local staging carrier, not a distinct planning concept.",
+          "token": "planResult"
         }
       ],
       "exclude": [
@@ -18596,6 +18601,7 @@
         "overlayPlan",
         "planErr",
         "planQwen35QSAScratch",
+        "planResult",
         "planResumeDedup",
         "planapproval",
         "planned",
@@ -19917,6 +19923,11 @@
           "category": "incidental",
           "reason": "Private atomic one-use state of the owned FFN normalization carrier; records whether that single logical loop has consumed its input, not a general execution loop or independently scheduled loop controller.",
           "token": "loopClaimed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Weight struct holding cross-pass controller projections for an Inkling-2 looped core layer; model weight container, not a separate loop concept.",
+          "token": "Inkling2LoopControllerWeights"
         }
       ],
       "id": "loop",
@@ -19927,6 +19938,7 @@
         "DecodeLoopNS",
         "FakMetaSuperloopNight100",
         "FleetScoutLoop",
+        "Inkling2LoopControllerWeights",
         "LoopView",
         "LoopbackEndpoint",
         "LoopbackOnly",
