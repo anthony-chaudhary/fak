@@ -2,7 +2,6 @@ package compute
 
 // CPU-guarded contract test for the NCCL tensor-parallel group lifecycle adapted from
 // ashhart/TensorFold (Apache-2.0): zig/src/cuda/tp_group.zig, pin
-// 9e8c368b0b4c2c7892a0c9f0f302d7c164016209. ADAPT decision — the Group lifecycle is
 // re-expressed in idiomatic Go, no upstream code is copied: open(rank,world) validation,
 // rank-order all-gather, matched-count send/recv, post-sync check, abort-once, and the
 // destroy-after-abort refusal (an aborted communicator is never torn down twice).
@@ -172,8 +171,6 @@ func (g *ncclOpGroup) destroy() error {
 }
 
 // TestNCCLOpGroupAbortOnceNoDestroy pins the TP-group lifecycle contract borrowed from
-// ashhart/TensorFold zig/src/cuda/tp_group.zig@9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// (Apache-2.0, ADAPT): abort-once, no double destroy, abort-then-destroy no-op, world
 // mismatch refusal, rank-order gather, and matched send/recv counts. CPU-guarded: the
 // reference model runs on any host; the NCCL-level legs it mirrors need FAK_CUDA_NCCL.
 //

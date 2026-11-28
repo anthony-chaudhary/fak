@@ -1,6 +1,4 @@
 // ---- Q3_K q8_1 DP4A matrix-vector product for decode + Q3_K dequant ----------------------
-// Adapted from llama.cpp at 571d0d540df04f25298d0e159e520d9fc62ed121 (MIT).
-// Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
 // Only the Q3_K instantiation on the NVIDIA GENERIC parameter table is kept (Ampere and newer,

@@ -1,7 +1,5 @@
 // megakernel_nvfp4_decode.cuh - structure-only contract for Blackwell NVFP4 persistent decode.
 //
-// ADAPT of Luce-Org/lucebox-hub (Apache-2.0), optimizations/megakernel/kernel_gb10_nvfp4.cu
-// @f3cc3ec9c56810c724981e8ae5114539e9500b8a: fused NVFP4 dequant GEMVs inside a single-launch
 // decode pass targeting sm_120/sm_121a. No upstream code is copied.
 //
 // SKELETON ONLY: constants. No device run claim, no model loader change, no speed claim; included

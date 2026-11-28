@@ -57,7 +57,6 @@ extern "C" int fak_v41_embed_gather(const void *table,float *out,const intptr_t 
 // Optional IQ4_NL spine, not a Go/model capability. Both native feature defines
 // are required; ordinary embedding builds and ABI2's accepted modes are intact.
 // The 32-lane selected-row mapping is adapted from llama.cpp at
-// e0f142d5ddc1461ce721644d92af33db23545105 (MIT); the MIT notice is retained in
 // v41_embed_iq4nl.h. No upstream context, stream, cache or scheduler is imported.
 #ifdef FAK_CUDA_V41_EMBED_IQ4NL
 #include "v41_embed_iq4nl.h"
@@ -182,7 +181,6 @@ extern "C" int fak_v41_embed_iq4nl_row_poison(float *target,const uint32_t *stat
 }
 
 // Row-parallel mapping adapted from Niko1221/Strata at
-// c62d5e3a15b40ea51c96aae9e8d36928965f53ab (MIT).
 // Copyright (c) 2026 Peasant Smith (mw00), Project Maya contributors,
 // including needmorevram, and Niko1221 and the Strata contributors.
 // License and notices: THIRD_PARTY_NOTICES.md ("Strata", "Project Maya").

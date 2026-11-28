@@ -1,9 +1,7 @@
 package compute
 
 // EPLB logical-to-physical expert remap plus per-physical hit-count recording:
-// the CPU reference of eplb_map_record.cu (ADAPT of vllm-project/vllm
 // vllm/model_executor/layers/fused_moe/router/base_router.py at pin
-// ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0 — the fused Triton
 // _eplb_map_and_record_i32_kernel). This file is pure Go on purpose: it compiles
 // and is tested in every build, while the device kernel ships behind the cuda
 // build tag once the successor policy-hook packet wires eplb_map_record.cu into

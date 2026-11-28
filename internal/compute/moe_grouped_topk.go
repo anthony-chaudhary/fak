@@ -3,8 +3,6 @@ package compute
 // Group-constrained MoE top-k routing (noaux_tc style): pure-Go host reference
 // of moe_grouped_topk.cu.
 //
-// ADAPT of vllm-project/vllm@ae065918640a198a56f6f17eb45e251c3229fe41
-// (csrc/moe/grouped_topk_kernels.cu:480,639,922,1095, Apache-2.0):
 // grouped_topk_fused_kernel family re-expressed cleanly for fak.
 //
 // Pre-build reconnaissance (served model config check):

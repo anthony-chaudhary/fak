@@ -1,7 +1,5 @@
 // online_sparse_index.cuh - structure-only contract for MInference online sparse-index approx.
 //
-// ADAPT of microsoft/MInference (MIT), minference/ops/op_utils/vertical_slash_utils.py:460
-// @29ef1974fcb5: last-q block attention approximation -> vertical column top-k + slash
 // diagonal-sum (calc_index) top-k per request, without full-attention recompute. No upstream
 // code is copied.
 //

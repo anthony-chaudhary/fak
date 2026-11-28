@@ -41,9 +41,6 @@ __global__ void k_f32_to_f16(const float *src, __half *dst, int n) {
   if (i < n) dst[i] = __float2half(src[i]);
 }
 // Contiguous vec4 loads/stores adapted from llama.cpp, change
-// f4e276a2066a40cd200db17c1131826d6c0c7a94, retained at
-// 0ec4027a2a0183de87c007069adddc06e665f7de (MIT).
-// Copyright (c) 2023-2026 The ggml authors. The complete MIT permission notice is
 // reproduced in THIRD_PARTY_NOTICES.md ("llama.cpp").
 // Fak specializes the conversion to F32 -> F16 and keeps the existing intrinsic,
 // stream and profiler label. The transpose and compensated hi/lo paths are separate.
@@ -143,7 +140,6 @@ __device__ signed char q8round_dev(float x) {
 }
 
 // The block-32 maximum follows the llama.cpp block-32 max reduction at
-// f3586e66bc916d672773d4a6505513ba91a3595c (MIT).
 // Copyright (c) 2023-2026 The ggml authors. The full permission notice is
 // retained in THIRD_PARTY_NOTICES.md ("llama.cpp").
 // Only the max reduction is borrowed: Fak's float scales and q8round_dev stay.
@@ -429,7 +425,6 @@ extern "C" int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, c
   }();
   if (P < 128 && !(smallp_rowtile && P >= 2)) return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
   if (P < 128) return fcuda_q8_matmul_rows_f32(dCodes, dScales, dX, dY, out, in, P, block);
-  // oss-port-cuda-perf-gdn-q8-dequant-retire: the P>=128 dequant -> fp16 split + 3x cuBLAS arm
   // no longer serves prefill panels. Every panel row now runs the per-row BitExact lane: the
   // rowtile panel GEMM when its contract holds (block 32, 16-byte aligned codes, bounded output
   // groups), the plain per-row GEMM otherwise - neither dequants the weight or allocates a

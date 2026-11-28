@@ -2,13 +2,11 @@
 // iq_gemv.cuh — resident IQ2_XXS / IQ2_XS / IQ1_M / IQ4_NL dequant-fused GEMV.
 //
 // Ported from llama.cpp (MIT, Copyright (c) 2023-2026 The ggml authors) at
-// f7c01c5226cac1de1052c17920ff38cdefea0ae6. The tables below are emitted from
 // the Go copies in quant_iq2_xxs_tables.go / quant_rawiq_tables.go, so the CPU
 // oracle (iq2xxsRowDot, iq2xsDequantSuperBlock) and this kernel share one
 // source. License and notice: THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
 // IQ1_M / IQ4_NL are ported from llama.cpp (MIT) at
-// 571d0d540df04f25298d0e159e520d9fc62ed121. fcuda_iq1s_grid_gpu is emitted
 // from the Go iq1SGrid (quant_rawiq_tables.go).
 //
 // Activations stay f32 (the k_q2k_gemv contract), so GB/s is directly comparable with

@@ -188,7 +188,6 @@ extern "C" void fcuda_gptq_gemv(const uint32_t *dW, const uint32_t *dZeros, cons
 /* Draft insertion in cuda_kernels.cu. Clean-room use of the documented
  * cuBLASLt API; no NVIDIA sample source is copied. The official BSD-3 sample
  * was consulted only as an API cross-check:
- * NVIDIA/CUDALibrarySamples@a94482ebecf8b16d5b83ab276b7db3a84979f0e5,
  * cuBLASLt/LtNvfp4Matmul/sample_cublasLt_LtNvfp4Matmul.cu. */
 #include <cublasLt.h>
 #include <stdint.h>

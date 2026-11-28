@@ -1,6 +1,5 @@
 // Copyright (c) 2026 FlashInfer contributors.
 // SPDX-License-Identifier: Apache-2.0
-// Adapted at revision 48903c68b22d8ef52d6294b5af8f2855928ec355; see THIRD_PARTY_NOTICES.md ("FlashInfer").
 
 package compute
 

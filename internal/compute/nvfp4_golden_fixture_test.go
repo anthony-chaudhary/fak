@@ -16,7 +16,6 @@ import (
 // formula, so a stride/tile drift in nvfp4ScaleLayoutOffset fails here even when the
 // swizzle/unswizzle pair still inverts itself.
 //
-// PROVENANCE. Pinned at NVIDIA/TensorRT-LLM @ ecae3c97e2b646580415518a45a72bc5a5a67075,
 // fetched 2026-11-03:
 //   - cpp/tensorrt_llm/kernels/quantization.h (sha256 4a64db27f63ba18c790087bcae314ad9b3eec3f9ca1907cfe314faaf0c3594d7)
 //     — QuantizationSFLayout::SWIZZLED contract: 512-byte blocks of 128x4 FP8 values, rows

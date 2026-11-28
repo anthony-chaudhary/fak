@@ -13,7 +13,6 @@ import (
 )
 
 // q8_panel_prefill_route_test.go pins the routing decision for P>=128 Q8_0 prefill GEMMs
-// (oss-port-cuda-perf-gdn-q8-dequant-retire): the dequant -> fp16 split + 3x cuBLAS arm no
 // longer serves these panels. In-contract shapes (block 32, 16-byte aligned codes, bounded
 // output groups) run the rowtile panel GEMM, out-of-contract alignment/block shapes stay on
 // the plain per-row BitExact GEMM, and only an argument-bounds refusal (P > 65535 or an int

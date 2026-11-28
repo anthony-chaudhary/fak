@@ -1,8 +1,5 @@
 // fp8_gemm_allreduce.cuh - structure-only contract for SM90 fused FP8 rowwise GEMM+all-reduce.
 //
-// ADAPT of flashinfer-ai/flashinfer (Apache-2.0),
-// csrc/cake_fp8_rowwise_gemm_allreduce/hopper/cake_fp8_rowwise_gemm_allreduce_32edd0405014d238b067_kernel.cu
-// @139888400ff008a4136ce6b35e2f7320bb0c0f40: 512-thread CTAs with producer/math warp-role split,
 // 5-stage SMEM pipeline, m64n128k32 e4m3 MMA shape, and P2P partial publish via atomic flag words.
 // No upstream code is copied.
 //

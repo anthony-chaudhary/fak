@@ -13,8 +13,6 @@ import (
 //
 // Closed in-memory oracle over the SM90 pull-style FP4 MegaMoE task-shape
 // contract and K128 stage-ordering invariants adapted from
-// flashinfer-ai/flashinfer PR #7961 @74c8d6bd0943165f8ec85c898908f3cebcef875a
-// (Apache-2.0; skeleton in cuda/mega_moe_fp4.cuh). Software evidence only:
 // these tests pin structure and ordering, never hardware or served-token
 // speed.
 

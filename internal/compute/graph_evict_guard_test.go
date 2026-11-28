@@ -7,7 +7,6 @@ import (
 
 // TestGraphEvictGuard pins the llama.cpp CUDA graph-pool pending-use guard
 // adapted in graph_evict_guard.go (ggml/src/ggml-cuda/common.cuh
-// @00f113eceb2758158582d56f98bf476b2fe3ed32, MIT): a captured graph queued for
 // replay is non-evictable until its replay completes, so an eviction pass under
 // memory pressure cannot free a graph that is still in flight.
 func TestGraphEvictGuard(t *testing.T) {

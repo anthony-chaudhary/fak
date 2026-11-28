@@ -1,7 +1,5 @@
 // mkernel_collective.cuh - structure-only phase contract for fused collective-compute operators.
 //
-// ADAPT of uccl-project/mKernel (MIT), include/operators/gemm_ar/gemm_ar.cuh and
-// include/operators/ag_gemm/ag_gemm.cuh @ef6225fdde493f4119f519c99bfa4ad9234e323b: persistent
 // operators that fuse GEMM with all-reduce, all-gather and reduce-scatter, driven by a session
 // that advances through declared phases. No upstream code is copied.
 //

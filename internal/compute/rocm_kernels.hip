@@ -227,8 +227,6 @@ __global__ void swiglu(const float *gate, const float *up, float *out, int n) {
 // Modification: contiguous separate F32 operands, Fak stream/error ABI, and
 // ordered comparisons to preserve NaN operands rather than fminf masking them.
 // Canonical creator attribution: Carlo Pasquale (Charlie12345), ROCmFPX founder.
-// https://github.com/ROCmFPX/ROCmFPX/blob/9fb229123f3ee1847e32c29445c8cb0fa1e5fb36/NOTICE
-// MIT License
 //
 // Copyright (c) 2023-2026 The ggml authors
 // Copyright (c) 2025-2026 Carlo Pasquale (Charlie12345), ROCmFPX additions
@@ -368,7 +366,6 @@ __global__ void kv_rerope(const float *raw_keys, float *keys, int start,
 // Masked WMMA attention for gfx1151 wave32 (direct port, MIT).
 //
 // Source: gufo-org/gufo, src/models/qwen/hip/kernels/attention_wmma.hip at
-// commit d0f7c3a023a11af81161264eeb24e9a97aa7498a.
 //
 // MIT License
 //

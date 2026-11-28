@@ -1,6 +1,5 @@
 // Private Qwen dense prefill seam. Arithmetic is adapted ONLY from this repo's
 // k_rmsnorm and k_qwen35_partial_rope_panel in transformer_ops.cuh at
-// 133fc57c9bf4f209390031ed31833a420d87faf6 (Apache-2.0). No new numerical algorithm.
 // One block per Q head, K head, or V-copy head; exactly 256 threads per block.
 #include <stdint.h>
 

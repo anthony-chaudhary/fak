@@ -1,6 +1,4 @@
 // ---- Qwen3.8 hd256 tensor-core prompt attention (P-05, fak#13984) ------------------
-// Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
-// Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
 // One instantiation: DKQ = DV = 256, ncols1 = 8, ncols2 = 8 (GQA-packed: Qwen3.8 has

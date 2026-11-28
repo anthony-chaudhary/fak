@@ -1,6 +1,4 @@
 // ---- IQ4_XS resident GEMV (f32 and q8_1 DP4A MMVQ) + dequant-split prefill GEMM -----------
-// Adapted from llama.cpp at 571d0d540df04f25298d0e159e520d9fc62ed121 (MIT).
-// Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
 // One resident IQ4_XS weight [out, in] (verbatim 136-byte 256-weight super-blocks, row-major)

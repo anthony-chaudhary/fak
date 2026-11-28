@@ -6,7 +6,6 @@
 // binding. Same bindings and push constants as v41_q2k_matvec_id.comp.
 //
 // ADAPT (MIT, Copyright (c) 2023-2026 The ggml authors): llama.cpp mul_mat_vec_id,
-// https://github.com/ggml-org/llama.cpp/blob/ccdbe290533f68154ede46e0618622eebcb6c070/ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl#L47-L87
 // with ids remapped through a per-layer slot map as in llama.cpp PR #29887.
 //
 // Per row the arithmetic is q3k_matmul.comp at one token term for term, so each

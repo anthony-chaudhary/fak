@@ -42,7 +42,6 @@ func (b *CUDAPageBlock) DecRef() int64 {
 }
 
 // CUDAPagedPrefillPath names the dtype path a CUDA block table pages its KV memory on
-// during prefill (oss-port-flashinfer-fp8-prefill-6393, PR #3321).
 type CUDAPagedPrefillPath string
 
 const (
@@ -65,7 +64,6 @@ func (p CUDAPagedPrefillPath) elementBytes() int {
 	return 4
 }
 
-// The FP8 paged branch's arch admission. INSPIRE-ONLY port of the principle behind
 // flashinfer-ai/flashinfer's SM120 FMHA paged prefill
 // (flashinfer/attention/cute_dsl/sm120_fmha.py, Apache-2.0): an FP8 paged prefill
 // path exists only where the architecture covers it; every other arch falls back to

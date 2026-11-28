@@ -9,7 +9,6 @@ spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [44
 // single `[hidden]` output (DeepSeek V4.1, fak-private#3341).
 //
 // ADAPT (MIT, Copyright (c) 2025-2026 antirez): antirez/ds4 ds4_cuda.cu
-// moe_down_sum_qwarp32_kernel @fc80bd695da76ee14bcb86820bf900a5cdfda806:23869 and
 // moe_down_q4K_sum6_qwarp32_kernel:24099 do the down projection plus the six-expert
 // sum. Here the Q3_K coefficients and per-row accumulation order are
 // v41_q3k_matvec_id.comp's term for term, so each pick's down row is bitwise the id

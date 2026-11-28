@@ -1,6 +1,4 @@
 // ---- Q4_K int8 tensor-core MMQ for prompt panels (P-04, fak#13983) ---------------------
-// Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
-// Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
 // Only the Q4_K instantiation is kept, on the NVIDIA MMA data layout. The Ampere config
@@ -9,8 +7,6 @@
 // fallback. Blackwell uses the Ampere rows for Q4_K, so sm_100/sm_103/sm_120 run the same
 // int8 mma.sync path. The activation is quantized by quantize_mmq_q8_1 in its DS4 layout.
 // The Stream-K useful-work grid cap additionally follows change
-// 4c1004c49221b07c3b8108977e3d1991fc9f45cc, retained at revision
-// 0ec4027a2a0183de87c007069adddc06e665f7de (2026-10-31). Local behavior:
 //   * No MoE (ids_dst, expert_bounds), channel/sample broadcast or NVFP4 y_scale plumbing:
 //     one weight [out, in] times one activation [P, in], so write-back indexes dst by
 //     column j directly and the shared-memory ids prefix is gone.

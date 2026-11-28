@@ -3,9 +3,7 @@
 // by the successor policy-hook packet) so the kernel shares g_stream, the pooled
 // allocator and the transfer witnesses of the single libfakcuda object.
 //
-// ADAPT of vllm-project/vllm
 // vllm/model_executor/layers/fused_moe/router/base_router.py at pin
-// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0): the fused Triton
 // _eplb_map_and_record_i32_kernel, re-expressed as a CUDA grid-stride kernel for
 // fak's flat C ABI. Divergences from upstream, all deliberate:
 //   - record_enabled arrives as a plain int32 argument instead of a pointer load

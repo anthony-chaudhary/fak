@@ -9,9 +9,6 @@ import "math"
 // instead the difference of a single per-token cumulative prefix, so the only
 // intermediate is O(L).
 //
-// The reference (fastino-ai/GLiNER2 @ d7c727458bf6929bc9ef5ee04e13c3f717a7c455,
-// Apache-2.0, gliner2/models/boundary/heads.py:88-103 consumed at
-// scoring.py:253-255) centers each token's "inside" contribution before the fp32
 // cumulative sum and carries the mean separately. Centering keeps the running
 // offset bounded (a raw cumsum of large logits loses low-order bits as it grows),
 // while the carried mean preserves exact interval differences: for any

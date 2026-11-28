@@ -1,4 +1,3 @@
-// Clean-room implementation inspired by casper-hansen/AutoAWQ_kernels@c7b0e88c327694c715b0a758d9ce8fd414a1fa21 (MIT):
 // semaphore-based producer/consumer warp handoff and load-time act-order column_remap permutation.
 package compute
 

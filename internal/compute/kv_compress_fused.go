@@ -1,7 +1,6 @@
 package compute
 
 // Adapted from sgl-project/sglang python/sglang/srt/layers/attention/dsv4/dsv41_sparse.py
-// at commit 5481134403e01b46891e091ec63db42a36e6626f (Apache-2.0); changes were made:
 // the compressor's pool-then-finish contract is re-expressed as a single host pass
 // over a prefill ring, with no device kernel.
 

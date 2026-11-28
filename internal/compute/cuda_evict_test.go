@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// cuda_evict_test.go — the `-tags cuda` port of the evict==never-saw witness (#479), run
 // ON the GPU against the on-GPU cudaKV.Evict (compact + single-rotation re-RoPE from device
 // Kraw, no host round-trip). It reproduces the MIDDLE-span case — a span with BOTH a prefix
 // before it AND survivors after it — not just an end trim, because the whole point is the

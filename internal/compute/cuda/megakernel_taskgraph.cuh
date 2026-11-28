@@ -1,7 +1,5 @@
 // megakernel_taskgraph.cuh - structure-only skeleton of a decode megakernel task graph.
 //
-// ADAPT of cohere-ai/cohere-megakernel (Apache-2.0), src/decode/abi.h and
-// src/decode/megakernel.cuh @67d0b9ca22ea3652796b715d1d1863459e0e2c3c: a host-built task list of
 // fixed-width int32 descriptors, dependency counters held in global memory, and a warp-role split
 // (8 consumers, 1 controller, 1 producer, 1 storer). No upstream code is copied; only the ABI
 // shape is re-expressed. Reference envelope upstream: H100 sm_90a BF16.

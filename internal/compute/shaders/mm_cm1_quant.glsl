@@ -6,7 +6,6 @@
 // token (the matvec route re-streams the full matrix for every token).
 //
 // Adapted from ggml-vulkan (MIT, Copyright (c) 2023-2026 The ggml authors), pinned at
-// llama.cpp f74e2fa6a31cc33ab4ee4ae516641cfe62df3924.
 //
 // MIT License. Copyright (c) 2023-2026 The ggml authors.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this

@@ -1,6 +1,5 @@
 // Checked ordinary-sequence adapter for the EXISTING in-tree Apache-2.0
 // k_rmsnorm_fused_residual_add / fcuda_rmsnorm_fused_residual_add_f32 at
-// transformer_ops.cuh@133fc57c9bf4f209390031ed31833a420d87faf6.
 // No arithmetic kernel is added or re-credited here. Included after that file.
 #include <stdint.h>
 

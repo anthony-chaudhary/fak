@@ -6,7 +6,6 @@
 // so one dispatch replaces one q2k_matvec per pick.
 //
 // ADAPT (MIT, Copyright (c) 2023-2026 The ggml authors): llama.cpp mul_mat_vec_id,
-// https://github.com/ggml-org/llama.cpp/blob/ccdbe290533f68154ede46e0618622eebcb6c070/ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl#L47-L87
 // (expert_i0 = gl_WorkGroupID.y, expert_id = data_ids[expert_i0], b/d offsets per
 // expert). The ids carry ring slots, not expert numbers, as llama.cpp PR #29887's
 // llama_moe_cache remaps ids through its per-layer slot map before mul_mat_id. The

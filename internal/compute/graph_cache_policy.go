@@ -6,7 +6,6 @@ import (
 )
 
 // GraphCachePolicy is a host-side keyed CUDA graph cache policy adapted from
-// TensorFold at pin 9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0; see
 // THIRD_PARTY_NOTICES.md, "TensorFold"). It runs against an injected engine so
 // the whole policy is testable on host CPU with a fake engine, beside
 // cudaBackend.GraphBegin/GraphEndLaunch in cuda.go:

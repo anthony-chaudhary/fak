@@ -18,7 +18,6 @@ const (
 )
 
 // Sequence algorithm adapted from llama.cpp gated_delta_net.cu at
-// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
 func (c *cudaBackend) Qwen35GDNSequence(
 	normalizedInput,
 	inProjQKV, inProjZ, inProjB, inProjA,

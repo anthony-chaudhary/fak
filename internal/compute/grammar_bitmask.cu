@@ -2,7 +2,6 @@
 //
 // ADAPTED from vllm-project/vllm,
 // vllm/v1/worker/gpu/structured_outputs.py:133 (_apply_grammar_bitmask_kernel)
-// at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0; attribution in
 // THIRD_PARTY_NOTICES.md), lineage xgrammar
 // apply_token_bitmask_inplace_triton (mlc-ai/xgrammar
 // python/xgrammar/kernels/apply_token_bitmask_inplace_triton.py): a packed
@@ -10,7 +9,6 @@
 // device-resident f32 logits rows addressed by an explicit row-index vector.
 // Re-expressed against fak conventions (extern "C" fcuda_* entry, int status
 // returns, explicit stream argument); no upstream code copied.
-// Ref oss-port-vllmtop-grammar-bitmask-device-20261104.
 //
 // Not yet #included into cuda_kernels.cu: that one-line build wiring is a
 // follow-on ticket beyond this candidate's path cap. The Go oracle in

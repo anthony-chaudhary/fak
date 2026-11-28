@@ -5,8 +5,6 @@
 // iq2s_matvec.comp - GGML IQ2_S matrix-vector product on the packed weights.
 //
 // Ported from ggml-vulkan (MIT, Copyright (c) 2023-2026 The ggml authors), pinned at
-// llama.cpp dff60048744f99cb0af68d02be2314456b3269dc:
-//   ggml/src/ggml-vulkan/vulkan-shaders/types.glsl:1240-1519   (iq2s_grid and its LDS copy)
 //   ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_iq2_s.comp (grid/sign/scale decode)
 //   ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl  (subgroupAdd row reduction)
 //

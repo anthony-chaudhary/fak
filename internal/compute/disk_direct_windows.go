@@ -5,9 +5,7 @@ package compute
 // The unbuffered open, its cached random-access counterpart and the refusal
 // fallback are adapted from magnitudedev/magnitude,
 // inference/seismic/io/src/disk/platform.rs at commit
-// 8d7dbcc1baf4eb3ae7f1c3449dd463f3b375f576 (Apache-2.0). The single alignment
 // shared by buffer, offset and length follows the upstream direct-read layout at
-// commit 814f72abf533c96dbc21bc8b5c3b6ba38c156f64. Changes were made: it is
 // re-expressed in Go against this package's direct-read seam.
 
 import (

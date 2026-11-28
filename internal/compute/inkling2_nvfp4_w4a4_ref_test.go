@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// Host port of the activation quantizer in k_ink2p_nvf4_quant (llama.cpp's
 // quantize_mmq_nvfp4 algorithm, IEEE-rounded): every float32 step rounds where the
 // device rounds, so the codes and nibbles match the kernel bit for bit. They need not
 // match fast-math llama.cpp on near-tie blocks.

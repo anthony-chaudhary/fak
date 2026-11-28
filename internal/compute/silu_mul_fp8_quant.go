@@ -5,13 +5,11 @@
 // csrc/libtorch_stable/quantization/activation_kernels.cu:276
 // (silu_mul_fp8_quant_deep_gemm_kernel) with the act_and_mul_kernel structure
 // (csrc/libtorch_stable/activation_kernels.cu:102) at
-// b6ff8a2f509cc7ac9c58176f5115a836aa1e08bd (Apache-2.0; attribution in
 // THIRD_PARTY_NOTICES.md): swiglu(gate, up) followed by per-128-group e4m3fn
 // quantization whose ue8m0 scale is driven by the group amax, producing the
 // packed codes+scales a stage-2 down-projection GEMM would consume.
 // Re-expressed here as the CPU library/oracle that pins that contract; the
 // CUDA kernel lives in silu_mul_fp8_quant.cu. No upstream code copied.
-// Ref oss-port-vllmtop-silu-mul-fp8-quant-20261103.
 //
 // SEMANTICS (pinned by silu_mul_fp8_quant_test.go):
 //   - Row layout follows act_and_mul: token t reads gate = x[t*2H : t*2H+H]

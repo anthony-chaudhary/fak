@@ -2,14 +2,12 @@
 // [rows, vocab].
 //
 // ADAPTED from vllm-project/vllm, vllm/v1/worker/gpu/sample/logprob.py at
-// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0): _topk_log_softmax_kernel
 // (per-row max + log-sum-exp streamed over 1024-wide blocks, output emitted
 // only at the gathered ids), _ranks_kernel (chosen-token rank counting ties
 // as >=) and _fill_logprob_token_ids_kernel (gather-column layout: chosen
 // token first, then the bounded top-k ids). Re-expressed against fak's
 // libfakcuda conventions (caller stream, extern "C" fcuda_* entry, int status
 // returns); no upstream code copied. Ref
-// oss-port-vllmtop-logprob-device-topk-20261103.
 //
 // Not yet #included into cuda_kernels.cu: that one-line build wiring is a
 // follow-on ticket beyond this candidate's path cap. The CPU reference in

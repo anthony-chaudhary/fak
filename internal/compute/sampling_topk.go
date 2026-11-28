@@ -12,8 +12,6 @@
 // implementations of one contract.
 //
 // ADAPTED from vLLM (Apache-2.0; vllm-project/vllm at
-// ae065918640a198a56f6f17eb45e251c3229fe41):
-//   csrc/persistent_topk.cuh:868  persistent_topk_kernel — coarse-histogram +
 //       byte-refinement threshold selection over monotone keys.
 //   csrc/persistent_topk.cuh:1295 FilteredTopKUnifiedKernel — single-CTA-per-row
 //       filtered top-k with a bounded shared stash.

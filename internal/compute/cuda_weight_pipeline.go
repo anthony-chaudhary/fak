@@ -1,4 +1,3 @@
-// Clean-room implementation inspired by IST-DASLab/marlin@1f25790bdd49fba53106164a24666dade68d7c90 (Apache-2.0):
 // multi-stage cp.async global->shared weight pipeline descriptor and L2 evict_first cache-hint policy.
 package compute
 

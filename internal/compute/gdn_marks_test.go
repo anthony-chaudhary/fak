@@ -9,7 +9,6 @@ import (
 )
 
 // TestGDNMarkListOrderAndSlotSelection pins the TensorFold-adapted segment-mark contract
-// (zig/src/core/deltanet_kernels.zig:9 markList/slotKernel @9e8c368b0b4c2c7892a0c9f0f302d7c164016209):
 // a mark list keeps at most 4 ascending non-zero rows <= total rows, refusing empty, late,
 // repeated or fifth marks; tree state selects the narrowest slot kernel holding its peak;
 // and recurrent state stores at segment marks so a resumed recurrence replays

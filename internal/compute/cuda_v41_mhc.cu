@@ -1,5 +1,4 @@
 // Adapted from ggml-org/llama.cpp dsv4-hc.cu at
-// 3c809f44383bcebc318b8cddd8c6d11aaa861e9b; see cuda_v41_mhc.LICENSE.
 // Included by cuda_kernels.cu. Contiguous FAK ABI, not ggml's tensor ABI.
 #ifdef FAK_CUDA_V41_MHC
 __device__ static float mhc_bf16(float v) {

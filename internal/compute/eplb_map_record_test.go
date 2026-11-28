@@ -3,7 +3,6 @@ package compute
 // CPU-oracle witnesses for the EPLB logical-to-physical map-and-record contract
 // (eplb_map_record.go, device twin eplb_map_record.cu). The expected values below
 // are hand-computed from the vLLM _eplb_map_and_record_i32_kernel semantics pinned
-// by ticket oss-port-vllmtop-eplb-map-record-20261103: replica selection is the
 // low 32 bits of token*2654435769 modulo the clamped replica count, hit counts
 // accumulate per physical target, and disabled/unpadded/out-of-range entries
 // never record.

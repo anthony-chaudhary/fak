@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // FAK's stored Engram row contract, shared by the checked CUDA family.
 // Packed integer arithmetic is adapted without numerical changes from
-// shaders/v41_engram_row_decode.comp at 04257226173c7871d96d3d77dc5975b8a61fb93d.
-// Q2_K and IQ4_NL use the existing MIT-attributed llama.cpp helpers instead
 // of a second decoder/codebook. CUDA launch, stream and ownership stay in FAK.
 #ifndef FAK_V41_ENGRAM_ROWS_H
 #define FAK_V41_ENGRAM_ROWS_H

@@ -5,10 +5,6 @@
 // iq4xs_matvec.comp - GGML IQ4_XS matrix-vector product on the packed weights.
 //
 // Ported from ggml-vulkan (MIT, Copyright (c) 2023-2026 The ggml authors), pinned at
-// llama.cpp dff60048744f99cb0af68d02be2314456b3269dc:
-//   ggml/src/ggml-vulkan/vulkan-shaders/types.glsl:1703-1728   (block_iq4_xs layout)
-//   ggml/src/ggml-vulkan/vulkan-shaders/types.glsl:1807-1822   (kvalues_iq4nl table in LDS)
-//   ggml/src/ggml-vulkan/vulkan-shaders/dequant_funcs.glsl:450-478 (scale/nibble decode)
 //   ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl  (subgroupAdd row reduction)
 //
 // MIT License. Copyright (c) 2023-2026 The ggml authors.

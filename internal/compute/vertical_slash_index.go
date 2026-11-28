@@ -2,7 +2,6 @@ package compute
 
 // Host mirror of the vertical/slash -> block-sparse attention metadata builder.
 // Adapted from microsoft/MInference csrc/vertical_slash_index.cu at commit
-// 29ef1974fcb5a1440ccf92d7d7996900230fddcf, MIT.
 // Copyright (c) Microsoft Corporation. Full license text:
 // cuda/minference_vertical_slash_index.cuh.
 

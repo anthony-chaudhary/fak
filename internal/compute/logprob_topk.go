@@ -2,14 +2,12 @@
 // [rows, vocab].
 //
 // ADAPTED from vllm-project/vllm, vllm/v1/worker/gpu/sample/logprob.py at
-// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0): _topk_log_softmax_kernel
 // (per-row max + log-sum-exp streamed over 1024-wide blocks, output emitted
 // only at the gathered ids), _ranks_kernel (chosen-token rank counting ties as
 // >=) and _fill_logprob_token_ids_kernel (gather-column layout: chosen token
 // first, then the bounded top-k ids). Re-expressed here as the CPU contract
 // reference that pins the observable behavior of the CUDA family in
 // logprob_topk.cu; no upstream code copied. Ref
-// oss-port-vllmtop-logprob-device-topk-20261103.
 //
 // SEMANTICS (pinned by logprob_topk_test.go):
 //   - All value arithmetic is float32, exactly as on device: row max,

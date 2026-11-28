@@ -144,8 +144,6 @@ extern "C" void fcuda_upload_async_stats(uint64_t *issued, uint64_t *fallback, s
 }
 
 // BEGIN checked expert-ring refill (#14199).
-// Conceptual geometry-slot/completion adaptation of vLLM fa3b9d1377219247060d3c8b49eae199c9e7e154,
-// offloader/prefetch.py (Apache-2.0); see third_party/vllm-offloader-refill.
 // This eager arm does NOT use the legacy copy-stream/event slot protocol above.
 // All calls hold cudaMu inside an already-owned complete execution domain.
 #define FCUDA_OFFLOAD_REFILL_CAP ((size_t)64 << 20)

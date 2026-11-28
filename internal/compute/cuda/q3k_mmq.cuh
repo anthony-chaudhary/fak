@@ -1,12 +1,8 @@
 // PRIVATE, UNQUALIFIED: Q3_K prompt-only MMQ; no default dispatch change.
 // Q3 loader/dot/D4 quantizer/config direct-adapted from ggml-org/llama.cpp at
-// 571d0d540df04f25298d0e159e520d9fc62ed121 (MIT). License and notices:
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
 // Launch/writeback/stream-k scaffolding reused from Fak q4k_mmq.cuh, whose
-// upstream pin is 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd.
 // Stream-K iteration cap additionally follows llama.cpp change
-// 4c1004c49221b07c3b8108977e3d1991fc9f45cc.
-// Copyright (c) 2023-2026 The ggml authors. MIT text follows.
 /*
 MIT License
 

@@ -2,7 +2,6 @@ package compute
 
 // block_sparse_indexer_test.go — pins the DIRECT-PORTED SGLang DSV4.1 two-level
 // block-sparse indexer contract (block_amax.cuh / candidate_block_table.cuh /
-// topk_bf16_small.cuh @faaff1eca8876b8b77d8704f080c3ee2064b8b65):
 //   - the acceptance invariant: TwoLevelBlockKeys selects the same key SET as the
 //     flat DeepSelectTopk on the identically prepared block-maxima keys, for every
 //     input (fuzzed, plus a brute-force reference on small rows);

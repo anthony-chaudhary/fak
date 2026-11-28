@@ -89,7 +89,6 @@ func cudaQ8RowsScratch(rows, in, block int) cudaGEMMScratch {
 
 // cudaQ8MatMulScratch is the scratch fcuda_q8_matmul_f32 needs for rows rows: the per-row
 // activation codes plus f32 block scales, whatever the row count. The P>=128 dequant + fp16
-// split arm was retired (oss-port-cuda-perf-gdn-q8-dequant-retire), so no weight-sized f32/fp16
 // image is ever allocated or priced for a Q8_0 GEMM.
 func cudaQ8MatMulScratch(out, in, rows, block int) cudaGEMMScratch {
 	return cudaQ8RowsScratch(rows, in, block)

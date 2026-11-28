@@ -2,8 +2,6 @@
  * SPDX-License-Identifier: Apache-2.0
  * SPDX-FileCopyrightText: Copyright contributors to the vLLM project
  *
- * Adapted from vllm-project/vllm at fa3b9d1377219247060d3c8b49eae199c9e7e154
- * (Apache-2.0). License and notices: THIRD_PARTY_NOTICES.md ("vLLM"); see also
  * third_party/vllm-gdn-decode/NOTICE.
  * FAK uses FP32 activations and one canonical [head,key,value] carried state.
  * The upstream 1..8-token warp-row recurrence is retained; shared-memory

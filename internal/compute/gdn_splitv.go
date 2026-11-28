@@ -3,7 +3,6 @@ package compute
 // Gated Delta Net (GDN) Split-V MTP decode occupancy partitioner and host
 // reduction oracle.
 //
-// ADAPT of vllm-project/vllm@8bb1147817f79d36669efcdf461cf63e10b3679b
 // (csrc/gdn/fused_gdn_decode_kernel.cu,
 // vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py, Apache-2.0).
 //

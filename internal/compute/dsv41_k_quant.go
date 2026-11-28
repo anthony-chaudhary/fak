@@ -3,14 +3,12 @@
 // ADAPTED from vllm-project/vllm,
 // vllm/models/deepseek_v41/common/ops/cache_utils.py:184,528
 // (_quantize_and_insert_k_mxfp8_kernel, _dequantize_and_gather_k_mxfp8_kernel)
-// at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0; attribution in
 // THIRD_PARTY_NOTICES.md): the V4.1 all-dims MXFP8 K record (512 e4m3 payload
 // bytes + 16 ue8m0 scale bytes of 32 dims each, interleaved per token inside
 // the paged page), quantized at paged-cache insert and dequantized during
 // decode-attention gather. Re-expressed here as the CPU oracle that pins that
 // contract; the CUDA kernels live in dsv41_k_quant.cu with the shared record
 // helpers in cuda/dsv41_k_quant_vllm.cuh. No upstream code copied.
-// Ref oss-port-vllmtop-dsv41-k-quant-cache-20261103.
 //
 // SEMANTICS (pinned by dsv41_k_quant_test.go):
 //   - One record is DSV41KBytesPerToken = 528 bytes: dims 0..511 as OCP

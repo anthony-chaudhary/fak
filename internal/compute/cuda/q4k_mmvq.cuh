@@ -1,6 +1,4 @@
 // ---- Q4_K q8_1 DP4A matrix-vector product for decode (fak#8635) -------------------------
-// Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
-// Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
 //
 // The default Q4_K instantiation uses the NVIDIA GENERIC parameter table (Ampere and newer,

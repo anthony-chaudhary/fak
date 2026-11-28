@@ -5,9 +5,7 @@
 // packet) so it shares g_stream, the pooled allocator and the transfer
 // witnesses of the single libfakcuda object.
 //
-// DIRECT-PORT of vllm-project/vllm
 // vllm/v1/kv_offload/cpu/swap_blocks_triton.py at pin
-// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0).
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 // This file is a modified derivative: the Triton _swap_blocks_kernel is
 // re-expressed as a CUDA kernel for fak's flat C ABI. Divergences, all

@@ -4,8 +4,6 @@
 // The one-row fused gate (V41RouterGateTopKBackend) stays canonical for decode;
 // this is the prefill-batch path.
 //
-// ADAPT of vllm-project/vllm csrc/fp32_router_gemm.cu at pin
-// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0): fp32_router_gemm_kernel,
 // re-expressed for fak's flat C ABI and the 512-class expert envelope. Divergences
 // from upstream, all deliberate:
 //   - fp32 activation only (upstream's bf16 activation variant is dropped): the

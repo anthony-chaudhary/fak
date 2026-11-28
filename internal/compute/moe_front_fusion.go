@@ -1,7 +1,6 @@
 package compute
 
 // Adapted from NVIDIA/TensorRT-LLM (Apache-2.0) at commit
-// 2f528b21d8b28ec56f4d4d8eace953dce8399138, sources
 // tensorrt_llm/_torch/moe/fused_moe/moe_scheduler.py and
 // tensorrt_llm/_torch/moe/fused_moe/cutedsl/grouped_gemm/nvfp4.py.
 // Changes: the MoE decode front-end ordering contract is re-expressed as a

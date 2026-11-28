@@ -4,8 +4,6 @@
 // input, and an op with no assigned input stays unassigned.
 //
 // ADAPTED from llama.cpp (MIT; ggml-org/llama.cpp at
-// 83078fec0db82d6b5a00d9599062c38c39145755):
-//   ggml/src/ggml-backend.cpp:921 ggml_backend_sched_backend_id_from_cur —
 //       pass 1 of ggml_backend_sched_split_graph: a tensor whose buffer is
 //       pre-allocated (a weight) pins its op to the backend that owns the
 //       buffer; an op with no weight source is left unassigned for the

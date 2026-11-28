@@ -10,7 +10,6 @@ import (
 //
 // The arithmetic contract is adapted from FreeToken's Torch oracle at
 // python/freetoken/models/qwen4_exp/ple.py:428-478 in
-// af71ba43206e124f5ff6419b47ee36c6e9981078 (Apache-2.0). The fused CUDA
 // realization is separately attributed at its implementation site.
 type Qwen4ExpPLEHashSpec struct {
 	NGramSize      int

@@ -4,8 +4,6 @@
 // and not declared in cuda_backend.h. Remains gated on qualification before
 // wiring into libfakcuda.
 //
-// ADAPT of vllm-project/vllm@ae065918640a198a56f6f17eb45e251c3229fe41
-// (csrc/moe/grouped_topk_kernels.cu:480,639,922,1095, Apache-2.0):
 // grouped_topk_fused_kernel family re-expressed for fak's flat C ABI.
 // Divergences from upstream, deliberate:
 //   - Ties in both group score and expert choice score resolve deterministically

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // FP8 KV storage mechanism adapted from vllm-project/vllm
-// fa3b9d1377219247060d3c8b49eae199c9e7e154:
-// csrc/quantization/w8a8/fp8/common.cu,
 // csrc/quantization/w8a8/fp8/common.cuh, and
 // csrc/quantization/w8a8/fp8/nvidia/quant_utils.cuh.
 // Row maximum reduction and native saturating E4M3 conversion are retained.

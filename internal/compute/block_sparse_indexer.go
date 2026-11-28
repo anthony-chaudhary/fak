@@ -2,13 +2,10 @@ package compute
 
 // block_sparse_indexer.go — DeepSeek-V4.1 two-level block-sparse indexer, host-side.
 //
-// PROVENANCE (DIRECT-PORT, ticket oss-port-sglang-block-sparse-indexer):
-//   Source:  sgl-project/sglang @ faaff1eca8876b8b77d8704f080c3ee2064b8b65
 //            ("dsv4.1: Top-k kernels and candidate selection", PR #39648);
 //            license and notices: THIRD_PARTY_NOTICES.md ("SGLang").
 //   License: Apache-2.0 (SGLang root LICENSE; no per-file copyright header on the
 //            pinned sources). Copyright SGLang authors.
-//   Reuse:   DIRECT-PORT of the decomposition contract — the level-one block-amax
 //            reducer (newest block forced +inf, rows with <= topk blocks skipped),
 //            the exact level-two top-k over block maxima, and the candidate-block
 //            table finaliser (ascending ids, INT32_MAX pad, pool-slot transform,

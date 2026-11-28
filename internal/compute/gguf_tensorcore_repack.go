@@ -1,4 +1,3 @@
-// Clean-room implementation inspired by IST-DASLab/marlin@1f25790bdd49fba53106164a24666dade68d7c90 (Apache-2.0):
 // offline tensor-core fragment weight+scale repack with idempotent repack guard, lossless unpack, and GGUF preservation.
 package compute
 

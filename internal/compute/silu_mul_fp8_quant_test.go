@@ -18,7 +18,6 @@ import (
 // FP8 borrow from csrc/libtorch_stable/quantization/activation_kernels.cu:276
 // (silu_mul_fp8_quant_deep_gemm_kernel) with the act_and_mul_kernel structure
 // (csrc/libtorch_stable/activation_kernels.cu:102) @
-// b6ff8a2f509cc7ac9c58176f5115a836aa1e08bd (Apache-2.0):
 //
 //	(a) amax-driven ue8m0 scale and e4m3fn RNE payload vs the independent
 //	    f64 Go reference on a known row, with hand-pinned scale bytes and

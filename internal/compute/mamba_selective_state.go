@@ -5,8 +5,6 @@ import (
 	"math"
 )
 
-// ADAPT of state-spaces/mamba (Apache-2.0),
-// mamba_ssm/ops/triton/selective_state_update.py:24 @e9594ce1c732:
 // decode-step selective state update with fp32 math, z-gate, dstate block
 // selection, and optional state_batch_indices slot indirection (negative index
 // skips pad rows). Component and host oracle only: no hardware or speed claim.

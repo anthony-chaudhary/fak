@@ -16,7 +16,6 @@ import (
 // IQ2_XXS (2.06 bits/weight) formats, with ~22% fewer expert bytes than INT4 gs64.
 //
 // The layout and arithmetic are adopted from benmaster82/picchio (MIT, pinned at
-// 275ed9b34f36e69ea13e1e75049c738ec720f00d, "Copyright (c) 2026 benmaster82"): the
 // per-group-64 plane layout, the scalar decode, and the quantize mirror (per-group
 // amax/3.5 scale, 1e-8 floor, round-to-nearest code clamped to [-4,3]). This is a
 // clean-room Go port: no C bytes are vendored; the layout and arithmetic are adopted

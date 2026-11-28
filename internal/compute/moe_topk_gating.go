@@ -3,8 +3,6 @@ package compute
 // General device top-k gating with softmax/sigmoid scoring and optional weight
 // renormalization: the pure-Go host reference of moe_topk_gating.cu.
 //
-// ADAPT of vllm-project/vllm@ae065918640a198a56f6f17eb45e251c3229fe41
-// (csrc/moe/topk_softmax_kernels.cu:80,142,165,280, Apache-2.0): topkGating,
 // moeTopK, moeSoftmax, and moeSigmoid re-expressed for general non-V4.1 MoE
 // routers.
 //

@@ -2,7 +2,6 @@
 //
 // DeepSeek V4.1 compressor ring and gated pool on CUDA (opt-in
 // FAK_CUDA_V41_COMPRESSOR). Ported from antirez/ds4 at
-// 80ebbc396aee40eedc1d829222f3362d10fa4c6c (MIT; see
 // THIRD_PARTY_NOTICES.md "antirez/ds4 (DwarfStar)").
 #ifdef FAK_CUDA_V41_COMPRESSOR
 

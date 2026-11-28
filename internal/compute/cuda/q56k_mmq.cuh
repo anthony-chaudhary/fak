@@ -1,5 +1,4 @@
 // ---- Retained Q5_K/Q6_K prompt-panel MMQ family (Q6_K default prefill arm) ----
-// Adapted from llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
 // Copyright (c) 2023-2026 The ggml authors. Full permission notice is in
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
 //

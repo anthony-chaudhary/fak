@@ -89,9 +89,7 @@ func DiagnoseHIPChannelCamping(
 
 // WMMA attention route for gfx1151.
 //
-// The device kernel in rocm_kernels.hip is a direct port of gufo-org/gufo
 // src/models/qwen/hip/kernels/attention_wmma.hip at commit
-// d0f7c3a023a11af81161264eeb24e9a97aa7498a (MIT License, Copyright (c) 2026
 // gufo contributors; the full notice sits beside the kernel). This file holds
 // the portable half: the selection contract the device guard implements and a
 // CPU reference that walks the kernel's tiling, so the port can be checked on

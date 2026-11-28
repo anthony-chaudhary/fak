@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-// Direct port of shaders/v41_routed_swiglu.comp, blob
-// 782669d69e5ca477a3fc88f06527f4f451d6b16e. See PROVENANCE.md.
 // The lane math is shared, outside the opt-in, with the routed id/fused
 // kernels in cuda_v41_routed_mmid.cu, so both paths publish the same bits.
 __device__ static unsigned routed_swiglu_bf16(unsigned u) {

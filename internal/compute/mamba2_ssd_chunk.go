@@ -5,8 +5,6 @@ import (
 	"math"
 )
 
-// ADAPT of state-spaces/mamba (Apache-2.0),
-// mamba_ssm/ops/triton/ssd_combined.py:628 @e9594ce1c732:
 // Mamba-2 SSD chunked prefill pipeline (chunk cumsum -> chunk state -> state
 // passing -> chunk scan) with cu_seqlens varlen packed batches, initial_states,
 // and per-sequence final_states. Component and host oracle only: no hardware or

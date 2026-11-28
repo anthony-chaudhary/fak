@@ -826,7 +826,6 @@ func QuantizeF32ToQ4_0(src []float32) ([]byte, error) {
 // QuantizeF32ToQ4_0Ref encodes float32 values into ggml-exact Q4_0 blocks.
 //
 // Ported from ggml-org/llama.cpp ggml/src/ggml-quants.c (quantize_row_q4_0_ref)
-// at commit 83078fec0db82d6b5a00d9599062c38c39145755. MIT License.
 // Copyright (c) 2023-2026 The ggml authors
 //
 // The scale is the signed max-magnitude value over -8, so that value lands on

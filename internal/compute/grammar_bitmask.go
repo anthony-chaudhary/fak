@@ -3,7 +3,6 @@
 //
 // ADAPTED from vllm-project/vllm,
 // vllm/v1/worker/gpu/structured_outputs.py:133 (_apply_grammar_bitmask_kernel)
-// at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0; attribution in
 // THIRD_PARTY_NOTICES.md), lineage xgrammar
 // apply_token_bitmask_inplace_triton (mlc-ai/xgrammar
 // python/xgrammar/kernels/apply_token_bitmask_inplace_triton.py): a packed
@@ -14,7 +13,6 @@
 // candidate re-expresses that contract as the Go oracle that pins it
 // (GrammarBitmaskWordCount / PackGrammarBitmask / ApplyGrammarBitmask), with
 // the CUDA kernel in grammar_bitmask.cu. No upstream code copied.
-// Ref oss-port-vllmtop-grammar-bitmask-device-20261104.
 //
 // SEMANTICS (pinned by grammar_bitmask_test.go):
 //   - One packed word covers 32 tokens: bit i of word w addresses token

@@ -33,8 +33,6 @@ func gbByteIDs(s string) []int {
 }
 
 // TestGrammarBitmaskMatchesHostMaskOracle pins the vLLM grammar-bitmask borrow
-// from vllm/v1/worker/gpu/structured_outputs.py @ ae065918640a198a56f6f17eb45e251c3229fe41
-// (Apache-2.0; lineage xgrammar apply_token_bitmask_inplace_triton):
 //
 //	(a) a dense allowed-set row produces byte-identical -inf placement vs
 //	    CallMask.MaskLogits on the f32 oracle, with allowed values preserved

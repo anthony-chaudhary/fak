@@ -2,8 +2,6 @@
 //
 // ADAPTED from sgl-project/sglang,
 // python/sglang/kernels/ops/speculative/dspark/sharded_greedy.py:109 at
-// 7d5696b3a1638a7c980e46ed77eb876faad158a2 (Apache-2.0). Re-expressed in
-// idiomatic Go; no upstream code copied. Ref oss-port-sglang-dspark-sharded-greedy.
 //
 // PROBLEM / CONTEXT:
 // DSpark speculative decoding selects the next token as the argmax of

@@ -1,12 +1,10 @@
 // dsv41_k_quant.cu — DSv4.1 mxfp8 K-plane quantize-and-insert +
 // dequantize-and-gather.
 //
-// Adapted from vLLM at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0).
 // License and notice: THIRD_PARTY_NOTICES.md ("vLLM").
 // The V4.1 all-dims MXFP8 record (512 e4m3 payload bytes + 16 ue8m0 scales of
 // 32 dims each) is quantized at paged-cache insert and dequantized during
 // decode-attention gather.
-// Ref oss-port-vllmtop-dsv41-k-quant-cache-20261103.
 //
 // Not yet #included into cuda_kernels.cu: that one-line build wiring is a
 // follow-on ticket beyond this candidate's path cap. The Go oracle in

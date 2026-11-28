@@ -5,7 +5,6 @@ import (
 	"math"
 )
 
-// ADAPT of FlagOpen/FlagGems (Apache-2.0), src/flag_gems/ops/rms_norm.py:1 @3f1f896fd90f:
 // fused single-pass RMSNorm kernel contract over [rows, cols] float32 panels.
 // Component and host oracle only: no hardware or speed claim.
 

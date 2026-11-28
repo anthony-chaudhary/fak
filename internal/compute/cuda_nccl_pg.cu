@@ -43,8 +43,6 @@ static ncclComm_t g_pg_comm;
 static int g_pg_rank = -1;
 static int g_pg_world = 0;
 // g_pg_aborted latches the first fcuda_nccl_pg_abort (the TP-group abort-once discipline
-// adapted from ashhart/TensorFold zig/src/cuda/tp_group.zig@9e8c368b0b4c2c7892a0c9f0f302d7c164016209,
-// Apache-2.0; ADAPT — re-expressed, no upstream code copied). Once set, fcuda_nccl_pg_destroy
 // REFUSES the ncclCommDestroy (abort-then-destroy is a no-op — no double teardown of an
 // already-aborted communicator). The closed contract is pinned on a CPU host by
 // nccl_group_lifecycle_test.go (TestNCCLOpGroupAbortOnceNoDestroy).

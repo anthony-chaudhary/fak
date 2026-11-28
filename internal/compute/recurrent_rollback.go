@@ -1,4 +1,3 @@
-// Ported from modular/modular max/python/max/nn/_graph_ops/state_space/kimi_delta.py@88ab8913af6b9298fe914e0f20d87a49e4172d0d (Apache-2.0 WITH LLVM-exception; Copyright (c) 2026 Modular Inc.). Adapted to fak-owned Go.
 //
 // The attribution above covers the GDN spec-verify ring-record machinery in this
 // file (the GDNVerifyRing* types, record construction, ring wraparound, the fold,

@@ -4,7 +4,6 @@
 // v41_compressor_ring.comp - DeepSeek V4.1 device-resident compressor group
 // ring. Adapted from DeepInfer compress_and_update_state_decode_tl (Apache-2.0,
 // deepseek-ai/DeepInfer deepinfer/model_executor/layers/tilelang_ops/cuda/compress.py
-// at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01; see THIRD_PARTY_NOTICES.md); no
 // upstream source is copied. Every decode token stores its projected
 // (kv, score) row into ring row `slot`; the token that closes a group
 // (emit != 0) also pools the ring in the same dispatch. The pool arithmetic is

@@ -1,5 +1,4 @@
 // Adapted from HazyResearch/Megakernels (https://github.com/HazyResearch/Megakernels),
-// pinned at revision 7309cec801537b61fea3b50d7dfe454a6cde578e.
 // Copyright (c) 2025 HazyResearch
 // SPDX-License-Identifier: MIT
 // See THIRD_PARTY_NOTICES.md ("HazyResearch Megakernels").

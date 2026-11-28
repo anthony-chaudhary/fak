@@ -1,6 +1,5 @@
 /* vulkan_backend.h — the flat C ABI between the Go cgo wrapper (vulkan.go) and the
  * Vulkan compute shim (vulkan_shim.cpp). It mirrors cuda_backend.h function-for-function
- * so vulkan.go is a near-mechanical port of cuda.go: the Go side owns the Backend
  * interface and re-checks every result; this header carries only data (device buffer
  * handles + shapes), never trust.
  *

@@ -1,5 +1,4 @@
 // Persistent [max_position, rot_dim] RoPE cos/sin table and position-id array rotation kernel.
-// Adapted from vllm-project/vllm@ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0).
 // Copyright (c) 2023, The vLLM team. License and notice: THIRD_PARTY_NOTICES.md ("vLLM").
 //
 // Table layout: [max_position, rot_dim], where each row pos stores

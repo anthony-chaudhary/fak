@@ -1,7 +1,5 @@
 // selective_scan_prefill.cuh - structure-only contract for Mamba selective-scan chunked prefill.
 //
-// ADAPT of state-spaces/mamba (Apache-2.0), csrc/selective_scan/selective_scan_fwd_kernel.cuh:74
-// @e9594ce1c732: CUB warp-scan of (a, b) recurrence pairs with running-prefix carry across
 // chunks, final-state extraction, MAX_DSTATE=256, sm_75+ (bf16 path sm_80+). No upstream code
 // is copied.
 //

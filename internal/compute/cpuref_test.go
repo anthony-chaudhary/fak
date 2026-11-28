@@ -7,7 +7,6 @@ import (
 )
 
 // cpuref_test.go — pins the Q8_0 decode group-column walk (llama.cpp AMX-inspired, INSPIRE-ONLY;
-// ggml/src/ggml-cpu/amx/mmq.cpp:1573@8df6229c0fd56f735f91ddbbd4e7308fce4a96ab, MIT). The closed
 // contract: for every output row o, y[o] = Σ_b float32(exactIntBlockSum(o,b)) * dw[o,b] * dx[b],
 // accumulated in block order b=0..nblk-1. Any traversal that keeps that per-output sequence is
 // bit-identical; TestCpuRefGroupColumnWalk proves it against an independent first-principles

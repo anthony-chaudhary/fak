@@ -465,7 +465,6 @@ __global__ void k_qwen35_gdn_conv_state(
 // matching the existing CPU recurrence before value-head group expansion.
 // Prompt-panel tiling, column split, and split out-norm adapted from mw00/project-maya
 // src/prefill/kernels.cu (gdn_conv_tiled_kernel, gdn_rec_cols_kernel, gdn_out_norm_kernel) at
-// 4615f346d9311dd1ce9f5738ab04446f023a6e42 (MIT; Copyright (c) 2026 Peasant Smith and the
 // Project Maya contributors; Copyright (c) 2026 Niko1221 and the Strata contributors).
 // Every element keeps the expression and order of the one-block-per-head panel it replaced,
 // so prompt outputs and recurrent/conv state stay bitwise that panel's (#9359).
@@ -1682,7 +1681,6 @@ extern "C" int fcuda_qwen35_gdn_decode_lanes_f32(
 }
 
 // Sequence-spine Q8 prefill delegates to the ordinary Q8 entry so eligible P>=128 panels take
-// the same rowtile panel lane every other prefill caller gets. oss-port-cuda-perf-gdn-q8-dequant-retire
 // retired the dequant -> fp16 split + 3x cuBLAS arm inside fcuda_q8_matmul_f32, but this seam kept
 // serving it directly, leaving the landed routing uninvoked on the live serve path. The entry keeps
 // q8_dequant_sgemm as its argument-bounds last resort and carries the mmq qualification opt-in
@@ -1695,7 +1693,6 @@ static int qwen35_gdn_q8_prefill(
 }
 
 /* Sequence spine adapted from llama.cpp gated_delta_net.cu at
- * 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT). Unlike calling the public
  * decode ABI from Go, this loop preserves every panel row and recurrent state on
  * g_stream and synchronizes once at the sequence boundary. */
 extern "C" int fcuda_qwen35_gdn_sequence_f32(

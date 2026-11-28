@@ -3,8 +3,6 @@ package compute
 // Batched KV block transport between a pinned host slab and device memory: the
 // CPU reference of kv_swap_batch.cu.
 //
-// DIRECT-PORT of vllm-project/vllm vllm/v1/kv_offload/cpu/swap_blocks_triton.py
-// at pin ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0).
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 // This file is a modified derivative of the Triton _swap_blocks_kernel and its
 // swap_blocks_batch dispatcher.

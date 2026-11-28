@@ -1,5 +1,4 @@
 // Adapted from DeepGEMM (https://github.com/deepseek-ai/DeepGEMM),
-// pinned at revision 5081f8513af57e61696de4f4f04b0e707ffb503e.
 // Copyright (c) 2025 DeepSeek
 // SPDX-License-Identifier: MIT
 // See THIRD_PARTY_NOTICES.md ("DeepGEMM").

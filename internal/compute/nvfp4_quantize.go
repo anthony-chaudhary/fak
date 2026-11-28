@@ -19,7 +19,6 @@ const (
 
 // QuantizeNVFP4Reference quantizes a finite row-major [rows, cols] matrix into
 // the unswizzled layout consumed by DecodeNVFP4Reference. The numerical recipe
-// follows NVIDIA Model Optimizer at commit 0638a274cf195870564d8e3c164e4f859e5be2a2:
 // one FP32 tensor scale and one positive E4M3FN scale per 16 consecutive K
 // values, followed by saturating E2M1 round-to-nearest-even conversion.
 //

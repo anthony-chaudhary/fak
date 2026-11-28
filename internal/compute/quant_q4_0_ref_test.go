@@ -8,7 +8,6 @@ import (
 )
 
 // The oracles below are transcribed from ggml-org/llama.cpp at commit
-// 83078fec0db82d6b5a00d9599062c38c39145755 (MIT, Copyright (c) 2023-2026 The ggml
 // authors): quantize_row_q4_0_ref in ggml/src/ggml-quants.c and the portable
 // ggml_compute_fp32_to_fp16 in ggml/src/ggml-impl.h. They share no code with the port.
 

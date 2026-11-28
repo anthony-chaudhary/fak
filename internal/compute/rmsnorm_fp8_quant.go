@@ -3,11 +3,9 @@
 //
 // ADAPTED from vllm-project/vllm, csrc/layernorm_quant_kernels.cu:23,88,161
 // (rms_norm_static_fp8_quant_kernel, fused_add_rms_norm_static_fp8_quant_kernel)
-// at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0): one-pass RMSNorm
 // writing OCP e4m3fn codes under a static per-tensor scale, for layers whose
 // next op consumes FP8 activations. Re-expressed here as the CPU oracle that
 // pins that contract; the CUDA kernel lives in rmsnorm_fp8_quant.cu. No
-// upstream code copied. Ref oss-port-vllmtop-rmsnorm-fp8-quant-20261103.
 //
 // This file is pure Go on purpose: it compiles and is tested in every build,
 // while the device kernel ships behind the cuda build tag once the successor

@@ -4,8 +4,6 @@ import "sync"
 
 // GraphEvictGuard is a host-side pending-use guard for the CUDA graph cache,
 // adapted from llama.cpp's CUDA graph-pool eviction fix
-// (ggml/src/ggml-cuda/common.cuh @00f113eceb2758158582d56f98bf476b2fe3ed32,
-// MIT; see THIRD_PARTY_NOTICES.md, "llama.cpp"). Upstream, a captured graph that
 // had been queued for imminent replay could still be evicted when graph-pool
 // memory pressure triggered a cleanup pass, forcing a costly re-capture stall
 // mid-decode. The fix guards the eviction decision on pending use: a graph with

@@ -11,7 +11,6 @@ import (
 )
 
 // Oracle and fixture copied without arithmetic changes from
-// vulkan_v41_engram_pool_test.go at be41c0a42f9878971df73a4043e58ee7eb2800d2.
 // Local names avoid collisions in combined CUDA/Vulkan builds.
 func cudaEngramWitnessBF16(v float32) float32 {
 	bits := math.Float32bits(v)

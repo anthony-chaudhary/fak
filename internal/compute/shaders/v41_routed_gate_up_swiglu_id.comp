@@ -5,7 +5,6 @@
 // down-operand publication into a single `mid` output (DeepSeek V4.1, fak-private#3341).
 //
 // ADAPT (MIT, Copyright (c) 2025-2026 antirez): antirez/ds4 ds4_cuda.cu
-// moe_gate_up_mid_decode_lut_qwarp32_kernel @fc80bd695da76ee14bcb86820bf900a5cdfda806:22143
 // does gate + up + SwiGLU + route weight into one mid buffer.
 //
 // Each projection retains v41_q2k_matvec_id.comp's row arithmetic and

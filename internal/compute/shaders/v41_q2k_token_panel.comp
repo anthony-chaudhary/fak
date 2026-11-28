@@ -2,7 +2,6 @@
 
 // Experimental same-expert token tile. Adapted from fak's q2k_matvec mode 0
 // and v41_q2k_matvec_id Q2K_BANK arithmetic. Prior art: llama.cpp multi-column
-// GEMV, MIT, ggml authors, pinned ccdbe290533f68154ede46e0618622eebcb6c070:
 // ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec.comp and mul_mat_vec_base.glsl.
 // Quant decode is outside the token loop; each activation and its ordered sum
 // are shared by the two output rows. Each row/token retains its own ordered

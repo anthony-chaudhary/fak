@@ -4,8 +4,6 @@ package compute
 // unweighted/unit expert rows before the finalize/all-reduce pass applies
 // per-token top-k router weights.
 //
-// ADAPT of sgl-project/sglang@2e7105d6fc8ac3b6e7f52215cd01709392d1f7ea
-// (python/sglang/kernels/jit/csrc/moe/mxfp4_decode/moe_mxfp4.cuh, Apache-2.0):
 // in the low-batch decode path (kMaxM=256), expert down-projection skips the
 // inline router-weight multiply and emits unweighted rows; the top-k weights
 // are folded into the subsequent finalize/all-reduce pass that already touches

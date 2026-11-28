@@ -3,7 +3,6 @@
 // one decode query position.
 //
 // Adapted from ggml-vulkan (MIT, Copyright (c) 2023-2026 The ggml authors), pinned at
-// llama.cpp f74e2fa6a31cc33ab4ee4ae516641cfe62df3924:
 //   ggml/src/ggml-vulkan/vulkan-shaders/flash_attn.comp                (scalar split-k path)
 //   ggml/src/ggml-vulkan/vulkan-shaders/flash_attn_split_k_reduce.comp (split combine)
 // License text: THIRD_PARTY_NOTICES.md.

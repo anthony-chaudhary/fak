@@ -798,7 +798,6 @@ bool allocPressure(VkResult r) {
 }
 
 // Compatible-type enumeration adapted from ROCmFPX/ggml Vulkan allocation:
-// https://github.com/ROCmFPX/ROCmFPX/blob/9279b36aa69fd1ecc420211fc24b5c011c6889ed/ggml/src/ggml-vulkan/ggml-vulkan-buffers.cpp
 // Copyright (c) 2023-2026 The ggml authors
 // Copyright (c) 2025-2026 Carlo Pasquale (Charlie12345), ROCmFPX additions
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -1642,8 +1641,6 @@ void restoreCleanup() {
 // empty flush is a cheap no-op.
 VkCommandBuffer               g_batchCmd  = VK_NULL_HANDLE;
 // Drained command reuse, adapted from ggml's completed command-pool recycling:
-// ggml-org/llama.cpp 5e03a1ff450cae37a774684de55d14fb48b1f90b,
-// ggml/src/ggml-vulkan/ggml-vulkan.cpp:1114-1137 (MIT).
 // Copyright (c) 2023-2026 The ggml authors. See THIRD_PARTY_NOTICES.md.
 // Reset one buffer, never the shared pool: restore and one-shot commands have
 // independent ownership. This slot is separate from the active batch census.
@@ -7205,8 +7202,6 @@ int fvk_v41_routed_swiglu_panel_chunk_module_abi(const void* data, size_t bytes)
 }
 // V4.1 routed-expert id dispatch (fak#13820): one dispatch per stage over every
 // routed pick of a layer. ADAPT (MIT, Copyright (c) 2023-2026 The ggml authors):
-// llama.cpp ggml-vulkan mul_mat_vec_id @ccdbe290533f68154ede46e0618622eebcb6c070
-// (ggml-vulkan.cpp:7876-7908, one dispatch, grid Y = selected expert) with ids
 // remapped through a per-layer slot map as llama.cpp PR #29887's llama_moe_cache
 // does. The slot table is the layer's bound ring pages (up to kV41RoutedIDSlots).
 static constexpr int kV41RoutedIDSlots = 8;
@@ -7456,7 +7451,6 @@ int fvk_v41_routed_publish_sum_f32(const void* dDown, void* dSum, const void* dI
 // V4.1 fused routed-FFN dispatch (fak-private#3341): two dispatches per routed
 // layer instead of the id path's five. ADAPT (MIT, Copyright (c) 2025-2026
 // antirez): antirez/ds4 ds4_cuda.cu moe_gate_up_mid_decode_lut_qwarp32_kernel
-// @fc80bd695da76ee14bcb86820bf900a5cdfda806:22143 (gate + up + SwiGLU + route
 // weight into one mid buffer) and moe_down_sum_qwarp32_kernel:23869 /
 // moe_down_q4K_sum6_qwarp32_kernel:24099 (down projection plus the six-expert
 // sum). The id/slot-map binding is the routed id path's (llama.cpp

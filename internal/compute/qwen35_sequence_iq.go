@@ -1,7 +1,6 @@
 package compute
 
 // The sequence route composes the existing llama.cpp IQ2 port (iq_gemv.cuh,
-// f7c01c5226cac1de1052c17920ff38cdefea0ae6, MIT; THIRD_PARTY_NOTICES.md).
 // Weights stay GGUF-packed and activations stay F32. This is not a new kernel
 // or an expansion of the loader's transformed GDN/QK retention policy.
 const qwen35SequenceIQ2MaxTokens = 65535 // existing GEMV grid.y, not an admission heuristic

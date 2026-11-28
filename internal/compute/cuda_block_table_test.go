@@ -4,10 +4,7 @@ import (
 	"testing"
 )
 
-// TestCudaPagedPrefillSelect pins oss-port-flashinfer-fp8-prefill-6393 (PR #3321):
 // the arch-gated FP8 paged-prefill branch of the CUDA block-table paging path.
-// INSPIRE-ONLY port of the principle behind flashinfer-ai/flashinfer's SM120 FMHA
-// paged prefill (Apache-2.0): an FP8 paged path exists only where the arch admits
 // it; every other arch keeps the generic path. No kernel is added; this witnesses
 // host-side selection and byte accounting only. [SW-VERIFIED]
 func TestCudaPagedPrefillSelect(t *testing.T) {

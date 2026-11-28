@@ -5,9 +5,6 @@
 // iq1s_matvec.comp - GGML IQ1_S matrix-vector product on the packed weights.
 //
 // Ported from ggml-vulkan (MIT, Copyright (c) 2023-2026 The ggml authors), pinned at
-// llama.cpp dff60048744f99cb0af68d02be2314456b3269dc:
-//   ggml/src/ggml-vulkan/vulkan-shaders/types.glsl:518-652     (IQ1S_DELTA, packed 2-bit iq1s_grid)
-//   ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_iq1_s.comp:10-55 (2-bit grid/scale/delta decode)
 //   ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl  (subgroupAdd row reduction)
 //
 // MIT License. Copyright (c) 2023-2026 The ggml authors.

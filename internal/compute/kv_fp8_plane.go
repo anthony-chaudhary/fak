@@ -50,8 +50,6 @@ func kvFP8Finite(x float32) bool {
 
 // QuantizeKVFP8Plane is the correctness oracle for dynamic E4M3FN storage.
 // Its row reduction/conversion structure is adapted from vLLM
-// fa3b9d1377219247060d3c8b49eae199c9e7e154,
-// csrc/quantization/w8a8/fp8/common.cu (Apache-2.0).
 //
 // Fak intentionally does not use vLLM's min scale 1/(448*512): nonzero
 // rows use correctly rounded F32 amax/448, replacing only an underflowed

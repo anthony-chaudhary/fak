@@ -1,8 +1,6 @@
 // Package compute — MPK SM-level task-graph schema, partition invariants, and
 // task-descriptor contract, ported from the mirage-project/mirage MPK
 // (OSDI 2026) task-graph path: scripts/parse_task_graph.py and
-// scripts/partition_graph.py, pinned at d90383d009aba60b9c2a274685e3c0ef0d83e7b8
-// (Apache-2.0).
 //
 // In mirage, tensor programs lower to SM-level task graphs: each node is a
 // block of work that one or more SMs execute, and edges are tensor

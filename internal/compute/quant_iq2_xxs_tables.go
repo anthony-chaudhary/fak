@@ -10,8 +10,6 @@
 
 package compute
 
-// Codebook from ggml-org/llama.cpp at 6fe74980162af0ed5e559870d5deccafaa034e7c
-// (MIT; copyright 2023-2026 the ggml authors). These are
 // the IQ2_XXS magnitude/sign tables the model-side scalar reference decoder
 // (internal/model/quant_kquant_iqtables.go) already carries; they are duplicated
 // here because compute cannot import model (model imports compute), exactly as the

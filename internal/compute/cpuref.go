@@ -882,8 +882,6 @@ func qdot8scalar(qw []int8, dw []float32, qx []int8, dx []float32, block int) fl
 const amxDecodeGroupRows = 8
 
 // q8GroupColumnWalk computes dst[o] = Σ_b partial(o,b) with the group-column traversal adapted
-// from llama.cpp's AMX mmq kernels (ggml/src/ggml-cpu/amx/mmq.cpp:1573@8df6229c0fd56f735f91ddbbd4e7308fce4a96ab,
-// MIT, INSPIRE-ONLY): where the row-innermost walk completes one output row before starting the
 // next, this fixes the quantized group (block column b) and walks the group of output rows, so
 // the activation block and its scale are read once per group instead of once per output row —
 // the tile-residency principle behind the reported +13% tg on AMX. Bit identity with the

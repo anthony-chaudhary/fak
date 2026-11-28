@@ -4,9 +4,7 @@
 // V4.1 mxfp8 K-plane record helpers shared by the quantize-and-insert and
 // dequantize-and-gather kernels in ../dsv41_k_quant.cu.
 //
-// Adapted from vLLM at ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0).
 // License and notice: THIRD_PARTY_NOTICES.md ("vLLM").
-// Ref oss-port-vllmtop-dsv41-k-quant-cache-20261103.
 //
 // Record (V4.1 mxfp8, 528 B/token, interleaved per token inside a page):
 //   [0,512)   e4m3 payload, one byte per dim (RoPE dims included)

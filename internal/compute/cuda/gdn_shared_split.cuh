@@ -1,6 +1,5 @@
 // Shared activation split for the retained Q8 GDN sequence producer (#14097).
 // The surrounding sequence adapts llama.cpp gated_delta_net.cu at
-// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT; existing notices retained).
 // This is original orchestration of Fak's existing compensated kernels, not a
 // new upstream arithmetic port. Include after q8_dequant_sgemm.
 #include <stdint.h>

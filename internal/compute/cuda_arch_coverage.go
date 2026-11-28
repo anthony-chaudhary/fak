@@ -217,8 +217,6 @@ func SelectCUDADecodeProgram(major, minor int, dt Dtype) CUDADecodeProgram {
 
 // ---- Attention backend priority list ----------------------------------------------
 //
-// ADAPT of the xformers/MSLK fmha dispatch idea (facebookresearch/xformers,
-// xformers/ops/fmha/dispatch.py @b5410d3bb4bf6929aba3324676b05e826a4d2886, BSD-3-Clause):
 // an ORDERED list of candidate attention backends, each declaring its support envelope over
 // (compute capability, dtype, mask shape, sequence regime). The walk returns the first eligible
 // entry and falls through to the generic path when nothing covers the combination. Only the

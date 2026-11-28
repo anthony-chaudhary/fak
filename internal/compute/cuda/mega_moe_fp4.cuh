@@ -3,10 +3,6 @@
 //
 // ADAPTED from flashinfer-ai/flashinfer PR #7961 "perf(moe_ep): faster SM90
 // MXFP4/NVFP4 pull MegaMoE (N72/N80 token tiles, measured defaults, K128
-// pipelining)", merged 2026-11-06 at 74c8d6bd0943165f8ec85c898908f3cebcef875a:
-//   flashinfer/moe_ep/kernel_src/sm90/pull_style_cutedsl_megakernel/shim/hopper_mxfp4.py
-//   flashinfer/moe_ep/kernel_src/sm90/pull_style_cutedsl_megakernel/shim/mxfp4_optimization.py
-// Apache-2.0 upstream. This fragment re-expresses the task-shape contract
 // and pipelining invariants as a host/device-shared skeleton; no upstream
 // code block is copied and no BSD device kernel is ported. The closed
 // in-memory oracle over tile packing and stage ordering lives in

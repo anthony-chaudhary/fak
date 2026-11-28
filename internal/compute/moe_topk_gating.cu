@@ -5,8 +5,6 @@
 // and not declared in cuda_backend.h. Remains gated behind qualification and a
 // served non-V4.1 MoE model landing before wiring into libfakcuda.
 //
-// ADAPT of vllm-project/vllm@ae065918640a198a56f6f17eb45e251c3229fe41
-// (csrc/moe/topk_softmax_kernels.cu:80,142,165,280, Apache-2.0): moeSoftmax,
 // moeSigmoid, moeTopK, and topkGating re-expressed for fak's flat C ABI.
 // Divergences from upstream, deliberate:
 //   - Ties in selection score resolve deterministically by ASCENDING expert

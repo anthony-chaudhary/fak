@@ -15,8 +15,6 @@
 // Change BOTH architecture names to 103a only for an admitted matching target.
 // SM100a adapter object was actually compiled; harness linking/execution and
 // SM103a remain UNRUN. Never treat build success as device/parity/performance.
-// Upstream FlashMLA MIT 2e5429fc5653bab6e081f09477126f731882a6a9;
-// CUTLASS BSD-3 4faf1a1568cf1e4ad8ff71846a13e16f2a6a6f6b, licenses retained.
 #include "cuda_flashmla_sparse_decode.h"
 #include <cuda_runtime.h>
 #include <vector>

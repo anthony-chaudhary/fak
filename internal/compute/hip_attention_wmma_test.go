@@ -4,7 +4,6 @@ package compute
 // generator, the case shapes, the comparison metric and the FP64 oracle are
 // ported from gufo-org/gufo tests/models/qwen/hip/attention/
 // wmma_prefill_ops_test.cpp at commit
-// d0f7c3a023a11af81161264eeb24e9a97aa7498a (MIT License, Copyright (c) 2026
 // gufo contributors). Upstream runs them against the device kernel; here they
 // run against the CPU mirror of that kernel, so they prove the tiling and
 // masking logic, not the silicon.

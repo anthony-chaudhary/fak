@@ -1,8 +1,6 @@
 package compute
 
 // Batched multi-row router gate GEMM: the CPU reference of moe_router_gemm.cu
-// (ADAPT of vllm-project/vllm csrc/fp32_router_gemm.cu at pin
-// ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0). This file is pure Go on
 // purpose: it compiles and is tested in every build, while the device kernel
 // ships behind the cuda build tag once the follow-on ticket wires
 // moe_router_gemm.cu into the single libfakcuda translation unit. The cgo launch

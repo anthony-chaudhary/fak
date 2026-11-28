@@ -19,7 +19,6 @@ import (
 	"unsafe"
 )
 
-// Geometry-slot/completion adaptation of vLLM fa3b9d1377219247060d3c8b49eae199c9e7e154.
 // See third_party/vllm-offloader-refill. Eager only, default off, no graph admission.
 func (c *cudaBackend) OffloadRefillEnabled() bool {
 	return c != nil && c == cudaDev && os.Getenv("FAK_CUDA_EXPERT_RING_REFILL") == "1"

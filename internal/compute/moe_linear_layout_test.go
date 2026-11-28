@@ -1,8 +1,6 @@
 package compute
 
 // CPU-oracle witnesses for the linearized MoE expert weight layout
-// (moe_linear_layout.go, ADAPT of ggml-org/llama.cpp PR #31047 at pin
-// 69ee2ecc0150ba7d1204a7f7393dfd651569db8c, MIT). The fixtures are fixed and
 // hand-checkable: six experts of four three-byte rows each. The witnesses pin
 // (1) offset-table addressing returns byte-identical tiles to the strided
 // reference, and (2) the launch planner issues no gather step for a fully

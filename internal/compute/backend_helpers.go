@@ -61,8 +61,6 @@ func releaseKVDeviceSlices[D any](keys, rawKeys, values []D, positions *[]int, r
 // Compute kernel source-hash cache (INSPIRE-ONLY clean-room adaptation of the
 // mlx Metal kernel cache, which keys compiled pipelines on the kernel source
 // so identical sources compile once: ml-explore/mlx
-// mlx/backend/common/metal_kernel.cpp @f624f8ec47e8049253c93360868b2bfea8a5b061,
-// MIT; no upstream code copied). Backends re-emit equivalent programs per
 // call site; keying the compiled-program cache on a content hash of the
 // source lets byte-identical sources share one entry while edited sources
 // recompile under their own.

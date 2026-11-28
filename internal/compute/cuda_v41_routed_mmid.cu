@@ -4,10 +4,7 @@
 // the fused gate/up GEMV with the clamped SwiGLU in its epilogue, and the down
 // GEMV with the checked BF16 publication and the routed sum in its epilogue.
 //
-// Ported from llama.cpp at 571d0d540df04f25298d0e159e520d9fc62ed121
-// (MIT, Copyright (c) 2023-2026 The ggml authors; see THIRD_PARTY_NOTICES.md,
 // "llama.cpp"). The clamped SwiGLU follows antirez/ds4 at
-// 80ebbc396aee40eedc1d829222f3362d10fa4c6c (MIT, The ds4.c authors; see
 // THIRD_PARTY_NOTICES.md, "antirez/ds4 (DwarfStar)"): g = min(g, c),
 // u = clamp(u, +-c), silu(g) * u * weight.
 //

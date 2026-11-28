@@ -100,7 +100,6 @@ func TestGraphCachePolicyVoterOwnership(t *testing.T) {
 
 // TestGraphCachePolicyCaptureReplayEvict pins the TensorFold graph-cache
 // contract adapted in graph_cache_policy.go (zig/src/cuda/graph_cache.zig:178
-// @9e8c368b0b4c2c7892a0c9f0f302d7c164016209): capture-once/replay-on-hit,
 // LRU eviction under cap, fingerprint drop-all, room-miss shed to min_keep,
 // hold evicts nothing, vote-gated misses, eager fallbacks, and peer-failure
 // disable.

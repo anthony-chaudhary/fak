@@ -302,8 +302,6 @@ __global__ void k_qwen38_causal_attention_panel_hd256(
 }
 
 // ---- Split-KV chunked-prefill panel (vLLM split-KV merge borrow) -----------------
-// ADAPT of vllm-project/vllm csrc/attention/merge_attn_states.cu at
-// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0; notice at
 // third_party/vllm-merge-attn-states/NOTICE): rows whose prefix exceeds
 // QWEN38_SPLITKV_PREFIX_THRESHOLD split their causal KV range into at most
 // QWEN38_SPLITKV_MAX_PARTITIONS contiguous partitions, one CTA per

@@ -1,7 +1,6 @@
 #ifndef FAK_CUDA_DEVICE_SCOPE_HOST_TEST
 // Algorithm adapted from FlashML-org/FreeToken
 // python/freetoken/kernel/triton/ple_hash.py:31-83 at
-// de77d16a5ac36494d85964f846b50ad36f7acc21 (Apache-2.0).
 //
 // One block owns one flattened token and one thread owns one PLE head. The
 // request-local coordinate is recovered from cuSeqLens inside this launch, so

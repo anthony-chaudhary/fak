@@ -17,7 +17,6 @@
 
 // Descriptor flow adapted from NVIDIA/CUDALibrarySamples (Apache-2.0):
 // cuBLASLt/LtMxfp8Matmul/sample_cublasLt_LtMxfp8Matmul.cu at
-// 9b347f161cce5cd2a51a0406b140f2a2d81df024.
 // Fak changes: exact V4.1 wkv_b TN/F32 geometry; runtime-opt-in SM120-only
 // capability; existing SIMT cast plus byte-only scale repack; checked owned
 // buffers, stream/capture/lifetime/error boundaries. This is not a DeepGEMM

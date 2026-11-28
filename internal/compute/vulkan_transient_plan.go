@@ -96,7 +96,6 @@ type transientSlot struct {
 // dominated by the definition and follows every use, and escaping values remain distinct.
 //
 // This is adapted from the lifetime/escape boundary in Modular KGEN StackReuse.cpp at
-// modular/modular@1c9fd2e03331f77d3a1034127cb3700b7fa43c02. The implementation and receipt
 // remain fak-native and backend-neutral.
 func PlanGraphTransients(graph Graph, values []TransientValue, align int64) (TransientAllocationPlan, TransientPlanReceipt, error) {
 	canonical, pipelineReceipt, err := CanonicalGraphPipeline().Run(graph)

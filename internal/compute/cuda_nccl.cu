@@ -136,7 +136,6 @@ extern "C" int fcuda_nccl_reducescatter_f32(void **dsend, void **drecv, int n, i
 // ---- Lifecycle: abort-once + ordered teardown ----------------------------------------
 //
 // The TP-group lifecycle discipline adapted from ashhart/TensorFold's zig/src/cuda/
-// tp_group.zig Group (pin 9e8c368b0b4c2c7892a0c9f0f302d7c164016209, Apache-2.0; ADAPT —
 // re-expressed in this C++ layer, no upstream code copied): Group.abort() latches and runs
 // ncclCommAbort exactly ONCE; Group.destroyComm() REFUSES to run ncclCommDestroy after an
 // abort (abort-then-destroy is a no-op — an already-aborted communicator must never be

@@ -1,7 +1,6 @@
 // Included by cuda_kernels.cu, not a separate translation unit.
 //
 // DeepSeek-V4.1 MoE router top-k on CUDA, scored and token-hashed layers.
-// Adapted from antirez/ds4 at 80ebbc396aee40eedc1d829222f3362d10fa4c6c (MIT, The
 // ds4.c authors; see THIRD_PARTY_NOTICES.md, "antirez/ds4 (DwarfStar)"): one warp
 // per token row, four rows per block, k rounds of a __shfl_xor_sync argmax with
 // the lower expert first on equal values, and a hash mode that takes the row's
@@ -18,7 +17,6 @@
 // and the token-hash layers is the vLLM topkGatingSoftplusSqrt and
 // dsv4HashTopkSoftplusSqrt pattern (vllm-project/vllm
 // csrc/moe/topk_softplus_sqrt_kernels.cu:245,78 at
-// ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0): score every expert
 // sqrt(softplus(z)) inside the selection kernel, take the gate picks by
 // top-k or the hash picks from the token-to-expert table, and renormalize
 // the unbiased scores by the in-order sum times the routed scaling factor.

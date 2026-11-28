@@ -1,7 +1,5 @@
 // megakernel_sm120_decode.cuh - structure-only description of a persistent sm_120a decode pass.
 //
-// ADAPT of SamuelReeder/megakernels (MIT), qwen3.5-0.8b/csrc/megakernel.cu
-// @10bd202c2cdceaf0703ea3bbb88ad03eaa308766: one resident CTA per SM, a weight ring owned by a
 // producer warp, flag-in-data handoff in place of grid barriers, and int8 weight rows with fused
 // dequant. No upstream code is copied. Measured upstream on sm_120a; nothing here is tuned or
 // measured on that card class.

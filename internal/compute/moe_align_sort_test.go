@@ -3,7 +3,6 @@ package compute
 // CPU-oracle witnesses for the MoE align-and-sort / weighted-sum finalize contract
 // (moe_align_sort.go, device twin moe_align_sort.cu). The expected values below are
 // hand-computed from the vLLM moe_align_block_size semantics pinned by ticket
-// oss-port-vllmtop-moe-align-sort-20261103: every cumsum entry is a block multiple,
 // pad slots hold the numel sentinel, and num_tokens_post_pad is the sum of the
 // per-expert padded counts.
 

@@ -2,9 +2,6 @@ package compute
 
 // Lamport -0.0 sentinel slot all-reduce push-plane protocol.
 //
-// ADAPT of sgl-project/sglang@f8aa131db5885f8c331909b000b6edf56a682a05
-// (python/sglang/kernels/jit/include/sgl_kernel/distributed/communicator.cuh:145-205,
-// Apache-2.0): producers encode +0.0 payload words to -0.0 (kNegZeroF16=0x8000,
 // kNegZeroF32=0x80000000) so written zeros are distinguishable from untouched
 // all-zero slot words without a separate arrival flags buffer; consumers poll
 // slots until no empty sentinel word remains, reduce across ranks, and

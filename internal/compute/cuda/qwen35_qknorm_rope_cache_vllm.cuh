@@ -2,7 +2,6 @@
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 //
 // Adapted from vllm-project/vllm csrc/fused_qknorm_rope_cache_kernel.cu
-// at fa3b9d1377219247060d3c8b49eae199c9e7e154 (Apache-2.0). License and notice:
 // THIRD_PARTY_NOTICES.md ("vLLM").
 
 static unsigned long long g_qwen35_vllm_qk_launches = 0;

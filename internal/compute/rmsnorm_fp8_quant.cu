@@ -4,9 +4,7 @@
 // the pooled allocator and the transfer witnesses of the single libfakcuda
 // object.
 //
-// ADAPT of vllm-project/vllm csrc/layernorm_quant_kernels.cu:23,88,161
 // (rms_norm_static_fp8_quant_kernel, fused_add_rms_norm_static_fp8_quant_kernel)
-// at pin ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0): one-pass
 // RMSNorm writing OCP e4m3fn codes under a static per-tensor scale, for
 // layers whose next op consumes FP8 activations. Re-expressed as a CUDA
 // grid-stride kernel for fak's flat C ABI. Divergences from upstream, all

@@ -8,7 +8,6 @@ import (
 )
 
 // Packed Engram gather, adapted from SGLang PR #47935 ("DSV4.1 Engram
-// packed-gather"), merged 2026-11-04 at 3f5b1bec8e00115bc8439b5b9a9da902822d2f82:
 // https://github.com/sgl-project/sglang/pull/47935
 //
 // Upstream keeps the DeepSeek-V4.1 conditional-memory lookup tables as MXFP4

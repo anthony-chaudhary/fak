@@ -18,7 +18,6 @@ import (
 
 // TestRmsNormFp8QuantMatchesOracle pins the vLLM fused RMSNorm + static-scale
 // FP8 E4M3 activation quant borrow from csrc/layernorm_quant_kernels.cu @
-// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0):
 //
 //	(a) norm+scale+round matches the Go reference on known rows, with
 //	    hand-pinned e4m3 bytes on exact-representable values;

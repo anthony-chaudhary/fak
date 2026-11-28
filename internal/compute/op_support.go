@@ -2,8 +2,6 @@ package compute
 
 // Op-level offload veto for Backend placement.
 //
-// ADAPT of ggml-org/llama.cpp@83078fec0db82d6b5a00d9599062c38c39145755
-// (ggml/src/ggml-backend.cpp:476,644,972, MIT): scheduler placement consults
 // both supports_op and offload_op, moving an op onto a candidate backend only
 // when both hold.
 //

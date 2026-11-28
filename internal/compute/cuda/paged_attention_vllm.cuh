@@ -1,5 +1,4 @@
 // ---- Paged decode attention over a block table (fak cuda-paged-kv) ------------------
-// Adapted from vLLM at tag v0.11.0 (b8b302cde434df8c9289a2b465406b47ebab1c2d), Apache-2.0.
 // Copyright (c) 2023, The vLLM team. Copyright (c) 2020-2023, NVIDIA CORPORATION.
 // The kernel lineage is NVIDIA FasterTransformer (release/v5.3_tag), Apache-2.0.
 // License and notice: THIRD_PARTY_NOTICES.md ("vLLM"); the FasterTransformer lineage is
@@ -19,7 +18,6 @@
 // V [num_blocks, nKV, hd, block]. One physical block id addresses the same block in every
 // layer's arena, so a block table is per-session, not per-layer.
 
-// Multi-page append follows vLLM e5196e2959a42908313510f55fa21f213a48802e per-token
 // slot addressing via the bounded by-value map; see paged_kv_write_map.h.
 #include <stdint.h>
 #include "paged_kv_write_map.h"
@@ -829,8 +827,6 @@ extern "C" int fcuda_paged_store_int(int* dst, int value) {
 #undef FAK_PA_BLOCK_SIZE
 
 // Qualified one-page COW adaptation of the vLLM block-copy kernel at
-// b8b302cde434df8c9289a2b465406b47ebab1c2d.
-// Copyright (c) 2023, The vLLM team. Apache-2.0; existing family notice above.
 // Modified: bounded by-value arena map, one distinct page pair, all three F32
 // planes per layer; no torch, device metadata allocation or new driver API.
 extern "C" int fcuda_paged_kv_copy_enabled(void) {

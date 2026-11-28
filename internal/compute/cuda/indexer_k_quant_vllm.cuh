@@ -1,6 +1,5 @@
 // Per-row symmetric INT8 quantization and paged cache write/gather helpers for the
 // DSA lightning indexer key cache.
-// Adapted from vllm-project/vllm@ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0).
 // Copyright (c) 2023, The vLLM team. License and notice: THIRD_PARTY_NOTICES.md ("vLLM").
 #ifndef FAK_INDEXER_K_QUANT_VLLM_CUH
 #define FAK_INDEXER_K_QUANT_VLLM_CUH

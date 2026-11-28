@@ -2,7 +2,6 @@ package compute
 
 import "errors"
 
-// ADAPT of OpenNMT/CTranslate2 (MIT), src/cpu/primitives.cc:1 @09e0165f68c8:
 // int8 CPU GEMM blocking and B-matrix panel packing for quantized CPU decode.
 // Component and host oracle only: no hardware or speed claim.
 

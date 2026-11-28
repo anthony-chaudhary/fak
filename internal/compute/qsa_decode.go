@@ -3,7 +3,6 @@ package compute
 // Adapted from flashinfer-ai/flashinfer (Apache-2.0), files
 // flashinfer/experimental/qsa_nvfp4/csrc/qsa_nvfp4_attention.cuh and
 // flashinfer/experimental/qsa_nvfp4/backend.py at commit
-// 61bc8b6dd7049a44d614b2a0cd4a036cb3c46ad0. Changes were made: the device
 // kernels are not ported; this file re-expresses their decode-step contract
 // (page math, split count, merge plan and reference, E2M1/E4M3 to BF16
 // conversion) as host Go reference code.

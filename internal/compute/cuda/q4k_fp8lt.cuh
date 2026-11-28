@@ -17,7 +17,6 @@
 
 // Q4_K prompt-panel FP8 GEMM descriptor flow adapted from NVIDIA/CUDALibrarySamples
 // cuBLASLt/LtFp8Matmul/sample_cublasLt_LtFp8Matmul.cu at
-// 9b347f161cce5cd2a51a0406b140f2a2d81df024 (Apache-2.0).
 // Fak changes: TN geometry, E4M3 inputs with per-tensor device scales, F32 output,
 // stream/pool/workspace ownership, bounded heuristic selection, and checked cleanup.
 // The Q4_K dequant and scale/convert kernels below are Fak's adapter, not an upstream GEMM.

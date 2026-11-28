@@ -4,9 +4,7 @@ package compute
 // rows packed contiguously behind a per-expert offset table, with a launch
 // planner that consumes those offsets instead of runtime gathers.
 //
-// ADAPT of the CUDA MoE layout linearization in ggml-org/llama.cpp PR #31047
 // (`ggml/src/ggml-cuda/mmf.cu` and `ggml/src/ggml-cuda/mmf.cuh` at pin
-// 69ee2ecc0150ba7d1204a7f7393dfd651569db8c, MIT): there the quantized mixed-
 // input matmul and indexer dot-product kernels read contiguous per-expert row
 // blocks instead of gathering across a strided expert pool, and kernel launches
 // receive per-expert contiguous offsets rather than runtime gathers. This file

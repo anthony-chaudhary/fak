@@ -3,8 +3,6 @@
 // follow-on grouped-GEMM ticket) so the kernels share g_stream, the pooled
 // allocator and the transfer witnesses of the single libfakcuda object.
 //
-// ADAPT of vllm-project/vllm at pin ae065918640a198a56f6f17eb45e251c3229fe41
-// (Apache-2.0): the align-and-sort + weighted-sum finalize kernels, re-expressed
 // for fak's flat C ABI. Divergences from upstream, all deliberate:
 //   - No CUB: the per-expert exclusive prefix sum is a hand-rolled two-level
 //     warp-shuffle scan (32 warps x 32 lanes), so num_experts <= 1024 fits one
