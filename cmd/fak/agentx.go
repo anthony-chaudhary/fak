@@ -1135,3 +1135,89 @@ func (a *toolCallDeltaAccumulator) merged() []toolCallSlot {
 	}
 	return out
 }
+
+// ADAPT of ai-dynamo/aiperf (Apache-2.0, sticky_router.py:351 @ab610add4e8876fca223197596c728e17365f381):
+// two-strike stale-worker eviction tracker.
+type twoStrikeEvictionTracker struct {
+	strikes map[string]int
+	evicted map[string]bool
+}
+
+func newTwoStrikeEvictionTracker() *twoStrikeEvictionTracker {
+	return &twoStrikeEvictionTracker{
+		strikes: make(map[string]int),
+		evicted: make(map[string]bool),
+	}
+}
+
+func (t *twoStrikeEvictionTracker) RecordMiss(workerID string) bool {
+	if t.evicted[workerID] {
+		return true
+	}
+	t.strikes[workerID]++
+	if t.strikes[workerID] >= 2 {
+		t.evicted[workerID] = true
+		return true
+	}
+	return false
+}
+
+func (t *twoStrikeEvictionTracker) RecordHeartbeat(workerID string) {
+	if !t.evicted[workerID] {
+		t.strikes[workerID] = 0
+	}
+}
+
+// ADAPT of ai-dynamo/aiperf (Apache-2.0, plugins.py:848 @ab610add4e8876fca223197596c728e17365f381):
+// plugin conflict resolution (higher priority wins; on tie, external beats builtin).
+type pluginEntry struct {
+	Name     string
+	Kind     string
+	Priority int
+	External bool
+}
+
+func resolvePluginConflict(entries []pluginEntry) (pluginEntry, bool) {
+	if len(entries) == 0 {
+		return pluginEntry{}, false
+	}
+	best := entries[0]
+	for _, e := range entries[1:] {
+		if e.Priority != best.Priority {
+			if e.Priority > best.Priority {
+				best = e
+			}
+			continue
+		}
+		if e.External != best.External {
+			if e.External {
+				best = e
+			}
+			continue
+		}
+		if e.Name < best.Name {
+			best = e
+		}
+	}
+	return best, true
+}
+
+// ADAPT of ai-dynamo/aiperf (Apache-2.0, generate_plugin_artifacts.py:175 @ab610add4e8876fca223197596c728e17365f381):
+// CI drift gate comparing declared manifest entries against generated typed registry entries.
+func validateGeneratedRegistryDrift(manifest, generated map[string]string) error {
+	for k, v := range manifest {
+		gv, ok := generated[k]
+		if !ok {
+			return fmt.Errorf("registry drift: missing generated entry %q", k)
+		}
+		if gv != v {
+			return fmt.Errorf("registry drift: entry %q type %q != manifest %q", k, gv, v)
+		}
+	}
+	for k := range generated {
+		if _, ok := manifest[k]; !ok {
+			return fmt.Errorf("registry drift: extra generated entry %q", k)
+		}
+	}
+	return nil
+}

@@ -757,3 +757,49 @@ func TestFirstTokenRelease(t *testing.T) {
 		}
 	})
 }
+
+func TestTwoStrikeEviction(t *testing.T) {
+	tr := newTwoStrikeEvictionTracker()
+	if tr.RecordMiss("w1") {
+		t.Fatal("first miss should not evict")
+	}
+	tr.RecordHeartbeat("w1")
+	if tr.RecordMiss("w1") {
+		t.Fatal("heartbeat should reset strike count")
+	}
+	if !tr.RecordMiss("w1") {
+		t.Fatal("second consecutive miss must evict")
+	}
+}
+
+func TestRegistryConflict(t *testing.T) {
+	// Equal priority: external beats builtin.
+	got, ok := resolvePluginConflict([]pluginEntry{
+		{Name: "a-builtin", Priority: 10, External: false},
+		{Name: "b-external", Priority: 10, External: true},
+	})
+	if !ok || got.Name != "b-external" {
+		t.Fatalf("got %+v, want b-external", got)
+	}
+	// Higher priority wins regardless of external flag.
+	got2, _ := resolvePluginConflict([]pluginEntry{
+		{Name: "b-external", Priority: 10, External: true},
+		{Name: "c-builtin", Priority: 20, External: false},
+	})
+	if got2.Name != "c-builtin" {
+		t.Fatalf("got %+v, want c-builtin", got2)
+	}
+}
+
+func TestGeneratedRegistry(t *testing.T) {
+	manifest := map[string]string{"metric.ttft": "latency", "metric.tps": "throughput"}
+	if err := validateGeneratedRegistryDrift(manifest, map[string]string{"metric.ttft": "latency", "metric.tps": "throughput"}); err != nil {
+		t.Fatalf("matching registry failed: %v", err)
+	}
+	if err := validateGeneratedRegistryDrift(manifest, map[string]string{"metric.ttft": "latency"}); err == nil {
+		t.Fatal("expected drift error for missing generated entry")
+	}
+	if err := validateGeneratedRegistryDrift(manifest, map[string]string{"metric.ttft": "latency", "metric.tps": "wrong"}); err == nil {
+		t.Fatal("expected drift error for mismatched type")
+	}
+}
