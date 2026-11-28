@@ -131,6 +131,10 @@ type Inkling2LoopHost struct {
 	// are the target features a DSpark draft reads.
 	FeatureVisits []int
 	Features      [][]float32
+	// Optional damped RK sub-stepping and pass-shift probe (default nil = off).
+	RK            *Inkling2LoopRKConfig
+	PassProbe     *Inkling2LoopPassProbeConfig
+	LastPassProbe *Inkling2LoopPassProbeReport
 }
 
 // NewInkling2LoopHost builds the host forward. An empty core (CoreStart ==
@@ -266,6 +270,8 @@ func (h *Inkling2LoopHost) PrefillToken(token int, final bool) []float32 {
 	prelude := cur
 	preludeBlocks := append([][]float32(nil), blocks...)
 	core := hp.CoreEnd - hp.CoreStart
+	var passExits [][]float32
+	probeActive := h.PassProbe != nil && h.PassProbe.Enabled && hp.Passes > 3
 	// a pass > 0 reads controllers and the pass-0 bank, both absent without a core
 	for pass := 0; pass < hp.Passes && (pass == 0 || core > 0); pass++ {
 		var bank [][]float32
@@ -279,18 +285,29 @@ func (h *Inkling2LoopHost) PrefillToken(token int, final bool) []float32 {
 		for ip := hp.CoreStart; ip < hp.CoreEnd; ip++ {
 			h.tap(visit, cur)
 			visit++
-			if pass == 0 {
-				cur = h.layer(ip, ip, cur, &blocks, nil)
-				continue
+			slot := ip
+			var msg *inkling2Messages
+			if pass > 0 {
+				slot = hp.Layers + (pass-1)*core + (ip - hp.CoreStart)
+				ctrl := &h.W.Controllers[ip-hp.CoreStart]
+				msgs := make([][]float32, 4)
+				for c := range msgs {
+					msgs[c] = inkling2Mix(bank, bankOut, ctrl.MsgQuery[c])
+				}
+				msg = &inkling2Messages{ctrl: ctrl, msgs: msgs}
 			}
-			slot := hp.Layers + (pass-1)*core + (ip - hp.CoreStart)
-			ctrl := &h.W.Controllers[ip-hp.CoreStart]
-			msgs := make([][]float32, 4)
-			for c := range msgs {
-				msgs[c] = inkling2Mix(bank, bankOut, ctrl.MsgQuery[c])
+			if h.RK.Enabled() && (ip-hp.CoreStart) < h.RK.Window {
+				cur = h.stepLayerDampedRK(slot, ip, cur, &blocks, msg)
+			} else {
+				cur = h.layer(slot, ip, cur, &blocks, msg)
 			}
-			cur = h.layer(slot, ip, cur, &blocks, &inkling2Messages{ctrl: ctrl, msgs: msgs})
 		}
+		if probeActive {
+			passExits = append(passExits, append([]float32(nil), cur...))
+		}
+	}
+	if probeActive {
+		h.LastPassProbe = evaluatePassProbe(passExits, h.PassProbe.CollapseThreshold)
 	}
 	for il := hp.CoreEnd; il < hp.Layers; il++ {
 		h.tap(visit, cur)
@@ -318,6 +335,27 @@ func (h *Inkling2LoopHost) PrefillToken(token int, final bool) []float32 {
 type inkling2Messages struct {
 	ctrl *Inkling2LoopControllerWeights
 	msgs [][]float32
+}
+
+func (h *Inkling2LoopHost) stepLayerDampedRK(slot, ip int, cur []float32, blocks *[][]float32, m *inkling2Messages) []float32 {
+	snap := h.Save()
+	beta := h.RK.Beta
+	oneMinusBeta := 1 - beta
+	state := append([]float32(nil), cur...)
+	for stage := 0; stage < h.RK.K-1; stage++ {
+		tmpBlocks := append([][]float32(nil), (*blocks)...)
+		cand := h.layer(slot, ip, state, &tmpBlocks, m)
+		for i := range state {
+			state[i] = oneMinusBeta*state[i] + beta*cand[i]
+		}
+		h.Load(snap)
+	}
+	// Final stage commits KV and short-conv cache state exactly once.
+	cand := h.layer(slot, ip, state, blocks, m)
+	for i := range state {
+		state[i] = oneMinusBeta*state[i] + beta*cand[i]
+	}
+	return state
 }
 
 func (h *Inkling2LoopHost) layer(slot, ip int, cur []float32, blocks *[][]float32, m *inkling2Messages) []float32 {
