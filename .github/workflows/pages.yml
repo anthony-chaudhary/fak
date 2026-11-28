@@ -46,9 +46,9 @@ jobs:
         run: >-
           go run ./cmd/pagescheck seo
           --root .
-          --minimum-score 84.5
-          --maximum-debt 820
-          --maximum-orphans 170
+          --minimum-score 94.0
+          --maximum-debt 530
+          --maximum-orphans 15
           > pages-seo-report.json
       - name: Build a fresh site from tracked source
         uses: actions/jekyll-build-pages@v1
@@ -66,8 +66,9 @@ jobs:
           go run ./cmd/pagescheck artifact
           --root _site
           --base-url https://anthony-chaudhary.github.io/fak/
-          --minimum-pages 1000
+          --minimum-pages 500
           --require index.html
+          --require showcase.html
           --require awesome-token-efficiency.html
           --write-manifest
       - name: Upload only this clean build

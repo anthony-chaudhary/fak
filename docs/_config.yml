@@ -96,3 +96,63 @@ exclude:
   - CODE-SLOP-SCORECARD.md
   - VENDOR-ADOPTION-SCORECARD.md
   - dispatch-status.md
+  - extended-index.md
+  # Bulk-excluded internal, historical, generated, localized, and raw-receipt trees
+  # (kept in git for provenance and developers; excluded from the reader-facing Pages site).
+  - notes/
+  - research/
+  - generated/
+  - proofs/
+  - claims/
+  - i18n/
+  - plans/
+  - decisions/
+  - questions/
+  - reviews/
+  - dispatch/
+  - cadence/
+  - nightrun/
+  - confluence/
+  - gtm/
+  - marketing/
+  - templates/
+  - witnesses/
+  - adoption/
+  - quality/
+  - learning/
+  - milestones/
+  - refactor/
+  - sota/
+  - specs/
+  - standards/
+  - concepts/
+  - context-budget/
+  - cache-frontier/
+  - deepseek/
+  - design/
+  - kimi-k3/
+  - localbench/
+  - mlp/
+  - model/
+  - models/
+  - hardware/
+  - compute/
+  - engineering/
+  - grafana/
+  - operator/
+  - playbooks/
+  - portability/
+  - superset/
+  - webbench/
+  - awesome-caching/
+  - ci/
+  - generation/
+  - receipts/
+  - industry-scorecard/
+  - lightgap-scorecard/
+  - concept-disambiguation-scorecard/
+  - intent-literal-scorecard/
+  - persona-fit-scorecard/
+  - popularization-scorecard/
+  - product-scorecard/
+  - toon-scorecard/

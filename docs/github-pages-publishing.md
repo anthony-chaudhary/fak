@@ -15,10 +15,10 @@ rebuilt from an empty output directory.
 
 1. `pagescheck freshness` loads `.github/pages-freshness-targets.json`. Every asset under `docs/marketing/` and `docs/launch/` must be classified either `durable` (no age expiry) or `review` with a page-specific review interval and concrete up-to-date check. An overdue review asks the maintainer to verify that check and then update, archive, or retain the page with a witnessed review commit; age alone never orders deletion. The checkout is full-depth so review age is reproducible.
 2. `pagescheck source` rejects non-UTF-8 source before Jekyll can fail opaquely.
-3. `pagescheck seo` scores the complete published source corpus and refuses regression below the checked-in score/debt/orphan baseline with a narrow cross-platform path-resolution allowance (84.5 / 820 / 170; the 2026-08-24 current-main witness is 85.7 / 807 / 162 after the published corpus grew from 1,194 to 1,603 pages, leaving only narrow platform variance); its full JSON witness is published at `/_proofs/seo-report.json`.
+3. `pagescheck seo` scores the complete published source corpus and refuses regression below the checked-in score/debt/orphan baseline (94.0 / 530 / 15 after bulk-excluding internal, historical, generated, localized, and raw-receipt trees in `docs/_config.yml` and archiving stale orphaned root docs via `cmd/docreap`); its full JSON witness is published at `/_proofs/seo-report.json`.
 4. GitHub's supported Jekyll builder creates a fresh `_site` from `docs/`.
 5. `pagescheck artifact` refuses a narrow or SEO-broken artifact. It requires at least
-   1,000 HTML pages, a sitemap using the production base URL, the front page, and the
+   500 HTML pages, a sitemap using the production base URL, the front page, `showcase.html`, and the
    rendered `awesome-token-efficiency.html` page with title, description, and canonical URL.
 6. The check writes `_site/.pages-manifest.json`, an exact sorted list of deployed paths,
    byte sizes, and SHA-256 digests.
@@ -43,7 +43,7 @@ To audit a locally built Jekyll artifact:
 ```bash
 go run ./cmd/pagescheck artifact --root _site \
   --base-url https://anthony-chaudhary.github.io/fak/ \
-  --minimum-pages 1000 --require index.html \
+  --minimum-pages 500 --require index.html --require showcase.html \
   --require awesome-token-efficiency.html --write-manifest
 ```
 

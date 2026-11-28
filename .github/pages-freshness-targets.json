@@ -23,6 +23,42 @@
       "check": "Directory availability, submission status, and copy remain current."
     },
     {
+      "path": "docs/launch/inkling2-launch-2026-11-24.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Inkling-2-Mini launch copy, release version, and RTX 5080 / Metal numbers match committed receipts."
+    },
+    {
+      "path": "docs/launch/assets/inkling2-batched-serving.svg",
+      "class": "review",
+      "review_after_days": 30,
+      "check": "Inkling-2-Mini batched serving SVG matches inkling2-charts.data.json and published RTX 5080 receipts."
+    },
+    {
+      "path": "docs/launch/assets/inkling2-charts.data.json",
+      "class": "review",
+      "review_after_days": 30,
+      "check": "Inkling-2-Mini chart dataset matches committed RTX 5080 and Metal receipts."
+    },
+    {
+      "path": "docs/launch/assets/inkling2-context-depth.svg",
+      "class": "review",
+      "review_after_days": 30,
+      "check": "Inkling-2-Mini context-depth SVG matches inkling2-charts.data.json and published RTX 5080 receipts."
+    },
+    {
+      "path": "docs/launch/assets/inkling2-decode-climb.svg",
+      "class": "review",
+      "review_after_days": 30,
+      "check": "Inkling-2-Mini decode-climb SVG matches inkling2-charts.data.json and published RTX 5080 receipts."
+    },
+    {
+      "path": "docs/launch/assets/inkling2-decode-comparison.svg",
+      "class": "review",
+      "review_after_days": 30,
+      "check": "Inkling-2-Mini decode-comparison SVG matches inkling2-charts.data.json and published RTX 5080 receipts."
+    },
+    {
       "path": "docs/launch/landscape-research.md",
       "class": "review",
       "review_after_days": 21,

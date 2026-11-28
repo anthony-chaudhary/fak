@@ -1,6 +1,6 @@
 # fak configuration answers
 
-Updated: 2026-08-10
+Updated: 2026-11-28
 Authority: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md
 
 ## How do I configure fak?

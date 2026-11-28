@@ -6,14 +6,6 @@ permalink: /configuration/
 
 # How to configure fak
 
-**Audience:** operators configuring a first or existing fak deployment. **Prerequisite:** a working `fak` binary.
-
-```bash
-fak serve --help
-```
-
-Expected result: the command prints configuration flags and exits without starting a server.
-
 These concise answers cover the decisions people most often make when configuring fak. For every `fak serve` flag, environment variable, and manifest field, use the [complete server configuration reference](server-config.md).
 
 <script type="application/ld+json">
@@ -23,7 +15,7 @@ These concise answers cover the decisions people most often make when configurin
   "name": "fak configuration answers",
   "description": "Direct answers and authoritative documentation links for configuring the Fused Agent Kernel (fak).",
   "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md",
-  "dateModified": "2026-09-06",
+  "dateModified": "2026-11-28",
   "mainEntity": [
     {
       "@type": "Question",

@@ -5,7 +5,7 @@
 > hooks (routing, fallback, prompt-cache cost) and agent-security demand hooks such
 > as MCP tool poisoning, the lethal trifecta, and least-privilege tool access.
 >
-> Updated: 2026-11-23T05:00:31Z
+> Updated: 2026-11-28T06:15:31Z
 
 ## core
 
