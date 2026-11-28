@@ -110,6 +110,16 @@ func (b *ThinkBudget) canThinkMore() bool {
 // the life of the counter.
 func (b *ThinkBudget) Forced() bool { return b.forced }
 
+// Inkling2AnswerLead is what a caller injects when Observe reports a forced close on
+// an Inkling-2 stream: the end_message that closes the thinking block plus the visible
+// answer header. Closing the block alone lets the model reopen <|content_thinking|>;
+// leading with the answer header means it writes the answer instead. ThinkBudget does
+// not re-arm after the force (the latch is one-way), so the lead is injected once.
+// Adapted from jesdga95/basalt PR #632 (behavioral anchor; no source copied).
+func Inkling2AnswerLead() string {
+	return inkling2EndMessage + inkling2RoleModel + inkling2ContentText
+}
+
 // Count reports how many reasoning tokens have been counted inside the span so far.
 func (b *ThinkBudget) Count() int { return b.count }
 

@@ -164,6 +164,25 @@ func TestThinkBudgetSplitMarker(t *testing.T) {
 	}
 }
 
+// TestThinkBudgetInkling2AnswerLead pins the injection a forced close must append for
+// Inkling 2: the end_message plus the answer header, exactly once, with no re-arm.
+func TestThinkBudgetInkling2AnswerLead(t *testing.T) {
+	want := "<|end_message|><|message_model|><|content_text|>"
+	if got := Inkling2AnswerLead(); got != want {
+		t.Fatalf("Inkling2AnswerLead() = %q, want %q", got, want)
+	}
+	b := NewThinkBudget(1, true)
+	injections := 0
+	for _, tok := range []string{"a", "b", "c", "d"} {
+		if b.Observe(tok) {
+			injections++
+		}
+	}
+	if injections != 1 || !b.Forced() {
+		t.Fatalf("injections = %d forced = %v, want exactly one force and no re-arm", injections, b.Forced())
+	}
+}
+
 // TestForceIndex exercises the whole-stream helper for the forced case and the
 // never-forced (natural close) case.
 func TestForceIndex(t *testing.T) {
