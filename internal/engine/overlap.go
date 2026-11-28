@@ -271,6 +271,7 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 	var yielded *OverlapResult[T]
 	if len(s.buffered) >= s.depth {
 		yielded = s.buffered[0]
+		s.buffered[0] = nil
 		s.buffered = s.buffered[1:]
 		s.yielded[yielded.ID] = true
 	}

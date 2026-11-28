@@ -154,6 +154,41 @@ func getA2APushStore() *a2aPushStore {
 	return a2aPushSingleton
 }
 
+// setConfig registers or updates taskID's push config, bounding ps.configs to
+// a2aMaxTasks by evicting the oldest registration when at capacity.
+func (ps *a2aPushStore) setConfig(taskID string, cfg a2aPushConfig) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if _, exists := ps.configs[taskID]; !exists && len(ps.configs) >= a2aMaxTasks {
+		var oldestID string
+		var oldestAt time.Time
+		for id, c := range ps.configs {
+			if oldestID == "" || c.CreatedAt.Before(oldestAt) {
+				oldestID = id
+				oldestAt = c.CreatedAt
+			}
+		}
+		if oldestID != "" {
+			delete(ps.configs, oldestID)
+		}
+	}
+	ps.configs[taskID] = cfg
+}
+
+// deleteA2APushConfigIfInitialized prunes taskID's webhook registration when an
+// A2A task is evicted, without allocating the singleton if webhooks were never used.
+func deleteA2APushConfigIfInitialized(taskID string) {
+	a2aPushMu.Lock()
+	ps := a2aPushSingleton
+	a2aPushMu.Unlock()
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	delete(ps.configs, taskID)
+	ps.mu.Unlock()
+}
+
 // SetA2APushWebhookAllowlist configures which webhook hosts push-notification delivery may
 // dial (deny-by-default until called) and whether loopback/private targets are permitted.
 // This is the host-facing seam a deployment calls to ENABLE webhooks; without it delivery
@@ -390,9 +425,7 @@ func (s *Server) handleA2ASetPushConfig(w http.ResponseWriter, r *http.Request, 
 
 	cfg := a2aPushConfig{URL: target, CallerID: callerID, CreatedAt: time.Now().UTC()}
 	ps := getA2APushStore()
-	ps.mu.Lock()
-	ps.configs[taskID] = cfg
-	ps.mu.Unlock()
+	ps.setConfig(taskID, cfg)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"task_id":    taskID,

@@ -41,6 +41,7 @@ func (s *a2aTaskStore) insertLocked(taskID string, task *a2aTask) {
 	if len(s.tasks) >= a2aMaxTasks {
 		if victim := s.evictionVictimLocked(); victim != "" {
 			delete(s.tasks, victim)
+			deleteA2APushConfigIfInitialized(victim)
 		}
 	}
 	s.tasks[taskID] = task

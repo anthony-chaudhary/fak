@@ -124,8 +124,54 @@ func registerActiveMMU(m *MMU) {
 
 func ResetActiveMMUsForTest() {
 	activeMMUsMu.Lock()
-	defer activeMMUsMu.Unlock()
+	for i := range activeMMUs {
+		activeMMUs[i] = nil
+	}
 	activeMMUs = nil
+	activeMMUsMu.Unlock()
+
+	mmuCOWMu.Lock()
+	clear(mmuCOWPageTables)
+	mmuCOWMu.Unlock()
+
+	mmuForkMu.Lock()
+	clear(mmuForkManagers)
+	mmuForkMu.Unlock()
+
+	mmuKVPoolMu.Lock()
+	clear(mmuKVPools)
+	mmuKVPoolMu.Unlock()
+}
+
+// Close detaches m from the package-global MMU registry and associated
+// COW/fork/KV-pool tables so a discarded MMU does not remain pinned for the
+// process lifetime. Safe to call on nil or multiple times.
+func (m *MMU) Close() {
+	if m == nil {
+		return
+	}
+	activeMMUsMu.Lock()
+	for i, cur := range activeMMUs {
+		if cur == m {
+			copy(activeMMUs[i:], activeMMUs[i+1:])
+			activeMMUs[len(activeMMUs)-1] = nil
+			activeMMUs = activeMMUs[:len(activeMMUs)-1]
+			break
+		}
+	}
+	activeMMUsMu.Unlock()
+
+	mmuCOWMu.Lock()
+	delete(mmuCOWPageTables, m)
+	mmuCOWMu.Unlock()
+
+	mmuForkMu.Lock()
+	delete(mmuForkManagers, m)
+	mmuForkMu.Unlock()
+
+	mmuKVPoolMu.Lock()
+	delete(mmuKVPools, m)
+	mmuKVPoolMu.Unlock()
 }
 
 // NewWithLimit builds a gate whose quarantine ledger holds at most maxHeld entries

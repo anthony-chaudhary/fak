@@ -14,6 +14,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/leakcheck"
+	"github.com/anthony-chaudhary/fak/internal/toolproc"
 )
 
 func TestStreamingHandlerDoesNotLeakGoroutines(t *testing.T) {
@@ -84,4 +86,97 @@ func TestStreamingHandlerDoesNotLeakGoroutines(t *testing.T) {
 		Settle: 3 * time.Second, // planner honors ctx, so cancelled goroutines return promptly
 	}, body)
 	t.Logf("goroutines stable across 40 streams (20 cancelled mid-flight): baseline=%d final=%d", base, final)
+}
+
+func TestA2APushConfigsBoundedAcrossEvictions(t *testing.T) {
+	store := getA2AStore()
+	store.mu.Lock()
+	savedTasks := store.tasks
+	store.tasks = make(map[string]*a2aTask)
+	store.mu.Unlock()
+
+	a2aPushMu.Lock()
+	savedPush := a2aPushSingleton
+	a2aPushSingleton = newA2APushStore()
+	ps := a2aPushSingleton
+	a2aPushMu.Unlock()
+
+	t.Cleanup(func() {
+		store.mu.Lock()
+		store.tasks = savedTasks
+		store.mu.Unlock()
+		a2aPushMu.Lock()
+		a2aPushSingleton = savedPush
+		a2aPushMu.Unlock()
+	})
+
+	baseTime := time.Date(2026, 11, 27, 0, 0, 0, 0, time.UTC)
+	total := a2aMaxTasks + 64
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("task-%05d", i)
+		ts := baseTime.Add(time.Duration(i) * time.Millisecond)
+		store.mu.Lock()
+		store.insertLocked(id, &a2aTask{
+			TaskID:    id,
+			State:     "completed",
+			CreatedAt: ts,
+			UpdatedAt: ts,
+		})
+		store.mu.Unlock()
+		ps.setConfig(id, a2aPushConfig{
+			URL:       "https://example.com/hook",
+			CallerID:  "caller-1",
+			CreatedAt: ts,
+		})
+	}
+
+	store.mu.RLock()
+	taskCount := len(store.tasks)
+	store.mu.RUnlock()
+	if taskCount > a2aMaxTasks {
+		t.Fatalf("a2aTaskStore len = %d, want <= %d", taskCount, a2aMaxTasks)
+	}
+
+	ps.mu.RLock()
+	cfgCount := len(ps.configs)
+	_, oldestPresent := ps.configs["task-00000"]
+	ps.mu.RUnlock()
+	if cfgCount > a2aMaxTasks {
+		t.Fatalf("a2aPushStore.configs len = %d, want <= %d (LEAK)", cfgCount, a2aMaxTasks)
+	}
+	if oldestPresent {
+		t.Fatalf("evicted task-00000 still present in a2aPushStore.configs")
+	}
+}
+
+func TestServerCloseReleasesGlobalMapsAndEvictor(t *testing.T) {
+	base, final := leakcheck.Stable(t, leakcheck.StableOpts{
+		Iters:  12,
+		Slack:  4,
+		Settle: 2 * time.Second,
+	}, func(i int) {
+		srv := newTestServer(t)
+		srv.SetToolprocReuse(toolproc.ArmedConfig{}, nil)
+		_ = srv.ControlManager()
+		_ = srv.clientRuntime()
+		ev := NewIdleGatedEvictor(nil, nil)
+		srv.SetIdleGatedEvictor(ev)
+		ev.Start(context.Background())
+
+		srv.Close()
+
+		if _, ok := reuseSeams.Load(srv); ok {
+			t.Fatalf("iter %d: reuseSeams still holds closed Server", i)
+		}
+		if _, ok := serverControlManagers.Load(srv); ok {
+			t.Fatalf("iter %d: serverControlManagers still holds closed Server", i)
+		}
+		if _, ok := sessionClientRuntimes.Load(srv); ok {
+			t.Fatalf("iter %d: sessionClientRuntimes still holds closed Server", i)
+		}
+		if ev.IsRunning() {
+			t.Fatalf("iter %d: kvEvictor still running after Server.Close()", i)
+		}
+	})
+	t.Logf("Server.Close goroutines stable: baseline=%d final=%d", base, final)
 }

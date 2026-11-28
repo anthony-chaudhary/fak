@@ -167,6 +167,9 @@ func (s *Server) revoke(witness string) (evicted int, trustEpoch uint64) {
 // needs it (the process owns the bus for its lifetime); tests that construct many
 // Servers call it so subscriptions do not accumulate on the global vDSO.
 func (s *Server) Close() {
+	if s == nil {
+		return
+	}
 	if s.otlp != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = s.otlp.close(ctx)
@@ -187,4 +190,15 @@ func (s *Server) Close() {
 	if s.cacheStream != nil {
 		vdso.Default.SetCacheEventSink(nil)
 	}
+	s.kvEvictorMu.Lock()
+	ev := s.kvEvictor
+	s.kvEvictor = nil
+	s.kvEvictorMu.Unlock()
+	if ev != nil {
+		ev.Stop()
+	}
+	_ = s.ClosePhaseLedger()
+	s.DisarmToolprocReuse()
+	serverControlManagers.Delete(s)
+	sessionClientRuntimes.Delete(s)
 }
