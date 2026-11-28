@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 )
 
 // RosterSchema is the on-disk schema tag for a fleet roster file. A roster that
@@ -164,4 +165,39 @@ func Template(n int, class, group, prefix string) Roster {
 		}
 	}
 	return Roster{Schema: RosterSchema, Boxes: boxes}
+}
+
+// BoxCondition represents an idempotent node-health condition adapted from
+// kubernetes/node-problem-detector (problem_client.go:107 @ 3593d9fa577e, Apache-2.0).
+type BoxCondition struct {
+	Type               string    `json:"type"`
+	Status             bool      `json:"status"`
+	Reason             string    `json:"reason"`
+	Message            string    `json:"message"`
+	LastTransitionTime time.Time `json:"last_transition_time"`
+}
+
+// MergeBoxConditions merges patch into existing with idempotent
+// reason/message/lastTransition semantics: LastTransitionTime updates only on
+// Status change (or new condition), and changed is false on identical patches.
+func MergeBoxConditions(existing []BoxCondition, patch BoxCondition, now time.Time) ([]BoxCondition, bool) {
+	out := append([]BoxCondition(nil), existing...)
+	for i, c := range out {
+		if c.Type != patch.Type {
+			continue
+		}
+		if c.Status == patch.Status && c.Reason == patch.Reason && c.Message == patch.Message {
+			return out, false
+		}
+		if c.Status != patch.Status {
+			patch.LastTransitionTime = now
+		} else {
+			patch.LastTransitionTime = c.LastTransitionTime
+		}
+		out[i] = patch
+		return out, true
+	}
+	patch.LastTransitionTime = now
+	out = append(out, patch)
+	return out, true
 }
