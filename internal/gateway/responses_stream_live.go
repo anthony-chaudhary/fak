@@ -23,6 +23,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -169,12 +170,37 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 		Arguments      string `json:"arguments"`
 	}
 
+	liveCtx, cancelLive := context.WithCancel(ctx)
+	defer cancelLive()
+	writeCtrl := newLiveChatWriteControl(liveCtx, w)
+	defer func() {
+		if writeCtrl != nil {
+			writeCtrl.close()
+		}
+	}()
+
 	// One handler goroutine owns Responses emission. Keep the first write
 	// failure and never retry a broken response writer, including error tails.
 	var writeFailure error
 	send := func(event string, data any) {
-		if writeFailure == nil {
-			writeFailure = writeSSEEvent(w, event, data)
+		if writeFailure != nil {
+			return
+		}
+		if writeCtrl != nil {
+			if err := writeCtrl.arm(); err != nil {
+				writeFailure = err
+				cancelLive()
+				return
+			}
+		}
+		writeFailure = writeSSEEvent(w, event, data)
+		if writeCtrl != nil {
+			if cerr := writeCtrl.clear(); cerr != nil && writeFailure == nil {
+				writeFailure = cerr
+			}
+		}
+		if writeFailure != nil {
+			cancelLive()
 		}
 	}
 
@@ -283,7 +309,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	guard := newLiftGuard(emitContent)
 	fragments := newUTF8FragmentBuffer(guard.write)
 
-	turnCtx := plannerTurnContext(ctx, nil, turn.messages, s.contextEpoch)
+	turnCtx := plannerTurnContext(liveCtx, nil, turn.messages, s.contextEpoch)
 	var firstDelta firstDeltaClock
 	turnCtx = withTextToolOffer(turnCtx, turn.tools)
 	// Request the native per-token seam only after the live route is selected.
@@ -300,7 +326,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	if err != nil {
 		s.renderTurnDebugError(reqTrace, "openai_responses", err, time.Since(began))
 		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, 0, started, comp)
-		if writeFailure != nil {
+		if writeFailure != nil || errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			return true
 		}
 		if !started {

@@ -873,6 +873,9 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		r, err := p.streamingClient().Do(req)
 		finishProvider(providerResponseStatus(r), err)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(ctxErr, context.Canceled) {
+				return nil, nil, ctxErr
+			}
 			if uerr := classifyDoError(err, &rs); uerr != nil {
 				return nil, nil, uerr
 			}
@@ -886,6 +889,9 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 				raw, readErr := io.ReadAll(r.Body)
 				r.Body.Close()
 				if readErr != nil {
+					if errors.Is(readErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+						return nil, nil, readErr
+					}
 					// This fallback has emitted nothing to the sink, so a 200 body
 					// read failure is retryable within this loop's existing shared
 					// budget. A final read failure must remain the terminal cause,

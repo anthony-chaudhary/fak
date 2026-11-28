@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -1188,15 +1189,24 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	send := anthropicSSESender(w, flusher)
-	send("message_start", map[string]any{
+	checkedSend := anthropicSSECheckedSender(w, flusher)
+	send := func(event string, data any) {
+		_ = checkedSend(event, data)
+	}
+	if err := checkedSend("message_start", map[string]any{
 		"type": "message_start",
 		"message": map[string]any{
 			"id": id, "type": "message", "role": "assistant", "model": model,
 			"content": []any{}, "stop_reason": nil, "stop_sequence": nil,
 			"usage": map[string]int{"input_tokens": agent.EstimateAnthropicTokens(req), "output_tokens": 0},
 		},
-	})
+	}); err != nil {
+		markFeatureActivationIncomplete(r.Context())
+		return
+	}
+
+	turnCtx, cancelTurn := context.WithCancel(r.Context())
+	defer cancelTurn()
 
 	type turnResult struct {
 		turn *anthropicTurn
@@ -1205,7 +1215,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 	done := make(chan turnResult, 1)
 	began := time.Now()
 	go func() {
-		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, sessionTurn, id, model, upstreamKey, upstreamBeta)
+		turn, err := s.completeAnthropicTurn(turnCtx, req, reqTrace, sessionTurn, id, model, upstreamKey, upstreamBeta)
 		done <- turnResult{turn: turn, err: err}
 	}()
 
@@ -1215,6 +1225,10 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		select {
 		case res := <-done:
 			if res.err != nil {
+				if errors.Is(res.err, context.Canceled) || r.Context().Err() != nil {
+					markFeatureActivationIncomplete(r.Context())
+					return
+				}
 				// The in-kernel decode path Claude Code actually hits: classify so an in-kernel
 				// GPU OOM surfaces an actionable message in the SSE error frame instead of the
 				// opaque "upstream model error". A genuine upstream error still falls through to
@@ -1242,8 +1256,13 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 			streamAnthropicBlocks(send, res.turn.Blocks, res.turn.Stop, res.turn.Usage)
 			return
 		case <-ticker.C:
-			send("ping", map[string]any{"type": "ping"})
+			if err := checkedSend("ping", map[string]any{"type": "ping"}); err != nil {
+				cancelTurn()
+				markFeatureActivationIncomplete(r.Context())
+				return
+			}
 		case <-r.Context().Done():
+			cancelTurn()
 			markFeatureActivationIncomplete(r.Context())
 			return
 		}

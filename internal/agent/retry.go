@@ -73,6 +73,9 @@ func deterministicTransportError(err error) bool {
 // return it alone, some alongside a nil result), which is why the return itself stays at
 // the call site rather than folding into this helper.
 func classifyDoError(err error, rs *retryState) error {
+	if errors.Is(err, context.Canceled) {
+		return err
+	}
 	if deterministicTransportError(err) {
 		return &UpstreamUnreachableError{Err: err}
 	}
@@ -650,6 +653,12 @@ func (p *HTTPPlanner) retryBackoffWait(ctx context.Context, attempt, lastStatus 
 			se.RetryAfter = lastRetryAfter
 		}
 		return false, &RetryCeilingError{Cause: &se, Wait: wait, Ceiling: ceiling}
+	}
+	if err := ctx.Err(); err != nil {
+		if lastStatusErr != nil {
+			return false, &RetryInterruptedError{Cause: lastStatusErr, Err: err, AnnouncedWait: wait}
+		}
+		return false, err
 	}
 	if p.RetryNotify != nil {
 		p.RetryNotify(attempt, lastStatus, wait)

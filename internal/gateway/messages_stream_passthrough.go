@@ -18,6 +18,7 @@ package gateway
 // A denied call is dropped and named in an in-band note, never shown to the client.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -67,9 +68,13 @@ type anthropicPassthrough struct {
 	turn     servedSessionTurn
 	flusher  http.Flusher
 
-	send       func(string, any)
-	started    bool
-	wroteError bool
+	send         func(string, any)
+	writeCtx     context.Context
+	cancelWrites context.CancelFunc
+	writeCtrl    *liveChatWriteControl
+	writeErr     error
+	started      bool
+	wroteError   bool
 	// relayedError prevents a second synthetic error after the provider frame.
 	relayedError bool
 	// wroteErrCause is the REAL failure behind the terminal HTTP error wroteError marks.
@@ -214,7 +219,34 @@ func (p *anthropicPassthrough) start() {
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
 	p.w.WriteHeader(http.StatusOK)
-	p.send = anthropicSSESender(p.w, p.flusher)
+	p.writeCtrl = newLiveChatWriteControl(p.writeCtx, p.w)
+	checkedSend := anthropicSSECheckedSender(p.w, p.flusher)
+	p.send = func(event string, data any) {
+		if p.writeErr != nil {
+			return
+		}
+		if p.writeCtrl != nil {
+			if err := p.writeCtrl.arm(); err != nil {
+				p.writeErr = err
+				if p.cancelWrites != nil {
+					p.cancelWrites()
+				}
+				return
+			}
+		}
+		err := checkedSend(event, data)
+		if p.writeCtrl != nil {
+			if cerr := p.writeCtrl.clear(); cerr != nil && err == nil {
+				err = cerr
+			}
+		}
+		if err != nil {
+			p.writeErr = err
+			if p.cancelWrites != nil {
+				p.cancelWrites()
+			}
+		}
+	}
 	p.hb.markStreamStart()
 }
 
@@ -502,6 +534,9 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 	w = sw
 	flusher = sw
 
+	writeCtx, cancelWrites := context.WithCancel(r.Context())
+	defer cancelWrites()
+
 	p := &anthropicPassthrough{
 		s:               s,
 		w:               w,
@@ -510,6 +545,8 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		reqTrace:        reqTrace,
 		turn:            sessionTurn,
 		flusher:         flusher,
+		writeCtx:        writeCtx,
+		cancelWrites:    cancelWrites,
 		passIdx:         map[int]int{},
 		toolBuf:         map[int]*sseToolAccum{},
 		openClientBlock: -1,
@@ -519,22 +556,31 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		model:           req.Model,
 		began:           time.Now(),
 	}
+	defer func() {
+		if p.writeCtrl != nil {
+			p.writeCtrl.close()
+		}
+	}()
 	defer p.stopHeartbeat()
 	began := time.Now()
 
-	err := hp.StreamAnthropicRaw(r.Context(), req.Raw, upstreamKey, upstreamBeta, p.onEvent)
+	err := hp.StreamAnthropicRaw(writeCtx, req.Raw, upstreamKey, upstreamBeta, p.onEvent)
 	p.stopHeartbeat()
 	// #3353 warm-continue: a worker that dies mid-turn (client bytes already flowing) is
 	// recovered by replaying the already-delivered assistant text as a prefill turn on a
 	// fresh worker with the token budget decremented, so the caller sees ONE unbroken turn
 	// instead of a terminal error + cold session restart. Gated OFF by default; only the
 	// text-only pre-tool prefix is replayable (see canWarmContinue).
-	if err != nil && p.started && p.canWarmContinue(err) {
+	if err != nil && p.started && p.writeErr == nil && r.Context().Err() == nil && p.canWarmContinue(err) {
 		s.logf("gateway: warm-continue after mid-stream death (messages): %v", err)
 		err = p.warmContinue(hp, upstreamKey, upstreamBeta)
 	}
 	if err != nil {
 		switch {
+		case p.writeErr != nil || errors.Is(err, context.Canceled) || r.Context().Err() != nil:
+			s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
+			s.recordFailedTurn(r.Context(), s.servedLocality(p.reqModel()), err, began, 0, p.started)
+			return true
 		case p.started:
 			// Client bytes already flowed; we cannot change the status. Emit a terminal
 			// error frame so the client's SSE parser ends cleanly, then own the response.

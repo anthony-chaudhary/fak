@@ -151,6 +151,9 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		r, derr := p.streamingClient().Do(req)
 		finishProvider(providerResponseStatus(r), derr)
 		if derr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(ctxErr, context.Canceled) {
+				return ctxErr
+			}
 			// A deterministic dial failure (refused/NXDOMAIN/TLS) cannot be retried away —
 			// fail fast and tagged. A transient transport error (timeout, mid-flight reset)
 			// gets the same backoff as a retryable status.

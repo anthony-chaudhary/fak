@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1158,6 +1159,9 @@ func (p *HTTPPlanner) completeOnce(ctx context.Context, messages []Message, tool
 		resp, err := p.Client.Do(req)
 		finishProvider(providerResponseStatus(resp), err)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(ctxErr, context.Canceled) {
+				return nil, ctxErr
+			}
 			// A deterministic dial-time failure (refused / NXDOMAIN / TLS) will not
 			// resolve on retry — retrying only adds ~8s of backoff latency to what is a
 			// configuration error. Fail fast and tag it as unreachable (#346).
@@ -1172,6 +1176,9 @@ func (p *HTTPPlanner) completeOnce(ctx context.Context, messages []Message, tool
 		raw, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusOK && readErr != nil {
+			if errors.Is(readErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+				return nil, readErr
+			}
 			// A 200 with a truncated/unreadable body has not produced a completion yet,
 			// so it is safe to spend the same shared attempt budget used for a
 			// transport glitch. The successful status supersedes any older retryable
