@@ -198,6 +198,50 @@ These concise answers cover the decisions people most often make when configurin
         "text": "Use the centralized policy plane: sign an organization manifest, enroll each machine with the organization trust material, and verify the effective policy. Local operators may tighten the organization floor but cannot weaken it.",
         "citation": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/org-policy-plane.md"
       }
+    },
+    {
+      "@type": "Question",
+      "name": "Where do default coding-agent settings live in fak?",
+      "keywords": [
+        "coding agent config",
+        "opencode.json",
+        "coding-agent-safe.json",
+        "fak.toml"
+      ],
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Built-in server defaults require no config file, while optional overrides live in fak.toml generated via fak config guide. Coding-agent presets and harness defaults live in examples/presets/coding-agent-safe.json, repository opencode.json, and user harness configs.",
+        "citation": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#opinionated-defaults-reviewable-overrides"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How can an agent or operator inspect active coding-agent settings?",
+      "keywords": [
+        "fak config audit",
+        "print-effective-config",
+        "fak policy dump"
+      ],
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Run fak config audit to verify surface coverage, fak serve --print-effective-config to inspect resolved flag, manifest, and default provenance, and fak policy --dump to view the active capability-floor policy.",
+        "citation": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#inspect-the-effective-configuration"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I change or reconfigure coding-agent settings safely?",
+      "keywords": [
+        "reconfigure coding agent",
+        "fak config guide",
+        "fak harness gallery",
+        "fak preflight"
+      ],
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Explicit CLI flags override fak.toml, which overrides built-in defaults. Write reviewed postures with fak config guide --posture <name> --write fak.toml, validate policies with fak policy --check and fak preflight --policy, and scaffold workspaces with fak harness gallery show/init --id coding-workspace.",
+        "citation": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/policy-guide.md"
+      }
     }
   ]
 }
@@ -280,6 +324,24 @@ Choose the integration guide for the provider wire, point the client or fak serv
 Use the centralized policy plane: sign an organization manifest, enroll each machine with the organization trust material, and verify the effective policy. Local operators may tighten the organization floor but cannot weaken it.
 
 [Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/org-policy-plane.md)
+
+## Where do default coding-agent settings live in fak?
+
+Built-in server defaults require no config file, while optional overrides live in fak.toml generated via fak config guide. Coding-agent presets and harness defaults live in examples/presets/coding-agent-safe.json, repository opencode.json, and user harness configs.
+
+[Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#opinionated-defaults-reviewable-overrides)
+
+## How can an agent or operator inspect active coding-agent settings?
+
+Run fak config audit to verify surface coverage, fak serve --print-effective-config to inspect resolved flag, manifest, and default provenance, and fak policy --dump to view the active capability-floor policy.
+
+[Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#inspect-the-effective-configuration)
+
+## How do I change or reconfigure coding-agent settings safely?
+
+Explicit CLI flags override fak.toml, which overrides built-in defaults. Write reviewed postures with fak config guide --posture <name> --write fak.toml, validate policies with fak policy --check and fak preflight --policy, and scaffold workspaces with fak harness gallery show/init --id coding-workspace.
+
+[Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/policy-guide.md)
 
 ## Complete configuration reference
 

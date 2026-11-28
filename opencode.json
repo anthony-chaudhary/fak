@@ -2,7 +2,7 @@
   "$schema": "https://opencode.ai/config.json",
   "agent": {
     "build": {
-      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Coordinate substantive work through parallel subagents by default. When independent work and capacity are available, launch 4â€“8 (up to 16 on high-capacity hosts) bounded subagents concurrently across pairwise tree-disjoint lanes; scale the fan-out to the useful independent tasks and available capacity. Structure work into parallel cohorts: (1) discovery/scoping via researcher and explore, (2) implementation via worker and deep-reason, and (3) adversarial verification via cross-validator, issue-auditor, and tester. Delegate investigation, implementation, and independent verification to the appropriate explore, researcher, worker, deep-reason, cross-validator, issue-auditor, tester, reviewer, or scout profiles. Give each worker one concrete deliverable, explicit file ownership, and a witness command. Use FAK's managed worker isolation and lane leases for implementation, with disjoint write sets. Launch independent tasks together before waiting for their results; sequence tasks that depend on earlier results. Keep trivial or inherently sequential work local. Collect compact receipts and independently inspect artifacts and execute the required witnesses before integrating results or claiming completion. (2) Leaf worker mode (depth 1 or assigned a leaf task): Execute directly within assigned package boundaries: do NOT invoke nested 'task' calls or spawn subagents (preventing subagent depth limit recursion failure, #12028). Instead, author reproduction unit tests, execute atomic code modifications directly, run package verification, and land changes via safe git sync. Keep trivial or inherently sequential work local. Follow AGENTS.md for guarded dispatch, landing, and verification."
+      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Coordinate substantive work through parallel subagents by default. When independent work and capacity are available, launch 4-8 (up to 16 on high-capacity hosts) bounded subagents concurrently across pairwise tree-disjoint lanes; scale the fan-out to the useful independent tasks and available capacity. Structure work into parallel cohorts: (1) discovery/scoping via researcher and explore, (2) implementation via worker and deep-reason, and (3) adversarial verification via cross-validator, issue-auditor, and tester. Delegate investigation, implementation, and independent verification to the appropriate explore, researcher, worker, deep-reason, cross-validator, issue-auditor, tester, reviewer, or scout profiles. Give each worker one concrete deliverable, explicit file ownership, and a witness command. Use FAK's managed worker isolation and lane leases for implementation, with disjoint write sets. Launch independent tasks together before waiting for their results; sequence tasks that depend on earlier results. Keep trivial or inherently sequential work local. Collect compact receipts and independently inspect artifacts and execute the required witnesses before integrating results or claiming completion. (2) Leaf worker mode (depth 1 or assigned a leaf task): Execute directly within assigned package boundaries: do NOT invoke nested 'task' calls or spawn subagents (preventing subagent depth limit recursion failure, #12028). Instead, author reproduction unit tests, execute atomic code modifications directly, run package verification, and land changes via safe git sync. Keep trivial or inherently sequential work local. Follow AGENTS.md for guarded dispatch, landing, and verification."
     },
     "cross-validator": {
       "description": "Adversarial cross-validation subagent for verifying code changes, inspecting diffs, executing tests, and producing proof verdicts"
@@ -19,7 +19,7 @@
       "description": "Safe git landing subagent for executing pre-commit package validation, lint checks, explicit-path commits, and unprompted push"
     },
     "plan": {
-      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Plan substantive work through parallel read-only subagents by default. When independent questions and capacity are available, launch 4â€“8 bounded explore or researcher subagents concurrently; scale the fan-out to the useful independent questions and available capacity. Give each subagent one concrete question, a scoped read-only surface, and the evidence to return. Explicitly require read-only investigation in every delegation: do not edit files, implement changes, or launch implementation workers during planning. Launch independent investigations together before waiting for their results; sequence questions that depend on earlier findings. Keep trivial or inherently sequential planning local. Collect compact findings, independently inspect the cited evidence, and synthesize a plan with disjoint implementation ownership, FAK managed worker isolation and lane leases, and checkable witnesses. (2) Leaf worker mode (depth 1): Execute read-only investigations directly without calling the 'task' tool. Follow AGENTS.md and preserve plan-mode restrictions."
+      "prompt": "Top-level coordinator vs. leaf worker role: (1) Coordinator mode (depth 0): Plan substantive work through parallel read-only subagents by default. When independent questions and capacity are available, launch 4-8 bounded explore or researcher subagents concurrently; scale the fan-out to the useful independent questions and available capacity. Give each subagent one concrete question, a scoped read-only surface, and the evidence to return. Explicitly require read-only investigation in every delegation: do not edit files, implement changes, or launch implementation workers during planning. Launch independent investigations together before waiting for their results; sequence questions that depend on earlier findings. Keep trivial or inherently sequential planning local. Collect compact findings, independently inspect the cited evidence, and synthesize a plan with disjoint implementation ownership, FAK managed worker isolation and lane leases, and checkable witnesses. (2) Leaf worker mode (depth 1): Execute read-only investigations directly without calling the 'task' tool. Follow AGENTS.md and preserve plan-mode restrictions."
     },
     "researcher": {
       "description": "Research and discovery subagent for investigating codebase layout, prior art, doc searches, and structured findings"
@@ -38,6 +38,11 @@
     }
   },
   "autoupdate": false,
+  "compaction": {
+    "auto": true,
+    "preserve_recent_tokens": 20000,
+    "reserved": 22528
+  },
   "instructions": [
     "AGENTS.md"
   ],
@@ -99,24 +104,43 @@
             "context": 32768,
             "output": 8192
           },
-          "name": "Qwen 3.8 27B UD Q2_K_XL (Local Halo)"
+          "name": "Qwen 3.8 27B UD Q2_K_XL (Local)",
+          "options": {
+            "extraBody": {
+              "presence_penalty": 1.5,
+              "temperature": 0.7,
+              "top_k": 20,
+              "top_p": 0.8
+            }
+          },
+          "tool_call": true
         },
         "fak-local": {
           "limit": {
             "context": 32768,
             "output": 8192
           },
-          "name": "FAK Local Serving"
+          "name": "FAK Local Serving",
+          "tool_call": true
         },
         "qwen3.8-27b-q4_k_m": {
           "limit": {
-            "context": 20480,
+            "context": 32768,
             "output": 4096
           },
-          "name": "Qwen 3.8 27B Q4_K_M (Native Mac)"
+          "name": "Qwen 3.8 27B Q4_K_M (Native Mac)",
+          "options": {
+            "extraBody": {
+              "presence_penalty": 1.5,
+              "temperature": 0.7,
+              "top_k": 20,
+              "top_p": 0.8
+            }
+          },
+          "tool_call": true
         }
       },
-      "name": "FAK Strix Halo (local)",
+      "name": "FAK Local",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
         "apiKey": "{file:~/.fak/router/gateway.key}",
@@ -132,10 +156,12 @@
           },
           "name": "Qwen 3.8 27B through the local Fak router",
           "options": {
-            "presence_penalty": 1.5,
-            "temperature": 0.7,
-            "top_k": 20,
-            "top_p": 0.8
+            "extraBody": {
+              "presence_penalty": 1.5,
+              "temperature": 0.7,
+              "top_k": 20,
+              "top_p": 0.8
+            }
           },
           "tool_call": true
         },
@@ -144,12 +170,14 @@
             "context": 262144,
             "output": 16384
           },
-          "name": "Qwen 3.8 27B via Modular through Fak router",
+          "name": "Qwen 3.8 27B (via fak router)",
           "options": {
-            "presence_penalty": 1.5,
-            "temperature": 0.7,
-            "top_k": 20,
-            "top_p": 0.8
+            "extraBody": {
+              "presence_penalty": 1.5,
+              "temperature": 0.7,
+              "top_k": 20,
+              "top_p": 0.8
+            }
           },
           "tool_call": true
         },
@@ -158,14 +186,16 @@
             "context": 1048576,
             "output": 131072
           },
-          "name": "DeepSeek 4.1 Flash (via fak router)"
+          "name": "DeepSeek 4.1 Flash (via fak router)",
+          "tool_call": true
         },
         "space-bunny-free": {
           "limit": {
             "context": 1048576,
             "output": 524288
           },
-          "name": "Space Bunny Free (via fak router)"
+          "name": "Space Bunny Free (via fak router)",
+          "tool_call": true
         }
       },
       "name": "FAK Router (routing mode)",

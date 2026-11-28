@@ -67,3 +67,18 @@ Search terms: fak provider config, fak model configuration, fak API credentials
 Use the centralized policy plane: sign an organization manifest, enroll each machine with the organization trust material, and verify the effective policy. Local operators may tighten the organization floor but cannot weaken it.
 Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/org-policy-plane.md
 Search terms: fak organization policy, centralized agent policy, team capability floor
+
+## Where do default coding-agent settings live in fak?
+Built-in server defaults require no config file, while optional overrides live in fak.toml generated via fak config guide. Coding-agent presets and harness defaults live in examples/presets/coding-agent-safe.json, repository opencode.json, and user harness configs.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#opinionated-defaults-reviewable-overrides
+Search terms: coding agent config, opencode.json, coding-agent-safe.json, fak.toml
+
+## How can an agent or operator inspect active coding-agent settings?
+Run fak config audit to verify surface coverage, fak serve --print-effective-config to inspect resolved flag, manifest, and default provenance, and fak policy --dump to view the active capability-floor policy.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#inspect-the-effective-configuration
+Search terms: fak config audit, print-effective-config, fak policy dump
+
+## How do I change or reconfigure coding-agent settings safely?
+Explicit CLI flags override fak.toml, which overrides built-in defaults. Write reviewed postures with fak config guide --posture <name> --write fak.toml, validate policies with fak policy --check and fak preflight --policy, and scaffold workspaces with fak harness gallery show/init --id coding-workspace.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/policy-guide.md
+Search terms: reconfigure coding agent, fak config guide, fak harness gallery, fak preflight
