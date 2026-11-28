@@ -102,6 +102,18 @@ type reservedPlannerReplica struct {
 	prefix         []string
 	decode         *decodeFootprintReservation
 	decodeDecision DecodeFootprintRouteDecision
+	runnerUp       PlannerReplica
+	hasRunnerUp    bool
+}
+
+type runnerUpPickPolicy interface {
+	PickPolicy
+	pickWithRunnerUp(candidates []PlannerReplica, prefix []string, load func(name string) int) (primary PlannerReplica, runnerUp PlannerReplica, hasRunnerUp bool, ok bool)
+}
+
+type runnerUpCapture struct {
+	replica     PlannerReplica
+	hasRunnerUp bool
 }
 
 func (r reservedPlannerReplica) Release() {
@@ -551,6 +563,17 @@ func (r *ReplicaDispatch) hasUntriedReplica(route reservedPlannerReplica, tried 
 
 func (r *ReplicaDispatch) retargetRoute(route *reservedPlannerReplica, tried map[string]struct{}, opts []agent.SampleOpt, cause error) error {
 	if route.reservation == nil {
+		if route.hasRunnerUp && route.runnerUp.Name != "" {
+			if _, excluded := tried[route.runnerUp.Name]; !excluded {
+				for _, repl := range r.replicas {
+					if repl.Name == route.runnerUp.Name {
+						route.Release()
+						*route = reservedPlannerReplica{replica: repl, prefix: route.prefix}
+						return nil
+					}
+				}
+			}
+		}
 		// Static decode bookings must leave the failed replica before a fresh
 		// booking is made. The caller's deferred finish sees the replacement.
 		route.Release()
@@ -560,9 +583,18 @@ func (r *ReplicaDispatch) retargetRoute(route *reservedPlannerReplica, tried map
 		}
 		return err
 	}
-	next, err := r.retargetReserved(route.reservation, route.decode, route.prefix, tried, cause)
+	preferred := ""
+	if route.hasRunnerUp {
+		preferred = route.runnerUp.Name
+	}
+	route.runnerUp = PlannerReplica{}
+	route.hasRunnerUp = false
+	var nextRunnerUp runnerUpCapture
+	next, err := r.retargetReserved(route.reservation, route.decode, route.prefix, tried, cause, preferred, &nextRunnerUp)
 	if err == nil {
 		route.replica = next
+		route.runnerUp = nextRunnerUp.replica
+		route.hasRunnerUp = nextRunnerUp.hasRunnerUp
 		if decision, ok := route.currentDecodeDecision(); ok {
 			route.decodeDecision = decision
 		}
@@ -719,6 +751,15 @@ func (r *ReplicaDispatch) reserveOnEngineWithDecode(prefix []string, skip map[st
 			}
 		}
 		if len(skip) > 0 {
+			if rp, ok := r.policy.(runnerUpPickPolicy); ok {
+				if primary, runnerUp, hasRunnerUp, picked := rp.pickWithRunnerUp(candidates, prefix, nil); picked {
+					for _, candidate := range candidates {
+						if candidate.Name == primary.Name {
+							return reservedPlannerReplica{replica: candidate, prefix: prefix, runnerUp: runnerUp, hasRunnerUp: hasRunnerUp}, nil
+						}
+					}
+				}
+			}
 			if r.policy != nil {
 				if chosen, ok := r.policy.Pick(candidates, prefix, nil); ok {
 					for _, candidate := range candidates {
@@ -740,6 +781,11 @@ func (r *ReplicaDispatch) reserveOnEngineWithDecode(prefix []string, skip map[st
 			}
 			return reservedPlannerReplica{}, ErrReplicaDispatchEmpty
 		}
+		if rp, ok := r.policy.(runnerUpPickPolicy); ok {
+			if primary, runnerUp, hasRunnerUp, picked := rp.pickWithRunnerUp(candidates, prefix, nil); picked {
+				return reservedPlannerReplica{replica: primary, prefix: prefix, runnerUp: runnerUp, hasRunnerUp: hasRunnerUp}, nil
+			}
+		}
 		repl, err := r.pick(prefix)
 		return reservedPlannerReplica{replica: repl, prefix: prefix}, err
 	}
@@ -750,7 +796,8 @@ func (r *ReplicaDispatch) reserveOnEngineWithDecode(prefix []string, skip map[st
 		allowed[repl.Name] = struct{}{}
 	}
 	var booking *decodeFootprintReservation
-	reservation, err := membership.reserveForModel(r.model, engine, allowed, skip, r.reservationPicker(prefix, byName, req, nil, &booking))
+	var runnerUp runnerUpCapture
+	reservation, err := membership.reserveForModel(r.model, engine, allowed, skip, r.reservationPicker(prefix, byName, req, nil, &booking, "", &runnerUp))
 	if err != nil {
 		if booking != nil {
 			booking.releaseOnce("booking_failure")
@@ -770,17 +817,25 @@ func (r *ReplicaDispatch) reserveOnEngineWithDecode(prefix []string, skip map[st
 		booking.setIdentity(reservation.Engine(), r.model)
 	}
 	decision, _ := booking.decisionSnapshot()
-	return reservedPlannerReplica{replica: repl, reservation: reservation, prefix: prefix, decode: booking, decodeDecision: decision}, nil
+	return reservedPlannerReplica{
+		replica:        repl,
+		reservation:    reservation,
+		prefix:         prefix,
+		decode:         booking,
+		decodeDecision: decision,
+		runnerUp:       runnerUp.replica,
+		hasRunnerUp:    runnerUp.hasRunnerUp,
+	}, nil
 }
 
-func (r *ReplicaDispatch) retargetReserved(reservation *fleetReservation, booking *decodeFootprintReservation, prefix []string, skip map[string]struct{}, cause error) (PlannerReplica, error) {
+func (r *ReplicaDispatch) retargetReserved(reservation *fleetReservation, booking *decodeFootprintReservation, prefix []string, skip map[string]struct{}, cause error, preferred string, runnerUpOut *runnerUpCapture) (PlannerReplica, error) {
 	byName := make(map[string]PlannerReplica, len(r.replicas))
 	allowed := make(map[string]struct{}, len(r.replicas))
 	for _, repl := range r.replicas {
 		byName[repl.Name] = repl
 		allowed[repl.Name] = struct{}{}
 	}
-	workerID, err := reservation.Retarget(r.model, allowed, skip, r.reservationPicker(prefix, byName, decodeFootprintRouteRequest{}, booking, nil), cause)
+	workerID, err := reservation.Retarget(r.model, allowed, skip, r.reservationPicker(prefix, byName, decodeFootprintRouteRequest{}, booking, nil, preferred, runnerUpOut), cause)
 	if err != nil {
 		return PlannerReplica{}, err
 	}
@@ -795,7 +850,7 @@ func (r *ReplicaDispatch) retargetReserved(reservation *fleetReservation, bookin
 	return repl, nil
 }
 
-func (r *ReplicaDispatch) reservationPicker(prefix []string, byName map[string]PlannerReplica, req decodeFootprintRouteRequest, existing *decodeFootprintReservation, capture **decodeFootprintReservation) fleetReservationPick {
+func (r *ReplicaDispatch) reservationPicker(prefix []string, byName map[string]PlannerReplica, req decodeFootprintRouteRequest, existing *decodeFootprintReservation, capture **decodeFootprintReservation, preferred string, runnerUpOut *runnerUpCapture) fleetReservationPick {
 	return func(statuses []WorkerStatus) (fleetReservationPickResult, bool) {
 		candidates := make([]PlannerReplica, 0, len(statuses))
 		inflight := make(map[string]int, len(statuses))
@@ -811,6 +866,11 @@ func (r *ReplicaDispatch) reservationPicker(prefix []string, byName map[string]P
 		}
 		if len(candidates) == 0 {
 			return fleetReservationPickResult{}, false
+		}
+		if preferred != "" {
+			if _, valid := inflight[preferred]; valid {
+				return fleetReservationPickResult{workerID: preferred}, true
+			}
 		}
 		if policy, ok := r.policy.(decodeFootprintPickPolicy); ok {
 			load := func(name string) int { return inflight[name] }
@@ -832,6 +892,17 @@ func (r *ReplicaDispatch) reservationPicker(prefix []string, byName map[string]P
 				}
 				if booking != nil {
 					booking.releaseOnce("booking_failure")
+				}
+			}
+		}
+		if rp, ok := r.policy.(runnerUpPickPolicy); ok {
+			if primary, runnerUp, hasRunnerUp, picked := rp.pickWithRunnerUp(candidates, prefix, func(name string) int { return inflight[name] }); picked {
+				if _, valid := inflight[primary.Name]; valid {
+					if runnerUpOut != nil {
+						runnerUpOut.replica = runnerUp
+						runnerUpOut.hasRunnerUp = hasRunnerUp
+					}
+					return fleetReservationPickResult{workerID: primary.Name}, true
 				}
 			}
 		}
