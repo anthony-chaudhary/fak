@@ -12,7 +12,9 @@ This page is the public entry point for accelerator and chip teams searching for
 The short version: fak has a binding layer for model execution. A new accelerator
 does not fork the agent kernel; it implements `internal/compute.Backend`, registers
 a backend name, advertises exact `Caps`, and proves its correctness class against
-the reference floor.
+the reference floor. See the [first-class multi-platform doctrine](../multi-platform-doctrine.md)
+for the any-OS / any-GPU architecture commitment and the current top-3 GPU focus (Apple Metal,
+NVIDIA CUDA, AMD ROCm/Vulkan).
 
 ## Start here: bring a backend and prove it runs
 

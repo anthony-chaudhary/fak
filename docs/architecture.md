@@ -58,7 +58,9 @@ is authoritative: fak-native is the product and performance path, intended to be
 matched, quality-constrained envelopes. llama.cpp remains an explicit benchmark,
 parity/reference, migration/interoperability, or borrowing aid, never a silent fallback. This
 distinction preserves fak's ownership of kernels, memory, scheduling, cache, adaptation, and
-operations while keeping current claims subordinate to benchmark evidence.
+operations while keeping current claims subordinate to benchmark evidence. For OS and GPU
+portability across macOS, Linux, Windows, and heterogeneous accelerators (top-3 focus: Apple
+Metal, NVIDIA CUDA, AMD ROCm/Vulkan), see the [first-class multi-platform doctrine](multi-platform-doctrine.md).
 
 ## End-to-end request flow
 

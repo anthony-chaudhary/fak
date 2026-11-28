@@ -17,7 +17,9 @@ description: "The hardware coverage matrix for fak: one pure-Go agent kernel pro
 Every number on this page traces to a committed artifact via the single source of
 truth, **[`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)**. This page is the
 *rollup* — the at-a-glance "how serious is this" view — not a new claim. Where a number
-appears here it carries a pointer to the doc + commit that owns it.
+appears here it carries a pointer to the doc + commit that owns it. For the governing
+platform-support rules across OSes and GPUs (top-3 focus: Metal, NVIDIA CUDA, AMD ROCm/Vulkan),
+see the [first-class multi-platform doctrine](multi-platform-doctrine.md).
 
 **Lineage:** rolled up 2026-06-21 · fak `v0.30.0` · against `BENCHMARK-AUTHORITY` +
 `MODEL-LADDER-VS-SOTA-2026-06-21` + the per-platform results docs linked below.

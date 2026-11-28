@@ -2,6 +2,10 @@
 
 > Automated-contributor instructions for the shared checkout. Humans: read [`README.md`](README.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md); curated doc map: [`llms.txt`](llms.txt).
 
+## First-class multi-platform invariant (any OS, any GPU)
+
+Keep `fak` co-equal across **macOS, Linux, and Windows** and architected for first-class native inference across **heterogeneous GPUs** behind `internal/compute.Backend` (current top-3 focus: **Apple Metal, NVIDIA CUDA, and AMD ROCm/Vulkan**, plus the `cpu-ref` oracle), rather than hyper-fitting the engine to a single OS or vendor. Vendor-specific kernels, layouts, and fast paths stay behind the HAL and dispatch on `Caps`; never leak single-vendor assumptions into the model loop, scheduler, KV/context MMU, policy floor, or user contract, and never extrapolate a single-box witness across platforms. Canonical doctrine and deterministic docs guard: [`docs/multi-platform-doctrine.md`](docs/multi-platform-doctrine.md).
+
 ## What this project is
 
 **fak** is an *agent kernel*: one Go binary that sits between an AI agent and its tools, handling every call before it runs to reuse shared setup, route calls, serve repeats locally, and shed old turns while provider caches survive. It is first a **performance gate** and, on the same checkpoint, a **security gate** using `default_open` (permissive default bounded by a structural safety floor; `fail_closed` is an explicit operator lever; see [`POLICY.md`](POLICY.md)).

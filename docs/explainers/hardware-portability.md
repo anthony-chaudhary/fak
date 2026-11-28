@@ -30,7 +30,9 @@ host-CPU assumptions the `internal/compute` HAL neutralizes, how its type contra
 new backend be a *registration* rather than a fork, and where each hardware class plugs in.
 Vendor-facing onboarding lives in
 [`docs/vendor/neo-silicon-onboarding.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-silicon-onboarding.md), including the
-minimum compiling backend example.
+minimum compiling backend example. For the overarching OS and GPU portability rules
+(macOS, Linux, Windows; top-3 focus on Apple Metal, NVIDIA CUDA, and AMD ROCm/Vulkan), see
+the [first-class multi-platform doctrine](../multi-platform-doctrine.md).
 
 ## 1. Why a *seam*, not a *port*
 

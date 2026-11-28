@@ -7,7 +7,9 @@ description: "Operator route for choosing a remote model server, a local CPU pat
 
 **Audience:** operators deciding where model inference runs behind fak. fak remains the
 policy, routing, cache, and audit layer in every choice; the backend supplies model
-tokens.
+tokens. For the architectural commitment across macOS, Linux, Windows, and the top-3 GPU
+targets (Apple Metal, NVIDIA CUDA, AMD ROCm/Vulkan), see the
+[first-class multi-platform doctrine](../multi-platform-doctrine.md).
 
 **Current default:** front an existing OpenAI-compatible model server, local or remote.
 That is the maintained operating path for production model serving and lets fak stay

@@ -228,6 +228,10 @@ while this guard proves the required distinctions and entry-point projections re
 
 ## Related authorities
 
+- [First-class multi-platform doctrine](multi-platform-doctrine.md) establishes co-equal OS
+  support (macOS, Linux, Windows) and heterogeneous GPU support (top-3 focus: Apple Metal,
+  NVIDIA CUDA, AMD ROCm/Vulkan) behind `internal/compute.Backend`.
+
 - [External system architecture](architecture.md) places native and external execution inside
   the larger agent-kernel boundary.
 - [Performance outcomes](performance.md) routes a claimed outcome to its current witness.
