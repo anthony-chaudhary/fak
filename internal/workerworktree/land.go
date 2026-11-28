@@ -34,6 +34,9 @@ const (
 	// diff does not carry. The intent's issue number is the operator-supplied source
 	// of truth; a mismatched closing reference is a binding error, not a land.
 	LandResultMessageBindingMismatch = "message-binding-mismatch"
+	// LandResultTrunkUnpublished refuses a plumbing land onto refs/heads/main when
+	// local main is already diverged from origin/main or unpublished past grace.
+	LandResultTrunkUnpublished = "ERR_FLOW_TRUNK_UNPUBLISHED"
 )
 
 func isolatedLandReconciliation(wtPath, reason, detail string) (Result, bool) {
@@ -449,6 +452,9 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 				Reason:    fmt.Sprintf("base commit %s is not an ancestor of trunk %s (stale base)", shortSHA(checkBase), target),
 			}
 		}
+	}
+	if refusal := checkTrunkUnpublishedOrDiverged(root, cfg.branchRef, wtPath, git); refusal != nil {
+		return *refusal
 	}
 	// The landing pathset, read ONCE: it feeds both the out-of-lane ledger and the
 	// hard-self core-lock gate below, so the two can never disagree about what this

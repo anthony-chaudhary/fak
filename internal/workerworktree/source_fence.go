@@ -91,7 +91,7 @@ func sourceFenceObjectID(s string) bool {
 // check, process-local mutex or preflight-only lease check provides this fence.
 func landCompareAndSwap(root, target, candidate, parent string, cfg landConfig, git GitRunner) (int, string, *Result) {
 	if cfg.sourceLease == nil {
-		rc, out := run(git, root, []string{"update-ref", target, candidate, parent})
+		rc, out := run(git, root, []string{"update-ref", "-m", "workerworktree: land " + shortSHA(candidate), target, candidate, parent})
 		return rc, out, nil
 	}
 	oid, refusal := landSourceSnapshot(root, cfg, git)
