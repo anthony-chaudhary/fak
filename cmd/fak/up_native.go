@@ -26,6 +26,7 @@ import (
 type turnkeyNativeResources struct {
 	Planner     *agent.InKernelPlanner
 	Model       *fakmodel.Model
+	Backend     compute.Backend
 	LoadProfile *gateway.ModelLoadProfile
 	Startup     turnkeyNativeStartup
 
@@ -75,6 +76,25 @@ type turnkeyNativeStartup struct {
 	// startup facts: the identity a reviewed catalog record must bind. The artifact
 	// digest is filled only once a live record matched every other field.
 	MTPQualification *turnkeyMTPQualificationKey `json:"mtp_qualification,omitempty"`
+	MTPEngine        string                      `json:"mtp_engine,omitempty"`
+	MTPReason        string                      `json:"mtp_reason,omitempty"`
+
+	// Single-node auto-acceleration startup receipts (surfaced in startup summary & /healthz).
+	FitShrinkEnabled       bool                    `json:"fit_shrink_enabled"`
+	FitShrinkAttempts      int                     `json:"fit_shrink_attempts,omitempty"`
+	FitShrinkAdjusted      bool                    `json:"fit_shrink_adjusted,omitempty"`
+	FitShrinkReason        string                  `json:"fit_shrink_reason,omitempty"`
+	EffectiveContextTokens int                     `json:"effective_context_tokens,omitempty"`
+	HeapScavenged          bool                    `json:"heap_scavenged"`
+	HeapScavengeReason     string                  `json:"heap_scavenge_reason,omitempty"`
+	CUDAGraphActive        bool                    `json:"cuda_graph_active"`
+	CUDAGraphReason        string                  `json:"cuda_graph_reason,omitempty"`
+	CUDAMMQActive          bool                    `json:"cuda_mmq_active"`
+	CUDAMMQArm             string                  `json:"cuda_mmq_arm,omitempty"`
+	CUDAMMQReason          string                  `json:"cuda_mmq_reason,omitempty"`
+	RadixActive            bool                    `json:"radix_kv_cache_active"`
+	RadixReason            string                  `json:"radix_kv_cache_reason,omitempty"`
+	Envelope               *upAccelerationEnvelope `json:"serve_envelope,omitempty"`
 }
 
 func (r *turnkeyNativeResources) Close() error {
@@ -107,11 +127,13 @@ func (r *turnkeyNativeResources) ReleaseAdmission() bool {
 }
 
 type turnkeyNativeLoadDeps struct {
-	resolveBackend func() (compute.Backend, error)
-	resolveMetal   func() (serveMetalDecision, error)
-	admitAndLoad   func(bool, string, func(), *serveFitBudget) (func(), error)
-	refusePeak     func(string) error
-	loadModel      func(string, compute.Backend, int, *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile)
+	resolveBackend   func() (compute.Backend, error)
+	resolveMetal     func() (serveMetalDecision, error)
+	admitAndLoad     func(bool, string, func(), *serveFitBudget) (func(), error)
+	refusePeak       func(string) error
+	loadModel        func(string, compute.Backend, int, *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile)
+	fitShrinkEnabled bool
+	loadModelFitted  func(string, compute.Backend, int, *serveFitBudget, bool, int) (upFittedLoadResult, error)
 	// fitOverride is the STABLE, headroom-aware memory budget the turnkey loader
 	// admits against, instead of the live host-free probe. It exists so a momentary
 	// dip in reclaimable memory (cold cache, a just-loaded sibling) cannot spuriously
@@ -156,11 +178,11 @@ type turnkeyNativeLoadDeps struct {
 }
 
 func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
-	// Keep loader heap reclamation opt-in until startup performance is qualified.
 	var scavengeLoaderHeap func()
-	if raw := strings.TrimSpace(os.Getenv("FAK_UP_SCAVENGE_LOADER_HEAP")); raw == "1" || strings.EqualFold(raw, "true") {
+	if enabled, _ := upScavengeLoaderHeapEnabled(); enabled {
 		scavengeLoaderHeap = debug.FreeOSMemory
 	}
+	fitEnabled, _ := upFitShrinkEnabled()
 	return turnkeyNativeLoadDeps{
 		resolveBackend: func() (compute.Backend, error) { return resolveServeChatBackend("") },
 		resolveMetal:   func() (serveMetalDecision, error) { return resolveServeMetalDecision(false, false, "") },
@@ -168,12 +190,12 @@ func defaultTurnkeyNativeLoadDeps() turnkeyNativeLoadDeps {
 		admitAndLoad: func(metal bool, path string, load func(), fitFloor *serveFitBudget) (func(), error) {
 			return loadLocalLauncherModelWithMetalLease(metal, path, gpulease.Options{}, load, fitFloor)
 		},
-		// loadModel threads the caller-supplied fit override (when set) as the
-		// loader's admission budget; a nil override keeps the live host probe
-		// exactly as before.
-		loadModel: func(path string, backend compute.Backend, contextTokens int, fit *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile) {
-			m, q4k, profile, _ := loadServeInKernelModel(path, backend, false, contextTokens, nil, 1, fit)
-			return m, q4k, profile
+		fitShrinkEnabled: fitEnabled,
+		// loadModelFitted threads the caller-supplied fit override (when set) through
+		// runServeFitCommit for adaptive context/MTP fallback recovery; injected
+		// test hooks setting deps.loadModel take precedence when non-nil.
+		loadModelFitted: func(path string, backend compute.Backend, contextTokens int, fit *serveFitBudget, retainMTP bool, minContextTokens int) (upFittedLoadResult, error) {
+			return loadTurnkeyModelWithFitCommit(path, backend, contextTokens, fit, retainMTP, minContextTokens)
 		},
 		loadTokenizer:      func(path string) (*tokenizer.Tokenizer, bool) { return resolveServeTokenizer("", path) },
 		newPlanner:         newTurnkeyInKernelPlanner,
@@ -275,32 +297,67 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 		device := turnkeyMTPDeviceCompatibility(deps.metalDevice(), startup.HostTotalBefore)
 		retainMTP = turnkeyMTPCatalogHasLiveRecordFor(mtpCatalog, time.Now(), device)
 	}
+	retainResidentMTP, specMode, specEnvForced, _, nonMetalMTPPreReason := upShouldRetainResidentMTP(metal, backend, modelID, modelPath, retainMTP)
 	var artifactBefore os.FileInfo
 	artifactStamp := stampModelArtifact(modelPath)
 	if info, statErr := os.Stat(modelPath); statErr == nil {
 		artifactBefore = info
 	}
 
+	effectiveContextTokens := contextTokens
+	startup.FitShrinkEnabled = deps.fitShrinkEnabled
+	startup.EffectiveContextTokens = contextTokens
 	var model *fakmodel.Model
 	var q4k bool
 	var profile *gateway.ModelLoadProfile
+	var fitLoadErr error
+	var mtpDroppedOnOOM bool
 	release, err := deps.admitAndLoad(metal, modelPath, func() {
-		if retainMTP {
-			func() {
-				defer deps.retainMTPHead()()
-				model, q4k, profile = deps.loadModel(modelPath, backend, contextTokens, deps.fitOverride)
-			}()
-			if model != nil {
-				return
+		if deps.loadModel != nil {
+			if retainMTP && deps.retainMTPHead != nil {
+				func() {
+					defer deps.retainMTPHead()()
+					model, q4k, profile = deps.loadModel(modelPath, backend, contextTokens, deps.fitOverride)
+				}()
+				if model != nil {
+					return
+				}
 			}
+			model, q4k, profile = deps.loadModel(modelPath, backend, contextTokens, deps.fitOverride)
+			return
 		}
-		model, q4k, profile = deps.loadModel(modelPath, backend, contextTokens, deps.fitOverride)
+		if deps.loadModelFitted != nil {
+			var restoreMTP func()
+			if metal && retainMTP && deps.retainMTPHead != nil {
+				restoreMTP = deps.retainMTPHead()
+			} else if !metal && retainResidentMTP {
+				fakmodel.SetRetainMTP(true)
+				restoreMTP = func() { fakmodel.SetRetainMTP(false) }
+			}
+			if restoreMTP != nil {
+				defer restoreMTP()
+			}
+			fitRes, fErr := deps.loadModelFitted(modelPath, backend, contextTokens, deps.fitOverride, retainResidentMTP || retainMTP, 512)
+			startup.FitShrinkAttempts = fitRes.Attempts
+			startup.FitShrinkAdjusted = fitRes.Shrunk
+			startup.FitShrinkReason = fitRes.ShrinkReason
+			if fitRes.EffectiveCtx > 0 {
+				effectiveContextTokens = fitRes.EffectiveCtx
+				startup.EffectiveContextTokens = fitRes.EffectiveCtx
+			}
+			mtpDroppedOnOOM = fitRes.MTPDroppedOnOOM
+			model, q4k, profile = fitRes.Model, fitRes.Q4K, fitRes.Profile
+			fitLoadErr = fErr
+		}
 	}, deps.fitFloor)
 	if err != nil {
 		return nil, err
 	}
 	if model == nil {
 		release()
+		if fitLoadErr != nil {
+			return nil, fitLoadErr
+		}
 		return nil, fmt.Errorf("failed to load %q into the in-kernel engine", modelPath)
 	}
 	if profile != nil {
@@ -344,6 +401,18 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 
 	if deps.scavengeLoaderHeap != nil {
 		deps.scavengeLoaderHeap()
+		startup.HeapScavenged = true
+		_, startup.HeapScavengeReason = upScavengeLoaderHeapEnabled()
+		if startup.HeapScavengeReason == "" {
+			startup.HeapScavengeReason = "debug.FreeOSMemory ran after model load"
+		}
+	} else {
+		scavOn, scavReason := upScavengeLoaderHeapEnabled()
+		if !scavOn {
+			startup.HeapScavengeReason = scavReason
+		} else {
+			startup.HeapScavengeReason = "loader heap scavenge hook disabled"
+		}
 	}
 	// Sample after residency promotion and loader-heap scavenging so the startup
 	// receipt and MTP qualification use the memory state the planner will inherit.
@@ -351,7 +420,15 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 		startup.HostTotalAfter, startup.HostAvailableAfter, _ = deps.hostMemory()
 	}
 
-	planner := deps.newPlanner(model, tok, modelID, q4k, backend, metal, contextTokens)
+	var freeVRAM int64 = startup.HostAvailableAfter
+	if backend != nil {
+		if _, free, ok := compute.DeviceMemoryInfo(backend); ok && free > 0 {
+			freeVRAM = free
+		}
+	}
+	startup.CUDAGraphActive, startup.CUDAGraphReason, startup.CUDAMMQArm, startup.CUDAMMQActive, startup.CUDAMMQReason = upConfigureCUDAGraphAndMMQ(backend, model, q4k, effectiveContextTokens, freeVRAM)
+
+	planner := deps.newPlanner(model, tok, modelID, q4k, backend, metal, effectiveContextTokens)
 	if planner != nil {
 		planner.SetWarmDiskModelDigest(artifactStamp.identityAfterLoad(modelPath))
 	}
@@ -392,10 +469,24 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 			startup.MTPInactiveDetail = turnkeyMTPBoundedDetail(planner.Qwen38MTPCanaryResult().RejectionReason)
 		}
 	}
+	if !metal {
+		nonMetalActive, nonMetalEngine, nonMetalReason := wireTurnkeyMTPSpecAndEvaluate(planner, false, backend, model, modelID, specMode, specEnvForced, mtpDroppedOnOOM, false, "")
+		startup.MTPActive = nonMetalActive
+		startup.MTPEngine = nonMetalEngine
+		if !nonMetalActive && nonMetalMTPPreReason != "" && (nonMetalReason == "" || strings.Contains(nonMetalReason, "embedded MTP weights")) {
+			startup.MTPReason = nonMetalMTPPreReason
+		} else {
+			startup.MTPReason = nonMetalReason
+		}
+	} else {
+		_, startup.MTPEngine, startup.MTPReason = wireTurnkeyMTPSpecAndEvaluate(planner, true, backend, model, modelID, specMode, specEnvForced, mtpDroppedOnOOM, startup.MTPActive, startup.MTPInactiveDetail)
+	}
+	startup.RadixActive, startup.RadixReason = upEvaluateRadixKVStatus(model, backend)
 
 	return &turnkeyNativeResources{
 		Planner:          planner,
 		Model:            model,
+		Backend:          backend,
 		LoadProfile:      profile,
 		Startup:          startup,
 		closeModel:       model.CloseWeights,

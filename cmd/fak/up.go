@@ -408,16 +408,8 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		*mock = true
 	}
 
-	var memoryBytes uint64
-	if *memoryGiB > 0 {
-		memoryBytes = uint64(*memoryGiB * float64(macfit.GiB))
-	} else {
-		var err error
-		memoryBytes, err = macfit.DetectUnifiedMemory()
-		if err != nil || memoryBytes == 0 {
-			memoryBytes = 16 * macfit.GiB
-		}
-	}
+	topo := resolveTurnkeyTopologyAndMemory(*memoryGiB)
+	memoryBytes := topo.EffectiveBytes
 
 	kvPrec, err := resolveUpKVPrecision(*kvPrecision)
 	if err != nil {
@@ -500,6 +492,11 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 		}
 		fmt.Fprintf(stdout, "Context Budget : %d tokens (KV: %s, %.2f GiB)\n", plan.ContextBudgetTokens, kvPrecLabel, float64(plan.ContextBudgetTokens*plan.KVBytesPerToken)/float64(macfit.GiB))
 		fmt.Fprintf(stdout, "Headroom       : %.1f%% (>= 20.0%% guaranteed to prevent swap)\n", plan.HeadroomRatio*100)
+		if topo.DeviceCount > 0 {
+			fmt.Fprintf(stdout, "GPU Topology   : %s (%d device(s), %.1f GiB total VRAM, %.1f GiB free)\n",
+				topo.Mode, topo.DeviceCount, float64(topo.TotalVRAMBytes)/float64(macfit.GiB), float64(topo.FreeVRAMBytes)/float64(macfit.GiB))
+		}
+		printTurnkeyAccelerationSummary(stdout, buildTurnkeyAccelerationReport(topo, plan, kvPrec, *mock, nil))
 		return
 	}
 
@@ -508,7 +505,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 
 	// The capability floor (and FAK_PROFILE) `fak serve` installs by default.
 	applyFloorWithProfile("", "")
-	server, err := startTurnkeyServer(ctx, plan, *addr, *mock)
+	server, err := startTurnkeyServerWithTopology(ctx, plan, topo, *addr, *mock)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak up: %v\n", err)
 		os.Exit(1)
@@ -542,6 +539,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 	if server.native != nil && server.metalDecision == (serveMetalDecision{}) {
 		printTurnkeyComputeBackendStamp(stdout, server.native.Startup.BackendName)
 	}
+	printTurnkeyAccelerationSummary(stdout, server.accelerationReport())
 	if *gpuIdleExit > 0 {
 		fmt.Fprintf(stdout, "  • GPU idle-exit:             stops after %s idle so a queued GPU peer can run (#13135)\n", *gpuIdleExit)
 	}
@@ -594,6 +592,8 @@ func printTurnkeyReady(w io.Writer, ver, addr string, plan macfit.TurnkeyProfile
 
 type turnkeyServer struct {
 	plan             macfit.TurnkeyProfile
+	topo             upGPUTopology
+	accelReport      upAccelerationReport
 	mock             bool
 	engineID         string
 	planner          agent.Planner
@@ -896,6 +896,10 @@ func newTurnkeyInKernelPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, 
 }
 
 func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr string, mock bool, custom ...*agent.InKernelPlanner) (*turnkeyServer, error) {
+	return startTurnkeyServerWithTopology(ctx, plan, resolveTurnkeyTopologyAndMemory(0), addr, mock, custom...)
+}
+
+func startTurnkeyServerWithTopology(ctx context.Context, plan macfit.TurnkeyProfile, topo upGPUTopology, addr string, mock bool, custom ...*agent.InKernelPlanner) (*turnkeyServer, error) {
 	contextTokens, err := turnkeyContextTokens(plan.ContextBudgetTokens)
 	if err != nil {
 		return nil, err
@@ -954,7 +958,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 				// reserve macfit plans against is the headroom here, so the two agree.
 				// Genuine live pressure is still caught downstream by the local
 				// admission reservation and the Metal GPU lease.
-				deps.fitOverride = turnkeyStableFitBudget(plan.MemoryBytes)
+				deps.fitOverride = turnkeyTopologyFitBudget(topo, plan.MemoryBytes)
 				// The reservation lives below the loader and re-samples live memory,
 				// so it needs the SAME stable envelope: otherwise a momentary dip
 				// refuses a plan the loader just admitted (the macfit/loader and
@@ -979,6 +983,9 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 				native, err = loadTurnkeyNativeResourcesWith(ctx, ref, plan.Tier.ModelID, contextTokens, deps)
 				if err != nil {
 					return nil, err
+				}
+				if env, envErr := solveTurnkeyServeEnvelope(plan, plan.KVPrecision, topo, native.Backend, native.Model, native.Startup.MTPActive); envErr == nil {
+					native.Startup.Envelope = env
 				}
 				nativeModelPath = ref
 				metalDecision := native.Startup.MetalDecision
@@ -1045,8 +1052,11 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 		return nil, fmt.Errorf("listen on %s: %w", addr, err)
 	}
 
+	accelReport := buildTurnkeyAccelerationReport(topo, plan, plan.KVPrecision, mock, native)
 	ts := &turnkeyServer{
 		plan:          plan,
+		topo:          topo,
+		accelReport:   accelReport,
 		mock:          mock,
 		engineID:      engineID,
 		planner:       planner,
@@ -1101,6 +1111,16 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	}()
 
 	return ts, nil
+}
+
+func (s *turnkeyServer) accelerationReport() upAccelerationReport {
+	if s == nil {
+		return upAccelerationReport{}
+	}
+	if len(s.accelReport.Features) > 0 {
+		return s.accelReport
+	}
+	return buildTurnkeyAccelerationReport(s.topo, s.plan, s.plan.KVPrecision, s.mock, s.native)
 }
 
 func turnkeyPlannerContextWindow(planner agent.Planner) int {

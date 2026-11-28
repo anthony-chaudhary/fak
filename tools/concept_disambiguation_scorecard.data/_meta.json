@@ -1602,6 +1602,21 @@
           "category": "incidental",
           "reason": "Numeric byte count field for per-GPU sharded KV cache memory in MidMarketPrefillPlan; sizing metric, not a cache subsystem.",
           "token": "KVCacheBytesPerGPU"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON feature map key reporting radix KV prefix reuse status in fak up acceleration summary (cmd/fak/up_auto_accel.go); telemetry key, not a new cache type.",
+          "token": "radix_kv_cache"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON struct tag on turnkeyNativeStartup.RadixActive in cmd/fak/up_native.go; startup telemetry tag, not a separate cache abstraction.",
+          "token": "radix_kv_cache_active"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON struct tag on turnkeyNativeStartup.RadixReason in cmd/fak/up_native.go; startup telemetry tag, not a separate cache abstraction.",
+          "token": "radix_kv_cache_reason"
         }
       ],
       "exclude": [
@@ -1698,6 +1713,9 @@
         "Qwen38ModeReport",
         "Qwen38Report",
         "Qwen38Workload",
+        "radix_kv_cache",
+        "radix_kv_cache_active",
+        "radix_kv_cache_reason",
         "ReasonCacheState",
         "RestartCacheHits",
         "RunCacheSourceSelfTest",
@@ -10734,6 +10752,16 @@
           "category": "incidental",
           "reason": "Selector function choosing CUDA attention kernel variant from SM arch and geometry options; internal helper, not a separate engine.",
           "token": "SelectCUDAAttentionKernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON/struct field naming the active speculative MTP engine tier on turnkeyNativeStartup in cmd/fak/up_native.go; telemetry label, not a separate gateway engine.",
+          "token": "MTPEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable receiving resolved MTP engine name on non-Metal backends in cmd/fak/up_native.go; call-site local, not a separate engine concept.",
+          "token": "nonMetalEngine"
         }
       ],
       "exclude": [
@@ -10777,12 +10805,14 @@
         "KernelRow",
         "KernelShare",
         "KernelTurns",
+        "MTPEngine",
         "NativeDecodeTraceEngine",
         "NativeDecodeTraceSupported",
         "NativeKernels",
         "NewEngine",
         "NewSessionAffinityGateway",
         "NewSpeculativeEngine",
+        "nonMetalEngine",
         "PrivateAgentAEngineCalls",
         "PrivateAgentBEngineCalls",
         "ProfiledKernelActiveTime",
@@ -13574,6 +13604,71 @@
           "category": "incidental",
           "reason": "Local CUDA execution-context helper parameter inside internal/compute kernel launch paths; device-stream receiver variable, not a context-window or KV-context concept.",
           "token": "ctxDev"
+        },
+        {
+          "category": "incidental",
+          "reason": "Context token cutoff threshold in cmd/fak/up_auto_accel.go tuning envelope; sizing constant, not a distinct context abstraction.",
+          "token": "LongCtxC1Cutoff"
+        },
+        {
+          "category": "incidental",
+          "reason": "Automatic default context cap populated on upAccelerationEnvelope from ServeEnvelope in cmd/fak/up_auto_accel.go; sizing field, not a separate context concept.",
+          "token": "AutoCtxCeiling"
+        },
+        {
+          "category": "incidental",
+          "reason": "Batch context alignment multiple reported on upAccelerationEnvelope in cmd/fak/up_auto_accel.go; sizing field, not a separate context concept.",
+          "token": "BatchCtxAlign"
+        },
+        {
+          "category": "incidental",
+          "reason": "Default context token count mirrored from ServeEnvelope onto upAccelerationEnvelope in cmd/fak/up_auto_accel.go; sizing field, not a new context model.",
+          "token": "DefaultCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Hard maximum context bound mirrored from ServeEnvelope onto upAccelerationEnvelope in cmd/fak/up_auto_accel.go; sizing field, not a separate context concept.",
+          "token": "HardMaxCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Maximum resident-fit context tokens computed by SolveServeEnvelope in cmd/fak/up_auto_accel.go; sizing field, not a separate context concept.",
+          "token": "ResidentCtxFitMax"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable holding effective fitted context length in cmd/fak/up_auto_accel.go; local variable, not a separate context abstraction.",
+          "token": "effCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable tracking attempted context token budget during fit shrink loop in cmd/fak/up_auto_accel.go; local variable, not a separate context concept.",
+          "token": "ctxTok"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local loop variable tracking prior context token budget before halving in cmd/fak/up_auto_accel.go; local variable, not a separate context concept.",
+          "token": "lastCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable tracking halved fallback context token count on OOM retry in cmd/fak/up_auto_accel.go; local variable, not a separate context concept.",
+          "token": "tryCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Minimum context token floor parameter passed into loadTurnkeyModelWithFitCommit in cmd/fak/up_native.go; parameter, not a separate context concept.",
+          "token": "minContextTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable tracking post-fit effective context tokens in loadTurnkeyNativeResourcesWith in cmd/fak/up_native.go; local variable, not a separate context concept.",
+          "token": "effectiveContextTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field on upFittedLoadResult and ServeFitCommitResult reporting post-shrink context window in cmd/fak/up_native.go; receipt field, not a new context model.",
+          "token": "EffectiveCtx"
         }
       ],
       "exclude": [
@@ -13584,6 +13679,8 @@
         "AffinityFromContext",
         "ApplyIncrementalContextUpdate",
         "ApplyTraceContext",
+        "AutoCtxCeiling",
+        "BatchCtxAlign",
         "COMPACTION_THRASH",
         "CombineIncrementalContext",
         "CompactionCheckpointConflation",
@@ -13602,24 +13699,33 @@
         "ContextTokensSaved",
         "ContextualID",
         "ctxDev",
+        "ctxTok",
+        "DefaultCtx",
         "DuplicateContextKeyError",
+        "effCtx",
+        "effectiveContextTokens",
+        "EffectiveCtx",
         "EmptyIncrementalContext",
         "ExecuteModelContext",
         "ExtractCompactionSummary",
         "FAK_COMPACTION_THRASH_STOP",
         "FeatureActivationTrackerFromContext",
         "FullContextInputTokens",
+        "HardMaxCtx",
         "IncrementalContext",
         "IncrementalContextGeneration",
         "InitializeIncrementalContext",
         "IsCopiedContext",
+        "lastCtx",
         "LockContext",
+        "LongCtxC1Cutoff",
         "LookupSnapshotTieredContext",
         "MakeContextSource",
         "MakeIncrementalContext",
         "MaxContextTokensForBudget",
         "MechanismStaleContext",
         "MetricFactRecall",
+        "minContextTokens",
         "MinCtx",
         "NativeCompactionObservation",
         "NewContextLayerMemo",
@@ -13631,6 +13737,7 @@
         "RenderInvariantPrefix",
         "ReplaceIncrementalContext",
         "RequestedCtx",
+        "ResidentCtxFitMax",
         "RestoreCalls",
         "RetainedContextBytes",
         "RuntimeContextChanged",
@@ -13641,6 +13748,7 @@
         "SetIncrementalContext",
         "SystemContext",
         "TerminationContextLimit",
+        "tryCtx",
         "V41EPOwnerMaxContextTokens",
         "ValidContextKey",
         "WithAffinity",
@@ -15617,6 +15725,11 @@
           "category": "incidental",
           "reason": "Boolean hardware capability field on CUDAAttentionSelection for sm_89+ FP8 KV support; capability flag, not a maturity tier.",
           "token": "SupportsFP8KV"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean capability field surfaced on upAccelerationEnvelope from active compute Caps in cmd/fak/up_auto_accel.go; capability flag, not a maturity tier.",
+          "token": "SupportsBatchedPrefill"
         }
       ],
       "exclude": [
@@ -15757,6 +15870,7 @@
         "SupportLocalOnly",
         "SupportPartial",
         "SupportedFeatures",
+        "SupportsBatchedPrefill",
         "SupportsBorrowedExpertUploads",
         "SupportsFP8KV",
         "SupportsRoutedExpertKQuant",
@@ -18661,6 +18775,11 @@
           "category": "incidental",
           "reason": "Memory sizing and roofline report struct returned by SizePrefillMidMarket for 1-8 GPU nodes; sizing struct, not an execution plan.",
           "token": "MidMarketPrefillPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local variable holding computed model memory plan byte budget in cmd/fak/up_auto_accel.go; local numeric variable, not an execution plan.",
+          "token": "planMemoryBytes"
         }
       ],
       "exclude": [
@@ -18753,6 +18872,7 @@
         "PlanIdentity",
         "PlanLog",
         "PlanLogEntry",
+        "planMemoryBytes",
         "PlanMSIX",
         "PlanPayload",
         "PlanReconciliation",
@@ -19716,6 +19836,11 @@
           "category": "incidental",
           "reason": "Private pure validation of already parsed GGUF tensor names, byte extents, overlap and supported geometry before output. It neither transforms tensor element ordering nor selects a model or cache layout.",
           "token": "validateConversionLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wrapper struct adapting compute.MemoryPlan fields to serveFitCommit input in cmd/fak/up_auto_accel.go; internal adapter struct, not a tensor memory layout.",
+          "token": "serveFitCommitLayout"
         }
       ],
       "id": "layout",
@@ -19728,6 +19853,7 @@
         "NewExpertStorageLayout",
         "ROCmFP4LayoutName",
         "ReplayOutcome",
+        "serveFitCommitLayout",
         "ValidateROCmFP4Layout",
         "archusesmlamoelayout",
         "defaultlayout",

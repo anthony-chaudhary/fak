@@ -39,6 +39,7 @@ func (s *turnkeyServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		"live_residency": s.liveResidencyReport(),
 		"agent_warm":     s.agentWarm.agentWarmBlock(),
 		"sessions":       s.capacityStats(),
+		"acceleration":   s.accelReport,
 	}
 	if hb := s.hostBudgetBlock(); hb != nil {
 		body["host_budget"] = hb
