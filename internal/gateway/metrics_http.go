@@ -75,6 +75,23 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(s.renderMetrics()))
 }
 
+// WriteKVUtilizationHeaders attaches per-response KV utilization and token
+// capacity headers so downstream admission can gate ITL on KV pressure.
+func WriteKVUtilizationHeaders(w http.ResponseWriter, utilization float64, maxTokenCapacity int) {
+	if w == nil {
+		return
+	}
+	if utilization < 0 {
+		utilization = 0
+	} else if utilization > 1 {
+		utilization = 1
+	}
+	w.Header().Set("X-Fak-KV-Utilization", fmt.Sprintf("%.6f", utilization))
+	if maxTokenCapacity > 0 {
+		w.Header().Set("X-Fak-Max-Token-Capacity", fmt.Sprintf("%d", maxTokenCapacity))
+	}
+}
+
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
