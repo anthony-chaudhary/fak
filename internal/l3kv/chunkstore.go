@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 )
 
@@ -86,12 +88,23 @@ type ChunkStore struct {
 	// in-memory index manifest recording map[string]SpanLocation
 	spans map[string]SpanLocation
 
+	// segment-level reclaim tracking (mori-umbp-6)
+	tick     uint64
+	keyTicks map[string]uint64
+	segments map[uint64]*segmentMeta
+
 	// active chunk state
 	activeChunkID uint64
 	activeOffset  uint64
 	activeBuf     []byte
 
 	closed bool
+}
+
+type segmentMeta struct {
+	appendedBytes  uint64
+	liveBytes      uint64
+	lastAccessTick uint64
 }
 
 // NewChunkStore creates or opens an append-only chunk store rooted at cfg.Dir.
@@ -121,6 +134,8 @@ func NewChunkStore(cfg ChunkStoreConfig) (*ChunkStore, error) {
 		padToChunk: cfg.PadToChunk,
 		autoSync:   cfg.AutoSync,
 		spans:      make(map[string]SpanLocation),
+		keyTicks:   make(map[string]uint64),
+		segments:   make(map[uint64]*segmentMeta),
 		activeBuf:  make([]byte, cfg.ChunkSize),
 	}
 
@@ -178,6 +193,17 @@ func (s *ChunkStore) Put(ctx context.Context, digest string, payload []byte) err
 		}
 	}
 
+	// If overwriting an existing key, subtract its old live bytes from its old segment.
+	if oldLoc, existed := s.spans[digest]; existed {
+		if oldSeg := s.segments[oldLoc.ChunkID]; oldSeg != nil {
+			if oldSeg.liveBytes >= oldLoc.Length {
+				oldSeg.liveBytes -= oldLoc.Length
+			} else {
+				oldSeg.liveBytes = 0
+			}
+		}
+	}
+
 	// Record location in index manifest
 	loc := SpanLocation{
 		ChunkID: s.activeChunkID,
@@ -192,6 +218,12 @@ func (s *ChunkStore) Put(ctx context.Context, digest string, payload []byte) err
 	}
 
 	s.spans[digest] = loc
+	s.tick++
+	s.keyTicks[digest] = s.tick
+	seg := s.ensureSegmentLocked(s.activeChunkID)
+	seg.appendedBytes += payloadLen
+	seg.liveBytes += payloadLen
+	seg.lastAccessTick = s.tick
 
 	// If chunk is now completely full, flush immediately
 	if s.activeOffset >= s.chunkSize {
@@ -217,30 +249,35 @@ func (s *ChunkStore) Get(ctx context.Context, digest string) ([]byte, error) {
 		return nil, fmt.Errorf("l3kv: empty span digest")
 	}
 
-	s.mu.RLock()
+	s.mu.Lock()
 	if s.closed {
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		return nil, ErrClosed
 	}
 
 	loc, ok := s.spans[digest]
 	if !ok {
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		return nil, fmt.Errorf("l3kv: span %q: %w", digest, ErrNotFound)
+	}
+	s.tick++
+	s.keyTicks[digest] = s.tick
+	if seg := s.segments[loc.ChunkID]; seg != nil {
+		seg.lastAccessTick = s.tick
 	}
 
 	// Fast path: if span is in active in-memory chunk buffer
 	if loc.ChunkID == s.activeChunkID {
 		if loc.Offset+loc.Length > uint64(len(s.activeBuf)) {
-			s.mu.RUnlock()
+			s.mu.Unlock()
 			return nil, fmt.Errorf("l3kv: span %q bounds exceed active buffer (%d+%d > %d)", digest, loc.Offset, loc.Length, len(s.activeBuf))
 		}
 		res := make([]byte, loc.Length)
 		copy(res, s.activeBuf[loc.Offset:loc.Offset+loc.Length])
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		return res, nil
 	}
-	s.mu.RUnlock()
+	s.mu.Unlock()
 
 	// Slow path: span is in committed chunk file on disk
 	return s.readFromDisk(loc)
@@ -355,6 +392,9 @@ func (s *ChunkStore) loadManifestLocked() error {
 	}
 	for k, v := range m.Spans {
 		s.spans[k] = v
+		seg := s.ensureSegmentLocked(v.ChunkID)
+		seg.appendedBytes += v.Length
+		seg.liveBytes += v.Length
 	}
 	s.activeChunkID = m.NextChunkID
 	s.activeOffset = 0
@@ -493,6 +533,158 @@ func (a *chunkStoreAdapter) Get(ctx context.Context, key string) ([]byte, bool, 
 }
 
 var _ Store = (*chunkStoreAdapter)(nil)
+
+func (s *ChunkStore) ensureSegmentLocked(chunkID uint64) *segmentMeta {
+	seg, ok := s.segments[chunkID]
+	if !ok {
+		seg = &segmentMeta{}
+		s.segments[chunkID] = seg
+	}
+	return seg
+}
+
+// LiveBytes returns the total live payload bytes currently indexed across all segments.
+func (s *ChunkStore) LiveBytes() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var total uint64
+	for _, seg := range s.segments {
+		total += seg.liveBytes
+	}
+	return total
+}
+
+// Delete logically removes digest from the index and decrements its segment's
+// live-byte count without rewriting the append-only segment file.
+func (s *ChunkStore) Delete(digest string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	loc, ok := s.spans[digest]
+	if !ok {
+		return false
+	}
+	delete(s.spans, digest)
+	delete(s.keyTicks, digest)
+	if seg := s.segments[loc.ChunkID]; seg != nil {
+		if seg.liveBytes >= loc.Length {
+			seg.liveBytes -= loc.Length
+		} else {
+			seg.liveBytes = 0
+		}
+	}
+	return true
+}
+
+// Touch updates per-key recency and each touched key's segment recency without
+// reading payload bytes.
+func (s *ChunkStore) Touch(digests []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range digests {
+		loc, ok := s.spans[d]
+		if !ok {
+			continue
+		}
+		s.tick++
+		s.keyTicks[d] = s.tick
+		if seg := s.segments[loc.ChunkID]; seg != nil {
+			seg.lastAccessTick = s.tick
+		}
+	}
+}
+
+// ColdestKeysInSegment returns up to limit live keys in chunkID ordered from
+// coldest (lowest last-access tick) to hottest.
+func (s *ChunkStore) ColdestKeysInSegment(chunkID uint64, limit int) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	type keyTick struct {
+		key  string
+		tick uint64
+	}
+	var items []keyTick
+	for k, loc := range s.spans {
+		if loc.ChunkID == chunkID {
+			items = append(items, keyTick{key: k, tick: s.keyTicks[k]})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].tick == items[j].tick {
+			return items[i].key < items[j].key
+		}
+		return items[i].tick < items[j].tick
+	})
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = it.key
+	}
+	return out
+}
+
+// ReclaimToBudget evicts whole committed (non-active) segments ranked by
+// (age + 1) / live_fraction (highest first, ties by lowest chunkID) until
+// LiveBytes() <= maxLiveBytes or no committed segments remain. Returns the
+// number of segments unlinked and total live bytes dropped.
+func (s *ChunkStore) ReclaimToBudget(maxLiveBytes uint64) (reclaimed int, droppedLiveBytes uint64, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0, 0, ErrClosed
+	}
+	var totalLive uint64
+	for _, seg := range s.segments {
+		totalLive += seg.liveBytes
+	}
+	for totalLive > maxLiveBytes {
+		var victimID uint64
+		victimFound := false
+		victimScore := -1.0
+		for id, seg := range s.segments {
+			if id == s.activeChunkID {
+				continue // active segment is never reclaimed
+			}
+			age := float64(s.tick - seg.lastAccessTick + 1)
+			var score float64
+			if seg.liveBytes == 0 || seg.appendedBytes == 0 {
+				score = math.Inf(1)
+			} else {
+				liveFrac := float64(seg.liveBytes) / float64(seg.appendedBytes)
+				score = age / liveFrac
+			}
+			if !victimFound || score > victimScore || (score == victimScore && id < victimID) {
+				victimFound = true
+				victimID = id
+				victimScore = score
+			}
+		}
+		if !victimFound {
+			break
+		}
+		seg := s.segments[victimID]
+		if err := os.Remove(s.ChunkPath(victimID)); err != nil && !os.IsNotExist(err) {
+			return reclaimed, droppedLiveBytes, fmt.Errorf("l3kv: remove reclaimed chunk %d: %w", victimID, err)
+		}
+		for k, loc := range s.spans {
+			if loc.ChunkID == victimID {
+				delete(s.spans, k)
+				delete(s.keyTicks, k)
+			}
+		}
+		totalLive -= seg.liveBytes
+		droppedLiveBytes += seg.liveBytes
+		delete(s.segments, victimID)
+		reclaimed++
+	}
+	if reclaimed > 0 {
+		if err := s.persistManifestLocked(); err != nil {
+			return reclaimed, droppedLiveBytes, err
+		}
+	}
+	return reclaimed, droppedLiveBytes, nil
+}
 
 func alignUp(n, align uint64) uint64 {
 	if align == 0 || n%align == 0 {

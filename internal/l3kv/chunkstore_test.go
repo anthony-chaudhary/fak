@@ -438,3 +438,83 @@ func TestChunkStoreConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+// fak-test:runtime fast est=20ms lane=default
+func TestChunkStoreReclaimsEmptiestColdestSegmentFirst(t *testing.T) {
+	dir := t.TempDir()
+	const chunkSize = 16 * 1024
+	store, err := NewChunkStore(ChunkStoreConfig{
+		Dir:        dir,
+		ChunkSize:  chunkSize,
+		Alignment:  4096,
+		PadToChunk: true,
+	})
+	if err != nil {
+		t.Fatalf("NewChunkStore: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+
+	// Chunk 0: two 4 KiB entries (8 KiB total), then delete one -> 50% live fraction.
+	if err := store.Put(ctx, "c0-a", make([]byte, 4096)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(ctx, "c0-b", make([]byte, 4096)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Sync(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Chunk 1: two 4 KiB entries (8 KiB total), 100% live, and touch c1-a so c1-b is coldest inside chunk 1.
+	if err := store.Put(ctx, "c1-a", make([]byte, 4096)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(ctx, "c1-b", make([]byte, 4096)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Sync(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Chunk 2 (active, uncommitted): one 4 KiB entry, never reclaimed.
+	if err := store.Put(ctx, "c2-active", make([]byte, 4096)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete c0-a so chunk 0 is 50% live (higher age/live_fraction score than chunk 1).
+	if !store.Delete("c0-a") {
+		t.Fatal("Delete(c0-a) returned false")
+	}
+	// Touch c1-b? No, touch c1-a so c1-b is the coldest key inside chunk 1.
+	store.Touch([]string{"c1-a"})
+	if coldest := store.ColdestKeysInSegment(1, 1); len(coldest) != 1 || coldest[0] != "c1-b" {
+		t.Fatalf("ColdestKeysInSegment(1)=%v, want [c1-b]", coldest)
+	}
+
+	// LiveBytes = 4096 (c0-b) + 8192 (c1) + 4096 (c2) = 16384.
+	if got := store.LiveBytes(); got != 16384 {
+		t.Fatalf("LiveBytes=%d, want 16384", got)
+	}
+
+	// Reclaim down to 12288 bytes -> must unlink chunk 0 (emptiest/coldest) and keep chunk 1 & active chunk 2.
+	reclaimed, dropped, err := store.ReclaimToBudget(12288)
+	if err != nil {
+		t.Fatalf("ReclaimToBudget: %v", err)
+	}
+	if reclaimed != 1 || dropped != 4096 {
+		t.Fatalf("reclaimed=%d dropped=%d, want 1 / 4096", reclaimed, dropped)
+	}
+	if _, err := os.Stat(store.ChunkPath(0)); !os.IsNotExist(err) {
+		t.Fatalf("chunk 0 file still exists after reclaim: %v", err)
+	}
+	if _, ok := store.Location("c0-b"); ok {
+		t.Fatal("c0-b still indexed after chunk 0 reclaim")
+	}
+	if _, ok := store.Location("c1-a"); !ok {
+		t.Fatal("c1-a missing; chunk 1 should have survived")
+	}
+	if _, ok := store.Location("c2-active"); !ok {
+		t.Fatal("c2-active missing; active chunk must never be reclaimed")
+	}
+}
