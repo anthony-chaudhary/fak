@@ -34,6 +34,8 @@ internal/compute/cuda/graph_quant_workspace.cuh	k_q8_quant_act	32	32	literal	qgr
 internal/compute/cuda/graph_quant_workspace.cuh	mul_mat_vec_q<1>	block	128	resolved-chain	grid	0
 internal/compute/cuda/graph_quant_workspace.cuh	quantize_q8_1	256	256	literal	qgrid	0
 internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_exp	256	256	literal	g1	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_flash_combine	128	128	literal	gc	0
+internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_flash_gqa_split<T, NVFP4, 3>	INK2_FLASH_WARPS * 32	128	resolved-chain	gf	0
 internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out<true, T, kVNVFP4, AsymK8V4>	othreads	0	runtime	g3	osmem
 internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tiled<T, kVNVFP4, AsymK8V4>	othreads	0	runtime	g3	0
 internal/compute/cuda/inkling2_attend_split.cuh	k_ink2_attend_out_tree<true, T, kVNVFP4, AsymK8V4>	INK2_ATS_TREE_GROUPS * 32	512	resolved-chain	g3	osmem
@@ -176,6 +178,8 @@ internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::attention	128	128	literal	tokens*he
 internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::dequantize	256	256	literal	rows	0
 internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::quantize	256	256	literal	rows	0
 internal/compute/cuda/kv_fp8.cuh	fak_kv_fp8::validate3	256	256	literal	((size_t)n + 255)/256	0
+internal/compute/cuda/kv_fp8_attention_owner.cuh	fak_kv_k8v4::k_kv_k8v4_append	fak_kv_k8v4::kGroupSize	32	resolved-chain	blocks	0
+internal/compute/cuda/kv_fp8_attention_owner.cuh	fak_kv_k8v4::k_kv_k8v4_decode_attention	fak_kv_k8v4::kAttentionThreads	128	resolved-chain	tokens * heads	shared
 internal/compute/cuda/kv_fp8_rotary.cuh	fak_kv_fp8::partial_rope_stage	256	256	literal	(n+255)/256	0
 internal/compute/cuda/kv_precision.cuh	k_kv_attention_prompt4_gqa4_typed	512	512	literal	grid	(size_t)16*hd*sizeof(float)
 internal/compute/cuda/kv_precision.cuh	k_kv_attention_prompt4_typed	128	128	literal	grid	(size_t)16*hd*sizeof(float)
@@ -191,6 +195,7 @@ internal/compute/cuda/model_candidates.cuh	k_v41_bf16_publish	256	256	literal	bl
 internal/compute/cuda/model_candidates.cuh	k_v41_bf16_publish_status	1	1	literal	1	0
 internal/compute/cuda/model_candidates.cuh	k_v41_tail_rope	256	256	literal	blocks	0
 internal/compute/cuda/mxfp8_cast.cuh	k_mxfp8_cast_f32	128	128	literal	blocks	0
+internal/compute/cuda/nvfp4_w4a4_gemm.cuh	ink2_w4a4::k_ink2_w4a4_probe	32	32	literal	1	0
 internal/compute/cuda/nvfp4_warp_gemv.cuh	k_nvfp4_w4a16_warp_f32	256	256	literal	grid	0
 internal/compute/cuda/paged_attention_vllm.cuh	fak_paged_kv_copy_blocks_kernel	256	256	literal	planes	0
 internal/compute/cuda/paged_attention_vllm.cuh	fak_vllm_pa::paged_gather_rows_kernel	threads	0	runtime	tokens	0
@@ -294,10 +299,14 @@ internal/compute/cuda/sampling_candidates.cuh	k_sampling_candidates_histogram	25
 internal/compute/cuda/situ_moe.cuh	k_situ_act	256	256	literal	grid	0
 internal/compute/cuda/situ_moe.cuh	k_situ_combine	256	256	literal	(hidden + 255) / 256	0
 internal/compute/cuda/spec_graph.cuh	k_argmax	256	256	literal	1	0
+internal/compute/cuda/spec_graph.cuh	k_dsa_index_quant_cache	128	128	literal	tokens	0
+internal/compute/cuda/spec_graph.cuh	k_dsa_index_quant_rows	128	128	literal	nKeys	0
 internal/compute/cuda/spec_graph.cuh	k_dsa_index_score	threads	256	resolved-chain	nKeys	0
 internal/compute/cuda/spec_graph.cuh	k_dsa_index_topk	threads	256	resolved-chain	1	0
 internal/compute/cuda/spec_graph.cuh	k_dsa_sparse_attend	FLASH_THREADS	128	resolved-chain	nH	shmem
 internal/compute/cuda/spec_graph.cuh	k_spec_verify_attention	block_attn	128	resolved-chain	grid_attn	shmem_attn
+internal/compute/cuda/spec_graph.cuh	k_spec_verify_attention_batch_invariant	FLASH_THREADS	128	resolved-chain	grid_inv	shmem_inv
+internal/compute/cuda/spec_graph.cuh	k_spec_verify_bitwise_check	256	256	literal	blocks	0
 internal/compute/cuda/spec_graph.cuh	k_spec_verify_combine	block_combine	128	resolved-chain	grid_combine	0
 internal/compute/cuda/transformer_ops.cuh	k_add	256	256	literal	(n + 255) / 256	0
 internal/compute/cuda/transformer_ops.cuh	k_add_bias	256	256	literal	(rows * width + 255) / 256	0
@@ -371,8 +380,13 @@ internal/compute/moe_align_sort.cu	k_mae_align_block_size	MAE_THREADS	1024	resol
 internal/compute/moe_align_sort.cu	k_mae_fill_sentinel	MAE_FILL_THREADS	256	resolved-chain	fillGrid	0
 internal/compute/moe_align_sort.cu	k_mae_scatter_expert_tokens	MAE_SCATTER_THREADS	256	resolved-chain	scatterGrid	0
 internal/compute/moe_align_sort.cu	k_mae_sum_topk_f32	MAE_SCATTER_THREADS	256	resolved-chain	grid	0
+internal/compute/moe_grouped_topk.cu	k_mgt_grouped_topk_f32	MGT_THREADS	256	resolved-chain	(unsigned int)num_tokens	0
+internal/compute/moe_topk_gating.cu	k_mtg_topk_gating_f32	MTG_THREADS	256	resolved-chain	(unsigned int)num_tokens	0
+internal/compute/prefill_paged.cu	k_paged_chunked_prefill_attention	FLASH_THREADS	128	resolved-chain	tokens * nH	shmem
 internal/compute/rmsnorm_fp8_quant.cu	k_rfq_fused_add_rmsnorm_fp8_quant	RFQ_THREADS	256	resolved-chain	grid	0
 internal/compute/rmsnorm_fp8_quant.cu	k_rfq_rmsnorm_fp8_quant	RFQ_THREADS	256	resolved-chain	grid	0
+internal/compute/rope_position_array.cu	k_rope_build_cos_sin_cache	threads	0	runtime	max_position	
+internal/compute/rope_position_array.cu	k_rope_position_array	threads	0	runtime	tokens * nHeads	
 internal/compute/routed_expert_gemv.cu	k_rex_gemv_fp8_block32_e8m0	REX_THREADS	256	resolved-chain	(unsigned int)g.blocks	0
 internal/compute/routed_expert_gemv.cu	k_rex_gemv_mxfp4_e8m0	REX_THREADS	256	resolved-chain	(unsigned int)g.blocks	0
 internal/compute/sampling_topk.cu	k_sampling_draw_f32	SAMPLING_TOPK_THREADS	1024	resolved-chain	grid	smem
