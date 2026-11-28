@@ -192,6 +192,9 @@ func (t *Tree) spillHostSnapshotToSSD(ns string, n *node) {
 	if n.remoteSnapshot != nil {
 		return // the remote tier already preserves this prefix; no duplicate copy on disk
 	}
+	if t.recurrentInterval > 0 && !ShouldSpillRecurrentCheckpoint(n, t.recurrentInterval, nil) {
+		return // sparse retention mask: superseded recurrent checkpoint is not spilled
+	}
 	payload, err := n.hostSnapshot.MarshalBinary()
 	if err != nil {
 		t.l3LocalFaults++

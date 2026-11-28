@@ -47,6 +47,19 @@ func inKernelAdaptiveSnapshotCheckpoint(matched, cacheable, promptTokens int) in
 	return grid
 }
 
+// inKernelRecurrentRetentionKeep implements the sparse recurrent-state
+// retention mask: keep a checkpoint at pos only if it is the latest state in
+// its interval or sits on a reachable shared-prefix boundary.
+func inKernelRecurrentRetentionKeep(pos, interval int, reachableBoundaries map[int]bool, latestInInterval int) bool {
+	if interval <= 0 {
+		return true
+	}
+	if reachableBoundaries != nil && reachableBoundaries[pos] {
+		return true
+	}
+	return pos >= latestInInterval
+}
+
 // admitPrefillCheckpoint snapshots s (positioned at the end of prefix) and admits
 // it. optional marks the shared-prefix boundary snapshot, an opportunistic extra:
 // when the snapshot byte budget refuses it the request proceeds without it instead
