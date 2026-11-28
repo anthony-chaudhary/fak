@@ -2,10 +2,10 @@
   "_about": "META + category vocabulary for the fak INDUSTRY scorecard. Modular: the taxonomy lives in _taxonomy.json, the competitor registry in _competitors.json, and fak's position rows in rows-<group>.json. Edit a file, then `python tools/industry_scorecard.py` to re-grade and `--markdown-dir docs/industry-scorecard` to rebuild. Categories are the data-defined closed vocab: a row/dim with an undeclared category is MALFORMED.",
   "meta": {
     "title": "fak — Industry scorecard (industry-first, SOTA-only)",
-    "as_of": "2026-06-27",
-    "fak_version": "0.31.0",
+    "as_of": "2026-11-27",
+    "fak_version": "0.60.0",
     "authority": "BENCHMARK-AUTHORITY.md",
-    "machine_note": "fak headline numbers measured on Apple M3 Pro (arm64) + RTX 4070 (WSL2) + datacenter GPU (GPU server); SOTA refs sourced from vendor docs / papers / leaderboards (see _taxonomy.json source_url + source_date). Deterministic metrics are hardware-independent; live wall-clocks are within-run ratios (BENCHMARK-GOVERNANCE.md).",
+    "machine_note": "fak v0.60.0 Mid-Market (1-8 GPU) headline numbers measured on NVIDIA RTX 5080 16 GB (sm_120), RTX 5090 Laptop (sm_120), Apple M3 Pro (CPU; pure internal/metalgemm Inkling-2 receipts pending), and 8-GPU datacenter server; Hyperscaler multi-node/NVL72/288-GPU MLPerf/PD-disagg dimensions are tagged EXCLUDE/out-of-scope. SOTA refs sourced from vendor docs / papers / leaderboards (see _taxonomy.json).",
     "fresh_window_days": 150,
     "industry_review_window_days": 365
   },

@@ -9,16 +9,16 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 
 ## Quantization & precision (`quantization`)
 
-### ○ KV-cache quantization (FP8 / INT8 / INT4 KV) — fak: **no-claim**
+### ≈ KV-cache quantization (FP8 / INT8 / INT4 KV) — fak: **parity**
 
 *Why it matters:* Quantizing KV from BF16 to FP8 halves bytes-per-cached-token, directly doubling concurrency or context length at fixed HBM. INT8/INT4 push further. The buyer cares about the precision/accuracy/throughput trade: which formats are supported, whether attention runs in low precision (not just storage), and the measured accuracy delta. It is one of the cheapest capacity multipliers available.
 
-- **SOTA bar:** FP8 (e4m3) KV-cache quantization is the production standard: ~46% KV memory reduction (per-token cost ~54% of BF16), +14.9% output throughput / -14.8% median ITL on Llama-3.1-8B, recovering 97-98% of baseline long-context AUC at 128k and fully recovering aggregated AUC@1M. INT4 KV gives ~75% reduction but is research-stage; vLLM ships FP8 only.
-- **Leading systems:** FP8 e4m3 KV (vLLM production, Apr 2026), INT4 KV (research: ~75% reduction), FP8 e5m2 (vLLM)
+- **SOTA bar:** FP8 (e4m3) KV-cache quantization is the cross-GPU default (~46% real memory reduction / 54% of BF16 per-token cost in vLLM Apr 2026, +14.9% output throughput, recovering 97-98% long-context AUC at 128k). On Blackwell, vLLM, SGLang, and FlashInfer also ship 4-bit FP4 KV (4x reduction vs FP16), while local runtimes (llama.cpp #26989, Ollama) use integer q4_0/iq4_nl KV.
+- **Leading systems:** FP8 e4m3 KV (vLLM/SGLang production, Apr 2026), FP4 KV (vLLM/SGLang/FlashInfer on Blackwell, 4x vs FP16), q4_0 / iq4_nl KV (llama.cpp #26989 / Ollama), INT4 / KIVI KV (research: ~75% reduction)
 - **Source:** [https://vllm-project.github.io/2026/04/22/fp8-kvcache.html](https://vllm-project.github.io/2026/04/22/fp8-kvcache.html) (2026-04)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for the current kernel. fak's quantization work is on weight bytes (Q8/Q4_K), not on the KV cache dtype; it has no FP8/INT8/INT4 KV path and so claims none of TensorRT-LLM/vLLM's ~2-3x batch gain from FP8 KV. fak's KV story is exact eviction/reuse on an f32 cache, a different axis from KV-precision compression.
-- **Trace:** fak quantizes WEIGHTS (Q8_0 SIMD lane, CLAIMS line 95; Q4_K/Q8 device GEMV witnesses line 146) but there is no FP8/INT8/INT4 KV-CACHE quantization claim. The kernel-owned KVCache and KV-decode parity (line 85) are at f32; no per-token KV-byte reduction from a quantized KV dtype is measured.
+- **fak:** parity — 4 x KV memory reduction (KV dtype) (shipped)
+- **fak note:** HW-WITNESSED on RTX 5080 16 GB (sm_120): fak ships auto-FP8 global KV (>16K, 2x vs FP16, 32K mean KL 0.004225 nats), opt-in NVFP4 block-16 global KV (4x vs FP16, 128k all-resident with 0 GiB CPU spill, 4.21x prefill 1,190 vs 283 tok/s, +21.7% decode 16.9 vs 13.9 tok/s, exact 128k needle retrieval, 4/4 greedy oracle pass), and opt-in asymmetric fp8k_nvfp4v (0eb366df29). Parity on 4x KV capacity reduction with Blackwell FP4 KV stacks; both low-bit modes stay opt-in.
+- **Trace:** eb68a8cf8a · docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json · README.md (128k NVFP4 KV on RTX 5080); docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md (32K auto-FP8 KV); commits 7b462f9b5e & 0eb366df29 (asymmetric fp8k_nvfp4v KV)
 
 ### ○ FP8 (W8A8, E4M3) accuracy retention vs bf16 reference — fak: **no-claim**
 
@@ -27,9 +27,9 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** FP8 (W8A8, E4M3) weight+activation quantization is effectively lossless: ~99.9% accuracy recovery on HumanEval and <=1% degradation vs BF16 across all model scales, including Llama 3.1 405B fully recovering accuracy.
 - **Leading systems:** FP8 W8A8 via LLM Compressor (vLLM), NVIDIA TensorRT Model Optimizer FP8, AMD Quark FP8
 - **Source:** [https://developers.redhat.com/articles/2024/10/17/we-ran-over-half-million-evaluations-quantized-llms](https://developers.redhat.com/articles/2024/10/17/we-ran-over-half-million-evaluations-quantized-llms) (2024-10)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. fak has no FP8 (W8A8/E4M3) path at all — its compute HAL is f32-only and its sole quant rung is Q8_0 weight-narrowing on CPU SIMD/GPU. No accuracy-retention-vs-bf16 study exists, so fak makes no claim. Not a measurable gap fak should chase: FP8 lossless retention is a model-numerics property of vLLM/TensorRT-LLM, orthogonal to fak's prefix-reuse/adjudication differentiator.
-- **Trace:** none — CLAIMS.md: compute HAL is f32-only; the only narrowing fak ships is Q8_0 (8-bit), and BENCHMARK-AUTHORITY.md carries no FP8 or accuracy-recovery number
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** PARTIAL PRIMITIVES, NO W8A8 EVAL: fak ships FP8 global KV cache (>16K auto-FP8, 32K mean KL 0.004225 nats) and fp8_block32_e8m0 CUDA weight kernels plus SM120 NVFP4 W4A4 prefill (not f32-only), but still lacks a full FP8 W8A8 weight+activation serving path and HumanEval/MMLU accuracy-retention comparison vs BF16. Honest no-claim.
+- **Trace:** docs/notes/PACKING-COVERAGE-MATRIX-2026-11-03.md (fp8_block32_e8m0 CUDA kernel); docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md (32K auto-FP8 KV); no W8A8 HumanEval eval
 
 ### ○ INT8 W8A8 (SmoothQuant) accuracy under activation outliers — fak: **no-claim**
 
@@ -39,8 +39,8 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **Leading systems:** INT8 W8A8 SmoothQuant via LLM Compressor (vLLM), SmoothQuant (Xiao et al.)
 - **Source:** [https://developers.redhat.com/articles/2025/03/03/deployment-ready-reasoning-quantized-deepseek-r1-models](https://developers.redhat.com/articles/2025/03/03/deployment-ready-reasoning-quantized-deepseek-r1-models) (2025-03)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. fak's int8/Q8_0 SIMD lane (in-flight) is weight-only and proven argmax-exact against its own f32 oracle, NOT an activation-quantized W8A8 path with SmoothQuant. fak has no per-token activation scaling, no outlier-suppression study, and no per-task degradation measurement — it makes no SmoothQuant accuracy claim.
-- **Trace:** none — fak's int8 lane is Q8_0 WEIGHT-only (W8A16-style), argmax-exact vs the f32 oracle; there is no W8A8 activation-quant path and no SmoothQuant outlier-handling, so no accuracy-under-outliers number exists
+- **fak note:** Weight+activation W8A8 SmoothQuant eval unmeasured: fak now quantizes activations to Q8_1/int8 on-the-fly in CUDA MMQ/MMVQ and Inkling-2 prefill/decode paths alongside native Q8_0 weights across backends, but has no SmoothQuant migration or BF16 per-task accuracy degradation benchmark. Honest no-claim.
+- **Trace:** docs/notes/PACKING-COVERAGE-MATRIX-2026-11-03.md (native Q8_0 CUDA/Vulkan/CPU/Metal + Q8_1 activations for CUDA decode/prefill); no SmoothQuant W8A8 Open-LLM benchmark
 
 ### ○ INT4 weight-only (W4A16: AWQ, GPTQ) accuracy and calibration sensitivity — fak: **no-claim**
 
@@ -49,9 +49,9 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** INT4 weight-only (W4A16) via AWQ or GPTQ keeps accuracy degradation within negligible-to-moderate range (<4% typical, often <1-2% on HumanEval); AWQ is the de-facto best-practice INT4 format for vLLM in 2026 and generally edges out GPTQ on perplexity.
 - **Leading systems:** AWQ (AutoAWQ) via vLLM, GPTQ / GPTQModel + Marlin (vLLM), W4A16 LLM Compressor
 - **Source:** [https://vrlatech.com/llm-quantization-explained-int4-int8-fp8-awq-and-gptq-in-2026/](https://vrlatech.com/llm-quantization-explained-int4-int8-fp8-awq-and-gptq-in-2026/) (2026-01)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. fak has no INT4 weight-only path (no AWQ, no GPTQ, no calibration-set tooling); its lowest precision is 8-bit Q8_0. Note BENCHMARK-AUTHORITY does report serving a q4_k_m GGUF (Qwen3.6-27B) but at 0.9 tok/s with only 2-token parity before drift — that is a GGUF-load capability, not an INT4-accuracy-retention claim, so no W4A16 accuracy number is asserted.
-- **Trace:** none — fak ships only Q8_0 (8-bit weight) and f32; no W4A16 / INT4 / AWQ / GPTQ path and no calibration-sensitivity study in CLAIMS.md or BENCHMARK-AUTHORITY.md
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** PARTIAL PRIMITIVES, NO W4A16 CALIBRATION BENCH: fak ships native CUDA/Vulkan/Metal/CPU 4-bit GGUF kernels (Q4_K MMQ default on sm_80+, IQ1_M..IQ4_NL, NVFP4) and host-side AWQ/GPTQ packing, serving Inkling-2-Mini (26B) and Qwen3.8-27B Q4_K_M on CUDA; however, GPU device-resident AWQ/GPTQ kernels and W4A16 HumanEval/perplexity calibration-sensitivity benchmarks remain unbuilt/unmeasured.
+- **Trace:** docs/notes/PACKING-COVERAGE-MATRIX-2026-11-03.md (native Q4_K/Q3_K/IQ* CUDA/Vulkan/Metal/CPU, host AWQ/GPTQ); docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md (Qwen3.8-27B Q4_K_M MMQ)
 
 ### ○ 4-bit microscaling float (NVFP4 / MXFP4 / FP4) accuracy vs FP8 on Blackwell — fak: **no-claim**
 
@@ -60,9 +60,9 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** NVFP4 (4-bit, 16-value blocks, FP8 E4M3 fractional block scales) now achieves <=1% accuracy drop vs FP8 on large reasoning models (DeepSeek-R1-0528: MMLU-PRO 85->84, GPQA 81->80) and ~99% recovery vs BF16 for 70B-235B models, at ~2.3x higher throughput than weight-only 4-bit; clearly the SOTA 4-bit format on Blackwell, well ahead of MXFP4 (32-value, power-of-two scales).
 - **Leading systems:** NVFP4 via NVIDIA TensorRT Model Optimizer + LLM Compressor (vLLM, Blackwell B200/GB200), NVFP4 (vLLM Marlin)
 - **Source:** [https://developer.nvidia.com/blog/introducing-nvfp4-for-efficient-and-accurate-low-precision-inference/](https://developer.nvidia.com/blog/introducing-nvfp4-for-efficient-and-accurate-low-precision-inference/) (2025-09)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. fak has no microscaling 4-bit float format, no NVFP4/MXFP4 kernels, and no Blackwell tensor-core path. This is squarely vendor-stack (TensorRT-LLM/ModelOpt) territory; fak asserts nothing and should not — it is orthogonal to its prefix-reuse differentiator.
-- **Trace:** none — no 4-bit microscaling-float path (NVFP4/MXFP4/FP4) anywhere in fak; compute HAL is f32-only, quant rung is Q8_0, no Blackwell-class hardware path
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** HONEST NO-CLAIM on downstream MMLU-PRO/GPQA accuracy vs FP8: fak ships native SM120 NVFP4 W4A4 grouped prefill on Inkling-2-Mini-UD-Q3_K_XL (default on sm_120f/a at 27355b23dd) and passed its RTX 5080 KL gate vs per-token step (mean KL 0.003728 nats, max 0.105, 84/85 same-top, 4/4 llama.cpp CPU greedy oracle pass), but has NOT measured MMLU-PRO or GPQA accuracy retention against an FP8 baseline. Witnessed NVFP4 W4A4 prefill throughput (5861.0 vs realugbun/llama.cpp 3012.4 tok/s on UD-Q3_K_XL) lives in single-stream-prefill-gpu.
+- **Trace:** 27355b23dd · docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4/RESULTS.md · docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4/RESULTS.md
 
 ### ○ Full 4-bit (W4A4 + KV4) via rotation/outlier removal — fak: **no-claim**
 
@@ -71,9 +71,9 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** Learned-rotation methods now lead 4-bit weight+activation: SpinQuant (ICLR 2025) closes the gap to full precision by up to 45.1% relative to QuaRot on hard-to-quantize Llama-3 8B, and 2025-2026 successors (Qronos, ResQ PCA-rotations, TurboQuant for KV cache, WUSH adaptive transforms) advance further; Hadamard/learned rotations are the standard outlier-removal primitive feeding NVFP4/W4A4.
 - **Leading systems:** SpinQuant (learned rotations), Qronos (2025), ResQ PCA-rotation (2025), TurboQuant (2026, KV cache), QuaRot (Hadamard baseline)
 - **Source:** [https://arxiv.org/abs/2405.16406](https://arxiv.org/abs/2405.16406) (2025-04)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. Full 4-bit (W4A4+KV4) via rotation/outlier removal is an aggressive model-numerics research line; fak has none of it (no activation quant, no KV quant, no rotation). It makes no perplexity-delta or zero-shot-retention claim here.
-- **Trace:** none — no W4A4, no KV4, no Hadamard/learned rotation (QuaRot/SpinQuant) path; fak is f32 compute with an 8-bit weight rung only
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** ROTATION PRIMITIVE SHIPPED, END-TO-END PPL GAP REMAINS: fak now ships SM120 NVFP4 W4A4 prefill, 4-bit NVFP4 KV cache, and FWHT16 Hadamard-rotated NVFP4-V values (0eb366df29, internal/compute/block_diagonal_wht.go), but has no QuaRot/SpinQuant-style full-model WikiText-2 perplexity or zero-shot retention benchmark vs FP16. Honest no-claim.
+- **Trace:** 0eb366df29 · commit 0eb366df29 & internal/compute/block_diagonal_wht.go (FWHT16-rotated NVFP4-V KV); docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4/RESULTS.md (SM120 NVFP4 W4A4 prefill)
 
 ### ○ Quantization granularity (per-tensor / per-channel / per-group / microscaling block size) — fak: **no-claim**
 
@@ -82,9 +82,9 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** Per-block (block-32) microscaling beats per-tensor/per-channel; measured SNR gains of 3.0-3.4 dB over group-128 and 9.2-9.4 dB over per-tensor for two-level microscaling. Common group sizes 32/64/128; group-128 is the de-facto 4-bit weight-only default. NVFP4's block-16 + FP32 scale is finer than MXFP4's block-32 power-of-two.
 - **Leading systems:** MX formats (OCP MXFP4/MXFP8, block-32), NVFP4 (block-16, FP32 second-level), group-128 INT4 (AWQ/GPTQ), MOSS two-level microscaling
 - **Source:** [https://arxiv.org/html/2511.05811v2](https://arxiv.org/html/2511.05811v2) (2025-11)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. fak's only granularity is whatever Q8_0/GGUF gives it; it has authored no microscaling block-size study and no SNR-vs-granularity numbers. The MX/NVFP4 granularity question is a format-design axis owned by the quant-format authors, not fak — no claim.
-- **Trace:** none — fak consumes Q8_0 (the GGUF 8-bit block scheme) but has shipped no per-tensor/per-channel/per-group/microscaling granularity comparison or SNR measurement
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** BLOCK GRANULARITIES SHIPPED, SNR ABLATION UNMEASURED: fak executes two-level block-16 NVFP4 (E4M3 + FP32), block-32 E8M0 MXFP4/FP8, and GGUF Q/IQ super-blocks plus INT8 blk16 KV, but has authored no controlled SNR-vs-granularity dB study against MOSS. Honest no-claim.
+- **Trace:** docs/notes/PACKING-COVERAGE-MATRIX-2026-11-03.md (block-16 NVFP4, block-32 E8M0 MXFP4/FP8, GGUF super-blocks); commit 0eb366df29 (INT8-K blk16 + FWHT16 NVFP4-V)
 
 ### ○ Accuracy-constrained throughput on a neutral benchmark (MLPerf Inference) — fak: **no-claim**
 
@@ -94,7 +94,7 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **Leading systems:** NVIDIA GB300 NVL72 (Blackwell Ultra, TensorRT-LLM/Dynamo), NVIDIA GB200 NVL72 (Blackwell), CoreWeave / Nebius GB300 NVL72 submissions
 - **Source:** [https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform](https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform) (2026-04-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE BY DESIGN for a reuse kernel. The accuracy-constrained number is now MLPerf v6.0's (2026-03-30) server scenario, carried by DeepSeek-R1 671B MoE (8,064 tok/s/GPU on GB300 NVL72 under a 2 s TTFT / 12.5 tok/s/user p99 SLO while holding the accuracy bar), superseding v5.x's Llama-3.1-405B framing. fak has never submitted to MLPerf and runs no accuracy-constrained throughput benchmark. Its closest real number — 1085.6 vs 1451.6 tok/s vs raw SGLang on 8-GPU datacenter server (it TRAILS, the gateway tax) — is an ungated throughput race, not an MLPerf accuracy-gated result, so no MLPerf claim is made. fak does NOT intend an own-engine MLPerf-shaped DeepSeek-R1 number; on a 671B MoE it fronts SGLang/llama.cpp, and its in-kernel DeepSeek-class-MoE path is the GLM-5.2 work (#1010, #1026; single device, commit 498a4ab). See max-model-and-moe-coverage.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. OUT OF SCOPE BY DESIGN for a reuse kernel. The accuracy-constrained number is now MLPerf v6.0's (2026-03-30) server scenario, carried by DeepSeek-R1 671B MoE (8,064 tok/s/GPU on GB300 NVL72 under a 2 s TTFT / 12.5 tok/s/user p99 SLO while holding the accuracy bar), superseding v5.x's Llama-3.1-405B framing. fak has never submitted to MLPerf and runs no accuracy-constrained throughput benchmark. Its closest real number — 1085.6 vs 1451.6 tok/s vs raw SGLang on 8-GPU datacenter server (it TRAILS, the gateway tax) — is an ungated throughput race, not an MLPerf accuracy-gated result, so no MLPerf claim is made. fak does NOT intend an own-engine MLPerf-shaped DeepSeek-R1 number; on a 671B MoE it fronts SGLang/llama.cpp, and its in-kernel DeepSeek-class-MoE path is the GLM-5.2 work (#1010, #1026; single device, commit 498a4ab). See max-model-and-moe-coverage.
 - **Trace:** none — fak has no MLPerf Inference submission and no accuracy-gated throughput run; its only live concurrent head-to-head (served-throughput-vs-sglang) is a raw tok/s race fak TRAILS, with no 99%/99.9%-accuracy gate applied
 
 ### ○ Quantization format & low-precision datatype coverage — fak: **no-claim**
@@ -105,14 +105,14 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **Leading systems:** vLLM quantization (LLM Compressor, Marlin, AutoAWQ, GPTQModel, bitsandbytes, Quark), TensorRT Model Optimizer (FP8/INT4/NVFP4)
 - **Source:** [https://docs.vllm.ai/en/latest/features/quantization/](https://docs.vllm.ai/en/latest/features/quantization/) (2026-01)
 - **fak:** no-claim — no number (in-flight)
-- **fak note:** REAL but partial gap. fak LOADS GGUF Q8_0/Q4_K and witnesses Q8 device GEMM (Vulkan 24.6 tok/s 1.49x vs f32; datacenter GPU k_q8_gemm cosine~1.0), and has an in-flight AVX2/AVX-512 int8 SIMD decode lane (~2.97x vs HF dynamic-int8, int8-simd-vs-hf row) — but its own engine still largely DEQUANTS to f32, and it has NO FP8 W8A8, NVFP4/MXFP4 W4A4, AWQ/GPTQ, or KV-cache quantization. The TensorRT-LLM/vLLM Blackwell-tensor-core NVFP4 path is entirely out of fak's reach. No shipped fak coverage-breadth number; the int8 lane is deliberately not yet [SHIPPED]. Verdict no-claim on coverage; the speed sub-claim lives in int8-simd-vs-hf.
-- **Trace:** CLAIMS: GGUF Q8_0/Q4_K loaded but DEQUANT-to-f32 on own engine; int8/Q8_0 SIMD lane is in-flight (not [SHIPPED]); no FP8/NVFP4/MXFP4/AWQ/GPTQ
+- **fak note:** PARTIAL GAP: fak now ships native SM120 NVFP4 W4A4 prefill, FP8/NVFP4 KV cache, and resident Q3_K/Q4_K/Q8_0/IQ* CUDA & Metal kernels, but lacks FP8 W8A8/AWQ/GPTQ weight paths and Hopper FP8 GEMM parity. No single coverage-breadth scalar claimed.
+- **Trace:** README.md; docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4/RESULTS.md; docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md: native NVFP4 W4A4 grouped prefill (sm_120f), FP8 & NVFP4 global KV cache, plus Q3_K/Q4_K/Q8_0/IQ2_XS/IQ2_S/IQ3_XXS/IQ3_S/IQ4_NL resident CUDA & Metal kernels.
 
 ### ▲ int8 / Q8_0 SIMD decode throughput vs the same-rung int8 peer — fak: **lead**
 
 *Why it matters:* The execution speed of an int8-quantized model on CPU SIMD (AVX2/AVX-512) decides local-inference viability. fak's hand-written int8 GEMM beats the standard HuggingFace dynamic-int8 reference.
 
-- **SOTA bar:** HuggingFace dynamic-int8 is the standard same-rung CPU int8 reference (1Ã—); llama.cpp Q8_0 CPU is the harder peer (~parity).
+- **SOTA bar:** HuggingFace dynamic-int8 is the standard same-rung CPU int8 reference (1×); llama.cpp Q8_0 CPU is the harder peer (~parity).
 - **Leading systems:** HuggingFace dynamic-int8, llama.cpp Q8_0
 - **Source:** [https://huggingface.co/docs/transformers/main/quantization/overview](https://huggingface.co/docs/transformers/main/quantization/overview) (2026-06)
 - **fak:** lead — 2.97 × vs HF int8 (in-flight)
@@ -145,7 +145,7 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 
 ### ≈ Dense GPU compute correctness with ZERO vendor GEMM (cuBLAS-free) — fak: **parity**
 
-*Why it matters:* Every mainstream stack depends on NVIDIA cuBLAS for its GEMMs. Running a real model's dense path on an owned, dependency-free kernel â€” and proving it bit-matches the vendor oracle â€” is a portability/auditability differentiator.
+*Why it matters:* Every mainstream stack depends on NVIDIA cuBLAS for its GEMMs. Running a real model's dense path on an owned, dependency-free kernel — and proving it bit-matches the vendor oracle — is a portability/auditability differentiator.
 
 - **SOTA bar:** cuBLAS is the tuned vendor GEMM every other stack carries; matching it bit-for-bit (cosine=1.0) is parity by construction.
 - **Leading systems:** cuBLAS (NVIDIA tuned vendor GEMM)

@@ -22,7 +22,7 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 ## Agent / fleet serving (`agent-fleet`)
 
-### ▲ Cross-agent fleet serving time (N agents Ã— T turns): work eliminated by shared-prefix fusion — fak: **lead**
+### ▲ Cross-agent fleet serving time (N agents × T turns): work eliminated by shared-prefix fusion — fak: **lead**
 
 *Why it matters:* fak's product category. When a fleet of agents shares a large system/context prefix, fusing that prefix once across all agents eliminates re-prefill work that even a tuned per-agent cache repeats. This is the axis fak is built to win.
 
@@ -46,7 +46,7 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 ### ○ Cross-agent reuse marginal value vs a LIVE tuned shared-prefix engine (head-to-head) — fak: **no-claim**
 
-*Why it matters:* A live SGLang/vLLM ALSO fuses a shared prefix once. The marginal win vs a real competing process â€” not vs fak's own warm-KV arm â€” is the number a buyer comparing engines actually wants, and fak has not measured it.
+*Why it matters:* A live SGLang/vLLM ALSO fuses a shared prefix once. The marginal win vs a real competing process — not vs fak's own warm-KV arm — is the number a buyer comparing engines actually wants, and fak has not measured it.
 
 - **SOTA bar:** Head-to-head marginal value of cross-agent reuse vs a LIVE tuned shared-prefix engine (vLLM APC / SGLang RadixAttention, which also fuses a shared prefix once) remains UNMEASURED; fak's own WebVoyager stratification puts the marginal-vs-tuned win at only ~1.0-1.10x on that workload.
 - **Leading systems:** SGLang RadixAttention (live process), vLLM Automatic Prefix Caching (live process)
@@ -59,9 +59,9 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 ### ▲ Model routing granularity: per-aspect + first-class ensemble routing vs whole-request single-model selection — fak: **lead**
 
-*Why it matters:* Every mainstream 'LLM router' (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) answers one question â€” which SINGLE model should serve this WHOLE request â€” and the only shipped model ensemble is a single fixed recipe (OpenRouter Fusion). Routing a sub-request aspect (one tool call, one reasoning step) to its own model, or declaring a configurable per-aspect ensemble with a reduction, is a granularity layer no surveyed product exposes; it is the axis that decides whether routing is a per-request pick or a first-class, in-loop decision.
+*Why it matters:* Every mainstream 'LLM router' (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) answers one question — which SINGLE model should serve this WHOLE request — and the only shipped model ensemble is a single fixed recipe (OpenRouter Fusion). Routing a sub-request aspect (one tool call, one reasoning step) to its own model, or declaring a configurable per-aspect ensemble with a reduction, is a granularity layer no surveyed product exposes; it is the axis that decides whether routing is a per-request pick or a first-class, in-loop decision.
 
-- **SOTA bar:** Surveyed 2025-2026 routers/gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) all route the WHOLE request to ONE model; OpenRouter Fusion is the only shipped model ensemble and it is a fixed parallel-synthesize recipe, not a configurable per-aspect reduction. None routes a sub-request aspect to its own model. (Aurelio Semantic-Router routes to an intent, not a model; vLLM/SGLang routers balance replicas of ONE model for KV locality â€” a different layer.)
+- **SOTA bar:** Surveyed 2025-2026 routers/gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) all route the WHOLE request to ONE model; OpenRouter Fusion is the only shipped model ensemble and it is a fixed parallel-synthesize recipe, not a configurable per-aspect reduction. None routes a sub-request aspect to its own model. (Aurelio Semantic-Router routes to an intent, not a model; vLLM/SGLang routers balance replicas of ONE model for KV locality — a different layer.)
 - **Leading systems:** RouteLLM (LMSYS), Martian, NotDiamond, Unify.ai, OpenRouter (+ Fusion), Portkey, LiteLLM Router
 - **Source:** [https://github.com/anthony-chaudhary/fak/blob/main/docs/model-routing.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/model-routing.md) (2026-06)
 - **fak:** lead — no number (shipped)
@@ -72,7 +72,7 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 ### ▲ Long-session history compaction that preserves the provider prompt-cache prefix (drop-and-splice vs summarize-and-resend) — fak: **lead**
 
-*Why it matters:* An agent re-sends its whole transcript every turn; the provider prompt cache discounts the unchanged prefix ONLY while it stays byte-for-byte identical. Almost every built-in compaction (Aider, LangChain ConversationSummaryMemory, Codex CLI, Copilot CLI, Anthropic API context-editing) summarizes or clears old turns and re-sends a REWRITTEN prompt â€” which by the providers' own docs breaks that exact-match prefix and re-bills it at full price on the compacting turn. Whether a tool can shrink a long conversation WITHOUT busting the cache is the axis that decides if compaction saves money on the turn it fires or costs it.
+*Why it matters:* An agent re-sends its whole transcript every turn; the provider prompt cache discounts the unchanged prefix ONLY while it stays byte-for-byte identical. Almost every built-in compaction (Aider, LangChain ConversationSummaryMemory, Codex CLI, Copilot CLI, Anthropic API context-editing) summarizes or clears old turns and re-sends a REWRITTEN prompt — which by the providers' own docs breaks that exact-match prefix and re-bills it at full price on the compacting turn. Whether a tool can shrink a long conversation WITHOUT busting the cache is the axis that decides if compaction saves money on the turn it fires or costs it.
 
 - **SOTA bar:** The field splits two ways. Summarizers (Aider, LangChain ConversationSummaryMemory, Codex CLI, Copilot CLI) and Anthropic's API context-editing REWRITE/clear content and break the prefix cache (OpenAI docs: 'when you drop, summarize or compact earlier turns ... you'll break the cache'; Anthropic context-editing docs: 'Invalidates cached prompt prefixes when content is cleared'). The cache-preserving sub-field is small: LangChain trim_messages (pure sliding-window drop, no rewrite) and Copilot's DELIBERATE cache-boundary reset reason about it; no surveyed tool ships a PROVEN byte-identity splice on by default. Context-editing pairs clearing with a memory tool for recovery (a different axis: recoverability), reporting up to ~84% token reduction on an Anthropic agent eval.
 - **Leading systems:** Anthropic API context-editing (clear_tool_uses_20250919), OpenAI Codex CLI (summary compaction), GitHub Copilot CLI (cache-boundary compaction), Aider (ChatSummary), LangChain (trim_messages / ConversationSummaryMemory)

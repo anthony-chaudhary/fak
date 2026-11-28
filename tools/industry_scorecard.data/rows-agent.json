@@ -29,7 +29,8 @@
         "field": "kv_aware_locality.hit_rate",
         "expect": 0.9396551724137931,
         "tol": 1e-06
-      }
+      },
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "fleet-serving-50x5",
@@ -55,7 +56,8 @@
         "tol": 1e-06
       },
       "verdict": "lead",
-      "status": "shipped"
+      "status": "shipped",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "marginal-vs-warm-cache",
@@ -75,7 +77,8 @@
       "comparison_note": "Cross-agent prefix fusion ON TOP of an already-warm per-agent cache — the honest marginal few-fold (2.4–2.7×, conservative end shown), NOT the 60× headline vs naive. FENCE: the 'tuned' baseline is fak's OWN warm-KV arm B (bit-exact, kernel held constant), NOT a live SGLang/vLLM process — a real competing engine also fuses a shared prefix once, so the marginal-vs-a-live-tuned-process number is unmeasured (see row 'marginal-vs-tuned-process').",
       "measured_on": "2026-06-19",
       "verdict": "lead",
-      "status": "shipped"
+      "status": "shipped",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "marginal-vs-tuned-process",
@@ -94,7 +97,8 @@
       "comparison_note": "Every committed fleet multiplier (4.1×, 60.3×, 139×) is measured vs NAIVE re-prefill or fak's OWN kernel held constant in warm-KV mode — NOT a head-to-head against a live SGLang/vLLM process, which ALSO fuses a shared prefix once. The honest marginal-vs-a-real-tuned-process number is UNMEASURED; the repo's WebVoyager baseline-stratification record puts the marginal-vs-tuned win at only ~1.0–1.10× on that workload. Naming this gap stops the 4.1× from being read as a vs-live-competitor result.",
       "measured_on": "2026-06-23",
       "verdict": "no-claim",
-      "status": "projected"
+      "status": "projected",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "model-routing-granularity",
@@ -116,7 +120,8 @@
       "fak_doc": "docs/model-routing.md (survey + status); BENCHMARK-AUTHORITY.md (fak routebench)",
       "apples_to_apples": true,
       "comparison_note": "To our knowledge / among surveyed 2025-2026 routers and gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router), every one routes the WHOLE request to ONE model and the only shipped model ensemble is OpenRouter Fusion — a fixed parallel-synthesize recipe, not a configurable reduction. fak routes at the ASPECT level (request | tool_call | query | step), so one request can send different aspects to different models, with first-class ENSEMBLES folded by a configurable reduction (first | vote | best_of | all_reduce | concat), expressed as one deterministic, verifiable policy. The decision spine (Route + Combine) and the offline benchmark (fak routebench) are SHIPPED (commit 2298421, witnessed by go test), so this is a CATEGORICAL capability lead on routing granularity and ensemble expressiveness — NOT a benchmarked speed/quality win. Any '10x' is a target to be measured, never an inferred or borrowed number; the live multi-model dispatch that executes a decision on real engines is STUB, so the end-to-end competitive latency/cost/quality delta is unmeasured.",
-      "measured_on": "2026-06-24"
+      "measured_on": "2026-06-24",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "long-horizon-time-to-solution",
@@ -137,7 +142,8 @@
       "fak_doc": "epic #1706 (FrontierSWE first-class support - time-to-solution); C4 (TTS model) -> C14/C15 close this row with a witnessed number. Related on-axis: [[fleet-serving-50x5]] (cross-agent fleet serving) and [[marginal-vs-tuned-process]] (the honest marginal-vs-live-engine gap).",
       "apples_to_apples": true,
       "comparison_note": "HONEST NAMED GAP, not a win. The competitive thesis - that fak cross-agent prefix fusion + cache-value + disinterested-referee orchestration FINISH long-horizon work faster - is projected/gated, NOT yet witnessed. FrontierSWE is the SOTA bar precisely because the field has no time-to-solution winner: models barely progress in 20h. fak has run NO FrontierSWE task end-to-end, so there is no fak time-to-solution number; this row exists to set the bar the eventual witnessed measurement (epic #1706 C14/C15) gets scored against. Any speedup here is a target to be measured, never inferred or borrowed.",
-      "measured_on": "2026-06-27"
+      "measured_on": "2026-06-27",
+      "cohort": "Mid-Market (1-8 GPU)"
     }
   ]
 }

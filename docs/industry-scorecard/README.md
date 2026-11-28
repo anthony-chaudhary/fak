@@ -5,7 +5,7 @@ description: "Industry-first competitive scorecard: a researched taxonomy of the
 
 # Industry scorecard — fak vs the LLM-serving field
 
-<!-- industry-scorecard: 2026-11-24 · process: tools/industry_scorecard.py · data: tools/industry_scorecard.data/ -->
+<!-- industry-scorecard: 2026-11-27 · process: tools/industry_scorecard.py · data: tools/industry_scorecard.data/ -->
 
 This is the **outward** measuring stick — the counterpart of the inward scorecards (hygiene, code, docs). It does not start from what fak happened to measure; it starts from the **industry**. The source of truth is a researched taxonomy of the dimensions a serious operator, buyer, or analyst uses to evaluate an LLM-serving system (`tools/industry_scorecard.data/_taxonomy.json`), each with the current SOTA bar and a dated source. fak is then positioned honestly on every dimension — and for most of them the honest answer is a **named gap**, not a win. Everything below is re-derived from the data by `tools/industry_scorecard.py`; no number is hand-typed.
 
@@ -23,40 +23,40 @@ The driver is the UNBOUNDED competitive front, not the bounded grade. Lead with 
 
 | Metric (primary = unbounded competitive front) | Value |
 |---|---|
-| **Standing on the field** | **48.3/100** (below the 60 floor — raise it) — 6 lead · 15 parity · 10 trails · 63 honest gap |
-| **Honest gaps to close (drive to 0)** | **64** of 94 positioned axes carry no fak number yet (30 measured) |
-| Coverage of the field (at goal) | 100.0% (91/91 industry dimensions positioned) |
+| **Standing on the field** | **49.1/100** (below the 60 floor — raise it) — 7 lead · 17 parity · 13 trails · 58 honest gap |
+| **Honest gaps to close (drive to 0)** | **59** of 95 positioned axes carry no fak number yet (36 measured) |
+| Coverage of the field (at goal) | 100.0% (82/82 industry dimensions positioned) |
 | Parity-debt — honesty defects (at goal) | 0 · coverage-debt 0 |
-| Tracked | 91 dimensions · 104 competitors · 94 positions |
-| As of | 2026-06-27 (fak 0.31.0) |
-| Advisory signals | 11 fak-freshness · 0 industry-drift |
-| Legacy bounded score (saturates near the top; grades map honesty + coverage, not field standing; hides the still-open industry gap; not the driver) | 98.8/100 (grade A) — honesty 98.0 × 60% + coverage 100.0% × 40% |
+| Tracked | 92 dimensions · 104 competitors · 95 positions |
+| As of | 2026-11-27 (fak 0.60.0) |
+| Advisory signals | 64 fak-freshness · 17 industry-drift |
+| Legacy bounded score (saturates near the top; grades map honesty + coverage, not field standing; hides the still-open industry gap; not the driver) | 97.6/100 (grade A) — honesty 96.0 × 60% + coverage 100.0% × 40% |
 
 > **Read this right.** The metric to optimize is fak's **standing** on the field (raise it above its floor by turning a gap/parity axis into a measured lead) and the **honest-gap count** (drive it toward 0 as benchmarks land). The bounded /100 grade-A composite grades only map completeness + honesty — it scores how complete and honest fak's competitive MAP is, explicitly **not how much fak wins** — and it SATURATES near the top once the map is honestly drawn and can no longer tell you how much of the field fak still does not contest, so it is kept only as a labeled legacy line, not the driver. fak is a focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.
 
 ## Standing at a glance
 
 ```text
-industry standing chart — 91 dimensions · 104 competitors · map 98.8/100 (grade A) · standing 48.3/100 · parity-debt 0
+industry standing chart — 92 dimensions · 104 competitors · map 97.6/100 (grade A) · standing 49.1/100 · parity-debt 0
 
 coverage of the field (positioned / in-scope dimensions):
-  positioned  [████████████████████████████████]  91/91  (100.0%)
+  positioned  [████████████████████████████████]  82/82  (100.0%)
 
 standing on the positioned axes (shown, not hidden):
-  ▲ lead      ██······················ 6
-  ≈ parity    ██████·················· 15
-  ▼ trails    ████···················· 10
-  ○ no-claim  ████████████████████████ 63
+  ▲ lead      ███····················· 7
+  ≈ parity    ███████················· 17
+  ▼ trails    █████··················· 13
+  ○ no-claim  ████████████████████████ 58
 
 coverage by group:
   agent          ███████████············· 7/7
   cost           ████████················ 5/5
   decoding       █████████████████████··· 13/13
-  distributed    ████████················ 5/5
-  memory         █████████████████████··· 13/13
+  distributed    ██······················ 1/1
+  memory         ███████████████████····· 12/12
   models         ██████████████·········· 9/9
-  numerics       █████████████████████··· 13/13
-  operability    ██████████████·········· 9/9
+  numerics       ███████████████████····· 12/12
+  operability    ██████████·············· 6/6
   security       ███····················· 2/2
   serving        ████████████████████████ 15/15
 ```
@@ -68,11 +68,11 @@ coverage by group:
 | agent | 7/7 | [agent.md](agent.md) |
 | cost | 5/5 | [cost.md](cost.md) |
 | decoding | 13/13 | [decoding.md](decoding.md) |
-| distributed | 5/5 | [distributed.md](distributed.md) |
-| memory | 13/13 | [memory.md](memory.md) |
+| distributed | 1/1 | [distributed.md](distributed.md) |
+| memory | 12/12 | [memory.md](memory.md) |
 | models | 9/9 | [models.md](models.md) |
-| numerics | 13/13 | [numerics.md](numerics.md) |
-| operability | 9/9 | [operability.md](operability.md) |
+| numerics | 12/12 | [numerics.md](numerics.md) |
+| operability | 6/6 | [operability.md](operability.md) |
 | security | 2/2 | [security.md](security.md) |
 | serving | 15/15 | [serving.md](serving.md) |
 
@@ -88,30 +88,36 @@ coverage by group:
 | ▲ | lead | client-compaction | MEASURED load-bearing-fact retention at a bounded peak over a 100/200/300-turn goal — the fidelity a relay's durable externalize buys that the cache-preserving sliding-window drop (the apples-to-apples competitor) cannot | 1 fraction of load-bearing facts retained at 300 turns (hermetic analytic model; higher is better) | 0.064 fraction of load-bearing facts retained at 300 turns (hermetic analytic model; higher is better) | 15.62× | LangChain trim_messages (sliding-window drop) — the one competitor design that ALSO preserves the prompt cache; benchmarked in the same 4-arm sweep against auto-compaction (summarize-in-place) and Anthropic API context-editing (clear_tool_uses + memory tool) |
 | ▲ | lead | model-routing | Model routing granularity: per-aspect + first-class ensemble routing vs whole-request single-model selection | — | — | — | RouteLLM (LMSYS); Martian; NotDiamond; Unify.ai; OpenRouter (+ Fusion); Portkey; LiteLLM Router |
 | ▲ | lead | quantization | int8 / Q8_0 SIMD decode throughput vs the same-rung int8 peer | 2.97 × vs HF int8 | 1 × vs HF int8 | 2.97× | HuggingFace dynamic-int8 (the standard same-rung int8 reference) |
+| ▲ | lead | single-stream | Single-stream prefill throughput on a consumer GPU (prompt ingestion tok/s) | 5861 tok/s HTTP pp512 server prompt rate (Inkling-2-Mini-UD-Q3_K_XL, RTX 5080) | 3012.4 tok/s HTTP pp512 server prompt rate (Inkling-2-Mini-UD-Q3_K_XL, RTX 5080) | 1.95× | realugbun/llama.cpp fork (2eb2530e, UD-Q3_K_XL) and upstream llama.cpp (33aeb17) on RTX 5080 |
 | ≈ | parity | hardware-shape-neutrality | Hardware-shape neutrality: explicit fences for host-CPU assumptions | 7 of 7 host-shape assumptions explicitly FENCED in the compute HAL contract | — | — | vLLM plugin backends; llama.cpp backend matrix; MLC-LLM / TVM compilation |
 | ≈ | parity | kv-cache | Prefix caching / automatic KV reuse across requests (shared-context workloads) | 6.95 × | 7.5 × | 0.93× | fak's own deterministic token-reuse ceiling (the exact upper bound) |
 | ≈ | parity | kv-cache | Prefix/KV-cache reuse impact on TTFT (cache-hit latency) | 6.95 × | 7.5 × | 0.93× | fak's own deterministic token-reuse ceiling (the exact upper bound) |
 | ≈ | parity | kv-cache | Automatic prefix caching / RadixAttention prefix reuse and cache hit rate | 86.7 % | 50–99 % | — | SGLang RadixAttention published hit-rate band |
 | ≈ | parity | kv-cache | KV-cache-aware / prefix-aware request routing across a fleet | 93.97 % cross-replica prefix-KV cache-hit | 50–99 % cross-replica prefix-KV cache-hit | — | NVIDIA Dynamo (KV-aware router); SGLang router; Baseten |
+| ≈ | parity | kv-cache | KV-cache quantization (FP8 / INT8 / KIVI sub-4-bit) accuracy at long context | 0.004225 mean KL nats vs per-token step (32K fp8) | — | — | vLLM (--kv-cache-dtype fp8, E4M3); KIVI (2-bit asymmetric); KVTuner (mixed-precision); KVQuant |
 | ≈ | parity | kv-cache | Automatic cross-request prefix / KV-cache reuse (shared system prompts, agent scaffolds, few-shot) | 86.7 % | 50–99 % | — | SGLang RadixAttention published hit-rate band |
 | ≈ | parity | numerical-correctness | Numerical-correctness error metric vs reference (perplexity, KL-divergence, recovery %) | — | — | — | HuggingFace transformers f32 reference (the oracle) |
 | ≈ | parity | numerical-correctness | Dense GPU compute correctness with ZERO vendor GEMM (cuBLAS-free) | — | — | — | cuBLAS (NVIDIA's tuned vendor GEMM — the standard dependency every other stack carries) |
 | ≈ | parity | operability | OpenAI-compatible API surface + reliable structured output / tool-calling | — | — | — | vLLM (XGrammar/guided decoding); SGLang; LiteLLM (gateway) |
+| ≈ | parity | quantization | KV-cache quantization (FP8 / INT8 / INT4 KV) | 4 x KV memory reduction (KV dtype) | 4 x KV memory reduction (KV dtype) | 1.00× | vLLM / SGLang / FlashInfer (Blackwell FP4 KV = 4x vs FP16; cross-GPU FP8 KV); llama.cpp (#26989 q4_0/iq4_nl) |
 | ≈ | parity | request-routing | Cache-aware request routing across replicas (route to the worker that already holds the prefix) | 93.97 % cross-replica prefix-KV cache-hit | 50–99 % cross-replica prefix-KV cache-hit | — | NVIDIA Dynamo (Smart Router); SGLang router; vLLM production router |
 | ≈ | parity | scheduling | Request scheduling and cache-aware routing (FCFS vs priority vs prefix/KV-cache-aware) | 86.7 % | 50–99 % | — | SGLang RadixAttention published hit-rate band |
 | ≈ | parity | security | Tool/agent sandboxing, structural containment, and PII/exfil prevention | — | — | — | Container/microVM sandboxes; MELON (provable IPI defense); IFC / capability allow-lists |
 | ≈ | parity | security | Prompt-injection defense and agent security (attack-success-rate vs utility-under-attack) | — | — | — | Design-by-construction defenses (CaMeL, MELON) on official AgentDojo; detector-only baselines |
-| ≈ | parity | single-stream | Single-stream decode throughput on a consumer GPU | 120 tok/s | 105–135 tok/s | 1.00× | llama.cpp Q8_0 on the same RTX 4070 (-ngl 99) |
+| ≈ | parity | single-stream | Single-stream decode throughput on a consumer GPU | 122.34 tok/s (Inkling-2-Mini UD-Q3_K_XL, RTX 5080) | 119.47 tok/s (Inkling-2-Mini UD-Q3_K_XL, RTX 5080) | 1.02× | realugbun/llama.cpp fork (2eb2530e) and upstream llama.cpp (ad50351f5) on RTX 5080 (-ngl 99) |
 | ≈ | parity | speculative-decoding | Output-distribution losslessness of speculation (greedy and stochastic) | — | — | — | vLLM; speculative sampling (Leviathan et al.) |
 | ▼ | trails | hardware-coverage | Hardware / format coverage and portability of quantized kernels | — | — | — | vLLM (FP8 on Hopper/Ada/Blackwell + MI300X via hipBLASLt/aiter); SGLang (FP8 MI300X); TensorRT-LLM (NVFP4 Blackwell); llama.cpp (broad CPU/GPU GGUF + FP4) |
 | ▼ | trails | hardware-coverage | Hardware backend breadth (NVIDIA, AMD, Intel, TPU, AWS, Apple, CPU) | 4 distinct compute backends shipped (CPU + NVIDIA CUDA + AMD Vulkan + Apple Metal), all single-device | — | — | vLLM; llama.cpp; SGLang; MLC-LLM |
 | ▼ | trails | latency | End-to-end request latency (E2EL) | 9026.9 ms E2EL P50 @ conc 64 | 7222 ms E2EL P50 @ conc 64 | 0.80× | Raw SGLang 0.5.10 (TP=8, no fak proxy), Qwen3.6-27B on an 8-GPU datacenter server — SAME load harness as fak-gateway (the gateway is the only delta); the absolute-latency SOTA bar is NVIDIA GenAI-Perf / vLLM benchmark_serving e2el percentile. |
 | ▼ | trails | latency | Tail latency distribution (P50/P95/P99/P99.9) | 9997.6 ms request-latency P99 @ conc 64 | 8157.9 ms request-latency P99 @ conc 64 | 0.82× | Raw SGLang 0.5.10 (TP=8, no fak proxy), Qwen3.6-27B on an 8-GPU datacenter server — SAME load harness as fak-gateway (the gateway is the only delta); MLPerf Inference encodes its SLOs at P99 and production practice flags P99>>P50 as a saturation red flag. |
-| ▼ | trails | model-coverage | Maximum parameter count & frontier-MoE architecture coverage | 7 B params (max on own engine) | 72 B params (max on own engine) | 0.10× | llama.cpp (72B CPU / ~32B Metal; Qwen3-30B-A3B MoE @ 50 tok/s) · SGLang (multi-GPU TP, 27B+ quantized) |
+| ▼ | trails | model-coverage | Maximum parameter count & frontier-MoE architecture coverage | 26 B params (max on own engine) | 72 B params (max on own engine) | 0.36× | llama.cpp (72B CPU / ~32B Metal; Qwen3-30B-A3B MoE @ 50 tok/s) · SGLang (multi-GPU TP, 27B+ quantized) |
+| ▼ | trails | model-coverage | Long-context serving (128K-1M tokens) & KV/prefix-cache reuse | 131072 tokens max context length | 1e+06 tokens max context length | 0.13× | SGLang (RadixAttention); vLLM (PagedAttention/prefix caching) |
 | ▼ | trails | operability | Production observability: Prometheus metrics (TTFT/TPOT/queue) + OpenTelemetry tracing | — | — | — | vLLM; SGLang; NVIDIA Dynamo |
 | ▼ | trails | security | Prompt-injection defense and agent security (attack-success-rate vs utility-under-attack) | — | — | — | Tuned guardrail / defense stacks on a SOTA evasion battery (AgentDojo-style) |
 | ▼ | trails | single-stream | Single-stream (one chat) decode throughput on CPU | 8.7 tok/s | 17.3 tok/s | 0.50× | llama.cpp Metal (M3 Pro) |
 | ▼ | trails | single-stream | Single-stream prefill throughput, apples-to-apples CPU-vs-CPU | 0.12 × of llama.cpp CPU | 1 × of llama.cpp CPU | 0.12× | llama.cpp CPU, same box + Q8 weights (CPU-vs-CPU) |
+| ▼ | trails | speculative-decoding | Speculative-decoding wall-clock speedup (single-stream / low-concurrency) | 1.51 x wall-clock speedup | 4.79 x wall-clock speedup | 0.32× | EAGLE-3 (SafeAILab); vLLM; SGLang; P-EAGLE (vLLM) |
+| ▼ | trails | speculative-decoding | Draft acceptance length / acceptance rate (mean accepted tokens per verify step) | 0.7 draft acceptance rate (fraction; d2=2.40 tokens/verify) | 0.88 draft acceptance rate (fraction; d2=2.40 tokens/verify) | 0.80× | EAGLE-3 (SafeAILab); DeepSeek-V3 MTP; Medusa |
 | ▼ | trails | throughput | Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded) | 1085.6 tok/s @ conc 64 (peak) | 1451.6 tok/s @ conc 64 (peak) | 0.75× | Raw SGLang 0.5.10 (TP=8, no fak proxy), Qwen3.6-27B on an 8-GPU datacenter server |
 | ○ | no-claim | agent-fleet | Cross-agent reuse marginal value vs a LIVE tuned shared-prefix engine (head-to-head) | — | — | — | SGLang RadixAttention / vLLM Automatic Prefix Caching (actual competing processes) |
 | ○ | no-claim | client-compaction | Provider-REALIZED cache reuse after dropping the middle (does Anthropic's cache cascade to the head breakpoint, or re-bill the dropped middle as fresh input?) | — | — | — | Anthropic prompt cache (multi-breakpoint cascade behavior) |
@@ -127,13 +133,11 @@ coverage by group:
 | ○ | no-claim | kv-cache | KV compression / token eviction under a fixed cache budget | — | — | — | H2O; StreamingLLM; SnapKV; Quest |
 | ○ | no-claim | kv-cache | KV-cache transfer for prefill/decode disaggregation (NIXL / NCCL / UCX) | — | — | — | NVIDIA NIXL; NVIDIA Dynamo; Mooncake |
 | ○ | no-claim | kv-cache | Attention architecture impact on KV footprint (MQA/GQA/MLA bytes-per-token) | — | 70 KB/token KV footprint | — | DeepSeek-V2/V3 (MLA); GQA-based models (Llama-3, Qwen) |
-| ○ | no-claim | kv-cache | KV-cache quantization (FP8 / INT8 / KIVI sub-4-bit) accuracy at long context | — | — | — | vLLM (--kv-cache-dtype fp8, E4M3); KIVI (2-bit asymmetric); KVTuner (mixed-precision); KVQuant |
 | ○ | no-claim | latency | Interactive latency SLO attainment: TTFT and TPOT/ITL tail under load | — | — | — | MLPerf Inference v6.0 interactive scenario (DeepSeek-R1 / GPT-OSS 120B; TPOT <= 15 ms, TTFT <= 1.5-2.0 s P99); TensorRT-LLM; Sarathi-Serve / vLLM chunked prefill |
 | ○ | no-claim | latency | Time-to-first-token (TTFT) under realistic prefill | — | 1500 ms TTFT (P50/P99) | — | MLPerf Inference v6.0 (DeepSeek-R1 interactive TTFT <= 1.5 s P99; Llama-3.1-405B interactive 4.5 s still defined); vLLM benchmark_serving; NVIDIA GenAI-Perf |
 | ○ | no-claim | latency | Inter-token latency / time-per-output-token (ITL/TPOT) | — | 15 ms TPOT (P50/P99) | — | MLPerf Inference v6.0 (DeepSeek-R1 / GPT-OSS 120B interactive TPOT <= 15 ms P99); vLLM benchmark_serving; NVIDIA GenAI-Perf |
 | ○ | no-claim | latency | Prefill-decode interference & chunked-prefill TTFT/TPOT tension | — | 68 % P95 ITL improvement from chunked prefill | — | Sarathi-Serve; vLLM chunked prefill; SGLang |
 | ○ | no-claim | model-coverage | Multimodal / vision-language (VLM) model coverage | — | — | — | SGLang; vLLM |
-| ○ | no-claim | model-coverage | Long-context serving (128K-1M tokens) & KV/prefix-cache reuse | — | — | — | SGLang (RadixAttention); vLLM (PagedAttention/prefix caching) |
 | ○ | no-claim | model-coverage | LoRA / multi-LoRA hot-swap serving | — | — | — | vLLM; SGLang; TensorRT-LLM |
 | ○ | no-claim | model-coverage | Embedding & reranker (non-generative) model coverage | — | — | — | vLLM; SGLang; TensorRT-LLM |
 | ○ | no-claim | model-coverage | Capability/quality of the served model (SWE-bench Verified, GPQA, AIME, LiveCodeBench) | — | — | — | Gemini 3.x (SWE-bench/GPQA); Claude Opus 4.5 + agent scaffold; GPT-5.x (AIME) |
@@ -150,11 +154,10 @@ coverage by group:
 | ○ | no-claim | parallelism | Large-scale expert parallelism (EP) for giant MoE models | — | — | — | SGLang; DeepSeek (DeepEP); vLLM |
 | ○ | no-claim | parallelism | Data-parallel (DP) attention / hybrid attention-FFN parallelism | — | — | — | SGLang; vLLM |
 | ○ | no-claim | parallelism | Multi-node scale-out (combined TP x PP x EP x DP across hosts) | — | — | — | SGLang; NVIDIA Dynamo; TensorRT-LLM; NVIDIA GB200/GB300 NVL72 |
-| ○ | no-claim | quantization | KV-cache quantization (FP8 / INT8 / INT4 KV) | — | 2 x KV memory reduction (KV dtype) | — | TensorRT-LLM; vLLM |
 | ○ | no-claim | quantization | FP8 (W8A8, E4M3) accuracy retention vs bf16 reference | — | 99 % accuracy recovery vs bf16 | — | vLLM (FP8 W8A8 dynamic/static); TensorRT-LLM (ModelOpt); SGLang; Red Hat / Neural Magic llm-compressor |
 | ○ | no-claim | quantization | INT8 W8A8 (SmoothQuant) accuracy under activation outliers | — | — | — | SmoothQuant (MIT HAN Lab); vLLM INT8 W8A8; TensorRT-LLM; llm-compressor |
 | ○ | no-claim | quantization | INT4 weight-only (W4A16: AWQ, GPTQ) accuracy and calibration sensitivity | — | — | — | AWQ (LMDeploy, vLLM); GPTQ (vLLM, AutoGPTQ); TensorRT-LLM W4A16 |
-| ○ | no-claim | quantization | 4-bit microscaling float (NVFP4 / MXFP4 / FP4) accuracy vs FP8 on Blackwell | — | 0.1 MMLU-point drop vs FP8 | — | NVIDIA Blackwell + TensorRT-LLM (ModelOpt NVFP4); vLLM NVFP4; llama.cpp (NVFP4/MXFP4) |
+| ○ | no-claim | quantization | 4-bit microscaling float (NVFP4 / MXFP4 / FP4) accuracy vs FP8 on Blackwell | — | 1 % MMLU-PRO drop NVFP4 vs FP8 (DeepSeek-R1-0528) | — | NVIDIA TensorRT Model Optimizer NVFP4; vLLM Marlin NVFP4 (DeepSeek-R1-0528) |
 | ○ | no-claim | quantization | Full 4-bit (W4A4 + KV4) via rotation/outlier removal | — | 99 WikiText-2 perplexity delta / zero-shot retention | — | QuaRot (Hadamard rotation); SpinQuant (learned rotation); QServe W4A8KV4 |
 | ○ | no-claim | quantization | Quantization granularity (per-tensor / per-channel / per-group / microscaling block size) | — | 3 SNR dB by granularity | — | MX formats (OCP MXFP4/MXFP8, block-32); NVFP4 (block-16, FP32 second-level); group-128 INT4 (AWQ/GPTQ); MOSS two-level microscaling |
 | ○ | no-claim | quantization | Accuracy-constrained throughput on a neutral benchmark (MLPerf Inference) | — | 8064 accuracy-gated tok/s per GPU | — | NVIDIA GB300 NVL72 (Blackwell Ultra, TensorRT-LLM/Dynamo); AMD MI355X (ROCm); MLPerf Inference v6.0 server scenario (DeepSeek-R1 671B, accuracy+latency-constrained) |
@@ -162,8 +165,6 @@ coverage by group:
 | ○ | no-claim | scheduling | Chunked / piggyback prefill and prefill-decode interference (stall-free batching) | — | — | — | Sarathi-Serve (chunked-prefill + stall-free scheduling); vLLM (chunked prefill); SGLang (chunked prefill) |
 | ○ | no-claim | speculative-decoding | Speculative decoding throughput effect across batch sizes (does it survive at high concurrency?) | — | — | — | EAGLE-3; EAGLE-2 (regresses at batch); vLLM / SGLang / TensorRT-LLM speculative backends |
 | ○ | no-claim | speculative-decoding | Speculative decoding effect on ITL (acceptance-rate-bound) | — | 3.5 x decode token-rate / acceptance rate | — | EAGLE-3; Medusa-2; TensorRT-LLM / vLLM speculative decoding |
-| ○ | no-claim | speculative-decoding | Speculative-decoding wall-clock speedup (single-stream / low-concurrency) | — | 4.79 x wall-clock speedup | — | EAGLE-3 (SafeAILab); vLLM; SGLang; P-EAGLE (vLLM) |
-| ○ | no-claim | speculative-decoding | Draft acceptance length / acceptance rate (mean accepted tokens per verify step) | — | 0.85 mean accepted tokens / verify step | — | EAGLE-3; DeepSeek-V3 MTP; Medusa |
 | ○ | no-claim | speculative-decoding | Breadth of speculative methods supported (draft-model, EAGLE/-2/-3, Medusa, MTP, lookahead, n-gram/prompt-lookup) | — | — | — | TensorRT-LLM; vLLM; SGLang |
 | ○ | no-claim | speculative-decoding | Retrieval / prompt-lookup (n-gram) drafting for input-grounded tasks | — | 2.8 x speedup on input-grounded tasks | — | vLLM (ngram / prompt-lookup); TensorRT-LLM (Lookahead) |
 | ○ | no-claim | speculative-decoding | Speculative-decoding behavior under high concurrency / large batch (break-even) | — | — | — | MagicDec; vLLM continuous batching; SGLang |
@@ -181,13 +182,13 @@ coverage by group:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `verdict_consistency` | 90 | 0 | every verdict matches its evidence (11 unverifiable) |
-| structure | `well_formed` | 100 | 0 | all 94 rows well-formed |
+| traceability | `freshness` | 60 | 0 | 52 stale fak measurement(s) (> 150d) |
+| honesty | `verdict_consistency` | 90 | 0 | every verdict matches its evidence (12 unverifiable) |
+| structure | `well_formed` | 100 | 0 | all 95 rows well-formed |
 | completeness | `competitor_named` | 100 | 0 | every row names a concrete competitor |
 | completeness | `axis_coverage` | 100 | 0 | all 5 contracted regimes covered |
 | honesty | `baseline_sota` | 100 | 0 | every comparison is vs a tuned / SOTA / next-best baseline |
 | honesty | `apples_disclosed` | 100 | 0 | every non-comparable row discloses what differs |
 | traceability | `fak_traced` | 100 | 0 | every shipped claim traces to evidence |
 | traceability | `competitor_sourced` | 100 | 0 | every competitor number is sourced |
-| traceability | `freshness` | 100 | 0 | every fak measurement within 150d of 2026-06-27 |
 

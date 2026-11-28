@@ -16,19 +16,19 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **SOTA bar:** Continuous (in-flight) batching is now table stakes across vLLM/SGLang/TensorRT-LLM; the live competitive number is no longer 'vLLM 24x vs Orca/TGI' but cross-engine: SGLang's RadixAttention holds roughly a 29% aggregate-throughput edge over vLLM on H100 (~16,200 vs ~12,500 tok/s, Llama 3.1 8B), widening to up to ~6.4x on prefix-heavy RAG/multi-turn and shrinking to near-zero on unique-prompt batches; continuous batching itself still delivers ~3-4x over naive/static batching.
 - **Leading systems:** SGLang (RadixAttention), vLLM v1 (continuous batching + automatic prefix caching), TensorRT-LLM (in-flight batching)
 - **Source:** [https://particula.tech/blog/sglang-vs-vllm-inference-engine-comparison](https://particula.tech/blog/sglang-vs-vllm-inference-engine-comparison) (2026)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure but currently OUT OF SCOPE for the kernel as shipped: CLAIMS labels continuous/in-flight batching [SIMULATED] read-only telemetry, not on the live serving path, and the polymodel decode lane is explicitly SERIAL (at-most-one-model-decodes-per-step, off-mainline). Iteration-level batching is the defining vLLM/SGLang throughput lever; fak has NO shipped number. fak's fleet win is prefix-reuse work-ELIMINATION, a different axis from concurrent-decode batching, so no parity is implied.
-- **Trace:** CLAIMS.md L163 ([SIMULATED] continuous-batching read-only telemetry, not on live serving path); CLAIMS.md L6 (SIMULATED tag definition); existing data.json row 'continuous-batching'.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** LIVE BATCHING SHIPPED ON CONVERGED MAIN, NO H100 vLLM/SGLANG HEAD-TO-HEAD YET: NativeScheduler (internal/modelengine) and CUDA cohorts ship live concurrent batching — RTX 5080 C16 ragged cohort prefill reaches 372.076 agg E2E tok/s (2.70x vs lockstep 137.702, commit 507693d73b), lockstep C24 f16 KV hits 783.7 agg decode tok/s (2e7682ba2a), and Wave-2 C4_p2048 HTTP reaches 130.44 agg E2E tok/s vs realugbun/llama.cpp 122.47 (C2_p512 still trails 121.16 vs 139.58). Because no comparable req/s or tok/s run exists against H100 SGLang/vLLM, verdict stays no-claim.
+- **Trace:** 507693d73b · docs/benchmarks/published/HEADLINES.json · internal/modelengine/nativesched.go (NativeScheduler continuous batching); docs/benchmarks/published/HEADLINES.json (507693d73b C16 cohort 372.076 agg tok/s; 2e7682ba2a C24 783.7 tok/s); docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json (C4_p2048 130.44 agg E2E)
 
 ### ○ Absolute aggregate tokens/s at scale on standardized hardware (MLPerf Inference) — fak: **no-claim**
 
 *Why it matters:* Cross-vendor, audited absolute throughput on a fixed model and SLO is what a buyer uses to compare full systems and compute cost-per-token. MLPerf Inference is the only neutral, reproducible apples-to-apples leaderboard with both offline (max throughput) and server (latency-constrained) scenarios, so it anchors the absolute SOTA bar that engine micro-benchmarks cannot.
 
-- **SOTA bar:** MLPerf Inference v6.0 (results 2026-03-30 / published 2026-04-01) supersedes v5.0 and v5.1, and the headline model is now DeepSeek-R1 (671B MoE reasoning), not Llama 3.1 405B: NVIDIA's largest-ever submission of 288 Blackwell Ultra GPUs (4x GB300 NVL72 over Quantum-X800 InfiniBand) hit ~2.494 million tokens/second aggregate in the offline scenario, at 9,821 tok/s/GPU offline (8,064 tok/s/GPU server) â€” up to 2.7x higher than the GB300 debut six months prior via TensorRT-LLM/Dynamo software.
+- **SOTA bar:** MLPerf Inference v6.0 (results 2026-03-30 / published 2026-04-01) supersedes v5.0 and v5.1, and the headline model is now DeepSeek-R1 (671B MoE reasoning), not Llama 3.1 405B: NVIDIA's largest-ever submission of 288 Blackwell Ultra GPUs (4x GB300 NVL72 over Quantum-X800 InfiniBand) hit ~2.494 million tokens/second aggregate in the offline scenario, at 9,821 tok/s/GPU offline (8,064 tok/s/GPU server) — up to 2.7x higher than the GB300 debut six months prior via TensorRT-LLM/Dynamo software.
 - **Leading systems:** NVIDIA GB300 NVL72 x4 (288 Blackwell Ultra GPUs, TensorRT-LLM/Dynamo), NVIDIA GB300 NVL72 single rack, CoreWeave / Nebius GB300 NVL72
 - **Source:** [https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform](https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform) (2026-04-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE BY DESIGN for a reuse kernel: MLPerf Inference v6.0 (2026-03-30) ranks absolute aggregate tok/s on standardized Blackwell-Ultra hardware, and its headline model is now DeepSeek-R1 671B MoE, not Llama-3.1-405B — NVIDIA's 288-GPU (4x GB300 NVL72) submission hit ~2.494M tok/s aggregate / 9,821 tok/s/GPU offline, superseding the old v5.x GB200 / 405B bar. fak has no MLPerf submission and its own generic engine ceilings at ~7B (data.json model-size-ceiling), so it is not in this race and does NOT intend an own-engine MLPerf-shaped 671B number; on a frontier MoE it FRONTS SGLang/llama.cpp rather than serving them itself. fak's actual DeepSeek-class-MoE serving path is the in-kernel GLM-5.2 work (#1010, #1026): MoE/FFN experts + router on its own pure GPU kernel (cosine=1.0, commit 498a4ab) but on a SINGLE device, so no standardized fak tok/s exists. See max-model-and-moe-coverage.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. MLPerf Inference v6.0 (2026-03-30) ranks aggregate tok/s on 288-GPU (4x GB300 NVL72) DeepSeek-R1 671B submissions (~2.494M tok/s). fak targets 1-8 GPU mid-market (26B-27B native on consumer/datacenter GPUs, plus GLM-5.2 MoE on 1 datacenter GPU) and has no MLPerf submission.
 - **Trace:** No MLPerf submission or standardized-hardware aggregate tok/s in BENCHMARK-AUTHORITY.md. The only concurrent server number is the GPU server run (data.json 'served-throughput-vs-sglang', 1085.6 tok/s @ conc 64) which is fak-gateway-fronting-SGLang on non-MLPerf hardware/harness, not a standardized MLPerf result.
 
 ### ○ Latency-vs-throughput Pareto frontier — fak: **no-claim**
@@ -39,7 +39,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Leading systems:** DistServe (PD disaggregation), Mooncake / Splitwise (PD disaggregation), Sarathi-Serve (chunked prefill, now a baseline point), DuetServe / MuxWise / DynaServe (intra-GPU PD multiplexing, 2025-2026)
 - **Source:** [https://haoailab.com/blogs/distserve/](https://haoailab.com/blogs/distserve/) (2024-2026)
 - **fak:** no-claim — no number (stub)
-- **fak note:** fak has not recorded a latency-vs-throughput Pareto frontier (no P99 TTFT/TPOT vs request-rate). The adjacent committed evidence is a throughput-vs-concurrency sweep where fak trails raw SGLang (see peak-serving-throughput-per-gpu). Named as a gap, not a Pareto measurement.
+- **fak note:** fak has not recorded a full P99-TTFT/TPOT vs RPS Pareto frontier. Adjacent committed measurements show C1-C4 RTX 5080 median TTFT+agg E2E (rtx5080-inkling2-v060) and 8-GPU datacenter server fak-gateway vs raw SGLang throughput where fak trails at 0.75x peak (peak-serving-throughput-per-gpu). Named as a gap.
 - **Trace:** experiments/qwen36/gpu-server-r4-20260622/compare.json + docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md: fak-gateway vs raw SGLang on 8-GPU datacenter server / Qwen3.6-27B, concurrency sweep 1->128; fak/raw = 0.60x (conc 8) -> 0.75x (conc 64 peak, 1085.6 vs 1451.6 tok/s) -> 0.97x (conc 128).
 
 ### ▼ Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded) — fak: **trails**
@@ -62,9 +62,9 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **SOTA bar:** Proactive intra-GPU prefill/decode disaggregation (Nexus) now beats chunked-prefill, delivering up to 2.2x higher throughput, 20x lower TTFT, and 2.5x lower TBT vs vLLM (and up to 2x vs SGLang), superseding Sarathi-Serve's 5.6x chunked-prefill capacity claim.
 - **Leading systems:** Nexus (proactive intra-GPU PD disaggregation, arXiv 2507.06608), DuetServe (adaptive GPU multiplexing, arXiv 2511.04791), Sarathi-Serve (chunked prefill, original bar)
 - **Source:** [https://arxiv.org/abs/2507.06608](https://arxiv.org/abs/2507.06608) (2025-08)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for fak as a reuse kernel today, and an unmeasured GAP if pursued: Sarathi-Serve-style chunked/piggyback prefill caps per-iteration prefill work to bound TBT under decode interference. fak owns its own forward but has not built or measured chunked-prefill scheduling; no number exists, so no claim.
-- **Trace:** No chunked-prefill / TBT-SLO / prefill-decode-interference number in BENCHMARK-AUTHORITY.md or CLAIMS.md. fak's prefill rows (single-stream-prefill, radix-live-vs-ceiling) are single-stream or reuse, not stall-free chunked scheduling under load.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** 512-token prefill chunking and NativeScheduler exist in code, but fak has no measured mixed-long/short TBT/ITL stall-free capacity benchmark against Nexus, DuetServe, or Sarathi-Serve. Honest no-claim.
+- **Trace:** internal/ggufload/inkling2loop_prefill.go (512-token chunked prefill) & internal/modelengine/nativesched.go; no TBT-SLO interference benchmark vs Nexus/Sarathi-Serve
 
 ### ≈ Request scheduling and cache-aware routing (FCFS vs priority vs prefix/KV-cache-aware) — fak: **parity**
 
@@ -87,7 +87,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Leading systems:** MLPerf Inference v6.0 (NVIDIA Blackwell Ultra GB300, AMD MI355X), MLPerf Inference v5.1
 - **Source:** [https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/](https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/) (2026-03-24)
 - **fak:** no-claim — no number (stub)
-- **fak note:** fak ships no ms-level P99 TTFT/TPOT tail-latency number; the only live head-to-head is a THROUGHPUT sweep (it trails raw SGLang 0.75× at peak — see peak-serving-throughput-per-gpu). An honest gap on the latency-tail axis, not a measured trail.
+- **fak note:** fak ships median C1-C4 HTTP TTFT/decode sweeps on RTX 5080 (rtx5080-inkling2-v060) and 8-GPU gateway-fronting-SGLang P50/P99 E2EL (trailing raw SGLang 0.75x throughput at conc 64), but no P99 TTFT+TPOT joint interactive SLO pass-rate measurement matching MLPerf v6.0 interactive bounds.
 - **Trace:** data.json row 'served-throughput-vs-sglang'; artifact experiments/qwen36/gpu-server-r4-20260622/compare.json; docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md s2. fak 1085.6 vs raw SGLang 1451.6 tok/s @ conc 64 on 8-GPU datacenter server, Qwen3.6-27B.
 
 ### ○ Time-to-first-token (TTFT) under realistic prefill — fak: **no-claim**
@@ -97,9 +97,9 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **SOTA bar:** MLPerf Inference v6.0 defines per-model P99 TTFT SLOs: GPT-OSS 120B interactive TTFT <= 2.0 s (server <= 3.0 s), DeepSeek-R1 interactive TTFT <= 1.5 s (server <= 2.0 s), Llama-3.1-405B interactive TTFT <= 4.5 s (server <= 6.0 s). The 4.5 s P99 405B bar from v5.1 still stands for the largest model.
 - **Leading systems:** MLPerf Inference v6.0 (DeepSeek-R1 interactive), MLPerf Inference v5.1 (Llama-3.1-405B interactive)
 - **Source:** [https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/](https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/) (2026-03-24)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure. TTFT is adjacent to fak's actual lever (prefix-reuse cuts prefill tokens, which IS the dominant TTFT term on a cache hit), yet fak has never reported TTFT as a percentile under realistic prefill/concurrency the way MLPerf v6.0 (DeepSeek-R1 1.5 s P99 TTFT interactive; 405B 4.5 s still defined) or vLLM/GenAI-Perf do. The adjacent committed evidence is the +1804.9 ms E2EL gateway tax at conc 64 (end-to-end-request-latency), which is the UPPER BOUND on the TTFT tax since the gateway's admission decision (Decide 362 ns / AdmitChain <=87 us idle-box) runs before the first upstream byte. No-claim stands until a STREAMING run isolates the per-request TTFT distribution -- host-gated on the GPU box. The streaming-capable harness already exists: `fak webbench serving --dataset FILE --tracks ours,sglang --endpoints ours=<fak-gateway/v1>,sglang=<raw-sglang/v1>` captures per-request ttft_ms/itl_ms/tpot_ms over SSE (internal/webbench/serving.go MeasureSSERequest, ServingTrackStats.TTFTMillis). The committed compare.json was the OLDER non-streaming runner, so the only gap is a live fak-fronts-SGLang streaming run on the GPU box (off-box here), not new code.
-- **Trace:** No TTFT row exists in BENCHMARK-AUTHORITY.md or CLAIMS.md. fak commits prefill-WORK ratios (single-stream prefill 0.58x vs llama.cpp CPU; RadixAttention live prefill 4.58x-6.95x vs full re-prefill) but never a TTFT measured as a latency percentile at fixed ISL/concurrency. The committed fak-fronts-SGLang harness (experiments/qwen36/gpu-server-r4-20260622/compare.json) is NON-STREAMING -- it captures total request latency (E2EL, now committed; see end-to-end-request-latency) but cannot isolate the first-token wait, so it bounds but does not measure the TTFT tax.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** MEDIAN HTTP TTFT MEASURED ON RTX 5080, P99 SLO DISTRIBUTION UNMEASURED: Wave-2 rtx5080-inkling2-v060 (<=16K f16 KV) witnesses median TTFT vs realugbun/llama.cpp: C1_p512 274.35 vs 267.81 ms (trails), C1_p2048 638.20 vs 723.77 ms, C2_p512 351.33 vs 530.63 ms, C4_p512 598.89 vs 981.30 ms, and C4_p2048 2017.61 vs 3718.34 ms (1.84x faster TTFT; 2.32x vs stock 4683.83 ms). Earlier C1 NVFP4 W4A4 pp512 run saw median first visible token trail (1165.6 vs 195.5 ms). Because this dimension's SOTA bar scores P99 TTFT (1.5 s DeepSeek-R1), verdict stays no-claim without percentile TTFT.
+- **Trace:** be228d79ef · docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json · docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json (C1-C4 <= 16K median HTTP TTFT vs llama.cpp); docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4/RESULTS.md (visible TTFT caveat); experiments/qwen36/gpu-server-r4-20260622/compare.json
 
 ### ○ Inter-token latency / time-per-output-token (ITL/TPOT) — fak: **no-claim**
 
@@ -108,9 +108,9 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **SOTA bar:** MLPerf Inference v6.0 reasoning-model interactive scenarios now require TPOT <= 15 ms P99 (GPT-OSS 120B and DeepSeek-R1), down from the prior 80 ms TPOT bar; the legacy Llama-2-70B interactive bound is 40 ms TPOT (~25 tok/s/user) and server is 80-200 ms.
 - **Leading systems:** MLPerf Inference v6.0 (GPT-OSS 120B, DeepSeek-R1 interactive), MLPerf Inference v5.1
 - **Source:** [https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/](https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/) (2026-03-24)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure. fak has decode-rate numbers (which trail llama.cpp single-stream, as it openly states it does not target single-stream) but never the per-output-token latency distribution MLPerf v6.0 encodes (<= 15 ms P99 TPOT interactive for DeepSeek-R1 / GPT-OSS 120B; the prior 80 ms is now the server-scenario bound). The adjacent committed evidence is the +1804.9 ms E2EL gateway tax at conc 64 (end-to-end-request-latency); since the gateway is a streaming pass-through that adjudicates ONCE at admission and does not re-decide per output token, most of that tax is front-loaded into TTFT, leaving a small per-token relay component -- but the non-streaming artifact cannot separate it. No-claim stands until a STREAMING run isolates the per-request TPOT/ITL distribution -- host-gated on the GPU box. The streaming-capable harness already exists: `fak webbench serving --dataset FILE --tracks ours,sglang --endpoints ours=<fak-gateway/v1>,sglang=<raw-sglang/v1>` captures per-request tpot_ms/itl_ms over SSE (internal/webbench/serving.go MeasureSSERequest, ServingTrackStats.TPOTMillis). The committed compare.json was the OLDER non-streaming runner, so the only gap is a live fak-fronts-SGLang streaming run on the GPU box (off-box here), not new code.
-- **Trace:** fak commits single-stream DECODE throughput (8.7 tok/s 7B Q8 CPU, ~0.55-0.73x of llama.cpp at HEAD 374776a; ~120 tok/s GPU parity), but throughput is not inter-token LATENCY: no TPOT/ITL percentile is committed in BENCHMARK-AUTHORITY.md or CLAIMS.md. The committed fak-fronts-SGLang harness (experiments/qwen36/gpu-server-r4-20260622/compare.json) is NON-STREAMING -- it captures total request latency (E2EL, now committed; see end-to-end-request-latency) but does not timestamp individual output tokens, so it cannot isolate the per-token (TPOT) component of the gateway tax.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** MEAN STREAM DECODE MEASURED, P99 TPOT DISTRIBUTION UNMEASURED: Wave-2 RTX 5080 HTTP sweep records C1_p512 102.45 vs realugbun 118.63 tok/s (~9.8 vs 8.4 ms/tok mean) and C4_p2048 43.72 vs 55.30 tok/s/stream (~22.9 vs 18.1 ms/tok), while in-process C1 reaches 122.34 tok/s. Because MLPerf v6.0 scores P99 TPOT (<=15 ms), verdict stays no-claim pending SSE P99 TPOT percentiles.
+- **Trace:** be228d79ef · docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json · docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json (C1-C4 stream decode rates); experiments/qwen36/gpu-server-r4-20260622/compare.json
 
 ### ▼ End-to-end request latency (E2EL) — fak: **trails**
 
@@ -141,15 +141,15 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **SOTA bar:** Chunked prefill cuts P95 inter-token latency by ~68% under mixed long/short workloads (e.g. 2,800 ms -> 890 ms P95 ITL at 32K inputs) by prioritizing decode and chunking prefill into the token budget.
 - **Leading systems:** vLLM chunked prefill (decode-prioritized scheduling), SGLang chunked prefill
 - **Source:** [https://www.spheron.network/blog/llm-serving-optimization-continuous-batching-paged-attention/](https://www.spheron.network/blog/llm-serving-optimization-continuous-batching-paged-attention/) (2026-06)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. Chunked prefill (Sarathi-Serve: ~68% P95 ITL improvement at 32K inputs) is a SCHEDULER technique inside a serving engine to remove decode-side ITL spikes; fak's own decode path is serial and small-model, and on the GPU server it fronts SGLang/llama.cpp which own this scheduling. fak makes no claim and shows no number on prefill-decode interference.
-- **Trace:** No chunked-prefill mechanism is shipped or claimed in CLAIMS.md / BENCHMARK-AUTHORITY.md. fak's own engine prefills a prefix once and clones it (NewBatchFromPrefix) but does not interleave long prefills with decode steps to smooth ITL.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** OUT OF SCOPE / GAP: 512-token prefill chunking and NativeScheduler exist for native cohorts, and fak fronts SGLang/llama.cpp on external GPUs, but no 32K mixed-load P95 ITL interference ablation vs Sarathi-Serve/vLLM is measured.
+- **Trace:** internal/ggufload/inkling2loop_prefill.go & internal/modelengine/nativesched.go; no 32K P95 ITL interference bench
 
 ## Single-stream (one chat) (`single-stream`)
 
 ### ▼ Single-stream (one chat) decode throughput on CPU — fak: **trails**
 
-*Why it matters:* The regime local/edge stacks (llama.cpp, Ollama, MLC) compete hardest on: one user, one chat, raw tokens/s on commodity hardware. fak explicitly does NOT target this â€” showing the loss keeps the scorecard honest.
+*Why it matters:* The regime local/edge stacks (llama.cpp, Ollama, MLC) compete hardest on: one user, one chat, raw tokens/s on commodity hardware. fak explicitly does NOT target this — showing the loss keeps the scorecard honest.
 
 - **SOTA bar:** llama.cpp Metal/CPU leads single-stream decode on the same box (e.g. Qwen2.5-7B Q8 ~17.3 tok/s Metal, M3 Pro).
 - **Leading systems:** llama.cpp, Ollama, MLC-LLM
@@ -160,23 +160,34 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 
 ### ▼ Single-stream prefill throughput, apples-to-apples CPU-vs-CPU — fak: **trails**
 
-*Why it matters:* Prefill (prompt ingestion) speed on CPU is a core local-inference axis. fak's arm64 build lacks the register-blocked int8 GEMM tile that x86 already has â€” a disclosed, narrowing loss.
+*Why it matters:* Prefill (prompt ingestion) speed on CPU is a core local-inference axis; fak's x86 Zen5 per-token compute slope reaches parity while its arm64 integer prefill path historically trailed llama.cpp CPU.
 
-- **SOTA bar:** llama.cpp CPU sets the prefill bar on the same box + Q8 weights (1Ã— reference); fak arm64 is ~0.12Ã— until the int8 tile lands.
+- **SOTA bar:** llama.cpp CPU sets the prefill bar on the same box + Q8 weights (1× reference); fak arm64 is ~0.12× until the int8 tile lands.
 - **Leading systems:** llama.cpp
 - **Source:** [https://github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) (2026-06)
 - **fak:** trails — 0.12 × of llama.cpp CPU (shipped)
-- **fak note:** Apples-to-apples CPU-vs-CPU is ~0.12× on arm64 (which lacks the register-blocked int8 GEMM tile); the x86 Zen5 per-token compute SLOPE already reaches parity (1.03×), the ceiling arm64 inherits once the tile lands. The often-cited 0.083× vs a Metal GPU is NOT apples-to-apples — ~12× of that gap is the GPU device, so it collapses toward ~0.12× once the device is removed.
+- **fak note:** Apples-to-apples CPU-vs-CPU is ~0.12x on arm64 (historical MODEL-LADDER-VS-SOTA 2026-06-21; internal/compute/arm64tile landed since without a newer Qwen2.5-7B remeasure); x86 Zen5 per-token compute slope reached parity (1.03x). GPU single-stream prefill lives on single-stream-prefill-gpu.
 - **Trace:** 34c74f4 · MODEL-LADDER-VS-SOTA-2026-06-21.md · QWEN25-7B-RESULTS.md
 
 ### ≈ Single-stream decode throughput on a consumer GPU — fak: **parity**
 
-*Why it matters:* Local GPU single-stream decode (the RTX-class laptop/desktop regime) is where llama.cpp's CUDA backend sets the bar; fak reaches parity here at higher precision via a reusable CUDA graph.
+*Why it matters:* Local GPU single-stream decode (the RTX-class laptop/desktop regime) is where llama.cpp's CUDA backend sets the bar; fak reaches parity with tuned forks on RTX 5080 sm_120 short context while trailing at depth 1946.
 
-- **SOTA bar:** llama.cpp Q8_0 ~120 Â± 15 tok/s on an RTX 4070 (-ngl 99).
-- **Leading systems:** llama.cpp (CUDA)
-- **Source:** [https://github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) (2026-06)
-- **fak:** parity — 120 tok/s (shipped)
-- **fak note:** Same GPU (RTX 4070, WSL2), but fak runs f32 — 4× the weight bytes of llama.cpp's 8-bit Q8_0 — so parity is reached at HIGHER precision and ~46% GPU utilization (a disclosed fak advantage, not a hidden tilt). Gated FAK_CUDA_GRAPH=1; small model that fits VRAM (a 7B f32 set won't fit WSL's ~15 GB, so large-model parity is not claimed).
-- **Trace:** 1029e37 · GPU.md §3b · LLAMACPP-HEADTOHEAD-RESULTS.md
+- **SOTA bar:** On RTX 5080 16 GB (-ngl 99, Inkling-2-Mini UD-Q3_K_XL), realugbun/llama.cpp (2eb2530e) decodes at 119.47 tok/s (upstream llama.cpp ad50351f5 at 80.99 tok/s); prior RTX 4070 Q8_0 reference is ~120 ± 15 tok/s.
+- **Leading systems:** realugbun/llama.cpp fork (CUDA, RTX 5080), upstream llama.cpp (CUDA)
+- **Source:** [https://github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) (2026-11)
+- **fak:** parity — 122.34 tok/s (Inkling-2-Mini UD-Q3_K_XL, RTX 5080) (shipped)
+- **fak note:** HW-WITNESSED on RTX 5080 16 GB (sm_120f, Inkling-2-Mini-UD-Q3_K_XL): v0.60.0 in-process decode reaches 122.34 tok/s (TestInkling2CUDADecodeBench, kv=f16), and interleaved ABBA fork parity reaches 119.89 vs realugbun/llama.cpp 119.47 tok/s (1.51x upstream llama.cpp 80.99). Different harnesses (Go bench vs llama-bench), so read as parity, not a lead; at depth 1946 plain decode still trails the fork (88.97 vs 113.81 tok/s).
+- **Trace:** be228d79ef · docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json · docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md; docs/benchmarks/published/aegis-inkling2-fork-parity/RESULTS.md; BENCHMARK-AUTHORITY.md
+
+### ▲ Single-stream prefill throughput on a consumer GPU (prompt ingestion tok/s) — fak: **lead**
+
+*Why it matters:* Prompt ingestion speed on a single consumer GPU governs TTFT on long repo context and agent tool turns. On Blackwell sm_120, grouped W4A4 tensor-core prefill (NVFP4) vs standard MMQ/cuBLAS GGUF kernels decides cold prompt cost.
+
+- **SOTA bar:** On RTX 5080 16 GB (Inkling-2-Mini UD-Q3_K_XL HTTP pp512), realugbun/llama.cpp (2eb2530e) ingests prompts at 3012.4 tok/s (upstream llama.cpp 33aeb17 at 2144.6 tok/s); on dense Qwen3.8-27B Q4_K_M (RTX 5090 Laptop), llama.cpp b11870 hits 904.1 tok/s at P=512 and 1053.2 tok/s at P=2048.
+- **Leading systems:** realugbun/llama.cpp fork (CUDA RTX 5080 UD-Q3_K_XL), upstream llama.cpp (CUDA RTX 5080 / RTX 5090 Laptop)
+- **Source:** [https://github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) (2026-11)
+- **fak:** lead — 5861 tok/s HTTP pp512 server prompt rate (Inkling-2-Mini-UD-Q3_K_XL, RTX 5080) (shipped)
+- **fak note:** HW-WITNESSED on RTX 5080 16 GB (sm_120f, Inkling-2-Mini-UD-Q3_K_XL): fak executes the checkpoint's NVFP4-quantized experts via native SM120 NVFP4 W4A4 grouped prefill (default at 27355b23dd), reaching 5861.0 tok/s HTTP pp512 server prompt rate (1.95x realugbun/llama.cpp fork 3012.4 tok/s, 2.73x upstream llama.cpp 2144.6 tok/s on the exact same UD-Q3_K_XL GGUF — llama.cpp runs its standard CUDA UD-Q3_K_XL kernels, NOT NVFP4 W4A4 activations), and 6037.6/6038.2/6033.9 vs 3337.4/3537.8/3648.6 tok/s at C2/C4/C8 pooled median (rev e7ad0c8dee5, 1 output token). HONEST FENCES: (1) server prompt rate only — on that C1 pp512 run median first visible token still trailed (1165.6 vs 195.5 ms), though Wave-2 C4_p2048 HTTP TTFT leads at 2017.61 vs 3718.34 ms (rtx5080-inkling2-v060); (2) on dense Qwen3.8-27B-Q4_K_M (RTX 5090 Laptop, cuda-prefill-sm120-20261106), fak default Q4_K MMQ prefill still trails llama.cpp b11870 at 119.2 vs 904.1 tok/s (pp512, 0.13x) and 153.8 vs 1053.2 tok/s (pp2048, 0.15x).
+- **Trace:** 27355b23dd · docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4/RESULTS.md · docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4/RESULTS.md; README.md (C2/C4/C8 pooled median rev e7ad0c8dee5); docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md (Q4_K_M MMQ)
 

@@ -28,8 +28,8 @@ description: "The cost dimensions that matter in LLM serving, the current SOTA b
 - **Leading systems:** DistServe, DOPD (>99% SLO attainment, up to 1.5x over vLLM/DistServe, 2026-03), TaiChi (90% SLO attainment, 29-77% over PD-disagg, 2025-08)
 - **Source:** [https://arxiv.org/abs/2401.09670](https://arxiv.org/abs/2401.09670) (2024-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. SLO-constrained goodput is the metric of a full PD-disaggregating serving STACK (DistServe 4.48x goodput, GenAI-Perf goodput mode); fak is a kernel/adjudication plane that FRONTS such a stack (the GPU server run is SGLang-serves + fak-adjudicates) and does not own the scheduler that goodput measures. no-claim.
-- **Trace:** No goodput-under-SLO number exists. CLAIMS.md labels continuous-batching [SIMULATED] (read-only telemetry, not on the live serving path) and the polymodel decode lane is explicitly SERIAL/off-mainline, so fak has no SLO-constrained per-GPU goodput measurement.
+- **fak note:** GAP / partial stack scope: fak has measured C1-C4 HTTP TTFT and aggregate E2E tok/s on RTX 5080 (130.44 agg E2E tok/s and 2017.61 ms median TTFT at C4_p2048) plus gateway-fronting-SGLang throughput, but publishes no joint P99 TTFT+TPOT SLO-attained req/s/GPU goodput curve against DistServe/Dynamo. Honest no-claim.
+- **Trace:** No joint TTFT+TPOT goodput SLO curve exists yet; internal/modelengine/nativesched.go ships native continuous batching and rtx5080-inkling2-v060 measures C1-C4 median TTFT + agg E2E tok/s.
 
 ### ○ End-to-end effective request capacity / cost gain from the KV system under SLO — fak: **no-claim**
 
@@ -46,11 +46,11 @@ description: "The cost dimensions that matter in LLM serving, the current SOTA b
 
 *Why it matters:* Cost-per-million-tokens at the utilization you can actually sustain is the metric finance signs off on. It folds throughput, batching, quantization, and utilization into one number and exposes the gap between marketing throughput and the bill.
 
-- **SOTA bar:** GPT-4-equivalent quality now serves at ~$0.40 / 1M tokens vs ~$20 in late 2022 (â‰ˆ10x/yr decline). Real production GPU utilization is only 30-60%, so realistic cost-per-token runs 2-3x above spreadsheet estimates; FP8/FP4 quantization roughly halves cost-per-token on H100/H200. Self-hosting a 7B breaks even only above ~50% utilization.
+- **SOTA bar:** GPT-4-equivalent quality now serves at ~$0.40 / 1M tokens vs ~$20 in late 2022 (≈10x/yr decline). Real production GPU utilization is only 30-60%, so realistic cost-per-token runs 2-3x above spreadsheet estimates; FP8/FP4 quantization roughly halves cost-per-token on H100/H200. Self-hosting a 7B breaks even only above ~50% utilization.
 - **Leading systems:** Hosted frontier APIs, vLLM/SGLang self-host on H100/H200, FP8/FP4 quantization
 - **Source:** [https://introl.com/blog/inference-unit-economics-true-cost-per-million-tokens-guide](https://introl.com/blog/inference-unit-economics-true-cost-per-million-tokens-guide) (2025-09-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE as a measured number for a reuse kernel, though it is the axis fak's reuse story IMPLIES. fak's headline is work eliminated (50x5 fleet 4.1x vs tuned / 60.3x vs naive; ultra-long-context ~4x vs warm cache vs ~40x vs naive) which translates to lower infra cost ON TOP of any model at the same quality, but fak has committed NO $/1M-token figure, no utilization model, and no quantization-cost number. Stating a dollar SOTA-relative position would invent a number. Honest no-claim.
+- **fak note:** OUT OF SCOPE as a measured dollar figure: fak reports token/work-elimination ratios (50x5 fleet 4.1x vs tuned; 128k NVFP4 KV 4.21x prefill) rather than USD/1M tokens at cluster utilization targets. Stating a dollar SOTA-relative figure without billing telemetry would fabricate a number. Honest no-claim.
 - **Trace:** No $/token row in BENCHMARK-AUTHORITY.md or CLAIMS.md; fak measures work-elimination ratios (tokens/FLOPs), never a dollar figure or utilization-adjusted cost
 
 ### ○ Energy efficiency (Wh per token / tokens-per-watt) and power-capped throughput — fak: **no-claim**

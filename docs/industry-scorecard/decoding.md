@@ -16,9 +16,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** EAGLE-3 remains the named SOTA: ~1.38x throughput at batch 64 in SGLang on a single H100, peaking at ~1.81x at batch 2 and up to ~6.5x single-stream, ~1.4x over EAGLE-2.
 - **Leading systems:** EAGLE-3 (SafeAILab), SGLang speculative backend, vLLM/TensorRT-LLM spec backends
 - **Source:** [https://arxiv.org/abs/2503.01840](https://arxiv.org/abs/2503.01840) (2025-03)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for fak's shipped engine: fak borrows the speculative-decoding PATTERN for batched adjudication (verify a set of decisions in one pass) but does not ship a draft/target speculative-decoding generation backend, so there is no EAGLE-style acceptance-rate or batch-scaling throughput number. No fak value exists; named as out-of-scope rather than a measured gap.
-- **Trace:** No speculative-decoding throughput-vs-batch number in BENCHMARK-AUTHORITY.md. CLAIMS.md L28 references speculative-decoding only as inverted PRIOR ART for batch ADJUDICATION (set-shape decision equals serial in one pass), not as a generation-speed spec-decode backend; no acceptance-rate or batch-scaling tok/s is measured.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** SINGLE-STREAM SHIPPED, HIGH-CONCURRENCY UNMEASURED: fak now ships opt-in CUDA DSpark speculative decoding on Inkling-2-Mini (1.43x d2 / 1.51x d4 at C=1, 67bb976926a) alongside NativeScheduler batching, but has NOT measured whether speculative speedup survives at high serving batch concurrency (e.g. batch 16-64 vs EAGLE-3). Honest no-claim.
+- **Trace:** 67bb976926a · docs/benchmarks/published/HEADLINES.json · docs/benchmarks/published/HEADLINES.json (67bb976926a C=1 DSpark 171.54/180.92 tok/s); no C=16..64 spec-decode sweep
 
 ### ○ Speculative decoding effect on ITL (acceptance-rate-bound) — fak: **no-claim**
 
@@ -27,31 +27,31 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** EAGLE-3 reports ~0.80-0.88 acceptance on coding/instruction tasks giving ~3-4x decode token-rate (ITL) gains on H100/H200, and outperforms EAGLE-2/Medusa-2 by 15-25% tokens/s at batch size 1. Speedup primarily reduces ITL, not TTFT.
 - **Leading systems:** EAGLE-3, Medusa-2, TensorRT-LLM / vLLM speculative decoding
 - **Source:** [https://www.spheron.network/blog/eagle-3-speculative-decoding-gpu-cloud/](https://www.spheron.network/blog/eagle-3-speculative-decoding-gpu-cloud/) (2026-01)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP (mechanism built, number unmeasured). fak has the correctness machinery for speculative decoding (Medusa/EAGLE-2/SpecInfer-style tree verify, bit-exact via KVCache.Evict) and the closed-form EffectiveTokensPerVerify model, but no measured acceptance rate or ITL speedup - only the arithmetic, pending the bench harness (#535). EAGLE-3 reports ~0.80-0.88 acceptance / ~3-4x decode-rate on H100/H200. fak claims no number here; no-claim until the lane runs on a GPU.
-- **Trace:** CLAIMS.md: polymodel AcceptGreedy/AcceptTree + single-pass batched/tree verify (internal/spec, #533) are SHIPPED as the accept DECISION + bit-exact rollback, proven token-identical to plain greedy - but explicitly 'no GPU, so no tokens/sec', off mainline (NOT in defconfig, FAK_POLYMODEL default off). No acceptance-rate or ITL-speedup number is committed.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** C1 RATE MEASURED ON RTX 5080 (see spec-decode-speedup 1.51x and acceptance-length-rate 0.70), P50/P99 HTTP ITL DISTRIBUTION UNMEASURED: fak measures C=1 in-process DSpark decode speedups (171.54 tok/s d2 / 180.92 tok/s d4 vs 119.72 plain) plus spec oracle depth 4-8 (294-326 tok/s on f32 KV in rtx5080-inkling2-v060), but has no per-token P50/P99 HTTP ITL comparison vs EAGLE-3.
+- **Trace:** 67bb976926a · docs/benchmarks/published/HEADLINES.json · docs/benchmarks/published/HEADLINES.json (spec.d2=171.535, spec.d4=180.92); aegis-inkling2-spec-decode/RESULTS.md
 
-### ○ Speculative-decoding wall-clock speedup (single-stream / low-concurrency) — fak: **no-claim**
+### ▼ Speculative-decoding wall-clock speedup (single-stream / low-concurrency) — fak: **trails**
 
 *Why it matters:* The headline reason operators turn on speculative decoding: how much faster each request finishes at interactive (batch~1) load. It directly sets the latency a chat/agent user feels, and is the number buyers compare across engines and draft methods.
 
 - **SOTA bar:** EAGLE-3 reports up to 4.79x speedup on LLaMA-3.3-70B with no quality loss and is the de-facto industrial standard supported in vLLM and SGLang; vLLM's P-EAGLE reaches ~4-5x over standard decoding (20-30% over EAGLE-3 alone) on coding benchmarks
 - **Leading systems:** EAGLE-3 (SafeAILab), vLLM, SGLang, P-EAGLE (vLLM)
 - **Source:** [https://github.com/SafeAILab/EAGLE](https://github.com/SafeAILab/EAGLE) (2025-09)
-- **fak:** no-claim — no number (projected)
-- **fak note:** REAL GAP fak should measure. fak has shipped speculative-decode MECHANISM (greedy + tree verify, single-pass batched), proven token-identical to greedy — but ZERO measured wall-clock speedup: no GPU path, no real draft model, synthetic CPU only, off-mainline by construction. EAGLE-3's up-to-4.79x is a measured wall-clock on LLaMA-3.3-70B; fak has no comparable number, so no verdict is honest. The honest bench is gated on #535.
-- **Trace:** CLAIMS.md In-kernel model: internal/polymodel AcceptGreedy/AcceptTree + internal/spec SpeculativeGreedy/SpeculativeTree + model.VerifyForward (rungs #533); honest fence states it runs on the CPU synthetic PreNorm regime, NO GPU, so NO tokens/sec — the speedup is only the closed-form EffectiveTokensPerVerify arithmetic; a measured number needs bench harness #535. Off mainline (FAK_POLYMODEL default off).
+- **fak:** trails — 1.51 x wall-clock speedup (shipped)
+- **fak note:** HW-WITNESSED on RTX 5080 (Inkling-2-Mini-UD-Q3_K_XL, opt-in FAK_INKLING2_SPEC): DSpark depth 4 reaches 180.92 tok/s (1.51x vs plain 119.715 tok/s, capitals prompt; depth 2 reaches 171.535 tok/s = 1.43x, superseding prior 151.65 tok/s). Opt-in and not bit-exact on every prompt; trails EAGLE-3's up-to-4.79x on LLaMA-3.3-70B.
+- **Trace:** 67bb976926a · docs/benchmarks/published/HEADLINES.json · docs/benchmarks/published/HEADLINES.json (67bb976926a: spec.d4=180.92 vs plain 119.715, spec.d2=171.535); docs/benchmarks/published/aegis-inkling2-spec-decode/RESULTS.md
 
-### ○ Draft acceptance length / acceptance rate (mean accepted tokens per verify step) — fak: **no-claim**
+### ▼ Draft acceptance length / acceptance rate (mean accepted tokens per verify step) — fak: **trails**
 
 *Why it matters:* Acceptance length tau is the upstream driver of every spec-decode speedup; it is the engine-independent quality metric of a draft method and the thing that determines whether the verify-step overhead pays off. Operators tune draft depth/tree against measured tau on their own traffic.
 
 - **SOTA bar:** EAGLE-3 reports per-task acceptance rate ~0.80-0.88 (coding/instruction) and mean accepted length ~4.5-5.0 tokens per draft-verify cycle, exceeding the older DeepSeek-V3 MTP ~0.85 second-token figure.
 - **Leading systems:** EAGLE-3 (SafeAILab), DeepSeek-V3 MTP, FastMTP / FastEagle (2025 successors)
 - **Source:** [https://arxiv.org/abs/2503.01840](https://arxiv.org/abs/2503.01840) (2025-03)
-- **fak:** no-claim — no number (projected)
-- **fak note:** REAL GAP fak should measure. fak proves the accept/rollback ACCOUNTING is correct (KEEP+EVICT conservation, lossless), but reports no empirical tau / acceptance rate from a real draft+target pair. EAGLE-class ~0.6-0.8 per-token and DeepSeek-V3 MTP ~85-90% 2nd-token are measured on real models; fak's only number is a parameterized model, so it cannot claim an acceptance rate. Competitor value shown is DeepSeek-V3 MTP 2nd-token acceptance.
-- **Trace:** CLAIMS.md: polymodel.EffectiveTokensPerVerify is a geometric-series speedup MODEL (closed-form arithmetic), not an empirical acceptance rate; AcceptGreedy/AcceptTree KEEP/EVICT counts are proven conserved against the bit-exact KVCache.Evict rollback but are exercised on synthetic/adversarial drafts (cmd/polymodelbench forces a rollback every round), not measured on a real draft model against a real target.
+- **fak:** trails — 0.7 draft acceptance rate (fraction; d2=2.40 tokens/verify) (shipped)
+- **fak note:** HW-WITNESSED on RTX 5080 (Inkling-2-Mini DSpark depth 2): 74/106 drafts accepted (0.70 acceptance rate, 2.40 tokens/verify in aegis-inkling2-spec-decode prior to the 67bb976926a verify-kernel climb reaching 171.54 tok/s at d2 and 180.92 tok/s at d4). Trails EAGLE-3 (0.80-0.88 rate, ~4.5-5.0 tokens/verify) and DeepSeek-V3 MTP (0.85-0.90 2nd-token rate).
+- **Trace:** 67bb976926a · docs/benchmarks/published/HEADLINES.json · docs/benchmarks/published/HEADLINES.json (67bb976926a: spec.d2=171.535, spec.d4=180.92 tok/s superseding 5915ef42be); docs/benchmarks/published/aegis-inkling2-spec-decode/RESULTS.md (74/106 drafts = 0.70, 2.40 tok/verify at depth 2)
 
 ### ○ Breadth of speculative methods supported (draft-model, EAGLE/-2/-3, Medusa, MTP, lookahead, n-gram/prompt-lookup) — fak: **no-claim**
 
@@ -60,9 +60,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** TensorRT-LLM supports draft-target, Medusa, ReDrafter, Lookahead, and EAGLE(-1/-2, EAGLE-3 via two-model/disaggregated); vLLM supports EAGLE/EAGLE-3, Medusa, MTP, n-gram/prompt-lookup; SGLang supports EAGLE/EAGLE3 and standard draft
 - **Leading systems:** TensorRT-LLM, vLLM, SGLang
 - **Source:** [https://nvidia.github.io/TensorRT-LLM/advanced/speculative-decoding.html](https://nvidia.github.io/TensorRT-LLM/advanced/speculative-decoding.html) (2025-12)
-- **fak:** no-claim — no number (projected)
-- **fak note:** REAL GAP. fak's tree-verify mechanism is genuinely EAGLE-2/Medusa/SpecInfer-shaped and lossless, but as an unwired CPU-synthetic accounting layer it supports no method end-to-end on the live serving path. TensorRT-LLM/vLLM ship 4-6 production methods (draft-target, Medusa, EAGLE/-3, MTP, lookahead, n-gram). fak claims no breadth; naming this prevents the shipped accept-core from being read as method parity.
-- **Trace:** CLAIMS.md In-kernel model: internal/polymodel ships AcceptGreedy (chain) + AcceptTree (the token-TREE generalization explicitly mapped to Medusa/EAGLE-2/SpecInfer) + PickDrafter ensemble selection, with single-pass batched + tree-attention verify (model.VerifyForward, #533). But it is the policy/accounting brain + a CPU synthetic verify only — off mainline (not in defconfig, FAK_POLYMODEL default off); no draft-target with a real draft model, no trained EAGLE/-2/-3 head, no native MTP weights, no n-gram/prompt-lookup.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** PARTIAL COVERAGE SHIPPED, STILL TRAILS SOTA MENU: fak now ships CUDA DSpark drafting (opt-in on Inkling-2-Mini) and deterministic toolgrammar.ForcedDraft jump-forward decoding (020586f72c) plus CPU tree-verify primitives, yet lacks general external draft-target, EAGLE-3, Medusa, and SuffixDecoding/n-gram lookup across models on fak serve.
+- **Trace:** 67bb976926a · docs/benchmarks/published/HEADLINES.json · docs/benchmarks/published/HEADLINES.json (67bb976926a CUDA DSpark MTP); commits 28b7299a29 & 020586f72c (toolgrammar.ForcedDraft jump-forward); internal/polymodel & internal/spec (CPU tree verify)
 
 ### ○ Retrieval / prompt-lookup (n-gram) drafting for input-grounded tasks — fak: **no-claim**
 
@@ -83,8 +83,8 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 - **Leading systems:** EAGLE 3.1 (vLLM + TorchSpec), EAGLE-3, SpecForge training framework
 - **Source:** [https://vllm.ai/blog/2026-05-26-eagle-3-1](https://vllm.ai/blog/2026-05-26-eagle-3-1) (2026-05)
 - **fak:** parity — no number (shipped)
-- **fak note:** Correctness-oracle => parity (a losslessness property is matched, never beaten). fak's speculative path is proven token-identical to plain greedy decode (the accepted path is bit-exact via KVCache.Evict rollback), the GREEDY-equivalence guarantee. HONEST FENCE vs the SOTA bar: this is proven for GREEDY only on the CPU synthetic PreNorm model; fak has NOT shown distribution-preserving rejection sampling under STOCHASTIC (temperature>0) decoding the way vLLM's implementation does — fak's in-kernel decode is greedy-only, so the sampled-decoding half of the losslessness bar is unaddressed. The greedy half is at parity; the stochastic half is unbuilt.
-- **Trace:** CLAIMS.md In-kernel model (#533): spec.SpeculativeGreedy verifies a k-token draft in ONE VerifyForward pass and stays token-identical to plain greedy; spec.VerifyTree/SpeculativeTree commit only the accepted path and are token-identical to plain greedy decode. Witnesses: TestSpeculativeTreeLosslessGreedyPath (21/63 accepted, distractors rejected by the tree mask), TestSpeculativeTreeLosslessArbitrary (lossless regardless of drafter quality), TestVerifyTreeRewindsAndCommitsCleanly (target cache byte-exact to a greedy session after the round), TestVerifyForwardChainMatchesSerial. go test ./internal/model ./internal/spec.
+- **fak note:** Parity on the greedy CPU oracle half, WITH HONEST FENCES: (1) internal/spec proves token-identity vs plain greedy decode on the CPU PreNorm path (via KVCache.Evict rollback); (2) on CUDA RTX 5080 Inkling-2-Mini, opt-in DSpark batched verify is NOT bit-exact to single-step decode on all prompts due to GEMM reduction order (diverges at token 65 on capitals; bit_exact=false in HEADLINES.json); (3) distribution-preserving stochastic (temperature>0) rejection sampling parity is unbuilt.
+- **Trace:** internal/spec SpeculativeGreedy/VerifyTree (greedy CPU bit-exact rollback witness); docs/benchmarks/published/aegis-inkling2-spec-decode/RESULTS.md & HEADLINES.json (RTX 5080 DSpark bit_exact=false)
 
 ### ○ Speculative-decoding behavior under high concurrency / large batch (break-even) — fak: **no-claim**
 
@@ -93,9 +93,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** EAGLE-3's measured high-concurrency behavior: positive throughput uplift sustained to batch ~64 in SGLang (1.38x at batch 64), with the speedup approaching break-even beyond that as baseline throughput rises; EAGLE-2 already regresses (0.93x at batch 24).
 - **Leading systems:** EAGLE-3 (SGLang), MagicDec (fixed-window draft, prior reference), vLLM/SGLang continuous batching
 - **Source:** [https://arxiv.org/abs/2503.01840](https://arxiv.org/abs/2503.01840) (2025-03)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel, and a real gap relative to a full serving stack. Spec-decode-under-high-concurrency (MagicDec fixed-window draft restoring speedup at large batch) presupposes continuous batching, which fak does not have on the live path (continuous-batching is [SIMULATED]; the decode lane is serial by construction). fak makes no batch-scaling claim. Reuses the existing 'continuous-batching' / 'served-throughput-vs-sglang' gap framing.
-- **Trace:** CLAIMS.md In-kernel model: the polymodel decode lane is explicitly SERIAL (the at-most-one-model-decodes-per-step invariant is asserted); CLAIMS Engine labels continuous-batching [SIMULATED] (read-only telemetry, not on the live serving path). No batch-scaling / break-even measurement exists.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** GAP: NativeScheduler continuous batching and CUDA cohorts are shipped, and C=1 DSpark spec decode is measured (180.92 tok/s d4), but high-concurrency break-even batch sizing for speculative decoding (e.g. batch 16-64 vs MagicDec / EAGLE-3) is unmeasured.
+- **Trace:** internal/modelengine/nativesched.go & HEADLINES.json; no high-batch speculative scaling sweep yet
 
 ## Structured output (`structured-output`)
 
@@ -106,9 +106,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** XGrammar-2 (arXiv 2601.04426, Jan 2026) drops grammar-mask per-token overhead to ~12-20us (Llama tool-calling ~12-13us, OpenAI Harmony ~15-20us) with <6% end-to-end overhead vs unconstrained and ~10ms (>100x faster) dynamic compilation; it is the new SOTA, far below LLGuidance's ~250us (Harmony) / >1000us (tool-calling) on the agentic workloads.
 - **Leading systems:** XGrammar-2 (vLLM/SGLang/TensorRT-LLM default backend), XGrammar, LLGuidance (Rust Earley)
 - **Source:** [https://arxiv.org/html/2601.04426](https://arxiv.org/html/2601.04426) (2026-01)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP. Constrained/guided decoding (JSON-schema/regex/CFG bitmask per token) is explicitly [STUB] in fak — fak owns its decode loop in the in-kernel model but has not built the logit-mask. XGrammar's <40 microsecond/token is the bar; fak has no per-token mask overhead to report. Competitor value is XGrammar's <40us/token.
-- **Trace:** CLAIMS.md Pre-flight ladder: '[STUB] Decode-time logit-mask (grammar-constrained generation) — the strongest form (never-emit a malformed call) — requires owning the decode loop; not in v0.1.' fak's grammar rung is a post-hoc positional->named TRANSFORM at the syscall boundary, not a per-token decode-time bitmask FSM.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** MECHANISM SHIPPED, OVERHEAD BENCH UNMEASURED: fak now ships native decode-time logit bitmask FSMs (BatchBitmaskFSM with prefix-skip vocab trie and speculative rollback, 361b316673/b2a53f9305), structured carriers in internal/agent/inkernel_structured.go, and toolgrammar.ForcedDraft jump-forward decoding (020586f72c). However, no per-token microsecond latency benchmark against XGrammar-2 (<40 us/tok) is committed, so verdict stays no-claim.
+- **Trace:** 361b316673 · internal/grammar/batch_bitmask_fsm.go (361b316673) + b2a53f9305 (sorted-vocab trie); internal/agent/inkernel_structured.go; internal/toolgrammar ForcedDraft (28b7299a29, 020586f72c); no XGrammar-2 us/token parity benchmark
 
 ### ○ Grammar/schema compilation latency and cache (cold-start for dynamic agentic schemas) — fak: **no-claim**
 
@@ -117,9 +117,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** XGrammar-2 compiles in ~10 ms vs >1000 ms for XGrammar (~80x faster), with >6x tool-calling compilation speedup via Earley-based adaptive mask cache + cross-grammar cache + JIT; integrated into vLLM and SGLang
 - **Leading systems:** XGrammar-2, XGrammar, LLGuidance/Guidance
 - **Source:** [https://blog.mlc.ai/2026/05/04/xgrammar-2-fast-customizable-structured-generation](https://blog.mlc.ai/2026/05/04/xgrammar-2-fast-customizable-structured-generation) (2026-05)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP, partial-scope. fak has a content-addressed dedup CACHE for its tool-arg grammar (so a repeated grammar is not re-parsed), conceptually adjacent to XGrammar's cross-grammar cache, but it is a tool-call repair grammar, not a CFG/JSON-schema decode mask, and carries no committed compile-latency number. XGrammar-2's ~10ms (vs >1000ms) is the bar; fak makes no measured claim. Competitor value is XGrammar-2 ~10ms.
-- **Trace:** CLAIMS.md Pre-flight ladder grammar rung: 'content-addressed grammar dedup' exists for the TOOL-INVOCATION grammar (positional->named repair), but there is no committed compilation-latency number, and the decode-time grammar FSM is [STUB] (not built). No XGrammar/Earley-style mask-cache compile metric exists.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** CACHE SHIPPED, COMPILE LATENCY UNMEASURED: fak now ships SchemaCompileCache caching compiled *JSONSchemaMask and sorted-vocab tries across decode requests (361b316673, b2a53f9305), alongside content-addressed tool-arg grammar dedup, but has committed no cold compile-time (ms) comparison against XGrammar-2 (~10 ms). Honest no-claim.
+- **Trace:** 361b316673 · internal/grammar/batch_bitmask_fsm.go SchemaCompileCache (FIFO schema/vocab compile cache, 361b316673) + internal/grammar/json_schema_mask.go; no cold compile-ms benchmark vs XGrammar-2
 
 ### ○ Structured-output validity vs reasoning-quality tax (constraint-induced degradation) — fak: **no-claim**
 
@@ -128,9 +128,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** Constrained decoding guarantees ~100% syntactic/schema validity (JSON-Pass/Type-Safety >.95) but does NOT guarantee semantic quality and can REDUCE accuracy: ExtractBench (2026) shows structured mode dropping overall validity 51%->37% and GPT-5 credit-agreement pass rate 86.9%->70.0% vs prompt-based extraction. The honest SOTA bar is 'validity is solved; value accuracy is the open gap (13.7pt spread across models).'
 - **Leading systems:** XGrammar (vLLM/SGLang/TRT-LLM default), LLGuidance (guidance-ai), OpenAI Structured Outputs
 - **Source:** [https://arxiv.org/pdf/2602.12247](https://arxiv.org/pdf/2602.12247) (2026-02)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. Structured-output validity-vs-reasoning-tax (JSONSchemaBench, the answer-before-reasoning degradation) is a property of a constrained-generation engine fak does not have. fak claims nothing here; the related answershape consumer witness measures a different thing (degeneration), not schema conformance.
-- **Trace:** No fak evidence: fak runs no constrained generation ([STUB] decode-time logit-mask) and has no JSONSchemaBench run. fak's answershape witness grades degeneration/repetition shape, not schema validity, and its grammar rung repairs tool-arg arity, not output schemas.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** NATIVE STRUCTURED CONSTRAINTS SHIPPED, REASONING-TAX BENCH UNMEASURED: fak now enforces bounded JSON-schema, regex, GBNF, and guided_choice bitmasks during native decode (witnessed by go test ./internal/agent and ./internal/grammar), but has NOT run JSONSchemaBench or ExtractBench to quantify validity-vs-reasoning accuracy loss. Honest no-claim.
+- **Trace:** 361b316673 · internal/grammar + internal/agent/inkernel_structured.go (TestNativeGuidedJSONConstrainsCompletion, TestNativeGuidedRegexConstrainsCompletion, TestNativeStructuredCompleteAndStream); no JSONSchemaBench run
 
 ### ○ Tool/function-call parsing coverage and robustness (per-model formats) — fak: **no-claim**
 
@@ -139,9 +139,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 - **SOTA bar:** vLLM ships per-family parsers (hermes, llama3_json, mistral, pythonic, internlm, granite, plus qwen3/qwen3_coder); when constraints aren't enforced it falls back to extracting from raw text, so args can be malformed - making grammar-backed (constrained) tool calling the robustness frontier
 - **Leading systems:** vLLM tool-call parsers, SGLang, XGrammar-2 (grammar-backed tool calling)
 - **Source:** [https://docs.vllm.ai/en/latest/features/tool_calling/](https://docs.vllm.ai/en/latest/features/tool_calling/) (2025-12)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP on the measured axis; mechanism is adjacent but narrow. fak has a SHIPPED boundary mechanism that hardens tool calls (arity repair + MISROUTE deny + MALFORMED deny on bad writes), which is robustness-shaped, but it is NOT the per-family format-parser coverage the SOTA bar measures (vLLM's hermes/llama3_json/mistral/pythonic/qwen3_coder parsers) and carries no coverage/malformed-rate number. So fak makes no coverage claim. Grammar-backed (constrained) tool calling — the robustness frontier — is the [STUB] decode-time mask fak has not built.
-- **Trace:** CLAIMS.md Pre-flight ladder grammar rung [SHIPPED]: positional->named auto-repair (in-syscall TRANSFORM, no model turn) for arity-matched calls; unrepairable => Deny(MISROUTE); fail-open on unknown grammar (units 52-57). CLAIMS adjudicator: write-scoped codelint Deny(MALFORMED) on unparseable Go/JSON (#536). Gateway mints/validates calls. But there is NO per-model-family parser suite and NO measured coverage/robustness number.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** FORCED-DRAFT + BOUNDARY REPAIR SHIPPED, PER-FAMILY COVERAGE BENCH UNMEASURED: fak now ships deterministic toolgrammar.ForcedDraft jump-forward constraints wired into serving decode (020586f72c), decode-time bitmask FSMs, and syscall-boundary arity repair + MISROUTE/MALFORMED denials, yet has no measured multi-family raw-text parser malformed-call rate benchmark vs vLLM parsers.
+- **Trace:** 020586f72c · internal/toolgrammar + commit 020586f72c (ForcedDraft wired into serving decode loop); internal/grammar/batch_bitmask_fsm.go; boundary positional->named repair; no per-family parser benchmark
 
 ### ○ Sampler coverage and correctness (temperature, top-p, top-k, min-p) — fak: **no-claim**
 

@@ -16,9 +16,9 @@ description: "The memory dimensions that matter in LLM serving, the current SOTA
 - **SOTA bar:** PagedAttention keeps KV-cache memory waste under 4% (near-zero internal/external fragmentation), enabling 2-4x throughput at the same latency; this remains the canonical paged-KV efficiency reference as of mid-2026.
 - **Leading systems:** vLLM PagedAttention, SGLang RadixAttention (radix-tree paged KV)
 - **Source:** [https://arxiv.org/abs/2309.06180](https://arxiv.org/abs/2309.06180) (2023-09)
-- **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE / disclosed capability gap: fak owns its own in-kernel KV cache via copy-CAS (that IS the fusion), with no PagedAttention-style block paging to drive KV-memory waste toward <4% or to maximize concurrent-sequence count on fixed VRAM. CLAIMS marks external zero-copy KV co-residence an explicit [STUB] (~120h, out of scope). No memory-efficiency or max-concurrency number exists; reuses the named-gap row vllm-zero-copy-kv.
-- **Trace:** No PagedAttention-style memory-waste or max-concurrency number in BENCHMARK-AUTHORITY.md. CLAIMS.md L161 [STUB] 'No zero-copy KV co-residence with an external serving engine' (copy-CAS path, paging into the working set is residency decomposition, not anti-fragmentation KV paging).
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** PARTIAL AUTOTUNE SHIPPED, PAGED FRAGMENTATION BENCHMARK ABSENT: fak now ships a unified VRAM-envelope slot autotuner (0cb005834d) and scalar/cohort tight-cap slot reuse (761d14fcdc, verified 0 OOM at 2200 MiB cap), alongside copy-CAS radix KV reuse, but does not implement vLLM-style virtual block paging or publish a <4% KV-memory-waste benchmark.
+- **Trace:** commits 0cb005834d (unified VRAM-envelope autotuner across 12-80 GiB GPUs) & 761d14fcdc (slot budget/tight-cap coexistence); no PagedAttention <4% block-fragmentation benchmark
 
 ### ≈ Prefix caching / automatic KV reuse across requests (shared-context workloads) — fak: **parity**
 
@@ -83,8 +83,8 @@ description: "The memory dimensions that matter in LLM serving, the current SOTA
 - **Leading systems:** LMCache (vLLM, production Jan 2026), llm-d native KV offload (57x TTFT), Mooncake Store
 - **Source:** [https://arxiv.org/abs/2510.09665](https://arxiv.org/abs/2510.09665) (2025-10)
 - **fak:** no-claim — no number (in-flight)
-- **fak note:** OUT OF SCOPE as a measured head-to-head, though the policy plane is shipped. fak models a multi-tier hierarchy (incl. CXL/NUMA-far) and decides demote-vs-evict, but it moves no KV bytes and has no access-bandwidth or capacity-multiple number against LMCache's claimed ~7x faster CPU access / ~100x capacity or Mooncake's pooled store. The demote demo's '28000 tokens saved' is vs blind LRU on its own engine, not a cross-tier bandwidth comparison.
-- **Trace:** CLAIMS line 142: internal/cachemeta models HBM->DRAM->CXL/NUMA-far->Disk tiers with per-tier TTL, demote-not-evict, and a hardware-cost-driven PlanPlacement; cmd/hwcachedemo is deterministic (28000 prefill tokens saved by demoting vs blind LRU). Explicitly the payload-free POLICY plane: cachemeta touches no bytes; physical movement is left to an engine adapter.
+- **fak note:** SPILLOVER & POLICY SHIPPED, CROSS-TIER BANDWIDTH BENCHMARK UNMEASURED: fak now ships GPU->RAM->NVMe idle-slot spillover (ac7031a8aa), checksummed disk prefix spillover (16c2efeec1), checksummed NVFP4/fp8k_nvfp4v KV snapshots (e3bc194cd1), and cachemeta tier placement policy, yet has no head-to-head access-bandwidth or capacity-multiple benchmark vs LMCache or Mooncake Store.
+- **Trace:** ac7031a8aa · commits ac7031a8aa (radixkv GPU->RAM->NVMe idle-slot spillover), 16c2efeec1 (checksummed disk prefix spillover), e3bc194cd1 (kvmmu checksummed NVFP4/fp8k_nvfp4v snapshots), and internal/cachemeta PlanPlacement (hwcachedemo 28000 tokens saved)
 
 ### ○ KV compression / token eviction under a fixed cache budget — fak: **no-claim**
 
@@ -105,7 +105,7 @@ description: "The memory dimensions that matter in LLM serving, the current SOTA
 - **Leading systems:** NVIDIA Dynamo 1.0 + NIXL (GA Mar 2026), Mooncake Transfer Engine, SGLang EPD disaggregation
 - **Source:** [https://developer.nvidia.com/blog/nvidia-dynamo-1-production-ready/](https://developer.nvidia.com/blog/nvidia-dynamo-1-production-ready/) (2026-03)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a single-process reuse kernel. fak has no prefill/decode disaggregation and moves no KV over the wire; the KVTransfer directives are policy-plane intents consumed by an external adapter. It claims nothing against NIXL/Dynamo point-to-point RDMA transfer or layerwise overlap.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. OUT OF SCOPE for a single-process reuse kernel. fak has no prefill/decode disaggregation and moves no KV over the wire; the KVTransfer directives are policy-plane intents consumed by an external adapter. It claims nothing against NIXL/Dynamo point-to-point RDMA transfer or layerwise overlap.
 - **Trace:** No prefill/decode disaggregation or NIXL/NCCL/UCX KV transfer in CLAIMS.md. cachemeta emits KVTransfer offload/restore DIRECTIVES (line 142) and a coherence bus broadcasts refutations (BENCHMARK-AUTHORITY causal-invalidation row), but no cross-GPU KV transport, no layerwise overlap, no measured transfer bandwidth or TTFT-inflation figure.
 
 ### ≈ KV-cache-aware / prefix-aware request routing across a fleet — fak: **parity**
@@ -130,16 +130,16 @@ description: "The memory dimensions that matter in LLM serving, the current SOTA
 - **fak note:** OUT OF SCOPE. KV footprint per token is a MODEL-architecture property (MLA vs GQA), and fak is a serving kernel, not a model designer; it faithfully serves whatever attention shape the checkpoint defines (MHA/GQA/MQA argmax-exact, GLM-5.2 DSA dense path on-GPU via the in-kernel GLM-5.2 / DeepSeek-class work, #1010 / #1026) but claims no KB/token figure against DeepSeek MLA's ~70 KB/token (the v6.0 / DeepSeek-R1 reference attention). Analogous to the swebench-resolve-rate fence: the kernel inherits, it does not set, this number.
 - **Trace:** CLAIMS line 146: fak's CUDA flash-attention is correct for MHA/GQA/MQA (cosine=1.0) and line 147 serves GLM-5.2's DSA attention (dense path pure-GPU, sparse DSA still host-side). fak SERVES these architectures faithfully but measures no bytes-per-token KV footprint and ships no MLA-style footprint reduction of its own.
 
-### ○ KV-cache quantization (FP8 / INT8 / KIVI sub-4-bit) accuracy at long context — fak: **no-claim**
+### ≈ KV-cache quantization (FP8 / INT8 / KIVI sub-4-bit) accuracy at long context — fak: **parity**
 
 *Why it matters:* KV-cache dominates memory at long context and high concurrency; halving it (FP8) or going to 2-4 bits (KIVI/KVQuant) directly buys longer contexts or more concurrent requests at fixed hardware. The buyer question is exactly where it stays lossless vs where it degrades (prefill-heavy, head_dim=256, hybrid sliding-window layers).
 
 - **SOTA bar:** Ultra-low-bit KV quant frontier (2026): Together AI's OSCAR reaches 2.28 effective bits within 1.42 points of BF16 (Qwen3-8B; ~0.02-pt gap on Qwen3-32B) with ~8x KV memory reduction at 100K context and up to 7.83x job-level throughput; TurboQuant (ICLR 2026) is near-lossless at 3-4 bits / full-precision NIAH recall at 4x.
 - **Leading systems:** OSCAR (Together AI, 2026), TurboQuant (Google/NYU, ICLR 2026), Kitty 2-bit dynamic channel-wise (arXiv 2511.18643)
 - **Source:** [https://www.marktechpost.com/2026/06/18/the-kv-cache-compression-race-turboquant-vs-oscar-vs-epicache/](https://www.marktechpost.com/2026/06/18/the-kv-cache-compression-race-turboquant-vs-oscar-vs-epicache/) (2026-06)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should be aware of, but currently OUT OF SCOPE. fak owns its KV cache (that IS the reuse/eviction moat) but stores it at f32 — there is no FP8/INT8/sub-4-bit KV quantization and therefore no long-context accuracy-retention number. fak's adjacent KV claims (bit-exact Evict/quarantine, 86.7% radix hit-rate) are reuse/correctness properties on an UNQUANTIZED cache, not KV-quant accuracy, so no parity is implied. KV quantization is the natural lever a serving-stack-facing fak would eventually measure.
-- **Trace:** none for KV QUANTIZATION accuracy — fak's KV cache is a kernel-owned f32 structure; its KV claims are bit-exact eviction (max|Δ|=0, KV-quarantine bridge) and radix prefix reuse, NOT a quantized (FP8/INT8/KIVI) KV cache with a long-context accuracy study
+- **fak:** parity — 0.004225 mean KL nats vs per-token step (32K fp8) (shipped)
+- **fak note:** HW-WITNESSED on RTX 5080 (Inkling-2-Mini): 32K auto-FP8 KV achieves mean KL 0.004225 nats (84/85 same-top, 32/32 forced oracle exact) and 0 HTTP 500s across 14-task deveval-outcome; 128K opt-in NVFP4 KV achieves exact needle retrieval and 4/4 greedy oracle pass; asymmetric fp8k_nvfp4v reaches 0.004011 nats KL (0eb366df29).
+- **Trace:** 9b6b0b2173 · docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json · docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md (32K fp8 KL 0.004225 nats, 84/85 same-top, 32/32 oracle); README.md (128k nvfp4 exact needle); commit 0eb366df29 (INT8-K blk16 + FWHT16 NVFP4-V KL 0.004011)
 
 ### ≈ Automatic cross-request prefix / KV-cache reuse (shared system prompts, agent scaffolds, few-shot) — fak: **parity**
 
@@ -149,6 +149,6 @@ description: "The memory dimensions that matter in LLM serving, the current SOTA
 - **Leading systems:** SGLang RadixAttention, vLLM Automatic Prefix Caching, Mooncake KV pool
 - **Source:** [https://www.lmsys.org/blog/2024-01-17-sglang/](https://www.lmsys.org/blog/2024-01-17-sglang/) (2024-01)
 - **fak:** parity — 86.7 % (shipped)
-- **fak note:** fak measured on-box: cache-aware (≡ DFS) scheduling recovers FCFS 62.1% → 86.7% = 100% of optimal, inside SGLang's published band. Split-reuse proven bit-identical to recompute (max|Δ|=0), so the hit is a real reuse, not a numerics shortcut. FENCE: 86.7% is on radixbench's synthetic 'agents' workload (deliberately cache-favorable); on a REAL tau2-airline trace fak's measured addressable purity is ~0.7% (CLAIMS vDSO unit 33/83) — so this is a same-workload-as-SGLang reuse-mechanism parity, not a promise of 86.7% on every production corpus.
-- **Trace:** 92896a4 · experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json · BENCHMARK-AUTHORITY.md RadixAttention ladder; experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json (commit 92896a4); CLAIMS.md 'RadixAttention parity vs SGLang' [SHIPPED]
+- **fak note:** fak measured on-box (radixbench 2026-06-19): cache-aware (≡ DFS) scheduling recovers FCFS 62.1% → 86.7% = 100% of optimal, inside SGLang's published band. Split-reuse proven bit-identical to recompute (max|Δ|=0). Nov 2026 commit 31816e4c4e also lands opt-in CUDA cohort prefix reuse (FAK_INKLING2_BATCH_PREFIX_CACHE_MIB, RTX 5080 4-row trace prefills 24,168->4,201 tokens, TTFT p50 1.36s->0.155s). FENCE: 86.7% is on synthetic 'agents' trace (~0.7% addressable purity on tau2-airline).
+- **Trace:** 92896a4 · experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json · BENCHMARK-AUTHORITY.md RadixAttention ladder; experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json (commit 92896a4); also commit 31816e4c4e (Inkling-2 CUDA cohort prefix store)
 

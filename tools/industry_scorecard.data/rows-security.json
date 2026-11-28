@@ -21,7 +21,8 @@
       "apples_to_apples": true,
       "comparison_note": "fak's OWN repeated concession: the detector these drivers feed is '~100% evadable on a SOTA evasion battery' and FP-prone on private real transcripts (it sealed 2/59 benign pages as false positives). Detection is DELIBERATELY non-load-bearing — fak's security guarantee is the STRUCTURAL capability floor + containment (which never run the detector), not a detection rate. This TRAILING row carries the honest concession so the security story is never read as a detection-rate win.",
       "measured_on": "2026-06-23",
-      "qualitative": true
+      "qualitative": true,
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "tool-sandboxing-structural-containment",
@@ -42,7 +43,8 @@
       "fak_doc": "CLAIMS.md Adjudication (default-deny manifest, closed 12-reason vocab), Security substrate (IFC Ref.Taint sink-gated, kernel-authored provenance, plan-CFI), Context-MMU (quarantine/page-out), provable-deletion certificate (internal/deletioncert), causal-invalidation witness (commit 0fc39aa)",
       "apples_to_apples": true,
       "comparison_note": "fak's genuine security strength and arguably its second differentiator after reuse, but PARITY not lead because there is no audited containment leaderboard and the comparison is capability-presence, not a measured ASR-under-containment number. fak ships layered structural controls that hold even when the detector is fooled: a declarative default-deny capability allow-list (closed 12-reason vocab), IFC taint that sink-gates tainted->sink flows pre-call (FIDES/CaMeL-class), kernel-authored provenance (trust taken from the model), plan-CFI, context-MMU quarantine/page-out, and a self-signed provable-deletion certificate + byte-exact causal invalidation. This is the MELON/IFC/capability-allow-list family. Honest fences: self-signed v1 receipts, EvictedCount self-reported, no disposable-microVM tool sandbox, no third-party containment audit. Parity on the layered-containment posture; no number to claim lead.",
-      "measured_on": "2026-06-23"
+      "measured_on": "2026-06-23",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "agentdojo-default-deny-asr-utility",
@@ -63,7 +65,8 @@
       "fak_doc": "BENCHMARK-AUTHORITY.md (AgentDojo Structural Safety Floor) · internal/agentdojo",
       "apples_to_apples": true,
       "comparison_note": " fak's default-deny capability floor (IFC Ref.Taint + sink-gate) achieves the same provable security as CaMeL (zero ASR on the expanded attack battery) while preserving 100% benign utility on the local structural floor. This is a PARITY claim (not lead) because (1) the measured utility sample is local and small (2/2), not the full AgentDojo task suite with official harness grading; (2) the comparison is structural-floor-to-structural-floor, not raw-model-to-raw-model on the public leaderboard; (3) ASR=0 is a floor claim, not a utility-optimized frontier measurement. Honest fence: LOCAL structural floor (model-free, deterministic), not an official AgentDojo leaderboard score; utility sample is a benign-controls guard, not the full task suite. Parity on the joint ASR+utility frontier (zero attacks, preserved utility) for default-deny structural defenses.",
-      "measured_on": "2026-06-27"
+      "measured_on": "2026-06-27",
+      "cohort": "Mid-Market (1-8 GPU)"
     }
   ]
 }

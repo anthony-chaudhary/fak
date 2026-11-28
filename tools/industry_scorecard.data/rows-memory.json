@@ -14,13 +14,14 @@
       "unit": "% KV memory waste / max concurrent seqs",
       "higher_is_better": true,
       "verdict": "no-claim",
-      "status": "stub",
+      "status": "in-flight",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "No PagedAttention-style memory-waste or max-concurrency number in BENCHMARK-AUTHORITY.md. CLAIMS.md L161 [STUB] 'No zero-copy KV co-residence with an external serving engine' (copy-CAS path, paging into the working set is residency decomposition, not anti-fragmentation KV paging).",
+      "fak_doc": "commits 0cb005834d (unified VRAM-envelope autotuner across 12-80 GiB GPUs) & 761d14fcdc (slot budget/tight-cap coexistence); no PagedAttention <4% block-fragmentation benchmark",
       "apples_to_apples": true,
-      "comparison_note": "OUT OF SCOPE / disclosed capability gap: fak owns its own in-kernel KV cache via copy-CAS (that IS the fusion), with no PagedAttention-style block paging to drive KV-memory waste toward <4% or to maximize concurrent-sequence count on fixed VRAM. CLAIMS marks external zero-copy KV co-residence an explicit [STUB] (~120h, out of scope). No memory-efficiency or max-concurrency number exists; reuses the named-gap row vllm-zero-copy-kv.",
-      "measured_on": "2026-06-23"
+      "comparison_note": "PARTIAL AUTOTUNE SHIPPED, PAGED FRAGMENTATION BENCHMARK ABSENT: fak now ships a unified VRAM-envelope slot autotuner (0cb005834d) and scalar/cohort tight-cap slot reuse (761d14fcdc, verified 0 OOM at 2200 MiB cap), alongside copy-CAS radix KV reuse, but does not implement vLLM-style virtual block paging or publish a <4% KV-memory-waste benchmark.",
+      "measured_on": "2026-11-27",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "prefix-caching-kv-reuse",
@@ -46,7 +47,8 @@
         "field": "workloads[0].live_prefill_speedup",
         "expect": 6.951232568881241,
         "tol": 1e-06
-      }
+      },
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "prefix-cache-ttft-impact",
@@ -72,7 +74,8 @@
         "field": "workloads[0].live_prefill_speedup",
         "expect": 6.951232568881241,
         "tol": 1e-06
-      }
+      },
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "paged-kv-memory-utilization",
@@ -93,7 +96,8 @@
       "fak_doc": "No memory-utilization figure in BENCHMARK-AUTHORITY.md or CLAIMS.md. CLAIMS line 85: in-kernel model owns its KV cache as a Go structure; internal/radixkv rebuilds RadixAttention (edge-split via Evict) over it, but there is no paged-block utilization / fragmentation % measured.",
       "apples_to_apples": false,
       "comparison_note": "OUT OF SCOPE for a reuse kernel. fak does not implement a PagedAttention-style block allocator; it owns a contiguous kernel-owned KVCache (CLAIMS 'In-kernel model') and a radix tree over it for reuse, not anti-fragmentation block management. No utilization % is measured against vLLM's ~96.3%, so no parity is claimed.",
-      "measured_on": "2026-06-23"
+      "measured_on": "2026-06-23",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "automatic-prefix-caching-hit-rate",
@@ -123,7 +127,8 @@
         "field": "workloads[0].cache_hit_rate",
         "expect": 0.8666666666666667,
         "tol": 1e-06
-      }
+      },
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "non-prefix-kv-reuse-cacheblend",
@@ -144,7 +149,8 @@
       "fak_doc": "No CacheBlend-style non-prefix / cross-document KV reuse in CLAIMS.md or BENCHMARK-AUTHORITY.md. internal/radixkv (CLAIMS line 93) is longest-PREFIX match only; CanShare (line 90) requires a byte-identical PrefixDigest. No partial-recomputation cross-chunk KV fusion exists.",
       "apples_to_apples": false,
       "comparison_note": "REAL GAP fak should measure. fak's reuse is strictly prefix-shaped (radix longest-prefix + byte-identical PrefixDigest share gate); it has nothing analogous to CacheBlend's ~15%-recompute reuse of non-prefix RAG chunks. For a kernel whose entire thesis is KV reuse, cross-document/non-prefix reuse is an adjacent capability worth measuring, not an out-of-scope axis.",
-      "measured_on": "2026-06-23"
+      "measured_on": "2026-06-23",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "kv-offloading-tiered-capacity",
@@ -160,12 +166,13 @@
       "higher_is_better": true,
       "verdict": "no-claim",
       "status": "in-flight",
-      "fak_commit": "",
+      "fak_commit": "ac7031a8aa",
       "fak_artifact": "",
-      "fak_doc": "CLAIMS line 142: internal/cachemeta models HBM->DRAM->CXL/NUMA-far->Disk tiers with per-tier TTL, demote-not-evict, and a hardware-cost-driven PlanPlacement; cmd/hwcachedemo is deterministic (28000 prefill tokens saved by demoting vs blind LRU). Explicitly the payload-free POLICY plane: cachemeta touches no bytes; physical movement is left to an engine adapter.",
+      "fak_doc": "commits ac7031a8aa (radixkv GPU->RAM->NVMe idle-slot spillover), 16c2efeec1 (checksummed disk prefix spillover), e3bc194cd1 (kvmmu checksummed NVFP4/fp8k_nvfp4v snapshots), and internal/cachemeta PlanPlacement (hwcachedemo 28000 tokens saved)",
       "apples_to_apples": false,
-      "comparison_note": "OUT OF SCOPE as a measured head-to-head, though the policy plane is shipped. fak models a multi-tier hierarchy (incl. CXL/NUMA-far) and decides demote-vs-evict, but it moves no KV bytes and has no access-bandwidth or capacity-multiple number against LMCache's claimed ~7x faster CPU access / ~100x capacity or Mooncake's pooled store. The demote demo's '28000 tokens saved' is vs blind LRU on its own engine, not a cross-tier bandwidth comparison.",
-      "measured_on": "2026-06-23"
+      "comparison_note": "SPILLOVER & POLICY SHIPPED, CROSS-TIER BANDWIDTH BENCHMARK UNMEASURED: fak now ships GPU->RAM->NVMe idle-slot spillover (ac7031a8aa), checksummed disk prefix spillover (16c2efeec1), checksummed NVFP4/fp8k_nvfp4v KV snapshots (e3bc194cd1), and cachemeta tier placement policy, yet has no head-to-head access-bandwidth or capacity-multiple benchmark vs LMCache or Mooncake Store.",
+      "measured_on": "2026-11-27",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "kv-compression-eviction",
@@ -186,7 +193,8 @@
       "fak_doc": "CLAIMS line 85/87/93: KVCache.Evict and the quarantine-evict bridge are bit-EXACT (evicted == never-saw, max|Δ|=0), and internal/radixkv EvictNode adds policy-driven span eviction over LRU. But every fak eviction is exact/lossless removal of a chosen span, not lossy compression of a retained cache under a fixed budget; no quality-vs-budget curve is measured.",
       "apples_to_apples": false,
       "comparison_note": "REAL GAP on the lossy-compression axis. fak does provable EXACT eviction (the deletion-cert / quarantine-evict story, a containment strength), not budget-bounded token-dropping that trades quality like H2O/SnapKV/Quest. There is no fak accuracy-at-256/1024-token-budget number, so no parity/lead is claimed; the H2O-class quality-under-budget question is unmeasured for fak. (correctness-oracle reasoning: where fak IS exact-vs-oracle it is parity, but that is on eviction equivalence, not on this compression-quality dimension.)",
-      "measured_on": "2026-06-23"
+      "measured_on": "2026-06-23",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "kv-transfer-disaggregation",
@@ -206,8 +214,9 @@
       "fak_artifact": "",
       "fak_doc": "No prefill/decode disaggregation or NIXL/NCCL/UCX KV transfer in CLAIMS.md. cachemeta emits KVTransfer offload/restore DIRECTIVES (line 142) and a coherence bus broadcasts refutations (BENCHMARK-AUTHORITY causal-invalidation row), but no cross-GPU KV transport, no layerwise overlap, no measured transfer bandwidth or TTFT-inflation figure.",
       "apples_to_apples": false,
-      "comparison_note": "OUT OF SCOPE for a single-process reuse kernel. fak has no prefill/decode disaggregation and moves no KV over the wire; the KVTransfer directives are policy-plane intents consumed by an external adapter. It claims nothing against NIXL/Dynamo point-to-point RDMA transfer or layerwise overlap.",
-      "measured_on": "2026-06-23"
+      "comparison_note": "EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. OUT OF SCOPE for a single-process reuse kernel. fak has no prefill/decode disaggregation and moves no KV over the wire; the KVTransfer directives are policy-plane intents consumed by an external adapter. It claims nothing against NIXL/Dynamo point-to-point RDMA transfer or layerwise overlap.",
+      "measured_on": "2026-06-23",
+      "cohort": "Hyperscaler (EXCLUDE/out-of-scope)"
     },
     {
       "id": "kv-cache-aware-routing",
@@ -237,7 +246,8 @@
         "field": "kv_aware_locality.hit_rate",
         "expect": 0.9396551724137931,
         "tol": 1e-06
-      }
+      },
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "attention-arch-kv-footprint",
@@ -258,7 +268,8 @@
       "fak_doc": "CLAIMS line 146: fak's CUDA flash-attention is correct for MHA/GQA/MQA (cosine=1.0) and line 147 serves GLM-5.2's DSA attention (dense path pure-GPU, sparse DSA still host-side). fak SERVES these architectures faithfully but measures no bytes-per-token KV footprint and ships no MLA-style footprint reduction of its own.",
       "apples_to_apples": false,
       "comparison_note": "OUT OF SCOPE. KV footprint per token is a MODEL-architecture property (MLA vs GQA), and fak is a serving kernel, not a model designer; it faithfully serves whatever attention shape the checkpoint defines (MHA/GQA/MQA argmax-exact, GLM-5.2 DSA dense path on-GPU via the in-kernel GLM-5.2 / DeepSeek-class work, #1010 / #1026) but claims no KB/token figure against DeepSeek MLA's ~70 KB/token (the v6.0 / DeepSeek-R1 reference attention). Analogous to the swebench-resolve-rate fence: the kernel inherits, it does not set, this number.",
-      "measured_on": "2026-06-23"
+      "measured_on": "2026-06-23",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "kv-cache-quantization-accuracy",
@@ -269,17 +280,23 @@
       "competitor_class": "sota",
       "competitor_value": null,
       "competitor_source": "https://vllm-project.github.io/2026/04/22/fp8-kvcache.html (2026-04)",
-      "fak_value": null,
-      "unit": "accuracy-point loss at long context",
+      "fak_value": 0.004225,
+      "unit": "mean KL nats vs per-token step (32K fp8)",
       "higher_is_better": false,
-      "verdict": "no-claim",
-      "status": "stub",
-      "fak_commit": "",
-      "fak_artifact": "",
-      "fak_doc": "none for KV QUANTIZATION accuracy — fak's KV cache is a kernel-owned f32 structure; its KV claims are bit-exact eviction (max|Δ|=0, KV-quarantine bridge) and radix prefix reuse, NOT a quantized (FP8/INT8/KIVI) KV cache with a long-context accuracy study",
-      "apples_to_apples": true,
-      "comparison_note": "REAL GAP fak should be aware of, but currently OUT OF SCOPE. fak owns its KV cache (that IS the reuse/eviction moat) but stores it at f32 — there is no FP8/INT8/sub-4-bit KV quantization and therefore no long-context accuracy-retention number. fak's adjacent KV claims (bit-exact Evict/quarantine, 86.7% radix hit-rate) are reuse/correctness properties on an UNQUANTIZED cache, not KV-quant accuracy, so no parity is implied. KV quantization is the natural lever a serving-stack-facing fak would eventually measure.",
-      "measured_on": "2026-06-23"
+      "verdict": "parity",
+      "status": "shipped",
+      "fak_commit": "9b6b0b2173",
+      "fak_artifact": "docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json",
+      "fak_doc": "docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md (32K fp8 KL 0.004225 nats, 84/85 same-top, 32/32 oracle); README.md (128k nvfp4 exact needle); commit 0eb366df29 (INT8-K blk16 + FWHT16 NVFP4-V KL 0.004011)",
+      "apples_to_apples": false,
+      "comparison_note": "HW-WITNESSED on RTX 5080 (Inkling-2-Mini): 32K auto-FP8 KV achieves mean KL 0.004225 nats (84/85 same-top, 32/32 forced oracle exact) and 0 HTTP 500s across 14-task deveval-outcome; 128K opt-in NVFP4 KV achieves exact needle retrieval and 4/4 greedy oracle pass; asymmetric fp8k_nvfp4v reaches 0.004011 nats KL (0eb366df29).",
+      "measured_on": "2026-11-27",
+      "cohort": "Mid-Market (1-8 GPU)",
+      "verify": {
+        "field": "results.fp8_kv_32k_and_deveval14_9b6b0b2173.kl_32k_fp8_mean_nats",
+        "expect": 0.004225,
+        "tol": 1e-06
+      }
     },
     {
       "id": "cross-request-prefix-cache-reuse",
@@ -297,9 +314,9 @@
       "status": "shipped",
       "fak_commit": "92896a4",
       "fak_artifact": "experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json",
-      "fak_doc": "BENCHMARK-AUTHORITY.md RadixAttention ladder; experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json (commit 92896a4); CLAIMS.md 'RadixAttention parity vs SGLang' [SHIPPED]",
+      "fak_doc": "BENCHMARK-AUTHORITY.md RadixAttention ladder; experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json (commit 92896a4); also commit 31816e4c4e (Inkling-2 CUDA cohort prefix store)",
       "apples_to_apples": true,
-      "comparison_note": "fak measured on-box: cache-aware (≡ DFS) scheduling recovers FCFS 62.1% → 86.7% = 100% of optimal, inside SGLang's published band. Split-reuse proven bit-identical to recompute (max|Δ|=0), so the hit is a real reuse, not a numerics shortcut. FENCE: 86.7% is on radixbench's synthetic 'agents' workload (deliberately cache-favorable); on a REAL tau2-airline trace fak's measured addressable purity is ~0.7% (CLAIMS vDSO unit 33/83) — so this is a same-workload-as-SGLang reuse-mechanism parity, not a promise of 86.7% on every production corpus.",
+      "comparison_note": "fak measured on-box (radixbench 2026-06-19): cache-aware (≡ DFS) scheduling recovers FCFS 62.1% → 86.7% = 100% of optimal, inside SGLang's published band. Split-reuse proven bit-identical to recompute (max|Δ|=0). Nov 2026 commit 31816e4c4e also lands opt-in CUDA cohort prefix reuse (FAK_INKLING2_BATCH_PREFIX_CACHE_MIB, RTX 5080 4-row trace prefills 24,168->4,201 tokens, TTFT p50 1.36s->0.155s). FENCE: 86.7% is on synthetic 'agents' trace (~0.7% addressable purity on tau2-airline).",
       "measured_on": "2026-06-19",
       "competitor_range": [
         50,
@@ -309,7 +326,8 @@
         "field": "workloads[0].cache_hit_rate",
         "expect": 0.8666666666666667,
         "tol": 1e-06
-      }
+      },
+      "cohort": "Mid-Market (1-8 GPU)"
     }
   ]
 }

@@ -15,13 +15,14 @@
       "higher_is_better": true,
       "verdict": "trails",
       "status": "shipped",
-      "fak_commit": "",
-      "fak_artifact": "",
-      "fak_doc": "BENCHMARK-AUTHORITY.md + CLAIMS.md: fak runs f32 + Q8_0 on CPU (arm64/x86 SIMD), Vulkan (RX 7600), and CUDA (RTX 4070 sm_89, datacenter GPU); GGUF q4_k_m load proven (Qwen3.6-27B) but slow. NO FP8/INT8-W8A8/INT4-accelerated/NVFP4/MXFP4 kernel on any target",
+      "fak_commit": "27355b23dd",
+      "fak_artifact": "docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json",
+      "fak_doc": "docs/notes/PACKING-COVERAGE-MATRIX-2026-11-03.md; docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md; docs/benchmarks/published/aegis-inkling2-prefill-nvfp4-w4a4/RESULTS.md; docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md",
       "apples_to_apples": false,
-      "comparison_note": "A real, disclosed head-to-head where fak TRAILS on coverage breadth. fak's hardware portability is genuine (CPU SIMD + Vulkan + CUDA, with bit-exact cross-platform reproduction), but its FORMAT coverage is narrow: f32 plus 8-bit Q8_0, with GGUF k-quant load-only. The SOTA stacks accelerate FP8 across Hopper/Ada/Blackwell + MI300X, NVFP4 on Blackwell, and broad GGUF k-quants (llama.cpp). fak has no hardware-accelerated FP8/INT4/FP4 GEMM on ANY device, so on the format×hardware coverage axis it clearly trails — named, not buried.",
-      "measured_on": "2026-06-23",
-      "qualitative": true
+      "comparison_note": "Disclosed coverage gap where fak still TRAILS SOTA engines: fak now ships native SM120 NVFP4 W4A4 prefill, FP8/NVFP4/fp8k_nvfp4v KV cache, Q4_K MMQ (sm_80+), and native CUDA/Vulkan/Metal/CPU kernels for Q2_K..Q8_0 and IQ1_M..IQ4_NL (plus host AWQ/GPTQ). However, it lacks Hopper/Ada/MI300X FP8 W8A8 GEMMs, GPU AWQ/GPTQ device kernels, and production MXFP4 MoE coverage that vLLM, SGLang, TensorRT-LLM, and llama.cpp accelerate across targets.",
+      "measured_on": "2026-11-27",
+      "qualitative": true,
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "hardware-shape-neutrality",
@@ -43,7 +44,8 @@
       "apples_to_apples": false,
       "comparison_note": "This corrects the GPU-bias in a pure backend-breadth row. fak still TRAILS the mature engines on how many accelerator families it serves, but it has a FENCED contract for the seven host-shape assumptions the HAL explainer names: (1) float32 monoculture -> Dtype/QuantSpec, (2) host-pointer aliasing -> Tensor/Host/Read boundary, (3) x86 build-tag dispatch -> runtime registry and Tier, (4) synchronous return-by-value -> Caps.Async with explicit Read/Argmax fences, (5) goroutine-only parallelism -> whole-op Backend methods, (6) row-major only -> Layout descriptor, and (7) eager full-RAM plus little-endian host -> WeightSource and Upload. Provenance labels: contract FENCED in code and docs; CUDA/Vulkan/Metal/CPU backends WITNESSED where their support rows say so; broad vendor conformance remains not-yet until the BCK/fak-certified work lands. apples_to_apples=false because this dimension measures contract shape, not device count or throughput.",
       "measured_on": "2026-06-30",
-      "qualitative": true
+      "qualitative": true,
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "max-model-and-moe-coverage",
@@ -54,17 +56,18 @@
       "competitor_class": "sota",
       "competitor_value": 72,
       "competitor_source": "HERO-BENCHMARK-2026-06-21.md ('Model-size ceiling on this box' fence); CLAIMS.md; llama.cpp model support (72B CPU / Qwen3-30B-A3B MoE)",
-      "fak_value": 7,
+      "fak_value": 26,
       "unit": "B params (max on own engine)",
       "higher_is_better": true,
       "verdict": "trails",
       "status": "shipped",
-      "fak_commit": "",
-      "fak_artifact": "",
-      "fak_doc": "HERO-BENCHMARK-2026-06-21.md (honest fence) · CLAIMS.md",
+      "fak_commit": "be228d79ef",
+      "fak_artifact": "docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json",
+      "fak_doc": "docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md; docs/_witnesses/issue-8623-qwen38-27b/README.md (TP2 BF16); docs/benchmarks/published/m3pro-inkling2-mini-metal/RESULTS.md (retired Splash port retracted)",
       "apples_to_apples": false,
-      "comparison_note": "fak's OWN generic GGUF-dequant engine ceilings at ~7B on 36 GB (dequant-to-f32 OOMs above; two arch families fail at load; f32 27B = 108 GB > 80 GB VRAM). fak's actual DeepSeek-class-MoE serving path is the in-kernel GLM-5.2 work (#1010, #1026): it runs the MoE/FFN experts + router on its own pure k_q8_gemm GPU kernel (cosine=1.0, commit 498a4ab) — but on a SINGLE device, with the DSA sparse-attention still host-side and no cross-node expert parallelism (see expert-parallelism-large-moe and attention-arch-kv-footprint). So for a frontier 671B MoE — the new MLPerf v6.0 / DeepSeek-R1 reference workload — fak is NOT in the race on its own engine and must FRONT llama.cpp/SGLang, exactly what the 27B GPU server run does (SGLang-serves + fak-adjudicates). A hard, disclosed capability ceiling that bounds where any fak engine 'win' can apply. apples_to_apples=false: fak's dequant/single-device engine vs llama.cpp quantized/CPU and SGLang multi-GPU TP are different configs by construction.",
-      "measured_on": "2026-06-21"
+      "comparison_note": "HW-WITNESSED on RTX 5080 16 GB (rtx5080-inkling2-v060/perf-receipt-v2.json): fak-native serves Inkling-2-Mini (26B hybrid MoE, UD-Q3_K_XL) on a single consumer NVIDIA GPU, and Qwen3.8-27B BF16 TP2 / Q4_K_M on datacenter/laptop CUDA (issue-8623, cuda-prefill-sm120), fronting SGLang/vLLM for frontier 100B-1T models. Historical M3 Pro Inkling-2-Mini vendored Splash receipts were retired and retracted as fak-native Metal claims (pure internal/metalgemm resident M3 Pro receipts pending). Trails llama.cpp (72B CPU) and SGLang multi-GPU TP.",
+      "measured_on": "2026-11-27",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "multimodal-vlm-coverage",
@@ -82,10 +85,11 @@
       "status": "stub",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "none — no VLM in CLAIMS; in-kernel model is text-only SmolLM2/Qwen forward",
+      "fak_doc": "none — in-kernel forward serves text-only architectures (SmolLM2, Qwen2.5/3.8, Inkling-2, GLM-5.2)",
       "apples_to_apples": true,
-      "comparison_note": "OUT OF SCOPE for a text-tool-loop reuse kernel. fak's in-kernel model is a text-only forward pass (SmolLM2-135M / Qwen2.5 / GLM-5.2); there is NO vision encoder, no image-token path, no multimodal RadixAttention. fak's prefix-reuse mechanism is modality-agnostic in principle but no VLM is wired or measured. No fak number; verdict no-claim. (A REAL gap only if fak intended to serve VLMs on its own engine — it does not; it fronts an external engine for anything beyond ~7B text.)",
-      "measured_on": "2026-06-23"
+      "comparison_note": "OUT OF SCOPE for a text-tool-loop reuse kernel. fak's in-kernel model executes text-only forward passes (up to 26B Inkling-2-Mini and 27B Qwen3.8 on 1-2 GPUs); there is NO vision encoder, no image-token patch path, and no multimodal RadixAttention. Larger or VLM workloads ride fronted SGLang/vLLM endpoints. Verdict stays no-claim.",
+      "measured_on": "2026-11-27",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "long-context-capacity",
@@ -94,19 +98,20 @@
       "category": "model-coverage",
       "competitor": "SGLang (RadixAttention); vLLM (PagedAttention/prefix caching)",
       "competitor_class": "sota",
-      "competitor_value": null,
+      "competitor_value": 1000000,
       "competitor_source": "https://particula.tech/blog/sglang-vs-vllm-inference-engine-comparison (2026-01-01)",
-      "fak_value": null,
-      "unit": "% cache hit rate (FCFS 62.1% -> cache-aware), inside SGLang's published 50-99% band",
+      "fak_value": 131072,
+      "unit": "tokens max context length",
       "higher_is_better": true,
-      "verdict": "no-claim",
-      "status": "stub",
-      "fak_commit": "",
-      "fak_artifact": "",
-      "fak_doc": "experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json (workloads[0].cache_hit_rate=0.8667), commit 92896a4; BENCHMARK-AUTHORITY RadixAttention rows",
-      "apples_to_apples": true,
-      "comparison_note": "fak's 86.7% prefix-cache hit rate does NOT measure long-context capacity. fak's real long-context posture is its model-size ceiling (~7B on 36 GB) plus an arithmetic ultra-long-context WORK floor — not a served-capacity-vs-SOTA number. Honest gap.",
-      "measured_on": "2026-06-23"
+      "verdict": "trails",
+      "status": "shipped",
+      "fak_commit": "eb68a8cf8a",
+      "fak_artifact": "README.md",
+      "fak_doc": "README.md (128k all-resident NVFP4 KV on 16 GB RTX 5080); docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md (32K auto-FP8 KV)",
+      "apples_to_apples": false,
+      "comparison_note": "HW-WITNESSED on 16 GB RTX 5080: fak serves 131,072 (128K) all-resident context with opt-in NVFP4 KV (0 GiB CPU spill, 1,190 tok/s prefill, 16.9 tok/s decode, exact 128k needle retrieval, rev eb68a8cf8a) and 32K auto-FP8 KV by default (rtx5080-inkling2-v060). Trails datacenter multi-GPU SGLang/vLLM 1,000,000-token context deployments (apples_to_apples=false: single 16 GB consumer GPU all-resident vs datacenter multi-GPU / server deployment).",
+      "measured_on": "2026-11-26",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "lora-multi-adapter-serving",
@@ -127,7 +132,8 @@
       "fak_doc": "none — no LoRA in CLAIMS",
       "apples_to_apples": true,
       "comparison_note": "OUT OF SCOPE for the reuse/adjudication kernel. fak has no LoRA adapter loading, no multi-adapter batching, no hot-swap path. Its multi-model story is the polymodel residency Pool (host many full models, share prefill, decode one) — a DIFFERENT primitive (full models, not low-rank adapters) and itself off-mainline/policy-only (CLAIMS polymodel rows, FAK_POLYMODEL default off). No fak LoRA number; verdict no-claim.",
-      "measured_on": "2026-06-23"
+      "measured_on": "2026-06-23",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "embeddings-rerankers-coverage",
@@ -148,7 +154,8 @@
       "fak_doc": "none — no pooling/embedding endpoint in CLAIMS",
       "apples_to_apples": true,
       "comparison_note": "OUT OF SCOPE for a generative-tool-loop reuse kernel. fak serves only causal-LM next-token decode; there is no pooling head, no embeddings endpoint, no cross-encoder reranker path. fak's OpenAI-compatible surface is /v1/chat/completions (CLAIMS Gateway), not /v1/embeddings. No fak number; verdict no-claim.",
-      "measured_on": "2026-06-23"
+      "measured_on": "2026-06-23",
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "hardware-backend-breadth",
@@ -164,13 +171,14 @@
       "higher_is_better": true,
       "verdict": "trails",
       "status": "shipped",
-      "fak_commit": "",
-      "fak_artifact": "",
-      "fak_doc": "CLAIMS Engine: pure-Go CPU; '-tags vulkan' RX 7600; '-tags cuda' RTX 4070 / datacenter GPU; 'darwin && metal' M3 Pro — each numerically witnessed (cosine=1.0 / argmax-exact)",
+      "fak_commit": "be228d79ef",
+      "fak_artifact": "docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json",
+      "fak_doc": "docs/benchmarks/published/rtx5080-inkling2-v060/RESULTS.md (CUDA sm_120f); docs/claims/engine.md (CPU/CUDA/Vulkan/Metal); docs/benchmarks/QWEN-PERFORMANCE-INDEX.md & docs/benchmarks/published/m3pro-inkling2-mini-metal/RESULTS.md",
       "apples_to_apples": true,
-      "comparison_note": "REAL but narrow vs the SOTA breadth bar. fak ships four numerically-correct single-device backends: pure-Go CPU (x86 AVX/arm64) plus NVIDIA CUDA (RTX 4070 + 8-GPU datacenter server sm_80), AMD Vulkan (RX 7600), and Apple Metal (M3 Pro), each argmax-exact / cosine=1.0 vs cpu-ref. But vLLM (TPU, Gaudi 2/3, Inferentia/Trainium, Ascend, Spyre) and llama.cpp (HIP, SYCL, CANN, OpenCL, WebGPU via MLC) span far more silicon, and fak's GPU paths are mostly f32 and throughput-immature (Vulkan ~58x slower than llama.cpp CPU; CUDA reaches parity only on a small model that fits VRAM). fak trails on breadth and on per-backend maturity; disclosed, not hidden.",
-      "measured_on": "2026-06-23",
-      "qualitative": true
+      "comparison_note": "REAL but narrower than SOTA breadth. fak ships four numerically-verified single-device backends: pure-Go CPU (x86 AVX2/AVX-512 + arm64), NVIDIA CUDA (sm_80..sm_120, reaching decode parity & W4A4 prefill lead on 26B Inkling-2-Mini on RTX 5080), AMD Vulkan (RX 7600, Q8/Q4_K/GDN wired; full Qwen3.8 receipt awaiting remeasure), and Apple Metal (internal/metalgemm; retired Splash Inkling-2 port retracted, full M3 Pro resident receipts pending). Still trails vLLM (TPU/Gaudi/Trainium/Ascend/Spyre) and llama.cpp (HIP/SYCL/CANN/OpenCL) on accelerator breadth and non-CUDA GPU maturity.",
+      "measured_on": "2026-11-27",
+      "qualitative": true,
+      "cohort": "Mid-Market (1-8 GPU)"
     },
     {
       "id": "served-model-capability-quality",
@@ -191,7 +199,8 @@
       "fak_doc": "industry_scorecard.data.json swebench-resolve-rate row (no-claim/stub); SOTA-COMPARISON.md; CLAIMS: fak is a serving kernel, resolve rate set by the served model",
       "apples_to_apples": true,
       "comparison_note": "OUT OF SCOPE by construction. fak is a serving KERNEL, not a model: SWE-bench Verified / GPQA / AIME / LiveCodeBench are set entirely by whatever model it serves, so fak claims NO resolve rate of its own. The frontier bars cited (SWE-bench Verified ~79-80.6%, GPQA Diamond ~93-94%, AIME up to 100%) are model-served-by-engine results. fak's claim is orthogonal: ~20-24x prefill-work reduction ON TOP of any model at the same quality, lower infra cost. Carried so the scorecard never quietly omits the headline a frontier-model comparison leads with. Honest no-claim.",
-      "measured_on": "2026-06-23"
+      "measured_on": "2026-06-23",
+      "cohort": "Mid-Market (1-8 GPU)"
     }
   ]
 }

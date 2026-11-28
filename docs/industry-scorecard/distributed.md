@@ -17,7 +17,7 @@ description: "The distributed dimensions that matter in LLM serving, the current
 - **Leading systems:** SGLang PD (MI300X), NVIDIA Dynamo 1.0 (38% over best aggregated config; 7x w/ wide-EP on GB200), vLLM disaggregated prefilling (NIXL)
 - **Source:** [https://rocm.blogs.amd.com/software-tools-optimization/disaggregation/README.html](https://rocm.blogs.amd.com/software-tools-optimization/disaggregation/README.html) (2025-08)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for the reuse kernel: fak does not disaggregate prefill from decode into independently-scaled pools; its differentiator is cross-agent prefix fusion on one kernel, not P/D separation. DistServe/Splitwise/SGLang-PD/llm-d numbers have no fak counterpart; named as out-of-scope rather than a measured gap.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. OUT OF SCOPE for the reuse kernel: fak does not disaggregate prefill from decode into independently-scaled pools; its differentiator is cross-agent prefix fusion on one kernel, not P/D separation. DistServe/Splitwise/SGLang-PD/llm-d numbers have no fak counterpart; named as out-of-scope rather than a measured gap.
 - **Trace:** No P/D-disaggregation goodput/TTFT number in BENCHMARK-AUTHORITY.md or CLAIMS.md. fak runs a single fused forward (prefill+decode together); no disaggregated prefill/decode pool is built or measured.
 
 ### ○ Prefill-decode disaggregation & per-phase SLO isolation — fak: **no-claim**
@@ -28,7 +28,7 @@ description: "The distributed dimensions that matter in LLM serving, the current
 - **Leading systems:** NVIDIA Dynamo 1.0, DistServe, TaiChi (unifies agg+disagg to fix both TTFT and TPOT violations, 2025-08)
 - **Source:** [https://developer.nvidia.com/blog/removing-the-guesswork-from-disaggregated-serving/](https://developer.nvidia.com/blog/removing-the-guesswork-from-disaggregated-serving/) (2026-03)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. PD-disaggregation with per-phase SLO isolation (DistServe 7.4x request rate / 12.6x tighter SLO; NVIDIA Dynamo Planner) is a serving-stack architecture; fak owns neither the prefill/decode scheduler nor the per-phase GPU pools. It is an adjudication/coherence plane that rides on whatever engine does this. no-claim.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. OUT OF SCOPE for a reuse kernel. PD-disaggregation with per-phase SLO isolation (DistServe 7.4x request rate / 12.6x tighter SLO; NVIDIA Dynamo Planner) is a serving-stack architecture; fak owns neither the prefill/decode scheduler nor the per-phase GPU pools. It is an adjudication/coherence plane that rides on whatever engine does this. no-claim.
 - **Trace:** No prefill-decode disaggregation is shipped or claimed. fak's own engine runs a single co-located forward; on the GPU server it fronts SGLang TP=8 (which itself is not run in a disaggregated config in the committed GPU server artifacts).
 
 ### ○ Large-scale expert parallelism (EP) for giant MoE models — fak: **no-claim**
@@ -39,7 +39,7 @@ description: "The distributed dimensions that matter in LLM serving, the current
 - **Leading systems:** Huawei CloudMatrix-Infer (CloudMatrix384, DeepSeek-R1), SGLang + DeepEP (96-GPU, prior bar), vLLM expert-parallel deployment
 - **Source:** [https://arxiv.org/abs/2506.12708](https://arxiv.org/abs/2506.12708) (2025-06)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a single-box reuse kernel. fak DOES run GLM-5.2's MoE/FFN experts + router on its own pure k_q8_gemm GPU kernel (the in-kernel GLM-5.2 / DeepSeek-class path, #1010 / #1026; cosine=1.0, datacenter GPU, commit 498a4ab) — but on a SINGLE device, with no expert-parallel sharding across nodes and the DSA sparse-attention still host-side. fak's own-engine ceiling is ~7B (see max-model-and-moe-coverage); giant-MoE EP (the MLPerf v6.0 / DeepSeek-R1 671B reference regime) is delegated to SGLang/DeepEP, which fak fronts. No fak EP number exists; verdict no-claim.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. OUT OF SCOPE for a single-box reuse kernel. fak DOES run Inkling-2-Mini (26B hybrid MoE) on single consumer CUDA GPUs (RTX 5080), Qwen3.8-27B BF16 TP2 / Q4_K_M, and GLM-5.2 MoE/FFN experts + router on pure k_q8_gemm CUDA kernels (commit 498a4ab, 1 datacenter GPU, sparse DSA attention host-side), with no cross-node EP sharding; frontier 671B-1T giant-MoE EP is delegated to fronted SGLang/DeepEP. Verdict no-claim.
 - **Trace:** none — fak runs GLM-5.2 MoE experts on ONE datacenter GPU (CLAIMS Engine, commit 498a4ab), never EP across nodes
 
 ### ○ Data-parallel (DP) attention / hybrid attention-FFN parallelism — fak: **no-claim**
@@ -61,6 +61,6 @@ description: "The distributed dimensions that matter in LLM serving, the current
 - **Leading systems:** NVIDIA GB300 NVL72 x4 (288 GPUs over Quantum-X800 InfiniBand, MLPerf v6.0), SGLang/TensorRT-LLM + NVIDIA Dynamo multi-node, GB200 NVL72 (prior generation)
 - **Source:** [https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform](https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform) (2026-04-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for the reuse/adjudication kernel. fak's OWN engine runs on a single device (CPU, or one RTX 4070 / RX 7600 / M3 Pro / datacenter GPU). The only multi-GPU run in the evidence (8-GPU datacenter server, Qwen3.6-27B) is SGLang doing the TP scale-out with fak as the in-front gateway/adjudication plane — and there fak TRAILS raw SGLang on throughput (served-throughput-vs-sglang row). fak has no own TPxPPxEPxDP scale-out number; verdict no-claim.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. fak's native engine targets single-node 1-2 GPU local execution (CPU, RTX 5080/5090 Laptop, AMD RX 7600, Apple M3 Pro, datacenter GPU TP2), rather than multi-node 72-288 GPU NVLink/InfiniBand clusters. When fronting multi-GPU SGLang on an 8-GPU datacenter server, fak acts as the gateway/adjudication plane and trails raw SGLang on throughput. Verdict no-claim.
 - **Trace:** none — fak's own engine is single-box (CLAIMS GPU backends are all one device); the 8-GPU datacenter server run is SGLang-serves + fak-adjudicates
 

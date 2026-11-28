@@ -27,9 +27,9 @@ description: "The operability dimensions that matter in LLM serving, the current
 - **SOTA bar:** Under concurrency, single-GPU TTFT P99 explodes (e.g. ~8.6 s at C=180, ~34 s at C=420); pipeline parallelism (PP=2) holds it to ~3 s at C=180 and ~13 s at C=420 (~2.5-3x improvement). At 100 concurrent requests TensorRT-LLM P95 TTFT ~1,280 ms vs vLLM ~1,450 ms; vLLM sustains QoS to C=32 and stays usable to C=64.
 - **Leading systems:** TensorRT-LLM (lowest P95 TTFT under load), SGLang, vLLM (most robust queueing/scheduling)
 - **Source:** [https://www.spheron.network/blog/vllm-vs-tensorrt-llm-vs-sglang-benchmarks/](https://www.spheron.network/blog/vllm-vs-tensorrt-llm-vs-sglang-benchmarks/) (2026-01)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure. fak has the harness to vary concurrency (it ran 1->128 on the GPU server) but reports the throughput envelope, not the saturation diagnostic (P99 TTFT climbing while P50 stays flat as the queue builds). Since the gateway proxy adds queueing of its own, the TTFT-under-load curve is exactly what an honest operability claim needs; not yet measured, so no-claim.
-- **Trace:** The GPU server concurrency sweep (conc 1->128, QWEN36-27B-GPU-SERVER-RESULTS.md) varies LOAD but records completion-tokens/sec, not a TTFT/queueing curve: there is no committed P99-TTFT-vs-RPS saturation sweep showing the rate at which the SLO is crossed.
+- **fak:** no-claim — no number (in-flight)
+- **fak note:** C1-C4 MEDIAN TTFT MEASURED, P99 SATURATION KNEE UNMEASURED: Wave-2 RTX 5080 HTTP sweeps measure median TTFT across C1..C4 (274.35 ms C1_p512, 351.33 ms C2_p512, 598.89 ms C4_p512, 2017.61 ms C4_p2048 vs realugbun/llama.cpp 3718.34 ms), proving graceful mid-market scaling to C=4, while P99 TTFT saturation-knee curves under high-RPS load (C=32..420) remain unmeasured.
+- **Trace:** be228d79ef · docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json · docs/benchmarks/published/rtx5080-inkling2-v060/perf-receipt-v2.json (C1-C4 median HTTP TTFT); experiments/qwen36/gpu-server-r4-20260622/compare.json
 
 ### ○ Cold-start / autoscaling latency (scale-to-zero & scale-out) — fak: **no-claim**
 
@@ -50,8 +50,8 @@ description: "The operability dimensions that matter in LLM serving, the current
 - **Leading systems:** LMCache, Mooncake Store
 - **Source:** [https://arxiv.org/html/2510.09665v2](https://arxiv.org/html/2510.09665v2) (2025-10)
 - **fak:** no-claim — no number (in-flight)
-- **fak note:** REAL GAP, with adjacent mechanism shipped. fak has durable cross-process session core images and a coherence bus that broadcasts cache refutations with byte-exact causal eviction, but NOT a global deduplicated KV pool shared across live engine instances (LMCache cross-instance reuse / Mooncake Store). The pieces that point toward it (recall, the coherence bus, the not-yet-witness-keyed tier-2) are real; the cross-instance live-sharing claim is unbuilt, so no parity is asserted.
-- **Trace:** CLAIMS lines 66-71: recall persists a finished session as a durable, integrity-checked CORE IMAGE reloadable in a FRESH process; BENCHMARK-AUTHORITY causal-invalidation row proves a coherence-bus broadcast + targeted causal eviction (max|Δ|=0). But this is cross-PROCESS session reload + invalidation coherence, not a live cross-INSTANCE shared KV POOL like LMCache/Mooncake Store.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. Multi-node cluster live KV pool (LMCache / Mooncake Store) is EXCLUDE/out-of-scope for 1-8 GPU mid-market. On single-node, fak ships durable recall core images, coherence-bus causal eviction, checksummed disk prefix spillover (16c2efeec1), and NVFP4/fp8k_nvfp4v KV snapshots (e3bc194cd1), not a multi-host shared HBM/RDMA KV pool.
+- **Trace:** 16c2efeec1 · CLAIMS recall core images + vdso.Revoke causal invalidation; commits 16c2efeec1 (checksummed disk prefix store) & e3bc194cd1 (kvmmu checksummed NVFP4 snapshots)
 
 ### ○ Multi-node fault tolerance & failure recovery (resilient serving) — fak: **no-claim**
 
@@ -61,7 +61,7 @@ description: "The operability dimensions that matter in LLM serving, the current
 - **Leading systems:** FailSafe (research), KevlarFlow (research), ReviveMoE (research), NVIDIA Dynamo
 - **Source:** [https://arxiv.org/html/2601.22438v1](https://arxiv.org/html/2601.22438v1) (2026-01-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a single-box reuse kernel. fak has no multi-node serving topology, hence no node-failure rerouting, no background KV replication, no decoupled parallel re-init. Its nearest adjacent witness — causal invalidation-on-external-write (vdso.Revoke, commit 0fc39aa, max|Delta|=0) — is an INTEGRITY/coherence property (evict cache reads a write made stale), explicitly 'a containment/coherence witness, not a throughput number', NOT failure recovery. The research bar (KevlarFlow/FailSafe/ReviveMoE) is multi-GPU resilient serving fak does not attempt. No fak number; verdict no-claim.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. OUT OF SCOPE for a single-box reuse kernel. fak has no multi-node serving topology, hence no node-failure rerouting, no background KV replication, no decoupled parallel re-init. Its nearest adjacent witness — causal invalidation-on-external-write (vdso.Revoke, commit 0fc39aa, max|Delta|=0) — is an INTEGRITY/coherence property (evict cache reads a write made stale), explicitly 'a containment/coherence witness, not a throughput number', NOT failure recovery. The research bar (KevlarFlow/FailSafe/ReviveMoE) is multi-GPU resilient serving fak does not attempt. No fak number; verdict no-claim.
 - **Trace:** none — no multi-node failure-recovery number in CLAIMS; causal-invalidation (commit 0fc39aa) is an integrity/coherence witness, not failure recovery
 
 ### ≈ OpenAI-compatible API surface + reliable structured output / tool-calling — fak: **parity**
@@ -72,8 +72,8 @@ description: "The operability dimensions that matter in LLM serving, the current
 - **Leading systems:** vLLM + XGrammar-2 (default), SGLang, TensorRT-LLM, OpenAI Structured Outputs (response_format)
 - **Source:** [https://arxiv.org/pdf/2601.04426](https://arxiv.org/pdf/2601.04426) (2026-01)
 - **fak:** parity — no number (shipped)
-- **fak note:** Parity on CAPABILITY PRESENCE, not a JSON-schema conformance or guided-decoding performance number. fak ships the de facto OpenAI-compatible Chat Completions and Responses surfaces, forwards structured-output carriers to ridden OpenAI-compatible engines, and now owns an opt-in in-kernel decode-time constraint hook: logit_bias and an injected per-step LogitMask apply before argmax, with a deterministic load-bearing schema-valid JSON witness. The remaining gap versus XGrammar-2 is breadth and measurement: no committed arbitrary-schema conformance percentage, grammar-compile coverage, or per-token overhead comparison. apples_to_apples=false keeps this a bounded API + mechanism parity claim, not an unqualified guided-decoding parity claim.
-- **Trace:** CLAIMS.md Gateway [SHIPPED] (/v1/chat/completions, /v1/responses, /v1/models, /healthz, MCP); Engine [SHIPPED] OpenAI-compatible client base_url-swappable; internal/agent forwards response_format / logit_bias carriers; internal/model constraint_test.go witnesses the opt-in FAK_NATIVE_GUIDED_DECODE per-step LogitMask before argmax
+- **fak note:** Parity on CAPABILITY PRESENCE, not a JSONSchemaBench accuracy or XGrammar-2 us/token benchmark. fak ships OpenAI-compatible Chat Completions and Responses APIs plus native decode-time bitmask FSMs (BatchBitmaskFSM, sorted-vocab trie b2a53f9305, SchemaCompileCache, ForcedDraft tool calls 020586f72c, json_schema/regex/choice/GBNF). Quantitative conformance/latency vs XGrammar-2 remains unmeasured (apples_to_apples=false).
+- **Trace:** 361b316673 · CLAIMS.md Gateway (/v1/chat/completions, /v1/responses, MCP); internal/grammar/batch_bitmask_fsm.go (361b316673, b2a53f9305); internal/agent/inkernel_structured.go; internal/toolgrammar (020586f72c)
 
 ### ▼ Production observability: Prometheus metrics (TTFT/TPOT/queue) + OpenTelemetry tracing — fak: **trails**
 
@@ -94,7 +94,7 @@ description: "The operability dimensions that matter in LLM serving, the current
 - **Leading systems:** KServe + KEDA, Ray Serve, llm-d / vLLM on Kubernetes
 - **Source:** [https://developers.redhat.com/articles/2025/09/23/how-set-kserve-autoscaling-vllm-keda](https://developers.redhat.com/articles/2025/09/23/how-set-kserve-autoscaling-vllm-keda) (2025-09-23)
 - **fak:** no-claim — no number (in-flight)
-- **fak note:** KUBERNETES DEPLOYMENT SHIPPED; LLM-AWARE AUTOSCALING UNBUILT. fak now has copy-paste base and GPU-overlay manifests with liveness/readiness probes, hardened pod settings, kustomize entry points, and a documented rollout/smoke path. That removes the old 'no K8s deployment' claim. The scored contract is broader, however: fak still has no KServe/KEDA/Ray operator, no custom-metric HPA driven by running/waiting requests, no traffic-split/canary controller, and no scale-to-zero lifecycle. apples_to_apples=false and no-claim preserve that residual rather than treating deployability alone as autoscaling parity.
+- **fak note:** EXCLUDE / out-of-scope for fak-native's mid-market 1-8 GPU target. KUBERNETES CLUSTER AUTOSCALING EXCLUDE/OUT-OF-SCOPE FOR 1-8 GPU MID-MARKET; SINGLE-NODE K8S DEPLOYMENT SHIPPED. fak provides hardened base and single-GPU overlay manifests (deploy/k8s/) with probes and kustomize docs, while multi-node KServe/KEDA/Ray/Kueue cluster autoscaling and scale-to-zero orchestration belong to the hyperscaler tier.
 - **Trace:** deploy/k8s/fak.yaml + kustomization.yaml ship an apply-ready hardened proxy Deployment/Service/Secret/ConfigMap; deploy/k8s/overlays/gpu ships the in-kernel one-GPU/PVC sibling; docs/fak/deployment-guide.md is the operator contract. No fak-owned KEDA/HPA/operator or scale-to-zero controller is shipped.
 
 ### ○ Multi-tenant fairness, per-tenant quotas, and SLO attainment under contention — fak: **no-claim**
