@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -78,6 +79,19 @@ func TestInkling2CUDAPrefillDefaults(t *testing.T) {
 			t.Fatalf("%s=%s, want f16", key, value)
 		}
 	}
+	for _, want := range []struct{ key, val string }{
+		{"FAK_INKLING2_BATCH_PREFIX_CACHE_MIB", "4096"},
+		{"FAK_INKLING2_PREFIX_SLOTS", "4"},
+		{"FAK_INKLING2_HOL_BACKFILL_MAX", "4"},
+	} {
+		if value, _ := lookup(want.key); value != want.val {
+			t.Fatalf("%s=%s, want %s", want.key, value, want.val)
+		}
+	}
+	optOut := inkling2CUDAPrefillDefaults(inkling2EnvLookup(map[string]string{"FAK_INKLING2_BATCH_PREFIX_CACHE_MIB": "0"}))
+	if value, _ := optOut("FAK_INKLING2_BATCH_PREFIX_CACHE_MIB"); value != "0" {
+		t.Fatalf("explicit opt-out FAK_INKLING2_BATCH_PREFIX_CACHE_MIB=%s, want 0", value)
+	}
 	if _, set := lookup("FAK_INKLING2_CTX"); set {
 		t.Fatal("CUDA defaults set a context cap")
 	}
@@ -91,6 +105,40 @@ func TestInkling2CUDAPrefillDefaults(t *testing.T) {
 	if err != nil || admission.gap != 8*time.Millisecond || admission.maxWait != 40*time.Millisecond ||
 		kv != "f32" || ctx != "16384" {
 		t.Fatalf("explicit CUDA settings changed: %+v, KV %s, context %s, %v", admission, kv, ctx, err)
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestInkling2ConfigSanityWarnings(t *testing.T) {
+	if w := inkling2ConfigSanityWarnings(inkling2EnvLookup(map[string]string{"FAK_INKLING2_BATCH_PREFIX_CACHE_MIB": "4096"}), true, inkling2PrefixReuseOn); len(w) != 0 {
+		t.Fatalf("expected no warnings with defaults on, got %v", w)
+	}
+	wOff := inkling2ConfigSanityWarnings(inkling2EnvLookup(map[string]string{"FAK_INKLING2_BATCH_PREFIX_CACHE_MIB": "0"}), true, inkling2PrefixReuseOff)
+	if len(wOff) != 2 {
+		t.Fatalf("expected 2 warnings when both batch prefix cache and prefix reuse are off, got %v", wOff)
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestInkling2PrefixHitWatch(t *testing.T) {
+	var watch inkling2PrefixHitWatch
+	if msg := watch.observe(1000, 0, true); msg != "" {
+		t.Fatalf("small prompt should not trigger: %q", msg)
+	}
+	if msg := watch.observe(5000, 0, true); msg != "" {
+		t.Fatalf("miss 1 should not alert: %q", msg)
+	}
+	if msg := watch.observe(5000, 0, true); !strings.Contains(msg, "RED FLAG: kv_prefix_zero_hit_streak") {
+		t.Fatalf("miss 2 should emit RED FLAG alert, got %q", msg)
+	}
+	if msg := watch.observe(5000, 0, true); msg != "" {
+		t.Fatalf("miss 3 should be rate-limited: %q", msg)
+	}
+	if msg := watch.observe(5000, 128, true); msg != "" {
+		t.Fatalf("cache hit should reset without alerting: %q", msg)
+	}
+	if msg := watch.observe(5000, 0, true); msg != "" {
+		t.Fatalf("miss 1 after reset should not alert: %q", msg)
 	}
 }
 
@@ -1022,5 +1070,27 @@ func TestInkling2AdmitHoLBoundedBackfill(t *testing.T) {
 	e0.queue <- s1
 	if _, ok := e0.admitQueued(c0, 100); ok || e0.pending != big || c0.holBackfills != 0 {
 		t.Fatalf("K=0 admitted backfill: ok=%v pending=%v backfills=%d", ok, e0.pending == big, c0.holBackfills)
+	}
+}
+
+// fak-test:runtime fast est=5ms
+func TestInkling2AdmitCohortUsesLastArenaEstimateToShedProactively(t *testing.T) {
+	ledger := newInkling2ByteLedger(1000)
+	ledger.Set("prefix_store", inkling2LedgerPrefixStore, 700)
+	arena := int64(600)
+	var shedNeed int64
+	e := &inkling2LoopBatchEngine{
+		ledger:           ledger,
+		cohortArenaBytes: func() int64 { return arena },
+		shedIdleSlots:    func(n int64) int64 { shedNeed = n; return n },
+	}
+	e.syncCohortLedger()
+	if e.lastArenaBytes != 600 {
+		t.Fatalf("lastArenaBytes = %d, want 600", e.lastArenaBytes)
+	}
+	ledger.Delete("cohort_arena")
+	e.admitCohortMemory(e.lastArenaBytes)
+	if shedNeed != 300 {
+		t.Fatalf("shed need = %d, want 300 (700+600-1000)", shedNeed)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"slices"
 	"strconv"
@@ -109,6 +110,12 @@ func inkling2CUDAPrefillDefaults(lookup func(string) (string, bool)) func(string
 			return "25ms", true
 		case "FAK_INKLING2_BATCH_WAIT":
 			return "75ms", true
+		case "FAK_INKLING2_BATCH_PREFIX_CACHE_MIB":
+			return "4096", true
+		case "FAK_INKLING2_PREFIX_SLOTS":
+			return "4", true
+		case "FAK_INKLING2_HOL_BACKFILL_MAX":
+			return "4", true
 		default:
 			return "", false
 		}
@@ -344,6 +351,9 @@ type inkling2LoopBatchEngine struct {
 	slotMemoryStatus func() Inkling2SlotMemoryStatus
 	// cohortArenaBytes reports bytes currently held by cached cohort arenas.
 	cohortArenaBytes func() int64
+	// lastArenaBytes is the last observed cohort arena footprint, used as the
+	// admission estimate when the arenas were released. Run worker only.
+	lastArenaBytes int64
 	// initialDecodeHeadroom caps the upfront per-row decode KV reservation; 0 reserves full maxNew.
 	initialDecodeHeadroom int
 	// autotune observability counters
@@ -352,6 +362,7 @@ type inkling2LoopBatchEngine struct {
 	lastCohortWidth     atomic.Int64
 	lastChunkSize       atomic.Int64
 	cohortAutotuneStats func() ggufload.Inkling2CohortAutotuneStats
+	prefixHitWatch      inkling2PrefixHitWatch
 	specActive          bool
 	scalarOpen          inkling2LoopSessionOpener
 	scalarClose         func() error
@@ -401,6 +412,51 @@ var (
 	_ agent.Inkling2LoopLogitGenerator = (*inkling2LoopBatchEngine)(nil)
 	_ agent.Inkling2LoopDraftGenerator = (*inkling2LoopBatchEngine)(nil)
 )
+
+// inkling2ConfigSanityWarnings returns startup warnings when KV prefix caching
+// is disabled or misconfigured for multi-turn agentic workloads.
+func inkling2ConfigSanityWarnings(lookup func(string) (string, bool), batchEnabled bool, prefixReuse inkling2PrefixReuseMode) []string {
+	var warnings []string
+	if prefixReuse == inkling2PrefixReuseOff {
+		warnings = append(warnings, "WARNING: prefix reuse is disabled (FAK_INKLING2_PREFIX_REUSE=0)")
+	}
+	if batchEnabled {
+		v := ""
+		if lookup != nil {
+			v, _ = lookup("FAK_INKLING2_BATCH_PREFIX_CACHE_MIB")
+		}
+		v = strings.TrimSpace(v)
+		if v == "" || v == "0" {
+			warnings = append(warnings, "WARNING: batch prefix cache is disabled (FAK_INKLING2_BATCH_PREFIX_CACHE_MIB=0); multi-turn prompts will re-prefill from scratch")
+		}
+	}
+	return warnings
+}
+
+type inkling2PrefixHitWatch struct {
+	mu     sync.Mutex
+	streak int
+}
+
+// observe tracks consecutive large prompts (>=4096 tokens) with zero cached
+// prefix tokens and emits a rate-limited red-flag alert on the 2nd miss and
+// every 10th miss thereafter.
+func (w *inkling2PrefixHitWatch) observe(promptTokens, cachedTokens int, cacheEnabled bool) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if cachedTokens > 0 {
+		w.streak = 0
+		return ""
+	}
+	if promptTokens < 4096 {
+		return ""
+	}
+	w.streak++
+	if w.streak == 2 || (w.streak > 2 && (w.streak-2)%10 == 0) {
+		return fmt.Sprintf("RED FLAG: kv_prefix_zero_hit_streak turns=%d last_prompt_tokens=%d batch_prefix_cache=%t — default multi-turn usage is re-prefilling every turn from scratch; check FAK_INKLING2_BATCH_PREFIX_CACHE_MIB, FAK_INKLING2_PREFIX_REUSE, or dynamic prompt/tool jitter", w.streak, promptTokens, cacheEnabled)
+	}
+	return ""
+}
 
 const (
 	inkling2HoLBackfillMaxDefault = 2
@@ -512,6 +568,11 @@ func (e *inkling2LoopBatchEngine) enqueue(ctx context.Context, prompt []int, max
 	}
 	select {
 	case result := <-r.done:
+		if result.err == nil {
+			if alert := e.prefixHitWatch.observe(len(prompt), result.gen.CachedPromptTokens, e.loneCohort); alert != "" {
+				log.Printf("fak serve: %s", alert)
+			}
+		}
 		return result.gen, result.err
 	case <-ctx.Done():
 		// the worker retires the row at its next step; closing the sink lets the
@@ -755,7 +816,11 @@ func (e *inkling2LoopBatchEngine) syncCohortLedger() {
 		return
 	}
 	if e.cohortArenaBytes != nil {
-		e.ledger.Set("cohort_arena", inkling2LedgerCohortArena, e.cohortArenaBytes())
+		b := e.cohortArenaBytes()
+		e.ledger.Set("cohort_arena", inkling2LedgerCohortArena, b)
+		if b > 0 {
+			e.lastArenaBytes = b
+		}
 	}
 	if e.prefixStats != nil {
 		e.ledger.Set("prefix_store", inkling2LedgerPrefixStore, e.prefixStats().HeldBytes)
@@ -804,7 +869,11 @@ func (e *inkling2LoopBatchEngine) runGroup(group []*inkling2QueuedRequest, owned
 		return
 	}
 	e.batchGroups.Add(1)
-	e.admitCohortMemory(0)
+	need := int64(0)
+	if !e.arenasCached {
+		need = e.lastArenaBytes
+	}
+	e.admitCohortMemory(need)
 	e.arenasCached = true
 	ran := e.runBatch(group, owned)
 	e.syncCohortLedger()

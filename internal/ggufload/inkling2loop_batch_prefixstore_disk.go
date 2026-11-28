@@ -468,10 +468,11 @@ func (st *inkling2PrefixStore) lookupDiskLongerThan(prompt []int, minLen int) *i
 		ramBytes := ck.Bytes() + int64(8*len(tokens))
 		st.tick++
 		promoted := &ink2PrefixEntry{
-			tokens: tokens,
-			ck:     ck,
-			bytes:  ramBytes,
-			used:   st.tick,
+			loopSlots: st.loopSlots,
+			tokens:    tokens,
+			ck:        ck,
+			bytes:     ramBytes,
+			used:      st.tick,
 		}
 		if ramBytes <= st.capBytes {
 			st.entries = append(st.entries, promoted)

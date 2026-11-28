@@ -33,10 +33,12 @@ type inkling2PrefixStore struct {
 }
 
 type ink2PrefixEntry struct {
-	tokens []int
-	ck     *ink2RowCkpt
-	bytes  int64
-	used   uint64
+	// loopSlots is the pass-count slot layout the checkpoint was taken at; a lookup at another depth never hits it.
+	loopSlots int
+	tokens    []int
+	ck        *ink2RowCkpt
+	bytes     int64
+	used      uint64
 }
 
 // Inkling2PrefixStoreStats counts what the cross-request prefix store did.
@@ -193,7 +195,7 @@ func (st *inkling2PrefixStore) lookup(prompt []int) *ink2PrefixEntry {
 	st.stats.Lookups++
 	var best *ink2PrefixEntry
 	for _, e := range st.entries {
-		if len(e.tokens) < len(prompt) && (best == nil || len(e.tokens) > len(best.tokens)) && inkling2HasPrefix(prompt, e.tokens) {
+		if e.loopSlots == st.loopSlots && len(e.tokens) < len(prompt) && (best == nil || len(e.tokens) > len(best.tokens)) && inkling2HasPrefix(prompt, e.tokens) {
 			best = e
 		}
 	}
@@ -286,7 +288,7 @@ func (st *inkling2PrefixStore) put(tokens []int, ck *ink2RowCkpt) {
 		st.disk.removeExact(tokens)
 	}
 	st.tick++
-	st.entries = append(st.entries, &ink2PrefixEntry{tokens: append([]int(nil), tokens...), ck: ck, bytes: bytes, used: st.tick})
+	st.entries = append(st.entries, &ink2PrefixEntry{loopSlots: st.loopSlots, tokens: append([]int(nil), tokens...), ck: ck, bytes: bytes, used: st.tick})
 	st.held += bytes
 	st.stats.Saves++
 	st.evictRAMToCap()

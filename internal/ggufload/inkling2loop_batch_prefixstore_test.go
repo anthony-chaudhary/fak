@@ -132,3 +132,19 @@ func TestInkling2PrefixStoreFromEnv(t *testing.T) {
 		}
 	}
 }
+
+// A checkpoint taken at one loop depth (slot count P) is never reused at another.
+func TestInkling2PrefixStoreLoopSlotsMismatchNeverHits(t *testing.T) {
+	st := &inkling2PrefixStore{capBytes: 1 << 20, minTokens: 2, loopSlots: 1}
+	sys := seqTokens(8, 100)
+	st.put(sys, storeCkpt(len(sys), 4))
+	prompt := append(append([]int(nil), sys...), 5)
+	st.loopSlots = 2
+	if e := st.lookup(prompt); e != nil {
+		t.Fatalf("P-mismatched checkpoint hit %d tokens", len(e.tokens))
+	}
+	st.loopSlots = 1
+	if e := st.lookup(prompt); e == nil || e.loopSlots != 1 {
+		t.Fatalf("same-P lookup: hit %v, want the entry", e)
+	}
+}
