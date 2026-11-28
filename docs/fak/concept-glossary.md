@@ -2788,3 +2788,10 @@ Optional capability interface on an Inkling-2 loop engine running greedy or samp
 MaxResidentCtx is the hard upper-bound resident global KV context on ModelMemoryBudget consumed by the model-agnostic ServeEnvelope solver, clamping resolved context tokens below backend capacity limits.
 
 **Distinct from:** The model-agnostic backend hard resident context ceiling in ModelMemoryBudget - not Inkling2AutoCtxCeiling (the default auto-fit cap) and not Inkling2ResidentFitCtx (the live free-VRAM fit calculation).
+
+
+### skill_debt
+
+The skill-effectiveness scorecard defect integer counting broken, stale, or redundant agent instructions across SKILL.md bundles.
+
+**Distinct from:** Agent skill-bundle effectiveness defects ONLY - NOT py_debt (Python tooling hygiene), NOT skill_slop_scorecard (SKILL.md structural slop gate), and NOT control-pane (the fold).

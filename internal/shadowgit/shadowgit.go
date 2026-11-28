@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -161,9 +163,19 @@ func (s *ShadowGit) stage() error {
 }
 
 // commit records the staged worktree as a snapshot and returns its sha. --allow-empty
-// keeps step numbering contiguous even for a step that changed nothing.
-func (s *ShadowGit) commit(message string) (string, error) {
-	if _, err := s.git0("commit", "-q", "--allow-empty", "-m", message); err != nil {
+// keeps step numbering contiguous even for a step that changed nothing. Step metadata
+// trailers are attached in the commit body so Summarize can reconstruct status from the
+// shadow repo alone across process restarts.
+func (s *ShadowGit) commitStep(subject string, step int, baseline bool, label string) (string, error) {
+	cleanSubj := strings.TrimSpace(strings.ReplaceAll(strings.SplitN(subject, "\n", 2)[0], "\r", ""))
+	if cleanSubj == "" {
+		cleanSubj = fmt.Sprintf("shadowgit step %d", step)
+	}
+	trailer := fmt.Sprintf("Shadowgit-Step: %d\nShadowgit-Baseline: %t", step, baseline)
+	if label != "" {
+		trailer += "\nShadowgit-Label: " + strconv.Quote(label)
+	}
+	if _, err := s.git0("commit", "-q", "--allow-empty", "-m", cleanSubj, "-m", trailer); err != nil {
 		return "", err
 	}
 	sha, err := s.git0("rev-parse", "HEAD")
@@ -179,7 +191,7 @@ func (s *ShadowGit) Baseline() (Snapshot, error) {
 	if err := s.stage(); err != nil {
 		return Snapshot{}, err
 	}
-	sha, err := s.commit("shadowgit baseline")
+	sha, err := s.commitStep("shadowgit baseline", 0, true, "")
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -201,7 +213,7 @@ func (s *ShadowGit) Snapshot(step int, label string) (Snapshot, error) {
 	if msg == "" {
 		msg = fmt.Sprintf("shadowgit step %d", step)
 	}
-	sha, err := s.commit(msg)
+	sha, err := s.commitStep(msg, step, false, label)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -211,6 +223,311 @@ func (s *ShadowGit) Snapshot(step int, label string) (Snapshot, error) {
 	}
 	s.lastCommit = sha
 	return Snapshot{Step: step, Label: label, Commit: sha, Parent: parent, Changes: changes}, nil
+}
+
+// StatusReport is the witnessed status snapshot of a shadowgit ledger and its
+// worktree, suitable for crash/resume inspection and peer health checks without
+// staging files or mutating the shadow index.
+type StatusReport struct {
+	GitDir         string   `json:"git_dir"`
+	WorkTree       string   `json:"work_tree"`
+	Initialized    bool     `json:"initialized"`               // true once a baseline commit exists in the shadow ledger
+	Dirty          bool     `json:"dirty"`                     // true when workTree has un-snapshotted writes
+	PendingWrites  int      `json:"pending_writes"`            // count of un-snapshotted paths in workTree
+	PendingPaths   []string `json:"pending_paths,omitempty"`   // sorted worktree-relative pending paths
+	CommitCount    int      `json:"commit_count"`              // total commits in the shadow ledger
+	SnapshotCount  int      `json:"snapshot_count"`            // non-baseline snapshot commits since the latest baseline
+	LatestStep     int      `json:"latest_step"`               // step number of the latest commit (0 for baseline)
+	LatestCommit   string   `json:"latest_commit,omitempty"`   // shadow sha of HEAD ("" until Baseline)
+	LatestLabel    string   `json:"latest_label,omitempty"`    // label of the latest snapshot ("" if unlabeled or baseline)
+	LatestBaseline bool     `json:"latest_baseline,omitempty"` // true when HEAD is a baseline commit
+	LastChanges    []Change `json:"last_changes,omitempty"`    // attributed changes in the latest snapshot (parent -> HEAD)
+	ChangesSummary string   `json:"changes_summary"`           // compact human-readable status and delta summary
+}
+
+// Status returns the witnessed StatusReport for the shadow repository and worktree.
+// It delegates to [ShadowGit.Summarize].
+func (s *ShadowGit) Status() (StatusReport, error) {
+	return s.Summarize()
+}
+
+// Summarize reads the shadow repository's witnessed commit log, latest diff, and
+// current worktree status, folding them into a StatusReport without staging or
+// committing.
+func (s *ShadowGit) Summarize() (StatusReport, error) {
+	if s == nil || s.git == nil || s.gitDir == "" || s.workTree == "" {
+		return StatusReport{}, fmt.Errorf("shadowgit: ledger is not initialized")
+	}
+	if fi, err := os.Stat(s.workTree); err != nil || !fi.IsDir() {
+		return StatusReport{}, fmt.Errorf("shadowgit: work-tree %q is not a directory", s.workTree)
+	}
+	if fi, err := os.Stat(s.gitDir); err != nil || !fi.IsDir() {
+		return StatusReport{}, fmt.Errorf("shadowgit: git-dir %q is not a directory", s.gitDir)
+	}
+	snapshots, err := s.readSnapshots()
+	if err != nil {
+		return StatusReport{}, err
+	}
+	pending, err := s.pendingPaths()
+	if err != nil {
+		return StatusReport{}, err
+	}
+	return FoldStatus(s.gitDir, s.workTree, snapshots, pending), nil
+}
+
+// FoldStatus folds an ordered slice of witnessed snapshots (oldest to newest) and
+// any un-snapshotted worktree paths into a deterministic StatusReport. Pure: no I/O.
+func FoldStatus(gitDir, workTree string, snapshots []Snapshot, pendingPaths []string) StatusReport {
+	var cleanPending []string
+	for _, p := range pendingPaths {
+		if p != "" {
+			cleanPending = append(cleanPending, p)
+		}
+	}
+	sort.Strings(cleanPending)
+
+	report := StatusReport{
+		GitDir:        gitDir,
+		WorkTree:      workTree,
+		Dirty:         len(cleanPending) > 0,
+		PendingWrites: len(cleanPending),
+		PendingPaths:  cleanPending,
+	}
+
+	if len(snapshots) == 0 {
+		report.ChangesSummary = "uninitialized (no baseline); " + pendingSummary(report.PendingWrites)
+		return report
+	}
+
+	report.Initialized = true
+	report.CommitCount = len(snapshots)
+	for i := len(snapshots) - 1; i >= 0; i-- {
+		if snapshots[i].Baseline {
+			break
+		}
+		report.SnapshotCount++
+	}
+
+	latest := snapshots[len(snapshots)-1]
+	report.LatestStep = latest.Step
+	report.LatestCommit = latest.Commit
+	report.LatestLabel = latest.Label
+	report.LatestBaseline = latest.Baseline
+	if !latest.Baseline && len(latest.Changes) > 0 {
+		report.LastChanges = append([]Change(nil), latest.Changes...)
+	}
+
+	headDesc := fmt.Sprintf("step %d", latest.Step)
+	if latest.Baseline {
+		headDesc = fmt.Sprintf("baseline (step %d)", latest.Step)
+	} else if latest.Label != "" {
+		headDesc = fmt.Sprintf("step %d (%s)", latest.Step, latest.Label)
+	}
+	parts := []string{headDesc}
+	if !latest.Baseline {
+		parts = append(parts, summarizeChanges(report.LastChanges))
+	}
+	parts = append(parts, snapshotCountSummary(report.SnapshotCount), pendingSummary(report.PendingWrites))
+	report.ChangesSummary = strings.Join(parts, "; ")
+	return report
+}
+
+func summarizeChanges(changes []Change) string {
+	if len(changes) == 0 {
+		return "0 changes"
+	}
+	counts := make(map[string]int, len(changes))
+	for _, c := range changes {
+		st := c.Status
+		if st == "" {
+			st = "?"
+		}
+		counts[st]++
+	}
+	order := []string{"A", "M", "D", "R", "C", "T"}
+	seen := make(map[string]bool, len(order))
+	var breakdown []string
+	for _, k := range order {
+		if n := counts[k]; n > 0 {
+			breakdown = append(breakdown, fmt.Sprintf("%d %s", n, k))
+			seen[k] = true
+		}
+	}
+	var extras []string
+	for k := range counts {
+		if !seen[k] {
+			extras = append(extras, k)
+		}
+	}
+	sort.Strings(extras)
+	for _, k := range extras {
+		breakdown = append(breakdown, fmt.Sprintf("%d %s", counts[k], k))
+	}
+	noun := "changes"
+	if len(changes) == 1 {
+		noun = "change"
+	}
+	return fmt.Sprintf("%d %s (%s)", len(changes), noun, strings.Join(breakdown, ", "))
+}
+
+func snapshotCountSummary(n int) string {
+	if n == 1 {
+		return "1 snapshot"
+	}
+	return fmt.Sprintf("%d snapshots", n)
+}
+
+func pendingSummary(n int) string {
+	if n == 0 {
+		return "clean"
+	}
+	if n == 1 {
+		return "1 pending write"
+	}
+	return fmt.Sprintf("%d pending writes", n)
+}
+
+func (s *ShadowGit) readSnapshots() ([]Snapshot, error) {
+	_, headErr := s.git0("rev-parse", "--verify", "HEAD")
+	if headErr != nil {
+		refsOut, refErr := s.git0("for-each-ref", "--format=%(objectname)", "refs/heads")
+		if refErr != nil {
+			return nil, fmt.Errorf("shadowgit: inspect shadow repo: %w", refErr)
+		}
+		if strings.TrimSpace(refsOut) == "" {
+			return nil, nil // valid initialized repo, Baseline not yet called
+		}
+		return nil, fmt.Errorf("shadowgit: resolve HEAD: %w", headErr)
+	}
+	logOut, err := s.git0("log", "--reverse", "--format=%H%x1f%P%x1f%s%x1f%b%x1e", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	snapshots := parseShadowLog(logOut)
+	if len(snapshots) > 0 {
+		last := &snapshots[len(snapshots)-1]
+		if !last.Baseline && last.Parent != "" {
+			changes, err := s.diff(last.Parent, last.Commit)
+			if err != nil {
+				return nil, err
+			}
+			last.Changes = changes
+		}
+	}
+	return snapshots, nil
+}
+
+func parseShadowLog(out string) []Snapshot {
+	records := strings.Split(out, "\x1e")
+	var snapshots []Snapshot
+	for _, rec := range records {
+		rec = strings.Trim(rec, "\r\n")
+		if rec == "" {
+			continue
+		}
+		parts := strings.SplitN(rec, "\x1f", 4)
+		if len(parts) < 3 {
+			continue
+		}
+		sha := strings.TrimSpace(parts[0])
+		parents := strings.Fields(parts[1])
+		parent := ""
+		if len(parents) > 0 {
+			parent = parents[0]
+		}
+		subject := strings.TrimSpace(parts[2])
+		body := ""
+		if len(parts) >= 4 {
+			body = parts[3]
+		}
+
+		var (
+			step        int
+			hasStep     bool
+			baseline    bool
+			hasBaseline bool
+			label       string
+			hasLabel    bool
+		)
+		for _, line := range strings.Split(body, "\n") {
+			line = strings.TrimSpace(line)
+			switch {
+			case strings.HasPrefix(line, "Shadowgit-Step:"):
+				if n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "Shadowgit-Step:"))); err == nil {
+					step = n
+					hasStep = true
+				}
+			case strings.HasPrefix(line, "Shadowgit-Baseline:"):
+				if b, err := strconv.ParseBool(strings.TrimSpace(strings.TrimPrefix(line, "Shadowgit-Baseline:"))); err == nil {
+					baseline = b
+					hasBaseline = true
+				}
+			case strings.HasPrefix(line, "Shadowgit-Label:"):
+				raw := strings.TrimSpace(strings.TrimPrefix(line, "Shadowgit-Label:"))
+				if u, err := strconv.Unquote(raw); err == nil {
+					label = u
+				} else {
+					label = raw
+				}
+				hasLabel = true
+			}
+		}
+
+		if !hasBaseline && subject == "shadowgit baseline" {
+			baseline = true
+		}
+		if !hasStep {
+			if baseline {
+				step = 0
+			} else if strings.HasPrefix(subject, "shadowgit step ") {
+				if n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(subject, "shadowgit step "))); err == nil {
+					step = n
+					hasStep = true
+				}
+			}
+			if !hasStep && !baseline {
+				step = len(snapshots)
+			}
+		}
+		if !hasLabel && !baseline && subject != fmt.Sprintf("shadowgit step %d", step) {
+			label = subject
+		}
+
+		snapshots = append(snapshots, Snapshot{
+			Step:     step,
+			Label:    label,
+			Commit:   sha,
+			Parent:   parent,
+			Baseline: baseline,
+		})
+	}
+	return snapshots
+}
+
+func (s *ShadowGit) pendingPaths() ([]string, error) {
+	out, err := s.git0("status", "--porcelain", "-z", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	return parseStatusPorcelainZ(out), nil
+}
+
+func parseStatusPorcelainZ(z string) []string {
+	fields := strings.Split(z, "\x00")
+	var paths []string
+	for i := 0; i < len(fields); i++ {
+		entry := fields[i]
+		if len(entry) < 4 {
+			continue
+		}
+		x, y := entry[0], entry[1]
+		paths = append(paths, entry[3:])
+		if x == 'R' || x == 'C' || y == 'R' || y == 'C' {
+			i++
+		}
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 // CheckForWrites reports whether the worktree has any change not yet in the last

@@ -31,7 +31,9 @@
 // [ShadowGit.Snapshot] returns a [Snapshot] (step, shadow commit, and the []Change
 // since the previous snapshot). [WriteChangelogLine] appends it to a state_changelog
 // JSONL — the per-step write ledger a checkpoint (#2394) or a trajectory joins against
-// by step to bind step -> bytes-changed.
+// by step to bind step -> bytes-changed. [ShadowGit.Status] / [ShadowGit.Summarize]
+// (and the pure [FoldStatus] fold) expose a witnessed [StatusReport] of dirty writes,
+// snapshot count, latest step/commit/label, and change summary without modifying the index.
 //
 // Borrowed from agent-lens@9eab2b0 (StateManager / shadow_git.py: commit_baseline,
 // snapshot, check_for_writes).

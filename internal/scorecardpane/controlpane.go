@@ -182,6 +182,7 @@ var Cards = []Card{
 	// function of git history plus live issue state, not of tracked tree files, so a
 	// diff-disjoint carry would replay a stale reading as though it were fresh.
 	{Key: "flow", Debt: "flow_debt", Cmd: "go run ./cmd/fak score flow --json", Label: "flow-metrics"},
+	{Key: "skill_effectiveness", Debt: "skill_debt", Script: "skill_effectiveness_scorecard.py", Label: "skill-effectiveness"},
 }
 
 // goBackedKey reports whether a card key is a go run ./cmd/fak card. A simultaneous

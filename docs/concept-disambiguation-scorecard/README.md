@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **157** (clarity 9 + coverage 148) |
-| **Crystal-clear concepts (and climbing)** | **1759** crystal of 4237 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4314 / 4462** (96.7% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **171** (clarity 13 + coverage 158) |
+| **Crystal-clear concepts (and climbing)** | **1760** crystal of 4238 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4316 / 4474** (96.5% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **3** of 322 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **97** of 5591 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **97** of 5593 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 92.9/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 91.8/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4237 concepts - score 92.9/100 (grade A) - disambiguation-debt 157
+concept-disambiguation chart - 4238 concepts - score 91.8/100 (grade A) - disambiguation-debt 171
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1759
+  * crystal       ####################........ 1760
   o defined       ############################ 2478
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -54,7 +54,7 @@ clarity mix by family (each cell = one concept):
   policy-capability ****************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (267 concept(s); 136 crystal)
   pool             ****************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (111 concept(s); 40 crystal)
   render-materialize ****************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (239 concept(s); 52 crystal)
-  score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 35 crystal)
+  score-debt       ************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (126 concept(s); 36 crystal)
   session-runtime  ***********************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (371 concept(s); 143 crystal)
   support-maturity ********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 68 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
@@ -62,29 +62,29 @@ clarity mix by family (each cell = one concept):
   witness-proof    *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (220 concept(s); 91 crystal)
 
 coverage by family (positioned / discovered):
-  context-ctx      ##########################.. 349/374
-  session-runtime  ###########################. 393/415
+  context-ctx      ##########################.. 350/377
+  session-runtime  ##########################.. 393/417
   plan             ###########################. 667/685
-  cache            ###########################. 474/484
+  cache            ###########################. 474/486
+  pool             ##########################.. 117/128
   gateway-engine   ###########################. 327/337
   loop             ##########################.. 155/165
-  guard-gate       ############################ 584/593
+  guard-gate       ############################ 583/592
   layout           ########################.... 58/67
-  pool             ##########################.. 117/126
   attention        ###########################. 244/251
-  policy-capability ############################ 294/299
+  policy-capability ###########################. 294/300
   support-maturity ###########################. 146/151
-  evict            ###########################. 97/100
+  evict            ###########################. 97/101
   render-materialize ############################ 257/260
-  witness-proof    ############################ 207/210
+  witness-proof    ############################ 208/211
   decision         ###########################. 69/71
-  score-debt       ############################ 141/142
+  score-debt       ############################ 142/143
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 96.7%  (4314/4462 confusable tokens positioned)
+namespace coverage  [###############################.] 96.5%  (4316/4474 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 319
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      #........................... 3
   pairs separated   [################################] 319/322
 
-name index: 5591 lookup name(s) -> 4237 concept(s), 97 ambiguous
+name index: 5593 lookup name(s) -> 4238 concept(s), 97 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **319 / 322** (319 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **3** |
 | Entangled concepts (own twin undrawn) | 6 |
-| Boundaries drawn (mutual / total) | 3748 / 8149 |
+| Boundaries drawn (mutual / total) | 3756 / 8157 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5591 over 4237 concepts |
+| Lookup names indexed | 5593 over 4238 concepts |
 | Lookup names landing on several concepts | 97 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4237 |
+| Concepts carrying a contrast set | 4238 |
 
 ## The concepts (best verdict first)
 
@@ -1578,6 +1578,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | score-debt | **NotDebt** - The Scorecard roll-up COUNT of dials that graded GradeNotDebt: how many surveyed dials were excluded from the lift worklist as correctly harness-held safety dials. Derived by Score so no consumer re-folds the grades. |
 | * | crystal | symbol | score-debt | **score-debt implementation surface for mlpdebt** - `mlp_debt` is the score-debt symbol declared or used at `internal/mlpscore/kernel.go:21` as `// DebtKey is the headline HARD integer the control-pane folds (corpus.mlp_debt): the`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | cli-verb | score-debt | **performance-rsi-scorecard** - The fak performance-rsi-scorecard CLI command, implemented by cmdPerformanceRSIScorecard, scores versioned end-to-end performance RSI evidence and optionally compares it with a prior report to measure whether the complete performance improvement loop is closing. |
+| * | crystal | metric | score-debt | **skill_debt** - The skill-effectiveness scorecard defect integer counting broken, stale, or redundant agent instructions across SKILL.md bundles. |
 | * | crystal | subsystem | score-debt | **scorecard** - One deterministic measurement of a surface that folds reality into a single *_debt integer plus an A-F grade (the family is documented in the scorecard skill). |
 | * | crystal | subsystem | score-debt | **scorecard control pane** - The fold that sums every scorecard's *_debt into one portfolio number with a pinned ratchet that reds only on a regression above baseline. |
 | * | crystal | metric | score-debt | **disambiguation-debt** - This scorecard's integer: clarity defects of positioned concepts plus coverage gaps (confusable tree tokens with no row). |
@@ -4385,8 +4386,8 @@ Each abstraction rolls up WEAKEST-LINK: only as crystal-clear as its foggiest
 descendant. '!' = the head verdict reads clearer than the subtree supports.
 
      rolled       head         size debt  mix                  family / canonical
+  !o defined     crystal        17    4  **ooooooooooooooo    score-debt / scorecard
   !o defined     crystal        30    0  *1 o29               score-debt / scorecard control pane
-  !o defined     crystal        17    0  **ooooooooooooooo    score-debt / scorecard
   !o defined     crystal        11    0  ***oooooooo          session-runtime / Session
   !o defined     crystal        10    0  ********oo           guard-gate / gate (decision point)
   !o defined     crystal         7    0  *oooooo              cache / vCache
@@ -4438,8 +4439,8 @@ descendant. '!' = the head verdict reads clearer than the subtree supports.
    * crystal     crystal         2    0  **                   plan / landCandidateCapture (prepared-candidate receipt variant)
 
 abstraction overclaims (20) - head reads clearer than its subtree supports:
-  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: grade-debt = defined)
   ! scorecard: abstraction declares 'crystal' but rolls up to 'defined' (weakest: agent-readiness-scorecard = defined)
+  ! control-pane: abstraction declares 'crystal' but rolls up to 'defined' (weakest: grade-debt = defined)
   ! session: abstraction declares 'crystal' but rolls up to 'defined' (weakest: budget = defined)
   ! gate: abstraction declares 'crystal' but rolls up to 'defined' (weakest: normgate = defined)
   ! vcache: abstraction declares 'crystal' but rolls up to 'defined' (weakest: cov5304-vcache-context-join-report = defined)
@@ -4464,8 +4465,8 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 
 | | Abstraction | Rolled | Head declares | Subtree | Debt | Weakest descendant |
 |---|---|---|---|---:|---:|---|
+| o! | **scorecard** (`scorecard`) | defined | crystal | 17 | 4 | agent-readiness-scorecard = defined |
 | o! | **scorecard control pane** (`control-pane`) | defined | crystal | 30 | 0 | grade-debt = defined |
-| o! | **scorecard** (`scorecard`) | defined | crystal | 17 | 0 | agent-readiness-scorecard = defined |
 | o! | **Session** (`session`) | defined | crystal | 11 | 0 | budget = defined |
 | o! | **gate (decision point)** (`gate`) | defined | crystal | 10 | 0 | normgate = defined |
 | o! | **vCache** (`vcache`) | defined | crystal | 7 | 0 | cov5304-vcache-context-join-report = defined |
@@ -4522,41 +4523,41 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `clarity_consistent` | 0 | 6 | 6 verdict overclaim(s) |
 | separation | `pair_separated` | 40 | 3 | 3 confusable pair(s) with no line drawn |
+| grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
+| grounded | `alias_resolved` | 76 | 2 | 2 unresolvable alias(es) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 34 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4401/8149 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4237 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4401/8157 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4238 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
-| grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
-| grounded | `alias_resolved` | 100 | 0 | every alias resolves in the tree (token or wire key) |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5591 lookup name(s) resolves - 97 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5593 lookup name(s) resolves - 97 land on several concepts, all separated |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| context-ctx | 349 | 374 | 25 |
-| session-runtime | 393 | 415 | 22 |
+| context-ctx | 350 | 377 | 27 |
+| session-runtime | 393 | 417 | 24 |
 | plan | 667 | 685 | 18 |
-| cache | 474 | 484 | 10 |
+| cache | 474 | 486 | 12 |
+| pool | 117 | 128 | 11 |
 | gateway-engine | 327 | 337 | 10 |
 | loop | 155 | 165 | 10 |
-| guard-gate | 584 | 593 | 9 |
+| guard-gate | 583 | 592 | 9 |
 | layout | 58 | 67 | 9 |
-| pool | 117 | 126 | 9 |
 | attention | 244 | 251 | 7 |
-| policy-capability | 294 | 299 | 5 |
+| policy-capability | 294 | 300 | 6 |
 | support-maturity | 146 | 151 | 5 |
-| evict | 97 | 100 | 3 |
+| evict | 97 | 101 | 4 |
 | render-materialize | 257 | 260 | 3 |
-| witness-proof | 207 | 210 | 3 |
+| witness-proof | 208 | 211 | 3 |
 | decision | 69 | 71 | 2 |
-| score-debt | 141 | 142 | 1 |
+| score-debt | 142 | 143 | 1 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | trajectory-control | 0 | 0 | 0 |

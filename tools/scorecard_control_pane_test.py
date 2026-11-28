@@ -136,6 +136,20 @@ def test_operator_heaviness_scorecard_registered() -> None:
     }
 
 
+def test_skill_effectiveness_scorecard_registered() -> None:
+    card = next(c for c in scp.SCORECARDS if c["key"] == "skill_effectiveness")
+    assert card == {
+        "key": "skill_effectiveness",
+        "debt": "skill_debt",
+        "script": "skill_effectiveness_scorecard.py",
+        "label": "skill-effectiveness",
+    }
+    out = scp.fold(full_metrics(skill_effectiveness=25), None, workspace=".", commit="abc1234")
+    assert out["total_debt"] == 25
+    metric = next(m for m in out["metrics"] if m["key"] == "skill_effectiveness")
+    assert metric["debt_key"] == "skill_debt" and metric["debt"] == 25
+
+
 # Every tools/*_scorecard.py on disk must be registered in the fold OR named in a
 # documented exclusion list — the breadth invariant (#1270). Without this an
 # unfolded surface can regress freely and never trip the ratchet, the gap that

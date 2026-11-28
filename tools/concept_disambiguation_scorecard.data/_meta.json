@@ -2424,6 +2424,11 @@
           "category": "incidental",
           "reason": "Local error result from kvFP8AttendEager inside the rooted Qwen transaction; it names no separate attention mechanism, capability, or execution policy.",
           "token": "attentionErr"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pre-existing V4.1 shared-attention filename cited in internal/sotamatrix/sotamatrix.go; not a separate attention mechanism.",
+          "token": "cuda_v41_shared_attention"
         }
       ],
       "exclude": [
@@ -2474,6 +2479,7 @@
         "cudaV41SharedAttentionKey",
         "cudaV41SharedAttentionTags",
         "cuda_kv_fp8_attention_owner",
+        "cuda_v41_shared_attention",
         "errKVFP8Attention",
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",

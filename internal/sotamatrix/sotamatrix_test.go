@@ -253,3 +253,59 @@ func TestEveryRowResolvesAndIsComplete(t *testing.T) {
 		}
 	}
 }
+
+func TestAddedKernelCoverageRowsAndGlobs(t *testing.T) {
+	cases := []struct {
+		slug, path string
+		route      Route
+	}{
+		{"batched-prefill-panel", "internal/compute/prefill_batch.go", RouteStayMinimal},
+		{"batched-prefill-panel", "internal/compute/prefill_attribution.go", RouteStayMinimal},
+		{"cuda-deepgemm-wkv", "internal/compute/cuda_deepgemm_wkv.cu", RouteBind},
+		{"cuda-flashmla-sparse-decode", "internal/compute/cuda_flashmla_sparse_decode.cu", RouteBind},
+		{"cuda-flashmla-sparse-decode", "internal/compute/testdata/flashmla_decode_device_qualification.cu", RouteBind},
+		{"cuda-flashmla-sparse-prefill", "internal/compute/cuda_flashmla_sparse_prefill.cu", RouteBind},
+		{"cuda-sm10x-tmem-probe", "internal/compute/cuda_sm10x_probe.cu", RouteStayMinimal},
+		{"cuda-v41-compressor-pool", "internal/compute/cuda_v41_compressor_pool.cu", RouteStayMinimal},
+		{"cuda-v41-engram-gate", "internal/compute/cuda_v41_engram_gate.cu", RouteStayMinimal},
+		{"cuda-v41-indexer", "internal/compute/cuda_v41_indexer.cu", RouteStayMinimal},
+		{"cuda-v41-mhc", "internal/compute/cuda_v41_mhc.cu", RouteBorrow},
+		{"cuda-v41-routed-mmid", "internal/compute/cuda_v41_routed_mmid.cu", RouteBorrow},
+		{"cuda-v41-routed-swiglu", "internal/compute/cuda_v41_routed_swiglu.cu", RouteBorrow},
+		{"cuda-v41-router", "internal/compute/cuda_v41_router.cu", RouteBorrow},
+		{"cuda-v41-shared-attention", "internal/compute/cuda_v41_shared_attention.cu", RouteBorrow},
+		{"cuda-dsv41-k-quant", "internal/compute/dsv41_k_quant.cu", RouteBorrow},
+		{"cuda-eplb-map-record", "internal/compute/eplb_map_record.cu", RouteBorrow},
+		{"cuda-grammar-bitmask", "internal/compute/grammar_bitmask.cu", RouteBorrow},
+		{"cuda-kv-swap-batch", "internal/compute/kv_swap_batch.cu", RouteBorrow},
+		{"cuda-logprob-topk", "internal/compute/logprob_topk.cu", RouteBorrow},
+		{"cuda-moe-align-sort", "internal/compute/moe_align_sort.cu", RouteBorrow},
+		{"cuda-moe-router-gemm", "internal/compute/moe_router_gemm.cu", RouteBorrow},
+		{"cuda-rmsnorm-fp8-quant", "internal/compute/rmsnorm_fp8_quant.cu", RouteBorrow},
+		{"cuda-routed-expert-gemv", "internal/compute/routed_expert_gemv.cu", RouteStayMinimal},
+		{"cuda-sampling-topk", "internal/compute/sampling_topk.cu", RouteBorrow},
+		{"cuda-silu-mul-fp8-quant", "internal/compute/silu_mul_fp8_quant.cu", RouteBorrow},
+		{"cuda-tree-verify-attention", "internal/compute/tree_attention.cu", RouteStayMinimal},
+		{"host-q8-packed-kv-attention", "internal/model/quant_attn_q8_packed.go", RouteBorrow},
+		{"host-q8-packed-kv-attention", "internal/model/quant_attn_q8_packed_default.go", RouteBorrow},
+		{"host-q8-packed-kv-attention", "internal/model/quant_attn_q8_packed_qualification.go", RouteBorrow},
+		{"gguf-quant-registry-admission", "internal/model/quant_capability_load.go", RouteStayMinimal},
+		{"gguf-quant-registry-admission", "internal/model/quant_registry.go", RouteStayMinimal},
+		{"gguf-quant-registry-admission", "internal/model/quant_storage_plan.go", RouteStayMinimal},
+		{"gguf-ternary-q2-prefill", "internal/model/quant_q2_prefill.go", RouteBind},
+		{"gguf-q3k-iq3s-dequant", "internal/model/quant_q3k_iq3s.go", RouteBind},
+		{"gguf-row-normalized-kquant", "internal/model/quant_row_normalized.go", RouteBind},
+	}
+	for _, tc := range cases {
+		op, ok := BySlug(tc.slug)
+		if !ok {
+			t.Fatalf("row %q missing from SOTA matrix", tc.slug)
+		}
+		if op.Route != tc.route {
+			t.Errorf("%s route = %q, want %q", tc.slug, op.Route, tc.route)
+		}
+		if !anyGlobMatches(op.FileGlobs, tc.path) {
+			t.Errorf("%s FileGlobs %v do not cover %s", tc.slug, op.FileGlobs, tc.path)
+		}
+	}
+}

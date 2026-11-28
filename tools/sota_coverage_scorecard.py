@@ -93,8 +93,14 @@ MATRIX_GO = "internal/sotamatrix/sotamatrix.go"
 # genuine kernel surface  -  every *.cu device kernel, the named compute-kernel
 # files, and the model-side quant/moe SIMD lanes.
 KERNEL_PATHSPECS = [
-    # Every CUDA/device kernel is a kernel by definition.
+    # Every CUDA/device kernel and CUDA header kernel is a kernel by definition.
     "internal/compute/*.cu",
+    "internal/compute/cuda/*.cuh",
+    # Compute-kernel tuning / arbitration, radix KV cache, and constrained grammar decoding.
+    "internal/computetune/*.go",
+    "internal/radixkv/*.go",
+    "internal/grammar/*.go",
+    "internal/toolgrammar/*.go",
     # The named compute-kernel files (GEMM, attention, sparse, prefill, device dispatch).
     "internal/compute/cpuref.go",
     "internal/compute/cuda.go",

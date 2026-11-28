@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -191,5 +193,204 @@ func TestParseNameStatusZ(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("change %d = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+// fak-test:runtime fast est=200ms lane=default
+func TestShadowGit_StatusReportLifecycleAndReopen(t *testing.T) {
+	gitAvailable(t)
+	wt := t.TempDir()
+	newRealRepo(t, wt)
+	shadow := filepath.Join(t.TempDir(), "shadow.git")
+
+	sg, err := Open(shadow, wt, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-baseline: valid repo, uninitialized baseline, sees existing worktree file as pending.
+	pre, err := sg.Status()
+	if err != nil {
+		t.Fatalf("Status pre-baseline: %v", err)
+	}
+	if pre.Initialized {
+		t.Errorf("pre-baseline Initialized = true, want false")
+	}
+	if !pre.Dirty || pre.PendingWrites != 1 || !reflect.DeepEqual(pre.PendingPaths, []string{"tracked.txt"}) {
+		t.Errorf("pre-baseline pending = (dirty=%v count=%d paths=%v), want dirty=true count=1 [tracked.txt]", pre.Dirty, pre.PendingWrites, pre.PendingPaths)
+	}
+	if pre.CommitCount != 0 || pre.SnapshotCount != 0 || pre.LatestCommit != "" {
+		t.Errorf("pre-baseline counts/commit = (%d, %d, %q), want (0, 0, \"\")", pre.CommitCount, pre.SnapshotCount, pre.LatestCommit)
+	}
+	if !strings.Contains(pre.ChangesSummary, "uninitialized") || !strings.Contains(pre.ChangesSummary, "1 pending write") {
+		t.Errorf("pre-baseline summary = %q, want uninitialized + 1 pending write", pre.ChangesSummary)
+	}
+
+	// Baseline: initialized, 1 commit, 0 snapshots, clean.
+	base, err := sg.Baseline()
+	if err != nil {
+		t.Fatal(err)
+	}
+	atBase, err := sg.Summarize()
+	if err != nil {
+		t.Fatalf("Summarize at baseline: %v", err)
+	}
+	if !atBase.Initialized || !atBase.LatestBaseline || atBase.Dirty || atBase.PendingWrites != 0 {
+		t.Fatalf("atBase flags unexpected: %+v", atBase)
+	}
+	if atBase.CommitCount != 1 || atBase.SnapshotCount != 0 || atBase.LatestStep != 0 || atBase.LatestCommit != base.Commit || atBase.LatestLabel != "" {
+		t.Fatalf("atBase metadata unexpected: %+v (want commit=%s)", atBase, base.Commit)
+	}
+	if len(atBase.LastChanges) != 0 {
+		t.Errorf("baseline LastChanges = %+v, want empty", atBase.LastChanges)
+	}
+	if !strings.Contains(atBase.ChangesSummary, "baseline (step 0)") || !strings.Contains(atBase.ChangesSummary, "clean") {
+		t.Errorf("atBase summary = %q", atBase.ChangesSummary)
+	}
+
+	// Dirty worktree after baseline (before snapshot).
+	if err := os.WriteFile(filepath.Join(wt, "alpha.txt"), []byte("a1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "tracked.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirtyRep, err := sg.Status()
+	if err != nil {
+		t.Fatalf("Status dirty: %v", err)
+	}
+	if !dirtyRep.Dirty || dirtyRep.PendingWrites != 2 || !reflect.DeepEqual(dirtyRep.PendingPaths, []string{"alpha.txt", "tracked.txt"}) {
+		t.Errorf("dirty pending = %+v, want [alpha.txt tracked.txt]", dirtyRep)
+	}
+	if !strings.Contains(dirtyRep.ChangesSummary, "2 pending writes") {
+		t.Errorf("dirty summary = %q, want 2 pending writes", dirtyRep.ChangesSummary)
+	}
+
+	// Snapshot 1 and Snapshot 2 (with custom non-contiguous step number & label).
+	s1, err := sg.Snapshot(1, "add alpha and edit tracked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "beta.txt"), []byte("b1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := sg.Snapshot(7, "add beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Dirty again after snapshot 2.
+	if err := os.WriteFile(filepath.Join(wt, "gamma.txt"), []byte("g1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopen a fresh ShadowGit handle (simulating a peer process or post-crash probe).
+	reopened, err := Open(shadow, wt, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := reopened.Summarize()
+	if err != nil {
+		t.Fatalf("reopened Summarize: %v", err)
+	}
+	if !rep.Initialized || rep.LatestBaseline {
+		t.Errorf("reopened flags = (%v, %v), want (true, false)", rep.Initialized, rep.LatestBaseline)
+	}
+	if rep.CommitCount != 3 || rep.SnapshotCount != 2 {
+		t.Errorf("counts = (%d, %d), want (3, 2)", rep.CommitCount, rep.SnapshotCount)
+	}
+	if rep.LatestStep != 7 || rep.LatestCommit != s2.Commit || rep.LatestLabel != "add beta" {
+		t.Errorf("latest = (step=%d commit=%s label=%q), want (7, %s, %q)", rep.LatestStep, rep.LatestCommit, rep.LatestLabel, s2.Commit, "add beta")
+	}
+	if !reflect.DeepEqual(rep.LastChanges, []Change{{Status: "A", Path: "beta.txt"}}) {
+		t.Errorf("LastChanges = %+v, want [A beta.txt]", rep.LastChanges)
+	}
+	if !rep.Dirty || rep.PendingWrites != 1 || !reflect.DeepEqual(rep.PendingPaths, []string{"gamma.txt"}) {
+		t.Errorf("pending = %+v, want [gamma.txt]", rep)
+	}
+	if !strings.Contains(rep.ChangesSummary, "step 7 (add beta)") || !strings.Contains(rep.ChangesSummary, "1 A") || !strings.Contains(rep.ChangesSummary, "2 snapshots") || !strings.Contains(rep.ChangesSummary, "1 pending write") {
+		t.Errorf("reopened summary = %q", rep.ChangesSummary)
+	}
+	_ = s1
+
+	// Re-basing resets SnapshotCount since latest baseline while CommitCount keeps growing.
+	rebased, err := sg.Baseline()
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRebase, err := sg.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRebase.CommitCount != 4 || afterRebase.SnapshotCount != 0 || afterRebase.LatestCommit != rebased.Commit || !afterRebase.LatestBaseline || afterRebase.Dirty {
+		t.Errorf("afterRebase = %+v", afterRebase)
+	}
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestShadowGit_StatusErrorsAndUninitialized(t *testing.T) {
+	var nilSG *ShadowGit
+	if _, err := nilSG.Status(); err == nil {
+		t.Error("nil ShadowGit.Status() must error")
+	}
+	if _, err := (&ShadowGit{}).Summarize(); err == nil {
+		t.Error("zero ShadowGit.Summarize() must error")
+	}
+
+	// Non-git directory as gitDir should return an error rather than reporting clean.
+	wt := t.TempDir()
+	notAGitDir := t.TempDir()
+	sg := &ShadowGit{gitDir: notAGitDir, workTree: wt, git: ExecRunner{}}
+	if _, err := sg.Summarize(); err == nil {
+		t.Error("Summarize over non-git directory must error")
+	}
+
+	// Missing workTree should return an error.
+	sgMissingWT := &ShadowGit{gitDir: notAGitDir, workTree: filepath.Join(wt, "missing"), git: ExecRunner{}}
+	if _, err := sgMissingWT.Status(); err == nil {
+		t.Error("Status with missing work-tree must error")
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestFoldStatus_PureFoldingAndSummary(t *testing.T) {
+	uninit := FoldStatus("/tmp/s.git", "/tmp/wt", nil, []string{"b.go", "", "a.go"})
+	if uninit.Initialized || !uninit.Dirty || uninit.PendingWrites != 2 {
+		t.Fatalf("uninit FoldStatus = %+v", uninit)
+	}
+	if !reflect.DeepEqual(uninit.PendingPaths, []string{"a.go", "b.go"}) {
+		t.Errorf("PendingPaths not sorted/filtered: %v", uninit.PendingPaths)
+	}
+
+	snaps := []Snapshot{
+		{Step: 0, Commit: "c0", Baseline: true},
+		{Step: 1, Label: "step-one", Commit: "c1", Parent: "c0", Changes: []Change{{Status: "A", Path: "x.go"}}},
+		{Step: 2, Commit: "c2", Parent: "c1", Changes: []Change{{Status: "M", Path: "x.go"}, {Status: "A", Path: "y.go"}}},
+	}
+	rep := FoldStatus("/tmp/s.git", "/tmp/wt", snaps, nil)
+	if !rep.Initialized || rep.Dirty || rep.CommitCount != 3 || rep.SnapshotCount != 2 {
+		t.Fatalf("folded report = %+v", rep)
+	}
+	if rep.LatestStep != 2 || rep.LatestCommit != "c2" || rep.LatestLabel != "" || len(rep.LastChanges) != 2 {
+		t.Fatalf("folded latest = %+v", rep)
+	}
+	if rep.ChangesSummary != "step 2; 2 changes (1 A, 1 M); 2 snapshots; clean" {
+		t.Errorf("ChangesSummary = %q", rep.ChangesSummary)
+	}
+
+	// Mutating LastChanges on report must not alias input snapshot slice.
+	rep.LastChanges[0].Path = "tampered.go"
+	if snaps[2].Changes[0].Path != "x.go" {
+		t.Errorf("FoldStatus aliased snapshot Changes slice")
+	}
+
+	// Also verify parseShadowLog fallback on commits without trailers, and porcelain -z rename parsing.
+	parsed := parseShadowLog("sha0\x1f\x1fshadowgit baseline\x1f\x1esha1\x1fsha0\x1fshadowgit step 4\x1f\x1e")
+	if len(parsed) != 2 || !parsed[0].Baseline || parsed[1].Step != 4 || parsed[1].Label != "" {
+		t.Errorf("parseShadowLog fallback = %+v", parsed)
+	}
+	pending := parseStatusPorcelainZ(" M tracked.txt\x00R  new.txt\x00old.txt\x00?? a b.txt\x00")
+	if !reflect.DeepEqual(pending, []string{"a b.txt", "new.txt", "tracked.txt"}) {
+		t.Errorf("parseStatusPorcelainZ = %v", pending)
 	}
 }

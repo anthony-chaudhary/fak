@@ -223,7 +223,8 @@
       "distinction": "PYTHON TOOLING quality - NOT code_debt (the Go module's quality surface) and NOT the control pane fold.",
       "distinct_from": [
         "control-pane",
-        "cov-20260903-score-debt-codedebt"
+        "cov-20260903-score-debt-codedebt",
+        "sd-skill-debt"
       ],
       "aliases": [],
       "grounding": "py_debt",
@@ -471,7 +472,8 @@
       "distinction": "A SKILL-authoring structural gate - NOT a code test-coverage gate and NOT the rsiloop skill-quarantine gate that reuses its flagged vocabulary.",
       "distinct_from": [
         "scorecard",
-        "sd-popularization-readiness-scorecard"
+        "sd-popularization-readiness-scorecard",
+        "sd-skill-debt"
       ],
       "aliases": [],
       "grounding": "skill_slop_scorecard",
@@ -479,6 +481,30 @@
       "glossary_anchor": "",
       "parent": "scorecard",
       "verdict": "defined",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "sd-skill-debt",
+      "canonical": "skill_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The skill-effectiveness scorecard defect integer counting broken, stale, or redundant agent instructions across SKILL.md bundles.",
+      "distinction": "Agent skill-bundle effectiveness defects ONLY - NOT py_debt (Python tooling hygiene), NOT skill_slop_scorecard (SKILL.md structural slop gate), and NOT control-pane (the fold).",
+      "distinct_from": [
+        "control-pane",
+        "scorecard",
+        "sd-py-debt",
+        "sd-skill-slop-scorecard"
+      ],
+      "aliases": [
+        "skill_effectiveness_scorecard"
+      ],
+      "grounding": "skill_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
       "gaps": []
     }
   ]

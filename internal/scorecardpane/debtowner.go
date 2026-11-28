@@ -70,6 +70,7 @@ var DebtOwners = map[string]DebtOwner{
 	"process_debt":        {Leaf: "tools", Lane: "tools", Pathspec: "tools/cuda_dev_scorecard.py"},
 	"persona_fit_debt":    {Leaf: "tools", Lane: "tools", Pathspec: "tools/persona_fit_scorecard.py"},
 	"commit_debt":         {Leaf: "tools", Lane: "tools", Pathspec: "tools/commit_subject_coverage.py"},
+	"skill_debt":          {Leaf: "tools", Lane: "tools", Pathspec: "tools/skill_effectiveness_scorecard.py"},
 
 	// --- Go-backed detectors: leaf = the owning internal package -----------------
 	"seo_debt":               {Leaf: "seoaeoscore", Lane: "seoaeoscore", Pathspec: "internal/seoaeoscore/**"},

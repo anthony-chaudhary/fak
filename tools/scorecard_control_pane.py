@@ -335,6 +335,7 @@ SCORECARDS: list[dict[str, str]] = [
     # tree, REMOVE this row — folding both double-counts the subject defects in total_debt.
     {"key": "commit_subject", "debt": "commit_debt", "script": "commit_subject_coverage.py", "label": "commit-subject"},
     {"key": "flow", "debt": "flow_debt", "script": "", "cmd": "go run ./cmd/fak score flow --json", "label": "flow-metrics"},
+    {"key": "skill_effectiveness", "debt": "skill_debt", "script": "skill_effectiveness_scorecard.py", "label": "skill-effectiveness"},
 ]
 
 # Every scorecard implementation must be represented by the default portfolio
