@@ -166,3 +166,58 @@ func (r *AdaptiveDraftModuleRegistry) Lookup(artifact string, draftLength int) (
 	module, ok := r.modules[key]
 	return module, ok
 }
+
+// AdaptiveNgramVerifyAccepted counts the leading ngram drafts accepted by the
+// target. By default (forceGreedy=false) verification follows the sampler
+// unchanged: draft i is accepted when it equals sampled[i]. With forceGreedy
+// (SGLang NGRAM forced-greedy verify, default off) acceptance is routed through
+// greedy argmax[i] regardless of sampler settings. Draft generation is untouched.
+func AdaptiveNgramVerifyAccepted(forceGreedy bool, drafts, argmax, sampled []int) int {
+	ref := sampled
+	if forceGreedy {
+		ref = argmax
+	}
+	n := 0
+	for n < len(drafts) && n < len(ref) && drafts[n] == ref[n] {
+		n++
+	}
+	return n
+}
+
+// AdaptiveDraftReplayRing is a bounded FIFO ring of recently verified drafts
+// (TensorRT-LLM MTP replay). A repeated key replays the recorded accepted
+// count without calling the verifier; an evicted key recomputes. The verifier
+// itself is unchanged. A zero capacity disables replay (every call recomputes).
+type AdaptiveDraftReplayRing struct {
+	cap  int
+	keys []string
+	vals map[string]int
+	Hits int
+	Miss int
+}
+
+// NewAdaptiveDraftReplayRing returns a ring holding at most capacity drafts.
+func NewAdaptiveDraftReplayRing(capacity int) *AdaptiveDraftReplayRing {
+	return &AdaptiveDraftReplayRing{cap: capacity, vals: make(map[string]int)}
+}
+
+// Verify returns the accepted count for key, replaying from the ring when present
+// and otherwise calling recompute and recording its result (evicting the oldest).
+func (r *AdaptiveDraftReplayRing) Verify(key string, recompute func() int) (accepted int, replayed bool) {
+	if v, ok := r.vals[key]; ok {
+		r.Hits++
+		return v, true
+	}
+	r.Miss++
+	v := recompute()
+	if r.cap <= 0 {
+		return v, false
+	}
+	if len(r.keys) >= r.cap {
+		delete(r.vals, r.keys[0])
+		r.keys = r.keys[1:]
+	}
+	r.keys = append(r.keys, key)
+	r.vals[key] = v
+	return v, false
+}

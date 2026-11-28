@@ -510,3 +510,24 @@ func TestMTPForwardSpeculativeMTP(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestQwen35DoubleShiftNormProtection(t *testing.T) {
+	trunk := map[string]tensorMeta{
+		"model.layers.0.input_layernorm.weight":  {},
+		"model.norm.weight":                      {},
+		"model.layers.0.self_attn.q_proj.weight": {},
+	}
+	base := Qwen35TrunkShiftNormNames(trunk)
+	if len(base) != 2 {
+		t.Fatalf("trunk shift names=%v want 2", base)
+	}
+	with := map[string]tensorMeta{"mtp.norm.weight": {}, "mtp.layers.0.input_layernorm.weight": {}}
+	for k, v := range trunk {
+		with[k] = v
+	}
+	got := Qwen35TrunkShiftNormNames(with)
+	if len(got) != len(base) || got[0] != base[0] || got[1] != base[1] {
+		t.Fatalf("with mtp.* got %v want %v", got, base)
+	}
+}

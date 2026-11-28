@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -15,10 +16,10 @@ import (
 // arch FAMILY (HF model_type "qwen3_5_text"), NOT one model release: it is shared by both
 // Qwen3.5-0.8B AND Qwen3.6-27B, because the Qwen3.6-27B checkpoint also declares
 // model_type "qwen3_5_text" (config_test.go), so this one loader is the code path for both
-// model versions — the "3.5" in the symbol is the arch lineage, not the release number.
+// model versions â€” the "3.5" in the symbol is the arch lineage, not the release number.
 // Three of every four decoder layers are a
-// Gated-DeltaNet *linear-attention* token mixer — a recurrent state-space scan, not
-// quadratic attention — and every fourth layer is gated full attention. This file adds
+// Gated-DeltaNet *linear-attention* token mixer â€” a recurrent state-space scan, not
+// quadratic attention â€” and every fourth layer is gated full attention. This file adds
 // the linear-attention mixer and the load-time tensor-name normalization. The
 // full-attention output gate lives in attnSeq (forward.go) behind cfg.AttnOutputGate;
 // config detection, the (1+weight) RMSNorm, the partial-rotary inv_freq denominator, and
@@ -31,7 +32,7 @@ import (
 // 1/sqrt(head_k_dim) query scale, the rank-1 delta-rule state update, and a per-head
 // gated RMSNorm of the readout.
 
-// IsQwen35Hybrid reports whether this checkpoint is a qwen35-family hybrid — i.e. any of
+// IsQwen35Hybrid reports whether this checkpoint is a qwen35-family hybrid â€” i.e. any of
 // Qwen3.5 / Qwen3.6 / Qwen3-Next, which all share HF model_type "qwen3_5_text" (any
 // linear_attention layer present). It gates the (1+w) RMSNorm, the rotary-dim rope
 // denominator, the tensor-name normalization, and the per-layer mixer dispatch.
@@ -41,7 +42,7 @@ import (
 // claim, and neither shares the qwen35 GDN weights or its recurrent state
 // machinery. Kimi K3.1 in particular ships "kda"/"dsa" layer_types once its
 // nested membership lists are rebuilt, but a K3.1 config that carries the
-// wrapper's own FLAT list can still spell a layer "linear_attention" — so the
+// wrapper's own FLAT list can still spell a layer "linear_attention" â€” so the
 // exclusion is by arch identity (issue #14363), not by geometry accident.
 func (c Config) IsQwen35Hybrid() bool {
 	if c.GLM5Next || c.IsKimiK31() {
@@ -72,7 +73,7 @@ func (c Config) isLinearAttnLayer(l int) bool {
 // multi-token-prediction head ("mtp.") that text generation never reads; we rename the LM
 // tensors and drop the rest so the standard layer-prefix lookups resolve. The vision
 // tower is dropped by DEFAULT, but RETAINED in place (left in man for newModel to segregate
-// into Model.Vision) when RetainVision is set — the safetensors twin of the GGUF mmproj
+// into Model.Vision) when RetainVision is set â€” the safetensors twin of the GGUF mmproj
 // retain (#4029). The MTP head follows RetainMTP; when retained, its exact one-layer
 // namespace is validated before the Model can expose it to native draft wiring.
 func materializeQwen35Tensors(cfg Config, man map[string]tensorMeta) error {
@@ -155,7 +156,7 @@ func l2normInto(dst, x []float32, eps float32) {
 
 // rmsNormGatedInPlace applies Qwen3_5RMSNormGated to x in place: x = weight *
 // (x*rsqrt(mean(x^2)+eps)) * silu(gate). weight is the plain (ones-init) gated-norm
-// weight — NOT the (1+w) form used by the ordinary RMSNorm layers.
+// weight â€” NOT the (1+w) form used by the ordinary RMSNorm layers.
 func rmsNormGatedInPlace(x, weight, gate []float32, eps float32) {
 	var ss float32
 	for _, v := range x {
@@ -480,7 +481,7 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 
 	t := s.phaseStart()
 	xp := mat.prep(xn)
-	// The four GDN in_proj weights all read the same normed input xp — group them so the
+	// The four GDN in_proj weights all read the same normed input xp â€” group them so the
 	// resident-Q4_K Metal kernel issues the q4_k-resident members (qkv, z) in a single command
 	// buffer (the per-token decode lever, #67); the tiny b/a fall back per-call.
 	in4 := mulGroup(mat, []string{
@@ -546,13 +547,13 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 	s.phaseEnd("qwen35_linear_step_qk_norm", t)
 	s.tapOp(l, "qk_norm", qNorm)
 	t = s.phaseStart()
-	// Each value head's Gated-DeltaNet update is self-contained — it reads the shared (now
+	// Each value head's Gated-DeltaNet update is self-contained â€” it reads the shared (now
 	// read-only) qNorm/kNorm and v, mutates only its OWN recurrent state lst.recurrent[h], and
 	// writes the disjoint core[h*vHd:(h+1)*vHd]. The kvmem/delta scratch is also
 	// indexed by head, so stolen chunks never share mutable scratch. The arithmetic per
 	// head is identical to the serial
 	// loop, so the result is BIT-IDENTICAL regardless of worker count (pinned by the bit-exact
-	// hybrid split-prefill/decode witness in qwen35_test.go) — this just spreads the nV
+	// hybrid split-prefill/decode witness in qwen35_test.go) â€” this just spreads the nV
 	// independent heads across cores, the per-token decode lever for the 75%-of-layers GDN scan.
 	headStep := func(h int) {
 		kvmem := w.kvmem[h*vHd : (h+1)*vHd]
@@ -622,8 +623,8 @@ func ResetGDNStepCounters() {
 }
 
 // gdnFMA32 returns a*b+c with a single rounding. Every Go implementation of the
-// Gated-DeltaNet recurrence in this package — ScalarHeadStep's decode reference
-// below and the Q8, Q4_K, chunked, and backend-agnostic prefill scans — must use
+// Gated-DeltaNet recurrence in this package â€” ScalarHeadStep's decode reference
+// below and the Q8, Q4_K, chunked, and backend-agnostic prefill scans â€” must use
 // it for its three accumulate sites (the kvmem reduction, the state update, and
 // the readout) so they stay bit-identical to the AVX-512 decode kernel, which
 // fuses exactly those three (VFMADD231PS in
@@ -640,7 +641,7 @@ func ResetGDNStepCounters() {
 //   - every float32 is exactly representable in float64, so the operands and the
 //     product are exact; and
 //   - `a*b+c` then needs up to ~2*24 bits, so float64 -> float32 IS a genuine
-//     double rounding — but Figueroa's theorem makes double rounding innocuous
+//     double rounding â€” but Figueroa's theorem makes double rounding innocuous
 //     whenever the intermediate precision satisfies p_int >= 2*p_final + 2. Here
 //     53 >= 2*24 + 2 = 50, so the two-step rounding is provably equal to a single
 //     correctly-rounded float32 FMA.
@@ -932,4 +933,22 @@ func ValidatePLEPrefillThroughput(tokPerSec float64) error {
 		return fmt.Errorf("model: prefill throughput %.2f tok/s below 300 tok/s floor", tokPerSec)
 	}
 	return nil
+}
+
+// Qwen35TrunkShiftNormNames lists the norm tensors that receive the +1.0 RMSNorm
+// shift: trunk norms only. MTP weights shipped alongside carry their own norm,
+// so mtp.* keys are filtered out before the trunk shift to avoid a double shift.
+// The MTP head math is unchanged.
+func Qwen35TrunkShiftNormNames(man map[string]tensorMeta) []string {
+	var out []string
+	for name := range man {
+		if strings.HasPrefix(name, "mtp.") {
+			continue
+		}
+		if strings.HasSuffix(name, "norm.weight") {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

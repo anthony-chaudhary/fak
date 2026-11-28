@@ -156,3 +156,37 @@ func TestAdaptiveDraftDepthModuleNaming(t *testing.T) {
 		t.Fatalf("empty module err=%v", e)
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestAdaptiveDraftDepthNgramGreedyVerify(t *testing.T) {
+	drafts := []int{1, 2, 3, 4}
+	argmax := []int{1, 2, 3, 9}
+	sampled := []int{1, 2, 7, 4}
+	if got := AdaptiveNgramVerifyAccepted(true, drafts, argmax, sampled); got != 3 {
+		t.Fatalf("forceGreedy accepted=%d want 3", got)
+	}
+	if got := AdaptiveNgramVerifyAccepted(false, drafts, argmax, sampled); got != 2 {
+		t.Fatalf("sampler accepted=%d want 2", got)
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestAdaptiveDraftDepthRingReplay(t *testing.T) {
+	r := NewAdaptiveDraftReplayRing(2)
+	calls := 0
+	f := func(v int) func() int { return func() int { calls++; return v } }
+	r.Verify("a", f(3))
+	if v, rep := r.Verify("a", f(99)); !rep || v != 3 || calls != 1 {
+		t.Fatalf("repeat v=%d replayed=%v calls=%d", v, rep, calls)
+	}
+	r.Verify("b", f(1))
+	r.Verify("c", f(2)) // evicts a
+	if v, rep := r.Verify("a", f(5)); rep || v != 5 || calls != 4 {
+		t.Fatalf("evicted v=%d replayed=%v calls=%d", v, rep, calls)
+	}
+	z := NewAdaptiveDraftReplayRing(0)
+	z.Verify("x", f(1))
+	if _, rep := z.Verify("x", f(1)); rep {
+		t.Fatal("zero capacity must not replay")
+	}
+}
