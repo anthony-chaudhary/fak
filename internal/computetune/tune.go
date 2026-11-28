@@ -18,6 +18,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/computebuild"
@@ -770,4 +771,90 @@ func DispatchMatMul(ctx context.Context, profile Profile, manifest Manifest, can
 	}
 	out, err := chosen.Run(ctx, profile)
 	return out, chosen.ID(), err
+}
+
+// Sanitizer gate: clean-room Go port of the AKO4X sanitizer-skill routing (pattern
+// MIT, templates/skills/sanitizer/SKILL.md@ce030ebd855d) and the Atrex gateway
+// sanitizer choices (alibaba/atrex-kernel-agent gateway.py:2160@dc388550ab6b,
+// Apache-2.0). Software-verified parser + routing only; a physical compute-sanitizer
+// run needs a CUDA host and is a follow-up.
+
+// SanitizerTool is one member of the closed compute-sanitizer tool set. There is
+// deliberately no leakcheck and no rcheck.
+type SanitizerTool string
+
+const (
+	SanitizerMemcheck  SanitizerTool = "memcheck"  // OOB / misaligned global, local, shared
+	SanitizerRacecheck SanitizerTool = "racecheck" // shared-memory WAW / RAW / WAR hazards
+	SanitizerInitcheck SanitizerTool = "initcheck" // uninitialized reads
+	SanitizerSynccheck SanitizerTool = "synccheck" // divergent barrier / invalid sync masks
+)
+
+// SanitizerFailureClass names what a failing kernel looks like.
+type SanitizerFailureClass string
+
+const (
+	FailureOutOfBounds   SanitizerFailureClass = "out_of_bounds"
+	FailureSharedHazard  SanitizerFailureClass = "shared_memory_hazard"
+	FailureUninitialized SanitizerFailureClass = "uninitialized_read"
+	FailureBarrierMisuse SanitizerFailureClass = "barrier_misuse"
+)
+
+// ErrSanitizerGate is the closed refusal for a kernel that fails its sanitizer gate
+// or whose failure class has no routed tool; callers match it with errors.Is.
+var ErrSanitizerGate = errors.New("computetune: sanitizer gate refused the kernel")
+
+// SanitizerToolFor routes a failure class to its compute-sanitizer --tool.
+func SanitizerToolFor(class SanitizerFailureClass) (SanitizerTool, error) {
+	switch class {
+	case FailureOutOfBounds:
+		return SanitizerMemcheck, nil
+	case FailureSharedHazard:
+		return SanitizerRacecheck, nil
+	case FailureUninitialized:
+		return SanitizerInitcheck, nil
+	case FailureBarrierMisuse:
+		return SanitizerSynccheck, nil
+	}
+	return "", fmt.Errorf("%w: unknown failure class %q", ErrSanitizerGate, class)
+}
+
+// SanitizerVerdict is the parsed outcome of one compute-sanitizer run.
+type SanitizerVerdict struct {
+	Tool   SanitizerTool `json:"tool"`
+	Errors int           `json:"errors"`
+	Clean  bool          `json:"clean"`
+}
+
+// ParseSanitizerSummary parses the trailing "ERROR SUMMARY: N errors" line (or a
+// racecheck "RACECHECK SUMMARY: N hazards") of compute-sanitizer output. Output
+// without a summary line is not clean: absence of evidence refuses.
+func ParseSanitizerSummary(tool SanitizerTool, out string) SanitizerVerdict {
+	v := SanitizerVerdict{Tool: tool}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "SUMMARY:") {
+			continue
+		}
+		var n int
+		if _, err := fmt.Sscanf(line[strings.Index(line, "SUMMARY:")+len("SUMMARY:"):], " %d", &n); err == nil {
+			v.Errors = n
+			v.Clean = n == 0
+			return v
+		}
+	}
+	return v
+}
+
+// RequireSanitizerClean is the gate: a kernel is timed only if every verdict is clean.
+func RequireSanitizerClean(verdicts ...SanitizerVerdict) error {
+	if len(verdicts) == 0 {
+		return fmt.Errorf("%w: no sanitizer verdict", ErrSanitizerGate)
+	}
+	for _, v := range verdicts {
+		if !v.Clean {
+			return fmt.Errorf("%w: %s reported %d error(s) or no summary", ErrSanitizerGate, v.Tool, v.Errors)
+		}
+	}
+	return nil
 }

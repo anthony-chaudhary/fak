@@ -802,3 +802,34 @@ func TestCompileStats(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestSanitizerGate(t *testing.T) {
+	want := map[SanitizerFailureClass]SanitizerTool{
+		FailureOutOfBounds: SanitizerMemcheck, FailureSharedHazard: SanitizerRacecheck,
+		FailureUninitialized: SanitizerInitcheck, FailureBarrierMisuse: SanitizerSynccheck,
+	}
+	for class, tool := range want {
+		got, err := SanitizerToolFor(class)
+		if err != nil || got != tool {
+			t.Fatalf("SanitizerToolFor(%s) = %s, %v; want %s", class, got, err, tool)
+		}
+	}
+	if _, err := SanitizerToolFor("leak"); !errors.Is(err, ErrSanitizerGate) {
+		t.Fatalf("unknown class must refuse, got %v", err)
+	}
+	clean := ParseSanitizerSummary(SanitizerMemcheck, "========= ERROR SUMMARY: 0 errors\n")
+	dirty := ParseSanitizerSummary(SanitizerRacecheck, "========= RACECHECK SUMMARY: 3 hazards displayed\n")
+	missing := ParseSanitizerSummary(SanitizerInitcheck, "kernel output only\n")
+	if !clean.Clean || dirty.Clean || dirty.Errors != 3 || missing.Clean {
+		t.Fatalf("parse mismatch: clean=%+v dirty=%+v missing=%+v", clean, dirty, missing)
+	}
+	if err := RequireSanitizerClean(clean); err != nil {
+		t.Fatalf("clean verdict must pass: %v", err)
+	}
+	for _, vs := range [][]SanitizerVerdict{{clean, dirty}, {missing}, nil} {
+		if err := RequireSanitizerClean(vs...); !errors.Is(err, ErrSanitizerGate) {
+			t.Fatalf("expected gate refusal for %+v, got %v", vs, err)
+		}
+	}
+}
