@@ -12098,6 +12098,11 @@
           "category": "incidental",
           "reason": "Typed error sentinel for refusal by the positioned ResolveQwen35GDNPackedInputPolicy constructor and its representation checks; it is not a separate policy, capability declaration or authorization decision.",
           "token": "ErrQwen35GDNPackedPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "ReplicaDispatch.WithPickPolicy builder method reused inside internal/gateway/kv_fleet_routing.go when bridging FleetCacheRouter; attaches existing PickPolicy rather than defining a new policy concept.",
+          "token": "WithPickPolicy"
         }
       ],
       "exclude": [
@@ -12383,6 +12388,7 @@
         "verifyTailPolicyMatrix",
         "windowReceipt",
         "windowResult",
+        "WithPickPolicy",
         "wsl_preflight"
       ],
       "known_tokens": [],
