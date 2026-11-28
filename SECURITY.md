@@ -63,7 +63,7 @@ The floor `fak` actually defends — these *are* security bugs:
 
 ## What is explicitly **out** of scope
 
-By design, and stated plainly in the README and `fak/CLAIMS.md`:
+By design, and stated plainly in the README and `CLAIMS.md`:
 
 - **Evading the injection *detector*.** The heuristic that *flags* suspicious tool
   results is **≈100% evadable by design** — it is a helpful bonus, never the floor. A

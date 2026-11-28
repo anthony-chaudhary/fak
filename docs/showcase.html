@@ -451,7 +451,7 @@
             <h4><span class="ix">flip 1</span> Policy in the kernel</h4>
             <p>
               The permission check rides the <em>same call path</em> as the tool call — one address
-              space, no IPC, <code>default-deny</code>. Refusing an irreversible action doesn't depend
+              space, no IPC, built-in <code>default_open</code> posture with configurable <code>default-deny</code> policy. Refusing an irreversible action doesn't depend
               on <em>catching</em> an attack; the lever was simply never wired up. When the check
               would crash or time out, the call doesn't run anyway — it fails <em>closed</em>.
             </p>
@@ -644,7 +644,7 @@ evict  <span class="d">[ system ][ query ]</span>            <span class="k">que
       </div>
       <div class="ch-box"><canvas id="hero" aria-label="Total time to serve the 50 by 5 agent fleet: tuned SOTA prefix cache 78 minutes vs fak fused 19 minutes"></canvas></div>
       <noscript>Tuned SOTA prefix cache: <b>78 min</b> · fak fused: <b>19 min</b> (≈4× faster). Enable JavaScript to see the chart.</noscript>
-      <p class="ch-note">Generated from <code>tools/hero_benchmark.data.json</code> · <code>fak v0.30.0</code> · single-stream decode, 7B. Every number traces to a commit + artifact in <a href="https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md" style="color:var(--fak)">BENCHMARK-AUTHORITY.md</a>.</p>
+      <p class="ch-note">Generated from <code>tools/hero_benchmark.data.json</code> · <code>fak v0.60.0</code> · single-stream decode, 7B. Every number traces to a commit + artifact in <a href="https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md" style="color:var(--fak)">BENCHMARK-AUTHORITY.md</a>.</p>
     </div>
 
     <div class="metrics">

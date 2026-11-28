@@ -43,10 +43,10 @@ gh attestation verify SHA256SUMS --repo anthony-chaudhary/fak
 ### Install with Go
 
 ```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@v0.59.0
+go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 ```
 
-This builds v0.59.0 from source and includes Inkling-2-Mini. On Apple Silicon
+This builds the latest release from source and includes Inkling-2-Mini. On Apple Silicon
 the Metal build requires CGo and the Xcode command line tools. Leave
 `CGO_ENABLED` at its default of 1. For a prebuilt binary, the installer
 downloads GitHub's Latest release. Set `FAK_VERSION=0.59.0` to pin it.
@@ -68,21 +68,21 @@ The plain `go build` above runs Inkling-2 on the host CPU. For the CUDA device p
 build the binary with the CUDA backend, then run the pinned GGUF:
 
 ```bash
-go run ./cmd/fak-dev build-cuda binary --arch sm_120 --cuda-home /opt/cuda ./cmd/fak ./fak
-./fak run /var/lib/fak/models/inkling2/gguf-mainline/Inkling-2-Mini-UD-Q3_K_XL.gguf
+go run ./cmd/fak-dev build-cuda binary --arch sm_120f --cuda-home /opt/cuda ./cmd/fak ./fak
+./fak run /path/to/Inkling-2-Mini-UD-Q3_K_XL.gguf
 ```
 
-- `--arch` is the card's compute capability (`sm_120` for RTX 50-series). `--cuda-home` is the CUDA Toolkit root.
-- `make cuda-build-sm120` builds only the kernel library (`libfakcuda.a`); it does not produce a runnable `./fak` with the CUDA backend. Use the `binary` command above.
+- `--arch` is the card's compute capability (`sm_120f` for RTX 50-series). `--cuda-home` is the CUDA Toolkit root.
+- `make cuda-build-sm120f` builds only the kernel library (`libfakcuda.a`); it does not produce a runnable `./fak` with the CUDA backend. Use the `binary` command above.
 - On WSL, if the link fails with `cannot find -lcuda`, set `LIBRARY_PATH=<cuda>/lib64/stubs` (or `lib/stubs`) for the build.
 - The binary needs the CUDA 12 runtime sonames (`libcudart.so.12`, `libcublas.so.12`, `libcublasLt.so.12`) on `LD_LIBRARY_PATH`.
 - Backend choice: with `--backend` omitted, a CUDA build selects CUDA for Inkling-2 when the binary's cubins cover the card. The run prints `fak run: <arch> backend=cuda layers=<N> passes=<N>` to stderr (`cmd/fak/run_inkling2.go`), where `<arch>` is the GGUF's `general.architecture` (`inkling2` or `inkling2_loop`), not a fixed `inkling2` string. A CPU fallback prints `backend=cpu`. Check that line before trusting any throughput number. Pass `--backend cuda` to fail loud instead of falling back to CPU.
 
-> **Windows note:** Build natively with `go build -o fak.exe ./cmd/fak`. Microsoft Defender Antivirus real-time ML detections repeatedly quarantine freshly compiled test binaries (the 2026-08-25 audit for issue #8919 supersedes the earlier Application-Control diagnosis — see [docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md)); run test suites inside WSL with `./test.ps1`. The binary itself runs natively without issues.
+> **Windows note:** Build natively with `go build -o fak.exe ./cmd/fak`. Microsoft Defender Antivirus real-time ML detections repeatedly quarantine freshly compiled test binaries; run test suites inside WSL with `./test.ps1`. The binary itself runs natively without issues.
 
 ---
 
-## Check a tool policy
+## 2. Check a tool policy
 
 ### Capability floor preflight checks
 
@@ -122,6 +122,8 @@ Inspect and validate the policy manifest:
 ./fak policy --check floor.json
 ```
 
+> **Windows PowerShell 5.1 note:** Output redirection (`>`) in Windows PowerShell 5.1 writes UTF-16LE with a BOM, and `Set-Content -Encoding utf8` writes UTF-8 with a BOM. Write `floor.json` as UTF-8 without a BOM (or use PowerShell 7 / `git-bash`) before running `fak policy --check floor.json`.
+
 See [`POLICY.md`](POLICY.md) for manifest schema details.
 
 ### Guard posture: default-open convenience with fail-closed safety
@@ -149,7 +151,7 @@ You can inspect or dump the strict fail-closed capability floor anytime with `fa
 
 <a id="gateway-setup"></a>
 
-## 3. Step 2: Gateway setup (Tier 1 — practical serving path)
+## 3. Gateway setup (Tier 1 — practical serving path)
 
 `fak serve` acts as an OpenAI-compatible gateway. **By default it is a raw inference
 pipe** — requests pass through with zero interception processing. Pass `--guard` (or
@@ -212,7 +214,7 @@ Clients can pass the key via `Authorization: Bearer <token>` or Anthropic's `x-a
 
 <a id="local-model-setup"></a>
 
-## 4. Step 3: Local serve (Tier 2 — in-kernel model execution)
+## 4. Local serve (Tier 2 — in-kernel model execution)
 
 [Install the build for your platform](INSTALL.md#local-model-setup). In a terminal, run:
 
@@ -227,18 +229,15 @@ At `you>`, ask a coding question. Leave the terminal open to use its chat
 completions endpoint at `http://127.0.0.1:8080/v1`. For a lightweight one-shot
 alternative, use `fak run smollm2` from the [quick start](README.md#try-fak).
 
-Apple Silicon has [hardware evidence for serving this model](docs/_witnesses/issue-9587-nativeadmission/).
-Fresh installs and the first reply from each release build are tracked in
-[the platform verification ticket](https://github.com/anthony-chaudhary/fak/issues/14508).
-
 To let fak choose a larger model based on available memory, run `fak up`.
 In v0.56.0 the automatic 70B download can return HTTP 401. Select the public
 27B model with `fak up --model 27B` (about 17 GB).
 
 Connect OpenCode or Pi to the chat completions endpoint from a second terminal
 with `fak opencode` or `fak pi`. Claude Code and Codex use the Messages and
-Responses endpoints. Start `fak serve --gguf qwen38:27b-q4` for those clients,
-then run `fak claude` or `fak codex`. See the [agent guides](docs/integrations/README.md).
+Responses endpoints. Start `fak up` (or `fak serve --gguf /path/to/model.gguf`)
+for those clients, then run `fak claude` or `fak codex`. See the
+[agent guides](docs/integrations/README.md).
 
 For fully local, private inference without external servers, `fak` can run pure-Go model forward passes and local GGUF models directly in-kernel on your silicon:
 
@@ -247,11 +246,11 @@ For fully local, private inference without external servers, `fak` can run pure-
 Run an interactive chat session directly in your terminal (no background server needed):
 
 ```bash
-# Pull and chat with Qwen3.8 (resumable download, auto-cached)
-fak run qwen38
+# Pull and chat with Inkling-2-Mini (resumable download, auto-cached)
+fak run inkling2-mini
 
-# Or run a one-shot query
-fak run qwen38 "Explain KV cache in one line"
+# Or run a one-shot query with SmolLM2
+fak run smollm2 "Explain KV cache in one line"
 ```
 
 ### B. Apple Silicon Metal GPU acceleration (`fak serve` + `fak chat`)
@@ -266,7 +265,7 @@ CPU reference archives cannot provide Metal acceleration. Ways to obtain a GPU b
 
 ```bash
 # Terminal 1: start the server (Metal auto-selected only when the build supports it and the device qualifies)
-fak serve --gguf qwen38:27b-q4
+fak up
 
 # Terminal 2: chat with it (auto-connects to local server and detects model)
 fak chat
@@ -274,7 +273,7 @@ fak chat
 
 Or connect explicitly if using custom ports or model routing:
 ```bash
-fak chat --base-url http://127.0.0.1:8080/v1 --model qwen38:27b-q4
+fak chat --base-url http://127.0.0.1:8080/v1 --model inkling2-mini
 ```
 
 For complete Apple Silicon unified memory sizing and multi-agent setup, see the [Mac local models guide](docs/fak/mac-local-models.md).
@@ -284,7 +283,7 @@ For complete Apple Silicon unified memory sizing and multi-agent setup, see the 
 Run an agent wrapped with a local GGUF model:
 
 ```bash
-fak guard --gguf qwen38:27b -- claude
+fak guard --gguf /path/to/Inkling-2-Mini-UD-Q3_K_XL.gguf -- claude
 ```
 
 The GGUF model loads directly into the kernel address space, adjudicates every tool call locally, and requires no external API keys or network requests.
@@ -298,7 +297,7 @@ Kernel developers working on native forward passes and KV-cache mechanics should
 | Symptom | Cause and resolution |
 |---|---|
 | `go: go.mod requires go >= 1.26` | Upgrade Go to 1.26+ or enable `GOTOOLCHAIN=auto`. |
-| `Application Control policy has blocked this file` (Windows) | Microsoft Defender Antivirus real-time ML quarantines fresh test executables (supersedes the older Application-Control diagnosis — see [docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md)). Run test suites in WSL with `./test.ps1`. |
+| `Application Control policy has blocked this file` (Windows) | Microsoft Defender Antivirus real-time ML quarantines fresh test executables. Run test suites in WSL with `./test.ps1`. |
 | `no such file testdata/...` | Run commands from the repository root, or supply an absolute path to `--trace`. |
 | `address already in use` | Another service is using port 8080. Choose a different port using `--addr`. |
 

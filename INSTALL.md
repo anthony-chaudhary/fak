@@ -49,10 +49,6 @@ includes the Apple Silicon Metal and Linux amd64 Vulkan archives, a checksum
 alongside each download, and the aggregate `SHA256SUMS`.
 A packaged backend still needs qualification on the actual model and GPU.
 
-The older v0.54.0 Metal archive was backfilled from its tagged source. Its
-SHA-256 checksum and ad-hoc signature are available. That backfill has no
-SLSA attestation or Apple notarization.
-
 ---
 
 ## Install options at a glance
@@ -66,19 +62,13 @@ gateway in production (auth, policy, sizing, service units) is
 | One-line installer | [`curl \| sh`](#1-one-line-installer-recommended) | Linux/macOS laptops and servers; verifies against `SHA256SUMS` |
 | Manual download | [release archive](#2-manual-download) | Air-gapped hosts; the Windows `.zip` |
 | `go install` | [`go install …@latest`](#about-go-install) | Go developers |
-| Homebrew | [`Formula/fak.rb`](Formula/fak.rb) | macOS (and Linuxbrew) |
+| Homebrew | [`Formula/fak.rb`](Formula/fak.rb) | macOS (and Linuxbrew); installs the CPU build |
 | Docker / OCI | [`ghcr.io/anthony-chaudhary/fak`](#3-docker) | Containers; published multi-arch `linux/amd64` + `linux/arm64` (plus the NVIDIA CUDA image) |
 | Docker Compose | [`examples/compose-ollama`](examples/compose-ollama) | fak + Ollama on one box |
 | Kubernetes / Helm | [`deploy/k8s`](deploy/k8s), [`deploy/helm`](deploy/helm) | Clusters — `kubectl apply -k deploy/k8s`; Helm from a checkout: `helm install fak deploy/helm/fak`; Helm without a clone: `helm install fak oci://ghcr.io/anthony-chaudhary/fak/charts/fak --version X.Y.Z` (Helm 3.8+) |
 | systemd | [`deploy/systemd`](deploy/systemd) | Linux service — hardened unit, `DynamicUser` |
 | winget | [`deploy/winget`](deploy/winget) | Windows — `winget install AnthonyChaudhary.Fak` (after the one-time submission) |
 | macOS launchd | [`tools/com.fak.serve-gateway.plist`](tools/com.fak.serve-gateway.plist) | macOS service |
-
-The Helm chart is also published to ghcr as an OCI artifact on every `v*` tag
-([`.github/workflows/release-helm.yml`](.github/workflows/release-helm.yml)),
-alongside the ghcr image — its first publish requires a one-time maintainer step
-to set the ghcr package visibility to public, the same posture as the
-[mcp-registry one-time publish step](docs/fak/mcp-registry.md).
 
 ---
 
@@ -157,7 +147,7 @@ SHA256SUMS                           # aggregate, all targets
 ### Linux / macOS
 
 ```sh
-VERSION=RELEASE_WITH_GPU_ASSETS
+VERSION=0.59.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')          # linux | darwin
 ARCH=$(uname -m); [ "$ARCH" = x86_64 ] && ARCH=amd64; [ "$ARCH" = aarch64 ] && ARCH=arm64
 case "${OS}/${ARCH}" in
@@ -278,9 +268,7 @@ Don't trust those counts — they move as verbs land, and none of the rest of th
 depends on them. Repository-development commands are not part of this runtime count; maintainers install the separate `fak-dev` artifact with `go install ./cmd/fak-dev`, and `fak-dev help` lists that surface. Derive your own runtime count: `fak help --all` prints the whole list
 for the build you actually installed, `fak help --all` prints every listed verb tagged with
 its tier, and `fak-dev index verbs --json` emits the same classification as machine-readable
-rows. The classification has exactly one home in the source
-([`internal/devindex/tiers.go`](internal/devindex/tiers.go)) and a test refuses a newly
-dispatched verb that no tier claims, so a verb cannot drift into the wrong column.
+rows. The classification is enforced by tests so a verb cannot drift into the wrong column.
 
 ### Is the dev tier a problem in a production image?
 
@@ -292,7 +280,7 @@ No — and the reason is specific, not reassurance:
 - **The container never invokes one.** The [`Dockerfile`](Dockerfile) sets
   `ENTRYPOINT ["/usr/local/bin/fak"]` with `CMD ["serve", "--addr", "0.0.0.0:8080"]`.
 - **Most dev verbs have nothing to act on outside a checkout.** They locate the repository
-  by searching upward for `dos.toml` / `go.mod`; a distroless image has neither.
+  by searching upward for `go.mod`; a distroless image has none.
 - **They cost bytes, not behaviour** — and the bytes are the ~13 MB the Docker section
   above already quotes.
 
