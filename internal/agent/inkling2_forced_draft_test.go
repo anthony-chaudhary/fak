@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -170,9 +171,12 @@ func TestInkling2ForcedDraftVocabAndStateProgression(t *testing.T) {
 		t.Fatal("newForcedDrafter returned nil for forced tool call")
 	}
 
-	// Prefix vocab must be cached once per planner.
+	// Prefix vocab and mask cache must be cached once per planner.
 	if p.forcedDraftVocab() != p.forcedDraftVocab() {
 		t.Fatal("forcedDraftVocab rebuilt PrefixVocab instead of reusing cached instance")
+	}
+	if p.forcedDraftMaskCache() == nil || p.forcedDraftMaskCache() != p.forcedDraftMaskCache() {
+		t.Fatal("forcedDraftMaskCache rebuilt or returned nil instead of reusing planner instance")
 	}
 
 	initIDs := d.NextForced(0, false)
@@ -310,5 +314,180 @@ func TestInkling2ForcedDraftCompleteUsesGenerateDraftAndPreservesParity(t *testi
 	}
 	if got := strings.TrimSpace(comp.Message.Content); got != "" {
 		t.Fatalf("forced tool completion leaked text content: %q", got)
+	}
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestInkling2ForcedDraftMaskLogitsEndToEnd(t *testing.T) {
+	tok := inkling2ForcedDraftTestTokenizer(t)
+	stopID, _ := tok.SpecialID(Inkling2EndOfTurnMarker)
+	tools := []ToolDef{{
+		Type: "function",
+		Function: ToolDefFunction{
+			Name: "read_file",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"path": {"type": "string"},
+					"offset": {"type": "integer"},
+					"strict": {"type": "boolean"}
+				},
+				"required": ["path", "offset", "strict"],
+				"additionalProperties": false
+			}`),
+		},
+	}}
+
+	cfg := model.Config{ModelType: "inkling2_loop", VocabSize: tok.Vocab()}
+	p, err := NewInkling2LoopPlanner(&inkling2StubDraftGen{}, tok, "inkling2-mini", cfg, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp := applySampleOpts(
+		WithToolChoice(json.RawMessage(`{"type":"function","function":{"name":"read_file"}}`)),
+		WithReasoningEffort(EffortTierNone),
+	)
+	d := p.newForcedDrafter(sp, tools)
+	if d == nil {
+		t.Fatal("newForcedDrafter returned nil")
+	}
+
+	// Backward compatibility + optional MaskLogits hook.
+	var _ Inkling2LoopDrafter = d
+	var masker interface{ MaskLogits([]float32) } = d
+
+	// 1. Initial forced jump: {"name":"read_file","arguments":{"path":"
+	initIDs := d.NextForced(0, false)
+	if len(initIDs) == 0 {
+		t.Fatal("expected initial forced tokens")
+	}
+	initText, err := tok.Decode(initIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initText != `{"name":"read_file","arguments":{"path":"` {
+		t.Fatalf("initText = %q", initText)
+	}
+
+	// In string body: stopID must be masked to -Inf, valid string tokens preserved.
+	logits := make([]float32, tok.Vocab())
+	for i := range logits {
+		logits[i] = 1.0
+	}
+	masker.MaskLogits(logits)
+	if !math.IsInf(float64(logits[stopID]), -1) {
+		t.Fatalf("expected stopID=%d masked to -Inf while inside string body, got %v", stopID, logits[stopID])
+	}
+	gIDs, err := tok.Encode("g")
+	if err != nil || len(gIDs) != 1 {
+		t.Fatalf("encode g: ids=%v err=%v", gIDs, err)
+	}
+	if math.IsInf(float64(logits[gIDs[0]]), -1) {
+		t.Fatalf("expected 'g' token to remain unmasked in string body")
+	}
+
+	// Emit go.mod" -> NextForced jumps to ,"offset":
+	valIDs, err := tok.Encode(`go.mod"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var forcedAfterQuote []int
+	for _, id := range valIDs {
+		forcedAfterQuote = d.NextForced(id, true)
+	}
+	midText, err := tok.Decode(forcedAfterQuote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if midText != `,"offset":` {
+		t.Fatalf("midText = %q, want ,\"offset\":", midText)
+	}
+
+	// At integer position: digits allowed, quote and stopID masked to -Inf.
+	for i := range logits {
+		logits[i] = 1.0
+	}
+	masker.MaskLogits(logits)
+	digitIDs, err := tok.Encode("4")
+	if err != nil || len(digitIDs) != 1 {
+		t.Fatalf("encode 4: ids=%v err=%v", digitIDs, err)
+	}
+	quoteIDs, err := tok.Encode(`"`)
+	if err != nil || len(quoteIDs) != 1 {
+		t.Fatalf("encode quote: ids=%v err=%v", quoteIDs, err)
+	}
+	if math.IsInf(float64(logits[digitIDs[0]]), -1) {
+		t.Fatalf("expected digit '4' unmasked at integer position")
+	}
+	if !math.IsInf(float64(logits[quoteIDs[0]]), -1) {
+		t.Fatalf("expected quote masked at integer position, got %v", logits[quoteIDs[0]])
+	}
+	if !math.IsInf(float64(logits[stopID]), -1) {
+		t.Fatalf("expected stopID masked at integer position, got %v", logits[stopID])
+	}
+
+	// Emit '4', then ',' triggers forced ,"strict":
+	if mid := d.NextForced(digitIDs[0], true); len(mid) != 0 {
+		t.Fatalf("expected no forced tokens mid-integer, got %v", mid)
+	}
+	commaIDs, err := tok.Encode(",")
+	if err != nil || len(commaIDs) != 1 {
+		t.Fatalf("encode comma: ids=%v err=%v", commaIDs, err)
+	}
+	strictPromptIDs := d.NextForced(commaIDs[0], true)
+	strictPromptText, err := tok.Decode(strictPromptIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strictPromptText != `"strict":` {
+		t.Fatalf("strictPromptText = %q, want \"strict\":", strictPromptText)
+	}
+
+	// At boolean position: 't' and 'f' allowed, digit '4' and stopID masked.
+	for i := range logits {
+		logits[i] = 1.0
+	}
+	masker.MaskLogits(logits)
+	tIDs, err := tok.Encode("t")
+	if err != nil || len(tIDs) != 1 {
+		t.Fatalf("encode t: ids=%v err=%v", tIDs, err)
+	}
+	if math.IsInf(float64(logits[tIDs[0]]), -1) {
+		t.Fatalf("expected 't' unmasked at boolean position")
+	}
+	if !math.IsInf(float64(logits[digitIDs[0]]), -1) {
+		t.Fatalf("expected digit '4' masked at boolean position, got %v", logits[digitIDs[0]])
+	}
+
+	// Emit "true" -> NextForced completes with }}
+	boolIDs, err := tok.Encode("true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tailIDs []int
+	for _, id := range boolIDs {
+		tailIDs = d.NextForced(id, true)
+	}
+	tailText, err := tok.Decode(tailIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tailText != `}}` {
+		t.Fatalf("tailText = %q, want }}", tailText)
+	}
+	if !d.state.IsComplete() {
+		t.Fatal("expected state complete after }}")
+	}
+
+	// Once complete: stopID MUST be preserved while non-whitespace tokens are masked to -Inf.
+	for i := range logits {
+		logits[i] = 1.0
+	}
+	masker.MaskLogits(logits)
+	if math.IsInf(float64(logits[stopID]), -1) {
+		t.Fatalf("expected stopID=%d preserved when state.IsComplete(), got -Inf", stopID)
+	}
+	if !math.IsInf(float64(logits[tIDs[0]]), -1) {
+		t.Fatalf("expected non-whitespace token 't' masked when complete, got %v", logits[tIDs[0]])
 	}
 }

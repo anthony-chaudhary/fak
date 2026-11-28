@@ -105,6 +105,7 @@ type Inkling2LoopPlanner struct {
 	mu            sync.Mutex
 	vocabOnce     sync.Once
 	prefixVocab   *toolgrammar.PrefixVocab
+	maskCache     *toolgrammar.MaskCache
 }
 
 var _ StreamingPlanner = (*Inkling2LoopPlanner)(nil)

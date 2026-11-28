@@ -43,6 +43,26 @@ func (c *nativeStructuredConstraint) acceptEmitted(token, vocab int, stops map[i
 	return c.accept(token, effective)
 }
 
+// proposeStructuredForcedTokens returns a linear draft proposal from forced
+// grammar bytes when the active structured constraint is in its JSON phase and
+// exposes ForcedTokens.
+func proposeStructuredForcedTokens(structured *nativeStructuredConstraint, vocabSize, maxTokens int) model.DraftProposal {
+	if structured == nil || structured.phase != nativeStructuredJSON || vocabSize <= 0 || maxTokens <= 0 {
+		return model.DraftProposal{}
+	}
+	proposer, ok := structured.mask.(interface {
+		ForcedTokens(history []int, vocabSize, maxTokens int) []int
+	})
+	if !ok {
+		return model.DraftProposal{}
+	}
+	tokens := proposer.ForcedTokens(structured.history, vocabSize, maxTokens)
+	if len(tokens) == 0 {
+		return model.DraftProposal{}
+	}
+	return model.NewLinearProposal(tokens, nil)
+}
+
 // verifyStructuredSpeculativeRound adapts DeepInfer's per-position mask-before-
 // verification and transactional grammar progress to the native linear verifier.
 // Source: deepinfer/structure_output/matcher.py and model_executor/layers/sampler.py

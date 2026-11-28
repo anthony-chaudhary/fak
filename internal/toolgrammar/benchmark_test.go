@@ -478,6 +478,7 @@ func TestBenchmarkSanity(t *testing.T) {
 		{"Compile_DiscriminatedUnion", BenchmarkCompile_DiscriminatedUnion},
 		{"GrammarGeneration_Dialects", BenchmarkGrammarGeneration_Dialects},
 		{"TokenValidation_MatchLiteral_Snippet", BenchmarkTokenValidation_MatchLiteral_Snippet},
+		{"ForcedPrefixJumpForwardWithMask", BenchmarkForcedPrefixJumpForwardWithMask},
 	}
 
 	for _, bm := range benchmarks {
@@ -486,4 +487,79 @@ func TestBenchmarkSanity(t *testing.T) {
 			t.Errorf("benchmark %s performed 0 iterations", bm.name)
 		}
 	}
+}
+
+// BenchmarkForcedPrefixJumpForwardWithMask measures jump-forward drafting and logit masking
+// throughput across branching positions.
+func BenchmarkForcedPrefixJumpForwardWithMask(b *testing.B) {
+	cg, err := Compile([]byte(benchUnionSchemaJSON), GrammarOptions{Dialect: DialectJSON, IncludeToolTag: true})
+	if err != nil {
+		b.Fatalf("Compile failed: %v", err)
+	}
+	var toks []VocabToken
+	var id int32
+	for c := 0; c < 256; c++ {
+		toks = append(toks, VocabToken{ID: id, Text: string([]byte{byte(c)})})
+		id++
+	}
+	for _, s := range []string{
+		`{"name":"`, `edit_file`, `","arguments":{"`, `mode`, `":"`, `replace`, `view`, `write`,
+		`","`, `path`, `old_string`, `new_string`, `content`, `"}}`, `main.go`,
+	} {
+		toks = append(toks, VocabToken{ID: id, Text: s})
+		id++
+	}
+	vocab := NewPrefixVocab(toks)
+	mc := NewMaskCache(toks)
+	logits := make([]float32, len(toks))
+
+	b.Run("JumpForwardOnly", func(b *testing.B) {
+		var dst []int32
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			st, _ := NewJumpForwardState(cg)
+			dst, _ = ForcedDraftInto(st, vocab, dst[:0])
+			_ = st.AdvanceText(`{"name":"edit_file","arguments":{"mode":"`)
+			_ = st.AdvanceText(`view"`)
+			dst, _ = ForcedDraftInto(st, vocab, dst[:0])
+			benchSinkBool = len(dst) > 0
+		}
+	})
+
+	b.Run("JumpForwardAndMaskLogits", func(b *testing.B) {
+		var dst []int32
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			st, _ := NewJumpForwardState(cg)
+			dst, _ = ForcedDraftInto(st, vocab, dst[:0])
+			_ = st.AdvanceText(`{"name":"edit_file","arguments":{"mode":"`)
+			for j := range logits {
+				logits[j] = 1.0
+			}
+			st.MaskLogits(toks, logits)
+			_ = st.AdvanceText(`view"`)
+			dst, _ = ForcedDraftInto(st, vocab, dst[:0])
+			benchSinkBool = len(dst) > 0
+		}
+	})
+
+	b.Run("JumpForwardAndMaskCache", func(b *testing.B) {
+		var dst []int32
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			st, _ := NewJumpForwardState(cg)
+			dst, _ = ForcedDraftInto(st, vocab, dst[:0])
+			_ = st.AdvanceText(`{"name":"edit_file","arguments":{"mode":"`)
+			for j := range logits {
+				logits[j] = 1.0
+			}
+			mc.MaskLogits(st, logits)
+			_ = st.AdvanceText(`view"`)
+			dst, _ = ForcedDraftInto(st, vocab, dst[:0])
+			benchSinkBool = len(dst) > 0
+		}
+	})
 }

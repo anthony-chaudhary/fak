@@ -1,8 +1,10 @@
 package grammar
 
 import (
+	"bytes"
 	"errors"
 	"math"
+	"sort"
 	"sync"
 )
 
@@ -222,15 +224,7 @@ func (m *JSONSchemaMask) admittedTokensLinear(state jsonMaskState, vocabSize int
 // sorted-vocabulary trie: consecutive tokens reuse the cursor state of their
 // shared byte prefix, and a dead prefix rejects its whole subtree.
 func (m *JSONSchemaMask) fillTrie(state jsonMaskState, vocabSize int) []uint64 {
-	m.cacheMu.Lock()
-	t := m.trie
-	m.cacheMu.Unlock()
-	if t == nil || t.vocabSize != vocabSize {
-		t = newVocabTrie(vocabSize, m.tokenBytes)
-		m.cacheMu.Lock()
-		m.trie = t
-		m.cacheMu.Unlock()
-	}
+	t := m.ensureTrie(vocabSize)
 	n := len(state.cursors)
 	flat := make([]jsonCursor, n*(t.maxLen+1))
 	slot := func(d int) []jsonCursor { return flat[d*n : (d+1)*n] }
@@ -250,6 +244,121 @@ func (m *JSONSchemaMask) fillTrie(state jsonMaskState, vocabSize int) []uint64 {
 		bits[id>>6] |= 1 << (uint(id) & 63)
 	})
 	return bits
+}
+
+func (m *JSONSchemaMask) ensureTrie(vocabSize int) *vocabTrie {
+	m.cacheMu.Lock()
+	t := m.trie
+	m.cacheMu.Unlock()
+	if t == nil || t.vocabSize != vocabSize {
+		t = newVocabTrie(vocabSize, m.tokenBytes)
+		m.cacheMu.Lock()
+		m.trie = t
+		m.cacheMu.Unlock()
+	}
+	return t
+}
+
+const defaultForcedBytesMax = 64
+
+// ForcedBytes advances a trial copy of the active cursors from history while
+// exactly one of the 256 byte values keeps at least one cursor alive, bounded
+// by maxBytes (default 64 when <= 0).
+func (m *JSONSchemaMask) ForcedBytes(history []int, maxBytes int) []byte {
+	if m == nil || m.dec == nil {
+		return nil
+	}
+	state, ok := m.stateAfter(history)
+	if !ok {
+		return nil
+	}
+	return m.forcedBytesFromState(state, maxBytes)
+}
+
+func (m *JSONSchemaMask) forcedBytesFromState(state jsonMaskState, maxBytes int) []byte {
+	if maxBytes <= 0 {
+		maxBytes = defaultForcedBytesMax
+	}
+	cur := make([]jsonCursor, len(state.cursors))
+	copy(cur, state.cursors)
+	trial := make([]jsonCursor, len(cur))
+	var out []byte
+	for len(out) < maxBytes {
+		var forcedByte byte
+		aliveCount := 0
+		for b := 0; b < 256; b++ {
+			copy(trial, cur)
+			anyAlive := false
+			for i := range trial {
+				if m.programs[i].step(&trial[i], byte(b)) {
+					anyAlive = true
+				}
+			}
+			if anyAlive {
+				aliveCount++
+				if aliveCount > 1 {
+					break
+				}
+				forcedByte = byte(b)
+			}
+		}
+		if aliveCount != 1 {
+			break
+		}
+		out = append(out, forcedByte)
+		for i := range cur {
+			m.programs[i].step(&cur[i], forcedByte)
+		}
+	}
+	return out
+}
+
+// ForcedTokens greedily tokenizes the deterministic forced-byte prefix from
+// history using the sorted-vocabulary trie over tokenBytes, returning at most
+// maxTokens token IDs.
+func (m *JSONSchemaMask) ForcedTokens(history []int, vocabSize, maxTokens int) []int {
+	if m == nil || m.dec == nil || vocabSize <= 0 || maxTokens <= 0 {
+		return nil
+	}
+	m.cacheDecoded(vocabSize)
+	forced := m.ForcedBytes(history, 0)
+	if len(forced) == 0 {
+		return nil
+	}
+	t := m.ensureTrie(vocabSize)
+	if t.maxLen <= 0 || len(t.pieces) == 0 {
+		return nil
+	}
+	var tokens []int
+	rem := forced
+	for len(rem) > 0 && len(tokens) < maxTokens {
+		matched := -1
+		matchedLen := 0
+		limit := min(len(rem), t.maxLen)
+		for l := limit; l >= 1; l-- {
+			prefix := rem[:l]
+			pos := sort.Search(len(t.pieces), func(i int) bool {
+				return bytes.Compare(t.pieces[i], prefix) >= 0
+			})
+			for pos < len(t.pieces) && bytes.Equal(t.pieces[pos], prefix) {
+				if t.ids[pos] != m.eos {
+					matched = t.ids[pos]
+					matchedLen = l
+					break
+				}
+				pos++
+			}
+			if matched >= 0 {
+				break
+			}
+		}
+		if matched < 0 {
+			break
+		}
+		tokens = append(tokens, matched)
+		rem = rem[matchedLen:]
+	}
+	return tokens
 }
 
 func maskAll(logits []float32) {

@@ -20,10 +20,7 @@ type ForcedDrafter interface {
 	NextForced(token int, hasToken bool) []int
 }
 
-// BuildForcedDraftVocab constructs an immutable tokenizer prefix trie excluding
-// stop and special tokens for deterministic grammar-constrained jump-forward
-// drafting.
-func BuildForcedDraftVocab(tok *tokenizer.Tokenizer, stops map[int]bool) *toolgrammar.PrefixVocab {
+func forcedDraftTokens(tok *tokenizer.Tokenizer, stops map[int]bool) []toolgrammar.VocabToken {
 	if tok == nil {
 		return nil
 	}
@@ -47,10 +44,28 @@ func BuildForcedDraftVocab(tok *tokenizer.Tokenizer, stops map[int]bool) *toolgr
 		}
 		tokens = append(tokens, toolgrammar.VocabToken{ID: int32(id), Text: piece})
 	}
+	return tokens
+}
+
+// BuildForcedDraftVocab constructs an immutable tokenizer prefix trie excluding
+// stop and special tokens for deterministic grammar-constrained jump-forward
+// drafting.
+func BuildForcedDraftVocab(tok *tokenizer.Tokenizer, stops map[int]bool) *toolgrammar.PrefixVocab {
+	tokens := forcedDraftTokens(tok, stops)
 	if len(tokens) == 0 {
 		return nil
 	}
 	return toolgrammar.NewPrefixVocab(tokens)
+}
+
+// BuildForcedDraftVocabAndMaskCache constructs both the immutable prefix trie
+// and matching MaskCache in a single vocabulary scan.
+func BuildForcedDraftVocabAndMaskCache(tok *tokenizer.Tokenizer, stops map[int]bool) (*toolgrammar.PrefixVocab, *toolgrammar.MaskCache) {
+	tokens := forcedDraftTokens(tok, stops)
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	return toolgrammar.NewPrefixVocab(tokens), toolgrammar.NewMaskCache(tokens)
 }
 
 // ForcedDraftToolSpec returns the parameter schema and tool name when the
@@ -87,18 +102,25 @@ func HasSamplingSideEffects(sp SampleParams) bool {
 }
 
 type forcedDrafter struct {
-	vocab    *toolgrammar.PrefixVocab
-	state    *toolgrammar.JumpForwardState
-	decode   func([]int) (string, error)
-	stops    map[int]bool
-	dst      []int32
-	disabled bool
+	vocab     *toolgrammar.PrefixVocab
+	maskCache *toolgrammar.MaskCache
+	state     *toolgrammar.JumpForwardState
+	decode    func([]int) (string, error)
+	stops     map[int]bool
+	dst       []int32
+	disabled  bool
 }
 
 // NewForcedDrafter builds a per-turn deterministic jump-forward drafter for
 // forced-tool requests when token penalties are unset and a compiled grammar
 // state can be initialized. Returns nil when forced drafting is ineligible.
 func NewForcedDrafter(decode func([]int) (string, error), vocab *toolgrammar.PrefixVocab, stops map[int]bool, sp SampleParams, tools []ToolDef) *forcedDrafter {
+	return NewForcedDrafterWithMask(decode, vocab, nil, stops, sp, tools)
+}
+
+// NewForcedDrafterWithMask builds a per-turn deterministic jump-forward drafter
+// paired with a reusable MaskCache for grammar-constrained logit masking.
+func NewForcedDrafterWithMask(decode func([]int) (string, error), vocab *toolgrammar.PrefixVocab, maskCache *toolgrammar.MaskCache, stops map[int]bool, sp SampleParams, tools []ToolDef) *forcedDrafter {
 	if decode == nil || vocab == nil || HasSamplingSideEffects(sp) {
 		return nil
 	}
@@ -119,11 +141,49 @@ func NewForcedDrafter(decode func([]int) (string, error), vocab *toolgrammar.Pre
 		return nil
 	}
 	return &forcedDrafter{
-		vocab:  vocab,
-		state:  state,
-		decode: decode,
-		stops:  stops,
+		vocab:     vocab,
+		maskCache: maskCache,
+		state:     state,
+		decode:    decode,
+		stops:     stops,
 	}
+}
+
+// MaskLogits masks invalid token logits to -Inf according to the current
+// grammar state while preserving stop/EOS tokens once complete.
+func (d *forcedDrafter) MaskLogits(logits []float32) {
+	if d == nil || d.disabled || d.state == nil || d.maskCache == nil || len(logits) == 0 {
+		return
+	}
+	if d.state.IsComplete() {
+		type savedLogit struct {
+			id  int
+			val float32
+		}
+		var stackSaved [8]savedLogit
+		var extra []savedLogit
+		n := 0
+		for id := range d.stops {
+			if id < 0 || id >= len(logits) {
+				continue
+			}
+			if n < len(stackSaved) {
+				stackSaved[n] = savedLogit{id: id, val: logits[id]}
+				n++
+			} else {
+				extra = append(extra, savedLogit{id: id, val: logits[id]})
+			}
+		}
+		d.maskCache.MaskLogits(d.state, logits)
+		for i := 0; i < n; i++ {
+			logits[stackSaved[i].id] = stackSaved[i].val
+		}
+		for _, s := range extra {
+			logits[s.id] = s.val
+		}
+		return
+	}
+	d.maskCache.MaskLogits(d.state, logits)
 }
 
 func (d *forcedDrafter) NextForced(token int, hasToken bool) []int {

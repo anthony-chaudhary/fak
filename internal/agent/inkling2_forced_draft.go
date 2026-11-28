@@ -18,9 +18,18 @@ func (p *Inkling2LoopPlanner) forcedDraftVocab() *toolgrammar.PrefixVocab {
 		return nil
 	}
 	p.vocabOnce.Do(func() {
-		p.prefixVocab = BuildForcedDraftVocab(p.tok, p.stops)
+		p.prefixVocab, p.maskCache = BuildForcedDraftVocabAndMaskCache(p.tok, p.stops)
 	})
 	return p.prefixVocab
+}
+
+// forcedDraftMaskCache returns the planner-owned reusable MaskCache built
+// alongside forcedDraftVocab.
+func (p *Inkling2LoopPlanner) forcedDraftMaskCache() *toolgrammar.MaskCache {
+	if p.forcedDraftVocab() == nil {
+		return nil
+	}
+	return p.maskCache
 }
 
 func forcedDraftToolSpec(sp SampleParams, tools []ToolDef) (params json.RawMessage, toolName string) {
@@ -41,5 +50,5 @@ func (p *Inkling2LoopPlanner) newForcedDrafter(sp SampleParams, tools []ToolDef)
 	if vocab == nil {
 		return nil
 	}
-	return NewForcedDrafter(p.tok.Decode, vocab, p.stops, sp, tools)
+	return NewForcedDrafterWithMask(p.tok.Decode, vocab, p.forcedDraftMaskCache(), p.stops, sp, tools)
 }

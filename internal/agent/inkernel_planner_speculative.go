@@ -829,11 +829,20 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		// and bonus advance. Nested target accounting is overlapping, not additive.
 		var diagnosticStart time.Time
 		var proposal model.DraftProposal
-		if proposalGenerator != nil {
-			roundDraft := maxDraft
-			if remaining := maxNew - gen; roundDraft > remaining {
-				roundDraft = remaining
+		roundDraft := maxDraft
+		if remaining := maxNew - gen; roundDraft > remaining {
+			roundDraft = remaining
+		}
+		if structured != nil && p.structuredSpeculationSupported() && roundDraft > 0 {
+			forcedStart := diagnosticNow()
+			if forced := proposeStructuredForcedTokens(structured, len(curLogits), roundDraft); len(forced.Tokens) > 0 {
+				diagnosticStart = forcedStart
+				attempt.begin(diagnosticStart, gen)
+				attempt.draftFinished(diagnosticNow().Sub(diagnosticStart), nil)
+				proposal = forced
 			}
+		}
+		if len(proposal.Tokens) == 0 && proposalGenerator != nil {
 			var propErr error
 			diagnosticStart = diagnosticNow()
 			attempt.begin(diagnosticStart, gen)

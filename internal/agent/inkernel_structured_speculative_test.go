@@ -40,7 +40,8 @@ func (p *structuredSpeculativeProbe) Propose(_ context.Context, committed []int,
 func TestNativeStructuredSpeculativeCompleteAndStream(t *testing.T) {
 	p := nativeStructuredTestPlanner(t)
 	temperature := 0.0
-	options := []SampleOpt{WithResponseFormat(nativeStructuredTestFormat), WithTemperature(&temperature), WithPerTokenStream(true)}
+	branchingFormat := json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object","properties":{"answer":{"type":"string","enum":["aaa","aab","aba","abb","baa","bab","bba","bbb"]}},"required":["answer"],"additionalProperties":false}}}`)
+	options := []SampleOpt{WithResponseFormat(branchingFormat), WithTemperature(&temperature), WithPerTokenStream(true)}
 	messages := []Message{{Role: RoleUser, Content: "Return the requested object."}}
 	serial, err := p.Complete(context.Background(), messages, nil, options...)
 	if err != nil {
@@ -53,11 +54,7 @@ func TestNativeStructuredSpeculativeCompleteAndStream(t *testing.T) {
 	proposalError := errors.New("draft unavailable")
 	for _, mode := range []string{"invalid", "accepted", "empty", "error", "tree"} {
 		t.Run(mode, func(t *testing.T) {
-			base := -1
 			probe := &structuredSpeculativeProbe{propose: func(committed []int, limit int) (model.DraftProposal, error) {
-				if base < 0 {
-					base = len(committed)
-				}
 				switch mode {
 				case "tree":
 					return model.DraftProposal{Tree: &model.CandidateTree{Nodes: []model.CandidateNode{{Token: want[0], Parent: -1}}}}, nil
@@ -68,7 +65,13 @@ func TestNativeStructuredSpeculativeCompleteAndStream(t *testing.T) {
 				case "invalid":
 					return model.NewLinearProposal([]int{p.m.Cfg.VocabSize + 1}, nil), nil
 				}
-				at := len(committed) - base
+				at := 0
+				for k := min(len(committed), len(want)); k >= 0; k-- {
+					if slices.Equal(committed[len(committed)-k:], want[:k]) {
+						at = k
+						break
+					}
+				}
 				if at >= len(want) {
 					return model.DraftProposal{}, nil
 				}
@@ -84,7 +87,6 @@ func TestNativeStructuredSpeculativeCompleteAndStream(t *testing.T) {
 				t.Fatalf("proposals=%d content=%q stream=%q want=%q", probe.calls, got.Message.Content, streamed.String(), serial.Message.Content)
 			}
 			// Reusing the planner must not reuse the previous request's matcher.
-			base = -1
 			again, err := p.Complete(context.Background(), messages, nil, options...)
 			if err != nil || again.Message.Content != serial.Message.Content {
 				t.Fatalf("fresh request=%v err=%v", again, err)
@@ -248,5 +250,58 @@ func TestNativeStructuredSpeculativeExclusions(t *testing.T) {
 	p.metal = true
 	if p.structuredSpeculationSupported() {
 		t.Fatal("admitted Metal")
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestNativeStructuredSpeculativeForcedBytesAcceptance(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	stops := StopIDs(p.tok, p.m.Cfg)
+	singleEnumFormat := json.RawMessage(`{"type":"json_schema","json_schema":{"name":"status","strict":true,"schema":{"type":"object","properties":{"status":{"type":"string","enum":["ok"]}},"required":["status"],"additionalProperties":false}}}`)
+	c, err := p.newNativeStructuredConstraint(singleEnumFormat, stops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := proposeStructuredForcedTokens(c, p.m.Cfg.VocabSize, 32)
+	if len(proposal.Tokens) == 0 {
+		t.Fatal("proposeStructuredForcedTokens returned empty proposal")
+	}
+	decoded, err := p.tok.Decode(proposal.Tokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded != `{"status":"ok"}` {
+		t.Fatalf("forced proposal decoded = %q, want %q", decoded, `{"status":"ok"}`)
+	}
+
+	s := p.m.NewSession()
+	p.configureNativeSession(s)
+	defer s.Close()
+	s.Prefill([]int{1, 2, 3})
+	last := make([]float32, p.m.Cfg.VocabSize)
+	result, err := verifyStructuredSpeculativeRound(context.Background(), s, proposal, last, c, stops)
+	if err != nil {
+		t.Fatalf("verifyStructuredSpeculativeRound: %v", err)
+	}
+	if result.NumAccepted != len(proposal.Tokens) || result.RollbackKVCount != 0 || !slices.Equal(result.AcceptedTokens, proposal.Tokens) {
+		t.Fatalf("accepted=%d/%d rollback=%d tokens=%v want=%v", result.NumAccepted, len(proposal.Tokens), result.RollbackKVCount, result.AcceptedTokens, proposal.Tokens)
+	}
+
+	// End-to-end planner loop: forced-bytes proposer completes the single-variant
+	// enum without relying on the external draft probe.
+	probe := &structuredSpeculativeProbe{propose: func([]int, int) (model.DraftProposal, error) {
+		return model.DraftProposal{}, nil
+	}}
+	p.EnableSpeculativeDecoding(probe, 16)
+	temperature := 0.0
+	got, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "Return status."}}, nil, WithResponseFormat(singleEnumFormat), WithTemperature(&temperature))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Message.Content != `{"status":"ok"}` {
+		t.Fatalf("Complete content = %q, want %q", got.Message.Content, `{"status":"ok"}`)
+	}
+	if probe.calls != 0 {
+		t.Fatalf("expected forced-bytes proposer to cover single-variant enum without draft probe, got %d probe calls", probe.calls)
 	}
 }
