@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2023-2024 SGLang Team
-// Ownership adaptation of SGLang at 181380682b50f4606d1a09df3cbbbfc21de931e3,
 // described in THIRD_PARTY_NOTICES.md ("SGLang").
 package radixkv
 

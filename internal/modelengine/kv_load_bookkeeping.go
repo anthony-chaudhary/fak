@@ -8,7 +8,6 @@ import (
 
 // Adapted from vLLM PR #65831 "[Perf][Core] Reduce per-block CPU cost of KV
 // block allocation and caching" (vllm-project/vllm, merged at revision
-// 518c624a1c731cfc6c73369ced6351cb03754ddf, Apache-2.0; the pinned sources are
 // the v1 core block pool and KV cache manager modules): host-side bookkeeping
 // for an async KV load that starts, is promoted to running, and finishes used
 // to grow linearly with prompt length because each scheduler step re-derived

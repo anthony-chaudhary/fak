@@ -1,7 +1,6 @@
 // NOTICE / attribution:
 // Adapted from ai-dynamo/aiperf, src/aiperf/kubernetes/_memory_estimator/
 // (constants.py, utils.py, components.py, estimates.py, estimator.py) at
-// ab610add4e8876fca223197596c728e17365f381. License: Apache-2.0
 // (SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 // All rights reserved.).
 //

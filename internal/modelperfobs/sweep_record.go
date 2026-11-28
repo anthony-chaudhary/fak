@@ -6,7 +6,6 @@
 // (BenchmarkMetrics + calculate_metrics at :590/:1140-1210) and
 // src/llm_optimizer/cli.py (the enhanced result structure and best_configs
 // selection at :142-170/:558-570) at
-// 7be87d776e60a978516a2ae53e4a4ff745d04c20 (Apache-2.0). Re-expressed in
 // idiomatic Go; no upstream code is copied. Study note:
 // docs/research/STUDY-PRODUCTION-SCALING-ECON-2026-11-07.md, candidate
 // llm-optimizer-4.

@@ -1,4 +1,3 @@
-// relaunch.go — the pure decision core of the RELAUNCH-OUTCOME audit (the Go port of
 // tools/resume_relaunch_audit.py's verdict/fold half; #1343/#1346 scope bullet
 // "fak resume audit").
 //

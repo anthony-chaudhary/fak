@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/metrics/accumulator.py:324@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): phase-scoped masking by categorical tag rather
 // than wall-clock windowing.
 package perfledger

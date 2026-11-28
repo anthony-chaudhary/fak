@@ -158,11 +158,10 @@ type perfStatRecord struct {
 // the raw event names, integer values, scheduling metadata, and capture bounds.
 //
 // Pinned field borrow:
-//   - Intel PCM at a211c95843bbe161bdaa8e5feb58cfcf6af1570d uses two uncore
-//     snapshots and an explicit 64-byte CAS conversion. We borrow those
-//     principles, not any PCM CSV layout.
-//   - Linux perf at 3ba13f5e7180c034b0a1ef7e052fb780856b134e documents the
-//     perf stat JSON keys and CSV field order accepted here.
+//
+//	snapshots and an explicit 64-byte CAS conversion. We borrow those
+//	principles, not any PCM CSV layout.
+//	perf stat JSON keys and CSV field order accepted here.
 func ImportHostControllerCounters(r io.Reader, o HostControllerImportOptions) (BandwidthCollection, error) {
 	if r == nil {
 		return BandwidthCollection{}, errors.New("host controller counter input is nil")

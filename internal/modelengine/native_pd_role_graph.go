@@ -7,12 +7,10 @@ package modelengine
 //
 // Concept adaptation (Apache-2.0):
 //   - vllm-project/vllm (vllm/v1/core/kv_cache_planning.py:1337-1383,1589-1634
-//     and vllm/v1/core/sched/scheduler.py:1383-1492 @e7473bf6862289f0647d1f4b01498288b181e063):
 //     group decode lanes by actual (stage, rank) KV geometry, never merge incompatible
 //     KV geometries, reserve receiver capacity before remote KV load, and treat
 //     waiting-for-remote-KV as non-progress until complete compatible stage/rank KV arrives.
 //   - deepseek-ai/DeepInfer (csrc/engine/scheduler.hpp:288-340
-//     @9bd9cf243fc53ef9afbf8f04d391d989117d6ab9):
 //     separate prefill/decode role branches.
 //
 // Clean-room Go implementation; no upstream code copied. Does not implement or

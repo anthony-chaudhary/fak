@@ -2,7 +2,6 @@ package modelengine
 
 // Adapted from vllm-project/vllm (Apache-2.0; see THIRD_PARTY_NOTICES.md):
 //   - Deferred KV block frees fence: vllm/v1/core/sched/scheduler.py:455-462,
-//     1690-1694, 2974-2990 at revision ae065918640a198a56f6f17eb45e251c3229fe41
 //     (FIFO of (fence_seq, blocks) gated on processed_step_seq >= fence_seq,
 //     reverse drain within each entry so tail blocks evict first).
 //   - AsyncScheduler output-placeholder protocol:

@@ -4,8 +4,6 @@
 //
 // NOTICE / attribution: ported from lm-sys/RouteLLM, routellm/evals/evaluate.py
 // (functions auc_metric + apgr_metric, and the APGR-descending ranking in
-// generate_results), pinned at 0b64fdafe049e596a3f5657c219329f24af24198
-// (Apache-2.0). Re-expressed in idiomatic Go; no upstream code is copied.
 package modelroute
 
 import (

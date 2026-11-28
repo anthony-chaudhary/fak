@@ -1,6 +1,4 @@
 // Ported from github.com/dgraph-io/ristretto (sketch.go, policy.go, z/bbloom.go
-// @a56a38ebeec716a0da3d20a46b417ca2ab7c81f4), Apache-2.0.
-// SPDX-License-Identifier: Apache-2.0
 
 package radixkv
 

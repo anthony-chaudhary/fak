@@ -2,7 +2,6 @@
 package perfledger
 
 // Adversarial spec tests for the adjusted-percentile / derived-latency port
-// (direct port of NVIDIA aiperf derived_latency.py). Every expected number is
 // hand-computed in comments so a reviewer can verify each vector without
 // running numpy.
 

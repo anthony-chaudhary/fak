@@ -1,4 +1,3 @@
-// DIRECT-PORT ai-dynamo/aiperf src/aiperf/metrics/derived_latency.py@ab610add4e8876fca223197596c728e17365f381 (Apache-2.0):
 // CO-aware effective_latency = end_ns − credit_issued_ns over successful records, plus the
 // failure-inflated adj_effective_latency companion. Ported from the summarize-time derived
 // metrics (_effective_samples, _inflated_metric_result): one shared sampling pass feeds both

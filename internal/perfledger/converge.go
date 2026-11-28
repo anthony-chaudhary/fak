@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/config/sweep/config.py@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): the adaptive-search sweep's three-signal
 // convergence knobs and
 // the validators that guard them. The pinned file declares the knobs, their

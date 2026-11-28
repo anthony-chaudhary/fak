@@ -1,8 +1,6 @@
 package modelloadplan
 
 // ExpertCacheLRFU adapts the ClassLRU policy in ggml-org/llama.cpp,
-// src/llama-moe-cache.cpp:17-228 at c4fb579695320929b6a453f4f3a56951bda332ee
-// (MIT). This is a Go policy implementation, not a
 // loader/device integration. Eight frequency classes retain the CRF across
 // eviction; each class has an LRU list. Among its oldest unselected candidates,
 // eviction chooses the largest age/2^class, not the globally lowest raw CRF.

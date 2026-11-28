@@ -10,7 +10,6 @@ import (
 
 // RehomeTranscript copies a session's transcript (and its sidecar <sid>/ dir) from the
 // throttled owner's config dir into the healthy target account's config dir. It is the
-// Go port of fleet_resume_watchdog.rehome_transcript.
 //
 // `claude --resume <sid>` is CLAUDE_CONFIG_DIR + cwd scoped: it only finds the
 // conversation under <config>/projects/<sanitized-cwd>/<sid>.jsonl, so to resume on a

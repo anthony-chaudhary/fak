@@ -8,7 +8,6 @@ import (
 
 // TestNativeSchedulerSkipUnusedDrafts pins the vLLM skip_drafts/_drafts_unused
 // adaptation (vllm/v1/core/sched/scheduler.py:311-315, 483-525, 712, 1528-1530,
-// 1693 @ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0): NativeScheduler
 // computes a per-step skipDrafts flag from lane state — the prefill-chunk
 // cursor versus the prompt length, and terminal-token detection at
 // publication — and reports it so the MTP self-speculation path proposes K=0

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 // Completion ownership adapted from vllm/v1/kv_offload/tiering/manager.py:281-358
-// at bd5bbce6e45e09dbd07ac3e8c394626c059078f7; modified for Go synchronous
 // snapshot acquisition: publish successful owners and release rejected owners.
 //
 // Package radixkv is SGLang's RadixAttention prefix cache, rebuilt over fak's
@@ -1098,7 +1097,6 @@ func (v snapshotEvictionView) refs(n *node) int {
 // by the dry run; their nodes remain attached, just as releaseHotSnapshot leaves them.
 // Priority-ordered per-tier reclaim follows NVIDIA/TensorRT-LLM, Apache-2.0,
 // cpp/tensorrt_llm/batch_manager/evictionPolicy.cpp at
-// f4c5c935aa891b0826f73936c4831236cb6ff836 (LRUEvictionPolicy::getFreeBlock/refresh).
 // This Go adaptation keeps Fak's existing pin, tier and logical-TTL contracts.
 func (t *Tree) snapshotVictimSkipping(exclude *node, skipped map[*node]bool) *node {
 	return t.snapshotVictimSkippingInView(exclude, skipped, snapshotEvictionView{clock: t.clock})

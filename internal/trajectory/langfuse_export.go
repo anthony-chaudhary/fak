@@ -22,7 +22,6 @@ import (
 // mirrors Langfuse's ingestion records (trace, observation, score, session
 // grouping) so the export can be POSTed to /api/public/ingestion unchanged.
 //
-// Upstream pin: langfuse/langfuse @ 2335676165d8f4f66ae276f7f187b44e43b26277
 // (web/src/server/otel/otelRequestBody.ts, processOtelIngestion.ts).
 const LangfuseExportSchema = "fak-trajectory-langfuse-export/1"
 

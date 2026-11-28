@@ -1,6 +1,5 @@
 // Package skilldiscovery adapts OpenCode's remote skill catalog/staging subsystem.
 // Source: anomalyco/opencode packages/core/src/skill/discovery.ts
-// @4eb29a64f0054672950acf789f2b09487ebfbb20 (MIT; see LICENSE).
 // Integrity pins, byte limits and immutable generations are FAK adaptations.
 package skilldiscovery
 

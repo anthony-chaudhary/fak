@@ -1,6 +1,5 @@
 // guard.go — the pure, interpreter-free core of the repo-guard PreToolUse hook.
 //
-// This is a faithful Go port of tools/repo_guard.py. It exists because the hook
 // fires on EVERY Bash/Write/Edit tool call, and the Python original re-spawned a
 // fresh interpreter each time — a per-decision subprocess on the live request
 // path, exactly the boundary DIRECTION.md says must stay Go-only and

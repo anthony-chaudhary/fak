@@ -25,7 +25,6 @@
 //! Two families exist, both over tokens serialized as little-endian `int32`:
 //!
 //! - [`HashAlgo::Ahash64`]: a 64-bit, non-cryptographic hash. Each block is
-//!   hashed with aHash (an in-crate port of Mojo's `_ahash.mojo`) keyed by a
 //!   32-byte seed, then chained as `ahash(prev, block_hash)` under the same
 //!   seed. Hashes are 8 bytes, the big-endian two's-complement encoding of the
 //!   `u64`. The first `prev` is the 8-byte parent hash, zero by default.

@@ -9,7 +9,6 @@ import (
 // mmr.go — issue #3940: MMR-style redundancy suppression inside the top-k journal
 // Recall() selection (the one borrow filed by the Puppetmaster study,
 // docs/notes/study-puppetmaster-borrow-scout-2026-07-10.md, row 3 — a Python→Go
-// clean-room port of its `finalize_memory_retrieval` reranker).
 //
 // The defect it closes: journal Recall() ranks provenance → recency → FTS-overlap →
 // index order and then takes the top k. Nothing in that key penalizes REDUNDANCY, so k

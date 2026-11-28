@@ -1,7 +1,6 @@
 // fak-test:runtime fast est=10ms
 package perfledger
 
-// Adversarial spec tests for the effective-latency pair (direct port of
 // NVIDIA aiperf derived_latency.py). Every expected number is hand-computed
 // in comments so a reviewer can verify each vector without running numpy.
 

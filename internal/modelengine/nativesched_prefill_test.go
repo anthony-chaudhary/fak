@@ -1372,7 +1372,6 @@ func TestPrefixHitApplyClampsToSnapshottedDepth(t *testing.T) {
 // truncation adapted into lookupPrefixPageAligned: a raw token-exact hit is
 // floored to a multiple of the block size in tokens, a sub-page hit is a miss
 // that releases its boundary lease, and page 1 leaves the raw match unchanged.
-// Source: SGLang at 00a9a81b67774e8374172646c092e14999472703 (Apache-2.0).
 // fak-test:runtime fast est=50ms lane=default
 func TestLookupPrefixTruncatesToPageMultiple(t *testing.T) {
 	prompt := nativeSchedulerQwenPrompt(40)

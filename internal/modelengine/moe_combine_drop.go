@@ -3,7 +3,6 @@ package modelengine
 // Adapted from deepseek-ai/DeepEP (MIT; Copyright (c) 2025 DeepSeek; see
 // THIRD_PARTY_NOTICES.md), csrc/hybrid_ep/backend/hybrid_ep_backend.cuh and
 // deep_ep/hybrid_ep_buffer.py at pinned revision
-// 4e890fd19a3a52f23cc7bd38a0d9b0b1276f70d6 (HybridEP PR #766).
 //
 // Clean-room host Go contract and in-memory oracle only; no RDMA hardware or
 // device kernels are invoked.

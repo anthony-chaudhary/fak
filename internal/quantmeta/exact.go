@@ -16,7 +16,6 @@ import (
 //
 // The invariant is the upstream strata "exact mode reports failure rather than
 // substituting" contract (ro99/strata, Apache-2.0, pinned at
-// 015b075079c51a7aec670ee24924f920f5e7bb2b): a value that storage would alter is
 // REFUSED at admission, never silently rounded to the nearest representable
 // value.
 //

@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 //! The free lists every block pool allocates from.
 //!
-//! A port of `_FreeKVCacheBlockQueue` in
 //! `max/python/max/pipelines/kv_cache/paged_kv_cache/block_utils.py`: a doubly
 //! linked list ordered least-recently-used first, with O(1) removal from the
 //! middle, which is what lets a prefix hit revive one block without walking

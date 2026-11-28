@@ -1,6 +1,4 @@
-// DIRECT-PORT of NVIDIA/nccl src/ras/diagnostics.h, src/ras/diagnostics.cc
 // (dispatch table) and src/ras/diagnostics_gpu.cc (GPU model, ECC, NVLink
-// summarize rules) at 3e46c089f4ae4732722a419eb6096aead7e47a30.
 // Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0 (upstream LICENSE.txt).
 // Ported: the closed RAS diagnostics check-ID vocabulary in upstream order,

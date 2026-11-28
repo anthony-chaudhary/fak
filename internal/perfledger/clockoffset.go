@@ -9,9 +9,6 @@
 // least-uncertainty pick, the NTP best-sample rule — after a median/MAD gate
 // has rejected probe outliers (clock steps, retries, responses queued on the
 // server side).
-//
-// Port of ai-dynamo/aiperf workers/clock_offset_tracker.py at ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0), re-expressed in idiomatic Go; no upstream code copied.
 package perfledger
 
 import (

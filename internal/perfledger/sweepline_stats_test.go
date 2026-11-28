@@ -3,7 +3,6 @@
 package perfledger
 
 // Adversarial contract tests for the ai-dynamo/aiperf sweepline_stats port
-// (upstream pin ab610add4e8876fca223197596c728e17365f381, Apache-2.0).
 //
 // Expectations are derived from the pinned spec:
 //   - Time-weighted: step function clipped to [windowStart, windowEnd]; the

@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/sweep_controller/main.py:119@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): four-way terminal-phase rollup
 // (Succeeded/Failed/PartiallyFailed/Cancelled) honoring a maxFailures budget
 // and abort policy while isolating cancelled children from genuine failures.

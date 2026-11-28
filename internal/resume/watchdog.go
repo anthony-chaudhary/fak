@@ -1,5 +1,4 @@
 // watchdog.go — the pure per-row decision core of the cross-account resume watchdog
-// (`fak resume watchdog`), the Go port of tools/fleet_resume_watchdog.py's tick loop.
 // The watchdog is the LAUNCH half of the resume process: sweep/stopped/scan discover and
 // bucket the dead sessions, fleet_sessions writes the AUTO_RESUME plan, and each watchdog
 // tick walks that plan deciding, per session, whether to fire `claude --resume` under the

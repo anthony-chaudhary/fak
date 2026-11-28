@@ -1,4 +1,3 @@
-// DIRECT-PORT ai-dynamo/aiperf@ab610add4e8876fca223197596c728e17365f381 (Apache-2.0):
 // E2E Normalized Interactivity, the per-request rate at which a user receives
 // output tokens INCLUDING the prefill wait: output_sequence_length /
 // request_latency. Source: src/aiperf/metrics/types/e2e_normalized_interactivity_metrics.py

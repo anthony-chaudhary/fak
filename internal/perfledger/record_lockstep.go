@@ -1,7 +1,6 @@
 // Adapted from ai-dynamo/aiperf, src/aiperf/workers/worker.py:1551
 // (together with CreditContext in src/aiperf/credit/structs.py and the
 // completion barrier in src/aiperf/records/records_manager.py), pinned at
-// ab610add4e8876fca223197596c728e17365f381 (ai-dynamo/aiperf@ab610ad).
 // Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0. Changes were made: adapted from Python
 // asyncio/ZMQ worker finally-block lockstep into idiomatic Go execution guards,

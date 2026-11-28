@@ -1,6 +1,4 @@
 // Inspired by ai-dynamo/aiperf
-// src/aiperf/metrics/types/usage_diff_metrics.py:29@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0): usage-diff metrics comparing API-reported token counts against
 // client-tokenized counts and reporting percentage discrepancy to surface
 // billing-vs-actual tokenization mismatches.
 package perfledger

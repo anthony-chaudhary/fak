@@ -1,6 +1,5 @@
 // Adapted from bentoml/llm-optimizer, src/llm_optimizer/visualization/template.html
 // (getParetoPoints at :79, calculateBestConfig at :191) at
-// 7be87d776e60a978516a2ae53e4a4ff745d04c20. Apache-2.0; re-expressed in idiomatic
 // Go over typed (latency, throughput) config points instead of dashboard rows.
 // The dominance rule keeps equal points on the front, as upstream does; best-config
 // selection adds deterministic tie-breaks the dashboard left to chart order.

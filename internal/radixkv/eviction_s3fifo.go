@@ -1,6 +1,4 @@
 // Ported from github.com/maypok86/otter (policy.go, sketch.go, internal/xruntime/hasher.go
-// @73e5472e8d8a6047589e48b37daaf952a390bc74), Apache-2.0.
-// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025 Alexey Mayshev and contributors.
 // License: https://www.apache.org/licenses/LICENSE-2.0
 // Modified for Fak: a standalone, single-threaded policy keyed by uint64 that owns its own

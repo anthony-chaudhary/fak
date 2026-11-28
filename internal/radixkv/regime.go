@@ -94,7 +94,6 @@ func (r Regime) Complete() bool {
 // injective even when values contain the labels and delimiters used by the encoding.
 // The version change deliberately starts a cold namespace instead of migrating legacy
 // keys whose ambiguous identity cannot be recovered safely. This invariant is adapted
-// from vLLM PR #51899 at 166608ec098c860e27ab385d0a7450b9b06a238f (Apache-2.0);
 // the representation here is native to fak and copies no upstream implementation.
 func (r Regime) RegimeKey() string {
 	return fmt.Sprintf(

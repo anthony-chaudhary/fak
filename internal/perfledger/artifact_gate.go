@@ -1,6 +1,4 @@
 // Adapted from SemiAnalysisAI/InferenceX
-// video-generation/evaluator/media.py@ea9e4f6f2e3073d55fe6f1dcd33557b7fe67f608
-// (Apache-2.0; modified from the original): the acceptance doctrine of
 // analyze_media, applied to perf receipts instead of video clips. A result
 // counts only after its artifact is read back against the contract its
 // producer declared; the file's size and mtime are compared before and after

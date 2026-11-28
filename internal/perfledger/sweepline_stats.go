@@ -1,6 +1,4 @@
 // Time-weighted statistics over sweep-line step functions, ported DIRECT from
-// ai-dynamo/aiperf src/aiperf/analysis/sweepline_stats.py:55 @ ab610add4e8876fca223197596c728e17365f381
-// (aiperf 0.14.0, Apache-2.0), with the SweepLineStats shape, the ZERO stats
 // value, and _step_lookup taken from src/aiperf/analysis/sweepline.py. The
 // numpy vector kernels are re-expressed as plain loops over []float64
 // (stdlib only); the searchsorted side conventions, the clipped-segment

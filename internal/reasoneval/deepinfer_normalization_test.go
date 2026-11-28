@@ -3,7 +3,6 @@ package reasoneval
 import "testing"
 
 // TestDeepInferAIMENormalization ports four source-derived compatibility cases
-// from DeepInfer@553741557a57df44a46fb3ab72b6aafeaf945337, eval/aime/bench.py:
 // 73-89 (last complete box), 95-110 (normalization), and 127-148 (scoring).
 // The large-integer cases stress normalization, not the valid AIME 0-999 domain.
 // Signed fallback and incomplete-box handling remain native policy controls.

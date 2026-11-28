@@ -586,7 +586,6 @@ func SloRank(elapsed, expected, target time.Duration) float64 {
 //
 // Adapted from vllm-project/aibrix pkg/plugins/gateway/queue/slo_queue.go
 // (profileLess, rank, and the no-profile / no-SLO-info fallbacks) @
-// a89b94a574b2190a0e80ff5de1992698283a88e3 (Apache-2.0, Copyright The Aibrix
 // Team); re-expressed over fak's duration-based budgets, no source copied.
 func RankSloProfiles(profiles []SloProfile, elapsed, expected time.Duration) ([]string, SloFallback) {
 	if len(profiles) == 0 {

@@ -5,7 +5,6 @@
 // a registered router and its cutoff in one wire string.
 //
 // BORROWED CONTRACT (ADAPT, not a port): lm-sys/RouteLLM @
-// 0b64fdafe049e596a3f5657c219329f24af24198 (Apache-2.0; upstream dormant since
 // 2024-08-10, so this is a design reference, never a live dependency). The
 // contract adapted here is the two-tier dispatch in routellm/routers/routers.py:32-48
 // (one abstract calculate_strong_win_rate returning P(strong wins) in [0,1],
@@ -15,7 +14,6 @@
 // Re-expressed in idiomatic Go against this package's Subject vocabulary; no
 // upstream code block is copied. Study note: fak-private
 // docs/research/STUDY-PRODUCTION-SCALING-ECON-2026-11-07.md, candidate
-// routellm-1. Ticket: oss-port-routellm-routellm-1.
 //
 // WHY THIS BELONGS ON THE SPINE. modelroute.go decides an abstract model id
 // per Aspect; account.go binds ids to provider accounts. This file adds the

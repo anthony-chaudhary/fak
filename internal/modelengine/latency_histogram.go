@@ -1,6 +1,3 @@
-// DIRECT-PORT of triton-inference-server/core src/latency_histogram.h and
-// src/latency_histogram.cc at e3d3ad9e582e4692ddf2c10ba61551f4acb15ce7
-// (BSD-3-Clause).
 // Ported: the geometric 1us..60s ratio-1.2 boundaries, boundary normalization,
 // the 32-shard relaxed-atomic histogram, the bucket-derived snapshot, and the
 // cumulative Prometheus text export (_bucket{le}, +Inf, _sum, _count).

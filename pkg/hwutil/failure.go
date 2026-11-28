@@ -1,10 +1,7 @@
 // Closed DCGM health-failure field catalog for GPU receipts.
 //
-// Direct port of the DCGM_FR_* health-failure field set from
 // NVIDIA/dcgm-exporter internal/pkg/collector/gpu_health_collector.go
 // (healthCheckErrorToStringMap), pinned at
-// 4e663a526c4624ad0e18ad816f09b7be2c5348a7:
-// https://github.com/NVIDIA/dcgm-exporter/blob/4e663a526c4624ad0e18ad816f09b7be2c5348a7/internal/pkg/collector/gpu_health_collector.go
 // The numeric values are the DCGM HealthCheckErrorCode enum as published by
 // NVIDIA/go-dcgm v1.4712.2 pkg/dcgm/const.go at that pin — the same binding
 // dcgm-exporter consumes — not the upstream map's source line numbers.

@@ -1,8 +1,6 @@
 // empirical_sampler.go ports aiperf's empirical distribution sampler to Go.
 //
 // NOTICE: ported from ai-dynamo/aiperf, src/aiperf/dataset/synthesis/empirical_sampler.py
-// (EmpiricalSampler), pinned at commit ab610add4e8876fca223197596c728e17365f381
-// (ai-dynamo/aiperf@ab610ad), Apache-2.0 licensed. The source learns the
 // distinct values of an observed sample and their frequencies, then draws new
 // values with probability proportional to those frequencies. This port does the
 // same with exact integer counts and a caller-supplied math/rand/v2 generator,

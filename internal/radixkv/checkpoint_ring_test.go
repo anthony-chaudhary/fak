@@ -7,7 +7,6 @@ import (
 )
 
 // TestCheckpointRing is the witness for the bounded per-lane KV checkpoint ring
-// (oss-port-llamacpp-lane-ctx-checkpoint-20261106), the host-side port of
 // llama.cpp's per-slot context checkpoints (--ctx-checkpoints 32,
 // --checkpoint-min-step 8192, save/restore/erase; PR #15293).
 //

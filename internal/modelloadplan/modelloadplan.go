@@ -2,7 +2,6 @@
 //
 // Context-aware fit contract (usable context, requested/effective/clamp ladder,
 // multi-user inverse, and graded headroom ratios) adapted from AlexsJones/llmfit
-// (MIT, pinned at 7f47fca32c27230ccfbb012994a0d0bff03bc283; see
 // THIRD_PARTY_NOTICES.md). Uses Fak's own kvbudget geometry and fixed
 // per-session state, keeps admission and grade thresholds aligned, and always
 // propagates clamped contexts into runtime sizing.

@@ -1,5 +1,4 @@
 // Conceptual INSPIRE-ONLY seam derived from NVIDIA/OpenShell
-// (af8182f7b63da6dd8bbea8b3c313227764ee0dea, Apache-2.0).
 // No Rust runtime is ported and no isolation guarantee is claimed without a
 // native escape test.
 package sandbox

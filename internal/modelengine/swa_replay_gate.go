@@ -3,8 +3,6 @@ package modelengine
 import "errors"
 
 // Source: sgl-project/sglang, deepseek_v4_backend.py:3862-3927, revision
-// 3c6a6c8068658b88e40bcaa5a0bf48b9a94ebdba (Apache-2.0):
-// https://github.com/sgl-project/sglang/blob/3c6a6c8068658b88e40bcaa5a0bf48b9a94ebdba/python/sglang/srt/layers/attention/deepseek_v4_backend.py
 // Copyright (c) 2026 sgl-project
 //
 // Adapted for Fak as idiomatic Go (no upstream code blocks copied): only the

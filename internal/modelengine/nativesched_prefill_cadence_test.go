@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// TestNativeSchedulerPrefillCadence pins the FAK_NATIVE_PREFILL_INTERVAL port of
-// vLLM's local prefill cadence (vllm/config/scheduler.py:203-208,
-// vllm/v1/core/sched/scheduler.py:389-406,748-769,1562-1577 @ae065918640a,
-// Apache-2.0, ADAPT): prefill is held to every Nth engine step so decode runs in
 // longer uninterrupted stretches, with a capacity escape for a backed-up
 // waiting queue. These are exact step-order and counter contracts on the
 // synthetic fixture — no GPU or throughput claim.

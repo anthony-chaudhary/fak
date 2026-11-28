@@ -1,6 +1,5 @@
 // Sliding-window + token-bucket per-route caps, ported host-side from the
 // NVIDIA/go-ratelimit study (INSPIRE-ONLY; pin
-// NVIDIA/go-ratelimit@ff47a8b20c89af3006649d1657e2c494229efdce, Apache-2.0).
 //
 // WHAT WAS BORROWED. The upstream library pairs two classic cap shapes behind
 // one admission call: a SLIDING WINDOW (at most N events in any rolling

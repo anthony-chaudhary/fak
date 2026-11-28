@@ -60,7 +60,6 @@ func (s *NativeScheduler) advancePackedPrefill(iteration uint64) []*schedLane {
 // scheduler generation is the ordinary native forward; a hot-swapped generation
 // retains its Step/StepBatch route rather than being bypassed by PrefillPacked.
 // Adapted from vLLM scheduler.py's token budget and gpu/input_batch.py's row
-// mapping at fa3b9d1377219247060d3c8b49eae199c9e7e154 (Apache-2.0).
 func (s *NativeScheduler) advanceMixedPackedPrefill(iteration uint64, active []*schedLane, gen ForwardGen) (ready, mixed []*schedLane) {
 	var decodes []*schedLane
 	if gen.Generation == 1 && gen.Impl.Name == "incumbent" {

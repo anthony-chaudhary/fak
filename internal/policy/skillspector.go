@@ -1,5 +1,4 @@
 // Conceptual INSPIRE-ONLY seam derived from NVIDIA/SkillSpector
-// (e48d771a26f7398b36256ceb8d8f94adce3d5c44, Apache-2.0).
 // No Python scanner runtime is ported and no completeness claim is made over
 // upstream detection rules.
 package policy

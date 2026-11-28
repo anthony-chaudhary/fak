@@ -2,8 +2,6 @@
 //
 // NOTICE / attribution:
 //
-// This file is a direct port of the speculative-decoding acceptance metrics
-// from ai-dynamo/aiperf, pinned at ai-dynamo/aiperf@ab610add4e8876fca223197596c728e17365f381,
 // files src/aiperf/metrics/types/spec_decode_metrics.py and
 // src/aiperf/common/models/spec_decode_models.py
 // (Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES).

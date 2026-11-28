@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 // Completion ownership adapted from vllm/v1/kv_offload/tiering/manager.py:281-358
-// at bd5bbce6e45e09dbd07ac3e8c394626c059078f7; modified for Go synchronous
 // snapshot acquisition: publish successful owners and release rejected owners.
 //
 // Budget-pressure eviction, retention protection, and policy subtree removal.
@@ -158,11 +157,7 @@ func (t *Tree) evictToBudget() {
 }
 
 // Multi-victim heap adapted from SGLang radix_cache.py evict, lines 582-607 at
-// 00a9a81b67774e8374172646c092e14999472703 (Copyright 2023-2024 SGLang Team,
-// Apache-2.0). Modifications: defer setup until after the first victim, restrict
 // to pure LRU, preserve Fak's leaf immunity/tiers/telemetry and fall back on ties.
-// https://github.com/sgl-project/sglang/blob/00a9a81b67774e8374172646c092e14999472703/python/sglang/srt/mem_cache/radix_cache.py
-// SPDX-License-Identifier: Apache-2.0
 // This heap lives for one serialized eviction pass; it is not a persistent index.
 type lruHeapEntry struct {
 	n   *node
@@ -462,7 +457,6 @@ func (t *Tree) SetNodeRetention(n *node, req RetentionRequest) error {
 	// A finite high-priority request must remain clock-governed: either a
 	// permanent tier marker or pinPath would make it immune after expiry.
 	// This preserves the TTL lifecycle of TensorRT-LLM's releaseBlock/refresh
-	// at f4c5c935aa891b0826f73936c4831236cb6ff836 (Apache-2.0; #5259), using
 	// Fak's existing logical expiry and probationary demotion semantics.
 	n.tierSet = tier != Tier0PinnedRoot || req.TTL == RetainForever
 	if tier == Tier0PinnedRoot && req.TTL == RetainForever {

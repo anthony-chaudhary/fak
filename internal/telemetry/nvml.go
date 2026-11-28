@@ -1,6 +1,4 @@
-// DIRECT-PORT of NVIDIA/go-nvml pkg/nvml/const.go, pkg/nvml/return.go,
 // pkg/nvml/types_gen.go and pkg/nvml/zz_generated.api.go at
-// f83235b8e2ea45c52a11a6ba5c7b8049813a1e6b (Apache-2.0), https://github.com/NVIDIA/go-nvml.
 // Copyright (c) 2020, 2024, NVIDIA CORPORATION. All rights reserved.
 // Ported: the Return code vocabulary with its error strings, the Memory_v2 and
 // Utilization record shapes, and the Init/Shutdown/DeviceGetCount/

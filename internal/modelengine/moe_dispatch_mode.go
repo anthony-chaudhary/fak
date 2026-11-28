@@ -6,7 +6,6 @@ package modelengine
 // Config::get_rdma_buffer_size_hint, LowLatencyLayout, and
 // get_low_latency_rdma_size_hint) and csrc/kernels/configs.cuh
 // (NUM_MAX_NVL_PEERS, NUM_MAX_RDMA_PEERS, NUM_BUFFER_ALIGNMENT_BYTES), pinned at
-// deepseek-ai/DeepEP@f6aa38fe06cd4a0489e7730365d4e0114970a2f3. Adapted to
 // fak-owned Go.
 //
 // DeepEP dispatches expert-parallel tokens in one of two modes. Normal

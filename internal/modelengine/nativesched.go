@@ -75,13 +75,11 @@ const (
 	nativeAllocationNever
 )
 
-// Unified paged-KV manager foundation (fak oss-port-trtllm-kv-manager-20178).
 //
 // Adapted from TensorRT-LLM's unified KV cache manager, which centralizes block
 // (page) ownership, per-request reservations, and storage-layout identity in a
 // single resource manager instead of scattered per-path caches:
 // NVIDIA/TensorRT-LLM tensorrt_llm/_torch/pyexecutor/kv_cache/kv_cache_manager_v2.py
-// @9c0e41287fffb691040e7a4babcf5409ad3476c1 (Apache-2.0, NVIDIA CORPORATION &
 // AFFILIATES). Go concept adaptation, not copied upstream code. This packet
 // introduces the interface and ledger behind the scheduler's call sites; it
 // does not migrate the admission/prefill bookkeeping yet.
@@ -986,10 +984,7 @@ func (s *NativeScheduler) AdmitTokenIDs(ctx context.Context, name string, prompt
 // refusal. Known sequences pass in their given order; the check reorders
 // nothing and assigns no slots.
 //
-// Port of the batch sequence-membership validation in ggml-org/llama.cpp
 // llama_batch_allocr::init at pinned revision
-// 25603ef89168a570ea4f34803ce36531c05fd357 (MIT), referenced at
-// src/llama-batch.cpp:475 (PR #30386): a batch carrying a sequence outside the
 // allocated set is refused before the allocator touches slot state instead of
 // corrupting it. Concept adaptation, not copied code: the upstream guard
 // protects per-token sequence-set bookkeeping; here the active set is the
@@ -1506,8 +1501,6 @@ func (s *NativeScheduler) SetMaxTokensPerStep(n int) {
 }
 
 // SetSpecAdmissionPad arms vLLM's pad_spec_decode admission padding
-// (vllm/v1/core/sched/scheduler.py:1271-1296@ae065918640a198a56f6f17eb45e251c3229fe41,
-// Apache-2.0): with k > 0, a waiting lane promoted into a spec-carrying decode step
 // reserves k placeholder draft slots, so its first decode step rides the same
 // fixed-shape panel as the resident 1+k lanes; a step whose token budget cannot
 // carry the padded cost holds the lane in waiting rather than admitting a short
@@ -1549,8 +1542,6 @@ func (s *NativeScheduler) SetPrefillInterval(n int) {
 // leaves the cap disabled rather than starving the lane into sub-minimum
 // chunks. Source: vllm-project/vllm, vllm/config/scheduler.py:79-90 and
 // vllm/v1/core/sched/scheduler.py:728-742, revision
-// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0):
-// https://github.com/vllm-project/vllm/blob/ae065918640a198a56f6f17eb45e251c3229fe41/vllm/v1/core/sched/scheduler.py
 // Adapted for Fak as idiomatic Go (no upstream code blocks copied): only the
 // queued-others trigger and the min(chunk, threshold) clamp are ported; the
 // adaptive fair-share floor arrives with the serve-knob wiring leaf.

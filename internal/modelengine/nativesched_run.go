@@ -87,7 +87,6 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) (queueWaits []time.Du
 			s.specAdmissionPadSlots += uint64(pad)
 		}
 		// First scheduling only, following vLLM v1 metrics/stats.py at
-		// 0c63ce9f0e0b5b2782f0f30cb491069dac158bb2 (Apache-2.0).
 		// This is a Go concept adaptation, not copied upstream code. A later
 		// materialization requeue or preemption does not restart the interval.
 		if ln.queueWaitPending {
@@ -733,9 +732,7 @@ func (s *NativeScheduler) stepSoloOne(ln *schedLane, iteration uint64) bool {
 // invariant is "equal admission order implies equal batch order" — it removes churn as a
 // source of divergence and makes the assignment reproducible, but it does not by itself
 // join ranks that admit in different orders (there is no distributed multi-rank
-// admission plane in this scheduler today). Port of the stable-UID decode ordering
 // convention from sgl-project/mini-sglang at pinned revision
-// 9a91cfafe754aa85daee49998176275667eb58f2 (MIT), referenced at decode.py:32-35; the
 // upstream file is not vendored. Slot position only, and a correctness fix rather than a
 // speed one: the per-request token stream, KV accounting and the existing seqNo
 // preemption ordering are untouched, no latency, throughput or token-rate gain is
@@ -942,8 +939,6 @@ func (s *NativeScheduler) stepDecodeCohort(lanes []*schedLane, ids []int, iterat
 // decodeBatchBucket selects the fixed-shape decode graph bucket that a live
 // batch of n rows replays through: the smallest captured bucket >= n, the
 // pad-to-captured-size rule from sgl-project/mini-sglang at pinned revision
-// 9a91cfafe754aa85daee49998176275667eb58f2 (MIT), referenced at
-// python/minisgl/engine/graph.py:16-156; the upstream file is not vendored.
 // Buckets must be sorted unique positive sizes (strictly increasing); any
 // other set, n < 1, or n above the largest captured size refuses with ok=false
 // rather than mis-selecting a shape.

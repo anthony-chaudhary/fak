@@ -2,7 +2,6 @@
 // every fak build.
 //
 // perm.go adapts opencode's ordered wildcard tool-permission ruleset
-// evaluation at revision 4eb29a64f0054672950acf789f2b09487ebfbb20 (MIT,
 // Copyright (c) 2025 opencode). License and notice: THIRD_PARTY_NOTICES.md
 // ("opencode").
 //

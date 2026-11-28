@@ -9,7 +9,6 @@
 // Run that owns the file I/O and the gh seam) and the *question generation* left
 // to the agent.
 //
-// This is the Go port of the retired tools/question_ledger.py (fak pythongate):
 // byte-faithful subcommands, exit codes, and row schema. The gh subprocess for
 // `ensure-label` is behind the GHFunc seam so the whole CLI is unit-testable.
 //

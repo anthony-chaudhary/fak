@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/metrics/types/good_request_count_metric.py@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES; modified
 // from the original): the good-request counter behind goodput. User SLO thresholds
 // arrive in each metric's display unit, are normalized once into the unit the
 // records carry, and a request is good only when every SLO holds in that

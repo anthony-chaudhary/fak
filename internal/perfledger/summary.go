@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/kubernetes/crd_models.py@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): the curated status-summary projection
 // (MetricsSummary.from_metrics). A full per-tag metrics payload is narrowed to
 // a fixed list of tags written through unchanged, so a reader reaches every

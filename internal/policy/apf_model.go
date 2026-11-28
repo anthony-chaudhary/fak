@@ -1,8 +1,5 @@
 // apf_model.go — the APF (agent-policy-fabric) signed-policy artifact model.
 //
-// INSPIRE-ONLY port of the signed-policy admission concept from
-// NVIDIA/agent-policy-fabric (Apache-2.0, pin
-// NVIDIA/agent-policy-fabric@fb961f7cc78e3d5149f0505ca624d064be1866f8):
 // a policy document travels as a SIGNED ARTIFACT whose content is bound to a
 // policy version; a host-side ADMISSION POINT enforces the artifact at
 // admission time, and every decision — including gate waivers — is bound to

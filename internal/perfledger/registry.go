@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/metrics/metric_registry.py:212@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): declarative RECORD/AGGREGATE/DERIVED metric
 // registry with startup dependency-shape validation, cycle detection, and
 // deterministic topological compute ordering.

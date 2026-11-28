@@ -1,6 +1,3 @@
-// DIRECT-PORT of NVIDIA/go-nvlib pkg/nvpci/nvpci.go and
-// pkg/nvlib/device/mig_profile.go at d3f4ca82a973a3ea4f6dd30e7fca3fd5444972be
-// (Apache-2.0), https://github.com/NVIDIA/go-nvlib.
 // Copyright (c) 2021, 2022, NVIDIA CORPORATION. All rights reserved.
 // Ported: sysfs PCI device discovery with its vendor and class constants, and
 // the MIG profile string grammar with its memory-size rounding. Changes were made.

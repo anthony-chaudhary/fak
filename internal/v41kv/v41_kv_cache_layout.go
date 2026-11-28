@@ -20,7 +20,6 @@
 //
 // Adapted from deepseek-ai/DeepSeek-V4.1-Flash attention, transcribed from
 // deepseek-ai/FlashMLA tests/quant.py at
-// ba89a3466e9470ad08ab39738d4e7bb66989e1e7 (MIT).
 
 package v41kv
 
@@ -578,7 +577,6 @@ func finite32(v float32) bool { return math.Float32bits(v)&0x7f800000 != 0x7f800
 //
 // The contract is a clean-room adaptation of the wire-encoding idea pinned in
 // basetenlabs/deepseek-ultrafast crates/kv-transfer/src/encoding.rs:6-81 at
-// 76766a97308bfd1658fb055e835d0f92de737dc3 (Elastic-2.0, idea only; no code
 // copied); the fp4 geometry it charges is the same one this package already
 // pins for the V4.1 record (FP4 288 B/token E4M3).
 type V41KVWireEncoding int

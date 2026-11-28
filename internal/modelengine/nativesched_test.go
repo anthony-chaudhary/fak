@@ -327,8 +327,6 @@ func TestNativeSchedulerReportsDeterministicCachePhaseLatency(t *testing.T) {
 // disagrees with itself. This is a correctness invariant, not a speed item: no latency,
 // throughput or token-rate outcome is claimed.
 //
-// Port of the stable-UID decode ordering convention from sgl-project/mini-sglang at pinned
-// revision 9a91cfafe754aa85daee49998176275667eb58f2 (MIT), referenced at decode.py:32-35;
 // the upstream file is not vendored.
 //
 // Batch composition is read from beforeModelExecute, which the scheduler invokes once per

@@ -1,4 +1,3 @@
-// Package procguard is the native Go port of the standalone operator/control-pane
 // modes of tools/proc_resource_guard.py — catch a runaway process before it pins
 // the host. The dispatch-preflight core (thread/handle/working-set level breach) is
 // already a pure classifier in internal/dispatchtick.EvaluateProcGuard; this package

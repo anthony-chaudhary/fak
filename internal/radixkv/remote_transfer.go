@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 // Split-phase transfer ownership adapted from vllm/v1/kv_offload/tiering/manager.py
-// at 5c8ae7c74aaa99d1f7fbeea942fd7282e3413810. Modified for synchronous Go
 // SnapshotStore calls: prepare/pin under the tree lock, execute outside it,
 // validate publication, and retain the job until actual callback retirement.
 // Ordinary non-speculative planner lookup, scoped lookup, warm-disk and pressure

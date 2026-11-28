@@ -89,8 +89,6 @@ func ds3Space(r rune) bool { return unicode.IsSpace(r) }
 
 // The pinned llama.cpp tables include Unicode 15.1 additions absent from Go's
 // Unicode 15.0 tables: CJK Extension I letters and five ideographic symbols.
-// Source: vcruz305/llama.cpp@5210c7c5ed61dddaee6ed476623abf4b63093d16,
-// src/unicode-data.cpp (MIT; Copyright (c) 2023-2026 The ggml authors).
 // TestDeepSeek3UnicodeVersion requires review when Go's Unicode tables change.
 func ds3Letter(r rune) bool {
 	return !ds3Space(r) && (unicode.IsLetter(r) || (r >= 0x2EBF0 && r <= 0x2EE5D))

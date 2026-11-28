@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/plot/models/uncertainty.py:11@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): BenchmarkPoint uncertainty contract enforcing
 // ci_low <= mean <= ci_high, 2D covariance cov_xy, and n_runs < 3 low-confidence
 // flagging.

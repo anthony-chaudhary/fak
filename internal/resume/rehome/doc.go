@@ -1,4 +1,3 @@
-// Package rehome is the Go port of the interactive resume-resolver
 // (tools/resume_resolver.py): it decides WHICH account `claude --resume <sid>`
 // should run under, re-homing the transcript onto a healthy account when the
 // owning account is rate-limited or blocked.

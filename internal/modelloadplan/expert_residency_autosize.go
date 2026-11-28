@@ -7,7 +7,6 @@ import "errors"
 var ErrExpertResidencyAutosize = errors.New("modelloadplan: expert residency budget refused")
 
 // ExpertResidencyAutosize is the bounded slot-budget component of SGLang's
-// paged-experts auto policy at 8a0edcf799d06bdee8832356d382495e7fb50f22.
 // The caller reserves KV and other fixed state first; this function allocates
 // equal expert slots per layer from the remaining bytes. It does not choose
 // expert identities, observe load, reserve device memory or change a loader.

@@ -1,8 +1,6 @@
 // sweepseed.go ports aiperf's restart-stable sweep-seed derivation to Go.
 //
 // NOTICE: ported from ai-dynamo/aiperf, src/aiperf/sweep_controller/plan_builder.py
-// (_stable_sweep_seed), pinned at commit ab610add4e8876fca223197596c728e17365f381
-// (ai-dynamo/aiperf@ab610ad), Apache-2.0 licensed. The source derives a
 // restart-stable stochastic-sweep seed as the first four bytes of SHA-256 of
 // the sweep's apiserver identity (metadata.uid), read big-endian. This port
 // applies the same derivation to the canonical identity of a sweep plan

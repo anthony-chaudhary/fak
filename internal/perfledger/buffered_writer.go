@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/common/mixins/buffered_jsonl_writer_mixin.py:21@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): buffered JSONL writer with batch-size and
 // periodic freshness flushes, bounded flush-task concurrency, and wire-only-field exclusion.
 package perfledger

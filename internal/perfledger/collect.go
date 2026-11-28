@@ -1,6 +1,4 @@
 // Inspired by ai-dynamo/aiperf
-// src/aiperf/sweep_controller/k8s_executor.py:70@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0): bounded re-read loop handling the terminal child summary-race
 // before falling back to a secondary source.
 package perfledger
 

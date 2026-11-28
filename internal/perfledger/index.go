@@ -1,7 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/operator/runs_index.py:605@ab610add4e8876fca223197596c728e17365f381
-// and src/aiperf/operator/results_db.py:1@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): compressed run-index store using stdlib
 // compress/gzip + indexed summary columns keyed by (namespace, run_id, epoch),
 // with fail-safe disk-scan fallback when the index file is absent or corrupt.

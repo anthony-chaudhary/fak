@@ -8,8 +8,6 @@ import (
 
 // ---------------------------------------------------------------------------
 // Win-rate-threshold routing contract (borrowed from lm-sys/RouteLLM @
-// 0b64fdafe049e596a3f5657c219329f24af24198, routellm/routers/routers.py:32-48
-// and routellm/controller.py:93-103; ADAPT, Apache-2.0): one
 // CalculateStrongWinRate per scorer, strong iff win rate >= threshold, and the
 // "router-<name>-<threshold>" model-id grammar. These tests pin the CLOSED
 // contract — values and sentinel errors via errors.Is, never error prose.

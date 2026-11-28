@@ -1,5 +1,3 @@
-// DIRECT-PORT of NVIDIA/go-dcgm pkg/dcgm/const_fields.go at
-// bc5d307bece3d373de882978c8503a1c8613e232 (Apache-2.0), https://github.com/NVIDIA/go-dcgm.
 // Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 // Ported: the DCGM_FI_DEV_* field IDs and names for the health and thermal
 // fields, with each field's current upstream name and its deprecated alias.

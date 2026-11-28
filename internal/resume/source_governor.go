@@ -51,7 +51,6 @@ type SourcePolicy struct {
 
 	// MaxLaunchesPerWindow + WindowSeconds bound the launch RATE across the whole source:
 	// refuse once this many launches have been recorded in the trailing WindowSeconds.
-	// A faithful port of launch_admission's GLOBAL_LAUNCH_CAP, generalized from
 	// per-account to per-source. Either being 0 disables the gate (a rate needs both a
 	// count and a window to mean anything).
 	MaxLaunchesPerWindow int   `json:"max_launches_per_window,omitempty"`

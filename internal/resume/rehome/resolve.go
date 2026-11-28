@@ -194,7 +194,6 @@ func carriedThrottleBlock(st OwnerStatus) bool {
 }
 
 // Resolve decides where `claude --resume <sid>` should run, re-homing the transcript
-// onto a healthy account when the owner is throttled. It is the Go port of
 // resume_resolver.resolve. The steps below mirror resume_resolver.resolve's own
 // sequence: locate the owner, settle any duplicate-owner reselection, resolve its
 // live status, and then apply the PIN / WAIT_RESET / REHOME decision ladder.

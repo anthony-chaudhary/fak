@@ -2,7 +2,6 @@
 // parsed tail of a top-level Claude Code transcript, classify how the session stopped
 // (its DISPOSITION) and decide which stopped sessions are safe to resume headlessly,
 // which must wait (account throttled / auth-walled), and which to leave alone. It is the
-// Go port of tools/stopped_sessions.py's classify/decide core.
 //
 // The authoritative signals, learned from the on-disk transcript format:
 //

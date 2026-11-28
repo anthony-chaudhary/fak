@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/metrics/column_store.py@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): the session-indexed, NaN-sparse columnar store
 // for per-record metrics. Each record writes to the slot named by its session index, in any
 // arrival order; unwritten slots read as NaN. The numpy arrays become plain

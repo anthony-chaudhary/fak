@@ -1,5 +1,4 @@
 // Structural adaptation of SGLang Kimi-K3.1 DSA decode step metadata precompute
-// (dsa_backend_mtp_precompute.py, kimi_k3.py @ 188cf7da66938ca2e1ea9cbf7ebbf9a2c81edc2a, Apache-2.0).
 // Pure-Go component contract; no hardware claim.
 package modelengine
 

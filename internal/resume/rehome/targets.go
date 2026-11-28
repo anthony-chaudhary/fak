@@ -91,7 +91,6 @@ func hasPositiveEvidence(t Target) bool {
 }
 
 // RehomeTargets returns the available Claude worker accounts a throttled session can
-// move to, least loaded first. It is the Go port of fleet_sessions.rehome_targets: a
 // pure ranker with no admission side effects.
 //
 // opencode accounts are excluded (a Claude transcript can only resume under another

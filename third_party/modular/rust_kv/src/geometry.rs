@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 //! The huge-block geometry a Jenga pool is carved from.
 //!
-//! A port of the geometry half of MAX's
 //! `max/python/max/pipelines/kv_cache/paged_kv_cache/jenga_block_pool.py`
 //! (`compute_jenga_ratios`, `JengaGeometry`, `plan_jenga_geometry` and its
 //! helpers, `_pristine_pool_can_satisfy`) and of the capacity search in

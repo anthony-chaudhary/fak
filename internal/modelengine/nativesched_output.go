@@ -7,7 +7,6 @@ import "github.com/anthony-chaudhary/fak/internal/abi"
 
 // newNativeRequestOutbox isolates the selected native syscall producer from a
 // delayed Tokens consumer. The upstream analogue (vLLM at
-// 975dca5bb5db302077674cfa9afe851ee700ad73) keeps publication request-local
 // rather than awaiting its reader.
 //
 // This is bounded by the actual native request budget, not a guessed queue

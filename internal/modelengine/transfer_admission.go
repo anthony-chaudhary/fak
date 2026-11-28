@@ -10,7 +10,6 @@ import (
 
 // Adapted from the vLLM cap on in-flight async KV loads (vllm-project/vllm,
 // pinned at revision
-// 56e993a68990cd3bb0719d5d91dab549ce0d5a79; the pinned sources are
 // vllm/config/scheduler.py and
 // vllm/distributed/kv_transfer/kv_connector/v1/base.py, Apache-2.0).
 //

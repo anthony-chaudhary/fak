@@ -1,6 +1,5 @@
 // Adapted from open-telemetry/semantic-conventions-genai, docs/gen-ai/gen-ai-agent-spans.md,
 // docs/gen-ai/execute-tool.md and docs/gen-ai/gen-ai-spans.md at commit
-// e6658f14c9d9ea0760825f029cb82e7673f48fab (Apache-2.0). This is an adaptation of the
 // span-name and attribute conventions, not a copy of upstream code.
 
 package stepspan

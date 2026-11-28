@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/metrics/list_metric_aggregation.py:43@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES;
 // modified from the original): bounded-memory merging t-digest quantile sketch
 // paired with Welford/Chan online parallel mean/variance, exact count/sum/min/max,
 // and an optional per-record-replay capability gate for list-metric aggregation.

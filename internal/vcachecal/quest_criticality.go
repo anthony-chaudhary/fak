@@ -1,6 +1,4 @@
 // Ported from github.com/mit-han-lab/Quest (kernels/include/decode/decode_page.cuh and
-// kernels/include/decode/decode_attn.cuh@01c1623bf9395009520874e989e29f683203b357), MIT.
-// SPDX-License-Identifier: MIT
 
 package vcachecal
 

@@ -1,8 +1,6 @@
 // results_markers.go ports aiperf's fail-closed result-directory markers to Go.
 //
 // NOTICE: ported from ai-dynamo/aiperf, src/aiperf/common/results_markers.py,
-// pinned at commit ab610add4e8876fca223197596c728e17365f381
-// (ai-dynamo/aiperf@ab610ad), Apache-2.0 licensed. A results directory is
 // readable only once its ready marker has been installed, atomically and
 // last; an export brackets itself with a processing marker so a crash leaves
 // the directory reading as not-ready instead of partially ready. Checkpoint

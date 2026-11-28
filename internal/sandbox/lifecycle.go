@@ -1,5 +1,4 @@
 // Adapted from opensandbox-group/OpenSandbox specs/sandbox-lifecycle.yml at
-// f72baeae3a7feb11a49cc42f48dba3e93a94600d (Apache-2.0). This is a native
 // reimplementation of the sandbox lifecycle state machine and its
 // create/list/get/pause/resume/snapshot/renew/delete contract, not a copy.
 

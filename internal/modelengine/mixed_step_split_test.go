@@ -10,7 +10,6 @@ import (
 // all-zero (unsplit) fail-open cases, the min(1+K, 8) decode-width cap, and
 // the view-slicing semantics a split-aware op applies to the record. The
 // expected records mirror the upstream modular test suite at
-// 88ab8913af6b9298fe914e0f20d87a49e4172d0d, extended with the two batch
 // max-length slots (slots 0-1) this fak port carries in the same array.
 func TestMixedStepSplitRecord(t *testing.T) {
 	const k = 3 // draft width used by most cases below

@@ -46,7 +46,6 @@ type Reselection struct {
 	Target *Owner
 }
 
-// ReselectDuplicateOwner is the Go port of resume_resolver._reselect_duplicate_owner.
 // For a session duplicated across accounts (the signature of a prior re-home), it
 // confirms the newest-mtime owner actually serves; if it does not, it falls back to
 // another copy's account that a live probe confirms serving — but only safely.

@@ -8,7 +8,6 @@ import (
 
 // These tests pin the O(1)-amortized KV-load bookkeeping contract adapted from
 // vLLM PR #65831 (vllm/v1/core/block_pool.py and vllm/v1/core/kv_cache_manager.py
-// at 518c624a1c731cfc6c73369ced6351cb03754ddf, Apache-2.0): N load transitions
 // cost O(N) total pool touches, independent of pool size, and per-step
 // aggregate reads cost zero pool touches.
 

@@ -1,4 +1,3 @@
-// DIRECT-PORT ai-dynamo/aiperf src/aiperf/metrics/derived_latency.py@ab610add4e8876fca223197596c728e17365f381 (Apache-2.0):
 // the generic failure-inflated "adj_<tag>" percentile band (upstream
 // _inflated_metric_result / inject_adjusted_latency_metrics, the
 // PERCENTILE_INCLUDES_FAILED_REQUESTS treatment) and the credit-to-start

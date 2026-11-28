@@ -1,5 +1,3 @@
-// DIRECT-PORT of sethvargo/go-limiter memorystore/store.go and store.go (Store
-// interface) at cd11927274b607c56cff42adb6cb7b972a85a11a (Apache-2.0).
 // Ported: the per-key interval-reset token bucket (Take/Get/Set/Burst/Close,
 // full refill at each interval boundary, clock-backward re-anchor, TTL purge).
 // fak adds: an injected clock, a typed reset instant, refusal of every method

@@ -14,8 +14,6 @@
 //	Source:   JigSawPT/deepseek-v41-flash-on-5090 (MIT), pinned at
 //	          path:line@sha `tools/stall_decomposition.py:22-31,43-92` and
 //	          `results/tier_direct_20260923/README.md:17-22`
-//	          @ dbbdb887211fc8a9581c29b8ddcce1a6cad74061.
-//	License:  MIT. Disposition: cite-and-reimplement at the *method* level only.
 //	          No upstream source is vendored, translated, or copied; nothing
 //	          above is mechanically derived from its code. The anchors are the
 //	          citation record a reviewer can re-read.

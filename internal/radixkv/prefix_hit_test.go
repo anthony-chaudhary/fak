@@ -7,7 +7,6 @@ import (
 
 // prefix_hit_test.go — Upstream test vectors for the joint-prefix matcher ported
 // from modular/modular rust_kv/kv-core/src/prefix_hit.rs at revision
-// 8d559749621418f39f31df7da998bcce884fa5b1 (vendored near-verbatim under
 // third_party/modular/rust_kv; per-file byte receipts in PINNED-SOURCE.json).
 // The upstream Rust test module is the oracle: every subtest below ports one
 // #[test] from that module by name, with exact integer equality.

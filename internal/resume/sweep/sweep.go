@@ -1,7 +1,6 @@
 // Package sweep is the pure decision core of the manifest-free crash discovery: given
 // every on-disk COPY of a recently-touched session (the same transcript can live under
 // several account dirs after re-homes), it resolves the SUPERSET copy, reads the terminal
-// turn, and buckets the session by the action it actually needs. It is the Go port of
 // tools/resume_sweep.py's classify/sort/dedup core.
 //
 // # The gap it closes (inherited from the Python)

@@ -10,7 +10,6 @@ import (
 // These tests pin the two-budget admission contract adapted from vLLM
 // (vllm/config/scheduler.py and
 // vllm/distributed/kv_transfer/kv_connector/v1/base.py at
-// 56e993a68990cd3bb0719d5d91dab549ce0d5a79, Apache-2.0): execution slots and
 // in-flight KV-transfer slots are INDEPENDENT ceilings. A full compute batch
 // still admits a bounded transfer start, the transfer cap strictly bounds
 // concurrent starts, and releasing a transfer slot admits the next waiter.

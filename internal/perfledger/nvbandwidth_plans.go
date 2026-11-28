@@ -1,5 +1,4 @@
 // Measurement-plan model for native memory-transport benchmarks, inspired by
-// NVIDIA/nvbandwidth at 82fc4e8c6afa0babb8687793678f615b3b8d793e (Apache-2.0;
 // see THIRD_PARTY_NOTICES.md). INSPIRE-ONLY: the named copy-plan taxonomy
 // (copy initiator x access type x direction), the per-pair bandwidth matrix,
 // and the moment-in-time receipt discipline are re-expressed as a pure-Go

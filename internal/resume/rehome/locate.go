@@ -37,7 +37,6 @@ func isHost(configDir string) bool {
 }
 
 // LocateMatches returns every <home>/.claude* account dir holding this session's
-// <sid>.jsonl, each as a Match. It is the Go port of resume_resolver._locate_matches:
 // the raw input shared by the owner pick and the duplicate-owner re-selection. A dir
 // or file that cannot be statted is skipped (fail-open), never fatal.
 func LocateMatches(sid, home string) []Match {
@@ -77,7 +76,6 @@ func LocateMatches(sid, home string) []Match {
 }
 
 // LocateOwner returns the on-disk owner record for session sid, or nil when no
-// ~/.claude* account holds it. It is the Go port of resume_resolver.locate_owner:
 // among non-host accounts the freshest .jsonl wins; the host (~/.claude) is chosen
 // only when it is the SOLE owner. Scanning every projects/* (not just the current cwd
 // slug) makes the lookup robust to a session created under a different directory.

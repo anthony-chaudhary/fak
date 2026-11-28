@@ -6,7 +6,6 @@ import (
 	"testing"
 )
 
-// TestPercentileBand verifies the percentile-band metric dict (direct port of
 // aiperf metric_dicts.metric_result_from_array's quantile core) returns the
 // correct p1..p99 values for a known sample set and handles empty input.
 //

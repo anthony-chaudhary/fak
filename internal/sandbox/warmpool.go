@@ -1,6 +1,5 @@
 // Adapted from kubernetes-sigs/agent-sandbox
 // extensions/controllers/sandboxwarmpool_controller.go at
-// 890de53a4dd18e35313173e6dc34d9559b1a9733 (Apache-2.0). This is a native
 // reimplementation of the SandboxWarmPool reconcile semantics (template-hash
 // staleness, rate-limited refill, surplus deletion), not a copy.
 

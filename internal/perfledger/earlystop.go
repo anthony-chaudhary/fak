@@ -1,4 +1,3 @@
-// Ported from ai-dynamo/aiperf@ab610add (ab610add4e8876fca223197596c728e17365f381),
 // src/aiperf/config/sweep/multi_run.py and the improvement-patience early-stop it
 // drives. Apache-2.0.
 //

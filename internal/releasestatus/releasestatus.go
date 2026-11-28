@@ -43,7 +43,6 @@ const (
 
 // actionNextActions is the closed set of next_action.kind values that mean a human
 // or loop must act (loop-status verdict ACTION). Any kind outside it reads OK. This
-// is the Go port of release_status.py's ACTION_NEXT_ACTIONS plus the two
 // non-gating advisory kinds the python also emits (wait, pause_auto_release).
 var actionNextActions = map[string]bool{
 	"clean_worktree":         true,
@@ -521,7 +520,6 @@ type BranchRegime struct {
 	RoleError          string   `json:"role_error,omitempty"`
 }
 
-// Status is the full folded record — the typed Go port of the python JSON.
 type Status struct {
 	Schema               string        `json:"schema"`
 	Root                 string        `json:"root"`

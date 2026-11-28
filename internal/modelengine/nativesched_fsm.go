@@ -32,7 +32,6 @@ import "fmt"
 // edge is a typed error instead of a silent overwrite.
 //
 // Adapted from tokenspeed's typed request FSM with declared legal transitions
-// (lightseekorg/tokenspeed at b174a3186d9a6eb3192389afbb25611a976eefc7, MIT).
 // The upstream file is not vendored; only the "explicit transition table +
 // checked setter" convention is borrowed, with runtime rather than
 // compile-time checking. Scheduling decisions are unchanged: every edge the

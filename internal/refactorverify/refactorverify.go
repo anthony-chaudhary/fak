@@ -1,5 +1,4 @@
 // Package refactorverify proves a god-split / code-motion refactor dropped NO
-// top-level definition — the Go port of the retired tools/refactor_verify.py
 // (fak pythongate).
 //
 // The /modularize skill splits a monolith by MOVING top-level declarations between

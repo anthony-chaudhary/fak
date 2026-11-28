@@ -5,10 +5,7 @@ import (
 	"testing"
 )
 
-// TestSessionDecodeRetention is the oss-port-trtllm-cross-turn-gen-reuse-20261106 witness
 // for the ADAPTED TensorRT-LLM KVCacheManagerV2 cross-turn generation-block reuse
-// (PRs #19710 + #20086, tag v1.4.0rc2 @ b96ba434e8a05e2ab52d2082bd8d70b1d844739b,
-// Apache-2.0): a finished decode lane's generated suffix is retained under a session key
 // with priority/TTL and a bounded byte budget, so the session's next turn prefix-extends
 // into the prior-turn KV instead of re-prefilling it. It pins the closed contract:
 //

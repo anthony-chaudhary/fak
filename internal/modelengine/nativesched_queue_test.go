@@ -235,7 +235,6 @@ func TestNativeSchedulerPromotionRespectsTokenBudget(t *testing.T) {
 
 // TestNativeSchedulerBatchSequenceCheck pins the ported llama.cpp batch
 // sequence-membership validation (ggml-org/llama.cpp llama_batch_allocr::init,
-// src/llama-batch.cpp:475 @ 25603ef89168a570ea4f34803ce36531c05fd357, MIT,
 // PR #30386): a proposed batch whose sequence ids fall outside the scheduler's
 // active set is refused with a typed error before any slot or queue state
 // moves, while known sequences pass in their given order.
@@ -521,7 +520,6 @@ func TestNativeSchedulerSlotLoraInvalidation(t *testing.T) {
 }
 
 // TestNativeSchedulerUnifiedKVManager pins the unified paged-KV manager
-// contract (fak oss-port-trtllm-kv-manager-20178): one manager owns the block
 // pool, its versioned layout, and every per-owner reservation.
 //
 //   - acquire/release round-trips blocks: grants come out ascending, Used/Free

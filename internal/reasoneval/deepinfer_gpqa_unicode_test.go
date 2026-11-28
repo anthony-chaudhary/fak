@@ -5,8 +5,6 @@ import "testing"
 // fak-test:runtime fast est=1ms lane=default
 func TestDeepInferGPQAUnicodeExtraction(t *testing.T) {
 	t.Parallel()
-	// Source-derived cases for DeepInfer@553741557a57df44a46fb3ab72b6aafeaf945337
-	// eval/gpqa/bench.py:111-134. Python regex word characters include all numeric
 	// categories, not only decimal digits; marks and non-underscore Pc do not count.
 	cases := []struct {
 		name, text, prediction, source string

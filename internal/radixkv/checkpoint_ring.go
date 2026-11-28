@@ -9,10 +9,8 @@ import (
 )
 
 // CheckpointRing is a bounded per-lane ring of KV context checkpoints taken at
-// token boundaries. It is the host-side port of llama.cpp's per-slot context
 // checkpoints (tools/server --ctx-checkpoints N, default 32, and
 // --checkpoint-min-step, default 8192 tokens; save/restore/erase slot endpoints,
-// upstream PR #15293, ggml-org/llama.cpp@fd27b2034905f8dadd8bd6d2cc44595f4929d391).
 //
 // A lane (session) keeps a bounded ring of checkpoints. Each checkpoint is a
 // cheap page-set descriptor: the list of physical block IDs that back the lane's

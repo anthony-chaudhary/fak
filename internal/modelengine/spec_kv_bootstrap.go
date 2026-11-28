@@ -7,7 +7,6 @@ import (
 
 // Source: sgl-project/sglang PR #38978 "Reduce decode bootstrap latency with
 // request-owned speculative KV", python/sglang/srt, revision
-// 3c6a6c8068658b88e40bcaa5a0bf48b9a94ebdba (Apache-2.0):
 // https://github.com/sgl-project/sglang/pull/38978
 //
 // Adapted for Fak as idiomatic Go (no upstream code blocks copied): only the

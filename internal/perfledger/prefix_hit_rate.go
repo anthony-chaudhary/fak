@@ -2,8 +2,6 @@
 //
 // NOTICE / attribution:
 //
-// This file is a direct port of the prefix hit-rate analysis from
-// ai-dynamo/aiperf, pinned at ai-dynamo/aiperf@ab610add4e8876fca223197596c728e17365f381,
 // file src/aiperf/dataset/synthesis/prefix_analyzer.py
 // (Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES).
 // Licensed under the Apache License, Version 2.0 (Apache-2.0).

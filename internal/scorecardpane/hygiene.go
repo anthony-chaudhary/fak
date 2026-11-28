@@ -1,6 +1,5 @@
 package scorecardpane
 
-// hygiene.go — the native port of tools/repo_hygiene_scorecard.py: the deterministic
 // repo-hygiene fold over the git-tracked tree. Twelve mechanical KPIs in four groups
 // (verbosity, organization, indexing, accessibility), folded into a continuous value,
 // an A-F grade, the legacy score, and the headline hygiene-debt integer. The JSON

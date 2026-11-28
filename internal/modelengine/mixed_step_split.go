@@ -1,6 +1,5 @@
 package modelengine
 
-// Adapted from modular/modular max/python/max/pipelines/kv_cache/paged_kv_cache/_mixed_step_split.py@88ab8913af6b9298fe914e0f20d87a49e4172d0d (Apache-2.0 WITH LLVM-exception; Copyright (c) 2026 Modular Inc.). Adapted to fak-owned Go.
 //
 // Some attention ops pick one route for the whole batch from its longest row,
 // so in a step that batches decode rows with prefill rows every decode row

@@ -16,7 +16,6 @@ import (
 // ran, the screen session and log path that are still on the host, and the
 // crash log if it died. The pinned study recorded exactly this shape as a
 // serializable launch event and printed a banner with the reattach line; this
-// file is the distilled, testable port of that.
 //
 // Two write paths matter, and they answer two different questions:
 //

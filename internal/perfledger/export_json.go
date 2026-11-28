@@ -2,8 +2,6 @@
 //
 // NOTICE: ported from ai-dynamo/aiperf, src/aiperf/exporters/metrics_json_exporter.py
 // (scrub_non_finite before orjson.dumps), pinned at commit
-// ab610add4e8876fca223197596c728e17365f381 (ai-dynamo/aiperf@ab610ad),
-// Apache-2.0 licensed. The source rewrites every NaN, +Inf and -Inf in a
 // nested export payload to JSON null so serialization never fails and the
 // file stays valid JSON. This port walks maps, slices, arrays, pointers and
 // interfaces the same way and marshals the scrubbed tree with encoding/json.

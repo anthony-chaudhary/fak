@@ -8,14 +8,11 @@
 // runtime, no GPU, no network, no accuracy claim.
 //
 // Pinned references:
-//   - NVIDIA/Model-Optimizer @ 91e31320a6853eceb16525bd09302fc404ca8e7d
-//     (Apache-2.0): the quantization recipe — a packed E2M1 payload, one
-//     E4M3FN block scale per 16 weights, one FP32 global (tensor) scale, and
-//     the "early" decode that folds the global scale into every weight.
-//   - flashinfer-ai/flashinfer @ 866c80d0c70a90624b4c2056d12d1543d709609e
-//     (Apache-2.0): the W4A16 consumption recipe — BF16-rounded activations,
-//     exact local E2M1*E4M3 products, FP32 serial accumulation, and the global
-//     scale applied ONCE at the epilogue ("late" tensor scaling).
+//
+//	E4M3FN block scale per 16 weights, one FP32 global (tensor) scale, and
+//	the "early" decode that folds the global scale into every weight.
+//	exact local E2M1*E4M3 products, FP32 serial accumulation, and the global
+//	scale applied ONCE at the epilogue ("late" tensor scaling).
 package quantmatrix
 
 import (

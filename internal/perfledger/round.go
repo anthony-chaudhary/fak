@@ -2,8 +2,6 @@
 //
 // NOTICE: ported from ai-dynamo/aiperf, src/aiperf/kubernetes/crd_models.py
 // (_round_summary, _FRACTION_KEYS), pinned at commit
-// ab610add4e8876fca223197596c728e17365f381 (ai-dynamo/aiperf@ab610ad),
-// Apache-2.0 licensed. The source rounds every float in a nested summary to
 // 2 decimals for display, except keys naming 0..1 fractions, which keep 9
 // decimals so a small error rate is neither erased to 0 nor inflated. This
 // port keeps that rule, half-to-even ties and non-finite passthrough.

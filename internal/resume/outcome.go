@@ -11,7 +11,6 @@
 // cases. Telling them apart today takes manual transcript forensics. This file is the
 // deterministic fold that turns typed transcript facts + typed ledger facts into (a) the
 // closed Outcome of the last attempt, (b) the outcome-aware RetryGate a relauncher
-// self-gates on (the port of fleet_resume_watchdog.resume_blocked), and (c) the one
 // ResumeState label an operator reads per session (pending / launched / took /
 // re-stranded / gave-up / settled).
 //

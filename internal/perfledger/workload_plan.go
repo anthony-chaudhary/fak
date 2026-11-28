@@ -2,8 +2,6 @@
 //
 // NOTICE: ported from SemiAnalysisAI/InferenceX, video-generation/specs/video_spec.py
 // (canonical_json_bytes, plan_for, plan_sha256), pinned at commit
-// ea9e4f6f2e3073d55fe6f1dcd33557b7fe67f608 (SemiAnalysisAI/InferenceX@ea9e4f6),
-// Apache-2.0 licensed. The source hashes a benchmark plan as SHA-256 of
 // sorted-key, compact, UTF-8 JSON that refuses NaN/Inf, and renames a plan whose
 // repetition/warmup counts are overridden. This port gives fak benchmark receipts
 // the same workload identity: content is hashed, host/GPU/port never are.

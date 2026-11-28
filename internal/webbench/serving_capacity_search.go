@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// ADAPT: Microsoft Vidur CapacitySearch.search, MIT, abae7f63aa857300f5cdc6f5e0d27860cd24721b.
 // Attribution and deliberate bounded-search differences: docs/notes/WEBBENCH-CAPACITY-SEARCH.md.
 var (
 	ErrCapacityInvalid     = errors.New("invalid capacity search")

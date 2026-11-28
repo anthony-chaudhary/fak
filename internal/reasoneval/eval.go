@@ -2,11 +2,7 @@
 // benchmarks whose answers do not require a model judge.
 //
 // The AIME and GPQA extraction order adapts DeepInfer's Apache-2.0 evaluation
-// rules at deepseek-ai/DeepInfer@9bd9cf243fc53ef9afbf8f04d391d989117d6ab9:
-// eval/aime/bench.py:73-148 and eval/gpqa/bench.py:111-134. HLE remains outside
-// this rule scorer because eval/score.py:43-55 requires an external judge.
 // AIME last-complete-box selection and numeric normalization also follow
-// deepseek-ai/DeepInfer@553741557a57df44a46fb3ab72b6aafeaf945337.
 package reasoneval
 
 import (
@@ -29,7 +25,6 @@ type RuleResult struct {
 // for the selected benchmark.
 var ErrJudgeRequired = errors.New("benchmark requires an external judge")
 
-// GPQA follows Python's Unicode regex classes at DeepInfer@553741557a57df44a46fb3ab72b6aafeaf945337.
 // Python whitespace includes the separators and U+001C..U+001F, unlike Go's \s.
 const gpqaPythonSpace = `[\t-\r\x1c-\x1f\x85\p{Z}]`
 

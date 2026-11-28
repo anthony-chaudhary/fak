@@ -235,7 +235,6 @@ func pickBinding(axes []AxisSaving, order []string, turns int) string {
 }
 
 // Selfcheck returns the first violated anti-overclaim invariant, or nil if every
-// hard invariant holds. It is the Go port of the original tool's selfcheck: the
 // vector must DECOMPOSE one event, never INFLATE it.
 func Selfcheck() error {
 	report := syntheticReport()

@@ -9,8 +9,6 @@ import "errors"
 var errNativePrefillBudgetExhausted = errors.New("modelengine: native prefill step token budget exhausted")
 
 // Source: sgl-project/mini-sglang, python/minisgl/scheduler/prefill.py:33-151,
-// revision 9a91cfafe754aa85daee49998176275667eb58f2 (MIT):
-// https://github.com/sgl-project/mini-sglang/blob/9a91cfafe754aa85daee49998176275667eb58f2/python/minisgl/scheduler/prefill.py
 // Copyright (c) 2026 sgl-project
 //
 // Adapted for Fak as idiomatic Go (no upstream code blocks copied): only the

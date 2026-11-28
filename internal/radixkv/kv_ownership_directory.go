@@ -2,7 +2,6 @@
 // KV ownership directory contract. Clean-room adaptation of the Redis CAS
 // ownership directory mechanism described in basetenlabs/deepseek-ultrafast
 // crates/kv-transfer/src/directory.rs:43-121 at
-// 76766a97308bfd1658fb055e835d0f92de737dc3 (Elastic License 2.0,
 // source-available; idea only). No upstream code is copied: the mechanism -
 // one owner record per KV content digest carrying {epoch, seq, peer}, a
 // mint-once epoch generation that fences late writers, and stale-view

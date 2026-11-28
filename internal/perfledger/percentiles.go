@@ -1,4 +1,3 @@
-// DIRECT-PORT ai-dynamo/aiperf src/aiperf/metrics/metric_dicts.py@ab610add4e8876fca223197596c728e17365f381 (Apache-2.0):
 // the percentile-band metric dict (metric_result_from_array's quantile core).
 // Given a sample set, computes the p1/p5/p10/p25/p50/p75/p90/p95/p99 band with
 // the source's linear-interpolation method (numpy default "linear") and returns

@@ -74,7 +74,6 @@ func (lruStrategy) Priority(n *node) victimKey { return victimKey{age: n.lastUse
 // MRU priority rule ported from SGLang, Copyright 2023-2024 SGLang Team.
 // SPDX-License-Identifier: Apache-2.0
 // Source: python/sglang/srt/mem_cache/evict_policy.py:10-65 (MRUStrategy)
-// at 00a9a81b67774e8374172646c092e14999472703.
 // License: https://www.apache.org/licenses/LICENSE-2.0
 // Modified for Fak: SGLang's -node.last_access_time becomes the complement of the
 // unsigned logical clock (^lastUsed), which reverses recency without signed overflow;
@@ -89,7 +88,6 @@ func (mruStrategy) Priority(n *node) victimKey {
 // FIFO/FILO priority rules ported from SGLang, Copyright 2023-2024 SGLang Team.
 // SPDX-License-Identifier: Apache-2.0
 // Source: python/sglang/srt/mem_cache/evict_policy.py:24-35
-// at 00a9a81b67774e8374172646c092e14999472703.
 // License: https://www.apache.org/licenses/LICENSE-2.0
 // Modified for Fak: use deterministic node-creation ticks instead of wall time,
 // and complement unsigned ticks to reverse ordering without signed overflow.

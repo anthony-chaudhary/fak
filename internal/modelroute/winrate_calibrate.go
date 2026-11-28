@@ -5,7 +5,6 @@
 // computed from how the scorer actually scores real subjects.
 //
 // BORROWED CONTRACT (ADAPT, not a port): lm-sys/RouteLLM @
-// 0b64fdafe049e596a3f5657c219329f24af24198 (Apache-2.0; upstream dormant since
 // 2024-08-10, so this is a design reference, never a live dependency). The
 // contract adapted here is the calibration loop in
 // routellm/calibrate_threshold.py:50-58: score every prompt of a reference
@@ -18,7 +17,6 @@
 // Re-expressed in idiomatic Go against this package's Subject vocabulary; no
 // upstream code block is copied. Study note: fak-private
 // docs/research/STUDY-PRODUCTION-SCALING-ECON-2026-11-07.md, candidate
-// routellm-2. Ticket: oss-port-routellm-routellm-2.
 //
 // WHY THIS BELONGS ON THE SPINE. routellm-1 (winrate.go) shipped the dispatch
 // contract with a USER-PICKED cutoff: the operator had to know what a win

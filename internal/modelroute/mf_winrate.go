@@ -2,7 +2,6 @@
 // routes by a predicted win rate and select the top one.
 //
 // BORROWED CONTRACT (ADAPT, not a port): lm-sys/RouteLLM @
-// 0b64fdafe049e596a3f5657c219329f24af24198 (Apache-2.0; upstream dormant since
 // 2024-08-10, so this is a design reference, never a live dependency). The
 // contract adapted here is the matrix-factorization scorer in
 // routellm/routers/matrix_factorization/model.py: the per-model embedding
@@ -20,7 +19,6 @@
 // this package's Subject vocabulary; no upstream code block is copied. The
 // OpenAI text-embedding call is replaced by an injected prompt embedding so the
 // package stays pure (stdlib only, no I/O). Ticket:
-// oss-port-routellm-routellm-3.
 package modelroute
 
 import (

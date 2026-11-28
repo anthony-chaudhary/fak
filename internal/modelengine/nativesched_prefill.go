@@ -1025,8 +1025,6 @@ func (s *NativeScheduler) closeLaneSession(sess *model.Session) {
 }
 
 // Adapted from NVIDIA/TensorRT-LLM ContextChunkingPolicy
-// (cpp/include/tensorrt_llm/executor/types.h:222-233@b96ba434e8a05e2ab52d2082bd8d70b1d844739b,
-// Apache-2.0); concept only, no upstream code copied.
 
 // nativeChunkPolicy selects how one iteration's prefill token budget is split
 // across waiting contexts.

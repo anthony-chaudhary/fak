@@ -8,8 +8,6 @@ import (
 
 // TestNativeSchedulerLongPrefillCapClamp pins the cross-request fairness clamp
 // (vLLM long_prefill_token_threshold,
-// vllm/v1/core/sched/scheduler.py:728-742@ae065918640a198a56f6f17eb45e251c3229fe41,
-// Apache-2.0): while other requests are queued, a lone long prefill advances
 // at most the armed threshold prompt tokens per scheduler step; empty queues
 // leave the chunk untouched; and the clamp composes with the p0-prefill-budget
 // resumable chunking - the next step resumes at the clamped cursor with no

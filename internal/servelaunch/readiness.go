@@ -28,12 +28,9 @@
 // sleeps. Elapsed figures are therefore reported at tick granularity.
 //
 // The terminal Stopping outcome and the engine-start-chain gate are a
-// clean-room ADAPT of the 3-state readiness atomic (0 starting / 1 ready /
 // 2 stopping, one-way stop) in basetenlabs/deepseek-ultrafast
-// crates/server/src/readiness.rs:15-38 @ 76766a97308bfd1658fb055e835d0f92de737dc3
 // (Elastic License 2.0, source-available; idea only). The contract is
 // re-expressed over this package's channel seams; no upstream source text is
-// copied. Borrow-port: oss-port-dsuf-servelaunch-terminal-stop-20261116.
 package servelaunch
 
 import (

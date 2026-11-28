@@ -1,6 +1,4 @@
 // Adapted from confident-ai/deepeval (Apache-2.0) at commit
-// 696248fd7f8b4db1aa0d4f05cee22c3d2cc5857b, upstream paths
-// deepeval/metrics/tool_correctness/tool_correctness.py,
 // deepeval/metrics/step_efficiency/step_efficiency.py and
 // deepeval/metrics/task_completion/task_completion.py. This is a Go
 // reimplementation of the deterministic parts only; LLM-judged scoring stays

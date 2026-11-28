@@ -1,8 +1,6 @@
 // grid.go ports aiperf's log-spaced integer grid helper to Go.
 //
 // NOTICE: ported from ai-dynamo/aiperf, src/aiperf/search_recipes/builtins.py
-// (_logspace_int_steps), pinned at commit ab610add4e8876fca223197596c728e17365f381
-// (ai-dynamo/aiperf@ab610ad), Apache-2.0 licensed. The source builds the
 // concurrency-ramp sweep grid: steps log-spaced points in [lo, hi], rounded
 // half-to-even, floored at 1, deduplicated and sorted ascending.
 package perfledger

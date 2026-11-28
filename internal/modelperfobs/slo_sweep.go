@@ -1,7 +1,5 @@
 // Adapted from bentoml/llm-optimizer src/llm_optimizer/performance.py
 // (estimate_performance_under_constraints and run_performance_estimation) at
-// revision 7be87d776e60a978516a2ae53e4a4ff745d04c20, Apache-2.0:
-// https://github.com/bentoml/llm-optimizer/blob/7be87d776e60a978516a2ae53e4a4ff745d04c20/src/llm_optimizer/performance.py
 // The idea is re-expressed in idiomatic Go; no upstream code is copied.
 // Changed: typed sentinel errors instead of raised ValueErrors, an explicit
 // memory-infeasible flag instead of an infinite-TTFT sentinel, and a

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 // Completion ownership adapted from vllm/v1/kv_offload/tiering/manager.py:281-358
-// at bd5bbce6e45e09dbd07ac3e8c394626c059078f7; modified for Go scoped snapshot
 // acquisition through the shared success/failure ownership guard.
 package radixkv
 

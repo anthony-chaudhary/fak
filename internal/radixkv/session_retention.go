@@ -5,9 +5,6 @@
 //   - PR #19710 "reuse generation KV blocks across turns" and
 //   - PR #20086 "native retention priority/TTL in KVCM V2",
 //
-// at tag v1.4.0rc2, commit b96ba434e8a05e2ab52d2082bd8d70b1d844739b
-// (https://github.com/NVIDIA/TensorRT-LLM, Apache-2.0).
-//
 // Upstream mechanism: when a request lane finishes, its generated decode blocks are
 // retained (not freed) under a session-scoped retention key with a priority and a TTL;
 // the next turn of the same session prefix-extends into them instead of re-prefilling

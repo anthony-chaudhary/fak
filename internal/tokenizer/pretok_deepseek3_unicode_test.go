@@ -8,8 +8,6 @@ import (
 )
 
 // Source-derived expectations from vcruz305/llama.cpp at
-// 5210c7c5ed61dddaee6ed476623abf4b63093d16, src/unicode-data.cpp.
-// MIT; Copyright (c) 2023-2026 The ggml authors.
 // These tests do not claim execution of the C++ reference binary.
 func TestDeepSeek3UnicodeVersion(t *testing.T) {
 	if unicode.Version != "15.0.0" { //boundarylint:ignore CHANGE_DETECTOR_TEST pinned llama.cpp 5210c7c Unicode 15.1 supplement requires audited Go 15.0 tables

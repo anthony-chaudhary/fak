@@ -1,6 +1,3 @@
-// Ported from github.com/FasterDecoding/SnapKV (snapkv/monkeypatch/snapkv_utils.py@e216ddc84c5bd210378cbdbbba12ba02102aa640), Apache-2.0.
-// SPDX-License-Identifier: Apache-2.0
-
 package vcachecal
 
 import (

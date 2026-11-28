@@ -1,6 +1,4 @@
 // Adapted from ai-dynamo/aiperf
-// src/aiperf/kubernetes/_memory_estimator/estimator.py@ab610add4e8876fca223197596c728e17365f381
-// (Apache-2.0, Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES; modified
 // from the original): the _rp_queue_depth token-pressure model. Past a
 // per-request token count, tokenizing a finished record takes longer than the
 // workers take to finish the next one, so records back up in the processor's
