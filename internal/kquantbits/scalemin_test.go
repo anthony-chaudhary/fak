@@ -11,3 +11,24 @@ func TestScaleMinK4(t *testing.T) {
 		t.Fatalf("pair 4 = (%d,%d)", scale, min)
 	}
 }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestNUQLUTMetaDecode(t *testing.T) {
+	meta := NUQCodebookMeta{
+		BitWidth:  2,
+		Signposts: []float32{-1.5, -0.5, 0.5, 1.5},
+	}
+	got, err := DecodeNUQChannel([]uint8{0, 1, 2, 3}, meta, 2.0, 1.0)
+	if err != nil {
+		t.Fatalf("DecodeNUQChannel: %v", err)
+	}
+	want := []float32{-2.0, 0.0, 2.0, 4.0}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+	if _, err := DecodeNUQChannel([]uint8{4}, meta, 1.0, 0); err == nil {
+		t.Fatal("expected error for out-of-range NUQ code")
+	}
+}
