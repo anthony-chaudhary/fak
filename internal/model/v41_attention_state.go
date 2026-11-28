@@ -21,7 +21,6 @@ package model
 // SOFTWARE.
 //
 // Adapted from deepseek-ai/DeepSeek-V4.1-Flash inference/model.py:656-763,
-// 1166-1180, 1242-1272 at dba1be0a40aa45a94ad051997016db3960a90277 (MIT).
 //
 // The reference keeps one process-global SharedAttentionRuntime plus per-layer
 // window/compress/index buffers, and each Compressor/Indexer pools its own

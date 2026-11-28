@@ -13,7 +13,6 @@ import (
 // 0731 MoE execution. Every expected value below is transcribed from the pinned
 // reference equations, NOT read from or copied out of the production helpers.
 //
-// Pinned reference: DeepSeek-V4-Flash-0731@7872f01b1d1fe23eabc4c98b48bffcef5a386062
 // inference/model.py Gate/Expert/MoE with config n_routed_experts=256,
 // n_shared_experts=1, num_experts_per_tok=6, routed_scaling_factor=1.5,
 // swiglu_limit=10, scoring_func=sqrtsoftplus.

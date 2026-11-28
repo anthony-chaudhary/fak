@@ -257,8 +257,6 @@ func v41RopeThetaForLayer(cfg Config, layer int) float64 {
 // cfg.rotaryDim()/invFreqDenom(), i.e. the full head width for a non-MLA
 // layout), this table is sized to QKRopeHeadDim: len(cos)==len(sin)==QKRopeHeadDim/2
 // with inv[j] = 1/theta^(2j/QKRopeHeadDim) before YaRN. The pinned reference
-// DeepSeek-V4.1-Flash@dba1be0a40aa45a94ad051997016db3960a90277,
-// inference/model.py:369-389,680-696, selects compressed theta and YaRN for
 // EVERY nonzero compression ratio, including ratio 1. Ratio 0 uses base theta
 // without YaRN. Both regimes have UNIT amplitude; the generic HF YaRN
 // ropeAttentionFactor does not belong to this model's complex exponentials.

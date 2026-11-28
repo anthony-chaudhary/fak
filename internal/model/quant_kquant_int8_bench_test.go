@@ -74,7 +74,6 @@ func BenchmarkQ5KInt8GEMV(b *testing.B) {
 // the timed region — only the for i := 0; i < b.N; i++ { ... } loop is timed.
 //
 // Shape provenance (REAL, not synthetic): the pinned artifact unsloth/Qwen3.8-27B-GGUF revision
-// 4ca720788d1e01f1bff70c033e0d0028fd02e502, file Qwen3.8-27B-UD-Q2_K_XL.gguf, has
 // HiddenSize=5120, IntermediateSize=17408, NumLayers=64, VocabSize=248320, dense (NumExperts=0),
 // and 16 real Q2_K tensors. The most frequent Q2_K tensor is blk.<n>.attn_q.weight, GGUF dims
 // [5120, 12288] (reduction in=5120, rows out=12288), 7 of the 16 tensors. All three arms pin that

@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// gate_docplacement.go — the DOC_PLACEMENT gate, a port of tools/check_doc_placement.py. Two
 // rules: (1) a root-level *.md must be in the front-door allowlist; (2) a newly-added dated
 // note under docs/notes/ must be listed in INDEX.md.
 

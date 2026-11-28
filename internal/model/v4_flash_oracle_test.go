@@ -9,7 +9,6 @@ package model
 // Scope and provenance. The reference below is a plain in-order scalar
 // transcription of the pinned official artifact
 // deepseek-ai/DeepSeek-V4-Flash-0731 @ revision
-// 7872f01b1d1fe23eabc4c98b48bffcef5a386062 (inference/model.py +
 // inference/kernel.py). It reuses NONE of the production machinery — not
 // v4HashRoute, not v4ScoredRoute, not decodeV4ExpertQuant, not
 // composeV4RoutedExperts, not v4SiLU, and not cpuOracle*. Every matmul, norm,

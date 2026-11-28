@@ -2,7 +2,6 @@ package model
 
 // This file adapts DeepSeek V4.1 Flash's mHC coefficient split, Sinkhorn
 // normalization, and pre/post mixing from inference/kernel.py and
-// inference/model.py at revision dba1be0a40aa45a94ad051997016db3960a90277.
 //
 // MIT License
 // Copyright (c) 2023 DeepSeek

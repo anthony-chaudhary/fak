@@ -11,7 +11,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/egresslist"
 )
 
-// gate_publicleak.go — the PUBLIC_LEAK gate, a byte-faithful port of
 // tools/scrub_public_copy.py's --audit-staged path (_scan_added_lines + _effective_audit_needles).
 // It substring-matches added lines (case-insensitive) against a redact-needle list and two
 // case-sensitive regexes (live Slack token, GCP service-account email), skipping self-referential

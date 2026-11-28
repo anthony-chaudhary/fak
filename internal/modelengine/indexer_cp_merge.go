@@ -1,7 +1,6 @@
 package modelengine
 
 // Adapted from sgl-project/sglang python/sglang/srt/layers/attention/minimax_sparse_ops/indexer_cp.py
-// at commit 2fd45ed82fe07ec64ef7f4d2dbd9071b0eb01763 (Apache-2.0); changes were made: only the
 // shard-the-scan and merge-candidates contract is re-expressed as host Go, with no collectives or kernels.
 
 import (

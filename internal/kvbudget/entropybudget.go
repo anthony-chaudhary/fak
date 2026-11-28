@@ -2,10 +2,7 @@ package kvbudget
 
 // This file adds an OPT-IN entropy-gated chunk budgeting mode (#13062): a pure,
 // GPU-free policy that reallocates a conserved retained-token budget across
-// chunks instead of spending a fixed per-chunk share. It is an ADAPT of
 // EntropyGatedChunkKVPress from the NVIDIA/kvpress study
-// (pin 71640b4f9061054a7630c5049bb9ee659a01523c, Apache-2.0,
-// `kvpress/presses/entropy_gated_chunkkv_press.py:91-141`); no upstream bytes
 // are copied.
 //
 // # The waste this removes

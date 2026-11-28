@@ -1025,7 +1025,6 @@ func (s *Session) v41State() *v41ForwardState {
 // It retains the host execution policy; no selected device operation is replayed.
 //
 // Adapted from DeepSeek-V4.1-Flash inference/model.py RMSNorm and Block.forward:
-// https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/dba1be0a40aa45a94ad051997016db3960a90277/inference/model.py
 // Modification: explicit widened-BF16 boundaries and fail-closed validation in Go.
 // This preserves the reference operations, not GPU reduction-order bit identity.
 //

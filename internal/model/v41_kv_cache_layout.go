@@ -2,8 +2,6 @@
 // Two-pool fp8 unified KV layout pair check, adapted from SGLang.
 // Source: sgl-project/sglang,
 // python/sglang/kernels/ops/attention/dsv4/unified_kv_kernels/layout.py at
-// revision 3c6a6c8068658b88e40bcaa5a0bf48b9a94ebdba (Apache-2.0):
-// https://github.com/sgl-project/sglang/blob/3c6a6c8068658b88e40bcaa5a0bf48b9a94ebdba/python/sglang/kernels/ops/attention/dsv4/unified_kv_kernels/layout.py
 // Reuse decision: ADAPT. Upstream check_two_pool_pair guards the two separate
 // pool allocations that one shared row index addresses: neither writer
 // bounds-checks that index, so a scatter walks off the end of the shorter pool

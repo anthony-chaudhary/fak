@@ -7,7 +7,6 @@ import (
 )
 
 // v41_mhc_overlap_test.go — witness for the sglang pre-mix hand-off adaptation
-// (borrow-port oss-port-sglang-mhc-premix-overlap). The next role layer's
 // attention mHC mix stats and pre-collapse are staged during the current role
 // layer's FFN window tail and consumed at the next layer's head instead of
 // opening that layer's window serially. A pure scheduling change: every value
@@ -15,8 +14,6 @@ import (
 // moves, and the total coefficient work across the two-layer span is unchanged.
 //
 // Design reference (ADAPT): sgl-project/sglang
-// python/sglang/srt/models/deepseek_v4_mhc.py @3c6a6c8068658b88e40bcaa5a0bf48b9a94ebdba
-// (Apache-2.0) -- "Step 1's pre is consumed by step 2 of the next
 // hyper-connection -- the lag that lets step 1 run beside steps 2-3".
 
 // v41MHCOverlapRoleModel builds a two-layer full-geometry V4.1 fixture whose

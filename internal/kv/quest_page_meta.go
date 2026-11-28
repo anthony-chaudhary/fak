@@ -1,7 +1,4 @@
 // Ported from github.com/mit-han-lab/Quest
-// (kernels/include/decode/decode_page.cuh@01c1623bf9395009520874e989e29f683203b357:
-// vec_reduct, AppendPagedKVCacheDecodeKernel, AppendPagedKVCachePrefillKernel), MIT.
-// SPDX-License-Identifier: MIT
 
 package kv
 

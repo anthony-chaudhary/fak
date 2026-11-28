@@ -15,7 +15,6 @@
 // much, and a port that keeps the state in f16 pays none of it.
 //
 // Source pin: JigSawPT/deepseek-v41-flash-on-5090 (MIT),
-// tools/kv_floor.py:63-81@21d29fdb275191bbd5d288c3729324c7b16d2599, re-verified
 // unchanged at its registry pin on 2026-11-08. No upstream code is vendored or
 // executed; the three quoted floors are upstream-measured priors labeled
 // upstream_quoted_unverified, never appliance measurements.

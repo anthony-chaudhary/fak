@@ -12,8 +12,6 @@ package model
 // reads in place or by one private shard per rank, and its lookup cost hinges
 // on whether the kernel actually backed those pages with huge pages. This file
 // adapts SGLang's Engram _HostTable placement discipline (sgl-project/sglang,
-// python/sglang/srt/layers/engram.py:547-706 @ 3c6a6c8068658b88e40bcaa5a0bf48b9a94ebdba,
-// Apache-2.0; ADAPT verdict): layout select with fail-closed validation of the
 // two accepted spellings, admission accounting that charges the full resident
 // copy count against an explicit host budget, and a huge-page-backing check
 // parsed from smaps-format evidence.

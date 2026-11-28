@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-// gate_democommand.go — the DEMO_COMMAND gate, a byte-faithful port of tools/demo_command_audit.py.
 // It is the local twin of the hosted-link guard: where that catches broken PUBLIC urls, this catches
 // docs that tell a reader to run `go run ./cmd/<demo>`, `bash tools/<x>.sh`, `python tools/<x>.py`,
 // or `make <target>` that no longer resolves. Static and network-free — it never executes a demo.

@@ -8,7 +8,6 @@ import (
 )
 
 // V4.1 text prompt encoding is pinned to
-// deepseek-ai/DeepSeek-V4.1-Flash@dba1be0a40aa45a94ad051997016db3960a90277
 // (inference/model.py and its sibling encoding/ directory).
 //
 // The tokenizer is byte-level BPE with a merge-rank table, matching the

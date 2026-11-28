@@ -8,7 +8,6 @@ import (
 // v4_flash_attention.go - the first bounded slice of DeepSeek-V4-Flash-0731
 // per-layer attention (parent #12636, epic #12635).
 //
-// The published contract at revision 7872f01b1d1fe23eabc4c98b48bffcef5a386062
 // gives every attention layer a 128-token sliding window and EXACTLY ONE
 // compression ratio per layer (Config.CompressRatios):
 //

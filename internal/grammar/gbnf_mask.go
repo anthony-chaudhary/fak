@@ -1,5 +1,4 @@
 // GBNF pushdown matching and partial-codepoint admission are adapted from
-// llama.cpp cd8427d018c07eefab6c110f7f115c31ec4c6157 (MIT).
 // See LLAMA-GBNF-LICENSE.txt and gbnf.README.md.
 package grammar
 

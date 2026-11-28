@@ -2,7 +2,6 @@ package hooks
 
 import "strings"
 
-// gate_indexsync.go — the INDEX_SYNC gate, a port of tools/check_index_sync.py. It triggers only
 // when an index file (INDEX.md / llms.txt) or a docs/notes/ file is staged. Two checks: dangling
 // .md links in a staged index file, and dated docs/notes/ notes (newly added) not listed in
 // INDEX.md.

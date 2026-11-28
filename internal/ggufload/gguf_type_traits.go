@@ -1,7 +1,6 @@
 package ggufload
 
 // Block geometry translated from llama.cpp at
-// 83078fec0db82d6b5a00d9599062c38c39145755 (MIT); see THIRD_PARTY_NOTICES.md,
 // "llama.cpp".
 type tensorTraits struct {
 	BlockSize, TypeSize uint64

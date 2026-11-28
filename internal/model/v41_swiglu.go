@@ -185,7 +185,6 @@ func v41SwiGLUParallel(w1, w3, w2, xn []float32, I, H int, cfg Config) []float32
 
 // v41FullSharedExpertSwiGLU owns the BF16 publications around unchanged F32
 // projection/activation callbacks. DeepSeek's pinned model.py Expert.forward
-// (dba1be0a40aa45a94ad051997016db3960a90277, lines 841-851) widens
 // gate/up outputs, computes clamped SwiGLU, then narrows the down input. This
 // fixes dtype boundaries only; quantized-GEMM activation parity is separate.
 func (m *Model) v41FullSharedExpertSwiGLU(l int, xn []float32, cfg Config, project v41DenseProjectionFunc, activate v41SharedActivationFunc, publish v41BF16BoundaryFunc) ([]float32, error) {

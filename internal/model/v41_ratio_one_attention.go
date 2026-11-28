@@ -13,7 +13,6 @@ import (
 // IDs and the same token's separate window/compressed representations remain
 // independent contributions to the common denominator.
 //
-// Source: inference/model.py:700-780 at dba1be0a40aa45a94ad051997016db3960a90277.
 // This internal projected-input seam does not supply FP8 window or FP4 index/KV
 // quantization and does not widen ratio-one public forward admission. Inputs are
 // already normalized/rotated; the caller applies inverse output RoPE once after

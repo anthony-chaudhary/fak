@@ -7,8 +7,6 @@ import (
 )
 
 // The launch/separate-output/join/combine ordering adapts Niko1221/Strata
-// c62d5e3a15b40ea51c96aae9e8d36928965f53ab, include/strata/core/hit_hook.hpp
-// and src/core/session.cpp. See STRATA_LICENSE.txt for the MIT notice.
 // Fak retains its current router, placement, kernels and ordered reduction.
 type glmOverlapBatch struct {
 	cfg      Config

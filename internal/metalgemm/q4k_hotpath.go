@@ -14,16 +14,12 @@ import (
 //
 // 1. llama.cpp
 //    Repository: https://github.com/ggml-org/llama.cpp
-//    Commit:     17197474510622a3b4ea7d0909d70b606f542b96
-//    License:    MIT
 //    Copyright:  Copyright (c) 2023-2026 The ggml authors
 //    Notice:     Retain the copyright and permission notice in copies or substantial portions.
 //    Path:       ggml-metal.metal (Q4_K block dot-product and SIMD scale unpack)
 //
 // 2. MLX-LM
 //    Repository: https://github.com/ml-explore/mlx-lm
-//    Commit:     d5b6c8c49774ed7fd40c97f964b1e7f10e2f0ccb
-//    License:    MIT
 //    Copyright:  Copyright © 2023 Apple Inc.
 //    Notice:     Retain the copyright and permission notice in copies or substantial portions.
 //    Path:       mlx/backend/metal/kernels/steel/gemm (SIMD-unrolled quantized dot product)

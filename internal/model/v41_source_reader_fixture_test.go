@@ -27,7 +27,6 @@ package model
 //
 // Provenance. Target: deepseek-ai/DeepSeek-V4.1-Flash inference/model.py
 // (Compressor + lightning indexer), revision
-// dba1be0a40aa45a94ad051997016db3960a90277 (MIT), the same pinned revision as the
 // sibling oracles (v41_compress_index_ref_test.go, v41_oracle_test.go).
 //
 // Scope honesty. Test-only; no production behavior changes; no checkpoint, no

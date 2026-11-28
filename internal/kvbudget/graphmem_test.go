@@ -6,9 +6,7 @@ import (
 )
 
 // TestKVBudgetGraphMemoryReserve pins the CUDA-graph pool reservation term in
-// the KV-block derivation (fak oss-port-vllmtop-cudagraph-mem-profile-20261103,
 // adapting vLLM profile_cudagraph_memory + determine_available_memory @
-// ae065918640a198a56f6f17eb45e251c3229fe41):
 //   - (a) injected probe measurements (first=100MiB, delta=2MiB x 8 buckets)
 //     yield the exact reserved bytes and the reduced block count;
 //   - (b) zero-bucket / NONE-mode input reserves 0 and leaves the block count

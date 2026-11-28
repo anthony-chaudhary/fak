@@ -9,7 +9,6 @@ package model
 //
 // Equations. The tail is a plain in-order transcription of the pinned official
 // artifact deepseek-ai/DeepSeek-V4.1-Flash @ revision
-// dba1be0a40aa45a94ad051997016db3960a90277 (inference/model.py): the decoder
 // stack output is normalized once by the model final RMSNorm
 // (model.norm.weight), multiplied by the output head (lm_head.weight, or the
 // tied embedding when the head is absent), and scaled by the architecture logit

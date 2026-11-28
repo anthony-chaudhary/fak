@@ -777,10 +777,7 @@ func (d *Qwen35MTPDraftSession) latch(stage string, pos int, cause error) {
 // layer's KV advances at the same position.
 //
 // Mechanism provenance (semantic adaptation; no source copied): vLLM
-// b2dc864bb668da328aee8a8b0b72a0ad13c82252 returns the Qwen3.5 MTP normalized
 // hidden and feeds it through AutoRegressiveSpeculator; SGLang
-// 8a87079dbbf0f5b1543ec25d914dfd988eba42de carries logits_output.hidden_states
-// step to step; llama.cpp 9723942adc518b43c4b95dc4dce6906903eb5e09 is
 // reference-only and likewise feeds each Qwen3.5 draft hidden to the next step.
 func qwen35MTPForwardFeedback(f *Qwen35MTPForward, pos int, priorHidden, currentEmbedding []float32) (feedback, logits []float32, err error) {
 	if f == nil {

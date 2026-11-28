@@ -3,8 +3,6 @@
 package metalgemm
 
 // The frequency construction and dispatch geometry below are adapted from
-// antirez/ds4 ds4_metal.m@bd66c402070042bf0a79ad6ece8242de4c93680c
-// under the MIT notice reproduced in v41_rope.metal.
 
 /*
 #cgo CFLAGS: -x objective-c -fobjc-arc

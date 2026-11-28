@@ -4,7 +4,6 @@ package model
 // state machine and the lightning indexer scoring/selection primitives into the
 // `model` package (fak#13006). It is a faithful transcription of the reference
 // deepseek-ai/DeepSeek-V4.1-Flash inference/model.py (Compressor and the
-// lightning indexer) at revision dba1be0a40aa45a94ad051997016db3960a90277 (MIT).
 //
 // The `internal/model/v41` subpackage already carries these primitives, but
 // package `model` cannot import it: the subpackage imports `model`, so importing

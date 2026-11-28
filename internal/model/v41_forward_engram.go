@@ -66,7 +66,6 @@ package model
 //	streams[t][s][i] = bf16(streams[t][s][i] + gate_s * bf16(value[i]))
 //
 // This full residual-sum boundary follows official DeepSeek-V4.1-Flash
-// dba1be0a40aa45a94ad051997016db3960a90277 inference/model.py:350–365 (MIT),
 // not the earlier Metal delta-rounding approximation. Each stream has its own
 // gate; no gated values are summed across streams. x is synchronized explicitly
 // from stream 0, whether or not those caller buffers alias.

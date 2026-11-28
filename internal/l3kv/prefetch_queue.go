@@ -12,7 +12,6 @@ import (
 // restore finds its span already in memory instead of paying the disk read at
 // admission time. Adapted from TensorFold's lane-host fetch contract
 // (zig/src/core/lane_host_fetch.zig + lane_host_admit.zig:13, docs/api.md:661
-// @9e8c368b0b4c2c7892a0c9f0f302d7c164016209, Apache-2.0): held reads wait with
 // a bounded timeout and fall back to admission restore or fresh prefill;
 // concurrent-read permits are capped; a cancelled waiter does not cancel the
 // read — it keeps its permit until the I/O returns; Stop cancels the queue's

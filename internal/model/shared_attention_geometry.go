@@ -1,9 +1,6 @@
 // shared_attention_geometry.go — shared-attention geometry contract: GQA/RoPE shape
 // validation, byte-mask attention-view checks, and KV-cache append slot/buffer rules.
 //
-// ADAPTED from ashhart/TensorFold @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// (Apache-2.0; see THIRD_PARTY_NOTICES.md, "TensorFold"). The closed contract:
-//
 //   - Shape: query heads must divide KV heads (GQA), the head dimension is bounded at
 //     256 and 32-aligned, the rotary range fits the head and is even, and the key
 //     capacity is positive, u32-bounded, and free of element-count overflow.

@@ -28,7 +28,6 @@ import (
 )
 
 // Full routed Expert.forward boundaries follow pinned DeepSeek model.py
-// dba1be0a40aa45a94ad051997016db3960a90277:841-851,895-904. The
 // callbacks remain F32; each publication below is owned. Quantized GEMM
 // activation parity is separate from these explicit BF16 graph boundaries.
 type v41RoutedTripleLoader func() (gate, up, down []float32, err error)

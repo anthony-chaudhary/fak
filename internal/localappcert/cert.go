@@ -5,7 +5,6 @@
 // The six-gate serving acceptance contract (load -> chat -> reasoning -> tools ->
 // context -> speed) adapts the ordered gating and evidence discipline from
 // sybil-solutions/local-ai-registry (lab/lab.py:37,400-488 at
-// 1c43bdeba34628376e848bc454ad7557a818f0f7, MIT).
 /*
 MIT License
 

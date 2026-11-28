@@ -822,7 +822,6 @@ func composeSublayer(t BlockTopology, x []float32, n normWeights, eps float32, c
 // Provenance (ADAPT): the enumeration shape is adapted from the vLLM project's
 // DeepSeek-V4.1-Flash H200 recipe (Apache-2.0),
 // recipes/models/deepseek-ai/DeepSeek-V4.1-Flash.yaml at pin
-// e740badc2e3df13a5c2abfca04ed0ac917985c5f — see THIRD_PARTY_NOTICES.md. No upstream
 // code is copied; the recipe facts are re-expressed as Go registration data.
 
 // CacheClassKind classifies what one forward-requested cache entry holds. It is the

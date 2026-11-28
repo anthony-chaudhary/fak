@@ -10,7 +10,6 @@ import (
 	"strings"
 )
 
-// gate_fileadmission.go — the FILE_ADMISSION gate, a port of tools/check_committed_files.py.
 // It refuses files that should never be committed: credentials, private-lab subsystems, random
 // shell/PowerShell scripts (prefer Go sub-modules/applications), build junk, regenerable logs/temp,
 // and oversized blobs. The CLASSIFICATION ORDER is load-bearing (check_committed_files.py _classify

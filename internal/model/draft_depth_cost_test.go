@@ -55,7 +55,6 @@ func draftDepthFixture() []float64 {
 
 // TestDraftDepthPooledCostsAndKeepStop pins the adapted TensorFold draft-depth
 // cost model (zig/src/core/draft_depth.zig Costs/DepthRule @
-// 9e8c368b0b4c2c7892a0c9f0f302d7c164016209): pooled marginal verify ms never
 // add more ms as rows grow inside a kernel regime; draft 1 is always kept;
 // low confidence rejects row 2 while high confidence accepts it; More charges
 // the row plus its level; and the token/ms EMAs follow the cost model, never

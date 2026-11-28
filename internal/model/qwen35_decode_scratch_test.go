@@ -7,7 +7,6 @@ import (
 )
 
 // linearAttnStepAllocatingReference freezes the pre-reuse implementation at
-// 7b08d6da99bcabf804faaaccb9fba2f654f6f82b. Keep its allocation and arithmetic
 // independent of linearDecodeScratch so poison/reuse parity is non-circular.
 func (s *Session) linearAttnStepAllocatingReference(l int, xn []float32, mat matKernel) []float32 {
 	dispatchWorkers := currentWorkerCount()

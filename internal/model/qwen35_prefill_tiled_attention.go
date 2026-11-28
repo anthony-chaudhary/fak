@@ -6,7 +6,6 @@ import (
 	"unsafe"
 )
 
-// Adapted from ggml-org/llama.cpp at 74bca3950054eed1795f525cb9cf06bfe796492d (MIT).
 // License and notices: THIRD_PARTY_NOTICES.md ("llama.cpp").
 // The borrowed unit is the multi-query/KV tile, packed K/V reuse, and running
 // maximum/sum/output rescale. FAK keeps its existing fdot and saxpy primitives,

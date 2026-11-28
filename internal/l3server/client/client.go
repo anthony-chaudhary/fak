@@ -26,7 +26,6 @@ func New(addr string) (*Client, error) {
 	return newWithTimeout(addr, 5*time.Second)
 }
 
-// ADAPT: ggml-org/llama.cpp at bc180757161f9f7d56e0efac44257e9029951a3b:
 // admit only after successful HELLO.
 // MIT License
 // Copyright (c) 2023-2026 The ggml authors

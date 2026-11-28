@@ -2,7 +2,6 @@
 // Windowed draft KV group adapted from vLLM (vllm-project/vllm, Apache-2.0),
 // vllm/v1/core/kv_cache_planning.py and
 // vllm/model_executor/layers/attention/mla_attention.py, revision
-// 09109f96221c4a4d87235931980460529060fc94. No Python source is copied.
 
 package model
 

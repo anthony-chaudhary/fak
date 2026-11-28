@@ -1,7 +1,6 @@
 package v41
 
 // Engram hashing in this file is adapted from antirez/ds4 at
-// bd66c402070042bf0a79ad6ece8242de4c93680c (ds4_engram.c).
 //
 // MIT License
 // Copyright (c) 2026 The ds4.c authors

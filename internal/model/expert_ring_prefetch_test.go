@@ -297,11 +297,9 @@ func ringKeyTensorName(key string) string {
 	return key
 }
 
-// ---- oss-port-strata-layer-major-prefill leaf 1 (prefill warm hook) ----
 // Closed contract for the packed per-layer expert warm hook, kept in this file to
 // honor the ticket scope (allowed test file: expert_ring_prefetch_test.go).
 
-// batch_prefill_test.go — closed contract for oss-port-strata-layer-major-prefill leaf 1
 // (prefill-warm-hook): the packed rectangular prefill walk carries a session-flag-gated
 // per-layer expert warm hook at the entry of BOTH packed layer loops (F32 and Q8 lanes).
 // The flag's zero value keeps the walk byte-for-byte unchanged (rejection probe); armed,

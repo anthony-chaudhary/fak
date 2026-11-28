@@ -1,5 +1,4 @@
 // Package glm52prefillsweep is the GLM-5.2 pure-fak PREFILL-latency sweep driver —
-// the Go port of the retired tools/glm52_prefill_sweep.py (lever L9; #3085/#3086).
 //
 // It is the prefill analogue of the pure-fak DECODE sweep (cmd/glmdsatput): it runs a
 // prefill-dominant request (a large prompt, max_tokens≈1) at each prompt length in
@@ -919,7 +918,6 @@ func parentDir(path string) string {
 	return path[:i]
 }
 
-// Run is the CLI entry (Go port of the Python main). Returns the process exit code.
 func Run(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("glm52-prefill-sweep", flag.ContinueOnError)
 	fs.SetOutput(stderr)

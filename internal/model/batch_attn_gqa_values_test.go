@@ -298,7 +298,6 @@ func BenchmarkSplitKGQAValues(b *testing.B) {
 }
 
 // Exact pre-change materialized body, renamed only. Fak base e519243109923b13
-// resolves batch_attn.go to Git blob 63cdb8bf414410e3b701d6695ae8b19a742a9308.
 func splitKGQAValuesBaseline(attnOut, q, scores []float32, rows decodeKVRows, a decodeAttnStepArgs, sc *splitKDecodeScratch, nw, chunk, nChunks int) []float32 {
 	nKV, grp, hd := a.nH/a.grp, a.grp, a.hd
 	units := nKV * nChunks

@@ -119,7 +119,6 @@ type ElasticBlockAllocator struct {
 	freeBlocks map[int]bool
 	// recycledBlocks is a LIFO ordering hint for released, non-cached blocks.
 	// Adapted from vLLM v1/core block-pool.py at revision
-	// 975dca5bb5db302077674cfa9afe851ee700ad73 (Apache-2.0).
 	recycledBlocks []int
 	// cachedBlocks is the FIFO reuse order for released blocks whose contents
 	// stay cached; cachedFree marks which free blocks it owns. Adapted from

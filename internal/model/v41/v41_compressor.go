@@ -2,7 +2,6 @@ package v41
 
 // This file adapts the token-group pooling state machine from
 // deepseek-ai/DeepSeek-V4.1-Flash, inference/model.py (Compressor), revision
-// dba1be0a40aa45a94ad051997016db3960a90277.
 //
 // MIT License
 // Copyright (c) 2023 DeepSeek

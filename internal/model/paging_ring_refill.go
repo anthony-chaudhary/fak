@@ -8,8 +8,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
-// Adapted from vLLM fa3b9d1377219247060d3c8b49eae199c9e7e154,
-// vllm/model_executor/offloader/prefetch.py (Apache-2.0, Copyright contributors
 // to the vLLM project): reusable geometry-matched slots and completion before
 // reuse. FAK keeps its actual admission policy, not vLLM's modulo layer pool.
 //

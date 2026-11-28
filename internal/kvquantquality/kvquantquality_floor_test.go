@@ -8,7 +8,6 @@ import (
 
 // upstreamFloorFixtures are the three floors the pinned upstream study measured
 // on a large MoE checkpoint: JigSawPT/deepseek-v41-flash-on-5090 (MIT),
-// tools/kv_floor.py:63-81@21d29fdb275191bbd5d288c3729324c7b16d2599. They are
 // quoted priors, not appliance measurements: every use keeps the
 // upstream_quoted_unverified label visible.
 var upstreamFloorFixtures = []struct {

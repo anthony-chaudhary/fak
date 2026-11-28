@@ -1,4 +1,3 @@
-// Hermetic tests for the L9 prefill-sweep driver (Go port of the retired
 // tools/glm52_prefill_sweep.py + its test). GPU-free and network-free by construction:
 // every test exercises the pure planner or the pure ledger-land helper. The purity test
 // overrides the execGit + httpDo seams to FAIL, then proves --dry-run reaches neither —

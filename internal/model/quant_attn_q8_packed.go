@@ -1,7 +1,6 @@
 package model
 
 // The block reconstruction below adapts the Q8_0 row dequantizer from
-// ggml-org/llama.cpp at 83078fec0db82d6b5a00d9599062c38c39145755 (MIT).
 // Copyright (c) 2023-2026 The ggml authors. License and notices:
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
 // Fak uses fp32 scales rather than the donor's fp16 scales. Each worker reconstructs

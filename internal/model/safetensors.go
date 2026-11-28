@@ -370,8 +370,6 @@ type safetensorsShardSelection struct {
 // selectSafetensorsShards narrows a safetensors index weight map (tensor name -> shard
 // file) to the minimal set of shard files that hold a wanted key. A wanted entry matches
 // an index key when it equals the key or is a prefix of it, so a draft's "mtp.0." prefix
-// selects every mtp.0.* tensor wherever it lives. This is the port of TensorRT-LLM's
-// HfWeightLoader._files_with_key_prefixes (weight_loader.py:623-657@d865b3c2): a
 // draft/MTP load opens only the shards holding draft keys instead of every shard of a
 // large index, while the full-load path is untouched.
 //

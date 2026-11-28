@@ -10,7 +10,6 @@ import (
 // embedding table onto the target model's table instead of loading a second copy.
 //
 // Ported from vLLM's DeepSeek-V4 MTP embedding alias fix (vllm-project/vllm,
-// Apache-2.0, vllm/models/deepseek_v4/nvidia/mtp.py@3f34cac035724890e6ee5707a6649517b83d2d61,
 // PR #65816). No Python source is copied. Under pipeline parallelism the MTP drafter held its own copy of the
 // target model's embedding table; the fix aliases the drafter to the target's
 // embedding parameters. That removes duplicate memory that scales with vocabulary

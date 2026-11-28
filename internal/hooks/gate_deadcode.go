@@ -83,7 +83,6 @@ var deadCodeKeepRE = regexp.MustCompile(`^\s*//\s*slop:keep\b`)
 // codeOnlyLines reduces each source line to its code-only form — string/rune literals and
 // comments blanked, cross-line raw-string (backtick) and block-comment (/* */) spans tracked —
 // so an identifier that appears only inside a string or comment is NOT counted as a reference.
-// Index-aligned to the input lines. A byte-faithful port of code_slop_scorecard.py
 // code_lines_of / _code_only.
 func codeOnlyLines(text string) []string {
 	lines := strings.Split(text, "\n")

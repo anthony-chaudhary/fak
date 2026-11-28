@@ -1,8 +1,6 @@
 package model
 
 // Native reference adaptation of Z Lab's DFlash2 math at commit
-// 07ebd93db9f472af339b644bb70221ad8428328a, dflash/model_mlx.py.
-// Copyright (c) 2026 Z Lab. MIT license: see dflash2_reference_LICENSE.txt.
 // This uses FAK-owned BF16 reads and native Go math, never a Python runtime.
 
 import (

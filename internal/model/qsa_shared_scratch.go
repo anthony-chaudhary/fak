@@ -24,7 +24,6 @@ import (
 //
 // Provenance (ADAPT): the contract is adapted from the vLLM project's Qwen4Exp
 // QSA shared top-k buffer change, PR #65619, at pin
-// 9a56d4fec6b0a30a0a989f1cd06cd3c2f7325619 — see THIRD_PARTY_NOTICES.md. No
 // upstream code is copied; the buffer-ownership facts are re-expressed as a Go
 // type with fail-closed sizing.
 

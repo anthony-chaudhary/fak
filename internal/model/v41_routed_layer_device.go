@@ -795,7 +795,6 @@ func v41RoutedFusedAdmits(be compute.V41RoutedFusedBackend, weights []v41RoutedL
 // The host-resident branch below adapts vllm-project/vllm,
 // vllm/model_executor/layers/fused_moe/fused_moe.py (_weights_host_resident and
 // the naive_block_assignment condition of _prepare_expert_assignment), pinned at
-// 3b364baef5cd731b5e1f14ff16387feb69d01f10. Apache-2.0.
 // Copyright contributors to the vLLM project.
 // Changed for Fak: the marker is the session's expert placement predicate, not
 // a tensor attribute, and grouping shares one staged triple per expert.

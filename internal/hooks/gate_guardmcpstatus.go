@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-// gate_guardmcpstatus.go — the GUARD_MCP_STATUS gate, a byte-faithful port of
-// tools/guard_mcp_status_audit.py.
 //
 // It audits the guard/MCP proof packet against current evidence artifacts:
 // - guard default-floor/default-journal tests are present in cmd/fak/guard_test.go;

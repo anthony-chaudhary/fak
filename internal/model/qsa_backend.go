@@ -28,7 +28,6 @@ import (
 // PR #20714, at pin
 // tensorrt_llm/_torch/attention/backends/sparse/qsa/prims_ts_core.py:1;
 // tensorrt_llm/_torch/attention/backends/sparse/qsa/prims_ts_indexer/api.py:1
-// @0bdadaa4dd10b869a8dc5f85ee07b7bb591ac66b — see THIRD_PARTY_NOTICES.md. No
 // upstream code is copied; the phase and registration facts are re-expressed
 // as a Go contract with a closed host oracle.
 

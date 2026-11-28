@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2023-2024 SGLang Team
 // Dense retained-prefix ownership adapted from SGLang radix_cache.py at
-// 181380682b50f4606d1a09df3cbbbfc21de931e3. Modified for FAK's existing
 // PagedKV allocator and request-private contiguous Session cache.
 package model
 

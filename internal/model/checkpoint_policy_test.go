@@ -1,5 +1,3 @@
-// Ported from modular/modular max/python/max/pipelines/kv_cache/checkpoint/{_checkpointer,_triggers,_heuristic/_at_event}.py@88ab8913af6b9298fe914e0f20d87a49e4172d0d (Apache-2.0 WITH LLVM-exception; Copyright (c) 2026 Modular Inc.). Direct port to fak-owned Go.
-
 package model
 
 import (

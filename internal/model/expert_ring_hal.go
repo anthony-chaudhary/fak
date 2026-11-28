@@ -354,9 +354,7 @@ func (r *pagedRing) stats() ExpertRingStats {
 	}
 }
 
-// --- Paged-expert K-of-E window (borrow-port oss-port-strata-paged-experts) -------
 //
-// ADAPT of SGLang's paged-experts design (PR #42557@8e7601ae, Apache-2.0 — auto-K sizing, LRU
 // waves, bit-identical vs unpaged; slot lookup fused into decide per #46457/#46567) and Strata's
 // batched remote-expert-pool discipline (docs/DEEPSEEK41.md:54@46c152a1, MIT), extended onto the
 // existing ring seams rather than built in parallel: the bounded pagedRing already holds a

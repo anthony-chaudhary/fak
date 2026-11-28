@@ -7,8 +7,6 @@ import (
 	"math"
 )
 
-// Resident Q4/Q5/Q6 float-block port of internal/ggufload's AVX2 decoder at
-// 2fb9f3bc303bcfdeaebcaebb4e9cd61f1d187484, under the same Apache-2.0 repository
 // license. Model cannot import ggufload (loader -> model cycle). Like the
 // existing resident IQ3 port, reuse its exact unpack/multiply instructions but
 // use model's resolved CPU/OS tier and original scalar exceptional fallback.

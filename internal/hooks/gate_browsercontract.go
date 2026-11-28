@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-// gate_browsercontract.go — the BROWSER_CONTRACT gate, a byte-faithful port of
 // tools/demo_browser_contract.py. Where DEMO_COMMAND catches docs that tell a reader to run a demo
 // command that no longer resolves, this catches metadata DRIFT around each browser demo's documented
 // defaults: the Go `const defaultAddr`, the shared demoui base-path/listen/URL helpers in main.go,

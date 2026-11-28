@@ -9,8 +9,6 @@ package guideddecode
 // largest tensor at [Q, Ks, end_block_size], so a fixed schema and budget make
 // peak memory linear in sequence length.
 //
-// The reference (fastino-ai/GLiNER2 @ d7c727458bf6929bc9ef5ee04e13c3f717a7c455,
-// Apache-2.0, gliner2/models/boundary/proposal.py:147-200 `_score_ends_blockwise`
 // with `merge_running_topk` at :125-144; MASK_LOGIT = -1.0e4 from
 // boundary/constants.py) streams end blocks, masks invalid pairs to the finite
 // MASK_LOGIT sentinel, and merges [running || block] with a stable descending

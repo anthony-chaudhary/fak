@@ -1,6 +1,5 @@
 /*
  * Adapted from ggml-common.h and ggml-metal/kernels/{common,dequantize}.h
- * in Koosh0610/llama.cpp-inkling @ cf5f8a770eb4ee7ee03e35f8975b35715dbd3536.
  *
  * MIT License
  *

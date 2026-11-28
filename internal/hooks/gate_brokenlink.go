@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// gate_brokenlink.go — the BROKEN_LINK gate, a port of tools/check_links.py. For each staged
 // front-door doc it checks three things: dead markdown links, dead inline `code.md` refs, and
 // references to scrub-private docs. HTTP/mailto/anchor/absolute/data targets are skipped — it is
 // an offline relative-path resolver only.

@@ -3,8 +3,6 @@ package model
 import "fmt"
 
 // tensor_parallel_vocab.go — the VOCAB-PARALLEL tensor-parallel subsystem, ADAPTED from
-// vLLM vllm/model_executor/layers/vocab_parallel_embedding.py @4ba787ec9959e566d3b587a796dff07673324da5
-// (tag v0.33.0rc3, Apache-2.0; see third_party/vllm-vocab-parallel/NOTICE). tensor_parallel.go
 // ported the FFN block and tensor_parallel_attn.go the attention block of the Megatron
 // decomposition; this file ports the THIRD building block — the two LARGEST projections in
 // every checkpoint, the token-embedding table and the LM head, sharded across the VOCABULARY

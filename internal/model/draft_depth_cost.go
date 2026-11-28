@@ -1,8 +1,6 @@
 package model
 
 // Adapted from ashhart/TensorFold, zig/src/core/draft_depth.zig
-// (Costs / DepthRule) at revision 9e8c368b0b4c2c7892a0c9f0f302d7c164016209
-// (Apache-2.0): https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/draft_depth.zig
 //
 // Re-expressed in idiomatic Go over fak's MTP depth-governor seam; no upstream
 // code blocks are copied. See THIRD_PARTY_NOTICES.md ("TensorFold draft-depth

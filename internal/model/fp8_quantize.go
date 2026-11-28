@@ -9,8 +9,6 @@ import (
 
 // The FP8-to-BF16 lookup bytes below are adapted from ktransformers
 // GemmKernel224FP8::bf16_{hi,lo}_{0,1}_val and fp8x64_to_bf16x64:
-// https://github.com/kvcache-ai/ktransformers/blob/0c2912a5e25dc3459d728a59be2d8c7461ba64bd/kt-kernel/operators/amx/la/amx_raw_kernels.hpp
-// Licensed under Apache-2.0; see the repository LICENSE. Modified for Fak:
 // concatenate each pair of 64-byte tables, replace SIMD permutation with a Go
 // scalar lookup, and preserve E4M3FN NaNs instead of decoding 0x7f as 480.
 // Only the finite-byte decode is borrowed. Scale application and Q8 rounding

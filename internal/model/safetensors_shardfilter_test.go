@@ -13,8 +13,6 @@ import (
 
 // fak-test:runtime fast est=40ms
 //
-// TestSafetensorsShardFilter pins the port of TensorRT-LLM's
-// HfWeightLoader._files_with_key_prefixes (weight_loader.py:623-657@d865b3c2): a partial
 // (draft/MTP) load must open ONLY the shards whose index entries hold a wanted key, while
 // the full-load path still opens every shard. The witness is the exact set of shard files
 // the loader opens, recorded by the injected opener — so the test fails if the filter

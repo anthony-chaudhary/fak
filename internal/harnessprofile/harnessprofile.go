@@ -359,7 +359,6 @@ func cloneProfiles(in []HarnessProfile) []HarnessProfile {
 // host OS (filepath.Base is host-specific — on a Linux runner it will not split a
 // Windows backslash path, so LastIndexAny over `/` and `\` keeps the match
 // cross-platform), and a Windows .exe/.cmd/.bat/.ps1/.com launcher suffix is removed.
-// It is a port of cmd/fak's guardAgentBaseName so Lookup normalizes identically.
 func baseName(command string) string {
 	base := strings.ToLower(strings.TrimSpace(command))
 	if i := strings.LastIndexAny(base, `/\`); i >= 0 {

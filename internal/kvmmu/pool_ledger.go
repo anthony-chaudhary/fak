@@ -6,8 +6,6 @@
 // of Engram tables into pinned host DRAM read through UVA (bitwise-unchanged
 // output), and SGLang placement cpu / lookup peer_read is the equivalent
 // placement. Source: vllm-project/vllm,
-// recipes/models/deepseek-ai/DeepSeek-V4.1-Flash.yaml @ e740badc2e3df13a5c2abfca04ed0ac917985c5f
-// (Apache-2.0); study note fak-private docs/research/STUDY-ngram-engram-serving-
 // H200-recipe-seams-2026-11-05.md (row 1). Failure classes closed here: MBL-084
 // (host+device counted as disjoint windows), MBL-085 (unbounded eager dequant),
 // MBL-087 (double-charging produced spurious refusals).

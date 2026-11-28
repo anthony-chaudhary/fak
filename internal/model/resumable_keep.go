@@ -1,6 +1,5 @@
 package model
 
-// Adapted from modular/modular max/python/max/pipelines/kv_cache/paged_kv_cache/jenga_block_manager.py@88ab8913af6b9298fe914e0f20d87a49e4172d0d (Apache-2.0 WITH LLVM-exception; Copyright (c) 2026 Modular Inc.). Adapted to fak-owned Go.
 //
 // Re-expressed in idiomatic Go as an engine-agnostic resumable-boundary and
 // keep-trim policy for paged prefix caches; no upstream code blocks are copied.

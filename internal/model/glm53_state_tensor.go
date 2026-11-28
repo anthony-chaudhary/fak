@@ -31,7 +31,6 @@ import (
 //
 // Provenance (ADAPT): the contract is adapted from ggml-org/llama.cpp PR
 // #30499 ("meta: support GLM-5.3 next sm tensor"), commit
-// 259d91709d60945911bedb9bcfb2957c6e153ea7, src/llama-arch.cpp +
 // src/llama-model.cpp - see THIRD_PARTY_NOTICES.md. No upstream code is
 // copied; the registration facts are re-expressed as Go types with
 // fail-closed validation.

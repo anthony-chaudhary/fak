@@ -1,5 +1,4 @@
 // GBNF character-rule parsing and repetition lowering are adapted from llama.cpp
-// at cd8427d018c07eefab6c110f7f115c31ec4c6157 (MIT).
 // See LLAMA-GBNF-LICENSE.txt and gbnf.README.md.
 package grammar
 

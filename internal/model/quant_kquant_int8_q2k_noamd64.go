@@ -7,8 +7,6 @@ package model
 // AVX2/VNNI kernel; every other arch routes the per-sub-block reduction to q2kReduceRowScalar, the
 // arch-neutral reference in quant_kquant_int8_q2k.go.
 //
-// MIT provenance: direct port/adapt of llama.cpp's Q2_K x Q8_K integer reduction
-// at ggml-org/llama.cpp commit 83078fec0db82d6b5a00d9599062c38c39145755 (MIT;
 // upstream LICENSE at the pin; Copyright (c) 2023-2026 The ggml authors).
 // Native Go, no cgo/FFI.
 

@@ -11,7 +11,6 @@ import (
 // explicit request must carry a non-empty, pinned human-readable reason instead of
 // failing. Also pins that the FAK_GGUF_MMAP opt-in gate maps to an mmap request with
 // its historical semantics intact. Design reference (ADAPT): ggml-org/llama.cpp
-// src/llama-model-loader.cpp:559@83078fec0db82d6b5a00d9599062c38c39145755 (MIT).
 
 func TestResolveLoadModeDegradesWithReason(t *testing.T) {
 	// Every degrade reason must name the fallback target so an operator reading the

@@ -7,7 +7,6 @@ import (
 
 // The IQ1/IQ2 scalar reference decoders below are direct Go ports of the
 // llama.cpp IQ1/IQ2 row dequantizers from revision
-// 6fe74980162af0ed5e559870d5deccafaa034e7c. The accompanying codebook tables
 // are copied from that revision's GGML common constants.
 //
 // llama.cpp / ggml original notice:

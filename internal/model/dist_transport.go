@@ -11,7 +11,6 @@ import (
 
 // dist_transport.go — the control-plane transport vtable for a DistComm process
 // group. ADAPTED from TensorFold's cluster transport contract (Apache-2.0):
-// ashhart/TensorFold zig/src/cluster/transport.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
 // plus its loopback-adjacent realization and error classification in
 // zig/src/cluster/fabric_link.zig:79. The upstream idea: what a control plane
 // needs from a link layer is exactly four things — a bounded send, a poll of

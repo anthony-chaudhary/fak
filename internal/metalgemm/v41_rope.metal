@@ -1,5 +1,4 @@
 // Adapted from antirez/ds4 metal/dsv41.metal at
-// bd66c402070042bf0a79ad6ece8242de4c93680c (MIT).
 // Copyright (c) 2026 The ds4.c authors
 // Copyright (c) 2023-2026 The ggml authors
 // Copyright (c) 2023 DeepSeek

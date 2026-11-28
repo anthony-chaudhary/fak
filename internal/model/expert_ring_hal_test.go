@@ -303,7 +303,6 @@ func TestExpertRingDefaultOffIsUnchanged(t *testing.T) {
 	}
 }
 
-// --- paged-expert K-of-E window (borrow-port oss-port-strata-paged-experts) --------
 //
 // The window makes the ring's byte-budgeted working set an explicit object: auto-K sizing from
 // the declared budget, a planned LRU wave per layer entry, and an observed hit/miss split. The

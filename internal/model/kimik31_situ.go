@@ -8,7 +8,6 @@ package model
 //
 // SOURCE (direct port, pinned): SGLang
 // python/sglang/kernels/ops/activation/kimi_k3_situ_and_mul.py at
-// a7d9f81ee24c5cceeceeb4ccb9072f68d56cb10d (Apache-2.0), whose docstring is
 // the authoritative formula:
 //
 //	gate_out = beta * tanh(gate / beta) * sigmoid(gate)

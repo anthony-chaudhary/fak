@@ -12,7 +12,6 @@ import (
 // v4_flash_kv_layout.go - the first bounded slice of DeepSeek-V4-Flash-0731
 // per-layer KV state (parent #12637, epic #12635).
 //
-// The published contract at revision 7872f01b1d1fe23eabc4c98b48bffcef5a386062
 // gives EVERY attention layer a 128-token circular window, and additionally one
 // per-layer compression regime selected by compress_ratios[layer]:
 //

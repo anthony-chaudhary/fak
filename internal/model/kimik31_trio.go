@@ -13,8 +13,6 @@ var ErrKimiK31TrioGeometry = errors.New("model: kimi-k31 trio indexer geometry")
 // component of K3.1 bring-up. It is not a device backend or forward route.
 // This general host oracle does not model device row/top-k capacity limits.
 // Visible NaN scores are refused; the upstream score domain excludes NaNs.
-// It adapts SGLang topk.py at 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e
-// (Apache-2.0): a selected logical token i maps to
 // pageTable[i/pageSize]*pageSize+i%pageSize. Only the causal seqLen prefix
 // participates. Missing tokens produce -1 entries, including seqLen zero.
 // Selection uses the existing DSA oracle's deterministic tie rule; selected
@@ -102,7 +100,6 @@ func SelectKimiK31TrioBackend(architecture string, sparseMLA, topKIndexer bool) 
 // causal seqLen prefix participates, slots past min(topK, seqLen) are -1,
 // visible NaN scores are refused, and the deterministic tie rule of
 // SelectKimiK31DSATopK holds. It adapts SGLang topk.py / topk_v2.cuh at
-// 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e (Apache-2.0).
 func KimiK31TrioRawTopK(scores []float32, seqLen, topK int) ([]int, error) {
 	if seqLen < 0 || seqLen > len(scores) || topK <= 0 {
 		return nil, fmt.Errorf("%w: sequence or top-k", ErrKimiK31TrioGeometry)
@@ -131,7 +128,6 @@ func KimiK31TrioRawTopK(scores []float32, seqLen, topK int) ([]int, error) {
 // slices agree on the batch size. A zero-row batch returns an empty non-nil
 // result; any row's geometry refusal refuses the whole call with no partial
 // output. It adapts SGLang topk.py / topk_v2.cuh at
-// 61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e (Apache-2.0).
 func KimiK31TrioPagedTopKRows(scores [][]float32, seqLens []int, pageTables [][]int, pageSize, topK int) ([][]int, error) {
 	batch := len(scores)
 	if batch != len(seqLens) || batch != len(pageTables) {

@@ -1,9 +1,6 @@
 package metalgemm
 
 // Prior-art: carloslfu/slotstream / MLX (https://github.com/carloslfu/slotstream)
-// ADAPT: vLLM prefetch.py@bd5bbce6e45e09dbd07ac3e8c394626c059078f7
-// (Apache-2.0, Copyright contributors to the vLLM project), credited SGLang
-// offloader.py@11bfd868ac36c0d5c7089c3f1a65ed575feb5540. Retain buffer ownership
 // until completion; shutdown is a Go extension. No Python/CUDA code copied.
 
 import (

@@ -14,16 +14,11 @@
  * limitations under the License.
  */
 
-// DIRECT-PORT of the NVIDIA XID code -> operator-text closed vocabulary from
-// NVIDIA/dcgm-exporter (Apache-2.0). The table below is ported VERBATIM from
 //
-//	https://github.com/NVIDIA/dcgm-exporter/blob/4e663a526c4624ad0e18ad816f09b7be2c5348a7/internal/pkg/collector/xid_errors.go
-//	pin 4e663a526c4624ad0e18ad816f09b7be2c5348a7 (table declared at xid_errors.go:20)
 //
 // which in turn indexes the vendor XID catalog
 // (https://docs.nvidia.com/deploy/xid-errors/#topic_4) frozen at that pin.
 // Borrow provenance: docs/research/STUDY-PRODUCTION-SCALING-GPU-SRE-2026-11-07.md,
-// candidate dcgm-exporter-1 (native ticket oss-port-dcgm-exporter-dcgm-exporter-1).
 //
 // What fak adds AROUND the ported data: the fail-closed accessor
 // XIDOperatorText, the record-level ExtractXID the classifier rung reads, and

@@ -17,8 +17,6 @@
 // SOFTWARE.
 //
 // Native scalar adaptation of inference/model.py at
-// 4dd75a8b448d95ae8e284d5c5a1e4b8808bd583b and inference/kernel.py at
-// 517ef625df97ec57aadc91b67506a57c20fdc5bb in
 // https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash.
 // These reference-code revisions are separate from the artifact revision
 // DeepSeekV41FlashRevision. No physical checkpoint completeness is asserted.

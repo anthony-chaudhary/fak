@@ -11,7 +11,6 @@ import (
 )
 
 // A projected-input wiring witness for inference/model.py:700-780 at
-// dba1be0a40aa45a94ad051997016db3960a90277. Distinct per-layer window rows and
 // zero queries make the one-sink denominator independently calculable. This
 // does not qualify projection/norm numerics, FP8 window or FP4 cache arithmetic,
 // full-model parity, or physical device execution. Runtime is not yet measured.

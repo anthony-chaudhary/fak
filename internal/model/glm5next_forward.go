@@ -2,8 +2,6 @@ package model
 
 // GLM-5.3-Flash (glm5_next) native text forward — the weights-bound engine rung
 // of the epic #9433 native track. Adapted from HuggingFace Transformers
-// (transformers/models/glm5_next, pinned at 19876312341f42cf49467bb24d67271cf28cb599)
-// under Apache-2.0.
 //
 // What this file owns (and the oracle leaves glm5next_kda_*/glm5next_cadence do
 // NOT): the full decoder executed against REAL checkpoint tensor names, so a

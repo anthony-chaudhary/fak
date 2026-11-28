@@ -7,10 +7,8 @@ import (
 	"math"
 )
 
-// quant_amd64_iquant.go — the AVX2 port of the resident IQ3_XXS decode dequant. The scalar
 // twin (iq3xxsDequantSuperBlock, quant_iquant.go) stays as the reference and the non-AVX2
 // fallback; this drives the same math through the 8-lane iq3xxsGroupAVX2 kernel when the
-// resolved tier has AVX2. It is a faithful port of internal/ggufload's dequantIQ3XXSArch (the
 // load-path kernel); model cannot import ggufload (import cycle on the residentMatRows path,
 // per quant_iquant.go), so the kernel and its sign-mask precompute are duplicated here.
 // FAK_QKERNEL=scalar pins the scalar path (qtier resolves to tierScalar) for A/B measurement.
@@ -68,8 +66,6 @@ func init() {
 
 // iq2DequantSuperBlockAVX2 reuses the existing eight-byte magnitude/scale/sign
 // kernel for the IQ2 family. Block indices/scales mirror the in-tree scalar
-// decoders in quant_kquant_iqtables.go (llama.cpp 6fe74980162af0ed5e559870d5deccafaa034e7c,
-// MIT; full original notice and unchanged codebooks are retained in that file).
 //
 // For a finite f16 scale, every scaled magnitude remains finite in float32.
 // Moving a lane's sign flip after that multiplication preserves every bit,

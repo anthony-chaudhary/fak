@@ -106,7 +106,6 @@ func TestClassifyHostFault(t *testing.T) {
 		})
 	}
 
-	// Pinned XID vocabulary (DIRECT-PORT of the dcgm-exporter table at
 	// 4e663a526c46). These are the VALUE assertions: an operator receipt's fault
 	// text is the closed contract, so a reworded or re-sorted row must fail here
 	// rather than silently change what an operator reads.

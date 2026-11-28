@@ -39,7 +39,6 @@ import (
 //
 // ARCH SPELLING: the community K3.1 converter registers
 // LLM_ARCH_KIMI_K31 = "kimi-k31" (csabakecskemeti/llama.cpp@kimi-k31,
-// 46bed7e66a25cba0d0278451c4feb05bc3ff5b9c, fetched 2026-11-07); the underscore
 // variant is accepted alongside, matching the kimi-k2/kimi_k2 precedent. Until
 // a real kimi-k31 GGUF header is read on the node (study PF-06), this string
 // is the planned spelling — a mismatch surfaces as an unrecognized-arch load

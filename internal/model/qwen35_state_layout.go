@@ -3,7 +3,6 @@ package model
 // SPDX-License-Identifier: Apache-2.0
 // State-spec planning adapted from Tokenomos.
 // Copyright 2026 Shih-Ying Yeh (aka KohakuBlueLeaf, KBlueLeaf)
-// Revision eeb47ee09a3c5e66411e90313b017c211d6a3fbb:
 // src/tokenomos/models/contract.py and src/tokenomos/core/pools.py.
 // Modified for FAK: checked native dimensions and explicit dtype; retain FAK's
 // host row ownership and HAL convolution order, not the donor's GPU slot pools

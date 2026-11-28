@@ -1,5 +1,4 @@
 // Package godsplitplan is the boundary + hazard planner for a behavior-preserving
-// Go split — the Go port of the retired tools/godsplit_plan.py (fak pythongate).
 //
 // The /modularize skill retires the code-quality scorecard's `architecture` debt
 // (god-files > 1500 lines, god-functions > 200 lines) by MOVING top-level

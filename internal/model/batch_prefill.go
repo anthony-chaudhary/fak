@@ -76,7 +76,6 @@ func lmHeadProjectedRows(selected []float32, hiddenSize int) int {
 }
 
 // prefillExpertWarmArm is one session's arm of the packed-prefill per-layer expert
-// warm hook (the Strata layer-major borrow, oss-port-strata-layer-major-prefill leaf 1).
 // enabled is the session-level flag — zero value off; hook is the seam the walk fires
 // at each layer entry when enabled. A nil hook with enabled=true keeps the production
 // default: today's packed lanes are dense-only (batchPreNormFastPathOK excludes the MoE

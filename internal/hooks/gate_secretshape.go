@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// gate_secretshape.go — the SECRET_SHAPE gate, a port of tools/check_secret_shapes.py. It
 // catches operator-leak SHAPES the literal needle list (PUBLIC_LEAK) misses: a Windows/macOS
 // home path with a real username, an msl-* host, a *.lab host. Scans added lines of text files.
 

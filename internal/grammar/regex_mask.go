@@ -22,7 +22,6 @@ import (
 //
 // Adapted from DeepInfer structured-output regex dispatch and full-match regex
 // semantics (Apache-2.0, deepseek-ai/DeepInfer deepinfer/structure_output/compiler.py
-// at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
 type RegexMask struct {
 	dec        TokenDecoder
 	eos        int

@@ -5,7 +5,6 @@ package model
 // Copyright 2026 Shih-Ying Yeh (aka KohakuBlueLeaf, KBlueLeaf).
 // Modified native Go translation for FAK: bounded per-session full/ring owners,
 // rather than Tokenomos's batched GPU pools. Source: KohakuBlueleaf/Tokenomos
-// eeb47ee09a3c5e66411e90313b017c211d6a3fbb, models/contract.py,
 // core/pools.py, models/blocks/attention.py, kernels/attention/paged.py.
 // The complete Apache-2.0 license is retained in the repository root LICENSE.
 // Preserve the donor's separate K/V planes, absolute-position ring addressing,

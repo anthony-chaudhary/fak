@@ -9,7 +9,6 @@ import (
 )
 
 // quantizeV4DenseFP8TensorInto consumes the dense FP8 pair published by
-// DeepSeek-V4-Flash-0731 at revision 7872f01b1d1fe23eabc4c98b48bffcef5a386062:
 // an E4M3 weight and its E8M0 sibling scale. The scale sorts before the weight,
 // so its first visit validates and defers the pair; the weight visit performs one
 // decode and installs only the Q8 resident tensor.

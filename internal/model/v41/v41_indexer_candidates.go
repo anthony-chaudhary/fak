@@ -19,7 +19,6 @@
 // SOFTWARE.
 //
 // Adapted from deepseek-ai/DeepSeek-V4.1-Flash inference/model.py:561-610 at
-// dba1be0a40aa45a94ad051997016db3960a90277 (MIT).
 
 package v41
 

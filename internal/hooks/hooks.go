@@ -21,7 +21,6 @@
 // test that enforces it (architest's TestEveryPackageDeclaresTier). A claim carrying none of those
 // is prose, and prose decays silently.
 //
-// Each gate is a byte-faithful port of its tools/check_*.py / scrub_public_copy.py oracle;
 // a `parity_test.go` differential harness asserts identical verdicts against the Python
 // checkers (kept on disk as the fallback when no `fak` binary resolves, and as the oracle).
 // The exit contract every pre-commit gate honors: clean / violation / could-not-run, where

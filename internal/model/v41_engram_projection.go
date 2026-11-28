@@ -19,7 +19,6 @@
 // SOFTWARE.
 //
 // Engram projection preserves the raw output-major contraction and BF16 boundary
-// in DeepSeek-V4.1-Flash at dba1be0a40aa45a94ad051997016db3960a90277 (MIT).
 package model
 
 import (

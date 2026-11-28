@@ -15,7 +15,6 @@ import "testing"
 //	idx:  0    1    2    3    4    5    6    7   8   9  10  11  12  13  14   15
 //	val: -127 -104 -83  -65  -49  -35  -22  -10  1  13  25  38  53  69  89  113
 
-// Reference: llama.cpp at 83078fec0db82d6b5a00d9599062c38c39145755 (MIT).
 // fak-test:runtime fast est=1ms lane=default
 func TestDequantIQ4NLKnownAnswer(t *testing.T) {
 	// One 32-element block. d = 2.0 (f16 0x4000, little-endian 0x00 0x40). qs[j]

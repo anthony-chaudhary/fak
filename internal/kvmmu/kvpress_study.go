@@ -1,5 +1,4 @@
 // Conceptual INSPIRE-ONLY seam derived from NVIDIA/kvpress
-// (94951a5b90a2594efbb674c69a9fb9cd28f300c0, Apache-2.0).
 // No Python runtime, model weights, or served-token quality claim is made.
 package kvmmu
 

@@ -11,7 +11,6 @@ package model
 //
 // Reference: deepseek-ai/DeepSeek-V4.1-Flash inference/model.py (Compressor /
 // lightning indexer / Attention forward) and inference/kernel.py's sparse sink
-// kernel, pinned at revision dba1be0a40aa45a94ad051997016db3960a90277 (MIT).
 //
 // Boundaries. The caller owns projection, RoPE, and the session state; this file
 // begins where already-projected query heads and a completed compressed KV stream

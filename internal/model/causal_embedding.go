@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Pooling/hidden-output contract adapted from llama.cpp at
-// cd8427d018c07eefab6c110f7f115c31ec4c6157 (MIT). License and notice:
 // THIRD_PARTY_NOTICES.md ("llama.cpp").
 package model
 

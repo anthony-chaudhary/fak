@@ -1,7 +1,6 @@
 package ggufload
 
 // PQ2_0 uses PrismML's group-128 ternary block from ggml-common.h at
-// adfffbe41b2cabcd51fff326ab045662265062bb. The rows below are permuted as
 // complete blocks, so no codes or f16 scales are changed. The permutations are
 // the packed equivalents of normalizeCanonicalTensorData.
 //

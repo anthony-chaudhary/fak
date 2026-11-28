@@ -12,7 +12,6 @@ package model
 //
 // SOURCE (direct port, pinned): SGLang
 // python/sglang/srt/models/kimi_k3.py at
-// a7d9f81ee24c5cceeceeb4ccb9072f68d56cb10d (Apache-2.0):
 //
 //   - `KimiK3MoE.__init__` builds `routed_expert_down_proj` (hidden -> latent),
 //     `routed_expert_norm` (RMSNorm over the latent width, when

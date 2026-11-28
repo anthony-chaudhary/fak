@@ -22,17 +22,12 @@ var ErrModelOptNVFP4SourceClosed = errors.New("model: ModelOpt NVFP4 source is c
 // the checkpoint's exact base name.
 //
 // The two admitted sibling-name families are pinned to NVIDIA ModelOpt commit
-// 0638a274cf195870564d8e3c164e4f859e5be2a2 (Apache-2.0):
 //
 //   - Hugging Face export: unified_export_hf.py registers weight_scale and
 //     weight_scale_2, and normalizes any TensorRT-produced scale swizzle back to
 //     the linear ModelOpt layout before export.
 //   - TensorRT-LLM export: model_config.py and model_config_utils.py emit
 //     weights_scaling_factor and weights_scaling_factor_2.
-//
-// https://github.com/NVIDIA/TensorRT-Model-Optimizer/blob/0638a274cf195870564d8e3c164e4f859e5be2a2/modelopt/torch/export/unified_export_hf.py
-// https://github.com/NVIDIA/TensorRT-Model-Optimizer/blob/0638a274cf195870564d8e3c164e4f859e5be2a2/modelopt/torch/export/trtllm/model_config.py
-// https://github.com/NVIDIA/TensorRT-Model-Optimizer/blob/0638a274cf195870564d8e3c164e4f859e5be2a2/modelopt/torch/export/trtllm/model_config_utils.py
 type ModelOptNVFP4Source struct {
 	mu       sync.RWMutex
 	file     *safetensorsFile

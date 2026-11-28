@@ -12,7 +12,6 @@ import (
 	"strings"
 )
 
-// gate_demolivelinks.go — the DEMO_LIVE_LINKS gate, a byte-faithful port of
 // tools/demo_live_links.py static audit.
 //
 // Where DEMO_COMMAND catches broken local command references and BROWSER_CONTRACT

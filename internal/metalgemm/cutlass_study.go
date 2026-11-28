@@ -16,8 +16,6 @@ package metalgemm
 //
 // Provenance: lifted from the deep study
 // docs/research/STUDY-NVIDIA-CUTLASS-2026-11-06.md (fak-private), pinned at
-// NVIDIA/cutlass@b2f249acd20392beeb16f5e5a31f4f1a4e38b3bd. License boundary:
-// the include/ tree is BSD-3-Clause per-file; the python/CuTeDSL tree is
 // NVIDIA-EULA and INSPIRE-ONLY, so nothing here is copied from it.
 
 // CutlassStudyPin is one pinned upstream reference: a file path and line in the

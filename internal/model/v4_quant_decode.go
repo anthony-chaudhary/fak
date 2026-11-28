@@ -40,8 +40,6 @@ var v4FlashExpertQuantSpecs = map[string]v4ExpertQuantSpec{
 }
 
 // decodeV4ExpertQuant decodes the exact routed-expert format observed in
-// deepseek-ai/DeepSeek-V4-Pro@b5968e9190ef611bbf34a7229255be88a0e937c1
-// and DeepSeek-V4-Flash-0731@7872f01b1d1fe23eabc4c98b48bffcef5a386062.
 // The pinned inference code views each byte as torch.float4_e2m1fn_x2 and
 // applies one F8_E8M0 scale per 32 unpacked K values. PyTorch's OCP type
 // definition establishes low-nibble val0/high-nibble val1 ordering. The

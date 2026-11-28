@@ -26,7 +26,6 @@ type ink2DF2Layer struct {
 }
 
 // ink2DFlash2Draft is the DFlash2 draft resident beside a target session, the
-// device port of Inkling2DFlash2Draft. Every target forward writes its context
 // K/V from the four target taps, one ring row per position, so rows of
 // rejected drafts sit past the committed position and are overwritten. A
 // proposal runs the block over the anchor and Block-1 masks and returns the

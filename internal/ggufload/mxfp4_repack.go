@@ -18,7 +18,6 @@ import (
 // touching any value: no calibration, no re-quantization. Adapted from
 // antirez/ds4 gguf-tools/deepseek41_dspark.py expert_bytes and
 // deepseek41_quantize.py to_mxfp4 (MIT, pin
-// b3f50180ec2c7324892be1f50bc83555ccb8d5e7).
 
 var (
 	// ErrMXFP4MisalignedSource: the packed code length is not a multiple of

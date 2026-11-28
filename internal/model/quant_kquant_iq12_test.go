@@ -12,7 +12,6 @@ import (
 
 // These IQ1/IQ2 oracle digests and matvec result bits were produced by the scalar
 // dequantize_row_iq* routines in the pinned llama.cpp revision documented beside the production
-// decoder (6fe74980162af0ed5e559870d5deccafaa034e7c). The fixture bytes are generated here rather
 // than copied from a model, so the witness is deterministic and exercises codebook indexes, sign
 // selectors, sub-block scales, and row/block strides without depending on an external artifact.
 var iq12ResidentCases = []struct {

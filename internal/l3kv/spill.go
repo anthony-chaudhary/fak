@@ -59,7 +59,6 @@ type SpillStats struct {
 // existing restore path (Store.Get -> RestoreSpan) reads it back. Adapted from
 // TensorFold's disk_spill contract (zig/src/native/disk_spill.zig,
 // zig/src/server/cli.zig:518-523, zig/src/core/prompt_cache.zig:191
-// @9e8c368b0b4c2c7892a0c9f0f302d7c164016209, Apache-2.0): optional spill copies
 // before releasing RAM, reusing the durable restore path, capped on disk,
 // entry size, and time; checkpoint slots bound retained RAM states.
 // It is safe for concurrent use.

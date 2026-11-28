@@ -4,7 +4,6 @@
 // on non-Apple hosts.
 //
 // Provenance: adapted from huggingface/candle PR #4068 at revision
-// cfcbd7186d13271843ce7eb41d25659bd0835850 (Apache-2.0 / MIT).
 
 package metalgemm
 

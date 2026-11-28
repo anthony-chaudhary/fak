@@ -17,11 +17,8 @@ type RowState struct {
 	finished bool
 }
 
-// BatchedGrammarStep is a host-side port of the per-sequence terminal
 // contract from vLLM's Guidance structured-output backend under speculative
 // decoding, pinned at
-// vllm/v1/structured_output/backend_guidance.py:1@4593e73c85440e81a10565b4017a9ced421f2208
-// (Apache-2.0). In a batch, a draft token that hits EOS on one row must
 // terminate that row only: the batched step applies EOS as a terminal
 // transition scoped to that single row, freezes its state, and masks the
 // finished row to the terminal-only set while every other live row keeps

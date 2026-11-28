@@ -11,10 +11,6 @@ import (
 )
 
 // DeepSeek-V4-Flash-0731 routed-expert FP4 dimensions are pinned from the
-// official checkpoint at revision 7872f01b1d1fe23eabc4c98b48bffcef5a386062:
-//
-//   - config: https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731/blob/7872f01b1d1fe23eabc4c98b48bffcef5a386062/config.json
-//   - inference: https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731/blob/7872f01b1d1fe23eabc4c98b48bffcef5a386062/inference/model.py
 //
 // These tests use the real packed tensor dimensions but deterministic in-memory
 // bytes. They neither contain nor read the published checkpoint weights.

@@ -1,7 +1,6 @@
 package model
 
 // Known-address batch preparation is adapted from JigSawPT/llama.cpp at
-// 8ce0968539b1a6795f3413c2783dfa5646b4688a (MIT). License and notices:
 // THIRD_PARTY_NOTICES.md ("JigSawPT/llama.cpp").
 //
 // MIT License
@@ -229,8 +228,6 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 }
 
 // The bounded worker scheduling is adapted from the Strata/Project Maya
-// EgReader (Niko1221/Strata) at c62d5e3a15b40ea51c96aae9e8d36928965f53ab
-// (MIT; complete license and Maya attribution in THIRD_PARTY_NOTICES.md,
 // "Strata" and "Project Maya"). The local producer policy and source hold are
 // reused with exact coalesced spans, immutable copied output and the existing
 // transaction/cache publication boundary. One process-wide additional read

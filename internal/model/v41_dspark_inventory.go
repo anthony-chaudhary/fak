@@ -44,7 +44,6 @@ type V41DSparkInventory struct {
 // Architecture sources (MIT model/reference, Apache-2.0 vLLM):
 // https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/inference/model.py
 // https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/inference/convert.py
-// https://github.com/vllm-project/vllm/blob/763e3f7c911308fa609fb9437642929efe955798/vllm/models/deepseek_v41/nvidia/dspark.py
 // The pinned FAK artifact identity remains DeepSeekV41FlashRevision. Individual
 // artifact headers/hashes must still be captured by the hardware intake receipt.
 func DeepSeekV41DSparkInventory(c Config) (*V41DSparkInventory, error) {

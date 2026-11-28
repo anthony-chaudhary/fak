@@ -3,7 +3,6 @@ package ggufload
 // quant_descriptor_adapter_test.go is the witness suite for the W4AFP8
 // foreign-descriptor adapter (ported from vllm-project/vllm,
 // vllm/model_executor/layers/quantization/w4afp8.py@
-// 05737d01eb8d74b52c8478c6885dfb603808f335, Apache-2.0). It pins the
 // load-time translation of a fixed foreign descriptor onto the canonical W4A8
 // FP8 MoE scheme, the routed-expert tensor-name remap, the int4->uint4b8 byte
 // repack, and the fail-closed refusal of unknown spellings. No model weights

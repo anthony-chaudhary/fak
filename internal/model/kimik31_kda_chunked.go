@@ -7,7 +7,6 @@ package model
 // touched once per chunk (the inter-chunk carry) instead of once per token,
 // with per-token contributions expressed through within-chunk cumulative
 // decay factors — the standard linear-attention chunk trick (FLA's chunked
-// Gated-DeltaNet; MoonshotAI/FlashKDA is the CUTLASS SM90+ port of the same
 // form, see the cuda-kda-chunked-prefill SOTA row).
 
 import (

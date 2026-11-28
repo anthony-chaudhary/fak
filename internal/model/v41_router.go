@@ -151,7 +151,6 @@ func v41Route(logits, correctionBias []float32, cfg v41RouterConfig) ([]routePic
 // Gate divides by sum + 1e-20, including a valid all-zero selected-score row.
 // This changes only that F32 normalization sequence, not score or top-k math.
 // Reference: DeepSeek-V4.1-Flash inference/model.py Gate.forward, revision
-// dba1be0a40aa45a94ad051997016db3960a90277, lines 824-826 (MIT).
 func v41RouteForGeometry(logits, correctionBias []float32, cfg v41RouterConfig, full bool) ([]routePick, error) {
 	return v41RouteWithNormalization(logits, correctionBias, cfg, full)
 }

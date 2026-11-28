@@ -6,7 +6,6 @@ import (
 )
 
 // TestDynamicSDScheduleLookup pins the borrowed vLLM dynamic-SD-schedule
-// contract (ADAPT of vllm/v1/spec_decode/dynamic/utils.py@ae065918640a198a56f6f17eb45e251c3229fe41):
 // sparse (batch_size, K) points normalize into a dense, monotonic table;
 // duplicates and out-of-range K reject with the named sentinel errors; and batch
 // sizes above the largest point clamp to the last entry.

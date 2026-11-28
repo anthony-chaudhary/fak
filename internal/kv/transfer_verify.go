@@ -1,7 +1,5 @@
 // Ported from github.com/SemiAnalysisAI/InferenceX
 // (collectivex/bench/kv_workload.py and collectivex/bench/run_kv.py
-// @ea9e4f6f2e3073d55fe6f1dcd33557b7fe67f608), Apache-2.0.
-// SPDX-License-Identifier: Apache-2.0
 
 package kv
 

@@ -214,7 +214,6 @@ func (d NgramDrafter) Draft(committed []int) []int {
 // drafter fills the remainder. Adapted from ExLlamaV3's hybrid drafting
 // (exllamav3/generator/generator.py iterate_hybrid_gen and
 // exllamav3/generator/ngram.py, turboderp-org/exllamav3 at
-// 3a513ac9f91aae777f317ca2341b8e445b62c64e, MIT): the long suffix-match
 // continuation rides ahead of the regular drafter's guess, so verbatim repetition
 // of context (reciting a drafted reply, editing source) advances many tokens at
 // prefill speed while novel text falls back to the model drafter. Upstream batches
@@ -254,7 +253,6 @@ func (d NgramDrafter) HybridDraft(committed []int, modelDraft func() []int) []in
 
 // longestRecentTokenSuffix adapts the bounded reverse-KMP scan from
 // vllm/v1/spec_decode/ngram_proposer.py at
-// 85591000403fc3bc3b4d0303e3a97bedab007763 (Apache-2.0).
 // It scans all candidate suffix lengths together, keeping only maxMatch LPS
 // entries. Strictly longer updates retain Fak's most-recent tie, unlike vLLM's
 // earliest-occurrence tie. Starting at reverse index one excludes the current

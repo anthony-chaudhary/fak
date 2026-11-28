@@ -1,5 +1,3 @@
-// DIRECT-PORT of triton-inference-server/core src/infer_stats.h, src/infer_stats.cc
-// at e3d3ad9e582e4692ddf2c10ba61551f4acb15ce7 (BSD-3-Clause).
 // Ported: the per-request phase-split stats of InferenceStatsAggregator
 // (request/queue/compute_input/compute_infer/compute_output durations, cache
 // hit/miss counts and durations, success/failure split with FailureReason).

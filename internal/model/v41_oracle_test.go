@@ -9,7 +9,6 @@ package model
 // Scope and provenance. The reference below is a plain in-order scalar
 // transcription of the pinned official artifact
 // deepseek-ai/DeepSeek-V4.1-Flash @ revision
-// dba1be0a40aa45a94ad051997016db3960a90277 (inference/model.py +
 // inference/kernel.py), plus the published config axes admitted in
 // v41_config.go. It reuses NONE of the production machinery - not
 // V41EngramHashState.Hash, not v41MHCSplit, not v41Route, not

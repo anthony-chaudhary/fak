@@ -26,7 +26,6 @@ import (
 // Adapted from DeepInfer's dispatch of JSON output to an XGrammar builtin
 // any-JSON grammar with a bounded whitespace count (Apache-2.0,
 // deepseek-ai/DeepInfer deepinfer/structure_output/compiler.py at
-// 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
 type JSONValueMask struct {
 	dec TokenDecoder
 	eos int

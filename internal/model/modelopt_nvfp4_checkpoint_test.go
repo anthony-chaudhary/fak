@@ -19,7 +19,6 @@ import (
 // holds one block scale per 16 values; <base>.weight_scale_2 F32 scalar is the
 // per-tensor global scale; value = E2M1 * blockScale * globalScale.
 // https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/quantization/modelopt.py
-// https://github.com/NVIDIA/TensorRT-Model-Optimizer/blob/0638a274cf195870564d8e3c164e4f859e5be2a2/modelopt/torch/export/unified_export_hf.py
 var nvfp4TestE2M1 = []float32{0, 0.5, 1, 1.5, 2, 3, 4, 6}
 
 // nvfp4TestTriple builds an analytic packed triple: code(r,i) = (r+i)%8, block

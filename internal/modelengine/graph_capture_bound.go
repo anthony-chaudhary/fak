@@ -3,7 +3,6 @@ package modelengine
 // Adapted from deepseek-ai/DeepEP (MIT; Copyright (c) 2025 DeepSeek; see
 // THIRD_PARTY_NOTICES.md), csrc/hybrid_ep/executor/executor.cu and
 // deep_ep/hybrid_ep_buffer.py at pinned revision
-// 7181fd860d182c0b9f006034651e920dab887f86 (HybridEP PR #745).
 //
 // Clean-room host Go contract and in-memory oracle only; no GPU or CUDA graph
 // capture hardware is executed.

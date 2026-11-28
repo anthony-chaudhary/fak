@@ -12,7 +12,6 @@ import (
 // reference for DeepSeek-V4-Flash-0731 (parent #12636, epic #12635).
 //
 // The published Attention.forward at revision
-// 7872f01b1d1fe23eabc4c98b48bffcef5a386062 for a layer whose compress_ratio is
 // 0 executes, in order:
 //
 //   q  = wq_b(wq_norm(wq_a(x)))            // low-rank Q, reshaped [seq,n_heads,head_dim]

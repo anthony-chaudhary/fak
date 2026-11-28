@@ -1,10 +1,7 @@
 // v41_dspark_policy.go — V4.1 DSpark confidence-scheduled variable-length
-// verification slot allocation (borrow-port oss-port-deepinfer-dspark-varlen-policy).
 //
-// Clean-room ADAPT of the pure policy core of DeepInfer's MTP variable-length
 // scheduler (deepseek-ai/DeepInfer, csrc/engine/mtp_varlen.hpp, schedule() at
 // lines 150-267 plus its two runtime estimators, pin
-// 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01, Apache-2.0). The contract is
 // reimplemented from that reading; no upstream source text is copied.
 //
 // The policy decides how many draft positions each scheduled request gets

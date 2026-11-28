@@ -100,7 +100,6 @@ func (c *Config) applyMiniMaxSparseConfig(s miniMaxSparseConfig) error {
 	}
 	// Adapted from get_minimax_sparse_layer_ids and
 	// get_minimax_sparse_disable_value_layer_ids in SGLang model_config.py:448-459
-	// at 7cefa607657b9e63abe6946cb795e77d4d31c9c0 (Apache-2.0).
 	layers := make([]string, c.NumLayers)
 	hasSparse := false
 	for layer, frequency := range s.LayerFreq {

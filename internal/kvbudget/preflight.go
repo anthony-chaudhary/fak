@@ -1,5 +1,4 @@
 // Structural adaptation of Ollama scheduler load-path capacity planning
-// (server/sched.go:539-700,804,1478,1633 @ 02480ca2a47153e1f9c31cbe1e05536da97ce1ba, MIT).
 package kvbudget
 
 import (

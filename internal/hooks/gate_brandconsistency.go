@@ -6,7 +6,6 @@ import (
 )
 
 // gate_brandconsistency.go — the BRAND_CONSISTENCY gate, and since #6265 the ONLY
-// implementation of the check (it began as a byte-faithful port of the now-retired
 // the retired Python checker, whose golden vectors live on in the test beside it).
 // It guards fak's PRIMARY product descriptor against re-drift: the durable brand keeps ONE
 // primary noun ("the Fused Agent Kernel" / "agent kernel") and retires "agent tool firewall"

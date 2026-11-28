@@ -5,10 +5,8 @@ import (
 	"sync"
 )
 
-// PrefetchMatchBound is the host-side port of SGLang's HiCache L3 prefetch
 // bound (sgl-project/sglang PR #48522,
 // python/sglang/srt/mem_cache/common.py:1;python/sglang/srt/managers/scheduler.py:1
-// @c52ac8a14293dd5ebf19f7cc84d9ba7943c7537b, Apache-2.0): a prefetch from
 // external storage must stop at the matched-key boundary. The upstream bug
 // let the prefetch reserve more pages than the longest-prefix match
 // justified, and the scheduler charged its admission accounting against the

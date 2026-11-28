@@ -9,8 +9,6 @@ import (
 )
 
 // Support-GGUF names and invariants adapted from antirez/ds4
-// b4e3faf5262b21db94ec309cf321640ff1eed460, gguf-tools/deepseek41_dspark.py.
-// MIT License: Copyright (c) 2026 The ds4.c authors;
 // Copyright (c) 2023-2026 The ggml authors; Copyright (c) 2023 DeepSeek.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal

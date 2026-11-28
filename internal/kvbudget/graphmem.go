@@ -8,16 +8,14 @@
 // # Source of truth (ADAPT verdict — re-expressed in idiomatic Go, no copied
 // code blocks)
 //
-//	vllm-project/vllm @ ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0)
-//	  - vllm/v1/worker/gpu/cudagraph_utils.py:922-1037
-//	    profile_cudagraph_memory + _extrapolate_full_graph_memory:
-//	    first capture pays the pool baseline, later buckets mostly reuse it, so
-//	    the second sample is taken as the per-bucket cost (floored at
-//	    _MIN_PER_GRAPH_BYTES) and the total is first + (total-1) × per-bucket;
-//	    a NONE-mode / zero-sample probe reserves 0.
-//	  - vllm/v1/worker/gpu_worker.py:705-750
-//	    determine_available_memory: available_kv_cache_memory_bytes =
-//	    requested - non_kv_cache_memory - cudagraph_estimate_applied.
+//	  profile_cudagraph_memory + _extrapolate_full_graph_memory:
+//	  first capture pays the pool baseline, later buckets mostly reuse it, so
+//	  the second sample is taken as the per-bucket cost (floored at
+//	  _MIN_PER_GRAPH_BYTES) and the total is first + (total-1) × per-bucket;
+//	  a NONE-mode / zero-sample probe reserves 0.
+//	- vllm/v1/worker/gpu_worker.py:705-750
+//	  determine_available_memory: available_kv_cache_memory_bytes =
+//	  requested - non_kv_cache_memory - cudagraph_estimate_applied.
 package kvbudget
 
 import "math"
@@ -72,7 +70,6 @@ func (p GraphMemProbe) ExtrapolatedPoolFootprint(totalBuckets int) uint64 {
 // available = floor(freeBytes×utilization) − nonKVBytes − graphReserveBytes,
 // blocks = floor(available / bytesPerBlock) — vLLM's
 // available_kv_cache_memory_bytes = requested − non_kv −
-// cudagraph_estimate_applied (gpu_worker.py:744-750@ae065918640a198a56f6f17eb45e251c3229fe41).
 // It fails closed with ErrNonKVExceedsBudget when the combined charge exceeds
 // the utilized budget — never a negative block count. A zero reserve reduces
 // to DeriveMaxBlocks exactly.

@@ -14,7 +14,6 @@ func TestMiniMaxPublishedConfigArrayCompatibility(t *testing.T) {
 }
 
 // Source data: MiniMaxAI/MiniMax-M3.1-Flash config.json at
-// 54e4e69dfc452b1e94a426c24a4fdeeaa8e3ad5e; model metadata, no remote code.
 
 const minimaxM31PublishedConfig = `{
   "architectures": [

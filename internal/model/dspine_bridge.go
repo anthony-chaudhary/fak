@@ -4,7 +4,6 @@ package model
 // (anthony-chaudhary/fak#14441), the third drafter lineage for the spec-decode
 // path alongside chain-style and MTP drafters and the DFlash 2 reference shape.
 //
-// Concept-level port of the DSpine mechanisms (Zhang et al., "Draft in Parallel,
 // Condition Through Depth: Adjacent Causal Injection for Speculative Decoding",
 // arXiv:2609.36173; Apache-2.0) re-expressed against fak's own drafter shapes.
 // No upstream bytes are vendored; attribution/NOTICE preserved.

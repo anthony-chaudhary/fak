@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Draft KV dtype selection adapted from vLLM (Copyright vLLM contributors),
 // vllm/config/speculative.py, revision
-// 31f84f6b957b5f5309f66130efc3c1df07d8a995. No Python source is copied.
 
 package model
 

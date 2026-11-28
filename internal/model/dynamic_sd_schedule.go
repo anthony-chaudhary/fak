@@ -17,7 +17,6 @@ import (
 //   - vllm/config/speculative.py:517-519,2122-2123
 //     (num_speculative_tokens_per_batch_size + uses_dynamic_speculative_decoding)
 //   - vllm/v1/core/sched/scheduler.py:1658-1660 (per-step K = lookup[batch_size])
-// at pin ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0).
 //
 // Mechanism: the operator supplies (batch_size, K) points; validation normalizes
 // them into a DENSE monotonically-indexed table covering every batch size

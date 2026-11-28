@@ -4,8 +4,6 @@ package kvmmu
 // from the DeepSeek-V4.1-Flash Engram host-offload H200 recipe (vLLM
 // --engram-config cpu_offload + use_thp at TP4; SGLang placement cpu / lookup
 // peer_read equivalent). Source: vllm-project/vllm,
-// recipes/models/deepseek-ai/DeepSeek-V4.1-Flash.yaml @ e740badc2e3df13a5c2abfca04ed0ac917985c5f
-// (Apache-2.0), ADAPT verdict — no upstream code copied. The geometry mirrors the
 // published recipe per rank: ~81.2 GiB resident weights + 38.5 GiB KV on the
 // device row, a 23.6 GiB pinned Engram shard on the host row, against >=256 GB
 // playbook host RAM. Software evidence only: no pinned memory is allocated and

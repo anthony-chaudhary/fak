@@ -9,7 +9,6 @@ import (
 // byte counts, not derived estimates. Sources:
 //   - Official 48 weight shards total 510,296,708,312 bytes, recorded in
 //     docs/deepseek/v4-flash-native.md for DeepSeek-V4.1-Flash at the pinned
-//     revision DeepSeekV41FlashRevision (dba1be0a40aa45a94ad051997016db3960a90277).
 //   - Engram (the two embedding tables for layer IDs {1,14}) measured footprint
 //     202,758,032,400 bytes, recorded in the issue body.
 const (

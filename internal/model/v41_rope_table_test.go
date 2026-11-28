@@ -8,7 +8,6 @@ import (
 
 // The configuration is the retained official V4.1 fixture; its rotary fields
 // also match the pinned GGUF header. The independent scalar oracle transcribes
-// model.py:369-389,680-696 at dba1be0a40aa45a94ad051997016db3960a90277.
 // This witnesses layer policy and the YaRN equation at host table precision,
 // not PyTorch bitwise parity, tensor loading, or hardware execution.
 // fak-test:runtime fast est=10ms lane=default

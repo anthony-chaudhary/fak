@@ -17,7 +17,6 @@ package model
 // a from-scratch scalar transcription of the pinned reference
 // (deepseek-ai/DeepSeek-V4.1-Flash inference/model.py Compressor +
 // lightning indexer, revision
-// dba1be0a40aa45a94ad051997016db3960a90277, MIT) that deliberately shares NO
 // helper with the production path under test, nor with the `model/v41`
 // transcription: it re-implements the BF16 round-to-nearest-even cast, the
 // stable-softmax pooling, the learned-RMSNorm tail, the rectified per-head
@@ -26,7 +25,6 @@ package model
 // V41CompressorPool / V41IndexerScore / V41SelectCandidateBlocks /
 // V41SelectIndexRows against the independently executed reference numbers.
 //
-// Provenance. Revision: dba1be0a40aa45a94ad051997016db3960a90277. Equation
 // source: the Compressor and lightning-indexer stages of the reference
 // inference/model.py at that revision. The fixture records that revision so a
 // drift is caught by the revision check, exactly like the sibling oracle.

@@ -8,7 +8,6 @@ import (
 
 // fak-test:runtime fast est=10ms lane=default
 // TestSharedAttentionGeometryRefusals pins the shared-attention geometry contract ADAPTED
-// from ashhart/TensorFold zig/src/core/shared_attention.zig:17@9e8c368b0b4c2c7892a0c9f0f302d7c164016209:
 // valid GQA/RoPE passes; qh=3/kh=2, odd rotary_dim, misaligned head_dim, dup KV slots, and
 // aliased buffers refuse via sentinel errors.
 func TestSharedAttentionGeometryRefusals(t *testing.T) {

@@ -1,8 +1,6 @@
 package ggufload
 
 // quant_descriptor_adapter.go ports the vLLM W4AFP8 checkpoint adapter
-// (vllm/model_executor/layers/quantization/w4afp8.py:1@05737d01eb8d74b52c8478c6885dfb603808f335,
-// Apache-2.0) into the fak weight loader as a pure host-side, loader-component
 // translator.
 //
 // SGLang-style W4AFP8 MoE checkpoints serialize their routed experts as

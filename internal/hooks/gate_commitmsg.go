@@ -12,7 +12,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-// gate_commitmsg.go — the COMMIT_MSG gate, a port of tools/check_commit_msg.py. It nudges the
 // subject toward `type(scope): <verb> <what>` so the DOS commit-audit witness can grade the
 // commit. CommitMsgVerdict returns (ok, why): ok==true means gradeable.
 

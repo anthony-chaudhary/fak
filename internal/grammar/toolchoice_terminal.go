@@ -31,7 +31,6 @@ const (
 var ErrToolchoiceTerminal = errors.New("grammar: tool-choice structural refusal")
 
 // ToolchoiceTerminal is a host contract adapted from SGLang Kimi-K3
-// structural tags at ebeed893722150a29303d9eb9bd975abec4072a5 (Apache-2.0).
 // Required mode permits EOS only after a complete nonempty tools section.
 // Parallel mode does not terminate after the first individual call. None
 // forbids tools and requires response content. This is not sampler wiring.

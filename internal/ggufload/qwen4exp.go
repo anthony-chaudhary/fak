@@ -1,7 +1,6 @@
 package ggufload
 
 // Qwen3.8-Flash-Next ("qwen4exp") GGUF hyperparameters and tensor schema. Key
-// reads, validation and the tensor set follow Nathanw1014/llama.cpp@dff60048744f99cb0af68d02be2314456b3269dc
 // src/models/qwen4exp.cpp load_arch_hparams/load_arch_tensors and the converter
 // conversion/qwen4exp.py at the same revision (MIT License, Copyright (c) 2023-2026
 // The ggml authors).

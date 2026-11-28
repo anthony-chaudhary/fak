@@ -10,9 +10,7 @@ package model
 // reference" (TestQ2KReduceAsmMatchesScalar). Integer addition is associative with no overflow on
 // these ranges, so any SIMD lane order is bit-identical.
 //
-// MIT provenance: direct port/adapt of the integer reduction of ggml_vec_dot_q2_K_q8_K,
 //   upstream:   ggml-org/llama.cpp
-//   commit pin: 83078fec0db82d6b5a00d9599062c38c39145755
 //   source:     ggml/src/ggml-cpu/arch/x86/quants.c
 //   license:    MIT (upstream LICENSE at the pin); Copyright (c) 2023-2026 The ggml authors
 // Native Go assembly only — no cgo/FFI.

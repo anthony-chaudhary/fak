@@ -22,7 +22,6 @@ var (
 // v41CompressorRing keeps each ratio >= 2 compressor-source layer's current
 // group on the device. Adapted from DeepInfer compress_and_update_state_decode
 // (Apache-2.0, deepseek-ai/DeepInfer deepinfer/model_executor/layers/
-// tilelang_ops/compress.py at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no
 // upstream source is copied. Every decode token projects its carrier through
 // wkv/wgate into a ring row without a readback, and the group-closing token
 // pools the ring in the same dispatch and reads back one row. The host

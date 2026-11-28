@@ -194,7 +194,6 @@ func (l *ExpertHotSetLearner) LoadWarmStartProfile(profile []ExpertUsageCount) {
 
 // expertUnitLess reports whether a sorts strictly before b under the learner's total order — the
 // rank_learned_profile ordering DIRECT-PORTED from Strata (Niko1221/Strata
-// src/core/expert_cache.cpp:141 @ 7695859aa13afb248bdb4d36f9b2e95707db079d, MIT): resident experts
 // first, then routing-frequency heat descending, then the prior saved-profile rank ascending (a
 // unit absent from the profile sorts after ranked ones), then the (layer, expert) index ascending.
 // It is a total order, so a warm-start profile breaks ties deterministically regardless of Go's

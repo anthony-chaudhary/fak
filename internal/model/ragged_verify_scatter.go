@@ -2,7 +2,6 @@
 // Ragged verify scatter adapted from SGLang (sgl-project/sglang, Apache-2.0),
 // python/sglang/srt/speculative/ragged_verify.py and
 // python/sglang/srt/layers/engram.py, revision
-// 32b7b66572d76bb5b7042e5792fee31d9de60286. No Python source is copied.
 
 package model
 

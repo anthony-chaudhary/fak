@@ -177,7 +177,6 @@ func TestV41CandidateOrdinaryPathRefusesMismatchedPublication(t *testing.T) {
 
 // Ratio-one prefill and two incremental decode steps match an independent
 // composition oracle (stepRatioOne + v41CombinedAttention, source:
-// inference/model.py:700-780 at dba1be0a40aa45a94ad051997016db3960a90277) at
 // every position of both the source and the reader, and the decode logits match
 // a full-history recompute. Host F32 only: not FP8/FP4 or device parity.
 // fak-test:justify why=contract when=changed:internal/model/**

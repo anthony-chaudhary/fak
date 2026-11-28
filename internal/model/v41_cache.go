@@ -124,7 +124,6 @@ func (c *V41ExpertCache) Put(layer, expert int, payload []byte) error {
 }
 
 // putClockRow adapts the Engram row cache from Niko1221/Strata at
-// c62d5e3a15b40ea51c96aae9e8d36928965f53ab.
 // Copyright (c) 2026 Peasant Smith and the Project Maya contributors.
 // Copyright (c) 2026 Niko1221 and the Strata contributors.
 // MIT license and Maya lineage: THIRD_PARTY_NOTICES.md ("Strata", "Project Maya").

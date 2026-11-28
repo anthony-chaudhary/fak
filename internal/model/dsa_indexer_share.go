@@ -7,8 +7,6 @@ import (
 
 // dsa_indexer_share.go — layer-group-scoped DSA light-indexer selection sharing.
 //
-// Upstream: ml-explore/mlx-lm, mlx_lm/models/glm_moe_dsa.py @4e9a1de64e2d874f0742b10ded506e30e67270e0
-// (PR #1410, "glm_moe_dsa: DSA cross-layer indexer sharing (GLM-5.2)", MIT, verdict ADAPT).
 //
 // In a GLM-5.2 DSA block several layers alias the SAME light indexer: they share
 // one indexer projection and therefore one top-k page/key selection. Recomputing
@@ -16,7 +14,6 @@ import (
 // prefill path. The upstream fix computes the selection once per layer group and
 // broadcasts it to every dependent layer.
 //
-// This is the fak-native port of that contract, expressed on the package's existing
 // DSA selector seam (dsaTopKIndices / dsaIndexDigest / cloneIndexDecision) rather
 // than a parallel type. It is metadata/control-flow only: it decides WHICH keys a
 // group attends to, not the attention math. It is host-buildable (no CUDA tag).

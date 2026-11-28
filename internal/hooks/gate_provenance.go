@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// gate_provenance.go — the PROVENANCE_LABEL gate, a port of tools/check_provenance_labels.py.
 // It refuses an added line that labels a known-MODELED number "measured": the line must mention
 // "measured", NOT match any ALLOW_PATTERNS carve-out, and match a MODELED family's context AND
 // number. It scans added lines of staged *.md/*.html/*.txt/*.json (minus skip prefixes/basenames).

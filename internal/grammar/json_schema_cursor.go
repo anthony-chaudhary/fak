@@ -12,7 +12,6 @@ import (
 // The per-state token-mask cache adapts the adaptive token-mask cache that
 // DeepInfer's structured output inherits from XGrammar (Apache-2.0,
 // deepseek-ai/DeepInfer deepinfer/structure_output at
-// 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
 
 const (
 	numStart = iota

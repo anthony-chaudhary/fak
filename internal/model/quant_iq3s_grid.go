@@ -21,8 +21,6 @@
 
 package model
 
-// Codebook from ggml-org/llama.cpp at 6fe74980162af0ed5e559870d5deccafaa034e7c
-// (MIT; copyright 2023-2026 the ggml authors).
 // iq3SGrid is the GGML IQ3_S 4-value magnitude codebook. Values are packed
 // little-endian bytes and decoded against llama.cpp's IQ3_S row dequantizer.
 var iq3SGrid = [...]uint32{

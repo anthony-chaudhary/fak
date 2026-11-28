@@ -328,7 +328,6 @@ type Config struct {
 	LinearUseFullRankGate bool `json:"linear_use_full_rank_gate,omitempty"`
 
 	// DeepSeek-V4-Flash-0731 forward metadata from revision
-	// 7872f01b1d1fe23eabc4c98b48bffcef5a386062. CompressRatios selects one
 	// compression regime for each attention layer; the remaining fields define the
 	// model's hyperconnection and grouped low-rank output transforms.
 	CompressRatios  []int   `json:"compress_ratios,omitempty"`

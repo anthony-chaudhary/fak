@@ -22,7 +22,6 @@ package model
 //
 // Selection composition adapted from Indexer.forward/select_candidate_blocks in
 // deepseek-ai/DeepSeek-V4.1-Flash inference/model.py at
-// dba1be0a40aa45a94ad051997016db3960a90277 (MIT). Existing selectors retain their
 // deterministic tie and -1 policies; this is not a numerical parity claim.
 
 import "fmt"

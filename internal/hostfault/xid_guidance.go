@@ -15,8 +15,6 @@
  * limitations under the License.
  */
 
-// DIRECT-PORT of NVIDIA/nccl src/ras/diagnostics_xid.cc at
-// 3e46c089f4ae4732722a419eb6096aead7e47a30 (Apache-2.0).
 //
 // Ported: the XID/SXID event types, SXID driver classes, the kernel-log line
 // grammar (rasDiagnosticsXidParseLine, ParseCode, ParseBdf), the event

@@ -19,9 +19,6 @@
 // SOFTWARE.
 //
 // Oracle adapted independently from deepseek-ai/DeepSeek-V4.1-Flash
-// inference/model.py:561-610 at dba1be0a40aa45a94ad051997016db3960a90277
-// (MIT), cross-checked against PipeNetwork/deepseek-v41-mlx indexer.py:38-64,
-// 129-144 at a9567ae7196e596355b6fdaa7de7af4a2c92ba91 (Apache-2.0).
 
 package v41
 

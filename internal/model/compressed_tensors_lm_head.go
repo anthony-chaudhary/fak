@@ -1,7 +1,6 @@
 package model
 
 // Explicit head targeting and weight_scale layout are adapted from SGLang:
-// https://github.com/sgl-project/sglang/blob/5375babbac9977cdb8f061cec77b6efd0987a1fd/python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py
 // and schemes/compressed_tensors_w8a16_fp8.py at the same revision.
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project

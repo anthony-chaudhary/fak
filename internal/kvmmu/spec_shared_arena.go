@@ -10,10 +10,7 @@
 // KV-cache-manager allocation so that speculation steps reconcile in place
 // rather than through a second cache. Source: NVIDIA/TensorRT-LLM,
 // tensorrt_llm/_torch/pyexecutor/kv_cache/kv_cache_manager_v2.py +
-// tensorrt_llm/_torch/speculative/dspark.py @ a7a60c3959eea42b2b90a1c7b9d55b4633e1a594
-// (Apache-2.0); study note fak-private
 // docs/research/STUDY-BORROW-WAVE-H200-LATEST-2026-11-06.md (row
-// oss-port-dspark-unified-kv-arena-20261106). Component only: a closed
 // in-memory oracle over a fixed page table, software evidence, no hardware
 // claim.
 package kvmmu

@@ -1,7 +1,6 @@
 package model
 
 // Portions adapted from antirez/ds4 at
-// bd66c402070042bf0a79ad6ece8242de4c93680c (tests/test_engram.c).
 //
 // MIT License
 // Copyright (c) 2026 The ds4.c authors
@@ -31,7 +30,6 @@ import (
 )
 
 // Oracle adapted from antirez/ds4 tests/test_engram.c:14-103 at
-// bd66c402070042bf0a79ad6ece8242de4c93680c under the MIT notice retained in
 // v41_engram.go.
 func TestV41EngramHashMatchesFullHistoryAcrossChunks(t *testing.T) {
 	layout := toyV41EngramLayout()

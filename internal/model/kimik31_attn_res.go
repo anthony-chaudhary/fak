@@ -10,7 +10,6 @@ package model
 //
 // SOURCE (direct port, pinned): SGLang
 // python/sglang/srt/layers/attn_residual.py at
-// a7d9f81ee24c5cceeceeb4ccb9072f68d56cb10d (Apache-2.0). The authoritative
 // semantics are aggregate_stream_torch (the file's own eager reference):
 //
 //	rows   = cat([bank[:, 0:nvb, :], prefix.unsqueeze(1)], dim=1)   # [T, nvb+1, H]

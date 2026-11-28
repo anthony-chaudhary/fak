@@ -20,7 +20,6 @@ type V4ExpertReplicaPlacement struct {
 
 // NewV4ExpertReplicaPlacement adapts DeepInfer's EPLB replica selection and
 // physical placement at deepseek-ai/DeepInfer revision
-// 9bd9cf243fc53ef9afbf8f04d391d989117d6ab9. History is [step][logical expert].
 func NewV4ExpertReplicaPlacement(history [][]int64, physicalCount, capacity int) (V4ExpertReplicaPlacement, error) {
 	if len(history) == 0 || len(history[0]) == 0 || physicalCount < len(history[0]) || capacity <= 0 || physicalCount%capacity != 0 {
 		return V4ExpertReplicaPlacement{}, ErrV4ExpertReplicaPlacement
