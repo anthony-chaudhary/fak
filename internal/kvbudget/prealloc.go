@@ -149,3 +149,72 @@ func AdmitAllCapped(freeBlocks, capNewTokens int, streams []Stream) ([]Verdict, 
 	}
 	return out, r
 }
+
+// QuestPageSelection holds per-layer selected page indices under a token budget
+// with last-page exclusion (Quest quest-3).
+type QuestPageSelection struct {
+	PageBudget    int
+	LayerSelected [][]int
+}
+
+// QuestPageBudgetSelect computes pageBudget = tokenBudget / pageSize, excludes
+// the final active page (index numPages-1) from top-k competition so it is
+// always retained, and selects the top-(pageBudget-1) highest-scoring earlier
+// pages per layer (plus the always-retained last page).
+func QuestPageBudgetSelect(tokenBudget, pageSize int, layerScores [][]float32) (QuestPageSelection, bool) {
+	if tokenBudget <= 0 || pageSize <= 0 || len(layerScores) == 0 {
+		return QuestPageSelection{}, false
+	}
+	pageBudget := tokenBudget / pageSize
+	if pageBudget < 1 {
+		pageBudget = 1
+	}
+	sel := QuestPageSelection{
+		PageBudget:    pageBudget,
+		LayerSelected: make([][]int, len(layerScores)),
+	}
+	for l, scores := range layerScores {
+		n := len(scores)
+		if n == 0 {
+			continue
+		}
+		if n <= pageBudget {
+			all := make([]int, n)
+			for i := range all {
+				all[i] = i
+			}
+			sel.LayerSelected[l] = all
+			continue
+		}
+		lastPage := n - 1
+		kEarly := pageBudget - 1
+		// Select top kEarly indices from [0 .. lastPage-1].
+		picked := make([]int, 0, pageBudget)
+		used := make([]bool, lastPage)
+		for step := 0; step < kEarly; step++ {
+			bestIdx := -1
+			for i := 0; i < lastPage; i++ {
+				if used[i] {
+					continue
+				}
+				if bestIdx < 0 || scores[i] > scores[bestIdx] {
+					bestIdx = i
+				}
+			}
+			if bestIdx < 0 {
+				break
+			}
+			used[bestIdx] = true
+			picked = append(picked, bestIdx)
+		}
+		// Sort ascending and append the excluded-from-eviction last page.
+		for i := 1; i < len(picked); i++ {
+			for j := i; j > 0 && picked[j] < picked[j-1]; j-- {
+				picked[j], picked[j-1] = picked[j-1], picked[j]
+			}
+		}
+		picked = append(picked, lastPage)
+		sel.LayerSelected[l] = picked
+	}
+	return sel, true
+}

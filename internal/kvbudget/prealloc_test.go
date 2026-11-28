@@ -186,3 +186,23 @@ func TestAntiHogCoAdmit(t *testing.T) {
 		t.Errorf("18-block pool admitted a 939-block worst case uncapped: %+v", v)
 	}
 }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestQuestPageBudgetSelect(t *testing.T) {
+	// tokenBudget=48, pageSize=16 -> pageBudget=3 (top 2 early pages + last page 4).
+	scores := [][]float32{
+		{0.1, 0.9, 0.3, 0.8, 0.05}, // last page index 4 has lowest score, must still be kept
+		{0.7, 0.2, 0.6, 0.1, 0.01},
+	}
+	sel, ok := QuestPageBudgetSelect(48, 16, scores)
+	if !ok || sel.PageBudget != 3 {
+		t.Fatalf("QuestPageBudgetSelect = (%+v, %v), want PageBudget=3", sel, ok)
+	}
+	want0 := []int{1, 3, 4}
+	want1 := []int{0, 2, 4}
+	for i := range want0 {
+		if sel.LayerSelected[0][i] != want0[i] || sel.LayerSelected[1][i] != want1[i] {
+			t.Fatalf("LayerSelected = %v, want [%v %v]", sel.LayerSelected, want0, want1)
+		}
+	}
+}
