@@ -500,13 +500,10 @@ func (o *KVPageOffloader) Config() KVOffloadConfig {
 	return o.cfg
 }
 
-// ADAPT of modular/modular (Apache-2.0 WITH LLVM-exception),
-// rust_kv/kv-tier-connector/src/copy_engine.rs:111 spans and :87 check_row
-// @88ab8913af6b9298fe914e0f20d87a49e4172d0d: host rows and disk slots are padded to
-// whole 4 KiB while device blocks stride by their own bytes. A PaddedRowUnit separates
-// the host stride from the device stride, so a copy moves only the unit's bytes and the
-// padding goes to disk, never to the device. Span math and validation only; copy
-// execution stays GPU-gated.
+// Host rows and disk slots are padded to whole 4 KiB while device blocks stride by
+// their own bytes. A PaddedRowUnitSpan separates the host stride from the device
+// stride, so a copy moves only the unit's bytes and the padding goes to disk, never
+// to the device. Span math and validation only; copy execution stays GPU-gated.
 
 // PaddedRowUnitSpan is one device unit's slice of a padded host row.
 type PaddedRowUnitSpan struct {
@@ -527,9 +524,9 @@ type PaddedRowLayout struct {
 // PaddedRowPad rounds n up to whole 4 KiB.
 func PaddedRowPad(n int) int { return (n + 4095) &^ 4095 }
 
-// PaddedRowSpans returns per-unit spans after checking the row, mirroring check_row:
-// logical bytes must fit the stride, and the stride must be whole 4 KiB. A replicated
-// leaf copies through unit 0 only and fans out on the device side.
+// PaddedRowSpans returns per-unit spans after validating that logical bytes fit the
+// stride and the stride is a whole number of 4 KiB. A replicated leaf copies through
+// unit 0 only and fans out on the device side.
 func PaddedRowSpans(l PaddedRowLayout) ([]PaddedRowUnitSpan, error) {
 	if l.Units <= 0 || l.UnitBytes <= 0 || l.HostStride <= 0 {
 		return nil, fmt.Errorf("compute: padded row needs positive units, unit bytes and stride")

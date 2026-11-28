@@ -380,13 +380,11 @@ func StreamWeightsWithEviction(
 	return totalStreamed, nil
 }
 
-// ADAPT of modular/modular (Apache-2.0 WITH LLVM-exception),
-// rust_kv/kv-tier-connector/src/disk_tier.rs:1009 check_dio_align and :964 dio_align
-// @88ab8913af6b9298fe914e0f20d87a49e4172d0d: before trusting O_DIRECT, decide from the
-// kernel-reported direct-I/O alignments (statx STATX_DIOALIGN: memory and offset).
-// ext4/XFS serialize unaligned direct writes on the inode lock, and unaligned hole
-// punches zero edges through the page cache, so an alignment above the row padding is
-// refused. The decision table is pure; a live statx leg is Linux>=6.1 only.
+// Before trusting O_DIRECT, decide from the kernel-reported direct-I/O alignments
+// (statx STATX_DIOALIGN: memory and offset). ext4/XFS serialize unaligned direct
+// writes on the inode lock, and unaligned hole punches zero edges through the page
+// cache, so an alignment above the row padding is refused. The decision table is
+// pure; a live statx leg is Linux>=6.1 only.
 
 // DioAlignRowPadding is the host row padding the alignment must fit inside.
 const DioAlignRowPadding = 4096

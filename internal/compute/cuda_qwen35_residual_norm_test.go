@@ -259,10 +259,8 @@ func BenchmarkCUDAQwen35ResidualNormEnqueue(b *testing.B) {
 	}
 }
 
-// ADAPT of modular/modular (Apache-2.0 WITH LLVM-exception),
-// max/kernels/src/nn/gated_residual_rms_norm.mojo:264 @88ab8913af6b9298fe914e0f20d87a49e4172d0d:
-// closed host oracle pinning the serial 4-step gated residual RMSNorm boundary,
-// alpha/beta identities, and temperature T scaling.
+// gatedResidualRMSNormRef is a closed host oracle pinning the serial 4-step gated
+// residual RMSNorm boundary, alpha/beta identities, and temperature T scaling.
 func gatedResidualRMSNormRef(residual, branch, postW, nextPreW []float32, gate, temp, eps float64) (nextPre []float32, alpha, beta float64) {
 	n := len(residual)
 	scaled := make([]float64, n)
