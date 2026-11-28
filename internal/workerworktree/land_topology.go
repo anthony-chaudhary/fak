@@ -177,6 +177,8 @@ func (s *topologyCandidateSession) discardWitnessSnapshot() error {
 		// Failed preparation must leave the reusable namespace before unlocking.
 		if err := os.Rename(s.dir, filepath.Join(filepath.Dir(s.dir), ".fak-witness-quarantine-"+filepath.Base(s.dir))); err != nil && !os.IsNotExist(err) {
 			cleanupErr = fmt.Errorf("%w; quarantine rename: %v", cleanupErr, err)
+		} else {
+			run(witnessSnapshotGitRunner(ctx), s.root, []string{"worktree", "prune"})
 		}
 	}
 	releaseCandidatePool(s.poolLock)
@@ -498,9 +500,7 @@ func (s *topologyCandidateSession) create(ref string) (bool, string) {
 	}
 	// A killed land never runs close; its owner-named candidate is collected by
 	// a later land's sweep (candidate.go).
-	if s.poolPrefix != witnessSnapshotPoolPrefix {
-		sweepTopologyCandidatesBeforeCreate(s.root, parent, s.git)
-	}
+	sweepTopologyCandidatesBeforeCreate(s.root, parent, s.git)
 	if candidatePoolEnabled() || s.poolPrefix == witnessSnapshotPoolPrefix {
 		if s.adoptPooled(parent, ref) {
 			return true, ""
@@ -590,7 +590,7 @@ func (s *topologyCandidateSession) createPooled(parent, ref string) (bool, strin
 func (s *topologyCandidateSession) createTransient(parent, ref string) (bool, string) {
 	pattern := topologyCandidatePattern()
 	if s.poolPrefix == witnessSnapshotPoolPrefix {
-		pattern = OwnerNamedScratchPattern(".fak-witness-once-")
+		pattern = OwnerNamedScratchPattern(witnessTransientDirPrefix)
 	}
 	candDir, err := os.MkdirTemp(parent, pattern)
 	if err != nil {
@@ -730,8 +730,8 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 		if staleRegistration {
 			run(s.git, s.root, []string{"worktree", "prune"})
 		}
+		s.pruneGoneRegistrations()
 		if s.poolPrefix != witnessSnapshotPoolPrefix {
-			s.pruneGoneRegistrations()
 			trimPoolExcessPrefix(s.root, parent, s.git, s.poolName())
 		}
 		return true
@@ -739,9 +739,7 @@ func (s *topologyCandidateSession) adoptPooled(parent, ref string) bool {
 	if staleRegistration {
 		run(s.git, s.root, []string{"worktree", "prune"})
 	}
-	if s.poolPrefix != witnessSnapshotPoolPrefix {
-		s.pruneGoneRegistrations()
-	}
+	s.pruneGoneRegistrations()
 	return false
 }
 

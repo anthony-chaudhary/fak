@@ -357,3 +357,36 @@ func TestWitnessSnapshotPoolManagedWorkspaceUsesCommittedCanonicalTopology(t *te
 		})
 	}
 }
+
+// fak-test:runtime slow est=3s lane=default
+// fak-test:justify why=regression when=changed:internal/workerworktree/**
+func TestWitnessSnapshotSweepReapsDeadOwnerOnceCandidateAndLockedRegistration(t *testing.T) {
+	root, parent, _ := witnessPoolFixture(t)
+	parentDir := filepath.Dir(root)
+	leaked := filepath.Join(parentDir, ".fak-witness-once-999999-mwszod1x-123456")
+	mustGit(t, root, "worktree", "add", "--detach", leaked, parent)
+	admin := candidateAdminDir(leaked)
+	if admin == "" {
+		t.Fatalf("expected git admin dir for %s", leaked)
+	}
+	if err := os.WriteFile(filepath.Join(admin, "locked"), []byte("initializing\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	report := SweepTopologyCandidates(root, parentDir, defaultGit, CandidateSweepOptions{
+		Now:          time.Now(),
+		Apply:        true,
+		ProcessAlive: func(int) bool { return false },
+	})
+	if report.Reaped < 1 {
+		t.Fatalf("expected dead-owner .fak-witness-once-* to be reaped, got report=%+v", report)
+	}
+	if _, err := os.Stat(leaked); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("leaked .fak-witness-once-* dir survived sweep: %v", err)
+	}
+	if _, err := os.Stat(admin); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("locked admin registration survived sweep/prune: %s err=%v", admin, err)
+	}
+	if list := mustGit(t, root, "worktree", "list", "--porcelain"); strings.Contains(list, filepath.Base(leaked)) {
+		t.Fatalf("leaked worktree still registered after sweep: %s", list)
+	}
+}

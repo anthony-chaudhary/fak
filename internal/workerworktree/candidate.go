@@ -43,6 +43,10 @@ const (
 	// so the one owner-aware sweep collects both.
 	execWitnessCandidatePrefix = "fak-exec-witness-"
 
+	// witnessTransientDirPrefix is the transient witness-snapshot directory family
+	// AcquireWitnessSnapshot creates when the pool is full or bypassed.
+	witnessTransientDirPrefix = ".fak-witness-once-"
+
 	// LegacyCandidateMaxAge is how long a candidate without an owner identity in
 	// its name (created by a binary older than the owner-named candidates) must sit
 	// untouched before a sweep collects it. Its directory mtime moves when the
@@ -62,7 +66,7 @@ const (
 // topologyCandidatePrefixes is every verify-checkout family the one owner-aware
 // sweep collects. Both producers name their checkout through
 // OwnerNamedScratchPattern, so the same pid/start identity parsing applies to each.
-var topologyCandidatePrefixes = []string{topologyCandidatePrefix, execWitnessCandidatePrefix}
+var topologyCandidatePrefixes = []string{topologyCandidatePrefix, execWitnessCandidatePrefix, witnessTransientDirPrefix}
 
 // candidateOwner is the creator identity encoded in a candidate name. Start is the
 // process start time in Unix milliseconds, or 0 on a platform that exposes none.
