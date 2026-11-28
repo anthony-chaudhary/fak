@@ -647,3 +647,88 @@ func TestNativeSchedulerUnifiedKVManager(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=1ms
+func TestNativeSchedulerQueueBoundsReject(t *testing.T) {
+	t.Parallel()
+	lane := func(n int) *schedLane { return &schedLane{prompt: make([]int, n)} }
+	s := &NativeScheduler{waiting: []*schedLane{lane(4), lane(4)}}
+
+	if err := s.queueBoundsRejectLocked(4); err != nil {
+		t.Fatalf("bound 0 must admit today's order, got %v", err)
+	}
+	s.SetQueueBounds(2, 0)
+	err := s.queueBoundsRejectLocked(4)
+	var qe *NativeQueueBoundError
+	if !errors.As(err, &qe) || !errors.Is(err, ErrNativeQueueBound) || qe.Reason != "requests" || qe.Limit != 2 {
+		t.Fatalf("bound 2 must reject the third queued request with a typed error, got %v", err)
+	}
+	s.SetQueueBounds(0, 10)
+	if err := s.queueBoundsRejectLocked(2); err != nil {
+		t.Fatalf("10 queued tokens fit under bound 10: %v", err)
+	}
+	if err := s.queueBoundsRejectLocked(3); !errors.As(err, &qe) || qe.Reason != "tokens" {
+		t.Fatalf("11 queued tokens must reject on tokens, got %v", err)
+	}
+	s.SetQueueBounds(-1, -1)
+	if err := s.queueBoundsRejectLocked(1 << 20); err != nil {
+		t.Fatalf("negative bounds disable the check: %v", err)
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestNativeSchedulerKVResumePreservesNewLoads(t *testing.T) {
+	t.Parallel()
+	restored, fresh := &schedLane{seqNo: 1}, &schedLane{seqNo: 2}
+	got := kvResumeMerge([]*schedLane{restored}, []*schedLane{fresh}, true, true)
+	if len(got) != 2 || got[0] != restored || got[1] != fresh {
+		t.Fatalf("resume with a same-step arrival must keep both in order, got %d lanes", len(got))
+	}
+	if got := kvResumeMerge([]*schedLane{restored}, []*schedLane{fresh}, true, false); len(got) != 1 {
+		t.Fatalf("guard off models the dropped-arrival defect, got %d lanes", len(got))
+	}
+	a, b := &schedLane{seqNo: 3}, &schedLane{seqNo: 4}
+	got = kvResumeMerge(nil, []*schedLane{a, b}, false, true)
+	if len(got) != 2 || got[0] != a || got[1] != b {
+		t.Fatalf("without resume the order must be unchanged")
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestNativeSchedulerKVBackedContinuation(t *testing.T) {
+	t.Parallel()
+	valid := &kvContinuation{Handle: 7, Depth: 6}
+	if pre, depth := planKVContinuation(true, valid, 10); pre != 4 || depth != 6 {
+		t.Fatalf("valid handle must restore depth 6 and prefill the 4-token tail, got prefill=%d depth=%d", pre, depth)
+	}
+	if pre, depth := planKVContinuation(true, &kvContinuation{Handle: 7, Depth: 10}, 10); pre != 0 || depth != 10 {
+		t.Fatalf("full-depth handle must prefill nothing, got prefill=%d depth=%d", pre, depth)
+	}
+	for name, c := range map[string]*kvContinuation{"nil": nil, "zero handle": {Depth: 6}, "depth past prompt": {Handle: 7, Depth: 11}} {
+		if pre, depth := planKVContinuation(true, c, 10); pre != 10 || depth != 0 {
+			t.Fatalf("%s must follow today's recompute path, got prefill=%d depth=%d", name, pre, depth)
+		}
+	}
+	if pre, depth := planKVContinuation(false, valid, 10); pre != 10 || depth != 0 {
+		t.Fatalf("default-off must recompute, got prefill=%d depth=%d", pre, depth)
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestNativeSchedulerLonePrefillChunkCap(t *testing.T) {
+	t.Parallel()
+	pre := func(chunk int) *schedLane { return &schedLane{state: schedLanePrefilling, prefillChunkTokens: chunk} }
+	dec := &schedLane{state: schedLaneDecode}
+	if !holdDecodePromotion(true, []*schedLane{pre(0), dec}) {
+		t.Fatal("one uncapped lone prefill must block decode promotion")
+	}
+	if holdDecodePromotion(true, []*schedLane{pre(512), dec}) {
+		t.Fatal("a capped chunk must not block decode promotion")
+	}
+	if holdDecodePromotion(true, []*schedLane{pre(0), pre(0), dec}) {
+		t.Fatal("two prefills are not a lone chunk")
+	}
+	if holdDecodePromotion(true, []*schedLane{dec}) || holdDecodePromotion(false, []*schedLane{pre(0)}) {
+		t.Fatal("no prefill, or guard disabled, must not hold")
+	}
+}

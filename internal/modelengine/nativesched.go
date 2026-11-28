@@ -257,6 +257,10 @@ type NativeScheduler struct {
 	// and otherwise FIFO, up to maxRunning.
 	waiting []*schedLane
 	lanes   []*schedLane
+	// maxQueuedReqs / maxQueuedTokens bound the waiting queue at enqueue (vLLM
+	// Rust-frontend queue bounds, PR #3339); 0 disables a bound, the pre-bound
+	// behaviour. Set through SetQueueBounds; read under mu.
+	maxQueuedReqs, maxQueuedTokens int
 	// maxRunning caps the running set; 0 = unbounded (every admitted lane runs at once,
 	// the pre-queue behaviour). A positive cap is the BARE structural admission knob the
 	// issue scopes ("the bare admit/evict loop and queues it sits on") — NOT a priority/
@@ -1059,6 +1063,11 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 	}
 
 	s.mu.Lock()
+	if err := s.queueBoundsRejectLocked(len(prompt)); err != nil {
+		s.mu.Unlock()
+		cancel()
+		return nil, err
+	}
 	if s.qwenPrefillTokens >= nativeQwenPrefillMinChunkTokens &&
 		prep.q4k &&
 		q4k &&
@@ -1659,4 +1668,107 @@ func (s *NativeScheduler) specStepPanelLocked() (int, bool) {
 		return 0, false
 	}
 	return 1 + s.specPadK, true
+}
+
+// ErrNativeQueueBound is the sentinel every queue-bound rejection unwraps to.
+var ErrNativeQueueBound = errors.New("modelengine: native scheduler queue bound exceeded")
+
+// NativeQueueBoundError is the typed rejection returned at enqueue once the
+// waiting queue holds max requests or tokens.
+type NativeQueueBoundError struct {
+	Reason string // "requests" or "tokens"
+	Limit  int
+	Queued int // queued before the rejected request, plus that request for tokens
+}
+
+func (e *NativeQueueBoundError) Error() string {
+	return ErrNativeQueueBound.Error() + ": " + e.Reason + " " + strconv.Itoa(e.Queued) + " > limit " + strconv.Itoa(e.Limit)
+}
+
+func (e *NativeQueueBoundError) Unwrap() error { return ErrNativeQueueBound }
+
+// SetQueueBounds bounds the waiting queue at admission: reqs caps queued
+// requests, tokens caps queued prompt tokens including the new request. A
+// value <= 0 disables that bound (the default, today's behaviour). Running
+// lanes and preemption are untouched.
+func (s *NativeScheduler) SetQueueBounds(reqs, tokens int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.maxQueuedReqs, s.maxQueuedTokens = max(reqs, 0), max(tokens, 0)
+}
+
+// queueBoundsRejectLocked reports the typed rejection for a new request of
+// promptTokens, or nil when admitted. Caller holds mu.
+func (s *NativeScheduler) queueBoundsRejectLocked(promptTokens int) error {
+	if s.maxQueuedReqs > 0 && len(s.waiting) >= s.maxQueuedReqs {
+		return &NativeQueueBoundError{Reason: "requests", Limit: s.maxQueuedReqs, Queued: len(s.waiting) + 1}
+	}
+	if s.maxQueuedTokens > 0 {
+		queued := promptTokens
+		for _, ln := range s.waiting {
+			queued += len(ln.prompt)
+		}
+		if queued > s.maxQueuedTokens {
+			return &NativeQueueBoundError{Reason: "tokens", Limit: s.maxQueuedTokens, Queued: queued}
+		}
+	}
+	return nil
+}
+
+// kvResumeMerge orders the lanes of one resume step (vLLM offloading-scheduler
+// same-step resume guard, PR #3338). With a resume active and preserveNew set,
+// restored lanes come first and the same-step arrivals are re-admitted after
+// them, so none is dropped; with preserveNew unset the arrivals are lost, the
+// defect the guard exists to prevent. With no resume active the arrivals keep
+// their order untouched.
+func kvResumeMerge(restored, arrivals []*schedLane, resumeActive, preserveNew bool) []*schedLane {
+	if !resumeActive {
+		return append([]*schedLane(nil), arrivals...)
+	}
+	out := append([]*schedLane(nil), restored...)
+	if preserveNew {
+		out = append(out, arrivals...)
+	}
+	return out
+}
+
+// kvContinuation is a waiting lane's carried KV handle: Handle names the saved
+// KV and Depth is how many prompt tokens it covers.
+type kvContinuation struct {
+	Handle uint64
+	Depth  int
+}
+
+// planKVContinuation decides how many prompt tokens a waiting lane must
+// prefill (vLLM generate-input KV continuation, PR #3337). Disabled (the
+// default) or without a valid handle it recomputes the whole prompt, today's
+// path; with a valid handle (nonzero, depth within the prompt) it restores the
+// handle's depth and prefills only the tail.
+func planKVContinuation(enabled bool, c *kvContinuation, promptTokens int) (prefillTokens, restoredDepth int) {
+	if !enabled || c == nil || c.Handle == 0 || c.Depth <= 0 || c.Depth > promptTokens {
+		return promptTokens, 0
+	}
+	return promptTokens - c.Depth, c.Depth
+}
+
+// holdDecodePromotion reports whether decode promotion must wait because one
+// uncapped prefill chunk is the only prefill running (vLLM lone-prefill-chunk
+// guard, PR #3335): letting later decodes jump ahead of it starves it. A
+// capped chunk (prefillChunkTokens > 0) never holds decodes, and the guard is
+// a no-op when disabled.
+func holdDecodePromotion(enabled bool, running []*schedLane) bool {
+	if !enabled {
+		return false
+	}
+	var lone *schedLane
+	for _, ln := range running {
+		if ln.state != schedLanePrefilling {
+			continue
+		}
+		if lone != nil {
+			return false
+		}
+		lone = ln
+	}
+	return lone != nil && lone.prefillChunkTokens <= 0
 }
