@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -85,4 +86,35 @@ func TestSplitBudget(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestCPUShares(t *testing.T) {
+	specs := []CPUShareSpec{
+		{Name: "manager", Pinned: 100, Weight: 100},
+		{Name: "worker", Pinned: 100, Weight: 300},
+		{Name: "pinned-only", Pinned: 200},
+	}
+	got, err := CPUShares(1000, specs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[2] != 200 || got[0]+got[1]+got[2] != 1000 || got[0] < 100 || got[1] <= got[0] {
+		t.Fatalf("shares %v break carve-out/weight/sum contract", got)
+	}
+	if want := []int{250, 550, 200}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	only, err := CPUShares(1000, []CPUShareSpec{{Name: "a", Pinned: 10}, {Name: "b", Pinned: 20}})
+	if err != nil || !reflect.DeepEqual(only, []int{10, 20}) {
+		t.Fatalf("no-weight case = %v, %v", only, err)
+	}
+	_, err = CPUShares(50, specs)
+	if !errors.Is(err, errCPUSharesExhausted) {
+		t.Fatalf("exhaustion err = %v", err)
+	}
+	for _, name := range []string{"manager=100", "worker=100", "pinned-only=200"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Fatalf("error %q does not name term %s", err, name)
+		}
+	}
 }

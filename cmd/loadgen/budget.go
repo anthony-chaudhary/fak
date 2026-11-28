@@ -89,3 +89,49 @@ func SplitBudget(total int, weights, minimums []int) ([]int, error) {
 	}
 	return shares, nil
 }
+
+// Inspired by ai-dynamo/aiperf, src/aiperf/kubernetes/jobset.py:162 at
+// ab610add4e8876fca223197596c728e17365f381 (Apache-2.0; idea only): fixed
+// pinned requests are carved out first, the remainder is split by weight, and
+// exhaustion names every term.
+
+var errCPUSharesExhausted = errors.New("cpushares: pinned requests exceed total")
+
+// CPUShareSpec is one consumer: a fixed Pinned request plus a Weight over the
+// remainder (a zero-weight consumer receives only its pinned amount).
+type CPUShareSpec struct {
+	Name   string
+	Pinned int
+	Weight int
+}
+
+// CPUShares returns one share per spec, summing to exactly total when any
+// weight exists, or to the pinned sum when none does and the budget is not
+// exhausted.
+func CPUShares(total int, specs []CPUShareSpec) ([]int, error) {
+	pinned := 0
+	for _, s := range specs {
+		pinned += s.Pinned
+	}
+	if pinned > total {
+		detail := ""
+		for i, s := range specs {
+			if i > 0 {
+				detail += ", "
+			}
+			detail += fmt.Sprintf("%s=%d", s.Name, s.Pinned)
+		}
+		return nil, fmt.Errorf("%w: total %d, pinned %d (%s)", errCPUSharesExhausted, total, pinned, detail)
+	}
+	weights := make([]int, len(specs))
+	mins := make([]int, len(specs))
+	anyWeight := false
+	for i, s := range specs {
+		weights[i], mins[i] = s.Weight, s.Pinned
+		anyWeight = anyWeight || s.Weight > 0
+	}
+	if !anyWeight {
+		return mins, nil
+	}
+	return SplitBudget(total, weights, mins)
+}
